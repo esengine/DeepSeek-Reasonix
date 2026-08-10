@@ -70,9 +70,10 @@ func cliSessionRecoveredHandler(leases *control.SessionLeaseKeeper) func(control
 // copySessionForWriting duplicates the session at src into a fresh session
 // file beside it and returns the new path. It backs the --copy escape hatch:
 // when src is held by another runtime, the copy gives this process a session
-// it can own. The duplicate is written through Session.Save, so it is
-// event-log aware (authoritative event log plus .jsonl checkpoint) and starts
-// with no lease/lock sidecars of its own; src is only read. When src is being
+// it can own. The duplicate is written through Session.SaveIfAbsent, so it is
+// event-log aware (authoritative event log plus .jsonl checkpoint), cannot
+// replace a destination another runtime created, and starts with no
+// lease/lock sidecars of its own; src is only read. When src is being
 // written concurrently, the copy captures the transcript as of the load — an
 // append-only prefix, the same view a resume would see.
 func copySessionForWriting(src string) (string, error) {
@@ -94,7 +95,7 @@ func copySessionForWriting(src string) (string, error) {
 	newPath := agent.NewSessionPath(filepath.Dir(src), label)
 	copySess := agent.NewSession("")
 	copySess.Messages = msgs
-	if err := copySess.Save(newPath); err != nil {
+	if err := copySess.SaveIfAbsent(newPath); err != nil {
 		return "", fmt.Errorf("copy session: %w", err)
 	}
 	preview, turns := agent.SessionPreviewFromMessages(msgs)

@@ -7,6 +7,7 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -32,20 +33,28 @@ type Tool interface {
 	ReadOnly() bool
 }
 
+// ContextualTool is an execution-time availability contract for tools whose
+// ownership depends on the active workflow context. Provider schemas remain
+// static for cache stability; the host must still consult this contract before
+// permissions, hooks, leases, or Execute so stale transcripts fail closed.
+type ContextualTool interface {
+	ProviderVisible(context.Context) bool
+}
+
 // Previewer is an optional capability a writer Tool may implement: given the
 // same raw JSON args Execute would receive, compute the file change the call
-// *would* make — without touching disk. A front-end uses it to show an approval
-// card or a changed-files panel before the call runs (the permission gate, not
-// Preview, decides whether it may proceed). Type-assert a Tool to Previewer to
-// discover support; the file-writing built-ins implement it, most tools do not.
+// *would* make — without touching disk. ctx must be Execute's, so the preview
+// resolves through the same FileOverlay and a user never approves a diff that
+// differs from what runs. Type-assert to discover support; the file-writing
+// built-ins implement it, most tools do not.
 type Previewer interface {
-	Preview(args json.RawMessage) (diff.Change, error)
+	Preview(ctx context.Context, args json.RawMessage) (diff.Change, error)
 }
 
 // PreviewChange returns the change a writer tool would make for args, or ok=false
 // when there's nothing renderable: t is read-only, doesn't implement Previewer,
 // the preview errored (the edit will likely fail too), or the file is binary.
-func PreviewChange(t Tool, args json.RawMessage) (diff.Change, bool) {
+func PreviewChange(ctx context.Context, t Tool, args json.RawMessage) (diff.Change, bool) {
 	if t == nil || t.ReadOnly() {
 		return diff.Change{}, false
 	}
@@ -53,7 +62,7 @@ func PreviewChange(t Tool, args json.RawMessage) (diff.Change, bool) {
 	if !ok {
 		return diff.Change{}, false
 	}
-	ch, err := pv.Preview(args)
+	ch, err := pv.Preview(ctx, args)
 	if err != nil || ch.Binary {
 		return diff.Change{}, false
 	}
@@ -232,7 +241,7 @@ type SnipHinter interface {
 	SnipHint() SnipHint
 }
 
-// --- process-global built-in set (populated by builtin subpackage init) ---
+// process-global built-in set (populated by builtin subpackage init)
 
 var builtins = map[string]Tool{}
 
@@ -266,7 +275,7 @@ func LookupBuiltin(name string) (Tool, bool) {
 	return t, ok
 }
 
-// --- per-run registry instance ---
+// per-run registry instance
 
 // Registry is a per-run set of tools: enabled built-ins plus plugin tools.
 type Registry struct {
@@ -414,11 +423,8 @@ func (r *Registry) ResolveCall(name string) (resolved Tool, canonical string, ca
 		if !ok {
 			continue
 		}
-		for _, alias := range mcpBindingAliases(b) {
-			if name == alias {
-				matches[canonicalName] = t
-				break
-			}
+		if slices.Contains(mcpBindingAliases(b), name) {
+			matches[canonicalName] = t
 		}
 	}
 	if len(matches) == 1 {
@@ -539,6 +545,43 @@ func (r *Registry) Schemas() []provider.ToolSchema {
 			Description: t.Description(),
 			Parameters:  r.canon[name],
 		})
+	}
+	return out
+}
+
+// SchemasForContext returns the contextual projection for host metadata and
+// diagnostics. Provider requests intentionally use Schemas so phase changes do
+// not churn the cache-stable tool contract.
+func (r *Registry) SchemasForContext(ctx context.Context) []provider.ToolSchema {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	r.mu.RLock()
+	names := append([]string(nil), r.order...)
+	entries := make(map[string]struct {
+		t    Tool
+		data json.RawMessage
+	}, len(names))
+	for _, name := range names {
+		if t := r.tools[name]; t != nil {
+			entries[name] = struct {
+				t    Tool
+				data json.RawMessage
+			}{t: t, data: r.canon[name]}
+		}
+	}
+	r.mu.RUnlock()
+	sort.Strings(names)
+	out := make([]provider.ToolSchema, 0, len(names))
+	for _, name := range names {
+		entry, ok := entries[name]
+		if !ok || entry.t == nil {
+			continue
+		}
+		if contextual, ok := entry.t.(ContextualTool); ok && !contextual.ProviderVisible(ctx) {
+			continue
+		}
+		out = append(out, provider.ToolSchema{Name: entry.t.Name(), Description: entry.t.Description(), Parameters: entry.data})
 	}
 	return out
 }

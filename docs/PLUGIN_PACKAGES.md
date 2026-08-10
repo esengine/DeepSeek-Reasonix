@@ -1,7 +1,7 @@
 # Reasonix Plugin Packages
 
-Reasonix plugin packages bundle skills, hooks, and MCP servers behind one
-installable unit.
+Reasonix plugin packages bundle skills, hooks, MCP servers, prompts, themes,
+and code extensions behind one installable unit.
 
 ## CLI Mode
 
@@ -256,6 +256,120 @@ Plugin hook execution is explicit:
   Reasonix shell-command behavior. `shellCommand: true` remains supported as
   the legacy spelling of shell form.
 
+## Manifest v2 (Extensions)
+
+Native Reasonix extensions use the exact v2 `apiVersion`:
+
+```json
+{
+  "apiVersion": "reasonix.io/plugin/v2",
+  "name": "example",
+  "version": "1.0.0",
+  "description": "Example extension",
+  "requires": [],
+  "provides": [
+    {
+      "namespace": "plugin/example",
+      "kind": "interceptors",
+      "id": "default",
+      "version": "1.0.0"
+    }
+  ],
+  "contributes": {
+    "skills": ["skills"],
+    "agents": ["agents"],
+    "commands": ["commands"],
+    "prompts": ["prompts"],
+    "hooks": {},
+    "mcpServers": {},
+    "themes": ["themes/*.reasonix-theme"]
+  },
+  "runtime": {
+    "command": "${REASONIX_PLUGIN_ROOT}/bin/example",
+    "args": [],
+    "env": {},
+    "required": true,
+    "priority": 0,
+    "intercepts": ["input.receive", "tool.before"],
+    "replaces": [],
+    "capabilities": ["interceptors"]
+  }
+}
+```
+
+Parsing rules:
+
+- Native `reasonix-plugin.json` manifests must declare the exact
+  `reasonix.io/plugin/v2` value. v1 and missing versions are rejected; there
+  is no v1 dual-read or automatic migration path.
+- v2 is strict: any unknown field — at the root or nested under
+  `contributes`/`runtime` — is an error naming the field path, so typos fail
+  loudly instead of silently disabling a capability.
+- v2 resource discovery is explicit. Reasonix loads only the skills, agents,
+  commands, prompts, hooks, MCP servers, themes, and runtime declared by the
+  native manifest. Host-specific sidecars such as a root `CLAUDE.md`,
+  `hooks/hooks.json`, `.claude/settings.json`, or `.mcp.json` are not imported
+  implicitly.
+- Minor aliases (`reasonix.io/plugin/v2.0`, `v2.1`, …) and unknown major
+  versions are rejected.
+- `requires` and `provides` declare dependency constraints and the capability
+  ceiling enforced against the Sidecar handshake.
+- v2 may mix the supported top-level resource fields (`skills`, `hooks`,
+  `mcpServers`, …)
+  with `contributes`: identical paths are deduplicated; the same key with two
+  different definitions is a manifest error naming the key.
+- All relative paths and globs must stay inside the plugin root: traversal,
+  absolute paths, escaping symlinks, and non-regular theme files are
+  rejected.
+
+New resource types:
+
+- `prompts` are prompt templates using the same semantics and argument
+  substitution as commands, invoked as `/<plugin>:<name>`. `commands` remains
+  a compatible alias.
+- `themes` are `.reasonix-theme` files shown read-only in Desktop Settings as
+  plugin themes (IDs `plugin:<plugin>:<theme>`); they are never copied into
+  the user theme library. If the plugin is disabled or uninstalled while its
+  theme is active, the desktop falls back to the base style but keeps the
+  ID, so reinstalling the same plugin restores the theme.
+
+The `runtime` block declares a code extension — a sidecar process Reasonix
+launches and talks to over the Extension Protocol (JSON-RPC 2.0 over stdio;
+see `docs/EXTENSION_PROTOCOL.generated.md` for the method index and
+`sdk/go/README.md` for the Go SDK):
+
+- `command`/`args`/`env` are **exec form only** — the command is the
+  executable (never shell-interpreted); `${REASONIX_PLUGIN_ROOT}` expands to
+  the installed plugin root.
+- `intercepts` lists the events the extension wants to intercept (for example
+  `input.receive`, `tool.before`, `permission.decision`); `replaces` declares
+  the replacement slots it may own (`system_prompt`, `context`,
+  `provider_request`, `provider_response`, `compaction`, `session_policy`,
+  `permission`, `frontend_events`, `tool:<name>`, `provider:<ref>`). Each
+  slot has exactly one owner across all installed plugins; a collision fails
+  the build with both sources named.
+- `capabilities` gates whole feature families: `interceptors`, `strategies`,
+  `providers`, `ui`. Anything the sidecar announces beyond the manifest is
+  rejected during the handshake.
+- Provider models contributed by an extension appear as
+  `plugin/<plugin>/<provider>/<model>` in the model picker; the ref also
+  works as `default_model` (including on first boot) and in `/model`,
+  Desktop, and ACP model switches.
+
+**Full trust.** A code extension runs outside the sandbox with the
+unfiltered inherited environment. It can read the full session and
+environment, bypass permissions, and operate the machine directly; a
+`permission.decision` "allow" from an extension overrides a host deny.
+Installing, updating, replacing, or `--link`ing a plugin with a `runtime`
+block *is* the authorization — there is no second confirmation prompt, and
+`--link` keeps trusting changed content automatically. The install preview,
+`reasonix plugin show`, capability diagnostics, and the Desktop installer
+therefore display a prominent `FULL TRUST` block with the runtime command,
+interceptors, replacement slots, and provider/UI capabilities. Review that
+block before installing, and only install runtimes you trust completely.
+Only plugins installed through the plugin flow can start a runtime; project
+configuration can never declare one.
+
 ## Codex & Claude Compatibility
 
 Reasonix also reads Codex plugin manifests at `.codex-plugin/plugin.json` and
@@ -278,8 +392,10 @@ before anything is written. Set the optional install name to a marketplace
 plugin name to select only that entry. Object sources are accepted only for a
 GitHub repository URL pinned to a full commit SHA. Unpinned external strings,
 npm, `strict: false`, and other advanced marketplace protocols are skipped in
-a bulk install and rejected when selected by name. For packages
-such as Superpowers and Claude-style skill packs, Reasonix maps:
+a bulk install and rejected when selected by name. For packages such as
+Superpowers and Claude-style skill packs, Reasonix maps the following
+compatibility conventions. Native v2 manifests use only their explicit
+declarations and do not apply these fallbacks:
 
 - `skills` to Reasonix skill roots. A Claude manifest that declares no
   `skills` field falls back to the conventional `skills/` (or `.claude/skills/`)
@@ -307,8 +423,10 @@ such as Superpowers and Claude-style skill packs, Reasonix maps:
   Agents use `/<plugin>:agent:<name>`, so an upstream agent and skill may share
   the same name without shadowing one another.
 - `hooks/session-start-codex` to the Reasonix `SessionStart` hook when present.
-- A plugin-root `CLAUDE.md` file to a built-in `SessionStart` context hook. The
-  file is read directly by Reasonix, without spawning a shell command.
+- For Codex compatibility packages, a plugin-root `CLAUDE.md` file to a built-in
+  `SessionStart` context hook. The file is read directly by Reasonix, without
+  spawning a shell command. Claude plugin manifests ignore this file, matching
+  Claude Code's plugin contract.
 - `.claude/settings.json` and `hooks/hooks.json` command hooks to Reasonix hook
   events when the event names match. `matcher`, `args`, `shell`, `async`,
   `env`, and timeout are preserved. Claude's execution contract is retained:
@@ -356,7 +474,9 @@ such as Superpowers and Claude-style skill packs, Reasonix maps:
   unbraced `$NAME` and Windows `%NAME%` spellings), so plugin-relative paths
   do not depend on the target shell's environment-variable syntax. On Windows,
   shell-form hooks without an explicit shell use the same Git Bash-first,
-  PowerShell-fallback selection as Reasonix's shell tool. Explicit Bash hooks
+  PowerShell-fallback selection as Reasonix's shell tool; when a hook points to
+  a POSIX-shebang script file, the host also converts Windows paths to a Bash-
+  compatible form. Explicit Bash hooks
   and legacy bare `sh -c`/`bash -c` hooks are routed through a discovered Git
   for Windows Bash even when it is not on `cmd.exe`'s `PATH`; an explicit
   interpreter path remains untouched. If no usable Bash is installed, the hook

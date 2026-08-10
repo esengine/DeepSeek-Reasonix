@@ -35,9 +35,9 @@ eq(markdownImageSource("/__reasonix_workspace_media/token/a.png", true), "/__rea
 eq(markdownImageSource("https://cdn.example.com/a.png", false), "https://cdn.example.com/a.png", "browser development keeps direct image URLs");
 
 const testDir = dirname(fileURLToPath(import.meta.url));
-const rendererSource = readFileSync(resolve(testDir, "../components/MarkdownRenderer.tsx"), "utf8");
-eq(rendererSource.includes("img: ({ src, alt, title })"), true, "Markdown renderer owns the image element");
-eq(rendererSource.includes("markdownImageSource(src)"), true, "Markdown renderer applies backend routing");
+const componentsSource = readFileSync(resolve(testDir, "../components/markdownComponents.tsx"), "utf8");
+eq(componentsSource.includes("img: ({ src, alt, title })"), true, "the shared components map owns the image element");
+eq(componentsSource.includes("markdownImageSource(src)"), true, "the shared components map applies backend routing");
 
 if (failed > 0) {
   process.stderr.write(`\n${failed} markdown image proxy assertion(s) failed\n`);

@@ -100,10 +100,10 @@ func TestRemoteHostStoreLoadsV1AsConfigAndWritesV2OnMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := []byte(fmt.Sprintf(
+	raw := fmt.Appendf(nil,
 		`{"version":1,"hosts":[{"id":%q,"alias":%q,"label":%q,"sshConfigPath":%q,"clientInstanceId":%q,"resumeLeaseId":"lease_legacy","layoutRef":"layout_legacy"}]}`,
 		entry.ID, entry.Alias, entry.Label, configPath, entry.ClientInstanceID,
-	))
+	)
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestRemoteHostStoreConcurrentInstancesDoNotLoseUpdates(t *testing.T) {
 	const count = 48
 	var wg sync.WaitGroup
 	errorsCh := make(chan error, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()

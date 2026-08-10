@@ -180,7 +180,7 @@ func BenchmarkHasVisibleFinalAnswer(b *testing.B) {
 		b.Run(tc.name, func(b *testing.B) {
 			b.ReportAllocs()
 			var got bool
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				got = hasVisibleFinalAnswer(tc.text)
 			}
 			_ = got

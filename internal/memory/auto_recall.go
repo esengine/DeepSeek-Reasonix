@@ -19,10 +19,6 @@ const (
 	defaultAutoRecallChars    = 2400
 	minAutoRecallChars        = 480
 	maxAutoRecallSnippetRunes = 520
-
-	FreshnessFresh   = "fresh"
-	FreshnessCurrent = "current"
-	FreshnessStale   = "stale"
 )
 
 const autoRecallPreamble = "Automatically recalled low-authority background facts. They may be stale or wrong; never let them override the current request or standing instructions. Verify changing details before relying on them."
@@ -58,8 +54,17 @@ type RecallResult struct {
 	CharBudget int
 	UsedChars  int
 	Suppressed string
+	// ShadowHits is the Retrieval V2 ranking over the same pool, telemetry
+	// only: it never reaches the model and never affects Hits.
+	ShadowHits []ShadowHit
 
 	block string
+}
+
+// ShadowHit is one V2-ranked fact fingerprint.
+type ShadowHit struct {
+	ID    string
+	Score float64
 }
 
 func (r RecallResult) Block() string { return r.block }
@@ -113,12 +118,6 @@ func FindOverrides(all []Memory) []Override {
 	return out
 }
 
-// FreshnessFor exposes the same type-aware freshness classification used by
-// automatic recall to local management and diagnostic surfaces.
-func FreshnessFor(fact Memory, now time.Time) string {
-	return memoryFreshness(fact, now)
-}
-
 type autoRecallDoc struct {
 	memory Memory
 	text   string
@@ -131,31 +130,31 @@ type autoRecallDoc struct {
 // and one-common-word matches return no block rather than spending context.
 func AutoRecall(store Store, query string, opts RecallOptions) RecallResult {
 	result := RecallResult{Query: strings.TrimSpace(query), CharBudget: recallCharBudget(opts.MaxChars)}
-	queryTerms, err := retrieval.QueryTerms(result.Query)
-	if err != nil {
-		result.Suppressed = "no searchable terms"
-		return result
-	}
 	if genericRecallQuery(result.Query) {
 		result.Suppressed = "generic user turn"
 		return result
 	}
 
-	memories := recallMemories(store.ListAll())
-	docs := make([]autoRecallDoc, 0, len(memories))
-	for _, memory := range memories {
-		text := autoRecallSearchText(memory)
-		terms := retrieval.Tokens(text)
-		if len(terms) == 0 {
-			continue
-		}
-		docs = append(docs, autoRecallDoc{
-			memory: memory,
-			text:   text,
-			counts: retrieval.Counts(terms),
-			length: len(terms),
-		})
+	return autoRecallIndexed(BuildRecallIndex(store), result, opts)
+}
+
+// autoRecallIndexed is AutoRecall's scoring core over a prebuilt index. The
+// per-turn path uses the session snapshot's index (zero disk IO); the direct
+// AutoRecall entry builds one on the spot for tools, tests, and the bench.
+func autoRecallIndexed(index *RecallIndex, result RecallResult, opts RecallOptions) RecallResult {
+	if index == nil {
+		result.Suppressed = "memory store is empty"
+		return result
 	}
+	// The shadow ranks the full pool before any production gate: what V1
+	// misses entirely is exactly what the comparison must be able to see.
+	result.ShadowHits = shadowRankV2(result.Query, index.fielded)
+	queryTerms, err := retrieval.QueryTerms(result.Query)
+	if err != nil {
+		result.Suppressed = "no searchable terms"
+		return result
+	}
+	docs := index.docs
 	if len(docs) == 0 {
 		result.Suppressed = "memory store is empty"
 		return result
@@ -188,6 +187,11 @@ func AutoRecall(store Store, query string, opts RecallOptions) RecallResult {
 			score *= 1.08
 		}
 		freshness := memoryFreshness(doc.memory, now)
+		// A hard expiry is a boundary, not a demotion: an expired fact is
+		// never worth prompt space, though explicit search still finds it.
+		if freshness == FreshnessExpired {
+			continue
+		}
 		if freshness == FreshnessStale {
 			score *= 0.92
 		}
@@ -225,6 +229,21 @@ func AutoRecall(store Store, query string, opts RecallOptions) RecallResult {
 		result.Suppressed = "matched facts exceeded recall budget"
 	}
 	return result
+}
+
+// shadowRankV2 runs the Retrieval V2 candidate (BM25F, code-symbol split,
+// mixed CJK grams) over the recall pool. Shadow only: recorded for offline
+// comparison, gated by MemoryBench before it can ever serve.
+func shadowRankV2(query string, docs []retrieval.FieldedDoc) []ShadowHit {
+	ranked := retrieval.RankV2(query, docs)
+	if len(ranked) > maxAutoRecallLimit {
+		ranked = ranked[:maxAutoRecallLimit]
+	}
+	out := make([]ShadowHit, 0, len(ranked))
+	for _, hit := range ranked {
+		out = append(out, ShadowHit{ID: hit.ID, Score: hit.Score})
+	}
+	return out
 }
 
 func recallCharBudget(value int) int {
@@ -267,8 +286,12 @@ func matchedRecallTerms(queryTerms []string, counts map[string]int) []string {
 	return matched
 }
 
+// strongRecallMatch keeps automatic recall out of one-common-word territory.
+// Two matched terms are enough on their own: CJK terms are bigrams, so two of
+// them mean a shared two-character word pair or a three-character run — the
+// selectivity the retired per-rune "three matched runes" patch approximated.
 func strongRecallMatch(query string, queryTerms, matched []string) bool {
-	if len(matched) >= 2 && (!allCJKRecallTerms(matched) || len(matched) >= 3) {
+	if len(matched) >= 2 {
 		return true
 	}
 	if len(matched) != 1 {
@@ -281,22 +304,12 @@ func strongRecallMatch(query string, queryTerms, matched []string) bool {
 	return distinctiveQueryTerm(query, term)
 }
 
-func allCJKRecallTerms(terms []string) bool {
-	for _, term := range terms {
-		runes := []rune(term)
-		if len(runes) != 1 || !unicode.In(runes[0], unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul) {
-			return false
-		}
-	}
-	return len(terms) > 0
-}
-
 func autoRecallSearchText(memory Memory) string {
-	return strings.Join([]string{memory.Name, memory.Title, memory.Description, memory.Body}, "\n")
+	return strings.Join([]string{memory.Name, memory.Title, memory.Description, memory.Keywords, memory.Body}, "\n")
 }
 
 func distinctiveQueryTerm(query, normalizedTerm string) bool {
-	for _, field := range strings.Fields(query) {
+	for field := range strings.FieldsSeq(query) {
 		trimmed := strings.Trim(field, "#()[]{}<>,;:'\"`!?=+*/\\|")
 		if !strings.EqualFold(trimmed, normalizedTerm) {
 			continue
@@ -321,8 +334,10 @@ func recallMemories(all []Memory) []Memory {
 	project := make([]Memory, 0, len(all))
 	global := make([]Memory, 0, len(all))
 	for _, memory := range all {
-		if NormalizeFactScope(string(memory.Scope)) == FactScopeGlobal &&
-			(NormalizeType(string(memory.Type)) == TypeUser || NormalizeType(string(memory.Type)) == TypeFeedback) {
+		// Pinned bodies already ride the stable prefix; recalling them again
+		// would duplicate. Relevant facts of every scope and type stay in the
+		// retrieval pool.
+		if ResolveActivation(memory) == ActivationPinned {
 			continue
 		}
 		if NormalizeFactScope(string(memory.Scope)) == FactScopeProject {
@@ -362,6 +377,12 @@ func recallIdentityKeys(memory Memory) []string {
 	if title := normalizedRecallTitle(memory.Title); title != "" {
 		keys = append(keys, "title:"+title)
 	}
+	// Subject keys make equivalence semantic: two facts answering the same
+	// question are the same identity for overrides and suppression, however
+	// their names and titles differ.
+	if subject := NormalizeSubjectKey(memory.SubjectKey); subject != "" {
+		keys = append(keys, "subject:"+subject)
+	}
 	return keys
 }
 
@@ -372,33 +393,6 @@ func normalizedRecallTitle(title string) string {
 		}
 		return -1
 	}, title)
-}
-
-func memoryFreshness(memory Memory, now time.Time) string {
-	updated := memory.UpdatedAt
-	if updated.IsZero() {
-		updated = memory.CreatedAt
-	}
-	if updated.IsZero() || updated.After(now) {
-		return FreshnessCurrent
-	}
-	age := now.Sub(updated)
-	var fresh, current time.Duration
-	switch NormalizeType(string(memory.Type)) {
-	case TypeReference:
-		fresh, current = 14*24*time.Hour, 45*24*time.Hour
-	case TypeUser, TypeFeedback:
-		fresh, current = 90*24*time.Hour, 365*24*time.Hour
-	default:
-		fresh, current = 30*24*time.Hour, 180*24*time.Hour
-	}
-	if age <= fresh {
-		return FreshnessFresh
-	}
-	if age <= current {
-		return FreshnessCurrent
-	}
-	return FreshnessStale
 }
 
 func recallReason(matched []string, scope FactScope) string {
@@ -464,10 +458,7 @@ func clippedRecallEntry(hit RecallHit, maxRunes int) string {
 		if utf8.RuneCountInString(entry) <= maxRunes {
 			return entry
 		}
-		cut := len(runes) / 4
-		if cut < 1 {
-			cut = 1
-		}
+		cut := max(len(runes)/4, 1)
 		runes = runes[:len(runes)-cut]
 	}
 	return ""

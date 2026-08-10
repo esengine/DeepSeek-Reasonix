@@ -35,6 +35,8 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           pnpm install --frozen-lockfile
+          pnpm test
+          pnpm typecheck
           npx wrangler deploy
       - name: Sync RESEND_API_KEY to the worker
         working-directory: workers/accounts

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -765,10 +766,7 @@ func (l *Ledger) HasSuccessfulCommandAfter(command string, after int) bool {
 	if l == nil || command == "" {
 		return false
 	}
-	start := after + 1
-	if start < 0 {
-		start = 0
-	}
+	start := max(after+1, 0)
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -785,10 +783,7 @@ func (l *Ledger) HasSuccessfulCompleteStepAfter(after int) bool {
 	if l == nil {
 		return false
 	}
-	start := after + 1
-	if start < 0 {
-		start = 0
-	}
+	start := max(after+1, 0)
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -810,10 +805,7 @@ func (l *Ledger) HasSuccessfulDeliverySignoffAfter(after int) bool {
 	if l == nil {
 		return false
 	}
-	start := after + 1
-	if start < 0 {
-		start = 0
-	}
+	start := max(after+1, 0)
 
 	l.mu.Lock()
 	receipts := append([]Receipt(nil), l.receipts...)
@@ -851,10 +843,7 @@ func (l *Ledger) HasSuccessfulReviewAfter(after int) bool {
 	if l == nil {
 		return false
 	}
-	start := after + 1
-	if start < 0 {
-		start = 0
-	}
+	start := max(after+1, 0)
 
 	l.mu.Lock()
 	receipts := append([]Receipt(nil), l.receipts...)
@@ -875,10 +864,7 @@ func (l *Ledger) HasHostReviewCoverageAfter(after int, requiredPaths []string) b
 	if l == nil {
 		return false
 	}
-	start := after + 1
-	if start < 0 {
-		start = 0
-	}
+	start := max(after+1, 0)
 	l.mu.Lock()
 	receipts := append([]Receipt(nil), l.receipts...)
 	l.mu.Unlock()
@@ -1036,8 +1022,8 @@ func (l *Ledger) IncompleteLatestTodos() ([]TodoStepMatch, bool) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	for i := len(l.receipts) - 1; i >= 0; i-- {
-		r := l.receipts[i]
+	for _, v := range slices.Backward(l.receipts) {
+		r := v
 		if !r.Success || r.ToolName != "todo_write" {
 			continue
 		}
@@ -1251,10 +1237,7 @@ func (l *Ledger) HasSuccessfulAnchorRefreshReadAfter(paths []string, after int) 
 	if l == nil || len(wanted) == 0 {
 		return false
 	}
-	start := after + 1
-	if start < 0 {
-		start = 0
-	}
+	start := max(after+1, 0)
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -1331,8 +1314,8 @@ func (l *Ledger) MatchLatestTodoStep(step string) (TodoStepMatch, bool) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	for i := len(l.receipts) - 1; i >= 0; i-- {
-		r := l.receipts[i]
+	for _, v := range slices.Backward(l.receipts) {
+		r := v
 		if !r.Success || r.ToolName != "todo_write" {
 			continue
 		}
@@ -1348,8 +1331,8 @@ func (l *Ledger) LatestTodos() ([]TodoItem, bool) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	for i := len(l.receipts) - 1; i >= 0; i-- {
-		r := l.receipts[i]
+	for _, v := range slices.Backward(l.receipts) {
+		r := v
 		if r.Success && r.ToolName == "todo_write" {
 			return append([]TodoItem(nil), r.Todos...), true
 		}
@@ -1374,8 +1357,8 @@ func (l *Ledger) UnverifiedCompletedTodos(current []TodoItem) (missing []TodoSte
 
 	var previous []TodoItem
 	baseline := -1
-	for i := len(receipts) - 1; i >= 0; i-- {
-		r := receipts[i]
+	for i, v := range slices.Backward(receipts) {
+		r := v
 		if !r.Success || r.ToolName != "todo_write" {
 			continue
 		}
@@ -1444,10 +1427,7 @@ func hasFailedCompleteStepRecoveryForTodo(receipts []Receipt, baseline int, inde
 // Recovery only trusts progress that happened before the failed sign-off.
 // Later unrelated work must not retroactively authorize an earlier completion.
 func hasSuccessfulProgressBeforeReceipt(receipts []Receipt, baseline int, before int) bool {
-	start := baseline + 1
-	if start < 0 {
-		start = 0
-	}
+	start := max(baseline+1, 0)
 	for i := start; i < before && i < len(receipts); i++ {
 		r := receipts[i]
 		if !r.Success || r.ToolName == "todo_write" || r.ToolName == "complete_step" || r.Read {
@@ -1511,18 +1491,24 @@ func DeliveryProfileFromContext(ctx context.Context) bool {
 	return enabled
 }
 
-// WithSessionMessages attaches the full conversation history so verifyStepEvidence
-// can fall back to scanning the transcript when the per-turn ledger misses a
-// command (cross-turn references, non-bash tool calls, truncated command strings).
-func WithSessionMessages(ctx context.Context, msgs []provider.Message) context.Context {
-	return context.WithValue(ctx, sessionMessagesKey{}, msgs)
+// WithSessionMessages attaches a lazy transcript accessor so verifyStepEvidence
+// can fall back to scanning the conversation when the per-turn ledger misses a
+// command (cross-turn references, non-bash tool calls, truncated command
+// strings). The context carries the capability, not the data: snapshot is
+// called only when a consumer (complete_step) actually needs the history, so
+// ordinary tool calls never pay for a full transcript copy.
+func WithSessionMessages(ctx context.Context, snapshot func() []provider.Message) context.Context {
+	return context.WithValue(ctx, sessionMessagesKey{}, snapshot)
 }
 
-// SessionMessagesFromContext retrieves the conversation history attached by
-// WithSessionMessages.
+// SessionMessagesFromContext resolves the transcript accessor attached by
+// WithSessionMessages, taking the snapshot at call time.
 func SessionMessagesFromContext(ctx context.Context) ([]provider.Message, bool) {
-	msgs, ok := ctx.Value(sessionMessagesKey{}).([]provider.Message)
-	return msgs, ok
+	snapshot, ok := ctx.Value(sessionMessagesKey{}).(func() []provider.Message)
+	if !ok || snapshot == nil {
+		return nil, false
+	}
+	return snapshot(), true
 }
 
 // WithTodoState attaches the host's canonical task list to a tool call. The
@@ -1678,6 +1664,29 @@ func BashToolCallMixesMutationAndVerification(args json.RawMessage) bool {
 	return bashContainsVerificationSegment(command) && bashMayMutate(command)
 }
 
+// BashToolCallMixesMutationAndMaskableVerification is the ordinary-mode subset of
+// BashToolCallMixesMutationAndVerification: the same mixed shape, but only when
+// the shell's exit status can actually hide the earlier step's failure.
+//
+// Delivery mode blocks the broad shape because a mutation invalidates the
+// verification *receipt* regardless of exit status. Ordinary mode has no receipt
+// to protect — its only concern is a result that looks successful while an
+// earlier step failed. `build && test` cannot produce that (bash short-circuits
+// and reports the failing status), so blocking it would reject the single most
+// common shell shape in real projects for no safety gain. `build; test` can,
+// and stays blocked.
+func BashToolCallMixesMutationAndMaskableVerification(args json.RawMessage) bool {
+	if !BashToolCallMixesMutationAndVerification(args) {
+		return false
+	}
+	command, ok := bashCommandFromArgs(args)
+	if !ok {
+		return false
+	}
+	canMask, analyzed := shellparse.CanMaskEarlierFailure(command)
+	return analyzed && canMask
+}
+
 // BashToolCallMasksVerificationExit reports the common `check; echo $?` shape.
 // The trailing reporter makes the shell call itself succeed even when the
 // verifier failed, so a successful tool receipt cannot prove the check passed.
@@ -1724,46 +1733,108 @@ func BashToolCallMasksVerificationExit(args json.RawMessage) bool {
 // this shape before execution and directs callers to auditable file tools,
 // script files, or conventional verifier commands instead.
 func BashToolCallUsesOpaqueInlineInterpreter(args json.RawMessage) bool {
+	command, ok := bashCommandFromArgs(args)
+	if !ok {
+		return false
+	}
+	return bashCommandUsesOpaqueInlineInterpreter(command)
+}
+
+// BashToolCallUsesNonTerminalInlineInterpreter reports whether an opaque
+// inline interpreter (python -c, node -e, …) is not the last top-level segment
+// *and* a later segment can overwrite its exit status. Ordinary mode blocks that
+// shape deterministically without rewriting the command. An `&&` chain is left
+// alone: bash short-circuits it, so the interpreter's failure is still the
+// call's exit status and nothing is hidden.
+func BashToolCallUsesNonTerminalInlineInterpreter(args json.RawMessage) bool {
+	command, ok := bashCommandFromArgs(args)
+	if !ok {
+		return false
+	}
+	segments, _, ok := shellparse.SplitTopLevel(command)
+	if !ok || len(segments) < 2 {
+		// Unknown / unparseable syntax: do not pretend full analysis.
+		return false
+	}
+	if canMask, analyzed := shellparse.CanMaskEarlierFailure(command); !analyzed || !canMask {
+		return false
+	}
+	for i, segment := range segments {
+		if !bashSegmentUsesOpaqueInlineInterpreter(segment) {
+			continue
+		}
+		if i < len(segments)-1 {
+			return true
+		}
+	}
+	return false
+}
+
+// BashCommandMayBeOpaqueMutation reports whether a sole opaque inline
+// interpreter call is allowed to run but cannot be proven read-only for
+// mutation-risk labeling.
+func BashCommandMayBeOpaqueMutation(args json.RawMessage) bool {
+	return BashToolCallUsesOpaqueInlineInterpreter(args)
+}
+
+func bashCommandFromArgs(args json.RawMessage) (string, bool) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(args, &fields); err != nil {
-		return false
+		return "", false
 	}
 	command := strings.TrimSpace(stringField(fields, "command"))
-	if command == "" {
-		return false
-	}
+	return command, command != ""
+}
+
+func bashCommandUsesOpaqueInlineInterpreter(command string) bool {
 	segments, _, ok := shellparse.SplitTopLevel(command)
 	if !ok {
 		return false
 	}
-	for _, segment := range segments {
-		normalized, _ := shellsafe.NormalizeBashSafeRedirectsForMatch(segment)
-		argv, malformed := shellparse.StaticFields(normalized)
-		if malformed != "" || len(argv) == 0 {
-			continue
-		}
-		base := strings.ToLower(filepath.Base(argv[0]))
-		args := argv[1:]
-		switch base {
-		case "node", "bun":
-			if hasCommandArg(args, "-e", "--eval", "-p", "--print") {
-				return true
-			}
-		case "python", "python3", "ruby", "perl":
-			if hasCommandArg(args, "-c", "-e") {
-				return true
-			}
-		case "php":
-			if hasCommandArg(args, "-r") {
-				return true
-			}
-		case "deno":
-			if len(args) > 0 && strings.EqualFold(args[0], "eval") {
-				return true
-			}
-		}
+	return slices.ContainsFunc(segments, bashSegmentUsesOpaqueInlineInterpreter)
+}
+
+func bashSegmentUsesOpaqueInlineInterpreter(segment string) bool {
+	normalized, _ := shellsafe.NormalizeBashSafeRedirectsForMatch(segment)
+	argv, malformed := shellparse.StaticFields(normalized)
+	if malformed != "" || len(argv) == 0 {
+		return false
+	}
+	base := strings.ToLower(filepath.Base(argv[0]))
+	args := argv[1:]
+	switch base {
+	case "node", "bun":
+		return hasCommandArg(args, "-e", "--eval", "-p", "--print")
+	case "python", "python3", "ruby", "perl":
+		return hasCommandArg(args, "-c", "-e")
+	case "php":
+		return hasCommandArg(args, "-r")
+	case "deno":
+		return len(args) > 0 && strings.EqualFold(args[0], "eval")
 	}
 	return false
+}
+
+// ShellContractPreflightMessage is the model-facing recovery text when a
+// deterministic shell contract blocks a call before launch.
+func ShellContractPreflightMessage(reason string) string {
+	switch reason {
+	case "mixed":
+		return "blocked: this command runs a verification check after a state-changing segment, separated so the " +
+			"check's exit status would hide a failure in that earlier segment. " +
+			"Chain them with '&&' so a failed step stops the command and stays the result, " +
+			"or run the modification and the verification as separate calls."
+	case "mask_exit":
+		return "blocked: the trailing echo/printf of $? masks the verifier's exit status, so this command would look successful even when the check failed. " +
+			"Run the verifier by itself and let its exit status be the tool result."
+	case "inline_nonterminal":
+		return "blocked: an inline interpreter (python -c, node -e, …) is followed by a segment that can hide its failure. " +
+			"Chain with '&&' so the interpreter's exit status survives, run it as the final command, " +
+			"or use edit_file for file changes and put script source in a file."
+	default:
+		return "blocked: this shell command violates the host execution contract. " +
+			"Use edit_file for modifications and a separate shell call for verification."
+	}
 }
 
 func bashContainsVerificationSegment(command string) bool {
@@ -1922,12 +1993,7 @@ func bashSegmentIsVerification(fields []string) bool {
 			return true
 		}
 		if args[0] == "test" {
-			for _, arg := range args[1:] {
-				if goTestFlagWritesFile(arg) {
-					return false
-				}
-			}
-			return true
+			return !slices.ContainsFunc(args[1:], goTestFlagWritesFile)
 		}
 		// A package pattern can expand to one main package, so even `go build
 		// ./...` may write a workspace binary. Package expansion and inherited
@@ -1941,12 +2007,7 @@ func bashSegmentIsVerification(fields []string) bool {
 	case "tsc":
 		return tscSegmentIsVerification(args)
 	case "mypy":
-		for _, arg := range args {
-			if mypyFlagWritesReport(arg) {
-				return false
-			}
-		}
-		return true
+		return !slices.ContainsFunc(args, mypyFlagWritesReport)
 	case "npm", "pnpm", "yarn", "bun", "cargo":
 		if len(args) > 0 && hasCommandArg(args[:1], "test", "check", "lint", "clippy") {
 			return true
@@ -2145,12 +2206,7 @@ func nodeSegmentIsVerification(args []string) bool {
 	case "--test":
 		// Match the repository's treatment of other conventional test runners,
 		// but fail closed on test-runner and Node runtime flags that write files.
-		for _, arg := range args[1:] {
-			if nodeTestFlagWritesFile(arg) {
-				return false
-			}
-		}
-		return true
+		return !slices.ContainsFunc(args[1:], nodeTestFlagWritesFile)
 	default:
 		return false
 	}
@@ -2445,8 +2501,8 @@ func argNamesPath(arg, needle string) bool {
 	if tok == needle || strings.HasSuffix(tok, "/"+needle) {
 		return true
 	}
-	if i := strings.Index(tok, ":"); i >= 0 {
-		rest := tok[i+1:]
+	if _, after, ok := strings.Cut(tok, ":"); ok {
+		rest := after
 		if rest == needle || strings.HasSuffix(rest, "/"+needle) {
 			return true
 		}
@@ -2692,8 +2748,8 @@ func hasSuccessfulCompleteStepForTodo(receipts []Receipt, index int, current []T
 }
 
 func latestTodoStep(step string, receipts []Receipt) TodoStepMatch {
-	for i := len(receipts) - 1; i >= 0; i-- {
-		r := receipts[i]
+	for _, v := range slices.Backward(receipts) {
+		r := v
 		if !r.Success || r.ToolName != "todo_write" {
 			continue
 		}

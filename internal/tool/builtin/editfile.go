@@ -19,6 +19,7 @@ type editFile struct {
 	guard   SessionDataGuard
 	managed ManagedConfigPaths
 	workDir string
+	overlay FileOverlay
 }
 
 func (editFile) Name() string { return "edit_file" }
@@ -53,22 +54,22 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		return "", err
 	}
 
-	content, enc, err := readFileEncoded(p.Path)
+	src, err := readEditSource(ctx, e.overlay, p.Path)
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", p.Path, err)
 	}
 
-	applied := applyOldStringEdit(content, p.OldString, p.NewString, false)
+	applied := applyOldStringEdit(src.content, p.OldString, p.NewString, false)
 	switch {
 	case applied.applied == 1:
 		// ok
 	case applied.matches == 0:
-		return "", oldStringNotFoundError(p.Path, p.OldString, content)
+		return "", oldStringNotFoundError(p.Path, p.OldString, src.content)
 	default:
-		return "", oldStringNotUniqueError(p.Path, p.OldString, content, applied.matches, false)
+		return "", oldStringNotUniqueError(p.Path, p.OldString, src.content, applied.matches, false)
 	}
 
-	if err := writeFileEncoded(p.Path, applied.updated, enc); err != nil {
+	if err := src.write(ctx, e.overlay, p.Path, applied.updated); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}
 	summary := fmt.Sprintf("edited %s", p.Path)

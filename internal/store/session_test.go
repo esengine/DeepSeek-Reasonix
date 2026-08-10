@@ -15,6 +15,7 @@ func TestSessionSidecarLayout(t *testing.T) {
 		{"event-log", SessionEventLog(p), "/home/u/.reasonix/sessions/abc.events.jsonl"},
 		{"event-log-damaged", SessionEventLogDamaged(p), "/home/u/.reasonix/sessions/abc.events.jsonl.damaged"},
 		{"event-index", SessionEventIndex(p), "/home/u/.reasonix/sessions/abc.event-index.json"},
+		{"display-index", SessionDisplayIndex(p), "/home/u/.reasonix/sessions/abc.display-index.json"},
 		{"conflict-log", SessionConflictLog(p), "/home/u/.reasonix/sessions/abc.conflicts.jsonl"},
 		{"lock", SessionLockFile(p), p + ".lock"},
 		{"lease-lock", SessionLeaseLock(p), p + ".lease.lock"},
@@ -22,6 +23,7 @@ func TestSessionSidecarLayout(t *testing.T) {
 		{"checkpoint", SessionCheckpointDir(p), "/home/u/.reasonix/sessions/abc.ckpt"},
 		{"jobs", SessionJobsDir(p), "/home/u/.reasonix/sessions/abc.jobs"},
 		{"cleanup-pending", SessionCleanupPending(p), "/home/u/.reasonix/sessions/abc.cleanup-pending.json"},
+		{"context", SessionContext(p), "/home/u/.reasonix/sessions/abc.context.json"},
 	}
 	for _, c := range cases {
 		if c.got != c.want {
@@ -40,6 +42,7 @@ func TestSessionSidecarEmptyPath(t *testing.T) {
 		{"event-log", SessionEventLog},
 		{"event-log-damaged", SessionEventLogDamaged},
 		{"event-index", SessionEventIndex},
+		{"display-index", SessionDisplayIndex},
 		{"conflict-log", SessionConflictLog},
 		{"lock", SessionLockFile},
 		{"lease-lock", SessionLeaseLock},
@@ -47,6 +50,7 @@ func TestSessionSidecarEmptyPath(t *testing.T) {
 		{"checkpoint", SessionCheckpointDir},
 		{"jobs", SessionJobsDir},
 		{"cleanup-pending", SessionCleanupPending},
+		{"context", SessionContext},
 	} {
 		if got := fn.f(""); got != "" {
 			t.Errorf("%s(\"\") = %q, want empty", fn.name, got)
@@ -85,8 +89,10 @@ func TestSessionSidecarFiles(t *testing.T) {
 		"/home/u/.reasonix/sessions/abc.events.jsonl",
 		"/home/u/.reasonix/sessions/abc.events.jsonl.damaged",
 		"/home/u/.reasonix/sessions/abc.event-index.json",
+		"/home/u/.reasonix/sessions/abc.display-index.json",
 		"/home/u/.reasonix/sessions/abc.conflicts.jsonl",
 		"/home/u/.reasonix/sessions/abc.recovery.json",
+		"/home/u/.reasonix/sessions/abc.context.json",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("SessionSidecarFiles = %v, want %v", got, want)

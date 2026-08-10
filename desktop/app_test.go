@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,7 +37,6 @@ import (
 	"reasonix/internal/plugin"
 	"reasonix/internal/pluginpkg"
 	"reasonix/internal/provider"
-	"reasonix/internal/remote/protocol"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/skill"
 	"reasonix/internal/store"
@@ -435,6 +435,15 @@ func TestCommandsDocsShowsOnlyRuntimeWinner(t *testing.T) {
 	}
 }
 
+func commandInfoByName(commands []CommandInfo, name string) (CommandInfo, bool) {
+	for _, command := range commands {
+		if command.Name == name {
+			return command, true
+		}
+	}
+	return CommandInfo{}, false
+}
+
 func TestCommandsDocsAccountsForHiddenCompatibilityAliases(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -499,40 +508,6 @@ func TestCommandsDocsDoesNotDisplaceQualifiedCustomCommands(t *testing.T) {
 			t.Fatalf("command %q = %+v, %v; want kind %q", want.name, command, ok, want.kind)
 		}
 	}
-}
-
-func TestAppendRemoteSessionCommandsUsesHostResolvedDocsName(t *testing.T) {
-	base := []CommandInfo{{Name: "new", Kind: "builtin", Group: "actions"}}
-	legacy := appendRemoteSessionCommands(base, protocol.SessionCatalogResult{})
-	if _, ok := commandInfoByName(legacy, "docs"); ok {
-		t.Fatalf("new desktop invented /docs for an older host: %+v", legacy)
-	}
-	catalog := protocol.SessionCatalogResult{
-		BuiltinCommands: []protocol.BuiltinCommandCatalogItem{{
-			Name: control.ReasonixDocsSlashName, Description: "host docs", Hint: "<question>", Group: "integrations",
-		}},
-		Commands: []protocol.CommandCatalogItem{{Name: "manuals:docs", Description: "plugin docs"}},
-		Skills:   []protocol.SkillCatalogItem{},
-	}
-	commands := appendRemoteSessionCommands(base, catalog)
-	if _, ok := commandInfoByName(commands, "docs"); ok {
-		t.Fatalf("remote commands invented an unavailable short docs route: %+v", commands)
-	}
-	if fallback, ok := commandInfoByName(commands, control.ReasonixDocsSlashName); !ok || fallback.Kind != "builtin" || fallback.Hint != "<question>" {
-		t.Fatalf("remote qualified docs fallback = %+v, %v", fallback, ok)
-	}
-	if canonical, ok := commandInfoByName(commands, "manuals:docs"); !ok || canonical.Kind != "custom" {
-		t.Fatalf("remote canonical plugin docs = %+v, %v", canonical, ok)
-	}
-}
-
-func commandInfoByName(commands []CommandInfo, name string) (CommandInfo, bool) {
-	for _, command := range commands {
-		if command.Name == name {
-			return command, true
-		}
-	}
-	return CommandInfo{}, false
 }
 
 func TestCommandsClassifiesSubagentSkills(t *testing.T) {
@@ -1084,14 +1059,14 @@ func TestBackgroundRestorePlanAvoidsNormalWindowFlash(t *testing.T) {
 
 func TestEmitReadyInvokesReadyHook(t *testing.T) {
 	app := NewApp()
-	var calls int32
+	var calls atomic.Int32
 	app.readyHook = func() {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 	}
 
 	app.emitReady(context.TODO())
 
-	if got := atomic.LoadInt32(&calls); got != 1 {
+	if got := calls.Load(); got != 1 {
 		t.Fatalf("ready hook calls = %d, want 1", got)
 	}
 }
@@ -1253,7 +1228,7 @@ func BenchmarkDesktopSettingsPayloads(b *testing.B) {
 	b.Setenv("SHARED_PROVIDER_KEY", "sk-test")
 
 	cfg := config.LoadForEdit(config.UserConfigPath())
-	for i := 0; i < 40; i++ {
+	for i := range 40 {
 		cfg.Providers = append(cfg.Providers, config.ProviderEntry{
 			Name:      fmt.Sprintf("custom-%02d", i),
 			Kind:      "openai",
@@ -1269,12 +1244,12 @@ func BenchmarkDesktopSettingsPayloads(b *testing.B) {
 	app := NewApp()
 
 	b.Run("Settings", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			_ = app.Settings()
 		}
 	})
 	b.Run("DesktopStartupSettings", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			_ = app.DesktopStartupSettings()
 		}
 	})
@@ -2099,7 +2074,6 @@ func TestResetProviderPresetAccessRejectsMissingSameNameProvider(t *testing.T) {
 
 func TestAddEveryProviderPresetAccessInstallsTemplate(t *testing.T) {
 	for _, preset := range config.CuratedProviderPresets() {
-		preset := preset
 		t.Run(preset.ID, func(t *testing.T) {
 			isolateDesktopUserDirs(t)
 
@@ -2916,7 +2890,7 @@ func TestSetEffortForTabReanchorsDepthCapRecoveryBranch(t *testing.T) {
 
 	app := NewApp()
 	app.ctx = context.Background()
-	app.runtimeEvents.emit = func(context.Context, string, ...interface{}) {}
+	app.runtimeEvents.emit = func(context.Context, string, ...any) {}
 	tab := &WorkspaceTab{
 		ID:          "tab_depth_cap_effort",
 		Scope:       "global",
@@ -2950,29 +2924,30 @@ func TestSetEffortForTabReanchorsDepthCapRecoveryBranch(t *testing.T) {
 	if err := app.SetEffortForTab(tab.ID, "max"); err != nil {
 		t.Fatalf("SetEffortForTab: %v", err)
 	}
-	if got := tab.Ctrl.SessionPath(); got != recoveryPath {
-		t.Fatalf("session path after effort switch = %q, want current recovery branch %q", got, recoveryPath)
+	isolatedPath := tab.Ctrl.SessionPath()
+	if isolatedPath == recoveryPath || !strings.Contains(isolatedPath, "-recovery-") {
+		t.Fatalf("session path after effort switch = %q, want an isolated recovery branch", isolatedPath)
 	}
-	if got := tab.currentSessionPath(); got != recoveryPath {
-		t.Fatalf("tab current session path = %q, want %q", got, recoveryPath)
+	if got := tab.currentSessionPath(); got != isolatedPath {
+		t.Fatalf("tab current session path = %q, want %q", got, isolatedPath)
 	}
-	if tab.sessionLease == nil || sessionRuntimeKey(tab.sessionLease.Path()) != sessionRuntimeKey(recoveryPath) {
-		t.Fatalf("tab lease path = %q, want %q", tab.sessionLeaseRuntimeKey(), recoveryPath)
+	if tab.sessionLease == nil || sessionRuntimeKey(tab.sessionLease.Path()) != sessionRuntimeKey(isolatedPath) {
+		t.Fatalf("tab lease path = %q, want %q", tab.sessionLeaseRuntimeKey(), isolatedPath)
 	}
 	matches, err := filepath.Glob(filepath.Join(dir, "*-recovery-*.jsonl"))
 	if err != nil {
 		t.Fatalf("glob recovery branches: %v", err)
 	}
 	matches = primarySessionFiles(matches)
-	if len(matches) != 1 || matches[0] != recoveryPath {
-		t.Fatalf("recovery branches after effort switch = %v, want only %q", matches, recoveryPath)
+	if len(matches) != 2 || !slices.Contains(matches, recoveryPath) || !slices.Contains(matches, isolatedPath) {
+		t.Fatalf("recovery branches after effort switch = %v, want canonical and isolated paths", matches)
 	}
 
 	lines := readConflictLogLines(t, store.SessionConflictLog(recoveryPath))
 	if len(lines) != 1 {
 		t.Fatalf("conflict log lines = %v, want one depth-cap diagnostic", lines)
 	}
-	if !strings.Contains(lines[0], `"outcome":"recovery_depth_cap_force_saved"`) {
+	if !strings.Contains(lines[0], `"outcome":"recovery_depth_cap_isolated"`) {
 		t.Fatalf("conflict diagnostic = %s, want depth-cap outcome", lines[0])
 	}
 	if strings.Contains(lines[0], dir) || strings.Contains(lines[0], recoveryPath) {
@@ -2991,43 +2966,14 @@ func TestSetEffortForTabReanchorsDepthCapRecoveryBranch(t *testing.T) {
 		t.Fatalf("glob recovery branches after snapshot: %v", err)
 	}
 	matches = primarySessionFiles(matches)
-	if len(matches) != 1 || matches[0] != recoveryPath {
-		t.Fatalf("recovery branches after follow-up snapshot = %v, want only %q", matches, recoveryPath)
-	}
-}
-
-func TestAddOfficialProviderAccessUsesDesktopLanguagePricing(t *testing.T) {
-	isolateDesktopUserDirs(t)
-	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
-		t.Fatalf("mkdir config dir: %v", err)
-	}
-	if err := os.WriteFile(config.UserConfigPath(), []byte(`
-[desktop]
-language = "zh"
-`), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	if _, err := NewApp().AddOfficialProviderAccess("deepseek", ""); err != nil {
-		t.Fatalf("AddOfficialProviderAccess: %v", err)
-	}
-	cfg := config.LoadForEdit(config.UserConfigPath())
-	p, ok := cfg.Provider("deepseek")
-	if !ok {
-		t.Fatal("deepseek provider not saved")
-	}
-	flash := p.Prices["deepseek-v4-flash"]
-	pro := p.Prices["deepseek-v4-pro"]
-	if flash == nil || flash.Output != 2 || flash.Currency != "¥" {
-		t.Fatalf("flash price = %+v, want CNY preset", flash)
-	}
-	if pro == nil || pro.Output != 6 || pro.Currency != "¥" {
-		t.Fatalf("pro price = %+v, want CNY preset", pro)
+	if len(matches) != 2 || !slices.Contains(matches, recoveryPath) || !slices.Contains(matches, isolatedPath) {
+		t.Fatalf("recovery branches after follow-up snapshot = %v, want canonical and isolated paths", matches)
 	}
 }
 
 func TestRemoveBuiltInProviderAccessRetargetsDefaultToRemainingAccess(t *testing.T) {
 	isolateDesktopUserDirs(t)
+	setDesktopTestCredential(t, "MIMO_API_KEY", "sk-test")
 	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
@@ -3074,12 +3020,12 @@ func TestModelsForTabOnlyListsProviderAccessWhenConfigured(t *testing.T) {
 	setDesktopTestCredential(t, "MIMO_API_KEY", "sk-test")
 
 	cfg := config.Default()
-	cfg.DefaultModel = "deepseek-flash/deepseek-v4-flash"
-	cfg.Desktop.ProviderAccess = []string{"deepseek-flash", "mimo-pro"}
-	deepseek, _ := cfg.Provider("deepseek-flash")
-	deepseek.Model = ""
-	deepseek.Models = []string{"deepseek-v4-flash", "deepseek-v4-pro"}
-	deepseek.Default = "deepseek-v4-flash"
+	cfg.DefaultModel = "deepseek/deepseek-v4-flash"
+	cfg.Desktop.ProviderAccess = []string{"deepseek", "mimo-pro"}
+	cfg.Providers = append(cfg.Providers, config.ProviderEntry{
+		Name: "deepseek", Kind: "anthropic", BaseURL: "https://api.deepseek.com/anthropic",
+		Models: []string{"deepseek-v4-flash", "deepseek-v4-pro"}, Default: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY",
+	})
 	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
@@ -3592,7 +3538,7 @@ func TestSetModelForTabContinuesRecoveryPathAfterSnapshotConflict(t *testing.T) 
 
 	app := NewApp()
 	app.ctx = context.Background()
-	app.runtimeEvents.emit = func(context.Context, string, ...interface{}) {}
+	app.runtimeEvents.emit = func(context.Context, string, ...any) {}
 	tab := &WorkspaceTab{
 		ID:          "tab_recovery_model",
 		Scope:       "global",
@@ -4365,16 +4311,13 @@ func runQuickClickWorkspaceReconcileTest(t *testing.T, layoutStyle string) {
 	errs := make(chan error, len(actions))
 	var wg sync.WaitGroup
 	for _, action := range actions {
-		action := action
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			ready <- struct{}{}
 			<-start
 			if err := action.run(); err != nil {
 				errs <- fmt.Errorf("%s: %w", action.name, err)
 			}
-		}()
+		})
 	}
 	for range actions {
 		<-ready
@@ -5166,6 +5109,46 @@ func TestConnectKeyRestoresDeepSeekProviderAccess(t *testing.T) {
 	}
 }
 
+func TestConnectKeyFreshInstallUsesDeepSeekAnthropicDefaults(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	oldFetch := connectKeyBalanceFetch
+	connectKeyBalanceFetch = func(context.Context, *http.Client, string, string) (*billing.Balance, error) {
+		return &billing.Balance{Available: true}, nil
+	}
+	t.Cleanup(func() { connectKeyBalanceFetch = oldFetch })
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	app.setTestCtrl(control.New(control.Options{Label: "fresh-install"}), "deepseek-flash/deepseek-v4-flash")
+	workspace := t.TempDir()
+	app.tabs["test"].WorkspaceRoot = workspace
+	defer func() {
+		if ctrl := app.activeCtrl(); ctrl != nil {
+			ctrl.Close()
+		}
+	}()
+
+	if _, err := app.ConnectKey("sk-test"); err != nil {
+		t.Fatalf("ConnectKey: %v", err)
+	}
+	cfg, err := config.LoadForRootReadOnly(workspace)
+	if err != nil {
+		t.Fatalf("load fresh-install config: %v", err)
+	}
+	entry, ok := cfg.ResolveModel(cfg.DefaultModel)
+	if !ok {
+		t.Fatalf("default model %q did not resolve", cfg.DefaultModel)
+	}
+	if entry.Kind != "anthropic" || entry.BaseURL != "https://api.deepseek.com/anthropic" ||
+		entry.Thinking != "enabled" || !config.EffectiveWebSearch(entry) || config.EffectiveVision(entry) {
+		t.Fatalf("fresh-install DeepSeek entry = %+v; want Anthropic, thinking, web search, and text-only vision", entry)
+	}
+	if app.NeedsOnboarding() {
+		t.Fatal("fresh-install onboarding should close after the validated DeepSeek key is stored")
+	}
+}
+
 func TestBalanceForTabUsesDesktopPricingCurrency(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	cfg := config.Default()
@@ -5668,9 +5651,24 @@ func TestMetaForTabReportsImageInputCapability(t *testing.T) {
 	if err := app.SetModel("custom/vision-pro"); err != nil {
 		t.Fatalf("SetModel(custom/vision-pro): %v", err)
 	}
-	if got := app.Meta().ImageInputEnabled; !got {
-		t.Fatal("vision model meta should enable image input")
+	// ImageInputEnabled is served from the per-tab cache; the model change
+	// invalidates it and a background refresh repopulates it (tab:meta).
+	waitForMetaImageInput(t, app, true)
+}
+
+// waitForMetaImageInput polls until the cached image-input capability reaches
+// the expected value. MetaForTab serves the background-refreshed cache, so the
+// value flips asynchronously after a model/settings change.
+func waitForMetaImageInput(t *testing.T, app *App, want bool) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if app.Meta().ImageInputEnabled == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
+	t.Fatalf("Meta().ImageInputEnabled did not become %v", want)
 }
 
 func TestMetaForTabImageInputCapabilityUsesCurrentRef(t *testing.T) {
@@ -6819,7 +6817,7 @@ func assertSingleTeardownTimeoutNotice(t *testing.T, notices <-chan event.Event,
 		t.Fatal("missing background-job teardown timeout notice")
 	}
 	var waited time.Duration
-	for _, field := range strings.Fields(notice.Detail) {
+	for field := range strings.FieldsSeq(notice.Detail) {
 		if !strings.HasPrefix(field, "waited=") {
 			continue
 		}
@@ -7184,7 +7182,7 @@ func TestSubmitEntryPointsRejectEmptyProviderInput(t *testing.T) {
 			return app.SubmitEditedDisplayToTab("missing", "visible prompt", "\n", "original prompt")
 		}},
 		{name: "initial goal", call: func() error {
-			_, err := app.SubmitInitialGoalToTab("missing", "goal", "visible prompt", "", nil, "normal", "auto", "local", 0, 0)
+			_, err := app.SubmitInitialGoalToTab("missing", "goal", "visible prompt", "", nil, "normal", "auto")
 			return err
 		}},
 	} {
@@ -7323,7 +7321,7 @@ func BenchmarkDesktopListSessionsScoped(b *testing.B) {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			b.Fatalf("mkdir %s: %v", dir, err)
 		}
-		for i := 0; i < 120; i++ {
+		for i := range 120 {
 			path := filepath.Join(dir, fmt.Sprintf("session-%03d.jsonl", i))
 			body := fmt.Sprintf(`{"role":"user","content":"session %03d"}`+"\n", i)
 			if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
@@ -7338,7 +7336,7 @@ func BenchmarkDesktopListSessionsScoped(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		sessions := app.ListSessions()
 		if len(sessions) != 120 {
 			b.Fatalf("ListSessions len = %d, want 120", len(sessions))
@@ -7589,12 +7587,12 @@ func TestDesktopSharedHostProjectMCPConnectsWithoutLaunchApproval(t *testing.T) 
 
 	srv := desktopMCPHTTPServer(t)
 	defer srv.Close()
-	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(fmt.Sprintf(`
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), fmt.Appendf(nil, `
 [[plugins]]
 name = "h"
 type = "http"
 url = %q
-`, srv.URL)), 0o644); err != nil {
+`, srv.URL), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -7785,12 +7783,12 @@ func TestSetMCPServerEnabledSharedHostPreservesSiblingTabs(t *testing.T) {
 
 	srv := desktopMCPHTTPServer(t)
 	defer srv.Close()
-	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(fmt.Sprintf(`
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), fmt.Appendf(nil, `
 [[plugins]]
 name = "h"
 type = "http"
 url = %q
-`, srv.URL)), 0o644); err != nil {
+`, srv.URL), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -7935,12 +7933,12 @@ func TestReconnectMCPServerUsesEffectiveProjectConfigWhenUserNameIsShadowed(t *t
 	if err := userCfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(fmt.Sprintf(`
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), fmt.Appendf(nil, `
 [[plugins]]
 name = "h"
 type = "http"
 url = %q
-`, projectServer.URL)), 0o644); err != nil {
+`, projectServer.URL), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -8081,7 +8079,7 @@ func newGatedDesktopMCPLaunchFixture(t *testing.T, startGateAddr string) gatedDe
 		gateConfig = fmt.Sprintf("DESKTOP_MCP_START_GATE_ADDR = %q\n", startGateAddr)
 	}
 	helperArgs := []string{"-test.run=TestDesktopMCPHelperProcess", "--"}
-	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), []byte(fmt.Sprintf(`
+	if err := os.WriteFile(filepath.Join(dir, "reasonix.toml"), fmt.Appendf(nil, `
 [[plugins]]
 name = "h"
 command = %q
@@ -8093,7 +8091,7 @@ DESKTOP_MCP_SINGLE_INSTANCE_ADDR = %q
 %s
 [sandbox]
 network = true
-`, exe, singleInstanceAddr, gateConfig)), 0o644); err != nil {
+`, exe, singleInstanceAddr, gateConfig), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -8331,13 +8329,13 @@ func installGatedTestPluginPackage(t *testing.T, mcpServerName string) string {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, pluginpkg.NativeManifest), []byte(fmt.Sprintf(`{
+	if err := os.WriteFile(filepath.Join(root, pluginpkg.NativeManifest), fmt.Appendf(nil, `{"apiVersion": "reasonix.io/plugin/v2",
   "name": "review-helper",
   "version": "1.0.0",
   "mcpServers": {
     %q: { "type": "stdio", "command": "helper" }
   }
-}`, mcpServerName)), 0o644); err != nil {
+}`, mcpServerName), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := pluginpkg.Upsert(reasonixHome, pluginpkg.InstalledPlugin{
@@ -9108,13 +9106,13 @@ func TestRemoveMCPServerRejectsPluginManagedServerWithoutDisconnecting(t *testin
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, pluginpkg.NativeManifest), []byte(fmt.Sprintf(`{
+	if err := os.WriteFile(filepath.Join(root, pluginpkg.NativeManifest), fmt.Appendf(nil, `{"apiVersion": "reasonix.io/plugin/v2",
   "name": "superpowers",
   "version": "1.0.0",
   "mcpServers": {
     "helper": { "type": "http", "url": %q }
   }
-}`, srv.URL)), 0o644); err != nil {
+}`, srv.URL), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := pluginpkg.Upsert(reasonixHome, pluginpkg.InstalledPlugin{
@@ -10153,7 +10151,7 @@ func TestRunShellForTabStaysBoundDuringRapidProjectTabSwitching(t *testing.T) {
 	waitForShellDispatch(t, shellEvents, marker)
 	waitForFile(t, filepath.Join(projectA, marker), "shell")
 
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		if err := app.SetActiveTab("project-b"); err != nil {
 			t.Fatalf("SetActiveTab(project-b): %v", err)
 		}
@@ -10307,12 +10305,7 @@ func newBackgroundJobController(t *testing.T, label string) *control.Controller 
 }
 
 func hasLevel(levels []string, want string) bool {
-	for _, level := range levels {
-		if level == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(levels, want)
 }
 
 func hasCommand(cmds []CommandInfo, name string) bool {
@@ -10352,7 +10345,7 @@ func TestSessionActionsWithoutControllerReturnError(t *testing.T) {
 	}
 }
 
-// --- Prompt history scanning tests ------------------------------------------
+// Prompt history scanning tests
 
 func identityPromptDisplay(text string) string { return text }
 
@@ -10642,14 +10635,14 @@ func TestScanPromptHistoryFromDirUsesSessionActivityBeforeEventInterleaving(t *t
 	early := filepath.Join(dir, "early.jsonl")
 	late := filepath.Join(dir, "late.jsonl")
 
-	if err := os.WriteFile(early, []byte(fmt.Sprintf(`{"role":"user","content":"early first","time":%d}
+	if err := os.WriteFile(early, fmt.Appendf(nil, `{"role":"user","content":"early first","time":%d}
 {"role":"assistant","content":"ok"}
 {"role":"user","content":"early second","time":%d}
-`, base.UnixMilli(), base.Add(time.Minute).UnixMilli())), 0o644); err != nil {
+`, base.UnixMilli(), base.Add(time.Minute).UnixMilli()), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(late, []byte(fmt.Sprintf(`{"role":"user","content":"late newest","time":%d}
-`, base.Add(2*time.Minute).UnixMilli())), 0o644); err != nil {
+	if err := os.WriteFile(late, fmt.Appendf(nil, `{"role":"user","content":"late newest","time":%d}
+`, base.Add(2*time.Minute).UnixMilli()), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	// Invert file mtimes: session activity should keep each session grouped
@@ -10818,8 +10811,8 @@ func TestScanPromptHistoryPaginatesCurrentSessionBeforeCrossSession(t *testing.T
 	other := filepath.Join(dir, "other.jsonl")
 	var lines []byte
 	for i := range 55 {
-		lines = append(lines, []byte(fmt.Sprintf(`{"role":"user","content":"current %d"}
-`, i))...)
+		lines = append(lines, fmt.Appendf(nil, `{"role":"user","content":"current %d"}
+`, i)...)
 	}
 	if err := os.WriteFile(current, lines, 0o644); err != nil {
 		t.Fatal(err)
@@ -10893,8 +10886,8 @@ func TestScanPromptHistoryFromDirReadsAllEntriesForInternalHelper(t *testing.T) 
 	dir := t.TempDir()
 	var lines []byte
 	for i := range 250 {
-		lines = append(lines, []byte(fmt.Sprintf(`{"role":"user","content":"prompt %d"}
-`, i))...)
+		lines = append(lines, fmt.Appendf(nil, `{"role":"user","content":"prompt %d"}
+`, i)...)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "many.jsonl"), lines, 0o644); err != nil {
 		t.Fatal(err)

@@ -3,9 +3,14 @@ package serve
 import (
 	"context"
 	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/jobs"
 )
@@ -182,6 +187,110 @@ func TestSwitchModelRejectsWhileBackgroundJobRunning(t *testing.T) {
 	if built {
 		t.Fatal("switchModel built a controller despite a running background job")
 	}
+}
+
+func TestExtensionReloadRejectsWhileTurnRunning(t *testing.T) {
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Runner: blockingRunner{}, Sink: bc})
+	s := New(ctrl, bc, config.ServeConfig{})
+	built := false
+	s.rebuildController = func(_ context.Context, _ *control.Controller, _ string) (*control.Controller, error) {
+		built = true
+		return control.New(control.Options{Sink: bc}), nil
+	}
+
+	ctrl.SubmitHTTP("hi")
+	waitRunning(t, ctrl)
+	if err := s.reloadExtensions(context.Background()); err == nil {
+		t.Fatal("expected extension reload to refuse while a turn is running")
+	}
+	if built {
+		t.Fatal("extension reload built a controller despite a running turn")
+	}
+	ctrl.Cancel()
+	waitNotRunning(t, ctrl)
+}
+
+func TestConcurrentExtensionReloadsAreSerialized(t *testing.T) {
+	bc := NewBroadcaster()
+	s := New(control.New(control.Options{Sink: bc}), bc, config.ServeConfig{})
+	firstEntered := make(chan struct{})
+	secondEntered := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var calls atomic.Int32
+	s.rebuildController = func(_ context.Context, _ *control.Controller, _ string) (*control.Controller, error) {
+		if calls.Add(1) == 1 {
+			close(firstEntered)
+			<-releaseFirst
+		} else {
+			close(secondEntered)
+		}
+		return control.New(control.Options{Sink: bc}), nil
+	}
+
+	done := make(chan error, 2)
+	go func() { done <- s.reloadExtensions(context.Background()) }()
+	<-firstEntered
+	go func() { done <- s.reloadExtensions(context.Background()) }()
+	select {
+	case <-secondEntered:
+		t.Fatal("second extension reload entered the rebuild while the first still owned bindMu")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseFirst)
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Fatalf("reload: %v", err)
+		}
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("rebuild calls = %d, want 2", calls.Load())
+	}
+}
+
+func TestSubmitWaitsForExtensionReloadAndTargetsReplacement(t *testing.T) {
+	bc := NewBroadcaster()
+	old := control.New(control.Options{Sink: bc, Runner: blockingRunner{}})
+	s := New(old, bc, config.ServeConfig{})
+	buildEntered := make(chan struct{})
+	releaseBuild := make(chan struct{})
+	replacement := control.New(control.Options{Sink: bc, Runner: blockingRunner{}})
+	s.rebuildController = func(_ context.Context, _ *control.Controller, _ string) (*control.Controller, error) {
+		close(buildEntered)
+		<-releaseBuild
+		return replacement, nil
+	}
+
+	reloadDone := make(chan error, 1)
+	go func() { reloadDone <- s.reloadExtensions(context.Background()) }()
+	<-buildEntered
+
+	submitDone := make(chan int, 1)
+	go func() {
+		req := httptest.NewRequest(http.MethodPost, "/submit", strings.NewReader(`{"input":"hello"}`))
+		rec := httptest.NewRecorder()
+		s.submit(rec, req)
+		submitDone <- rec.Code
+	}()
+	select {
+	case <-submitDone:
+		t.Fatal("submit crossed the extension reload generation boundary")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(releaseBuild)
+	if err := <-reloadDone; err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if code := <-submitDone; code != 202 {
+		t.Fatalf("submit status = %d, want 202", code)
+	}
+	waitRunning(t, replacement)
+	if old.Running() {
+		t.Fatal("submit started on the outgoing controller")
+	}
+	replacement.Cancel()
+	waitNotRunning(t, replacement)
 }
 
 // blockingRunner keeps a turn "running" until its context is cancelled, so tests

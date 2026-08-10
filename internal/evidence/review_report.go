@@ -161,10 +161,7 @@ func (l *Ledger) HasStructuredReviewAfter(kind ReviewKind, after int, requiredPa
 	if l == nil {
 		return false, false, nil
 	}
-	start := after + 1
-	if start < 0 {
-		start = 0
-	}
+	start := max(after+1, 0)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for i := start; i < len(l.receipts); i++ {

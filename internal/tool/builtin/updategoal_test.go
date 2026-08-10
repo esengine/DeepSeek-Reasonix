@@ -90,6 +90,57 @@ func TestUpdateGoalRecordsReport(t *testing.T) {
 	}
 }
 
+func TestUpdateGoalAcknowledgesTheCompletionAccount(t *testing.T) {
+	toolFn, _, ctx := goalTool(t)
+	got, err := toolFn.Execute(ctx, json.RawMessage(
+		`{"status":"complete","completion":{"verified":["go test ./..."],"unverified":["desktop UI"],"risks":["one-way migration"]}}`))
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !strings.Contains(got, "1 verified, 1 unverified, 1 risks") {
+		t.Fatalf("result = %q, want the recorded account echoed back", got)
+	}
+	if !strings.Contains(got, "reconciled against this session's receipts") {
+		t.Fatalf("result = %q, want the claim's fate stated", got)
+	}
+}
+
+func TestUpdateGoalCompleteWithoutAnAccountSaysSo(t *testing.T) {
+	toolFn, _, ctx := goalTool(t)
+	got, err := toolFn.Execute(ctx, json.RawMessage(`{"status":"complete"}`))
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !strings.Contains(got, "No completion account was given") {
+		t.Fatalf("result = %q, want the silence named", got)
+	}
+}
+
+func TestUpdateGoalRejectsAnEmptyVerifiedEntry(t *testing.T) {
+	toolFn, rec, ctx := goalTool(t)
+	_, err := toolFn.Execute(ctx, json.RawMessage(`{"status":"complete","completion":{"verified":["  "]}}`))
+	if err == nil || !strings.Contains(err.Error(), "completion.verified[0] is empty") {
+		t.Fatalf("Execute() error = %v, want the empty citation rejected", err)
+	}
+	if len(rec.reports) != 0 {
+		t.Fatalf("rejected call still recorded a report: %+v", rec.reports)
+	}
+}
+
+// A continue turn may still declare what it has not verified; only the
+// completion echo is reserved for complete.
+func TestUpdateGoalContinueKeepsItsPlainResult(t *testing.T) {
+	toolFn, _, ctx := goalTool(t)
+	got, err := toolFn.Execute(ctx, json.RawMessage(
+		`{"status":"continue","reason":"still fixing","completion":{"unverified":["nothing run yet"]}}`))
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if strings.Contains(got, "Completion account recorded") {
+		t.Fatalf("result = %q, want no completion echo on continue", got)
+	}
+}
+
 func TestUpdateGoalRecorderErrorsPropagate(t *testing.T) {
 	toolFn, rec, ctx := goalTool(t)
 	rec.err = errors.New("conflicting reports this turn")

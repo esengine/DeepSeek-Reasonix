@@ -1,7 +1,8 @@
 // Run: tsx src/__tests__/context-panel-breakdown.test.ts
 
-import { cacheHitTone, contextBreakdown, contextCostDisplay, contextSessionCache, contextSourceRows, contextUsageRefreshKey, contextWindowStatus, formatCacheHitRate, formatMetricTokens } from "../components/ContextPanel";
+import { cacheHitTone, contextBreakdown, contextCostDisplay, contextSessionCache, contextSourceRows, contextUsageRefreshKey, contextWindowStatus, formatCacheHitRate, formatMetricTokens, liveTurnUsageBreakdown } from "../components/ContextPanel";
 import { currencySymbol, formatMoney, formatMoneyLocalized } from "../lib/money";
+import type { WireUsage } from "../lib/types";
 
 let passed = 0;
 let failed = 0;
@@ -75,6 +76,76 @@ eq(
   "oversized provider breakdown is normalized to used context tokens",
 );
 eq(Math.round(oversized.otherPct * 10) / 10, 6.1, "oversized provider breakdown does not fill the ring");
+
+// Multi-attempt stream recovery: billable aggregates vs latest Context* shape.
+// Ring uses used=30002; panel breakdown must not show 60000/5 from aggregates.
+const multiAttemptUsage = {
+  promptTokens: 60_000,
+  completionTokens: 5,
+  totalTokens: 60_005,
+  cacheHitTokens: 0,
+  cacheMissTokens: 60_000,
+  reasoningTokens: 3,
+  sessionCacheHitTokens: 0,
+  sessionCacheMissTokens: 0,
+  contextPromptTokens: 30_000,
+  contextCompletionTokens: 2,
+  contextReasoningTokens: 1,
+} as WireUsage;
+const multiAttemptTurn = liveTurnUsageBreakdown(multiAttemptUsage, {
+  promptTokens: 30_000,
+  completionTokens: 2,
+  reasoningTokens: 1,
+});
+eq(
+  multiAttemptTurn,
+  { promptTokens: 30_000, completionTokens: 2, reasoningTokens: 1 },
+  "live turn breakdown prefers Context* over billable aggregates",
+);
+const multiAttemptRing = contextBreakdown(
+  30_002,
+  200_000,
+  multiAttemptTurn.promptTokens,
+  multiAttemptTurn.completionTokens,
+  multiAttemptTurn.reasoningTokens,
+);
+eq(
+  {
+    promptTokens: multiAttemptRing.promptTokens,
+    completionTokens: multiAttemptRing.completionTokens,
+    reasoningTokens: multiAttemptRing.reasoningTokens,
+  },
+  { promptTokens: 30_000, completionTokens: 1, reasoningTokens: 1 },
+  "2×30K recovery: panel segments match latest attempt, not 60000/5",
+);
+const legacyLive = liveTurnUsageBreakdown(
+  {
+    promptTokens: 100,
+    completionTokens: 20,
+    totalTokens: 120,
+    cacheHitTokens: 0,
+    cacheMissTokens: 100,
+    reasoningTokens: 8,
+    sessionCacheHitTokens: 0,
+    sessionCacheMissTokens: 0,
+  } as WireUsage,
+  null,
+);
+eq(
+  legacyLive,
+  { promptTokens: 100, completionTokens: 20, reasoningTokens: 8 },
+  "legacy usage without Context* falls back to billable fields",
+);
+const rebindFallback = liveTurnUsageBreakdown(null, {
+  promptTokens: 30_000,
+  completionTokens: 2,
+  reasoningTokens: 1,
+});
+eq(
+  rebindFallback,
+  { promptTokens: 30_000, completionTokens: 2, reasoningTokens: 1 },
+  "without live usage, panel uses backend rebind snapshot",
+);
 
 const unknownWindow = contextBreakdown(42_124, 0, 22_134, 12_345, 7_521);
 eq(

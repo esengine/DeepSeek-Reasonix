@@ -38,6 +38,7 @@ func TestAnnotateToolSchemaErrorLeavesUnrelatedErrorsUnchanged(t *testing.T) {
 	}
 	tools := []ToolSchema{{Name: "read_file"}}
 	for _, err := range tests {
+		//nolint:errorlint // identity check: unrelated errors must come back unchanged, not wrapped.
 		if got := AnnotateToolSchemaError(err, tools); got != err {
 			t.Errorf("AnnotateToolSchemaError(%v) changed unrelated error to %v", err, got)
 		}

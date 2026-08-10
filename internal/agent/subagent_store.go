@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -77,6 +78,7 @@ type SubagentSpec struct {
 	ParentToolCallID string
 	SystemPrompt     string
 	Registry         *tool.Registry
+	ToolContext      context.Context
 	Model            string
 	Effort           string
 }
@@ -742,7 +744,7 @@ func (s *SubagentStore) LoadMeta(ref string) (SubagentMeta, error) {
 }
 
 func metaFromSpec(ref string, status SubagentStatus, created, updated time.Time, spec SubagentSpec) SubagentMeta {
-	scope, schemaHash := toolIdentity(spec.Registry)
+	scope, schemaHash := toolIdentity(spec.Registry, spec.ToolContext)
 	return SubagentMeta{
 		Ref:              ref,
 		CreatedAt:        created,
@@ -940,17 +942,6 @@ func validSubagentRef(ref string) bool {
 		return false
 	}
 	return true
-}
-
-func toolIdentity(reg *tool.Registry) ([]string, string) {
-	if reg == nil {
-		return nil, bytesHash(nil)
-	}
-	names := reg.Names()
-	sort.Strings(names)
-	schemas := normalizeToolSchemas(reg.Schemas())
-	data, _ := json.Marshal(schemas)
-	return names, bytesHash(data)
 }
 
 func bytesHash(data []byte) string {

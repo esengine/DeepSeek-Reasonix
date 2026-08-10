@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -57,6 +58,35 @@ func TestBwrapArgsForArgsMountsTemporaryExecutableAfterMasks(t *testing.T) {
 	}
 }
 
+func TestBwrapArgsBindsSessionTempAtTmp(t *testing.T) {
+	private := t.TempDir()
+	argv := bwrapArgs(Spec{
+		Mode:        "enforce",
+		SessionTemp: private,
+		WriteRoots:  []string{t.TempDir()},
+	}, Shell{Kind: ShellBash, Path: "bash"}, "true")
+	bind := indexArgs(argv, "--bind", private, "/tmp")
+	if bind < 0 {
+		t.Fatalf("expected --bind %s /tmp in %v", private, argv)
+	}
+	if indexArgs(argv, "--tmpfs", "/tmp") >= 0 {
+		t.Fatalf("session temp must not use tmpfs /tmp: %v", argv)
+	}
+	// Must not bind the host public temporary root as /tmp.
+	if host := os.TempDir(); host != private {
+		if indexArgs(argv, "--bind", host, "/tmp") >= 0 {
+			t.Fatalf("must not bind host temp %s at /tmp: %v", host, argv)
+		}
+	}
+}
+
+func TestBwrapArgsWithoutSessionTempKeepsTmpfs(t *testing.T) {
+	argv := bwrapArgs(Spec{Mode: "enforce"}, Shell{Kind: ShellBash, Path: "bash"}, "true")
+	if indexArgs(argv, "--tmpfs", "/tmp") < 0 {
+		t.Fatalf("independent sandbox should keep tmpfs /tmp: %v", argv)
+	}
+}
+
 func TestBwrapForbidReadArgsMasksFilesAndDirectories(t *testing.T) {
 	dir := t.TempDir()
 	nested := filepath.Join(dir, "nested")
@@ -93,10 +123,5 @@ func containsPath(paths []string, want string) bool {
 	if err != nil {
 		return false
 	}
-	for _, p := range paths {
-		if p == absWant {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(paths, absWant)
 }

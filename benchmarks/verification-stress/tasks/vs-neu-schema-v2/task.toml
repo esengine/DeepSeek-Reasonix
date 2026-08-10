@@ -1,0 +1,4 @@
+prompt = "Migrate the record schema from 'username' to 'handle' everywhere — schema.py, serializer.py and consumer.py must stay consistent (schema.FIELDS drives both). Round-trips must keep working."
+class = "ebm-neutral"
+max_steps = 18
+timeout_sec = 300

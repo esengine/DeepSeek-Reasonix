@@ -1,0 +1,7 @@
+region,product,units,unit_price
+east,lanterns,10,25.0
+east,ropes,40,5.5
+west,anchors,3,100.0
+east,lanterns,20,25.0
+west,ropes,10,5.5
+north,sails,2,80.25

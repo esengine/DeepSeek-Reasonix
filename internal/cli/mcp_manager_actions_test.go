@@ -8,7 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/config"
 	"reasonix/internal/event"
+	"reasonix/internal/plugin"
 )
 
 func TestSplitEditorCommandUsesStaticShellWords(t *testing.T) {
@@ -25,6 +27,32 @@ func TestSplitEditorCommandUsesStaticShellWords(t *testing.T) {
 func TestSplitEditorCommandRejectsShellControl(t *testing.T) {
 	if _, err := splitEditorCommand(`vim file; rm -rf tmp`); err == nil {
 		t.Fatal("splitEditorCommand accepted shell control syntax")
+	}
+}
+
+func TestMCPActionsOfferOAuthOnlyForEligibleHTTPServers(t *testing.T) {
+	tests := []struct {
+		name           string
+		transport      string
+		url            string
+		authConfigured bool
+		want           mcpAction
+	}{
+		{name: "streamable HTTP", transport: "http", url: "https://mcp.example.test/mcp", want: mcpActionAuth},
+		{name: "stdio", transport: "stdio", want: mcpActionConnect},
+		{name: "legacy SSE", transport: "sse", url: "https://mcp.example.test/sse", want: mcpActionConnect},
+		{name: "static authentication", transport: "http", url: "https://mcp.example.test/mcp", authConfigured: true, want: mcpActionConnect},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			actions := mcpActionsFor(mcpServerView{
+				Name: "server", Transport: tc.transport, URL: tc.url, Status: "failed",
+				Error: "authentication required", AuthStatus: "required", authConfigured: tc.authConfigured,
+			}, "")
+			if len(actions) == 0 || actions[0].kind != tc.want {
+				t.Fatalf("actions = %+v, want first action %q", actions, tc.want)
+			}
+		})
 	}
 }
 
@@ -55,6 +83,13 @@ auto_start = false
 		t.Fatalf("setupProfile: %v", err)
 	}
 	defer ctrl.Close()
+	oauthState := filepath.Join(plugin.MCPStateDir(config.ReasonixHomeDir(), controllerRoot, "dida"), "oauth.json")
+	if err := os.MkdirAll(filepath.Dir(oauthState), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(oauthState, []byte(`{"version":1,"access_token":"private"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	pending := []string{}
 	model := chatTUI{ctrl: ctrl, pendingCommit: &pending}
@@ -74,5 +109,8 @@ auto_start = false
 	}
 	if !strings.Contains(string(cwdRaw), "cwd-token") {
 		t.Fatalf("cwd config was unexpectedly modified:\n%s", cwdRaw)
+	}
+	if _, err := os.Stat(oauthState); !os.IsNotExist(err) {
+		t.Fatalf("controller OAuth state was not cleared: %v", err)
 	}
 }

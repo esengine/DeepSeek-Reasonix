@@ -48,7 +48,9 @@ func (a conversationApplier) ApplyConversationTruncate(boundary int, forward []b
 			return err
 		}
 	}
-	s.Rewrite(msgs[:boundary])
+	s.Rewrite(msgs[:boundary], "rewind_truncate")
+	// Lineage changed: drop any projection built for the longer history.
+	c.executor.InvalidateProjection()
 	if err := c.SnapshotRewrite(); err != nil {
 		_ = a.RestoreConversation(forward)
 		return fmt.Errorf("persist conversation after rewind: %w", err)
@@ -65,7 +67,8 @@ func (a conversationApplier) RestoreConversation(forward []byte) error {
 	if err := json.Unmarshal(forward, &msgs); err != nil {
 		return err
 	}
-	c.executor.Session().Rewrite(msgs)
+	c.executor.Session().Rewrite(msgs, "rewind_restore")
+	c.executor.InvalidateProjection()
 	if err := c.SnapshotRewrite(); err != nil {
 		return fmt.Errorf("restore conversation: %w", err)
 	}

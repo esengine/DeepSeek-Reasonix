@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -36,37 +37,40 @@ import (
 // the exception: they go to Reasonix's global .env (upsertDotEnv), since config
 // stores only the env-var name, not the key.
 
-// --- read ---
+// read
 
 type ProviderView struct {
-	Name              string                      `json:"name"`
-	BuiltIn           bool                        `json:"builtIn"`
-	Added             bool                        `json:"added"`
-	Kind              string                      `json:"kind"`
-	BaseURL           string                      `json:"baseUrl"`
-	ChatURL           string                      `json:"chatUrl"`
-	Models            []string                    `json:"models"`
-	VisionModels      []string                    `json:"visionModels"`
-	VisionModelsSet   bool                        `json:"visionModelsConfigured"`
-	ModelsURL         string                      `json:"modelsUrl"`
-	Default           string                      `json:"default"`
-	APIKeyEnv         string                      `json:"apiKeyEnv"`
-	Headers           map[string]string           `json:"headers"`
-	ExtraBody         map[string]any              `json:"extraBody"`
-	AuthHeader        bool                        `json:"authHeader"`
-	KeySet            bool                        `json:"keySet"` // the env var currently resolves to a non-empty value
-	RequiresKey       bool                        `json:"requiresKey"`
-	Configured        bool                        `json:"configured"` // selectable: either key is present or no key is required
-	KeySource         string                      `json:"keySource,omitempty"`
-	KeySourcePath     string                      `json:"keySourcePath,omitempty"`
-	BalanceURL        string                      `json:"balanceUrl"`
-	ContextWindow     int                         `json:"contextWindow"`
-	ReasoningProtocol string                      `json:"reasoningProtocol"`
-	Thinking          string                      `json:"thinking"`
-	WebSearch         bool                        `json:"webSearch"`
-	SupportedEfforts  []string                    `json:"supportedEfforts"`
-	DefaultEffort     string                      `json:"defaultEffort"`
-	ModelOverrides    []ProviderModelOverrideView `json:"modelOverrides"`
+	Name                        string                      `json:"name"`
+	BuiltIn                     bool                        `json:"builtIn"`
+	Added                       bool                        `json:"added"`
+	Kind                        string                      `json:"kind"`
+	BaseURL                     string                      `json:"baseUrl"`
+	ChatURL                     string                      `json:"chatUrl"`
+	Models                      []string                    `json:"models"`
+	VisionModels                []string                    `json:"visionModels"`
+	VisionModelsSet             bool                        `json:"visionModelsConfigured"`
+	VisionCapability            string                      `json:"visionCapability,omitempty"`
+	ModelsURL                   string                      `json:"modelsUrl"`
+	Default                     string                      `json:"default"`
+	APIKeyEnv                   string                      `json:"apiKeyEnv"`
+	Headers                     map[string]string           `json:"headers"`
+	ExtraBody                   map[string]any              `json:"extraBody"`
+	AuthHeader                  bool                        `json:"authHeader"`
+	KeySet                      bool                        `json:"keySet"` // the env var currently resolves to a non-empty value
+	RequiresKey                 bool                        `json:"requiresKey"`
+	Configured                  bool                        `json:"configured"` // selectable: either key is present or no key is required
+	KeySource                   string                      `json:"keySource,omitempty"`
+	KeySourcePath               string                      `json:"keySourcePath,omitempty"`
+	BalanceURL                  string                      `json:"balanceUrl"`
+	ContextWindow               int                         `json:"contextWindow"`
+	ReasoningProtocol           string                      `json:"reasoningProtocol"`
+	Thinking                    string                      `json:"thinking"`
+	WebSearch                   bool                        `json:"webSearch"`
+	ServerWebSearchCapability   bool                        `json:"serverWebSearchCapability"`
+	SupportedEfforts            []string                    `json:"supportedEfforts"`
+	DefaultEffort               string                      `json:"defaultEffort"`
+	ModelOverrides              []ProviderModelOverrideView `json:"modelOverrides"`
+	RecommendedUpgradeAvailable bool                        `json:"recommendedUpgradeAvailable,omitempty"`
 	// ModelCatalogFingerprint is an opaque digest of the provider identity and
 	// current model selection. Background discovery must compare it while holding
 	// the config edit lock before applying a narrow catalog-only update.
@@ -114,6 +118,7 @@ type ProviderModelOverrideView struct {
 	DefaultEffort     string   `json:"defaultEffort"`
 	Vision            *bool    `json:"vision"`
 	ContextWindow     int      `json:"contextWindow,omitempty"`
+	MaxOutputTokens   int      `json:"maxOutputTokens,omitempty"`
 }
 
 type PermissionsView struct {
@@ -162,7 +167,6 @@ type AgentView struct {
 	CompactRatio           float64 `json:"compactRatio,omitempty"`
 	EffectiveCompactRatio  float64 `json:"effectiveCompactRatio,omitempty"`
 	CompactRatioOverridden bool    `json:"compactRatioOverridden,omitempty"`
-	CompactRatioRemote     bool    `json:"compactRatioRemote,omitempty"`
 }
 
 type BotAllowlistView struct {
@@ -399,10 +403,10 @@ func providerCredentialsRevision() string {
 	return config.CredentialStoreRevision()
 }
 
-var providerModelCatalogFingerprintKey = func() []byte {
+var providerStateFingerprintKey = func() []byte {
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
-		panic(fmt.Sprintf("initialize provider catalog fingerprint key: %v", err))
+		panic(fmt.Sprintf("initialize provider state fingerprint key: %v", err))
 	}
 	return key
 }()
@@ -414,7 +418,7 @@ func providerModelCatalogFingerprint(p config.ProviderEntry) string {
 func providerModelCatalogFingerprintForCredentials(p config.ProviderEntry, credentialsRevision string) string {
 	// This token crosses the Wails boundary, so key the digest instead of exposing
 	// a reusable hash of header or credential-store metadata to the frontend.
-	h := hmac.New(sha256.New, providerModelCatalogFingerprintKey)
+	h := hmac.New(sha256.New, providerStateFingerprintKey)
 	write := func(value string) {
 		_, _ = fmt.Fprintf(h, "%d:", len(value))
 		_, _ = h.Write([]byte(value))
@@ -494,6 +498,7 @@ func providerModelOverridesForView(overrides map[string]config.ProviderModelOver
 			DefaultEffort:     ov.DefaultEffort,
 			Vision:            ov.Vision,
 			ContextWindow:     ov.ContextWindow,
+			MaxOutputTokens:   ov.MaxOutputTokens,
 		})
 	}
 	return out
@@ -519,8 +524,9 @@ func providerModelOverridesForSave(overrides []ProviderModelOverrideView, models
 			DefaultEffort:     strings.TrimSpace(item.DefaultEffort),
 			Vision:            item.Vision,
 			ContextWindow:     max(item.ContextWindow, 0),
+			MaxOutputTokens:   item.MaxOutputTokens,
 		}
-		if strings.TrimSpace(ov.ReasoningProtocol) == "" && len(ov.SupportedEfforts) == 0 && strings.TrimSpace(ov.DefaultEffort) == "" && ov.Vision == nil && ov.ContextWindow == 0 {
+		if strings.TrimSpace(ov.ReasoningProtocol) == "" && len(ov.SupportedEfforts) == 0 && strings.TrimSpace(ov.DefaultEffort) == "" && ov.Vision == nil && ov.ContextWindow == 0 && ov.MaxOutputTokens == 0 {
 			continue
 		}
 		out[model] = ov
@@ -529,17 +535,6 @@ func providerModelOverridesForSave(overrides []ProviderModelOverrideView, models
 		return nil
 	}
 	return out
-}
-
-func providerRemovalFallbackRef(c *config.Config, name string) string {
-	for i := range c.Providers {
-		p := &c.Providers[i]
-		if p.Name == name || !p.Configured() || len(p.ModelList()) == 0 {
-			continue
-		}
-		return p.Name + "/" + p.DefaultModel()
-	}
-	return ""
 }
 
 func desktopModelRefsProvider(c *config.Config, ref, name string) bool {
@@ -636,27 +631,33 @@ func providerViewFromEntryForRootWithResolverAndCredentials(p config.ProviderEnt
 	}
 	key := resolver.ResolveGlobalFirst(p.APIKeyEnv)
 	requiresKey := p.RequiresAPIKey()
+	visionCapability := "configurable"
+	if !config.CanConfigureVision(&p) {
+		visionCapability = "unsupported"
+	}
 	return ProviderView{
 		Name: p.Name, BuiltIn: builtIn, Added: added, Kind: p.Kind, BaseURL: p.BaseURL, ChatURL: p.ChatURL,
-		Models: nonNil(models), VisionModels: nonNil(providerVisionModels(models, visionModels)), VisionModelsSet: visionModelsSet, ModelsURL: p.ModelsURL, Default: p.DefaultModel(),
-		APIKeyEnv:               p.APIKeyEnv,
-		Headers:                 nonNilStringMap(p.Headers),
-		ExtraBody:               nonNilAnyMap(p.ExtraBody),
-		AuthHeader:              p.AuthHeader,
-		KeySet:                  key.Set,
-		RequiresKey:             requiresKey,
-		Configured:              !requiresKey || key.Set,
-		KeySource:               key.Source.Label,
-		KeySourcePath:           key.Source.Path,
-		BalanceURL:              p.BalanceURL,
-		ContextWindow:           p.ContextWindow,
-		ReasoningProtocol:       p.ReasoningProtocol,
-		Thinking:                providerThinkingForSettings(p.Thinking),
-		WebSearch:               config.EffectiveWebSearch(&p),
-		SupportedEfforts:        nonNil(p.SupportedEfforts),
-		DefaultEffort:           p.DefaultEffort,
-		ModelOverrides:          providerModelOverridesForView(p.ModelOverrides, models),
-		ModelCatalogFingerprint: providerModelCatalogFingerprintForCredentials(p, credentialsRevision),
+		Models: nonNil(models), VisionModels: nonNil(providerVisionModels(models, visionModels)), VisionModelsSet: visionModelsSet, VisionCapability: visionCapability, ModelsURL: p.ModelsURL, Default: p.DefaultModel(),
+		APIKeyEnv:                   p.APIKeyEnv,
+		Headers:                     nonNilStringMap(p.Headers),
+		ExtraBody:                   nonNilAnyMap(p.ExtraBody),
+		AuthHeader:                  p.AuthHeader,
+		KeySet:                      key.Set,
+		RequiresKey:                 requiresKey,
+		Configured:                  !requiresKey || key.Set,
+		KeySource:                   key.Source.Label,
+		KeySourcePath:               key.Source.Path,
+		BalanceURL:                  p.BalanceURL,
+		ContextWindow:               p.ContextWindow,
+		ReasoningProtocol:           p.ReasoningProtocol,
+		Thinking:                    providerThinkingForSettings(p.Thinking),
+		WebSearch:                   config.EffectiveWebSearch(&p),
+		ServerWebSearchCapability:   config.IsOfficialDeepSeekWebSearchEndpoint(&p),
+		SupportedEfforts:            nonNil(p.SupportedEfforts),
+		DefaultEffort:               p.DefaultEffort,
+		ModelOverrides:              providerModelOverridesForView(p.ModelOverrides, models),
+		RecommendedUpgradeAvailable: config.CanUpgradeDeepSeekProviderProtocol(&p),
+		ModelCatalogFingerprint:     providerModelCatalogFingerprintForCredentials(p, credentialsRevision),
 	}
 }
 
@@ -1106,7 +1107,6 @@ func (a *App) Settings() SettingsView {
 			v.Agent.CompactRatioOverridden = math.Abs(effective-v.Agent.CompactRatio) > 0.0001
 		}
 	}
-	v.Agent.CompactRatioRemote = a.activeWorkbenchTargetIsRemote()
 	added := providerAccessSet(cfg.Desktop.ProviderAccess)
 	resolver := config.NewCredentialResolverForRoot(root)
 	credentialsRevision := providerCredentialsRevision()
@@ -1114,7 +1114,9 @@ func (a *App) Settings() SettingsView {
 	v.ProviderPresets = providerPresetViewsForRootWithResolver(cfg, root, resolver)
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
-		v.Providers = append(v.Providers, providerViewFromEntryForRootWithResolverAndCredentials(*p, isOfficialBuiltInProvider(*p), added[p.Name], root, resolver, credentialsRevision))
+		providerView := providerViewFromEntryForRootWithResolverAndCredentials(*p, isOfficialBuiltInProvider(*p), added[p.Name], root, resolver, credentialsRevision)
+		providerView.RecommendedUpgradeAvailable = providerView.RecommendedUpgradeAvailable && config.CanUpgradeDeepSeekProviderProtocolUserConfig(p.Name)
+		v.Providers = append(v.Providers, providerView)
 	}
 	return v
 }
@@ -1301,7 +1303,7 @@ func botDomainOrDefault(domain string) string {
 	return "feishu"
 }
 
-// --- apply (write config, then rebuild the controller so it's live) ---
+// apply (write config, then rebuild the controller so it's live)
 
 // applyConfigChange mutates the user-global config and rebuilds the controller so
 // the change takes effect this session. Desktop settings such as providers and
@@ -1310,6 +1312,60 @@ func botDomainOrDefault(domain string) string {
 func (a *App) applyConfigChange(mutate func(*config.Config) error) error {
 	_, err := a.applyConfigChangeWithWarning("settings", mutate)
 	return err
+}
+
+// applySkillConfigChange edits the config file that owns the selected [skills]
+// field. Project skill settings shadow the global setting at runtime, so
+// writing only the user config would make the UI appear to save while the
+// active project continued using its old value.
+func (a *App) applySkillConfigChange(field, setting string, mutate func(*config.Config) error) error {
+	return a.applySkillConfigChangeForFields([]string{field}, setting, mutate)
+}
+
+func (a *App) applySkillConfigChangeForFields(fields []string, setting string, mutate func(*config.Config) error) error {
+	workspaceRoot := a.activeWorkspaceRoot()
+	projectPath := config.SourcePathForRoot(workspaceRoot)
+	projectOwned := strings.TrimSpace(projectPath) != "" && !config.IsUserConfigPath(projectPath)
+	if projectOwned {
+		projectOwned = slices.ContainsFunc(fields, func(field string) bool {
+			return config.ConfigFileDefinesSkillKey(projectPath, field)
+		})
+	}
+	if !projectOwned {
+		return a.applyConfigChange(mutate)
+	}
+	if err := a.ensureActiveTabRebuildAllowed(setting); err != nil {
+		return err
+	}
+	if err := func() error {
+		unlock, err := config.LockConfigFileEdits(projectPath)
+		if err != nil {
+			return err
+		}
+		defer unlock()
+		cfg, err := config.LoadForEditWithoutCredentialsReadOnlyStrict(projectPath)
+		if err != nil {
+			return err
+		}
+		if err := mutate(cfg); err != nil {
+			return err
+		}
+		for _, field := range fields {
+			if err := cfg.KeepProjectSkillKey(field); err != nil {
+				return err
+			}
+		}
+		return cfg.SaveTo(projectPath)
+	}(); err != nil {
+		return err
+	}
+	if err := a.rebuildSetting(setting); err != nil {
+		if _, ok := a.deferredRebuildWarning(setting, err); ok {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func (a *App) applyConfigChangeWithWarning(setting string, mutate func(*config.Config) error) (string, error) {
@@ -1341,6 +1397,53 @@ func (a *App) applyConfigChangeWithWarning(setting string, mutate func(*config.C
 		return "", err
 	}
 	return "", nil
+}
+
+// applyGlobalProviderConfigChange persists a provider-wide setting and refreshes
+// every visible runtime while runtime admission and all turn gates are frozen.
+// Detached runtimes cannot participate in the failure-atomic build-and-swap, so
+// reject before writing instead of leaving one session on stale provider state.
+func (a *App) applyGlobalProviderConfigChange(setting, operation, detachedAction string, mutate func(*config.Config) error) error {
+	defer a.lockRuntimeMutation(operation)()
+	releaseGates, err := a.lockRuntimeTurnGates(setting, nil)
+	if err != nil {
+		return err
+	}
+	defer releaseGates()
+	tabs, err := a.visibleTabsForGlobalRuntimeMutation(detachedAction)
+	if err != nil {
+		return err
+	}
+	if err := func() error {
+		unlock := config.LockUserConfigEdits()
+		defer unlock()
+		cfg, path, err := a.loadDesktopUserConfigForEdit()
+		if err != nil {
+			return err
+		}
+		if err := mutate(cfg); err != nil {
+			return err
+		}
+		return cfg.SaveTo(path)
+	}(); err != nil {
+		return err
+	}
+
+	var rebuildErrs []error
+	for _, tab := range tabs {
+		if a.controllerForTab(tab) == nil {
+			// A startup placeholder has no stale provider runtime. Its eventual
+			// build reads the just-persisted config.
+			continue
+		}
+		if err := a.rebuildSettingTurnLocked(setting, tab, true, false); err != nil {
+			if _, ok := a.deferredRebuildWarningForTab(setting, err, tab); ok {
+				continue
+			}
+			rebuildErrs = append(rebuildErrs, err)
+		}
+	}
+	return errors.Join(rebuildErrs...)
 }
 
 func (a *App) applyConfigOnly(mutate func(*config.Config) error) error {
@@ -1385,6 +1488,10 @@ func (a *App) ensureLiveControllersRuntimeMutationAllowed(setting string) error 
 }
 
 func (a *App) deferredRebuildWarning(setting string, err error) (string, bool) {
+	return a.deferredRebuildWarningForTab(setting, err, a.activeTab())
+}
+
+func (a *App) deferredRebuildWarningForTab(setting string, err error, tab *WorkspaceTab) (string, bool) {
 	if err == nil || !errors.Is(err, agent.ErrSessionLeaseHeld) {
 		return "", false
 	}
@@ -1395,10 +1502,9 @@ func (a *App) deferredRebuildWarning(setting string, err error) (string, bool) {
 	userErr := userFacingSessionLeaseError(setting, err)
 	warning := fmt.Sprintf("%s saved, but the current session could not refresh yet: %s", setting, userErr.Error())
 	slog.Warn("desktop: deferred settings rebuild", "setting", setting, "err", err)
-	// Bind both the warning and the retry to the tab whose refresh failed (the
-	// rebuild acts on the active tab), so a tab switch right after the failure
-	// cannot misroute the notice or the deferred rebuild.
-	if tab := a.activeTab(); tab != nil {
+	// Bind both the warning and the retry to the tab whose refresh failed, so a
+	// tab switch or a multi-tab mutation cannot misroute either one.
+	if tab != nil {
 		a.warnForTab(tab.ID, warning)
 		a.scheduleDeferredRebuild(tab.ID, setting)
 	}
@@ -1689,13 +1795,13 @@ func configDeclaresProviderAccess(path string) bool {
 	if err != nil {
 		return false
 	}
-	for _, line := range strings.Split(string(body), "\n") {
+	for line := range strings.SplitSeq(string(body), "\n") {
 		if before, _, ok := strings.Cut(line, "#"); ok {
 			line = before
 		}
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "provider_access") {
-			rest := strings.TrimSpace(strings.TrimPrefix(line, "provider_access"))
+		if after, ok := strings.CutPrefix(line, "provider_access"); ok {
+			rest := strings.TrimSpace(after)
 			return strings.HasPrefix(rest, "=")
 		}
 	}
@@ -1757,7 +1863,6 @@ func (a *App) rebuildSetting(setting string) error {
 	a.runtimeRebuildMu.Lock()
 	err := a.rebuildSettingLocked(setting)
 	a.runtimeRebuildMu.Unlock()
-	a.refreshWorkbenchProviderBrokerAsync()
 	return err
 }
 
@@ -1774,13 +1879,25 @@ func (a *App) rebuildSettingLocked(setting string) error {
 	}
 	tab.turnStartMu.Lock()
 	defer tab.turnStartMu.Unlock()
-	return a.rebuildSettingTurnLocked(setting, tab, false)
+	return a.rebuildSettingTurnLocked(setting, tab, false, false)
 }
 
 // rebuildSettingTurnLocked is rebuildSettingLocked's body; callers must hold
 // runtimeRebuildMu and the passed tab's turnStartMu. admissionHeld is true for
 // MCP lifecycle callers that also hold runtimeAdmissionMu's write side.
-func (a *App) rebuildSettingTurnLocked(setting string, tab *WorkspaceTab, admissionHeld bool) error {
+// reload selects the stage-3b runtime-reload build path (boot.Rebuild migrates
+// the session) instead of the legacy boot.Build + manual migration; everything
+// else — active-work guards, workspace prep, lease moves, swap, close-after-
+// swap, fence — is shared.
+func (a *App) rebuildSettingTurnLocked(setting string, tab *WorkspaceTab, admissionHeld bool, reload bool) error {
+	return a.rebuildSettingTurnLockedWithModel(setting, tab, "", admissionHeld, reload)
+}
+
+// rebuildSettingTurnLockedWithModel optionally builds the replacement for a
+// target model without changing tab.model before the swap. Provider removal
+// uses this to remain failure-atomic: a failed fallback build leaves both the
+// old controller and its visible model identity untouched.
+func (a *App) rebuildSettingTurnLockedWithModel(setting string, tab *WorkspaceTab, modelOverride string, admissionHeld bool, reload bool) error {
 	if a.ctx == nil {
 		return nil
 	}
@@ -1829,6 +1946,9 @@ func (a *App) rebuildSettingTurnLocked(setting string, tab *WorkspaceTab, admiss
 	snap := a.tabRuntimeSnapshot(tab)
 	runtime := snap.normalizedRuntime()
 	model := snap.model
+	if override := strings.TrimSpace(modelOverride); override != "" {
+		model = override
+	}
 	if cfg, err := config.LoadForRoot(snap.workspaceRoot); err == nil {
 		if resolved, fallback, ok := cfg.ResolveModelWithFallback(model); ok {
 			if fallback && strings.TrimSpace(model) != "" {
@@ -1837,22 +1957,7 @@ func (a *App) rebuildSettingTurnLocked(setting string, tab *WorkspaceTab, admiss
 			model = resolved
 		}
 	}
-	sharedHost := a.lookupSharedHost(snap.sharedHostKey)
-	ctrl, err := boot.Build(a.bootContext(), boot.Options{
-		Model: model, RequireKey: false,
-		AutoPricingCurrency:      a.desktopAutoPricingCurrency(),
-		StatsSource:              "desktop",
-		Sink:                     snap.sink,
-		WorkspaceRoot:            snap.workspaceRoot,
-		SessionDir:               sessionDirForSnapshot(snap),
-		EffortOverride:           cloneStringPtr(snap.effort),
-		TokenMode:                runtime.tokenMode,
-		SharedHost:               sharedHost,
-		CleanupPendingReconciler: reconcileDesktopCleanupPending,
-		SubagentParentLive:       a.subagentParentProbeForBuild(tab),
-		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
-		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
-	})
+	ctrl, restoredRuntime, path, err := a.buildSettingReplacementController(tab, snap, runtime, model, prevPath, setting, oldCtrl, carried, reload)
 	if err != nil {
 		if oldCtrl == nil {
 			leaseHeld := false
@@ -1870,18 +1975,6 @@ func (a *App) rebuildSettingTurnLocked(setting string, tab *WorkspaceTab, admiss
 			}
 			a.emitReady(a.ctx)
 		}
-		return err
-	}
-	a.bindControllerDisplayRecorder(ctrl)
-	configureControllerRuntime(ctrl, oldCtrl, runtime)
-	path := agent.ContinueSessionPath(prevPath, ctrl.SessionDir(), ctrl.Label())
-	if err := a.ensureTabSessionLeaseForRebuild(tab, path, setting); err != nil {
-		ctrl.Close()
-		return err
-	}
-	restoredRuntime, err := resumeControllerRuntimeWithMessages(ctrl, carried, path, runtime)
-	if err != nil {
-		ctrl.Close()
 		return err
 	}
 	a.mu.Lock()
@@ -1902,7 +1995,8 @@ func (a *App) rebuildSettingTurnLocked(setting string, tab *WorkspaceTab, admiss
 	a.supersedeTabBuildLocked(tab)
 	a.saveTabsLocked()
 	a.mu.Unlock()
-	if oldCtrl != nil {
+	// True subgraph rebuilds reuse the same controller pointer — never Close it.
+	if oldCtrl != nil && oldCtrl != ctrl {
 		oldCtrl.Close()
 	}
 	a.persistTabSessionPath(tab, path)
@@ -1913,6 +2007,138 @@ func (a *App) rebuildSettingTurnLocked(setting string, tab *WorkspaceTab, admiss
 	a.notifyTabRuntimeRebuilt(tab)
 	a.emitReady(a.ctx)
 	return nil
+}
+
+// buildSettingReplacementController builds the replacement controller for
+// rebuildSettingTurnLocked and migrates the session onto it, returning the
+// controller, the runtime posture actually restored, and the session path it
+// bound. reload=false is the legacy settings path (boot.Build plus the
+// desktop's manual migration); reload=true is the stage-3b runtime reload,
+// routing build and migration through boot.Rebuild so history, approval mode
+// and grants, plan/goal state, and lifecycle move inside the boot layer. The
+// caller owns the swap, closing the old controller after the swap, and the
+// post-swap persistence.
+func (a *App) buildSettingReplacementController(tab *WorkspaceTab, snap tabRuntimeSnapshot, runtime normalizedTabRuntime, model, prevPath, setting string, oldCtrl control.SessionAPI, carried []provider.Message, reload bool) (control.SessionAPI, normalizedTabRuntime, string, error) {
+	opts := boot.Options{
+		Model: model, RequireKey: false,
+		RuntimeReload:            boot.RuntimeReload{ForceFullRebuild: reload},
+		AutoPricingCurrency:      a.desktopAutoPricingCurrency(),
+		StatsSource:              "desktop",
+		Sink:                     snap.sink,
+		WorkspaceRoot:            snap.workspaceRoot,
+		SessionDir:               sessionDirForSnapshot(snap),
+		EffortOverride:           cloneStringPtr(snap.effort),
+		TokenMode:                runtime.tokenMode,
+		SharedHost:               a.lookupSharedHost(snap.sharedHostKey),
+		CleanupPendingReconciler: reconcileDesktopCleanupPending,
+		SubagentParentLive:       a.subagentParentProbeForBuild(tab),
+		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
+		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
+	}
+	if reload && oldCtrl != nil {
+		old, ok := oldCtrl.(*control.Controller)
+		if !ok {
+			return nil, normalizedTabRuntime{}, "", fmt.Errorf("reload runtime: controller is %T, want *control.Controller", oldCtrl)
+		}
+		res, err := rebuildTabRuntime(a, tab, old, opts)
+		if err != nil {
+			return nil, normalizedTabRuntime{}, "", err
+		}
+		ctrl := res.Controller
+		a.bindControllerDisplayRecorder(ctrl)
+		// boot.Rebuild migrated history (same session file, fresh system
+		// prompt spliced), approval mode and grants, plan/goal state, and
+		// lifecycle. The interactive approval gate and the plan/yolo tab
+		// mode are desktop wiring Rebuild deliberately leaves out — the
+		// mode re-apply also restores yolo, which Rebuild does not carry.
+		ctrl.EnableInteractiveApproval()
+		applyTabModeToController(ctrl, runtime.tabMode())
+		// Same path Rebuild pinned internally (identical inputs), recomputed
+		// for the lease move and the post-swap persistence.
+		path := agent.ContinueSessionPath(prevPath, ctrl.SessionDir(), ctrl.Label())
+		if err := a.ensureTabSessionLeaseForRebuild(tab, path, setting); err != nil {
+			ctrl.Close()
+			return nil, normalizedTabRuntime{}, "", err
+		}
+		restoredRuntime, err := normalizeRestoredControllerRuntime(ctrl, runtime)
+		if err != nil {
+			ctrl.Close()
+			return nil, normalizedTabRuntime{}, "", err
+		}
+		return ctrl, restoredRuntime, path, nil
+	}
+	// Same-session rebuild without the full boot.Rebuild path still must keep
+	// the private temporary directory (Issue #7575).
+	if old, ok := oldCtrl.(*control.Controller); ok && old != nil && opts.SessionTemp == nil {
+		opts.SessionTemp = old.SessionTemp()
+	}
+	ctrl, err := boot.Build(a.bootContext(), opts)
+	if err != nil {
+		return nil, normalizedTabRuntime{}, "", err
+	}
+	a.bindControllerDisplayRecorder(ctrl)
+	configureControllerRuntime(ctrl, oldCtrl, runtime)
+	path := agent.ContinueSessionPath(prevPath, ctrl.SessionDir(), ctrl.Label())
+	if err := a.ensureTabSessionLeaseForRebuild(tab, path, setting); err != nil {
+		ctrl.Close()
+		return nil, normalizedTabRuntime{}, "", err
+	}
+	restoredRuntime, err := resumeControllerRuntimeWithMessages(ctrl, carried, path, runtime)
+	if err != nil {
+		ctrl.Close()
+		return nil, normalizedTabRuntime{}, "", err
+	}
+	return ctrl, restoredRuntime, path, nil
+}
+
+// runtimeReloadSettingLabel is the settings-style label used in busy/lease
+// error text and notices for an explicit runtime reload.
+const runtimeReloadSettingLabel = "runtime reload"
+
+// ReloadRuntime rebuilds the tab's agent runtime in place — tools, skills,
+// commands, hooks, providers, and MCP servers are re-discovered from the
+// current config — while the session carries over (transcript, approval
+// grants, goal/recovery state, shared plugin Host) via boot.Rebuild. Active
+// work or a held lease queues exactly one reload on the deferred-rebuild
+// loop, which runs it once the tab is idle; a failure keeps the old
+// controller fully usable.
+func (a *App) ReloadRuntime(tabID string) error {
+	if a.ctx == nil {
+		return nil
+	}
+	tab := a.tabByID(tabID)
+	if tab == nil || tab.ID != tabID {
+		return fmt.Errorf("unknown tab %q", tabID)
+	}
+	// Same serialization as rebuildSetting: two build+swap sequences on the
+	// same tab must not interleave.
+	a.runtimeRebuildMu.Lock()
+	err := a.reloadRuntimeTurnLocked(tab)
+	a.runtimeRebuildMu.Unlock()
+	if err == nil {
+		return nil
+	}
+	var busy *rebuildBusyError
+	if errors.As(err, &busy) || errors.Is(err, agent.ErrSessionLeaseHeld) {
+		// Queue exactly one reload per tab (the pending map coalesces
+		// duplicates); the loop retries once the work finishes or the lease
+		// clears.
+		a.scheduleDeferredRebuild(tab.ID, deferredRuntimeReloadLabel)
+		a.noticeForTab(tab.ID, "runtime reload queued: will run when the current work finishes")
+		return nil
+	}
+	return err
+}
+
+// reloadRuntimeTurnLocked runs the in-place runtime reload for tab; callers
+// hold runtimeRebuildMu (the deferred-rebuild retry loop also drives it).
+func (a *App) reloadRuntimeTurnLocked(tab *WorkspaceTab) error {
+	if a.ctx == nil {
+		return nil
+	}
+	tab.turnStartMu.Lock()
+	defer tab.turnStartMu.Unlock()
+	return a.rebuildSettingTurnLocked(runtimeReloadSettingLabel, tab, false, true)
 }
 
 // SetDefaultModel sets the config default and switches the live model to it.
@@ -2165,18 +2391,25 @@ func (a *App) SetDefaultToolApprovalMode(mode string) error {
 func (a *App) SetDefaultAutoRecoveryCheckpoint(_ bool) error { return nil }
 
 func officialProviderTemplate(kind, pricingLanguage string) ([]config.ProviderEntry, string, error) {
+	webSearchEnabled := true
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "deepseek", "deepseek-official":
 		return []config.ProviderEntry{{
 			Name:          "deepseek",
-			Kind:          "openai",
-			BaseURL:       "https://api.deepseek.com",
+			Kind:          "anthropic",
+			BaseURL:       "https://api.deepseek.com/anthropic",
 			Models:        []string{"deepseek-v4-flash", "deepseek-v4-pro"},
 			Default:       "deepseek-v4-flash",
 			APIKeyEnv:     "DEEPSEEK_API_KEY",
 			BalanceURL:    "https://api.deepseek.com/user/balance",
+			Thinking:      "enabled",
+			WebSearch:     &webSearchEnabled,
 			ContextWindow: 1_000_000,
 			Prices:        config.DeepSeekV4PricesForLanguage(pricingLanguage),
+			ModelOverrides: map[string]config.ProviderModelOverride{
+				"deepseek-v4-flash": {SupportedEfforts: []string{"disabled", "low", "high", "max"}, DefaultEffort: "high"},
+				"deepseek-v4-pro":   {SupportedEfforts: []string{"disabled", "high", "max"}, DefaultEffort: "high"},
+			},
 		}}, "DEEPSEEK_API_KEY", nil
 	default:
 		return nil, "", fmt.Errorf("unknown official provider template %q", kind)
@@ -2214,10 +2447,8 @@ func providerVisionModels(models, visionModels []string) []string {
 func providerDefaultForModels(currentDefault string, models []string) string {
 	currentDefault = strings.TrimSpace(currentDefault)
 	if currentDefault != "" {
-		for _, model := range models {
-			if model == currentDefault {
-				return currentDefault
-			}
+		if slices.Contains(models, currentDefault) {
+			return currentDefault
 		}
 	}
 	if len(models) > 0 {
@@ -2231,12 +2462,15 @@ func saveProviderConfig(c *config.Config, p ProviderView) error {
 		return fmt.Errorf("config is nil")
 	}
 	e := config.ProviderEntry{Name: p.Name}
+	existing := false
 	for i := range c.Providers {
 		if c.Providers[i].Name == p.Name {
 			e = c.Providers[i]
+			existing = true
 			break
 		}
 	}
+	original := e
 	e.Name = p.Name
 	e.Kind = p.Kind
 	e.BaseURL = p.BaseURL
@@ -2250,10 +2484,12 @@ func saveProviderConfig(c *config.Config, p ProviderView) error {
 	e.ContextWindow = p.ContextWindow
 	e.ReasoningProtocol = p.ReasoningProtocol
 	e.Thinking = providerThinkingForSettings(p.Thinking)
-	if config.SupportsServerWebSearch(&e) {
+	// Settings exposes this switch only for verified endpoints. Preserve an
+	// existing advanced override, but never carry an official default to a new URL.
+	if config.IsOfficialDeepSeekWebSearchEndpoint(&e) {
 		enabled := p.WebSearch
 		e.WebSearch = &enabled
-	} else {
+	} else if !config.SupportsServerWebSearch(&e) || !existing || config.IsOfficialDeepSeekWebSearchEndpoint(&original) {
 		e.WebSearch = nil
 	}
 	e.SupportedEfforts = p.SupportedEfforts
@@ -2293,6 +2529,44 @@ func (a *App) SaveProvider(p ProviderView) error {
 	return a.applyConfigChange(func(c *config.Config) error {
 		return saveProviderConfig(c, p)
 	})
+}
+
+// SetProviderWebSearch updates every provider represented by one Settings
+// access card in a single config transaction. Legacy DeepSeek aliases can
+// remain separate when their custom transport fields differ, so changing only
+// the first profile would leave the grouped control in a contradictory state.
+func (a *App) SetProviderWebSearch(names []string, enabled bool) error {
+	return a.applyGlobalProviderConfigChange(
+		"DeepSeek server-side web search",
+		"set-provider-web-search",
+		"changing DeepSeek server-side web search",
+		func(c *config.Config) error {
+			seen := make(map[string]bool, len(names))
+			providers := make([]*config.ProviderEntry, 0, len(names))
+			for _, rawName := range names {
+				name := strings.TrimSpace(rawName)
+				if name == "" || seen[name] {
+					continue
+				}
+				seen[name] = true
+				entry, ok := c.Provider(name)
+				if !ok {
+					return fmt.Errorf("provider %q not found", name)
+				}
+				if !config.IsOfficialDeepSeekWebSearchEndpoint(entry) {
+					return fmt.Errorf("provider %q does not support configurable server-side web search", name)
+				}
+				providers = append(providers, entry)
+			}
+			if len(providers) == 0 {
+				return fmt.Errorf("provider list is empty")
+			}
+			for _, entry := range providers {
+				value := enabled
+				entry.WebSearch = &value
+			}
+			return nil
+		})
 }
 
 func providerModelOverridesForCatalog(overrides map[string]config.ProviderModelOverride, models []string) map[string]config.ProviderModelOverride {
@@ -2450,46 +2724,73 @@ func (a *App) SaveProviderWithKey(p ProviderView, key string) (string, error) {
 	return warning, nil
 }
 
-// AddOfficialProviderAccess adds one curated desktop provider template to the
-// Settings > Model > Access list. The runtime default providers still exist
-// independently; this only records the user's explicit access setup.
-func (a *App) AddOfficialProviderAccess(kind, key string) (string, error) {
-	// Read-only pre-read (pricing language); the actual write happens inside
-	// applyConfigChange below, under the config edit lock.
-	cfg, _, err := a.loadDesktopUserConfigForView()
+// UpgradeDeepSeekProviderAccess applies the explicit Settings action for an
+// official legacy OpenAI entry. The config package performs a narrow raw-TOML
+// edit so unrelated and future fields are not lost to a full config render.
+func (a *App) UpgradeDeepSeekProviderAccess(name string) (string, error) {
+	const setting = "DeepSeek provider protocol"
+	defer a.lockRuntimeMutation("upgrade-deepseek-provider")()
+	releaseGates, err := a.lockRuntimeTurnGates(setting, nil)
 	if err != nil {
 		return "", err
 	}
-	entries, keyEnv, err := officialProviderTemplate(kind, cfg.DeepSeekOfficialPricingLanguage())
+	defer releaseGates()
+	visibleTabs, err := a.visibleTabsForGlobalRuntimeMutation("upgrading the DeepSeek provider protocol")
 	if err != nil {
 		return "", err
 	}
-	if err := a.ensureActiveTabRebuildAllowed("provider access"); err != nil {
+
+	changed, err := config.UpgradeDeepSeekProviderProtocolUserConfig(name)
+	if err != nil {
 		return "", err
 	}
-	keyWarning := ""
-	if strings.TrimSpace(key) != "" && keyEnv != "" {
-		var err error
-		keyWarning, err = a.saveProviderCredential(keyEnv, key)
-		if err != nil {
-			return "", err
+	if !changed {
+		return "", fmt.Errorf("DeepSeek provider %q is not eligible for the recommended protocol upgrade", name)
+	}
+	warning := ""
+	var rebuildErrs []error
+	for _, tab := range visibleTabs {
+		if a.controllerForTab(tab) == nil {
+			// A visible startup placeholder has no stale provider runtime. Its
+			// eventual build will read the upgraded config directly.
+			continue
 		}
-	}
-	rebuildWarning, err := a.applyConfigChangeWithWarning("provider access", func(c *config.Config) error {
-		names := make([]string, 0, len(entries))
-		for _, e := range entries {
-			if err := c.UpsertProvider(e); err != nil {
-				return err
+		if err := a.rebuildSettingTurnLocked(setting, tab, true, false); err != nil {
+			if deferred, ok := a.deferredRebuildWarningForTab(setting, err, tab); ok {
+				if warning == "" {
+					warning = deferred
+				}
+				continue
 			}
-			names = append(names, e.Name)
+			// The protocol is user-global and already persisted. Keep refreshing
+			// sibling tabs so one workspace-specific boot failure cannot leave
+			// every later runtime pinned to the old protocol.
+			rebuildErrs = append(rebuildErrs, err)
 		}
-		addProviderAccess(c, names...)
-		return nil
-	})
-	if err != nil {
-		return "", err
 	}
-	return appendSettingsWarning(keyWarning, rebuildWarning), nil
+	return warning, errors.Join(rebuildErrs...)
+}
+
+// visibleTabsForGlobalRuntimeUpgrade returns every visible runtime that must
+// observe a user-global provider protocol change. A detached controller cannot
+// use rebuildSettingTurnLocked because it is intentionally absent from a.tabs;
+// reject before mutating config so it never remains silently pinned to the old
+// protocol. runtime mutation admission and all turn gates are held by callers.
+func (a *App) visibleTabsForGlobalRuntimeMutation(detachedAction string) ([]*WorkspaceTab, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	for _, tab := range a.detachedSessions {
+		if tab != nil && tab.Ctrl != nil {
+			return nil, fmt.Errorf("background session is still open; reopen or close it before %s", detachedAction)
+		}
+	}
+	tabs := make([]*WorkspaceTab, 0, len(a.tabs))
+	for _, id := range a.orderedTabIDsLocked() {
+		if tab := a.tabs[id]; tab != nil {
+			tabs = append(tabs, tab)
+		}
+	}
+	return tabs, nil
 }
 
 // AddProviderPresetAccess installs one editable custom-provider preset. Unlike
@@ -2680,355 +2981,6 @@ func (a *App) FetchAllProviderModels(providers []ProviderView) map[string][]stri
 	return results
 }
 
-// DeleteProvider removes a provider and retargets open idle tabs that used it.
-func (a *App) DeleteProvider(name string) error {
-	err := a.deleteProviderAndRetargetTabs(name)
-	if err == nil {
-		a.refreshWorkbenchProviderBrokerAsync()
-	}
-	return err
-}
-
-// RemoveProviderAccess hides a provider from Settings > Model > Access and from
-// settings model pickers. Built-in provider entries remain in the runtime config
-// for back-compat, but visible defaults and idle tabs are retargeted away from
-// the removed access entry when another accessed provider is available. Custom
-// providers are deleted outright.
-func (a *App) RemoveProviderAccess(name string) (err error) {
-	defer func() {
-		if err == nil {
-			a.refreshWorkbenchProviderBrokerAsync()
-		}
-	}()
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return fmt.Errorf("remove provider access: empty provider name")
-	}
-	// Read-only dispatch check (built-in vs custom); the removal paths below
-	// reload and write under the config edit lock.
-	cfg, _, err := a.loadDesktopUserConfigForView()
-	if err != nil {
-		return err
-	}
-	if p, ok := cfg.Provider(name); ok && isOfficialBuiltInProvider(*p) {
-		return a.removeBuiltInProviderAccessAndRetargetTabs(name)
-	}
-	return a.deleteProviderAndRetargetTabs(name)
-}
-
-type providerRemovalTab struct {
-	id       string
-	ctrl     control.SessionAPI
-	readOnly bool
-}
-
-func providerAccessFallbackRef(c *config.Config, name string) string {
-	name = strings.TrimSpace(name)
-	for _, candidate := range c.Desktop.ProviderAccess {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "" || candidate == name {
-			continue
-		}
-		p, ok := c.Provider(candidate)
-		if !ok || len(p.ModelList()) == 0 {
-			continue
-		}
-		return p.Name + "/" + p.DefaultModel()
-	}
-	return ""
-}
-
-func retargetProviderReferences(c *config.Config, name, fallbackRef string) {
-	if strings.TrimSpace(fallbackRef) == "" {
-		return
-	}
-	if desktopModelRefsProvider(c, c.DefaultModel, name) {
-		c.DefaultModel = fallbackRef
-	}
-	if desktopModelRefsProvider(c, c.Agent.PlannerModel, name) {
-		c.Agent.PlannerModel = fallbackRef
-	}
-	if desktopModelRefsProvider(c, c.Agent.SubagentModel, name) {
-		c.Agent.SubagentModel = fallbackRef
-	}
-	for skill, ref := range c.Agent.SubagentModels {
-		if desktopModelRefsProvider(c, ref, name) {
-			c.Agent.SubagentModels[skill] = fallbackRef
-		}
-	}
-}
-
-func (a *App) removeBuiltInProviderAccessAndRetargetTabs(name string) error {
-	defer a.lockRuntimeMutation("remove-provider-access")()
-	releaseGates, err := a.lockRuntimeTurnGates("provider access", nil)
-	if err != nil {
-		return err
-	}
-	defer releaseGates()
-
-	// This first load is a read-only planning copy (fallback ref + affected-tab
-	// scan); it loads credentials because the fallback choice depends on which
-	// providers resolve a key. The saved edit below reloads under the config
-	// edit lock so the slow snapshot work in between cannot widen the
-	// read-modify-write window.
-	cfg, _, err := a.loadDesktopUserConfigForViewWithCredentials()
-	if err != nil {
-		return err
-	}
-	fallbackRef := providerAccessFallbackRef(cfg, name)
-
-	var affected []providerRemovalTab
-	if fallbackRef != "" {
-		a.mu.RLock()
-		for _, id := range a.orderedTabIDsLocked() {
-			tab := a.tabs[id]
-			if tab == nil {
-				continue
-			}
-			ref := tab.model
-			if strings.TrimSpace(ref) == "" {
-				ref = cfg.DefaultModel
-			}
-			if !desktopModelRefsProvider(cfg, ref, name) {
-				continue
-			}
-			if controllerHasActiveRuntimeWork(tab.Ctrl) {
-				a.mu.RUnlock()
-				return fmt.Errorf("finish or cancel active work using %q before removing the provider access", name)
-			}
-			affected = append(affected, providerRemovalTab{id: id, ctrl: tab.Ctrl, readOnly: tab.ReadOnly})
-		}
-		a.mu.RUnlock()
-	}
-
-	if len(affected) == 0 {
-		if err := a.ensureActiveTabRebuildAllowed("provider access"); err != nil {
-			return err
-		}
-	}
-	for _, item := range affected {
-		if item.ctrl != nil && !item.readOnly {
-			if err := item.ctrl.Snapshot(); err != nil {
-				slog.Warn("desktop: snapshot before removing provider access failed", "tab", item.id, "provider", name, "err", err)
-				return fmt.Errorf("save current session before removing provider access: %w", err)
-			}
-		}
-	}
-	// Reload-modify-save under the config edit lock: the pre-save snapshots
-	// above are slow and must not hold the lock, so mutate a fresh copy here
-	// instead of the stale planning copy loaded before them.
-	if err := func() error {
-		unlock := config.LockUserConfigEdits()
-		defer unlock()
-		fresh, path, err := a.loadDesktopUserConfigForEdit()
-		if err != nil {
-			return err
-		}
-		retargetProviderReferences(fresh, name, fallbackRef)
-		removeProviderAccess(fresh, name)
-		return fresh.SaveTo(path)
-	}(); err != nil {
-		return err
-	}
-	if len(affected) == 0 {
-		if err := a.rebuildActiveSettingRuntimeMutationLocked("provider access"); err != nil {
-			if _, ok := a.deferredRebuildWarning("provider access", err); ok {
-				return nil
-			}
-			return err
-		}
-		return nil
-	}
-	for _, item := range affected {
-		if item.ctrl != nil {
-			item.ctrl.Close()
-		}
-	}
-
-	var rebuildTabs []*WorkspaceTab
-	var releasedHostKeys []string
-	a.mu.Lock()
-	for _, item := range affected {
-		tab := a.tabs[item.id]
-		if tab == nil {
-			continue
-		}
-		if tab.Ctrl != item.ctrl {
-			// The tab swapped controllers while we worked off-lock; nil-ing the
-			// replacement would leak it. Leave the new runtime alone.
-			continue
-		}
-		tab.Ctrl = nil
-		if key := takeTabSharedHostKey(tab); key != "" {
-			releasedHostKeys = append(releasedHostKeys, key)
-		}
-		// Supersede any in-flight startup build: it was planned against the
-		// removed provider and would otherwise finish later, pass its
-		// generation check, and reinstall a controller for it.
-		a.supersedeTabBuildLocked(tab)
-		tab.model = fallbackRef
-		tab.Label = fallbackRef
-		clearTabStartupError(tab)
-		tab.Ready = a.ctx == nil
-		if a.ctx != nil {
-			a.setSessionRuntimePhaseLocked(tab, sessionRuntimeStarting, nil)
-		} else {
-			a.setSessionRuntimePhaseLocked(tab, sessionRuntimeFailed, fmt.Errorf("desktop runtime is not started"))
-		}
-		if a.ctx != nil {
-			rebuildTabs = append(rebuildTabs, tab)
-		}
-	}
-	a.saveTabsLocked()
-	a.mu.Unlock()
-	for _, key := range releasedHostKeys {
-		a.releaseSharedHost(key)
-	}
-
-	for _, tab := range rebuildTabs {
-		go a.buildTabController(tab)
-	}
-	return nil
-}
-
-func (a *App) deleteProviderAndRetargetTabs(name string) error {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return fmt.Errorf("remove provider: empty provider name")
-	}
-	defer a.lockRuntimeMutation("delete-provider")()
-	releaseGates, err := a.lockRuntimeTurnGates("provider", nil)
-	if err != nil {
-		return err
-	}
-	defer releaseGates()
-
-	// Read-only planning copy (with credentials — the fallback choice depends
-	// on which providers resolve a key); the saved edit below reloads under the
-	// config edit lock (see removeBuiltInProviderAccessAndRetargetTabs).
-	cfg, _, err := a.loadDesktopUserConfigForViewWithCredentials()
-	if err != nil {
-		return err
-	}
-	fallbackRef := providerRemovalFallbackRef(cfg, name)
-
-	var affected []providerRemovalTab
-	a.mu.RLock()
-	for _, id := range a.orderedTabIDsLocked() {
-		tab := a.tabs[id]
-		if tab == nil {
-			continue
-		}
-		ref := tab.model
-		if strings.TrimSpace(ref) == "" {
-			ref = cfg.DefaultModel
-		}
-		if !desktopModelRefsProvider(cfg, ref, name) {
-			continue
-		}
-		if controllerHasActiveRuntimeWork(tab.Ctrl) {
-			a.mu.RUnlock()
-			return fmt.Errorf("finish or cancel active work using %q before deleting the provider", name)
-		}
-		affected = append(affected, providerRemovalTab{id: id, ctrl: tab.Ctrl, readOnly: tab.ReadOnly})
-	}
-	a.mu.RUnlock()
-
-	if len(affected) > 0 && fallbackRef == "" {
-		return fmt.Errorf("remove provider: %q is used by open tabs and no other configured provider exists", name)
-	}
-	if len(affected) == 0 {
-		if err := a.ensureActiveTabRebuildAllowed("provider"); err != nil {
-			return err
-		}
-	}
-	for _, item := range affected {
-		if item.ctrl != nil && !item.readOnly {
-			if err := item.ctrl.Snapshot(); err != nil {
-				slog.Warn("desktop: snapshot before deleting provider failed", "tab", item.id, "provider", name, "err", err)
-				return fmt.Errorf("save current session before deleting provider: %w", err)
-			}
-		}
-	}
-	// Reload-modify-save under the config edit lock; the snapshots above ran
-	// off-lock against the stale planning copy.
-	if err := func() error {
-		unlock := config.LockUserConfigEdits()
-		defer unlock()
-		fresh, path, err := a.loadDesktopUserConfigForEdit()
-		if err != nil {
-			return err
-		}
-		if err := fresh.RemoveProvider(name); err != nil {
-			return err
-		}
-		removeProviderAccess(fresh, name)
-		return fresh.SaveTo(path)
-	}(); err != nil {
-		return err
-	}
-
-	if len(affected) == 0 {
-		if err := a.rebuildActiveSettingRuntimeMutationLocked("provider"); err != nil {
-			if _, ok := a.deferredRebuildWarning("provider", err); ok {
-				return nil
-			}
-			return err
-		}
-		return nil
-	}
-	for _, item := range affected {
-		if item.ctrl != nil {
-			item.ctrl.Close()
-		}
-	}
-
-	var rebuildTabs []*WorkspaceTab
-	var releasedHostKeys []string
-	a.mu.Lock()
-	for _, item := range affected {
-		tab := a.tabs[item.id]
-		if tab == nil {
-			continue
-		}
-		if tab.Ctrl != item.ctrl {
-			// The tab swapped controllers while we worked off-lock; nil-ing the
-			// replacement would leak it. Leave the new runtime alone.
-			continue
-		}
-		tab.Ctrl = nil
-		if key := takeTabSharedHostKey(tab); key != "" {
-			releasedHostKeys = append(releasedHostKeys, key)
-		}
-		// Supersede any in-flight startup build: it was planned against the
-		// removed provider and would otherwise finish later, pass its
-		// generation check, and reinstall a controller for it.
-		a.supersedeTabBuildLocked(tab)
-		tab.model = fallbackRef
-		tab.Label = fallbackRef
-		clearTabStartupError(tab)
-		tab.Ready = a.ctx == nil
-		if a.ctx != nil {
-			a.setSessionRuntimePhaseLocked(tab, sessionRuntimeStarting, nil)
-		} else {
-			a.setSessionRuntimePhaseLocked(tab, sessionRuntimeFailed, fmt.Errorf("desktop runtime is not started"))
-		}
-		if a.ctx != nil {
-			rebuildTabs = append(rebuildTabs, tab)
-		}
-	}
-	a.saveTabsLocked()
-	a.mu.Unlock()
-	for _, key := range releasedHostKeys {
-		a.releaseSharedHost(key)
-	}
-
-	for _, tab := range rebuildTabs {
-		go a.buildTabController(tab)
-	}
-	return nil
-}
-
 // rebuildActiveSettingRuntimeMutationLocked refreshes the active controller
 // while lockRuntimeMutation and all runtime turn gates are held.
 func (a *App) rebuildActiveSettingRuntimeMutationLocked(setting string) error {
@@ -3039,7 +2991,7 @@ func (a *App) rebuildActiveSettingRuntimeMutationLocked(setting string) error {
 		}
 		return fmt.Errorf("no active tab")
 	}
-	return a.rebuildSettingTurnLocked(setting, tab, true)
+	return a.rebuildSettingTurnLocked(setting, tab, true, false)
 }
 
 // SetProviderKey writes a secret to Reasonix's global .env under the given

@@ -3,6 +3,7 @@ package skill
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -100,13 +101,7 @@ func TestBuiltinSkillsIncludeCodeGraphHintAndToolsWhenDiscovered(t *testing.T) {
 			t.Fatalf("explore body missing priority hint %q:\n%s", want, explore.Body)
 		}
 	}
-	found := false
-	for _, name := range explore.AllowedTools {
-		if name == "mcp__codegraph__symbols" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(explore.AllowedTools, "mcp__codegraph__symbols")
 	if !found {
 		t.Fatalf("explore allowed tools = %v, want codegraph tool", explore.AllowedTools)
 	}

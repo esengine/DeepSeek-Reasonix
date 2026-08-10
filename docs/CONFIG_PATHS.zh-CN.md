@@ -62,17 +62,19 @@ credentials_store = "auto"   # 旧兼容字段；provider key 保存在 .env
 [ui]
 theme = "auto"
 cursor_shape = "bar"         # CLI/TUI 输入光标：underline|block|bar
+show_turn_usage = false       # 隐藏 TUI 每轮 token/费用回执；默认 true
 
 [desktop]
 provider_access = ["deepseek"]
 
 [[providers]]
 name        = "deepseek"
-kind        = "openai"
-base_url    = "https://api.deepseek.com"
+kind        = "anthropic"
+base_url    = "https://api.deepseek.com/anthropic"
 models      = ["deepseek-v4-flash", "deepseek-v4-pro"]
 default     = "deepseek-v4-flash"
 api_key_env = "DEEPSEEK_API_KEY"
+web_search  = true
 
 [[plugins]]
 name    = "example"
@@ -84,6 +86,9 @@ command = "example-mcp-server"
 
 `[ui].cursor_shape` 只影响 CLI/TUI 的输入框。默认值 `bar` 清晰可见，同时不会覆盖
 CJK 双宽字符；如果偏好其它形状，可以设为 `block` 或 `underline`。
+
+`[ui].show_turn_usage = false` 会隐藏 TUI transcript 中每次模型请求完成后的 token 与
+费用回执；统计和运行中状态仍正常更新。默认值为 `true`。
 
 ### 自定义 provider 的 `api_key_env` 命名
 

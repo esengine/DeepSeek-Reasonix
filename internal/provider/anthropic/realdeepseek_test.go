@@ -78,6 +78,79 @@ func TestRealDeepSeekAnthropicToolLoop(t *testing.T) {
 		len(second.text), len(second.reasoning), second.promptTokens, second.cacheHitTokens)
 }
 
+// TestRealDeepSeekAnthropicWebSearch verifies that the official Anthropic
+// compatibility endpoint accepts the server-side web_search tool and returns a
+// normal assistant completion. It is intentionally separate from the tool-loop
+// test so a provider-side search regression is visible on its own.
+func TestRealDeepSeekAnthropicWebSearch(t *testing.T) {
+	key := os.Getenv("DEEPSEEK_API_KEY")
+	if key == "" {
+		t.Skip("DEEPSEEK_API_KEY not set — skipping live probe")
+	}
+
+	p, err := New(provider.Config{
+		Name:    "deepseek-anthropic",
+		BaseURL: "https://api.deepseek.com/anthropic",
+		Model:   "deepseek-v4-flash",
+		APIKey:  key,
+		Extra: map[string]any{
+			"api_key_env": "DEEPSEEK_API_KEY",
+			"thinking":    "disabled",
+			"web_search":  true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	turn := collectLiveDeepSeekTurn(t, p, provider.Request{
+		Messages: []provider.Message{{
+			Role:    provider.RoleUser,
+			Content: "Search the web for the latest DeepSeek API documentation update and reply with one source URL.",
+		}},
+		MaxTokens: 256,
+	})
+	if strings.TrimSpace(turn.text) == "" {
+		t.Fatalf("web_search returned no assistant text (reasoning=%d)", len(turn.reasoning))
+	}
+	t.Logf("web_search: text=%d prompt=%d cache_hit=%d", len(turn.text), turn.promptTokens, turn.cacheHitTokens)
+}
+
+// TestRealDeepSeekAnthropicIgnoresImages confirms the text-only official
+// endpoint still completes when stale vision metadata accompanies a user turn.
+// The provider-boundary filter is what prevents the historical image_url 400.
+func TestRealDeepSeekAnthropicIgnoresImages(t *testing.T) {
+	key := os.Getenv("DEEPSEEK_API_KEY")
+	if key == "" {
+		t.Skip("DEEPSEEK_API_KEY not set — skipping live probe")
+	}
+
+	p, err := New(provider.Config{
+		Name:    "deepseek-anthropic",
+		BaseURL: "https://api.deepseek.com/anthropic",
+		Model:   "deepseek-v4-flash",
+		APIKey:  key,
+		Extra: map[string]any{
+			"api_key_env": "DEEPSEEK_API_KEY",
+			"vision":      true,
+			"thinking":    "disabled",
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	turn := collectLiveDeepSeekTurn(t, p, provider.Request{Messages: []provider.Message{{
+		Role:    provider.RoleUser,
+		Content: "Reply with the single word: ok.",
+		Images:  []string{"data:image/png;base64,AAAA"},
+	}}, MaxTokens: 64})
+	if strings.TrimSpace(turn.text) == "" {
+		t.Fatalf("text-only image-filter smoke returned no assistant text")
+	}
+	t.Logf("image-filter: text=%d prompt=%d cache_hit=%d", len(turn.text), turn.promptTokens, turn.cacheHitTokens)
+}
+
 type liveDeepSeekTurn struct {
 	text, reasoning              string
 	calls                        []provider.ToolCall

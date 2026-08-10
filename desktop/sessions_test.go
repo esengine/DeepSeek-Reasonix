@@ -30,7 +30,7 @@ func occupyReadFileWithTimeoutSlots(t *testing.T) func() {
 			return
 		}
 		released = true
-		for i := 0; i < filled; i++ {
+		for range filled {
 			<-readFileWithTimeoutSlots
 		}
 	}
@@ -38,7 +38,7 @@ func occupyReadFileWithTimeoutSlots(t *testing.T) func() {
 	return release
 }
 
-// --- loadSessionTitles ---
+// loadSessionTitles
 
 func TestLoadSessionTitlesMissing(t *testing.T) {
 	dir := t.TempDir()
@@ -68,7 +68,7 @@ func TestLoadSessionTitlesValid(t *testing.T) {
 	}
 }
 
-// --- saveSessionTitles ---
+// saveSessionTitles
 
 func TestSaveSessionTitlesCreatesDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "nested", "sessions")
@@ -102,7 +102,7 @@ func TestSaveSessionTitlesRoundTrip(t *testing.T) {
 	}
 }
 
-// --- setSessionTitle ---
+// setSessionTitle
 
 func TestSetSessionTitle(t *testing.T) {
 	dir := t.TempDir()
@@ -160,7 +160,7 @@ func TestSetSessionTitlePreservesExistingTitlesWhenTimedReadSlotsFull(t *testing
 	}
 }
 
-// --- deleteSessionFile ---
+// deleteSessionFile
 
 func TestDeleteSessionFile(t *testing.T) {
 	dir := t.TempDir()
@@ -1176,7 +1176,7 @@ func writeSubagentArtifact(t *testing.T, dir, ref, parentSession string) {
 	}
 }
 
-// --- sessionTitlesPath ---
+// sessionTitlesPath
 
 func TestSessionTitlesPath(t *testing.T) {
 	got := sessionTitlesPath("/sessions")
@@ -1208,7 +1208,7 @@ func TestRecordSessionPlannerDisplayConcurrentPreservesEverySession(t *testing.T
 	start := make(chan struct{})
 	errs := make(chan error, writers)
 	var wg sync.WaitGroup
-	for i := 0; i < writers; i++ {
+	for i := range writers {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -1232,7 +1232,7 @@ func TestRecordSessionPlannerDisplayConcurrentPreservesEverySession(t *testing.T
 	if len(got) != writers {
 		t.Fatalf("planner display sessions = %d, want %d", len(got), writers)
 	}
-	for i := 0; i < writers; i++ {
+	for i := range writers {
 		key := fmt.Sprintf("session-%02d.jsonl", i)
 		if len(got[key]) != 1 || len(got[key][0].Messages) != 1 || got[key][0].Messages[0].Content != fmt.Sprintf("answer-%02d", i) {
 			t.Fatalf("planner display %s = %+v", key, got[key])
@@ -1243,7 +1243,7 @@ func TestRecordSessionPlannerDisplayConcurrentPreservesEverySession(t *testing.T
 func TestRecordSessionPlannerDisplayCrossProcessPreservesEverySession(t *testing.T) {
 	if role := os.Getenv("REASONIX_PLANNER_DISPLAY_HELPER"); role != "" {
 		dir := os.Getenv("REASONIX_PLANNER_DISPLAY_DIR")
-		sessionPlannerDisplayLockTimeout = 5 * time.Second
+		sessionPlannerDisplayExternalLockTimeout = 5 * time.Second
 		attempted := filepath.Join(dir, role+".attempted")
 		loaded := filepath.Join(dir, role+".loaded")
 		release := filepath.Join(dir, role+".release")
@@ -1504,7 +1504,7 @@ func TestRecordSessionDisplaySerializesConcurrentTabs(t *testing.T) {
 	const tabs = 32
 	errs := make(chan error, tabs)
 	var wg sync.WaitGroup
-	for i := 0; i < tabs; i++ {
+	for i := range tabs {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -1523,7 +1523,7 @@ func TestRecordSessionDisplaySerializesConcurrentTabs(t *testing.T) {
 	}
 
 	got := loadSessionDisplays(dir)
-	for i := 0; i < tabs; i++ {
+	for i := range tabs {
 		key := fmt.Sprintf("tab-%02d.jsonl", i)
 		content := fmt.Sprintf("expanded-%02d", i)
 		if display := got[key][messageDisplayKey(content)]; display != fmt.Sprintf("display-%02d", i) {

@@ -71,8 +71,8 @@ func launcherLocatorForSpec(spec Spec) (launcherLocator, bool) {
 			if arg == "--from" && i+1 < len(args) {
 				return launcherLocator{kind: kind, value: args[i+1], arg: i + 1, command: command}, true
 			}
-			if strings.HasPrefix(arg, "--from=") {
-				return launcherLocator{kind: kind, value: strings.TrimPrefix(arg, "--from="), arg: i, prefix: "--from=", command: command}, true
+			if after, ok := strings.CutPrefix(arg, "--from="); ok {
+				return launcherLocator{kind: kind, value: after, arg: i, prefix: "--from=", command: command}, true
 			}
 		}
 	}

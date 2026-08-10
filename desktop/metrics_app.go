@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -102,10 +103,8 @@ func countBucket(n int) string {
 
 func knownBucket(value string, allowed ...string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
-	for _, ok := range allowed {
-		if value == ok {
-			return value
-		}
+	if slices.Contains(allowed, value) {
+		return value
 	}
 	return "other"
 }
@@ -433,7 +432,7 @@ func (m *metricsAggregator) observeRecoveryMetrics(stats recovery.Metrics) {
 		return
 	}
 	add := func(signal string, n int64) {
-		for i := int64(0); i < n; i++ {
+		for range n {
 			m.inc(signal, "total")
 		}
 	}

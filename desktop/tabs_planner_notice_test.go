@@ -1,9 +1,11 @@
 package main
 
 import (
+	"path/filepath"
 	"testing"
 
 	"reasonix/internal/event"
+	"reasonix/internal/provider"
 )
 
 // Planner notices are persisted through plannerDisplay into session history;
@@ -31,5 +33,59 @@ func TestRecordPlannerDisplayEventKeepsNoticeDetail(t *testing.T) {
 	}
 	if got.Detail != `mcp server "github" failed to start: command not found` {
 		t.Fatalf("Detail = %q, want diagnostic detail preserved", got.Detail)
+	}
+}
+
+func TestCancelledDisplaySidecarReplaysStructuredDecisionReceipt(t *testing.T) {
+	const userContent = "run the build"
+	receipt := &provider.DecisionReceipt{
+		ID:      "approval-1",
+		Kind:    "tool",
+		Tool:    "bash",
+		Subject: "npm run build",
+		Outcome: "allow_once",
+	}
+	tab := &WorkspaceTab{}
+	tab.recordDisplayEvent(event.Event{
+		Kind:            event.Notice,
+		Level:           event.LevelInfo,
+		Source:          event.UsageSourceExecutor,
+		Text:            "Decision recorded: allow_once",
+		Code:            event.NoticeCodeDecisionReceipt,
+		DecisionReceipt: receipt,
+	})
+	display := tab.takeDisplayTurn(true)
+	if len(display) != 2 || display[0].DecisionReceipt == nil || display[1].Code != event.NoticeCodeCancelledTurn {
+		t.Fatalf("cancelled display = %+v, want structured receipt plus cancellation notice", display)
+	}
+
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session.jsonl")
+	if err := recordSessionPlannerDisplay(dir, sessionPath, userContent, display); err != nil {
+		t.Fatalf("record cancelled display: %v", err)
+	}
+	plannerTurns := sessionPlannerDisplayTurns(dir, sessionPath)
+	if len(plannerTurns) != 1 || len(plannerTurns[0].Messages) != 2 || plannerTurns[0].Messages[0].DecisionReceipt == nil {
+		t.Fatalf("persisted display lost decision receipt: %+v", plannerTurns)
+	}
+
+	visible := historyMessagesWithPlannerDisplays([]provider.Message{
+		{Role: provider.RoleUser, Content: userContent},
+		{Role: provider.RoleAssistant, DecisionReceipts: []*provider.DecisionReceipt{receipt}},
+	}, func(content string) string { return content }, plannerTurns, nil)
+	if len(visible) != 3 {
+		t.Fatalf("visible history = %+v, want user, sidecar receipt, and cancellation notice", visible)
+	}
+	got := visible[1]
+	if got.Code != event.NoticeCodeDecisionReceipt || got.DecisionReceipt == nil {
+		t.Fatalf("structured decision receipt missing after reload: %+v", got)
+	}
+	if got.DecisionReceipt.ID != receipt.ID || got.DecisionReceipt.Tool != receipt.Tool || got.DecisionReceipt.Subject != receipt.Subject || got.DecisionReceipt.Outcome != receipt.Outcome {
+		t.Fatalf("replayed receipt = %+v, want %+v", got.DecisionReceipt, receipt)
+	}
+	for i, message := range visible {
+		if i != 1 && message.DecisionReceipt != nil {
+			t.Fatalf("decision receipt replayed more than once: %+v", visible)
+		}
 	}
 }

@@ -3,6 +3,8 @@
 package agent
 
 import (
+	"bytes"
+	"strings"
 	"sync"
 
 	"reasonix/internal/provider"
@@ -43,6 +45,15 @@ type Session struct {
 	// what is actually on disk, and the repaired view no longer represents
 	// those bytes — a session that kept running extends the raw transcript.
 	rawMessages []provider.Message
+	// pendingContentReasons accumulates a reason string each time Rewrite()
+	// actually replaces provider-visible message bytes (compact, prune/snip,
+	// summarize, rewind, guardian merge). ReplaceLocalMetadata bumps
+	// rewriteVersion for the same save-path (NeedsRewriteSave) purpose without
+	// appending here, because ModelMessages strips or never serializes the
+	// local-only metadata it changes — so that path must never report a
+	// cache-prefix change. DrainContentRewriteReasons (run_loop.go, once per
+	// provider request) is the sole consumer.
+	pendingContentReasons []string
 }
 
 // NewSession initializes a session with an optional system prompt.
@@ -62,6 +73,48 @@ func (s *Session) Add(m provider.Message) {
 	s.version++
 }
 
+// AddDecisionReceipt persists local decision metadata without inserting a
+// standalone message into the current tool turn. Tool results must remain
+// directly adjacent to the assistant message that requested them; otherwise
+// session normalization fabricates interrupted placeholders and older readers
+// can lose the real result. Attaching to the newest assistant message keeps the
+// provider-visible transcript byte-for-byte equivalent after ModelMessages.
+//
+// The fallback sentinel covers host decisions made before any assistant message
+// exists. Older readers already discard this unmatched tool record safely.
+func (s *Session) AddDecisionReceipt(receipt *provider.DecisionReceipt) {
+	if s == nil || receipt == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	//nolint:modernize // slices.Backward yields element copies; this body writes through the index.
+	for i := len(s.Messages) - 1; i >= 0; i-- {
+		if s.Messages[i].Role == provider.RoleUser && !s.Messages[i].LocalOnly {
+			break
+		}
+		if s.Messages[i].Role != provider.RoleAssistant || s.Messages[i].LocalOnly {
+			continue
+		}
+		receipts := append([]*provider.DecisionReceipt(nil), s.Messages[i].DecisionReceipts...)
+		s.Messages[i].DecisionReceipts = append(receipts, receipt)
+		// A mid-turn snapshot may already contain this assistant message. Force
+		// the next save to replace it instead of treating the later tool result
+		// as the only append-only change.
+		s.rewriteVersion++
+		s.version++
+		return
+	}
+	s.Messages = append(s.Messages, provider.Message{
+		Role:            provider.RoleTool,
+		ToolCallID:      provider.LocalOnlyToolID,
+		Name:            provider.LocalOnlyToolName,
+		LocalOnly:       true,
+		DecisionReceipt: receipt,
+	})
+	s.version++
+}
+
 // UpdateToolCallPreview replaces the preview fields of the newest matching
 // assistant tool call. A dependent writer can only be previewed after an
 // earlier writer in the same model batch succeeds; updating under the session
@@ -73,6 +126,7 @@ func (s *Session) UpdateToolCallPreview(call provider.ToolCall) bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	//nolint:modernize // slices.Backward yields element copies; this body writes through the index.
 	for i := len(s.Messages) - 1; i >= 0; i-- {
 		if s.Messages[i].Role != provider.RoleAssistant {
 			continue
@@ -109,6 +163,7 @@ func (s *Session) UpdateToolCallResolution(call provider.ToolCall) bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	//nolint:modernize // slices.Backward yields element copies; this body writes through the index.
 	for i := len(s.Messages) - 1; i >= 0; i-- {
 		if s.Messages[i].Role != provider.RoleAssistant {
 			continue
@@ -149,12 +204,61 @@ func (s *Session) Replace(msgs []provider.Message) {
 // atomic classification matters when a periodic snapshot races compaction,
 // pruning, or local metadata edits: a later autosave must use owned-rewrite
 // conflict checks instead of mistaking the modified prefix for another writer.
-func (s *Session) Rewrite(msgs []provider.Message) {
+//
+// reason names the provider-visible change (e.g. "compact_auto", "snip",
+// "rewind_truncate") and is queued for the next DrainContentRewriteReasons
+// call, which feeds cache-diagnostics attribution. Callers whose msgs only
+// change local-only display metadata (never serialized to the provider) must
+// use ReplaceLocalMetadata instead, so they don't misreport a cache-prefix
+// change that never happened.
+func (s *Session) Rewrite(msgs []provider.Message, reason string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Messages = msgs
 	s.rewriteVersion++
 	s.version++
+	if reason != "" {
+		s.pendingContentReasons = append(s.pendingContentReasons, reason)
+	}
+}
+
+// ReplaceLocalMetadata atomically replaces the message log exactly like
+// Rewrite (including the rewriteVersion bump that forces the next save to use
+// owned-rewrite conflict checks), for callers that only changed local-only
+// display metadata (e.g. marking a resubmitted message Edited) rather than any
+// provider-visible byte. Unlike Rewrite, it never queues a cache-prefix-change
+// reason, since ModelMessages strips or never serializes what changed.
+func (s *Session) ReplaceLocalMetadata(msgs []provider.Message) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Messages = msgs
+	s.rewriteVersion++
+	s.version++
+}
+
+// DrainContentRewriteReasons returns and clears the reasons queued by Rewrite
+// since the last drain. Called once per provider request (run_loop.go) so
+// CompareShape can attribute a cache-prefix change to the operation that
+// actually caused it.
+func (s *Session) DrainContentRewriteReasons() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	reasons := s.pendingContentReasons
+	s.pendingContentReasons = nil
+	return reasons
+}
+
+// NoteContentRewrite queues a provider-visible prefix-change reason without
+// mutating Messages. Projection installs use this so cache diagnostics still
+// attribute the next request's miss to compaction while the canonical
+// transcript stays intact.
+func (s *Session) NoteContentRewrite(reason string) {
+	if s == nil || reason == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pendingContentReasons = append(s.pendingContentReasons, reason)
 }
 
 // Snapshot returns a copy of the messages, safe to read from another goroutine
@@ -170,6 +274,25 @@ func (s *Session) Len() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.Messages)
+}
+
+// MessageRange returns a copy of the messages in [start, end), clamped to the
+// current log bounds, safe to read from another goroutine while a turn
+// appends. Paging frontends use it to fetch a display window without paying
+// for a Snapshot of the whole history.
+func (s *Session) MessageRange(start, end int) []provider.Message {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if start < 0 {
+		start = 0
+	}
+	if end > len(s.Messages) {
+		end = len(s.Messages)
+	}
+	if start >= end {
+		return []provider.Message{}
+	}
+	return append([]provider.Message(nil), s.Messages[start:end]...)
 }
 
 // CloneWithMessages returns a fresh Session carrying msgs while preserving the
@@ -198,6 +321,7 @@ func (s *Session) CloneWithMessages(msgs []provider.Message) *Session {
 		persisted:               s.persisted,
 		normalizedDirty:         s.normalizedDirty,
 		eventLogDamaged:         s.eventLogDamaged,
+		pendingContentReasons:   append([]string(nil), s.pendingContentReasons...),
 	}
 }
 
@@ -226,6 +350,7 @@ func (s *Session) CloneWithMessagesIfCompatible(msgs []provider.Message) (*Sessi
 		persisted:               s.persisted,
 		normalizedDirty:         s.normalizedDirty,
 		eventLogDamaged:         s.eventLogDamaged,
+		pendingContentReasons:   append([]string(nil), s.pendingContentReasons...),
 	}, true
 }
 
@@ -237,6 +362,21 @@ func (s *Session) snapshotWithVersion() ([]provider.Message, uint64, int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return append([]provider.Message(nil), s.Messages...), s.version, s.rewriteVersion
+}
+
+// snapshotMessagesVersion returns a copy of the messages with the transcript
+// version, for projection validity checks that do not need rewriteVersion.
+func (s *Session) snapshotMessagesVersion() ([]provider.Message, uint64) {
+	msgs, version, _ := s.snapshotWithVersion()
+	return msgs, version
+}
+
+// TranscriptVersion returns the current append/rewrite counter used by
+// context-projection validity checks.
+func (s *Session) TranscriptVersion() uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.version
 }
 
 // RewriteVersion returns the current rewrite version.
@@ -254,6 +394,32 @@ func (s *Session) NeedsRewriteSave() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.rewriteVersion > s.persistedRewriteVersion
+}
+
+// HasUnsavedChanges reports whether the in-memory transcript contains storage
+// changes that have not been durably recorded at path. It is intentionally
+// conservative when no verified baseline exists: an idle controller must not
+// replace an in-memory conversation with a possibly older disk copy after a
+// bounded lock failure or an interrupted save.
+func (s *Session) HasUnsavedChanges(path string) bool {
+	if s == nil || strings.TrimSpace(path) == "" {
+		return false
+	}
+	msgs, _, rewriteVersion := s.snapshotWithVersion()
+	digest, err := digestSessionMessages(msgs)
+	if err != nil {
+		return true
+	}
+	key := canonicalSessionSavePath(path)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.persisted.ok || s.persisted.path != key {
+		return true
+	}
+	if s.normalizedDirty || s.eventLogDamaged || rewriteVersion > s.persistedRewriteVersion {
+		return true
+	}
+	return !bytes.Equal(digest[:], s.persisted.digest[:])
 }
 
 // IncrementRewrite bumps the rewrite version by 1.

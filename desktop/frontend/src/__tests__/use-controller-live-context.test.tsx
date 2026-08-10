@@ -226,8 +226,18 @@ function LiveProbe({ value }: { value: Controller }) {
     () => value.liveStore.getSnapshot(value.activeTabId)?.text ?? "",
     [value.activeTabId, value.liveStore],
   );
+  const getModelActiveAtSnapshot = useCallback(
+    () => value.liveStore.getModelActiveAt(value.activeTabId) ?? 0,
+    [value.activeTabId, value.liveStore],
+  );
   const text = useSyncExternalStore(subscribe, getSnapshot);
-  return <span data-live-text>{text}</span>;
+  const modelActiveAt = useSyncExternalStore(subscribe, getModelActiveAtSnapshot);
+  return (
+    <>
+      <span data-live-text>{text}</span>
+      <span data-live-model-active-at>{modelActiveAt}</span>
+    </>
+  );
 }
 
 function Probe() {
@@ -322,6 +332,10 @@ await act(async () => {
   await flushPromises(20);
 });
 eq(document.querySelector("[data-live-text]")?.textContent, "one two three", "live subscriber receives the coalesced text burst");
+ok(
+  Number(document.querySelector("[data-live-model-active-at]")?.textContent ?? 0) > 0,
+  "live subscriber receives the first provider-output timestamp",
+);
 eq(controllerProbeRenders, rendersBeforeTextBurst, "pure stream deltas do not re-render the controller owner");
 
 backendContext = {

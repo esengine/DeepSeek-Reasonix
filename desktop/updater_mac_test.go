@@ -1001,6 +1001,42 @@ func TestMacUpdateHandoffParserRequiresCompletePipePair(t *testing.T) {
 	}
 }
 
+func TestMacUpdateHandoffReadinessSurfacesChildStartupFailure(t *testing.T) {
+	readyReader, readyWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer readyReader.Close()
+	originalRead := readMacUpdateHandoff
+	originalLogPath := macHandoffLogPath
+	readMacUpdateHandoff = func() (*repair.UpdateTransaction, error) {
+		return nil, fmt.Errorf("pending transaction is unreadable")
+	}
+	macHandoffLogPath = func() string { return filepath.Join(t.TempDir(), "update-helper.log") }
+	t.Cleanup(func() {
+		readMacUpdateHandoff = originalRead
+		macHandoffLogPath = originalLogPath
+	})
+	done := make(chan int, 1)
+	go func() {
+		done <- runMacUpdateHandoff(macUpdateHandoffConfig{
+			ToVersion:     "v2",
+			CreatedAt:     "2026-07-28T00:00:00Z",
+			TransactionID: strings.Repeat("a", 64),
+			ReadyFD:       int(readyWriter.Fd()),
+			ProceedFD:     int(readyWriter.Fd()) + 1,
+		})
+	}()
+	err = waitForMacHandoffReady(readyReader, time.Second)
+	if err == nil || !strings.Contains(err.Error(), "read-pending-transaction") ||
+		!strings.Contains(err.Error(), "pending transaction is unreadable") {
+		t.Fatalf("readiness error = %v", err)
+	}
+	if code := <-done; code == 0 {
+		t.Fatal("helper startup failure returned success")
+	}
+}
+
 func TestMacUpdateHandoffHandshakeWaitsForParentRelease(t *testing.T) {
 	readyReader, readyWriter, err := os.Pipe()
 	if err != nil {

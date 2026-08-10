@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -60,9 +61,7 @@ func newSSETransport(ctx context.Context, s Spec) (*sseTransport, error) {
 		return nil, fmt.Errorf("sse plugin %q: invalid url %q", s.Name, s.URL)
 	}
 	headers := make(map[string]string, len(s.Headers))
-	for key, value := range s.Headers {
-		headers[key] = value
-	}
+	maps.Copy(headers, s.Headers)
 	lifeCtx, cancel := context.WithCancel(ctx)
 	t := &sseTransport{
 		name:          s.Name,

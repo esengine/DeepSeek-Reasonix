@@ -2,6 +2,8 @@
 package eventwire
 
 import (
+	"encoding/json"
+
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
@@ -10,24 +12,39 @@ import (
 // externalizable:"true" marks large string payloads the Remote protocol may
 // offload via content refs without changing provider-visible semantics.
 type Event struct {
-	Kind            string           `json:"kind"`
-	Text            string           `json:"text,omitempty" externalizable:"true"`
-	Detail          string           `json:"detail,omitempty" externalizable:"true"`
-	Code            string           `json:"code,omitempty"`
-	Reasoning       string           `json:"reasoning,omitempty" externalizable:"true"`
-	MemoryCitations []MemoryCitation `json:"memoryCitations,omitempty"`
-	Level           string           `json:"level,omitempty"`
-	Tool            *Tool            `json:"tool,omitempty"`
-	Usage           *Usage           `json:"usage,omitempty"`
-	Approval        *Approval        `json:"approval,omitempty"`
-	Ask             *Ask             `json:"ask,omitempty"`
-	Compaction      *Compaction      `json:"compaction,omitempty"`
-	Guardian        *Guardian        `json:"guardian,omitempty"`
-	Err             string           `json:"err,omitempty" externalizable:"true"`
-	Outcome         string           `json:"outcome,omitempty"`
-	Readiness       *FinalReadiness  `json:"readiness,omitempty"`
-	RetryAttempt    int              `json:"retryAttempt,omitempty"`
-	RetryMax        int              `json:"retryMax,omitempty"`
+	Kind            string             `json:"kind"`
+	Text            string             `json:"text,omitempty" externalizable:"true"`
+	Detail          string             `json:"detail,omitempty" externalizable:"true"`
+	Code            string             `json:"code,omitempty"`
+	Reasoning       string             `json:"reasoning,omitempty" externalizable:"true"`
+	MemoryCitations []MemoryCitation   `json:"memoryCitations,omitempty"`
+	Level           string             `json:"level,omitempty"`
+	Tool            *Tool              `json:"tool,omitempty"`
+	Usage           *Usage             `json:"usage,omitempty"`
+	Approval        *Approval          `json:"approval,omitempty"`
+	Ask             *Ask               `json:"ask,omitempty"`
+	Compaction      *Compaction        `json:"compaction,omitempty"`
+	Guardian        *Guardian          `json:"guardian,omitempty"`
+	DecisionReceipt *DecisionReceipt   `json:"decisionReceipt,omitempty"`
+	Extension       *ExtensionSurface  `json:"extension,omitempty"`
+	Err             string             `json:"err,omitempty" externalizable:"true"`
+	Outcome         string             `json:"outcome,omitempty"`
+	Readiness       *FinalReadiness    `json:"readiness,omitempty"`
+	Receipt         *CompletionReceipt `json:"receipt,omitempty"`
+	CheckpointTurn  *int               `json:"checkpointTurn,omitempty"`
+	RetryAttempt    int                `json:"retryAttempt,omitempty"`
+	RetryMax        int                `json:"retryMax,omitempty"`
+	RetryScope      string             `json:"retryScope,omitempty"` // "headers" | "stream"; omit for older clients
+	StreamAttempt   *StreamAttempt     `json:"streamAttempt,omitempty"`
+}
+
+// StreamAttempt is the JSON form of event.StreamAttemptInfo.
+type StreamAttempt struct {
+	ID      string `json:"id"`
+	Action  string `json:"action"` // begin | discard | commit
+	Attempt int    `json:"attempt,omitempty"`
+	Max     int    `json:"max,omitempty"`
+	Reason  string `json:"reason,omitempty"` // connection_reset | premature_eof | idle_timeout
 }
 
 // ToWire converts a typed runtime event into the shared frontend JSON contract.
@@ -39,6 +56,9 @@ func ToWire(e event.Event) Event {
 	switch e.Kind {
 	case event.Notice:
 		w.Code = e.Code
+		if e.DecisionReceipt != nil {
+			w.DecisionReceipt = ToWireDecisionReceipt(e.DecisionReceipt)
+		}
 		if e.Level == event.LevelWarn {
 			w.Level = "warn"
 		} else {
@@ -51,12 +71,16 @@ func ToWire(e event.Event) Event {
 			Output: e.Tool.Output, Err: e.Tool.Err,
 			ReadOnly: e.Tool.ReadOnly, Truncated: e.Tool.Truncated,
 			DurationMs: e.Tool.DurationMs, Partial: e.Tool.Partial,
+			StartedAt: e.Tool.StartedAt, EndedAt: e.Tool.EndedAt,
 			ArgChars: e.Tool.ArgChars, Refreshed: e.Tool.Refreshed,
-			ParentID: e.Tool.ParentID,
-			Diff:     e.Tool.Diff, Added: e.Tool.Added, Removed: e.Tool.Removed,
+			ParentID: e.Tool.ParentID, AttemptID: e.Tool.AttemptID,
+			Diff: e.Tool.Diff, Added: e.Tool.Added, Removed: e.Tool.Removed,
 		}
 		if e.Tool.Profile != nil {
 			wt.Profile = &Profile{Model: e.Tool.Profile.Model, Effort: e.Tool.Profile.Effort}
+		}
+		if e.Tool.Execution != nil {
+			wt.Execution = toWireShellExecution(e.Tool.Execution)
 		}
 		w.Tool = wt
 	case event.Usage:
@@ -65,9 +89,14 @@ func ToWire(e event.Event) Event {
 				PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens,
 				TotalTokens: u.TotalTokens, CacheHitTokens: u.CacheHitTokens,
 				CacheMissTokens: u.CacheMissTokens, ReasoningTokens: u.ReasoningTokens,
-				Estimated:             u.Estimated,
-				Source:                e.UsageSource,
-				SessionCacheHitTokens: e.SessionHit, SessionCacheMissTokens: e.SessionMiss,
+				Estimated:               u.Estimated,
+				Source:                  e.UsageSource,
+				ContextPromptTokens:     u.ContextPromptTokens,
+				ContextCompletionTokens: u.ContextCompletionTokens,
+				ContextReasoningTokens:  u.ContextReasoningTokens,
+				ContextCacheHitTokens:   u.ContextCacheHitTokens,
+				ContextCacheMissTokens:  u.ContextCacheMissTokens,
+				SessionCacheHitTokens:   e.SessionHit, SessionCacheMissTokens: e.SessionMiss,
 			}
 			if e.CacheDiagnostics != nil {
 				w.Usage.CacheDiagnostics = ToWireCacheDiagnostics(e.CacheDiagnostics)
@@ -111,8 +140,12 @@ func ToWire(e event.Event) Event {
 		}
 	case event.GuardianAssessment:
 		w.Guardian = ToWireGuardian(e.Guardian)
+	case event.ExtensionSurface, event.ExtensionStatus:
+		w.Extension = ToWireExtensionSurface(e.Extension)
 	case event.TurnDone:
 		w.Outcome = e.Outcome
+		w.CheckpointTurn = e.CheckpointTurn
+		w.Receipt = completionReceiptWire(e.Receipt)
 		if e.Readiness != nil {
 			w.Readiness = &FinalReadiness{Attempts: e.Readiness.Attempts, Missing: append([]string(nil), e.Readiness.Missing...)}
 		}
@@ -122,8 +155,35 @@ func ToWire(e event.Event) Event {
 	case event.Retrying:
 		w.RetryAttempt = e.RetryAttempt
 		w.RetryMax = e.RetryMax
+		if e.RetryScope != "" {
+			w.RetryScope = string(e.RetryScope)
+		}
+	case event.StreamAttempt:
+		w.StreamAttempt = &StreamAttempt{
+			ID:      e.StreamAttempt.ID,
+			Action:  string(e.StreamAttempt.Action),
+			Attempt: e.StreamAttempt.Attempt,
+			Max:     e.StreamAttempt.Max,
+			Reason:  e.StreamAttempt.Reason,
+		}
 	}
 	return w
+}
+
+// DecisionReceipt is the JSON form of a provider-excluded user decision.
+type DecisionReceipt struct {
+	ID      string `json:"id"`
+	Kind    string `json:"kind"`
+	Tool    string `json:"tool,omitempty"`
+	Subject string `json:"subject,omitempty"`
+	Outcome string `json:"outcome"`
+}
+
+func ToWireDecisionReceipt(in *provider.DecisionReceipt) *DecisionReceipt {
+	if in == nil {
+		return nil
+	}
+	return &DecisionReceipt{ID: in.ID, Kind: in.Kind, Tool: in.Tool, Subject: in.Subject, Outcome: in.Outcome}
 }
 
 type FinalReadiness struct {
@@ -197,24 +257,62 @@ type Profile struct {
 
 // Tool is the JSON form of an event.Tool.
 type Tool struct {
-	ID           string   `json:"id,omitempty"`
-	Name         string   `json:"name"`
-	Args         string   `json:"args,omitempty" externalizable:"true"`
-	ResolvedName string   `json:"resolvedName,omitempty"`
-	CapabilityID string   `json:"capabilityId,omitempty"`
-	Output       string   `json:"output,omitempty" externalizable:"true"`
-	Err          string   `json:"err,omitempty" externalizable:"true"`
-	ReadOnly     bool     `json:"readOnly"`
-	Truncated    bool     `json:"truncated,omitempty"`
-	DurationMs   int64    `json:"durationMs,omitempty"`
-	Partial      bool     `json:"partial,omitempty"`
-	ArgChars     int      `json:"argChars,omitempty"`
-	Refreshed    bool     `json:"refreshed,omitempty"`
-	ParentID     string   `json:"parentId,omitempty"`
-	Diff         string   `json:"diff,omitempty" externalizable:"true"`
-	Added        int      `json:"added,omitempty"`
-	Removed      int      `json:"removed,omitempty"`
-	Profile      *Profile `json:"profile,omitempty"`
+	ID           string          `json:"id,omitempty"`
+	Name         string          `json:"name"`
+	Args         string          `json:"args,omitempty" externalizable:"true"`
+	ResolvedName string          `json:"resolvedName,omitempty"`
+	CapabilityID string          `json:"capabilityId,omitempty"`
+	Output       string          `json:"output,omitempty" externalizable:"true"`
+	Err          string          `json:"err,omitempty" externalizable:"true"`
+	ReadOnly     bool            `json:"readOnly"`
+	Truncated    bool            `json:"truncated,omitempty"`
+	DurationMs   int64           `json:"durationMs,omitempty"`
+	StartedAt    int64           `json:"startedAt,omitempty"` // unix ms; zero when the call never ran
+	EndedAt      int64           `json:"endedAt,omitempty"`
+	Partial      bool            `json:"partial,omitempty"`
+	ArgChars     int             `json:"argChars,omitempty"`
+	Refreshed    bool            `json:"refreshed,omitempty"`
+	ParentID     string          `json:"parentId,omitempty"`
+	AttemptID    string          `json:"attemptId,omitempty"` // host-local stream_attempt id for speculative partials
+	Diff         string          `json:"diff,omitempty" externalizable:"true"`
+	Added        int             `json:"added,omitempty"`
+	Removed      int             `json:"removed,omitempty"`
+	Profile      *Profile        `json:"profile,omitempty"`
+	Execution    *ShellExecution `json:"execution,omitempty"`
+}
+
+// ShellExecution is the JSON form of event.ShellExecution (local UI metadata).
+type ShellExecution struct {
+	Kind           string `json:"kind,omitempty"`
+	Shell          string `json:"shell,omitempty"`
+	ShellVersion   string `json:"shellVersion,omitempty"`
+	Platform       string `json:"platform,omitempty"`
+	SupportsAndAnd bool   `json:"supportsAndAnd"`
+	State          string `json:"state,omitempty"`
+	FailurePhase   string `json:"failurePhase,omitempty"`
+	ExitCode       *int   `json:"exitCode,omitempty"`
+	OutputTail     string `json:"outputTail,omitempty"`
+	MutationRisk   string `json:"mutationRisk,omitempty"`
+	Verification   string `json:"verification,omitempty"`
+	DurationMs     int64  `json:"durationMs,omitempty"`
+}
+
+func toWireShellExecution(in *event.ShellExecution) *ShellExecution {
+	if in == nil {
+		return nil
+	}
+	out := &ShellExecution{
+		Kind: in.Kind, Shell: in.Shell, ShellVersion: in.ShellVersion,
+		Platform: in.Platform, SupportsAndAnd: in.SupportsAndAnd,
+		State: in.State, FailurePhase: in.FailurePhase,
+		OutputTail: in.OutputTail, MutationRisk: in.MutationRisk,
+		Verification: in.Verification, DurationMs: in.DurationMs,
+	}
+	if in.ExitCode != nil {
+		code := *in.ExitCode
+		out.ExitCode = &code
+	}
+	return out
 }
 
 // Usage is the JSON form of provider usage telemetry.
@@ -229,10 +327,17 @@ type Usage struct {
 	Source           string            `json:"source,omitempty"`
 	CacheDiagnostics *CacheDiagnostics `json:"cacheDiagnostics,omitempty"`
 	// Session-cumulative cache tokens keep status displays steadier than one-turn values.
-	SessionCacheHitTokens  int     `json:"sessionCacheHitTokens"`
-	SessionCacheMissTokens int     `json:"sessionCacheMissTokens"`
-	Cost                   float64 `json:"cost,omitempty"`
-	Currency               string  `json:"currency,omitempty"`
+	SessionCacheHitTokens  int `json:"sessionCacheHitTokens"`
+	SessionCacheMissTokens int `json:"sessionCacheMissTokens"`
+	// Context* fields are the latest single-request shape for gauges/rebind.
+	// When omitted, clients fall back to the billable prompt/completion totals.
+	ContextPromptTokens     int     `json:"contextPromptTokens,omitempty"`
+	ContextCompletionTokens int     `json:"contextCompletionTokens,omitempty"`
+	ContextReasoningTokens  int     `json:"contextReasoningTokens,omitempty"`
+	ContextCacheHitTokens   int     `json:"contextCacheHitTokens,omitempty"`
+	ContextCacheMissTokens  int     `json:"contextCacheMissTokens,omitempty"`
+	Cost                    float64 `json:"cost,omitempty"`
+	Currency                string  `json:"currency,omitempty"`
 	// CostUSD is a compatibility alias for older consumers; it mirrors Cost.
 	CostUSD float64 `json:"costUsd,omitempty"`
 }
@@ -353,12 +458,19 @@ func ToWireCacheDiagnostics(d *event.CacheDiagnostics) *CacheDiagnostics {
 // generator; callers receive a copy and may sort it without mutating eventwire.
 func KindNames() []string {
 	names := make([]string, 0, int(event.KindCount))
-	for kind := event.Kind(0); kind < event.KindCount; kind++ {
+	for kind := range event.KindCount {
 		if name, ok := kindNames[kind]; ok {
 			names = append(names, name)
 		}
 	}
 	return names
+}
+
+// KindName returns the stable wire name of one event kind, or false for a
+// kind outside the known set.
+func KindName(kind event.Kind) (string, bool) {
+	name, ok := kindNames[kind]
+	return name, ok
 }
 
 var kindNames = map[event.Kind]string{
@@ -381,4 +493,137 @@ var kindNames = map[event.Kind]string{
 	event.Retrying:           "retrying",
 	event.Steer:              "steer",
 	event.GuardianAssessment: "guardian_assessment",
+	event.ExtensionSurface:   "extension_surface",
+	event.ExtensionStatus:    "extension_status",
+	event.StreamAttempt:      "stream_attempt",
+}
+
+// ExtensionSurface is the JSON form of an event.ExtensionSurfacePayload.
+type ExtensionSurface struct {
+	PluginID     string                 `json:"pluginId"`
+	SurfaceID    string                 `json:"surfaceId"`
+	SessionID    string                 `json:"sessionId,omitempty"`
+	Generation   uint64                 `json:"generation,omitempty"`
+	Kind         string                 `json:"kind"`
+	Status       *ExtensionStatus       `json:"status,omitempty"`
+	Card         *ExtensionCard         `json:"card,omitempty"`
+	Form         *ExtensionForm         `json:"form,omitempty"`
+	Notification *ExtensionNotification `json:"notification,omitempty"`
+}
+
+// ExtensionStatus is the JSON form of an event.ExtensionStatusView.
+type ExtensionStatus struct {
+	Label    string   `json:"label"`
+	Detail   string   `json:"detail,omitempty"`
+	Severity string   `json:"severity,omitempty"`
+	Progress *float64 `json:"progress,omitempty"`
+}
+
+// ExtensionKeyValue is the JSON form of an event.ExtensionKeyValue.
+type ExtensionKeyValue struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// ExtensionActionRef is the JSON form of an event.ExtensionActionRef.
+type ExtensionActionRef struct {
+	ActionID string `json:"actionId"`
+	Label    string `json:"label"`
+}
+
+// ExtensionCard is the JSON form of an event.ExtensionCardView.
+type ExtensionCard struct {
+	Title    string               `json:"title,omitempty"`
+	Markdown string               `json:"markdown,omitempty" externalizable:"true"`
+	Text     string               `json:"text,omitempty" externalizable:"true"`
+	Fields   []ExtensionKeyValue  `json:"fields,omitempty"`
+	Progress *float64             `json:"progress,omitempty"`
+	Actions  []ExtensionActionRef `json:"actions,omitempty"`
+}
+
+// ExtensionFormField is the JSON form of an event.ExtensionFormField. Default
+// travels as raw JSON: the remote schema has no "any" type, and the field is
+// already protocol-validated JSON on arrival.
+type ExtensionFormField struct {
+	Key      string          `json:"key"`
+	Label    string          `json:"label,omitempty"`
+	Kind     string          `json:"kind,omitempty"`
+	Options  []string        `json:"options,omitempty"`
+	Default  json.RawMessage `json:"default,omitempty"`
+	Required bool            `json:"required,omitempty"`
+}
+
+// ExtensionForm is the JSON form of an event.ExtensionFormView.
+type ExtensionForm struct {
+	Title   string               `json:"title,omitempty"`
+	Message string               `json:"message,omitempty" externalizable:"true"`
+	Fields  []ExtensionFormField `json:"fields"`
+}
+
+// ExtensionNotification is the JSON form of an event.ExtensionNotificationView.
+type ExtensionNotification struct {
+	Title    string `json:"title"`
+	Body     string `json:"body,omitempty" externalizable:"true"`
+	Severity string `json:"severity,omitempty"`
+}
+
+// ToWireExtensionSurface converts an event.ExtensionSurfacePayload into its
+// JSON wire form. A nil payload yields nil so a malformed event never
+// marshals a half-filled extension object.
+func ToWireExtensionSurface(p *event.ExtensionSurfacePayload) *ExtensionSurface {
+	if p == nil {
+		return nil
+	}
+	out := &ExtensionSurface{
+		PluginID: p.PluginID, SurfaceID: p.SurfaceID, SessionID: p.SessionID,
+		Generation: p.Generation, Kind: p.Kind,
+	}
+	if s := p.Status; s != nil {
+		out.Status = &ExtensionStatus{Label: s.Label, Detail: s.Detail, Severity: s.Severity, Progress: s.Progress}
+	}
+	if c := p.Card; c != nil {
+		card := &ExtensionCard{
+			Title: c.Title, Markdown: c.Markdown, Text: c.Text, Progress: c.Progress,
+		}
+		if len(c.Fields) > 0 {
+			card.Fields = make([]ExtensionKeyValue, len(c.Fields))
+			for i, f := range c.Fields {
+				card.Fields[i] = ExtensionKeyValue{Key: f.Key, Value: f.Value}
+			}
+		}
+		if len(c.Actions) > 0 {
+			card.Actions = make([]ExtensionActionRef, len(c.Actions))
+			for i, a := range c.Actions {
+				card.Actions[i] = ExtensionActionRef{ActionID: a.ActionID, Label: a.Label}
+			}
+		}
+		out.Card = card
+	}
+	if f := p.Form; f != nil {
+		form := &ExtensionForm{Title: f.Title, Message: f.Message}
+		if len(f.Fields) > 0 {
+			form.Fields = make([]ExtensionFormField, len(f.Fields))
+			for i, field := range f.Fields {
+				wireField := ExtensionFormField{
+					Key: field.Key, Label: field.Label, Kind: field.Kind,
+					Options:  append([]string(nil), field.Options...),
+					Required: field.Required,
+				}
+				if field.Default != nil {
+					// The value arrived as protocol-validated JSON, so a
+					// marshal failure here is unreachable in practice; a
+					// pathological in-memory value simply drops the default.
+					if raw, err := json.Marshal(field.Default); err == nil {
+						wireField.Default = raw
+					}
+				}
+				form.Fields[i] = wireField
+			}
+		}
+		out.Form = form
+	}
+	if n := p.Notification; n != nil {
+		out.Notification = &ExtensionNotification{Title: n.Title, Body: n.Body, Severity: n.Severity}
+	}
+	return out
 }

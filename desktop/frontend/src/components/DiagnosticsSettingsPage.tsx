@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight, Clipboard, Loader2, RefreshCw } from "lucide
 import { app } from "../lib/bridge";
 import { asArray } from "../lib/array";
 import { useT } from "../lib/i18n";
-import type { CapabilityDiagnosticsReport, CapabilityIssue, SettingsTab } from "../lib/types";
+import type { CapabilityDiagnosticsReport, CapabilityIssue, RuntimeDoctorReport, SettingsTab } from "../lib/types";
 
 export function DiagnosticsSettingsPage({
   onNavigate,
@@ -12,12 +12,14 @@ export function DiagnosticsSettingsPage({
 }) {
   const t = useT();
   const [report, setReport] = useState<CapabilityDiagnosticsReport | null>(null);
+  const [runtimeDoctor, setRuntimeDoctor] = useState<RuntimeDoctorReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [includeRuntime, setIncludeRuntime] = useState(false);
   const [copied, setCopied] = useState(false);
   const [open, setOpen] = useState<Record<string, boolean>>({
     issues: true,
+    runtime: true,
     instructions: false,
     skills: false,
     commands: false,
@@ -34,13 +36,21 @@ export function DiagnosticsSettingsPage({
     setError(null);
     try {
       const next = normalizeDiagnosticsReport(await app.CapabilityDiagnostics(runtime));
+      let doctor: RuntimeDoctorReport | null = null;
+      try {
+        doctor = await app.RuntimeDoctor();
+      } catch {
+        doctor = null;
+      }
       // Last-request-wins: ignore stale responses after rapid refresh/toggle.
       if (seq !== loadSeq.current) return;
       setReport(next);
+      setRuntimeDoctor(doctor);
     } catch (err) {
       if (seq !== loadSeq.current) return;
       setError(err instanceof Error ? err.message : String(err));
       setReport(null);
+      setRuntimeDoctor(null);
     } finally {
       if (seq === loadSeq.current) {
         setLoading(false);
@@ -138,6 +148,42 @@ export function DiagnosticsSettingsPage({
               </span>
             </div>
           </div>
+
+          {runtimeDoctor && (
+            <section className="diag-section">
+              <button type="button" className="diag-section__header" onClick={() => toggle("runtime")}>
+                {open.runtime ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                <span>Extension runtime (v2)</span>
+              </button>
+              {open.runtime && (
+                <div className="diag-section__body">
+                  <div className="diag-summary">
+                    <div className="diag-summary__item">
+                      <strong>{runtimeDoctor.publishedGeneration}</strong>
+                      <span>generation</span>
+                    </div>
+                    <div className="diag-summary__item">
+                      <strong>{runtimeDoctor.allowResume ? "yes" : "no"}</strong>
+                      <span>allow resume</span>
+                    </div>
+                    <div className="diag-summary__item">
+                      <strong>{runtimeDoctor.cleanRollback ? "yes" : "no"}</strong>
+                      <span>clean rollback</span>
+                    </div>
+                    <div className="diag-summary__meta">
+                      <span>
+                        no-op={runtimeDoctor.noOpRebuilds} subgraph={runtimeDoctor.subgraphRebuilds} full={runtimeDoctor.fullRebuilds}{" "}
+                        staleDrops={runtimeDoctor.staleDrops} admitReject={runtimeDoctor.admissionRejected} ownerFallbacks={runtimeDoctor.runtimeOwnerFallbacks}
+                      </span>
+                    </div>
+                  </div>
+                  <pre className="diag-path" style={{ whiteSpace: "pre-wrap", marginTop: 8 }}>
+                    {runtimeDoctor.text}
+                  </pre>
+                </div>
+              )}
+            </section>
+          )}
 
           <section className="diag-section">
             <button type="button" className="diag-section__header" onClick={() => toggle("issues")}>

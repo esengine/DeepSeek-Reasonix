@@ -36,10 +36,7 @@ var highRiskToolHints = []string{
 // Medium: ordinary production code or limited multi-file edits.
 // High: security-sensitive surfaces, opaque mutations, or 10+ paths.
 func ClassifyMutationRisk(receipts []Receipt, after int) RiskLevel {
-	start := after + 1
-	if start < 0 {
-		start = 0
-	}
+	start := max(after+1, 0)
 	var paths []string
 	seen := map[string]bool{}
 	opaque := false
@@ -123,10 +120,7 @@ func (l *Ledger) PathsSince(after int) []string {
 	if l == nil {
 		return nil
 	}
-	start := after
-	if start < 0 {
-		start = 0
-	}
+	start := max(after, 0)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	seen := map[string]bool{}

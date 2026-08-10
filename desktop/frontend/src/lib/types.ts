@@ -22,7 +22,21 @@ export type EventKind =
   | "mcp_surface_ready"
   | "retrying"
   | "steer"
-  | "guardian_assessment";
+  | "guardian_assessment"
+  | "extension_surface"
+  | "extension_status"
+  | "stream_attempt";
+
+export type StreamAttemptAction = "begin" | "discard" | "commit";
+
+export interface WireStreamAttempt {
+  id: string;
+  action: StreamAttemptAction;
+  attempt?: number;
+  max?: number;
+  /** Fixed enum only: connection_reset | premature_eof | idle_timeout */
+  reason?: string;
+}
 
 export interface WireCompaction {
   trigger?: string; // "auto" | "manual"
@@ -34,6 +48,21 @@ export interface WireCompaction {
 export interface WireProfile {
   model?: string;
   effort?: string;
+}
+
+export interface WireShellExecution {
+  kind?: string;
+  shell?: string;
+  shellVersion?: string;
+  platform?: string;
+  supportsAndAnd?: boolean;
+  state?: string;
+  failurePhase?: string;
+  exitCode?: number;
+  outputTail?: string;
+  mutationRisk?: string;
+  verification?: string;
+  durationMs?: number;
 }
 
 export interface WireTool {
@@ -51,10 +80,13 @@ export interface WireTool {
   argChars?: number; // partial only: cumulative argument chars streamed so far
   refreshed?: boolean; // same-ID full dispatch with a preview recomputed after an earlier write
   parentId?: string; // set on a sub-agent's calls — the parent `task` call's id
+  /** Host-local stream_attempt id for speculative parent partials only. */
+  attemptId?: string;
   diff?: string;
   added?: number;
   removed?: number;
   profile?: WireProfile; // subagent model/effort resolved for this call
+  execution?: WireShellExecution; // local shell metadata; never provider-visible
 }
 
 export interface WireCacheDiagnostics {
@@ -83,6 +115,12 @@ export interface WireUsage {
   // hit-rate (Σhit/Σ(hit+miss)), steadier than the single-turn cacheHitTokens.
   sessionCacheHitTokens: number;
   sessionCacheMissTokens: number;
+  /** Latest single-request shape for context gauges; omit → use billable totals. */
+  contextPromptTokens?: number;
+  contextCompletionTokens?: number;
+  contextReasoningTokens?: number;
+  contextCacheHitTokens?: number;
+  contextCacheMissTokens?: number;
   cost?: number;
   currency?: string;
   // Deprecated compatibility alias. Prefer cost + currency.
@@ -127,6 +165,14 @@ export interface WireGuardian {
   usage?: WireUsage;
 }
 
+export interface WireDecisionReceipt {
+  id: string;
+  kind: string;
+  tool?: string;
+  subject?: string;
+  outcome: string;
+}
+
 export interface WireAskOption {
   label: string;
   description?: string;
@@ -143,6 +189,78 @@ export interface WireAskQuestion {
 export interface WireAsk {
   id: string;
   questions: WireAskQuestion[];
+}
+
+// Extension UI surfaces (stage 8a) — structured-only documents published by
+// extension sidecars through the host UI hub. Exactly one sub-struct is set,
+// selected by `kind`.
+export interface WireExtensionStatus {
+  label: string;
+  detail?: string;
+  severity?: string; // "info" | "warn" | "error"
+  progress?: number;
+}
+
+export interface WireExtensionKeyValue {
+  key: string;
+  value: string;
+}
+
+export interface WireExtensionActionRef {
+  actionId: string;
+  label: string;
+}
+
+export interface WireExtensionCard {
+  title?: string;
+  markdown?: string;
+  text?: string;
+  fields?: WireExtensionKeyValue[];
+  progress?: number;
+  actions?: WireExtensionActionRef[];
+}
+
+export interface WireExtensionFormField {
+  key: string;
+  label?: string;
+  kind?: string; // "confirm" | "input" | "select" | "multiselect"
+  options?: string[];
+  default?: unknown;
+  required?: boolean;
+}
+
+export interface WireExtensionForm {
+  title?: string;
+  message?: string;
+  fields: WireExtensionFormField[];
+}
+
+export interface WireExtensionNotification {
+  title: string;
+  body?: string;
+  severity?: string; // "info" | "warn" | "error"
+}
+
+export interface WireExtensionSurface {
+  pluginId: string;
+  surfaceId: string;
+  sessionId?: string;
+  generation?: number;
+  kind: string; // "status" | "card" | "form" | "notification"
+  status?: WireExtensionStatus;
+  card?: WireExtensionCard;
+  form?: WireExtensionForm;
+  notification?: WireExtensionNotification;
+}
+
+// ExtensionActionView is one handshake-declared extension UI action, the JSON
+// twin of desktop's ExtensionActionView (stage 8b2). Slash is the public
+// invocation name, "/<plugin>:<action>".
+export interface ExtensionActionView {
+  plugin: string;
+  action: string;
+  slash: string;
+  description?: string;
 }
 
 // QuestionAnswer is the reply for one question, sent back via AnswerQuestion.
@@ -175,14 +293,19 @@ export interface WireEvent {
   ask?: WireAsk;
   compaction?: WireCompaction;
   guardian?: WireGuardian;
+  decisionReceipt?: WireDecisionReceipt;
+  extension?: WireExtensionSurface;
   err?: string;
+  checkpointTurn?: number; // Authoritative TurnDone rewind target; zero is valid.
+  submissionId?: string; // Opaque correlation for the exact optimistic user submission.
   outcome?: "final_readiness" | "recovery_paused";
   readiness?: WireFinalReadiness;
   retryAttempt?: number;
   retryMax?: number;
-  // Tab routing: set by the Go-side tabEventSink so multi-tab frontends
-  // route each event to the correct per-tab reducer.
-  tabId?: string;
+  /** Optional: "headers" | "stream". Older clients ignore unknown fields. */
+  retryScope?: "headers" | "stream";
+  streamAttempt?: WireStreamAttempt;
+  tabId?: string; // Go's tabEventSink tags events for the correct per-tab reducer.
   runtimeEpoch?: string;
   sessionHitTokens?: number;
   sessionMissTokens?: number;
@@ -227,6 +350,8 @@ export interface TabMeta {
   topicId: string;
   topicTitle: string;
   sessionPath?: string;
+  sessionRevision?: number;
+  sessionDigest?: string;
   readOnly?: boolean;
   filePath?: string;
   projectColor?: string;
@@ -244,7 +369,6 @@ export interface TabMeta {
   tokenMode?: TokenMode;
   goal?: string;
   goalStatus?: GoalStatus;
-  autoResearch?: AutoResearchCompactView;
   recovered?: boolean;
   recoveryReason?: string;
   recoveryDigest?: string;
@@ -419,11 +543,13 @@ export interface HistoryMessage {
   toolName?: string;
   toolResultArchived?: boolean;
   toolResultError?: string;
+  execution?: WireShellExecution;
   pending?: boolean;
   trigger?: string;
   messages?: number;
   summary?: string;
   archive?: string;
+  decisionReceipt?: WireDecisionReceipt;
 }
 
 export interface HistoryToolCall {
@@ -447,6 +573,99 @@ export interface HistoryPage {
   endTurn: number;
   totalTurns: number;
   hasOlder: boolean;
+  revision?: number;
+  digest?: string;
+}
+
+// ── Windowed history paging (desktop/history_slice.go) ──────────────────────
+// HistorySliceForTab pages toward older history with an opaque cursor; the
+// first call uses cursor "" for the newest page. Entry IDs are stable for the
+// life of a session revision (s<file>:r<epoch>:m<msgIndex>:o<subOrder>).
+
+export interface HistorySliceRequest {
+  cursor: string; // "" = newest page; pass nextCursor to page older
+  turns?: number;
+  entries?: number;
+  bytes?: number;
+}
+
+// HistoryContentRef marks a string field replaced inline by a ≤4KiB preview;
+// the full value is fetchable in chunks via HistoryContentForTab.
+export interface HistoryContentRef {
+  entryId: string;
+  field: string; // content|reasoning|submitText|detail|code|summary|archive|toolResultError|toolArguments|toolSubject|toolSummary|toolDiff
+  size: number;
+  chunks: number;
+  toolCallId?: string;
+  revision: number;
+  revKnown?: boolean;
+  digest: string;
+}
+
+export interface HistoryEntry {
+  entryId: string;
+  turn: number; // 1-based visible turn (0 = before the first turn)
+  order: number; // absolute provider-message index
+  message: HistoryMessage;
+  refs: HistoryContentRef[];
+}
+
+export interface HistorySlice {
+  entries: HistoryEntry[];
+  nextCursor: string; // toward older; empty when none
+  hasOlder: boolean;
+  totalTurns: number;
+  startTurn: number;
+  endTurn: number;
+  stale: boolean; // cursor bound to an older session revision: discard + reload
+  revision: number;
+  revisionKnown?: boolean;
+  digest?: string;
+  // Diagnostic read path: index|scan|event-log|live-index|live-fallback (empty when the
+  // backend predates the field or no session was readable).
+  source?: string;
+}
+
+export interface HistoryContentChunk {
+  entryId: string;
+  field: string;
+  chunk: number;
+  chunks: number;
+  data: string;
+  done: boolean;
+  stale: boolean;
+}
+
+// ── Two-phase topic activation (desktop/topic_activation.go) ────────────────
+
+export interface TopicActivationRequest {
+  scope: string;
+  workspaceRoot: string;
+  topicId: string;
+  sessionPath: string;
+  requestId?: string;
+}
+
+export interface TopicActivationTicket {
+  requestId: string;
+  tabId: string;
+  meta: TabMeta;
+}
+
+export type TopicActivationPhase = "starting" | "ready" | "failed" | "cancelled";
+
+export interface TopicActivationEvent {
+  requestId: string;
+  tabId: string;
+  phase: TopicActivationPhase;
+  error?: string;
+}
+
+// tab:meta channel: a full refreshed Meta pushed after the background refresh
+// of the expensive MetaForTab fields (git branch, image-input capability).
+export interface TabMetaRefreshEvent {
+  tabId: string;
+  meta: Meta;
 }
 
 export interface PromptHistoryEntry {
@@ -578,11 +797,13 @@ export interface Meta {
   runtime?: SessionRuntimeView;
   startupErr?: string;
   eventChannel: string;
+  sessionPath?: string;
+  sessionRevision?: number;
+  sessionDigest?: string;
   cwd: string;
   workspaceRoot?: string;
   workspaceName?: string;
   workspacePath?: string;
-  sessionPath?: string;
   gitBranch?: string;
   imageInputEnabled?: boolean;
   autoApproveTools?: boolean;
@@ -593,7 +814,6 @@ export interface Meta {
   goal?: string;
   goalStatus?: GoalStatus;
   goalRuntime?: GoalRuntime;
-  autoResearch?: AutoResearchCompactView;
   canonicalTodos?: Todo[];
 }
 
@@ -609,61 +829,13 @@ export interface GoalRuntime {
   turnsUsed: number;
   turnsLimit: number;
   tokensUsed: number;
+  /** @deprecated Goal has no hard token limit; retained as 0 for old hosts/clients. */
   tokensLimit: number;
   noProgressTurns: number;
   noProgressLimit: number;
   lastReason?: string;
   stopCause?: string;
   budgetExtensions: number;
-}
-
-export interface AutoResearchCompactView {
-  taskId: string;
-  status: "running" | "blocked" | "complete" | "stopped" | "invalid";
-  iteration: number;
-  pivotRequired: boolean;
-  staleCount: number;
-}
-
-export interface AutoResearchCriterionView {
-  id: string;
-  description: string;
-  required: boolean;
-  evidenceCount: number;
-  status: string;
-}
-
-export interface AutoResearchStatusView extends AutoResearchCompactView {
-  goal: string;
-  currentDirection: string;
-  pivotCount: number;
-  lastHeartbeatAt: string;
-  findingCount: number;
-  openCriteria: AutoResearchCriterionView[];
-  blocker: string;
-  taskPath: string;
-  nextRequiredAction: string;
-}
-
-export interface AutoResearchFindingView {
-  id: string;
-  kind: string;
-  summary: string;
-  source: string;
-  command?: string;
-  paths?: string[];
-  accepted: boolean;
-  createdAt: string;
-}
-
-export interface AutoResearchEvidenceView {
-  id: string;
-  kind: string;
-  summary: string;
-  source: string;
-  command?: string;
-  paths?: string[];
-  accepted: boolean;
 }
 
 export function normalizeCollaborationMode(mode?: string, goal?: string, legacyMode?: Mode): CollaborationMode {
@@ -862,6 +1034,7 @@ export interface SkillView {
   name: string;
   description: string;
   scope: string;
+  sourceDir?: string;
   runAs: string;
   enabled: boolean;
   plugin?: string;
@@ -893,6 +1066,7 @@ export interface SkillRootView {
   scope: string;
   priority: number;
   status: string;
+  enabled: boolean;
   configured: boolean;
   removable: boolean;
   skills: number;
@@ -904,10 +1078,12 @@ export interface CapabilitiesView {
   skills: SkillView[];
   skillRoots: SkillRootView[];
   plugins: PluginView[];
+  allowImplicitInvocation?: boolean;
 }
 export interface SkillsSettingsView {
   skills: SkillView[];
   skillRoots: SkillRootView[];
+  allowImplicitInvocation?: boolean;
 }
 export interface SubagentProfileInput {
   name: string;
@@ -1183,7 +1359,7 @@ export interface MemoryView {
 }
 
 // SettingsTab is the top-level navigation item in the Settings Centre modal.
-export type SettingsTab = "general" | "models" | "providers" | "bots" | "mcp" | "remote" | "skills" | "subagents" | "plugins" | "memory" | "hooks" | "diagnostics" | "shortcuts" | "permissions" | "sandbox" | "network" | "appearance" | "updates";
+export type SettingsTab = "general" | "models" | "providers" | "bots" | "mcp" | "remote" | "skills" | "subagents" | "plugins" | "memory" | "hooks" | "diagnostics" | "shortcuts" | "permissions" | "sandbox" | "network" | "appearance" | "storage" | "updates";
 
 // ── Remote SSH module (mirrors desktop/remote_app.go view structs) ──
 
@@ -1328,9 +1504,30 @@ export interface RemoteServerView {
   error?: string;
 }
 
+/** Path-free summary of files left behind by the removed Remote Workbench. */
+export interface RemoteLegacyWorkbenchData {
+  mirrorCount: number;
+  mirrorBytes: number;
+  trustFile: boolean;
+}
+
 export interface RemoteForwardsEvent {
   hostId: string;
   forwards: RemoteForwardView[];
+}
+
+/** Extension runtime doctor report from App.RuntimeDoctor. */
+export interface RuntimeDoctorReport {
+  text: string;
+  publishedGeneration: number;
+  allowResume: boolean;
+  cleanRollback: boolean;
+  hasIrreversible: boolean;
+  noOpRebuilds: number;
+  fullRebuilds: number;
+  subgraphRebuilds: number;
+  staleDrops: number;
+  admissionRejected: number; runtimeOwnerFallbacks: number;
 }
 
 /** Capability diagnostics report from App.CapabilityDiagnostics (capdiag.Report). */
@@ -1443,6 +1640,7 @@ export interface ProviderView {
   models: string[];
   visionModels: string[]; // subset of models that accepts image input
   visionModelsConfigured: boolean; // true when an empty list is an explicit choice
+  visionCapability?: "configurable" | "unsupported"; // backend authority; absent on older Wails payloads
   modelsUrl: string; // optional override for model discovery; empty derives from baseUrl
   default: string;
   apiKeyEnv: string;
@@ -1456,12 +1654,14 @@ export interface ProviderView {
   keySourcePath?: string;
   balanceUrl: string; // optional wallet-balance endpoint; "" disables the readout
   contextWindow: number;
-  reasoningProtocol: string; // auto|deepseek|glm|openai|none; empty = auto/model registry
+  reasoningProtocol: string; // auto|deepseek|glm|kimi-k3|openai|none; empty = auto/model registry
   thinking: string; // provider-specific thinking override: ""|enabled|disabled|adaptive
   webSearch?: boolean; // expose a provider-executed web search tool when supported
+  serverWebSearchCapability?: boolean; // backend-verified provider capability; absent on older Wails payloads
   supportedEfforts: string[]; // custom /effort levels; empty = use built-in Kind/BaseURL default
   defaultEffort: string; // /effort level when user picks "auto" or unset; "" = supportedEfforts[0]
   modelOverrides?: ProviderModelOverrideView[] | null;
+  recommendedUpgradeAvailable?: boolean; // official legacy OpenAI entry can switch to recommended Anthropic access
   modelCatalogFingerprint?: string; // opaque compare-and-apply token for background model discovery
 }
 
@@ -1497,6 +1697,7 @@ export interface ProviderModelOverrideView {
   defaultEffort: string;
   vision?: boolean | null;
   contextWindow?: number;
+  maxOutputTokens?: number;
 }
 
 // BalanceInfo is the wallet-balance readout (desktop/app.go Balance). available
@@ -1652,7 +1853,6 @@ export interface AgentView {
   compactRatio?: number; // Advanced global default; older backends omit it.
   effectiveCompactRatio?: number; // Active local session after project overrides.
   compactRatioOverridden?: boolean;
-  compactRatioRemote?: boolean; // Active session is owned by the remote host.
 }
 
 export interface BotAllowlistView {
@@ -1928,7 +2128,7 @@ export interface ExternalOpenerView {
 
 export interface ExternalOpenersView {
   openers: ExternalOpenerView[];
-  preferred: string;
+  preferred: string; workspaceOpenable?: boolean;
 }
 
 // Auto-updater payloads (desktop/updater.go). UpdateInfo drives the update banner;
@@ -1967,4 +2167,57 @@ export interface UpdateProgress {
   received: number;
   total: number;
   err?: string;
+}
+
+// Task Monitor panel types (internal/taskmonitor).
+
+export type TaskState =
+  | "queued"
+  | "running"
+  | "waiting"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "stale"
+  | string; // forward-compat
+
+export type RuntimeState = "unknown" | "alive" | "exited" | string;
+
+export interface TaskSnapshot {
+  schema_version: number;
+  task_id: string;
+  job_id?: string; // jobs.Manager-local runtime identifier
+  session_id: string;
+  state: TaskState;
+  runtime_state?: RuntimeState; // absent in snapshots written before this field existed
+  version: number;
+  created_at: string; // ISO 8601
+  updated_at: string; // ISO 8601
+  error_code?: string;
+  error_summary?: string;
+}
+
+export interface ControlResult {
+  schema_version: number;
+  command: string;
+  task_id: string;
+  session_id?: string;
+  state?: TaskState;
+  runtime_state?: RuntimeState;
+  version?: number;
+  accepted: boolean;
+  idempotent: boolean;
+  error?: { code: string; message: string };
+}
+
+export interface TaskEvent {
+  sequence: number;
+  timestamp: string; // ISO 8601
+  event_type: string;
+  task_id: string;
+  session_id: string;
+  state: TaskState;
+  runtime_state?: RuntimeState;
+  error_code?: string;
+  error_summary?: string;
 }

@@ -39,7 +39,20 @@ func newTestChatTUI() chatTUI {
 		shellExpanded:        shellExp,
 		shellTranscriptIdx:   shellIdx,
 		toolLineCountByID:    map[string]int{},
+		subagentProgressIdx:  map[string]int{},
+		subagentProgress:     map[string]*cliSubagentProgress{},
+		showTurnUsage:        true,
 	}
+}
+
+// subagentStatus / subagentPreview build reserved ToolProgress events the same
+// way the agent tracker emits them.
+func subagentStatus(id, phase string) event.Event {
+	return event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: id, Name: event.SubagentProgressStatusName, Output: phase}}
+}
+
+func subagentPreview(id, channel, text string, truncated bool) event.Event {
+	return event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: id, Name: channel, Output: text, Truncated: truncated}}
 }
 
 func TestCacheRateLabelKeepsTwoDecimals(t *testing.T) {
@@ -124,6 +137,23 @@ func TestTurnReceiptLeavesOneBlankRowAfterAssistantAnswer(t *testing.T) {
 	}
 	if !strings.Contains(ansi.Strip(m.transcript[2]), "TURN") {
 		t.Fatalf("last block should be the turn receipt, got %q", m.transcript[2])
+	}
+}
+
+func TestTurnReceiptCanBeHiddenWithoutDisablingUsageAccounting(t *testing.T) {
+	m := newTestChatTUI()
+	m.showTurnUsage = false
+	m.ingestEvent(event.Event{Kind: event.Text, Text: "Answer"})
+	m.ingestEvent(event.Event{Kind: event.Message})
+	m.ingestEvent(event.Event{Kind: event.Usage, Usage: &provider.Usage{
+		PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12,
+	}})
+
+	if len(m.transcript) != 1 {
+		t.Fatalf("hidden turn receipt should not add transcript blocks, got %d: %v", len(m.transcript), m.transcript)
+	}
+	if m.turnTokens != 2 {
+		t.Fatalf("hidden turn receipt should still account for completion tokens, got %d", m.turnTokens)
 	}
 }
 
@@ -374,6 +404,18 @@ func TestRepeatedShellCommandDoesNotAccumulateOutput(t *testing.T) {
 	}
 }
 
+func TestShellResultReplacesCappedLiveProgress(t *testing.T) {
+	m := newTestChatTUI()
+	const id = "shell-build"
+	const final = "build started\n...[truncated]...\nfinal compiler error\n"
+	m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: id, Name: "bash", Args: `{"command":"build"}`}})
+	m.ingestEvent(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: id, Output: "build started\n...[live capped]...\n"}})
+	m.ingestEvent(event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: id, Name: "bash", Output: final}})
+	if got := m.shellOutputs[id]; got != final {
+		t.Fatalf("shellOutputs[%q] = %q, want bounded final result %q", id, got, final)
+	}
+}
+
 func TestCollapsedShellHintUsesKeyboardShortcutOnly(t *testing.T) {
 	m := newTestChatTUI()
 	const id = "shell-long"
@@ -458,7 +500,7 @@ func TestTodoPanelKeepsLastSuccessfulTodoWrite(t *testing.T) {
 func TestToolProgressTailCap(t *testing.T) {
 	m := newTestChatTUI()
 	m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "b1", Name: "bash", Args: `{"command":"x"}`}})
-	for i := 0; i < toolStreamTailLines+5; i++ {
+	for i := range toolStreamTailLines + 5 {
 		m.ingestEvent(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: "b1", Output: "line" + string(rune('A'+i)) + "\n"}})
 	}
 	block := m.transcript[m.toolStreamIdx]
@@ -474,7 +516,7 @@ func TestToolProgressTailCap(t *testing.T) {
 // long stream — the fix for the O(n²)/multi-GB re-render of the full thought.
 func TestReasoningViewBounded(t *testing.T) {
 	m := newTestChatTUI()
-	for i := 0; i < 5000; i++ {
+	for range 5000 {
 		m.ingestEvent(event.Event{Kind: event.Reasoning, Text: "some thinking text token "})
 	}
 	if len(m.reasoningView) > reasoningViewMax {
@@ -482,5 +524,174 @@ func TestReasoningViewBounded(t *testing.T) {
 	}
 	if c := strings.Count(m.transcript[m.reasoningTextIdx], "\n") + 1; c > reasoningTailLines {
 		t.Fatalf("live reasoning block kept %d lines, want <= %d", c, reasoningTailLines)
+	}
+}
+
+// TestSubagentProgressBlockShowsPhaseElapsedActivity proves the default block
+// shows phase, elapsed, and recent activity — never the reasoning body.
+func TestSubagentProgressBlockShowsPhaseElapsedActivity(t *testing.T) {
+	m := newTestChatTUI()
+	m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "task-1", Name: "task", Args: `{"prompt":"work"}`}})
+	m.ingestEvent(subagentStatus("task-1", "running"))
+	m.ingestEvent(subagentPreview("task-1", event.SubagentProgressReasoningName, "secret thinking", false))
+	m.ingestEvent(subagentStatus("task-1", "reasoning"))
+
+	joined := strings.Join(m.transcript, "\n")
+	if !strings.Contains(joined, "running") && !strings.Contains(joined, "reasoning") {
+		t.Fatalf("progress block should show the phase:\n%s", joined)
+	}
+	if strings.Contains(joined, "secret thinking") {
+		t.Fatalf("default block must not print the reasoning body:\n%s", joined)
+	}
+	if !strings.Contains(joined, "ago") {
+		t.Fatalf("progress block should show recent activity:\n%s", joined)
+	}
+}
+
+// TestSubagentProgressVerboseShowsBoundedTails proves verbose mode renders the
+// reasoning/text tails and marks truncation.
+func TestSubagentProgressVerboseShowsBoundedTails(t *testing.T) {
+	m := newTestChatTUI()
+	m.showReasoning = true
+	m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "task-1", Name: "task", Args: `{"prompt":"work"}`}})
+	m.ingestEvent(subagentStatus("task-1", "running"))
+	m.ingestEvent(subagentPreview("task-1", event.SubagentProgressReasoningName, "chain of thought", false))
+	m.ingestEvent(subagentPreview("task-1", event.SubagentProgressTextName, "draft answer", false))
+	m.ingestEvent(subagentPreview("task-1", event.SubagentProgressNoticeName, "heads up", true))
+
+	joined := strings.Join(m.transcript, "\n")
+	for _, want := range []string{"chain of thought", "draft answer", "heads up", "truncated"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("verbose block should show %q:\n%s", want, joined)
+		}
+	}
+
+	// Tails are bounded: a huge reasoning body keeps only the recent tail.
+	m.ingestEvent(subagentPreview("task-1", event.SubagentProgressReasoningName, strings.Repeat("x", subagentPreviewMax*2)+"END", false))
+	joined = strings.Join(m.transcript, "\n")
+	if !strings.Contains(joined, "END") || strings.Contains(joined, strings.Repeat("x", subagentPreviewMax)) {
+		t.Fatalf("verbose reasoning should keep a bounded tail:\n%s", joined)
+	}
+}
+
+// TestSubagentProgressTerminalCollapsesToOneLine proves terminal children fold
+// to a one-line summary (no recent-activity suffix), while the preview stays
+// available in verbose mode.
+func TestSubagentProgressTerminalCollapsesToOneLine(t *testing.T) {
+	m := newTestChatTUI()
+	m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "task-1", Name: "task", Args: `{"prompt":"work"}`}})
+	m.ingestEvent(subagentStatus("task-1", "running"))
+	m.ingestEvent(subagentPreview("task-1", event.SubagentProgressTextName, "answer body", false))
+	m.ingestEvent(subagentStatus("task-1", "completed"))
+
+	joined := strings.Join(m.transcript, "\n")
+	if strings.Contains(joined, "answer body") {
+		t.Fatalf("terminal block must collapse the preview away:\n%s", joined)
+	}
+	if !strings.Contains(joined, "completed") || strings.Contains(joined, "ago") {
+		t.Fatalf("terminal block should be a one-line summary:\n%s", joined)
+	}
+
+	// Verbose keeps the preview after terminal.
+	m2 := newTestChatTUI()
+	m2.showReasoning = true
+	m2.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "task-1", Name: "task", Args: `{"prompt":"work"}`}})
+	m2.ingestEvent(subagentPreview("task-1", event.SubagentProgressTextName, "answer body", false))
+	m2.ingestEvent(subagentStatus("task-1", "failed"))
+	joined = strings.Join(m2.transcript, "\n")
+	if !strings.Contains(joined, "answer body") || !strings.Contains(joined, "failed") {
+		t.Fatalf("verbose terminal block should keep the preview:\n%s", joined)
+	}
+}
+
+// TestSubagentProgressChildrenDoNotCrossStream proves concurrent children keep
+// their own fixed slots: each child's content stays under its own ID, and a
+// late event for one child never appends to another child's block.
+func TestSubagentProgressChildrenDoNotCrossStream(t *testing.T) {
+	m := newTestChatTUI()
+	m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "p-1", Name: "parallel_tasks", Args: `{}`}})
+	m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "p-1/sub-1", Name: "task", Args: `{}`, ParentID: "p-1"}})
+	m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "p-1/sub-2", Name: "task", Args: `{}`, ParentID: "p-1"}})
+
+	m.ingestEvent(subagentStatus("p-1/sub-1", "running"))
+	m.ingestEvent(subagentStatus("p-1/sub-2", "running"))
+	m.ingestEvent(subagentPreview("p-1/sub-1", event.SubagentProgressReasoningName, "AAAA", false))
+	m.ingestEvent(subagentPreview("p-1/sub-2", event.SubagentProgressReasoningName, "BBBB", false))
+	m.ingestEvent(subagentStatus("p-1/sub-1", "completed"))
+	// A late event for child 2 must land in child 2's own slot.
+	m.ingestEvent(subagentPreview("p-1/sub-2", event.SubagentProgressTextName, "child two text", false))
+	m.ingestEvent(subagentStatus("p-1/sub-2", "completed"))
+
+	idx1, ok1 := m.subagentProgressIdx["p-1/sub-1"]
+	idx2, ok2 := m.subagentProgressIdx["p-1/sub-2"]
+	if !ok1 || !ok2 || idx1 == idx2 {
+		t.Fatalf("children should own distinct fixed slots: %d %d", idx1, idx2)
+	}
+	if strings.Contains(m.transcript[idx1], "BBBB") || strings.Contains(m.transcript[idx2], "AAAA") {
+		t.Fatalf("children cross-streamed:\nidx1=%s\nidx2=%s", m.transcript[idx1], m.transcript[idx2])
+	}
+	if strings.Contains(m.transcript[idx1], "child two text") {
+		t.Fatalf("late child-2 content must never land in child-1's block:\n%s", m.transcript[idx1])
+	}
+	// The late preview is attributed to the right child in memory (the default
+	// collapsed view hides bodies after terminal, verbose shows them again).
+	if got := m.subagentProgress["p-1/sub-2"]; got == nil || got.text != "child two text" {
+		t.Fatalf("late child-2 text = %+v, want it stored on child 2", got)
+	}
+	if strings.Contains(m.transcript[idx2], "BBBB") || !strings.Contains(m.transcript[idx2], "completed") {
+		t.Fatalf("child-2 terminal block = %q, want its own completed summary", m.transcript[idx2])
+	}
+}
+
+// TestSubagentProgressOrdinaryToolProgressUnaffected proves non-reserved
+// ToolProgress still streams through the single live tool stream.
+func TestSubagentProgressOrdinaryToolProgressUnaffected(t *testing.T) {
+	m := newTestChatTUI()
+	m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "b1", Name: "bash", Args: `{"command":"ls"}`}})
+	m.ingestEvent(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: "b1", Output: "file.txt\n"}})
+	if joined := strings.Join(m.transcript, "\n"); !strings.Contains(joined, "file.txt") {
+		t.Fatalf("ordinary tool progress must still stream:\n%s", joined)
+	}
+	if len(m.subagentProgress) != 0 {
+		t.Fatalf("ordinary progress must not create sub-agent state")
+	}
+}
+
+// TestSubagentProgressUnknownReservedChannelIgnored locks forward compatibility:
+// an older CLI must suppress a future reasonix.subagent.* channel instead of
+// treating its body as ordinary tool output.
+func TestSubagentProgressUnknownReservedChannelIgnored(t *testing.T) {
+	m := newTestChatTUI()
+	m.ingestEvent(subagentPreview("task-1", event.SubagentProgressPrefix+"future", "must stay hidden", false))
+
+	if got := strings.Join(m.transcript, "\n"); got != "" {
+		t.Fatalf("unknown reserved progress entered the transcript: %q", got)
+	}
+	if m.toolStreamID != "" || m.toolLineCount != 0 || m.toolPartial != "" {
+		t.Fatalf("unknown reserved progress opened ordinary tool output: id=%q lines=%d partial=%q", m.toolStreamID, m.toolLineCount, m.toolPartial)
+	}
+	if len(m.subagentProgress) != 0 {
+		t.Fatalf("unknown reserved progress allocated known-channel state: %+v", m.subagentProgress)
+	}
+}
+
+// TestSubagentProgressNativeScrollbackPrintsOnPhaseChange proves Termux-style
+// native scrollback (which cannot rewrite printed output) queues a status line
+// on phase changes and terminal only — same-phase repeats stay quiet.
+func TestSubagentProgressNativeScrollbackPrintsOnPhaseChange(t *testing.T) {
+	m := newTestChatTUI()
+	m.nativeScrollback = true
+	m.ingestEvent(subagentStatus("task-1", "running"))
+	m.ingestEvent(subagentStatus("task-1", "running")) // repeat phase: no print
+	m.ingestEvent(subagentStatus("task-1", "reasoning"))
+	m.ingestEvent(subagentStatus("task-1", "completed"))
+	got := strings.Join(*m.pendingCommit, "\n")
+	for _, want := range []string{"running", "reasoning", "completed"} {
+		if strings.Count(got, want) != 1 {
+			t.Fatalf("scrollback output should print each phase exactly once, got %q (count %q = %d)", got, want, strings.Count(got, want))
+		}
+	}
+	if len(m.subagentProgressIdx) != 0 {
+		t.Fatalf("scrollback mode must not allocate fixed transcript slots")
 	}
 }

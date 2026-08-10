@@ -24,6 +24,9 @@ func doctorCommand(args []string, version string) int {
 	if len(args) > 0 && args[0] == "capabilities" {
 		return doctorCapabilitiesCommand(args[1:])
 	}
+	if len(args) > 0 && args[0] == "runtime" {
+		return doctorRuntimeCommand(args[1:])
+	}
 	if len(args) > 0 && args[0] == "repair" {
 		return doctorRepairCommand(args[1:])
 	}

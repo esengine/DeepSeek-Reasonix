@@ -84,7 +84,7 @@ func TestHostAddConcurrentSameServerReusesSingleClient(t *testing.T) {
 	errs := make([]error, callers)
 	counts := make([]int, callers)
 	wg.Add(callers)
-	for i := 0; i < callers; i++ {
+	for i := range callers {
 		go func(i int) {
 			defer wg.Done()
 			tools, err := h.Add(ctx, spec)

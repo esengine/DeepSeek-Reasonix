@@ -25,7 +25,7 @@ import (
 	"reasonix/internal/tool"
 )
 
-// --- fakes: a Factory wrapping a behavior-driven runner in a real Controller ---
+// fakes: a Factory wrapping a behavior-driven runner in a real Controller
 
 // fakeRunner stands in for an agent.Runner; it emits to the session's sink and
 // honors ctx cancellation, but runs no model.
@@ -297,7 +297,7 @@ func (f *configurableFactory) hookEventsSnapshot() []hook.Event {
 	return append([]hook.Event(nil), f.hookEvents...)
 }
 
-// --- a minimal JSON-RPC client over the wire, for integration tests ---
+// a minimal JSON-RPC client over the wire, for integration tests
 
 type frame struct {
 	ID     *json.RawMessage `json:"id"`
@@ -584,7 +584,7 @@ func messageChunkText(t *testing.T, f frame) (string, bool) {
 	return p.Update.Content.Text, true
 }
 
-// --- tests ---
+// tests
 
 func TestServeLifecycle(t *testing.T) {
 	factory := &fakeFactory{behavior: func(_ context.Context, sink event.Sink, input string) error {

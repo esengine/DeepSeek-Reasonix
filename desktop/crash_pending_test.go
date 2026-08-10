@@ -107,11 +107,9 @@ func TestWritePendingReportQueueIsBoundedUnderConcurrentWriters(t *testing.T) {
 	var done sync.WaitGroup
 	var successes atomic.Int32
 
-	for i := 0; i < writers; i++ {
+	for range writers {
 		ready.Add(1)
-		done.Add(1)
-		go func() {
-			defer done.Done()
+		done.Go(func() {
 			report := baseCrashReport("performance")
 			report.Source = "native.watchdog"
 			report.Label = "mac.main_thread.hang"
@@ -121,7 +119,7 @@ func TestWritePendingReportQueueIsBoundedUnderConcurrentWriters(t *testing.T) {
 			if writePendingReport(report, false) {
 				successes.Add(1)
 			}
-		}()
+		})
 	}
 	ready.Wait()
 	close(start)

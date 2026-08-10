@@ -177,10 +177,7 @@ func (p *mcpManager) renderTools(width int) string {
 	if len(v.ToolList) == 0 {
 		b.WriteString(viewMeta("Current connection did not return tool details.") + "\n")
 	} else {
-		limit := len(v.ToolList)
-		if limit > mcpToolMaxRows {
-			limit = mcpToolMaxRows
-		}
+		limit := min(len(v.ToolList), mcpToolMaxRows)
 		for _, t := range v.ToolList[:limit] {
 			desc := t.Description
 			if t.SchemaError != "" {

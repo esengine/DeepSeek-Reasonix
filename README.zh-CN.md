@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/logo.svg" alt="Reasonix" width="640"/>
+  <img src="docs/logo-ghost-wave-effect.svg" alt="Reasonix" width="360"/>
 </p>
 
 <p align="center">
@@ -10,6 +10,8 @@
   <a href="./docs/GUIDE.zh-CN.md">指南</a>
   &nbsp;·&nbsp;
   <a href="./docs/ACP.zh-CN.md">ACP</a>
+  &nbsp;·&nbsp;
+  <a href="./docs/EXTENSIONS.zh-CN.md">扩展开发</a>
   &nbsp;·&nbsp;
   <a href="./docs/SPEC.zh-CN.md">规格</a>
   &nbsp;·&nbsp;
@@ -37,8 +39,13 @@
 
 <br/>
 
-<h3 align="center">面向终端的 DeepSeek 原生 AI coding agent。</h3>
-<p align="center">由配置与插件驱动的极薄 harness——单一静态 Go 二进制，围绕 DeepSeek 的前缀缓存调优，长会话也能把 token 成本压低。</p>
+<p align="center"><strong>开源 · MIT · 单个 Go 二进制</strong></p>
+<h3 align="center">可以一直开着跑的编码 Agent。</h3>
+<p align="center">一套本地引擎,四个入口——终端、桌面端、浏览器,或通过 ACP 接入你的编辑器。计划模式、权限、工作区沙箱与逐轮 checkpoint,让长时间自治运行始终可读、可撤销。</p>
+
+<div align="center">
+  <video src="https://github.com/user-attachments/assets/ab2f3878-e224-4931-8254-060e7695cfb9" controls preload="metadata" width="560"></video>
+</div>
 
 <br/>
 
@@ -51,12 +58,12 @@
   内核无硬编码模型。
 - **多模型 · 可组合**：DeepSeek 作为预设内置；任何 OpenAI 兼容
   端点都只是一条配置。可选让两个模型协同（执行器 + 规划器），各自独立、缓存稳定的 session。
-- **插件驱动**：外部工具以子进程形式运行，通过 stdio JSON-RPC 通信（MCP 兼容）；
-  内置工具在编译期自注册。
+- **插件驱动**：MCP server 提供工具、提示词和资源；Extension Protocol v1
+  Sidecar 还可以拦截运行时事件、提供 Provider 与结构化 UI，并通过版本化插件包分发。
 - **缓存友好的上下文维护**：启动时注入稳定的环境摘要；旧工具输出会先 snip/prune，
   再进入摘要 compaction；内置工具 schema 合约有文档和回归测试保护。
 - **零摩擦分发**：`CGO_ENABLED=0` 单二进制；一条命令交叉编译到六个目标平台。
-  唯一依赖是一个 TOML 解析库。
+  产物是完全自包含的静态二进制——目标机器上除二进制本身外无需安装任何东西。
 
 ## 安装
 
@@ -145,6 +152,10 @@ CLI 进阶用法和详细配置见 **[CLI 命令参考](./docs/CLI.zh-CN.md)**�
   [任务合约与暂停策略](./docs/TASK_CONTRACT.zh-CN.md) ·
   [工具合约](./docs/TOOL_CONTRACT.zh-CN.md) ·
   [从 0.x 迁移](./docs/MIGRATING.zh-CN.md)
+- **扩展开发：** [扩展概览](./docs/EXTENSIONS.zh-CN.md) ·
+  [插件包与 Manifest v1](./docs/PLUGIN_PACKAGES.zh-CN.md) ·
+  [Extension Protocol](./docs/EXTENSION_PROTOCOL.zh-CN.md) ·
+  [Go SDK 与 starter](./sdk/go/README.md)
 
 ## Star 趋势
 
@@ -168,14 +179,13 @@ CLI 进阶用法和详细配置见 **[CLI 命令参考](./docs/CLI.zh-CN.md)**�
 | Contributor | Contributor | Contributor | Contributor |
 | --- | --- | --- | --- |
 | [**SivanCola**](https://github.com/SivanCola) | [**esengine**](https://github.com/esengine) | [**ttmouse**](https://github.com/ttmouse) | [**lifu963**](https://github.com/lifu963) |
-| **reasonix**（anonymous） | [**HUQIANTAO**](https://github.com/HUQIANTAO) | [**GTC2080**](https://github.com/GTC2080) | [**light-front-theory**](https://github.com/light-front-theory) |
-| **merge-order-check**（anonymous） | [**Li-Charles-One**](https://github.com/Li-Charles-One) | [**eghrhegpe**](https://github.com/eghrhegpe) | **wufengfan**（anonymous） |
+| **reasonix** | [**HUQIANTAO**](https://github.com/HUQIANTAO) | [**GTC2080**](https://github.com/GTC2080) | [**light-front-theory**](https://github.com/light-front-theory) |
+| **merge-order-check** | [**Li-Charles-One**](https://github.com/Li-Charles-One) | [**eghrhegpe**](https://github.com/eghrhegpe) | **wufengfan** |
 | [**CVEngineer66**](https://github.com/CVEngineer66) | [**dependabot\[bot\]**](https://github.com/apps/dependabot) | [**lanshi17**](https://github.com/lanshi17) | [**SuMuxi66**](https://github.com/SuMuxi66) |
 | [**CnsMaple**](https://github.com/CnsMaple) | [**cyq1017**](https://github.com/cyq1017) | [**JesonChou**](https://github.com/JesonChou) | [**XTLine**](https://github.com/XTLine) |
 <!-- reasonix-top-contributors:end -->
 
-另外特别感谢 [**Bernardxu123**](https://github.com/Bernardxu123) 设计的项目 logo，
-以及 [AIGC Link](https://xhslink.com/m/80ngts127cA) 在小红书上的推广。
+特别感谢 [**Bernardxu123**](https://github.com/Bernardxu123) 设计的项目 logo和开场视频。
 
 <p align="center">
   <a href="https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors">

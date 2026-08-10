@@ -60,10 +60,13 @@ func (e *SessionLeaseError) Unwrap() error {
 }
 
 type SessionLease struct {
-	path    string
-	ownerID uint64
-	unlock  func()
-	once    sync.Once
+	path      string
+	ownerID   uint64
+	mu        sync.Mutex
+	leaseLock *sessionLockFile
+	released  bool
+	// beforeReleaseLock is a test hook for the registry-before-unlock invariant.
+	beforeReleaseLock func()
 }
 
 func TryAcquireSessionLease(path string) (*SessionLease, error) {
@@ -79,7 +82,7 @@ func TryAcquireSessionLease(path string) (*SessionLease, error) {
 		info, _ := LoadSessionLeaseInfo(path)
 		return nil, &SessionLeaseError{Path: path, Info: info}
 	}
-	unlock, err := tryLockSessionLeaseFile(path)
+	leaseLock, err := tryTakeSessionLeaseLock(path)
 	if err != nil {
 		sessionLeaseOwners.CompareAndDelete(path, ownerID)
 		if errors.Is(err, ErrSessionLeaseHeld) {
@@ -91,7 +94,7 @@ func TryAcquireSessionLease(path string) (*SessionLease, error) {
 	// The OS lock proves any active-registry entry left without its reservation
 	// is stale. Clear it before publishing this generation.
 	sessionLeaseActiveOwners.Delete(path)
-	lease := &SessionLease{path: path, ownerID: ownerID, unlock: unlock}
+	lease := &SessionLease{path: path, ownerID: ownerID, leaseLock: leaseLock}
 	if err := SaveSessionLeaseInfo(path, newSessionLeaseInfo(path)); err != nil {
 		lease.Release()
 		return nil, err
@@ -131,7 +134,7 @@ func TryReclaimCurrentProcessSessionLease(path string) (*SessionLease, error) {
 		// probe instead of wedging on metadata damage.
 		info = nil
 	}
-	unlock, err := tryLockSessionLeaseFile(path)
+	leaseLock, err := tryTakeSessionLeaseLock(path)
 	if err != nil {
 		if errors.Is(err, ErrSessionLeaseHeld) {
 			return nil, &SessionLeaseError{Path: path, Info: info}
@@ -143,7 +146,7 @@ func TryReclaimCurrentProcessSessionLease(path string) (*SessionLease, error) {
 	// the lock above and never reach this store, and a stale lease released
 	// later misses its CompareAndDelete against the new owner id.
 	ownerID := sessionLeaseSeq.Add(1)
-	lease := &SessionLease{path: path, ownerID: ownerID, unlock: unlock}
+	lease := &SessionLease{path: path, ownerID: ownerID, leaseLock: leaseLock}
 	sessionLeaseActiveOwners.Delete(path)
 	sessionLeaseOwners.Store(path, ownerID)
 	if err := SaveSessionLeaseInfo(path, newSessionLeaseInfo(path)); err != nil {
@@ -226,29 +229,35 @@ func (l *SessionLease) Release() {
 	if l == nil {
 		return
 	}
-	l.once.Do(func() {
-		// Revoke ownership-sensitive repair before the OS lock becomes available
-		// to a successor. CompareAndDelete keeps a stale generation from
-		// deauthorizing a newer reclaimed lease.
-		sessionLeaseActiveOwners.CompareAndDelete(l.path, l.ownerID)
-		_ = os.Remove(sessionLeaseInfoPath(l.path))
-		if l.unlock != nil {
-			l.unlock()
-		}
-		// Only remove the entry this lease owns: after a reclaim the map may
-		// already point at a newer lease for the same path.
-		sessionLeaseOwners.CompareAndDelete(l.path, l.ownerID)
-		// Best-effort retirement of the lock sidecars this session no longer
-		// needs. Historically they were left behind on every release and only
-		// swept on the next boot reconcile, so ordinary use accumulated
-		// .lock/.lease.lock files (#6014). The helpers re-take each lock
-		// non-blocking and delete it atomically with the release, so a new
-		// holder or an in-flight save simply turns this into a no-op. This
-		// must run after CompareAndDelete: the lease-lock helper skips paths
-		// the owner registry still reports as held by this process.
-		_ = removeStaleSessionLeaseLockSidecar(l.path, store.SessionLeaseLock(l.path))
-		_ = removeStaleSessionLockSidecar(l.path, store.SessionLockFile(l.path))
-	})
+	l.mu.Lock()
+	if l.released {
+		l.mu.Unlock()
+		return
+	}
+	l.released = true
+	leaseLock := l.leaseLock
+	l.leaseLock = nil
+	beforeReleaseLock := l.beforeReleaseLock
+	l.mu.Unlock()
+
+	// Revoke ownership-sensitive repair before the OS lock becomes available
+	// to a successor. CompareAndDelete keeps a stale generation from
+	// deauthorizing a newer reclaimed lease.
+	sessionLeaseActiveOwners.CompareAndDelete(l.path, l.ownerID)
+	_ = os.Remove(sessionLeaseInfoPath(l.path))
+	// Only remove the entry this lease owns: after a reclaim the map may
+	// already point at a newer lease for the same path.
+	sessionLeaseOwners.CompareAndDelete(l.path, l.ownerID)
+	if beforeReleaseLock != nil {
+		beforeReleaseLock()
+	}
+	if leaseLock != nil {
+		// Delete the exact lock file while its lock is still held. Besides
+		// retiring the sidecar, retaining the lock object enables an atomic
+		// handoff to SessionRemovalGuard without an unlock/reacquire window.
+		_ = leaseLock.RemoveAndUnlock()
+	}
+	_ = removeStaleSessionLockSidecar(l.path, store.SessionLockFile(l.path))
 }
 
 func newSessionLeaseInfo(path string) SessionLeaseInfo {
