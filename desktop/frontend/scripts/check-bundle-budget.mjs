@@ -71,8 +71,9 @@ for (const path of localeChunks) {
   const name = basename(path);
   // Task Monitor, Extension UI, Storage & paths, and shell execution cards
   // add their own labels. Reasoning summaries and status bar metrics add the
-  // latest localized copy. Keep both dictionaries within narrow allowances.
-  const budget = name.startsWith("zh-TW-") ? 54 * 1024 : 53.25 * 1024;
+  // latest localized copy. Workspace watcher states add three user-facing
+  // strings; keep that growth within a quarter-KiB allowance per dictionary.
+  const budget = name.startsWith("zh-TW-") ? 54.25 * 1024 : 53.5 * 1024;
   assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }
 

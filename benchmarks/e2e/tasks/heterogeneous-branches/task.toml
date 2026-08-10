@@ -1,0 +1,4 @@
+prompt = "Three unrelated defects, one per area, all verified by `python3 check.py`. (1) svc/query/filters.py combines clauses without the parentheses its docstring requires. (2) svc/format/human.py truncates instead of rounding half up. (3) docs/api.md is a stale manifest: it must list every public function in svc/query and svc/format as `- <package>.<function>`, sorted, one per line. Fix all three so check.py prints OK."
+class = "delegation"
+max_steps = 60
+timeout_sec = 900

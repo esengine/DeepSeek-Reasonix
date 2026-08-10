@@ -22,6 +22,7 @@ type builtinSlashSpec struct {
 func builtinSlashSpecs() []builtinSlashSpec {
 	return []builtinSlashSpec{
 		{name: "/compact", insert: "/compact ", hint: i18n.M.CmdCompact, showInHelp: true},
+		{name: "/context", insert: "/context", hint: i18n.M.CmdContext, showInHelp: true},
 		{name: "/new", insert: "/new ", hint: i18n.M.CmdNew, showInHelp: true},
 		{name: "/clear", insert: "/clear", hint: i18n.M.CmdClear, showInHelp: true},
 		{name: "/cls", insert: "/cls", hint: i18n.M.CmdCls, showInHelp: true},

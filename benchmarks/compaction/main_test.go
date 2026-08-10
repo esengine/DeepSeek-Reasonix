@@ -12,7 +12,7 @@ func TestRepeatedFoldsStayBoundedAndKeepSucceeding(t *testing.T) {
 		reserve  = 8192 // summaryOutputReserve: the digest the call must still return
 		maxCalls = 7    // maxSummarySpans + the merge pass
 	)
-	res, err := runCost(gens, window, false)
+	res, err := runCost(gens, window, arms{})
 	if err != nil {
 		t.Fatalf("runCost: %v", err)
 	}

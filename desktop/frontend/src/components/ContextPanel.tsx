@@ -100,7 +100,7 @@ export function cacheHitTone(hitTokens: number, missTokens: number): MetricTone 
   return "warn";
 }
 
-function formatSharePercent(value: number, total: number): string {
+export function formatSharePercent(value: number, total: number): string {
   if (total <= 0 || value <= 0) return "-";
   const pct = (value / total) * 100;
   if (pct > 0 && pct < 1) return "<1%";
@@ -613,11 +613,10 @@ export function ContextPanel({
                   </div>
                   <div className="context-panel__source-legend">
                     {sourceUsageRows.map((row) => {
-                      const sharePct = sourceTotalTokens > 0 ? (sourceTokenTotal(row) / sourceTotalTokens) * 100 : 0;
                       return (
                         <span key={row.source}>
                           <i className={`context-panel__source-dot context-panel__source-tone--${sourceTone(row.source)}`} aria-hidden="true" />
-                          {sourceLabel(row.label, t)} {sharePct > 0 ? `${sharePct.toFixed(0)}%` : "-"}
+                          {sourceLabel(row.label, t)} {formatSharePercent(sourceTokenTotal(row), sourceTotalTokens)}
                         </span>
                       );
                     })}

@@ -1,6 +1,6 @@
 // Run: tsx src/__tests__/context-panel-breakdown.test.ts
 
-import { cacheHitTone, contextBreakdown, contextCostDisplay, contextSessionCache, contextSourceRows, contextUsageRefreshKey, contextWindowStatus, formatCacheHitRate, formatMetricTokens, liveTurnUsageBreakdown } from "../components/ContextPanel";
+import { cacheHitTone, contextBreakdown, contextCostDisplay, contextSessionCache, contextSourceRows, contextUsageRefreshKey, contextWindowStatus, formatCacheHitRate, formatMetricTokens, formatSharePercent, liveTurnUsageBreakdown } from "../components/ContextPanel";
 import { currencySymbol, formatMoney, formatMoneyLocalized } from "../lib/money";
 import type { WireUsage } from "../lib/types";
 
@@ -28,6 +28,8 @@ function ok(condition: boolean, label: string) {
 }
 
 console.log("\ncontext panel breakdown");
+
+eq(formatSharePercent(1, 1_000), "<1%", "small non-zero source shares are not shown as zero");
 
 const mock = contextBreakdown(42_124, 128_000, 22_134, 12_345, 7_521);
 eq(

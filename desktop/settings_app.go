@@ -652,7 +652,7 @@ func providerViewFromEntryForRootWithResolverAndCredentials(p config.ProviderEnt
 		ReasoningProtocol:           p.ReasoningProtocol,
 		Thinking:                    providerThinkingForSettings(p.Thinking),
 		WebSearch:                   config.EffectiveWebSearch(&p),
-		ServerWebSearchCapability:   config.IsOfficialDeepSeekWebSearchEndpoint(&p),
+		ServerWebSearchCapability:   config.HasServerWebSearchCapability(&p),
 		SupportedEfforts:            nonNil(p.SupportedEfforts),
 		DefaultEffort:               p.DefaultEffort,
 		ModelOverrides:              providerModelOverridesForView(p.ModelOverrides, models),

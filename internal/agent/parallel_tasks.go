@@ -185,18 +185,10 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 			// retain one independently readable transcript per child. Headless runs
 			// remain ephemeral and still receive fair bounded previews.
 			output, runErr := p.taskTool.RunProfileSpec(itemCtx, ProfileExecSpec{
-				Kind:         "task",
-				Name:         "task",
-				Prompt:       t.Prompt,
-				Description:  label,
-				CallTools:    t.Tools,
-				MaxSteps:     t.MaxSteps,
-				Model:        modelRef,
-				Effort:       effortRef,
-				ReadOnly:     true,
-				AllowNoTools: true,
-				Nested:       SubagentDepth(ctx) > 0,
-				SystemPrompt: DefaultReadOnlyTaskSystemPrompt,
+				Task:   TaskSpec{Objective: t.Prompt, Description: label},
+				Worker: WorkerSpec{Kind: "task", Name: "task", SystemPrompt: DefaultReadOnlyTaskSystemPrompt, Model: modelRef, Effort: effortRef},
+				Grant:  CapabilityGrant{ReadOnly: true, AllowNoTools: true, CallTools: t.Tools},
+				Sched:  SchedulerPolicy{MaxSteps: t.MaxSteps, Nested: SubagentDepth(ctx) > 0},
 			})
 
 			if ctx.Err() != nil && runErr == nil {

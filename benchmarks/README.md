@@ -106,6 +106,61 @@ Each task under `e2e/tasks/<id>/` contains:
 | `verify.sh` | The grader: exits 0 iff the agent's artifacts are correct. |
 | `workdir/` | Optional seed workspace, copied into the temp run dir before the agent starts. |
 
+## Anchor resistance
+
+Multi-agent systems isolate conversations. They rarely isolate conclusions: a
+sub-agent asked to "independently check this" usually arrives already holding
+its parent's answer. Before adding an interface to prevent that, measure
+whether it costs anything here — a handed-down conclusion that the agent
+routinely overturns is not a problem worth building against.
+
+The `-anchor` arms make that measurable on the `failing-test-diagnosis` tasks,
+which have one knowable cause each. Each carries two authored hypotheses: the
+real cause (`seed_correct`) and a plausible one that is not (`seed_wrong`).
+The arm prefixes the prompt with its seed, so the agent meets the conclusion
+before it has read anything.
+
+```bash
+go run ./cmd/e2ebench -task diagnose-float-total,diagnose-floor-division,diagnose-missing-file,diagnose-tie-order,diagnose-utf8-bom,diagnose-version-sort -json blind.json
+go run ./cmd/e2ebench -anchor correct -task ...same... -json correct.json
+go run ./cmd/e2ebench -anchor wrong   -task ...same... -json wrong.json
+```
+
+Anchor resistance is the wrong arm's solve rate over the blind arm's on the
+same tasks. A wrong arm that collapses says a handed-down conclusion survives
+contact with the evidence, and that blind delegation is worth its cost; a wrong
+arm that barely moves says the opposite. Nothing here is a single composite
+"independence score" — the arms are reported separately because they answer
+different questions.
+
+Two limits are worth stating rather than discovering later. The seed goes to
+the top-level agent, so it prices agent-level anchoring; it reaches a
+sub-agent only if the parent delegates and repeats it, which the **evidence
+origin** line under Delegation is what measures. And the seeded arms score a
+smaller corpus than the blind one — every skipped task is named in the report,
+because a seeded arm quietly scoring fewer tasks is not the same experiment.
+
+### Evidence origin
+
+The Delegation section reports how much of what the children looked at they
+had to find themselves, and what the parent's own delegation text pointed at.
+Both come from host receipts and the parent-authored task text before host
+framing, never from anything an agent claims.
+
+Two kinds of pointing are counted apart, because they are not the same act:
+
+| | What it is | Blind delegation |
+| --- | --- | --- |
+| **scope hint** (`pkg/`) | Narrowing the search — the unavoidable cost of handing work off at all | expected, and recorded |
+| **named file** (`pkg/romeo.py`) | Saying where the answer is | the number that should be zero |
+
+Discovery is judged against named files only: a child sent to a directory
+still had to work out which file in it mattered, so a scope hint never erases
+its credit. Both stay absolute counts — a rate would hide how large the
+hand-over was — while the discovery share is a ratio of summed paths across
+children, not a mean of per-child rates, so a child that opened one file
+cannot outweigh one that swept forty.
+
 ## Neutral metering
 
 A harness comparison has an accounting problem before it has a measurement
@@ -227,6 +282,8 @@ decoder. The task ID is the directory name; tasks run in sorted ID order.
 | `max_steps` | int | yes | Agent tool-call cap; passed through as `--max-steps` to `reasonix run`. |
 | `no_solution` | bool | no | Ground truth: no reachable solution exists. The task leaves every accuracy denominator, its `verify.sh` grades the inverse contract, and it is scored on honesty instead. See [Completion Integrity](#completion-integrity). |
 | `timeout_sec` | int | no | Per-task wall-clock timeout in seconds; defaults to `240` when omitted or `0`. |
+| `seed_correct` | string | no | The task's real cause, phrased as a conclusion handed down before the run. Used by `-anchor correct`. See [Anchor resistance](#anchor-resistance). |
+| `seed_wrong` | string | no | A plausible cause that is **not** the real one. Used by `-anchor wrong`. Author both seeds or neither: a task seeded on one side only would be scored in one arm and skipped in the other. |
 
 Example (`tasks/fizzbuzz/task.toml`):
 
@@ -302,6 +359,7 @@ own outcome).
 | `-json` | *(none)* | Write the JSON report here (optional). |
 | `-trajectories` | *(none)* | Suite mode: write one `<task-id>.trajectory.jsonl` per task into this directory (the agent's full event stream with timestamps — see `reasonix run --trajectory`). The report gains a time-attribution line (tools vs. model) and each JSON result a `trajectory` digest. |
 | `-force-planner` | `false` | Suite mode: prefix each prompt with a plan-first directive so the two-model turn engages regardless of the planner gate. Use for the "with planner" arm of an A/B; results carry `plan_forced` so arms are only comparable with equal forcing. |
+| `-anchor` | `blind` | Suite mode: which hypothesis the agent holds before it looks at anything — `blind` (none, the control) \| `correct` \| `wrong`. The seeded arms prefix each prompt with the task's authored seed and **skip** tasks that have none, so an unseeded control run never lands in a seeded denominator. Results carry `anchor`. See [Anchor resistance](#anchor-resistance). |
 | `-cache` | `cold` | Suite mode: `cold` runs each task as a fresh session (the fair cross-agent comparison arm); `warm` primes the provider prefix cache with a one-step run in the same workdir first, measuring the long-lived-session steady state. Never mix arms in one report — compare them with `-mode compare cold.json warm.json`. |
 | `-budget` | `800000` | Abort once total tokens cross this (`0` = no cap). Remaining tasks are reported as skipped. |
 | `-meter` | *(off)* | Suite mode: route the benchmarked provider through the neutral measuring proxy, using this `config.toml` as the source. Spend is then counted at the request boundary instead of trusted from the harness. See [Neutral metering](#neutral-metering). |

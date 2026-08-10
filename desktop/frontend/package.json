@@ -5,18 +5,22 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "pnpm lint:hooks && node scripts/check-css-syntax.mjs src/styles.css && node scripts/check-z-index-tokens.mjs src/styles.css && tsc --noEmit && vite build && node scripts/check-bundle-budget.mjs",
+    "build": "pnpm lint:hooks && pnpm check:waapi && node scripts/check-css-syntax.mjs src/styles.css && node scripts/check-z-index-tokens.mjs src/styles.css && tsc --noEmit && vite build && node scripts/check-bundle-budget.mjs",
     "check:bundle": "node scripts/check-bundle-budget.mjs",
     "preview": "vite preview",
     "check:css": "node scripts/check-css-syntax.mjs src/styles.css && node scripts/check-z-index-tokens.mjs src/styles.css",
+    "check:waapi": "node scripts/check-waapi-contract.mjs",
     "lint:hooks": "eslint \"src/**/*.{ts,tsx}\"",
     "test:todo-visibility": "node scripts/test-todo-visibility.mjs",
     "typecheck": "tsc --noEmit",
     "test:terminal": "tsx src/__tests__/terminal-events.test.ts && tsx src/__tests__/terminal-store.test.ts && tsx src/__tests__/terminal-output.test.ts && tsx src/__tests__/terminal-theme.test.ts && tsx src/__tests__/workspace-layout.test.ts",
     "test:usage-stats": "tsx src/__tests__/usage-stats-format.test.ts && tsx src/__tests__/usage-stats-panel.test.tsx",
     "test:task-monitor": "tsx src/components/TaskMonitorPanel.test.tsx && tsx src/__tests__/task-monitor-navigation.test.ts",
+    "test:workspace": "tsx src/__tests__/workspace-refresh-store.test.ts && tsx src/__tests__/workspace-changes-errors.test.tsx",
     "test:settings-responsive": "tsx src/__tests__/settings-responsive-layout.test.ts",
-    "pretest": "pnpm test:terminal && pnpm test:task-monitor && tsx src/__tests__/rich-composer-selection.test.tsx && tsx src/__tests__/context-center-contract.test.ts && tsx src/__tests__/provider-model-cache.test.ts && tsx src/__tests__/format-tokens.test.ts && pnpm test:usage-stats && pnpm test:settings-responsive && pnpm test:composer-menu-viewport",
+    "test:motion": "node scripts/check-motion-ci-contract.mjs && node scripts/check-waapi-contract.mjs --self-test && tsx src/__tests__/native-motion.test.tsx && tsx src/__tests__/approval-animation.test.tsx",
+    "test:transcript": "tsx src/__tests__/transcript-virtualization.test.tsx",
+    "pretest": "pnpm test:terminal && pnpm test:task-monitor && tsx src/__tests__/rich-composer-selection.test.tsx && tsx src/__tests__/context-center-contract.test.ts && tsx src/__tests__/provider-model-cache.test.ts && tsx src/__tests__/format-tokens.test.ts && pnpm test:usage-stats && pnpm test:settings-responsive && pnpm test:composer-menu-viewport && pnpm test:transcript",
     "test:composer-menu-viewport": "tsx src/__tests__/composer-menu-viewport.test.ts && tsx src/__tests__/virtual-menu-identity.test.tsx",
     "test": "node scripts/test-todo-visibility.mjs && node scripts/run-tests.mjs",
     "test:remote": "tsx src/__tests__/remote-workspace-launch.test.ts && tsx src/__tests__/remote-store.test.ts && tsx src/__tests__/remote-error-ux.test.tsx && tsx src/__tests__/remote-hosts-page.test.tsx && tsx src/__tests__/remote-secret-dialog.test.tsx && node --import ./scripts/svg-stub-register.mjs --import tsx src/__tests__/remote-server-panel.test.tsx && tsx src/__tests__/statusbar-workspace.test.tsx",
@@ -76,5 +80,9 @@
   },
   "overrides": {
     "mdast-util-gfm-autolink-literal": "2.0.0"
+  },
+  "engines": {
+    "node": ">=24",
+    "pnpm": ">=10 <11"
   }
 }

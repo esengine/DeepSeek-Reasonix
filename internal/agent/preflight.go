@@ -1,87 +1,17 @@
 package agent
 
 import (
-	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
-	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
 
 // ErrCompactionRequired is returned when the prompt exceeds the provider limit
 // and compaction could not produce a usable projection. Callers may retry.
 var ErrCompactionRequired = errors.New("context exceeds provider limit and compaction failed")
-
-// contextPreflight may compact into a projection under pressure; never rewrites history.
-func (a *Agent) contextPreflight(ctx context.Context, trigger string) error {
-	if a == nil || a.session == nil || a.contextWindow <= 0 {
-		return nil
-	}
-	msgs, version := a.session.snapshotMessagesVersion()
-	cacheKey := a.currentPromptCacheKey()
-	est := estimateMessagesTokens(provider.ModelMessages(msgs))
-	_, _, high := a.compactThresholds()
-	force := max(int(float64(a.contextWindow)*a.compactForceRatio), high)
-
-	// Prefer an existing valid projection when it still covers the pressure.
-	if st := a.compactionState; projectionValid(st, msgs, version, cacheKey) {
-		visible := modelVisibleFromProjection(st.Projection, msgs)
-		projEst := estimateMessagesTokens(provider.ModelMessages(visible))
-		if projEst < high || projEst < est {
-			return nil
-		}
-	}
-
-	if est < high {
-		return nil
-	}
-
-	// Prefer a free prune/snip projection before a paid summarize call.
-	pruned, pst := a.applyToolResultMaintenanceView(msgs, toolResultPrune)
-	if pst.Results > 0 {
-		if err := a.installPruneProjection(pruned, pst); err == nil {
-			projEst := estimateMessagesTokens(provider.ModelMessages(pruned))
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf(
-				"pruned %d stale tool results (~%d tokens est.) before request", pst.Results, est-projEst)})
-			if projEst < high {
-				return nil
-			}
-			est = projEst
-		}
-	}
-
-	forceCompact := est >= force || trigger == CompactionTriggerManual || trigger == CompactionTriggerOverflow
-	outcome, err := a.compactToProjection(ctx, trigger, "", forceCompact)
-	if err != nil {
-		if est >= force {
-			return fmt.Errorf("%w", errors.Join(ErrCompactionRequired, err))
-		}
-		a.sink.Emit(event.Event{
-			Kind:   event.Notice,
-			Level:  event.LevelInfo,
-			Text:   "Context cleanup deferred; continuing with full history.",
-			Detail: fmt.Sprintf("compaction failed under soft threshold: %v", err),
-		})
-		return nil
-	}
-	// Force + Noop: refuse outside a tool loop; mid-turn is deferred.
-	if forceCompact && outcome == CompactionNoop {
-		if a.activeTurnStart(msgs) < 0 {
-			return fmt.Errorf("%w: no foldable region under force threshold", ErrCompactionRequired)
-		}
-		a.sink.Emit(event.Event{
-			Kind:   event.Notice,
-			Level:  event.LevelInfo,
-			Text:   "Context cleanup deferred until the current tool turn finishes.",
-			Detail: "force threshold reached but the active turn cannot be folded yet",
-		})
-	}
-	return nil
-}
 
 // modelVisibleMessages returns the provider-bound message list: a valid
 // projection plus any post-projection appends, otherwise the full canonical
@@ -91,7 +21,10 @@ func (a *Agent) modelVisibleMessages() []provider.Message {
 		return nil
 	}
 	msgs, version := a.session.snapshotMessagesVersion()
-	if st := a.compactionState; projectionValid(st, msgs, version, a.currentPromptCacheKey()) {
+	a.compactionMu.Lock()
+	st := a.compactionState
+	a.compactionMu.Unlock()
+	if projectionValid(st, msgs, version, a.currentPromptCacheKey()) {
 		if visible := modelVisibleFromProjection(st.Projection, msgs); len(visible) > 0 {
 			return visible
 		}
@@ -99,12 +32,28 @@ func (a *Agent) modelVisibleMessages() []provider.Message {
 	return msgs
 }
 
+func (a *Agent) currentProjectionVersion() uint64 {
+	if a == nil {
+		return 0
+	}
+	a.compactionMu.Lock()
+	defer a.compactionMu.Unlock()
+	return a.compactionState.Projection.ProjectionVersion
+}
+
 // currentPromptCacheKey is the lineage key for the bound session + model.
 func (a *Agent) currentPromptCacheKey() string {
 	if a == nil {
 		return ""
 	}
-	return promptCacheKey(a.workspaceID, BranchID(a.sessionPath), a.modelRef)
+	a.compactionMu.Lock()
+	defer a.compactionMu.Unlock()
+	return a.currentPromptCacheKeyLocked()
+}
+
+func (a *Agent) currentPromptCacheKeyLocked() string {
+	key := promptCacheKey(a.workspaceID, BranchID(a.sessionPath), a.modelRef)
+	return key + a.contextEditingLineageSuffixLocked()
 }
 
 // InvalidateProjection drops the in-memory and on-disk projection after
@@ -113,9 +62,15 @@ func (a *Agent) InvalidateProjection() {
 	if a == nil {
 		return
 	}
+	a.compactionMu.Lock()
+	path := a.sessionPath
 	a.compactionState = CompactionState{}
-	if a.sessionPath != "" {
-		if err := RemoveCompactionState(a.sessionPath); err != nil {
+	a.compactionMu.Unlock()
+	a.compactStuck = false
+	a.consecutiveCompacts = 0
+	a.lastCompactionTurn.Store(0)
+	if path != "" {
+		if err := RemoveCompactionState(path); err != nil {
 			slog.Warn("agent: remove context projection", "err", err)
 		}
 	}
@@ -129,33 +84,57 @@ func (a *Agent) LoadProjectionSidecar(sessionPath string) {
 	if a == nil {
 		return
 	}
+	_, effective, policyVersion := resolveContextEditing(a.requestedContextEditing, a.prov)
+	a.compactionMu.Lock()
 	a.sessionPath = sessionPath
+	a.contextEditing = effective
+	a.contextEditingPolicyVersion = policyVersion
+	a.compactionState = CompactionState{}
+	a.compactionMu.Unlock()
+	a.nativeContextEditingAccepted.Store(false)
+	a.contextEditingRuntimeFallback.Store(false)
 	if sessionPath == "" {
-		a.compactionState = CompactionState{}
+		a.resetCompactionState()
 		return
 	}
 	st, ok, err := LoadCompactionState(sessionPath)
 	if err != nil {
 		slog.Warn("agent: load context projection", "err", err)
 		_ = RemoveCompactionState(sessionPath)
-		a.compactionState = CompactionState{}
+		a.resetCompactionState()
 		return
 	}
 	if !ok {
-		a.compactionState = CompactionState{}
+		a.resetCompactionState()
 		return
+	}
+	a.compactionMu.Lock()
+	if st.ContextEditingFallbackLocal && !st.NativeContextEditingAccepted && a.contextEditing == "native" {
+		a.contextEditing = "local"
+		a.contextEditingRuntimeFallback.Store(true)
 	}
 	// Fail closed: known lineage requires an exact stored key (including
 	// rejecting blank keys on early sidecars written before this field).
-	if key := a.currentPromptCacheKey(); key != "" && st.PromptCacheKey != key {
+	key := a.currentPromptCacheKeyLocked()
+	if (key != "" && st.PromptCacheKey != key) ||
+		(st.Projection.CoveredPrefixHash == "" && st.BlockedInputHash == "" &&
+			!st.ContextEditingFallbackLocal && !st.NativeContextEditingAccepted) {
+		a.contextEditing = effective
+		a.contextEditingPolicyVersion = policyVersion
 		a.compactionState = CompactionState{}
-		return
-	}
-	if st.Projection.CoveredPrefixHash == "" {
-		a.compactionState = CompactionState{}
+		a.contextEditingRuntimeFallback.Store(false)
+		a.compactionMu.Unlock()
 		return
 	}
 	a.compactionState = st
+	a.compactionMu.Unlock()
+	a.nativeContextEditingAccepted.Store(st.NativeContextEditingAccepted)
+}
+
+func (a *Agent) resetCompactionState() {
+	a.compactionMu.Lock()
+	a.compactionState = CompactionState{}
+	a.compactionMu.Unlock()
 }
 
 // BindSessionPath rebinds projection persistence to path. When loadSidecar is
@@ -169,9 +148,19 @@ func (a *Agent) BindSessionPath(path string, loadSidecar bool) {
 		a.LoadProjectionSidecar(path)
 		return
 	}
+	_, effective, policyVersion := resolveContextEditing(a.requestedContextEditing, a.prov)
+	a.compactionMu.Lock()
 	a.sessionPath = path
+	a.contextEditing = effective
+	a.contextEditingPolicyVersion = policyVersion
 	a.compactionState = CompactionState{}
 	a.cacheState = CacheStateUnknown
+	a.compactionMu.Unlock()
+	a.nativeContextEditingAccepted.Store(false)
+	a.contextEditingRuntimeFallback.Store(false)
+	a.compactStuck = false
+	a.consecutiveCompacts = 0
+	a.lastCompactionTurn.Store(0)
 }
 
 // SetSessionPath binds the transcript path used for projection persistence.
@@ -179,7 +168,9 @@ func (a *Agent) SetSessionPath(path string) {
 	if a == nil {
 		return
 	}
+	a.compactionMu.Lock()
 	a.sessionPath = path
+	a.compactionMu.Unlock()
 }
 
 // SessionPath returns the bound transcript path.
@@ -187,6 +178,8 @@ func (a *Agent) SessionPath() string {
 	if a == nil {
 		return ""
 	}
+	a.compactionMu.Lock()
+	defer a.compactionMu.Unlock()
 	return a.sessionPath
 }
 
@@ -200,6 +193,8 @@ func (a *Agent) SetCacheState(state string) {
 	default:
 		state = CacheStateUnknown
 	}
+	a.compactionMu.Lock()
+	defer a.compactionMu.Unlock()
 	a.cacheState = state
 	if a.compactionState.SchemaVersion == 0 && len(a.compactionState.Projection.Messages) == 0 {
 		a.compactionState.SchemaVersion = compactionStateSchemaCurrent
@@ -210,27 +205,49 @@ func (a *Agent) SetCacheState(state string) {
 
 // CacheState returns the last estimated cache warm/cold/unknown label.
 func (a *Agent) CacheState() string {
-	if a == nil || a.cacheState == "" {
+	if a == nil {
+		return CacheStateUnknown
+	}
+	a.compactionMu.Lock()
+	defer a.compactionMu.Unlock()
+	if a.cacheState == "" {
 		return CacheStateUnknown
 	}
 	return a.cacheState
 }
 
-// persistCompactionState writes the sidecar when a session path is bound.
-func (a *Agent) persistCompactionState() error {
-	if a == nil || a.sessionPath == "" {
+func (a *Agent) persistCompactionStateLocked() error {
+	if a.sessionPath == "" {
 		return nil
 	}
 	return SaveCompactionState(a.sessionPath, a.compactionState)
 }
 
+// maintenanceReplacement is the rewrite for one stale tool result. Both the
+// planning pass and the re-write that follows archiving go through it, so a
+// result cannot be shortened one way while planning and another way on install.
+// ok is false when the policy protects the message outright.
+func (a *Agent) maintenanceReplacement(m provider.Message, mode toolResultMaintenanceMode, archive string) (string, bool) {
+	if a.keepPolicy&KeepErrors != 0 && isErrorMessage(m) {
+		// A recorded failure stays recognisable once its text is rewritten, so
+		// its passing noise can go. A text-only failure has no such anchor:
+		// eliding it would hide that it was ever an error.
+		if !failedExecution(m.ToolExecution) {
+			return "", false
+		}
+		return snipFailureResult(m.Content), true
+	}
+	return rewriteToolResult(m, mode, archive, a.snipStrategyFor(m.Name)), true
+}
+
 // applyToolResultMaintenanceView returns a copy of msgs with stale tool results
 // snipped or pruned. The canonical transcript is never modified.
 func (a *Agent) applyToolResultMaintenanceView(msgs []provider.Message, mode toolResultMaintenanceMode) ([]provider.Message, PruneStats) {
-	var st PruneStats
+	st := PruneStats{Mode: mode}
 	if a.contextWindow <= 0 || len(msgs) == 0 {
 		return msgs, st
 	}
+	st.InputHash = providerVisibleFingerprint(provider.ModelMessages(msgs))
 	head, start, ok := a.planCompaction(msgs, 1)
 	if !ok {
 		if mode != toolResultPrune {
@@ -249,10 +266,10 @@ func (a *Agent) applyToolResultMaintenanceView(msgs []provider.Message, mode too
 		if !shouldMaintainToolResult(m, mode) {
 			continue
 		}
-		if a.keepPolicy&KeepErrors != 0 && isErrorMessage(m) {
+		replacement, ok := a.maintenanceReplacement(m, mode, "projection-view")
+		if !ok {
 			continue
 		}
-		replacement := rewriteToolResult(m, mode, "projection-view", a.snipStrategyFor(m.Name))
 		if replacement == m.Content {
 			continue
 		}
@@ -268,13 +285,17 @@ func (a *Agent) applyToolResultMaintenanceView(msgs []provider.Message, mode too
 	return next, st
 }
 
-// installProjection replaces the agent's projection and optionally persists it.
-// On persist failure the in-memory state is rolled back so half-written state
-// cannot be used for subsequent requests.
-func (a *Agent) installProjection(st CompactionState) error {
+// installProjectionIfCurrent closes the compare-and-install window for
+// maintenance callers that performed network work from an earlier snapshot.
+func (a *Agent) installProjectionIfCurrent(st CompactionState, projectionVersion, generation uint64) error {
+	a.compactionMu.Lock()
+	defer a.compactionMu.Unlock()
+	if a.compactionState.Projection.ProjectionVersion != projectionVersion || a.compactionState.Generation != generation {
+		return errCompressStaleContext
+	}
 	prev := a.compactionState
 	a.compactionState = st
-	if err := a.persistCompactionState(); err != nil {
+	if err := a.persistCompactionStateLocked(); err != nil {
 		a.compactionState = prev
 		return err
 	}

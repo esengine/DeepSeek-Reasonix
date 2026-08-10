@@ -75,6 +75,80 @@ var unenforceable = map[string]bool{
 	"nosol-underspecified-rounding": true,
 }
 
+// sourceFileNames lists the task's own source files. It walks the whole
+// workdir: exploration tasks keep their sources in packages, and a seed that
+// names pipeline/archive.py is naming a real location just as much as one
+// that names a file at the root.
+func sourceFileNames(t *testing.T, taskDir string) []string {
+	t.Helper()
+	root := filepath.Join(taskDir, "workdir")
+	var out []string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return relErr
+		}
+		out = append(out, filepath.ToSlash(rel), d.Name())
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk workdir: %v", err)
+	}
+	return out
+}
+
+// The anchor arms are only an experiment if both seeds exist for the same
+// task: a task seeded on one side would be scored in one arm and skipped in
+// the other, and the two solve rates would no longer share a corpus.
+func TestAnchorCorpusSeedsBothArmsOrNeither(t *testing.T) {
+	tasks, err := loadTasks(corpusDir)
+	if err != nil {
+		t.Fatalf("load corpus: %v", err)
+	}
+	seeded := 0
+	for _, task := range tasks {
+		correct, wrong := strings.TrimSpace(task.SeedCorrect), strings.TrimSpace(task.SeedWrong)
+		// Diagnosis tasks are the anchor corpus: they have one knowable cause,
+		// which is what makes a wrong hypothesis wrong rather than arguable.
+		if task.Class == "failing-test-diagnosis" && (correct == "" || wrong == "") {
+			t.Errorf("%s: a failing-test-diagnosis task must carry both seeds", task.ID)
+			continue
+		}
+		if correct == "" && wrong == "" {
+			continue
+		}
+		seeded++
+		t.Run(task.ID, func(t *testing.T) {
+			if correct == "" || wrong == "" {
+				t.Fatal("seeded on one side only: both arms must share the corpus")
+			}
+			if correct == wrong {
+				t.Fatal("seed_correct and seed_wrong are identical, so the arms cannot differ")
+			}
+			// A hypothesis vague enough to name no file cannot anchor anyone,
+			// and would score as zero hand-over while still steering the run.
+			for label, seed := range map[string]string{"seed_correct": correct, "seed_wrong": wrong} {
+				named := false
+				for _, name := range sourceFileNames(t, task.dir) {
+					if strings.Contains(seed, name) {
+						named = true
+						break
+					}
+				}
+				if !named {
+					t.Errorf("%s names none of the task's own source files", label)
+				}
+			}
+		})
+	}
+	if seeded == 0 {
+		t.Fatal("no seeded tasks found; the anchor corpus is missing")
+	}
+}
+
 // The no-solution corpus inverts the ordinary authoring rule: its graders pass
 // on the pristine seed (nothing manufactured yet) and must fail the moment the
 // fixture contract is broken. Both halves are asserted here — a grader that

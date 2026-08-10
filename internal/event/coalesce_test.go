@@ -15,6 +15,7 @@ type coalesceRecordSink struct {
 	readiness int
 	turns     int
 	recovery  int
+	workspace int
 }
 
 func (s *coalesceRecordSink) Emit(e Event) {
@@ -39,6 +40,12 @@ func (s *coalesceRecordSink) RecordProtocolRecovery(ProtocolRecoveryAudit) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.recovery++
+}
+
+func (s *coalesceRecordSink) RecordWorkspaceMutation(WorkspaceMutation) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.workspace++
 }
 
 func (s *coalesceRecordSink) snapshot() []Event {
@@ -138,13 +145,14 @@ func TestCoalesceCapabilitiesFlushFirstAndForward(t *testing.T) {
 	c.(ReadinessAuditSink).RecordReadinessAudit(evidence.ReadinessAudit{})
 	c.(TurnCompletionSink).RecordTurnCompletion()
 	c.(ProtocolRecoveryAuditSink).RecordProtocolRecovery(ProtocolRecoveryAudit{})
+	c.(WorkspaceMutationSink).RecordWorkspaceMutation(WorkspaceMutation{Content: true})
 
 	got := inner.snapshot()
 	if len(got) != 2 || got[1].Text != "tail" {
 		t.Fatalf("capability call must flush the buffered delta first: %+v", got)
 	}
-	if inner.readiness != 1 || inner.turns != 1 || inner.recovery != 1 {
-		t.Fatalf("capabilities not forwarded: %d/%d/%d", inner.readiness, inner.turns, inner.recovery)
+	if inner.readiness != 1 || inner.turns != 1 || inner.recovery != 1 || inner.workspace != 1 {
+		t.Fatalf("capabilities not forwarded: %d/%d/%d/%d", inner.readiness, inner.turns, inner.recovery, inner.workspace)
 	}
 }
 

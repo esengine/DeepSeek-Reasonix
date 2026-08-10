@@ -78,6 +78,10 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 			return
 		}
 		outcomes[i] = a.executeOne(ctx, calls[i])
+		recordWorkspaceMutation(a.sink, outcomes[i].workspaceMutation)
+		if outcomes[i].executed {
+			surfaceWriters[i] = outcomes[i].workspaceMutation != nil
+		}
 		if outcomes[i].resolved {
 			readOnly := outcomes[i].resolvedReadOnly
 			calls[i].ResolvedName = outcomes[i].resolvedName
@@ -318,6 +322,11 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 		if startedAt[i] > 0 {
 			tr.StartedAt = startedAt[i]
 			tr.EndedAt = startedAt[i] + durations[i]
+			if mutation := o.workspaceMutation; mutation != nil {
+				tr.WorkspaceMutation = true
+				tr.WorkspacePaths = append([]string(nil), mutation.Paths...)
+				tr.WorkspaceAllPaths = mutation.AllPaths
+			}
 		}
 		a.sink.Emit(event.Event{Kind: event.ToolResult, Tool: tr})
 		if o.truncated && o.truncMsg != "" {
@@ -356,6 +365,8 @@ func batchCallIsMutatingFailure(a *Agent, call provider.ToolCall, o toolOutcome)
 		return false
 	}
 	readOnly := false
+	toolName := call.Name
+	toolArgs := json.RawMessage(call.Arguments)
 	t, _, ambiguous := a.tools.ResolveCall(call.Name)
 	known := t != nil && len(ambiguous) == 0
 	if known {
@@ -367,12 +378,17 @@ func batchCallIsMutatingFailure(a *Agent, call provider.ToolCall, o toolOutcome)
 	if o.resolved {
 		readOnly = o.resolvedReadOnly
 	}
-	if call.Name == "bash" && permission.BashCommandIsReadOnly(json.RawMessage(call.Arguments)) {
+	if o.effective.name != "" {
+		toolName = o.effective.name
+		toolArgs = o.effective.args
+		readOnly = o.effective.readOnly
+	}
+	if toolName == "bash" && permission.BashCommandIsReadOnly(toolArgs) {
 		readOnly = true
 	}
 	// Verification failures do not open the dependency barrier by themselves —
 	// only a failed modification does.
-	if call.Name == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(json.RawMessage(call.Arguments))) {
+	if toolName == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(toolArgs)) {
 		return false
 	}
 	// Resolved writers (including MCP targets behind use_capability) count even
@@ -380,7 +396,7 @@ func batchCallIsMutatingFailure(a *Agent, call provider.ToolCall, o toolOutcome)
 	if o.resolved && !o.resolvedReadOnly {
 		return true
 	}
-	if evidence.ToolCallMutates(call.Name, json.RawMessage(call.Arguments), readOnly) {
+	if evidence.ToolCallMutates(toolName, toolArgs, readOnly) {
 		return true
 	}
 	// Fail closed only for a target the host could not classify: a blanket
