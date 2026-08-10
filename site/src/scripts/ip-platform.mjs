@@ -8,7 +8,17 @@ import {
   validateIntake,
   validateShare,
 } from "./ip-platform-state.mjs";
-import { ASSET_TYPE_COLORS, RELATION_LABELS, edgePath, layoutAssetGraph, relatedAssetIds } from "./asset-graph.mjs";
+import {
+  ASSET_TYPE_COLORS,
+  RELATION_LABELS,
+  edgePath,
+  graphZoomLevel,
+  layoutAssetGraph,
+  normalizeGraphCamera,
+  panGraphCamera,
+  relatedAssetIds,
+  zoomGraphCameraAt,
+} from "./asset-graph.mjs";
 import { createAgentWorkbench } from "./agent-workbench.mjs";
 
 const storageKey = "intelifar-ip-platform-v1";
@@ -50,7 +60,16 @@ let currentAssetGraph = { nodes: [], edges: [], meta: {} };
 let graphFocusId = null;
 let selectedGraphNode = null;
 let selectedGraphRelationship = null;
-let graphScale = 1;
+function defaultGraphCamera() {
+  const camera = normalizeGraphCamera();
+  return window.matchMedia("(max-width: 660px)").matches
+    ? zoomGraphCameraAt(camera, 0.42, { x: 540, y: 310 })
+    : camera;
+}
+
+let graphCamera = defaultGraphCamera();
+const graphPointers = new Map();
+let graphGesture = null;
 let agentWorkbench = null;
 const qs = (selector, root = document) => root.querySelector(selector);
 const qsa = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -174,6 +193,35 @@ function graphNodeColor(type) {
   return ASSET_TYPE_COLORS[type] || ASSET_TYPE_COLORS.未分类;
 }
 
+function graphCameraPoint(event) {
+  const rect = qs("#asset-graph").getBoundingClientRect();
+  return {
+    x: (event.clientX - rect.left) * 1080 / Math.max(1, rect.width),
+    y: (event.clientY - rect.top) * 620 / Math.max(1, rect.height),
+  };
+}
+
+function applyGraphCamera({ announce = true } = {}) {
+  graphCamera = normalizeGraphCamera(graphCamera);
+  const viewport = qs("#graph-viewport");
+  const graph = qs("#asset-graph");
+  viewport.setAttribute("transform", `translate(${graphCamera.x.toFixed(2)} ${graphCamera.y.toFixed(2)}) scale(${graphCamera.scale.toFixed(3)})`);
+  const level = graphZoomLevel(graphCamera.scale);
+  graph.dataset.zoomLevel = level;
+  graph.dataset.cameraX = graphCamera.x.toFixed(2);
+  graph.dataset.cameraY = graphCamera.y.toFixed(2);
+  graph.dataset.cameraScale = graphCamera.scale.toFixed(3);
+  const levelLabel = level === "overview" ? "全景脉络" : level === "detail" ? "节点细节" : "关系网络";
+  const status = `${Math.round(graphCamera.scale * 100)}% · ${levelLabel}`;
+  setText("#graph-zoom-reset", `${Math.round(graphCamera.scale * 100)}%`);
+  if (announce || qs("#graph-camera-status")?.textContent !== status) setText("#graph-camera-status", status);
+}
+
+function resetGraphCamera() {
+  graphCamera = defaultGraphCamera();
+  applyGraphCamera();
+}
+
 function updateGraphInspector(node) {
   selectedGraphNode = node;
   selectedGraphRelationship = null;
@@ -190,7 +238,7 @@ function updateGraphInspector(node) {
   setText("#graph-inspector-degree", `${degree} 条`);
   setText("#graph-inspector-evidence", `${node.evidenceIds?.length ?? 0} 处`);
   qsa(".graph-node", qs("#graph-nodes")).forEach((element) => element.classList.toggle("is-selected", element.dataset.graphNodeId === node.id));
-  qsa(".graph-edge", qs("#graph-edges")).forEach((element) => {
+  qsa(".graph-edge, .graph-edge-glow", qs("#graph-viewport")).forEach((element) => {
     const connected = element.dataset.source === node.id || element.dataset.target === node.id;
     element.classList.toggle("is-highlighted", connected);
     element.classList.toggle("is-dimmed", !connected);
@@ -224,7 +272,7 @@ function updateRelationshipInspector(edge) {
   setText("#relationship-review-note", proposed ? "关联证据来自两端资产，仅作为人工复核线索；未确认前不参与只读成员搜索。" : "已确认关系会参与资产搜索扩展与影响分析。 ");
   qs("#relationship-review-actions").hidden = !canReview;
   qsa(".graph-node", qs("#graph-nodes")).forEach((element) => element.classList.remove("is-selected", "is-dimmed"));
-  qsa(".graph-edge", qs("#graph-edges")).forEach((element) => {
+  qsa(".graph-edge, .graph-edge-glow", qs("#graph-viewport")).forEach((element) => {
     const selected = element.dataset.relationshipId === edge.id;
     element.classList.toggle("is-highlighted", selected);
     element.classList.toggle("is-dimmed", !selected);
@@ -334,15 +382,18 @@ function renderAssetGraph() {
   const nodesById = new Map(nodes.map((node) => [node.id, node]));
   const positioned = layoutAssetGraph({ nodes, edges }, { width: 1080, height: 620, focusId: graphFocusId });
   const positionedById = new Map(positioned.map((node) => [node.id, node]));
+  const glowLayer = qs("#graph-edge-glows");
   const edgeLayer = qs("#graph-edges");
   const labelLayer = qs("#graph-edge-labels");
   const nodeLayer = qs("#graph-nodes");
-  edgeLayer.replaceChildren(); labelLayer.replaceChildren(); nodeLayer.replaceChildren();
+  glowLayer.replaceChildren(); edgeLayer.replaceChildren(); labelLayer.replaceChildren(); nodeLayer.replaceChildren();
   edges.forEach((edge) => {
     const source = positionedById.get(edge.sourceAssetId);
     const target = positionedById.get(edge.targetAssetId);
     if (!source || !target) return;
     const pathData = edgePath(source, target, edge.id);
+    const stateClass = edge.verificationStatus === "proposed" ? " is-proposed" : "";
+    const glow = svgElement("path", { d: pathData, class: `graph-edge-glow${stateClass}`, "aria-hidden": "true", "data-source": edge.sourceAssetId, "data-target": edge.targetAssetId, "data-relationship-id": edge.id });
     const path = svgElement("path", { d: pathData, class: `graph-edge${edge.verificationStatus === "proposed" ? " is-proposed" : ""}`, "aria-hidden": "true", "data-source": edge.sourceAssetId, "data-target": edge.targetAssetId, "data-relationship-id": edge.id });
     const hitTarget = svgElement("path", { d: pathData, class: `graph-edge-hit${edge.verificationStatus === "proposed" ? " is-proposed" : ""}`, tabindex: "0", role: "button", "aria-label": `查看关系：${source.title} ${RELATION_LABELS[edge.relationType] || edge.relationType} ${target.title}`, "data-source": edge.sourceAssetId, "data-target": edge.targetAssetId, "data-relationship-id": edge.id });
     const title = svgElement("title", {}, `${source.title} ${RELATION_LABELS[edge.relationType] || edge.relationType} ${target.title}${edge.verificationStatus === "proposed" ? "，待复核" : "，已确认"}`);
@@ -351,6 +402,7 @@ function renderAssetGraph() {
     hitTarget.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") { event.preventDefault(); updateRelationshipInspector(edge); }
     });
+    glowLayer.append(glow);
     edgeLayer.append(path, hitTarget);
     if (edges.length <= 28) {
       const label = svgElement("text", { x: (source.x + target.x) / 2, y: (source.y + target.y) / 2 - 7, class: "graph-edge-label", "data-source": edge.sourceAssetId, "data-target": edge.targetAssetId, "data-relationship-id": edge.id }, RELATION_LABELS[edge.relationType] || edge.relationType);
@@ -359,16 +411,22 @@ function renderAssetGraph() {
   });
   positioned.forEach((node) => {
     const color = graphNodeColor(node.type);
-    const group = svgElement("g", { class: `graph-node${selectedGraphNode?.id === node.id ? " is-selected" : ""}`, transform: `translate(${node.x} ${node.y})`, tabindex: "0", role: "button", "aria-label": `${node.title}，${node.type || "知识资产"}，${node.degree} 条直接关系`, "data-graph-node-id": node.id });
+    const radius = Math.min(24, 11 + node.degree * 1.8 + (node.isFocus ? 3 : 0));
+    const labelSide = node.x < 500 ? -1 : 1;
+    const labelX = labelSide * (radius + 13);
+    const labelAnchor = labelSide < 0 ? "end" : "start";
+    const group = svgElement("g", { class: `graph-node${selectedGraphNode?.id === node.id ? " is-selected" : ""}${node.isFocus ? " is-core" : ""}`, transform: `translate(${node.x} ${node.y})`, tabindex: "0", role: "button", "aria-label": `${node.title}，${node.type || "知识资产"}，${node.degree} 条直接关系`, "data-graph-node-id": node.id, "data-node-degree": node.degree, style: `color:${color}` });
     group.append(
-      svgElement("rect", { class: "node-halo", x: -87, y: -39, width: 174, height: 78, rx: 16 }),
-      svgElement("rect", { class: "node-card", x: -82, y: -34, width: 164, height: 68, rx: 12 }),
-      svgElement("rect", { class: "node-accent", x: -82, y: -34, width: 6, height: 68, rx: 3, fill: color }),
-      svgElement("text", { class: "node-kicker", x: -67, y: -17 }, `${node.type || "知识资产"} · ${node.id.slice(-6)}`),
-      svgElement("text", { class: "node-title", x: -67, y: 3 }, node.title.length > 14 ? `${node.title.slice(0, 14)}…` : node.title),
-      svgElement("text", { class: "node-meta", x: -67, y: 22 }, `${node.owner || "待认领"} · ${Math.round(Number(node.confidence || 0) * 100)}%`),
-      svgElement("circle", { cx: 69, cy: -21, r: 10, fill: color }),
-      svgElement("text", { class: "node-degree", x: 69, y: -21 }, String(node.degree)),
+      svgElement("circle", { class: "node-hit", r: Math.max(34, radius + 12) }),
+      svgElement("circle", { class: "node-ripple", r: radius + 17 }),
+      svgElement("circle", { class: "node-orbit", r: radius + 8 }),
+      svgElement("circle", { class: "node-core", r: radius, fill: color }),
+      svgElement("circle", { class: "node-center", r: Math.max(3.5, radius * .26) }),
+      svgElement("circle", { class: "node-degree-badge", cx: -radius * .72, cy: -radius * .72, r: 8 }),
+      svgElement("text", { class: "node-degree", x: -radius * .72, y: -radius * .72 }, String(node.degree)),
+      svgElement("text", { class: "node-title", x: labelX, y: -4, "text-anchor": labelAnchor }, node.title.length > 18 ? `${node.title.slice(0, 18)}…` : node.title),
+      svgElement("text", { class: "node-kicker", x: labelX, y: 12, "text-anchor": labelAnchor }, `${node.type || "知识资产"} · ${node.id.slice(-6)}`),
+      svgElement("text", { class: "node-meta", x: labelX, y: 27, "text-anchor": labelAnchor }, `${node.owner || "待认领"} · ${Math.round(Number(node.confidence || 0) * 100)}%`),
     );
     group.addEventListener("click", () => updateGraphInspector(node));
     group.addEventListener("keydown", (event) => {
@@ -382,7 +440,7 @@ function renderAssetGraph() {
   setText("#graph-edge-count", String(graph.edges.filter((edge) => edge.verificationStatus === "confirmed").length));
   setText("#graph-proposed-count", String(proposedCount));
   setText("#graph-coverage", graph.nodes.length ? `${Math.round(connectedIds.size / graph.nodes.length * 100)}%` : "0%");
-  setText("#graph-summary", graphFocusId ? `已聚焦 ${nodesById.get(graphFocusId)?.title || graphFocusId} 的一跳网络` : `展示 ${nodes.length} 项资产 · ${edges.length} 条关系`);
+  setText("#graph-summary", graphFocusId ? `已聚焦 ${nodesById.get(graphFocusId)?.title || graphFocusId} 的一跳网络` : `神经全景 · ${nodes.length} 项资产 · ${edges.length} 条关系`);
   qs("#graph-empty").hidden = positioned.length > 0;
   renderRelationshipRegister(edges, nodesById);
   const legend = qs("#graph-legend");
@@ -391,8 +449,7 @@ function renderAssetGraph() {
     const item = document.createElement("span"); const marker = document.createElement("i"); const label = document.createElement("b");
     marker.style.background = graphNodeColor(nodeType); label.textContent = nodeType; item.append(marker, label); legend.append(item);
   });
-  qs("#graph-viewport").style.transform = `scale(${graphScale})`;
-  setText("#graph-zoom-reset", `${Math.round(graphScale * 100)}%`);
+  applyGraphCamera({ announce: false });
 }
 
 async function loadAssetGraph() {
@@ -1314,7 +1371,7 @@ qs("#graph-reset").addEventListener("click", () => {
   graphFocusId = null;
   selectedGraphNode = null;
   selectedGraphRelationship = null;
-  graphScale = 1;
+  graphCamera = defaultGraphCamera();
   qs("#graph-search").value = "";
   qs("#graph-type-filter").value = "all";
   qs("#graph-relation-filter").value = "all";
@@ -1343,6 +1400,7 @@ qs("#relationship-open-evidence").addEventListener("click", (event) => {
 qs("#graph-focus-neighborhood").addEventListener("click", () => {
   if (!selectedGraphNode) return;
   graphFocusId = selectedGraphNode.id;
+  graphCamera = defaultGraphCamera();
   qs("#graph-inspector").hidden = true;
   selectedGraphNode = null;
   renderAssetGraph();
@@ -1355,6 +1413,7 @@ qs("#asset-graph").addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   if (graphFocusId) {
     graphFocusId = null;
+    graphCamera = defaultGraphCamera();
     renderAssetGraph();
   } else {
     selectedGraphNode = null;
@@ -1364,14 +1423,87 @@ qs("#asset-graph").addEventListener("keydown", (event) => {
     renderAssetGraph();
   }
 });
-function updateGraphScale(next) {
-  graphScale = Math.max(.7, Math.min(1.45, next));
-  qs("#graph-viewport").style.transform = `scale(${graphScale})`;
-  setText("#graph-zoom-reset", `${Math.round(graphScale * 100)}%`);
+function updateGraphScale(next, anchor = { x: 540, y: 310 }) {
+  graphCamera = zoomGraphCameraAt(graphCamera, next, anchor);
+  applyGraphCamera();
 }
-qs("#graph-zoom-in").addEventListener("click", () => updateGraphScale(graphScale + .1));
-qs("#graph-zoom-out").addEventListener("click", () => updateGraphScale(graphScale - .1));
-qs("#graph-zoom-reset").addEventListener("click", () => updateGraphScale(1));
+
+function graphPointerSnapshot() {
+  return [...graphPointers.values()];
+}
+
+function graphDistance([left, right]) {
+  return Math.max(1, Math.hypot(right.x - left.x, right.y - left.y));
+}
+
+function graphMidpoint([left, right]) {
+  return { x: (left.x + right.x) / 2, y: (left.y + right.y) / 2 };
+}
+
+function beginGraphGesture() {
+  const points = graphPointerSnapshot();
+  if (!points.length) { graphGesture = null; return; }
+  if (points.length === 1) {
+    graphGesture = { mode: "pan", camera: { ...graphCamera }, point: { ...points[0] } };
+    return;
+  }
+  const pair = points.slice(0, 2);
+  graphGesture = {
+    mode: "pinch",
+    camera: { ...graphCamera },
+    distance: graphDistance(pair),
+    midpoint: graphMidpoint(pair),
+  };
+}
+
+const graphSvg = qs("#asset-graph");
+qs("#graph-zoom-in").addEventListener("click", () => updateGraphScale(graphCamera.scale * 1.2));
+qs("#graph-zoom-out").addEventListener("click", () => updateGraphScale(graphCamera.scale / 1.2));
+qs("#graph-zoom-reset").addEventListener("click", resetGraphCamera);
+graphSvg.addEventListener("wheel", (event) => {
+  event.preventDefault();
+  updateGraphScale(graphCamera.scale * (event.deltaY < 0 ? 1.14 : 1 / 1.14), graphCameraPoint(event));
+}, { passive: false });
+graphSvg.addEventListener("pointerdown", (event) => {
+  if (event.target.closest(".graph-node, .graph-edge-hit")) return;
+  graphSvg.setPointerCapture(event.pointerId);
+  graphPointers.set(event.pointerId, graphCameraPoint(event));
+  beginGraphGesture();
+  graphSvg.classList.add("is-panning");
+});
+graphSvg.addEventListener("pointermove", (event) => {
+  if (!graphPointers.has(event.pointerId) || !graphGesture) return;
+  graphPointers.set(event.pointerId, graphCameraPoint(event));
+  const points = graphPointerSnapshot();
+  if (points.length >= 2 && graphGesture.mode === "pinch") {
+    const pair = points.slice(0, 2);
+    const midpoint = graphMidpoint(pair);
+    const scale = normalizeGraphCamera({ scale: graphGesture.camera.scale * graphDistance(pair) / graphGesture.distance }).scale;
+    const worldX = (graphGesture.midpoint.x - graphGesture.camera.x) / graphGesture.camera.scale;
+    const worldY = (graphGesture.midpoint.y - graphGesture.camera.y) / graphGesture.camera.scale;
+    graphCamera = { x: midpoint.x - worldX * scale, y: midpoint.y - worldY * scale, scale };
+  } else if (points.length === 1 && graphGesture.mode === "pan") {
+    graphCamera = panGraphCamera(graphGesture.camera, { x: points[0].x - graphGesture.point.x, y: points[0].y - graphGesture.point.y });
+  } else {
+    beginGraphGesture();
+    return;
+  }
+  applyGraphCamera({ announce: false });
+});
+function finishGraphPointer(event) {
+  if (!graphPointers.has(event.pointerId)) return;
+  graphPointers.delete(event.pointerId);
+  if (graphPointers.size) beginGraphGesture();
+  else {
+    graphGesture = null;
+    graphSvg.classList.remove("is-panning");
+  }
+}
+graphSvg.addEventListener("pointerup", finishGraphPointer);
+graphSvg.addEventListener("pointercancel", finishGraphPointer);
+graphSvg.addEventListener("dblclick", (event) => {
+  if (!event.target.closest(".graph-node, .graph-edge-hit")) resetGraphCamera();
+});
 qs("#asset-mode-graph").addEventListener("click", () => {
   qs("#view-assets").classList.remove("asset-list-only");
   qs("#asset-mode-graph").classList.add("is-active");

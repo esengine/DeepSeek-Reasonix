@@ -38,6 +38,46 @@ function clamp(value, minimum, maximum) {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
+export const GRAPH_CAMERA_LIMITS = Object.freeze({ minimum: 0.35, maximum: 2.4 });
+
+function finiteNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+export function normalizeGraphCamera(camera = {}) {
+  return {
+    x: finiteNumber(camera.x),
+    y: finiteNumber(camera.y),
+    scale: clamp(finiteNumber(camera.scale, 1), GRAPH_CAMERA_LIMITS.minimum, GRAPH_CAMERA_LIMITS.maximum),
+  };
+}
+
+export function zoomGraphCameraAt(camera, nextScale, anchor = { x: 540, y: 310 }) {
+  const current = normalizeGraphCamera(camera);
+  const scale = normalizeGraphCamera({ scale: nextScale }).scale;
+  const point = { x: finiteNumber(anchor.x, 540), y: finiteNumber(anchor.y, 310) };
+  const worldX = (point.x - current.x) / current.scale;
+  const worldY = (point.y - current.y) / current.scale;
+  return { x: point.x - worldX * scale, y: point.y - worldY * scale, scale };
+}
+
+export function panGraphCamera(camera, delta = {}) {
+  const current = normalizeGraphCamera(camera);
+  return {
+    ...current,
+    x: current.x + finiteNumber(delta.x),
+    y: current.y + finiteNumber(delta.y),
+  };
+}
+
+export function graphZoomLevel(scale) {
+  const normalized = normalizeGraphCamera({ scale }).scale;
+  if (normalized < 0.72) return "overview";
+  if (normalized > 1.45) return "detail";
+  return "network";
+}
+
 export function relatedAssetIds(graph, rootAssetId, depth = 1) {
   const allowedDepth = clamp(Math.round(Number(depth) || 0), 0, 2);
   const nodeIds = new Set((graph?.nodes ?? []).map((node) => node.id));

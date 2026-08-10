@@ -24,4 +24,3 @@
 
 - Output：桌面全景、近景节点、移动端和最终结构截图，更新验收报告。
 - Test：运行 `npm test`、`npm run build`、`npm run test:e2e`、`npm run test:e2e:modules` 和凭据扫描，并人工查看最终截图。
-

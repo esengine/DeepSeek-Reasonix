@@ -56,6 +56,18 @@ test("responsive and accessibility contracts are present", () => {
   assert.match(styles, /prefers-reduced-motion/);
 });
 
+test("IP panorama exposes a scalable semantic neural network camera", () => {
+  assert.match(source, /data-testid="graph-camera-status"/);
+  assert.match(source, /滚轮缩放/);
+  assert.match(source, /id="graph-viewport"/);
+  assert.match(behavior, /zoomGraphCameraAt/);
+  assert.match(behavior, /addEventListener\("wheel"/);
+  assert.match(behavior, /addEventListener\("pointerdown"/);
+  assert.match(styles, /\.graph-node \.node-core/);
+  assert.match(styles, /data-zoom-level="overview"/);
+  assert.match(styles, /prefers-reduced-motion/);
+});
+
 test("real MinerU and DeepSeek analysis stays behind the same-origin gateway", () => {
   assert.match(source, /id="real-file-input"/);
   assert.match(source, /data-testid="real-analysis-results"/);

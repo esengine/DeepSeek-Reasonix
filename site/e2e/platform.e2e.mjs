@@ -99,12 +99,33 @@ await check("资产全景网络筛选、聚焦与键盘访问", async () => {
   assert(await page.locator(".graph-node").count() === 7, "全景网络未渲染完整演示资产");
   assert(await page.locator(".graph-edge").count() === 7, "维护者默认视图应展示已确认与待复核关系");
   assert(await page.locator(".graph-edge.is-proposed").count() === 2, "默认视图未区分待复核关系");
+  const graphCanvas = page.locator("#asset-graph");
+  assert(await graphCanvas.getAttribute("data-camera-scale") === "1.000", "神经全景未使用稳定初始相机");
+  await page.locator("#graph-zoom-in").click();
+  assert(Number(await graphCanvas.getAttribute("data-camera-scale")) > 1, "缩放按钮未放大神经全景");
+  await page.locator("#graph-zoom-reset").click();
+  await graphCanvas.hover({ position: { x: 420, y: 310 } });
+  await page.mouse.wheel(0, 540);
+  await page.mouse.wheel(0, 540);
+  await page.mouse.wheel(0, 540);
+  assert(await graphCanvas.getAttribute("data-zoom-level") === "overview", "缩小时未进入语义全景层级");
+  await page.locator("#graph-zoom-reset").click();
+  const graphBox = await graphCanvas.boundingBox();
+  await page.mouse.move(graphBox.x + 180, graphBox.y + 280);
+  await page.mouse.down();
+  await page.mouse.move(graphBox.x + 250, graphBox.y + 315, { steps: 4 });
+  await page.mouse.up();
+  assert(Math.abs(Number(await graphCanvas.getAttribute("data-camera-x"))) > 10, "拖拽空白画布未改变相机位置");
+  await page.locator("#graph-zoom-reset").click();
+  assert(await page.locator("[data-testid='graph-camera-status']").textContent() === "100% · 关系网络", "适配全景未恢复相机状态");
+  await page.screenshot({ path: path.join(graphArtifacts, "06-neural-panorama.png") });
   const coreNode = page.getByRole("button", { name: /稀疏专家路由与动态负载均衡方法，技术方案/ });
   await coreNode.focus();
   await page.keyboard.press("Enter");
   await page.locator("#graph-inspector:not([hidden])").waitFor();
   assert((await page.locator("#graph-inspector-degree").textContent()) === "4 条", "资产卡片直接关系统计不准确");
   await page.screenshot({ path: path.join(screenshots, "04-asset-panorama.png") });
+  await page.locator("#graph-stage").screenshot({ path: path.join(graphArtifacts, "07-neural-node-inspector.png") });
   await page.locator("#graph-focus-neighborhood").click();
   assert(await page.locator(".graph-node").count() === 5, "一跳聚焦未保留维护者可复核的完整邻域");
   await page.locator("#asset-graph").press("Escape");
@@ -226,6 +247,7 @@ await check("移动端响应式导航与指挥台", async () => {
   await mobilePage.locator("#mobile-menu").click();
   await mobilePage.locator("[data-testid='nav-assets']").click();
   await mobilePage.locator("#graph-loading").waitFor({ state: "hidden" });
+  await mobilePage.waitForTimeout(450);
   assert(await mobilePage.evaluate(() => document.body.scrollWidth <= window.innerWidth), "移动端资产全景产生页面级横向溢出");
   assert(await mobilePage.locator(".graph-node").count() === 7, "移动端资产全景节点缺失");
   await mobilePage.screenshot({ path: path.join(graphArtifacts, "04-mobile-panorama.png"), fullPage: true });
@@ -244,11 +266,12 @@ const traversalP95 = Number(graphPerformance.boundedTraversal?.p95Ms || 0).toFix
 await check("最终交付物结构截图留档", async () => {
   await page.setContent(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>
     *{box-sizing:border-box}body{margin:0;background:#f3f4f8;color:#171823;font:14px "Microsoft YaHei",sans-serif}.sheet{display:grid;grid-template-columns:260px 1fr;min-height:100vh}.rail{display:flex;flex-direction:column;padding:42px 30px;background:#171823;color:#fff}.brand{display:flex;gap:12px;align-items:center;font:bold 20px monospace;letter-spacing:.08em}.glyph{display:grid;place-items:center;width:36px;height:36px;border:1px solid #756cff;border-radius:10px;color:#a9a4ff}.rail small{margin:10px 0;color:#8d91a5;font:10px monospace;letter-spacing:.18em}.rail-meta{margin-top:auto;display:grid;gap:8px;border-top:1px solid #343644;padding-top:20px}.rail-meta b{font-size:14px}.rail-meta span{color:#b8bac7;font-size:11px;line-height:1.7}.content{padding:44px 52px}.head{display:flex;justify-content:space-between;align-items:flex-start}.eyebrow{color:#635bff;font:bold 10px monospace;letter-spacing:.14em}.head h1{margin:10px 0 4px;font-size:34px}.head p{margin:0;color:#727689}.pass{padding:10px 16px;border:1px solid #8ed8bf;border-radius:10px;background:#effbf7;color:#16866a;font:bold 10px monospace}.layout{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:20px;margin-top:28px}.panel{overflow:hidden;border:1px solid #dfe1e9;border-radius:16px;background:#fff;box-shadow:0 18px 50px rgba(26,27,43,.06)}.panel-head{display:flex;justify-content:space-between;align-items:end;padding:23px;border-bottom:1px solid #e4e5eb}.panel-head h2{margin:5px 0 0;font-size:18px}.panel-head>span{color:#7d8090;font-size:9px}.tree{margin:0;padding:25px 28px;color:#292b39;font:12px/1.75 Consolas,monospace;white-space:pre-wrap}.side{display:grid;gap:16px}.metric{padding:23px}.metric small{display:block;color:#787b8c;font-size:10px}.metric strong{display:block;margin:7px 0 2px;font-size:35px}.metric b{color:#635bff}.checklist{padding:8px 22px}.checklist p{display:grid;grid-template-columns:24px 1fr;gap:9px;align-items:center;margin:0;padding:16px 0;border-top:1px solid #e8e9ee;font-size:11px}.checklist p:first-child{border-top:0}.checklist i{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:#e7f6f1;color:#16866a;font-style:normal}.note{padding:15px;border:1px dashed #d9a44c;border-radius:12px;background:#fff9eb;color:#865d16;font-size:10px;line-height:1.6}
-  </style></head><body><main class="sheet"><aside class="rail"><div class="brand"><span class="glyph">IF</span>intelifar</div><small>IP INTELLIGENCE</small><div class="rail-meta"><b>资产关系全景阶段</b><span>图投影 · 权限遍历 · 可解释搜索<br>桌面与移动端真实 E2E</span></div></aside><section class="content"><header class="head"><div><span class="eyebrow">FINAL DELIVERY MANIFEST</span><h1>最终交付物结构</h1><p>intelifar 小微企业知识资产平台 · 2026-08-10 验收快照</p></div><span class="pass">● ALL CHECKS PASSED</span></header><div class="layout"><article class="panel"><div class="panel-head"><div><span class="eyebrow">REPOSITORY TREE</span><h2>intelifar-ip-wiki/</h2></div><span>关系全景核心交付路径</span></div><pre class="tree">├─ INTELIFAR-DELIVERY.md
+  </style></head><body><main class="sheet"><aside class="rail"><div class="brand"><span class="glyph">IF</span>intelifar</div><small>IP INTELLIGENCE</small><div class="rail-meta"><b>IP 神经全景阶段</b><span>语义缩放 · 权限遍历 · 可解释搜索<br>桌面与移动端真实 E2E</span></div></aside><section class="content"><header class="head"><div><span class="eyebrow">FINAL DELIVERY MANIFEST</span><h1>最终交付物结构</h1><p>intelifar 小微企业知识资产平台 · 2026-08-10 验收快照</p></div><span class="pass">● ALL CHECKS PASSED</span></header><div class="layout"><article class="panel"><div class="panel-head"><div><span class="eyebrow">REPOSITORY TREE</span><h2>intelifar-ip-wiki/</h2></div><span>神经全景核心交付路径</span></div><pre class="tree">├─ INTELIFAR-DELIVERY.md
 ├─ docs/
 │  ├─ INTELIFAR-USER-GUIDE.zh-CN.md
 │  ├─ architecture/adr/0002-use-rebuildable-ip-graph-projection.md
-│  └─ plans/2026-08-10-ip-asset-knowledge-graph-*.md
+│  ├─ plans/2026-08-10-ip-asset-knowledge-graph-*.md
+│  └─ plans/2026-08-10-neural-ip-panorama-*.md
 ├─ site/
 │  ├─ server/
 │  │  ├─ asset-graph-store.mjs          图投影 / 图搜索 / 权限遍历
@@ -256,14 +279,14 @@ await check("最终交付物结构截图留档", async () => {
 │  │  └─ real-analysis-server.mjs       图与关系 API / 审计
 │  ├─ src/
 │  │  ├─ pages/index.astro              资产关系全景 UI
-│  │  ├─ styles/ip-platform.css         intelifar 图视觉系统
-│  │  └─ scripts/asset-graph*.mjs       布局算法 / 交互测试
+│  │  ├─ styles/ip-platform.css         intelifar 神经全景视觉系统
+│  │  └─ scripts/asset-graph*.mjs       布局 / 相机 / 交互测试
 │  ├─ e2e/
 │  │  ├─ platform.e2e.mjs               桌面 / 键盘 / 移动端
 │  │  └─ asset-graph-performance.mjs    10k / 100k 性能门槛
 │  └─ dist/                             生产静态构建
 └─ artifacts/ip-asset-graph/
-   ├─ 01..05-*.png                      最终视觉与结构截图
+   ├─ 01..07-*.png                      全景 / 节点 / 移动 / 结构截图
    ├─ acceptance-report.md              功能评分与验收边界
    ├─ performance-results.json          原始性能数据
    └─ performance-report.md             性能验收摘要</pre></article><aside class="side"><section class="panel metric"><small>SEARCH P95 / 目标 400ms</small><strong>${searchP95}<b>ms</b></strong><small>10,000 节点 · 100,000 关系</small></section><section class="panel metric"><small>2-HOP P95 / 目标 500ms</small><strong>${traversalP95}<b>ms</b></strong><small>权限先裁剪，再按索引遍历</small></section><section class="panel checklist"><p><i>✓</i><span>工作区与查看者机密边界</span></p><p><i>✓</i><span>关系确认、拒绝与哈希审计</span></p><p><i>✓</i><span>键盘、桌面与移动端全景</span></p><p><i>✓</i><span>中文手册与就地截图</span></p></section><div class="note">生产部署仍需由客户完成 HTTPS、主机加固、异地备份、告警和供应商数据协议。</div></aside></div></section></main></body></html>`);
@@ -301,7 +324,7 @@ await writeFile(path.join(artifacts, "delivery-tree.txt"), [
   "|-- site/",
   "|   |-- src/pages/index.astro         # enterprise application shell",
   "|   |-- src/styles/ip-platform.css    # intelifar design system",
-  "|   |-- src/scripts/asset-graph*.mjs  # graph layout, interaction and tests",
+  "|   |-- src/scripts/asset-graph*.mjs  # graph layout, semantic camera and tests",
   "|   |-- public/brand/                 # official logo assets",
   "|   |-- e2e/platform.e2e.mjs          # desktop, keyboard and mobile scenarios",
   "|   |-- e2e/asset-graph-performance.mjs # 10k nodes / 100k edges gate",
@@ -315,7 +338,7 @@ await writeFile(path.join(artifacts, "delivery-tree.txt"), [
   "    |-- enterprise-95-scorecard.md",
   "    |-- enterprise-95-review/          # final desktop/mobile visual review",
   "    |-- real-e2e/                      # sanitized live-provider publication evidence",
-  "    |-- ip-asset-graph/                # panorama, performance and structure proof",
+  "    |-- ip-asset-graph/                # neural panorama, performance and structure proof",
   "    `-- screenshots/                   # full product browser evidence",
 ].join("\n"), "utf8");
 process.stdout.write(`${results.length} E2E scenarios passed.\n`);

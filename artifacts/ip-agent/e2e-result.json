@@ -1,6 +1,6 @@
 {
   "task": {
-    "id": "AGT-8fff3c5b-96d2-4e44-8e46-365bf07e9480",
+    "id": "AGT-666086f2-82c6-4d12-802a-0cfef77148d1",
     "workspaceId": "WS-AGENT-E2E",
     "createdBy": "USR-2CCAAB16D6F37B1C",
     "createdRole": "owner",
@@ -9,8 +9,8 @@
     "assetIds": [],
     "state": "complete",
     "stageLabel": "任务结果已通过证据门禁",
-    "createdAt": "2026-08-10T11:17:54.426Z",
-    "updatedAt": "2026-08-10T11:17:54.438Z",
+    "createdAt": "2026-08-10T11:46:16.781Z",
+    "updatedAt": "2026-08-10T11:46:16.793Z",
     "plan": {
       "title": "知识抽取引擎影响分析",
       "intent": "impact_analysis",
@@ -103,12 +103,12 @@
       "resultTokens": 59,
       "totalTokens": 96
     },
-    "completedAt": "2026-08-10T11:17:54.438Z",
+    "completedAt": "2026-08-10T11:46:16.793Z",
     "error": null,
     "events": [
       {
-        "id": "AGE-2b0bd2ba-4eca-4931-9a6b-a513a6dac72a",
-        "taskId": "AGT-8fff3c5b-96d2-4e44-8e46-365bf07e9480",
+        "id": "AGE-6dd8b4d3-260a-4d38-9ead-4225cd373697",
+        "taskId": "AGT-666086f2-82c6-4d12-802a-0cfef77148d1",
         "type": "task.created",
         "stepId": null,
         "detail": {
@@ -116,11 +116,11 @@
           "assetCount": 0,
           "boundary": "document-ip-wiki-readonly"
         },
-        "createdAt": "2026-08-10T11:17:54.429Z"
+        "createdAt": "2026-08-10T11:46:16.785Z"
       },
       {
-        "id": "AGE-33fe1dc9-8b37-47a8-b20f-1fbc5823e1a9",
-        "taskId": "AGT-8fff3c5b-96d2-4e44-8e46-365bf07e9480",
+        "id": "AGE-30df6dbb-bc76-4532-9926-c827af443e7e",
+        "taskId": "AGT-666086f2-82c6-4d12-802a-0cfef77148d1",
         "type": "plan.ready",
         "stepId": null,
         "detail": {
@@ -129,22 +129,22 @@
           "stepCount": 3,
           "model": "deepseek-chat-e2e"
         },
-        "createdAt": "2026-08-10T11:17:54.431Z"
+        "createdAt": "2026-08-10T11:46:16.787Z"
       },
       {
-        "id": "AGE-e673c0f4-465f-4abf-8a9f-7cc1f569212f",
-        "taskId": "AGT-8fff3c5b-96d2-4e44-8e46-365bf07e9480",
+        "id": "AGE-9ddba792-1f23-4196-b7d8-00e5bcb8a750",
+        "taskId": "AGT-666086f2-82c6-4d12-802a-0cfef77148d1",
         "type": "step.started",
         "stepId": "S1",
         "detail": {
           "title": "搜索授权资产",
           "tool": "search_assets"
         },
-        "createdAt": "2026-08-10T11:17:54.432Z"
+        "createdAt": "2026-08-10T11:46:16.787Z"
       },
       {
-        "id": "AGE-33448cb2-1243-4667-901d-a0e36904995f",
-        "taskId": "AGT-8fff3c5b-96d2-4e44-8e46-365bf07e9480",
+        "id": "AGE-346b5128-0b11-4e88-9287-faf8ce59a536",
+        "taskId": "AGT-666086f2-82c6-4d12-802a-0cfef77148d1",
         "type": "step.complete",
         "stepId": "S1",
         "detail": {
@@ -158,22 +158,22 @@
             "EV-PARSER-1"
           ]
         },
-        "createdAt": "2026-08-10T11:17:54.435Z"
+        "createdAt": "2026-08-10T11:46:16.789Z"
       },
       {
-        "id": "AGE-97589ed3-100d-41a8-b2e9-9b6d98822158",
-        "taskId": "AGT-8fff3c5b-96d2-4e44-8e46-365bf07e9480",
+        "id": "AGE-d5d1366a-b342-4a5c-a556-d03a3169c450",
+        "taskId": "AGT-666086f2-82c6-4d12-802a-0cfef77148d1",
         "type": "step.started",
         "stepId": "S2",
         "detail": {
           "title": "检查依赖关系",
           "tool": "inspect_neighborhood"
         },
-        "createdAt": "2026-08-10T11:17:54.436Z"
+        "createdAt": "2026-08-10T11:46:16.790Z"
       },
       {
-        "id": "AGE-22ef1bab-8238-41eb-8d1c-e41627509d94",
-        "taskId": "AGT-8fff3c5b-96d2-4e44-8e46-365bf07e9480",
+        "id": "AGE-e6fca35b-15cc-4bd7-8cb6-080d07a2dc01",
+        "taskId": "AGT-666086f2-82c6-4d12-802a-0cfef77148d1",
         "type": "step.complete",
         "stepId": "S2",
         "detail": {
@@ -183,25 +183,25 @@
           "sourceIds": [
             "IP-REAL-CORE",
             "IP-REAL-PARSER",
-            "REL-AAF7EA42-F06B-4C18-8BB9-5CEC59C967DE"
+            "REL-B8C9E1E6-AE33-4D9C-B16A-BFBD62CCE4A6"
           ]
         },
-        "createdAt": "2026-08-10T11:17:54.437Z"
+        "createdAt": "2026-08-10T11:46:16.790Z"
       },
       {
-        "id": "AGE-cdeb8762-8864-46e6-991b-d4e68df85d74",
-        "taskId": "AGT-8fff3c5b-96d2-4e44-8e46-365bf07e9480",
+        "id": "AGE-acce0d6f-8d89-4212-a5d0-8be19bcf9cf2",
+        "taskId": "AGT-666086f2-82c6-4d12-802a-0cfef77148d1",
         "type": "step.started",
         "stepId": "S3",
         "detail": {
           "title": "核验关键证据",
           "tool": "read_evidence"
         },
-        "createdAt": "2026-08-10T11:17:54.437Z"
+        "createdAt": "2026-08-10T11:46:16.791Z"
       },
       {
-        "id": "AGE-4447ee90-5cda-4652-9f2c-4abead629a6d",
-        "taskId": "AGT-8fff3c5b-96d2-4e44-8e46-365bf07e9480",
+        "id": "AGE-e68f9760-c4df-48b6-8285-db0a1de35c9a",
+        "taskId": "AGT-666086f2-82c6-4d12-802a-0cfef77148d1",
         "type": "step.complete",
         "stepId": "S3",
         "detail": {
@@ -213,11 +213,11 @@
             "IP-REAL-CORE"
           ]
         },
-        "createdAt": "2026-08-10T11:17:54.437Z"
+        "createdAt": "2026-08-10T11:46:16.792Z"
       },
       {
-        "id": "AGE-2428e7da-b39f-4ed8-be33-5a750214f31e",
-        "taskId": "AGT-8fff3c5b-96d2-4e44-8e46-365bf07e9480",
+        "id": "AGE-be8bf0dd-ace3-417d-b414-0a634dbd61ad",
+        "taskId": "AGT-666086f2-82c6-4d12-802a-0cfef77148d1",
         "type": "delivery.complete",
         "stepId": null,
         "detail": {
@@ -230,12 +230,12 @@
             "totalTokens": 96
           }
         },
-        "createdAt": "2026-08-10T11:17:54.439Z"
+        "createdAt": "2026-08-10T11:46:16.794Z"
       }
     ]
   },
   "wikiDraftTask": {
-    "id": "AGT-e57209c3-88d8-4dd8-8543-0a868af3b035",
+    "id": "AGT-706d510b-9c33-4def-9663-367f40c06dcf",
     "workspaceId": "WS-AGENT-E2E",
     "createdBy": "USR-2CCAAB16D6F37B1C",
     "createdRole": "owner",
@@ -244,8 +244,8 @@
     "assetIds": [],
     "state": "complete",
     "stageLabel": "任务结果已通过证据门禁",
-    "createdAt": "2026-08-10T11:17:56.399Z",
-    "updatedAt": "2026-08-10T11:17:56.405Z",
+    "createdAt": "2026-08-10T11:46:18.616Z",
+    "updatedAt": "2026-08-10T11:46:18.620Z",
     "plan": {
       "title": "知识抽取引擎 Wiki 更新草案",
       "intent": "wiki_draft",
@@ -317,12 +317,12 @@
       "resultTokens": 43,
       "totalTokens": 74
     },
-    "completedAt": "2026-08-10T11:17:56.405Z",
+    "completedAt": "2026-08-10T11:46:18.620Z",
     "error": null,
     "events": [
       {
-        "id": "AGE-c299da2f-97b9-4b06-96f1-89c3c01e42f5",
-        "taskId": "AGT-e57209c3-88d8-4dd8-8543-0a868af3b035",
+        "id": "AGE-81d6b0ab-b45c-4006-b843-2d430f628e0a",
+        "taskId": "AGT-706d510b-9c33-4def-9663-367f40c06dcf",
         "type": "task.created",
         "stepId": null,
         "detail": {
@@ -330,11 +330,11 @@
           "assetCount": 0,
           "boundary": "document-ip-wiki-readonly"
         },
-        "createdAt": "2026-08-10T11:17:56.401Z"
+        "createdAt": "2026-08-10T11:46:18.617Z"
       },
       {
-        "id": "AGE-dbf73861-14e1-4f6b-b7d1-af007beaad98",
-        "taskId": "AGT-e57209c3-88d8-4dd8-8543-0a868af3b035",
+        "id": "AGE-22b08d0b-128f-4cf8-add7-6278e9da0882",
+        "taskId": "AGT-706d510b-9c33-4def-9663-367f40c06dcf",
         "type": "plan.ready",
         "stepId": null,
         "detail": {
@@ -343,22 +343,22 @@
           "stepCount": 2,
           "model": "deepseek-chat-e2e"
         },
-        "createdAt": "2026-08-10T11:17:56.402Z"
+        "createdAt": "2026-08-10T11:46:18.618Z"
       },
       {
-        "id": "AGE-08dac1c5-00a5-47fa-946c-36251e331eb6",
-        "taskId": "AGT-e57209c3-88d8-4dd8-8543-0a868af3b035",
+        "id": "AGE-a08ee606-d749-422a-ba23-2d8a95e993c5",
+        "taskId": "AGT-706d510b-9c33-4def-9663-367f40c06dcf",
         "type": "step.started",
         "stepId": "S1",
         "detail": {
           "title": "读取当前正式 Wiki",
           "tool": "read_wiki"
         },
-        "createdAt": "2026-08-10T11:17:56.402Z"
+        "createdAt": "2026-08-10T11:46:18.618Z"
       },
       {
-        "id": "AGE-fdff4d76-be8a-4ab3-80d2-38b5676de851",
-        "taskId": "AGT-e57209c3-88d8-4dd8-8543-0a868af3b035",
+        "id": "AGE-0e36cdd8-8655-455e-aa92-cad75809c482",
+        "taskId": "AGT-706d510b-9c33-4def-9663-367f40c06dcf",
         "type": "step.complete",
         "stepId": "S1",
         "detail": {
@@ -371,22 +371,22 @@
             "WIKI:IP-REAL-CORE"
           ]
         },
-        "createdAt": "2026-08-10T11:17:56.403Z"
+        "createdAt": "2026-08-10T11:46:18.619Z"
       },
       {
-        "id": "AGE-d1220727-4797-4975-bdfd-8e8d8aebcac5",
-        "taskId": "AGT-e57209c3-88d8-4dd8-8543-0a868af3b035",
+        "id": "AGE-5d2e869b-bbd5-442b-8991-483ec34ca6a5",
+        "taskId": "AGT-706d510b-9c33-4def-9663-367f40c06dcf",
         "type": "step.started",
         "stepId": "S2",
         "detail": {
           "title": "准备只读草案上下文",
           "tool": "compose_wiki_draft"
         },
-        "createdAt": "2026-08-10T11:17:56.404Z"
+        "createdAt": "2026-08-10T11:46:18.619Z"
       },
       {
-        "id": "AGE-b64ff973-c876-4735-a98f-f4ef2c90d896",
-        "taskId": "AGT-e57209c3-88d8-4dd8-8543-0a868af3b035",
+        "id": "AGE-e19c0e10-9afd-4bc6-a93d-3c07b0023f55",
+        "taskId": "AGT-706d510b-9c33-4def-9663-367f40c06dcf",
         "type": "step.complete",
         "stepId": "S2",
         "detail": {
@@ -398,11 +398,11 @@
             "EV-CORE-1"
           ]
         },
-        "createdAt": "2026-08-10T11:17:56.404Z"
+        "createdAt": "2026-08-10T11:46:18.620Z"
       },
       {
-        "id": "AGE-065ed1ab-e0f3-498f-8c2e-ccceb69eb7ec",
-        "taskId": "AGT-e57209c3-88d8-4dd8-8543-0a868af3b035",
+        "id": "AGE-2ab0a62c-e021-455b-8763-64a83417e2e1",
+        "taskId": "AGT-706d510b-9c33-4def-9663-367f40c06dcf",
         "type": "delivery.complete",
         "stepId": null,
         "detail": {
@@ -415,11 +415,11 @@
             "totalTokens": 74
           }
         },
-        "createdAt": "2026-08-10T11:17:56.405Z"
+        "createdAt": "2026-08-10T11:46:18.621Z"
       }
     ]
   },
-  "relationshipId": "REL-AAF7EA42-F06B-4C18-8BB9-5CEC59C967DE",
+  "relationshipId": "REL-B8C9E1E6-AE33-4D9C-B16A-BFBD62CCE4A6",
   "plannerCalls": 2,
   "synthesisCalls": 2
 }
