@@ -1,6 +1,7 @@
 # MiMo 专项维护基线
 
-> 基线：`main-v2` @ `15239191e`（v1.23.0）
+> 基线：上游 `main-v2` @ `15239191e`（v1.23.0）
+> 落点：独立维护分支 **`mimo-baseline`**（main-v2 保持纯镜像，仅同步上游）
 > 范围：**纯 MiMo 局部配置** — 只影响 `mimo`（api.xiaomimimo.com）Responses provider，其他 vendor 与全局设置完全不受影响。
 
 ## 参数（`internal/provider/responses/vendor.go` `"mimo"` 段）
@@ -34,6 +35,6 @@
 
 ## 维护方式
 
-- 本基线建立在 `main-v2` 镜像之上，仅含上述 MiMo 专项改动。
+- 本基线是独立分支 `mimo-baseline`（起点 = 上游 main-v2 @ `15239191e`），仅含上述 MiMo 专项改动；`main-v2` 保持纯镜像，只做 `fetch + merge --ff-only`。
 - 上游 main-v2 更新后，重新基线：以新上游为 base 重放本文件的 mimo 专项 diff（`vendor.go`/`responses.go`/`responses_test.go`）。
 - 供 PR 分支（如 `fix-mimo-reasoning-config` → 上游 #7644）及本地 dev 的 mimo 参数同步参照。
