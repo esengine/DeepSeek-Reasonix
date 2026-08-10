@@ -90,7 +90,16 @@ func (a *Agent) buildSamplingRequest(ctx context.Context, trigger string) (sampl
 	// CreatedAt is durable UI metadata, not model input. Strip it from the
 	// transport copy so wall-clock differences never invalidate the provider's
 	// prompt-cache prefix (and custom providers cannot accidentally send it).
-	prepared, err := a.contextManager().Prepare(ctx, ContextPreparePolicy{Trigger: trigger})
+	// Admission uses the last real usage observation when one exists: the
+	// calibrated estimate runs hot on CJK/tool-dense sessions (975k vs 602k
+	// measured 2026-08-10), forcing summarizer passes before the 80% trigger.
+	policy := ContextPreparePolicy{Trigger: trigger}
+	if u := a.lastUsage.Load(); u != nil {
+		if pt := u.LatestPromptTokens(); pt > 0 {
+			policy.ObservedInputTokens = pt
+		}
+	}
+	prepared, err := a.contextManager().Prepare(ctx, policy)
 	if err != nil {
 		return samplingRequest{}, err
 	}

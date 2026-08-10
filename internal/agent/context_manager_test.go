@@ -171,3 +171,37 @@ func TestStrictAlternatingRolesStillConvergesBeforeSampling(t *testing.T) {
 		}
 	}
 }
+
+// TestPrepareUsesObservedInputTokensRegression pins the sampling-path fix:
+// production Prepare must admit the last real usage observation instead of the
+// calibrated estimate, which runs hot on CJK/tool-dense sessions (measured
+// 975k estimated vs 602k actual on 2026-08-10) and can force a summarizer
+// pass well before the 80% trigger.
+func TestPrepareUsesObservedInputTokensRegression(t *testing.T) {
+	prov := &fakeProvider{reply: "summary"}
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleUser, Content: strings.Repeat("中文内容", 400)},
+		{Role: provider.RoleUser, Content: strings.Repeat("tool detail ", 300)},
+	}}
+	a := New(prov, tool.NewRegistry(), sess, Options{
+		ContextWindow:       1000,
+		ToolResultSnipRatio: 0.6,
+		MaxOutputTokens:     64, // keep hard ceiling ≈ 680 so fold=800 dominates
+		WorkspaceID:         "workspace",
+		ModelRef:            "model",
+	}, event.Discard)
+	// Without the observed-tokens handoff the CJK-heavy estimate crosses the
+	// force threshold and the summarizer is called; the real observation sits
+	// far below the fold trigger (800).
+	a.lastUsage.Store(&provider.Usage{PromptTokens: 200, CompletionTokens: 10, TotalTokens: 210})
+	prepared, err := a.prepareSamplingRequest(context.Background())
+	if err != nil {
+		t.Fatalf("prepare sampling request: %v", err)
+	}
+	if prov.got != nil {
+		t.Fatal("summarizer was called although observed input (200) is below the fold trigger (800)")
+	}
+	if len(prepared.req.Messages) != 2 {
+		t.Fatalf("visible messages = %d, want the original 2 (fold must not have run)", len(prepared.req.Messages))
+	}
+}
