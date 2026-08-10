@@ -44,6 +44,7 @@ import { app, onEvent, onProjectTreeChanged, onReady, onRuntimeRebuilt, onSessio
 import { generativeMusic, isGenerativeMusicEnabled } from "./lib/generative-music";
 import { clearAttentionChimeKeys, playAttentionChime, playSuccessChime, shouldPlayAttentionChimeForEvent } from "./lib/sound";
 import { NoticeCard, Transcript } from "./components/Transcript";
+import { SessionTimeline } from "./components/SessionTimeline";
 import { Composer } from "./components/Composer";
 import { TranscriptSelectionMenu } from "./components/TranscriptSelectionMenu";
 import { TodoPanel } from "./components/TodoPanel";
@@ -4933,6 +4934,8 @@ export default function App() {
             ) : noticePreviewMockEnabled() ? (
               <NoticePreviewPanel />
             ) : (
+              <>
+              <SessionTimeline items={state.items} />
               <Transcript
                 items={displayItems}
                 live={state.live}
@@ -4960,6 +4963,7 @@ export default function App() {
                 onLoadOlderHistory={() => activeTabId && loadOlderHistory(activeTabId)}
                 invocationMetadata={activeTabId ? invocationMetadataByTab[activeTabId] : undefined}
               />
+              </>
             )}
           </main>
 
