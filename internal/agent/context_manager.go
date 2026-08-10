@@ -141,7 +141,11 @@ func (m ContextManager) tryToolMaintenance(visible []provider.Message, prepared 
 		// compaction or an overflow — those must proceed regardless.
 		if !(forceFold || policy.Trigger == CompactionTriggerManual || policy.Trigger == CompactionTriggerOverflow) &&
 			a.CacheState() == CacheStateWarm {
-			return PreparedContext{}, false, false, nil
+			// Return handled=true with the untouched prepared context so the
+			// caller does NOT fall through to foldContext (full summary
+			// compaction is far more expensive than prune and would defeat
+			// the cache-preservation intent).
+			return prepared, true, false, nil
 		}
 		mode = toolResultPrune
 	}
