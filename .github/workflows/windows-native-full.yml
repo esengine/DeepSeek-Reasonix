@@ -2,6 +2,9 @@ name: Windows Native Full
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - "feature/**"
   pull_request:
     branches: [main-v2]
 
@@ -138,4 +141,3 @@ jobs:
           if ($failed.Count -gt 0) {
             throw "Native Windows full test failed or skipped: $($failed.Name -join ', ')"
           }
-

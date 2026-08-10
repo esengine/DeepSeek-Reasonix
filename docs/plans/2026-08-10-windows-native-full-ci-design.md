@@ -8,7 +8,7 @@
 
 ## 选择方案
 
-新增 `.github/workflows/windows-native-full.yml`，在面向 `main-v2` 的 pull request 和手动触发时运行单一 `windows-latest` job。它不使用 WSL、Docker 或 Linux 容器，权限限定为 `contents: read`。
+新增 `.github/workflows/windows-native-full.yml`，在面向 `main-v2` 的 pull request、fork 的 `feature/**` 分支推送和手动触发时运行单一 `windows-latest` job。fork 推送入口用于工作流尚未进入上游默认分支时的首次隔离验证；它不使用 WSL、Docker 或 Linux 容器，权限限定为 `contents: read`。
 
 工作流先通过 `actions/setup-go` 使用根 `go.mod` 的 Go 1.26.5 工具链，并显式设置 `GOTOOLCHAIN=local`，禁止运行时自动下载其他工具链。它验证当前 `bash` 来自 Git for Windows，而不是 `System32` 的 WSL 启动器。真实供应商缓存守卫保持关闭，测试不会读取 `apikey.txt` 或调用 DeepSeek/MinerU。
 
@@ -36,4 +36,3 @@
 - Git Bash 路径预检通过且未调用 WSL。
 - 任一模块失败不会阻止其余模块执行，但最终 job 正确失败。
 - 日志 artifact 包含 `root.log`、`sdk-go.log`、`desktop-prep.log` 和 `desktop.log`（对应步骤执行时）。
-

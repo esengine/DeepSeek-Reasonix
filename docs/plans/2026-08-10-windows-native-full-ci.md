@@ -17,7 +17,7 @@
 
 **Step 1: Define triggers and least privilege**
 
-Add `workflow_dispatch` and pull requests targeting `main-v2`, set `permissions: contents: read`, and use a concurrency group that cancels superseded runs.
+Add `workflow_dispatch`, pushes to fork feature branches (`feature/**`), and pull requests targeting `main-v2`; set `permissions: contents: read`, and use a concurrency group that cancels superseded runs. The push trigger supplies first-run evidence while the new workflow is not yet present on the upstream default branch.
 
 **Step 2: Prepare pinned toolchains**
 
@@ -77,4 +77,3 @@ Push the branch to a confirmed writable remote and open a PR to `main-v2`, or di
 **Step 3: Retain final evidence**
 
 Download/record the GitHub Actions run URL, per-module outcomes, and artifact structure in `artifacts/windows-native-go-tests/summary.md`.
-
