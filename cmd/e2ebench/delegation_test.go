@@ -48,6 +48,46 @@ func TestRenderDelegationExposesWhatDelegationCost(t *testing.T) {
 	}
 }
 
+// The section has to price independence as well as cost: how much of what the
+// children read they had to find, and how much the parent's own text handed
+// them. The hand-over stays an absolute count so its size cannot be hidden.
+func TestRenderDelegationReportsEvidenceOrigin(t *testing.T) {
+	got := renderDelegation([]result{{
+		Passed: true,
+		runMetrics: runMetrics{
+			ToolCalls: 30, SubagentToolCalls: 24, SubagentRuns: 2,
+			ParentScopeHints: 2, ParentNamedFiles: 4,
+			ChildEvidencePaths: 25, ChildDiscoveredPaths: 23,
+		},
+	}})
+	for _, want := range []string{"evidence origin", "**92%**", "(23/25 paths)", "**2** scope hint(s)", "**4** file(s) named"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("delegation section missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// Children that never touched a path leave the rate undefined. Printing 0%
+// would read as "found nothing itself" instead of "nothing was measured".
+func TestRenderDelegationSaysWhenEvidenceOriginIsUnscored(t *testing.T) {
+	got := renderDelegation([]result{{
+		Passed:     true,
+		runMetrics: runMetrics{ToolCalls: 6, SubagentToolCalls: 3, SubagentRuns: 1},
+	}})
+	line := ""
+	for l := range strings.SplitSeq(got, "\n") {
+		if strings.Contains(l, "evidence origin") {
+			line = l
+		}
+	}
+	if !strings.Contains(line, "not scored") {
+		t.Errorf("unscored origin rendered as %q", line)
+	}
+	if strings.Contains(line, "%") {
+		t.Errorf("unscored origin printed a rate: %q", line)
+	}
+}
+
 // A clean delegated arm must not print alarm lines it has no evidence for.
 func TestRenderDelegationStaysQuietWhenNothingWentWrong(t *testing.T) {
 	got := renderDelegation([]result{{

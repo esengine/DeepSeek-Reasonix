@@ -8,6 +8,7 @@ import "fmt"
 func renderDelegation(results []result) string {
 	var runs, nested, childCalls, parentCalls, mutations, dupes int
 	var reports, prose, falseDone, downgrades, violations int
+	var scopeHints, namedFiles, evidencePaths, discoveredPaths int
 	solved, total, childTokens := 0, 0, 0
 	for _, r := range results {
 		if r.Skipped {
@@ -28,6 +29,10 @@ func renderDelegation(results []result) string {
 		falseDone += r.FalseCompletions
 		downgrades += r.CriterionDowngrades
 		violations += r.WriteScopeViolations
+		scopeHints += r.ParentScopeHints
+		namedFiles += r.ParentNamedFiles
+		evidencePaths += r.ChildEvidencePaths
+		discoveredPaths += r.ChildDiscoveredPaths
 		if u, ok := r.UsageBySource["subagent"]; ok {
 			childTokens += u.PromptTokens + u.CompletionTokens
 		}
@@ -50,6 +55,17 @@ func renderDelegation(results []result) string {
 	if childTokens > 0 {
 		b += fmt.Sprintf("- child context re-sent: %s tokens per child, cumulative over its calls (%s across %d runs)\n",
 			comma(childTokens/runs), comma(childTokens), runs)
+	}
+	// Scope and named files are reported apart and as counts. Narrowing the
+	// search is what delegating costs; naming the file is handing over the
+	// answer, and one number would report the cheap one as the expensive one.
+	if evidencePaths > 0 {
+		b += fmt.Sprintf("- evidence origin: children found **%s** of what they looked at themselves (%d/%d paths)\n",
+			pct(discoveredPaths, evidencePaths), discoveredPaths, evidencePaths)
+		b += fmt.Sprintf("- parent delegation text: **%d** scope hint(s) · **%d** file(s) named outright\n",
+			scopeHints, namedFiles)
+	} else {
+		b += "- evidence origin: not scored — no child receipt carried a path\n"
 	}
 	if dupes > 0 {
 		b += fmt.Sprintf("- **duplicate work**: %d file(s) mutated by more than one child\n", dupes)

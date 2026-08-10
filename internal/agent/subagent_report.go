@@ -74,20 +74,22 @@ func decorateExecutionReceipt(rec *evidence.Receipt, result string, ex *tool.She
 // composeSubagentAnswer assembles everything the parent is shown for one child
 // run: the host-adjudicated completion claim when the child submitted one, the
 // child's own prose, then the host's receipts.
-func composeSubagentAnswer(ctx context.Context, answer string, sub *Agent, claims WritePathSet) string {
+func composeSubagentAnswer(ctx context.Context, answer string, sub *Agent, claims WritePathSet, delegationText string) string {
 	summary := sub.EvidenceSummary()
 	report, reasons, hasReport := sub.CompletionReport()
 	if hasReport {
 		answer = strings.TrimSpace(formatCompletionReport(report, reasons) + "\n\n" + answer)
 	}
-	recordDelegationAudit(ctx, summary, claims, report, reasons, hasReport)
+	recordDelegationAudit(ctx, summary, claims, report, reasons, hasReport, delegationText)
 	return appendHostReceipts(answer, summary, claims)
 }
 
 // recordDelegationAudit emits one structured receipt per child run. It reports
 // what the host observed and what it refused to back, so an orchestration
-// benchmark can separate real gains from extra tokens spent.
-func recordDelegationAudit(ctx context.Context, summary evidence.ChildEvidenceSummary, claims WritePathSet, report evidence.CompletionReport, reasons []string, hasReport bool) {
+// benchmark can separate real gains from extra tokens spent. delegationText is
+// the parent-authored task before host framing, which is what makes the
+// evidence-origin split a host record rather than a claim.
+func recordDelegationAudit(ctx context.Context, summary evidence.ChildEvidenceSummary, claims WritePathSet, report evidence.CompletionReport, reasons []string, hasReport bool, delegationText string) {
 	audit := evidence.DelegationAudit{
 		Depth:           SubagentDepth(ctx),
 		ToolCalls:       len(summary.Receipts),
@@ -97,6 +99,7 @@ func recordDelegationAudit(ctx context.Context, summary evidence.ChildEvidenceSu
 		Downgrades:      len(reasons),
 	}
 	audit.Mutations = len(audit.MutationPaths)
+	audit.ClassifyEvidenceOrigin(delegationText, summary.EvidencePaths())
 	if hasReport {
 		audit.AdjudicatedStatus = string(report.Status)
 	}

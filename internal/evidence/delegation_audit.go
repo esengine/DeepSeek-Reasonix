@@ -18,6 +18,32 @@ type DelegationAudit struct {
 	// Downgrades counts the criterion claims it refused.
 	AdjudicatedStatus string
 	Downgrades        int
+	// ParentScopeHints counts directories the delegation narrowed the search to.
+	ParentScopeHints int
+	// ParentNamedFiles counts specific files the delegation text handed over.
+	ParentNamedFiles int
+	// EvidencePaths is every distinct path the child produced a receipt for.
+	EvidencePaths int
+	// DiscoveredPaths is the subset of those no named file already covered.
+	DiscoveredPaths int
+}
+
+// ClassifyEvidenceOrigin scores one run against the text its parent wrote.
+// Discovery is judged against named files only: a child sent to a directory
+// still had to work out which file in it mattered. Counts only — a rate is a
+// ratio of sums across runs, and averaging per-run rates would weight a child
+// that read two files like one that read forty.
+func (a *DelegationAudit) ClassifyEvidenceOrigin(delegationText string, evidencePaths []string) {
+	scope, files := SplitNamedPaths(NamedPaths(delegationText))
+	a.ParentScopeHints = len(scope)
+	a.ParentNamedFiles = len(files)
+	a.EvidencePaths = len(evidencePaths)
+	a.DiscoveredPaths = 0
+	for _, p := range evidencePaths {
+		if !UnderNamedPath(files, p) {
+			a.DiscoveredPaths++
+		}
+	}
 }
 
 // FalseCompletion reports a child that claimed more than the host could back.

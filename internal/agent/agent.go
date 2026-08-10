@@ -1141,11 +1141,11 @@ type Options struct {
 	// everything, so ordinary callers leave it unset.
 	Ablation ablation.Set
 
-	// ClassifierTaskText, when non-empty, is the pristine task text delivery
-	// intent classification should judge instead of the raw Run input. Sub-agent
-	// spawners set it before prepending host framing (subagent/workspace context,
-	// review contracts) so framing verbs cannot arm expectations and user input
-	// dressed up as framing cannot disarm them.
+	// ClassifierTaskText, when non-empty, is the pristine task text, set by
+	// sub-agent spawners before host framing is prepended. Delivery intent
+	// classification judges it instead of the raw Run input, so framing verbs
+	// cannot arm expectations; the delegation audit scores evidence origin
+	// against it, so only locations the parent wrote itself count as hints.
 	ClassifierTaskText string
 
 	// CapabilityLedger is the optional turn-scoped capability route ledger for

@@ -67,6 +67,10 @@ type RunMetrics struct {
 	CriterionDowngrades        int `json:"criterion_downgrades,omitempty"`
 	WriteScopeViolations       int `json:"write_scope_violations,omitempty"`
 	DuplicateWorkPaths         int `json:"duplicate_work_paths,omitempty"`
+	ParentScopeHints           int `json:"parent_scope_hints,omitempty"`
+	ParentNamedFiles           int `json:"parent_named_files,omitempty"`
+	ChildEvidencePaths         int `json:"child_evidence_paths,omitempty"`
+	ChildDiscoveredPaths       int `json:"child_discovered_paths,omitempty"`
 	MissingReasoningDetected   int `json:"missing_reasoning_detected,omitempty"`
 	MissingReasoningRetries    int `json:"missing_reasoning_retries,omitempty"`
 	MissingReasoningRecovered  int `json:"missing_reasoning_recovered,omitempty"`
@@ -311,6 +315,12 @@ func (s *metricsSink) RecordDelegationAudit(a evidence.DelegationAudit) {
 	s.m.SubagentMutations += a.Mutations
 	s.m.WriteScopeViolations += a.ClaimViolations
 	s.m.CriterionDowngrades += a.Downgrades
+	// Summed, never averaged: an independence rate is a ratio of these totals,
+	// so a child that read two files cannot outweigh one that read forty.
+	s.m.ParentScopeHints += a.ParentScopeHints
+	s.m.ParentNamedFiles += a.ParentNamedFiles
+	s.m.ChildEvidencePaths += a.EvidencePaths
+	s.m.ChildDiscoveredPaths += a.DiscoveredPaths
 	if a.HasReport {
 		s.m.CompletionReports++
 	} else {

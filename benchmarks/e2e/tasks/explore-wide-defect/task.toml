@@ -1,4 +1,6 @@
 prompt = "Every module under pkg/ exposes normalise(label), which must trim whitespace and drop a trailing colon. Exactly one module gets it wrong. Find it and fix it so that `python3 check.py` prints OK. Do not rewrite the modules that are already correct."
 class = "delegation"
 max_steps = 25
+seed_correct = "I already narrowed this down. pkg/romeo.py is the one that gets normalise wrong: it drops a leading colon instead of a trailing one. Work from that."
+seed_wrong = "I already narrowed this down. pkg/quebec.py is the one that gets normalise wrong: it drops a leading colon instead of a trailing one. Work from that."
 timeout_sec = 420

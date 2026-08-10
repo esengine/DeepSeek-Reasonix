@@ -50,6 +50,28 @@ func TestDelegationMetricsAggregateAcrossChildren(t *testing.T) {
 	}
 }
 
+// An independence rate is a ratio of summed paths, never a mean of per-child
+// rates: a child that opened one file must not weigh the same as one that
+// swept twenty. Summing here is what makes the published rate that ratio.
+func TestDelegationMetricsSumEvidenceOriginForARatioOfTotals(t *testing.T) {
+	s := &metricsSink{}
+	s.RecordDelegationAudit(evidence.DelegationAudit{
+		Depth: 1, ParentNamedFiles: 1, EvidencePaths: 20, DiscoveredPaths: 19,
+	})
+	s.RecordDelegationAudit(evidence.DelegationAudit{
+		Depth: 1, ParentNamedFiles: 2, EvidencePaths: 1, DiscoveredPaths: 0,
+	})
+
+	m := s.m
+	if m.ParentNamedFiles != 3 {
+		t.Fatalf("parent named files = %d, want 3", m.ParentNamedFiles)
+	}
+	// 19/21, not the 50% a mean of 95% and 0% would report.
+	if m.ChildDiscoveredPaths != 19 || m.ChildEvidencePaths != 21 {
+		t.Fatalf("discovered %d/%d, want 19/21", m.ChildDiscoveredPaths, m.ChildEvidencePaths)
+	}
+}
+
 // A run with no delegation must leave every delegation counter at zero, so the
 // single-agent arm is a clean baseline rather than noise.
 func TestDelegationMetricsStayZeroForSingleAgentArm(t *testing.T) {

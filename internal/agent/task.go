@@ -1833,7 +1833,7 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 		// Still merge any partial child evidence so parent gates see real writes.
 		mergeChildEvidence(ctx, sub)
 		if answer, ok := salvageReadinessExhaustedAnswer(sub, sess, opts, err); ok {
-			return composeSubagentAnswer(ctx, answer, sub, SubagentWriteClaim(ctx)), nil
+			return composeSubagentAnswer(ctx, answer, sub, SubagentWriteClaim(ctx), opts.ClassifierTaskText), nil
 		}
 		return "", fmt.Errorf("sub-agent: %w", err)
 	}
@@ -1861,7 +1861,7 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 	}
 	mergeChildEvidence(ctx, sub)
 	if answer := latestAssistantAnswer(sess); answer != "" {
-		return composeSubagentAnswer(ctx, answer, sub, SubagentWriteClaim(ctx)), nil
+		return composeSubagentAnswer(ctx, answer, sub, SubagentWriteClaim(ctx), opts.ClassifierTaskText), nil
 	}
 	return "", fmt.Errorf("sub-agent finished without producing a final answer")
 }
