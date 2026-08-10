@@ -115,7 +115,7 @@ func (m ContextManager) foldContext(ctx context.Context, prepared PreparedContex
 		reason = "manual"
 	case policy.Trigger == CompactionTriggerOverflow:
 		reason = "overflow"
-	case est >= force:
+	case forceFold:
 		reason = "force"
 	case est >= fold:
 		reason = "fold"
