@@ -1,0 +1,83 @@
+name: Apply Nextcloud Talk integration
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/nextcloud-talk-bot
+    paths:
+      - scripts/apply_nextcloud_talk_integration.py
+      - .github/workflows/apply-nextcloud-talk-integration.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/nextcloud-talk-bot
+          fetch-depth: 0
+
+      - name: Apply integration wiring
+        run: python3 scripts/apply_nextcloud_talk_integration.py
+
+      - name: Format Go changes
+        run: |
+          gofmt -w \
+            internal/config/config.go \
+            internal/config/render.go \
+            internal/config/nextcloud_talk_bot_test.go \
+            internal/bot/nextcloudtalk/adapter.go \
+            internal/bot/nextcloudtalk/adapter_test.go \
+            internal/botruntime/runtime.go \
+            internal/botruntime/nextcloud_talk_test.go \
+            internal/cli/bot.go \
+            desktop/bot_connection_app.go \
+            desktop/nextcloud_talk_bot_test.go
+          git diff --check
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Run root Go tests
+        run: go test ./...
+
+      - name: Run desktop Go tests
+        working-directory: desktop
+        run: go test ./...
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install frontend dependencies
+        working-directory: desktop/frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck desktop frontend
+        working-directory: desktop/frontend
+        run: pnpm typecheck
+
+      - name: Remove temporary integration helpers
+        run: rm -f scripts/apply_nextcloud_talk_integration.py .github/workflows/apply-nextcloud-talk-integration.yml
+
+      - name: Commit verified integration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat(bot): finish Nextcloud Talk integration"
+          git push origin feature/nextcloud-talk-bot
