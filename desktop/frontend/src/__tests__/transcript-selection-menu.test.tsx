@@ -384,6 +384,56 @@ console.log("\ntranscript selection menu");
 }
 
 {
+  // Positioning: the floating action centers horizontally over the selection
+  // and prefers the space above it, flipping below when the top edge would
+  // collide with the window. jsdom measures a zero-size rect for the action
+  // itself, so the expected left is the exact selection center.
+  const dom = installDom();
+  document.body.insertAdjacentHTML("beforeend", "<div class=\"msg__body\">positioned reply text</div>");
+  const msgBody = document.querySelector(".msg__body") as HTMLElement;
+
+  const root = createRoot(document.getElementById("root") as HTMLElement);
+  await act(async () => {
+    root.render(
+      <LocaleProvider>
+        <TranscriptSelectionMenu onAddToChat={() => {}} />
+      </LocaleProvider>,
+    );
+    await flushTimers();
+  });
+
+  const originalRangeRect = window.Range.prototype.getBoundingClientRect;
+  const rectAt = (left: number, top: number, width: number, height: number) =>
+    () => ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+
+  selectNodeText(msgBody.firstChild as Node);
+  window.Range.prototype.getBoundingClientRect = rectAt(100, 200, 300, 20);
+  await act(async () => {
+    msgBody.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, button: 0 }));
+    await drainFrame();
+  });
+  const action = document.querySelector(".transcript-selection-action") as HTMLElement | null;
+  eq(action?.style.left, "250px", "the action centers horizontally over the selection");
+  eq(action?.style.top, "192px", "the action sits above the selection");
+
+  // Top edge too tight (selection starts at y=2): flip below the selection.
+  window.Range.prototype.getBoundingClientRect = rectAt(100, 2, 300, 20);
+  await act(async () => {
+    msgBody.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, button: 0 }));
+    await drainFrame();
+  });
+  const flipped = document.querySelector(".transcript-selection-action") as HTMLElement | null;
+  eq(flipped?.style.top, "30px", "the action flips below the selection when the top edge is too tight");
+  eq(flipped?.style.left, "250px", "the flipped action stays centered over the selection");
+
+  window.Range.prototype.getBoundingClientRect = originalRangeRect;
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
   // Plain browser (no window.runtime): the native menu owns right-click.
   const dom = installDom();
   document.body.insertAdjacentHTML("beforeend", "<div class=\"msg__body\">browser text</div>");
