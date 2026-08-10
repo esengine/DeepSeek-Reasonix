@@ -1594,7 +1594,7 @@ func (a *Agent) HostProgressSignature() string {
 		return ""
 	}
 	s := a.evidence.ReceiptProgressSummary()
-	return fmt.Sprintf("w=%d;c=%d;t=%d;s=%d;r=%d", s.Writes, s.Commands, s.Todos, s.Signoffs, s.Reviews)
+	return fmt.Sprintf("w=%d;c=%d;t=%d;s=%d;r=%d;reads=%d", s.Writes, s.Commands, s.Todos, s.Signoffs, s.Reviews, s.Reads)
 }
 
 type finalReadinessCheck struct {

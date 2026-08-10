@@ -69,6 +69,22 @@ func budgetClassForLegacyMode(goal string, researchMode GoalResearchMode) string
 	}
 }
 
+// noProgressQuota returns the no-progress stall limit for a budget class.
+// Research-class goals are allowed more read/analyze-only turns before the
+// host pauses them: reads and searches carry a task forward but are not
+// host-verifiable mutations, and a flat four-turn limit misfires on real
+// research (issue #8137). The turn budget remains the final backstop.
+func noProgressQuota(class string) int {
+	switch class {
+	case budgetClassResearch:
+		return 10
+	case budgetClassWrite:
+		return 6
+	default:
+		return defaultNoProgressLimit
+	}
+}
+
 // goalMachine owns the active goal FSM and its persistence. It is a strict
 // leaf: methods take only machine locks and never call back into Controller.
 // advance() takes already-gathered inputs so no disk/executor work holds mu.
@@ -335,7 +351,7 @@ func (g *goalMachine) installGoalLocked(goal, preferredBudgetClass string) {
 		g.budgetClass = preferredBudgetClass
 		g.turnsLimit = budgetQuota(g.budgetClass)
 		g.tokensLimit = 0 // no token hard limit
-		g.noProgressLimit = defaultNoProgressLimit
+		g.noProgressLimit = noProgressQuota(g.budgetClass)
 	}
 	// Installing a normal Goal always abandons any pending legacy migration.
 	g.legacyTaskID = ""
@@ -826,8 +842,11 @@ func (g *goalMachine) restoreFromState(sessionPath string) (path string, data []
 		if g.turnsLimit == 0 {
 			g.turnsLimit = budgetQuota(g.budgetClass)
 		}
-		if g.noProgressLimit == 0 {
-			g.noProgressLimit = defaultNoProgressLimit
+		if g.noProgressLimit == 0 || g.noProgressLimit == defaultNoProgressLimit {
+			// A missing or legacy flat limit (4) is re-derived from the budget
+			// class so already-running research goals benefit after an upgrade
+			// (issue #8137); only a deliberately different value is honored.
+			g.noProgressLimit = noProgressQuota(g.budgetClass)
 		}
 		// Auto-clear legacy token-budget pauses so the next user turn can
 		// continue without a manual resume. Loading itself never calls a

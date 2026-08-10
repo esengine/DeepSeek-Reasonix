@@ -1294,6 +1294,27 @@ func TestLedgerReviewAfterRestoredCheckpointBaseline(t *testing.T) {
 	}
 }
 
+// TestReceiptProgressSummaryCountsReads pins the A2 read-progress rule: only
+// successful reads with real output count toward the cross-turn signature, so
+// read/analyze-heavy goal turns stop being misclassified as stalled while
+// empty or failed reads cannot masquerade as progress.
+func TestReceiptProgressSummaryCountsReads(t *testing.T) {
+	l := NewLedger()
+	l.Record(Receipt{ToolName: "read_file", Success: true, Read: true, OutputBytes: 512})
+	l.Record(Receipt{ToolName: "grep", Success: true, Read: true, OutputBytes: 120})
+	l.Record(Receipt{ToolName: "read_file", Success: true, Read: true, OutputBytes: 0})    // empty read: not progress
+	l.Record(Receipt{ToolName: "read_file", Success: false, Read: true, OutputBytes: 512}) // failed read: not progress
+	l.Record(Receipt{ToolName: "bash", Success: true, Command: "go test ./internal/..."})
+	l.Record(Receipt{ToolName: "edit_file", Success: true, Write: true, Mutation: true})
+	s := l.ReceiptProgressSummary()
+	if s.Reads != 2 {
+		t.Fatalf("Reads = %d, want 2 (only successful reads with output)", s.Reads)
+	}
+	if s.Commands != 1 || s.Writes != 1 {
+		t.Fatalf("existing categories regressed: %+v", s)
+	}
+}
+
 func TestLedgerDeliverySignoffRequiresPostMutationVerificationAndReview(t *testing.T) {
 	ledger := NewLedger()
 	ledger.Record(ReceiptFromToolCall("todo_write", json.RawMessage(`{"todos":[{"content":"Ship parser","status":"in_progress"}]}`), true, true))

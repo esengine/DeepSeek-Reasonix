@@ -456,16 +456,18 @@ func (l *Ledger) Len() int {
 }
 
 // ReceiptProgressSummary counts successful host-observable receipts by category
-// for cross-turn progress signatures. Failed receipts and reads never count:
-// repeated reads, failed bookkeeping, and reworded answers must not masquerade
-// as progress. Categories are not mutually exclusive (a successful bash command
-// that also writes counts in both), which is fine for a change detector.
+// for cross-turn progress signatures. Failed receipts never count; reads count
+// only when they produced output, so read/analyze-heavy turns register as
+// progress while empty or failed reads cannot masquerade as one. Categories
+// are not mutually exclusive (a successful bash command that also writes counts
+// in both), which is fine for a change detector.
 type ReceiptProgressSummary struct {
 	Writes   int // successful mutations/writes
 	Commands int // successful commands (bash receipts)
 	Todos    int // successful todo_write receipts
 	Signoffs int // successful complete_step signoffs
 	Reviews  int // successful review receipts
+	Reads    int // successful read/search receipts with content (read_file, grep, glob, …)
 }
 
 // ReceiptProgressSummary returns the current ledger's progress counts.
@@ -494,6 +496,13 @@ func (l *Ledger) ReceiptProgressSummary() ReceiptProgressSummary {
 		}
 		if successfulForegroundReviewReceipt(r) || completedStructuredReviewReceipt(r, nil) {
 			out.Reviews++
+		}
+		// A read with real output carries research forward even though it is not
+		// a mutation: counting it keeps read/analyze-heavy goal turns from being
+		// misclassified as stalled (issue #8137). Empty or failed reads stay out
+		// so bare retries cannot masquerade as progress.
+		if r.Read && r.OutputBytes > 0 {
+			out.Reads++
 		}
 	}
 	return out

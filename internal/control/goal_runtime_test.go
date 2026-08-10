@@ -196,6 +196,20 @@ func TestEvaluatorCompleteStillGatedByReadiness(t *testing.T) {
 // TestTurnTokenNoProgressPausesAndResumeExtendsBudget covers turn and
 // no-progress budgets at the FSM level and the resume extension contract.
 // Token hard limits no longer pause goals.
+// TestNoProgressQuotaByBudgetClass pins the per-class stall limits.
+func TestNoProgressQuotaByBudgetClass(t *testing.T) {
+	cases := map[string]int{
+		budgetClassResearch: 10,
+		budgetClassWrite:    6,
+		budgetClassSimple:   defaultNoProgressLimit,
+	}
+	for class, want := range cases {
+		if got := noProgressQuota(class); got != want {
+			t.Fatalf("noProgressQuota(%q) = %d, want %d", class, got, want)
+		}
+	}
+}
+
 func TestTurnTokenNoProgressPausesAndResumeExtendsBudget(t *testing.T) {
 	newMachine := func() *goalMachine {
 		g := &goalMachine{goal: "fix the parser", status: GoalStatusRunning}
@@ -243,6 +257,25 @@ func TestTurnTokenNoProgressPausesAndResumeExtendsBudget(t *testing.T) {
 		}
 		if g.status != GoalStatusBlocked || g.stopCause != stopCauseNoProgress {
 			t.Fatalf("machine = (%q, %q), want blocked+no_progress", g.status, g.stopCause)
+		}
+	})
+
+	t.Run("research class raises the no-progress limit", func(t *testing.T) {
+		g := &goalMachine{goal: "research the topic", status: GoalStatusRunning, budgetClass: budgetClassResearch}
+		g.turnsLimit = budgetQuota(budgetClassResearch)
+		g.noProgressLimit = noProgressQuota(g.budgetClass)
+		if g.noProgressLimit != 10 {
+			t.Fatalf("research no-progress limit = %d, want 10", g.noProgressLimit)
+		}
+		for i := 0; i < g.noProgressLimit-1; i++ {
+			g.advance(in(&goalTurnReport{status: GoalStatusRunning, reason: "still researching"}, "sig", "sig"))
+		}
+		if g.status != GoalStatusRunning {
+			t.Fatalf("research class paused before its quota: %+v", g)
+		}
+		g.advance(in(&goalTurnReport{status: GoalStatusRunning, reason: "still researching"}, "sig", "sig"))
+		if g.status != GoalStatusBlocked || g.stopCause != stopCauseNoProgress {
+			t.Fatalf("machine = (%q, %q), want blocked+no_progress at quota", g.status, g.stopCause)
 		}
 	})
 
