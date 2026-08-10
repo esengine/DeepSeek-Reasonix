@@ -125,7 +125,8 @@ type PromptHistoryResult struct {
 // flow the other way: each tab's controller emits to a tabEventSink that
 // forwards events tagged with tabId to the webview via runtime.EventsEmit.
 type App struct {
-	ctx context.Context
+	ctx          context.Context
+	workspaceHub *workspaceChangeHub
 
 	// taskCtrl is the process-wide task-monitor control service (lazy; see
 	// taskControl). One instance serializes control operations in-process.
@@ -539,6 +540,7 @@ func NewApp() *App {
 		remoteWindows:       newRemoteWindowRegistry(),
 		remoteWindowOwnerID: newRemoteWindowOwnerID(),
 	}
+	a.workspaceHub = newWorkspaceChangeHub(a)
 	a.terminals = newTerminalManager(a)
 	a.botBridge = a.newBotBridge()
 	return a
@@ -958,6 +960,9 @@ func (a *App) shutdown(context.Context) {
 	if a.remoteWindowTicket != "" {
 		// Remote web window child: nothing to snapshot or stop locally.
 		return
+	}
+	if a.workspaceHub != nil {
+		a.workspaceHub.close()
 	}
 	// A real quit also terminates surviving web windows: their tunnels die with
 	// this process, so a leftover window would only show a dead Serve page.
@@ -6639,21 +6644,6 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// ContextInfo is the prompt-vs-window gauge payload plus session totals. Used
-// and Window both zero means no context-window data yet.
-type ContextInfo struct {
-	Used            int                         `json:"used"`
-	Window          int                         `json:"window"`
-	SessionTokens   int                         `json:"sessionTokens"`
-	CompactRatio    float64                     `json:"compactRatio,omitempty"`
-	SessionCost     float64                     `json:"sessionCost,omitempty"`
-	SessionCurrency string                      `json:"sessionCurrency,omitempty"`
-	CacheHitTokens  int                         `json:"cacheHitTokens,omitempty"`
-	CacheMissTokens int                         `json:"cacheMissTokens,omitempty"`
-	Estimated       bool                        `json:"estimated,omitempty"`
-	Sources         map[string]usageSourceStats `json:"sources,omitempty"`
-}
-
 // ContextUsage returns the latest context-window gauge numbers.
 func (a *App) ContextUsage() ContextInfo {
 	return a.ContextUsageForTab("")
@@ -6703,6 +6693,7 @@ func (a *App) ContextUsageForTab(tabID string) ContextInfo {
 		info.Used = snap.Usage.LastUsedTokens
 	}
 	info.CompactRatio = ctrl.CompactRatio()
+	info.Maintenance = contextMaintenanceInfo(ctrl.ContextMaintenanceSnapshot())
 	return info
 }
 

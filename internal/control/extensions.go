@@ -207,6 +207,10 @@ func (s *frontendEventSink) RecordContractShadow(a event.ContractShadowAudit) {
 	event.RecordContractShadow(s.inner, a)
 }
 
+func (s *frontendEventSink) RecordDelegationAudit(a evidence.DelegationAudit) {
+	event.RecordDelegationAudit(s.inner, a)
+}
+
 func (s *frontendEventSink) RecordCompletionReport(a event.CompletionReportAudit) {
 	event.RecordCompletionReport(s.inner, a)
 }

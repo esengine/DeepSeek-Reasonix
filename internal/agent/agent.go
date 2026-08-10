@@ -544,22 +544,32 @@ type Agent struct {
 	// under the window (consecutiveCompacts crosses the limit), so auto-compaction
 	// pauses instead of looping. softCompactNoticed gates the one-shot soft-ratio
 	// notice so it fires once per approach, not every turn.
-	contextWindow          int
-	softCompactRatio       float64
-	toolResultSnipRatio    float64
-	compactRatio           float64
-	compactForceRatio      float64
-	softCompactNoticed     bool
-	recentKeep             int
-	archiveDir             string
-	keepPolicy             KeepPolicy
-	compactStuck           bool
-	consecutiveCompacts    int
-	sessionPath            string // bound transcript path for projection sidecars
-	workspaceID            string // stable prompt-cache lineage component
-	cacheState             string // warm/cold/unknown; never provider-visible
-	compactionState        CompactionState
+	contextWindow       int
+	softCompactRatio    float64
+	toolResultSnipRatio float64
+	compactRatio        float64
+	compactForceRatio   float64
+	softCompactNoticed  bool
+	recentKeep          int
+	archiveDir          string
+	keepPolicy          KeepPolicy
+	compactStuck        bool
+	consecutiveCompacts int
+	sessionPath         string // bound transcript path for projection sidecars
+	workspaceID         string // stable prompt-cache lineage component
+	cacheState          string // warm/cold/unknown; never provider-visible
+	compactionState     CompactionState
+	// compactionMu guards projection snapshots/install and the in-memory sidecar
+	// generation. Network summarization never runs while this lock is held.
+	compactionMu sync.Mutex
+	// compactionRunMu singleflights the expensive summary transaction without
+	// holding the session lock during network I/O.
+	compactionRunMu sync.Mutex
+	// lastCompactionTurn prevents the post-turn observer and pre-send preflight
+	// from paying for two summaries during one active tool loop.
+	lastCompactionTurn     atomic.Int64
 	strictAlternatingRoles bool // coalesce adjacent user turns on provider request copies
+	contextEditingState
 	// activeTurnCreatedAt identifies the real/synthetic user message that began
 	// the currently running turn. Compaction may rewrite older history while a
 	// tool loop is active, but it must keep this message and everything after it
@@ -828,8 +838,13 @@ func (a *Agent) SetSession(s *Session) {
 	a.missingReasoningHealthyStreak = 0
 	a.repeatFailureCounts = nil
 	a.repeatFailureScope = ""
+	a.compactionMu.Lock()
 	a.compactionState = CompactionState{} // lineage change; disk reloaded on Resume
 	a.cacheState = CacheStateUnknown
+	a.compactionMu.Unlock()
+	a.compactStuck = false
+	a.consecutiveCompacts = 0
+	a.lastCompactionTurn.Store(0)
 	if s != nil {
 		a.rebuildTodoState(s.Snapshot())
 	}
@@ -837,8 +852,8 @@ func (a *Agent) SetSession(s *Session) {
 
 // LastUsage returns the most recent per-turn token telemetry the provider
 // reported (nil if no turn has run yet). The TUI uses it to show a context
-// gauge alongside the prompt; the actual cache decisions still live inside
-// maybeCompact.
+// gauge alongside the prompt; ContextManager.Prepare owns cache-breaking
+// maintenance decisions.
 func (a *Agent) LastUsage() *provider.Usage { return a.lastUsage.Load() }
 
 // SessionCache returns the cumulative cache hit/miss prompt tokens across every
@@ -1019,7 +1034,7 @@ func (a *Agent) CompactRatio() float64 { return a.compactRatio }
 
 // CompactNow forces one projection compaction (canonical transcript untouched).
 func (a *Agent) CompactNow(ctx context.Context, instructions string) error {
-	_, err := a.compactToProjection(ctx, "manual", instructions, true)
+	_, err := a.contextManager().Prepare(ctx, ContextPreparePolicy{Trigger: CompactionTriggerManual, Instructions: instructions, Force: true})
 	return err
 }
 
@@ -1082,6 +1097,7 @@ type Options struct {
 	SessionPath            string // projection sidecar path; empty = memory only
 	WorkspaceID            string // prompt-cache lineage component
 	StrictAlternatingRoles bool   // merge adjacent user turns for strict providers at request time
+	ContextEditing         string // local (default) or native (explicit opt-in)
 
 	// Hooks fires PreToolUse / PostToolUse shell hooks around tool calls. nil
 	// disables hook firing.
@@ -1125,11 +1141,11 @@ type Options struct {
 	// everything, so ordinary callers leave it unset.
 	Ablation ablation.Set
 
-	// ClassifierTaskText, when non-empty, is the pristine task text delivery
-	// intent classification should judge instead of the raw Run input. Sub-agent
-	// spawners set it before prepending host framing (subagent/workspace context,
-	// review contracts) so framing verbs cannot arm expectations and user input
-	// dressed up as framing cannot disarm them.
+	// ClassifierTaskText, when non-empty, is the pristine task text, set by
+	// sub-agent spawners before host framing is prepended. Delivery intent
+	// classification judges it instead of the raw Run input, so framing verbs
+	// cannot arm expectations; the delegation audit scores evidence origin
+	// against it, so only locations the parent wrote itself count as hints.
 	ClassifierTaskText string
 
 	// CapabilityLedger is the optional turn-scoped capability route ledger for
@@ -1293,6 +1309,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		workspaceID:               strings.TrimSpace(opts.WorkspaceID),
 		cacheState:                CacheStateUnknown,
 		strictAlternatingRoles:    opts.StrictAlternatingRoles,
+		contextEditingState:       newContextEditingState(opts.ContextEditing, prov),
 		subagentDepth:             subagentDepth,
 		maxSubagentDepth:          maxSubagentDepth,
 		mutationObserver:          opts.MutationObserver,
@@ -2333,7 +2350,7 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 	}
 	// Host stream cancels on generation drain (OpenAI/Anthropic HTTP reads).
 	defer trackPublishedHostStream(ctx, cancel)()
-	ch, err := a.prov.Stream(ctx, req)
+	ch, err := a.streamProviderRequest(ctx, req)
 	if err != nil {
 		return streamedTurn{usage: provider.UsageWithRequestAttemptCount(ctx, nil), err: err}
 	}
@@ -2940,16 +2957,18 @@ func batchStormSignature(calls []provider.ToolCall, outcomes []toolOutcome) (str
 // data URLs from a tool.ImageTool result; they ride outside output so text
 // truncation can never corrupt an image payload.
 type toolOutcome struct {
-	output           string
-	images           []string
-	blocked          bool
-	errMsg           string
-	truncated        bool
-	truncMsg         string
-	resolved         bool
-	resolvedName     string
-	capabilityID     string
-	resolvedReadOnly bool
+	output                     string
+	images                     []string
+	blocked                    bool
+	errMsg                     string
+	truncated                  bool
+	truncMsg                   string
+	resolved                   bool
+	resolvedName               string
+	capabilityID               string
+	resolvedReadOnly, executed bool
+	workspaceMutation          *event.WorkspaceMutation
+	effective                  workspaceEffectiveCall
 	// execution is local shell metadata (optional). Provider messages strip it
 	// via ModelMessages; UI/event sinks surface it on ToolResult cards.
 	execution *tool.ShellExecution

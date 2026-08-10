@@ -15,6 +15,11 @@ agent. It is the Reasonix analog of Claude Code's CLAUDE.md.
   the frontends `cli`, `serve`, `acp`, `bot`, `botruntime`, `boot` and the hosts
   `cmd/`, `desktop/` may import `control`; nothing below a frontend may import
   one. The declared sets live in `tools/repolint/layers.go`.
+- Subagent delegation keeps five concepts apart: a profile says how a worker
+  thinks, `TaskSpec` what this call wants, `CapabilityGrant` what it may touch,
+  `ContextRequest` what it starts from, `SchedulerPolicy` when it runs. Put a
+  field in whichever member decides its value — profiles carry ceilings, never
+  per-call values. `internal/agent/profile_boundary_test.go` enforces it.
 - Cache-first: the system-prompt prefix (base prompt + tools + memory) must stay
   byte-stable across turns so DeepSeek's automatic prefix cache stays warm. Never
   mutate it mid-session — ride the turn tail instead (see `control.Compose`).

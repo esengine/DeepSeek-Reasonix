@@ -115,12 +115,38 @@ approvals, model selection, and workspace sessions.
 
 ### Path D: Build from source
 
+Clone the repository first:
+
 ```sh
 git clone https://github.com/esengine/DeepSeek-Reasonix.git
 cd DeepSeek-Reasonix
+```
+
+#### CLI
+
+The CLI build requires **Go 1.25+**. The module pins a `toolchain` directive;
+keep `GOTOOLCHAIN=auto` so Go downloads the pinned toolchain, or install it.
+
+```sh
 make build      # -> bin/reasonix(.exe)
 make cross      # -> dist/ (darwin|linux|windows × amd64|arm64)
 ```
+
+#### Desktop
+
+The desktop build additionally requires:
+
+- **Node 24+ and pnpm 10** (`npm install -g pnpm@10`) for the frontend
+- **Wails CLI** matching the shared `.wails-version` pin
+
+```sh
+make wails-install
+cd desktop
+wails build
+```
+
+See the [desktop build guide](desktop/README.md#prerequisites) for platform
+webview dependencies and Linux build tags.
 
 ## Quick start
 

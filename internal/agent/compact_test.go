@@ -2,13 +2,26 @@ package agent
 
 import (
 	"context"
-	"reasonix/internal/event"
 	"strings"
 	"testing"
 
+	"reasonix/internal/event"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
+
+// prepareForObservedUsage preserves the old synthetic-usage test ergonomics
+// while production has only one mutating entry point: ContextManager.Prepare.
+func prepareForObservedUsage(a *Agent, ctx context.Context, usage *provider.Usage) {
+	if a == nil || usage == nil || usage.LatestPromptTokens() <= 0 {
+		return
+	}
+	view := a.modelVisibleMessages()
+	a.setPromptTokenCalibration(usage.LatestPromptTokens(), a.requestCalibrationShape(provider.Request{Messages: view}))
+	_, _ = a.contextManager().Prepare(ctx, ContextPreparePolicy{
+		Trigger: CompactionTriggerPressure, ObservedInputTokens: usage.LatestPromptTokens(),
+	})
+}
 
 // fakeProvider returns a fixed reply and records the messages it was asked to
 // complete, so tests can drive summarization without a network call.
@@ -330,7 +343,7 @@ func TestMaybeCompactThreshold(t *testing.T) {
 	// Below 50% of the window: untouched.
 	sess := newSess()
 	a := New(&fakeProvider{reply: "s"}, tool.NewRegistry(), sess, Options{ContextWindow: 100, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
-	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 49})
+	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 49})
 	if len(sess.Messages) != 7 {
 		t.Errorf("below threshold should not compact, len = %d", len(sess.Messages))
 	}
@@ -344,7 +357,7 @@ func TestMaybeCompactThreshold(t *testing.T) {
 			notices = append(notices, e)
 		}
 	}))
-	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 50})
+	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 50})
 	if len(sess.Messages) != 7 {
 		t.Errorf("soft threshold should not compact, len = %d", len(sess.Messages))
 	}
@@ -354,7 +367,7 @@ func TestMaybeCompactThreshold(t *testing.T) {
 	if len(notices) != 1 || notices[0].Text != "Context is getting large; preserving cache until cleanup is needed." || !strings.Contains(notices[0].Detail, "context reached 50%") {
 		t.Fatalf("soft threshold notice = %+v", notices)
 	}
-	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 60})
+	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 60})
 	if len(notices) != 1 {
 		t.Fatalf("soft threshold notice should only emit once, got %d", len(notices))
 	}
@@ -365,7 +378,7 @@ func TestMaybeCompactThreshold(t *testing.T) {
 	// index 1 (the count is unchanged because one message becomes one summary).
 	sess = newSess()
 	a = New(&fakeProvider{reply: "s"}, tool.NewRegistry(), sess, Options{ContextWindow: 100, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
-	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 80})
+	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 80})
 	if !hasCompactionSummary(visibleContext(a)) {
 		t.Errorf("compact threshold should fold the large early message into projection, got: %+v", visibleContext(a))
 	}
@@ -377,7 +390,7 @@ func TestMaybeCompactThreshold(t *testing.T) {
 	// No context window: compaction disabled.
 	sess = newSess()
 	a = New(&fakeProvider{reply: "s"}, tool.NewRegistry(), sess, Options{RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
-	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 1 << 30})
+	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 1 << 30})
 	if len(sess.Messages) != 7 {
 		t.Errorf("no window should disable compaction, len = %d", len(sess.Messages))
 	}
@@ -394,7 +407,7 @@ func TestMaybeCompactForceCeilingBypassesEconomics(t *testing.T) {
 	prov := &fakeProvider{reply: "forced summary"}
 	a := New(prov, tool.NewRegistry(), sess, Options{ContextWindow: 100, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
 
-	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 90})
+	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 90})
 	// Force bypasses economics and installs a projection summary; canonical stays.
 	if got := len(sess.Messages); got != 5 {
 		t.Fatalf("canonical len = %d, want 5: %+v", got, sess.Messages)
@@ -422,7 +435,7 @@ func TestMaybeCompactSkipsLowValueRegionBeforeForceCeiling(t *testing.T) {
 	prov := &fakeProvider{reply: "should not summarize"}
 	a := New(prov, tool.NewRegistry(), sess, Options{ContextWindow: 100, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
 
-	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 80})
+	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 80})
 	if got := len(sess.Messages); got != 5 {
 		t.Fatalf("low-value region should not compact before force ceiling, len = %d", got)
 	}
@@ -440,7 +453,7 @@ func TestMaybeCompactFoldsSingleLargeMessageAtThreshold(t *testing.T) {
 	}}
 	a := New(&fakeProvider{reply: "single large summary"}, tool.NewRegistry(), sess, Options{ContextWindow: 100, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
 
-	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 80})
+	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 80})
 	if got := len(sess.Messages); got != 4 {
 		t.Fatalf("canonical len = %d, want 4: %+v", got, sess.Messages)
 	}
@@ -594,7 +607,7 @@ func TestMaybeCompactClearsStuckLatchAnywhereBelowTrigger(t *testing.T) {
 			a.consecutiveCompacts = 1
 			a.compactStuck = true
 
-			a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: tc.prompt})
+			prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: tc.prompt})
 
 			if a.consecutiveCompacts != 0 || a.compactStuck {
 				t.Fatalf("prompt %d sits under the trigger; want the latch cleared, got consecutiveCompacts=%d compactStuck=%v",
@@ -604,21 +617,40 @@ func TestMaybeCompactClearsStuckLatchAnywhereBelowTrigger(t *testing.T) {
 	}
 }
 
-// TestMaybeCompactStillLatchesWhenPromptStaysAboveTrigger proves the safety
-// valve survives the fix above: a genuinely too-small window (the prompt never
-// drops under the trigger between compactions) must still pause auto-compaction.
-func TestMaybeCompactStillLatchesWhenPromptStaysAboveTrigger(t *testing.T) {
+// TestMaybeCompactDefersWhenOnlyActiveTurnRemains proves current-turn
+// protection wins over a synthetic pressure observation.
+func TestMaybeCompactDefersWhenOnlyActiveTurnRemains(t *testing.T) {
 	sess := NewSession("sys")
 	sess.Add(provider.Message{Role: provider.RoleUser, Content: "hi"})
 	a := New(&fakeProvider{reply: "- summary"}, tool.NewRegistry(), sess, Options{ContextWindow: 20000}, event.Discard)
 
-	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 17000})
+	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 17000})
 	if a.compactStuck {
-		t.Fatalf("a single over-trigger compaction must not latch: consecutiveCompacts=%d", a.consecutiveCompacts)
+		t.Fatalf("active turn should be deferred, not durably blocked: consecutiveCompacts=%d", a.consecutiveCompacts)
 	}
-	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 17000})
-	if !a.compactStuck {
-		t.Fatalf("two consecutive over-trigger compactions must still latch: consecutiveCompacts=%d", a.consecutiveCompacts)
+	version := a.currentProjectionVersion()
+	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 17000})
+	if got := a.currentProjectionVersion(); got != version {
+		t.Fatalf("blocked fingerprint retried: projection version %d -> %d", version, got)
+	}
+}
+
+func TestCompactThresholdsReserveConfiguredOutputBudget(t *testing.T) {
+	a := &Agent{
+		contextWindow:       100_000,
+		maxOutputTokens:     20_000,
+		softCompactRatio:    0.5,
+		toolResultSnipRatio: 0.8,
+		compactRatio:        0.9,
+		compactForceRatio:   0.95,
+	}
+	soft, snip, high := a.compactThresholds()
+	// hard = 100000 - 20000 output - 256 protocol reserve.
+	if soft != 50_000 || snip != 79_744 || high != 79_744 {
+		t.Fatalf("thresholds = %d/%d/%d, want 50000/79744/79744", soft, snip, high)
+	}
+	if got := a.minimumMaintenanceSavingsTokens(); got != 4096 {
+		t.Fatalf("minimum maintenance savings = %d, want 4096", got)
 	}
 }
 

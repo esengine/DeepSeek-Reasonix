@@ -35,6 +35,7 @@ type MCPCapabilityRuntime struct {
 	dispatchMu sync.RWMutex
 	mu         sync.RWMutex
 	servers    map[string]mcpRuntimeServer
+	gates      mcpServerGates
 	// shared connection observation across all frontends on this session.
 	state *mcpProxySharedState
 }
@@ -1237,60 +1238,6 @@ func (t *UseCapabilityTool) ensureState() *mcpProxySharedState {
 	return t.state
 }
 
-func (s *mcpProxySharedState) markConnected(server string) {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.connected == nil {
-		s.connected = map[string]bool{}
-	}
-	s.connected[server] = true
-}
-
-func (s *mcpProxySharedState) setLiveTools(server string, snap []plugin.CachedTool) {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.liveTools == nil {
-		s.liveTools = map[string][]plugin.CachedTool{}
-	}
-	s.liveTools[server] = snap
-	if s.connected == nil {
-		s.connected = map[string]bool{}
-	}
-	s.connected[server] = true
-}
-
-func (s *mcpProxySharedState) snapshotLiveTools() map[string][]plugin.CachedTool {
-	if s == nil {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if len(s.liveTools) == 0 {
-		return nil
-	}
-	out := make(map[string][]plugin.CachedTool, len(s.liveTools))
-	for k, v := range s.liveTools {
-		out[k] = append([]plugin.CachedTool(nil), v...)
-	}
-	return out
-}
-
-func (s *mcpProxySharedState) clearServer(server string) {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	delete(s.connected, strings.TrimSpace(server))
-	delete(s.liveTools, strings.TrimSpace(server))
-	s.mu.Unlock()
-}
-
 // specFor looks up the boot-converted spec for server. The proxy deliberately
 // holds []plugin.Spec, not raw config entries: env expansion, workspace
 // overrides, call timeouts, and read-only tool names all live in the
@@ -1369,7 +1316,7 @@ func (t *UseCapabilityTool) withRuntimeBoundMCP(ctx context.Context, server stri
 	if !plugin.MCPToolMatchesSpec(target, spec) {
 		return fmt.Errorf("connected MCP server %q identity does not match the current runtime configuration; reconnect this server before retrying", server)
 	}
-	return execute()
+	return t.runtime.withServerGate(ctx, server, execute)
 }
 
 func (t *UseCapabilityTool) serverEnabled(server string) bool {

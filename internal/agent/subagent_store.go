@@ -48,6 +48,10 @@ type SubagentMeta struct {
 	ToolSchemaHash   string         `json:"toolSchemaHash"`
 	Model            string         `json:"model"`
 	Effort           string         `json:"effort"`
+	// Capsule records what context this run was given; CapsuleHash is its
+	// stable identity for comparing two runs.
+	Capsule     ContextCapsule `json:"capsule"`
+	CapsuleHash string         `json:"capsuleHash"`
 }
 
 // subagentMetaDecodeError distinguishes malformed metadata content from file
@@ -81,6 +85,9 @@ type SubagentSpec struct {
 	ToolContext      context.Context
 	Model            string
 	Effort           string
+	// ResumedFrom feeds the context capsule; it does not change how the
+	// transcript itself is stored.
+	ResumedFrom string
 }
 
 // SubagentRun is a prepared transcript run. Call Release exactly once.
@@ -741,26 +748,6 @@ func (s *SubagentStore) LoadMeta(ref string) (SubagentMeta, error) {
 		return meta, &subagentMetaDecodeError{ref: ref, err: err}
 	}
 	return meta, nil
-}
-
-func metaFromSpec(ref string, status SubagentStatus, created, updated time.Time, spec SubagentSpec) SubagentMeta {
-	scope, schemaHash := toolIdentity(spec.Registry, spec.ToolContext)
-	return SubagentMeta{
-		Ref:              ref,
-		CreatedAt:        created,
-		UpdatedAt:        updated,
-		Status:           status,
-		Kind:             strings.TrimSpace(spec.Kind),
-		Name:             strings.TrimSpace(spec.Name),
-		WorkspaceRoot:    strings.TrimSpace(spec.WorkspaceRoot),
-		ParentSession:    strings.TrimSpace(spec.ParentSession),
-		ParentToolCallID: strings.TrimSpace(spec.ParentToolCallID),
-		SystemPromptHash: bytesHash([]byte(spec.SystemPrompt)),
-		ToolScope:        scope,
-		ToolSchemaHash:   schemaHash,
-		Model:            strings.TrimSpace(spec.Model),
-		Effort:           strings.TrimSpace(spec.Effort),
-	}
 }
 
 func validateMeta(meta SubagentMeta, spec SubagentSpec) error {

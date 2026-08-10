@@ -28,7 +28,7 @@ func (f fatTool) Execute(context.Context, json.RawMessage) (string, error) {
 
 // loopMock emits exactly one tool call per user turn (a tool call when the last
 // message is the user's, a final answer when it is the tool result), so each Run
-// does one tool round — the step that triggers maybeCompact. finalText overrides
+// does one tool round — the next request then runs ContextManager.Prepare. finalText overrides
 // the per-turn closing answer so a test can grow the session with assistant text
 // (which pruning never touches) instead of tool output.
 type loopMock struct {
@@ -82,7 +82,7 @@ func (m *loopMock) handler(w http.ResponseWriter, r *http.Request) {
 
 // compactionsPerTurn drives `turns` user messages through a fresh agent wired to
 // loopMock and reports, per turn, how many compactions started and whether an
-// auto-compaction-paused notice was seen.
+// durable blocked receipt was seen.
 func compactionsPerTurn(t *testing.T, windowTok int, blob, finalText string, turns int) (perTurn []int, paused bool, prunes int) {
 	t.Helper()
 	mock := &loopMock{t: t, finalText: finalText}
@@ -103,6 +103,13 @@ func compactionsPerTurn(t *testing.T, windowTok int, blob, finalText string, tur
 				paused = true
 			}
 			if strings.Contains(e.Text, "pruned") {
+				prunes++
+			}
+		case event.ContextMaintenanceEvent:
+			if e.Maintenance != nil && e.Maintenance.Status == "blocked" {
+				paused = true
+			}
+			if e.Maintenance != nil && e.Maintenance.Status == "applied" && e.Maintenance.Action == "prune" {
 				prunes++
 			}
 		}

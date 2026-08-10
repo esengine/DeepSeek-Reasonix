@@ -188,10 +188,14 @@ func (gs *Session) review(ctx context.Context, toolName string, args json.RawMes
 	// verdict.
 	before := gs.sess.Snapshot()
 	rewriteBefore := gs.sess.RewriteVersion()
+	projectionBefore := gs.agent.ContextMaintenanceSnapshot().ProjectionVersion
 	start := time.Now()
 	agentErr := gs.agent.Run(reviewCtx, transcriptText+"\n"+formatReviewRequest(toolName, args))
 	dur := time.Since(start).Milliseconds()
-	if agentErr == nil && reviewN%compactEvery == 0 {
+	// Pressure maintenance runs before sampling. Do not pay for a second summary
+	// when that same review already advanced the visible projection.
+	projectionAfter := gs.agent.ContextMaintenanceSnapshot().ProjectionVersion
+	if agentErr == nil && reviewN%compactEvery == 0 && projectionAfter == projectionBefore {
 		_ = gs.agent.CompactNow(reviewCtx, "")
 	}
 	reviewUsage := gs.snapshotReviewUsage()
@@ -222,7 +226,7 @@ func (gs *Session) review(ctx context.Context, toolName string, args json.RawMes
 		}
 	}
 	// Any compaction this review triggered (the periodic CompactNow above or
-	// maybeCompact inside Run) inserts its digest as a RoleUser message, which
+	// ContextManager inside Run) inserts its digest as a RoleUser message, which
 	// can land directly before a review's user turn and re-create the
 	// consecutive-user shape this session must never carry. Repair on the
 	// final session state, after any failed-turn rollback.

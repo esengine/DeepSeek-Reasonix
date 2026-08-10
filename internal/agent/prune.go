@@ -30,6 +30,9 @@ type PruneStats struct {
 	Results    int
 	SavedChars int
 	Archive    string
+	Mode       toolResultMaintenanceMode
+	InputHash  string
+	Force      bool
 }
 
 // SnipStaleToolResults shortens stale tool-result content older than the
@@ -47,74 +50,28 @@ func (a *Agent) PruneStaleToolResults() (PruneStats, error) {
 }
 
 func (a *Agent) maintainStaleToolResults(mode toolResultMaintenanceMode) (PruneStats, error) {
-	var st PruneStats
+	st := PruneStats{Mode: mode}
 	if a.contextWindow <= 0 {
 		return st, nil
 	}
-	msgs := a.session.Messages
-	head, start, ok := a.planCompaction(msgs, 1)
-	if !ok {
-		if mode != toolResultPrune {
-			return st, nil
-		}
-		head = 1
-		start = len(msgs) - a.recentKeep
-		if start < head {
-			return st, nil
-		}
-	}
-	var idx []int
-	for i := head; i < start; i++ {
-		m := msgs[i]
-		if !shouldMaintainToolResult(m, mode) {
-			continue
-		}
-		// Honor the keep policy before maintenance: an error:/blocked: tool
-		// result that KeepErrors would preserve must reach compact() verbatim.
-		if a.keepPolicy&KeepErrors != 0 && isErrorMessage(m) {
-			continue
-		}
-		idx = append(idx, i)
-	}
-	if len(idx) == 0 {
-		return st, nil
-	}
-	if a.archiveDir != "" {
-		originals := make([]provider.Message, 0, len(idx))
-		for _, i := range idx {
-			if mode == toolResultPrune && strings.HasPrefix(msgs[i].Content, snippedMarker) {
-				continue
-			}
-			originals = append(originals, msgs[i])
-		}
-		if len(originals) > 0 {
-			path, err := archiveMessages(a.archiveDir, originals)
-			if err != nil {
-				return st, fmt.Errorf("archive: %w", err)
-			}
-			st.Archive = path
-		}
-	}
-	next := append([]provider.Message(nil), msgs...)
-	for _, i := range idx {
-		m := next[i]
-		replacement := rewriteToolResult(m, mode, st.Archive, a.snipStrategyFor(m.Name))
-		if replacement == m.Content {
-			continue
-		}
-		st.SavedChars += len(m.Content) - len(replacement)
-		m.Content = replacement
-		next[i] = m
-		st.Results++
-	}
+	visible := a.modelVisibleMessages()
+	next, st := a.applyToolResultMaintenanceView(visible, mode)
+	st.Force = true
 	if st.Results == 0 {
 		return st, nil
 	}
-	reason := "prune"
-	if mode == toolResultSnip {
-		reason = "snip"
+	before := a.currentProjectionVersion()
+	if err := a.installPruneProjection(next, st); err != nil {
+		return PruneStats{Mode: mode}, err
 	}
-	a.session.Rewrite(next, reason)
+	if a.currentProjectionVersion() == before {
+		return PruneStats{Mode: mode}, nil
+	}
+	a.compactionMu.Lock()
+	if a.compactionState.LastReceipt != nil {
+		st.Archive = a.compactionState.LastReceipt.Archive
+	}
+	a.compactionMu.Unlock()
 	return st, nil
 }
 

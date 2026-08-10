@@ -2,19 +2,19 @@
   "limits": {
     "banner": 15,
     "commented-code": 0,
-    "complexity": 2081,
-    "essay": 4113,
-    "file-size": 111289,
-    "function-size": 9171,
+    "complexity": 2085,
+    "essay": 4099,
+    "file-size": 110865,
+    "function-size": 9157,
     "layering": 1,
     "marker": 0,
     "narrative": 64,
-    "test-file-size": 70137
+    "test-file-size": 70093
   },
   "files": {
     "cmd/e2ebench/main.go": {
       "essay": 1,
-      "function-size": 2
+      "function-size": 1
     },
     "cmd/e2ebench/mutation.go": {
       "essay": 1
@@ -28,7 +28,7 @@
     "desktop/app.go": {
       "complexity": 63,
       "essay": 96,
-      "file-size": 11590,
+      "file-size": 11489,
       "function-size": 381
     },
     "desktop/app_autosave_test.go": {
@@ -84,7 +84,7 @@
       "essay": 2
     },
     "desktop/frontend/src/App.tsx": {
-      "file-size": 4758
+      "file-size": 4749
     },
     "desktop/frontend/src/__tests__/app-chrome-tabs.test.ts": {
       "test-file-size": 19
@@ -99,7 +99,7 @@
       "test-file-size": 551
     },
     "desktop/frontend/src/__tests__/decision-surface.test.tsx": {
-      "test-file-size": 262
+      "test-file-size": 250
     },
     "desktop/frontend/src/__tests__/math-golden.test.ts": {
       "test-file-size": 106
@@ -117,7 +117,7 @@
       "test-file-size": 106
     },
     "desktop/frontend/src/components/ApprovalModal.tsx": {
-      "file-size": 261
+      "file-size": 238
     },
     "desktop/frontend/src/components/CapabilitiesPanel.tsx": {
       "file-size": 2658
@@ -141,7 +141,7 @@
       "file-size": 6960
     },
     "desktop/frontend/src/components/StatusBar.tsx": {
-      "file-size": 23
+      "file-size": 20
     },
     "desktop/frontend/src/components/ThemeGallery.tsx": {
       "file-size": 489
@@ -150,19 +150,19 @@
       "file-size": 158
     },
     "desktop/frontend/src/components/Transcript.tsx": {
-      "file-size": 444
+      "file-size": 443
     },
     "desktop/frontend/src/components/UsageStatsPanel.tsx": {
       "file-size": 276
     },
     "desktop/frontend/src/components/WorkspacePanel.tsx": {
-      "file-size": 1356
+      "file-size": 1411
     },
     "desktop/frontend/src/custom/features/heartbeat/HeartbeatPanel.tsx": {
       "file-size": 415
     },
     "desktop/frontend/src/lib/bridge.ts": {
-      "file-size": 4671
+      "file-size": 4676
     },
     "desktop/frontend/src/lib/crash.ts": {
       "file-size": 225
@@ -171,10 +171,10 @@
       "file-size": 307
     },
     "desktop/frontend/src/lib/types.ts": {
-      "file-size": 1423
+      "file-size": 1455
     },
     "desktop/frontend/src/lib/useController.ts": {
-      "file-size": 3916
+      "file-size": 3925
     },
     "desktop/heartbeat.go": {
       "essay": 20,
@@ -273,7 +273,7 @@
     },
     "desktop/sessions.go": {
       "essay": 5,
-      "file-size": 512
+      "file-size": 458
     },
     "desktop/sessions_lease_guard_test.go": {
       "essay": 3
@@ -309,7 +309,7 @@
     "desktop/tabs.go": {
       "complexity": 74,
       "essay": 133,
-      "file-size": 8872,
+      "file-size": 8719,
       "function-size": 630
     },
     "desktop/tabs_order_test.go": {
@@ -320,7 +320,7 @@
     },
     "desktop/tabs_topic_test.go": {
       "essay": 1,
-      "test-file-size": 3421
+      "test-file-size": 3409
     },
     "desktop/temphelper_test.go": {
       "essay": 4
@@ -437,24 +437,21 @@
     },
     "internal/agent/agent.go": {
       "complexity": 61,
-      "essay": 109,
-      "file-size": 2743,
-      "function-size": 124
+      "essay": 108,
+      "file-size": 2762,
+      "function-size": 125
     },
     "internal/agent/ask.go": {
       "essay": 4
     },
     "internal/agent/branch.go": {
-      "essay": 11
+      "essay": 10
     },
     "internal/agent/cache_shape.go": {
       "essay": 3
     },
     "internal/agent/cache_shape_test.go": {
       "essay": 1
-    },
-    "internal/agent/cachehit_e2e_test.go": {
-      "essay": 2
     },
     "internal/agent/capability_gate.go": {
       "essay": 7
@@ -463,7 +460,10 @@
       "essay": 1
     },
     "internal/agent/compact.go": {
-      "essay": 9
+      "essay": 4
+    },
+    "internal/agent/compact_projection.go": {
+      "essay": 1
     },
     "internal/agent/compact_test.go": {
       "essay": 3
@@ -492,14 +492,14 @@
       "test-file-size": 501
     },
     "internal/agent/execute_batch.go": {
-      "complexity": 43,
-      "function-size": 199
+      "complexity": 48,
+      "function-size": 213
     },
     "internal/agent/execute_one.go": {
       "complexity": 13,
       "essay": 23,
-      "file-size": 154,
-      "function-size": 19
+      "file-size": 158,
+      "function-size": 20
     },
     "internal/agent/extensions.go": {
       "essay": 64
@@ -510,8 +510,8 @@
       "test-file-size": 1020
     },
     "internal/agent/fleet.go": {
-      "essay": 4,
-      "function-size": 39
+      "essay": 3,
+      "function-size": 24
     },
     "internal/agent/listsessions_bench_test.go": {
       "essay": 4
@@ -533,7 +533,7 @@
     },
     "internal/agent/parallel_tasks.go": {
       "essay": 3,
-      "function-size": 81
+      "function-size": 73
     },
     "internal/agent/parallel_tasks_test.go": {
       "essay": 2
@@ -575,13 +575,13 @@
     "internal/agent/run_loop.go": {
       "complexity": 8,
       "essay": 32,
-      "file-size": 281,
-      "function-size": 57
+      "file-size": 254,
+      "function-size": 45
     },
     "internal/agent/save.go": {
       "complexity": 49,
       "essay": 113,
-      "file-size": 1550,
+      "file-size": 1543,
       "function-size": 124
     },
     "internal/agent/save_test.go": {
@@ -609,7 +609,7 @@
       "test-file-size": 33
     },
     "internal/agent/session_lease.go": {
-      "essay": 18
+      "essay": 13
     },
     "internal/agent/session_lease_test.go": {
       "essay": 4
@@ -634,7 +634,7 @@
     },
     "internal/agent/subagent_store.go": {
       "essay": 5,
-      "file-size": 162
+      "file-size": 149
     },
     "internal/agent/subagent_store_test.go": {
       "test-file-size": 250
@@ -642,7 +642,7 @@
     "internal/agent/task.go": {
       "complexity": 25,
       "essay": 55,
-      "file-size": 1355,
+      "file-size": 1295,
       "function-size": 114
     },
     "internal/agent/task_test.go": {
@@ -662,7 +662,7 @@
     },
     "internal/agent/usecapability.go": {
       "essay": 9,
-      "file-size": 777
+      "file-size": 724
     },
     "internal/agent/usecapability_test.go": {
       "test-file-size": 998
@@ -673,8 +673,8 @@
     "internal/boot/boot.go": {
       "complexity": 295,
       "essay": 102,
-      "file-size": 2234,
-      "function-size": 1862,
+      "file-size": 2226,
+      "function-size": 1854,
       "narrative": 3
     },
     "internal/boot/boot_test.go": {
@@ -810,7 +810,7 @@
       "complexity": 300,
       "essay": 110,
       "file-size": 4546,
-      "function-size": 1196
+      "function-size": 1195
     },
     "internal/cli/chat_tui_paste.go": {
       "essay": 9
@@ -820,10 +820,10 @@
       "test-file-size": 3582
     },
     "internal/cli/cli.go": {
-      "complexity": 77,
+      "complexity": 75,
       "essay": 60,
-      "file-size": 1967,
-      "function-size": 519
+      "file-size": 1951,
+      "function-size": 506
     },
     "internal/cli/cli_test.go": {
       "essay": 9,
@@ -927,7 +927,7 @@
       "file-size": 126
     },
     "internal/cli/shell_completion.go": {
-      "function-size": 124
+      "function-size": 117
     },
     "internal/cli/skill_hooks.go": {
       "essay": 1
@@ -974,8 +974,8 @@
       "essay": 2
     },
     "internal/config/config.go": {
-      "essay": 59,
-      "file-size": 1538,
+      "essay": 50,
+      "file-size": 1500,
       "narrative": 2
     },
     "internal/config/credentials.go": {
@@ -1037,6 +1037,9 @@
     "internal/config/paths.go": {
       "essay": 13
     },
+    "internal/config/plugin_entry.go": {
+      "essay": 9
+    },
     "internal/config/plugin_packages.go": {
       "essay": 2
     },
@@ -1047,10 +1050,10 @@
       "file-size": 282
     },
     "internal/config/render.go": {
-      "complexity": 249,
+      "complexity": 250,
       "essay": 2,
-      "file-size": 1008,
-      "function-size": 960
+      "file-size": 1015,
+      "function-size": 967
     },
     "internal/config/render_test.go": {
       "test-file-size": 761
@@ -1067,7 +1070,7 @@
     "internal/control/controller.go": {
       "complexity": 11,
       "essay": 165,
-      "file-size": 5453,
+      "file-size": 5408,
       "function-size": 78,
       "narrative": 4
     },
@@ -1194,6 +1197,7 @@
     },
     "internal/event/event.go": {
       "essay": 10,
+      "file-size": 43,
       "narrative": 1
     },
     "internal/event/subagent_progress.go": {
@@ -1202,10 +1206,13 @@
     "internal/event/sync.go": {
       "essay": 2
     },
+    "internal/eventwire/wire.go": {
+      "function-size": 24
+    },
     "internal/evidence/evidence.go": {
       "complexity": 6,
       "essay": 38,
-      "file-size": 2080
+      "file-size": 2083
     },
     "internal/evidence/evidence_test.go": {
       "essay": 1,
@@ -1506,7 +1513,7 @@
     "internal/pluginpkg/pluginpkg.go": {
       "complexity": 1,
       "essay": 2,
-      "file-size": 438
+      "file-size": 426
     },
     "internal/pluginpkg/pluginpkg_test.go": {
       "test-file-size": 67
@@ -1526,8 +1533,8 @@
     "internal/provider/anthropic/anthropic.go": {
       "complexity": 45,
       "essay": 36,
-      "file-size": 112,
-      "function-size": 154
+      "file-size": 126,
+      "function-size": 158
     },
     "internal/provider/anthropic/anthropic_test.go": {
       "essay": 1,
@@ -1551,7 +1558,7 @@
     },
     "internal/provider/provider.go": {
       "essay": 50,
-      "file-size": 353
+      "file-size": 361
     },
     "internal/provider/responses/responses.go": {
       "complexity": 54,
@@ -1720,7 +1727,7 @@
       "essay": 1
     },
     "internal/serve/serve_test.go": {
-      "test-file-size": 442
+      "test-file-size": 422
     },
     "internal/serve/switch_recovery_test.go": {
       "essay": 2

@@ -423,10 +423,14 @@
   },
   {
     "Name": "fleet",
-    "Description": "Dispatch 2–64 sub-agent tasks in parallel and return bounded previews plus stable Subagent references for full-result retrieval from completed persisted children with read_subagent_result. Each item may select a profile, model, effort, tools, write_paths, or read_only. Multiple writers must declare non-overlapping write_paths; omitted write_paths claim the whole workspace, so two or more writers without paths fail preflight before any task starts. Independent failure is the default: one failure does not cancel others. Background mode returns a fleet job id collectable with wait.",
+    "Description": "Dispatch 2–64 sub-agent tasks as a small dependency graph and return bounded previews plus stable Subagent references for full-result retrieval from completed persisted children with read_subagent_result. Each item may select a profile, model, effort, tools, write_paths, or read_only, and may declare depends_on to run after other items (research → implement → review). Tasks with no dependency between them run in parallel and must declare non-overlapping write_paths; ordered tasks may share paths. Omitted write_paths claim the whole workspace, so two or more concurrent writers without paths fail preflight before any task starts. A failed task's dependents are skipped; independent branches keep going unless fail_fast is set. Background mode returns a fleet job id collectable with wait.",
     "ReadOnly": false,
     "Schema": {
       "properties": {
+        "fail_fast": {
+          "description": "Stop starting new tasks after the first failure. Tasks already running are left to finish so partial writes are not abandoned mid-flight. Omitted (the default) means independent branches keep going; a failed task's dependents are skipped either way.",
+          "type": "boolean"
+        },
         "run_in_background": {
           "description": "Run the whole fleet asynchronously and return a job id collectable with wait. Items queue for concurrency/write slots inside the job.",
           "type": "boolean"
@@ -435,12 +439,23 @@
           "description": "Array of 2–64 sub-tasks to run under the session scheduler.",
           "items": {
             "properties": {
+              "depends_on": {
+                "description": "Ids of tasks that must complete before this one starts. Unknown ids, self-edges, and cycles fail preflight. A task whose dependency fails or is skipped is skipped too. Ordered tasks may share write_paths; only tasks that can run at the same time need disjoint claims.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
               "description": {
                 "description": "Optional short label shown in the job list.",
                 "type": "string"
               },
               "effort": {
                 "description": "Optional reasoning effort override.",
+                "type": "string"
+              },
+              "id": {
+                "description": "Optional stable id for this task, referenced by other tasks' depends_on. Defaults to the 1-based position.",
                 "type": "string"
               },
               "max_steps": {
@@ -472,7 +487,7 @@
                 "type": "array"
               },
               "write_paths": {
-                "description": "Write targets for this item. Parallel writers must declare non-overlapping paths. Omitting write_paths claims the whole workspace; multiple whole-workspace claims (or any path overlap) fail preflight and start nothing.",
+                "description": "Write targets for this item. Writers that can run at the same time must declare non-overlapping paths; writers ordered by depends_on may share them. Omitting write_paths claims the whole workspace; two concurrent whole-workspace claims (or any overlap between concurrent writers) fail preflight and start nothing.",
                 "items": {
                   "type": "string"
                 },

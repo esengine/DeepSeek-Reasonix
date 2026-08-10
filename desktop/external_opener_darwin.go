@@ -176,6 +176,6 @@ func darwinExternalOpenerCommand(spec externalOpenerSpec, path string) *exec.Cmd
 	return exec.Command("/usr/bin/open", "-a", spec.Target, launchPath)
 }
 
-func launchPlatformExternalOpener(spec externalOpenerSpec, path string) error {
+func launchPlatformExternalOpener(spec externalOpenerSpec, path string, _ bool) error {
 	return startDetachedExternalOpener(darwinExternalOpenerCommand(spec, path))
 }
