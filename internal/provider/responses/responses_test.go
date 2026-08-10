@@ -585,7 +585,7 @@ func TestVendorCapabilityTableCoversKnownEndpoints(t *testing.T) {
 		singleSegment        bool
 	}{
 		{"https://api.deepseek.com", "deepseek", true, true, false, false},
-		{"https://api.xiaomimimo.com/v1", "mimo", true, true, true, true},
+		{"https://api.xiaomimimo.com/v1", "mimo", true, true, true, false},
 		{"https://dashscope.aliyuncs.com/compatible-mode/v1", "dashscope", false, false, false, false},
 		{"https://example.com/v1", "", false, false, false, false},
 	}
@@ -1172,5 +1172,30 @@ func TestVendorTableMaxOutputTokens(t *testing.T) {
 	db, _, _ := ds.buildRequestBody(provider.Request{Messages: msg})
 	if got := db["max_output_tokens"]; got != provider.DefaultHighReasoningOutputTokens {
 		t.Fatalf("deepseek auto budget = %#v, want high-reasoning %d", got, provider.DefaultHighReasoningOutputTokens)
+	}
+}
+
+func TestMiMoEmitsSummaryModeEvenWhenEffortEmpty(t *testing.T) {
+	// MiMo's default effort is "auto" (normalized to empty), so the reasoning
+	// object must still be emitted when caps.summaryMode is set — otherwise
+	// summaryMode="none" is dropped and the server falls back to emitting
+	// reasoning summaries (truncation root cause: MiMo folds the summary back
+	// into context, doubling thinking each turn).
+	c := New(Config{Name: "mimo", BaseURL: "https://api.xiaomimimo.com", Model: "mimo-v2.5"}).(*client)
+	if c.caps.summaryMode != "none" {
+		t.Fatalf("mimo summaryMode = %q, want none", c.caps.summaryMode)
+	}
+	body, _, _ := c.buildRequestBody(provider.Request{
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+	})
+	reasoning, ok := body["reasoning"].(map[string]any)
+	if !ok {
+		t.Fatalf("mimo with empty effort must still send reasoning object (summaryMode set), body=%v", body)
+	}
+	if got := reasoning["summary"]; got != "none" {
+		t.Fatalf("reasoning.summary = %#v, want none (must be sent even with empty effort)", got)
+	}
+	if _, hasEffort := reasoning["effort"]; hasEffort {
+		t.Fatalf("reasoning.effort should be omitted for empty effort, got %#v", reasoning)
 	}
 }

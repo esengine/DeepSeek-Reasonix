@@ -3,6 +3,7 @@ package responses
 import (
 	"net/url"
 	"strings"
+	"time"
 
 	"reasonix/internal/provider"
 )
@@ -50,13 +51,19 @@ type vendorCapabilities struct {
 
 	// defaultMaxOutputTokens is the max_output_tokens sent when the caller
 	// did not request one (req.MaxTokens == 0). Zero means "leave unset and
-	// let the server use its own default". MiMo's server default (32768)
-	// covers reasoning + visible output, and its thinking mode can spend a
-	// large chunk of that budget on reasoning before the visible answer —
-	// truncating tool calls mid-JSON on long turns. Raise it to the next
-	// documented tier (65536, within the allowed [1, 131072] range) so the
-	// answer survives long reasoning.
+	// let the server use its own default". The default (32K) covers
+	// reasoning + visible output; long reasoning turns can spend most of it
+	// before the visible answer, truncating tool calls mid-JSON. Users must
+	// raise it manually (e.g. 128000, MiMo-Code's MIMO_OUTPUT_TOKEN_MAX
+	// within [1, 131072]) for long-reasoning workloads.
 	defaultMaxOutputTokens int
+
+	// summaryMode, when non-empty, is sent as reasoning.summary in the
+	// request body. MiMo-Code's codex config sets model_reasoning_summary
+	// = "none" to tell the server NOT to emit reasoning summaries, keeping
+	// the output budget for visible content. Empty means "do not send
+	// reasoning.summary" (the OpenAI default).
+	summaryMode string
 
 	// compactionOutputTokens is the separate budget for native/summary
 	// compaction calls. Zero means "no dedicated compaction budget; fall
@@ -72,6 +79,12 @@ type vendorCapabilities struct {
 	// chain-of-thought echoed each turn and inflating reasoning output
 	// until truncation. Only send it where the wire demands it.
 	summaryRequired bool
+
+	// streamIdleTimeout overrides the default SSE stream idle timeout for
+	// this vendor. MiMo's cold-path TTFT can reach ~5 minutes for long
+	// reasoning turns; the default 120s would abort prematurely. Zero means
+	// use defaultStreamIdleTimeout.
+	streamIdleTimeout time.Duration
 }
 
 var vendorTable = map[string]vendorCapabilities{
@@ -102,11 +115,19 @@ var vendorTable = map[string]vendorCapabilities{
 		stateless:              true,
 		sessionCacheHeader:     false,
 		toolCallReasoning:      true,
-		singleSegmentReasoning: true,
+		singleSegmentReasoning: false,
 		ignoresTemperature:     true,
-		// Coding-agent default 32K; users may raise explicitly. Not 128K auto.
+		// Default 32K is too small for long reasoning turns: the budget
+		// covers reasoning + visible output, so tool calls truncate mid-JSON.
+		// Users must raise it manually to 128000 (MiMo-Code's
+		// MIMO_OUTPUT_TOKEN_MAX) for long-reasoning workloads.
 		defaultMaxOutputTokens: provider.DefaultReasoningOutputTokens,
-		compactionOutputTokens: provider.DefaultOrdinaryOutputTokens,
+		summaryMode:            "none",
+		// MiMo only accepts effort values: none, low, medium, high
+		// (case-sensitive lowercase). auto/disabled/off/HIGH are rejected
+		// with HTTP 400. NormalizeEffort in effort.go handles the mapping.
+		streamIdleTimeout:      8 * time.Minute, // cold-path TTFT ~5min
+		compactionOutputTokens: 4096,
 	},
 	// "" (unknown OpenAI-compatible endpoint) → zero value = default behavior.
 	// Unknown gateways deliberately do NOT inherit a large max-output default.

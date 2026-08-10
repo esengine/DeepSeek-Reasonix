@@ -157,7 +157,7 @@ func New(cfg Config) provider.Provider {
 		baseURL: strings.TrimRight(cfg.BaseURL, "/"), model: cfg.Model, effort: cfg.Effort,
 		vendor: vendor, caps: cap, mode: cfg.mode(), sessionCache: sessionCache, webSearch: cfg.WebSearch, maxOutputTokens: maxOutputTokens,
 		vision: vision,
-		http:   httpClient, idleTimeout: defaultStreamIdleTimeout,
+		http:   httpClient, idleTimeout: cap.streamIdleTimeout,
 	}
 }
 
@@ -207,16 +207,20 @@ func (c *client) MissingToolCallReasoningWarningIdentity() string {
 // without reasoning only for vendors whose endpoint reliably emits it.
 // DeepSeek's official API emits tool-call reasoning for its pro-tier models,
 // so a missing chain-of-thought there is a real degradation worth one warning.
-// MiMo documents reasoning alongside tool calls but does not guarantee it on
-// every round (observed: mimo-v2.5-pro tool-call turn with empty reasoning),
-// so a missing chain-of-thought is endpoint-conditional, not a degradation
-// signal — silence the warning. Capability-driven (review #7234):
-// toolCallReasoning=false vendors (DashScope) never warn — no round-trip
-// contract; singleSegmentReasoning=true vendors (MiMo) never warn — their
-// tool-call thinking is a single optional segment. Only multi-segment
-// thinking vendors that require replay (DeepSeek) warn, scoped to non-flash.
+// MiMo preserves reasoning on replay but does not guarantee it every round
+// (observed: mimo-v2.5-pro tool-call turn with empty reasoning), so a missing
+// chain-of-thought is endpoint-conditional, not a degradation signal — silence
+// the warning. toolCallReasoning=false vendors (DashScope) never warn — no
+// round-trip contract. This mirrors openai.go's model-scoped gate.
 func (c *client) WarnOnMissingToolCallReasoning() bool {
-	if !c.caps.toolCallReasoning || c.caps.singleSegmentReasoning {
+	if !c.caps.toolCallReasoning {
+		return false
+	}
+	// MiMo: preserves reasoning on replay but does not guarantee it every
+	// round — a missing chain-of-thought is endpoint-conditional, not a
+	// degradation worth a warning (observed: mimo-v2.5-pro tool-call turn
+	// with empty reasoning).
+	if c.vendor == "mimo" {
 		return false
 	}
 	model := strings.ToLower(strings.TrimSpace(c.model))
@@ -300,8 +304,15 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool, [
 	case "disabled", "off":
 		effort = "none"
 	}
-	if effort != "" {
-		body["reasoning"] = map[string]any{"effort": effort}
+	if effort != "" || c.caps.summaryMode != "" {
+		reasoning := map[string]any{}
+		if effort != "" {
+			reasoning["effort"] = effort
+		}
+		if c.caps.summaryMode != "" {
+			reasoning["summary"] = c.caps.summaryMode
+		}
+		body["reasoning"] = reasoning
 	}
 	maxOutputTokens := req.MaxTokens
 	if maxOutputTokens == 0 {
