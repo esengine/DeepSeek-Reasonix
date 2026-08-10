@@ -312,12 +312,10 @@ func restoreTrashedSessionFile(dir, path string) error {
 		return err
 	}
 	target := filepath.Join(dir, key)
-	if _, err := os.Stat(target); err == nil {
-		return fmt.Errorf("session already exists: %s", key)
-	} else if !os.IsNotExist(err) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := checkRestoreSessionArtifactConflicts(itemDir, target, key); err != nil {
 		return err
 	}
 	if err := checkRestoreSubagentConflicts(dir, itemDir); err != nil {
@@ -332,6 +330,23 @@ func restoreTrashedSessionFile(dir, path string) error {
 		return err
 	}
 	return os.RemoveAll(itemDir)
+}
+
+func checkRestoreSessionArtifactConflicts(itemDir, target, key string) error {
+	for _, artifact := range sessionTrashArtifacts(target, key) {
+		trashed := filepath.Join(itemDir, artifact.name)
+		if _, err := os.Lstat(trashed); os.IsNotExist(err) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		if _, err := os.Lstat(artifact.src); err == nil {
+			return fmt.Errorf("session artifact already exists: %s", artifact.name)
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 func purgeTrashedSessionFile(dir, path string) error {

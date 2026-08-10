@@ -552,6 +552,38 @@ func TestRestoreTrashedSessionFileRejectsSubagentConflict(t *testing.T) {
 	}
 }
 
+func TestRestoreTrashedSessionFileRejectsSidecarConflict(t *testing.T) {
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session.jsonl")
+	metaPath := store.SessionMeta(sessionPath)
+	if err := os.WriteFile(sessionPath, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(metaPath, []byte("trash meta"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := deleteSessionFile(dir, sessionPath); err != nil {
+		t.Fatalf("trash: %v", err)
+	}
+	if err := os.WriteFile(metaPath, []byte("active meta"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	trashPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jsonl")
+	if err := restoreTrashedSessionFile(dir, trashPath); err == nil {
+		t.Fatal("restore should fail on sidecar conflict")
+	}
+	if _, err := os.Stat(trashPath); err != nil {
+		t.Fatalf("trash item should remain after failed restore: %v", err)
+	}
+	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) {
+		t.Fatalf("session file should not be restored after conflict, stat err = %v", err)
+	}
+	if b, err := os.ReadFile(metaPath); err != nil || string(b) != "active meta" {
+		t.Fatalf("active sidecar = %q, %v; want original active meta", b, err)
+	}
+}
+
 func TestPurgeTrashedSessionFile(t *testing.T) {
 	dir := t.TempDir()
 	sessionPath := filepath.Join(dir, "session.jsonl")

@@ -2376,7 +2376,12 @@ export default function App() {
   const onRenameSession = useCallback(
     async (path: string, title: string) => {
       if (state.running) return;
-      await renameSession(path, title);
+      try {
+        await renameSession(path, title);
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : String(err), "error");
+        return;
+      }
       const sessions = await listSessions();
       setHistView((cur) =>
         cur === null
@@ -2386,34 +2391,49 @@ export default function App() {
             : cur,
       );
     },
-    [state.running, renameSession, listSessions],
+    [state.running, renameSession, listSessions, showToast],
   );
   const onRestoreTrashedSession = useCallback(
     async (path: string) => {
-      await restoreSession(path);
+      try {
+        await restoreSession(path);
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : String(err), "error");
+        return;
+      }
       const trashed = await listTrashedSessions();
       setHistView((cur) => (cur === null ? null : { kind: "trash", sessions: trashed }));
     },
-    [restoreSession, listTrashedSessions],
+    [restoreSession, listTrashedSessions, showToast],
   );
   const onPurgeTrashedSession = useCallback(
     async (path: string) => {
-      await purgeTrashedSession(path);
+      try {
+        await purgeTrashedSession(path);
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : String(err), "error");
+        return;
+      }
       const trashed = await listTrashedSessions();
       setHistView((cur) => (cur === null ? null : { kind: "trash", sessions: trashed }));
     },
-    [purgeTrashedSession, listTrashedSessions],
+    [purgeTrashedSession, listTrashedSessions, showToast],
   );
   const onPurgeAllTrashedSessions = useCallback(
     async (paths: string[]) => {
       const uniquePaths = Array.from(new Set(paths));
       for (const path of uniquePaths) {
-        await purgeTrashedSession(path);
+        try {
+          await purgeTrashedSession(path);
+        } catch (err) {
+          showToast(err instanceof Error ? err.message : String(err), "error");
+          return;
+        }
       }
       const trashed = await listTrashedSessions();
       setHistView((cur) => (cur === null ? null : { kind: "trash", sessions: trashed }));
     },
-    [purgeTrashedSession, listTrashedSessions],
+    [purgeTrashedSession, listTrashedSessions, showToast],
   );
 
   // Workspace: open the folder chooser and switch projects. The hook resets the
