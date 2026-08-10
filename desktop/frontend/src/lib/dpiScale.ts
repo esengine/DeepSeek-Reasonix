@@ -77,3 +77,27 @@ export function saveRestartZoom(userZoom: ZoomLevel): void {
 export function initDpiScale(): void {
   /* zoom is handled entirely by the Go side (ZoomFactor) */
 }
+
+/**
+ * Force a compositor refresh after Windows minimise/restore or DPI-related
+ * visibility changes. WebView2 can keep a rasterization scale/layer from the
+ * pre-minimise monitor, which shows as overall UI blow-up or blurry text
+ * (#7794, #7799) until the next full repaint.
+ *
+ * Safe no-op outside a browser/DOM environment.
+ */
+export function forceWindowsDpiRepaint(): void {
+  if (typeof document === "undefined" || typeof window === "undefined") return;
+  const platform = typeof navigator !== "undefined" ? navigator.platform || navigator.userAgent || "" : "";
+  if (!/Win/i.test(platform)) return;
+
+  const root = document.documentElement;
+  // A one-frame transform forces WebView2 to re-rasterize without changing layout.
+  const prev = root.style.getPropertyValue("transform");
+  root.style.setProperty("transform", "translateZ(0)");
+  void root.offsetHeight;
+  window.requestAnimationFrame(() => {
+    if (prev) root.style.setProperty("transform", prev);
+    else root.style.removeProperty("transform");
+  });
+}

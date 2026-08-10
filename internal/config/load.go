@@ -223,6 +223,7 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	normalizeLegacyQwenContextWindows(cfg)
 	normalizeLegacyKimiK3Catalog(cfg)
 	normalizeLegacyOpenCodeGoKimiK3Catalog(cfg)
+	normalizeOpenCodeGoMimoVision(cfg)
 	normalizeLegacyMimoCustomProviders(cfg)
 	normalizeLegacyProviderModels(cfg)
 	normalizeDesktopOfficialProviderAccess(cfg)
@@ -795,6 +796,7 @@ func normalizeConfigForEdit(cfg *Config) bool {
 	changed = normalizeLegacyQwenContextWindows(cfg) || changed
 	changed = normalizeLegacyKimiK3Catalog(cfg) || changed
 	changed = normalizeLegacyOpenCodeGoKimiK3Catalog(cfg) || changed
+	changed = normalizeOpenCodeGoMimoVision(cfg) || changed
 	changed = normalizeLegacyMimoCustomProviders(cfg) || changed
 	normalizeLegacyProviderModels(cfg)
 	normalizeDesktopOfficialProviderAccess(cfg)
@@ -1412,6 +1414,49 @@ func migrateKimiK3VisionModels(current, legacy []string) []string {
 	return mergeModelLists([]string{"kimi-k3"}, current)
 }
 
+// migrateOpenCodeGoVisionModels upgrades stock OpenCode Go vision catalogs so
+// multimodal models already present in Models gain image input. An explicit
+// empty vision_models list remains a user disable signal. Only nil (never set)
+// and the previous stock list {"kimi-k3"} are upgraded; any other list is a
+// deliberate user customization and is left untouched.
+func migrateOpenCodeGoVisionModels(current []string) []string {
+	if current != nil && len(current) == 0 {
+		return current
+	}
+	if current != nil && !stringSlicesEqual(current, []string{"kimi-k3"}) {
+		return current
+	}
+	return mergeModelLists(opencodeGoVisionModels, current)
+}
+
+// normalizeOpenCodeGoMimoVision upgrades existing opencode-go installs that list
+// mimo-v2.5 as a chat model but still carry a stock vision list without it.
+// Without this, mid-session switches to opencode-go/mimo-v2.5 never attach
+// image payloads even though a fresh preset would (#7798).
+func normalizeOpenCodeGoMimoVision(c *Config) bool {
+	if c == nil {
+		return false
+	}
+	changed := false
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		presetID := strings.TrimSpace(p.PresetID)
+		if (presetID != "opencode-go" && (presetID != "" || strings.TrimSpace(p.Name) != "opencode-go")) ||
+			!strings.EqualFold(strings.TrimSpace(p.Kind), "openai") ||
+			normalizedBaseURLForMigration(p.BaseURL) != "https://opencode.ai/zen/go/v1" ||
+			!p.HasModel("mimo-v2.5") {
+			continue
+		}
+		next := migrateOpenCodeGoVisionModels(p.VisionModels)
+		if stringSlicesEqual(next, p.VisionModels) {
+			continue
+		}
+		p.VisionModels = next
+		changed = true
+	}
+	return changed
+}
+
 func mergeMissingKimiK3Override(p *ProviderEntry, defaults ProviderModelOverride) {
 	if p.ModelOverrides == nil {
 		p.ModelOverrides = map[string]ProviderModelOverride{}
@@ -1458,7 +1503,7 @@ func normalizeLegacyOpenCodeGoKimiK3Catalog(c *Config) bool {
 			continue
 		}
 		p.Models = append([]string(nil), opencodeGoModels...)
-		p.VisionModels = migrateKimiK3VisionModels(p.VisionModels, nil)
+		p.VisionModels = migrateOpenCodeGoVisionModels(p.VisionModels)
 		mergeMissingKimiK3Override(p, ProviderModelOverride{
 			ReasoningProtocol: ReasoningProtocolOpenAI,
 			SupportedEfforts:  []string{"high", "max"},

@@ -223,3 +223,45 @@ func TestControllerImageInputEnabledDoesNotFallbackFromUnknownRef(t *testing.T) 
 		t.Fatal("unknown ref should not inherit image input from the default fallback model")
 	}
 }
+
+// Mid-session model switches must re-evaluate vision from the new modelRef.
+// A text-only default (deepseek-v4-flash style) followed by a switch to a
+// vision model on the same provider must start attaching image payloads
+// without requiring a new session (#7798).
+func TestControllerInputImagesFollowsMidSessionModelSwitch(t *testing.T) {
+	workspace := t.TempDir()
+	cfg := config.Default()
+	cfg.DefaultModel = "relay/text-only"
+	cfg.Providers = []config.ProviderEntry{{
+		Name:         "relay",
+		Kind:         "openai",
+		BaseURL:      "https://example.invalid/v1",
+		Models:       []string{"text-only", "vision-model"},
+		VisionModels: []string{"vision-model"},
+	}}
+	if err := cfg.SaveTo(filepath.Join(workspace, "reasonix.toml")); err != nil {
+		t.Fatalf("save workspace config: %v", err)
+	}
+	path := filepath.Join(workspace, "diagram.png")
+	if err := os.WriteFile(path, mustBase64(t, tinyPNG), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &Controller{workspaceRoot: workspace, modelRef: "relay/text-only"}
+	if c.imageInputEnabled() {
+		t.Fatal("text-only default must not enable image input")
+	}
+	if urls := c.inputImages("look at @diagram.png"); len(urls) != 0 {
+		t.Fatalf("text-only session should suppress images, got %v", urls)
+	}
+
+	// Simulate SetModel rebuild: only modelRef changes on the live controller
+	// path that imageInputEnabled re-resolves against config.
+	c.modelRef = "relay/vision-model"
+	if !c.imageInputEnabled() {
+		t.Fatal("mid-session switch to vision model must enable image input")
+	}
+	if urls := c.inputImages("look at @diagram.png"); len(urls) != 1 {
+		t.Fatalf("vision model after switch should attach image payload, got %v", urls)
+	}
+}

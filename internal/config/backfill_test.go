@@ -747,6 +747,7 @@ func TestNormalizeLegacyOpenCodeGoKimiK3CatalogPreservesVisionChoices(t *testing
 	}{
 		{name: "explicitly disabled", vision: []string{}, want: []string{}},
 		{name: "custom list", vision: []string{"mimo-v2.5"}, want: []string{"mimo-v2.5"}},
+		{name: "previous stock list gains mimo vision", vision: []string{"kimi-k3"}, want: []string{"kimi-k3", "mimo-v2.5"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -760,6 +761,27 @@ func TestNormalizeLegacyOpenCodeGoKimiK3CatalogPreservesVisionChoices(t *testing
 				t.Fatalf("vision models = %#v, want %#v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestNormalizeOpenCodeGoMimoVisionUpgradesStockCatalog(t *testing.T) {
+	c := &Config{Providers: []ProviderEntry{{
+		Name:         "opencode-go",
+		Kind:         "openai",
+		BaseURL:      "https://opencode.ai/zen/go/v1",
+		Models:       append([]string(nil), opencodeGoModels...),
+		VisionModels: []string{"kimi-k3"},
+		PresetID:     "opencode-go",
+	}}}
+	if !normalizeOpenCodeGoMimoVision(c) {
+		t.Fatal("expected mimo vision upgrade for stock kimi-k3-only list")
+	}
+	if !c.Providers[0].HasVisionModel("mimo-v2.5") || !c.Providers[0].HasVisionModel("kimi-k3") {
+		t.Fatalf("vision models = %#v, want kimi-k3 and mimo-v2.5", c.Providers[0].VisionModels)
+	}
+	// Second pass is a no-op.
+	if normalizeOpenCodeGoMimoVision(c) {
+		t.Fatal("second migration pass should not report a change")
 	}
 }
 

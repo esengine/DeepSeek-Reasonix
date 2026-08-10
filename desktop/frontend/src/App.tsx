@@ -38,6 +38,7 @@ import { useGoalActionHandler } from "./lib/goalAction";
 import { useWailsResizeFix } from "./lib/useWailsResizeFix";
 import { asArray } from "./lib/array";
 import { createBoundedRefreshCoordinator, sameTabMetaLists, shouldRefreshTabMetaForEvent, TAB_META_MAX_IN_FLIGHT, tabMetaFallbackDelay } from "./lib/tabMetaRefresh";
+import { forceWindowsDpiRepaint } from "./lib/dpiScale";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, t, useI18n, useT, type Translator } from "./lib/i18n";
 import { localizedNoticeText, useController, type Item, type LiveStream } from "./lib/useController";
 import { app, onEvent, onProjectTreeChanged, onReady, onRuntimeRebuilt, onSessionRecovered, openExternal } from "./lib/bridge";
@@ -2609,8 +2610,11 @@ export default function App() {
       schedule();
     };
     const onVisibilityChange = () => {
-      if (document.visibilityState === "visible") refreshAndSchedule();
-      else {
+      if (document.visibilityState === "visible") {
+        // Minimise/restore on Windows can leave a stale WebView2 scale layer.
+        forceWindowsDpiRepaint();
+        refreshAndSchedule();
+      } else {
         if (timer !== undefined) window.clearTimeout(timer);
         schedule();
       }

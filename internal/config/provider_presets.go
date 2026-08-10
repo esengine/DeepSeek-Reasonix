@@ -112,8 +112,12 @@ var (
 	stepfunPlanModels = []string{"step-3.7-flash", "step-3.5-flash", "step-3.5-flash-2603"}
 
 	legacyOpenCodeGoModels           = []string{"glm-5.2", "glm-5.1", "kimi-k2.7-code", "kimi-k2.6", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5-pro", "mimo-v2.5"}
-	opencodeGoModels                 = []string{"glm-5.2", "glm-5.1", "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5-pro", "mimo-v2.5"}
-	opencodeGoVisionModels           = []string{"kimi-k3"}
+	opencodeGoModels = []string{"glm-5.2", "glm-5.1", "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5-pro", "mimo-v2.5"}
+	// mimo-v2.5 is multimodal on the OpenCode Go relay; without listing it here,
+	// mid-session switches from a text-only default (e.g. deepseek-v4-flash) to
+	// opencode-go/mimo-v2.5 keep imageInputEnabled false and only attach path text
+	// (#7798). mimo-v2.5-pro stays text-only, matching the official MiMo catalog.
+	opencodeGoVisionModels = []string{"kimi-k3", "mimo-v2.5"}
 	opencodeGoAnthropicModels        = []string{"qwen3.7-plus", "qwen3.7-max", "qwen3.6-plus", "minimax-m3", "minimax-m2.7", "minimax-m2.5"}
 	opencodeZenAnthropicModels       = []string{"claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5", "qwen3.6-plus", "qwen3.5-plus", "qwen3.6-plus-free"}
 	opencodeZenAnthropicVisionModels = []string{"claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"}

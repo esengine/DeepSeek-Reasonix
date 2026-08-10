@@ -510,6 +510,18 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	if !ok {
 		t.Fatal("opencode-go/kimi-k3 did not resolve")
 	}
+	mimoVision, ok := cfg.ResolveModel("opencode-go/mimo-v2.5")
+	if !ok || !EffectiveVision(mimoVision) || !ExplicitModelVision(mimoVision) {
+		t.Fatalf("opencode-go/mimo-v2.5 must be vision-capable for mid-session switches: ok=%v entry=%+v", ok, mimoVision)
+	}
+	mimoPro, ok := cfg.ResolveModel("opencode-go/mimo-v2.5-pro")
+	if !ok || EffectiveVision(mimoPro) {
+		t.Fatalf("opencode-go/mimo-v2.5-pro must stay text-only: ok=%v entry=%+v", ok, mimoPro)
+	}
+	flash, ok := cfg.ResolveModel("opencode-go/deepseek-v4-flash")
+	if !ok || EffectiveVision(flash) {
+		t.Fatalf("opencode-go/deepseek-v4-flash must stay text-only: ok=%v entry=%+v", ok, flash)
+	}
 	if protocol := ReasoningProtocolForEntry(kimiK3); protocol != ReasoningProtocolOpenAI {
 		t.Fatalf("opencode Kimi K3 protocol = %q, want openai", protocol)
 	}
