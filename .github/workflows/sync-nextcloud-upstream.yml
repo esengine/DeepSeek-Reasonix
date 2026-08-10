@@ -1,0 +1,34 @@
+name: Sync Nextcloud branch with upstream
+
+on:
+  push:
+    branches:
+      - feature/nextcloud-talk-bot
+    paths:
+      - .github/workflows/sync-nextcloud-upstream.yml
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/nextcloud-talk-bot
+          fetch-depth: 0
+
+      - name: Merge latest upstream main-v2
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/esengine/DeepSeek-Reasonix.git
+          git fetch upstream main-v2
+          git merge --no-edit upstream/main-v2
+
+      - name: Remove temporary workflow and push
+        run: |
+          git rm .github/workflows/sync-nextcloud-upstream.yml
+          git commit -m "chore: remove temporary upstream sync workflow"
+          git push origin feature/nextcloud-talk-bot
