@@ -1,0 +1,65 @@
+name: Verify Nextcloud frontend
+
+on:
+  push:
+    branches:
+      - feature/nextcloud-talk-bot
+    paths:
+      - .github/workflows/verify-nextcloud-frontend.yml
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/nextcloud-talk-bot
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6.0.9
+        with:
+          version: 10
+          run_install: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
+
+      - name: Run frontend build and capture result
+        shell: bash
+        run: |
+          set +e
+          cd desktop/frontend
+          pnpm install --frozen-lockfile > /tmp/install.log 2>&1
+          install_code=$?
+          if [ "$install_code" -eq 0 ]; then
+            pnpm build > /tmp/build.log 2>&1
+            build_code=$?
+          else
+            build_code=99
+            : > /tmp/build.log
+          fi
+          cd ../..
+          {
+            echo "install_exit_code=$install_code"
+            echo "build_exit_code=$build_code"
+            echo "===== install tail ====="
+            tail -n 40 /tmp/install.log
+            echo "===== build tail ====="
+            tail -n 160 /tmp/build.log
+          } > NEXTCLOUD_FRONTEND_VERIFY.txt
+          exit 0
+
+      - name: Commit verification report and clean workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/verify-nextcloud-frontend.yml
+          git add NEXTCLOUD_FRONTEND_VERIFY.txt
+          git commit -m "ci: record Nextcloud frontend verification"
+          git push origin feature/nextcloud-talk-bot
