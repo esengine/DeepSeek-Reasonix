@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
+import { createAssetGraphStore } from "./asset-graph-store.mjs";
 
 const ROLES = new Set(["owner", "admin", "editor", "viewer"]);
 const TERMINAL_JOB_STATES = new Set(["complete", "failed", "interrupted", "cancelled", "blocked"]);
@@ -218,6 +219,7 @@ export function createPlatformStore(options = {}) {
     );
     CREATE INDEX IF NOT EXISTS audit_workspace_sequence ON audit_events(workspace_id, sequence);
   `);
+  const assetGraphStore = createAssetGraphStore(database);
 
   const statements = {
     ensureWorkspace: database.prepare(`
@@ -368,6 +370,20 @@ export function createPlatformStore(options = {}) {
     }
   });
 
+  const savePublicationRecord = database.transaction((workspaceId, publication) => {
+    statements.savePublication.run({
+      workspaceId,
+      id: publication.publicationId,
+      sourceJobId: publication.sourceJobId,
+      payloadJson: JSON.stringify(publication),
+      createdAt: publication.publishedAt || nowIso(),
+    });
+    const stored = parseJson(statements.publicationByJob.get(workspaceId, publication.sourceJobId).payload_json);
+    seedWikiVersions(workspaceId, stored);
+    assetGraphStore.projectPublication(workspaceId, stored);
+    return stored;
+  });
+
   const createWikiVersion = database.transaction((workspaceId, assetId, input) => {
     const current = statements.currentWiki.get(workspaceId, assetId);
     if (!current) {
@@ -449,6 +465,24 @@ export function createPlatformStore(options = {}) {
     if (disabledAt) statements.deleteSessionsByUser.run(id);
     return publicMemberRow(statements.workspaceMember.get(workspaceId, id));
   });
+
+  function appendAuditRecord(workspaceId, input) {
+    const previousHash = statements.lastAudit.get(String(workspaceId))?.event_hash || "0".repeat(64);
+    const event = {
+      id: input.id || `AUD-${randomUUID()}`,
+      workspaceId: String(workspaceId),
+      actorUserId: input.actorUserId || null,
+      action: String(input.action),
+      objectType: String(input.objectType),
+      objectId: String(input.objectId),
+      detailJson: JSON.stringify(input.detail ?? {}),
+      previousHash,
+      createdAt: input.createdAt || nowIso(),
+    };
+    event.eventHash = createHash("sha256").update([event.previousHash, event.workspaceId, event.actorUserId || "", event.action, event.objectType, event.objectId, event.detailJson, event.createdAt].join("\n")).digest("hex");
+    statements.insertAudit.run(event);
+    return { id: event.id, action: event.action, objectType: event.objectType, objectId: event.objectId, detail: parseJson(event.detailJson, {}), previousHash: event.previousHash, eventHash: event.eventHash, createdAt: event.createdAt };
+  }
 
   return {
     unsafeDatabaseForTests: database,
@@ -599,10 +633,7 @@ export function createPlatformStore(options = {}) {
     },
     savePublication(workspaceId, publication) {
       const item = clone(publication);
-      statements.savePublication.run({ workspaceId: String(workspaceId), id: item.publicationId, sourceJobId: item.sourceJobId, payloadJson: JSON.stringify(item), createdAt: item.publishedAt || nowIso() });
-      const stored = parseJson(statements.publicationByJob.get(String(workspaceId), item.sourceJobId).payload_json);
-      seedWikiVersions(String(workspaceId), stored);
-      return clone(stored);
+      return clone(savePublicationRecord(String(workspaceId), item));
     },
     listPublications(workspaceId) {
       return statements.listPublications.all(String(workspaceId)).map((row) => parseJson(row.payload_json)).filter(Boolean);
@@ -616,6 +647,36 @@ export function createPlatformStore(options = {}) {
       }
       return null;
     },
+    getAssetGraph(workspaceId, options = {}) {
+      return assetGraphStore.getGraph(String(workspaceId), options);
+    },
+    searchAssetGraph(workspaceId, query, options = {}) {
+      return assetGraphStore.search(String(workspaceId), query, options);
+    },
+    createAssetRelationship(workspaceId, input, optionsForRelationship = {}) {
+      const scopedWorkspaceId = String(workspaceId);
+      if (!optionsForRelationship.audit) return assetGraphStore.createRelationship(scopedWorkspaceId, input);
+      return database.transaction(() => {
+        const relationship = assetGraphStore.createRelationship(scopedWorkspaceId, input);
+        appendAuditRecord(scopedWorkspaceId, { ...optionsForRelationship.audit, objectId: relationship.id });
+        return relationship;
+      })();
+    },
+    getAssetRelationship(workspaceId, relationshipId) {
+      return assetGraphStore.getRelationship(String(workspaceId), String(relationshipId));
+    },
+    updateAssetRelationshipStatus(workspaceId, relationshipId, status, optionsForRelationship = {}) {
+      const scopedWorkspaceId = String(workspaceId);
+      if (!optionsForRelationship.audit) return assetGraphStore.updateRelationshipStatus(scopedWorkspaceId, String(relationshipId), String(status));
+      return database.transaction(() => {
+        const relationship = assetGraphStore.updateRelationshipStatus(scopedWorkspaceId, String(relationshipId), String(status));
+        appendAuditRecord(scopedWorkspaceId, { ...optionsForRelationship.audit, objectId: relationship.id });
+        return relationship;
+      })();
+    },
+    rebuildAssetGraph(workspaceId) {
+      return assetGraphStore.rebuild(String(workspaceId), this.listPublications(workspaceId));
+    },
     getWiki(workspaceId, assetId) {
       return wikiRow(statements.currentWiki.get(String(workspaceId), String(assetId)));
     },
@@ -626,21 +687,7 @@ export function createPlatformStore(options = {}) {
       return createWikiVersion(String(workspaceId), String(assetId), input);
     },
     appendAudit(workspaceId, input) {
-      const previousHash = statements.lastAudit.get(String(workspaceId))?.event_hash || "0".repeat(64);
-      const event = {
-        id: input.id || `AUD-${randomUUID()}`,
-        workspaceId: String(workspaceId),
-        actorUserId: input.actorUserId || null,
-        action: String(input.action),
-        objectType: String(input.objectType),
-        objectId: String(input.objectId),
-        detailJson: JSON.stringify(input.detail ?? {}),
-        previousHash,
-        createdAt: input.createdAt || nowIso(),
-      };
-      event.eventHash = createHash("sha256").update([event.previousHash, event.workspaceId, event.actorUserId || "", event.action, event.objectType, event.objectId, event.detailJson, event.createdAt].join("\n")).digest("hex");
-      statements.insertAudit.run(event);
-      return { id: event.id, action: event.action, objectType: event.objectType, objectId: event.objectId, detail: parseJson(event.detailJson, {}), previousHash: event.previousHash, eventHash: event.eventHash, createdAt: event.createdAt };
+      return appendAuditRecord(String(workspaceId), input);
     },
     verifyAuditChain(workspaceId) {
       const rows = statements.listAudit.all(String(workspaceId));

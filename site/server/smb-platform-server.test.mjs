@@ -178,3 +178,63 @@ test("onboards members and enforces revocable double-secret Wiki sharing", async
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("serves a role-filtered asset graph and audits relationship review", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "intelifar-graph-server-"));
+  const dist = path.join(directory, "dist");
+  await mkdir(dist);
+  await writeFile(path.join(dist, "index.html"), "<!doctype html><title>intelifar</title>", "utf8");
+  const gateway = await createRealAnalysisServer({
+    distRoot: dist,
+    databasePath: path.join(directory, "platform.sqlite"),
+    config: { mineruApiKey: "m", deepseekApiKey: "d", deepseekModel: "deepseek-chat" },
+    ...providers(),
+    auth: { required: true, workspaceId: "WS-GRAPH", workspaceName: "图谱空间", email: "owner-graph@example.com", password: "Owner-Graph-2026", name: "空间所有者" },
+  });
+  gateway.platformStore.savePublication("WS-GRAPH", {
+    publicationId: "PUB-GRAPH-API",
+    sourceJobId: "JOB-GRAPH-API",
+    status: "published",
+    version: "V1.0",
+    publishedAt: "2026-08-10T10:00:00.000Z",
+    document: { title: "知识产权图谱报告", sourceName: "graph.pdf" },
+    assets: [
+      { id: "IP-GRAPH-CORE", title: "知识抽取引擎", type: "核心技术", owner: "算法组", sensitivity: "内部", confidence: 0.96, version: "V1.0", wiki: { title: "知识抽取引擎", executiveSummary: "可追溯抽取", keyMechanism: "模型抽取", metrics: [], relationships: [{ source: "知识抽取引擎", relation: "依赖", target: "文档解析器" }] }, evidence: [{ id: "EV-CORE", quote: "依赖解析器" }] },
+      { id: "IP-GRAPH-PARSER", title: "文档解析器", type: "软件著作权", owner: "平台组", sensitivity: "内部", confidence: 0.92, version: "V1.0", wiki: { title: "文档解析器", executiveSummary: "版面解析", keyMechanism: "OCR", metrics: [], relationships: [] }, evidence: [{ id: "EV-PARSER", quote: "解析文档" }] },
+      { id: "IP-GRAPH-SECRET", title: "未公开经营策略", type: "商业秘密", owner: "管理层", sensitivity: "机密", confidence: 0.9, version: "V1.0", wiki: { title: "未公开经营策略", executiveSummary: "仅管理层可见", keyMechanism: "保密策略", metrics: [], relationships: [] }, evidence: [{ id: "EV-SECRET", quote: "保密内容" }] },
+    ],
+  });
+  try {
+    const viewerHash = await hashPassword("Viewer-Graph-2026");
+    gateway.platformStore.createUser({ id: "USR-GRAPH-VIEWER", workspaceId: "WS-GRAPH", email: "viewer-graph@example.com", name: "查看者", role: "viewer", passwordHash: viewerHash });
+    const baseUrl = await gateway.start();
+    const ownerLogin = await login(baseUrl, "owner-graph@example.com", "Owner-Graph-2026");
+    const ownerHeaders = { cookie: ownerLogin.cookie, "content-type": "application/json" };
+    const viewerLogin = await login(baseUrl, "viewer-graph@example.com", "Viewer-Graph-2026");
+    const viewerHeaders = { cookie: viewerLogin.cookie };
+
+    const ownerGraph = (await (await fetch(`${baseUrl}/api/assets/graph?includeProposed=true`, { headers: ownerHeaders })).json()).graph;
+    assert.equal(ownerGraph.nodes.length, 3);
+    const proposed = ownerGraph.edges.find((edge) => edge.verificationStatus === "proposed");
+    assert.ok(proposed);
+    const viewerGraphBefore = (await (await fetch(`${baseUrl}/api/assets/graph?includeProposed=true`, { headers: viewerHeaders })).json()).graph;
+    assert.deepEqual(viewerGraphBefore.nodes.map((node) => node.id).sort(), ["IP-GRAPH-CORE", "IP-GRAPH-PARSER"]);
+    assert.equal(viewerGraphBefore.edges.length, 0);
+    assert.equal((await fetch(`${baseUrl}/api/assets/IP-GRAPH-SECRET`, { headers: viewerHeaders })).status, 404);
+    assert.equal((await (await fetch(`${baseUrl}/api/assets/search?q=未公开经营策略`, { headers: viewerHeaders })).json()).results.length, 0);
+
+    const confirmedResponse = await fetch(`${baseUrl}/api/relationships/${proposed.id}/confirm`, { method: "POST", headers: ownerHeaders });
+    assert.equal(confirmedResponse.status, 200);
+    const viewerGraphAfter = (await (await fetch(`${baseUrl}/api/assets/graph`, { headers: viewerHeaders })).json()).graph;
+    assert.equal(viewerGraphAfter.edges.length, 1);
+    const secretRelationResponse = await fetch(`${baseUrl}/api/relationships`, { method: "POST", headers: ownerHeaders, body: JSON.stringify({ sourceAssetId: "IP-GRAPH-PARSER", targetAssetId: "IP-GRAPH-SECRET", relationType: "references", evidenceIds: ["EV-PARSER"] }) });
+    assert.equal(secretRelationResponse.status, 201);
+    const secretRelation = (await secretRelationResponse.json()).relationship;
+    assert.equal((await fetch(`${baseUrl}/api/relationships/${secretRelation.id}`, { headers: viewerHeaders })).status, 404);
+    assert.equal((await fetch(`${baseUrl}/api/relationships`, { method: "POST", headers: { ...viewerHeaders, "content-type": "application/json" }, body: JSON.stringify({ sourceAssetId: "IP-GRAPH-CORE", targetAssetId: "IP-GRAPH-PARSER", relationType: "references" }) })).status, 403);
+    assert.equal(gateway.platformStore.verifyAuditChain("WS-GRAPH").valid, true);
+  } finally {
+    await gateway.stop();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

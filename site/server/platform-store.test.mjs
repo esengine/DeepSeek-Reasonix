@@ -181,3 +181,186 @@ test("persists one-time invitations and protects owner membership", async () => 
     await fx.close();
   }
 });
+
+function graphPublication(sourceJobId = "JOB-GRAPH-1") {
+  return {
+    publicationId: `PUB-${sourceJobId}`,
+    sourceJobId,
+    status: "published",
+    version: "V1.0",
+    publishedAt: "2026-08-10T09:00:00.000Z",
+    document: { title: "企业知识产权技术报告", sourceName: "ip-report.pdf" },
+    assets: [
+      {
+        id: "IP-GRAPH-CORE",
+        title: "多模态知识抽取引擎",
+        type: "核心技术",
+        owner: "算法团队",
+        sensitivity: "内部",
+        status: "有效",
+        confidence: 0.96,
+        tags: ["多模态", "知识抽取"],
+        version: "V1.0",
+        wiki: {
+          title: "多模态知识抽取引擎",
+          executiveSummary: "从长文档中提取可追溯的知识资产。",
+          keyMechanism: "版面解析与大模型联合抽取",
+          metrics: [],
+          relationships: [{ source: "多模态知识抽取引擎", relation: "依赖", target: "文档版面解析器" }],
+        },
+        evidence: [{ id: "EV-CORE-1", label: "第 12 页", quote: "抽取引擎依赖版面解析结果" }],
+      },
+      {
+        id: "IP-GRAPH-PARSER",
+        title: "文档版面解析器",
+        type: "软件著作权",
+        owner: "平台团队",
+        sensitivity: "内部",
+        status: "有效",
+        confidence: 0.91,
+        tags: ["MinerU", "OCR"],
+        version: "V1.0",
+        wiki: {
+          title: "文档版面解析器",
+          executiveSummary: "解析文档版面、表格与公式。",
+          keyMechanism: "版面检测与 OCR",
+          metrics: [],
+          relationships: [],
+        },
+        evidence: [{ id: "EV-PARSER-1", label: "第 8 页", quote: "版面解析器输出结构化块" }],
+      },
+      {
+        id: "IP-GRAPH-SECRET",
+        title: "未公开商业策略",
+        type: "商业秘密",
+        owner: "管理层",
+        sensitivity: "机密",
+        status: "有效",
+        confidence: 0.88,
+        tags: ["战略"],
+        version: "V1.0",
+        wiki: {
+          title: "未公开商业策略",
+          executiveSummary: "仅限授权管理人员访问。",
+          keyMechanism: "保密经营策略",
+          metrics: [],
+          relationships: [],
+        },
+        evidence: [{ id: "EV-SECRET-1", label: "第 30 页", quote: "保密内容" }],
+      },
+    ],
+  };
+}
+
+test("projects publications into an idempotent workspace-scoped asset graph", async () => {
+  const fx = await fixture();
+  try {
+    fx.store.ensureWorkspace({ id: "WS-A", name: "甲公司" });
+    fx.store.ensureWorkspace({ id: "WS-B", name: "乙公司" });
+    fx.store.savePublication("WS-A", graphPublication());
+    fx.store.savePublication("WS-A", graphPublication());
+    fx.store.savePublication("WS-B", graphPublication("JOB-GRAPH-2"));
+
+    const graphA = fx.store.getAssetGraph("WS-A", { role: "owner", includeProposed: true });
+    assert.equal(graphA.nodes.length, 3);
+    assert.equal(graphA.edges.length, 1);
+    assert.equal(graphA.edges[0].relationType, "depends_on");
+    assert.equal(graphA.edges[0].verificationStatus, "proposed");
+    assert.ok(graphA.edges[0].id.startsWith("REL-"));
+    assert.equal(fx.store.getAssetGraph("WS-C", { role: "owner" }).nodes.length, 0);
+  } finally {
+    await fx.close();
+  }
+});
+
+test("enforces relationship lifecycle, evidence links, and cross-workspace integrity", async () => {
+  const fx = await fixture();
+  try {
+    fx.store.ensureWorkspace({ id: "WS-A", name: "甲公司" });
+    fx.store.ensureWorkspace({ id: "WS-B", name: "乙公司" });
+    fx.store.savePublication("WS-A", graphPublication());
+    fx.store.savePublication("WS-B", graphPublication("JOB-GRAPH-2"));
+
+    const relation = fx.store.createAssetRelationship("WS-A", {
+      sourceAssetId: "IP-GRAPH-PARSER",
+      targetAssetId: "IP-GRAPH-SECRET",
+      relationType: "references",
+      evidenceIds: ["EV-PARSER-1"],
+      origin: "manual",
+      createdBy: null,
+    });
+    assert.equal(relation.verificationStatus, "confirmed");
+    assert.deepEqual(relation.evidenceIds, ["EV-PARSER-1"]);
+    assert.throws(() => fx.store.createAssetRelationship("WS-A", {
+      sourceAssetId: "IP-GRAPH-PARSER",
+      targetAssetId: "IP-DOES-NOT-EXIST",
+      relationType: "references",
+    }), (error) => error.code === "INVALID_RELATION_ENDPOINT");
+    assert.throws(() => fx.store.createAssetRelationship("WS-A", {
+      sourceAssetId: "IP-GRAPH-PARSER",
+      targetAssetId: "IP-GRAPH-CORE",
+      relationType: "references",
+      evidenceIds: ["EV-HALLUCINATED"],
+    }), (error) => error.code === "INVALID_RELATION_EVIDENCE");
+
+    const proposed = fx.store.getAssetGraph("WS-A", { role: "owner", includeProposed: true }).edges.find((edge) => edge.verificationStatus === "proposed");
+    assert.equal(fx.store.updateAssetRelationshipStatus("WS-A", proposed.id, "confirmed", { updatedBy: null }).verificationStatus, "confirmed");
+    assert.throws(() => fx.store.updateAssetRelationshipStatus("WS-B", proposed.id, "rejected"), (error) => error.code === "NOT_FOUND");
+  } finally {
+    await fx.close();
+  }
+});
+
+test("commits relationship mutations and their audit event atomically", async () => {
+  const fx = await fixture();
+  try {
+    fx.store.ensureWorkspace({ id: "WS-A", name: "甲公司" });
+    fx.store.savePublication("WS-A", graphPublication());
+    const relationship = fx.store.createAssetRelationship("WS-A", {
+      sourceAssetId: "IP-GRAPH-PARSER",
+      targetAssetId: "IP-GRAPH-SECRET",
+      relationType: "references",
+      evidenceIds: ["EV-PARSER-1"],
+    }, { audit: { actorUserId: null, action: "relationship.create", objectType: "asset_relationship", detail: { reason: "人工复核" } } });
+    assert.equal(fx.store.verifyAuditChain("WS-A").count, 1);
+    assert.equal(fx.store.unsafeDatabaseForTests.prepare("SELECT object_id FROM audit_events WHERE workspace_id = ?").get("WS-A").object_id, relationship.id);
+
+    assert.throws(() => fx.store.createAssetRelationship("WS-A", {
+      sourceAssetId: "IP-GRAPH-CORE",
+      targetAssetId: "IP-GRAPH-SECRET",
+      relationType: "references",
+    }, { audit: { actorUserId: "USR-NOT-IN-WORKSPACE", action: "relationship.create", objectType: "asset_relationship", detail: {} } }));
+    assert.equal(fx.store.getAssetGraph("WS-A", { role: "owner" }).edges.filter((edge) => edge.relationType === "references").length, 1);
+  } finally {
+    await fx.close();
+  }
+});
+
+test("filters confidential nodes before traversal and explains graph-expanded search", async () => {
+  const fx = await fixture();
+  try {
+    fx.store.ensureWorkspace({ id: "WS-A", name: "甲公司" });
+    fx.store.savePublication("WS-A", graphPublication());
+    fx.store.createAssetRelationship("WS-A", {
+      sourceAssetId: "IP-GRAPH-PARSER",
+      targetAssetId: "IP-GRAPH-SECRET",
+      relationType: "references",
+      origin: "manual",
+    });
+
+    const viewerGraph = fx.store.getAssetGraph("WS-A", { role: "viewer", includeProposed: true, rootAssetId: "IP-GRAPH-PARSER", depth: 2 });
+    assert.deepEqual(viewerGraph.nodes.map((node) => node.id).sort(), ["IP-GRAPH-PARSER"]);
+    assert.equal(viewerGraph.edges.length, 0);
+    const editorGraph = fx.store.getAssetGraph("WS-A", { role: "editor", includeProposed: true, rootAssetId: "IP-GRAPH-PARSER", depth: 2 });
+    assert.ok(editorGraph.nodes.some((node) => node.id === "IP-GRAPH-SECRET"));
+
+    const proposed = fx.store.getAssetGraph("WS-A", { role: "owner", includeProposed: true }).edges.find((edge) => edge.relationType === "depends_on");
+    fx.store.updateAssetRelationshipStatus("WS-A", proposed.id, "confirmed");
+    const search = fx.store.searchAssetGraph("WS-A", "多模态", { role: "viewer", depth: 1 });
+    assert.equal(search.results[0].asset.id, "IP-GRAPH-CORE");
+    assert.ok(search.results.some((result) => result.asset.id === "IP-GRAPH-PARSER" && result.matchKind === "graph_expansion"));
+    assert.ok(search.results.every((result) => result.asset.id !== "IP-GRAPH-SECRET"));
+  } finally {
+    await fx.close();
+  }
+});

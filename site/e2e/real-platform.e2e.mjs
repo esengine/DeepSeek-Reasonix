@@ -18,7 +18,7 @@ await mkdir(artifacts, { recursive: true });
 await mkdir(screenshots, { recursive: true });
 
 const runtimeConfig = await loadRuntimeConfig({ keyFile, cwd: siteRoot });
-const gateway = await createRealAnalysisServer({ config: runtimeConfig, distRoot: path.join(siteRoot, "dist") });
+const gateway = await createRealAnalysisServer({ config: runtimeConfig, distRoot: path.join(siteRoot, "dist"), mineruMaxWaitMs: 20 * 60_000 });
 const baseURL = await gateway.start();
 const workspaceRequire = createRequire(path.join(repoRoot, "..", "e2e-runner.cjs"));
 const { chromium } = workspaceRequire("playwright");
@@ -55,7 +55,7 @@ try {
   assert.match(submitted.job.id, /^JOB-REAL-/);
 
   let lastState = "";
-  const deadline = Date.now() + 15 * 60_000;
+  const deadline = Date.now() + 22 * 60_000;
   while (Date.now() < deadline) {
     finalJob = await fetch(`${baseURL}/api/analysis/${submitted.job.id}`).then((response) => response.json()).then((value) => value.job);
     if (finalJob.state !== lastState) {
@@ -129,7 +129,7 @@ const report = [
   `- Input: ${path.basename(fixture)}`,
   `- MinerU state: ${finalJob?.state ?? "not-started"}`,
   `- MinerU model: ${finalJob?.result?.parser?.model ?? "n/a"}`,
-  `- MinerU task: ${finalJob?.result?.parser?.batchId ?? "n/a"}`,
+  `- MinerU task: ${finalJob?.result?.parser?.batchId ?? finalJob?.providerTaskId ?? "n/a"}`,
   `- Parsed Markdown: ${finalJob?.result?.parser?.markdownCharacters ?? 0} characters`,
   `- DeepSeek model: ${finalJob?.result?.llm?.model ?? "n/a"}`,
   `- DeepSeek response: ${finalJob?.result?.llm?.responseId ?? "n/a"}`,

@@ -108,9 +108,32 @@ function safeWikiInput(input) {
   return value;
 }
 
+function safeRelationshipInput(input) {
+  const value = {
+    sourceAssetId: String(input?.sourceAssetId ?? "").trim(),
+    targetAssetId: String(input?.targetAssetId ?? "").trim(),
+    relationType: String(input?.relationType ?? "").trim(),
+    confidence: input?.confidence == null ? undefined : Number(input.confidence),
+    evidenceIds: Array.isArray(input?.evidenceIds) ? input.evidenceIds.map((id) => String(id).trim()).filter(Boolean).slice(0, 20) : [],
+  };
+  if (!/^IP-[A-Za-z0-9-]{3,96}$/.test(value.sourceAssetId) || !/^IP-[A-Za-z0-9-]{3,96}$/.test(value.targetAssetId)) throw new Error("Valid source and target asset IDs are required");
+  if (!/^[a-z_]{3,32}$/.test(value.relationType)) throw new Error("A valid relationship type is required");
+  if (value.confidence != null && (!Number.isFinite(value.confidence) || value.confidence < 0 || value.confidence > 1)) throw new Error("Relationship confidence must be between 0 and 1");
+  if (value.evidenceIds.some((id) => !/^EV-[A-Za-z0-9-]{2,96}$/.test(id))) throw new Error("Evidence IDs are invalid");
+  return value;
+}
+
+function queryList(url, name) {
+  return url.searchParams.getAll(name)
+    .flatMap((value) => value.split(","))
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .slice(0, 20);
+}
+
 export async function createRealAnalysisServer(options = {}) {
   const config = options.config ?? await loadRuntimeConfig({ cwd: options.cwd ?? process.cwd(), keyFile: options.keyFile });
-  const mineruClient = options.mineruClient ?? createMineruClient({ apiKey: config.mineruApiKey, archiveProxyUrl: config.httpsProxy });
+  const mineruClient = options.mineruClient ?? createMineruClient({ apiKey: config.mineruApiKey, archiveProxyUrl: config.httpsProxy, maxWaitMs: options.mineruMaxWaitMs });
   const deepseekClient = options.deepseekClient ?? createDeepSeekClient({ apiKey: config.deepseekApiKey, model: config.deepseekModel });
   const authRequired = options.auth?.required === true;
   const shouldUsePlatformStore = Boolean(options.platformStore || options.databasePath || authRequired);
@@ -396,22 +419,83 @@ export async function createRealAnalysisServer(options = {}) {
         sendJson(response, job ? 200 : 404, job ? { job } : { error: "Analysis job not found" });
         return;
       }
-      if (request.method === "GET" && url.pathname === "/api/assets") {
+      if (request.method === "GET" && url.pathname === "/api/assets/graph") {
         if (!requireRole("viewer")) return;
-        sendJson(response, 200, { assets: await publicationRegistry.listAssets(workspaceId) });
+        const graph = await publicationRegistry.getAssetGraph(workspaceId, {
+          role: session.user.role,
+          includeProposed: url.searchParams.get("includeProposed") === "true",
+          types: queryList(url, "type"),
+          relationTypes: queryList(url, "relationType"),
+          rootAssetId: url.searchParams.get("root") ?? "",
+          depth: url.searchParams.get("depth"),
+          limit: url.searchParams.get("limit"),
+          edgeLimit: url.searchParams.get("edgeLimit"),
+        });
+        sendJson(response, 200, { graph });
         return;
       }
-      const assetMatch = request.method === "GET" && url.pathname.match(/^\/api\/assets\/(IP-REAL-[A-F0-9]+)$/);
+      if (request.method === "GET" && url.pathname === "/api/assets/search") {
+        if (!requireRole("viewer")) return;
+        const search = await publicationRegistry.searchAssetGraph(url.searchParams.get("q") ?? "", workspaceId, {
+          role: session.user.role,
+          depth: url.searchParams.get("depth"),
+          limit: url.searchParams.get("limit"),
+        });
+        sendJson(response, 200, search);
+        return;
+      }
+      const neighborhoodMatch = request.method === "GET" && url.pathname.match(/^\/api\/assets\/(IP-[A-Za-z0-9-]{3,96})\/neighborhood$/);
+      if (neighborhoodMatch) {
+        if (!requireRole("viewer")) return;
+        const graph = await publicationRegistry.getAssetGraph(workspaceId, {
+          role: session.user.role,
+          includeProposed: url.searchParams.get("includeProposed") === "true",
+          rootAssetId: neighborhoodMatch[1],
+          depth: url.searchParams.get("depth") ?? 1,
+          limit: url.searchParams.get("limit"),
+          edgeLimit: url.searchParams.get("edgeLimit"),
+        });
+        sendJson(response, graph.meta.rootUnavailable ? 404 : 200, graph.meta.rootUnavailable ? { error: "Asset not found" } : { graph });
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/relationships") {
+        if (!requireRole("editor")) return;
+        const input = safeRelationshipInput(await readJson(request));
+        const relationship = await publicationRegistry.createAssetRelationship(workspaceId, { ...input, origin: "manual", createdBy: authRequired ? session.user.id : null }, authRequired ? { audit: { actorUserId: session.user.id, action: "relationship.create", objectType: "asset_relationship", detail: { sourceAssetId: input.sourceAssetId, targetAssetId: input.targetAssetId, relationType: input.relationType, evidenceCount: input.evidenceIds.length } } } : {});
+        sendJson(response, 201, { relationship });
+        return;
+      }
+      const relationshipStatusMatch = request.method === "POST" && url.pathname.match(/^\/api\/relationships\/(REL-[A-Za-z0-9-]{8,96})\/(confirm|reject)$/);
+      if (relationshipStatusMatch) {
+        if (!requireRole("editor")) return;
+        const nextStatus = relationshipStatusMatch[2] === "confirm" ? "confirmed" : "rejected";
+        const relationship = await publicationRegistry.updateAssetRelationshipStatus(workspaceId, relationshipStatusMatch[1], nextStatus, authRequired ? { audit: { actorUserId: session.user.id, action: `relationship.${relationshipStatusMatch[2]}`, objectType: "asset_relationship", detail: { verificationStatus: nextStatus } } } : {});
+        sendJson(response, 200, { relationship });
+        return;
+      }
+      const relationshipMatch = request.method === "GET" && url.pathname.match(/^\/api\/relationships\/(REL-[A-Za-z0-9-]{8,96})$/);
+      if (relationshipMatch) {
+        if (!requireRole("viewer")) return;
+        const relationship = await publicationRegistry.getAssetRelationship(workspaceId, relationshipMatch[1], { role: session.user.role });
+        sendJson(response, relationship ? 200 : 404, relationship ? { relationship } : { error: "Asset relationship not found" });
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/api/assets") {
+        if (!requireRole("viewer")) return;
+        sendJson(response, 200, { assets: await publicationRegistry.listAssets(workspaceId, { role: session.user.role }) });
+        return;
+      }
+      const assetMatch = request.method === "GET" && url.pathname.match(/^\/api\/assets\/(IP-[A-Za-z0-9-]{3,96})$/);
       if (assetMatch) {
         if (!requireRole("viewer")) return;
-        const asset = await publicationRegistry.getAsset(workspaceId, assetMatch[1]);
+        const asset = await publicationRegistry.getAsset(workspaceId, assetMatch[1], { role: session.user.role });
         sendJson(response, asset ? 200 : 404, asset ? { asset } : { error: "Asset not found" });
         return;
       }
       const wikiVersionsMatch = request.method === "GET" && url.pathname.match(/^\/api\/wiki\/(IP-REAL-[A-F0-9]+)\/versions$/);
       if (wikiVersionsMatch) {
         if (!requireRole("viewer")) return;
-        const versions = await publicationRegistry.listWikiVersions(workspaceId, wikiVersionsMatch[1]);
+        const versions = await publicationRegistry.listWikiVersions(workspaceId, wikiVersionsMatch[1], { role: session.user.role });
         sendJson(response, versions.length ? 200 : 404, versions.length ? { versions } : { error: "Wiki not found" });
         return;
       }
@@ -428,20 +512,20 @@ export async function createRealAnalysisServer(options = {}) {
       const wikiMatch = request.method === "GET" && url.pathname.match(/^\/api\/wiki\/(IP-REAL-[A-F0-9]+)$/);
       if (wikiMatch) {
         if (!requireRole("viewer")) return;
-        const wiki = await publicationRegistry.getWiki(workspaceId, wikiMatch[1]);
+        const wiki = await publicationRegistry.getWiki(workspaceId, wikiMatch[1], { role: session.user.role });
         sendJson(response, wiki ? 200 : 404, wiki ? { wiki } : { error: "Wiki not found" });
         return;
       }
       const evidenceMatch = request.method === "GET" && url.pathname.match(/^\/api\/evidence\/(EV-[A-F0-9]+)$/);
       if (evidenceMatch) {
         if (!requireRole("viewer")) return;
-        const evidence = await publicationRegistry.getEvidence(workspaceId, evidenceMatch[1]);
+        const evidence = await publicationRegistry.getEvidence(workspaceId, evidenceMatch[1], { role: session.user.role });
         sendJson(response, evidence ? 200 : 404, evidence ? { evidence } : { error: "Evidence not found" });
         return;
       }
       if (request.method === "GET" && url.pathname === "/api/search") {
         if (!requireRole("viewer")) return;
-        sendJson(response, 200, { results: await publicationRegistry.search(url.searchParams.get("q") ?? "", workspaceId) });
+        sendJson(response, 200, { results: await publicationRegistry.search(url.searchParams.get("q") ?? "", workspaceId, { role: session.user.role }) });
         return;
       }
       if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method)) {
@@ -451,7 +535,7 @@ export async function createRealAnalysisServer(options = {}) {
       await serveStatic(response, url.pathname, distRoot);
     } catch (error) {
       const safeMessage = String(error?.message || "Gateway request failed").replace(/Bearer\s+[^\s]+/gi, "Bearer [redacted]").replace(/https?:\/\/\S+/gi, "[redacted-url]").slice(0, 220);
-      const status = error?.code === "INVALID_CREDENTIALS" ? 401 : ["VERSION_CONFLICT", "NOT_RETRYABLE", "BACKUP_IN_PROGRESS", "BACKUP_INTEGRITY_FAILED", "INVITATION_CONFLICT", "OWNER_PROTECTED"].includes(error?.code) ? 409 : error?.code === "UPLOAD_UNAVAILABLE" ? 410 : ["ENOENT", "NOT_FOUND", "INVITATION_UNAVAILABLE", "SHARE_UNAVAILABLE"].includes(error?.code) ? 404 : 400;
+      const status = error?.code === "INVALID_CREDENTIALS" ? 401 : ["VERSION_CONFLICT", "NOT_RETRYABLE", "BACKUP_IN_PROGRESS", "BACKUP_INTEGRITY_FAILED", "INVITATION_CONFLICT", "OWNER_PROTECTED", "DUPLICATE_RELATIONSHIP", "INVALID_RELATION_TRANSITION", "STORAGE_UNAVAILABLE"].includes(error?.code) ? 409 : error?.code === "UPLOAD_UNAVAILABLE" ? 410 : ["ENOENT", "NOT_FOUND", "INVITATION_UNAVAILABLE", "SHARE_UNAVAILABLE"].includes(error?.code) ? 404 : 400;
       if (request.url?.startsWith("/api/")) sendJson(response, status, { error: safeMessage, ...(error?.currentVersion ? { currentVersion: error.currentVersion } : {}) });
       else {
         applySecurityHeaders(response, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });

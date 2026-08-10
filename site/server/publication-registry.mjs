@@ -18,6 +18,12 @@ function emptyStore() {
   return { schemaVersion: 1, publications: [] };
 }
 
+function canViewAsset(asset, role = "owner") {
+  if (role !== "viewer") return true;
+  return !new Set(["机密", "绝密", "confidential", "secret", "restricted"])
+    .has(String(asset?.sensitivity ?? "").normalize("NFKC").trim().toLocaleLowerCase("zh-CN"));
+}
+
 export function createPublicationRegistry(options = {}) {
   const rootDir = path.resolve(options.rootDir ?? path.resolve(process.cwd(), ".runtime", "publications"));
   const storeFile = path.join(rootDir, "registry.json");
@@ -131,46 +137,94 @@ export function createPublicationRegistry(options = {}) {
       await writeQueue;
       return structuredClone(result);
     },
-    async listAssets(workspaceId = defaultWorkspaceId) {
+    async listAssets(workspaceId = defaultWorkspaceId, optionsForList = {}) {
       const store = await readStore(workspaceId);
-      return store.publications.flatMap((publication) => publication.assets).sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
+      return store.publications
+        .flatMap((publication) => publication.assets)
+        .filter((asset) => canViewAsset(asset, optionsForList.role))
+        .sort((a, b) => String(b.publishedAt ?? "").localeCompare(String(a.publishedAt ?? "")));
     },
-    async getAsset(first, second) {
+    async getAsset(first, second, optionsForAsset = {}) {
       const [workspaceId, id] = second === undefined ? [defaultWorkspaceId, first] : [first, second];
-      if (platformStore) return platformStore.findAsset(workspaceId, id);
-      return (await this.listAssets(workspaceId)).find((asset) => asset.id === id) ?? null;
+      const asset = platformStore
+        ? platformStore.findAsset(workspaceId, id)
+        : (await this.listAssets(workspaceId)).find((candidate) => candidate.id === id) ?? null;
+      return asset && canViewAsset(asset, optionsForAsset.role) ? asset : null;
     },
-    async getWiki(first, second) {
+    async getWiki(first, second, optionsForWiki = {}) {
       const [workspaceId, id] = second === undefined ? [defaultWorkspaceId, first] : [first, second];
-      const asset = await this.getAsset(workspaceId, id);
+      const asset = await this.getAsset(workspaceId, id, optionsForWiki);
       if (!asset) return null;
       const current = platformStore?.getWiki(workspaceId, id);
       return { assetId: asset.id, publicationId: asset.publicationId, version: current?.version ?? asset.version, publishedAt: asset.publishedAt, updatedAt: current?.updatedAt ?? asset.publishedAt, owner: asset.owner, sensitivity: asset.sensitivity, confidence: asset.confidence, document: asset.document, evidence: asset.evidence, ...(current ?? asset.wiki) };
     },
-    async getEvidence(first, second) {
+    async getEvidence(first, second, optionsForEvidence = {}) {
       const [workspaceId, id] = second === undefined ? [defaultWorkspaceId, first] : [first, second];
-      for (const asset of await this.listAssets(workspaceId)) {
+      for (const asset of await this.listAssets(workspaceId, optionsForEvidence)) {
         const evidence = asset.evidence.find((item) => item.id === id);
         if (evidence) return { ...evidence, assetTitle: asset.title };
       }
       return null;
     },
-    async search(query, workspaceId = defaultWorkspaceId) {
+    async search(query, workspaceId = defaultWorkspaceId, optionsForSearch = {}) {
       const normalized = safeText(query).toLocaleLowerCase("zh-CN");
       if (!normalized) return [];
-      return (await this.listAssets(workspaceId)).filter((asset) => [asset.id, asset.title, asset.type, asset.summary, asset.owner, asset.document?.title, asset.document?.sourceName, asset.wiki?.title, asset.wiki?.executiveSummary, asset.wiki?.keyMechanism, ...asset.tags, ...asset.evidence.map((item) => `${item.section} ${item.quote}`)].join(" ").toLocaleLowerCase("zh-CN").includes(normalized));
+      return (await this.listAssets(workspaceId, optionsForSearch)).filter((asset) => [asset.id, asset.title, asset.type, asset.summary, asset.owner, asset.document?.title, asset.document?.sourceName, asset.wiki?.title, asset.wiki?.executiveSummary, asset.wiki?.keyMechanism, ...asset.tags, ...asset.evidence.map((item) => `${item.section} ${item.quote}`)].join(" ").toLocaleLowerCase("zh-CN").includes(normalized));
+    },
+    async getAssetGraph(workspaceId = defaultWorkspaceId, optionsForGraph = {}) {
+      if (platformStore) return platformStore.getAssetGraph(workspaceId, optionsForGraph);
+      const assets = await this.listAssets(workspaceId, optionsForGraph);
+      const nodes = assets.map((asset) => ({
+        id: asset.id,
+        title: asset.title,
+        type: asset.type,
+        owner: asset.owner,
+        sensitivity: asset.sensitivity,
+        summary: asset.summary,
+        tags: asset.tags ?? [],
+        confidence: asset.confidence ?? 0,
+        status: asset.status,
+        version: asset.version,
+        evidenceIds: (asset.evidence ?? []).map((evidence) => evidence.id).filter(Boolean),
+        updatedAt: asset.publishedAt,
+      }));
+      return { nodes: nodes.slice(0, Number(optionsForGraph.limit) || 100), edges: [], meta: { depth: 0, totalVisibleNodes: nodes.length, totalVisibleEdges: 0, truncated: nodes.length > 100, storageMode: "snapshot" } };
+    },
+    async searchAssetGraph(query, workspaceId = defaultWorkspaceId, optionsForSearch = {}) {
+      if (platformStore) return platformStore.searchAssetGraph(workspaceId, query, optionsForSearch);
+      const assets = await this.search(query, workspaceId, optionsForSearch);
+      return { query, results: assets.map((asset) => ({ asset, matchKind: "direct", score: 66, explanation: "资产内容匹配", path: [asset.id] })), meta: { directMatches: assets.length, expandedMatches: 0, depth: 0 } };
+    },
+    async createAssetRelationship(workspaceId, input, optionsForRelationship = {}) {
+      if (!platformStore) throw Object.assign(new Error("Relationship editing requires the transactional platform store"), { code: "STORAGE_UNAVAILABLE" });
+      return platformStore.createAssetRelationship(workspaceId, input, optionsForRelationship);
+    },
+    async getAssetRelationship(workspaceId, relationshipId, optionsForRelationship = {}) {
+      if (!platformStore) return null;
+      const relationship = platformStore.getAssetRelationship(workspaceId, relationshipId);
+      if (!relationship) return null;
+      if (optionsForRelationship.role === "viewer" && relationship.verificationStatus !== "confirmed") return null;
+      const [source, target] = await Promise.all([
+        this.getAsset(workspaceId, relationship.sourceAssetId, optionsForRelationship),
+        this.getAsset(workspaceId, relationship.targetAssetId, optionsForRelationship),
+      ]);
+      return source && target ? relationship : null;
+    },
+    async updateAssetRelationshipStatus(workspaceId, relationshipId, status, optionsForRelationship = {}) {
+      if (!platformStore) throw Object.assign(new Error("Relationship editing requires the transactional platform store"), { code: "STORAGE_UNAVAILABLE" });
+      return platformStore.updateAssetRelationshipStatus(workspaceId, relationshipId, status, optionsForRelationship);
     },
     async updateWiki(workspaceId, assetId, input) {
       if (!platformStore) throw new Error("Wiki editing requires the transactional platform store");
       if (!platformStore.findAsset(workspaceId, assetId)) return null;
       return platformStore.saveWikiVersion(workspaceId, assetId, input);
     },
-    async listWikiVersions(workspaceId, assetId) {
+    async listWikiVersions(workspaceId, assetId, optionsForWiki = {}) {
       if (!platformStore) {
-        const wiki = await this.getWiki(workspaceId, assetId);
+        const wiki = await this.getWiki(workspaceId, assetId, optionsForWiki);
         return wiki ? [wiki] : [];
       }
-      if (!platformStore.findAsset(workspaceId, assetId)) return [];
+      if (!await this.getAsset(workspaceId, assetId, optionsForWiki)) return [];
       return platformStore.listWikiVersions(workspaceId, assetId);
     },
   };
