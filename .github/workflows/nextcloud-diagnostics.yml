@@ -11,6 +11,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: nextcloud-diagnostics
+  cancel-in-progress: true
+
 jobs:
   diagnose:
     runs-on: ubuntu-22.04
@@ -25,58 +29,19 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - uses: pnpm/action-setup@v6.0.9
-        with:
-          version: 10
-          run_install: false
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-          cache: pnpm
-          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
-
-      - name: Install Linux desktop dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc pkg-config libgtk-3-dev libwebkit2gtk-4.0-dev
-
-      - name: Install Wails CLI
-        run: |
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-          go install "github.com/wailsapp/wails/v2/cmd/wails@$(cat .wails-version)"
-
-      - name: Collect diagnostics without failing early
+      - name: Run affected Go tests and save output
         shell: bash
         run: |
           set +e
-          : > NEXTCLOUD_CI_DIAGNOSTICS.txt
-
-          run_check() {
-            name="$1"
-            shift
-            log="/tmp/${name}.log"
-            echo "===== ${name} =====" >> NEXTCLOUD_CI_DIAGNOSTICS.txt
-            "$@" >"$log" 2>&1
-            code=$?
-            echo "exit_code=${code}" >> NEXTCLOUD_CI_DIAGNOSTICS.txt
-            tail -n 180 "$log" >> NEXTCLOUD_CI_DIAGNOSTICS.txt
-            echo >> NEXTCLOUD_CI_DIAGNOSTICS.txt
-            return 0
-          }
-
-          run_check root_go_test bash -lc 'go test ./...'
-          run_check root_go_vet bash -lc 'go vet ./...'
-          run_check repolint bash -lc 'go run ./tools/repolint'
-          run_check diff_check bash -lc 'git diff --check'
-          run_check frontend_build bash -lc 'cd desktop && wails generate module && pnpm --dir frontend install --frozen-lockfile && pnpm --dir frontend build'
-          run_check desktop_go_test bash -lc 'cd desktop && go test ./...'
-          run_check frontend_typecheck bash -lc 'cd desktop/frontend && pnpm typecheck'
+          go test ./internal/bot/nextcloudtalk ./internal/botruntime ./internal/config ./internal/cli > NEXTCLOUD_CI_DIAGNOSTICS.txt 2>&1
+          code=$?
+          printf '\nexit_code=%s\n' "$code" >> NEXTCLOUD_CI_DIAGNOSTICS.txt
+          exit 0
 
       - name: Commit diagnostic report
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add NEXTCLOUD_CI_DIAGNOSTICS.txt
-          git commit -m "ci: record Nextcloud integration diagnostics"
+          git commit -m "ci: record Nextcloud Go diagnostics"
           git push origin feature/nextcloud-talk-bot
