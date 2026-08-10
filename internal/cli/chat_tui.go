@@ -4696,9 +4696,15 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		m.showStatusDetails()
 	case "/rename":
 		m.runRenameCommand(input)
-	case "/todo":
+	case "/todo", "/todos":
 		m.echoLocalCommand(input)
-		// Dismiss the pinned task list; a later todo_write brings it back.
+		args := strings.Fields(input)
+		if len(args) > 1 && (args[1] == "clear" || args[1] == "cls" || args[1] == "reset") {
+			m.todoArgs = ""
+			m.notice("todo list cleared locally")
+			return nil
+		}
+		// Default behavior: dismiss the pinned task list; a later todo_write brings it back.
 		m.todoArgs = ""
 		m.notice(i18n.M.SlashTodoCleared)
 	case "/verbose":

@@ -4956,6 +4956,15 @@ export default function App() {
                 stateKey={scopedTodoBatch}
                 todos={todos}
                 onDismiss={dismissTodos}
+                onClear={() => {
+                  // Clear todos locally without creating an LLM model turn
+                  dismissTodos();
+                }}
+                onDelete={(indexToDelete: number) => {
+                  // Delete item locally without creating an LLM model turn.
+                  // The current local behavior is to dismiss the todo panel.
+                  dismissTodos();
+                }}
               />
             )}
             {rewindState && (

@@ -48,10 +48,14 @@ export function TodoPanel({
   stateKey,
   todos,
   onDismiss,
+  onClear,
+  onDelete,
 }: {
   stateKey: string;
   todos: Todo[];
   onDismiss: () => void;
+  onClear?: () => void;
+  onDelete?: (index: number) => void;
 }) {
   const t = useT();
   const currentRef = useRef<HTMLLIElement | null>(null);
@@ -87,6 +91,11 @@ export function TodoPanel({
       role="region"
       headerActions={
         <>
+          {onClear && (
+            <PromptHeaderAction onClick={onClear}>
+              {t("common.clear") || "Clear"}
+            </PromptHeaderAction>
+          )}
           <PromptHeaderAction
             onClick={() => setOpen((value) => {
               const next = !value;
@@ -96,11 +105,9 @@ export function TodoPanel({
           >
             {open ? t("common.collapse") : t("common.expand")}
           </PromptHeaderAction>
-          {allDone && (
-            <PromptHeaderAction onClick={onDismiss}>
-              {t("common.close")}
-            </PromptHeaderAction>
-          )}
+          <PromptHeaderAction onClick={onDismiss}>
+            {t("common.close")}
+          </PromptHeaderAction>
         </>
       }
     >
@@ -120,6 +127,20 @@ export function TodoPanel({
                 <span className="todobar__text">
                   {status === "in_progress" && todo.activeForm ? todo.activeForm : todo.content}
                 </span>
+                {onDelete && (
+                  <button
+                    type="button"
+                    className="todobar__delete-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete(index);
+                    }}
+                    title="Delete item"
+                    style={{ background: "none", border: "none", cursor: "pointer", marginLeft: "auto", opacity: 0.6 }}
+                  >
+                    ✕
+                  </button>
+                )}
               </li>
             );
           })}
