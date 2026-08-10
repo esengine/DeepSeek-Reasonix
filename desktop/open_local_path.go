@@ -94,8 +94,8 @@ func hasDisallowedWindowsPathSyntax(path string) bool {
 // "open" verb. Directories and documents open normally; executable targets
 // are refused because OpenLocalPath is fed by AI-generated chat content —
 // a prompt-injected or hallucinated ".bat" path must not run on click.
-// openWorkspacePath itself stays untouched: it is also used by
-// RevealWorkspacePathForTab with trusted workspace inputs.
+// openWorkspacePath remains outside this executable-target guard because its
+// callers use it for paths already authorized by the workspace boundary.
 var executableOpenSuffixes = map[string]bool{
 	".app": true,
 	".bat": true, ".cmd": true, ".com": true, ".exe": true,
