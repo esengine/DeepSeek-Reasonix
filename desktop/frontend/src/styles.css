@@ -3005,9 +3005,12 @@ a[href] {
   flex-direction: column;
 }
 
-/* loading screen shown while boot.Build runs in the background */
+/* loading screen shown while boot.Build runs in the background; also the
+   placeholder while a tab's history hydrates after switching (height: 100%
+   lets it fill the non-flex right dock body). */
 .loading-screen {
   flex: 1;
+  height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;

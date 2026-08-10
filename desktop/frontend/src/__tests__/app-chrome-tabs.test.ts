@@ -507,6 +507,19 @@ ok(
 );
 
 ok(
+  Array.from(appSource.matchAll(/transcriptHydrating \? \(/g)).length === 2 &&
+    /<div className="loading-screen" role="status" aria-live="polite">/.test(appSource) &&
+    /loading-screen__text">\{t\("common\.loading"\)\}/.test(appSource) &&
+    /workbench-dock__body">[\s\S]*?\{transcriptHydrating \? \(/.test(appSource),
+  "tab switching shows a loading placeholder in both the transcript and right dock until history hydrates",
+);
+ok(
+  matchingBlocks(".loading-screen").length === 1 &&
+    /height: 100%/.test(matchingBlocks(".loading-screen")[0]),
+  "loading-screen shell fills the transcript and right dock while hydrating",
+);
+
+ok(
   /const creationEmptyHero =/.test(appSource) &&
     /!sidebarImDetailConnection/.test(appSource) &&
     /!transcriptHydrating/.test(appSource) &&
