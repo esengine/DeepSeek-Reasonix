@@ -49,10 +49,6 @@ jobs:
           go install github.com/securego/gosec/v2/cmd/gosec@v2.22.1
           "$(go env GOPATH)/bin/gosec" -quiet -fmt sarif -out gosec.sarif ./...
         continue-on-error: false
-      - name: Upload Go SARIF
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: ${{ matrix.module }}/gosec.sarif
 
   python:
     name: Python (bandit)
@@ -67,10 +63,6 @@ jobs:
         run: |
           pip install bandit==1.8.3
           bandit -q -r . -x tests,docs,scripts,release-notes -f sarif -o bandit.sarif
-      - name: Upload Python SARIF
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: bandit.sarif
 
   frontend:
     name: Frontend (eslint + audit)
