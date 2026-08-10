@@ -1,11 +1,11 @@
-import { createContext, memo, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { memo, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ControllerLiveStore, Item, LiveStream } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
 import type { InvocationMetadataMap } from "../lib/invocationDisplay";
 import { useT } from "../lib/i18n";
 import { AssistantMessage, InvocationMetadataContext, TurnActions, UserMessage } from "./Message";
-import { ProcessBrainIcon, ProcessCompactIcon, ProcessPhaseIcon } from "./ProcessCard";
+import { ProcessCompactIcon, ProcessPhaseIcon } from "./ProcessCard";
 import { ToolCard } from "./ToolCard";
 import { ExtensionCard } from "./ExtensionCard";
 import { ArrowDown, ChevronRight, CirclePlay, Info, TriangleAlert } from "lucide-react";
@@ -21,6 +21,7 @@ import {
   buildTranscriptRows,
   buildTurnModels,
   estimateTranscriptRowSize,
+  foldMapWithReasoningOpen,
   foldMapWithToggle,
   foldSegmentStates,
   historyEntryIdForRow,
@@ -36,18 +37,17 @@ import {
   type TranscriptLiveFlags,
   type TranscriptRow,
 } from "../lib/transcriptRows";
-import { displayReasoningText, STREAMING_REASONING_WINDOW_STEP_CHARS, STREAMING_REASONING_WINDOW_STEP_LINES } from "../lib/reasoningDisplay";
 import { observeScrollContentSize } from "../lib/scrollContentObserver";
 import { getTranscriptStore } from "../lib/transcriptStore";
 import { acquireMarkdownWorkerClient, releaseMarkdownWorkerClient } from "../lib/markdownWorkerClient";
 import { noteTranscriptRowCounts } from "../lib/sessionDiagnostics";
-import { Markdown } from "./Markdown";
-import { ReasoningSummary } from "./ReasoningSummary";
+import { useReasoningDisplayMode } from "../lib/reasoningDisplayPreference";
+import { InlineAssistantReasoning } from "./InlineAssistantReasoning";
+import { LiveStreamContext } from "./LiveStreamContext";
 
 type OpenTurnAction = { turn: number; menu: "summary" | "rewind" };
 
 const QUESTION_NAV_MIN_COUNT = 2;
-const LiveStreamContext = createContext<LiveStream | undefined>(undefined);
 type AssistantReasoningDisplay = "normal" | "hide";
 
 const LiveAssistantMessage = memo(function LiveAssistantMessage({
@@ -99,47 +99,6 @@ const LiveAssistantMessage = memo(function LiveAssistantMessage({
     />
   );
 });
-
-function InlineAssistantReasoning({ item }: { item: AssistantItem }) {
-  const t = useT();
-  const live = useContext(LiveStreamContext);
-  const [open, setOpen] = useState(false);
-  const shown = live && live.id === item.id
-    ? {
-        reasoning: live.reasoning,
-        streaming: true,
-        reasoningComplete: live.reasoningComplete,
-      }
-    : item;
-  const reasoning = shown.reasoning.trim();
-  const running = shown.streaming && !shown.reasoningComplete;
-  if (!reasoning) return null;
-  // The outer fold owns this row, so Markdown only mounts while both folds are open.
-  const visibleReasoning = open ? displayReasoningText(shown.reasoning, {
-    streaming: running,
-    truncateStreaming: true, stableWindowChars: STREAMING_REASONING_WINDOW_STEP_CHARS, stableWindowLines: STREAMING_REASONING_WINDOW_STEP_LINES,
-  }) : "";
-  return (
-    <div className={`turn-collapse__reasoning-phase${open ? " turn-collapse__reasoning-phase--open" : ""}`}>
-      <button
-        type="button"
-        className="turn-collapse__reasoning-head"
-        data-running={running ? "" : undefined}
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-      >
-        <ProcessBrainIcon size={12} />
-        <span>{running ? t("msg.thinkingRunning") : t("msg.thinking")}</span>
-        <ChevronRight className={`reasoning__chevron${open ? " reasoning__chevron--open" : ""}`} size={12} />
-      </button>
-      {open ? (
-        <div className="turn-collapse__inline-reasoning">
-          <Markdown text={visibleReasoning} streaming={running} />
-        </div>
-      ) : <ReasoningSummary text={shown.reasoning} streaming={running} onOpen={() => setOpen(true)} />}
-    </div>
-  );
-}
 
 // ── Virtual list layout ───────────────────────────────────────────────────────
 // The transcript is a single flat virtual list (block-level rows: user
@@ -592,13 +551,15 @@ export function Transcript({
   const liveHasAnswerText = Boolean(live?.text.trim());
   const liveHasReasoning = Boolean(live?.reasoning);
   const liveReasoningComplete = live?.reasoningComplete;
+  const reasoningDisplayMode = useReasoningDisplayMode();
+  const hideReasoning = reasoningDisplayMode === "hidden" || reasoningDisplayMode === "pending";
   const liveFlags = useMemo<TranscriptLiveFlags>(
     () => (liveId
       ? { id: liveId, hasAnswerText: liveHasAnswerText, hasReasoning: liveHasReasoning, reasoningComplete: liveReasoningComplete }
       : NO_LIVE),
     [liveId, liveHasAnswerText, liveHasReasoning, liveReasoningComplete],
   );
-  const turnModels = useMemo(() => buildTurnModels(items, liveFlags, running), [items, liveFlags, running]);
+  const turnModels = useMemo(() => buildTurnModels(items, liveFlags, running, hideReasoning), [items, liveFlags, running, hideReasoning]);
   const segmentStates = useMemo(() => foldSegmentStates(turnModels), [turnModels]);
 
   const [foldPreference, setFoldPreference] = useState<ProcessFoldPreference>(getProcessFoldPreference);
@@ -617,6 +578,11 @@ export function Transcript({
   const handleFoldToggle = useCallback((segmentKey: string, currentlyOpen: boolean) => {
     setFolds((prev) => foldMapWithToggle(prev, segmentKey, currentlyOpen));
   }, []);
+
+  const handleReasoningManualOpen = useCallback((segmentKey: string) => {
+    const running = segmentStates.find((segment) => segment.key === segmentKey)?.hasRunningWork ?? false;
+    setFolds((prev) => foldMapWithReasoningOpen(prev, segmentKey, running));
+  }, [segmentStates]);
 
   // ── The turn action menu ──────────────────────────────────────────────────
   const [openAction, setOpenAction] = useState<OpenTurnAction | null>(null);
@@ -757,7 +723,7 @@ export function Transcript({
       case "reasoning":
         return (
           <div className="turn-collapse__body">
-            <InlineAssistantReasoning item={row.item} />
+            <InlineAssistantReasoning item={row.item} onManualOpen={() => handleReasoningManualOpen(row.segmentKey)} />
           </div>
         );
       case "tool":

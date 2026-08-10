@@ -54,6 +54,10 @@ func (c *Controller) runGoalLoopWithImageRefsRawDisplay(ctx context.Context, inp
 	return newTurnOrchestrator(c).runGoalLoopWithImageRefsRawDisplay(ctx, input, raw, imageRefs, display)
 }
 
+func (c *Controller) runGoalLoopWithFrozenImagesRawDisplay(ctx context.Context, input, raw, display string, images []string) error {
+	return newTurnOrchestrator(c).runGoalLoopWithFrozenImagesRawDisplay(ctx, input, raw, display, images)
+}
+
 func (c *Controller) runEditedGoalLoopWithImageRefsRawDisplay(ctx context.Context, input, raw, imageRefs, display, original string) error {
 	return newTurnOrchestrator(c).runEditedGoalLoopWithImageRefsRawDisplay(ctx, input, raw, imageRefs, display, original)
 }

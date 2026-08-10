@@ -343,6 +343,10 @@ These commands work in Feishu, Lark, WeChat, and QQ.
 | `/queue followup` | Queue mid-run messages as later turns | `/queue followup` |
 | `/queue collect` | Merge queued messages into one later turn | `/queue collect` |
 | `/queue interrupt` | Cancel the current task and keep the newest message | `/queue interrupt` |
+| `/queue list` / `/queue show <n\|id>` | Inspect durable queued work | `/queue list` |
+| `/queue delete <n\|id>` / `/queue move <n\|id> <to>` | Delete or reorder pending work | `/queue move 2 1` |
+| `/queue pause` / `/queue resume` | Stop or resume automatic dispatch | `/queue resume` |
+| `/queue retry <n\|id>` / `/queue refresh <n\|id>` | Retry uncertain work or refresh frozen references | `/queue retry 1` |
 | `/projects [query]` | List indexed project workspaces | `/projects reasonix` |
 | `/use project <id\|name>` | Route this remote session to an indexed project | `/use project p1` |
 | `/use project default` | Clear the project override and return to configured routing | `/use project default` |
@@ -361,9 +365,12 @@ Shortcut replies:
   produce guidance.
 
 The default queue mode is `steer`: when the same session is already running, a
-new message is injected as mid-turn guidance instead of waiting for the whole
-turn to finish. `queue_cap` and `queue_drop` bound backlog growth in config.
-`reasonix bot doctor --deep` reports queue, pairing, and role diagnostics.
+new message is persisted before it is injected as mid-turn guidance. If the
+active turn cannot accept it, the same durable item remains a follow-up.
+Capacity is fail-closed at 64 items, 4 MiB per item, and 64 MiB per session;
+`queue_drop` no longer removes older work. After recovery the inbox stays
+paused until `/queue resume`. `reasonix bot doctor --deep` reports queue,
+pairing, and role diagnostics.
 
 Queue modes:
 

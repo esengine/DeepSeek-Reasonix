@@ -179,6 +179,24 @@ const keys = (rows: TranscriptRow[]) => rows.map((row) => row.key).join(",");
 // ── Fold reconciliation ───────────────────────────────────────────────────────
 
 {
+  const reasoningOnly = buildTurnModels([
+    { kind: "user", id: "u-hidden", text: "inspect" },
+    { kind: "assistant", id: "a-hidden", text: "", reasoning: "private thought", streaming: false },
+  ], undefined, false, true);
+  eq(foldSegmentStates(reasoningOnly).length, 0, "hidden reasoning does not create an empty process fold");
+
+  const mixed = buildTurnModels([
+    { kind: "user", id: "u-mixed", text: "inspect" },
+    { kind: "assistant", id: "a-mixed", text: "", reasoning: "private thought", streaming: false },
+    { kind: "tool", id: "tool-mixed", name: "bash", args: "{}", output: "ok", status: "done", readOnly: false },
+  ], undefined, false, true);
+  const mixedStates = foldSegmentStates(mixed);
+  eq(mixedStates.length, 1, "hidden reasoning keeps a mixed tool process fold");
+  eq(mixed[0]?.segments[0]?.displayItems.filter((item) => item.kind === "assistant").length ?? -1, 0, "hidden reasoning is excluded from fold body items");
+  eq(mixed[0]?.segments[0]?.displayItems.filter((item) => item.kind === "tool").length ?? -1, 1, "hidden reasoning does not hide tools");
+}
+
+{
   // Auto-open while running, auto-close on completion.
   const running = buildTurnModels(fixture.slice(0, 7), { id: "a2", hasAnswerText: true, hasReasoning: false, reasoningComplete: true }, true);
   const states = foldSegmentStates(running);
