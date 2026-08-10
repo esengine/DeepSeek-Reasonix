@@ -39,7 +39,9 @@ import http from "node:http";
 
 const frontendDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // Keep the browser download inside the repo when the caller did not pin one.
-process.env.PLAYWRIGHT_BROWSERS_PATH ??= path.join(frontendDir, ".pw-browsers");
+process.env.PLAYWRIGHT_BROWSERS_PATH = !process.env.PLAYWRIGHT_BROWSERS_PATH || process.env.PLAYWRIGHT_BROWSERS_PATH === ".pw-browsers"
+  ? path.join(frontendDir, ".pw-browsers")
+  : process.env.PLAYWRIGHT_BROWSERS_PATH;
 
 const { chromium } = await import("playwright");
 

@@ -23,9 +23,13 @@ const (
 	goalContinueTurn   = "Continue pursuing the active goal under its task contract. Do the next useful work, then call update_goal with your disposition: continue (include the next concrete step in next_action), complete (only when fully done and verified), or blocked (when only the user can unblock)."
 	goalCompleteNotice = "goal complete"
 
-	// Default no-progress stall limit: four consecutive goal turns without any
-	// host-verifiable progress pause the goal.
+	// Historical simple-goal no-progress value. It remains in sidecars and
+	// status DTOs for rolling compatibility, but current decisions ignore it.
 	defaultNoProgressLimit = 4
+	// Bound the persisted novelty window. Signatures are compact hashes, and
+	// retaining the most recent window is enough to stop short repeat cycles
+	// without allowing an unbounded Goal sidecar.
+	maxGoalProgressEvidence = 512
 )
 
 // Budget class aliases; classification and quotas live in taskintent.
@@ -41,7 +45,9 @@ const (
 const (
 	stopCauseBudgetTurns   = "budget_turns"
 	stopCauseBudgetTokens  = "budget_tokens" // legacy; never written by current runtime
-	stopCauseNoProgress    = "no_progress"
+	stopCauseNoProgress    = "no_progress"   // legacy; never written by current runtime
+	stopCauseGoalRunBudget = "goal_run_budget"
+	stopCauseGoalStuck     = "goal_stuck"
 	stopCauseEvaluator     = "evaluator_unavailable"
 	stopCauseLegacyArchive = "legacy_archive"
 	stopCauseManual        = "manual"
@@ -91,6 +97,7 @@ type goalMachine struct {
 	turnsUsed              int
 	turnsLimit             int
 	tokensUsed             int
+	requestsUsed           int
 	tokensLimit            int // always 0 at runtime; deprecated hard limit
 	noProgressTurns        int
 	noProgressLimit        int
@@ -98,6 +105,10 @@ type goalMachine struct {
 	lastEvaluatorReason    string
 	stopCause              string
 	budgetExtensions       int // turn extensions from resume (compat field name)
+	progressEvidence       []string
+	// stateExtra preserves fields written by a newer peer during read/modify/
+	// write cycles. Known current fields always win on serialization.
+	stateExtra map[string]json.RawMessage
 	// legacyTaskID is retained only while a historical AutoResearch archive is
 	// awaiting migration. It is serialized on fail-closed blocked sidecars so a
 	// restart can retry the migration without treating the raw archive path as a
@@ -127,32 +138,35 @@ type goalState struct {
 	Strict             bool                        `json:"strict,omitempty"`
 	Todos              []evidence.TodoItem         `json:"todos,omitempty"`
 
-	BudgetClass            string `json:"budgetClass,omitempty"`
-	TurnsUsed              int    `json:"turnsUsed,omitempty"`
-	TurnsLimit             int    `json:"turnsLimit,omitempty"`
-	TokensUsed             int    `json:"tokensUsed,omitempty"`
-	TokensLimit            int    `json:"tokensLimit,omitempty"`
-	NoProgressTurns        int    `json:"noProgressTurns,omitempty"`
-	NoProgressLimit        int    `json:"noProgressLimit,omitempty"`
-	LastContinuationReason string `json:"lastContinuationReason,omitempty"`
-	LastEvaluatorReason    string `json:"lastEvaluatorReason,omitempty"`
-	StopCause              string `json:"stopCause,omitempty"`
-	BudgetExtensions       int    `json:"budgetExtensions,omitempty"`
+	BudgetClass            string   `json:"budgetClass,omitempty"`
+	TurnsUsed              int      `json:"turnsUsed,omitempty"`
+	TurnsLimit             int      `json:"turnsLimit,omitempty"`
+	TokensUsed             int      `json:"tokensUsed,omitempty"`
+	RequestsUsed           int      `json:"requestsUsed,omitempty"`
+	TokensLimit            int      `json:"tokensLimit,omitempty"`
+	NoProgressTurns        int      `json:"noProgressTurns,omitempty"`
+	NoProgressLimit        int      `json:"noProgressLimit,omitempty"`
+	LastContinuationReason string   `json:"lastContinuationReason,omitempty"`
+	LastEvaluatorReason    string   `json:"lastEvaluatorReason,omitempty"`
+	StopCause              string   `json:"stopCause,omitempty"`
+	BudgetExtensions       int      `json:"budgetExtensions,omitempty"`
+	ProgressEvidence       []string `json:"progressEvidence,omitempty"`
 }
 
 // goalAdvanceInput carries everything the FSM needs for one continuation step,
 // gathered by the caller off the machine's lock. The FSM is the exclusive
-// decision point: it applies readiness, budget, and no-progress gates and
+// decision point: it applies readiness, outer budget, and host-owned Run gates and
 // decides complete / continue / blocked / pause.
 type goalAdvanceInput struct {
-	report          *goalTurnReport // validated update_goal report; nil when none
-	readiness       agent.ReadinessResult
-	evaluator       *goalEvaluatorVerdict // evaluator verdict; nil when not run
-	evaluatorFailed string                // evaluator error/timeout text; pause fail-closed
-	todos           []evidence.TodoItem
-	progressBefore  string // host progress signature captured before the turn
-	progressAfter   string // host progress signature captured after the turn
-	expectedEpoch   *uint64
+	report           *goalTurnReport // validated update_goal report; nil when none
+	readiness        agent.ReadinessResult
+	evaluator        *goalEvaluatorVerdict // evaluator verdict; nil when not run
+	evaluatorFailed  string                // evaluator error/timeout text; pause fail-closed
+	todos            []evidence.TodoItem
+	progressEvidence []string // host evidence identities visible after this turn
+	pauseCause       string   // host-owned Run boundary; empty for ordinary turns
+	pauseReason      string
+	expectedEpoch    *uint64
 }
 
 // goalEvaluatorVerdict is the bounded evaluator's structured outcome.
@@ -318,11 +332,12 @@ func (g *goalMachine) setLegacyArchiveBlockedWithTaskID(goal, preferredBudgetCla
 
 func (g *goalMachine) installGoalLocked(goal, preferredBudgetClass string) {
 	g.continuationEpoch++
-	g.turnsUsed, g.tokensUsed, g.noProgressTurns = 0, 0, 0
+	g.turnsUsed, g.tokensUsed, g.requestsUsed, g.noProgressTurns = 0, 0, 0, 0
 	g.block = ""
 	g.lastContinuationReason, g.lastEvaluatorReason = "", ""
 	g.stopCause = ""
 	g.budgetExtensions = 0
+	g.progressEvidence = nil
 	if goal == "" {
 		g.goal, g.status = "", GoalStatusStopped
 		g.budgetClass = ""
@@ -335,7 +350,7 @@ func (g *goalMachine) installGoalLocked(goal, preferredBudgetClass string) {
 		g.budgetClass = preferredBudgetClass
 		g.turnsLimit = budgetQuota(g.budgetClass)
 		g.tokensLimit = 0 // no token hard limit
-		g.noProgressLimit = defaultNoProgressLimit
+		g.noProgressLimit = noProgressQuota(g.budgetClass)
 	}
 	// Installing a normal Goal always abandons any pending legacy migration.
 	g.legacyTaskID = ""
@@ -397,7 +412,6 @@ func (g *goalMachine) resume(todos []evidence.TodoItem) (path string, data []byt
 	// can resume without understanding the removed hard limit.
 	extend := g.stopCause == stopCauseBudgetTurns ||
 		g.stopCause == stopCauseBudgetTokens ||
-		g.stopCause == stopCauseNoProgress ||
 		(g.turnsLimit > 0 && g.turnsUsed >= g.turnsLimit)
 	g.continuationEpoch++
 	g.status = GoalStatusRunning
@@ -483,7 +497,7 @@ func (g *goalMachine) admitContinuation(res goalAdvanceResult) (goalContinuation
 //  4. budget exhausted → safe pause (also vetoes complete claims rejected by
 //     readiness: those would continue, and continuation past the budget is a
 //     pause)
-//  5. no-progress limit reached → safe pause
+//  5. a host-owned Run budget/stuck boundary → safe pause
 //  6. otherwise continue, carrying the missing requirements (complete rejected
 //     by readiness, or no report with an explicit missing list) or the report's
 //     next_action as the next turn's prompt.
@@ -500,17 +514,7 @@ func (g *goalMachine) advance(in goalAdvanceInput) goalAdvanceResult {
 	// A top-level goal turn (the first turn or a synthetic continuation) counts
 	// against the turn budget; the in-Run model/tool loop is never re-counted.
 	g.turnsUsed++
-	// No-progress bookkeeping: only host-verifiable changes reset the stall
-	// counter. A terminal report is itself host-verifiable progress.
-	progressed := in.progressAfter != in.progressBefore || in.progressBefore == ""
-	if in.report != nil && in.report.status != GoalStatusRunning {
-		progressed = true
-	}
-	if progressed {
-		g.noProgressTurns = 0
-	} else {
-		g.noProgressTurns++
-	}
+	g.observeGoalProgress(in)
 	var notice string
 	var intercept string
 	var interceptNotice string
@@ -518,7 +522,7 @@ func (g *goalMachine) advance(in goalAdvanceInput) goalAdvanceResult {
 	evaluatorBlocked := in.evaluator != nil && in.evaluator.outcome == goaleval.OutcomeBlocked
 	// Terminal dispositions first (completing or blocking ends the goal, so the
 	// budget gates never veto them); then evaluator fail-closed, then the
-	// budget gates, then the no-progress gate; only then continue.
+	// budget gates, then any host-owned Run boundary; only then continue.
 	reportBlocked := in.report != nil && in.report.status == GoalStatusBlocked
 	reportComplete := in.report != nil && in.report.status == GoalStatusComplete
 	completeOK := (reportComplete || evaluatorComplete) && formatIncompleteTodos(in.todos, in.readiness.Reason) == ""
@@ -550,6 +554,7 @@ func (g *goalMachine) advance(in goalAdvanceInput) goalAdvanceResult {
 		g.status = GoalStatusComplete
 		g.block = ""
 		g.stopCause = ""
+		g.progressEvidence = nil
 		g.lastContinuationReason, g.lastEvaluatorReason = "", ""
 		notice = goalCompleteNotice
 	case in.evaluatorFailed != "" || (in.evaluator != nil && in.evaluator.outcome == goaleval.OutcomeUncertain):
@@ -570,10 +575,13 @@ func (g *goalMachine) advance(in goalAdvanceInput) goalAdvanceResult {
 		g.stopCause = stopCauseBudgetTurns
 		g.block = clipGoalReason(reason)
 		notice = "goal paused: " + reason
-	case g.noProgressLimit > 0 && g.noProgressTurns >= g.noProgressLimit:
-		reason := fmt.Sprintf("no host-verifiable progress in the last %d turns", g.noProgressTurns)
+	case in.pauseCause != "":
+		reason := strings.TrimSpace(in.pauseReason)
+		if reason == "" {
+			reason = "the current Goal run reached a recoverable execution boundary"
+		}
 		g.status = GoalStatusBlocked
-		g.stopCause = stopCauseNoProgress
+		g.stopCause = in.pauseCause
 		g.block = clipGoalReason(reason)
 		notice = "goal paused: " + reason
 	default:
@@ -619,13 +627,18 @@ func (g *goalMachine) advance(in goalAdvanceInput) goalAdvanceResult {
 // foldUsage attributes a turn's billable tokens to the goal, but only while the
 // goal lifecycle still matches the recorder's scope+epoch; stale or replaced
 // goals reject late usage.
-func (g *goalMachine) foldUsage(scopeID string, epoch uint64, tokens int) bool {
+func (g *goalMachine) foldUsage(scopeID string, epoch uint64, tokens, requests int) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if tokens <= 0 || g.scopeID != scopeID || g.continuationEpoch != epoch {
+	if (tokens <= 0 && requests <= 0) || g.scopeID != scopeID || g.continuationEpoch != epoch {
 		return false
 	}
-	g.tokensUsed += tokens
+	if tokens > 0 {
+		g.tokensUsed += tokens
+	}
+	if requests > 0 {
+		g.requestsUsed += requests
+	}
 	return true
 }
 
@@ -650,6 +663,7 @@ func (g *goalMachine) buildStateLocked(todos []evidence.TodoItem) (path string, 
 		TurnsUsed:              g.turnsUsed,
 		TurnsLimit:             g.turnsLimit,
 		TokensUsed:             g.tokensUsed,
+		RequestsUsed:           g.requestsUsed,
 		TokensLimit:            g.tokensLimit,
 		NoProgressTurns:        g.noProgressTurns,
 		NoProgressLimit:        g.noProgressLimit,
@@ -657,6 +671,7 @@ func (g *goalMachine) buildStateLocked(todos []evidence.TodoItem) (path string, 
 		LastEvaluatorReason:    g.lastEvaluatorReason,
 		StopCause:              g.stopCause,
 		BudgetExtensions:       g.budgetExtensions,
+		ProgressEvidence:       append([]string(nil), g.progressEvidence...),
 	}
 	// GoalResearchOff is a downgrade fence for ordinary Goal sidecars. A
 	// fail-closed legacy migration keeps its task identity and compatibility mode
@@ -667,7 +682,7 @@ func (g *goalMachine) buildStateLocked(todos []evidence.TodoItem) (path string, 
 	} else {
 		state.ResearchMode = GoalResearchOff
 	}
-	b, err := json.Marshal(state)
+	b, err := marshalGoalState(state, g.stateExtra)
 	if err != nil {
 		slog.Warn("controller: marshal goal state", "err", err)
 		return "", nil, false
@@ -753,6 +768,7 @@ func (g *goalMachine) restoreFromState(sessionPath string) (path string, data []
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.stateExtra = goalStateUnknownFields(raw)
 	g.goal = strings.TrimSpace(state.Goal)
 	g.status = state.Status
 	if g.status == "" {
@@ -797,6 +813,7 @@ func (g *goalMachine) restoreFromState(sessionPath string) (path string, data []
 	g.strict = state.Strict
 	g.stopCause = state.StopCause
 	g.budgetExtensions = state.BudgetExtensions
+	g.progressEvidence, _ = mergeGoalProgressEvidence(nil, state.ProgressEvidence)
 	g.lastContinuationReason = state.LastContinuationReason
 	g.lastEvaluatorReason = state.LastEvaluatorReason
 	// Budget defaults: old sidecars carry Turns (pre-budget counting); treat it
@@ -806,6 +823,7 @@ func (g *goalMachine) restoreFromState(sessionPath string) (path string, data []
 		g.turnsUsed = state.Turns
 	}
 	g.tokensUsed = state.TokensUsed
+	g.requestsUsed = state.RequestsUsed
 	g.budgetClass = normalizeBudgetClass(g.goal, state.BudgetClass, state.ResearchMode)
 	g.turnsLimit = state.TurnsLimit
 	g.noProgressTurns = state.NoProgressTurns
@@ -826,18 +844,8 @@ func (g *goalMachine) restoreFromState(sessionPath string) (path string, data []
 		if g.turnsLimit == 0 {
 			g.turnsLimit = budgetQuota(g.budgetClass)
 		}
-		if g.noProgressLimit == 0 {
-			g.noProgressLimit = defaultNoProgressLimit
-		}
-		// Auto-clear legacy token-budget pauses so the next user turn can
-		// continue without a manual resume. Loading itself never calls a
-		// provider.
-		if g.status == GoalStatusBlocked && g.stopCause == stopCauseBudgetTokens {
-			g.status = GoalStatusRunning
-			g.stopCause = ""
-			// The stop cause proves the block belongs to the removed token gate;
-			// do not leave a stale blocked reason attached to a running goal.
-			g.block = ""
+		g.noProgressLimit = resolvedNoProgressLimit(g.noProgressLimit, g.budgetClass)
+		if g.migrateRemovedGoalPause() {
 			migrated = true
 		}
 		// Also rewrite sidecars that still store a non-zero tokensLimit so the
@@ -952,73 +960,23 @@ func (c *Controller) restoreTerminalGoalTodos(sessionPath string) {
 	c.executor.ReplaceTodoState(todos)
 }
 
-// GoalRuntimeView is the host-side runtime summary exposed to frontends.
-type GoalRuntimeView struct {
-	TurnsUsed        int
-	TurnsLimit       int
-	TokensUsed       int
-	TokensLimit      int
-	NoProgressTurns  int
-	NoProgressLimit  int
-	LastReason       string
-	StopCause        string
-	BudgetExtensions int
-}
-
-// runtimeView returns the goal's budget/runtime summary.
-func (g *goalMachine) runtimeView() GoalRuntimeView {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	last := g.lastEvaluatorReason
-	if last == "" {
-		last = g.lastContinuationReason
-	}
-	return GoalRuntimeView{
-		TurnsUsed:        g.turnsUsed,
-		TurnsLimit:       g.turnsLimit,
-		TokensUsed:       g.tokensUsed,
-		TokensLimit:      0, // deprecated: no hard token limit
-		NoProgressTurns:  g.noProgressTurns,
-		NoProgressLimit:  g.noProgressLimit,
-		LastReason:       last,
-		StopCause:        g.stopCause,
-		BudgetExtensions: g.budgetExtensions,
-	}
-}
-
-func (g *goalMachine) lastContinuationReasonText() string {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.lastEvaluatorReason != "" {
-		return g.lastEvaluatorReason
-	}
-	return g.lastContinuationReason
-}
-
-func (g *goalMachine) budgetStatusText() string {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return fmt.Sprintf("turns: %d/%d used, tokens: %d, no-progress turns: %d/%d",
-		g.turnsUsed, g.turnsLimit, g.tokensUsed, g.noProgressTurns, g.noProgressLimit)
-}
-
 // goalTurnRecorder is the per-turn recorder bound to one goal turn's scope and
 // epoch. update_goal calls land here as candidate state; the FSM commits them
 // only when the goal lifecycle still matches (scope + epoch), so late calls
 // from a replaced or cleared goal are rejected. Usage events emitted during the
 // turn are folded through the recorder into the goal's observational token total.
 type goalTurnRecorder struct {
-	mu             sync.Mutex
-	machine        *goalMachine
-	scopeID        string
-	epoch          uint64
-	recorded       bool
-	terminal       bool
-	status         string
-	reason         string
-	nextAction     string
-	tokensUsed     int
-	progressBefore string
+	mu           sync.Mutex
+	machine      *goalMachine
+	scopeID      string
+	epoch        uint64
+	recorded     bool
+	terminal     bool
+	status       string
+	reason       string
+	nextAction   string
+	tokensUsed   int
+	requestsUsed int
 }
 
 func (g *goalMachine) newTurnRecorder(scopeID string, epoch uint64) *goalTurnRecorder {
@@ -1035,17 +993,23 @@ func (r *goalTurnRecorder) RecordGoalReport(report tool.GoalReport) (string, err
 	if !r.machine.turnActive(r.scopeID, r.epoch) {
 		return "", fmt.Errorf("update_goal: the active goal changed during this turn — report ignored; no goal state was changed")
 	}
+	// The wire status "continue" maps to the FSM's internal "running" state;
+	// retain the wire value for user-facing acknowledgements and errors.
+	wireStatus := report.Status
+	if report.Status == "continue" {
+		report.Status = GoalStatusRunning
+	}
 	switch {
 	case r.terminal:
-		return "", fmt.Errorf("update_goal: this turn's disposition is already final (%s); conflicting %q report ignored", r.status, report.Status)
+		return "", fmt.Errorf("update_goal: this turn's disposition is already final (%s); conflicting %q report ignored", r.status, wireStatus)
 	case !r.recorded:
 		// first record
 	case r.status == report.Status && r.reason == report.Reason && r.nextAction == report.NextAction:
-		return fmt.Sprintf("update_goal: %s already recorded for this turn (identical report).", report.Status), nil
+		return fmt.Sprintf("update_goal: %s already recorded for this turn (identical report).", wireStatus), nil
 	case r.status == GoalStatusRunning && (report.Status == GoalStatusComplete || report.Status == GoalStatusBlocked):
 		// continue → terminal upgrade allowed.
 	default:
-		return "", fmt.Errorf("update_goal: conflicting reports this turn (%s then %s) — the later report was ignored", r.status, report.Status)
+		return "", fmt.Errorf("update_goal: conflicting reports this turn (%s then %s) — the later report was ignored", r.status, wireStatus)
 	}
 	r.recorded = true
 	r.status = report.Status
@@ -1054,28 +1018,25 @@ func (r *goalTurnRecorder) RecordGoalReport(report tool.GoalReport) (string, err
 	if report.Status != GoalStatusRunning {
 		r.terminal = true
 	}
-	return fmt.Sprintf("update_goal: %s recorded for this turn.", report.Status), nil
-}
-
-func (r *goalTurnRecorder) setProgressBefore(sig string) {
-	r.mu.Lock()
-	r.progressBefore = sig
-	r.mu.Unlock()
-}
-
-func (r *goalTurnRecorder) progressBeforeText() string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.progressBefore
+	return fmt.Sprintf("update_goal: %s recorded for this turn.", wireStatus), nil
 }
 
 func (r *goalTurnRecorder) addUsage(tokens int) {
-	if tokens <= 0 {
+	r.addUsageWithRequests(tokens, 0)
+}
+
+func (r *goalTurnRecorder) addUsageWithRequests(tokens, requests int) {
+	if tokens <= 0 && requests <= 0 {
 		return
 	}
 	r.mu.Lock()
-	if r.machine.foldUsage(r.scopeID, r.epoch, tokens) {
-		r.tokensUsed += tokens
+	if r.machine.foldUsage(r.scopeID, r.epoch, tokens, requests) {
+		if tokens > 0 {
+			r.tokensUsed += tokens
+		}
+		if requests > 0 {
+			r.requestsUsed += requests
+		}
 	}
 	r.mu.Unlock()
 }

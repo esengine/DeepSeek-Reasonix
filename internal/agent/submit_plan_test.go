@@ -157,3 +157,38 @@ func TestSubmitPlanSchemaCarriesTheEvidenceContract(t *testing.T) {
 		t.Error("submit_plan schema exposes revision; identity is host-assigned")
 	}
 }
+
+// A planner that resubmits is told what its own edit changed. Left to describe
+// it, a model reports intent rather than effect — and a step it dropped by
+// accident reads exactly like one it meant to keep.
+func TestSubmitPlanTellsARevisionWhatItChanged(t *testing.T) {
+	ctx, _ := WithPlanSubmission(context.Background())
+	first := `{"objective":"o","steps":[{"id":"s1","title":"change the DB"},{"id":"s2","title":"change the API"}]}`
+	if _, err := submitPlan(t, ctx, first); err != nil {
+		t.Fatalf("first submission: %v", err)
+	}
+	second := `{"objective":"o","steps":[{"id":"s1","title":"change the DB"},{"id":"s3","title":"add the migration"},{"id":"s2","title":"change the API"}]}`
+	out, err := submitPlan(t, ctx, second)
+	if err != nil {
+		t.Fatalf("revision: %v", err)
+	}
+	for _, want := range []string{"Revision 1 → 2", "**Added**", "s3", "expands the approved scope"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("revision result missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "**Changed**") {
+		t.Errorf("an insertion must not report its neighbours as changed:\n%s", out)
+	}
+}
+
+func TestSubmitPlanSaysNothingAboutAFirstSubmission(t *testing.T) {
+	ctx, _ := WithPlanSubmission(context.Background())
+	out, err := submitPlan(t, ctx, `{"objective":"o","steps":[{"title":"do it"}]}`)
+	if err != nil {
+		t.Fatalf("submit_plan: %v", err)
+	}
+	if strings.Contains(out, "Revision") && strings.Contains(out, "→") {
+		t.Errorf("a first submission replaces nothing and must not render a diff:\n%s", out)
+	}
+}

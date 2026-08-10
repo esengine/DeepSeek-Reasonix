@@ -2,6 +2,743 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.23.0",
+      "date": "2026-08-10",
+      "channel": "stable",
+      "title": {
+        "en": "Reasonix v1.23.0: Smarter Context, Safer Delegation, and a Smoother Desktop",
+        "zh": "Reasonix v1.23.0：更智能的上下文、更安全的委托与更流畅的桌面体验"
+      },
+      "summary": {
+        "en": "This release brings a unified content-driven context maintenance system, a structured plan contract with acceptance criteria enforcement, bounded chat turns, and a durable session inbox. Desktop gains cross-message logical selection, live workspace refresh, and a three-mode reasoning display. The CLI now asks for the context window size and reports failures clearly. Many compaction, token estimation, and delegation bugs are fixed, making long sessions more predictable and cost-effective.",
+        "zh": "本次更新带来了统一的内容驱动上下文维护系统、带验收标准执行的结构化计划合约、有界对话轮次以及持久化会话收件箱。桌面端新增跨消息逻辑选区、工作区实时刷新和三模式思考过程展示。CLI 现在会询问上下文窗口大小并清晰报告失败。修复了大量压缩、令牌估算和委托相关的缺陷，使长会话更可预测且更具成本效益。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "User Guide",
+            "zh": "用户指南"
+          },
+          "body": {
+            "en": "Learn how to use Reasonix effectively.",
+            "zh": "了解如何有效使用 Reasonix。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/c1a3af4c99280e392d99b7f906e80e0178144dae/docs/GUIDE.md"
+        },
+        {
+          "title": {
+            "en": "CLI Reference",
+            "zh": "CLI 参考"
+          },
+          "body": {
+            "en": "Command-line interface documentation.",
+            "zh": "命令行界面文档。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/c1a3af4c99280e392d99b7f906e80e0178144dae/docs/CLI.md"
+        },
+        {
+          "title": {
+            "en": "Specification",
+            "zh": "规范"
+          },
+          "body": {
+            "en": "Technical specification and configuration details.",
+            "zh": "技术规范与配置详情。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/c1a3af4c99280e392d99b7f906e80e0178144dae/docs/SPEC.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "Content-Driven Context Maintenance",
+            "zh": "内容驱动的上下文维护"
+          },
+          "body": {
+            "en": "Replaced multi-threshold automatic context pruning with a single `compact_ratio` trigger. The system now creates a stable prefix, one structured summary, and a recent verbatim tail, preserving cache hits and reducing costs. Default ratio is 0.85.",
+            "zh": "用单一的 `compact_ratio` 触发器取代了多阈值自动上下文修剪。系统现在会创建稳定的前缀、一个结构化摘要和最近的逐字尾部，保留缓存命中并降低成本。默认比率为 0.85。"
+          },
+          "refs": [
+            8244
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Structured Plan Contract with Acceptance Criteria",
+            "zh": "带验收标准的结构化计划合约"
+          },
+          "body": {
+            "en": "Plans are now structured records with stable step identities. The agent enforces acceptance criteria before completing a turn, and the plan reviewer receives a diff of changes. This ensures the agreed outcome is actually met.",
+            "zh": "计划现在是具有稳定步骤标识的结构化记录。Agent 在完成轮次前会强制执行验收标准，计划审核者会收到变更差异。这确保了约定的结果确实得到满足。"
+          },
+          "refs": [
+            8167,
+            8183,
+            8193,
+            8201,
+            8222,
+            8235,
+            8249,
+            8250
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Bounded Chat Turns",
+            "zh": "有界对话轮次"
+          },
+          "body": {
+            "en": "Ordinary chat turns now have a default ceiling of 100 model rounds to prevent runaway loops. Goal runs are bounded at 16 rounds. The system also detects structural stuck states and pauses with a resumable `goal_stuck` status.",
+            "zh": "普通对话轮次现在默认上限为 100 个模型轮次，以防止失控循环。Goal 运行限制为 16 轮。系统还会检测结构性卡住状态，并以可恢复的 `goal_stuck` 状态暂停。"
+          },
+          "refs": [
+            8185,
+            8228
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Durable Session Inbox",
+            "zh": "持久化会话收件箱"
+          },
+          "body": {
+            "en": "Queued follow-ups and steer instructions are now persisted in a session-scoped inbox before acknowledgment. This prevents loss on crashes and ensures reliable recovery with paused review and capacity limits.",
+            "zh": "排队的后续指令和引导指令现在在确认前会持久化到会话范围的收件箱中。这可以防止崩溃时丢失，并通过暂停审核和容量限制确保可靠恢复。"
+          },
+          "refs": [
+            8061
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Cross-Message Logical Selection (Desktop)",
+            "zh": "跨消息逻辑选区（桌面端）"
+          },
+          "body": {
+            "en": "Selecting text across multiple messages now uses a logical selection model, keeping the DOM bounded and producing readable copy text from Markdown, LaTeX, code blocks, and tables. Single-message selection remains native.",
+            "zh": "跨多条消息选择文本现在使用逻辑选区模型，保持 DOM 有界，并从 Markdown、LaTeX、代码块和表格中生成可读的复制文本。单条消息选择仍为原生方式。"
+          },
+          "refs": [
+            8224
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Three-Mode Reasoning Display (Desktop)",
+            "zh": "三模式思考过程展示（桌面端）"
+          },
+          "body": {
+            "en": "Added a persisted preference for reasoning display: hidden, summary, or auto (live-follow). Applies to main agent, work folds, and sub-agent previews. Legacy settings are migrated automatically.",
+            "zh": "新增持久化的思考过程展示偏好：隐藏、摘要或自动（实时跟随）。适用于主 Agent、工作折叠区和子 Agent 预览。旧设置会自动迁移。"
+          },
+          "refs": [
+            8103
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Live Workspace Refresh (Desktop)",
+            "zh": "工作区实时刷新（桌面端）"
+          },
+          "body": {
+            "en": "Workspace previews and the changes view now update immediately from agent mutation events, bounded filesystem/Git watching, and revision reconciliation, instead of waiting for turn completion.",
+            "zh": "工作区预览和变更视图现在会根据 Agent 变更事件、有界文件系统/Git 监视和修订协调立即更新，而无需等待轮次完成。"
+          },
+          "refs": [
+            8102
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "CLI Context Window Prompt",
+            "zh": "CLI 上下文窗口提示"
+          },
+          "body": {
+            "en": "The custom provider wizard now asks for the context window size instead of silently assuming 128K tokens. This prevents premature compaction on models with larger windows.",
+            "zh": "自定义提供程序向导现在会询问上下文窗口大小，而不是默认假设为 128K 令牌。这可以防止在具有更大窗口的模型上过早压缩。"
+          },
+          "refs": [
+            8124
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Delegation Contract and Measurement",
+            "zh": "委托合约与度量"
+          },
+          "body": {
+            "en": "Sub-agent delegation is now a formal contract with enforced write claims, host-adjudicated completion, and detailed cost measurement. This improves safety and transparency for complex tasks.",
+            "zh": "子 Agent 委托现在是一个正式的合约，具有强制写入声明、主机裁决的完成和详细的成本度量。这提高了复杂任务的安全性和透明度。"
+          },
+          "refs": [
+            8114
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Compaction and Token Estimation Fixes",
+            "zh": "压缩与令牌估算修复"
+          },
+          "body": {
+            "en": "Fixed several bugs that caused premature or excessive compaction: output budget collapsing thresholds, character-based token estimation, cold-start calibration loss, and context gauge mismatch. These changes make long sessions more predictable and reduce API costs.",
+            "zh": "修复了多个导致过早或过度压缩的缺陷：输出预算导致阈值崩溃、基于字符的令牌估算、冷启动校准丢失以及上下文仪表不匹配。这些更改使长会话更可预测，并降低了 API 成本。"
+          },
+          "refs": [
+            8199,
+            8205,
+            8207,
+            8210,
+            8221
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Runaway Loop Prevention",
+            "zh": "失控循环预防"
+          },
+          "body": {
+            "en": "Exploration now stops counting novelty as progress after six consecutive read-only rounds, allowing the no-progress guard to fire. Combined with the turn ceiling, this prevents hours-long wandering without output.",
+            "zh": "探索现在在连续六个只读轮次后不再将新颖性计为进展，从而允许无进展防护触发。结合轮次上限，这可以防止数小时无输出的徘徊。"
+          },
+          "refs": [
+            8233
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Delegated Call Visibility",
+            "zh": "委托调用可见性"
+          },
+          "body": {
+            "en": "Fixed an issue where delegated sub-agent calls appeared as top-level work in the transcript, and refusals were shown as successes. Now sub-calls render inside their parent, and blocked commands are correctly reported.",
+            "zh": "修复了委托的子 Agent 调用在对话记录中显示为顶级工作，以及拒绝被显示为成功的问题。现在子调用在其父级内部渲染，被阻止的命令会正确报告。"
+          },
+          "refs": [
+            8246
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Desktop Task Monitor Timer Freeze",
+            "zh": "桌面任务监视器计时器冻结"
+          },
+          "body": {
+            "en": "Terminal task elapsed-time displays now freeze at the correct boundary, and queued tasks show a dash instead of queue age as runtime.",
+            "zh": "终端任务的已用时间显示现在会在正确的边界冻结，排队任务显示为破折号而不是将排队时间作为运行时间。"
+          },
+          "refs": [
+            7655
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Windows Explorer Folder Opening",
+            "zh": "Windows 资源管理器文件夹打开"
+          },
+          "body": {
+            "en": "Fixed a bug where 'Open in File Explorer' could launch a sibling .lnk shortcut instead of the folder. Folders now open with the `explore` verb and a trailing separator.",
+            "zh": "修复了“在文件资源管理器中打开”可能启动同级 .lnk 快捷方式而不是文件夹的错误。文件夹现在使用 `explore` 动词和尾部路径分隔符打开。"
+          },
+          "refs": [
+            8010
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "CLI Failure Reporting",
+            "zh": "CLI 失败报告"
+          },
+          "body": {
+            "en": "The CLI now always explains why a run failed, even with `-p/--print`. Previously, text output could exit with code 1 and an empty stderr.",
+            "zh": "CLI 现在始终会解释运行失败的原因，即使使用 `-p/--print` 也是如此。以前，文本输出可能以代码 1 退出且 stderr 为空。"
+          },
+          "refs": [
+            8212
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Windows Transcript Scroll Flicker",
+            "zh": "Windows 对话滚动闪烁"
+          },
+          "body": {
+            "en": "Removed an unnecessary full-screen clear on Windows that caused visible flicker and item jitter during transcript scrolling.",
+            "zh": "移除了 Windows 上不必要的全屏清除，该清除导致对话滚动时出现可见的闪烁和项目抖动。"
+          },
+          "refs": [
+            8142
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Evidence Preservation in Compaction",
+            "zh": "压缩中的证据保留"
+          },
+          "body": {
+            "en": "The keep policy now correctly identifies tool failures by their structured state, not just text prefixes. This preserves specific failure evidence through compaction without doubling projection size.",
+            "zh": "保留策略现在通过结构化状态正确识别工具失败，而不仅仅是文本前缀。这可以在压缩过程中保留特定的失败证据，而不会使投影大小翻倍。"
+          },
+          "refs": [
+            8155
+          ]
+        },
+        {
+          "kind": "security",
+          "title": {
+            "en": "Hardened Desktop Build and Review Gates",
+            "zh": "加固的桌面构建与审核门禁"
+          },
+          "body": {
+            "en": "Enforced native CSS animation contracts, added WebView2 release gates, unified Wails CLI/library version pinning, and removed a cross-boundary review gate that caused false CI failures.",
+            "zh": "强制执行原生 CSS 动画合约，添加了 WebView2 发版门禁，统一了 Wails CLI/库版本锁定，并移除了导致虚假 CI 失败的跨边界审核门禁。"
+          },
+          "refs": [
+            8069,
+            8096,
+            8098,
+            8211
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "Content-Driven Context Maintenance",
+              "zh": "内容驱动的上下文维护"
+            },
+            "body": {
+              "en": "Single `compact_ratio` trigger with stable prefix, summary, and verbatim tail. Default 0.85.",
+              "zh": "单一的 `compact_ratio` 触发器，具有稳定的前缀、摘要和逐字尾部。默认 0.85。"
+            },
+            "refs": [
+              8244
+            ]
+          },
+          {
+            "title": {
+              "en": "Structured Plan Contract",
+              "zh": "结构化计划合约"
+            },
+            "body": {
+              "en": "Plans are records with stable step IDs; acceptance criteria enforced before turn completion.",
+              "zh": "计划是具有稳定步骤 ID 的记录；在轮次完成前强制执行验收标准。"
+            },
+            "refs": [
+              8167,
+              8183,
+              8193,
+              8201,
+              8222,
+              8235,
+              8249,
+              8250
+            ]
+          },
+          {
+            "title": {
+              "en": "Bounded Chat Turns",
+              "zh": "有界对话轮次"
+            },
+            "body": {
+              "en": "Default 100-round ceiling for chat, 16 for Goal runs; structural stuck detection with `goal_stuck` pause.",
+              "zh": "对话默认 100 轮上限，Goal 运行 16 轮；结构性卡住检测，`goal_stuck` 暂停。"
+            },
+            "refs": [
+              8185,
+              8228
+            ]
+          },
+          {
+            "title": {
+              "en": "Durable Session Inbox",
+              "zh": "持久化会话收件箱"
+            },
+            "body": {
+              "en": "Persisted queued instructions with crash recovery, capacity limits, and quarantine salvage.",
+              "zh": "持久化排队指令，具有崩溃恢复、容量限制和隔离挽救功能。"
+            },
+            "refs": [
+              8061
+            ]
+          },
+          {
+            "title": {
+              "en": "Cross-Message Logical Selection (Desktop)",
+              "zh": "跨消息逻辑选区（桌面端）"
+            },
+            "body": {
+              "en": "Logical selection for arbitrary loaded-history length; bounded DOM, readable copy from Markdown/LaTeX/code/tables.",
+              "zh": "任意已加载历史长度的逻辑选区；有界 DOM，从 Markdown/LaTeX/代码/表格中可读复制。"
+            },
+            "refs": [
+              8224
+            ]
+          },
+          {
+            "title": {
+              "en": "Three-Mode Reasoning Display (Desktop)",
+              "zh": "三模式思考过程展示（桌面端）"
+            },
+            "body": {
+              "en": "Hidden, summary, or auto (live-follow) reasoning display; legacy migration.",
+              "zh": "隐藏、摘要或自动（实时跟随）思考过程展示；旧版迁移。"
+            },
+            "refs": [
+              8103
+            ]
+          },
+          {
+            "title": {
+              "en": "Delegation Contract",
+              "zh": "委托合约"
+            },
+            "body": {
+              "en": "Formal sub-agent delegation with enforced write claims, host-adjudicated completion, and cost measurement.",
+              "zh": "正式的子 Agent 委托，具有强制写入声明、主机裁决的完成和成本度量。"
+            },
+            "refs": [
+              8114
+            ]
+          },
+          {
+            "title": {
+              "en": "OpenCode Go DeepSeek Presets",
+              "zh": "OpenCode Go DeepSeek 预设"
+            },
+            "body": {
+              "en": "Added Flash-only presets for Anthropic Messages and Responses API with web search enabled.",
+              "zh": "新增仅 Flash 的 Anthropic Messages 和 Responses API 预设，并启用网络搜索。"
+            },
+            "refs": [
+              8105
+            ]
+          },
+          {
+            "title": {
+              "en": "Context Report Command",
+              "zh": "上下文报告命令"
+            },
+            "body": {
+              "en": "`/context` now shows window, thresholds, last maintenance pass, and blocked reason.",
+              "zh": "`/context` 现在显示窗口、阈值、上次维护过程和阻止原因。"
+            },
+            "refs": [
+              8126
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Live Workspace Refresh (Desktop)",
+              "zh": "工作区实时刷新（桌面端）"
+            },
+            "body": {
+              "en": "Immediate updates from agent mutations, filesystem/Git watching, and revision reconciliation.",
+              "zh": "根据 Agent 变更、文件系统/Git 监视和修订协调立即更新。"
+            },
+            "refs": [
+              8102
+            ]
+          },
+          {
+            "title": {
+              "en": "CLI Context Window Prompt",
+              "zh": "CLI 上下文窗口提示"
+            },
+            "body": {
+              "en": "Wizard asks for context window size instead of assuming 128K.",
+              "zh": "向导询问上下文窗口大小，而不是假设 128K。"
+            },
+            "refs": [
+              8124
+            ]
+          },
+          {
+            "title": {
+              "en": "Plan Reviewer Diff",
+              "zh": "计划审核者差异"
+            },
+            "body": {
+              "en": "Reviewer receives a structured diff of plan changes, not just two rendered strings.",
+              "zh": "审核者收到计划变更的结构化差异，而不仅仅是两个渲染字符串。"
+            },
+            "refs": [
+              8249
+            ]
+          },
+          {
+            "title": {
+              "en": "Evidence Origin Tracking",
+              "zh": "证据来源跟踪"
+            },
+            "body": {
+              "en": "Benchmarks now measure delegation independence and anchor resistance.",
+              "zh": "基准测试现在度量委托独立性和锚点抵抗力。"
+            },
+            "refs": [
+              8154
+            ]
+          },
+          {
+            "title": {
+              "en": "Desktop Build Hardening",
+              "zh": "桌面构建加固"
+            },
+            "body": {
+              "en": "Unified Wails version pin, Node 24/pnpm 10 alignment, non-interactive installs.",
+              "zh": "统一 Wails 版本锁定，Node 24/pnpm 10 对齐，非交互式安装。"
+            },
+            "refs": [
+              8069,
+              8098
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Compaction Threshold Collapse",
+              "zh": "压缩阈值崩溃"
+            },
+            "body": {
+              "en": "Output budget no longer collapses all thresholds; reserve at most 25% of window.",
+              "zh": "输出预算不再导致所有阈值崩溃；最多保留窗口的 25%。"
+            },
+            "refs": [
+              8199
+            ]
+          },
+          {
+            "title": {
+              "en": "Token Estimation Unit",
+              "zh": "令牌估算单位"
+            },
+            "body": {
+              "en": "Cold estimate uses characters × 0.25, not rune count; fixes 3x overestimation for CJK.",
+              "zh": "冷估算使用字符数 × 0.25，而不是符文数；修复了 CJK 的 3 倍高估问题。"
+            },
+            "refs": [
+              8205
+            ]
+          },
+          {
+            "title": {
+              "en": "Calibration Survival Across Session Swap",
+              "zh": "会话切换时校准保留"
+            },
+            "body": {
+              "en": "Prompt-token calibration now persists across session rebinds (tab switch, fork, rewind).",
+              "zh": "提示令牌校准现在在会话重新绑定（标签切换、分支、回退）时保留。"
+            },
+            "refs": [
+              8207
+            ]
+          },
+          {
+            "title": {
+              "en": "Single Compaction Trigger",
+              "zh": "单一压缩触发器"
+            },
+            "body": {
+              "en": "Tool-result maintenance only runs at `compact_ratio`, preserving cache hits below fold.",
+              "zh": "工具结果维护仅在 `compact_ratio` 时运行，保留折叠点以下的缓存命中。"
+            },
+            "refs": [
+              8210
+            ]
+          },
+          {
+            "title": {
+              "en": "Context Gauge Accuracy",
+              "zh": "上下文仪表准确性"
+            },
+            "body": {
+              "en": "Gauge now measures the same input tokens as the compaction trigger, not last turn's usage.",
+              "zh": "仪表现在测量与压缩触发器相同的输入令牌，而不是上一轮的使用量。"
+            },
+            "refs": [
+              8221
+            ]
+          },
+          {
+            "title": {
+              "en": "Runaway Loop Prevention",
+              "zh": "失控循环预防"
+            },
+            "body": {
+              "en": "Exploration novelty stops counting as progress after 6 read-only rounds.",
+              "zh": "探索新颖性在 6 个只读轮次后不再计为进展。"
+            },
+            "refs": [
+              8233
+            ]
+          },
+          {
+            "title": {
+              "en": "Delegated Call Visibility",
+              "zh": "委托调用可见性"
+            },
+            "body": {
+              "en": "Sub-agent calls render inside parent; blocked commands correctly reported as not run.",
+              "zh": "子 Agent 调用在父级内部渲染；被阻止的命令正确报告为未运行。"
+            },
+            "refs": [
+              8246
+            ]
+          },
+          {
+            "title": {
+              "en": "Desktop Task Monitor Timer",
+              "zh": "桌面任务监视器计时器"
+            },
+            "body": {
+              "en": "Elapsed time freezes at terminal state; queued tasks show dash.",
+              "zh": "已用时间在终端状态冻结；排队任务显示破折号。"
+            },
+            "refs": [
+              7655
+            ]
+          },
+          {
+            "title": {
+              "en": "Windows Explorer Folder Open",
+              "zh": "Windows 资源管理器文件夹打开"
+            },
+            "body": {
+              "en": "Uses `explore` verb and trailing separator to avoid .lnk hijacking.",
+              "zh": "使用 `explore` 动词和尾部路径分隔符以避免 .lnk 劫持。"
+            },
+            "refs": [
+              8010
+            ]
+          },
+          {
+            "title": {
+              "en": "CLI Failure Reporting",
+              "zh": "CLI 失败报告"
+            },
+            "body": {
+              "en": "Always explains why a run failed, even with `-p`.",
+              "zh": "始终解释运行失败的原因，即使使用 `-p`。"
+            },
+            "refs": [
+              8212
+            ]
+          },
+          {
+            "title": {
+              "en": "Windows Transcript Scroll Flicker",
+              "zh": "Windows 对话滚动闪烁"
+            },
+            "body": {
+              "en": "Removed unnecessary full-screen clear on Windows.",
+              "zh": "移除了 Windows 上不必要的全屏清除。"
+            },
+            "refs": [
+              8142
+            ]
+          },
+          {
+            "title": {
+              "en": "Evidence Preservation in Compaction",
+              "zh": "压缩中的证据保留"
+            },
+            "body": {
+              "en": "Keep policy uses structured tool state, not text prefixes; preserves failures with minimal size increase.",
+              "zh": "保留策略使用结构化工具状态，而不是文本前缀；以最小的尺寸增加保留失败信息。"
+            },
+            "refs": [
+              8155
+            ]
+          },
+          {
+            "title": {
+              "en": "CI Flake Fixes",
+              "zh": "CI 偶发故障修复"
+            },
+            "body": {
+              "en": "Increased timeouts for Windows test and frontend transcript harness to prevent false failures.",
+              "zh": "增加了 Windows 测试和前端对话记录工具的超时时间，以防止误报失败。"
+            },
+            "refs": [
+              8229
+            ]
+          },
+          {
+            "title": {
+              "en": "Warp Terminal Scroll Clear",
+              "zh": "Warp 终端滚动清除"
+            },
+            "body": {
+              "en": "Legacy full-redraw workaround now limited to Warp terminal only.",
+              "zh": "旧版全重绘解决方法现在仅限于 Warp 终端。"
+            },
+            "refs": [
+              8156
+            ]
+          },
+          {
+            "title": {
+              "en": "CI Unblock for Windows",
+              "zh": "Windows CI 解除阻塞"
+            },
+            "body": {
+              "en": "Increased test timeouts and fixed session inbox/hook tests for Windows.",
+              "zh": "增加了测试超时时间，并修复了 Windows 上的会话收件箱/钩子测试。"
+            },
+            "refs": [
+              8255
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "esengine",
+        "mchenziyi",
+        "Ray-lyy",
+        "NkAntony777"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.23.0",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.22.0...desktop-v1.23.0",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.23.0",
+      "baseVersion": "1.23.0",
+      "status": "reviewed",
+      "previousRelease": "1.22.0",
+      "builds": {
+        "cli": "v1.23.0",
+        "desktop": "v1.23.0",
+        "npm": "1.23.0"
+      }
+    },
+    {
       "version": "1.22.0",
       "date": "2026-08-10",
       "channel": "stable",

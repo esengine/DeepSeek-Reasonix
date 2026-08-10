@@ -63,10 +63,6 @@ type vendorCapabilities struct {
 	// back to ordinary summarize without inheriting a large default".
 	compactionOutputTokens int
 
-	// nativeCompaction marks vendors with a dedicated compact endpoint.
-	// When false, agents must use ordinary summarize fallback.
-	nativeCompaction bool
-
 	// summaryRequired marks vendors whose Responses API requires the
 	// `summary` list on input reasoning items (DashScope; without it the
 	// server rejects with "Invalid 'summary': summary is required..."). The
@@ -95,10 +91,12 @@ var vendorTable = map[string]vendorCapabilities{
 		toolCallReasoning:      true,
 		singleSegmentReasoning: false,
 		ignoresTemperature:     false,
-		defaultMaxOutputTokens: provider.DefaultHighOutputTokens,
-		// Compaction summaries are short briefings; keep the budget separate
-		// from ordinary answer output so a summary call cannot inherit 32K.
-		compactionOutputTokens: 4096,
+		// Auto ceiling for ordinary reasoning; high/max is applied via
+		// AutoOutputBudget at construction/request time (64K). Never 128K.
+		defaultMaxOutputTokens: provider.DefaultReasoningOutputTokens,
+		// Compaction summaries use a dedicated 16K-class budget, independent of
+		// ordinary answer output.
+		compactionOutputTokens: provider.DefaultOrdinaryOutputTokens,
 	},
 	"mimo": {
 		stateless:              true,
@@ -106,8 +104,9 @@ var vendorTable = map[string]vendorCapabilities{
 		toolCallReasoning:      true,
 		singleSegmentReasoning: true,
 		ignoresTemperature:     true,
-		defaultMaxOutputTokens: 128000,
-		compactionOutputTokens: 4096,
+		// Coding-agent default 32K; users may raise explicitly. Not 128K auto.
+		defaultMaxOutputTokens: provider.DefaultReasoningOutputTokens,
+		compactionOutputTokens: provider.DefaultOrdinaryOutputTokens,
 	},
 	// "" (unknown OpenAI-compatible endpoint) → zero value = default behavior.
 	// Unknown gateways deliberately do NOT inherit a large max-output default.

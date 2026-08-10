@@ -29,21 +29,20 @@ func TestContextReportUsesLatestPromptNotBillableAggregate(t *testing.T) {
 	}
 }
 
-// Thresholds must come from the same helper the decision uses, so the report
-// cannot drift from what compaction will actually do.
+// The sole trigger must come from the same helper the decision uses.
 func TestContextReportThresholdsMatchTheDecision(t *testing.T) {
 	a := New(&fakeProvider{reply: "unused"}, tool.NewRegistry(), NewSession("sys"), Options{
-		ContextWindow: 200_000, CompactRatio: 0.8, CompactForceRatio: 0.9, RecentKeep: 2,
+		ContextWindow: 200_000, CompactRatio: 0.85, RecentKeep: 2,
 	}, event.Discard)
 
 	rep := a.ContextReport()
-	soft, snip, fold := a.compactThresholds()
-	if rep.SoftThreshold != soft || rep.SnipThreshold != snip || rep.FoldThreshold != fold {
-		t.Errorf("report thresholds (%d/%d/%d) differ from compactThresholds (%d/%d/%d)",
-			rep.SoftThreshold, rep.SnipThreshold, rep.FoldThreshold, soft, snip, fold)
+	fold := a.compactTrigger()
+	if rep.FoldThreshold != fold {
+		t.Errorf("report FoldThreshold %d differs from compactTrigger %d", rep.FoldThreshold, fold)
 	}
-	if want := a.forceCompactThreshold(fold); rep.ForceThreshold != want {
-		t.Errorf("ForceThreshold = %d, want %d", rep.ForceThreshold, want)
+	if rep.SoftThreshold != 0 || rep.SnipThreshold != 0 || rep.ForceThreshold != 0 {
+		t.Errorf("legacy multi-threshold fields should stay zero: soft=%d snip=%d force=%d",
+			rep.SoftThreshold, rep.SnipThreshold, rep.ForceThreshold)
 	}
 }
 

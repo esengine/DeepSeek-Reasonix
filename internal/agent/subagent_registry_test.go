@@ -282,21 +282,23 @@ func TestReadOnlySubagentToolRegistryKeepsOnlyResearchToolsAndSafeBash(t *testin
 	if err != nil || out != "safe bash ok" {
 		t.Fatalf("safe redirected bash delegated to inner tool = %q, %v; want safe bash ok, nil", out, err)
 	}
-	out, err = bash.Execute(context.Background(), json.RawMessage(`{"command":"rm -rf tmp"}`))
-	if err != nil || !strings.HasPrefix(out, "blocked:") {
-		t.Fatalf("unsafe bash should be blocked as tool output, got %q, %v", out, err)
-	}
-	out, err = bash.Execute(context.Background(), json.RawMessage(`{"command":"Test-NetConnection -ComputerName example.com -Port 443"}`))
-	if err != nil || !strings.HasPrefix(out, "blocked:") {
-		t.Fatalf("network probe should require the parent permission path, got %q, %v", out, err)
-	}
-	out, err = bash.Execute(context.Background(), json.RawMessage(`{"command":"git status","run_in_background":true}`))
-	if err != nil || !strings.HasPrefix(out, "blocked:") {
-		t.Fatalf("background read-only bash should be blocked as tool output, got %q, %v", out, err)
-	}
-	out, err = bash.Execute(context.Background(), json.RawMessage(`{"command":"git status","preserve_background_processes":true}`))
-	if err != nil || !strings.HasPrefix(out, "blocked:") {
-		t.Fatalf("process-preserving read-only bash should be blocked as tool output, got %q, %v", out, err)
+	for _, refused := range []struct {
+		what string
+		args string
+	}{
+		{"unsafe bash", `{"command":"rm -rf tmp"}`},
+		{"network probe", `{"command":"Test-NetConnection -ComputerName example.com -Port 443"}`},
+		{"background read-only bash", `{"command":"git status","run_in_background":true}`},
+		{"process-preserving read-only bash", `{"command":"git status","preserve_background_processes":true}`},
+	} {
+		out, err = bash.Execute(context.Background(), json.RawMessage(refused.args))
+		msg, blocked := tool.BlockedMessage(err)
+		if !blocked || !strings.HasPrefix(msg, "blocked:") {
+			t.Fatalf("%s should raise a host refusal, got %q, %v", refused.what, out, err)
+		}
+		if out != "" {
+			t.Fatalf("%s must not also return output, got %q", refused.what, out)
+		}
 	}
 }
 

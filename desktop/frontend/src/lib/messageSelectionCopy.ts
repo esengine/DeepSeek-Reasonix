@@ -1,4 +1,8 @@
+import { writeClipboardText } from "./clipboard";
+import { transcriptSelectionStore } from "./transcriptSelectionStore";
+
 const MESSAGE_SELECTION_SELECTOR = ".msg__body, .reasoning__body";
+export const TRANSCRIPT_COPY_FAILED_EVENT = "reasonix:transcript-copy-failed";
 
 export interface MessageSelectionCopyState {
   text: string;
@@ -69,6 +73,21 @@ function rangeIntersectsNode(range: Range, node: Node): boolean {
 
 export function installMessageSelectionCopy(doc: Document = document): () => void {
   const onCopy = (event: ClipboardEvent) => {
+    const logical = transcriptSelectionStore.getSnapshot();
+    if (logical.mode === "logical-dragging" || logical.mode === "logical-settled") {
+      if (isEditableTarget(event.target)) return;
+      const snapshotId = logical.id;
+      const sourceTabId = logical.tabId;
+      event.preventDefault();
+      void transcriptSelectionStore.resolveText(snapshotId).then(async (text) => {
+        if (!text || !transcriptSelectionStore.isCurrent(snapshotId, sourceTabId)) return;
+        const copied = await writeClipboardText(text);
+        if (!transcriptSelectionStore.isCurrent(snapshotId, sourceTabId)) return;
+        if (copied) transcriptSelectionStore.clear("copy");
+        else doc.dispatchEvent(new CustomEvent(TRANSCRIPT_COPY_FAILED_EVENT));
+      });
+      return;
+    }
     const selection = doc.getSelection();
     const text = messageSelectionCopyText({
       text: restoreLatexInSelection(selection),

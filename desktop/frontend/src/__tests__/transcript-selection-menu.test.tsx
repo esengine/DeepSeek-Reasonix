@@ -24,6 +24,10 @@ import { createRoot } from "react-dom/client";
 import { TranscriptSelectionMenu } from "../components/TranscriptSelectionMenu";
 import { LocaleProvider } from "../lib/i18n";
 import { resetCustomShortcuts, saveCustomShortcut } from "../lib/keyboardShortcuts";
+import {
+  transcriptSelectionStore,
+  type TranscriptSelectableRow,
+} from "../lib/transcriptSelectionStore";
 
 let passed = 0;
 let failed = 0;
@@ -145,6 +149,7 @@ console.log("\ntranscript selection menu");
     await flushTimers();
   });
   eq(clipboard[0], "assistant reply text", "Copy writes the selection through the clipboard bridge");
+  eq(document.getSelection()?.isCollapsed, true, "Copy releases the browser selection after the clipboard write succeeds");
   eq(document.querySelector(".context-menu"), null, "transcript menu closes after Copy");
 
   // Releasing a pointer after selecting message text exposes the compact Add
@@ -404,6 +409,116 @@ console.log("\ntranscript selection menu");
   eq(document.querySelector(".context-menu"), null, "plain browser never sees the app menu");
 
   await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  const clipboard: string[] = [];
+  const additions: string[] = [];
+  (window as unknown as { runtime: { ClipboardSetText: (text: string) => Promise<boolean> } }).runtime = {
+    ClipboardSetText: async (text: string) => {
+      clipboard.push(text);
+      return true;
+    },
+  };
+  document.body.insertAdjacentHTML(
+    "beforeend",
+    '<div class="transcript__row" data-row-key="row-a"><div class="msg__body" data-transcript-selectable="message">alpha</div></div>' +
+      '<div class="transcript__row" data-row-key="row-b"><div class="msg__body" data-transcript-selectable="message">bravo</div></div>',
+  );
+  const first = document.querySelector<HTMLElement>('[data-row-key="row-a"] .msg__body')!;
+  const root = createRoot(document.getElementById("root") as HTMLElement);
+  const logicalRows = (resolvers?: Partial<Record<string, () => Promise<string>>>): TranscriptSelectableRow[] => [
+    {
+      rowKey: "row-a",
+      sourceText: "alpha",
+      contentRevision: 1,
+      resolveText: resolvers?.["row-a"] ?? (async () => "alpha"),
+    },
+    {
+      rowKey: "row-b",
+      sourceText: "bravo",
+      contentRevision: 1,
+      resolveText: resolvers?.["row-b"] ?? (async () => "bravo"),
+    },
+  ];
+  const selectLogical = (rows = logicalRows()) => {
+    transcriptSelectionStore.clear("test-reset");
+    transcriptSelectionStore.beginNative("tab-logical");
+    transcriptSelectionStore.promoteToLogical(
+      "tab-logical",
+      { rowKey: "row-a", textOffset: 1, affinity: "forward" },
+      { rowKey: "row-b", textOffset: 3, affinity: "forward" },
+      rows,
+    );
+    transcriptSelectionStore.settleLogical();
+  };
+
+  await act(async () => {
+    root.render(
+      <LocaleProvider>
+        <TranscriptSelectionMenu resetKey="tab-logical" onAddToChat={(text) => additions.push(text)} />
+      </LocaleProvider>,
+    );
+    await flushTimers();
+  });
+  await act(async () => {
+    selectLogical();
+    await flushTimers();
+  });
+  const logicalAdd = document.querySelector<HTMLButtonElement>(".transcript-selection-action button");
+  ok(logicalAdd != null, "settled logical selection exposes Add to Chat by snapshot id");
+  await act(async () => {
+    logicalAdd?.click();
+    await flushTimers();
+  });
+  eq(additions[0], "lpha\n\nbra", "logical Add to Chat resolves partial endpoints in document order");
+  eq(transcriptSelectionStore.getSnapshot().mode, "none", "logical Add to Chat clears the consumed snapshot");
+
+  await act(async () => {
+    selectLogical();
+    await flushTimers();
+  });
+  const logicalContextEvent = await dispatchContextMenu(first);
+  eq(logicalContextEvent.defaultPrevented, true, "right-click inside a logical selection opens the app menu");
+  const logicalCopy = document.querySelector<HTMLButtonElement>('.context-menu [role="menuitem"]');
+  await act(async () => {
+    logicalCopy?.click();
+    await flushTimers();
+  });
+  eq(clipboard[0], "lpha\n\nbra", "logical right-click Copy resolves the frozen snapshot");
+  eq(transcriptSelectionStore.getSnapshot().mode, "none", "successful logical Copy clears the snapshot");
+
+  let finishProjection!: (text: string) => void;
+  const delayedProjection = new Promise<string>((resolve) => { finishProjection = resolve; });
+  await act(async () => {
+    selectLogical(logicalRows({ "row-a": () => delayedProjection }));
+    await flushTimers();
+  });
+  const staleAdd = document.querySelector<HTMLButtonElement>(".transcript-selection-action button");
+  await act(async () => {
+    staleAdd?.click();
+    await flushTimers();
+  });
+  await act(async () => {
+    root.render(
+      <LocaleProvider>
+        <TranscriptSelectionMenu resetKey="tab-after-switch" onAddToChat={(text) => additions.push(text)} />
+      </LocaleProvider>,
+    );
+    await flushTimers();
+  });
+  await act(async () => {
+    finishProjection("alpha");
+    await flushTimers();
+  });
+  eq(additions.length, 1, "tab switch discards a late logical Add to Chat projection");
+
+  await act(async () => {
+    transcriptSelectionStore.clear("test-cleanup");
     root.unmount();
   });
   dom.window.close();

@@ -16,10 +16,12 @@ import (
 // batchExecution is the result of one provider tool-call batch.
 type batchExecution struct {
 	results            []string
+	outcomes           []toolOutcome
 	images             [][]string
 	executions         []*tool.ShellExecution
 	recoveryStopTurn   bool
 	recoveryStopReason string
+	goalStuck          goalStuckSignal
 }
 
 // executeBatch dispatches one model turn's tool calls. ToolDispatch events are
@@ -333,9 +335,7 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: o.truncMsg})
 		}
 	}
-	if !cancelled {
-		a.applyBatchGuards(calls, outcomes, results, receiptMark)
-	}
+	goalStuck := a.applyBatchGuards(ctx, cancelled, calls, outcomes, results, receiptMark)
 	images := make([][]string, len(calls))
 	executions := make([]*tool.ShellExecution, len(calls))
 	for i := range outcomes {
@@ -350,10 +350,12 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 	}
 	return batchExecution{
 		results:            results,
+		outcomes:           outcomes,
 		images:             images,
 		executions:         executions,
 		recoveryStopTurn:   recoveryBatchStop,
 		recoveryStopReason: recoveryStopReason,
+		goalStuck:          goalStuck,
 	}
 }
 

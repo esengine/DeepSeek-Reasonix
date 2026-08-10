@@ -1,7 +1,8 @@
 import type { Translator } from "./i18n";
 
 export type ContextMaintenanceStatus = "planned" | "applied" | "noop" | "blocked" | "failed";
-export type ContextMaintenanceAction = "snip" | "prune" | "summary" | "native_tool_clear" | "noop";
+/** New writers only emit summary | noop. snip/prune/native are legacy restore-only. */
+export type ContextMaintenanceAction = "summary" | "noop" | "snip" | "prune" | "native_tool_clear";
 
 export interface WireContextMaintenance {
   status?: ContextMaintenanceStatus;
@@ -34,9 +35,15 @@ export interface ContextMaintenanceInfo {
   projectedTokens?: number;
   summaryTokens?: number;
   lastSavedTokens?: number;
+  /** @deprecated always 0; use triggerTokens */
   snipTrigger?: number;
+  /** @deprecated alias of triggerTokens */
   foldTrigger?: number;
+  /** @deprecated always 0; use triggerTokens */
   forceTrigger?: number;
+  triggerTokens?: number;
+  /** none | restored | applied — runtime only */
+  checkpointState?: "none" | "restored" | "applied";
   hardInputCeiling?: number;
   headroom?: number;
   projectionVersion?: number;
@@ -44,25 +51,19 @@ export interface ContextMaintenanceInfo {
   lastReceipt?: ContextMaintenanceReceipt;
 }
 
-function maintenanceActionLabel(action: ContextMaintenanceAction | undefined, t: Translator): string | undefined {
-  switch (action) {
-    case "snip": return t("context.maintenanceActionSnip");
-    case "prune": return t("context.maintenanceActionPrune");
-    case "summary": return t("summary.detail");
-    case "native_tool_clear": return t("context.maintenanceActionNative");
-    default: return undefined;
-  }
-}
-
 export function formatContextMaintenanceNotice(m: WireContextMaintenance, t: Translator): string {
-  const parts = [t("context.maintenanceTitle")];
-  const action = maintenanceActionLabel(m.action, t);
-  if (action) parts.push(action);
   switch (m.status) {
-    case "blocked": parts.push(t("projectTree.status.paused")); break;
-    case "failed": parts.push(t("task.state.failed")); break;
-    case "applied": parts.push(t("settings.typography.applied")); break;
+    case "applied":
+      return t("context.maintenanceAppliedSummary");
+    case "blocked":
+      return t("context.maintenanceBlockedSummary");
+    case "failed":
+      return t("context.maintenanceFailedSummary");
+    default:
+      break;
   }
+  const parts = [t("context.maintenanceTitle")];
+  if (m.action === "summary") parts.push(t("summary.detail"));
   if (typeof m.inputTokens === "number" && typeof m.resultTokens === "number") {
     parts.push(t("context.tokensValue", {
       value: `${m.inputTokens.toLocaleString()} → ${m.resultTokens.toLocaleString()}`,
@@ -72,4 +73,21 @@ export function formatContextMaintenanceNotice(m: WireContextMaintenance, t: Tra
     parts.push(`−${t("context.tokensValue", { value: m.savedTokens.toLocaleString() })}`);
   }
   return parts.join(" · ");
+}
+
+const MAX_SEEN_MAINTENANCE_OPS = 64;
+
+/** True when this operationId has not yet been rendered as a notice. */
+export function isNewMaintenanceOperation(seen: readonly string[] | undefined, operationId?: string): boolean {
+  const id = (operationId ?? "").trim();
+  if (!id) return true;
+  return !(seen ?? []).includes(id);
+}
+
+/** Remember an operationId for reconnect/replay dedupe (bounded FIFO). */
+export function rememberMaintenanceOperation(seen: readonly string[] | undefined, operationId?: string): string[] {
+  const id = (operationId ?? "").trim();
+  if (!id) return [...(seen ?? [])];
+  if ((seen ?? []).includes(id)) return [...(seen ?? [])];
+  return [...(seen ?? []), id].slice(-MAX_SEEN_MAINTENANCE_OPS);
 }

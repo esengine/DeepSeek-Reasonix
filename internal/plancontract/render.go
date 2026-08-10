@@ -96,7 +96,9 @@ func renderDetail(b *strings.Builder, step Step, indent string) {
 		if c.Optional {
 			label += " (optional)"
 		}
-		fmt.Fprintf(b, "%s%s: %s\n", indent, label, c.Text)
+		// The id is rendered because a proof has to cite it: a criterion the
+		// executor cannot name is one it cannot satisfy.
+		fmt.Fprintf(b, "%s%s [%s]: %s\n", indent, label, c.ID, c.Text)
 	}
 	for _, v := range step.Verification {
 		command := v.Command

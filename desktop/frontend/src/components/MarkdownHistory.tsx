@@ -91,16 +91,18 @@ export const MarkdownHistory = memo(function MarkdownHistory({
     const handle = getMarkdownWorkerClient().parse(text);
     let cancelled = false;
     handle.promise
-      .then((parsedBlocks) => {
-        if (cancelled || !parsedBlocks) return;
+      .then((result) => {
+        if (cancelled || !result) return;
         if (entryId) {
           getTranscriptStore().setMarkdown(entryId, revision, {
             source: text,
-            blocks: parsedBlocks,
-            bytes: text.length * 2 + estimateHastBytes(parsedBlocks),
+            blocks: result.blocks,
+            selectionText: result.selectionText,
+            selectionRevision: result.selectionRevision,
+            bytes: text.length * 2 + result.selectionText.length * 2 + estimateHastBytes(result.blocks),
           });
         }
-        setParsed({ text, blocks: parsedBlocks });
+        setParsed({ text, blocks: result.blocks });
         onParsed?.();
       })
       .catch(() => {

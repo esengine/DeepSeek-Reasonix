@@ -1956,8 +1956,8 @@ func TestSetCompactRatioPersistsToUserConfig(t *testing.T) {
 
 	app := NewApp()
 	defaultView := app.Settings()
-	if defaultView.Agent.CompactRatio != 0.8 || defaultView.Agent.EffectiveCompactRatio != 0.8 {
-		t.Fatalf("default compact ratios = %v/%v, want 0.8/0.8", defaultView.Agent.CompactRatio, defaultView.Agent.EffectiveCompactRatio)
+	if defaultView.Agent.CompactRatio != 0.85 || defaultView.Agent.EffectiveCompactRatio != 0.85 {
+		t.Fatalf("default compact ratios = %v/%v, want 0.85/0.85", defaultView.Agent.CompactRatio, defaultView.Agent.EffectiveCompactRatio)
 	}
 	if err := app.SetCompactRatio(0.7); err != nil {
 		t.Fatalf("SetCompactRatio: %v", err)
@@ -1972,8 +1972,9 @@ func TestSetCompactRatioPersistsToUserConfig(t *testing.T) {
 	if cfg.Agent.CompactRatio != 0.7 {
 		t.Fatalf("saved compact ratio = %v, want 0.7", cfg.Agent.CompactRatio)
 	}
-	if cfg.Agent.ToolResultSnipRatio != 0.6 || cfg.Agent.CompactForceRatio != 0.9 {
-		t.Fatalf("setting compact ratio changed adjacent thresholds: %+v", cfg.Agent)
+	// Deprecated multi-threshold fields stay cleared / unused.
+	if cfg.Agent.ToolResultSnipRatio != 0 || cfg.Agent.CompactForceRatio != 0 {
+		t.Fatalf("setting compact ratio revived deprecated thresholds: %+v", cfg.Agent)
 	}
 
 	if err := app.SetCompactRatio(0.9); err == nil {
@@ -1994,7 +1995,7 @@ func TestSetCompactRatioRejectsActiveWorkBeforeSaving(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "stop background jobs") {
 		t.Fatalf("SetCompactRatio with background job error = %v, want active-work guard", err)
 	}
-	if got := config.LoadForEdit(config.UserConfigPath()).Agent.CompactRatio; got != 0.8 {
+	if got := config.LoadForEdit(config.UserConfigPath()).Agent.CompactRatio; got != 0.85 {
 		t.Fatalf("compact ratio changed after rejected update: %v", got)
 	}
 }

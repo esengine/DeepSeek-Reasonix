@@ -1,0 +1,7 @@
+[server]
+port = 8080
+timeout_sec = 30
+max_body_mb = 8
+
+[cache]
+ttl_sec = 300

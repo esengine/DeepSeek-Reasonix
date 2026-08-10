@@ -41,6 +41,15 @@ function dispatchScroll(el: HTMLElement) {
   el.dispatchEvent(new Event("scroll"));
 }
 
+function firstTextNode(root: Node): Text | null {
+  if (root.nodeType === Node.TEXT_NODE) return root as Text;
+  for (const child of Array.from(root.childNodes)) {
+    const found = firstTextNode(child);
+    if (found) return found;
+  }
+  return null;
+}
+
 // ── Windowed mounting ─────────────────────────────────────────────────────────
 {
   const harness = await createTranscriptHarness({ viewportHeight: 200, rowHeight: 100 });
@@ -76,10 +85,13 @@ function dispatchScroll(el: HTMLElement) {
     const anchorIdBefore = Array.from(harness.container.querySelectorAll(".transcript__row"))
       .map((row) => {
         const match = /translate3d\(0(?:px)?, ([\d.-]+)px/.exec((row as HTMLElement).style.transform);
-        return { row, top: match ? Number(match[1]) : -1 };
+        return {
+          anchorId: row.querySelector("[data-question-anchor]")?.id,
+          top: match ? Number(match[1]) : -1,
+        };
       })
-      .filter(({ top }) => top >= before)
-      .sort((a, b) => a.top - b.top)[0]?.row.querySelector("[data-question-anchor]")?.id;
+      .filter(({ anchorId, top }) => anchorId != null && top >= before)
+      .sort((a, b) => a.top - b.top)[0]?.anchorId;
     ok(anchorIdBefore != null, "found a fully-visible anchor row before the prepend");
     // Prepend five older turns (15 rows) — the reading position must follow
     // the anchor row, not the row index.
@@ -157,6 +169,63 @@ function dispatchScroll(el: HTMLElement) {
     await harness.render(items, { running: false, tabId: "tab-x" });
     ok(calls.some(([tabId, entryId]) => tabId === "tab-x" && entryId === "e1"), "mounted user row triggers lazy content resolution");
     ok(calls.some(([tabId, entryId]) => tabId === "tab-x" && entryId === "e2"), "mounted answer row triggers lazy content resolution");
+  } finally {
+    await harness.unmount();
+    await harness.close();
+  }
+}
+
+// ── Native cross-page selection keeps a continuous DOM range ─────────────────
+{
+  const harness = await createTranscriptHarness({ viewportHeight: 200, rowHeight: 100 });
+  try {
+    await harness.render(turns(30), { running: false, tabId: "selection-tab" });
+    await harness.settle();
+    const el = harness.scrollElement();
+    el.scrollTop = 0;
+    dispatchScroll(el);
+    await harness.flush();
+
+    const anchorBody = harness.container.querySelector<HTMLElement>("#question-anchor-u0 .msg__body")
+      ?? harness.container.querySelector<HTMLElement>("#question-anchor-u0")?.closest<HTMLElement>(".msg")?.querySelector(".msg__body")
+      ?? null;
+    ok(anchorBody != null, "selection anchor row is mounted");
+    anchorBody?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+    await harness.flush();
+
+    let focusBody: HTMLElement | null = null;
+    for (let top = 1000; top <= 8000 && !focusBody; top += 500) {
+      el.scrollTop = top;
+      dispatchScroll(el);
+      await harness.flush();
+      focusBody = harness.container.querySelector<HTMLElement>("#question-anchor-u20 .msg__body")
+        ?? harness.container.querySelector<HTMLElement>("#question-anchor-u20")?.closest<HTMLElement>(".msg")?.querySelector(".msg__body")
+        ?? null;
+    }
+    ok(focusBody != null, "selection focus row mounts after crossing virtual pages");
+
+    const anchorText = anchorBody ? firstTextNode(anchorBody) : null;
+    const focusText = focusBody ? firstTextNode(focusBody) : null;
+    const selection = document.getSelection();
+    if (anchorText && focusText && selection) {
+      const range = document.createRange();
+      range.setStart(anchorText, 0);
+      range.setEnd(focusText, focusText.data.length);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+      await harness.flush();
+      ok(selection.anchorNode?.isConnected && selection.focusNode?.isConnected, "native selection endpoints stay connected");
+      ok(harness.container.querySelectorAll(".transcript__row").length >= 61, "every intervening row stays mounted while native selection is active");
+
+      document.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, button: 0 }));
+      selection.removeAllRanges();
+      document.dispatchEvent(new Event("selectionchange"));
+      await harness.flush();
+      ok(harness.container.querySelectorAll(".transcript__row").length <= 24, "clearing selection releases retained rows");
+    } else {
+      ok(false, "selection endpoint text nodes are available");
+    }
   } finally {
     await harness.unmount();
     await harness.close();
