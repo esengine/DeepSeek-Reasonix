@@ -19,16 +19,27 @@ jobs:
           ref: feature/nextcloud-talk-bot
           fetch-depth: 0
 
-      - name: Merge latest upstream main-v2
+      - name: Merge latest upstream main-v2 or record conflicts
+        shell: bash
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/esengine/DeepSeek-Reasonix.git
           git fetch upstream main-v2
-          git merge --no-edit upstream/main-v2
 
-      - name: Remove temporary workflow and push
-        run: |
-          git rm .github/workflows/sync-nextcloud-upstream.yml
-          git commit -m "chore: remove temporary upstream sync workflow"
+          if git merge --no-edit upstream/main-v2; then
+            git rm .github/workflows/sync-nextcloud-upstream.yml
+            git rm -f NEXTCLOUD_CI_DIAGNOSTICS.txt 2>/dev/null || true
+            git rm -f SYNC_CONFLICTS.txt 2>/dev/null || true
+            git commit -m "chore: clean temporary Nextcloud CI helpers"
+            git push origin feature/nextcloud-talk-bot
+            exit 0
+          fi
+
+          git diff --name-only --diff-filter=U > /tmp/SYNC_CONFLICTS.txt
+          git merge --abort
+          cp /tmp/SYNC_CONFLICTS.txt SYNC_CONFLICTS.txt
+          git add SYNC_CONFLICTS.txt
+          git commit -m "ci: record upstream sync conflicts"
           git push origin feature/nextcloud-talk-bot
