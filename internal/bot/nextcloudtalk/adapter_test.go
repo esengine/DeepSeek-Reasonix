@@ -19,9 +19,9 @@ func TestWebhookAcceptsSignedMessage(t *testing.T) {
 	t.Setenv(envName, secret)
 
 	a := &adapter{
-		cfg: Config{SecretEnv: envName, ConnectionID: "nextcloud-talk-main"},
+		cfg:    Config{SecretEnv: envName, ConnectionID: "nextcloud-talk-main"},
 		logger: slog.Default(),
-		msgCh: make(chan bot.InboundMessage, 1),
+		msgCh:  make(chan bot.InboundMessage, 1),
 	}
 	body := []byte(`{
 		"type":"Create",

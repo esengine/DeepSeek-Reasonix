@@ -890,8 +890,8 @@ type WeixinBotConfig struct {
 // keep working.
 type BotConnectionConfig struct {
 	ID               string                        `toml:"id"`
-	Provider         string                        `toml:"provider"` // qq|feishu|weixin
-	Domain           string                        `toml:"domain"`   // feishu|lark|weixin|qq
+	Provider         string                        `toml:"provider"` // qq|feishu|weixin|nextcloud-talk
+	Domain           string                        `toml:"domain"`   // feishu|lark|weixin|qq|nextcloud-talk
 	Label            string                        `toml:"label"`
 	Enabled          bool                          `toml:"enabled"`
 	Status           string                        `toml:"status"` // disconnected|pending|connected|error
@@ -911,6 +911,12 @@ type BotConnectionCredential struct {
 	AppSecretEnv string `toml:"app_secret_env"`
 	AccountID    string `toml:"account_id"`
 	TokenEnv     string `toml:"token_env"`
+	// Nextcloud Talk uses the generic connection record rather than a legacy
+	// top-level provider block. Secrets remain environment-variable references.
+	ServerURL   string `toml:"server_url"`
+	ListenAddr  string `toml:"listen_addr"`
+	WebhookPath string `toml:"webhook_path"`
+	SecretEnv   string `toml:"secret_env"`
 }
 
 type BotConnectionSessionMapping struct {

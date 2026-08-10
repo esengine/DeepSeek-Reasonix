@@ -14,6 +14,7 @@ import (
 
 	"reasonix/internal/bot"
 	"reasonix/internal/bot/feishu"
+	"reasonix/internal/bot/nextcloudtalk"
 	"reasonix/internal/bot/weixin"
 	"reasonix/internal/botruntime"
 	"reasonix/internal/config"
@@ -24,6 +25,10 @@ type BotConnectionCredentialView struct {
 	AppSecretEnv string `json:"appSecretEnv"`
 	AccountID    string `json:"accountId"`
 	TokenEnv     string `json:"tokenEnv"`
+	ServerURL    string `json:"serverUrl"`
+	ListenAddr   string `json:"listenAddr"`
+	WebhookPath  string `json:"webhookPath"`
+	SecretEnv    string `json:"secretEnv"`
 	SecretSet    bool   `json:"secretSet"`
 }
 
@@ -216,6 +221,24 @@ func (a *App) DiagnoseBotConnection(id string) (BotConnectionDiagnostic, error) 
 				phase = "install"
 				code = "connection_not_connected"
 				reportable = status == "error" || strings.TrimSpace(conn.LastError) != ""
+			} else if conn.Provider == string(bot.PlatformNextcloudTalk) && strings.TrimSpace(conn.Credential.ServerURL) == "" {
+				status = "warning"
+				message = "Nextcloud server URL 未配置。"
+				phase = "config"
+				code = "server_url_missing"
+				reportable = true
+			} else if conn.Provider == string(bot.PlatformNextcloudTalk) && strings.TrimSpace(conn.Credential.SecretEnv) == "" {
+				status = "warning"
+				message = "Nextcloud Talk shared secret 环境变量未配置。"
+				phase = "credential"
+				code = "secret_env_missing"
+				reportable = true
+			} else if conn.Provider == string(bot.PlatformNextcloudTalk) && !envIsSet(conn.Credential.SecretEnv) {
+				status = "warning"
+				message = conn.Credential.SecretEnv + " 未设置。"
+				phase = "credential"
+				code = "secret_missing"
+				reportable = true
 			} else if conn.Credential.AppSecretEnv != "" && strings.TrimSpace(conn.Credential.AppSecretEnv) != "" && !envIsSet(conn.Credential.AppSecretEnv) {
 				status = "warning"
 				message = conn.Credential.AppSecretEnv + " 未设置。"
@@ -257,7 +280,7 @@ func (a *App) TestBotConnection(id, target string) (BotConnectionDiagnostic, err
 		return botConnectionDiagnostic(nil, id, "missing", "config", "connection_missing", "未找到连接。", true), nil
 	}
 	target = firstNonEmptyBot(strings.TrimSpace(target), firstSessionRemoteID(conn.SessionMappings))
-	if conn.Provider != "feishu" && conn.Provider != "weixin" {
+	if conn.Provider != "feishu" && conn.Provider != "weixin" && conn.Provider != string(bot.PlatformNextcloudTalk) {
 		return botConnectionDiagnostic(conn, conn.ID, "warning", "send", "test_send_unsupported", "当前渠道暂不支持桌面端主动发送测试消息，可使用诊断检查基础配置。", false), nil
 	}
 	if target == "" {
@@ -280,6 +303,14 @@ func (a *App) TestBotConnection(id, target string) (BotConnectionDiagnostic, err
 		weixinCfg.AccountID = firstNonEmptyBot(conn.Credential.AccountID, weixinCfg.AccountID)
 		weixinCfg.TokenEnv = firstNonEmptyBot(conn.Credential.TokenEnv, weixinCfg.TokenEnv)
 		result, err = weixin.SendText(ctx, weixinCfg, target, "Reasonix bot 测试消息：连接和发送链路可用。")
+	case string(bot.PlatformNextcloudTalk):
+		result, err = nextcloudtalk.SendText(ctx, nextcloudtalk.Config{
+			ServerURL:    strings.TrimSpace(conn.Credential.ServerURL),
+			ListenAddr:   strings.TrimSpace(conn.Credential.ListenAddr),
+			WebhookPath:  strings.TrimSpace(conn.Credential.WebhookPath),
+			SecretEnv:    strings.TrimSpace(conn.Credential.SecretEnv),
+			ConnectionID: conn.ID,
+		}, target, "Reasonix bot 测试消息：Nextcloud Talk 发送链路可用。")
 	}
 	if err != nil {
 		return botConnectionDiagnostic(conn, conn.ID, "error", "send", "test_send_failed", err.Error(), true), nil
@@ -717,6 +748,7 @@ func botConnectionView(conn config.BotConnectionConfig) BotConnectionView {
 		Access: botAccessViewFromConfig(conn.Access),
 		Credential: BotConnectionCredentialView{
 			AppID: conn.Credential.AppID, AppSecretEnv: conn.Credential.AppSecretEnv, AccountID: conn.Credential.AccountID, TokenEnv: conn.Credential.TokenEnv,
+			ServerURL: conn.Credential.ServerURL, ListenAddr: conn.Credential.ListenAddr, WebhookPath: conn.Credential.WebhookPath, SecretEnv: conn.Credential.SecretEnv,
 			SecretSet: botCredentialSecretSet(conn),
 		},
 		SessionMappings: botSessionMappingViews(conn.SessionMappings, conn.WorkspaceRoot),
@@ -725,6 +757,9 @@ func botConnectionView(conn config.BotConnectionConfig) BotConnectionView {
 }
 
 func botCredentialSecretSet(conn config.BotConnectionConfig) bool {
+	if conn.Provider == string(bot.PlatformNextcloudTalk) {
+		return strings.TrimSpace(conn.Credential.SecretEnv) != "" && envIsSet(conn.Credential.SecretEnv)
+	}
 	if conn.Credential.AppSecretEnv != "" {
 		return envIsSet(conn.Credential.AppSecretEnv)
 	}
@@ -789,6 +824,10 @@ func botConnectionConfig(view BotConnectionView) config.BotConnectionConfig {
 			AppSecretEnv: strings.TrimSpace(view.Credential.AppSecretEnv),
 			AccountID:    strings.TrimSpace(view.Credential.AccountID),
 			TokenEnv:     strings.TrimSpace(view.Credential.TokenEnv),
+			ServerURL:    strings.TrimRight(strings.TrimSpace(view.Credential.ServerURL), "/"),
+			ListenAddr:   strings.TrimSpace(view.Credential.ListenAddr),
+			WebhookPath:  strings.TrimSpace(view.Credential.WebhookPath),
+			SecretEnv:    strings.TrimSpace(view.Credential.SecretEnv),
 		},
 		SessionMappings: botSessionMappingConfigs(view.SessionMappings, view.WorkspaceRoot),
 		LastError:       strings.TrimSpace(view.LastError),

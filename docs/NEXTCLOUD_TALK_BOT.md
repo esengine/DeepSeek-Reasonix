@@ -80,3 +80,17 @@ made persistent:
 
 Until those wiring changes land, this adapter is a foundation for #8117 rather
 than a user-visible stable channel.
+
+
+## Desktop setup
+
+Reasonix exposes Nextcloud Talk under **Settings -> Bots -> Nextcloud Talk**.
+The desktop form stores the server URL, listener and webhook path in the normal
+`[[bot.connections]]` record, while the shared secret is stored through the
+Reasonix secret environment store.
+
+The same connection can be used by the headless gateway:
+
+```sh
+reasonix bot start --channels nextcloud-talk --dir /path/to/project
+```

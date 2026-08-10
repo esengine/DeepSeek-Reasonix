@@ -47,7 +47,7 @@ func botCommand(args []string, version string) int {
 
 func botStart(args []string, version string) int {
 	fs := flag.NewFlagSet("bot start", flag.ContinueOnError)
-	channels := fs.String("channels", "", "启用的平台，逗号分隔：qq,feishu,lark,weixin")
+	channels := fs.String("channels", "", "启用的平台，逗号分隔：qq,feishu,lark,weixin,nextcloud-talk")
 	dir := fs.String("dir", "", "工作目录")
 	model := fs.String("model", "", "模型名（空则用 default_model）")
 
@@ -355,8 +355,23 @@ func botDoctor(args []string) int {
 		status := "ok"
 		if !conn.Enabled {
 			status = "disabled"
-		} else if len(conn.SessionMappings) == 0 && (conn.Provider == string(bot.PlatformFeishu) || conn.Provider == string(bot.PlatformWeixin)) {
+		} else if len(conn.SessionMappings) == 0 && (conn.Provider == string(bot.PlatformFeishu) || conn.Provider == string(bot.PlatformWeixin) || conn.Provider == string(bot.PlatformNextcloudTalk)) {
 			status = "missing"
+		}
+		if conn.Provider == string(bot.PlatformNextcloudTalk) && conn.Enabled {
+			if strings.TrimSpace(conn.Credential.ServerURL) == "" {
+				addCheck("bot.connection."+id+".server_url", "missing", "server_url is empty")
+			} else {
+				addCheck("bot.connection."+id+".server_url", "ok", conn.Credential.ServerURL)
+			}
+			secretEnv := strings.TrimSpace(conn.Credential.SecretEnv)
+			if secretEnv == "" {
+				addCheck("bot.connection."+id+".secret", "missing", "secret_env is empty")
+			} else if os.Getenv(secretEnv) == "" {
+				addCheck("bot.connection."+id+".secret", "missing", secretEnv+" is not set")
+			} else {
+				addCheck("bot.connection."+id+".secret", "ok", secretEnv+" is set")
+			}
 		}
 		addCheck("bot.connection."+id+".session_mappings", status,
 			fmt.Sprintf("provider=%s mappings=%d", conn.Provider, len(conn.SessionMappings)))
@@ -552,7 +567,7 @@ func botUsage() {
 	fmt.Print(`reasonix bot — multi-channel IM bot gateway (QQ / Feishu / WeChat)
 
 Usage:
-  reasonix bot start   [--channels qq,feishu,lark,weixin] [--dir PATH] [--model NAME]
+  reasonix bot start   [--channels qq,feishu,lark,weixin,nextcloud-talk] [--dir PATH] [--model NAME]
   reasonix bot doctor  [--json] [--deep]
   reasonix bot pairing list|approve|reject
   reasonix bot weixin-login [--timeout SECONDS]

@@ -67,6 +67,15 @@ func New(cfg Config, logger *slog.Logger) bot.Adapter {
 	}
 }
 
+// SendText sends a plain-text message to one Nextcloud Talk conversation.
+func SendText(ctx context.Context, cfg Config, chatID, text string) (bot.SendResult, error) {
+	return New(cfg, slog.Default()).Send(ctx, bot.OutboundMessage{
+		ChatID:   strings.TrimSpace(chatID),
+		ChatType: bot.ChatDirect,
+		Text:     text,
+	})
+}
+
 func (a *adapter) Platform() bot.Platform { return bot.PlatformNextcloudTalk }
 func (a *adapter) Name() string           { return "nextcloud-talk" }
 

@@ -1275,6 +1275,10 @@ function normalizeBotConnection(raw: any) {
       appSecretEnv: String(credential.appSecretEnv ?? "").trim(),
       accountId: String(credential.accountId ?? "").trim(),
       tokenEnv: String(credential.tokenEnv ?? "").trim(),
+      serverUrl: String(credential.serverUrl ?? "").trim(),
+      listenAddr: String(credential.listenAddr ?? "").trim(),
+      webhookPath: String(credential.webhookPath ?? "").trim(),
+      secretEnv: String(credential.secretEnv ?? "").trim(),
       secretSet: Boolean(credential.secretSet),
     },
     sessionMappings: asArray(raw?.sessionMappings).map((item: any) => ({
@@ -2274,8 +2278,8 @@ function NetworkSection({ s, busy, apply }: SectionProps) {
   );
 }
 
-type BotInstallTarget = "qq" | "feishu" | "lark" | "weixin";
-type BotOfficialInstallTarget = Exclude<BotInstallTarget, "qq">;
+type BotInstallTarget = "qq" | "feishu" | "lark" | "weixin" | "nextcloud-talk";
+type BotOfficialInstallTarget = Exclude<BotInstallTarget, "qq" | "nextcloud-talk">;
 const BOT_ALLOWLIST_TEXT_KEYS = [
   "qqUsers",
   "feishuUsers",
@@ -2299,10 +2303,14 @@ type BotInstallState = {
   timeLeft: number;
   message: string;
 };
-const BOT_INSTALL_TARGETS: BotInstallTarget[] = ["qq", "feishu", "lark", "weixin"];
+const BOT_INSTALL_TARGETS: BotInstallTarget[] = ["qq", "feishu", "lark", "weixin", "nextcloud-talk"];
 const BOT_INSTALL_DEFAULT_TIMEOUT_SECONDS = 300;
 const BOT_INSTALL_MIN_POLL_SECONDS = 3;
 const DEFAULT_QQ_SECRET_ENV = "QQ_BOT_APP_SECRET";
+const DEFAULT_NEXTCLOUD_TALK_SECRET_ENV = "NEXTCLOUD_TALK_BOT_SECRET";
+const DEFAULT_NEXTCLOUD_TALK_LISTEN_ADDR = "127.0.0.1:38017";
+const DEFAULT_NEXTCLOUD_TALK_WEBHOOK_PATH = "/reasonix/nextcloud-talk";
+const NEXTCLOUD_TALK_CONNECTION_ID = "nextcloud-talk";
 const QQ_CONNECTION_ID = "__qq_bot__";
 const BOT_PLATFORM_KEYS = ["qq", "feishu", "weixin"] as const;
 type BotPlatformKey = typeof BOT_PLATFORM_KEYS[number];
@@ -2314,10 +2322,11 @@ function botAllowlistKey(platform: BotPlatformKey, role: BotAllowlistRole): BotA
   return `${platform}${role}`;
 }
 
-function botConnectionPlatform(connection: BotConnectionView): BotPlatformKey {
+function botConnectionPlatform(connection: BotConnectionView): BotPlatformKey | null {
   if (connection.provider === "weixin") return "weixin";
   if (connection.provider === "qq") return "qq";
-  return "feishu";
+  if (connection.provider === "feishu") return "feishu";
+  return null;
 }
 
 function botPlatformLabel(platform: BotPlatformKey, t: ReturnType<typeof useT>): string {
@@ -2346,6 +2355,11 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   const [connectionSecrets, setConnectionSecrets] = useState<Record<string, string>>({});
   const [accessText, setAccessText] = useState<Record<string, string>>({});
   const [qqSecretValue, setQQSecretValue] = useState("");
+  const [nextcloudServerURL, setNextcloudServerURL] = useState("");
+  const [nextcloudListenAddr, setNextcloudListenAddr] = useState(DEFAULT_NEXTCLOUD_TALK_LISTEN_ADDR);
+  const [nextcloudWebhookPath, setNextcloudWebhookPath] = useState(DEFAULT_NEXTCLOUD_TALK_WEBHOOK_PATH);
+  const [nextcloudSecretEnv, setNextcloudSecretEnv] = useState(DEFAULT_NEXTCLOUD_TALK_SECRET_ENV);
+  const [nextcloudSecretValue, setNextcloudSecretValue] = useState("");
   const [expandedConnectionId, setExpandedConnectionId] = useState("");
   const [advancedMode, setAdvancedMode] = useState(false);
   const installRef = useRef(install);
@@ -2365,6 +2379,7 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
     setConnectionSecrets({});
     setAccessText({});
     setQQSecretValue("");
+    setNextcloudSecretValue("");
     setTestTargets({});
   }, [s.bot]);
   const focusAccessStep = () => {
@@ -2501,6 +2516,7 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   const installQrURL = install.result?.url ?? "";
   const installQrIsImage = installQrURL.startsWith("data:image/");
   const isQQInstallTarget = installTarget === "qq";
+  const isNextcloudInstallTarget = installTarget === "nextcloud-talk";
   const selectedInstallLabel = botTargetLabel(installTarget, t);
   const installUserCode = install.result?.userCode && installTarget !== "weixin" ? formatInstallUserCode(install.result.userCode) : "";
   const qqSecretEnv = draft.qq.appSecretEnv.trim() || DEFAULT_QQ_SECRET_ENV;
@@ -2731,6 +2747,54 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
     setDraft(nextDraft);
     setQQSecretValue("");
   };
+  const saveNextcloudTalkAndEnable = async () => {
+    const serverURL = nextcloudServerURL.trim().replace(/\/+$/, "");
+    const listenAddr = nextcloudListenAddr.trim() || DEFAULT_NEXTCLOUD_TALK_LISTEN_ADDR;
+    const webhookPath = nextcloudWebhookPath.trim() || DEFAULT_NEXTCLOUD_TALK_WEBHOOK_PATH;
+    const secretEnv = nextcloudSecretEnv.trim() || DEFAULT_NEXTCLOUD_TALK_SECRET_ENV;
+    const secret = nextcloudSecretValue.trim();
+    if (!serverURL || !secretEnv || !secret) return;
+    const now = new Date().toISOString();
+    const connection = normalizeBotConnection({
+      id: NEXTCLOUD_TALK_CONNECTION_ID,
+      provider: "nextcloud-talk",
+      domain: "nextcloud-talk",
+      label: "Nextcloud Talk",
+      enabled: true,
+      status: "connected",
+      model: "",
+      toolApprovalMode: "ask",
+      workspaceRoot: "",
+      access: defaultBotAccess(),
+      credential: {
+        appId: "",
+        appSecretEnv: "",
+        accountId: "",
+        tokenEnv: "",
+        serverUrl: serverURL,
+        listenAddr,
+        webhookPath: webhookPath.startsWith("/") ? webhookPath : `/${webhookPath}`,
+        secretEnv,
+        secretSet: true,
+      },
+      sessionMappings: [],
+      lastError: "",
+      createdAt: now,
+      updatedAt: now,
+    });
+    const nextDraft = botDraftWithDerivedGatewayState({
+      ...draft,
+      enabled: true,
+      connections: [...draft.connections.filter((item) => item.provider !== "nextcloud-talk"), connection],
+    });
+    await apply(async () => {
+      await app.SetBotSecret(secretEnv, secret);
+      await app.SetBotSettings(nextDraft);
+    });
+    setDraft(nextDraft);
+    setNextcloudSecretValue("");
+    setExpandedConnectionId(connection.id);
+  };
   const removeQQBot = async () => {
     const env = draft.qq.appSecretEnv.trim() || DEFAULT_QQ_SECRET_ENV;
     const nextDraft = botDraftWithDerivedGatewayState({
@@ -2754,7 +2818,10 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   const simpleAccessMode = draft.allowlist.allowAll ? "everyone" : "trusted";
   const connectedPlatforms = new Set<BotPlatformKey>();
   if (qqAdded) connectedPlatforms.add("qq");
-  for (const connection of draft.connections) connectedPlatforms.add(botConnectionPlatform(connection));
+  for (const connection of draft.connections) {
+    const platform = botConnectionPlatform(connection);
+    if (platform) connectedPlatforms.add(platform);
+  }
   const platformHasAllowlistText = (platform: BotPlatformKey) =>
     BOT_ALLOWLIST_ROLES.some((role) => allowlistText[botAllowlistKey(platform, role)].trim());
   const visibleAccessPlatforms = BOT_PLATFORM_KEYS.filter((platform) =>
@@ -3080,7 +3147,7 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
           <button type="button" className="btn btn--small" disabled={busy} onClick={() => void diagnoseConnection(selectedConnection.id)}>
             {t("settings.botDiagnose")}
           </button>
-          {(selectedConnection.provider === "feishu" || selectedConnection.provider === "weixin") ? (
+          {(selectedConnection.provider === "feishu" || selectedConnection.provider === "weixin" || selectedConnection.provider === "nextcloud-talk") ? (
             <button type="button" className="btn btn--small" disabled={busy || !selectedConnectionRemote} onClick={() => void testConnection(selectedConnection)}>
               {t("settings.botTest")}
             </button>
@@ -3194,6 +3261,43 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
             <span>{botConnectionCredentialSummary(selectedConnection, t)}</span>
             <strong>{selectedConnection.credential.secretSet ? t("settings.botSecretSet") : t("settings.botSecretMissing")}</strong>
           </div>
+          {selectedConnection.provider === "nextcloud-talk" ? (
+            <div className="bot-manual-form">
+              <div className="bot-card-field">
+                <span>{t("settings.botNextcloudServerURL")}</span>
+                <input
+                  className="mem-input"
+                  value={selectedConnection.credential.serverUrl ?? ""}
+                  disabled={busy}
+                  spellCheck={false}
+                  onChange={(event) => updateConnectionCredential(selectedConnection.id, { serverUrl: event.target.value })}
+                  onBlur={(event) => void persistConnectionCredential(selectedConnection.id, { serverUrl: event.currentTarget.value })}
+                />
+              </div>
+              <div className="bot-card-field">
+                <span>{t("settings.botNextcloudListenAddr")}</span>
+                <input
+                  className="mem-input"
+                  value={selectedConnection.credential.listenAddr ?? ""}
+                  disabled={busy}
+                  spellCheck={false}
+                  onChange={(event) => updateConnectionCredential(selectedConnection.id, { listenAddr: event.target.value })}
+                  onBlur={(event) => void persistConnectionCredential(selectedConnection.id, { listenAddr: event.currentTarget.value })}
+                />
+              </div>
+              <div className="bot-card-field">
+                <span>{t("settings.botNextcloudWebhookPath")}</span>
+                <input
+                  className="mem-input"
+                  value={selectedConnection.credential.webhookPath ?? ""}
+                  disabled={busy}
+                  spellCheck={false}
+                  onChange={(event) => updateConnectionCredential(selectedConnection.id, { webhookPath: event.target.value })}
+                  onBlur={(event) => void persistConnectionCredential(selectedConnection.id, { webhookPath: event.currentTarget.value })}
+                />
+              </div>
+            </div>
+          ) : null}
           {botConnectionSecretEnv(selectedConnection) ? (
             <div className="bot-secret-row">
               <input
@@ -3294,6 +3398,90 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
             </div>
           </div>
         </div>
+      ) : isNextcloudInstallTarget ? (
+        <div className="bot-connect-panel bot-connect-panel--manual">
+          <div className="bot-connect-panel__body">
+            <div className="bot-qq-simple__head">
+              <div>
+                <strong>{selectedInstallLabel}</strong>
+                <p>{t("settings.botInstallManualNextcloud")}</p>
+              </div>
+              <span className="bot-qq-simple__status">
+                <KeyRound aria-hidden="true" />
+                {t("settings.botInstallNextcloudHint")}
+              </span>
+            </div>
+            <div className="bot-manual-form">
+              <div className="bot-card-field">
+                <span>{t("settings.botNextcloudServerURL")}</span>
+                <input
+                  className="mem-input"
+                  value={nextcloudServerURL}
+                  disabled={busy}
+                  placeholder="https://cloud.example.com"
+                  spellCheck={false}
+                  onChange={(event) => setNextcloudServerURL(event.target.value)}
+                />
+              </div>
+              <div className="bot-card-field">
+                <span>{t("settings.botNextcloudListenAddr")}</span>
+                <input
+                  className="mem-input"
+                  value={nextcloudListenAddr}
+                  disabled={busy}
+                  placeholder={DEFAULT_NEXTCLOUD_TALK_LISTEN_ADDR}
+                  spellCheck={false}
+                  onChange={(event) => setNextcloudListenAddr(event.target.value)}
+                />
+              </div>
+              <div className="bot-card-field">
+                <span>{t("settings.botNextcloudWebhookPath")}</span>
+                <input
+                  className="mem-input"
+                  value={nextcloudWebhookPath}
+                  disabled={busy}
+                  placeholder={DEFAULT_NEXTCLOUD_TALK_WEBHOOK_PATH}
+                  spellCheck={false}
+                  onChange={(event) => setNextcloudWebhookPath(event.target.value)}
+                />
+              </div>
+              <div className="bot-card-field">
+                <span>{t("settings.botNextcloudSecretEnv")}</span>
+                <input
+                  className="mem-input"
+                  value={nextcloudSecretEnv}
+                  disabled={busy}
+                  placeholder={DEFAULT_NEXTCLOUD_TALK_SECRET_ENV}
+                  spellCheck={false}
+                  onChange={(event) => setNextcloudSecretEnv(event.target.value)}
+                />
+              </div>
+              <div className="bot-card-field">
+                <span>{t("settings.botAppSecret")}</span>
+                <input
+                  className="mem-input"
+                  type="password"
+                  value={nextcloudSecretValue}
+                  disabled={busy}
+                  placeholder={t("settings.botSecretPaste")}
+                  spellCheck={false}
+                  onChange={(event) => setNextcloudSecretValue(event.target.value)}
+                />
+              </div>
+              <div className="bot-qq-simple__actions">
+                <button
+                  type="button"
+                  className="btn btn--primary btn--small"
+                  disabled={busy || !nextcloudServerURL.trim() || !nextcloudSecretEnv.trim() || !nextcloudSecretValue.trim()}
+                  onClick={() => void saveNextcloudTalkAndEnable()}
+                >
+                  {t("settings.botSaveAndEnable")}
+                </button>
+              </div>
+              <div className="bot-connect-panel__hint">{t("settings.botNextcloudSetupHelp")}</div>
+            </div>
+          </div>
+        </div>
       ) : (
         <div className="bot-connect-panel bot-connect-panel--phone">
           <div className="bot-connect-panel__qr">
@@ -3337,7 +3525,7 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
             {installUserCode ? <code>{installUserCode}</code> : null}
             <div className="bot-connect-panel__actions">
               {!selectedInstallConnection && install.status !== "showing" && install.status !== "starting" ? (
-                <button type="button" className="btn btn--primary btn--small" disabled={busy} onClick={() => void startInstall(installTarget)}>
+                <button type="button" className="btn btn--primary btn--small" disabled={busy} onClick={() => void startInstall(installTarget as BotOfficialInstallTarget)}>
                   {install.status === "error" ? <RefreshCw aria-hidden="true" /> : <QrCode aria-hidden="true" />}
                   {install.status === "error" ? t("settings.botInstallRetry") : t("settings.botInstallGenerate")}
                 </button>
@@ -3748,6 +3936,7 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
                             <option value="qq">QQ</option>
                             <option value="feishu">{t("settings.botFeishu")}</option>
                             <option value="weixin">{t("settings.botWeixin")}</option>
+                            <option value="nextcloud-talk">{t("settings.botNextcloudTalk")}</option>
                           </select>
                         </label>
                         <label>
@@ -3872,6 +4061,7 @@ function botTargetLabel(target: BotInstallTarget, t: ReturnType<typeof useT>): s
     case "qq": return "QQ";
     case "lark": return "Lark";
     case "weixin": return t("settings.botWeixin");
+    case "nextcloud-talk": return t("settings.botNextcloudTalk");
     default: return t("settings.botFeishu");
   }
 }
@@ -3881,6 +4071,7 @@ function botTargetHint(target: BotInstallTarget, t: ReturnType<typeof useT>): st
     case "qq": return t("settings.botInstallQQHint");
     case "lark": return t("settings.botInstallLarkHint");
     case "weixin": return t("settings.botInstallWeixinHint");
+    case "nextcloud-talk": return t("settings.botInstallNextcloudHint");
     default: return t("settings.botInstallFeishuHint");
   }
 }
@@ -3904,8 +4095,10 @@ function botAccessReady(access: BotAccessView): boolean {
   return botAccessEntryCount(access) > 0;
 }
 
-function botInstallTargetMatchesConnection(target: BotOfficialInstallTarget, connection: BotConnectionView): boolean {
+function botInstallTargetMatchesConnection(target: BotInstallTarget, connection: BotConnectionView): boolean {
+  if (target === "qq") return connection.provider === "qq";
   if (target === "weixin") return connection.provider === "weixin";
+  if (target === "nextcloud-talk") return connection.provider === "nextcloud-talk";
   if (target === "lark") return connection.provider === "feishu" && connection.domain === "lark";
   return connection.provider === "feishu" && connection.domain !== "lark";
 }
@@ -3914,6 +4107,7 @@ function botInstallTargetForConnection(connection: BotConnectionView): BotInstal
   if (connection.provider === "weixin") return "weixin";
   if (connection.provider === "feishu" && connection.domain === "lark") return "lark";
   if (connection.provider === "qq") return "qq";
+  if (connection.provider === "nextcloud-talk") return "nextcloud-talk";
   return "feishu";
 }
 
@@ -3934,6 +4128,7 @@ function botConnectionLabel(connection: BotConnectionView, t: ReturnType<typeof 
   if (connection.domain === "lark") return "Lark";
   if (connection.provider === "weixin") return t("settings.botWeixin");
   if (connection.provider === "qq") return "QQ";
+  if (connection.provider === "nextcloud-talk") return t("settings.botNextcloudTalk");
   return t("settings.botFeishu");
 }
 
@@ -3946,11 +4141,15 @@ function botConnectionScopeLabel(connection: BotConnectionView, t: ReturnType<ty
 }
 
 function botConnectionSecretEnv(connection: BotConnectionView): string {
-  return connection.provider === "weixin" ? connection.credential.tokenEnv : connection.credential.appSecretEnv;
+  if (connection.provider === "weixin") return connection.credential.tokenEnv;
+  if (connection.provider === "nextcloud-talk") return connection.credential.secretEnv ?? "";
+  return connection.credential.appSecretEnv;
 }
 
 function botConnectionSecretPatch(connection: BotConnectionView, value: string): Partial<BotConnectionView["credential"]> {
-  return connection.provider === "weixin" ? { tokenEnv: value } : { appSecretEnv: value };
+  if (connection.provider === "weixin") return { tokenEnv: value };
+  if (connection.provider === "nextcloud-talk") return { secretEnv: value };
+  return { appSecretEnv: value };
 }
 
 function botConnectionCredentialSummary(connection: BotConnectionView, t: ReturnType<typeof useT>): string {
@@ -3958,6 +4157,9 @@ function botConnectionCredentialSummary(connection: BotConnectionView, t: Return
     return connection.credential.accountId
       ? t("settings.botCredentialAccount", { value: connection.credential.accountId })
       : t("settings.botCredentialLocalWeixin");
+  }
+  if (connection.provider === "nextcloud-talk") {
+    return connection.credential.serverUrl || t("settings.botCredentialConfigured");
   }
   if (connection.credential.appId) {
     return t("settings.botCredentialApp", { value: connection.credential.appId });

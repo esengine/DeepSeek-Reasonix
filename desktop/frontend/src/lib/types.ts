@@ -1954,6 +1954,10 @@ export interface BotConnectionCredentialView {
   appSecretEnv: string;
   accountId: string;
   tokenEnv: string;
+  serverUrl?: string;
+  listenAddr?: string;
+  webhookPath?: string;
+  secretEnv?: string;
   secretSet: boolean;
 }
 

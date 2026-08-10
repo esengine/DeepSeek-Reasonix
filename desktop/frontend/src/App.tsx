@@ -427,7 +427,7 @@ type HistoryViewState =
   | { kind: "history"; source: "scope"; filter: HistoryScopeFilter; sessions: SessionMeta[] }
   | { kind: "history"; source: "all"; sessions: SessionMeta[] }
   | { kind: "trash"; sessions: SessionMeta[] };
-type SidebarImPlatform = "qq" | "feishu" | "lark" | "weixin";
+type SidebarImPlatform = "qq" | "feishu" | "lark" | "weixin" | "nextcloud-talk";
 type SidebarImStatus = "connected" | "disabled" | "pending" | "error" | "disconnected";
 type SidebarImConnection = {
   id: string;
@@ -495,11 +495,12 @@ function saveDismissedTodoKeys(keys: ReadonlySet<string>): void {
 }
 
 function isSidebarImConnection(connection: BotConnectionView): boolean {
-  return connection.provider === "feishu" || connection.provider === "weixin";
+  return connection.provider === "feishu" || connection.provider === "weixin" || connection.provider === "nextcloud-talk";
 }
 
 function sidebarImPlatform(connection: BotConnectionView): SidebarImPlatform {
   if (connection.provider === "weixin") return "weixin";
+  if (connection.provider === "nextcloud-talk") return "nextcloud-talk";
   return connection.domain === "lark" ? "lark" : "feishu";
 }
 
@@ -507,6 +508,7 @@ function sidebarImPlatformLabel(platform: SidebarImPlatform, translate: Translat
   if (platform === "qq") return "QQ";
   if (platform === "lark") return "Lark";
   if (platform === "weixin") return translate("settings.botWeixin");
+  if (platform === "nextcloud-talk") return translate("settings.botNextcloudTalk");
   return translate("settings.botFeishu");
 }
 
@@ -569,6 +571,7 @@ function uniqueTrimmedValues(values: string[]): string[] {
 function sidebarImAllowlistUsers(bot: BotSettingsView, platform: SidebarImPlatform): string[] {
   if (platform === "qq") return uniqueTrimmedValues(asArray(bot.allowlist.qqUsers));
   if (platform === "weixin") return uniqueTrimmedValues(asArray(bot.allowlist.weixinUsers));
+  if (platform === "nextcloud-talk") return [];
   return uniqueTrimmedValues(asArray(bot.allowlist.feishuUsers));
 }
 
@@ -654,7 +657,9 @@ function sidebarImConnectionsFromBot(
       const workspaceRoot = botMappingWorkspaceRoot(mapping, connection.workspaceRoot);
       const status = sidebarImStatus(connection, bot.enabled);
       const title = connection.label.trim() || platformLabel;
-      const allowlistUsers = sidebarImAllowlistUsers(bot, platform);
+      const allowlistUsers = platform === "nextcloud-talk"
+        ? uniqueTrimmedValues(asArray(connection.access.users))
+        : sidebarImAllowlistUsers(bot, platform);
       const identityLabel = botMappingIdentityLabel(mapping);
       const mappedUserId = mapping?.userId.trim() ?? "";
       const subtitleParts = [
@@ -677,8 +682,8 @@ function sidebarImConnectionsFromBot(
         sessionSource,
         scope,
         workspaceRoot,
-        allowAll: bot.allowlist.allowAll,
-        allowlistEnabled: bot.allowlist.enabled,
+        allowAll: platform === "nextcloud-talk" ? connection.access.allowAll : bot.allowlist.allowAll,
+        allowlistEnabled: platform === "nextcloud-talk" ? connection.access.enabled : bot.allowlist.enabled,
         allowlistUsers,
         allowlistMatched: remoteId
           ? allowlistUsers.includes(remoteId) || (mappedUserId ? allowlistUsers.includes(mappedUserId) : false)
@@ -788,7 +793,7 @@ function SidebarImConnectionDetail({ connection, onClose, onOpenSession, onOpenS
     <div className="bot-detail">
       <section className="bot-detail__summary">
         <div className={`bot-detail__avatar bot-detail__avatar--${connection.platform}`} aria-hidden="true">
-          {connection.platform === "qq" ? "Q" : connection.platform === "weixin" ? "微" : connection.platform === "lark" ? "L" : "飞"}
+          {connection.platform === "qq" ? "Q" : connection.platform === "weixin" ? "微" : connection.platform === "nextcloud-talk" ? "N" : connection.platform === "lark" ? "L" : "飞"}
         </div>
         <div className="bot-detail__summary-main">
           <span>{translate("botDetail.subtitle")}</span>
