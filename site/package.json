@@ -13,6 +13,7 @@
     "test:e2e:operations": "node e2e/smb-operations.e2e.mjs",
     "test:e2e:collaboration": "node e2e/smb-collaboration.e2e.mjs",
     "test:e2e:modules": "node e2e/module-tour.e2e.mjs",
+    "test:e2e:real-ui": "node e2e/real-ui-default-port.e2e.mjs",
     "test:e2e:real": "node e2e/real-platform.e2e.mjs",
     "test:e2e:internet": "node e2e/internet-corpus.e2e.mjs",
     "test:e2e:agent": "node e2e/bounded-agent.e2e.mjs",
@@ -20,8 +21,8 @@
     "test:graph:performance": "node e2e/asset-graph-performance.mjs",
     "start:real": "node server/real-analysis-server.mjs",
     "security:scan": "node server/credential-scan.mjs",
-    "verify": "npm test && npm run build && npm run test:e2e && npm run test:e2e:agent",
-    "verify:real": "npm test && npm run build && npm run test:e2e:real"
+    "verify": "npm test && npm run build && npm run test:e2e:real-ui && npm run test:e2e && npm run test:e2e:agent",
+    "verify:real": "npm test && npm run build && npm run test:e2e:real-ui && npm run test:e2e:real"
   },
   "dependencies": {
     "@astrojs/sitemap": "^3.7.3",

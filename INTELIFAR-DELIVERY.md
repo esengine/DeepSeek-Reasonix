@@ -33,13 +33,16 @@ npm run test:e2e:smb
 npm run test:e2e:operations
 npm run test:e2e:collaboration
 npm run test:e2e:modules
+npm run test:e2e:real-ui
 npm run test:e2e:agent
 npm run test:e2e:agent:real
 npm run test:e2e:real
 npm run test:graph:performance
 ```
 
-真实模式使用服务端运行时密钥。开发环境会从 `MINERU_API_KEY`、`DEEPSEEK_API_KEY` 读取；若未配置，则查找工作区上层的 `apikey.txt`。生产环境应使用密钥管理服务或环境注入，不应挂载明文文件。`npm run start:real` 默认仅监听本机的同源分析网关。
+仓库根目录、`sdk/go` 和 `desktop` 是三个独立 Go 模块。上游 Reasonix 验收使用 `go.mod` 固定的 Go 1.26.5，并分别执行 `go test ./...`；只运行根目录命令不会覆盖两个嵌套模块。
+
+真实模式使用服务端运行时密钥。开发环境会从 `MINERU_API_KEY`、`DEEPSEEK_API_KEY` 读取；若未配置，则查找工作区上层的 `apikey.txt`。生产环境应使用密钥管理服务或环境注入，不应挂载明文文件。`npm run start:real` 默认仅监听 `http://127.0.0.1:4388/` 的本机同源分析网关；如需自定义，可通过 `PORT` 环境变量覆盖。
 
 启用小微企业账号与 SQLite 持久化模式：
 
@@ -77,6 +80,7 @@ npm run start:real
 - `artifacts/ip-asset-graph/`：可缩放神经网络桌面/节点/移动截图、10,000 节点与 100,000 关系性能结果及验收报告。
 - `artifacts/ip-asset-graph/acceptance-report.md`：关系全景能力、测试证据、99.0 分评分和适用边界。
 - `artifacts/ip-agent/`：受控任务助手桌面、来源回链、越界拦截、移动端、最终交付结构截图，以及离线和真实 DeepSeek 结果报告。
+- `artifacts/real-ui-port/`：4388 默认端口的首页、IP 全景图、IP 任务助手浏览器证据，以及上游 Go 实际执行结果与环境边界。
 - `artifacts/real-e2e/retry-history.md`：真实 MinerU 首次排队超时及延长等待后成功的完整记录。
 
 ## 实现状态与生产边界

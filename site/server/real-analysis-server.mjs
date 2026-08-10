@@ -639,6 +639,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       name: process.env.INTELIFAR_BOOTSTRAP_NAME ?? "空间所有者",
     } : { required: false },
   });
-  const url = await gateway.start(Number(process.env.PORT ?? 4322));
+  const url = await gateway.start(Number(process.env.PORT ?? 4388));
   process.stdout.write(`intelifar real analysis gateway listening on ${url}\n`);
 }
