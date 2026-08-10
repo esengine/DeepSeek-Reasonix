@@ -2188,10 +2188,10 @@ func (c *Controller) EnableInteractiveApproval() {
 	}); ok {
 		setter.SetPlannerPlanApprover(plannerPlanApprover{c: c})
 	}
-	if setter, ok := c.runner.(interface {
-		SetPlannerUserDecisionAsker(agent.PlannerUserDecisionAsker)
-	}); ok {
-		setter.SetPlannerUserDecisionAsker(plannerUserDecisionAsker{c: c})
+	// The planner holds the real ask tool, so it reaches the same approval
+	// surface the executor does instead of a parallel prose-question path.
+	if setter, ok := c.runner.(interface{ SetAsker(agent.Asker) }); ok {
+		setter.SetAsker(c)
 	}
 }
 
@@ -2219,38 +2219,6 @@ func (p plannerPlanApprover) RunWithPlannerApproval(ctx context.Context, plan st
 		c.completePlanTodos(todoArgs)
 	}
 	return nil
-}
-
-type plannerUserDecisionAsker struct {
-	c *Controller
-}
-
-func (p plannerUserDecisionAsker) RunWithPlannerUserDecision(ctx context.Context, _ string, question event.AskQuestion, run func(context.Context, string) error) error {
-	answers, err := p.c.Ask(ctx, []event.AskQuestion{question})
-	if err != nil {
-		return err
-	}
-	answer := plannerUserDecisionAnswer(question, answers)
-	if strings.TrimSpace(answer) == "" {
-		return nil
-	}
-	return run(ctx, answer)
-}
-
-func plannerUserDecisionAnswer(question event.AskQuestion, answers []event.AskAnswer) string {
-	for _, answer := range answers {
-		if answer.QuestionID != question.ID {
-			continue
-		}
-		selected := make([]string, 0, len(answer.Selected))
-		for _, item := range answer.Selected {
-			if s := strings.TrimSpace(item); s != "" {
-				selected = append(selected, s)
-			}
-		}
-		return strings.Join(selected, ", ")
-	}
-	return ""
 }
 
 func (c *Controller) newInteractiveGate() *permission.Gate {
