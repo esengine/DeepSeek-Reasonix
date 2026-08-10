@@ -191,7 +191,7 @@ await act(async () => {
 
 const compactButton = Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Compact") as HTMLButtonElement | undefined;
 if (!compactButton) throw new Error("compact display mode button did not render");
-const generalFieldLabels = Array.from(rootEl.querySelectorAll(".settings-section__body > .settings-field > .settings-field__copy > .settings-field__label"))
+const generalFieldLabels = Array.from(rootEl.querySelectorAll(".settings-section__body > .settings-field .settings-field__label"))
   .map((label) => label.textContent?.trim());
 eq(generalFieldLabels[0], "Desktop style", "general settings place desktop style first");
 eq(document.querySelectorAll(".step-limit-control").length, 0, "general settings hide executor and planner step-limit controls");

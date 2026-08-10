@@ -266,3 +266,28 @@ func TestRebuildTodoStatePreservesSameBatchReplaySemantics(t *testing.T) {
 		t.Fatalf("same-batch complete_step replay changed: %+v", a.todoState)
 	}
 }
+
+func TestRebuildTodoStateKeepsStepIdentityAcrossDuplicateCallIDs(t *testing.T) {
+	const sharedID = "call_0"
+	msgs := []provider.Message{
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID: sharedID, Name: "todo_write",
+			Arguments: `{"todos":[{"content":"first","status":"completed","step_id":"plan_step_01"},{"content":"target","status":"in_progress","step_id":"plan_step_02"}]}`,
+		}}},
+		{Role: provider.RoleTool, ToolCallID: sharedID, Name: "todo_write", Content: "Todos updated"},
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID: sharedID, Name: "complete_step",
+			Arguments: `{"step":"1","step_id":"plan_step_02"}`,
+		}}},
+		{Role: provider.RoleTool, ToolCallID: sharedID, Name: "complete_step", Content: "signed off"},
+	}
+
+	a := &Agent{}
+	a.rebuildTodoState(msgs)
+	if len(a.todoState) != 2 || a.todoState[0].Status != "completed" || a.todoState[1].Status != "completed" {
+		t.Fatalf("step identity did not override conflicting position across duplicate call IDs: %+v", a.todoState)
+	}
+	if a.todoState[0].StepID != "plan_step_01" || a.todoState[1].StepID != "plan_step_02" {
+		t.Fatalf("step identity was not preserved during replay: %+v", a.todoState)
+	}
+}

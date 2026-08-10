@@ -317,6 +317,10 @@ sequenceDiagram
 | `/queue followup` | 运行中消息排队为后续回合 | `/queue followup` |
 | `/queue collect` | 合并排队消息为一个后续回合 | `/queue collect` |
 | `/queue interrupt` | 取消当前任务并处理最新消息 | `/queue interrupt` |
+| `/queue list` / `/queue show <n\|id>` | 查看持久化排队内容 | `/queue list` |
+| `/queue delete <n\|id>` / `/queue move <n\|id> <位置>` | 删除或调整待处理项顺序 | `/queue move 2 1` |
+| `/queue pause` / `/queue resume` | 暂停或恢复自动派发 | `/queue resume` |
+| `/queue retry <n\|id>` / `/queue refresh <n\|id>` | 重试不确定项或刷新冻结引用 | `/queue retry 1` |
 | `/projects [关键词]` | 查看已索引项目工作区 | `/projects reasonix` |
 | `/use project <id\|名称>` | 将当前远端会话路由到已索引项目 | `/use project p1` |
 | `/use project default` | 清除项目覆盖，恢复配置路由 | `/use project default` |
@@ -332,10 +336,11 @@ sequenceDiagram
 - `/stop`、`/mode`、`/answer ...` 等 slash 命令不会被 Ask 快捷回复截获。
 - 如果没有待处理操作，`1` / `2` 会被当作普通消息或收到提示。
 
-默认队列模式是 `steer`：同一会话正在运行时，新消息会作为当前任务的
-mid-turn guidance 注入，而不是等完整回合结束。`queue_cap` 和 `queue_drop`
-可以在配置里限制排队堆积；`reasonix bot doctor --deep` 会显示当前队列、
-配对和角色诊断信息。
+默认队列模式是 `steer`：同一会话正在运行时，新消息会先持久化，再作为当前
+任务的 mid-turn guidance 注入；当前回合无法接收时，同一条消息会保留为后续
+回合。容量采用失败关闭：每个会话最多 64 条、单条 4 MiB、合计 64 MiB，
+`queue_drop` 不再删除旧消息。崩溃恢复后 Inbox 默认暂停，需检查后执行
+`/queue resume`。`reasonix bot doctor --deep` 会显示队列、配对和角色诊断信息。
 
 队列模式：
 

@@ -387,6 +387,33 @@ console.log("\ncomposer session draft");
   // running source session.
   const dom = installDom();
   const sent: Array<{ tab: string; text: string }> = [];
+  const inboxByTab = new Map<string, Array<{ id: string; preview: string }>>();
+  installBridgeApp({
+    InboxSnapshot: async (tabId: string) => {
+      const items = (inboxByTab.get(tabId) ?? []).map((item, position) => ({
+        ...item,
+        intent: "followup",
+        state: "queued",
+        byteSize: item.preview.length,
+        position: position + 1,
+      }));
+      return {
+        revision: items.length,
+        paused: false,
+        recovered: false,
+        items,
+        itemsCount: items.length,
+        bytes: items.reduce((sum, item) => sum + item.byteSize, 0),
+        maxItems: 64,
+        maxBytes: 64 * 1024 * 1024,
+      };
+    },
+    EnqueueInboxFollowup: async (tabId: string, display: string) => {
+      const item = { id: "durable-tab-a", preview: display };
+      inboxByTab.set(tabId, [...(inboxByTab.get(tabId) ?? []), item]);
+      return { itemId: item.id, disposition: "queued_followup", position: 1, paused: false };
+    },
+  });
   const { root, rerender } = await renderComposer({
     running: true,
     tabId: "tab-a",
@@ -424,13 +451,13 @@ console.log("\ncomposer session draft");
   });
   ok(document.querySelector(".composer-guidance-item") !== null, "session A restores its queued guidance after switching back");
 
+  inboxByTab.delete("tab-a"); // Controller dispatched and durably acked it.
   await rerender({ running: false });
   await act(async () => {
     await flushTimers();
   });
-  eq(sent.length, 1, "session A sends its queued guidance when its own turn finishes");
-  eq(sent[0]?.tab, "tab-a", "restored guidance stays routed to session A");
-  eq(sent[0]?.text, "follow up in A", "restored guidance keeps its original text");
+  eq(sent.length, 0, "session A completion does not duplicate the Controller-owned follow-up");
+  ok(document.querySelector(".composer-guidance-item") === null, "session A clears the durable item after its backend ack");
 
   await act(async () => {
     root.unmount();

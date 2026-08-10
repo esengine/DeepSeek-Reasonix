@@ -25,6 +25,7 @@ import (
 	"reasonix/internal/jobs"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
+	"reasonix/internal/sessioninbox"
 	"reasonix/internal/store"
 	"reasonix/internal/tool/builtin"
 )
@@ -138,6 +139,15 @@ func Serve(ctx context.Context, r io.Reader, w io.Writer, factory Factory, info 
 	conn.Handle("session/resume", svc.sessionResume)
 	conn.Handle("session/prompt", svc.sessionPrompt)
 	conn.Handle(sessionSteerMethod, svc.sessionSteer)
+	conn.Handle(sessionInboxEnqueueMethod, svc.sessionInboxEnqueue)
+	conn.Handle(sessionInboxListMethod, svc.sessionInboxList)
+	conn.Handle(sessionInboxGetMethod, svc.sessionInboxGet)
+	conn.Handle(sessionInboxUpdateMethod, svc.sessionInboxUpdate)
+	conn.Handle(sessionInboxDeleteMethod, svc.sessionInboxDelete)
+	conn.Handle(sessionInboxMoveMethod, svc.sessionInboxMove)
+	conn.Handle(sessionInboxPauseMethod, svc.sessionInboxSetPaused)
+	conn.Handle(sessionInboxRetryMethod, svc.sessionInboxRetry)
+	conn.Handle(sessionInboxRefreshMethod, svc.sessionInboxRefresh)
 	conn.Handle(sessionReloadExtensionsMethod, svc.sessionReloadExtensions)
 	conn.Handle(sessionStatusMethod, svc.sessionStatus)
 	conn.Handle("session/set_config_option", svc.sessionSetConfigOption)
@@ -598,7 +608,21 @@ func (s *service) initialize(_ context.Context, raw json.RawMessage) (any, error
 			MCPCapabilities: MCPCapabilities{HTTP: true, SSE: false},
 			Meta: map[string]any{
 				"reasonix.io": ReasonixExtensionCapabilities{
-					SessionSteer:            &SessionSteerCapability{Method: sessionSteerMethod},
+					SessionSteer: &SessionSteerCapability{Method: sessionSteerMethod},
+					SessionInbox: &SessionInboxCapability{
+						SchemaVersion: sessionInboxSchemaVersion,
+						Methods: map[string]string{
+							"enqueue":   sessionInboxEnqueueMethod,
+							"list":      sessionInboxListMethod,
+							"get":       sessionInboxGetMethod,
+							"update":    sessionInboxUpdateMethod,
+							"delete":    sessionInboxDeleteMethod,
+							"move":      sessionInboxMoveMethod,
+							"setPaused": sessionInboxPauseMethod,
+							"retry":     sessionInboxRetryMethod,
+							"refresh":   sessionInboxRefreshMethod,
+						},
+					},
 					SessionReloadExtensions: &SessionReloadExtensionsCapability{Method: sessionReloadExtensionsMethod},
 					ExtensionSurface:        &ExtensionSurfaceCapability{Supported: true, SchemaVersion: reasonixExtensionSurfaceSchemaVersion},
 				},
@@ -1152,7 +1176,7 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 		s.finishTurn(ctx, sess)
 		cancel()
 	}()
-	runErr := sess.ctrl.RunTurn(runCtx, text)
+	runErr := drainACPInbox(runCtx, sess.ctrl, sess.ctrl.RunTurn(runCtx, text))
 
 	statusEvent := sess.status.finishTurn(
 		runErr,
@@ -1180,8 +1204,9 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 	return res, nil
 }
 
-// sessionSteer injects user guidance into an active turn and acknowledges once
-// the agent has queued it for the next safe loop boundary.
+// sessionSteer durably persists guidance then attempts mid-turn admission.
+// Parameter/session errors remain RPC errors; busy rejection returns a
+// disposition so clients can keep the durable follow-up.
 func (s *service) sessionSteer(_ context.Context, raw json.RawMessage) (any, error) {
 	var p SessionSteerParams
 	if err := json.Unmarshal(raw, &p); err != nil {
@@ -1195,10 +1220,32 @@ func (s *service) sessionSteer(_ context.Context, raw json.RawMessage) (any, err
 	if text == "" {
 		return nil, &RPCError{Code: ErrInvalidParams, Message: sessionSteerMethod + ": empty prompt"}
 	}
-	if !sess.currentCtrl().TrySteer(text) {
+	ctrl := sess.currentCtrl()
+	if api, ok := ctrl.(control.SessionAPI); ok {
+		if ensurer, ok := any(api).(interface{ EnsureSessionPath() }); ok {
+			ensurer.EnsureSessionPath()
+		}
+		// Durable path when the session has a transcript path; ephemeral
+		// test controllers without persistence fall back to TrySteer.
+		if api.SessionPath() != "" {
+			rec, err := api.TryEnqueueAndSteer(control.InboxRequest{
+				Intent:  sessioninbox.IntentSteer,
+				Display: text,
+				Raw:     text,
+				Submit:  text,
+				Source:  "acp",
+			})
+			if err != nil {
+				return nil, &RPCError{Code: ErrInvalidRequest, Message: sessionSteerMethod + ": " + err.Error()}
+			}
+			return SessionSteerResult{ItemID: rec.ItemID, Disposition: string(rec.Disposition)}, nil
+		}
+	}
+	// Compatibility for older controller stubs / pathless sessions.
+	if !ctrl.TrySteer(text) {
 		return nil, &RPCError{Code: ErrInvalidRequest, Message: sessionSteerMethod + ": session has no active prompt"}
 	}
-	return SessionSteerResult{}, nil
+	return SessionSteerResult{Disposition: "steer_accepted"}, nil
 }
 
 // sessionReloadExtensions rebuilds a session's agent runtime in place —

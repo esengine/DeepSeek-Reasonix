@@ -167,6 +167,16 @@ func SessionJobsDir(sessionPath string) string {
 	return sessionStem(sessionPath) + ".jobs"
 }
 
+// SessionInboxDir is the durable session-level instruction inbox
+// (<id>.inbox/). Manifest metadata and frozen prompt blobs live here.
+func SessionInboxDir(sessionPath string) string {
+	sessionPath = strings.TrimSpace(sessionPath)
+	if sessionPath == "" {
+		return ""
+	}
+	return sessionStem(sessionPath) + ".inbox"
+}
+
 // SessionCleanupPending is the delayed-cleanup marker (<id>.cleanup-pending.json).
 func SessionCleanupPending(sessionPath string) string {
 	sessionPath = strings.TrimSpace(sessionPath)
