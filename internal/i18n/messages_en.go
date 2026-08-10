@@ -332,7 +332,7 @@ var English = Messages{
 	GoalPausedReason:             "paused by the user",
 	GoalPausedFmt:                "goal is paused (%s) — use /goal resume to continue",
 	GoalBudgetExtended:           "goal resumed — one additional turn slice added",
-	GoalRuntimeFmt:               "runtime: turns %d/%d, tokens %d, no-progress %d/%d, extensions %d",
+	GoalRuntimeFmt:               "runtime: turns %d/%d, tokens %d, requests %d, no-progress %d (observational), extensions %d",
 	GoalRuntimeLastReason:        "last reason",
 	ModelSwitchUnavailable:       "model switching is unavailable in this session",
 	ModelSwitchBusy:              "finish or cancel active work and stop background jobs before switching models",

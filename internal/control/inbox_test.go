@@ -207,7 +207,10 @@ func TestThirtySteersApplyAndAckExactlyOnce(t *testing.T) {
 		}
 	}
 	close(prov.release)
-	waitForDone(t, done)
+	// Thirty durable round trips are real filesystem work; a loaded Windows
+	// runner spends most of the default five seconds before the turn is even
+	// released. This asserts exactly-once acknowledgement, not latency.
+	waitForDoneWithin(t, done, 60*time.Second)
 
 	if items := c.InboxSnapshot().Items; len(items) != 0 {
 		t.Fatalf("accepted steers were not all acknowledged: %+v", items)

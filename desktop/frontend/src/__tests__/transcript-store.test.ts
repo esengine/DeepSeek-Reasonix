@@ -326,7 +326,13 @@ console.log("\ntranscript store");
 // ── markdown cache budget + LRU ─────────────────────────────────────────────
 {
   const store = new TranscriptStore(new FakeBackend([]), { markdownBudgetBytes: 120 });
-  const parsed = (text: string) => ({ source: text, blocks: [], bytes: text.length * 2 });
+  const parsed = (text: string) => ({
+    source: text,
+    blocks: [],
+    selectionText: text,
+    selectionRevision: 1,
+    bytes: text.length * 2,
+  });
   store.setMarkdown("e1", 1, parsed("a".repeat(20))); // 40 bytes
   store.setMarkdown("e2", 1, parsed("b".repeat(20)));
   store.setMarkdown("e3", 1, parsed("c".repeat(20)));
@@ -335,6 +341,11 @@ console.log("\ntranscript store");
   eq(store.getMarkdown("e2", 1), undefined, "markdown LRU evicts the least-recently-used entry");
   ok(store.getMarkdown("e1", 1) !== undefined, "recently read markdown entry survives");
   eq(store.getMarkdown("e1", 2), undefined, "markdown entries key on entryId + revision");
+
+  const release = store.pinMarkdown("e1", 1);
+  store.setMarkdown("e5", 1, parsed("e".repeat(50)));
+  ok(store.getMarkdown("e1", 1) !== undefined, "active selection pins its markdown projection");
+  release();
 }
 
 // ── lazy content refs ───────────────────────────────────────────────────────

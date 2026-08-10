@@ -209,6 +209,9 @@ func buildReviewEvidence(failure *FailureEvent, diagnosis []string, proposal Pro
 	if proposal.PlanAfter != "" {
 		p["plan_after"] = samplePreview(proposal.PlanAfter)
 	}
+	if proposal.PlanDiff != "" {
+		p["plan_diff"] = samplePreview(proposal.PlanDiff)
+	}
 	if proposal.Subject != "" {
 		p["subject"] = clipBytes(proposal.Subject, 300)
 	}

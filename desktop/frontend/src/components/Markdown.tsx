@@ -302,7 +302,7 @@ const StreamingMarkdownTail = memo(function StreamingMarkdownTail({ text }: { te
     previousTextRef.current = text;
   }, [text]);
 
-  return <div ref={elementRef} className="md md--stream-tail" />;
+  return <div ref={elementRef} className="md md--stream-tail" data-transcript-selection-source-fallback />;
 });
 
 export const Markdown = memo(function Markdown({
@@ -359,7 +359,7 @@ export const Markdown = memo(function Markdown({
 
   const committedView = (
     <>
-      <Suspense fallback={<div className="md">{renderedText}</div>}>
+      <Suspense fallback={<div className="md" data-transcript-selection-source-fallback>{renderedText}</div>}>
         {sections.length === 1 ? (
           <MarkdownRenderer text={renderedText} plainStatusBlocks={plainStatusBlocks} />
         ) : (
@@ -377,12 +377,14 @@ export const Markdown = memo(function Markdown({
   if (streaming || legacyMode) return committedView;
 
   return (
-    <Suspense fallback={<div className="md">{text}</div>}>
+    <Suspense fallback={<div className="md" data-transcript-selection-source-fallback>{text}</div>}>
       <MarkdownHistory
         text={text}
         plainStatusBlocks={plainStatusBlocks}
         entryId={entryId}
-        fallback={wasStreamingRef.current ? committedView : <div className="md">{text}</div>}
+        fallback={wasStreamingRef.current
+          ? committedView
+          : <div className="md" data-transcript-selection-source-fallback>{text}</div>}
         onParsed={handleWorkerParsed}
         onError={handleWorkerError}
       />

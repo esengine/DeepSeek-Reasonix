@@ -8,7 +8,7 @@ import { asArray } from "./array";
 import { addBreadcrumb } from "./breadcrumbs";
 import { app, onEvent, onReady, onRuntimeRebuilt, onTabMeta, onTopicActivation } from "./bridge";
 import { invalidateCache } from "./composerHistory";
-import { formatContextMaintenanceNotice } from "./contextMaintenanceTypes";
+import { formatContextMaintenanceNotice, isNewMaintenanceOperation, rememberMaintenanceOperation } from "./contextMaintenanceTypes";
 import { formatGuardianAssessmentNotice } from "./guardianEvents";
 import { invalidateSharedQuery } from "./queryCoalesce";
 import { createRafBatch } from "./rafBatch";
@@ -467,6 +467,9 @@ interface State {
   // title…). Drives right-panel snapshot refreshes so sub-agent activity keeps
   // the session metrics live; state.usage stays executor-gated for the gauge.
   usageSeq: number;
+  // Bounded set of context_maintenance operationIds already shown as notices
+  // so reconnect/replay does not insert duplicate timeline cards.
+  seenMaintenanceOps: string[];
   // Extension UI surfaces (stage 8b2). See the ExtensionStatusEntry block
   // above for the keying/lifecycle rules.
   extensionStatuses: Record<string, ExtensionStatusEntry>;
@@ -524,6 +527,7 @@ export const initialState: State = {
   sessionGen: 0,
   contextPanelSeq: 0,
   usageSeq: 0,
+  seenMaintenanceOps: [],
   extensionStatuses: {},
   extensionNotifications: [],
   extensionGenerations: {},
@@ -1701,7 +1705,9 @@ function applyEvent(s: State, e: WireEvent): State {
     case "context_maintenance": {
       const m = e.maintenance;
       if (!m || m.status === "noop") return s;
-      return appendNoticeToState(s, m.status === "failed" ? "warn" : "info", formatContextMaintenanceNotice(m, t), m.reason);
+      if (!isNewMaintenanceOperation(s.seenMaintenanceOps, m.operationId)) return s;
+      const next = appendNoticeToState(s, m.status === "failed" ? "warn" : "info", formatContextMaintenanceNotice(m, t), m.reason);
+      return { ...next, seenMaintenanceOps: rememberMaintenanceOperation(s.seenMaintenanceOps, m.operationId) };
     }
     case "phase":
       return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "phase", id: `p${s.seq}`, text: e.text ?? "" }] };

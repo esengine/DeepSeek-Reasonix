@@ -199,12 +199,8 @@ func assertTaskToolConfigEqual(t *testing.T, a, b *TaskTool) {
 			[3]int{a.maxSteps, a.contextWindow, a.recentKeep},
 			[3]int{b.maxSteps, b.contextWindow, b.recentKeep})
 	}
-	if a.softCompactRatio != b.softCompactRatio || a.toolResultSnipRatio != b.toolResultSnipRatio ||
-		a.compactRatio != b.compactRatio || a.compactForceRatio != b.compactForceRatio || a.temperature != b.temperature {
+	if a.compactRatio != b.compactRatio || a.temperature != b.temperature {
 		t.Fatalf("ratio/temp mismatch")
-	}
-	if a.contextEditing != b.contextEditing {
-		t.Fatalf("context editing mismatch: %q/%q", a.contextEditing, b.contextEditing)
 	}
 	if a.archiveDir != b.archiveDir || a.sysPrompt != b.sysPrompt || a.keepPolicy != b.keepPolicy {
 		t.Fatalf("archive/sys/keep mismatch: archive=%q/%q sys=%q/%q keep=%v/%v",

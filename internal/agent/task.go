@@ -199,7 +199,7 @@ func (b foregroundOnlyBash) Execute(ctx context.Context, args json.RawMessage) (
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
 	if p.RunInBackground {
-		return "", fmt.Errorf("background bash is unavailable in subagents; run a foreground command or ask the parent agent to start a background job")
+		return "", tool.Blocked("blocked: background bash is unavailable in subagents; run a foreground command or ask the parent agent to start a background job")
 	}
 	return b.inner.Execute(ctx, args)
 }
@@ -227,7 +227,7 @@ func (readOnlyBash) Schema() json.RawMessage {
 
 func (b readOnlyBash) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	if !permission.BashCommandIsReadOnly(args) {
-		return "blocked: read-only subagents can run only permission-classified foreground read-only commands", nil
+		return "", tool.Blocked("blocked: read-only subagents can run only permission-classified foreground read-only commands")
 	}
 	return b.inner.Execute(ctx, args)
 }
@@ -248,13 +248,10 @@ type TaskTool struct {
 	parentReg                     *tool.Registry
 	maxSteps                      int
 	contextWindow                 int
-	softCompactRatio              float64
-	toolResultSnipRatio           float64
 	compactRatio                  float64
-	compactForceRatio             float64
 	recentKeep                    int
 	temperature                   float64
-	contextEditing, archiveDir    string
+	archiveDir                    string
 	keepPolicy                    KeepPolicy
 	sysPrompt                     string
 	gate                          Gate
@@ -326,26 +323,22 @@ func NewTaskToolWithOptions(opts TaskToolOptions) *TaskTool {
 		sysPrompt = DefaultTaskSystemPrompt
 	}
 	return &TaskTool{
-		prov:                opts.Provider,
-		pricing:             opts.Pricing,
-		parentReg:           opts.ParentRegistry,
-		maxSteps:            opts.MaxSteps,
-		contextWindow:       opts.ContextWindow,
-		recentKeep:          opts.RecentKeep,
-		softCompactRatio:    opts.SoftCompactRatio,
-		toolResultSnipRatio: opts.ToolResultSnipRatio,
-		compactRatio:        opts.CompactRatio,
-		compactForceRatio:   opts.CompactForceRatio,
-		contextEditing:      normalizeContextEditing(opts.ContextEditing),
-		temperature:         opts.Temperature,
-		archiveDir:          opts.ArchiveDir,
-		keepPolicy:          opts.KeepPolicy,
-		sysPrompt:           sysPrompt,
-		gate:                opts.Gate,
-		subagentModel:       opts.SubagentModel,
-		subagentEffort:      opts.SubagentEffort,
-		resolveProvider:     opts.ResolveProvider,
-		maxSubagentDepth:    DefaultMaxSubagentDepth,
+		prov:             opts.Provider,
+		pricing:          opts.Pricing,
+		parentReg:        opts.ParentRegistry,
+		maxSteps:         opts.MaxSteps,
+		contextWindow:    opts.ContextWindow,
+		recentKeep:       opts.RecentKeep,
+		compactRatio:     opts.CompactRatio,
+		temperature:      opts.Temperature,
+		archiveDir:       opts.ArchiveDir,
+		keepPolicy:       opts.KeepPolicy,
+		sysPrompt:        sysPrompt,
+		gate:             opts.Gate,
+		subagentModel:    opts.SubagentModel,
+		subagentEffort:   opts.SubagentEffort,
+		resolveProvider:  opts.ResolveProvider,
+		maxSubagentDepth: DefaultMaxSubagentDepth,
 	}
 }
 
@@ -614,24 +607,6 @@ func (r *ReadOnlyTaskTool) Execute(ctx context.Context, args json.RawMessage) (s
 	return r.task.RunProfileSpec(ctx, spec)
 }
 
-// childMaxSteps resolves a sub-agent's step budget. An explicit request wins.
-// Otherwise mirror the parent: a finite parent caps the child at half its
-// budget (min 5) so a delegated sub-task stays shorter than the whole turn; an
-// unbounded parent yields an unbounded child (it shares the parent's ctx, so
-// cancelling the turn stops it, and it compacts its own context — the same
-// bounds the parent has). Shared by task, read_only_task, and parallel_tasks
-// children so the default cannot drift per call site.
-func (t *TaskTool) childMaxSteps(requested int) int {
-	if requested > 0 {
-		return requested
-	}
-	if t.maxSteps <= 0 {
-		return 0
-	}
-	half := max(t.maxSteps/2, 5)
-	return half
-}
-
 func (t *TaskTool) effectiveProfile(model, effort string) (string, string) {
 	model = strings.TrimSpace(model)
 	effort = strings.TrimSpace(effort)
@@ -789,7 +764,7 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 		spec.Worker.SystemPrompt = t.sysPrompt
 	}
 
-	maxSteps := t.childMaxSteps(spec.Sched.MaxSteps)
+	maxSteps := t.childMaxStepsForContext(ctx, spec.Sched.MaxSteps)
 	childDepth, err := t.nextSubagentDepth(ctx)
 	if err != nil {
 		return "", err
@@ -1637,31 +1612,27 @@ func (t *TaskTool) runReadOnlySubSession(ctx context.Context, prompt string, sub
 // must stay uniform across those paths — add new fields here, not at call sites.
 func (t *TaskTool) subagentOptions(ctx context.Context, maxSteps int, pricing *provider.Pricing, ctxWin, childDepth int, recoveryTaskID string, mutationObserver *checkpoint.MutationObserver) Options {
 	opts := Options{
-		MaxSteps:            maxSteps,
-		Temperature:         t.temperature,
-		Pricing:             pricing,
-		UsageSource:         event.UsageSourceSubagent,
-		Gate:                t.gate,
-		ContextWindow:       ctxWin,
-		RecentKeep:          t.recentKeep,
-		SoftCompactRatio:    t.softCompactRatio,
-		ToolResultSnipRatio: t.toolResultSnipRatio,
-		CompactRatio:        t.compactRatio,
-		CompactForceRatio:   t.compactForceRatio,
-		ContextEditing:      t.contextEditing,
-		ArchiveDir:          t.archiveDir,
-		KeepPolicy:          t.keepPolicy,
-		ResponseLanguage:    ResponseLanguageFromContext(ctx),
-		ReasoningLanguage:   ReasoningLanguageFromContext(ctx),
-		SubagentDepth:       childDepth,
-		MaxSubagentDepth:    t.maxDepth(),
-		DeliveryProfile:     t.deliveryProfile,
-		Ablation:            t.ablation,
-		WorkspaceLease:      t.workspaceLease,
-		RecoveryGate:        t.recoveryGate,
-		RecoveryAgentID:     "subagent",
-		RecoveryTaskID:      recoveryTaskID,
-		MutationObserver:    mutationObserver,
+		MaxSteps:          maxSteps,
+		Temperature:       t.temperature,
+		Pricing:           pricing,
+		UsageSource:       event.UsageSourceSubagent,
+		Gate:              t.gate,
+		ContextWindow:     ctxWin,
+		RecentKeep:        t.recentKeep,
+		CompactRatio:      t.compactRatio,
+		ArchiveDir:        t.archiveDir,
+		KeepPolicy:        t.keepPolicy,
+		ResponseLanguage:  ResponseLanguageFromContext(ctx),
+		ReasoningLanguage: ReasoningLanguageFromContext(ctx),
+		SubagentDepth:     childDepth,
+		MaxSubagentDepth:  t.maxDepth(),
+		DeliveryProfile:   t.deliveryProfile,
+		Ablation:          t.ablation,
+		WorkspaceLease:    t.workspaceLease,
+		RecoveryGate:      t.recoveryGate,
+		RecoveryAgentID:   "subagent",
+		RecoveryTaskID:    recoveryTaskID,
+		MutationObserver:  mutationObserver,
 	}
 	return opts
 }

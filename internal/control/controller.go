@@ -1586,8 +1586,8 @@ func (c *Controller) applyGoalCommand(input, display string) bool {
 		rt := c.GoalRuntime()
 		c.notice(fmt.Sprintf(i18n.M.GoalCurrentFmt, goal))
 		c.notice(fmt.Sprintf(i18n.M.GoalRuntimeFmt,
-			rt.TurnsUsed, rt.TurnsLimit, rt.TokensUsed,
-			rt.NoProgressTurns, rt.NoProgressLimit, rt.BudgetExtensions))
+			rt.TurnsUsed, rt.TurnsLimit, rt.TokensUsed, rt.RequestsUsed,
+			rt.NoProgressTurns, rt.BudgetExtensions))
 		if rt.LastReason != "" {
 			c.noticeDetail(i18n.M.GoalRuntimeLastReason, rt.LastReason)
 		}
@@ -3560,7 +3560,7 @@ func (c *Controller) cacheColdAfter() time.Duration {
 	}
 	// 查询路径只读：LoadForRootReadOnly 不触发配置迁移写盘（评审 #7168
 	// 第 4 点）；失败时保守回退 24h（DeepSeek/未知 vendor 默认），避免
-	// 提前触发 PruneStaleToolResults 改写仍可命中的缓存历史。
+	// 把 cache TTL 过期误当成历史改写信号（resume 只记录 warm/cold/unknown）。
 	cfg, err := config.LoadForRootReadOnly(c.workspaceRoot)
 	if err != nil {
 		return 24 * time.Hour
@@ -4740,19 +4740,15 @@ func (c *Controller) SessionPersistedState() (agent.PersistedState, bool) {
 	return c.executor.Session().PersistedState(c.SessionPath())
 }
 
-// ContextSnapshot returns (usedTokens, contextWindow) from the most recent
-// turn. Both zero means no data yet — a gauge hides itself.
-// usedTokens is promptTokens + completionTokens so the GUI breakdown and
-// gauge reflect the full token usage, not just the prompt fill.
+// ContextSnapshot returns (usedTokens, contextWindow) for the gauge. usedTokens
+// is what the next request will send, measured the way the compaction trigger
+// measures it, so the gauge and the trigger can never disagree. Both zero means
+// no data yet — a gauge hides itself.
 func (c *Controller) ContextSnapshot() (int, int) {
 	if c.executor == nil {
 		return 0, 0
 	}
-	u := c.executor.LastUsage()
-	if u == nil {
-		return 0, c.executor.ContextWindow()
-	}
-	return u.PromptTokens + u.CompletionTokens, c.executor.ContextWindow()
+	return c.executor.ContextUsedTokens(), c.executor.ContextWindow()
 }
 
 // CompactRatio returns the auto-compaction threshold as a fraction of the window

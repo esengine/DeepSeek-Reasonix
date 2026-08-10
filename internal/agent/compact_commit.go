@@ -17,44 +17,43 @@ type summaryProjectionCommit struct {
 	sourceTokens, projectionTokens                   int
 }
 
-// commitSummaryProjection performs the final CAS, content-addressed archive,
-// and sidecar switch after all network and interceptor work has completed.
+// commitSummaryProjection CAS-installs a checkpoint under compactionMu:
+// transcript version/hash, projection version, and generation must still match.
+// The maintenance event is emitted only after the lock is released so a sink
+// that re-enters ContextMaintenanceSnapshot cannot deadlock.
 func (a *Agent) commitSummaryProjection(commit summaryProjectionCommit) (CompactionState, error) {
-	current, currentVersion := a.session.snapshotMessagesVersion()
+	state := a.summaryProjectionState(commit)
 	a.compactionMu.Lock()
-	currentProjectionVersion := a.compactionState.Projection.ProjectionVersion
-	currentGeneration := a.compactionState.Generation
-	a.compactionMu.Unlock()
-	if currentVersion != commit.transcriptVersion || len(current) != len(commit.canonical) ||
+	current, currentVersion := a.session.snapshotMessagesVersion()
+	if currentVersion != commit.transcriptVersion ||
+		len(current) != len(commit.canonical) ||
 		coveredPrefixHash(current, len(current)) != coveredPrefixHash(commit.canonical, len(commit.canonical)) ||
-		currentProjectionVersion != commit.projectionVersion || currentGeneration != commit.generation {
+		a.compactionState.Projection.ProjectionVersion != commit.projectionVersion ||
+		a.compactionState.Generation != commit.generation {
+		a.compactionMu.Unlock()
 		return CompactionState{}, errCompressStaleContext
 	}
-
-	archive := ""
-	if a.archiveDir != "" {
-		path, err := archiveMessages(a.archiveDir, commit.fold)
-		if err != nil {
-			return CompactionState{}, fmt.Errorf("archive: %w", err)
-		}
-		archive = path
-	}
-	state := a.summaryProjectionState(commit, archive)
-	if err := a.installProjectionIfCurrent(state, commit.projectionVersion, commit.generation); err != nil {
+	prev := a.compactionState
+	a.compactionState = state
+	if err := a.persistCompactionStateLocked(); err != nil {
+		a.compactionState = prev
+		a.compactionMu.Unlock()
 		if errors.Is(err, errCompressStaleContext) {
 			return CompactionState{}, err
 		}
 		return CompactionState{}, fmt.Errorf("persist projection: %w", err)
 	}
+	a.checkpointState = "applied"
 	if commit.activeTurn != 0 && commit.trigger != CompactionTriggerManual {
 		a.lastCompactionTurn.Store(commit.activeTurn)
 	}
-	a.session.NoteContentRewrite("compact_" + commit.trigger)
-	a.emitContextMaintenance(state.LastReceipt)
+	receipt := state.LastReceipt
+	a.compactionMu.Unlock()
+	a.emitContextMaintenance(receipt)
 	return state, nil
 }
 
-func (a *Agent) summaryProjectionState(commit summaryProjectionCommit, archive string) CompactionState {
+func (a *Agent) summaryProjectionState(commit summaryProjectionCommit) CompactionState {
 	projectionVersion := commit.projectionVersion + 1
 	now := time.Now().UTC()
 	summaryHash := summaryContentHash(commit.summary)
@@ -65,25 +64,19 @@ func (a *Agent) summaryProjectionState(commit summaryProjectionCommit, archive s
 		ProjectionVersion: projectionVersion, CoveredCount: len(commit.canonical), CoveredPrefixHash: coveredHash,
 		InputHash: commit.inputHash, OutputHash: commit.outputHash, InputTokens: commit.sourceTokens,
 		ResultTokens: commit.projectionTokens, SavedTokens: max(0, commit.sourceTokens-commit.projectionTokens),
-		SummaryHash: summaryHash, Archive: archive, CacheBreak: true, CreatedAt: now,
+		SummaryHash: summaryHash, CacheBreak: true, CreatedAt: now,
 	}
-	state := CompactionState{
+	// LastReceipt is authoritative; do not mirror last_trigger/last_mode/token
+	// counters or top-level blocked_* fields (stripped again on save).
+	return CompactionState{
 		SchemaVersion: compactionStateSchemaCurrent, TranscriptVersion: commit.transcriptVersion,
 		Generation: commit.generation + 1, PromptCacheKey: a.currentPromptCacheKey(),
-		NativeContextEditingAccepted: a.nativeContextEditingAccepted.Load(),
-		ContextEditingFallbackLocal:  a.contextEditingRuntimeFallback.Load(),
 		Projection: ContextProjection{
 			Messages: commit.projected, TranscriptVersion: commit.transcriptVersion,
 			ProjectionVersion: projectionVersion, CoveredCount: len(commit.canonical), CoveredPrefixHash: coveredHash,
 			SummaryHash: summaryHash, SourceTokens: commit.sourceTokens, ProjectionTokens: commit.projectionTokens,
 			ViewInputHash: commit.inputHash, ViewOutputHash: commit.outputHash, CreatedAt: now,
 		},
-		LastCacheState: a.CacheState(), LastTrigger: commit.trigger, LastMode: commit.result.Mode,
-		LastSourceTokens: commit.sourceTokens, LastResultTokens: commit.projectionTokens,
 		LastReceipt: receipt, UpdatedAt: now,
 	}
-	if a.pricing != nil && commit.result.Usage != nil {
-		state.LastCompactionCost = a.pricing.Cost(commit.result.Usage)
-	}
-	return state
 }
