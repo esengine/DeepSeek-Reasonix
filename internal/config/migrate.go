@@ -584,10 +584,30 @@ func migrateLegacyBaseURL(cfg *Config, baseURL string) {
 	if cfg == nil || baseURL == "" {
 		return
 	}
+	officialDeepSeek := isOfficialDeepSeekOpenAIEndpoint(baseURL)
 	for i := range cfg.Providers {
-		if cfg.Providers[i].APIKeyEnv == "DEEPSEEK_API_KEY" {
-			cfg.Providers[i].BaseURL = baseURL
+		p := &cfg.Providers[i]
+		if p.APIKeyEnv != "DEEPSEEK_API_KEY" {
+			continue
 		}
+		if officialDeepSeek {
+			// v0.x stored the official OpenAI-compatible root (or /v1). The
+			// current built-in provider is Anthropic, whose documented endpoint
+			// has a distinct /anthropic prefix.
+			p.Kind = "anthropic"
+			p.BaseURL = deepSeekAnthropicBaseURL
+			continue
+		}
+		// A non-official v0.x base URL was an OpenAI-compatible endpoint. Keep
+		// that wire protocol instead of applying the new Anthropic defaults to a
+		// custom gateway that may not implement Messages API.
+		p.Kind = "openai"
+		p.BaseURL = baseURL
+		p.Thinking = ""
+		p.WebSearch = nil
+		p.SupportedEfforts = nil
+		p.DefaultEffort = ""
+		p.ModelOverrides = nil
 	}
 }
 

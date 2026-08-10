@@ -52,27 +52,29 @@ type BranchMeta struct {
 	// fields (Turns/Preview) FROM the session's content. It is stamped only by the
 	// writers that actually derive those counts — Controller.snapshot's
 	// UpdateSessionMeta and Fork/Branch — never by EnsureBranchMeta / TouchBranchMeta
-	// / rename / set-model, which don't know the turn count. So ListSessions can
-	// tell a meta whose counts are authoritative (>= BranchMetaCountsVersion: trust
-	// Turns even when 0 = genuinely empty) from a legacy/contentless one
-	// (< version: decode once, then backfill + stamp).
+	// / rename / set-model, which don't know the turn count. ListSessions trusts
+	// positive v1 counts, but revalidates a v1 zero once because old preview errors
+	// could be cached as empty. Current-version zero counts are authoritative.
 	SchemaVersion int `json:"schema_version,omitempty"`
 	// Turns and Preview are listing-only fields the desktop sidebar and CLI
 	// pickers show ("5 turns · 'help me debug…'") without decoding the whole
 	// .jsonl. The autosave path (Controller.snapshot) keeps them fresh from the
 	// in-memory conversation, so ListSessions stays O(1) per session instead of
-	// O(file size). Gated by SchemaVersion (above), not Turns == 0, so a
-	// genuinely-empty session is recorded once and never re-decoded.
+	// O(file size). SchemaVersion distinguishes a current, validated zero from an
+	// old zero that may have swallowed a decode error.
 	Turns        int               `json:"turns,omitempty"`
 	Preview      string            `json:"preview,omitempty"`
 	InFlightTurn *InFlightTurnMeta `json:"in_flight_turn,omitempty"`
 }
 
-// BranchMetaCountsVersion is stamped into BranchMeta.SchemaVersion whenever a
-// writer records Turns/Preview from session content (UpdateSessionMeta,
-// Fork/Branch). Bump it when the meaning of those listing fields changes so
-// existing listings re-derive them instead of trusting a stale cache.
-const BranchMetaCountsVersion = 1
+const (
+	// branchMetaCountsInitialVersion introduced content-derived Turns/Preview.
+	// Positive counts from this version remain authoritative.
+	branchMetaCountsInitialVersion = 1
+	// BranchMetaCountsVersion certifies that zero turns came from a successful,
+	// error-aware decode. Version 1 could cache a preview failure as zero turns.
+	BranchMetaCountsVersion = 2
+)
 
 // InFlightTurnMeta records the message-log boundary for a foreground turn that
 // has started but not yet reached TurnDone. If the process exits mid-turn, a

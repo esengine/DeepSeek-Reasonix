@@ -45,7 +45,6 @@ import (
 	"reasonix/internal/fileref"
 	fileenc "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/i18n"
-	"reasonix/internal/jobs"
 	"reasonix/internal/mcpdiag"
 	"reasonix/internal/mcpregistry"
 	"reasonix/internal/memory"
@@ -795,6 +794,9 @@ func (a *App) restoreOrBuildTabs() {
 	// freshly written config (including the user's default_model) is
 	// picked up by Load instead of falling back to built-in defaults.
 	_, _ = config.MigrateLegacyIfNeeded()
+	if err := reconcileTopicArchiveMetadataPending(a.deleteTopic); err != nil {
+		slog.Warn("desktop: topic archive metadata reconciliation remains pending")
+	}
 	f := loadTabsFile()
 	_, _ = recoverLegacyProjectSidebarRoots(f)
 	_, _ = config.ApplyUserConfigUpgradesOnStartup(config.UserConfigPath())
@@ -2480,32 +2482,7 @@ func removeDesktopSessionArtifacts(path string) error {
 	if err != nil {
 		return err
 	}
-	defer guard.Release()
-	if err := invalidateTopicDirMarkers(filepath.Dir(path)); err != nil {
-		return err
-	}
-	defer invalidateTopicSessionIndexForPath(path)
-	for _, p := range sessionOwnedArtifactPaths(path) {
-		if strings.TrimSpace(p) == "" {
-			continue
-		}
-		if err := os.RemoveAll(p); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-	}
-	if err := guard.RemoveSidecarsAndRelease(); err != nil {
-		return err
-	}
-	if err := removeSessionDisplay(filepath.Dir(path), path); err != nil {
-		return err
-	}
-	if err := removeSessionPlannerDisplay(filepath.Dir(path), path); err != nil {
-		return err
-	}
-	if err := agent.DeleteSubagentsByParent(filepath.Dir(path), agent.BranchID(path)); err != nil {
-		return err
-	}
-	return agent.ClearCleanupPending(path)
+	return removeDesktopSessionArtifactsWithGuard(path, guard)
 }
 
 // CheckpointMeta summarises one rewind point (a user turn) for the desktop.
@@ -3510,53 +3487,6 @@ func (a *App) sessionDeleteFallbackTarget(target fallbackRuntimeTarget) fallback
 	return target
 }
 
-func (a *App) removeTopicRuntimeBindings(topicID string) ([]removedSessionRuntime, fallbackRuntimeTarget) {
-	var removed []removedSessionRuntime
-	var fallback fallbackRuntimeTarget
-
-	a.mu.Lock()
-	for id, tab := range a.tabs {
-		if tab == nil || tab.TopicID != topicID {
-			continue
-		}
-		sessionDir := tabRuntimeSessionDir(tab)
-		sessionPath := canonicalTabSessionPath(tab.currentSessionPath())
-		if len(removed) == 0 {
-			fallback = fallbackRuntimeTarget{scope: tab.Scope, workspaceRoot: tab.WorkspaceRoot}
-		}
-		removed = append(removed, removedRuntimeFromTab(tab, sessionDir, sessionPath))
-		a.markTabRemovedLocked(tab)
-		delete(a.tabs, id)
-		a.removeTabOrderLocked(id)
-		if a.activeTabID == id {
-			a.activeTabID = ""
-		}
-	}
-	for key, tab := range a.detachedSessions {
-		if tab == nil || tab.TopicID != topicID {
-			continue
-		}
-		sessionDir := tabRuntimeSessionDir(tab)
-		sessionPath := canonicalTabSessionPath(tab.currentSessionPath())
-		if len(removed) == 0 {
-			fallback = fallbackRuntimeTarget{scope: tab.Scope, workspaceRoot: tab.WorkspaceRoot}
-		}
-		removed = append(removed, removedRuntimeFromTab(tab, sessionDir, sessionPath))
-		a.markTabRemovedLocked(tab)
-		delete(a.detachedSessions, key)
-	}
-	if a.activeTabID == "" && len(a.tabOrder) > 0 {
-		a.activeTabID = a.tabOrder[0]
-	}
-	fallback.needs = len(removed) > 0 && len(a.tabs) == 0
-	dir, entries, activeID, version := a.saveTabsCollectLocked()
-	a.mu.Unlock()
-
-	a.saveTabsWrite(dir, entries, activeID, version)
-
-	return removed, fallback
-}
-
 func removedRuntimeFromTab(tab *WorkspaceTab, dir, sessionPath string) removedSessionRuntime {
 	return removedSessionRuntime{
 		tab:           tab,
@@ -3636,28 +3566,6 @@ func (a *App) destroyHandlesForSession(dir, sessionPath string, removed []remove
 		destroys = append(destroys, item.ctrl.BeginDestroySession(sessionPath))
 	}
 	return destroys
-}
-
-func waitDestroyHandles(destroys []control.SessionDestroyHandle) bool {
-	results := make(chan jobs.TeardownResult, len(destroys))
-	waits := 0
-	for _, destroy := range destroys {
-		if destroy.Wait == nil {
-			continue
-		}
-		waits++
-		go func(wait func() jobs.TeardownResult) {
-			results <- wait()
-		}(destroy.Wait)
-	}
-
-	timedOut := false
-	for range waits {
-		if (<-results).HasTimedOut() {
-			timedOut = true
-		}
-	}
-	return timedOut
 }
 
 func waitAllDestroyHandles(destroys []control.SessionDestroyHandle) {

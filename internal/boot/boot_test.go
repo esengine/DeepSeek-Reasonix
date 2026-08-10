@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -625,6 +627,165 @@ model = "x"
 	}
 }
 
+func TestBuildDeepSeekTextParentCanUseImageReturningMCPAndVisionSubagent(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerBootSubagentTestProvider()
+	prov := &bootSubagentTestProvider{combinedVision: true}
+	setBootSubagentTestProvider(t, prov)
+	if _, err := config.SetCredential("BOOT_DEEPSEEK_TEST_KEY", "test-key"); err != nil {
+		t.Fatalf("store test DeepSeek credential: %v", err)
+	}
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "parent"
+
+[agent]
+system_prompt = "BASE"
+subagent_model = "vision-model"
+
+[[providers]]
+name = "parent"
+kind = "boot-subagent-test"
+base_url = "https://api.deepseek.com/anthropic"
+model = "x"
+api_key_env = "BOOT_DEEPSEEK_TEST_KEY"
+
+[[providers]]
+name = "vision-model"
+kind = "boot-subagent-test"
+base_url = "https://vision.example.invalid"
+model = "x"
+vision = true
+`)
+	png, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+	if err != nil {
+		t.Fatalf("decode test png: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".reasonix", "attachments"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".reasonix", "attachments", "shot.png"), png, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mcpImage := base64.StdEncoding.EncodeToString(png)
+	var mcpCalls atomic.Int32
+	mcpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			ID     *int            `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if request.ID == nil {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		var result any
+		switch request.Method {
+		case "initialize":
+			result = map[string]any{
+				"protocolVersion": "2024-11-05",
+				"serverInfo":      map[string]any{"name": "vision-reader", "version": "1"},
+				"capabilities":    map[string]any{"tools": map[string]any{}},
+			}
+		case "tools/list":
+			result = map[string]any{"tools": []map[string]any{{
+				"name":        "inspect",
+				"description": "Inspect an image file by path.",
+				"inputSchema": map[string]any{
+					"type":       "object",
+					"properties": map[string]any{"path": map[string]any{"type": "string"}},
+					"required":   []string{"path"},
+				},
+				"annotations": map[string]any{"readOnlyHint": true},
+			}}}
+		case "tools/call":
+			mcpCalls.Add(1)
+			result = map[string]any{"content": []map[string]any{
+				{"type": "text", "text": "vision-mcp-ok"},
+				{"type": "image", "mimeType": "image/png", "data": mcpImage},
+			}}
+		default:
+			http.Error(w, "unsupported method", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": *request.ID, "result": result})
+	}))
+	defer mcpServer.Close()
+
+	ctrl, err := Build(context.Background(), Options{
+		Sink: event.Discard,
+		ExtraPlugins: []plugin.Spec{{
+			Name:       "vision-reader",
+			Type:       "http",
+			URL:        mcpServer.URL,
+			Authorized: true,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	if ctrl.ImageInputEnabled() {
+		loaded, loadErr := config.LoadForRoot(dir)
+		resolved, _ := loaded.ResolveModel(ctrl.ModelRef())
+		t.Fatalf("official DeepSeek parent unexpectedly enables direct images: ref=%q entry=%+v load_err=%v", ctrl.ModelRef(), resolved, loadErr)
+	}
+	if err := ctrl.Run(context.Background(), "review @.reasonix/attachments/shot.png"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	reqs := prov.requestsSnapshot()
+	if len(reqs) != 4 {
+		t.Fatalf("provider requests = %d, want parent MCP call, parent subagent call, vision child, and parent final", len(reqs))
+	}
+	if got := mcpCalls.Load(); got != 1 {
+		t.Fatalf("vision MCP calls = %d, want 1", got)
+	}
+	if !requestHasTool(reqs[0], "mcp__vision-reader__inspect") || !requestHasTool(reqs[0], "review") {
+		t.Fatalf("parent tools = %v, want both vision MCP and review subagent", toolSchemaNames(reqs[0].Tools))
+	}
+	if got := bootLastUser(reqs[0]); !strings.Contains(got, "@.reasonix/attachments/shot.png") {
+		t.Fatalf("text-only parent lost the attachment reference needed by MCP: %q", got)
+	}
+	// The direct attachment remains candidate-only for the text parent. An MCP
+	// image is intentionally retained on its local tool-result message; the real
+	// DeepSeek adapter tests assert that this exact role is omitted on the wire.
+	for _, requestIndex := range []int{0, 1, 3} {
+		for _, msg := range reqs[requestIndex].Messages {
+			if msg.Role == provider.RoleUser && len(msg.Images) != 0 {
+				t.Fatalf("text-only parent request %d embedded %d direct attachment(s): %+v", requestIndex, len(msg.Images), reqs[requestIndex].Messages)
+			}
+		}
+	}
+	if !requestMessageContains(reqs[1].Messages, provider.RoleTool, "vision-mcp-ok") {
+		t.Fatalf("parent did not receive the vision MCP text result: %+v", reqs[1].Messages)
+	}
+	var parentMCPImageCount int
+	for _, msg := range reqs[1].Messages {
+		if msg.Role == provider.RoleTool && msg.Name == "mcp__vision-reader__inspect" {
+			parentMCPImageCount += len(msg.Images)
+		}
+	}
+	if parentMCPImageCount != 1 {
+		t.Fatalf("parent local MCP result images = %d, want one image for provider-boundary filtering", parentMCPImageCount)
+	}
+	var childImageCount int
+	for _, msg := range reqs[2].Messages {
+		if msg.Role == provider.RoleUser {
+			childImageCount = len(msg.Images)
+		}
+	}
+	if childImageCount != 1 {
+		t.Fatalf("vision child user images = %d, want one attachment; request = %+v", childImageCount, reqs[2].Messages)
+	}
+}
+
 func TestBuildUsesConfiguredLanguageForResponsePreference(t *testing.T) {
 	isolateConfigHome(t)
 	dir := robustTempDir(t)
@@ -848,10 +1009,11 @@ func setBootSubagentTestProvider(t *testing.T, p *bootSubagentTestProvider) {
 }
 
 type bootSubagentTestProvider struct {
-	mu          sync.Mutex
-	calls       int
-	continueRef string
-	requests    []provider.Request
+	mu             sync.Mutex
+	calls          int
+	continueRef    string
+	requests       []provider.Request
+	combinedVision bool
 }
 
 func (p *bootSubagentTestProvider) Name() string { return "boot-subagent-test" }
@@ -868,9 +1030,35 @@ func (p *bootSubagentTestProvider) Stream(_ context.Context, req provider.Reques
 	p.calls++
 	ref := p.continueRef
 	p.requests = append(p.requests, req)
+	combinedVision := p.combinedVision
 	p.mu.Unlock()
 
 	var chunks []provider.Chunk
+	if combinedVision {
+		switch call {
+		case 0:
+			chunks = []provider.Chunk{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{
+				ID: "vision-mcp-1", Name: "mcp__vision-reader__inspect",
+				Arguments: `{"path":".reasonix/attachments/shot.png"}`,
+			}}}
+		case 1:
+			chunks = []provider.Chunk{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{
+				ID: "vision-review-1", Name: "review", Arguments: `{"task":"inspect the attached image"}`,
+			}}}
+		case 2:
+			chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "vision child answer"}, {Type: provider.ChunkDone}}
+		case 3:
+			chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "parent done"}, {Type: provider.ChunkDone}}
+		default:
+			chunks = []provider.Chunk{{Type: provider.ChunkError, Err: fmt.Errorf("unexpected combined vision provider call %d", call)}}
+		}
+		ch := make(chan provider.Chunk, len(chunks))
+		for _, chunk := range chunks {
+			ch <- chunk
+		}
+		close(ch)
+		return ch, nil
+	}
 	switch call {
 	case 0:
 		chunks = []provider.Chunk{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "review-1", Name: "review", Arguments: `{"task":"first skill task"}`}}}
@@ -1517,7 +1705,7 @@ func TestNewProviderBuildsDeepSeekAnthropicPreset(t *testing.T) {
 	}
 }
 
-func TestNewProviderAllowsExplicitOfficialDeepSeekVisionModel(t *testing.T) {
+func TestNewProviderRejectsExplicitOfficialDeepSeekVisionModel(t *testing.T) {
 	var gotReq map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
@@ -1562,13 +1750,15 @@ func TestNewProviderAllowsExplicitOfficialDeepSeekVisionModel(t *testing.T) {
 	if !ok {
 		t.Fatalf("message = %#v, want object", messages[0])
 	}
-	parts, ok := message["content"].([]any)
-	if !ok || len(parts) != 2 {
-		t.Fatalf("content = %#v, want [text, image_url]", message["content"])
+	if got, ok := message["content"].(string); !ok || got != "describe" {
+		t.Fatalf("content = %#v, want plain text despite stale explicit vision metadata", message["content"])
 	}
-	imagePart, ok := parts[1].(map[string]any)
-	if !ok || imagePart["type"] != "image_url" {
-		t.Fatalf("image part = %#v, want image_url", parts[1])
+	encoded, err := json.Marshal(gotReq)
+	if err != nil {
+		t.Fatalf("marshal captured request: %v", err)
+	}
+	if bytes.Contains(encoded, []byte("image_url")) || bytes.Contains(encoded, []byte("base64,AAAA")) {
+		t.Fatalf("official DeepSeek request leaked image payload: %s", encoded)
 	}
 }
 
@@ -4021,6 +4211,72 @@ func TestBuildMigratesLegacyConfigEndToEnd(t *testing.T) {
 	migratedSession := filepath.Join(config.SessionDir(), "chat-1.jsonl")
 	if _, err := os.Stat(migratedSession); err != nil {
 		t.Errorf("legacy session not imported to %s: %v", migratedSession, err)
+	}
+}
+
+func TestBuildMigratesLegacyDeepSeekProtocolWithOneNotice(t *testing.T) {
+	home := isolateConfigHome(t)
+	t.Setenv("REASONIX_HOME", filepath.Join(home, "reasonix-home"))
+	userPath := config.UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userPath, []byte(`default_model = "deepseek-flash/deepseek-v4-flash"
+
+[[providers]]
+name = "deepseek-flash"
+kind = "openai"
+base_url = "https://api.deepseek.com"
+model = "deepseek-v4-flash"
+api_key_env = "DEEPSEEK_API_KEY"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var notices []event.Event
+	sink := event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Notice {
+			notices = append(notices, e)
+		}
+	})
+	build := func() {
+		t.Helper()
+		ctrl, err := Build(context.Background(), Options{Sink: sink, WorkspaceRoot: t.TempDir()})
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		ctrl.Close()
+	}
+
+	build()
+	migrationNotices := 0
+	for _, notice := range notices {
+		if notice.Text != "DeepSeek official access was upgraded to Anthropic Messages." {
+			continue
+		}
+		migrationNotices++
+		if notice.Level != event.LevelInfo || !strings.Contains(notice.Detail, "prefix-cache") {
+			t.Fatalf("migration notice = %+v", notice)
+		}
+	}
+	if migrationNotices != 1 {
+		t.Fatalf("migration notices = %d, want 1; got %+v", migrationNotices, notices)
+	}
+	raw, err := os.ReadFile(userPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `kind = "anthropic"`) ||
+		!strings.Contains(string(raw), `base_url = "https://api.deepseek.com/anthropic"`) {
+		t.Fatalf("legacy DeepSeek protocol remained on disk:\n%s", raw)
+	}
+
+	notices = nil
+	build()
+	for _, notice := range notices {
+		if strings.Contains(notice.Text, "DeepSeek official access was upgraded") {
+			t.Fatalf("second boot repeated migration notice: %+v", notice)
+		}
 	}
 }
 

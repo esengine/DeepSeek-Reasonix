@@ -22,6 +22,12 @@ import {
   createDefaultTypographyPreferences,
   getTypographyPreferences,
 } from "../lib/typographyPreferences";
+import {
+  baseSettings,
+  flushPromises,
+  installCanvasMock,
+  waitFor,
+} from "../test-support/settingsTestFixtures";
 
 let passed = 0;
 let failed = 0;
@@ -44,113 +50,6 @@ function eq(actual: unknown, expected: unknown, label: string) {
   }
 }
 
-function flushPromises(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-function installCanvasMock(win: Window) {
-  Object.defineProperty(win.HTMLCanvasElement.prototype, "getContext", {
-    configurable: true,
-    value(type: string) {
-      if (type !== "2d") return null;
-      return {
-        font: "",
-        measureText: () => ({ width: 0 }),
-      } as unknown as CanvasRenderingContext2D;
-    },
-  });
-}
-
-async function waitFor(label: string, predicate: () => boolean) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    await act(async () => {
-      await flushPromises();
-    });
-    if (predicate()) return;
-  }
-  throw new Error(`timed out waiting for ${label}`);
-}
-
-function baseSettings(displayMode: "standard" | "compact" = "standard"): SettingsView {
-  return {
-    defaultModel: "",
-    plannerModel: "",
-    subagentModel: "",
-    subagentEffort: "",
-    autoPlan: "off",
-    providers: [],
-    officialProviders: [],
-    providerPresets: [],
-    permissions: { mode: "ask", allow: [], ask: [], deny: [] },
-    sandbox: { bash: "enforce", network: false, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: "/work", effectiveWriteRoots: ["/work"], shell: "auto" },
-    network: { proxyMode: "auto", proxyUrl: "", noProxy: "", proxy: { type: "socks5", server: "", port: 0, username: "", password: "" } },
-    agent: { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto", compactRatio: 0.8 },
-    bot: {
-      enabled: false,
-      model: "",
-	      toolApprovalMode: "",
-	      maxSteps: 0,
-	      debounceMs: 0,
-	      queueMode: "steer",
-	      queueCap: 20,
-	      queueDrop: "summarize",
-	      ignoreSelfMessages: true,
-	      selfUserIds: { qq: [], feishu: [], weixin: [] },
-	      control: { enabled: false, addr: "127.0.0.1:37913", tokenEnv: "REASONIX_BOT_CONTROL_TOKEN" },
-	      pairing: { enabled: true, requestTtlMinutes: 60, maxPendingPerPlatform: 3 },
-	      routes: [],
-	      allowlist: {
-	        enabled: false,
-	        allowAll: false,
-	        qqUsers: [],
-	        feishuUsers: [],
-	        weixinUsers: [],
-	        qqApprovers: [],
-	        feishuApprovers: [],
-	        weixinApprovers: [],
-	        qqAdmins: [],
-	        feishuAdmins: [],
-	        weixinAdmins: [],
-	        qqGroups: [],
-	        feishuGroups: [],
-	        weixinGroups: [],
-	      },
-      qq: {
-        enabled: false,
-        appId: "",
-        appSecretEnv: "",
-        secretSet: false,
-        sandbox: false,
-        model: "",
-        toolApprovalMode: "ask",
-        workspaceRoot: "",
-        access: { enabled: true, allowAll: false, pairingEnabled: true, users: [], groups: [], approvers: [], admins: [] },
-      },
-      feishu: { enabled: false, domain: "feishu", appId: "", appSecretEnv: "", secretSet: false, verificationToken: "", mode: "webhook", webhookPort: 0, requireMention: false },
-      weixin: { enabled: false, accountId: "", tokenEnv: "", tokenSet: false, apiBase: "" },
-      connections: [],
-    },
-    desktopLanguage: "en",
-    desktopLayoutStyle: "workbench",
-    desktopTheme: "auto",
-    desktopThemeStyle: "graphite",
-    desktopTerminalTheme: "auto",
-    closeBehavior: "background",
-    displayMode,
-    statusBarStyle: "text",
-    statusBarItems: ["model", "workspace", "git_branch", "cache", "balance"],
-    defaultToolApprovalMode: "auto",
-    checkUpdates: true,
-    updateChannel: "stable",
-    telemetry: true,
-    metrics: true,
-    configPath: "/tmp/reasonix/config.toml",
-    providerKinds: [],
-    autoApproveTools: false,
-    bypass: false,
-  };
-}
-
 console.log("\nsettings refresh snapshot");
 
 const nullableProvider = normalizeProviderView({
@@ -166,6 +65,21 @@ const glmProvider = normalizeProviderView({
   reasoningProtocol: "glm",
 } as ProviderView);
 eq(glmProvider.reasoningProtocol, "glm", "provider snapshots preserve the explicit GLM reasoning protocol");
+
+const serverWebSearchProvider = normalizeProviderView({
+  name: "custom-anthropic",
+  kind: "anthropic",
+  baseUrl: "https://gateway.example/anthropic",
+  serverWebSearchCapability: true,
+} as ProviderView);
+eq(serverWebSearchProvider.serverWebSearchCapability, true, "provider snapshots preserve backend server web-search capability");
+
+const legacyServerWebSearchProvider = normalizeProviderView({
+  name: "legacy-anthropic",
+  kind: "anthropic",
+  baseUrl: "https://api.deepseek.com/anthropic",
+} as ProviderView);
+eq(legacyServerWebSearchProvider.serverWebSearchCapability, undefined, "older provider snapshots keep an absent capability distinguishable");
 
 eq(providerEditorEffectiveKind(true, "anthropic", ["anthropic", "openai"]), "anthropic", "new custom providers keep the selected Anthropic-compatible kind");
 eq(providerEditorEffectiveKind(false, "anthropic", ["anthropic", "openai"]), "anthropic", "existing providers preserve their stored kind");
@@ -782,6 +696,225 @@ eq(providerCatalogSaveCalls, 0, "leaving the models usage tab suppresses the sta
 
 await act(async () => {
   providerRaceRoot.unmount();
+});
+
+// Cancelling a freshly fetched model catalog must also clear the success copy
+// that asks the user to confirm and save that now-hidden draft.
+const providerRefreshCancelRootEl = document.createElement("div");
+document.body.appendChild(providerRefreshCancelRootEl);
+const providerRefreshCancelRoot = createRoot(providerRefreshCancelRootEl);
+const providerRefreshCancelSettings = baseSettings("standard");
+providerRefreshCancelSettings.defaultModel = "deepseek/deepseek-v4-flash";
+providerRefreshCancelSettings.providers = [{
+  name: "deepseek",
+  builtIn: true,
+  added: true,
+  kind: "anthropic",
+  baseUrl: "https://api.deepseek.com/anthropic",
+  chatUrl: "",
+  models: ["deepseek-v4-flash"],
+  visionModels: [],
+  visionModelsConfigured: true,
+  visionCapability: "unsupported",
+  modelsUrl: "https://api.deepseek.com/models",
+  default: "deepseek-v4-flash",
+  apiKeyEnv: "DEEPSEEK_API_KEY",
+  keySet: true,
+  requiresKey: true,
+  configured: true,
+  balanceUrl: "https://api.deepseek.com/user/balance",
+  contextWindow: 1_000_000,
+  reasoningProtocol: "",
+  thinking: "enabled",
+  webSearch: true,
+  serverWebSearchCapability: true,
+  supportedEfforts: [],
+  defaultEffort: "",
+}];
+window.go = {
+  main: {
+    App: {
+      Settings: async () => providerRefreshCancelSettings,
+      FetchAllProviderModels: async () => ({}),
+      FetchProviderModels: async () => ["deepseek-v4-flash", "deepseek-v4-pro"],
+    } as Partial<AppBindings> as AppBindings,
+  },
+};
+
+await act(async () => {
+  providerRefreshCancelRoot.render(
+    <LocaleProvider>
+      <SettingsPanel initialTab="models" desktopPlatform="linux" onClose={() => {}} onChanged={() => {}} />
+    </LocaleProvider>,
+  );
+  await flushPromises();
+});
+const providerRefreshCancelAccessButton = Array.from(providerRefreshCancelRootEl.querySelectorAll(".settings-subtab")).find(
+  (button) => button.textContent?.trim() === "Access",
+) as HTMLButtonElement | undefined;
+if (!providerRefreshCancelAccessButton) throw new Error("provider refresh cancel Access subtab did not render");
+await act(async () => {
+  providerRefreshCancelAccessButton.click();
+  await flushPromises();
+});
+const providerRefreshCancelButton = Array.from(providerRefreshCancelRootEl.querySelectorAll("button")).find(
+  (button) => button.textContent?.trim() === "Refresh models",
+) as HTMLButtonElement | undefined;
+if (!providerRefreshCancelButton) throw new Error("provider refresh action did not render");
+await act(async () => {
+  providerRefreshCancelButton.click();
+  await flushPromises();
+});
+await waitFor(
+  "provider model draft",
+  () => providerRefreshCancelRootEl.textContent?.includes("Found 2 models for DeepSeek Official. Review and save the enabled list.") === true,
+);
+const providerModelDraftCancelButton = providerRefreshCancelRootEl.querySelector<HTMLButtonElement>(
+  ".provider-model-draft__actions button",
+);
+if (!providerModelDraftCancelButton) throw new Error("provider model draft cancel action did not render");
+await act(async () => {
+  providerModelDraftCancelButton.click();
+  await flushPromises();
+});
+ok(
+  providerRefreshCancelRootEl.textContent?.includes("Found 2 models for DeepSeek Official. Review and save the enabled list.") === false,
+  "cancelling a provider model draft clears its stale save instruction",
+);
+ok(
+  providerRefreshCancelRootEl.querySelector(".provider-model-draft") === null,
+  "cancelling a provider model draft closes the candidate editor",
+);
+await act(async () => {
+  providerRefreshCancelRoot.unmount();
+});
+
+// A settings mutation may persist before a workspace-specific runtime rebuild
+// fails. The panel must re-read the authoritative snapshot on that error so an
+// already-completed protocol upgrade is not offered again.
+const upgradeFailureRootEl = document.createElement("div");
+document.body.appendChild(upgradeFailureRootEl);
+const upgradeFailureRoot = createRoot(upgradeFailureRootEl);
+let upgradeFailureSettings = baseSettings("standard");
+upgradeFailureSettings.defaultModel = "deepseek/deepseek-v4-flash";
+upgradeFailureSettings.providers = [{
+  name: "deepseek-flash",
+  builtIn: true,
+  added: true,
+  kind: "openai",
+  baseUrl: "https://api.deepseek.com",
+  chatUrl: "",
+  models: ["deepseek-v4-flash"],
+  visionModels: [],
+  visionModelsConfigured: true,
+  visionCapability: "unsupported",
+  modelsUrl: "https://api.deepseek.com/models",
+  default: "deepseek-v4-flash",
+  apiKeyEnv: "DEEPSEEK_API_KEY",
+  keySet: true,
+  requiresKey: true,
+  configured: true,
+  balanceUrl: "https://api.deepseek.com/user/balance",
+  contextWindow: 1_000_000,
+  reasoningProtocol: "deepseek",
+  thinking: "enabled",
+  webSearch: false,
+  serverWebSearchCapability: false,
+  supportedEfforts: ["low", "high", "max"],
+  defaultEffort: "high",
+  recommendedUpgradeAvailable: true,
+}];
+let upgradeFailureSettingsCalls = 0;
+let upgradeFailureMutationCalls = 0;
+let upgradeFailureChanged: SettingsView | undefined;
+window.go = {
+  main: {
+    App: {
+      Settings: async () => {
+        upgradeFailureSettingsCalls += 1;
+        return upgradeFailureSettings;
+      },
+      FetchAllProviderModels: async () => ({}),
+      UpgradeDeepSeekProviderAccess: async () => {
+        upgradeFailureMutationCalls += 1;
+        upgradeFailureSettings = {
+          ...upgradeFailureSettings,
+          providers: upgradeFailureSettings.providers.map((provider) => ({
+            ...provider,
+            kind: "anthropic",
+            baseUrl: "https://api.deepseek.com/anthropic",
+            webSearch: true,
+            serverWebSearchCapability: true,
+            recommendedUpgradeAvailable: false,
+          })),
+        };
+        throw new Error("workspace runtime boot failed after protocol upgrade");
+      },
+    } as Partial<AppBindings> as AppBindings,
+  },
+};
+
+await act(async () => {
+  upgradeFailureRoot.render(
+    <LocaleProvider>
+      <SettingsPanel
+        initialTab="models"
+        desktopPlatform="linux"
+        onClose={() => {}}
+        onChanged={(settings?: SettingsView) => {
+          upgradeFailureChanged = settings;
+        }}
+      />
+    </LocaleProvider>,
+  );
+  await flushPromises();
+});
+const upgradeFailureAccessButton = Array.from(upgradeFailureRootEl.querySelectorAll(".settings-subtab")).find(
+  (button) => button.textContent?.trim() === "Access",
+) as HTMLButtonElement | undefined;
+if (!upgradeFailureAccessButton) throw new Error("upgrade failure Access subtab did not render");
+await act(async () => {
+  upgradeFailureAccessButton.click();
+  await flushPromises();
+});
+await waitFor(
+  "legacy DeepSeek protocol upgrade action",
+  () => upgradeFailureRootEl.textContent?.includes("Upgrade to recommended protocol") === true,
+);
+let upgradeFailureButton = Array.from(upgradeFailureRootEl.querySelectorAll("button")).find(
+  (button) => button.textContent?.includes("Upgrade to recommended protocol"),
+) as HTMLButtonElement | undefined;
+if (!upgradeFailureButton) throw new Error("DeepSeek protocol upgrade button did not render");
+await act(async () => {
+  upgradeFailureButton?.click();
+  await flushPromises();
+});
+upgradeFailureButton = upgradeFailureRootEl.querySelector<HTMLButtonElement>(
+  ".provider-protocol-upgrade .inline-confirm > button",
+) ?? undefined;
+if (upgradeFailureButton?.textContent?.trim() !== "Confirm") throw new Error("DeepSeek protocol upgrade confirmation did not render");
+await act(async () => {
+  upgradeFailureButton?.click();
+  await flushPromises();
+});
+await waitFor("post-error settings reload", () => upgradeFailureSettingsCalls === 2);
+
+eq(upgradeFailureMutationCalls, 1, "DeepSeek protocol upgrade mutation is invoked once");
+ok(
+  upgradeFailureRootEl.textContent?.includes("Upgrade to recommended protocol") === false,
+  "persisted DeepSeek protocol upgrade disappears after a runtime refresh error",
+);
+ok(
+  upgradeFailureRootEl.textContent?.includes("workspace runtime boot failed after protocol upgrade") === true,
+  "post-mutation reload preserves the original runtime error",
+);
+ok(
+  upgradeFailureChanged?.providers[0]?.kind === "anthropic",
+  "onChanged receives the authoritative persisted protocol after a runtime error",
+);
+
+await act(async () => {
+  upgradeFailureRoot.unmount();
 });
 dom.window.close();
 

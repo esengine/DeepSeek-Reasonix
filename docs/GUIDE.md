@@ -14,7 +14,7 @@
 - [Configuration](#configuration)
 - [CLI reference](./CLI.md)
 - [Environment variables](#environment-variables)
-- [Serve web frontend](#serve-web-frontend)
+- [Web frontend](#web-frontend)
 - [Configuration paths](./CONFIG_PATHS.md)
 - [Reasoning language](./REASONING_LANGUAGE.md)
 - [Task contracts and pause policy](./TASK_CONTRACT.md)
@@ -72,10 +72,11 @@ tool_result_snip_ratio = 0.6       # shorten stale tool output before summary co
 
 [[providers]]
 name        = "deepseek-flash"
-kind        = "openai"
-base_url    = "https://api.deepseek.com"
+kind        = "anthropic"
+base_url    = "https://api.deepseek.com/anthropic"
 model       = "deepseek-v4-flash"
 api_key_env = "DEEPSEEK_API_KEY"
+web_search  = true
 # also preset: deepseek-pro
 
 [tools]
@@ -204,23 +205,39 @@ these separately reviewed reports. Runtime fatal throws, operating-system kills,
 and panics in unwrapped background goroutines cannot be recovered by Go and do
 not produce this local report.
 
-## Serve web frontend
+## Web frontend
 
-`reasonix serve` starts the same local engine behind a browser UI. Use it when
-you want a desktop-style surface without installing the desktop app, when running
-Reasonix on a remote development box through a tunnel, or when you want a
-shareable view of a live session.
+For local use, `reasonix web` starts the browser UI and opens it in your default
+browser. Inside an interactive CLI session, `/web` snapshots the current session,
+restores the terminal, and opens an explicit `/sessions/<id>#token=...` deep link.
+Even a never-used session keeps its reserved ID without forcing an empty
+transcript onto disk, so the first Web turn continues the same session identity.
 
 ```bash
 cd your-project
-reasonix serve
-# open http://127.0.0.1:8787
+reasonix web
 ```
 
-By default it listens on `127.0.0.1:8787` with `auth_mode = "none"`. Keep that
-default for local-only use. If you bind outside loopback, expose it through a
-tunnel, or put it behind a reverse proxy, enable authentication before sharing
-the URL:
+Use `reasonix web --no-open` when you want to start the foreground Web server
+and print its URL without opening a browser tab. The lower-level
+`reasonix serve` command starts the same engine without opening a browser by
+default. It remains the right entry point for remote development boxes,
+supervisors, tunnels, reverse proxies, and shareable authenticated sessions.
+
+`reasonix web` starts at `127.0.0.1:8787`, automatically tries 8788, 8789, and
+so on when a port is busy (up to 100 retries), and defaults to a newly generated
+token even when `[serve].auth_mode` is `none`. Each live process registers a
+single-writer heartbeat file under `<Reasonix home>/server/instances/`; clean
+shutdown removes its own file, while later instances lazily remove records whose
+owner process is confirmed dead. Multiple Web instances can therefore share one
+Reasonix home without overwriting registry state. The process stays attached to
+the terminal; stop it with Ctrl-C.
+
+An explicit `reasonix web --auth none` disables the default token and should be
+used only when the listener is intentionally trusted. `reasonix serve` keeps its
+backward-compatible, config-driven `auth_mode = "none"` default on
+`127.0.0.1:8787`. If you bind Serve outside loopback, expose it through a tunnel,
+or put it behind a reverse proxy, enable authentication before sharing the URL:
 
 ```bash
 reasonix serve --auth token
@@ -228,7 +245,9 @@ reasonix serve --addr 0.0.0.0:8787 --auth token
 reasonix serve --auth password --password 'temporary-password'
 ```
 
-Token mode prints a share URL with `?token=...`; pass `--token` or set
+Token mode prints a share URL with `#token=...`; the Web page exchanges the
+fragment for an HttpOnly cookie before starting API or SSE requests, keeping the
+token out of request URLs, browser history, referrers, and access logs. Pass `--token` or set
 `[serve].token` to reuse a stable token. Password mode requires either
 `--password` at startup or a stored bcrypt hash:
 
@@ -356,10 +375,16 @@ Custom provider** for proxies, aggregators, or self-hosted services that speak
 the OpenAI-compatible chat API or Anthropic-compatible Messages API.
 
 For common providers, choose **Add model service -> Recommended preset** instead.
-The official DeepSeek service continues to use its specially adapted OpenAI Chat
-Completions path by default; add the optional **DeepSeek Anthropic** preset only
-when Anthropic Messages compatibility is needed. The two entries do not replace
-each other. Reasonix can prefill editable custom-provider entries for Kimi CN,
+New official DeepSeek entries use the Anthropic-compatible Messages endpoint by
+default and enable provider-side `web_search`; the same `DEEPSEEK_API_KEY` works
+for both protocols. On startup, Reasonix upgrades unmodified legacy
+`deepseek-flash` / `deepseek-pro` entries that still use the official endpoint
+and standard key/model settings. Customized official Chat Completions entries
+stay unchanged and show an **Upgrade protocol** action in Settings. Proxy
+endpoints, custom headers, model lists, and capability overrides are never
+migrated automatically. Existing
+separately named `deepseek-anthropic` entries remain compatible, but that
+redundant preset is no longer offered for new access. Reasonix can prefill editable custom-provider entries for Kimi CN,
 Kimi Global,
 Kimi Coding Plan, MiMo API, MiMo Anthropic, MiMo Token Plan CN/SGP/AMS and their
 Anthropic-compatible variants, MiniMax CN/Global API, MiniMax CN/Global

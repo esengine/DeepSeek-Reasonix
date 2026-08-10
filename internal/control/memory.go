@@ -84,12 +84,7 @@ func (m *memoryManager) claimAutoRemember(args json.RawMessage) bool {
 }
 
 func (m *memoryManager) recall(query string) memory.RecallResult {
-	mem := m.current()
-	store := memory.Store{}
-	if mem != nil {
-		store = mem.Store
-	}
-	result := memory.AutoRecall(store, query, memory.RecallOptions{})
+	result := m.current().AutoRecall(query, memory.RecallOptions{})
 	m.recordRecall(result)
 	return result
 }
@@ -123,6 +118,9 @@ func memoryRecallAudit(result memory.RecallResult) event.MemoryRecallAudit {
 			Type:      string(memory.NormalizeType(string(hit.Memory.Type))),
 			Freshness: hit.Freshness, Score: hit.Score,
 		})
+	}
+	for _, hit := range result.ShadowHits {
+		audit.Shadow = append(audit.Shadow, event.MemoryRecallHit{ID: hit.ID, Score: hit.Score})
 	}
 	return audit
 }

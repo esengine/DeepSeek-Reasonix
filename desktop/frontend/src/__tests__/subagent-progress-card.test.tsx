@@ -9,7 +9,6 @@ import { registerHooks } from "node:module";
 import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import gsap from "gsap";
 import { ToolCard } from "../components/ToolCard";
 import { LocaleProvider } from "../lib/i18n";
 import { setReasoningSummaryEnabled } from "../lib/reasoningSummaryPreference";
@@ -25,28 +24,6 @@ registerHooks({
 });
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
-
-// jsdom has no layout engine: stub the GSAP tween surface the collapse hook
-// touches so layout effects complete synchronously. Under tsx the imported
-// binding is a CJS interop object, so the stubs must go onto that object
-// itself (the hook imports the same binding).
-type GsapToOptions = { onComplete?: () => void };
-const gsapForTests = gsap as unknown as {
-  to: (target: unknown, vars: GsapToOptions) => unknown;
-  fromTo: (target: unknown, from: unknown, vars: GsapToOptions) => unknown;
-  set: (target: unknown, vars: unknown) => unknown;
-  killTweensOf: (target: unknown) => void;
-};
-gsapForTests.to = (_target: unknown, vars: GsapToOptions) => {
-  vars.onComplete?.();
-  return {};
-};
-gsapForTests.fromTo = (_target: unknown, _from: unknown, vars: GsapToOptions) => {
-  vars.onComplete?.();
-  return {};
-};
-gsapForTests.set = () => ({});
-gsapForTests.killTweensOf = () => {};
 
 let passed = 0;
 let failed = 0;

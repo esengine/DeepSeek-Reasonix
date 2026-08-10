@@ -12,8 +12,8 @@
   "dependencies": {
     "@astrojs/sitemap": "^3.7.3",
     "@fontsource-variable/inter": "^5.3.0",
-    "@fontsource-variable/jetbrains-mono": "^5.1.0",
-    "astro": "^7.1.3"
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "astro": "^7.1.6"
   },
   "devDependencies": {
     "sharp": "^0.35.3"

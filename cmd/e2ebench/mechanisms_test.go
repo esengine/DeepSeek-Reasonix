@@ -165,6 +165,53 @@ func TestRenderContractShadowAgreement(t *testing.T) {
 	}
 }
 
+func TestRenderCompletionReportPricesOverclaim(t *testing.T) {
+	honest := result{task: task{ID: "a"}, Passed: true}
+	honest.Trajectory = &trajectorySummary{CompletionVerdict: "done"}
+	overclaimed := result{task: task{ID: "b"}, Passed: false}
+	overclaimed.Trajectory = &trajectorySummary{CompletionVerdict: "done"}
+	warned := result{task: task{ID: "c"}, Passed: false}
+	warned.Trajectory = &trajectorySummary{
+		CompletionVerdict: "partial", CompletionGaps: 2,
+		CompletionGapKinds: []string{"unreviewed_change", "stale_verification"},
+		ClaimsVerified:     4, ClaimsUnbacked: 1,
+	}
+	got := renderCompletionReport([]result{honest, overclaimed, warned})
+	for _, want := range []string{
+		"verdicts done ×2 · partial ×1",
+		"**overclaim** 50% (1/2 done runs the grader failed)",
+		"**caught** 50% (1/2 failed runs declared a gap)",
+		"gaps stale_verification ×1 · unreviewed_change ×1",
+		"**unbacked claims** 25% (1/4 asserted verifications the ledger denied)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("completion line missing %q:\n%s", want, got)
+		}
+	}
+	if renderCompletionReport([]result{{task: task{ID: "d"}}}) != "" {
+		t.Fatal("runs without completion audits must render nothing")
+	}
+}
+
+func TestSummarizeTrajectoryReadsCompletionReport(t *testing.T) {
+	path := t.TempDir() + "/completion.trajectory.jsonl"
+	lines := []string{
+		`{"seq":1,"ts":1000,"event":{"kind":"turn_started"}}`,
+		`{"seq":2,"ts":2000,"completion_report":{"verdict":"partial","gaps":1,"gap_kinds":["unreviewed_change"]}}`,
+		`{"seq":3,"ts":3000,"event":{"kind":"turn_done"}}`,
+	}
+	if err := writeLines(path, lines); err != nil {
+		t.Fatal(err)
+	}
+	s, err := summarizeTrajectory(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.CompletionVerdict != "partial" || s.CompletionGaps != 1 || len(s.CompletionGapKinds) != 1 {
+		t.Fatalf("completion = %q/%d/%v", s.CompletionVerdict, s.CompletionGaps, s.CompletionGapKinds)
+	}
+}
+
 func TestSummarizeTrajectoryReadsContractShadow(t *testing.T) {
 	path := t.TempDir() + "/shadow.trajectory.jsonl"
 	lines := []string{

@@ -153,7 +153,27 @@ Reasonix 通过低频 compaction 保持 cache-first：
 用户可用 `reasonix config compact-ratio [--local] [VALUE]` 查看或修改 65–85% 的自动
 压缩阈值，内置默认值为 80%。项目级设置优先于桌面端与新 CLI 会话共用的用户全局配置。
 
-tool result 的 snip/prune 不删除消息，确保 assistant `tool_calls` 与 tool result 配对。摘要只折叠 assistant/tool 工作；正常大小的用户回合和既有 digest 原样保留。被移除的原文归档到 `reasonix/archive/<timestamp>.jsonl`。
+tool result 的 snip/prune 不删除消息，确保 assistant `tool_calls` 与 tool result 配对。
+
+摘要折叠时，固定前缀与近期 tail 之间的区间被划分为三部分：开头若干条小体量用户回合原样提升到
+digest 之前，keep policy 保护的消息原样保留，其余全部——assistant/tool 工作、后续用户回合、以及
+已有 digest——折叠进同一条 digest。三者构成一个划分：区间内的消息要么原样保留，要么进入摘要输入，
+不存在两者皆非的情况。
+
+一次折叠不会超出一次摘要调用。折叠区间超过单次调用能容纳的量（窗口减去 digest 出参、摘要提示词与
+调用方 instructions 所占空间）时，先让旧 tool result 交出主体
+（只保留首尾若干行，且仅作用于送给摘要器的副本，transcript 与 projection 都不改）；仍然过大的区间
+被拆成连续几部分分别摘要，再由最后一次调用合并，并对份数设上限，使单次 compaction 的调用数有界；
+某一部分被迫丢弃的内容，会写在摘要器读到的文本里。
+
+因此逐字保留的是：system prompt、体量足够小的首个用户回合、折叠区间开头若干条小体量用户回合、
+keep policy 保护的消息，以及近期 tail。其余均为尽力而为——只在 digest 抓住它的前提下留存，
+其中包括超出提升窗口的小体量用户回合，所以长期有效的约束更适合在近期回合中重述。
+
+两个性质限制了这种损失：每次折叠都从 canonical transcript 重新生成 digest，而不是在上一条 digest
+之上再摘要，因此 digest 不会形成链条，反复压缩也不会累积摘要漂移；同时 compaction 只写 projection，
+canonical transcript 保留全部原文，被折叠的细节仍可通过 `history` tool 与归档
+（`reasonix/archive/<timestamp>.jsonl`）取回。
 
 `history` tool 支持对 session 与归档进行 BM25 搜索；`memory` tool 用于检索自动记忆，
 `remember` 与 `forget` 负责写入和归档。每个真实用户回合前，Reasonix 会用原始用户消息执行
@@ -238,11 +258,12 @@ reasoning_language = "auto"
 
 [[providers]]
 name           = "deepseek"
-kind           = "openai"
-base_url       = "https://api.deepseek.com"
+kind           = "anthropic"
+base_url       = "https://api.deepseek.com/anthropic"
 models         = ["deepseek-v4-flash", "deepseek-v4-pro"]
 default        = "deepseek-v4-flash"
 api_key_env    = "DEEPSEEK_API_KEY"
+web_search     = true
 context_window = 1000000
 max_output_tokens = 32768  # 正文、reasoning 与工具调用共用的总输出预算；0 使用 provider 默认值
 

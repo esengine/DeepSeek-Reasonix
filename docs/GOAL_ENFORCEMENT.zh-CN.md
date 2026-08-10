@@ -8,6 +8,7 @@ Reasonix 的 Goal 模式（`/goal`）将目标推进（Goal）、验收（Delive
 |------|----------|------|
 | 结构化完成协议 | `update_goal` 工具 | 每轮目标 turn 结束时模型通过工具报告 continue/complete/blocked（含 reason 与 next_action），取代旧的 `[goal:*]` footer 文本标记 |
 | 完成校验 | 默认 | `complete` 声明必须通过 Delivery readiness（todos、验证、review、签收、能力门禁）才会真正完成；不满足时用缺失项开启下一轮 |
+| 完成自述与对账 | `update_goal` 的 `completion` | `complete` 可附带自述：`verified` 命令逐条与本会话真实 receipt 对账，没跑过 / 跑失败 / 早于最后一次改动都记为 unbacked claim；`unverified` 与 `risks` 是宿主推断不出的声明，只增不减，永远不阻塞完成 |
 | 独立评审 | 无报告时 | 模型未调用 `update_goal` 时，宿主调用一次独立 bounded evaluator 判定；评审不可用/出错/不确定时安全暂停，绝不默认继续 |
 | 执行预算 | 默认 | **轮次与无进展熔断**：简单 10 轮、写入型 20 轮、研究型 40 轮；连续 4 轮无宿主可验证进展则暂停。累计 token 只做观测展示，**没有 token 硬上限**，也没有 provider 请求前预算准入 |
 | 暂停/恢复 | `/goal pause` / `/goal resume` | 暂停保留 Goal、todo、Delivery checkpoint 与运行历史；轮次型暂停恢复时追加一档同类别**轮数**（`budget_extensions` 统计轮次追加次数） |
@@ -27,6 +28,18 @@ Reasonix 的 Goal 模式（`/goal`）将目标推进（Goal）、验收（Delive
 - `continue`（附 `reason` 与可选 `next_action`）— 继续推进；
 - `complete`（仅在请求完成、输出格式与约束满足、验证已尝试或声明不可用时）— 宿主会用 Delivery readiness 校验该声明；
 - `blocked`（仅当下一步需要用户独有信息、不可逆或对外可见操作、或范围变化时）— 立即停止。
+
+`complete` 还可以附一份自述 `completion`：
+
+```json
+{"status":"complete","completion":{
+  "verified":["go test ./..."],
+  "unverified":["desktop UI 未实际操作验证"],
+  "risks":["迁移不可逆"]
+}}
+```
+
+宿主对这份自述只做一件事——**对账**。`verified` 里的每条命令都会去本会话的真实 receipt 里找：没跑过、跑失败、或者最后一次运行早于最后一次改动，都会被记成一条 unbacked claim。`unverified` 与 `risks` 宿主无从推断，因此原样保留；它们**只增不减**，一份自述永远不能抹掉宿主自己发现的缺口，也永远不会因为诚实申报而阻塞完成。
 
 `update_goal` 只在活动 Goal turn 中可用；普通聊天调用会收到结构化错误且不改变任何状态。同值重复调用幂等，`continue` 可升级为 `complete`/`blocked`，终态后冲突调用被拒绝；目标被替换或清除后，迟到的报告/用量一律按 scope+epoch 拒绝。
 

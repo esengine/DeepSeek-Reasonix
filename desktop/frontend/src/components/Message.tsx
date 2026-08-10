@@ -12,7 +12,7 @@ import { replaySubmitTextPreservingSelectedContext } from "../lib/editReplay";
 import { useT } from "../lib/i18n";
 import { ImageViewer } from "./ImageViewer";
 import { Tooltip } from "./Tooltip";
-import { useGSAPCollapse } from "../lib/useGSAPCollapse";
+import { useCollapseAnimation } from "../lib/useCollapseAnimation";
 import { displayReasoningText, STREAMING_REASONING_WINDOW_STEP_CHARS, STREAMING_REASONING_WINDOW_STEP_LINES } from "../lib/reasoningDisplay";
 import { ReasoningSummary } from "./ReasoningSummary";
 import { historyEntryIdForItemId } from "../lib/transcriptRows";
@@ -919,7 +919,7 @@ function ReasoningPanel({
     : "";
   const label = isReasoningRunning ? t("msg.thinkingRunning") : t("msg.thinking");
   const meta = isReasoningRunning ? "" : reasoningDurationLabel(item.reasoningDurationMs, t);
-  useGSAPCollapse(reasoningBodyRef, reasoningOpen);
+  useCollapseAnimation(reasoningBodyRef, reasoningOpen);
 
   return (
     <div className="reasoning">

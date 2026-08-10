@@ -414,6 +414,9 @@ interface State {
   lastTurnWaitAccumMs: number;
   lastTurnModelMs: number;
   lastTurnOutputEstimated: boolean;
+  // Per-request rate (null when unmeasurable) and pending interval are tab-local.
+  lastRequestTps?: number | null;
+  pendingRequestModelMs?: number;
   promptWaitStartedAt?: number;
   // promptEventClock() reading taken when the CURRENT pending prompt first
   // arrived. Orders the prompt against reconciliation snapshots so a snapshot
@@ -1126,7 +1129,7 @@ function endPromptWaitIfIdle(s: State, now = Date.now()): State {
   return endPromptWait(s, now);
 }
 
-function resetTurnTiming(now = Date.now()): Pick<State, "turnStartAt" | "turnDoneAt" | "turnWaitAccumMs" | "promptWaitStartedAt" | "turnTokens" | "turnTotalTokens" | "turnOutputTokens" | "turnOutputChars" | "turnOutputCharsAtUsage" | "turnOutputEstimated" | "turnModelActiveAt" | "turnModelActiveMs" | "turnCost" | "turnArgChars"> {
+function resetTurnTiming(now = Date.now()): Pick<State, "turnStartAt" | "turnDoneAt" | "turnWaitAccumMs" | "promptWaitStartedAt" | "turnTokens" | "turnTotalTokens" | "turnOutputTokens" | "turnOutputChars" | "turnOutputCharsAtUsage" | "turnOutputEstimated" | "turnModelActiveAt" | "turnModelActiveMs" | "turnCost" | "turnArgChars" | "pendingRequestModelMs"> {
   return {
     turnStartAt: now,
     turnDoneAt: 0,
@@ -1139,7 +1142,7 @@ function resetTurnTiming(now = Date.now()): Pick<State, "turnStartAt" | "turnDon
     turnOutputCharsAtUsage: 0,
     turnOutputEstimated: false,
     turnModelActiveAt: undefined,
-    turnModelActiveMs: 0,
+    turnModelActiveMs: 0, pendingRequestModelMs: undefined,
     turnCost: 0,
     turnArgChars: 0,
   };
@@ -1156,13 +1159,11 @@ function beginTurnModelActivity(s: State, now = Date.now()): State {
     : { ...s, turnModelActiveAt: now };
 }
 
-function endTurnModelActivity(s: State, now = Date.now()): State {
+function endTurnModelActivity(s: State, now = Date.now(), stashForUsage = false): State {
   if (!s.turnModelActiveAt || s.turnModelActiveAt <= 0) return s;
-  return {
-    ...s,
-    turnModelActiveAt: undefined,
-    turnModelActiveMs: Math.max(0, s.turnModelActiveMs) + Math.max(0, now - s.turnModelActiveAt),
-  };
+  const closedMs = Math.max(0, now - s.turnModelActiveAt);
+  return { ...s, turnModelActiveAt: undefined, turnModelActiveMs: Math.max(0, s.turnModelActiveMs) + closedMs,
+    pendingRequestModelMs: stashForUsage ? closedMs : s.pendingRequestModelMs };
 }
 
 function snapshotCompletedTurnTelemetry(s: State, now = Date.now()): State {
@@ -1485,10 +1486,10 @@ function applyEvent(s: State, e: WireEvent): State {
           existingAssistant && existingAssistant.text.trim() === "" && existingAssistant.reasoning.trim() === "" && !existingAssistant.memoryCitations?.length
             ? s.items.filter((it) => !(it.kind === "assistant" && it.id === existingAssistant.id))
             : s.items;
-        return { ...endTurnModelActivity(s), items, live: undefined, currentAssistant: undefined, turnOutputCharsAtUsage: 0 };
+        return { ...endTurnModelActivity(s, Date.now(), true), items, live: undefined, currentAssistant: undefined, turnOutputCharsAtUsage: 0 };
       }
       const now = Date.now();
-      const settled = endTurnModelActivity(s, now);
+      const settled = endTurnModelActivity(s, now, true);
       const { items, id, seq } = ensureAssistant(settled);
       const streamedChars = settled.live?.id === id ? settled.live.text.length + settled.live.reasoning.length : 0;
       const turnOutputChars = Math.max(0, settled.turnOutputChars - streamedChars + text.length + reasoning.length);
@@ -1552,7 +1553,7 @@ function applyEvent(s: State, e: WireEvent): State {
           items: [...activeState.items, { kind: "tool", id, name: t.name, args: "", readOnly: t.readOnly, resolvedName: t.resolvedName, capabilityId: t.capabilityId, status: "running", argChars: t.argChars || undefined, parentId: t.parentId, subagentProgress: SUBAGENT_PROGRESS_TOOLS.has(t.name) ? freshSubagentProgress() : undefined }],
         }, id, false, undefined, { attemptId: t.attemptId, parentId: t.parentId, partial: true });
       }
-      const settled = t.parentId ? s : endTurnModelActivity(s);
+      const settled = t.parentId ? s : endTurnModelActivity(s, Date.now(), true);
       const id = t.id || `tool${s.seq}`;
       const idx = settled.items.findIndex((it) => it.kind === "tool" && it.id === id);
       if (idx >= 0) {
@@ -1661,18 +1662,16 @@ function applyEvent(s: State, e: WireEvent): State {
       // Only executor usage belongs to the foreground model stream. Planner,
       // subagent, and auxiliary usage still contributes to session totals and
       // usageSeq, but must not close or inflate the executor TPS interval.
-      const settled = updateContextGauge ? endTurnModelActivity(s) : s;
-      // Prefer Context* (latest attempt) over billable aggregates when multi-
-      // attempt sampling recovery folds several provider calls into one Usage.
-      // Matches Controller.ContextSnapshot: latest prompt + completion.
+      const settled = updateContextGauge ? endTurnModelActivity(s, Date.now(), true) : s;
+      const hasRequestContext = (e.usage?.contextPromptTokens ?? 0) > 0 || (e.usage?.contextCompletionTokens ?? 0) > 0;
+      const requestModelMs = updateContextGauge ? (settled.pendingRequestModelMs ?? 0) : 0;
+      const requestTokens = updateContextGauge ? (hasRequestContext ? (e.usage?.contextCompletionTokens ?? 0) : (e.usage?.completionTokens ?? 0)) : 0;
+      const lastRequestTps = updateContextGauge ? (requestTokens > 0 && requestModelMs >= 500 ? requestTokens / (requestModelMs / 1000) : null) : s.lastRequestTps;
+      // Context* is the latest sampling attempt; other token fields are billable aggregates.
       let used = settled.context.used;
-      if (e.usage && settled.context.window && updateContextGauge) {
-        const hasContext =
-          (e.usage.contextPromptTokens ?? 0) > 0 || (e.usage.contextCompletionTokens ?? 0) > 0;
-        used = hasContext
-          ? (e.usage.contextPromptTokens ?? 0) + (e.usage.contextCompletionTokens ?? 0)
-          : (e.usage.promptTokens ?? 0) + (e.usage.completionTokens ?? 0);
-      }
+      if (e.usage && settled.context.window && updateContextGauge) used = hasRequestContext
+        ? (e.usage.contextPromptTokens ?? 0) + (e.usage.contextCompletionTokens ?? 0)
+        : (e.usage.promptTokens ?? 0) + (e.usage.completionTokens ?? 0);
       const turnTokens = settled.turnTokens + (e.usage?.completionTokens ?? 0);
       const turnOutputTokens = updateContextGauge
         ? settled.turnOutputTokens + (e.usage?.completionTokens ?? 0)
@@ -1693,7 +1692,7 @@ function applyEvent(s: State, e: WireEvent): State {
       const usage = updateContextGauge ? e.usage : settled.usage;
       // The completed round's usage now accounts for the streamed tool-call
       // arguments, so drop the live estimate rather than double-count it.
-      return { ...settled, usage, context: { ...settled.context, used, sessionTokens }, turnTokens, turnOutputTokens, turnOutputCharsAtUsage, turnOutputEstimated, turnTotalTokens, turnCost, turnArgChars: updateContextGauge ? 0 : settled.turnArgChars, sessionTokens, sessionCost, sessionCurrency, usageSeq: settled.usageSeq + 1 };
+      return { ...settled, usage, context: { ...settled.context, used, sessionTokens }, turnTokens, turnOutputTokens, turnOutputCharsAtUsage, turnOutputEstimated, turnTotalTokens, turnCost, turnArgChars: updateContextGauge ? 0 : settled.turnArgChars, sessionTokens, sessionCost, sessionCurrency, usageSeq: settled.usageSeq + 1, lastRequestTps, pendingRequestModelMs: updateContextGauge ? undefined : settled.pendingRequestModelMs };
     }
     case "notice":
       return appendNoticeToState(s, e.level ?? "info", e.text ?? "", e.detail, e.code, e.decisionReceipt);

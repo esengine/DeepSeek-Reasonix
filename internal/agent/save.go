@@ -1626,6 +1626,11 @@ type SessionOrderInfo struct {
 	Turns         int
 	Preview       string
 	SchemaVersion int
+	// Revision and ContentDigest bind a listing backfill to the transcript
+	// generation it decoded. They are sidecar-only compare-and-apply guards and
+	// are not exposed through SessionInfo.
+	Revision      int64
+	ContentDigest string
 }
 
 // CleanupPendingMeta records that a session was logically removed but still has
@@ -2151,6 +2156,8 @@ func ListSessionOrder(dir string) ([]SessionOrderInfo, error) {
 		turns := 0
 		preview := ""
 		schemaVersion := 0
+		revision := int64(0)
+		contentDigest := ""
 		if meta, ok, err := LoadBranchMeta(full); err == nil && ok {
 			if !meta.CreatedAt.IsZero() {
 				createdAt = meta.CreatedAt
@@ -2170,6 +2177,8 @@ func ListSessionOrder(dir string) ([]SessionOrderInfo, error) {
 			turns = meta.Turns
 			preview = meta.Preview
 			schemaVersion = meta.SchemaVersion
+			revision = meta.Revision
+			contentDigest = meta.ContentDigest
 		}
 		out = append(out, SessionOrderInfo{
 			Path:           full,
@@ -2188,6 +2197,8 @@ func ListSessionOrder(dir string) ([]SessionOrderInfo, error) {
 			Turns:          turns,
 			Preview:        preview,
 			SchemaVersion:  schemaVersion,
+			Revision:       revision,
+			ContentDigest:  contentDigest,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -2211,37 +2222,32 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 	var out []SessionInfo
 	for _, session := range ordered {
 		preview, turns := session.Preview, session.Turns
-		if session.SchemaVersion < BranchMetaCountsVersion {
+		var previewErr error
+		if sessionListingCountsNeedRefresh(session.SchemaVersion, turns) {
 			// The sidecar's counts weren't recorded from content (a legacy session
-			// from before they were persisted). Decode the .jsonl once, then backfill
-			// + stamp the sidecar so every later listing is O(1) — and so a genuinely
-			// empty session is recorded once instead of being re-decoded forever.
-			preview, turns = previewSession(session.Path)
-			// Best-effort: a failure here just means we decode again next time.
-			_ = UpdateSessionMeta(session.Path, "", preview, turns, false)
+			// from before they were persisted), or an old zero may have swallowed a
+			// decode error. Decode once, then backfill + stamp the sidecar so every
+			// later listing is O(1) and a recovered session becomes visible again.
+			preview, turns, previewErr = previewSessionWithError(session.Path)
+			if previewErr == nil {
+				// Compare-and-apply under the metadata lock. A turn-end save may have
+				// advanced the transcript and its counts while this listing decoded;
+				// never overwrite that newer state with a stale backfill.
+				preview, turns, _ = updateSessionListingCountsIfCurrent(session, preview, turns)
+			}
 		}
 		if turns == 0 {
+			hasData := sessionArtifactsHaveContent(session.Path)
+			if previewErr != nil && hasData {
+				preview = "Session may be corrupted — " + filepath.Base(session.Path)
+				out = append(out, sessionInfoFromOrder(session, preview, 0))
+				continue
+			}
 			// Never had user interaction — an empty conversation that should not
 			// appear in the history panel or the resume picker.
 			continue
 		}
-		out = append(out, SessionInfo{
-			Path:           session.Path,
-			CreatedAt:      session.CreatedAt,
-			LastActivityAt: session.LastActivityAt,
-			ModTime:        session.ModTime,
-			Preview:        preview,
-			Turns:          turns,
-			Scope:          session.Scope,
-			WorkspaceRoot:  session.WorkspaceRoot,
-			TopicID:        session.TopicID,
-			TopicTitle:     session.TopicTitle,
-			CustomTitle:    session.CustomTitle,
-			Recovered:      session.Recovered,
-			RecoveryReason: session.RecoveryReason,
-			RecoveryDigest: session.RecoveryDigest,
-			ParentID:       session.ParentID,
-		})
+		out = append(out, sessionInfoFromOrder(session, preview, turns))
 	}
 	return out, nil
 }
@@ -2275,21 +2281,8 @@ func SessionPreviewFromMessages(msgs []provider.Message) (string, int) {
 // user-role messages so the picker can show "5 turns · 'help me debug the…'".
 // Errors are swallowed — a malformed file just shows up with an empty preview.
 func previewSession(path string) (string, int) {
-	msgs, _, _, err := loadSessionMessages(path)
-	if err != nil {
-		return "", 0
-	}
-	first := ""
-	turns := 0
-	for _, m := range msgs {
-		if m.Role == provider.RoleUser && IsUserAuthoredTurn(UserMessageText(m)) {
-			turns++
-			if first == "" {
-				first = truncatePreview(previewProse(UserMessageText(m)))
-			}
-		}
-	}
-	return first, turns
+	preview, turns, _ := previewSessionWithError(path)
+	return preview, turns
 }
 
 // previewProse drops the leading @file references a prompt opens with so the

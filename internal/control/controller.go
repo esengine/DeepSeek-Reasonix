@@ -929,7 +929,7 @@ func (c *Controller) finishGuardedTurn(err error, completion *guardedTurnComplet
 		c.mu.Unlock()
 		c.spawnGuardedTurn(ctx, cancel, next)
 	}()
-	done := event.Event{Kind: event.TurnDone, Err: err, Cancelled: cancelRequested, Outcome: turnOutcome(err), CheckpointTurn: c.validatedCheckpointTurn(completion)}
+	done := event.Event{Kind: event.TurnDone, Err: err, Cancelled: cancelRequested, Outcome: turnOutcome(err), CheckpointTurn: c.validatedCheckpointTurn(completion), Receipt: c.executor.CompletionReceipt()}
 	var readinessErr *agent.FinalReadinessError
 	if errors.As(err, &readinessErr) {
 		done.Readiness = &event.FinalReadiness{Attempts: readinessErr.Attempts, Missing: append([]string(nil), readinessErr.Missing...)}
@@ -1850,9 +1850,9 @@ func (c *Controller) runRefTurnWithResolverSync(ctx context.Context, input, refL
 		sent = "Referenced context:\n\n" + block + "\n\n" + input
 	}
 	if strings.TrimSpace(original) != "" {
-		return c.runEditedGoalLoopWithRawDisplay(ctx, sent, input, display, original)
+		return c.runEditedGoalLoopWithImageRefsRawDisplay(ctx, sent, input, refLine, display, original)
 	}
-	return c.runGoalLoopWithRawDisplay(ctx, sent, input, display)
+	return c.runGoalLoopWithImageRefsRawDisplay(ctx, sent, input, refLine, display)
 }
 
 // notice emits an informational Notice event.
@@ -1878,8 +1878,8 @@ func (c *Controller) Run(ctx context.Context, input string) (err error) {
 	parentSession := c.parentSessionID()
 	ctx = agent.WithParentSession(ctx, parentSession)
 	ctx = jobs.WithSession(ctx, parentSession)
-	ctx = agent.WithUserImages(ctx, c.inputImages(input))
 	rawInput := input
+	ctx = c.withTurnImages(ctx, rawInput)
 	ctx = agent.WithRawUserInput(ctx, rawInput)
 	input = c.Compose(input)
 	// input.receive: same interception seam as the orchestrated turn — the
@@ -1950,7 +1950,7 @@ func (c *Controller) RunSubagentProfile(ctx context.Context, name, task string, 
 	parentSession := c.parentSessionID()
 	ctx = agent.WithParentSession(ctx, parentSession)
 	ctx = jobs.WithSession(ctx, parentSession)
-	ctx = agent.WithUserImages(ctx, c.inputImages(task))
+	ctx = c.withTurnImages(ctx, task)
 	ctx = agent.WithResponseLanguagePreference(ctx, c.responseLanguage)
 	ctx = agent.WithReasoningLanguagePreference(ctx, c.reasoningLanguage)
 	ctx = agent.WithSubagentDepth(ctx, 0)
@@ -4646,51 +4646,6 @@ func (c *Controller) setSessionPath(p string, fresh bool) {
 	if !fresh {
 		c.recoverCheckpointTransactions()
 	}
-}
-
-// SessionDestroyHandle separates waiting for cancelled jobs from ending the
-// destroy window, so callers can move/delete persistent artifacts in between.
-type SessionDestroyHandle struct {
-	Wait    func() jobs.TeardownResult
-	WaitAll func()
-	Finish  func()
-	Async   bool
-}
-
-// BeginDestroySession marks a session as leaving active use and cancels its
-// background jobs. Call Wait before moving/deleting artifacts, then Finish after
-// persistent cleanup/move work is complete.
-func (c *Controller) BeginDestroySession(sessionPath string) SessionDestroyHandle {
-	parentSession := agent.BranchID(sessionPath)
-	if c.jobs == nil || parentSession == "" {
-		wait := func() jobs.TeardownResult { return jobs.TeardownResult{} }
-		noop := func() {}
-		return SessionDestroyHandle{Wait: wait, WaitAll: noop, Finish: noop}
-	}
-	teardown := c.jobs.BeginDestroySession(parentSession)
-	return SessionDestroyHandle{
-		Wait: func() jobs.TeardownResult {
-			return c.jobs.WaitTeardown(context.Background(), teardown, c.jobs.TeardownGrace())
-		},
-		WaitAll: func() {
-			for _, ch := range teardown.DoneChannels() {
-				<-ch
-			}
-		},
-		Finish: func() {
-			c.jobs.FinishDestroySession(parentSession)
-		},
-		Async: teardown.Async(),
-	}
-}
-
-// IsDestroyingSession reports whether sessionPath is currently in the destroy
-// window for this controller's job manager.
-func (c *Controller) IsDestroyingSession(sessionPath string) bool {
-	if c.jobs == nil {
-		return false
-	}
-	return c.jobs.IsDestroying(agent.BranchID(sessionPath))
 }
 
 func (c *Controller) setActiveJobSession(sessionPath string) {

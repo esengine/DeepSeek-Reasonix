@@ -14,7 +14,7 @@ import { ReadOnlyBatch } from "./ReadOnlyBatch";
 import { ToolGroup } from "./ToolGroup";
 import { getProcessFoldPreference, onProcessFoldPreferenceChange, type ProcessFoldPreference } from "../lib/processFoldPreference";
 import { STEER_NOTICE_PREFIX, isSteerNoticeText } from "../lib/useController";
-import { useEntranceAnimation } from "../lib/useEntranceAnimation";
+import { useTranscriptEntranceAnimation } from "../lib/useEntranceAnimation";
 import { useScrollManager } from "../lib/useScrollManager";
 import { compactQuestionText, lastQuestionTurn, questionAnchorId, questionTurnsById, scrollVersion, type QuestionAnchor } from "../lib/transcriptGrouping";
 import {
@@ -145,7 +145,7 @@ function InlineAssistantReasoning({ item }: { item: AssistantItem }) {
 // The transcript is a single flat virtual list (block-level rows: user
 // message, process-fold header, tool batch, answer, notice, turn actions, …)
 // rendered by @tanstack/react-virtual over the scroll container. Overscan of 8
-// rows keeps offscreen Markdown/ToolCard/Mermaid/GSAP instances unmounted.
+// rows keeps offscreen Markdown, ToolCard, Mermaid, and animation instances unmounted.
 // anchorTo: "end" makes the virtualizer compensate prepends (older history
 // pages), fold toggles and async height drift against the stable row keys, so
 // the reading position does not jump; measurement (measureElement) owns all
@@ -442,8 +442,7 @@ export function Transcript({
     setCreationScrollbarHot(true);
   }, [SCROLLBAR_HOT_ZONE_PX, SCROLLBAR_MIN_THUMB_PX, creationMode, scrollRef, setCreationScrollbarHot, syncCreationScrollbarMetrics]);
 
-  const sessionKey = useMemo(() => `${items[0]?.id ?? ""}|${items[items.length - 1]?.id ?? ""}`, [items]);
-  const entranceRef = useEntranceAnimation<HTMLDivElement>(sessionKey, items.length);
+  const entranceRef = useTranscriptEntranceAnimation<HTMLDivElement>(tabId, revealSignal, items);
 
   // Lease the markdown parse worker for as long as a transcript surface is
   // mounted; the last release terminates the thread (it re-spawns lazily).
@@ -562,7 +561,7 @@ export function Transcript({
     };
   }, [items.length, scheduleRepinIfWasPinned]);
 
-  // Footer height changes → smooth scroll repin with GSAP.
+  // Footer height changes → frame-batched scroll repin.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -782,7 +781,7 @@ export function Transcript({
       case "phase":
         return (
           <div className="turn-collapse__body">
-            <PhaseCard text={row.item.text} />
+            <PhaseCard id={row.item.id} text={row.item.text} />
           </div>
         );
       case "process-notice":
@@ -810,7 +809,7 @@ export function Transcript({
         );
       case "notice":
         if (isSteerNoticeText(row.item.text)) {
-          return <SteerCard text={row.item.text} />;
+          return <SteerCard id={row.item.id} text={row.item.text} />;
         }
         return (
           <NoticeCard
@@ -1135,17 +1134,17 @@ function QuestionJumpBar({ questions, onJump }: { questions: QuestionAnchor[]; o
 
 type CompactionItem = Extract<Item, { kind: "compaction" }>;
 
-function PhaseCard({ text }: { text: string }) {
-  return <div className="phase" data-entrance="true"><ProcessPhaseIcon size={12} /><span>{text}</span></div>;
+function PhaseCard({ id, text }: { id: string; text: string }) {
+  return <div className="phase" data-entrance={id}><ProcessPhaseIcon size={12} /><span>{text}</span></div>;
 }
 
 // A mid-turn steer is the user's own message, so it renders on the user side
 // of the transcript instead of disappearing into the work fold.
-function SteerCard({ text }: { text: string }) {
+function SteerCard({ id, text }: { id: string; text: string }) {
   const t = useT();
   const body = text.startsWith(STEER_NOTICE_PREFIX) ? text.slice(STEER_NOTICE_PREFIX.length) : text;
   return (
-    <div className="steer-line" data-entrance="true">
+    <div className="steer-line" data-entrance={id}>
       <div className="steer-line__bubble" title={t("transcript.steer")}>
         <span className="steer-line__icon" aria-hidden="true">↪</span>
         <span className="steer-line__text">{body}</span>
@@ -1194,7 +1193,7 @@ export function NoticeCard({ item, onAction, actionDisabled = false }: { item: N
   const t = useT();
   const StatusIcon = item.level === "warn" ? TriangleAlert : Info;
   return (
-    <div className={`notice-line notice-line--${item.level}${item.variant ? ` notice-line--${item.variant}` : ""}`} data-entrance="true">
+    <div className={`notice-line notice-line--${item.level}${item.variant ? ` notice-line--${item.variant}` : ""}`} data-entrance={item.id}>
       <StatusIcon className="notice-line__icon" size={14} aria-hidden="true" />
       <div className="notice-line__text">
         {item.decisionReceipt ? (

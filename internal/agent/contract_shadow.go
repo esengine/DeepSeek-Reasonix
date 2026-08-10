@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 
+	"reasonix/internal/completion"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
 	"reasonix/internal/taskcontract"
@@ -83,12 +84,26 @@ func intentName(i taskintent.Intent) string {
 	}
 }
 
-// emitContractShadow records the shadow contract's end-of-turn summary; the
-// contract observed the turn and decided nothing.
-func (a *Agent) emitContractShadow(input string) {
+// emitTurnShadows records the end-of-turn shadow observations from one replay
+// of the turn's receipts: the contract's state, and the completion report
+// derived from it. Both observe; neither decides.
+func (a *Agent) emitTurnShadows(input string) {
 	if a.evidence == nil {
 		return
 	}
 	c := buildShadowContract(input, a.evidence.Receipts())
 	event.RecordContractShadow(a.sink, contractShadowAudit(c))
+	rep := completion.Build(c, a.evidence)
+	a.completion = &rep
+	event.RecordCompletionReport(a.sink, completionReportAudit(rep))
+}
+
+// CompletionReceipt returns the turn's completion record for the host to
+// deliver, or nil when the turn had nothing to judge. The host renders it; the
+// agent never writes the user-facing text, which is the whole point.
+func (a *Agent) CompletionReceipt() *event.CompletionReceipt {
+	if a == nil || a.completion == nil {
+		return nil
+	}
+	return completionReceipt(*a.completion)
 }

@@ -1663,6 +1663,9 @@ func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *too
 	// intent classification must judge the task, not the wrapper.
 	opts.ClassifierTaskText = prompt
 	prompt = t.withWorkspaceContext(prompt)
+	// The child provider owns the final vision decision. Text-only providers
+	// retain the attachment metadata but omit image parts during serialization.
+	ctx = WithUserImages(ctx, SubagentImageCandidates(ctx))
 	return RunSubAgentWithSession(ctx, prov, subReg, sess, prompt, opts, sink)
 }
 
@@ -1673,6 +1676,7 @@ func (t *TaskTool) runReadOnlySubSession(ctx context.Context, prompt string, sub
 	// intent classification must judge the task, not the wrapper.
 	opts.ClassifierTaskText = prompt
 	prompt = t.withWorkspaceContext(prompt)
+	ctx = WithUserImages(ctx, SubagentImageCandidates(ctx))
 	return RunReadOnlySubAgentWithSession(ctx, prov, subReg, sess, prompt, opts, sink)
 }
 

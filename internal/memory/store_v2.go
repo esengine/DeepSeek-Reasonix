@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"reasonix/internal/fileutil"
 )
 
 type SaveOptions struct {
@@ -568,61 +570,23 @@ func snapshotMemoryRevisionInDir(base, path string, memory Memory) error {
 	return writeMemoryAtomic(filepath.Join(dir, name), b, 0o644)
 }
 
+// writeMemoryAtomic publishes a fact file through the shared crash-safe
+// writer (temp + fsync + replace), creating the parent directory on demand.
 func writeMemoryAtomic(path string, data []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".memory-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if err := tmp.Chmod(mode); err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, path)
+	return fileutil.AtomicWriteFile(path, data, mode)
 }
 
-func writeMemoryCreate(path string, data []byte, mode os.FileMode) (err error) {
+// writeMemoryCreate publishes a fact file only when path is still absent; a
+// concurrent creator wins. The shared writer stages a complete temp file, so
+// a crash can never leave a partial fact where active truth lives.
+func writeMemoryCreate(path string, data []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
-	if err != nil {
-		return err
-	}
-	complete := false
-	defer func() {
-		if !complete {
-			_ = os.Remove(path)
-		}
-	}()
-	if _, err = file.Write(data); err != nil {
-		_ = file.Close()
-		return err
-	}
-	if err = file.Sync(); err != nil {
-		_ = file.Close()
-		return err
-	}
-	if err = file.Close(); err != nil {
-		return err
-	}
-	complete = true
-	return nil
+	return fileutil.AtomicCreateFile(path, data, mode)
 }
 
 func newMemoryID(name string, now time.Time) string {

@@ -13,9 +13,23 @@ var ChineseTraditional = Messages{
 	TurnCancelled:       "已取消 — 回到提示符",
 	InterruptedRecovery: "本輪已中斷。部分輸出會永久保留供查看；只有完整工具呼叫及結果和有界恢復摘要會進入模型下一輪。繼續或回復前請先檢查目前工作區。",
 	RecoveryPaused:      "已暫停自動重試。Reasonix 已停止重複嘗試，並保留已完成的工作。傳送「繼續」即可開始新一輪，也可以補充要求來調整方向。",
-	NoSessionToResume:   "沒有可恢復的會話 — 用 `reasonix` 開一個新的",
-	ResumeRequiresTTY:   "--resume 需要互動式終端；用 --continue 直接恢復最近一次",
-	PickSessionLabel:    "恢復哪個會話？",
+	ReceiptVerified:     "沒有未經驗證的部分",
+	ReceiptGapsHeader:   "未驗證:",
+	ReceiptRisksHeader:  "已申報的風險:",
+	ReceiptMore:         "另有 %d 項",
+	ReceiptGapKinds: map[string]string{
+		"unbacked_claim":      "聲稱過但帳本不支持",
+		"unproven_criterion":  "驗收項沒有證據",
+		"missing_check":       "預期的檢查從未通過",
+		"failed_verification": "驗證失敗",
+		"stale_verification":  "驗證早於最後一次改動",
+		"unverified_change":   "改動了但沒有任何驗證",
+		"unreviewed_change":   "改動後再沒看過",
+		"declared_unverified": "自己申報未驗證",
+	},
+	NoSessionToResume: "沒有可恢復的會話 — 用 `reasonix` 開一個新的",
+	ResumeRequiresTTY: "--resume 需要互動式終端；用 --continue 直接恢復最近一次",
+	PickSessionLabel:  "恢復哪個會話？",
 
 	ResumeBusy:             "請先完成或取消當前這一輪再恢復會話",
 	ResumeBadIndexFmt:      "請選擇 1–%d 的會話（用 /resume 檢視列表）",
@@ -248,6 +262,7 @@ var ChineseTraditional = Messages{
 	CmdMouse:            "切換滑鼠接管（關閉後由終端原生處理選取/右鍵）",
 	CmdReasonLang:       "設定可見思考語言",
 	CmdHelp:             "檢視命令列表",
+	CmdWeb:              "在 Web UI 中繼續目前工作階段",
 	CmdTodo:             "清除任務清單",
 	CmdQuit:             "退出會話",
 	CmdCopy:             "選擇回覆複製到剪貼簿",
@@ -478,6 +493,7 @@ var ChineseTraditional = Messages{
   reasonix run [--model NAME] [--max-steps N] [-c|--continue] [--resume PATH] [--copy] [--output-format FORMAT] <task>
   reasonix run --events-jsonl [--model NAME] <task>      輸出脫敏結構化事件 JSONL
   reasonix review [--base BRANCH] [--commit SHA] [--model NAME]  AI 程式碼審查（基於本機 diff）
+  reasonix web [--model NAME] [--addr HOST:PORT] [--no-open]  啟動本機 Web UI 並用預設瀏覽器開啟
   reasonix serve [--model NAME] [--addr HOST:PORT] [--auth none|token|password] [--token STR] [--password STR] [--hash-password]  透過 HTTP+SSE 提供服務（支援可選認證）
   reasonix acp [--model NAME]                           透過 stdio 提供 Agent Client Protocol（也可用：reasonix --acp）
   reasonix setup [path]                                 互動式設定精靈；生成 reasonix.toml（及 .env）
@@ -507,6 +523,7 @@ var ChineseTraditional = Messages{
   reasonix
   reasonix --continue
   reasonix --resume provider-config
+  reasonix web
   reasonix run "把 main.go 裡的 TODO 實現掉"
   reasonix run --model mimo-pro "給這個函式補單元測試"
   reasonix -p "總結這個倉庫" --output-format json

@@ -120,7 +120,7 @@ func TestParseCodexClaudeCompatibility(t *testing.T) {
 	}
 }
 
-func TestParseClaudePluginManifest(t *testing.T) {
+func TestParseClaudePluginManifestDoesNotLoadRootClaudeInstructions(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, filepath.Join(root, ClaudeManifest), `{
 	  "name": "ui-ux-pro-max",
@@ -148,8 +148,8 @@ func TestParseClaudePluginManifest(t *testing.T) {
 	if len(inv.Skills) != 1 || inv.Skills[0].Name != "ui-ux-pro-max" || inv.Skills[0].Invocation != "/ui-ux-pro-max" {
 		t.Fatalf("Inventory().Skills = %+v", inv.Skills)
 	}
-	if hooks := pkg.Manifest.Hooks["SessionStart"]; len(hooks) != 1 || hooks[0].ContextFile != "CLAUDE.md" {
-		t.Fatalf("SessionStart hooks = %+v, want CLAUDE.md context hook", hooks)
+	if hooks := pkg.Manifest.Hooks["SessionStart"]; len(hooks) != 0 {
+		t.Fatalf("SessionStart hooks = %+v, want plugin-root CLAUDE.md ignored", hooks)
 	}
 	if ManifestPath(pkg.ManifestKind) != ClaudeManifest {
 		t.Fatalf("ManifestPath(%q) = %q, want %q", pkg.ManifestKind, ManifestPath(pkg.ManifestKind), ClaudeManifest)

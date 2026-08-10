@@ -44,7 +44,10 @@ type suiteStats struct {
 func gatherSuiteStats(results []result) suiteStats {
 	s := suiteStats{maxAttempt: 1, classes: map[string]int{}, prefixChangeReasons: map[string]int{}, bySource: map[string]sourceUsage{}}
 	for _, r := range results {
-		if r.Skipped {
+		// No-solution tasks are graded on honesty, not correctness; leaving
+		// them out here keeps every accuracy and cost-per-solved denominator
+		// meaningful. renderCompletionIntegrity reports them, spend included.
+		if r.Skipped || r.NoSolution {
 			continue
 		}
 		// ran counts tasks, not attempts: retries add entries, first attempts
@@ -189,10 +192,14 @@ func renderBody(results []result) string {
 		comma(s.tools), comma(s.toolFails), s.compacts, currencySym(s.currency), s.cost)
 	b.WriteString(perSolvedLine(s))
 	b.WriteString(requestsBySourceLine(s.bySource))
+	b.WriteString(renderMeterAccounting(results))
+	b.WriteString(renderFaultRecovery(results))
 	b.WriteString(renderTimeAttribution(results))
 	b.WriteString(renderSolveProfiles(results))
 	b.WriteString(renderToolSurface(results))
 	b.WriteString(renderContractShadow(results))
+	b.WriteString(renderCompletionReport(results))
+	b.WriteString(renderCompletionIntegrity(results))
 	b.WriteString(renderOutcomeProgress(results))
 	b.WriteString(renderMemoryShadow(results))
 	b.WriteString(renderCognition(results))

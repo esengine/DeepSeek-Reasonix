@@ -9,7 +9,9 @@ import (
 	_ "embed"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -218,6 +220,16 @@ func (ag *authGate) middleware(next http.Handler) http.Handler {
 			return
 		}
 		if ag.mode == authToken {
+			if r.URL.Path == "/auth/token" {
+				ag.handleTokenBootstrap(w, r)
+				return
+			}
+			// Let the inert shell trade its URL fragment for an HttpOnly cookie
+			// before API or SSE calls; query-token links use the legacy path below.
+			if r.URL.Query().Get("token") == "" && tokenBootstrapPublicPath(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			ag.checkToken(w, r, next)
 			return
 		}
@@ -226,9 +238,69 @@ func (ag *authGate) middleware(next http.Handler) http.Handler {
 	})
 }
 
-// checkToken validates the token from cookie or query parameter. If the query
-// parameter is valid, it sets a cookie and redirects to strip the token from the
-// URL (preventing it from leaking via browser history or referrer headers).
+func tokenBootstrapPublicPath(r *http.Request) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	if r.URL.Path == "/" || r.URL.Path == "/assets/logo-wordmark.svg" {
+		return true
+	}
+	// Only one non-empty session segment is an inert shell entry point; this
+	// prevents API-like paths from becoming public in token mode.
+	const prefix = "/sessions/"
+	id := strings.TrimPrefix(r.URL.Path, prefix)
+	return id != r.URL.Path && id != "" && !strings.Contains(id, "/")
+}
+
+// handleTokenBootstrap validates a token delivered from the URL fragment by
+// the Web shell. The token travels in a bounded JSON body rather than the URL,
+// keeping it out of request lines, access logs, browser history, and referrers.
+func (ag *authGate) handleTokenBootstrap(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	contentType := r.Header.Get("Content-Type")
+	if i := strings.IndexByte(contentType, ';'); i >= 0 {
+		contentType = contentType[:i]
+	}
+	if !strings.EqualFold(strings.TrimSpace(contentType), "application/json") {
+		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
+	var body struct {
+		Token string `json:"token"`
+	}
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(&body); err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(body.Token), []byte(ag.token)) != 1 {
+		ag.deny(w, r)
+		return
+	}
+	ag.setAuthCookie(w, r, &http.Cookie{
+		Name:     cookieToken,
+		Value:    ag.token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(sessionDuration.Seconds()),
+	})
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// checkToken validates the token from a cookie or the legacy query parameter.
+// New links use a URL fragment and handleTokenBootstrap; query links remain
+// supported so previously shared URLs keep working.
 func (ag *authGate) checkToken(w http.ResponseWriter, r *http.Request, next http.Handler) {
 	// 1. Check cookie first (fast path).
 	if c, err := r.Cookie(cookieToken); err == nil && strings.TrimSpace(c.Value) != "" {

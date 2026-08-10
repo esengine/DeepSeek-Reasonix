@@ -286,8 +286,7 @@ type Agent struct {
 	maxStepsKey        string
 	reasoningByteLimit int
 	maxOutputTokens    int
-	// executorHandoffGuard is enabled by Coordinator for the executor agent. The
-	// per-turn marker check in Run keeps ordinary single-model turns unaffected.
+	// executorHandoffGuard is enabled by Coordinator only for the executor agent.
 	executorHandoffGuard bool
 	temperature          float64
 	pricing              *provider.Pricing
@@ -297,15 +296,14 @@ type Agent struct {
 	reasoningLanguage    atomic.Value // string: auto|zh|en
 
 	// sink receives the turn's typed event stream (reasoning/text deltas, tool
-	// dispatch/results, usage, notices). The agent no longer formats output
-	// itself — a frontend's Sink decides how to render. Never nil; New defaults
-	// it to event.Discard.
+	// dispatch/results, usage, notices). Frontends decide how to render it;
+	// never nil because New defaults it to event.Discard.
 	sink                event.Sink
 	requireVisibleFinal bool // internal callers require final Content
-	// lastUsage caches the most recent per-turn telemetry the provider reported so
-	// the CLI can expose a context gauge without re-scraping the usage line. The
-	// run loop writes it while a frontend's status line reads it, so it is atomic.
+	// lastUsage caches the latest provider telemetry for the CLI context gauge.
+	// The run loop writes it while a frontend reads it, so it is atomic.
 	lastUsage atomic.Pointer[provider.Usage]
+	outputBudgetState
 
 	// sessCacheHit/sessCacheMiss accumulate cache tokens across every API call
 	// this session, so frontends can show the aggregate hit-rate (Σhit/Σ(hit+miss))
@@ -824,6 +822,7 @@ func (a *Agent) SetSession(s *Session) {
 	a.sessMu.Unlock()
 	a.sessCacheHit.Store(0)
 	a.sessCacheMiss.Store(0)
+	a.resetOutputBudgetState()
 	a.warnedMissingToolCallReasoning = false
 	a.missingReasoningWarnStateChecked = false
 	a.missingReasoningHealthyStreak = 0
@@ -1298,6 +1297,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		maxSubagentDepth:          maxSubagentDepth,
 		mutationObserver:          opts.MutationObserver,
 	}
+	a.outputBudget = outputBudgetOf(prov)
 	if a.sessionPath != "" {
 		a.LoadProjectionSidecar(a.sessionPath)
 	}
@@ -2459,7 +2459,7 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 				stored, _ := finishReasoning()
 				usage = bestEffortStreamUsage(usage, text.Len(), reasoning.Len(), finishReasonClientReasoningLimit)
 				usage = provider.UsageWithRequestAttemptCount(ctx, usage)
-				a.lastUsage.Store(usage)
+				a.storeLatestRequestUsage(usage)
 				return collect(stored, errReasoningByteLimitExceeded)
 			}
 		case provider.ChunkText:
@@ -2508,7 +2508,7 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 			}
 		case provider.ChunkUsage:
 			usage, a.lastReasoning = chunk.Usage, chunk.Usage.ReasoningTokens
-			a.lastUsage.Store(chunk.Usage)
+			a.storeLatestRequestUsage(chunk.Usage)
 			a.sessCacheHit.Add(int64(chunk.Usage.CacheHitTokens))
 			a.sessCacheMiss.Add(int64(chunk.Usage.CacheMissTokens))
 		case provider.ChunkError:

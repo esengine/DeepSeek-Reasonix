@@ -241,6 +241,7 @@ func TestFixedEarlyUserTurnsStableAcrossCompactions(t *testing.T) {
 	// the pre-projection canonical estimate. This remains useful for tail sizing,
 	// but must not change which early turns define the stable prefix.
 	a.lastUsage.Store(&provider.Usage{PromptTokens: charsOfMessages(sess.Messages)})
+	a.setPromptTokenCalibration(charsOfMessages(sess.Messages), requestCalibrationShapeOf(provider.Request{Messages: sess.Messages}))
 	if got := a.tokPerChar(); got < 0.9 || got > 1.1 {
 		t.Fatalf("test did not install the intended dynamic calibration: %f", got)
 	}

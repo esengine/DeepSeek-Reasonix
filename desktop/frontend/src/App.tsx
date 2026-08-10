@@ -79,7 +79,7 @@ import { WorktreeBadge } from "./components/WorktreeBadge";
 import { HeartbeatPanel } from "./custom/features/heartbeat/HeartbeatPanel";
 import "./custom/features/heartbeat/heartbeat.css";
 import { CopyButton } from "./components/CopyButton";
-import { ExternalOpener } from "./components/ExternalOpener";
+import { ExternalOpener, shouldMountExternalOpener } from "./components/ExternalOpener";
 import { startTerminalEventBridge } from "./lib/terminalEvents";
 import { applyTerminalThemePreference } from "./lib/terminalTheme";
 import { formatTerminalOutputForComposer } from "./lib/terminalOutput";
@@ -204,11 +204,14 @@ import { useViewportHeightVar, useWindowStatePersistence } from "./lib/windowSta
 import { availableWorkspacePanelWidth, resolveLiveWorkspacePanelWidth, resolveWorkspacePanelWidth, workspacePanelAriaMinWidth } from "./lib/workspaceLayout";
 import { createRafResizeUpdater } from "./lib/resizeDrag";
 import { useGlobalShortcut } from "./lib/keyboardShortcuts";
+import { useMountTransition } from "./lib/useMountTransition";
 import { topicShortcutIndexFromEvent, useTopicShortcuts, type TopicShortcutEntry } from "./lib/topicShortcuts";
 import { composerDraftKeyForTab } from "./lib/composerDraftKey";
 import { continueDelivery } from "./lib/deliveryContinue";
 import { activateGoalAndSubmitOnTab } from "./lib/goalSubmit";
 import logoWordmark from "./assets/logo-wordmark.svg";
+
+const TERMINAL_CLOSE_TRANSITION_MS = 250;
 
 function noticePreviewMockEnabled(): boolean {
   const value = browserMockScenarioParam();
@@ -1266,7 +1269,6 @@ export default function App() {
   const [workspacePanelResizing, setWorkspacePanelResizing] = useState(false);
   const [liveWorkspacePanelRenderWidth, setLiveWorkspacePanelRenderWidth] = useState<number | null>(null);
   const [liveTerminalHeight, setLiveTerminalHeight] = useState<number | null>(null);
-  const [terminalContentVisible, setTerminalContentVisible] = useState(false);
   const terminalResizing = liveTerminalHeight !== null;
   const workspacePanelMaximized = useLayoutStore((s) => s.workspacePanelMaximized);
   const setWorkspacePanelMaximized = useLayoutStore((s) => s.setWorkspacePanelMaximized);
@@ -1274,6 +1276,10 @@ export default function App() {
   const setRightDockMode = useLayoutStore((s) => s.setRightDockMode);
   const terminalPanelOpen = useLayoutStore((s) => s.terminalPanelOpen);
   const setTerminalPanelOpen = useLayoutStore((s) => s.setTerminalPanelOpen);
+  const { mounted: terminalContentVisible } = useMountTransition(
+    terminalPanelOpen,
+    TERMINAL_CLOSE_TRANSITION_MS,
+  );
   const terminalHeight = useLayoutStore((s) => s.terminalHeight);
   const setTerminalHeight = useLayoutStore((s) => s.setTerminalHeight);
   const [dockRefreshKey, setDockRefreshKey] = useState(0);
@@ -2997,21 +3003,6 @@ export default function App() {
     [setSavedTerminalHeight, terminalPanelOpen, terminalRenderHeight, terminalResizeMaxHeight],
   );
 
-  // Manage terminal content visibility for open/close animation.
-  // On open: mount content immediately. On close: wait for the grid-template-rows
-  // transition to finish before unmounting.
-  const handleTerminalTransitionEnd = useCallback((event: React.TransitionEvent<HTMLDivElement>) => {
-    if (event.propertyName === "grid-template-rows" && !terminalPanelOpen) {
-      setTerminalContentVisible(false);
-    }
-  }, [terminalPanelOpen]);
-
-  useEffect(() => {
-    if (terminalPanelOpen) {
-      setTerminalContentVisible(true);
-    }
-  }, [terminalPanelOpen]);
-
   const openWorkspacePanel = useCallback(
     (mode: RightDockMode = rightDockMode) => {
       closeTransientOverlays();
@@ -4360,7 +4351,6 @@ export default function App() {
           .filter(Boolean)
           .join(" ")}
         style={layoutStyle}
-        onTransitionEnd={handleTerminalTransitionEnd}
       >
         {!appChromeHidden && (
           <AppChrome
@@ -4715,8 +4705,8 @@ export default function App() {
             </div>
             <div className="topicbar__spacer" />
             <div className="topicbar__actions">
-              {sidebarCreation && !sidebarImDetailConnection && activeTab?.scope === "project" && (
-                <ExternalOpener tabId={activeTab.id} dismissSignal={transientOverlayDismissSignal} />
+              {sidebarCreation && shouldMountExternalOpener(activeTab, Boolean(sidebarImDetailConnection)) && activeTab && (
+                <ExternalOpener key={activeTab.id} tabId={activeTab.id} dismissSignal={transientOverlayDismissSignal} />
               )}
               {!sidebarImDetailConnection && (
               <>
@@ -4792,8 +4782,8 @@ export default function App() {
                   </button>
                 </Tooltip>
               )}
-              {!sidebarCreation && !sidebarImDetailConnection && activeTab?.scope === "project" && (
-                <ExternalOpener tabId={activeTab.id} dismissSignal={transientOverlayDismissSignal} />
+              {!sidebarCreation && shouldMountExternalOpener(activeTab, Boolean(sidebarImDetailConnection)) && activeTab && (
+                <ExternalOpener key={activeTab.id} tabId={activeTab.id} dismissSignal={transientOverlayDismissSignal} />
               )}
               <Tooltip label={t("shortcuts.cheatsheetTitle")}>
                 <button
@@ -5426,6 +5416,7 @@ export default function App() {
             lastTurnOutputTokens={state.lastTurnOutputTokens}
             lastTurnModelMs={state.lastTurnModelMs}
             lastTurnOutputEstimated={state.lastTurnOutputEstimated}
+            lastRequestTps={state.lastRequestTps}
             turnCost={state.turnCost}
             cost={state.sessionCost}
             currency={state.sessionCurrency}

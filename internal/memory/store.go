@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"reasonix/internal/config"
+	"reasonix/internal/fileutil"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/frontmatter"
 )
@@ -134,23 +135,6 @@ func (s Store) dirs() []string {
 		return []string{s.GlobalDir, s.Dir}
 	}
 	return []string{s.Dir}
-}
-
-// Index returns the MEMORY.md contents (the per-line index of saved memories),
-// or "" if there are none yet. This is what loads into the cached prefix.
-// When both GlobalDir and Dir have indexes, they are merged with deduplication
-// (global first).
-func (s Store) Index() string {
-	memories := s.List()
-	if len(memories) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	for _, memory := range memories {
-		b.WriteString(renderIndexLine(memory.Name, memory))
-		b.WriteString("\n")
-	}
-	return b.String()
 }
 
 // Path returns the absolute file path a memory with the given name lives at.
@@ -462,10 +446,12 @@ func flushIndexIn(dir string, lines map[string]string) error {
 		b.WriteString("\n")
 	}
 	result := strings.TrimRight(b.String(), "\n")
-	if result == "" {
-		return os.WriteFile(path, []byte(""), 0o644)
+	if result != "" {
+		result += "\n"
 	}
-	return os.WriteFile(path, []byte(result+"\n"), 0o644)
+	// The index is derived state, but a torn write would still hide facts
+	// from the next session's prefix until the next reindex.
+	return fileutil.AtomicWriteFile(path, []byte(result), 0o644)
 }
 
 // reindexIn rewrites the MEMORY.md line for name in the given directory,

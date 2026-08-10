@@ -3,3 +3,4 @@ class = "pinned"
 max_steps = 8
 timeout_sec = 180
 memory_markers = ["MEMKEY-PIN4D"]
+memory_markers_prefix = true

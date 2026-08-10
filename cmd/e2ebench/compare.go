@@ -64,7 +64,9 @@ type classStats struct {
 func aggregateArm(results []result) armStats {
 	s := armStats{ByClass: map[string]classStats{}}
 	for _, r := range results {
-		if r.Skipped {
+		// No-solution tasks never enter an accuracy comparison; see
+		// gatherSuiteStats.
+		if r.Skipped || r.NoSolution {
 			continue
 		}
 		// Retry entries share their task's denominator: only first attempts

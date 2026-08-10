@@ -54,8 +54,17 @@ type RecallResult struct {
 	CharBudget int
 	UsedChars  int
 	Suppressed string
+	// ShadowHits is the Retrieval V2 ranking over the same pool, telemetry
+	// only: it never reaches the model and never affects Hits.
+	ShadowHits []ShadowHit
 
 	block string
+}
+
+// ShadowHit is one V2-ranked fact fingerprint.
+type ShadowHit struct {
+	ID    string
+	Score float64
 }
 
 func (r RecallResult) Block() string { return r.block }
@@ -121,31 +130,31 @@ type autoRecallDoc struct {
 // and one-common-word matches return no block rather than spending context.
 func AutoRecall(store Store, query string, opts RecallOptions) RecallResult {
 	result := RecallResult{Query: strings.TrimSpace(query), CharBudget: recallCharBudget(opts.MaxChars)}
-	queryTerms, err := retrieval.QueryTerms(result.Query)
-	if err != nil {
-		result.Suppressed = "no searchable terms"
-		return result
-	}
 	if genericRecallQuery(result.Query) {
 		result.Suppressed = "generic user turn"
 		return result
 	}
 
-	memories := recallMemories(store.ListAll())
-	docs := make([]autoRecallDoc, 0, len(memories))
-	for _, memory := range memories {
-		text := autoRecallSearchText(memory)
-		terms := retrieval.Tokens(text)
-		if len(terms) == 0 {
-			continue
-		}
-		docs = append(docs, autoRecallDoc{
-			memory: memory,
-			text:   text,
-			counts: retrieval.Counts(terms),
-			length: len(terms),
-		})
+	return autoRecallIndexed(BuildRecallIndex(store), result, opts)
+}
+
+// autoRecallIndexed is AutoRecall's scoring core over a prebuilt index. The
+// per-turn path uses the session snapshot's index (zero disk IO); the direct
+// AutoRecall entry builds one on the spot for tools, tests, and the bench.
+func autoRecallIndexed(index *RecallIndex, result RecallResult, opts RecallOptions) RecallResult {
+	if index == nil {
+		result.Suppressed = "memory store is empty"
+		return result
 	}
+	// The shadow ranks the full pool before any production gate: what V1
+	// misses entirely is exactly what the comparison must be able to see.
+	result.ShadowHits = shadowRankV2(result.Query, index.fielded)
+	queryTerms, err := retrieval.QueryTerms(result.Query)
+	if err != nil {
+		result.Suppressed = "no searchable terms"
+		return result
+	}
+	docs := index.docs
 	if len(docs) == 0 {
 		result.Suppressed = "memory store is empty"
 		return result
@@ -220,6 +229,21 @@ func AutoRecall(store Store, query string, opts RecallOptions) RecallResult {
 		result.Suppressed = "matched facts exceeded recall budget"
 	}
 	return result
+}
+
+// shadowRankV2 runs the Retrieval V2 candidate (BM25F, code-symbol split,
+// mixed CJK grams) over the recall pool. Shadow only: recorded for offline
+// comparison, gated by MemoryBench before it can ever serve.
+func shadowRankV2(query string, docs []retrieval.FieldedDoc) []ShadowHit {
+	ranked := retrieval.RankV2(query, docs)
+	if len(ranked) > maxAutoRecallLimit {
+		ranked = ranked[:maxAutoRecallLimit]
+	}
+	out := make([]ShadowHit, 0, len(ranked))
+	for _, hit := range ranked {
+		out = append(out, ShadowHit{ID: hit.ID, Score: hit.Score})
+	}
+	return out
 }
 
 func recallCharBudget(value int) int {

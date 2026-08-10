@@ -3,6 +3,7 @@ package autoresearch
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -143,6 +144,9 @@ func TestArchiveReaderRejectsSymlinkedTaskContent(t *testing.T) {
 func TestLoadTaskRejectsUnreadableArchiveFile(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root can bypass archive file permissions")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no Unix permission bits; chmod cannot make a file unreadable")
 	}
 	root := t.TempDir()
 	taskRoot := writeArchiveFixture(t, root, "permission-task", "permission goal", nil)

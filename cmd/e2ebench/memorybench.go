@@ -33,6 +33,12 @@ func seedTaskMemory(taskDir, work string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The child derives its project slug from Getwd, which returns the
+	// symlink-resolved path (/private/var vs /var on macOS); seed under the
+	// same identity or the store lands in a directory nobody reads.
+	if resolved, rErr := filepath.EvalSymlinks(absWork); rErr == nil {
+		absWork = resolved
+	}
 	pairs := [][2]string{
 		{filepath.Join(seeds, "project"), filepath.Join(stateHome, "projects", config.WorkspaceSlug(absWork), "memory")},
 		{filepath.Join(seeds, "global"), filepath.Join(stateHome, "memory", "global")},
@@ -74,11 +80,11 @@ func taskExperimentEnv(cfg suiteConfig, t task, work string) (env []string, note
 }
 
 // applyMemoryStats folds one trajectory's recall behavior into the result row.
-func applyMemoryStats(r *result, trajPath string, markers []string) {
-	stats := scanMemoryRecall(trajPath, markers)
+func applyMemoryStats(r *result, trajPath string, t task) {
+	stats := scanMemoryRecall(trajPath, t.MemoryMarkers, t.MemoryMarkersPrefix)
 	r.MemoryRecallEvents, r.MemoryRecallHits = stats.RecallEvents, stats.RecallHits
 	r.MemoryRecallChars, r.MemorySuppressed = stats.RecallChars, stats.Suppressed
-	r.MemoryMarkersUsed = stats.MarkersUsed
+	r.MemoryMarkersUsed, r.MemoryShadowAgree = stats.MarkersUsed, stats.ShadowAgree
 }
 
 // memoryRunStats is what one trajectory reveals about recall behavior.
@@ -88,13 +94,14 @@ type memoryRunStats struct {
 	RecallChars  int
 	Suppressed   int // recall decisions that stayed silent
 	MarkersUsed  int // task markers seen in tool args or answer text after recall
+	ShadowAgree  int // recall events where the V2 shadow's top hit matched production's
 }
 
 // scanMemoryRecall extracts recall decisions and point-of-use evidence: a
 // marker (a unique token planted in a seeded fact body) counts as used only
 // when it appears in tool arguments or answer text AFTER a recall injected
 // facts — the fact reached the decision path, not just the ranking.
-func scanMemoryRecall(path string, markers []string) memoryRunStats {
+func scanMemoryRecall(path string, markers []string, markersInPrefix bool) memoryRunStats {
 	var stats memoryRunStats
 	f, err := os.Open(path)
 	if err != nil {
@@ -106,6 +113,7 @@ func scanMemoryRecall(path string, markers []string) memoryRunStats {
 			Hits       []struct{ ID string } `json:"hits"`
 			UsedChars  int                   `json:"used_chars"`
 			Suppressed string                `json:"suppressed"`
+			ShadowHits []struct{ ID string } `json:"shadow_hits"`
 		} `json:"memory_recall"`
 		Event *struct {
 			Kind string `json:"kind"`
@@ -116,7 +124,9 @@ func scanMemoryRecall(path string, markers []string) memoryRunStats {
 		} `json:"event"`
 	}
 	used := make(map[string]bool, len(markers))
-	recalled := false
+	// Pinned facts arrive via the stable prefix, before any recall: their
+	// markers count from the first record.
+	recalled := markersInPrefix
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 64*1024*1024)
 	for scanner.Scan() {
@@ -130,6 +140,9 @@ func scanMemoryRecall(path string, markers []string) memoryRunStats {
 				stats.RecallHits += len(mr.Hits)
 				stats.RecallChars += mr.UsedChars
 				recalled = true
+				if len(mr.ShadowHits) > 0 && mr.ShadowHits[0].ID == mr.Hits[0].ID {
+					stats.ShadowAgree++
+				}
 			} else if mr.Suppressed != "" {
 				stats.Suppressed++
 			}
@@ -174,8 +187,15 @@ func renderMemoryShadow(results []result) string {
 	if hits == 0 && markersTotal == 0 {
 		return ""
 	}
+	shadowAgree := 0
+	for _, r := range results {
+		shadowAgree += r.MemoryShadowAgree
+	}
 	line := fmt.Sprintf("**Memory shadow** (%d runs): **recall fired** in %d runs · **hits** %d · **injected chars** %d",
 		runs, recallRuns, hits, chars)
+	if recallRuns > 0 {
+		line += fmt.Sprintf(" · **V2 top1 agree** %d/%d", shadowAgree, recallRuns)
+	}
 	if markersTotal > 0 {
 		line += fmt.Sprintf(" · **point-of-use** %d/%d markers", markersUsed, markersTotal)
 	}

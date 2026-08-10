@@ -14,7 +14,7 @@
 - [配置](#配置)
 - [CLI 命令参考](./CLI.zh-CN.md)
 - [环境变量](#环境变量)
-- [Serve Web 前端](#serve-web-前端)
+- [Web 前端](#web-前端)
 - [配置路径](./CONFIG_PATHS.zh-CN.md)
 - [思考语言](./REASONING_LANGUAGE.zh-CN.md)
 - [任务合约与暂停策略](./TASK_CONTRACT.zh-CN.md)
@@ -66,10 +66,11 @@ tool_result_snip_ratio = 0.6       # 在摘要 compaction 前先缩短旧工具�
 
 [[providers]]
 name        = "deepseek-flash"
-kind        = "openai"
-base_url    = "https://api.deepseek.com"
+kind        = "anthropic"
+base_url    = "https://api.deepseek.com/anthropic"
 model       = "deepseek-v4-flash"
 api_key_env = "DEEPSEEK_API_KEY"
+web_search  = true
 # 还有预设：deepseek-pro
 
 [tools]
@@ -183,19 +184,33 @@ reasonix report delete [ID]     # 不发送，直接删除
 需要单独审阅的报告。Go 无法恢复 runtime fatal throw、操作系统强制终止，以及未包装
 后台 goroutine 中的 panic，因此这些情况不会生成本地报告。
 
-## Serve Web 前端
+## Web 前端
 
-`reasonix serve` 会用同一个本地 Reasonix 引擎启动浏览器 UI。适合不安装桌面端但想用可视化界面、
-在远程开发机上通过 tunnel 使用，或把当前会话临时共享给浏览器查看的场景。
+本机使用时，`reasonix web` 会启动浏览器 UI，并自动用默认浏览器打开。也可以在 CLI 交互会话中
+执行 `/web`：Reasonix 会保存当前会话、恢复终端，然后打开明确的
+`/sessions/<id>#token=...` 深链。即使会话尚未产生第一轮消息，也会延续已预留的 Session ID，
+同时继续保持“空会话不提前写 transcript”的惰性落盘行为。
 
 ```bash
 cd your-project
-reasonix serve
-# 打开 http://127.0.0.1:8787
+reasonix web
 ```
 
-默认监听 `127.0.0.1:8787`，认证模式是 `auth_mode = "none"`。这个默认值只适合本机使用。
-如果要绑定到非 loopback 地址、通过 tunnel 暴露，或放到反向代理后面，请先开启认证再分享 URL：
+如果想启动前台 Web 服务并打印地址、但不自动新开浏览器标签页，可使用
+`reasonix web --no-open`。底层的 `reasonix serve`
+默认不会打开浏览器，继续用于远程开发机、进程托管、tunnel、反向代理和需要认证分享的场景。
+
+`reasonix web` 从 `127.0.0.1:8787` 开始监听；端口占用时会依次尝试 8788、8789……，
+最多递增重试 100 次。它默认启用自动生成的 Token，即使配置中的 `[serve].auth_mode`
+是 `none` 也一样。每个运行实例都会在 `<Reasonix home>/server/instances/` 下写入自己的
+单写者 heartbeat 文件；正常退出时只删除自己的文件，新实例则会惰性清理已确认进程死亡的记录。
+因此多个 Web 实例可以共用同一个 Reasonix home，而不会相互覆盖登记状态。服务保持在前台运行，
+按 Ctrl-C 停止。
+
+显式传入 `reasonix web --auth none` 可以关闭默认 Token，只应在监听地址确定可信时使用。
+`reasonix serve` 则保持向后兼容：默认监听 `127.0.0.1:8787`，认证模式仍由配置决定，空配置为
+`auth_mode = "none"`。如果要绑定到非 loopback 地址、通过 tunnel 暴露，或放到反向代理后面，
+请先开启认证再分享 URL：
 
 ```bash
 reasonix serve --auth token
@@ -203,7 +218,9 @@ reasonix serve --addr 0.0.0.0:8787 --auth token
 reasonix serve --auth password --password 'temporary-password'
 ```
 
-Token 模式会在终端打印带 `?token=...` 的分享链接；可通过 `--token` 或 `[serve].token`
+Token 模式会在终端打印带 `#token=...` 的分享链接；Web 页面会先将 fragment 换成
+HttpOnly Cookie，再启动 API 与 SSE 请求，从而避免 Token 进入请求 URL、浏览器历史、
+Referrer 和访问日志。可通过 `--token` 或 `[serve].token`
 复用固定 token。Password 模式必须在启动时传 `--password`，或在配置里保存 bcrypt hash：
 
 ```bash
@@ -305,9 +322,13 @@ Serve。认证失败或主机密钥错误属于终止性故障，此时会关闭
 在桌面端打开 **设置 -> 模型 -> 接入 -> 添加模型服务 -> 自定义供应商**，用于接入代理、
 聚合平台或自建 OpenAI-compatible chat API / Anthropic-compatible Messages API 服务。
 
-常用服务优先使用 **添加模型服务 -> 推荐预设**。DeepSeek 官方服务默认继续使用经过专项适配的
-OpenAI Chat Completions；需要 Anthropic Messages 兼容时，可单独添加 **DeepSeek Anthropic**
-可选预设，两者不会互相替换。Reasonix 还可以预填以下可编辑的自定义 provider：
+常用服务优先使用 **添加模型服务 -> 推荐预设**。新建的官方 DeepSeek provider 默认使用
+Anthropic-compatible Messages 端点，并开启 provider 侧 `web_search`；两种协议都复用同一个
+`DEEPSEEK_API_KEY`。启动时，Reasonix 会自动升级仍使用官方端点、标准密钥和标准模型设置且
+未修改过的旧 `deepseek-flash` / `deepseek-pro` 条目。修改过的官方 Chat Completions 配置保持
+原样，设置页会提供 **升级到推荐协议** 操作。代理地址、自定义 Headers、模型列表和能力覆盖
+都不会自动迁移。已有单独命名的 `deepseek-anthropic` 条目继续兼容，但新增
+接入不再展示这个重复预设。Reasonix 还可以预填以下可编辑的自定义 provider：
 Kimi CN、Kimi Global、Kimi Coding Plan、MiMo API、MiMo Anthropic、MiMo Token Plan
 CN/SGP/AMS 及其 Anthropic-compatible 变体、MiniMax CN/Global API、MiniMax
 CN/Global Anthropic、GLM CN、Z.AI Global、GLM/Z.AI Coding Plan 的

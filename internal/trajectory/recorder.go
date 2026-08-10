@@ -30,6 +30,7 @@ type Record struct {
 	ProtocolRecovery    string               `json:"protocol_recovery,omitempty"`
 	TurnCompletion      bool                 `json:"turn_completion,omitempty"`
 	ContractShadow      *ContractShadowAudit `json:"contract_shadow,omitempty"`
+	CompletionReport    *CompletionReport    `json:"completion_report,omitempty"`
 	OutcomeProgress     *OutcomeProgress     `json:"outcome_progress,omitempty"`
 	DelegationAdmission *DelegationAdmission `json:"delegation_admission,omitempty"`
 	MemoryRecall        *MemoryRecall        `json:"memory_recall,omitempty"`
@@ -41,6 +42,7 @@ type MemoryRecall struct {
 	UsedChars  int               `json:"used_chars,omitempty"`
 	Omitted    int               `json:"omitted,omitempty"`
 	Suppressed string            `json:"suppressed,omitempty"`
+	ShadowHits []MemoryRecallHit `json:"shadow_hits,omitempty"`
 }
 
 // MemoryRecallHit is one recalled fact's content-free fingerprint.
@@ -91,6 +93,23 @@ type ContractShadowAudit struct {
 	Verdict               string `json:"verdict"`
 	Complete              bool   `json:"complete,omitempty"`
 	ReadyToFinalize       bool   `json:"ready_to_finalize,omitempty"`
+}
+
+// CompletionReport mirrors event.CompletionReportAudit with stable keys.
+type CompletionReport struct {
+	Verdict             string   `json:"verdict"`
+	Risk                string   `json:"risk,omitempty"`
+	Criteria            int      `json:"criteria,omitempty"`
+	CriteriaSatisfied   int      `json:"criteria_satisfied,omitempty"`
+	Changes             int      `json:"changes,omitempty"`
+	ChangesUnreviewed   int      `json:"changes_unreviewed,omitempty"`
+	Verifications       int      `json:"verifications,omitempty"`
+	VerificationsFailed int      `json:"verifications_failed,omitempty"`
+	VerificationsStale  int      `json:"verifications_stale,omitempty"`
+	Gaps                int      `json:"gaps,omitempty"`
+	GapKinds            []string `json:"gap_kinds,omitempty"`
+	ClaimsVerified      int      `json:"claims_verified,omitempty"`
+	ClaimsUnbacked      int      `json:"claims_unbacked,omitempty"`
 }
 
 // ReadinessAudit mirrors evidence.ReadinessAudit with stable snake_case keys.
@@ -199,6 +218,25 @@ func (r *Recorder) RecordContractShadow(a event.ContractShadowAudit) {
 	event.RecordContractShadow(r.inner, a)
 }
 
+func (r *Recorder) RecordCompletionReport(a event.CompletionReportAudit) {
+	r.append(Record{CompletionReport: &CompletionReport{
+		Verdict:             a.Verdict,
+		Risk:                a.Risk,
+		Criteria:            a.Criteria,
+		CriteriaSatisfied:   a.CriteriaSatisfied,
+		Changes:             a.Changes,
+		ChangesUnreviewed:   a.ChangesUnreviewed,
+		Verifications:       a.Verifications,
+		VerificationsFailed: a.VerificationsFailed,
+		VerificationsStale:  a.VerificationsStale,
+		Gaps:                a.Gaps,
+		GapKinds:            a.GapKinds,
+		ClaimsVerified:      a.ClaimsVerified,
+		ClaimsUnbacked:      a.ClaimsUnbacked,
+	}})
+	event.RecordCompletionReport(r.inner, a)
+}
+
 func (r *Recorder) RecordOutcomeProgress(sample evidence.OutcomeSample) {
 	r.append(Record{OutcomeProgress: &OutcomeProgress{
 		Round:            sample.Round,
@@ -227,6 +265,9 @@ func (r *Recorder) RecordMemoryRecall(a event.MemoryRecallAudit) {
 			ID: hit.ID, Revision: hit.Revision, Scope: hit.Scope,
 			Type: hit.Type, Freshness: hit.Freshness, Score: hit.Score,
 		})
+	}
+	for _, hit := range a.Shadow {
+		rec.ShadowHits = append(rec.ShadowHits, MemoryRecallHit{ID: hit.ID, Score: hit.Score})
 	}
 	r.append(Record{MemoryRecall: rec})
 	event.RecordMemoryRecall(r.inner, a)

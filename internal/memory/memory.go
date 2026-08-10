@@ -22,6 +22,10 @@ type Set struct {
 	CWD                    string   // project working dir used for discovery
 	UserDir                string   // user config root (may be "")
 	InstructionDiagnostics []instruction.Diagnostic
+
+	// recall is the snapshot's prebuilt retrieval index (nil when memory is
+	// hidden or empty); Set.AutoRecall serves each turn from it without disk.
+	recall *RecallIndex
 }
 
 // Options configures discovery. CWD defaults to "." and UserDir is the user
@@ -57,6 +61,7 @@ func Load(opts Options) *Set {
 		CWD:                    cwd,
 		UserDir:                opts.UserDir,
 		InstructionDiagnostics: resolved.Diagnostics,
+		recall:                 BuildRecallIndex(store),
 	}
 }
 
