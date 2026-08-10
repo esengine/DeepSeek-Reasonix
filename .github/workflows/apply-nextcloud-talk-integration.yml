@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   apply-and-verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Check out feature branch
         uses: actions/checkout@v7
@@ -40,6 +40,11 @@ jobs:
           node-version: "24"
           cache: pnpm
           cache-dependency-path: desktop/frontend/pnpm-lock.yaml
+
+      - name: Install Linux desktop build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc pkg-config libgtk-3-dev libwebkit2gtk-4.0-dev
 
       - name: Prepare deterministic source anchors
         run: |
