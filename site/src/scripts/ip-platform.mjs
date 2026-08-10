@@ -8,6 +8,7 @@ import {
   validateIntake,
   validateShare,
 } from "./ip-platform-state.mjs";
+import { ASSET_TYPE_COLORS, RELATION_LABELS, edgePath, layoutAssetGraph, relatedAssetIds } from "./asset-graph.mjs";
 
 const storageKey = "intelifar-ip-platform-v1";
 const titles = {
@@ -42,6 +43,11 @@ let lastDrawerTrigger = null;
 let activeAssetType = "all";
 let currentSession = null;
 let currentMembers = [];
+let currentAssetGraph = { nodes: [], edges: [], meta: {} };
+let graphFocusId = null;
+let selectedGraphNode = null;
+let selectedGraphRelationship = null;
+let graphScale = 1;
 const qs = (selector, root = document) => root.querySelector(selector);
 const qsa = (selector, root = document) => [...root.querySelectorAll(selector)];
 
@@ -60,6 +66,8 @@ function applySession(session, mode = "local-session") {
   qs("#wiki-edit").disabled = !canEdit;
   qs("#open-share").disabled = !canEdit;
   qs("#share-wiki").disabled = !canEdit;
+  qs("#graph-include-proposed").disabled = !canEdit;
+  qs("#graph-include-proposed").closest("label").title = canEdit ? "显示 DeepSeek 建议但尚未人工确认的关系" : "只读成员仅查看已确认关系";
   if (qs("#session-dialog").open) qs("#session-dialog").close();
 }
 
@@ -105,6 +113,294 @@ function showToast(title, detail, type = "success") {
   toast.append(icon, copy);
   region.append(toast);
   setTimeout(() => toast.remove(), 4200);
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function svgElement(name, attributes = {}, text = "") {
+  const element = document.createElementNS(SVG_NS, name);
+  Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, String(value)));
+  if (text) element.textContent = text;
+  return element;
+}
+
+function demoAssetGraph() {
+  const nodes = [
+    { id: "IP-2026-0841", title: "稀疏专家路由与动态负载均衡方法", type: "技术方案", owner: "推理架构组", sensitivity: "机密", summary: "面向大规模混合专家模型推理的动态路由与拥塞预测方案。", tags: ["动态路由", "负载均衡"], confidence: .986, status: "已入库", version: "V1.3", evidenceIds: Array.from({ length: 14 }, (_, index) => `S-048-${String(index + 1).padStart(2, "0")}`) },
+    { id: "IP-2026-0840", title: "长上下文分层缓存策略", type: "算法模型", owner: "基础模型组", sensitivity: "内部", summary: "降低长上下文推理过程中的重复计算与显存抖动。", tags: ["长上下文", "缓存"], confidence: .964, status: "已入库", version: "V1.2", evidenceIds: Array.from({ length: 9 }, (_, index) => `S-052-${index + 1}`) },
+    { id: "IP-2026-0839", title: "跨模态语义一致性评估体系", type: "评估方法", owner: "多模态组", sensitivity: "内部", summary: "对文本、图像和表格抽取结果进行统一语义校验。", tags: ["多模态", "评估"], confidence: .948, status: "已入库", version: "V1.1", evidenceIds: Array.from({ length: 11 }, (_, index) => `S-067-${index + 1}`) },
+    { id: "IP-2026-0838", title: "异构算力运行时编排框架", type: "软件架构", owner: "平台工程部", sensitivity: "机密", summary: "跨 GPU 与推理节点的统一运行时编排和资源隔离框架。", tags: ["异构算力", "编排"], confidence: .932, status: "已入库", version: "V2.0", evidenceIds: Array.from({ length: 18 }, (_, index) => `S-075-${index + 1}`) },
+    { id: "IP-2026-0837", title: "推理服务 SLA 分级模型", type: "业务规则", owner: "解决方案部", sensitivity: "公开", summary: "将客户服务等级映射到延迟、吞吐与恢复目标。", tags: ["SLA", "服务治理"], confidence: .917, status: "已入库", version: "V1.4", evidenceIds: Array.from({ length: 6 }, (_, index) => `S-081-${index + 1}`) },
+    { id: "IP-2026-0836", title: "路由决策回放与审计机制", type: "软件著作权", owner: "平台工程部", sensitivity: "内部", summary: "按推理批次回放路由决策并验证关键参数变更。", tags: ["审计", "可观测性"], confidence: .941, status: "已入库", version: "V1.0", evidenceIds: ["S-091-02", "S-091-03", "S-092-01"] },
+    { id: "IP-2026-0835", title: "专家节点故障隔离策略", type: "业务规则", owner: "可靠性团队", sensitivity: "内部", summary: "识别异常专家节点并在不中断服务的情况下执行软隔离。", tags: ["容错", "隔离"], confidence: .925, status: "待复核", version: "V1.0", evidenceIds: ["S-096-04", "S-097-01"] },
+  ];
+  const edges = [
+    { id: "REL-DEMO-001", sourceAssetId: "IP-2026-0841", targetAssetId: "IP-2026-0840", relationType: "depends_on", confidence: .97, verificationStatus: "confirmed", origin: "manual", evidenceIds: ["S-048-03"] },
+    { id: "REL-DEMO-002", sourceAssetId: "IP-2026-0841", targetAssetId: "IP-2026-0838", relationType: "implements", confidence: .95, verificationStatus: "confirmed", origin: "manual", evidenceIds: ["S-048-09"] },
+    { id: "REL-DEMO-003", sourceAssetId: "IP-2026-0839", targetAssetId: "IP-2026-0840", relationType: "similar_to", confidence: .88, verificationStatus: "confirmed", origin: "manual", evidenceIds: ["S-067-06"] },
+    { id: "REL-DEMO-004", sourceAssetId: "IP-2026-0838", targetAssetId: "IP-2026-0837", relationType: "part_of", confidence: .91, verificationStatus: "confirmed", origin: "manual", evidenceIds: ["S-075-11"] },
+    { id: "REL-DEMO-005", sourceAssetId: "IP-2026-0836", targetAssetId: "IP-2026-0841", relationType: "references", confidence: .93, verificationStatus: "confirmed", origin: "manual", evidenceIds: ["S-091-02"] },
+    { id: "REL-DEMO-006", sourceAssetId: "IP-2026-0835", targetAssetId: "IP-2026-0841", relationType: "depends_on", confidence: .82, verificationStatus: "proposed", origin: "model", evidenceIds: [] },
+    { id: "REL-DEMO-007", sourceAssetId: "IP-2026-0835", targetAssetId: "IP-2026-0838", relationType: "conflicts_with", confidence: .74, verificationStatus: "proposed", origin: "model", evidenceIds: [] },
+  ];
+  return { nodes, edges, meta: { totalVisibleNodes: nodes.length, totalVisibleEdges: edges.length, storageMode: "static-demo" } };
+}
+
+function graphAsset(node) {
+  const published = currentPublishedAssets.find((asset) => asset.id === node.id);
+  if (published) return published;
+  const evidence = (node.evidenceIds ?? []).map((id) => ({ id, assetId: node.id, section: "来源文档", quote: "此关系节点已绑定可追溯的来源证据。", verified: true }));
+  return {
+    ...node,
+    title: node.title,
+    summary: node.summary || "尚未补充资产摘要。",
+    tags: node.tags ?? [],
+    evidence,
+    document: { sourceName: "企业知识资产来源文档", title: "知识资产来源文档" },
+    wiki: { title: node.title, executiveSummary: node.summary || "尚未补充资产摘要。", keyMechanism: "请在资产 Wiki 中查看完整机制说明。", metrics: [], relationships: [] },
+    publishedAt: node.updatedAt || new Date().toISOString(),
+  };
+}
+
+function graphNodeColor(type) {
+  return ASSET_TYPE_COLORS[type] || ASSET_TYPE_COLORS.未分类;
+}
+
+function updateGraphInspector(node) {
+  selectedGraphNode = node;
+  selectedGraphRelationship = null;
+  qs("#relationship-inspector").hidden = true;
+  const inspector = qs("#graph-inspector");
+  inspector.hidden = false;
+  setText("#graph-inspector-type", `${node.type || "知识资产"} · ${node.id}`);
+  setText("#graph-inspector-title", node.title);
+  setText("#graph-inspector-summary", node.summary || "尚未补充资产摘要。打开资产详情可继续完善。 ");
+  setText("#graph-inspector-owner", node.owner || "待认领");
+  setText("#graph-inspector-sensitivity", node.sensitivity || "待复核");
+  const includeProposed = qs("#graph-include-proposed").checked && !qs("#graph-include-proposed").disabled;
+  const degree = currentAssetGraph.edges.filter((edge) => (edge.verificationStatus === "confirmed" || includeProposed) && (edge.sourceAssetId === node.id || edge.targetAssetId === node.id)).length;
+  setText("#graph-inspector-degree", `${degree} 条`);
+  setText("#graph-inspector-evidence", `${node.evidenceIds?.length ?? 0} 处`);
+  qsa(".graph-node", qs("#graph-nodes")).forEach((element) => element.classList.toggle("is-selected", element.dataset.graphNodeId === node.id));
+  qsa(".graph-edge", qs("#graph-edges")).forEach((element) => {
+    const connected = element.dataset.source === node.id || element.dataset.target === node.id;
+    element.classList.toggle("is-highlighted", connected);
+    element.classList.toggle("is-dimmed", !connected);
+  });
+  qsa(".graph-edge-label", qs("#graph-edge-labels")).forEach((element) => element.classList.toggle("is-dimmed", element.dataset.source !== node.id && element.dataset.target !== node.id));
+}
+
+function updateRelationshipInspector(edge) {
+  selectedGraphNode = null;
+  selectedGraphRelationship = edge;
+  qs("#graph-inspector").hidden = true;
+  const inspector = qs("#relationship-inspector");
+  inspector.hidden = false;
+  const source = currentAssetGraph.nodes.find((node) => node.id === edge.sourceAssetId);
+  const target = currentAssetGraph.nodes.find((node) => node.id === edge.targetAssetId);
+  const label = RELATION_LABELS[edge.relationType] || edge.relationType;
+  const proposed = edge.verificationStatus === "proposed";
+  const canReview = proposed && ["owner", "admin", "editor"].includes(currentSession?.user?.role);
+  setText("#relationship-inspector-status", proposed ? "待人工复核 · AI 建议" : "已确认关系");
+  setText("#relationship-inspector-title", `${source?.title || edge.sourceAssetId} ${label} ${target?.title || edge.targetAssetId}`);
+  setText("#relationship-inspector-source", source?.title || edge.sourceAssetId);
+  setText("#relationship-inspector-label", label);
+  setText("#relationship-inspector-target", target?.title || edge.targetAssetId);
+  setText("#relationship-inspector-confidence", `${Math.round(Number(edge.confidence || 0) * 100)}%`);
+  setText("#relationship-inspector-origin", edge.origin === "model" ? "文档智能发现" : edge.origin === "import" ? "批量导入" : "人工建立");
+  setText("#relationship-inspector-verification", proposed ? "待复核" : "已确认");
+  setText("#relationship-inspector-evidence", `${edge.evidenceIds?.length ?? 0} 处`);
+  setText("#relationship-review-note", proposed ? "请结合来源证据判断是否存在真实业务关系；未确认前不参与只读成员搜索。" : "已确认关系会参与资产搜索扩展与影响分析。 ");
+  qs("#relationship-review-actions").hidden = !canReview;
+  qsa(".graph-node", qs("#graph-nodes")).forEach((element) => element.classList.remove("is-selected", "is-dimmed"));
+  qsa(".graph-edge", qs("#graph-edges")).forEach((element) => {
+    const selected = element.dataset.relationshipId === edge.id;
+    element.classList.toggle("is-highlighted", selected);
+    element.classList.toggle("is-dimmed", !selected);
+  });
+  qsa(".graph-edge-label", qs("#graph-edge-labels")).forEach((element) => {
+    element.classList.toggle("is-dimmed", element.dataset.relationshipId !== edge.id);
+  });
+}
+
+async function reviewSelectedRelationship(nextStatus) {
+  const edge = selectedGraphRelationship;
+  if (!edge || edge.verificationStatus !== "proposed") return;
+  const buttons = qsa("button", qs("#relationship-review-actions"));
+  buttons.forEach((button) => { button.disabled = true; });
+  try {
+    if (currentSession?.mode === "static-demo") {
+      currentAssetGraph.edges = nextStatus === "rejected"
+        ? currentAssetGraph.edges.filter((candidate) => candidate.id !== edge.id)
+        : currentAssetGraph.edges.map((candidate) => candidate.id === edge.id ? { ...candidate, verificationStatus: "confirmed", origin: "model" } : candidate);
+    } else {
+      const action = nextStatus === "confirmed" ? "confirm" : "reject";
+      const response = await fetch(`/api/relationships/${encodeURIComponent(edge.id)}/${action}`, { method: "POST", headers: { accept: "application/json" } });
+      const payload = await response.json().catch(() => ({}));
+      if (response.status === 401) { lockWorkspace(); return; }
+      if (!response.ok) throw new Error(payload.error || "关系复核失败");
+      await loadAssetGraph();
+    }
+    selectedGraphRelationship = null;
+    qs("#relationship-inspector").hidden = true;
+    renderAssetGraph();
+    showToast(nextStatus === "confirmed" ? "关系已确认" : "关系建议已拒绝", nextStatus === "confirmed" ? "该关系现在可用于检索扩展与影响分析" : "该建议已从当前关系网络移除");
+  } catch (error) {
+    showToast("无法完成关系复核", String(error.message || "请稍后重试"), "error");
+  } finally {
+    buttons.forEach((button) => { button.disabled = false; });
+  }
+}
+
+function populateGraphFilters() {
+  const select = qs("#graph-type-filter");
+  const current = select.value;
+  const known = new Set(qsa("option", select).map((option) => option.value));
+  [...new Set(currentAssetGraph.nodes.map((node) => node.type || "未分类"))].sort((left, right) => left.localeCompare(right, "zh-CN")).forEach((type) => {
+    if (known.has(type)) return;
+    const option = document.createElement("option");
+    option.value = type;
+    option.textContent = type;
+    select.append(option);
+  });
+  if ([...select.options].some((option) => option.value === current)) select.value = current;
+}
+
+function renderRelationshipRegister(edges, nodesById) {
+  const register = qs("#graph-relation-list");
+  register.replaceChildren();
+  edges.forEach((edge) => {
+    const article = document.createElement("article");
+    const source = document.createElement("strong");
+    const relation = document.createElement("span");
+    const target = document.createElement("strong");
+    article.tabIndex = 0;
+    article.setAttribute("role", "button");
+    article.setAttribute("aria-label", `查看关系：${nodesById.get(edge.sourceAssetId)?.title || edge.sourceAssetId} ${RELATION_LABELS[edge.relationType] || edge.relationType} ${nodesById.get(edge.targetAssetId)?.title || edge.targetAssetId}`);
+    source.textContent = nodesById.get(edge.sourceAssetId)?.title || edge.sourceAssetId;
+    relation.textContent = `${RELATION_LABELS[edge.relationType] || edge.relationType}${edge.verificationStatus === "proposed" ? " · 待复核" : ""}`;
+    target.textContent = nodesById.get(edge.targetAssetId)?.title || edge.targetAssetId;
+    article.append(source, relation, target);
+    article.addEventListener("click", () => updateRelationshipInspector(edge));
+    article.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); updateRelationshipInspector(edge); }
+    });
+    register.append(article);
+  });
+  setText("#graph-relation-total", `${edges.length} 条`);
+}
+
+function renderAssetGraph() {
+  const graph = currentAssetGraph;
+  const query = qs("#graph-search").value.trim().toLocaleLowerCase("zh-CN");
+  const type = qs("#graph-type-filter").value;
+  const relationType = qs("#graph-relation-filter").value;
+  const includeProposed = qs("#graph-include-proposed").checked && !qs("#graph-include-proposed").disabled;
+  let edges = graph.edges.filter((edge) => (edge.verificationStatus === "confirmed" || includeProposed) && (relationType === "all" || edge.relationType === relationType));
+  let nodes = graph.nodes.filter((node) => type === "all" || node.type === type);
+  const allowedTypeIds = new Set(nodes.map((node) => node.id));
+  edges = edges.filter((edge) => allowedTypeIds.has(edge.sourceAssetId) && allowedTypeIds.has(edge.targetAssetId));
+  if (query) {
+    const matches = new Set(nodes.filter((node) => [node.id, node.title, node.type, node.owner, node.summary, ...(node.tags ?? [])].join(" ").toLocaleLowerCase("zh-CN").includes(query)).map((node) => node.id));
+    const adjacent = new Set(matches);
+    edges.forEach((edge) => {
+      if (matches.has(edge.sourceAssetId)) adjacent.add(edge.targetAssetId);
+      if (matches.has(edge.targetAssetId)) adjacent.add(edge.sourceAssetId);
+    });
+    nodes = nodes.filter((node) => adjacent.has(node.id));
+  }
+  if (graphFocusId) {
+    const focused = relatedAssetIds({ nodes, edges }, graphFocusId, 1);
+    if (focused.size) nodes = nodes.filter((node) => focused.has(node.id));
+    else graphFocusId = null;
+  }
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  edges = edges.filter((edge) => nodeIds.has(edge.sourceAssetId) && nodeIds.has(edge.targetAssetId));
+  if (selectedGraphRelationship && !edges.some((edge) => edge.id === selectedGraphRelationship.id)) {
+    selectedGraphRelationship = null;
+    qs("#relationship-inspector").hidden = true;
+  }
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const positioned = layoutAssetGraph({ nodes, edges }, { width: 1080, height: 620, focusId: graphFocusId });
+  const positionedById = new Map(positioned.map((node) => [node.id, node]));
+  const edgeLayer = qs("#graph-edges");
+  const labelLayer = qs("#graph-edge-labels");
+  const nodeLayer = qs("#graph-nodes");
+  edgeLayer.replaceChildren(); labelLayer.replaceChildren(); nodeLayer.replaceChildren();
+  edges.forEach((edge) => {
+    const source = positionedById.get(edge.sourceAssetId);
+    const target = positionedById.get(edge.targetAssetId);
+    if (!source || !target) return;
+    const pathData = edgePath(source, target, edge.id);
+    const path = svgElement("path", { d: pathData, class: `graph-edge${edge.verificationStatus === "proposed" ? " is-proposed" : ""}`, "aria-hidden": "true", "data-source": edge.sourceAssetId, "data-target": edge.targetAssetId, "data-relationship-id": edge.id });
+    const hitTarget = svgElement("path", { d: pathData, class: `graph-edge-hit${edge.verificationStatus === "proposed" ? " is-proposed" : ""}`, tabindex: "0", role: "button", "aria-label": `查看关系：${source.title} ${RELATION_LABELS[edge.relationType] || edge.relationType} ${target.title}`, "data-source": edge.sourceAssetId, "data-target": edge.targetAssetId, "data-relationship-id": edge.id });
+    const title = svgElement("title", {}, `${source.title} ${RELATION_LABELS[edge.relationType] || edge.relationType} ${target.title}${edge.verificationStatus === "proposed" ? "，待复核" : "，已确认"}`);
+    hitTarget.append(title);
+    hitTarget.addEventListener("click", () => updateRelationshipInspector(edge));
+    hitTarget.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); updateRelationshipInspector(edge); }
+    });
+    edgeLayer.append(path, hitTarget);
+    if (edges.length <= 28) {
+      const label = svgElement("text", { x: (source.x + target.x) / 2, y: (source.y + target.y) / 2 - 7, class: "graph-edge-label", "data-source": edge.sourceAssetId, "data-target": edge.targetAssetId, "data-relationship-id": edge.id }, RELATION_LABELS[edge.relationType] || edge.relationType);
+      labelLayer.append(label);
+    }
+  });
+  positioned.forEach((node) => {
+    const color = graphNodeColor(node.type);
+    const group = svgElement("g", { class: `graph-node${selectedGraphNode?.id === node.id ? " is-selected" : ""}`, transform: `translate(${node.x} ${node.y})`, tabindex: "0", role: "button", "aria-label": `${node.title}，${node.type || "知识资产"}，${node.degree} 条直接关系`, "data-graph-node-id": node.id });
+    group.append(
+      svgElement("rect", { class: "node-halo", x: -87, y: -39, width: 174, height: 78, rx: 16 }),
+      svgElement("rect", { class: "node-card", x: -82, y: -34, width: 164, height: 68, rx: 12 }),
+      svgElement("rect", { class: "node-accent", x: -82, y: -34, width: 6, height: 68, rx: 3, fill: color }),
+      svgElement("text", { class: "node-kicker", x: -67, y: -17 }, `${node.type || "知识资产"} · ${node.id.slice(-6)}`),
+      svgElement("text", { class: "node-title", x: -67, y: 3 }, node.title.length > 14 ? `${node.title.slice(0, 14)}…` : node.title),
+      svgElement("text", { class: "node-meta", x: -67, y: 22 }, `${node.owner || "待认领"} · ${Math.round(Number(node.confidence || 0) * 100)}%`),
+      svgElement("circle", { cx: 69, cy: -21, r: 10, fill: color }),
+      svgElement("text", { class: "node-degree", x: 69, y: -21 }, String(node.degree)),
+    );
+    group.addEventListener("click", () => updateGraphInspector(node));
+    group.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); updateGraphInspector(node); }
+    });
+    nodeLayer.append(group);
+  });
+  const proposedCount = graph.edges.filter((edge) => edge.verificationStatus === "proposed").length;
+  const connectedIds = new Set(graph.edges.flatMap((edge) => [edge.sourceAssetId, edge.targetAssetId]));
+  setText("#graph-node-count", String(graph.nodes.length));
+  setText("#graph-edge-count", String(graph.edges.filter((edge) => edge.verificationStatus === "confirmed").length));
+  setText("#graph-proposed-count", String(proposedCount));
+  setText("#graph-coverage", graph.nodes.length ? `${Math.round(connectedIds.size / graph.nodes.length * 100)}%` : "0%");
+  setText("#graph-summary", graphFocusId ? `已聚焦 ${nodesById.get(graphFocusId)?.title || graphFocusId} 的一跳网络` : `展示 ${nodes.length} 项资产 · ${edges.length} 条关系`);
+  qs("#graph-empty").hidden = positioned.length > 0;
+  renderRelationshipRegister(edges, nodesById);
+  const legend = qs("#graph-legend");
+  legend.replaceChildren();
+  [...new Set(nodes.map((node) => node.type || "未分类"))].slice(0, 7).forEach((nodeType) => {
+    const item = document.createElement("span"); const marker = document.createElement("i"); const label = document.createElement("b");
+    marker.style.background = graphNodeColor(nodeType); label.textContent = nodeType; item.append(marker, label); legend.append(item);
+  });
+  qs("#graph-viewport").style.transform = `scale(${graphScale})`;
+  setText("#graph-zoom-reset", `${Math.round(graphScale * 100)}%`);
+}
+
+async function loadAssetGraph() {
+  qs("#graph-loading").hidden = false;
+  try {
+    const params = new URLSearchParams({ limit: "100", edgeLimit: "200" });
+    if (qs("#graph-include-proposed").checked) params.set("includeProposed", "true");
+    const response = await fetch(`/api/assets/graph?${params}`, { headers: { accept: "application/json" } });
+    if (response.status === 401) { lockWorkspace(); return; }
+    if (!response.ok) throw new Error("graph-api-unavailable");
+    const payload = await response.json();
+    currentAssetGraph = payload.graph ?? { nodes: [], edges: [], meta: {} };
+  } catch {
+    currentAssetGraph = currentSession?.mode === "static-demo" ? demoAssetGraph() : { nodes: [], edges: [], meta: {} };
+  } finally {
+    qs("#graph-loading").hidden = true;
+  }
+  populateGraphFilters();
+  renderAssetGraph();
 }
 
 function closeDrawers(restoreFocus = true) {
@@ -581,6 +877,7 @@ async function publishCurrentAnalysis() {
     });
     const first = payload.publication.assets[0];
     if (first) renderDynamicWiki(first);
+    await loadAssetGraph();
     setText("#publication-status", "已发布");
     button.textContent = "✓ 已发布到资产库与 Wiki";
     const audit = makeAuditEvent("发布真实 IP 资产", `${payload.publication.assets.length} 项资产已形成 ${payload.publication.version} 证据快照`);
@@ -890,6 +1187,84 @@ qs("#wiki-version-history").addEventListener("click", async (event) => {
   }
 });
 qs("#asset-tag-filter").addEventListener("click", () => { qs("#asset-search").focus(); showToast("标签筛选", "可直接输入标签关键词，列表会实时过滤"); });
+
+qs("#graph-search").addEventListener("input", renderAssetGraph);
+qs("#graph-type-filter").addEventListener("change", renderAssetGraph);
+qs("#graph-relation-filter").addEventListener("change", renderAssetGraph);
+qs("#graph-include-proposed").addEventListener("change", loadAssetGraph);
+qs("#graph-reset").addEventListener("click", () => {
+  graphFocusId = null;
+  selectedGraphNode = null;
+  selectedGraphRelationship = null;
+  graphScale = 1;
+  qs("#graph-search").value = "";
+  qs("#graph-type-filter").value = "all";
+  qs("#graph-relation-filter").value = "all";
+  qs("#graph-include-proposed").checked = false;
+  qs("#graph-inspector").hidden = true;
+  qs("#relationship-inspector").hidden = true;
+  renderAssetGraph();
+});
+qs("#graph-inspector-close").addEventListener("click", () => {
+  selectedGraphNode = null;
+  qs("#graph-inspector").hidden = true;
+  renderAssetGraph();
+});
+qs("#relationship-inspector-close").addEventListener("click", () => {
+  selectedGraphRelationship = null;
+  qs("#relationship-inspector").hidden = true;
+  renderAssetGraph();
+});
+qs("#relationship-confirm").addEventListener("click", () => reviewSelectedRelationship("confirmed"));
+qs("#relationship-reject").addEventListener("click", () => reviewSelectedRelationship("rejected"));
+qs("#graph-focus-neighborhood").addEventListener("click", () => {
+  if (!selectedGraphNode) return;
+  graphFocusId = selectedGraphNode.id;
+  qs("#graph-inspector").hidden = true;
+  selectedGraphNode = null;
+  renderAssetGraph();
+  qs(`[data-graph-node-id="${CSS.escape(graphFocusId)}"]`)?.focus();
+});
+qs("#graph-open-asset").addEventListener("click", (event) => {
+  if (selectedGraphNode) populateAssetDrawer(graphAsset(selectedGraphNode), event.currentTarget);
+});
+qs("#asset-graph").addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  if (graphFocusId) {
+    graphFocusId = null;
+    renderAssetGraph();
+  } else {
+    selectedGraphNode = null;
+    selectedGraphRelationship = null;
+    qs("#graph-inspector").hidden = true;
+    qs("#relationship-inspector").hidden = true;
+    renderAssetGraph();
+  }
+});
+function updateGraphScale(next) {
+  graphScale = Math.max(.7, Math.min(1.45, next));
+  qs("#graph-viewport").style.transform = `scale(${graphScale})`;
+  setText("#graph-zoom-reset", `${Math.round(graphScale * 100)}%`);
+}
+qs("#graph-zoom-in").addEventListener("click", () => updateGraphScale(graphScale + .1));
+qs("#graph-zoom-out").addEventListener("click", () => updateGraphScale(graphScale - .1));
+qs("#graph-zoom-reset").addEventListener("click", () => updateGraphScale(1));
+qs("#asset-mode-graph").addEventListener("click", () => {
+  qs("#view-assets").classList.remove("asset-list-only");
+  qs("#asset-mode-graph").classList.add("is-active");
+  qs("#asset-mode-list").classList.remove("is-active");
+  qs("#asset-mode-graph").setAttribute("aria-pressed", "true");
+  qs("#asset-mode-list").setAttribute("aria-pressed", "false");
+  qs("#asset-graph-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+qs("#asset-mode-list").addEventListener("click", () => {
+  qs("#view-assets").classList.add("asset-list-only");
+  qs("#asset-mode-list").classList.add("is-active");
+  qs("#asset-mode-graph").classList.remove("is-active");
+  qs("#asset-mode-list").setAttribute("aria-pressed", "true");
+  qs("#asset-mode-graph").setAttribute("aria-pressed", "false");
+  qs("#asset-list-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+});
 
 function findButton(root, label) {
   return qsa("button", root).find((button) => button.textContent.trim() === label);
@@ -1499,6 +1874,7 @@ qs("#operations-job-list").addEventListener("click", async (event) => {
 qs("#refresh-operations").addEventListener("click", loadOperations);
 qs('[data-nav="system"]').addEventListener("click", loadOperations);
 qs('[data-nav="lifecycle"]').addEventListener("click", loadShares);
+qs('[data-nav="assets"]').addEventListener("click", loadAssetGraph);
 
 qs("#refresh-health").addEventListener("click", async (event) => {
   event.currentTarget.disabled = true;
@@ -1514,5 +1890,5 @@ navigate(titles[hashView] ? hashView : state.activeView, false);
 updateAnalysisUI();
 await refreshProviderHealth();
 if (await initializeSession()) {
-  await Promise.all([loadPublishedAssets(), loadOperations(), loadShares(), loadMembers()]);
+  await Promise.all([loadPublishedAssets(), loadAssetGraph(), loadOperations(), loadShares(), loadMembers()]);
 }
