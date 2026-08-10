@@ -2,14 +2,14 @@
   "limits": {
     "banner": 15,
     "commented-code": 0,
-    "complexity": 2096,
-    "essay": 4082,
-    "file-size": 110104,
-    "function-size": 9159,
+    "complexity": 2095,
+    "essay": 4081,
+    "file-size": 110089,
+    "function-size": 9152,
     "layering": 1,
     "marker": 0,
     "narrative": 64,
-    "test-file-size": 69905
+    "test-file-size": 69916
   },
   "files": {
     "cmd/e2ebench/main.go": {
@@ -27,8 +27,8 @@
     },
     "desktop/app.go": {
       "complexity": 63,
-      "essay": 96,
-      "file-size": 11489,
+      "essay": 95,
+      "file-size": 11484,
       "function-size": 381
     },
     "desktop/app_autosave_test.go": {
@@ -84,10 +84,10 @@
       "essay": 2
     },
     "desktop/frontend/src/App.tsx": {
-      "file-size": 4733
+      "file-size": 4743
     },
     "desktop/frontend/src/__tests__/app-chrome-tabs.test.ts": {
-      "test-file-size": 19
+      "test-file-size": 32
     },
     "desktop/frontend/src/__tests__/capabilities-panel-actions.test.ts": {
       "test-file-size": 307
@@ -308,7 +308,7 @@
     "desktop/tabs.go": {
       "complexity": 74,
       "essay": 133,
-      "file-size": 8716,
+      "file-size": 8715,
       "function-size": 630
     },
     "desktop/tabs_order_test.go": {
@@ -498,8 +498,8 @@
     "internal/agent/execute_one.go": {
       "complexity": 13,
       "essay": 23,
-      "file-size": 157,
-      "function-size": 20
+      "file-size": 142,
+      "function-size": 18
     },
     "internal/agent/extensions.go": {
       "essay": 64
@@ -1073,13 +1073,13 @@
     "internal/control/controller.go": {
       "complexity": 10,
       "essay": 162,
-      "file-size": 5420,
+      "file-size": 5416,
       "function-size": 75,
       "narrative": 4
     },
     "internal/control/controller_test.go": {
       "essay": 10,
-      "test-file-size": 4610
+      "test-file-size": 4608
     },
     "internal/control/errmsg.go": {
       "essay": 2
@@ -1166,9 +1166,9 @@
       "essay": 1
     },
     "internal/control/turn_orchestrator.go": {
-      "complexity": 2,
+      "complexity": 1,
       "essay": 13,
-      "function-size": 60
+      "function-size": 55
     },
     "internal/control/turn_orchestrator_test.go": {
       "essay": 1,
