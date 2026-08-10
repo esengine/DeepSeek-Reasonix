@@ -2,7 +2,7 @@
   "$schema": "https://wails.io/schemas/config.v2.json",
   "name": "reasonix-desktop",
   "outputfilename": "reasonix-desktop",
-  "frontend:install": "pnpm install",
+  "frontend:install": "pnpm install --config.confirmModulesPurge=false",
   "frontend:build": "pnpm build",
   "frontend:dev:watcher": "pnpm dev",
   "frontend:dev:serverUrl": "auto",

@@ -63,6 +63,7 @@ reasoning_language = "auto"      # 可见思考过程语言：auto|zh|en
 # max_subagent_concurrency = 6        # 会话级子代理总并发（task/fleet/skills）
 # max_parallel_writers = 3            # 互不重叠 write_paths 时的并行写入上限
 tool_result_snip_ratio = 0.6       # 在摘要 compaction 前先缩短旧工具输出
+# context_editing = "native"       # 仅官方 Anthropic 端点显式启用；默认 local
 
 [[providers]]
 name        = "deepseek-flash"
@@ -333,7 +334,9 @@ Kimi CN、Kimi Global、Kimi Coding Plan、MiMo API、MiMo Anthropic、MiMo Toke
 CN/SGP/AMS 及其 Anthropic-compatible 变体、MiniMax CN/Global API、MiniMax
 CN/Global Anthropic、GLM CN、Z.AI Global、GLM/Z.AI Coding Plan 的
 OpenAI-compatible 与 Anthropic-compatible 端点、OpenCode Go、OpenCode Go
-Anthropic、OpenCode Zen Anthropic、Qwen/DashScope CN/Global、Qwen Coding Plan
+Anthropic、OpenCode Go DeepSeek Anthropic、OpenCode Go DeepSeek Responses、
+OpenCode Zen Anthropic、Qwen/DashScope CN/Global、
+Qwen Coding Plan
 CN/Global 的 OpenAI-compatible 与 Anthropic-compatible 端点、StepFun
 OpenAI-compatible 与 Anthropic-compatible 端点、NovitaAI、GMI Cloud、Vercel AI
 Gateway、HuggingFace Router、NVIDIA NIM、KiloCode 和 Ollama Cloud。Plan 表示
@@ -343,8 +346,13 @@ Gateway、HuggingFace Router、NVIDIA NIM、KiloCode 和 Ollama Cloud。Plan 表
 `config.toml` 只保存端点、模型列表、key 环境变量名、上下文窗口、视觉模型元数据、
 中国区端点直连、MiniMax `reasoning_split`、GLM/MiniMax thinking heuristic、
 Anthropic-compatible 网关需要的 Bearer 认证、Ollama Cloud max-effort 支持，
-以及 OpenCode Go 的每模型 reasoning 覆盖。OpenCode Go 预设原生包含订阅线路的
-`kimi-k3`，并配置图像输入、`high`/`max` 推理强度和 1,048,576 token 上下文窗口。未修改过
+以及 OpenCode Go 的每模型 reasoning 覆盖。专用的 OpenCode Go DeepSeek Anthropic 与
+DeepSeek Responses 预设接入已验证的 Flash 线路，并默认启用 provider 侧 `web_search`；
+Responses 变体使用无状态上下文回放。原有混合 OpenCode Go Anthropic 预设仍只包含 Qwen
+与 MiniMax，避免把服务端搜索工具发送给未验证模型。DeepSeek Pro 暂时仍只放在 Chat
+Completions 预设中，因为真实 Anthropic
+和 Responses 请求目前会在 OpenCode Go 的上游转换阶段失败。OpenCode Go 预设原生包含
+订阅线路的 `kimi-k3`，并配置图像输入、`high`/`max` 推理强度和 1,048,576 token 上下文窗口。未修改过
 模型目录的既有 OpenCode Go 预设会自动升级；用户编辑过的模型目录保持不变。
 Kimi CN 和 Kimi Global 直连 API 预设也包含 `kimi-k3`，支持图像输入、1,048,576 token
 上下文窗口以及官方 `low`/`high`/`max` 推理强度（默认 `max`）。对官方 K3 端点，Reasonix
@@ -757,7 +765,7 @@ RPC 调用。两者都可按服务器覆盖。
 
 ## 斜杠命令
 
-交互式 `reasonix` 会话里，内置命令（`/compact`、`/new`、`/clear`、`/rewind`、`/tree`、`/branch`、`/switch`、`/todo`、`/model`、`/work-mode`、`/mcp`、`/skills`、`/hooks`、`/memory`、`/goal`、`/output-style`、`/sandbox`、`/language`、`/reasoning-language`、`/help`）在本地执行——`/help` 可列出全部。
+交互式 `reasonix` 会话里，内置命令（`/compact`、`/context`、`/new`、`/clear`、`/rewind`、`/tree`、`/branch`、`/switch`、`/todo`、`/model`、`/work-mode`、`/mcp`、`/skills`、`/hooks`、`/memory`、`/goal`、`/output-style`、`/sandbox`、`/language`、`/reasoning-language`、`/help`）在本地执行——`/help` 可列出全部。
 内置 **Skill**（如 `/init`、`/explore`、`/test`、`/reasonix-guide`）也会出现在斜杠菜单，
 并可通过 `run_skill` 调用（正文按需加载；只有索引行进入缓存稳定前缀）。配置或能力排障时
 用 `/reasonix-guide`，它会引导运行 `reasonix doctor capabilities`（见

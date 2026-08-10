@@ -420,24 +420,11 @@ func (a *Agent) streamWithSamplingRecovery(ctx context.Context, turn int) stream
 		last.usage = finalizeSamplingUsage(billable, result.usage)
 
 		if result.err != nil {
-			if provider.IsStreamInterrupted(result.err) && attempt < maxSamplingAttempts {
-				streamSink.Discard()
-				reason := provider.StreamInterruptReason(result.err)
-				a.emitStreamAttempt(attemptID, event.StreamAttemptDiscard, attempt, reason, result.err)
-				a.sink.Emit(event.Event{
-					Kind: event.Retrying, RetryAttempt: attempt, RetryMax: maxStreamRecoveries,
-					RetryScope: event.RetryScopeStream,
-				})
-				if !streamRetrySleep(ctx, attempt) {
-					return streamedTurn{usage: finalizeSamplingUsage(billable, result.usage), interrupted: true, err: ctx.Err()}
-				}
+			retry, terminal := a.handleSamplingError(ctx, attemptID, attempt, streamSink, &frozen, result, last, billable)
+			if retry {
 				continue
 			}
-			// Exhausted retries or non-retryable error: leave the last
-			// speculative UI visible (no discard) so LocalOnly can mirror it.
-			streamSink.Flush()
-			last.usage = finalizeSamplingUsage(billable, result.usage)
-			return last
+			return terminal
 		}
 
 		// Clean terminal. Optionally repair missing reasoning with one extra
@@ -764,19 +751,6 @@ func finalizeSamplingUsage(billable, latest *provider.Usage) *provider.Usage {
 	return &out
 }
 
-// applyLatestContextShape copies the latest single-request shape into Context*
-// fields for gauges and Desktop rebind telemetry.
-func applyLatestContextShape(dst, latest *provider.Usage) {
-	if dst == nil || latest == nil {
-		return
-	}
-	dst.ContextPromptTokens = latest.PromptTokens
-	dst.ContextCompletionTokens = latest.CompletionTokens
-	dst.ContextReasoningTokens = latest.ReasoningTokens
-	dst.ContextCacheHitTokens = latest.CacheHitTokens
-	dst.ContextCacheMissTokens = latest.CacheMissTokens
-}
-
 // mergeStreamUsage remains for missing-reasoning style single-repair merges that
 // need a simple sum. Sampling recovery uses mergeSamplingUsage instead.
 func mergeStreamUsage(first, retry *provider.Usage) *provider.Usage {
@@ -828,7 +802,7 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *runLoopState, te
 	// but still pause so Goal auto-continue cannot open another Run with
 	// a fresh finalization round. turn_done reports recovery_paused.
 	if state.recoveryGraceRound {
-		a.maybeCompact(ctx, usage)
+		a.contextManager().ObserveUsage(usage)
 		reason := ""
 		if ctrl := a.recoveryEpisodeControl(); ctrl != nil {
 			_, _ = ctrl.ConsumeFinalization(a.recoveryTaskID)
@@ -840,7 +814,7 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *runLoopState, te
 	}
 	readiness := a.finalReadinessCheckFor()
 	if state.graceRound && (readiness.reason != "" || !hasVisibleFinalAnswer(text)) {
-		a.maybeCompact(ctx, usage)
+		a.contextManager().ObserveUsage(usage)
 		return false, &maxStepsPause{steps: state.runMaxSteps, key: state.runMaxStepsKey}
 	}
 	if readiness.reason != "" {
@@ -869,7 +843,7 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *runLoopState, te
 			}
 			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeEmptyFinal, Text: emptyFinalNotice(), Detail: emptyFinalNoticeDetail(a.prov.Name(), usage, len(reasoning))})
 			a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(emptyFinalRetryMessage())})
-			a.maybeCompact(ctx, usage)
+			a.contextManager().ObserveUsage(usage)
 			return true, nil
 		}
 	}
@@ -877,7 +851,7 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *runLoopState, te
 		state.handoffNudges++
 		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeExecutorHandoff, Text: executorHandoffNoticeText(), Detail: "executor answered without taking any action; nudging it to use its tools"})
 		a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(executorHandoffRetryMessage())})
-		a.maybeCompact(ctx, usage)
+		a.contextManager().ObserveUsage(usage)
 		return true, nil
 	}
 	if readiness.applies {
@@ -890,7 +864,7 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *runLoopState, te
 	// A final-answer turn otherwise skips compaction, so a large context
 	// carries into the next turn un-folded and can overflow the model window.
 	// No-op below the trigger, so normal turns keep their warm cache.
-	a.maybeCompact(ctx, usage)
+	a.contextManager().ObserveUsage(usage)
 	return false, nil // model gave a final answer
 }
 
@@ -939,7 +913,7 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 				Name:       call.Name,
 			})
 		}
-		a.maybeCompact(ctx, usage)
+		a.contextManager().ObserveUsage(usage)
 		return false, &RecoveryPauseError{
 			Message:    "Automatic retries paused. Reasonix stopped repeated attempts and kept completed work. Send \"continue\" to start a fresh attempt, or add instructions to change direction.",
 			StopReason: reason,
@@ -1022,7 +996,7 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 
 	// The prompt only grows from here; compact before the next turn so it
 	// stays within the model's window.
-	a.maybeCompact(ctx, usage)
+	a.contextManager().ObserveUsage(usage)
 
 	// When Auto recovery exhausts its Episode budget, offer exactly one
 	// summarize-only finalization round. Successful summary ends cleanly;

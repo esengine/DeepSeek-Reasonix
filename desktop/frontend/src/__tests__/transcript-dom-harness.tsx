@@ -28,6 +28,7 @@ export interface TranscriptHarness {
   render: (items: Item[], props?: Record<string, unknown>) => Promise<void>;
   flush: () => Promise<void>;
   settle: () => Promise<void>;
+  waitFor: (condition: () => boolean, description: string, attempts?: number) => Promise<void>;
   unmount: () => Promise<void>;
   close: () => Promise<void>;
   loadModule: <T>(path: string) => Promise<T>;
@@ -167,6 +168,14 @@ export async function createTranscriptHarness(options: TranscriptHarnessOptions 
     }
   };
 
+  const waitFor = async (condition: () => boolean, description: string, attempts = 8) => {
+    for (let i = 0; i < attempts; i += 1) {
+      if (condition()) return;
+      await flush();
+    }
+    if (!condition()) throw new Error(`timed out waiting for ${description}`);
+  };
+
   return {
     dom,
     container,
@@ -190,6 +199,7 @@ export async function createTranscriptHarness(options: TranscriptHarnessOptions 
     },
     flush,
     settle,
+    waitFor,
     unmount: async () => {
       const current = root;
       root = null;

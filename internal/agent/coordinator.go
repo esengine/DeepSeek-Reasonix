@@ -10,6 +10,7 @@ import (
 
 	"reasonix/internal/event"
 	"reasonix/internal/nilutil"
+	"reasonix/internal/plancontract"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
@@ -27,13 +28,6 @@ type PlannerPlanApprover interface {
 	RunWithPlannerApproval(ctx context.Context, plan string, run func(context.Context) error) error
 }
 
-// PlannerUserDecisionAsker lets hosts turn planner-authored user questions into
-// a real AskRequest. The returned answer is host-authenticated user input that
-// Coordinator can safely pass to the executor as context.
-type PlannerUserDecisionAsker interface {
-	RunWithPlannerUserDecision(ctx context.Context, plan string, question event.AskQuestion, run func(context.Context, string) error) error
-}
-
 // DefaultPlannerPrompt steers the planner toward concise plans, not execution.
 const DefaultPlannerPrompt = `You are the planner in a two-model coding agent.
 Given a task, produce a concise, ordered plan for the executor model to carry out.
@@ -45,24 +39,28 @@ for the executor. Output executor-ready instructions: what to do, which files or
 commands are relevant, expected blockers, and key decisions. Keep it short and
 actionable.
 
-A host-authored <planner-turn> block at the end of the user turn selects the
-planning depth. For depth=light, return a compact objective, 1-4 ordered steps,
-likely touchpoints, and the main verification; omit empty boilerplate sections.
-For depth=full, inspect enough evidence to distinguish verified touchpoints from
-candidate touchpoints, then include goal/non-goals when useful, ordered steps,
-risks or blockers, concrete acceptance criteria, command-level verification, and
-rollback only when the change is risky or difficult to reverse. Label assumptions
-instead of presenting inferred paths or commands as verified facts.
+Deliver the plan by calling submit_plan. The plan is data, not prose: the host
+renders it for the user and hands it to the executor, so do not also write the
+plan out in your reply. Fill the fields you actually have — a step's title is
+required, everything else is there so the plan can say what free text only
+implies. Record read paths as verified_files and inferred ones as
+candidate_files; never present an unread path as verified. Set requires_approval
+when execution should stop for the user; the host owns the final decision.
 
-If execution must stop for explicit user approval of the plan, end the plan with
-a final line containing exactly [planner_requires_approval]. If execution needs
-a user-owned decision or missing user-provided value before it can be safe, do
-not ask in prose; include one structured block:
-<planner-ask>
-question: the concrete question
-option: recommended safe/default choice
-option: alternative choice
-</planner-ask>
+A host-authored <planner-turn> block at the end of the user turn selects the
+planning depth. For depth=light, submit a compact objective with 1-4 steps,
+likely touchpoints, and the main verification. For depth=full, inspect enough
+evidence to separate verified touchpoints from candidates, then also fill
+non-goals, per-step risks, acceptance criteria, and command-level verification.
+Label anything unproven in assumptions rather than stating it as fact.
+
+If execution needs a user-owned decision or a missing user-provided value
+before it can be safe, call ask and let the answer shape the plan; never ask in
+prose and never plan around a guess you could have settled.
+
+If submit_plan is unavailable to you, fall back to writing the plan as your
+reply, and end it with a final line containing exactly
+[planner_requires_approval] when execution must stop for user approval.
 
 Crucial: You only have research tools plus the stable use_capability proxy for
 authorized MCP. You do NOT have bash, execute, file writers, or other
@@ -106,8 +104,6 @@ const (
 const noChangesMarker = "[no_changes]"
 
 const plannerRequiresApprovalMarker = "[planner_requires_approval]"
-const plannerAskStartMarker = "<planner-ask>"
-const plannerAskEndMarker = "</planner-ask>"
 
 // PlannerPromptWithContext appends cache-stable standing context, such as loaded
 // REASONIX.md / AGENTS.md memory, to the planner's smaller system prompt.
@@ -136,9 +132,8 @@ type Coordinator struct {
 	// plannerPolicy chooses executor-only, plan-and-execute, or plan-for-approval
 	// per turn. nil preserves the historical "plan every turn" constructor
 	// behavior used by direct Coordinator callers.
-	plannerPolicy            PlannerPolicy
-	plannerPlanApprover      PlannerPlanApprover
-	plannerUserDecisionAsker PlannerUserDecisionAsker
+	plannerPolicy       PlannerPolicy
+	plannerPlanApprover PlannerPlanApprover
 }
 
 // NewCoordinator wires a planner provider (with its own session) to an executor.
@@ -334,16 +329,6 @@ func (c *Coordinator) SetPlannerPlanApprover(g PlannerPlanApprover) {
 	c.plannerPlanApprover = g
 }
 
-// SetPlannerUserDecisionAsker connects planner-authored prose questions to the
-// host's structured AskRequest surface. Without one, legacy handoff behavior is
-// preserved so headless/non-interactive runs keep moving.
-func (c *Coordinator) SetPlannerUserDecisionAsker(g PlannerUserDecisionAsker) {
-	if c == nil {
-		return
-	}
-	c.plannerUserDecisionAsker = g
-}
-
 // Run plans with the planner model, then hands the plan to the executor.
 func (c *Coordinator) Run(ctx context.Context, input string) error {
 	c.sink.Emit(event.Event{Kind: event.TurnStarted})
@@ -366,7 +351,7 @@ func (c *Coordinator) Run(ctx context.Context, input string) error {
 		plannerCtx = withRunStepLimit(plannerCtx, decision.MaxResearchRounds, "planner research rounds")
 	}
 	plannerInput := plannerTurnInput(input, decision)
-	plan, err := c.plan(plannerCtx, plannerInput)
+	outcome, err := c.plan(plannerCtx, plannerInput)
 	if err != nil {
 		if ctx.Err() != nil {
 			return fmt.Errorf("planner: %w", err)
@@ -404,7 +389,17 @@ func (c *Coordinator) Run(ctx context.Context, input string) error {
 		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.prov.Name() + " · executing", Source: event.UsageSourceExecutor})
 		return c.executor.Run(ctx, input)
 	}
-	if isNoOpPlan(plan) {
+	return c.deliverPlan(ctx, input, outcome, decision)
+}
+
+// deliverPlan routes a finished plan to its ending: relayed conclusion, plan
+// only, approval gate, user decision, or straight to the executor. Split out of
+// Run so the routing reads as one decision table.
+func (c *Coordinator) deliverPlan(ctx context.Context, input string, outcome plannerOutcome, decision PlannerDecision) error {
+	plan := outcome.text
+	// A submitted plan is never a no-op conclusion: [no_changes] marks the
+	// ABSENCE of a plan, which by construction cannot be a field of one.
+	if !outcome.structured && isNoOpPlan(plan) {
 		c.persistExecutorNoOp(ctx, input, plan)
 		// The relayed conclusion is planner text; keep its source so sinks
 		// attribute it like every other planner emission. Display goes through
@@ -444,25 +439,8 @@ func (c *Coordinator) Run(ctx context.Context, input string) error {
 	if decision.Route == PlannerRoutePlanForApproval {
 		return runWithPlanApproval()
 	}
-	if plannerPlanRequestsApproval(plan) {
+	if outcome.requestsApproval() {
 		return runWithPlanApproval()
-	}
-	if c.plannerUserDecisionAsker != nil {
-		if question, ok := plannerPlanRequestsUserDecision(plan); ok {
-			executed := false
-			err := c.plannerUserDecisionAsker.RunWithPlannerUserDecision(ctx, plan, question, func(ctx context.Context, answer string) error {
-				if strings.TrimSpace(answer) == "" {
-					return nil
-				}
-				executed = true
-				return runExecutorWithPlan(ctx, planWithHostUserAnswer(plan, answer))
-			})
-			if err == nil && !executed && ctx.Err() == nil {
-				c.persistExecutorNoOp(ctx, input, plan+"\n\n"+plannerDecisionUnansweredNote)
-				c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: plannerDecisionUnansweredNotice, Source: event.UsageSourcePlanner})
-			}
-			return err
-		}
 	}
 	return runExecutorWithPlan(ctx, plan)
 }
@@ -480,293 +458,6 @@ const (
 	plannerDecisionUnansweredNote     = "(The user did not provide the requested decision; execution was not started.)"
 	plannerDecisionUnansweredNotice   = "Waiting for your decision; nothing was executed. Reply to continue."
 )
-
-// plannerApprovalPhrases is the fallback for planners that ignore the
-// structured marker. Claims of past approval ("用户已批准", "already approved")
-// are deliberately included: the planner cannot know host approval state, so a
-// claimed approval is re-gated instead of trusted.
-var plannerApprovalPhrases = []string{
-	"是否批准",
-	"等待用户批准",
-	"等待您的批准",
-	"待用户批准",
-	"批准这个方案",
-	"批准该方案",
-	"批准此方案",
-	"批准这个计划",
-	"批准该计划",
-	"批准此计划",
-	"批准方案后",
-	"批准计划后",
-	"用户已批准",
-	"用户已经批准",
-	"已经获得批准",
-	"approve this plan",
-	"approve the plan",
-	"approval before",
-	"waiting for approval",
-	"awaiting approval",
-	"wait for user approval",
-	"user approved",
-	"already approved",
-	"has approved",
-}
-
-func plannerPlanRequestsApproval(plan string) bool {
-	lower := strings.ToLower(strings.TrimSpace(plan))
-	if lower == "" {
-		return false
-	}
-	if strings.ToLower(lastNonEmptyLine(lower)) == plannerRequiresApprovalMarker {
-		return true
-	}
-	// Match per line so a nearby negation ("无需等待用户批准", "no need to wait
-	// for approval") exempts only its own phrase, not the whole plan.
-	for rawLine := range strings.SplitSeq(lower, "\n") {
-		line := strings.TrimSpace(rawLine)
-		if line == "" {
-			continue
-		}
-		for _, phrase := range plannerApprovalPhrases {
-			before, _, ok := strings.Cut(line, phrase)
-			if !ok {
-				continue
-			}
-			if approvalMentionNegated(before) {
-				continue
-			}
-			return true
-		}
-	}
-	return false
-}
-
-// approvalMentionNegated reports whether the text immediately before a matched
-// approval phrase negates it, so plans that explicitly rule out an approval
-// round ("无需等待用户批准，直接执行") do not trigger a needless one. Only the
-// nearby prefix counts; a negation earlier in the line about something else
-// must not disarm the gate. Erring toward gating is fine — the failure mode is
-// one extra approval prompt, never a silent execution.
-func approvalMentionNegated(prefix string) bool {
-	const window = 30
-	if len(prefix) > window {
-		prefix = prefix[len(prefix)-window:]
-	}
-	for _, neg := range []string{"无需", "无须", "不需要", "不需", "不必", "不用", "no need", "not require", "not required", "without"} {
-		if strings.Contains(prefix, neg) {
-			return true
-		}
-	}
-	return false
-}
-
-func plannerPlanRequestsUserDecision(plan string) (event.AskQuestion, bool) {
-	trimmed := strings.TrimSpace(plan)
-	if trimmed == "" || plannerPlanRequestsApproval(trimmed) {
-		return event.AskQuestion{}, false
-	}
-	if q, ok := parsePlannerAskBlock(trimmed); ok {
-		return q, true
-	}
-	lower := strings.ToLower(trimmed)
-	// Directive asks and claimed user choices only. Bare mentions ("用户选择",
-	// "确认目标", "user confirmation") are deliberately absent: ordinary plan
-	// wording such as "运行测试确认目标行为不变" or "update the user selection
-	// component" must not conjure an ask dialog.
-	decisionPhrases := []string{
-		"需要用户选择",
-		"让用户选择",
-		"请用户选择",
-		"等待用户选择",
-		"用户已选择",
-		"用户已经选择",
-		"请选择",
-		"选哪个",
-		"哪种方案",
-		"哪个方案",
-		"哪一个方案",
-		"需要用户确认",
-		"请用户确认",
-		"等待用户确认",
-		"需要用户提供",
-		"请用户提供",
-		"等待用户提供",
-		"need user to choose",
-		"ask the user to choose",
-		"user should choose",
-		"user chose",
-		"user has chosen",
-		"user already chose",
-		"which option",
-		"which approach",
-		"which plan",
-		"please choose",
-		"please confirm",
-		"needs user confirmation",
-		"need the user to provide",
-		"ask the user to provide",
-	}
-	hasDecisionPhrase := false
-	for _, phrase := range decisionPhrases {
-		if strings.Contains(lower, phrase) {
-			hasDecisionPhrase = true
-			break
-		}
-	}
-	if !hasDecisionPhrase {
-		return event.AskQuestion{}, false
-	}
-	return event.AskQuestion{
-		ID:      "planner_user_decision",
-		Header:  "Planner",
-		Prompt:  plannerQuestionPrompt(trimmed),
-		Options: plannerDecisionOptions(trimmed),
-	}, true
-}
-
-func parsePlannerAskBlock(plan string) (event.AskQuestion, bool) {
-	lower := strings.ToLower(plan)
-	start := strings.Index(lower, plannerAskStartMarker)
-	end := strings.Index(lower, plannerAskEndMarker)
-	if start < 0 || end <= start {
-		return event.AskQuestion{}, false
-	}
-	block := plan[start+len(plannerAskStartMarker) : end]
-	var question string
-	var options []event.AskOption
-	for raw := range strings.SplitSeq(block, "\n") {
-		line := strings.TrimSpace(raw)
-		if line == "" {
-			continue
-		}
-		key, value, ok := strings.Cut(line, ":")
-		if !ok {
-			key, value, ok = strings.Cut(line, "：")
-		}
-		if !ok {
-			continue
-		}
-		value = strings.TrimSpace(value)
-		switch strings.ToLower(strings.TrimSpace(key)) {
-		case "question", "问题":
-			question = value
-		case "option", "选项":
-			if value != "" && len(options) < 4 {
-				options = append(options, event.AskOption{Label: truncateRunes(value, 72)})
-			}
-		}
-	}
-	if strings.TrimSpace(question) == "" {
-		question = "Planner needs your decision before execution. Choose an option or type your own answer."
-	}
-	if len(options) < 2 {
-		options = plannerDecisionOptions(plan)
-	}
-	return event.AskQuestion{
-		ID:      "planner_user_decision",
-		Header:  "Planner",
-		Prompt:  truncateRunes(question, 280),
-		Options: options,
-	}, true
-}
-
-func plannerQuestionPrompt(plan string) string {
-	lines := strings.Split(plan, "\n")
-	for _, v := range slices.Backward(lines) {
-		line := strings.TrimSpace(strings.Trim(v, "-* \t"))
-		if line == "" {
-			continue
-		}
-		lower := strings.ToLower(line)
-		if strings.ContainsAny(line, "？?") ||
-			strings.Contains(lower, "请选择") ||
-			strings.Contains(lower, "please choose") ||
-			strings.Contains(lower, "please confirm") ||
-			strings.Contains(lower, "请用户") ||
-			strings.Contains(lower, "需要用户") {
-			return truncateRunes(line, 280)
-		}
-	}
-	return "Planner needs your decision before execution. Choose an option or type your own answer."
-}
-
-func plannerDecisionOptions(plan string) []event.AskOption {
-	choices := extractPlannerDecisionOptions(plan)
-	if len(choices) >= 2 {
-		opts := make([]event.AskOption, 0, min(len(choices), 4))
-		for _, choice := range choices {
-			opts = append(opts, event.AskOption{Label: truncateRunes(choice, 72)})
-			if len(opts) == 4 {
-				break
-			}
-		}
-		return opts
-	}
-	return []event.AskOption{
-		{Label: "Type my answer", Description: "Use the custom answer row to provide the missing choice or information."},
-		{Label: "Pause", Description: "Do not execute yet; I will reply in chat."},
-	}
-}
-
-func extractPlannerDecisionOptions(plan string) []string {
-	lines := strings.Split(plan, "\n")
-	out := make([]string, 0, 4)
-	for _, raw := range lines {
-		line := strings.TrimSpace(raw)
-		if line == "" {
-			continue
-		}
-		candidate := ""
-		lower := strings.ToLower(line)
-		switch {
-		case strings.HasPrefix(line, "方案") || strings.HasPrefix(line, "选项"):
-			candidate = strings.TrimSpace(strings.TrimLeft(strings.TrimPrefix(strings.TrimPrefix(line, "方案"), "选项"), "一二三四五六七八九十1234567890.、:：)） \t"))
-		case strings.HasPrefix(lower, "option ") || strings.HasPrefix(lower, "approach "):
-			if idx := strings.IndexAny(line, ":：-—"); idx >= 0 && idx+1 < len(line) {
-				candidate = strings.TrimSpace(line[idx+1:])
-			}
-		default:
-			fields := strings.Fields(line)
-			if len(fields) >= 2 {
-				prefix := strings.TrimRight(fields[0], ".)、:：")
-				if len(prefix) == 1 && ((prefix[0] >= 'A' && prefix[0] <= 'D') || (prefix[0] >= 'a' && prefix[0] <= 'd')) {
-					candidate = strings.TrimSpace(strings.TrimPrefix(line, fields[0]))
-				}
-			}
-		}
-		candidate = strings.TrimSpace(strings.Trim(candidate, "-—:： \t"))
-		if candidate == "" || looksLikePlanStep(candidate) {
-			continue
-		}
-		out = append(out, candidate)
-		if len(out) == 4 {
-			break
-		}
-	}
-	return out
-}
-
-func looksLikePlanStep(s string) bool {
-	lower := strings.ToLower(strings.TrimSpace(s))
-	for _, prefix := range []string{"read ", "edit ", "update ", "run ", "test ", "检查", "读取", "修改", "更新", "运行", "测试"} {
-		if strings.HasPrefix(lower, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
-func planWithHostUserAnswer(plan, answer string) string {
-	return strings.TrimSpace(plan) + "\n\nHost user answer to planner question:\n" + strings.TrimSpace(answer)
-}
-
-func truncateRunes(s string, max int) string {
-	rs := []rune(strings.TrimSpace(s))
-	if len(rs) <= max {
-		return string(rs)
-	}
-	return string(rs[:max]) + "..."
-}
 
 // isNoOpPlan reports whether the plan explicitly concludes that nothing needs
 // to change: the final non-empty line is exactly the [no_changes] marker that
@@ -806,12 +497,37 @@ func (c *Coordinator) persistExecutorNoOp(ctx context.Context, input, plan strin
 	c.executor.session.Add(provider.Message{Role: provider.RoleAssistant, Content: plan})
 }
 
-// plan streams a plan from the planner and appends it to the planner session, so
-// that session grows prepend-only and stays cache-friendly.
-func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
+// plannerOutcome is one planning turn's result. A submitted plan is the
+// contract; text is what the user and the executor read — rendered from the plan
+// when there is one, the planner's prose when there is not.
+type plannerOutcome struct {
+	text       string
+	plan       plancontract.Plan
+	structured bool
+}
+
+// requestsApproval reports whether execution should stop for the user. A
+// structured plan states it in a field; prose falls back to phrase matching,
+// which exists only because free text has no field to read.
+func (o plannerOutcome) requestsApproval() bool {
+	if o.structured {
+		return o.plan.RequiresApproval
+	}
+	return plannerPlanRequestsApproval(o.text)
+}
+
+// plan produces this turn's plan, structured when the planner submitted one.
+func (c *Coordinator) plan(ctx context.Context, input string) (plannerOutcome, error) {
 	if c.plannerAgent != nil {
 		return c.planWithTools(ctx, input)
 	}
+	text, err := c.planFromStream(ctx, input)
+	return plannerOutcome{text: text}, err
+}
+
+// planFromStream is the tool-less planner path: with no submit_plan available
+// its result is always prose, which the host reads with the text fallback.
+func (c *Coordinator) planFromStream(ctx context.Context, input string) (string, error) {
 	// On failure, roll the just-added user message back: a dangling user turn
 	// would produce consecutive user roles on the next plan (which some
 	// providers reject), and Run's executor fallback keeps the turn alive
@@ -867,9 +583,10 @@ func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
 // planWithTools runs the planner through the normal Agent loop over a filtered
 // read-only registry. That gives the planner the same tool-call contract as the
 // executor while preserving its separate session and cache prefix.
-func (c *Coordinator) planWithTools(ctx context.Context, input string) (string, error) {
+func (c *Coordinator) planWithTools(ctx context.Context, input string) (plannerOutcome, error) {
 	before := c.plannerSess.Snapshot()
 	rewriteBefore := c.plannerSess.RewriteVersion()
+	ctx, submission := WithPlanSubmission(ctx)
 	if err := c.plannerAgent.Run(ctx, input); err != nil {
 		// Mirror plan()'s rollback: Run already appended the user message
 		// (and possibly partial assistant/tool rounds) to the planner
@@ -880,7 +597,15 @@ func (c *Coordinator) planWithTools(ctx context.Context, input string) (string, 
 		// turn would leave a tool-call tail that the next provider request
 		// cannot safely resume.
 		c.rollbackPlannerTurn(before, rewriteBefore)
-		return "", err
+		return plannerOutcome{}, err
+	}
+	// A submitted plan is the contract, whatever the planner said afterwards.
+	// The host renders it so the user sees the plan itself rather than the
+	// planner's acknowledgement of having submitted it.
+	if plan, ok := submission.Plan(); ok {
+		text := plancontract.Render(plan)
+		c.sink.Emit(event.Event{Kind: event.Text, Text: text, Source: event.UsageSourcePlanner})
+		return plannerOutcome{text: text, plan: plan, structured: true}, nil
 	}
 	// The plan is this turn's final answer: the last non-empty assistant
 	// message appended after the pre-turn boundary. When a session rewrite
@@ -896,13 +621,13 @@ func (c *Coordinator) planWithTools(ctx context.Context, input string) (string, 
 	for i := len(c.plannerSess.Messages) - 1; i >= floor; i-- {
 		m := c.plannerSess.Messages[i]
 		if m.Role == provider.RoleAssistant && strings.TrimSpace(m.Content) != "" {
-			return m.Content, nil
+			return plannerOutcome{text: m.Content}, nil
 		}
 	}
 	// No usable plan came back: roll back too, so the executor-fallback turn
 	// does not leave the planner session ending in a user message.
 	c.rollbackPlannerTurn(before, rewriteBefore)
-	return "", fmt.Errorf("planner finished without producing a plan")
+	return plannerOutcome{}, fmt.Errorf("planner finished without producing a plan")
 }
 
 func plannerResearchPauseDetail(err error) string {
@@ -1064,4 +789,19 @@ func HandoffTask(s string) string {
 		return task
 	}
 	return s
+}
+
+// SetAsker gives both models the host's question surface. The planner needs it
+// as much as the executor: a decision that shapes the plan must be settled
+// while planning, not stapled to a finished plan.
+func (c *Coordinator) SetAsker(as Asker) {
+	if c == nil {
+		return
+	}
+	if c.plannerAgent != nil {
+		c.plannerAgent.SetAsker(as)
+	}
+	if c.executor != nil {
+		c.executor.SetAsker(as)
+	}
 }

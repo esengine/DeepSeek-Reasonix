@@ -231,6 +231,11 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	fmt.Fprintf(&b, "tool_result_snip_ratio = %s   # snip stale tool results at this fraction before summary compaction\n", formatFloat(c.Agent.ToolResultSnipRatio))
 	fmt.Fprintf(&b, "compact_ratio       = %s   # try compacting when prompt reaches this fraction\n", formatFloat(c.Agent.CompactRatio))
 	fmt.Fprintf(&b, "compact_force_ratio = %s   # force compacting at this high-water mark\n", formatFloat(c.Agent.CompactForceRatio))
+	if strings.TrimSpace(c.Agent.ContextEditing) == "native" {
+		b.WriteString("context_editing     = \"native\"   # opt in to official Anthropic native tool clearing\n")
+	} else {
+		b.WriteString("# context_editing     = \"native\"   # opt in only for official Anthropic native tool clearing; default is local\n")
+	}
 	if c.Agent.Keep != nil {
 		fmt.Fprintf(&b, "keep                = %s   # compaction keep policy: errors, user_marked\n", renderStringArray(c.Agent.Keep))
 	} else {
@@ -781,9 +786,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 				b.WriteString("# Raw MCP tool names with per-tool call timeouts.\n")
 				fmt.Fprintf(&b, "tool_timeout_seconds = %s\n", renderIntMap(pl.ToolTimeoutSeconds))
 			}
-			if pl.AutoStart != nil {
-				fmt.Fprintf(&b, "auto_start = %v\n", *pl.AutoStart)
-			}
+			renderPluginPolicy(&b, pl)
 		}
 	}
 
@@ -942,6 +945,12 @@ func RenderTOMLProjectDelta(c *Config) string {
 	if c.Agent.CompactForceRatio != d.Agent.CompactForceRatio {
 		fmt.Fprintf(&agentBuf, "compact_force_ratio = %s\n", formatFloat(c.Agent.CompactForceRatio))
 		anyAgent = true
+	}
+	if c.Agent.ContextEditing != d.Agent.ContextEditing {
+		if strings.TrimSpace(c.Agent.ContextEditing) == "native" {
+			fmt.Fprintf(&agentBuf, "context_editing = %q\n", "native")
+			anyAgent = true
+		}
 	}
 	if c.Agent.Keep != nil && !reflect.DeepEqual(c.Agent.Keep, d.Agent.Keep) {
 		fmt.Fprintf(&agentBuf, "keep = %s\n", renderStringArray(c.Agent.Keep))
@@ -1253,9 +1262,7 @@ func RenderTOMLProjectDelta(c *Config) string {
 			b.WriteString("# Raw MCP tool names with per-tool call timeouts.\n")
 			fmt.Fprintf(&b, "tool_timeout_seconds = %s\n", renderIntMap(pl.ToolTimeoutSeconds))
 		}
-		if pl.AutoStart != nil {
-			fmt.Fprintf(&b, "auto_start = %v\n", *pl.AutoStart)
-		}
+		renderPluginPolicy(&b, pl)
 		b.WriteString("\n")
 	}
 

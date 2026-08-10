@@ -139,6 +139,13 @@ func (c *coalescer) drainAndUnlock() {
 // Optional sink capabilities flush first so audits never overtake a buffered
 // delta, then forward to inner sinks that opt in.
 
+func (c *coalescer) RecordDelegationAudit(a evidence.DelegationAudit) {
+	c.mu.Lock()
+	c.enqueueFlushLocked()
+	c.drainAndUnlock()
+	RecordDelegationAudit(c.inner, a)
+}
+
 func (c *coalescer) RecordReadinessAudit(a evidence.ReadinessAudit) {
 	c.mu.Lock()
 	c.enqueueFlushLocked()
@@ -193,4 +200,11 @@ func (c *coalescer) RecordDelegationAdmission(a DelegationAdmissionAudit) {
 	c.enqueueFlushLocked()
 	c.drainAndUnlock()
 	RecordDelegationAdmission(c.inner, a)
+}
+
+func (c *coalescer) RecordWorkspaceMutation(m WorkspaceMutation) {
+	c.mu.Lock()
+	c.enqueueFlushLocked()
+	c.drainAndUnlock()
+	RecordWorkspaceMutation(c.inner, m)
 }

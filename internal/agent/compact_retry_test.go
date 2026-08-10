@@ -25,7 +25,7 @@ func TestMaybeCompactIgnoresRetryAggregateBelowContextThreshold(t *testing.T) {
 		ArchiveDir:    t.TempDir(),
 	}, event.Discard)
 
-	a.maybeCompact(context.Background(), &provider.Usage{
+	prepareForObservedUsage(a, context.Background(), &provider.Usage{
 		PromptTokens:        80,
 		ContextPromptTokens: 40,
 	})
@@ -49,7 +49,7 @@ func TestMaybeCompactStillTriggersAtLatestContextThreshold(t *testing.T) {
 		ArchiveDir:    t.TempDir(),
 	}, event.Discard)
 
-	a.maybeCompact(context.Background(), &provider.Usage{
+	prepareForObservedUsage(a, context.Background(), &provider.Usage{
 		PromptTokens:        160,
 		ContextPromptTokens: 80,
 	})

@@ -1358,22 +1358,12 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 				}
 			}
 		}()
+	case trimmed == "/context":
+		c.noticeDetail(c.ContextReport())
 	case trimmed == "/new":
-		go func() {
-			if err := c.NewSession(); err != nil {
-				c.notice("new session failed: " + err.Error())
-			} else {
-				c.notice("new session")
-			}
-		}()
+		c.runSessionVerb(c.NewSession, "new session", "new session failed: ")
 	case trimmed == "/clear":
-		go func() {
-			if err := c.ClearSession(); err != nil {
-				c.notice("clear context failed: " + err.Error())
-			} else {
-				c.notice("context cleared")
-			}
-		}()
+		c.runSessionVerb(c.ClearSession, "context cleared", "clear context failed: ")
 	case strings.HasPrefix(trimmed, "/mcp__"):
 		c.runGuarded(func(ctx context.Context) error {
 			sent, found, err := c.MCPPrompt(ctx, trimmed)
@@ -2198,10 +2188,10 @@ func (c *Controller) EnableInteractiveApproval() {
 	}); ok {
 		setter.SetPlannerPlanApprover(plannerPlanApprover{c: c})
 	}
-	if setter, ok := c.runner.(interface {
-		SetPlannerUserDecisionAsker(agent.PlannerUserDecisionAsker)
-	}); ok {
-		setter.SetPlannerUserDecisionAsker(plannerUserDecisionAsker{c: c})
+	// The planner holds the real ask tool, so it reaches the same approval
+	// surface the executor does instead of a parallel prose-question path.
+	if setter, ok := c.runner.(interface{ SetAsker(agent.Asker) }); ok {
+		setter.SetAsker(c)
 	}
 }
 
@@ -2229,38 +2219,6 @@ func (p plannerPlanApprover) RunWithPlannerApproval(ctx context.Context, plan st
 		c.completePlanTodos(todoArgs)
 	}
 	return nil
-}
-
-type plannerUserDecisionAsker struct {
-	c *Controller
-}
-
-func (p plannerUserDecisionAsker) RunWithPlannerUserDecision(ctx context.Context, _ string, question event.AskQuestion, run func(context.Context, string) error) error {
-	answers, err := p.c.Ask(ctx, []event.AskQuestion{question})
-	if err != nil {
-		return err
-	}
-	answer := plannerUserDecisionAnswer(question, answers)
-	if strings.TrimSpace(answer) == "" {
-		return nil
-	}
-	return run(ctx, answer)
-}
-
-func plannerUserDecisionAnswer(question event.AskQuestion, answers []event.AskAnswer) string {
-	for _, answer := range answers {
-		if answer.QuestionID != question.ID {
-			continue
-		}
-		selected := make([]string, 0, len(answer.Selected))
-		for _, item := range answer.Selected {
-			if s := strings.TrimSpace(item); s != "" {
-				selected = append(selected, s)
-			}
-		}
-		return strings.Join(selected, ", ")
-	}
-	return ""
 }
 
 func (c *Controller) newInteractiveGate() *permission.Gate {

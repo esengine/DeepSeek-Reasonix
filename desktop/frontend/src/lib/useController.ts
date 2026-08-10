@@ -8,7 +8,9 @@ import { asArray } from "./array";
 import { addBreadcrumb } from "./breadcrumbs";
 import { app, onEvent, onReady, onRuntimeRebuilt, onTabMeta, onTopicActivation } from "./bridge";
 import { invalidateCache } from "./composerHistory";
+import { formatContextMaintenanceNotice } from "./contextMaintenanceTypes";
 import { formatGuardianAssessmentNotice } from "./guardianEvents";
+import { invalidateSharedQuery } from "./queryCoalesce";
 import { createRafBatch } from "./rafBatch";
 import { aliasActivationRequest, noteActivationRequested, noteActivationSettled, noteActivationStarted } from "./sessionDiagnostics";
 import { applyLiveSegments, coalesceStreamDeltas, completeLiveReasoning, type StreamDeltaEntry, type StreamSegment } from "./streamDeltaBatch";
@@ -1696,6 +1698,11 @@ function applyEvent(s: State, e: WireEvent): State {
     }
     case "notice":
       return appendNoticeToState(s, e.level ?? "info", e.text ?? "", e.detail, e.code, e.decisionReceipt);
+    case "context_maintenance": {
+      const m = e.maintenance;
+      if (!m || m.status === "noop") return s;
+      return appendNoticeToState(s, m.status === "failed" ? "warn" : "info", formatContextMaintenanceNotice(m, t), m.reason);
+    }
     case "phase":
       return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "phase", id: `p${s.seq}`, text: e.text ?? "" }] };
     case "compaction_started":
@@ -2266,6 +2273,7 @@ const noticeCodeKeys: Record<string, DictKey> = {
   session_recovery_depth_cap: "recovery.noticeKeptCurrent",
   session_shutdown_recovery_forked: "recovery.noticeSavedCopy",
   decision_receipt: "notice.decisionReceiptTitle",
+  context_editing_fallback: "notice.contextEditingFallback",
 };
 
 // localizedNoticeText localizes a notice's main copy by its stable code first,
@@ -2664,8 +2672,9 @@ export function useController() {
       if (!streamDeltaOnly) bump();
     }
   }, [bump, notifyLiveListeners]);
-
   const clearBalanceForTab = useCallback((tabId: string): void => {
+    invalidateSharedQuery("BalanceForTab", [tabId]);
+    invalidateSharedQuery("MetaForTab", [tabId]);
     const seq = (balanceRefreshSeqByTab.current.get(tabId) ?? 0) + 1;
     balanceRefreshSeqByTab.current.set(tabId, seq);
     dispatchTo(tabId, { type: "balance", balance: { available: false, display: "" } });
@@ -2764,10 +2773,8 @@ export function useController() {
     return metaRefreshSeq.current.get(tabId) === seq;
   }, []);
   const bumpSessionLoadSeq = useCallback((tabId: string): number => {
-    // A session transition changes the meaning of every tab-scoped Meta field.
-    // Invalidate requests that started against the previous session before
-    // resetting or hydrating the visible state.
     bumpMetaRefreshSeq(tabId);
+    invalidateSharedQuery("MetaForTab", [tabId]);
     const seq = (sessionLoadSeq.current.get(tabId) ?? 0) + 1;
     sessionLoadSeq.current.set(tabId, seq);
     return seq;
@@ -2813,8 +2820,9 @@ export function useController() {
   }, [dispatchTo, loadMetaForTab]);
   const refreshMetaForTab = useCallback(async (tabId: string): Promise<void> => {
     const sessionSeq = sessionLoadSeq.current.get(tabId) ?? 0;
-    const meta = await refreshMetaOnlyForTab(tabId);
+    const meta = await loadMetaForTab(tabId);
     if (meta === undefined || (sessionLoadSeq.current.get(tabId) ?? 0) !== sessionSeq) return;
+    dispatchTo(tabId, { type: "meta", meta });
     const [context, effort] = await Promise.all([
       app.ContextUsageForTab(tabId).catch(() => undefined),
       app.EffortForTab(tabId).catch(() => undefined),
@@ -2822,7 +2830,7 @@ export function useController() {
     if ((sessionLoadSeq.current.get(tabId) ?? 0) !== sessionSeq) return;
     if (context !== undefined) dispatchTo(tabId, { type: "context", context });
     if (effort !== undefined) dispatchTo(tabId, { type: "effort", effort });
-  }, [dispatchTo, refreshMetaOnlyForTab]);
+  }, [dispatchTo, loadMetaForTab]);
   const bumpCheckpointRefreshSeq = useCallback((tabId: string): number => {
     const seq = (checkpointRefreshSeq.current.get(tabId) ?? 0) + 1;
     checkpointRefreshSeq.current.set(tabId, seq);
@@ -3367,14 +3375,15 @@ export function useController() {
         textBatch.drain();
         dispatchTo(targetTabId, { type: "event", e });
       }
+      if (e.kind === "turn_done" || e.kind === "context_maintenance") {
+        void app.ContextUsageForTab(targetTabId).then((context) => dispatchTo(targetTabId, { type: "context", context })).catch(() => {});
+      }
       if (e.kind === "turn_done") {
-        app
-          .ContextUsageForTab(targetTabId)
-          .then((context) => dispatchTo(targetTabId, { type: "context", context }))
-          .catch(() => {});
+        invalidateSharedQuery("BalanceForTab", [targetTabId]);
         void refreshBalanceForTab(targetTabId);
         app.EffortForTab(targetTabId).then((effort) => dispatchTo(targetTabId, { type: "effort", effort })).catch(() => {});
         void refreshCheckpoints(targetTabId);
+        invalidateSharedQuery("MetaForTab", [targetTabId]);
         void refreshMetaForTab(targetTabId);
       }
       if (e.kind === "turn_done" || e.kind === "notice") {
@@ -3400,18 +3409,20 @@ export function useController() {
     // rebuild (settings-wide) affects every known tab.
     const offRebuilt = onRuntimeRebuilt((rebuiltTabId, runtimeEpoch) => {
       if (rebuiltTabId) {
+        invalidateSharedQuery("MetaForTab", [rebuiltTabId]);
         if (runtimeEpoch) runtimeEpochByTabRef.current.set(rebuiltTabId, runtimeEpoch);
         dispatchTo(rebuiltTabId, { type: "controller_rebuilt" });
       } else {
         if (runtimeEpoch) {
           for (const id of Array.from(statesRef.current.keys())) runtimeEpochByTabRef.current.set(id, runtimeEpoch);
         }
-        for (const id of Array.from(statesRef.current.keys())) dispatchTo(id, { type: "controller_rebuilt" });
+        for (const id of Array.from(statesRef.current.keys())) {
+          invalidateSharedQuery("MetaForTab", [id]);
+          dispatchTo(id, { type: "controller_rebuilt" });
+        }
       }
     });
-
     const offTopicActivation = onTopicActivation(handleTopicActivationEvent);
-
     // tab:meta carries a full refreshed Meta after the backend's background
     // refresh of the expensive fields (git branch, image-input capability) —
     // those arrive empty in the first MetaForTab response now. Merge it like a
@@ -3436,7 +3447,6 @@ export function useController() {
     // otherwise a session left mid-confirmation shows "waiting" with no modal
     // and no way to stop (#3844).
     void app.ReplayPendingPrompts().catch(() => {});
-
     return () => {
       textBatch.drain();
       for (const timer of cancelReconcileTimers.current.values()) {
@@ -4086,9 +4096,9 @@ export function useController() {
   const restoreSession = useCallback((path: string) => app.RestoreSession(path).catch(() => {}).finally(() => invalidateCache()), []);
   const purgeTrashedSession = useCallback((path: string) => app.PurgeTrashedSession(path).catch(() => {}).finally(() => invalidateCache()), []);
   const renameSession = useCallback((path: string, title: string) => app.RenameSession(path, title).catch(() => {}).finally(() => invalidateCache()), []);
-
   const refreshMeta = useCallback(async () => {
     if (!activeTabId) return;
+    invalidateSharedQuery("MetaForTab", [activeTabId]);
     await refreshMetaForTab(activeTabId);
   }, [activeTabId, refreshMetaForTab]);
 

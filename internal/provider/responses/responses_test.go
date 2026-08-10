@@ -302,7 +302,7 @@ func TestStreamToleratesWebSearchLifecycleEvents(t *testing.T) {
 	}
 }
 
-func TestDeepSeekStatelessReplayPreservesCompletedWebSearchCall(t *testing.T) {
+func TestEnabledStatelessWebSearchPreservesCompletedCallForCompatibleGateway(t *testing.T) {
 	var bodies []map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -323,10 +323,7 @@ func TestDeepSeekStatelessReplayPreservesCompletedWebSearchCall(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := New(Config{Name: "deepseek", APIKey: "key", BaseURL: server.URL, Model: "deepseek-v4-flash", Mode: "stateless", WebSearch: true}).(*client)
-	// The test server is local, so pin the vendor classification to the official
-	// DeepSeek behavior under test without weakening production URL detection.
-	client.vendor = "deepseek"
+	client := New(Config{Name: "compatible", APIKey: "key", BaseURL: server.URL, Model: "deepseek-v4-flash", Mode: "stateless", WebSearch: true}).(*client)
 	first := collect(t, client, provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "search"}}})
 	var replayItems []json.RawMessage
 	for _, chunk := range first {
@@ -360,7 +357,7 @@ func TestDeepSeekStatelessReplayPreservesCompletedWebSearchCall(t *testing.T) {
 	}
 }
 
-func TestResponsesItemsAreIgnoredOutsideOfficialDeepSeekWire(t *testing.T) {
+func TestResponsesItemsAreIgnoredWhenServerWebSearchIsDisabled(t *testing.T) {
 	raw := json.RawMessage(`{"id":"ws_1","type":"web_search_call","status":"completed"}`)
 	client := New(Config{Name: "compatible", BaseURL: "https://gateway.example", Model: "m", Mode: "stateless"}).(*client)
 	body, _, _ := client.buildRequestBody(provider.Request{Messages: []provider.Message{
@@ -383,7 +380,7 @@ func TestDeepSeekReplayDropsMalformedOrIncompleteSearchItems(t *testing.T) {
 		json.RawMessage(`{"id":"fc_1","type":"function_call","status":"completed"}`),
 		json.RawMessage(`{"id":`),
 	}
-	client := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", Mode: "stateless"}).(*client)
+	client := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", Mode: "stateless", WebSearch: true}).(*client)
 	body, _, _ := client.buildRequestBody(provider.Request{Messages: []provider.Message{
 		{Role: provider.RoleUser, Content: "search"},
 		{Role: provider.RoleAssistant, Content: "answer", ResponsesItems: items},

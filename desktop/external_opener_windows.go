@@ -367,12 +367,12 @@ func renderWindowsExternalOpenerIcon(icon windows.Handle, background byte) ([]by
 	return append([]byte(nil), pixels...), true
 }
 
-func launchPlatformExternalOpener(spec externalOpenerSpec, path string) error {
+func launchPlatformExternalOpener(spec externalOpenerSpec, path string, isDir bool) error {
 	var cmd *exec.Cmd
 	launchPath := externalOpenerLaunchPath(spec, path)
 	switch spec.LaunchMode {
 	case "shell-open":
-		return openWorkspacePath(path)
+		return openWorkspacePathWithType(path, isDir)
 	case "path":
 		cmd = exec.Command(spec.Target, path)
 	case "windows-terminal":

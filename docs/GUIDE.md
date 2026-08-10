@@ -69,6 +69,7 @@ reasoning_language = "auto"      # visible reasoning text: auto|zh|en
 # max_subagent_concurrency = 6        # session-wide sub-agent concurrency (task/fleet/skills)
 # max_parallel_writers = 3            # concurrent writers with non-overlapping write_paths
 tool_result_snip_ratio = 0.6       # shorten stale tool output before summary compaction
+# context_editing = "native"       # opt in only for the official Anthropic endpoint; default local
 
 [[providers]]
 name        = "deepseek-flash"
@@ -389,7 +390,8 @@ Kimi Global,
 Kimi Coding Plan, MiMo API, MiMo Anthropic, MiMo Token Plan CN/SGP/AMS and their
 Anthropic-compatible variants, MiniMax CN/Global API, MiniMax CN/Global
 Anthropic, GLM CN, Z.AI Global, GLM/Z.AI Coding Plan OpenAI-compatible and
-Anthropic-compatible endpoints, OpenCode Go, OpenCode Go Anthropic, OpenCode Zen
+Anthropic-compatible endpoints, OpenCode Go, OpenCode Go Anthropic, OpenCode Go
+DeepSeek Anthropic, OpenCode Go DeepSeek Responses, OpenCode Zen
 Anthropic, Qwen/DashScope CN/Global, Qwen Coding Plan CN/Global
 OpenAI-compatible and Anthropic-compatible endpoints, StepFun OpenAI-compatible
 and Anthropic-compatible endpoints, NovitaAI, GMI Cloud, Vercel AI Gateway,
@@ -402,8 +404,15 @@ usually needs only the provider API key: the key value is stored in Reasonix hom
 environment-variable name, context window, vision model metadata, proxy bypass
 for China-only endpoints, MiniMax `reasoning_split`, GLM/MiniMax thinking
 heuristics, Anthropic-compatible Bearer auth where needed, Ollama Cloud
-max-effort support, and OpenCode Go per-model reasoning overrides. The OpenCode
-Go preset includes its native `kimi-k3` subscription route with image input,
+max-effort support, and OpenCode Go per-model reasoning overrides. The dedicated
+OpenCode Go DeepSeek Anthropic and DeepSeek Responses presets expose the verified
+Flash routes and enable provider-side `web_search` by default; the Responses
+variant uses stateless context replay. The existing mixed OpenCode Go Anthropic
+preset remains scoped to Qwen and MiniMax so server tools are not sent to
+unverified models. DeepSeek Pro remains on the Chat Completions preset because
+live Anthropic and Responses requests currently fail in the OpenCode Go upstream
+conversion. The OpenCode Go preset includes its native `kimi-k3` subscription
+route with image input,
 `high`/`max` reasoning effort, and a 1,048,576-token context window. Existing untouched
 OpenCode Go preset installs are upgraded automatically; edited model catalogs
 are preserved. The Kimi CN and Kimi Global direct-API presets also include
@@ -952,7 +961,7 @@ convenient.
 
 ## Slash commands
 
-In an interactive `reasonix` session, built-in commands (`/compact`, `/new`, `/clear`, `/rewind`,
+In an interactive `reasonix` session, built-in commands (`/compact`, `/context`, `/new`, `/clear`, `/rewind`,
 `/tree`, `/branch`, `/switch`, `/todo`, `/model`, `/work-mode`, `/mcp`, `/skills`, `/hooks`,
 `/memory`, `/goal`, `/output-style`, `/sandbox`, `/language`,
 `/reasoning-language`, `/help`) run

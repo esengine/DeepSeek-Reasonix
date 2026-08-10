@@ -134,8 +134,16 @@ export function useTranscriptEntranceAnimation<T extends HTMLElement>(
   const seedIds = useMemo(() => items.map((item) => item.id), [items]);
   // A tail append preserves this key; a surface switch, reveal, or history
   // prepend resets it and pre-seeds every model ID before virtual rows mount.
-  const resetKey = `${tabId ?? ""}|${String(revealSignal)}|${items[0]?.id ?? ""}`;
+  const resetKey = transcriptEntranceResetKey(tabId, revealSignal, items);
   return useEntranceAnimation<T>(resetKey, items.length, "[data-entrance]", seedIds);
+}
+
+export function transcriptEntranceResetKey(
+  tabId: string | undefined,
+  revealSignal: unknown,
+  items: readonly { id: string }[],
+): string {
+  return `${tabId ?? ""}|${String(revealSignal)}|${items[0]?.id ?? ""}`;
 }
 
 function itemsStagger(count: number): number {

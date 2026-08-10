@@ -46,6 +46,9 @@ func growSession(sess *agent.Session, gen int, probes []probe) {
 		if p.plantAt == gen {
 			p.plant(sess)
 		}
+		if revise, ok := p.later[gen]; ok {
+			revise(sess)
+		}
 	}
 	for i := range unitsPerGeneration {
 		workUnit(sess, gen, i)

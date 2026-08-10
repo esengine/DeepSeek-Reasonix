@@ -20,7 +20,8 @@ import (
 const (
 	compactionStateSchemaV1      = 1
 	compactionStateSchemaV2      = 2
-	compactionStateSchemaCurrent = compactionStateSchemaV2
+	compactionStateSchemaV3      = 3
+	compactionStateSchemaCurrent = compactionStateSchemaV3
 )
 
 // Cache state labels for resume/preflight telemetry. They never enter the
@@ -59,11 +60,42 @@ type ContextProjection struct {
 	CoveredCount int `json:"covered_count"`
 	// CoveredPrefixHash fingerprints provider-visible canonical[:CoveredCount]
 	// so append-only growth can be distinguished from prefix edits/rewrites.
-	CoveredPrefixHash string    `json:"covered_prefix_hash,omitempty"`
-	SummaryHash       string    `json:"summary_hash,omitempty"`
-	SourceTokens      int       `json:"source_tokens,omitempty"`
-	ProjectionTokens  int       `json:"projection_tokens,omitempty"`
-	CreatedAt         time.Time `json:"created_at"`
+	CoveredPrefixHash string `json:"covered_prefix_hash,omitempty"`
+	SummaryHash       string `json:"summary_hash,omitempty"`
+	SourceTokens      int    `json:"source_tokens,omitempty"`
+	ProjectionTokens  int    `json:"projection_tokens,omitempty"`
+	// ViewInputHash/ViewOutputHash make free maintenance idempotent across
+	// retries and resume. They fingerprint the visible view, not canonical
+	// storage, so a projection can evolve without rewriting the transcript.
+	ViewInputHash  string    `json:"view_input_hash,omitempty"`
+	ViewOutputHash string    `json:"view_output_hash,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+// ContextMaintenanceReceipt is the durable, provider-neutral outcome of one
+// context maintenance transaction. Transcript content is intentionally not
+// included; hashes and counts are sufficient for dedupe and diagnostics.
+type ContextMaintenanceReceipt struct {
+	OperationID         string    `json:"operation_id,omitempty"`
+	Status              string    `json:"status,omitempty"` // planned|applied|noop|blocked|failed
+	Action              string    `json:"action,omitempty"` // snip|prune|summary|native_tool_clear|noop
+	Trigger             string    `json:"trigger,omitempty"`
+	SourceProjection    uint64    `json:"source_projection,omitempty"`
+	ProjectionVersion   uint64    `json:"projection_version,omitempty"`
+	CoveredCount        int       `json:"covered_count,omitempty"`
+	CoveredPrefixHash   string    `json:"covered_prefix_hash,omitempty"`
+	InputHash           string    `json:"input_hash,omitempty"`
+	OutputHash          string    `json:"output_hash,omitempty"`
+	InputTokens         int       `json:"input_tokens,omitempty"`
+	ResultTokens        int       `json:"result_tokens,omitempty"`
+	SavedTokens         int       `json:"saved_tokens,omitempty"`
+	AffectedToolResults int       `json:"affected_tool_results,omitempty"`
+	SummaryHash         string    `json:"summary_hash,omitempty"`
+	Archive             string    `json:"archive,omitempty"`
+	CacheBreak          bool      `json:"cache_break,omitempty"`
+	Reason              string    `json:"reason,omitempty"`
+	BlockedInputHash    string    `json:"blocked_input_hash,omitempty"`
+	CreatedAt           time.Time `json:"created_at,omitempty"`
 }
 
 // CompactionOutcome reports whether compactToProjection installed a projection.
@@ -78,17 +110,26 @@ const (
 
 // CompactionState is the session context sidecar payload.
 type CompactionState struct {
-	SchemaVersion      int               `json:"schema_version"`
-	TranscriptVersion  uint64            `json:"transcript_version"`
-	Projection         ContextProjection `json:"projection"`
-	PromptCacheKey     string            `json:"prompt_cache_key,omitempty"`
-	LastCacheState     string            `json:"last_cache_state,omitempty"`
-	LastTrigger        string            `json:"last_trigger,omitempty"`
-	LastMode           string            `json:"last_mode,omitempty"`
-	LastSourceTokens   int               `json:"last_source_tokens,omitempty"`
-	LastResultTokens   int               `json:"last_result_tokens,omitempty"`
-	LastCompactionCost float64           `json:"last_compaction_cost,omitempty"`
-	UpdatedAt          time.Time         `json:"updated_at"`
+	SchemaVersion      int                        `json:"schema_version"`
+	TranscriptVersion  uint64                     `json:"transcript_version"`
+	Projection         ContextProjection          `json:"projection"`
+	PromptCacheKey     string                     `json:"prompt_cache_key,omitempty"`
+	LastCacheState     string                     `json:"last_cache_state,omitempty"`
+	LastTrigger        string                     `json:"last_trigger,omitempty"`
+	LastMode           string                     `json:"last_mode,omitempty"`
+	LastSourceTokens   int                        `json:"last_source_tokens,omitempty"`
+	LastResultTokens   int                        `json:"last_result_tokens,omitempty"`
+	LastCompactionCost float64                    `json:"last_compaction_cost,omitempty"`
+	Generation         uint64                     `json:"generation,omitempty"`
+	LastReceipt        *ContextMaintenanceReceipt `json:"last_receipt,omitempty"`
+	BlockedInputHash   string                     `json:"blocked_input_hash,omitempty"`
+	BlockedReason      string                     `json:"blocked_reason,omitempty"`
+	// NativeContextEditingAccepted latches the first successful native request.
+	// ContextEditingFallbackLocal persists the only allowed request-shape switch:
+	// an explicit unsupported response before that latch was set.
+	NativeContextEditingAccepted bool      `json:"native_context_editing_accepted,omitempty"`
+	ContextEditingFallbackLocal  bool      `json:"context_editing_fallback_local,omitempty"`
+	UpdatedAt                    time.Time `json:"updated_at"`
 }
 
 // CompactionTelemetry is the structured observability record for one
@@ -135,7 +176,7 @@ func LoadCompactionState(sessionPath string) (CompactionState, bool, error) {
 	if err := json.Unmarshal(b, &st); err != nil {
 		return CompactionState{}, false, fmt.Errorf("decode context state %s: %w", path, err)
 	}
-	if st.SchemaVersion != 0 && st.SchemaVersion != compactionStateSchemaV1 && st.SchemaVersion != compactionStateSchemaV2 {
+	if st.SchemaVersion != 0 && st.SchemaVersion != compactionStateSchemaV1 && st.SchemaVersion != compactionStateSchemaV2 && st.SchemaVersion != compactionStateSchemaV3 {
 		return CompactionState{}, false, fmt.Errorf("unsupported context schema version %d", st.SchemaVersion)
 	}
 	if st.SchemaVersion == 0 {
@@ -150,7 +191,7 @@ func SaveCompactionState(sessionPath string, st CompactionState) error {
 	if path == "" {
 		return fmt.Errorf("empty session path")
 	}
-	// V2 preserves logical user-turn boundaries and coalesces roles only on
+	// V3 preserves logical user-turn boundaries and coalesces roles only on
 	// outbound copies. Previous readers reject this boundary and fall back to
 	// canonical history instead of misreading the changed V1 invariant.
 	st.SchemaVersion = compactionStateSchemaCurrent

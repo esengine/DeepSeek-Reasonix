@@ -6,6 +6,7 @@ import { app, openExternal } from "../lib/bridge";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
 import { apiKeyEnvFromProviderName, createLatestRequestGate, inferredVisionModels, mergedFetchedProviderModels, mergeProviderModelContextWindows, providerApiKeyEnvForSave, providerDefaultModel, providerIsConfigured, providerModelCandidates, providerModelContextWindowDrafts, providerModelContextWindowIsSmall, providerRequiresKey } from "../lib/providerModels";
 import { cachedFetchProviderModels, invalidateProviderCacheByAPIKeyEnv, shouldSkipAutoRefresh } from "../lib/providerModelCache";
+import { opencodeGoPresetDescriptionKeys } from "../lib/providerPresetDescriptions";
 import { useUpdater } from "../lib/useUpdater";
 import {
   applyTheme,
@@ -5289,10 +5290,9 @@ function providerPresetDescription(preset: ProviderPresetView, t: ReturnType<typ
       return t("settings.addProvider.preset.zaiCodingPlanGlobalDesc");
     case "zai-coding-plan-global-anthropic":
       return t("settings.addProvider.preset.zaiCodingPlanGlobalAnthropicDesc");
-    case "opencode-go":
-      return t("settings.addProvider.preset.opencodeGoDesc");
-    case "opencode-go-anthropic":
-      return t("settings.addProvider.preset.opencodeGoAnthropicDesc");
+    case "opencode-go": case "opencode-go-anthropic":
+    case "opencode-go-deepseek-anthropic": case "opencode-go-deepseek-responses":
+      return t(opencodeGoPresetDescriptionKeys[preset.id]);
     case "opencode-zen-anthropic":
       return t("settings.addProvider.preset.opencodeZenAnthropicDesc");
     case "qwen-cn":

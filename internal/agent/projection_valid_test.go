@@ -177,7 +177,7 @@ func TestForceThresholdNoopReturnsCompactionRequired(t *testing.T) {
 		RecentKeep:        2,
 	}, event.Discard)
 
-	err := a.contextPreflight(context.Background(), CompactionTriggerPressure)
+	_, err := a.contextManager().Prepare(context.Background(), ContextPreparePolicy{Trigger: CompactionTriggerPressure})
 	if err == nil {
 		t.Fatal("expected ErrCompactionRequired when force threshold has no fold region")
 	}

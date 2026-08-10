@@ -1,9 +1,28 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strings"
+
+	"reasonix/internal/ablation"
 )
+
+// experimentAxes is the validated set of fixed axes one suite invocation runs
+// on. They are resolved together so a second bad flag is reported alongside
+// the first instead of being masked by an early exit.
+type experimentAxes struct {
+	profile, cache, anchor string
+	arm                    ablation.Set
+}
+
+func resolveExperimentAxes(profile, ablate, cache, anchor string) (experimentAxes, error) {
+	p, perr := normalizeBenchmarkProfile(profile)
+	a, aerr := ablation.Parse(ablate)
+	c, cerr := normalizeCacheArm(cache)
+	an, anerr := normalizeAnchorArm(anchor)
+	return experimentAxes{profile: p, cache: c, anchor: an, arm: a}, errors.Join(perr, aerr, cerr, anerr)
+}
 
 const (
 	benchmarkProfileBaseline = "baseline"
