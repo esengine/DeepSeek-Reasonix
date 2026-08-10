@@ -1,0 +1,37 @@
+name: Refresh Nextcloud repolint baseline
+
+on:
+  push:
+    branches:
+      - feature/nextcloud-talk-bot
+    paths:
+      - .github/workflows/update-nextcloud-repolint-baseline.yml
+
+permissions:
+  contents: write
+
+jobs:
+  update-baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/nextcloud-talk-bot
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Refresh repolint baseline
+        run: go run ./tools/repolint -update
+
+      - name: Remove temporary workflow and commit baseline
+        run: |
+          rm -f .github/workflows/update-nextcloud-repolint-baseline.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tools/repolint/baseline.json .github/workflows/update-nextcloud-repolint-baseline.yml
+          git commit -m "chore(repolint): baseline Nextcloud bot integration"
+          git push origin feature/nextcloud-talk-bot
