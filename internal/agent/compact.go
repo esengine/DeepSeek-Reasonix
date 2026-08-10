@@ -27,6 +27,7 @@ const (
 	defaultToolResultSnipRatio = 0.6   // rewrite stale tool results cheaply before summary compaction
 	defaultCompactRatio        = 0.8   // trigger: prompt at this fraction of the window compacts
 	defaultCompactForceRatio   = 0.9   // force compaction at this high-water mark even for low-value folds
+	defaultCompactGapRatio     = 0.1   // cooldown: after a successful auto-compaction, require the prompt to regrow this fraction of the window before folding again
 	defaultCompactTarget       = 0.5   // safety cap: the kept tail never exceeds this fraction of the window
 	defaultTailTokens          = 16384 // verbatim recent-tail budget, in tokens
 	minRecentKeep              = 2     // never keep fewer recent messages than this
@@ -112,6 +113,11 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 	if u.PromptTokens < high {
 		a.consecutiveCompacts = 0
 		a.compactStuck = false
+		a.compactCooldownNoticed = false
+		// The prompt fell back under the trigger, so the cooldown anchor from any
+		// earlier compaction no longer applies: a fresh approach is a healthy new
+		// cycle, not a re-trigger of a still-full window.
+		a.lastAutoCompactPrompt = 0
 	}
 	// Between the soft ratio and the trigger, report growing context once without
 	// rewriting the prefix — a compaction here would needlessly crater the cache.
@@ -148,9 +154,38 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 			return
 		}
 	}
-	if err := a.compact(ctx, "auto", "", force); err != nil {
+	// Cooldown: after a successful auto-compaction, wait until the prompt has
+	// regrown meaningfully before folding again. A re-trigger with almost no
+	// growth means the kept tail alone (usually one oversized tool result) still
+	// exceeds the threshold — compacting again would pay another full-region
+	// replay plus a cache crater for the same outcome. The force high-water
+	// mark always bypasses the cooldown so context never runs away.
+	if !force && a.lastAutoCompactPrompt > 0 {
+		gap := int(float64(a.contextWindow) * a.compactGapRatio)
+		if grew := u.PromptTokens - a.lastAutoCompactPrompt; grew < gap {
+			if !a.compactCooldownNoticed {
+				a.compactCooldownNoticed = true
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
+					Text:   "Context cleanup held off briefly by cooldown after the last compaction.",
+					Detail: fmt.Sprintf("prompt grew %d tokens since the last compaction (cooldown needs %d); skipping to avoid another full replay. Will resume as the prompt grows.", grew, gap)})
+			}
+			return
+		}
+	}
+	folded, err := a.compact(ctx, "auto", "", force)
+	if err != nil {
+		// A failed pass must not leave the cooldown armed: nothing was folded, so
+		// the next trigger is a fresh attempt rather than a re-trigger.
+		a.lastAutoCompactPrompt = 0
+		a.compactCooldownNoticed = false
 		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Context cleanup skipped for now.", Detail: fmt.Sprintf("compaction skipped: %v", err)})
 		return
+	}
+	// Anchor the cooldown only on a pass that actually folded something: a
+	// no-op pass (economics, active-turn guard, extension-emptied fold) must
+	// not delay the next genuine attempt to the force high-water mark.
+	if folded {
+		a.lastAutoCompactPrompt = u.PromptTokens
 	}
 	// A healthy compaction drops the prompt under the trigger, so the next turn
 	// won't compact. Compacting on consecutive turns means the kept tail alone
@@ -224,7 +259,7 @@ func estimateTextTokens(s string) int {
 // high-water mark always compact). A Started event is emitted before the (network)
 // summarize so the UI can show a "compacting…" placeholder, and a Done event
 // (carrying the summary) replaces it.
-func (a *Agent) compact(ctx context.Context, trigger, instructions string, force bool) error {
+func (a *Agent) compact(ctx context.Context, trigger, instructions string, force bool) (bool, error) {
 	msgs := a.session.Messages
 	head, start, ok := a.planCompaction(msgs, minCompactMessages)
 	if !ok {
@@ -234,7 +269,7 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 		head, start, ok = a.planCompaction(msgs, 1)
 	}
 	if !ok {
-		return nil // recent tail already covers everything worth keeping
+		return false, nil // recent tail already covers everything worth keeping
 	}
 	// A controller in-flight marker records the pre-turn message count, but a
 	// compaction rewrites message indexes. Keep the entire active turn outside
@@ -244,7 +279,7 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 	if active := a.activeTurnStart(msgs); active >= head && active < start {
 		start = active
 		if start <= head {
-			return nil
+			return false, nil
 		}
 	}
 	region := msgs[head:start]
@@ -254,13 +289,13 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 	// wherever in the session they said it); only the rest folds into the digest.
 	kept, fold := a.partitionFold(region)
 	if len(fold) == 0 {
-		return nil // nothing but kept user turns — a fold would save nothing
+		return false, nil // nothing but kept user turns — a fold would save nothing
 	}
 
 	// Economic check on the foldable part (kept user turns don't count toward the
 	// savings): skip if too small to justify the call, unless force demands it.
 	if !force && !foldEconomics(fold) {
-		return nil
+		return false, nil
 	}
 
 	a.sink.Emit(event.Event{Kind: event.CompactionStarted, Compaction: event.Compaction{Trigger: trigger}})
@@ -283,11 +318,11 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 	fold, instructions, err = a.interceptCompactionPrepare(ctx, fold, instructions)
 	if err != nil {
 		a.emitCompactionAborted(trigger)
-		return err
+		return false, err
 	}
 	if len(fold) == 0 {
 		a.emitCompactionAborted(trigger)
-		return nil // the extension replaced the fold with nothing to fold
+		return false, nil // the extension replaced the fold with nothing to fold
 	}
 
 	archived := ""
@@ -295,7 +330,7 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 		path, err := archiveMessages(a.archiveDir, fold)
 		if err != nil {
 			a.emitCompactionAborted(trigger)
-			return fmt.Errorf("archive: %w", err)
+			return false, fmt.Errorf("archive: %w", err)
 		}
 		archived = path
 	}
@@ -319,7 +354,7 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 	summary, err = a.interceptCompactionComplete(ctx, summary)
 	if err != nil {
 		a.emitCompactionAborted(trigger)
-		return err
+		return false, err
 	}
 
 	compacted := make([]provider.Message, 0, head+len(kept)+1+len(msgs)-start)
@@ -338,7 +373,7 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 	a.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{
 		Trigger: trigger, Messages: len(fold), Summary: summary, Archive: archived,
 	}})
-	return nil
+	return true, nil
 }
 
 // emitCompactionAborted resolves a "compacting…" placeholder when a pass fails

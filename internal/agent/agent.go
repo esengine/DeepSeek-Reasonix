@@ -525,18 +525,25 @@ type Agent struct {
 	// under archiveDir. compactStuck latches when compaction can't get the prompt
 	// under the window (consecutiveCompacts crosses the limit), so auto-compaction
 	// pauses instead of looping. softCompactNoticed gates the one-shot soft-ratio
-	// notice so it fires once per approach, not every turn.
-	contextWindow       int
-	softCompactRatio    float64
-	toolResultSnipRatio float64
-	compactRatio        float64
-	compactForceRatio   float64
-	softCompactNoticed  bool
-	recentKeep          int
-	archiveDir          string
-	keepPolicy          KeepPolicy
-	compactStuck        bool
-	consecutiveCompacts int
+	// notice so it fires once per approach, not every turn. The cooldown
+	// (compactGapRatio) additionally requires the prompt to regrow past a
+	// fraction of the window after a successful compaction before folding again,
+	// so a tail that still exceeds the trigger (one oversized tool result) does
+	// not re-pay a full-region replay every turn.
+	contextWindow          int
+	softCompactRatio       float64
+	toolResultSnipRatio    float64
+	compactRatio           float64
+	compactGapRatio        float64
+	compactForceRatio      float64
+	softCompactNoticed     bool
+	recentKeep             int
+	archiveDir             string
+	keepPolicy             KeepPolicy
+	compactStuck           bool
+	consecutiveCompacts    int
+	lastAutoCompactPrompt  int  // prompt tokens at the last successful auto-compaction (cooldown anchor)
+	compactCooldownNoticed bool // gates the one-shot cooldown notice so it fires once per stall, not every turn
 	// activeTurnCreatedAt identifies the real/synthetic user message that began
 	// the currently running turn. Compaction may rewrite older history while a
 	// tool loop is active, but it must keep this message and everything after it
@@ -974,7 +981,8 @@ func (a *Agent) CompactRatio() float64 { return a.compactRatio }
 // TUI's `/compact` command so the user can reset the prefix before it
 // naturally fills up.
 func (a *Agent) CompactNow(ctx context.Context, instructions string) error {
-	return a.compact(ctx, "manual", instructions, true)
+	_, err := a.compact(ctx, "manual", instructions, true)
+	return err
 }
 
 // Options configures an Agent.
@@ -1030,6 +1038,7 @@ type Options struct {
 	SoftCompactRatio    float64
 	ToolResultSnipRatio float64
 	CompactRatio        float64
+	CompactGapRatio     float64
 	CompactForceRatio   float64
 	RecentKeep          int
 	ArchiveDir          string
@@ -1145,6 +1154,9 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	if opts.CompactRatio <= 0 {
 		opts.CompactRatio = defaultCompactRatio
 	}
+	if opts.CompactGapRatio <= 0 {
+		opts.CompactGapRatio = defaultCompactGapRatio
+	}
 	if opts.ToolResultSnipRatio >= opts.CompactRatio {
 		opts.ToolResultSnipRatio = opts.CompactRatio
 	}
@@ -1235,6 +1247,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		softCompactRatio:          opts.SoftCompactRatio,
 		toolResultSnipRatio:       opts.ToolResultSnipRatio,
 		compactRatio:              opts.CompactRatio,
+		compactGapRatio:           opts.CompactGapRatio,
 		compactForceRatio:         opts.CompactForceRatio,
 		recentKeep:                opts.RecentKeep,
 		archiveDir:                opts.ArchiveDir,

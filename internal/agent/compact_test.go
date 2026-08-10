@@ -161,7 +161,7 @@ func TestCompactKeepsMidSessionUserTurns(t *testing.T) {
 	a := New(&fakeProvider{reply: "digest"}, tool.NewRegistry(), sess,
 		Options{RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
 
-	if err := a.compact(context.Background(), "manual", "", true); err != nil {
+	if _, err := a.compact(context.Background(), "manual", "", true); err != nil {
 		t.Fatalf("compact: %v", err)
 	}
 
@@ -235,7 +235,7 @@ func TestCompactKeepsPriorDigests(t *testing.T) {
 	a := New(&fakeProvider{reply: "new digest"}, tool.NewRegistry(), sess,
 		Options{RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
 
-	if err := a.compact(context.Background(), "manual", "", true); err != nil {
+	if _, err := a.compact(context.Background(), "manual", "", true); err != nil {
 		t.Fatalf("compact: %v", err)
 	}
 
@@ -267,7 +267,7 @@ func TestCompactReplacesHistory(t *testing.T) {
 	dir := t.TempDir()
 	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, ArchiveDir: dir}, event.Discard)
 
-	if err := a.compact(context.Background(), "manual", "", true); err != nil {
+	if _, err := a.compact(context.Background(), "manual", "", true); err != nil {
 		t.Fatalf("compact: %v", err)
 	}
 	if got := sess.RewriteVersion(); got != 1 {
@@ -324,7 +324,7 @@ func TestCompactKeepsErrorMessages(t *testing.T) {
 	}}
 	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, ArchiveDir: t.TempDir(), KeepPolicy: KeepErrors}, event.Discard)
 
-	if err := a.compact(context.Background(), "manual", "", true); err != nil {
+	if _, err := a.compact(context.Background(), "manual", "", true); err != nil {
 		t.Fatalf("compact: %v", err)
 	}
 	if len(sess.Messages) < 6 {
@@ -391,7 +391,7 @@ func TestCompactKeepsUserMarkedMessages(t *testing.T) {
 	}}
 	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, ArchiveDir: t.TempDir(), KeepPolicy: KeepUserMarked}, event.Discard)
 
-	if err := a.compact(context.Background(), "manual", "", true); err != nil {
+	if _, err := a.compact(context.Background(), "manual", "", true); err != nil {
 		t.Fatalf("compact: %v", err)
 	}
 	var kept bool
@@ -444,7 +444,7 @@ func TestCompactFallsBackToMechanicalFoldWhenSummaryFails(t *testing.T) {
 	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, ArchiveDir: t.TempDir()}, sink)
 
 	before := len(sess.Messages)
-	if err := a.compact(context.Background(), "manual", "", true); err != nil {
+	if _, err := a.compact(context.Background(), "manual", "", true); err != nil {
 		t.Fatalf("compact should fall back, not error: %v", err)
 	}
 	if len(sess.Messages) >= before {
@@ -490,7 +490,7 @@ func TestCompactEmitsEvents(t *testing.T) {
 	sink := event.FuncSink(func(e event.Event) { got = append(got, e) })
 	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2}, sink)
 
-	if err := a.compact(context.Background(), "auto", "", true); err != nil {
+	if _, err := a.compact(context.Background(), "auto", "", true); err != nil {
 		t.Fatalf("compact: %v", err)
 	}
 
@@ -536,7 +536,7 @@ func TestCompactInjectsFocusAndPreCompactHook(t *testing.T) {
 	}}
 	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, Hooks: &stubHooks{preCompactOut: "KEEP-THE-MIGRATION-PLAN"}}, event.Discard)
 
-	if err := a.compact(context.Background(), "manual", "focus on the auth refactor", true); err != nil {
+	if _, err := a.compact(context.Background(), "manual", "focus on the auth refactor", true); err != nil {
 		t.Fatalf("compact: %v", err)
 	}
 	if len(prov.got) == 0 || prov.got[0].Role != provider.RoleSystem {
@@ -565,7 +565,7 @@ func TestCompactRewriteVersionFeedsCacheDiagnostics(t *testing.T) {
 	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2}, event.Discard)
 	before := CaptureShape("sys", nil, sess.RewriteVersion())
 
-	if err := a.compact(context.Background(), "auto", "", true); err != nil {
+	if _, err := a.compact(context.Background(), "auto", "", true); err != nil {
 		t.Fatalf("compact: %v", err)
 	}
 
@@ -590,7 +590,7 @@ func TestCompactFoldsSingleLargeMessage(t *testing.T) {
 	}}
 	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
 
-	if err := a.compact(context.Background(), "auto", "", false); err != nil {
+	if _, err := a.compact(context.Background(), "auto", "", false); err != nil {
 		t.Fatalf("compact: %v", err)
 	}
 	if got := len(sess.Messages); got != 4 {
@@ -614,7 +614,7 @@ func TestCompactSkipsSingleSmallMessage(t *testing.T) {
 	}}
 	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
 
-	if err := a.compact(context.Background(), "auto", "", false); err != nil {
+	if _, err := a.compact(context.Background(), "auto", "", false); err != nil {
 		t.Fatalf("compact: %v", err)
 	}
 	if got := len(sess.Messages); got != 4 {
@@ -823,7 +823,7 @@ func TestCompactKeepsActiveTurnVerbatim(t *testing.T) {
 	}, event.Discard)
 	a.activeTurnCreatedAt.Store(currentCreatedAt)
 
-	if err := a.compact(context.Background(), "auto", "", true); err != nil {
+	if _, err := a.compact(context.Background(), "auto", "", true); err != nil {
 		t.Fatalf("compact: %v", err)
 	}
 	start := a.activeTurnStart(sess.Messages)
@@ -983,20 +983,88 @@ func TestMaybeCompactClearsStuckLatchAnywhereBelowTrigger(t *testing.T) {
 	}
 }
 
-// TestMaybeCompactStillLatchesWhenPromptStaysAboveTrigger proves the safety
-// valve survives the fix above: a genuinely too-small window (the prompt never
-// drops under the trigger between compactions) must still pause auto-compaction.
-func TestMaybeCompactStillLatchesWhenPromptStaysAboveTrigger(t *testing.T) {
-	sess := NewSession("sys")
-	sess.Add(provider.Message{Role: provider.RoleUser, Content: "hi"})
-	a := New(&fakeProvider{reply: "- summary"}, tool.NewRegistry(), sess, Options{ContextWindow: 20000}, event.Discard)
+// foldableSess returns a session with a genuinely foldable early region (an
+// early user message beyond the 1500-token keep cap), so compact() actually
+// folds and arms the cooldown anchor in tests.
+func foldableSess() *Session {
+	return &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: strings.Repeat("LARGE EARLY CONTENT. ", 300)},
+		{Role: provider.RoleAssistant, Content: "first answer"},
+		{Role: provider.RoleUser, Content: "next"},
+	}}
+}
+
+// TestMaybeCompactCooldownBlocksReTriggerWithoutGrowth proves the cooldown
+// intercepts a re-trigger that regrew almost nothing (the kept tail alone
+// still exceeds the trigger) after a successful compaction — the loop that
+// used to re-pay a full-region replay on consecutive turns. The stuck latch
+// is no longer the first line of defense: the cooldown stops the second
+// compaction before it ever pays.
+func TestMaybeCompactCooldownBlocksReTriggerWithoutGrowth(t *testing.T) {
+	sess := foldableSess()
+	var notices []event.Event
+	a := New(&fakeProvider{reply: "- summary"}, tool.NewRegistry(), sess, Options{ContextWindow: 20000}, event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Notice {
+			notices = append(notices, e)
+		}
+	}))
 
 	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 17000})
-	if a.compactStuck {
-		t.Fatalf("a single over-trigger compaction must not latch: consecutiveCompacts=%d", a.consecutiveCompacts)
+	if a.compactStuck || a.consecutiveCompacts != 1 {
+		t.Fatalf("first over-trigger compaction: consecutiveCompacts=%d compactStuck=%v", a.consecutiveCompacts, a.compactStuck)
 	}
+	// Same prompt again: grew 0 < gap (0.1×20000). Cooldown blocks; no second
+	// compaction, no stuck latch, one cooldown notice.
 	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 17000})
+	if a.compactStuck || a.consecutiveCompacts != 1 {
+		t.Fatalf("cooldown must block the re-trigger: consecutiveCompacts=%d compactStuck=%v", a.consecutiveCompacts, a.compactStuck)
+	}
+	if len(notices) != 1 || !strings.Contains(notices[0].Text, "held off") {
+		t.Fatalf("cooldown notice = %+v", notices)
+	}
+	// A single cooldown notice, not one per turn.
+	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 17100})
+	if len(notices) != 1 {
+		t.Fatalf("cooldown notice should emit once, got %d", len(notices))
+	}
+}
+
+// TestMaybeCompactCooldownClearsOnHealthyRecovery verifies a compaction that
+// drops the prompt back under the trigger resets the cooldown anchor, so a
+// later healthy approach compacts again at the normal trigger instead of
+// being pushed to the force high-water mark.
+func TestMaybeCompactCooldownClearsOnHealthyRecovery(t *testing.T) {
+	sess := foldableSess()
+	a := New(&fakeProvider{reply: "- summary"}, tool.NewRegistry(), sess, Options{ContextWindow: 20000}, event.Discard)
+
+	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 17000}) // compacts, anchors cooldown
+	if a.consecutiveCompacts != 1 {
+		t.Fatalf("first compaction: consecutiveCompacts=%d", a.consecutiveCompacts)
+	}
+	// Healthy recovery: the prompt drops back under the trigger, clearing the
+	// latch and the cooldown anchor.
+	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 15000})
+	if a.consecutiveCompacts != 0 || a.lastAutoCompactPrompt != 0 {
+		t.Fatalf("healthy dip must clear latch and cooldown anchor: consecutiveCompacts=%d anchor=%d", a.consecutiveCompacts, a.lastAutoCompactPrompt)
+	}
+	// A fresh approach compacts again at the normal trigger — not delayed to force.
+	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 17000})
+	if a.consecutiveCompacts != 1 || a.compactStuck {
+		t.Fatalf("fresh approach must compact: consecutiveCompacts=%d compactStuck=%v", a.consecutiveCompacts, a.compactStuck)
+	}
+}
+
+// TestMaybeCompactForceBypassesCooldownAndLatches keeps the safety valve: the
+// force high-water mark (0.9×window) bypasses the cooldown, so a genuinely
+// too-small window still pauses auto-compaction after two compactions.
+func TestMaybeCompactForceBypassesCooldownAndLatches(t *testing.T) {
+	sess := foldableSess()
+	a := New(&fakeProvider{reply: "- summary"}, tool.NewRegistry(), sess, Options{ContextWindow: 20000}, event.Discard)
+
+	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 17000}) // non-force, anchors the cooldown
+	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 18000}) // force (0.9×20000) bypasses cooldown
 	if !a.compactStuck {
-		t.Fatalf("two consecutive over-trigger compactions must still latch: consecutiveCompacts=%d", a.consecutiveCompacts)
+		t.Fatalf("two compactions with force bypassing cooldown must still latch: consecutiveCompacts=%d", a.consecutiveCompacts)
 	}
 }
