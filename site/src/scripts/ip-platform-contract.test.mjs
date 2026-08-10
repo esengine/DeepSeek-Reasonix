@@ -56,6 +56,17 @@ test("real MinerU and DeepSeek analysis stays behind the same-origin gateway", (
   assert.match(behavior, /textContent = source\.quote/);
 });
 
+test("real analysis discloses parsed volume and actual DeepSeek coverage", () => {
+  assert.match(source, /解析与分析范围/);
+  assert.match(source, /id="real-analysis-range"/);
+  assert.match(behavior, /analysisSamplingStrategy/);
+  assert.match(behavior, /analysisSelectedSections/);
+  assert.match(behavior, /DeepSeek 分段分析/);
+  assert.match(source, /id="real-job-select"/);
+  assert.match(behavior, /fetch\("\/api\/analysis"/);
+  assert.match(behavior, /loadRecentRealJobs/);
+});
+
 test("administrator operations UI is wired to same-origin backup and recovery APIs", () => {
   assert.match(source, /data-testid="operations-console"/);
   assert.match(source, /data-testid="create-backup"/);

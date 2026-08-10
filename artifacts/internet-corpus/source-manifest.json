@@ -1,0 +1,62 @@
+[
+  {
+    "id": "deepseek-v3",
+    "title": "DeepSeek-V3 Technical Report",
+    "sourcePage": "https://arxiv.org/abs/2412.19437",
+    "downloadUrl": "https://arxiv.org/pdf/2412.19437",
+    "finalUrl": "https://arxiv.org/pdf/2412.19437",
+    "fileName": "deepseek-v3.pdf",
+    "format": "pdf",
+    "category": "技术白皮书",
+    "expectedConcepts": [
+      "Multi-head Latent Attention",
+      "DeepSeekMoE",
+      "Multi-Token Prediction"
+    ],
+    "contentType": "application/pdf",
+    "size": 1887366,
+    "sha256": "812a3fd645c80725354de9d831a6785503007a60681461407f64e97305fa9330",
+    "cached": true,
+    "fetchedAt": "2026-08-10T07:19:15.580Z"
+  },
+  {
+    "id": "qwen2.5",
+    "title": "Qwen2.5 Technical Report",
+    "sourcePage": "https://arxiv.org/abs/2412.15115",
+    "downloadUrl": "https://arxiv.org/pdf/2412.15115",
+    "finalUrl": "https://arxiv.org/pdf/2412.15115",
+    "fileName": "qwen2.5.pdf",
+    "format": "pdf",
+    "category": "技术白皮书",
+    "expectedConcepts": [
+      "18 trillion",
+      "DCA",
+      "YARN"
+    ],
+    "contentType": "application/pdf",
+    "size": 1938604,
+    "sha256": "73b3292bead3ac8896679d3ac8be87439756faf356566cbda3ccc8a3dc7d79d3",
+    "cached": true,
+    "fetchedAt": "2026-08-10T07:19:15.581Z"
+  },
+  {
+    "id": "cn119129722a",
+    "title": "一种基于大语言模型及向量库构建知识图谱的方法",
+    "sourcePage": "https://patents.google.com/patent/CN119129722A/zh",
+    "downloadUrl": "https://patents.google.com/patent/CN119129722A/zh",
+    "finalUrl": "https://patents.google.com/patent/CN119129722A/zh",
+    "fileName": "cn119129722a.html",
+    "format": "html",
+    "category": "专利文档",
+    "expectedConcepts": [
+      "RoBERTa",
+      "BiLSTM-Attention-CRF",
+      "向量库"
+    ],
+    "contentType": "text/html",
+    "size": 212900,
+    "sha256": "71b962568c3943d995c2db073daac6f01512ebdbb20bb44f455740ec379ec7e8",
+    "cached": true,
+    "fetchedAt": "2026-08-10T07:19:15.581Z"
+  }
+]

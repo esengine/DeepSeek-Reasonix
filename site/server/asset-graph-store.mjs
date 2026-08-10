@@ -333,7 +333,10 @@ export function createAssetGraphStore(database) {
           ...parseJson(statements.nodeById.get(workspaceId, sourceAssetId)?.evidence_ids_json, []),
           ...parseJson(statements.nodeById.get(workspaceId, targetAssetId)?.evidence_ids_json, []),
         ]);
-        for (const evidenceId of Array.isArray(relationship?.evidenceIds) ? relationship.evidenceIds : []) {
+        const requestedEvidence = Array.isArray(relationship?.evidenceIds) && relationship.evidenceIds.length
+          ? relationship.evidenceIds
+          : [...allowedEvidence].slice(0, 4);
+        for (const evidenceId of requestedEvidence) {
           const normalizedEvidenceId = cleanText(evidenceId, "", 100);
           if (normalizedEvidenceId && allowedEvidence.has(normalizedEvidenceId)) statements.insertEvidence.run({ workspaceId, relationshipId, evidenceId: normalizedEvidenceId, createdAt: timestamp });
         }

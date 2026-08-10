@@ -266,6 +266,7 @@ test("projects publications into an idempotent workspace-scoped asset graph", as
     assert.equal(graphA.edges.length, 1);
     assert.equal(graphA.edges[0].relationType, "depends_on");
     assert.equal(graphA.edges[0].verificationStatus, "proposed");
+    assert.deepEqual(graphA.edges[0].evidenceIds, ["EV-CORE-1", "EV-PARSER-1"]);
     assert.ok(graphA.edges[0].id.startsWith("REL-"));
     assert.equal(fx.store.getAssetGraph("WS-C", { role: "owner" }).nodes.length, 0);
   } finally {

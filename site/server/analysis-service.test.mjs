@@ -10,7 +10,7 @@ test("orchestrates MinerU before DeepSeek and exposes sanitized provider evidenc
   const order = [];
   const service = createAnalysisService({
     mineruClient: { async parseDocument(file, hooks) { order.push("mineru"); hooks.onProgress({ state: "running", progress: 44, batchId: "batch-live" }); return { provider: "MinerU", model: "MinerU-HTML", batchId: "batch-live", traceId: "trace-live", fileName: file.name, markdown: "# 真实解析\n可溯源 IP Wiki" }; } },
-    deepseekClient: { async analyzeMarkdown() { order.push("deepseek"); return { provider: "DeepSeek", model: "deepseek-v4-flash", responseId: "chat-live", usage: { totalTokens: 88 }, analysis: { document: { title: "真实报告" }, assets: [{ title: "IP Wiki" }], risks: [], wiki: { executive_summary: "摘要" } } }; } },
+    deepseekClient: { async analyzeMarkdown() { order.push("deepseek"); return { provider: "DeepSeek", model: "deepseek-v4-flash", responseId: "chat-live", usage: { totalTokens: 88 }, input: { strategy: "section-balanced", sourceCharacters: 90_000, analysisCharacters: 60_000, selectedSourceCharacters: 58_000, totalSections: 20, selectedSections: 10, coveragePositions: [0, 0.5, 0.95], quoteValidation: { total: 2, verified: 2, rejected: 0 } }, analysis: { document: { title: "真实报告" }, assets: [{ title: "IP Wiki" }], risks: [], wiki: { executive_summary: "摘要" } } }; } },
   });
   const submitted = await service.submit({ name: "report.html", bytes: Buffer.from("<html></html>") }, { expectedCategory: "技术报告" });
   const complete = await service.whenSettled(submitted.id);
@@ -19,6 +19,9 @@ test("orchestrates MinerU before DeepSeek and exposes sanitized provider evidenc
   assert.equal(complete.result.parser.batchId, "batch-live");
   assert.equal(complete.result.llm.model, "deepseek-v4-flash");
   assert.equal(complete.result.parser.markdownSha256.length, 64);
+  assert.equal(complete.result.parser.analysisSamplingStrategy, "section-balanced");
+  assert.equal(complete.result.parser.analysisInputCharacters, 60_000);
+  assert.deepEqual(complete.result.parser.quoteValidation, { total: 2, verified: 2, rejected: 0 });
 });
 
 test("sanitizes unexpected provider errors", async () => {

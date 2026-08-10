@@ -86,9 +86,9 @@ export function createPublicationRegistry(options = {}) {
           parserBatchId: document.parserBatchId,
           precision: "章节级",
           locator: section,
-          verified: Boolean(quote && document.markdownSha256),
+          verified: source?.verified !== false && Boolean(quote && document.markdownSha256),
         };
-      });
+      }).filter((item) => item.verified);
       return {
         id: assetId,
         sourceAssetId: safeText(asset.id, `IP-${assetIndex + 1}`),

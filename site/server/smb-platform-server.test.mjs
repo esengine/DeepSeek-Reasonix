@@ -83,6 +83,8 @@ test("protects the SMB API, scopes assets by workspace, and versions Wiki edits"
     viewerForm.append("file", new Blob(["<!doctype html><html></html>"], { type: "text/html" }), "viewer.html");
     viewerForm.append("category", "技术报告");
     assert.equal((await fetch(`${baseUrl}/api/analysis`, { method: "POST", headers: { cookie: viewerLogin.cookie }, body: viewerForm })).status, 403);
+    assert.equal((await fetch(`${baseUrl}/api/analysis`, { headers: { cookie: viewerLogin.cookie } })).status, 403);
+    assert.equal((await fetch(`${baseUrl}/api/analysis/${job.id}`, { headers: { cookie: viewerLogin.cookie } })).status, 403);
 
     assert.equal((await fetch(`${baseUrl}/api/admin/operations`, { headers: { cookie: viewerLogin.cookie } })).status, 403);
     const operations = await (await fetch(`${baseUrl}/api/admin/operations`, { headers: authHeaders })).json();

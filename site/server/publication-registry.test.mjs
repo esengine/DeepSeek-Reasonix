@@ -36,6 +36,7 @@ test("publishes stable assets and evidence atomically and idempotently", async (
     assert.equal(first.assets[0].evidence[0].quoteHash.length, 64);
     assert.equal(first.assets[0].evidence[0].precision, "章节级");
     assert.equal(first.assets[0].evidence[0].section, "产品目标");
+    assert.equal(first.assets[0].evidence[0].verified, true);
     assert.doesNotMatch(JSON.stringify(first), /Bearer|signed-url|private-key/);
   } finally {
     await rm(rootDir, { recursive: true, force: true });

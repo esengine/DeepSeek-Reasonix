@@ -71,9 +71,11 @@ try {
   const providerId = (await page.locator("[data-testid='real-provider-id']").textContent()).trim();
   const model = (await page.locator("[data-testid='real-model-name']").textContent()).trim();
   const tokenText = (await page.locator("[data-testid='real-token-usage']").textContent()).trim();
+  const coverageText = (await page.locator("[data-testid='real-analysis-range']").textContent()).trim();
   assert.ok(providerId.length > 12 && !providerId.includes("batch-test"), "MinerU task ID is not real");
   assert.match(model, /^deepseek-v4-/);
   assert.ok(Number(tokenText.replace(/[^0-9]/g, "")) > 0, "DeepSeek token usage is missing");
+  assert.match(coverageText, /DeepSeek (?:全量|分段)分析/);
   assert.ok(await page.locator("#real-asset-list article").count() > 0, "No real IP assets were rendered");
   assert.ok(await page.locator("#real-source-quotes blockquote").count() > 0, "No real source quotations were rendered");
 
@@ -131,6 +133,9 @@ const report = [
   `- MinerU model: ${finalJob?.result?.parser?.model ?? "n/a"}`,
   `- MinerU task: ${finalJob?.result?.parser?.batchId ?? finalJob?.providerTaskId ?? "n/a"}`,
   `- Parsed Markdown: ${finalJob?.result?.parser?.markdownCharacters ?? 0} characters`,
+  `- DeepSeek analysis input: ${finalJob?.result?.parser?.analysisInputCharacters ?? 0} characters (${finalJob?.result?.parser?.analysisSamplingStrategy ?? "n/a"})`,
+  `- Section coverage: ${finalJob?.result?.parser?.analysisSelectedSections ?? 0}/${finalJob?.result?.parser?.analysisTotalSections ?? 0}`,
+  `- Quote validation: ${finalJob?.result?.parser?.quoteValidation?.verified ?? 0} verified / ${finalJob?.result?.parser?.quoteValidation?.rejected ?? 0} rejected`,
   `- DeepSeek model: ${finalJob?.result?.llm?.model ?? "n/a"}`,
   `- DeepSeek response: ${finalJob?.result?.llm?.responseId ?? "n/a"}`,
   `- DeepSeek tokens: ${finalJob?.result?.llm?.usage?.totalTokens ?? 0}`,

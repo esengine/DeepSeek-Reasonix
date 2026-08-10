@@ -386,7 +386,7 @@ export async function createRealAnalysisServer(options = {}) {
         return;
       }
       if (request.method === "GET" && url.pathname === "/api/analysis") {
-        if (!requireRole("viewer")) return;
+        if (!requireRole("editor")) return;
         sendJson(response, 200, { jobs: analysisService.list(workspaceId) });
         return;
       }
@@ -414,7 +414,7 @@ export async function createRealAnalysisServer(options = {}) {
       }
       const jobMatch = request.method === "GET" && url.pathname.match(/^\/api\/analysis\/(JOB-REAL-[A-Za-z0-9-]+)$/);
       if (jobMatch) {
-        if (!requireRole("viewer")) return;
+        if (!requireRole("editor")) return;
         const job = analysisService.get(jobMatch[1], workspaceId);
         sendJson(response, job ? 200 : 404, job ? { job } : { error: "Analysis job not found" });
         return;

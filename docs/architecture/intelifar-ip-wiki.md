@@ -27,8 +27,9 @@ The web surface is transport-agnostic and calls only same-origin APIs. In SMB mo
 1. `POST /api/analysis` accepts a bounded multipart document and returns `JOB-REAL-*`.
 2. MinerU v4 creates a signed upload URL, receives the binary, and is polled until `done`.
 3. The gateway downloads the official result archive, reads `full.md` in memory, and calculates its SHA-256 digest.
-4. A bounded Markdown excerpt is sent to `deepseek-v4-flash` using JSON Output and a fixed IP analysis schema.
-5. `GET /api/analysis/:id` returns progress or normalized assets, risks, Wiki sections, usage metadata, and source quotations.
+4. Documents within 60,000 characters use their complete Markdown. Longer documents use deterministic section-balanced sampling across the front, middle, priority headings and tail, and disclose selected versus total sections.
+5. The bounded input is sent to `deepseek-v4-flash` using JSON Output and a fixed IP analysis schema. Every source quotation must verify as a normalized continuous input substring; unsupported assets and quotations are removed before publication.
+6. `GET /api/analysis/:id` returns progress or normalized assets, risks, Wiki sections, usage metadata, sampling coverage, quotation-validation counts, and source quotations. Completed jobs remain selectable after a browser refresh.
 
 Windows development can set `INTELIFAR_HTTPS_PROXY`; the current workspace falls back to the detected local WinHTTP proxy for MinerU CDN downloads after direct connection failure. Production must configure proxy routing explicitly.
 
@@ -50,7 +51,7 @@ Each schema field carries value, confidence, extractor version, evidence ID, doc
 
 Publication snapshots and append-only Wiki versions remain the audit truth. On publication, the gateway transactionally projects assets into workspace-scoped `asset_nodes`, `asset_aliases`, `asset_relationships`, and `relationship_evidence` tables. This projection is rebuildable and never replaces the source snapshots.
 
-Model-extracted relationships enter as `proposed`; editor confirmation or rejection is an audited lifecycle change. Manual relationships enter as `confirmed`. Supported controlled types are `depends_on`, `implements`, `derived_from`, `replaces`, `references`, `part_of`, `similar_to`, and `conflicts_with`. Endpoints must both exist inside the same workspace, and symmetric relationships use canonical endpoint ordering to prevent duplicates.
+Model-extracted relationships enter as `proposed`; editor confirmation or rejection is an audited lifecycle change. Their endpoints must resolve uniquely to titles extracted in the same response, and verified evidence from both endpoint assets is attached as review context without implying that the relationship is already proven. Manual relationships enter as `confirmed`. Supported controlled types are `depends_on`, `implements`, `derived_from`, `replaces`, `references`, `part_of`, `similar_to`, and `conflicts_with`. Endpoints must both exist inside the same workspace, and symmetric relationships use canonical endpoint ordering to prevent duplicates.
 
 Authorization is applied to nodes before any traversal. A viewer therefore cannot infer a confidential asset through graph edges, search expansion, direct asset lookup, neighborhood lookup, or relationship lookup. Search combines normalized text recall with bounded one- or two-hop expansion across confirmed edges and returns the path used to explain an expanded match.
 

@@ -28,8 +28,10 @@ test("user guide places enough real screenshots next to user tasks", () => {
   for (const imagePath of [
     "artifacts/smb-p0-review/01-smb-secure-login.png",
     "artifacts/screenshots/02-document-intake.png",
-    "artifacts/screenshots/10-real-api-analysis.png",
-    "artifacts/user-guide-review/02-asset-provenance.png",
+    "artifacts/internet-corpus/02-real-analysis-coverage.png",
+    "artifacts/internet-corpus/01-real-asset-panorama.png",
+    "artifacts/internet-corpus/03-real-relationship-review.png",
+    "artifacts/internet-corpus/04-real-relationship-evidence.png",
     "artifacts/enterprise-95-review/06-real-wiki-final.png",
     "artifacts/smb-p0d-review/01-team-invitation.png",
     "artifacts/smb-p0d-review/05-double-credential-share.png",

@@ -514,6 +514,11 @@ img { display: block; max-width: 100%; }
 .real-analysis-results { margin-top: 16px; overflow: hidden; border-color: color-mix(in srgb, var(--violet) 25%, var(--line)); }
 .real-result-head { padding: 18px 20px; background: linear-gradient(115deg, var(--violet-wash), transparent 62%); }
 .real-result-head p { margin: 4px 0 0; color: var(--muted); font-size: 8px; }
+.real-result-actions { display: flex; align-items: flex-end; gap: 12px; }
+.real-job-picker { display: grid; gap: 4px; min-width: 220px; }
+.real-job-picker > span { color: var(--muted); font: 650 7px var(--font-mono); letter-spacing: .08em; }
+.real-job-picker select { max-width: 300px; padding: 7px 28px 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font-size: 9px; }
+.relationship-evidence-action { width: 100%; margin-top: 10px; }
 .provider-badges { display: flex; flex-wrap: wrap; gap: 7px; }
 .provider-badges span { display: inline-flex; align-items: center; gap: 6px; padding: 7px 9px; border: 1px solid color-mix(in srgb, var(--green) 28%, var(--line)); border-radius: 99px; background: var(--green-soft); color: var(--green); font: 650 7px var(--font-mono); letter-spacing: .06em; }
 .provider-badges i { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 12%, transparent); }
@@ -697,6 +702,8 @@ body[data-session-state="ready"] #logout-button { color: #aeb2c2; cursor: pointe
   .real-provider-grid > div { border-left: 0; border-top: 1px solid var(--line); }
   .real-provider-grid > div:first-child { border-top: 0; }
   .real-result-head { align-items: flex-start; flex-direction: column; }
+  .real-result-actions { width: 100%; align-items: flex-start; flex-direction: column; }
+  .real-job-picker, .real-job-picker select { width: 100%; max-width: none; }
   .toast-region { left: 12px; right: 12px; bottom: 12px; }.toast{min-width:0;width:100%}
 }
 

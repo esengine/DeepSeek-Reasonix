@@ -36,6 +36,7 @@ function loadState() {
 let state = loadState();
 let selectedRealFile = null;
 let currentRealJob = null;
+let recentRealJobs = [];
 let currentPublishedAssets = [];
 let selectedPublishedAsset = null;
 let activeEvidence = null;
@@ -67,6 +68,7 @@ function applySession(session, mode = "local-session") {
   qs("#open-share").disabled = !canEdit;
   qs("#share-wiki").disabled = !canEdit;
   qs("#graph-include-proposed").disabled = !canEdit;
+  qs("#graph-include-proposed").checked = canEdit;
   qs("#graph-include-proposed").closest("label").title = canEdit ? "显示 DeepSeek 建议但尚未人工确认的关系" : "只读成员仅查看已确认关系";
   if (qs("#session-dialog").open) qs("#session-dialog").close();
 }
@@ -210,7 +212,10 @@ function updateRelationshipInspector(edge) {
   setText("#relationship-inspector-origin", edge.origin === "model" ? "文档智能发现" : edge.origin === "import" ? "批量导入" : "人工建立");
   setText("#relationship-inspector-verification", proposed ? "待复核" : "已确认");
   setText("#relationship-inspector-evidence", `${edge.evidenceIds?.length ?? 0} 处`);
-  setText("#relationship-review-note", proposed ? "请结合来源证据判断是否存在真实业务关系；未确认前不参与只读成员搜索。" : "已确认关系会参与资产搜索扩展与影响分析。 ");
+  const evidenceButton = qs("#relationship-open-evidence");
+  evidenceButton.disabled = !edge.evidenceIds?.length;
+  evidenceButton.textContent = edge.evidenceIds?.length ? `查看关联证据（${edge.evidenceIds.length}）` : "暂无关联证据";
+  setText("#relationship-review-note", proposed ? "关联证据来自两端资产，仅作为人工复核线索；未确认前不参与只读成员搜索。" : "已确认关系会参与资产搜索扩展与影响分析。 ");
   qs("#relationship-review-actions").hidden = !canReview;
   qsa(".graph-node", qs("#graph-nodes")).forEach((element) => element.classList.remove("is-selected", "is-dimmed"));
   qsa(".graph-edge", qs("#graph-edges")).forEach((element) => {
@@ -388,7 +393,7 @@ async function loadAssetGraph() {
   qs("#graph-loading").hidden = false;
   try {
     const params = new URLSearchParams({ limit: "100", edgeLimit: "200" });
-    if (qs("#graph-include-proposed").checked) params.set("includeProposed", "true");
+    if (!qs("#graph-include-proposed").disabled) params.set("includeProposed", "true");
     const response = await fetch(`/api/assets/graph?${params}`, { headers: { accept: "application/json" } });
     if (response.status === 401) { lockWorkspace(); return; }
     if (!response.ok) throw new Error("graph-api-unavailable");
@@ -638,7 +643,12 @@ function renderRealResults(result) {
   setText("#real-model-name", llm.model);
   setText("#real-response-id", llm.responseId || "响应编号不可用");
   setText("#real-token-usage", `${Number(llm.usage?.totalTokens || 0).toLocaleString("zh-CN")} tokens`);
-  setText("#real-markdown-count", `${Number(parser.markdownCharacters || 0).toLocaleString("zh-CN")} 字符`);
+  const parsedCharacters = Number(parser.markdownCharacters || 0);
+  const analysisCharacters = Number(parser.analysisInputCharacters || parsedCharacters);
+  setText("#real-markdown-count", `${parsedCharacters.toLocaleString("zh-CN")} 字符`);
+  setText("#real-analysis-range", parser.analysisSamplingStrategy === "section-balanced"
+    ? `DeepSeek 分段分析 ${analysisCharacters.toLocaleString("zh-CN")} 字符 · ${Number(parser.analysisSelectedSections || 0)}/${Number(parser.analysisTotalSections || 0)} 章节`
+    : `DeepSeek 全量分析 ${analysisCharacters.toLocaleString("zh-CN")} 字符`);
   setText("#real-markdown-hash", `SHA-256 ${parser.markdownSha256.slice(0, 12)}…`);
   setText("#real-document-title", analysis.document.title);
   setText("#real-document-summary", analysis.document.summary);
@@ -699,7 +709,60 @@ function renderRealResults(result) {
   const publishButton = qs("#publish-analysis");
   publishButton.disabled = false;
   publishButton.removeAttribute("aria-busy");
+  publishButton.textContent = "复核并发布到资产库 →";
   setText("#publication-status", "待人工复核");
+}
+
+function populateRecentRealJobs() {
+  const select = qs("#real-job-select");
+  select.replaceChildren();
+  recentRealJobs.forEach((job) => {
+    const option = document.createElement("option");
+    option.value = job.id;
+    option.textContent = `${job.result?.analysis?.document?.title || job.document?.name || job.id} · ${job.result?.analysis?.assets?.length || 0} 项资产`;
+    select.append(option);
+  });
+  select.disabled = recentRealJobs.length === 0;
+}
+
+function showRecentRealJob(job) {
+  if (!job?.result) return;
+  currentRealJob = job;
+  state.analysis = {
+    ...state.analysis,
+    id: job.id,
+    mode: "real",
+    document: job.document?.name || job.result.analysis.document.title,
+    category: job.result.analysis.document.category,
+    progress: 100,
+    status: "complete",
+    liveText: `${job.result.analysis.assets.length} 项真实 IP 资产与 Wiki 已生成`,
+    updatedAt: new Date(job.updatedAt || Date.now()).toLocaleString("zh-CN"),
+  };
+  renderRealResults(job.result);
+  if (currentPublishedAssets.some((asset) => asset.sourceJobId === job.id)) {
+    qs("#publish-analysis").disabled = true;
+    qs("#publish-analysis").textContent = "✓ 已发布到资产库与 Wiki";
+    setText("#publication-status", "已发布");
+  }
+  qs("#real-job-select").value = job.id;
+  updateAnalysisUI();
+  saveState();
+}
+
+async function loadRecentRealJobs(preferredId = state.analysis.id) {
+  try {
+    const response = await fetch("/api/analysis", { headers: { accept: "application/json" } });
+    if (response.status === 401) { lockWorkspace(); return; }
+    if (!response.ok) return;
+    const payload = await response.json();
+    recentRealJobs = (payload.jobs || []).filter((job) => job.state === "complete" && job.result);
+    populateRecentRealJobs();
+    const selected = recentRealJobs.find((job) => job.id === preferredId) || recentRealJobs[0];
+    if (selected) showRecentRealJob(selected);
+  } catch {
+    // Static acceptance mode intentionally has no persisted real jobs.
+  }
 }
 
 function evidenceButton(evidence, label = "查看证据") {
@@ -931,6 +994,9 @@ async function runRealAnalysis(intake) {
   state.analysis.id = submitted.job.id;
   const job = await pollRealJob(submitted.job.id);
   currentRealJob = job;
+  recentRealJobs = [job, ...recentRealJobs.filter((entry) => entry.id !== job.id)];
+  populateRecentRealJobs();
+  qs("#real-job-select").value = job.id;
   state.analysis.category = job.result.analysis.document.category;
   state.analysis.liveText = `${job.result.analysis.assets.length} 项真实 IP 资产与 Wiki 已生成`;
   renderRealResults(job.result);
@@ -943,6 +1009,10 @@ async function runRealAnalysis(intake) {
 }
 
 qs("#publish-analysis").addEventListener("click", publishCurrentAnalysis);
+qs("#real-job-select").addEventListener("change", (event) => {
+  const selected = recentRealJobs.find((job) => job.id === event.currentTarget.value);
+  if (selected) showRecentRealJob(selected);
+});
 
 qs("#intake-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1200,7 +1270,7 @@ qs("#graph-reset").addEventListener("click", () => {
   qs("#graph-search").value = "";
   qs("#graph-type-filter").value = "all";
   qs("#graph-relation-filter").value = "all";
-  qs("#graph-include-proposed").checked = false;
+  qs("#graph-include-proposed").checked = !qs("#graph-include-proposed").disabled;
   qs("#graph-inspector").hidden = true;
   qs("#relationship-inspector").hidden = true;
   renderAssetGraph();
@@ -1217,6 +1287,11 @@ qs("#relationship-inspector-close").addEventListener("click", () => {
 });
 qs("#relationship-confirm").addEventListener("click", () => reviewSelectedRelationship("confirmed"));
 qs("#relationship-reject").addEventListener("click", () => reviewSelectedRelationship("rejected"));
+qs("#relationship-open-evidence").addEventListener("click", (event) => {
+  const evidenceIds = new Set(selectedGraphRelationship?.evidenceIds || []);
+  const evidence = currentPublishedAssets.flatMap((asset) => asset.evidence || []).find((item) => evidenceIds.has(item.id));
+  if (evidence) renderEvidence(evidence, event.currentTarget);
+});
 qs("#graph-focus-neighborhood").addEventListener("click", () => {
   if (!selectedGraphNode) return;
   graphFocusId = selectedGraphNode.id;
@@ -1891,4 +1966,5 @@ updateAnalysisUI();
 await refreshProviderHealth();
 if (await initializeSession()) {
   await Promise.all([loadPublishedAssets(), loadAssetGraph(), loadOperations(), loadShares(), loadMembers()]);
+  await loadRecentRealJobs();
 }

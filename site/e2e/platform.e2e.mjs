@@ -97,18 +97,18 @@ await check("资产全景网络筛选、聚焦与键盘访问", async () => {
   await page.locator("[data-testid='nav-assets']").click();
   await page.locator("#graph-loading").waitFor({ state: "hidden" });
   assert(await page.locator(".graph-node").count() === 7, "全景网络未渲染完整演示资产");
-  assert(await page.locator(".graph-edge").count() === 5, "默认视图应只展示已确认关系");
+  assert(await page.locator(".graph-edge").count() === 7, "维护者默认视图应展示已确认与待复核关系");
+  assert(await page.locator(".graph-edge.is-proposed").count() === 2, "默认视图未区分待复核关系");
   const coreNode = page.getByRole("button", { name: /稀疏专家路由与动态负载均衡方法，技术方案/ });
   await coreNode.focus();
   await page.keyboard.press("Enter");
   await page.locator("#graph-inspector:not([hidden])").waitFor();
-  assert((await page.locator("#graph-inspector-degree").textContent()) === "3 条", "资产卡片直接关系统计不准确");
+  assert((await page.locator("#graph-inspector-degree").textContent()) === "4 条", "资产卡片直接关系统计不准确");
   await page.screenshot({ path: path.join(screenshots, "04-asset-panorama.png") });
   await page.locator("#graph-focus-neighborhood").click();
-  assert(await page.locator(".graph-node").count() === 4, "一跳聚焦未裁剪无关节点");
+  assert(await page.locator(".graph-node").count() === 5, "一跳聚焦未保留维护者可复核的完整邻域");
   await page.locator("#asset-graph").press("Escape");
   assert(await page.locator(".graph-node").count() === 7, "Escape 未返回关系全景");
-  await page.locator("#graph-include-proposed").check();
   await page.locator(".graph-edge").nth(6).waitFor();
   assert(await page.locator(".graph-edge.is-proposed").count() === 2, "待复核关系未使用独立状态呈现");
   await page.locator(".graph-edge-hit.is-proposed").first().focus();
@@ -119,9 +119,9 @@ await check("资产全景网络筛选、聚焦与键盘访问", async () => {
   await page.locator("#relationship-reject").click();
   assert(await page.locator(".graph-edge.is-proposed").count() === 1, "拒绝关系建议后网络未更新");
   await page.locator("#graph-reset").click();
-  assert(await page.locator(".graph-edge").count() === 5, "重置视图未恢复已确认关系范围");
+  assert(await page.locator(".graph-edge").count() === 6, "重置视图未恢复维护者关系范围");
   await page.locator("#graph-search").fill("异构算力");
-  assert(await page.locator(".graph-node").count() === 3, "图搜索未保留匹配资产及一跳上下文");
+  assert(await page.locator(".graph-node").count() === 4, "图搜索未保留匹配资产及可复核的一跳上下文");
   await page.locator("#graph-reset").click();
 });
 
