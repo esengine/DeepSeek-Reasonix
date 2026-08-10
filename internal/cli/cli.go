@@ -783,15 +783,7 @@ func runAgent(args []string, version string) int {
 		}
 	}
 	if runErr != nil {
-		if !completion.isError {
-			if format == runOutputText {
-				fmt.Fprintln(os.Stderr, "\n"+runErr.Error())
-			}
-			return completion.exitCode
-		}
-		if resultOutput == nil {
-			fmt.Fprintln(os.Stderr, "\n"+i18n.M.ErrorPrefix, runErr)
-		}
+		reportRunFailure(os.Stderr, format, resultOutput != nil, completion, runErr)
 		return completion.exitCode
 	}
 	return completion.exitCode

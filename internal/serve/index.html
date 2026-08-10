@@ -101,8 +101,9 @@ input,textarea{font:inherit;color:inherit}
 .card-head .ico{width:18px;height:18px;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;background:var(--panel-2);color:var(--fg-2);flex-shrink:0;font-size:10px}
 .card-main{display:grid;gap:2px;min-width:0}
 .card-title{display:flex;align-items:center;gap:7px;min-width:0}
-.card-head .name{color:var(--fg);font-weight:500;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.card-head .subject{font-family:var(--mono);font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+/* The tool name identifies the call; the argument summary is what may shrink. */
+.card-head .name{color:var(--fg);font-weight:500;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto;max-width:55%}
+.card-head .subject{font-family:var(--mono);font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 0;min-width:0}
 .card-meta{display:flex;align-items:center;gap:8px;min-width:0;font-family:var(--mono);font-size:10.5px;color:var(--muted-2)}
 .card-badge{display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:999px;border:1px solid var(--border);font-size:10.5px;color:var(--muted);white-space:nowrap}
 .card-actions{display:flex;align-items:center;gap:4px}
@@ -119,6 +120,12 @@ input,textarea{font:inherit;color:inherit}
 .card[data-tone="danger"] .card-badge{background:var(--danger-soft);border-color:transparent;color:var(--danger)}
 .card[data-tone="accent"] .card-badge{background:var(--accent-soft);border-color:transparent;color:var(--accent)}
 .card .err-body{padding:6px 12px;color:var(--danger);background:var(--danger-soft);font-family:var(--mono);font-size:12px;white-space:pre-wrap;border-top:1px solid var(--border)}
+.card[data-open="false"] .card-body,.card[data-open="false"] .card-nest{display:none}
+.card-nest{border-top:1px solid var(--border);background:var(--bg-2);padding:4px 10px 8px}
+.card-nest__label{font-family:var(--mono);font-size:10.5px;color:var(--muted-2);padding:4px 2px 2px}
+.card-nest .card{margin:6px 0 0;border-left:2px solid var(--border-strong);border-radius:0 var(--radius-lg) var(--radius-lg) 0;box-shadow:none}
+.card-nest .card-head{padding:5px 10px}
+.card--subagent-orphan{border-left:2px solid var(--border-strong)}
 .spin{animation:spin .9s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
@@ -315,7 +322,12 @@ input,textarea{font:inherit;color:inherit}
   .slash-menu__foot{display:none}
   .card-head{grid-template-columns:auto minmax(0,1fr) auto}
   .card-actions{grid-column:3}
+  /* Narrow screens drop the badge, except when it carries the only signal that
+     the command never ran — a red icon alone reads as "failed". */
   .card-badge{display:none}
+  .card[data-state="blocked"] .card-head{grid-template-columns:auto minmax(0,1fr) auto auto}
+  .card[data-state="blocked"] .card-badge{display:inline-flex}
+  .card[data-state="blocked"] .card-actions{grid-column:4}
 }
 @media(min-width:769px){
   .menu-btn,.sidebar-overlay{display:none}
@@ -664,6 +676,9 @@ const __T = {
     'tool_args': 'Args',
     'tool_output': 'Output',
     'tool_lines': 'lines',
+    'tool_subcalls': 'sub-agent calls',
+    'tool_blocked': 'Blocked',
+    'tool_not_executed': 'not executed',
     'submit': 'Submit',
     'approval_title': 'Approval Required',
     'allow': 'Allow',
@@ -806,6 +821,9 @@ const __T = {
     'tool_args': '参数',
     'tool_output': '输出',
     'tool_lines': '行',
+    'tool_subcalls': '个子代理调用',
+    'tool_blocked': '已阻止',
+    'tool_not_executed': '未执行',
     'submit': '提交',
     'approval_title': '需要批准',
     'allow': '允许',
@@ -1121,6 +1139,25 @@ function copyText(text) {
   if(navigator.clipboard?.writeText)return navigator.clipboard.writeText(text).then(()=>true).catch(()=>false);
   return Promise.resolve(false);
 }
+// A sub-agent's calls carry the spawning call's parentId. They render inside
+// that card, so a delegated command is never shown as the session's own work.
+function toolNestHost(tool) {
+  if(!tool.parentId)return null;
+  const parent=toolCards[tool.parentId];
+  if(!parent)return null;
+  let nest=parent.querySelector(':scope > .card-nest');
+  if(!nest){
+    nest=el('div','card-nest');
+    nest.appendChild(el('div','card-nest__label'));
+    parent.appendChild(nest);
+  }
+  if(parent.dataset.userToggled!=='true')parent.dataset.open='true';
+  return nest;
+}
+function updateNestLabel(nest) {
+  const label=nest.querySelector('.card-nest__label');
+  if(label)label.textContent=nest.querySelectorAll(':scope > .card').length+' '+__('tool_subcalls');
+}
 function renderToolDispatch(tool) {
 
   // Partial, full, and post-write preview-refresh dispatches share one ID.
@@ -1142,11 +1179,15 @@ function renderToolDispatch(tool) {
   const head=el('div','card-head');
   const summary=toolArgsSummary(tool.args);
   head.innerHTML='<span class="ico spin">'+toolIcon('accent')+'</span><div class="card-main"><div class="card-title"><span class="name">'+escHtml(tool.name)+'</span>'+(summary?'<span class="subject">'+escHtml(summary)+'</span>':'')+'</div><div class="card-meta">'+escHtml(__('tool_args'))+' '+fmtTok(String(tool.args||'').length)+'</div></div><span class="card-badge">'+escHtml(__('tool_running'))+'</span><div class="card-actions"><button type="button" class="card-action card-copy" title="'+escAttr(__('tool_copy'))+'" aria-label="'+escAttr(__('tool_copy'))+'"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button><span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></span></div>';
-  const body=el('div','card-body'); body.style.display='none';
-  head.onclick=e=>{if(e.target.closest('button'))return;const open=card.dataset.open==='true';card.dataset.open=open?'false':'true';body.style.display=open?'none':'';};
+  const body=el('div','card-body');
+  head.onclick=e=>{if(e.target.closest('button'))return;card.dataset.open=card.dataset.open==='true'?'false':'true';card.dataset.userToggled='true';};
   const copy=head.querySelector('.card-copy');
   if(copy)copy.onclick=async e=>{e.stopPropagation();const ok=await copyText(body.textContent||card.dataset.toolArgs||'');copy.title=ok?__('tool_copied'):__('tool_copy');setTimeout(()=>{copy.title=__('tool_copy');},1200);};
-  card.appendChild(head);card.appendChild(body);log.appendChild(card);toolCards[tool.id]=card;scrollDown();
+  card.appendChild(head);card.appendChild(body);
+  const nest=toolNestHost(tool);
+  if(nest){nest.appendChild(card);updateNestLabel(nest);}
+  else{if(tool.parentId)card.classList.add('card--subagent-orphan');log.appendChild(card);}
+  toolCards[tool.id]=card;scrollDown();
 }
 function shellDisplayName(ex){
   if(!ex||!ex.shell)return 'bash';
@@ -1163,12 +1204,18 @@ function renderToolResult(tool) {
     const title=card.querySelector('.card-title .name');
     if(title)title.textContent=shellDisplayName(ex);
   }
-  setToolStatus(card,tool.err?'danger':'success',tool.err?__('tool_failed'):__('tool_done'));
+  // A host refusal reports not_run shell metadata: the command never started,
+  // so it reads as blocked rather than as a failed or completed command.
+  const refused=Boolean(tool.err)&&ex&&ex.state==='not_run';
+  card.dataset.state=refused?'blocked':(tool.err?'failed':'done');
+  setToolStatus(card,tool.err?'danger':'success',refused?__('tool_blocked'):(tool.err?__('tool_failed'):__('tool_done')));
+  const nest=card.querySelector(':scope > .card-nest');
+  if(nest&&card.dataset.userToggled!=='true')card.dataset.open='false';
   let meta=fmtElapsed(elapsed);
   if(ex){
     const bits=[];
     if(typeof ex.exitCode==='number')bits.push('exit '+ex.exitCode);
-    if(ex.failurePhase)bits.push(ex.failurePhase);
+    if(ex.failurePhase)bits.push(refused?__('tool_not_executed'):ex.failurePhase);
     if(ex.verification&&ex.verification!=='not_verification')bits.push(ex.verification);
     if(bits.length)meta=bits.join(' · ')+' · '+meta;
   }
@@ -1178,7 +1225,7 @@ function renderToolResult(tool) {
     card.appendChild(err);
     updateToolMeta(card,meta);
   } else {
-    const body=card.querySelector('.card-body');
+    const body=card.querySelector(':scope > .card-body');
     const output=String(tool.output||'');
     if(body)body.textContent=output?output.slice(0,2000)+(tool.truncated?'\n...[truncated]':''):__('tool_no_output');
     updateToolMeta(card,meta+' · '+lineCount(output)+' '+__('tool_lines'));
@@ -1190,8 +1237,8 @@ function renderToolProgress(tool) {
   // local-frontend contract; they must never land in ordinary tool output.
   if (tool.name && tool.name.indexOf('reasonix.subagent.') === 0) return;
   const card=toolCards[tool.id]; if(!card)return;
-  const body=card.querySelector('.card-body'); if(!body)return;
-  body.style.display=''; card.dataset.open='true';
+  const body=card.querySelector(':scope > .card-body'); if(!body)return;
+  if(card.dataset.userToggled!=='true')card.dataset.open='true';
   body.textContent+=tool.output||'';
   if(body.textContent.length>4000) body.textContent=body.textContent.slice(-3000);
   updateToolMeta(card,fmtElapsed(Date.now()-Number(card.dataset.startedAt||Date.now()))+' · '+lineCount(body.textContent)+' '+__('tool_lines'));

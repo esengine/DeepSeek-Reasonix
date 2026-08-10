@@ -3,10 +3,36 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/event"
+	"reasonix/internal/i18n"
 )
+
+// reportRunFailure states why a run ended without a result. Text output — which
+// -p/--print also selects — has nowhere else to carry that: its sink prints the
+// final response and nothing else, so a failed run exited 1 with an empty
+// stderr and a half-finished answer. Structured formats encode the failure in
+// their own payload and need this only when no such sink was built.
+func reportRunFailure(w io.Writer, format runOutputFormat, structured bool, completion runCompletion, runErr error) {
+	if runErr == nil {
+		return
+	}
+	switch {
+	case format != runOutputText:
+		if !structured {
+			fmt.Fprintln(w, "\n"+i18n.M.ErrorPrefix, runErr)
+		}
+	case completion.isError:
+		fmt.Fprintln(w, "\n"+i18n.M.ErrorPrefix, runErr)
+	default:
+		// A paused run is a reportable outcome, not a failure, and reads better
+		// without the error prefix.
+		fmt.Fprintln(w, "\n"+runErr.Error())
+	}
+}
 
 type runCompletion struct {
 	outcome string

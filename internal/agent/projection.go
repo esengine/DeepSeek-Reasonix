@@ -6,11 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
+	"reasonix/internal/fileutil"
 	"reasonix/internal/provider"
 	"reasonix/internal/store"
 )
@@ -185,55 +184,40 @@ func LoadCompactionState(sessionPath string) (CompactionState, bool, error) {
 	return st, true, nil
 }
 
-// SaveCompactionState writes the sidecar via temp file + atomic rename.
+// SaveCompactionState writes the sidecar via strict atomic publish (temp +
+// file fsync + rename + best-effort parent-dir fsync). Checkpoint sidecars are
+// commit pointers: EXDEV/copy fallbacks that can tear an existing file are
+// rejected so a failed write leaves the previous checkpoint intact. A returned
+// error means the on-disk pointer was not published.
 func SaveCompactionState(sessionPath string, st CompactionState) error {
 	path := ContextStatePath(sessionPath)
 	if path == "" {
 		return fmt.Errorf("empty session path")
 	}
-	// V3 preserves logical user-turn boundaries and coalesces roles only on
-	// outbound copies. Previous readers reject this boundary and fall back to
-	// canonical history instead of misreading the changed V1 invariant.
+	// V3 keeps logical user-turn boundaries; previous readers fall back to
+	// canonical history rather than misreading the V1 coalesced invariant.
 	st.SchemaVersion = compactionStateSchemaCurrent
 	if st.UpdatedAt.IsZero() {
 		st.UpdatedAt = time.Now().UTC()
+	}
+	// LastReceipt is authoritative. Drop mirrored top-level last_*/blocked_*
+	// writer fields so new sidecars do not re-emit the pre-v3 dual schema.
+	// Old files with those keys still decode into the struct for readers.
+	st.LastTrigger = ""
+	st.LastMode = ""
+	st.LastSourceTokens = 0
+	st.LastResultTokens = 0
+	st.LastCompactionCost = 0
+	if st.LastReceipt != nil {
+		st.BlockedInputHash = ""
+		st.BlockedReason = ""
 	}
 	b, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return err
 	}
 	b = append(b, '\n')
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp.*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpName)
-		}
-	}()
-	if _, err := tmp.Write(b); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return err
-	}
-	cleanup = false
-	return nil
+	return fileutil.AtomicWriteFileStrict(path, b, 0o644)
 }
 
 // RemoveCompactionState deletes a corrupt or invalidated projection sidecar.
@@ -335,9 +319,9 @@ func projectionValid(st CompactionState, msgs []provider.Message, transcriptVers
 	if n <= 0 || n > len(msgs) {
 		return false
 	}
-	// Current lineage known: stored key must be present and equal.
+	// Current lineage known: stored key must match (legacy native suffix ok).
 	if cacheKey != "" {
-		if st.PromptCacheKey == "" || st.PromptCacheKey != cacheKey {
+		if _, ok := lineageKeyCompatible(st.PromptCacheKey, cacheKey); !ok {
 			return false
 		}
 	}
@@ -409,19 +393,4 @@ func formatSummaryMessage(summary string) provider.Message {
 			summary + "\n" +
 			summaryTagClose,
 	}
-}
-
-// extractLatestSummary returns the body of the newest compaction summary in msgs.
-func extractLatestSummary(msgs []provider.Message) string {
-	for i := range slices.Backward(msgs) {
-		if !isCompactionSummary(msgs[i]) {
-			continue
-		}
-		body := msgs[i].Content
-		body = strings.TrimPrefix(strings.TrimLeft(body, "\n "), summaryTagOpen)
-		body = strings.TrimSuffix(strings.TrimRight(body, "\n "), summaryTagClose)
-		body = strings.TrimPrefix(body, "\nSummary of earlier conversation (older messages were compacted to save context):\n")
-		return strings.TrimSpace(body)
-	}
-	return ""
 }

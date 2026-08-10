@@ -850,7 +850,7 @@ func TestConfigCompactRatioQueryReportsBuiltInDefault(t *testing.T) {
 			t.Fatalf("config compact-ratio query rc = %d, want 0", rc)
 		}
 	})
-	if out != "compact_ratio = 80% (built-in default)\n" {
+	if out != "compact_ratio = 85% (built-in default)\n" {
 		t.Fatalf("config compact-ratio query output = %q", out)
 	}
 }

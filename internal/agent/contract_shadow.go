@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"reasonix/internal/completion"
 	"reasonix/internal/event"
@@ -42,6 +44,7 @@ func buildShadowContract(input string, receipts []evidence.Receipt, plan *planco
 	}
 	for _, r := range receipts {
 		c.Observe(r)
+		resolveCitedCriteria(c, r)
 	}
 	for i, todo := range todos {
 		if todo.Status == "completed" {
@@ -49,6 +52,53 @@ func buildShadowContract(input string, receipts []evidence.Receipt, plan *planco
 		}
 	}
 	return c
+}
+
+// resolveCitedCriteria satisfies the criteria a successful complete_step named.
+// The tool verified each proof against the ledger before succeeding, so what the
+// citation adds is the binding: "the command ran" and "the criterion holds" are
+// different claims, and only the model knows which proof was for which.
+func resolveCitedCriteria(c *taskcontract.Contract, r evidence.Receipt) {
+	if r.ToolName != "complete_step" || !r.Success || len(r.Args) == 0 {
+		return
+	}
+	var payload struct {
+		Evidence []struct {
+			Kind        string `json:"kind"`
+			CriterionID string `json:"criterion_id"`
+		} `json:"evidence"`
+	}
+	if json.Unmarshal(r.Args, &payload) != nil {
+		return
+	}
+	for _, e := range payload.Evidence {
+		id := strings.TrimSpace(e.CriterionID)
+		if id == "" {
+			continue
+		}
+		c.Resolve(id, taskcontract.Satisfied, taskcontract.EvidenceRef{
+			Kind:          criterionEvidenceKind(e.Kind),
+			MutationEpoch: c.Epoch(),
+			Source:        "complete_step",
+			Success:       true,
+		})
+	}
+}
+
+// criterionEvidenceKind mirrors the ledger's own classification so staleness
+// behaves identically: a mutation proves it happened and never stales, while a
+// verification, review, or manual check must be re-proven after later changes.
+func criterionEvidenceKind(kind string) taskcontract.EvidenceKind {
+	switch kind {
+	case "verification":
+		return taskcontract.EvidenceVerification
+	case "review":
+		return taskcontract.EvidenceReview
+	case "diff", "files":
+		return taskcontract.EvidenceMutation
+	default:
+		return taskcontract.EvidenceRead
+	}
 }
 
 func contractShadowAudit(c *taskcontract.Contract) event.ContractShadowAudit {

@@ -1,0 +1,4 @@
+prompt = "Exactly one setting differs across config/base.toml, config/staging.toml and config/production.toml. Write AUDIT.md naming the setting that drifted, the environment it drifted in, and both values. Do not change any config."
+class = "read-only-output"
+max_steps = 25
+timeout_sec = 480

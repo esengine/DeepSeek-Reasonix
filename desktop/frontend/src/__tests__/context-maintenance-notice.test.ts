@@ -1,5 +1,9 @@
 import { readFileSync } from "node:fs";
-import { formatContextMaintenanceNotice } from "../lib/contextMaintenanceTypes";
+import {
+  formatContextMaintenanceNotice,
+  isNewMaintenanceOperation,
+  rememberMaintenanceOperation,
+} from "../lib/contextMaintenanceTypes";
 import type { DictKey, Translator } from "../lib/i18n";
 
 function ok(value: unknown, message: string) {
@@ -7,12 +11,12 @@ function ok(value: unknown, message: string) {
 }
 
 const messages: Partial<Record<DictKey, string>> = {
-  "context.maintenanceTitle": "上下文维护",
-  "context.maintenanceActionPrune": "工具结果裁剪",
+  "context.maintenanceTitle": "上下文短视图",
+  "context.maintenanceAppliedSummary": "已生成短视图",
+  "context.maintenanceBlockedSummary": "摘要未形成短视图 · 已停重试",
+  "context.maintenanceFailedSummary": "摘要失败 · 已停重试",
   "context.tokensValue": "{value} tokens",
-  "projectTree.status.paused": "已暂停",
-  "settings.typography.applied": "已应用",
-  "task.state.failed": "失败",
+  "summary.detail": "摘要",
 };
 
 const translate: Translator = (key, vars) => {
@@ -22,25 +26,52 @@ const translate: Translator = (key, vars) => {
 
 const applied = formatContextMaintenanceNotice({
   status: "applied",
-  action: "prune",
+  action: "summary",
   inputTokens: 120,
   resultTokens: 80,
   savedTokens: 40,
 }, translate);
-ok(applied === "上下文维护 · 工具结果裁剪 · 已应用 · 120 → 80 tokens · −40 tokens", `unexpected applied notice: ${applied}`);
-ok(!applied.includes("Context") && !applied.includes("applied"), "maintenance notice leaked hardcoded English");
+ok(applied === "已生成短视图", `unexpected applied notice: ${applied}`);
 
 const blocked = formatContextMaintenanceNotice({ status: "blocked" }, translate);
-ok(blocked === "上下文维护 · 已暂停", `unexpected blocked notice: ${blocked}`);
+ok(blocked === "摘要未形成短视图 · 已停重试", `unexpected blocked notice: ${blocked}`);
+
+const failed = formatContextMaintenanceNotice({ status: "failed" }, translate);
+ok(failed === "摘要失败 · 已停重试", `unexpected failed notice: ${failed}`);
 
 const contextPanelSource = readFileSync(new URL("../components/ContextPanel.tsx", import.meta.url), "utf8");
 ok(
-  !contextPanelSource.includes('t("context.maintenanceProjected")'),
-  "ContextPanel must not render the internal context-maintenance composition block",
+  contextPanelSource.includes("context.maintenanceCanonical"),
+  "ContextPanel must show canonical vs model-visible tokens",
 );
 ok(
-  !contextPanelSource.includes("const maintenance = context?.maintenance"),
-  "ContextPanel must not derive hidden maintenance UI state",
+  contextPanelSource.includes("triggerTokens") || contextPanelSource.includes("maintenance?.triggerTokens"),
+  "ContextPanel must surface triggerTokens",
+);
+ok(
+  contextPanelSource.includes("checkpointState"),
+  "ContextPanel must surface checkpointState",
+);
+ok(
+  !contextPanelSource.includes("snipTrigger") && !contextPanelSource.includes("forceTrigger"),
+  "ContextPanel must not present retired multi-threshold triggers as user settings",
+);
+
+ok(isNewMaintenanceOperation([], "op-1"), "empty seen list accepts first operationId");
+ok(isNewMaintenanceOperation(["op-1"], "op-1") === false, "duplicate operationId is rejected");
+ok(isNewMaintenanceOperation(["op-1"], "op-2"), "distinct operationId is accepted");
+ok(isNewMaintenanceOperation(["op-1"], ""), "missing operationId is still shown");
+const remembered = rememberMaintenanceOperation(["op-1"], "op-2");
+ok(remembered.includes("op-1") && remembered.includes("op-2"), "remember keeps prior and new ids");
+ok(rememberMaintenanceOperation(["op-1"], "op-1").length === 1, "remember is idempotent for same id");
+const many = Array.from({ length: 70 }, (_, i) => `op-${i}`);
+const bounded = rememberMaintenanceOperation(many.slice(0, 64), "op-new");
+ok(bounded.length === 64 && bounded[bounded.length - 1] === "op-new", "remember bounds to 64 ids");
+
+const settingsSource = readFileSync(new URL("../components/SettingsPanel.tsx", import.meta.url), "utf8");
+ok(
+  !settingsSource.includes("settings.coldResumePrune") && !settingsSource.includes("SetColdResumePrune"),
+  "SettingsPanel must not expose retired coldResumePrune control",
 );
 
 console.log("context-maintenance-notice: ok");

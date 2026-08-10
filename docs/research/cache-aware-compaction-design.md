@@ -1,114 +1,123 @@
-# Cache-Aware Context Projection 与惰性压缩
+# Content-Driven Context Maintenance（Cache-Aware Checkpoint）
 
-> 日期：2026-08-07
-> 状态：当前实现说明
-> 核心约束：canonical transcript 是永久事实源；缓存状态只影响成本策略，不直接触发历史改写。
+> 日期：2026-08-10
+> 状态：当前实现说明（取代多阈值 prune/snip/native 自动维护叙述）
+> 核心约束：canonical transcript 是永久事实源；唯一自动触发是 `compact_ratio`；缓存状态只影响成本与观测，不触发历史改写。
 
 ## 一、问题与目标
 
-长会话需要同时满足两个目标：
+长会话需要同时满足：
 
 1. 保留完整历史，以支持恢复、回退、分支和审计；
-2. 在模型上下文接近上限时，构造更短且稳定的 provider-visible 请求。
+2. 在上下文接近上限时，构造更短且稳定的 provider-visible 请求；
+3. 不因 cache TTL / cold resume 主动改写仍可命中的前缀。
 
-旧路径把 cache TTL 过期与 session 压缩绑定：cold resume 会同步压缩并重写历史。这既把成本信号变成了数据变更信号，也会在用户只是恢复会话时破坏原有前缀。
+旧路径使用 soft / snip / force 多阈值，并在压力下自动安装 prune 投影或调用 provider native compaction。该路径把维护成本与可恢复性缠在一起，也会在 resume 时破坏缓存前缀。
 
-当前设计将两者拆开：
+当前产品路径：
 
 ```text
-canonical transcript (Session.Messages，普通压缩永不改写)
+canonical transcript (Session.Messages，普通维护永不改写)
     |
-    +-- model-visible context projection
+    +-- model-visible context projection / checkpoint
+    |       stable prefix + one structured summary + recent tail
     |
-    +-- cache state (warm/cold/unknown，仅参与成本与观测)
+    +-- first-visible tool bound (创建时 32KB Content/RawContent)
+    |
+    +-- cache state (warm/cold/unknown，仅成本与观测)
 ```
 
-## 二、持久化边界
+## 二、唯一自动触发
+
+- 配置键：`agent.compact_ratio`（默认 `0.85`）
+- 入口：`Prepare` / preflight 是唯一自动维护入口；`ObserveUsage` 只更新统计
+- 不再存在自动 soft compact、tool_result snip/prune 投影、native multi-threshold 路径
+- 兼容：旧配置键与 sidecar 字段可读；加载时清零/忽略/迁移删除，不新建 prune 投影
+
+## 三、Checkpoint 形态
+
+当 projected tokens ≥ `compact_ratio × context_window` 时，生成内容驱动 checkpoint：
+
+```text
+stable system / early prefix
+-> 一条结构化 summary（单次摘要请求，上限约 16K）
+-> recent tail（约 10% 窗口，夹在 32K–96K）
+```
+
+验收要点：
+
+- 默认接受天花板约 50% 窗口；强制路径可放宽但不用不同 estimator 绕过
+- 摘要失败不写 mechanical marker，不安装半成品，不改 canonical
+- provider-visible 始终最多一条 summary；旧 summary 可进入下一次 fold 被滚动吸收
+- 首次安装会预期 cache miss；安装后前缀应保持稳定以利后续 hit
+
+## 四、持久化边界
 
 ### Canonical transcript
 
-- `Session.Messages` 始终保存完整 transcript。
-- 普通 compaction、cold resume、tool prune/snip 不删除或替换 canonical 消息。
-- rewind、fork、branch 仍以 canonical 为事实源。
+- `Session.Messages` 始终保存完整 transcript
+- 普通 compaction、cold resume、旧 prune/snip API no-op 均不删除或替换 canonical 消息
+- rewind / fork / branch 仍以 canonical 为事实源
 
 ### Context projection sidecar
 
-- projection 存储在 `<session>.context.json`，不改变原 session 文件格式。
-- sidecar 保存 projection、covered prefix fingerprint、transcript/projection version、prompt cache key、cache 状态和压缩 telemetry。
-- 删除 session 时 sidecar 纳入同一删除清单。
-- 老版本不知道 sidecar 时仍可读取完整 session；新版本遇到缺失、旧 schema 或校验失败的 sidecar 会安全重建。
+- 路径：`<session>.context.json`（schema v3）
+- 保存 projection、covered prefix fingerprint、version、prompt cache key、cache 状态与 telemetry
+- 旧 prune / native 字段可加载后忽略；校验失败则安全重建
+- 删除 session 时 sidecar 一并删除
 
-## 三、运行时行为
+## 五、运行时行为
 
-### Resume 只记录缓存状态
+### Resume
 
-恢复会话时，根据 provider TTL 和最后活动时间记录 `warm`、`cold` 或 `unknown`。Resume 路径不会调用 `Compact`、`SnapshotRewrite` 或 `PruneStaleToolResults`，也不会修改 canonical transcript。
+只根据 provider TTL 与最后活动时间记录 `warm` / `cold` / `unknown`。Resume 不调用 Compact、不安装 projection、不改写 tool results。
 
-### Preflight 惰性生成 projection
+### Prepare
 
-每次模型请求前，`contextPreflight` 根据当前 token 压力判断是否需要 projection：
+每次模型请求前：
 
-- 未达到压力阈值：继续发送 append-only canonical view；
-- 达到压缩阈值：尝试生成并安装 projection；
-- 达到 force 阈值但没有可折叠内容：在非 tool loop 中返回可重试的 `ErrCompactionRequired`；
-- 摘要失败：不写 mechanical marker，不安装半成品，也不改写 canonical；
-- tool loop 进行中：只发 notice，由后续 preflight/stuck guard 处理，避免中断工具调用配对。
+1. 估计 projected tokens
+2. 低于 `compact_ratio`：发送 append-only / 现有有效 projection
+3. 达到阈值：至多一次 summary，CAS 安装 checkpoint
+4. tool loop 中优先 notice，避免打断 tool 配对
 
-### Provider-visible 顺序
+### First-visible tool bound
 
-projection 使用稳定顺序：
+工具结果创建时把模型可见 `Content` 限制在约 32KB，完整原文进 `RawContent` / archive。这是写入时策略，不是阈值触发的历史 snip 投影。
 
-```text
-system
--> 确定性的早期 user turns
--> 一条 rolling summary
--> 必须保留的消息
--> recent tail
-```
+## 六、Provider 与输出预算
 
-早期 user turn 的资格使用固定 token/char 估算和 context-window 上限，不依赖最近一次 provider usage。动态 usage 校准只用于 tail sizing 等不决定消息身份的估算，因此 projection 激活后，早期前缀不会因 canonical/projection 统计口径变化而漂移。
+- 应用层 summary 是默认路径；Responses 等 native compaction 标记 unsupported 时回退 summary
+- `max_output_tokens=0` 表示 auto ladder（普通 16K / reasoning 32K / high·max 64K）；128K 仅显式配置
+- auto ladder 与 `compact_ratio` 解耦
 
-旧 summary 会进入下一次 fold，由新 summary 滚动吸收；provider-visible projection 始终只保留一条 summary，不会形成无限摘要链。原 summary 仍保留在 canonical transcript 中。
+## 七、缓存影响
 
-## 四、有效性与失效
+| 场景 | 预期 |
+| --- | --- |
+| warm resume 低于阈值 | 复用 append-only 前缀，无摘要 |
+| 首次跨过 compact_ratio | 前缀变为 prefix+summary+tail，一次预期 miss |
+| checkpoint 安装后继续对话 | 稳定 prefix 利于 hit；generation 作用域避免重复摘要 |
+| cold resume | 只记 cache 状态，不因 TTL 重写历史 |
 
-projection 采用 fail-closed 校验：
+## 八、验证与烟雾
 
-- `CoveredPrefixHash` 对 `ModelMessages(canonical[:CoveredCount])` 的完整 provider-visible 内容生成稳定 fingerprint，覆盖图片、reasoning 元数据、Responses items、tool call ID/name/arguments/thought signature；
-- `PromptCacheKey` 必须存在，并严格匹配 `workspace|session lineage|model`；
-- 缺少 fingerprint、前缀被 edit/rewrite、切换模型或 lineage 时，内存 projection 立即失效；
-- rewind、fork、branch、snip/prune 和显式范围摘要会使相关 projection 失效或隔离。
+- 确定性：`internal/agent` compact / projection / prune no-op / restart 测试
+- 离线 e2e：`benchmarks/context-maintenance-e2e` 的 `seed` + `resume`（`-offline`）
+- 在线 e2e：同目录 `continue`（`DEEPSEEK_API_KEY`，`-max-usd` 费用上限，至多一次摘要）
 
-加载时发现某模型的 sidecar key 不匹配，只丢弃当前内存状态，不删除磁盘文件，避免破坏其它模型仍可使用的状态。
+## 九、有意保留的兼容层
 
-## 五、Provider compaction 与失败策略
+不算功能缺口，也不声称“代码里已无旧概念”：
 
-Provider 接口已定义：
+1. 配置结构体仍可读旧 soft/snip/force 键，加载时清零并迁移删除
+2. sidecar 仍可解码旧 prune/native 字段后忽略
+3. `PruneStaleToolResults` / `SnipStaleToolResults` 保留为 no-op API，避免旧调用点 panic
+4. snip 几何 helpers 仍服务 first-visible 与 summary fold 输入，不再用于自动投影安装
 
-- `NativeCompactor`；
-- `CompactionRequest` / `CompactionResult`；
-- `CompactionCapabilities`；
-- `ErrCompactionUnsupported`。
+## 十、明确未做
 
-当前 Responses vendor 明确返回 unsupported，并回退到 Reasonix 的摘要路径。摘要首次失败后的重试会聚合两次 attempt 的 usage 与 request count，供成本和 telemetry 使用。
-
-Anthropic、DeepSeek 等原生 compaction endpoint 尚未接入；能力接口不代表这些 endpoint 已经可用。
-
-## 六、缓存影响
-
-- 正向影响：cold resume 不再为了 TTL 状态改写历史，缓存仍 warm 时可以继续复用原 append-only 前缀。
-- 预期 miss：首次在高压力下激活 projection 时，请求前缀会从 canonical 切换为 `summary + tail`，因此会发生一次预期的 cache miss。
-- 稳定性：激活后，确定性的早期轮次、单条 rolling summary、稳定 cache key 和 fail-closed fingerprint 降低后续无意义的前缀漂移。
-- 不确定点：token 估算可能使 preflight 比旧路径更早或更晚触发摘要，需要通过 telemetry 持续观察 break-even 成本。
-
-## 七、明确未实现的后续
-
-以下能力不属于当前阶段，不能按已落地行为依赖：
-
-1. Anthropic/DeepSeek 原生 compaction endpoint；
-2. compaction 后调用 `SaveKnowledge` 或写入 EventChain；
-3. 依靠 EventChain 完成跨 session 的 L2 自动恢复；
-4. feature flag 观测期、旧兼容路径的最终清理；
-5. 完整 break-even 成本 dashboard 聚合。
-
-这些后续必须分别设计失败原子性、持久化兼容、缓存影响和 provider 能力探测，不能重新把 cache TTL 与 canonical transcript 改写绑定。
+1. 重新启用多阈值自动 prune/snip 投影
+2. 把 cache TTL 重新绑定到 transcript 改写
+3. 跨 session 的 EventChain L2 自动恢复作为维护主路径
+4. 完整 break-even 成本 dashboard

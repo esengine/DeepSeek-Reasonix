@@ -125,7 +125,17 @@ func (*SubmitPlanTool) Execute(ctx context.Context, args json.RawMessage) (strin
 	if plan.RequiresApproval {
 		approval = " Approval was requested; the host decides whether execution gates."
 	}
+	// A revision is told what it changed. Left to describe its own edit a model
+	// reports intent, not effect, and a step it dropped by accident reads the
+	// same as one it kept.
+	revised := ""
+	if diff, ok := submission.Revised(); ok && diff.Moved() {
+		revised = "\n\n" + plancontract.RenderDiff(diff)
+		if diff.NeedsApproval() {
+			revised += "\n\nThis revision expands the approved scope; the host may gate it again."
+		}
+	}
 	return fmt.Sprintf(
-		"Plan revision %d accepted: %d phase(s), %d sub-step(s). The host renders it for the user and hands it to the executor — do not restate it.%s",
-		plan.Revision, phases, subSteps, approval), nil
+		"Plan revision %d accepted: %d phase(s), %d sub-step(s). The host renders it for the user and hands it to the executor — do not restate it.%s%s",
+		plan.Revision, phases, subSteps, approval, revised), nil
 }

@@ -329,6 +329,52 @@ await check("marks only terminal tasks", async () => {
   return document.querySelectorAll(".taskmonitor__terminal").length === 1;
 });
 
+await check("freezes terminal task elapsed time", async () => {
+  const realNow = Date.now;
+  try {
+    Date.now = () => Date.parse("2025-01-01T02:00:00Z");
+    listTasksImpl = async () => [snap({ state: "cancelled", runtime_state: "exited" })];
+    await renderPanel();
+    await openPanel();
+    const atFinish = document.querySelector(".taskmonitor__time")?.textContent;
+    Date.now = () => Date.parse("2025-01-01T03:00:00Z");
+    await click(buttonByLabel("Refresh"));
+    const afterRefresh = document.querySelector(".taskmonitor__time")?.textContent;
+    return atFinish === "1h" && afterRefresh === "1h";
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+await check("uses the expired runtime lease for stale task elapsed time", async () => {
+  const realNow = Date.now;
+  try {
+    Date.now = () => Date.parse("2025-01-01T02:00:00Z");
+    listTasksImpl = async () => [snap({
+      state: "stale",
+      runtime_state: "exited",
+      updated_at: "2025-01-01T00:00:00Z",
+      runtime_lease_until: "2025-01-01T00:30:00Z",
+    })];
+    await renderPanel();
+    await openPanel();
+    const atDetection = document.querySelector(".taskmonitor__time")?.textContent;
+    Date.now = () => Date.parse("2025-01-01T03:00:00Z");
+    await click(buttonByLabel("Refresh"));
+    const afterRefresh = document.querySelector(".taskmonitor__time")?.textContent;
+    return atDetection === "30m" && afterRefresh === "30m";
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+await check("does not present requeue age as elapsed runtime", async () => {
+  listTasksImpl = async () => [snap({ state: "queued", runtime_state: "exited" })];
+  await renderPanel();
+  await openPanel();
+  return document.querySelector(".taskmonitor__time")?.textContent === "—";
+});
+
 dom.window.close();
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

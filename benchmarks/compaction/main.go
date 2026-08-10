@@ -42,7 +42,7 @@ func main() {
 	window := flag.Int("window", 128_000, "context window in tokens")
 	control := flag.Bool("control", true, "fidelity: also score probes against full history")
 	arm := flag.String("arm", "full", "full | incremental: re-derive each digest from canonical, or fold the previous projection")
-	snip := flag.Bool("snip", false, "run the stale-tool-result snip pass before each fold, as the 0.6 threshold does in a real session")
+	snip := flag.Bool("snip", false, "legacy no-op: automatic snip projections are gone; kept so old scripts do not fail")
 	out := flag.String("out", "", "write the JSON report here")
 	flag.Parse()
 
@@ -143,6 +143,8 @@ func (h *harness) runGeneration(ctx context.Context, gen int, probes []probe) ge
 	h.calls.reset()
 	start := time.Now()
 	if h.snip {
+		// SnipStaleToolResults is intentionally a no-op; record zeros for
+		// report schema compatibility with pre-content-driven baselines.
 		st, serr := h.agentA.SnipStaleToolResults()
 		if serr != nil {
 			r.Error = serr.Error()
@@ -161,7 +163,11 @@ func (h *harness) runGeneration(ctx context.Context, gen int, probes []probe) ge
 	}
 	if st, ok, sterr := agent.LoadCompactionState(h.path); sterr == nil && ok {
 		r.ProjectionTokens = st.Projection.ProjectionTokens
-		r.Mode = st.LastMode
+		if st.LastReceipt != nil && st.LastReceipt.Action == "summary" {
+			r.Mode = agent.CompactionModeSummarized
+		} else if st.LastMode != "" {
+			r.Mode = st.LastMode
+		}
 	}
 	return r
 }

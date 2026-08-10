@@ -789,6 +789,7 @@ func normalizeConfigForEdit(cfg *Config) bool {
 	normalizeLegacyEffort(cfg)
 	normalizeLegacyAgentStepLimits(cfg)
 	changed := normalizeRetiredAutoPlan(cfg)
+	changed = normalizeRetiredMultiThresholdCompaction(cfg) || changed
 	normalizeLegacyMCPTiers(cfg)
 	changed = normalizeLegacyStepFunBaseURLs(cfg) || changed
 	changed = normalizeLegacyLongCatContextWindows(cfg) || changed
@@ -802,6 +803,30 @@ func normalizeConfigForEdit(cfg *Config) bool {
 	applyDeepSeekOfficialDefaultPricing(cfg)
 	backfillDeepSeekOfficialPrices(cfg)
 	normalizeEffortConfig(cfg)
+	return changed
+}
+
+// normalizeRetiredMultiThresholdCompaction clears retired multi-threshold keys
+// so they never reach the Agent. Disk migration removes them on ordinary start;
+// loading still ignores them if migration could not rewrite the file.
+func normalizeRetiredMultiThresholdCompaction(c *Config) bool {
+	if c == nil {
+		return false
+	}
+	changed := c.Agent.SoftCompactRatio != 0 ||
+		c.Agent.ToolResultSnipRatio != 0 ||
+		c.Agent.CompactForceRatio != 0 ||
+		c.Agent.ColdResumePrune != nil ||
+		strings.TrimSpace(c.Agent.ContextEditing) != ""
+	c.Agent.SoftCompactRatio = 0
+	c.Agent.ToolResultSnipRatio = 0
+	c.Agent.CompactForceRatio = 0
+	c.Agent.ColdResumePrune = nil
+	c.Agent.ContextEditing = ""
+	if c.Agent.CompactRatio <= 0 {
+		c.Agent.CompactRatio = Default().Agent.CompactRatio
+		changed = true
+	}
 	return changed
 }
 
@@ -1075,6 +1100,50 @@ func migrateRetiredConfigKeysFile(path string, strip func(string) (string, bool)
 
 func stripLegacyMemoryCompilerLines(raw string) (string, bool) {
 	return stripTOMLKeyLines(raw, "agent", "memory_compiler")
+}
+
+// MigrateLegacyMultiThresholdCompactionForRoot strips retired soft/snip/force keys.
+func MigrateLegacyMultiThresholdCompactionForRoot(root string) (bool, error) {
+	root = resolveRoot(root)
+	paths := make([]string, 0, 2)
+	if userPath := userConfigLoadPath(); userPath != "" {
+		paths = append(paths, userPath)
+	}
+	projectPath := "reasonix.toml"
+	if root != "." {
+		projectPath = filepath.Join(root, "reasonix.toml")
+	}
+	paths = append(paths, projectPath)
+
+	changedAny := false
+	seen := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		clean := filepath.Clean(path)
+		if _, ok := seen[clean]; ok {
+			continue
+		}
+		seen[clean] = struct{}{}
+		changed, err := migrateLegacyMultiThresholdCompactionFile(path)
+		if err != nil {
+			return changedAny, fmt.Errorf("migrate deprecated multi-threshold compaction keys in %s: %w", path, err)
+		}
+		changedAny = changedAny || changed
+	}
+	return changedAny, nil
+}
+
+func migrateLegacyMultiThresholdCompactionFile(path string) (bool, error) {
+	return migrateRetiredConfigKeysFile(path, stripLegacyMultiThresholdCompactionLines)
+}
+
+func stripLegacyMultiThresholdCompactionLines(raw string) (string, bool) {
+	return stripTOMLKeyLines(raw, "agent",
+		"soft_compact_ratio",
+		"tool_result_snip_ratio",
+		"compact_force_ratio",
+		"cold_resume_prune",
+		"context_editing",
+	)
 }
 
 func migrateLegacyMCPTiersFile(path string) error {

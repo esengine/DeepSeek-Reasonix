@@ -301,7 +301,7 @@ func TestPositionalCompressionPreservesCheckpointLineage(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("load projection sidecar: ok=%v err=%v", ok, err)
 	}
-	if state.LastTrigger != agent.CompactionTriggerManual || state.Projection.ProjectionVersion == 0 {
+	if state.LastReceipt == nil || state.LastReceipt.Trigger != agent.CompactionTriggerManual || state.Projection.ProjectionVersion == 0 {
 		t.Fatalf("projection state = %+v", state)
 	}
 	if _, ok := c.checkpoints.boundary(1); !ok {

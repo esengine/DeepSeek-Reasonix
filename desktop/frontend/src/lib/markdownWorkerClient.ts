@@ -21,7 +21,7 @@
 // so this module stays light enough for the eager transcript graph, and the
 // remark+katex stack only ever lands in lazy chunks / the inline worker.
 
-import type { MarkdownBlock } from "./markdownPipeline";
+import type { MarkdownParseResult } from "./markdownPipeline";
 import { registerMarkdownWorkerDiagnostics } from "./sessionDiagnostics";
 
 type MarkdownPipelineModule = typeof import("./markdownPipeline");
@@ -38,7 +38,7 @@ export interface MarkdownParseRequest {
 
 export interface MarkdownParseResponse {
   id: number;
-  blocks?: MarkdownBlock[];
+  result?: MarkdownParseResult;
   error?: string;
 }
 
@@ -50,8 +50,8 @@ export interface MarkdownWorkerLike {
 }
 
 export interface MarkdownParseHandle {
-  /** Resolves parsed blocks, or undefined when cancelled/disposed. */
-  promise: Promise<MarkdownBlock[] | undefined>;
+  /** Resolves the render blocks and selection projection together. */
+  promise: Promise<MarkdownParseResult | undefined>;
   /** Drop the response when it arrives; resolves the promise with undefined. */
   cancel(): void;
 }
@@ -60,11 +60,11 @@ export interface MarkdownWorkerClientOptions {
   /** Override worker creation (tests inject a synchronous fake). */
   createWorker?: () => Promise<MarkdownWorkerLike>;
   /** Override the in-process fallback parse (tests inject a spy). */
-  parseInProcess?: (text: string) => MarkdownBlock[];
+  parseInProcess?: (text: string) => MarkdownParseResult;
 }
 
 interface PendingRequest {
-  resolve(blocks: MarkdownBlock[] | undefined): void;
+  resolve(result: MarkdownParseResult | undefined): void;
   reject(error: Error): void;
   /** performance.now() at parse() time, for parse-latency diagnostics. */
   startedAt: number;
@@ -78,7 +78,7 @@ function nowMs(): number {
 
 export class MarkdownWorkerClient {
   private readonly createWorker?: () => Promise<MarkdownWorkerLike>;
-  private readonly parseInProcess?: (text: string) => MarkdownBlock[];
+  private readonly parseInProcess?: (text: string) => MarkdownParseResult;
   private worker: MarkdownWorkerLike | null = null;
   private workerPromise: Promise<MarkdownWorkerLike | null> | null = null;
   private readonly pending = new Map<number, PendingRequest>();
@@ -120,7 +120,7 @@ export class MarkdownWorkerClient {
     }
     const id = this.nextId;
     this.nextId += 1;
-    const promise = new Promise<MarkdownBlock[] | undefined>((resolve, reject) => {
+    const promise = new Promise<MarkdownParseResult | undefined>((resolve, reject) => {
       this.pending.set(id, { resolve, reject, startedAt: nowMs(), text, state: "queued" });
     });
     const cancel = () => {
@@ -188,15 +188,15 @@ export class MarkdownWorkerClient {
     const injected = this.parseInProcess;
     const run = injected
       ? async () => injected(text)
-      : () => loadPipeline().then((pipeline) => pipeline.parseMarkdownToBlocks(text));
+      : () => loadPipeline().then((pipeline) => pipeline.parseMarkdown(text));
     void run().then(
-      (blocks) => {
+      (result) => {
         const entry = this.pending.get(id);
         if (entry) {
           this.pending.delete(id);
           this.noteSettled(entry);
           if (this.disposed) entry.resolve(undefined);
-          else entry.resolve(blocks);
+          else entry.resolve(result);
         }
         if (this.activeRequestId === id) this.activeRequestId = null;
         this.fallbackActive = false;
@@ -246,7 +246,7 @@ export class MarkdownWorkerClient {
     if (response.error !== undefined) {
       entry.reject(new Error(response.error));
     } else {
-      entry.resolve(response.blocks ?? []);
+      entry.resolve(response.result ?? { blocks: [], selectionText: "", selectionRevision: 0 });
     }
     void this.pump();
   }

@@ -43,6 +43,7 @@ type toolCallPlan struct {
 	planTransition            bool
 	planBefore                string
 	planAfter                 string
+	planDiff                  string
 	planReplacementAuthorized bool
 	recoveryGen               uint64
 
@@ -342,8 +343,12 @@ func (a *Agent) applyPlanModeAndProxy(ctx context.Context, plan *toolCallPlan) (
 			if rc.Unavailable {
 				return toolOutcome{output: result, errMsg: firstLine(rc.UnavailableReason)}, true
 			}
-			body, truncMsg := truncateToolOutput(result)
-			return toolOutcome{output: body, truncated: truncMsg != "", truncMsg: truncMsg}, true
+			body, truncMsg := truncateToolOutputFor(result, plan.call.Name, plan.call.ID)
+			out := toolOutcome{output: body, truncated: truncMsg != "", truncMsg: truncMsg}
+			if truncMsg != "" {
+				out.rawOutput = result
+			}
+			return out, true
 		}
 	} else if outcome, blocked := a.readOnlyExecutionBlock(t, nil); blocked {
 		return outcome, true
@@ -477,7 +482,7 @@ func (a *Agent) applyRecoveryAndPermission(ctx context.Context, plan *toolCallPl
 	// is exhausted so host-proven read-only diagnosis can remain available while
 	// further execution is quarantined. Ask/Yolo still bypass inside the gate.
 	plan.verification = plan.evidenceName == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(plan.evidenceArgs))
-	plan.planTransition, plan.planBefore, plan.planAfter = a.recoveryPlanTransition(plan.evidenceName, plan.evidenceArgs)
+	plan.planTransition, plan.planBefore, plan.planAfter, plan.planDiff = a.recoveryPlanTransition(plan.evidenceName, plan.evidenceArgs)
 	episodeStopped := false
 	if ctrl := a.recoveryEpisodeControl(); ctrl != nil {
 		plan.recoveryGen = ctrl.Generation()
@@ -499,23 +504,7 @@ func (a *Agent) applyRecoveryAndPermission(ctx context.Context, plan *toolCallPl
 		if ctrl := a.recoveryEpisodeControl(); ctrl != nil {
 			episodeID = ctrl.EpisodeID()
 		}
-		dec, rerr := a.recoveryGate.BeforeMutation(ctx, RecoveryProposal{
-			AgentID:        a.recoveryAgentID,
-			TaskID:         a.recoveryTaskID,
-			TaskScopeID:    recoveryTaskScopeID(a.deliveryScopeID, a.recoveryRunSeq.Load()),
-			EpisodeID:      episodeID,
-			TaskSummary:    a.recoveryTaskSummary,
-			Tool:           plan.evidenceName,
-			Args:           plan.evidenceArgs,
-			Subject:        subject,
-			Preview:        preview,
-			ReadOnly:       plan.readOnly,
-			Mutates:        plan.mutates,
-			Verification:   plan.verification,
-			PlanTransition: plan.planTransition,
-			PlanBefore:     plan.planBefore,
-			PlanAfter:      plan.planAfter,
-		})
+		dec, rerr := a.recoveryGate.BeforeMutation(ctx, a.recoveryProposal(plan, episodeID, subject, preview))
 		if dec.Generation != 0 {
 			plan.recoveryGen = dec.Generation
 		}
@@ -681,7 +670,7 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 		}
 	}
 	if !a.planMode.Load() {
-		cctx = evidence.WithTodoState(cctx, a.CanonicalTodoState())
+		cctx = a.withContractState(cctx)
 	}
 	if plan.planReplacementAuthorized {
 		cctx = tool.WithPlanReplacementAuthorization(cctx)
@@ -798,33 +787,12 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	// before evidence, hooks, and recovery observation, so every downstream
 	// consumer sees the final (possibly replaced) outcome.
 	result, err = a.interceptToolAfter(ctx, call, result, err)
-	if a.evidence != nil {
-		// Always record the model-visible call for audit, then the real target
-		// attributes for mutation/read classification when they differ.
-		if call.Name == "complete_step" {
-			rec := evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), err == nil, readOnly)
-			a.evidence.Record(rec)
-			if err == nil {
-				a.advanceCanonicalTodo(rec.Step)
-			}
-		} else if evidenceName != call.Name {
-			// Proxy: meta receipt (non-mutation) + real target receipt.
-			a.evidence.Record(evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), err == nil, true))
-			rec := evidence.ReceiptFromToolCall(evidenceName, evidenceArgs, err == nil, readOnly)
-			decorateExecutionReceipt(&rec, result, execution)
-			a.evidence.Record(rec)
-		} else {
-			rec := evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), err == nil, t.ReadOnly())
-			decorateExecutionReceipt(&rec, result, execution)
-			a.evidence.Record(rec)
-			if err == nil && call.Name == "todo_write" {
-				a.setTodoState(rec.Todos)
-				if len(rec.Todos) > 0 {
-					a.deliveryCriteriaEstablished = true
-				}
-			}
-		}
+	// A tool that refused its own call never ran: report it like the permission
+	// and plan-mode blocks above rather than as an execution failure.
+	if msg, refused := tool.BlockedMessage(err); refused {
+		return a.blockedToolOutcome(plan, msg)
 	}
+	a.recordToolReceipts(plan, result, execution, err)
 	// Track skill/capability outcomes for Delivery gates.
 	a.noteCapabilityInvocation(call.Name, json.RawMessage(call.Arguments), err)
 	// Success and failure hooks observe the result after the tool ran. Use the
@@ -853,11 +821,16 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 			detail = strings.TrimRight(detail, "\n") + "\nThe arguments were not valid JSON. Re-emit them exactly per this schema:\n" + string(t.Schema())
 		}
 		a.recordRepeatFailure(call, t, err)
-		body, truncMsg := truncateToolOutput(fmt.Sprintf("error: %v\n%s", err, detail))
-		return toolOutcome{
+		rawErr := fmt.Sprintf("error: %v\n%s", err, detail)
+		body, truncMsg := truncateToolOutputFor(rawErr, call.Name, call.ID)
+		out := toolOutcome{
 			output: body, errMsg: firstLine(err.Error()), truncated: truncMsg != "", truncMsg: truncMsg,
 			execution: execution, recoveryGeneration: recoveryGen,
 		}
+		if truncMsg != "" {
+			out.rawOutput = rawErr
+		}
+		return out
 	}
 	if mutates {
 		a.clearRepeatFailuresAfterMutation(evidenceName, evidenceArgs, readOnly)
@@ -869,36 +842,15 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	if a.hooks != nil && call.Name == "task" && !isBackgroundTaskCall(call.Arguments) {
 		a.hooks.SubagentStop(ctx, result)
 	}
-	body, truncMsg := truncateToolOutput(result)
-	return toolOutcome{
+	body, truncMsg := truncateToolOutputFor(result, call.Name, call.ID)
+	out := toolOutcome{
 		output: body, images: images, truncated: truncMsg != "", truncMsg: truncMsg,
 		execution: execution, recoveryGeneration: recoveryGen,
 	}
-}
-
-// shellPreflightExecution builds not_run/preflight metadata for a blocked bash call.
-func shellPreflightExecution(plan *toolCallPlan, hasVerification bool) *tool.ShellExecution {
-	ex := &tool.ShellExecution{
-		Kind:         "shell",
-		State:        tool.ShellStateNotRun,
-		FailurePhase: tool.ShellPhasePreflight,
-		MutationRisk: tool.ShellMutationNotStarted,
-		Verification: tool.ShellVerificationNotVerification,
+	if truncMsg != "" {
+		out.rawOutput = result
 	}
-	if hasVerification {
-		ex.Verification = tool.ShellVerificationNotRun
-	}
-	if plan != nil {
-		if de, ok := plan.execTool.(tool.DetailedExecutor); ok {
-			if desc := de.ExecutionDescriptor(plan.execArgs); desc != nil {
-				ex.Shell = desc.Shell
-				ex.ShellVersion = desc.ShellVersion
-				ex.Platform = desc.Platform
-				ex.SupportsAndAnd = desc.SupportsAndAnd
-			}
-		}
-	}
-	return ex
+	return out
 }
 
 // observeBeforeMutation captures preimages for Previewable writers and records
