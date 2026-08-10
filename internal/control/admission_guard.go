@@ -22,7 +22,7 @@ const (
 // runGuarded runs body under a fresh context, guarding concurrent turns.
 // Finishing-window arrivals park instead of dropping (see admissionResult).
 func (c *Controller) runGuarded(body func(ctx context.Context) error) admissionResult {
-	return c.admitGuardedTurn(body, false)
+	return c.admitGuardedTurn(body, false, true, nil)
 }
 
 // runGuardedOrPark admits like runGuarded but parks the body while another
@@ -31,10 +31,16 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) admissionR
 // the FIFO drain in finishGuardedTurn delivers them the moment the current
 // turn finishes.
 func (c *Controller) runGuardedOrPark(body func(ctx context.Context) error) admissionResult {
-	return c.admitGuardedTurn(body, true)
+	return c.admitGuardedTurn(body, true, true, nil)
 }
 
-func (c *Controller) admitGuardedTurn(body func(ctx context.Context) error, parkWhileRunning bool) admissionResult {
+// runGuardedInbox admits a durable item without parking it in volatile memory.
+// onStart runs after admission is reserved and before its goroutine can finish.
+func (c *Controller) runGuardedInbox(body func(ctx context.Context) error, onStart func()) admissionResult {
+	return c.admitGuardedTurn(body, false, false, onStart)
+}
+
+func (c *Controller) admitGuardedTurn(body func(ctx context.Context) error, parkWhileRunning, parkWhileFinishing bool, onStart func()) admissionResult {
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
@@ -60,6 +66,10 @@ func (c *Controller) admitGuardedTurn(body func(ctx context.Context) error, park
 		return turnDroppedRunning
 	}
 	if c.finishing {
+		if !parkWhileFinishing {
+			c.mu.Unlock()
+			return turnDroppedRunning
+		}
 		c.parkedTurns = append(c.parkedTurns, body)
 		c.mu.Unlock()
 		return turnParked
@@ -69,6 +79,9 @@ func (c *Controller) admitGuardedTurn(body func(ctx context.Context) error, park
 	c.running = true
 	c.canceling = false
 	c.mu.Unlock()
+	if onStart != nil {
+		onStart()
+	}
 	c.spawnGuardedTurn(ctx, cancel, body)
 	return turnStarted
 }

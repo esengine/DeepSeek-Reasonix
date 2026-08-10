@@ -25,6 +25,7 @@ import (
 	"reasonix/internal/jobs"
 	"reasonix/internal/memory"
 	"reasonix/internal/nilutil"
+	"reasonix/internal/plancontract"
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
@@ -443,13 +444,12 @@ type Agent struct {
 	// final participating run/background job so verification remains isolated.
 	workspaceLease *workspacelease.Owner
 
-	// steerQueue holds mid-turn user messages queued while the agent is
-	// running. Each is consumed once per loop iteration, persisted to the
-	// session for history replay, and sent to the model as guidance (not a
-	// new task). Cache miss for the next API call is unavoidable but limited
-	// to one call — the prefix stays stable otherwise.
+	// steerQueue holds mid-turn guidance admitted while the agent is running.
+	// Entries keep a durable inbox item ID plus a loader so full bodies are not
+	// retained in the agent heap beyond need. Cache miss for the next API call
+	// is unavoidable but limited to one call — the prefix stays stable otherwise.
 	steerMu       sync.Mutex
-	steerQueue    []string
+	steerQueue    []steerEntry
 	steerConsumed bool
 	// steerRunActive is true while Run is executing. Steer only queues while
 	// it is set; once the turn's exit flush has drained the queue, later
@@ -466,8 +466,9 @@ type Agent struct {
 	// ledger it survives turn boundaries and compaction (it never rides in the
 	// prompt), so the final-answer gate still sees an unfinished plan a later
 	// turn would otherwise hide. Rebuilt from the session in SetSession.
-	todoMu    sync.Mutex
-	todoState []evidence.TodoItem
+	todoMu       sync.Mutex
+	todoState    []evidence.TodoItem
+	planContract *plancontract.Plan // approved plan this turn executes, if any
 
 	// hostAdvanceSeq guarantees unique tool IDs across turns: every
 	// emitTodoState call increments it so the frontend always sees a fresh
@@ -924,6 +925,14 @@ func trimLeadingSteerWrapper(content string) (string, bool) {
 	return content, false
 }
 
+// steerEntry is one mid-turn guidance admission.
+type steerEntry struct {
+	itemID string
+	load   func() (string, error)
+	// text is a fallback when load is nil (legacy Steer(string) path).
+	text string
+}
+
 // Steer queues a message for mid-turn injection. It reports whether an active
 // turn accepted the text; on false nothing was queued and the caller must
 // deliver it another way (typically as a new turn). Without the active check,
@@ -931,12 +940,18 @@ func trimLeadingSteerWrapper(content string) (string, bool) {
 // controller observing running=false would sit in the queue unconsumed and
 // unpersisted — invisible to both the model and history.
 func (a *Agent) Steer(text string) bool {
+	return a.SteerItem("", func() (string, error) { return text, nil })
+}
+
+// SteerItem queues durable-inbox guidance identified by itemID. load is called
+// only when the entry is consumed so the agent does not retain every body.
+func (a *Agent) SteerItem(itemID string, load func() (string, error)) bool {
 	a.steerMu.Lock()
 	defer a.steerMu.Unlock()
 	if !a.steerRunActive {
 		return false
 	}
-	a.steerQueue = append(a.steerQueue, text)
+	a.steerQueue = append(a.steerQueue, steerEntry{itemID: itemID, load: load})
 	a.steerConsumed = false
 	return true
 }
@@ -948,16 +963,36 @@ func (a *Agent) SteerConsumed() bool {
 	return a.steerConsumed
 }
 
-func (a *Agent) consumeSteer() (string, bool) {
+// SetSink replaces the agent's event sink. Controllers use this to wrap the
+// sink after construction (e.g. durable inbox observation) without rebuilding
+// the agent.
+func (a *Agent) SetSink(sink event.Sink) {
+	if a == nil {
+		return
+	}
+	if nilutil.IsNil(sink) {
+		sink = event.Discard
+	}
+	a.sink = sink
+}
+
+func (a *Agent) consumeSteer() (text, itemID string, ok bool) {
 	a.steerMu.Lock()
 	defer a.steerMu.Unlock()
 	if len(a.steerQueue) == 0 {
-		return "", false
+		return "", "", false
 	}
-	t := a.steerQueue[0]
+	e := a.steerQueue[0]
 	a.steerQueue = a.steerQueue[1:]
 	a.steerConsumed = len(a.steerQueue) == 0
-	return t, true
+	if e.load != nil {
+		t, err := e.load()
+		if err != nil {
+			return "", e.itemID, false
+		}
+		return t, e.itemID, true
+	}
+	return e.text, e.itemID, true
 }
 
 // closeSteerIntakeIfIdle atomically closes the normal-completion race between
@@ -988,8 +1023,14 @@ func (a *Agent) flushSteerQueue() {
 	}
 	a.steerRunActive = false
 	a.steerMu.Unlock()
-	for _, text := range pending {
-		a.RecordUnappliedSteer(text)
+	for _, e := range pending {
+		text := e.text
+		if e.load != nil {
+			if t, err := e.load(); err == nil {
+				text = t
+			}
+		}
+		a.RecordUnappliedSteer(text, e.itemID)
 	}
 }
 
@@ -1002,10 +1043,15 @@ func UnappliedSteerNotice(text string) string {
 // RecordUnappliedSteer stores guidance that could not affect its intended
 // in-flight turn. The orphan-tool sentinel makes older readers drop the record
 // during wire normalization, while current readers use LocalOnly to exclude it
-// before every provider request.
-func (a *Agent) RecordUnappliedSteer(text string) {
+// before every provider request. itemID correlates the notice with the durable
+// session inbox entry when one exists.
+func (a *Agent) RecordUnappliedSteer(text string, itemID ...string) {
 	if a == nil || a.session == nil {
 		return
+	}
+	id := ""
+	if len(itemID) > 0 {
+		id = itemID[0]
 	}
 	a.session.Add(provider.Message{
 		Role:       provider.RoleTool,
@@ -1015,10 +1061,11 @@ func (a *Agent) RecordUnappliedSteer(text string) {
 		LocalOnly:  true,
 	})
 	a.sink.Emit(event.Event{
-		Kind:  event.Notice,
-		Level: event.LevelWarn,
-		Code:  event.NoticeCodeUnappliedSteer,
-		Text:  UnappliedSteerNotice(text),
+		Kind:   event.Notice,
+		Level:  event.LevelWarn,
+		Code:   event.NoticeCodeUnappliedSteer,
+		Text:   UnappliedSteerNotice(text),
+		ItemID: id,
 	})
 }
 
@@ -1900,45 +1947,6 @@ func (a *Agent) setTodoState(todos []evidence.TodoItem) {
 	a.todoMu.Unlock()
 }
 
-// SeedTodoState initializes the canonical task list from a host-generated
-// starter list, such as an approved plan. A new host seed replaces stale state
-// from earlier work so complete_step matches the plan the UI just displayed.
-func (a *Agent) SeedTodoState(todos []evidence.TodoItem) {
-	if len(todos) == 0 {
-		return
-	}
-	a.setTodoState(todos)
-}
-
-// ReplaceTodoState mirrors a host-generated todo list into the canonical state.
-// It is used when the host, rather than the model, owns the full state transition.
-func (a *Agent) ReplaceTodoState(todos []evidence.TodoItem) {
-	a.setTodoState(todos)
-	a.recordTodoState(a.CanonicalTodoState())
-}
-
-// CanonicalTodoState returns a copy of the host-reconstructed task list.
-func (a *Agent) CanonicalTodoState() []evidence.TodoItem {
-	a.todoMu.Lock()
-	defer a.todoMu.Unlock()
-	return append([]evidence.TodoItem(nil), a.todoState...)
-}
-
-func (a *Agent) incompleteCanonicalTodos() ([]evidence.TodoStepMatch, bool) {
-	a.todoMu.Lock()
-	defer a.todoMu.Unlock()
-	if len(a.todoState) == 0 {
-		return nil, false
-	}
-	return evidence.IncompleteTodos(a.todoState), true
-}
-
-func (a *Agent) hasIncompleteCanonicalCriteria() bool {
-	a.todoMu.Lock()
-	defer a.todoMu.Unlock()
-	return len(a.todoState) > 0 && len(evidence.IncompleteTodos(a.todoState)) > 0
-}
-
 func (a *Agent) hasActiveCanonicalTodo() bool {
 	a.todoMu.Lock()
 	defer a.todoMu.Unlock()
@@ -2001,30 +2009,6 @@ func (a *Agent) advanceCanonicalTodo(step string) {
 	a.todoMu.Unlock()
 	a.recordTodoState(snapshot)
 	a.emitTodoState(snapshot, m.Index)
-}
-
-// recordTodoState logs the host-advanced list as a synthetic todo_write receipt
-// so the per-turn final gate (which reads the ledger's latest todo_write) sees
-// the advance — the model no longer has to re-send a todo_write to mark the
-// completion. It bypasses the todo_write tool, so the completion-transition
-// guard never runs on it.
-func (a *Agent) recordTodoState(todos []evidence.TodoItem) {
-	if a.evidence == nil {
-		return
-	}
-	args, err := json.Marshal(map[string]any{"todos": todos})
-	if err != nil {
-		return
-	}
-	a.evidence.Record(evidence.ReceiptFromToolCall("todo_write", json.RawMessage(args), true, true))
-}
-
-func canonicalTodoStatus(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return "pending"
-	}
-	return s
 }
 
 // emitTodoState emits a synthetic todo_write event so the frontend task panel

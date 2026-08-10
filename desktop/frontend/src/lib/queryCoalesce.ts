@@ -32,6 +32,11 @@ const COALESCED = new Set([
   "BalanceForTab",
 ]);
 
+// Any command that can change backend-visible state starts a new query epoch.
+// Prefixes match the generated binding names while leaving ordinary reads
+// (List/Get/Meta/History/Context/Jobs/Checkpoints) available for coalescing.
+const MUTATION_PREFIX = /^(Activate|Add|Answer|Apply|Approve|Cancel|Clear|Close|Connect|Create|Delete|Ensure|Fetch|Install|New|Open|Refresh|Remove|Rename|Reorder|Replay|Resolve|Resume|Run|Save|Send|Set|Start|Steer|Stop|Switch|Trash|Try|Update|Upgrade)/;
+
 type Entry = { promise: Promise<unknown>; at: number };
 
 const inflight = new Map<string, Entry>();
@@ -44,12 +49,19 @@ export function coalescesQuery(method: string): boolean {
   return COALESCED.has(method);
 }
 
+export function invalidatesQueryCoalescing(method: string): boolean {
+  return MUTATION_PREFIX.test(method);
+}
+
 /**
  * maybeShare is the bridge's single entry point: it decides whether a call is
  * shareable and shares it, so the proxy never has to know the allowlist.
  */
 export function maybeShare(method: string, args: unknown[], run: () => unknown): unknown {
-  if (!coalescesQuery(method)) return run();
+  if (!coalescesQuery(method)) {
+    if (invalidatesQueryCoalescing(method)) inflight.clear();
+    return run();
+  }
   return shareQuery(method, args, async () => run());
 }
 
@@ -57,7 +69,8 @@ export function maybeShare(method: string, args: unknown[], run: () => unknown):
  * shareQuery returns the in-flight answer for an identical call made inside the
  * window, or runs it. A rejection is never shared beyond its own settlement:
  * the next caller retries rather than inheriting a stale failure. Callers that
- * cross an external state boundary must explicitly invalidate that query.
+ * cross an external state boundary may explicitly invalidate that query, while
+ * bridge mutations invalidate the whole burst automatically.
  */
 export function shareQuery<T>(method: string, args: unknown[], run: () => Promise<T>): Promise<T> {
   const key = `${method}|${safeKey(args)}`;
@@ -72,8 +85,6 @@ export function shareQuery<T>(method: string, args: unknown[], run: () => Promis
         forget(key, promise);
         return;
       }
-      // A settled answer stays shareable for the rest of the window: the
-      // duplicates this exists for arrive within a few milliseconds of it.
       setTimeout(() => forget(key, promise), WINDOW_MS);
     },
     () => forget(key, promise),

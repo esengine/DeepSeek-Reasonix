@@ -563,7 +563,10 @@ type Event struct {
 	RetryDelay      time.Duration             // Retrying: backoff delay before this attempt (0 = unknown)
 	RetryScope      RetryScope                // Retrying: optional "headers" | "stream"; empty for older emitters
 	StreamAttempt   StreamAttemptInfo         // StreamAttempt lifecycle
-	Workspace       *WorkspaceChangedPayload  // WorkspaceChanged (host-local)
+	// ItemID correlates Steer / unapplied-steer / TurnDone with a durable
+	// session-inbox entry. Empty for legacy callers that still use text only.
+	ItemID    string
+	Workspace *WorkspaceChangedPayload // WorkspaceChanged (host-local)
 }
 
 type WorkspaceWatchState string

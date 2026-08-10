@@ -204,7 +204,7 @@ func TestInputReceiveBlock(t *testing.T) {
 func TestInputReceiveNilDispatcherUntouched(t *testing.T) {
 	runner := &fakeTurnRunner{}
 	c := New(Options{Runner: runner})
-	if _, wrapped := c.sink.(*frontendEventSink); wrapped {
+	if sinkHasFrontendWrapper(c.sink) {
 		t.Fatal("sink wrapped without a dispatcher — the nil fast path must stay unwrapped")
 	}
 	if err := runTestTurn(c, "plain"); err != nil {
@@ -247,7 +247,8 @@ func TestSetExtensionsInstallsDispatcher(t *testing.T) {
 		t.Fatal("SetExtensions(nil) wrapped the sink")
 	}
 	c.SetExtensions(d)
-	if _, wrapped := c.sink.(*frontendEventSink); !wrapped {
+	// Durable inbox observation sits outside the frontend wrapper.
+	if !sinkHasFrontendWrapper(c.sink) {
 		t.Fatal("SetExtensions did not wrap the sink")
 	}
 	// The first install wins; a later SetExtensions is ignored.
@@ -545,4 +546,16 @@ func controlSystemMessage(msgs []provider.Message) string {
 		}
 	}
 	return ""
+}
+
+func sinkHasFrontendWrapper(s event.Sink) bool {
+	switch t := s.(type) {
+	case *frontendEventSink:
+		return true
+	case *inboxEventSink:
+		_, ok := t.inner.(*frontendEventSink)
+		return ok
+	default:
+		return false
+	}
 }

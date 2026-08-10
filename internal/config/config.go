@@ -293,12 +293,13 @@ type DesktopConfig struct {
 	CheckUpdates            *bool    `toml:"check_updates"`              // startup update checks; nil keeps the default enabled
 	// UpdateChannel is a legacy compatibility field. It is accepted on read but
 	// ignored and omitted from future canonical writes.
-	UpdateChannel     string   `toml:"update_channel"`
-	Telemetry         *bool    `toml:"telemetry"`          // anonymous launch ping plus scrubbed next-launch native crash diagnostics; nil keeps the default enabled
-	Metrics           *bool    `toml:"metrics"`            // aggregate desktop metrics (anonymous signal/bucket counts, including lifecycle health; no content); nil keeps the default enabled
-	ProviderAccess    []string `toml:"provider_access"`    // desktop-only list of provider entries shown in Settings > Model > Access
-	ExpandThinking    bool     `toml:"expand_thinking"`    // true = show reasoning text expanded by default; false = collapsed
-	ConversationWidth string   `toml:"conversation_width"` // standard|full; max transcript width; empty = standard
+	UpdateChannel        string   `toml:"update_channel"`
+	Telemetry            *bool    `toml:"telemetry"`          // anonymous launch ping plus scrubbed next-launch native crash diagnostics; nil keeps the default enabled
+	Metrics              *bool    `toml:"metrics"`            // aggregate desktop metrics (anonymous signal/bucket counts, including lifecycle health; no content); nil keeps the default enabled
+	ProviderAccess       []string `toml:"provider_access"`    // desktop-only list of provider entries shown in Settings > Model > Access
+	ExpandThinking       bool     `toml:"expand_thinking"`    // deprecated compatibility alias: true maps to auto
+	ReasoningDisplayMode string   `toml:"reasoning_display_mode"`
+	ConversationWidth    string   `toml:"conversation_width"` // standard|full; max transcript width; empty = standard
 	// STTEnabled enables the desktop voice-to-text (Edge Web Speech API bridge)
 	// mic button in the composer. Default false — users opt in from Settings.
 	STTEnabled bool `toml:"stt_enabled"`
@@ -320,9 +321,8 @@ type DesktopConfig struct {
 	STTHotkeyStop  string `toml:"stt_hotkey_stop"`
 }
 
-// DesktopExternalOpener returns the user-selected external opener id. The
-// desktop shell resolves it against applications installed on the current OS;
-// an empty or unavailable id safely falls back to the platform file manager.
+// DesktopExternalOpener returns the selected opener id; unavailable ids fall
+// back to the platform file manager in the desktop shell.
 func (c *Config) DesktopExternalOpener() string {
 	if c == nil {
 		return ""
