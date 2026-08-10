@@ -360,7 +360,7 @@ type parentClaimProbeHooks struct {
 	acquireErr error
 }
 
-func (h *parentClaimProbeHooks) PreToolUse(context.Context, string, json.RawMessage) (bool, string) {
+func (h *parentClaimProbeHooks) PreToolUse(context.Context, string, json.RawMessage) (bool, string, json.RawMessage) {
 	release, err := h.scheduler.Acquire(context.Background(), AcquireRequest{
 		Writer: true, WritePaths: h.claim, Nested: true,
 	})
@@ -368,7 +368,7 @@ func (h *parentClaimProbeHooks) PreToolUse(context.Context, string, json.RawMess
 	if err == nil {
 		release()
 	}
-	return false, ""
+	return false, "", nil
 }
 func (*parentClaimProbeHooks) PostToolUse(context.Context, string, json.RawMessage, string) {}
 func (*parentClaimProbeHooks) PostToolUseFailure(context.Context, string, json.RawMessage, string, error) {

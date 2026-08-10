@@ -660,7 +660,7 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	}
 	// Proxy tools fire hooks against the real MCP target name and arguments.
 	if a.hooks != nil {
-		if block, msg := a.hooks.PreToolUse(ctx, plan.permName, plan.permArgs); block {
+		if block, msg, rewritten := a.hooks.PreToolUse(ctx, plan.permName, plan.permArgs); block {
 			if msg == "" {
 				msg = "blocked by a PreToolUse hook"
 			}
@@ -669,6 +669,16 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 				blocked: true,
 				errMsg:  "blocked by PreToolUse hook",
 			}, true
+		} else if len(rewritten) > 0 {
+			// A hook rewrote the tool args (e.g. a bash command). Execute with
+			// the rewritten args, and carry them through evidence / PostToolUse
+			// so the audit trail reflects what actually ran. Permission /
+			// read-only classification is intentionally NOT re-run (user-decided):
+			// the RTK use case is an equivalent rewrite (git status -> rtk git
+			// status), so the earlier classification still holds.
+			plan.runArgs = rewritten
+			plan.evidenceArgs = rewritten
+			plan.permArgs = rewritten
 		}
 	}
 	cctx := tool.WithContextCompressor(withCallContext(ctx, plan.call.ID, a.sink, a.asker, a.planMode.Load()), a)
@@ -814,7 +824,10 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 			decorateExecutionReceipt(&rec, result, execution)
 			a.evidence.Record(rec)
 		} else {
-			rec := evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), err == nil, t.ReadOnly())
+			// evidenceArgs equals the original call args unless a PreToolUse
+			// hook rewrote them, in which case it is the command that actually
+			// ran — the audit trail should reflect that.
+			rec := evidence.ReceiptFromToolCall(call.Name, evidenceArgs, err == nil, t.ReadOnly())
 			decorateExecutionReceipt(&rec, result, execution)
 			a.evidence.Record(rec)
 			if err == nil && call.Name == "todo_write" {
