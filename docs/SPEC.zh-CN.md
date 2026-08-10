@@ -164,7 +164,7 @@ tool result 的 snip/prune 不删除消息，确保 assistant `tool_calls` 与 t
 原生工具清理不会替代 Reasonix 的摘要折叠，也不会修改 canonical history。
 
 摘要折叠时，固定前缀与近期 tail 之间的区间被划分为三部分：开头若干条小体量用户回合原样提升到
-digest 之前，keep policy 保护的消息原样保留，其余全部——assistant/tool 工作、后续用户回合、以及
+digest 之前，keep policy 保护的消息予以保留，其余全部——assistant/tool 工作、后续用户回合、以及
 已有 digest——折叠进同一条 digest。三者构成一个划分：区间内的消息要么原样保留，要么进入摘要输入，
 不存在两者皆非的情况。
 
@@ -174,8 +174,9 @@ digest 之前，keep policy 保护的消息原样保留，其余全部——assi
 被拆成连续几部分分别摘要，再由最后一次调用合并，并对份数设上限，使单次 compaction 的调用数有界；
 某一部分被迫丢弃的内容，会写在摘要器读到的文本里。
 
-因此逐字保留的是：system prompt、体量足够小的首个用户回合、折叠区间开头若干条小体量用户回合、
-keep policy 保护的消息，以及近期 tail。其余均为尽力而为——只在 digest 抓住它的前提下留存，
+因此逐字保留的是：system prompt、体量足够小的首个用户回合、折叠区间开头若干条小体量用户回合，
+以及近期 tail。keep policy 保护的消息同样留存，但带有执行记录的失败只保留承载失败的若干行。
+其余均为尽力而为——只在 digest 抓住它的前提下留存，
 其中包括超出提升窗口的小体量用户回合，所以长期有效的约束更适合在近期回合中重述。
 
 两个性质限制了这种损失：每次折叠都从 canonical transcript 重新生成 digest，而不是在上一条 digest

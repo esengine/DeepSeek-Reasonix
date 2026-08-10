@@ -42,6 +42,7 @@ func main() {
 	window := flag.Int("window", 128_000, "context window in tokens")
 	control := flag.Bool("control", true, "fidelity: also score probes against full history")
 	arm := flag.String("arm", "full", "full | incremental: re-derive each digest from canonical, or fold the previous projection")
+	snip := flag.Bool("snip", false, "run the stale-tool-result snip pass before each fold, as the 0.6 threshold does in a real session")
 	out := flag.String("out", "", "write the JSON report here")
 	flag.Parse()
 
@@ -49,14 +50,14 @@ func main() {
 		res []genResult
 		err error
 	)
-	incremental := *arm == "incremental"
+	a := arms{incremental: *arm == "incremental", snip: *snip}
 	switch {
 	case *arm != "full" && *arm != "incremental":
 		err = fmt.Errorf("unknown arm %q", *arm)
 	case *mode == "cost":
-		res, err = runCost(*gens, *window, incremental)
+		res, err = runCost(*gens, *window, a)
 	case *mode == "fidelity":
-		res, err = runFidelity(*gens, *window, *control, incremental)
+		res, err = runFidelity(*gens, *window, *control, a)
 	default:
 		err = fmt.Errorf("unknown mode %q", *mode)
 	}
@@ -83,6 +84,8 @@ type genResult struct {
 	SummarizerInput  int            `json:"summarizer_input_tokens"`
 	LargestCall      int            `json:"largest_call_tokens"`
 	Mode             string         `json:"mode,omitempty"`
+	SnippedResults   int            `json:"snipped_results,omitempty"`
+	SnippedChars     int            `json:"snipped_chars,omitempty"`
 	Seconds          float64        `json:"seconds"`
 	Error            string         `json:"error,omitempty"`
 	Survived         map[string]int `json:"survived,omitempty"`   // probe class -> 1 kept, 0 lost
@@ -97,9 +100,10 @@ type harness struct {
 	agentA *agent.Agent
 	path   string
 	calls  *callRecorder
+	snip   bool
 }
 
-func newHarness(t *testingDir, p provider.Provider, window int, rec *callRecorder, incremental bool) *harness {
+func newHarness(t *testingDir, p provider.Provider, window int, rec *callRecorder, arm arms) *harness {
 	sess := newSession()
 	path := filepath.Join(t.dir, "session.jsonl")
 	a := agent.New(p, tool.NewRegistry(), sess, agent.Options{
@@ -107,13 +111,23 @@ func newHarness(t *testingDir, p provider.Provider, window int, rec *callRecorde
 		ArchiveDir:    filepath.Join(t.dir, "archive"),
 		SessionPath:   path,
 		RecentKeep:    4,
-		Ablation:      foldArm(incremental),
+		// boot's default when cfg.Agent.Keep is unset; without it the bench
+		// would measure a configuration no real session runs.
+		KeepPolicy: agent.KeepErrors,
+		Ablation:   foldArm(arm.incremental),
 	}, rec.sink())
-	return &harness{sess: sess, agentA: a, path: path, calls: rec}
+	return &harness{sess: sess, agentA: a, path: path, calls: rec, snip: arm.snip}
 }
 
 // foldArm switches full re-derivation off, which is what makes a fold read the
 // previous projection instead of the canonical transcript.
+// arms selects the maintenance behaviour under test. Snipping is off by default
+// so a run stays comparable with baselines recorded before it existed.
+type arms struct {
+	incremental bool
+	snip        bool
+}
+
 func foldArm(incremental bool) ablation.Set {
 	if incremental {
 		return ablation.New(ablation.FullFold)
@@ -128,6 +142,13 @@ func (h *harness) runGeneration(ctx context.Context, gen int, probes []probe) ge
 
 	h.calls.reset()
 	start := time.Now()
+	if h.snip {
+		st, serr := h.agentA.SnipStaleToolResults()
+		if serr != nil {
+			r.Error = serr.Error()
+		}
+		r.SnippedResults, r.SnippedChars = st.Results, st.SavedChars
+	}
 	err := h.agentA.CompactNow(ctx, "")
 	r.Seconds = time.Since(start).Seconds()
 	if err != nil {
@@ -145,7 +166,7 @@ func (h *harness) runGeneration(ctx context.Context, gen int, probes []probe) ge
 	return r
 }
 
-func runCost(gens, window int, incremental bool) ([]genResult, error) {
+func runCost(gens, window int, a arms) ([]genResult, error) {
 	dir, cleanup, err := tempDir()
 	if err != nil {
 		return nil, err
@@ -154,7 +175,7 @@ func runCost(gens, window int, incremental bool) ([]genResult, error) {
 
 	rec := &callRecorder{}
 	p := &scriptedProvider{rec: rec, reply: syntheticDigest, window: window}
-	h := newHarness(dir, p, window, rec, incremental)
+	h := newHarness(dir, p, window, rec, a)
 
 	var out []genResult
 	for gen := range gens {
@@ -163,7 +184,7 @@ func runCost(gens, window int, incremental bool) ([]genResult, error) {
 	return out, nil
 }
 
-func runFidelity(gens, window int, control, incremental bool) ([]genResult, error) {
+func runFidelity(gens, window int, control bool, a arms) ([]genResult, error) {
 	key := os.Getenv("DEEPSEEK_API_KEY")
 	if key == "" {
 		return nil, fmt.Errorf("fidelity mode needs DEEPSEEK_API_KEY")
@@ -179,7 +200,7 @@ func runFidelity(gens, window int, control, incremental bool) ([]genResult, erro
 	defer cleanup()
 
 	rec := &callRecorder{}
-	h := newHarness(dir, &recordingProvider{inner: p, rec: rec}, window, rec, incremental)
+	h := newHarness(dir, &recordingProvider{inner: p, rec: rec}, window, rec, a)
 	probes := probeSuite()
 
 	ctx := context.Background()
@@ -193,7 +214,7 @@ func runFidelity(gens, window int, control, incremental bool) ([]genResult, erro
 			return nil, verr
 		}
 		for _, probe := range probes {
-			if probe.plantAt > gen {
+			if probe.settledAt() > gen {
 				continue
 			}
 			answer, aerr := ask(ctx, p, visible, probe.question)

@@ -18,6 +18,7 @@ import (
 	"reasonix/internal/ablation"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
+	"reasonix/internal/tool"
 )
 
 // Compaction is a low-frequency cache-reset point: the prompt grows append-only
@@ -366,8 +367,27 @@ func isErrorMessage(m provider.Message) bool {
 	if m.Role != provider.RoleTool {
 		return false
 	}
+	if failedExecution(m.ToolExecution) {
+		return true
+	}
 	s := strings.TrimSpace(strings.ToLower(m.Content))
 	return strings.HasPrefix(s, "error:") || strings.HasPrefix(s, "blocked:")
+}
+
+// failedExecution reads the failure the host already recorded, rather than
+// guessing from the text. A `go test` run that reports FAIL exits non-zero
+// while its output starts with "=== RUN", which no prefix match can see.
+func failedExecution(ex *provider.ToolExecution) bool {
+	if ex == nil {
+		return false
+	}
+	if ex.State == tool.ShellStateFailed || ex.State == tool.ShellStateTimedOut {
+		return true
+	}
+	if ex.ExitCode != nil && *ex.ExitCode != 0 {
+		return true
+	}
+	return ex.Verification == tool.ShellVerificationFailed
 }
 
 func isUserMarked(m provider.Message) bool {

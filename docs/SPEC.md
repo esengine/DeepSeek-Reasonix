@@ -275,9 +275,14 @@ Long tasks eventually fill the model's context window. Reasonix manages this wit
   limits. `model_overrides.<model>.max_output_tokens` can specialize mixed
   gateways; Anthropic still supplies a mandatory `max_tokens` fallback.
 - Tool-result snip/prune never removes messages, so assistant `tool_calls` and
-  tool results stay paired. `KeepErrors` preserves error/blocked tool outputs,
-  and the recent tail is not rewritten. Snipped results can later be upgraded to
-  pruned placeholders; already-pruned results are left alone.
+  tool results stay paired. `KeepErrors` preserves failed tool outputs,
+  recognised from the recorded execution (state, exit code, verification) or,
+  when there is none, an `error:`/`blocked:` text prefix. A failure with a
+  recorded execution keeps its failure-carrying lines rather than the whole
+  result, since the record still identifies it as a failure after a rewrite; a
+  text-only failure has no such anchor and is kept whole. The recent tail is not
+  rewritten. Snipped results can later be upgraded to pruned placeholders;
+  already-pruned results are left alone.
 - Automatic maintenance is planned once before a sampling request from the
   current visible projection plus its append-only canonical tail. It never
   rewrites the canonical transcript. A failed or non-convergent view fingerprint
@@ -290,7 +295,7 @@ Long tasks eventually fill the model's context window. Reasonix manages this wit
 - When summary compaction runs, the fold region (everything between the pinned
   prefix and the recent tail) is split three ways: the first few **small user
   turns** are hoisted verbatim ahead of the digest, messages the keep policy
-  protects stay verbatim, and **everything else** — assistant/tool work, later
+  protects are kept, and **everything else** — assistant/tool work, later
   user turns, and any prior digest — is summarized into a single digest, using
   the executor's own provider, no tools. The split is a partition: a message in
   the region is either kept verbatim or reaches the summarizer, never neither.
@@ -345,8 +350,9 @@ Long tasks eventually fill the model's context window. Reasonix manages this wit
 
 **What survives a fold.** Verbatim, at every compaction: the system prompt, the
 first user turn when it is small enough to be a brief, the first few small user
-turns of the fold region, the messages the keep policy protects, and the recent
-tail. Everything else is **best-effort** — it reaches the summarizer and survives
+turns of the fold region, and the recent tail. The messages the keep policy
+protects also survive, though a failure with a recorded execution keeps only its
+failure-carrying lines. Everything else is **best-effort** — it reaches the summarizer and survives
 only as well as the digest captured it. That includes small user turns beyond the
 hoisted window, so a durable constraint is safest restated in a recent turn
 rather than assumed to hold from turn 4 of a long session.

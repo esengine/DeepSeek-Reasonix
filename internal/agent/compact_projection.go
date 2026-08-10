@@ -545,7 +545,7 @@ func (a *Agent) partitionFoldForProjection(region []provider.Message) (early, ca
 			}
 			fold = append(fold, m)
 		case policyKeep[i]:
-			kept = append(kept, m)
+			kept = append(kept, a.keptForProjection(m))
 		default:
 			fold = append(fold, m)
 		}
@@ -702,7 +702,11 @@ func (a *Agent) installPruneProjection(view []provider.Message, st PruneStats) e
 					continue
 				}
 				m := currentVisible[i]
-				m.Content = rewriteToolResult(m, st.Mode, archive, a.snipStrategyFor(m.Name))
+				replacement, ok := a.maintenanceReplacement(m, st.Mode, archive)
+				if !ok {
+					continue
+				}
+				m.Content = replacement
 				view[i] = m
 			}
 			dst = estimateMessagesTokens(view)

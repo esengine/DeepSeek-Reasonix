@@ -223,6 +223,23 @@ func (a *Agent) persistCompactionStateLocked() error {
 	return SaveCompactionState(a.sessionPath, a.compactionState)
 }
 
+// maintenanceReplacement is the rewrite for one stale tool result. Both the
+// planning pass and the re-write that follows archiving go through it, so a
+// result cannot be shortened one way while planning and another way on install.
+// ok is false when the policy protects the message outright.
+func (a *Agent) maintenanceReplacement(m provider.Message, mode toolResultMaintenanceMode, archive string) (string, bool) {
+	if a.keepPolicy&KeepErrors != 0 && isErrorMessage(m) {
+		// A recorded failure stays recognisable once its text is rewritten, so
+		// its passing noise can go. A text-only failure has no such anchor:
+		// eliding it would hide that it was ever an error.
+		if !failedExecution(m.ToolExecution) {
+			return "", false
+		}
+		return snipFailureResult(m.Content), true
+	}
+	return rewriteToolResult(m, mode, archive, a.snipStrategyFor(m.Name)), true
+}
+
 // applyToolResultMaintenanceView returns a copy of msgs with stale tool results
 // snipped or pruned. The canonical transcript is never modified.
 func (a *Agent) applyToolResultMaintenanceView(msgs []provider.Message, mode toolResultMaintenanceMode) ([]provider.Message, PruneStats) {
@@ -249,10 +266,10 @@ func (a *Agent) applyToolResultMaintenanceView(msgs []provider.Message, mode too
 		if !shouldMaintainToolResult(m, mode) {
 			continue
 		}
-		if a.keepPolicy&KeepErrors != 0 && isErrorMessage(m) {
+		replacement, ok := a.maintenanceReplacement(m, mode, "projection-view")
+		if !ok {
 			continue
 		}
-		replacement := rewriteToolResult(m, mode, "projection-view", a.snipStrategyFor(m.Name))
 		if replacement == m.Content {
 			continue
 		}
