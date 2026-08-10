@@ -1,0 +1,25 @@
+intelifar-ip-wiki/
+|-- README.md / README.zh-CN.md       # intelifar fork entry
+|-- INTELIFAR-DELIVERY.md             # acceptance and runbook
+|-- LICENSE                           # upstream MIT license
+|-- docs/
+|   |-- architecture/intelifar-ip-wiki.md
+|   `-- plans/2026-08-09-intelifar-ip-wiki-*.md
+|-- internal/                         # preserved Reasonix Go kernel
+|-- site/
+|   |-- src/pages/index.astro         # enterprise application shell
+|   |-- src/styles/ip-platform.css    # intelifar design system
+|   |-- src/scripts/ip-platform*.mjs  # behavior, state, contracts
+|   |-- public/brand/                 # official logo assets
+|   |-- e2e/platform.e2e.mjs          # twelve browser scenarios
+|   |-- e2e/real-platform.e2e.mjs     # MinerU + DeepSeek live scenario
+|   |-- server/                       # gateway, providers and publication registry
+|   `-- dist/                         # production static build
+`-- artifacts/
+    |-- e2e-report.md
+    |-- intelifar-audit-sample.csv
+    |-- delivery-tree.txt
+    |-- enterprise-95-scorecard.md
+    |-- enterprise-95-review/          # final desktop/mobile visual review
+    |-- real-e2e/                      # sanitized live-provider publication evidence
+    `-- screenshots/01..14-*.png

@@ -1,3 +1,30 @@
+# intelifar IP Intelligence · 灵遐智析
+
+> 基于开源 Reasonix 底座，为灵遐智能系统性改造的企业级长文档 IP 分析与 Wiki 治理工作台。
+
+`site/` 已成为可离线回归、也可连接真实 MinerU 与 DeepSeek 的业务工作台，覆盖文档接入与分类、Schema 提取、Wiki 生成、涂黑脱敏、精准溯源、全生命周期治理和审计证据。API Key 仅由同源 Node 网关在服务端运行时读取。
+
+```powershell
+cd site
+npm ci
+npm test
+npm run build
+node .\e2e\platform.e2e.mjs
+npm run test:e2e:smb
+npm run test:e2e:operations
+npm run test:e2e:collaboration
+npm run test:e2e:modules
+npm run test:e2e:real
+```
+
+外部小微企业用户可按登录、上传、复核、阅读、修改、邀请和安全分享任务阅读 [完整中文使用说明](./docs/INTELIFAR-USER-GUIDE.zh-CN.md)。工程验收与生产集成边界请见 [INTELIFAR-DELIVERY.md](./INTELIFAR-DELIVERY.md)。
+
+---
+
+## 上游 Reasonix
+
+下方保留 Reasonix 原始内核、开源许可、文档与归属说明；Go 运行时继续作为未来生产连接器的智能代理底座。
+
 <p align="center">
   <img src="docs/logo-ghost-wave-effect.svg" alt="Reasonix" width="360"/>
 </p>
