@@ -133,6 +133,20 @@ func (m ContextManager) tryToolMaintenance(visible []provider.Message, prepared 
 	}
 	mode := toolResultSnip
 	if est >= fold || forceFold {
+		// Cache-aware prune guard: rewriting the prefix on a warm provider
+		// cache invalidates prefix caching (DeepSeek: ~50-120x cost
+		// difference between cache hit and miss). Only elide stale tool
+		// results when the cache is known cold or unknown; on a warm cache,
+		// keep the prefix untouched unless the request is a manual/forced
+		// compaction or an overflow — those must proceed regardless.
+		if !(forceFold || policy.Trigger == CompactionTriggerManual || policy.Trigger == CompactionTriggerOverflow) &&
+			a.CacheState() == CacheStateWarm {
+			// Return handled=true with the untouched prepared context so the
+			// caller does NOT fall through to foldContext (full summary
+			// compaction is far more expensive than prune and would defeat
+			// the cache-preservation intent).
+			return prepared, true, false, nil
+		}
 		mode = toolResultPrune
 	}
 	maintained, stats := a.applyToolResultMaintenanceView(visible, mode)
