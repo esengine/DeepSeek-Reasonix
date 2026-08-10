@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ReactNode } from "react";
 import { Command, Search } from "lucide-react";
 import { useT } from "../lib/i18n";
+import { isImeEvent } from "../lib/imeComposition";
 import { useMountTransition } from "../lib/useMountTransition";
 
 // CommandPalette is a ⌘K / Ctrl+K modal that surfaces the desktop app's
@@ -163,6 +164,7 @@ export function CommandPalette({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
+      if (isImeEvent({ nativeEvent: e })) return;
       const closeButtonHasFocus = e.target instanceof HTMLElement && Boolean(e.target.closest("[data-palette-close]"));
       if (closeButtonHasFocus && (e.key === "Enter" || e.key === " ")) return;
       if (e.key === "Escape") {

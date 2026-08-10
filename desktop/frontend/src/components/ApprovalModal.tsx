@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useT, type Translator } from "../lib/i18n";
+import { isImeEvent } from "../lib/imeComposition";
 import type { ComposerInsertRequest, DirEntry, ToolApprovalMode, WireApproval } from "../lib/types";
 import {
   DecisionConfirmBar,
@@ -632,6 +633,7 @@ export function ApprovalModal({
   };
 
   const onRevisionKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (isImeEvent(event)) return;
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
       submitRevision();
       event.stopPropagation();

@@ -117,7 +117,7 @@
       "test-file-size": 106
     },
     "desktop/frontend/src/components/ApprovalModal.tsx": {
-      "file-size": 238
+      "file-size": 240
     },
     "desktop/frontend/src/components/CapabilitiesPanel.tsx": {
       "file-size": 2658
@@ -126,7 +126,7 @@
       "file-size": 4003
     },
     "desktop/frontend/src/components/MemoryPanel.tsx": {
-      "file-size": 1088
+      "file-size": 1091
     },
     "desktop/frontend/src/components/Message.tsx": {
       "file-size": 91
@@ -138,7 +138,7 @@
       "file-size": 141
     },
     "desktop/frontend/src/components/SettingsPanel.tsx": {
-      "file-size": 6768
+      "file-size": 6770
     },
     "desktop/frontend/src/components/StatusBar.tsx": {
       "file-size": 20
