@@ -79,3 +79,7 @@ site/.generated/
 !/CLAUDE.md
 # intelifar local publication registry (replace with managed storage in production)
 site/.runtime/
+
+# Native Windows Go test runtime logs and firewall broker control files.
+/artifacts/windows-native-go-tests/*.log
+/artifacts/windows-native-go-tests/.control-*/

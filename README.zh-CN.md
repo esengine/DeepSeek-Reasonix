@@ -17,6 +17,22 @@ npm run test:e2e:modules
 npm run test:e2e:real
 ```
 
+### Windows 原生全量 Go 测试
+
+Windows 开发机不需要安装 WSL 或 Docker。请在普通权限 PowerShell 中运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-go-windows-native.ps1
+```
+
+脚本严格使用 Go 1.26.5 与 Git for Windows Bash，依次执行根模块、`sdk/go` 和 `desktop` 的全部 Go 测试。运行开始时会出现一次 UAC 提示，仅用于租用两条限定在 `127.0.0.1/::1` 的临时 TCP 回环规则；测试仍以普通用户权限执行，结束或异常退出后规则自动删除。日志与汇总写入 `artifacts/windows-native-go-tests/`。
+
+仅检查工具链且不申请 UAC、不修改防火墙时，可运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-go-windows-native.ps1 -PreflightOnly
+```
+
 外部小微企业用户可按登录、上传、复核、阅读、修改、邀请和安全分享任务阅读 [完整中文使用说明](./docs/INTELIFAR-USER-GUIDE.zh-CN.md)。工程验收与生产集成边界请见 [INTELIFAR-DELIVERY.md](./INTELIFAR-DELIVERY.md)。
 
 ---

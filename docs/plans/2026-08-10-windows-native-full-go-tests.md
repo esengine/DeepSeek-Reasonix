@@ -4,7 +4,7 @@
 
 **Goal:** Make all Go tests repeatably executable on native Windows without WSL, Docker, skipped cases, or persistent firewall changes.
 
-**Architecture:** A PowerShell orchestrator resolves the pinned Go toolchain and Git for Windows Bash, elevates through UAC only for two loopback-only temporary firewall rules, runs all three Go modules with uncached tests, records per-module logs and a Markdown summary, and removes the rules in a `finally` block.
+**Architecture:** A non-admin PowerShell orchestrator resolves the pinned Go toolchain and Git for Windows Bash, starts a short-lived elevated firewall lease broker for two loopback-only rules, runs all three Go modules itself with uncached tests, records per-module logs and a Markdown summary, and signals the broker to remove the rules in a `finally` block.
 
 **Tech Stack:** PowerShell 5.1+, Go 1.26.5, Git for Windows Bash, Windows Defender Firewall.
 
@@ -31,13 +31,13 @@ Expected: PASS with Go 1.26.5 and a Git for Windows Bash path; no UAC and no fir
 **Files:**
 - Modify: `scripts/test-go-windows-native.ps1`
 
-**Step 1: Implement UAC worker launch**
+**Step 1: Implement UAC broker launch**
 
-When not elevated, relaunch the same script with an internal worker flag and propagate its exit code.
+Launch the same script with an internal broker flag. The elevated process only owns firewall rules; tests remain in the original non-admin process.
 
 **Step 2: Implement temporary loopback rules**
 
-Create unique IPv4 and IPv6 inbound TCP allow rules restricted on both ends to loopback. Record exact names and delete them in `finally`, including after failed tests.
+Create unique IPv4 and IPv6 inbound TCP allow rules restricted on both ends to loopback. Record exact names and delete them in `finally`, including after failed tests, parent-process exit, or lease timeout.
 
 **Step 3: Add cleanup verification**
 
@@ -87,4 +87,3 @@ Run: `git diff --check` and `git status --short`.
 **Step 2: Commit**
 
 Commit the design, plan, runner, documentation, and final verification evidence with an intentional Windows-test message.
-
