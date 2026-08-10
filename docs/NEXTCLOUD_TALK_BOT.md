@@ -1,6 +1,7 @@
 # Nextcloud Talk bot adapter
 
-This document describes the Nextcloud Talk bot integration added for #8117.
+This document describes the Nextcloud Talk bot integration added for #8117. The
+channel is available in both the desktop bot manager and the headless gateway.
 
 Nextcloud Talk exposes a signed webhook bot API (`bots-v1`). A Talk bot receives
 ActivityStreams events and sends messages back through the Talk OCS bot message
