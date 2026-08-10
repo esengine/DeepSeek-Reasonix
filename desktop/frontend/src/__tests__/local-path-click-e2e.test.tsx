@@ -132,14 +132,26 @@ console.log("\nheadless click-to-open e2e");
   ok(browsed.length === 0, "system browser was not involved");
 }
 
-// 2. UNC path (markdown folds \\ into \, linkify restores it; the href uses
-// forward slashes, which Windows accepts as a UNC form).
+// 2. UNC path with a remote host (markdown folds \\ into \) must NOT open:
+//    forwarding it to OpenLocalPath would connect to the remote SMB share
+//    (Net-NTLM credential leak). Loopback UNC (\\localhost\share) still opens.
 {
   const anchors = await renderClick("共享盘 \\\\nas\\share\\docs\\report.md 已生成");
+  ok(anchors.length === 0, "remote UNC renders no clickable anchor (SMB leak parity)");
+  const before = opened.length;
   await act(async () => {
-    anchors[0].dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+    anchors.forEach((a) => a.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true })));
+    await Promise.resolve();
   });
-  ok(opened[1] === "//nas/share/docs/report.md", `UNC path forwarded as slash form (${opened[1]})`);
+  ok(opened.length === before, `remote UNC must NOT reach OpenLocalPath (got ${opened.slice(before).join(", ")})`);
+
+  const loopbackAnchors = await renderClick("本机共享 \\\\localhost\\share\\docs\\report.md 已生成");
+  ok(loopbackAnchors.length === 1, "loopback UNC renders a clickable anchor");
+  await act(async () => {
+    loopbackAnchors[0].dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+  });
+  ok(opened[opened.length - 1] === "//localhost/share/docs/report.md",
+    `loopback UNC forwarded as slash form (${opened[opened.length - 1]})`);
 }
 
 // 3. Remote file:// authorities are refused (SMB credential-leak parity with

@@ -67,8 +67,12 @@ eq(pathCount("see file:///D:/x/%zz"), 0, "malformed file URL is not linkified");
 eq(pathCount("see file://./PhysicalDrive0"), 0, "device-authority file URL is not linkified");
 eq(pathCount("see file:///C:/safe.txt:payload"), 0, "alternate data stream file URL is not linkified");
 eq(pathCount("see file:///tmp/report.md?download=1"), 0, "file URL with a query is not partially linkified");
-eq(firstPath("see \\nas\\share\\docs\\report.md done"), "\\\\nas\\share\\docs\\report.md",
-  "UNC path matched whole and \\\\ prefix restored");
+eq(firstPath("see \\nas\\share\\docs\\report.md done"), undefined,
+  "remote UNC path is NOT linkified (SMB leak parity with backend)");
+eq(firstPath("见 \\nas\\share\\x.md"), undefined, "remote UNC in CJK sentence stays inert");
+eq(firstPath("见 \\\\nas\\\\share\\\\x.md"), undefined, "double-escaped remote UNC stays inert");
+eq(firstPath("见 \\localhost\\share\\x.md"), "\\\\localhost\\share\\x.md",
+  "loopback UNC path still matches and \\\\ prefix restored");
 
 console.log("\nlinkifyLocalPaths — lookalikes and non-paths");
 
@@ -86,7 +90,7 @@ eq(pathCount("prefixD:\\x\\y.md"), 0, "drive path after a letter is rejected wit
 eq(pathCount("file:///D:/x/y.md"), 1, "file URL drive segment is not double-matched");
 eq(pathCount("a\\b\\c.md 讨论"), 0, "share-less backslash path in prose is not a UNC path");
 eq(pathCount("C:\\nas\\share\\x.md"), 1, "drive path does not also become a UNC match");
-eq(firstPath("见 \\nas\\share\\x.md"), "\\\\nas\\share\\x.md", "real UNC path still matches");
+eq(firstPath("见 \\nas\\share\\x.md"), undefined, "real UNC path with remote host is NOT linkified");
 eq(pathCount("see C:\\safe.txt:payload"), 0, "alternate data stream drive path stays inert");
 eq(pathCount("see \\.\\PhysicalDrive0"), 0, "device namespace path stays inert");
 eq(pathCount("see C:\\docs\\NUL.txt"), 0, "reserved DOS device path stays inert");
@@ -123,7 +127,10 @@ eq(localPathFromHref("file:///Users/liangkang/notes/readme.md"), "/Users/liangka
 eq(localPathFromHref("file://nas/share/report.md"), null, "rejects remote authority (SMB credential leak — backend rule parity)");
 eq(localPathFromHref("file://127.0.0.1//nas/share/x.txt"), null, "rejects loopback + double-slash path (backend parity)");
 eq(localPathFromHref("file://localhost/C:/x.txt"), "C:/x.txt", "loopback drive path still opens");
-eq(localPathFromHref("file:///%5c%5cnas%5cshare%5cdocs%5creport.md"), "//nas/share/docs/report.md", "lowercase %5c spelling handled");
+eq(localPathFromHref("file:///%5c%5cnas%5cshare%5cdocs%5creport.md"), null,
+  "lowercase %5c remote UNC refused (SMB leak parity)");
+eq(localPathFromHref("file:///%5c%5clocalhost%5cshare%5cdocs%5creport.md"), "//localhost/share/docs/report.md",
+  "lowercase %5c loopback UNC still decodes");
 eq(localPathFromHref("file://[::1]/C:/x.txt"), "C:/x.txt", "IPv6 loopback drive path opens");
 eq(localPathFromHref("file:////nas/share/report.md"), null, "rejects four-slash UNC (empty authority — remote SMB leak)");
 eq(localPathFromHref("file://///nas/share/report.md"), null, "rejects five-slash UNC (empty authority — remote SMB leak)");

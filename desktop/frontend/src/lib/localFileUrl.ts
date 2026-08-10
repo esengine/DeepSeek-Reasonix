@@ -36,9 +36,22 @@ function hasDisallowedRawFileUrlSyntax(href: string): boolean {
 // isLoopbackHostname mirrors the backend's loopback set (localhost / 127.0.0.1
 // / ::1). Any other file:// host decodes to a remote UNC path and must be
 // refused before it reaches OpenLocalPath.
-function isLoopbackHostname(host: string): boolean {
+export function isLoopbackHostname(host: string): boolean {
   const h = host.toLowerCase();
   return h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "[::1]";
+}
+
+// uncHostName mirrors the backend's uncHost (open_local_path.go): the server
+// component of a UNC path (\\host\share or //host/share), or "" when the
+// path is not in UNC form. Any number of leading slashes beyond the first two
+// still resolves to a UNC root on Windows.
+export function uncHostName(path: string): string {
+  const slash = path.replace(/\\/g, "/");
+  if (!slash.startsWith("//")) return "";
+  const rest = slash.replace(/^\/+/, "");
+  if (rest === "") return "";
+  const i = rest.indexOf("/");
+  return i >= 0 ? rest.slice(0, i) : rest;
 }
 
 export function localPathFromHref(href?: string): string | null {
@@ -50,13 +63,15 @@ export function localPathFromHref(href?: string): string | null {
   // URL normalization would turn the backslash into a fourth slash, making
   // it look like the empty-authority remote-UNC form that is refused below.
   // Recognize the literal spelling and hand the UNC path through directly —
-  // this matches the product rule that plain UNC paths (\\host\share) open
-  // normally. The remote-authority and 4+-slash attack spellings do NOT
-  // match (they have "/" where this regex requires "\") and stay refused.
+  // but only for loopback hosts: a remote UNC (\\nas\share) must not reach
+  // OpenLocalPath, which would connect to the remote SMB share. The
+  // remote-authority and 4+-slash attack spellings do NOT match (they have
+  // "/" where this regex requires "\") and stay refused.
   if (/^file:\/\/\/\\/.test(href)) {
     const unc = "\\" + href.slice("file:///".length); // \nas\... → \\nas\...
     if (hasDisallowedWindowsPathSyntax(unc)) return null;
-    return unc.replace(/\\/g, "/"); // //nas/share/... (backend FromSlash form)
+    if (!isLoopbackHostname(uncHostName(unc))) return null; // remote UNC refused (SMB parity)
+    return unc.replace(/\\/g, "/"); // //localhost/share/... (backend FromSlash form)
   }
   // Linkified UNC hrefs are %5C-encoded by localPathHref so markdown URL
   // normalization cannot fold backslashes into extra slashes; decode back.
@@ -65,7 +80,8 @@ export function localPathFromHref(href?: string): string | null {
   if (/^file:\/\/\/%5[cC]/i.test(href)) {
     const decoded = decodeURIComponent(href.slice("file:///".length)); // \\nas\share\...
     if (hasDisallowedWindowsPathSyntax(decoded)) return null;
-    return decoded.replace(/\\/g, "/"); // //nas/share/...
+    if (!isLoopbackHostname(uncHostName(decoded))) return null; // remote UNC refused (SMB parity)
+    return decoded.replace(/\\/g, "/"); // //localhost/share/...
   }
 
   try {

@@ -9,7 +9,7 @@
 
 import { visit } from "unist-util-visit";
 import type { Parent, Link, Root, Text } from "mdast";
-import { hasDisallowedWindowsPathSyntax, isLocalFileHref } from "./localFileUrl";
+import { hasDisallowedWindowsPathSyntax, isLocalFileHref, isLoopbackHostname, uncHostName } from "./localFileUrl";
 import { unescapeRefPath } from "./refToken";
 
 // Sentence punctuation is excluded from path characters: Windows forbids `：`
@@ -139,7 +139,11 @@ export function linkifyLocalPaths(text: string): LocalPathSegment[] {
     // `\\` escape); restore the real UNC prefix for the native opener.
     const path = m.kind === "unc" ? "\\" + stripTrailingClosers(m.raw) : stripTrailingClosers(m.raw);
     const decodedPath = unescapeRefPath(path);
-    if (path && !hasDisallowedWindowsPathSyntax(decodedPath)) {
+    // Remote UNC (\\nas\share\...) must NOT become a clickable link: opening
+    // it connects to the remote SMB share (Net-NTLM credential leak). Only
+    // loopback UNC (\\localhost\share) stays linkified — it is this machine.
+    const remoteUnc = m.kind === "unc" && !isLoopbackHostname(uncHostName(decodedPath));
+    if (path && !hasDisallowedWindowsPathSyntax(decodedPath) && !remoteUnc) {
       segments.push({ text: m.raw, path: decodedPath });
     } else {
       segments.push({ text: m.raw });

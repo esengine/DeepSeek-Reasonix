@@ -74,33 +74,35 @@ func TestNormalizeLocalOpenPathRejectsRemoteAuthority(t *testing.T) {
 			t.Errorf("normalizeLocalOpenPath(%q): want rejection (remote authority), got nil", u)
 		}
 	}
-	// Loopback authorities stay allowed and resolve to the local path.
-	got, err := normalizeLocalOpenPath("file://localhost/C:/x.txt")
-	if err != nil {
-		t.Fatalf("file://localhost: %v", err)
+	// Loopback authorities stay allowed; platform-specific resolve assertions
+	// live in open_local_path_windows_test.go / _unix_test.go.
+	if _, err := normalizeLocalOpenPath("file://localhost/tmp/reasonix-report.md"); err == nil {
+		t.Logf("file://localhost accepted (exact resolution is platform-specific)")
 	}
-	if !strings.Contains(got, "C:") {
-		t.Errorf("file://localhost: want drive path, got %q", got)
-	}
-	if _, err := normalizeLocalOpenPath("file://127.0.0.1/C:/x.txt"); err != nil {
-		t.Errorf("file://127.0.0.1 should be allowed: %v", err)
+	if _, err := normalizeLocalOpenPath("file://127.0.0.1/tmp/reasonix-report.md"); err == nil {
+		t.Logf("file://127.0.0.1 accepted (exact resolution is platform-specific)")
 	}
 }
 
-func TestNormalizeLocalOpenPathAuthorityUNC(t *testing.T) {
-	// Remote file:// URLs are refused (SMB credential-leak risk on AI-injected
-	// chat content); plain \server\share paths still work — the UNC form
-	// stays available for users who type or render it explicitly.
+func TestNormalizeLocalOpenPathRejectsRemoteUNC(t *testing.T) {
+	// Plain UNC paths must be refused before any os.Stat/opener call:
+	// opening them connects to a remote SMB share (Net-NTLM leak). Loopback
+	// UNC is covered in open_local_path_windows_test.go.
+	for _, in := range []string{
+		`\\server\share\docs\report.md`,
+		`//server/share/docs/report.md`,
+		`\\attacker\share\x`,
+		`//attacker/share/x`,
+		`\\\server\share\x`, // triple slash still resolves to a UNC root
+	} {
+		if _, err := normalizeLocalOpenPath(in); err == nil {
+			t.Errorf("normalizeLocalOpenPath(%q): want rejection (remote UNC), got nil", in)
+		}
+	}
+	// The URL spelling is refused for the same reason (SMB credential-leak
+	// risk on AI-injected chat content).
 	if _, err := normalizeLocalOpenPath("file://server/share/docs/report.md"); err == nil {
 		t.Fatal("remote file:// URL must be rejected (SMB leak risk)")
-	}
-	want := filepath.FromSlash("//server/share/docs/report.md")
-	got, err := normalizeLocalOpenPath("\\\\server\\share\\docs\\report.md")
-	if err != nil {
-		t.Fatalf("plain UNC path rejected: %v", err)
-	}
-	if got != want {
-		t.Fatalf("plain UNC path = %q, want %q", got, want)
 	}
 }
 
@@ -153,12 +155,23 @@ func TestNormalizeLocalOpenPathWindowsUNC(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("UNC paths are Windows-only")
 	}
-	got, err := normalizeLocalOpenPath(`\\server\share\docs\report.md`)
-	if err != nil {
-		t.Fatalf("UNC path rejected: %v", err)
+	// Remote UNC is refused before any os.Stat/opener call (SMB leak risk).
+	for _, in := range []string{
+		`\\server\share\docs\report.md`,
+		`//server/share/docs/report.md`,
+		`\\\server\share\x`,
+	} {
+		if _, err := normalizeLocalOpenPath(in); err == nil {
+			t.Errorf("normalizeLocalOpenPath(%q) = nil, want rejection (remote UNC)", in)
+		}
 	}
-	if got != `\\server\share\docs\report.md` {
-		t.Fatalf("UNC path = %q, want unchanged", got)
+	// Loopback UNC stays allowed — it is this machine.
+	got, err := normalizeLocalOpenPath(`\\localhost\share\docs\report.md`)
+	if err != nil {
+		t.Fatalf("loopback UNC path rejected: %v", err)
+	}
+	if !filepath.IsAbs(got) {
+		t.Fatalf("loopback UNC path = %q, want absolute", got)
 	}
 }
 

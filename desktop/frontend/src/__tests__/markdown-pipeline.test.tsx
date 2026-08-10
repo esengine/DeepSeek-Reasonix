@@ -143,14 +143,16 @@ for (const [name, text] of Object.entries(fixtures)) {
   }
 }
 
-// Authority-form UNC links use the same strict local-file allowlist in the
-// worker pipeline as canonical file:/// links do.
+// Authority-form UNC links with a REMOTE host are refused by the same strict
+// local-file allowlist that rejects other remote file:// authorities (SMB
+// credential leak) — the sanitizer blanks them like any unsafe file: URL.
+// Loopback authority (file://localhost/...) still resolves locally.
 {
-  const unc = "file://nas/share/report.md";
-  eq(markdownUrlTransform(unc), unc, "authority-form UNC survives pipeline URL sanitization");
-  const root = parseMarkdownToHast(`[report](${unc})`);
-  const html = renderBlocks([{ key: "unc", children: root.children }]);
-  ok(html.includes(`href="${unc}"`), "authority-form UNC href survives HAST rendering");
+  const remote = "file://nas/share/report.md";
+  eq(markdownUrlTransform(remote), "", "remote-authority UNC is blanked by pipeline URL sanitization");
+  const root = parseMarkdownToHast(`[report](${remote})`);
+  const html = renderBlocks([{ key: "remote", children: root.children }]);
+  ok(!html.includes("nas/share"), "remote-authority UNC href is dropped from HAST rendering");
 }
 
 // Windows device namespaces and alternate data streams must not be restored

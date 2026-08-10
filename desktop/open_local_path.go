@@ -56,6 +56,12 @@ func normalizeLocalOpenPath(path string) (string, error) {
 	if hasDisallowedWindowsPathSyntax(path) {
 		return "", fmt.Errorf("unsafe local path syntax %q", path)
 	}
+	// Refuse non-loopback UNC before any os.Stat/opener: opening
+	// \\server\share\... connects to a remote SMB share and negotiates
+	// Net-NTLM credentials. Loopback UNC (\\localhost\share) stays allowed.
+	if host := uncHost(path); host != "" && !isLoopbackHost(host) {
+		return "", fmt.Errorf("remote UNC path %q is not allowed (SMB credential leak risk)", host)
+	}
 	// Normalize forward slashes (file URLs, slash-form UNC "//nas/share")
 	// to the platform-native separators the opener expects.
 	path = filepath.FromSlash(path)
@@ -71,6 +77,26 @@ func normalizeLocalOpenPath(path string) (string, error) {
 func isLoopbackHost(host string) bool {
 	h := strings.ToLower(host)
 	return h == "localhost" || h == "127.0.0.1" || h == "::1" || h == "[::1]"
+}
+
+// uncHost extracts the server component of a UNC path (\\server\share or
+// //server/share), or "" when path is not in UNC form. Any number of leading
+// slashes beyond the first two is treated as a UNC root because Windows
+// resolves \\\\server\share and //server/share alike; the empty server
+// (///x) is not a shareable UNC.
+func uncHost(path string) string {
+	slashPath := strings.ReplaceAll(path, "\\", "/")
+	if !strings.HasPrefix(slashPath, "//") {
+		return ""
+	}
+	rest := strings.TrimLeft(slashPath, "/")
+	if rest == "" {
+		return ""
+	}
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		rest = rest[:i]
+	}
+	return rest
 }
 
 func isASCIILetter(value byte) bool {

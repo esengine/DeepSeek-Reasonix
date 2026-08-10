@@ -19,6 +19,24 @@ func TestNormalizeLocalOpenPathPreservesUnixRoot(t *testing.T) {
 	}
 }
 
+func TestNormalizeLocalOpenPathLoopbackUnix(t *testing.T) {
+	// Loopback authorities resolve to the same local path on Unix; the
+	// drive-letter spelling in the Windows test file is Windows-only.
+	for _, u := range []string{
+		"file://localhost/tmp/reasonix-report.md",
+		"file://127.0.0.1/tmp/reasonix-report.md",
+	} {
+		got, err := normalizeLocalOpenPath(u)
+		if err != nil {
+			t.Errorf("loopback URL %q rejected: %v", u, err)
+			continue
+		}
+		if got != "/tmp/reasonix-report.md" {
+			t.Errorf("loopback URL %q = %q, want /tmp/reasonix-report.md", u, got)
+		}
+	}
+}
+
 func TestOpenLocalPathRejectsExecutableMode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "clicked-document")
 	if err := os.WriteFile(path, []byte("not safe to launch"), 0o755); err != nil {

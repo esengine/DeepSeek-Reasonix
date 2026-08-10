@@ -61,7 +61,7 @@ assert.equal(
 );
 assert.equal(
   transformExportMarkdownUrl("file://nas/share/report.md", "href", fallbackUrlTransform),
-  "file://nas/share/report.md",
+  "filtered:file://nas/share/report.md",
 );
 assert.equal(
   transformExportMarkdownUrl("file://./PhysicalDrive0", "href", fallbackUrlTransform),
