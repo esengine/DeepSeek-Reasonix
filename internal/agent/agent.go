@@ -2090,7 +2090,8 @@ func (a *Agent) rebuildTodoState(msgs []provider.Message) {
 
 func toolResultFailed(content string) bool {
 	content = strings.TrimSpace(content)
-	return strings.HasPrefix(content, "error:") ||
+	return content == "cancelled: context cancelled before execution" ||
+		strings.HasPrefix(content, "error:") ||
 		strings.HasPrefix(content, "blocked:") ||
 		strings.HasPrefix(content, "Error:") ||
 		strings.HasPrefix(content, "[error")

@@ -116,3 +116,19 @@ func TestPathsProvenInSessionPairsDuplicateIDsByPosition(t *testing.T) {
 		t.Fatal("the second duplicate-ID call should use the failed second result")
 	}
 }
+
+func TestPathsProvenInSessionRejectsDuplicateIDBatchWithOrphanReplacement(t *testing.T) {
+	msgs := []provider.Message{
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{
+			{ID: "duplicate", Name: "read_file", Arguments: `{"path":"unread.go"}`},
+			{ID: "duplicate", Name: "bash", Arguments: `{"command":"go test ./..."}`},
+		}},
+		// The successful row is an orphan replacement, not the read_file result.
+		{Role: provider.RoleTool, ToolCallID: "orphan", Name: "bash", Content: "PASS"},
+		{Role: provider.RoleTool, ToolCallID: "duplicate", Name: "read_file", Content: "error: denied"},
+	}
+
+	if PathsProvenInSession(msgs, []string{"unread.go"}, false) {
+		t.Fatal("an orphan replacement in an ambiguous duplicate-ID batch must not grant path evidence")
+	}
+}

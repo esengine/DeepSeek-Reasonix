@@ -78,6 +78,14 @@ func TestWalkToolCallExchangesFallsBackToPositionForAmbiguousCallIDs(t *testing.
 				{Role: RoleTool, ToolCallID: "dup", Content: "B"},
 			},
 		},
+		{
+			name:  "mixed IDs with aligned unique anchor",
+			calls: []ToolCall{{Name: "first"}, {ID: "known", Name: "second"}},
+			tools: []Message{
+				{Role: RoleTool, ToolCallID: "gateway-a", Name: "first", Content: "A"},
+				{Role: RoleTool, ToolCallID: "known", Name: "second", Content: "B"},
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -101,6 +109,79 @@ func TestWalkToolCallExchangesFailsClosedOnIncompletePositionalTurn(t *testing.T
 	}
 	if got := collectToolCallExchanges(msgs); len(got) != 0 {
 		t.Fatalf("incomplete positional turn produced exchanges: %+v", got)
+	}
+}
+
+func TestWalkToolCallExchangesFailsClosedOnContradictoryPositionalIdentity(t *testing.T) {
+	tests := []struct {
+		name    string
+		calls   []ToolCall
+		results []Message
+	}{
+		{
+			name: "non-empty IDs disagree by position",
+			calls: []ToolCall{
+				{ID: "dup", Name: "read_file"},
+				{ID: "dup", Name: "read_file"},
+			},
+			results: []Message{
+				{Role: RoleTool, ToolCallID: "orphan", Name: "read_file", Content: "not owned by either call"},
+				{Role: RoleTool, ToolCallID: "dup", Name: "read_file", Content: "error: denied"},
+			},
+		},
+		{
+			name: "duplicate IDs have crossed tool names",
+			calls: []ToolCall{
+				{ID: "dup", Name: "read_file"},
+				{ID: "dup", Name: "bash"},
+			},
+			results: []Message{
+				{Role: RoleTool, ToolCallID: "dup", Name: "bash", Content: "PASS"},
+				{Role: RoleTool, ToolCallID: "dup", Name: "read_file", Content: "error: denied"},
+			},
+		},
+		{
+			name: "mixed IDs have a displaced unique anchor",
+			calls: []ToolCall{
+				{ID: "", Name: "read_file"},
+				{ID: "known", Name: "read_file"},
+			},
+			results: []Message{
+				{Role: RoleTool, ToolCallID: "known", Name: "read_file", Content: "known result"},
+				{Role: RoleTool, ToolCallID: "", Name: "read_file", Content: "empty-ID result"},
+			},
+		},
+		{
+			name: "mixed IDs have a missing unique anchor",
+			calls: []ToolCall{
+				{ID: "", Name: "read_file"},
+				{ID: "known", Name: "read_file"},
+			},
+			results: []Message{
+				{Role: RoleTool, ToolCallID: "gateway", Name: "read_file", Content: "gateway result"},
+				{Role: RoleTool, ToolCallID: "", Name: "read_file", Content: "empty-ID result"},
+			},
+		},
+		{
+			name: "mixed IDs have a duplicated unique anchor",
+			calls: []ToolCall{
+				{ID: "", Name: "read_file"},
+				{ID: "known", Name: "read_file"},
+			},
+			results: []Message{
+				{Role: RoleTool, ToolCallID: "known", Name: "read_file", Content: "first copy"},
+				{Role: RoleTool, ToolCallID: "known", Name: "read_file", Content: "second copy"},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			msgs := append([]Message{{Role: RoleAssistant, ToolCalls: tc.calls}}, tc.results...)
+			if got := collectToolCallExchanges(msgs); len(got) != 0 {
+				t.Fatalf("contradictory positional batch produced exchanges: %+v", got)
+			}
+		})
 	}
 }
 

@@ -161,6 +161,46 @@ func TestRebuildTodoStateIgnoresNormalizedInterruptedResults(t *testing.T) {
 	})
 }
 
+func TestRebuildTodoStateIgnoresCancelledBeforeExecutionWithEmptyIDs(t *testing.T) {
+	const cancelledBeforeExecution = "cancelled: context cancelled before execution"
+
+	t.Run("todo_write", func(t *testing.T) {
+		msgs := []provider.Message{
+			{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+				Name:      "todo_write",
+				Arguments: `{"todos":[{"content":"unconfirmed","status":"in_progress"}]}`,
+			}}},
+			{Role: provider.RoleTool, Name: "todo_write", Content: cancelledBeforeExecution},
+		}
+
+		a := &Agent{}
+		a.rebuildTodoState(msgs)
+		if len(a.todoState) != 0 {
+			t.Fatalf("cancelled empty-ID todo_write rebuilt canonical state: %+v", a.todoState)
+		}
+	})
+
+	t.Run("complete_step", func(t *testing.T) {
+		msgs := []provider.Message{
+			{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+				ID: "todo", Name: "todo_write",
+				Arguments: `{"todos":[{"content":"ship","status":"in_progress"}]}`,
+			}}},
+			{Role: provider.RoleTool, ToolCallID: "todo", Name: "todo_write", Content: "Todos updated"},
+			{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+				Name: "complete_step", Arguments: `{"step":"ship"}`,
+			}}},
+			{Role: provider.RoleTool, Name: "complete_step", Content: " \n" + cancelledBeforeExecution + "\t"},
+		}
+
+		a := &Agent{}
+		a.rebuildTodoState(msgs)
+		if len(a.todoState) != 1 || a.todoState[0].Status != "in_progress" {
+			t.Fatalf("cancelled empty-ID complete_step advanced canonical state: %+v", a.todoState)
+		}
+	})
+}
+
 func TestSetSessionAndRebuildTodoStateScopeDuplicateIDs(t *testing.T) {
 	s := NewSession("")
 	for _, msg := range []provider.Message{

@@ -77,6 +77,9 @@ func toolCallIDsAmbiguous(calls []ToolCall) bool {
 
 func walkPositionalToolCallExchanges(calls []ToolCall, results []Message, assistantIndex int, failBatchOnPlaceholder bool, visit func(ToolCallExchange) bool) bool {
 	if failBatchOnPlaceholder {
+		if !positionalToolCallResultsCompatible(calls, results) {
+			return true
+		}
 		for _, result := range results {
 			if result.Content == interruptedToolResult {
 				return true
@@ -93,6 +96,44 @@ func walkPositionalToolCallExchanges(calls []ToolCall, results []Message, assist
 			AssistantIndex: assistantIndex,
 			ResultIndex:    assistantIndex + 1 + callIndex,
 		}) {
+			return false
+		}
+	}
+	return true
+}
+
+// positionalToolCallResultsCompatible rejects structural evidence that an
+// ambiguous batch was reordered or contains a replacement/orphan result. Empty
+// fields remain compatible because gateways and old sessions can omit them.
+func positionalToolCallResultsCompatible(calls []ToolCall, results []Message) bool {
+	for i, call := range calls {
+		result := results[i]
+		if call.ID != "" && result.ToolCallID != "" && call.ID != result.ToolCallID {
+			return false
+		}
+		if call.Name != "" && result.Name != "" && call.Name != result.Name {
+			return false
+		}
+	}
+
+	// Every unique non-empty call ID is a reliable positional anchor. Missing,
+	// duplicated, or displaced results contradict ownership even when empty
+	// positions cannot be compared directly.
+	for callIndex, call := range calls {
+		if call.ID == "" {
+			continue
+		}
+		callCount, resultCount, resultIndex := 0, 0, -1
+		for i := range calls {
+			if calls[i].ID == call.ID {
+				callCount++
+			}
+			if results[i].ToolCallID == call.ID {
+				resultIndex = i
+				resultCount++
+			}
+		}
+		if callCount == 1 && (resultCount != 1 || resultIndex != callIndex) {
 			return false
 		}
 	}
