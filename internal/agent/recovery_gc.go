@@ -600,6 +600,7 @@ func recoveryTrashSidecars(path string) []string {
 		path+".telemetry.json",
 		store.SessionCheckpointDir(path),
 		store.SessionJobsDir(path),
+		store.SessionInboxDir(path),
 	)
 	return artifacts
 }

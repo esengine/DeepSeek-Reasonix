@@ -52,6 +52,7 @@ import (
 	"reasonix/internal/provider"
 	"reasonix/internal/recovery"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/sessioninbox"
 	"reasonix/internal/sessiontemp"
 	"reasonix/internal/shellrun"
 	"reasonix/internal/skill"
@@ -303,6 +304,10 @@ type Controller struct {
 	turn int
 
 	displayRecorder func(content, display string)
+
+	// inbox is the durable session-level instruction queue. Disk I/O never
+	// runs under c.mu; the store owns its own lock.
+	inbox inboxState
 }
 
 type approvalReply struct {
@@ -637,6 +642,14 @@ func New(opts Options) *Controller {
 	// Checkpoints: bind a store to the session and route writer pre-edits into it.
 	c.rebindCheckpoints(opts.SessionPath)
 	c.setActiveJobSession(opts.SessionPath)
+	c.rebindInbox()
+	// Observe Steer / unapplied-steer for durable inbox state transitions.
+	// Must wrap both the controller sink and the executor sink: agent.Steer
+	// emits on the executor path, TurnDone on the controller path.
+	c.sink = &inboxEventSink{inner: c.sink, c: c}
+	if c.executor != nil {
+		c.executor.SetSink(c.sink)
+	}
 	cmdsInit := opts.Commands
 	c.commands.Store(&cmdsInit)
 	if c.executor != nil {
@@ -700,13 +713,26 @@ func (c *Controller) ReplaceExtensions(d *dispatch.Dispatcher) {
 
 func (c *Controller) installExtensionsLocked(d *dispatch.Dispatcher) {
 	c.extensions = d
-	if existing, ok := c.sink.(*frontendEventSink); ok {
-		existing.setDispatcher(d)
-	} else {
-		c.sink = newFrontendEventSink(c.sink, d)
+	// Keep the inbox observer as the outermost sink so Steer/unapplied events
+	// always update durable state, while still installing/updating the
+	// frontendEventSink wrapper underneath for extension rulings.
+	switch sink := c.sink.(type) {
+	case *inboxEventSink:
+		if existing, ok := sink.inner.(*frontendEventSink); ok {
+			existing.setDispatcher(d)
+		} else {
+			sink.inner = newFrontendEventSink(sink.inner, d)
+		}
+	case *frontendEventSink:
+		sink.setDispatcher(d)
+		// Ensure inbox observer stays outer.
+		c.sink = &inboxEventSink{inner: sink, c: c}
+	default:
+		c.sink = &inboxEventSink{inner: newFrontendEventSink(c.sink, d), c: c}
 	}
 	if c.executor != nil {
 		c.executor.SetExtensions(d)
+		c.executor.SetSink(c.sink)
 	}
 }
 
@@ -913,11 +939,14 @@ func (c *Controller) finishGuardedTurn(err error, completion *guardedTurnComplet
 	defer func() {
 		c.mu.Lock()
 		c.finishing = false
-		if c.closed || len(c.parkedTurns) == 0 {
-			// A closed controller must not start a parked turn against freed
-			// resources; close() also cleared the queue, this guards the
-			// close-raced-with-delivery ordering.
+		if c.closed {
 			c.mu.Unlock()
+			return
+		}
+		if len(c.parkedTurns) == 0 {
+			c.mu.Unlock()
+			// No parked compatibility body: admit the next durable inbox item.
+			c.maybeDispatchInbox()
 			return
 		}
 		next := c.parkedTurns[0]
@@ -929,11 +958,32 @@ func (c *Controller) finishGuardedTurn(err error, completion *guardedTurnComplet
 		c.mu.Unlock()
 		c.spawnGuardedTurn(ctx, cancel, next)
 	}()
-	done := event.Event{Kind: event.TurnDone, Err: err, Cancelled: cancelRequested, Outcome: turnOutcome(err), CheckpointTurn: c.validatedCheckpointTurn(completion), Receipt: c.executor.CompletionReceipt()}
+	c.inbox.mu.Lock()
+	// Prefer a single representative id for the wire event (first active).
+	// Full multi-item ack happens in onInboxTurnDone via activeItemIDs.
+	activeInboxID := ""
+	for id := range c.inbox.activeItemIDs {
+		activeInboxID = id
+		break
+	}
+	c.inbox.mu.Unlock()
+	done := event.Event{
+		Kind:           event.TurnDone,
+		Err:            err,
+		Cancelled:      cancelRequested,
+		Outcome:        turnOutcome(err),
+		CheckpointTurn: c.validatedCheckpointTurn(completion),
+		Receipt:        c.executor.CompletionReceipt(),
+		ItemID:         activeInboxID,
+	}
 	var readinessErr *agent.FinalReadinessError
 	if errors.As(err, &readinessErr) {
 		done.Readiness = &event.FinalReadiness{Attempts: readinessErr.Attempts, Missing: append([]string(nil), readinessErr.Missing...)}
 	}
+	// Ack active durable items before exposing TurnDone. Frontends commonly
+	// refresh the inbox from that event and must not observe already-consumed
+	// steers in the completed turn. Dispatch still waits for finishing to clear.
+	c.onInboxTurnDone()
 	c.sink.Emit(done)
 }
 
@@ -1010,40 +1060,9 @@ func (c *Controller) runTurn(ctx context.Context, input string) error {
 // composition, checkpoints, hooks, and plan approval. It is for transports that
 // need a blocking request/response boundary, such as ACP session/prompt.
 func (c *Controller) RunTurn(ctx context.Context, input string) error {
-	ctx, cancel := context.WithCancel(extension.ContextWithRuntimeOwner(ctx, c.RuntimeOwner()))
-	c.mu.Lock()
-	// finishing is part of the gate: TurnDone delivery for the previous turn
-	// is still fanning out, and starting a synchronous turn inside that
-	// window recreates the completion/transport crosstalk the window exists
-	// to prevent (Running() already reports true here). closed seals a torn-
-	// down controller. Synchronous callers get an error rather than parking:
-	// they hold a request/response boundary open and already handle busy.
-	if c.running || c.finishing || c.rotating || c.closed {
-		c.mu.Unlock()
-		cancel()
-		return ErrTurnRunning
-	}
-	if c.rejectDrainingGenerationLocked() {
-		c.mu.Unlock()
-		cancel()
-		c.emitDrainingNotice()
-		return ErrRuntimeDraining
-	}
-	c.cancel = cancel
-	c.running = true
-	c.canceling = false
-	c.mu.Unlock()
-	defer event.RecordTurnCompletion(c.sink)
-
-	defer func() {
-		c.mu.Lock()
-		c.running = false
-		c.cancel = nil
-		c.canceling = false
-		c.mu.Unlock()
-		cancel()
-	}()
-	return c.runTurn(ctx, input)
+	return c.runSynchronousTurn(ctx, nil, func(runCtx context.Context) error {
+		return c.runTurn(runCtx, input)
+	})
 }
 
 func (c *Controller) runTurnWithRaw(ctx context.Context, input, raw string) error {
@@ -1205,6 +1224,22 @@ func (c *Controller) submitInvocations(input, display string, requests []Invocat
 		c.SubmitDisplay(display, input)
 		return
 	}
+	prepared, err := c.prepareInvocationTurn(input, requests)
+	if err != nil {
+		c.notice(err.Error())
+		return
+	}
+	c.runGuarded(func(ctx context.Context) error {
+		return c.runPreparedInvocationTurn(ctx, prepared, input, input, display, nil)
+	})
+}
+
+type preparedInvocationTurn struct {
+	composed  string
+	subagents []skill.Skill
+}
+
+func (c *Controller) prepareInvocationTurn(input string, requests []InvocationRequest) (preparedInvocationTurn, error) {
 	ordered := append([]InvocationRequest(nil), requests...)
 	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Offset < ordered[j].Offset })
 	inline := make([]skill.Skill, 0, len(ordered))
@@ -1212,16 +1247,14 @@ func (c *Controller) submitInvocations(input, display string, requests []Invocat
 	for _, request := range ordered {
 		sk, _, ok := c.resolveSkillInvocation("/" + strings.TrimSpace(request.Name))
 		if !ok {
-			c.notice("unknown invocation: /" + strings.TrimSpace(request.Name))
-			return
+			return preparedInvocationTurn{}, fmt.Errorf("unknown invocation: /%s", strings.TrimSpace(request.Name))
 		}
 		kind := "skill"
 		if sk.RunAs == skill.RunSubagent {
 			kind = "subagent"
 		}
-		if request.Kind != kind {
-			c.notice(fmt.Sprintf("invocation /%s is %s, not %s", sk.SlashName(), kind, request.Kind))
-			return
+		if strings.TrimSpace(request.Kind) != "" && request.Kind != kind {
+			return preparedInvocationTurn{}, fmt.Errorf("invocation /%s is %s, not %s", sk.SlashName(), kind, request.Kind)
 		}
 		if sk.RunAs == skill.RunSubagent {
 			subagents = append(subagents, sk)
@@ -1238,24 +1271,36 @@ func (c *Controller) submitInvocations(input, display string, requests []Invocat
 		parts = append(parts, input)
 	}
 	composed := strings.Join(parts, "\n\n")
-	if len(subagents) == 0 {
-		c.runGuarded(func(ctx context.Context) error {
-			return c.runGoalLoopWithRawDisplay(ctx, composed, input, display)
-		})
-		return
-	}
 	if strings.TrimSpace(input) == "" {
-		c.notice("subagent invocation requires a task")
-		return
-	}
-	c.runGuarded(func(ctx context.Context) error {
-		planMode := c.PlanMode()
-		runner := c.skillRunner
-		if runner == nil {
-			return fmt.Errorf("subagent skill runner is unavailable")
+		if len(subagents) > 0 {
+			return preparedInvocationTurn{}, fmt.Errorf("subagent invocation requires a task")
 		}
-		return newTurnOrchestrator(c).runSubagentSkillTurnsGoalLoop(ctx, subagents, composed, input, display, runner, planMode)
-	})
+	}
+	return preparedInvocationTurn{composed: composed, subagents: subagents}, nil
+}
+
+func (c *Controller) runPreparedInvocationTurn(
+	ctx context.Context,
+	prepared preparedInvocationTurn,
+	input, raw, display string,
+	frozenImages []string,
+) error {
+	if len(prepared.subagents) == 0 {
+		return c.runGoalLoopWithFrozenImagesRawDisplay(ctx, prepared.composed, raw, display, frozenImages)
+	}
+	runner := c.skillRunner
+	if runner == nil {
+		return fmt.Errorf("subagent skill runner is unavailable")
+	}
+	return newTurnOrchestrator(c).runSubagentSkillTurnsGoalLoop(
+		ctx,
+		prepared.subagents,
+		prepared.composed,
+		input,
+		display,
+		runner,
+		c.PlanMode(),
+	)
 }
 
 // SubmitEditedDisplay is SubmitDisplay for an inline-edited prompt. The model
@@ -2864,6 +2909,9 @@ func (c *Controller) NewSession() error {
 	c.resetRecoveryForNewSession(freshPath)
 	c.rotateSessionTemp()
 	c.snapshotMu.Unlock()
+	// Old session keeps its inbox (paused); the fresh session starts empty.
+	c.pauseInboxOnRotate()
+	c.rebindInbox()
 	// A new session starts with no active goal: without this, a running goal's
 	// text kept injecting into the fresh session's first turns. The old
 	// session's goal-state sidecar was persisted before the rotation and stays
@@ -2949,6 +2997,7 @@ func (c *Controller) ClearSession() error {
 	c.resetRecoveryForNewSession(freshPath)
 	c.rotateSessionTemp()
 	c.snapshotMu.Unlock()
+	c.rebindInbox()
 	// Same contract as NewSession: the fresh session starts with no active goal.
 	c.ClearGoal()
 	c.mu.Lock()
@@ -3004,6 +3053,9 @@ func removeSessionArtifacts(path string) error {
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 			return err
 		}
+	}
+	if err := sessioninbox.RemoveDir(path); err != nil && !os.IsNotExist(err) {
+		return err
 	}
 	if dir := ckptDir(path); dir != "" {
 		if err := os.RemoveAll(dir); err != nil && !os.IsNotExist(err) {
@@ -3445,6 +3497,7 @@ func (c *Controller) Resume(s *agent.Session, path string) {
 		c.rotateSessionTemp()
 	}
 	c.snapshotMu.Unlock()
+	c.rebindInbox()
 	c.recoverCheckpointTransactions()
 	c.recoverInterruptedTurn(path)
 	c.maybeColdResumePrune(path)
@@ -4611,6 +4664,7 @@ func (c *Controller) setSessionPath(p string, fresh bool) {
 		c.loadRecoveryState(p)
 	}
 	c.snapshotMu.Unlock()
+	c.rebindInbox()
 	if !fresh {
 		c.recoverCheckpointTransactions()
 	}

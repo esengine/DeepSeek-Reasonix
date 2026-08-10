@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const settings = readFileSync(resolve(testDir, "../components/SettingsPanel.tsx"), "utf8");
+const settingsNavigation = readFileSync(resolve(testDir, "../components/SettingsNavigation.tsx"), "utf8");
 const storagePage = readFileSync(resolve(testDir, "../components/StorageSettingsPage.tsx"), "utf8");
 const bridge = readFileSync(resolve(testDir, "../lib/bridge.ts"), "utf8");
 const backend = readFileSync(resolve(testDir, "../../../storage_app.go"), "utf8");
@@ -28,8 +29,8 @@ function ok(condition: boolean, label: string) {
 
 console.log("\nsettings storage page contract");
 
-const tabs = settings.match(/const SETTINGS_TABS: SettingsTab\[\] = \[([^\]]+)\]/)?.[1] ?? "";
-ok(/"storage",\s*"updates"\s*$/.test(tabs), "Storage is immediately before Updates in the settings navigation");
+const tabs = settingsNavigation.match(/SETTINGS_NAV_TABS: SettingsTab\[\] = \[([^\]]+)\]/)?.[1] ?? "";
+ok(/"storage",\s*"updates",?\s*$/.test(tabs), "Storage is immediately before Updates in the settings navigation");
 ok(types.includes('| "storage" | "updates";'), "SettingsTab exposes the storage route before updates");
 ok(settings.includes('tab === "storage"') && settings.includes("<StorageSettingsPage />"), "Storage renders the same page on every platform");
 ok(settings.includes('import("./StorageSettingsPage")'), "Storage data and UI are loaded only when its page bundle renders");

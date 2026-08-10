@@ -2068,6 +2068,7 @@ func migrateSessionSidecars(oldPath, newPath, newID string) error {
 		{store.SessionRecoveryState(oldPath), store.SessionRecoveryState(newPath)},
 		{store.SessionCheckpointDir(oldPath), store.SessionCheckpointDir(newPath)},
 		{store.SessionJobsDir(oldPath), store.SessionJobsDir(newPath)},
+		{store.SessionInboxDir(oldPath), store.SessionInboxDir(newPath)},
 	} {
 		// A source name past the filesystem limit cannot exist; renaming it
 		// would just manufacture ENAMETOOLONG instead of a clean not-exist.

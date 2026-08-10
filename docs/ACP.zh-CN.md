@@ -180,19 +180,46 @@ agentCapabilities._meta["reasonix.io"].sessionSteer.method
 }
 ```
 
-成功返回 `{}` 表示活动回合已接受引导。Reasonix 会在下一个安全的模型调用边界前把它
-作为 user message 加入上下文，不会取消回合，也不会额外消耗工具步骤预算。该消息会进入
-正常历史；回放 transcript 时显示用户原文，不显示 Reasonix 内部 steer marker。
+持久化会话会返回 item id 和 disposition：
+
+```json
+{"itemId":"inbox-item-id","disposition":"steer_accepted"}
+```
+
+Reasonix 会先完成持久化再返回。`steer_accepted` 表示活动回合已接受；
+`queued_followup` 表示 admission 竞争失败或当前没有活动回合，同一条持久化消息会保留为
+后续回合。无路径兼容会话可能不返回 `itemId`，但仍返回 `steer_accepted`。已应用的消息
+会进入正常历史；回放 transcript 时显示用户原文，不显示内部 steer marker。
 
 | 条件 | JSON-RPC 结果 |
 | --- | --- |
-| 活动 prompt 接受引导 | `{}` |
+| 活动 prompt 接受持久化引导 | `{"itemId":"...","disposition":"steer_accepted"}` |
+| 引导已持久化但活动 admission 被拒绝 | `{"itemId":"...","disposition":"queued_followup"}` |
 | session 不存在或 prompt 为空 | `-32602 InvalidParams` |
-| session 没有活动 prompt | `-32600 InvalidRequest` |
+| 无路径兼容 session 没有活动 prompt | `-32600 InvalidRequest` |
 | 客户端调用 `session/steer` | `-32601 MethodNotFound` |
 
-收到 `InvalidRequest` 时，引导没有入队。客户端可以等待活动 prompt 结束，再让用户把该
-文本作为普通新 prompt 提交，但不能把失败的 steer 静默显示为已接受。
+收到 `InvalidRequest` 时，兼容会话没有把引导入队。
+
+## 持久化 Session Inbox 扩展
+
+从 `agentCapabilities._meta["reasonix.io"].sessionInbox` 发现带版本的队列。
+Schema v1 在 `methods` map 中声明方法名；客户端应使用这里声明的名字，不要自行拼接
+vendor method。
+
+| Key | 用途 | 主要参数 |
+| --- | --- | --- |
+| `enqueue` | 持久化 follow-up 或 steer | `sessionId`、`text`，可选 `intent`、`idempotencyKey` |
+| `list` | 读取元数据、容量、暂停和恢复状态 | `sessionId` |
+| `get` | 按需读取一条完整 envelope | `sessionId`、`itemId` |
+| `update` / `delete` | 编辑或删除待处理项 | `sessionId`、`itemId` |
+| `move` | 调整待处理项顺序 | `sessionId`、`itemId`、从 0 开始的 `toIndex` |
+| `setPaused` | 暂停或恢复派发 | `sessionId`、`paused` |
+| `retry` / `refresh` | 重试不确定项或重新冻结引用 | `sessionId`、`itemId` |
+
+`enqueue` 返回 `itemId`、`disposition`、`position`、`paused` 和 `idempotent`。
+List 只返回预览和字节数，不返回正文。恢复出的 Inbox 默认暂停；客户端应先让用户检查，
+再用 `setPaused: false` 恢复派发。
 
 ## 运行时重载与扩展表面
 
@@ -220,8 +247,8 @@ Reasonix 还在 `agentCapabilities._meta["reasonix.io"]` 中通告两个扩展�
 | --- | --- | --- |
 | 现有 ACP v1 方法 | 方法名和响应结构不变。 | 兼容 |
 | Capability `_meta` | 可以忽略未知 metadata。 | 兼容 |
-| 持久化 transcript | 不需要新增持久化 schema。 | 兼容 |
-| CLI、Desktop、Bot steer | 保留现有 idle fallback。 | 兼容 |
+| 持久化 transcript | transcript schema 不变；Inbox 使用带版本的 sidecar。 | 兼容 |
+| CLI、Desktop、Bot steer | 被拒绝的 steer 会保留为持久化 follow-up。 | 兼容 |
 
 Steer 只会把用户请求的消息追加到正常会话历史，不改变 system prompt、工具 schema、工具
 顺序或其他稳定的 provider prefix 字节。下一次 provider 请求必然包含这条新消息，和任何
@@ -234,6 +261,7 @@ Steer 只会把用户请求的消息追加到正常会话历史，不改变 syst
 3. 使用绝对工作区路径打开会话，并隔离保存各 session id。
 4. Prompt 运行期间继续处理 agent 发往客户端的文件、terminal 和权限请求。
 5. 只有在 Reasonix 声明 capability 且 prompt 活动时才显示 steer UI。
-6. 把成功的 steer 响应理解为“引导已入队”，而不是“模型已立即完成处理”。
+6. 按 steer `disposition` 分支；两种结果都已持久化，但只有 `steer_accepted`
+   能影响活动回合。
 7. 用 `session/close` 释放资源；只有用户明确要删除持久化历史时才调用
    `session/delete`。

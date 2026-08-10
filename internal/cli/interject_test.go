@@ -10,7 +10,7 @@ import (
 )
 
 func TestInterjectQueuesWhileRunningWithoutOverwrite(t *testing.T) {
-	m := newTestChatTUI()
+	m := newInboxTestChatTUI(t)
 	m.state = tuiRunning
 
 	m.input.SetValue("first")
@@ -25,26 +25,42 @@ func TestInterjectQueuesWhileRunningWithoutOverwrite(t *testing.T) {
 	m0, _ = m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = m0.(chatTUI)
 
-	if want := []string{"first", "second"}; len(m.pendingInterject) != len(want) ||
-		m.pendingInterject[0] != want[0] || m.pendingInterject[1] != want[1] {
-		t.Fatalf("pendingInterject = %v, want %v (second must not overwrite first; empty must not queue)", m.pendingInterject, want)
+	got := m.inboxBodies()
+	if want := []string{"first", "second"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("inbox = %v, want %v (second must not overwrite first; empty must not queue)", got, want)
 	}
 	if m.state != tuiRunning {
 		t.Fatalf("queuing input must not change state; got %v", m.state)
 	}
 }
 
-func TestInterjectDequeuesFrontOnTurnDone(t *testing.T) {
+func TestInterjectLeavesQueueOnTurnDoneForControllerDispatch(t *testing.T) {
 	r := &blockingTurnRunner{started: make(chan struct{})}
-	ctrl := control.New(control.Options{Runner: r, Sink: event.Discard, SessionDir: t.TempDir(), Label: "test"})
+	dir := t.TempDir()
+	ctrl := control.New(control.Options{Runner: r, Sink: event.Discard, SessionDir: dir, Label: "test"})
+	ctrl.EnsureSessionPath()
 	m := newChatTUI(ctrl, "", make(chan event.Event, 8), 80)
 	m.state = tuiRunning
-	m.pendingInterject = []string{"first", "second"}
+	m.seedInbox("first", "second")
 
+	// CLI no longer dequeues on TurnDone; durable items stay until the controller
+	// admits and acks them. Pause so dispatch does not immediately consume.
+	_ = m.ctrl.SetInboxPaused(true)
 	m0, _ := m.update(agentEventMsg(event.Event{Kind: event.TurnDone}))
 	m = m0.(chatTUI)
 
-	if len(m.pendingInterject) != 1 || m.pendingInterject[0] != "second" {
-		t.Fatalf("TurnDone should dequeue only the front; got %v", m.pendingInterject)
+	got := m.inboxBodies()
+	if len(got) != 2 || got[0] != "first" || got[1] != "second" {
+		t.Fatalf("TurnDone must not drop durable inbox items; got %v", got)
 	}
+}
+
+func newInboxTestChatTUI(t *testing.T) chatTUI {
+	t.Helper()
+	dir := t.TempDir()
+	ctrl := control.New(control.Options{SessionDir: dir, Label: "test", Sink: event.Discard})
+	ctrl.EnsureSessionPath()
+	m := newTestChatTUI()
+	m.ctrl = ctrl
+	return m
 }

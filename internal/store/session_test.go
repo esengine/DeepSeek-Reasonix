@@ -22,6 +22,7 @@ func TestSessionSidecarLayout(t *testing.T) {
 		{"lease-info", SessionLeaseInfo(p), p + ".lease.json"},
 		{"checkpoint", SessionCheckpointDir(p), "/home/u/.reasonix/sessions/abc.ckpt"},
 		{"jobs", SessionJobsDir(p), "/home/u/.reasonix/sessions/abc.jobs"},
+		{"inbox", SessionInboxDir(p), "/home/u/.reasonix/sessions/abc.inbox"},
 		{"cleanup-pending", SessionCleanupPending(p), "/home/u/.reasonix/sessions/abc.cleanup-pending.json"},
 		{"context", SessionContext(p), "/home/u/.reasonix/sessions/abc.context.json"},
 	}
@@ -49,6 +50,7 @@ func TestSessionSidecarEmptyPath(t *testing.T) {
 		{"lease-info", SessionLeaseInfo},
 		{"checkpoint", SessionCheckpointDir},
 		{"jobs", SessionJobsDir},
+		{"inbox", SessionInboxDir},
 		{"cleanup-pending", SessionCleanupPending},
 		{"context", SessionContext},
 	} {

@@ -82,6 +82,7 @@ func (a *Agent) observeOutcomeShadow(receiptMark int, results []string, outcomes
 	a.applyGovernor(&sample)
 	a.armGovernorCapture(sample)
 	event.RecordOutcomeProgress(a.sink, sample)
+	a.observeContractRound()
 }
 
 // applyProgressGuard escalates when consecutive rounds stop producing new

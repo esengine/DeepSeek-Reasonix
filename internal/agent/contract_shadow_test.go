@@ -20,7 +20,7 @@ func TestBuildShadowContractReplaysTheTurn(t *testing.T) {
 			{Content: "run the tests", Status: "completed"},
 		}},
 	}
-	c := buildShadowContract("fix the add bug in calc.py", receipts)
+	c := buildShadowContract("fix the add bug in calc.py", receipts, nil)
 	audit := contractShadowAudit(c)
 
 	if audit.Intent != "mutation" {
@@ -45,7 +45,7 @@ func TestBuildShadowContractIncompleteTurn(t *testing.T) {
 		}},
 		{ToolName: "edit_file", Mutation: true, Success: true},
 	}
-	audit := contractShadowAudit(buildShadowContract("investigate then fix the parser", receipts))
+	audit := contractShadowAudit(buildShadowContract("investigate then fix the parser", receipts, nil))
 	if audit.Complete {
 		t.Fatalf("open todo must keep the shadow incomplete: %+v", audit)
 	}

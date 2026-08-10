@@ -623,7 +623,8 @@ Chat and transcript shortcuts:
 
 | Key or command | What it does | Notes |
 | --- | --- | --- |
-| `Enter` | Sends the current message | While a turn is running, non-empty input is queued as follow-up feedback. |
+| `Enter` | Sends the current message | While a turn is running, non-empty input is durably queued as a follow-up before the composer clears. |
+| `Ctrl+Enter` or `/steer <text>` | Adds guidance to the active turn | The guidance is persisted first; if the turn cannot accept it, it remains a normal follow-up. |
 | `Shift+Enter`, `Alt+Enter`, or `Ctrl+J` | Inserts a newline | Plain `Enter` is reserved for send/confirm. |
 | Plain `Up` / `Down` while idle | Recalls older or newer submitted prompts | In a running turn, the same keys navigate queued follow-up feedback. |
 | `PageUp` / `PageDown` | Scrolls the transcript | Works regardless of the current chat state. |
@@ -641,6 +642,12 @@ Chat and transcript shortcuts:
 | `Ctrl+V` on macOS/Linux; `Alt+V` on Windows | Pastes a clipboard image | Image paste is a separate application action. The footer shows `Pasting image…` while the clipboard is read, then inserts an editable `[image #N]` token at the cursor. |
 | `/paste-image` | Pastes a clipboard image | Command form of the same image-only action. |
 | A line starting with `!` | Runs a shell command directly | The command runs locally without asking the model. |
+
+`/queue list` shows bounded previews without loading full bodies. Use `/queue
+show|edit|delete|move`, `/queue pause|resume`, and `/queue retry|refresh` to
+inspect or manage pending work. After crash recovery the inbox is paused, so
+review it and run `/queue resume` before dispatch continues. Each item is
+limited to 4 MiB; a session accepts at most 64 items and 64 MiB total.
 
 Mode and display shortcuts:
 

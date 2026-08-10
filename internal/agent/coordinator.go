@@ -332,6 +332,9 @@ func (c *Coordinator) SetPlannerPlanApprover(g PlannerPlanApprover) {
 // Run plans with the planner model, then hands the plan to the executor.
 func (c *Coordinator) Run(ctx context.Context, input string) error {
 	c.sink.Emit(event.Event{Kind: event.TurnStarted})
+	// A turn starts owing nothing to the last one's plan; deliverPlan installs
+	// this turn's plan only once the executor is actually about to run it.
+	c.executor.SetPlanContract(nil)
 	decision := PlannerDecision{
 		Route:  PlannerRoutePlanAndExecute,
 		Depth:  PlannerDepthFull,
@@ -408,6 +411,9 @@ func (c *Coordinator) deliverPlan(ctx context.Context, input string, outcome pla
 		return nil
 	}
 	runExecutorWithPlan := func(ctx context.Context, planText string) error {
+		if outcome.structured {
+			c.executor.SetPlanContract(&outcome.plan)
+		}
 		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.prov.Name() + " · executing", Source: event.UsageSourceExecutor})
 		return c.executor.Run(ctx, formatHandoffWithDecision(input, planText, decision, executorToolHandoffContext(c.executor)))
 	}
