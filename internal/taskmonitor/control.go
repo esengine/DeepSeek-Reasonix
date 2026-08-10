@@ -68,17 +68,25 @@ const (
 	ErrTaskIdempotencyConflict = "task_idempotency_conflict"
 	ErrTaskAuditFailed         = "task_audit_failed"
 	ErrTaskRuntimeUnavailable  = "task_runtime_unavailable"
+	ErrTaskRuntimeStartFailed  = "task_runtime_start_failed"
 )
 
 // ControlService provides atomic control operations on tasks.
 type ControlService struct {
-	mu    sync.Mutex
-	store WriteStore
+	mu        sync.Mutex
+	store     WriteStore
+	scheduler func(context.Context, string, string) error
 }
 
 // NewControlService returns a ControlService backed by store.
 func NewControlService(store WriteStore) *ControlService {
 	return &ControlService{store: store}
+}
+
+// SetScheduler installs the host scheduler used after a successful requeue.
+// A nil scheduler preserves standalone CLI behavior.
+func (cs *ControlService) SetScheduler(fn func(context.Context, string, string) error) {
+	cs.scheduler = fn
 }
 
 func (cs *ControlService) StopTask(ctx context.Context, projectDir, taskID string, expectedVersion uint64, reason, idemKey string) (ControlResult, error) {
@@ -105,7 +113,14 @@ func (cs *ControlService) CancelTaskWithKiller(ctx context.Context, projectDir, 
 // new runtime; RuntimeState therefore remains exited (or unknown for legacy
 // data) until a scheduler starts the task and records a new lifecycle.
 func (cs *ControlService) RequeueTask(ctx context.Context, projectDir, taskID string, expectedVersion uint64, idemKey string) (ControlResult, error) {
-	return cs.controlOp(ctx, projectDir, taskID, expectedVersion, "requeue", TaskStateQueued, "", idemKey, nil)
+	result, err := cs.controlOp(ctx, projectDir, taskID, expectedVersion, "requeue", TaskStateQueued, "", idemKey, nil)
+	if err == nil && result.Accepted && cs.scheduler != nil {
+		if scheduleErr := cs.scheduler(ctx, projectDir, taskID); scheduleErr != nil {
+			result.Accepted = false
+			result.Error = &CtrlError{Code: ErrTaskRuntimeStartFailed, Message: "runtime could not be started"}
+		}
+	}
+	return result, err
 }
 
 func (cs *ControlService) OpenTaskSession(ctx context.Context, projectDir, taskID string) (ControlResult, error) {
