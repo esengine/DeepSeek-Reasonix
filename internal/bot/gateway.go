@@ -347,7 +347,7 @@ func normalizeAdapterBindings(adapters []AdapterBinding) []AdapterBinding {
 }
 
 func (gw *BotGateway) buildAllowlist() {
-	for _, plat := range []Platform{PlatformQQ, PlatformFeishu, PlatformWeixin} {
+	for _, plat := range []Platform{PlatformQQ, PlatformFeishu, PlatformWeixin, PlatformTelegram} {
 		gw.allowlist[plat] = make(map[string]bool)
 		if !gw.cfg.Allowlist.Enabled {
 			continue
@@ -372,7 +372,7 @@ func addAllowlistUsers(dst map[string]bool, users []string) {
 }
 
 func (gw *BotGateway) buildSelfUserIDs() {
-	for _, plat := range []Platform{PlatformQQ, PlatformFeishu, PlatformWeixin} {
+	for _, plat := range []Platform{PlatformQQ, PlatformFeishu, PlatformWeixin, PlatformTelegram} {
 		gw.selfUserIDs[plat] = stringSet(gw.cfg.SelfUserIDs[plat])
 	}
 }
@@ -2170,6 +2170,7 @@ func (gw *BotGateway) runTurnItem(ctx context.Context, adapter Adapter, key stri
 		msg.ChatType,
 		msg.UserID,
 		msg.MessageID,
+		msg.ThreadID,
 		gw.logger,
 		func(approval event.Approval) {
 			gw.mu.Lock()
@@ -2733,10 +2734,15 @@ func sessionMappingMatches(mapping SessionMapping, msg InboundMessage) bool {
 }
 
 func sessionMappingIdentity(msg InboundMessage) (chatType string, userID string, threadID string) {
+	if msg.Platform == PlatformTelegram && msg.ChatType == ChatGroup && strings.TrimSpace(msg.ThreadID) != "" {
+		return string(ChatThread), "", strings.TrimSpace(msg.ThreadID)
+	}
 	switch msg.ChatType {
 	case ChatGroup, ChatGuild:
 		chatType = string(msg.ChatType)
-		userID = strings.TrimSpace(msg.UserID)
+		if msg.Platform != PlatformTelegram {
+			userID = strings.TrimSpace(msg.UserID)
+		}
 	case ChatThread:
 		chatType = string(msg.ChatType)
 		threadID = strings.TrimSpace(msg.ThreadID)
@@ -2807,6 +2813,7 @@ func (gw *BotGateway) sendText(ctx context.Context, adapter Adapter, msg Inbound
 		ChatType:     msg.ChatType,
 		Text:         text,
 		ReplyToMsgID: msg.MessageID,
+		ThreadID:     msg.ThreadID,
 	}
 	binding := AdapterBinding{
 		ID:       strings.TrimSpace(msg.ConnectionID),

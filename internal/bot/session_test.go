@@ -44,6 +44,18 @@ func TestBuildSessionKey(t *testing.T) {
 			wantSame: false,
 		},
 		{
+			name:     "telegram group shared across users",
+			src:      SessionSource{Platform: PlatformTelegram, ConnectionID: "telegram-main", ChatType: ChatGroup, ChatID: "-100123", UserID: "1"},
+			src2:     SessionSource{Platform: PlatformTelegram, ConnectionID: "telegram-main", ChatType: ChatGroup, ChatID: "-100123", UserID: "2"},
+			wantSame: true,
+		},
+		{
+			name:     "telegram topics are isolated",
+			src:      SessionSource{Platform: PlatformTelegram, ConnectionID: "telegram-main", ChatType: ChatGroup, ChatID: "-100123", ThreadID: "10", UserID: "1"},
+			src2:     SessionSource{Platform: PlatformTelegram, ConnectionID: "telegram-main", ChatType: ChatGroup, ChatID: "-100123", ThreadID: "11", UserID: "2"},
+			wantSame: false,
+		},
+		{
 			name:     "group same user different chat",
 			src:      SessionSource{Platform: PlatformFeishu, ChatType: ChatGroup, ChatID: "group1", UserID: "a"},
 			src2:     SessionSource{Platform: PlatformFeishu, ChatType: ChatGroup, ChatID: "group2", UserID: "a"},

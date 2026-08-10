@@ -183,8 +183,8 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # # Enabled MCP servers connect automatically in the background after session
 # # start. Use /mcp or the desktop MCP panel to refresh, reconnect, or disable.
 
-# Bot gateway: multi-channel IM bot for QQ, Feishu, and WeChat.
-# Start with `reasonix bot start --channels qq,feishu,weixin`.
+# Bot gateway: multi-channel IM bot for QQ, Feishu, WeChat, and Telegram.
+# Start with `reasonix bot start --channels qq,feishu,weixin,telegram`.
 # All secrets are read from environment variables; never put keys here.
 # [bot]
 # enabled    = false
@@ -200,6 +200,7 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # qq = []                 # 可选：各平台 bot 自己的 user/open id
 # feishu = []
 # weixin = []
+# telegram = []
 #
 # [bot.control]
 # enabled = false         # 本机 loopback HTTP API：GET /status, GET /metrics, POST /send
@@ -225,15 +226,19 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # qq_users    = []
 # feishu_users = []
 # weixin_users = []
+# telegram_users = []
 # qq_approvers = []       # 为空时沿用 allowlist 用户可审批的兼容行为
 # feishu_approvers = []
 # weixin_approvers = []
+# telegram_approvers = []
 # qq_admins = []          # 配置后 /yolo 和 /mode 仅限 admin
 # feishu_admins = []
 # weixin_admins = []
+# telegram_admins = []
 # qq_groups   = []
 # feishu_groups = []
 # weixin_groups = []
+# telegram_groups = []
 #
 # [bot.qq]
 # enabled        = false
@@ -255,6 +260,11 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # account_id = "default"
 # token_env = "WEIXIN_BOT_TOKEN"
 # api_base  = "https://ilinkai.weixin.qq.com"   # Tencent iLink Bot API base URL
+#
+# [bot.telegram]
+# enabled   = false
+# token_env = "TELEGRAM_BOT_TOKEN"
+# api_base  = "https://api.telegram.org"
 
 [serve]
 # Authentication for the HTTP serve frontend (reasonix serve).

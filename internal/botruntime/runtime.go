@@ -1,7 +1,9 @@
 package botruntime
 
 import (
+	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -10,6 +12,7 @@ import (
 	"reasonix/internal/bot"
 	"reasonix/internal/bot/feishu"
 	"reasonix/internal/bot/qq"
+	"reasonix/internal/bot/telegram"
 	"reasonix/internal/bot/weixin"
 	"reasonix/internal/config"
 )
@@ -27,6 +30,8 @@ func EnabledPlatforms(cfg *config.Config, channels []string) (map[bot.Platform]b
 				enabled[bot.PlatformQQ] = PlatformConfigured(cfg, bot.PlatformQQ)
 			case bot.PlatformFeishu:
 				enabled[bot.PlatformFeishu] = PlatformConfigured(cfg, bot.PlatformFeishu)
+			case bot.PlatformTelegram:
+				enabled[bot.PlatformTelegram] = PlatformConfigured(cfg, bot.PlatformTelegram)
 			case bot.PlatformWeixin:
 				enabled[bot.PlatformWeixin] = PlatformConfigured(cfg, bot.PlatformWeixin)
 			default:
@@ -42,6 +47,7 @@ func EnabledPlatforms(cfg *config.Config, channels []string) (map[bot.Platform]b
 	enabled[bot.PlatformQQ] = PlatformConfigured(cfg, bot.PlatformQQ)
 	enabled[bot.PlatformFeishu] = PlatformConfigured(cfg, bot.PlatformFeishu)
 	enabled[bot.PlatformWeixin] = PlatformConfigured(cfg, bot.PlatformWeixin)
+	enabled[bot.PlatformTelegram] = PlatformConfigured(cfg, bot.PlatformTelegram)
 	return enabled, warnings
 }
 
@@ -96,6 +102,10 @@ func PlatformConfigured(cfg *config.Config, platform bot.Platform) bool {
 		if cfg.Bot.Weixin.Enabled {
 			return true
 		}
+	case bot.PlatformTelegram:
+		if cfg.Bot.Telegram.Enabled {
+			return true
+		}
 	}
 	for _, conn := range cfg.Bot.Connections {
 		if conn.Enabled && bot.Platform(strings.TrimSpace(conn.Provider)) == platform {
@@ -116,7 +126,7 @@ func ChannelConfigs(connections []config.BotConnectionConfig, includeModel bool,
 		}
 		plat := bot.Platform(strings.TrimSpace(conn.Provider))
 		switch plat {
-		case bot.PlatformQQ, bot.PlatformFeishu, bot.PlatformWeixin:
+		case bot.PlatformQQ, bot.PlatformFeishu, bot.PlatformWeixin, bot.PlatformTelegram:
 		default:
 			continue
 		}
@@ -344,6 +354,19 @@ func AdapterBindings(cfg *config.Config, enabled map[bot.Platform]bool, feishuDo
 			weixinCfg.TokenEnv = firstNonEmptyString(strings.TrimSpace(conn.Credential.TokenEnv), weixinCfg.TokenEnv)
 			bindings = append(bindings, bot.AdapterBinding{ID: id, Domain: strings.TrimSpace(conn.Domain), Platform: platform, Adapter: weixin.New(weixinCfg, logger)})
 			hasConnection[platform] = true
+		case bot.PlatformTelegram:
+			tokenEnv := firstNonEmptyString(strings.TrimSpace(conn.Credential.TokenEnv), cfg.Bot.Telegram.TokenEnv)
+			bindings = append(bindings, bot.AdapterBinding{
+				ID:       id,
+				Domain:   "telegram",
+				Platform: platform,
+				Adapter: telegram.New(telegram.Config{
+					ConnectionID: id,
+					Token:        os.Getenv(tokenEnv),
+					APIBaseURL:   cfg.Bot.Telegram.APIBase,
+				}),
+			})
+			hasConnection[platform] = true
 		}
 	}
 	if enabled[bot.PlatformQQ] && !hasConnection[bot.PlatformQQ] {
@@ -356,6 +379,18 @@ func AdapterBindings(cfg *config.Config, enabled map[bot.Platform]bool, feishuDo
 	}
 	if enabled[bot.PlatformWeixin] && !hasConnection[bot.PlatformWeixin] {
 		bindings = append(bindings, bot.AdapterBinding{ID: string(bot.PlatformWeixin), Domain: "weixin", Platform: bot.PlatformWeixin, Adapter: weixin.New(cfg.Bot.Weixin, logger)})
+	}
+	if enabled[bot.PlatformTelegram] && !hasConnection[bot.PlatformTelegram] {
+		bindings = append(bindings, bot.AdapterBinding{
+			ID:       string(bot.PlatformTelegram),
+			Domain:   "telegram",
+			Platform: bot.PlatformTelegram,
+			Adapter: telegram.New(telegram.Config{
+				ConnectionID: string(bot.PlatformTelegram),
+				Token:        os.Getenv(strings.TrimSpace(cfg.Bot.Telegram.TokenEnv)),
+				APIBaseURL:   cfg.Bot.Telegram.APIBase,
+			}),
+		})
 	}
 	return bindings
 }
@@ -375,6 +410,70 @@ func ConnectionRuntimeID(conn config.BotConnectionConfig) string {
 	return provider + "-" + domain
 }
 
+func ValidateBotConfig(cfg *config.Config, lookupEnv func(string) string) error {
+	if cfg == nil {
+		return nil
+	}
+	if err := validateConnections(cfg.Bot.Connections, lookupEnv, cfg.Bot.Telegram.TokenEnv); err != nil {
+		return err
+	}
+	if !cfg.Bot.Telegram.Enabled || hasEnabledConnection(cfg.Bot.Connections, bot.PlatformTelegram) {
+		return nil
+	}
+	tokenEnv := strings.TrimSpace(cfg.Bot.Telegram.TokenEnv)
+	if tokenEnv == "" {
+		return fmt.Errorf("bot.telegram requires token_env")
+	}
+	if lookupEnv != nil && lookupEnv(tokenEnv) == "" {
+		return fmt.Errorf("bot.telegram token environment variable %s is not set", tokenEnv)
+	}
+	return nil
+}
+
+func hasEnabledConnection(connections []config.BotConnectionConfig, platform bot.Platform) bool {
+	for _, conn := range connections {
+		if conn.Enabled && bot.Platform(strings.TrimSpace(conn.Provider)) == platform {
+			return true
+		}
+	}
+	return false
+}
+
+func ValidateConnections(connections []config.BotConnectionConfig, lookupEnv func(string) string) error {
+	return validateConnections(connections, lookupEnv, "")
+}
+
+func validateConnections(connections []config.BotConnectionConfig, lookupEnv func(string) string, telegramTokenEnv string) error {
+	ids := make(map[string]bool)
+	for _, conn := range connections {
+		if !conn.Enabled {
+			continue
+		}
+		id := ConnectionRuntimeID(conn)
+		if id == "" {
+			return fmt.Errorf("enabled connection has no id or provider")
+		}
+		if ids[id] {
+			return fmt.Errorf("duplicate connection id %q", id)
+		}
+		ids[id] = true
+		if bot.Platform(strings.TrimSpace(conn.Provider)) != bot.PlatformTelegram {
+			continue
+		}
+		if domain := strings.TrimSpace(conn.Domain); domain != "" && !strings.EqualFold(domain, "telegram") {
+			return fmt.Errorf("telegram connection %q has invalid domain %q", id, domain)
+		}
+		tokenEnv := firstNonEmptyString(strings.TrimSpace(conn.Credential.TokenEnv), telegramTokenEnv)
+		if tokenEnv == "" {
+			return fmt.Errorf("telegram connection %q requires credential.token_env or bot.telegram.token_env", id)
+		}
+		if lookupEnv != nil && lookupEnv(tokenEnv) == "" {
+			return fmt.Errorf("telegram connection %q token environment variable %s is not set", id, tokenEnv)
+		}
+	}
+	return nil
+}
+
 func ModelName(cfg *config.Config, override string) string {
 	if strings.TrimSpace(override) != "" {
 		return strings.TrimSpace(override)
@@ -389,9 +488,9 @@ func ModelName(cfg *config.Config, override string) string {
 }
 
 func AllowlistUserCount(a config.BotAllowlist) int {
-	return len(a.QQUsers) + len(a.FeishuUsers) + len(a.WeixinUsers) +
-		len(a.QQApprovers) + len(a.FeishuApprovers) + len(a.WeixinApprovers) +
-		len(a.QQAdmins) + len(a.FeishuAdmins) + len(a.WeixinAdmins)
+	return len(a.QQUsers) + len(a.FeishuUsers) + len(a.WeixinUsers) + len(a.TelegramUsers) +
+		len(a.QQApprovers) + len(a.FeishuApprovers) + len(a.WeixinApprovers) + len(a.TelegramApprovers) +
+		len(a.QQAdmins) + len(a.FeishuAdmins) + len(a.WeixinAdmins) + len(a.TelegramAdmins)
 }
 
 func BotAccessUserCount(access config.BotAccessConfig) int {
@@ -603,10 +702,17 @@ func botSessionMappingMatches(mapping config.BotConnectionSessionMapping, msg bo
 }
 
 func botSessionMappingIdentity(msg bot.InboundMessage) (chatType string, userID string, threadID string) {
+	if msg.Platform == bot.PlatformTelegram && msg.ChatType == bot.ChatGroup && strings.TrimSpace(msg.ThreadID) != "" {
+		chatType = string(bot.ChatThread)
+		threadID = strings.TrimSpace(msg.ThreadID)
+		return chatType, userID, threadID
+	}
 	switch msg.ChatType {
 	case bot.ChatGroup, bot.ChatGuild:
 		chatType = string(msg.ChatType)
-		userID = strings.TrimSpace(msg.UserID)
+		if msg.Platform != bot.PlatformTelegram {
+			userID = strings.TrimSpace(msg.UserID)
+		}
 	case bot.ChatThread:
 		chatType = string(msg.ChatType)
 		threadID = strings.TrimSpace(msg.ThreadID)
@@ -673,6 +779,8 @@ func rememberAllowlist(allowlist *config.BotAllowlist, platform bot.Platform, us
 			allowlist.FeishuUsers, changed = appendUniqueString(allowlist.FeishuUsers, userID)
 		case bot.PlatformWeixin:
 			allowlist.WeixinUsers, changed = appendUniqueString(allowlist.WeixinUsers, userID)
+		case bot.PlatformTelegram:
+			allowlist.TelegramUsers, changed = appendUniqueString(allowlist.TelegramUsers, userID)
 		}
 	}
 	if !chatUsesGroupAllowlist(chatType) {
@@ -690,6 +798,8 @@ func rememberAllowlist(allowlist *config.BotAllowlist, platform bot.Platform, us
 		allowlist.FeishuGroups, groupChanged = appendUniqueString(allowlist.FeishuGroups, groupID)
 	case bot.PlatformWeixin:
 		allowlist.WeixinGroups, groupChanged = appendUniqueString(allowlist.WeixinGroups, groupID)
+	case bot.PlatformTelegram:
+		allowlist.TelegramGroups, groupChanged = appendUniqueString(allowlist.TelegramGroups, groupID)
 	}
 	return changed || groupChanged
 }

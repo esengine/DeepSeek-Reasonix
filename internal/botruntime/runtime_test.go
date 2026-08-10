@@ -4,6 +4,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"reasonix/internal/bot"
@@ -12,12 +13,106 @@ import (
 
 func TestAllowlistUserCountIncludesRoles(t *testing.T) {
 	allowlist := config.BotAllowlist{
-		FeishuApprovers: []string{"ou-approver"},
-		FeishuAdmins:    []string{"ou-admin"},
+		FeishuApprovers:   []string{"ou-approver"},
+		FeishuAdmins:      []string{"ou-admin"},
+		TelegramUsers:     []string{"123"},
+		TelegramApprovers: []string{"456"},
+		TelegramAdmins:    []string{"789"},
 	}
 
-	if got := AllowlistUserCount(allowlist); got != 2 {
+	if got := AllowlistUserCount(allowlist); got != 5 {
 		t.Fatalf("AllowlistUserCount() = %d, want role users included", got)
+	}
+}
+
+func TestValidateTelegramBotConfig(t *testing.T) {
+	cfg := config.Default()
+	cfg.Bot.Telegram.Enabled = true
+	cfg.Bot.Telegram.TokenEnv = "TELEGRAM_TEST_TOKEN"
+	if err := ValidateBotConfig(cfg, func(name string) string {
+		if name == "TELEGRAM_TEST_TOKEN" {
+			return "secret"
+		}
+		return ""
+	}); err != nil {
+		t.Fatalf("valid bot.telegram config: %v", err)
+	}
+	if err := ValidateBotConfig(cfg, func(string) string { return "" }); err == nil || !strings.Contains(err.Error(), "TELEGRAM_TEST_TOKEN") {
+		t.Fatalf("missing token error = %v", err)
+	}
+	cfg.Bot.Connections = []config.BotConnectionConfig{{
+		ID: "telegram-work", Provider: "telegram", Enabled: true,
+	}}
+	if err := ValidateBotConfig(cfg, func(name string) string {
+		if name == "TELEGRAM_TEST_TOKEN" {
+			return "secret"
+		}
+		return ""
+	}); err != nil {
+		t.Fatalf("Telegram connection should inherit provider token env: %v", err)
+	}
+	cfg.Bot.Connections[0].Credential.TokenEnv = "TELEGRAM_WORK_TOKEN"
+	if err := ValidateBotConfig(cfg, func(name string) string {
+		if name == "TELEGRAM_WORK_TOKEN" {
+			return "secret"
+		}
+		return ""
+	}); err != nil {
+		t.Fatalf("explicit Telegram connection should override singleton token env: %v", err)
+	}
+}
+
+func TestPlatformConfiguredIncludesTelegramSingleton(t *testing.T) {
+	cfg := config.Default()
+	cfg.Bot.Telegram.Enabled = true
+	if !PlatformConfigured(cfg, bot.PlatformTelegram) {
+		t.Fatal("enabled bot.telegram was not configured")
+	}
+}
+
+func TestTelegramConnectionOverridesSingletonBinding(t *testing.T) {
+	t.Setenv("TELEGRAM_PRIMARY_TOKEN", "primary")
+	t.Setenv("TELEGRAM_WORK_TOKEN", "work")
+	cfg := config.Default()
+	cfg.Bot.Telegram = config.TelegramBotConfig{Enabled: true, TokenEnv: "TELEGRAM_PRIMARY_TOKEN", APIBase: "https://api.telegram.org"}
+	enabled := map[bot.Platform]bool{bot.PlatformTelegram: true}
+
+	bindings := AdapterBindings(cfg, enabled, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if len(bindings) != 1 || bindings[0].ID != "telegram" {
+		t.Fatalf("singleton bindings = %+v", bindings)
+	}
+
+	cfg.Bot.Connections = []config.BotConnectionConfig{{
+		ID: "telegram-work", Provider: "telegram", Domain: "telegram", Enabled: true,
+		Credential: config.BotConnectionCredential{TokenEnv: "TELEGRAM_WORK_TOKEN"},
+	}}
+	bindings = AdapterBindings(cfg, enabled, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if len(bindings) != 1 || bindings[0].ID != "telegram-work" {
+		t.Fatalf("connection bindings = %+v, want singleton suppressed", bindings)
+	}
+}
+
+func TestValidateTelegramConnections(t *testing.T) {
+	connections := []config.BotConnectionConfig{{
+		ID: "telegram-main", Provider: "telegram", Domain: "telegram", Enabled: true,
+		Credential: config.BotConnectionCredential{TokenEnv: "TELEGRAM_TEST_TOKEN"},
+	}}
+	if err := ValidateConnections(connections, func(name string) string {
+		if name == "TELEGRAM_TEST_TOKEN" {
+			return "secret"
+		}
+		return ""
+	}); err != nil {
+		t.Fatalf("valid Telegram connection: %v", err)
+	}
+
+	duplicates := append(connections, connections[0])
+	if err := ValidateConnections(duplicates, func(string) string { return "secret" }); err == nil {
+		t.Fatal("duplicate connection ID was accepted")
+	}
+	missingToken := connections
+	if err := ValidateConnections(missingToken, func(string) string { return "" }); err == nil || !strings.Contains(err.Error(), "TELEGRAM_TEST_TOKEN") {
+		t.Fatalf("missing token error = %v", err)
 	}
 }
 
@@ -150,6 +245,63 @@ func TestRememberInboundSessionKeepsDistinctGroupUsers(t *testing.T) {
 	}
 	if mappings[0].UserID != "ou-user-1" || mappings[0].SessionID != "path:/sessions/user-1.jsonl" || mappings[1].UserID != "ou-user-2" || mappings[1].SessionID != "path:/sessions/user-2.jsonl" {
 		t.Fatalf("mappings = %+v, want user-specific session ids", mappings)
+	}
+}
+
+func TestRememberInboundSessionSharesTelegramGroupAcrossUsers(t *testing.T) {
+	isolateUserConfig(t)
+	cfg := config.Default()
+	cfg.Bot.Connections = []config.BotConnectionConfig{
+		{ID: "telegram-main", Provider: "telegram", Domain: "telegram", Enabled: true},
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	msg1 := bot.InboundMessage{Platform: bot.PlatformTelegram, ConnectionID: "telegram-main", Domain: "telegram", ChatType: bot.ChatGroup, ChatID: "-100123", UserID: "1"}
+	msg2 := bot.InboundMessage{Platform: bot.PlatformTelegram, ConnectionID: "telegram-main", Domain: "telegram", ChatType: bot.ChatGroup, ChatID: "-100123", UserID: "2"}
+	if err := RememberInboundSession(msg1, "path:/sessions/old.jsonl"); err != nil {
+		t.Fatalf("remember first user: %v", err)
+	}
+	if err := RememberInboundSession(msg2, "path:/sessions/new.jsonl"); err != nil {
+		t.Fatalf("remember second user: %v", err)
+	}
+
+	got := config.LoadForEdit(config.UserConfigPath())
+	mappings := got.Bot.Connections[0].SessionMappings
+	if len(mappings) != 1 || mappings[0].UserID != "" || mappings[0].SessionID != "path:/sessions/new.jsonl" {
+		t.Fatalf("Telegram group mappings = %+v, want one shared mapping", mappings)
+	}
+	if users := got.Bot.Allowlist.TelegramUsers; len(users) != 2 {
+		t.Fatalf("Telegram users = %+v, want both senders remembered", users)
+	}
+	if groups := got.Bot.Allowlist.TelegramGroups; len(groups) != 1 || groups[0] != "-100123" {
+		t.Fatalf("Telegram groups = %+v, want shared group", groups)
+	}
+}
+
+func TestRememberInboundSessionSeparatesTelegramTopics(t *testing.T) {
+	isolateUserConfig(t)
+	cfg := config.Default()
+	cfg.Bot.Connections = []config.BotConnectionConfig{
+		{ID: "telegram-main", Provider: "telegram", Domain: "telegram", Enabled: true},
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	for _, msg := range []bot.InboundMessage{
+		{Platform: bot.PlatformTelegram, ConnectionID: "telegram-main", Domain: "telegram", ChatType: bot.ChatGroup, ChatID: "-100123", ThreadID: "10", UserID: "1"},
+		{Platform: bot.PlatformTelegram, ConnectionID: "telegram-main", Domain: "telegram", ChatType: bot.ChatGroup, ChatID: "-100123", ThreadID: "11", UserID: "2"},
+	} {
+		if err := RememberInboundSession(msg, "path:/sessions/topic-"+msg.ThreadID+".jsonl"); err != nil {
+			t.Fatalf("remember topic %s: %v", msg.ThreadID, err)
+		}
+	}
+
+	mappings := config.LoadForEdit(config.UserConfigPath()).Bot.Connections[0].SessionMappings
+	if len(mappings) != 2 || mappings[0].ThreadID != "10" || mappings[1].ThreadID != "11" {
+		t.Fatalf("Telegram topic mappings = %+v, want separate topics", mappings)
 	}
 }
 

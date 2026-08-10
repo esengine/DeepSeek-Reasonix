@@ -148,7 +148,7 @@ func TestAskCardAddsAnswerButtonsForSingleChoice(t *testing.T) {
 
 func TestRenderSinkDoesNotFlushMidSentenceOnTimer(t *testing.T) {
 	adapter := newFakeAdapter(PlatformWeixin, "fake-weixin")
-	sink := newRenderSink(context.Background(), adapter, "weixin-weixin", "weixin", "chat-1", ChatDM, "user-1", "msg-1", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
+	sink := newRenderSink(context.Background(), adapter, "weixin-weixin", "weixin", "chat-1", ChatDM, "user-1", "msg-1", "", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
 	sink.lastFlush = time.Now().Add(-2 * time.Second)
 
 	sink.Emit(event.Event{Kind: event.Text, Text: "我是 **"})
@@ -170,7 +170,7 @@ func TestRenderSinkDoesNotFlushMidSentenceOnTimer(t *testing.T) {
 
 func TestRenderSinkKeepsSemanticTextUntilFinalResult(t *testing.T) {
 	adapter := newFakeAdapter(PlatformWeixin, "fake-weixin")
-	sink := newRenderSink(context.Background(), adapter, "weixin-weixin", "weixin", "chat-1", ChatDM, "user-1", "msg-1", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
+	sink := newRenderSink(context.Background(), adapter, "weixin-weixin", "weixin", "chat-1", ChatDM, "user-1", "msg-1", "", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
 	sink.lastFlush = time.Now().Add(-2 * time.Second)
 
 	sink.Emit(event.Event{Kind: event.Text, Text: "第一句。"})
@@ -191,7 +191,7 @@ func TestRenderSinkKeepsSemanticTextUntilFinalResult(t *testing.T) {
 
 func TestRenderSinkFinalFlushKeepsChunkLimit(t *testing.T) {
 	adapter := newFakeAdapter(PlatformWeixin, "fake-weixin")
-	sink := newRenderSink(context.Background(), adapter, "weixin-weixin", "weixin", "chat-1", ChatDM, "user-1", "msg-1", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
+	sink := newRenderSink(context.Background(), adapter, "weixin-weixin", "weixin", "chat-1", ChatDM, "user-1", "msg-1", "", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
 	sink.buf.WriteString(strings.Repeat("长", renderMaxChunkRunes*2+10))
 
 	sink.Emit(event.Event{Kind: event.TurnDone})
@@ -209,7 +209,7 @@ func TestRenderSinkFinalFlushKeepsChunkLimit(t *testing.T) {
 
 func TestRenderSinkConsumesEmptyWhitespacePrefix(t *testing.T) {
 	adapter := newFakeAdapter(PlatformWeixin, "fake-weixin")
-	sink := newRenderSink(context.Background(), adapter, "weixin-weixin", "weixin", "chat-1", ChatDM, "user-1", "msg-1", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
+	sink := newRenderSink(context.Background(), adapter, "weixin-weixin", "weixin", "chat-1", ChatDM, "user-1", "msg-1", "", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
 	sink.buf.WriteString("\n工具状态")
 
 	sink.flushPrefix(1)
@@ -224,7 +224,7 @@ func TestRenderSinkConsumesEmptyWhitespacePrefix(t *testing.T) {
 
 func TestRenderSinkSendsProgressWithoutToolOutput(t *testing.T) {
 	adapter := newFakeAdapter(PlatformWeixin, "fake-weixin")
-	sink := newRenderSink(context.Background(), adapter, "weixin-weixin", "weixin", "chat-1", ChatDM, "user-1", "msg-1", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
+	sink := newRenderSink(context.Background(), adapter, "weixin-weixin", "weixin", "chat-1", ChatDM, "user-1", "msg-1", "", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
 
 	sink.Emit(event.Event{Kind: event.TurnStarted})
 	sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "tool-1", Name: "read_file", ReadOnly: true}})
@@ -251,7 +251,7 @@ func TestRenderSinkSendsProgressWithoutToolOutput(t *testing.T) {
 
 func TestRenderSinkLimitsProgressMessages(t *testing.T) {
 	adapter := newFakeAdapter(PlatformWeixin, "fake-weixin")
-	sink := newRenderSink(context.Background(), adapter, "weixin-weixin", "weixin", "chat-1", ChatDM, "user-1", "msg-1", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
+	sink := newRenderSink(context.Background(), adapter, "weixin-weixin", "weixin", "chat-1", ChatDM, "user-1", "msg-1", "", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
 
 	for range renderMaxProgressMessages + 2 {
 		sink.lastProgress = time.Now().Add(-renderProgressMinInterval)
@@ -300,7 +300,7 @@ func (f *fakeEditorAdapter) editRecords() []editRecord {
 
 func TestRenderSinkStreamsIntoLiveMessage(t *testing.T) {
 	adapter := newFakeEditorAdapter()
-	sink := newRenderSink(context.Background(), adapter, "feishu-feishu", "feishu", "chat-1", ChatDM, "user-1", "msg-1", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
+	sink := newRenderSink(context.Background(), adapter, "feishu-feishu", "feishu", "chat-1", ChatDM, "user-1", "msg-1", "", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
 
 	// 第一个增量：超过软窗口后创建 live 消息。
 	sink.lastFlush = time.Now().Add(-2 * renderSoftFlushAfter)
@@ -344,7 +344,7 @@ func TestRenderSinkStreamsIntoLiveMessage(t *testing.T) {
 
 func TestRenderSinkStreamingThrottledBySoftWindow(t *testing.T) {
 	adapter := newFakeEditorAdapter()
-	sink := newRenderSink(context.Background(), adapter, "feishu-feishu", "feishu", "chat-1", ChatDM, "user-1", "msg-1", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
+	sink := newRenderSink(context.Background(), adapter, "feishu-feishu", "feishu", "chat-1", ChatDM, "user-1", "msg-1", "", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
 
 	// 软窗口内的增量不触发任何网络调用。
 	sink.Emit(event.Event{Kind: event.Text, Text: "刚开始的内容"})
@@ -358,7 +358,7 @@ func TestRenderSinkStreamingThrottledBySoftWindow(t *testing.T) {
 
 func TestRenderSinkStreamingEditFailureRotatesWithoutDuplication(t *testing.T) {
 	adapter := newFakeEditorAdapter()
-	sink := newRenderSink(context.Background(), adapter, "feishu-feishu", "feishu", "chat-1", ChatDM, "user-1", "msg-1", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
+	sink := newRenderSink(context.Background(), adapter, "feishu-feishu", "feishu", "chat-1", ChatDM, "user-1", "msg-1", "", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
 
 	sink.lastFlush = time.Now().Add(-2 * renderSoftFlushAfter)
 	sink.Emit(event.Event{Kind: event.Text, Text: "已送达的内容。"})
@@ -391,7 +391,7 @@ func TestRenderSinkStreamingEditFailureRotatesWithoutDuplication(t *testing.T) {
 
 func TestRenderSinkStreamingHardCapRotatesBlocks(t *testing.T) {
 	adapter := newFakeEditorAdapter()
-	sink := newRenderSink(context.Background(), adapter, "feishu-feishu", "feishu", "chat-1", ChatDM, "user-1", "msg-1", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
+	sink := newRenderSink(context.Background(), adapter, "feishu-feishu", "feishu", "chat-1", ChatDM, "user-1", "msg-1", "", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
 
 	sink.lastFlush = time.Now().Add(-2 * renderSoftFlushAfter)
 	sink.Emit(event.Event{Kind: event.Text, Text: "第一句。"})
@@ -432,7 +432,7 @@ func (f *failingEditorAdapter) EditMessage(ctx context.Context, id string, msg O
 
 func TestRenderSinkStreamingEditFailureDoesNotDuplicate(t *testing.T) {
 	adapter := &failingEditorAdapter{fakeAdapter: newFakeAdapter(PlatformFeishu, "fake-feishu")}
-	sink := newRenderSink(context.Background(), adapter, "feishu-feishu", "feishu", "chat-1", ChatDM, "user-1", "msg-1", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
+	sink := newRenderSink(context.Background(), adapter, "feishu-feishu", "feishu", "chat-1", ChatDM, "user-1", "msg-1", "", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
 
 	// Stream a first chunk so a live message is created (liveSentBytes == full).
 	sink.lastFlush = time.Now().Add(-2 * renderSoftFlushAfter)
@@ -460,7 +460,7 @@ func TestRenderSinkStreamingEditFailureDoesNotDuplicate(t *testing.T) {
 
 func TestRenderSinkStreamingFinalizesInOneEditWithoutSplit(t *testing.T) {
 	adapter := newFakeEditorAdapter()
-	sink := newRenderSink(context.Background(), adapter, "feishu-feishu", "feishu", "chat-1", ChatDM, "user-1", "msg-1", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
+	sink := newRenderSink(context.Background(), adapter, "feishu-feishu", "feishu", "chat-1", ChatDM, "user-1", "msg-1", "", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
 
 	// A final answer that does NOT end on a semantic boundary (ends inside a
 	// code fence) must be finalized as a single in-place edit, not shrunk +
@@ -480,7 +480,7 @@ func TestRenderSinkStreamingFinalizesInOneEditWithoutSplit(t *testing.T) {
 
 func TestRenderSinkSuppressesReasoning(t *testing.T) {
 	adapter := newFakeAdapter(PlatformWeixin, "fake-weixin")
-	sink := newRenderSink(context.Background(), adapter, "weixin-weixin", "weixin", "chat-1", ChatDM, "user-1", "msg-1", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
+	sink := newRenderSink(context.Background(), adapter, "weixin-weixin", "weixin", "chat-1", ChatDM, "user-1", "msg-1", "", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
 
 	sink.Emit(event.Event{Kind: event.Reasoning, Text: "internal reasoning"})
 	sink.Emit(event.Event{Kind: event.Text, Text: "可见结果"})
