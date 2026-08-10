@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	fileencoding "reasonix/internal/fileutil/encoding"
 )
@@ -54,6 +55,64 @@ func TestBlockSeparatesStandingInstructionsFromBackgroundMemory(t *testing.T) {
 		if strings.Contains(block, privatePath) {
 			t.Fatalf("Block() exposed machine-local path %q:\n%s", privatePath, block)
 		}
+	}
+}
+
+// TestLoadBoundsPrefixIndex verifies the Set.Index projection respects the
+// prefix budget even when the full store holds many facts, and that a fold
+// line tells the model more memories exist.
+func TestLoadBoundsPrefixIndex(t *testing.T) {
+	root := t.TempDir()
+	user := filepath.Join(root, "user")
+	proj := filepath.Join(root, "project")
+	mustMkdir(t, proj)
+	store := StoreFor(user, proj)
+	names := []string{"alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa", "lambda", "mu"}
+	for _, name := range names {
+		desc := strings.Repeat("description text ", 6) // ~120 chars per line
+		if _, err := store.Save(Memory{Name: name, Description: desc, Type: TypeProject, Body: "body"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set := Load(Options{CWD: proj, UserDir: user})
+	if set.Index == "" {
+		t.Fatal("expected a bounded index projection")
+	}
+	if len(set.Index) > defaultPrefixIndexMaxChars+200 {
+		t.Fatalf("prefix index %d chars exceeds budget %d:\n%s", len(set.Index), defaultPrefixIndexMaxChars, set.Index)
+	}
+	if !strings.Contains(set.Index, "more facts") {
+		t.Fatalf("expected a fold line:\n%s", set.Index)
+	}
+}
+
+// TestLoadIndexUsesSessionPinnedClock locks the cache contract: the prefix
+// index must be a pure function of the memory set within a session, not of
+// the wall clock — a same-session rebuild must produce byte-identical output.
+func TestLoadIndexUsesSessionPinnedClock(t *testing.T) {
+	old := sessionStartTime
+	defer func() { sessionStartTime = old }()
+
+	// Pin the session clock 200 days ahead of the wall clock: a fact written
+	// now is fresh by the wall clock but stale by the pinned clock, so the
+	// rendered index must fold it — the pinned clock wins.
+	sessionStartTime = time.Now().AddDate(0, 0, 200)
+
+	root := t.TempDir()
+	user := filepath.Join(root, "user")
+	proj := filepath.Join(root, "project")
+	mustMkdir(t, proj)
+	store := StoreFor(user, proj)
+	if _, err := store.Save(Memory{Name: "pinned-fact", Description: "a fact fresh by wall clock", Type: TypeProject, Body: "body"}); err != nil {
+		t.Fatal(err)
+	}
+
+	set := Load(Options{CWD: proj, UserDir: user})
+	if !strings.Contains(set.Index, "stale facts hidden") {
+		t.Fatalf("pinned session clock should fold the stale fact:\n%s", set.Index)
+	}
+	if strings.Contains(set.Index, "pinned-fact") {
+		t.Fatalf("folded fact must not render in the index:\n%s", set.Index)
 	}
 }
 
