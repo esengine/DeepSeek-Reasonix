@@ -199,8 +199,8 @@ type TaskRecorder interface {
 }
 
 // TaskRecorderWithParent is an optional extension for hosts that can identify
-// the task which launched a background job. Older recorders remain valid and
-// receive the ordinary lifecycle callbacks.
+// which task or session launched a background job. Older recorders continue
+// to receive the ordinary lifecycle callbacks.
 type TaskRecorderWithParent interface {
 	TaskRecorder
 	RecordStartWithParent(id, kind, label, parentTaskID, parentSessionID string)
@@ -348,7 +348,7 @@ func (w jobWriter) Write(p []byte) (int, error) {
 // the buffer and returns ""). The job is marked killed when its context was
 // cancelled, failed on any other error, else done.
 func (m *Manager) Start(kind, label string, run func(ctx context.Context, out io.Writer) (string, error)) *Job {
-	return m.StartForSessionWithParent("", "", kind, label, run)
+	return m.StartForSession("", kind, label, run)
 }
 
 // validatePathSegment rejects values that would let parentSession or kind
@@ -421,9 +421,9 @@ func (m *Manager) StartForSession(parentSession, kind, label string, run func(ct
 	return m.StartForSessionWithParent(parentSession, "", kind, label, run)
 }
 
-// StartForSessionWithParent launches a job and optionally records the parent
-// task relationship for Task Monitor consumers. The empty parentTaskID keeps
-// the existing session-root behavior.
+// StartForSessionWithParent launches a job and records optional parent
+// metadata for Task Monitor consumers. An empty parentTaskID preserves the
+// existing session-root behavior.
 func (m *Manager) StartForSessionWithParent(parentSession, parentTaskID, kind, label string, run func(ctx context.Context, out io.Writer) (string, error)) *Job {
 	parentSession = strings.TrimSpace(parentSession)
 	kind = strings.TrimSpace(kind)

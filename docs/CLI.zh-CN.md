@@ -251,9 +251,8 @@ ID，需要一并保留该私有身份密钥。任务仍在运行时
 
 Schema version 1 的兼容规则：
 
-`task requeue` 只接受失败、stale 或已退出 runtime 的任务。宿主接入调度器后，
-成功 requeue 会生成新的 job/attempt 并进入 queued→running；未接入调度器时，
-命令仍保持兼容并只将任务置为 queued。任务快照和事件中的
+`task requeue` 只接受失败、stale 或已退出 runtime 的任务，并将任务置为 queued，
+由宿主自己的 runtime 消费。任务快照和事件中的
 `parent_task_id`、`parent_session_id`、`kind`、`depth`、`attempt` 均为可选字段，
 用于 Desktop 展示父任务与 Subagent 树，不改变旧字段语义。
 

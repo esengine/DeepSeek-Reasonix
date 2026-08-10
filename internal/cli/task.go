@@ -24,20 +24,12 @@ var taskStore taskmonitor.Store
 // available (Desktop or running session).  When nil, kill is a no-op.
 var taskJobKiller taskmonitor.JobKiller
 
-// taskScheduler is injected by a host that owns RuntimeStarter. CLI remains
-// compatible in standalone mode, where requeue leaves the task queued.
-var taskScheduler func(context.Context, string, string) error
-
 // SetTaskStore replaces the Store used by the task subcommands.
 func SetTaskStore(s taskmonitor.Store) { taskStore = s }
 
 // SetTaskJobKiller sets the JobKiller for control subcommands.
 // Called by the wiring when a controller with jobs.Manager is available.
 func SetTaskJobKiller(k taskmonitor.JobKiller) { taskJobKiller = k }
-
-// SetTaskScheduler installs the host scheduler used after a successful
-// requeue. A nil scheduler preserves the standalone CLI behavior.
-func SetTaskScheduler(fn func(context.Context, string, string) error) { taskScheduler = fn }
 
 // The monitor commands are a content-free machine interface. Scrub optional
 // free-form summaries at the output boundary as well as at current write sites
@@ -525,7 +517,6 @@ func taskRequeueCmd(store taskmonitor.Store, args []string) int {
 		return 1
 	}
 	cs := taskmonitor.NewControlService(ws)
-	cs.SetScheduler(taskScheduler)
 	res, err := cs.RequeueTask(context.Background(), *dir, id, *expectedVersion, *idemKey)
 	return outputControlResult(res, err)
 }

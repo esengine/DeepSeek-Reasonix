@@ -1,9 +1,11 @@
 // Package taskmonitor defines the unified Task Monitor domain model and
-// query/control interfaces for observing and safely re-dispatching tasks. It provides
+// read-only query interfaces for observing background tasks. It provides
 // TaskSnapshot, TaskEvent, TaskState, RuntimeState and a Store abstraction.
 //
-// Runtime ownership remains with the host; RuntimeStarter is the narrow seam
-// used by the scheduler to request a fresh execution.
+// The package does not read private session files, does not parse internal
+// Reasonix state files, and does not implement a second state machine — it
+// is a pure observation layer that reuses the existing jobs.Manager as its
+// source of truth.
 package taskmonitor
 
 import (
@@ -163,7 +165,8 @@ type TaskSnapshot struct {
 	RuntimeState      RuntimeState `json:"runtime_state,omitempty"`
 	RuntimeLeaseUntil time.Time    `json:"runtime_lease_until,omitempty"`
 	// RuntimeOwnerID identifies the recorder generation that owns the live
-	// runtime lease and prevents delayed heartbeats from renewing a newer run.
+	// runtime lease. It prevents a delayed heartbeat from an older controller
+	// from renewing a newer lifecycle that reused the same session/job IDs.
 	RuntimeOwnerID  string    `json:"runtime_owner_id,omitempty"`
 	Version         uint64    `json:"version"`
 	CreatedAt       time.Time `json:"created_at"`
@@ -245,12 +248,12 @@ type TaskEvent struct {
 	Timestamp       time.Time    `json:"timestamp"`
 	EventType       string       `json:"event_type"`
 	TaskID          string       `json:"task_id"`
-	JobID           string       `json:"job_id,omitempty"`
 	SessionID       string       `json:"session_id"`
 	State           TaskState    `json:"state"`
 	RuntimeState    RuntimeState `json:"runtime_state,omitempty"`
 	ErrorCode       string       `json:"error_code,omitempty"`
 	ErrorSummary    string       `json:"error_summary,omitempty"`
+	JobID           string       `json:"job_id,omitempty"`
 	ParentTaskID    string       `json:"parent_task_id,omitempty"`
 	ParentSessionID string       `json:"parent_session_id,omitempty"`
 	Kind            string       `json:"kind,omitempty"`

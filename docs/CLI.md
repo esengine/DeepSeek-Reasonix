@@ -278,10 +278,8 @@ artifact exists. A `running` record without a live session lease is reported as
 
 Schema compatibility rules for version 1:
 
-`task requeue` accepts only failed, stale, or runtime-exited tasks. When a host
-installs a scheduler, a successful requeue creates a fresh job/attempt and
-consumes the queued task; without a scheduler the compatibility behavior is to
-leave the task queued. The optional `parent_task_id`, `parent_session_id`,
+`task requeue` accepts only failed, stale, or runtime-exited tasks and leaves the
+task queued for a host-owned runtime to consume. The optional `parent_task_id`, `parent_session_id`,
 `kind`, `depth`, and `attempt` fields let Desktop render parent/Subagent trees
 without changing the meaning of existing fields.
 

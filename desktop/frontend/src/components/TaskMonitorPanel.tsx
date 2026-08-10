@@ -87,24 +87,32 @@ function shortID(id: string): string {
 }
 
 export function taskTree(tasks: TaskSnapshot[]): Array<{ task: TaskSnapshot; depth: number }> {
+  const taskIDs = new Set(tasks.map((task) => task.task_id));
   const byParent = new Map<string, TaskSnapshot[]>();
   const roots: TaskSnapshot[] = [];
   for (const task of tasks) {
     const parent = task.parent_task_id;
-    if (parent && tasks.some((candidate) => candidate.task_id === parent)) {
+    if (parent && taskIDs.has(parent)) {
       const children = byParent.get(parent) ?? [];
       children.push(task);
       byParent.set(parent, children);
     } else roots.push(task);
   }
   const out: Array<{ task: TaskSnapshot; depth: number }> = [];
+  const visited = new Set<string>();
   const visit = (task: TaskSnapshot, depth: number, seen: Set<string>) => {
-    if (seen.has(task.task_id)) return;
+    if (seen.has(task.task_id) || visited.has(task.task_id)) return;
+    visited.add(task.task_id);
     const nextSeen = new Set(seen).add(task.task_id);
     out.push({ task, depth: Math.min(depth, 8) });
     for (const child of byParent.get(task.task_id) ?? []) visit(child, depth + 1, nextSeen);
   };
   for (const root of roots) visit(root, Math.max(0, root.depth ?? 0), new Set());
+  // A malformed or concurrently changing store can contain a parent cycle
+  // with no root. Keep those tasks visible instead of silently dropping them.
+  for (const task of tasks) {
+    if (!visited.has(task.task_id)) visit(task, Math.max(0, task.depth ?? 0), new Set());
+  }
   return out;
 }
 

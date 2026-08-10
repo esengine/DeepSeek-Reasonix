@@ -137,8 +137,7 @@ func (r *TaskRecorder) RecordStart(id, kind, label string) {
 	r.RecordStartWithParent(id, kind, label, "", "")
 }
 
-// RecordStartWithParent implements jobs.TaskRecorderWithParent. Parent
-// metadata is optional and never changes the globally unique monitor ID.
+// RecordStartWithParent records optional parent metadata for nested jobs.
 func (r *TaskRecorder) RecordStartWithParent(id, kind, label, parentTaskID, parentSessionID string) {
 	ctx := context.Background()
 	now := timeNow()
@@ -180,7 +179,8 @@ func (r *TaskRecorder) RecordStartWithParent(id, kind, label, parentTaskID, pare
 		Timestamp: now, EventType: "state_change",
 		TaskID: monitorID, SessionID: sessionID, State: TaskStateRunning,
 		RuntimeState: RuntimeStateAlive,
-		Kind:         taskKind(kind), ParentTaskID: parentTaskID, ParentSessionID: parentSessionID, Depth: depth, Attempt: 1,
+		Kind:         taskKind(kind), ParentTaskID: parentTaskID, ParentSessionID: parentSessionID,
+		Depth: depth, Attempt: 1,
 	})
 	r.startHeartbeat(monitorID)
 }

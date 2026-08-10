@@ -126,6 +126,14 @@ const treeRows = taskTree([treeGrandchild, treeChild, treeParent]);
 ok(treeRows.map((row) => row.task.task_id).join(",") === "parent,child,grandchild", "orders parent task tree before descendants");
 ok(treeRows.map((row) => row.depth).join(",") === "0,1,2", "preserves bounded task tree depth");
 
+const orphanRows = taskTree([snap({ task_id: "orphan", parent_task_id: "missing" })]);
+ok(orphanRows.length === 1 && orphanRows[0].task.task_id === "orphan", "keeps orphan tasks visible");
+const cycleRows = taskTree([
+  snap({ task_id: "cycle-a", parent_task_id: "cycle-b" }),
+  snap({ task_id: "cycle-b", parent_task_id: "cycle-a" }),
+]);
+ok(cycleRows.map((row) => row.task.task_id).sort().join(",") === "cycle-a,cycle-b", "keeps cyclic task components visible");
+
 let activeRoot: Root | null = null;
 let activeHost: HTMLElement | null = null;
 
