@@ -45,7 +45,7 @@ func (a *Agent) ContextMaintenanceSnapshot() ContextMaintenanceSnapshot {
 	}
 	for _, msg := range visible {
 		if isCompactionSummary(msg) {
-			snapshot.SummaryTokens += estimateMessagesTokens([]provider.Message{msg})
+			snapshot.SummaryTokens += a.estimatedPromptTokens([]provider.Message{msg})
 		}
 	}
 	snapshot.Headroom = max(0, snapshot.HardInputCeiling-snapshot.ProjectedTokens)

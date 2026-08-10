@@ -10,7 +10,7 @@ Reasonix 的 Goal 模式（`/goal`）将目标推进（Goal）、验收（Delive
 | 完成校验 | 默认 | `complete` 声明必须通过 Delivery readiness（todos、验证、review、签收、能力门禁）才会真正完成；不满足时用缺失项开启下一轮 |
 | 完成自述与对账 | `update_goal` 的 `completion` | `complete` 可附带自述：`verified` 命令逐条与本会话真实 receipt 对账，没跑过 / 跑失败 / 早于最后一次改动都记为 unbacked claim；`unverified` 与 `risks` 是宿主推断不出的声明，只增不减，永远不阻塞完成 |
 | 独立评审 | 无报告时 | 模型未调用 `update_goal` 时，宿主调用一次独立 bounded evaluator 判定；评审不可用/出错/不确定时安全暂停，绝不默认继续 |
-| 执行预算 | 默认 | **轮次与无进展熔断**：简单 10 轮、写入型 20 轮、研究型 40 轮；连续 4 轮无宿主可验证进展则暂停。累计 token 只做观测展示，**没有 token 硬上限**，也没有 provider 请求前预算准入 |
+| 执行预算 | 默认 | **真实执行轮次 + 结构化卡死检测**：简单/写入/研究型跨 Run 总预算为 10/20/40 轮；用户未显式配置 `max_steps` 时，每次 Goal Run 默认 16 个模型轮次并提供一次仅总结响应。相同宿主失败 3 次或成功轮连续 6 次没有新证据时结构化暂停。累计 token、provider 请求数和跨 turn 无进展只做观测，**没有 token/请求数硬上限** |
 | 暂停/恢复 | `/goal pause` / `/goal resume` | 暂停保留 Goal、todo、Delivery checkpoint 与运行历史；轮次型暂停恢复时追加一档同类别**轮数**（`budget_extensions` 统计轮次追加次数） |
 | 立即阻塞 | `blocked` 报告 | 单个 blocked 报告立即结束目标，不再重复三轮确认 |
 | 并行调度 | `parallel_tasks` 工具 | 并发派发多个子 agent，各自独立显示结果 |
@@ -53,21 +53,21 @@ Reasonix 的 Goal 模式（`/goal`）将目标推进（Goal）、验收（Delive
 
 普通 Delivery 的只读/咨询分类不变；上述「裸故障默认 write」只作用于 Goal 轮数类别。
 
-**Token 只观测、不设限**：executor、planner、subagent、compaction、router、reviewer、evaluator 等计费用量仍累计到 `tokensUsed` 并在 UI/CLI 展示，但：
+**Token 与请求数只观测、不设限**：executor、planner、subagent、compaction、router、reviewer、evaluator 等计费用量累计到 `tokensUsed`，真实 HTTP 请求（含重试）累计到 `requestsUsed`，并在 UI/CLI 展示，但：
 
 - 不存在 `tokensLimit` 硬上限（对外字段固定为 `0`）；
 - 没有 provider 请求前的 token 预留/准入；
 - 累计 token 再大也不会单独暂停 Goal。
 
-可停止 Goal 的条件：轮次耗尽、连续 4 轮无宿主可验证进展、evaluator 故障、显式 `blocked`、账号额度或人工暂停。
+可停止 Goal 的条件：10/20/40 外层轮次耗尽、单次 Run 的 16 轮默认边界、结构化卡死、evaluator 故障、显式 `blocked`、账号额度或人工暂停。跨 Goal turn 的 `noProgressTurns` 继续记录新颖证据变化，但不再直接停止 Goal。
 
 达到轮次预算后目标安全暂停（持久化层表现为 `blocked` + `stop_cause`，旧客户端安全显示为 blocked，不会误恢复自动运行）。`/goal status` 显示完整运行摘要：
 
 ```
-runtime: turns 12/20, tokens 214000, no-progress 0/4, extensions 0
+runtime: turns 12/20, tokens 214000, requests 37, no-progress 6 (observational), extensions 0
 ```
 
-`/goal resume` 恢复目标：轮次型暂停追加一档同类别轮数（累计 token 与 `budget_extensions` 保留，no-progress 计数归零）；手动暂停或 evaluator 故障暂停不自动追加额度，除非原轮次预算已耗尽。旧版本因 `budget_tokens` 暂停的 sidecar 在新版本加载时会自动改为 `running` 并立即持久化。
+`/goal resume` 恢复目标：只有 10/20/40 外层轮次型暂停才追加一档同类别轮数；`goal_run_budget` 与 `goal_stuck` 只开启一个新的 Run，不增加外层额度。累计 token、请求数与 `budget_extensions` 保留。旧版本因 `budget_tokens` 或 `no_progress` 暂停的 sidecar 在新版本加载时会自动改为 `running` 并立即持久化；旧 `noProgressLimit` 字段继续兼容读写但不再参与决策。
 
 上下文压缩继续使用全局既有策略（约 50% 提示、60% 工具结果清理、80% compact、90% 强制 compact）。Goal 开启本身不额外触发 summarizer，也不改变工具 Schema 或稳定 prompt 前缀。
 
@@ -135,7 +135,7 @@ Prometheus 会逐个问澄清问题：
 2. 获取结构化 Delivery readiness；
 3. 读取本轮的 `update_goal` 报告；
 4. 没有报告时调用一次独立 evaluator（readiness 已明确缺失项时直接继续，不调用）；
-5. 应用 readiness、轮次预算与 no-progress 门禁；
+5. 应用 readiness、外层轮次预算、单 Run 预算与结构化卡死边界；
 6. 由 Goal FSM 独占决定 complete、continue、blocked 或 pause。
 
 `complete` 只有在 readiness 通过时才被接受；`blocked` 立即停止；evaluator 超时、报错、JSON 非法或返回 `uncertain` 一律安全暂停。
@@ -153,7 +153,7 @@ Delivery 不再自行注入隐藏模型消息做 3/6 次 readiness 重试：普�
 
 ### 进展签名
 
-只有宿主可验证信息才能重置停滞计数：todo 状态变化、新的有效 mutation/verification/review/signoff receipt、Delivery checkpoint 变化、终态 `update_goal` 报告。任意工具调用、重复读取、仅改变措辞的回答或重复 continue 理由都不能伪造进展。
+只有宿主可验证且对当前 Goal **新颖**的信息才能重置停滞计数：新的读取/搜索结果、todo 状态变化、新的有效 mutation/verification/review/signoff receipt、Delivery checkpoint 变化、终态 `update_goal` 报告。读取和查询由规范化工具名、参数及宿主观测到的结果摘要标识；完全相同的重复调用、仅改变措辞的回答或重复 continue 理由都不能伪造进展。证据摘要以有界窗口持久化，不保存工具输出正文。
 
 ### Todo 状态流
 
@@ -165,7 +165,9 @@ advanceGoalAfterTurn → 读取 update_goal 报告 + readiness + 预算
   ├─ complete + readiness 缺失 → 拦截并列出缺失项，继续循环
   ├─ blocked → 立即阻塞
   ├─ 无报告 → evaluator 判定一次（失败则安全暂停）
-  └─ 轮次/无进展耗尽 → 安全暂停（blocked + stop_cause）
+  ├─ 外层轮次耗尽 → 安全暂停（blocked + budget_turns）
+  ├─ 单 Run 16 轮耗尽 → 总结后安全暂停（blocked + goal_run_budget）
+  └─ 3 次相同失败 / 6 次零证据成功轮 → 总结后安全暂停（blocked + goal_stuck）
 ```
 
 ### 并行调度架构
@@ -183,7 +185,7 @@ parallel_tasks Execute()
 
 ## 相关代码
 
-- `internal/control/goal.go` — Goal FSM、轮次预算、turn recorder、暂停/恢复、token 观测
+- `internal/control/goal.go` — Goal FSM、外层轮次预算、turn recorder、暂停/恢复、token/请求数观测
 - `internal/control/turn_orchestrator.go` — 每轮决策流程、evaluator 调用
 - `internal/control/input.go` — `/goal` 命令解析与任务合约注入
 - `internal/goaleval/` — 独立 bounded evaluator

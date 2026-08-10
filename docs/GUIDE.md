@@ -68,7 +68,7 @@ reasoning_language = "auto"      # visible reasoning text: auto|zh|en
 # max_subagent_depth = 2              # nested delegation depth; set 1 for the old single-layer boundary
 # max_subagent_concurrency = 6        # session-wide sub-agent concurrency (task/fleet/skills)
 # max_parallel_writers = 3            # concurrent writers with non-overlapping write_paths
-tool_result_snip_ratio = 0.6       # shorten stale tool output before summary compaction
+tool_result_snip_ratio = 0.6       # at compact_ratio, pruning stale tool output replaces the summary if it gets under this
 # context_editing = "native"       # opt in only for the official Anthropic endpoint; default local
 
 [[providers]]
@@ -623,7 +623,8 @@ Chat and transcript shortcuts:
 
 | Key or command | What it does | Notes |
 | --- | --- | --- |
-| `Enter` | Sends the current message | While a turn is running, non-empty input is queued as follow-up feedback. |
+| `Enter` | Sends the current message | While a turn is running, non-empty input is durably queued as a follow-up before the composer clears. |
+| `Ctrl+Enter` or `/steer <text>` | Adds guidance to the active turn | The guidance is persisted first; if the turn cannot accept it, it remains a normal follow-up. |
 | `Shift+Enter`, `Alt+Enter`, or `Ctrl+J` | Inserts a newline | Plain `Enter` is reserved for send/confirm. |
 | Plain `Up` / `Down` while idle | Recalls older or newer submitted prompts | In a running turn, the same keys navigate queued follow-up feedback. |
 | `PageUp` / `PageDown` | Scrolls the transcript | Works regardless of the current chat state. |
@@ -641,6 +642,12 @@ Chat and transcript shortcuts:
 | `Ctrl+V` on macOS/Linux; `Alt+V` on Windows | Pastes a clipboard image | Image paste is a separate application action. The footer shows `Pasting image…` while the clipboard is read, then inserts an editable `[image #N]` token at the cursor. |
 | `/paste-image` | Pastes a clipboard image | Command form of the same image-only action. |
 | A line starting with `!` | Runs a shell command directly | The command runs locally without asking the model. |
+
+`/queue list` shows bounded previews without loading full bodies. Use `/queue
+show|edit|delete|move`, `/queue pause|resume`, and `/queue retry|refresh` to
+inspect or manage pending work. After crash recovery the inbox is paused, so
+review it and run `/queue resume` before dispatch continues. Each item is
+limited to 4 MiB; a session accepts at most 64 items and 64 MiB total.
 
 Mode and display shortcuts:
 
@@ -1129,16 +1136,24 @@ changes collaboration mode implicitly; choose Goal in the composer or use
 `/goal` to start a long-running objective.
 
 Goal runs under a per-class **turn** budget: simple goals get 10 turns, write
-goals 20 turns, and research goals 40 turns; four consecutive turns without
-host-verifiable progress pause the goal. Cumulative token usage is still tracked
-and shown for diagnostics, but there is **no token hard limit** and no
-pre-provider request admission. In Goal mode, a bare bug/crash/exception
-statement defaults to the write turn class unless the user asks only for
-analysis/explanation or forbids changes. A paused goal keeps its todos, Delivery
+goals 20 turns, and research goals 40 turns. This is a cross-Run continuation
+backstop. Each Goal Run also defaults to 16 model rounds when no explicit
+`max_steps` is configured, then gets one summary-only response before a
+resumable `goal_run_budget` pause. Progress is goal-scoped and novelty based:
+new read/search results, mutations, verification, todo/signoff changes, and
+reviews advance the goal; an exact tool/argument/result repeat does not.
+Cumulative token and real provider request usage is tracked and shown for
+diagnostics, but there is
+**no token hard limit** and no pre-provider request admission. In Goal mode, a
+bare bug/crash/exception statement defaults to the write turn class unless the
+user asks only for analysis/explanation or forbids changes. A paused goal keeps its todos, Delivery
 checkpoint, and runtime history — use `/goal resume` to continue (turn-budget
-pauses add one more slice of turns of the same class), or `/goal pause` to pause
+pauses add one more slice of turns of the same class; Run-budget and structural
+stuck pauses start a fresh Run without extending the outer budget), or `/goal pause` to pause
 a running goal manually. `/goal status` shows the full runtime summary (turns
-used/limit, tokens used, no-progress, extensions). At the end of every goal turn
+used/limit, tokens, requests, observational no-progress streak, extensions).
+Within one Run, three repeated identical host failures or six successful
+zero-evidence rounds produce a resumable `goal_stuck` pause. At the end of every goal turn
 the model reports its disposition through the structured `update_goal` tool
 (continue/complete/blocked); when no report arrives, an independent bounded
 evaluator judges the turn once, and any evaluator failure pauses the goal
@@ -1154,9 +1169,9 @@ information only the user can provide.
 Research budgets are selected automatically for goals with strong long-horizon
 signals or several distinct phases. There is no separate research mode or
 runtime to configure. Goal state stays in the normal session sidecar, progress
-comes only from host receipts, canonical todos, `complete_step`, review and the
-Delivery checkpoint, and completion is decided by Delivery readiness plus the
-bounded Goal evaluator. Legacy `.reasonix/autoresearch/<task-id>/` archives are
+comes only from novel host receipts, canonical todos, `complete_step`, review
+and the Delivery checkpoint, and completion is decided by Delivery readiness
+plus the bounded Goal evaluator. Legacy `.reasonix/autoresearch/<task-id>/` archives are
 read-only: an explicit old path can be recovered as an ordinary Goal, but new
 runs never create or update those directories. Deprecated budget flags are
 accepted for compatibility but are hidden from help and completion.

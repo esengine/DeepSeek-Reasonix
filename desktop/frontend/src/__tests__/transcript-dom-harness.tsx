@@ -114,6 +114,13 @@ export async function createTranscriptHarness(options: TranscriptHarnessOptions 
       return 0;
     },
   });
+  Object.defineProperty(proto, "clientWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      if (this.classList.contains("transcript")) return 800;
+      return 0;
+    },
+  });
   Object.defineProperty(proto, "scrollHeight", {
     configurable: true,
     get(this: HTMLElement) {

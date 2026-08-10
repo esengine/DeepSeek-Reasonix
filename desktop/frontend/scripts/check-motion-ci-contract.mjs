@@ -59,14 +59,23 @@ if (motionScript.includes("transcript-virtualization.test.tsx")) {
 }
 
 const transcriptScript = packageJSON.scripts?.["test:transcript"] ?? "";
-if (transcriptScript !== "tsx src/__tests__/transcript-virtualization.test.tsx") {
-  throw new Error("motion-ci-contract: test:transcript must own the transcript virtualization suite");
+if (transcriptScript !== "tsx src/__tests__/transcript-selection-runtime.test.ts && tsx src/__tests__/scroll-manager.test.tsx && tsx src/__tests__/transcript-selection-retention.test.tsx && tsx src/__tests__/transcript-virtualization.test.tsx") {
+  throw new Error("motion-ci-contract: test:transcript must own the transcript selection and virtualization suites");
 }
 
 const transcriptCommand = "pnpm --dir frontend test:transcript";
-const transcriptRuns = workflow.split(transcriptCommand).length - 1;
+const transcriptRuns = workflow.match(/pnpm --dir frontend test:transcript(?:\s|$)/g)?.length ?? 0;
 if (!jobBody("desktop", "desktop-macos").includes(transcriptCommand) || transcriptRuns !== 1) {
   throw new Error("motion-ci-contract: the Linux desktop job must run test:transcript exactly once");
+}
+
+const transcriptBrowserCommand = "pnpm --dir frontend test:transcript-browser";
+const transcriptBrowserRuns = workflow.match(/pnpm --dir frontend test:transcript-browser(?:\s|$)/g)?.length ?? 0;
+if (!jobBody("desktop", "desktop-macos").includes(transcriptBrowserCommand) || transcriptBrowserRuns !== 1) {
+  throw new Error("motion-ci-contract: the Linux desktop job must run test:transcript-browser exactly once");
+}
+if (!jobBody("desktop", "desktop-macos").includes("PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend exec playwright install")) {
+  throw new Error("motion-ci-contract: Chromium must install into the path used by frontend browser tests");
 }
 
 console.log("motion-ci-contract: required jobs run focused native motion gates, Linux owns transcript virtualization, and Windows runs the real WebView2 smoke");

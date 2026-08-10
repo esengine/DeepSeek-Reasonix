@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client";
 import { LocaleProvider } from "../lib/i18n";
 import { AssistantMessage } from "../components/Message";
 import { setReasoningSummaryEnabled } from "../lib/reasoningSummaryPreference";
+import { applyReasoningDisplayMode, hydrateReasoningDisplayMode } from "../lib/reasoningDisplayPreference";
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -53,6 +54,10 @@ globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.windo
 const rootEl = document.getElementById("root");
 if (!rootEl) throw new Error("missing root");
 const root = createRoot(rootEl);
+
+// Most assertions in this file exercise the summary-mode disclosure behavior.
+// Select it explicitly so the test remains independent from the product default.
+hydrateReasoningDisplayMode("summary", true);
 
 type ReasoningItem = React.ComponentProps<typeof AssistantMessage>["item"];
 
@@ -199,6 +204,75 @@ await render({
   reasoningComplete: true,
 });
 ok(Boolean(document.querySelector(".reasoning-summary")), "reenabling reasoning summaries restores the preview");
+
+await act(async () => {
+  hydrateReasoningDisplayMode("auto", true);
+});
+await render({
+  kind: "assistant",
+  id: "a-auto",
+  text: "",
+  reasoning: "live thought",
+  streaming: true,
+  reasoningComplete: false,
+});
+ok(Boolean(document.querySelector(".reasoning__body")), "auto mode opens reasoning while it streams");
+
+await render({
+  kind: "assistant",
+  id: "a-auto",
+  text: "answer",
+  reasoning: "live thought",
+  streaming: false,
+  reasoningComplete: true,
+});
+ok(!document.querySelector(".reasoning__body"), "auto mode closes untouched reasoning after completion");
+ok(Boolean(document.querySelector(".reasoning-summary")), "auto mode leaves a summary after completion");
+
+await render({
+  kind: "assistant",
+  id: "a-auto-manual",
+  text: "",
+  reasoning: "manual thought",
+  streaming: true,
+  reasoningComplete: false,
+});
+await click(document.querySelector(".reasoning__head"));
+await click(document.querySelector(".reasoning__head"));
+await render({
+  kind: "assistant",
+  id: "a-auto-manual",
+  text: "answer",
+  reasoning: "manual thought",
+  streaming: false,
+  reasoningComplete: true,
+});
+ok(Boolean(document.querySelector(".reasoning__body")), "manual reasoning expansion survives auto completion");
+
+await act(async () => {
+  applyReasoningDisplayMode("hidden");
+});
+await render({
+  kind: "assistant",
+  id: "a-hidden",
+  text: "answer",
+  reasoning: "not shown",
+  streaming: false,
+  reasoningComplete: true,
+});
+ok(!document.querySelector(".reasoning"), "hidden mode removes the reasoning panel");
+await render({
+  kind: "assistant",
+  id: "a-hidden-only",
+  text: "",
+  reasoning: "reasoning-only work",
+  streaming: false,
+  reasoningComplete: true,
+});
+ok(!document.querySelector(".msg"), "hidden mode removes reasoning-only message shells");
+await act(async () => {
+  applyReasoningDisplayMode("summary");
+});
 
 await act(async () => {
   root.unmount();

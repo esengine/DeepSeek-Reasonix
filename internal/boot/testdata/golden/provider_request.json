@@ -226,11 +226,15 @@
             "type": "string"
           },
           "step": {
-            "description": "Which plan step this completes — its title or number, matching the task list.",
+            "description": "Which plan step this completes — its title or number, matching the task list. Use only when the item has no step_id.",
+            "type": "string"
+          },
+          "step_id": {
+            "description": "PREFERRED: the stable step_id of the task-list item this completes, e.g. \"plan_step_02\". Unlike a title or a number it survives retitles, insertions, and reordering, so cite it whenever the item has one.",
             "type": "string"
           },
           "step_index": {
-            "description": "Optional 1-based task-list item number. Prefer this when the step title is long or easy to mistype.",
+            "description": "Optional 1-based task-list item number. Use only when the item has no step_id; an index goes stale the moment a step is inserted above it.",
             "minimum": 1,
             "type": "integer"
           }
@@ -1585,7 +1589,7 @@
     },
     {
       "name": "todo_write",
-      "description": "Record and update a structured task list for the current work. Send the COMPLETE list every call — it replaces the previous one. Use it to plan multi-step work and show progress: keep exactly one item in_progress at a time, and flip an item to completed the moment it's done (don't batch completions). Skip it for trivial single-step tasks. The list is two-level: a `level` 0 item is a PHASE (a milestone) and the `level` 1 items after it are its concrete sub-steps; omit `level` (0) for a flat list. Each item has `content` (imperative, e.g. \"Add the parser\"), `status` (pending|in_progress|completed), `activeForm` (present-continuous shown while in progress, e.g. \"Adding the parser\"), and optional `level` (0 phase | 1 sub-step).",
+      "description": "Record and update a structured task list for the current work. Send the COMPLETE list every call — it replaces the previous one. Use it to plan multi-step work and show progress: keep exactly one item in_progress at a time, and flip an item to completed the moment it's done (don't batch completions). Skip it for trivial single-step tasks. The list is two-level: a `level` 0 item is a PHASE (a milestone) and the `level` 1 items after it are its concrete sub-steps; omit `level` (0) for a flat list. Each item has `content` (imperative, e.g. \"Add the parser\"), `status` (pending|in_progress|completed), `activeForm` (present-continuous shown while in progress, e.g. \"Adding the parser\"), optional `level` (0 phase | 1 sub-step), and `step_id` — an item's stable identity. COPY `step_id` VERBATIM for every item that already has one: it is how a completion stays attached to its step when you retitle it, insert a step above it, or reorder the list. Give a new item a fresh unique id (e.g. \"plan_step_07\"); never reuse or renumber an existing one.",
       "parameters": {
         "properties": {
           "todos": {
@@ -1615,6 +1619,10 @@
                     "in_progress",
                     "completed"
                   ],
+                  "type": "string"
+                },
+                "step_id": {
+                  "description": "Stable identity for this item, e.g. \"plan_step_02\". Copy it verbatim from the item's previous entry so completions stay attached across retitles, insertions, and reordering; use a fresh unique id for a genuinely new item.",
                   "type": "string"
                 }
               },

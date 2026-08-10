@@ -9,6 +9,10 @@ import "reasonix/internal/completion"
 // survive turns (delivery checkpoint/scope, failure budgets, storm counters)
 // stays directly on Agent.
 type perTurnState struct {
+	// turnInput is this run's task text. The contract is rebuilt from it and
+	// the ledger whenever a live view is needed, so one replay serves both the
+	// per-round observation and the end-of-turn record.
+	turnInput string
 	// completion is the report built as the turn ends; the host reads it while
 	// emitting TurnDone, before the next turn resets this state.
 	completion *completion.Report

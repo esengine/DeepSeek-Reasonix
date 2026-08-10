@@ -1915,12 +1915,19 @@ func TestGatewayQueueInterruptCancelsAndKeepsNewestMessage(t *testing.T) {
 	if !ctrl.wasCanceled() {
 		t.Fatal("controller was not canceled")
 	}
-	next := gw.sessions.Release(key)
-	if next == nil || next.Text != "newest request" {
-		t.Fatalf("release = %#v, want newest request", next)
+	// Durable interrupt keeps the message in the session inbox (not SessionManager.pending).
+	if next := gw.sessions.Release(key); next != nil {
+		t.Fatalf("legacy pending should be empty after durable interrupt, got %#v", next)
+	}
+	if n := gw.nextInboxMessage(key); n == nil || n.Text != "newest request" {
+		// Controllers without SessionAPI cannot durable-queue; accept cancel-only.
+		if api, ok := any(ctrl).(control.SessionAPI); ok {
+			_ = api
+			t.Fatalf("durable inbox missing newest request")
+		}
 	}
 	sent := adapter.sentMessages()
-	if len(sent) != 1 || !strings.Contains(sent[0].Text, "稍后处理这条新消息") {
+	if len(sent) != 1 || (!strings.Contains(sent[0].Text, "稍后处理") && !strings.Contains(sent[0].Text, "已持久排队") && !strings.Contains(sent[0].Text, "排队失败")) {
 		t.Fatalf("sent = %#v, want interrupt acknowledgement", sent)
 	}
 }

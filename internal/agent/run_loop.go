@@ -16,34 +16,6 @@ import (
 	"reasonix/internal/tool"
 )
 
-// runLoopState holds per-Run loop counters and flags. It is package-private and
-// not shared across goroutines; the first extraction keeps the existing lock
-// model and only structures the sequential turn state machine.
-type runLoopState struct {
-	runMaxSteps       int
-	runMaxStepsKey    string
-	runLimitHostOwned bool
-
-	emptyFinalBlocks   int
-	handoffNudges      int
-	usedAnyTool        bool
-	contextToolRepairs int
-	graceRound         bool
-	recoveryGraceRound bool
-
-	todoProgress         int
-	trackingTodoProgress bool
-	todoStallRounds      int
-	seenTodoProgress     map[string]struct{}
-
-	executorHandoff bool
-	// input is the user turn text after withTurnPreferences (used by handoff
-	// nudges that inspect the original request wording).
-	input string
-
-	workDurationMs func() int64
-}
-
 // streamedTurn is one provider completion collected by stream. Keeping the
 // result together makes the missing-reasoning recovery path explicit: the
 // first, malformed completion is never committed before a safe replacement is
@@ -141,7 +113,8 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	// A fresh user turn starts from zeroed per-turn host state; the new turn's
 	// values are computed below. Cross-turn state (checkpoint, scope, failure
 	// budgets) lives directly on Agent and is reconciled field by field.
-	a.perTurnState = perTurnState{}
+	a.perTurnState = perTurnState{turnInput: input}
+	a.resetStructuralRunGuards()
 	scope, scoped := DeliveryExecutionScopeFromContext(ctx)
 	preserveEvidence := a.preserveEvidenceOnce
 	// A run that starts with a pending readiness recovery (or an explicit
@@ -220,23 +193,7 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	// transcript tail. Fold its bounded facts into this new user turn exactly
 	// once; the user's raw text remains the classifier source above.
 	providerInput = withInterruptedRecovery(providerInput, a.pendingInterruptedRecovery())
-	if !scoped || a.repeatFailureScope != scope.ID {
-		a.repeatFailureCounts = nil
-	} else {
-		// Only stale-anchor failures have a side-effect-free state recheck.
-		// Ordinary write failures may recover between Runs after user action or
-		// an external state change, so do not carry their retry budget forward.
-		for sig, failure := range a.repeatFailureCounts {
-			if !failure.stateRecheck {
-				delete(a.repeatFailureCounts, sig)
-			}
-		}
-	}
-	if scoped {
-		a.repeatFailureScope = scope.ID
-	} else {
-		a.repeatFailureScope = ""
-	}
+	a.prepareRepeatFailureScope(scoped, scope.ID)
 	a.sink.Emit(event.Event{Kind: event.TurnStarted})
 	input = a.withTurnPreferences(providerInput)
 	userCreatedAt := time.Now().UnixMilli()
@@ -274,14 +231,18 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 // assistant turn into final-response or tool-round handling.
 func (a *Agent) runToolLoop(ctx context.Context, state *runLoopState) error {
 	ctx = a.withAgentContext(ctx)
-	for step := 0; state.runMaxSteps <= 0 || step < state.runMaxSteps || state.graceRound || state.recoveryGraceRound; step++ {
+	for step := 0; state.runMaxSteps <= 0 || step < state.runMaxSteps || state.graceRound || state.recoveryGraceRound || state.goalStuckGraceRound; step++ {
 		// Consume a queued steer and persist it to the session so it
 		// survives tab switches and history replay. The model sees it as
 		// guidance (with a prefix), not a new task. One cache miss per
 		// steer is unavoidable — the model must see the new instruction.
-		if text, ok := a.consumeSteer(); ok {
+		if text, itemID, ok := a.consumeSteer(); ok {
 			a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(midTurnSteerMessage(text))})
-			a.sink.Emit(event.Event{Kind: event.Steer, Text: text})
+			a.sink.Emit(event.Event{Kind: event.Steer, Text: text, ItemID: itemID})
+		} else if itemID != "" {
+			// Loader failed after dequeue: durable entry stays for inspection
+			// (unapplied path marks uncertain + pause via the notice sink).
+			a.RecordUnappliedSteer("(body load failed)", itemID)
 		}
 		schemas := a.tools.Schemas()
 		prefixShape := a.capturePrefixShape(schemas)
@@ -357,7 +318,7 @@ func (a *Agent) runToolLoop(ctx context.Context, state *runLoopState) error {
 	// Only reached when a positive maxSteps guard is configured. The work so far
 	// is already in the session, so the user can just send another message to pick
 	// up where it left off.
-	return &maxStepsPause{steps: state.runMaxSteps, key: state.runMaxStepsKey}
+	return &maxStepsPause{steps: state.runMaxSteps, key: state.runMaxStepsKey, hostOwned: state.runLimitHostOwned}
 }
 
 // streamWithSamplingRecovery coordinates Codex-style original-request replay
@@ -812,10 +773,21 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *runLoopState, te
 			StopReason: reason,
 		}
 	}
+	if state.goalStuckGraceRound {
+		a.contextManager().ObserveUsage(usage)
+		return false, &goalStuckPause{limit: state.goalStuckLimit, key: state.goalStuckKey, reason: state.goalStuckReason}
+	}
 	readiness := a.finalReadinessCheckFor()
 	if state.graceRound && (readiness.reason != "" || !hasVisibleFinalAnswer(text)) {
 		a.contextManager().ObserveUsage(usage)
-		return false, &maxStepsPause{steps: state.runMaxSteps, key: state.runMaxStepsKey}
+		return false, &maxStepsPause{steps: state.runMaxSteps, key: state.runMaxStepsKey, hostOwned: state.runLimitHostOwned}
+	}
+	if state.graceRound && state.runPauseAfterFinal {
+		// A host-owned limit is a real Goal yield boundary even when the model
+		// produced a useful summary. Controller still evaluates that final text and
+		// may complete the Goal; otherwise it persists a resumable budget pause.
+		a.contextManager().ObserveUsage(usage)
+		return false, &maxStepsPause{steps: state.runMaxSteps, key: state.runMaxStepsKey, hostOwned: true}
 	}
 	if readiness.reason != "" {
 		// Delivery no longer retries readiness with hidden model messages: the
@@ -890,34 +862,8 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 		return false, fmt.Errorf("model repeatedly called context-unavailable tools without a visible answer: %s", strings.Join(unavailableContextTools, ", "))
 	}
 
-	// Grace round guard: if we already gave the model one extra response
-	// and it still wants to call tools, stop here.
-	if state.graceRound {
-		return false, &maxStepsPause{steps: state.runMaxSteps, key: state.runMaxStepsKey}
-	}
-	// Recovery Episode exhausted: one finalization round only. Further tool
-	// calls are not executed; return a typed pause so the host can surface
-	// recovery_paused without treating it as a send failure.
-	if state.recoveryGraceRound {
-		reason := ""
-		if ctrl := a.recoveryEpisodeControl(); ctrl != nil {
-			_, _ = ctrl.ConsumeFinalization(a.recoveryTaskID)
-		}
-		// Pair tool-call / tool-result without executing.
-		msg := "blocked: Auto recovery already paused this turn. Do not call tools; the user will continue in the next message."
-		for _, call := range calls {
-			a.session.Add(provider.Message{
-				Role:       provider.RoleTool,
-				Content:    msg,
-				ToolCallID: call.ID,
-				Name:       call.Name,
-			})
-		}
-		a.contextManager().ObserveUsage(usage)
-		return false, &RecoveryPauseError{
-			Message:    "Automatic retries paused. Reasonix stopped repeated attempts and kept completed work. Send \"continue\" to start a fresh attempt, or add instructions to change direction.",
-			StopReason: reason,
-		}
+	if boundaryErr, stop := a.stopUnexecutedBoundaryCalls(state, calls, usage); stop {
+		return false, boundaryErr
 	}
 
 	receiptMark := 0
@@ -955,43 +901,11 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 		nudge := fmt.Sprintf("The following tools are unavailable in the current workflow phase: %s. Do not call them again. Respond to the user's request with visible answer text now; call a different tool only if it is still needed to complete the request.", strings.Join(unavailableContextTools, ", "))
 		a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(nudge)})
 	}
-	if !a.planMode.Load() {
-		nextProgress, nextTracking := a.canonicalTodoProgress()
-		hostProgress := false
-		if a.evidence != nil {
-			for _, sig := range a.evidence.SuccessfulProgressSignaturesSince(receiptMark) {
-				if _, seen := state.seenTodoProgress[sig]; !seen {
-					hostProgress = true
-					state.seenTodoProgress[sig] = struct{}{}
-				}
-			}
-		}
-		switch {
-		case !nextTracking:
-			state.todoStallRounds = 0
-		case !state.trackingTodoProgress || nextProgress > state.todoProgress || hostProgress:
-			state.todoStallRounds = 0
-		default:
-			state.todoStallRounds++
-		}
-		state.todoProgress, state.trackingTodoProgress = nextProgress, nextTracking
-		if state.todoStallRounds == todoProgressNudgeRounds {
-			nudge := todoProgressNudgeMessage(state.todoStallRounds)
-			a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(nudge)})
-			a.sink.Emit(event.Event{
-				Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeLoopGuard,
-				Text:   loopGuardNoticeText(),
-				Detail: fmt.Sprintf("the current todo has no new completion, unique read, command, or mutation for %d consecutive tool-call rounds; asking the assistant to reassess", state.todoStallRounds),
-			})
-		}
-		if state.todoStallRounds >= maxTodoStallRounds {
-			a.sink.Emit(event.Event{
-				Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeLoopGuard,
-				Text:   "Task progress stalled; pausing before more tools are called.",
-				Detail: fmt.Sprintf("the current todo has no new completion, unique read, command, or mutation for %d consecutive tool-call rounds after a host reassessment; work is saved and can be resumed", state.todoStallRounds),
-			})
-			return false, &todoStallPause{rounds: state.todoStallRounds}
-		}
+	if err := a.trackTodoProgress(state, receiptMark); err != nil {
+		return false, err
+	}
+	if a.armGoalStuckFinalization(state, batch.goalStuck) {
+		return true, nil
 	}
 
 	// The prompt only grows from here; compact before the next turn so it
@@ -1024,6 +938,12 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeToolBudget, Text: toolBudgetNoticeText(), Detail: fmt.Sprintf("budget (%s=%d) exhausted: one grace round to finalize", state.runMaxStepsKey, state.runMaxSteps)})
 	}
 	return true, nil
+}
+
+func (a *Agent) pairUnexecutedGraceCalls(calls []provider.ToolCall, msg string) {
+	for _, call := range calls {
+		a.session.Add(provider.Message{Role: provider.RoleTool, Content: msg, ToolCallID: call.ID, Name: call.Name})
+	}
 }
 
 func (a *Agent) unavailableContextualToolCalls(ctx context.Context, calls []provider.ToolCall) []string {

@@ -16,6 +16,8 @@ import type { TaskEvent, TaskSnapshot } from "../lib/types";
 
 // --- helpers ---
 
+type TaskTimerSnapshot = TaskSnapshot & { runtime_lease_until?: string };
+
 const STATE_CONFIG: Record<
   string,
   { key: "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled" | "stale"; color: string; dot: string }
@@ -56,11 +58,20 @@ function isTerminalState(state: string): boolean {
   return state === "succeeded" || state === "failed" || state === "cancelled" || state === "stale";
 }
 
-function elapsed(task: TaskSnapshot, nowMs: number): string {
+function elapsed(task: TaskTimerSnapshot, nowMs: number): string {
   if (!task.created_at) return "—";
   const startMs = new Date(task.created_at).getTime();
+  if (task.state === "queued") return "—";
   const live = task.runtime_state === "alive" && !isTerminalState(task.state);
-  const endMs = live ? nowMs : new Date(task.updated_at).getTime();
+  let endMs = live ? nowMs : new Date(task.updated_at).getTime();
+  if (task.state === "stale" && task.runtime_lease_until) {
+    const leaseEndMs = new Date(task.runtime_lease_until).getTime();
+    // Stale is inferred when an alive runtime lease expires. The observer does
+    // not rewrite updated_at, so the expired lease is the best bounded end time.
+    if (!isNaN(leaseEndMs) && leaseEndMs >= startMs && leaseEndMs <= nowMs) {
+      endMs = leaseEndMs;
+    }
+  }
   const ms = endMs - startMs;
   if (isNaN(ms) || ms < 0) return "—";
   const s = Math.floor(ms / 1000);

@@ -145,6 +145,7 @@ console.log("\ntranscript selection menu");
     await flushTimers();
   });
   eq(clipboard[0], "assistant reply text", "Copy writes the selection through the clipboard bridge");
+  eq(document.getSelection()?.isCollapsed, true, "Copy releases the browser selection after the clipboard write succeeds");
   eq(document.querySelector(".context-menu"), null, "transcript menu closes after Copy");
 
   // Releasing a pointer after selecting message text exposes the compact Add

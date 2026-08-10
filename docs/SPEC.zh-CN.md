@@ -144,9 +144,11 @@ type Tool interface {
 
 Reasonix 通过低频 compaction 保持 cache-first：
 
-- 低于 `agent.tool_result_snip_ratio` 时不改写历史；
-- 达到 snip ratio 后，归档并缩短较旧 tool result；
-- 达到 `agent.compact_ratio` 后，先把旧 tool result 修剪为占位符，仍超阈值才调用摘要；
+- 低于 `agent.compact_ratio` 时绝不改写历史：任何改写都会让该处之后的 prompt
+  缓存整体失效；`agent.soft_compact_ratio` 只发提示，不参与决策；
+- 达到 `agent.compact_ratio` 后，先归档并把旧 tool result 修剪为占位符；若仅此
+  就降到 `agent.tool_result_snip_ratio` 以下，则以它替代摘要，不调用摘要模型，
+  否则再执行摘要 compaction；
 - 达到 `agent.compact_force_ratio` 后，可执行强制折叠；
 - `context_window = 0` 会关闭该实例的 compaction。
 
@@ -216,7 +218,7 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
 - 安装 MCP server 即授权其全部工具，不再有 server、raw tool、writer 或 destructive 的第二套审批策略；项目 `reasonix.toml` 与 `.mcp.json` 声明同样默认可信，不需要额外启动确认，显式全局 `deny` 仍然优先。全局安装写入用户 `config.toml`，项目声明保留在原项目文件；同名时项目覆盖全局，项目内部 `reasonix.toml` 高于 `.mcp.json`。编辑写回当前生效来源，删除高优先级声明后露出下一层。`readOnlyHint` 与 `destructiveHint` 仅用于调度、Plan/严格只读边界及缓存到实时安全分类复核，不会新增逐调用审批。严格只读子智能体 registry 仍仅暴露已授权且 `readOnlyHint: true`、无 `destructiveHint` 的 MCP；双模型 Planner 通过固定 `use_capability` 代理（从不暴露直接 `mcp__*` schema）调用已授权、非 destructive 的 MCP，不再要求 `readOnlyHint`，destructive 工具留给 Executor。Balanced 双模型的 Executor 使用独立 frontend 复用同一稳定代理，因此 Planner 发现的 capability ID 可在 handoff 后直接执行，同时保持两侧 ledger/audit 隔离。分发前代理会再次复核当前 controller 的 enable、授权和完整运行时连接身份；共享 Host 中仅 server 同名不构成复用权限。
 - Plan 是协作流程，不等于全工具只读。普通 built-in 与 Bash 仍走 Ask/Auto/YOLO 和 Sandbox；独立双模型 Planner 允许已授权、非 destructive 的 MCP（即使没有 `readOnlyHint`），但在规划阶段持续阻止 destructive 与未授权目标；没有独立 Planner 的单模型 Plan 仍阻止 MCP writer/destructive。
 - Plan 只能由用户显式选择进入，与当前工具审批姿态相互独立；普通聊天不会自动切换到 Plan。Auto/YOLO 不会回答 `ask`，也不会替用户批准 `exit_plan_mode`，获批计划的短期自动执行窗口也不会自动批准后续计划或嵌套/间接 Bash。
-- 桌面端协作模式分为 `normal`、`plan` 和 `goal`。Goal 会持续推进目标，直到完成、阻塞、用户停止或达到轮次/无进展安全边界，并按目标自动选择简单（10）、写入（20）或研究（40）轮预算。三类预算共用同一个 Goal FSM、宿主 receipt、Delivery readiness 和有界 evaluator，不再存在第二套研究协议或可写 sidecar。普通聊天不会隐式切换协作模式；旧 `.reasonix/autoresearch/.../` 目录只读，显式旧路径可恢复为普通 Goal。
+- 桌面端协作模式分为 `normal`、`plan` 和 `goal`。Goal 会持续推进目标，直到完成、阻塞、用户停止或达到执行安全边界，并按目标自动选择简单（10）、写入（20）或研究（40）轮的跨 Run continuation backstop。用户未显式配置 `max_steps` 时，每次 Goal Run 默认 16 个模型轮次并提供一次仅总结响应；未完成时以 `goal_run_budget` 可恢复暂停。跨 turn 无进展只做观测；单次 Run 内相同宿主失败连续 3 次或成功工具轮连续 6 次没有新证据时，以 `goal_stuck` 暂停。Goal 范围的新颖证据允许新的读取/搜索结果推进任务，但拒绝完全相同的工具、参数和结果重复。累计 token 和真实 provider 请求数只做观测。三类预算共用同一个 Goal FSM、宿主 receipt、Delivery readiness 和有界 evaluator，不再存在第二套研究协议或可写 sidecar。普通聊天不会隐式切换协作模式；旧 `.reasonix/autoresearch/.../` 目录只读，显式旧路径可恢复为普通 Goal。
 
 ### 3.8 Slash command
 

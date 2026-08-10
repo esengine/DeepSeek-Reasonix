@@ -41,6 +41,7 @@ const (
 	maxCarriedDigestTokens     = 12000 // ceiling on digests carried verbatim across folds before one consolidating fold merges them
 	maxEarlyUserTurns          = 3     // small user turns hoisted verbatim ahead of the digest; position-fixed (the first N of the fold region, never "the latest N") so the projection prefix stays byte-stable
 	protocolReserveTokens      = 256   // provider framing and control fields not represented by message estimates
+	maxOutputReserveRatio      = 0.25  // ceiling on the window share an output budget may reserve before the thresholds collapse
 )
 
 var errSummaryOutputTruncated = errors.New("summarizer output truncated")
@@ -90,9 +91,10 @@ What is still in progress or unstarted, and the single most concrete next action
 Rules: be terse — bullet points and fragments, not prose. Preserve identifiers, paths, and numbers exactly. Do NOT invent anything not present in the messages; if something is unknown, leave it out rather than guessing.`
 
 // compactThresholds returns the prompt-token boundaries ContextManager switches
-// on. The compaction ablation arm collapses the snip and fold triggers onto
-// soft, so the cache-preserving deferral branch is unreachable and the session
-// folds as soon as it grows — what a harness with no prompt-cache strategy does.
+// on. Only high triggers maintenance: soft is a notice, and snip is how far a
+// tool-result pass must bring the prompt down to stand in for the summary. The
+// compaction ablation arm folds at soft instead, which is what a harness with
+// no prompt-cache strategy does.
 func (a *Agent) compactThresholds() (soft, snip, high int) {
 	hard := a.hardInputCeiling()
 	high = int(float64(a.contextWindow) * a.compactRatio)
@@ -119,14 +121,26 @@ func (a *Agent) hardInputCeiling() int {
 		return 0
 	}
 	hard := a.contextWindow
-	outputBudget := a.maxOutputTokens
-	if outputBudget <= 0 && sharesContextWindow(a.prov) {
-		outputBudget = a.outputBudget
-	}
-	if outputBudget > 0 {
+	if outputBudget := a.reservedOutputTokens(); outputBudget > 0 {
 		hard -= outputBudget + protocolReserveTokens
 	}
 	return max(1, hard)
+}
+
+// reservedOutputTokens is the window share the thresholds hold back for the
+// reply. An output budget can exceed the configured window entirely (DeepSeek
+// defaults to 128K), which would drive every threshold to the one-token floor.
+// effectiveOutputBudget clips the actual reply at send time, so reserving more
+// than a quarter of the window buys nothing here.
+func (a *Agent) reservedOutputTokens() int {
+	budget := a.maxOutputTokens
+	if budget <= 0 && sharesContextWindow(a.prov) {
+		budget = a.outputBudget
+	}
+	if budget <= 0 {
+		return 0
+	}
+	return minInt(budget, int(float64(a.contextWindow)*maxOutputReserveRatio))
 }
 
 func (a *Agent) forceCompactThreshold(high int) int {

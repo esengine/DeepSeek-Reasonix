@@ -104,38 +104,44 @@ func (m ContextManager) prepareOnce(ctx context.Context, policy ContextPreparePo
 	if a.compactStuck && policy.Trigger == CompactionTriggerPressure {
 		return prepared, false, nil
 	}
-	if est >= soft && est < snip && !a.softCompactNoticed {
+	if soft > 0 && est >= soft && est < fold && !a.softCompactNoticed {
 		a.softCompactNoticed = true
 		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 			Text:   "Context is getting large; preserving cache until cleanup is needed.",
 			Detail: fmt.Sprintf("context reached %.0f%% of window; keeping cache-first prefix until compact threshold %.0f%%", a.softCompactRatio*100, a.compactRatio*100)})
 	}
-	if est < snip && !policy.Force && policy.Trigger != CompactionTriggerManual && policy.Trigger != CompactionTriggerOverflow {
+
+	// One trigger. Rewriting stale tool results invalidates the prompt prefix
+	// from the rewrite point on, and a cache miss costs 50x a hit, so it only
+	// pays at the fold point — where the prefix is being reset anyway.
+	forceFold := policy.Force || policy.Trigger == CompactionTriggerManual || policy.Trigger == CompactionTriggerOverflow || est >= force
+	if est < fold && !forceFold {
 		return prepared, false, nil
 	}
 
 	// Native Anthropic tool clearing replaces only local snip/prune. Full-fold
 	// summary remains the hard/manual convergence path.
-	forceFold := policy.Force || policy.Trigger == CompactionTriggerManual || policy.Trigger == CompactionTriggerOverflow || est >= force
-	if maintained, handled, retry, err := m.tryToolMaintenance(visible, prepared, policy, est, fold, forceFold, inputHash); handled {
+	if maintained, handled, retry, err := m.tryToolMaintenance(visible, prepared, policy, est, snip, forceFold, inputHash); handled {
 		return maintained, retry, err
-	}
-	if est < fold && !forceFold {
-		return prepared, false, nil
 	}
 	return m.foldContext(ctx, prepared, policy, inputHash, est, fold, force, forceFold)
 }
 
-func (m ContextManager) tryToolMaintenance(visible []provider.Message, prepared PreparedContext, policy ContextPreparePolicy, est, fold int, forceFold bool, inputHash string) (PreparedContext, bool, bool, error) {
+// tryToolMaintenance is the first step of a fold, not a trigger of its own:
+// dropping stale tool results is cheap and sometimes enough, which saves the
+// summarizer round trip. sufficient is how far down the result must land to
+// stand in for the summary; anything above it falls through to the fold.
+func (m ContextManager) tryToolMaintenance(visible []provider.Message, prepared PreparedContext, policy ContextPreparePolicy, est, sufficient int, forceFold bool, inputHash string) (PreparedContext, bool, bool, error) {
 	a := m.agent
 	if a.effectiveContextEditing() == "native" {
 		return PreparedContext{}, false, false, nil
 	}
-	mode := toolResultSnip
-	if est >= fold || forceFold {
-		mode = toolResultPrune
+	if forceFold || policy.Trigger == CompactionTriggerManual {
+		return PreparedContext{}, false, false, nil
 	}
-	maintained, stats := a.applyToolResultMaintenanceView(visible, mode)
+	// Elide in one pass rather than shortening now and eliding next turn: each
+	// rewrite costs a prefix, so a two-step escalation pays it twice.
+	maintained, stats := a.applyToolResultMaintenanceView(visible, toolResultPrune)
 	if stats.Results == 0 {
 		return PreparedContext{}, false, false, nil
 	}
@@ -143,9 +149,7 @@ func (m ContextManager) tryToolMaintenance(visible []provider.Message, prepared 
 	if policy.ObservedInputTokens > 0 {
 		maintainedTokens = max(0, est-int(float64(stats.SavedChars)*a.tokPerChar()))
 	}
-	// An over-trigger result is only an intermediate plan; summary installs the
-	// sole prefix switch for this transaction.
-	if maintainedTokens >= fold || forceFold || policy.Trigger == CompactionTriggerManual {
+	if maintainedTokens >= sufficient {
 		return PreparedContext{}, false, false, nil
 	}
 	before := a.currentProjectionVersion()

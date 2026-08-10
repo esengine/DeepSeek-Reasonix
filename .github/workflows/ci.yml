@@ -351,6 +351,7 @@ jobs:
         run: |
           wails generate module
           pnpm --dir frontend install --frozen-lockfile
+          PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend exec playwright install --with-deps chromium
           pnpm --dir frontend build
 
       - name: Test desktop frontend
@@ -360,6 +361,7 @@ jobs:
           pnpm --dir frontend test:workspace
           pnpm --dir frontend test:motion
           pnpm --dir frontend test:transcript
+          pnpm --dir frontend test:transcript-browser
 
       - name: Test usage statistics frontend
         run: pnpm --dir frontend test:usage-stats
@@ -576,11 +578,8 @@ jobs:
             .github/workflows/release-desktop.yml \
             .github/workflows/release-verify-issues.yml \
             .github/workflows/docs-impact.yml \
-            .github/workflows/ci.yml \
-            .github/workflows/cross-boundary-review.yml \
-            .github/workflows/cross-boundary-review-signal.yml
+            .github/workflows/ci.yml
           bash scripts/release-workflows.test.sh
-          node --test .github/scripts/cross-boundary-review.test.cjs
           node scripts/check-single-release-public-contract.mjs
 
   # The site/ auth client has security-sensitive redirect-validation logic

@@ -247,7 +247,29 @@ export function TranscriptSelectionMenu({
             shortcutPlatform,
           ),
           onSelect: () => {
-            void writeClipboardText(text);
+            const selection = document.getSelection();
+            const snapshot = selection && !selection.isCollapsed
+              ? {
+                  anchorNode: selection.anchorNode,
+                  anchorOffset: selection.anchorOffset,
+                  focusNode: selection.focusNode,
+                  focusOffset: selection.focusOffset,
+                }
+              : null;
+            void writeClipboardText(text).then((copied) => {
+              const current = document.getSelection();
+              if (
+                !copied
+                || !snapshot
+                || !current
+                || current.isCollapsed
+                || current.anchorNode !== snapshot.anchorNode
+                || current.anchorOffset !== snapshot.anchorOffset
+                || current.focusNode !== snapshot.focusNode
+                || current.focusOffset !== snapshot.focusOffset
+              ) return;
+              current.removeAllRanges();
+            });
             setPoint(null);
           },
         },

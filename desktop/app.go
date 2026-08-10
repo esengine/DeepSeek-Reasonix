@@ -6831,16 +6831,15 @@ type Meta struct {
 	Goal              string             `json:"goal,omitempty"`
 	GoalStatus        string             `json:"goalStatus,omitempty"`
 	GoalRuntime       *GoalRuntimeView   `json:"goalRuntime,omitempty"`
-	// A nil pointer means the controller cannot provide an authoritative snapshot;
-	// a non-nil pointer preserves an empty list as an explicit panel clear.
+	// Nil means no authoritative snapshot; non-nil empty means clear the panel.
 	CanonicalTodos *[]evidence.TodoItem `json:"canonicalTodos,omitempty"`
 }
 
-// GoalRuntimeView is the desktop-facing Goal budget/runtime summary.
 type GoalRuntimeView struct {
 	TurnsUsed        int    `json:"turnsUsed"`
 	TurnsLimit       int    `json:"turnsLimit"`
 	TokensUsed       int    `json:"tokensUsed"`
+	RequestsUsed     int    `json:"requestsUsed,omitempty"`
 	TokensLimit      int    `json:"tokensLimit"` // Deprecated: always 0; retained for bridge compatibility.
 	NoProgressTurns  int    `json:"noProgressTurns"`
 	NoProgressLimit  int    `json:"noProgressLimit"`
@@ -6858,6 +6857,7 @@ func goalRuntimeViewFromController(ctrl control.SessionAPI) *GoalRuntimeView {
 		TurnsUsed:        rt.TurnsUsed,
 		TurnsLimit:       rt.TurnsLimit,
 		TokensUsed:       rt.TokensUsed,
+		RequestsUsed:     rt.RequestsUsed,
 		TokensLimit:      rt.TokensLimit,
 		NoProgressTurns:  rt.NoProgressTurns,
 		NoProgressLimit:  rt.NoProgressLimit,

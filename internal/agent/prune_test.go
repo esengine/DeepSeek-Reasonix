@@ -228,7 +228,10 @@ func TestMaybeCompactPruneAvoidsFold(t *testing.T) {
 	}
 }
 
-func TestMaybeCompactSnipsAtSnipRatioWithoutFold(t *testing.T) {
+// Rewriting a stale tool result invalidates the prompt prefix from that point
+// on, so below the fold trigger history is left exactly as the provider cached
+// it, however large it has grown.
+func TestMaintenanceLeavesHistoryAloneBelowFoldTrigger(t *testing.T) {
 	prov := &fakeProvider{reply: "summary"}
 	sess := pruneFixture(strings.Repeat("line\n", 1000))
 	a := New(prov, tool.NewRegistry(), sess, Options{ContextWindow: 1000, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
@@ -236,30 +239,52 @@ func TestMaybeCompactSnipsAtSnipRatioWithoutFold(t *testing.T) {
 	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 650})
 
 	if prov.got != nil {
-		t.Fatal("summarizer was called at snip ratio")
+		t.Fatal("summarizer was called below the fold trigger")
+	}
+	if got := a.currentProjectionVersion(); got != 0 {
+		t.Fatalf("projection installed below the fold trigger: version %d", got)
+	}
+	for _, m := range visibleContext(a) {
+		if m.Role == provider.RoleTool && (strings.HasPrefix(m.Content, snippedMarker) || strings.HasPrefix(m.Content, prunedMarker)) {
+			t.Fatalf("tool result rewritten below the fold trigger: %.80q", m.Content)
+		}
+	}
+}
+
+// At the fold trigger, dropping stale tool results comes first: when that gets
+// the prompt low enough it stands in for the summary, saving the round trip for
+// the same single prefix switch.
+func TestMaintenancePrefersPruneOverSummaryAtFoldTrigger(t *testing.T) {
+	prov := &fakeProvider{reply: "summary"}
+	sess := pruneFixture(strings.Repeat("line\n", 1000))
+	a := New(prov, tool.NewRegistry(), sess, Options{ContextWindow: 1000, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
+
+	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 850})
+
+	if prov.got != nil {
+		t.Fatal("summarizer was called although pruning was enough")
 	}
 	if got := sess.Snapshot()[3].Content; !strings.HasPrefix(got, "line") {
-		t.Errorf("canonical tool result rewritten at snip ratio: %.80q", got)
+		t.Errorf("canonical tool result rewritten: %.80q", got)
 	}
-	proj := visibleContext(a)
 	found := false
-	for _, m := range proj {
-		if m.Role == provider.RoleTool && strings.HasPrefix(m.Content, snippedMarker) {
+	for _, m := range visibleContext(a) {
+		if m.Role == provider.RoleTool && strings.HasPrefix(m.Content, prunedMarker) {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("tool result not snipped in projection: %+v", proj)
+		t.Errorf("tool result not elided in projection: %+v", visibleContext(a))
 	}
 }
 
 func TestProjectionMaintenanceContinuesFromVisibleView(t *testing.T) {
 	sess := pruneFixture(strings.Repeat("line\n", 1000))
 	a := New(nil, tool.NewRegistry(), sess, Options{ContextWindow: 1000, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
-	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 650})
+	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 850})
 	first := a.compactionState.Projection.ProjectionVersion
-	if first == 0 || !strings.HasPrefix(visibleContext(a)[3].Content, snippedMarker) {
-		t.Fatalf("first maintenance did not install a snipped projection: %+v", visibleContext(a))
+	if first == 0 || !strings.HasPrefix(visibleContext(a)[3].Content, prunedMarker) {
+		t.Fatalf("first maintenance did not install an elided projection: %+v", visibleContext(a))
 	}
 	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 650})
 	if got := a.compactionState.Projection.ProjectionVersion; got != first {

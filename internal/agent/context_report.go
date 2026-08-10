@@ -47,10 +47,10 @@ func (a *Agent) ContextReport() ContextReport {
 	}
 	if a.session != nil {
 		canonical, _ := a.session.snapshotMessagesVersion()
-		rep.CanonicalTokens = estimateMessagesTokens(provider.ModelMessages(canonical))
+		rep.CanonicalTokens = a.estimatedPromptTokens(provider.ModelMessages(canonical))
 	}
 	visible := a.modelVisibleMessages()
-	rep.ProjectionTokens = estimateMessagesTokens(provider.ModelMessages(visible))
+	rep.ProjectionTokens = a.estimatedPromptTokens(provider.ModelMessages(visible))
 	rep.Projected = rep.ProjectionTokens != rep.CanonicalTokens
 
 	if a.contextWindow > 0 {
