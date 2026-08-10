@@ -9,9 +9,10 @@ intelifar-ip-wiki/
 |-- site/
 |   |-- src/pages/index.astro         # enterprise application shell
 |   |-- src/styles/ip-platform.css    # intelifar design system
-|   |-- src/scripts/ip-platform*.mjs  # behavior, state, contracts
+|   |-- src/scripts/asset-graph*.mjs  # graph layout, interaction and tests
 |   |-- public/brand/                 # official logo assets
-|   |-- e2e/platform.e2e.mjs          # twelve browser scenarios
+|   |-- e2e/platform.e2e.mjs          # desktop, keyboard and mobile scenarios
+|   |-- e2e/asset-graph-performance.mjs # 10k nodes / 100k edges gate
 |   |-- e2e/real-platform.e2e.mjs     # MinerU + DeepSeek live scenario
 |   |-- server/                       # gateway, providers and publication registry
 |   `-- dist/                         # production static build
@@ -22,4 +23,5 @@ intelifar-ip-wiki/
     |-- enterprise-95-scorecard.md
     |-- enterprise-95-review/          # final desktop/mobile visual review
     |-- real-e2e/                      # sanitized live-provider publication evidence
-    `-- screenshots/01..14-*.png
+    |-- ip-asset-graph/                # panorama, performance and structure proof
+    `-- screenshots/                   # full product browser evidence

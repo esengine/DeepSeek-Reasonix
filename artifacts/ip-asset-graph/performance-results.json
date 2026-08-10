@@ -1,0 +1,39 @@
+{
+  "generatedAt": "2026-08-10T05:55:13.111Z",
+  "fixture": {
+    "nodes": 10000,
+    "relationships": 100000,
+    "confidentialNodes": 100
+  },
+  "seedDurationMs": 1448.57,
+  "search": {
+    "samplesMs": [
+      133.54,
+      135.65,
+      141.91,
+      146.56,
+      142.59,
+      140.92,
+      153.39,
+      137.09
+    ],
+    "p50Ms": 140.92,
+    "p95Ms": 153.39,
+    "targetP95Ms": 400
+  },
+  "boundedTraversal": {
+    "samplesMs": [
+      68.01,
+      64.48,
+      78.4,
+      73.99,
+      74.8,
+      71.21,
+      73.68,
+      64.45
+    ],
+    "p50Ms": 71.21,
+    "p95Ms": 78.4,
+    "targetP95Ms": 500
+  }
+}

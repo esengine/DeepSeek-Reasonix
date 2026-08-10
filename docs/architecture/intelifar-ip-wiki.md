@@ -12,6 +12,7 @@ Astro product shell
        -> DeepSeek JSON Output IP analysis adapter
        -> double-credential redacted Wiki share adapter
        -> SQLite workspace, job, publication, Wiki version, member, share and audit adapter
+       -> rebuildable IP asset-node, relationship, alias and evidence projection
        -> retained uploads for explicit interrupted-job retry
   -> deterministic domain state (retained offline acceptance adapter)
   -> Reasonix controller / agent runtime (preserved upstream kernel)
@@ -44,6 +45,25 @@ Stages are `parse`, `classify`, `extract`, `verify`, and `wiki`. Every event inc
 ### IP asset
 
 Each schema field carries value, confidence, extractor version, evidence ID, document ID, page/content-block locator, content hash, and validation state. Asset versions are append-only; edits create a new version and audit event.
+
+### IP asset graph
+
+Publication snapshots and append-only Wiki versions remain the audit truth. On publication, the gateway transactionally projects assets into workspace-scoped `asset_nodes`, `asset_aliases`, `asset_relationships`, and `relationship_evidence` tables. This projection is rebuildable and never replaces the source snapshots.
+
+Model-extracted relationships enter as `proposed`; editor confirmation or rejection is an audited lifecycle change. Manual relationships enter as `confirmed`. Supported controlled types are `depends_on`, `implements`, `derived_from`, `replaces`, `references`, `part_of`, `similar_to`, and `conflicts_with`. Endpoints must both exist inside the same workspace, and symmetric relationships use canonical endpoint ordering to prevent duplicates.
+
+Authorization is applied to nodes before any traversal. A viewer therefore cannot infer a confidential asset through graph edges, search expansion, direct asset lookup, neighborhood lookup, or relationship lookup. Search combines normalized text recall with bounded one- or two-hop expansion across confirmed edges and returns the path used to explain an expanded match.
+
+Same-origin endpoints:
+
+- `GET /api/assets/graph` — capped full graph with type/relation/status filters.
+- `GET /api/assets/:id/neighborhood` — permission-filtered, maximum two-hop neighborhood.
+- `GET /api/assets/search` — direct and graph-expanded search with explanations.
+- `POST /api/relationships` — editor-only manual relationship creation.
+- `POST /api/relationships/:id/confirm|reject` — editor-only model relationship review.
+- `GET /api/relationships/:id` — returns 404 when either endpoint is not visible.
+
+The current SQLite target is 10,000 visible nodes and 100,000 relationships on one application instance. Indexed adjacency reads avoid scanning the complete edge table for neighborhood and search expansion. The checked performance artifact records search P95 below 400 ms and bounded two-hop traversal P95 below 500 ms on the acceptance host.
 
 ### Provenance
 
