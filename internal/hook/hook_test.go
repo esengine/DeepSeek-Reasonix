@@ -687,7 +687,7 @@ func TestLoadPluginHooksPreservesExecutionContract(t *testing.T) {
 	reasonixHome := filepath.Join(home, ".reasonix")
 	root := filepath.Join(reasonixHome, "plugins", "hook-contract")
 	writeHookTestFile(t, filepath.Join(root, pluginpkg.NativeManifest), `{
-  "name": "hook-contract",
+  "apiVersion": "reasonix.io/plugin/v2", "name": "hook-contract",
   "hooks": {
     "SessionStart": [
       {"command":"bin/check","args":[],"shellCommand":true},
@@ -726,7 +726,7 @@ func TestLoadExpandsReasonixPluginRootBeforeShellLaunch(t *testing.T) {
 	root := filepath.Join(reasonixHome, "plugins", "impeccable")
 	projectRoot := filepath.Join(home, "$CLAUDE_PLUGIN_ROOT-project")
 	writeHookTestFile(t, filepath.Join(root, pluginpkg.NativeManifest), `{
-  "name": "impeccable",
+  "apiVersion": "reasonix.io/plugin/v2", "name": "impeccable",
   "version": "3.9.1",
   "hooks": {
     "PostToolUse": [{
@@ -1021,6 +1021,23 @@ func TestReasonixHomeOverridesGlobalHookPaths(t *testing.T) {
 	hooks := Load(LoadOptions{})
 	if len(hooks) != 1 || hooks[0].Command != "echo rx" {
 		t.Fatalf("Load hooks = %+v, want Reasonix home hook only", hooks)
+	}
+}
+
+func TestLoadOptionsReasonixHomeDirUsesExactGlobalHookPath(t *testing.T) {
+	home := t.TempDir()
+	reasonixHome := filepath.Join(home, "AppData", "Roaming", "reasonix")
+	settingsPath := filepath.Join(reasonixHome, SettingsFilename)
+	if err := os.MkdirAll(reasonixHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settingsPath, []byte(`{"hooks":{"Stop":[{"command":"echo exact"}]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	hooks := Load(LoadOptions{HomeDir: home, ReasonixHomeDir: reasonixHome})
+	if len(hooks) != 1 || hooks[0].Command != "echo exact" || hooks[0].Source != settingsPath {
+		t.Fatalf("Load hooks = %+v, want exact Reasonix home hook", hooks)
 	}
 }
 

@@ -163,7 +163,7 @@ func routeCandidates(input string, entries []Entry) []RouteCandidate {
 	}
 	var candidates []RouteCandidate
 	for _, e := range entries {
-		if e.Status == StatusDisabled || negativeMatch(text, e.NegativeTriggers) {
+		if e.Status == StatusDisabled || e.Status == StatusFailed || negativeMatch(text, e.NegativeTriggers) {
 			continue
 		}
 		if policy, reason, ok := routeEntry(text, e); ok {
@@ -218,10 +218,7 @@ func limitRouteCandidates(candidates []RouteCandidate) []RouteCandidate {
 			suggested = append(suggested, candidate)
 		}
 	}
-	slots := targetCandidates - len(strong)
-	if slots < 0 {
-		slots = 0
-	}
+	slots := max(targetCandidates-len(strong), 0)
 	if len(suggested) > slots {
 		suggested = suggested[:slots]
 	}

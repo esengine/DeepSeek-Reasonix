@@ -70,3 +70,18 @@ func TestRunPersistsRawUserInputSeparatelyFromProviderContext(t *testing.T) {
 		t.Fatalf("previous-release reader sees %q, want provider-visible %q", legacy.Content, composed)
 	}
 }
+
+func TestSubagentImageCandidatesAreCopiedAndIsolated(t *testing.T) {
+	images := []string{"data:image/png;base64,AAAA"}
+	ctx := WithSubagentImageCandidates(context.Background(), images)
+	images[0] = "mutated"
+
+	got := SubagentImageCandidates(ctx)
+	if len(got) != 1 || got[0] != "data:image/png;base64,AAAA" {
+		t.Fatalf("candidates = %v, want an isolated copy of the original image", got)
+	}
+	got[0] = "mutated again"
+	if again := SubagentImageCandidates(ctx); again[0] != "data:image/png;base64,AAAA" {
+		t.Fatalf("candidate accessor exposed mutable context state: %v", again)
+	}
+}

@@ -31,6 +31,7 @@ evidence. State any unverified result or assumption explicitly.
 var tokenEconomyCoreBuiltins = []string{
 	"bash",
 	"bash_output",
+	"compress",
 	"edit_file",
 	"kill_shell",
 	"read_file",

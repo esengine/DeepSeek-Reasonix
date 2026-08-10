@@ -71,7 +71,7 @@ func InstalledShowText(reasonixHome, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	skills, commands, hooks, mcp := pkg.CapabilityCounts()
+	summary := pkg.CapabilitySummary()
 	state := "disabled"
 	if p.Enabled {
 		state = "enabled"
@@ -82,7 +82,10 @@ func InstalledShowText(reasonixHome, name string) (string, error) {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "plugin %s [%s]\n", p.Name, state)
-	fmt.Fprintf(&b, "version: %s\nkind: %s\nroot: %s\nsource: %s\ncapabilities: %d skills, %d commands, %d hooks, %d MCP servers\n", version, p.ManifestKind, filepath.Clean(root), p.Source, skills, commands, hooks, mcp)
+	fmt.Fprintf(&b, "version: %s\nkind: %s\nroot: %s\nsource: %s\ncapabilities: %d skills, %d commands, %d prompts, %d hooks, %d MCP servers, %d themes\n", version, p.ManifestKind, filepath.Clean(root), p.Source, summary.Skills, summary.Commands, summary.Prompts, summary.Hooks, summary.MCPServers, summary.Themes)
+	if summary.Runtime {
+		b.WriteString(RuntimeTrustText(pkg.Manifest.Runtime))
+	}
 	if p.Enabled {
 		b.WriteString("usage: enabled plugins load into new sessions; use /skills, invoke /<plugin>:<skill> or /<plugin>:<command>, or ask naturally.\n")
 	} else {
@@ -114,24 +117,65 @@ func pluginCapabilityText(reasonixHome string, p InstalledPlugin) string {
 	if err != nil {
 		return "invalid: " + err.Error()
 	}
-	skills, commands, hooks, mcp := pkg.CapabilityCounts()
+	summary := pkg.CapabilitySummary()
 	parts := []string{}
-	if skills > 0 {
-		parts = append(parts, fmt.Sprintf("%d skills", skills))
+	if summary.Skills > 0 {
+		parts = append(parts, fmt.Sprintf("%d skills", summary.Skills))
 	}
-	if commands > 0 {
-		parts = append(parts, fmt.Sprintf("%d commands", commands))
+	if summary.Commands > 0 {
+		parts = append(parts, fmt.Sprintf("%d commands", summary.Commands))
 	}
-	if hooks > 0 {
-		parts = append(parts, fmt.Sprintf("%d hooks", hooks))
+	if summary.Prompts > 0 {
+		parts = append(parts, fmt.Sprintf("%d prompts", summary.Prompts))
 	}
-	if mcp > 0 {
-		parts = append(parts, fmt.Sprintf("%d MCP", mcp))
+	if summary.Hooks > 0 {
+		parts = append(parts, fmt.Sprintf("%d hooks", summary.Hooks))
+	}
+	if summary.MCPServers > 0 {
+		parts = append(parts, fmt.Sprintf("%d MCP", summary.MCPServers))
+	}
+	if summary.Themes > 0 {
+		parts = append(parts, fmt.Sprintf("%d themes", summary.Themes))
+	}
+	if summary.Runtime {
+		parts = append(parts, "FULL TRUST runtime")
 	}
 	if len(parts) == 0 {
 		return "no exported capabilities"
 	}
 	return strings.Join(parts, " / ")
+}
+
+// RuntimeTrustText renders the prominent FULL TRUST block for a package that
+// declares a runtime process. CLI and session-facing views share it so the
+// risk statement reads identically everywhere.
+func RuntimeTrustText(rt *RuntimeSpec) string {
+	if rt == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("runtime: FULL TRUST\n")
+	fmt.Fprintf(&b, "  command: %s\n", RuntimeCommandLine(rt))
+	if len(rt.Intercepts) > 0 {
+		fmt.Fprintf(&b, "  intercepts: %s\n", strings.Join(rt.Intercepts, ", "))
+	}
+	if len(rt.Replaces) > 0 {
+		fmt.Fprintf(&b, "  replaces: %s\n", strings.Join(rt.Replaces, ", "))
+	}
+	if len(rt.Capabilities) > 0 {
+		fmt.Fprintf(&b, "  capabilities: %s\n", strings.Join(rt.Capabilities, ", "))
+	}
+	b.WriteString("  risk: the runtime process runs inside Reasonix — it can read the full session and environment, bypass permissions, and operate this machine directly.\n")
+	return b.String()
+}
+
+// RuntimeCommandLine renders the exec-form runtime command plus args as one
+// display line. The command is never executed through a shell.
+func RuntimeCommandLine(rt *RuntimeSpec) string {
+	if rt == nil {
+		return ""
+	}
+	return strings.Join(append([]string{rt.Command}, rt.Args...), " ")
 }
 
 func appendInventoryText(b *strings.Builder, pluginName string, inv Inventory) {
@@ -165,6 +209,26 @@ func appendInventoryText(b *strings.Builder, pluginName string, inv Inventory) {
 			}
 		}
 	}
+	if len(inv.Prompts) > 0 {
+		b.WriteString("prompts:\n")
+		for _, pr := range inv.Prompts {
+			desc := oneLine(pr.Description)
+			if desc == "" {
+				desc = "(no description)"
+			}
+			if pr.ArgHint != "" {
+				fmt.Fprintf(b, "  %s %s - %s\n", pr.Name, pr.ArgHint, desc)
+			} else {
+				fmt.Fprintf(b, "  %s - %s\n", pr.Name, desc)
+			}
+		}
+	}
+	if len(inv.Themes) > 0 {
+		b.WriteString("themes:\n")
+		for _, theme := range inv.Themes {
+			fmt.Fprintf(b, "  %s - %s\n", theme.Name, theme.Path)
+		}
+	}
 	if len(inv.Hooks) > 0 {
 		b.WriteString("hooks:\n")
 		for _, hook := range inv.Hooks {
@@ -194,7 +258,7 @@ func appendInventoryText(b *strings.Builder, pluginName string, inv Inventory) {
 			fmt.Fprintf(b, "  %s [%s] - %s\n", server.Name, server.Transport, target)
 		}
 	}
-	if len(inv.Skills) == 0 && len(inv.Commands) == 0 && len(inv.Hooks) == 0 && len(inv.MCPServers) == 0 {
+	if len(inv.Skills) == 0 && len(inv.Commands) == 0 && len(inv.Prompts) == 0 && len(inv.Themes) == 0 && len(inv.Hooks) == 0 && len(inv.MCPServers) == 0 {
 		b.WriteString("capabilities: no detailed inventory available\n")
 	}
 }

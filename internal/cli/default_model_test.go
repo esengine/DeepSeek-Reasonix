@@ -118,6 +118,27 @@ func TestResolveModelForCLI(t *testing.T) {
 			wantRef:      "minimax/MiniMax-M3",
 			wantFallback: false,
 		},
+		{
+			// An explicit plugin-namespaced ref passes through unresolved:
+			// extension sidecars own it, boot's merged resolver gates it.
+			name:         "explicit plugin ref passes through",
+			explicitRef:  "plugin/demo/fake/x",
+			defaultModel: "minimax/MiniMax-M3",
+			configured:   true,
+			keyless:      false,
+			wantRef:      "plugin/demo/fake/x",
+			wantFallback: false,
+		},
+		{
+			// Two segments only is NOT a plugin ref — it stays an ordinary
+			// (unknown) config ref and keeps failing loudly.
+			name:         "two-segment plugin shape is not a plugin ref",
+			explicitRef:  "plugin/demo",
+			defaultModel: "minimax/MiniMax-M3",
+			configured:   true,
+			keyless:      false,
+			wantErrSub:   "unknown model",
+		},
 	}
 
 	for _, tc := range cases {

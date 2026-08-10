@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"reasonix/internal/control"
+	"reasonix/internal/repair"
 )
 
 type shutdownSnapshotController struct {
@@ -97,6 +98,81 @@ func TestShutdownRecordsLKGOnlyAfterReady(t *testing.T) {
 	a.startupReady.Store(true)
 	// Post-ready shutdown attempts RecordHealthyConfig; missing user config is fine.
 	a.shutdown(context.Background())
+}
+
+func TestCaptureAndCommitPendingUpdateHealthUsesExactStartupIdentity(t *testing.T) {
+	originalRead := readPendingUpdateForHealth
+	originalMark := markPendingUpdateHealthyAfterReady
+	t.Cleanup(func() {
+		readPendingUpdateForHealth = originalRead
+		markPendingUpdateHealthyAfterReady = originalMark
+	})
+	tx := &repair.UpdateTransaction{
+		SchemaVersion: 1,
+		ToVersion:     version,
+		CreatedAt:     "2026-08-05T00:00:00Z",
+		Platform:      "darwin/arm64",
+		TargetKind:    "app-bundle",
+		TargetPath:    "/Applications/Reasonix.app",
+		BackupPath:    "/Applications/Reasonix.app.reasonix-update-backup",
+	}
+	readPendingUpdateForHealth = func() (*repair.UpdateTransaction, error) { return tx, nil }
+	app := NewApp()
+	capturePendingUpdateHealthIdentity(app)
+	wantID := repair.UpdateTransactionID(tx)
+	if app.healthyUpdateCreatedAt != tx.CreatedAt || app.healthyUpdateTransactionID != wantID {
+		t.Fatalf("captured health identity=(%q,%q), want (%q,%q)", app.healthyUpdateCreatedAt, app.healthyUpdateTransactionID, tx.CreatedAt, wantID)
+	}
+	called := false
+	markPendingUpdateHealthyAfterReady = func(running, createdAt, transactionID string) error {
+		called = true
+		if running != version || createdAt != tx.CreatedAt || transactionID != wantID {
+			t.Fatalf("health commit=(%q,%q,%q)", running, createdAt, transactionID)
+		}
+		return nil
+	}
+	if err := app.commitPendingUpdateHealth(); err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("exact startup transaction was not committed")
+	}
+}
+
+func TestCapturePendingUpdateHealthAcceptsVersionPrefixMismatch(t *testing.T) {
+	originalRead := readPendingUpdateForHealth
+	originalVersion := version
+	t.Cleanup(func() {
+		readPendingUpdateForHealth = originalRead
+		version = originalVersion
+	})
+	version = "1.21.0"
+	readPendingUpdateForHealth = func() (*repair.UpdateTransaction, error) {
+		return &repair.UpdateTransaction{
+			ToVersion:  "v1.21.0",
+			CreatedAt:  "2026-08-07T00:00:00Z",
+			TargetKind: "file",
+		}, nil
+	}
+	app := &App{}
+	capturePendingUpdateHealthIdentity(app)
+	if app.healthyUpdateCreatedAt == "" || app.healthyUpdateTransactionID == "" {
+		t.Fatalf("expected health identity for v-prefix mismatch, got createdAt=%q id=%q",
+			app.healthyUpdateCreatedAt, app.healthyUpdateTransactionID)
+	}
+}
+
+func TestCapturePendingUpdateHealthRejectsDifferentTargetVersion(t *testing.T) {
+	originalRead := readPendingUpdateForHealth
+	t.Cleanup(func() { readPendingUpdateForHealth = originalRead })
+	readPendingUpdateForHealth = func() (*repair.UpdateTransaction, error) {
+		return &repair.UpdateTransaction{ToVersion: version + "-other", CreatedAt: "2026-08-05T00:00:00Z"}, nil
+	}
+	app := NewApp()
+	capturePendingUpdateHealthIdentity(app)
+	if app.healthyUpdateCreatedAt != "" || app.healthyUpdateTransactionID != "" {
+		t.Fatalf("captured unrelated transaction: %+v", app)
+	}
 }
 
 func TestShutdownUsesDurableSnapshotBeforeClosingController(t *testing.T) {

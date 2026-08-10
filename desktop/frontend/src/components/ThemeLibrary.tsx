@@ -354,13 +354,15 @@ export function ThemeLibrarySection() {
     const official: ThemePackView[] = [];
     const base: ThemePackView[] = [];
     const user: ThemePackView[] = [];
+    const plugin: ThemePackView[] = [];
     for (const p of packs) {
       const kind = themePackKind(p);
       if (kind === "official") official.push(p);
       else if (kind === "base") base.push(p);
+      else if (kind === "plugin") plugin.push(p);
       else user.push(p);
     }
-    return { official, base, user };
+    return { official, base, user, plugin };
   }, [packs]);
 
   return (
@@ -442,6 +444,27 @@ export function ThemeLibrarySection() {
               </div>
             )}
           </section>
+
+          {groups.plugin.length > 0 && (
+            <section className="theme-library__group" data-group="plugin">
+              <h4 className="theme-library__heading">{t("settings.themeLibrary.groupPlugin")}</h4>
+              <div className="theme-library__grid">
+                {groups.plugin.map((pack) => (
+                  <ThemeLibCard
+                    key={pack.id}
+                    pack={pack}
+                    active={pack.id === activeId}
+                    busy={busy}
+                    onActivate={() => void activate(pack)}
+                    onEdit={() => openEdit(pack)}
+                    onCopy={() => void openCopy(pack)}
+                    onExport={() => void doExport(pack)}
+                    onDelete={() => void remove(pack)}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
         </>
       )}
 
@@ -559,7 +582,13 @@ function ThemeLibCard({
           {pack.name} {active ? <Check size={12} style={{ display: "inline", verticalAlign: "middle" }} /> : null}
         </div>
         <div className="theme-lib-card__sub">
-          {kind === "base" ? t("settings.themeLibrary.builtin") : pack.author || t("settings.themeLibrary.userTheme")}
+          {kind === "base"
+            ? t("settings.themeLibrary.builtin")
+            : kind === "plugin"
+              ? pack.pluginName
+                ? t("settings.themeGallery.kindPlugin", { name: pack.pluginName })
+                : t("settings.themeGallery.kindPluginUnknown")
+              : pack.author || t("settings.themeLibrary.userTheme")}
           {" · "}
           {pack.baseStyle}
         </div>
@@ -578,9 +607,11 @@ function ThemeLibCard({
             <Pencil size={12} />
           </button>
         )}
-        <button type="button" className="btn btn--small" disabled={busy} onClick={onCopy} title={t("settings.themeLibrary.copy")}>
-          <Copy size={12} />
-        </button>
+        {kind !== "plugin" && (
+          <button type="button" className="btn btn--small" disabled={busy} onClick={onCopy} title={t("settings.themeLibrary.copy")}>
+            <Copy size={12} />
+          </button>
+        )}
         {kind === "user" && (
           <>
             <button type="button" className="btn btn--small" disabled={busy} onClick={onExport} title={t("settings.themeLibrary.export")}>

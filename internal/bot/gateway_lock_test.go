@@ -384,7 +384,7 @@ func TestBotGatewayToolApprovalModeConcurrentWithConfigReaders(t *testing.T) {
 		defer close(writerDone)
 		<-start
 		modes := []string{control.ToolApprovalYolo, control.ToolApprovalAsk, control.ToolApprovalAuto}
-		for i := 0; i < iterations; i++ {
+		for i := range iterations {
 			mode := modes[i%len(modes)]
 			gw.UpdateConnectionToolApprovalMode("feishu-lark", mode)
 			gw.mu.Lock()
@@ -397,7 +397,7 @@ func TestBotGatewayToolApprovalModeConcurrentWithConfigReaders(t *testing.T) {
 
 	close(start)
 	connMsg := InboundMessage{Platform: PlatformFeishu, ConnectionID: "feishu-lark", ChatType: ChatDM, ChatID: "chat", UserID: "user"}
-	for i := 0; i < iterations; i++ {
+	for range iterations {
 		gw.sessionOptionsForMessage(connMsg)
 		gw.sessionOptionsForMessage(InboundMessage{Platform: PlatformFeishu})
 		projects := gw.buildProjectIndex()

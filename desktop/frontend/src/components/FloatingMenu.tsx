@@ -39,7 +39,7 @@ export function FloatingMenu({
   const pos = useMemo(() => clampFloatingMenuPosition(x, y, width, estimatedHeight), [estimatedHeight, width, x, y]);
   if (typeof document === "undefined") return null;
   // Portal to <body>: the menu is position:fixed, but a transformed ancestor
-  // (e.g. .workspace-preview carries a residual GSAP transform) would otherwise
+  // (e.g. .workspace-preview carries a residual transform) would otherwise
   // become its containing block and push the fixed coordinates off-screen.
   // Rendering at the body root keeps fixed positioning relative to the viewport.
   return createPortal(

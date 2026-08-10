@@ -1,0 +1,7 @@
+prompt = """metrics.py keeps a module-level counter mutated through `global`. Refactor:
+- introduce a Counter class holding the state; independent instances must not share counts
+- keep bump()/value()/reset() working unchanged via a module-level default instance
+- no `global` statements remain in metrics.py"""
+class = "refactor"
+max_steps = 20
+timeout_sec = 300

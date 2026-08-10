@@ -1,7 +1,7 @@
 // Package releaseasset downloads and verifies immutable Reasonix CLI release
-// artifacts for a requested platform. It is used when a local Desktop needs to
-// provision the matching Workbench host binary without requiring Node/npm on
-// the remote machine.
+// artifacts for a requested platform. It is used when a local Desktop or CLI
+// needs to provision the remote `reasonix serve` binary without requiring
+// Node/npm on the remote machine.
 package releaseasset
 
 import (
@@ -32,7 +32,8 @@ var cliReleaseVersionPattern = regexp.MustCompile(`^v(?:0|[1-9][0-9]*)\.(?:0|[1-
 
 // DownloadCLI downloads the exact official CLI release for version and target,
 // verifies it against SHA256SUMS from the same immutable release, and returns
-// the extracted executable bytes. V1 Remote Workbench supports Unix hosts.
+// the extracted executable bytes. Remote Serve provisioning supports Linux and
+// macOS hosts.
 func DownloadCLI(ctx context.Context, client *http.Client, version, goos, goarch string) ([]byte, error) {
 	if !cliReleaseVersionPattern.MatchString(strings.TrimSpace(version)) {
 		return nil, fmt.Errorf("remote CLI download requires a released version, got %q", version)
@@ -107,7 +108,7 @@ func fetchBounded(ctx context.Context, client *http.Client, rawURL string, limit
 
 func verifyChecksum(data []byte, assetName string, checksums []byte) error {
 	want := ""
-	for _, line := range strings.Split(string(checksums), "\n") {
+	for line := range strings.SplitSeq(string(checksums), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) != 2 || strings.TrimPrefix(fields[1], "*") != assetName {
 			continue

@@ -4,8 +4,9 @@ import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { initialState, reducer, useController, type Item } from "../lib/useController";
+import { historySliceFromMessages } from "./mockHistorySlice";
 import type { AppBindings } from "../lib/bridge";
-import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, JobView, Meta, TabMeta, WireEvent } from "../lib/types";
+import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, HistorySliceRequest, JobView, Meta, TabMeta, WireEvent } from "../lib/types";
 
 let passed = 0;
 let failed = 0;
@@ -180,6 +181,8 @@ window.go = {
         const messages = await staleHistory.promise;
         return { messages, startTurn: 0, endTurn: messages.filter((message) => message.role === "user").length, totalTurns: messages.filter((message) => message.role === "user").length, hasOlder: false };
       },
+      HistorySliceForTab: async (tabID: string, req: HistorySliceRequest) =>
+        historySliceFromMessages(tabID, await staleHistory.promise, req),
       HistoryCheckpointTurnsForTab: async () => [],
       ReplayPendingPrompts: async () => {},
       NewSession: async () => {
@@ -304,6 +307,11 @@ window.go.main.App = {
     reusedHistoryCalls.push("history");
     return reusedHistoryCalls.length === 1 ? reusedOldHistory.promise : reusedEmptyPage;
   },
+  HistorySliceForTab: async (tabID: string, req: HistorySliceRequest) => {
+    reusedHistoryCalls.push("history");
+    const page = reusedHistoryCalls.length === 1 ? await reusedOldHistory.promise : reusedEmptyPage;
+    return historySliceFromMessages(tabID, page.messages, req);
+  },
   HistoryCheckpointTurnsForTab: async () => [],
   ReplayPendingPrompts: async () => {},
   EnsureBlankTab: async () => ({ ...reusedTab, sessionPath: "/sessions/new.jsonl", active: true }),
@@ -356,6 +364,10 @@ window.go.main.App = {
   HistoryPageForTab: async (tabID: string) => {
     raceHistoryCalls.push(tabID);
     return reusedEmptyPage;
+  },
+  HistorySliceForTab: async (tabID: string, req: HistorySliceRequest) => {
+    raceHistoryCalls.push(tabID);
+    return historySliceFromMessages(tabID, reusedEmptyPage.messages, req);
   },
   HistoryCheckpointTurnsForTab: async () => [],
   ReplayPendingPrompts: async () => {},

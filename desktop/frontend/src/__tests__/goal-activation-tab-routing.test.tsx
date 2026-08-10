@@ -143,7 +143,7 @@ window.go = {
             : tab,
         );
       },
-      SubmitInitialGoalToTab: async (
+      SubmitInitialGoalToTabWithID: async (
         tabID: string,
         goal: string,
         display: string,
@@ -151,13 +151,11 @@ window.go = {
         invocations: { name: string }[],
         collaborationMode: string,
         toolApprovalMode: string,
-        targetKind: string,
-        targetIdentityGen: number,
-        targetRequestSeq: number,
+        _submissionID: string,
       ): Promise<string[]> => {
         await goalGate;
         initialGoalCalls.push(
-          `${tabID}:${goal}:${display}:${invocations[0]?.name ?? ""}:${collaborationMode}:${toolApprovalMode}:${targetKind}:${targetIdentityGen}:${targetRequestSeq}`,
+          `${tabID}:${goal}:${display}:${invocations[0]?.name ?? ""}:${collaborationMode}:${toolApprovalMode}`,
         );
         tabs = tabs.map((tab) =>
           tab.id === tabID
@@ -169,8 +167,14 @@ window.go = {
       SubmitInvocationsToTab: async () => {
         throw new Error("split SubmitInvocationsToTab must not be used for initial Goals");
       },
+      SubmitInvocationsToTabWithID: async () => {
+        throw new Error("split SubmitInvocationsToTabWithID must not be used for initial Goals");
+      },
       SubmitToTab: async () => {
         throw new Error("plain SubmitToTab must not be used for structured first Goal turns");
+      },
+      SubmitToTabWithID: async () => {
+        throw new Error("plain SubmitToTabWithID must not be used for structured first Goal turns");
       },
     } as Partial<AppBindings> as AppBindings,
   },
@@ -199,7 +203,6 @@ eq(controller?.activeTabId, "tab-a", "harness starts on tab A");
 const sourceTabId = "tab-a";
 const pending = activateGoalAndSubmitOnTab({
   tabId: sourceTabId,
-  target: { kind: "ssh", identityGen: 7, requestSeq: 11 },
   displayText: "Cross-tab safe goal",
   submitText: "/ui-ux-pro-max Cross-tab safe goal",
   structured: {
@@ -207,12 +210,10 @@ const pending = activateGoalAndSubmitOnTab({
     input: "Cross-tab safe goal",
     invocations: [{ name: "ui-ux-pro-max", kind: "skill", offset: 0 }],
   },
-  sendToTab: (tabId, goal, display, submit, structured, target) => {
+  sendToTab: (tabId, goal, display, submit, structured) => {
     if (!controller) throw new Error("controller missing");
-    if (!target) throw new Error("target missing");
     return controller.sendToTab(tabId, display, submit, undefined, structured, {
       goal,
-      target,
       collaborationMode: "normal",
       toolApprovalMode: "ask",
     });
@@ -235,8 +236,8 @@ await act(async () => {
 
 eq(
   initialGoalCalls.join("|"),
-  "tab-a:Cross-tab safe goal:/ui-ux-pro-max Cross-tab safe goal:ui-ux-pro-max:normal:ask:ssh:7:11",
-  "atomic Goal submit kept source tab A and its Remote target token",
+  "tab-a:Cross-tab safe goal:/ui-ux-pro-max Cross-tab safe goal:ui-ux-pro-max:normal:ask",
+  "atomic Goal submit kept source tab A",
 );
 eq(initialGoalCalls.length, 1, "atomic Goal submit ran once");
 
@@ -244,7 +245,7 @@ eq(initialGoalCalls.length, 1, "atomic Goal submit ran once");
 // structured submit.
 const failedInitialGoalCalls: string[] = [];
 const failInvokeCalls: string[] = [];
-(window.go.main.App as AppBindings).SubmitInitialGoalToTab = async (tabID: string) => {
+(window.go.main.App as AppBindings).SubmitInitialGoalToTabWithID = async (tabID: string) => {
   failedInitialGoalCalls.push(tabID);
   throw new Error("workbench target changed");
 };
@@ -257,7 +258,6 @@ await act(async () => {
   try {
     await activateGoalAndSubmitOnTab({
       tabId: "tab-a",
-      target: { kind: "ssh", identityGen: 7, requestSeq: 11 },
       displayText: "Must not run skill",
       submitText: "/ui-ux-pro-max Must not run skill",
       structured: {
@@ -265,10 +265,9 @@ await act(async () => {
         input: "Must not run skill",
         invocations: [{ name: "ui-ux-pro-max", kind: "skill", offset: 0 }],
       },
-      sendToTab: (tabId, goal, display, submit, structured, target) =>
+      sendToTab: (tabId, goal, display, submit, structured) =>
         controller!.sendToTab(tabId, display, submit, undefined, structured, {
           goal,
-          target: target!,
           collaborationMode: "normal",
           toolApprovalMode: "ask",
         }),

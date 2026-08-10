@@ -3,6 +3,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -111,7 +112,7 @@ func applyMac(zipPath, targetVersion string) error {
 	readyReader, readyWriter, err := os.Pipe()
 	if err != nil {
 		if _, cancelErr := cancelMacUpdateHandoff(tx, macUpdateHandoffLockTimeout); cancelErr != nil {
-			return fmt.Errorf("create macOS update readiness pipe: %w; cancel prepared update: %v", err, cancelErr)
+			return fmt.Errorf("create macOS update readiness pipe: %w; cancel prepared update: %w", err, cancelErr)
 		}
 		return fmt.Errorf("create macOS update readiness pipe: %w", err)
 	}
@@ -120,7 +121,7 @@ func applyMac(zipPath, targetVersion string) error {
 		_ = readyReader.Close()
 		_ = readyWriter.Close()
 		if _, cancelErr := cancelMacUpdateHandoff(tx, macUpdateHandoffLockTimeout); cancelErr != nil {
-			return fmt.Errorf("create macOS update proceed pipe: %w; cancel prepared update: %v", err, cancelErr)
+			return fmt.Errorf("create macOS update proceed pipe: %w; cancel prepared update: %w", err, cancelErr)
 		}
 		return fmt.Errorf("create macOS update proceed pipe: %w", err)
 	}
@@ -142,7 +143,7 @@ func applyMac(zipPath, targetVersion string) error {
 		_ = readyWriter.Close()
 		_ = proceedReader.Close()
 		if _, cancelErr := cancelMacUpdateHandoff(tx, macUpdateHandoffLockTimeout); cancelErr != nil {
-			return fmt.Errorf("%w; cancel prepared update: %v", err, cancelErr)
+			return fmt.Errorf("%w; cancel prepared update: %w", err, cancelErr)
 		}
 		return err
 	}
@@ -154,10 +155,10 @@ func applyMac(zipPath, targetVersion string) error {
 		_ = cmd.Wait()
 		cancelled, cancelErr := cancelMacUpdateHandoff(tx, macUpdateHandoffLockTimeout)
 		if cancelErr != nil {
-			return fmt.Errorf("%w; cancel prepared update: %v", cause, cancelErr)
+			return fmt.Errorf("%w; cancel prepared update: %w", cause, cancelErr)
 		}
 		if cleanupErr := cleanupMacHandoffStaging(cancelled); cleanupErr != nil {
-			return fmt.Errorf("%w; cleanup prepared update: %v", cause, cleanupErr)
+			return fmt.Errorf("%w; cleanup prepared update: %w", cause, cleanupErr)
 		}
 		return cause
 	}
@@ -181,14 +182,55 @@ func waitForMacHandoffReady(reader *os.File, timeout time.Duration) error {
 	if err := reader.SetReadDeadline(time.Now().Add(timeout)); err != nil {
 		return err
 	}
-	buf := make([]byte, len("ready"))
-	if _, err := io.ReadFull(reader, buf); err != nil {
+	var response macHandoffReadyResponse
+	if err := json.NewDecoder(io.LimitReader(reader, 64<<10)).Decode(&response); err != nil {
 		return err
 	}
-	if string(buf) != "ready" {
-		return fmt.Errorf("unexpected readiness response")
+	switch response.Status {
+	case "ready":
+		return nil
+	case "error":
+		phase := strings.TrimSpace(response.Phase)
+		if phase == "" {
+			phase = "startup"
+		}
+		detail := strings.TrimSpace(response.Error)
+		if detail == "" {
+			detail = "unknown helper error"
+		}
+		return fmt.Errorf("helper failed during %s: %s", phase, detail)
+	default:
+		return fmt.Errorf("unexpected readiness response %q", response.Status)
 	}
-	return nil
+}
+
+type macHandoffReadyResponse struct {
+	Status string `json:"status"`
+	Phase  string `json:"phase,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
+func writeMacHandoffReadyResponse(fd int, response macHandoffReadyResponse) error {
+	if fd == 0 {
+		return nil
+	}
+	ready := os.NewFile(uintptr(fd), "reasonix-update-ready")
+	if ready == nil {
+		return fmt.Errorf("readiness pipe is unavailable")
+	}
+	defer ready.Close()
+	return json.NewEncoder(ready).Encode(response)
+}
+
+func reportMacHandoffStartupFailure(cfg macUpdateHandoffConfig, phase string, err error) {
+	if err == nil {
+		return
+	}
+	_ = writeMacHandoffReadyResponse(cfg.ReadyFD, macHandoffReadyResponse{
+		Status: "error",
+		Phase:  phase,
+		Error:  err.Error(),
+	})
 }
 
 // maybeRunMacUpdateHandoff handles the detached self-update child before Wails
@@ -260,13 +302,16 @@ func runMacUpdateHandoff(cfg macUpdateHandoffConfig) int {
 	pending, err := readMacUpdateHandoff()
 	if err != nil {
 		logf("cannot read pending update handoff: %v", err)
+		reportMacHandoffStartupFailure(cfg, "read-pending-transaction", err)
 		return 1
 	}
 	if strings.TrimSpace(pending.ToVersion) != cfg.ToVersion ||
 		strings.TrimSpace(pending.CreatedAt) != cfg.CreatedAt ||
 		repair.UpdateTransactionID(pending) != cfg.TransactionID ||
 		pending.HandoffOwnerPID <= 0 {
-		logf("pending update does not match handoff identity")
+		err := fmt.Errorf("pending update does not match handoff identity")
+		logf("%v", err)
+		reportMacHandoffStartupFailure(cfg, "validate-transaction-identity", err)
 		return 1
 	}
 	if err := completeMacHandoffHandshake(cfg); err != nil {
@@ -391,10 +436,10 @@ func runMacUpdateHandoff(cfg macUpdateHandoffConfig) int {
 		if err := macHandoffRename(backupApp, oldApp); err != nil {
 			if retainedFailedApp && failedAppVerified {
 				if verifyErr := repair.VerifyAppBundleUpdateHandoffReplacement(claimed, failedApp); verifyErr != nil {
-					return fmt.Errorf("restore backup bundle: %w (retained replacement changed: %v)", err, verifyErr)
+					return fmt.Errorf("restore backup bundle: %w (retained replacement changed: %w)", err, verifyErr)
 				}
 				if compensateErr := macHandoffRename(failedApp, oldApp); compensateErr != nil {
-					return fmt.Errorf("restore backup bundle: %w (failed to restore replacement bundle: %v)", err, compensateErr)
+					return fmt.Errorf("restore backup bundle: %w (failed to restore replacement bundle: %w)", err, compensateErr)
 				}
 			}
 			return fmt.Errorf("restore backup bundle: %w", err)
@@ -402,14 +447,14 @@ func runMacUpdateHandoff(cfg macUpdateHandoffConfig) int {
 		if err := repair.VerifyAppBundleUpdateHandoffOriginal(claimed); err != nil {
 			rejected, retainErr := retainMacHandoffNode(oldApp, "reasonix-update-rejected")
 			if retainErr != nil {
-				return fmt.Errorf("restored backup bundle changed: %w (retain rejected bundle: %v)", err, retainErr)
+				return fmt.Errorf("restored backup bundle changed: %w (retain rejected bundle: %w)", err, retainErr)
 			}
 			if retainedFailedApp && failedAppVerified {
 				if verifyErr := repair.VerifyAppBundleUpdateHandoffReplacement(claimed, failedApp); verifyErr != nil {
-					return fmt.Errorf("restored backup bundle changed: %w (rejected bundle retained at %s; prior live bundle changed: %v)", err, rejected, verifyErr)
+					return fmt.Errorf("restored backup bundle changed: %w (rejected bundle retained at %s; prior live bundle changed: %w)", err, rejected, verifyErr)
 				}
 				if compensateErr := macHandoffRename(failedApp, oldApp); compensateErr != nil {
-					return fmt.Errorf("restored backup bundle changed: %w (rejected bundle retained at %s; restore prior live bundle: %v)", err, rejected, compensateErr)
+					return fmt.Errorf("restored backup bundle changed: %w (rejected bundle retained at %s; restore prior live bundle: %w)", err, rejected, compensateErr)
 				}
 			}
 			return fmt.Errorf("restored backup bundle changed: %w (rejected bundle retained at %s)", err, rejected)
@@ -543,23 +588,11 @@ func completeMacHandoffHandshake(cfg macUpdateHandoffConfig) error {
 	if cfg.ReadyFD == 0 && cfg.ProceedFD == 0 {
 		return nil
 	}
-	ready := os.NewFile(uintptr(cfg.ReadyFD), "reasonix-update-ready")
 	proceed := os.NewFile(uintptr(cfg.ProceedFD), "reasonix-update-proceed")
-	if ready == nil || proceed == nil {
-		if ready != nil {
-			_ = ready.Close()
-		}
-		if proceed != nil {
-			_ = proceed.Close()
-		}
+	if proceed == nil {
 		return fmt.Errorf("handoff pipe is unavailable")
 	}
-	if _, err := io.WriteString(ready, "ready"); err != nil {
-		_ = ready.Close()
-		_ = proceed.Close()
-		return fmt.Errorf("signal readiness: %w", err)
-	}
-	if err := ready.Close(); err != nil {
+	if err := writeMacHandoffReadyResponse(cfg.ReadyFD, macHandoffReadyResponse{Status: "ready"}); err != nil {
 		_ = proceed.Close()
 		return fmt.Errorf("signal readiness: %w", err)
 	}
@@ -578,7 +611,7 @@ func completeMacHandoffHandshake(cfg macUpdateHandoffConfig) error {
 }
 
 func retainMacHandoffNode(path, suffix string) (string, error) {
-	for attempt := 0; attempt < 16; attempt++ {
+	for attempt := range 16 {
 		retained := fmt.Sprintf(
 			"%s.%s-%d-%d",
 			path,
@@ -603,7 +636,7 @@ func cleanupOwnedMacUpdateDirectory(path string, owner os.FileInfo) error {
 	if strings.TrimSpace(path) == "" || owner == nil || !owner.IsDir() {
 		return fmt.Errorf("macOS update cleanup identity is incomplete")
 	}
-	for attempt := 0; attempt < 16; attempt++ {
+	for attempt := range 16 {
 		cleanup := fmt.Sprintf("%s.reasonix-cleanup-%d-%d", path, time.Now().UTC().UnixNano(), attempt)
 		err := unix.RenameatxNp(unix.AT_FDCWD, path, unix.AT_FDCWD, cleanup, unix.RENAME_EXCL)
 		if err != nil {

@@ -367,22 +367,23 @@ func renderWindowsExternalOpenerIcon(icon windows.Handle, background byte) ([]by
 	return append([]byte(nil), pixels...), true
 }
 
-func launchPlatformExternalOpener(spec externalOpenerSpec, path string) error {
+func launchPlatformExternalOpener(spec externalOpenerSpec, path string, isDir bool) error {
 	var cmd *exec.Cmd
+	launchPath := externalOpenerLaunchPath(spec, path)
 	switch spec.LaunchMode {
 	case "shell-open":
-		return openWorkspacePath(path)
+		return openWorkspacePathWithType(path, isDir)
 	case "path":
 		cmd = exec.Command(spec.Target, path)
 	case "windows-terminal":
 		// exec.Command uses CreateProcess argument escaping, not cmd.exe, so
 		// workspace paths with shell metacharacters stay a single -d argument.
-		cmd = exec.Command(spec.Target, "-d", path)
+		cmd = exec.Command(spec.Target, "-d", launchPath)
 	case "console":
 		// Never route console openers through cmd.exe / start: working-directory
 		// text would be re-parsed as shell syntax (& | ^ etc.). ShellExecute
 		// opens the binary with lpDirectory set to the workspace path.
-		plan := planWindowsConsoleLaunch(spec.Target, path)
+		plan := planWindowsConsoleLaunch(spec.Target, launchPath)
 		if plan.File == "" {
 			return os.ErrNotExist
 		}

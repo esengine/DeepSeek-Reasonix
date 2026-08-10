@@ -49,7 +49,7 @@ func main() {
 	}
 }
 
-// --- JSON-RPC framing ---
+// JSON-RPC framing
 
 type request struct {
 	JSONRPC string           `json:"jsonrpc"`
@@ -151,7 +151,7 @@ func handleLine(line []byte, w *bufio.Writer) error {
 	return nil
 }
 
-// --- tools ---
+// tools
 
 // toolDef is one exposed tool: its advertised metadata plus the handler. run
 // returns the text result, or an error which becomes an isError tool result the
@@ -257,7 +257,7 @@ func textResult(text string, isError bool) map[string]any {
 	}
 }
 
-// --- prompts ---
+// prompts
 
 // promptList advertises the server's prompts. They surface in reasonix as
 // /mcp__example__<name> slash commands.
@@ -297,7 +297,7 @@ func getPrompt(params json.RawMessage) (any, *rpcError) {
 	}, nil
 }
 
-// --- resources ---
+// resources
 
 // resourceContents is the demo resource store, keyed by uri.
 var resourceContents = map[string]string{

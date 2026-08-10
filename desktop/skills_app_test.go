@@ -51,7 +51,7 @@ func TestSkillRootsViewCountsProjectSkills(t *testing.T) {
 	roots := skillRootsView()
 	want := realTestPath(root)
 	for _, r := range roots {
-		if realTestPath(r.Dir) == want {
+		if config.CanonicalSkillPath(r.Dir) == want {
 			if r.Status != "ok" || r.Skills != 1 || r.Scope != "project" {
 				t.Fatalf("project root view = %+v", r)
 			}
@@ -62,6 +62,140 @@ func TestSkillRootsViewCountsProjectSkills(t *testing.T) {
 		}
 	}
 	t.Fatalf("project skill root %q not found in %+v", root, roots)
+}
+
+func TestSkillRootsViewUsesActiveWorkspaceForRelativeProjectPaths(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	project := t.TempDir()
+	root := filepath.Join(project, "relative-skills")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "relative.md"), []byte("---\ndescription: relative\n---\nbody"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte("[skills]\npaths = [\"relative-skills\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadForRootReadOnly(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := skillRootsViewFrom(project, cfg, config.LoadForEdit(config.UserConfigPath()))
+	if got := skillRootCount(roots, root); got != 1 {
+		t.Fatalf("relative project skill root count = %d, want 1; roots=%+v", got, roots)
+	}
+}
+
+func TestSkillRootsViewShowsProjectExcludedPathAsDisabled(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	project := t.TempDir()
+	root := filepath.Join(project, "project-skills")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "disabled.md"), []byte("---\ndescription: disabled\n---\nbody"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte("[skills]\nexcluded_paths = [\"project-skills\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadForRootReadOnly(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := skillRootsViewFrom(project, cfg, config.LoadForEdit(config.UserConfigPath()))
+	for _, view := range roots {
+		if realTestPath(view.Dir) != realTestPath(root) {
+			continue
+		}
+		if view.Enabled || view.Status != "disabled" || !view.Configured || view.Skills != 0 {
+			t.Fatalf("project excluded root view = %+v", view)
+		}
+		return
+	}
+	t.Fatalf("project excluded skill root %q not found in %+v", root, roots)
+}
+
+func TestSkillSettingsEditProjectOwnedFields(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	project := t.TempDir()
+	root := filepath.Join(project, "project-skills")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	projectConfig := filepath.Join(project, "reasonix.toml")
+	if err := os.WriteFile(projectConfig, []byte("[skills]\npaths = [\"project-skills\"]\ndisable_implicit_invocation = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(wd)
+	if err := os.Chdir(project); err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp()
+	if err := app.SetSkillPathEnabled(root, false); err != nil {
+		t.Fatalf("SetSkillPathEnabled: %v", err)
+	}
+	projectCfg, err := config.LoadForEditReadOnlyStrict(projectConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projectCfg.Skills.ExcludedPaths) != 1 || realTestPath(projectCfg.Skills.ExcludedPaths[0]) != realTestPath(root) {
+		t.Fatalf("project excluded paths = %v, want %q", projectCfg.Skills.ExcludedPaths, root)
+	}
+	if err := app.SetSkillPathEnabled(root, true); err != nil {
+		t.Fatalf("SetSkillPathEnabled restore: %v", err)
+	}
+	projectCfg, err = config.LoadForEditReadOnlyStrict(projectConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projectCfg.Skills.ExcludedPaths) != 0 {
+		t.Fatalf("project excluded paths after restore = %v, want empty", projectCfg.Skills.ExcludedPaths)
+	}
+	if err := app.SetSkillImplicitInvocation(false); err != nil {
+		t.Fatalf("SetSkillImplicitInvocation: %v", err)
+	}
+	projectCfg, err = config.LoadForEditReadOnlyStrict(projectConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projectCfg.Skills.ExcludedPaths) != 0 {
+		t.Fatalf("project excluded paths changed during policy edit: %v", projectCfg.Skills.ExcludedPaths)
+	}
+	if !projectCfg.Skills.DisableImplicitInvocation {
+		t.Fatal("project implicit invocation policy was overwritten")
+	}
+	if err := app.SetSkillImplicitInvocation(true); err != nil {
+		t.Fatalf("SetSkillImplicitInvocation restore: %v", err)
+	}
+	projectCfg, err = config.LoadForEditReadOnlyStrict(projectConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projectCfg.Skills.DisableImplicitInvocation {
+		t.Fatal("project implicit invocation policy did not restore")
+	}
+	userCfg := config.LoadForEdit(config.UserConfigPath())
+	if len(userCfg.Skills.ExcludedPaths) != 0 || userCfg.Skills.DisableImplicitInvocation {
+		t.Fatalf("project-owned skill edits leaked into user config: %+v", userCfg.Skills)
+	}
 }
 
 func TestSkillRootsViewMarksEnvConfiguredCustomRoot(t *testing.T) {
@@ -211,7 +345,7 @@ func TestSkillRootsViewDedupesConfiguredProjectConventionRoot(t *testing.T) {
 	}
 }
 
-func TestSkillRootsViewOmitsExcludedConventionRoot(t *testing.T) {
+func TestSkillRootsViewShowsExcludedConventionRootAsDisabled(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
@@ -242,12 +376,16 @@ func TestSkillRootsViewOmitsExcludedConventionRoot(t *testing.T) {
 	}
 
 	roots := skillRootsView()
-	want := realTestPath(root)
+	want := config.CanonicalSkillPath("~/.agents/skills")
 	for _, r := range roots {
-		if realTestPath(r.Dir) == want {
-			t.Fatalf("excluded convention root should be hidden, got %+v in %+v", r, roots)
+		if config.CanonicalSkillPath(r.Dir) == want {
+			if r.Enabled || r.Status != "disabled" || r.Skills != 0 {
+				t.Fatalf("excluded convention root should remain visible as disabled, got %+v", r)
+			}
+			return
 		}
 	}
+	t.Fatalf("excluded convention root should remain visible as disabled, roots=%+v", roots)
 }
 
 func TestRemoveSkillPathPseudoDeletesConventionRoot(t *testing.T) {
@@ -363,6 +501,59 @@ func TestSkillsSettingsCarriesSubagentProfileFields(t *testing.T) {
 	}
 	if len(got.AllowedTools) != 2 || got.AllowedTools[0] != "read_file" || got.AllowedTools[1] != "grep" {
 		t.Fatalf("AllowedTools not carried through: %v", got.AllowedTools)
+	}
+}
+
+func TestSkillsSettingsCarriesSkillSourceDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	project := t.TempDir()
+	root := filepath.Join(project, ".reasonix", "skills")
+	skillDir := filepath.Join(root, "owned")
+	skillPath := filepath.Join(skillDir, "SKILL.md")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(skillPath, []byte("---\ndescription: owned\n---\nbody"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(wd)
+	if err := os.Chdir(project); err != nil {
+		t.Fatal(err)
+	}
+
+	a := NewApp()
+	a.setTestCtrl(control.New(control.Options{
+		AllSkills: []skill.Skill{{Name: "owned", Description: "owned", Scope: skill.ScopeProject, Path: skillPath}},
+	}), "")
+	defer a.activeCtrl().Close()
+
+	views := a.SkillsSettings().Skills
+	if len(views) != 1 {
+		t.Fatalf("Skills = %+v, want exactly one entry", views)
+	}
+	if got, want := realTestPath(views[0].SourceDir), realTestPath(root); got != want {
+		t.Fatalf("SourceDir = %q, want %q", got, want)
+	}
+}
+
+func TestSkillSourceDirPrefersLongestMatchingRoot(t *testing.T) {
+	parent := t.TempDir()
+	nested := filepath.Join(parent, "nested")
+	skillPath := filepath.Join(nested, "example", "SKILL.md")
+	got := skillSourceDir(skill.Skill{Scope: skill.ScopeCustom, Path: skillPath}, []SkillRootView{
+		{Dir: parent, Scope: string(skill.ScopeCustom)},
+		{Dir: nested, Scope: string(skill.ScopeCustom)},
+	})
+	if realTestPath(got) != realTestPath(nested) {
+		t.Fatalf("skillSourceDir = %q, want longest matching root %q", got, nested)
 	}
 }
 

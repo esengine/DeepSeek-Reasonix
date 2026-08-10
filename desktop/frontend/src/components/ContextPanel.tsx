@@ -100,7 +100,7 @@ export function cacheHitTone(hitTokens: number, missTokens: number): MetricTone 
   return "warn";
 }
 
-function formatSharePercent(value: number, total: number): string {
+export function formatSharePercent(value: number, total: number): string {
   if (total <= 0 || value <= 0) return "-";
   const pct = (value / total) * 100;
   if (pct > 0 && pct < 1) return "<1%";
@@ -172,6 +172,34 @@ interface ContextBreakdown {
 
 function nonNegativeTokenCount(value: number): number {
   return Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+/** Prefer Context* (latest attempt) over billable aggregates for turn panels. */
+export function liveTurnUsageBreakdown(
+  usage?: WireUsage | null,
+  info?: Pick<ContextPanelInfo, "promptTokens" | "completionTokens" | "reasoningTokens"> | null,
+): { promptTokens: number; completionTokens: number; reasoningTokens: number } {
+  if (usage) {
+    const hasContext =
+      (usage.contextPromptTokens ?? 0) > 0 || (usage.contextCompletionTokens ?? 0) > 0;
+    if (hasContext) {
+      return {
+        promptTokens: usage.contextPromptTokens ?? 0,
+        completionTokens: usage.contextCompletionTokens ?? 0,
+        reasoningTokens: usage.contextReasoningTokens ?? 0,
+      };
+    }
+    return {
+      promptTokens: usage.promptTokens ?? 0,
+      completionTokens: usage.completionTokens ?? 0,
+      reasoningTokens: usage.reasoningTokens ?? 0,
+    };
+  }
+  return {
+    promptTokens: info?.promptTokens ?? 0,
+    completionTokens: info?.completionTokens ?? 0,
+    reasoningTokens: info?.reasoningTokens ?? 0,
+  };
 }
 
 export function contextBreakdown(
@@ -363,9 +391,12 @@ export function ContextPanel({
   const usedTokens = context?.used && context.used > 0 ? context.used : info?.usedTokens ?? 0;
   const windowTokens = context?.window && context.window > 0 ? context.window : info?.windowTokens ?? 0;
   // Prefer live usage props (updated in real-time by the reducer during streaming)
-  // over the async-fetched info snapshot (only refreshed on turn_done).
-  const promptTokens = usage?.promptTokens ?? info?.promptTokens ?? 0;
-  const completionTokens = usage?.completionTokens ?? info?.completionTokens ?? 0;
+  // over the async-fetched info snapshot (only refreshed on turn_done). Multi-
+  // attempt stream recovery reports billable aggregates on prompt/completion
+  // and latest-attempt shape on Context* — use the latter for turn breakdown.
+  const turnBreakdown = liveTurnUsageBreakdown(usage, info);
+  const promptTokens = turnBreakdown.promptTokens;
+  const completionTokens = turnBreakdown.completionTokens;
   const totalTokens = info?.totalTokens && info.totalTokens > 0
     ? info.totalTokens
     : sessionTokens && sessionTokens > 0
@@ -373,7 +404,7 @@ export function ContextPanel({
       : usage?.totalTokens && usage.totalTokens > 0
         ? usage.totalTokens
         : promptTokens + completionTokens;
-  const reasoningTokens = usage?.reasoningTokens ?? info?.reasoningTokens ?? 0;
+  const reasoningTokens = turnBreakdown.reasoningTokens;
   // Session-cumulative cache tokens for the top summary: all-sources telemetry
   // first (matching the session cost and per-source rows in this panel — the
   // wire session counters are executor-only), with the live counters bridging
@@ -582,11 +613,10 @@ export function ContextPanel({
                   </div>
                   <div className="context-panel__source-legend">
                     {sourceUsageRows.map((row) => {
-                      const sharePct = sourceTotalTokens > 0 ? (sourceTokenTotal(row) / sourceTotalTokens) * 100 : 0;
                       return (
                         <span key={row.source}>
                           <i className={`context-panel__source-dot context-panel__source-tone--${sourceTone(row.source)}`} aria-hidden="true" />
-                          {sourceLabel(row.label, t)} {sharePct > 0 ? `${sharePct.toFixed(0)}%` : "-"}
+                          {sourceLabel(row.label, t)} {formatSharePercent(sourceTokenTotal(row), sourceTotalTokens)}
                         </span>
                       );
                     })}

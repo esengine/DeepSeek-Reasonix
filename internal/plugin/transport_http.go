@@ -7,11 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 
+	"reasonix/internal/mcpdiag"
 	"reasonix/internal/tool"
 )
 
@@ -36,6 +38,7 @@ type httpTransport struct {
 	client   *http.Client
 	roots    []mcpRoot
 	progress progressRouter
+	oauth    *mcpOAuthClient
 
 	mu      sync.Mutex
 	nextID  int
@@ -47,14 +50,24 @@ func newHTTPTransport(s Spec) (*httpTransport, error) {
 		return nil, fmt.Errorf("http plugin %q: url is required", s.Name)
 	}
 	headers := make(map[string]string, len(s.Headers))
-	for key, value := range s.Headers {
-		headers[key] = value
+	maps.Copy(headers, s.Headers)
+	var oauth *mcpOAuthClient
+	var err error
+	if !mcpdiag.HasAuthConfig(headers, s.Env, s.URL) {
+		oauth, err = newMCPOAuthClient(s.StateDir, s.OAuthHTTPClient)
+		if err != nil {
+			return nil, fmt.Errorf("http plugin %q: load OAuth state: %w", s.Name, err)
+		}
+		if oauth != nil && !sameCanonicalResource(oauth.state.Resource, s.URL) {
+			return nil, fmt.Errorf("http plugin %q: stored OAuth token belongs to a different MCP resource; clear authentication and authorize this endpoint", s.Name)
+		}
 	}
 	return &httpTransport{
 		name:    s.Name,
 		url:     s.URL,
 		headers: headers,
 		roots:   mcpRoots(s.WorkspaceRoot),
+		oauth:   oauth,
 		client: &http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) == 0 || sameHTTPOrigin(via[0].URL, req.URL) {
 				return nil
@@ -156,6 +169,10 @@ func (t *httpTransport) registerProgress(token string, sink tool.ProgressFunc) f
 // do POSTs one JSON-RPC body with the standard MCP headers, the configured
 // static headers, and the session id (once known). Caller holds t.mu.
 func (t *httpTransport) do(ctx context.Context, body []byte) (*http.Response, error) {
+	return t.doOAuth(ctx, body, false)
+}
+
+func (t *httpTransport) doOAuth(ctx context.Context, body []byte, refreshed bool) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -165,10 +182,29 @@ func (t *httpTransport) do(ctx context.Context, body []byte) (*http.Response, er
 	for k, v := range t.headers {
 		req.Header.Set(k, v)
 	}
+	usedOAuth := false
+	if req.Header.Get("Authorization") == "" && t.oauth != nil {
+		header, used, err := t.oauth.authorizationHeader(ctx, false)
+		if err != nil {
+			return nil, err
+		}
+		if header != "" {
+			req.Header.Set("Authorization", header)
+			usedOAuth = used
+		}
+	}
 	if t.session != "" {
 		req.Header.Set("Mcp-Session-Id", t.session)
 	}
-	return t.client.Do(req)
+	resp, err := t.client.Do(req)
+	if err != nil || refreshed || resp.StatusCode != http.StatusUnauthorized || !usedOAuth || !t.oauth.canRefresh() {
+		return resp, err
+	}
+	_ = resp.Body.Close()
+	if _, _, err := t.oauth.authorizationHeader(ctx, true); err != nil {
+		return nil, err
+	}
+	return t.doOAuth(ctx, body, true)
 }
 
 func (t *httpTransport) captureSession(resp *http.Response) {

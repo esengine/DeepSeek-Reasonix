@@ -15,19 +15,15 @@ func TestControllerAccessorIsRaceSafe(t *testing.T) {
 	s := &Server{ctrl: a}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 64; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 64 {
+		wg.Go(func() {
 			if got := s.ctl(); got != a && got != b {
 				t.Errorf("ctl() returned a pointer that was never set")
 			}
-		}()
+		})
 	}
-	for i := 0; i < 16; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 16 {
+		wg.Go(func() {
 			s.mu.Lock()
 			if s.ctrl == a {
 				s.ctrl = b
@@ -35,7 +31,7 @@ func TestControllerAccessorIsRaceSafe(t *testing.T) {
 				s.ctrl = a
 			}
 			s.mu.Unlock()
-		}()
+		})
 	}
 	wg.Wait()
 }

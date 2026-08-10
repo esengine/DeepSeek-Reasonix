@@ -22,6 +22,213 @@ type supersededUpdateFixture struct {
 	running     string
 }
 
+type supersededAppUpdateFixture struct {
+	home        string
+	target      string
+	backup      string
+	marker      string
+	pendingBody []byte
+	transaction *UpdateTransaction
+}
+
+func prepareSupersededAppUpdateFixture(t *testing.T, withBackup, withBackupIdentity bool) supersededAppUpdateFixture {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	root := t.TempDir()
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	target := filepath.Join(root, "Reasonix.app")
+	marker := filepath.Join(target, "Contents", "Resources", "release.txt")
+	executable := filepath.Join(target, "Contents", "MacOS", "reasonix-desktop")
+	for _, path := range []string{marker, executable} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("healthy current app"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backup := target + ".reasonix-update-backup"
+	if withBackup {
+		backupMarker := filepath.Join(backup, "Contents", "Resources", "release.txt")
+		if err := os.MkdirAll(filepath.Dir(backupMarker), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(backupMarker, []byte("preserved previous app"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	originalExecutable := repairExecutable
+	repairExecutable = func() (string, error) { return executable, nil }
+	t.Cleanup(func() { repairExecutable = originalExecutable })
+	tx := &UpdateTransaction{
+		SchemaVersion: updateTransactionVersion,
+		FromVersion:   "v1.19.5",
+		ToVersion:     "v1.19.7",
+		Platform:      runtime.GOOS + "/amd64",
+		TargetKind:    "app-bundle",
+		TargetPath:    target,
+		BackupPath:    backup,
+		CreatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if withBackupIdentity {
+		var err error
+		tx.BackupTreeID, err = repairPlanTreeContentStateID(backup)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := createPendingUpdate(tx); err != nil {
+		t.Fatal(err)
+	}
+	pendingBody, err := os.ReadFile(PendingUpdatePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return supersededAppUpdateFixture{
+		home: home, target: target, backup: backup, marker: marker,
+		pendingBody: pendingBody, transaction: tx,
+	}
+}
+
+func TestArchiveSupersededPendingAppBundleUpdatePreservesLegacyBackup(t *testing.T) {
+	fixture := prepareSupersededAppUpdateFixture(t, true, false)
+	archived, err := ArchiveSupersededPendingAppBundleUpdate("v1.19.5")
+	if err != nil || !archived {
+		t.Fatalf("archived=%v err=%v", archived, err)
+	}
+	if _, err := os.Lstat(PendingUpdatePath()); !os.IsNotExist(err) {
+		t.Fatalf("pending transaction survived: %v", err)
+	}
+	if _, err := os.Lstat(fixture.backup); !os.IsNotExist(err) {
+		t.Fatalf("public rollback path survived: %v", err)
+	}
+	backups, err := filepath.Glob(fixture.backup + ".reasonix-retired-*")
+	if err != nil || len(backups) != 1 {
+		t.Fatalf("archived backups=%v err=%v", backups, err)
+	}
+	if body, err := os.ReadFile(filepath.Join(backups[0], "Contents", "Resources", "release.txt")); err != nil || string(body) != "preserved previous app" {
+		t.Fatalf("archived backup body=%q err=%v", body, err)
+	}
+	entries, err := os.ReadDir(filepath.Join(fixture.home, "repair", "legacy-updates"))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("transaction archives=%v err=%v", entries, err)
+	}
+	if body, err := os.ReadFile(fixture.marker); err != nil || string(body) != "healthy current app" {
+		t.Fatalf("running app changed=%q err=%v", body, err)
+	}
+}
+
+func TestArchiveSupersededPendingAppBundleUpdateHealsMissingBackup(t *testing.T) {
+	fixture := prepareSupersededAppUpdateFixture(t, false, false)
+	fixture.transaction.BackupTreeID = strings.Repeat("a", 64)
+	if err := overwritePendingUpdateForTest(fixture.transaction); err != nil {
+		t.Fatal(err)
+	}
+	archived, err := ArchiveSupersededPendingAppBundleUpdate("v1.19.5")
+	if err != nil || !archived {
+		t.Fatalf("archived=%v err=%v", archived, err)
+	}
+	if _, err := os.Lstat(PendingUpdatePath()); !os.IsNotExist(err) {
+		t.Fatalf("missing-backup transaction survived: %v", err)
+	}
+}
+
+func TestArchiveSupersededPendingAppBundleUpdateLeavesModernRollbackForHealthCommit(t *testing.T) {
+	prepareSupersededAppUpdateFixture(t, true, true)
+	archived, err := ArchiveSupersededPendingAppBundleUpdate("v1.19.7")
+	if err != nil || archived {
+		t.Fatalf("modern transaction archived=%v err=%v", archived, err)
+	}
+	if _, err := ReadPendingUpdate(); err != nil {
+		t.Fatalf("modern pending transaction changed: %v", err)
+	}
+}
+
+func TestArchiveSupersededPendingAppBundleUpdateLeavesCurrentProcessHandoff(t *testing.T) {
+	fixture := prepareSupersededAppUpdateFixture(t, false, false)
+	fixture.transaction.HandoffOwnerPID = os.Getpid()
+	fixture.transaction.HandoffStagingPath = filepath.Join(filepath.Dir(fixture.target), "handoff-stage")
+	fixture.transaction.HandoffAppPath = filepath.Join(fixture.transaction.HandoffStagingPath, "Reasonix.app")
+	fixture.transaction.HandoffAppTreeID = strings.Repeat("b", 64)
+	fixture.transaction.HandoffStagingTreeID = strings.Repeat("c", 64)
+	if err := overwritePendingUpdateForTest(fixture.transaction); err != nil {
+		t.Fatal(err)
+	}
+	archived, err := ArchiveSupersededPendingAppBundleUpdate("v1.19.5")
+	if err != nil || archived {
+		t.Fatalf("current handoff archived=%v err=%v", archived, err)
+	}
+	if _, err := readPendingUpdateUnchecked(); err != nil {
+		t.Fatalf("current handoff transaction changed: %v", err)
+	}
+}
+
+func TestArchiveSupersededPendingAppBundleUpdateRejectsUnrelatedOlderVersion(t *testing.T) {
+	fixture := prepareSupersededAppUpdateFixture(t, true, false)
+	archived, err := ArchiveSupersededPendingAppBundleUpdate("v1.19.4")
+	if err == nil || archived {
+		t.Fatalf("older running version archived=%v err=%v", archived, err)
+	}
+	assertPendingTransactionUnchanged(t, fixture.pendingBody)
+}
+
+func TestArchiveSupersededPendingAppBundleUpdateRestoresStateOnTargetDrift(t *testing.T) {
+	fixture := prepareSupersededAppUpdateFixture(t, true, false)
+	originalHook := supersededAppUpdateAfterBackupArchive
+	supersededAppUpdateAfterBackupArchive = func(string) {
+		if err := os.WriteFile(fixture.marker, []byte("changed concurrently"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { supersededAppUpdateAfterBackupArchive = originalHook })
+	archived, err := ArchiveSupersededPendingAppBundleUpdate("v1.19.5")
+	if err == nil || archived {
+		t.Fatalf("drifted target archived=%v err=%v", archived, err)
+	}
+	if _, err := ReadPendingUpdate(); err != nil {
+		t.Fatalf("pending transaction was not restored: %v", err)
+	}
+	if body, err := os.ReadFile(filepath.Join(fixture.backup, "Contents", "Resources", "release.txt")); err != nil || string(body) != "preserved previous app" {
+		t.Fatalf("rollback backup was not restored=%q err=%v", body, err)
+	}
+}
+
+func TestArchiveSupersededPendingAppBundleUpdatePreservesRecreatedBackupPath(t *testing.T) {
+	fixture := prepareSupersededAppUpdateFixture(t, true, false)
+	originalHook := supersededAppUpdateAfterBackupArchive
+	supersededAppUpdateAfterBackupArchive = func(string) {
+		marker := filepath.Join(fixture.backup, "Contents", "Resources", "release.txt")
+		if err := os.MkdirAll(filepath.Dir(marker), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(marker, []byte("concurrently recreated backup"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { supersededAppUpdateAfterBackupArchive = originalHook })
+
+	archived, err := ArchiveSupersededPendingAppBundleUpdate("v1.19.5")
+	if err == nil || archived {
+		t.Fatalf("recreated backup archived=%v err=%v", archived, err)
+	}
+	if _, err := ReadPendingUpdate(); err != nil {
+		t.Fatalf("pending transaction was not restored: %v", err)
+	}
+	if body, err := os.ReadFile(filepath.Join(fixture.backup, "Contents", "Resources", "release.txt")); err != nil || string(body) != "concurrently recreated backup" {
+		t.Fatalf("recreated public backup changed=%q err=%v", body, err)
+	}
+	backups, err := filepath.Glob(fixture.backup + ".reasonix-retired-*")
+	if err != nil || len(backups) != 1 {
+		t.Fatalf("preserved archived backups=%v err=%v", backups, err)
+	}
+	if body, err := os.ReadFile(filepath.Join(backups[0], "Contents", "Resources", "release.txt")); err != nil || string(body) != "preserved previous app" {
+		t.Fatalf("archived original backup changed=%q err=%v", body, err)
+	}
+}
+
 func prepareSupersededUpdateFixture(t *testing.T, pendingVersion, runningVersion string) supersededUpdateFixture {
 	t.Helper()
 	home := t.TempDir()

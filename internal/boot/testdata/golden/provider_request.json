@@ -1,0 +1,1761 @@
+{
+  "Messages": [
+    {
+      "role": "system",
+      "content": "BASE SYSTEM PROMPT\n\nUser-owned choices: when a consequential decision has no safe, obvious default, call the ask tool so the user can choose. Otherwise proceed with a sensible reversible default. Do not ask in prose when ask is available. In non-interactive runs, state the assumption and take the safest reversible path.\n\nWork practices: when the request or a linked discussion names a specific approach or expected behavior, implement exactly that; if you believe a different approach is better, state the trade-off explicitly instead of silently substituting it. Keep scratch work (repro scripts, probes, generated output) out of the repository — use a temp directory or clean up before finishing — and review the final diff before declaring done: only the intended changes, no leftovers, and no known regressions. Scale verification to the change: reproduce the problem and run the most relevant focused tests.\n\nReply in the same language the user is using in their most recent message: if they write in Chinese answer in Chinese, in English answer in English, and switch whenever they switch. Let this also guide the language you think in. Always keep code, identifiers, file paths, shell commands, and technical terms in their original form — never translate them.\n\nCurrent workspace: \"\u003cROOT\u003e\"\n\n# Skills — playbooks you can invoke\n\nOne-liner index. Before non-trivial work, scan it: if an untagged (inline) skill is even plausibly relevant to the task, invoke it before continuing instead of pre-judging — loading one imperfect inline skill is cheap. Skills tagged `[🧬 subagent]` are the heavy path; reach for them only when the task genuinely needs context-heavy work, not on weak relevance. Each entry is a built-in or a user-authored playbook. Call `run_skill({ name: \"\u003cskill-name\u003e\", arguments: \"\u003ctask\u003e\" })` — `name` is JUST the identifier (e.g. `\"explore\"`), NOT the `[🧬 subagent]` tag that follows it. Prefer the dedicated top-level tool when one exists for a built-in subagent skill. Entries tagged `[🧬 subagent]` spawn an isolated subagent — its tool calls and reasoning never enter your context, only its final answer does; use them for context-heavy work (deep exploration, multi-step research) where you only need the conclusion. Untagged skills are inlined: the body becomes a tool result you read and act on directly. The user can also invoke a skill via `/\u003cname\u003e`.\n\n```\n- explore [🧬 subagent] — Explore the codebase in an isolated subagent — wide-net read-only investigation that returns one distilled an…\n- init — Bootstrap or refresh this project's AGENTS.md — analyze the codebase (structure, build/test commands, architecture, conventio…\n- install-capability — Install or uninstall Reasonix MCP servers and skills from a URL, GitHub/raw file, local path/folder, .mcp.json,…\n- reasonix-guide — Troubleshoot and configure Reasonix capabilities: Skills (project/custom/global/builtin priority, discovery dirs), …\n- research [🧬 subagent] — Research a question by combining web_fetch + code reading in an isolated subagent. Best for: 'is X supported…\n- review [🧬 subagent] — Review the pending changes (current branch diff by default) in an isolated subagent — flags correctness, secur…\n- security-review [🧬 subagent] — Security-focused review of the current branch diff in an isolated subagent — flags injection/authz/se…\n- test — Run the project's test suite, diagnose failures, propose+apply fixes, re-run until green (or stop after 2 attempts on the sam…\n```"
+    },
+    {
+      "role": "user",
+      "content": "USER PROMPT"
+    },
+    {
+      "role": "assistant",
+      "content": "ASSISTANT REPLY",
+      "reasoning_content": "THINKING",
+      "reasoning_signature": "sig",
+      "tool_calls": [
+        {
+          "id": "call_1",
+          "name": "read",
+          "arguments": "{\"path\":\"a.txt\"}"
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "TOOL RESULT",
+      "tool_call_id": "call_1",
+      "name": "read"
+    }
+  ],
+  "Tools": [
+    {
+      "name": "ask",
+      "description": "Ask the user one or more multiple-choice questions when you hit a decision that is genuinely theirs to make — one you can't resolve from the request, the code, or sensible defaults. The frontend shows the options for the user to pick; their choices are returned to you. Prefer this over asking in prose for any real fork (which approach, which library, scope). Don't use it for decisions with an obvious default — pick the sensible option and proceed. Tool-approval modes such as YOLO do not answer these questions for the user. Each question has a short `header` (a tab label), the `question` text, 2-4 `options` (each a `label` and optional `description`; put any recommended option first), and `multiSelect` when more than one may apply.",
+      "parameters": {
+        "properties": {
+          "questions": {
+            "description": "1-4 questions to ask together.",
+            "items": {
+              "properties": {
+                "header": {
+                  "description": "Very short label for the question (a tab title), e.g. \"Library\".",
+                  "type": "string"
+                },
+                "multiSelect": {
+                  "description": "Allow selecting more than one option.",
+                  "type": "boolean"
+                },
+                "options": {
+                  "description": "The choices. Put any recommended option first.",
+                  "items": {
+                    "properties": {
+                      "description": {
+                        "description": "Optional one-line explanation of the choice.",
+                        "type": "string"
+                      },
+                      "label": {
+                        "description": "The choice text (concise).",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "label"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 4,
+                  "minItems": 2,
+                  "type": "array"
+                },
+                "question": {
+                  "description": "The full question to ask.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "header",
+                "options",
+                "question"
+              ],
+              "type": "object"
+            },
+            "maxItems": 4,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "questions"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "bash",
+      "description": "Execute a command in the shell and return combined stdout/stderr. Use for builds, tests, git, package managers, etc. To search/read/list/edit/move files, prefer the dedicated tools (grep, read_file, ls, glob, edit_file, move_file) over shell grep/cat/ls/find/sed/mv/Move-Item — they behave identically on every OS. For symbol search or architecture questions, prefer LSP/read tools and targeted grep before shell commands.",
+      "parameters": {
+        "properties": {
+          "command": {
+            "description": "Shell command to execute",
+            "type": "string"
+          },
+          "preserve_background_processes": {
+            "description": "After the shell command exits normally, keep any process-group members it intentionally left behind. Use only for deliberate daemonization, browser/GUI/session launchers such as playwright-cli open, or nohup/disown/setsid; cancellation and timeouts still kill the process group.",
+            "type": "boolean"
+          },
+          "run_in_background": {
+            "description": "Run detached: returns a job id immediately and keeps running across turns (no foreground timeout). Read new output with bash_output, wait with wait, stop it with kill_shell. Use for long-running commands like servers, watchers, or builds you don't need to block on.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "bash_output",
+      "description": "Read new output from a background job started with bash(run_in_background=true) or task(run_in_background=true). Returns the output produced since the last bash_output call for that job, plus its status (running/done/failed/killed). Does not block.",
+      "parameters": {
+        "properties": {
+          "filter": {
+            "description": "Optional regular expression; only matching lines of the new output are returned.",
+            "type": "string"
+          },
+          "job_id": {
+            "description": "The background job id (e.g. \"bash-1\") returned when it was started.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "code_index",
+      "description": "Lightweight built-in code symbol index. Prefer lsp_* for language semantics and installed code graph MCP tools for call graph, impact, and architecture relationships; use this as the local fallback for file outlines and symbol definition candidates, then verify with read_file or grep.",
+      "parameters": {
+        "properties": {
+          "action": {
+            "description": "outline lists symbols under path; search finds symbol definition candidates by name.",
+            "enum": [
+              "outline",
+              "search"
+            ],
+            "type": "string"
+          },
+          "kind": {
+            "description": "Optional symbol kind filter, such as func, method, class, type, interface, const, var, struct, enum, trait.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Maximum symbols to return (default 100, max 200).",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "description": "File or directory path to inspect (default \".\").",
+            "type": "string"
+          },
+          "query": {
+            "description": "Symbol name or substring for action=search.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "complete_step",
+      "description": "Record the evidence-backed completion of ONE step of an approved plan. Call it as you finish each step instead of silently moving on: it signs the step off with PROOF it is done — the verification you ran (command + result), a completed built-in review that is fresh for any later changes, the diff/files you changed, or a manual check. A completion with no evidence is REJECTED, so don't claim a step is done until you can show why. The host advances the task list for you when you sign off — it marks this step completed and moves the next to in_progress, so you don't need a separate todo_write to mark completions. Fields: `step` (which step — its title or number, matching the task list), `result` (what is now true/changed), `evidence` (≥1 item, each with `kind` = verification|review|diff|files|manual and a `summary`, plus optional `command`/`paths`), and optional `notes`.",
+      "parameters": {
+        "properties": {
+          "evidence": {
+            "description": "Proof the step is done. At least one item is required.",
+            "items": {
+              "properties": {
+                "command": {
+                  "description": "REQUIRED for verification evidence: the command as it actually ran (e.g. \"go test ./...\") — it is checked against this session's real command history.",
+                  "type": "string"
+                },
+                "kind": {
+                  "description": "verification = a command/test was run (command REQUIRED); review = a built-in review run completed and, after changes, inspected the latest changed result (the verdict/findings still apply separately); diff = a concrete code change (paths REQUIRED); files = files created/edited/inspected (paths REQUIRED); manual = a manual check.",
+                  "enum": [
+                    "verification",
+                    "review",
+                    "diff",
+                    "files",
+                    "manual"
+                  ],
+                  "type": "string"
+                },
+                "paths": {
+                  "description": "REQUIRED for diff/files evidence: the files this evidence refers to, as the paths were passed to the tools that touched them.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "summary": {
+                  "description": "The evidence itself: the test result, what the diff does, or what was confirmed.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "summary"
+              ],
+              "type": "object"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "notes": {
+            "description": "Optional caveats, follow-ups, or anything deferred.",
+            "type": "string"
+          },
+          "result": {
+            "description": "What is now true or changed as a result of finishing this step.",
+            "type": "string"
+          },
+          "step": {
+            "description": "Which plan step this completes — its title or number, matching the task list. Use only when the item has no step_id.",
+            "type": "string"
+          },
+          "step_id": {
+            "description": "PREFERRED: the stable step_id of the task-list item this completes, e.g. \"plan_step_02\". Unlike a title or a number it survives retitles, insertions, and reordering, so cite it whenever the item has one.",
+            "type": "string"
+          },
+          "step_index": {
+            "description": "Optional 1-based task-list item number. Use only when the item has no step_id; an index goes stale the moment a step is inserted above it.",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "evidence",
+          "result"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "compress",
+      "description": "Compress a selected part of the current model-visible conversation without deleting visible history. Use only when the user explicitly asks for context compression. Choose `before` to summarize everything before the uniquely matched user turn while keeping that turn and later context, or `after` to summarize from that turn through the last completed turn while keeping the active turn. The anchor must be an exact, unique excerpt from a real user message; use a longer excerpt if the tool reports multiple matches.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "anchor": {
+            "description": "An exact, unique excerpt from one real user message in the current model-visible conversation.",
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "direction": {
+            "description": "Which side of the anchor user turn to compress.",
+            "enum": [
+              "before",
+              "after"
+            ],
+            "type": "string"
+          },
+          "focus": {
+            "description": "Optional guidance about facts or decisions the summary must preserve.",
+            "maxLength": 2000,
+            "type": "string"
+          }
+        },
+        "required": [
+          "anchor",
+          "direction"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "delete_range",
+      "description": "Delete a contiguous text range from a file using exact start/end text anchors. Each anchor must match exactly one line. Returns unified diff on success. Use for large deletions — smaller changes should use edit_file.",
+      "parameters": {
+        "properties": {
+          "end_anchor": {
+            "description": "Exact text of the last line to delete (must be unique in the file)",
+            "type": "string"
+          },
+          "inclusive": {
+            "description": "Whether to include the anchor lines in the deletion (default true)",
+            "type": "boolean"
+          },
+          "path": {
+            "description": "File path",
+            "type": "string"
+          },
+          "start_anchor": {
+            "description": "Exact text of the first line to delete (must be unique in the file)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "end_anchor",
+          "path",
+          "start_anchor"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "delete_symbol",
+      "description": "Delete a named symbol (function, method, type, interface, const, var) from a Go source file using AST parsing. For non-Go files, use delete_range with manual anchors.",
+      "parameters": {
+        "properties": {
+          "kind": {
+            "description": "Optional kind filter: func, method, type, interface, const, var",
+            "type": "string"
+          },
+          "name": {
+            "description": "Name of the symbol to delete",
+            "type": "string"
+          },
+          "parent": {
+            "description": "Optional parent struct name for method disambiguation",
+            "type": "string"
+          },
+          "path": {
+            "description": "Path to the source file",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "path"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "docs",
+      "description": "Search and read the official documentation embedded in this exact Reasonix build. Use it before web search or assumptions for Reasonix setup, CLI, Desktop, configuration, permissions, MCP, memory, recovery, provider behavior, and maintainer workflows. Search first, then read the returned section_id when the full section is needed.",
+      "parameters": {
+        "properties": {
+          "audience": {
+            "description": "Optional audience filter; defaults to all.",
+            "enum": [
+              "all",
+              "user",
+              "developer",
+              "maintainer"
+            ],
+            "type": "string"
+          },
+          "language": {
+            "description": "Language preference. search defaults to auto from the query; list defaults to all. Explicit en or zh-CN filters results.",
+            "enum": [
+              "auto",
+              "all",
+              "en",
+              "zh-CN"
+            ],
+            "type": "string"
+          },
+          "limit": {
+            "description": "Maximum search results, default 5, max 10.",
+            "maximum": 10,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "operation": {
+            "description": "search ranks relevant sections; read returns one section or lists a document's sections; list shows the embedded document catalog.",
+            "enum": [
+              "search",
+              "read",
+              "list"
+            ],
+            "type": "string"
+          },
+          "path": {
+            "description": "Exact docs/*.md path returned by search/list. With operation=read and no section_id, lists that document's sections.",
+            "type": "string"
+          },
+          "query": {
+            "description": "Question, command, configuration key, error phrase, or topic for operation=search.",
+            "maxLength": 4096,
+            "type": "string"
+          },
+          "section_id": {
+            "description": "Exact section_id returned by search or by a document section listing. Used by operation=read.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "edit_file",
+      "description": "Replace an exact string in a file with another. old_string must occur exactly once; add surrounding context to disambiguate. Use for targeted edits instead of rewriting the whole file.",
+      "parameters": {
+        "properties": {
+          "new_string": {
+            "description": "Replacement text (may be empty to delete)",
+            "type": "string"
+          },
+          "old_string": {
+            "description": "Exact text to replace (must be unique in the file)",
+            "type": "string"
+          },
+          "path": {
+            "description": "File path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "new_string",
+          "old_string",
+          "path"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "explore",
+      "description": "Run a focused read-only codebase investigation in an isolated subagent. Use for broad survey questions across many files — 'find all places that X', 'how does Y work across the project', 'audit Z'. Returns one distilled answer with file:line citations. Its reads + reasoning never enter your context, unlike chained read_file.",
+      "parameters": {
+        "properties": {
+          "continue_from": {
+            "description": "Continue a prior compatible subagent transcript in the current conversation context. Pass only the 'sa_...' value from the prior result's 'Subagent reference: ...' line.",
+            "type": "string"
+          },
+          "task": {
+            "description": "Concrete investigation question. The subagent has none of your context — write a self-contained prompt naming the symbol / pattern / behavior to survey.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "fleet",
+      "description": "Dispatch 2–64 sub-agent tasks as a small dependency graph and return bounded previews plus stable Subagent references for full-result retrieval from completed persisted children with read_subagent_result. Each item may select a profile, model, effort, tools, write_paths, or read_only, and may declare depends_on to run after other items (research → implement → review). Tasks with no dependency between them run in parallel and must declare non-overlapping write_paths; ordered tasks may share paths. Omitted write_paths claim the whole workspace, so two or more concurrent writers without paths fail preflight before any task starts. A failed task's dependents are skipped; independent branches keep going unless fail_fast is set. Background mode returns a fleet job id collectable with wait.",
+      "parameters": {
+        "properties": {
+          "fail_fast": {
+            "description": "Stop starting new tasks after the first failure. Tasks already running are left to finish so partial writes are not abandoned mid-flight. Omitted (the default) means independent branches keep going; a failed task's dependents are skipped either way.",
+            "type": "boolean"
+          },
+          "run_in_background": {
+            "description": "Run the whole fleet asynchronously and return a job id collectable with wait. Items queue for concurrency/write slots inside the job.",
+            "type": "boolean"
+          },
+          "tasks": {
+            "description": "Array of 2–64 sub-tasks to run under the session scheduler.",
+            "items": {
+              "properties": {
+                "depends_on": {
+                  "description": "Ids of tasks that must complete before this one starts. Unknown ids, self-edges, and cycles fail preflight. A task whose dependency fails or is skipped is skipped too. Ordered tasks may share write_paths; only tasks that can run at the same time need disjoint claims.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "description": {
+                  "description": "Optional short label shown in the job list.",
+                  "type": "string"
+                },
+                "effort": {
+                  "description": "Optional reasoning effort override.",
+                  "type": "string"
+                },
+                "id": {
+                  "description": "Optional stable id for this task, referenced by other tasks' depends_on. Defaults to the 1-based position.",
+                  "type": "string"
+                },
+                "max_steps": {
+                  "description": "Optional max tool-call rounds.",
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "model": {
+                  "description": "Optional model override.",
+                  "type": "string"
+                },
+                "profile": {
+                  "description": "Optional runAs=subagent profile name.",
+                  "type": "string"
+                },
+                "prompt": {
+                  "description": "Task prompt for the sub-agent.",
+                  "type": "string"
+                },
+                "read_only": {
+                  "description": "Force the read-only registry even if the profile is writable.",
+                  "type": "boolean"
+                },
+                "tools": {
+                  "description": "Optional tool whitelist (intersected with profile allowed-tools).",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "write_paths": {
+                  "description": "Write targets for this item. Writers that can run at the same time must declare non-overlapping paths; writers ordered by depends_on may share them. Omitting write_paths claims the whole workspace; two concurrent whole-workspace claims (or any overlap between concurrent writers) fail preflight and start nothing.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "prompt"
+              ],
+              "type": "object"
+            },
+            "maxItems": 64,
+            "minItems": 2,
+            "type": "array"
+          }
+        },
+        "required": [
+          "tasks"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "forget",
+      "description": "Delete a saved memory by name when it is wrong, stale, or superseded, so it stops loading into future sessions. Use the stable project/\u003cname\u003e.md or global/\u003cname\u003e.md reference returned by memory search/read/list. Prefer updating a memory with `remember` (reuse its name) over forget-then-recreate; reach for forget only when the fact should no longer exist at all.",
+      "parameters": {
+        "properties": {
+          "name": {
+            "description": "Stable memory id, project/\u003cname\u003e.md or global/\u003cname\u003e.md reference, or legacy slug of the memory to archive.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "glob",
+      "description": "Find files matching a glob pattern (e.g. \"*.go\", \"internal/*/*.go\", \"**/*.test.ts\"). Supports shell metacharacters * ? [] and the recursive ** pattern.",
+      "parameters": {
+        "properties": {
+          "pattern": {
+            "description": "Glob pattern (supports ** for recursive matching)",
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "description": "Walk timeout in seconds (default 30, max 300); partial results are returned when it expires",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "grep",
+      "description": "Search for a regular expression in a file, or recursively under a directory (skips hidden files and files matched by .gitignore). Returns matching lines as path:line:text, capped at 200 matches.",
+      "parameters": {
+        "properties": {
+          "path": {
+            "description": "File or directory to search (default \".\")",
+            "type": "string"
+          },
+          "pattern": {
+            "description": "Regular expression (RE2 syntax)",
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "description": "Abort and return partial matches after this many seconds (default 30, max 300). Raise it for a large tree; lower it for a quick probe.",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "history",
+      "description": "Search saved local session history with lightweight BM25 retrieval, then read messages around a hit. Use search when past decisions, failed attempts, commands, or tool inputs may help the current task; use around with a returned session_path and message_index to inspect the nearby transcript. By default it searches user text, assistant text, tool inputs, and tool errors; normal tool outputs are excluded unless kind includes tool_output.",
+      "parameters": {
+        "properties": {
+          "after": {
+            "description": "Messages after message_index for operation=around, default 3, max 10.",
+            "type": "integer"
+          },
+          "before": {
+            "description": "Messages before message_index for operation=around, default 3, max 10.",
+            "type": "integer"
+          },
+          "kind": {
+            "description": "History parts to search. Defaults to user_text, assistant_text, tool_input, and tool_error.",
+            "items": {
+              "enum": [
+                "user_text",
+                "assistant_text",
+                "tool_input",
+                "tool_error",
+                "tool_output"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "limit": {
+            "description": "Maximum search hits to return, default 8, max 20.",
+            "type": "integer"
+          },
+          "message_index": {
+            "description": "Message index from a search hit. Required for operation=around.",
+            "type": "integer"
+          },
+          "operation": {
+            "description": "search ranks saved history; around returns nearby messages for a search hit.",
+            "enum": [
+              "search",
+              "around"
+            ],
+            "type": "string"
+          },
+          "query": {
+            "description": "Search query for operation=search.",
+            "type": "string"
+          },
+          "scope": {
+            "description": "project searches the current session directory; global also includes compacted-history archives.",
+            "enum": [
+              "project",
+              "global"
+            ],
+            "type": "string"
+          },
+          "session_path": {
+            "description": "Path from a search hit. Required for operation=around.",
+            "type": "string"
+          },
+          "tool_name": {
+            "description": "Optional tool-name filter for tool_input, tool_error, or tool_output.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "install_skill",
+      "description": "Author and save a new skill — a reusable playbook future turns invoke via run_skill (or /\u003cname\u003e). Runnable immediately this turn; appears in the pinned Skills index on the next launch. 'project' (default) writes to \u003crepo\u003e/.reasonix/skills/ (this workspace only); 'global' writes to the Reasonix home skills directory (every project).",
+      "parameters": {
+        "properties": {
+          "allowedTools": {
+            "description": "Optional tool allowlist for runAs=subagent (e.g. ['read_file','grep']).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "body": {
+            "description": "Markdown playbook. For subagent skills, write the subagent's persona/rules — it gets no context besides 'arguments' at runtime.",
+            "type": "string"
+          },
+          "description": {
+            "description": "≤120-char one-liner shown in the pinned Skills index — future agents read it to decide whether to invoke.",
+            "type": "string"
+          },
+          "effort": {
+            "description": "Optional effort for runAs=subagent (e.g. high, max). Ignored otherwise.",
+            "type": "string"
+          },
+          "model": {
+            "description": "Optional model override for runAs=subagent (a configured provider/model name). Ignored otherwise.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Identifier — letters/digits/_/-/., 1-64 chars, starts alphanumeric. Becomes the skill folder name under the selected skills directory.",
+            "type": "string"
+          },
+          "runAs": {
+            "description": "inline (default) folds the body into the parent turn; subagent spawns an isolated child loop returning only its final answer (use for context-heavy work).",
+            "enum": [
+              "inline",
+              "subagent"
+            ],
+            "type": "string"
+          },
+          "scope": {
+            "description": "Where to write. Defaults to project when a workspace exists, else global.",
+            "enum": [
+              "project",
+              "global"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "body",
+          "description",
+          "name"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "install_source",
+      "description": "Plan, install, or uninstall a Reasonix skill, MCP server, or plugin package from a URL, local file/folder, .mcp.json, executable, or package name. Two-phase: with apply=false (default) returns a deterministic plan with per-action risk level; with apply=true copies/registers skills, connects/persists MCP servers, or installs plugin packages after validation. op='uninstall' removes a previously installed skill, MCP server, or plugin package by name.",
+      "parameters": {
+        "properties": {
+          "apply": {
+            "description": "false (default) only returns an install plan; true performs the planned writes/connects. Ignored for op=uninstall.",
+            "type": "boolean"
+          },
+          "args": {
+            "description": "Optional stdio MCP args override.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "command": {
+            "description": "Optional stdio MCP command override for package/local executable installs.",
+            "type": "string"
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Environment variables for stdio MCP servers.",
+            "type": "object"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "HTTP headers for remote MCP servers. Prefer ${VAR} placeholders for secrets.",
+            "type": "object"
+          },
+          "kind": {
+            "description": "Capability kind. Defaults to auto.",
+            "enum": [
+              "auto",
+              "skill",
+              "mcp",
+              "plugin"
+            ],
+            "type": "string"
+          },
+          "mode": {
+            "description": "Skill install mode. auto registers multi-skill roots and copies single skills into the canonical \u003cskill-name\u003e/SKILL.md layout; copy copies skill files/folders; link creates symlinks; register adds a skill root to [skills].paths.",
+            "enum": [
+              "auto",
+              "copy",
+              "link",
+              "register"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "Optional override for the installed MCP server or single skill name. Required for op=uninstall when removing by name.",
+            "type": "string"
+          },
+          "op": {
+            "description": "Whether to install (default) or uninstall.",
+            "enum": [
+              "install",
+              "uninstall"
+            ],
+            "type": "string"
+          },
+          "planId": {
+            "description": "Optional. Echoed from a previous planned response to confirm the host is approving the same plan.",
+            "type": "string"
+          },
+          "replace": {
+            "description": "Allow replacing an existing MCP config entry with the same name. Skills still refuse to overwrite existing files.",
+            "type": "boolean"
+          },
+          "scope": {
+            "description": "Where to persist config or copy skills. MCP installs default to global so every project can use them; project-root .mcp.json imports default to project; skills default to project when a workspace exists, otherwise global.",
+            "enum": [
+              "project",
+              "global"
+            ],
+            "type": "string"
+          },
+          "source": {
+            "description": "URL, local file/folder path, .mcp.json path, or package name to install from. Ignored when op=uninstall (use name instead).",
+            "type": "string"
+          },
+          "strict": {
+            "description": "Skill install strictness. true (default) requires name+description frontmatter; false copies the file as-is (use only for files you trust).",
+            "type": "boolean"
+          },
+          "tier": {
+            "description": "Persisted MCP startup tier. Defaults to background.",
+            "enum": [
+              "background",
+              "eager"
+            ],
+            "type": "string"
+          },
+          "transport": {
+            "description": "MCP transport override. URL sources default to http unless --sse-like; package sources default to stdio.",
+            "enum": [
+              "auto",
+              "stdio",
+              "http",
+              "sse"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      }
+    },
+    {
+      "name": "kill_shell",
+      "description": "Terminate a running background job (bash or task) started with run_in_background. A no-op if the job has already finished or the id is unknown.",
+      "parameters": {
+        "properties": {
+          "job_id": {
+            "description": "The background job id to terminate (e.g. \"bash-1\").",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_sessions",
+      "description": "List saved AI conversation sessions. Returns timestamp, model, turn count, preview, and file for each visible session, newest first. Uses session metadata (branch sidecar timestamps). Use read_session to view a session's conversation.",
+      "parameters": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      }
+    },
+    {
+      "name": "ls",
+      "description": "List the entries of a directory. Directories are shown with a trailing slash; files show their byte size. Set recursive=true to list all nested files depth-first (skips .git/node_modules).",
+      "parameters": {
+        "properties": {
+          "path": {
+            "description": "Directory path (default \".\")",
+            "type": "string"
+          },
+          "recursive": {
+            "description": "When true, recursively list all nested files (default false)",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "lsp_definition",
+      "description": "Jump to where a symbol is defined. Give the file, the 1-based line the symbol appears on, and the symbol text itself.",
+      "parameters": {
+        "properties": {
+          "file": {
+            "description": "Path to the source file, relative to the workspace root or absolute.",
+            "type": "string"
+          },
+          "line": {
+            "description": "1-based line number the symbol appears on.",
+            "type": "integer"
+          },
+          "symbol": {
+            "description": "The exact symbol text on that line, e.g. \"executeBatch\". Used to locate the column.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "line",
+          "symbol"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "lsp_diagnostics",
+      "description": "Report compiler/linter diagnostics (errors, warnings) for a file from its language server. Use after editing to check the change compiles.",
+      "parameters": {
+        "properties": {
+          "file": {
+            "description": "Path to the source file, relative to the workspace root or absolute.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "lsp_hover",
+      "description": "Show the type signature and documentation for a symbol. Give the file, the 1-based line, and the symbol text.",
+      "parameters": {
+        "properties": {
+          "file": {
+            "description": "Path to the source file, relative to the workspace root or absolute.",
+            "type": "string"
+          },
+          "line": {
+            "description": "1-based line number the symbol appears on.",
+            "type": "integer"
+          },
+          "symbol": {
+            "description": "The exact symbol text on that line, e.g. \"executeBatch\". Used to locate the column.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "line",
+          "symbol"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "lsp_references",
+      "description": "List every reference to a symbol across the workspace. Give the file, the 1-based line, and the symbol text.",
+      "parameters": {
+        "properties": {
+          "file": {
+            "description": "Path to the source file, relative to the workspace root or absolute.",
+            "type": "string"
+          },
+          "line": {
+            "description": "1-based line number the symbol appears on.",
+            "type": "integer"
+          },
+          "symbol": {
+            "description": "The exact symbol text on that line, e.g. \"executeBatch\". Used to locate the column.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "line",
+          "symbol"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "memory",
+      "description": "Search, list, and read saved background memories for this project, including explicitly global facts. Use this before saving a new memory to avoid duplicates, and when a saved memory from the index looks relevant but needs its full body. This tool is read-only; use remember to save or update a memory, and forget to archive one.",
+      "parameters": {
+        "properties": {
+          "limit": {
+            "description": "Maximum search/list results to return, default 8, max 20.",
+            "type": "integer"
+          },
+          "name": {
+            "description": "Stable memory id, project/\u003cname\u003e.md or global/\u003cname\u003e.md reference, or legacy slug for operation=read.",
+            "type": "string"
+          },
+          "operation": {
+            "description": "search ranks saved memories; read returns one full memory by stable id or legacy name; list returns the saved-memory index.",
+            "enum": [
+              "search",
+              "read",
+              "list"
+            ],
+            "type": "string"
+          },
+          "query": {
+            "description": "Search query for operation=search.",
+            "type": "string"
+          },
+          "scope": {
+            "description": "Optional scope filter for search or list.",
+            "enum": [
+              "project",
+              "global"
+            ],
+            "type": "string"
+          },
+          "type": {
+            "description": "Optional memory type filter for search or list.",
+            "enum": [
+              "user",
+              "feedback",
+              "project",
+              "reference"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "move_file",
+      "description": "Move or rename a file from source_path to destination_path. Creates the destination parent directory as needed. Use instead of shell mv, Move-Item, or ren for file moves so workspace confinement and file-edit permissions apply.",
+      "parameters": {
+        "properties": {
+          "destination_path": {
+            "description": "Destination file path; must not already exist",
+            "type": "string"
+          },
+          "source_path": {
+            "description": "Existing file path to move",
+            "type": "string"
+          }
+        },
+        "required": [
+          "destination_path",
+          "source_path"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "multi_edit",
+      "description": "Apply a list of edits to a single file atomically: each edit runs against the result of the previous one, all in memory; the file is rewritten only if every edit succeeds. Cheaper and safer than chaining edit_file calls — a failure in step 3 leaves the file untouched instead of half-edited.",
+      "parameters": {
+        "properties": {
+          "edits": {
+            "description": "Ordered edits. Each step sees the file as left by the previous step.",
+            "items": {
+              "properties": {
+                "new_string": {
+                  "description": "Replacement text (empty deletes).",
+                  "type": "string"
+                },
+                "old_string": {
+                  "description": "Exact text to find. Without replace_all, must match exactly once.",
+                  "type": "string"
+                },
+                "replace_all": {
+                  "description": "Replace every occurrence instead of requiring uniqueness.",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "new_string",
+                "old_string"
+              ],
+              "type": "object"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "path": {
+            "description": "File path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "edits",
+          "path"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "notebook_edit",
+      "description": "Edit one cell of a Jupyter notebook (.ipynb). Target a cell by 0-based cell_number (or cell_id). edit_mode: \"replace\" (default) swaps the cell's source; \"insert\" adds a new cell after cell_number (use -1 to prepend at the top), taking cell_type and new_source; \"delete\" removes the cell. cell_type is \"code\" or \"markdown\" (required for insert). Editing a code cell clears its outputs. Prefer this over edit_file for notebooks — it keeps the JSON valid.",
+      "parameters": {
+        "properties": {
+          "cell_id": {
+            "description": "Target the cell by its id instead of cell_number (replace/delete).",
+            "type": "string"
+          },
+          "cell_number": {
+            "description": "0-based index of the target cell. For insert, the new cell goes after this one (-1 prepends).",
+            "type": "integer"
+          },
+          "cell_type": {
+            "description": "Cell type for insert (and optional retype on replace).",
+            "enum": [
+              "code",
+              "markdown"
+            ],
+            "type": "string"
+          },
+          "edit_mode": {
+            "description": "replace (default), insert, or delete.",
+            "enum": [
+              "replace",
+              "insert",
+              "delete"
+            ],
+            "type": "string"
+          },
+          "new_source": {
+            "description": "The cell's new source text (replace/insert).",
+            "type": "string"
+          },
+          "path": {
+            "description": "Path to the .ipynb notebook.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "parallel_tasks",
+      "description": "Dispatch multiple read-only sub-agent tasks concurrently. Blocks until all complete, then returns a bounded preview and a stable Subagent reference for every completed persisted child; use read_subagent_result to page through any full answer without combined-result truncation.",
+      "parameters": {
+        "properties": {
+          "tasks": {
+            "description": "Array of sub-task descriptions to run in parallel.",
+            "items": {
+              "properties": {
+                "description": {
+                  "description": "Optional short label shown in the job list.",
+                  "type": "string"
+                },
+                "effort": {
+                  "description": "Optional reasoning effort override.",
+                  "type": "string"
+                },
+                "max_steps": {
+                  "description": "Optional max tool-call rounds. Defaults to half the parent agent's step budget (minimum 5), same as task.",
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "model": {
+                  "description": "Optional model override.",
+                  "type": "string"
+                },
+                "prompt": {
+                  "description": "The task prompt for the sub-agent.",
+                  "type": "string"
+                },
+                "tools": {
+                  "description": "Optional tool whitelist for the sub-agent.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "prompt"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tasks"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "read_file",
+      "description": "Read a text file with optional line offset/limit. Output prefixes each line with its 1-based number (e.g. `   42→...`) so subsequent edit_file calls can target exact lines. Use `offset` and `limit` to page through large files; the tool reports total length and pagination hints in a trailer.",
+      "parameters": {
+        "properties": {
+          "limit": {
+            "description": "Maximum lines to return (default 2000)",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "description": "0-based line offset to start reading from (default 0)",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "path": {
+            "description": "File path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "read_only_skill",
+      "description": "Invoke a skill in read-only mode. Inline skills are loaded into context like read_skill. `[🧬 subagent]` skills run in an isolated ephemeral read-only subagent with only read-only research tools and safe foreground bash; no writes, installers, memory mutation, continuation/fork, background jobs, or writer-capable delegation are available. Read-only nested delegation may be available until max_subagent_depth is reached. Pass `name` as the bare skill identifier and `arguments` as the concrete task.",
+      "parameters": {
+        "properties": {
+          "arguments": {
+            "description": "Free-form arguments. For inline skills: appended as an 'Arguments:' line. For subagent skills: REQUIRED — becomes the read-only subagent's entire task.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Skill identifier as it appears in the pinned Skills index. Just the identifier, not the [🧬 subagent] tag.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "read_only_task",
+      "description": "Spawn a read-only research sub-agent for a focused investigation. The sub-agent runs in an isolated, ephemeral session with read-only tools only; bash is wrapped to allow only permission-classified foreground read-only commands. It cannot write files, install capabilities, mutate memory, run background jobs, continue/fork transcripts, or delegate to writer-capable agents. Read-only nested delegation may be available until max_subagent_depth is reached. Only its final answer is returned.",
+      "parameters": {
+        "properties": {
+          "description": {
+            "description": "Short label for the read-only sub-task (3-7 words). Surfaced in the dispatch line so the user sees what's running.",
+            "type": "string"
+          },
+          "effort": {
+            "description": "Optional reasoning effort for the sub-agent (e.g. high, max).",
+            "type": "string"
+          },
+          "max_steps": {
+            "description": "Optional cap on tool-call rounds. Defaults to half the parent's cap (min 5).",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "model": {
+            "description": "Optional model override for the sub-agent (a configured provider/model name).",
+            "type": "string"
+          },
+          "prompt": {
+            "description": "What the read-only sub-agent should investigate. Be specific about the evidence or summary to return — the sub-agent does not see this conversation.",
+            "type": "string"
+          },
+          "tools": {
+            "description": "Optional read-only tool whitelist. Writer, installer, memory mutation, background job, and delegation tools are never exposed.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "read_session",
+      "description": "Read a saved AI conversation session by file name (e.g. \"20260618-231556.000000000-gpt-4.jsonl\"). Returns a bounded, privacy-safe view: each message truncated to 2000 runes, no reasoning content, no system prompts, no tool result content (opt-in via show_tool_results). Use list_sessions to discover available sessions.",
+      "parameters": {
+        "properties": {
+          "max_turns": {
+            "description": "Maximum user-assistant turns to return (default 50). 0 = no limit.",
+            "type": "integer"
+          },
+          "session": {
+            "description": "Session file name (e.g. \"20260618-231556.000000000-gpt-4.jsonl\") or full path. Use list_sessions to see available sessions.",
+            "type": "string"
+          },
+          "show_tool_results": {
+            "description": "When true, include tool result content (default false). Tool results may contain secrets, command output, environment data, or private file contents.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "session"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "read_skill",
+      "description": "Load an inline playbook from the Skills index into your context WITHOUT running anything — the skill body returns as a tool result you read and follow. This is the read-only alternative when no subagent execution is needed. Pass `name` as the BARE identifier (e.g. 'commit'), NOT the `[🧬 subagent]` tag. Subagent-tagged skills are rejected: use run_skill (or the dedicated tool) for those, since they execute work.",
+      "parameters": {
+        "properties": {
+          "arguments": {
+            "description": "Optional free-form arguments, appended as an 'Arguments:' line; the skill's own instructions decide how to use them.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Inline skill identifier as it appears in the pinned Skills index. Just the identifier, not the [🧬 subagent] tag.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "read_subagent_result",
+      "description": "Read a completed sub-agent's full final answer by the Subagent reference returned from task, parallel_tasks, or fleet. Results are scoped to the current conversation lineage and paged by UTF-8 byte offset so large answers remain lossless without overflowing one tool result.",
+      "parameters": {
+        "properties": {
+          "limit_bytes": {
+            "description": "Maximum UTF-8 bytes to return. Defaults to 12288 and is capped at 24576.",
+            "maximum": 24576,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset_bytes": {
+            "description": "UTF-8 byte offset to start reading from. Omit for the beginning; use next_offset_bytes from the previous page.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ref": {
+            "description": "The sa_... value from a Subagent reference line.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "remember",
+      "description": "Save a durable background fact so it survives across sessions. Use for things worth remembering long-term: who the user is and their preferences (type \"user\"); guidance on how to work, including the why (type \"feedback\"); ongoing goals or constraints not derivable from the code (type \"project\"); or pointers to external resources (type \"reference\"). For feedback/project, structure the body with a \"**Why:**\" line and a \"**How to apply:**\" line so the fact is actionable later; link related memories inline with [[their-name]]. Do NOT save what the repo already records (code structure, git history) or facts that only matter to the current conversation; if asked to remember one of those, save instead the non-obvious point behind it. Choose scope \"project\" for the current workspace (the safe default) or \"global\" only when the fact should affect every project. Standing rules that must always be followed belong in project or global REASONIX.md/AGENTS.md instructions, not background memory. Before saving, check the loaded memory index for an entry that already covers this — reuse that name to update it rather than create a near-duplicate, and use `forget` to drop one that is now wrong. The saved index loads into context at the start of each session.",
+      "parameters": {
+        "properties": {
+          "activation": {
+            "description": "How the fact reaches the model: relevant (the default) is retrieval-only; pinned loads the body into every session's stable prefix. Use pinned ONLY when the user explicitly asks for an always-available fact — pinned space is budget-limited, and rules that must always hold belong in REASONIX.md/AGENTS.md instructions instead. Omit on update to preserve the current choice.",
+            "enum": [
+              "relevant",
+              "pinned"
+            ],
+            "type": "string"
+          },
+          "body": {
+            "description": "The fact itself (Markdown). For feedback/project, include a \"**Why:**\" line and a \"**How to apply:**\" line; link related memories with [[their-name]].",
+            "type": "string"
+          },
+          "description": {
+            "description": "One-line hook shown in the index — the phrase a future session reads to decide whether to open this memory. Make it specific.",
+            "type": "string"
+          },
+          "expected_revision": {
+            "description": "Revision returned by memory search/read. When set with id, the update fails instead of overwriting a newer change.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "expires_at": {
+            "description": "Hard expiry as RFC3339 or YYYY-MM-DD. Past this moment the fact stops being auto-recalled entirely. Set it when the fact has a known end of life. Omit on update to preserve; \"never\" clears an existing expiry.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Stable memory id for an update. Prefer this over name when supplied by memory search/read.",
+            "type": "string"
+          },
+          "keywords": {
+            "description": "Space-separated search aliases a future query might use where the body's own words would miss: synonyms, translations of key terms (recall matching is lexical, so give Chinese facts English aliases and vice versa), related command or tool names. Omit when the body already carries the likely query words. When updating, omit to preserve existing keywords.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Stable project/\u003cname\u003e.md or global/\u003cname\u003e.md reference returned by memory search/read/list, or a short kebab-case slug for a new fact. Reusing a reference updates that exact memory. Omit to derive a new slug from the description.",
+            "type": "string"
+          },
+          "scope": {
+            "description": "Where the fact applies. For a new fact, omit for the safe default, project. When updating an existing name, omit to preserve its current scope. Use global only when it should affect every workspace.",
+            "enum": [
+              "project",
+              "global"
+            ],
+            "type": "string"
+          },
+          "subject_key": {
+            "description": "Dotted key naming the question this fact answers, e.g. project.package_manager, project.release_branch, user.response_style. One active value per scope+subject: saving a new fact for a held subject is rejected with the holder's id — update that id so the change becomes a revision, not a contradiction. Search existing memories first and reuse their keys; omit for narrative facts that are not a single-valued answer.",
+            "type": "string"
+          },
+          "title": {
+            "description": "Short human-readable label shown in the memory index, e.g. \"Prefers tabs\". Omit to derive one from the name.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Category of the fact.",
+            "enum": [
+              "user",
+              "feedback",
+              "project",
+              "reference"
+            ],
+            "type": "string"
+          },
+          "verified": {
+            "description": "Set true only when you have JUST re-confirmed the fact still holds (checked the file, ran the command). Renews the freshness clock without changing the meaning of updated_at.",
+            "type": "boolean"
+          },
+          "volatility": {
+            "description": "How fast the fact ages, independent of type: volatile for facts that die in days (a current release branch, this week's task), stable for slow-changing ones, evergreen for facts that never age (a README location, a fixed preference). Omit to use the type default, or on update to preserve the current choice.",
+            "enum": [
+              "evergreen",
+              "stable",
+              "volatile"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "body",
+          "description"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "research",
+      "description": "Combine web_fetch + code reading in an isolated subagent. Use when the answer needs both an external reference and local verification — 'is X supported by lib Y', 'compare our impl against the spec'. Returns one synthesis citing code (file:line) and web (URL).",
+      "parameters": {
+        "properties": {
+          "continue_from": {
+            "description": "Continue a prior compatible subagent transcript in the current conversation context. Pass only the 'sa_...' value from the prior result's 'Subagent reference: ...' line.",
+            "type": "string"
+          },
+          "task": {
+            "description": "Concrete research question. The subagent has none of your context — name the external thing to look up and the local code to compare against.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "review",
+      "description": "Review the pending changes (current branch diff) in an isolated subagent — flags correctness / security / missing-tests / hidden behavior per file:line. Read-only; you decide what to act on. Use before suggesting a PR-shaped change or after finishing a multi-step edit.",
+      "parameters": {
+        "properties": {
+          "continue_from": {
+            "description": "Continue a prior compatible subagent transcript in the current conversation context. Pass only the 'sa_...' value from the prior result's 'Subagent reference: ...' line.",
+            "type": "string"
+          },
+          "task": {
+            "description": "What to focus the review on (e.g. 'focus on the auth changes' or 'general'). The subagent reads the diff itself.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "run_skill",
+      "description": "Invoke a playbook from the Skills index pinned in the system prompt. For the built-in subagent skills (explore / research / review / security_review), prefer the dedicated top-level tools of the same name — they're easier to pick and do the same thing. Pass `name` as the BARE identifier (e.g. 'explore'), NOT the `[🧬 subagent]` tag that follows it in the index. `[🧬 subagent]` skills spawn an isolated subagent — only the final distilled answer returns; supply `arguments` describing the concrete task since the subagent has no other context. Untagged skills are inlined: the body becomes a tool result you read and follow.",
+      "parameters": {
+        "properties": {
+          "arguments": {
+            "description": "Free-form arguments. For inline skills: appended as an 'Arguments:' line; the skill's own instructions decide how to use them. For subagent skills: REQUIRED — becomes the entire task the subagent receives.",
+            "type": "string"
+          },
+          "continue_from": {
+            "description": "Continue a prior compatible subagent transcript in the current conversation context. Only valid for runAs=subagent skills. Pass only the 'sa_...' value from the prior result's 'Subagent reference: ...' line.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Skill identifier as it appears in the pinned Skills index (e.g. 'explore', 'review'). Case-sensitive. Just the identifier, not the [🧬 subagent] tag.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "security_review",
+      "description": "Security-focused review of the current branch diff in an isolated subagent — injection / authz / secrets / deserialization / path-traversal / crypto, severity-tagged. Read-only. Use when shipping changes that touch auth, input parsing, file IO, or external requests.",
+      "parameters": {
+        "properties": {
+          "continue_from": {
+            "description": "Continue a prior compatible subagent transcript in the current conversation context. Pass only the 'sa_...' value from the prior result's 'Subagent reference: ...' line.",
+            "type": "string"
+          },
+          "task": {
+            "description": "Optional scope hint (e.g. 'focus on token handling in internal/auth/') or 'full' for everything in the diff.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "slash_command",
+      "description": "Invoke a project slash command (a reusable prompt template or skill) by name. Returns the command's expanded prompt text for you to act on in this turn — it does not run on its own. Call with an empty command (or \"list\") to see what's available. Available: explore, init, install-capability, reasonix-guide, research, review, security-review, test.",
+      "parameters": {
+        "properties": {
+          "arguments": {
+            "description": "Arguments passed to the command, as you'd type them after the name (space-separated).",
+            "type": "string"
+          },
+          "command": {
+            "description": "Slash command name (with or without a leading slash). Empty or \"list\" returns the available commands.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "task",
+      "description": "Spawn a sub-agent for a focused sub-task. Optional profile selects a runAs=subagent Skill whose body becomes the full system prompt (no implicit concise default). Optional write_paths declare non-overlapping write targets so background writers may run in parallel; omitting write_paths on a writer claims the whole workspace and serializes writers. The sub-agent runs in its own session with a filtered tool list (defaults to every parent tool, then applies the subagent boundary: Recursive agent/skill tools are exposed only while max_subagent_depth leaves another delegation layer; unsupported background job tools (parallel_tasks, wait, bash_output, kill_shell) are excluded; bash is exposed as foreground-only inside subagents.). Only its final answer is returned.",
+      "parameters": {
+        "properties": {
+          "continue_from": {
+            "description": "Continue a prior compatible subagent transcript in the current conversation context. Pass only the 'sa_...' value from the prior result's 'Subagent reference: ...' line. If the ref belongs to an ancestor conversation, the framework continues a current-conversation copy.",
+            "type": "string"
+          },
+          "description": {
+            "description": "Short label for the sub-task (3-7 words). Surfaced in the dispatch line so the user sees what's running.",
+            "type": "string"
+          },
+          "effort": {
+            "description": "Optional reasoning effort for the sub-agent (e.g. high, max). Same precedence as model.",
+            "type": "string"
+          },
+          "max_steps": {
+            "description": "Optional cap on tool-call rounds. Defaults to half the parent's cap (min 5).",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "model": {
+            "description": "Optional model override for the sub-agent (a configured provider/model name). Precedence: persistent profile config, this argument, profile frontmatter, global subagent default, parent model.",
+            "type": "string"
+          },
+          "profile": {
+            "description": "Optional runAs=subagent profile name. Resolved at runtime from the Skill store; explicit names may invoke invocation=manual profiles. The profile body becomes the full system prompt.",
+            "type": "string"
+          },
+          "prompt": {
+            "description": "What the sub-agent should accomplish. Be specific about the deliverable — the sub-agent does not see this conversation.",
+            "type": "string"
+          },
+          "run_in_background": {
+            "description": "Run the sub-agent asynchronously: returns a job id immediately and keeps working across turns. Collect its final answer with wait, and you'll be notified when it finishes. Use for long, independent sub-tasks you don't need to block on right now.",
+            "type": "boolean"
+          },
+          "tools": {
+            "description": "Optional tool whitelist. When profile sets allowed-tools, this list is intersected (call args cannot expand profile permissions). Recursive agent/skill tools are exposed only while max_subagent_depth leaves another delegation layer; unsupported background job tools (parallel_tasks, wait, bash_output, kill_shell) are excluded; bash is exposed as foreground-only inside subagents.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "write_paths": {
+            "description": "Optional workspace-relative or absolute file/directory paths this writer may modify. Globs and workspace escapes are rejected. Writers without write_paths claim the whole workspace (serializing against every other writer claim). Non-overlapping paths allow parallel writers up to max_parallel_writers. In fleet, multiple whole-workspace claims fail preflight before any task starts.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "todo_write",
+      "description": "Record and update a structured task list for the current work. Send the COMPLETE list every call — it replaces the previous one. Use it to plan multi-step work and show progress: keep exactly one item in_progress at a time, and flip an item to completed the moment it's done (don't batch completions). Skip it for trivial single-step tasks. The list is two-level: a `level` 0 item is a PHASE (a milestone) and the `level` 1 items after it are its concrete sub-steps; omit `level` (0) for a flat list. Each item has `content` (imperative, e.g. \"Add the parser\"), `status` (pending|in_progress|completed), `activeForm` (present-continuous shown while in progress, e.g. \"Adding the parser\"), optional `level` (0 phase | 1 sub-step), and `step_id` — an item's stable identity. COPY `step_id` VERBATIM for every item that already has one: it is how a completion stays attached to its step when you retitle it, insert a step above it, or reorder the list. Give a new item a fresh unique id (e.g. \"plan_step_07\"); never reuse or renumber an existing one.",
+      "parameters": {
+        "properties": {
+          "todos": {
+            "description": "The complete task list, in order. Replaces any previous list.",
+            "items": {
+              "properties": {
+                "activeForm": {
+                  "description": "Present-continuous form shown while the task is in progress (e.g. \"Running tests\").",
+                  "type": "string"
+                },
+                "content": {
+                  "description": "Imperative description of the task.",
+                  "type": "string"
+                },
+                "level": {
+                  "description": "Nesting level: 0 = phase/milestone, 1 = a sub-step of the phase above it. Omit for a flat list.",
+                  "enum": [
+                    0,
+                    1
+                  ],
+                  "type": "integer"
+                },
+                "status": {
+                  "description": "Task state. Keep at most one in_progress.",
+                  "enum": [
+                    "pending",
+                    "in_progress",
+                    "completed"
+                  ],
+                  "type": "string"
+                },
+                "step_id": {
+                  "description": "Stable identity for this item, e.g. \"plan_step_02\". Copy it verbatim from the item's previous entry so completions stay attached across retitles, insertions, and reordering; use a fresh unique id for a genuinely new item.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "content",
+                "status"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "todos"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "update_goal",
+      "description": "Report this turn's disposition for the active goal. Call it at the end of every goal turn instead of using prose markers: `continue` (work is ongoing — give a concrete next_action), `complete` (the request is fully done, output format and constraints satisfied, and verification was attempted or reported unavailable), or `blocked` (only the user can unblock: missing user-only information, an irreversible/externally visible operation, or changed scope). The host validates your claim against Delivery acceptance criteria and decides whether to continue automatically. Fields: `status` (required, one of continue|complete|blocked), `reason` (required for continue and blocked, optional for complete), `next_action` (optional concrete next step; recommended for continue), `completion` (recommended with complete: `verified` is checked against real receipts, while `unverified` and `risks` are yours to declare and never count against you).",
+      "parameters": {
+        "properties": {
+          "completion": {
+            "description": "Your own account of the finished work.",
+            "properties": {
+              "risks": {
+                "description": "Known risks to carry forward.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "unverified": {
+                "description": "What you did NOT verify. The host cannot infer what you skipped, so stating it is the only way it is known — and it never blocks completion.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "verified": {
+                "description": "Commands you ran as proof, as they actually ran. One that never ran, failed, or predates your latest change is recorded as an unbacked claim.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "next_action": {
+            "description": "Optional concrete next step. Recommended for continue so the host can guide the next turn.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Short explanation. REQUIRED for continue and blocked; optional for complete.",
+            "type": "string"
+          },
+          "status": {
+            "description": "continue = keep working autonomously; complete = the goal is fully done and verified; blocked = only the user can unblock.",
+            "enum": [
+              "continue",
+              "complete",
+              "blocked"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "wait",
+      "description": "Block until background jobs finish, then return each job's status and final output/answer. Use to collect the result of a task(run_in_background) or bash(run_in_background) before continuing. Omit job_ids to wait for every running job.",
+      "parameters": {
+        "properties": {
+          "job_ids": {
+            "description": "Background job ids to wait for. Omit to wait for every currently-running job.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "timeout_seconds": {
+            "description": "Optional maximum seconds to block before returning current progress. Omit to wait until the jobs finish.",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "web_fetch",
+      "description": "Fetch a URL over HTTPS/HTTP and return its text content. HTML pages are reduced to readable text (scripts, styles, tags stripped, whitespace collapsed); JSON / plain text / markdown bodies come back verbatim. Use to read documentation pages, API responses, or source files hosted somewhere the local filesystem can't reach.",
+      "parameters": {
+        "properties": {
+          "url": {
+            "description": "Absolute URL beginning with http:// or https://",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "write_file",
+      "description": "Write content to a file at the given path (overwriting existing content). Creates parent directories as needed.",
+      "parameters": {
+        "properties": {
+          "content": {
+            "description": "Full content to write",
+            "type": "string"
+          },
+          "path": {
+            "description": "File path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content",
+          "path"
+        ],
+        "type": "object"
+      }
+    }
+  ],
+  "Temperature": 0.7,
+  "MaxTokens": 1024
+}

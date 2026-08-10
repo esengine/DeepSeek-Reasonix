@@ -764,6 +764,47 @@ func TestCredentialStoreRevisionChangesForSameLengthReplacement(t *testing.T) {
 	}
 }
 
+func TestSetCredentialIfRevisionRejectsStaleWriter(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+
+	missingRevision := CredentialStoreRevision()
+	if _, err := SetCredential("REVISION_CAS_KEY", "newer-key"); err != nil {
+		t.Fatalf("SetCredential(newer): %v", err)
+	}
+	if _, applied, err := SetCredentialIfRevision("REVISION_CAS_KEY", "stale-key", missingRevision); err != nil {
+		t.Fatalf("SetCredentialIfRevision(stale): %v", err)
+	} else if applied {
+		t.Fatal("stale credential revision overwrote a newer value")
+	}
+	resolved := ResolveCredentialForRootGlobalFirst(".", "REVISION_CAS_KEY")
+	if !resolved.Set || resolved.Value != "newer-key" {
+		t.Fatalf("credential after stale write = set:%v value:%q, want newer-key", resolved.Set, resolved.Value)
+	}
+}
+
+func TestSetCredentialIfRevisionAppliesCurrentWriter(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+
+	revision := CredentialStoreRevision()
+	if _, applied, err := SetCredentialIfRevision("REVISION_CAS_KEY", "accepted-key", revision); err != nil {
+		t.Fatalf("SetCredentialIfRevision(current): %v", err)
+	} else if !applied {
+		t.Fatal("current credential revision was rejected")
+	}
+	resolved := ResolveCredentialForRootGlobalFirst(".", "REVISION_CAS_KEY")
+	if !resolved.Set || resolved.Value != "accepted-key" {
+		t.Fatalf("stored credential = set:%v value:%q, want accepted-key", resolved.Set, resolved.Value)
+	}
+}
+
 func TestStoreCredentialLinesRejectsUnsafeFileLines(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

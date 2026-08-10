@@ -4,9 +4,12 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 
+	"reasonix/internal/event"
+	"reasonix/internal/shellrun"
 	"reasonix/internal/tool"
 )
 
@@ -21,11 +24,12 @@ func connectorBlock(lines []string) string {
 		return ""
 	}
 	indent := strings.Repeat(" ", len([]rune(connector)))
-	out := dim(connector) + lines[0]
+	var out strings.Builder
+	out.WriteString(dim(connector) + lines[0])
 	for _, ln := range lines[1:] {
-		out += "\n" + indent + ln
+		out.WriteString("\n" + indent + ln)
 	}
-	return out
+	return out.String()
 }
 
 // toolVerb maps a tool's snake_case id to the verb shown in its card.
@@ -114,6 +118,39 @@ func toolDisplayName(name string) string {
 		return v
 	}
 	return name
+}
+
+// shellToolDisplayName prefers the actual interpreter label when structured
+// execution metadata is present (Git Bash / Windows PowerShell / PowerShell 7+).
+func shellToolDisplayName(name string, ex *event.ShellExecution) string {
+	if name == "bash" && ex != nil && ex.Shell != "" {
+		return shellrun.DisplayName(&tool.ShellExecution{Shell: ex.Shell, ShellVersion: ex.ShellVersion})
+	}
+	return toolDisplayName(name)
+}
+
+// shellFailureDetail appends exit code, failure phase, and mutation-risk hints
+// for failed shell results. Empty when there is no structured metadata.
+func shellFailureDetail(ex *event.ShellExecution) string {
+	if ex == nil {
+		return ""
+	}
+	var parts []string
+	if ex.ExitCode != nil {
+		parts = append(parts, fmt.Sprintf("exit %d", *ex.ExitCode))
+	}
+	if ex.FailurePhase != "" {
+		parts = append(parts, ex.FailurePhase)
+	}
+	switch ex.FailurePhase {
+	case tool.ShellPhasePreflight, tool.ShellPhaseAuthorization, tool.ShellPhaseDependency, tool.ShellPhaseLaunch:
+		parts = append(parts, "not executed")
+	default:
+		if ex.MutationRisk == tool.ShellMutationMayBePartial {
+			parts = append(parts, "may be partial")
+		}
+	}
+	return strings.Join(parts, " · ")
 }
 
 // toolArg pulls the primary argument shown in the card's parentheses.

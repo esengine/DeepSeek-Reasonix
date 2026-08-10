@@ -15,7 +15,6 @@ import (
 	"reasonix/internal/remote"
 	"reasonix/internal/remote/bootstrap"
 	"reasonix/internal/remote/forward"
-	"reasonix/internal/remote/protocol"
 	"reasonix/internal/remote/sftpfs"
 )
 
@@ -288,34 +287,6 @@ func TestEnsureServerResultCannotMutateReplacement(t *testing.T) {
 	}
 }
 
-func TestEnsureWorkbenchCLIUsesHostInstallPolicyAndExactBuild(t *testing.T) {
-	mgr := newDesktopRemoteManager(nil)
-	hostCtx, hostCancel := context.WithCancel(context.Background())
-	defer hostCancel()
-	mgr.hosts["box"] = &managedHost{ctx: hostCtx, cancel: hostCancel, client: newLifecycleSSHClient(nil)}
-	expected, err := protocol.NewBuildID("v1.2.3", strings.Repeat("a", 40))
-	if err != nil {
-		t.Fatal(err)
-	}
-	mgr.localBinary = func() string { return "/packaged/reasonix" }
-	mgr.fetchRemoteBinary = func(context.Context, string, string, string) ([]byte, error) {
-		return []byte("downloaded"), nil
-	}
-	mgr.ensureWorkbenchCLI = func(_ context.Context, _ bootstrap.Conn, opts bootstrap.WorkbenchOptions) (bootstrap.WorkbenchCLI, error) {
-		if opts.Install != "npm" || opts.LocalBinary != "/packaged/reasonix" || opts.ExpectedBuild != expected || opts.FetchBinary == nil {
-			t.Fatalf("Workbench options = %+v", opts)
-		}
-		return bootstrap.WorkbenchCLI{Path: "/home/dev/.reasonix/remote/workbench/build/reasonix", Installed: true}, nil
-	}
-	got, err := mgr.EnsureWorkbenchCLI(context.Background(), "box", config.RemoteHostEntry{ServeInstall: "npm"}, expected)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "/home/dev/.reasonix/remote/workbench/build/reasonix" {
-		t.Fatalf("binary = %q", got)
-	}
-}
-
 func TestStopServerRejectsEmptyWorkspace(t *testing.T) {
 	mgr := newDesktopRemoteManager(nil)
 	hostCtx, hostCancel := context.WithCancel(context.Background())
@@ -402,15 +373,13 @@ func TestHostKeyPromptsAreSerializedForGlobalDialog(t *testing.T) {
 		prompts = append(prompts, pendingPrompt{hostID: hostID, prompt: mgr.hostKeyPrompt(hostID, mh)})
 	}
 	for _, pending := range prompts {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, _ = pending.prompt(ctx, remote.HostKeyQuestion{
 				Address:     pending.hostID + ":22",
 				KeyType:     "ssh-ed25519",
 				Fingerprint: pending.hostID,
 			})
-		}()
+		})
 	}
 
 	first := <-sink.statuses
@@ -432,5 +401,123 @@ func TestHostKeyPromptsAreSerializedForGlobalDialog(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("second prompt did not appear after resolving the first")
+	}
+}
+
+// TestEnsureServerFailureKeepsOwnershipOnPreviousReadyServe is the failed-
+// switch atomicity contract: when the new workspace's Serve fails to start,
+// the host's server ownership stays on the still-running previous Serve, so
+// Stop and Logs keep operating on the workspace that actually runs.
+func TestEnsureServerFailureKeepsOwnershipOnPreviousReadyServe(t *testing.T) {
+	seedLifecycleHost(t, "box")
+	mgr := newDesktopRemoteManager(nil)
+	hostCtx, hostCancel := context.WithCancel(context.Background())
+	defer hostCancel()
+	client := newLifecycleSSHClient(nil)
+	mgr.hosts["box"] = &managedHost{
+		ctx: hostCtx, cancel: hostCancel, client: client,
+		server: RemoteServerView{HostID: "box", Workspace: "/srv/a", State: "ready", LocalURL: "http://127.0.0.1:54321/"},
+		token:  "token-a",
+	}
+	mgr.ensureServe = func(context.Context, bootstrap.Conn, bootstrap.Options) (bootstrap.Result, error) {
+		return bootstrap.Result{}, errors.New("serve launch failed")
+	}
+	var stopped, logged []string
+	mgr.stopServe = func(_ context.Context, _ bootstrap.Conn, workspace string) error {
+		stopped = append(stopped, workspace)
+		return nil
+	}
+	mgr.serveLogs = func(_ context.Context, _ bootstrap.Conn, workspace string, _ int, _ *strings.Builder) error {
+		logged = append(logged, workspace)
+		return nil
+	}
+
+	if _, _, err := mgr.EnsureServer(context.Background(), "box", "/srv/b"); err == nil {
+		t.Fatal("expected the serve launch failure")
+	}
+	status := mgr.ServerStatus("box")
+	if status.State != "ready" || status.Workspace != "/srv/a" {
+		t.Fatalf("server state after failed switch = %+v, want the previous ready /srv/a", status)
+	}
+	if got := mgr.hosts["box"].token; got != "token-a" {
+		t.Fatalf("token after failed switch = %q, want the previous token", got)
+	}
+
+	if err := mgr.StopServer("box"); err != nil {
+		t.Fatal(err)
+	}
+	if len(stopped) != 1 || stopped[0] != "/srv/a" {
+		t.Fatalf("StopServer operated on %v, want the previous /srv/a", stopped)
+	}
+	if _, err := mgr.ServerLogs(context.Background(), "box", 50); err != nil {
+		t.Fatal(err)
+	}
+	if len(logged) != 1 || logged[0] != "/srv/a" {
+		t.Fatalf("ServerLogs operated on %v, want the previous /srv/a", logged)
+	}
+}
+
+// TestEnsureServerReplaceFailureKeepsOwnershipOnPreviousReadyServe covers the
+// same contract when the new Serve started but its loopback tunnel could not
+// be bound: the just-started Serve is stopped, ownership returns to the
+// previous ready Serve, and the failed view never replaces it.
+func TestEnsureServerReplaceFailureKeepsOwnershipOnPreviousReadyServe(t *testing.T) {
+	seedLifecycleHost(t, "box")
+	mgr := newDesktopRemoteManager(nil)
+	hostCtx, hostCancel := context.WithCancel(context.Background())
+	defer hostCancel()
+	client := newLifecycleSSHClient(nil)
+	// A closed forward set makes the tunnel Replace fail deterministically;
+	// the Set semantics keep any previous forward live on a failed Replace.
+	closedForwards := forward.NewSet(nil)
+	closedForwards.Close()
+	client.forwards = closedForwards
+	mgr.hosts["box"] = &managedHost{
+		ctx: hostCtx, cancel: hostCancel, client: client,
+		server: RemoteServerView{HostID: "box", Workspace: "/srv/a", State: "ready", LocalURL: "http://127.0.0.1:54321/"},
+		token:  "token-a",
+	}
+	mgr.ensureServe = func(context.Context, bootstrap.Conn, bootstrap.Options) (bootstrap.Result, error) {
+		return bootstrap.Result{State: bootstrap.ServeState{Addr: "127.0.0.1:9999"}}, nil
+	}
+	var stopped []string
+	mgr.stopServe = func(_ context.Context, _ bootstrap.Conn, workspace string) error {
+		stopped = append(stopped, workspace)
+		return nil
+	}
+
+	if _, _, err := mgr.EnsureServer(context.Background(), "box", "/srv/b"); err == nil {
+		t.Fatal("expected the tunnel Replace failure")
+	}
+	// The newly started /srv/b Serve was cleaned up, not left orphaned.
+	if len(stopped) != 1 || stopped[0] != "/srv/b" {
+		t.Fatalf("cleanup stopped %v, want the failed /srv/b", stopped)
+	}
+	status := mgr.ServerStatus("box")
+	if status.State != "ready" || status.Workspace != "/srv/a" {
+		t.Fatalf("server state after failed tunnel switch = %+v, want the previous ready /srv/a", status)
+	}
+	if got := mgr.hosts["box"].token; got != "token-a" {
+		t.Fatalf("token after failed tunnel switch = %q, want the previous token", got)
+	}
+}
+
+// TestEnsureServerFirstStartFailurePublishesError keeps the informative error
+// view when there is no previous ready Serve to preserve.
+func TestEnsureServerFirstStartFailurePublishesError(t *testing.T) {
+	seedLifecycleHost(t, "box")
+	mgr := newDesktopRemoteManager(nil)
+	hostCtx, hostCancel := context.WithCancel(context.Background())
+	defer hostCancel()
+	mgr.hosts["box"] = &managedHost{ctx: hostCtx, cancel: hostCancel, client: newLifecycleSSHClient(nil)}
+	mgr.ensureServe = func(context.Context, bootstrap.Conn, bootstrap.Options) (bootstrap.Result, error) {
+		return bootstrap.Result{}, errors.New("serve launch failed")
+	}
+	if _, _, err := mgr.EnsureServer(context.Background(), "box", "/srv/b"); err == nil {
+		t.Fatal("expected the serve launch failure")
+	}
+	status := mgr.ServerStatus("box")
+	if status.State != "error" || status.Workspace != "/srv/b" {
+		t.Fatalf("server state after first-start failure = %+v, want error /srv/b", status)
 	}
 }

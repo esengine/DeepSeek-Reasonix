@@ -142,6 +142,62 @@ func TestIsOllamaCloudEntry(t *testing.T) {
 	}
 }
 
+func TestIsMimoEntry(t *testing.T) {
+	for _, tc := range []struct {
+		baseURL string
+		want    bool
+	}{
+		{"https://api.xiaomimimo.com/v1", true},
+		{"https://api.xiaomimimo.com/v1/responses", true},
+		{"https://api.deepseek.com", false},
+		{"https://dashscope.aliyuncs.com/compatible-mode/v1", false},
+		{"https://api.xiaomimimo.com.attacker.example/v1", false},
+		{"https://example.com/?u=api.xiaomimimo.com", false},
+		{"", false},
+	} {
+		if got := isMimoEntry(&ProviderEntry{BaseURL: tc.baseURL}); got != tc.want {
+			t.Errorf("baseURL=%q: isMimoEntry=%v, want %v", tc.baseURL, got, tc.want)
+		}
+	}
+	if isMimoEntry(nil) {
+		t.Fatal("isMimoEntry(nil) must be false")
+	}
+}
+
+func TestMimoEffortSupportsNone(t *testing.T) {
+	e := &ProviderEntry{
+		Kind:              "responses",
+		BaseURL:           "https://api.xiaomimimo.com/v1",
+		ReasoningProtocol: ReasoningProtocolOpenAI,
+	}
+	cap := EffortCapabilityForEntry(e)
+	if !cap.Supported {
+		t.Fatal("MiMo effort must be supported")
+	}
+	for _, level := range []string{"auto", "none", "low", "medium", "high"} {
+		if !containsString(cap.Levels, level) {
+			t.Errorf("MiMo capability missing %q: %v", level, cap.Levels)
+		}
+	}
+	got, err := NormalizeEffort(e, "none")
+	if err != nil || got != "none" {
+		t.Fatalf("MiMo none = %q/%v, want none/nil", got, err)
+	}
+	for _, level := range []string{"low", "medium", "high"} {
+		if got, err := NormalizeEffort(e, level); err != nil || got != level {
+			t.Fatalf("MiMo %s = %q/%v, want %s/nil", level, got, err, level)
+		}
+	}
+	if _, err := NormalizeEffort(e, "xhigh"); err == nil {
+		t.Fatal("MiMo xhigh must be rejected")
+	}
+	// A plain OpenAI endpoint keeps rejecting none.
+	plain := &ProviderEntry{Kind: "openai", BaseURL: "https://example.com/v1", ReasoningProtocol: ReasoningProtocolOpenAI}
+	if got, err := NormalizeEffort(plain, "none"); err == nil || got != "" {
+		t.Fatalf("plain OpenAI none = %q/%v, want error", got, err)
+	}
+}
+
 func TestEffortCapabilityZhipu(t *testing.T) {
 	e := &ProviderEntry{Kind: "openai", BaseURL: "https://open.bigmodel.cn/api/paas/v4", Model: "glm-4.5-air"}
 	cap := EffortCapabilityForEntry(e)

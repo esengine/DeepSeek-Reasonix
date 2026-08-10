@@ -634,6 +634,7 @@ const __T = {
     'cmd_mcp': 'MCP servers',
     'cmd_skill': 'Skills',
     'cmd_hooks': 'Hooks',
+    'cmd_reload': 'Reload extensions',
     'cmd_memory': 'Show memory',
     'cmd_forget': 'Forget memory',
     'cmd_goal': 'Set a goal for the agent to pursue autonomously',
@@ -647,6 +648,9 @@ const __T = {
     'cmd_group_memory': 'Memory',
     'cmd_group_agent': 'Agent',
     'cmd_group_help': 'Help',
+    'extensions_reloading': 'Reloading extensions...',
+    'extensions_reloaded': 'Extensions reloaded',
+    'extensions_reload_failed': 'Could not reload extensions',
     'command_palette': 'Command palette',
     'command_empty': 'No commands match',
     'command_nav': '↑↓ navigate · Enter insert · Esc close',
@@ -692,6 +696,7 @@ const __T = {
     'delete_session': 'Delete Session',
     'cannot_delete_active': 'Cannot delete the active session',
     'delete_failed': 'Could not delete the session. Check your connection and try again.',
+    'auth_failed': 'Web authentication failed',
     'search_sessions': 'Search sessions',
     'active': 'Active',
     'use_model': 'Use',
@@ -708,8 +713,8 @@ const __T = {
     'scope_conversation': 'Conversation only',
     'scope_code': 'Code only',
     'scope_fork': 'Fork (new branch)',
-    'scope_sumfrom': 'Summarize from here',
-    'scope_sumupto': 'Summarize up to here',
+    'scope_sumfrom': 'Compress model context after here (visible history is kept)',
+    'scope_sumupto': 'Compress model context before here (visible history is kept)',
     'delete_confirm': 'Delete this session?',
     'welcome_tag': 'AI coding agent',
     'hint_commands': '/ commands',
@@ -771,6 +776,7 @@ const __T = {
     'cmd_mcp': 'MCP 服务器',
     'cmd_skill': '技能',
     'cmd_hooks': '钩子',
+    'cmd_reload': '重新加载扩展',
     'cmd_memory': '显示记忆',
     'cmd_forget': '忘记记忆',
     'cmd_goal': '设置目标让代理自主执行',
@@ -784,6 +790,9 @@ const __T = {
     'cmd_group_memory': '记忆',
     'cmd_group_agent': '代理',
     'cmd_group_help': '帮助',
+    'extensions_reloading': '正在重新加载扩展…',
+    'extensions_reloaded': '扩展已重新加载',
+    'extensions_reload_failed': '无法重新加载扩展',
     'command_palette': '命令面板',
     'command_empty': '没有匹配的命令',
     'command_nav': '↑↓ 选择 · Enter 插入 · Esc 关闭',
@@ -829,6 +838,7 @@ const __T = {
     'delete_session': '删除会话',
     'cannot_delete_active': '无法删除当前会话',
     'delete_failed': '无法删除会话，请检查连接后重试',
+    'auth_failed': 'Web 认证失败',
     'search_sessions': '搜索会话',
     'active': '当前',
     'use_model': '使用',
@@ -845,8 +855,8 @@ const __T = {
     'scope_conversation': '仅对话',
     'scope_code': '仅代码',
     'scope_fork': '分叉（新分支）',
-    'scope_sumfrom': '从此处总结',
-    'scope_sumupto': '总结到此处',
+    'scope_sumfrom': '压缩此处之后的模型上下文（保留可见历史）',
+    'scope_sumupto': '压缩此处之前的模型上下文（保留可见历史）',
     'delete_confirm': '删除此会话？',
     'welcome_tag': 'AI 编码助手',
     'hint_commands': '/ 命令',
@@ -915,6 +925,24 @@ const welcome = $('#welcome');
 const welcomeModel = $('#welcome-model'), welcomeCwd = $('#welcome-cwd');
 const slashAnchor = $('#slash-menu-anchor');
 
+// Token links use a URL fragment so the secret never appears in the initial
+// HTTP request, browser history, referrers, or access logs. Exchange it for an
+// HttpOnly cookie before any API fetch or SSE connection starts.
+const __nativeFetch = window.fetch.bind(window);
+function bootstrapFragmentToken() {
+  const fragment = new URLSearchParams(window.location.hash.slice(1));
+  const token = fragment.get('token');
+  if(!token)return Promise.resolve();
+  fragment.delete('token');
+  const cleanHash=fragment.toString();
+  window.history.replaceState(null,'',window.location.pathname+window.location.search+(cleanHash?'#'+cleanHash:''));
+  return __nativeFetch('/auth/token',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token})}).then(response=>{
+    if(!response.ok)throw new Error(__('auth_failed')+' (HTTP '+response.status+')');
+  });
+}
+const __authReady = bootstrapFragmentToken();
+window.fetch = (...args) => __authReady.then(() => __nativeFetch(...args));
+
 // ── state ──
 let running = false, planMode = false, bypassMode = false, toolApprovalMode = 'ask', yoloRestoreMode = 'ask';
 let goalMode = false, goalActive = false, goalText = '';
@@ -942,6 +970,7 @@ const SLASH_CMDS = [
   {cmd:'mcp',sig:'/mcp',desc:__('cmd_mcp'),group:'system'},
   {cmd:'skill',sig:'/skill',desc:__('cmd_skill'),group:'system'},
   {cmd:'hooks',sig:'/hooks',desc:__('cmd_hooks'),group:'system'},
+  {cmd:'reload',sig:'/reload',desc:__('cmd_reload'),group:'system'},
   {cmd:'memory',sig:'/memory',desc:__('cmd_memory'),group:'memory'},
   {cmd:'forget',sig:'/forget <item>',desc:__('cmd_forget'),group:'memory',danger:true},
   {cmd:'help',sig:'/help',desc:__('cmd_help'),group:'help'},
@@ -1119,20 +1148,47 @@ function renderToolDispatch(tool) {
   if(copy)copy.onclick=async e=>{e.stopPropagation();const ok=await copyText(body.textContent||card.dataset.toolArgs||'');copy.title=ok?__('tool_copied'):__('tool_copy');setTimeout(()=>{copy.title=__('tool_copy');},1200);};
   card.appendChild(head);card.appendChild(body);log.appendChild(card);toolCards[tool.id]=card;scrollDown();
 }
+function shellDisplayName(ex){
+  if(!ex||!ex.shell)return 'bash';
+  if(ex.shell==='git-bash')return 'Git Bash';
+  if(ex.shell==='powershell')return 'Windows PowerShell';
+  if(ex.shell==='pwsh')return 'PowerShell 7+';
+  return ex.shell;
+}
 function renderToolResult(tool) {
   const card=toolCards[tool.id]; if(!card)return;
   const elapsed=Math.max(0,Date.now()-Number(card.dataset.startedAt||Date.now()));
+  const ex=tool.execution||null;
+  if(ex&&tool.name==='bash'){
+    const title=card.querySelector('.card-title .name');
+    if(title)title.textContent=shellDisplayName(ex);
+  }
   setToolStatus(card,tool.err?'danger':'success',tool.err?__('tool_failed'):__('tool_done'));
-  if(tool.err){card.appendChild(el('div','err-body',tool.err));updateToolMeta(card,fmtElapsed(elapsed));}
-  else {
+  let meta=fmtElapsed(elapsed);
+  if(ex){
+    const bits=[];
+    if(typeof ex.exitCode==='number')bits.push('exit '+ex.exitCode);
+    if(ex.failurePhase)bits.push(ex.failurePhase);
+    if(ex.verification&&ex.verification!=='not_verification')bits.push(ex.verification);
+    if(bits.length)meta=bits.join(' · ')+' · '+meta;
+  }
+  if(tool.err){
+    const err=el('div','err-body',tool.err);
+    if(ex&&ex.outputTail){const pre=el('pre','err-stderr',ex.outputTail.slice(0,16000));err.appendChild(pre);}
+    card.appendChild(err);
+    updateToolMeta(card,meta);
+  } else {
     const body=card.querySelector('.card-body');
     const output=String(tool.output||'');
     if(body)body.textContent=output?output.slice(0,2000)+(tool.truncated?'\n...[truncated]':''):__('tool_no_output');
-    updateToolMeta(card,fmtElapsed(elapsed)+' · '+lineCount(output)+' '+__('tool_lines'));
+    updateToolMeta(card,meta+' · '+lineCount(output)+' '+__('tool_lines'));
   }
   scrollDown();
 }
 function renderToolProgress(tool) {
+  // Reserved sub-agent progress channels (reasonix.subagent.*) are an internal
+  // local-frontend contract; they must never land in ordinary tool output.
+  if (tool.name && tool.name.indexOf('reasonix.subagent.') === 0) return;
   const card=toolCards[tool.id]; if(!card)return;
   const body=card.querySelector('.card-body'); if(!body)return;
   body.style.display=''; card.dataset.open='true';
@@ -1140,6 +1196,42 @@ function renderToolProgress(tool) {
   if(body.textContent.length>4000) body.textContent=body.textContent.slice(-3000);
   updateToolMeta(card,fmtElapsed(Date.now()-Number(card.dataset.startedAt||Date.now()))+' · '+lineCount(body.textContent)+' '+__('tool_lines'));
   scrollDown();
+}
+
+// Serve renders the structured extension contract as safe native text. It
+// never injects extension-provided HTML/Markdown into innerHTML, so a sidecar
+// cannot turn a card, form, status, or notification into executable content.
+function renderExtensionSurface(p) {
+  if(!p)return;
+  const lines=[];
+  const plugin=p.pluginId||'extension';
+  let severity='';
+  if(p.status){
+    severity=p.status.severity||'';
+    lines.push(p.status.label||'');
+    if(p.status.detail)lines.push(p.status.detail);
+    if(typeof p.status.progress==='number')lines.push(Math.round(p.status.progress*100)+'%');
+  } else if(p.card){
+    lines.push(p.card.title||'');
+    lines.push(p.card.text||p.card.markdown||'');
+    (p.card.fields||[]).forEach(f=>lines.push((f.key||'')+': '+(f.value||'')));
+    (p.card.actions||[]).forEach(a=>lines.push('['+(a.label||a.actionId||'action')+']'));
+  } else if(p.form){
+    lines.push(p.form.title||'');
+    lines.push(p.form.message||'');
+    (p.form.fields||[]).forEach(f=>{
+      let detail=(f.label||f.key||'')+(f.required?' *':'');
+      if((f.options||[]).length)detail+=' — '+f.options.join(', ');
+      lines.push(detail);
+    });
+  } else if(p.notification){
+    severity=p.notification.severity||'';
+    lines.push(p.notification.title||'');
+    lines.push(p.notification.body||'');
+  }
+  const text='['+plugin+'] '+lines.filter(Boolean).join('\n');
+  const node=el('div','notice'+((severity==='warn'||severity==='error')?' notice--warn':''),text);
+  log.appendChild(node);scrollDown();
 }
 
 // ── approval ──
@@ -1397,7 +1489,9 @@ function closeSlashMenu(){slashOpen=false;const m=$('#slash-menu');if(m)m.remove
 function acceptSlash(){if(!slashOpen)return;const c=slashFiltered[slashIndex];if(c){input.value='/'+c.cmd+' ';}closeSlashMenu();input.focus();}
 
 // ── SSE ──
-const es=new EventSource('/events');
+let es;
+function connectEvents(){
+es=new EventSource('/events');
 es.onopen=()=>{setConnState('connected');fetchStatus();fetchTodos();};
 es.onmessage=ev=>{setConnState('connected');
   const e=JSON.parse(ev.data);
@@ -1429,6 +1523,8 @@ es.onmessage=ev=>{setConnState('connected');
     case 'phase': finalizeMsg(); log.appendChild(el('div','phase',e.text||''));scrollDown();break;
     case 'approval_request': if(e.approval)showApproval(e.approval); break;
     case 'ask_request': if(e.ask)showAsk(e.ask); break;
+    case 'extension_surface': if(e.extension)renderExtensionSurface(e.extension); break;
+    case 'extension_status': if(e.extension)renderExtensionSurface(e.extension); break;
     case 'compaction_started': showCompaction({trigger:e.compaction?.trigger}); break;
     case 'compaction_done': showCompaction(e.compaction||{}); break;
     case 'retrying': setRetrying(e.retryAttempt,e.retryMax); break;
@@ -1439,6 +1535,8 @@ es.onerror=()=>{
   if(es.readyState===EventSource.CONNECTING){setConnState('reconnecting');}
   else{setConnState('disconnected');}
 };
+}
+__authReady.then(connectEvents).catch(error=>{setConnState('disconnected');showNotice(error instanceof Error?error.message:__('auth_failed'),'warn');});
 
 // ── status polling ──
 function fetchStatus(){
@@ -1641,6 +1739,14 @@ async function syncModeBeforeSubmit(){
 }
 async function send(){
   const v=input.value.trim(); if(!v)return;
+  if(v==='/reload'){
+    input.value='';input.style.height='';closeSlashMenu();
+    showNotice(__('extensions_reloading'));
+    const response=await post('/extensions/reload',{});
+    if(response.ok){showNotice(__('extensions_reloaded'));fetchStatus();}
+    else{showNotice((await response.text()).trim()||__('extensions_reload_failed'),'warn');}
+    return;
+  }
   await syncModeBeforeSubmit();
   let submitInput=v;
   if(goalMode && !v.startsWith('/goal')){

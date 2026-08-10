@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -26,8 +27,8 @@ const (
 	themePackManifestName     = "theme.json"
 	themePackExt              = ".reasonix-theme"
 	themeStateFileName        = "desktop-theme-state.json"
-	// Schema v2: activeThemeId may only reference official or user packs.
-	// Base style ids (graphite/…) live exclusively in desktop.theme_style.
+	// Schema v2: activeThemeId may only reference official, user or plugin
+	// packs. Base style ids (graphite/…) live exclusively in desktop.theme_style.
 	themeStateSchemaVer   = 2
 	themeStateSchemaVerV1 = 1
 	themeDirName          = "themes"
@@ -84,7 +85,7 @@ type ThemePackManifest struct {
 	Recipes        ThemePackRecipes          `json:"recipes"`
 	Background     *ThemePackBackground      `json:"background,omitempty"`
 	TaskBackground *ThemePackSceneBackground `json:"taskBackground,omitempty"`
-	Extra          map[string]interface{}    `json:"-"` // rejected on parse when present as unknown top-level
+	Extra          map[string]any            `json:"-"` // rejected on parse when present as unknown top-level
 }
 
 // ThemePackTokens holds optional light/dark semantic color overrides.
@@ -129,28 +130,35 @@ type ThemeDesktopState struct {
 	ActiveThemeID string `json:"activeThemeId,omitempty"`
 }
 
-// ThemePackView is the frontend-safe summary of a theme (base, official or user).
+// ThemePackView is the frontend-safe summary of a theme (base, official, user
+// or plugin).
 type ThemePackView struct {
-	ID                string                    `json:"id"`
-	Name              string                    `json:"name"`
-	Author            string                    `json:"author,omitempty"`
-	Description       string                    `json:"description,omitempty"`
-	License           string                    `json:"license,omitempty"`
-	BaseStyle         string                    `json:"baseStyle"`
-	Builtin           bool                      `json:"builtin"`
-	Kind              string                    `json:"kind"` // "base" | "official" | "user"
-	Active            bool                      `json:"active"`
-	HasBackground     bool                      `json:"hasBackground"`
-	BackgroundURL     string                    `json:"backgroundUrl,omitempty"`
-	TaskBackgroundURL string                    `json:"taskBackgroundUrl,omitempty"`
-	PreviewURL        string                    `json:"previewUrl,omitempty"`
-	NameKey           string                    `json:"nameKey,omitempty"`
-	DescriptionKey    string                    `json:"descriptionKey,omitempty"`
-	Tokens            ThemePackTokens           `json:"tokens"`
-	Recipes           ThemePackRecipes          `json:"recipes"`
-	Background        *ThemePackBackground      `json:"background,omitempty"`
-	TaskBackground    *ThemePackSceneBackground `json:"taskBackground,omitempty"`
-	ContrastWarnings  []ThemeContrastWarning    `json:"contrastWarnings,omitempty"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	Author            string `json:"author,omitempty"`
+	Description       string `json:"description,omitempty"`
+	License           string `json:"license,omitempty"`
+	BaseStyle         string `json:"baseStyle"`
+	Builtin           bool   `json:"builtin"`
+	Kind              string `json:"kind"` // "base" | "official" | "user" | "plugin"
+	Active            bool   `json:"active"`
+	HasBackground     bool   `json:"hasBackground"`
+	BackgroundURL     string `json:"backgroundUrl,omitempty"`
+	TaskBackgroundURL string `json:"taskBackgroundUrl,omitempty"`
+	PreviewURL        string `json:"previewUrl,omitempty"`
+	NameKey           string `json:"nameKey,omitempty"`
+	DescriptionKey    string `json:"descriptionKey,omitempty"`
+	// PluginName badges plugin-contributed themes (Kind == "plugin"); the
+	// frontend renders them read-only as "Plugin · <name>".
+	PluginName string `json:"pluginName,omitempty"`
+	// Warnings carries non-fatal plugin theme discovery issues (invalid files
+	// skipped) scoped to this pack's plugin, following PluginView.Warnings.
+	Warnings         []string                  `json:"warnings,omitempty"`
+	Tokens           ThemePackTokens           `json:"tokens"`
+	Recipes          ThemePackRecipes          `json:"recipes"`
+	Background       *ThemePackBackground      `json:"background,omitempty"`
+	TaskBackground   *ThemePackSceneBackground `json:"taskBackground,omitempty"`
+	ContrastWarnings []ThemeContrastWarning    `json:"contrastWarnings,omitempty"`
 }
 
 // ThemeContrastWarning surfaces WCAG contrast issues without blocking save.
@@ -175,8 +183,11 @@ type ThemeExperienceView struct {
 	ThemeMode      string         `json:"themeMode"`               // auto|light|dark
 	BaseStyle      string         `json:"baseStyle"`               // graphite|aurora|…
 	EffectiveStyle string         `json:"effectiveStyle"`          // pack.baseStyle when pack active, else baseStyle
-	ActiveThemeID  string         `json:"activeThemeId,omitempty"` // official/user only; never a base id
+	ActiveThemeID  string         `json:"activeThemeId,omitempty"` // official/user/plugin only; never a base id
 	ActivePack     *ThemePackView `json:"activePack,omitempty"`
+	// Warnings aggregates non-fatal plugin theme discovery issues (invalid
+	// contributed files skipped) so the gallery can surface them.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // ThemeSaveInput is the editor payload for creating/updating a user theme.
@@ -559,7 +570,7 @@ func manifestToView(m *ThemePackManifest, kind string, active bool, backgroundUR
 		Description:       m.Description,
 		License:           m.License,
 		BaseStyle:         m.BaseStyle,
-		Builtin:           kind != themeKindUser,
+		Builtin:           kind == themeKindBase || kind == themeKindOfficial,
 		Kind:              kind,
 		Active:            active,
 		HasBackground:     (m.Background != nil && m.Background.Image != "") || (m.TaskBackground != nil && m.TaskBackground.Image != ""),
@@ -593,9 +604,7 @@ func copyStringMap(in map[string]string) map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
+	maps.Copy(out, in)
 	return out
 }
 

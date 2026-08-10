@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"slices"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -175,7 +176,7 @@ func handshakeTimeout(dialTimeout time.Duration) time.Duration {
 }
 
 func closeAll(clients []*ssh.Client) {
-	for i := len(clients) - 1; i >= 0; i-- {
-		_ = clients[i].Close()
+	for _, v := range slices.Backward(clients) {
+		_ = v.Close()
 	}
 }

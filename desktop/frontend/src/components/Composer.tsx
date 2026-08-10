@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { ArrowRight, ArrowUp, AtSign, Check, ChevronDown, ChevronUp, ChevronsUpDown, CornerDownRight, Equal, Eye, FilePlus2, FileText, Flag, Folder, Gauge, Hash, List, Loader2, MessageSquare, Mic, MicOff, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, Undo2, Wand2, X } from "lucide-react";
 import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
 import { app, onEnhanceProgress, onFilesDropped, onSTTState, onSTTTranscript } from "../lib/bridge";
-import { canUsePromptHistory, composerEnterAction, insertComposerNewline, isFnKeyEvent, promptHistoryDirectionFromEvent } from "../lib/composerKeyboard";
+import { canUsePromptHistory, composerEnterAction, composerEscapeAction, composerMenuKeyAction, insertComposerNewline, isFnKeyEvent, isImeKeyEvent, promptHistoryDirectionFromEvent } from "../lib/composerKeyboard";
 import { cacheGeneration, loadOlder } from "../lib/composerHistory";
 import { SPINNER_WORDS, useI18n, type DictKey, type Translator } from "../lib/i18n";
 import { detectShortcutPlatform, formatShortcutCombo, isReservedComposerHistoryShortcut, matchesShortcut, useShortcutComboLabel } from "../lib/keyboardShortcuts";
@@ -22,6 +22,7 @@ import {
   type StructuredInvocationSubmit,
 } from "../lib/invocationDisplay";
 import { formatTokens } from "../lib/format";
+import type { ControllerLiveStore } from "../lib/useController";
 import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
 import { createRafResizeUpdater } from "../lib/resizeDrag";
 import { observeComposerMenuViewport } from "../lib/composerMenuViewport";
@@ -92,10 +93,6 @@ const COMPOSER_RUN_STRIP_RESERVED = 30;
 const COMPOSER_MAX_VIEWPORT_RATIO = 0.4;
 const COMPOSER_AUTO_RESERVED_HEIGHT = 58;
 const PROMPT_HISTORY_PREFETCH_REMAINING = 3;
-// Grace after compositionend to swallow a confirm-Enter that lands just after
-// it; the real gap is a few ms, so keep it short or a deliberate quick second
-// Enter (submit) gets eaten too.
-const IME_CONFIRM_GRACE_MS = 100;
 const FILE_REF_SEARCH_CACHE_TTL_MS = 5000;
 
 type PastedBlock = {
@@ -420,23 +417,6 @@ function useTick(on: boolean): number {
   return Date.now();
 }
 
-function isImeKeyEvent(
-  e: KeyboardEvent<HTMLElement>,
-  composing: boolean,
-  lastCompositionEndAt: number,
-): boolean {
-  const native = e.nativeEvent as globalThis.KeyboardEvent & {
-    isComposing?: boolean;
-    keyCode?: number;
-  };
-  return (
-    composing ||
-    native.isComposing === true ||
-    native.keyCode === 229 ||
-    Date.now() - lastCompositionEndAt < IME_CONFIRM_GRACE_MS
-  );
-}
-
 // --- past:chats session reference → prompt context (PR-B) ---
 // Send-side helpers for "@past:chats" session references. PR-A wired the menu and
 // the composer-context card; this layer reads each referenced session through the
@@ -559,6 +539,11 @@ export function Composer({
   turnWaitAccumMs = 0,
   promptWaitStartedAt,
   turnTokens,
+  turnOutputTokens,
+  turnOutputCharsAtUsage,
+  turnModelActiveAt,
+  turnModelActiveMs = 0,
+  liveStore,
   turnArgChars = 0,
   retry,
   suspendedByDecision = false,
@@ -627,6 +612,20 @@ export function Composer({
   turnWaitAccumMs?: number;
   promptWaitStartedAt?: number;
   turnTokens?: number;
+  // Completion + reasoning tokens accumulated this turn — feeds the streaming
+  // TPS readout in the run ticker (composer-run-strip).
+  turnOutputTokens?: number;
+  // Live text+reasoning characters already covered by turnOutputTokens.
+  turnOutputCharsAtUsage?: number;
+  // Active provider-output time for the current turn; excludes tool gaps.
+  turnModelActiveAt?: number;
+  turnModelActiveMs?: number;
+  // Live-stream subscription for the character-count TPS fallback (chars ÷ 4)
+  // when the provider does not emit per-chunk usage events with token counts
+  // during streaming. Subscribing here keeps text deltas off the main state
+  // tree — only the composer re-renders, matching the controller's live-store
+  // contract (pure stream deltas must not re-render the controller owner).
+  liveStore?: ControllerLiveStore;
   // Streaming tool-call argument chars (no usage event yet) — folded into the
   // pill as an estimated-token tail so a long write_file body reads as
   // progress, not a stall.
@@ -770,6 +769,8 @@ export function Composer({
   const wasRunningByDraftRef = useRef<Record<string, boolean>>({ [draftKey]: running });
   const composingRef = useRef(false);
   const lastCompositionEndAt = useRef(0);
+  const pastChatSearchComposingRef = useRef(false);
+  const pastChatSearchLastCompositionEndAt = useRef(0);
   const lastSelectionRef = useRef({ start: 0, end: 0 });
   const consumedInsertIdByDraftRef = useRef<Record<string, number>>({});
   const consumedSelectedTextIdByDraftRef = useRef<Record<string, number>>({});
@@ -3503,7 +3504,7 @@ export function Composer({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement | HTMLDivElement>) => {
-    const composing = isImeKeyEvent(e, composingRef.current, lastCompositionEndAt.current);
+    const composing = isImeKeyEvent(e.nativeEvent, composingRef.current, lastCompositionEndAt.current);
     const native = e.nativeEvent as globalThis.KeyboardEvent & {
       keyCode?: number;
       which?: number;
@@ -3702,7 +3703,7 @@ export function Composer({
     }
     // Esc interrupts the in-flight turn (matches the Stop button's hint), and
     // restores the text if the server hadn't replied yet.
-    if (e.key === "Escape" && running) {
+    if (composerEscapeAction(e.nativeEvent, running, composing) === "cancel") {
       e.preventDefault();
       handleCancel();
     }
@@ -3765,7 +3766,12 @@ export function Composer({
   // menu logic. Regular typing keys (letters, Backspace, etc.) pass through
   // so the user can type a search query.
   const onPastChatSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter" || e.key === "Tab" || e.key === "Escape") {
+    const composing = isImeKeyEvent(
+      e.nativeEvent,
+      pastChatSearchComposingRef.current,
+      pastChatSearchLastCompositionEndAt.current,
+    );
+    if (composerMenuKeyAction(e.nativeEvent, composing) === "handle") {
       e.preventDefault();
       e.stopPropagation();
       if (e.key === "ArrowDown" && count > 0) {
@@ -3933,6 +3939,24 @@ export function Composer({
     closeProfileMenu();
     closeMoreMenu();
   }, [suspendedByDecision, closeIntentMenu, closeProfileMenu, closeMoreMenu]);
+  // Live text+reasoning character count for the run-strip TPS fallback. Reads
+  // through the live store's own subscription so stream deltas re-render only
+  // this component — the controller's bump path stays text-delta-free.
+  const subscribeLiveText = useCallback(
+    (cb: () => void) => liveStore?.subscribe(tabId, cb) ?? (() => {}),
+    [liveStore, tabId],
+  );
+  const liveTextChars = useSyncExternalStore(
+    subscribeLiveText,
+    () => {
+      const live = liveStore?.getSnapshot(tabId);
+      return live ? live.text.length + live.reasoning.length : 0;
+    },
+  );
+  const liveModelActiveAt = useSyncExternalStore(
+    subscribeLiveText,
+    () => liveStore?.getModelActiveAt?.(tabId),
+  );
   const runStateText = retry
     ? t("status.retrying", { attempt: retry.attempt, max: retry.max })
     : waitingPrompt === "approval"
@@ -3947,9 +3971,21 @@ export function Composer({
         const elapsedMs = Math.max(0, now - turnStartAt - waitAccumMs);
         const words = SPINNER_WORDS[locale];
         const word = words[Math.floor(elapsedMs / 3000) % words.length];
-        const liveTokens = (turnTokens ?? 0) + Math.round((turnArgChars ?? 0) / 4);
+        const usageTokens = turnTokens ?? 0;
+        // Include streaming tool-call args in the estimate so TPS stays
+        // meaningful while the model streams a write_file / long tool body.
+        const inFlightChars = Math.max(0, liveTextChars - (turnOutputCharsAtUsage ?? 0)) + (turnArgChars ?? 0);
+        const estimatedChars = Math.round(inFlightChars / 4);
+        const liveTokens = usageTokens + estimatedChars;
         const tok = liveTokens > 0 ? ` · ↓ ${formatTokens(liveTokens)} ${t("status.tokens")}` : "";
-        return `${word}… ${fmtElapsed(elapsedMs)}${tok}`;
+        const outTok: number = (turnOutputTokens ?? 0) + estimatedChars;
+        const modelActiveAt = liveModelActiveAt ?? turnModelActiveAt;
+        const modelElapsedMs = Math.max(0, turnModelActiveMs + (modelActiveAt && modelActiveAt > 0 ? Math.max(0, now - modelActiveAt) : 0));
+        const tps = outTok > 0 && modelElapsedMs >= 500 ? Math.round(outTok / (modelElapsedMs / 1000)) : null;
+        const tpsStr = tps !== null ? ` · ${tps} tokens/s` : "";
+        const suffix = `${tpsStr}${tok}`;
+        const prefix = `${word}… ${fmtElapsed(elapsedMs)}`;
+        return { prefix, suffix: suffix || null };
       })()
     : null;
   const submitEmpty = !text.trim() && attachments.length === 0 && workspaceRefs.length === 0 &&
@@ -4180,7 +4216,6 @@ export function Composer({
                       turnsUsed: goalRuntime.turnsUsed,
                       turnsLimit: goalRuntime.turnsLimit,
                       tokensUsed: formatTokens(goalRuntime.tokensUsed),
-                      tokensLimit: formatTokens(goalRuntime.tokensLimit),
                       noProgressTurns: goalRuntime.noProgressTurns,
                       noProgressLimit: goalRuntime.noProgressLimit,
                       extensions: goalRuntime.budgetExtensions,
@@ -4345,6 +4380,16 @@ export function Composer({
                     onChange={(ev) => {
                       setPastChatQuery(ev.target.value);
                       setActive(0);
+                    }}
+                    onCompositionStart={() => {
+                      pastChatSearchComposingRef.current = true;
+                    }}
+                    onCompositionEnd={() => {
+                      pastChatSearchComposingRef.current = false;
+                      pastChatSearchLastCompositionEndAt.current = Date.now();
+                    }}
+                    onBlur={() => {
+                      pastChatSearchComposingRef.current = false;
                     }}
                     onKeyDown={onPastChatSearchKeyDown}
                   />
@@ -4650,11 +4695,20 @@ export function Composer({
         {runStateText && (
           <div className={`composer-run-strip${waitingPrompt ? " composer-run-strip--waiting" : ""}`}>
             <span className="composer-run-strip__dot" aria-hidden="true" />
-            {/* The ticker re-renders every second; keep it out of the accessibility
-                tree and announce only the stable state text via the live region. */}
-            <span className="composer-run-strip__text" aria-hidden={runTicker ? true : undefined}>
-              {runTicker ?? runStateText}
-            </span>
+            {runTicker ? (
+              <>
+                <span className="composer-run-strip__text" aria-hidden="true">{runTicker.prefix}</span>
+                {runTicker.suffix && (
+                  <Tooltip label={t("composer.runStripEstimateHint")}>
+                    <span className="composer-run-strip__text" aria-hidden="true">{runTicker.suffix}</span>
+                  </Tooltip>
+                )}
+              </>
+            ) : (
+              <span className="composer-run-strip__text">
+                {runStateText}
+              </span>
+            )}
             <span className="sr-only" role="status">{runStateText}</span>
           </div>
         )}
@@ -4731,7 +4785,7 @@ export function Composer({
                   id="composer-input"
                   ref={taRef}
                   className="composer__input"
-                  aria-label={t("composer.placeholder")}
+                  aria-label={t("composer.placeholder")} spellCheck={false} autoCorrect="off" autoCapitalize="off"
                   value={text}
                   onInputCapture={(e) => {
                     pendingNativeInputTypeRef.current = (e.nativeEvent as InputEvent).inputType;

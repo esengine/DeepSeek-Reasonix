@@ -1,0 +1,4 @@
+prompt = "common/money.py now requires a second argument: fmt_amount(cents, currency). Every call site under pkgs/alpha, pkgs/beta and pkgs/gamma still passes one argument and is broken. Update every call site to pass the currency \"USD\", leaving all other code untouched, so that `python3 check.py` prints OK. The three packages share no files."
+class = "delegation"
+max_steps = 60
+timeout_sec = 900

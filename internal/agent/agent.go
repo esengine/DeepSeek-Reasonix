@@ -14,11 +14,13 @@ import (
 
 	"mvdan.cc/sh/v3/syntax"
 
+	"reasonix/internal/ablation"
 	"reasonix/internal/capability"
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/diff"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
+	"reasonix/internal/extension/dispatch"
 	"reasonix/internal/instruction"
 	"reasonix/internal/jobs"
 	"reasonix/internal/memory"
@@ -38,7 +40,11 @@ import (
 const maxToolOutputBytes = 32 * 1024
 
 const maxEmptyFinalBlocks = 3
-const maxStreamRecoveries = 3
+
+// maxStreamRecoveries is the number of body-phase stream retries after the
+// initial sampling attempt (Codex-aligned default: 1 + 5 = 6 attempts total).
+const maxStreamRecoveries = 5
+const maxSamplingAttempts = maxStreamRecoveries + 1
 const maxExecutorHandoffNudges = 1
 
 const defaultReasoningByteLimit = 128 * 1024
@@ -131,6 +137,27 @@ func CallContext(ctx context.Context) (parentID string, sink event.Sink, asker A
 func PlanModeFromContext(ctx context.Context) bool {
 	cc, ok := ctx.Value(callContextKey{}).(callContext)
 	return ok && cc.planMode
+}
+
+// withAgentContext establishes the agent-owned workflow capabilities for a
+// model round and for tool availability checks. Missing capabilities shadow
+// inherited values so child agents cannot reach parent Goal, Jobs, or memory
+// state accidentally.
+func (a *Agent) withAgentContext(ctx context.Context) context.Context {
+	if a == nil {
+		return ctx
+	}
+	if a.jobs != nil {
+		ctx = jobs.WithManager(ctx, a.jobs)
+	} else {
+		ctx = jobs.WithoutManager(ctx)
+	}
+	if a.memQueue != nil {
+		ctx = memory.WithQueue(ctx, a.memQueue)
+	} else {
+		ctx = memory.WithoutQueue(ctx)
+	}
+	return planmode.WithActive(ctx, a.planMode.Load())
 }
 
 // WithParentSession stamps the active parent session ID onto a turn context so
@@ -259,8 +286,7 @@ type Agent struct {
 	maxStepsKey        string
 	reasoningByteLimit int
 	maxOutputTokens    int
-	// executorHandoffGuard is enabled by Coordinator for the executor agent. The
-	// per-turn marker check in Run keeps ordinary single-model turns unaffected.
+	// executorHandoffGuard is enabled by Coordinator only for the executor agent.
 	executorHandoffGuard bool
 	temperature          float64
 	pricing              *provider.Pricing
@@ -270,21 +296,20 @@ type Agent struct {
 	reasoningLanguage    atomic.Value // string: auto|zh|en
 
 	// sink receives the turn's typed event stream (reasoning/text deltas, tool
-	// dispatch/results, usage, notices). The agent no longer formats output
-	// itself — a frontend's Sink decides how to render. Never nil; New defaults
-	// it to event.Discard.
-	sink event.Sink
-
-	// lastUsage caches the most recent per-turn telemetry the provider reported so
-	// the CLI can expose a context gauge without re-scraping the usage line. The
-	// run loop writes it while a frontend's status line reads it, so it is atomic.
+	// dispatch/results, usage, notices). Frontends decide how to render it;
+	// never nil because New defaults it to event.Discard.
+	sink                event.Sink
+	requireVisibleFinal bool // internal callers require final Content
+	// lastUsage caches the latest provider telemetry for the CLI context gauge.
+	// The run loop writes it while a frontend reads it, so it is atomic.
 	lastUsage atomic.Pointer[provider.Usage]
+	outputBudgetState
 
 	// sessCacheHit/sessCacheMiss accumulate cache tokens across every API call
 	// this session, so frontends can show the aggregate hit-rate (Σhit/Σ(hit+miss))
 	// — a steadier, cost-oriented number than the single-turn rate. They are NOT
-	// reset on compaction (compaction only rewrites session.Messages), so the
-	// aggregate never craters when the prefix is summarized away. Atomic: the run
+	// reset on compaction, so the aggregate never craters when the model-visible
+	// prefix is summarized away. Atomic: the run
 	// loop accumulates them while the status line reads them.
 	sessCacheHit  atomic.Int64
 	sessCacheMiss atomic.Int64
@@ -328,6 +353,13 @@ type Agent struct {
 	// for the agent's lifetime and validates proxy calls after resolution.
 	readOnlyExecution bool
 
+	// mutationDependencyBarrier is set for the remainder of a provider tool
+	// batch after any mutating call fails or is blocked. executeOne re-checks
+	// it after proxy resolution so use_capability cannot bypass the barrier by
+	// advertising schema-level ReadOnly()==true. Parallel read-only segments
+	// never set it. Cleared at the start of each executeBatch.
+	mutationDependencyBarrier atomic.Bool
+
 	// plannerMCPExecution relaxes the strict read-only MCP boundary for the
 	// two-model Planner only: authorized, non-destructive MCP targets may run
 	// through use_capability even without readOnlyHint. Ordinary writers, bash,
@@ -339,6 +371,12 @@ type Agent struct {
 	// Plan workflows. nil disables gating entirely.
 	gate Gate
 
+	// extensions, when non-nil, is the frozen Extension Protocol v2 dispatcher
+	// for this controller generation. The run loop consults it at the
+	// agent-side intercept points (see extensions.go); nil means no runtime
+	// packages are installed and every point passes through byte-identically.
+	extensions *dispatch.Dispatcher
+
 	// recoveryGate, when non-nil, is the Auto Guard boundary for Auto mode.
 	// Shared by root and sub-agents for the same controller task. nil disables
 	// recovery checks (Ask/YOLO, headless without wiring, or feature off).
@@ -348,10 +386,6 @@ type Agent struct {
 	// recoveryTaskID isolates recovery state across concurrent top-level tasks.
 	// Empty shares the root task bucket.
 	recoveryTaskID string
-	// recoveryTaskSummary is the bounded task text for this Agent.Run. It lets a
-	// shared recovery gate review sub-agent mutations against the child task,
-	// rather than the root controller transcript.
-	recoveryTaskSummary string
 	// recoveryRunSeq gives ordinary (non-goal) runs a collision-free host scope.
 	// Goal runs use their stable delivery scope instead.
 	recoveryRunSeq atomic.Uint64
@@ -446,16 +480,22 @@ type Agent struct {
 
 	// deliveryProfile enables the runtime-enforced delivery contract. The stable
 	// profile prompt explains intent; these fields are host state and never enter
-	// the provider-cached prefix. deliveryCriteriaEstablished resets per user turn
-	// but may inherit an unfinished canonical task list on continuation.
-	deliveryProfile             bool
-	deliveryCriteriaEstablished bool
-	deliveryTaskExpected        bool
-	deliveryMutationExpected    bool
-	deliveryPersistentExpected  bool
-	deliveryScopeID             string
-	deliveryScopeActive         bool
-	deliveryCheckpoint          evidence.DeliveryCheckpoint
+	// the provider-cached prefix. deliveryScopeID and deliveryCheckpoint survive
+	// turns while a stable delivery scope continues; the per-turn expectations
+	// live in perTurnState.
+	deliveryProfile    bool
+	deliveryScopeID    string
+	deliveryCheckpoint evidence.DeliveryCheckpoint
+
+	// perTurnState groups the host flags that are valid for exactly one
+	// Agent.Run. beginRunTurn zeroes the whole struct in one assignment, so a
+	// field added here can never be forgotten in the reset; state that must
+	// survive turns stays directly on Agent.
+	perTurnState
+
+	// ablation names the subsystems a benchmark arm switched off. The zero value
+	// is the control arm.
+	ablation ablation.Set
 
 	// classifierTaskText is the host-trusted task text for delivery intent
 	// classification, set by sub-agent spawners whose Run input carries host
@@ -471,10 +511,6 @@ type Agent struct {
 	// readiness. An explicit host recovery action can consume it to preserve the
 	// failed turn's receipts once; an ordinary user turn still resets evidence.
 	deliveryRecoveryPending bool
-	// readinessRecovered marks a run that started with evidence preserved from
-	// (or a pending recovery of) a prior readiness failure, so the final allowed
-	// audit can report Recovered=true. Set per turn in beginRunTurn.
-	readinessRecovered bool
 
 	// capabilityLedger tracks require/prefer outcomes for this user turn only.
 	// Never serialized into prompts or session state.
@@ -519,6 +555,21 @@ type Agent struct {
 	keepPolicy          KeepPolicy
 	compactStuck        bool
 	consecutiveCompacts int
+	sessionPath         string // bound transcript path for projection sidecars
+	workspaceID         string // stable prompt-cache lineage component
+	cacheState          string // warm/cold/unknown; never provider-visible
+	compactionState     CompactionState
+	// compactionMu guards projection snapshots/install and the in-memory sidecar
+	// generation. Network summarization never runs while this lock is held.
+	compactionMu sync.Mutex
+	// compactionRunMu singleflights the expensive summary transaction without
+	// holding the session lock during network I/O.
+	compactionRunMu sync.Mutex
+	// lastCompactionTurn prevents the post-turn observer and pre-send preflight
+	// from paying for two summaries during one active tool loop.
+	lastCompactionTurn     atomic.Int64
+	strictAlternatingRoles bool // coalesce adjacent user turns on provider request copies
+	contextEditingState
 	// activeTurnCreatedAt identifies the real/synthetic user message that began
 	// the currently running turn. Compaction may rewrite older history while a
 	// tool loop is active, but it must keep this message and everything after it
@@ -538,33 +589,27 @@ type Agent struct {
 	stormSig   string
 	stormCount int
 
-	// blockedTurnStreak counts consecutive turns in which every tool call was
-	// blocked by the host (permission, plan mode, hook, or loop guard).
-	// stormSig catches a model fixated on one call shape; this catches a model
-	// rotating between blocked shapes — alternating tools, reordering a batch,
-	// or blockers whose text varies per attempt — which is zero progress all
-	// the same. Reset by any turn containing a non-blocked outcome and at the
-	// start of each user turn. See applyStormBreaker.
-	blockedTurnStreak int
+	// progress escalates adaptively on consecutive zero-evidence-gain rounds
+	// (see progress_guard.go); reset with the evidence ledger each turn.
+	progress progressGuard
 
-	// loopGuardArmed / loopGuardReceiptMark let final readiness stand down
-	// after a loop guard fired this user turn: once the host has told the model
-	// to stop retrying and report the blocker, demanding the receipts that the
-	// blocker prevents would restart the loop the guard just broke. The mark is
-	// the evidence-ledger receipt count from just before the guarded batch, so
-	// real progress — a successful write or command receipt landing after it —
-	// revokes the pass, while the bookkeeping the guard itself recommends
-	// (ask, todo_write, complete_step) keeps it. Host state, not message text:
-	// tool output that merely quotes "[loop guard]" must not unlock readiness.
-	// Reset at the start of each user turn. See loopGuardAllowsFinal.
-	loopGuardArmed       bool
-	loopGuardReceiptMark int
+	// outcome shadows progress with an outcome-decomposed scorer whose samples
+	// only feed trajectory recording; it never influences guard behavior.
+	outcome *evidence.OutcomeTracker
 
-	// repeatSuccessCounts tracks write-like tool calls that have already
-	// succeeded in this user turn. This catches the complementary loop shape to
-	// stormSig: a model keeps doing the same successful write, so there is no
-	// error for the failure-only storm breaker to see.
-	repeatSuccessCounts map[string]int
+	// ebm is the Evidence-Before-More-Mutation nudge's once-per-turn state.
+	ebm ebmState
+
+	// governor is the reasoning governor's per-turn engagement state.
+	governor governorState
+
+	// forkRestore, when armed, swaps the frozen fork-bundle conversation in
+	// right after beginRunTurn — the counterfactual-continuation seam.
+	forkRestore func(*runLoopState)
+
+	// lastReasoning is the previous executor round's reasoning-token spend,
+	// read by the governor trigger (live policy and fork capture alike).
+	lastReasoning int
 
 	// repeatFailureCounts tracks semantically identical write-like calls that
 	// keep failing with the same failure class. Unlike stormSig, successful
@@ -635,6 +680,17 @@ func (a *Agent) SetGate(g Gate) {
 		g = nil
 	}
 	a.gate = g
+}
+
+// SetExtensions installs the extension dispatcher after construction. Boot
+// uses it because sidecars — and therefore the dispatcher — only exist after
+// snapshot assembly, which runs after the agent is built. Safe to call before
+// the run loop starts; nil disables interception.
+func (a *Agent) SetExtensions(d *dispatch.Dispatcher) {
+	if a == nil {
+		return
+	}
+	a.extensions = d
 }
 
 // SetRecoveryGate installs Auto Guard. Safe to call before the run loop starts;
@@ -776,11 +832,19 @@ func (a *Agent) SetSession(s *Session) {
 	a.sessMu.Unlock()
 	a.sessCacheHit.Store(0)
 	a.sessCacheMiss.Store(0)
+	a.resetOutputBudgetState()
 	a.warnedMissingToolCallReasoning = false
 	a.missingReasoningWarnStateChecked = false
 	a.missingReasoningHealthyStreak = 0
 	a.repeatFailureCounts = nil
 	a.repeatFailureScope = ""
+	a.compactionMu.Lock()
+	a.compactionState = CompactionState{} // lineage change; disk reloaded on Resume
+	a.cacheState = CacheStateUnknown
+	a.compactionMu.Unlock()
+	a.compactStuck = false
+	a.consecutiveCompacts = 0
+	a.lastCompactionTurn.Store(0)
 	if s != nil {
 		a.rebuildTodoState(s.Snapshot())
 	}
@@ -788,8 +852,8 @@ func (a *Agent) SetSession(s *Session) {
 
 // LastUsage returns the most recent per-turn token telemetry the provider
 // reported (nil if no turn has run yet). The TUI uses it to show a context
-// gauge alongside the prompt; the actual cache decisions still live inside
-// maybeCompact.
+// gauge alongside the prompt; ContextManager.Prepare owns cache-breaking
+// maintenance decisions.
 func (a *Agent) LastUsage() *provider.Usage { return a.lastUsage.Load() }
 
 // SessionCache returns the cumulative cache hit/miss prompt tokens across every
@@ -968,12 +1032,10 @@ func (a *Agent) steerQueueLen() int {
 // fires (e.g. 0.8). The status line uses it to show headroom to the next compact.
 func (a *Agent) CompactRatio() float64 { return a.compactRatio }
 
-// CompactNow runs one compaction pass immediately, regardless of the
-// usage-ratio threshold maybeCompact normally honours. Used by the chat
-// TUI's `/compact` command so the user can reset the prefix before it
-// naturally fills up.
+// CompactNow forces one projection compaction (canonical transcript untouched).
 func (a *Agent) CompactNow(ctx context.Context, instructions string) error {
-	return a.compact(ctx, "manual", instructions, true)
+	_, err := a.contextManager().Prepare(ctx, ContextPreparePolicy{Trigger: CompactionTriggerManual, Instructions: instructions, Force: true})
+	return err
 }
 
 // Options configures an Agent.
@@ -997,15 +1059,14 @@ type Options struct {
 	// provider instance. It is attached to emitted Usage events so downstream
 	// usage accounting can attribute tokens to the exact model.
 	ModelRef string
-
+	// RequireVisibleFinal makes internal callers reject reasoning-only responses.
+	RequireVisibleFinal bool
 	// Gate is the per-call permission gate. nil disables gating.
 	Gate Gate
-
 	// ReadOnlyExecution enables a permanent host-side read-only boundary for
 	// planner and research agents. It is intentionally independent of Plan mode
 	// so a stale collaboration flag cannot authorize a dynamic writer target.
 	ReadOnlyExecution bool
-
 	// PlannerMCPExecution enables Planner-trusted MCP through use_capability:
 	// authorized, non-destructive tools may run without readOnlyHint. Only
 	// NewPlannerAgent sets this; strict read-only sub-agents must not.
@@ -1025,14 +1086,18 @@ type Options struct {
 
 	// Context management. ContextWindow <= 0 disables compaction. Ratios and
 	// RecentKeep fall back to defaults when unset.
-	ContextWindow       int
-	SoftCompactRatio    float64
-	ToolResultSnipRatio float64
-	CompactRatio        float64
-	CompactForceRatio   float64
-	RecentKeep          int
-	ArchiveDir          string
-	KeepPolicy          KeepPolicy
+	ContextWindow          int
+	SoftCompactRatio       float64
+	ToolResultSnipRatio    float64
+	CompactRatio           float64
+	CompactForceRatio      float64
+	RecentKeep             int
+	ArchiveDir             string
+	KeepPolicy             KeepPolicy
+	SessionPath            string // projection sidecar path; empty = memory only
+	WorkspaceID            string // prompt-cache lineage component
+	StrictAlternatingRoles bool   // merge adjacent user turns for strict providers at request time
+	ContextEditing         string // local (default) or native (explicit opt-in)
 
 	// Hooks fires PreToolUse / PostToolUse shell hooks around tool calls. nil
 	// disables hook firing.
@@ -1047,6 +1112,9 @@ type Options struct {
 
 	// Jobs is the session's background-job manager (nil disables background tools).
 	Jobs *jobs.Manager
+	// MemoryQueue optionally gives a child agent an explicitly owned live-memory
+	// queue. When nil, child construction shadows inherited queues.
+	MemoryQueue memory.Queue
 
 	// WriteScheduler is the session-scoped subagent concurrency/write-claim
 	// controller. When set on the parent executor, write-capable tools reserve
@@ -1069,11 +1137,15 @@ type Options struct {
 	// final answer. It changes host control flow, not tool schemas.
 	DeliveryProfile bool
 
-	// ClassifierTaskText, when non-empty, is the pristine task text delivery
-	// intent classification should judge instead of the raw Run input. Sub-agent
-	// spawners set it before prepending host framing (subagent/workspace context,
-	// review contracts) so framing verbs cannot arm expectations and user input
-	// dressed up as framing cannot disarm them.
+	// Ablation switches subsystems off for a benchmark arm. The zero value runs
+	// everything, so ordinary callers leave it unset.
+	Ablation ablation.Set
+
+	// ClassifierTaskText, when non-empty, is the pristine task text, set by
+	// sub-agent spawners before host framing is prepended. Delivery intent
+	// classification judges it instead of the raw Run input, so framing verbs
+	// cannot arm expectations; the delegation audit scores evidence origin
+	// against it, so only locations the parent wrote itself count as hints.
 	ClassifierTaskText string
 
 	// CapabilityLedger is the optional turn-scoped capability route ledger for
@@ -1112,6 +1184,13 @@ type Options struct {
 	// depth 0; child subagents are depth 1. MaxSubagentDepth caps delegation.
 	SubagentDepth    int
 	MaxSubagentDepth int
+
+	// Extensions is the frozen extension dispatcher for this agent's controller
+	// generation (Extension Protocol v2). Nil means no runtime packages are
+	// installed; the run loop then passes every intercept point through
+	// byte-identically. Boot installs it with SetExtensions once sidecars are
+	// live (they start after the agent is constructed).
+	Extensions *dispatch.Dispatcher
 
 	// MutationObserver is the host-side file mutation observer shared with
 	// (or cloned for) sub-agents. nil disables v2 capture. Does not affect
@@ -1175,10 +1254,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	} else {
 		maxSubagentDepth = NormalizeMaxSubagentDepth(maxSubagentDepth)
 	}
-	subagentDepth := opts.SubagentDepth
-	if subagentDepth < 0 {
-		subagentDepth = 0
-	}
+	subagentDepth := max(opts.SubagentDepth, 0)
 	reasoningByteLimit := opts.ReasoningByteLimit
 	if reasoningByteLimit == 0 {
 		reasoningByteLimit = defaultReasoningByteLimit
@@ -1196,7 +1272,9 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		usageSource:               usageSourceOrDefault(opts.UsageSource, event.UsageSourceExecutor),
 		modelRef:                  strings.TrimSpace(opts.ModelRef),
 		sink:                      sink,
+		requireVisibleFinal:       opts.RequireVisibleFinal,
 		gate:                      gate,
+		extensions:                opts.Extensions,
 		recoveryGate:              opts.RecoveryGate,
 		recoveryAgentID:           strings.TrimSpace(opts.RecoveryAgentID),
 		recoveryTaskID:            strings.TrimSpace(opts.RecoveryTaskID),
@@ -1207,6 +1285,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		configWriteApprover:       configWriteApprover,
 		hooks:                     hooks,
 		jobs:                      opts.Jobs,
+		memQueue:                  opts.MemoryQueue,
 		writeScheduler:            opts.WriteScheduler,
 		writeWorkspaceRoot:        strings.TrimSpace(opts.WriteWorkspaceRoot),
 		workspaceLease:            opts.WorkspaceLease,
@@ -1214,6 +1293,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		evidence:                  evidence.NewLedger(),
 		projectChecks:             append([]instruction.VerifyCheck(nil), opts.ProjectChecks...),
 		deliveryProfile:           opts.DeliveryProfile,
+		ablation:                  opts.Ablation,
 		classifierTaskText:        opts.ClassifierTaskText,
 		capabilityLedger:          opts.CapabilityLedger,
 		capabilityAudit:           opts.CapabilityAudit,
@@ -1225,12 +1305,23 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		recentKeep:                opts.RecentKeep,
 		archiveDir:                opts.ArchiveDir,
 		keepPolicy:                opts.KeepPolicy,
+		sessionPath:               strings.TrimSpace(opts.SessionPath),
+		workspaceID:               strings.TrimSpace(opts.WorkspaceID),
+		cacheState:                CacheStateUnknown,
+		strictAlternatingRoles:    opts.StrictAlternatingRoles,
+		contextEditingState:       newContextEditingState(opts.ContextEditing, prov),
 		subagentDepth:             subagentDepth,
 		maxSubagentDepth:          maxSubagentDepth,
 		mutationObserver:          opts.MutationObserver,
 	}
+	a.outputBudget = outputBudgetOf(prov)
+	if a.sessionPath != "" {
+		a.LoadProjectionSidecar(a.sessionPath)
+	}
 	a.SetResponseLanguage(opts.ResponseLanguage)
 	a.SetReasoningLanguage(opts.ReasoningLanguage)
+	a.maybeArmForkFromEnv()
+	a.maybeWrapForkCaptureProvider()
 	return a
 }
 
@@ -1328,7 +1419,16 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	defer a.activeTurnCreatedAt.Store(0)
 
+	// agent.before_start: an extension may abort the run before the user turn
+	// is appended. The redacted reason surfaces like a normal run error.
+	if err := a.interceptAgentStart(ctx); err != nil {
+		return err
+	}
+
 	_, state := a.beginRunTurn(ctx, input)
+	if a.forkRestore != nil {
+		a.forkRestore(state)
+	}
 	state.runMaxSteps = runMaxSteps
 	state.runMaxStepsKey = runMaxStepsKey
 	state.runLimitHostOwned = runLimitHostOwned
@@ -1571,7 +1671,7 @@ func (c finalReadinessCheck) audit(result evidence.ReadinessAuditResult, recover
 }
 
 func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
-	if a.evidence == nil {
+	if a.evidence == nil || a.ablation.Off(ablation.Evidence) {
 		return finalReadinessCheck{}
 	}
 	var missing []string
@@ -1782,34 +1882,6 @@ func (a *Agent) deliveryMutationCheckpointReady() bool {
 		a.deliveryReviewGateFailure() == ""
 }
 
-// armLoopGuardPass records that a loop guard fired this user turn.
-// receiptMark is the evidence-ledger receipt count from just before the
-// guarded batch ran, so a successful write or command receipt recorded after
-// it counts as real progress and revokes the pass (see loopGuardAllowsFinal).
-func (a *Agent) armLoopGuardPass(receiptMark int) {
-	a.loopGuardArmed = true
-	a.loopGuardReceiptMark = receiptMark
-}
-
-// loopGuardAllowsFinal reports whether final readiness should stand down: a
-// loop guard fired this user turn and no host-observable progress — a
-// successful write or command receipt — has landed since. In that state the
-// missing receipts are exactly what the blocker prevents, so demanding them
-// would restart the retry loop the guard just broke; the model must be free to
-// report the blocker instead. The bookkeeping the guard recommends (ask,
-// todo_write, complete_step) produces neither write nor command receipts, so
-// it keeps the pass; real progress revokes it because receipts are obtainable
-// again and readiness should resume enforcing them.
-func (a *Agent) loopGuardAllowsFinal() bool {
-	if a == nil || !a.loopGuardArmed {
-		return false
-	}
-	if a.evidence == nil {
-		return true
-	}
-	return !a.evidence.HasWriteOrCommandSince(a.loopGuardReceiptMark)
-}
-
 func finalReadinessIncompleteTodos(items []evidence.TodoStepMatch) string {
 	parts := make([]string, 0, len(items))
 	for _, item := range items {
@@ -1904,586 +1976,6 @@ func registryHasWriterTools(reg *tool.Registry) bool {
 	}
 	for _, name := range reg.Names() {
 		if t, ok := reg.Get(name); ok && !t.ReadOnly() {
-			return true
-		}
-	}
-	return false
-}
-
-type deliveryTaskIntent uint8
-
-const (
-	deliveryIntentConversation deliveryTaskIntent = iota
-	deliveryIntentAdvisory
-	deliveryIntentObservableRead
-	deliveryIntentMutation
-	deliveryIntentPersistentAction
-)
-
-func classifyDeliveryTaskIntent(input string) deliveryTaskIntent {
-	switch {
-	case deliveryTaskHasMutationIntent(input):
-		return deliveryIntentMutation
-	case deliveryTaskNeedsPersistentAction(input):
-		return deliveryIntentPersistentAction
-	case deliveryTaskIsConversationOnly(input):
-		return deliveryIntentConversation
-	case !heuristicInputIsTask(input):
-		return deliveryIntentConversation
-	case deliveryTaskIsAdvisory(input):
-		return deliveryIntentAdvisory
-	default:
-		return deliveryIntentObservableRead
-	}
-}
-
-func deliveryTaskNeedsEvidence(input string) bool {
-	intent := classifyDeliveryTaskIntent(input)
-	return intent == deliveryIntentObservableRead || intent == deliveryIntentMutation || intent == deliveryIntentPersistentAction
-}
-
-var deliveryMutationNeedles = []string{
-	"fix", "repair", "resolve", "create", "add", "write", "edit", "update", "change", "delete", "remove", "rename",
-	"implement", "refactor", "apply", "install", "publish", "commit", "push", "continue work",
-	"modify", "patch", "replace", "move", "configure", "upgrade", "downgrade", "bump", "enable", "disable", "merge",
-	"make changes", "make a change", "make the changes", "make the requested changes", "make the necessary changes", "make these changes", "make those changes", "make code changes",
-	"修复", "解决", "创建", "新建", "添加", "编写", "编辑", "修改", "更新", "删除", "移除", "重命名", "实现", "重构",
-	"实施", "落地", "安装", "发布", "提交", "继续处理", "调整", "替换", "移动", "升级", "降级", "启用", "禁用", "合并", "改动", "打补丁",
-}
-
-var deliveryAdvisoryPhrases = []string{
-	"what's wrong", "what is wrong", "why", "what should i do", "what can i do", "how should i", "how do i", "how can i",
-	"can you explain", "could you explain", "give me advice", "any advice", "help me understand",
-	"为什么", "怎么回事", "怎么办", "怎么", "怎样", "如何", "是什么问题", "什么原因", "的原因", "给我建议", "有什么建议",
-}
-
-func deliveryTaskNeedsMutation(input string) bool {
-	intent := classifyDeliveryTaskIntent(input)
-	return intent == deliveryIntentMutation || intent == deliveryIntentPersistentAction
-}
-
-func deliveryTaskHasMutationIntent(input string) bool {
-	affirmative, _ := deliveryTaskMutationIntent(input)
-	return affirmative
-}
-
-func deliveryTaskNeedsPersistentAction(input string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(input))
-	if normalized == "" {
-		return false
-	}
-	actionNeedles := []string{
-		"remember", "save", "store", "keep this", "keep that",
-		"记住", "记下来", "保存", "存下来", "记录下来",
-	}
-	durableNeedles := []string{
-		"permanently", "durable", "long-term", "long term", "across sessions", "future sessions", "every session", "after restart", "after restarting",
-		"永久", "长期", "持久", "跨会话", "以后每次", "未来会话", "重启后", "下次启动",
-	}
-	for _, clause := range deliveryTaskClauses(normalized) {
-		action := false
-		for _, needle := range actionNeedles {
-			affirmative, _ := deliveryTaskNeedleIntent(clause, needle)
-			action = action || affirmative
-		}
-		durable := false
-		for _, needle := range durableNeedles {
-			affirmative, _ := deliveryTaskNeedleIntent(clause, needle)
-			durable = durable || affirmative
-		}
-		if action && durable && !deliveryTaskClauseIsAdvisory(clause) {
-			return true
-		}
-	}
-	return false
-}
-
-func deliveryTaskIsConversationOnly(input string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(input))
-	if normalized == "" || deliveryTaskHasHostAnchor(normalized) || deliveryTaskHasCommand(normalized) {
-		return false
-	}
-	localCue := containsAnySubstring(normalized, []string{
-		"next turn", "next message", "later in this chat", "this conversation", "when i ask again", "when i ask next",
-		"下一轮", "下轮", "下一条消息", "稍后再问", "待会再问", "这个对话", "本次对话", "本轮会话",
-	})
-	conversationAction := containsAnySubstring(normalized, []string{
-		"remember", "keep in mind", "keep this", "keep that", "answer", "respond", "reply",
-		"记住", "记一下", "回答", "回复", "再告诉我",
-	})
-	return localCue && conversationAction
-}
-
-// TaskNeedsMutation reports whether a task text looks like a mutation request
-// under the existing task-intent classification. The host uses it to pick a
-// Goal budget class; it never gates permissions or whether writes are allowed.
-func TaskNeedsMutation(input string) bool {
-	return deliveryTaskNeedsMutation(input)
-}
-
-func deliveryTaskMutationIntent(input string) (affirmative, negated bool) {
-	normalized := strings.ToLower(strings.TrimSpace(input))
-	for _, clause := range deliveryTaskClauses(normalized) {
-		clauseAffirmative := false
-		clauseNegated := false
-		if deliveryMutationClauseNegated(clause) {
-			clauseNegated = true
-		}
-		for _, needle := range deliveryMutationNeedles {
-			hasAffirmative, hasNegated := deliveryTaskNeedleIntent(clause, needle)
-			clauseAffirmative = clauseAffirmative || hasAffirmative
-			clauseNegated = clauseNegated || hasNegated
-		}
-		if clauseAffirmative && deliveryTaskClauseIsAdvisory(clause) && !deliveryTaskAdvisoryClauseRequestsMutation(clause) {
-			clauseAffirmative = false
-			clauseNegated = true
-		}
-		affirmative = affirmative || clauseAffirmative
-		negated = negated || clauseNegated
-	}
-	return affirmative, negated
-}
-
-func deliveryTaskIsAdvisory(input string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(input))
-
-	// Concrete targets and commands always remain host-observable, including
-	// when the request is phrased as a "why" question.
-	if deliveryTaskHasHostAnchor(normalized) || deliveryTaskHasCommand(normalized) {
-		return false
-	}
-
-	// Question wording is scoped per clause. This keeps remote troubleshooting
-	// such as "analyze why WPS won't open" advisory, while a separate imperative
-	// clause such as "reproduce the crash" still requires observable work.
-	sawAdvisory := false
-	for _, clause := range deliveryTaskClauses(normalized) {
-		if deliveryTaskClauseIsAdvisory(clause) {
-			sawAdvisory = true
-			continue
-		}
-		if deliveryTaskClauseHasObservableWork(clause) {
-			return false
-		}
-	}
-	if sawAdvisory {
-		return true
-	}
-
-	// A standalone refusal, inability, or constraint around a mutation verb is
-	// advisory rather than work Reasonix can perform. Affirmative mixed intent is
-	// handled by deliveryTaskNeedsMutation before this function is consulted.
-	_, negatedMutation := deliveryTaskMutationIntent(normalized)
-	return negatedMutation
-}
-
-func deliveryTaskHasHostAnchor(input string) bool {
-	for _, anchor := range []string{
-		"this repo", "this repository", "current repository", "codebase", "workspace", "pull request", "this pr", "ci job",
-		"/pull/", "actions/runs/",
-		"当前仓库", "这个仓库", "当前项目", "这个项目", "代码库", "工作区", "这个 pr", "这个pr", "此 pr", "此pr",
-	} {
-		if strings.Contains(input, anchor) {
-			return true
-		}
-	}
-	return deliveryTaskHasFileReference(input)
-}
-
-func deliveryTaskHasFileReference(input string) bool {
-	previous := rune(0)
-	for index, current := range input {
-		if current == '@' && index+1 < len(input) &&
-			(index == 0 || strings.ContainsRune(" \t\r\n([{<,:;（【《，。；：", previous)) {
-			next, _ := utf8.DecodeRuneInString(input[index+1:])
-			if !strings.ContainsRune(" \t\r\n", next) {
-				return true
-			}
-		}
-		previous = current
-	}
-
-	for _, raw := range strings.FieldsFunc(input, func(r rune) bool {
-		switch r {
-		case ' ', '\t', '\r', '\n', '`', '\'', '"', '(', ')', '[', ']', '{', '}', '<', '>', ',', '，', ';', '；', '!', '！', '?', '？':
-			return true
-		default:
-			return false
-		}
-	}) {
-		token := strings.ToLower(strings.TrimSpace(raw))
-		if token == "" || strings.Contains(token, "://") {
-			continue
-		}
-		if strings.HasPrefix(token, "./") || strings.HasPrefix(token, "../") ||
-			strings.HasPrefix(token, "/") || strings.Contains(token, `\`) {
-			return true
-		}
-		base := token
-		if slash := strings.LastIndexByte(base, '/'); slash >= 0 {
-			base = base[slash+1:]
-		}
-		switch base {
-		case "dockerfile", "makefile", "cmakelists.txt", "justfile", "license", "readme", "changelog":
-			return true
-		}
-		dot := strings.LastIndexByte(base, '.')
-		if dot < 0 {
-			continue
-		}
-		switch base[dot:] {
-		case ".go", ".mod", ".sum", ".js", ".jsx", ".ts", ".tsx", ".py", ".rs", ".java", ".kt", ".swift",
-			".c", ".cc", ".cpp", ".h", ".hpp", ".cs", ".rb", ".php", ".sh", ".zsh", ".fish", ".ps1",
-			".md", ".json", ".yaml", ".yml", ".toml", ".xml", ".sql", ".proto", ".html", ".css", ".scss",
-			".vue", ".svelte", ".txt", ".log", ".csv", ".pdf", ".env", ".ini", ".conf", ".lock":
-			return true
-		}
-	}
-	return false
-}
-
-func deliveryTaskHasCommand(input string) bool {
-	tokens := strings.FieldsFunc(strings.ToLower(input), func(r rune) bool {
-		asciiWord := r >= 'a' && r <= 'z' || r >= '0' && r <= '9'
-		return !asciiWord && r != '_' && r != '-' && r != '.' && r != '/' && r != '\\' && r != ':'
-	})
-	for i := range tokens {
-		if deliveryCommandStartsAt(tokens, i) {
-			return true
-		}
-	}
-	return false
-}
-
-func deliveryCommandStartsAt(tokens []string, index int) bool {
-	command := strings.TrimSpace(tokens[index])
-	if command == "" {
-		return false
-	}
-	if strings.HasPrefix(command, "./") || strings.HasPrefix(command, "../") ||
-		strings.HasPrefix(command, "/") || strings.Contains(command, `\`) {
-		return true
-	}
-	next := ""
-	if index+1 < len(tokens) {
-		next = tokens[index+1]
-	}
-	if next != "--" && len(next) > 1 && strings.HasPrefix(next, "-") {
-		return true
-	}
-	previous := ""
-	if index > 0 {
-		previous = tokens[index-1]
-	}
-	switch command {
-	case "go":
-		switch next {
-		case "build", "clean", "doc", "env", "fmt", "generate", "get", "install", "list", "mod", "run", "test", "tool", "version", "vet", "work":
-			return true
-		}
-	case "git", "npm", "npx", "pnpm", "yarn", "bun", "deno", "cargo", "rustc", "python", "python3",
-		"bash", "sh", "zsh", "fish", "powershell", "pwsh", "docker", "docker-compose", "kubectl", "helm", "terraform",
-		"gradle", "gradlew", "mvn", "dotnet", "xcodebuild", "gcc", "g++", "clang", "clang++":
-		return deliveryCommandHasExplicitCue(previous) || deliveryCommandHasSubcommand(next)
-	case "node":
-		return deliveryCommandHasExplicitCue(previous) || next == "inspect" || next == "test"
-	case "swift":
-		return next == "build" || next == "package" || next == "run" || next == "test"
-	case "make", "just":
-		switch next {
-		case "all", "build", "check", "clean", "fail", "failed", "failing", "install", "lint", "test":
-			return true
-		}
-	case "pytest", "cmake", "ninja", "eslint", "tsc", "vitest", "jest":
-		return deliveryCommandHasExplicitCue(previous) || next == "fail" || next == "failed" || next == "failing"
-	}
-	return false
-}
-
-func deliveryCommandHasExplicitCue(previous string) bool {
-	switch previous {
-	case "command", "execute", "executing", "run", "running", "using", "with":
-		return true
-	default:
-		return false
-	}
-}
-
-func deliveryCommandHasSubcommand(next string) bool {
-	switch next {
-	case "add", "apply", "branch", "build", "check", "checkout", "clean", "clone", "commit", "config", "container",
-		"deploy", "describe", "destroy", "dev", "diff", "down", "env", "exec", "fetch", "fmt", "generate", "get", "image",
-		"init", "install", "lint", "list", "log", "logs", "login", "logout", "merge", "mod", "package", "plan", "ps", "publish",
-		"pull", "push", "rebase", "remote", "remove", "reset", "restore", "run", "serve", "show", "start", "stash", "status",
-		"switch", "tag", "test", "tool", "uninstall", "up", "update", "upgrade", "version", "vet", "work", "worktree":
-		return true
-	default:
-		return false
-	}
-}
-
-func deliveryTaskClauseHasObservableWork(clause string) bool {
-	for _, needle := range []string{
-		"review", "inspect", "analyze", "check", "reproduce", "audit", "verify",
-		"评审", "审查", "检查", "分析", "复现", "审计", "验证",
-	} {
-		affirmative, _ := deliveryTaskNeedleIntent(clause, needle)
-		if affirmative {
-			return true
-		}
-	}
-	return false
-}
-
-func deliveryTaskClauseIsAdvisory(clause string) bool {
-	for _, phrase := range deliveryAdvisoryPhrases {
-		if strings.Contains(clause, phrase) {
-			return true
-		}
-	}
-	return false
-}
-
-func deliveryTaskAdvisoryClauseRequestsMutation(clause string) bool {
-	advisoryIndex := len(clause)
-	for _, phrase := range deliveryAdvisoryPhrases {
-		if index := strings.Index(clause, phrase); index >= 0 && index < advisoryIndex {
-			advisoryIndex = index
-		}
-	}
-	if advisoryIndex == len(clause) {
-		return false
-	}
-	if deliveryTaskStartsWithMutation(clause[:advisoryIndex]) {
-		return true
-	}
-
-	for _, cue := range []string{" please ", " then ", " so ", " therefore ", "然后", "所以", "而是", "转而"} {
-		for rest := clause[advisoryIndex:]; ; {
-			index := strings.Index(rest, cue)
-			if index < 0 {
-				break
-			}
-			rest = rest[index+len(cue):]
-			if deliveryTaskStartsWithMutation(rest) {
-				return true
-			}
-		}
-	}
-	for rest, offset := clause[advisoryIndex:], advisoryIndex; ; {
-		index := strings.Index(rest, "请")
-		if index < 0 {
-			break
-		}
-		absolute := offset + index
-		after := clause[absolute+len("请"):]
-		requestWord := strings.HasSuffix(clause[:absolute], "申") || strings.HasPrefix(after, "求")
-		if !requestWord && deliveryTaskStartsWithMutation(after) {
-			return true
-		}
-		offset = absolute + len("请")
-		rest = clause[offset:]
-	}
-
-	for _, cue := range []string{" and ", "并且", "并"} {
-		if index := strings.LastIndex(clause[advisoryIndex:], cue); index >= 0 {
-			cueStart := advisoryIndex + index
-			tail := clause[cueStart+len(cue):]
-			if !deliveryTaskClauseHasNegation(clause[:cueStart]) && deliveryTaskStartsWithMutation(tail) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func deliveryTaskStartsWithMutation(input string) bool {
-	input = strings.TrimSpace(input)
-	for {
-		stripped := false
-		for _, prefix := range []string{"please ", "can you ", "could you ", "would you ", "you should ", "帮我", "请你", "直接", "继续", "再"} {
-			if strings.HasPrefix(input, prefix) {
-				input = strings.TrimSpace(strings.TrimPrefix(input, prefix))
-				stripped = true
-				break
-			}
-		}
-		if !stripped {
-			break
-		}
-	}
-	for _, needle := range deliveryMutationNeedles {
-		if containsTaskNeedle(input, needle) {
-			if containsNonASCII(needle) {
-				return strings.HasPrefix(input, needle)
-			}
-			tokens := strings.FieldsFunc(input, func(r rune) bool {
-				return !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9') && r != '_' && r != '\''
-			})
-			needleTokens := strings.Fields(needle)
-			if len(tokens) >= len(needleTokens) {
-				matches := true
-				for i := range needleTokens {
-					matches = matches && tokens[i] == needleTokens[i]
-				}
-				if matches {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
-func deliveryTaskClauseHasNegation(clause string) bool {
-	clause = strings.ReplaceAll(clause, "’", "'")
-	for _, phrase := range []string{
-		" not ", " never ", " without ", "cannot", "can't", " cant ", "don't", " dont ", "won't", " wont ", "unable",
-		"不要", "别", "勿", "不能", "无法", "不想", "不敢", "无需", "不需要", "不可", "没法", "没有", "禁止", "拒绝",
-	} {
-		if strings.Contains(" "+clause+" ", phrase) {
-			return true
-		}
-	}
-	return false
-}
-
-func deliveryTaskClauses(input string) []string {
-	input = strings.NewReplacer(
-		" but ", "\n",
-		" however ", "\n",
-		" nevertheless ", "\n",
-		"但请", "\n请",
-		"但是", "\n",
-		"不过", "\n",
-	).Replace(input)
-	return strings.FieldsFunc(input, func(r rune) bool {
-		switch r {
-		case '\n', '\r', '.', '。', ',', '，', ';', '；', '!', '！', '?', '？':
-			return true
-		default:
-			return false
-		}
-	})
-}
-
-func deliveryMutationClauseNegated(clause string) bool {
-	for _, phrase := range []string{
-		"without changing", "without modifying", "analysis only", "review only",
-		"不要改动", "只分析", "仅分析", "只检查", "仅检查", "只评审", "仅评审",
-	} {
-		if strings.Contains(clause, phrase) {
-			return true
-		}
-	}
-	return false
-}
-
-func deliveryTaskNeedleIntent(clause, needle string) (affirmative, negated bool) {
-	if containsNonASCII(needle) {
-		for offset := 0; offset < len(clause); {
-			relative := strings.Index(clause[offset:], needle)
-			if relative < 0 {
-				break
-			}
-			index := offset + relative
-			prefix := []rune(clause[:index])
-			if deliveryMutationRunesNegated(prefix) {
-				negated = true
-			} else {
-				affirmative = true
-			}
-			offset = index + len(needle)
-		}
-		return affirmative, negated
-	}
-
-	clause = strings.ReplaceAll(clause, "’", "'")
-	tokens := strings.FieldsFunc(clause, func(r rune) bool {
-		return !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9') && r != '_' && r != '\''
-	})
-	needleTokens := strings.Fields(needle)
-	for i := 0; i+len(needleTokens) <= len(tokens); i++ {
-		matches := true
-		for j, token := range needleTokens {
-			if tokens[i+j] != token {
-				matches = false
-				break
-			}
-		}
-		if !matches {
-			continue
-		}
-		if deliveryMutationTokensNegated(tokens[:i]) {
-			negated = true
-		} else {
-			affirmative = true
-		}
-	}
-	return affirmative, negated
-}
-
-func deliveryMutationTokensNegated(prefix []string) bool {
-	if len(prefix) > 6 {
-		prefix = prefix[len(prefix)-6:]
-	}
-	boundary := -1
-	for i, token := range prefix {
-		switch token {
-		case "but", "however", "nevertheless", "instead", "so", "then", "therefore", "please":
-			boundary = i
-		}
-	}
-	if boundary >= 0 {
-		prefix = prefix[boundary+1:]
-	}
-	for i, token := range prefix {
-		if token == "not" && i+1 < len(prefix) && prefix[i+1] == "only" {
-			continue
-		}
-		switch token {
-		case "not", "never", "without", "cannot", "can't", "cant", "don't", "dont", "won't", "wont", "unable", "avoid", "avoiding", "afraid", "refuse", "refusing", "needn't":
-			return true
-		case "no":
-			if i+1 < len(prefix) && prefix[i+1] == "need" {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func deliveryMutationRunesNegated(prefix []rune) bool {
-	if len(prefix) > 12 {
-		prefix = prefix[len(prefix)-12:]
-	}
-	window := string(prefix)
-	scopeStart := 0
-	for _, boundary := range []string{"所以", "然后", "而是", "转而", "改为"} {
-		if index := strings.LastIndex(window, boundary); index >= 0 {
-			end := index + len(boundary)
-			if end > scopeStart {
-				scopeStart = end
-			}
-		}
-	}
-	if index := strings.LastIndex(window, "请"); index >= 0 {
-		before, after := window[:index], window[index+len("请"):]
-		requestWord := strings.HasSuffix(before, "申") || strings.HasPrefix(after, "求")
-		negatedRequest := false
-		for _, marker := range []string{"不要", "不能", "无法", "不想", "不敢", "无需", "不需要", "不可", "没法", "禁止", "拒绝"} {
-			if strings.HasSuffix(before, marker) || strings.Contains(after, marker) {
-				negatedRequest = true
-				break
-			}
-		}
-		if !requestWord && !negatedRequest && index+len("请") > scopeStart {
-			scopeStart = index + len("请")
-		}
-	}
-	window = window[scopeStart:]
-	for _, marker := range []string{"不要", "别", "勿", "不能", "无法", "不想", "不敢", "无需", "不需要", "不可", "没法", "没有", "禁止", "拒绝"} {
-		if strings.Contains(window, marker) {
 			return true
 		}
 	}
@@ -2819,26 +2311,24 @@ func toolBudgetNoticeText() string {
 	return "Tool round limit reached; asking the assistant to summarize progress."
 }
 
-func streamRecoveryMessage(hasPartialText, hadPartialTool bool) string {
-	switch {
-	case hadPartialTool:
-		return "The previous assistant response was interrupted while a tool call was streaming. Continue the same task now. If a tool is still needed, issue a fresh complete tool call from scratch; do not rely on any partial tool-call arguments from the interrupted stream."
-	case hasPartialText:
-		return "The previous assistant response was interrupted during streaming. Continue the same task now. Partial text remains visible to the user but was excluded from model context; avoid needlessly repeating it, and do not assume it was complete."
-	default:
-		return "The previous assistant response was interrupted during streaming before visible answer text was completed. Continue the same task now and provide the next useful response."
-	}
-}
-
 // stream runs one completion, emitting reasoning and text deltas as typed
 // events and collecting complete tool calls. A Message event closes the text
 // stream so a sink can re-render the streamed raw text as styled markdown. The
 // accumulated text and reasoning are also returned so the caller can round-trip
 // reasoning on the next turn.
-func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, string, string, []provider.ToolCall, []json.RawMessage, *provider.Usage, bool, bool, []provider.ToolCall, error) {
+//
+// When frozen is non-nil, the request is not rebuilt from session — retries
+// must replay the same provider-visible body.
+func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) streamedTurn {
+	return a.streamWithFrozen(ctx, turn, sink, nil, "")
+}
+
+func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink, frozen *samplingRequest, attemptID string) streamedTurn {
 	ctx = provider.WithRetryNotify(ctx, func(info provider.RetryInfo) {
-		sink.Emit(event.Event{Kind: event.Retrying, RetryAttempt: info.Attempt, RetryMax: info.Max, RetryDelay: info.Delay, Err: info.Err})
+		sink.Emit(event.Event{Kind: event.Retrying, RetryAttempt: info.Attempt, RetryMax: info.Max, RetryDelay: info.Delay, RetryScope: event.RetryScopeHeaders, Err: info.Err})
 	})
+	// Reuse a parent attempt counter when present so stream retries accumulate
+	// into one RequestCount; otherwise install a fresh counter for this call.
 	ctx = provider.WithRequestAttemptCounter(ctx)
 	// A stream can terminate locally before the provider channel closes (for
 	// example when the client-side reasoning guard fires). Own a child context
@@ -2846,26 +2336,23 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 	// reader instead of leaving generation and billing running in the background.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	// CreatedAt is durable UI metadata, not model input. Strip it from the
-	// transport copy so wall-clock differences never invalidate the provider's
-	// prompt-cache prefix (and custom providers cannot accidentally send it).
-	requestMessages := append([]provider.Message(nil), provider.ModelMessages(a.session.Messages)...)
-	for i := range requestMessages {
-		requestMessages[i].CreatedAt = 0
+
+	var req provider.Request
+	var err error
+	if frozen != nil {
+		req = freezeProviderRequest(frozen.req)
+	} else {
+		prepared, perr := a.prepareSamplingRequest(ctx)
+		if perr != nil {
+			return streamedTurn{err: perr}
+		}
+		req = prepared.req
 	}
-	req := provider.Request{
-		Messages:    requestMessages,
-		Tools:       a.tools.Schemas(),
-		MaxTokens:   a.maxOutputTokens,
-		Temperature: provider.OptionalTemperature(a.temperature),
-	}
-	inputFloor := 0
-	if previous := a.lastUsage.Load(); previous != nil {
-		inputFloor = previous.PromptTokens
-	}
-	ch, err := provider.StreamWithRequestBudgetEstimate(ctx, a.prov, req, inputFloor)
+	// Host stream cancels on generation drain (OpenAI/Anthropic HTTP reads).
+	defer trackPublishedHostStream(ctx, cancel)()
+	ch, err := a.streamProviderRequest(ctx, req)
 	if err != nil {
-		return "", "", "", nil, nil, provider.UsageWithRequestAttemptCount(ctx, nil), false, false, nil, err
+		return streamedTurn{usage: provider.UsageWithRequestAttemptCount(ctx, nil), err: err}
 	}
 
 	// A PostLLMCall hook rewrites the whole reasoning block, so when one is wired
@@ -2875,13 +2362,26 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 	transformReasoning := a.hooks != nil && a.hooks.HasPostLLMCall()
 
 	var text, reasoning strings.Builder
-	var signature string // provider-issued proof for the reasoning (Anthropic thinking)
+	var signature string                    // provider-issued proof for the reasoning (Anthropic thinking)
+	var reasoningID, reasoningStatus string // Responses reasoning item id/status (meta chunk)
 	var calls []provider.ToolCall
 	var responsesItems []json.RawMessage
 	var partialCalls []provider.ToolCall
 	var usage *provider.Usage
 	var partialToolStarted bool
+	var maxArgChars int
 	var lastArgProgress time.Time
+	// collect packages the stream state accumulated so far; stored is the
+	// finishReasoning output that becomes the round-tripped reasoning.
+	collect := func(stored string, err error) streamedTurn {
+		return streamedTurn{
+			text: text.String(), reasoning: stored, signature: signature,
+			reasoningID: reasoningID, reasoningStatus: reasoningStatus,
+			calls: calls, responsesItems: responsesItems, usage: usage,
+			partialToolStarted: partialToolStarted, partialCalls: partialCalls,
+			maxArgChars: maxArgChars, err: err,
+		}
+	}
 	finishReasoning := func() (stored, display string) {
 		original := reasoning.String()
 		display = original
@@ -2892,7 +2392,8 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 			}
 		}
 		stored = display
-		if signature != "" || provider.RequiresReasoningRoundTrip(a.prov) || (len(calls) > 0 && provider.RequiresToolCallReasoning(a.prov)) {
+		providerBound := signature != "" || reasoningID != "" || reasoningStatus != ""
+		if providerBound || provider.RequiresReasoningRoundTrip(a.prov) || (len(calls) > 0 && provider.RequiresToolCallReasoning(a.prov)) {
 			stored = original
 		}
 		return stored, display
@@ -2904,25 +2405,53 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 			stored, _ := finishReasoning()
 			usage = bestEffortStreamUsage(usage, text.Len(), reasoning.Len(), "interrupted")
 			usage = provider.UsageWithRequestAttemptCount(ctx, usage)
-			return text.String(), stored, signature, calls, responsesItems, usage, false, partialToolStarted, partialCalls, ctx.Err()
+			return collect(stored, ctx.Err())
 		case c, ok := <-ch:
 			if !ok {
 				if err := ctx.Err(); err != nil {
 					stored, _ := finishReasoning()
 					usage = bestEffortStreamUsage(usage, text.Len(), reasoning.Len(), "interrupted")
 					usage = provider.UsageWithRequestAttemptCount(ctx, usage)
-					return text.String(), stored, signature, calls, responsesItems, usage, false, partialToolStarted, partialCalls, err
+					return collect(stored, err)
 				}
 				stored, display := finishReasoning()
-				if text.Len() > 0 || display != "" {
+				// provider.response: extensions rule on the assembled terminal
+				// response before it is persisted. A replacement becomes the
+				// visible assistant turn (the user's transcript); a block fails
+				// the turn.
+				providerSignature := signature
+				finalText, finalReasoning, signature, calls, usage, err := a.interceptProviderResponse(
+					ctx, text.String(), stored, signature, calls, usage)
+				if err != nil {
+					return streamedTurn{partialToolStarted: partialToolStarted, partialCalls: partialCalls, maxArgChars: maxArgChars, err: err}
+				}
+				// Responses reasoning IDs/status and Anthropic signatures are
+				// provider-bound metadata. Never attach the provider's metadata
+				// to reasoning that an extension replaced.
+				if finalReasoning != stored || signature != providerSignature {
+					reasoningID, reasoningStatus = "", ""
+				}
+				if finalReasoning != stored {
+					// The extension replaced the reasoning: what is persisted
+					// and what the closing Message event re-renders must agree.
+					display = finalReasoning
+				}
+				if finalText != "" || display != "" {
 					sink.Emit(event.Event{
 						Kind:      event.Message,
-						Text:      DisplayAssistantText(text.String()),
+						Text:      DisplayAssistantText(finalText),
 						Reasoning: display,
 					})
 				}
 				usage = provider.UsageWithRequestAttemptCount(ctx, usage)
-				return text.String(), stored, signature, calls, responsesItems, usage, false, false, partialCalls, nil
+				// A clean terminal never reports partialToolStarted: the calls
+				// slice is now authoritative and the partial cards were merged.
+				return streamedTurn{
+					text: finalText, reasoning: finalReasoning, signature: signature,
+					reasoningID: reasoningID, reasoningStatus: reasoningStatus,
+					calls: calls, responsesItems: responsesItems, usage: usage,
+					partialCalls: partialCalls, maxArgChars: maxArgChars,
+				}
 			}
 			chunk = c
 		}
@@ -2932,6 +2461,14 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 			if chunk.Signature != "" {
 				signature = chunk.Signature
 			}
+			// 元数据 chunk（空 Text）：reasoning item id/status 贯通
+			// SSE → session → 下一轮回传（评审 #7234 第 1 点）。
+			if chunk.ReasoningID != "" {
+				reasoningID = chunk.ReasoningID
+			}
+			if chunk.ReasoningStatus != "" {
+				reasoningStatus = chunk.ReasoningStatus
+			}
 			if chunk.Text != "" && !transformReasoning {
 				sink.Emit(event.Event{Kind: event.Reasoning, Text: chunk.Text})
 			}
@@ -2939,8 +2476,8 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 				stored, _ := finishReasoning()
 				usage = bestEffortStreamUsage(usage, text.Len(), reasoning.Len(), finishReasonClientReasoningLimit)
 				usage = provider.UsageWithRequestAttemptCount(ctx, usage)
-				a.lastUsage.Store(usage)
-				return text.String(), stored, signature, calls, responsesItems, usage, false, partialToolStarted, partialCalls, errReasoningByteLimitExceeded
+				a.storeLatestRequestUsage(usage)
+				return collect(stored, errReasoningByteLimitExceeded)
 			}
 		case provider.ChunkText:
 			text.WriteString(chunk.Text)
@@ -2954,7 +2491,7 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 			if tc := chunk.ToolCall; tc != nil {
 				partialCalls = upsertPartialToolCall(partialCalls, *tc)
 				sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
-					ID: tc.ID, Name: tc.Name, ReadOnly: a.toolReadOnly(tc.Name), Partial: true,
+					ID: tc.ID, Name: tc.Name, ReadOnly: a.toolReadOnly(tc.Name), Partial: true, AttemptID: attemptID,
 				}})
 			}
 		case provider.ChunkToolCallArgsDelta:
@@ -2963,11 +2500,14 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 			// partial dispatch with the cumulative size (time-throttled) so the
 			// UI can show progress instead of a dead counter for the duration of
 			// a 30KB write_file body.
+			if chunk.ArgChars > maxArgChars {
+				maxArgChars = chunk.ArgChars
+			}
 			if tc := chunk.ToolCall; tc != nil && time.Since(lastArgProgress) >= 250*time.Millisecond {
 				partialCalls = upsertPartialToolCall(partialCalls, *tc)
 				lastArgProgress = time.Now()
 				sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
-					ID: tc.ID, Name: tc.Name, ReadOnly: a.toolReadOnly(tc.Name), Partial: true, ArgChars: chunk.ArgChars,
+					ID: tc.ID, Name: tc.Name, ReadOnly: a.toolReadOnly(tc.Name), Partial: true, ArgChars: chunk.ArgChars, AttemptID: attemptID,
 				}})
 			}
 		case provider.ChunkToolCall:
@@ -2975,14 +2515,17 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 			if chunk.ToolCall != nil {
 				calls = append(calls, *chunk.ToolCall)
 				partialCalls = upsertPartialToolCall(partialCalls, *chunk.ToolCall)
+				if n := len(chunk.ToolCall.Arguments); n > maxArgChars {
+					maxArgChars = n
+				}
 			}
 		case provider.ChunkResponsesItem:
 			if len(chunk.ResponsesItem) > 0 {
 				responsesItems = append(responsesItems, append(json.RawMessage(nil), chunk.ResponsesItem...))
 			}
 		case provider.ChunkUsage:
-			usage = chunk.Usage
-			a.lastUsage.Store(chunk.Usage)
+			usage, a.lastReasoning = chunk.Usage, chunk.Usage.ReasoningTokens
+			a.storeLatestRequestUsage(chunk.Usage)
 			a.sessCacheHit.Add(int64(chunk.Usage.CacheHitTokens))
 			a.sessCacheMiss.Add(int64(chunk.Usage.CacheMissTokens))
 		case provider.ChunkError:
@@ -2990,14 +2533,16 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 				stored, _ := finishReasoning()
 				usage = bestEffortStreamUsage(usage, text.Len(), reasoning.Len(), "interrupted")
 				usage = provider.UsageWithRequestAttemptCount(ctx, usage)
-				return text.String(), stored, signature, calls, responsesItems, usage, true, partialToolStarted, partialCalls, chunk.Err
+				st := collect(stored, chunk.Err)
+				st.interrupted = true
+				return st
 			}
 			stored, _ := finishReasoning()
 			if errors.Is(chunk.Err, context.Canceled) || errors.Is(chunk.Err, context.DeadlineExceeded) {
 				usage = bestEffortStreamUsage(usage, text.Len(), reasoning.Len(), "interrupted")
 			}
 			usage = provider.UsageWithRequestAttemptCount(ctx, usage)
-			return text.String(), stored, signature, calls, responsesItems, usage, false, partialToolStarted, partialCalls, chunk.Err
+			return collect(stored, chunk.Err)
 		}
 	}
 }
@@ -3107,252 +2652,64 @@ func (a *Agent) systemPrompt() string {
 	return b.String()
 }
 
-// batchExecution is the result of one provider tool-call batch.
-type batchExecution struct {
-	results            []string
-	images             [][]string
-	recoveryStopTurn   bool
-	recoveryStopReason string
+func toEventShellExecution(in *tool.ShellExecution, durationMs int64) *event.ShellExecution {
+	if in == nil {
+		return nil
+	}
+	out := &event.ShellExecution{
+		Kind:           in.Kind,
+		Shell:          in.Shell,
+		ShellVersion:   in.ShellVersion,
+		Platform:       in.Platform,
+		SupportsAndAnd: in.SupportsAndAnd,
+		State:          in.State,
+		FailurePhase:   in.FailurePhase,
+		OutputTail:     in.OutputTail,
+		MutationRisk:   in.MutationRisk,
+		Verification:   in.Verification,
+		DurationMs:     in.DurationMs,
+	}
+	if out.DurationMs == 0 && durationMs > 0 {
+		out.DurationMs = durationMs
+	}
+	if in.ExitCode != nil {
+		code := *in.ExitCode
+		out.ExitCode = &code
+	}
+	return out
 }
 
-// executeBatch dispatches one model turn's tool calls. A ToolDispatch event is
-// emitted for every call up front, in call order, so a frontend can show the
-// timeline chronologically. Contiguous known ReadOnly calls fan out across
-// goroutines; unknown and writer calls run as single-call serial segments so
-// write/read ordering stays provider-ordered. ToolResult events are emitted
-// after the batch in call order, so emission stays serial even when execution
-// parallelised. Images are aligned by index with results.
-func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) batchExecution {
-	// The assistant message already stored this slice in Session. Keep execution
-	// state separate so refreshing a dependent preview never mutates shared
-	// session memory outside Session's lock.
-	calls = append([]provider.ToolCall(nil), calls...)
-	for _, c := range calls {
-		a.emitFullToolDispatch(c, false)
+func toProviderToolExecution(in *tool.ShellExecution) *provider.ToolExecution {
+	if in == nil {
+		return nil
 	}
-
-	results := make([]string, len(calls))
-	outcomes := make([]toolOutcome, len(calls))
-	durations := make([]int64, len(calls))
-	completedStepInBatch := false
-	// Snapshot the receipt count before the batch runs: if a loop guard fires
-	// for this batch, successes recorded during it (a mixed batch where only one
-	// call was guard-blocked) must already count as progress against the pass.
-	receiptMark := 0
-	if a.evidence != nil {
-		receiptMark = a.evidence.Len()
+	out := &provider.ToolExecution{
+		Kind:           in.Kind,
+		Shell:          in.Shell,
+		ShellVersion:   in.ShellVersion,
+		Platform:       in.Platform,
+		SupportsAndAnd: in.SupportsAndAnd,
+		State:          in.State,
+		FailurePhase:   in.FailurePhase,
+		OutputTail:     in.OutputTail,
+		MutationRisk:   in.MutationRisk,
+		Verification:   in.Verification,
+		DurationMs:     in.DurationMs,
 	}
-	// Full dispatches are prepared against the batch's initial file state. After
-	// one writer runs, a dependent later writer may only become previewable (or
-	// its original preview may become stale). Refresh even after a failed writer:
-	// commands and filesystem calls can mutate disk before reporting an error.
-	// The first writer stays on the single-preview fast path.
-	earlierWriterRan := false
-	surfaceWriters := make([]bool, len(calls))
-	run := func(i int) {
-		t, _, ambiguous := a.tools.ResolveCall(calls[i].Name)
-		known := t != nil && len(ambiguous) == 0
-		writer := known && !t.ReadOnly()
-		surfaceWriters[i] = writer
-		if earlierWriterRan && writer {
-			if refreshed, changed := refreshCurrentFileDiff(t, calls[i]); changed {
-				calls[i] = refreshed
-				a.session.UpdateToolCallPreview(refreshed)
-				a.emitFullToolDispatch(refreshed, true)
-			}
-		}
-		start := time.Now()
-		if calls[i].Name == "complete_step" && completedStepInBatch {
-			output := "blocked: only one successful complete_step is allowed per tool-call round. Continue from the newly promoted in_progress todo in the next round instead of batching sign-offs."
-			outcomes[i] = toolOutcome{output: output, blocked: true, errMsg: "blocked: complete_step sign-offs must be serial"}
-			if a.evidence != nil {
-				a.evidence.Record(evidence.ReceiptFromToolCall(calls[i].Name, json.RawMessage(calls[i].Arguments), false, true))
-			}
-			durations[i] = time.Since(start).Milliseconds()
-			results[i] = output
-			return
-		}
-		outcomes[i] = a.executeOne(ctx, calls[i])
-		if outcomes[i].resolved {
-			readOnly := outcomes[i].resolvedReadOnly
-			calls[i].ResolvedName = outcomes[i].resolvedName
-			calls[i].CapabilityID = outcomes[i].capabilityID
-			calls[i].ResolvedReadOnly = &readOnly
-			surfaceWriters[i] = !readOnly
-		}
-		if calls[i].Name == "complete_step" && outcomes[i].errMsg == "" {
-			completedStepInBatch = true
-		}
-		durations[i] = time.Since(start).Milliseconds()
-		results[i] = outcomes[i].output
+	if in.ExitCode != nil {
+		code := *in.ExitCode
+		out.ExitCode = &code
 	}
-	finalize := func(i int) {
-		if calls[i].ResolvedReadOnly != nil {
-			a.session.UpdateToolCallResolution(calls[i])
-			a.emitResolvedToolDispatch(calls[i])
-		}
-		if surfaceWriters[i] || (outcomes[i].resolved && !outcomes[i].resolvedReadOnly) {
-			earlierWriterRan = true
-		}
-	}
-	cancelled := false
-	markCancelled := func(start int) {
-		errMsg := context.Canceled.Error()
-		if err := ctx.Err(); err != nil {
-			errMsg = err.Error()
-		}
-		output := "cancelled: context cancelled before execution"
-		for j := start; j < len(calls); j++ {
-			results[j] = output
-			outcomes[j] = toolOutcome{output: output, errMsg: errMsg}
-		}
-		cancelled = true
-	}
-
-	// recoveryBatchStop blocks remaining tools after Episode budgets are
-	// exhausted so tool-call / result pairs stay complete for the provider.
-	recoveryBatchStop := false
-	recoveryStopReason := ""
-	markRecoveryStopped := func(start int, reason string) {
-		msg := "blocked: Auto recovery paused this turn; do not call more tools. Summarize completed work for the user."
-		for j := start; j < len(calls); j++ {
-			if results[j] != "" {
-				continue
-			}
-			results[j] = msg
-			outcomes[j] = toolOutcome{
-				output:             msg,
-				blocked:            true,
-				errMsg:             firstLine(msg),
-				recoveryStopTurn:   true,
-				recoveryStopReason: reason,
-			}
-		}
-		recoveryBatchStop = true
-		if reason != "" {
-			recoveryStopReason = reason
-		}
-	}
-
-	for _, batch := range partitionToolCalls(a.tools, calls) {
-		if ctx.Err() != nil {
-			markCancelled(batch.start)
-			break
-		}
-		if recoveryBatchStop {
-			markRecoveryStopped(batch.start, recoveryStopReason)
-			break
-		}
-		if batch.parallel && batch.end-batch.start > 1 {
-			ranUntil := runParallel(ctx, batch.start, batch.end, run)
-			for i := batch.start; i < ranUntil; i++ {
-				finalize(i)
-			}
-			// After parallel execution completes, check if context was cancelled.
-			// The individual tool executions should have detected ctx.Done(), but
-			// we verify here to ensure we don't continue to subsequent batches.
-			if ctx.Err() != nil {
-				markCancelled(ranUntil)
-				break
-			}
-			for i := batch.start; i < batch.end; i++ {
-				if outcomes[i].recoveryStopTurn {
-					recoveryBatchStop = true
-					recoveryStopReason = outcomes[i].recoveryStopReason
-					markRecoveryStopped(batch.end, recoveryStopReason)
-					break
-				}
-			}
-			if recoveryBatchStop {
-				break
-			}
-			continue
-		}
-		for i := batch.start; i < batch.end; i++ {
-			// Before executing the next tool, check if context was cancelled.
-			// This prevents starting new tools when a previous tool's execution
-			// triggered cancellation.
-			if ctx.Err() != nil {
-				markCancelled(i)
-				break
-			}
-			if recoveryBatchStop {
-				markRecoveryStopped(i, recoveryStopReason)
-				break
-			}
-			run(i)
-			finalize(i)
-			if outcomes[i].recoveryStopTurn {
-				recoveryBatchStop = true
-				recoveryStopReason = outcomes[i].recoveryStopReason
-				markRecoveryStopped(i+1, recoveryStopReason)
-				break
-			}
-			// After each tool execution, also check if the context was cancelled.
-			// If so, stop executing remaining tools and return immediately so
-			// the agent loop can detect the cancellation and exit.
-			if ctx.Err() != nil {
-				markCancelled(i + 1)
-				break
-			}
-		}
-		if cancelled || recoveryBatchStop {
-			break
-		}
-	}
-
-	for i, c := range calls {
-		o := outcomes[i]
-		t, _, ambiguous := a.tools.ResolveCall(c.Name)
-		ok := t != nil && len(ambiguous) == 0
-		readOnly := ok && t.ReadOnly()
-		if c.ResolvedReadOnly != nil {
-			readOnly = *c.ResolvedReadOnly
-		}
-		a.sink.Emit(event.Event{Kind: event.ToolResult, Tool: event.Tool{
-			ID:           c.ID,
-			Name:         c.Name,
-			Args:         c.Arguments,
-			ResolvedName: c.ResolvedName,
-			CapabilityID: c.CapabilityID,
-			Output:       o.output,
-			Err:          o.errMsg,
-			ReadOnly:     readOnly,
-			Truncated:    o.truncated,
-			DurationMs:   durations[i],
-		}})
-		if o.truncated && o.truncMsg != "" {
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: o.truncMsg})
-		}
-	}
-	if !cancelled {
-		a.applyStormBreaker(calls, outcomes, results, receiptMark)
-	}
-	images := make([][]string, len(calls))
-	for i := range outcomes {
-		images[i] = outcomes[i].images
-		if outcomes[i].recoveryStopTurn {
-			recoveryBatchStop = true
-			if outcomes[i].recoveryStopReason != "" {
-				recoveryStopReason = outcomes[i].recoveryStopReason
-			}
-		}
-	}
-	return batchExecution{
-		results:            results,
-		images:             images,
-		recoveryStopTurn:   recoveryBatchStop,
-		recoveryStopReason: recoveryStopReason,
-	}
+	return out
 }
 
-func (a *Agent) emitFullToolDispatch(c provider.ToolCall, refreshed bool) {
+func (a *Agent) emitFullToolDispatch(ctx context.Context, c provider.ToolCall, refreshed bool) {
 	t, _, ambiguous := a.tools.ResolveCall(c.Name)
 	ok := t != nil && len(ambiguous) == 0
 	ev := event.Tool{ID: c.ID, Name: c.Name, Args: c.Arguments, ReadOnly: ok && t.ReadOnly(), Refreshed: refreshed}
 	ev.FileDiff = event.FileDiff{Diff: c.Diff, Added: c.Added, Removed: c.Removed}
 	if ok && ev.Diff == "" && ev.Added == 0 && ev.Removed == 0 {
-		if ch, ok := tool.PreviewChange(t, json.RawMessage(c.Arguments)); ok {
+		if ch, ok := tool.PreviewChange(ctx, t, json.RawMessage(c.Arguments)); ok {
 			ev.FileDiff = event.FileDiff{Diff: ch.Diff, Added: ch.Added, Removed: ch.Removed}
 		}
 	}
@@ -3398,7 +2755,7 @@ func (a *Agent) emitResolvedToolDispatch(c provider.ToolCall) {
 // earlier successful writers in the same provider batch. Preview failures clear
 // any stale initial diff; a later Execute will then fail or ask for recovery
 // without presenting the user with a preview that no longer describes disk.
-func refreshCurrentFileDiff(t tool.Tool, call provider.ToolCall) (provider.ToolCall, bool) {
+func refreshCurrentFileDiff(ctx context.Context, t tool.Tool, call provider.ToolCall) (provider.ToolCall, bool) {
 	pv, ok := t.(tool.Previewer)
 	if !ok {
 		return call, false
@@ -3407,7 +2764,7 @@ func refreshCurrentFileDiff(t tool.Tool, call provider.ToolCall) (provider.ToolC
 	refreshed.Diff = ""
 	refreshed.Added = 0
 	refreshed.Removed = 0
-	if change, err := pv.Preview(json.RawMessage(call.Arguments)); err == nil {
+	if change, err := pv.Preview(ctx, json.RawMessage(call.Arguments)); err == nil {
 		refreshed.Diff = change.Diff
 		refreshed.Added = change.Added
 		refreshed.Removed = change.Removed
@@ -3416,7 +2773,7 @@ func refreshCurrentFileDiff(t tool.Tool, call provider.ToolCall) (provider.ToolC
 	return refreshed, changed
 }
 
-func (a *Agent) withPreviewFileDiffs(calls []provider.ToolCall) []provider.ToolCall {
+func (a *Agent) withPreviewFileDiffs(ctx context.Context, calls []provider.ToolCall) []provider.ToolCall {
 	if len(calls) == 0 {
 		return calls
 	}
@@ -3431,87 +2788,13 @@ func (a *Agent) withPreviewFileDiffs(calls []provider.ToolCall) []provider.ToolC
 		if !ok {
 			continue
 		}
-		if ch, ok := tool.PreviewChange(t, json.RawMessage(out[i].Arguments)); ok {
+		if ch, ok := tool.PreviewChange(ctx, t, json.RawMessage(out[i].Arguments)); ok {
 			out[i].Diff = ch.Diff
 			out[i].Added = ch.Added
 			out[i].Removed = ch.Removed
 		}
 	}
 	return out
-}
-
-type toolCallBatch struct {
-	start    int
-	end      int
-	parallel bool
-}
-
-// partitionToolCalls keeps provider order while letting contiguous known
-// read-only tools run together. Unknown and writer tools are single-call serial
-// batches so they cannot reorder around reads or produce surprising errors.
-// complete_step and todo_write read the turn's evidence ledger. wait and
-// bash_output can merge a background task's receipts into that ledger. These
-// evidence-sensitive tools never join a parallel run, so provider order stays
-// receipt order. use_capability is always serial because its provider-visible
-// read-only surface can resolve to a real MCP writer only inside executeOne;
-// batching it as a reader would let multiple database/API mutations race.
-func partitionToolCalls(r *tool.Registry, calls []provider.ToolCall) []toolCallBatch {
-	var batches []toolCallBatch
-	for i := 0; i < len(calls); {
-		if parallelisable(r, calls[i].Name) {
-			start := i
-			i++
-			for i < len(calls) && parallelisable(r, calls[i].Name) {
-				i++
-			}
-			batches = append(batches, toolCallBatch{start: start, end: i, parallel: true})
-			continue
-		}
-		batches = append(batches, toolCallBatch{start: i, end: i + 1})
-		i++
-	}
-	return batches
-}
-
-func parallelisable(r *tool.Registry, name string) bool {
-	switch name {
-	case "complete_step", "todo_write", "wait", "bash_output", "use_capability":
-		return false
-	}
-	t, _, ambiguous := r.ResolveCall(name)
-	return t != nil && len(ambiguous) == 0 && t.ReadOnly()
-}
-
-func runParallel(ctx context.Context, start, end int, run func(int)) int {
-	const maxParallel = 8
-	sem := make(chan struct{}, maxParallel)
-	var wg sync.WaitGroup
-	ranUntil := start
-launch:
-	for i := start; i < end; i++ {
-		if ctx.Err() != nil {
-			break
-		}
-		select {
-		case sem <- struct{}{}:
-		case <-ctx.Done():
-			break launch
-		}
-		if ctx.Err() != nil {
-			<-sem
-			break
-		}
-		i := i
-		wg.Add(1)
-		ranUntil = i + 1
-		go func() {
-			defer wg.Done()
-			defer func() { <-sem }()
-			run(i)
-		}()
-	}
-	wg.Wait()
-	return ranUntil
 }
 
 // stormBreakThreshold is how many times in a row the same tool may fail the same
@@ -3674,16 +2957,21 @@ func batchStormSignature(calls []provider.ToolCall, outcomes []toolOutcome) (str
 // data URLs from a tool.ImageTool result; they ride outside output so text
 // truncation can never corrupt an image payload.
 type toolOutcome struct {
-	output           string
-	images           []string
-	blocked          bool
-	errMsg           string
-	truncated        bool
-	truncMsg         string
-	resolved         bool
-	resolvedName     string
-	capabilityID     string
-	resolvedReadOnly bool
+	output                     string
+	images                     []string
+	blocked                    bool
+	errMsg                     string
+	truncated                  bool
+	truncMsg                   string
+	resolved                   bool
+	resolvedName               string
+	capabilityID               string
+	resolvedReadOnly, executed bool
+	workspaceMutation          *event.WorkspaceMutation
+	effective                  workspaceEffectiveCall
+	// execution is local shell metadata (optional). Provider messages strip it
+	// via ModelMessages; UI/event sinks surface it on ToolResult cards.
+	execution *tool.ShellExecution
 	// recoveryGeneration is the gate generation captured before execution so
 	// ObserveResult can ignore stale results after a mode switch.
 	recoveryGeneration uint64
@@ -4217,8 +3505,8 @@ func (a *Agent) toolReadOnly(name string) bool {
 // firstLine returns s up to its first newline — a one-line failure summary for
 // the display Err, while the full error stays in the model-facing output.
 func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
+	if before, _, ok := strings.Cut(s, "\n"); ok {
+		return before
 	}
 	return s
 }

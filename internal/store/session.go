@@ -38,6 +38,18 @@ func SessionRecoveryState(sessionPath string) string {
 	return sessionStem(sessionPath) + ".recovery.json"
 }
 
+// SessionContext is the context-projection / compaction-state sidecar
+// (<id>.context.json). It holds the model-visible projection and cache
+// telemetry; transcript authority remains with the native event log once one
+// exists, with the primary .jsonl retained as its compatibility checkpoint.
+func SessionContext(sessionPath string) string {
+	sessionPath = strings.TrimSpace(sessionPath)
+	if sessionPath == "" {
+		return ""
+	}
+	return sessionStem(sessionPath) + ".context.json"
+}
+
 // sessionStem strips the .jsonl suffix so a sidecar sits beside the session as
 // <id>.<kind> rather than <id>.jsonl.<kind>.
 func sessionStem(sessionPath string) string {
@@ -90,6 +102,17 @@ func SessionEventIndex(sessionPath string) string {
 		return ""
 	}
 	return sessionStem(sessionPath) + ".event-index.json"
+}
+
+// SessionDisplayIndex is the paging sidecar for the transcript
+// (<id>.display-index.json). It contains per-message byte offsets, roles, and
+// turn boundaries derived from the transcript, never message bodies, so a
+// reader can page a huge history without parsing whole session files.
+func SessionDisplayIndex(sessionPath string) string {
+	if sessionPath == "" {
+		return ""
+	}
+	return sessionStem(sessionPath) + ".display-index.json"
 }
 
 // SessionConflictLog is the append-only diagnostic log for snapshot conflict
@@ -171,7 +194,9 @@ func SessionSidecarFiles(sessionPath string) []string {
 		SessionEventLog(sessionPath),
 		SessionEventLogDamaged(sessionPath),
 		SessionEventIndex(sessionPath),
+		SessionDisplayIndex(sessionPath),
 		SessionConflictLog(sessionPath),
 		SessionRecoveryState(sessionPath),
+		SessionContext(sessionPath),
 	}
 }

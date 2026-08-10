@@ -32,8 +32,8 @@ type dispatchItem struct {
 }
 
 // recordDispatcher keeps filesystem latency off provider/UI event goroutines.
-// Dispatchers are shared per state directory, so controller rebuilds and the
-// Remote Workbench do not create one goroutine per recorder instance.
+// Dispatchers are shared per state directory, so controller rebuilds do not
+// create one goroutine per recorder instance.
 type recordDispatcher struct {
 	writer *Writer
 	queue  chan dispatchItem
@@ -172,6 +172,35 @@ func (r *Recorder) RecordReadinessAudit(a evidence.ReadinessAudit) {
 // RecordProtocolRecovery preserves the wrapped sink's audit capability.
 func (r *Recorder) RecordProtocolRecovery(a event.ProtocolRecoveryAudit) {
 	event.RecordProtocolRecovery(r.inner, a)
+}
+
+// RecordContractShadow preserves the wrapped sink's audit capability.
+func (r *Recorder) RecordContractShadow(a event.ContractShadowAudit) {
+	event.RecordContractShadow(r.inner, a)
+}
+
+// RecordCompletionReport preserves the wrapped sink's audit capability.
+func (r *Recorder) RecordDelegationAudit(a evidence.DelegationAudit) {
+	event.RecordDelegationAudit(r.inner, a)
+}
+
+func (r *Recorder) RecordCompletionReport(a event.CompletionReportAudit) {
+	event.RecordCompletionReport(r.inner, a)
+}
+
+// RecordOutcomeProgress preserves the wrapped sink's audit capability.
+func (r *Recorder) RecordOutcomeProgress(sample evidence.OutcomeSample) {
+	event.RecordOutcomeProgress(r.inner, sample)
+}
+
+// RecordMemoryRecall preserves the wrapped sink's audit capability.
+func (r *Recorder) RecordMemoryRecall(a event.MemoryRecallAudit) {
+	event.RecordMemoryRecall(r.inner, a)
+}
+
+// RecordDelegationAdmission preserves the wrapped sink's audit capability.
+func (r *Recorder) RecordDelegationAdmission(a event.DelegationAdmissionAudit) {
+	event.RecordDelegationAdmission(r.inner, a)
 }
 
 func (r *Recorder) recordUsage(e event.Event) {

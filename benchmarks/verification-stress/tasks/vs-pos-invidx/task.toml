@@ -1,0 +1,4 @@
+prompt = "Search misses documents: a token appearing in several docs only returns the last one, and trailing punctuation sticks to words so 'end.' is not found by 'end'. Fix tokenizer.py and index.py."
+class = "ebm-positive"
+max_steps = 18
+timeout_sec = 300

@@ -3,12 +3,14 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,7 +20,9 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/eventwire"
 	"reasonix/internal/jobs"
+	"reasonix/internal/permission"
 	"reasonix/internal/provider"
+	"reasonix/internal/tool"
 )
 
 func TestTitlePromptRequiresUserMessageLanguage(t *testing.T) {
@@ -64,6 +68,43 @@ func TestGenerateTitleRecordsUsageWithModelIdentity(t *testing.T) {
 type fakeRunner struct{ got chan string }
 
 func (f fakeRunner) Run(_ context.Context, input string) error { f.got <- input; return nil }
+
+type serveApprovalWriter struct{}
+
+func (serveApprovalWriter) Name() string        { return "serve_write" }
+func (serveApprovalWriter) Description() string { return "write a test file" }
+func (serveApprovalWriter) Schema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}}}`)
+}
+func (serveApprovalWriter) ReadOnly() bool { return false }
+func (serveApprovalWriter) Execute(context.Context, json.RawMessage) (string, error) {
+	return "ok", nil
+}
+
+type serveApprovalProvider struct {
+	mu   sync.Mutex
+	turn int
+}
+
+func (p *serveApprovalProvider) Name() string { return "serve-approval-test" }
+func (p *serveApprovalProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+	p.mu.Lock()
+	turn := p.turn
+	p.turn++
+	p.mu.Unlock()
+
+	ch := make(chan provider.Chunk, 2)
+	if turn == 0 {
+		ch <- provider.Chunk{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{
+			ID: "serve-approval-1", Name: "serve_write", Arguments: `{"path":"a.txt"}`,
+		}}
+	} else {
+		ch <- provider.Chunk{Type: provider.ChunkText, Text: "done"}
+	}
+	ch <- provider.Chunk{Type: provider.ChunkDone}
+	close(ch)
+	return ch, nil
+}
 
 func TestServeSubmitRunsAndBroadcastsTurnDone(t *testing.T) {
 	bc := NewBroadcaster()
@@ -113,11 +154,11 @@ func TestServeEndpoints(t *testing.T) {
 	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
-	if resp, err := http.Get(srv.URL + "/history"); err != nil || resp.StatusCode != 200 {
+	if resp, err := http.Get(srv.URL + "/history"); err != nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("history = %v / %v", resp, err)
 	}
 
-	if resp, _ := http.Get(srv.URL + "/context"); resp.StatusCode != 200 {
+	if resp, _ := http.Get(srv.URL + "/context"); resp.StatusCode != http.StatusOK {
 		t.Errorf("context status = %d", resp.StatusCode)
 	}
 
@@ -173,6 +214,46 @@ func TestServeSubmitRejectsShellShortcut(t *testing.T) {
 	case in := <-got:
 		t.Fatalf("runner should not run shell submit, got %q", in)
 	default:
+	}
+}
+
+func TestServeSubmitValidatesFormat(t *testing.T) {
+	bc := NewBroadcaster()
+	got := make(chan string, 1)
+	ctrl := control.New(control.Options{Runner: fakeRunner{got: got}, Sink: bc})
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
+	defer srv.Close()
+
+	post := func(body string) int {
+		resp, err := http.Post(srv.URL+"/submit", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	// Unsupported format is rejected with 400 and the runner never runs.
+	if code := post(`{"input":"hi","format":"xml"}`); code != http.StatusBadRequest {
+		t.Fatalf("unsupported format status = %d, want 400", code)
+	}
+	select {
+	case in := <-got:
+		t.Fatalf("runner must not run for rejected format, got %q", in)
+	default:
+	}
+
+	// Whitespace-padded json_object is normalized and accepted.
+	if code := post(`{"input":"hi","format":"  json_object  "}`); code != http.StatusAccepted {
+		t.Fatalf("padded json_object status = %d, want 202", code)
+	}
+	select {
+	case in := <-got:
+		if in != "hi" {
+			t.Fatalf("runner ran %q, want hi", in)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner never ran for padded json_object")
 	}
 }
 
@@ -313,26 +394,6 @@ func TestServeCompactEndpoint(t *testing.T) {
 	}
 }
 
-func TestServeIndexPage(t *testing.T) {
-	bc := NewBroadcaster()
-	ctrl := control.New(control.Options{Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
-	defer srv.Close()
-
-	resp, err := http.Get(srv.URL + "/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		t.Errorf("index status = %d", resp.StatusCode)
-	}
-	ct := resp.Header.Get("Content-Type")
-	if !strings.Contains(ct, "text/html") {
-		t.Errorf("index content-type = %q, want text/html", ct)
-	}
-}
-
 func TestServeIndexDefinesQueryHelpers(t *testing.T) {
 	html := string(indexHTML)
 	for _, want := range []string{
@@ -387,6 +448,24 @@ func TestServeIndexPresentsRecoveryPauseAsNotice(t *testing.T) {
 		if !strings.Contains(html, want) {
 			t.Fatalf("serve index missing recovery pause support %q", want)
 		}
+	}
+}
+
+func TestServeIndexRendersAndReloadsExtensions(t *testing.T) {
+	html := string(indexHTML)
+	for _, want := range []string{
+		"case 'extension_surface': if(e.extension)renderExtensionSurface(e.extension); break;",
+		"case 'extension_status': if(e.extension)renderExtensionSurface(e.extension); break;",
+		"const node=el('div','notice'",
+		"post('/extensions/reload',{})",
+		"{cmd:'reload',sig:'/reload'",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("serve index missing extension support %q", want)
+		}
+	}
+	if strings.Contains(html, "p.card.markdown+'</") {
+		t.Fatal("extension Markdown must not be inserted as HTML")
 	}
 }
 
@@ -485,6 +564,81 @@ func TestServeModelsMarksActiveByModelRef(t *testing.T) {
 	}
 	if !active["alternate/shared-chat"] {
 		t.Fatal("alternate/shared-chat was not marked active")
+	}
+}
+
+func TestServeModelsIncludesExtensionProviderCatalog(t *testing.T) {
+	writeServeModelConfig(t)
+
+	bc := NewBroadcaster()
+	ref := "plugin/demo/cloud/extension-chat"
+	ctrl := control.New(control.Options{
+		Sink:     bc,
+		Label:    "extension-chat",
+		ModelRef: ref,
+		ProviderResolver: &provider.StaticResolver{Descriptors: []provider.Descriptor{{
+			Ref: ref, Model: "extension-chat", DisplayName: "Extension Chat",
+		}},
+		},
+	})
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/models")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Models []struct {
+			Ref      string `json:"ref"`
+			Provider string `json:"provider"`
+			Kind     string `json:"kind"`
+			Active   bool   `json:"active"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range body.Models {
+		if model.Ref == ref {
+			if model.Provider != "plugin/demo/cloud" || model.Kind != "extension" || !model.Active {
+				t.Fatalf("extension model = %+v", model)
+			}
+			return
+		}
+	}
+	t.Fatalf("extension provider %q missing from models: %+v", ref, body.Models)
+}
+
+func TestServeExtensionReloadPublishesOnlySuccessfulReplacement(t *testing.T) {
+	bc := NewBroadcaster()
+	old := control.New(control.Options{Sink: bc, ModelRef: "default/model"})
+	s := New(old, bc, config.ServeConfig{})
+
+	wantErr := errors.New("sidecar did not initialize")
+	s.rebuildController = func(context.Context, *control.Controller, string) (*control.Controller, error) {
+		return nil, wantErr
+	}
+	if err := s.reloadExtensions(context.Background()); !errors.Is(err, wantErr) {
+		t.Fatalf("reload error = %v, want %v", err, wantErr)
+	}
+	if s.ctl() != old {
+		t.Fatal("failed reload replaced the working controller")
+	}
+
+	replacement := control.New(control.Options{Sink: bc, ModelRef: "default/model"})
+	s.rebuildController = func(_ context.Context, gotOld *control.Controller, ref string) (*control.Controller, error) {
+		if gotOld != old || ref != "default/model" {
+			t.Fatalf("rebuild inputs old=%p ref=%q", gotOld, ref)
+		}
+		return replacement, nil
+	}
+	if err := s.reloadExtensions(context.Background()); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if s.ctl() != replacement {
+		t.Fatal("successful reload did not publish the replacement")
 	}
 }
 
@@ -811,7 +965,7 @@ func TestServeContextEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		t.Errorf("context status = %d", resp.StatusCode)
 	}
 	var body map[string]int
@@ -821,5 +975,248 @@ func TestServeContextEndpoint(t *testing.T) {
 	// Before any turn, used should be 0.
 	if body["used"] != 0 {
 		t.Errorf("used = %d, want 0", body["used"])
+	}
+}
+
+// TestServeEventsReplaysPendingAskOnAttach proves a late /events subscriber
+// receives a still-blocked ask_request. Without replay, the browser attaches to
+// a healthy-looking session that never surfaces the parked prompt (#7643).
+func TestServeEventsReplaysPendingAskOnAttach(t *testing.T) {
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Sink: bc})
+	ctrl.EnableInteractiveApproval()
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
+	defer srv.Close()
+
+	firstSub, cancelFirst := bc.Subscribe()
+	defer cancelFirst()
+
+	askCtx, cancelAsk := context.WithCancel(context.Background())
+	askDone := make(chan error, 1)
+	go func() {
+		_, err := ctrl.Ask(askCtx, []event.AskQuestion{{
+			ID: "q1", Prompt: "pick one", Options: []event.AskOption{{Label: "A"}, {Label: "B"}},
+		}})
+		askDone <- err
+	}()
+
+	select {
+	case data := <-firstSub:
+		if !strings.Contains(string(data), `"kind":"ask_request"`) {
+			t.Fatalf("initial subscriber got %s, want ask_request", data)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for initial ask_request")
+	}
+
+	resp, err := http.Get(srv.URL + "/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("/events status = %d", resp.StatusCode)
+	}
+
+	replayed := make(chan string, 1)
+	go func() {
+		buf := make([]byte, 0, 4096)
+		tmp := make([]byte, 512)
+		for {
+			n, readErr := resp.Body.Read(tmp)
+			if n > 0 {
+				buf = append(buf, tmp[:n]...)
+				if strings.Contains(string(buf), `"kind":"ask_request"`) {
+					replayed <- string(buf)
+					return
+				}
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-replayed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("late SSE attach never received replayed ask_request")
+	}
+
+	select {
+	case err := <-askDone:
+		t.Fatalf("ask resolved before the late client answered: %v", err)
+	default:
+	}
+
+	// Reconnect recovery must be connection-local: the existing subscriber
+	// must not receive the same prompt a second time.
+	select {
+	case data := <-firstSub:
+		t.Fatalf("existing subscriber got duplicate replay: %s", data)
+	default:
+	}
+
+	cancelAsk()
+	select {
+	case <-askDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("blocked ask did not exit after test cancellation")
+	}
+}
+
+// TestServeEventsReplayHandoffSerializesPromptEmission proves the controller's
+// attach handoff can register a subscriber and replay while prompt emission is
+// serialized, so a prompt cannot land between those two operations.
+func TestServeEventsReplayHandoffSerializesPromptEmission(t *testing.T) {
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Sink: bc})
+	ctrl.EnableInteractiveApproval()
+
+	askCtx, cancelAsk := context.WithCancel(context.Background())
+	defer cancelAsk()
+	taskDone := make(chan struct{})
+	var sub <-chan []byte
+	var cancelSub func()
+	ctrl.ReplayPendingPromptsWith(func() event.Sink {
+		sub, cancelSub = bc.Subscribe()
+		go func() {
+			_, _ = ctrl.Ask(askCtx, []event.AskQuestion{{
+				ID: "q1", Prompt: "pick one", Options: []event.AskOption{{Label: "A"}, {Label: "B"}},
+			}})
+			close(taskDone)
+		}()
+		return event.FuncSink(func(e event.Event) { bc.EmitTo(sub, e) })
+	})
+	defer cancelSub()
+
+	select {
+	case data := <-sub:
+		if !strings.Contains(string(data), `"kind":"ask_request"`) {
+			t.Fatalf("handoff subscriber got %s, want ask_request", data)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("handoff subscriber never received ask_request")
+	}
+	select {
+	case data := <-sub:
+		t.Fatalf("handoff subscriber got duplicate ask_request: %s", data)
+	default:
+	}
+
+	cancelAsk()
+	select {
+	case <-taskDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handoff ask did not exit after cancellation")
+	}
+}
+
+// TestServeEventsReplaysPendingApprovalOnAttach covers the actual approval
+// surface from #7643: a late browser must receive a parked ApprovalRequest and
+// be able to answer it through the serve HTTP endpoint.
+func TestServeEventsReplaysPendingApprovalOnAttach(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(serveApprovalWriter{})
+	ag := agent.New(&serveApprovalProvider{}, reg, agent.NewSession(""), agent.Options{}, event.Discard)
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{
+		Runner:   ag,
+		Executor: ag,
+		Sink:     bc,
+		Policy:   permission.New("ask", nil, nil, nil),
+	})
+	ctrl.EnableInteractiveApproval()
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
+	defer srv.Close()
+
+	runDone := make(chan error, 1)
+	go func() { runDone <- ctrl.Executor().Run(context.Background(), "write a file") }()
+
+	deadline := time.After(2 * time.Second)
+	for !ctrl.PendingPrompt() {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for parked approval")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	resp, err := http.Get(srv.URL + "/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("/events status = %d", resp.StatusCode)
+	}
+
+	replayed := make(chan eventwire.Event, 1)
+	go func() {
+		buf := make([]byte, 0, 4096)
+		tmp := make([]byte, 512)
+		for {
+			n, readErr := resp.Body.Read(tmp)
+			if n > 0 {
+				buf = append(buf, tmp[:n]...)
+				if strings.Contains(string(buf), `"kind":"approval_request"`) {
+					frame := string(buf)
+					start := strings.Index(frame, "data: ")
+					if start < 0 {
+						return
+					}
+					end := strings.IndexByte(frame[start:], '\n')
+					if end < 0 {
+						end = len(frame) - start
+					}
+					var wire eventwire.Event
+					if json.Unmarshal([]byte(strings.TrimSpace(frame[start+len("data: "):start+end])), &wire) == nil {
+						replayed <- wire
+					}
+					return
+				}
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	}()
+
+	var approval eventwire.Event
+	select {
+	case approval = <-replayed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("late SSE attach never received replayed approval_request")
+	}
+	if approval.Kind != "approval_request" || approval.Approval == nil || approval.Approval.Tool != "serve_write" {
+		t.Fatalf("replayed approval = %+v, want serve_write approval_request", approval)
+	}
+
+	payload, err := json.Marshal(map[string]any{"id": approval.Approval.ID, "allow": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/approve", strings.NewReader(string(payload)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	answer, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer.Body.Close()
+	if answer.StatusCode != http.StatusNoContent {
+		t.Fatalf("/approve status = %d", answer.StatusCode)
+	}
+
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("executor run after approval: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("executor did not finish after approval")
 	}
 }

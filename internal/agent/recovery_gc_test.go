@@ -40,10 +40,13 @@ func forkRecoveryBranch(t *testing.T, dir, name string) (parentPath, branchPath 
 // fork preserved" shape that makes the fork redundant.
 func coverBranchInParent(t *testing.T, parentPath string, branchMsgs []provider.Message) {
 	t.Helper()
-	merged := NewSession("")
-	merged.Messages = append([]provider.Message(nil), branchMsgs...)
+	merged, err := LoadSession(parentPath)
+	if err != nil {
+		t.Fatalf("Load covering parent: %v", err)
+	}
+	merged.Replace(append([]provider.Message(nil), branchMsgs...))
 	merged.Add(provider.Message{Role: provider.RoleAssistant, Content: "answered after recovery"})
-	if err := merged.Save(parentPath); err != nil {
+	if err := merged.SaveRewrite(parentPath); err != nil {
 		t.Fatalf("Save covering parent: %v", err)
 	}
 }
@@ -114,9 +117,9 @@ func TestReclaimableRecoveryBranchesRespectsGraceLeaseAndMissingParent(t *testin
 	}
 
 	// Parent gone: content is no longer covered anywhere — kept.
-	for _, suffix := range []string{"", ".events.jsonl", ".meta"} {
-		if err := os.Remove(parentPath + suffix); err != nil && !os.IsNotExist(err) {
-			t.Fatalf("remove parent artifact %s: %v", suffix, err)
+	for _, artifact := range append([]string{parentPath}, store.SessionSidecarFiles(parentPath)...) {
+		if err := os.Remove(artifact); err != nil && !os.IsNotExist(err) {
+			t.Fatalf("remove parent artifact %s: %v", artifact, err)
 		}
 	}
 	if got, err := ReclaimableRecoveryBranches(dir, later, RecoveryGCGracePeriod); err != nil || len(got) != 0 {
@@ -165,9 +168,9 @@ func TestRecoveryBranchCoveredByParentReadsActualContent(t *testing.T) {
 	if !RecoveryBranchCoveredByParent(missingBranch, dir) {
 		t.Fatal("missing-parent fixture was not covered before parent removal")
 	}
-	for _, suffix := range []string{"", ".events.jsonl", ".meta"} {
-		if err := os.Remove(missingParent + suffix); err != nil && !os.IsNotExist(err) {
-			t.Fatalf("remove parent artifact %s: %v", suffix, err)
+	for _, artifact := range append([]string{missingParent}, store.SessionSidecarFiles(missingParent)...) {
+		if err := os.Remove(artifact); err != nil && !os.IsNotExist(err) {
+			t.Fatalf("remove parent artifact %s: %v", artifact, err)
 		}
 	}
 	if RecoveryBranchCoveredByParent(missingBranch, dir) {

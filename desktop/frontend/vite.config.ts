@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { defineConfig, searchForWorkspaceRoot, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { execSync } from "node:child_process";
@@ -91,7 +92,7 @@ const channel = buildChannel();
 const nodeModulePath = String.raw`[\\/]node_modules[\\/](?:\.pnpm[\\/][^\\/]+[\\/]node_modules[\\/])?`;
 const vendorReact = new RegExp(`${nodeModulePath}(?:react|react-dom)(?:[\\/]|$)`);
 const vendorMarkdown = new RegExp(
-  `${nodeModulePath}(?:react-markdown|remark-gfm|remark-math|rehype-katex|katex)(?:[\\/]|$)`,
+  `${nodeModulePath}(?:react-markdown|remark-gfm|remark-math|remark-parse|remark-rehype|rehype-katex|katex|unified|vfile|hast-util-to-jsx-runtime|html-url-attributes)(?:[\\/]|$)`,
 );
 const vendorHighlight = new RegExp(`${nodeModulePath}highlight\\.js(?:[\\/]|$)`);
 
@@ -107,6 +108,22 @@ export default defineConfig({
   plugins: [react(), stripCrossorigin(), archiveHiddenSourcemaps(commit), keepDistPlaceholder()],
   base: "./",
   define: { __BUILD_COMMIT__: JSON.stringify(commit), __BUILD_CHANNEL__: JSON.stringify(channel) },
+  resolve: {
+    alias: {
+      // decode-named-character-reference (micromark/remark dependency) ships a
+      // browser condition (index.dom.js) that calls document.createElement at
+      // module scope. That explodes inside markdown.worker.ts (WorkerGlobalScope
+      // has no document), killing the off-main-thread parse on first use. The
+      // default entry is DOM-free and works in both window and worker, so pin
+      // it for every bundle. The package is a direct devDependency so this
+      // resolve works under pnpm's non-hoisted layout.
+      "decode-named-character-reference": createRequire(import.meta.url).resolve("decode-named-character-reference"),
+      // hast-util-from-html-isomorphic (rehype-katex dependency) has the same
+      // shape: its browser entry constructs a DOMParser at module scope, which
+      // WorkerGlobalScope lacks. Pin the isomorphic default (parse5) entry.
+      "hast-util-from-html-isomorphic": createRequire(import.meta.url).resolve("hast-util-from-html-isomorphic"),
+    },
+  },
   build: {
     outDir: "dist",
     emptyOutDir: true,

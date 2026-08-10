@@ -27,6 +27,7 @@ const (
 	transcriptSourceBanner
 	transcriptSourceReplayBundle
 	transcriptSourceTurnReceipt
+	transcriptSourceSubagentProgress
 )
 
 // transcriptSource retains only the semantic inputs needed to reproduce a
@@ -55,6 +56,7 @@ func (m *chatTUI) appendTranscriptBlock(rendered string, source transcriptSource
 	m.ensureTranscriptSources()
 	m.transcript = append(m.transcript, rendered)
 	m.transcriptSources = append(m.transcriptSources, source)
+	// Wrap cache extends on next Update via append-only path.
 }
 
 func (m *chatTUI) setTranscriptBlock(index int, rendered string, source transcriptSource) {
@@ -64,6 +66,9 @@ func (m *chatTUI) setTranscriptBlock(index int, rendered string, source transcri
 	m.ensureTranscriptSources()
 	m.transcript[index] = rendered
 	m.transcriptSources[index] = source
+	// In-place rewrite: drop wrap from this block onward so the next sync
+	// re-wraps the mutated block and everything after it.
+	m.invalidateWrapFrom(index)
 }
 
 func (m *chatTUI) removeTranscriptBlock(index int) {
@@ -73,6 +78,7 @@ func (m *chatTUI) removeTranscriptBlock(index int) {
 	m.ensureTranscriptSources()
 	m.transcript = append(m.transcript[:index], m.transcript[index+1:]...)
 	m.transcriptSources = append(m.transcriptSources[:index], m.transcriptSources[index+1:]...)
+	m.invalidateWrapFrom(index)
 }
 
 func (m *chatTUI) truncateTranscriptBlocks(length int) {
@@ -80,6 +86,7 @@ func (m *chatTUI) truncateTranscriptBlocks(length int) {
 	m.ensureTranscriptSources()
 	m.transcript = m.transcript[:length]
 	m.transcriptSources = m.transcriptSources[:length]
+	m.invalidateWrapFrom(length)
 }
 
 func (m *chatTUI) renderTranscriptSource(source transcriptSource, terminalWidth int) string {
@@ -99,6 +106,11 @@ func (m *chatTUI) renderTranscriptSource(source transcriptSource, terminalWidth 
 		return m.renderReplayBundle(source, contentWidth, renderAssistantMarkdown)
 	case transcriptSourceTurnReceipt:
 		return renderTurnReceiptBand(source.raw, contentWidth)
+	case transcriptSourceSubagentProgress:
+		if sp := m.subagentProgress[source.raw]; sp != nil {
+			return m.subagentProgressBlock(source.raw, sp)
+		}
+		return ""
 	default:
 		return ""
 	}
@@ -305,7 +317,7 @@ func (a transcriptResizeAnchor) yOffset(blocks []string, width int) int {
 	}
 	block := min(max(a.block, 0), len(blocks)-1)
 	offset := 0
-	for i := 0; i < block; i++ {
+	for i := range block {
 		offset += transcriptBlockLineCount(blocks[i], width)
 	}
 	lines := transcriptBlockLineCount(blocks[block], width)
@@ -461,7 +473,7 @@ func (m chatTUI) renderTranscript() string {
 
 	rows := make([]string, h)
 	bar := make([]string, h)
-	for r := 0; r < h; r++ {
+	for r := range h {
 		idx := yoff + r
 		line := blank // off-content rows fill to width
 		if idx >= 0 && idx < total {
@@ -705,15 +717,9 @@ func scrollbarThumb(height, yoff, total int) (start, size int) {
 	if total <= height {
 		return 0, 0 // no overflow → no thumb
 	}
-	size = height * height / total
-	if size < 1 {
-		size = 1
-	}
+	size = max(height*height/total, 1)
 	maxYoff := total - height
-	start = yoff * (height - size) / maxYoff
-	if start > height-size {
-		start = height - size
-	}
+	start = min(yoff*(height-size)/maxYoff, height-size)
 	return start, size
 }
 
@@ -726,13 +732,7 @@ func scrollbarYOffset(height, row, total, grabOffset int) int {
 	if maxTop <= 0 {
 		return 0
 	}
-	top := row - grabOffset
-	if top < 0 {
-		top = 0
-	}
-	if top > maxTop {
-		top = maxTop
-	}
+	top := min(max(row-grabOffset, 0), maxTop)
 	maxYoff := total - height
 	return (top*maxYoff + maxTop/2) / maxTop
 }
@@ -765,6 +765,9 @@ func (m chatTUI) scrollbarGrabRowOffset(row int) int {
 
 func (m *chatTUI) dragScrollbar(row int) {
 	m.viewport.SetYOffset(scrollbarYOffset(m.viewport.Height(), row, len(m.wrappedLines), m.scrollbarGrabOffset))
+	// Sync immediately so a streaming event between drag motions cannot see a
+	// stale followTail and yank the reader back to the bottom (#6430/#6978).
+	m.syncScrollModeAfterGesture()
 }
 
 // transcriptCaret maps a screen cell (x, y) in the transcript region to an

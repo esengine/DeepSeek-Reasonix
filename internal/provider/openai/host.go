@@ -2,6 +2,7 @@ package openai
 
 import (
 	"net/url"
+	"slices"
 	"strings"
 
 	"reasonix/internal/provider"
@@ -24,10 +25,8 @@ func matchesVendorHost(baseURL, apex string, canonical ...string) bool {
 		return false
 	}
 	host := strings.ToLower(u.Hostname())
-	for _, c := range canonical {
-		if host == c {
-			return true
-		}
+	if slices.Contains(canonical, host) {
+		return true
 	}
 	return strings.HasSuffix(host, "."+apex)
 }

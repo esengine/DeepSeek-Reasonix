@@ -153,17 +153,23 @@ type PluginPackageReport struct {
 
 // PluginPackageInfo is one installed package.
 type PluginPackageInfo struct {
-	Name         string   `json:"name"`
-	Enabled      bool     `json:"enabled"`
-	Version      string   `json:"version,omitempty"`
-	Root         string   `json:"root"`
-	ManifestKind string   `json:"manifest_kind,omitempty"`
-	Skills       int      `json:"skills"`
-	Commands     int      `json:"commands"`
-	Hooks        int      `json:"hooks"`
-	MCPServers   int      `json:"mcp_servers"`
-	Warnings     []string `json:"warnings,omitempty"`
-	Status       string   `json:"status"` // ok | missing_root | invalid_manifest | disabled
+	Name         string `json:"name"`
+	Enabled      bool   `json:"enabled"`
+	Version      string `json:"version,omitempty"`
+	Root         string `json:"root"`
+	ManifestKind string `json:"manifest_kind,omitempty"`
+	Skills       int    `json:"skills"`
+	Commands     int    `json:"commands"`
+	Hooks        int    `json:"hooks"`
+	MCPServers   int    `json:"mcp_servers"`
+	// Prompts, Themes, and Runtime are native Manifest v2 fields. They stay
+	// omitempty so older diagnostic consumers see no shape change for legacy
+	// packages.
+	Prompts  int      `json:"prompts,omitempty"`
+	Themes   int      `json:"themes,omitempty"`
+	Runtime  bool     `json:"runtime,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
+	Status   string   `json:"status"` // ok | missing_root | invalid_manifest | disabled
 }
 
 // MCPReport covers merged MCP server configuration and optional live/runtime state.

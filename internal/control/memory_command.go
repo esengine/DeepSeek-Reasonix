@@ -11,7 +11,7 @@ import (
 	"reasonix/internal/memory"
 )
 
-const memoryCommandUsage = "usage: /memory [recall|revisions <id-or-name>|restore <id-or-name> <revision>|archived|recover <archive-path>|instructions]"
+const memoryCommandUsage = "usage: /memory [recall|subjects|pin <id-or-name>|unpin <id-or-name>|verify <id-or-name>|revisions <id-or-name>|restore <id-or-name> <revision>|archived|recover <archive-path>|instructions]"
 
 // MemoryCompletionData returns stable references for structured /memory
 // completion. IDs come first because they remain unambiguous if a fact is
@@ -61,6 +61,23 @@ func MemoryCommandText(api MemoryControl, input string) string {
 			return "usage: /memory recall"
 		}
 		return renderMemoryRecall(api.LastMemoryRecall())
+	case "pin", "unpin":
+		ref, err := singleMemoryArgument(rest)
+		if err != nil {
+			return "usage: /memory " + subcommand + " <id-or-name>"
+		}
+		return setMemoryActivation(api, ref, subcommand == "pin")
+	case "verify":
+		ref, err := singleMemoryArgument(rest)
+		if err != nil {
+			return "usage: /memory verify <id-or-name>"
+		}
+		return verifyMemory(api, ref)
+	case "subjects":
+		if rest != "" {
+			return "usage: /memory subjects"
+		}
+		return renderMemorySubjects(api.Memory())
 	case "revisions":
 		ref, err := singleMemoryArgument(rest)
 		if err != nil {
@@ -104,10 +121,82 @@ func MemoryCommandText(api MemoryControl, input string) string {
 	}
 }
 
+// setMemoryActivation flips a fact between pinned and relevant through the
+// same save path the model uses, so revisioning and the pinned budget apply.
+// The stable prefix picks the change up at the next session start.
+func setMemoryActivation(api MemoryControl, ref string, pin bool) string {
+	set := api.Memory()
+	if set == nil {
+		return i18n.M.ListMemoryNone
+	}
+	fact, ok := set.Store.Read(ref)
+	if !ok {
+		return fmt.Sprintf("memory %q not found", ref)
+	}
+	activation := memory.ActivationRelevant
+	if pin {
+		activation = memory.ActivationPinned
+	}
+	if memory.ResolveActivation(fact) == activation {
+		return fmt.Sprintf("%s is already %s", fact.Name, activation)
+	}
+	fact.Activation = activation
+	if _, err := api.SaveMemory(fact); err != nil {
+		return "memory activation: " + err.Error()
+	}
+	return fmt.Sprintf("%s is now %s (takes effect in the stable prefix at the next session)", fact.Name, activation)
+}
+
+// verifyMemory stamps last_verified_at through the normal save path: the
+// freshness clock renews, revision history honestly records the confirmation.
+func verifyMemory(api MemoryControl, ref string) string {
+	set := api.Memory()
+	if set == nil {
+		return i18n.M.ListMemoryNone
+	}
+	fact, ok := set.Store.Read(ref)
+	if !ok {
+		return fmt.Sprintf("memory %q not found", ref)
+	}
+	fact.LastVerifiedAt = time.Now().UTC()
+	if _, err := api.SaveMemory(fact); err != nil {
+		return "memory verify: " + err.Error()
+	}
+	return fmt.Sprintf("%s verified; freshness clock renewed (revision %d -> %d)", fact.Name, fact.Revision, fact.Revision+1)
+}
+
+// renderMemorySubjects lists the subject keys in use so writers reuse them
+// instead of minting near-duplicates.
+func renderMemorySubjects(set *memory.Set) string {
+	if set == nil {
+		return i18n.M.ListMemoryNone
+	}
+	type holder struct{ key, line string }
+	var rows []holder
+	for _, fact := range set.Store.ListAll() {
+		key := memory.NormalizeSubjectKey(fact.SubjectKey)
+		if key == "" {
+			continue
+		}
+		rows = append(rows, holder{key, fmt.Sprintf("  %s -> id=%s scope=%s name=%s %s",
+			key, fact.ID, memory.NormalizeFactScope(string(fact.Scope)), fact.Name, memoryOneLine(fact.Description))})
+	}
+	if len(rows) == 0 {
+		return "no subject keys in use\nassign one with remember's subject_key to track single-valued facts (e.g. project.package_manager)"
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].key < rows[j].key })
+	var b strings.Builder
+	b.WriteString("subject keys (one active value per scope+subject)\n")
+	for _, row := range rows {
+		b.WriteString(row.line + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 func parseMemoryCommand(input string) (subcommand, rest string) {
 	input = strings.TrimSpace(input)
-	if strings.HasPrefix(input, "/memory") {
-		input = strings.TrimSpace(strings.TrimPrefix(input, "/memory"))
+	if after, ok := strings.CutPrefix(input, "/memory"); ok {
+		input = strings.TrimSpace(after)
 	}
 	if input == "" {
 		return "", ""
@@ -181,10 +270,14 @@ func RenderMemorySummary(set *memory.Set, now time.Time) string {
 		for _, fact := range facts {
 			fmt.Fprintf(&b, "  [%s](%s.md)\n", memoryDisplayTitle(fact.Title, fact.Name), fact.Name)
 			fmt.Fprintf(&b, "    id=%s\n", fact.ID)
-			fmt.Fprintf(&b, "    revision=%d scope=%s type=%s freshness=%s\n",
+			pinned := ""
+			if memory.ResolveActivation(fact) == memory.ActivationPinned {
+				pinned = " activation=pinned"
+			}
+			fmt.Fprintf(&b, "    revision=%d scope=%s type=%s freshness=%s%s\n",
 				fact.Revision,
 				memory.NormalizeFactScope(string(fact.Scope)), memory.NormalizeType(string(fact.Type)),
-				memory.FreshnessFor(fact, now))
+				memory.FreshnessFor(fact, now), pinned)
 			if description := memoryOneLine(fact.Description); description != "" {
 				fmt.Fprintf(&b, "    description=%s\n", description)
 			}

@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// --- Spec.Enforce ---
+// Spec.Enforce
 
 func TestEnforce(t *testing.T) {
 	cases := []struct {
@@ -30,7 +30,7 @@ func TestEnforce(t *testing.T) {
 	}
 }
 
-// --- Spec zero value ---
+// Spec zero value
 
 func TestSpecZeroValue(t *testing.T) {
 	var s Spec
@@ -69,7 +69,7 @@ func TestUnavailableMessageIsActionable(t *testing.T) {
 	}
 }
 
-// --- Command ---
+// Command
 
 func TestCommandNonEnforce(t *testing.T) {
 	spec := Spec{Mode: "off"}
@@ -269,7 +269,7 @@ func TestShellArgvDefaultsPath(t *testing.T) {
 	}
 }
 
-// --- Command (platform-specific) ---
+// platform-specific Command tests
 
 func TestCommandNonDarwin(t *testing.T) {
 	if runtime.GOOS == "darwin" {
@@ -322,7 +322,7 @@ func TestCommandDarwinNonEnforce(t *testing.T) {
 	}
 }
 
-// --- Available ---
+// Available
 
 func TestAvailableNonDarwin(t *testing.T) {
 	if runtime.GOOS == "darwin" {

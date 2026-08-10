@@ -6,6 +6,7 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -104,7 +105,7 @@ func TestEmptyFinalNotice(t *testing.T) {
 	}
 }
 
-// --- parallel-dispatch tests ---
+// parallel-dispatch tests
 
 // fakeTool is a minimal Tool stand-in for dispatch tests; ReadOnly is
 // configurable and Execute sleeps a fixed duration so we can measure
@@ -115,6 +116,58 @@ type fakeTool struct {
 	delay    time.Duration
 	err      error
 	calls    *int32 // shared counter to assert all dispatched
+}
+
+type blockingTool struct {
+	name    string
+	started chan struct{}
+	release chan struct{}
+}
+
+func (b blockingTool) Name() string            { return b.name }
+func (b blockingTool) Description() string     { return "" }
+func (b blockingTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (b blockingTool) ReadOnly() bool          { return true }
+func (b blockingTool) Execute(ctx context.Context, _ json.RawMessage) (string, error) {
+	close(b.started)
+	select {
+	case <-b.release:
+		return b.name + " done", nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+type workspaceSignalSink struct {
+	mu        sync.Mutex
+	events    []event.Event
+	mutations chan event.WorkspaceMutation
+}
+
+func newWorkspaceSignalSink() *workspaceSignalSink {
+	return &workspaceSignalSink{mutations: make(chan event.WorkspaceMutation, 8)}
+}
+
+func (s *workspaceSignalSink) Emit(e event.Event) {
+	s.mu.Lock()
+	s.events = append(s.events, e)
+	s.mu.Unlock()
+}
+
+func (s *workspaceSignalSink) RecordWorkspaceMutation(m event.WorkspaceMutation) {
+	s.mutations <- m
+}
+
+func (s *workspaceSignalSink) kinds(kind event.Kind) []event.Event {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []event.Event
+	for _, e := range s.events {
+		if e.Kind == kind {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 func (f fakeTool) Name() string            { return f.name }
@@ -202,6 +255,23 @@ func TestPartitionToolCallsCompleteStepSerial(t *testing.T) {
 	}
 }
 
+func TestPartitionToolCallsCompressSerial(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "read_file", readOnly: true})
+	reg.Add(fakeTool{name: "compress", readOnly: true})
+
+	calls := []provider.ToolCall{{Name: "read_file"}, {Name: "compress"}, {Name: "read_file"}}
+	got := partitionToolCalls(reg, calls)
+	want := []toolCallBatch{
+		{start: 0, end: 1, parallel: true},
+		{start: 1, end: 2},
+		{start: 2, end: 3, parallel: true},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("partitionToolCalls = %+v, want %+v", got, want)
+	}
+}
+
 func TestPartitionToolCallsTodoWriteSerial(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "read_file", readOnly: true})
@@ -264,6 +334,144 @@ func TestExecuteBatchParallelReadOnly(t *testing.T) {
 	// Allow generous slack for CI; even 2x serial would prove we got parallelism.
 	if elapsed >= 2*delay {
 		t.Errorf("read-only batch took %v (>= %v) — not parallel", elapsed, 2*delay)
+	}
+}
+
+func TestExecuteBatchStampsToolResultTimestamps(t *testing.T) {
+	const delay = 30 * time.Millisecond
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "a", readOnly: true, delay: delay})
+
+	sink := &recordSink{}
+	a := New(nil, reg, NewSession(""), Options{}, sink)
+
+	before := time.Now().UnixMilli()
+	a.executeBatch(context.Background(), []provider.ToolCall{{Name: "a"}})
+	after := time.Now().UnixMilli()
+
+	results := sink.kinds(event.ToolResult)
+	if len(results) != 1 {
+		t.Fatalf("got %d tool results, want 1", len(results))
+	}
+	tr := results[0].Tool
+	if tr.StartedAt < before || tr.StartedAt > after {
+		t.Errorf("StartedAt = %d, want within [%d, %d]", tr.StartedAt, before, after)
+	}
+	if tr.EndedAt != tr.StartedAt+tr.DurationMs {
+		t.Errorf("EndedAt = %d, want StartedAt+DurationMs = %d", tr.EndedAt, tr.StartedAt+tr.DurationMs)
+	}
+	if tr.DurationMs < delay.Milliseconds() {
+		t.Errorf("DurationMs = %d, want >= %d", tr.DurationMs, delay.Milliseconds())
+	}
+}
+
+func TestExecuteBatchMarksOnlyExecutedWritersForWorkspaceRefresh(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "write_file"})
+	reg.Add(fakeTool{name: "read_file", readOnly: true})
+	sink := &recordSink{}
+	a := New(nil, reg, NewSession(""), Options{}, sink)
+	a.executeBatch(context.Background(), []provider.ToolCall{
+		{Name: "write_file", Arguments: `{"path":"pkg/main.go","content":"x"}`},
+		{Name: "read_file", Arguments: `{"path":"pkg/main.go"}`},
+	})
+	results := sink.kinds(event.ToolResult)
+	if len(results) != 2 {
+		t.Fatalf("got %d results, want 2", len(results))
+	}
+	if !results[0].Tool.WorkspaceMutation || len(results[0].Tool.WorkspacePaths) != 1 || results[0].Tool.WorkspacePaths[0] != "pkg/main.go" {
+		t.Fatalf("writer metadata = %+v", results[0].Tool)
+	}
+	if results[1].Tool.WorkspaceMutation {
+		t.Fatalf("read-only call was marked as mutation: %+v", results[1].Tool)
+	}
+}
+
+func TestExecuteBatchMarksFailedWriterForWorkspaceRefresh(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "write_file", err: errors.New("partial write")})
+	sink := &recordSink{}
+	a := New(nil, reg, NewSession(""), Options{}, sink)
+	a.executeBatch(context.Background(), []provider.ToolCall{{Name: "write_file", Arguments: `{"path":"partial.go"}`}})
+	results := sink.kinds(event.ToolResult)
+	if len(results) != 1 || !results[0].Tool.WorkspaceMutation {
+		t.Fatalf("failed writer did not invalidate workspace: %+v", results)
+	}
+}
+
+func TestExecuteBatchPublishesWorkspaceMutationBeforeLaterToolCompletes(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "write_file"})
+	reg.Add(blockingTool{name: "slow_read", started: started, release: release})
+	sink := newWorkspaceSignalSink()
+	a := New(nil, reg, NewSession(""), Options{}, sink)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		a.executeBatch(context.Background(), []provider.ToolCall{
+			{Name: "write_file", Arguments: `{"path":"ready.go","content":"x"}`},
+			{Name: "slow_read", Arguments: `{}`},
+		})
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("later tool did not start")
+	}
+	select {
+	case mutation := <-sink.mutations:
+		if mutation.ToolName != "write_file" || len(mutation.Paths) != 1 || mutation.Paths[0] != "ready.go" {
+			t.Fatalf("workspace mutation = %+v", mutation)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("writer completion did not publish before the later tool completed")
+	}
+	if results := sink.kinds(event.ToolResult); len(results) != 0 {
+		t.Fatalf("provider-ordered ToolResult events published before the batch completed: %+v", results)
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("batch did not finish after releasing the later tool")
+	}
+}
+
+func TestWorkspaceMutationClassifierTreatsGitCommitAsGitMetadata(t *testing.T) {
+	mutation, ok := workspaceMutationForCall("call", "bash", json.RawMessage(`{"command":"git commit -m test"}`), false)
+	if !ok || !mutation.GitMeta || !mutation.WorkingTree || !mutation.AllPaths {
+		t.Fatalf("git commit workspace invalidation = %+v, ok=%v", mutation, ok)
+	}
+	mutation, ok = workspaceMutationForCall("call", "bash", json.RawMessage(`{"command":"go test ./..."}`), false)
+	if !ok || mutation.GitMeta {
+		t.Fatalf("ordinary bash workspace invalidation refreshed git metadata: %+v, ok=%v", mutation, ok)
+	}
+	if mutation, ok = workspaceMutationForCall("call", "remember", json.RawMessage(`{"name":"preference"}`), false); ok {
+		t.Fatalf("host-only memory write invalidated the workspace: %+v", mutation)
+	}
+}
+
+func TestExecuteBatchCancelledCallsCarryNoTimestamps(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "a", readOnly: true})
+
+	sink := &recordSink{}
+	a := New(nil, reg, NewSession(""), Options{}, sink)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	a.executeBatch(ctx, []provider.ToolCall{{Name: "a"}})
+
+	results := sink.kinds(event.ToolResult)
+	if len(results) != 1 {
+		t.Fatalf("got %d tool results, want 1", len(results))
+	}
+	tr := results[0].Tool
+	if tr.StartedAt != 0 || tr.EndedAt != 0 {
+		t.Errorf("never-ran call has StartedAt=%d EndedAt=%d, want both zero", tr.StartedAt, tr.EndedAt)
 	}
 }
 

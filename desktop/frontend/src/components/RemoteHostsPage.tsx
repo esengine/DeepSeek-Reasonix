@@ -5,7 +5,7 @@ import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import { isRemoteDegradedWarning, remoteConnectionErrorSummaryKey } from "../lib/remoteErrors";
 import { useRemoteStore } from "../store/remote";
-import type { RemoteConnectionStatus, RemoteHostInput, RemoteHostView, RemoteConnState } from "../lib/types";
+import type { RemoteConnectionStatus, RemoteHostInput, RemoteHostView, RemoteConnState, RemoteLegacyWorkbenchData } from "../lib/types";
 
 const EMPTY_INPUT: RemoteHostInput = {
   label: "",
@@ -28,11 +28,46 @@ export function RemoteHostsPage() {
   const [hosts, setHosts] = useState<RemoteHostView[]>([]);
   const [screen, setScreen] = useState<Screen>({ kind: "list" });
   const [pageError, setPageError] = useState("");
+  const [legacyData, setLegacyData] = useState<RemoteLegacyWorkbenchData | null>(null);
+  const [legacyBusy, setLegacyBusy] = useState<"" | "mirrors" | "trust">("");
   const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const statuses = useRemoteStore((s) => s.statuses);
   const setStoreHosts = useRemoteStore((s) => s.setHosts);
   const hydrateStatuses = useRemoteStore((s) => s.hydrateStatuses);
   const openExplorer = useRemoteStore((s) => s.openExplorer);
+
+  const refreshLegacy = useCallback(async () => {
+    try {
+      const view = await app.ScanRemoteLegacyWorkbenchData();
+      setLegacyData(view.mirrorCount > 0 || view.trustFile ? view : null);
+    } catch {
+      setLegacyData(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshLegacy();
+  }, [refreshLegacy]);
+
+  const cleanLegacy = useCallback(async (target: "mirrors" | "trust") => {
+    const confirmed = await confirm({
+      title: t("remote.legacyData.cleanTitle"),
+      message: target === "mirrors" ? t("remote.legacyData.cleanMirrorsConfirm") : t("remote.legacyData.cleanTrustConfirm"),
+      confirmLabel: t("remote.legacyData.clean"),
+      cancelLabel: t("remote.host.cancel"),
+      tone: "danger",
+    });
+    if (!confirmed) return;
+    setLegacyBusy(target);
+    try {
+      await app.CleanRemoteLegacyWorkbenchData(target);
+      await refreshLegacy();
+    } catch (error) {
+      setPageError(String(error));
+    } finally {
+      setLegacyBusy("");
+    }
+  }, [confirm, refreshLegacy, t]);
 
   const refresh = useCallback(async () => {
     const next = await app.RemoteHosts();
@@ -124,10 +159,45 @@ export function RemoteHostsPage() {
             ))}
           </ul>
         )}
+        {legacyData && (
+          <section className="remote-hosts__legacy" aria-label={t("remote.legacyData.title")}>
+            <h3>{t("remote.legacyData.title")}</h3>
+            <p>{t("remote.legacyData.summary", { count: legacyData.mirrorCount, size: formatLegacyBytes(legacyData.mirrorBytes) })}</p>
+            {legacyData.trustFile && <p>{t("remote.legacyData.trustPresent")}</p>}
+            <div className="remote-hosts__legacy-actions">
+              <button
+                className="btn btn--danger"
+                disabled={legacyBusy !== "" || legacyData.mirrorCount === 0}
+                onClick={() => void cleanLegacy("mirrors")}
+              >
+                {legacyBusy === "mirrors" ? t("remote.legacyData.cleaning") : t("remote.legacyData.cleanMirrors")}
+              </button>
+              <button
+                className="btn btn--danger"
+                disabled={legacyBusy !== "" || !legacyData.trustFile}
+                onClick={() => void cleanLegacy("trust")}
+              >
+                {legacyBusy === "trust" ? t("remote.legacyData.cleaning") : t("remote.legacyData.cleanTrust")}
+              </button>
+            </div>
+          </section>
+        )}
       </div>
       {confirmDialog}
     </>
   );
+
+function formatLegacyBytes(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "0 B";
+  const units = ["B", "KiB", "MiB", "GiB"];
+  let value = n;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value >= 100 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
+}
 }
 
 function RemoteHostRow(props: {

@@ -7,6 +7,9 @@ import (
 )
 
 func TestDesktopBuildLinksSharedSourceRevision(t *testing.T) {
+	// The remote protocol source-revision ldflag was removed with the Remote
+	// Workbench protocol stack; the test now asserts the shared product docs
+	// identity and the packaging-order invariant below.
 	data, err := os.ReadFile("../scripts/desktop-build.sh")
 	if err != nil {
 		t.Fatal(err)
@@ -15,10 +18,10 @@ func TestDesktopBuildLinksSharedSourceRevision(t *testing.T) {
 	for _, want := range []string{
 		`SOURCE_REVISION="$(git -C "$ROOT" rev-parse --verify HEAD)"`,
 		`SOURCE_REVISION="$SOURCE_REVISION+dirty"`,
-		`source_revision_ldflag="-X reasonix/internal/remote/protocol.linkedSourceRevision=$SOURCE_REVISION"`,
 		`product_docs_ldflags="-X reasonix/internal/productdocs.linkedVersion=$VERSION -X reasonix/internal/productdocs.linkedRevision=$SOURCE_REVISION"`,
-		`ldflags="-X main.version=$VERSION -X main.channel=$CHANNEL $source_revision_ldflag $product_docs_ldflags"`,
-		`-X main.version=$VERSION $source_revision_ldflag $product_docs_ldflags`,
+		`cli_identity_ldflags="-X main.version=$VERSION -X main.gitCommit=$GIT_COMMIT -X main.buildTimeUTC=$BUILD_TIME_UTC $product_docs_ldflags"`,
+		`ldflags="-X main.version=$VERSION -X main.channel=$CHANNEL $product_docs_ldflags"`,
+		`cli_identity_ldflags`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("desktop-build.sh does not preserve the shared build identity %q", want)

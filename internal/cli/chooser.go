@@ -81,7 +81,7 @@ func (c *chooser) answers() []event.AskAnswer {
 	return out
 }
 
-// --- chatTUI integration ---
+// chatTUI integration
 
 // handleChooserKey routes a keystroke to the active chooser (when not in free-text
 // mode — that's handled in Update by the textarea). Selecting an option in a

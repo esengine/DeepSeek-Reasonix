@@ -310,7 +310,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "24"
       - uses: pnpm/action-setup@v6.0.9
         with:
           version: 10
@@ -371,7 +371,7 @@ jobs:
           rm -f "$RUNNER_TEMP/cert.p12"
 
       - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+        run: go install "github.com/wailsapp/wails/v2/cmd/wails@$(cat "$GITHUB_WORKSPACE/.wails-version")"
 
       # Official Windows releases must fail closed. Forks can still exercise
       # unsigned packaging without repository secrets, but esengine releases
@@ -394,6 +394,31 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
         run: scripts/desktop-build.sh "${{ matrix.platform }}" "${{ needs.resolve.outputs.version }}" "${{ needs.resolve.outputs.channel }}"
+
+      # Candidate code is immutable, but release validation belongs to the
+      # protected workflow control plane. Reuse this sparse checkout later for
+      # Authenticode verification rather than trusting a candidate-owned test.
+      - name: Checkout protected release verifier
+        if: runner.os == 'Windows' && (matrix.platform == 'windows/amd64' || env.HAS_SIGNPATH == 'true')
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: release-control
+          sparse-checkout: |
+            scripts/test-webview2-approval-smoke.ps1
+            scripts/verify-windows-authenticode.ps1
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      # Exercise the exact Wails binary built for Stable on Microsoft's real
+      # WebView2 runtime before any signing or publication side effect.
+      - name: Smoke-test Wails approval in WebView2
+        if: matrix.platform == 'windows/amd64'
+        shell: pwsh
+        run: |
+          ./release-control/scripts/test-webview2-approval-smoke.ps1 `
+            -ExecutablePath "desktop/build/bin/reasonix-desktop.exe" `
+            -TimeoutSeconds 60
 
       # Sign every executable that users actually run before rebuilding the
       # portable archive and NSIS installer. Signing only the finished NSIS
@@ -504,20 +529,6 @@ jobs:
         if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
         run: cp signed-installer/*installer*.exe dist/
 
-      # Recovery builds intentionally check out the immutable product SHA,
-      # which can predate a verifier repair. Fetch only the verifier from the
-      # protected workflow commit so recovery can validate old immutable
-      # artifacts without rebuilding them from a moving product branch.
-      - name: Checkout protected release verifier
-        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          path: release-control
-          sparse-checkout: scripts/verify-windows-authenticode.ps1
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
-
       - name: Verify Windows Authenticode release contract
         if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
         shell: pwsh
@@ -594,7 +605,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "24"
 
       - uses: actions/download-artifact@v8
         with:

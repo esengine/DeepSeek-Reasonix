@@ -150,6 +150,7 @@ func TestExplainError(t *testing.T) {
 	}
 
 	plain := errors.New("some other failure")
+	//nolint:errorlint // identity check: explainError must return the same error, unwrapped.
 	if explainError(plain) != plain {
 		t.Error("unknown errors should pass through unchanged")
 	}

@@ -155,7 +155,7 @@ func baseCrashReport(kind string) crashReport {
 }
 
 func topFrameFromStack(stack string) string {
-	for _, line := range strings.Split(stack, "\n") {
+	for line := range strings.SplitSeq(stack, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

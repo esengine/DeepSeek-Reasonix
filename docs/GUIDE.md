@@ -14,7 +14,7 @@
 - [Configuration](#configuration)
 - [CLI reference](./CLI.md)
 - [Environment variables](#environment-variables)
-- [Serve web frontend](#serve-web-frontend)
+- [Web frontend](#web-frontend)
 - [Configuration paths](./CONFIG_PATHS.md)
 - [Reasoning language](./REASONING_LANGUAGE.md)
 - [Task contracts and pause policy](./TASK_CONTRACT.md)
@@ -57,6 +57,7 @@ default_model = "deepseek-flash"   # executor; set [agent].planner_model to add 
 [ui]
 # shortcut_layout = "desktop"      # classic|desktop; compatibility setting
 # cursor_shape = "bar"             # block|underline|bar; CLI/TUI text cursor
+show_turn_usage = false             # hide per-request token/cost receipts in the TUI; default true
 
 [agent]
 reasoning_language = "auto"      # visible reasoning text: auto|zh|en
@@ -68,13 +69,15 @@ reasoning_language = "auto"      # visible reasoning text: auto|zh|en
 # max_subagent_concurrency = 6        # session-wide sub-agent concurrency (task/fleet/skills)
 # max_parallel_writers = 3            # concurrent writers with non-overlapping write_paths
 tool_result_snip_ratio = 0.6       # shorten stale tool output before summary compaction
+# context_editing = "native"       # opt in only for the official Anthropic endpoint; default local
 
 [[providers]]
 name        = "deepseek-flash"
-kind        = "openai"
-base_url    = "https://api.deepseek.com"
+kind        = "anthropic"
+base_url    = "https://api.deepseek.com/anthropic"
 model       = "deepseek-v4-flash"
 api_key_env = "DEEPSEEK_API_KEY"
+web_search  = true
 # also preset: deepseek-pro
 
 [tools]
@@ -85,6 +88,7 @@ mcp_call_timeout_seconds = 300   # default MCP call safety cap; per-plugin/tool 
 
 [environment]
 enabled = true   # inject a stable startup summary of OS, shell, and common tools
+offline = false  # set true when outbound network access is unavailable; prevents futile retries
 # [environment.tools]
 # go = "/opt/homebrew/bin/go"   # optional explicit trusted path; workspace-local paths are not auto-executed
 
@@ -202,23 +206,39 @@ these separately reviewed reports. Runtime fatal throws, operating-system kills,
 and panics in unwrapped background goroutines cannot be recovered by Go and do
 not produce this local report.
 
-## Serve web frontend
+## Web frontend
 
-`reasonix serve` starts the same local engine behind a browser UI. Use it when
-you want a desktop-style surface without installing the desktop app, when running
-Reasonix on a remote development box through a tunnel, or when you want a
-shareable view of a live session.
+For local use, `reasonix web` starts the browser UI and opens it in your default
+browser. Inside an interactive CLI session, `/web` snapshots the current session,
+restores the terminal, and opens an explicit `/sessions/<id>#token=...` deep link.
+Even a never-used session keeps its reserved ID without forcing an empty
+transcript onto disk, so the first Web turn continues the same session identity.
 
 ```bash
 cd your-project
-reasonix serve
-# open http://127.0.0.1:8787
+reasonix web
 ```
 
-By default it listens on `127.0.0.1:8787` with `auth_mode = "none"`. Keep that
-default for local-only use. If you bind outside loopback, expose it through a
-tunnel, or put it behind a reverse proxy, enable authentication before sharing
-the URL:
+Use `reasonix web --no-open` when you want to start the foreground Web server
+and print its URL without opening a browser tab. The lower-level
+`reasonix serve` command starts the same engine without opening a browser by
+default. It remains the right entry point for remote development boxes,
+supervisors, tunnels, reverse proxies, and shareable authenticated sessions.
+
+`reasonix web` starts at `127.0.0.1:8787`, automatically tries 8788, 8789, and
+so on when a port is busy (up to 100 retries), and defaults to a newly generated
+token even when `[serve].auth_mode` is `none`. Each live process registers a
+single-writer heartbeat file under `<Reasonix home>/server/instances/`; clean
+shutdown removes its own file, while later instances lazily remove records whose
+owner process is confirmed dead. Multiple Web instances can therefore share one
+Reasonix home without overwriting registry state. The process stays attached to
+the terminal; stop it with Ctrl-C.
+
+An explicit `reasonix web --auth none` disables the default token and should be
+used only when the listener is intentionally trusted. `reasonix serve` keeps its
+backward-compatible, config-driven `auth_mode = "none"` default on
+`127.0.0.1:8787`. If you bind Serve outside loopback, expose it through a tunnel,
+or put it behind a reverse proxy, enable authentication before sharing the URL:
 
 ```bash
 reasonix serve --auth token
@@ -226,7 +246,9 @@ reasonix serve --addr 0.0.0.0:8787 --auth token
 reasonix serve --auth password --password 'temporary-password'
 ```
 
-Token mode prints a share URL with `?token=...`; pass `--token` or set
+Token mode prints a share URL with `#token=...`; the Web page exchanges the
+fragment for an HttpOnly cookie before starting API or SSE requests, keeping the
+token out of request URLs, browser history, referrers, and access logs. Pass `--token` or set
 `[serve].token` to reuse a stable token. Password mode requires either
 `--password` at startup or a stored bcrypt hash:
 
@@ -242,9 +264,21 @@ behind_proxy = true    # only behind a trusted reverse proxy
 
 The web UI exposes chat, tool approvals, session history, rewind/fork/summarize,
 model and reasoning-effort controls, Goal, a live todo panel fed by the
-`todo_write` tool, and provider balance when configured. Use `--model`,
+`todo_write` tool, extension status/card/form/notification surfaces, and
+provider balance when configured. Extension-hosted providers appear in the
+model picker. Run `/reload` while idle to fail-atomically reload extension
+sidecars and the runtime generation without restarting Serve. Use `--model`,
 `--max-steps`, or `--resume` for one-off launches; otherwise `serve` uses the
 user-global `default_model`.
+
+If the selected Provider has no saved API key, a loopback-bound Serve still
+starts and shows a Provider setup page instead of failing before the browser can
+connect. After authentication, enter the key there; Reasonix writes it to this
+host's global credential file with restricted permissions, rebuilds the active
+controller in the same process, and opens the normal UI. The credential-writing
+endpoint is disabled for non-loopback listeners. For a remote SSH window,
+"this host" means the remote host reached through the SSH tunnel; the key is
+not copied from the desktop machine.
 
 ## Editor integrations over ACP
 
@@ -325,7 +359,15 @@ files over SFTP, manage port forwards, and start/open the remote workspace.
 Opening a workspace creates a separate native Reasonix window, similar to a
 VS Code Remote SSH window. The primary window owns the SSH tunnel; the remote
 window is an isolated, lightweight shell and does not restore or acquire local
-conversation sessions.
+conversation sessions. The remote web page uses the provider configuration and
+API keys on the **remote** host — the desktop never exposes its own providers
+to a remote host. If that host is missing the selected Provider's API key, the
+window shows the authenticated setup page first, saves the key only in the
+remote Reasonix credential file, and activates the Provider without restarting
+the remote Serve process. A transient SSH outage keeps the remote window open;
+the desktop reconnects in the background, re-attaches its loopback forward, and
+reloads the window against the recovered Serve. An authentication or host-key
+failure is terminal and closes the unusable remote window instead.
 
 ## Custom OpenAI-compatible providers
 
@@ -334,15 +376,22 @@ Custom provider** for proxies, aggregators, or self-hosted services that speak
 the OpenAI-compatible chat API or Anthropic-compatible Messages API.
 
 For common providers, choose **Add model service -> Recommended preset** instead.
-The official DeepSeek service continues to use its specially adapted OpenAI Chat
-Completions path by default; add the optional **DeepSeek Anthropic** preset only
-when Anthropic Messages compatibility is needed. The two entries do not replace
-each other. Reasonix can prefill editable custom-provider entries for Kimi CN,
+New official DeepSeek entries use the Anthropic-compatible Messages endpoint by
+default and enable provider-side `web_search`; the same `DEEPSEEK_API_KEY` works
+for both protocols. On startup, Reasonix upgrades unmodified legacy
+`deepseek-flash` / `deepseek-pro` entries that still use the official endpoint
+and standard key/model settings. Customized official Chat Completions entries
+stay unchanged and show an **Upgrade protocol** action in Settings. Proxy
+endpoints, custom headers, model lists, and capability overrides are never
+migrated automatically. Existing
+separately named `deepseek-anthropic` entries remain compatible, but that
+redundant preset is no longer offered for new access. Reasonix can prefill editable custom-provider entries for Kimi CN,
 Kimi Global,
 Kimi Coding Plan, MiMo API, MiMo Anthropic, MiMo Token Plan CN/SGP/AMS and their
 Anthropic-compatible variants, MiniMax CN/Global API, MiniMax CN/Global
 Anthropic, GLM CN, Z.AI Global, GLM/Z.AI Coding Plan OpenAI-compatible and
-Anthropic-compatible endpoints, OpenCode Go, OpenCode Go Anthropic, OpenCode Zen
+Anthropic-compatible endpoints, OpenCode Go, OpenCode Go Anthropic, OpenCode Go
+DeepSeek Anthropic, OpenCode Go DeepSeek Responses, OpenCode Zen
 Anthropic, Qwen/DashScope CN/Global, Qwen Coding Plan CN/Global
 OpenAI-compatible and Anthropic-compatible endpoints, StepFun OpenAI-compatible
 and Anthropic-compatible endpoints, NovitaAI, GMI Cloud, Vercel AI Gateway,
@@ -355,8 +404,15 @@ usually needs only the provider API key: the key value is stored in Reasonix hom
 environment-variable name, context window, vision model metadata, proxy bypass
 for China-only endpoints, MiniMax `reasoning_split`, GLM/MiniMax thinking
 heuristics, Anthropic-compatible Bearer auth where needed, Ollama Cloud
-max-effort support, and OpenCode Go per-model reasoning overrides. The OpenCode
-Go preset includes its native `kimi-k3` subscription route with image input,
+max-effort support, and OpenCode Go per-model reasoning overrides. The dedicated
+OpenCode Go DeepSeek Anthropic and DeepSeek Responses presets expose the verified
+Flash routes and enable provider-side `web_search` by default; the Responses
+variant uses stateless context replay. The existing mixed OpenCode Go Anthropic
+preset remains scoped to Qwen and MiniMax so server tools are not sent to
+unverified models. DeepSeek Pro remains on the Chat Completions preset because
+live Anthropic and Responses requests currently fail in the OpenCode Go upstream
+conversion. The OpenCode Go preset includes its native `kimi-k3` subscription
+route with image input,
 `high`/`max` reasoning effort, and a 1,048,576-token context window. Existing untouched
 OpenCode Go preset installs are upgraded automatically; edited model catalogs
 are preserved. The Kimi CN and Kimi Global direct-API presets also include
@@ -597,7 +653,7 @@ Mode and display shortcuts:
 | `/theme [auto|light|dark|style]` | Shows or switches the CLI theme | Bare `/theme` lists background modes and named accent palettes. The choice is saved to the user config; `REASONIX_THEME` and `REASONIX_THEME_STYLE` can override it for one run. |
 | `Ctrl+O` | Toggles verbose reasoning display | Also available through `/verbose`. |
 | `Ctrl+B` | Expands or collapses long shell output | Long shell-output hint lines can also be clicked in the transcript; text selection is handled in-app while the full-screen TUI has mouse reporting enabled. |
-| `/goal <objective>`, `/goal --research <objective>`, `/goal --simple <objective>`, `/goal status`, `/goal clear` | Starts, checks, or clears Goal | Goal is not in any keyboard cycle; clearly long-horizon goals automatically enable AutoResearch after Goal is explicitly started. |
+| `/goal <objective>`, `/goal status`, `/goal pause`, `/goal resume`, `/goal clear` | Starts, checks, pauses, resumes, or clears Goal | Goal automatically selects a simple, write, or research turn budget. |
 | `/migrate`, `/migrate --from <legacy-dir>` | Retries legacy migration or imports sessions from a chosen v0.x source | Use `--from` for custom Windows v0.52 install/data directories; it imports sessions only. See [Configuration paths](./CONFIG_PATHS.md). |
 
 Picker and approval shortcuts:
@@ -669,6 +725,42 @@ Reasonix always removes saved provider and bot credential variables from tool
 subprocess environments and automatically adds its global credential `.env` to
 the runtime read-deny boundary. Project `.env` files keep their existing
 workspace-scoped behavior.
+
+**Session-private temporary directory.** Within one logical chat session, Bash
+commands share a private temporary directory so consecutive calls can exchange
+files through `$TMPDIR` (and, on Linux under bubblewrap, through literal
+`/tmp`). No user setup is required: Reasonix automatically exports `TMPDIR`,
+`TMP`, and `TEMP` for Bash and client-owned ACP terminals. The directory is
+created lazily, is never the host public temporary root, and is rotated on
+`/new`, `/clear`, resume of another session, and branch switches.
+Model/settings hot rebuilds keep the same directory. Temporary files are not
+durable storage: resume across process restarts does not restore them, and
+scripts that need long-lived data should write into the workspace or a
+user-specified path.
+
+Reasonix-generated and project scripts should use the standard temporary
+environment variables rather than hard-coding `/tmp`; users should not set
+these variables themselves. For example:
+
+```sh
+tmp_file="${TMPDIR:?}/result.json"
+```
+
+```powershell
+$tmpFile = Join-Path $env:TEMP "result.json"
+```
+
+| Platform | `$TMPDIR` / `$TMP` / `$TEMP` | Literal `/tmp` |
+| --- | --- | --- |
+| Linux + bubblewrap | Virtual `/tmp` (bound to the private dir) | Shared for the session (not a fresh empty tmpfs each call) |
+| macOS Seatbelt | Host path of the private dir (allowed by policy) | Host macOS temporary directory; scripts should use `$TMPDIR` |
+| Windows (no OS Bash sandbox) | Host path of the private dir | Not promised to match (e.g. Git Bash `/tmp`) |
+
+Independent sandboxes such as MCP servers keep their own isolation and do not
+inherit the chat session's temporary directory. An approved sandbox-escape
+command still receives the private temp environment variables, but on Linux its
+literal `/tmp` is no longer mapped by bubblewrap.
+
 **Windows note:** Reasonix does not ship an OS-level Bash sandbox on Windows.
 The effective mode is fixed to `off`; even an older config containing
 `bash = "enforce"` resolves to `off`, `reasonix doctor` flags the ignored value,
@@ -734,6 +826,24 @@ Reasonix is an MCP client. A `[[plugins]]` entry's `type` selects the transport:
 (`${VAR}` / `${VAR:-default}` expanded from the environment, so tokens stay out
 of the file); `sse` connects to servers that still use the legacy persistent
 GET + announced POST endpoint transport.
+
+For a remote HTTP server without a static `Authorization` header, an
+authentication challenge is shown as **Sign in**. Run
+`reasonix mcp auth <name>` in the CLI, or click **Sign in** for that server in
+the Desktop MCP panel. Reasonix performs OAuth metadata discovery, dynamic
+client registration, PKCE S256 authorization, and refresh-token
+rotation. Discovery and token requests use the same Reasonix network-proxy
+settings as the MCP connection.
+
+OAuth client and token state is kept outside the workspace in the server's
+private Reasonix state directory, written with mode `0600`, and bound to the
+full configured resource URL. An explicit static `Authorization` header always
+takes precedence. **Clear authentication** removes only Reasonix's local OAuth
+state; it does not sign out the third-party browser session. Reasonix opens the
+browser only after an explicit sign-in action, never automatically from a
+background tool-call failure. Removing the MCP server also removes its local
+OAuth state unless a lower-priority declaration for the same resource becomes
+effective.
 
 Browse the official MCP Registry from **Settings → MCP servers → Browse
 registry**, or use `reasonix mcp browse [query]` and
@@ -851,7 +961,7 @@ convenient.
 
 ## Slash commands
 
-In an interactive `reasonix` session, built-in commands (`/compact`, `/new`, `/clear`, `/rewind`,
+In an interactive `reasonix` session, built-in commands (`/compact`, `/context`, `/new`, `/clear`, `/rewind`,
 `/tree`, `/branch`, `/switch`, `/todo`, `/model`, `/work-mode`, `/mcp`, `/skills`, `/hooks`,
 `/memory`, `/goal`, `/output-style`, `/sandbox`, `/language`,
 `/reasoning-language`, `/help`) run
@@ -1011,28 +1121,28 @@ permission, or tool behavior must declare whether embedded documentation was
 updated. When no documentation change is needed, the declaration must explain
 why the existing version-matched guidance remains correct.
 
-## Goal and AutoResearch
+## Goal
 
-Goal is the unified runtime for long-running objectives. Ordinary `/goal`
-objectives stay lightweight: Reasonix keeps working until the goal is complete,
-blocked, paused, or cleared. When a goal is clearly long-horizon, Goal
-automatically enables the AutoResearch strategy instead of requiring a separate
-`/auto-research` skill; `auto-research` is not listed as a standalone built-in
-skill in Settings -> Skills or the slash menu. Ordinary chat never changes the
-collaboration mode implicitly; choose Goal in the composer or use `/goal` to
-start a long-running objective.
+Goal is the unified runtime for long-running objectives. Reasonix keeps working
+until the goal is complete, blocked, paused, or cleared. Ordinary chat never
+changes collaboration mode implicitly; choose Goal in the composer or use
+`/goal` to start a long-running objective.
 
-Goal runs under a per-class budget: simple goals get 10 turns / 200k tokens,
-write goals 20 turns / 400k tokens, and AutoResearch goals 40 turns / 800k
-tokens; four consecutive turns without host-verifiable progress pause the goal.
-A paused goal keeps its todos, Delivery checkpoint, and budget history — use
-`/goal resume` to continue (budget pauses add one more slice of the same
-class), or `/goal pause` to pause a running goal manually. `/goal status`
-shows the full runtime summary. At the end of every goal turn the model reports
-its disposition through the structured `update_goal` tool (continue/complete/
-blocked); when no report arrives, an independent bounded evaluator judges the
-turn once, and any evaluator failure pauses the goal instead of continuing
-silently.
+Goal runs under a per-class **turn** budget: simple goals get 10 turns, write
+goals 20 turns, and research goals 40 turns; four consecutive turns without
+host-verifiable progress pause the goal. Cumulative token usage is still tracked
+and shown for diagnostics, but there is **no token hard limit** and no
+pre-provider request admission. In Goal mode, a bare bug/crash/exception
+statement defaults to the write turn class unless the user asks only for
+analysis/explanation or forbids changes. A paused goal keeps its todos, Delivery
+checkpoint, and runtime history — use `/goal resume` to continue (turn-budget
+pauses add one more slice of turns of the same class), or `/goal pause` to pause
+a running goal manually. `/goal status` shows the full runtime summary (turns
+used/limit, tokens used, no-progress, extensions). At the end of every goal turn
+the model reports its disposition through the structured `update_goal` tool
+(continue/complete/blocked); when no report arrives, an independent bounded
+evaluator judges the turn once, and any evaluator failure pauses the goal
+instead of continuing silently.
 
 For complex work, write the objective as a
 [task contract](./TASK_CONTRACT.md): Context, Request, Output format,
@@ -1041,38 +1151,15 @@ for autonomous work. It keeps going with sensible defaults unless the next step
 requires an irreversible or externally visible operation, a scope change, or
 information only the user can provide.
 
-AutoResearch is enabled for goals with strong signals such as "keep
-researching", "long-running", "thoroughly", "debug until the root cause is
-clear", "do not spin", "run experiments", "verify repeatedly", or "turn this
-into a complete plan". It can also trigger when the objective combines multiple
-phases such as research/diagnosis, implementation/fixing, verification/testing,
-optimization/documentation/release, or when the user names an existing
-`.reasonix/autoresearch/<task-id>/` directory. Advanced users can force it with
-`/goal --research <objective>` or force lightweight Goal with
-`/goal --simple <objective>`. Outside an explicitly started Goal, those signals
-remain ordinary chat text and do not create durable AutoResearch state.
-
-Once AutoResearch is active, the agent treats the goal as a stateful research
-loop instead of a chat-only continuation. It creates or reuses a project-local
-`.reasonix/autoresearch/<task-id>/` directory. For new tasks, the default id
-shape is `YYYYMMDD-HHMMSS-slug`, such as `20260618-224530-cache-audit`; Reasonix
-checks the project directory first and appends `-2`, `-3`, and so on only if
-that id already exists. The task state includes `task_spec.md`, `progress.json`,
-`findings.jsonl`, `directions_tried.json`, and `iteration_log.jsonl`, records
-each iteration's direction, evidence, verification result, and blocker, and uses
-`stale_count` to detect repeated weak progress. Repeated stalls force a
-structural pivot, such as changing evidence source, entrypoint, test oracle,
-decomposition, benchmark, or worker strategy, rather than retrying the same
-tactic.
-
-Workers and subagents may explore independently, but the orchestrator owns the
-canonical state files. Completion requires a requirement-by-requirement evidence
-audit against `task_spec.md`; a passing narrow check is not treated as proof of a
-broad requirement. Dynamic run state stays in `.reasonix/autoresearch/...`, not
-in `REASONIX.md`, `AGENTS.md`, project memory, tool schemas, or the cache-stable
-system prompt. Public publishing, destructive operations, credentials, payments,
-and external notifications still follow the normal approval, privacy, and cache
-gates.
+Research budgets are selected automatically for goals with strong long-horizon
+signals or several distinct phases. There is no separate research mode or
+runtime to configure. Goal state stays in the normal session sidecar, progress
+comes only from host receipts, canonical todos, `complete_step`, review and the
+Delivery checkpoint, and completion is decided by Delivery readiness plus the
+bounded Goal evaluator. Legacy `.reasonix/autoresearch/<task-id>/` archives are
+read-only: an explicit old path can be recovered as an ordinary Goal, but new
+runs never create or update those directories. Deprecated budget flags are
+accepted for compatibility but are hidden from help and completion.
 
 ## @ references
 

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -547,7 +548,7 @@ func TestTranscriptResizeRerendersCommittedMarkdownAtNewWidth(t *testing.T) {
 	newLines := strings.Count(newRendered, "\n") + 1
 
 	ruleWidth := 0
-	for _, line := range strings.Split(newRendered, "\n") {
+	for line := range strings.SplitSeq(newRendered, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed != "" && strings.Trim(trimmed, "─") == "" {
 			ruleWidth = visibleWidth(trimmed)
@@ -585,6 +586,7 @@ func TestTranscriptResizeKeepsScrolledReaderOnSameBlock(t *testing.T) {
 	contentWidth := transcriptContentWidth(m.width, false)
 	secondBlockStart := transcriptBlockLineCount(m.transcript[0], contentWidth)
 	m.viewport.SetYOffset(secondBlockStart)
+	m.markUserScrolled() // explicit leave-tail; production paths do this via wheel/PgUp
 	if m.viewport.AtBottom() {
 		t.Fatal("test reader anchor must be above the transcript bottom")
 	}
@@ -937,6 +939,60 @@ func TestModalPanelsHideComposerBox(t *testing.T) {
 				t.Fatalf("bottomRows with %s = %d, want %d (panel + status rows, no composer box)", tt.name, got, want)
 			}
 		})
+	}
+}
+
+// TestRewindPickerWindowsLongSession verifies the Esc-Esc turn list windows
+// long sessions (one row per turn) so the overlay cannot outgrow the terminal:
+// at most quickPickerMaxVisible rows render, with ↑/↓ more markers pointing at
+// the hidden turns and the window following the selection.
+func TestRewindPickerWindowsLongSession(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = m0.(chatTUI)
+
+	metas := make([]checkpoint.Meta, 12)
+	for i := range metas {
+		metas[i] = checkpoint.Meta{Turn: i, Prompt: fmt.Sprintf("turn %d", i)}
+	}
+
+	// Newest turn selected (default): window shows rows 4..11.
+	m.rewind = &rewindPicker{metas: metas, sel: 11}
+	card := m.renderRewind()
+	if !strings.Contains(card, "↑ more") {
+		t.Fatalf("newest selection should show ↑ more: %q", card)
+	}
+	if strings.Contains(card, "↓ more") {
+		t.Fatalf("newest selection must not show ↓ more: %q", card)
+	}
+	if !strings.Contains(card, "turn 11") || strings.Contains(card, "turn 0") {
+		t.Fatalf("window must cover rows 4..11, got: %q", card)
+	}
+
+	// Oldest turn selected: window shows rows 0..7.
+	m.rewind = &rewindPicker{metas: metas, sel: 0}
+	card = m.renderRewind()
+	if !strings.Contains(card, "↓ more") {
+		t.Fatalf("oldest selection should show ↓ more: %q", card)
+	}
+	if strings.Contains(card, "↑ more") {
+		t.Fatalf("oldest selection must not show ↑ more: %q", card)
+	}
+	if !strings.Contains(card, "turn 0") || strings.Contains(card, "turn 11") {
+		t.Fatalf("window must cover rows 0..7, got: %q", card)
+	}
+
+	// Short session (≤8 turns): every row visible, no markers.
+	m.rewind = &rewindPicker{metas: metas[:4], sel: 0}
+	card = m.renderRewind()
+	if strings.Contains(card, "more") {
+		t.Fatalf("short session must not show more markers: %q", card)
+	}
+	for i := range 4 {
+		if !strings.Contains(card, fmt.Sprintf("turn %d", i)) {
+			t.Fatalf("short session row %d missing: %q", i, card)
+		}
 	}
 }
 
@@ -1442,13 +1498,7 @@ func TestInsertNewlineKeyBinding(t *testing.T) {
 	ctrl := control.New(control.Options{})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
 	keys := m.input.KeyMap.InsertNewline.Keys()
-	found := false
-	for _, k := range keys {
-		if k == "shift+enter" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(keys, "shift+enter")
 	if !found {
 		t.Errorf("newChatTUI InsertNewline should include shift+enter, got %v", keys)
 	}
@@ -1464,7 +1514,7 @@ func TestCtrlHomeEndScrollKeyBindings(t *testing.T) {
 	}
 
 	cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 8})
-	for i := 0; i < 12; i++ {
+	for range 12 {
 		cur = adv(cur, notice)
 	}
 	// Viewport should be at the bottom after output.
@@ -1490,12 +1540,16 @@ func TestMouseWheelAndPageKeysScrollTranscript(t *testing.T) {
 	ch := make(chan event.Event, 1)
 	notice := agentEventMsg(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "line"})
 	adv := func(m chatTUI, msg tea.Msg) chatTUI {
-		n, _ := m.Update(msg)
+		n, cmd := m.Update(msg)
+		_, wheel := msg.(tea.MouseWheelMsg)
+		_, key := msg.(tea.KeyPressMsg)
+		if cmd != nil && (wheel || key) {
+			t.Fatalf("viewport update %T should rely on the renderer diff, got command %T", msg, cmd)
+		}
 		return n.(chatTUI)
 	}
-
 	cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 10})
-	for i := 0; i < 40; i++ {
+	for range 40 {
 		cur = adv(cur, notice)
 	}
 	if !cur.viewport.AtBottom() {
@@ -1505,23 +1559,20 @@ func TestMouseWheelAndPageKeysScrollTranscript(t *testing.T) {
 	if bottom <= cur.viewport.Height()+3 {
 		t.Fatalf("test transcript did not overflow enough: bottom=%d height=%d", bottom, cur.viewport.Height())
 	}
-
+	cur.legacyScrollClear = false
 	cur = adv(cur, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
 	if got, want := cur.viewport.YOffset(), bottom-3; got != want {
 		t.Fatalf("wheel-up YOffset = %d, want %d", got, want)
 	}
-
 	cur = adv(cur, tea.MouseWheelMsg{Button: tea.MouseWheelDown})
 	if got := cur.viewport.YOffset(); got != bottom {
 		t.Fatalf("wheel-down should return by one wheel step, YOffset=%d want bottom=%d", got, bottom)
 	}
-
 	cur = adv(cur, tea.KeyPressMsg{Code: tea.KeyPgUp})
 	pageUp := cur.viewport.YOffset()
 	if got, want := pageUp, bottom-cur.viewport.Height(); got != want {
 		t.Fatalf("PageUp YOffset = %d, want %d", got, want)
 	}
-
 	cur = adv(cur, tea.KeyPressMsg{Code: tea.KeyPgDown})
 	if got := cur.viewport.YOffset(); got != bottom {
 		t.Fatalf("PageDown should return to bottom from one page up, YOffset=%d want %d", got, bottom)
@@ -1538,7 +1589,7 @@ func TestRunningStreamPreservesScrolledReadingPosition(t *testing.T) {
 	}
 
 	cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 10})
-	for i := 0; i < 40; i++ {
+	for range 40 {
 		cur = adv(cur, notice)
 	}
 	cur.state = tuiRunning
@@ -1575,7 +1626,7 @@ func TestTranscriptScrollbarClickAndDrag(t *testing.T) {
 	}
 
 	cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 10})
-	for i := 0; i < 40; i++ {
+	for range 40 {
 		cur = adv(cur, notice)
 	}
 	cur.viewport.GotoTop()
@@ -1689,6 +1740,58 @@ func setLocalClipboardSession(t *testing.T) {
 	t.Setenv("SSH_CONNECTION", "")
 	t.Setenv("SSH_CLIENT", "")
 	t.Setenv("SSH_TTY", "")
+}
+
+func TestShiftInsertPastesClipboardText(t *testing.T) {
+	setLocalClipboardSession(t)
+	m := newComposerMouseTestTUI(t, 60, 16)
+	m.input.SetValue("before ")
+
+	previous := readNativeClipboardText
+	t.Cleanup(func() { readNativeClipboardText = previous })
+	readNativeClipboardText = func() (string, error) { return "pasted text", nil }
+
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyInsert, Mod: tea.ModShift})
+	m = next.(chatTUI)
+	if got := m.input.Value(); got != "before " {
+		t.Fatalf("Shift+Insert changed the composer before the async read: %q", got)
+	}
+	result := clipboardTextPasteResultFromCmd(t, cmd)
+	next, _ = m.Update(result)
+	m = next.(chatTUI)
+
+	if got := m.input.Value(); got != "before pasted text" {
+		t.Fatalf("Shift+Insert paste produced %q, want %q", got, "before pasted text")
+	}
+}
+
+func TestShiftInsertPasteOverSSHDoesNotReadRemoteClipboard(t *testing.T) {
+	t.Setenv("SSH_CONNECTION", "host 22 client 1234")
+	t.Setenv("SSH_CLIENT", "")
+	t.Setenv("SSH_TTY", "")
+
+	m := newComposerMouseTestTUI(t, 60, 16)
+	m.input.SetValue("before ")
+
+	previous := readNativeClipboardText
+	t.Cleanup(func() { readNativeClipboardText = previous })
+	readNativeClipboardText = func() (string, error) {
+		t.Fatal("SSH Shift+Insert paste must not read the remote host clipboard")
+		return "", nil
+	}
+
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyInsert, Mod: tea.ModShift})
+	m = next.(chatTUI)
+	result := clipboardTextPasteResultFromCmd(t, cmd)
+	if !result.remote {
+		t.Fatalf("SSH Shift+Insert paste result = %+v, want remote hint", result)
+	}
+
+	next, _ = m.Update(result)
+	m = next.(chatTUI)
+	if got := m.input.Value(); got != "before " {
+		t.Fatalf("SSH Shift+Insert paste changed composer to %q", got)
+	}
 }
 
 func TestMouseRightClickWithoutSelectionPastesClipboardText(t *testing.T) {
@@ -1993,6 +2096,85 @@ func TestMouseDragReleaseAutoCopies(t *testing.T) {
 	m3 := out.(chatTUI)
 	if m3.copyNoticeText != i18n.M.MouseCopiedHint {
 		t.Errorf("completed native copy notice = %q, want %q", m3.copyNoticeText, i18n.M.MouseCopiedHint)
+	}
+}
+
+// TestCtrlInsertCopiesTranscriptSelection verifies the terminal-convention
+// Ctrl+Insert copy key copies an active transcript selection to the clipboard
+// and arms the copied notice, without Ctrl+C's destructive side effects.
+func TestCtrlInsertCopiesTranscriptSelection(t *testing.T) {
+	setLocalClipboardSession(t)
+	m := newTestChatTUI()
+	m.transcript = []string{"hello world"}
+	m.wrappedLines = []string{"hello world"}
+	m.sel = selection{active: true, anchor: selPos{line: 0, col: 0}, head: selPos{line: 0, col: 5}}
+
+	previous := writeNativeClipboardText
+	t.Cleanup(func() { writeNativeClipboardText = previous })
+	writeNativeClipboardText = func(text string) error {
+		if text != "hello" {
+			t.Fatalf("native clipboard text = %q, want hello", text)
+		}
+		return nil
+	}
+
+	out, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyInsert, Mod: tea.ModCtrl})
+	m2 := out.(chatTUI)
+	if m2.input.Value() != "" {
+		t.Fatalf("Ctrl+Insert must not touch the composer, got %q", m2.input.Value())
+	}
+	result := clipboardCopyResultFromCmd(t, cmd)
+	out, _ = m2.Update(result)
+	m3 := out.(chatTUI)
+	if m3.copyNoticeText != i18n.M.MouseCopiedHint {
+		t.Errorf("completed native copy notice = %q, want %q", m3.copyNoticeText, i18n.M.MouseCopiedHint)
+	}
+}
+
+// TestCtrlInsertCopiesComposerSelection verifies Ctrl+Insert also copies an
+// active selection inside the composer, mirroring the Ctrl+C handling.
+func TestCtrlInsertCopiesComposerSelection(t *testing.T) {
+	setLocalClipboardSession(t)
+	m := newComposerMouseTestTUI(t, 60, 16)
+	m.input.SetValue("hello world")
+	m.composerSel = composerSelection{active: true, anchor: 0, head: 5, value: m.input.Value()}
+
+	previous := writeNativeClipboardText
+	t.Cleanup(func() { writeNativeClipboardText = previous })
+	writeNativeClipboardText = func(text string) error {
+		if text != "hello" {
+			t.Fatalf("native clipboard text = %q, want hello", text)
+		}
+		return nil
+	}
+
+	out, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyInsert, Mod: tea.ModCtrl})
+	m2 := out.(chatTUI)
+	result := clipboardCopyResultFromCmd(t, cmd)
+	out, _ = m2.Update(result)
+	m3 := out.(chatTUI)
+	if m3.copyNoticeText != i18n.M.MouseCopiedHint {
+		t.Errorf("completed native copy notice = %q, want %q", m3.copyNoticeText, i18n.M.MouseCopiedHint)
+	}
+}
+
+// TestCtrlInsertWithoutSelectionIsNoOp verifies Ctrl+Insert with no active
+// selection leaves the composer and the session state untouched — unlike
+// Ctrl+C, it must never clear input or quit.
+func TestCtrlInsertWithoutSelectionIsNoOp(t *testing.T) {
+	m := newTestChatTUI()
+	m.input.SetValue("draft text")
+
+	out, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyInsert, Mod: tea.ModCtrl})
+	m2 := out.(chatTUI)
+	if cmd != nil {
+		t.Fatalf("Ctrl+Insert without a selection should be a no-op, got cmd %T", cmd)
+	}
+	if got := m2.input.Value(); got != "draft text" {
+		t.Fatalf("Ctrl+Insert without a selection changed the composer to %q", got)
+	}
+	if m2.state != tuiIdle {
+		t.Fatalf("Ctrl+Insert without a selection changed state to %v, want idle", m2.state)
 	}
 }
 
@@ -2842,7 +3024,7 @@ func TestTranscriptTailFollow(t *testing.T) {
 	notice := agentEventMsg(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "line"})
 
 	cur := adv(newChatTUI(ctrl, "", make(chan event.Event, 1), 80), tea.WindowSizeMsg{Width: 80, Height: 8})
-	for i := 0; i < 12; i++ { // overflow the short viewport so there's room to scroll
+	for range 12 { // overflow the short viewport so there's room to scroll
 		cur = adv(cur, notice)
 	}
 	if !cur.viewport.AtBottom() {
@@ -2872,10 +3054,10 @@ func TestEmptyEnterScrollsToBottom(t *testing.T) {
 		return n.(chatTUI)
 	}
 
-	// --- idle state ---
+	// idle state
 	t.Run("idle", func(t *testing.T) {
 		cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 8})
-		for i := 0; i < 12; i++ {
+		for range 12 {
 			cur = adv(cur, notice)
 		}
 		// Scroll up to leave the bottom.
@@ -2890,10 +3072,10 @@ func TestEmptyEnterScrollsToBottom(t *testing.T) {
 		}
 	})
 
-	// --- running state ---
+	// running state
 	t.Run("running", func(t *testing.T) {
 		cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 8})
-		for i := 0; i < 12; i++ {
+		for range 12 {
 			cur = adv(cur, notice)
 		}
 		cur.state = tuiRunning
@@ -2922,9 +3104,8 @@ func TestForceGotoBottomScrollsWithoutTranscriptChange(t *testing.T) {
 		n, _ := adv(m, msg)
 		return n
 	}
-
 	cur := next(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 8})
-	for i := 0; i < 12; i++ {
+	for range 12 {
 		cur = next(cur, notice)
 	}
 	if !cur.viewport.AtBottom() {
@@ -2938,6 +3119,7 @@ func TestForceGotoBottomScrollsWithoutTranscriptChange(t *testing.T) {
 
 	cur.forceGotoBottom = true
 	cur.transcriptDirty = false
+	cur.legacyScrollClear = false
 	cur, cmd := adv(cur, tea.WindowSizeMsg{Width: 80, Height: 8})
 
 	if !cur.viewport.AtBottom() {
@@ -2946,12 +3128,10 @@ func TestForceGotoBottomScrollsWithoutTranscriptChange(t *testing.T) {
 	if cur.forceGotoBottom {
 		t.Fatal("forceGotoBottom should be cleared after scrolling")
 	}
-	if cmd == nil {
-		t.Fatal("regular forceGotoBottom scroll jump should request ClearScreen")
-	}
+	assertLegacyViewportClearCmd(t, cmd, false)
 }
 
-func TestSessionSwitchSuppressesOneClearScreen(t *testing.T) {
+func TestSessionSwitchSuppressesOneWarpClearScreen(t *testing.T) {
 	ctrl := control.New(control.Options{})
 	ch := make(chan event.Event, 1)
 	notice := agentEventMsg(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "line"})
@@ -2965,21 +3145,20 @@ func TestSessionSwitchSuppressesOneClearScreen(t *testing.T) {
 	}
 
 	cur := next(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 8})
-	for i := 0; i < 12; i++ {
+	for range 12 {
 		cur = next(cur, notice)
 	}
 	cur = next(cur, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
 	if cur.viewport.AtBottom() {
 		t.Fatal("wheel-up should break the bottom pin")
 	}
-
+	cur.legacyScrollClear = true
 	cur.sessionSwitch = true
 	cur.forceGotoBottom = true
 	cur.transcriptDirty = false
 	cur, cmd := adv(cur, tea.WindowSizeMsg{Width: 80, Height: 8})
-
 	if cmd != nil {
-		t.Fatal("session switch rebuild should suppress the ClearScreen scroll-jump workaround once")
+		t.Fatal("session switch rebuild should suppress the Warp ClearScreen workaround once")
 	}
 	if cur.sessionSwitch {
 		t.Fatal("sessionSwitch should be cleared after one Update")
@@ -2991,9 +3170,7 @@ func TestSessionSwitchSuppressesOneClearScreen(t *testing.T) {
 	cur = next(cur, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
 	cur.forceGotoBottom = true
 	cur, cmd = adv(cur, tea.WindowSizeMsg{Width: 80, Height: 8})
-	if cmd == nil {
-		t.Fatal("later scroll jumps must still request ClearScreen")
-	}
+	assertLegacyViewportClearCmd(t, cmd, true)
 	if cur.sessionSwitch {
 		t.Fatal("sessionSwitch should remain false after the suppressed cycle")
 	}
@@ -3606,11 +3783,9 @@ func TestDoubleCtrlCQuit(t *testing.T) {
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
 	ctrlC := tea.KeyPressMsg{Code: 'c', Mod: 4} // 4 = ModCtrl
 
-	// First Ctrl+C while idle: arms quit, flushes hint via finalize cmd.
-	out, cmd := m.Update(ctrlC)
-	if cmd == nil {
-		t.Error("first Ctrl+C should return a finalize cmd to flush the hint")
-	}
+	// First Ctrl+C while idle arms quit and adds the hint to model state. A
+	// renderer command is not required for Bubble Tea to paint that state.
+	out, _ := m.Update(ctrlC)
 	m2, ok := out.(chatTUI)
 	if !ok {
 		t.Fatalf("Update returned %T, want chatTUI", out)
@@ -3626,13 +3801,10 @@ func TestDoubleCtrlCQuit(t *testing.T) {
 	}
 	_ = out2
 
-	// Window expired: re-arms instead of quitting (still flushes hint via finalize).
+	// Window expired: re-arms instead of quitting.
 	m3 := m2
 	m3.lastCtrlCAt = time.Now().Add(-2 * time.Second)
-	out4, cmd4 := m3.Update(ctrlC)
-	if cmd4 == nil {
-		t.Error("expired Ctrl+C should return a finalize cmd to flush the re-armed hint")
-	}
+	out4, _ := m3.Update(ctrlC)
 	m4, ok := out4.(chatTUI)
 	if !ok {
 		t.Fatalf("Update returned %T, want chatTUI", out4)
@@ -3809,10 +3981,11 @@ func TestCtrlCCopySelection(t *testing.T) {
 	// Execute the command (copyToClipboard → OSC 52).
 	cmd()
 
-	// Second Ctrl+C should now arm quit (selection is gone).
-	_, cmd2 := m2.Update(ctrlC)
-	if cmd2 == nil {
-		t.Error("Ctrl+C after copy should arm quit (return a finalize cmd)")
+	// Second Ctrl+C should now arm quit (selection is gone). Rendering the
+	// changed model does not require a command.
+	out2, _ := m2.Update(ctrlC)
+	if out2.(chatTUI).lastCtrlCAt.IsZero() {
+		t.Error("Ctrl+C after copy should arm quit")
 	}
 }
 
@@ -3876,10 +4049,7 @@ func TestTruncateSubject(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := truncateSubject(tc.input, tc.width)
-			wantMax := tc.width - 28
-			if wantMax < 16 {
-				wantMax = 16
-			}
+			wantMax := max(tc.width-28, 16)
 			w := ansi.StringWidth(got)
 			if w > wantMax {
 				t.Errorf("truncateSubject(%q, %d) = %q (width %d), want visible width <= %d", tc.input, tc.width, got, w, wantMax)
@@ -4101,6 +4271,7 @@ func TestDesktopShortcutLayoutDoesNotStealCompletionTab(t *testing.T) {
 		kind:        compSlash,
 		items:       []compItem{{label: "/mcp", insert: "/mcp ", descend: true}},
 		replaceFrom: 0,
+		replaceTo:   len("/"),
 	}
 
 	out, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})

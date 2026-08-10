@@ -12,7 +12,7 @@ import (
 	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
-// --- Detect ---
+// Detect
 
 func TestDetectUTF8Plain(t *testing.T) {
 	enc, _ := Detect([]byte("hello world\n"))
@@ -71,7 +71,7 @@ func TestDetectEmpty(t *testing.T) {
 	}
 }
 
-// --- Decode ---
+// Decode
 
 func TestDecodeUTF8(t *testing.T) {
 	in := []byte("hello\n世界")
@@ -146,7 +146,7 @@ func TestDecodeLossyUTF8(t *testing.T) {
 	}
 }
 
-// --- Encode ---
+// Encode
 
 func TestEncodeUTF8(t *testing.T) {
 	out := Encode("hello", UTF8)
@@ -195,7 +195,7 @@ func TestEncodeGB18030(t *testing.T) {
 	}
 }
 
-// --- Round-trip ---
+// Round-trip
 
 func TestRoundTripGB18030(t *testing.T) {
 	original := "你好世界\n第二行\n"
@@ -235,7 +235,7 @@ func TestRoundTripUTF8BOM(t *testing.T) {
 	}
 }
 
-// --- BOM-less UTF-16 ---
+// BOM-less UTF-16
 
 func utf16NoBOM(t *testing.T, s string, order binary.ByteOrder) []byte {
 	t.Helper()
@@ -306,7 +306,7 @@ func TestRoundTripUTF16LENoBOM(t *testing.T) {
 	}
 }
 
-// --- UTF-16 supplementary plane (surrogate pairs) ---
+// UTF-16 supplementary plane (surrogate pairs)
 
 func TestSurrogatePairRoundTrip(t *testing.T) {
 	// U+1F600 (😀) is in the supplementary plane and requires a surrogate pair.

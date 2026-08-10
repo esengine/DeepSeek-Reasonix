@@ -9,6 +9,7 @@ import (
 
 	"reasonix/internal/evidence"
 	"reasonix/internal/instruction"
+	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
@@ -52,8 +53,9 @@ func (completeStep) Schema() json.RawMessage {
 	return json.RawMessage(`{
 "type":"object",
 "properties":{
-  "step":{"type":"string","description":"Which plan step this completes — its title or number, matching the task list."},
-  "step_index":{"type":"integer","minimum":1,"description":"Optional 1-based task-list item number. Prefer this when the step title is long or easy to mistype."},
+  "step_id":{"type":"string","description":"PREFERRED: the stable step_id of the task-list item this completes, e.g. \"plan_step_02\". Unlike a title or a number it survives retitles, insertions, and reordering, so cite it whenever the item has one."},
+  "step":{"type":"string","description":"Which plan step this completes — its title or number, matching the task list. Use only when the item has no step_id."},
+  "step_index":{"type":"integer","minimum":1,"description":"Optional 1-based task-list item number. Use only when the item has no step_id; an index goes stale the moment a step is inserted above it."},
   "result":{"type":"string","description":"What is now true or changed as a result of finishing this step."},
   "evidence":{
     "type":"array",
@@ -80,6 +82,12 @@ func (completeStep) Schema() json.RawMessage {
 // effect), so it never needs approval and stays available alongside todo_write.
 func (completeStep) ReadOnly() bool { return true }
 
+// complete_step signs off execution work and is unavailable during planning.
+// The host Plan gate remains authoritative for stale or hallucinated calls.
+func (completeStep) ProviderVisible(ctx context.Context) bool {
+	return !planmode.Active(ctx)
+}
+
 // PlanModeSafe reports false: although complete_step is read-only, it signs off a
 // completed execution step, which is meaningful only after plan approval — not
 // during planning. This explicit phase opt-out is the Plan gate's enforced
@@ -88,6 +96,7 @@ func (completeStep) PlanModeSafe() bool { return false }
 
 func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
+		StepID    string         `json:"step_id"`
 		Step      string         `json:"step"`
 		StepIndex int            `json:"step_index"`
 		Result    string         `json:"result"`
@@ -97,9 +106,9 @@ func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, 
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
-	step := completeStepIdentity(p.Step, p.StepIndex)
+	step := completeStepIdentity(p.StepID, p.Step, p.StepIndex)
 	if step == "" {
-		return "", fmt.Errorf("step or step_index is required — name the plan step you are completing, or cite its 1-based task-list number")
+		return "", fmt.Errorf("step_id, step, or step_index is required — cite the task-list item you are completing, preferring its stable step_id")
 	}
 	if p.StepIndex < 0 {
 		return "", fmt.Errorf("step_index must be a positive 1-based task-list number")
@@ -128,7 +137,7 @@ func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, 
 	hostVerified, manualUnverified, err := verifyStepEvidence(ctx, p.Evidence)
 	if err != nil {
 		if hasTodo && todoMatch.Status == "in_progress" {
-			return "", fmt.Errorf("%v; todo %d %q remains in_progress — repair the evidence and retry this step before moving on", err, todoMatch.Index, todoMatch.Content)
+			return "", fmt.Errorf("%w; todo %d %q remains in_progress — repair the evidence and retry this step before moving on", err, todoMatch.Index, todoMatch.Content)
 		}
 		return "", err
 	}
@@ -156,7 +165,13 @@ func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, 
 		step, len(p.Evidence), strings.Join(kinds, ", "), hostStatus+todoStatus+projectStatus, advanceStatus), nil
 }
 
-func completeStepIdentity(step string, stepIndex int) string {
+// completeStepIdentity picks the citation to resolve against the task list,
+// most stable first: an id survives a replan, an index survives a retitle, a
+// title survives neither.
+func completeStepIdentity(stepID, step string, stepIndex int) string {
+	if id := strings.TrimSpace(stepID); id != "" {
+		return id
+	}
 	if stepIndex > 0 {
 		return strconv.Itoa(stepIndex)
 	}
@@ -288,6 +303,9 @@ func verifyTodoStep(ctx context.Context, step string) (evidence.TodoStepMatch, b
 		if allCompleted {
 			last := len(todos) - 1
 			return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q has no matching todo_write item and every current todo is already completed; this is a renewal sign-off, so retry complete_step with step_index %d (the final existing todo %q) and the fresh evidence — do not invent a new step or rewrite the completed list", step, last+1, todos[last].Content)
+		}
+		if ids := evidence.TodoStepIDs(todos); len(ids) > 0 {
+			return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q has no matching todo_write item in the current task list; cite the item's stable step_id — available ids: %s (list: %s)", step, strings.Join(ids, ", "), todoListInventory(todos))
 		}
 		return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q has no matching todo_write item in the current task list; cite a todo verbatim or by number: %s", step, todoListInventory(todos))
 	}

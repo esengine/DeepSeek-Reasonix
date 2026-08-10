@@ -1,0 +1,4 @@
+prompt = "Pagination is off: the final partial page is dropped (5 items at size 2 yields 2 pages) and a next link is emitted past the last page. Fix paginate.py and linkhdr.py."
+class = "ebm-positive"
+max_steps = 18
+timeout_sec = 300

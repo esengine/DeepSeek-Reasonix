@@ -1,7 +1,10 @@
 package anthropic
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"reasonix/internal/provider"
@@ -9,7 +12,7 @@ import (
 
 func TestBuildRequestEmbedsImageBlockForVisionModel(t *testing.T) {
 	c := &client{model: "claude-opus-4-8", vision: true}
-	req := c.buildRequest(provider.Request{
+	req := c.buildRequest(context.Background(), provider.Request{
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Content: "describe", Images: []string{"data:image/jpeg;base64,ZZZZ"}},
 		},
@@ -26,7 +29,7 @@ func TestBuildRequestEmbedsImageBlockForVisionModel(t *testing.T) {
 
 func TestBuildRequestSkipsImageBlockWithoutVision(t *testing.T) {
 	c := &client{model: "claude-opus-4-8"} // vision unset
-	req := c.buildRequest(provider.Request{
+	req := c.buildRequest(context.Background(), provider.Request{
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Content: "describe", Images: []string{"data:image/jpeg;base64,ZZZZ"}},
 		},
@@ -34,6 +37,69 @@ func TestBuildRequestSkipsImageBlockWithoutVision(t *testing.T) {
 	blocks := req.Messages[0].Content
 	if len(blocks) != 1 || blocks[0].Type != "text" {
 		t.Fatalf("blocks = %+v, want [text] only when vision is off", blocks)
+	}
+}
+
+func TestOfficialDeepSeekIgnoresVisionMetadata(t *testing.T) {
+	p, err := New(provider.Config{
+		Name:    "deepseek-anthropic",
+		BaseURL: "https://api.deepseek.com/anthropic",
+		Model:   "deepseek-v4-pro",
+		Extra:   map[string]any{"vision": true},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	c := p.(*client)
+	if c.vision {
+		t.Fatal("official DeepSeek Anthropic endpoint must ignore vision metadata")
+	}
+	req := c.buildRequest(context.Background(), provider.Request{Messages: append(
+		[]provider.Message{{
+			Role: provider.RoleUser, Content: "describe",
+			Images: []string{"data:image/jpeg;base64,ZZZZ"},
+		}},
+		toolMessages([]string{"data:image/png;base64,QUFB"})...,
+	)})
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	if strings.Contains(string(body), `"type":"image"`) || strings.Contains(string(body), "ZZZZ") || strings.Contains(string(body), "QUFB") {
+		t.Fatalf("official DeepSeek Anthropic request leaked image payload: %s", body)
+	}
+}
+
+func TestOfficialDeepSeekImageMetadataMatchesTextOnlyWireBytes(t *testing.T) {
+	p, err := New(provider.Config{
+		Name:    "deepseek-anthropic",
+		BaseURL: "https://api.deepseek.com/anthropic",
+		Model:   "deepseek-v4-pro",
+		Extra:   map[string]any{"vision": true},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	c := p.(*client)
+	plain := []provider.Message{
+		{Role: provider.RoleUser, Content: "inspect"},
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "c1", Name: "shot", Arguments: "{}"}}},
+		{Role: provider.RoleTool, ToolCallID: "c1", Name: "shot", Content: "vision result"},
+	}
+	withImages := append([]provider.Message(nil), plain...)
+	withImages[0].Images = []string{"data:image/png;base64," + strings.Repeat("QUFB", 20_000)}
+	withImages[2].Images = []string{"data:image/png;base64,VE9PTA=="}
+
+	plainBody, err := json.Marshal(c.buildRequest(context.Background(), provider.Request{Messages: plain}))
+	if err != nil {
+		t.Fatalf("marshal plain request: %v", err)
+	}
+	imageBody, err := json.Marshal(c.buildRequest(context.Background(), provider.Request{Messages: withImages}))
+	if err != nil {
+		t.Fatalf("marshal image request: %v", err)
+	}
+	if !bytes.Equal(imageBody, plainBody) {
+		t.Fatalf("official DeepSeek Anthropic image metadata changed provider-visible bytes:\nplain: %s\nimage: %s", plainBody, imageBody)
 	}
 }
 
@@ -49,7 +115,7 @@ func toolMessages(images []string) []provider.Message {
 
 func TestBuildRequestEmbedsToolResultImagesForVisionModel(t *testing.T) {
 	c := &client{model: "claude-opus-4-8", vision: true}
-	req := c.buildRequest(provider.Request{Messages: toolMessages([]string{"data:image/png;base64,QUFB"})})
+	req := c.buildRequest(context.Background(), provider.Request{Messages: toolMessages([]string{"data:image/png;base64,QUFB"})})
 	last := req.Messages[len(req.Messages)-1]
 	if last.Role != "user" || len(last.Content) != 1 || last.Content[0].Type != "tool_result" {
 		t.Fatalf("last message = %+v, want a single tool_result block", last)
@@ -72,7 +138,7 @@ func TestBuildRequestEmbedsToolResultImagesForVisionModel(t *testing.T) {
 
 func TestBuildRequestDropsToolResultImagesWithoutVision(t *testing.T) {
 	c := &client{model: "claude-opus-4-8"} // vision unset
-	req := c.buildRequest(provider.Request{Messages: toolMessages([]string{"data:image/png;base64,QUFB"})})
+	req := c.buildRequest(context.Background(), provider.Request{Messages: toolMessages([]string{"data:image/png;base64,QUFB"})})
 	last := req.Messages[len(req.Messages)-1]
 	if s, ok := last.Content[0].Content.(string); !ok || s != "[image: image/png]" {
 		t.Fatalf("non-vision tool_result content = %#v, want the plain placeholder string", last.Content[0].Content)
@@ -90,7 +156,7 @@ func TestBuildRequestToolResultTextOnlyKeepsStringContent(t *testing.T) {
 	// and takes the cache breakpoint, so the tool_result block keeps its
 	// pre-image-channel bytes.
 	msgs = append(msgs, provider.Message{Role: provider.RoleUser, Content: "next"})
-	req := c.buildRequest(provider.Request{Messages: msgs})
+	req := c.buildRequest(context.Background(), provider.Request{Messages: msgs})
 	last := req.Messages[len(req.Messages)-1]
 	if len(last.Content) != 2 || last.Content[0].Type != "tool_result" {
 		t.Fatalf("last message blocks = %+v, want [tool_result, text]", last.Content)

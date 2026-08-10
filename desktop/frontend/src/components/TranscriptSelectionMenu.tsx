@@ -76,6 +76,7 @@ export function TranscriptSelectionMenu({
     setPoint(null);
     setText("");
     closeAction();
+    document.getSelection()?.removeAllRanges();
   }, [closeAction, resetKey]);
 
   const addSelectionToChat = useCallback(() => {
@@ -120,7 +121,7 @@ export function TranscriptSelectionMenu({
 
   useEffect(() => {
     const onContextMenu = (event: MouseEvent) => {
-      if (typeof window === "undefined" || !window.runtime) return;
+      if (!enabled || typeof window === "undefined" || !window.runtime) return;
       const selected = messageSelectionContextText(document, event.target);
       if (selected == null) return;
       event.preventDefault();
@@ -129,7 +130,15 @@ export function TranscriptSelectionMenu({
     };
     document.addEventListener("contextmenu", onContextMenu);
     return () => document.removeEventListener("contextmenu", onContextMenu);
-  }, []);
+  }, [enabled]);
+
+  useEffect(() => {
+    if (enabled && onAddToChat) return;
+    setPoint(null);
+    setText("");
+    closeAction();
+    document.getSelection()?.removeAllRanges();
+  }, [closeAction, enabled, onAddToChat]);
 
   useEffect(() => {
     if (!enabled || !onAddToChat) {
@@ -169,6 +178,20 @@ export function TranscriptSelectionMenu({
       dismissedRef.current = null;
       scheduleShow(event.target);
     };
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      const target = event.target instanceof Element ? event.target : null;
+      // Keep the selection alive while the action itself is clicked so the
+      // button can consume the captured text. Every other left-click starts a
+      // new gesture; clear the old range immediately instead of relying on
+      // WebView-specific selectionchange ordering.
+      if (target?.closest(".transcript-selection-action")) return;
+      const selection = document.getSelection();
+      if (!selection || selection.isCollapsed) return;
+      selection.removeAllRanges();
+      dismissedRef.current = null;
+      closeAction();
+    };
     const onKeyUp = (event: KeyboardEvent) => {
       const selection = document.getSelection();
       const target = selection?.focusNode instanceof Element
@@ -190,6 +213,7 @@ export function TranscriptSelectionMenu({
     };
     const close = () => closeAction();
 
+    document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("pointerup", onPointerUp);
     document.addEventListener("keyup", onKeyUp);
     document.addEventListener("keydown", onKeyDown);
@@ -198,6 +222,7 @@ export function TranscriptSelectionMenu({
     window.addEventListener("scroll", close, true);
     return () => {
       if (frame !== null) cancelAnimationFrame(frame);
+      document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("pointerup", onPointerUp);
       document.removeEventListener("keyup", onKeyUp);
       document.removeEventListener("keydown", onKeyDown);
