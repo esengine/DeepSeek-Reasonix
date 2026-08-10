@@ -145,8 +145,8 @@ func TestSlashArgItems(t *testing.T) {
 	}
 	// /goal
 	items, _ = SlashArgItems("/goal ", data)
-	if !has(items, "--research") || !has(items, "--simple") || !has(items, "status") || !has(items, "clear") {
-		t.Errorf("/goal should offer research overrides and management commands; got %v", labelsOf(items))
+	if has(items, "--research") || has(items, "--simple") || !has(items, "status") || !has(items, "clear") {
+		t.Errorf("/goal should hide legacy budget flags and offer management commands; got %v", labelsOf(items))
 	}
 	if items, _ := SlashArgItems("/goal --research ", data); len(items) != 0 {
 		t.Errorf("/goal after a research flag should accept free-form objectives; got %v", labelsOf(items))

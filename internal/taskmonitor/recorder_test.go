@@ -3,7 +3,6 @@ package taskmonitor
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -28,7 +27,7 @@ func TestTaskRecorder_Lifecycle(t *testing.T) {
 	if err != nil || snap == nil {
 		t.Fatalf("GetTask after start: %+v, %v", snap, err)
 	}
-	if snap.State != TaskStateRunning || snap.RuntimeState != RuntimeStateAlive || snap.Version != 1 || snap.SessionID != "sess-1" || snap.ParentSessionID != "" {
+	if snap.State != TaskStateRunning || snap.RuntimeState != RuntimeStateAlive || snap.Version != 1 || snap.SessionID != "sess-1" {
 		t.Fatalf("snapshot after start = %+v", snap)
 	}
 	if snap.JobID != "task-1" {
@@ -56,63 +55,102 @@ func TestTaskRecorder_Lifecycle(t *testing.T) {
 func TestTaskRecorder_ParentMetadata(t *testing.T) {
 	dir := t.TempDir()
 	r, store := newRecorderForTest(t, dir)
-	r.RecordStartWithParent("child-1", "subagent", "child", "parent-1", "sess-1")
-	snap, err := store.GetTask(context.Background(), dir, monitorTaskID("sess-1", "child-1"))
+	ctx := context.Background()
+
+	r.RecordStartWithParent("child-1", "subagent", "demo", "parent-1", "parent-session")
+	snap, err := store.GetTask(ctx, dir, monitorTaskID("sess-1", "child-1"))
 	if err != nil || snap == nil {
-		t.Fatalf("GetTask: %+v, %v", snap, err)
+		t.Fatalf("GetTask after start: %+v, %v", snap, err)
 	}
-	if snap.ParentTaskID != "parent-1" || snap.ParentSessionID != "sess-1" || snap.Kind != "subagent" || snap.Depth != 1 {
-		t.Fatalf("parent metadata = %+v", snap)
-	}
-	events, err := store.ListEvents(context.Background(), dir, snap.TaskID, 0)
-	if err != nil || len(events) != 1 || events[0].ParentTaskID != "parent-1" {
-		t.Fatalf("parent event = %+v, %v", events, err)
+	if snap.ParentTaskID != "parent-1" || snap.ParentSessionID != "parent-session" || snap.Kind != "subagent" || snap.Depth != 1 || snap.Attempt != 1 {
+		t.Fatalf("snapshot metadata = %+v", snap)
 	}
 }
 
-func TestTaskRecorder_FailedMapsError(t *testing.T) {
+func TestTaskRecorder_HeartbeatRenewsExpiredOwnedLease(t *testing.T) {
+	dir := t.TempDir()
+	r, store := newRecorderForTest(t, dir)
+	ctx := context.Background()
+	monitorID := monitorTaskID("sess-1", "task-1")
+
+	r.RecordStart("task-1", "task", "demo")
+	// Drive the renewal deterministically instead of waiting for the ticker.
+	r.stopHeartbeat(monitorID)
+	raw, err := store.getTaskRaw(ctx, dir, monitorID)
+	if err != nil || raw == nil {
+		t.Fatalf("raw task after start: %+v, %v", raw, err)
+	}
+	raw.Version++
+	raw.RuntimeLeaseUntil = time.Now().Add(-time.Minute)
+	if err := store.SaveTask(ctx, dir, *raw); err != nil {
+		t.Fatal(err)
+	}
+
+	observed, err := store.GetTask(ctx, dir, monitorID)
+	if err != nil || observed == nil || observed.State != TaskStateStale || observed.RuntimeState != RuntimeStateExited {
+		t.Fatalf("expired observed task = %+v, err=%v", observed, err)
+	}
+	if !r.renewHeartbeat(ctx, monitorID) {
+		t.Fatal("live owner failed to renew its expired persisted lease")
+	}
+	observed, err = store.GetTask(ctx, dir, monitorID)
+	if err != nil || observed == nil || observed.State != TaskStateRunning || observed.RuntimeState != RuntimeStateAlive {
+		t.Fatalf("renewed observed task = %+v, err=%v", observed, err)
+	}
+	if !observed.RuntimeLeaseUntil.After(time.Now()) {
+		t.Fatalf("renewed lease = %v, want future deadline", observed.RuntimeLeaseUntil)
+	}
+
+	r.RecordDone("task-1", jobs.Done, nil)
+}
+
+func TestTaskRecorder_OldOwnerCannotRenewNewRuntimeGeneration(t *testing.T) {
+	dir := t.TempDir()
+	r, store := newRecorderForTest(t, dir)
+	ctx := context.Background()
+	monitorID := monitorTaskID("sess-1", "task-1")
+
+	r.RecordStart("task-1", "task", "demo")
+	r.stopHeartbeat(monitorID)
+	raw, err := store.getTaskRaw(ctx, dir, monitorID)
+	if err != nil || raw == nil {
+		t.Fatalf("raw task after start: %+v, %v", raw, err)
+	}
+	raw.Version++
+	raw.RuntimeOwnerID = "new-runtime-owner"
+	raw.RuntimeLeaseUntil = time.Now().Add(-time.Minute)
+	if err := store.SaveTask(ctx, dir, *raw); err != nil {
+		t.Fatal(err)
+	}
+	if r.renewHeartbeat(ctx, monitorID) {
+		t.Fatal("older recorder renewed a newer runtime generation")
+	}
+	after, err := store.getTaskRaw(ctx, dir, monitorID)
+	if err != nil || after == nil {
+		t.Fatalf("raw task after rejected renewal: %+v, %v", after, err)
+	}
+	if after.RuntimeOwnerID != "new-runtime-owner" || !after.RuntimeLeaseUntil.Equal(raw.RuntimeLeaseUntil) {
+		t.Fatalf("rejected renewal mutated newer runtime: %+v", after)
+	}
+}
+
+func TestTaskRecorder_FailedUsesContentFreeErrorCode(t *testing.T) {
 	dir := t.TempDir()
 	r, store := newRecorderForTest(t, dir)
 	ctx := context.Background()
 
 	r.RecordStart("bash-1", "bash", "")
-	r.RecordDone("bash-1", jobs.Failed, context.DeadlineExceeded)
+	r.RecordDone("bash-1", jobs.Failed, fmt.Errorf(`command "deploy --token secret" failed in /Users/alice/private`))
 	snap, _ := store.GetTask(ctx, dir, monitorTaskID("sess-1", "bash-1"))
-	if snap.State != TaskStateFailed || snap.ErrorCode != "job_failed" || !strings.Contains(snap.ErrorSummary, "deadline") {
+	if snap.State != TaskStateFailed || snap.ErrorCode != "job_failed" || snap.ErrorSummary != "" {
 		t.Fatalf("snapshot = %+v", snap)
 	}
-}
-
-func TestTaskRecorder_TruncatesLongError(t *testing.T) {
-	dir := t.TempDir()
-	r, store := newRecorderForTest(t, dir)
-	ctx := context.Background()
-
-	long := strings.Repeat("x", maxErrorSummaryLen*2)
-	r.RecordStart("t1", "bash", "")
-	r.RecordDone("t1", jobs.Failed, fmt.Errorf("%s", long))
-	snap, _ := store.GetTask(ctx, dir, monitorTaskID("sess-1", "t1"))
-	if len(snap.ErrorSummary) > maxErrorSummaryLen {
-		t.Fatalf("ErrorSummary length %d exceeds max %d", len(snap.ErrorSummary), maxErrorSummaryLen)
+	events, err := store.ListEvents(ctx, dir, monitorTaskID("sess-1", "bash-1"), 0)
+	if err != nil || len(events) != 2 {
+		t.Fatalf("events = %+v, err=%v", events, err)
 	}
-}
-
-func TestTaskRecorder_RedactsCredentialFromErrorSummary(t *testing.T) {
-	dir := t.TempDir()
-	r, store := newRecorderForTest(t, dir)
-	ctx := context.Background()
-	secret := "sk-real-secret-value-123456"
-	r.RecordStart("credential-error", "task", "")
-	r.RecordDone("credential-error", jobs.Failed, fmt.Errorf("provider rejected DEEPSEEK_API_KEY=%s", secret))
-	snap, err := store.GetTask(ctx, dir, monitorTaskID("sess-1", "credential-error"))
-	if err != nil || snap == nil {
-		t.Fatalf("snapshot = %+v, err=%v", snap, err)
-	}
-	if strings.Contains(snap.ErrorSummary, secret) {
-		t.Fatalf("error summary leaked credential: %q", snap.ErrorSummary)
-	}
-	if !strings.Contains(snap.ErrorSummary, "****") {
-		t.Fatalf("error summary was not redacted: %q", snap.ErrorSummary)
+	if events[1].ErrorCode != "job_failed" || events[1].ErrorSummary != "" {
+		t.Fatalf("terminal event exposed error content: %+v", events[1])
 	}
 }
 

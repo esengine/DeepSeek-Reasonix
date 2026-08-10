@@ -3,11 +3,12 @@ package control
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"unicode"
 
+	"reasonix/internal/ablation"
 	"reasonix/internal/agent"
+	"reasonix/internal/event"
 	"reasonix/internal/memory"
 	"reasonix/internal/planmode"
 	"reasonix/internal/skill"
@@ -138,15 +139,13 @@ func (c *Controller) Compose(text string) string {
 }
 
 func (c *Controller) compose(text, source string, includeHookContext bool) string {
-	goal, goalStatus, goalResearchMode, autoResearchTaskID := c.goals.snapshot()
+	goal, goalStatus := c.goals.snapshot()
 	return c.composeWithGoal(
 		text,
 		source,
 		includeHookContext,
 		goal,
 		goalStatus,
-		goalResearchMode,
-		autoResearchTaskID,
 	)
 }
 
@@ -154,8 +153,6 @@ func (c *Controller) composeWithGoal(
 	text, source string,
 	includeHookContext bool,
 	goal, goalStatus string,
-	goalResearchMode GoalResearchMode,
-	autoResearchTaskID string,
 ) string {
 	c.mu.Lock()
 	plan := c.planMode
@@ -165,10 +162,7 @@ func (c *Controller) composeWithGoal(
 	notes := c.memory.drainPending()
 
 	if strings.TrimSpace(goal) != "" && goalStatus == GoalStatusRunning {
-		prefix := activeGoalBlock(goal, goalResearchMode)
-		if runtime := c.autoResearchRuntimeBlock(autoResearchTaskID); runtime != "" {
-			prefix += "\n\n" + runtime
-		}
+		prefix := activeGoalBlock(goal)
 		text = prefix + "\n\n" + text
 	}
 	if plan {
@@ -206,11 +200,13 @@ func (c *Controller) composeWithGoal(
 		// Relevant facts ride only the real user-turn tail. This preserves the
 		// stable system/tool prefix and keeps synthetic recovery turns free of
 		// accidental recall. A just-written fact already arrives in memory-update.
-		if len(notes) == 0 {
-			if block := c.memory.recall(source).Block(); block != "" {
+		if len(notes) == 0 && !c.ablation.Off(ablation.Retrieval) {
+			result := c.memory.recall(source)
+			event.RecordMemoryRecall(c.sink, memoryRecallAudit(result))
+			if block := result.Block(); block != "" {
 				text = strings.TrimRight(text, "\n") + "\n\n" + block
 			}
-		} else {
+		} else if len(notes) > 0 {
 			c.memory.recordRecall(memory.RecallResult{
 				Query:      strings.TrimSpace(source),
 				Suppressed: "memory update already supplies the new fact",
@@ -290,53 +286,6 @@ func escapeHookContext(s string) string {
 	return strings.ReplaceAll(s, "</"+hookContextTag+">", "<\\/"+hookContextTag+">")
 }
 
-func (c *Controller) autoResearchRuntimeBlock(taskID string) string {
-	if c.autoResearch == nil || strings.TrimSpace(taskID) == "" {
-		return ""
-	}
-	summary, err := c.autoResearch.Summary(taskID)
-	if err != nil {
-		return "<autoresearch-runtime>\nstatus: invalid\nerror: " + strings.ReplaceAll(err.Error(), autoResearchRuntimeClose, "<\\/autoresearch-runtime>") + "\n</autoresearch-runtime>"
-	}
-	var b strings.Builder
-	b.WriteString("<autoresearch-runtime>\n")
-	b.WriteString("task_id: " + summary.TaskID + "\n")
-	b.WriteString("status: " + summary.Status + "\n")
-	b.WriteString("iteration: ")
-	b.WriteString(strconv.Itoa(summary.Iteration))
-	b.WriteString("\n")
-	b.WriteString("current_direction: " + summary.CurrentDirection + "\n")
-	b.WriteString("stale_count: ")
-	b.WriteString(strconv.Itoa(summary.StaleCount))
-	b.WriteString("\n")
-	b.WriteString("pivot_count: ")
-	b.WriteString(strconv.Itoa(summary.PivotCount))
-	b.WriteString("\n")
-	if summary.PivotRequired {
-		b.WriteString("pivot_required: true\n")
-	} else {
-		b.WriteString("pivot_required: false\n")
-	}
-	b.WriteString("open_success_criteria: ")
-	b.WriteString(strconv.Itoa(len(summary.OpenCriteria)))
-	b.WriteString("\n")
-	for _, criterion := range summary.OpenCriteria {
-		b.WriteString("- ")
-		b.WriteString(criterion.ID)
-		b.WriteString(": ")
-		b.WriteString(strings.ReplaceAll(criterion.Description, "\n", " "))
-		b.WriteString("\n")
-	}
-	if summary.Blocker != "" {
-		b.WriteString("blocker: " + summary.Blocker + "\n")
-	}
-	b.WriteString("next_required_action: " + summary.NextRequiredAction + "\n")
-	b.WriteString("</autoresearch-runtime>")
-	return b.String()
-}
-
-const autoResearchRuntimeClose = "</autoresearch-runtime>"
-
 func reasoningLanguageBlock(lang string) string {
 	return agent.ReasoningLanguageBlock(lang)
 }
@@ -350,7 +299,7 @@ func (c *Controller) ComposeSynthetic(text string) string {
 	return agent.WithReasoningLanguageForSource(text, lang, text)
 }
 
-func activeGoalBlock(goal string, researchMode GoalResearchMode) string {
+func activeGoalBlock(goal string) string {
 	goal = strings.TrimSpace(goal)
 	goal = strings.ReplaceAll(goal, activeGoalClose, "<\\/active-goal>")
 	var b strings.Builder
@@ -359,10 +308,6 @@ func activeGoalBlock(goal string, researchMode GoalResearchMode) string {
 	b.WriteString(goal)
 	b.WriteString("\n\n")
 	b.WriteString(goalTaskContractInstructions)
-	if shouldUseAutoResearch(goal, researchMode) {
-		b.WriteString("\n\n")
-		b.WriteString(autoResearchGoalInstructions)
-	}
 	b.WriteString("\n")
 	b.WriteString(activeGoalClose)
 	return b.String()
@@ -374,107 +319,7 @@ const goalTaskContractInstructions = `Goal mode: pursue this goal autonomously. 
 - Pause only when the next step involves an irreversible or externally visible operation, the requested scope has changed, or progress requires information only the user can provide. Otherwise keep working and report assumptions at the end.
 - Complete only when the concrete request is done, the output format and constraints are satisfied, and relevant verification was attempted or reported unavailable.
 
-Do not stop after describing a plan; execute the next useful step. End every goal-mode assistant reply with exactly one status marker on its own line: [goal:continue], [goal:complete], or [goal:blocked:<short reason>].`
-
-const autoResearchGoalInstructions = `AutoResearch protocol: this goal looks like long-horizon research, debugging, optimization, or implementation work. Treat AutoResearch as a durable strategy for this Goal, not as a background daemon or a global skill.
-- Say briefly in the first visible reply that the goal is being handled with AutoResearch and that host-owned state lives under .reasonix/autoresearch/<task-id>/, using the actual task_id from <autoresearch-runtime>.
-- Keep dynamic state out of REASONIX.md, AGENTS.md, project memory, system prompts, and tool schemas. Use project-local .reasonix/autoresearch/ state only.
-- Use the task_id and open_success_criteria in <autoresearch-runtime> as authoritative. The host creates task ids and owns state/task_spec.json, state/progress.json, state/findings.jsonl, state/directions_tried.json, state/iteration_log.jsonl, and logs/heartbeat.jsonl.
-- Do not hand-edit the host-owned AutoResearch state files. When you have direct evidence for an open criterion, include an <autoresearch-evidence> block in your assistant reply so the host can persist it:
-<autoresearch-evidence>
-{"criterion_id":"objective_evidence","kind":"file","summary":"What was directly observed","source":"file","paths":["relative/path"],"accepted":true}
-</autoresearch-evidence>
-- Before each iteration, use the runtime summary as authoritative, choose a direction that differs materially from directions already tried, execute the smallest evidence-producing chunk, verify it, and report accepted evidence with <autoresearch-evidence> blocks.
-- Increment stale_count when an iteration lacks accepted evidence or repeats a prior direction. At stale_count >= 2, make a structural pivot such as changing evidence source, entrypoint, implementation boundary, test oracle, benchmark, decomposition, environment, platform, or refutation angle. At stale_count >= 4, stop autonomous digging and ask for the smallest external input needed.
-- Workers or subagents may gather evidence, but the orchestrator owns canonical state writes. Workers must not publish, push, delete, contact external systems, or write canonical state unless explicitly designated.
-- Complete only after auditing every open success criterion in <autoresearch-runtime> against direct evidence. Public publishing, destructive changes, credential use, payments, external notifications, privacy-sensitive output, and cache-sensitive changes still require the normal Reasonix gates.`
-
-func shouldUseAutoResearch(goal string, mode GoalResearchMode) bool {
-	switch mode {
-	case GoalResearchOn:
-		return true
-	case GoalResearchOff:
-		return false
-	}
-	return isAutoResearchGoal(goal)
-}
-
-func isAutoResearchGoal(goal string) bool {
-	trimmed := strings.TrimSpace(goal)
-	if trimmed == "" {
-		return false
-	}
-	lower := strings.ToLower(trimmed)
-	if strings.Contains(lower, ".reasonix/autoresearch/") {
-		return true
-	}
-	for _, kw := range autoResearchStrongKeywords {
-		if strings.Contains(lower, kw) {
-			return true
-		}
-	}
-	return autoResearchPhaseCount(lower) >= 4
-}
-
-func autoResearchPhaseCount(lower string) int {
-	categories := 0
-	for _, group := range autoResearchPhaseKeywords {
-		if containsAnyGoalKeyword(lower, group) {
-			categories++
-		}
-	}
-	return categories
-}
-
-var autoResearchStrongKeywords = []string{
-	"持续",
-	"长期",
-	"彻底",
-	"直到根因",
-	"根因明确",
-	"多轮",
-	"不要原地打转",
-	"别原地打转",
-	"完整方案",
-	"完整做成方案",
-	"跑实验",
-	"反复验证",
-	"长期优化",
-	"系统性研究",
-	"持续研究",
-	"持续排查",
-	"持续推进",
-	"长期跑",
-	"long-horizon",
-	"long horizon",
-	"long-running",
-	"keep researching",
-	"keep working",
-	"root cause",
-	"until the root cause",
-	"do not spin",
-	"don't spin",
-	"thoroughly",
-	"systematically",
-}
-
-var autoResearchPhaseKeywords = [][]string{
-	{"研究", "调研", "排查", "分析", "定位", "诊断", "research", "investigate", "diagnose", "analyze", "analysis"},
-	{"实现", "修复", "改造", "开发", "重构", "implement", "build", "fix", "refactor"},
-	{"验证", "测试", "复现", "联调", "benchmark", "verify", "validate", "test", "reproduce"},
-	{"优化", "完善", "提升", "收敛", "optimize", "improve", "tune", "polish"},
-	{"文档", "方案", "说明", "总结", "document", "docs", "writeup", "plan"},
-	{"发布", "上线", "提交", "pull request", "publish", "ship", "deploy"},
-}
-
-func containsAnyGoalKeyword(s string, needles []string) bool {
-	for _, needle := range needles {
-		if strings.Contains(s, needle) {
-			return true
-		}
-	}
-	return false
-}
+Do not stop after describing a plan; execute the next useful step. End every goal-mode turn by calling the update_goal tool with your disposition: continue (work is ongoing — give the next concrete step in next_action), complete (only when fully done and verified), or blocked (only when the user can unblock). The host validates your claim and decides whether to continue automatically.`
 
 // MemoryQuickAddNote parses the "# <note>" memory shortcut. The space after
 // "#" is intentional: "#7", "#issue", and "#标题" are ordinary user prompts,
@@ -512,14 +357,19 @@ const (
 	GoalCommandStatus GoalCommandAction = iota + 1
 	GoalCommandSet
 	GoalCommandClear
+	GoalCommandPause
+	GoalCommandResume
 )
 
 type GoalCommand struct {
-	Action       GoalCommandAction
-	Text         string
-	Strict       bool
-	ResearchMode GoalResearchMode
+	Action               GoalCommandAction
+	Text                 string
+	Strict               bool
+	ResearchMode         GoalResearchMode
+	DeprecatedBudgetFlag bool
 }
+
+const GoalBudgetFlagDeprecatedNotice = "This /goal budget flag is deprecated; Goal now selects its budget automatically."
 
 func ParseGoalCommand(input string) (GoalCommand, bool) {
 	trimmed := strings.TrimSpace(input)
@@ -528,14 +378,19 @@ func ParseGoalCommand(input string) (GoalCommand, bool) {
 	}
 	args := strings.TrimSpace(trimmed[len("/goal"):])
 	strict, researchMode, actionArgs := parseLeadingGoalFlags(args)
+	deprecatedBudgetFlag := researchMode != GoalResearchAuto
 
 	switch strings.ToLower(actionArgs) {
 	case "", "status":
-		return GoalCommand{Action: GoalCommandStatus, Strict: strict, ResearchMode: researchMode}, true
+		return GoalCommand{Action: GoalCommandStatus, Strict: strict, ResearchMode: researchMode, DeprecatedBudgetFlag: deprecatedBudgetFlag}, true
 	case "clear", "off", "stop", "done":
-		return GoalCommand{Action: GoalCommandClear, Strict: strict, ResearchMode: researchMode}, true
+		return GoalCommand{Action: GoalCommandClear, Strict: strict, ResearchMode: researchMode, DeprecatedBudgetFlag: deprecatedBudgetFlag}, true
+	case "pause":
+		return GoalCommand{Action: GoalCommandPause, Strict: strict, ResearchMode: researchMode, DeprecatedBudgetFlag: deprecatedBudgetFlag}, true
+	case "resume":
+		return GoalCommand{Action: GoalCommandResume, Strict: strict, ResearchMode: researchMode, DeprecatedBudgetFlag: deprecatedBudgetFlag}, true
 	default:
-		return GoalCommand{Action: GoalCommandSet, Text: actionArgs, Strict: strict, ResearchMode: researchMode}, true
+		return GoalCommand{Action: GoalCommandSet, Text: actionArgs, Strict: strict, ResearchMode: researchMode, DeprecatedBudgetFlag: deprecatedBudgetFlag}, true
 	}
 }
 

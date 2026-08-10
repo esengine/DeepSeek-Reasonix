@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -147,6 +148,12 @@ func Collect(opts Options) Report {
 	bashConfigIgnored := strings.TrimSpace(cfg.Sandbox.Bash) == "enforce" && cfg.BashMode() == "off"
 	if bashConfigIgnored {
 		warnings = append(warnings, `config requests [sandbox] bash = "enforce", but Windows does not provide an OS-level Bash sandbox; the setting is fixed to "off" and bash runs unconfined`)
+	}
+	// Supervised deployments sometimes override HOME onto a service config dir
+	// while Reasonix isolation should use REASONIX_HOME. Do not rewrite
+	// subprocess HOME automatically (#7600 rejected); surface the mismatch.
+	if warn := homeIsolationWarning(); warn != "" {
+		warnings = append(warnings, warn)
 	}
 	report := Report{
 		Version: opts.Version,
@@ -357,6 +364,46 @@ func valueOr(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+// homeIsolationWarning detects a process HOME that differs from the OS account
+// home while REASONIX_HOME is unset. Services should keep the real account HOME
+// and isolate Reasonix state with REASONIX_HOME instead of rewriting HOME.
+func homeIsolationWarning() string {
+	if strings.TrimSpace(os.Getenv("REASONIX_HOME")) != "" {
+		return ""
+	}
+	envHome := strings.TrimSpace(os.Getenv("HOME"))
+	if envHome == "" {
+		// Windows services often set USERPROFILE rather than HOME.
+		envHome = strings.TrimSpace(os.Getenv("USERPROFILE"))
+	}
+	if envHome == "" {
+		return ""
+	}
+	acct, err := user.Current()
+	if err != nil || acct == nil || strings.TrimSpace(acct.HomeDir) == "" {
+		return ""
+	}
+	envClean := filepath.Clean(envHome)
+	acctClean := filepath.Clean(acct.HomeDir)
+	if samePathFold(envClean, acctClean) {
+		return ""
+	}
+	// Do not embed either absolute path: when HOME is overridden, redactHome
+	// cannot mask the account home, and shareable doctor output must stay free
+	// of machine-local identity.
+	return "process HOME differs from the OS account home; keep the real account HOME for services and isolate Reasonix with REASONIX_HOME"
+}
+
+func samePathFold(a, b string) bool {
+	if a == b {
+		return true
+	}
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return false
 }
 
 // redactHome rewrites a path under the user's home directory to start with "~",

@@ -3,6 +3,7 @@
 // Bilingual like the rest of the site: static labels via .l-en/.l-zh spans that the
 // shared `reasonix-lang` choice toggles; plain-text strings pick the current lang.
 import { initTheme } from "./theme.js";
+import { initMobileNav } from "./mobile-nav.js";
 
 const FORUM = (import.meta.env.PUBLIC_FORUM_API || "https://forum.reasonix.io").replace(/\/$/, "");
 const ACCOUNTS = (import.meta.env.PUBLIC_ACCOUNTS_API || "https://id.reasonix.io").replace(/\/$/, "");
@@ -63,6 +64,7 @@ const ERR = {
   rate_limited: ["You're posting too fast — take a short break.", "发帖太快了——稍微歇一会儿。"],
   daily_limit: ["You've hit today's posting limit for your trust level.", "你已达到当前信任等级的每日发帖上限。"],
   closed: ["This topic is closed to new replies.", "该话题已关闭，不能再回复。"],
+  self_flag: ["You can't report your own post.", "不能举报自己的帖子。"],
   unauthorized: ["Sign in to continue.", "请先登录。"],
 };
 const errText = (err) => (ERR[err.code] ? t(ERR[err.code][0], ERR[err.code][1]) : err.message);
@@ -126,12 +128,11 @@ const loginUrl = () => `/login/?next=${encodeURIComponent(location.pathname + lo
 let account = null;
 async function loadAccount() {
   try { account = (await api(ACCOUNTS, "/me")).user; } catch { account = null; }
-  const slot = el("nav-account");
-  if (slot) {
+  document.querySelectorAll("#nav-account, #mobile-nav-account").forEach((slot) => {
     slot.innerHTML = account
       ? `<a href="/account/" title="${esc(account.email)}">${avatar(account.handle)}</a>`
       : `<a class="btn btn-ghost sm" href="${loginUrl()}">${L("Sign in", "登录")}</a>`;
-  }
+  });
 }
 
 /* ── home ─────────────────────────────────────────── */
@@ -161,14 +162,14 @@ function renderHome() {
       if (!d.topics.length) { topicBox.innerHTML = `<div class="empty">${L("No topics yet —", "还没有话题 ——")} <a class="tag" href="/community/new/">${L("start the first one", "来发第一个")}</a>.</div>`; return; }
       topicBox.innerHTML = d.topics.map((tp) => `
         <div class="topic">
-          ${avatar(tp.author.split("@")[0])}
+          ${avatar(tp.author)}
           <div class="main">
             <div class="title">
               ${tp.pinned ? `<span class="badge pinned">📌 ${L("Pinned", "置顶")}</span>` : ""}
               ${tp.status === "solved" ? `<span class="badge solved">✓ ${L("Solved", "已解决")}</span>` : ""}
               <a href="/community/topic/?id=${tp.id}">${esc(tp.title)}</a>
             </div>
-            <div class="sub"><span class="cat-tag">${catName(tp.category, tp.categoryName)}</span> <span class="who">${esc(tp.author.split("@")[0])}</span> · ${ago(tp.createdAt)}</div>
+            <div class="sub"><span class="cat-tag">${catName(tp.category, tp.categoryName)}</span> <span class="who">${esc(tp.author)}</span> · ${ago(tp.createdAt)}</div>
           </div>
           <div class="stat"><div class="n">${tp.replyCount}</div><div class="l">${L("replies", "回复")}</div></div>
           <div class="last">${ago(tp.lastPostAt)}</div>
@@ -193,13 +194,13 @@ function postHtml(p, topic) {
   const roleWord = ROLES[p.role] ? L(ROLES[p.role][0], ROLES[p.role][1]) : "";
   const role = roleWord ? `<span class="badge role ${esc(p.role)}">${roleWord}</span>` : "";
   return `<article class="${cls}">
-    ${avatar(p.handle || p.author.split("@")[0], "lg")}
+    ${avatar(p.handle || p.author, "lg")}
     <div>
       ${answer ? `<div class="answer-flag">✓ ${L("Accepted answer", "已采纳回答")}</div>` : ""}
-      <div class="who"><span class="name">${esc(p.handle || p.author.split("@")[0])}</span>${role}<span class="when">${ago(p.createdAt)}</span></div>
+      <div class="who"><span class="name">${esc(p.handle || p.author)}</span>${role}<span class="when">${ago(p.createdAt)}</span></div>
       <div class="body">${md(p.body)}</div>
       <div class="actions">
-        <button class="react" data-like="${p.id}">👍 <span>${p.likeCount || 0}</span></button>
+        <button class="react${p.liked ? " on" : ""}" data-like="${p.id}" data-liked="${p.liked ? "1" : "0"}" aria-pressed="${p.liked ? "true" : "false"}">👍 <span>${p.likeCount || 0}</span></button>
         <button class="link-act" data-flag="${p.id}">${L("Report", "举报")}</button>
       </div>
     </div>
@@ -225,9 +226,26 @@ async function renderThread() {
   el("posts").innerHTML = posts.map((p) => postHtml(p, topic)).join("");
 
   const seen = new Set();
-  el("parti").innerHTML = posts.filter((p) => !seen.has(p.author) && seen.add(p.author)).slice(0, 8).map((p) => avatar(p.handle || p.author.split("@")[0])).join("");
+  el("parti").innerHTML = posts.filter((p) => !seen.has(p.author) && seen.add(p.author)).slice(0, 8).map((p) => avatar(p.handle || p.author)).join("");
 
   el("posts").addEventListener("click", async (e) => {
+    const like = e.target.closest("[data-like]");
+    if (like && account) {
+      const wasLiked = like.dataset.liked === "1";
+      like.disabled = true;
+      try {
+        const out = await forum(`/posts/${like.dataset.like}/likes`, { method: wasLiked ? "DELETE" : "POST" });
+        like.dataset.liked = out.liked ? "1" : "0";
+        like.setAttribute("aria-pressed", out.liked ? "true" : "false");
+        like.classList.toggle("on", out.liked);
+        like.querySelector("span").textContent = out.likeCount;
+      } catch (err) { alert(errText(err)); }
+      finally { like.disabled = false; }
+      return;
+    } else if (like) {
+      location.href = loginUrl();
+      return;
+    }
     const flag = e.target.closest("[data-flag]");
     if (flag && account) {
       if (!confirm(t("Report this post as spam or abuse?", "举报该帖为垃圾/滥用内容？"))) return;
@@ -309,6 +327,7 @@ async function renderNew() {
 
 (async function () {
   initTheme();
+  initMobileNav();
   initLang();
   await loadAccount();
   if (el("topic-list")) renderHome();

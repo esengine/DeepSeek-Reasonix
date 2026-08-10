@@ -1,6 +1,9 @@
 package sftpfs
 
-import "unicode/utf8"
+import (
+	"slices"
+	"unicode/utf8"
+)
 
 // Kind classifies file content for preview purposes.
 type Kind int
@@ -26,10 +29,8 @@ func DetectKind(sample []byte) Kind {
 	if len(sample) > sniffLen {
 		sample = sample[:sniffLen]
 	}
-	for _, b := range sample {
-		if b == 0 {
-			return KindBinary
-		}
+	if slices.Contains(sample, 0) {
+		return KindBinary
 	}
 	if utf8.Valid(sample) {
 		return KindText

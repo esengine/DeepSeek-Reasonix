@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 
 	fileencoding "reasonix/internal/fileutil/encoding"
@@ -75,11 +76,36 @@ type Config struct {
 	pluginPackageOwners        map[string]string
 	pluginPackageSkillOwners   map[string][]string
 	pluginPackageAgentOwners   map[string][]string
-	editLoadErr                error
+	// explicitProjectSkillKeys records project-level skill fields that the
+	// settings UI intentionally owns even when their value equals the built-in
+	// default. It is transient edit metadata and is never serialized directly.
+	explicitProjectSkillKeys map[string]bool
+	editLoadErr              error
 	// loadWarnings are non-fatal issues observed while loading config (corrupt
 	// user/project files recovered via last-known-good or defaults). They never
 	// rewrite the original file; the UI may surface them for doctor repair.
 	loadWarnings []string
+}
+
+// KeepProjectSkillKey marks a skill field as an intentional project override.
+// An explicit empty/false project value must still be written so it can
+// override a non-default user setting in the layered configuration.
+func (c *Config) KeepProjectSkillKey(key string) error {
+	key = strings.TrimSpace(key)
+	switch key {
+	case "paths", "excluded_paths", "disabled_skills", "disable_implicit_invocation", "max_depth":
+	default:
+		return fmt.Errorf("unknown project skill key %q", key)
+	}
+	if c.explicitProjectSkillKeys == nil {
+		c.explicitProjectSkillKeys = make(map[string]bool)
+	}
+	c.explicitProjectSkillKeys[key] = true
+	return nil
+}
+
+func (c *Config) keepsProjectSkillKey(key string) bool {
+	return c != nil && c.explicitProjectSkillKeys[key]
 }
 
 type promptFileSource uint8
@@ -234,6 +260,7 @@ type UIConfig struct {
 	ShortcutLayout string `toml:"shortcut_layout"` // classic|desktop; accepted for compatibility
 	CloseBehavior  string `toml:"close_behavior"`  // legacy desktop close behavior; prefer desktop.close_behavior
 	ShowReasoning  bool   `toml:"show_reasoning"`  // Ctrl+O / /verbose: show thinking text in CLI; false = collapsed
+	ShowTurnUsage  bool   `toml:"show_turn_usage"` // show per-request token/cost receipts in the CLI/TUI transcript
 	CursorShape    string `toml:"cursor_shape"`    // block|underline|bar; empty defaults to bar
 }
 
@@ -290,14 +317,6 @@ type NotificationsConfig struct {
 	TurnDone        bool `toml:"turn_done"`
 	ApprovalRequest bool `toml:"approval_request"`
 	AskRequest      bool `toml:"ask_request"`
-}
-
-// EnvironmentConfig controls the stable startup environment block injected into
-// the model-facing prompt. Enabled nil means the default (enabled); Tools maps a
-// tool name to an explicit executable path when PATH probing is not enough.
-type EnvironmentConfig struct {
-	Enabled *bool             `toml:"enabled"`
-	Tools   map[string]string `toml:"tools"`
 }
 
 // EnvironmentEnabled reports whether startup environment probing should feed the
@@ -537,6 +556,9 @@ var defaultDesktopStatusBarItems = []string{
 	"cache_avg",
 	"session_tokens",
 	"turn_tokens",
+	"turn_tps",
+	"turn_output_tokens",
+	"turn_cache_tokens",
 	"turn_cost",
 	"session_turns",
 	"context",
@@ -1009,12 +1031,22 @@ func (c *Config) NetworkProxyMode() string {
 // the global roots. ExcludedPaths hides matching discovery roots without deleting
 // folders. ~, relative paths, and ${VAR} expansion are supported. DisabledSkills
 // hides named skills from the agent prompt, slash invocation, and skill tools
-// while keeping them manageable.
+// while keeping them manageable. DisableImplicitInvocation keeps skills
+// discoverable to the host for explicit /skill use and management, but hides
+// their index and model-facing invocation tools.
 type SkillsConfig struct {
-	Paths          []string `toml:"paths"`
-	ExcludedPaths  []string `toml:"excluded_paths"`
-	DisabledSkills []string `toml:"disabled_skills"`
-	MaxDepth       int      `toml:"max_depth"`
+	Paths                     []string `toml:"paths"`
+	ExcludedPaths             []string `toml:"excluded_paths"`
+	DisabledSkills            []string `toml:"disabled_skills"`
+	DisableImplicitInvocation bool     `toml:"disable_implicit_invocation"`
+	MaxDepth                  int      `toml:"max_depth"`
+}
+
+// ImplicitSkillInvocationEnabled reports whether the model may discover and
+// invoke skills without an explicit user slash command. The zero value keeps
+// the historical default enabled for old configs.
+func (c *Config) ImplicitSkillInvocationEnabled() bool {
+	return c == nil || !c.Skills.DisableImplicitInvocation
 }
 
 // SkillCustomPaths returns the configured custom skill roots with ${VAR}
@@ -1275,6 +1307,10 @@ type AgentConfig struct {
 	ToolResultSnipRatio float64 `toml:"tool_result_snip_ratio"`
 	CompactRatio        float64 `toml:"compact_ratio"`
 	CompactForceRatio   float64 `toml:"compact_force_ratio"`
+	// ContextEditing selects local maintenance (default) or explicitly opted-in
+	// Anthropic native tool clearing. Native is only honored by official
+	// Anthropic endpoints; compatible gateways remain local.
+	ContextEditing string `toml:"context_editing"`
 	// Keep controls which compactable messages stay verbatim beyond the current
 	// user-fact/digest floor and recent tail. Empty uses the conservative default
 	// of keeping error tool results.
@@ -1349,26 +1385,25 @@ type ProviderEntry struct {
 	// (the field is omitted). "low" caps an image to a fixed ~85 tokens for cheap
 	// coarse reads; ignored by providers without the knob (e.g. anthropic).
 	VisionDetail string `toml:"vision_detail"`
-	// WebSearch enables the server-side web_search tool for the anthropic
-	// provider kind. When true, the provider includes {"type":"web_search"} in
-	// the tools array, and the API executes searches server-side, returning
-	// web_search_tool_result content blocks in the stream. This is the primary
-	// way to use DeepSeek's built-in search via its Anthropic-compatible
-	// endpoint (https://api.deepseek.com/anthropic). Off by default.
-	WebSearch bool `toml:"web_search"`
+	// WebSearch controls the provider-executed web_search tool for compatible
+	// Anthropic and Responses endpoints. Nil lets official DeepSeek endpoints use
+	// their product default; non-nil preserves an explicit user choice across
+	// config rewrites. DeepSeek returns web_search_tool_result blocks on the
+	// Anthropic wire and response.web_search_call events on the Responses wire.
+	WebSearch *bool `toml:"web_search"`
 	// ReasoningProtocol selects the request shape for OpenAI-compatible reasoning
 	// models. Empty/auto uses the model capability registry plus endpoint
-	// heuristics; glm selects GLM's thinking.type toggle; none disables automatic
-	// reasoning controls for this provider.
+	// heuristics. Explicit values select DeepSeek, GLM, Kimi K3, or standard
+	// OpenAI reasoning contracts; none disables automatic reasoning controls.
 	ReasoningProtocol string `toml:"reasoning_protocol"`
 	// SupportedEfforts lists the /effort levels this provider/model exposes.
-	// When non-empty, it overrides the built-in defaults derived from
-	// Kind/BaseURL and makes /effort configurable. "auto" is the implicit
-	// prefix — always accepted. DefaultEffort resolves it; omit DefaultEffort
-	// (or set one outside this list) to fall back to SupportedEfforts[0].
+	// Non-empty values override built-in Kind/BaseURL defaults except for fixed
+	// Kimi K3 reasoning. "auto" is the implicit prefix — always accepted.
+	// DefaultEffort resolves it; omit DefaultEffort (or set one outside this
+	// list) to fall back to SupportedEfforts[0].
 	SupportedEfforts []string `toml:"supported_efforts"`
 	// DefaultEffort is the /effort level used when the user picks "auto" or
-	// has not set Effort. Ignored when SupportedEfforts is empty.
+	// has not set Effort. Ignored for empty SupportedEfforts or fixed Kimi K3.
 	DefaultEffort string `toml:"default_effort"`
 	// ModelOverrides customizes capability metadata after ResolveModel selects a
 	// concrete model from a multi-model provider. Use it when a gateway exposes
@@ -1379,6 +1414,9 @@ type ProviderEntry struct {
 	// NoProxy reaches this provider's base_url directly, never through the proxy.
 	// For China-only endpoints a foreign-exit proxy resets the TLS handshake (#2803).
 	NoProxy bool `toml:"no_proxy"`
+	// CacheTTLMinutes overrides the vendor-default prefix-cache retention used by
+	// cold-resume prune. Zero uses the vendor default (DeepSeek/unknown 24h, DashScope/Anthropic 5m).
+	CacheTTLMinutes int `toml:"cache_ttl_minutes"`
 }
 
 type ProviderModelOverride struct {
@@ -1489,12 +1527,7 @@ func (e *ProviderEntry) DefaultModel() string {
 
 // HasModel reports whether m is one of the provider's models.
 func (e *ProviderEntry) HasModel(m string) bool {
-	for _, x := range e.ModelList() {
-		if x == m {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(e.ModelList(), m)
 }
 
 // PriceForModel returns the configured per-1M-token price for model. Per-model
@@ -1701,49 +1734,6 @@ func (s MCPConfigSource) ProjectScoped() bool {
 	return s == MCPSourceProjectConfig || s == MCPSourceProjectMCPJSON
 }
 
-// PluginEntry declares an external MCP server. Type selects the transport:
-// "stdio" (default) launches Command/Args/Env as a subprocess; "http"
-// (a.k.a. streamable-http) and "sse" connect to a remote URL with optional
-// static Headers. String fields support ${VAR} / ${VAR:-default} expansion so
-// secrets (bearer tokens, keys) come from the environment, not the file. The
-// fields mirror Claude Code's mcpServers spec, so entries can come from either
-// reasonix.toml's [[plugins]] or a project-root .mcp.json (see loadMCPJSON).
-type PluginEntry struct {
-	Name    string            `toml:"name"`
-	Type    string            `toml:"type"` // "stdio" (default) | "http" | "sse"
-	Command string            `toml:"command"`
-	Args    []string          `toml:"args"`
-	Env     map[string]string `toml:"env"`
-	URL     string            `toml:"url"`
-	Headers map[string]string `toml:"headers"`
-	// StartupTimeoutSeconds overrides [tools].mcp_startup_timeout_seconds for
-	// initialize + tools/list. Zero keeps the global/default cap.
-	StartupTimeoutSeconds int `toml:"startup_timeout_seconds"`
-	// CallTimeoutSeconds overrides the default per-call deadline for this MCP
-	// server. Zero falls back to [tools].mcp_call_timeout_seconds.
-	CallTimeoutSeconds int `toml:"call_timeout_seconds"`
-	// ToolTimeoutSeconds overrides the per-call deadline for raw MCP tool names
-	// from this server. Keys are server-local tool names, not model-visible
-	// mcp__server__tool names.
-	ToolTimeoutSeconds map[string]int `toml:"tool_timeout_seconds"`
-	// AutoStart controls whether the server connects during session startup.
-	// Nil preserves historical behavior: configured servers start automatically.
-	AutoStart *bool `toml:"auto_start"`
-	// Tier is a legacy compatibility field. New config rendering omits it; enabled
-	// MCP servers connect automatically in the background unless auto_start=false.
-	// Historical values are accepted for old files:
-	//   "eager"      — blocks startup until the handshake completes; required for
-	//                  servers whose tools the system prompt depends on.
-	//   "lazy"       — legacy alias for background.
-	//   "background" — placeholder + spawn fired at boot but not waited on;
-	//                  swap happens once the spawn finishes.
-	// Empty defaults to "background" so enabled MCPs connect automatically
-	// without blocking chat. Unknown non-empty values fall back to "background".
-	Tier         string          `toml:"tier"`
-	Source       MCPConfigSource `toml:"-" json:"-"`
-	expansionEnv map[string]string
-}
-
 func (e PluginEntry) ShouldAutoStart() bool {
 	return e.AutoStart == nil || *e.AutoStart
 }
@@ -1825,7 +1815,7 @@ func Default() *Config {
 		ConfigVersion:    5,
 		DefaultModel:     "deepseek-flash",
 		CredentialsStore: CredentialsStoreAuto,
-		UI:               UIConfig{Theme: "auto"},
+		UI:               UIConfig{Theme: "auto", ShowTurnUsage: true},
 		Desktop:          DesktopConfig{DefaultToolApprovalMode: "auto", ConversationWidth: "standard"},
 		Notifications: NotificationsConfig{
 			Enabled:         false,
@@ -1844,6 +1834,7 @@ func Default() *Config {
 			ToolResultSnipRatio:    0.6,
 			CompactRatio:           0.8,
 			CompactForceRatio:      0.9,
+			ContextEditing:         "local",
 			MaxSubagentDepth:       2,
 			MaxSubagentConcurrency: 6,
 			MaxParallelWriters:     3,
@@ -1876,9 +1867,25 @@ func Default() *Config {
 			Feishu:             FeishuBotConfig{Domain: "feishu", AppSecretEnv: "FEISHU_BOT_APP_SECRET", Mode: "webhook", WebhookPort: 8080, RequireMention: true},
 			Weixin:             WeixinBotConfig{AccountID: "default", TokenEnv: "WEIXIN_BOT_TOKEN", APIBase: "https://ilinkai.weixin.qq.com"},
 		},
+		// New installs use DeepSeek's Anthropic-compatible Messages endpoint so
+		// provider-executed web search is available by default. Existing explicit
+		// provider entries are merged on top of these defaults and keep their
+		// configured protocol unchanged.
 		Providers: []ProviderEntry{
-			{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: deepSeekV4FlashPriceUSD()},
-			{Name: "deepseek-pro", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: deepSeekV4ProPriceUSD()},
+			{
+				Name: "deepseek-flash", Kind: "anthropic", BaseURL: deepSeekAnthropicBaseURL,
+				Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY",
+				BalanceURL: "https://api.deepseek.com/user/balance", Thinking: "enabled",
+				WebSearch: boolPointer(true), SupportedEfforts: []string{"disabled", "low", "high", "max"}, DefaultEffort: "high",
+				ContextWindow: 1_000_000, Price: deepSeekV4FlashPriceUSD(),
+			},
+			{
+				Name: "deepseek-pro", Kind: "anthropic", BaseURL: deepSeekAnthropicBaseURL,
+				Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY",
+				BalanceURL: "https://api.deepseek.com/user/balance", Thinking: "enabled",
+				WebSearch: boolPointer(true), SupportedEfforts: []string{"disabled", "high", "max"}, DefaultEffort: "high",
+				ContextWindow: 1_000_000, Price: deepSeekV4ProPriceUSD(),
+			},
 		},
 	}
 }
@@ -1916,6 +1923,9 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 		return nil, false
 	}
 	if access := desktopProviderAccessMap(c.Desktop.ProviderAccess); len(access) > 0 {
+		if access["deepseek"] && !canCanonicalizeLegacyDeepSeekProviders(c) {
+			delete(access, "deepseek")
+		}
 		ref = retargetDesktopOfficialRef(ref, access)
 	}
 	// "provider/model"

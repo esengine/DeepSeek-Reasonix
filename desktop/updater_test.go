@@ -93,7 +93,7 @@ func TestValidateAssetInstallLayout(t *testing.T) {
 }
 
 func TestUpdaterWailsMethodContracts(t *testing.T) {
-	appType := reflect.TypeOf((*App)(nil))
+	appType := reflect.TypeFor[*App]()
 	tests := []struct {
 		name   string
 		numIn  int
@@ -146,14 +146,17 @@ func TestUpdaterNativeOperationsFailFastWhileBusy(t *testing.T) {
 
 func TestUpdaterReconcilesPendingUpdateBeforeInstallModeDispatch(t *testing.T) {
 	originalExists := pendingUpdateExistsForInstall
+	originalArchive := archiveSupersededPendingUpdateForInstall
 	originalReconcile := reconcilePendingUpdateForInstall
 	t.Cleanup(func() {
 		pendingUpdateExistsForInstall = originalExists
+		archiveSupersededPendingUpdateForInstall = originalArchive
 		reconcilePendingUpdateForInstall = originalReconcile
 	})
 
 	called := false
 	pendingUpdateExistsForInstall = func() bool { return true }
+	archiveSupersededPendingUpdateForInstall = func() (bool, error) { return false, nil }
 	reconcilePendingUpdateForInstall = func(runningVersion string) (repair.PendingUpdateReconcileResult, error) {
 		called = true
 		if runningVersion != version {
@@ -162,7 +165,7 @@ func TestUpdaterReconcilesPendingUpdateBeforeInstallModeDispatch(t *testing.T) {
 		return repair.PendingUpdateReconcileResult{Pending: true, Cleared: true}, nil
 	}
 	meta := &cachedUpdate{Channel: "preview", Version: "v1.18.0-preview.65", Size: 42}
-	if err := (&App{}).reconcilePendingUpdateBeforeInstall("install-1", meta); err != nil {
+	if err := (&App{}).reconcilePendingUpdateForRequest("install-1", meta); err != nil {
 		t.Fatal(err)
 	}
 	if !called {
@@ -170,20 +173,74 @@ func TestUpdaterReconcilesPendingUpdateBeforeInstallModeDispatch(t *testing.T) {
 	}
 }
 
-func TestUpdaterBlocksInstallWhilePreviousReleaseAwaitsHealth(t *testing.T) {
+func TestUpdaterArchivesSupersededUpdateBeforeReconciliation(t *testing.T) {
 	originalExists := pendingUpdateExistsForInstall
+	originalArchive := archiveSupersededPendingUpdateForInstall
 	originalReconcile := reconcilePendingUpdateForInstall
 	t.Cleanup(func() {
 		pendingUpdateExistsForInstall = originalExists
+		archiveSupersededPendingUpdateForInstall = originalArchive
+		reconcilePendingUpdateForInstall = originalReconcile
+	})
+
+	archived := false
+	pendingUpdateExistsForInstall = func() bool { return true }
+	archiveSupersededPendingUpdateForInstall = func() (bool, error) {
+		archived = true
+		return true, nil
+	}
+	reconcilePendingUpdateForInstall = func(string) (repair.PendingUpdateReconcileResult, error) {
+		if !archived {
+			t.Fatal("reconciliation ran before superseded update archival")
+		}
+		return repair.PendingUpdateReconcileResult{}, nil
+	}
+	meta := &cachedUpdate{Channel: "stable", Version: "v1.20.0", Size: 42}
+	if err := (&App{}).reconcilePendingUpdateForRequest("install-1", meta); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUpdaterReconcilesBeforeDownloading(t *testing.T) {
+	originalExists := pendingUpdateExistsForInstall
+	originalArchive := archiveSupersededPendingUpdateForInstall
+	originalReconcile := reconcilePendingUpdateForInstall
+	t.Cleanup(func() {
+		pendingUpdateExistsForInstall = originalExists
+		archiveSupersededPendingUpdateForInstall = originalArchive
 		reconcilePendingUpdateForInstall = originalReconcile
 	})
 
 	pendingUpdateExistsForInstall = func() bool { return true }
+	archiveSupersededPendingUpdateForInstall = func() (bool, error) { return false, nil }
+	reconcilePendingUpdateForInstall = func(string) (repair.PendingUpdateReconcileResult, error) {
+		return repair.PendingUpdateReconcileResult{Pending: true}, errors.New("blocked before download")
+	}
+	err := (&App{}).ApplyUpdateRequest("stable", "v1.20.0", "preflight-recovery")
+	if err == nil || !strings.Contains(err.Error(), "blocked before download") {
+		t.Fatalf("pre-download recovery error=%v", err)
+	}
+}
+
+func TestUpdaterBlocksInstallWhilePreviousReleaseAwaitsHealth(t *testing.T) {
+	originalExists := pendingUpdateExistsForInstall
+	originalArchive := archiveSupersededPendingUpdateForInstall
+	originalReconcile := reconcilePendingUpdateForInstall
+	t.Cleanup(func() {
+		pendingUpdateExistsForInstall = originalExists
+		archiveSupersededPendingUpdateForInstall = originalArchive
+		reconcilePendingUpdateForInstall = originalReconcile
+	})
+
+	pendingUpdateExistsForInstall = func() bool { return true }
+	archiveSupersededPendingUpdateForInstall = func() (bool, error) {
+		return false, errors.New("not a superseded flat-layout transaction")
+	}
 	reconcilePendingUpdateForInstall = func(string) (repair.PendingUpdateReconcileResult, error) {
 		return repair.PendingUpdateReconcileResult{Pending: true, AwaitingHealth: true}, repair.ErrPendingUpdateAwaitingHealth
 	}
 	meta := &cachedUpdate{Channel: "preview", Version: "v1.18.0-preview.65", Size: 42}
-	err := (&App{}).reconcilePendingUpdateBeforeInstall("install-1", meta)
+	err := (&App{}).reconcilePendingUpdateForRequest("install-1", meta)
 	if err == nil || !strings.Contains(err.Error(), "startup health check") {
 		t.Fatalf("health-check recovery error = %v", err)
 	}
@@ -1035,8 +1092,8 @@ func TestExtractLinuxReleaseUnitRejectsAmbiguousMembers(t *testing.T) {
 }
 
 func TestApplyLinuxVersionedActivatesWithoutPersistingGuard(t *testing.T) {
-	root := t.TempDir()
-	source := t.TempDir()
+	root := robustTempDir(t)
+	source := robustTempDir(t)
 	for _, name := range []string{installlayout.DesktopBinaryName(), installlayout.CLIBinaryName()} {
 		if err := os.WriteFile(filepath.Join(source, name), []byte("old-"+name), 0o700); err != nil {
 			t.Fatal(err)
@@ -1104,8 +1161,8 @@ func TestApplyLinuxVersionedActivatesWithoutPersistingGuard(t *testing.T) {
 }
 
 func TestApplyLinuxHoldsReleaseUnitLockDuringReplace(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("REASONIX_HOME", t.TempDir())
+	dir := robustTempDir(t)
+	t.Setenv("REASONIX_HOME", robustTempDir(t))
 	exe := filepath.Join(dir, "reasonix-desktop")
 	releasePaths := releaseUnitPathsFor(dir, "linux")
 	for _, path := range releasePaths {
@@ -1199,9 +1256,9 @@ func fastRetry(t *testing.T) {
 func TestDownloadRecoversFromMidStreamReset(t *testing.T) {
 	fastRetry(t)
 	const body = "complete-installer-bytes"
-	var calls int32
+	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		if atomic.AddInt32(&calls, 1) < int32(downloadAttempts) {
+		if calls.Add(1) < int32(downloadAttempts) {
 			// Mid-stream reset: promise 100 bytes, send a few, drop the socket —
 			// the client's body read fails with unexpected EOF, exactly the CN-IPv6
 			// "forcibly closed" case the retry exists for.
@@ -1226,16 +1283,16 @@ func TestDownloadRecoversFromMidStreamReset(t *testing.T) {
 	if string(data) != body {
 		t.Fatalf("got %q, want %q", data, body)
 	}
-	if n := atomic.LoadInt32(&calls); n != int32(downloadAttempts) {
+	if n := calls.Load(); n != int32(downloadAttempts) {
 		t.Fatalf("made %d attempts, want %d", n, downloadAttempts)
 	}
 }
 
 func TestDownloadGivesUpAfterCap(t *testing.T) {
 	fastRetry(t)
-	var calls int32
+	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		conn, _, err := w.(http.Hijacker).Hijack()
 		if err != nil {
 			t.Errorf("hijack: %v", err)
@@ -1248,7 +1305,7 @@ func TestDownloadGivesUpAfterCap(t *testing.T) {
 	if _, err := download(context.Background(), srv.Client(), nil, srv.URL, 0, nil); err == nil {
 		t.Fatal("download should fail after exhausting retries")
 	}
-	if n := atomic.LoadInt32(&calls); n != int32(downloadAttempts) {
+	if n := calls.Load(); n != int32(downloadAttempts) {
 		t.Fatalf("made %d attempts, want %d", n, downloadAttempts)
 	}
 }
@@ -1272,10 +1329,10 @@ func TestDownloadResumesWithRange(t *testing.T) {
 	fastRetry(t)
 	full := bytes.Repeat([]byte("0123456789"), 50) // 500 bytes
 	const cut = 200
-	var calls int32
+	var calls atomic.Int32
 	rangeCh := make(chan string, 4)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if atomic.AddInt32(&calls, 1) == 1 {
+		if calls.Add(1) == 1 {
 			// First attempt: promise the whole file, send a prefix, drop the socket.
 			conn, bw, err := w.(http.Hijacker).Hijack()
 			if err != nil {
@@ -1322,9 +1379,9 @@ func TestDownloadFallsBackToSecondClient(t *testing.T) {
 	primary := &http.Client{Transport: rtFunc(func(*http.Request) (*http.Response, error) {
 		return nil, errors.New("connection reset (ipv6)")
 	})}
-	var fbCalls int32
+	var fbCalls atomic.Int32
 	fallback := &http.Client{Transport: rtFunc(func(*http.Request) (*http.Response, error) {
-		atomic.AddInt32(&fbCalls, 1)
+		fbCalls.Add(1)
 		return &http.Response{
 			StatusCode:    http.StatusOK,
 			Body:          io.NopCloser(strings.NewReader(body)),
@@ -1340,7 +1397,7 @@ func TestDownloadFallsBackToSecondClient(t *testing.T) {
 	if string(data) != body {
 		t.Fatalf("got %q, want %q", data, body)
 	}
-	if atomic.LoadInt32(&fbCalls) == 0 {
+	if fbCalls.Load() == 0 {
 		t.Fatal("fallback client was never used after the primary failed")
 	}
 }
@@ -1423,9 +1480,9 @@ func TestFetchBytesFallbackEscapesStalledPrimary(t *testing.T) {
 
 func TestFetchBytesDoesNotRetryPermanentHTTPStatus(t *testing.T) {
 	fastRetry(t)
-	var calls int32
+	var calls atomic.Int32
 	client := &http.Client{Transport: rtFunc(func(*http.Request) (*http.Response, error) {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		return &http.Response{
 			StatusCode: http.StatusForbidden,
 			Status:     "403 Forbidden",
@@ -1437,7 +1494,7 @@ func TestFetchBytesDoesNotRetryPermanentHTTPStatus(t *testing.T) {
 	if _, err := fetchBytes(context.Background(), client, "https://example.invalid/latest.json"); err == nil {
 		t.Fatal("fetchBytes should return a permanent HTTP error")
 	}
-	if got := atomic.LoadInt32(&calls); got != 1 {
+	if got := calls.Load(); got != 1 {
 		t.Fatalf("permanent HTTP error made %d requests, want 1", got)
 	}
 }
@@ -1445,9 +1502,9 @@ func TestFetchBytesDoesNotRetryPermanentHTTPStatus(t *testing.T) {
 func TestFetchBytesRejectsOversizeResponsesWithoutRetry(t *testing.T) {
 	fastRetry(t)
 	t.Run("declared content length", func(t *testing.T) {
-		var calls int32
+		var calls atomic.Int32
 		client := &http.Client{Transport: rtFunc(func(*http.Request) (*http.Response, error) {
-			atomic.AddInt32(&calls, 1)
+			calls.Add(1)
 			return &http.Response{
 				StatusCode:    http.StatusOK,
 				Status:        "200 OK",
@@ -1466,7 +1523,7 @@ func TestFetchBytesRejectsOversizeResponsesWithoutRetry(t *testing.T) {
 		); !errors.Is(err, errUpdateResponseTooLarge) {
 			t.Fatalf("declared oversize error = %v, want errUpdateResponseTooLarge", err)
 		}
-		if got := atomic.LoadInt32(&calls); got != 1 {
+		if got := calls.Load(); got != 1 {
 			t.Fatalf("declared oversize response made %d requests, want 1", got)
 		}
 	})

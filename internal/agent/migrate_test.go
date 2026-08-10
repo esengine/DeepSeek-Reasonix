@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -257,6 +258,49 @@ func TestMigrateLegacySessionsSkipsAlreadyImported(t *testing.T) {
 	}
 	if len(loaded.Messages) != 1 || loaded.Messages[0].Content != "edited" {
 		t.Errorf("existing same-named session was clobbered: %+v", loaded.Messages)
+	}
+}
+
+func TestSessionSaveIfAbsentNeverReplacesExistingTranscript(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "imported.jsonl")
+	first := NewSession("sys")
+	first.Add(provider.Message{Role: provider.RoleUser, Content: "first import"})
+	if err := first.SaveIfAbsent(dest); err != nil {
+		t.Fatalf("first SaveIfAbsent: %v", err)
+	}
+	second := NewSession("sys")
+	second.Add(provider.Message{Role: provider.RoleUser, Content: "stale import"})
+	if err := second.SaveIfAbsent(dest); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("second SaveIfAbsent = %v, want os.ErrExist", err)
+	}
+	loaded, err := LoadSession(dest)
+	if err != nil {
+		t.Fatalf("load preserved destination: %v", err)
+	}
+	if len(loaded.Messages) != 2 || loaded.Messages[1].Content != "first import" {
+		t.Fatalf("destination was replaced: %+v", loaded.Messages)
+	}
+}
+
+func TestMigrateLegacyEventLogCanShareDestinationDirectory(t *testing.T) {
+	dir := t.TempDir()
+	legacy := filepath.Join(dir, "chat-1.events.jsonl")
+	if err := os.WriteFile(legacy, []byte(legacyEventLog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := MigrateLegacySessions(dir, dir, nil)
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("imported %d sessions, want 1", n)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "chat-1.jsonl")); err != nil {
+		t.Fatalf("migrated destination missing: %v", err)
+	}
+	if _, err := os.Stat(legacy); err != nil {
+		t.Fatalf("legacy source must remain untouched: %v", err)
 	}
 }
 

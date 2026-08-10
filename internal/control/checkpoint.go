@@ -1,10 +1,16 @@
 package control
 
 import (
+	"context"
+	"fmt"
 	"sync"
+	"sync/atomic"
+	"time"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/diff"
+	"reasonix/internal/provider"
 )
 
 // checkpointManager owns the snapshot-based rewind bookkeeping: the per-session
@@ -14,13 +20,12 @@ import (
 // orchestration (truncating the session, restoring code, emitting events) that
 // needs its other collaborators.
 //
-// turn is decoupled from the store so it never collides after a log restructure;
+// turn is decoupled from the store so it remains monotonic across session work;
 // bound[turn] records len(Session.Messages) at that turn's start — the truncation
 // boundary for a conversation rewind/fork. Boundaries are persisted in each
 // checkpoint and rebuilt from the store on resume (so a reopened session can still
-// rewind conversation / fork), but dropped after a summarize restructures the log
-// so those operations report "unavailable" rather than mis-truncating; code
-// rewind (file-based) is unaffected. Every store call does its disk I/O off mu —
+// rewind conversation / fork). Context compression never changes the transcript,
+// so it leaves these boundaries intact. Every store call does its disk I/O off mu —
 // mu is taken only to read/swap the store pointer and mutate turn/bound.
 type checkpointManager struct {
 	// mu guards store, turn, and bound; every critical section under it is short
@@ -58,12 +63,12 @@ func (m *checkpointManager) enabled() bool {
 
 // beginWithObserver opens a checkpoint and updates the mutation observer's
 // ownership turn for subsequent captures.
-func (m *checkpointManager) beginWithObserver(input string, msgIndex int, obs *checkpoint.MutationObserver) {
+func (m *checkpointManager) beginWithObserver(input string, msgIndex int, obs *checkpoint.MutationObserver) (int, *checkpoint.Store, bool) {
 	m.mu.Lock()
 	store := m.store
 	if store == nil {
 		m.mu.Unlock()
-		return
+		return 0, nil, false
 	}
 	turn := m.turn
 	m.turn++
@@ -74,6 +79,97 @@ func (m *checkpointManager) beginWithObserver(input string, msgIndex int, obs *c
 		obs.SetOwnershipTurn(turn)
 	}
 	store.Begin(turn, input, msgIndex)
+	return turn, store, true
+}
+
+type guardedTurnCheckpoint struct {
+	session      *agent.Session
+	store        *checkpoint.Store
+	turn         int
+	messageIndex int
+	openedAt     int64
+}
+
+type guardedTurnCompletion struct {
+	checkpoint *guardedTurnCheckpoint
+}
+
+type guardedTurnCompletionKey struct{}
+
+func withGuardedTurnCompletion(ctx context.Context) (context.Context, *guardedTurnCompletion) {
+	completion := &guardedTurnCompletion{}
+	return context.WithValue(ctx, guardedTurnCompletionKey{}, completion), completion
+}
+
+// beginCheckpoint opens a rewind checkpoint before the visible user message is
+// appended. Guarded turns retain the exact boundary so TurnDone can identify
+// the corresponding optimistic frontend item without positional guessing.
+func (c *Controller) beginCheckpoint(ctx context.Context, input string) {
+	if c.executor == nil || c.executor.Session() == nil {
+		return
+	}
+	session := c.executor.Session()
+	messageIndex := session.Len()
+	openedAt := time.Now().UnixMilli()
+	atomic.AddInt64(&c.sessionRevision, 1)
+	turn, store, ok := c.checkpoints.beginWithObserver(input, messageIndex, c.mutationObserver)
+	if ok {
+		if completion, _ := ctx.Value(guardedTurnCompletionKey{}).(*guardedTurnCompletion); completion != nil {
+			completion.checkpoint = &guardedTurnCheckpoint{
+				session: session, store: store, turn: turn, messageIndex: messageIndex, openedAt: openedAt,
+			}
+		}
+	}
+	// User-visible turn start records an irreversible message-send receipt so
+	// recovery never claims a clean rollback of an already-committed prompt.
+	// Keep this owner bookkeeping even when checkpoints are disabled.
+	gen := c.RuntimeGeneration()
+	if gen == 0 {
+		gen = c.RuntimeOwner().Gate.Published()
+	}
+	msgID := fmt.Sprintf("turn-%d-%d", gen, atomic.LoadInt64(&c.sessionRevision))
+	// Dedup: a retried turn with the same revision must not double-record.
+	owner := c.RuntimeOwner()
+	owner.RecordMessageSentOnce(gen, msgID, "control")
+	d := owner.DecideResume(gen)
+	c.mu.Lock()
+	c.lastResumeDecision = d
+	c.mu.Unlock()
+}
+
+// validatedCheckpointTurn returns the checkpoint only while its original
+// boundary still names the real user message committed by this guarded turn.
+// Stale or synthetic candidates fail closed rather than being relocated.
+func (c *Controller) validatedCheckpointTurn(completion *guardedTurnCompletion) *int {
+	if completion == nil || completion.checkpoint == nil || c.executor == nil {
+		return nil
+	}
+	candidate := completion.checkpoint
+	if c.executor.Session() != candidate.session {
+		return nil
+	}
+	if !c.checkpoints.matchesBoundary(candidate.store, candidate.turn, candidate.messageIndex) {
+		return nil
+	}
+	messages := candidate.session.Snapshot()
+	if candidate.messageIndex < 0 || candidate.messageIndex >= len(messages) {
+		return nil
+	}
+	message := messages[candidate.messageIndex]
+	if message.Role != provider.RoleUser || message.LocalOnly ||
+		!agent.IsUserAuthoredTurn(agent.UserMessageText(message)) ||
+		(message.CreatedAt > 0 && candidate.openedAt > 0 && message.CreatedAt < candidate.openedAt) {
+		return nil
+	}
+	turn := candidate.turn
+	return &turn
+}
+
+func (m *checkpointManager) matchesBoundary(store *checkpoint.Store, turn, messageIndex int) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	boundary, ok := m.bound[turn]
+	return ok && m.store == store && boundary == messageIndex
 }
 
 // turnsByMessageIndex returns message-log index -> checkpoint turn over live
@@ -153,15 +249,6 @@ func (m *checkpointManager) truncateFrom(turn int) error {
 	}
 	m.mu.Unlock()
 	return nil
-}
-
-// clearBounds drops every boundary after a summarize restructures the log (so
-// conversation rewind degrades to "unavailable" until fresh turns rebuild them)
-// while keeping turn monotonic so new turns don't collide with the store.
-func (m *checkpointManager) clearBounds() {
-	m.mu.Lock()
-	m.bound = map[int]int{}
-	m.mu.Unlock()
 }
 
 // storeRef returns the live store pointer without holding mu across caller work.

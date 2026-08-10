@@ -1,3 +1,5 @@
+import { isLocalFileHref } from "./localFileUrl";
+
 const PDF_PAGE_WIDTH = 595.28;
 const PDF_PAGE_HEIGHT = 841.89;
 const PDF_MARGIN = 36;
@@ -76,6 +78,10 @@ export function transformExportMarkdownUrl(
 ): string {
   const trimmed = value.trim();
   if (key === "src" && isSafeInlineExportImage(trimmed)) return trimmed;
+  // Local-path anchors from remarkLocalPathLinks are kept so an exported
+  // document stays clickable; everything else goes through the default
+  // transform which blanks javascript: and other unsafe schemes.
+  if (key === "href" && isLocalFileHref(trimmed)) return trimmed;
   return fallback(value);
 }
 

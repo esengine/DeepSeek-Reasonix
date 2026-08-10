@@ -1,10 +1,11 @@
 // Run: tsx src/__tests__/activate-topic-stale.test.tsx
 //
 // Locks in last-click-wins for single-surface topic activation (#6607): when
-// a newer navigation starts while app.ActivateTopic is still in flight, the
-// stale completion must neither flip the visible tab away from the user's
-// last click nor delete the newer surface's cached state (the single-surface
-// prune removes every other tab state, blanking the visible transcript).
+// a newer navigation starts while app.StartTopicActivation is still in
+// flight, the stale completion must neither flip the visible tab away from
+// the user's last click nor delete the newer surface's cached state (the
+// single-surface prune removes every other tab state, blanking the visible
+// transcript).
 
 import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
@@ -13,7 +14,8 @@ import { createRoot } from "react-dom/client";
 import type { AppBindings } from "../lib/bridge";
 import { enqueueNavigationRequest, type NavigationCoalescingRefs } from "../lib/openTopicCoalescing";
 import { useController } from "../lib/useController";
-import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, JobView, Meta, TabMeta } from "../lib/types";
+import { historySliceFromMessages } from "./mockHistorySlice";
+import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, HistorySliceRequest, JobView, Meta, TabMeta, TopicActivationEvent, TopicActivationRequest } from "../lib/types";
 
 let passed = 0;
 let failed = 0;
@@ -137,13 +139,24 @@ let backendActiveId = "tab-a";
 // Per-tab holds so any activation can be stalled mid-flight and released.
 const activationHolds = new Map<string, Promise<void>>();
 const tabsById = new Map([tabA, tabX, tabY].map((tab) => [tab.id, tab]));
+const topicActivationHandlers: Array<(e: TopicActivationEvent) => void> = [];
+// The pending ticketed activation backend-side: a newer StartTopicActivation
+// supersedes it (cancelled), exactly like the real generation protocol.
+let mockPendingActivation: { requestId: string; tabId: string } | undefined;
+
+function emitTopicActivation(event: TopicActivationEvent): void {
+  for (const handler of topicActivationHandlers) handler(event);
+}
 
 function currentTabs(): TabMeta[] {
   return Array.from(tabsById.values()).map((tab) => ({ ...tab, active: tab.id === backendActiveId }));
 }
 
 window.runtime = {
-  EventsOn: () => () => {},
+  EventsOn: (name: string, cb: (...data: unknown[]) => void) => {
+    if (name === "topic:activation") topicActivationHandlers.push(cb as (e: TopicActivationEvent) => void);
+    return () => {};
+  },
   BrowserOpenURL: () => {},
 };
 window.go = {
@@ -165,6 +178,8 @@ window.go = {
         const messages = await window.go.main.App.HistoryForTab(tabID);
         return { messages, startTurn: 0, endTurn: messages.length, totalTurns: messages.length, hasOlder: false };
       },
+      HistorySliceForTab: async (tabID: string, req: HistorySliceRequest) =>
+        historySliceFromMessages(tabID, await window.go.main.App.HistoryForTab(tabID), req),
       HistoryCheckpointTurnsForTab: async () => [],
       ActivateTopic: async (_scope: string, workspaceRoot: string, topicId: string) => {
         const target = Array.from(tabsById.values()).find((tab) => tab.workspaceRoot === workspaceRoot && tab.topicId === topicId) ?? tabA;
@@ -172,6 +187,25 @@ window.go = {
         if (hold) await hold;
         backendActiveId = target.id;
         return { ...target, active: true };
+      },
+      StartTopicActivation: async (req: TopicActivationRequest) => {
+        const target = Array.from(tabsById.values()).find((tab) => tab.workspaceRoot === req.workspaceRoot && tab.topicId === req.topicId) ?? tabA;
+        const hold = activationHolds.get(target.id);
+        if (hold) await hold;
+        backendActiveId = target.id;
+        const requestId = req.requestId || `mock-activation-${target.id}`;
+        const previous = mockPendingActivation;
+        mockPendingActivation = { requestId, tabId: target.id };
+        if (previous && previous.requestId !== requestId) {
+          emitTopicActivation({ requestId: previous.requestId, tabId: previous.tabId, phase: "cancelled" });
+        }
+        emitTopicActivation({ requestId, tabId: target.id, phase: "starting" });
+        window.setTimeout(() => {
+          if (mockPendingActivation?.requestId !== requestId) return;
+          mockPendingActivation = undefined;
+          emitTopicActivation({ requestId, tabId: target.id, phase: "ready" });
+        }, 0);
+        return { requestId, tabId: target.id, meta: { ...target, active: true } };
       },
       SetActiveTab: async (tabID: string) => {
         backendActiveId = tabID;
@@ -298,8 +332,12 @@ await waitFor("queued last click applies once it runs", () => controller?.active
 // enqueue time — the queue-based scenario above only proves the mechanism.
 const appSource = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
 ok(
-  /const enqueueNavigation = useCallback\(\(input: DesktopNavigationIntent\)[\s\S]{0,900}?const navigationIntentSeq = noteNavigationIntent\(\);[\s\S]{0,900}?enqueueNavigationRequest\(/.test(appSource),
-  "App.enqueueNavigation captures a shared navigation intent before enqueueNavigationRequest",
+  /const enqueueNavigation = useCallback\(\(input: DesktopNavigationIntent\)[\s\S]{0,900}?const navigationIntentSeq = noteNavigationIntent\(\);[\s\S]{0,900}?enqueueNavigationWithIntent\(input, navigationIntentSeq\)/.test(appSource),
+  "App.enqueueNavigation captures a shared navigation intent before handing the request to the queue",
+);
+ok(
+  /const enqueueNavigationWithIntent = useCallback\([\s\S]{0,900}?enqueueNavigationRequest\([\s\S]{0,900}?\{ \.\.\.input, navigationIntentSeq \}/.test(appSource),
+  "App.enqueueNavigationWithIntent forwards the captured intent into enqueueNavigationRequest",
 );
 ok(
   /const enqueueTabSwitch = useCallback\([\s\S]{0,1400}?const navigationIntentSeq = noteNavigationIntent\(\);[\s\S]{0,1400}?switchTab\(request\.tabId, request\.optimisticTab, request\.navigationIntentSeq\)/.test(appSource),

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -47,12 +48,10 @@ func TestSlashCompletionFilterAndAccept(t *testing.T) {
 	if !m.completion.active || m.completion.kind != compSlash {
 		t.Fatalf("typing /co should open the slash menu: %+v", m.completion)
 	}
-	// /compact and /copy both start with "/co".
-	if len(m.completion.items) != 2 {
-		t.Fatalf("filter = %v, want /compact and /copy", labels(m.completion.items))
-	}
-	if m.completion.items[0].label != "/compact" || m.completion.items[1].label != "/copy" {
-		t.Fatalf("filter = %v, want [/compact /copy]", labels(m.completion.items))
+	// /compact, /context and /copy all start with "/co", in that order.
+	want := []string{"/compact", "/context", "/copy"}
+	if got := labels(m.completion.items); !slices.Equal(got, want) {
+		t.Fatalf("filter = %v, want %v", got, want)
 	}
 
 	m.acceptCompletion()
@@ -227,9 +226,19 @@ func TestActiveAtToken(t *testing.T) {
 		{`see @my\ dir/`, `my\ dir/`, true, 4},
 	}
 	for _, c := range cases {
-		at, tok, ok := activeAtToken(c.val)
+		at, end, tok, ok := activeAtToken(c.val, len(c.val))
 		if ok != c.wantOK || (ok && (tok != c.wantTok || at != c.wantAt)) {
-			t.Errorf("activeAtToken(%q) = (%d,%q,%v), want (%d,%q,%v)", c.val, at, tok, ok, c.wantAt, c.wantTok, c.wantOK)
+			t.Errorf("activeAtToken(%q) = (%d,%d,%q,%v), want (%d,_,%q,%v)", c.val, at, end, tok, ok, c.wantAt, c.wantTok, c.wantOK)
+		}
+		if ok {
+			if end < at || end > len(c.val) || !strings.HasPrefix(c.val[at:end], "@") {
+				t.Errorf("activeAtToken(%q) span [%d,%d) invalid", c.val, at, end)
+			}
+			// At EOF, caret-limited query equals the full token after '@'.
+			fullTok := c.val[at+1 : end]
+			if !strings.HasPrefix(fullTok, tok) {
+				t.Errorf("activeAtToken(%q) query %q is not a prefix of full token %q", c.val, tok, fullTok)
+			}
 		}
 	}
 }
@@ -357,7 +366,7 @@ func TestFileItemsSearchRespectsMenuCap(t *testing.T) {
 	defer os.Chdir(orig)
 
 	dir := t.TempDir()
-	for i := 0; i < maxCompItems; i++ {
+	for i := range maxCompItems {
 		writeAt(t, dir, filepath.Join("aa-dir-"+fmt.Sprintf("%03d", i), "file.txt"), "x")
 	}
 	writeAt(t, dir, "nested/aa-deep.js", "y")
@@ -508,6 +517,7 @@ func TestEnterOnExactSlashArgSubmitsWhenPrefixAlsoMatches(t *testing.T) {
 		items:       []compItem{{label: "1", insert: "1"}, {label: "10", insert: "10"}},
 		sel:         0,
 		replaceFrom: len("/resume "),
+		replaceTo:   len("/resume 1"),
 	}
 
 	got, _ := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -638,7 +648,7 @@ func hasLabel(items []compItem, label string) bool {
 	return false
 }
 
-// --- fuzzy matching for / completion ---
+// fuzzy matching for / completion
 
 // TestFuzzyFilterSlashSubsequence proves the slash-menu fuzzy filter matches
 // command labels whose letters appear in order, even when they are not a

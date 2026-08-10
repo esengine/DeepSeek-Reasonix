@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/event"
+	"reasonix/internal/fileutil"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/nilutil"
 	"reasonix/internal/provider"
@@ -88,16 +89,18 @@ func NewSession(prov provider.Provider, readOnlyReg *tool.Registry, policyPrompt
 	}
 	sess := agent.NewSession(policyPrompt)
 	ag := agent.New(prov, readOnlyReg, sess, agent.Options{
-		ModelRef:    strings.TrimSpace(modelRef),
-		MaxSteps:    6, // guardian reviews: enough for a few read-only tool calls
-		Temperature: temperature,
+		ModelRef:            strings.TrimSpace(modelRef),
+		MaxSteps:            6, // guardian reviews: enough for a few read-only tool calls
+		Temperature:         temperature,
+		RequireVisibleFinal: true, // each review must produce its own parseable verdict
 		// Use the shared context window so the guardian session can compact
 		// itself when it grows too large across many reviews.
-		ContextWindow:       100_000,
-		CompactRatio:        0.8,
-		SoftCompactRatio:    0.5,
-		ToolResultSnipRatio: 0.6,
-		CompactForceRatio:   0.9,
+		ContextWindow:          100_000,
+		CompactRatio:           0.8,
+		SoftCompactRatio:       0.5,
+		ToolResultSnipRatio:    0.6,
+		CompactForceRatio:      0.9,
+		StrictAlternatingRoles: true,
 		// Guardian's own sink drops everything — the audit line (emitTo) is the
 		// only user-visible output. Usage events are captured internally for
 		// per-review cost reporting.
@@ -185,10 +188,14 @@ func (gs *Session) review(ctx context.Context, toolName string, args json.RawMes
 	// verdict.
 	before := gs.sess.Snapshot()
 	rewriteBefore := gs.sess.RewriteVersion()
+	projectionBefore := gs.agent.ContextMaintenanceSnapshot().ProjectionVersion
 	start := time.Now()
 	agentErr := gs.agent.Run(reviewCtx, transcriptText+"\n"+formatReviewRequest(toolName, args))
 	dur := time.Since(start).Milliseconds()
-	if agentErr == nil && reviewN%compactEvery == 0 {
+	// Pressure maintenance runs before sampling. Do not pay for a second summary
+	// when that same review already advanced the visible projection.
+	projectionAfter := gs.agent.ContextMaintenanceSnapshot().ProjectionVersion
+	if agentErr == nil && reviewN%compactEvery == 0 && projectionAfter == projectionBefore {
 		_ = gs.agent.CompactNow(reviewCtx, "")
 	}
 	reviewUsage := gs.snapshotReviewUsage()
@@ -219,7 +226,7 @@ func (gs *Session) review(ctx context.Context, toolName string, args json.RawMes
 		}
 	}
 	// Any compaction this review triggered (the periodic CompactNow above or
-	// maybeCompact inside Run) inserts its digest as a RoleUser message, which
+	// ContextManager inside Run) inserts its digest as a RoleUser message, which
 	// can land directly before a review's user turn and re-create the
 	// consecutive-user shape this session must never carry. Repair on the
 	// final session state, after any failed-turn rollback.
@@ -283,20 +290,16 @@ func (gs *Session) Save(path string) error {
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(cp, data, 0o644); err != nil {
+		if err := fileutil.AtomicWriteFile(cp, data, 0o644); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// rollbackReview discards a failed review turn. agent.Run already appended the
-// combined review as a user message; leaving it dangling would make the next
-// review append another user message right after it — consecutive user roles,
-// which strict-alternation providers reject, permanently poisoning the session.
-// Without a mid-review rewrite the pre-review snapshot is restored exactly;
-// after a rewrite (auto-compaction on a large transcript) only trailing plain
-// user messages are dropped, so the compaction the review paid for survives.
+// rollbackReview removes a failed review without leaving consecutive users.
+// It restores the exact snapshot unless compaction rewrote the session; then it
+// removes only failed tail turns so the compacted, completed history survives.
 // Caller holds gs.mu.
 func (gs *Session) rollbackReview(before []provider.Message, rewriteBefore int) {
 	if gs.sess.RewriteVersion() == rewriteBefore {
@@ -306,6 +309,12 @@ func (gs *Session) rollbackReview(before []provider.Message, rewriteBefore int) 
 	msgs := gs.sess.Snapshot()
 	for len(msgs) > 0 {
 		last := msgs[len(msgs)-1]
+		if last.Role == provider.RoleAssistant {
+			if len(last.ToolCalls) > 0 || strings.TrimSpace(last.Content) == "" {
+				msgs = msgs[:len(msgs)-1]
+				continue
+			}
+		}
 		if last.Role != provider.RoleUser || agent.IsCompactionSummary(last) {
 			break
 		}
@@ -347,7 +356,7 @@ func (gs *Session) normalizeAlternation() {
 	if !merged {
 		return
 	}
-	gs.sess.Rewrite(out)
+	gs.sess.Rewrite(out, "guardian_merge")
 }
 
 // Load replaces the guardian's internal agent session with the one at path,
@@ -557,9 +566,9 @@ func firstRunesStr(s string, n int) string {
 
 func lastAssistantText(sess *agent.Session) string {
 	msgs := sess.Snapshot()
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == provider.RoleAssistant && strings.TrimSpace(msgs[i].Content) != "" {
-			return msgs[i].Content
+	for _, v := range slices.Backward(msgs) {
+		if v.Role == provider.RoleAssistant && strings.TrimSpace(v.Content) != "" {
+			return v.Content
 		}
 	}
 	return ""
@@ -593,6 +602,8 @@ func (gs *Session) addReviewUsage(usage *provider.Usage) {
 	gs.reviewUsage.TotalTokens += usage.TotalTokens
 	gs.reviewUsage.CacheHitTokens += usage.CacheHitTokens
 	gs.reviewUsage.CacheMissTokens += usage.CacheMissTokens
+	gs.reviewUsage.CacheWriteTokens += usage.CacheWriteTokens
+	gs.reviewUsage.CacheWriteBilledTokens += usage.CacheWriteBilledTokens
 	gs.reviewUsage.ReasoningTokens += usage.ReasoningTokens
 	gs.reviewUsage.RequestCount += guardianUsageRequestCount(usage)
 	gs.reviewUsage.Estimated = gs.reviewUsage.Estimated || usage.Estimated

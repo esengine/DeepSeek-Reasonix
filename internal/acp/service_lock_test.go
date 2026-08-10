@@ -411,7 +411,7 @@ func TestACPCtrlReadPathsDoNotRaceWithRebuild(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for i := 0; i < rebuilds; i++ {
+		for i := range rebuilds {
 			if err := svc.rebuildSession(context.Background(), sess, SessionConfigState{Model: models[i%len(models)]}, []sessionConfigDelta{{axis: "model", model: models[i%len(models)]}}); err != nil {
 				t.Errorf("rebuildSession %d: %v", i, err)
 				return

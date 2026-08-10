@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -168,13 +169,19 @@ func TestDesktopPackagesPreserveNativePlatformLaunchers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !bytes.HasPrefix(windowsData, []byte{0xef, 0xbb, 0xbf}) {
+		t.Fatal("Windows installer script must have a UTF-8 BOM so native makensis accepts localized strings")
+	}
 	windows := string(windowsData)
 	for _, want := range []string{
 		`File "/oname=${REASONIX_CLI}" "${REASONIX_CLI}"`,
-		`!uninstfinalize 'cmd.exe /C copy /Y "%1" "reasonix-uninstall.exe" >NUL'`,
+		`!define REASONIX_UNINST_FINALIZE 'cmd.exe /C copy /Y "%1" "reasonix-uninstall.exe" >NUL'`,
+		`!uninstfinalize '${REASONIX_UNINST_FINALIZE}'`,
 		`File "/oname=uninstall.exe" "${ARG_REASONIX_SIGNED_UNINSTALLER}"`,
 		`StrCpy $R9 "$INSTDIR\versions\.installer-v${INFO_PRODUCTVERSION}-$R8"`,
 		`File "/oname=${REASONIX_LAYOUT_INSTALLER}" "${REASONIX_GUARD}"`,
+		`nsExec::ExecToLog /OEM`,
+		`Reasonix layout activator output:`,
 		`--activate-staging "$R9" --no-relaunch`,
 		`CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${REASONIX_LAUNCHER}" "" "$INSTDIR\${REASONIX_LAUNCHER}" 0`,
 		`CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${REASONIX_LAUNCHER}" "" "$INSTDIR\${REASONIX_LAUNCHER}" 0`,
@@ -188,6 +195,9 @@ func TestDesktopPackagesPreserveNativePlatformLaunchers(t *testing.T) {
 	if strings.Contains(windows, `FileOpen $0 "$INSTDIR\current.json" w`) ||
 		strings.Contains(windows, `SetOutPath "$INSTDIR\versions\v${INFO_PRODUCTVERSION}"`) {
 		t.Fatal("normal Windows installer must not write the live version or current.json in place")
+	}
+	if strings.Contains(windows, `ExecWait '"$PLUGINSDIR\${REASONIX_LAYOUT_INSTALLER}"`) {
+		t.Fatal("Windows installer must not discard layout activator stdout/stderr")
 	}
 	if strings.Contains(windows, `CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${REASONIX_LAUNCHER}" "" "$INSTDIR\versions\v${INFO_PRODUCTVERSION}\${PRODUCT_EXECUTABLE}" 0`) ||
 		strings.Contains(windows, `CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${REASONIX_LAUNCHER}" "" "$INSTDIR\versions\v${INFO_PRODUCTVERSION}\${PRODUCT_EXECUTABLE}" 0`) {

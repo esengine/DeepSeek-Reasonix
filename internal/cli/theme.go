@@ -256,11 +256,11 @@ func (c terminalRGB) looksLight() bool {
 }
 
 func parseOSC11Response(s string) (terminalRGB, bool) {
-	idx := strings.Index(s, "]11;")
-	if idx < 0 {
+	_, after, ok := strings.Cut(s, "]11;")
+	if !ok {
 		return terminalRGB{}, false
 	}
-	payload := s[idx+len("]11;"):]
+	payload := after
 	if end := strings.IndexByte(payload, '\a'); end >= 0 {
 		payload = payload[:end]
 	} else if end := strings.Index(payload, "\x1b\\"); end >= 0 {
@@ -272,8 +272,8 @@ func parseOSC11Response(s string) (terminalRGB, bool) {
 		return terminalRGB{r, g, b}, ok
 	}
 	for _, prefix := range []string{"rgb:", "rgba:"} {
-		if strings.HasPrefix(payload, prefix) {
-			return parseOSCColorTriplet(strings.TrimPrefix(payload, prefix))
+		if after, ok := strings.CutPrefix(payload, prefix); ok {
+			return parseOSCColorTriplet(after)
 		}
 	}
 	return terminalRGB{}, false

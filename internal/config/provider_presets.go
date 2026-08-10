@@ -31,7 +31,15 @@ const (
 // intentionally editable after installation; they reduce setup friction without
 // turning fast-moving third-party catalogs into hard runtime dependencies.
 func CuratedProviderPresets() []ProviderPreset {
-	presets := cloneProviderPresets(curatedProviderPresets)
+	presets := make([]ProviderPreset, 0, len(curatedProviderPresets))
+	for _, preset := range curatedProviderPresets {
+		// Keep the old direct lookup available for installed configurations, but
+		// do not offer the redundant Anthropic preset in new-provider surfaces.
+		if preset.ID == "deepseek-anthropic" {
+			continue
+		}
+		presets = append(presets, cloneProviderPreset(preset))
+	}
 	sort.SliceStable(presets, func(i, j int) bool {
 		return providerPresetDisplayRank(presets[i].ID) < providerPresetDisplayRank(presets[j].ID)
 	})
@@ -52,9 +60,7 @@ func CuratedProviderPreset(id string) (ProviderPreset, bool) {
 func providerPresetDisplayRank(id string) int {
 	switch {
 	case id == "deepseek-responses":
-		return -1
-	case id == "deepseek-anthropic":
-		return 0
+		return -2
 	case id == "glm-cn" || id == "zai-global" || strings.HasPrefix(id, "glm-coding-plan-") || strings.HasPrefix(id, "zai-coding-plan-"):
 		return 0
 	case strings.HasPrefix(id, "longcat-"):
@@ -108,7 +114,6 @@ var (
 	legacyOpenCodeGoModels           = []string{"glm-5.2", "glm-5.1", "kimi-k2.7-code", "kimi-k2.6", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5-pro", "mimo-v2.5"}
 	opencodeGoModels                 = []string{"glm-5.2", "glm-5.1", "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5-pro", "mimo-v2.5"}
 	opencodeGoVisionModels           = []string{"kimi-k3"}
-	opencodeGoAnthropicModels        = []string{"qwen3.7-plus", "qwen3.7-max", "qwen3.6-plus", "minimax-m3", "minimax-m2.7", "minimax-m2.5"}
 	opencodeZenAnthropicModels       = []string{"claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5", "qwen3.6-plus", "qwen3.5-plus", "qwen3.6-plus-free"}
 	opencodeZenAnthropicVisionModels = []string{"claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"}
 
@@ -185,8 +190,8 @@ func kimiK3DirectOverride() ProviderModelOverride {
 var curatedProviderPresets = []ProviderPreset{
 	{
 		ID:          "deepseek-anthropic",
-		Label:       "DeepSeek Anthropic",
-		Description: "Optional official DeepSeek Anthropic-compatible endpoint; Chat Completions remains the default.",
+		Label:       "DeepSeek Official Anthropic",
+		Description: "Separate official DeepSeek Anthropic-compatible entry for Flash and Pro.",
 		KeyEnv:      "DEEPSEEK_API_KEY",
 		Entries: []ProviderEntry{{
 			Name:          "deepseek-anthropic",
@@ -197,6 +202,7 @@ var curatedProviderPresets = []ProviderPreset{
 			APIKeyEnv:     "DEEPSEEK_API_KEY",
 			BalanceURL:    "https://api.deepseek.com/user/balance",
 			Thinking:      "enabled",
+			WebSearch:     boolPointer(true),
 			ContextWindow: 1_000_000,
 			Prices:        deepSeekV4PricesUSD(),
 			ModelOverrides: map[string]ProviderModelOverride{
@@ -538,8 +544,8 @@ var curatedProviderPresets = []ProviderPreset{
 	},
 	{
 		ID:          "deepseek-responses",
-		Label:       "DeepSeek Responses API",
-		Description: "DeepSeek official stateless Responses API for deepseek-v4-flash.",
+		Label:       "DeepSeek Official Responses API",
+		Description: "Official stateless DeepSeek Responses API for Flash with server-side web search.",
 		KeyEnv:      "DEEPSEEK_API_KEY",
 		Entries: []ProviderEntry{{
 			Name:             "deepseek-responses",
@@ -552,6 +558,7 @@ var curatedProviderPresets = []ProviderPreset{
 			ContextWindow:    1_000_000,
 			Price:            deepSeekV4FlashPriceUSD(),
 			ResponsesMode:    "stateless",
+			WebSearch:        boolPointer(true),
 			SupportedEfforts: []string{"low", "high", "max"},
 			DefaultEffort:    "high",
 		}},
@@ -698,23 +705,9 @@ var curatedProviderPresets = []ProviderPreset{
 			},
 		}},
 	},
-	{
-		ID:          "opencode-go-anthropic",
-		Label:       "OpenCode Go Anthropic",
-		Description: "OpenCode Go subscription Anthropic-compatible route for Qwen and MiniMax models.",
-		KeyEnv:      "OPENCODE_GO_API_KEY",
-		Entries: []ProviderEntry{{
-			Name:          "opencode-go-anthropic",
-			Kind:          "anthropic",
-			BaseURL:       "https://opencode.ai/zen/go",
-			Models:        opencodeGoAnthropicModels,
-			VisionModels:  []string{"qwen3.7-plus", "qwen3.6-plus"},
-			Default:       "qwen3.7-plus",
-			APIKeyEnv:     "OPENCODE_GO_API_KEY",
-			Thinking:      "adaptive",
-			ContextWindow: 262144,
-		}},
-	},
+	opencodeGoAnthropicPreset,
+	opencodeGoDeepSeekAnthropicPreset,
+	opencodeGoDeepSeekResponsesPreset,
 	{
 		ID:          "opencode-zen-anthropic",
 		Label:       "OpenCode Zen Anthropic",
@@ -975,12 +968,8 @@ var curatedProviderPresets = []ProviderPreset{
 	},
 }
 
-func cloneProviderPresets(in []ProviderPreset) []ProviderPreset {
-	out := make([]ProviderPreset, 0, len(in))
-	for _, p := range in {
-		out = append(out, cloneProviderPreset(p))
-	}
-	return out
+func boolPointer(value bool) *bool {
+	return &value
 }
 
 func cloneProviderPreset(p ProviderPreset) ProviderPreset {
@@ -1001,6 +990,18 @@ func cloneProviderEntries(in []ProviderEntry) []ProviderEntry {
 }
 
 func cloneProviderEntry(e ProviderEntry) ProviderEntry {
+	if e.WebSearch != nil {
+		value := *e.WebSearch
+		e.WebSearch = &value
+	}
+	if e.ResponsesStateful != nil {
+		value := *e.ResponsesStateful
+		e.ResponsesStateful = &value
+	}
+	if e.visionOverride != nil {
+		value := *e.visionOverride
+		e.visionOverride = &value
+	}
 	e.Models = append([]string(nil), e.Models...)
 	e.VisionModels = append([]string(nil), e.VisionModels...)
 	e.SupportedEfforts = append([]string(nil), e.SupportedEfforts...)
@@ -1056,6 +1057,10 @@ func cloneModelOverrideMap(in map[string]ProviderModelOverride) map[string]Provi
 	out := make(map[string]ProviderModelOverride, len(in))
 	for k, v := range in {
 		v.SupportedEfforts = append([]string(nil), v.SupportedEfforts...)
+		if v.Vision != nil {
+			vision := *v.Vision
+			v.Vision = &vision
+		}
 		out[k] = v
 	}
 	return out

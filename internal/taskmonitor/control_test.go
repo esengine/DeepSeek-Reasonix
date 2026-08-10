@@ -3,11 +3,78 @@ package taskmonitor
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+func TestControlService_StopPreservesRuntimeLeaseUntilExit(t *testing.T) {
+	s := NewInMemoryStore()
+	cs := NewControlService(s)
+	now := time.Now()
+	leaseUntil := now.Add(time.Minute)
+	mustUpsertControl(t, s, "/p", TaskSnapshot{SchemaVersion: 1, TaskID: "t1", SessionID: "s1", State: TaskStateRunning, RuntimeState: RuntimeStateAlive, RuntimeLeaseUntil: leaseUntil, RuntimeOwnerID: "owner-1", Version: 1, CreatedAt: now, UpdatedAt: now})
+	res, err := cs.StopTaskWithKiller(context.Background(), "/p", "t1", 1, "", "", &mockKiller{fn: func(string, string) bool { return true }})
+	if err != nil || !res.Accepted {
+		t.Fatalf("stop: result=%+v err=%v", res, err)
+	}
+	snap, err := s.GetTask(context.Background(), "/p", "t1")
+	if err != nil || snap == nil {
+		t.Fatalf("snapshot: %+v err=%v", snap, err)
+	}
+	if snap.RuntimeState != RuntimeStateAlive || snap.RuntimeOwnerID != "owner-1" || !snap.RuntimeLeaseUntil.Equal(leaseUntil) {
+		t.Fatalf("stop discarded live runtime ownership: %+v", snap)
+	}
+	reconciled := *snap
+	reconcileRuntime(&reconciled, leaseUntil.Add(time.Second))
+	if reconciled.State != TaskStateCancelled || reconciled.RuntimeState != RuntimeStateExited {
+		t.Fatalf("expired cancelled runtime did not reconcile: %+v", reconciled)
+	}
+}
+
+func TestControlService_StopBoundsLegacyLeaseLessRuntime(t *testing.T) {
+	s := NewInMemoryStore()
+	cs := NewControlService(s)
+	now := time.Now()
+	mustUpsertControl(t, s, "/p", TaskSnapshot{SchemaVersion: 1, TaskID: "t1", SessionID: "s1", State: TaskStateRunning, RuntimeState: RuntimeStateAlive, RuntimeOwnerID: "owner-1", Version: 1, CreatedAt: now, UpdatedAt: now})
+	res, err := cs.StopTaskWithKiller(context.Background(), "/p", "t1", 1, "", "", &mockKiller{fn: func(string, string) bool { return true }})
+	if err != nil || !res.Accepted {
+		t.Fatalf("stop: result=%+v err=%v", res, err)
+	}
+	snap, err := s.GetTask(context.Background(), "/p", "t1")
+	if err != nil || snap == nil || snap.RuntimeState != RuntimeStateAlive || snap.RuntimeLeaseUntil.IsZero() || snap.RuntimeOwnerID != "owner-1" {
+		t.Fatalf("legacy runtime did not receive bounded lease: %+v", snap)
+	}
+	if got := snap.RuntimeLeaseUntil.Sub(snap.UpdatedAt); got != runtimeLeaseTTL {
+		t.Fatalf("lease duration = %v, want %v", got, runtimeLeaseTTL)
+	}
+}
+
+func TestFileStore_IdempotencyClaimQuarantinesCorruptRecord(t *testing.T) {
+	root := t.TempDir()
+	store := NewFileStore(filepath.Join(".reasonix", "tasks"))
+	key := "broken-key"
+	idemDir := filepath.Join(root, ".reasonix", "tasks", ".idempotency")
+	if err := os.MkdirAll(idemDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(idemDir, key+".json")
+	if err := os.WriteFile(target, []byte(`{"pending":`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec := IdempotencyRecord{Key: key, Op: "stop", TaskID: "t1", Version: 1}
+	claimed, err := store.ClaimIdempotency(context.Background(), root, rec)
+	if err != nil || claimed != nil {
+		t.Fatalf("claim = %+v, err=%v; want fresh claim", claimed, err)
+	}
+	backups, err := filepath.Glob(target + ".corrupt-*")
+	if err != nil || len(backups) != 1 {
+		t.Fatalf("corrupt record backups = %v, err=%v; want one quarantined record", backups, err)
+	}
+}
 
 func TestControlService_StopTask(t *testing.T) {
 	s := NewInMemoryStore()
@@ -326,8 +393,8 @@ func TestControlService_AuditEvent(t *testing.T) {
 			if ev.Sequence < 1 {
 				t.Errorf("expected positive sequence, got %d", ev.Sequence)
 			}
-			if ev.ErrorSummary != "stop reason" {
-				t.Errorf("expected reason in event, got %q", ev.ErrorSummary)
+			if ev.ErrorSummary != "" {
+				t.Errorf("control audit event must be content-free, got %q", ev.ErrorSummary)
 			}
 			if ev.SessionID != "s1" {
 				t.Errorf("expected session s1, got %q", ev.SessionID)

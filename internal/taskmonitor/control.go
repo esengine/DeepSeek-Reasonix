@@ -7,8 +7,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"reasonix/internal/secrets"
 )
 
 // JobKiller routes a control request to the runtime that owns a task. SessionID
@@ -300,11 +298,22 @@ func (cs *ControlService) controlOp(ctx context.Context, projectDir, taskID stri
 	// heartbeat. Retry those expected version advances. If RecordDone already
 	// persisted the requested terminal state, use that snapshot as the result.
 	const maxControlSaveAttempts = 4
-	for attempt := 0; attempt < maxControlSaveAttempts; attempt++ {
+	for attempt := range maxControlSaveAttempts {
 		next := *snap
 		next.Version++
 		next.State = targetState
 		next.UpdatedAt = timeNow()
+		if requeueable {
+			next.RuntimeLeaseUntil = time.Time{}
+			next.RuntimeOwnerID = ""
+		}
+		if runtimeControl && next.RuntimeState.Effective() == RuntimeStateAlive && next.RuntimeLeaseUntil.IsZero() {
+			// A successful kill request is only an admission signal: the runtime
+			// may still be exiting. Preserve an existing owner lease, and give
+			// legacy lease-less snapshots a bounded deadline so observers can
+			// eventually reconcile alive to exited if RecordDone never arrives.
+			next.RuntimeLeaseUntil = next.UpdatedAt.Add(runtimeLeaseTTL)
+		}
 		if err := cs.store.SaveTask(ctx, projectDir, next); err == nil {
 			snap = &next
 			claimed = false
@@ -356,9 +365,6 @@ func (cs *ControlService) controlOp(ctx context.Context, projectDir, taskID stri
 		SessionID:    snap.SessionID,
 		State:        targetState,
 		RuntimeState: snap.RuntimeState,
-	}
-	if reason != "" {
-		auditEv.ErrorSummary = secrets.RedactCredentials(reason)
 	}
 	if err := cs.store.AppendAuditEvent(ctx, projectDir, auditEv); err != nil {
 		// State is committed but audit is missing. This is a degraded

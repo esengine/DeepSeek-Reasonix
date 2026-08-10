@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/logo.svg" alt="Reasonix" width="640"/>
+  <img src="docs/logo-ghost-wave-effect.svg" alt="Reasonix" width="360"/>
 </p>
 
 <p align="center">
@@ -10,6 +10,8 @@
   <a href="./docs/GUIDE.md">Guide</a>
   &nbsp;·&nbsp;
   <a href="./docs/ACP.md">ACP</a>
+  &nbsp;·&nbsp;
+  <a href="./docs/EXTENSIONS.md">Extensions</a>
   &nbsp;·&nbsp;
   <a href="./docs/SPEC.md">Spec</a>
   &nbsp;·&nbsp;
@@ -37,8 +39,13 @@
 
 <br/>
 
-<h3 align="center">A DeepSeek-native AI coding agent for your terminal.</h3>
-<p align="center">A config- and plugin-driven harness — a single static Go binary, tuned around DeepSeek's prefix cache so token costs stay low across long sessions.</p>
+<p align="center"><strong>Open source · MIT · a single Go binary</strong></p>
+<h3 align="center">A coding agent you can leave running.</h3>
+<p align="center">One local engine, four ways in — terminal, desktop app, browser, or your editor over ACP. Plan mode, permissions, a workspace sandbox and per-turn checkpoints keep a long autonomous run something you can still read and undo.</p>
+
+<div align="center">
+  <video src="https://github.com/user-attachments/assets/ab2f3878-e224-4931-8254-060e7695cfb9" controls preload="metadata" width="560"></video>
+</div>
 
 <br/>
 
@@ -54,13 +61,15 @@
 - **Multi-model & composable.** DeepSeek ships as a preset; any
   OpenAI-compatible endpoint is a config entry, not new code. Optionally run
   two models together (executor + planner) in separate, cache-stable sessions.
-- **Plugin-driven.** External tools run as subprocesses over stdio JSON-RPC
-  (MCP-compatible). Built-in tools self-register at compile time.
+- **Plugin-driven.** MCP servers contribute tools, prompts, and resources;
+  Extension Protocol v1 sidecars can also intercept runtime events, contribute
+  Providers and structured UI, and ship versioned plugin packages.
 - **Cache-aware context maintenance.** Startup injects a small stable environment
   summary, stale tool output is snipped/pruned before summary compaction, and the
   built-in tool schema contract is documented for regression review.
 - **Zero-friction distribution.** `CGO_ENABLED=0` single binary; cross-compile
-  to six targets with one command. The only dependency is a TOML parser.
+  to six targets with one command. The result is a fully self-contained static
+  binary — nothing to install on the target machine beyond the binary itself.
 
 ## Install
 
@@ -106,12 +115,38 @@ approvals, model selection, and workspace sessions.
 
 ### Path D: Build from source
 
+Clone the repository first:
+
 ```sh
 git clone https://github.com/esengine/DeepSeek-Reasonix.git
 cd DeepSeek-Reasonix
+```
+
+#### CLI
+
+The CLI build requires **Go 1.25+**. The module pins a `toolchain` directive;
+keep `GOTOOLCHAIN=auto` so Go downloads the pinned toolchain, or install it.
+
+```sh
 make build      # -> bin/reasonix(.exe)
 make cross      # -> dist/ (darwin|linux|windows × amd64|arm64)
 ```
+
+#### Desktop
+
+The desktop build additionally requires:
+
+- **Node 24+ and pnpm 10** (`npm install -g pnpm@10`) for the frontend
+- **Wails CLI** matching the shared `.wails-version` pin
+
+```sh
+make wails-install
+cd desktop
+wails build
+```
+
+See the [desktop build guide](desktop/README.md#prerequisites) for platform
+webview dependencies and Linux build tags.
 
 ## Quick start
 
@@ -151,6 +186,10 @@ For advanced CLI usage and configuration, see the **[CLI reference](./docs/CLI.m
 - **Engineering & migration:** [Spec](./docs/SPEC.md) ·
   [Task contracts & pause policy](./docs/TASK_CONTRACT.md) ·
   [Tool contract](./docs/TOOL_CONTRACT.md) · [Migrating from 0.x](./docs/MIGRATING.md)
+- **Extension development:** [Extensions](./docs/EXTENSIONS.md) ·
+  [Plugin packages and Manifest v1](./docs/PLUGIN_PACKAGES.md) ·
+  [Extension Protocol](./docs/EXTENSION_PROTOCOL.md) ·
+  [Go SDK and starter](./sdk/go/README.md)
 
 ## Star History
 
@@ -174,15 +213,13 @@ A small list of folks whose work has shaped Reasonix the most — the current to
 | Contributor | Contributor | Contributor | Contributor |
 | --- | --- | --- | --- |
 | [**SivanCola**](https://github.com/SivanCola) | [**esengine**](https://github.com/esengine) | [**ttmouse**](https://github.com/ttmouse) | [**lifu963**](https://github.com/lifu963) |
-| **reasonix** (anonymous) | [**HUQIANTAO**](https://github.com/HUQIANTAO) | [**GTC2080**](https://github.com/GTC2080) | [**light-front-theory**](https://github.com/light-front-theory) |
-| **merge-order-check** (anonymous) | [**Li-Charles-One**](https://github.com/Li-Charles-One) | [**eghrhegpe**](https://github.com/eghrhegpe) | **wufengfan** (anonymous) |
+| **reasonix** | [**HUQIANTAO**](https://github.com/HUQIANTAO) | [**GTC2080**](https://github.com/GTC2080) | [**light-front-theory**](https://github.com/light-front-theory) |
+| **merge-order-check** | [**Li-Charles-One**](https://github.com/Li-Charles-One) | [**eghrhegpe**](https://github.com/eghrhegpe) | **wufengfan** |
 | [**CVEngineer66**](https://github.com/CVEngineer66) | [**dependabot\[bot\]**](https://github.com/apps/dependabot) | [**lanshi17**](https://github.com/lanshi17) | [**SuMuxi66**](https://github.com/SuMuxi66) |
 | [**CnsMaple**](https://github.com/CnsMaple) | [**cyq1017**](https://github.com/cyq1017) | [**JesonChou**](https://github.com/JesonChou) | [**XTLine**](https://github.com/XTLine) |
 <!-- reasonix-top-contributors:end -->
 
-Also a separate thank-you to [**Bernardxu123**](https://github.com/Bernardxu123)
-for designing the project logo, and to
-[AIGC Link](https://xhslink.com/m/80ngts127cA) for promoting the project on XiaoHongShu.
+Special thanks to [**Bernardxu123**](https://github.com/Bernardxu123) for designing the project logo and intro video.
 
 <p align="center">
   <a href="https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors">

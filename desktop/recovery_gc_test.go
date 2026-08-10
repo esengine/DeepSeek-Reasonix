@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -31,10 +30,13 @@ func forkCoveredRecoveryBranch(t *testing.T, dir, name string) (parentPath, bran
 	if err != nil {
 		t.Fatalf("SaveRecoveryBranch: %v", err)
 	}
-	covering := agent.NewSession("")
-	covering.Messages = append([]provider.Message(nil), stale.Snapshot()...)
+	covering, err := agent.LoadSession(parentPath)
+	if err != nil {
+		t.Fatalf("Load covering parent: %v", err)
+	}
+	covering.Replace(append([]provider.Message(nil), stale.Snapshot()...))
 	covering.Add(provider.Message{Role: provider.RoleAssistant, Content: "answered after recovery"})
-	if err := covering.Save(parentPath); err != nil {
+	if err := covering.SaveRewrite(parentPath); err != nil {
 		t.Fatalf("Save covering parent: %v", err)
 	}
 	return parentPath, info.Path
@@ -106,8 +108,7 @@ func TestRecoveryGCFirstSweepWaitsForTabRestore(t *testing.T) {
 	}
 	_, branchPath := forkCoveredRecoveryBranch(t, dir, "startup")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	app := &App{
 		ctx:          ctx,
 		tabs:         map[string]*WorkspaceTab{},

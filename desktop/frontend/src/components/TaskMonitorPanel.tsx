@@ -114,12 +114,16 @@ function eventSummary(ev: TaskEvent, t: ReturnType<typeof useT>): string {
 const POLL_INTERVAL_MS = 5000;
 
 export function TaskMonitorPanel({
+	tabID,
   onClose,
+  onOpenSession,
   initialOpen = false,
   popover = false,
   summaryMode = false,
 }: {
+  tabID: string;
   onClose?: () => void;
+  onOpenSession?: (tabID: string, taskID: string) => Promise<boolean> | boolean;
   initialOpen?: boolean;
   popover?: boolean;
   summaryMode?: boolean;
@@ -149,15 +153,14 @@ export function TaskMonitorPanel({
   const fetchTasks = useCallback(async () => {
     try {
       setError(null);
-      const sessionID = await app.CurrentTaskSessionID();
-      const list = sessionID ? await app.ListTasksForSession(sessionID) : await app.ListTasks();
+      const list = await app.ListTasksForTab(tabID);
       setTasks(list ?? []);
     } catch (e) {
       setError(String(e));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [tabID]);
 
   // Fetch events for a single task, using afterSequence for incremental load.
   const fetchEvents = useCallback(async (taskID: string) => {
@@ -169,7 +172,7 @@ export function TaskMonitorPanel({
     });
     try {
       const cursor = eventCursors.current.get(taskID) ?? 0;
-      const events = await app.ListTaskEvents(taskID, cursor);
+      const events = await app.ListTaskEventsForTab(tabID, taskID, cursor);
       if (events.length > 0) {
         setTaskEvents((prev) => {
           const next = new Map(prev);
@@ -201,7 +204,7 @@ export function TaskMonitorPanel({
         return next;
       });
     }
-  }, []);
+  }, [tabID]);
 
   // Initial fetch + periodic polling
   useEffect(() => {
@@ -250,17 +253,24 @@ export function TaskMonitorPanel({
     setActionError(null);
     setActionMessage(null);
     try {
+      if (action === "open" && onOpenSession) {
+        const opened = await onOpenSession(tabID, task.task_id);
+        if (opened) onClose?.();
+        return;
+      }
       const result = action === "stop"
-        ? await app.StopTask(task.task_id, task.version, "desktop request", `desktop-${action}-${task.task_id}-${task.version}`)
+        ? await app.StopTaskForTab(tabID, task.task_id, task.version, "desktop request", `desktop-${action}-${task.task_id}-${task.version}`)
         : action === "cancel"
-          ? await app.CancelTask(task.task_id, task.version, "desktop request", `desktop-${action}-${task.task_id}-${task.version}`)
+          ? await app.CancelTaskForTab(tabID, task.task_id, task.version, "desktop request", `desktop-${action}-${task.task_id}-${task.version}`)
           : action === "requeue"
-            ? await app.RequeueTask(task.task_id, task.version, `desktop-${action}-${task.task_id}-${task.version}`)
-            : await app.OpenTaskSession(task.task_id);
+            ? await app.RequeueTaskForTab(tabID, task.task_id, task.version, `desktop-${action}-${task.task_id}-${task.version}`)
+            : await app.OpenTaskSessionForTab(tabID, task.task_id);
       if (result.error) {
         setActionError(`${result.error.code}: ${result.error.message}`);
       } else if (action === "open") {
-        setActionMessage(`Session: ${result.session_id ?? "—"}`);
+        const sessionID = result.session_id?.trim();
+        if (!sessionID) throw new Error("Task session is unavailable");
+        setActionMessage(`Session: ${sessionID}`);
       } else {
         setActionMessage(result.idempotent ? "Already applied" : "Task updated");
         await fetchTasks();

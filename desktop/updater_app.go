@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"regexp"
 	"runtime"
@@ -28,8 +29,11 @@ var errUpdateInProgress = errors.New("update: another download or install is alr
 var updaterRequestIDRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 
 var (
-	pendingUpdateExistsForInstall    = repair.PendingUpdateExists
-	reconcilePendingUpdateForInstall = repair.ReconcilePendingUpdate
+	pendingUpdateExistsForInstall            = repair.PendingUpdateExists
+	archiveSupersededPendingUpdateForInstall = archiveSupersededPendingUpdateAfterReady
+	reconcilePendingUpdateForInstall         = repair.ReconcilePendingUpdate
+	readPendingUpdateForHealth               = repair.ReadPendingUpdate
+	markPendingUpdateHealthyAfterReady       = repair.MarkUpdateHealthyExact
 )
 
 func validateUpdaterRequest(requestID, selectedChannel, expectedVersion string) (string, string, string, error) {
@@ -246,7 +250,7 @@ func (a *App) installUpdateRequest(selectedChannel, expectedVersion, requestID s
 	if artifactKindFromMeta(meta.ArtifactKind) != artifactKindFromMeta(wantKind) {
 		return a.failUpdate(requestID, selectedChannel, expectedVersion, errUpdateCacheMismatch)
 	}
-	if err := a.reconcilePendingUpdateBeforeInstall(requestID, meta); err != nil {
+	if err := a.reconcilePendingUpdateForRequest(requestID, meta); err != nil {
 		return err
 	}
 
@@ -258,20 +262,82 @@ func (a *App) installUpdateRequest(selectedChannel, expectedVersion, requestID s
 	}
 }
 
-// reconcilePendingUpdateBeforeInstall runs before install-mode dispatch so a
-// profile change cannot let the deb or portable path bypass an unfinished
-// release-unit transaction from the previous attempt.
-func (a *App) reconcilePendingUpdateBeforeInstall(requestID string, meta *cachedUpdate) error {
+// reconcilePendingUpdateForRequest runs before download and again before
+// install-mode dispatch. The early pass avoids paying download and verification
+// costs for a blocked update; the second pass prevents a profile change or a
+// concurrent process from bypassing an unfinished release-unit transaction.
+func (a *App) reconcilePendingUpdateForRequest(requestID string, meta *cachedUpdate) error {
 	if pendingUpdateExistsForInstall() {
 		a.emitProgress(requestID, meta.Channel, meta.Version, "recovering", meta.Size, meta.Size, "")
+		// A user-initiated update proves the desktop reached a usable UI. Retire
+		// an eligible superseded app-bundle or flat-layout transaction here as
+		// well as in the delayed post-DOM health task, so an immediate click never
+		// has to fail once and ask the user to retry.
+		if archived, archiveErr := archiveSupersededPendingUpdateForInstall(); archiveErr != nil {
+			slog.Debug("desktop: superseded update was not eligible for automatic archival", "err", archiveErr)
+		} else if archived {
+			slog.Info("desktop: archived superseded update before install")
+		}
+		// Visible UI at the pending target is health evidence — heal before
+		// reconcile so a missed post-DOM task does not block the next update.
+		// Exact and probationary commits are independent best-effort paths.
+		refreshPendingUpdateHealthIdentity(a)
+		if err := a.commitPendingUpdateHealth(); err != nil {
+			slog.Debug("desktop: commit healthy update before install", "err", err)
+		}
+		if committed, err := repair.CommitProbationaryPendingUpdate(version); err != nil {
+			slog.Debug("desktop: probationary update commit before install", "err", err)
+		} else if committed {
+			slog.Info("desktop: committed probationary update before install")
+		}
 	}
 	if _, err := reconcilePendingUpdateForInstall(version); err != nil {
 		if errors.Is(err, repair.ErrPendingUpdateAwaitingHealth) {
-			err = fmt.Errorf("update recovery: the previous update is still completing its startup health check; wait briefly and try again")
+			// Retry heal after identity refresh, then always re-reconcile.
+			refreshPendingUpdateHealthIdentity(a)
+			if commitErr := a.commitPendingUpdateHealth(); commitErr != nil {
+				slog.Debug("desktop: commit healthy update on awaiting-health retry", "err", commitErr)
+			}
+			if committed, commitErr := repair.CommitProbationaryPendingUpdate(version); commitErr != nil {
+				slog.Debug("desktop: probationary update commit on awaiting-health retry", "err", commitErr)
+			} else if committed {
+				slog.Info("desktop: committed probationary update on awaiting-health retry")
+			}
+			if _, retryErr := reconcilePendingUpdateForInstall(version); retryErr == nil {
+				return nil
+			} else {
+				err = retryErr
+			}
+		}
+		if errors.Is(err, repair.ErrPendingUpdateAwaitingHealth) {
+			err = fmt.Errorf("update recovery: the previous update is still completing its startup health check; wait briefly and try again, or discard the previous update")
 		} else {
 			err = fmt.Errorf("update recovery: could not safely finish the previous update: %w", err)
 		}
 		return a.failUpdate(requestID, meta.Channel, meta.Version, err)
+	}
+	return nil
+}
+
+// AbandonPendingUpdate is a user-facing recovery action for stuck in-app
+// updates. It commits a still-running probationary target when possible,
+// otherwise cancels or rolls back the unfinished transaction, and as a last
+// resort force-retires a probationary marker that already owns the install.
+func (a *App) AbandonPendingUpdate() error {
+	if !pendingUpdateExistsForInstall() {
+		return nil
+	}
+	refreshPendingUpdateHealthIdentity(a)
+	if err := a.commitPendingUpdateHealth(); err != nil {
+		slog.Debug("desktop: commit healthy update during abandon", "err", err)
+	}
+	if archived, err := archiveSupersededPendingUpdateForInstall(); err != nil {
+		slog.Debug("desktop: archive superseded update during abandon", "err", err)
+	} else if archived {
+		return nil
+	}
+	if _, err := repair.AbandonPendingUpdate(version); err != nil {
+		return fmt.Errorf("could not discard the previous update: %w", err)
 	}
 	return nil
 }
@@ -400,6 +466,12 @@ func (a *App) ApplyUpdateRequest(selectedChannel, expectedVersion, requestID str
 	// sequence, so another request cannot slip into the former phase gap.
 	defer finish()
 
+	if err := a.reconcilePendingUpdateForRequest(requestID, &cachedUpdate{
+		Channel: selectedChannel,
+		Version: expectedVersion,
+	}); err != nil {
+		return err
+	}
 	if _, err := a.downloadUpdateRequest(selectedChannel, expectedVersion, requestID); err != nil {
 		return err
 	}

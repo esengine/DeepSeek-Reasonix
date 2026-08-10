@@ -12,6 +12,8 @@ int reasonix_write_alias(const char *target_path, const char *alias_path,
                          char **error_message);
 int reasonix_resolve_alias(const char *alias_path, char **target_path,
                            char **error_message);
+int reasonix_is_reasonix_bundle_url_string(const char *url_string,
+                                           char **error_message);
 */
 import "C"
 
@@ -127,4 +129,21 @@ func resolveMacAlias(aliasPath string) (string, error) {
 		return "", fmt.Errorf("%s", C.GoString(nativeErr))
 	}
 	return C.GoString(target), nil
+}
+
+func macURLReferencesReasonixBundle(rawURL string) (bool, error) {
+	urlCString := C.CString(rawURL)
+	defer C.free(unsafe.Pointer(urlCString))
+	var nativeErr *C.char
+	result := C.reasonix_is_reasonix_bundle_url_string(urlCString, &nativeErr)
+	if nativeErr != nil {
+		defer C.free(unsafe.Pointer(nativeErr))
+	}
+	if result < 0 {
+		if nativeErr == nil {
+			return false, fmt.Errorf("native bundle URL inspection failed")
+		}
+		return false, fmt.Errorf("%s", C.GoString(nativeErr))
+	}
+	return result == 1, nil
 }

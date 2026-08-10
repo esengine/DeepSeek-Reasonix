@@ -125,8 +125,35 @@ echo "解释这段代码" | reasonix run
 
 未使用 `-p` 或结构化输出格式时，`reasonix run` 保持正常的终端流式展示。它也接受
 `--model`、`--profile`、`--max-steps`、`--effort`、`--dir`、`--add-dir`、
-`--continue`、`--resume PATH`、`--copy`、`--allowed-tools` 和
+`--continue`、`--resume QUERY`、`--copy`、`--allowed-tools` 和
 `--permission-mode`，以及作为 `--permission-mode auto` 别名的 `--auto` / `-y`。
+
+### 基准对照组
+
+`--ablate` 用于整体关闭某个子系统，让基准测试能把成功率的变化归因到它身上。取值是
+`evidence`、`planner`、`subagent`、`retrieval`、`compaction` 的逗号分隔组合，另外还接受
+`none`（默认，全部启用）和 `all`。子代理继承父代理的对照组配置，对照组名称会写入
+`--metrics` 文件，因此记录下来的每次运行都能自证跑的是哪一组。
+
+```sh
+reasonix run --ablate evidence,planner --metrics run.json "修复失败的测试"
+```
+
+这是测量工具，不是调优开关：关掉某个子系统只会让 Reasonix 在它本来负责的工作上变差。
+
+### 轨迹记录
+
+`--trajectory PATH` 会把整次运行的完整事件流——带绝对起止时间的工具调用与结果、
+思考内容、重试、就绪与恢复决策——按每个事件一行的方式追加为带时间戳和序号的
+JSONL 记录，便于离线回放并归因时间去向（工具执行 vs. 两次调用之间的模型思考）。
+记录复用共享的 `eventwire` JSON 契约（放在 `event` 键下），外层包
+`schema_version`、`seq` 和 `ts`（unix 毫秒）。运行被杀死时已写完的行全部保留。
+与 `--events-jsonl` 不同，该文件包含提示词、工具参数和思考内容：请像对待会话
+转录一样谨慎处理。
+
+```sh
+reasonix run --metrics run.json --trajectory run.trajectory.jsonl "修复失败的测试"
+```
 
 ### 输出格式
 
@@ -254,8 +281,9 @@ reasonix --resume provider-config --copy
 - `--copy` 不修改原 transcript，而是在新的可写会话中继续。原会话已被另一个
   Reasonix 进程占用时可以使用它。
 
-一次性运行可用 `reasonix run --resume PATH "任务"` 指定 session 文件路径。Session
-lease 会阻止桌面端和 CLI 同时写入同一个 transcript。
+一次性运行可用 `reasonix run --resume QUERY "任务"`，支持 session 文件路径、
+session ID，或来自 `--events-jsonl` / `reasonix session show --json` 的不透明
+machine session ID。Session lease 会阻止桌面端和 CLI 同时写入同一个 transcript。
 
 ## 权限
 
@@ -366,9 +394,10 @@ SSH 下远端进程无法读取本机剪贴板，请使用终端粘贴快捷键�
 | `/memory [subcommand]` | 查看指令、记忆 provenance、召回、revision 与恢复。 |
 | `/rewind` | 把对话和/或代码恢复到更早的 turn。 |
 | `/tree`、`/branch`、`/switch` | 查看或切换会话分支。 |
+| `/reload` | 重载 agent 运行时（扩展、工具、skills、commands、hooks、providers），保留当前会话。回合运行中只排队一次；失败原子——重建失败时当前运行时不受影响。 |
 
 切换模型、effort 或工作模式会重建运行时，同时保留当前对话、会话级权限覆盖、附加目录
-访问权限和 session ownership。
+访问权限和 session ownership。`/reload` 使用同一套失败原子重建语义。
 
 ### 记忆诊断与恢复
 
@@ -385,6 +414,7 @@ SSH 下远端进程无法读取本机剪贴板，请使用终端粘贴快捷键�
 | `/memory archived` | 列出 archive facts 及其受管路径。 |
 | `/memory recover <archive-path>` | 不覆盖 active data，把 archive 恢复为新 revision。 |
 
-这些命令始终作用于当前 session controller。Remote Workbench 使用远程 memory catalog，
-绝不回退读取桌面本机记忆。权限、自动召回、写入确认和迁移行为见
+这些命令始终作用于当前 session controller。当会话位于远端主机上（`reasonix remote
+connect` 或桌面的远程网页窗口）时，它们使用远程 memory catalog，绝不回退读取桌面本机
+记忆。权限、自动召回、写入确认和迁移行为见
 [Context Engine v2](./SESSION_MEMORY_RETRIEVAL.zh-CN.md)。

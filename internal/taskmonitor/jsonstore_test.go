@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -113,13 +114,29 @@ func TestFileStore_RejectsPathTraversal_TaskID(t *testing.T) {
 	}
 }
 
-func TestFileStore_RejectsPathTraversal_ProjectDir(t *testing.T) {
-	dir := t.TempDir()
+func TestFileStore_AcceptsCleanableProjectDir(t *testing.T) {
+	parent := t.TempDir()
 	store := NewFileStore(".reasonix/tasks")
+	now := time.Now()
 
-	_, err := store.ListTasks(context.Background(), dir+"/../../../etc")
-	if err == nil || !strings.Contains(err.Error(), "escapes") {
-		t.Fatalf("expected escape rejection, got %v", err)
+	for _, projectDir := range []string{
+		filepath.Join(parent, "nested", "..", "project"),
+		filepath.Join(parent, "project..archive"),
+	} {
+		if err := os.MkdirAll(filepath.Clean(projectDir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		snap := TaskSnapshot{
+			SchemaVersion: 1, TaskID: "task-1", SessionID: "session-1",
+			State: TaskStateRunning, Version: 1, CreatedAt: now, UpdatedAt: now,
+		}
+		if err := store.SaveTask(context.Background(), projectDir, snap); err != nil {
+			t.Fatalf("SaveTask(%q): %v", projectDir, err)
+		}
+		got, err := store.GetTask(context.Background(), projectDir, snap.TaskID)
+		if err != nil || got == nil || got.TaskID != snap.TaskID {
+			t.Fatalf("GetTask(%q) = %+v, %v", projectDir, got, err)
+		}
 	}
 }
 
@@ -187,6 +204,34 @@ func TestFileStore_RejectsSymlinkStoreParent(t *testing.T) {
 	}
 }
 
+func TestFileStore_DefaultProjectRejectsSymlinkStoreParent(t *testing.T) {
+	project := t.TempDir()
+	outside := t.TempDir()
+	oldWorkingDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(project); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldWorkingDir); err != nil {
+			t.Errorf("restore working directory: %v", err)
+		}
+	})
+	if err := os.Symlink(outside, ".reasonix"); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	snap := TaskSnapshot{SchemaVersion: 1, TaskID: "t1", SessionID: "s", Version: 1, State: TaskStateRunning, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := NewFileStore(".reasonix/tasks").SaveTask(context.Background(), "", snap); err == nil {
+		t.Fatal("expected default project scope to reject symlink store parent")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "tasks", "t1", "snapshot.json")); !os.IsNotExist(err) {
+		t.Fatalf("default-scope write escaped through parent symlink: stat err=%v", err)
+	}
+}
+
 func TestFileStore_RejectsSymlinkSnapshotAndEvents(t *testing.T) {
 	project := t.TempDir()
 	outside := t.TempDir()
@@ -218,6 +263,9 @@ func TestFileStore_WritablePathsUsePrivateModes(t *testing.T) {
 	}
 	if err := store.AppendAuditEvent(context.Background(), project, TaskEvent{TaskID: "t1", SessionID: "s", EventType: "state_change", State: TaskStateRunning, Timestamp: now}); err != nil {
 		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		return // Windows does not expose POSIX permission bits through os.FileMode.
 	}
 	checks := map[string]os.FileMode{
 		filepath.Join(project, ".reasonix", "tasks"):                        0o700,

@@ -1,12 +1,17 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"reasonix/internal/config"
 )
@@ -30,8 +35,9 @@ type ExternalOpenerView struct {
 
 // ExternalOpenersView is the complete state for the Codex-style Open control.
 type ExternalOpenersView struct {
-	Openers   []ExternalOpenerView `json:"openers"`
-	Preferred string               `json:"preferred"`
+	Openers           []ExternalOpenerView `json:"openers"`
+	Preferred         string               `json:"preferred"`
+	WorkspaceOpenable bool                 `json:"workspaceOpenable,omitempty"`
 }
 
 type externalOpenerSpec struct {
@@ -180,6 +186,18 @@ func (a *App) ExternalOpeners() ExternalOpenersView {
 	return ExternalOpenersView{Openers: views, Preferred: selected.View.ID}
 }
 
+// ExternalOpenersForTab adds the tab-scoped local-workspace capability used by
+// the chat-header Open control. Scope is intentionally not part of the check:
+// both project tabs and Global tabs can own a real local workspace directory.
+func (a *App) ExternalOpenersForTab(tabID string) ExternalOpenersView {
+	if _, err := a.externalOpenerWorkspacePathForTab(tabID); err != nil {
+		return ExternalOpenersView{Openers: []ExternalOpenerView{}}
+	}
+	view := a.ExternalOpeners()
+	view.WorkspaceOpenable = true
+	return view
+}
+
 // SetPreferredExternalOpener persists an installed, platform-owned opener id.
 func (a *App) SetPreferredExternalOpener(id string) error {
 	specs := cachedPlatformExternalOpenerSpecs()
@@ -201,24 +219,14 @@ func (a *App) OpenWorkspaceInExternalOpener(id string) error {
 // OpenWorkspaceInExternalOpenerForTab is tab-scoped so a rapid tab switch cannot
 // send the wrong project to an external application.
 func (a *App) OpenWorkspaceInExternalOpenerForTab(tabID, id string) error {
-	root, _, ok := a.workspaceTargetForTab(tabID)
-	if !ok {
-		return os.ErrNotExist
-	}
-	path, err := workspaceBaseFromRoot(root)
+	path, err := a.externalOpenerWorkspacePathForTab(tabID)
 	if err != nil {
 		return err
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("workspace is not a directory")
 	}
 
 	specs := cachedPlatformExternalOpenerSpecs()
 	var spec externalOpenerSpec
+	var ok bool
 	if strings.TrimSpace(id) == "" {
 		spec, ok = resolveExternalOpener(specs, a.preferredExternalOpenerID())
 	} else {
@@ -227,5 +235,191 @@ func (a *App) OpenWorkspaceInExternalOpenerForTab(tabID, id string) error {
 	if !ok {
 		return fmt.Errorf("external opener %q is not available", strings.TrimSpace(id))
 	}
-	return launchPlatformExternalOpener(spec, path)
+	return launchPlatformExternalOpener(spec, path, true)
+}
+
+func (a *App) externalOpenerWorkspacePathForTab(tabID string) (string, error) {
+	root, _, ok := a.workspaceTargetForTab(tabID)
+	if !ok {
+		return "", os.ErrNotExist
+	}
+	// A bound tab with no root has no stable workspace to expose. Keep the legacy
+	// no-tab current-directory fallback, but do not turn an incomplete tab into
+	// an opener for the Desktop process's launch directory.
+	if strings.TrimSpace(root) == "" {
+		return "", os.ErrNotExist
+	}
+	path, err := workspaceBaseFromRoot(root)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("workspace is not a directory")
+	}
+	return path, nil
+}
+
+// OpenLocalPathInExternalOpener opens an absolute local path with one of the
+// detected, platform-owned applications. It shares OpenLocalPath's safety
+// checks so a markdown link cannot turn an AI-generated executable path into
+// an executable launch.
+func (a *App) OpenLocalPathInExternalOpener(path, id string) error {
+	path, err := normalizeLocalOpenPath(path)
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if !openTargetPathAllowed(path, info) {
+		return fmt.Errorf("refusing to open executable target %q", path)
+	}
+
+	specs := cachedPlatformExternalOpenerSpecs()
+	var spec externalOpenerSpec
+	var ok bool
+	if strings.TrimSpace(id) == "" {
+		spec, ok = resolveExternalOpener(specs, a.preferredExternalOpenerID())
+	} else {
+		spec, ok = externalOpenerByID(specs, id)
+	}
+	if !ok {
+		return fmt.Errorf("external opener %q is not available", strings.TrimSpace(id))
+	}
+	return launchPlatformExternalOpener(spec, path, info.IsDir())
+}
+
+// SaveLocalPathAs copies a local file to a user-selected destination without
+// changing the source. Directories are intentionally excluded: Finder's
+// reveal action is the appropriate operation for them.
+func (a *App) SaveLocalPathAs(path string) (string, error) {
+	path, err := normalizeLocalOpenPath(path)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("cannot save a directory as a file")
+	}
+	if a.ctx == nil {
+		return "", nil
+	}
+	target, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:                "Save file as",
+		DefaultDirectory:     filepath.Dir(path),
+		DefaultFilename:      filepath.Base(path),
+		CanCreateDirectories: true,
+	})
+	if err != nil || target == "" {
+		return "", err
+	}
+	if filepath.Clean(target) == filepath.Clean(path) {
+		return "", fmt.Errorf("destination is the same as the source")
+	}
+	if err := copyLocalPathAs(path, target); err != nil {
+		return "", err
+	}
+	return target, nil
+}
+
+func copyLocalPathAs(path, target string) (err error) {
+	src, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	sourceInfo, err := src.Stat()
+	if err != nil {
+		return err
+	}
+	if sourceInfo.IsDir() {
+		return fmt.Errorf("cannot save a directory as a file")
+	}
+	sameFile, err := localSaveDestinationIsSource(sourceInfo, target)
+	if err != nil {
+		return err
+	}
+	if sameFile {
+		return fmt.Errorf("destination is the same as the source")
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(target), "."+filepath.Base(target)+".reasonix-copy-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		if tmpName != "" {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err = io.Copy(tmp, src); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err = tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err = tmp.Chmod(sourceInfo.Mode().Perm()); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err = tmp.Close(); err != nil {
+		return err
+	}
+	if err = replaceLocalSaveDestination(tmpName, target); err != nil {
+		return err
+	}
+	tmpName = ""
+	return nil
+}
+
+// localSaveDestinationIsSource compares filesystem identity, not just path
+// spelling. os.Stat follows aliases, so this catches case-insensitive paths,
+// symlinks, and hard links before the destination is replaced.
+func localSaveDestinationIsSource(sourceInfo os.FileInfo, target string) (bool, error) {
+	targetInfo, err := os.Stat(target)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return os.SameFile(sourceInfo, targetInfo), nil
+}
+
+// externalOpenerWorkingDirectory returns a valid directory for process launch.
+// Editors still receive the original file path as an argument; only the
+// process CWD changes when the requested path is a regular file.
+func externalOpenerWorkingDirectory(path string) string {
+	info, err := os.Stat(path)
+	if err == nil && !info.IsDir() {
+		return filepath.Dir(path)
+	}
+	return path
+}
+
+func externalOpenerLaunchPath(spec externalOpenerSpec, path string) string {
+	if spec.View.Kind == externalOpenerTerminal || isTerminalLaunchMode(spec.LaunchMode) {
+		return externalOpenerWorkingDirectory(path)
+	}
+	return path
+}
+
+func isTerminalLaunchMode(mode string) bool {
+	switch mode {
+	case "ghostty", "gnome-terminal", "konsole", "kitty", "alacritty", "cwd", "windows-terminal", "console":
+		return true
+	default:
+		return false
+	}
 }

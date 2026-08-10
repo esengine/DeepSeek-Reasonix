@@ -5,7 +5,13 @@ import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { LocaleProvider } from "../lib/i18n";
-import { ProviderEditor, ProviderEditorModelPicker } from "../components/SettingsPanel";
+import {
+  ProviderEditor,
+  ProviderEditorModelPicker,
+  providerSupportsServerWebSearch,
+  providerSupportsServerWebSearchForView,
+  providerVisionCapabilityForView,
+} from "../components/SettingsPanel";
 import type { ProviderView } from "../lib/types";
 
 let passed = 0;
@@ -45,13 +51,14 @@ globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.win
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
 window.scrollTo = () => {};
 
-function renderPicker(candidates: string[]) {
+function renderPicker(candidates: string[], visionCapability: "configurable" | "unsupported" = "configurable") {
   return (
     <LocaleProvider>
       <ProviderEditorModelPicker
         candidates={candidates}
         selectedModels={[]}
         visionModels={[]}
+        visionCapability={visionCapability}
         contextWindows={{}}
         disabled={false}
         onToggleModel={() => undefined}
@@ -88,6 +95,68 @@ try {
 ok(!threw, "model picker can render after async model fetch returns candidates");
 ok(rootEl.textContent?.includes("zen-v1") === true, "model picker shows fetched custom provider models");
 
+await act(async () => {
+  root.render(renderPicker(["deepseek-v4-flash"], "unsupported"));
+  await flushPromises();
+});
+ok(rootEl.textContent?.includes("No image input") === true, "known text-only DeepSeek models show a read-only image capability");
+ok(rootEl.querySelectorAll('input[type="checkbox"]').length === 1, "text-only model card does not render a second image checkbox");
+ok(providerSupportsServerWebSearch("responses", "https://api.deepseek.com"), "DeepSeek Responses exposes server-side web search");
+ok(providerSupportsServerWebSearch("anthropic", "https://api.deepseek.com/anthropic"), "DeepSeek Anthropic exposes server-side web search");
+ok(!providerSupportsServerWebSearch("openai", "https://api.deepseek.com"), "DeepSeek Chat Completions does not expose server-side web search");
+ok(!providerSupportsServerWebSearch("responses", "https://relay.deepseek.com"), "DeepSeek-like subdomains do not inherit official defaults");
+ok(!providerSupportsServerWebSearch("responses", "https://api.deepseek.com/anthropic"), "Responses rejects the Anthropic base path");
+ok(!providerSupportsServerWebSearch("anthropic", "https://api.deepseek.com"), "Anthropic requires its documented base path");
+ok(!providerSupportsServerWebSearch("responses", "http://api.deepseek.com"), "insecure DeepSeek URLs do not inherit official defaults");
+ok(
+  providerSupportsServerWebSearchForView({
+    kind: "anthropic",
+    baseUrl: "https://gateway.example/anthropic",
+    serverWebSearchCapability: true,
+  }),
+  "backend verification can enable server-side web search for future curated endpoints",
+);
+ok(
+  !providerSupportsServerWebSearchForView({
+    kind: "anthropic",
+    baseUrl: "https://api.deepseek.com/anthropic",
+    serverWebSearchCapability: false,
+  }),
+  "backend capability overrides endpoint inference when explicitly unsupported",
+);
+ok(
+  providerSupportsServerWebSearchForView({ kind: "anthropic", baseUrl: "https://api.deepseek.com/anthropic" }),
+  "older backend payloads retain the exact DeepSeek endpoint fallback",
+);
+ok(
+  !providerSupportsServerWebSearchForView({ kind: "anthropic", baseUrl: "https://gateway.example/anthropic" }),
+  "older backend payloads do not infer support for arbitrary compatible endpoints",
+);
+ok(
+  providerVisionCapabilityForView({ kind: "openai", baseUrl: "https://custom.example/v1", visionCapability: "unsupported" }) === "unsupported",
+  "backend vision capability overrides frontend endpoint inference",
+);
+ok(
+  providerVisionCapabilityForView({ kind: "openai", baseUrl: "https://api.deepseek.com" }) === "unsupported",
+  "older backend payloads retain the endpoint-based vision fallback",
+);
+ok(
+  providerVisionCapabilityForView({ kind: "anthropic", baseUrl: "https://eu.deepseek.com/anthropic" }) === "unsupported",
+  "older backend payloads treat regional DeepSeek subdomains as text-only",
+);
+ok(
+  providerVisionCapabilityForView({ kind: "responses", baseUrl: "https://deepseek.com" }) === "configurable",
+  "the DeepSeek apex does not inherit official vision restrictions",
+);
+ok(
+  providerVisionCapabilityForView({ kind: "openai", baseUrl: "https://deepseek.com.example/v1" }) === "configurable",
+  "lookalike domains with a DeepSeek prefix do not inherit official vision restrictions",
+);
+ok(
+  providerVisionCapabilityForView({ kind: "openai", baseUrl: "https://api.deepseek.com.example/v1" }) === "configurable",
+  "lookalike domains with an official-host prefix remain configurable",
+);
+
 const builtInProvider: ProviderView = {
   name: "deepseek",
   builtIn: true,
@@ -109,10 +178,43 @@ const builtInProvider: ProviderView = {
   defaultEffort: "",
 };
 
+const deepSeekResponsesProvider: ProviderView = {
+  ...builtInProvider,
+  name: "deepseek-responses",
+  builtIn: false,
+  kind: "responses",
+  models: ["deepseek-v4-flash"],
+  default: "deepseek-v4-flash",
+  webSearch: true,
+  serverWebSearchCapability: true,
+};
+
+const longCatAnthropicProvider: ProviderView = {
+  ...builtInProvider,
+  name: "longcat-anthropic",
+  builtIn: false,
+  kind: "anthropic",
+  baseUrl: "https://api.longcat.chat/anthropic",
+  models: ["LongCat-2.0"],
+  default: "LongCat-2.0",
+  serverWebSearchCapability: false,
+};
+
+const backendUnsupportedCustomProvider: ProviderView = {
+  ...builtInProvider,
+  name: "deepseek-regional",
+  builtIn: false,
+  baseUrl: "https://eu.deepseek.com/v1",
+  models: ["deepseek-v4-pro"],
+  default: "deepseek-v4-pro",
+  visionCapability: "unsupported",
+};
+
 function renderProviderEditor(initial?: ProviderView) {
   return (
     <LocaleProvider>
       <ProviderEditor
+        key={initial?.name ?? "new-provider"}
         initial={initial}
         kinds={["openai"]}
         busy={false}
@@ -140,6 +242,36 @@ try {
 
 ok(!editorThrew, "provider editor can switch from built-in to custom without changing hook order");
 ok(rootEl.textContent?.includes("OpenAI-compatible") === true, "provider editor renders the custom provider fields after the switch");
+ok(rootEl.textContent?.includes("Kimi K3 reasoning (low / high / max)") === true, "custom provider editor exposes the explicit Kimi K3 reasoning protocol");
+
+await act(async () => {
+  root.render(<div />);
+  await flushPromises();
+});
+await act(async () => {
+  root.render(renderProviderEditor(deepSeekResponsesProvider));
+  await flushPromises();
+});
+const webSearchSwitch = rootEl.querySelector<HTMLInputElement>('input[role="switch"]');
+ok(rootEl.textContent?.includes("Server-side web search") === true, "DeepSeek Responses editor separates service capabilities from model selection");
+ok(webSearchSwitch?.checked === true, "curated DeepSeek Responses capability is enabled in the editor");
+ok(rootEl.textContent?.includes("No image input") === true, "DeepSeek Responses editor labels image input as unsupported");
+
+await act(async () => {
+  root.render(renderProviderEditor(longCatAnthropicProvider));
+  await flushPromises();
+});
+ok(rootEl.textContent?.includes("Server-side web search") === false, "unverified LongCat Anthropic endpoint hides server-side web search");
+ok(rootEl.querySelector<HTMLInputElement>('input[role="switch"]') === null, "unverified LongCat endpoint exposes no recommended web-search switch");
+
+await act(async () => {
+  root.render(renderProviderEditor(backendUnsupportedCustomProvider));
+  await flushPromises();
+});
+ok(
+  rootEl.textContent?.includes("No image input") === true,
+  "provider editor honors backend vision capability for endpoints outside the legacy frontend heuristic",
+);
 
 await act(async () => {
   root.unmount();

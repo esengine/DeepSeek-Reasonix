@@ -1,37 +1,22 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import gsap from "gsap";
 import { useT, type Translator } from "../lib/i18n";
 import type { ComposerInsertRequest, DirEntry, ToolApprovalMode, WireApproval } from "../lib/types";
 import {
   DecisionConfirmBar,
   PromptAction,
   PromptBadge,
-  PromptDescriptionToggle,
+  PromptDescriptionDisclosure,
   PromptHeaderAction,
   PromptShelf,
 } from "./PromptShelf";
-import { DUR_FAST } from "../lib/gsapAnimations";
+import { animateElementExit, DUR_FAST } from "../lib/motion";
 import {
   FileReferenceMenu,
   insertTextAtSelection,
   pickInlineFileReference,
   useFileReferenceMenu,
 } from "./FileReferenceMenu";
-
-function animateShelfExit(
-  el: HTMLDivElement,
-  options: { opacity: number; y: number; duration: number; ease: string; onComplete: () => void },
-) {
-  const animator = typeof gsap.to === "function"
-    ? gsap
-    : (gsap as unknown as { default?: typeof gsap }).default;
-  if (animator && typeof animator.to === "function") {
-    animator.to(el, options);
-    return;
-  }
-  options.onComplete();
-}
 
 function requiresFreshHumanApproval(tool: string): boolean {
   return tool === "remember" || tool === "forget" || tool === "exit_plan_mode" || tool === "sandbox_escape" || tool === "config_write";
@@ -81,8 +66,12 @@ function localizeApprovalSubject(tool: string, subject: string, t: Translator): 
   const trimmed = subject.trim();
   if (tool === "sandbox_escape") {
     if (!trimmed || trimmed === sandboxEscapeEnglishSubjectFallback) return t("approval.sandboxEscapeSubjectFallback");
+    const localizedPrefix = t("approval.sandboxEscapeSubjectPrefix");
     if (trimmed.startsWith(sandboxEscapeEnglishSubjectPrefix)) {
-      return `${t("approval.sandboxEscapeSubjectPrefix")}${trimmed.slice(sandboxEscapeEnglishSubjectPrefix.length)}`;
+      return trimmed.slice(sandboxEscapeEnglishSubjectPrefix.length).trim() || t("approval.sandboxEscapeSubjectFallback");
+    }
+    if (localizedPrefix !== sandboxEscapeEnglishSubjectPrefix && trimmed.startsWith(localizedPrefix)) {
+      return trimmed.slice(localizedPrefix.length).trim() || t("approval.sandboxEscapeSubjectFallback");
     }
     return trimmed;
   }
@@ -282,8 +271,9 @@ export function ApprovalModal({
   const reason = localizePlanModeApprovalReason(approval.tool, localizeApprovalReason(approval.tool, approval.reason, t), t);
   const subjectSummary = subject.split(/\r?\n/).find((line) => line.trim())?.trim() ?? "";
   // Plan approvals already show the plan above; keep a short hint. Tool
-  // approvals surface the command/subject by default (reason is secondary).
-  const toolMeta = isPlanApproval ? t("approval.planReadyHint") : (subjectSummary || reason || approval.tool);
+  // approvals render their command/subject in the details block, so header
+  // metadata is only a fallback when there is no subject to show there.
+  const toolMeta = isPlanApproval ? t("approval.planReadyHint") : (!subject ? (reason || approval.tool) : undefined);
   const hasToolDetails = Boolean(reason || subject);
   // Subject (command) is visible by default; long reason can collapse.
   const [reasonOpen, setReasonOpen] = useState(() => {
@@ -311,9 +301,8 @@ export function ApprovalModal({
   const onRevisionActiveChangeRef = useRef(onRevisionActiveChange);
   const revisionActiveRef = useRef(false);
   onRevisionActiveChangeRef.current = onRevisionActiveChange;
-  // When consecutive approvals arrive, animate the old card out before
-  // the new one slides in.  GSAP fromTo on the shelf wrapper avoids the
-  // jarring pop when the API cycles through 4+ pending approvals.
+  // When consecutive approvals arrive, animate the old card out before the
+  // new one slides in so a queue of pending approvals does not visibly pop.
   const closingRef = useRef(false);
   const fileMenu = useFileReferenceMenu(revisionText, cwd, tabId, workspaceScopeKey);
 
@@ -323,11 +312,10 @@ export function ApprovalModal({
     setSubmitting(true);
     const el = shelfRef.current;
     if (el) {
-      animateShelfExit(el, {
+      animateElementExit(el, {
         opacity: 0,
         y: 8,
         duration: DUR_FAST,
-        ease: "power2.in",
         onComplete: fn,
       });
     } else {
@@ -812,9 +800,6 @@ export function ApprovalModal({
                   description={action.desc}
                   descriptionId={`${instanceId}-description-${index}`}
                   descriptionDisclosure
-                  descriptionExpanded={!isPlanApproval && !isRecoveryApproval && selectedIndex === index
-                    ? descriptionExpanded
-                    : undefined}
                   onDescriptionOverflowChange={!isPlanApproval && !isRecoveryApproval && selectedIndex === index
                     ? setDescriptionTruncated
                     : undefined}
@@ -826,7 +811,6 @@ export function ApprovalModal({
                   tone={action.tone}
                   role={isPlanApproval || isRecoveryApproval ? "button" : "option"}
                   disabled={submitting}
-                  title={action.desc}
                 />
               );
               if (isRecoveryApproval && !isRecoveryPlanChange && index === 1 && recovery?.can_grant_task) {
@@ -868,8 +852,10 @@ export function ApprovalModal({
         }
         note={
           !isPlanApproval && !isRecoveryApproval && selectedDescriptionId && descriptionTruncated ? (
-            <PromptDescriptionToggle
-              descriptionId={selectedDescriptionId}
+            <PromptDescriptionDisclosure
+              descriptionId={`${selectedDescriptionId}-detail`}
+              label={selectedAction?.label}
+              description={selectedAction?.desc ?? ""}
               expanded={descriptionExpanded}
               onToggle={() => setExpandedDescriptionId((current) => current === selectedDescriptionId ? null : selectedDescriptionId)}
               disabled={submitting}

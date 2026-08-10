@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -41,12 +43,10 @@ func TestTaskControlConcurrentInitializationReturnsOneService(t *testing.T) {
 	const callers = 16
 	services := make(chan *taskmonitor.ControlService, callers)
 	var wg sync.WaitGroup
-	for i := 0; i < callers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range callers {
+		wg.Go(func() {
 			services <- app.taskControl()
-		}()
+		})
 	}
 	wg.Wait()
 	close(services)
@@ -64,8 +64,10 @@ func TestTaskControlConcurrentInitializationReturnsOneService(t *testing.T) {
 }
 
 func TestDesktopTaskJobKillerRoutesBySessionNotActiveTab(t *testing.T) {
-	pathA := agent.NewSessionPath(t.TempDir(), "session-a")
-	pathB := agent.NewSessionPath(t.TempDir(), "session-b")
+	projectA := t.TempDir()
+	projectB := t.TempDir()
+	pathA := filepath.Join(t.TempDir(), "shared-session.jsonl")
+	pathB := filepath.Join(t.TempDir(), "shared-session.jsonl")
 	ctrlA := &taskKillController{SessionAPI: control.New(control.Options{Label: "a", SessionPath: pathA})}
 	ctrlB := &taskKillController{SessionAPI: control.New(control.Options{Label: "b", SessionPath: pathB})}
 	defer ctrlA.Close()
@@ -73,17 +75,20 @@ func TestDesktopTaskJobKillerRoutesBySessionNotActiveTab(t *testing.T) {
 
 	app := &App{
 		tabs: map[string]*WorkspaceTab{
-			"active-a": {ID: "active-a", Ctrl: ctrlA},
+			"active-a": {ID: "active-a", WorkspaceRoot: projectA, Ctrl: ctrlA},
 		},
 		detachedSessions: map[string]*WorkspaceTab{
-			sessionRuntimeKey(pathB): {ID: "detached-b", Ctrl: ctrlB},
+			sessionRuntimeKey(pathB): {ID: "detached-b", WorkspaceRoot: projectB, Ctrl: ctrlB},
 		},
 		activeTabID: "active-a",
 	}
 
-	killer := desktopTaskJobKiller{app: app}
+	if agent.BranchID(pathA) != agent.BranchID(pathB) {
+		t.Fatal("test setup must use colliding session IDs")
+	}
+	killer := desktopTaskJobKiller{app: app, projectDir: projectB}
 	if !killer.Kill(agent.BranchID(pathB), "task-1") {
-		t.Fatal("expected detached session task to be killed")
+		t.Fatal("expected detached project B task to be killed")
 	}
 	if ctrlA.killCount() != 0 || ctrlB.killCount() != 1 {
 		t.Fatalf("kill routed incorrectly: active=%d detached=%d", ctrlA.killCount(), ctrlB.killCount())
@@ -91,12 +96,13 @@ func TestDesktopTaskJobKillerRoutesBySessionNotActiveTab(t *testing.T) {
 }
 
 func TestDesktopTaskJobKillerRefusesLegacyTaskWithoutSession(t *testing.T) {
+	root := t.TempDir()
 	path := agent.NewSessionPath(t.TempDir(), "session")
 	ctrl := &taskKillController{SessionAPI: control.New(control.Options{Label: "session", SessionPath: path})}
 	defer ctrl.Close()
-	app := &App{tabs: map[string]*WorkspaceTab{"active": {ID: "active", Ctrl: ctrl}}}
+	app := &App{tabs: map[string]*WorkspaceTab{"active": {ID: "active", WorkspaceRoot: root, Ctrl: ctrl}}}
 
-	if (desktopTaskJobKiller{app: app}).Kill("", "task-1") {
+	if (desktopTaskJobKiller{app: app, projectDir: root}).Kill("", "task-1") {
 		t.Fatal("legacy task without session ID must not be routed by colliding task ID")
 	}
 	if ctrl.killCount() != 0 {
@@ -147,5 +153,81 @@ func TestStopTaskRoutesMonitorIdentityToRuntimeJob(t *testing.T) {
 	ids := ctrl.killedIDs()
 	if len(ids) != 1 || ids[0] != "task-1" {
 		t.Fatalf("runtime killed IDs = %v, want [task-1]", ids)
+	}
+}
+
+func TestStopTaskForTabKeepsSourceWorkspaceAfterActiveTabSwitch(t *testing.T) {
+	projectA := t.TempDir()
+	projectB := t.TempDir()
+	pathA := filepath.Join(t.TempDir(), "shared-session.jsonl")
+	pathB := filepath.Join(t.TempDir(), "shared-session.jsonl")
+	ctrlA := &taskKillController{SessionAPI: control.New(control.Options{Label: "a", SessionPath: pathA})}
+	ctrlB := &taskKillController{SessionAPI: control.New(control.Options{Label: "b", SessionPath: pathB})}
+	defer ctrlA.Close()
+	defer ctrlB.Close()
+
+	app := &App{
+		ctx: context.Background(),
+		tabs: map[string]*WorkspaceTab{
+			"tab-a": {ID: "tab-a", Scope: "project", WorkspaceRoot: projectA, SessionPath: pathA, Ctrl: ctrlA},
+			"tab-b": {ID: "tab-b", Scope: "project", WorkspaceRoot: projectB, SessionPath: pathB, Ctrl: ctrlB},
+		},
+		activeTabID: "tab-b",
+	}
+	sessionID := agent.BranchID(pathA)
+	if sessionID != agent.BranchID(pathB) {
+		t.Fatal("test setup must use colliding session IDs")
+	}
+	monitorID := sessionID + "--task-1"
+	now := time.Now()
+	for _, root := range []string{projectA, projectB} {
+		if err := app.taskStore().SaveTask(app.ctx, root, taskmonitor.TaskSnapshot{
+			SchemaVersion: 1, TaskID: monitorID, JobID: "task-1", SessionID: sessionID,
+			State: taskmonitor.TaskStateRunning, RuntimeState: taskmonitor.RuntimeStateAlive,
+			Version: 1, CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	res, err := app.StopTaskForTab("tab-a", monitorID, 1, "", "tab-bound-stop")
+	if err != nil || !res.Accepted {
+		t.Fatalf("StopTaskForTab: result=%+v err=%v", res, err)
+	}
+	if ctrlA.killCount() != 1 || ctrlB.killCount() != 0 {
+		t.Fatalf("kill routed away from source tab: projectA=%d projectB=%d", ctrlA.killCount(), ctrlB.killCount())
+	}
+	projectBTask, err := app.taskStore().GetTask(app.ctx, projectB, monitorID)
+	if err != nil || projectBTask == nil || projectBTask.State != taskmonitor.TaskStateRunning {
+		t.Fatalf("project B task mutated by project A control: task=%+v err=%v", projectBTask, err)
+	}
+}
+
+func TestListSessionsForTabKeepsSourceDirectoryAfterActiveTabSwitch(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	pathA := filepath.Join(dirA, "a.jsonl")
+	pathB := filepath.Join(dirB, "b.jsonl")
+	if err := os.WriteFile(pathA, []byte(`{"role":"user","content":"workspace A"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pathB, []byte(`{"role":"user","content":"workspace B"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctrlA := control.New(control.Options{SessionDir: dirA, SessionPath: pathA, Label: "a"})
+	ctrlB := control.New(control.Options{SessionDir: dirB, SessionPath: pathB, Label: "b"})
+	defer ctrlA.Close()
+	defer ctrlB.Close()
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"tab-a": {ID: "tab-a", Scope: "project", WorkspaceRoot: t.TempDir(), SessionPath: pathA, Ctrl: ctrlA},
+			"tab-b": {ID: "tab-b", Scope: "project", WorkspaceRoot: t.TempDir(), SessionPath: pathB, Ctrl: ctrlB},
+		},
+		activeTabID: "tab-b",
+	}
+
+	sessions := app.ListSessionsForTab("tab-a")
+	if len(sessions) != 1 || sessions[0].Path != pathA || sessions[0].Preview != "workspace A" {
+		t.Fatalf("ListSessionsForTab(tab-a) = %+v", sessions)
 	}
 }

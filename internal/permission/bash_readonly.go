@@ -2,9 +2,9 @@ package permission
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 
-	"reasonix/internal/shellparse"
 	"reasonix/internal/shellsafe"
 )
 
@@ -36,12 +36,8 @@ func isReadOnlyBashSubject(subject string) bool {
 	if normalized, ok := normalizeBashSafeRedirectsForMatch(subject); ok {
 		subject = normalized
 	}
-	base, sub, ok := shellsafe.CommandIsReadOnly(subject)
+	base, sub, fields, ok := shellsafe.ClassifyReadOnlyCommand(subject)
 	if !ok {
-		return false
-	}
-	fields, malformed := shellparse.StaticFields(subject)
-	if malformed != "" {
 		return false
 	}
 	if sub == "" {
@@ -128,10 +124,8 @@ func hasArgWithPrefix(args []string, prefix string) bool {
 
 func hasAnyArg(args []string, unsafe ...string) bool {
 	for _, arg := range args {
-		for _, candidate := range unsafe {
-			if arg == candidate {
-				return true
-			}
+		if slices.Contains(unsafe, arg) {
+			return true
 		}
 	}
 	return false

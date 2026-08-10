@@ -113,7 +113,7 @@ func BenchmarkBashForegroundTimeoutConfiguredCap(b *testing.B) {
 		timeout := bt.foregroundTimeout()
 		if timeout > 0 {
 			var cancel context.CancelFunc
-			runCtx, cancel = context.WithTimeoutCause(ctx, timeout, errBashTimeout)
+			runCtx, cancel = context.WithTimeoutCause(ctx, timeout, errors.New("bash foreground timeout"))
 			cancel()
 		}
 		if runCtx == nil {

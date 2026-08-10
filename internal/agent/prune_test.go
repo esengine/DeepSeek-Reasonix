@@ -42,7 +42,7 @@ func TestPruneStaleToolResults(t *testing.T) {
 	if st.SavedChars < 4000 {
 		t.Errorf("SavedChars = %d, want > 4000", st.SavedChars)
 	}
-	msgs := sess.Snapshot()
+	msgs := visibleContext(a)
 	if len(msgs) != 7 {
 		t.Fatalf("message count changed: %d", len(msgs))
 	}
@@ -56,8 +56,11 @@ func TestPruneStaleToolResults(t *testing.T) {
 	if len(msgs[2].ToolCalls) != 1 || msgs[2].ToolCalls[0].ID != "1" {
 		t.Errorf("assistant tool_calls touched: %+v", msgs[2])
 	}
-	if got := sess.RewriteVersion(); got != 1 {
-		t.Errorf("RewriteVersion = %d, want 1", got)
+	if got := sess.RewriteVersion(); got != 0 {
+		t.Errorf("canonical RewriteVersion = %d, want 0", got)
+	}
+	if got := sess.Snapshot()[3].Content; got != big {
+		t.Fatal("projection maintenance rewrote canonical tool content")
 	}
 	if st.Archive == "" {
 		t.Fatal("no archive written")
@@ -80,8 +83,31 @@ func TestPruneStaleToolResults(t *testing.T) {
 	if st2.Results != 0 {
 		t.Errorf("second pass pruned %d, want 0 (idempotent)", st2.Results)
 	}
-	if got := sess.RewriteVersion(); got != 1 {
+	if got := sess.RewriteVersion(); got != 0 {
 		t.Errorf("no-op pass bumped RewriteVersion to %d", got)
+	}
+}
+
+func TestArchiveMessagesIsContentAddressedAndRetryStable(t *testing.T) {
+	dir := t.TempDir()
+	msgs := []provider.Message{{Role: provider.RoleTool, Name: "read_file", Content: strings.Repeat("x", 5000)}}
+	first, err := archiveMessages(dir, msgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := archiveMessages(dir, msgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == "" || first != second {
+		t.Fatalf("same archive input produced different paths: %q vs %q", first, second)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("retry created duplicate archives: %d", len(entries))
 	}
 }
 
@@ -98,7 +124,7 @@ func TestPruneNeverRewritesLocalInterruptedDisplay(t *testing.T) {
 
 func TestSnipStaleToolResults(t *testing.T) {
 	var lines []string
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		lines = append(lines, "line")
 	}
 	big := strings.Join(lines, "\n")
@@ -113,7 +139,7 @@ func TestSnipStaleToolResults(t *testing.T) {
 	if st.Results != 1 {
 		t.Fatalf("Results = %d, want 1", st.Results)
 	}
-	snipped := sess.Snapshot()[3].Content
+	snipped := visibleContext(a)[3].Content
 	if !strings.HasPrefix(snipped, snippedMarker) {
 		t.Fatalf("tool content not snipped: %.80q", snipped)
 	}
@@ -148,7 +174,7 @@ func TestSnipCanUpgradeToPrune(t *testing.T) {
 	if pruneStats, err := a.PruneStaleToolResults(); err != nil || pruneStats.Results != 1 {
 		t.Fatalf("prune st=%+v err=%v, want one upgraded result", pruneStats, err)
 	}
-	if got := sess.Snapshot()[3].Content; !strings.HasPrefix(got, prunedMarker) {
+	if got := visibleContext(a)[3].Content; !strings.HasPrefix(got, prunedMarker) {
 		t.Fatalf("snipped result was not upgraded to prune: %.80q", got)
 	} else if !strings.Contains(got, snipStats.Archive) {
 		t.Fatalf("pruned marker did not preserve original archive path %q: %.120q", snipStats.Archive, got)
@@ -171,7 +197,7 @@ func TestPruneSkipsSmallResults(t *testing.T) {
 	if err != nil || st.Results != 0 {
 		t.Fatalf("st=%+v err=%v, want small result kept", st, err)
 	}
-	if got := sess.Snapshot()[3].Content; !strings.HasPrefix(got, "xxx") {
+	if got := visibleContext(a)[3].Content; !strings.HasPrefix(got, "xxx") {
 		t.Errorf("small tool result was rewritten: %.40q", got)
 	}
 }
@@ -181,13 +207,24 @@ func TestMaybeCompactPruneAvoidsFold(t *testing.T) {
 	sess := pruneFixture(strings.Repeat("x", 5000))
 	a := New(prov, tool.NewRegistry(), sess, Options{ContextWindow: 1000, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
 
-	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 850})
+	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 850})
 
 	if prov.got != nil {
 		t.Fatal("summarizer was called although pruning cleared the trigger")
 	}
-	if got := sess.Snapshot()[3].Content; !strings.HasPrefix(got, prunedMarker) {
-		t.Errorf("tool result not pruned: %.60q", got)
+	// Canonical stays intact; prune lands only in the projection view.
+	if got := sess.Snapshot()[3].Content; !strings.HasPrefix(got, "xxx") {
+		t.Errorf("canonical tool result rewritten: %.60q", got)
+	}
+	proj := visibleContext(a)
+	found := false
+	for _, m := range proj {
+		if m.Role == provider.RoleTool && strings.HasPrefix(m.Content, prunedMarker) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("tool result not pruned in projection: %+v", proj)
 	}
 }
 
@@ -196,13 +233,37 @@ func TestMaybeCompactSnipsAtSnipRatioWithoutFold(t *testing.T) {
 	sess := pruneFixture(strings.Repeat("line\n", 1000))
 	a := New(prov, tool.NewRegistry(), sess, Options{ContextWindow: 1000, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
 
-	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 650})
+	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 650})
 
 	if prov.got != nil {
 		t.Fatal("summarizer was called at snip ratio")
 	}
-	if got := sess.Snapshot()[3].Content; !strings.HasPrefix(got, snippedMarker) {
-		t.Errorf("tool result not snipped at snip ratio: %.80q", got)
+	if got := sess.Snapshot()[3].Content; !strings.HasPrefix(got, "line") {
+		t.Errorf("canonical tool result rewritten at snip ratio: %.80q", got)
+	}
+	proj := visibleContext(a)
+	found := false
+	for _, m := range proj {
+		if m.Role == provider.RoleTool && strings.HasPrefix(m.Content, snippedMarker) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("tool result not snipped in projection: %+v", proj)
+	}
+}
+
+func TestProjectionMaintenanceContinuesFromVisibleView(t *testing.T) {
+	sess := pruneFixture(strings.Repeat("line\n", 1000))
+	a := New(nil, tool.NewRegistry(), sess, Options{ContextWindow: 1000, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
+	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 650})
+	first := a.compactionState.Projection.ProjectionVersion
+	if first == 0 || !strings.HasPrefix(visibleContext(a)[3].Content, snippedMarker) {
+		t.Fatalf("first maintenance did not install a snipped projection: %+v", visibleContext(a))
+	}
+	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 650})
+	if got := a.compactionState.Projection.ProjectionVersion; got != first {
+		t.Fatalf("same visible tool result was maintained again: projection version %d -> %d", first, got)
 	}
 }
 
@@ -220,20 +281,13 @@ func TestMaybeCompactPruneFallsThroughWhenStillOverThreshold(t *testing.T) {
 	}}
 	a := New(prov, tool.NewRegistry(), sess, Options{ContextWindow: 10000, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
 
-	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 8900})
+	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 8900})
 
 	if prov.got == nil {
 		t.Fatal("summarizer was not called although pruning still left prompt above compact threshold")
 	}
-	foundSummary := false
-	for _, m := range sess.Snapshot() {
-		if strings.Contains(m.Content, summaryTagOpen) {
-			foundSummary = true
-			break
-		}
-	}
-	if !foundSummary {
-		t.Fatal("summary compaction did not update the session")
+	if !hasCompactionSummary(visibleContext(a)) {
+		t.Fatal("summary compaction did not install a projection")
 	}
 }
 
@@ -254,22 +308,16 @@ func TestMaybeCompactForceRatioStillFolds(t *testing.T) {
 	}}
 	a := New(prov, tool.NewRegistry(), sess, Options{ContextWindow: 1000, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
 
-	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 950})
+	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 950})
 
 	if prov.got == nil {
 		t.Fatal("force ratio crossed but summarizer never called")
 	}
 	if got := sess.Snapshot()[1].Content; got != "task" {
-		t.Errorf("first user turn not pinned verbatim: %.40q", got)
+		t.Errorf("first user turn not pinned verbatim in canonical: %.40q", got)
 	}
-	found := false
-	for _, m := range sess.Snapshot() {
-		if strings.Contains(m.Content, summaryTagOpen) {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("no compaction summary in session after forced fold")
+	if !hasCompactionSummary(visibleContext(a)) {
+		t.Error("no compaction summary in projection after forced fold")
 	}
 }
 
@@ -294,12 +342,15 @@ func TestPruneSkipsRecentTail(t *testing.T) {
 	if st.Results != 1 {
 		t.Fatalf("Results = %d, want only the stale result pruned", st.Results)
 	}
-	msgs := sess.Snapshot()
+	msgs := visibleContext(a)
 	if !strings.HasPrefix(msgs[3].Content, prunedMarker) {
 		t.Fatalf("old result was not pruned: %.80q", msgs[3].Content)
 	}
 	if msgs[6].Content != recent {
 		t.Fatalf("recent tail tool result was rewritten")
+	}
+	if canonical := sess.Snapshot(); canonical[3].Content != old || canonical[6].Content != recent {
+		t.Fatal("projection prune rewrote canonical tool results")
 	}
 }
 
@@ -320,7 +371,7 @@ func TestPruneHonorsKeepErrors(t *testing.T) {
 		if st.Results != 0 {
 			t.Errorf("%s: Results = %d, want 0 (KeepErrors preserves error tool results)", prefix, st.Results)
 		}
-		if got := sess.Snapshot()[3].Content; !strings.HasPrefix(got, prefix) {
+		if got := visibleContext(a)[3].Content; !strings.HasPrefix(got, prefix) {
 			t.Errorf("%s: error tool result was elided: %.60q", prefix, got)
 		}
 	}
@@ -340,7 +391,7 @@ func TestPruneElidesErrorsWithoutKeepPolicy(t *testing.T) {
 	if st.Results != 1 {
 		t.Errorf("Results = %d, want 1 (no keep policy)", st.Results)
 	}
-	if got := sess.Snapshot()[3].Content; !strings.HasPrefix(got, prunedMarker) {
+	if got := visibleContext(a)[3].Content; !strings.HasPrefix(got, prunedMarker) {
 		t.Errorf("error tool result not elided without keep policy: %.60q", got)
 	}
 }
@@ -376,7 +427,7 @@ func TestSnipUsesRegisteredToolHint(t *testing.T) {
 	// 600 numbered lines; a SnipHinter keeping head=3, tail=2 must yield exactly
 	// those boundary lines, which no default geometry would produce.
 	var lines []string
-	for i := 0; i < 600; i++ {
+	for i := range 600 {
 		lines = append(lines, fmt.Sprintf("L%d", i))
 	}
 	content := strings.Join(lines, "\n")
@@ -389,7 +440,7 @@ func TestSnipUsesRegisteredToolHint(t *testing.T) {
 	if st, err := a.SnipStaleToolResults(); err != nil || st.Results != 1 {
 		t.Fatalf("snip st=%+v err=%v, want one result", st, err)
 	}
-	got := sess.Snapshot()[3].Content
+	got := visibleContext(a)[3].Content
 	if !strings.Contains(got, "showing first 3 lines and last 2 lines") {
 		t.Fatalf("snip did not honor the tool's SnipHint geometry: %.120q", got)
 	}
@@ -403,7 +454,7 @@ func TestSnipUsesRegisteredToolHint(t *testing.T) {
 
 func TestSnipFallsBackByReadOnlyTier(t *testing.T) {
 	var lines []string
-	for i := 0; i < 600; i++ {
+	for i := range 600 {
 		lines = append(lines, fmt.Sprintf("L%d", i))
 	}
 	content := strings.Join(lines, "\n")
@@ -427,7 +478,7 @@ func TestSnipFallsBackByReadOnlyTier(t *testing.T) {
 		if st, err := a.SnipStaleToolResults(); err != nil || st.Results != 1 {
 			t.Fatalf("%s: snip st=%+v err=%v, want one result", tc.name, st, err)
 		}
-		got := sess.Snapshot()[3].Content
+		got := visibleContext(a)[3].Content
 		want := "showing first 40 lines and last 40 lines"
 		if !tc.evenEnds {
 			want = "showing first 80 lines and last 12 lines"

@@ -1,4 +1,4 @@
-Unicode true
+﻿Unicode true
 
 ####
 ## Reasonix per-user NSIS installer.
@@ -37,6 +37,16 @@ Unicode true
 !include "wails_tools.nsh"
 !include "FileFunc.nsh"
 !include "LogicLib.nsh"
+
+# The build script writes this host-specific include before invoking makensis.
+# Keep a Windows fallback so opening this script directly still behaves like a
+# native Windows build.
+!if /FileExists "reasonix_host.nsh"
+!include "reasonix_host.nsh"
+!endif
+!ifndef REASONIX_UNINST_FINALIZE
+!define REASONIX_UNINST_FINALIZE 'cmd.exe /C copy /Y "%1" "reasonix-uninstall.exe" >NUL'
+!endif
 
 # The version information for this two must consist of 4 parts
 VIProductVersion "${INFO_PRODUCTVERSION}.0"
@@ -88,7 +98,7 @@ LangString reasonixUpdateSubtitle ${LANG_TRADCHINESE} "正在安裝已驗證的�
 ## The second pass provides ARG_REASONIX_SIGNED_UNINSTALLER and embeds that
 ## signed binary instead of generating another unsigned uninstaller.
 !ifndef ARG_REASONIX_SIGNED_UNINSTALLER
-!uninstfinalize 'cmd.exe /C copy /Y "%1" "reasonix-uninstall.exe" >NUL'
+!uninstfinalize '${REASONIX_UNINST_FINALIZE}'
 !endif
 #!finalize 'signtool --file "%1"'
 
@@ -103,6 +113,8 @@ OutFile "..\..\bin\${INFO_PROJECTNAME}-${ARCH}-installer.exe" # Name of the inst
 !define REASONIX_LAYOUT_INSTALLER "reasonix-layout-installer.exe"
 !define REASONIX_PAYLOAD_MANIFEST "reasonix-payload.json"
 !define REASONIX_PAYLOAD_SIGNATURE "reasonix-payload.json.minisig"
+!define REASONIX_LEGACY_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\Reasonix"
+!define REASONIX_LEGACY_PRODUCT_KEY "Software\reasonix\Reasonix"
 !define REASONIX_UNLOCK_RETRIES 60
 Var ReasonixUpdateMode
 Var ReasonixStageMode
@@ -124,7 +136,11 @@ ShowInstDetails show # This will always show the installation details.
     WriteRegStr HKCU "${UNINST_KEY}" "Publisher" "${INFO_COMPANYNAME}"
     WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "${INFO_PRODUCTNAME}"
     WriteRegStr HKCU "${UNINST_KEY}" "DisplayVersion" "${INFO_PRODUCTVERSION}"
+    !if /FileExists "${REASONIX_LAUNCHER}"
+    WriteRegStr HKCU "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\${REASONIX_LAUNCHER}"
+    !else
     WriteRegStr HKCU "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\${PRODUCT_EXECUTABLE}"
+    !endif
     WriteRegStr HKCU "${UNINST_KEY}" "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
     WriteRegStr HKCU "${UNINST_KEY}" "QuietUninstallString" "$\"$INSTDIR\uninstall.exe$\" /S"
     # Persist the resolved install path so a subsequent update picks it up
@@ -138,6 +154,48 @@ ShowInstDetails show # This will always show the installation details.
     ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
     IntFmt $0 "0x%08X" $0
     WriteRegDWORD HKCU "${UNINST_KEY}" "EstimatedSize" "$0"
+!macroend
+
+; Tauri 0.53 separately persisted $INSTDIR under its manufacturer/product key
+; and restores that value before every later install. Clear only a same-root
+; value so re-running 0.53 cannot overwrite the current uninstaller; preserve a
+; genuinely separate legacy installation. If this cleanup fails, retain the old
+; uninstall alias so a later update can retry the migration.
+!macro reasonix.deleteLegacyInstallerStateIfOwned
+    StrCpy $1 "1"
+    ClearErrors
+    ReadRegStr $0 HKCU "${REASONIX_LEGACY_PRODUCT_KEY}" ""
+    ${If} $0 == "$INSTDIR"
+        ClearErrors
+        DeleteRegValue HKCU "${REASONIX_LEGACY_PRODUCT_KEY}" ""
+        ${If} ${Errors}
+            StrCpy $1 "0"
+        ${EndIf}
+    ${ElseIf} $0 == "$\"$INSTDIR$\""
+        ClearErrors
+        DeleteRegValue HKCU "${REASONIX_LEGACY_PRODUCT_KEY}" ""
+        ${If} ${Errors}
+            StrCpy $1 "0"
+        ${EndIf}
+    ${EndIf}
+
+    ${If} $1 == "1"
+        ClearErrors
+        ReadRegStr $0 HKCU "${REASONIX_LEGACY_UNINST_KEY}" "InstallLocation"
+        ${If} $0 == "$INSTDIR"
+            DeleteRegKey HKCU "${REASONIX_LEGACY_UNINST_KEY}"
+        ${ElseIf} $0 == "$\"$INSTDIR$\""
+            DeleteRegKey HKCU "${REASONIX_LEGACY_UNINST_KEY}"
+        ${Else}
+            ClearErrors
+            ReadRegStr $0 HKCU "${REASONIX_LEGACY_UNINST_KEY}" "UninstallString"
+            ${If} $0 == "$INSTDIR\uninstall.exe"
+                DeleteRegKey HKCU "${REASONIX_LEGACY_UNINST_KEY}"
+            ${ElseIf} $0 == "$\"$INSTDIR\uninstall.exe$\""
+                DeleteRegKey HKCU "${REASONIX_LEGACY_UNINST_KEY}"
+            ${EndIf}
+        ${EndIf}
+    ${EndIf}
 !macroend
 
 !macro reasonix.deleteUninstaller
@@ -176,8 +234,44 @@ reasonix_stage_mode_done:
    StrCmp $INSTDIR "" 0 done
    ClearErrors
    ReadRegStr $0 HKCU "${UNINST_KEY}" "DisplayIcon"
+   IfErrors legacy_location
+   StrCmp $0 "" legacy_location
+   ${GetParent} "$0" $INSTDIR
+   StrCmp $INSTDIR "" legacy_location done
+
+legacy_location:
+   ; Tauri 0.53 used a different uninstall key and may have stored the selected
+   ; directory with surrounding quotes (for example "D:\Reasonix"). Reuse it
+   ; only while its uninstaller still exists so a stale registry value cannot
+   ; redirect the repair installer into an unrelated directory.
+   ClearErrors
+   ReadRegStr $0 HKCU "${REASONIX_LEGACY_UNINST_KEY}" "InstallLocation"
+   IfErrors legacy_uninstaller
+   StrCmp $0 "" legacy_uninstaller
+   StrCpy $1 $0 1
+   StrCmp $1 "$\"" 0 legacy_location_ready
+   StrCpy $1 $0 1 -1
+   StrCmp $1 "$\"" 0 legacy_location_ready
+   StrCpy $0 $0 -1 1
+
+legacy_location_ready:
+   IfFileExists "$0\uninstall.exe" 0 legacy_uninstaller
+   StrCpy $INSTDIR $0
+   Goto done
+
+legacy_uninstaller:
+   ClearErrors
+   ReadRegStr $0 HKCU "${REASONIX_LEGACY_UNINST_KEY}" "UninstallString"
    IfErrors fallback
    StrCmp $0 "" fallback
+   StrCpy $1 $0 1
+   StrCmp $1 "$\"" 0 legacy_uninstaller_ready
+   StrCpy $1 $0 1 -1
+   StrCmp $1 "$\"" 0 legacy_uninstaller_ready
+   StrCpy $0 $0 -1 1
+
+legacy_uninstaller_ready:
+   IfFileExists "$0" 0 fallback
    ${GetParent} "$0" $INSTDIR
    StrCmp $INSTDIR "" fallback done
 
@@ -350,7 +444,9 @@ reasonix_normal_install:
     !else
     !error "${REASONIX_GUARD} was not found; normal installs require the signed layout activator."
     !endif
-    ExecWait '"$PLUGINSDIR\${REASONIX_LAYOUT_INSTALLER}" --install-root "$INSTDIR" --version "v${INFO_PRODUCTVERSION}" --activate-staging "$R9" --no-relaunch' $0
+    DetailPrint "Reasonix layout activator output:"
+    nsExec::ExecToLog /OEM '"$PLUGINSDIR\${REASONIX_LAYOUT_INSTALLER}" --install-root "$INSTDIR" --version "v${INFO_PRODUCTVERSION}" --activate-staging "$R9" --no-relaunch'
+    Pop $0
     StrCmp $0 "0" reasonix_layout_activated
     DetailPrint "Reasonix layout activation failed with exit code $0; the previous version remains active."
     RMDir /r "$R9"
@@ -380,6 +476,7 @@ reasonix_layout_activated:
     !insertmacro wails.associateFiles
     !insertmacro wails.associateCustomProtocols
     !insertmacro reasonix.writeUninstaller
+    !insertmacro reasonix.deleteLegacyInstallerStateIfOwned
 
 reasonix_section_done:
 SectionEnd
@@ -406,6 +503,7 @@ Section "uninstall"
     !insertmacro wails.unassociateCustomProtocols
 
     !insertmacro reasonix.deleteUninstaller
+    !insertmacro reasonix.deleteLegacyInstallerStateIfOwned
 
     ; Only remove the installation directory if it is empty to prevent data loss
     RMDir $INSTDIR

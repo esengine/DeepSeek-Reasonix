@@ -14,11 +14,11 @@ import (
 	"io"
 	"log/slog"
 	"math"
-	"net"
 	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,17 +26,20 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"reasonix/internal/ablation"
 	"reasonix/internal/agent"
 	"reasonix/internal/boot"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/extension/providerext"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/i18n"
 	"reasonix/internal/notify"
 	"reasonix/internal/provider"
 	"reasonix/internal/provider/openai"
 	"reasonix/internal/serve"
+	"reasonix/internal/sessiontemp"
 	"reasonix/internal/stats"
 	"reasonix/internal/telemetry"
 
@@ -48,10 +51,21 @@ import (
 var (
 	runInteractiveSession = chatREPL
 	cliIsInteractive      = isInteractive
+	runWebCommand         = runWeb
+	openBrowserURL        = openInBrowser
 )
 
 // Run is the CLI entry point; it returns a process exit code.
+// Prefer RunWithBuildInfo when git commit / build time are available from ldflags.
 func Run(args []string, version string) int {
+	return RunWithBuildInfo(args, BuildInfo{Version: version})
+}
+
+// RunWithBuildInfo is the full CLI entry with optional build metadata for
+// `reasonix version --verbose` / `--json`.
+func RunWithBuildInfo(args []string, info BuildInfo) int {
+	info = info.withDefaults()
+	version := info.Version
 	// Usage recording is asynchronous so provider/UI paths never wait on disk.
 	// Drain records accepted by this process before a normal CLI exit.
 	defer func() {
@@ -113,6 +127,8 @@ func Run(args []string, version string) int {
 		return runInteractiveSession(rest, version)
 	case "serve":
 		return runServe(rest)
+	case "web":
+		return runWebCommand(rest)
 	case "setup":
 		configureCLIThemeFromConfigForTTYOutput()
 		return setupConfig(rest)
@@ -166,9 +182,14 @@ func Run(args []string, version string) int {
 	case "upgrade", "update":
 		configureCLIThemeFromConfig()
 		return upgradeCommand(rest, version)
-	case "version", "--version", "-v":
-		fmt.Println("reasonix", version)
-		return 0
+	case "version":
+		// Detailed identity: version --verbose / --json. Top-level --version/-v
+		// stay single-line for script compatibility (Integration D/E).
+		return versionCommand(rest, info, true)
+	case "--version", "-v":
+		return versionCommand(nil, info, false)
+	case "completion":
+		return completionCommand(rest)
 	case "docs-manifest":
 		return docsManifestCommand(rest, version)
 	case "help", "--help", "-h":
@@ -187,7 +208,7 @@ func isDoctorRepairCommand(args []string) bool {
 
 func isDefaultInteractiveFlag(arg string) bool {
 	switch arg {
-	case "--model", "--max-steps", "--continue", "-c", "--resume", "-r", "--copy", "--dangerously-skip-permissions", "--yolo", "--permission-mode", "--effort", "--dir", "--add-dir", "--allowed-tools", "--allowedTools":
+	case "--model", "--max-steps", "--continue", "-c", "--resume", "-r", "--copy", "--dangerously-skip-permissions", "--yolo", "--permission-mode", "--effort", "--dir", "--add-dir", "--allowed-tools", "--allowedTools", "--profile":
 		return true
 	}
 	if name, _, ok := strings.Cut(arg, "="); ok && isDefaultInteractiveFlag(name) {
@@ -198,7 +219,7 @@ func isDefaultInteractiveFlag(arg string) bool {
 
 func shouldMigrateLegacyConfigForCLI(cmd string) bool {
 	switch cmd {
-	case "", "run", "chat", "code", "serve", "setup", "config", "init", "acp", "mcp", "remote", "plugin", "subagent", "doctor", "bot", "upgrade", "update":
+	case "", "run", "chat", "code", "serve", "web", "setup", "config", "init", "acp", "mcp", "remote", "plugin", "subagent", "doctor", "bot", "upgrade", "update":
 		return true
 	default:
 		return false
@@ -262,6 +283,21 @@ type cliBuildOverrides struct {
 	HeadlessApprovalMode string
 	Stderr               io.Writer
 	OnSessionRecovered   func(control.SessionRecoveryInfo) error
+	Ablation             ablation.Set
+	// SessionTemp carries the previous Controller's private temporary directory
+	// manager across model/profile rebuilds so temporary files survive.
+	SessionTemp *sessiontemp.Manager
+}
+
+// sessionTempFromCLIController returns the logical-session private temporary
+// directory manager for a same-session CLI controller rebuild. Nil keeps fresh
+// builds on control.New's normal new-manager path.
+func sessionTempFromCLIController(ctrl control.SessionAPI) *sessiontemp.Manager {
+	prev, ok := ctrl.(*control.Controller)
+	if !ok || prev == nil {
+		return nil
+	}
+	return prev.SessionTemp()
 }
 
 func setupProfileWithOverrides(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, profile string, overrides cliBuildOverrides) (*control.Controller, error) {
@@ -287,6 +323,8 @@ func cliProfileBuildOptions(modelName string, maxStepsOverride int, requireKey b
 		StatsSource:          "cli",
 		Stderr:               overrides.Stderr,
 		OnSessionRecovered:   overrides.OnSessionRecovered,
+		Ablation:             overrides.Ablation,
+		SessionTemp:          overrides.SessionTemp,
 	}
 }
 
@@ -464,9 +502,11 @@ func runAgent(args []string, version string) int {
 	maxSteps := fs.Int("max-steps", 0, "one-off max tool-call rounds (0 = automatic)")
 	showThinking := fs.Bool("show-thinking", false, "show thinking text instead of the collapsed thinking marker")
 	metricsPath := fs.String("metrics", "", "write a JSON token/cache/cost summary of the run to this path")
+	trajectoryPath := fs.String("trajectory", "", "append a timestamped JSONL trajectory of the run's full event stream (tool calls, reasoning, decisions) to this path")
+	ablateFlag := fs.String("ablate", "", "benchmark arm: comma-separated subsystems to switch off (evidence, planner, subagent, retrieval, compaction; none|all)")
 	dir := fs.String("dir", "", "change to this directory first (project root); config, sandbox and file tools resolve from here")
 	cont := registerContinueFlag(fs)
-	resume := fs.String("resume", "", "resume a specific session file (non-interactive; takes precedence over --continue)")
+	resume := fs.String("resume", "", "resume by session file path, session ID, or machine session ID (takes precedence over --continue)")
 	copySession := fs.Bool("copy", false, "with --resume/--continue: duplicate the session and continue in the copy (escape hatch when the original is held by another Reasonix process)")
 	effort := fs.String("effort", "", "session reasoning effort override")
 	permissionMode := fs.String("permission-mode", "ask", "permission mode: manual | ask | auto | acceptEdits | dontAsk | plan | bypassPermissions")
@@ -506,6 +546,11 @@ func runAgent(args []string, version string) int {
 		format = runOutputEventsJSONL
 	}
 	profile, err := parseRuntimeProfile(*profileFlag)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
+	}
+	ablated, err := ablation.Parse(*ablateFlag)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
@@ -550,8 +595,17 @@ func runAgent(args []string, version string) int {
 
 	// Resolve the resume target up front so --copy and the session lease can be
 	// handled before any heavy assembly. --resume takes precedence over
-	// --continue, matching the Resume call below.
+	// --continue, matching the Resume call below. Accept file paths, branch
+	// IDs, preview text, and opaque machine session IDs (#7429).
 	resumePath := strings.TrimSpace(*resume)
+	if resumePath != "" {
+		resolved, err := resolveSessionQuery(resolveCLISessionDir(), resumePath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		resumePath = resolved
+	}
 	if resumePath == "" && *cont {
 		sessionDir := resolveCLISessionDir()
 		reclaimCLIRecoveryBranches(sessionDir)
@@ -615,34 +669,12 @@ func runAgent(args []string, version string) int {
 	defer stop()
 	started := time.Now()
 
-	// Live run: render the agent's event stream to stdout. Markdown post-stream
-	// redraw (cursor moves) is enabled only on a TTY; piped / captured output
-	// keeps the raw stream.
-	var sink event.Sink
-	var resultOutput *runOutputSink
-	if *printOnly || format != runOutputText {
-		resultOutput = newRunOutputSink(os.Stdout, format)
-		sink = resultOutput
-	} else {
-		var renderer agent.Renderer
-		termW := 80
-		if isTTY(os.Stdout) {
-			if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
-				termW = w
-			}
-			renderer = newMarkdownRenderer(termW)
-		}
-		textSink := agent.NewTextSink(os.Stdout, renderer, termW)
-		textSink.SetShowReasoning(*showThinking)
-		sink = textSink
+	chain, err := buildRunSink(format, *printOnly, *showThinking, *metricsPath, *trajectoryPath, cfg, reporter)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 1
 	}
-	var metrics *metricsSink
-	if *metricsPath != "" {
-		metrics = &metricsSink{inner: sink}
-		sink = metrics
-	}
-	sink = withNotifications(sink, cfg)
-	sink = reporter.Wrap(sink)
+	sink, resultOutput, metrics := chain.sink, chain.resultOutput, chain.metrics
 	if resumePath != "" {
 		*model = modelForResumePath(*model, resumePath, cfg)
 	}
@@ -667,6 +699,7 @@ func runAgent(args []string, version string) int {
 		WorkspaceRoot:        workspaceRoot,
 		HeadlessApprovalMode: permissions.approval,
 		OnSessionRecovered:   cliSessionRecoveredHandler(leases),
+		Ablation:             ablated,
 	}
 	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, true, sink, profile, overrides)
 	if err != nil {
@@ -712,10 +745,16 @@ func runAgent(args []string, version string) int {
 		})
 	}
 	if metrics != nil {
+		// Snapshot under the sink's lock: a background job can still be emitting
+		// into it while this goroutine assembles the final record.
+		final := metrics.Snapshot()
+		final.DurationMs = time.Since(started).Milliseconds()
+		final.Outcome = completion.class
+		final.Arm = ablated.Arm()
 		if exec := ctrl.Executor(); exec != nil {
 			if audit := exec.CapabilityAudit(); audit != nil {
 				snap := audit.Snapshot()
-				metrics.m.MergeCapabilityAuditCounters(
+				final.MergeCapabilityAuditCounters(
 					snap.Routes, snap.RoutedCandidates, snap.RoutedRequire, snap.RoutedPrefer, snap.RoutedSuggest, snap.Declines,
 					snap.SemanticRoutes, snap.SemanticFallbacks,
 					snap.RequireMissing, snap.RequireRecovered, snap.PreferMissing, snap.PreferRecovered,
@@ -727,7 +766,12 @@ func runAgent(args []string, version string) int {
 				)
 			}
 		}
-		if err := writeMetrics(*metricsPath, metrics.m); err != nil {
+		if err := writeMetrics(*metricsPath, final); err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		}
+	}
+	if chain.trajectory != nil {
+		if err := chain.trajectory.Close(); err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		}
 	}
@@ -753,18 +797,26 @@ func runAgent(args []string, version string) int {
 	return completion.exitCode
 }
 
-// runServe exposes the controller over HTTP+SSE: events stream to the browser,
-// commands arrive as JSON POSTs. The Broadcaster is the controller's event sink,
-// so the same typed stream the chat TUI consumes reaches web clients — the
-// transport-agnostic controller driven by a second frontend.
-func runServe(args []string) int {
-	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+func runServeWithOptions(args []string, opts serveRunOptions) int {
+	if opts.command == "" {
+		opts.command = "serve"
+	}
+	fs := flag.NewFlagSet(opts.command, flag.ContinueOnError)
 	model := fs.String("model", "", "provider name (default: config default_model)")
 	profileFlag := fs.String("profile", "balanced", "runtime profile: economy | balanced | delivery")
 	maxSteps := fs.Int("max-steps", 0, "one-off max tool-call rounds (0 = automatic)")
 	addr := fs.String("addr", "127.0.0.1:8787", "listen address")
 	resume := fs.String("resume", "", "resume a saved session file")
-	auth := fs.String("auth", "", "auth mode: none, token, or password (default: none)")
+	sessionIDValue := ""
+	sessionID := &sessionIDValue
+	if opts.command == "web" {
+		sessionID = fs.String("session-id", "", "bind a fresh Web session identity (used by /web handoff)")
+	}
+	authHelp := "auth mode: none, token, or password (default: config/none)"
+	if opts.command == "web" {
+		authHelp = "auth mode: none, token, or password (default: generated token)"
+	}
+	auth := fs.String("auth", "", authHelp)
 	token := fs.String("token", "", "pre-shared token for auth=token (auto-generated if empty)")
 	password := fs.String("password", "", "password for auth=password (use --hash-password to store a hash instead)")
 	hashPassword := fs.Bool("hash-password", false, "print a bcrypt hash of --password and exit")
@@ -772,8 +824,26 @@ func runServe(args []string) int {
 	portFile := fs.String("port-file", "", "write the actual bound listen address (host:port) to this file after binding")
 	tokenFile := fs.String("token-file", "", "read the auth=token pre-shared token from this file (overrides --token; keeps the secret out of argv)")
 	pidFile := fs.String("pid-file", "", "write the server process id to this file")
+	openBrowser := fs.Bool("open", opts.openBrowser, "open the Web UI in the default browser")
+	noOpen := fs.Bool("no-open", false, "do not open the Web UI in the default browser")
 	if code, ok := parseCommandFlags(fs, args); !ok {
 		return code
+	}
+	authExplicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "auth" {
+			authExplicit = true
+		}
+	})
+	if *resume != "" && *sessionID != "" {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "--resume and --session-id cannot be used together")
+		return 2
+	}
+	if *sessionID != "" {
+		if err := validateWebSessionID(*sessionID); err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 2
+		}
 	}
 	profile, err := parseRuntimeProfile(*profileFlag)
 	if err != nil {
@@ -801,7 +871,10 @@ func runServe(args []string) int {
 	cfg, _ := config.Load()
 
 	// Build serve config, merging CLI flags over config file.
-	serveCfg := cfg.Serve
+	serveCfg := serveConfigWithCommandDefaults(opts.command, authExplicit, cfg.Serve)
+	// `reasonix web` is a local browser entry point and defaults to a freshly
+	// generated token. `reasonix serve` keeps its existing config-driven default,
+	// and an explicit --auth always wins for both commands.
 	if *auth != "" {
 		serveCfg.AuthMode = *auth
 	}
@@ -867,7 +940,10 @@ func runServe(args []string) int {
 	// ignoring project-level default_model overrides. Explicit flags and
 	// resumable session models remain strict and are preserved verbatim.
 	*model = resolveServeModel(*model)
-	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, true, bc, profile, cliBuildOverrides{
+	// Keep the browser reachable when the selected provider has no saved key.
+	// The loopback-only provider setup surface stores the missing credential and
+	// rebuilds this controller in place before the normal web UI is exposed.
+	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, false, bc, profile, cliBuildOverrides{
 		OnSessionRecovered: cliSessionRecoveredHandler(leases),
 	})
 	if err != nil {
@@ -880,6 +956,13 @@ func runServe(args []string) int {
 	// Auto-save target: reuse the resumed file, else a fresh one — same as chat.
 	if *resume != "" {
 		ctrl.Resume(resumeSession, *resume)
+	} else if *sessionID != "" {
+		freshPath, err := freshWebSessionPath(ctrl.SessionDir(), *sessionID)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		ctrl.SetFreshSessionPath(freshPath)
 	}
 	ctrl.EnsureSessionPath()
 	// Fresh sessions take the lease too (defensive: the path is brand new); a
@@ -891,81 +974,12 @@ func runServe(args []string) int {
 
 	srv := serve.New(ctrl, bc, serveCfg)
 	srv.SetSessionLeases(leases)
-
-	// With --port-file the supervisor needs the real bound port (--addr may be
-	// 127.0.0.1:0), so listen first, record the address, then serve on the
-	// existing listener.
-	var ln net.Listener
-	displayAddr := *addr
-	if *portFile != "" {
-		var lerr error
-		ln, lerr = net.Listen("tcp", *addr)
-		if lerr != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, lerr)
-			return 1
-		}
-		displayAddr = ln.Addr().String()
-		if err := writeServeAddrFile(*portFile, displayAddr); err != nil {
-			_ = ln.Close()
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
-		defer os.Remove(*portFile)
-	}
-	if *pidFile != "" {
-		if err := writeServePidFile(*pidFile); err != nil {
-			if ln != nil {
-				_ = ln.Close()
-			}
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
-		defer os.Remove(*pidFile)
-	}
-
-	fmt.Printf("reasonix serve — %s on http://%s\n", ctrl.Label(), displayAddr)
-	if srv.AuthMode() == "token" {
-		fmt.Printf("  auth: token\n")
-		// Under --port-file the process is supervised (e.g. remote bootstrap):
-		// stdout is redirected to a log, so printing the token here would leak it
-		// into a file readable by other same-machine users. The supervisor
-		// already holds the token (it wrote --token-file), so suppress the share
-		// URL and print only the token-file reference.
-		if *portFile != "" && *tokenFile != "" {
-			fmt.Printf("  share: http://%s/ (token in %s)\n", displayAddr, *tokenFile)
-		} else {
-			fmt.Printf("  share: http://%s/?token=%s\n", displayAddr, srv.AuthToken())
-		}
-	} else if srv.AuthMode() == "password" {
-		fmt.Printf("  auth: password (login at http://%s/login)\n", displayAddr)
-	}
-	if warning := serve.PlainHTTPAuthWarning(serveCfg, displayAddr); warning != "" {
-		fmt.Fprintf(os.Stderr, "  %s\n", warning)
-	}
-	// Diagnostic: check whether balance endpoint is reachable
-	if b, err := ctrl.Balance(context.Background()); err != nil {
-		fmt.Fprintf(os.Stderr, "  balance: error — %v\n", err)
-	} else if b == nil {
-		fmt.Fprintf(os.Stderr, "  balance: not configured (no balance_url for this provider)\n")
-	} else {
-		fmt.Printf("  balance: %s\n", b.Display())
-	}
-
-	// Use graceful shutdown so SIGINT/SIGTERM drain active connections.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	if ln != nil {
-		if err := srv.RunGracefulListener(ctx, ln); err != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
-		return 0
-	}
-	if err := srv.RunGraceful(ctx, *addr); err != nil {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-		return 1
-	}
-	return 0
+	return runServeFrontend(ctrl, srv, serveCfg, serveFrontendOptions{
+		command: opts.command, address: *addr,
+		portFile: *portFile, tokenFile: *tokenFile, pidFile: *pidFile,
+		openBrowser: *openBrowser && !*noOpen,
+		hasSession:  *resume != "" || *sessionID != "",
+	})
 }
 
 // chatREPL is an interactive session: a single persistent agent/session and a
@@ -1018,16 +1032,18 @@ func chatREPL(args []string, version string) int {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
 	}
+	// Bubble Tea owns the terminal from the resume picker through controller
+	// shutdown. Start diagnostics before config/controller work so hangs leave a
+	// non-zero log with milestones (#7435, #7507).
+	diagnostics := startTUIDiagnostics(config.ReasonixHomeDir())
+	defer diagnostics.Close()
+	diagnostics.Milestone("config_load_begin")
 	cfg, err := config.Load()
 	if err == nil {
 		configureCLIThemeWithStyle(cfg.UITheme(), cfg.UIThemeStyle())
 		cliCursorShape = cfg.UICursorShape()
 	}
-	// Bubble Tea owns the terminal from the resume picker through controller
-	// shutdown. Route process logs and plugin stderr to a private, bounded file
-	// for that whole lifetime; user-facing warnings arrive as typed TUI events.
-	diagnostics := startTUIDiagnostics(config.ReasonixHomeDir())
-	defer diagnostics.Close()
+	diagnostics.Milestone("config_load_done")
 
 	// Decide whether we're starting fresh or resuming. --resume opens an
 	// interactive picker; --continue / -c jumps straight into the newest.
@@ -1123,6 +1139,7 @@ func chatREPL(args []string, version string) int {
 		Stderr:             diagnostics.Writer(),
 		OnSessionRecovered: cliSessionRecoveredHandler(leases),
 	}
+	diagnostics.Milestone("controller_build_begin")
 	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, false, sink, profile, overrides)
 	if err != nil && errors.Is(err, boot.ErrUnknownModel) && isInteractive() && config.SourcePath() == "" {
 		// True first run whose default model can't resolve: guide setup, then retry.
@@ -1138,6 +1155,7 @@ func chatREPL(args []string, version string) int {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
 	}
+	diagnostics.Milestone("controller_build_done")
 
 	// Decide where this conversation's auto-save lands. A resume reuses the
 	// file so closing/reopening keeps appending to the same history; a fresh
@@ -1171,6 +1189,9 @@ func chatREPL(args []string, version string) int {
 		switch {
 		case err != nil:
 			missing = err.Error()
+		case name != "" && providerext.PluginRefOwner(name) != "":
+			// Plugin-namespaced refs hold no config credential; boot's merged
+			// resolver already gated them, and there is no key env to warn about.
 		case name != "":
 			if vErr := cfg.Validate(name); vErr != nil {
 				missing = vErr.Error()
@@ -1197,12 +1218,15 @@ func chatREPL(args []string, version string) int {
 	}
 
 	m := newChatTUI(ctrl, missing, eventCh, termW)
+	m.diagnostics = diagnostics
+	m.updateWatchdogStatusProvider()
 	m.planMode = permissions.plan
 	m.leases = leases
-	if cfg, err := config.Load(); err == nil {
+	if cfg != nil {
 		m.outputStyle = cfg.Agent.OutputStyle    // shown as the active entry in /output-style
 		m.statuslineCmd = cfg.Statusline.Command // custom status-line command, "" = built-in row
 		m.showReasoning = cfg.UI.ShowReasoning   // /verbose persistence: start with config default
+		m.showTurnUsage = cfg.UI.ShowTurnUsage   // retain usage accounting even when transcript receipts are hidden
 		m.cfg = cfg
 	}
 
@@ -1215,6 +1239,9 @@ func chatREPL(args []string, version string) int {
 		if spec.EffortOverride != nil {
 			effectiveOverrides.Effort = spec.EffortOverride
 		}
+		// Keep the logical-session private temporary directory across model /
+		// profile switches (Issue #7575).
+		effectiveOverrides.SessionTemp = sessionTempFromCLIController(oldCtrl)
 		c, err := setupQuietProfile(ctx, spec.ModelRef, *maxSteps, false, sink, spec.RuntimeProfile, effectiveOverrides)
 		if err != nil {
 			return nil, err
@@ -1236,6 +1263,13 @@ func chatREPL(args []string, version string) int {
 		}
 		return c, nil
 	}
+	// /reload support: rebuild the runtime through boot.Rebuild so tools,
+	// skills, commands, hooks, MCP servers, and providers are discovered fresh
+	// while the boot layer migrates the session (history, approval grants,
+	// goal/recovery state, lifecycle). Same construction inputs as
+	// buildController so the replacement matches this session's launch wiring;
+	// the CLI holds no SharedHost, so each rebuild owns its plugin host.
+	m.bindRuntimeRebuilder(*maxSteps, sink, *yolo, overrides, cliProfileBuildOptions)
 	m.runtimeProfile = profile
 	if effortOverride != nil {
 		m.effortLevel = *effortOverride
@@ -1251,7 +1285,9 @@ func chatREPL(args []string, version string) int {
 	// Non-Termux terminals use an alt-screen transcript viewport. Termux stays
 	// in the normal buffer so native touch scrollback and soft-keyboard focus
 	// keep working; finalized transcript lines are emitted via tea.Println.
+	diagnostics.Milestone("terminal_takeover_begin")
 	p := tea.NewProgram(m)
+	diagnostics.StartWatchdog(p)
 	// SSH drop (SIGHUP) or service stop (SIGTERM): persist the conversation
 	// before the terminal goes away, then unwind through the normal close path
 	// so resume picks up the interrupted session (#3772).
@@ -1264,12 +1300,20 @@ func chatREPL(args []string, version string) int {
 	}()
 	final, runErr := p.Run()
 	signal.Stop(hangup)
+	diagnostics.Milestone("terminal_released")
 	// Close the active controller plus any retired ones from /model switches.
 	// Retired controllers were stashed rather than closed at switch time
 	// because Controller.Close() runs SessionEnd hooks and kills plugin
 	// subprocesses — operations that corrupt bubbletea's terminal raw mode
 	// when executed while the TUI is alive.
+	launchWeb := false
+	launchWebPath := ""
+	launchWebSessionID := ""
+	launchWebModelRef := ""
+	launchWebProfile := ""
 	if fm, ok := final.(chatTUI); ok {
+		launchWeb = fm.launchWebOnExit
+		launchWebProfile = fm.runtimeProfile
 		for _, oc := range fm.oldControllers {
 			if c, ok := oc.(*control.Controller); ok {
 				reporter.RecordRecovery(c.DrainRecoveryMetrics())
@@ -1277,6 +1321,9 @@ func chatREPL(args []string, version string) int {
 			oc.Close()
 		}
 		if fm.ctrl != nil {
+			launchWebPath = fm.launchWebResumePath
+			launchWebSessionID = fm.launchWebSessionID
+			launchWebModelRef = fm.launchWebModelRef
 			if c, ok := fm.ctrl.(*control.Controller); ok {
 				reporter.RecordRecovery(c.DrainRecoveryMetrics())
 			}
@@ -1292,6 +1339,15 @@ func chatREPL(args []string, version string) int {
 	if runErr != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, runErr)
 		return 1
+	}
+	if launchWeb {
+		// The Web runtime resumes a materialized TUI transcript or binds the exact
+		// reserved identity for a never-used session. Release the TUI lease before
+		// rebuilding the controller or the handoff would correctly reject its own
+		// session as already in use. The deferred Release remains as a harmless
+		// final guard for every other return path.
+		leases.Release()
+		return runWebCommand(webHandoffArgs(launchWebPath, launchWebSessionID, launchWebModelRef, launchWebProfile))
 	}
 	return 0
 }
@@ -1338,7 +1394,7 @@ func prepareNativeScrollback(w io.Writer, rows int) {
 }
 
 func reserveNativeScrollbackFrame(w io.Writer, rows int) {
-	for i := 0; i < rows; i++ {
+	for range rows {
 		fmt.Fprintln(w)
 	}
 }
@@ -1675,12 +1731,7 @@ func buildFamilyEntry(probe config.ProviderEntry, selected []string) config.Prov
 }
 
 func containsString(xs []string, v string) bool {
-	for _, x := range xs {
-		if x == v {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(xs, v)
 }
 
 // filterStaleCustomEntries drops the wizard's own magic-name entries
@@ -1886,7 +1937,7 @@ func promptCustomProviderManualWith(in *bufio.Scanner, baseURL, keyEnv, apiKey s
 	}
 	entry := config.ProviderEntry{
 		Name: providerName, Kind: "openai", BaseURL: baseURL,
-		Model: modelName, APIKeyEnv: keyEnv, ContextWindow: 128000,
+		Model: modelName, APIKeyEnv: keyEnv, ContextWindow: askContextWindow(in, os.Stdout),
 	}
 	fmt.Printf("  %s\n", green(fmt.Sprintf(i18n.M.CustomAddedFmt, entry.Name+"/"+modelName)))
 	return newProviderPromptResult([]config.ProviderEntry{entry}, keyEnv, apiKey), nil
@@ -1936,7 +1987,7 @@ func promptCustomProviderFromURL() (providerPromptResult, error) {
 	}
 	entry := config.ProviderEntry{
 		Name: providerName, Kind: "openai", BaseURL: baseURL,
-		Models: selected, Model: selected[0], APIKeyEnv: keyEnv, ContextWindow: 128000,
+		Models: selected, Model: selected[0], APIKeyEnv: keyEnv, ContextWindow: askContextWindow(in, os.Stdout),
 	}
 	fmt.Printf("  %s\n", green(fmt.Sprintf(i18n.M.CustomAddedFmt, entry.Name+"/"+selected[0])))
 	return newProviderPromptResult([]config.ProviderEntry{entry}, keyEnv, apiKey), nil
@@ -1988,7 +2039,7 @@ func promptAnthropicProviderManualWith(in *bufio.Scanner, baseURL, keyEnv, apiKe
 	}
 	entry := config.ProviderEntry{
 		Name: providerSlug("anthropic", baseURL), Kind: "anthropic", BaseURL: baseURL,
-		Model: modelName, APIKeyEnv: keyEnv, ContextWindow: 128000,
+		Model: modelName, APIKeyEnv: keyEnv, ContextWindow: askContextWindow(in, os.Stdout),
 	}
 	fmt.Printf("  %s\n", green(fmt.Sprintf(i18n.M.AnthropicAddedFmt, entry.Name+"/"+modelName)))
 	return newProviderPromptResult([]config.ProviderEntry{entry}, keyEnv, apiKey), nil
@@ -2038,7 +2089,7 @@ func promptAnthropicProviderFromURL() (providerPromptResult, error) {
 	}
 	entry := config.ProviderEntry{
 		Name: providerSlug("anthropic", baseURL), Kind: "anthropic", BaseURL: baseURL,
-		Models: selected, Model: selected[0], APIKeyEnv: keyEnv, ContextWindow: 128000,
+		Models: selected, Model: selected[0], APIKeyEnv: keyEnv, ContextWindow: askContextWindow(in, os.Stdout),
 	}
 	fmt.Printf("  %s\n", green(fmt.Sprintf(i18n.M.AnthropicAddedFmt, entry.Name+"/"+selected[0])))
 	return newProviderPromptResult([]config.ProviderEntry{entry}, keyEnv, apiKey), nil
@@ -2209,7 +2260,7 @@ func appendEnv(path string, lines []string) error {
 
 	var kept []string
 	if data, err := fileencoding.ReadFileUTF8(path); err == nil {
-		for _, raw := range strings.Split(string(data), "\n") {
+		for raw := range strings.SplitSeq(string(data), "\n") {
 			trimmed := strings.TrimSpace(raw)
 			check := strings.TrimPrefix(trimmed, "export ")
 			if k, _, ok := strings.Cut(check, "="); ok && target[strings.TrimSpace(k)] {

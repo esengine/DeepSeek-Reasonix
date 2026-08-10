@@ -131,9 +131,9 @@ func goalArgItems(prior []string) []SlashItem {
 		return nil
 	}
 	return []SlashItem{
-		{Label: "--research", Insert: "--research ", Hint: "force durable AutoResearch state"},
-		{Label: "--simple", Insert: "--simple ", Hint: "force lightweight Goal"},
-		{Label: "status", Insert: "status", Hint: "show active goal"},
+		{Label: "status", Insert: "status", Hint: "show active goal and budget runtime"},
+		{Label: "pause", Insert: "pause", Hint: "pause the running goal (keeps all state)"},
+		{Label: "resume", Insert: "resume", Hint: "resume a paused goal (adds one turn slice)"},
 		{Label: "clear", Insert: "clear", Hint: "stop goal mode"},
 	}
 }

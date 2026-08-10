@@ -33,8 +33,23 @@ const initialCSS = initialAssetPaths(".css");
 if (!initialJS.length) throw new Error("no initial JavaScript assets found in dist/index.html");
 if (!initialCSS.length) throw new Error("no initial CSS assets found in dist/index.html");
 
+// main.tsx intentionally loads styles.css before mounting React so the inline
+// boot shell can paint without waiting for the full application stylesheet.
+// Vite emits that entry as styles-<hash>.css; keep it in the startup budget
+// while also proving it never drifts back into the render-blocking HTML path.
+const appShellCSS = readdirSync(resolve(distDir, "assets"))
+  .filter((name) => /^styles-.+\.css$/.test(name))
+  .map((name) => resolve(distDir, "assets", name));
+if (appShellCSS.length !== 1) {
+  throw new Error(`expected exactly one deferred app-shell stylesheet, found ${appShellCSS.length}`);
+}
+if (initialCSS.some((path) => appShellCSS.includes(path))) {
+  throw new Error("app-shell stylesheet must not block the inline boot shell's first paint");
+}
+
 const initialJSGzip = initialJS.reduce((total, path) => total + gzipBytes(path), 0);
 const initialCSSGzip = initialCSS.reduce((total, path) => total + gzipBytes(path), 0);
+const appShellCSSGzip = appShellCSS.reduce((total, path) => total + gzipBytes(path), 0);
 const largestInitialJS = Math.max(...initialJS.map(gzipBytes));
 const largestInitialJSRaw = Math.max(...initialJS.map((path) => statSync(path).size));
 const localeChunks = readdirSync(resolve(distDir, "assets"))
@@ -42,19 +57,30 @@ const localeChunks = readdirSync(resolve(distDir, "assets"))
   .map((name) => resolve(distDir, "assets", name));
 
 console.log("\nbundle budgets");
-assertBudget("initial JavaScript gzip", initialJSGzip, 430 * 1024);
-assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 295 * 1024);
-assertBudget("initial CSS gzip", initialCSSGzip, 112 * 1024);
+assertBudget("initial JavaScript gzip", initialJSGzip, 400 * 1024);
+assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
+assertBudget("render-blocking CSS gzip", initialCSSGzip, 4 * 1024);
+// Extension surfaces, Task Monitor, and compact decision receipts share the
+// application stylesheet loaded before React mounts. Keep their combined
+// allowance bounded even though the file is no longer render-blocking.
+assertBudget("deferred app-shell CSS gzip", appShellCSSGzip, 114 * 1024);
 if (localeChunks.length !== 2) {
   throw new Error(`expected 2 on-demand Chinese locale chunks, found ${localeChunks.length}`);
 }
 for (const path of localeChunks) {
-  assertBudget(`${basename(path)} gzip`, gzipBytes(path), 52 * 1024);
+  const name = basename(path);
+  // Task Monitor, Extension UI, Storage & paths, and shell execution cards
+  // add their own labels. Reasoning summaries and status bar metrics add the
+  // latest localized copy. Workspace watcher states add three user-facing
+  // strings; keep that growth within a quarter-KiB allowance per dictionary.
+  const budget = name.startsWith("zh-TW-") ? 54.25 * 1024 : 53.5 * 1024;
+  assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }
 
-const rawInitialBytes = [...initialJS, ...initialCSS].reduce((total, path) => total + statSync(path).size, 0);
-// Task Monitor adds a small always-loaded style surface while its panel code
-// remains lazy-loaded. Keep the raw budget explicit while allowing the small
-// project-level UI addition and current upstream baseline.
-assertBudget("initial raw JavaScript and CSS", rawInitialBytes, 2_263 * 1024);
-assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_100 * 1024);
+const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
+  .reduce((total, path) => total + statSync(path).size, 0);
+// Native Web Animations and frame-batched scrolling avoid an eager animation
+// runtime. Preserve the resulting startup headroom instead of letting the shell
+// drift back to the previous 2.27 MiB / 295 KiB-gzip edge.
+assertBudget("initial raw JavaScript and CSS", rawInitialBytes, 2_200 * 1024);
+assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

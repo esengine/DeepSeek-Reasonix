@@ -119,10 +119,13 @@ func TestRunResumeKeepsCompletedIndexStableAcrossRecoveryGC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("save recovery branch: %v", err)
 	}
-	covered := agent.NewSession("")
-	covered.Messages = append([]provider.Message(nil), stale.Snapshot()...)
+	covered, err := agent.LoadSession(parentPath)
+	if err != nil {
+		t.Fatalf("load recovery parent: %v", err)
+	}
+	covered.Replace(append([]provider.Message(nil), stale.Snapshot()...))
 	covered.Add(provider.Message{Role: provider.RoleUser, Content: "later parent turn"})
-	if err := covered.Save(parentPath); err != nil {
+	if err := covered.SaveRewrite(parentPath); err != nil {
 		t.Fatalf("cover recovery branch in parent: %v", err)
 	}
 	recoveryMeta, ok, err := agent.LoadBranchMeta(recovery.Path)
@@ -182,7 +185,7 @@ func TestRunResumeKeepsCompletedIndexStableAcrossRecoveryGC(t *testing.T) {
 func TestCapResumeSessionGroupsDoesNotSplitRecoveryFamily(t *testing.T) {
 	base := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
 	sessions := make([]agent.SessionInfo, 0, 12)
-	for i := 0; i < 9; i++ {
+	for i := range 9 {
 		sessions = append(sessions, agent.SessionInfo{
 			Path:    filepath.Join("/sessions", "standalone-"+strconv.Itoa(i)+".jsonl"),
 			ModTime: base.Add(time.Duration(20-i) * time.Minute),
@@ -337,7 +340,7 @@ func TestResumeDispatchSwitchesAndReplays(t *testing.T) {
 func TestResumeWhileScrolledUpPinsViewportToBottom(t *testing.T) {
 	dir := t.TempDir()
 	active := agent.NewSession("sys")
-	for i := 0; i < 18; i++ {
+	for i := range 18 {
 		active.Add(provider.Message{Role: provider.RoleUser, Content: "active prompt " + strconv.Itoa(i)})
 	}
 	exec := agent.New(nil, nil, active, agent.Options{}, event.Discard)

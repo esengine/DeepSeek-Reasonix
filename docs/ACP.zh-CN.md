@@ -66,7 +66,10 @@ reasonix acp --profile delivery
 
 客户端声明 `fs.readTextFile`、`fs.writeTextFile` 或 `terminal` 后，Reasonix 会让
 适用的文件操作经过编辑器的未保存 buffer，并让适用的前台命令在客户端持有的 terminal
-中运行。客户端没有声明这些能力时，常规工作区工具会在 Reasonix 进程内本地运行。
+中运行。读取、编辑、写入等全部文件工具都参与其中，因此一次编辑作用于编辑器当前显示
+的内容，而不是磁盘上最后保存的副本。非 UTF-8 文件不适用：ACP 的文件方法只处理文本，
+这类文件会留在本地的编码保持路径上，原有字符集不变。客户端没有声明这些能力时，常规
+工作区工具会在 Reasonix 进程内本地运行。
 
 ## 会话生命周期
 
@@ -190,6 +193,26 @@ agentCapabilities._meta["reasonix.io"].sessionSteer.method
 
 收到 `InvalidRequest` 时，引导没有入队。客户端可以等待活动 prompt 结束，再让用户把该
 文本作为普通新 prompt 提交，但不能把失败的 steer 静默显示为已接受。
+
+## 运行时重载与扩展表面
+
+Reasonix 还在 `agentCapabilities._meta["reasonix.io"]` 中通告两个扩展点：
+
+- `sessionReloadExtensions`——vendor method
+  `_reasonix.io/session/reloadExtensions`。调用后按与 CLI `/reload`
+  相同的失败原子语义重载该会话的 agent 运行时（扩展、工具、skills、
+  commands、hooks、providers）：回合或重建进行中只排队一次
+  （`{"queued": true}`），空闲后执行；否则原子重建并交换，重建失败时
+  保留旧运行时。重载成功后 Reasonix 会推送新的
+  `available_commands_update`。
+- `extensionSurface`——结构化扩展 UI 能力。在 initialize `_meta` 中
+  同样声明了 `reasonix.io.extensionSurface` 的客户端会收到结构化的
+  扩展表面载荷；未声明的客户端收到等价文本 fallback（card/status 退
+  化为 `agent_message_chunk`，扩展表单退化为权限请求），因此客户端
+  不做任何处理也能保持兼容。
+
+已安装插件声明的扩展 action 以 `/<plugin>:<action>` 出现在
+`available_commands_update` 中，可像普通斜杠命令一样调用。
 
 ## 兼容性与缓存行为
 

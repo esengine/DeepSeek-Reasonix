@@ -108,11 +108,39 @@ fi
 grep -Eq '^  resolve:$' "$repo_root/.github/workflows/release-desktop.yml"
 grep -Eq 'sha:.*steps\.candidate\.outputs\.sha' "$repo_root/.github/workflows/release-desktop.yml"
 grep -Fq 'bash scripts/resolve-desktop-candidate.sh' "$repo_root/.github/workflows/release-desktop.yml"
+grep -Fq 'name: Smoke-test Wails approval in WebView2' "$repo_root/.github/workflows/release-desktop.yml"
+grep -Fq "if: matrix.platform == 'windows/amd64'" "$repo_root/.github/workflows/release-desktop.yml"
+grep -Fq './release-control/scripts/test-webview2-approval-smoke.ps1' "$repo_root/.github/workflows/release-desktop.yml"
+test -f "$repo_root/scripts/test-webview2-approval-smoke.ps1"
+grep -Fq 'name: Build Wails executable for WebView2 smoke' "$repo_root/.github/workflows/ci.yml"
+grep -Fq 'name: Smoke-test Wails approval in WebView2' "$repo_root/.github/workflows/ci.yml"
+grep -Fq '../scripts/test-webview2-approval-smoke.ps1' "$repo_root/.github/workflows/ci.yml"
+grep -Fq 'wails build -clean -s -skipbindings -nopackage -platform windows/amd64 -webview2 embed' \
+	"$repo_root/.github/workflows/ci.yml"
+review_gate="$repo_root/.github/workflows/cross-boundary-review.yml"
+review_signal="$repo_root/.github/workflows/cross-boundary-review-signal.yml"
+grep -Eq '^  pull_request_target:$' "$review_gate"
+grep -Eq '^  workflow_run:$' "$review_gate"
+grep -Eq '^  workflow_dispatch:$' "$review_gate"
+! grep -Eq '^  pull_request_review:$' "$review_gate"
+grep -Fq 'ref: ${{ github.workflow_sha }}' "$review_gate"
+grep -Fq 'persist-credentials: false' "$review_gate"
+grep -Fq 'review-control/.github/scripts/cross-boundary-review.cjs' "$review_gate"
+grep -Eq '^  pull_request_review:$' "$review_signal"
+! grep -Eq 'statuses: write|pull-requests: write|contents: write' "$review_signal"
+grep -Fq 'review.commit_id' "$repo_root/.github/scripts/cross-boundary-review.cjs"
+grep -Fq 'pull.head.sha' "$repo_root/.github/scripts/cross-boundary-review.cjs"
+desktop_build_line="$(grep -n -m1 'name: Build and package' "$repo_root/.github/workflows/release-desktop.yml" | cut -d: -f1)"
+webview2_smoke_line="$(grep -n -m1 'name: Smoke-test Wails approval in WebView2' "$repo_root/.github/workflows/release-desktop.yml" | cut -d: -f1)"
+signpath_upload_line="$(grep -n -m1 'name: Upload unsigned Windows payload for SignPath' "$repo_root/.github/workflows/release-desktop.yml" | cut -d: -f1)"
+[ "$desktop_build_line" -lt "$webview2_smoke_line" ]
+[ "$webview2_smoke_line" -lt "$signpath_upload_line" ]
 [ "$(grep -Fc 'IN_ORCHESTRATOR: ${{ inputs.orchestrator }}' "$repo_root/.github/workflows/release-desktop.yml")" = "3" ]
 [ "$(grep -Fc 'name: Revalidate immutable Desktop candidate' "$repo_root/.github/workflows/release-desktop.yml")" = "2" ]
 [ "$(grep -Fc 'ref: ${{ needs.resolve.outputs.sha }}' "$repo_root/.github/workflows/release-desktop.yml")" -ge 4 ]
 [ "$(grep -Ec '^          path: release-control$' "$repo_root/.github/workflows/release-desktop.yml")" = "3" ]
 grep -Fq 'name: Checkout protected release verifier' "$repo_root/.github/workflows/release-desktop.yml"
+grep -Fq 'scripts/test-webview2-approval-smoke.ps1' "$repo_root/.github/workflows/release-desktop.yml"
 grep -Fq './release-control/scripts/verify-windows-authenticode.ps1' "$repo_root/.github/workflows/release-desktop.yml"
 [ "$(grep -Fc 'ref: ${{ github.workflow_sha }}' "$repo_root/.github/workflows/release-desktop.yml")" -ge 2 ]
 [ "$(grep -Fc 'bash release-control/scripts/resolve-desktop-candidate.sh' "$repo_root/.github/workflows/release-desktop.yml")" = "2" ]
@@ -156,6 +184,20 @@ if sed -n '/^  workflow_dispatch:/,/^  workflow_call:/p' "$repo_root/.github/wor
 fi
 grep -Fq 'if: ${{ !inputs.orchestrated }}' "$repo_root/.github/workflows/release-npm.yml"
 grep -Fq 'Publish or recover immutable npm packages' "$repo_root/.github/workflows/release-npm.yml"
+if sed -n '/^  cache-guard:/,/^  npm:/p' \
+	"$repo_root/.github/workflows/release-npm.yml" |
+	grep -Fq 'RECOVERY_CONTROL_SHA'; then
+	echo "npm recovery control plane must load in the publisher job after candidate checkout" >&2
+	exit 1
+fi
+sed -n '/^  npm:/,$p' "$repo_root/.github/workflows/release-npm.yml" |
+	grep -Fq 'RECOVERY_CONTROL_SHA: ${{ github.workflow_sha }}'
+sed -n '/^  npm:/,$p' "$repo_root/.github/workflows/release-npm.yml" |
+	grep -Fq 'git restore --source="$RECOVERY_CONTROL_SHA"'
+for recovery_script in npm/publish.mjs scripts/finalize-npm-official-release.mjs; do
+	sed -n '/^  npm:/,$p' "$repo_root/.github/workflows/release-npm.yml" |
+		grep -Fq "$recovery_script"
+done
 grep -Fq 'publishPackages' "$repo_root/npm/build.mjs"
 grep -Eq 'signing-policy-slug: release-signing' "$repo_root/.github/workflows/release-desktop.yml"
 if grep -Eq 'signing-policy-slug:.*test-signing' "$repo_root/.github/workflows/release-desktop.yml"; then
@@ -1560,6 +1602,7 @@ fi
 
 node --test "$repo_root/npm/publish.test.mjs"
 node --test "$repo_root/scripts/finalize-npm-official-release.test.mjs"
+node "$repo_root/scripts/check-desktop-build-contract.mjs"
 bash "$repo_root/scripts/release-stable.test.sh"
 bash "$repo_root/scripts/check-docs-impact.test.sh"
 

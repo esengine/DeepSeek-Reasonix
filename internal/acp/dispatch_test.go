@@ -675,3 +675,58 @@ func TestClip(t *testing.T) {
 		t.Errorf("clip note missing: %q", got[len(got)-40:])
 	}
 }
+
+// Replay must show the user-authored view, not the persisted wire form:
+// injected transient blocks and protocol markers stay in history for parsing
+// but never reach the client (#6882).
+func TestUpdateSinkReplayStripsInjectedWrappers(t *testing.T) {
+	fn := &fakeNotifier{}
+	sink := newUpdateSink(fn, "sess-1")
+	sink.replay([]provider.Message{
+		{
+			Role: provider.RoleUser,
+			Content: "<response-language>\nFinal answer language preference: use Simplified Chinese.\n</response-language>\n" +
+				"Introduce yourself",
+		},
+		{
+			Role:    provider.RoleAssistant,
+			Content: "Here you go.\n[goal:continue]",
+		},
+	})
+
+	u := fn.updateMap(t, 0)
+	content, _ := u["content"].(map[string]any)
+	if content["text"] != "Introduce yourself" {
+		t.Fatalf("replayed user text = %v, want the authored text only", content["text"])
+	}
+	u = fn.updateMap(t, 1)
+	content, _ = u["content"].(map[string]any)
+	if content["text"] != "Here you go." {
+		t.Fatalf("replayed assistant text = %v, want goal marker stripped", content["text"])
+	}
+}
+
+// TestUpdateSinkDropsSubagentProgress locks the ACP policy for the reserved
+// sub-agent progress ToolProgress channels: every body stays out of ACP
+// notifications, exactly like ordinary ToolProgress (which has no handler).
+func TestUpdateSinkDropsSubagentProgress(t *testing.T) {
+	fn := &fakeNotifier{}
+	sink := newUpdateSink(fn, "sess-1")
+
+	sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{
+		ID: "task-1", Name: event.SubagentProgressStatusName, Output: "running",
+	}})
+	sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{
+		ID: "task-1", Name: event.SubagentProgressReasoningName, Output: "thinking",
+	}})
+	sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{
+		ID: "task-1", Name: event.SubagentProgressTextName, Output: "answer preview",
+	}})
+	sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{
+		ID: "task-1", Name: event.SubagentProgressNoticeName, Output: "heads up",
+		Truncated: true,
+	}})
+	if got := len(fn.notifs); got != 0 {
+		t.Fatalf("sub-agent progress produced %d notifications, want 0", got)
+	}
+}

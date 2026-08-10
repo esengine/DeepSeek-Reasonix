@@ -71,12 +71,9 @@ func TestTaskWarrantsPlanner(t *testing.T) {
 		{"what's the best way to refactor this module", true},
 		{"explain how to migrate from v1 to v2", true},
 		{goalContinueTurn, false},
-		{goalSelfCheckTurn, false},
-		{"No tool calls in recent turns. Either make progress with tools or signal [goal:blocked:<reason>].", false},
-		{"Goal signaled complete but issues remain:\n- the following tasks are still incomplete:\n  - Fix login (in_progress)\nFix or use todo_write/complete_step to mark done, then [goal:complete] again.", false},
-		{activeGoalBlock("execute plan: fix the parser", GoalResearchAuto) + "\n\n" + goalContinueTurn, false},
-		{activeGoalBlock("execute plan: fix the parser", GoalResearchAuto) + "\n\n" + goalSelfCheckTurn, false},
-		{activeGoalBlock("implement the new caching layer", GoalResearchAuto) + "\n\nimplement the new caching layer across the backend", true},
+		{"Goal signaled complete but issues remain:\n- the following tasks are still incomplete:\n  - Fix login (in_progress)\nFix or use todo_write/complete_step to mark done, then report complete again via update_goal.", false},
+		{activeGoalBlock("execute plan: fix the parser") + "\n\n" + goalContinueTurn, false},
+		{activeGoalBlock("implement the new caching layer") + "\n\nimplement the new caching layer across the backend", true},
 	}
 	for _, c := range cases {
 		if got := TaskWarrantsPlanner(c.input); got != c.want {
@@ -457,7 +454,7 @@ func TestPlannerPolicyUsesPristineMetadataInsteadOfInjectedContext(t *testing.T)
 	ctx := withPlannerTurnMetadata(context.Background(), plannerTurnMetadata{
 		UserText: "fix typo in README",
 	})
-	input := activeGoalBlock("migrate authentication across the backend", GoalResearchAuto) +
+	input := activeGoalBlock("migrate authentication across the backend") +
 		"\n\n<capability-route>\nhigh risk migration\n</capability-route>\n\nfix typo in README"
 	got := DecidePlannerRoute(ctx, input)
 	if got.Route != agent.PlannerRouteExecutorOnly || got.Reason != plannerReasonAtomicEdit {

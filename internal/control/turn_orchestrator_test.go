@@ -101,6 +101,43 @@ func TestTurnOrchestratorRunsForegroundUnit(t *testing.T) {
 	}
 }
 
+func TestNonGoalTurnDoesNotInvokeGoalEvaluator(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func(*turnOrchestrator) error
+	}{
+		{
+			name: "ordinary",
+			run: func(o *turnOrchestrator) error {
+				return o.runGoalLoopWithRawDisplay(context.Background(), "answer", "answer", "")
+			},
+		},
+		{
+			name: "edited",
+			run: func(o *turnOrchestrator) error {
+				return o.runEditedGoalLoopWithRawDisplay(context.Background(), "answer", "answer", "", "old answer")
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runner := &fakeTurnRunner{}
+			evaluator := &fakeGoalEvaluator{}
+			c := New(Options{Runner: runner, GoalEvaluator: evaluator})
+
+			if err := tt.run(newTurnOrchestrator(c)); err != nil {
+				t.Fatal(err)
+			}
+			if len(runner.inputs) != 1 {
+				t.Fatalf("runner inputs = %d, want 1", len(runner.inputs))
+			}
+			if evaluator.calls != 0 {
+				t.Fatalf("goal evaluator calls = %d, want 0 outside Goal mode", evaluator.calls)
+			}
+		})
+	}
+}
+
 func TestTurnOrchestratorTypedSyntheticTurnDoesNotDependOnPrefix(t *testing.T) {
 	runner := &fakeTurnRunner{}
 	c := New(Options{Runner: runner})
@@ -125,10 +162,12 @@ func TestTurnOrchestratorTypedSyntheticTurnDoesNotDependOnPrefix(t *testing.T) {
 func TestGoalTurnOutputCannotAdvanceReplacementGoal(t *testing.T) {
 	executor := agent.New(nil, tool.NewRegistry(), agent.NewSession("system"), agent.Options{}, event.Discard)
 	runner := &goalReplacingRunner{executor: executor}
+	evaluator := &fakeGoalEvaluator{}
 	c := New(Options{
-		Runner:     runner,
-		Executor:   executor,
-		SessionDir: t.TempDir(),
+		Runner:        runner,
+		Executor:      executor,
+		GoalEvaluator: evaluator,
+		SessionDir:    t.TempDir(),
 	})
 	runner.c = c
 	c.SetGoal("old goal")
@@ -150,6 +189,9 @@ func TestGoalTurnOutputCannotAdvanceReplacementGoal(t *testing.T) {
 	if got := c.GoalStatus(); got != GoalStatusRunning {
 		t.Fatalf("GoalStatus() = %q, want replacement Goal to remain running", got)
 	}
+	if evaluator.calls != 0 {
+		t.Fatalf("stale Goal evaluator calls = %d, want 0", evaluator.calls)
+	}
 }
 
 func TestGoalContinuationNoticeCannotMoveOldInterceptIntoReplacementGoal(t *testing.T) {
@@ -157,7 +199,7 @@ func TestGoalContinuationNoticeCannotMoveOldInterceptIntoReplacementGoal(t *test
 	session := agent.NewSession("")
 	session.Add(provider.Message{
 		Role:    provider.RoleAssistant,
-		Content: "All done.\n\n[goal:complete]",
+		Content: "All done.",
 	})
 	executor := agent.New(nil, tool.NewRegistry(), session, agent.Options{}, event.Discard)
 	executor.SeedTodoState([]evidence.TodoItem{{
@@ -173,7 +215,7 @@ func TestGoalContinuationNoticeCannotMoveOldInterceptIntoReplacementGoal(t *test
 		Sink: event.FuncSink(func(e event.Event) {
 			if replaced ||
 				e.Kind != event.Notice ||
-				!strings.Contains(e.Text, "Goal still has unfinished task state") {
+				!strings.Contains(e.Text, "Goal is not ready to complete yet") {
 				return
 			}
 			replaced = true
@@ -181,10 +223,17 @@ func TestGoalContinuationNoticeCannotMoveOldInterceptIntoReplacementGoal(t *test
 		}),
 	})
 	c.SetGoal("old goal")
+	scopeID, _, _ := c.goals.deliveryScope()
+	rec := c.goals.newTurnRecorder(scopeID, c.goals.continuationToken())
+	if _, err := rec.RecordGoalReport(tool.GoalReport{Status: GoalStatusComplete, Reason: ""}); err != nil {
+		t.Fatal(err)
+	}
+	c.goalUsageTee.setActiveRecorder(rec)
 
 	if err := newTurnOrchestrator(c).continueGoal(
 		context.Background(),
 		c.goals.continuationToken(),
+		nil,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +252,7 @@ func TestGoalContinuationOutputCannotAdvanceReplacementGoal(t *testing.T) {
 	session := agent.NewSession("system")
 	session.Add(provider.Message{
 		Role:    provider.RoleAssistant,
-		Content: "All done.\n\n[goal:complete]",
+		Content: "All done.",
 	})
 	executor := agent.New(nil, tool.NewRegistry(), session, agent.Options{}, event.Discard)
 	executor.SeedTodoState([]evidence.TodoItem{{
@@ -218,10 +267,17 @@ func TestGoalContinuationOutputCannotAdvanceReplacementGoal(t *testing.T) {
 	})
 	runner.c = c
 	c.SetGoal("old goal")
+	scopeID, _, _ := c.goals.deliveryScope()
+	rec := c.goals.newTurnRecorder(scopeID, c.goals.continuationToken())
+	if _, err := rec.RecordGoalReport(tool.GoalReport{Status: GoalStatusComplete, Reason: ""}); err != nil {
+		t.Fatal(err)
+	}
+	c.goalUsageTee.setActiveRecorder(rec)
 
 	if err := newTurnOrchestrator(c).continueGoal(
 		context.Background(),
 		c.goals.continuationToken(),
+		nil,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -284,27 +340,33 @@ func (r *deliveryScopeErrorRunner) Run(ctx context.Context, _ string) error {
 	if scope, ok := agent.DeliveryExecutionScopeFromContext(ctx); ok {
 		r.scopes = append(r.scopes, scope)
 	}
-	return &agent.FinalReadinessError{Attempts: 3, Reason: "missing verification"}
+	return &agent.FinalReadinessError{Attempts: 1, Reason: "missing verification", Missing: []string{"verification"}}
 }
 
-func TestGoalReadinessFailureBlocksAndKeepsDeliveryScope(t *testing.T) {
+func TestGoalReadinessFailureContinuesThenPausesOnNoProgress(t *testing.T) {
 	runner := &deliveryScopeErrorRunner{}
-	c := New(Options{Runner: runner})
+	executor := agent.New(nil, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
+	c := New(Options{Runner: runner, Executor: executor})
 	c.SetGoal("ship the integration")
 
 	err := newTurnOrchestrator(c).runGoalLoopWithRawDisplay(context.Background(), "start", "start", "")
-	var readiness *agent.FinalReadinessError
-	if !errors.As(err, &readiness) {
-		t.Fatalf("run err = %v, want FinalReadinessError", err)
+	if err != nil {
+		t.Fatalf("run err = %v, want the loop to absorb FinalReadinessError and pause on no-progress", err)
 	}
+	// The FSM absorbs the readiness failure and continues with the missing
+	// requirements; with no host-verifiable progress across turns the
+	// no-progress gate pauses the goal instead of looping forever.
 	if got := c.GoalStatus(); got != GoalStatusBlocked {
-		t.Fatalf("GoalStatus = %q, want blocked", got)
+		t.Fatalf("GoalStatus = %q, want blocked (no-progress pause)", got)
 	}
-	if len(runner.scopes) != 1 || runner.scopes[0].ID == "" || runner.scopes[0].TaskText != "ship the integration" {
-		t.Fatalf("delivery scopes = %+v", runner.scopes)
+	if rt := c.GoalRuntime(); rt.StopCause != stopCauseNoProgress {
+		t.Fatalf("stop cause = %q, want %q", rt.StopCause, stopCauseNoProgress)
+	}
+	if len(runner.scopes) < 2 || runner.scopes[0].ID == "" || runner.scopes[0].TaskText != "ship the integration" {
+		t.Fatalf("delivery scopes = %+v, want scoped continuation turns", runner.scopes)
 	}
 	if !c.ResumeGoal() || c.GoalStatus() != GoalStatusRunning {
-		t.Fatal("blocked Goal should resume with its existing scope")
+		t.Fatal("paused Goal should resume with its existing scope")
 	}
 	if id, task, ok := c.goals.deliveryScope(); !ok || id != runner.scopes[0].ID || task != "ship the integration" {
 		t.Fatalf("resumed scope = (%q, %q, %v), want preserved id/task", id, task, ok)
@@ -377,11 +439,11 @@ func (r *recordingSessionRunner) Run(ctx context.Context, input string) error {
 }
 
 func TestTurnOrchestratorGoalContinuationRunsStopPerUnit(t *testing.T) {
-	prov := &scriptedTurns{turns: [][]provider.Chunk{
-		textTurn("Started.\n\n[goal:continue]"),
-		textTurn("Finished.\n\n[goal:complete]"),
-	}}
-	ag := agent.New(prov, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
+	prov := &scriptedTurns{turns: flattenTurns(
+		goalToolTurn(GoalStatusRunning, "started", "next"),
+		goalToolTurn(GoalStatusComplete, "", ""),
+	)}
+	ag := agent.New(prov, goalRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
 	var stopEvents int
 	hooks := hook.NewRunner([]hook.ResolvedHook{{
 		HookConfig: hook.HookConfig{Command: "record-stop"},
@@ -405,8 +467,8 @@ func TestTurnOrchestratorGoalContinuationRunsStopPerUnit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if prov.call != 2 {
-		t.Fatalf("provider calls = %d, want initial + continuation", prov.call)
+	if prov.call != 4 {
+		t.Fatalf("provider calls = %d, want initial + continuation (report + final answer each)", prov.call)
 	}
 	if stopEvents != 2 {
 		t.Fatalf("Stop hook events = %d, want one per goal-loop turn unit", stopEvents)
@@ -635,6 +697,46 @@ func TestTurnOrchestratorCheckpointBoundaryPrecedesUserMessage(t *testing.T) {
 	}
 }
 
+// TestTurnOrchestratorCheckpointPromptIsRawUserInput verifies the rewind picker
+// label records the user's own text, not the composed provider input. compose()
+// prefixes the turn with transient blocks (<response-language>,
+// <reasoning-language>, plan marker, memory, hook context, …); storing that
+// string as checkpoint.Prompt made the Esc-Esc picker show a wall of prefab
+// prompt text instead of the user's messages.
+func TestTurnOrchestratorCheckpointPromptIsRawUserInput(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	sess := agent.NewSession("sys")
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	runner := &recordingSessionRunner{session: sess}
+	c := New(Options{
+		Runner:            runner,
+		Executor:          exec,
+		SessionDir:        dir,
+		SessionPath:       path,
+		Label:             "test",
+		ResponseLanguage:  "zh",
+		ReasoningLanguage: "en",
+	})
+	o := newTurnOrchestrator(c)
+	const raw = "fix the parser"
+	if err := o.runTurnWithRawDisplay(context.Background(), raw, raw, ""); err != nil {
+		t.Fatal(err)
+	}
+	cps := c.Checkpoints()
+	if len(cps) != 1 {
+		t.Fatalf("checkpoints = %+v, want exactly one", cps)
+	}
+	if got := cps[0].Prompt; got != raw {
+		t.Fatalf("checkpoint prompt = %q, want raw user input %q (composed text leaked into the rewind picker)", got, raw)
+	}
+	for _, prefab := range []string{"<response-language>", "<reasoning-language>"} {
+		if strings.Contains(cps[0].Prompt, prefab) {
+			t.Fatalf("checkpoint prompt contains %q: %q", prefab, cps[0].Prompt)
+		}
+	}
+}
+
 func TestTurnOrchestratorSyntheticTurnDoesNotCreateCheckpoint(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
@@ -695,7 +797,7 @@ func TestTurnOrchestratorStopFailureHookCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	o := newTurnOrchestrator(c)
-	if err := o.runTurnWithRawDisplay(ctx, "test", "test", ""); err != nil && err != context.Canceled {
+	if err := o.runTurnWithRawDisplay(ctx, "test", "test", ""); err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 	if stopCalls != 1 {
@@ -819,7 +921,7 @@ func TestTurnOrchestratorInterruptedAfterCompactionRelocatesVisibleTurn(t *testi
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sess := agent.NewSession("system")
-			for i := 0; i < 3; i++ {
+			for range 3 {
 				sess.Add(provider.Message{Role: provider.RoleUser, Content: "old task"})
 				sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "old answer"})
 			}
@@ -909,12 +1011,12 @@ func TestTurnOrchestratorCancelBeforeRunnerAddsUserPreservesVisiblePrompt(t *tes
 	c.canceling = true
 	c.mu.Unlock()
 
-	err := newTurnOrchestrator(c).runTurnWithRawDisplay(context.Background(), "inspect @diagram.png", "inspect @diagram.png", "")
+	err := newTurnOrchestrator(c).runTurnWithImageRefsRawDisplay(context.Background(), "Referenced context:\n\n<image path=\"diagram.png\">\n@diagram.png\n</image>\n\ninspect the diagnostic", "inspect the diagnostic", "@diagram.png", "")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 	msgs := sess.Snapshot()
-	if len(msgs) != 3 || msgs[1].Role != provider.RoleUser || msgs[1].Content != "inspect @diagram.png" || !msgs[2].LocalOnly {
+	if len(msgs) != 3 || msgs[1].Role != provider.RoleUser || !strings.Contains(msgs[1].Content, "inspect the diagnostic") || !msgs[2].LocalOnly {
 		t.Fatalf("session after pre-executor cancel = %+v, want user plus recovery marker", msgs)
 	}
 	if len(msgs[1].Images) != 1 || !strings.HasPrefix(msgs[1].Images[0], "data:image/png;base64,") {

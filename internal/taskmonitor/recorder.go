@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"reasonix/internal/jobs"
-	"reasonix/internal/secrets"
 )
 
 // TaskRecorder bridges jobs.Manager lifecycle events into the Task Store. It
@@ -21,12 +21,13 @@ import (
 // swallowed — monitoring is best-effort and must never break the job pipeline.
 // The store's per-task lock keeps concurrent recorders (CLI + Desktop) safe.
 type TaskRecorder struct {
-	store       WriteStore
-	projectDir  string
-	sessionIDFn func() string
-	mu          sync.Mutex
-	monitorIDs  map[string]string
-	heartbeats  map[string]context.CancelFunc
+	store          WriteStore
+	projectDir     string
+	sessionIDFn    func() string
+	mu             sync.Mutex
+	monitorIDs     map[string]string
+	heartbeats     map[string]context.CancelFunc
+	runtimeOwnerID string
 }
 
 // NewTaskRecorder returns a TaskRecorder writing to store under projectDir.
@@ -34,13 +35,24 @@ type TaskRecorder struct {
 // creation time (controllers resolve their session path lazily); it may return
 // "" when no session is bound yet.
 func NewTaskRecorder(store WriteStore, projectDir string, sessionIDFn func() string) *TaskRecorder {
-	return &TaskRecorder{store: store, projectDir: projectDir, sessionIDFn: sessionIDFn, monitorIDs: make(map[string]string), heartbeats: make(map[string]context.CancelFunc)}
+	return &TaskRecorder{store: store, projectDir: projectDir, sessionIDFn: sessionIDFn, monitorIDs: make(map[string]string), heartbeats: make(map[string]context.CancelFunc), runtimeOwnerID: newRuntimeOwnerID()}
 }
 
 const (
 	runtimeLeaseTTL       = 30 * time.Second
 	runtimeHeartbeatEvery = 5 * time.Second
 )
+
+var runtimeOwnerSequence atomic.Uint64
+
+func newRuntimeOwnerID() string {
+	var nonce [16]byte
+	if _, err := crand.Read(nonce[:]); err == nil {
+		return hex.EncodeToString(nonce[:])
+	}
+	h := sha256.Sum256(fmt.Appendf(nil, "%d:%d", timeNow().UnixNano(), runtimeOwnerSequence.Add(1)))
+	return hex.EncodeToString(h[:16])
+}
 
 // monitorTaskID creates a globally unique monitor identity for a job within
 // a session. jobs.Manager IDs are local to a manager and restart from task-1
@@ -63,7 +75,7 @@ func sessionlessMonitorTaskID(jobID string) string {
 	if _, err := crand.Read(nonce[:]); err != nil {
 		// crypto/rand failure is exceptional; retain a bounded, non-path-like
 		// identity rather than falling back to the colliding raw job ID.
-		h := sha256.Sum256([]byte(fmt.Sprintf("%s:%d", jobID, timeNow().UnixNano())))
+		h := sha256.Sum256(fmt.Appendf(nil, "%s:%d", jobID, timeNow().UnixNano()))
 		return hex.EncodeToString(h[:8]) + "--" + jobID
 	}
 	return hex.EncodeToString(nonce[:]) + "--" + jobID
@@ -98,18 +110,17 @@ func (r *TaskRecorder) startHeartbeat(monitorID string) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				cur, err := r.store.GetTask(ctx, r.projectDir, monitorID)
-				if err != nil || cur == nil || cur.State.Terminal() || cur.RuntimeState.Effective() != RuntimeStateAlive {
-					return
-				}
-				cur.Version++
-				cur.RuntimeLeaseUntil = timeNow().Add(runtimeLeaseTTL)
-				if err := r.store.SaveTask(ctx, r.projectDir, *cur); err != nil {
+				if !r.renewHeartbeat(ctx, monitorID) {
 					return
 				}
 			}
 		}
 	}()
+}
+
+func (r *TaskRecorder) renewHeartbeat(ctx context.Context, monitorID string) bool {
+	renewed, err := r.store.RenewRuntimeLease(ctx, r.projectDir, monitorID, r.runtimeOwnerID, timeNow().Add(runtimeLeaseTTL))
+	return err == nil && renewed
 }
 
 func (r *TaskRecorder) stopHeartbeat(monitorID string) {
@@ -152,6 +163,7 @@ func (r *TaskRecorder) RecordStartWithParent(id, kind, label, parentTaskID, pare
 		State:             TaskStateRunning,
 		RuntimeState:      RuntimeStateAlive,
 		RuntimeLeaseUntil: now.Add(runtimeLeaseTTL),
+		RuntimeOwnerID:    r.runtimeOwnerID,
 		Version:           1,
 		CreatedAt:         now,
 		UpdatedAt:         now,
@@ -194,20 +206,24 @@ func (r *TaskRecorder) RecordDone(id string, st jobs.Status, jobErr error) {
 	}
 	r.stopHeartbeat(monitorID)
 	const maxSaveAttempts = 4
-	for attempt := 0; attempt < maxSaveAttempts; attempt++ {
+	for range maxSaveAttempts {
 		cur, gerr := r.store.GetTask(ctx, r.projectDir, monitorID)
 		if gerr != nil || cur == nil {
 			return // never recorded (recorder attached after the job started)
+		}
+		if cur.RuntimeOwnerID != "" && cur.RuntimeOwnerID != r.runtimeOwnerID {
+			return // a newer recorder generation owns this reused task identity
 		}
 		now := timeNow()
 		cur.State = target
 		cur.RuntimeState = RuntimeStateExited
 		cur.RuntimeLeaseUntil = time.Time{}
+		cur.RuntimeOwnerID = ""
 		cur.Version++
 		cur.UpdatedAt = now
+		cur.ErrorSummary = ""
 		if jobErr != nil {
 			cur.ErrorCode = "job_failed"
-			cur.ErrorSummary = truncateSummary(secrets.RedactError(jobErr))
 		}
 		if serr := r.store.SaveTask(ctx, r.projectDir, *cur); serr != nil {
 			if errors.Is(serr, ErrStoreVersionConflict) {
@@ -240,17 +256,4 @@ func terminalState(st jobs.Status) TaskState {
 	default:
 		return ""
 	}
-}
-
-// truncateSummary caps an error message at maxErrorSummaryLen bytes without
-// splitting a UTF-8 rune.
-func truncateSummary(s string) string {
-	if len(s) <= maxErrorSummaryLen {
-		return s
-	}
-	b := []byte(s)[:maxErrorSummaryLen]
-	for len(b) > 0 && b[len(b)-1]&0xc0 == 0x80 {
-		b = b[:len(b)-1]
-	}
-	return string(b)
 }

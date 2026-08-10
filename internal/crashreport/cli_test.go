@@ -74,7 +74,7 @@ func TestCapturePanicWritesBoundedSanitizedReport(t *testing.T) {
 		t.Fatalf("report mode=%v", info.Mode().Perm())
 	}
 
-	for i := 0; i < maxReports+5; i++ {
+	for i := range maxReports + 5 {
 		if err := CapturePanic(home, "v1.20.0", i, []byte(stack)); err != nil {
 			t.Fatal(err)
 		}
@@ -139,7 +139,7 @@ func TestConcurrentCaptureKeepsQueueBounded(t *testing.T) {
 	const writers = 32
 	var wg sync.WaitGroup
 	start := make(chan struct{})
-	for i := 0; i < writers; i++ {
+	for i := range writers {
 		wg.Add(1)
 		go func(value int) {
 			defer wg.Done()
@@ -169,7 +169,7 @@ func TestCapturePanicPrunesOnlyCurrentReportFormat(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for i := 0; i < maxReports+1; i++ {
+	for i := range maxReports + 1 {
 		if err := CapturePanic(home, "v1.20.0", i, []byte("reasonix.run()\n\t/home/alice/main.go:12")); err != nil {
 			t.Fatal(err)
 		}

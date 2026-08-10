@@ -11,11 +11,13 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"reasonix/internal/ablation"
 	"reasonix/internal/shellparse"
 )
 
 type diffOpts struct {
 	bin, model, repo, base, testCmd, profile string
+	ablate                                   ablation.Set
 	maxSteps, timeoutSec, attempts           int
 }
 
@@ -46,10 +48,7 @@ func runDiff(o diffOpts) string {
 	pkgs := packagesOf(srcFiles)
 	prompt := buildDiffPrompt(srcFiles, pkgs, truncate(gitOut(o.repo, "diff", o.base+"...HEAD", "--")))
 
-	attempts := o.attempts
-	if attempts < 1 {
-		attempts = 1
-	}
+	attempts := max(o.attempts, 1)
 	var best diffReport
 	made := 0
 	for i := 1; i <= attempts; i++ {
@@ -85,6 +84,9 @@ func runOnce(o diffOpts, srcFiles, pkgs []string, prompt string) diffReport {
 		args = append(args, "--model", o.model)
 	}
 	args = appendBenchmarkProfileArgs(args, o.profile)
+	if !o.ablate.Empty() {
+		args = append(args, "--ablate", o.ablate.String())
+	}
 	args = append(args, prompt)
 	cmd := exec.CommandContext(ctx, o.bin, args...)
 	cmd.Dir = o.repo
@@ -401,7 +403,7 @@ func parseCoverProfile(repo, path string) map[string][]coverBlock {
 		return nil
 	}
 	out := map[string][]coverBlock{}
-	for _, ln := range strings.Split(string(data), "\n") {
+	for ln := range strings.SplitSeq(string(data), "\n") {
 		if ln == "" || strings.HasPrefix(ln, "mode:") {
 			continue
 		}
@@ -428,8 +430,8 @@ func repoRelFromModulePath(p string) string {
 	if strings.HasPrefix(p, prefix) {
 		return p[len(prefix):]
 	}
-	if i := strings.IndexByte(p, '/'); i >= 0 {
-		return p[i+1:]
+	if _, after, ok := strings.Cut(p, "/"); ok {
+		return after
 	}
 	return p
 }
@@ -442,7 +444,7 @@ func changedLineSet(repo, base string, srcFiles []string) map[string]map[int]boo
 	out := map[string]map[int]bool{}
 	file := ""
 	newLine := 0
-	for _, ln := range strings.Split(diff, "\n") {
+	for ln := range strings.SplitSeq(diff, "\n") {
 		// '-' (deletion) lines are intentionally unhandled: they don't advance the
 		// new-side line counter, so they fall through with no case.
 		switch {
@@ -452,10 +454,10 @@ func changedLineSet(repo, base string, srcFiles []string) map[string]map[int]boo
 		case strings.HasPrefix(ln, "@@"):
 			// @@ -a,b +c,d @@ — start collecting at new-side line c.
 			// Digit-only cut: malformed headers (e.g. `@@ +abc @@`) fail closed.
-			if plus := strings.Index(ln, "+"); plus >= 0 {
-				num := ln[plus+1:]
+			if _, after, ok := strings.Cut(ln, "+"); ok {
+				num := after
 				end := len(num)
-				for i := 0; i < len(num); i++ {
+				for i := range len(num) {
 					if num[i] < '0' || num[i] > '9' {
 						end = i
 						break
@@ -498,9 +500,9 @@ func countAssertionPins(ps []pinResult) int {
 func parseNewTests(diff string) []testRef {
 	var refs []testRef
 	pkg := ""
-	for _, ln := range strings.Split(diff, "\n") {
-		if strings.HasPrefix(ln, "+++ b/") {
-			pkg = "./" + filepath.ToSlash(filepath.Dir(strings.TrimPrefix(ln, "+++ b/")))
+	for ln := range strings.SplitSeq(diff, "\n") {
+		if after, ok := strings.CutPrefix(ln, "+++ b/"); ok {
+			pkg = "./" + filepath.ToSlash(filepath.Dir(after))
 			continue
 		}
 		if !strings.HasPrefix(ln, "+") || strings.HasPrefix(ln, "+++") {
@@ -514,11 +516,11 @@ func parseNewTests(diff string) []testRef {
 		// Method form `(r T) Name(...)` starts with '('; parse the receiver out before the name.
 		var name string
 		if sig[0] == '(' {
-			close := strings.IndexByte(sig, ')')
-			if close < 0 {
+			_, after, ok := strings.Cut(sig, ")")
+			if !ok {
 				continue
 			}
-			rest := strings.TrimSpace(sig[close+1:])
+			rest := strings.TrimSpace(after)
 			methodParen := strings.IndexByte(rest, '(')
 			if methodParen <= 0 {
 				continue
@@ -540,7 +542,7 @@ func parseNewTests(diff string) []testRef {
 
 func countAdded(diff string) int {
 	n := 0
-	for _, ln := range strings.Split(diff, "\n") {
+	for ln := range strings.SplitSeq(diff, "\n") {
 		if strings.HasPrefix(ln, "+") && !strings.HasPrefix(ln, "+++") {
 			n++
 		}
@@ -552,7 +554,7 @@ func countAdded(diff string) int {
 func failingTestNames(out string) []string {
 	var names []string
 	seen := map[string]bool{}
-	for _, ln := range strings.Split(out, "\n") {
+	for ln := range strings.SplitSeq(out, "\n") {
 		ln = strings.TrimSpace(ln)
 		if !strings.HasPrefix(ln, "--- FAIL:") {
 			continue
@@ -598,7 +600,7 @@ func changedGoFilesWorktree(repo string, includeTests bool) []string {
 
 func filterGo(out string, includeTests bool) []string {
 	var keep []string
-	for _, f := range strings.Fields(strings.ReplaceAll(out, "\n", " ")) {
+	for f := range strings.FieldsSeq(strings.ReplaceAll(out, "\n", " ")) {
 		if strings.HasSuffix(f, "_test.go") && !includeTests {
 			continue
 		}

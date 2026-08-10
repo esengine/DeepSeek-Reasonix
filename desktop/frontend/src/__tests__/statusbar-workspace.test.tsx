@@ -52,7 +52,9 @@ console.log("\nstatus bar workspace");
     { id: "demo", label: "demo", host: "192.0.2.10", port: 22, user: "dev", identityFile: "", proxyJump: "", defaultWorkspace: "~/app", serveInstall: "auto", useSSHConfig: false },
   ];
   const stopped = renderStatusBar({ workspacePath: "/workspace/repo", workspaceName: "repo", remoteHosts });
-  ok(stopped.includes("SSH · Disconnected"), "configured SSH entry remains visible while disconnected");
+  ok(stopped.includes("SSH · Disconnected"), "disconnected SSH entry keeps its full accessible status");
+  ok(stopped.includes('statusbar__remote--idle'), "disconnected SSH entry uses the compact idle treatment");
+  ok(stopped.includes('<span class="statusbar__remote-label">SSH</span>'), "disconnected SSH entry renders only the compact SSH label");
   ok(stopped.indexOf("SSH · Disconnected") < stopped.indexOf("workspace/repo"), "window-level SSH entry leads the status bar");
 
   const connected = renderStatusBar({
@@ -62,6 +64,8 @@ console.log("\nstatus bar workspace");
     remoteStatuses: { demo: { hostId: "demo", state: "connected" } },
   });
   ok(connected.includes("demo · Connected"), "SSH entry includes host and connected state text");
+  ok(connected.includes('statusbar__remote-state-dot'), "connected SSH entry renders a state dot");
+  ok(connected.includes('<span class="statusbar__remote-label">demo</span>'), "connected SSH entry renders the host without redundant state text");
 
   const failed = renderStatusBar({
     workspacePath: "/workspace/repo",
@@ -69,6 +73,7 @@ console.log("\nstatus bar workspace");
     remoteStatuses: { demo: { hostId: "demo", state: "stopped", error: "handshake failed" } },
   });
   ok(failed.includes("demo · Connection failed"), "SSH entry keeps a recoverable failure summary visible");
+  ok(failed.includes('<span class="statusbar__remote-label">demo · Connection failed</span>'), "failed SSH entry keeps the failure visible in the status bar");
   ok(!failed.includes("handshake failed"), "status entry keeps raw connection diagnostics out of primary chrome");
 
   const degraded = renderStatusBar({
@@ -190,6 +195,41 @@ console.log("\nstatus bar workspace");
 }
 
 {
+  const exact = renderStatusBar({
+    items: ["turn_tps"],
+    lastTurnOutputTokens: 100,
+    lastTurnModelMs: 5_000,
+  });
+  ok(exact.includes("20 t/s"), "completed TPS uses provider-output time");
+
+  const estimated = renderStatusBar({
+    items: ["turn_tps"],
+    lastTurnOutputTokens: 100,
+    lastTurnModelMs: 5_000,
+    lastTurnOutputEstimated: true,
+  });
+  ok(estimated.includes("≈20 t/s"), "fallback TPS is visibly marked as estimated");
+
+  const perRequest = renderStatusBar({
+    items: ["turn_tps"],
+    lastRequestTps: 35,
+    lastTurnOutputTokens: 100,
+    lastTurnModelMs: 5_000,
+  });
+  ok(perRequest.includes("35 t/s"), "per-request TPS wins over the completed turn value");
+
+  const slowRequest = renderStatusBar({
+    items: ["turn_tps"], lastRequestTps: 1 / 3, lastTurnOutputTokens: 100, lastTurnModelMs: 5_000,
+  });
+  ok(slowRequest.includes("&lt;1 t/s") && !slowRequest.includes("20 t/s"), "sub-one request TPS replaces the stale turn fallback");
+
+  const unavailable = renderStatusBar({
+    items: ["turn_tps"], lastRequestTps: null, lastTurnOutputTokens: 100, lastTurnModelMs: 5_000,
+  });
+  ok(unavailable.includes('stat__value--empty">-</b>') && !unavailable.includes("20 t/s"), "unmeasured latest requests clear the stale turn fallback");
+}
+
+{
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
     pretendToBeVisual: true,
     url: "http://localhost/",
@@ -197,6 +237,9 @@ console.log("\nstatus bar workspace");
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   globalThis.window = dom.window as unknown as Window & typeof globalThis;
   globalThis.document = dom.window.document;
+  // Node's built-in navigator reflects the machine's ICU locale; pin jsdom's
+  // en-US one so English-string assertions hold on zh-locale machines.
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: dom.window.navigator });
   globalThis.Node = dom.window.Node;
   globalThis.HTMLElement = dom.window.HTMLElement;
   globalThis.HTMLButtonElement = dom.window.HTMLButtonElement;
@@ -294,26 +337,17 @@ console.log("\nstatus bar workspace");
         <StatusBar
           context={{ used: 0, window: 0, sessionTokens: 0 }}
           running={false}
-          workbenchTarget={{ kind: "ssh", hostId: "remote-1" }}
-          jobs={[{ id: "remote-job", kind: "bash", label: "remote build", status: "running", startedAt: 1 }]}
-          backgroundRuntimes={[
-            {
-              tabId: "local-1", title: "Local delivery", detached: true,
-              running: false, pendingPrompt: false,
-              jobs: [{ id: "local-job", kind: "go", label: "local test", status: "running", startedAt: 1 }],
-            },
-          ]}
+          jobs={[{ id: "local-job", kind: "go", label: "local test", status: "running", startedAt: 1 }]}
         />
       </LocaleProvider>,
     );
   });
   const mixedJobsButton = rootEl.querySelector<HTMLButtonElement>(".statusbar__jobs-trigger");
-  ok(mixedJobsButton?.textContent?.includes("2") === true, "local and active Remote Workbench jobs share the total count");
+  ok(mixedJobsButton?.textContent?.includes("1") === true, "local jobs show in the status bar total");
   if (mixedJobsButton?.getAttribute("aria-expanded") !== "true") {
     await act(async () => { mixedJobsButton?.click(); });
   }
-  ok(document.body.textContent?.includes("local test") === true, "local background jobs remain visible in Remote Workbench");
-  ok(document.body.textContent?.includes("remote build") === true, "active Remote Workbench jobs remain visible beside local jobs");
+  ok(document.body.textContent?.includes("local test") === true, "local background jobs remain visible");
   await act(async () => { root.unmount(); });
   dom.window.close();
 }

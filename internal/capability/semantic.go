@@ -106,7 +106,7 @@ func semanticPool(text string, entries []Entry) []Entry {
 		// bounded built-in/high-policy Skill set so English metadata does not make
 		// the semantic router blind to Chinese requests.
 		matched := false
-		for _, tok := range strings.Fields(text) {
+		for tok := range strings.FieldsSeq(text) {
 			if len(tok) < 3 {
 				continue
 			}
@@ -248,7 +248,7 @@ func mergeSemanticIDs(decision RouteDecision, catalog Catalog, ids []string, rea
 			continue
 		}
 		e, ok := catalog.Lookup(id)
-		if !ok {
+		if !ok || e.Status == StatusFailed || e.Status == StatusDisabled {
 			continue
 		}
 		decision.Candidates = append(decision.Candidates, RouteCandidate{

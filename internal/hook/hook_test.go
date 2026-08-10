@@ -562,6 +562,59 @@ func TestLoadIncludesPluginSessionStartHook(t *testing.T) {
 	}
 }
 
+// TestInspectNoHomeDirResolvesPluginRootFromPlatformHome: with HomeDir empty
+// (the hook-machine default after #7420) and an isolated REASONIX_HOME, the
+// plugin probe and global settings resolve from the platform Reasonix home —
+// <home>/plugins and <home>/settings.json — not a doubled .reasonix segment.
+func TestInspectNoHomeDirResolvesPluginRootFromPlatformHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	root := filepath.Join(home, "plugins", "superpowers")
+	// Global settings live directly under the platform Reasonix home
+	// (writeSettings would add .reasonix, the OS-home convention #7420 fixes).
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "settings.json"), []byte(`{"hooks":{"PostToolUse":[{"command":"echo global"}]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeHookTestFile(t, filepath.Join(root, pluginpkg.CodexManifest), `{
+  "name": "superpowers",
+  "version": "6.1.0",
+  "skills": "./skills/"
+}`)
+	writeHookTestFile(t, filepath.Join(root, "hooks", "session-start-codex"), "#!/usr/bin/env bash\necho ok\n")
+	if err := pluginpkg.Upsert(home, pluginpkg.InstalledPlugin{
+		Name:         "superpowers",
+		Root:         "plugins/superpowers",
+		Version:      "6.1.0",
+		ManifestKind: "codex",
+		Enabled:      true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	insp := Inspect(LoadOptions{ProjectRoot: "/workspace"})
+	// Inspect reports project + plugin + global sources; assertions focus on
+	// the two that #7420 broke: plugin and global must resolve from the
+	// platform Reasonix home, not a doubled .reasonix segment.
+	var pluginOK, globalOK bool
+	for _, s := range insp.Sources {
+		switch s.Scope {
+		case ScopePlugin:
+			pluginOK = s.Status == "ok" && strings.Contains(s.Path, filepath.Join(home, "plugins"))
+		case ScopeGlobal:
+			globalOK = s.Status == "ok" && strings.Contains(s.Path, filepath.Join(home, "settings.json"))
+		}
+	}
+	if !pluginOK {
+		t.Fatalf("plugin source not resolved from platform home: %+v", insp.Sources)
+	}
+	if !globalOK {
+		t.Fatalf("global source not resolved from platform home: %+v", insp.Sources)
+	}
+}
+
 func TestLoadIncludesPluginClaudeCompatibilityHooks(t *testing.T) {
 	home := t.TempDir()
 	reasonixHome := filepath.Join(home, ".reasonix")
@@ -634,7 +687,7 @@ func TestLoadPluginHooksPreservesExecutionContract(t *testing.T) {
 	reasonixHome := filepath.Join(home, ".reasonix")
 	root := filepath.Join(reasonixHome, "plugins", "hook-contract")
 	writeHookTestFile(t, filepath.Join(root, pluginpkg.NativeManifest), `{
-  "name": "hook-contract",
+  "apiVersion": "reasonix.io/plugin/v2", "name": "hook-contract",
   "hooks": {
     "SessionStart": [
       {"command":"bin/check","args":[],"shellCommand":true},
@@ -673,7 +726,7 @@ func TestLoadExpandsReasonixPluginRootBeforeShellLaunch(t *testing.T) {
 	root := filepath.Join(reasonixHome, "plugins", "impeccable")
 	projectRoot := filepath.Join(home, "$CLAUDE_PLUGIN_ROOT-project")
 	writeHookTestFile(t, filepath.Join(root, pluginpkg.NativeManifest), `{
-  "name": "impeccable",
+  "apiVersion": "reasonix.io/plugin/v2", "name": "impeccable",
   "version": "3.9.1",
   "hooks": {
     "PostToolUse": [{
@@ -968,6 +1021,23 @@ func TestReasonixHomeOverridesGlobalHookPaths(t *testing.T) {
 	hooks := Load(LoadOptions{})
 	if len(hooks) != 1 || hooks[0].Command != "echo rx" {
 		t.Fatalf("Load hooks = %+v, want Reasonix home hook only", hooks)
+	}
+}
+
+func TestLoadOptionsReasonixHomeDirUsesExactGlobalHookPath(t *testing.T) {
+	home := t.TempDir()
+	reasonixHome := filepath.Join(home, "AppData", "Roaming", "reasonix")
+	settingsPath := filepath.Join(reasonixHome, SettingsFilename)
+	if err := os.MkdirAll(reasonixHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settingsPath, []byte(`{"hooks":{"Stop":[{"command":"echo exact"}]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	hooks := Load(LoadOptions{HomeDir: home, ReasonixHomeDir: reasonixHome})
+	if len(hooks) != 1 || hooks[0].Command != "echo exact" || hooks[0].Source != settingsPath {
+		t.Fatalf("Load hooks = %+v, want exact Reasonix home hook", hooks)
 	}
 }
 

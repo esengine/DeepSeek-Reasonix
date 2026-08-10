@@ -55,6 +55,11 @@ type WriteStore interface {
 	// SaveTask atomically persists snap with version-based CAS.
 	SaveTask(ctx context.Context, projectDir string, snap TaskSnapshot) error
 
+	// RenewRuntimeLease extends an alive task lease only when ownerID still
+	// owns the persisted runtime generation. Implementations must read the raw
+	// stored snapshot rather than a liveness-reconciled observation.
+	RenewRuntimeLease(ctx context.Context, projectDir, taskID, ownerID string, leaseUntil time.Time) (bool, error)
+
 	// AppendAuditEvent atomically assigns the next monotonic sequence
 	// number and appends the event to taskID's event log. Implementations
 	// must be safe for concurrent use across processes.

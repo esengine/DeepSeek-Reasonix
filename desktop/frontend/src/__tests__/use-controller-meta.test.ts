@@ -1,6 +1,8 @@
 // Run: tsx src/__tests__/use-controller-meta.test.ts
 
-import { currentTurnWaitMs, effortSwitchNoticeText, foregroundRunningFromRuntimeMeta, historyMessagesToItems, initialState, localizedBackendNoticeText, localizedNoticeText, metaFromTab, modelSwitchNoticeText, reducer, sameMeta, shouldReconcileStaleTurn, tokenModeSwitchNoticeText } from "../lib/useController";
+import { currentTurnWaitMs, effortSwitchNoticeText, foregroundRunningFromRuntimeMeta, historyMessagesToItems, initialState, localizedBackendNoticeText, localizedNoticeText, metaFromTab, modelSwitchNoticeText, reducer, sameMeta, shouldReconcileStaleTurn, tokenModeSwitchNoticeText, type Item } from "../lib/useController";
+import { parseTodos } from "../lib/tools";
+import { resolveTodoPanelTodos } from "../lib/todoVisibility";
 import type { HistoryMessage, Meta, TabMeta, WireUsage } from "../lib/types";
 
 type LooseTabMeta = Omit<TabMeta, "toolApprovalMode"> & { toolApprovalMode?: TabMeta["toolApprovalMode"] | "" };
@@ -209,12 +211,12 @@ console.log("\nuse controller meta");
   );
   eq(
     localizedBackendNoticeText("session conflicts kept recurring; kept the transcript on the current recovery branch"),
-    "Repeated save conflicts were detected, so the current conflict copy was saved in place.",
+    "Repeated save conflicts were detected, so the current conflict copy was saved in an isolated recovery branch.",
     "legacy repeated recovery conflict notice can be normalized",
   );
   eq(
     localizedBackendNoticeText("repeated save conflicts were detected; saved the current conflict copy in place"),
-    "Repeated save conflicts were detected, so the current conflict copy was saved in place.",
+    "Repeated save conflicts were detected, so the current conflict copy was saved in an isolated recovery branch.",
     "repeated recovery conflict notice can be normalized",
   );
   eq(
@@ -272,7 +274,7 @@ console.log("\nuse controller meta");
   );
   eq(
     localizedNoticeText("reworded depth cap", "session_recovery_depth_cap"),
-    "Repeated save conflicts were detected, so the current conflict copy was saved in place.",
+    "Repeated save conflicts were detected, so the current conflict copy was saved in an isolated recovery branch.",
     "session recovery depth-cap localization uses its stable notice code",
   );
   eq(
@@ -412,6 +414,54 @@ console.log("\nuse controller meta");
 
   const cleared = reducer(reset, { type: "meta", meta: meta({ canonicalTodos: [] }) });
   eq(cleared.meta?.canonicalTodos?.length, 0, "authoritative empty canonical todos survive meta refresh");
+}
+
+{
+  const delayedLiveMeta = meta({
+    canonicalTodos: [
+      { content: "Inspect the report", status: "completed" },
+      { content: "Ship the fix", status: "in_progress" },
+    ],
+  });
+  const hydrated = reducer({ ...initialState, meta: delayedLiveMeta }, { type: "meta", meta: delayedLiveMeta });
+  const noLiveTodo = hydrated.items.find(
+    (item): item is Extract<Item, { kind: "tool" }> => item.kind === "tool" && item.name === "todo_write",
+  );
+  eq(
+    resolveTodoPanelTodos(hydrated.meta?.canonicalTodos, noLiveTodo ? parseTodos(noLiveTodo.args) : undefined),
+    delayedLiveMeta.canonicalTodos,
+    "panel uses fresh Meta todos while the live todo_write event is delayed",
+  );
+
+  const staleMeta = meta({
+    canonicalTodos: [
+      { content: "Inspect the report", status: "in_progress" },
+      { content: "Ship the fix", status: "pending" },
+    ],
+  });
+  const liveArgs = JSON.stringify({
+    todos: [
+      { content: "Inspect the report", status: "completed" },
+      { content: "Ship the fix", status: "in_progress" },
+    ],
+  });
+  let liveState = reducer({ ...initialState, meta: staleMeta }, { type: "event", e: { kind: "turn_started" } });
+  liveState = reducer(liveState, {
+    type: "event",
+    e: { kind: "tool_dispatch", tool: { id: "todo-live", name: "todo_write", args: liveArgs, readOnly: true } },
+  });
+  liveState = reducer(liveState, {
+    type: "event",
+    e: { kind: "tool_result", tool: { id: "todo-live", name: "todo_write", readOnly: true, output: "Todos updated" } },
+  });
+  const liveTodo = liveState.items.find(
+    (item): item is Extract<Item, { kind: "tool" }> => item.kind === "tool" && item.name === "todo_write",
+  );
+  eq(
+    JSON.stringify(resolveTodoPanelTodos(liveState.meta?.canonicalTodos, liveTodo ? parseTodos(liveTodo.args) : undefined)),
+    JSON.stringify(JSON.parse(liveArgs).todos),
+    "panel switches to the live todo_write snapshot after it arrives",
+  );
 }
 
 {
@@ -594,18 +644,14 @@ console.log("\nuse controller meta");
 }
 
 {
-  let s = reducer(initialState, { type: "user", text: "first", seq: 0 });
+  let s = reducer(initialState, { type: "user", text: "first", seq: 0, submissionId: "meta-submission" });
   s = reducer(s, { type: "event", e: { kind: "turn_started" } });
   s = reducer(s, { type: "event", e: { kind: "notice", level: "info", text: "runtime notice" } });
-  s = reducer(s, { type: "event", e: { kind: "turn_done" } });
-  const merged = reducer(s, {
-    type: "history_checkpoint_turns",
-    turns: [0],
-  });
-  const user = merged.items.find((item) => item.kind === "user");
-  const notice = merged.items.find((item) => item.kind === "notice" && item.text === "runtime notice");
-  eq(user?.kind === "user" && user.checkpointTurn, 0, "turn_done checkpoint merge stamps user turn zero");
-  eq(Boolean(notice), true, "turn_done checkpoint merge preserves runtime notices");
+  s = reducer(s, { type: "event", e: { kind: "turn_done", checkpointTurn: 0, submissionId: "meta-submission" } });
+  const user = s.items.find((item) => item.kind === "user");
+  const notice = s.items.find((item) => item.kind === "notice" && item.text === "runtime notice");
+  eq(user?.kind === "user" && user.checkpointTurn, 0, "turn_done stamps the exact user with checkpoint turn zero");
+  eq(Boolean(notice), true, "turn_done checkpoint assignment preserves runtime notices");
 }
 
 {
@@ -620,7 +666,7 @@ console.log("\nuse controller meta");
     mode: "replace",
     page: {
       messages: [
-        { role: "user", content: "recent prompt" },
+        { role: "user", content: "recent prompt", checkpointTurn: 1060 },
         { role: "assistant", content: "recent answer" },
       ],
       startTurn: 60,
@@ -632,12 +678,8 @@ console.log("\nuse controller meta");
   eq(s.items.some((item) => item.kind === "user" && item.text === "recent prompt"), true, "history page replace renders the latest window");
   eq(s.historyStartTurn, 60, "history page stores the older cursor");
   eq(s.historyHasOlder, true, "history page records older availability");
-  const checkpointed = reducer(s, {
-    type: "history_checkpoint_turns",
-    turns: Array.from({ length: 61 }, (_, index) => index + 1000),
-  });
-  const recentUser = checkpointed.items.find((item) => item.kind === "user" && item.text === "recent prompt");
-  eq(recentUser?.kind === "user" && recentUser.checkpointTurn, 1060, "paged checkpoint merge uses the window start turn");
+  const recentUser = s.items.find((item) => item.kind === "user" && item.text === "recent prompt");
+  eq(recentUser?.kind === "user" && recentUser.checkpointTurn, 1060, "paged history hydrates its authoritative checkpoint turn");
   s = reducer(s, { type: "history_older_start" });
   eq(s.historyOlderLoading, true, "older history request marks loading");
   s = reducer(s, {

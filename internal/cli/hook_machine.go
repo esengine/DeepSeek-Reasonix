@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"reasonix/internal/config"
 	"reasonix/internal/hook"
 )
 
@@ -67,9 +66,12 @@ func runHookCommand(args []string, out io.Writer) int {
 	if options.projectRoot == "" {
 		options.projectRoot, _ = os.Getwd()
 	}
-	if options.homeDir == "" {
-		options.homeDir = config.ReasonixHomeDir()
-	}
+	// hook.Inspect's HomeDir is an OS user home directory: a non-empty value
+	// has .reasonix appended inside the hook package, and passing
+	// config.ReasonixHomeDir() here double-appends it. Leave it empty so the
+	// hook package resolves the platform Reasonix home itself (correct on
+	// every OS, including Windows where the home is %AppData%\Roaming\reasonix
+	// rather than ~/.reasonix) (#7420).
 	inspection := hook.Inspect(hook.LoadOptions{
 		ProjectRoot: options.projectRoot,
 		HomeDir:     options.homeDir,

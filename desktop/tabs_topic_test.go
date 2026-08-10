@@ -3140,6 +3140,9 @@ func TestTrashTopicMovesOpenSessionToTrash(t *testing.T) {
 	if _, err := os.Stat(trashPath); err != nil {
 		t.Fatalf("open topic session should be moved to trash: %v", err)
 	}
+	if agent.IsCleanupPending(sessionPath) {
+		t.Fatal("completed topic archive left a cleanup-pending marker")
+	}
 	trashed := app.ListTrashedSessions()
 	if len(trashed) != 1 || trashed[0].Path != trashPath {
 		t.Fatalf("trashed sessions = %#v, want %q", trashed, trashPath)
@@ -3288,7 +3291,7 @@ func TestTrashTopicRejectsRunningDetachedRuntime(t *testing.T) {
 	}
 }
 
-func TestTrashTopicWaitsForConcurrentTurnAdmission(t *testing.T) {
+func TestTrashTopicRejectsConcurrentTurnAdmissionWithoutWaiting(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	topicID := "topic_concurrent_turn_trash"
@@ -3344,31 +3347,12 @@ func TestTrashTopicWaitsForConcurrentTurnAdmission(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 
-	trashEntered := make(chan struct{})
-	var trashEnteredOnce sync.Once
-	app.runtimeMutationBeforeLockHook = func(operation string) {
-		if operation == "trash-topic" {
-			trashEnteredOnce.Do(func() { close(trashEntered) })
-		}
+	started := time.Now()
+	if err := app.TrashTopic(topicID); !errors.Is(err, errTopicArchiveBusy) {
+		t.Fatalf("concurrent TrashTopic error = %v, want %v", err, errTopicArchiveBusy)
 	}
-	trashDone := make(chan error, 1)
-	go func() { trashDone <- app.TrashTopic(topicID) }()
-	select {
-	case <-trashEntered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("TrashTopic did not reach the runtime mutation barrier")
-	}
-
-	// Wait until TrashTopic owns runtimeRebuildMu and is queued on the admission
-	// writer. Releasing the turn gate now must let SubmitToTab publish Running
-	// before TrashTopic can re-check active work.
-	deadline = time.Now().Add(5 * time.Second)
-	for app.runtimeRebuildMu.TryLock() {
-		app.runtimeRebuildMu.Unlock()
-		if time.Now().After(deadline) {
-			t.Fatal("TrashTopic never acquired the runtime rebuild lock")
-		}
-		time.Sleep(time.Millisecond)
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("concurrent TrashTopic waited %s instead of returning busy", elapsed)
 	}
 	tab.turnStartMu.Unlock()
 	turnGateHeld = false
@@ -3377,9 +3361,6 @@ func TestTrashTopicWaitsForConcurrentTurnAdmission(t *testing.T) {
 		t.Fatalf("SubmitToTab: %v", err)
 	}
 	<-runner.started
-	if err := <-trashDone; !errors.Is(err, errTopicHasActiveWork) {
-		t.Fatalf("concurrent TrashTopic error = %v, want %v", err, errTopicHasActiveWork)
-	}
 	if !ctrl.Running() {
 		t.Fatal("rejected archive should leave the concurrently admitted turn running")
 	}
@@ -3843,6 +3824,13 @@ func TestTrashTopicValidTrashRemovesEmptyLiveStub(t *testing.T) {
 	if _, err := os.Stat(trashPath); err != nil {
 		t.Fatalf("existing trash should remain authoritative: %v", err)
 	}
+	trashed, err := listTrashedSessionFiles(dir)
+	if err != nil {
+		t.Fatalf("listTrashedSessionFiles: %v", err)
+	}
+	if len(trashed) != 1 || !sameDesktopPath(trashed[0], trashPath) {
+		t.Fatalf("trashed sessions = %v, want only authoritative copy %q", trashed, trashPath)
+	}
 }
 
 func hasHistoryContent(messages []HistoryMessage, content string) bool {
@@ -3971,18 +3959,16 @@ func TestLegacyMigrationConcurrentRunsHaveNoLostUpdates(t *testing.T) {
 	}
 	const n = 8
 	want := make(map[string]bool, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		p := writeLegacySession(t, dir, fmt.Sprintf("legacy-%d.jsonl", i), "hi", time.Now())
 		want[legacySessionTopicID(p)] = true
 	}
 
 	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range n {
+		wg.Go(func() {
 			migrateLegacySessionsIntoGlobalTopics(dir)
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -4148,17 +4134,15 @@ func TestEnsureTopicIndexedConcurrentRunsHaveNoLostProjectUpdates(t *testing.T) 
 	const n = 12
 	start := make(chan struct{})
 	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
-		i := i
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for i := range n {
+
+		wg.Go(func() {
 			<-start
 			topicID := fmt.Sprintf("topic_recovered_%02d", i)
 			if err := ensureTopicIndexed("project", projectRoot, topicID, fmt.Sprintf("Recovered %02d", i), topicTitleSourceManual); err != nil {
 				t.Errorf("ensure topic indexed: %v", err)
 			}
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()
@@ -4171,7 +4155,7 @@ func TestEnsureTopicIndexedConcurrentRunsHaveNoLostProjectUpdates(t *testing.T) 
 	for _, child := range nodes[0].Children {
 		got[child.TopicID] = true
 	}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		topicID := fmt.Sprintf("topic_recovered_%02d", i)
 		if !got[topicID] {
 			t.Fatalf("concurrent topic index recovery lost %q; children=%#v", topicID, nodes[0].Children)
@@ -4179,5 +4163,47 @@ func TestEnsureTopicIndexedConcurrentRunsHaveNoLostProjectUpdates(t *testing.T) 
 		if title := loadTopicTitle(projectRoot, topicID); title == "" {
 			t.Fatalf("title index missing %q", topicID)
 		}
+	}
+}
+
+// A freshly created empty session must not hijack the topic from the
+// conversation the user actually had: content-bearing sessions outrank
+// content-free ones regardless of updatedAt (#7305).
+func TestFindTopicSessionPrefersContentOverNewerEmpty(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := robustTempDir(t)
+	app := NewApp()
+	topic, err := app.CreateTopic("project", projectRoot, "")
+	if err != nil {
+		t.Fatalf("CreateTopic: %v", err)
+	}
+	dir := desktopSessionDir(projectRoot)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+
+	contentPath := writeTopicSessionWithPrompt(t, dir, "content.jsonl", topic.ID, defaultTopicTitle, projectRoot, "real conversation", time.Now().Add(-time.Hour))
+
+	emptyPath := filepath.Join(dir, "empty.jsonl")
+	if err := os.WriteFile(emptyPath, nil, 0o644); err != nil {
+		t.Fatalf("write empty session: %v", err)
+	}
+	if err := agent.SaveBranchMetaPreserveUpdated(emptyPath, agent.BranchMeta{
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+		Scope:         "project",
+		WorkspaceRoot: projectRoot,
+		TopicID:       topic.ID,
+		TopicTitle:    defaultTopicTitle,
+	}); err != nil {
+		t.Fatalf("save empty branch meta: %v", err)
+	}
+
+	if got, _ := app.findTopicSessionForTarget("project", projectRoot, topic.ID); got != contentPath {
+		t.Fatalf("topic session = %q, want content-bearing %q to outrank newer empty %q", got, contentPath, emptyPath)
+	}
+	if got, _ := app.findTopicContentSessionForTarget("project", projectRoot, topic.ID); got != contentPath {
+		t.Fatalf("content topic session = %q, want %q", got, contentPath)
 	}
 }

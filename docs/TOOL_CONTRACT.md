@@ -10,6 +10,7 @@ This document records the provider-visible contract for Reasonix compile-time bu
 | `bash_output` | true | Read new output from a background job started with bash(run_in_background=true) or task(run_in_background=true). Returns the output produced since the last bash_output call for that job, plus its status (running/done/failed/killed). Does not block. |
 | `code_index` | true | Lightweight built-in code symbol index. Prefer lsp_* for language semantics and installed code graph MCP tools for call graph, impact, and architecture relationships; use this as the local fallback for file outlines and symbol definition candidates, then verify with read_file or grep. |
 | `complete_step` | true | Record the evidence-backed completion of ONE step of an approved plan. Call it as you finish each step instead of silently moving on: it signs the step off with PROOF it is done - the verification you ran (command + result), the diff/files you changed, or a manual check. A completion with no evidence is REJECTED, so don't claim a step is done until you can show why. The host advances the task list for you when you sign off - it marks this step completed and moves the next to in_progress, so you don't need a separate todo_write to mark completions. Fields: `step` (which step - its title or number, matching the task list), `result` (what is now true/changed), `evidence` (>=1 item, each with `kind` = verification\|diff\|files\|manual and a `summary`, plus optional `command`/`paths`), and optional `notes`. |
+| `compress` | true | Compress a selected part of the current model-visible conversation without deleting visible history. Use only when the user explicitly asks for context compression. Choose `before` to summarize everything before the uniquely matched user turn while keeping that turn and later context, or `after` to summarize from that turn through the last completed turn while keeping the active turn. The anchor must be an exact, unique excerpt from a real user message; use a longer excerpt if the tool reports multiple matches. |
 | `delete_range` | false | Delete a contiguous text range from a file using exact start/end text anchors. Each anchor must match exactly one line. Returns unified diff on success. Use for large deletions - smaller changes should use edit_file. |
 | `delete_symbol` | false | Delete a named symbol (function, method, type, interface, const, var) from a Go source file using AST parsing. For non-Go files, use delete_range with manual anchors. |
 | `edit_file` | false | Replace an exact string in a file with another. old_string must occur exactly once; add surrounding context to disambiguate. Use for targeted edits instead of rewriting the whole file. |
@@ -22,6 +23,7 @@ This document records the provider-visible contract for Reasonix compile-time bu
 | `notebook_edit` | false | Edit one cell of a Jupyter notebook (.ipynb). Target a cell by 0-based cell_number (or cell_id). edit_mode: "replace" (default) swaps the cell's source; "insert" adds a new cell after cell_number (use -1 to prepend at the top), taking cell_type and new_source; "delete" removes the cell. cell_type is "code" or "markdown" (required for insert). Editing a code cell clears its outputs. Prefer this over edit_file for notebooks - it keeps the JSON valid. |
 | `read_file` | true | Read a text file with optional line offset/limit. Output prefixes each line with its 1-based number so subsequent edit_file calls can target exact lines. Use `offset` and `limit` to page through large files; the tool reports total length and pagination hints in a trailer. |
 | `todo_write` | true | Record and update a structured task list for the current work. Send the COMPLETE list every call - it replaces the previous one. Use it to plan multi-step work and show progress: keep exactly one item in_progress at a time, and flip an item to completed the moment it's done (don't batch completions). Skip it for trivial single-step tasks. |
+| `update_goal` | true | Report this turn's disposition for the active goal: `continue` (work is ongoing - give a concrete next_action), `complete` (fully done and verified), or `blocked` (only the user can unblock). An optional `completion` account may accompany `complete`: `verified` commands are reconciled against the session's real receipts, while `unverified` and `risks` are declarations the host cannot infer. The host validates the claim against Delivery acceptance criteria and budget and decides whether to continue automatically. Outside an active goal turn the call fails closed without changing any state. |
 | `wait` | true | Block until background jobs finish, then return each job's status and final output/answer. Use to collect the result of a task(run_in_background) or bash(run_in_background) before continuing. Omit job_ids to wait for every running job. |
 | `web_fetch` | true | Fetch a URL over HTTPS/HTTP and return its text content. HTML pages are reduced to readable text; JSON / plain text / markdown bodies come back verbatim. Use to read documentation pages, API responses, or source files hosted somewhere the local filesystem can't reach. |
 | `write_file` | false | Write content to a file at the given path (overwriting existing content). Creates parent directories as needed. |
@@ -97,8 +99,15 @@ those direct tools are installed, connected, or refreshed.
 `ask`, `docs`, `explore`, `fleet`, `forget`, `history`, `install_skill`, `install_source`,
 `list_sessions`, `lsp_definition`, `lsp_diagnostics`, `lsp_hover`,
 `lsp_references`, `memory`, `parallel_tasks`, `read_only_skill`,
-`read_only_task`, `read_session`, `read_skill`, `remember`, `research`,
+`read_only_task`, `read_session`, `read_skill`, `read_subagent_result`, `remember`, `research`,
 `review`, `run_skill`, `security_review`, `slash_command`, `task`.
+
+`parallel_tasks` and `fleet` keep their combined result below the single-tool
+output limit by returning a fair preview and a stable `Subagent reference` for
+every persisted child. `read_subagent_result` pages through one referenced
+final answer by UTF-8 byte offset, so long parallel research remains lossless
+without injecting every report into the parent context at once. References are
+restricted to the current conversation lineage and workspace.
 
 `use_capability` (`action` = `list` | `inspect` | `call` | `decline`): Delivery
 Executor, plus both Planner and Executor in Balanced dual-model sessions; not

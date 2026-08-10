@@ -160,7 +160,9 @@ func (s *Scheduler) scheduleOne(ctx context.Context, projectDir string, task Tas
 		next.RuntimeState = RuntimeStateExited
 		next.RuntimeLeaseUntil = time.Time{}
 		next.ErrorCode = ErrTaskRuntimeStartFailed
-		next.ErrorSummary = truncateSummary(startErr.Error())
+		// Persist only the stable error code; runtime errors may contain paths,
+		// commands, or credentials and must not enter the task monitor store.
+		next.ErrorSummary = ""
 	} else {
 		next.State = TaskStateRunning
 		next.RuntimeState = RuntimeStateAlive

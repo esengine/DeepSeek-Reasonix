@@ -162,16 +162,19 @@ type TaskSnapshot struct {
 	State             TaskState    `json:"state"`
 	RuntimeState      RuntimeState `json:"runtime_state,omitempty"`
 	RuntimeLeaseUntil time.Time    `json:"runtime_lease_until,omitempty"`
-	Version           uint64       `json:"version"`
-	CreatedAt         time.Time    `json:"created_at"`
-	UpdatedAt         time.Time    `json:"updated_at"`
-	ErrorCode         string       `json:"error_code,omitempty"`
-	ErrorSummary      string       `json:"error_summary,omitempty"`
-	ParentTaskID      string       `json:"parent_task_id,omitempty"`
-	ParentSessionID   string       `json:"parent_session_id,omitempty"`
-	Kind              string       `json:"kind,omitempty"`
-	Depth             int          `json:"depth,omitempty"`
-	Attempt           int          `json:"attempt,omitempty"`
+	// RuntimeOwnerID identifies the recorder generation that owns the live
+	// runtime lease and prevents delayed heartbeats from renewing a newer run.
+	RuntimeOwnerID  string    `json:"runtime_owner_id,omitempty"`
+	Version         uint64    `json:"version"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+	ErrorCode       string    `json:"error_code,omitempty"`
+	ErrorSummary    string    `json:"error_summary,omitempty"`
+	ParentTaskID    string    `json:"parent_task_id,omitempty"`
+	ParentSessionID string    `json:"parent_session_id,omitempty"`
+	Kind            string    `json:"kind,omitempty"`
+	Depth           int       `json:"depth,omitempty"`
+	Attempt         int       `json:"attempt,omitempty"`
 }
 
 // Validate returns a non-nil error if required fields are missing or
@@ -211,6 +214,9 @@ func (ts TaskSnapshot) Validate() error {
 	}
 	if len(ts.RuntimeState) > maxFieldLen {
 		return fmt.Errorf("TaskSnapshot.RuntimeState exceeds max length %d", maxFieldLen)
+	}
+	if len(ts.RuntimeOwnerID) > maxFieldLen {
+		return fmt.Errorf("TaskSnapshot.RuntimeOwnerID exceeds max length %d", maxFieldLen)
 	}
 	if !ts.RuntimeLeaseUntil.IsZero() && ts.RuntimeLeaseUntil.Before(ts.CreatedAt) {
 		return fmt.Errorf("TaskSnapshot.RuntimeLeaseUntil is before CreatedAt")

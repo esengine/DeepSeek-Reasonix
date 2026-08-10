@@ -1,0 +1,4 @@
+prompt = "Bring geo.py and store.py in line with the project style guide in STYLE.md (snake_case functions, module-level constants UPPER_CASE, no single-letter public names). Pure renames; keep call compatibility inside the package."
+class = "ebm-negative"
+max_steps = 14
+timeout_sec = 240

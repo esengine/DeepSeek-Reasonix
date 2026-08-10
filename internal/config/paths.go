@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -540,8 +541,8 @@ var ConventionDirs = []string{".reasonix", ".agents", ".agent", ".claude"}
 // highest-priority entry — command.Load lets a later directory win on a clash.
 func conventionSubdirsAsc(base, sub string) []string {
 	out := make([]string, 0, len(ConventionDirs))
-	for i := len(ConventionDirs) - 1; i >= 0; i-- {
-		out = append(out, filepath.Join(base, ConventionDirs[i], sub))
+	for _, v := range slices.Backward(ConventionDirs) {
+		out = append(out, filepath.Join(base, v, sub))
 	}
 	return out
 }

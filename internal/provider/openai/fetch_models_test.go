@@ -3,8 +3,10 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -123,9 +125,16 @@ func TestFetchModelsAuthError(t *testing.T) {
 	}
 }
 
-func TestFetchModelsEmptyResponse(t *testing.T) {
+func TestFetchModelsLargeResponse(t *testing.T) {
+	// A model list larger than the old 256 KB cap should succeed.
+	// OpenRouter returns ~531 KB (338 models); this test generates
+	// enough entries to exceed 256 KB and confirms they are all parsed.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": nil})
+		data := make([]map[string]string, 8000)
+		for i := range data {
+			data[i] = map[string]string{"id": fmt.Sprintf("model-%04d", i), "object": "model"}
+		}
+		json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": data})
 	}))
 	defer srv.Close()
 
@@ -133,7 +142,27 @@ func TestFetchModelsEmptyResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(models) != 0 {
-		t.Errorf("want empty list, got %v", models)
+	if len(models) != 8000 {
+		t.Fatalf("want 8000 models, got %d", len(models))
+	}
+}
+
+func TestFetchModelsResponseTooLarge(t *testing.T) {
+	// A response larger than fetchModelsMaxBody should return a clear
+	// error rather than a cryptic JSON parse failure.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		padding := strings.Repeat("x", fetchModelsMaxBody+1024)
+		fmt.Fprintf(w, `{"object":"list","data":[{"id":"%s","object":"model"}]}`, padding)
+	}))
+	defer srv.Close()
+
+	_, err := FetchModels(context.Background(), srv.URL, "key", nil)
+	if err == nil {
+		t.Fatal("expected error for oversized response")
+	}
+	if !strings.Contains(err.Error(), "too large") {
+		t.Errorf("error should mention the size limit, got: %v", err)
 	}
 }

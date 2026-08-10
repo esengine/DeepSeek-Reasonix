@@ -8,7 +8,6 @@ import { continueDelivery } from "../lib/deliveryContinue";
 import {
   activateGoalAndSubmit,
   activateGoalAndSubmitOnTab,
-  workbenchTargetToken,
 } from "../lib/goalSubmit";
 import type { WireEvent } from "../lib/types";
 
@@ -26,17 +25,6 @@ function eq(a: unknown, b: unknown, label: string) {
 }
 
 console.log("\nsend failure feedback");
-
-eq(
-  workbenchTargetToken({ kind: "local", identityGen: 1, requestSeq: 0 })?.requestSeq,
-  0,
-  "initial Local workbench target keeps its zero request sequence",
-);
-eq(
-  workbenchTargetToken({ kind: "local", identityGen: 1 }),
-  null,
-  "workbench target without a request sequence fails closed",
-);
 
 {
   const calls: string[] = [];
@@ -97,7 +85,6 @@ eq(
   let activeTab = "tab-a";
   const pending = activateGoalAndSubmitOnTab({
     tabId: "tab-a",
-    target: { kind: "ssh", identityGen: 7, requestSeq: 11 },
     displayText: "Cross-tab safe goal",
     submitText: "/ui-ux-pro-max Cross-tab safe goal",
     structured: {
@@ -105,10 +92,10 @@ eq(
       input: "Cross-tab safe goal",
       invocations: [{ name: "ui-ux-pro-max", kind: "skill", offset: 0 }],
     },
-    sendToTab: async (tabId, goal, display, submit, structured, target) => {
+    sendToTab: async (tabId, goal, display, submit, structured) => {
       await submitGate;
       calls.push(
-        `send:${tabId}:${goal}:${display}:${submit}:${structured?.invocations[0]?.name ?? ""}:${target?.kind}:${target?.identityGen}:${target?.requestSeq}:active=${activeTab}`,
+        `send:${tabId}:${goal}:${display}:${submit}:${structured?.invocations[0]?.name ?? ""}:active=${activeTab}`,
       );
     },
   });
@@ -118,8 +105,8 @@ eq(
   await pending;
   eq(
     calls.join("|"),
-    "switched-to-tab-b|send:tab-a:Cross-tab safe goal:Cross-tab safe goal:/ui-ux-pro-max Cross-tab safe goal:ui-ux-pro-max:ssh:7:11:active=tab-b",
-    "activateGoalAndSubmitOnTab keeps Goal and Skill on the captured source tab and target",
+    "switched-to-tab-b|send:tab-a:Cross-tab safe goal:Cross-tab safe goal:/ui-ux-pro-max Cross-tab safe goal:ui-ux-pro-max:active=tab-b",
+    "activateGoalAndSubmitOnTab keeps Goal and Skill on the captured source tab",
   );
 }
 
@@ -140,22 +127,22 @@ eq(acceptsRuntimeEventEpoch("e2", "e2"), true, "current runtime epoch is accepte
 eq(acceptsRuntimeEventEpoch(undefined, "e1"), true, "first runtime epoch can establish the fence");
 eq(acceptsRuntimeEventEpoch("e2", undefined), true, "legacy events remain compatible");
 
-const sent = reducer({ ...initialState }, { type: "user", text: "hello", seq: 0 });
+const sent = reducer({ ...initialState }, { type: "user", text: "hello", seq: 0, submissionId: "send-0" });
 eq(sent.items.length, 1, "submit appends the user bubble immediately");
 eq(sent.items[0].kind === "user" && sent.items[0].text, "hello", "bubble carries the submitted text");
 eq(sent.running, true, "submit marks the turn running");
 eq(sent.pendingUser, "hello", "submit tracks the optimistic bubble");
 
-const hiddenSubmit = reducer({ ...initialState }, { type: "user", text: "display prompt", submitText: "hidden context\ndisplay prompt", seq: 0 });
+const hiddenSubmit = reducer({ ...initialState }, { type: "user", text: "display prompt", submitText: "hidden context\ndisplay prompt", seq: 0, submissionId: "hidden-0" });
 eq(
   hiddenSubmit.items[0].kind === "user" && hiddenSubmit.items[0].submitText,
   "hidden context\ndisplay prompt",
   "optimistic user bubble preserves submit-only context",
 );
 
-const confirmed = reducer(sent, { type: "event", e: { kind: "text", text: "hi" } as WireEvent });
-eq(confirmed.items.filter((it) => it.kind === "user").length, 1, "first backend event confirms without duplicating");
-eq(confirmed.pendingUser, undefined, "confirmation clears the pending marker");
+const confirmed = reducer(sent, { type: "event", e: { kind: "turn_done", submissionId: "send-0" } as WireEvent });
+eq(confirmed.items.filter((it) => it.kind === "user").length, 1, "matching TurnDone confirms without duplicating");
+eq(confirmed.pendingUser, undefined, "matching submission id clears the pending marker");
 
 const memoryCitationMessage = {
   kind: "message",
@@ -170,7 +157,7 @@ const citedAssistant = textThenCitationFinal.items.find((it) => it.kind === "ass
 eq(citedAssistant?.kind === "assistant" && citedAssistant.text, "done", "memory citations preserve existing assistant text");
 eq(citedAssistant?.kind === "assistant" && citedAssistant.memoryCitations?.length, 1, "memory citations attach to real assistant content");
 
-const failedState = reducer(sent, { type: "send_failed", error: "Send failed: bridge unavailable" });
+const failedState = reducer(sent, { type: "send_failed", submissionId: "send-0", error: "Send failed: bridge unavailable" });
 const failedBubble = failedState.items.find((it) => it.kind === "user");
 eq(failedBubble?.kind === "user" && failedBubble.failed, true, "send_failed marks the bubble failed");
 const notice = failedState.items[failedState.items.length - 1];
@@ -186,6 +173,7 @@ const readinessState = reducer(readinessStarted, {
     kind: "turn_done",
 		outcome: "final_readiness",
 		err: "final-answer readiness failed 3 times: missing verification",
+		submissionId: "send-0",
 		readiness: { attempts: 3, missing: ["verification", "review"] },
   } as WireEvent,
 });
@@ -201,13 +189,13 @@ eq(readinessUser?.kind === "user" && Boolean(readinessUser.failed), false, "fina
 eq(readinessState.running, false, "an unclicked continue-check action does not keep the turn running");
 eq(readinessState.pendingPrompt, false, "an unclicked continue-check action does not create a pending prompt");
 
-const recovering = reducer(readinessState, { type: "user", text: "Continue checks", seq: readinessState.seq, deliveryRecovery: true });
-const recovered = reducer(recovering, { type: "event", e: { kind: "turn_done" } as WireEvent });
+const recovering = reducer(readinessState, { type: "user", text: "Continue checks", seq: readinessState.seq, submissionId: "recovery-submit", deliveryRecovery: true });
+const recovered = reducer(recovering, { type: "event", e: { kind: "turn_done", submissionId: "recovery-submit" } as WireEvent });
 eq(recovered.items.some((it) => it.kind === "notice" && it.variant === "delivery"), false, "successful explicit recovery removes the stale delivery card");
 
 const ordinaryTurnError = reducer(readinessStarted, {
   type: "event",
-  e: { kind: "turn_done", err: "provider failed" } as WireEvent,
+  e: { kind: "turn_done", err: "provider failed", submissionId: "send-0" } as WireEvent,
 });
 const ordinaryTurnNotice = ordinaryTurnError.items[ordinaryTurnError.items.length - 1];
 eq(ordinaryTurnNotice.kind === "notice" && ordinaryTurnNotice.level, "warn", "ordinary turn errors remain warnings");
@@ -217,6 +205,7 @@ const recoveryPaused = reducer(readinessStarted, {
   type: "event",
   e: {
     kind: "turn_done",
+    submissionId: "send-0",
     outcome: "recovery_paused",
     err: "Automatic retries paused. Reasonix stopped repeated attempts and kept completed work. Send \"continue\" to start a fresh attempt, or add instructions to change direction.",
   } as WireEvent,
@@ -238,21 +227,22 @@ const recoveryUser = recoveryPaused.items.find((it) => it.kind === "user");
 eq(recoveryUser?.kind === "user" && Boolean(recoveryUser.failed), false, "recovery_paused does not mark the user message as failed");
 eq(recoveryPaused.running, false, "recovery_paused frees the composer");
 
-const shellSent = reducer({ ...initialState }, { type: "user", text: "!ls", seq: 0 });
-const shellFailed = reducer(shellSent, { type: "send_failed", error: "Command failed: workspace is still starting" });
+const shellSent = reducer({ ...initialState }, { type: "user", text: "!ls", seq: 0, submissionId: "shell-0" });
+const shellFailed = reducer(shellSent, { type: "send_failed", submissionId: "shell-0", error: "Command failed: workspace is still starting" });
 const shellNotice = shellFailed.items[shellFailed.items.length - 1];
 eq(shellNotice.kind, "notice", "rejected shell command appends a visible notice");
 eq(shellNotice.kind === "notice" && shellNotice.text.includes("workspace is still starting"), true, "shell rejection notice includes the backend error");
 
-const lateFailure = reducer(confirmed, { type: "send_failed", error: "Send failed: late" });
+const lateFailure = reducer(confirmed, { type: "send_failed", submissionId: "send-0", error: "Send failed: late" });
 eq(lateFailure, confirmed, "send_failed after backend confirmation is a no-op");
+eq(lateFailure.items, confirmed.items, "late send_failed leaves the confirmed transcript untouched");
 
 const beforeMcpReady = { ...initialState };
 const mcpReady = reducer(beforeMcpReady, { type: "event", e: { kind: "mcp_surface_ready" } as WireEvent });
 eq(mcpReady, beforeMcpReady, "mcp_surface_ready is accepted as a deliberate no-op");
 const pendingMcpReady = reducer(sent, { type: "event", e: { kind: "mcp_surface_ready" } as WireEvent });
 eq(pendingMcpReady, sent, "mcp_surface_ready does not confirm a pending submit");
-const failedAfterMcpReady = reducer(pendingMcpReady, { type: "send_failed", error: "Send failed: bridge unavailable" });
+const failedAfterMcpReady = reducer(pendingMcpReady, { type: "send_failed", submissionId: "send-0", error: "Send failed: bridge unavailable" });
 const failedAfterMcpReadyBubble = failedAfterMcpReady.items.find((it) => it.kind === "user");
 eq(
   failedAfterMcpReadyBubble?.kind === "user" && failedAfterMcpReadyBubble.failed,
@@ -267,14 +257,19 @@ const controllerSource = readFileSync(resolve(here, "../lib/useController.ts"), 
 eq(typesSource.includes('"mcp_surface_ready"'), true, "TypeScript EventKind declares mcp_surface_ready");
 eq(controllerSource.includes('e.kind === "mcp_surface_ready"'), true, "reducer handles mcp_surface_ready before optimistic confirmation");
 eq(
-  /state\.approval!\.tool === "exit_plan_mode" && allow\) await applyCollaborationMode\("normal"\);/.test(appSource),
+  /if \(allow\) \{\s*await applyCollaborationMode\("normal"\);\s*resolvePlanDecision\(state\.approval!\.id, "start_execution"\);/.test(appSource),
   true,
-  "plan approval clears the remembered plan restore intent before execution",
+  "plan approval clears the remembered plan restore intent and records start execution explicitly",
 );
 eq(
-  /onExitPlan=\{async \(\) => \{\s*await applyCollaborationMode\("normal"\);\s*approve\(state\.approval!\.id, false, false, false\);\s*\}\}/.test(appSource),
+  /onExitPlan=\{async \(\) => \{\s*await applyCollaborationMode\("normal"\);\s*resolvePlanDecision\(state\.approval!\.id, "exit_plan"\);\s*\}\}/.test(appSource),
   true,
-  "exit-without-executing switches to Normal before rejecting the pending plan",
+  "exit-without-executing switches to Normal before recording the explicit plan exit",
+);
+eq(
+  /onRevisePlan=\{\(text\) => \{[\s\S]{0,260}resolvePlanDecision\(state\.approval!\.id, "revise_plan"\);/.test(appSource),
+  true,
+  "plan revision records a distinct revise decision",
 );
 eq(
   !/exit_plan_mode[\s\S]{0,240}rememberUserIntent:\s*false/.test(appSource),
@@ -304,13 +299,11 @@ eq(
 eq(
     appSource.includes("activateGoalAndSubmitOnTab({") &&
     appSource.includes("tabId: sourceTabId") &&
-    appSource.includes("target: sourceTarget") &&
-    appSource.includes("target ? {") &&
     appSource.includes("goal: nextGoal") &&
     appSource.includes("collaborationMode: controllerComposerProfileCollaborationMode(composerProfile)") &&
     appSource.includes("toolApprovalMode,"),
   true,
-  "initial Goal activation captures the submission tab and workbench target",
+  "initial Goal activation captures the submission tab",
 );
 eq(
   appSource.includes("setControllerGoalForTab(tabId, trimmed)") && appSource.includes("clearControllerGoalForTab(tabId)"),
@@ -338,7 +331,7 @@ eq(
   "delivery recovery routes through continueDelivery with the backend Goal state",
 );
 eq(
-  controllerSource.includes("app.SubmitInitialGoalToTab(") &&
+  controllerSource.includes("app.SubmitInitialGoalToTabWithID(") &&
     appSource.includes("patchActivatedGoalForTab(sourceTabId, trimmed)"),
   true,
   "the first Goal turn uses the atomic target-scoped backend contract",

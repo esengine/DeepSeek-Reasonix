@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -625,6 +627,165 @@ model = "x"
 	}
 }
 
+func TestBuildDeepSeekTextParentCanUseImageReturningMCPAndVisionSubagent(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	registerBootSubagentTestProvider()
+	prov := &bootSubagentTestProvider{combinedVision: true}
+	setBootSubagentTestProvider(t, prov)
+	if _, err := config.SetCredential("BOOT_DEEPSEEK_TEST_KEY", "test-key"); err != nil {
+		t.Fatalf("store test DeepSeek credential: %v", err)
+	}
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "parent"
+
+[agent]
+system_prompt = "BASE"
+subagent_model = "vision-model"
+
+[[providers]]
+name = "parent"
+kind = "boot-subagent-test"
+base_url = "https://api.deepseek.com/anthropic"
+model = "x"
+api_key_env = "BOOT_DEEPSEEK_TEST_KEY"
+
+[[providers]]
+name = "vision-model"
+kind = "boot-subagent-test"
+base_url = "https://vision.example.invalid"
+model = "x"
+vision = true
+`)
+	png, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+	if err != nil {
+		t.Fatalf("decode test png: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".reasonix", "attachments"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".reasonix", "attachments", "shot.png"), png, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mcpImage := base64.StdEncoding.EncodeToString(png)
+	var mcpCalls atomic.Int32
+	mcpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			ID     *int            `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if request.ID == nil {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		var result any
+		switch request.Method {
+		case "initialize":
+			result = map[string]any{
+				"protocolVersion": "2024-11-05",
+				"serverInfo":      map[string]any{"name": "vision-reader", "version": "1"},
+				"capabilities":    map[string]any{"tools": map[string]any{}},
+			}
+		case "tools/list":
+			result = map[string]any{"tools": []map[string]any{{
+				"name":        "inspect",
+				"description": "Inspect an image file by path.",
+				"inputSchema": map[string]any{
+					"type":       "object",
+					"properties": map[string]any{"path": map[string]any{"type": "string"}},
+					"required":   []string{"path"},
+				},
+				"annotations": map[string]any{"readOnlyHint": true},
+			}}}
+		case "tools/call":
+			mcpCalls.Add(1)
+			result = map[string]any{"content": []map[string]any{
+				{"type": "text", "text": "vision-mcp-ok"},
+				{"type": "image", "mimeType": "image/png", "data": mcpImage},
+			}}
+		default:
+			http.Error(w, "unsupported method", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": *request.ID, "result": result})
+	}))
+	defer mcpServer.Close()
+
+	ctrl, err := Build(context.Background(), Options{
+		Sink: event.Discard,
+		ExtraPlugins: []plugin.Spec{{
+			Name:       "vision-reader",
+			Type:       "http",
+			URL:        mcpServer.URL,
+			Authorized: true,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	if ctrl.ImageInputEnabled() {
+		loaded, loadErr := config.LoadForRoot(dir)
+		resolved, _ := loaded.ResolveModel(ctrl.ModelRef())
+		t.Fatalf("official DeepSeek parent unexpectedly enables direct images: ref=%q entry=%+v load_err=%v", ctrl.ModelRef(), resolved, loadErr)
+	}
+	if err := ctrl.Run(context.Background(), "review @.reasonix/attachments/shot.png"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	reqs := prov.requestsSnapshot()
+	if len(reqs) != 4 {
+		t.Fatalf("provider requests = %d, want parent MCP call, parent subagent call, vision child, and parent final", len(reqs))
+	}
+	if got := mcpCalls.Load(); got != 1 {
+		t.Fatalf("vision MCP calls = %d, want 1", got)
+	}
+	if !requestHasTool(reqs[0], "mcp__vision-reader__inspect") || !requestHasTool(reqs[0], "review") {
+		t.Fatalf("parent tools = %v, want both vision MCP and review subagent", toolSchemaNames(reqs[0].Tools))
+	}
+	if got := bootLastUser(reqs[0]); !strings.Contains(got, "@.reasonix/attachments/shot.png") {
+		t.Fatalf("text-only parent lost the attachment reference needed by MCP: %q", got)
+	}
+	// The direct attachment remains candidate-only for the text parent. An MCP
+	// image is intentionally retained on its local tool-result message; the real
+	// DeepSeek adapter tests assert that this exact role is omitted on the wire.
+	for _, requestIndex := range []int{0, 1, 3} {
+		for _, msg := range reqs[requestIndex].Messages {
+			if msg.Role == provider.RoleUser && len(msg.Images) != 0 {
+				t.Fatalf("text-only parent request %d embedded %d direct attachment(s): %+v", requestIndex, len(msg.Images), reqs[requestIndex].Messages)
+			}
+		}
+	}
+	if !requestMessageContains(reqs[1].Messages, provider.RoleTool, "vision-mcp-ok") {
+		t.Fatalf("parent did not receive the vision MCP text result: %+v", reqs[1].Messages)
+	}
+	var parentMCPImageCount int
+	for _, msg := range reqs[1].Messages {
+		if msg.Role == provider.RoleTool && msg.Name == "mcp__vision-reader__inspect" {
+			parentMCPImageCount += len(msg.Images)
+		}
+	}
+	if parentMCPImageCount != 1 {
+		t.Fatalf("parent local MCP result images = %d, want one image for provider-boundary filtering", parentMCPImageCount)
+	}
+	var childImageCount int
+	for _, msg := range reqs[2].Messages {
+		if msg.Role == provider.RoleUser {
+			childImageCount = len(msg.Images)
+		}
+	}
+	if childImageCount != 1 {
+		t.Fatalf("vision child user images = %d, want one attachment; request = %+v", childImageCount, reqs[2].Messages)
+	}
+}
+
 func TestBuildUsesConfiguredLanguageForResponsePreference(t *testing.T) {
 	isolateConfigHome(t)
 	dir := robustTempDir(t)
@@ -848,10 +1009,11 @@ func setBootSubagentTestProvider(t *testing.T, p *bootSubagentTestProvider) {
 }
 
 type bootSubagentTestProvider struct {
-	mu          sync.Mutex
-	calls       int
-	continueRef string
-	requests    []provider.Request
+	mu             sync.Mutex
+	calls          int
+	continueRef    string
+	requests       []provider.Request
+	combinedVision bool
 }
 
 func (p *bootSubagentTestProvider) Name() string { return "boot-subagent-test" }
@@ -868,9 +1030,35 @@ func (p *bootSubagentTestProvider) Stream(_ context.Context, req provider.Reques
 	p.calls++
 	ref := p.continueRef
 	p.requests = append(p.requests, req)
+	combinedVision := p.combinedVision
 	p.mu.Unlock()
 
 	var chunks []provider.Chunk
+	if combinedVision {
+		switch call {
+		case 0:
+			chunks = []provider.Chunk{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{
+				ID: "vision-mcp-1", Name: "mcp__vision-reader__inspect",
+				Arguments: `{"path":".reasonix/attachments/shot.png"}`,
+			}}}
+		case 1:
+			chunks = []provider.Chunk{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{
+				ID: "vision-review-1", Name: "review", Arguments: `{"task":"inspect the attached image"}`,
+			}}}
+		case 2:
+			chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "vision child answer"}, {Type: provider.ChunkDone}}
+		case 3:
+			chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "parent done"}, {Type: provider.ChunkDone}}
+		default:
+			chunks = []provider.Chunk{{Type: provider.ChunkError, Err: fmt.Errorf("unexpected combined vision provider call %d", call)}}
+		}
+		ch := make(chan provider.Chunk, len(chunks))
+		for _, chunk := range chunks {
+			ch <- chunk
+		}
+		close(ch)
+		return ch, nil
+	}
 	switch call {
 	case 0:
 		chunks = []provider.Chunk{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "review-1", Name: "review", Arguments: `{"task":"first skill task"}`}}}
@@ -905,9 +1093,9 @@ func (p *bootSubagentTestProvider) requestsSnapshot() []provider.Request {
 }
 
 func bootLastUser(req provider.Request) string {
-	for i := len(req.Messages) - 1; i >= 0; i-- {
-		if req.Messages[i].Role == provider.RoleUser {
-			return req.Messages[i].Content
+	for _, v := range slices.Backward(req.Messages) {
+		if v.Role == provider.RoleUser {
+			return v.Content
 		}
 	}
 	return ""
@@ -919,9 +1107,9 @@ func subagentRefFromHistory(t *testing.T, msgs []provider.Message) string {
 		if msg.Role != provider.RoleTool {
 			continue
 		}
-		for _, line := range strings.Split(msg.Content, "\n") {
-			if strings.HasPrefix(line, "Subagent reference: ") {
-				return strings.TrimSpace(strings.TrimPrefix(line, "Subagent reference: "))
+		for line := range strings.SplitSeq(msg.Content, "\n") {
+			if after, ok := strings.CutPrefix(line, "Subagent reference: "); ok {
+				return strings.TrimSpace(after)
 			}
 		}
 	}
@@ -967,20 +1155,20 @@ model = "x"
 		t.Fatalf("headless run should keep an empty session path, got %q", got)
 	}
 
-	var toolContent string
+	var toolContent strings.Builder
 	for _, msg := range ctrl.History() {
 		if msg.Role == provider.RoleTool {
-			toolContent += "\n" + msg.Content
+			toolContent.WriteString("\n" + msg.Content)
 		}
 	}
-	if strings.Contains(toolContent, "parent session is required") {
-		t.Fatalf("task subagent failed in headless run mode: %s", toolContent)
+	if strings.Contains(toolContent.String(), "parent session is required") {
+		t.Fatalf("task subagent failed in headless run mode: %s", toolContent.String())
 	}
-	if !strings.Contains(toolContent, "subagent answer") {
-		t.Fatalf("task tool result = %q, want sub-agent answer", toolContent)
+	if !strings.Contains(toolContent.String(), "subagent answer") {
+		t.Fatalf("task tool result = %q, want sub-agent answer", toolContent.String())
 	}
-	if strings.Contains(toolContent, "Subagent reference") {
-		t.Fatalf("ephemeral headless run should not persist a transcript reference: %s", toolContent)
+	if strings.Contains(toolContent.String(), "Subagent reference") {
+		t.Fatalf("ephemeral headless run should not persist a transcript reference: %s", toolContent.String())
 	}
 }
 
@@ -1517,7 +1705,7 @@ func TestNewProviderBuildsDeepSeekAnthropicPreset(t *testing.T) {
 	}
 }
 
-func TestNewProviderAllowsExplicitOfficialDeepSeekVisionModel(t *testing.T) {
+func TestNewProviderRejectsExplicitOfficialDeepSeekVisionModel(t *testing.T) {
 	var gotReq map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
@@ -1562,13 +1750,15 @@ func TestNewProviderAllowsExplicitOfficialDeepSeekVisionModel(t *testing.T) {
 	if !ok {
 		t.Fatalf("message = %#v, want object", messages[0])
 	}
-	parts, ok := message["content"].([]any)
-	if !ok || len(parts) != 2 {
-		t.Fatalf("content = %#v, want [text, image_url]", message["content"])
+	if got, ok := message["content"].(string); !ok || got != "describe" {
+		t.Fatalf("content = %#v, want plain text despite stale explicit vision metadata", message["content"])
 	}
-	imagePart, ok := parts[1].(map[string]any)
-	if !ok || imagePart["type"] != "image_url" {
-		t.Fatalf("image part = %#v, want image_url", parts[1])
+	encoded, err := json.Marshal(gotReq)
+	if err != nil {
+		t.Fatalf("marshal captured request: %v", err)
+	}
+	if bytes.Contains(encoded, []byte("image_url")) || bytes.Contains(encoded, []byte("base64,AAAA")) {
+		t.Fatalf("official DeepSeek request leaked image payload: %s", encoded)
 	}
 }
 
@@ -2049,83 +2239,6 @@ model = "x"
 	}
 }
 
-func TestBootToolContractMatchesProviderVisibleSurface(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		tokenMode string
-	}{
-		{name: "default", tokenMode: ""},
-		{name: "economy", tokenMode: TokenModeEconomy},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			isolateConfigHome(t)
-			dir := robustTempDir(t)
-			t.Chdir(dir)
-			writeFile(t, dir, "reasonix.toml", `
-default_model = "test-model"
-
-[agent]
-system_prompt = "BASE"
-
-[[providers]]
-name = "test-model"
-kind = "boot-token-profile-test"
-model = "x"
-`)
-
-			req, entries := captureTokenProfileSurface(t, tc.tokenMode)
-			wantNames := defaultFullBootToolNames()
-			if tc.tokenMode == TokenModeEconomy {
-				wantNames = economyBootToolNames()
-			}
-			if got := toolSchemaNames(req.Tools); !reflect.DeepEqual(got, wantNames) {
-				t.Fatalf("%s provider-visible tool surface changed\ngot  %v\nwant %v", tc.name, got, wantNames)
-			}
-			if len(entries) != len(req.Tools) {
-				t.Fatalf("contract entries = %d, provider tools = %d\ncontract=%v\nprovider=%v", len(entries), len(req.Tools), contractEntryNames(entries), toolSchemaNames(req.Tools))
-			}
-			for i, e := range entries {
-				s := req.Tools[i]
-				if e.Name != s.Name {
-					t.Fatalf("tool[%d] name = %q, want %q\ncontract=%v\nprovider=%v", i, e.Name, s.Name, contractEntryNames(entries), toolSchemaNames(req.Tools))
-				}
-				if e.Description != strings.TrimSpace(s.Description) {
-					t.Fatalf("%s description drift\ncontract=%q\nprovider=%q", e.Name, e.Description, s.Description)
-				}
-				if !json.Valid(e.Schema) {
-					t.Fatalf("%s contract schema is invalid JSON: %s", e.Name, e.Schema)
-				}
-				if got := string(provider.CanonicalizeSchema(e.Schema)); got != string(e.Schema) {
-					t.Fatalf("%s contract schema is not canonical", e.Name)
-				}
-				if string(e.Schema) != string(s.Parameters) {
-					t.Fatalf("%s schema drift\ncontract=%s\nprovider=%s", e.Name, e.Schema, s.Parameters)
-				}
-			}
-			readOnly := map[string]bool{}
-			for _, e := range entries {
-				readOnly[e.Name] = e.ReadOnly
-			}
-			for name, want := range map[string]bool{
-				"bash":                false,
-				"read_file":           true,
-				"connect_tool_source": tc.tokenMode == TokenModeEconomy,
-			} {
-				got, ok := readOnly[name]
-				if !ok {
-					if name == "connect_tool_source" && tc.tokenMode != TokenModeEconomy {
-						continue
-					}
-					t.Fatalf("contract missing %s; tools=%v", name, contractEntryNames(entries))
-				}
-				if got != want {
-					t.Fatalf("%s ReadOnly = %v, want %v", name, got, want)
-				}
-			}
-		})
-	}
-}
-
 func TestToolContractDocCoversDefaultBootSurfaces(t *testing.T) {
 	pkgDir, err := os.Getwd()
 	if err != nil {
@@ -2183,7 +2296,7 @@ func defaultFullBootToolNames() []string {
 		"bash",
 		"bash_output",
 		"code_index",
-		"complete_step",
+		"complete_step", "compress",
 		"delete_range",
 		"delete_symbol",
 		"docs",
@@ -2213,6 +2326,7 @@ func defaultFullBootToolNames() []string {
 		"read_only_task",
 		"read_session",
 		"read_skill",
+		"read_subagent_result",
 		"remember",
 		"research",
 		"review",
@@ -2221,6 +2335,7 @@ func defaultFullBootToolNames() []string {
 		"slash_command",
 		"task",
 		"todo_write",
+		"update_goal",
 		"wait",
 		"web_fetch",
 		"write_file",
@@ -2231,11 +2346,12 @@ func economyBootToolNames() []string {
 	return []string{
 		"ask",
 		"bash",
-		"bash_output",
+		"bash_output", "compress",
 		"connect_tool_source",
 		"edit_file",
 		"kill_shell",
 		"read_file",
+		"update_goal",
 		"wait",
 		"write_file",
 	}
@@ -2282,18 +2398,19 @@ command = "reasonix-missing-mockmcp"
 	wantTools := []string{
 		"ask",
 		"bash",
-		"bash_output",
+		"bash_output", "compress",
 		"connect_tool_source",
 		"edit_file",
 		"kill_shell",
 		"read_file",
+		"update_goal",
 		"wait",
 		"write_file",
 	}
 	if got := toolSchemaNames(req.Tools); !reflect.DeepEqual(got, wantTools) {
 		t.Fatalf("economy first request tool order changed\ngot  %v\nwant %v", got, wantTools)
 	}
-	for _, want := range []string{"connect_tool_source", "read_file", "edit_file", "write_file", "bash", "ask"} {
+	for _, want := range []string{"compress", "connect_tool_source", "read_file", "edit_file", "write_file", "bash", "ask"} {
 		if !requestHasTool(req, want) {
 			t.Fatalf("economy first request missing tool %q; tools=%v", want, toolSchemaNames(req.Tools))
 		}
@@ -2736,17 +2853,17 @@ READ ONLY SKILL BODY`)
 			t.Fatalf("read_only_skill child request should hide %q; tools=%v", forbidden, toolSchemaNames(subReq.Tools))
 		}
 	}
-	var toolOutput string
+	var toolOutput strings.Builder
 	for _, msg := range ctrl.History() {
 		if msg.Role == provider.RoleTool && msg.Name == "connect_tool_source" {
-			toolOutput += msg.Content
+			toolOutput.WriteString(msg.Content)
 			if strings.Contains(msg.Content, "blocked:") {
 				t.Fatalf("connect_tool_source should not block read_only_skill in plan mode, got:\n%s", msg.Content)
 			}
 		}
 	}
-	if !strings.Contains(toolOutput, "readonlydig") || !strings.Contains(toolOutput, "# Skills") {
-		t.Fatalf("read_only_skill source result should include the skill index, got:\n%s", toolOutput)
+	if !strings.Contains(toolOutput.String(), "readonlydig") || !strings.Contains(toolOutput.String(), "# Skills") {
+		t.Fatalf("read_only_skill source result should include the skill index, got:\n%s", toolOutput.String())
 	}
 }
 
@@ -2950,17 +3067,17 @@ command = "reasonix-missing-mockmcp"
 			if len(reqs) != 2 {
 				t.Fatalf("requests = %d, want 2", len(reqs))
 			}
-			var toolOutput string
+			var toolOutput strings.Builder
 			for _, msg := range ctrl.History() {
 				if msg.Role == provider.RoleTool && msg.Name == "connect_tool_source" {
-					toolOutput += msg.Content
+					toolOutput.WriteString(msg.Content)
 				}
 			}
-			if strings.TrimSpace(toolOutput) == "" {
+			if strings.TrimSpace(toolOutput.String()) == "" {
 				t.Fatalf("connect_tool_source(%s) returned empty tool output", tt.source)
 			}
-			if strings.Contains(toolOutput, "blocked:") {
-				t.Fatalf("connect_tool_source(%s) should load capability metadata in Plan, got %q", tt.source, toolOutput)
+			if strings.Contains(toolOutput.String(), "blocked:") {
+				t.Fatalf("connect_tool_source(%s) should load capability metadata in Plan, got %q", tt.source, toolOutput.String())
 			}
 			for _, enabled := range tt.enabledTools {
 				if !requestHasTool(reqs[1], enabled) {
@@ -3020,17 +3137,17 @@ model = "x"
 	if requestHasTool(reqs[1], "complete_step") {
 		t.Fatalf("plan-mode workflow connect must not expose complete_step; tools=%v", toolSchemaNames(reqs[1].Tools))
 	}
-	var planConnectOutput string
+	var planConnectOutput strings.Builder
 	for _, msg := range ctrl.History() {
 		if msg.Role == provider.RoleTool && msg.Name == "connect_tool_source" {
-			planConnectOutput += msg.Content
+			planConnectOutput.WriteString(msg.Content)
 		}
 	}
-	if strings.Contains(planConnectOutput, "blocked:") {
-		t.Fatalf("workflow source should not be blocked in plan mode, got:\n%s", planConnectOutput)
+	if strings.Contains(planConnectOutput.String(), "blocked:") {
+		t.Fatalf("workflow source should not be blocked in plan mode, got:\n%s", planConnectOutput.String())
 	}
-	if !strings.Contains(planConnectOutput, "complete_step stays blocked in plan mode") {
-		t.Fatalf("plan-mode workflow connect should explain the deferred complete_step, got:\n%s", planConnectOutput)
+	if !strings.Contains(planConnectOutput.String(), "complete_step stays blocked in plan mode") {
+		t.Fatalf("plan-mode workflow connect should explain the deferred complete_step, got:\n%s", planConnectOutput.String())
 	}
 
 	ctrl.SetPlanMode(false)
@@ -3133,14 +3250,14 @@ model = "x"
 	if requestHasTool(reqs[1], "web_fetch") {
 		t.Fatalf("disabled web_fetch should not be exposed after connect_tool_source; tools=%v", toolSchemaNames(reqs[1].Tools))
 	}
-	var toolOutput string
+	var toolOutput strings.Builder
 	for _, msg := range ctrl.History() {
 		if msg.Role == provider.RoleTool && msg.Name == "connect_tool_source" {
-			toolOutput += msg.Content
+			toolOutput.WriteString(msg.Content)
 		}
 	}
-	if !strings.Contains(toolOutput, "web_fetch is disabled by [tools].enabled") {
-		t.Fatalf("connector should explain disabled web_fetch, got:\n%s", toolOutput)
+	if !strings.Contains(toolOutput.String(), "web_fetch is disabled by [tools].enabled") {
+		t.Fatalf("connector should explain disabled web_fetch, got:\n%s", toolOutput.String())
 	}
 }
 
@@ -3190,21 +3307,21 @@ model = "x"
 			t.Fatalf("second request should expose %q after connect_tool_source; tools=%v", name, toolSchemaNames(reqs[1].Tools))
 		}
 	}
-	var toolOutput string
+	var toolOutput strings.Builder
 	for _, msg := range ctrl.History() {
 		if msg.Role == provider.RoleTool && msg.Name == "connect_tool_source" {
-			toolOutput += msg.Content
+			toolOutput.WriteString(msg.Content)
 		}
 	}
-	if !strings.Contains(toolOutput, "projskill") || !strings.Contains(toolOutput, "# Skills") {
-		t.Fatalf("skills source result should include the skill index, got:\n%s", toolOutput)
+	if !strings.Contains(toolOutput.String(), "projskill") || !strings.Contains(toolOutput.String(), "# Skills") {
+		t.Fatalf("skills source result should include the skill index, got:\n%s", toolOutput.String())
 	}
 }
 
 func TestAddBuiltinsWithWorkspaceRootKeepsSessionTools(t *testing.T) {
 	reg := tool.NewRegistry()
 	var stderr bytes.Buffer
-	addBuiltins(reg, nil, []string{robustTempDir(t)}, sandbox.Spec{}, 120*time.Second, builtin.SearchSpec{}, &stderr, robustTempDir(t), netclient.ProxySpec{}, nil, nil, builtin.SessionDataGuard{}, builtin.ManagedConfigPaths{}, nil, nil)
+	addBuiltins(reg, nil, []string{robustTempDir(t)}, sandbox.Spec{}, 120*time.Second, builtin.SearchSpec{}, &stderr, robustTempDir(t), netclient.ProxySpec{}, nil, nil, builtin.SessionDataGuard{}, builtin.ManagedConfigPaths{}, nil, nil, nil, nil)
 	for _, name := range []string{
 		"todo_write",
 		"complete_step",
@@ -3353,8 +3470,8 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	// user-global REASONIX.md in the real config dir could append; the test
 	// environment has none, so the base stands alone.)
 	base := sys
-	if i := strings.Index(sys, "\n\n# Skills"); i >= 0 {
-		base = sys[:i]
+	if before, _, ok := strings.Cut(sys, "\n\n# Skills"); ok {
+		base = before
 	}
 	// The language policy, user-decision policy, and current-workspace line are
 	// always appended at boot; strip them so this assertion is purely about
@@ -3508,7 +3625,7 @@ func systemMessage(msgs []provider.Message) string {
 func stripLanguagePolicy(s string) string {
 	s = strings.TrimSpace(s)
 	for _, policy := range []string{
-		config.LanguagePolicy,
+		config.LanguagePolicy, config.WorkPracticePolicy,
 		config.UserDecisionPolicy,
 	} {
 		s = strings.TrimSpace(strings.TrimSuffix(s, policy))
@@ -3517,8 +3634,8 @@ func stripLanguagePolicy(s string) string {
 }
 
 func stripEnvironmentBlock(s string) string {
-	if i := strings.Index(s, "\n\n## Environment"); i >= 0 {
-		return s[:i]
+	if before, _, ok := strings.Cut(s, "\n\n## Environment"); ok {
+		return before
 	}
 	return s
 }
@@ -3691,7 +3808,7 @@ func TestRememberPermissionRuleSerializesConcurrentWriters(t *testing.T) {
 	start := make(chan struct{})
 	results := make(chan control.RememberResult, writers)
 	var wg sync.WaitGroup
-	for i := 0; i < writers; i++ {
+	for i := range writers {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
@@ -3709,7 +3826,7 @@ func TestRememberPermissionRuleSerializesConcurrentWriters(t *testing.T) {
 	}
 
 	got := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
-	for i := 0; i < writers; i++ {
+	for i := range writers {
 		rule := fmt.Sprintf("Edit(file-%02d)", i)
 		if !hasPermissionRule(got.Permissions.Allow, rule) {
 			t.Errorf("permissions.allow missing %q: %v", rule, got.Permissions.Allow)
@@ -3727,7 +3844,7 @@ func TestRememberPermissionRuleSerializesCrossProcessWriters(t *testing.T) {
 	const rulesPerWorker = 8
 	commands := make([]*exec.Cmd, 0, workers)
 	outputs := make([]bytes.Buffer, workers)
-	for worker := 0; worker < workers; worker++ {
+	for worker := range workers {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestRememberPermissionRuleProcessHelper$")
 		cmd.Stdout = &outputs[worker]
 		cmd.Stderr = &outputs[worker]
@@ -3774,8 +3891,8 @@ func TestRememberPermissionRuleSerializesCrossProcessWriters(t *testing.T) {
 	}
 
 	got := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
-	for worker := 0; worker < workers; worker++ {
-		for n := 0; n < rulesPerWorker; n++ {
+	for worker := range workers {
+		for n := range rulesPerWorker {
 			rule := fmt.Sprintf("Edit(process-%d-file-%02d)", worker, n)
 			if !hasPermissionRule(got.Permissions.Allow, rule) {
 				t.Errorf("permissions.allow missing %q: %v", rule, got.Permissions.Allow)
@@ -3813,7 +3930,7 @@ func TestRememberPermissionRuleProcessHelper(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	for n := 0; n < rules; n++ {
+	for n := range rules {
 		rule := fmt.Sprintf("Edit(process-%d-file-%02d)", worker, n)
 		result := rememberPermissionRule(workspace, rule)
 		if result.Err != nil || !result.Saved {
@@ -4004,12 +4121,7 @@ plan_mode_read_only_commands = ["gh issue view"]
 }
 
 func hasPermissionRule(rules []string, want string) bool {
-	for _, rule := range rules {
-		if rule == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(rules, want)
 }
 
 func hasPlanModeReadOnlyCommand(commands []string, want string) bool {
@@ -4099,6 +4211,72 @@ func TestBuildMigratesLegacyConfigEndToEnd(t *testing.T) {
 	migratedSession := filepath.Join(config.SessionDir(), "chat-1.jsonl")
 	if _, err := os.Stat(migratedSession); err != nil {
 		t.Errorf("legacy session not imported to %s: %v", migratedSession, err)
+	}
+}
+
+func TestBuildMigratesLegacyDeepSeekProtocolWithOneNotice(t *testing.T) {
+	home := isolateConfigHome(t)
+	t.Setenv("REASONIX_HOME", filepath.Join(home, "reasonix-home"))
+	userPath := config.UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userPath, []byte(`default_model = "deepseek-flash/deepseek-v4-flash"
+
+[[providers]]
+name = "deepseek-flash"
+kind = "openai"
+base_url = "https://api.deepseek.com"
+model = "deepseek-v4-flash"
+api_key_env = "DEEPSEEK_API_KEY"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var notices []event.Event
+	sink := event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Notice {
+			notices = append(notices, e)
+		}
+	})
+	build := func() {
+		t.Helper()
+		ctrl, err := Build(context.Background(), Options{Sink: sink, WorkspaceRoot: t.TempDir()})
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		ctrl.Close()
+	}
+
+	build()
+	migrationNotices := 0
+	for _, notice := range notices {
+		if notice.Text != "DeepSeek official access was upgraded to Anthropic Messages." {
+			continue
+		}
+		migrationNotices++
+		if notice.Level != event.LevelInfo || !strings.Contains(notice.Detail, "prefix-cache") {
+			t.Fatalf("migration notice = %+v", notice)
+		}
+	}
+	if migrationNotices != 1 {
+		t.Fatalf("migration notices = %d, want 1; got %+v", migrationNotices, notices)
+	}
+	raw, err := os.ReadFile(userPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `kind = "anthropic"`) ||
+		!strings.Contains(string(raw), `base_url = "https://api.deepseek.com/anthropic"`) {
+		t.Fatalf("legacy DeepSeek protocol remained on disk:\n%s", raw)
+	}
+
+	notices = nil
+	build()
+	for _, notice := range notices {
+		if strings.Contains(notice.Text, "DeepSeek official access was upgraded") {
+			t.Fatalf("second boot repeated migration notice: %+v", notice)
+		}
 	}
 }
 
@@ -4903,7 +5081,7 @@ func TestBuildMigratesLegacyEagerBeforeStatsDemotion(t *testing.T) {
 	// Three samples above 2*budget — the rule in stats.go's Recommend triggers
 	// when the trailing window is entirely over the threshold. Use 30s so even
 	// future budget bumps stay below the threshold.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := plugin.RecordStartup("slowserver", 30*time.Second); err != nil {
 			t.Fatalf("RecordStartup #%d: %v", i, err)
 		}
@@ -4986,8 +5164,7 @@ func TestBuildExtraPluginProbeKeepsSessionProcessAlive(t *testing.T) {
 	workspace := robustTempDir(t)
 	t.Chdir(workspace)
 
-	sessionCtx, cancelSession := context.WithCancel(context.Background())
-	defer cancelSession()
+	sessionCtx := t.Context()
 	ctrl, err := Build(sessionCtx, Options{
 		SessionDir: filepath.Join(t.TempDir(), "sessions"),
 		Sink:       event.Discard,

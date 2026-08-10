@@ -6,11 +6,11 @@ import (
 	"net"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
 	"reasonix/internal/event"
-	"reasonix/internal/evidence"
 	"reasonix/internal/netclient"
 	"reasonix/internal/provider"
 	"reasonix/internal/recovery"
@@ -69,7 +69,7 @@ func (r *Reporter) Wrap(inner event.Sink) event.Sink {
 	if r == nil {
 		return inner
 	}
-	return &sink{inner: inner, reporter: r, counts: countersFrom(r.static)}
+	return &sink{AuditForwarder: event.AuditForwarder{Inner: inner}, inner: inner, reporter: r, counts: countersFrom(r.static)}
 }
 
 func (r *Reporter) RecordRecovery(m recovery.Metrics) {
@@ -113,6 +113,7 @@ func (r *Reporter) append(counts map[string]int) {
 }
 
 type sink struct {
+	event.AuditForwarder
 	inner          event.Sink
 	reporter       *Reporter
 	counts         map[string]int
@@ -124,10 +125,6 @@ type sink struct {
 func (s *sink) Emit(e event.Event) {
 	s.observe(e)
 	s.inner.Emit(e)
-}
-
-func (s *sink) RecordReadinessAudit(a evidence.ReadinessAudit) {
-	event.RecordReadinessAudit(s.inner, a)
 }
 
 func (s *sink) RecordProtocolRecovery(a event.ProtocolRecoveryAudit) {
@@ -217,10 +214,8 @@ func safeBucket(value, fallback string) string {
 
 func enumBucket(value string, allowed ...string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
-	for _, item := range allowed {
-		if value == item {
-			return value
-		}
+	if slices.Contains(allowed, value) {
+		return value
 	}
 	return "other"
 }

@@ -172,7 +172,7 @@ func detectDotEnvDuplicateKeys(path string) []string {
 	}
 	seen := map[string]bool{}
 	dups := map[string]bool{}
-	for _, line := range strings.Split(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n") {
 		values, err := godotenv.Unmarshal(line)
 		if err != nil {
 			continue

@@ -31,7 +31,7 @@ State model (schema v2 of `desktop-theme-state.json`):
 | --- | --- | --- |
 | `themeMode` | auto / light / dark | desktop config |
 | `baseStyle` | Graphite…Amber | desktop config (`theme_style`) |
-| `activeThemeId` | official or user pack only | `desktop-theme-state.json` |
+| `activeThemeId` | official, user or plugin pack only | `desktop-theme-state.json` |
 | `selectedThemeId` / `previewThemeId` | gallery selection / temp preview | frontend memory only |
 
 - `activeThemeId` **must not** store base style ids. Choosing a base style clears the pack.
@@ -40,13 +40,14 @@ State model (schema v2 of `desktop-theme-state.json`):
 
 ## Theme kinds
 
-The gallery has three groups:
+The gallery has four groups:
 
 | Kind | Source | Editable | Deletable | Exportable |
 | --- | --- | --- | --- | --- |
 | **Base styles** | Six visual directions (Graphite, Aurora, Slate, Carbon, Nocturne, Amber), token-less | no (duplicate first) | no | no |
 | **Official themes** | Eight read-only packs embedded in the installer (manifest + original background + thumbnail, MIT) | no (duplicate first) | no | no |
 | **User themes** | Created in the editor, duplicated, or imported as `.reasonix-theme` | yes | yes | yes |
+| **Plugin themes** | `.reasonix-theme` packs contributed by enabled plugins (Manifest v2 `contributes.themes`), read straight from the plugin root — never copied into the user library | no | no (disable/uninstall the plugin) | no |
 
 - All 14 built-in ids (6 base + 8 official) are **reserved**: save, import, copy-over
   and delete all refuse collisions.
@@ -57,6 +58,13 @@ The gallery has three groups:
   then be edited or exported.
 - v1 states that stored a base id as `activeThemeId` are migrated to `desktop.theme_style`
   and cleared on load.
+- Plugin theme ids are external names of the form `plugin:<plugin>:<theme>`; the
+  pack's own `id` keeps following the usual id rules. Invalid contributed files
+  are skipped with a warning in the theme views, never fatal. When the plugin
+  behind the active id is missing, disabled or uninstalled, rendering falls back
+  to the configured base style but the id is **preserved** in
+  `desktop-theme-state.json` — reinstalling the same plugin restores the theme.
+  Save/delete/duplicate/export reject plugin theme ids as read-only.
 
 ### The eight official themes
 

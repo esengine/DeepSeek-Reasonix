@@ -314,7 +314,7 @@ func TestBehaviorMatrixGolden(t *testing.T) {
 	})
 	t.Run("third repeated operation stops without prompting", func(t *testing.T) {
 		got := run(t, func(g *Gate) {
-			for i := 0; i < 3; i++ {
+			for range 3 {
 				g.ObserveResult(context.Background(), Observation{
 					Tool: "write_file", Mutates: true, Subject: "a.go", ErrSummary: "fail",
 					Args: json.RawMessage(`{"path":"a.go","content":"x"}`),
@@ -330,7 +330,7 @@ func TestBehaviorMatrixGolden(t *testing.T) {
 	})
 	t.Run("different edit after three verification failures stays automatic", func(t *testing.T) {
 		got := run(t, func(g *Gate) {
-			for i := 0; i < 3; i++ {
+			for range 3 {
 				g.ObserveResult(context.Background(), Observation{
 					Tool: "bash", Verification: true, Subject: "go test ./...", ErrSummary: "fail",
 					Args: json.RawMessage(`{"command":"go test ./..."}`),

@@ -100,6 +100,11 @@ func (a *App) ListThemePacks() ([]ThemePackView, error) {
 		}
 		out = append(out, manifestToView(m, themeKindUser, activeID == id, bgURL, "", taskURL))
 	}
+	// Plugin themes come last: read-only, resolved live from enabled plugins.
+	pluginThemes, _ := discoverPluginThemes()
+	for _, pt := range pluginThemes {
+		out = append(out, pluginThemeView(pt, activeID == pt.id))
+	}
 	return out, nil
 }
 
@@ -112,6 +117,12 @@ func (a *App) GetActiveThemePack() (ThemeActiveView, error) {
 	st := a.migrateThemeDesktopStateLocked()
 	activeID := resolveActiveThemeID(st)
 	if st.ActiveThemeID != "" && activeID == "" {
+		// Plugin theme pointer whose plugin is missing/disabled/uninstalled:
+		// fall back to the base style but PRESERVE the pointer on disk so
+		// reinstalling the same plugin restores the theme.
+		if isPluginThemeID(st.ActiveThemeID) {
+			return view, nil
+		}
 		// Broken or migrated-away pointer: clear so the next launch is clean.
 		st.ActiveThemeID = ""
 		_ = saveThemeDesktopState(st)
@@ -123,9 +134,13 @@ func (a *App) GetActiveThemePack() (ThemeActiveView, error) {
 	view.ActiveThemeID = activeID
 	pack, err := a.loadThemeViewLocked(activeID, true)
 	if err != nil {
+		view.ActiveThemeID = ""
+		if isPluginThemeID(activeID) {
+			// Lost the race with a plugin change: same preserve contract.
+			return view, nil
+		}
 		st.ActiveThemeID = ""
 		_ = saveThemeDesktopState(st)
-		view.ActiveThemeID = ""
 		return view, nil
 	}
 	view.Pack = &pack
@@ -141,13 +156,20 @@ func (a *App) GetThemeExperience() (ThemeExperienceView, error) {
 	// before we read appearance.
 	st := a.migrateThemeDesktopStateLocked()
 	themeMode, baseStyle := a.desktopAppearanceLocked()
+	_, themeWarnings := discoverPluginThemes()
 	view := ThemeExperienceView{
 		ThemeMode:      themeMode,
 		BaseStyle:      baseStyle,
 		EffectiveStyle: baseStyle,
+		Warnings:       themeWarnings,
 	}
 	activeID := resolveActiveThemeID(st)
 	if st.ActiveThemeID != "" && activeID == "" {
+		// Plugin theme pointer with a missing/disabled plugin: render the base
+		// style, preserve the pointer (see GetActiveThemePack).
+		if isPluginThemeID(st.ActiveThemeID) {
+			return view, nil
+		}
 		st.ActiveThemeID = ""
 		_ = saveThemeDesktopState(st)
 		return view, nil
@@ -157,6 +179,9 @@ func (a *App) GetThemeExperience() (ThemeExperienceView, error) {
 	}
 	pack, err := a.loadThemeViewLocked(activeID, true)
 	if err != nil {
+		if isPluginThemeID(activeID) {
+			return view, nil
+		}
 		st.ActiveThemeID = ""
 		_ = saveThemeDesktopState(st)
 		return view, nil
@@ -183,6 +208,13 @@ func (a *App) loadThemeViewLocked(id string, active bool) (ThemePackView, error)
 		pvURL := officialAssetURL(m.ID, officialPreviewName)
 		return manifestToView(&m, themeKindOfficial, active, bgURL, pvURL), nil
 	}
+	if pluginName, themeID, ok := parsePluginThemeID(id); ok {
+		pt := findPluginTheme(pluginName, themeID)
+		if pt == nil {
+			return ThemePackView{}, fmt.Errorf("plugin theme %q is unavailable (plugin %q must be installed and enabled)", id, pluginName)
+		}
+		return pluginThemeView(*pt, active), nil
+	}
 	m, err := loadUserThemeManifest(id)
 	if err != nil {
 		return ThemePackView{}, err
@@ -198,8 +230,10 @@ func (a *App) loadThemeViewLocked(id string, active bool) (ThemePackView, error)
 	return manifestToView(m, themeKindUser, active, bgURL, "", taskURL), nil
 }
 
-// ActivateThemePack enables an official or user theme. Empty id clears the pack
-// (same as DisableThemePack). Base style ids are rejected — use ActivateBaseStyle.
+// ActivateThemePack enables an official, user or plugin theme. Empty id clears
+// the pack (same as DisableThemePack). Base style ids are rejected — use
+// ActivateBaseStyle. Plugin theme ids (plugin:<plugin>:<theme>) persist in
+// full so a later plugin reinstall can restore the theme.
 func (a *App) ActivateThemePack(id string) error {
 	themeMu.Lock()
 	defer themeMu.Unlock()
@@ -212,6 +246,18 @@ func (a *App) ActivateThemePack(id string) error {
 	}
 	if isBuiltinThemeID(id) {
 		return fmt.Errorf("base style %q is not a theme pack; use ActivateBaseStyle", id)
+	}
+	if isPluginThemeID(id) {
+		pluginName, themeID, ok := parsePluginThemeID(id)
+		if !ok {
+			return fmt.Errorf("invalid plugin theme id %q (want plugin:<plugin>:<theme>)", id)
+		}
+		pt := findPluginTheme(pluginName, themeID)
+		if pt == nil {
+			return fmt.Errorf("plugin theme %q is unavailable (plugin %q must be installed and enabled)", id, pluginName)
+		}
+		st.ActiveThemeID = pt.id
+		return saveThemeDesktopState(st)
 	}
 	if findOfficialTheme(id) != nil {
 		st.ActiveThemeID = id
@@ -273,7 +319,8 @@ func (a *App) ResetThemePack() error {
 	return a.DisableThemePack()
 }
 
-// migrateThemeDesktopStateLocked upgrades v1 state and clears invalid ids.
+// migrateThemeDesktopStateLocked upgrades v1 state and clears invalid ids —
+// except plugin: pointers, which are preserved even when unresolvable.
 // Caller must hold themeMu. Side effect: may write desktop.theme_style when a
 // v1 base-style activeThemeId is migrated.
 func (a *App) migrateThemeDesktopStateLocked() ThemeDesktopState {
@@ -287,8 +334,10 @@ func (a *App) migrateThemeDesktopStateLocked() ThemeDesktopState {
 		_ = a.SetDesktopAppearance(themeMode, id)
 		st.ActiveThemeID = ""
 		changed = true
-	} else if id != "" && resolveActiveThemeID(st) == "" {
-		// Missing / corrupt official or user pack — clear pointer only.
+	} else if id != "" && !isPluginThemeID(id) && resolveActiveThemeID(st) == "" {
+		// Missing / corrupt official or user pack — clear pointer only. Plugin
+		// pointers are never auto-cleared: they survive a missing/disabled
+		// plugin so a reinstall restores the theme.
 		st.ActiveThemeID = ""
 		changed = true
 	}
@@ -340,6 +389,9 @@ func (a *App) SaveThemePack(input ThemeSaveInput) (ThemePackView, error) {
 	themeMu.Lock()
 	defer themeMu.Unlock()
 
+	if isPluginThemeID(input.ID) {
+		return ThemePackView{}, errPluginThemeReadOnly(input.ID, "saved")
+	}
 	m := &ThemePackManifest{
 		SchemaVersion:  themePackSchemaVersion,
 		ID:             strings.TrimSpace(input.ID),
@@ -481,6 +533,9 @@ func (a *App) DeleteThemePack(id string) error {
 	defer themeMu.Unlock()
 
 	id = strings.TrimSpace(id)
+	if isPluginThemeID(id) {
+		return errPluginThemeReadOnly(id, "deleted — disable or uninstall the plugin instead")
+	}
 	if isReservedThemeID(id) {
 		return fmt.Errorf("built-in themes cannot be deleted")
 	}
@@ -502,6 +557,9 @@ func (a *App) CopyThemePack(sourceID, newID, newName string) (ThemePackView, err
 
 	sourceID = strings.TrimSpace(sourceID)
 	newID = strings.TrimSpace(newID)
+	if isPluginThemeID(sourceID) {
+		return ThemePackView{}, errPluginThemeReadOnly(sourceID, "duplicated")
+	}
 	if !themePackIDRe.MatchString(newID) || isReservedThemeID(newID) {
 		return ThemePackView{}, fmt.Errorf("invalid new theme id")
 	}
@@ -658,6 +716,9 @@ func (a *App) ExportThemePack(id, destPath string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return "", fmt.Errorf("theme id is required")
+	}
+	if isPluginThemeID(id) {
+		return "", errPluginThemeReadOnly(id, "exported")
 	}
 	path := strings.TrimSpace(destPath)
 	if path == "" {

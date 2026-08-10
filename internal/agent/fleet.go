@@ -36,7 +36,7 @@ func NewFleetTool(taskTool *TaskTool) *FleetTool {
 func (*FleetTool) Name() string { return "fleet" }
 
 func (*FleetTool) Description() string {
-	return "Dispatch 2–64 sub-agent tasks in parallel and aggregate results. Each item may select a profile, model, effort, tools, write_paths, or read_only. Multiple writers must declare non-overlapping write_paths; omitted write_paths claim the whole workspace, so two or more writers without paths fail preflight before any task starts. Independent failure is the default: one failure does not cancel others. Background mode returns a fleet job id collectable with wait."
+	return "Dispatch 2–64 sub-agent tasks as a small dependency graph and return bounded previews plus stable Subagent references for full-result retrieval from completed persisted children with read_subagent_result. Each item may select a profile, model, effort, tools, write_paths, or read_only, and may declare depends_on to run after other items (research → implement → review). Tasks with no dependency between them run in parallel and must declare non-overlapping write_paths; ordered tasks may share paths. Omitted write_paths claim the whole workspace, so two or more concurrent writers without paths fail preflight before any task starts. A failed task's dependents are skipped; independent branches keep going unless fail_fast is set. Background mode returns a fleet job id collectable with wait."
 }
 
 func (*FleetTool) Schema() json.RawMessage {
@@ -52,9 +52,11 @@ func (*FleetTool) Schema() json.RawMessage {
       "type":"object",
       "properties":{
         "prompt":{"type":"string","description":"Task prompt for the sub-agent."},
+        "id":{"type":"string","description":"Optional stable id for this task, referenced by other tasks' depends_on. Defaults to the 1-based position."},
+        "depends_on":{"type":"array","items":{"type":"string"},"description":"Ids of tasks that must complete before this one starts. Unknown ids, self-edges, and cycles fail preflight. A task whose dependency fails or is skipped is skipped too. Ordered tasks may share write_paths; only tasks that can run at the same time need disjoint claims."},
         "description":{"type":"string","description":"Optional short label shown in the job list."},
         "profile":{"type":"string","description":"Optional runAs=subagent profile name."},
-        "write_paths":{"type":"array","items":{"type":"string"},"description":"Write targets for this item. Parallel writers must declare non-overlapping paths. Omitting write_paths claims the whole workspace; multiple whole-workspace claims (or any path overlap) fail preflight and start nothing."},
+        "write_paths":{"type":"array","items":{"type":"string"},"description":"Write targets for this item. Writers that can run at the same time must declare non-overlapping paths; writers ordered by depends_on may share them. Omitting write_paths claims the whole workspace; two concurrent whole-workspace claims (or any overlap between concurrent writers) fail preflight and start nothing."},
         "read_only":{"type":"boolean","description":"Force the read-only registry even if the profile is writable."},
         "tools":{"type":"array","items":{"type":"string"},"description":"Optional tool whitelist (intersected with profile allowed-tools)."},
         "max_steps":{"type":"integer","description":"Optional max tool-call rounds.","minimum":1},
@@ -64,6 +66,7 @@ func (*FleetTool) Schema() json.RawMessage {
       "required":["prompt"]
     }
   },
+  "fail_fast":{"type":"boolean","description":"Stop starting new tasks after the first failure. Tasks already running are left to finish so partial writes are not abandoned mid-flight. Omitted (the default) means independent branches keep going; a failed task's dependents are skipped either way."},
   "run_in_background":{"type":"boolean","description":"Run the whole fleet asynchronously and return a job id collectable with wait. Items queue for concurrency/write slots inside the job."}
 },
 "required":["tasks"]
@@ -74,6 +77,8 @@ func (*FleetTool) ReadOnly() bool { return false }
 
 type fleetTaskItem struct {
 	Prompt      string   `json:"prompt"`
+	ID          string   `json:"id"`
+	DependsOn   []string `json:"depends_on"`
 	Description string   `json:"description"`
 	Profile     string   `json:"profile"`
 	WritePaths  []string `json:"write_paths"`
@@ -103,12 +108,61 @@ type fleetItemResult struct {
 	ref     string
 }
 
-func (f *FleetTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+// fleetGroupTerminalPhase classifies a fleet group's single terminal status:
+// cancellation/deadline wins, then any failed child, then any error
+// (including validation failures), then completed.
+func fleetGroupTerminalPhase(ctx context.Context, err error, results []fleetItemResult) subagentProgressPhase {
+	if ctx.Err() != nil {
+		return subagentPhaseCancelled
+	}
+	for _, r := range results {
+		if r.status == fleetItemFailed {
+			return subagentPhaseFailed
+		}
+	}
+	if err != nil {
+		return subagentPhaseFailed
+	}
+	return subagentPhaseCompleted
+}
+
+func (f *FleetTool) Execute(ctx context.Context, args json.RawMessage) (result string, err error) {
 	if f == nil || f.taskTool == nil {
 		return "", fmt.Errorf("fleet is not configured")
 	}
+	// Group lifecycle: the group card's terminal is an explicit event from
+	// the tool (running once children start, exactly one terminal at the
+	// end) so frontends never infer group completion from the children they
+	// happen to have observed. Validation failures emit a failed terminal;
+	// once runFleet starts it owns the lifecycle (the background job runs
+	// runFleet inside the job, after this function has returned).
+	groupParentID, groupSink, _, ok := CallContext(ctx)
+	if !ok || groupSink == nil {
+		groupParentID = "fleet"
+		groupSink = event.Discard
+	}
+	// The merger emits already-namespaced group/child IDs, so it must use the
+	// raw call sink. A nested subSink would prefix the group ID a second time
+	// (group/group), leaving the frontend unable to match its lifecycle card.
+	merger := newSubagentProgressMerger(realProgressClock{}, groupSink, groupParentID)
+	lifecycleHandoff := false
+	mergerCloseHandoff := false
+	defer func() {
+		if !mergerCloseHandoff {
+			merger.Close()
+		}
+	}()
+	defer func() {
+		if lifecycleHandoff {
+			return
+		}
+		merger.directStatus(groupParentID, fleetGroupTerminalPhase(ctx, err, nil))
+	}()
+	ctx = withSubagentProgressMerger(ctx, merger)
+
 	var params struct {
 		Tasks           []fleetTaskItem `json:"tasks"`
+		FailFast        bool            `json:"fail_fast"`
 		RunInBackground bool            `json:"run_in_background"`
 	}
 	dec := json.NewDecoder(bytes.NewReader(args))
@@ -135,37 +189,40 @@ func (f *FleetTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 		if err != nil {
 			return "", fmt.Errorf("task %d: %w", i+1, err)
 		}
-		if forceBackgroundClaim && !spec.ReadOnly && spec.WritePaths.Empty() {
+		if forceBackgroundClaim && !spec.Grant.ReadOnly && spec.Grant.WritePaths.Empty() {
 			whole, werr := WholeWorkspaceWriteClaim(f.taskTool.workspaceRoot)
 			if werr != nil {
 				return "", fmt.Errorf("task %d: %w", i+1, werr)
 			}
-			spec.WritePaths = whole
+			spec.Grant.WritePaths = whole
 		}
-		spec.Nested = SubagentDepth(ctx) > 0
-		spec.RunInBackground = false // fleet owns backgrounding
-		if spec.Description == "" {
-			spec.Description = fmt.Sprintf("fleet-%d", i+1)
+		spec.Sched.Nested = SubagentDepth(ctx) > 0
+		spec.Sched.RunInBackground = false // fleet owns backgrounding
+		if spec.Task.Description == "" {
+			spec.Task.Description = fmt.Sprintf("fleet-%d", i+1)
 		}
 		specs[i] = spec
-		if !spec.ReadOnly {
-			claims[i] = spec.WritePaths
+		if !spec.Grant.ReadOnly {
+			claims[i] = spec.Grant.WritePaths
 		}
 	}
-	if err := ValidateNonOverlappingWriteClaims(claims); err != nil {
+	plan, err := newFleetPlan(params.Tasks, params.FailFast)
+	if err != nil {
+		return "", fmt.Errorf("fleet preflight: %w", err)
+	}
+	if err := plan.validateConcurrentWriteClaims(claims); err != nil {
 		return "", fmt.Errorf("fleet preflight: %w", err)
 	}
 
 	if params.RunInBackground {
 		for i := range specs {
-			specs[i].BackgroundWriter = !specs[i].ReadOnly
+			specs[i].Sched.BackgroundWriter = !specs[i].Grant.ReadOnly
 		}
 		jm, ok := jobs.FromContext(ctx)
 		if !ok {
 			return "", fmt.Errorf("background execution is not available in this context")
 		}
-		parentID, parent, _, _ := CallContext(ctx)
-		nested := subSinkFor(parentID, parent)
+		parentID := groupParentID
 		parentSession := ParentSession(ctx)
 		label := fmt.Sprintf("fleet(%d)", len(specs))
 		backgroundEvidence := evidence.NewLedger()
@@ -175,7 +232,7 @@ func (f *FleetTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 		if observer != nil {
 			hasWriter := false
 			for i := range specs {
-				if specs[i].BackgroundWriter {
+				if specs[i].Sched.BackgroundWriter {
 					hasWriter = true
 					break
 				}
@@ -188,33 +245,72 @@ func (f *FleetTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 			}
 		}
 		job := jm.StartForSession(jobs.SessionFromContext(ctx), "fleet", label, func(jobCtx context.Context, _ io.Writer) (string, error) {
+			// Execute returns as soon as the job is registered, so the job owns
+			// the handed-off merger until every child preview and terminal has
+			// flushed. Closing it in Execute would strand child cards at running.
+			defer merger.Close()
 			if writerRegistered {
 				defer observer.UnregisterWriter(writerID)
 			}
 			jobCtx = WithParentSession(jobCtx, parentSession)
 			jobCtx = evidence.WithLedger(jobCtx, backgroundEvidence)
 			defer func() { jobs.PublishEvidence(jobCtx, backgroundEvidence.Summary()) }()
-			return f.runFleet(jobCtx, nested, specs)
+			// The job shares the Execute-level merger so the group lifecycle
+			// events and the child previews ride the same pacing budget.
+			jobCtx = withSubagentProgressMerger(jobCtx, merger)
+			return f.runFleet(jobCtx, groupSink, specs, plan, parentID)
 		})
+		// runFleet (inside the job) owns the terminal and merger close from
+		// here on. Foreground runFleet hands off only the terminal; Execute
+		// still closes the merger after the synchronous call returns.
+		lifecycleHandoff = true
+		mergerCloseHandoff = true
 		return fmt.Sprintf("Started background fleet %q (%s). Collect results with wait; you will be notified when it finishes.", job.ID, label), nil
 	}
 
-	return f.runFleet(ctx, subSink(ctx), specs)
+	lifecycleHandoff = true
+	return f.runFleet(ctx, groupSink, specs, plan, groupParentID)
 }
 
-func (f *FleetTool) runFleet(ctx context.Context, sink event.Sink, specs []ProfileExecSpec) (string, error) {
+func (f *FleetTool) runFleet(ctx context.Context, sink event.Sink, specs []ProfileExecSpec, plan fleetPlan, groupParentID string) (result string, err error) {
 	if sink == nil {
 		sink = event.Discard
 	}
-	parentID, _, _, ok := CallContext(ctx)
-	if !ok {
-		parentID = "fleet"
+	// Child IDs are namespaced exactly once under the group call. Background
+	// jobs no longer carry the original call context, so groupParentID is the
+	// authoritative identity there; direct callers fall back to CallContext.
+	parentID := strings.TrimSpace(groupParentID)
+	if parentID == "" {
+		var ok bool
+		parentID, _, _, ok = CallContext(ctx)
+		if !ok || parentID == "" {
+			parentID = "fleet"
+		}
 	}
+	groupParentID = parentID
+	// The Execute-level merger (or a fallback for direct callers) paces the
+	// group; runFleet owns the lifecycle once it starts: running up front
+	// and exactly one terminal after every child settles.
+	merger := subagentProgressMergerFromContext(ctx)
+	ownsMerger := false
+	if merger == nil {
+		merger = newSubagentProgressMerger(realProgressClock{}, sink, groupParentID)
+		ownsMerger = true
+		ctx = withSubagentProgressMerger(ctx, merger)
+	}
+	if ownsMerger {
+		defer merger.Close()
+	}
+	merger.directStatus(groupParentID, subagentPhaseRunning)
+	var results []fleetItemResult
+	defer func() {
+		merger.directStatus(groupParentID, fleetGroupTerminalPhase(ctx, err, results))
+	}()
 
 	n := len(specs)
-	results := make([]fleetItemResult, n)
+	results = make([]fleetItemResult, n)
 	for i := range results {
-		results[i] = fleetItemResult{index: i, status: fleetItemPending, profile: specs[i].Profile}
+		results[i] = fleetItemResult{index: i, status: fleetItemPending, profile: specs[i].Worker.Profile}
 	}
 
 	var wg sync.WaitGroup
@@ -222,32 +318,30 @@ func (f *FleetTool) runFleet(ctx context.Context, sink event.Sink, specs []Profi
 
 	startOne := func(idx int) {
 		spec := specs[idx]
-		label := spec.Description
+		label := spec.Task.Description
 		subID := fmt.Sprintf("%s/fleet-%d", parentID, idx+1)
 		dispatchArgs, _ := json.Marshal(map[string]any{
-			"prompt":      spec.Prompt,
+			"prompt":      spec.Task.Objective,
 			"description": label,
-			"profile":     spec.Profile,
+			"profile":     spec.Worker.Profile,
 		})
 		sink.Emit(event.Event{
 			Kind: event.ToolDispatch,
 			Tool: event.Tool{
 				ID: subID, ParentID: parentID, Name: "task",
-				Args: string(dispatchArgs), ReadOnly: spec.ReadOnly,
+				Args: string(dispatchArgs), ReadOnly: spec.Grant.ReadOnly,
 			},
 		})
 
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			// Each fleet item runs as its own task-shaped execution so
 			// transcripts, evidence, and scheduler claims stay independent.
 			itemCtx := withCallContext(ctx, subID, subSinkFor(subID, sink), nil, false)
 			out, err := f.taskTool.RunProfileSpec(itemCtx, spec)
-			res := fleetItemResult{index: idx, profile: spec.Profile, output: out, err: err}
+			answer, ref := splitSubagentRunResult(out)
+			res := fleetItemResult{index: idx, profile: spec.Worker.Profile, output: answer, ref: ref, err: err}
 			if err == nil {
 				res.status = fleetItemCompleted
-				res.ref = extractSubagentRef(out)
 				sink.Emit(event.Event{
 					Kind: event.ToolResult,
 					Tool: event.Tool{ID: subID, ParentID: parentID, Name: "task", Output: out},
@@ -264,46 +358,10 @@ func (f *FleetTool) runFleet(ctx context.Context, sink event.Sink, specs []Profi
 				})
 			}
 			doneCh <- res
-		}()
+		})
 	}
 
-	// Mark only genuinely unstarted items skipped. Started items always publish
-	// a terminal result, including after cancellation, so partial writer work is
-	// never misreported as a task that did not run.
-	started := 0
-	for i := range specs {
-		if ctx.Err() != nil {
-			for j := i; j < n; j++ {
-				results[j].status = fleetItemSkipped
-				results[j].err = ctx.Err()
-			}
-			break
-		}
-		startOne(i)
-		started++
-	}
-
-	completed := 0
-	cancelled := false
-	for completed < started && !cancelled {
-		select {
-		case r := <-doneCh:
-			results[r.index] = r
-			completed++
-		case <-ctx.Done():
-			cancelled = true
-		}
-	}
-	// doneCh is buffered for every item, so workers can always publish their
-	// terminal result while this goroutine waits. Once they stop, drain exactly
-	// the outstanding started items and preserve their real completed/cancelled
-	// status instead of replacing it with skipped.
-	wg.Wait()
-	for completed < started {
-		r := <-doneCh
-		results[r.index] = r
-		completed++
-	}
+	cancelled := driveFleet(ctx, plan, results, doneCh, wg.Wait, startOne)
 	for _, r := range results {
 		if r.status == fleetItemCancelled || r.status == fleetItemSkipped {
 			cancelled = true
@@ -322,7 +380,7 @@ func (f *FleetTool) runFleet(ctx context.Context, sink event.Sink, specs []Profi
 
 func formatFleetAggregate(results []fleetItemResult, cancelled bool) string {
 	n := len(results)
-	var b strings.Builder
+	var prefix string
 	if cancelled {
 		completed := 0
 		for _, r := range results {
@@ -330,41 +388,41 @@ func formatFleetAggregate(results []fleetItemResult, cancelled bool) string {
 				completed++
 			}
 		}
-		fmt.Fprintf(&b, "Cancelled fleet after completing %d of %d tasks:\n", completed, n)
+		prefix = fmt.Sprintf("Cancelled fleet after completing %d of %d tasks:\n", completed, n)
 	} else {
-		fmt.Fprintf(&b, "Completed fleet of %d tasks:\n", n)
+		prefix = fmt.Sprintf("Completed fleet of %d tasks:\n", n)
 	}
+	items := make([]subagentAggregateItem, 0, n)
 	for i, r := range results {
-		fmt.Fprintf(&b, "── task-%d", i+1)
+		header := fmt.Sprintf("── task-%d", i+1)
 		if r.profile != "" {
-			fmt.Fprintf(&b, " profile=%s", r.profile)
+			header += " profile=" + boundedInline(r.profile, 80)
 		}
-		b.WriteString(" ──\n")
+		header += " ──\n"
+		item := subagentAggregateItem{header: header, ref: r.ref}
 		switch r.status {
 		case fleetItemCompleted:
-			fmt.Fprintf(&b, "status: completed\n%s\n", strings.TrimSpace(r.output))
-			if r.ref != "" {
-				fmt.Fprintf(&b, "Subagent reference: %s\n", r.ref)
-			}
+			item.status = "status: completed\n"
+			item.answer = strings.TrimSpace(r.output)
 		case fleetItemFailed:
-			fmt.Fprintf(&b, "status: failed\n[FAILED] %v\n", r.err)
+			item.status = "status: failed\n"
+			if r.err != nil {
+				item.detail = fmt.Sprintf("[FAILED] %s\n", boundedInline(r.err.Error(), 256))
+			}
 		case fleetItemCancelled:
-			fmt.Fprintf(&b, "status: cancelled\n[CANCELLED] %v\n", r.err)
+			item.status = "status: cancelled\n"
+			if r.err != nil {
+				item.detail = fmt.Sprintf("[CANCELLED] %s\n", boundedInline(r.err.Error(), 256))
+			}
 		case fleetItemSkipped:
-			fmt.Fprintf(&b, "status: skipped\n[SKIPPED] %v\n", r.err)
+			item.status = "status: skipped\n"
+			if r.err != nil {
+				item.detail = fmt.Sprintf("[SKIPPED] %s\n", boundedInline(r.err.Error(), 256))
+			}
 		default:
-			fmt.Fprintf(&b, "status: pending\n")
+			item.status = "status: pending\n"
 		}
+		items = append(items, item)
 	}
-	return b.String()
-}
-
-func extractSubagentRef(output string) string {
-	const prefix = "Subagent reference: "
-	for _, line := range strings.Split(output, "\n") {
-		if strings.HasPrefix(line, prefix) {
-			return strings.TrimSpace(strings.TrimPrefix(line, prefix))
-		}
-	}
-	return ""
+	return formatBoundedSubagentAggregate(prefix, items)
 }

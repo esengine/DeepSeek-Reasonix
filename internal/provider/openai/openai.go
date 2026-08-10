@@ -12,8 +12,7 @@
 //     reasoning_effort, matching LongCat's OpenAI-compatible API.
 //   - ollama.com → accepts hosted Ollama Cloud's reasoning_effort scale,
 //     including max, and omits the field for none/disabled.
-//   - official Kimi API + kimi-k3 preserves complete assistant messages and
-//     uses K3's fixed-sampling/max_completion_tokens request shape.
+//   - Kimi K3 preserves complete messages and uses max_completion_tokens.
 //   - everything else (MiMo and other OpenAI-compatible gateways) uses the
 //     vanilla reasoning_effort scale (low/medium/high), unless its config
 //     declares a custom supported_efforts validation contract.
@@ -26,8 +25,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"sort"
 	"strings"
@@ -76,26 +77,26 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	if effort == "auto" {
 		effort = ""
 	}
+	protocol, _ := cfg.Extra["reasoning_protocol"].(string)
+	protocol = normalizeReasoningProtocol(protocol)
+	kimiK3 := usesKimiK3Contract(protocol, cfg.BaseURL, cfg.Model)
 	supportedEfforts, _ := cfg.Extra["supported_efforts"].([]string)
 	// A meaningful explicit list is the endpoint's declared effort vocabulary;
 	// auto remains implicit and is therefore ignored here.
-	hasExplicitEfforts := hasExplicitSupportedEfforts(supportedEfforts)
-	protocol, _ := cfg.Extra["reasoning_protocol"].(string)
-	protocol = normalizeReasoningProtocol(protocol)
+	supportedEfforts, hasExplicitEfforts := reasoningEffortVocabulary(kimiK3, supportedEfforts)
 	chatURL, _ := cfg.Extra["chat_url"].(string)
 	chatURL = normalizeChatURL(cfg.BaseURL, chatURL)
 	prefixChatURL := deepSeekPrefixChatURL(chatURL)
 	headers, _ := cfg.Extra["headers"].(map[string]string)
 	extraBody, _ := cfg.Extra["extra_body"].(map[string]any)
 	vision, _ := cfg.Extra["vision"].(bool)
-	explicitModelVision, _ := cfg.Extra["vision_model_explicit"].(bool)
 	officialDeepSeek := IsDeepSeek(cfg.BaseURL)
 	// DeepSeek's official chat API accepts string message content only. Keep
 	// this provider-boundary guard even though config capability resolution
-	// normally prevents image attachments from reaching this layer. A positive
-	// model-scoped capability can opt in without letting stale provider-wide
-	// vision=true settings affect current text-only models.
-	vision = vision && (!officialDeepSeek || explicitModelVision)
+	// normally prevents image attachments from reaching this layer. No persisted
+	// or extension-supplied capability flag may override the endpoint's current
+	// wire contract; future native vision support needs an explicit serializer.
+	vision = vision && !officialDeepSeek
 	visionDetail, _ := cfg.Extra["vision_detail"].(string)
 	visionDetail = strings.ToLower(strings.TrimSpace(visionDetail))
 	if visionDetail != "low" && visionDetail != "high" {
@@ -108,16 +109,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	zhipu := protocol == "glm" || (protocol == "" && IsZhipu(cfg.BaseURL))
 	longcat := protocol == "" && IsLongCat(cfg.BaseURL)
 	ollamaCloud := protocol == "" && IsOllamaCloud(cfg.BaseURL)
-	kimiK3 := IsKimiAPI(cfg.BaseURL) && strings.EqualFold(strings.TrimSpace(cfg.Model), "kimi-k3")
-	// Optional explicit `thinking` config field — a vendor-agnostic escape hatch
-	// (credit @eghrhegpe, #5063) for OpenAI-compatible providers we don't
-	// auto-detect (e.g. opencode.ai). "enabled"/"disabled" drive thinking.type;
-	// anything else is ignored so an unknown value never breaks a request.
-	thinkingType, _ := cfg.Extra["thinking"].(string)
-	thinkingType = strings.ToLower(strings.TrimSpace(thinkingType))
-	if thinkingType != "enabled" && thinkingType != "disabled" {
-		thinkingType = ""
-	}
+	thinkingType := configuredThinkingType(cfg)
 	switch {
 	case protocol == "none":
 		effort = ""
@@ -223,11 +215,15 @@ func New(cfg provider.Config) (provider.Provider, error) {
 			return nil, fmt.Errorf("openai: provider %q: effort must be low, medium, or high", name)
 		}
 	}
+	requestEfforts := requestEffortVocabulary(effortEndpoint{protocol: protocol,
+		thinkingType: thinkingType, effort: effort, deepseek: deepseek, flash: deepseekV4Flash,
+		minimax: minimax, zhipu: zhipu, longcat: longcat, ollamaCloud: ollamaCloud,
+		explicit: hasExplicitEfforts, supported: supportedEfforts})
 	// The automatic cap protects DeepSeek reasoning, not ordinary long-form
 	// output. Preserve an explicit user budget in either mode, but leave a
 	// thinking-disabled request uncapped unless the user configured one.
 	if maxOutputTokens == 0 && officialDeepSeek && thinkingType != "disabled" {
-		maxOutputTokens = provider.DefaultReasoningOutputTokens
+		maxOutputTokens = provider.DefaultHighOutputTokens // DeepSeek supports up to 384K; 128K is a safe default for reasoning
 	}
 	httpClient, err := newHTTPClient(cfg)
 	if err != nil {
@@ -255,29 +251,10 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		visionDetail:    visionDetail,
 		maxOutputTokens: maxOutputTokens,
 		effort:          effort,
+		requestEfforts:  requestEfforts,
 		http:            httpClient,
 		idleTimeout:     defaultStreamIdleTimeout,
 	}, nil
-}
-
-func supportsEffort(levels []string, want string) bool {
-	want = strings.ToLower(strings.TrimSpace(want))
-	for _, level := range levels {
-		if strings.ToLower(strings.TrimSpace(level)) == want {
-			return true
-		}
-	}
-	return false
-}
-
-func hasExplicitSupportedEfforts(levels []string) bool {
-	for _, level := range levels {
-		level = strings.ToLower(strings.TrimSpace(level))
-		if level != "" && level != "auto" {
-			return true
-		}
-	}
-	return false
 }
 
 func newHTTPClient(cfg provider.Config) (*http.Client, error) {
@@ -306,13 +283,14 @@ type client struct {
 	minimax         bool          // true for api.minimaxi.com — emits MiniMax-M3's thinking knob instead of reasoning_effort
 	zhipu           bool          // true for Zhipu GLM (bigmodel.cn / z.ai) — gates thinking via thinking.type, ignores reasoning_effort
 	longcat         bool          // true for LongCat — gates thinking via thinking.type, ignores reasoning_effort
-	kimiK3          bool          // true only for kimi-k3 on Moonshot's official direct API hosts
+	kimiK3          bool          // true for the explicit K3 protocol or kimi-k3 on Moonshot's direct API hosts
 	mimo            bool          // true for MiMo — upgrades legacy tuple schemas to Draft 2020-12
 	thinkingType    string        // explicit `thinking` config override (enabled|disabled); "" = no override
 	vision          bool          // model accepts image input — embed attached images as image_url parts
 	visionDetail    string        // image_url detail hint (low|high); "" = auto/omit
 	maxOutputTokens int           // configured/default total output budget; <=0 omits the optional field
 	effort          string        // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
+	requestEfforts  []string      // depth levels a per-request EffortOverride may take; empty = overrides ignored
 	idleTimeout     time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
 	authed          atomic.Bool   // a request has succeeded — gate transient-401 retry
 }
@@ -380,7 +358,7 @@ func (c *client) sendOpts() provider.SendOptions {
 
 func normalizeReasoningProtocol(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "deepseek", "glm", "openai", "none":
+	case "deepseek", "glm", "kimi-k3", "openai", "none":
 		return strings.ToLower(strings.TrimSpace(raw))
 	default:
 		return ""
@@ -519,7 +497,10 @@ func (c *client) openStream(ctx context.Context, targetURL string, wireReq chatR
 	c.authed.Store(true)
 
 	out := make(chan provider.Chunk)
-	go c.streamWithReconnect(requestCtx, resp, newReq, out)
+	// Body-phase stream cuts surface as StreamInterruptedError so the Agent
+	// can replay the exact frozen request. Connection+header retries stay in
+	// SendWithRetry; providers must not stack a second body-retry budget.
+	go c.streamOnce(requestCtx, resp, out)
 	return out, nil
 }
 
@@ -626,6 +607,8 @@ func mergeUsage(total, next *provider.Usage, countRequests bool) *provider.Usage
 	total.TotalTokens += next.TotalTokens
 	total.CacheHitTokens += next.CacheHitTokens
 	total.CacheMissTokens += next.CacheMissTokens
+	total.CacheWriteTokens += next.CacheWriteTokens
+	total.CacheWriteBilledTokens += next.CacheWriteBilledTokens
 	total.ReasoningTokens += next.ReasoningTokens
 	if countRequests {
 		total.RequestCount = totalRequests + nextRequests
@@ -645,41 +628,24 @@ func usageRequestCount(usage *provider.Usage) int {
 	return 1
 }
 
-// maxStreamReconnects bounds how many times a mid-stream connection drop is
-// replayed from scratch before the error is surfaced — each replay re-runs the
-// whole request (cheap under prompt caching, but not free).
-const maxStreamReconnects = 3
-
-// streamWithReconnect drives readStream and, when the connection is cut before
-// any model output has been forwarded, replays the request rather than failing
-// the turn. Once a token (reasoning/text/tool-call) has been emitted, a replay
-// would duplicate output, so the error is surfaced instead.
-func (c *client) streamWithReconnect(ctx context.Context, resp *http.Response, newReq func(context.Context) (*http.Request, error), out chan<- provider.Chunk) {
+// streamOnce drives a single body read. Mid-stream transport cuts become
+// StreamInterruptedError so the Agent can commit-or-replay; providers no longer
+// replay the body themselves (that would stack retry budgets with the Agent).
+func (c *client) streamOnce(ctx context.Context, resp *http.Response, out chan<- provider.Chunk) {
 	defer close(out)
-	for attempt := 0; ; attempt++ {
-		emitted, err := c.readStream(ctx, resp, out)
-		if err == nil {
-			return
-		}
-		if !provider.IsConnReset(err) {
-			sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: err})
-			return
-		}
-		if emitted {
-			sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: &provider.StreamInterruptedError{Err: err}})
-			return
-		}
-		if attempt >= maxStreamReconnects {
-			sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: err})
-			return
-		}
-		next, rerr := provider.SendWithRetry(ctx, c.http, c.sendOpts(), newReq)
-		if rerr != nil {
-			sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: rerr})
-			return
-		}
-		resp = next
+	_, err := c.readStream(ctx, resp, out)
+	if err == nil {
+		return
 	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: err})
+		return
+	}
+	if provider.IsConnReset(err) {
+		sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: provider.StreamInterrupt(err, provider.ClassifyStreamInterrupt(err))})
+		return
+	}
+	sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: err})
 }
 
 func sendChunk(ctx context.Context, out chan<- provider.Chunk, chunk provider.Chunk) bool {
@@ -725,7 +691,12 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		cm := chatMessage{
 			Role:       string(m.Role),
 			ToolCallID: m.ToolCallID,
-			Name:       m.Name,
+		}
+		if m.Role == provider.RoleTool {
+			// Always send the tool message's name, even when empty: strict
+			// backends (MiMo) 400 a tool result without the key (#4711).
+			name := m.Name
+			cm.Name = &name
 		}
 		// DeepSeek thinking mode 400s an assistant tool_calls turn whose
 		// reasoning_content KEY is absent from the request JSON ("reasoning_content
@@ -814,7 +785,7 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		StreamOptions:   &streamOptions{IncludeUsage: true},
 		Temperature:     req.Temperature,
 		MaxTokens:       maxOutputTokens,
-		ReasoningEffort: c.effort,
+		ReasoningEffort: kimiK3ReasoningEffort(c.kimiK3, c.requestEffort(req)),
 		ExtraBody:       c.extraBody,
 	}
 	switch {
@@ -969,6 +940,9 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			sawDone = true
 			break
 		}
+		if data == "" {
+			continue
+		}
 
 		var sr streamResponse
 		if err := json.Unmarshal([]byte(data), &sr); err != nil {
@@ -1075,14 +1049,17 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		return emitted, err
 	}
 	if stalled.Load() {
-		return emitted, fmt.Errorf("%s: stream stalled — no data for %s, connection likely dropped", c.name, idleTimeout)
+		// Idle stall is a body-phase cut: wrap so the Agent can replay the
+		// frozen request. Providers no longer reconnect here.
+		return emitted, fmt.Errorf("%s: stream stalled — no data for %s, connection likely dropped: %w", c.name, idleTimeout, io.ErrUnexpectedEOF)
 	}
 	if err := scanner.Err(); err != nil {
 		return emitted, fmt.Errorf("%s: read stream: %w", c.name, err)
 	}
 	// A proxy that idle-closes with a clean FIN ends the scan with no error. Without
 	// this check the turn would be committed as complete — including half-streamed
-	// tool-call arguments, which then 400 on every replay (#3953).
+	// tool-call arguments, which then 400 on every replay (#3953). OpenAI Chat
+	// accepts either [DONE] or a legal finish_reason as a complete terminal.
 	if !sawDone && lastFinishReason == "" {
 		return emitted, fmt.Errorf("%s: stream ended before completion: %w", c.name, io.ErrUnexpectedEOF)
 	}
@@ -1174,7 +1151,7 @@ func normaliseUsage(u *wireUsage) *provider.Usage {
 	}
 }
 
-// --- OpenAI-compatible wire protocol ---
+// OpenAI-compatible wire protocol
 
 type chatRequest struct {
 	Model               string         `json:"model"`
@@ -1225,9 +1202,7 @@ func (r chatRequest) MarshalJSON() ([]byte, error) {
 	if err := json.Unmarshal(raw, &body); err != nil {
 		return nil, err
 	}
-	for key, value := range cleanExtraBody(r.ExtraBody) {
-		body[key] = value
-	}
+	maps.Copy(body, cleanExtraBody(r.ExtraBody))
 	return json.Marshal(body)
 }
 
@@ -1257,7 +1232,12 @@ type chatMessage struct {
 	ReasoningContent *string        `json:"reasoning_content,omitempty"`
 	ToolCalls        []chatToolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string         `json:"tool_call_id,omitempty"`
-	Name             string         `json:"name,omitempty"`
+	// Name is the role=tool message's function name. A pointer so ordinary
+	// messages omit the key (byte-stable prefix), while tool messages always
+	// serialize it — even empty: strict OpenAI-compatible backends (MiMo, per
+	// its error table) reject a tool message whose `name` key is absent
+	// ("name is not set"), and OpenAI's spec requires the field on role=tool.
+	Name *string `json:"name,omitempty"`
 }
 
 type chatContentPart struct {

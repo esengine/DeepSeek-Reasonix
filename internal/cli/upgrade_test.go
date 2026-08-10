@@ -48,21 +48,21 @@ func TestVerifyChecksum(t *testing.T) {
 	hash := hex.EncodeToString(sum[:])
 
 	t.Run("match", func(t *testing.T) {
-		checksumFile := []byte(fmt.Sprintf("%s  reasonix-linux-amd64.tar.gz\n", hash))
+		checksumFile := fmt.Appendf(nil, "%s  reasonix-linux-amd64.tar.gz\n", hash)
 		if err := verifyChecksum(content, "reasonix-linux-amd64.tar.gz", checksumFile); err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
 	})
 
 	t.Run("mismatch", func(t *testing.T) {
-		checksumFile := []byte(fmt.Sprintf("%s  reasonix-linux-amd64.tar.gz\n", "0000000000000000000000000000000000000000000000000000000000000000"))
+		checksumFile := fmt.Appendf(nil, "%s  reasonix-linux-amd64.tar.gz\n", "0000000000000000000000000000000000000000000000000000000000000000")
 		if err := verifyChecksum(content, "reasonix-linux-amd64.tar.gz", checksumFile); err == nil {
 			t.Error("expected checksum mismatch error")
 		}
 	})
 
 	t.Run("not found", func(t *testing.T) {
-		checksumFile := []byte(fmt.Sprintf("%s  reasonix-darwin-arm64.tar.gz\n", hash))
+		checksumFile := fmt.Appendf(nil, "%s  reasonix-darwin-arm64.tar.gz\n", hash)
 		if err := verifyChecksum(content, "reasonix-linux-amd64.tar.gz", checksumFile); err == nil {
 			t.Error("expected not-found error")
 		}

@@ -16,7 +16,7 @@ import (
 // without an input_schema, and named tools keep their schema untouched.
 func TestBuildRequestWebSearchServerTool(t *testing.T) {
 	c := &client{name: "deepseek", model: "deepseek-v4-flash", webSearch: true}
-	r := c.buildRequest(provider.Request{
+	r := c.buildRequest(context.Background(), provider.Request{
 		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
 		Tools:    []provider.ToolSchema{{Name: "read_file", Parameters: json.RawMessage(`{"type":"object"}`)}},
 	})
@@ -35,7 +35,7 @@ func TestBuildRequestWebSearchServerTool(t *testing.T) {
 
 	// Disabled (default) ⇒ no server tool is injected.
 	off := &client{name: "deepseek", model: "deepseek-v4-flash"}
-	r = off.buildRequest(provider.Request{
+	r = off.buildRequest(context.Background(), provider.Request{
 		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
 		Tools:    []provider.ToolSchema{{Name: "read_file", Parameters: json.RawMessage(`{"type":"object"}`)}},
 	})

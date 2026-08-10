@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"reasonix/internal/boundedllm"
 	"reasonix/internal/event"
 	"reasonix/internal/nilutil"
 	"reasonix/internal/provider"
@@ -102,12 +103,7 @@ func (s *Session) Review(ctx context.Context, failure *FailureEvent, diagnosis [
 	if nilutil.IsNil(ctx) {
 		ctx = context.Background()
 	}
-	reviewCtx, cancel := context.WithTimeout(ctx, s.timeout)
-	defer cancel()
-	reviewCtx = provider.WithRequestAttemptCounter(reviewCtx)
-
-	sys := PolicyPrompt
-	if len(sys) > reviewerMaxSystemBytes {
+	if len(PolicyPrompt) > reviewerMaxSystemBytes {
 		// Should never happen; keep fail-closed if policy grows past budget.
 		return ReviewVerdict{}, fmt.Errorf("recovery reviewer system policy exceeds %d bytes", reviewerMaxSystemBytes)
 	}
@@ -115,71 +111,31 @@ func (s *Session) Review(ctx context.Context, failure *FailureEvent, diagnosis [
 	if err != nil {
 		return ReviewVerdict{}, err
 	}
-	if len(sys)+len(evidence) > reviewerMaxTotalBytes {
+	if len(PolicyPrompt)+len(evidence) > reviewerMaxTotalBytes {
 		// Must not mid-clip JSON. Evidence already field-budgeted to 6 KiB;
 		// remaining overflow can only come from a policy growth — fail closed.
 		return ReviewVerdict{}, fmt.Errorf("recovery reviewer request exceeds %d bytes", reviewerMaxTotalBytes)
 	}
-
-	temp := provider.TemperaturePtr(0)
-	req := provider.Request{
-		Messages: []provider.Message{
-			{Role: provider.RoleSystem, Content: sys},
-			{Role: provider.RoleUser, Content: evidence},
-		},
-		// No tools.
-		Temperature: temp,
-		MaxTokens:   reviewerMaxTokens,
-	}
-
+	// Serialize concurrent reviews on one shared provider instance.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	var usage *provider.Usage
-	defer func() {
-		usage = provider.UsageWithRequestAttemptCount(reviewCtx, usage)
-		if usage != nil && s.sink != nil {
-			s.sink.Emit(event.Event{
-				Kind:        event.Usage,
-				ModelRef:    s.modelRef,
-				Usage:       usage,
-				Pricing:     s.pricing,
-				UsageSource: event.UsageSourceRecoveryReviewer,
-				Source:      event.UsageSourceRecoveryReviewer,
-			})
-		}
-	}()
-
-	ch, err := s.prov.Stream(reviewCtx, req)
+	text, err := boundedllm.Call(ctx, boundedllm.Config{
+		Provider:       s.prov,
+		Pricing:        s.pricing,
+		ModelRef:       s.modelRef,
+		Sink:           event.Sink(s.sink),
+		UsageSource:    event.UsageSourceRecoveryReviewer,
+		Timeout:        s.timeout,
+		MaxTokens:      reviewerMaxTokens,
+		MaxOutputBytes: reviewerMaxOutputBytes,
+		MaxSystemBytes: reviewerMaxSystemBytes,
+		MaxTotalBytes:  reviewerMaxTotalBytes,
+	}, PolicyPrompt, evidence)
 	if err != nil {
 		return ReviewVerdict{}, err
 	}
-
-	var text strings.Builder
-	for chunk := range ch {
-		switch chunk.Type {
-		case provider.ChunkText:
-			text.WriteString(chunk.Text)
-			if text.Len() > reviewerMaxOutputBytes {
-				cancel()
-				return ReviewVerdict{}, fmt.Errorf("recovery reviewer output exceeded %d bytes", reviewerMaxOutputBytes)
-			}
-		case provider.ChunkUsage:
-			if chunk.Usage != nil {
-				u := *chunk.Usage
-				usage = &u
-			}
-		case provider.ChunkError:
-			if chunk.Err != nil {
-				return ReviewVerdict{}, chunk.Err
-			}
-			return ReviewVerdict{}, fmt.Errorf("recovery reviewer stream error")
-		}
-	}
-	if reviewCtx.Err() != nil && text.Len() == 0 {
-		return ReviewVerdict{}, reviewCtx.Err()
-	}
-	verdict, perr := parseReviewVerdict(text.String())
+	verdict, perr := parseReviewVerdict(text)
 	if perr != nil {
 		return ReviewVerdict{}, perr
 	}
@@ -281,7 +237,7 @@ func buildReviewEvidence(failure *FailureEvent, diagnosis []string, proposal Pro
 // Drop order prefers keeping failure identity and proposal identity over large
 // excerpts (task summary → diagnosis notes → output → preview → args).
 func marshalEvidenceWithinBudget(ev reviewEvidence) ([]byte, error) {
-	for attempt := 0; attempt < 12; attempt++ {
+	for range 12 {
 		raw, err := json.Marshal(ev)
 		if err != nil {
 			return nil, fmt.Errorf("marshal recovery evidence: %w", err)

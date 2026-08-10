@@ -10,6 +10,7 @@
 | `bash_output` | true | 读取后台 `bash` 或 `task` job 自上次读取后的新增输出和状态。 |
 | `code_index` | true | 轻量内置代码符号索引；优先使用 `lsp_*` 或代码图 MCP，缺失时用它兜底。 |
 | `complete_step` | true | 用证据记录已批准计划中一个步骤的完成情况。 |
+| `compress` | true | 压缩当前模型可见对话中选定的范围，不删除可见历史。仅在用户明确要求压缩上下文时使用；锚点必须是某条真实用户消息中唯一、精确的原文片段。 |
 | `delete_range` | false | 用精确 start/end 文本锚点删除文件中的连续范围。 |
 | `delete_symbol` | false | 用 Go AST 删除 Go 源文件中的命名符号。 |
 | `edit_file` | false | 将文件中的唯一精确字符串替换为另一个字符串。 |
@@ -78,8 +79,13 @@ Executor 刻意保留直接 `mcp__*` 工具，因此安装、连接或刷新这�
 `ask`, `docs`, `explore`, `fleet`, `forget`, `history`, `install_skill`, `install_source`,
 `list_sessions`, `lsp_definition`, `lsp_diagnostics`, `lsp_hover`,
 `lsp_references`, `memory`, `parallel_tasks`, `read_only_skill`,
-`read_only_task`, `read_session`, `read_skill`, `remember`, `research`,
+`read_only_task`, `read_session`, `read_skill`, `read_subagent_result`, `remember`, `research`,
 `review`, `run_skill`, `security_review`, `slash_command`, `task`.
+
+`parallel_tasks` 与 `fleet` 会为每个已持久化子 Agent 返回公平分配的预览和稳定的
+`Subagent reference`，使合并结果始终低于单工具输出上限。`read_subagent_result`
+按 UTF-8 字节偏移分页读取某个引用对应的完整最终答案，因此长篇并行调研无需一次性全部
+注入父会话也不会丢失。引用只允许在当前会话 lineage 和工作区内读取。
 
 `use_capability`（`action` = `list` | `inspect` | `call` | `decline`）：Delivery Executor，
 以及 Balanced 双模型会话中的 Planner 和 Executor；Economy 不启用。

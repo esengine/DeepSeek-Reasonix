@@ -7,7 +7,7 @@ import { createBoundedRefreshCoordinator, sameTabMetaLists, shouldRefreshTabMeta
 import type { TabMeta } from "../lib/types";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
-const appSource = readFileSync(resolve(testDir, "../App.tsx"), "utf8");
+const appSource = readFileSync(resolve(testDir, "../App.tsx"), "utf8"), workspaceFocusSource = readFileSync(resolve(testDir, "../lib/workspaceRefreshStore.ts"), "utf8");
 const appChromeSource = readFileSync(resolve(testDir, "../components/AppChrome.tsx"), "utf8");
 const commandPaletteSource = readFileSync(resolve(testDir, "../components/CommandPalette.tsx"), "utf8");
 const projectTreeSource = readFileSync(resolve(testDir, "../components/ProjectTree.tsx"), "utf8");
@@ -226,10 +226,10 @@ ok(!shouldRefreshTabMetaForEvent("text_delta"), "stream deltas do not trigger ta
 }
 
 ok(
-  !appSource.includes("setInterval(() => void refreshTabMetas(), 2000)") &&
-    appSource.includes('document.addEventListener("visibilitychange", onVisibilityChange)') &&
+  !appSource.includes("setInterval(() => void refreshTabMetas(), 2000)") && appSource.includes('import("./lib/workspaceRefreshStore")') &&
+    workspaceFocusSource.includes('document.addEventListener("visibilitychange", onVisibilityChange)') &&
     appSource.includes("createBoundedRefreshCoordinator<TabMeta[]>(TAB_META_MAX_IN_FLIGHT)") &&
-    appSource.includes("void refreshTabMetas();\n        schedule();"),
+    /void refreshTabMetas\(\);\s+schedule\(\);/.test(workspaceFocusSource),
   "tab metadata refresh is event-driven with a visibility-aware fallback",
 );
 
@@ -794,6 +794,25 @@ ok(
   finalDeclaration(".skip-to-composer", "box-shadow") === "none" &&
     finalDeclaration(".skip-to-composer:focus-visible", "box-shadow")?.includes("0 12px 28px"),
   "offscreen skip link does not leak its focus shadow into the workbench title area",
+);
+
+// The Wails drag runtime drops any mousedown with detail !== 1, so a double
+// click on a drag region never reaches the OS: both title-bar-hiding platforms
+// have to zoom from here or not at all.
+ok(
+  /chromeDoubleClickZooms\s*=\s*windowsFramelessChrome\s*\|\|\s*desktopPlatform === "darwin"/.test(appSource),
+  "title-bar double click zooms on macOS as well as frameless Windows",
+);
+ok(
+  /handleChromeTitlebarDoubleClick[\s\S]{0,700}?closest\("button, input, textarea, select, a, \[role='button'\], \[role='tab'\], \.windows-window-controls"\)/.test(appSource),
+  "title-bar double click still ignores interactive controls",
+);
+ok(
+  /function isMacOSWorkbenchSidebarTitlebar[\s\S]{0,500}?closest\("\.sidebar--workbench"\)[\s\S]{0,500}?MACOS_WORKBENCH_TITLEBAR_HEIGHT/.test(appSource) &&
+    /handleChromeTitlebarDoubleClick[\s\S]{0,400}?isMacOSWorkbenchSidebarTitlebar\(target, event\.clientY, desktopPlatform\)/.test(appSource) &&
+    !appSource.includes("window.runtime?.WindowToggleMaximise") &&
+    !bridgeSource.includes("WindowToggleMaximise?(): void;"),
+  "macOS workbench sidebar titlebar reuses the centralized zoom path",
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -1,0 +1,5 @@
+prompt = "Set the retry max backoff to 250 in this project's configuration."
+class = "symbol"
+max_steps = 8
+timeout_sec = 180
+memory_markers = ["MEMKEY-SYM9K"]

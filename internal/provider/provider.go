@@ -11,8 +11,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"slices"
 	"sort"
 	"strings"
+	"syscall"
 	"unicode"
 
 	"reasonix/internal/nilutil"
@@ -52,26 +56,78 @@ type Message struct {
 	ProviderContent  string   `json:"provider_content,omitempty"`
 	Images           []string `json:"images,omitempty"`            // data URLs (data:<mime>;base64,…) on user (attachments) and tool (MCP image results) messages; embedded only for vision-capable models
 	ReasoningContent string   `json:"reasoning_content,omitempty"` // assistant: thinking-mode chain-of-thought, round-tripped on multi-turn
+	// ReasoningID is the provider-issued reasoning-item id (OpenAI Responses:
+	// Reasoning.id is required on input items), captured from the streamed
+	// output item and round-tripped back into later inputs.
+	ReasoningID string `json:"reasoning_id,omitempty"`
+	// ReasoningStatus is the final status of the reasoning item
+	// ("in_progress" | "completed") as issued by the server's done event,
+	// round-tripped back into the input alongside ReasoningID.
+	ReasoningStatus string `json:"reasoning_status,omitempty"`
 	// ReasoningSignature is an opaque, provider-issued proof that ReasoningContent
 	// is genuine model output. Anthropic requires the signed thinking block be
 	// replayed on the next turn when a tool call followed thinking; providers
 	// without signed reasoning (e.g. the openai-compatible ones) leave it empty.
 	// Round-tripped alongside ReasoningContent.
-	ReasoningSignature string           `json:"reasoning_signature,omitempty"`
-	ToolCalls          []ToolCall       `json:"tool_calls,omitempty"`      // set by assistant
-	ToolCallID         string           `json:"tool_call_id,omitempty"`    // links a tool result to its call
-	Name               string           `json:"name,omitempty"`            // tool message: tool name
-	MemoryCitations    []MemoryCitation `json:"memoryCitations,omitempty"` // local UI metadata; provider requests ignore it
-	WorkDurationMs     int64            `json:"workDurationMs,omitempty"`  // local UI metadata; provider requests ignore it
-	CreatedAt          int64            `json:"createdAt,omitempty"`       // local UI metadata; unix milliseconds; stripped before provider requests
-	Edited             bool             `json:"edited,omitempty"`          // local UI metadata; provider requests ignore it
-	Original           string           `json:"original,omitempty"`        // user prompt before inline edit
+	ReasoningSignature string     `json:"reasoning_signature,omitempty"`
+	ToolCalls          []ToolCall `json:"tool_calls,omitempty"` // set by assistant
+	// ResponsesItems preserves provider-issued Responses API output items that
+	// must be replayed on a stateless follow-up. Today only DeepSeek
+	// web_search_call items use this path; other providers ignore the field.
+	// Keeping the opaque JSON on the assistant turn makes resume/restart safe,
+	// while omitempty keeps old session files byte-compatible when unused.
+	ResponsesItems  []json.RawMessage `json:"responses_items,omitempty"`
+	ToolCallID      string            `json:"tool_call_id,omitempty"`    // links a tool result to its call
+	Name            string            `json:"name,omitempty"`            // tool message: tool name
+	MemoryCitations []MemoryCitation  `json:"memoryCitations,omitempty"` // local UI metadata; provider requests ignore it
+	WorkDurationMs  int64             `json:"workDurationMs,omitempty"`  // local UI metadata; provider requests ignore it
+	CreatedAt       int64             `json:"createdAt,omitempty"`       // local UI metadata; unix milliseconds; stripped before provider requests
+	Edited          bool              `json:"edited,omitempty"`          // local UI metadata; provider requests ignore it
+	Original        string            `json:"original,omitempty"`        // user prompt before inline edit
 	// LocalOnly marks durable transcript content that must never be sent to a
 	// model provider. Interrupted streaming output uses it so every frontend can
 	// replay what the user saw without feeding partial reasoning or tool-call
 	// arguments back into the next request.
-	LocalOnly       bool                     `json:"local_only,omitempty"`
-	InterruptedTurn *InterruptedTurnRecovery `json:"interrupted_turn,omitempty"`
+	LocalOnly       bool             `json:"local_only,omitempty"`
+	DecisionReceipt *DecisionReceipt `json:"decision_receipt,omitempty"`
+	// DecisionReceipts are local-only metadata attached to a provider-visible
+	// message. Keeping them on the existing assistant record preserves the
+	// assistant/tool-result adjacency required by current and older readers.
+	// ModelMessages strips the field before handing requests to providers.
+	DecisionReceipts []*DecisionReceipt       `json:"decision_receipts,omitempty"`
+	InterruptedTurn  *InterruptedTurnRecovery `json:"interrupted_turn,omitempty"`
+	// ToolExecution is local shell UI metadata on tool-result messages. It is
+	// persisted for Desktop/CLI/Serve cards and stripped by ModelMessages before
+	// any provider request so tool schemas and prompt-cache prefixes stay stable.
+	ToolExecution *ToolExecution `json:"tool_execution,omitempty"`
+}
+
+// ToolExecution is host-local shell metadata mirrored from tool.ShellExecution.
+// Provider serializers must never emit this object on the wire.
+type ToolExecution struct {
+	Kind           string `json:"kind,omitempty"`
+	Shell          string `json:"shell,omitempty"`
+	ShellVersion   string `json:"shellVersion,omitempty"`
+	Platform       string `json:"platform,omitempty"`
+	SupportsAndAnd bool   `json:"supportsAndAnd"`
+	State          string `json:"state,omitempty"`
+	FailurePhase   string `json:"failurePhase,omitempty"`
+	ExitCode       *int   `json:"exitCode,omitempty"`
+	OutputTail     string `json:"outputTail,omitempty"`
+	MutationRisk   string `json:"mutationRisk,omitempty"`
+	Verification   string `json:"verification,omitempty"`
+	DurationMs     int64  `json:"durationMs,omitempty"`
+}
+
+// DecisionReceipt is durable, provider-excluded evidence of a user-owned
+// approval decision. It intentionally contains only bounded labels and the
+// outcome, never free-form guidance or provider-visible content.
+type DecisionReceipt struct {
+	ID      string `json:"id"`
+	Kind    string `json:"kind"`
+	Tool    string `json:"tool,omitempty"`
+	Subject string `json:"subject,omitempty"`
+	Outcome string `json:"outcome"`
 }
 
 // InterruptedTurnRecovery is the durable, provider-excluded handoff for a turn
@@ -160,6 +216,22 @@ type Request struct {
 	Tools       []ToolSchema
 	Temperature *float64 // nil = omit; non-nil = send the value, including 0
 	MaxTokens   int
+	// ResponseFormat, when non-nil, asks the endpoint for structured JSON
+	// output (Responses: text.format.type=json_object). Nil omits the field
+	// entirely — the common path must stay byte-stable for prompt caching.
+	ResponseFormat *ResponseFormat `json:"ResponseFormat,omitempty"`
+	EffortOverride string          `json:"EffortOverride,omitempty"` // per-call reasoning-depth override; adapters apply it only when the endpoint's effort vocabulary accepts it
+	// ContextEditing is an explicit provider capability request. Providers that
+	// do not support native editing ignore it; local compaction remains the
+	// default when it is nil.
+	ContextEditing *ContextEditingPolicy `json:"ContextEditing,omitempty"`
+}
+
+// ResponseFormat asks a provider to constrain its output shape.
+type ResponseFormat struct {
+	// Type is the structured format: "json_object" is the only shape the
+	// Responses endpoints currently define (MiMo/DashScope/OpenAI).
+	Type string `json:"type"`
 }
 
 // DefaultReasoningOutputTokens is the conservative provider-side budget used
@@ -167,6 +239,14 @@ type Request struct {
 // Unknown compatible gateways must opt in through configuration instead of
 // inheriting this value merely because they implement an OpenAI-shaped wire.
 const DefaultReasoningOutputTokens = 32 * 1024
+
+// DefaultHighOutputTokens is the raised output budget for reasoning APIs whose
+// documented contract safely accepts 128K-class ceilings (DeepSeek Responses
+// API allows up to 384K; MiMo allows up to 131072). Long reasoning turns
+// truncate under 32K, forcing many small write→test→fix iterations; a 128K
+// budget lets the model finish in one pass. Kept in one place so the three
+// protocols (Responses / Chat Completions / Anthropic) cannot drift apart.
+const DefaultHighOutputTokens = 128 * 1024
 
 // TemperaturePtr wraps v in a pointer so callers that explicitly want a
 // specific temperature, including 0 for deterministic output, can distinguish
@@ -203,7 +283,7 @@ func SanitizeToolPairing(msgs []Message) []Message { return NormalizeMessages(ms
 func ModelMessages(msgs []Message) []Message {
 	needsCopy := false
 	for _, m := range msgs {
-		if m.LocalOnly || m.RawContent != "" || m.ProviderContent != "" {
+		if m.LocalOnly || m.RawContent != "" || m.ProviderContent != "" || m.DecisionReceipt != nil || len(m.DecisionReceipts) > 0 || m.ToolExecution != nil {
 			needsCopy = true
 			break
 		}
@@ -221,6 +301,10 @@ func ModelMessages(msgs []Message) []Message {
 			candidate.ProviderContent = ""
 		}
 		candidate.RawContent = ""
+		candidate.DecisionReceipt = nil
+		candidate.DecisionReceipts = nil
+		// Local shell metadata must never enter provider request bytes.
+		candidate.ToolExecution = nil
 		out = append(out, candidate)
 	}
 	return out
@@ -254,7 +338,52 @@ func NormalizeMessages(msgs []Message) []Message {
 // Save/LoadSession remains a byte-for-byte conversation round trip for histories
 // that were already on disk.
 func NormalizeSessionMessages(msgs []Message) []Message {
-	return normalizeMessages(msgs, false)
+	return normalizeMessages(attachStandaloneDecisionReceipts(msgs), false)
+}
+
+// attachStandaloneDecisionReceipts migrates the short-lived receipt encoding
+// that stored a LocalOnly assistant message between an assistant tool call and
+// its result. Folding that metadata into the latest assistant message repairs
+// already-written sessions before tool-pair normalization can fabricate a
+// placeholder. Healthy histories return the original slice unchanged.
+func attachStandaloneDecisionReceipts(msgs []Message) []Message {
+	target := -1
+	needsMigration := false
+	for i, m := range msgs {
+		switch {
+		case m.Role == RoleUser && !m.LocalOnly:
+			target = -1
+		case m.Role == RoleAssistant && !m.LocalOnly:
+			target = i
+		case target >= 0 && m.LocalOnly && m.DecisionReceipt != nil:
+			needsMigration = true
+		}
+		if needsMigration {
+			break
+		}
+	}
+	if !needsMigration {
+		return msgs
+	}
+
+	out := make([]Message, 0, len(msgs))
+	target = -1
+	for _, m := range msgs {
+		switch {
+		case m.Role == RoleUser && !m.LocalOnly:
+			target = -1
+		case m.Role == RoleAssistant && !m.LocalOnly:
+			out = append(out, m)
+			target = len(out) - 1
+			continue
+		case target >= 0 && m.LocalOnly && m.DecisionReceipt != nil:
+			receipts := append([]*DecisionReceipt(nil), out[target].DecisionReceipts...)
+			out[target].DecisionReceipts = append(receipts, m.DecisionReceipt)
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 func normalizeMessages(msgs []Message, dropOrphanTools bool) []Message {
@@ -399,7 +528,7 @@ func repairToolCallArgs(m Message) Message {
 func closeTruncatedJSON(s string) string {
 	var stack []byte
 	inStr, esc := false, false
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		c := s[i]
 		if inStr {
 			switch {
@@ -439,8 +568,8 @@ func closeTruncatedJSON(s string) string {
 	case strings.HasSuffix(trimmed, ":"):
 		out = trimmed + "null"
 	}
-	for i := len(stack) - 1; i >= 0; i-- {
-		out += string(stack[i])
+	for _, v := range slices.Backward(stack) {
+		out += string(v)
 	}
 	if !json.Valid([]byte(out)) {
 		return "{}"
@@ -581,6 +710,7 @@ const (
 	ChunkUsage                              // token usage for the completion
 	ChunkDone                               // completion finished normally
 	ChunkError                              // an error occurred
+	ChunkResponsesItem                      // a complete provider-issued Responses API output item for stateless replay
 )
 
 // Usage reports token accounting for a completion. Cache hit/miss come from
@@ -593,18 +723,59 @@ const (
 // Estimated marks counts reconstructed locally because the provider's terminal
 // usage record did not arrive; exact provider usage leaves it false.
 type Usage struct {
-	PromptTokens     int
-	CompletionTokens int
-	TotalTokens      int
-	CacheHitTokens   int    // prompt tokens served from cache
-	CacheMissTokens  int    // prompt tokens not cached
-	ReasoningTokens  int    // subset of CompletionTokens spent on chain-of-thought
-	FinishReason     string // "stop", "tool_calls", "length", "content_filter", "repetition_truncation", …
-	Estimated        bool
+	PromptTokens           int
+	CompletionTokens       int
+	TotalTokens            int
+	CacheHitTokens         int     // prompt tokens served from cache
+	CacheMissTokens        int     // prompt tokens not cached, including CacheWriteTokens
+	CacheWriteTokens       int     // subset of CacheMissTokens used to create provider cache entries
+	CacheWriteBilledTokens float64 // cache-write charge expressed in ordinary input-token equivalents
+	ReasoningTokens        int     // subset of CompletionTokens spent on chain-of-thought
+	FinishReason           string  // "stop", "tool_calls", "length", "content_filter", "repetition_truncation", …
+	Estimated              bool
 	// RequestCount is the number of provider requests represented by this
 	// aggregate. Zero means one request for backward compatibility. Recovery
 	// paths that merge multiple attempts set the exact count.
 	RequestCount int
+	// Context* fields describe the latest single-request shape for context
+	// gauges and rebind telemetry. When zero, consumers fall back to the
+	// billable Prompt/Completion/… fields. Multi-attempt sampling recovery
+	// sets PromptTokens (etc.) to the billable aggregate and fills Context*
+	// from the final attempt only.
+	ContextPromptTokens     int
+	ContextCompletionTokens int
+	ContextReasoningTokens  int
+	ContextCacheHitTokens   int
+	ContextCacheMissTokens  int
+	// Native context-editing observations from the latest committed request.
+	ContextEditingType            string
+	ContextEditingClearedToolUses int
+	ContextEditingClearedTokens   int
+}
+
+// ContextFillTokens returns the latest-attempt context fill (prompt+completion)
+// used by status bars and context panels. Falls back to billable totals when
+// no Context* fields were set (single-attempt / legacy usage events).
+func (u *Usage) ContextFillTokens() int {
+	if u == nil {
+		return 0
+	}
+	if u.ContextPromptTokens > 0 || u.ContextCompletionTokens > 0 {
+		return u.ContextPromptTokens + u.ContextCompletionTokens
+	}
+	return u.PromptTokens + u.CompletionTokens
+}
+
+// LatestPromptTokens returns the latest-attempt prompt size for context-aware
+// runtime decisions. Falls back to PromptTokens for single-attempt legacy usage.
+func (u *Usage) LatestPromptTokens() int {
+	if u == nil {
+		return 0
+	}
+	if u.ContextPromptTokens > 0 {
+		return u.ContextPromptTokens
+	}
+	return u.PromptTokens
 }
 
 // Pricing is a provider's per-1M-token rates, used to estimate spend. Currency
@@ -628,8 +799,24 @@ func (p *Pricing) Cost(u *Usage) float64 {
 	} else if miss == 0 && hit > 0 && u.PromptTokens > hit {
 		miss = u.PromptTokens - hit
 	}
+	// CacheMissTokens intentionally remains the raw prompt-token denominator
+	// used by cache hit-rate displays, so cache writes are included there. For
+	// cost, split those writes back out and replace them with their provider-
+	// supplied input-token equivalent (for example Anthropic's 1.25x 5-minute
+	// writes or 2x 1-hour writes). Older providers leave both fields at zero and
+	// keep the legacy one-input-rate behavior. A write count without billed
+	// units also falls back to 1x for backward compatibility.
+	write := min(max(u.CacheWriteTokens, 0), miss)
+	billedWrite := 0.0
+	if write > 0 {
+		billedWrite = u.CacheWriteBilledTokens
+		if billedWrite <= 0 {
+			billedWrite = float64(write)
+		}
+	}
+	inputTokenUnits := float64(miss-write) + billedWrite
 	return (float64(hit)*p.CacheHit +
-		float64(miss)*p.Input +
+		inputTokenUnits*p.Input +
 		float64(u.CompletionTokens)*p.Output) / 1e6
 }
 
@@ -691,20 +878,40 @@ func isThreeLetterCurrencyCode(value string) bool {
 // Chunk is a single streamed event. Read the field matching Type.
 type Chunk struct {
 	Type      ChunkType
-	Text      string    // ChunkText, ChunkReasoning
-	Signature string    // ChunkReasoning: opaque proof for the reasoning (Anthropic thinking signature), when issued
-	ToolCall  *ToolCall // ChunkToolCallStart (ID+Name only), ChunkToolCallArgsDelta (ID+Name), ChunkToolCall (complete)
-	ArgChars  int       // ChunkToolCallArgsDelta: cumulative argument characters received for this call
-	Usage     *Usage    // ChunkUsage
-	Err       error     // ChunkError
+	Text      string // ChunkText, ChunkReasoning
+	Signature string // ChunkReasoning: opaque proof for the reasoning (Anthropic thinking signature), when issued
+	// ReasoningID/ReasoningStatus ride the final ChunkReasoning of a turn
+	// (empty Text): the provider-issued reasoning item id/status captured
+	// from the SSE stream, so the Agent can persist them into the session
+	// and the next turn's input reasoning item round-trips them (review
+	// #7234 — OpenAI Responses schema marks Reasoning.id required).
+	ReasoningID     string          // ChunkReasoning: provider-issued reasoning item id
+	ReasoningStatus string          // ChunkReasoning: final reasoning item status ("completed")
+	ToolCall        *ToolCall       // ChunkToolCallStart (ID+Name only), ChunkToolCallArgsDelta (ID+Name), ChunkToolCall (complete)
+	ArgChars        int             // ChunkToolCallArgsDelta: cumulative argument characters received for this call
+	ResponsesItem   json.RawMessage // ChunkResponsesItem: opaque validated Responses API output item
+	Usage           *Usage          // ChunkUsage
+	Err             error           // ChunkError
 }
 
-// StreamInterruptedError marks a recoverable transport cut that happened after
-// the caller had already received model output. Providers must not replay these
-// requests themselves because doing so could duplicate visible text or tool
-// calls; the agent can append a tail recovery prompt instead.
+// Fixed stream-interrupt reasons for observability. Values are a closed enum
+// and must never carry URLs, tool arguments, file paths, or raw error text.
+const (
+	StreamInterruptConnectionReset = "connection_reset"
+	StreamInterruptPrematureEOF    = "premature_eof"
+	StreamInterruptIdleTimeout     = "idle_timeout"
+)
+
+// StreamInterruptedError marks that the current sampling attempt never reached
+// a clean provider terminal event and is therefore uncommitted. The Agent may
+// replay the exact same provider request. Providers must not perform body-phase
+// request replay themselves — that lives at the Agent layer so retry budgets,
+// UI rollback, and tool execution stay single-owner. context.Canceled, auth,
+// 4xx/schema errors, and unparseable complete protocol payloads must not use
+// this type.
 type StreamInterruptedError struct {
-	Err error
+	Err    error
+	Reason string // one of the StreamInterrupt* constants; may be empty for older callers
 }
 
 func (e *StreamInterruptedError) Error() string {
@@ -719,6 +926,50 @@ func (e *StreamInterruptedError) Unwrap() error {
 		return nil
 	}
 	return e.Err
+}
+
+// StreamInterrupt wraps err as a StreamInterruptedError with a fixed reason.
+func StreamInterrupt(err error, reason string) error {
+	if err == nil {
+		return nil
+	}
+	return &StreamInterruptedError{Err: err, Reason: reason}
+}
+
+// StreamInterruptReason returns the fixed reason when err is a stream
+// interruption, or empty otherwise.
+func StreamInterruptReason(err error) string {
+	var interrupted *StreamInterruptedError
+	if !errors.As(err, &interrupted) || interrupted == nil {
+		return ""
+	}
+	if interrupted.Reason != "" {
+		return interrupted.Reason
+	}
+	return ClassifyStreamInterrupt(interrupted.Err)
+}
+
+// ClassifyStreamInterrupt maps a transport error onto a fixed reason enum.
+// Prefer attaching Reason at the emit site; this is a best-effort fallback.
+func ClassifyStreamInterrupt(err error) string {
+	if err == nil {
+		return StreamInterruptPrematureEOF
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "stalled") || strings.Contains(msg, "idle timeout") || strings.Contains(msg, "no data for"):
+		return StreamInterruptIdleTimeout
+	case errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) || strings.Contains(msg, "before completion") || strings.Contains(msg, "unexpected eof"):
+		return StreamInterruptPrematureEOF
+	case errors.Is(err, net.ErrClosed) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNABORTED) ||
+		strings.Contains(msg, "connection reset") || strings.Contains(msg, "forcibly closed") || strings.Contains(msg, "broken pipe"):
+		return StreamInterruptConnectionReset
+	default:
+		if IsConnReset(err) {
+			return StreamInterruptConnectionReset
+		}
+		return StreamInterruptPrematureEOF
+	}
 }
 
 func IsStreamInterrupted(err error) bool {

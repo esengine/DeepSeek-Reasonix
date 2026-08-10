@@ -2,8 +2,12 @@ package taskmonitor
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,6 +36,7 @@ type TmuxMapping struct {
 	Session       string    `json:"session"`
 	Window        string    `json:"window"`
 	Pane          string    `json:"pane"`
+	OwnerToken    string    `json:"owner_token,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	Stale         bool      `json:"stale"`
 }
@@ -70,9 +75,6 @@ func newDefaultTmuxRunner() TmuxRunner {
 }
 
 func (a *TmuxAdapter) Attach(ctx context.Context, projectDir, taskID, requestedSession string) TmuxResult {
-	if err := validateProjectDir(projectDir); err != nil {
-		return tmuxError(taskID, ErrTmuxMappingFailed, "invalid project directory")
-	}
 	if err := validateTmuxName(requestedSession); err != nil {
 		return tmuxError(taskID, ErrTmuxInvalidName, err.Error())
 	}
@@ -86,36 +88,54 @@ func (a *TmuxAdapter) Attach(ctx context.Context, projectDir, taskID, requestedS
 	if a.runner == nil {
 		return tmuxUnavailable(taskID)
 	}
-	if old, err := a.load(projectDir, taskID); err == nil && old != nil && !old.Stale {
-		if _, err := a.runner.Run(ctx, "has-session", "-t", old.Session); err == nil {
+	old, err := a.load(projectDir, taskID)
+	if err != nil {
+		return tmuxError(taskID, ErrTmuxMappingFailed, "mapping read failed")
+	}
+	if old != nil {
+		if err := a.validateMapping(projectDir, taskID, old); err != nil {
+			if err := a.removeMapping(projectDir, taskID); err != nil {
+				return tmuxError(taskID, ErrTmuxMappingFailed, "invalid mapping removal failed")
+			}
+		} else if !old.Stale && a.ownsSession(ctx, old) {
 			return TmuxResult{SchemaVersion: 1, TaskID: taskID, Available: true, Idempotent: true, Mapping: old}
+		} else {
+			old.Stale = true
+			if err := a.save(projectDir, *old); err != nil {
+				return tmuxError(taskID, ErrTmuxMappingFailed, "mapping update failed")
+			}
 		}
-		old.Stale = true
-		_ = a.save(projectDir, *old)
 	}
 	session := requestedSession
 	if session == "" {
-		session = "reasonix-" + taskID
+		session = defaultTmuxSessionName(taskID)
 	}
 	if err := validateTmuxName(session); err != nil {
 		return tmuxError(taskID, ErrTmuxInvalidName, err.Error())
+	}
+	ownerToken, err := newTmuxOwnerToken()
+	if err != nil {
+		return tmuxError(taskID, ErrTmuxMappingFailed, "mapping ownership creation failed")
 	}
 	window := "task"
 	if _, err := a.runner.Run(ctx, "new-session", "-d", "-s", session, "-n", window); err != nil {
 		return tmuxError(taskID, ErrTmuxCommandFailed, "tmux session creation failed")
 	}
-	m := &TmuxMapping{SchemaVersion: 1, TaskID: taskID, ProjectDir: projectDir, Session: session, Window: window, Pane: session + ":" + window + ".0", CreatedAt: time.Now().UTC()}
+	m := &TmuxMapping{SchemaVersion: 1, TaskID: taskID, ProjectDir: projectDir, Session: session, Window: window, Pane: session + ":" + window + ".0", OwnerToken: ownerToken, CreatedAt: time.Now().UTC()}
+	if _, err := a.runner.Run(ctx, "set-option", "-t", tmuxSessionPaneTarget(session), tmuxOwnerOption, ownerToken); err != nil {
+		// set-option may have reached the tmux server even when the client
+		// reports an error. Clean up only through the ownership-checked command.
+		_ = a.killOwnedSession(ctx, m)
+		return tmuxError(taskID, ErrTmuxCommandFailed, "tmux ownership marker failed")
+	}
 	if err := a.save(projectDir, *m); err != nil {
-		_, _ = a.runner.Run(ctx, "kill-session", "-t", session)
+		_ = a.killOwnedSession(ctx, m)
 		return tmuxError(taskID, ErrTmuxMappingFailed, "mapping write failed")
 	}
 	return TmuxResult{SchemaVersion: 1, TaskID: taskID, Available: true, Mapping: m}
 }
 
 func (a *TmuxAdapter) Status(ctx context.Context, projectDir, taskID string) TmuxResult {
-	if err := validateProjectDir(projectDir); err != nil {
-		return tmuxError(taskID, ErrTmuxMappingFailed, "invalid project directory")
-	}
 	m, err := a.load(projectDir, taskID)
 	if err != nil {
 		return tmuxError(taskID, ErrTmuxMappingFailed, "mapping read failed")
@@ -123,21 +143,23 @@ func (a *TmuxAdapter) Status(ctx context.Context, projectDir, taskID string) Tmu
 	if m == nil {
 		return TmuxResult{SchemaVersion: 1, TaskID: taskID, Available: a.runner != nil}
 	}
+	if err := a.validateMapping(projectDir, taskID, m); err != nil {
+		return tmuxError(taskID, ErrTmuxMappingFailed, "mapping ownership validation failed")
+	}
 	if a.runner == nil {
 		m.Stale = true
 		return TmuxResult{SchemaVersion: 1, TaskID: taskID, Available: false, Mapping: m}
 	}
-	if _, err := a.runner.Run(ctx, "has-session", "-t", m.Session); err != nil {
+	if !a.ownsSession(ctx, m) {
 		m.Stale = true
-		_ = a.save(projectDir, *m)
+		if err := a.save(projectDir, *m); err != nil {
+			return tmuxError(taskID, ErrTmuxMappingFailed, "mapping update failed")
+		}
 	}
 	return TmuxResult{SchemaVersion: 1, TaskID: taskID, Available: true, Mapping: m}
 }
 
 func (a *TmuxAdapter) Open(ctx context.Context, projectDir, taskID string) TmuxResult {
-	if err := validateProjectDir(projectDir); err != nil {
-		return tmuxError(taskID, ErrTmuxMappingFailed, "invalid project directory")
-	}
 	r := a.Status(ctx, projectDir, taskID)
 	if r.Mapping == nil || r.Mapping.Stale {
 		return r
@@ -152,9 +174,6 @@ func (a *TmuxAdapter) Open(ctx context.Context, projectDir, taskID string) TmuxR
 }
 
 func (a *TmuxAdapter) Detach(ctx context.Context, projectDir, taskID string) TmuxResult {
-	if err := validateProjectDir(projectDir); err != nil {
-		return tmuxError(taskID, ErrTmuxMappingFailed, "invalid project directory")
-	}
 	m, err := a.load(projectDir, taskID)
 	if err != nil {
 		return tmuxError(taskID, ErrTmuxMappingFailed, "mapping read failed")
@@ -162,26 +181,58 @@ func (a *TmuxAdapter) Detach(ctx context.Context, projectDir, taskID string) Tmu
 	if m == nil {
 		return TmuxResult{SchemaVersion: 1, TaskID: taskID, Available: a.runner != nil, Idempotent: true}
 	}
+	if err := a.validateMapping(projectDir, taskID, m); err != nil {
+		if err := a.removeMapping(projectDir, taskID); err != nil {
+			return tmuxError(taskID, ErrTmuxMappingFailed, "invalid mapping removal failed")
+		}
+		return tmuxError(taskID, ErrTmuxMappingFailed, "mapping ownership validation failed")
+	}
 	if a.runner != nil && !m.Stale {
-		if _, err := a.runner.Run(ctx, "kill-session", "-t", m.Session); err != nil {
-			return tmuxError(taskID, ErrTmuxCommandFailed, "tmux detach failed")
+		if a.ownsSession(ctx, m) {
+			if err := a.killOwnedSession(ctx, m); err != nil && a.ownsSession(ctx, m) {
+				return tmuxError(taskID, ErrTmuxCommandFailed, "tmux detach failed")
+			}
+			if a.ownsSession(ctx, m) {
+				return tmuxError(taskID, ErrTmuxCommandFailed, "tmux detach failed")
+			}
+		} else {
+			m.Stale = true
 		}
 	}
-	id, err := safeID(taskID)
-	if err != nil {
-		return tmuxError(taskID, ErrTmuxMappingFailed, "invalid task id")
+	if err := a.removeMapping(projectDir, taskID); err != nil {
+		return tmuxError(taskID, ErrTmuxMappingFailed, "mapping removal failed")
 	}
-	_ = os.Remove(a.mappingPath(projectDir, id))
 	return TmuxResult{SchemaVersion: 1, TaskID: taskID, Available: a.runner != nil, Idempotent: false, Mapping: m}
 }
 
 const (
+	tmuxOwnerOption       = "@reasonix-owner"
+	tmuxOwnerTokenBytes   = 16
+	defaultTmuxNamePrefix = "reasonix-"
+
 	ErrTmuxUnavailable   = "tmux_unavailable"
 	ErrTmuxInvalidName   = "tmux_invalid_name"
 	ErrTmuxCommandFailed = "tmux_command_failed"
 	ErrTmuxMappingFailed = "tmux_mapping_failed"
 	ErrTmuxTaskError     = "tmux_task_error"
 )
+
+func defaultTmuxSessionName(taskID string) string {
+	candidate := defaultTmuxNamePrefix + taskID
+	if len(candidate) <= 64 {
+		return candidate
+	}
+	sum := sha256.Sum256([]byte(taskID))
+	return defaultTmuxNamePrefix + hex.EncodeToString(sum[:16])
+}
+
+func newTmuxOwnerToken() (string, error) {
+	raw := make([]byte, tmuxOwnerTokenBytes)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(raw), nil
+}
 
 func tmuxUnavailable(taskID string) TmuxResult {
 	return tmuxError(taskID, ErrTmuxUnavailable, "tmux is not available")
@@ -195,38 +246,110 @@ func validateTmuxName(name string) error {
 	if name == "" {
 		return nil
 	}
-	if len(name) > 64 || strings.ContainsAny(name, "/\\\n\r\t") {
+	if len(name) > 64 {
 		return errors.New("tmux name contains invalid characters")
 	}
 	for _, r := range name {
-		if r < 0x20 || r == 0x7f {
-			return errors.New("tmux name contains control characters")
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.') {
+			return errors.New("tmux name contains invalid characters")
 		}
 	}
 	return nil
 }
 
-func validateProjectDir(projectDir string) error {
-	if strings.Contains(filepath.ToSlash(projectDir), "..") {
-		return errors.New("project directory escapes scope")
+func (a *TmuxAdapter) validateMapping(projectDir, taskID string, m *TmuxMapping) error {
+	if m == nil || m.SchemaVersion != 1 || m.TaskID != taskID {
+		return errors.New("tmux mapping identity mismatch")
+	}
+	if err := validateTmuxName(m.Session); err != nil || m.Session == "" || m.Window != "task" || m.Pane != m.Session+":"+m.Window+".0" {
+		return errors.New("tmux mapping target is invalid")
+	}
+	if len(m.OwnerToken) != tmuxOwnerTokenBytes*2 {
+		return errors.New("tmux mapping owner token is missing")
+	}
+	if _, err := hex.DecodeString(m.OwnerToken); err != nil {
+		return errors.New("tmux mapping owner token is invalid")
+	}
+	wantRoot, err := NewFileStore(a.base).taskRoot(projectDir)
+	if err != nil {
+		return err
+	}
+	gotRoot, err := NewFileStore(a.base).taskRoot(m.ProjectDir)
+	if err != nil {
+		return err
+	}
+	wantRoot, err = filepath.Abs(wantRoot)
+	if err != nil {
+		return err
+	}
+	gotRoot, err = filepath.Abs(gotRoot)
+	if err != nil {
+		return err
+	}
+	if filepath.Clean(gotRoot) != filepath.Clean(wantRoot) {
+		return errors.New("tmux mapping project mismatch")
 	}
 	return nil
 }
 
-func (a *TmuxAdapter) mappingPath(projectDir, taskID string) string {
-	root := projectDir
-	if root == "" {
-		root = "."
+func (a *TmuxAdapter) ownsSession(ctx context.Context, m *TmuxMapping) bool {
+	if a.runner == nil || m == nil {
+		return false
 	}
-	return filepath.Join(root, a.base, ".tmux", taskID+".json")
+	out, err := a.runner.Run(ctx, "show-options", "-v", "-t", tmuxSessionPaneTarget(m.Session), tmuxOwnerOption)
+	return err == nil && strings.TrimSpace(string(out)) == m.OwnerToken
+}
+
+// killOwnedSession performs the ownership comparison and destructive action in
+// one tmux server command queue. A separate show-options + kill-session pair
+// would allow the named session to be replaced between the check and the kill.
+func (a *TmuxAdapter) killOwnedSession(ctx context.Context, m *TmuxMapping) error {
+	if a.runner == nil || m == nil {
+		return nil
+	}
+	condition := fmt.Sprintf("#{==:#{%s},%s}", tmuxOwnerOption, m.OwnerToken)
+	killCommand := "kill-session -t =" + m.Session
+	_, err := a.runner.Run(ctx, "if-shell", "-t", tmuxSessionPaneTarget(m.Session), "-F", condition, killCommand, "")
+	return err
+}
+
+func tmuxSessionPaneTarget(session string) string {
+	return "=" + session + ":"
+}
+
+func (a *TmuxAdapter) removeMapping(projectDir, taskID string) error {
+	path, err := a.mappingPath(projectDir, taskID)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove tmux mapping: %w", err)
+	}
+	return nil
+}
+
+func (a *TmuxAdapter) mappingPath(projectDir, taskID string) (string, error) {
+	id, err := safeID(taskID)
+	if err != nil {
+		return "", err
+	}
+	root, err := NewFileStore(a.base).taskRoot(projectDir)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(root, ".tmux", id+".json")
+	if err := rejectSymlinkChain(root, path); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 func (a *TmuxAdapter) load(projectDir, taskID string) (*TmuxMapping, error) {
-	id, err := safeID(taskID)
+	path, err := a.mappingPath(projectDir, taskID)
 	if err != nil {
 		return nil, err
 	}
-	b, err := os.ReadFile(a.mappingPath(projectDir, id))
+	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -241,11 +364,15 @@ func (a *TmuxAdapter) load(projectDir, taskID string) (*TmuxMapping, error) {
 }
 
 func (a *TmuxAdapter) save(projectDir string, m TmuxMapping) error {
-	if _, err := safeID(m.TaskID); err != nil {
+	path, err := a.mappingPath(projectDir, m.TaskID)
+	if err != nil {
 		return err
 	}
-	path := a.mappingPath(projectDir, m.TaskID)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	root, err := NewFileStore(a.base).taskRoot(projectDir)
+	if err != nil {
+		return err
+	}
+	if _, err := prepareTaskDir(root, ".tmux"); err != nil {
 		return err
 	}
 	b, err := json.Marshal(m)
@@ -262,8 +389,15 @@ func (a *TmuxAdapter) save(projectDir string, m TmuxMapping) error {
 		_ = tmp.Close()
 		return err
 	}
+	if err = tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
 	if err = tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(name, path)
+	if err = os.Rename(name, path); err != nil {
+		return err
+	}
+	return nil
 }

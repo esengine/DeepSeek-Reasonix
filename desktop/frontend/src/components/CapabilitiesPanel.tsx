@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ChevronDown, ChevronRight, CircleAlert, Plus, RefreshCw, Search, Server as ServerIcon } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, ChevronDown, ChevronRight, CircleAlert, Folder, Plus, RefreshCw, Search, Server as ServerIcon } from "lucide-react";
 import { asArray } from "../lib/array";
-import { app, openExternal } from "../lib/bridge";
+import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import { mcpServerLifecycleActions, mcpServerRetryableFromAvailableList } from "../lib/mcpServerLifecycle";
+import { canUseNativeMCPOAuth } from "../lib/mcpOAuthEligibility";
 import type { CapabilitiesView, MCPInstallResult, MCPMarketplaceEntry, MCPMarketplaceView, MCPServerInput, PluginAgentView, PluginCommandView, PluginCompatibilityIssue, PluginHookView, PluginInstallOptions, PluginMCPServerView, PluginSkillView, PluginView, ServerView, SkillRootSkillView, SkillRootView, SkillsSettingsView, SkillView, TabMeta } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { ResizableDrawer } from "./ResizableDrawer";
@@ -22,6 +23,12 @@ async function installMCPServer(input: MCPServerInput): Promise<MCPInstallResult
   const result = await app.InstallMCPServer(input);
   if (result.state === "issue") throw new Error(result.message);
   return result;
+}
+
+function connectMCPServer(name: string, servers: ServerView[]): Promise<void> {
+  const server = servers.find((candidate) => candidate.name === name);
+  if (server && shouldOpenAuth(server)) return app.AuthenticateMCPServer(name);
+  return app.ReconnectMCPServer(name);
 }
 
 let mcpSettingsSnapshot: SettingsSnapshot<ServerView[]> | null = null;
@@ -100,7 +107,7 @@ export function CapabilitiesPanel({
     const q = skillQuery.trim().toLowerCase();
     if (!q) return view.skills;
     return view.skills.filter((sk) => {
-      const text = [sk.name, `/${sk.name}`, sk.invocation, sk.plugin, sk.description, sk.scope, sk.runAs].join(" ").toLowerCase();
+      const text = [sk.name, `/${sk.name}`, sk.invocation, sk.plugin, sk.description, sk.scope, sk.sourceDir, sk.runAs].join(" ").toLowerCase();
       return text.includes(q);
     });
   }, [view, skillQuery]);
@@ -209,7 +216,7 @@ export function CapabilitiesPanel({
                     servers={serverGroups.failed}
                     expanded={expandedErrors}
                     onToggle={toggleError}
-                    onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+                    onRetry={(name) => void mutate(() => connectMCPServer(name, view.servers))}
                     onRetryMany={(names) => void mutate(() => Promise.allSettled(names.map((name) => app.ReconnectMCPServer(name))))}
                     onConfirmClearAuth={(name) => void mutate(() => app.ClearMCPServerAuthentication(name))}
                     onConfirm={(name) => void mutate(() => app.RemoveMCPServer(name))}
@@ -244,7 +251,7 @@ export function CapabilitiesPanel({
                         setEditing(name);
                       }}
                       onCancelEdit={() => setEditing(null)}
-                      onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+                      onRetry={(name) => void mutate(() => connectMCPServer(name, view.servers))}
                       onReconnect={(name) => void mutate(() => app.ReconnectMCPServer(name))}
                       onConfirmClearAuth={(name) => void mutate(() => app.ClearMCPServerAuthentication(name))}
                       onToggle={(name, on) => void mutate(() => app.SetMCPServerEnabled(name, on))}
@@ -285,7 +292,7 @@ export function CapabilitiesPanel({
                     if (path) await app.AddSkillPath(path);
                   })}
                   onRefresh={() => mutate(() => app.RefreshSkills())}
-                  onRemove={(path) => mutate(() => app.RemoveSkillPath(path))}
+                  onToggle={(path, enabled) => mutate(() => app.SetSkillPathEnabled(path, enabled))}
                 />
                 <div className="cap-skills-head">
                   <div className="cap-skills-head__copy">
@@ -344,9 +351,11 @@ function normalizeSkillsSettingsView(view: SkillsSettingsView | CapabilitiesView
     skills: asArray(view?.skills),
     skillRoots: asArray(view?.skillRoots).map((root) => ({
       ...root,
+      enabled: root.enabled !== false,
       removable: Boolean(root.removable),
       skillItems: asArray(root.skillItems),
     })),
+    allowImplicitInvocation: view?.allowImplicitInvocation !== false,
   };
 }
 
@@ -402,11 +411,12 @@ function skillScopeSummary(scope: string, count: number, t: ReturnType<typeof us
   }
 }
 
-function skillSourceSummary(active: number, missing: number, empty: number, t: ReturnType<typeof useT>): string {
+function skillSourceSummary(active: number, missing: number, empty: number, disabled: number, t: ReturnType<typeof useT>): string {
   const parts: string[] = [];
   if (active > 0) parts.push(t("caps.sourcesSummaryActive", { active }));
   if (missing > 0) parts.push(t("caps.sourcesSummaryMissing", { missing }));
   if (empty > 0) parts.push(t("caps.sourcesSummaryEmpty", { empty }));
+  if (disabled > 0) parts.push(t("caps.sourcesSummaryDisabled", { disabled }));
   return parts.length > 0 ? parts.join(" · ") : t("caps.sourcesSummaryNone");
 }
 
@@ -415,27 +425,32 @@ function SkillSources({
   busy,
   onAdd,
   onRefresh,
-  onRemove,
+  onToggle,
 }: {
   roots: SkillRootView[];
   busy: boolean;
   onAdd: () => void;
   onRefresh: () => void;
-  onRemove: (path: string) => void;
+  onToggle: (path: string, enabled: boolean) => void;
 }) {
   const t = useT();
-  const [expanded, setExpanded] = useState(false);
-  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  // Sources are a core part of the Skills page, so expose them on first visit.
+  // Users can still collapse the section when they need more room for the list.
+  const [expanded, setExpanded] = useState(true);
   const [expandedRootSkills, setExpandedRootSkills] = useState<Set<string>>(() => new Set());
   const [fullRootSkills, setFullRootSkills] = useState<Set<string>>(() => new Set());
   const primaryRoots = roots.filter(isPrimarySkillRoot);
-  const diagnosticRoots = roots.filter((root) => !isPrimarySkillRoot(root));
-  const diagnosticsVisible = expanded && showDiagnostics;
-  const shownRoots = diagnosticsVisible ? [...primaryRoots, ...diagnosticRoots] : primaryRoots;
-  const summaryRoots = diagnosticsVisible ? roots : primaryRoots;
+  const enabledRoots = primaryRoots.filter((root) => root.enabled !== false && root.status !== "disabled");
+  const disabledRoots = primaryRoots.filter((root) => root.enabled === false || root.status === "disabled");
+  const shownRoots = [
+    ...enabledRoots,
+    ...disabledRoots,
+  ];
+  const summaryRoots = roots;
   const active = summaryRoots.filter((root) => root.skills > 0).length;
   const missing = summaryRoots.filter((root) => root.status === "missing").length;
   const empty = summaryRoots.filter((root) => root.status === "ok" && root.skills === 0).length;
+  const disabled = summaryRoots.filter((root) => root.enabled === false || root.status === "disabled").length;
   const toggleRootSkills = (key: string) => {
     setExpandedRootSkills((prev) => {
       const next = new Set(prev);
@@ -454,27 +469,28 @@ function SkillSources({
   };
   return (
     <div className={`cap-sources${expanded ? " cap-sources--expanded" : ""}`}>
-      <div className="cap-sources__head">
-        <div className="cap-sources__copy">
-          <div className="cap-sources__title">{t("caps.sources")}</div>
-          <div className="cap-sources__summary">{skillSourceSummary(active, missing, empty, t)}</div>
-        </div>
-        {!expanded && (
-          <div className="cap-sources__actions">
-            <button className="btn btn--small" type="button" onClick={() => setExpanded(true)} aria-expanded={expanded}>
-              {t("caps.manageSkillSources")}
-            </button>
-          </div>
-        )}
-      </div>
+      <button
+        className="cap-sources__head"
+        type="button"
+        onClick={() => setExpanded((value) => !value)}
+        aria-expanded={expanded}
+      >
+        <span className="cap-sources__copy">
+          <span className="cap-sources__title">{t("caps.sources")}</span>
+          <span className="cap-sources__summary">{skillSourceSummary(active, missing, empty, disabled, t)}</span>
+        </span>
+        <ChevronDown className={`cap-sources__chevron${expanded ? " cap-sources__chevron--expanded" : ""}`} aria-hidden size={16} />
+      </button>
       {expanded && (
         <>
           <div className="cap-sources__manage">
             <div className="cap-sources__manage-actions">
               <button className="btn btn--small" disabled={busy} onClick={onRefresh}>
+                <RefreshCw aria-hidden size={13} />
                 {t("caps.refreshSkills")}
               </button>
               <button className="btn btn--small" disabled={busy} onClick={onAdd}>
+                <Plus aria-hidden size={13} />
                 {t("caps.addSkillFolder")}
               </button>
             </div>
@@ -482,7 +498,6 @@ function SkillSources({
               className="btn btn--small"
               type="button"
               onClick={() => {
-                setShowDiagnostics(false);
                 setExpanded(false);
               }}
               aria-expanded={expanded}
@@ -490,9 +505,9 @@ function SkillSources({
               {t("common.collapse")}
             </button>
           </div>
-          {shownRoots.length === 0 ? (
+          {roots.length === 0 ? (
             <div className="mem-empty">{t("caps.noSkillRoots")}</div>
-          ) : (
+          ) : shownRoots.length > 0 ? (
             <div className="cap-source-list">
               {shownRoots.map((root) => {
                 const key = skillRootKey(root);
@@ -500,7 +515,6 @@ function SkillSources({
                 const rootSkillsExpanded = expandedRootSkills.has(key);
                 const rootSkillsFull = fullRootSkills.has(key);
                 const canShowRootSkills = rootSkills.length > 0;
-                const canRemoveRoot = root.removable;
                 return (
                   <div className={`cap-source cap-source--${skillRootTone(root)}`} key={key}>
                     <span className={`cap-dot cap-dot--${skillRootDot(root)}`} />
@@ -509,37 +523,30 @@ function SkillSources({
                         <div className="cap-source__label" title={root.dir}>
                           {skillRootLabel(root)}
                         </div>
+                        <div className="cap-source__badges">
+                          {skillRootBadges(root, t).map((badge) => (
+                            <span className={`cap-source-badge cap-source-badge--${badge.tone}`} key={badge.label}>
+                              {badge.label}
+                            </span>
+                          ))}
+                        </div>
                       </div>
                       <div className="cap-source__meta">
                         <span>{skillRootStatus(root, t)}</span>
                         <span>{t("caps.skillRootCount", { skills: root.skills })}</span>
                         {root.configured && <span>{t("caps.skillRootConfigured")}</span>}
                       </div>
-                      {(canShowRootSkills || canRemoveRoot) && (
+                      {canShowRootSkills && (
                         <div className="cap-source-actions">
-                          <>
-                            {canShowRootSkills && (
-                              <button
-                                className="btn btn--small"
-                                disabled={busy}
-                                type="button"
-                                aria-expanded={rootSkillsExpanded}
-                                onClick={() => toggleRootSkills(key)}
-                              >
-                                {rootSkillsExpanded ? t("caps.hideSkills") : t("caps.showSkills")}
-                              </button>
-                              )}
-                              {canRemoveRoot && (
-                                <InlineConfirmButton
-                                  label={t("caps.skillRootRemove")}
-                                  confirmLabel={t("caps.skillRootConfirmRemove")}
-                                  cancelLabel={t("common.cancel")}
-                                  disabled={busy}
-                                  danger
-                                  onConfirm={() => onRemove(root.dir)}
-                                />
-                              )}
-                            </>
+                          <button
+                            className="btn btn--small"
+                            disabled={busy}
+                            type="button"
+                            aria-expanded={rootSkillsExpanded}
+                            onClick={() => toggleRootSkills(key)}
+                          >
+                            {rootSkillsExpanded ? t("caps.hideSkills") : t("caps.showSkills")}
+                          </button>
                         </div>
                       )}
                       {rootSkillsExpanded && rootSkills.length > 0 && (
@@ -551,23 +558,24 @@ function SkillSources({
                       )}
                       {root.warning && <div className="cap-source__warning">{root.warning}</div>}
                     </div>
-                    <div className="cap-source__badges">
-                      {skillRootBadges(root, t).map((badge) => (
-                        <span className={`cap-source-badge cap-source-badge--${badge.tone}`} key={badge.label}>
-                          {badge.label}
-                        </span>
-                      ))}
+                    <div className="cap-source__side">
+                      {root.removable && (
+                        <input
+                          className="provider-capability-row__switch cap-source__switch"
+                          type="checkbox"
+                          role="switch"
+                          checked={root.enabled !== false}
+                          disabled={busy}
+                          aria-label={`${root.enabled === false ? t("caps.skillRootEnable") : t("caps.skillRootDisable")} ${root.dir}`}
+                          onChange={(event) => onToggle(root.dir, event.currentTarget.checked)}
+                        />
+                      )}
                     </div>
                   </div>
                 );
               })}
             </div>
-          )}
-          {diagnosticRoots.length > 0 && (
-            <button className="cap-diagnostics" type="button" onClick={() => setShowDiagnostics((v) => !v)}>
-              {diagnosticsVisible ? t("caps.hideDiagnostics") : t("caps.showDiagnostics", { count: diagnosticRoots.length })}
-            </button>
-          )}
+          ) : null}
         </>
       )}
     </div>
@@ -616,11 +624,11 @@ function skillRootKey(root: SkillRootView): string {
 }
 
 function isPrimarySkillRoot(root: SkillRootView): boolean {
-  return root.skills > 0 || root.configured || Boolean(root.warning);
+  return root.skills > 0 || root.configured || root.status === "disabled" || Boolean(root.warning);
 }
 
 function skillRootTone(root: SkillRootView): "active" | "empty" | "problem" {
-  if (root.warning || root.status === "inactive" || root.status === "unreadable") return "problem";
+  if (root.warning || root.status === "inactive" || root.status === "missing" || root.status === "unreadable") return "problem";
   if (root.skills > 0) return "active";
   return "empty";
 }
@@ -633,8 +641,10 @@ function skillRootDot(root: SkillRootView): "connected" | "disabled" | "failed" 
 }
 
 function skillRootStatus(root: SkillRootView, t: ReturnType<typeof useT>): string {
+  if (root.status === "disabled") return t("caps.skillRootDisabled");
   if (root.status === "ok" && root.skills > 0) return t("caps.skillRootActive");
   if (root.status === "ok") return t("caps.skillRootEmpty");
+  if (root.status === "missing") return t("caps.skillRootMissing");
   return root.status;
 }
 
@@ -788,10 +798,6 @@ function FailedServersNotice({
           const error = s.error || t("caps.failed");
           const actionLabel = serverActionLabel(s, t);
           const handlePrimaryAction = () => {
-            if (shouldOpenAuth(s)) {
-              openExternal((s.authUrl || "").trim());
-              return;
-            }
             onRetry(s.name);
           };
           return (
@@ -909,10 +915,6 @@ function ServerRow({
     sub = `${sub} · ${t("caps.authPossibleShort")}`;
   }
   const handlePrimaryAction = () => {
-    if (shouldOpenAuth(s)) {
-      openExternal((s.authUrl || "").trim());
-      return;
-    }
     onRetry();
   };
   return (
@@ -1445,8 +1447,7 @@ function serverAuthLabel(s: ServerView, t: ReturnType<typeof useT>): string {
 }
 
 function shouldOpenAuth(s: ServerView): boolean {
-  const url = (s.authUrl || "").trim();
-  return s.authStatus === "required" && /^https?:\/\//i.test(url);
+  return s.authStatus === "required" && canUseNativeMCPOAuth(s);
 }
 
 function canClearAuth(s: ServerView): boolean {
@@ -1484,7 +1485,15 @@ function SkillRow({
           <span className="cap-skill-card__head">
             <span className="cap-skill-card__icon">/</span>
             <span className="cap-skill-card__main">
-              <span className="cap-skill-card__command">{(skill.invocation || `/${skill.name}`).replace(/^\//, "")}</span>
+              <span className="cap-skill-card__identity">
+                <span className="cap-skill-card__command">{(skill.invocation || `/${skill.name}`).replace(/^\//, "")}</span>
+                {skill.sourceDir && (
+                  <span className="cap-skill-card__source" title={skill.sourceDir}>
+                    <Folder aria-hidden size={11} />
+                    <span>{skill.sourceDir}</span>
+                  </span>
+                )}
+              </span>
               <span className="cap-skill-card__badges">
                 <span className={`cap-skill-badge cap-skill-badge--${skill.scope}`}>{skillScopeLabel(skill.scope, t)}</span>
                 {skill.plugin && <span className="cap-skill-badge">{t("slash.plugin", { name: skill.plugin })}</span>}
@@ -1633,6 +1642,15 @@ export function parseMCPQuickDefinition(raw: string): MCPServerInput {
   return { name: quickMCPName(definition), transport: "stdio", command: definition, args: [], url: "", env: null, headers: null };
 }
 
+type PluginRuntimePlan = {
+  command?: string;
+  args?: string[];
+  intercepts?: string[];
+  replaces?: string[];
+  capabilities?: string[];
+  fullTrust?: boolean;
+};
+
 type PluginInstallPlanAction = {
   action?: string;
   kind?: string;
@@ -1644,6 +1662,7 @@ type PluginInstallPlanAction = {
   compatibility?: string;
   mappedCapabilities?: string[];
   skippedCapabilities?: PluginCompatibilityIssue[];
+  runtime?: PluginRuntimePlan;
   agentCount?: number;
   skillCount?: number;
   commandCount?: number;
@@ -1943,12 +1962,46 @@ function PluginPlanPreview({ plan }: { plan: PluginInstallPlanView }) {
 							{asArray(action.skippedCapabilities).map((issue, issueIndex) => <span className="cap-plugin-plan__warning" key={`${issue.capability}-${issue.path || ""}-${issueIndex}`}>{issue.capability}: {issue.reason}</span>)}
 							{action.message && <span className="cap-plugin-action__source">{action.message}</span>}
 							{action.error && <span className="cap-plugin-plan__warning">{action.error}</span>}
+							{action.runtime ? <PluginRuntimeTrustBlock runtime={action.runtime} /> : null}
 						</div>
 					))}
 				</div>
 			) : (
 				<pre className="cap-plugin-plan__raw">{plan.raw}</pre>
 			)}
+		</div>
+	);
+}
+
+// PluginRuntimeTrustBlock renders the prominent FULL TRUST warning for a
+// plugin that declares a runtime process. Install/update/replace/--link
+// already imply full trust, so this is disclosure, not a second confirmation.
+function PluginRuntimeTrustBlock({ runtime }: { runtime: PluginRuntimePlan }) {
+	const t = useT();
+	const commandLine = [runtime.command, ...asArray(runtime.args)].filter(Boolean).join(" ");
+	const groups: { label: string; values: string[] }[] = [
+		{ label: t("caps.pluginRuntimeIntercepts"), values: asArray(runtime.intercepts) },
+		{ label: t("caps.pluginRuntimeReplaces"), values: asArray(runtime.replaces) },
+		{ label: t("caps.pluginRuntimeCapabilities"), values: asArray(runtime.capabilities) },
+	];
+	return (
+		<div className="cap-plugin-runtime" role="alert">
+			<div className="cap-plugin-runtime__title">{t("caps.pluginRuntimeFullTrust")}</div>
+			{commandLine ? (
+				<div className="cap-plugin-runtime__row">
+					<span className="cap-plugin-runtime__label">{t("caps.pluginRuntimeCommand")}</span>
+					<code className="cap-plugin-runtime__cmd">{commandLine}</code>
+				</div>
+			) : null}
+			{groups
+				.filter((group) => group.values.length > 0)
+				.map((group) => (
+					<div className="cap-plugin-runtime__row" key={group.label}>
+						<span className="cap-plugin-runtime__label">{group.label}</span>
+						<span>{group.values.join(", ")}</span>
+					</div>
+				))}
+			<div className="cap-plugin-runtime__risk">{t("caps.pluginRuntimeRisk")}</div>
 		</div>
 	);
 }
@@ -2300,6 +2353,7 @@ function parsePluginInstallPlan(raw: string): PluginInstallPlanView {
 				compatibility: stringValue(item.compatibility),
 				mappedCapabilities: (Array.isArray(item.mappedCapabilities) ? item.mappedCapabilities : []).filter((value): value is string => typeof value === "string"),
 				skippedCapabilities: (Array.isArray(item.skippedCapabilities) ? item.skippedCapabilities : []) as PluginCompatibilityIssue[],
+				runtime: parsePluginRuntimePlan(item.runtime),
 				agentCount: numericValue(item.agentCount), skillCount: numericValue(item.skillCount), commandCount: numericValue(item.commandCount), hookCount: numericValue(item.hookCount), toolCount: numericValue(item.toolCount),
 			}];
 		});
@@ -2323,6 +2377,25 @@ function numericValue(value: unknown): number | undefined {
 
 function stringValue(value: unknown): string | undefined {
 	return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+// parsePluginRuntimePlan extracts the FULL TRUST runtime block a plugin
+// install plan carries (installsource.RuntimePlanInfo). Anything malformed
+// simply drops out — the risk UI is additive and must never break planning.
+function parsePluginRuntimePlan(value: unknown): PluginRuntimePlan | undefined {
+	if (!value || typeof value !== "object") return undefined;
+	const item = value as Record<string, unknown>;
+	const command = stringValue(item.command);
+	if (!command) return undefined;
+	const list = (v: unknown): string[] => (Array.isArray(v) ? v : []).filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+	return {
+		command,
+		args: list(item.args),
+		intercepts: list(item.intercepts),
+		replaces: list(item.replaces),
+		capabilities: list(item.capabilities),
+		fullTrust: item.fullTrust === true,
+	};
 }
 
 function pluginPlanActionLabel(action: PluginInstallPlanAction, t: ReturnType<typeof useT>): string {
@@ -2445,14 +2518,9 @@ function MCPSettingsServerRow({
 	const t = useT();
 	const lifecycle = mcpServerLifecycleActions(server);
 	const target = serverCommand(server);
-	const opensAuth = shouldOpenAuth(server);
 	const actionLabel = serverActionLabel(server, t);
 	const canRemove = server.configured && !server.builtIn && !server.managedByPlugin;
 	const handlePrimaryAction = () => {
-		if (opensAuth) {
-			openExternal((server.authUrl || "").trim());
-			return;
-		}
 		onRetry();
 	};
 
@@ -3127,7 +3195,7 @@ export function MCPServersSettingsPage() {
 						servers={projectServers}
 						busy={actionBusy}
 						onOpen={(name) => setScreen({ kind: "detail", name })}
-							onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+							onRetry={(name) => void mutate(() => connectMCPServer(name, servers ?? []))}
 							onToggle={(name, enabled) => void mutate(() => app.SetMCPServerEnabled(name, enabled))}
 							onRemove={(name) => void mutate(() => app.RemoveMCPServer(name))}
 					/>
@@ -3137,7 +3205,7 @@ export function MCPServersSettingsPage() {
 						servers={installedServers}
 						busy={actionBusy}
 						onOpen={(name) => setScreen({ kind: "detail", name })}
-							onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+							onRetry={(name) => void mutate(() => connectMCPServer(name, servers ?? []))}
 							onToggle={(name, enabled) => void mutate(() => app.SetMCPServerEnabled(name, enabled))}
 							onRemove={(name) => void mutate(() => app.RemoveMCPServer(name))}
 					/>
@@ -3147,7 +3215,7 @@ export function MCPServersSettingsPage() {
 						servers={managedServers}
 						busy={actionBusy}
 						onOpen={(name) => setScreen({ kind: "detail", name })}
-							onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+							onRetry={(name) => void mutate(() => connectMCPServer(name, servers ?? []))}
 							onToggle={(name, enabled) => void mutate(() => app.SetMCPServerEnabled(name, enabled))}
 							onRemove={(name) => void mutate(() => app.RemoveMCPServer(name))}
 					/>
@@ -3232,7 +3300,7 @@ export function MCPServersSettingsPage() {
 						tools={selectedServer.toolList ?? []}
 						busy={actionBusy}
 						onConfirm={() => void mutate(() => app.RemoveMCPServer(selectedServer.name)).then((ok) => { if (ok) setScreen({ kind: "list" }); })}
-						onConnectNow={() => void mutate(() => app.ReconnectMCPServer(selectedServer.name))}
+						onConnectNow={() => void mutate(() => connectMCPServer(selectedServer.name, servers ?? []))}
 						onReconnect={() => void mutate(() => app.ReconnectMCPServer(selectedServer.name))}
 						onConfirmClearAuth={() => void mutate(() => app.ClearMCPServerAuthentication(selectedServer.name))}
 						toolsExpanded
@@ -3252,7 +3320,7 @@ export function MCPServersSettingsPage() {
 
 // SkillsSettingsPage is a self-contained skills management page embedded inside
 // the settings centre.
-export function SkillsSettingsPage() {
+export function SkillsSettingsPage({ activeWorkspaceKey = "" }: { activeWorkspaceKey?: string }) {
 	const t = useT();
 	const [snapshotKey, setSnapshotKey] = useState("");
 	const [view, setView] = useState<SkillsSettingsView | null>(null);
@@ -3260,12 +3328,15 @@ export function SkillsSettingsPage() {
 	const [err, setErr] = useState<string | null>(null);
 	const [skillQuery, setSkillQuery] = useState("");
 	const [expandedSkills, setExpandedSkills] = useState<Set<string>>(() => new Set());
+	const reloadSequence = useRef(0);
 
 	const reload = useCallback(async () => {
+		const sequence = ++reloadSequence.current;
 		const [meta, tabs] = await Promise.all([
 			app.Meta().catch(() => null),
 			app.ListTabs().catch(() => []),
 		]);
+		if (sequence !== reloadSequence.current) return;
 		const key = settingsSnapshotKey(meta, tabs);
 		setSnapshotKey(key);
 		const cached = key ? skillsSettingsSnapshot : null;
@@ -3275,10 +3346,14 @@ export function SkillsSettingsPage() {
 			setView(null);
 		}
 		const next = normalizeSkillsSettingsView(await app.SkillsSettings().catch(() => ({ skills: [], skillRoots: [] })));
+		if (sequence !== reloadSequence.current) return;
 		skillsSettingsSnapshot = { key, value: next };
 		setView(next);
-	}, []);
-	useEffect(() => { void reload(); }, [reload]);
+	}, [activeWorkspaceKey]);
+	useEffect(() => {
+		setView(null);
+		void reload();
+	}, [reload]);
 
 	const mutate = async (fn: () => Promise<unknown>) => {
 		setBusy(true);
@@ -3301,7 +3376,7 @@ export function SkillsSettingsPage() {
 		const q = skillQuery.trim().toLowerCase();
 		if (!q) return view.skills;
 		return view.skills.filter((sk) => {
-			const text = [sk.name, "/" + sk.name, sk.invocation, sk.plugin, sk.description, sk.scope, sk.runAs].join(" ").toLowerCase();
+			const text = [sk.name, "/" + sk.name, sk.invocation, sk.plugin, sk.description, sk.scope, sk.sourceDir, sk.runAs].join(" ").toLowerCase();
 			return text.includes(q);
 		});
 	}, [view, skillQuery]);
@@ -3330,6 +3405,20 @@ export function SkillsSettingsPage() {
 					onChange={(e) => setSkillQuery(e.target.value)}
 				/>
 			</div>
+			<label className="provider-capability-row cap-skill-policy">
+				<span className="provider-capability-row__copy">
+					<span className="provider-capability-row__title">{t("caps.skillImplicitInvocation")}</span>
+					<span className="cap-skill-policy__hint">{t("caps.skillImplicitInvocationHint")}</span>
+				</span>
+				<input
+					className="provider-capability-row__switch"
+					type="checkbox"
+					role="switch"
+					checked={view.allowImplicitInvocation}
+					disabled={actionBusy}
+					onChange={(e) => void mutate(() => app.SetSkillImplicitInvocation(e.target.checked))}
+				/>
+			</label>
 			<SkillSources
 				roots={view.skillRoots ?? []}
 				busy={actionBusy}
@@ -3338,7 +3427,7 @@ export function SkillsSettingsPage() {
 					if (path) await app.AddSkillPath(path);
 				})}
 				onRefresh={() => mutate(() => app.RefreshSkills())}
-				onRemove={(path) => mutate(() => app.RemoveSkillPath(path))}
+				onToggle={(path, enabled) => mutate(() => app.SetSkillPathEnabled(path, enabled))}
 			/>
 			<div className="cap-skills-head">
 				<div className="cap-skills-head__copy">

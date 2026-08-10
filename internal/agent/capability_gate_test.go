@@ -103,6 +103,32 @@ func TestDeliveryReviewGateHighRiskStillRequiresSecurityReview(t *testing.T) {
 	}
 }
 
+func TestDeliveryReviewGateMediumAcceptsHostProvenVerificationAndCoverage(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/agent/parser.go"}`), true, false))
+	ledger.Record(evidence.ReceiptFromToolCall("bash", json.RawMessage(`{"command":"go test ./..."}`), true, true))
+	ledger.Record(evidence.ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"internal/agent/parser.go"}`), true, true))
+	ledger.Record(evidence.Receipt{ToolName: "complete_step", Success: true, Args: json.RawMessage(`{
+		"step":"fix parser",
+		"evidence":[{"kind":"verification","command":"go test ./..."}]
+	}`)})
+
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "review", readOnly: true})
+	a := &Agent{deliveryProfile: true, evidence: ledger, tools: reg}
+	if got := a.deliveryReviewGateFailure(); got != "" {
+		t.Fatalf("medium-risk host proof was rejected: %q", got)
+	}
+
+	missingVerification := evidence.NewLedger()
+	missingVerification.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/agent/parser.go"}`), true, false))
+	missingVerification.Record(evidence.ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"internal/agent/parser.go"}`), true, true))
+	a.evidence = missingVerification
+	if got := a.deliveryReviewGateFailure(); !strings.Contains(got, "host-proven verification") {
+		t.Fatalf("medium-risk review without verification = %q, want host-proof guidance", got)
+	}
+}
+
 func TestDeliveryReviewGateDefersToParentInSubagents(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/permission/gate.go"}`), true, false))

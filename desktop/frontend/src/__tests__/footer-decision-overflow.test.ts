@@ -129,5 +129,14 @@ function footerClipOffenders(): string[] {
 
 eq(footerClipOffenders().join(", "), "", "no footer rule except .footer--decision clips or caps the footer");
 
+// AC7 — repeated pasted blocks and attachment rows stay bounded inside the
+// composer footer. Pasted blocks must not flex-shrink vertically, otherwise
+// the capped list compresses each block instead of becoming scrollable.
+eq(finalDeclaration(".composer__pasted", "max-height"), "min(30vh, 240px)", "pasted block list is viewport-bounded");
+eq(finalDeclaration(".composer__pasted", "overflow-y"), "auto", "pasted block list scrolls internally");
+eq(finalDeclaration(".composer__pasted-block", "flex-shrink"), "0", "pasted blocks keep their readable height");
+eq(finalDeclaration(".composer-context", "max-height"), "min(30vh, 200px)", "attachment list is viewport-bounded");
+eq(finalDeclaration(".composer-context", "overflow-y"), "auto", "attachment list scrolls internally");
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

@@ -29,18 +29,31 @@ export function containsLink(body: string): boolean {
 // Throws an HttpError when the member may not post. `minTrust` is the category
 // gate; `body` enables the new-member link block.
 export function assertCanPost(member: Member, opts: { minTrust: number; body: string }): void {
-  if (!member.emailVerified) {
-    throw new HttpError(403, "email_unverified", "Confirm your email address before posting.");
-  }
-  if (member.silencedUntil && member.silencedUntil > new Date().toISOString()) {
-    throw new HttpError(403, "silenced", "Your account is temporarily restricted from posting.");
-  }
+  assertCanInteract(member);
   if (isStaff(member)) return;
   if (member.trust < opts.minTrust) {
     throw new HttpError(403, "insufficient_trust", "You don't have access to post in this category yet.");
   }
   if (member.trust < TRUST.BASIC && containsLink(opts.body)) {
     throw new HttpError(403, "links_restricted", "New members can't post links yet — this unlocks once you've participated a little.");
+  }
+}
+
+// Reactions and reports affect other people's content and moderation state, so
+// they require the same verified, unsilenced identity as content creation.
+export function assertCanInteract(member: Member): void {
+  if (!member.emailVerified) {
+    throw new HttpError(403, "email_unverified", "Confirm your email address before participating.");
+  }
+  if (member.silencedUntil && member.silencedUntil > new Date().toISOString()) {
+    throw new HttpError(403, "silenced", "Your account is temporarily restricted from participating.");
+  }
+}
+
+export function assertCanFlag(member: Member, postAuthor: string): void {
+  assertCanInteract(member);
+  if (member.email === postAuthor) {
+    throw new HttpError(422, "self_flag", "You can't report your own post.");
   }
 }
 

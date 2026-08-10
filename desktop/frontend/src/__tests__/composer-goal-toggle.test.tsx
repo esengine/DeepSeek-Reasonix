@@ -268,10 +268,9 @@ console.log("\ncomposer goal toggle");
 {
   const dom = installDom();
   const { root, calls, rerender } = await renderComposer();
-
   let textarea = document.querySelector("textarea") as HTMLTextAreaElement | null;
   if (!textarea) throw new Error("composer textarea did not render");
-
+  eq(["spellcheck", "autocorrect", "autocapitalize"].map((name) => textarea.getAttribute(name)).join("/"), "false/off/off", "plain composer disables browser text assistance");
   await rerender({ insertRequest: { id: 1, text: "ship the release notes", mode: "replace" } });
   eq(textarea.value, "ship the release notes", "insert request populates the composer draft");
   // The insert queues a rAF that refocuses the textarea; drain that frame
@@ -604,6 +603,7 @@ console.log("\ncomposer goal toggle");
   let token = richInput?.querySelector<HTMLElement>(".composer-invocation-token");
   const invocationId = token?.dataset.invocationId;
   if (!richInput || !token || !invocationId) throw new Error("rich invocation did not render for paste undo selection");
+  eq(["spellcheck", "autocorrect", "autocapitalize"].map((name) => richInput.getAttribute(name)).join("/"), "false/off/off", "rich composer disables browser text assistance");
   const afterToken = document.createRange();
   afterToken.setStartAfter(token);
   afterToken.collapse(true);
@@ -710,9 +710,10 @@ console.log("\ncomposer goal toggle");
     await flushTimers();
   });
 
-  const stopGoal = document.querySelector(".composer-intent-menu__stop") as HTMLButtonElement | null;
-  if (!stopGoal) throw new Error("explicit stop goal action did not render");
-  eq(stopGoal.textContent, "Stop goal", "active goal uses an explicit stop action");
+  const goalActions = Array.from(document.querySelectorAll(".composer-intent-menu__stop")) as HTMLButtonElement[];
+  const stopGoal = goalActions.find((b) => b.textContent === "End goal");
+  if (!stopGoal) throw new Error("explicit end-goal action did not render");
+  ok(goalActions.some((b) => b.textContent === "Pause goal"), "running goal offers a pause action");
   await act(async () => {
     stopGoal.click();
     await flushTimers();

@@ -297,7 +297,7 @@ func wordHasUnescapedBrace(word *syntax.Word) bool {
 
 func hasUnescapedMeta(value, meta string) bool {
 	escaped := false
-	for i := 0; i < len(value); i++ {
+	for i := range len(value) {
 		if escaped {
 			escaped = false
 			continue
@@ -311,6 +311,72 @@ func hasUnescapedMeta(value, meta string) bool {
 		}
 	}
 	return false
+}
+
+// CanMaskEarlierFailure reports whether a later part of command can hide the
+// failure of an earlier part, so the shell's final exit status is not evidence
+// that every step succeeded.
+//
+// Only `&&` chains are exempt: bash short-circuits them and reports the first
+// failing command's status, so `build && test` already surfaces a failed build.
+// Everything else can mask — `;` and newlines run the next command regardless,
+// `||` runs it precisely when the previous one failed, `|` reports only the
+// last stage, and `&` detaches the status entirely.
+//
+// ok is false when the command cannot be analyzed statically (parse failure,
+// here-documents, unsupported control syntax); callers must not read canMask
+// as proven-safe in that case.
+func CanMaskEarlierFailure(command string) (canMask bool, ok bool) {
+	if strings.TrimSpace(command) == "" {
+		return false, true
+	}
+	file, err := ParseBash(command)
+	if err != nil || HasHereDoc(file) {
+		return false, false
+	}
+	// Two or more top-level statements are `;`/newline separated.
+	if len(file.Stmts) > 1 {
+		return true, true
+	}
+	for _, stmt := range file.Stmts {
+		masks, stmtOK := stmtCanMaskEarlierFailure(stmt)
+		if !stmtOK {
+			return false, false
+		}
+		if masks {
+			return true, true
+		}
+	}
+	return false, true
+}
+
+func stmtCanMaskEarlierFailure(stmt *syntax.Stmt) (bool, bool) {
+	if stmt == nil || stmt.Negated || stmt.Coprocess || stmt.Disown {
+		return false, false
+	}
+	if stmt.Background {
+		return true, true
+	}
+	switch cmd := stmt.Cmd.(type) {
+	case *syntax.BinaryCmd:
+		if cmd.Op != syntax.AndStmt {
+			// `||`, `|`, and `|&` all let a later stage decide the status.
+			return true, true
+		}
+		xMasks, xOK := stmtCanMaskEarlierFailure(cmd.X)
+		if !xOK {
+			return false, false
+		}
+		yMasks, yOK := stmtCanMaskEarlierFailure(cmd.Y)
+		if !yOK {
+			return false, false
+		}
+		return xMasks || yMasks, true
+	case *syntax.CallExpr:
+		return false, true
+	default:
+		return false, false
+	}
 }
 
 // SplitTopLevel returns simple command segments split at top-level shell
@@ -481,7 +547,7 @@ func IsAssignment(word string) bool {
 	if !ok || name == "" {
 		return false
 	}
-	for i := 0; i < len(name); i++ {
+	for i := range len(name) {
 		c := name[i]
 		if i == 0 {
 			if c != '_' && (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') {

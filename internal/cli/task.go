@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"reasonix/internal/taskmonitor"
@@ -37,6 +38,37 @@ func SetTaskJobKiller(k taskmonitor.JobKiller) { taskJobKiller = k }
 // SetTaskScheduler installs the host scheduler used after a successful
 // requeue. A nil scheduler preserves the standalone CLI behavior.
 func SetTaskScheduler(fn func(context.Context, string, string) error) { taskScheduler = fn }
+
+// The monitor commands are a content-free machine interface. Scrub optional
+// free-form summaries at the output boundary as well as at current write sites
+// so snapshots persisted by older versions cannot disclose paths or commands.
+func contentFreeTaskSnapshot(s taskmonitor.TaskSnapshot) taskmonitor.TaskSnapshot {
+	s.ErrorSummary = ""
+	return s
+}
+
+func contentFreeTaskSnapshots(tasks []taskmonitor.TaskSnapshot) []taskmonitor.TaskSnapshot {
+	if tasks == nil {
+		return nil
+	}
+	contentFree := make([]taskmonitor.TaskSnapshot, len(tasks))
+	for i := range tasks {
+		contentFree[i] = contentFreeTaskSnapshot(tasks[i])
+	}
+	return contentFree
+}
+
+func contentFreeTaskEvents(events []taskmonitor.TaskEvent) []taskmonitor.TaskEvent {
+	if events == nil {
+		return nil
+	}
+	contentFree := make([]taskmonitor.TaskEvent, len(events))
+	for i := range events {
+		contentFree[i] = events[i]
+		contentFree[i].ErrorSummary = ""
+	}
+	return contentFree
+}
 
 func taskCommand(args []string) int {
 	if len(args) == 0 {
@@ -133,7 +165,7 @@ func taskTmuxFlags(name string, args []string) (string, string, bool, *flag.Flag
 	dir := fs.String("dir", "", "project directory scope")
 	session := fs.String("session", "", "tmux session name")
 	jsonOut := fs.Bool("json", false, "output as JSON")
-	if err := fs.Parse(reorderTaskID(args)); err != nil {
+	if err := fs.Parse(reorderTaskID(fs, args)); err != nil {
 		return "", "", false, fs, 2
 	}
 	return *dir, *session, *jsonOut, fs, 0
@@ -141,33 +173,52 @@ func taskTmuxFlags(name string, args []string) (string, string, bool, *flag.Flag
 
 // reorderTaskID lets users place the positional task ID before or after flags.
 // The standard flag package stops parsing at the first positional argument.
-func reorderTaskID(args []string) []string {
-	var id string
+func reorderTaskID(fs *flag.FlagSet, args []string) []string {
 	flags := make([]string, 0, len(args))
+	positionals := make([]string, 0, 1)
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if arg == "--dir" || arg == "--session" {
+		if arg == "--" {
 			flags = append(flags, arg)
-			if i+1 < len(args) {
-				flags = append(flags, args[i+1])
-				i++
-			}
+			positionals = append(positionals, args[i+1:]...)
+			break
+		}
+
+		name, inlineValue := taskFlagName(arg)
+		if name == "" {
+			positionals = append(positionals, arg)
 			continue
 		}
-		if arg == "--json" {
-			flags = append(flags, arg)
+
+		flags = append(flags, arg)
+		registered := fs.Lookup(name)
+		if registered == nil || inlineValue {
 			continue
 		}
-		if id == "" {
-			id = arg
-		} else {
-			flags = append(flags, arg)
+		if boolean, ok := registered.Value.(interface{ IsBoolFlag() bool }); ok && boolean.IsBoolFlag() {
+			continue
+		}
+		if i+1 < len(args) {
+			flags = append(flags, args[i+1])
+			i++
 		}
 	}
-	if id == "" {
-		return flags
+	return append(flags, positionals...)
+}
+
+func taskFlagName(arg string) (name string, inlineValue bool) {
+	if arg == "-" || !strings.HasPrefix(arg, "-") {
+		return "", false
 	}
-	return append(flags, id)
+	name = strings.TrimPrefix(arg, "-")
+	name = strings.TrimPrefix(name, "-")
+	if name == "" {
+		return "", false
+	}
+	if before, _, ok := strings.Cut(name, "="); ok {
+		return before, true
+	}
+	return name, false
 }
 
 func printTmuxResult(r taskmonitor.TmuxResult, jsonOut bool) int {
@@ -220,7 +271,7 @@ func taskTmuxDetachCmd(a *taskmonitor.TmuxAdapter, args []string) int {
 	return printTmuxResult(a.Detach(context.Background(), dir, fs.Arg(0)), jsonOut)
 }
 
-// --- list ---
+// list
 
 func taskListCmd(store taskmonitor.Store, args []string) int {
 	fs := flag.NewFlagSet("task list", flag.ContinueOnError)
@@ -240,6 +291,7 @@ func taskListCmd(store taskmonitor.Store, args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	tasks = contentFreeTaskSnapshots(tasks)
 	output := struct {
 		SchemaVersion int                        `json:"schema_version"`
 		Tasks         []taskmonitor.TaskSnapshot `json:"tasks"`
@@ -256,13 +308,13 @@ func taskListCmd(store taskmonitor.Store, args []string) int {
 	return 0
 }
 
-// --- status ---
+// status
 
 func taskStatusCmd(store taskmonitor.Store, args []string) int {
 	fs := flag.NewFlagSet("task status", flag.ContinueOnError)
 	jsonOut := fs.Bool("json", false, "output as JSON")
 	dir := fs.String("dir", "", "project directory scope")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderTaskID(fs, args)); err != nil {
 		return 2
 	}
 	if !*jsonOut {
@@ -286,7 +338,8 @@ func taskStatusCmd(store taskmonitor.Store, args []string) int {
 		Task          *taskmonitor.TaskSnapshot `json:"task"`
 	}{SchemaVersion: 1}
 	if snap != nil {
-		output.Task = snap
+		contentFree := contentFreeTaskSnapshot(*snap)
+		output.Task = &contentFree
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
@@ -297,7 +350,7 @@ func taskStatusCmd(store taskmonitor.Store, args []string) int {
 	return 0
 }
 
-// --- events ---
+// events
 
 func taskEventsCmd(store taskmonitor.Store, args []string) int {
 	fs := flag.NewFlagSet("task events", flag.ContinueOnError)
@@ -306,7 +359,7 @@ func taskEventsCmd(store taskmonitor.Store, args []string) int {
 	dir := fs.String("dir", "", "project directory scope")
 	after := fs.Int("after", 0, "only events with Sequence > N")
 	follow := fs.Bool("follow", false, "poll for new events until interrupted")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderTaskID(fs, args)); err != nil {
 		return 2
 	}
 	if !*jsonOut && !*jsonl {
@@ -333,6 +386,8 @@ func taskEventsCmd(store taskmonitor.Store, args []string) int {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
+
+		events = contentFreeTaskEvents(events)
 
 		// Find max sequence to update cursor
 		for _, e := range events {
@@ -383,7 +438,7 @@ func taskEventsCmd(store taskmonitor.Store, args []string) int {
 	return 0
 }
 
-// --- control commands ---
+// control commands
 
 func taskStopCmd(store taskmonitor.Store, args []string) int {
 	fs := flag.NewFlagSet("task stop", flag.ContinueOnError)
@@ -392,7 +447,7 @@ func taskStopCmd(store taskmonitor.Store, args []string) int {
 	expectedVersion := fs.Uint64("expected-version", 0, "expected task version for CAS")
 	reason := fs.String("reason", "", "reason for stopping")
 	idemKey := fs.String("idempotency-key", "", "idempotency key")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderTaskID(fs, args)); err != nil {
 		return 2
 	}
 	if !*jsonOut {
@@ -422,7 +477,7 @@ func taskCancelCmd(store taskmonitor.Store, args []string) int {
 	expectedVersion := fs.Uint64("expected-version", 0, "expected task version for CAS")
 	reason := fs.String("reason", "", "reason for cancelling")
 	idemKey := fs.String("idempotency-key", "", "idempotency key")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderTaskID(fs, args)); err != nil {
 		return 2
 	}
 	if !*jsonOut {
@@ -451,7 +506,7 @@ func taskRequeueCmd(store taskmonitor.Store, args []string) int {
 	dir := fs.String("dir", "", "project directory scope")
 	expectedVersion := fs.Uint64("expected-version", 0, "expected task version for CAS")
 	idemKey := fs.String("idempotency-key", "", "idempotency key")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderTaskID(fs, args)); err != nil {
 		return 2
 	}
 	if !*jsonOut {
@@ -479,7 +534,7 @@ func taskOpenSessionCmd(store taskmonitor.Store, args []string) int {
 	fs := flag.NewFlagSet("task open-session", flag.ContinueOnError)
 	jsonOut := fs.Bool("json", false, "output as JSON")
 	dir := fs.String("dir", "", "project directory scope")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderTaskID(fs, args)); err != nil {
 		return 2
 	}
 	if !*jsonOut {

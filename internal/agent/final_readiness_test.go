@@ -48,18 +48,21 @@ func TestFinalReadinessFailureBranches(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			a := &Agent{evidence: tc.evidence, projectChecks: tc.checks}
-			got := a.finalReadinessFailure()
+			got := a.ReadinessResult()
 			if tc.wantEmpty {
-				if got != "" {
-					t.Fatalf("finalReadinessFailure() = %q, want empty (no gate)", got)
+				if !got.Ready {
+					t.Fatalf("ReadinessResult() = %+v, want ready (no gate)", got)
 				}
 				return
 			}
-			if got == "" {
-				t.Fatalf("finalReadinessFailure() = empty, want a failure mentioning %q", tc.wantContain)
+			if got.Ready {
+				t.Fatalf("ReadinessResult() = ready, want a failure mentioning %q", tc.wantContain)
 			}
-			if !strings.Contains(got, tc.wantContain) {
-				t.Fatalf("finalReadinessFailure() = %q, want it to mention %q", got, tc.wantContain)
+			if !strings.Contains(got.Reason, tc.wantContain) {
+				t.Fatalf("ReadinessResult().Reason = %q, want it to mention %q", got.Reason, tc.wantContain)
+			}
+			if len(got.Missing) == 0 {
+				t.Fatalf("ReadinessResult().Missing empty for %q", tc.wantContain)
 			}
 		})
 	}
@@ -70,11 +73,11 @@ func TestFinalReadinessAllowsIncompleteTodosInPlanMode(t *testing.T) {
 	a := &Agent{evidence: readinessLedger(todo)}
 	a.SetPlanMode(true)
 
-	if got := a.finalReadinessFailure(); got != "" {
-		t.Fatalf("finalReadinessFailure() = %q, want empty in plan mode", got)
+	if got := a.ReadinessResult(); !got.Ready {
+		t.Fatalf("ReadinessResult() = %+v, want ready in plan mode", got)
 	}
-	if got := a.finalReadinessCheck(); got.applies {
-		t.Fatalf("finalReadinessCheck() applies in plan mode: %+v", got)
+	if got := a.finalReadinessCheckFor(); got.applies {
+		t.Fatalf("finalReadinessCheckFor() applies in plan mode: %+v", got)
 	}
 }
 
@@ -83,9 +86,9 @@ func TestFinalReadinessCheckAuditsIncompleteTodos(t *testing.T) {
 	writer := evidence.Receipt{ToolName: "write_file", Success: true, Write: true, Paths: []string{"a.go"}}
 	a := &Agent{evidence: readinessLedger(writer, todo)}
 
-	got := a.finalReadinessCheck()
+	got := a.finalReadinessCheckFor()
 	if !got.applies {
-		t.Fatalf("finalReadinessCheck() applies = false, want true")
+		t.Fatalf("finalReadinessCheckFor() applies = false, want true")
 	}
 	if got.incompleteTodos != 1 {
 		t.Fatalf("incompleteTodos = %d, want 1", got.incompleteTodos)
@@ -99,18 +102,6 @@ func TestFinalReadinessCheckAuditsIncompleteTodos(t *testing.T) {
 	}
 }
 
-func TestFinalReadinessNoticeTextHidesInternalReason(t *testing.T) {
-	msg := finalReadinessNoticeText()
-	for _, hidden := range []string{"final-answer", "readiness blocked", "todo_write", "latest successful"} {
-		if strings.Contains(strings.ToLower(msg), hidden) {
-			t.Fatalf("finalReadinessNoticeText() = %q, should not expose %q", msg, hidden)
-		}
-	}
-	if !strings.Contains(strings.ToLower(msg), "finish or explain") {
-		t.Fatalf("finalReadinessNoticeText() = %q, want user-facing recovery action", msg)
-	}
-}
-
 func TestFinalReadinessAllowsFinalAfterLoopGuardedToolBlocker(t *testing.T) {
 	todo := evidence.Receipt{ToolName: "todo_write", Success: true, Todos: []evidence.TodoItem{{Content: "edit", Status: "in_progress"}}}
 	writer := evidence.Receipt{ToolName: "write_file", Success: true, Write: true, Paths: []string{"a.go"}}
@@ -118,12 +109,12 @@ func TestFinalReadinessAllowsFinalAfterLoopGuardedToolBlocker(t *testing.T) {
 	a := &Agent{evidence: ledger}
 	a.armLoopGuardPass(ledger.Len())
 
-	got := a.finalReadinessCheck()
+	got := a.finalReadinessCheckFor()
 	if !got.applies {
-		t.Fatalf("finalReadinessCheck() applies = false, want true audit after loop guard")
+		t.Fatalf("finalReadinessCheckFor() applies = false, want true audit after loop guard")
 	}
 	if got.reason != "" {
-		t.Fatalf("finalReadinessCheck() reason = %q, want loop guard to allow final blocker report", got.reason)
+		t.Fatalf("finalReadinessCheckFor() reason = %q, want loop guard to allow final blocker report", got.reason)
 	}
 }
 
@@ -141,8 +132,8 @@ func TestFinalReadinessLoopGuardPassSurvivesBookkeeping(t *testing.T) {
 	ledger.Record(evidence.Receipt{ToolName: "todo_write", Success: true, Todos: []evidence.TodoItem{{Content: "edit", Status: "in_progress"}}})
 	ledger.Record(evidence.Receipt{ToolName: "complete_step", Success: true, Step: "edit"})
 
-	if got := a.finalReadinessCheck(); got.reason != "" {
-		t.Fatalf("finalReadinessCheck() reason = %q, want bookkeeping after the guard to keep the pass", got.reason)
+	if got := a.finalReadinessCheckFor(); got.reason != "" {
+		t.Fatalf("finalReadinessCheckFor() reason = %q, want bookkeeping after the guard to keep the pass", got.reason)
 	}
 }
 
@@ -158,8 +149,8 @@ func TestFinalReadinessLoopGuardPassRevokedByRealProgress(t *testing.T) {
 
 	ledger.Record(evidence.Receipt{ToolName: "bash", Success: true, Command: "go test ./..."})
 
-	if got := a.finalReadinessCheck(); got.reason == "" {
-		t.Fatal("finalReadinessCheck() reason empty, want real progress after the guard to revoke the pass")
+	if got := a.finalReadinessCheckFor(); got.reason == "" {
+		t.Fatal("finalReadinessCheckFor() reason empty, want real progress after the guard to revoke the pass")
 	}
 }
 
@@ -175,62 +166,7 @@ func TestFinalReadinessIgnoresLoopGuardQuotedInToolOutput(t *testing.T) {
 	sess.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "b1", Name: "bash", Content: "agent.go:2082: \"[loop guard] %s has now %s %d times\""})
 	a := &Agent{evidence: readinessLedger(writer, todo), session: sess}
 
-	if got := a.finalReadinessCheck(); got.reason == "" {
-		t.Fatal("finalReadinessCheck() reason empty, want quoted loop-guard text to be ignored")
-	}
-}
-
-func TestFinalReadinessRetryMessageKeepsUserChoicesInteractive(t *testing.T) {
-	msg := finalReadinessRetryMessage("latest successful todo_write still has incomplete items: Ask user to review the doc: in_progress")
-	lower := strings.ToLower(msg)
-	for _, want := range []string{
-		"ask tool",
-		"wait for its tool result",
-		"do not ask in prose",
-		"do not claim the user answered",
-		"do not run exploratory bash commands",
-		"do not keep retrying the blocked command",
-		"final existing todo's exact text or 1-based step_index",
-		"do not invent a new step",
-	} {
-		if !strings.Contains(lower, want) {
-			t.Fatalf("finalReadinessRetryMessage() missing %q:\n%s", want, msg)
-		}
-	}
-	if strings.Contains(msg, "recognized verification commands") {
-		t.Fatal("todo-only retry should not inject unrelated verification guidance")
-	}
-}
-
-// TestFinalReadinessRetryMessageIncludesVerifierSummary guards the deadlock
-// fix: the retry message must tell the model which commands actually count as
-// verification, so it does not guess (python -c is blocked, grep is not
-// classified) and burn retries in a loop until the loop guard or an
-// interrupted turn ends the session.
-func TestFinalReadinessRetryMessageIncludesVerifierSummary(t *testing.T) {
-	msg := finalReadinessRetryMessageFor(finalReadinessCheck{
-		reason:              "run relevant verification after the latest mutation",
-		missingVerification: 1,
-	})
-	for _, want := range []string{
-		"recognized verification commands",
-		"node --check",
-		"python -m pytest",
-		"NOT verification",
-		"blocked in delivery mode",
-	} {
-		if !strings.Contains(msg, want) {
-			t.Fatalf("finalReadinessRetryMessage() missing verifier summary %q:\n%s", want, msg)
-		}
-	}
-}
-
-func TestFinalReadinessRetryMessageOmitsVerifierSummaryForOtherFailures(t *testing.T) {
-	msg := finalReadinessRetryMessageFor(finalReadinessCheck{
-		reason:        "inspect the changed result after the latest mutation",
-		missingReview: 1,
-	})
-	if strings.Contains(msg, "recognized verification commands") {
-		t.Fatalf("review-only retry should not inject verifier summary:\n%s", msg)
+	if got := a.finalReadinessCheckFor(); got.reason == "" {
+		t.Fatal("finalReadinessCheckFor() reason empty, want quoted loop-guard text to be ignored")
 	}
 }

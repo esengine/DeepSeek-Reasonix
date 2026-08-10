@@ -214,13 +214,7 @@ func normalizeMissingReasoningIncident(incident missingReasoningIncident, now ti
 }
 
 func (incident missingReasoningIncident) lastEventUnixNano() int64 {
-	lastEvent := incident.LastMissingUnixNano
-	if incident.LastResolvedAtUnixNano > lastEvent {
-		lastEvent = incident.LastResolvedAtUnixNano
-	}
-	if incident.LastHealthyAtUnixNano > lastEvent {
-		lastEvent = incident.LastHealthyAtUnixNano
-	}
+	lastEvent := max(incident.LastHealthyAtUnixNano, max(incident.LastResolvedAtUnixNano, incident.LastMissingUnixNano))
 	return lastEvent
 }
 

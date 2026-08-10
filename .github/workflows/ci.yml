@@ -29,13 +29,14 @@ jobs:
       code: ${{ steps.filter.outputs.code }}
       desktop: ${{ steps.filter.outputs.desktop }}
       site: ${{ steps.filter.outputs.site }}
+      sdk: ${{ steps.filter.outputs.sdk }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - id: filter
         run: |
-          code=true; desktop=true; site=true
+          code=true; desktop=true; site=true; sdk=true
           base=""
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             base="${{ github.event.pull_request.base.sha }}"
@@ -45,7 +46,7 @@ jobs:
           if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then
             files=$(git diff --name-only "$base" HEAD)
             if [ -n "$files" ]; then
-              code=false; desktop=false; site=false
+              code=false; desktop=false; site=false; sdk=false
               # Root-module CI: desktop/ is a separate module, so only the
               # clearly unrelated paths below can skip it.
               if echo "$files" | grep -qvE '^(docs/|site/|release-notes/|desktop/|workers/|[^/]+\.md$)'; then code=true; fi
@@ -53,9 +54,13 @@ jobs:
               # so only this clearly-unrelated set is safe to skip.
               if echo "$files" | grep -qvE '^(docs/|site/|release-notes/|workers/|benchmarks/|npm/|[^/]+\.md$)'; then desktop=true; fi
               if echo "$files" | grep -q '^site/'; then site=true; fi
+              # sdk/go is a nested module invisible to root `go test ./...`;
+              # its DTOs are generated from internal/extension/protocol, so
+              # both paths must trigger the sdk job.
+              if echo "$files" | grep -qE '^(sdk/|internal/extension/)'; then sdk=true; fi
             fi
           fi
-          { echo "code=$code"; echo "desktop=$desktop"; echo "site=$site"; } >> "$GITHUB_OUTPUT"
+          { echo "code=$code"; echo "desktop=$desktop"; echo "site=$site"; echo "sdk=$sdk"; } >> "$GITHUB_OUTPUT"
 
   # The ruleset requires the per-OS check names (test (ubuntu-latest) etc.).
   # A matrix job skipped at job level reports no per-leg checks at all, so
@@ -79,7 +84,7 @@ jobs:
         uses: actions/checkout@v7
 
       - if: env.RUN_STEPS == 'true'
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -131,14 +136,40 @@ jobs:
       # Pull requests run a Windows smoke suite: the packages that actually
       # carry *_windows.go code, the startup/checkpoint packages with portable
       # filesystem contracts, plus cmd/. The full ./... sweep stays on pushes
-      # to main-v2; the Unix legs always run the full suite.
+      # to main-v2; the Unix legs always run the full suite. Keep the job-level
+      # budget above normal 7-9 minute runner variance; each package test binary
+      # remains independently bounded by Go's per-package timeout below.
+      #
+      # That timeout is 8m, not 3m: across four consecutive runs of the same
+      # code, internal/boot measured 133s, 146s, 162s and then hit 180s, and
+      # internal/agent 82s, 92s, 144s and 180s — a 2.2x spread from runner
+      # variance alone, with four heavy packages sharing four vCPUs. At 3m the
+      # step failed on slow runners without a code change; a hang still trips
+      # the 15 minute job budget above.
       - name: test (Windows smoke)
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
-        timeout-minutes: 10
+        timeout-minutes: 15
         env:
           REASONIX_RELEASE_CACHE_GUARD: "1"
           WINDOWS_SANDBOX_WAIT_MS: "20000"
-        run: go test -p 4 -timeout=3m ./internal/agent/... ./internal/boot/... ./internal/checkpoint/... ./internal/cli/... ./internal/control/... ./internal/desktoplauncher/... ./internal/filelock/... ./internal/fileutil/... ./internal/hook/... ./internal/instruction/... ./internal/mcplaunch/... ./internal/notify/... ./internal/proc/... ./internal/remote/... ./internal/repair/... ./internal/sandbox/... ./internal/sysproxy/... ./internal/workspacelease/... ./cmd/...
+        run: go test -p 4 -timeout=8m ./internal/agent/... ./internal/appidentity/... ./internal/boot/... ./internal/checkpoint/... ./internal/cli/... ./internal/control/... ./internal/desktoplauncher/... ./internal/filelock/... ./internal/fileutil/... ./internal/hook/... ./internal/instruction/... ./internal/mcplaunch/... ./internal/notify/... ./internal/proc/... ./internal/remote/... ./internal/repair/... ./internal/sandbox/... ./internal/sysproxy/... ./internal/workspacelease/... ./cmd/...
+
+      # The general Windows PR smoke list intentionally omits internal/tool.
+      # Keep the session-temp portability contract covered without widening the
+      # leg to every tool test: two real PowerShell launches must share the
+      # injected TMPDIR/TMP/TEMP directory.
+      - name: test (Windows session temp)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 3
+        run: go test -timeout=2m -run '^TestBashSharesSessionTempAcrossCalls$' ./internal/tool/builtin
+
+      # Shell execution contract: PowerShell identity, Chinese workspace paths,
+      # UTF-8 output, and ExitCode retention must gate PRs on native Windows.
+      # Keep this focused (not full ./internal/tool) so the smoke budget holds.
+      - name: test (Windows shell execution contract)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 5
+        run: go test -timeout=3m -run '^TestBashPowerShellExecuteDetailedContract$|^TestBashPowerShell51PreflightRejectsAndAndDetailed$|^TestBashPowerShellOutputIsUTF8$|^TestBashPowerShellSurfacesNonZeroExit$|^TestBashPowerShellRejectsChaining$' ./internal/tool/builtin
 
       - name: test (full)
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name != 'pull_request'
@@ -166,7 +197,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -193,12 +224,71 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           REASONIX_RELEASE_CACHE_GUARD: "1"
-        run: go test -race ./internal/agent/... ./internal/plugin/... ./internal/jobs/... ./internal/proc/... ./internal/sandbox/... ./internal/filelock/... ./internal/eventwire/... ./internal/remote/...
+        run: go test -race ./internal/agent/... ./internal/plugin/... ./internal/jobs/... ./internal/proc/... ./internal/sandbox/... ./internal/filelock/... ./internal/eventwire/... ./internal/remote/... ./internal/extension/... ./internal/boot/... ./internal/control/... ./internal/tool/...
 
       - name: test -race (full)
         if: github.event_name != 'pull_request'
         env:
           REASONIX_RELEASE_CACHE_GUARD: "1"
+        run: go test -race ./...
+
+  # sdk/go is a nested stdlib-only module invisible to root `go test ./...`.
+  # Its DTOs are generated from internal/extension/protocol, and the
+  # host-side conformance tests spawn the SDK example, so the job runs the
+  # same three-OS matrix as the root tests.
+  sdk:
+    needs: changes
+    if: always()
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      RUN_STEPS: ${{ github.event_name != 'pull_request' || needs.changes.outputs.sdk != 'false' }}
+    defaults:
+      run:
+        working-directory: sdk/go
+    steps:
+      - if: env.RUN_STEPS == 'true'
+        uses: actions/checkout@v7
+
+      - if: env.RUN_STEPS == 'true'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: sdk/go/go.mod
+
+      - name: gofmt
+        if: env.RUN_STEPS == 'true'
+        shell: bash
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: vet
+        if: env.RUN_STEPS == 'true'
+        run: go vet ./...
+
+      - name: stdlib-only guard
+        if: env.RUN_STEPS == 'true'
+        shell: bash
+        run: |
+          # The SDK is a public module with a hard stdlib-only contract.
+          if go list -m all | grep -v '^github.com/esengine/DeepSeek-Reasonix/sdk/go$'; then
+            echo "sdk/go must not depend on anything outside the standard library"
+            exit 1
+          fi
+
+      - name: test
+        if: env.RUN_STEPS == 'true'
+        run: go test ./...
+
+      - name: test -race
+        if: github.event_name != 'pull_request' && env.RUN_STEPS == 'true'
         run: go test -race ./...
 
   desktop:
@@ -211,18 +301,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: desktop/go.mod
           cache: true
           cache-dependency-path: desktop/go.sum
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@v6.0.9
         with:
           version: 10
           run_install: false
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: pnpm
@@ -231,7 +321,7 @@ jobs:
       - name: Install Wails CLI
         run: |
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          go install "github.com/wailsapp/wails/v2/cmd/wails@$(cat "$GITHUB_WORKSPACE/.wails-version")"
 
       - name: gofmt
         run: |
@@ -267,6 +357,9 @@ jobs:
         run: |
           pnpm --dir frontend test:terminal
           pnpm --dir frontend test:task-monitor
+          pnpm --dir frontend test:workspace
+          pnpm --dir frontend test:motion
+          pnpm --dir frontend test:transcript
 
       - name: Test usage statistics frontend
         run: pnpm --dir frontend test:usage-stats
@@ -287,6 +380,12 @@ jobs:
       - name: test
         run: go test ./...
 
+      # The extension work added new shared-state paths to the desktop
+      # runtime (tab/rebuild fences, extension UI). Race-sweep the module so
+      # regressions are CI-blocked, not just author-verified locally.
+      - name: test -race
+        run: go test -race ./...
+
   # desktop/ is a separate module, so the root macOS matrix above does not
   # compile or exercise the native PTY implementation.
   desktop-macos:
@@ -299,7 +398,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: desktop/go.mod
           cache: true
@@ -307,6 +406,16 @@ jobs:
 
       - name: Test integrated terminal and PTY lifecycle
         run: go test -race -run 'Test(ResolveTerminal|Terminal|EmptyTerminal|UnixTerminalProcess)' .
+
+      # desktop/*_darwin.go is the one build-tag set the lint job cannot reach:
+      # the main-thread watchdog is cgo, so it only type-checks with a real
+      # macOS toolchain.
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          working-directory: desktop
+          args: --timeout=5m
 
   # Desktop project-root matching is case-insensitive only on Windows
   # (sameDesktopPath folds case when os.PathSeparator is '\'), so the
@@ -323,18 +432,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: desktop/go.mod
           cache: true
           cache-dependency-path: desktop/go.sum
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@v6.0.9
         with:
           version: 10
           run_install: false
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: pnpm
@@ -343,7 +452,7 @@ jobs:
       - name: Install Wails CLI
         run: |
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          go install "github.com/wailsapp/wails/v2/cmd/wails@$(cat "$GITHUB_WORKSPACE/.wails-version")"
 
       # go:embed of frontend/dist needs a built frontend before the package
       # compiles, same as the ubuntu desktop leg.
@@ -352,6 +461,25 @@ jobs:
           wails generate module
           pnpm --dir frontend install --frozen-lockfile
           pnpm --dir frontend build
+
+      - name: Test native motion contracts
+        run: pnpm --dir frontend test:motion
+
+      # Build the real Wails executable on every desktop PR and exercise the
+      # approval interaction in Microsoft's installed WebView2 runtime. The
+      # frontend and bindings were already built above, so this skips only
+      # duplicate build work, not the native shell.
+      - name: Build Wails executable for WebView2 smoke
+        timeout-minutes: 10
+        run: wails build -clean -s -skipbindings -nopackage -platform windows/amd64 -webview2 embed
+
+      - name: Smoke-test Wails approval in WebView2
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          ../scripts/test-webview2-approval-smoke.ps1 `
+            -ExecutablePath "build/bin/reasonix-desktop.exe" `
+            -TimeoutSeconds 60
 
       - name: test (Windows desktop and update helper)
         timeout-minutes: 15
@@ -369,41 +497,72 @@ jobs:
         timeout-minutes: 20
         run: ../scripts/desktop-build.sh windows/amd64 v0.0.0-ci canary
 
+  # repolint scans desktop/ and sdk/ too, so this job also runs for diffs the
+  # `code` filter would otherwise skip.
   lint:
     needs: changes
-    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code != 'false')
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code != 'false' || needs.changes.outputs.desktop != 'false' || needs.changes.outputs.sdk != 'false')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
 
+      - if: github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false'
+        uses: pnpm/action-setup@v6.0.9
+        with:
+          version: 10
+          run_install: false
+
+      - if: github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false'
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
+
+      - name: required native motion contracts
+        if: github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false'
+        run: |
+          pnpm --dir desktop/frontend install --frozen-lockfile
+          pnpm --dir desktop/frontend test:motion
+
+      - name: repo standards
+        run: go run ./tools/repolint
+
+      - name: wails version pin
+        run: |
+          bash scripts/check-wails-pin.sh
+          bash scripts/check-wails-pin.test.sh
+
+      # `make lint-install` reads the same file, so a local run and this job
+      # cannot drift onto different linter versions.
+      - id: golangci
+        run: echo "version=$(cat .golangci-version)" >> "$GITHUB_OUTPUT"
+
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12.2
+          version: ${{ steps.golangci.outputs.version }}
           args: --timeout=5m
 
-      # Report-only complexity monitor for internal/agent. Does not duplicate the
-      # main lint/test/race gates; funlen+cyclop run with issues-exit-code=0 so
-      # the baseline is visible as a CI summary/artifact without blocking merges.
-      - name: agent complexity report
-        if: always()
+      # The step above only type-checks the linux/amd64 build, so every
+      # //go:build windows and //go:build darwin file in the tree went unlinted.
+      # Both modules cross-check without a toolchain; desktop under darwin does
+      # not, because its watchdog is cgo, so that leg lives in desktop-macos.
+      - name: golangci-lint (cross-platform build tags)
         run: |
-          # Reuse the golangci-lint binary installed by the previous step.
-          bash scripts/agent-complexity-report.sh
-
-      - name: upload agent complexity report
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: agent-complexity-report
-          path: agent-complexity-report.txt
-          if-no-files-found: ignore
-          retention-days: 14
+          set -euo pipefail
+          command -v golangci-lint
+          for target in "darwin ." "windows ." "windows desktop"; do
+            read -r target_os target_dir <<< "$target"
+            echo "::group::golangci-lint GOOS=$target_os ($target_dir)"
+            (cd "$target_dir" && GOOS="$target_os" golangci-lint run --timeout=5m ./...)
+            echo "::endgroup::"
+          done
 
       - name: release workflow contracts
         run: |
@@ -416,8 +575,12 @@ jobs:
             .github/workflows/release-npm.yml \
             .github/workflows/release-desktop.yml \
             .github/workflows/release-verify-issues.yml \
-            .github/workflows/docs-impact.yml
+            .github/workflows/docs-impact.yml \
+            .github/workflows/ci.yml \
+            .github/workflows/cross-boundary-review.yml \
+            .github/workflows/cross-boundary-review-signal.yml
           bash scripts/release-workflows.test.sh
+          node --test .github/scripts/cross-boundary-review.test.cjs
           node scripts/check-single-release-public-contract.mjs
 
   # The site/ auth client has security-sensitive redirect-validation logic
@@ -434,7 +597,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
 
@@ -449,7 +612,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -467,7 +630,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true

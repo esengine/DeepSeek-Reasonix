@@ -225,10 +225,7 @@ func backoffDelay(attempt int, retryAfter time.Duration) time.Duration {
 		}
 		return retryAfter
 	}
-	d := time.Duration(1<<(attempt-1)) * 500 * time.Millisecond
-	if d > maxBackoff {
-		d = maxBackoff
-	}
+	d := min(time.Duration(1<<(attempt-1))*500*time.Millisecond, maxBackoff)
 	return d + time.Duration(rand.Intn(250))*time.Millisecond
 }
 
