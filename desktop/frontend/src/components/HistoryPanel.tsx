@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { Archive, Pencil, Search, Trash2, RotateCcw } from "lucide-react";
+import { Archive, CheckSquare, Pencil, Search, Square, Trash2, RotateCcw } from "lucide-react";
 import { t, useT } from "../lib/i18n";
 import { historySessionDisplayTitle, sessionActivityTime } from "../lib/session";
 import type { HistoryMessage, SessionMeta } from "../lib/types";
@@ -30,6 +30,7 @@ export function HistoryPanel({
   onPurgeAll,
   onPurgeRecoveryCopies,
   onDeleteMany,
+  onTrashMany,
   onClose,
 }: {
   kind?: "history" | "trash";
@@ -44,6 +45,7 @@ export function HistoryPanel({
   onPurgeAll?: (paths: string[]) => void;
   onPurgeRecoveryCopies?: (paths: string[]) => void;
   onDeleteMany?: (paths: string[]) => void;
+  onTrashMany?: (paths: string[]) => void;
   onClose: () => void;
 }) {
   const tr = useT();
@@ -70,6 +72,9 @@ export function HistoryPanel({
     loading: boolean;
   } | null>(null);
   const previewSeq = useRef(0);
+  const [selecting, setSelecting] = useState(false);
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [confirmTrashMany, setConfirmTrashMany] = useState(false);
 
   const startRename = (s: SessionMeta) => {
     if (running) return;
@@ -80,6 +85,31 @@ export function HistoryPanel({
     if (running) return;
     onRename(path, draft.trim());
     setEditing(null);
+  };
+  const toggleChecked = useCallback((path: string) => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }, []);
+  const enterSelect = () => {
+    setSelecting(true);
+    setChecked(new Set());
+    setConfirmTrashMany(false);
+    setMenuConfirmTarget(null);
+    setEditing(null);
+  };
+  const exitSelect = () => {
+    setSelecting(false);
+    setChecked(new Set());
+    setConfirmTrashMany(false);
+  };
+  const doTrashMany = () => {
+    if (checked.size === 0 || !onTrashMany) return;
+    onTrashMany(Array.from(checked));
+    exitSelect();
   };
   const loadPreview = useCallback(
     async (s: SessionMeta) => {
@@ -165,6 +195,22 @@ export function HistoryPanel({
         : [...filteredSessions.filter((s) => !s.recoveryCopy), ...filteredSessions.filter((s) => s.recoveryCopy)],
     [filteredSessions, isTrash],
   );
+  const selectable = useMemo(
+    () => (!isTrash && !running ? displayedSessions.filter((s) => !s.current) : []),
+    [displayedSessions, isTrash, running],
+  );
+  const allSelected = selectable.length > 0 && selectable.every((s) => checked.has(s.path));
+  const toggleSelectAll = useCallback(() => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        for (const s of selectable) next.delete(s.path);
+      } else {
+        for (const s of selectable) next.add(s.path);
+      }
+      return next;
+    });
+  }, [allSelected, selectable]);
 
   // Sessions arrive newest-first; bucket consecutive ones under a day heading
   // (Today / Yesterday / a date) while preserving that order.
@@ -189,6 +235,29 @@ export function HistoryPanel({
   }, [isTrash]);
 
   useEffect(() => {
+    if (selecting && (isTrash || running)) {
+      setSelecting(false);
+      setChecked(new Set());
+      setConfirmTrashMany(false);
+    }
+  }, [isTrash, running, selecting]);
+
+  useEffect(() => {
+    if (!selecting) return;
+    const live = new Set(displayedSessions.map((s) => s.path));
+    setChecked((prev) => {
+      let stale = false;
+      for (const p of prev) {
+        if (!live.has(p)) {
+          stale = true;
+          break;
+        }
+      }
+      return stale ? new Set(Array.from(prev).filter((p) => live.has(p))) : prev;
+    });
+  }, [displayedSessions, selecting]);
+
+  useEffect(() => {
     setEditing(null);
     if (displayedSessions.length === 0) {
       if (preview) setPreview(null);
@@ -205,6 +274,7 @@ export function HistoryPanel({
     [displayedSessions, preview],
   );
   const openSessionMenu = (event: ReactMouseEvent<HTMLElement>, s: SessionMeta) => {
+    if (selecting) return;
     event.preventDefault();
     event.stopPropagation();
     setMenuConfirmTarget(null);
@@ -413,7 +483,7 @@ export function HistoryPanel({
           {!isTrash && running && <div className="management-modal__summary history-modal__summary">{tr("history.readOnlyHint")}</div>}
         </div>
         <div className="management-modal__actions history-modal__actions">
-          {recoveryCopyCount > 0 && (
+          {!selecting && recoveryCopyCount > 0 && (
             <button
               className={`chip history-clear${actionConfirmClearRecovery ? " history-clear--confirm" : ""}`}
               type="button"
@@ -423,6 +493,15 @@ export function HistoryPanel({
               {isTrash
                 ? tr(actionConfirmClearRecovery ? "history.confirmClearRecoveryCopies" : "history.clearRecoveryCopies")
                 : tr(actionConfirmClearRecovery ? "history.confirmTrashRecoveryCopies" : "history.trashRecoveryCopies")}
+            </button>
+          )}
+          {!isTrash && !running && sessions.length > 0 && (
+            <button
+              type="button"
+              className={`chip${selecting ? " chip--on" : ""}`}
+              onClick={selecting ? exitSelect : enterSelect}
+            >
+              {tr(selecting ? "history.selectDone" : "history.select")}
             </button>
           )}
           {isTrash && sessions.length > 0 && (
@@ -504,10 +583,28 @@ export function HistoryPanel({
                     const selected = preview?.path === s.path;
                     return (
                       <div
-                        className={`hist-item${s.current ? " hist-item--current" : ""}${selected ? " hist-item--selected" : ""}`}
+                        className={`hist-item${s.current ? " hist-item--current" : ""}${selected ? " hist-item--selected" : ""}${checked.has(s.path) ? " hist-item--checked" : ""}`}
                         key={s.path}
                         onContextMenu={(event) => openSessionMenu(event, s)}
                       >
+                        {selecting && (
+                          <button
+                            type="button"
+                            className={`hist-item__check${checked.has(s.path) ? " hist-item__check--on" : ""}`}
+                            aria-pressed={checked.has(s.path)}
+                            disabled={s.current}
+                            title={s.current ? tr("history.current") : undefined}
+                            onClick={() => toggleChecked(s.path)}
+                          >
+                            {s.current ? (
+                              <span className="hist-item__check-lock">—</span>
+                            ) : checked.has(s.path) ? (
+                              <CheckSquare size={15} />
+                            ) : (
+                              <Square size={15} />
+                            )}
+                          </button>
+                        )}
                         {editing === s.path ? (
                           <input
                             className="hist-item__rename"
@@ -526,11 +623,15 @@ export function HistoryPanel({
                             className="hist-item__main"
                             aria-pressed={selected}
                             onClick={() => {
+                              if (selecting) {
+                                if (!s.current) toggleChecked(s.path);
+                                return;
+                              }
                               setMenuConfirmTarget(null);
                               void loadPreview(s);
                             }}
                             onDoubleClick={() => {
-                              if (!isTrash && !running) onResume(s);
+                              if (!selecting && !isTrash && !running) onResume(s);
                             }}
                           >
                             <div className="hist-item__preview">{historySessionDisplayTitle(s, tr("history.emptySession"))}</div>
@@ -616,6 +717,51 @@ export function HistoryPanel({
             )}
           </section>
             </div>
+        {selecting && (
+          <div className="history-batchbar">
+            <div className="history-batchbar__count">{tr("history.nSelected", { n: checked.size })}</div>
+            <button
+              type="button"
+              className="chip"
+              onClick={toggleSelectAll}
+              disabled={selectable.length === 0}
+            >
+              {tr(allSelected ? "history.deselectAll" : "history.selectAll")}
+            </button>
+            <div className="history-batchbar__spacer" />
+            {checked.size > 0 &&
+              (confirmTrashMany ? (
+                <div className="history-batchbar__confirm">
+                  <span>{tr("history.confirmMoveSelectedToTrash", { n: checked.size })}</span>
+                  <button
+                    type="button"
+                    className="btn btn--small btn--danger"
+                    disabled={running}
+                    onClick={doTrashMany}
+                  >
+                    {tr("history.confirmMoveToTrash")}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--small"
+                    disabled={running}
+                    onClick={() => setConfirmTrashMany(false)}
+                  >
+                    {tr("common.cancel")}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn--small btn--danger"
+                  disabled={running}
+                  onClick={() => setConfirmTrashMany(true)}
+                >
+                  {tr("history.moveSelectedToTrash", { n: checked.size })}
+                </button>
+              ))}
+          </div>
+        )}
         <ContextMenu
           open={Boolean(menuSession)}
           point={menuPoint}

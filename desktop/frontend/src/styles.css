@@ -14786,7 +14786,7 @@ body > .mermaid-diagram--fullscreen {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
 }
 .history-toolbar {
@@ -14882,6 +14882,73 @@ body > .mermaid-diagram--fullscreen {
   color: #ff9f86;
   border-color: rgba(255, 139, 109, 0.62);
   background: rgba(255, 139, 109, 0.16);
+}
+.hist-item__check {
+  --wails-draggable: no-drag;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--fg-faint);
+  cursor: pointer;
+  transition: color 0.12s;
+}
+.hist-item__check:hover:not(:disabled) {
+  color: var(--fg);
+}
+.hist-item__check:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+.hist-item__check-lock {
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+.hist-item__check--on {
+  color: var(--accent);
+}
+.hist-item--checked {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: none;
+}
+.hist-item--checked::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 7px;
+  bottom: 7px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+.history-batchbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-soft);
+}
+.history-batchbar__count {
+  font-size: var(--font-control-small);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-dim);
+  font-weight: 550;
+}
+.history-batchbar__spacer {
+  flex: 1 1 auto;
+}
+.history-batchbar__confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-control-small);
+  color: var(--fg-dim);
 }
 .history-preview {
   min-width: 0;
