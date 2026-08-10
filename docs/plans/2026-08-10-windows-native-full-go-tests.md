@@ -37,7 +37,7 @@ Launch the same script with an internal broker flag. The elevated process only o
 
 **Step 2: Implement temporary loopback rules**
 
-Create unique IPv4 and IPv6 inbound TCP allow rules restricted on both ends to loopback. Record exact names and delete them in `finally`, including after failed tests, parent-process exit, or lease timeout.
+Create a unique IPv4 rule restricted on both ends to `127.0.0.1` and an IPv6 rule restricted to Windows interface index 1 (the loopback adapter). Record exact names and delete them in `finally`, including after failed tests, parent-process exit, or lease timeout.
 
 **Step 3: Add cleanup verification**
 

@@ -4,6 +4,7 @@ param(
     [string]$GoExecutable,
     [string]$ResultsDirectory,
     [switch]$FirewallBroker,
+    [switch]$CleanupFirewallLease,
     [string]$BrokerControlDirectory,
     [int]$ParentProcessId,
     [string]$RunToken
@@ -68,23 +69,39 @@ function Invoke-FirewallBroker {
     $createdRules = New-Object System.Collections.Generic.List[string]
 
     try {
+        $ipv6Loopback = Get-NetIPInterface -AddressFamily IPv6 -ErrorAction Stop |
+            Where-Object { $_.InterfaceIndex -eq 1 } |
+            Select-Object -First 1
+        if ($null -eq $ipv6Loopback) {
+            throw "Windows IPv6 loopback interface was not found."
+        }
         $ruleSpecs = @(
-            [pscustomobject]@{ Name = $ruleNames[0]; Address = "127.0.0.1"; Label = "IPv4" },
-            [pscustomobject]@{ Name = $ruleNames[1]; Address = "::1"; Label = "IPv6" }
+            [pscustomobject]@{ Name = $ruleNames[0]; Address = "127.0.0.1"; InterfaceAlias = ""; Label = "IPv4" },
+            [pscustomobject]@{ Name = $ruleNames[1]; Address = ""; InterfaceAlias = $ipv6Loopback.InterfaceAlias; Label = "IPv6" }
         )
         foreach ($spec in $ruleSpecs) {
-            New-NetFirewallRule `
-                -Name $spec.Name `
-                -DisplayName "intelifar Go test loopback $($spec.Label) ($RunToken)" `
-                -Group $firewallGroup `
-                -Direction Inbound `
-                -Action Allow `
-                -Enabled True `
-                -Profile Any `
-                -Protocol TCP `
-                -LocalAddress $spec.Address `
-                -RemoteAddress $spec.Address `
-                -EdgeTraversalPolicy Block | Out-Null
+            $ruleParameters = @{
+                Name = $spec.Name
+                DisplayName = "intelifar Go test loopback $($spec.Label) ($RunToken)"
+                Group = $firewallGroup
+                Direction = "Inbound"
+                Action = "Allow"
+                Enabled = "True"
+                Profile = "Any"
+                Protocol = "TCP"
+                EdgeTraversalPolicy = "Block"
+            }
+            if (-not [string]::IsNullOrWhiteSpace($spec.Address)) {
+                $ruleParameters.LocalAddress = $spec.Address
+                $ruleParameters.RemoteAddress = $spec.Address
+            }
+            else {
+                # Windows rejects ::1 as an explicit firewall address. Scoping
+                # both directions to interface index 1 keeps this rule on the
+                # IPv6 loopback adapter without widening it to a LAN adapter.
+                $ruleParameters.InterfaceAlias = $spec.InterfaceAlias
+            }
+            New-NetFirewallRule @ruleParameters | Out-Null
             $createdRules.Add($spec.Name)
         }
 
@@ -143,8 +160,37 @@ function Invoke-FirewallBroker {
     exit 0
 }
 
+function Remove-FirewallLease {
+    if (-not (Test-IsAdministrator)) {
+        throw "Firewall lease cleanup must be approved through Windows UAC."
+    }
+    if ($RunToken -notmatch '^[0-9a-f]{32}$') {
+        throw "Invalid firewall lease token."
+    }
+
+    $ruleNames = @(
+        "intelifar-go-test-$RunToken-ipv4",
+        "intelifar-go-test-$RunToken-ipv6"
+    )
+    foreach ($ruleName in $ruleNames) {
+        if ($null -ne (Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue)) {
+            Remove-NetFirewallRule -Name $ruleName -ErrorAction Stop
+        }
+    }
+    foreach ($ruleName in $ruleNames) {
+        if ($null -ne (Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue)) {
+            throw "Firewall rule still exists after cleanup: $ruleName"
+        }
+    }
+    Write-Host "Firewall lease $RunToken removed."
+    exit 0
+}
+
 if ($FirewallBroker) {
     Invoke-FirewallBroker
+}
+if ($CleanupFirewallLease) {
+    Remove-FirewallLease
 }
 
 function Resolve-PinnedGo {
@@ -221,10 +267,10 @@ function Wait-ForBrokerReady {
     $deadline = (Get-Date).AddSeconds(30)
     while ((Get-Date) -lt $deadline) {
         if (Test-Path -LiteralPath $ReadyPath -PathType Leaf) {
-            return Get-Content -LiteralPath $ReadyPath -Raw | ConvertFrom-Json
+            return Get-Content -LiteralPath $ReadyPath -Raw -Encoding UTF8 | ConvertFrom-Json
         }
         if (Test-Path -LiteralPath $FailedPath -PathType Leaf) {
-            $failure = Get-Content -LiteralPath $FailedPath -Raw | ConvertFrom-Json
+            $failure = Get-Content -LiteralPath $FailedPath -Raw -Encoding UTF8 | ConvertFrom-Json
             throw "Firewall broker failed: $($failure.error)"
         }
         if ($Process.HasExited) {
@@ -392,7 +438,7 @@ finally {
         }
     }
     if (Test-Path -LiteralPath $donePath -PathType Leaf) {
-        $brokerDone = Get-Content -LiteralPath $donePath -Raw | ConvertFrom-Json
+        $brokerDone = Get-Content -LiteralPath $donePath -Raw -Encoding UTF8 | ConvertFrom-Json
         $cleanupPassed = [bool]$brokerDone.success
         if (-not $cleanupPassed) {
             $suiteError = ($suiteError + " Firewall cleanup failed: " + $brokerDone.brokerError + " " + ($brokerDone.cleanupErrors -join "; ")).Trim()
