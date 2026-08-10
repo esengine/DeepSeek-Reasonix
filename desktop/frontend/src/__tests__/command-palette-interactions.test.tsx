@@ -134,5 +134,39 @@ console.log("\ncommand palette interactions");
   dom.window.close();
 }
 
+{
+  const dom = installDom();
+  const { root, calls } = await renderPalette();
+  const input = document.querySelector<HTMLInputElement>(".palette__input");
+  if (!input) throw new Error("missing palette input");
+  const dispatchKey = (key: string): KeyboardEvent => {
+    const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+    input.dispatchEvent(event);
+    return event;
+  };
+
+  await act(async () => {
+    input.dispatchEvent(new dom.window.FocusEvent("focusin", { bubbles: true }));
+    dispatchKey("n");
+    input.dispatchEvent(new Event("compositionstart", { bubbles: true }));
+    input.dispatchEvent(new Event("compositionend", { bubbles: true }));
+    dispatchKey("Enter");
+    await flush();
+  });
+  ok(calls.run === 0, "IME confirm Enter does not run the highlighted command");
+
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    dispatchKey("Enter");
+    await flush();
+  });
+  ok(calls.run === 1, "a deliberate Enter after the confirm grace runs the highlighted command");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

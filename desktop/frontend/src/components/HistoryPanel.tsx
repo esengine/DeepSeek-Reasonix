@@ -3,6 +3,7 @@ import type { MouseEvent as ReactMouseEvent } from "react";
 import { Archive, Pencil, Search, Trash2, RotateCcw } from "lucide-react";
 import { t, useT } from "../lib/i18n";
 import { historySessionDisplayTitle, sessionActivityTime } from "../lib/session";
+import { isImeEvent } from "../lib/imeComposition";
 import type { HistoryMessage, SessionMeta } from "../lib/types";
 import { historyMessagesToItems, type Item } from "../lib/useController";
 import { Transcript } from "./Transcript";
@@ -515,6 +516,7 @@ export function HistoryPanel({
                             value={draft}
                             onChange={(e) => setDraft(e.target.value)}
                             onKeyDown={(e) => {
+                              if (isImeEvent(e)) return;
                               if (e.key === "Enter") commitRename(s.path);
                               if (e.key === "Escape") setEditing(null);
                             }}

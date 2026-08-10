@@ -54,6 +54,10 @@ function installDom() {
   globalThis.localStorage = dom.window.localStorage;
   globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
   globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
+  // React 19 falls back to the IE input-event polyfill unless attachEvent is
+  // present; without this, synthetic keydown/input handlers never run in jsdom.
+  Object.defineProperty(dom.window.HTMLElement.prototype, "attachEvent", { configurable: true, value: () => {} });
+  Object.defineProperty(dom.window.HTMLElement.prototype, "detachEvent", { configurable: true, value: () => {} });
   Object.defineProperty(dom.window.HTMLElement.prototype, "clientHeight", {
     configurable: true,
     get() {
@@ -588,6 +592,80 @@ console.log("\nask card layout");
   });
   eq(optionButtons[1]?.getAttribute("aria-selected"), "true", "click checks the multi-select option");
   eq(confirm.disabled, false, "multi-select confirm enables after a real check");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  // IME confirm Enter must not confirm the custom answer; a deliberate Enter
+  // after the confirm grace still reaches the handler.
+  const dom = installDom();
+  const rootEl = document.getElementById("root");
+  if (!rootEl) throw new Error("missing root");
+  const root = createRoot(rootEl);
+  const answers: QuestionAnswer[][] = [];
+  const ask: WireAsk = {
+    id: "ask-ime-custom",
+    questions: [
+      {
+        id: "decision",
+        header: "Review",
+        prompt: "What should the archive logic do?",
+        options: [{ label: "Full alignment", description: "Keep behavior consistent." }],
+      },
+    ],
+  };
+  await act(async () => {
+    root.render(
+      React.createElement(LocaleProvider, null,
+        React.createElement(AskCard, {
+          ask,
+          onAnswer: (_id: string, next: QuestionAnswer[]) => answers.push(next),
+          onDismiss: () => undefined,
+          onStop: () => undefined,
+        }),
+      ),
+    );
+    await flushTimers();
+  });
+  const customOption = [...document.querySelectorAll(".prompt-shelf__actions .prompt-action")].at(-1) as HTMLElement | undefined;
+  if (!customOption) throw new Error("custom option did not render");
+  await act(async () => {
+    customOption.click();
+    await flushTimers();
+  });
+  const customInput = document.querySelector(".ask-shelf__custom") as HTMLInputElement | null;
+  if (!customInput) throw new Error("custom input did not render");
+  // A focusin activates React's jsdom input polyfill so keydown dispatches run.
+  const dispatchEnter = (): KeyboardEvent => {
+    const event = new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    customInput.dispatchEvent(event);
+    return event;
+  };
+  let imeEnter: KeyboardEvent | null = null;
+  await act(async () => {
+    customInput.dispatchEvent(new window.FocusEvent("focusin", { bubbles: true }));
+    // Typing a pinyin letter primes the shared compositionend listener before
+    // the confirming Enter arrives (a real IME session always types first).
+    customInput.dispatchEvent(new window.KeyboardEvent("keydown", { key: "n", bubbles: true, cancelable: true }));
+    customInput.dispatchEvent(new window.Event("compositionstart", { bubbles: true }));
+    customInput.dispatchEvent(new window.Event("compositionend", { bubbles: true }));
+    imeEnter = dispatchEnter();
+    await flushTimers();
+  });
+  eq(imeEnter?.defaultPrevented, true, "IME confirm Enter is swallowed in the ask custom input");
+  eq(answers.length, 0, "IME confirm Enter does not confirm the custom answer");
+
+  let plainEnter: KeyboardEvent | null = null;
+  await act(async () => {
+    await flushTimers(150);
+    plainEnter = dispatchEnter();
+    await flushTimers();
+  });
+  eq(plainEnter?.defaultPrevented, false, "a deliberate Enter after the confirm grace is not swallowed");
 
   await act(async () => {
     root.unmount();

@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useT } from "../lib/i18n";
+import { isImeEvent } from "../lib/imeComposition";
 import type { QuestionAnswer, WireAsk, WireAskQuestion } from "../lib/types";
 import {
   DecisionConfirmBar,
@@ -341,6 +342,10 @@ export function AskCard({
                 disabled={submitting}
                 onChange={(e) => setTyped(q, e.target.value)}
                 onKeyDown={(e) => {
+                  if (isImeEvent(e)) {
+                    e.preventDefault();
+                    return;
+                  }
                   if (e.key === "Enter" && canConfirm()) {
                     e.preventDefault();
                     confirmSelected();

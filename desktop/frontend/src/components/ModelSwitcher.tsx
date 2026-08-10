@@ -3,6 +3,7 @@ import { Brain, Check, ChevronsUpDown, Search } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
+import { isImeEvent } from "../lib/imeComposition";
 import type { ModelInfo } from "../lib/types";
 import { AnchoredPopover } from "./AnchoredPopover";
 import { Tooltip } from "./Tooltip";
@@ -194,6 +195,7 @@ export function ModelSwitcher({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
+                if (isImeEvent(e)) return;
                 if (e.key === "Escape") setOpen(false);
                 if (e.key === "Enter" && filtered.length === 1) pick(filtered[0]);
               }}

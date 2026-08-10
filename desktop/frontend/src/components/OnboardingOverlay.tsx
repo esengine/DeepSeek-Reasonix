@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import logo from "../assets/logo.svg";
 import { useT } from "../lib/i18n";
+import { isImeEvent } from "../lib/imeComposition";
 import { app, openExternal } from "../lib/bridge";
 
 // Full-window first-run guide: DeepSeek stays the fastest path, while users can
@@ -73,6 +74,7 @@ export function OnboardingOverlay({
             if (state === "error") setState("idle");
           }}
           onKeyDown={(e) => {
+            if (isImeEvent(e)) return;
             if (e.key === "Enter" && state !== "validating") {
               e.preventDefault();
               void submit();

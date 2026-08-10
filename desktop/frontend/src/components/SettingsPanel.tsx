@@ -8,6 +8,7 @@ import { apiKeyEnvFromProviderName, createLatestRequestGate, inferredVisionModel
 import { cachedFetchProviderModels, invalidateProviderCacheByAPIKeyEnv, shouldSkipAutoRefresh } from "../lib/providerModelCache";
 import { opencodeGoPresetDescriptionKeys } from "../lib/providerPresetDescriptions";
 import { useUpdater } from "../lib/useUpdater";
+import { isImeEvent } from "../lib/imeComposition";
 import {
   applyTheme,
   getTheme,
@@ -6863,6 +6864,7 @@ function RuleList({
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
+            if (isImeEvent(e)) return;
             if (e.key === "Enter") add();
           }}
         />

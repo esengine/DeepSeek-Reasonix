@@ -2,6 +2,7 @@ import { Activity, AlertTriangle, ArchiveRestore, Check, ChevronDown, ChevronRig
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
+import { isImeEvent } from "../lib/imeComposition";
 import type { MemoryArchive, MemoryFact, MemorySuggestion, MemorySuggestionsView, MemoryView, SkillSuggestion, TabMeta } from "../lib/types";
 import { AnchoredPopover } from "./AnchoredPopover";
 import { ResizableDrawer } from "./ResizableDrawer";
@@ -658,6 +659,7 @@ export function MemoryPanel({
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
                   onKeyDown={(e) => {
+                    if (isImeEvent(e)) return;
                     if (e.key === "Enter") void submitNote();
                   }}
                 />
@@ -1785,6 +1787,7 @@ export function MemorySettingsPage() {
 								value={note}
 								onChange={(e) => setNote(e.target.value)}
 								onKeyDown={(e) => {
+									if (isImeEvent(e)) return;
 									if (e.key === "Enter") void submitNote();
 								}}
 							/>
