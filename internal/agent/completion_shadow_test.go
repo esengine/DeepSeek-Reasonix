@@ -14,7 +14,7 @@ func shadowReport(input string, receipts ...evidence.Receipt) (event.ContractSha
 	for _, r := range receipts {
 		ledger.Record(r)
 	}
-	c := buildShadowContract(input, ledger.Receipts())
+	c := buildShadowContract(input, ledger.Receipts(), nil)
 	return contractShadowAudit(c), completionReportAudit(completion.Build(c, ledger))
 }
 

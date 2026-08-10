@@ -142,6 +142,7 @@ func Atomic(input string) *Contract {
 type PlanFacts struct {
 	AcceptanceCriteria []string
 	Regressions        []string // must-keep-passing criteria
+	Optional           []string // nice-to-have; recorded but never blocking
 	Verifications      []string // command-level checks; "" entries mean any
 	Risky              bool
 	Touchpoints        []string
@@ -160,6 +161,11 @@ func FromPlan(input string, facts PlanFacts) *Contract {
 	for i, text := range facts.Regressions {
 		c.Requirements = append(c.Requirements, Requirement{
 			ID: fmt.Sprintf("g%d", i+1), Kind: "regression", Text: text, Required: true,
+		})
+	}
+	for i, text := range facts.Optional {
+		c.Requirements = append(c.Requirements, Requirement{
+			ID: fmt.Sprintf("o%d", i+1), Kind: "behavior", Text: text,
 		})
 	}
 	for _, command := range facts.Verifications {

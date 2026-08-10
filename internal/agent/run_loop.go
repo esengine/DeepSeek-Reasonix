@@ -141,7 +141,7 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	// A fresh user turn starts from zeroed per-turn host state; the new turn's
 	// values are computed below. Cross-turn state (checkpoint, scope, failure
 	// budgets) lives directly on Agent and is reconciled field by field.
-	a.perTurnState = perTurnState{}
+	a.perTurnState = perTurnState{turnInput: input}
 	scope, scoped := DeliveryExecutionScopeFromContext(ctx)
 	preserveEvidence := a.preserveEvidenceOnce
 	// A run that starts with a pending readiness recovery (or an explicit
@@ -279,9 +279,13 @@ func (a *Agent) runToolLoop(ctx context.Context, state *runLoopState) error {
 		// survives tab switches and history replay. The model sees it as
 		// guidance (with a prefix), not a new task. One cache miss per
 		// steer is unavoidable — the model must see the new instruction.
-		if text, ok := a.consumeSteer(); ok {
+		if text, itemID, ok := a.consumeSteer(); ok {
 			a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(midTurnSteerMessage(text))})
-			a.sink.Emit(event.Event{Kind: event.Steer, Text: text})
+			a.sink.Emit(event.Event{Kind: event.Steer, Text: text, ItemID: itemID})
+		} else if itemID != "" {
+			// Loader failed after dequeue: durable entry stays for inspection
+			// (unapplied path marks uncertain + pause via the notice sink).
+			a.RecordUnappliedSteer("(body load failed)", itemID)
 		}
 		schemas := a.tools.Schemas()
 		prefixShape := a.capturePrefixShape(schemas)

@@ -375,8 +375,26 @@ func (o *turnOrchestrator) runGoalLoopWithRawDisplay(ctx context.Context, input,
 }
 
 func (o *turnOrchestrator) runGoalLoopWithImageRefsRawDisplay(ctx context.Context, input, raw, imageRefs, display string) error {
-	expectedContinuationEpoch := o.c.goals.continuationToken()
 	turn := o.c.prepareOrchestratedTurnImages(orchestratedTurn{input: input, raw: raw, imageRefs: imageRefs, display: display})
+	return o.runGoalLoopWithPreparedTurn(ctx, turn)
+}
+
+func (o *turnOrchestrator) runGoalLoopWithFrozenImagesRawDisplay(ctx context.Context, input, raw, display string, images []string) error {
+	turn := orchestratedTurn{
+		input:           input,
+		raw:             raw,
+		display:         display,
+		imageCandidates: append([]string(nil), images...),
+		imagesResolved:  true,
+	}
+	if o.c.imageInputEnabled() {
+		turn.userImages = append([]string(nil), images...)
+	}
+	return o.runGoalLoopWithPreparedTurn(ctx, turn)
+}
+
+func (o *turnOrchestrator) runGoalLoopWithPreparedTurn(ctx context.Context, turn orchestratedTurn) error {
+	expectedContinuationEpoch := o.c.goals.continuationToken()
 	ctx = agent.WithSubagentImageCandidates(ctx, turn.imageCandidates)
 	err := o.runOrchestratedTurn(ctx, turn)
 	if err != nil {
