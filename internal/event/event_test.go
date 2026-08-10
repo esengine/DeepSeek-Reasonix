@@ -72,9 +72,10 @@ func TestSyncTreatsTypedNilSinkAsDiscard(t *testing.T) {
 }
 
 type readinessAuditRecorder struct {
-	events   []evidence.ReadinessAudit
-	recovery []ProtocolRecoveryAudit
-	turns    int
+	events    []evidence.ReadinessAudit
+	recovery  []ProtocolRecoveryAudit
+	workspace []WorkspaceMutation
+	turns     int
 }
 
 func (r *readinessAuditRecorder) Emit(Event) {}
@@ -89,11 +90,24 @@ func (r *readinessAuditRecorder) RecordProtocolRecovery(a ProtocolRecoveryAudit)
 
 func (r *readinessAuditRecorder) RecordTurnCompletion() { r.turns++ }
 
+func (r *readinessAuditRecorder) RecordWorkspaceMutation(m WorkspaceMutation) {
+	r.workspace = append(r.workspace, m)
+}
+
 func TestSyncForwardsTurnCompletion(t *testing.T) {
 	rec := &readinessAuditRecorder{}
 	RecordTurnCompletion(Sync(rec))
 	if rec.turns != 1 {
 		t.Fatalf("turn completions = %d, want 1", rec.turns)
+	}
+}
+
+func TestSyncForwardsWorkspaceMutationWithoutUIEvent(t *testing.T) {
+	rec := &readinessAuditRecorder{}
+	sink := Sync(rec)
+	RecordWorkspaceMutation(sink, WorkspaceMutation{ToolName: "write_file", Paths: []string{"a.go"}, Content: true})
+	if len(rec.workspace) != 1 || rec.workspace[0].ToolName != "write_file" || len(rec.workspace[0].Paths) != 1 {
+		t.Fatalf("workspace mutation not forwarded through Sync: %+v", rec.workspace)
 	}
 }
 

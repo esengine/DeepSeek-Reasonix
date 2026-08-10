@@ -221,6 +221,10 @@ type Request struct {
 	// entirely — the common path must stay byte-stable for prompt caching.
 	ResponseFormat *ResponseFormat `json:"ResponseFormat,omitempty"`
 	EffortOverride string          `json:"EffortOverride,omitempty"` // per-call reasoning-depth override; adapters apply it only when the endpoint's effort vocabulary accepts it
+	// ContextEditing is an explicit provider capability request. Providers that
+	// do not support native editing ignore it; local compaction remains the
+	// default when it is nil.
+	ContextEditing *ContextEditingPolicy `json:"ContextEditing,omitempty"`
 }
 
 // ResponseFormat asks a provider to constrain its output shape.
@@ -743,6 +747,10 @@ type Usage struct {
 	ContextReasoningTokens  int
 	ContextCacheHitTokens   int
 	ContextCacheMissTokens  int
+	// Native context-editing observations from the latest committed request.
+	ContextEditingType            string
+	ContextEditingClearedToolUses int
+	ContextEditingClearedTokens   int
 }
 
 // ContextFillTokens returns the latest-attempt context fill (prompt+completion)

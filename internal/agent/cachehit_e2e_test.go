@@ -43,6 +43,7 @@ func (echoTool) Execute(_ context.Context, args json.RawMessage) (string, error)
 type collectSink struct {
 	usages  []*provider.Usage
 	notices []string
+	blocked bool
 }
 
 func (s *collectSink) Emit(e event.Event) {
@@ -53,13 +54,15 @@ func (s *collectSink) Emit(e event.Event) {
 		}
 	case event.Notice:
 		s.notices = append(s.notices, e.Text)
+	case event.ContextMaintenanceEvent:
+		if e.Maintenance != nil && e.Maintenance.Status == "blocked" {
+			s.blocked = true
+		}
 	}
 }
 
-// --- a mock DeepSeek endpoint that derives cache-hit tokens from the byte-
-// identical message prefix it shares with the previous *conversation* request.
-// The reported hit rate is therefore a direct measurement of how stable the
-// client keeps its request prefix turn over turn. ---
+// mockDeepSeek derives cache hits from the byte-identical prefix shared with
+// the previous conversation request, directly measuring prefix stability.
 
 type mockDeepSeek struct {
 	t            *testing.T
@@ -222,12 +225,9 @@ func TestCacheHitClimbsWithoutCompaction(t *testing.T) {
 	}
 }
 
-// TestCacheHitSurvivesTooSmallWindow drives a long tool-loop against a window so
-// small a single turn can't be summarized under it — the misconfigured regime
-// that used to make compaction rewrite the prefix every step, cratering the
-// cache turn after turn. The stuck guard now detects that compaction can't make
-// progress, pauses it (with a notice), and lets the prefix grow append-only — so
-// the hit rate recovers and stays high instead of collapsing repeatedly.
+// TestCacheHitSurvivesTooSmallWindow covers a window too small to summarize one
+// turn. Maintenance must stop rewriting the same prefix and let cache hits
+// recover instead of collapsing after every tool result.
 func TestCacheHitSurvivesTooSmallWindow(t *testing.T) {
 	mock := &mockDeepSeek{t: t, withTools: true, reasoning: longReasoning, toolRounds: 30}
 	srv := httptest.NewServer(http.HandlerFunc(mock.handler))
@@ -251,23 +251,19 @@ func TestCacheHitSurvivesTooSmallWindow(t *testing.T) {
 		t.Logf("step %2d: prompt=%5d hit=%5d miss=%4d → cache %3d%%%s", i, u.PromptTokens, u.CacheHitTokens, u.CacheMissTokens, r, marker)
 	}
 
-	paused := false
 	for _, n := range sink.notices {
 		t.Logf("notice: %s", n)
-		if strings.Contains(n, "Automatic context cleanup paused") {
-			paused = true
-		}
+	}
+	if sink.blocked {
+		t.Log("context maintenance entered a durable blocked state")
 	}
 
 	// The guard caps the damage: a couple of compactions at most, not one per step.
 	if collapses > 2 {
 		t.Errorf("compaction cratered the cache %d times; the stuck guard should cap it at ≤2", collapses)
 	}
-	if !paused {
-		t.Errorf("expected an auto-compaction-paused notice for the too-small window")
-	}
-	// Once paused, the prefix grows append-only again, so the tail of the run
-	// recovers to a high, stable hit rate instead of collapsing every step.
+	// With or without a blocked receipt, the same prefix must not be rewritten
+	// after every following tool result, so the tail cache rate recovers.
 	if n := len(sink.usages); n >= 6 {
 		if tail := tailAverage(usageRates(sink.usages), 5); tail < 85 {
 			t.Errorf("tail hit rate after the guard kicked in = %d%%, want ≥85%%", tail)

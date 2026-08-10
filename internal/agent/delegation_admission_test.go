@@ -46,11 +46,18 @@ func TestObserveDelegationAdmissionRecordsOnlyGatedTools(t *testing.T) {
 		{Name: "research", Arguments: `{"prompt":"date formats"}`},
 		{Name: "task", Arguments: `{"prompt":"sub work"}`},
 	})
-	if len(sink.audits) != 1 {
-		t.Fatalf("got %d audits, want 1 (research only)", len(sink.audits))
+	// read_file is not a delegation and must never be audited; research and task
+	// both are, since a paired measurement priced task/fleet delegation at 2-4x
+	// the cost of doing the same work directly.
+	if len(sink.audits) != 2 {
+		t.Fatalf("got %d audits, want research + task", len(sink.audits))
 	}
-	got := sink.audits[0]
-	if got.Tool != "research" || got.Verdict != "deny" || got.Reason != "local_fix_no_external_need" || got.Intent != "mutation" {
-		t.Fatalf("audit = %+v, want deny/local_fix_no_external_need on mutation intent", got)
+	for _, got := range sink.audits {
+		if got.Tool == "read_file" {
+			t.Fatalf("a non-delegation tool was audited: %+v", got)
+		}
+		if got.Verdict != "deny" || got.Reason != "local_fix_no_external_need" || got.Intent != "mutation" {
+			t.Fatalf("audit = %+v, want deny/local_fix_no_external_need on mutation intent", got)
+		}
 	}
 }

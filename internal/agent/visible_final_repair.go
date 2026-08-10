@@ -53,7 +53,7 @@ func (a *Agent) handleVisibleFinalContract(ctx context.Context, state *runLoopSt
 	}
 	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeEmptyFinal, Text: emptyFinalNotice(), Detail: emptyFinalNoticeDetail(a.prov.Name(), usage, len(reasoning))})
 	a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(emptyFinalRetryMessage())})
-	a.maybeCompact(ctx, usage)
+	a.contextManager().ObserveUsage(usage)
 	return true, true, nil
 }
 
@@ -66,7 +66,7 @@ func (a *Agent) requestVisibleFinalRepair(ctx context.Context, state *runLoopSta
 		Detail: emptyFinalNoticeDetail(a.prov.Name(), usage, reasoningLen),
 	})
 	a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(visibleFinalRepairMessage())})
-	a.maybeCompact(ctx, usage)
+	a.contextManager().ObserveUsage(usage)
 	return true, nil
 }
 

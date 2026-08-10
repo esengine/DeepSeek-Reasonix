@@ -185,6 +185,12 @@ func (r *Recorder) Emit(e event.Event) {
 	r.inner.Emit(e)
 }
 
+// RecordDelegationAudit forwards without persisting: delegation receipts are
+// aggregated by run metrics, and the trajectory schema stays unchanged.
+func (r *Recorder) RecordDelegationAudit(a evidence.DelegationAudit) {
+	event.RecordDelegationAudit(r.inner, a)
+}
+
 func (r *Recorder) RecordReadinessAudit(a evidence.ReadinessAudit) {
 	r.append(Record{ReadinessAudit: &ReadinessAudit{
 		Result:                    string(a.Result),

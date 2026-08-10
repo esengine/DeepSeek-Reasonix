@@ -50,7 +50,7 @@ func TestTaskToolReturnsSubAgentFinalAnswer(t *testing.T) {
 	if sys := sub.lastReq.Messages[0]; sys.Role != provider.RoleSystem || sys.Content != "test-sys-prompt" {
 		t.Errorf("first message = %+v, want system 'test-sys-prompt'", sys)
 	}
-	if got := lastUser(sub.lastReq); !strings.Contains(got, `<subagent-context event="SubagentStart">`) || !strings.HasSuffix(got, "find callers of Foo") {
+	if got := lastUser(sub.lastReq); !strings.Contains(got, `<subagent-context event="SubagentStart">`) || !strings.Contains(got, "find callers of Foo") || !strings.HasSuffix(got, completeSubtaskContract) {
 		t.Errorf("sub-agent user = %q, want SubagentStart context plus prompt", got)
 	}
 }
@@ -85,7 +85,7 @@ func TestTaskToolInjectsWorkspaceContextIntoSubagentPrompt(t *testing.T) {
 	if !strings.Contains(got, `<workspace-context event="SubagentWorkspace">`) ||
 		!strings.Contains(got, "Current workspace: "+strconv.Quote(workspace)) ||
 		!strings.Contains(got, `prefer "." or relative paths`) ||
-		!strings.HasSuffix(got, "inspect project") {
+		!strings.Contains(got, "inspect project") || !strings.HasSuffix(got, completeSubtaskContract) {
 		t.Fatalf("sub-agent user = %q, want workspace context plus prompt", got)
 	}
 }
@@ -148,7 +148,7 @@ func TestTaskToolInheritsReasoningLanguageFromContext(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 	got := lastUser(sub.lastReq)
-	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "简体中文") || !strings.HasSuffix(got, "inspect auth") {
+	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "简体中文") || !strings.Contains(got, "inspect auth") {
 		t.Fatalf("sub-agent user = %q, want reasoning-language-prefixed prompt", got)
 	}
 }
@@ -418,7 +418,7 @@ func TestReadOnlyTaskToolRunsEphemerallyWithReadOnlyRegistry(t *testing.T) {
 	if sys := sub.lastReq.Messages[0]; sys.Role != provider.RoleSystem || sys.Content != DefaultReadOnlyTaskSystemPrompt {
 		t.Fatalf("read_only_task system prompt = %+v, want read-only prompt", sys)
 	}
-	if got := lastUser(sub.lastReq); !strings.Contains(got, "Current workspace: ") || !strings.HasSuffix(got, "inspect callers") {
+	if got := lastUser(sub.lastReq); !strings.Contains(got, "Current workspace: ") || !strings.Contains(got, "inspect callers") {
 		t.Fatalf("read_only_task user = %q, want workspace context plus prompt", got)
 	}
 
@@ -503,7 +503,7 @@ func TestTaskToolPersistsAndContinuesTranscript(t *testing.T) {
 	if len(msgs) < 4 {
 		t.Fatalf("continued request messages = %+v, want prior transcript plus new task", msgs)
 	}
-	if !strings.HasSuffix(msgs[1].Content, "first task") || msgs[2].Content != "first answer" || !strings.HasSuffix(lastUser(sub.requests[1]), "second task") {
+	if !strings.Contains(msgs[1].Content, "first task") || msgs[2].Content != "first answer" || !strings.Contains(lastUser(sub.requests[1]), "second task") {
 		t.Fatalf("continued request messages = %+v, want first task/answer then second task", msgs)
 	}
 }
@@ -673,7 +673,7 @@ func TestTaskToolFailedForegroundContinuationPersistsAndRejectsReuse(t *testing.
 		t.Fatalf("LoadSession: %v", err)
 	}
 	msgs := loaded.Snapshot()
-	if len(msgs) != 5 || !strings.HasSuffix(msgs[1].Content, "first task") || msgs[2].Content != "first answer" || !strings.HasSuffix(msgs[3].Content, "second task") || !msgs[4].LocalOnly {
+	if len(msgs) != 5 || !strings.Contains(msgs[1].Content, "first task") || msgs[2].Content != "first answer" || !strings.Contains(msgs[3].Content, "second task") || !msgs[4].LocalOnly {
 		t.Fatalf("failed continuation transcript = %+v, want tasks plus provider-excluded failure recovery", msgs)
 	}
 	if _, err := task.Execute(testTaskContext(), []byte(`{"prompt":"third task","continue_from":"`+ref+`"}`)); err == nil || !strings.Contains(err.Error(), "failed and cannot be continued") {

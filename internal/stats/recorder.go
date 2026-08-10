@@ -180,6 +180,10 @@ func (r *Recorder) RecordContractShadow(a event.ContractShadowAudit) {
 }
 
 // RecordCompletionReport preserves the wrapped sink's audit capability.
+func (r *Recorder) RecordDelegationAudit(a evidence.DelegationAudit) {
+	event.RecordDelegationAudit(r.inner, a)
+}
+
 func (r *Recorder) RecordCompletionReport(a event.CompletionReportAudit) {
 	event.RecordCompletionReport(r.inner, a)
 }

@@ -84,6 +84,10 @@ function dispatchScroll(el: HTMLElement) {
     // Prepend five older turns (15 rows) — the reading position must follow
     // the anchor row, not the row index.
     await harness.render([...turns(5, "old-"), ...turns(20)], { running: false });
+    await harness.waitFor(
+      () => anchorIdBefore != null && harness.container.querySelector(`#${anchorIdBefore}`) !== null,
+      "the pre-prepend anchor row to remount",
+    );
     const delta = el.scrollTop - before;
     ok(delta > 0, `prepended history shifts the scroll offset down (delta ${delta})`);
     ok(

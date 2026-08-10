@@ -15,6 +15,12 @@
 # Usage: scripts/desktop-build.sh <os/arch> <version> [channel]
 #   e.g. scripts/desktop-build.sh darwin/arm64 v1.1.0
 #        scripts/desktop-build.sh darwin/arm64 v1.5.0-preview.42 preview
+#
+# Requirements:
+#   - Go toolchain matching desktop/go.mod (>= 1.25; the `toolchain` directive
+#     auto-downloads when GOTOOLCHAIN=auto)
+#   - Node >= 24 and pnpm 10 (the same major versions used by CI and releases)
+#   - Wails CLI matching the shared .wails-version pin (`make wails-install`)
 set -euo pipefail
 
 PLATFORM="${1:?usage: desktop-build.sh <os/arch> <version> [channel]}"

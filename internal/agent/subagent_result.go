@@ -169,14 +169,32 @@ type subagentAggregateItem struct {
 }
 
 func formatBoundedSubagentAggregate(prefix string, items []subagentAggregateItem) string {
-	baseBytes := len(prefix)
+	// Attestations are reserved before prose gets any budget: a long child
+	// answer must never truncate away what the host saw it change. They
+	// degrade to header plus violations only if they would starve previews.
+	prose := make([]string, len(items))
+	receipts := make([]string, len(items))
+	receiptBytes := 0
+	for i, item := range items {
+		prose[i], receipts[i] = splitHostReceipts(item.answer)
+		receiptBytes += len(receipts[i]) + 1
+	}
+	if reserve := subagentAggregateBudgetBytes / 2; receiptBytes > reserve && len(items) > 0 {
+		receiptBytes = 0
+		for i := range receipts {
+			receipts[i] = boundedHostReceipts(receipts[i], reserve/len(items))
+			receiptBytes += len(receipts[i]) + 1
+		}
+	}
+
+	baseBytes := len(prefix) + receiptBytes
 	completed := 0
-	for _, item := range items {
+	for i, item := range items {
 		baseBytes += len(item.header) + len(item.status) + len(item.detail)
 		if item.ref != "" {
 			baseBytes += len("Subagent reference: \n") + len(item.ref)
 		}
-		if item.answer != "" {
+		if prose[i] != "" {
 			baseBytes += len("Final answer preview:\n\n")
 			completed++
 		}
@@ -190,7 +208,7 @@ func formatBoundedSubagentAggregate(prefix string, items []subagentAggregateItem
 	var b strings.Builder
 	b.Grow(minInt(subagentAggregateBudgetBytes, baseBytes+available))
 	b.WriteString(prefix)
-	for _, item := range items {
+	for i, item := range items {
 		b.WriteString(item.header)
 		b.WriteString(item.status)
 		if item.ref != "" {
@@ -199,9 +217,13 @@ func formatBoundedSubagentAggregate(prefix string, items []subagentAggregateItem
 		if item.detail != "" {
 			b.WriteString(item.detail)
 		}
-		if item.answer != "" {
+		if prose[i] != "" {
 			b.WriteString("Final answer preview:\n")
-			b.WriteString(subagentAnswerPreview(item.answer, item.ref, perAnswer))
+			b.WriteString(subagentAnswerPreview(prose[i], item.ref, perAnswer))
+			b.WriteByte('\n')
+		}
+		if receipts[i] != "" {
+			b.WriteString(receipts[i])
 			b.WriteByte('\n')
 		}
 	}

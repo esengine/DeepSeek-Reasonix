@@ -10336,15 +10336,19 @@ body > .mermaid-diagram--fullscreen {
   padding: 7px 8px 3px;
 }
 .workspace-files__tools--embedded {
-  height: 0;
-  overflow: hidden;
-  justify-content: flex-start;
-  padding: 0;
-}
-.workspace-panel--split-preview .workspace-files__tools--embedded,
-.workspace-panel--tree-hidden .workspace-files__tools--embedded {
   height: 34px;
+  overflow: visible;
+  justify-content: flex-start;
   padding: 6px 10px 0;
+}
+.workspace-watch-status {
+  color: var(--text-muted, var(--fg-faint));
+  font-size: 18px;
+  line-height: 1;
+  cursor: help;
+}
+.workspace-iconbtn[aria-busy="true"] svg {
+  animation: spin 0.8s linear infinite;
 }
 .workspace-files__tabs {
   flex: 1 1 auto;
