@@ -1,0 +1,472 @@
+===== root_go_test =====
+exit_code=1
+2026/08/10 02:37:54 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:37:54 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=1 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:00 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:01 WARN session: save without a held lease (write-authority probe, store P2) path=a.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:01 WARN session: save without a held lease (write-authority probe, store P2) path=b.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:01 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:01 WARN session: refusing unsafe event-log replay path=/tmp/TestLoadSessionUserMessagesDoesNotFallbackAfterEventReplayBudget3450193307/001/session.events.jsonl resource=messages value=2 limit=1
+2026/08/10 02:38:01 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:01 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:01 WARN session: save without a held lease (write-authority probe, store P2) path=unleased.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:01 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:01 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:01 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:01 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:01 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:03 WARN session: keeping save after event index write failure path=/tmp/TestSaveSnapshotToleratesEventIndexWriteFailure2352505166/001/session.jsonl err="rename /tmp/TestSaveSnapshotToleratesEventIndexWriteFailure2352505166/001/.session-event-index.1988534669.tmp /tmp/TestSaveSnapshotToleratesEventIndexWriteFailure2352505166/001/session.event-index.json: file exists"
+2026/08/10 02:38:05 WARN session: keeping save after event index write failure path=/tmp/TestSaveSnapshotToleratesEventIndexWriteFailure2352505166/001/session.jsonl err="rename /tmp/TestSaveSnapshotToleratesEventIndexWriteFailure2352505166/001/.session-event-index.2286487718.tmp /tmp/TestSaveSnapshotToleratesEventIndexWriteFailure2352505166/001/session.event-index.json: file exists"
+2026/08/10 02:38:05 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:05 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:05 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:05 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:05 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:05 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:05 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:05 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:05 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:05 WARN session: save without a held lease (write-authority probe, store P2) path=a.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:05 WARN session: save without a held lease (write-authority probe, store P2) path=b.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:05 WARN session: save without a held lease (write-authority probe, store P2) path=empty.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:05 WARN session: save without a held lease (write-authority probe, store P2) path=real.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:05 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:05 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:05 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:05 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:05 WARN session: save without a held lease (write-authority probe, store P2) path=20260810-023805.963207910-nemotron-3-nano-30b------.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:05 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:05 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:06 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:06 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:06 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:06 WARN session: save without a held lease (write-authority probe, store P2) path=session.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:06 WARN session: save without a held lease (write-authority probe, store P2) path=sa_force.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:08 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023808_000000000_7256d98cd3f6.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:08 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023808_000000000_389ae2467c0d.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:08 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023808_000000000_23cb5a28a434.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:08 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023808_000000000_6069833dc8f2.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:08 WARN session: save without a held lease (write-authority probe, store P2) path=older-peer.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:08 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023808_000000000_6fe288b70044.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:08 WARN session: save without a held lease (write-authority probe, store P2) path=older-peer.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:08 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023808_000000000_bb946110554f.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:08 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023808_000000000_3663af814de6.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:08 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023808_000000000_3ae0399e24d8.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:08 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023808_000000000_e8d43a610bc0.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:08 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023808_000000000_a3689484c817.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:09 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023809_000000000_a04d6e45825f.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:09 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023809_000000000_e75b3d1dcf4a.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:09 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023809_000000000_8a661d9f818a.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:09 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023809_000000000_e44a71595ce4.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:09 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023809_000000000_16c18577fe30.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:09 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023809_000000000_11cf2a23e49e.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:09 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023809_000000000_fb8f9c02ed89.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:09 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023809_000000000_869a8c9efd6f.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:09 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023809_000000000_30608aa7605d.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:09 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023809_000000000_58a09ffd8bf3.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:09 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023809_000000000_100cdef0d99b.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:09 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023809_000000000_53a611195d6e.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:09 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023809_000000000_cc1fd053e2f8.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:09 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023809_000000000_d7ca82ab41de.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:09 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023809_000000000_5381838956b4.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:09 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023809_000000000_6aaca6048b9f.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:09 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023809_000000000_dad76ad1633b.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:09 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023809_000000000_358f1bae3007.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:09 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023809_000000000_db51daeafb64.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:09 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023809_000000000_022c23cc5ad6.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:09 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023809_000000000_df78403f3f97.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:09 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023809_000000000_efc624098f21.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:10 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023810_000000000_6bb3a8254d39.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:10 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023810_000000000_1df525eea7c3.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:10 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023810_000000000_19aeae44ec7b.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:10 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023810_000000000_adc86a32de0d.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:10 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023810_000000000_73f12396ed09.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:11 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023810_000000000_3615dd603683.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+--- FAIL: TestTaskToolCancelDuringStuckProviderReturnsPromptly (0.62s)
+    task_test.go:115: TaskTool.Execute did not return promptly after cancellation
+    testing.go:1464: TempDir RemoveAll cleanup: unlinkat /tmp/TestTaskToolCancelDuringStuckProviderReturnsPromptly4194494449/001: directory not empty
+2026/08/10 02:38:11 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023811_000000000_d096484fcc2b.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:11 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023811_000000000_04498e455758.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:12 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023812_000000000_bf983721ecd6.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:12 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023812_000000000_9397e13e418d.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:12 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023812_000000000_68911ed93af2.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:12 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023812_000000000_e251d4d3bc97.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:12 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023812_000000000_4e8dfe81868e.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:12 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023812_000000000_bf122954407d.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:12 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023812_000000000_ae06b3ec4eab.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:12 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023812_000000000_b92ad1bf312e.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:12 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023812_000000000_a57ddc99e455.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:12 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023812_000000000_57f8232c9201.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:13 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023813_000000000_3d71437c7a80.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:13 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023813_000000000_ecd3e29efd29.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:13 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023813_000000000_214bd1c8cacb.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:13 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023813_000000000_627acabf317a.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:13 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023813_000000000_2b6b3159a256.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:13 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023813_000000000_5e0a75609547.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:13 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023813_000000000_0e9efe271b00.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:13 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023813_000000000_d0ebd49776ac.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:13 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023813_000000000_5defc0bc578e.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+2026/08/10 02:38:13 WARN session: save without a held lease (write-authority probe, store P2) path=sa_20260810_023813_000000000_4da73a4c485e.jsonl mode=0 writer=runnervmliwqe-13523-b576b01d0ba014dc
+FAIL
+FAIL	reasonix/internal/agent	44.304s
+ok  	reasonix/internal/agent/testutil	0.016s
+ok  	reasonix/internal/appidentity	0.008s
+ok  	reasonix/internal/autoresearch	0.032s
+ok  	reasonix/internal/billing	0.014s
+ok  	reasonix/internal/boot	25.470s
+ok  	reasonix/internal/bot	1.181s
+ok  	reasonix/internal/bot/feishu	0.076s
+ok  	reasonix/internal/bot/nextcloudtalk	0.033s
+ok  	reasonix/internal/bot/qq	0.033s
+ok  	reasonix/internal/bot/weixin	0.026s
+ok  	reasonix/internal/botruntime	1.689s
+?   	reasonix/internal/boundedllm	[no test files]
+ok  	reasonix/internal/capability	0.029s
+ok  	reasonix/internal/capdiag	0.602s
+ok  	reasonix/internal/checkpoint	0.654s
+ok  	reasonix/internal/cli	21.503s
+ok  	reasonix/internal/command	0.012s
+ok  	reasonix/internal/completion	0.092s
+ok  	reasonix/internal/config	9.580s
+ok  	reasonix/internal/control	22.470s
+ok  	reasonix/internal/crashreport	1.183s
+ok  	reasonix/internal/desktoplauncher	0.002s
+ok  	reasonix/internal/diff	0.006s
+ok  	reasonix/internal/doctor	0.293s
+ok  	reasonix/internal/environment	0.588s
+ok  	reasonix/internal/event	0.031s
+ok  	reasonix/internal/eventwire	0.008s
+ok  	reasonix/internal/evidence	0.017s
+ok  	reasonix/internal/extension	0.080s
+ok  	reasonix/internal/extension/conformance	1.763s
+ok  	reasonix/internal/extension/dispatch	0.039s
+ok  	reasonix/internal/extension/protocol	0.005s
+ok  	reasonix/internal/extension/protocolgen	0.009s
+ok  	reasonix/internal/extension/providerconv	0.005s
+ok  	reasonix/internal/extension/providerext	1.062s
+ok  	reasonix/internal/extension/rpcwire	0.388s
+ok  	reasonix/internal/extension/sidecar	6.974s
+ok  	reasonix/internal/extension/uihub	0.008s
+ok  	reasonix/internal/extensioncontract	0.002s
+ok  	reasonix/internal/filelock	0.179s
+ok  	reasonix/internal/fileref	0.004s
+ok  	reasonix/internal/fileutil	0.040s
+ok  	reasonix/internal/fileutil/encoding	0.003s
+ok  	reasonix/internal/frontmatter	0.002s
+ok  	reasonix/internal/gitcmd	0.108s
+ok  	reasonix/internal/goaleval	0.060s
+ok  	reasonix/internal/guardian	0.607s
+ok  	reasonix/internal/history	1.401s
+ok  	reasonix/internal/hook	1.723s
+ok  	reasonix/internal/i18n	0.011s
+ok  	reasonix/internal/installlayout	0.871s
+ok  	reasonix/internal/installsource	0.997s
+ok  	reasonix/internal/instruction	0.072s
+ok  	reasonix/internal/jobs	3.901s
+ok  	reasonix/internal/lsp	0.008s
+ok  	reasonix/internal/mcpdiag	0.003s
+ok  	reasonix/internal/mcplaunch	0.034s
+ok  	reasonix/internal/mcpregistry	0.117s
+ok  	reasonix/internal/memory	3.031s
+ok  	reasonix/internal/migration	0.072s
+ok  	reasonix/internal/netclient	0.016s
+ok  	reasonix/internal/nilutil	0.002s
+ok  	reasonix/internal/notify	0.007s
+ok  	reasonix/internal/outputstyle	0.002s
+ok  	reasonix/internal/permission	0.029s
+ok  	reasonix/internal/planmode	0.008s
+ok  	reasonix/internal/plugin	18.198s
+ok  	reasonix/internal/pluginpkg	1.186s
+ok  	reasonix/internal/proc	0.053s
+ok  	reasonix/internal/productdocs	0.673s
+ok  	reasonix/internal/provider	6.512s
+ok  	reasonix/internal/provider/anthropic	0.303s
+ok  	reasonix/internal/provider/openai	2.128s
+ok  	reasonix/internal/provider/responses	0.172s
+ok  	reasonix/internal/recovery	0.198s
+ok  	reasonix/internal/releaseasset	0.010s
+ok  	reasonix/internal/remote	1.868s
+ok  	reasonix/internal/remote/bootstrap	0.437s
+ok  	reasonix/internal/remote/forward	0.016s
+ok  	reasonix/internal/remote/sftpfs	0.046s
+?   	reasonix/internal/remote/sshtest	[no test files]
+ok  	reasonix/internal/repair	9.614s
+ok  	reasonix/internal/retrieval	0.002s
+ok  	reasonix/internal/sandbox	0.009s
+ok  	reasonix/internal/secrets	27.582s
+ok  	reasonix/internal/serve	5.909s
+ok  	reasonix/internal/sessiontemp	1.895s
+ok  	reasonix/internal/shellparse	0.003s
+ok  	reasonix/internal/shellrun	0.309s
+ok  	reasonix/internal/shellsafe	0.004s
+ok  	reasonix/internal/skill	0.140s
+ok  	reasonix/internal/skill/builtincontent	0.005s
+ok  	reasonix/internal/stats	0.031s
+ok  	reasonix/internal/store	0.003s
+ok  	reasonix/internal/sysproxy	0.006s
+ok  	reasonix/internal/taskcontract	0.019s
+ok  	reasonix/internal/taskintent	0.036s
+ok  	reasonix/internal/taskmonitor	0.573s
+ok  	reasonix/internal/telemetry	0.082s
+ok  	reasonix/internal/testenv	0.008s
+ok  	reasonix/internal/textutil	0.007s
+ok  	reasonix/internal/tool	0.026s
+ok  	reasonix/internal/tool/builtin	12.563s
+ok  	reasonix/internal/tool/sessiontool	0.161s
+ok  	reasonix/internal/trajectory	0.015s
+ok  	reasonix/internal/workspacelease	0.539s
+ok  	reasonix/internal/worktree	0.203s
+?   	reasonix/release-notes	[no test files]
+ok  	reasonix/tools/repolint	0.004s
+?   	reasonix/tools/write_heartbeat	[no test files]
+FAIL
+
+===== root_go_vet =====
+exit_code=0
+
+===== repolint =====
+exit_code=0
+repolint: clean (1972 baselined findings)
+
+===== diff_check =====
+exit_code=0
+
+===== frontend_build =====
+exit_code=1
+dist/assets/background-DToqMniy.webp                    219.95 kB
+dist/assets/background-BVQt9_r_.webp                    229.75 kB
+dist/assets/background-Ci5UPFsb.webp                    241.72 kB
+dist/assets/background-BmUURQn1.webp                    267.37 kB
+dist/assets/background-3LGG1L92.webp                    275.62 kB
+dist/assets/TerminalPanel-sLQPUA_C.css                    4.00 kB │ gzip:   1.02 kB
+dist/assets/SettingsPanelEntry-NKI9HjWQ.css               4.13 kB │ gzip:   1.19 kB
+dist/assets/UsageStatsPanel-BTIDhamd.css                  8.12 kB │ gzip:   1.84 kB
+dist/assets/index-C9Yro5pX.css                           18.33 kB │ gzip:   3.16 kB
+dist/assets/vendor-markdown-BhkZgEot.css                 29.38 kB │ gzip:   7.93 kB
+dist/assets/styles-Bo894FyC.css                         820.95 kB │ gzip: 114.36 kB
+dist/assets/SettingsPanelEntry-C76vyNQn.js                0.07 kB │ gzip:   0.07 kB
+dist/assets/array-BKHaHXxq.js                             0.07 kB │ gzip:   0.07 kB │ map:     0.29 kB
+dist/assets/pie-RZYD4A2V-3mv7o-eB.js                      0.11 kB │ gzip:   0.12 kB
+dist/assets/info-DKCQHKI2-ghLyLMaN.js                     0.12 kB │ gzip:   0.12 kB
+dist/assets/radar-I7S5WNFK-tcVUM8iG.js                    0.12 kB │ gzip:   0.12 kB
+dist/assets/packet-7NZHBO7P-BaILXZdF.js                   0.12 kB │ gzip:   0.12 kB
+dist/assets/cynefin-VYW2F7L2-BKP9V9x5.js                  0.12 kB │ gzip:   0.12 kB
+dist/assets/treemap-6X3UGDF4-C_TdwPvD.js                  0.12 kB │ gzip:   0.12 kB
+dist/assets/wardley-OPB4EBWU-CcqVfsS6.js                  0.12 kB │ gzip:   0.12 kB
+dist/assets/gitGraph-TEB2WS4Q-DUhvYEBK.js                 0.12 kB │ gzip:   0.12 kB
+dist/assets/railroad-3IZDKUUU-o5GMktcf.js                 0.12 kB │ gzip:   0.12 kB
+dist/assets/treeView-QDETBFTQ-BvBTs5n3.js                 0.12 kB │ gzip:   0.12 kB
+dist/assets/channel-DkO4_9Jk.js                           0.12 kB │ gzip:   0.13 kB │ map:     0.51 kB
+dist/assets/railroad-peg-LSFZ7HO6-BW8V3B87.js             0.12 kB │ gzip:   0.12 kB
+dist/assets/railroad-abnf-AHOZXSZD-B6NuRT6B.js            0.12 kB │ gzip:   0.12 kB
+dist/assets/railroad-ebnf-EBAXGLYW-Bx0Ec1aW.js            0.12 kB │ gzip:   0.12 kB
+dist/assets/check-BFx6Xn0K.js                             0.12 kB │ gzip:   0.14 kB │ map:     0.75 kB
+dist/assets/array-BYpjckN4.js                             0.13 kB │ gzip:   0.12 kB │ map:     0.54 kB
+dist/assets/architecture-TIHT7OUA-DAHbEMHt.js             0.13 kB │ gzip:   0.13 kB
+dist/assets/eventmodeling-45OFAUF4-B_wu0QRA.js            0.13 kB │ gzip:   0.13 kB
+dist/assets/loader-circle-5SlTJqlI.js                     0.14 kB │ gzip:   0.15 kB │ map:     0.81 kB
+dist/assets/x-Cp972tmX.js                                 0.15 kB │ gzip:   0.15 kB │ map:     0.82 kB
+dist/assets/init-BWMzOYn8.js                              0.15 kB │ gzip:   0.13 kB │ map:     1.00 kB
+dist/assets/ResizableDrawer-BSqW2jbz.js                   0.16 kB │ gzip:   0.14 kB │ map:     6.24 kB
+dist/assets/chunk-Y2CYZVJY-BGfd48p4.js                    0.17 kB │ gzip:   0.15 kB │ map:     0.70 kB
+dist/assets/chunk-2Q5K7J3B-Dzv-BOK0.js                    0.19 kB │ gzip:   0.16 kB │ map:     0.80 kB
+dist/assets/copy-saWepz8S.js                              0.23 kB │ gzip:   0.21 kB │ map:     0.98 kB
+dist/assets/external-link-D2Qf3LiU.js                     0.25 kB │ gzip:   0.19 kB │ map:     1.03 kB
+dist/assets/circle-alert-D8pqmBwG.js                      0.25 kB │ gzip:   0.19 kB │ map:     1.13 kB
+dist/assets/chunk-XXDRQBXY-DOociB_N.js                    0.26 kB │ gzip:   0.22 kB │ map:     0.97 kB
+dist/assets/clipboard-RyIoJJPp.js                         0.26 kB │ gzip:   0.21 kB │ map:     1.06 kB
+dist/assets/idleTask-D1I9W2Ma.js                          0.26 kB │ gzip:   0.18 kB │ map:     1.18 kB
+dist/assets/chunk-JWPE2WC7-CVTKyB14.js                    0.27 kB │ gzip:   0.18 kB │ map:     0.80 kB
+dist/assets/message-square-plus-QQV8Nt-g.js               0.31 kB │ gzip:   0.23 kB │ map:     1.15 kB
+dist/assets/chunk-3NCLNEKW-CqAUer_I.js                    0.33 kB │ gzip:   0.26 kB │ map:     1.09 kB
+dist/assets/chunk-5VM5RSS4-BFaMbyqY.js                    0.37 kB │ gzip:   0.27 kB │ map:     0.75 kB
+dist/assets/markdownImage-C4Pe_X5Z.js                     0.45 kB │ gzip:   0.29 kB │ map:     1.48 kB
+dist/assets/sparkles-CQVRYcGQ.js                          0.49 kB │ gzip:   0.28 kB │ map:     1.36 kB
+dist/assets/chunk-BIQX33UG-B2FvK90j.js                    0.51 kB │ gzip:   0.31 kB │ map:     1.84 kB
+dist/assets/chunk-QBLGF6JB-B8kDpBtI.js                    0.51 kB │ gzip:   0.32 kB │ map:     1.85 kB
+dist/assets/chunk-EMLP6XTP-CWjrJb0d.js                    0.51 kB │ gzip:   0.31 kB │ map:     1.86 kB
+dist/assets/chunk-OSBZ3O6U-wh0kd2Yl.js                    0.52 kB │ gzip:   0.32 kB │ map:     1.88 kB
+dist/assets/chunk-CYSBUYHQ-B0FN_Uf-.js                    0.52 kB │ gzip:   0.32 kB │ map:     1.90 kB
+dist/assets/chunk-5FCAYU7R-D_i1qqIR.js                    0.53 kB │ gzip:   0.34 kB │ map:     1.95 kB
+dist/assets/chunk-KBJHAD2P-vuRQ1BBL.js                    0.58 kB │ gzip:   0.40 kB │ map:     2.00 kB
+dist/assets/flowDiagram-UKHOOZJN-BGV37gFF.js              0.62 kB │ gzip:   0.33 kB
+dist/assets/infoDiagram-6WML65LV-CJ98BmQ6.js              0.63 kB │ gzip:   0.41 kB │ map:     1.92 kB
+dist/assets/chunk-YOTPTUD7-Bq-flqJd.js                    0.64 kB │ gzip:   0.40 kB │ map:     2.31 kB
+dist/assets/MarkdownRenderer-BgBnclvN.js                  0.69 kB │ gzip:   0.42 kB │ map:     2.69 kB
+dist/assets/defineProperty-DMTxG6H7.js                    0.76 kB │ gzip:   0.38 kB
+dist/assets/rolldown-runtime-CXU3Ph47.js                  0.77 kB │ gzip:   0.45 kB
+dist/assets/classDiagram-JCYQIIEL-CvrZmSBk.js             0.79 kB │ gzip:   0.45 kB │ map:     1.52 kB
+dist/assets/classDiagram-v2-OCEON4UE-CvrZmSBk.js          0.79 kB │ gzip:   0.45 kB │ map:     1.53 kB
+dist/assets/stateDiagram-v2-UEYNNEHI-Cz81Nyff.js          0.80 kB │ gzip:   0.45 kB │ map:     1.51 kB
+dist/assets/swimlanesDiagram-ULZ7WXOC-DQDJMqXw.js         0.87 kB │ gzip:   0.49 kB │ map:     1.51 kB
+dist/assets/react-CwP2h1hP.js                             0.89 kB │ gzip:   0.48 kB │ map:     2.92 kB
+dist/assets/InlineConfirmButton-K3A78RH7.js               0.89 kB │ gzip:   0.52 kB │ map:     3.07 kB
+dist/assets/chunk-5HE753X5-0nQG5XDW.js                    0.90 kB │ gzip:   0.47 kB │ map:     3.14 kB
+dist/assets/rewindCommit-OqoRy1Gl.js                      0.93 kB │ gzip:   0.50 kB │ map:     2.43 kB
+dist/assets/chunk-MOZMSUNE-B5T0u7jS.js                    0.97 kB │ gzip:   0.49 kB │ map:     3.22 kB
+dist/assets/chunk-CQNSW5MT-BLkdOW1W.js                    0.99 kB │ gzip:   0.51 kB │ map:     3.29 kB
+dist/assets/line-B4aeVBMx.js                              1.00 kB │ gzip:   0.48 kB │ map:     3.29 kB
+dist/assets/HljsCode-BcawVQp0.js                          1.04 kB │ gzip:   0.61 kB │ map:     3.66 kB
+dist/assets/chunk-UBXNYLIW-Du9m9sck.js                    1.08 kB │ gzip:   0.61 kB │ map:     3.17 kB
+dist/assets/sizeCapture-X5ZJPWSS-DTqFx22c.js              1.10 kB │ gzip:   0.53 kB │ map:     2.91 kB
+dist/assets/chunk-5TONJI2A-D2kCyGPb.js                    1.11 kB │ gzip:   0.59 kB │ map:     4.11 kB
+dist/assets/UndoRewindBanner-BpNlMM7s.js                  1.13 kB │ gzip:   0.54 kB │ map:     2.88 kB
+dist/assets/chunk-JG7HCLWE-bqzg8ldc.js                    1.14 kB │ gzip:   0.60 kB │ map:     4.18 kB
+dist/assets/chunk-U6XO7XAA-Bf1AG1yM.js                    1.20 kB │ gzip:   0.63 kB │ map:     4.35 kB
+dist/assets/preload-helper-BAhTmhLg.js                    1.25 kB │ gzip:   0.69 kB
+dist/assets/ordinal-DDMBK6TR.js                           1.30 kB │ gzip:   0.59 kB │ map:     4.53 kB
+dist/assets/createLucideIcon-CqY5lRUc.js                  1.55 kB │ gzip:   0.85 kB │ map:     8.95 kB
+dist/assets/HljsDiff-Dd90uGX9.js                          1.61 kB │ gzip:   0.80 kB │ map:     4.52 kB
+dist/assets/chunk-R7FJI6CG-DyG5Edjt.js                    1.62 kB │ gzip:   0.81 kB │ map:     5.52 kB
+dist/assets/railroadDiagram-AXF67PYL-bo0FIyj_.js          1.72 kB │ gzip:   0.79 kB │ map:     4.56 kB
+dist/assets/chunk-5JV3BV7I-xRovfcoL.js                    1.81 kB │ gzip:   0.75 kB │ map:     5.61 kB
+dist/assets/chunk-W5SLKNZC-CBQCxzo7.js                    1.86 kB │ gzip:   0.90 kB │ map:     5.71 kB
+dist/assets/abnfDiagram-N423BO3Z-B5U4VsdY.js              1.87 kB │ gzip:   0.92 kB │ map:     5.39 kB
+dist/assets/chunk-2GRJ4B5K-LRQXfyx4.js                    1.98 kB │ gzip:   0.89 kB │ map:     6.14 kB
+dist/assets/pegDiagram-VL7TDLO6-Bnl5bW1j.js               2.08 kB │ gzip:   0.96 kB │ map:     5.78 kB
+dist/assets/MarkdownHistory-Cfnhw4_W.js                   2.11 kB │ gzip:   1.05 kB │ map:     9.47 kB
+dist/assets/ebnfDiagram-BXEA7PRR-BM9ZFRKY.js              2.12 kB │ gzip:   0.91 kB │ map:     5.95 kB
+dist/assets/StorageSettingsPage-rNoKTB7E.js               2.19 kB │ gzip:   0.77 kB │ map:     4.35 kB
+dist/assets/chunk-7BUUIJ7U-BGKARiK2.js                    2.26 kB │ gzip:   0.84 kB │ map:    10.07 kB
+dist/assets/ConfirmDialog-ZenzdsDL.js                     2.27 kB │ gzip:   0.95 kB │ map:     6.04 kB
+dist/assets/dist-DJybTK1b.js                              2.28 kB │ gzip:   1.01 kB │ map:     6.53 kB
+dist/assets/path-CRjrksrk.js                              2.35 kB │ gzip:   1.00 kB │ map:     8.54 kB
+dist/assets/Tooltip-BuikmVHr.js                           2.86 kB │ gzip:   1.27 kB │ map:     9.11 kB
+dist/assets/bridgeBenchFixtures-CLkOLhgO.js               3.32 kB │ gzip:   1.52 kB │ map:     9.19 kB
+dist/assets/highlight-DXtcxfjx.js                         3.36 kB │ gzip:   1.33 kB │ map:    14.30 kB
+dist/assets/regexSearch.worker-Bw0yItKX.js                3.53 kB │ gzip:   1.34 kB │ map:     0.09 kB
+dist/assets/chunk-J7OUQ5F2-DqQHq2bZ.js                    3.65 kB │ gzip:   1.58 kB │ map:     6.07 kB
+dist/assets/arc-B-C5r5aJ.js                               3.70 kB │ gzip:   1.50 kB │ map:    14.51 kB
+dist/assets/diagram-LBJQPF4R-BUY1RhEL.js                  4.39 kB │ gzip:   1.87 kB │ map:    11.60 kB
+dist/assets/themeExperience-BsSaBOda.js                   4.43 kB │ gzip:   1.28 kB │ map:    12.41 kB
+dist/assets/defaultLocale-CmbRFqoc.js                     5.17 kB │ gzip:   2.25 kB │ map:    20.29 kB
+dist/assets/markdownPipeline-BKbvGYWr.js                  5.19 kB │ gzip:   2.10 kB │ map:    21.38 kB
+dist/assets/map-BVMY07sT.js                               5.26 kB │ gzip:   1.96 kB │ map:    35.34 kB
+dist/assets/chunk-4I5QYGJK-Brbgg-dI.js                    6.28 kB │ gzip:   2.82 kB │ map:    24.66 kB
+dist/assets/linear-4kovT3lr.js                            6.37 kB │ gzip:   2.43 kB │ map:    24.48 kB
+dist/assets/diagram-UB23O5K3-BQqgvQZa.js                  6.37 kB │ gzip:   2.60 kB │ map:    18.11 kB
+dist/assets/pieDiagram-7S7Q4E2Y-D8xPxRMq.js               6.40 kB │ gzip:   2.65 kB │ map:    19.69 kB
+dist/assets/mermaid-parser.core-C5hf4C92.js               6.93 kB │ gzip:   1.89 kB │ map:    16.16 kB
+dist/assets/chunk-RYQCIY6F-DpJj1ZXo.js                    7.14 kB │ gzip:   2.70 kB │ map:    29.40 kB
+dist/assets/diagram-7IWD3JNH-DD3Vle1S.js                  8.73 kB │ gzip:   3.74 kB │ map:    25.26 kB
+dist/assets/dagre-VZM6K2ZE-Sa14NPmu.js                    8.89 kB │ gzip:   3.42 kB │ map:    29.01 kB
+dist/assets/DiagnosticsSettingsPage-CKwY1efj.js           9.22 kB │ gzip:   2.56 kB │ map:    22.58 kB
+dist/assets/TaskMonitorPanel-CzBee5Gt.js                 10.26 kB │ gzip:   3.09 kB │ map:    28.77 kB
+dist/assets/cynefinDiagram-MW4NZA55-BWrJn265.js          10.49 kB │ gzip:   3.51 kB │ map:    29.28 kB
+dist/assets/RemotePanel-DVUCoYWz.js                      10.56 kB │ gzip:   3.14 kB │ map:    26.73 kB
+dist/assets/stateDiagram-OKZ733FA-BbL2msge.js            10.75 kB │ gzip:   3.76 kB │ map:    31.32 kB
+dist/assets/markdownComponents-Ba6JDB9S.js               11.25 kB │ gzip:   4.24 kB │ map:    31.09 kB
+dist/assets/RemoteHostsPage-BOfsvpKq.js                  11.27 kB │ gzip:   2.95 kB │ map:    27.64 kB
+dist/assets/LineNumberCode-BUd3q3Qh.js                   11.68 kB │ gzip:   4.53 kB │ map:    43.81 kB
+dist/assets/diagram-B4RE2ZJO-ByvUuawk.js                 12.05 kB │ gzip:   4.26 kB │ map:    33.38 kB
+dist/assets/MermaidDiagram-B9ytjEb0.js                   14.32 kB │ gzip:   4.85 kB │ map:    34.55 kB
+dist/assets/sessionExport-D-zYo9hq.js                    14.55 kB │ gzip:   5.20 kB │ map:    33.35 kB
+dist/assets/HistoryPanel-tC322D4M.js                     15.08 kB │ gzip:   4.26 kB │ map:    44.98 kB
+dist/assets/chunk-6Q2QTUOP-Dm9Z-svs.js                   15.82 kB │ gzip:   4.38 kB │ map:    45.98 kB
+dist/assets/diagram-Q27KOJAE-DGiCR3mA.js                 16.63 kB │ gzip:   5.67 kB │ map:    54.53 kB
+dist/assets/esm-iJv_LrHx.js                              17.42 kB │ gzip:   6.18 kB │ map:    65.95 kB
+dist/assets/ishikawaDiagram-WSZJBQD7-pvkNLUqc.js         17.61 kB │ gzip:   6.56 kB │ map:    55.65 kB
+dist/assets/SubagentsPanel-fc9-NxLD.js                   19.41 kB │ gzip:   4.88 kB │ map:    46.82 kB
+dist/assets/kanban-definition-27J2QSJJ-6esmvYOt.js       20.21 kB │ gzip:   7.19 kB │ map:    60.90 kB
+dist/assets/markdownRemarkPlugins-CQ9NzN5b.js            21.93 kB │ gzip:   8.37 kB │ map:    92.74 kB
+dist/assets/mindmap-definition-FAOFIHXS-APoxjV9D.js      23.35 kB │ gzip:   8.02 kB │ map:    69.24 kB
+dist/assets/journeyDiagram-NVQOT4AX-CKg50y4P.js          23.85 kB │ gzip:   8.29 kB │ map:    70.96 kB
+dist/assets/sankeyDiagram-W5VNT64P-AWjD_V4O.js           24.44 kB │ gzip:   8.63 kB │ map:    79.12 kB
+dist/assets/wardleyDiagram-T6FBY63Y-D1iWDqQI.js          25.98 kB │ gzip:   6.64 kB │ map:    70.57 kB
+dist/assets/graphlib-DZMbFQnf.js                         26.44 kB │ gzip:   8.54 kB │ map:   193.38 kB
+dist/assets/erDiagram-JOGREHBK-BM6sTvRh.js               26.90 kB │ gzip:   9.46 kB │ map:    81.52 kB
+dist/assets/UsageStatsPanel-COd7gqjc.js                  27.58 kB │ gzip:   8.25 kB │ map:    79.65 kB
+dist/assets/rough.esm-p8dw60of.js                        28.07 kB │ gzip:   9.14 kB │ map:    66.95 kB
+dist/assets/gitGraphDiagram-DS77QQ5N-BR1kPwQT.js         29.58 kB │ gzip:   8.64 kB │ map:   104.30 kB
+dist/assets/browserify-DJI9lDkp.js                       29.61 kB │ gzip:   8.14 kB │ map:    89.58 kB
+dist/assets/timeline-definition-Z64GVDOM-Biy3Qzp9.js     30.95 kB │ gzip:  10.04 kB │ map:    94.86 kB
+dist/assets/requirementDiagram-LRYGKXZP-BD-FApRa.js      31.20 kB │ gzip:   9.80 kB │ map:    89.99 kB
+dist/assets/MemoryPanel-DuLRJox0.js                      32.82 kB │ gzip:   7.18 kB │ map:   110.18 kB
+dist/assets/chunk-NSK5VX7P-DEZmxkyI.js                   33.92 kB │ gzip:   8.93 kB │ map:   120.27 kB
+dist/assets/dagre-C1ovc7t7.js                            34.27 kB │ gzip:  11.90 kB │ map:   199.21 kB
+dist/assets/chunk-7Z6QIM7H-B0_kcmRg.js                   34.48 kB │ gzip:   7.38 kB │ map:    90.91 kB
+dist/assets/quadrantDiagram-CIZ2JOQS-C7xMeMUz.js         34.74 kB │ gzip:   9.83 kB │ map:   100.59 kB
+dist/assets/chunk-5RXB4S5H-DAY7KiMI.js                   37.64 kB │ gzip:  12.22 kB │ map:   113.17 kB
+dist/assets/mermaid.core-HnMFMchN.js                     38.11 kB │ gzip:  12.34 kB │ map:   103.91 kB
+dist/assets/xychartDiagram-ELKLHX3M-B8HIx6lj.js          43.60 kB │ gzip:  11.89 kB │ map:   125.82 kB
+dist/assets/vennDiagram-T6HMQDX7-oHXbkXDr.js             44.13 kB │ gzip:  15.64 kB │ map:   167.19 kB
+dist/assets/chunk-ZIRB5QZD-B-nxTeKg.js                   47.66 kB │ gzip:  14.56 kB │ map:   143.24 kB
+dist/assets/chunk-GF5L2VYU-CReaXNFq.js                   48.91 kB │ gzip:  15.78 kB │ map:   138.03 kB
+dist/assets/chunk-WRU74C26-C_bJLy3M.js                   48.96 kB │ gzip:  15.11 kB │ map:   102.75 kB
+dist/assets/src-LRT2Oj_m.js                              50.82 kB │ gzip:  16.76 kB │ map:   181.64 kB
+dist/assets/chunk-JQJVKLGR-Bm_SZNpJ.js                   59.77 kB │ gzip:  19.54 kB │ map:   171.59 kB
+dist/assets/c4Diagram-5PPSVZJV-CkSHph7L.js               69.66 kB │ gzip:  19.44 kB │ map:   184.13 kB
+dist/assets/blockDiagram-VBNYF7ZC-DkCoEUx3.js            73.94 kB │ gzip:  20.94 kB │ map:   226.73 kB
+dist/assets/ganttDiagram-PKOTCBZU-B13N3Zro.js            74.04 kB │ gzip:  23.37 kB │ map:   216.76 kB
+dist/assets/CapabilitiesPanel-CueSv3_g.js                75.95 kB │ gzip:  17.22 kB │ map:   214.93 kB
+dist/assets/cose-bilkent-JH36ORCC-ntVUmKX8.js            86.63 kB │ gzip:  22.23 kB │ map:   277.57 kB
+dist/assets/WorkspacePanel-d26duqGj.js                   90.38 kB │ gzip:  20.80 kB │ map:   219.64 kB
+dist/assets/chunk-QR6OTTB3-CgvsUXkG.js                  107.24 kB │ gzip:  25.27 kB │ map:   353.08 kB
+dist/assets/sequenceDiagram-SI44F4Z6-CoJds8g0.js        116.65 kB │ gzip:  30.66 kB │ map:   314.93 kB
+dist/assets/swimlanes-SLNWSIFB-BigxQLom.js              131.70 kB │ gzip:  41.18 kB │ map:   476.14 kB
+dist/assets/architectureDiagram-T3A2C74G-DiKbgw7b.js    155.09 kB │ gzip:  42.16 kB │ map:   538.72 kB
+dist/assets/bridge-CR0__vxa.js                          173.67 kB │ gzip:  49.64 kB │ map:   528.59 kB
+dist/assets/zh-C2N48eLp.js                              178.03 kB │ gzip:  54.89 kB │ map:   248.95 kB
+dist/assets/zh-TW-gJXlzZPh.js                           178.70 kB │ gzip:  55.74 kB │ map:   249.58 kB
+dist/assets/i18n-S2QKFzMj.js                            184.57 kB │ gzip:  51.92 kB │ map:   262.47 kB
+dist/assets/vendor-highlight-z0WTzwss.js                215.43 kB │ gzip:  72.09 kB │ map:   634.14 kB
+dist/assets/vendor-react-BxsOQ1VN.js                    237.22 kB │ gzip:  66.13 kB │ map:   811.23 kB
+dist/assets/chunk-I66GZJ75-Y4oPO7VJ.js                  243.65 kB │ gzip:  39.62 kB │ map:   593.07 kB
+dist/assets/SettingsPanel-CwXqnbe3.js                   274.10 kB │ gzip:  59.80 kB │ map:   669.78 kB
+dist/assets/TerminalPanel-CT1re24X.js                   339.23 kB │ gzip:  86.41 kB │ map:   654.24 kB
+dist/assets/cytoscape.esm-Cs62AURi.js                   455.27 kB │ gzip: 143.53 kB │ map: 1,639.28 kB
+dist/assets/chunk-KEIR6QF5-D-BI7O4Z.js                  704.24 kB │ gzip: 147.99 kB │ map: 1,863.07 kB
+dist/assets/vendor-markdown-BAyFfpaN.js                 709.92 kB │ gzip: 204.76 kB │ map: 2,473.58 kB
+dist/assets/index-BWbwIgoa.js                           808.39 kB │ gzip: 222.04 kB │ map: 2,570.52 kB
+dist/assets/markdown.worker-CHW6yy-F.js               1,089.52 kB │ gzip: 226.38 kB │ map:     0.08 kB
+
+[33m[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 600 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.[39m
+[32m✓ built in 17.41s[39m
+[33m[33m[PLUGIN_TIMINGS] [0mYour build spent 97% of 17.4s inside plugin hooks (16.9s).
+Not measurable — 4 hooks whose calls overlap, so elapsed time covers work other calls were doing. Profile with `node --cpu-prof`:
+  - vite:terser renderChunk (175 calls)
+  - vite:css transform (9 calls)
+  - vite:worker load (2 calls)
+  … and 1 more
+See https://rolldown.rs/reference/InputOptions.checks#plugintimings for more details.
+[39m
+
+bundle budgets
+  PASS  initial JavaScript gzip: 381.4 KiB / 400.0 KiB
+  PASS  largest initial JavaScript chunk gzip: 214.5 KiB / 280.0 KiB
+  PASS  render-blocking CSS gzip: 3.1 KiB / 4.0 KiB
+  PASS  deferred app-shell CSS gzip: 110.4 KiB / 114.0 KiB
+file:///home/runner/work/DeepSeek-Reasonix/DeepSeek-Reasonix/desktop/frontend/scripts/check-bundle-budget.mjs:26
+    throw new Error(`${label} is ${formatKiB(actual)}; budget is ${formatKiB(budget)}`);
+          ^
+
+Error: zh-C2N48eLp.js gzip is 53.4 KiB; budget is 53.3 KiB
+    at assertBudget (file:///home/runner/work/DeepSeek-Reasonix/DeepSeek-Reasonix/desktop/frontend/scripts/check-bundle-budget.mjs:26:11)
+    at file:///home/runner/work/DeepSeek-Reasonix/DeepSeek-Reasonix/desktop/frontend/scripts/check-bundle-budget.mjs:76:3
+    at ModuleJob.run (node:internal/modules/esm/module_job:439:25)
+    at async node:internal/modules/esm/loader:643:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v24.18.0
+ ELIFECYCLE  Command failed with exit code 1.
+
+===== desktop_go_test =====
+exit_code=0
+ok  	reasonix/desktop	63.984s
+ok  	reasonix/desktop/cmd/sign	5.723s
+ok  	reasonix/desktop/cmd/update-helper	0.016s
+ok  	reasonix/desktop/cmd/windows-resource	5.223s
+ok  	reasonix/desktop/internal/update	0.003s
+ok  	reasonix/desktop/internal/winuninstall	0.003s
+
+===== frontend_typecheck =====
+exit_code=0
+
+> reasonix-desktop-frontend@0.0.0 typecheck /home/runner/work/DeepSeek-Reasonix/DeepSeek-Reasonix/desktop/frontend
+> tsc --noEmit
+
+
