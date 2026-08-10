@@ -2,10 +2,10 @@
   "limits": {
     "banner": 15,
     "commented-code": 0,
-    "complexity": 2088,
-    "essay": 4100,
-    "file-size": 111164,
-    "function-size": 9181,
+    "complexity": 2080,
+    "essay": 4099,
+    "file-size": 110691,
+    "function-size": 9129,
     "layering": 1,
     "marker": 0,
     "narrative": 64,
@@ -42,7 +42,7 @@
       "essay": 11
     },
     "desktop/bot_connection_app.go": {
-      "file-size": 221
+      "file-size": 182
     },
     "desktop/bot_event_sink.go": {
       "essay": 2
@@ -84,7 +84,7 @@
       "essay": 2
     },
     "desktop/frontend/src/App.tsx": {
-      "file-size": 4754
+      "file-size": 4749
     },
     "desktop/frontend/src/__tests__/app-chrome-tabs.test.ts": {
       "test-file-size": 19
@@ -138,7 +138,7 @@
       "file-size": 141
     },
     "desktop/frontend/src/components/SettingsPanel.tsx": {
-      "file-size": 7162
+      "file-size": 6960
     },
     "desktop/frontend/src/components/StatusBar.tsx": {
       "file-size": 20
@@ -171,7 +171,7 @@
       "file-size": 307
     },
     "desktop/frontend/src/lib/types.ts": {
-      "file-size": 1432
+      "file-size": 1428
     },
     "desktop/frontend/src/lib/useController.ts": {
       "file-size": 3925
@@ -510,8 +510,8 @@
       "test-file-size": 1020
     },
     "internal/agent/fleet.go": {
-      "essay": 4,
-      "function-size": 39
+      "essay": 3,
+      "function-size": 24
     },
     "internal/agent/listsessions_bench_test.go": {
       "essay": 4
@@ -533,7 +533,7 @@
     },
     "internal/agent/parallel_tasks.go": {
       "essay": 3,
-      "function-size": 81
+      "function-size": 73
     },
     "internal/agent/parallel_tasks_test.go": {
       "essay": 2
@@ -634,7 +634,7 @@
     },
     "internal/agent/subagent_store.go": {
       "essay": 5,
-      "file-size": 162
+      "file-size": 149
     },
     "internal/agent/subagent_store_test.go": {
       "test-file-size": 250
@@ -642,7 +642,7 @@
     "internal/agent/task.go": {
       "complexity": 25,
       "essay": 55,
-      "file-size": 1355,
+      "file-size": 1295,
       "function-size": 114
     },
     "internal/agent/task_test.go": {
@@ -662,7 +662,7 @@
     },
     "internal/agent/usecapability.go": {
       "essay": 9,
-      "file-size": 777
+      "file-size": 724
     },
     "internal/agent/usecapability_test.go": {
       "test-file-size": 998
@@ -673,8 +673,8 @@
     "internal/boot/boot.go": {
       "complexity": 295,
       "essay": 102,
-      "file-size": 2236,
-      "function-size": 1864,
+      "file-size": 2226,
+      "function-size": 1854,
       "narrative": 3
     },
     "internal/boot/boot_test.go": {
@@ -794,8 +794,8 @@
       "function-size": 15
     },
     "internal/cli/bot.go": {
-      "complexity": 24,
-      "function-size": 128
+      "complexity": 18,
+      "function-size": 113
     },
     "internal/cli/branch.go": {
       "essay": 2
@@ -974,8 +974,8 @@
       "essay": 2
     },
     "internal/config/config.go": {
-      "essay": 59,
-      "file-size": 1549,
+      "essay": 50,
+      "file-size": 1500,
       "narrative": 2
     },
     "internal/config/credentials.go": {
@@ -1037,6 +1037,9 @@
     "internal/config/paths.go": {
       "essay": 13
     },
+    "internal/config/plugin_entry.go": {
+      "essay": 9
+    },
     "internal/config/plugin_packages.go": {
       "essay": 2
     },
@@ -1047,10 +1050,10 @@
       "file-size": 282
     },
     "internal/config/render.go": {
-      "complexity": 252,
+      "complexity": 250,
       "essay": 2,
-      "file-size": 1031,
-      "function-size": 971
+      "file-size": 1015,
+      "function-size": 967
     },
     "internal/config/render_test.go": {
       "test-file-size": 761
@@ -1209,7 +1212,7 @@
     "internal/evidence/evidence.go": {
       "complexity": 6,
       "essay": 38,
-      "file-size": 2080
+      "file-size": 2058
     },
     "internal/evidence/evidence_test.go": {
       "essay": 1,

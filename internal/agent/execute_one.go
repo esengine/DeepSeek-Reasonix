@@ -808,11 +808,11 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 			// Proxy: meta receipt (non-mutation) + real target receipt.
 			a.evidence.Record(evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), err == nil, true))
 			rec := evidence.ReceiptFromToolCall(evidenceName, evidenceArgs, err == nil, readOnly)
-			rec.OutputBytes = len(strings.TrimSpace(result))
+			decorateExecutionReceipt(&rec, result, execution)
 			a.evidence.Record(rec)
 		} else {
 			rec := evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), err == nil, t.ReadOnly())
-			rec.OutputBytes = len(strings.TrimSpace(result))
+			decorateExecutionReceipt(&rec, result, execution)
 			a.evidence.Record(rec)
 			if err == nil && call.Name == "todo_write" {
 				a.setTodoState(rec.Todos)

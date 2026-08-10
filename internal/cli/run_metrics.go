@@ -55,12 +55,24 @@ type RunMetrics struct {
 	ReadinessMissingSignoff        int            `json:"readiness_missing_signoff"`
 	ReadinessMissingActionEvidence int            `json:"readiness_missing_action_evidence"`
 	ReadinessMissingMutation       int            `json:"readiness_missing_mutation"`
-	MissingReasoningDetected       int            `json:"missing_reasoning_detected,omitempty"`
-	MissingReasoningRetries        int            `json:"missing_reasoning_retries,omitempty"`
-	MissingReasoningRecovered      int            `json:"missing_reasoning_recovered,omitempty"`
-	MissingReasoningReplaced       int            `json:"missing_reasoning_retry_replaced_response,omitempty"`
-	MissingReasoningSuppressed     int            `json:"missing_reasoning_retry_suppressed,omitempty"`
-	MissingReasoningFallbacks      int            `json:"missing_reasoning_fallbacks,omitempty"`
+	// Delegation counters let one model be compared across orchestration arms
+	// without scraping prose. Child tool calls are already split out as
+	// SubagentToolCalls below; parent calls are ToolCalls minus that.
+	SubagentRuns               int `json:"subagent_runs,omitempty"`
+	SubagentNestedRuns         int `json:"subagent_nested_runs,omitempty"`
+	SubagentMutations          int `json:"subagent_mutations,omitempty"`
+	CompletionReports          int `json:"completion_reports,omitempty"`
+	CompletionsProsedOnly      int `json:"completions_prose_only,omitempty"`
+	FalseCompletions           int `json:"false_completions,omitempty"`
+	CriterionDowngrades        int `json:"criterion_downgrades,omitempty"`
+	WriteScopeViolations       int `json:"write_scope_violations,omitempty"`
+	DuplicateWorkPaths         int `json:"duplicate_work_paths,omitempty"`
+	MissingReasoningDetected   int `json:"missing_reasoning_detected,omitempty"`
+	MissingReasoningRetries    int `json:"missing_reasoning_retries,omitempty"`
+	MissingReasoningRecovered  int `json:"missing_reasoning_recovered,omitempty"`
+	MissingReasoningReplaced   int `json:"missing_reasoning_retry_replaced_response,omitempty"`
+	MissingReasoningSuppressed int `json:"missing_reasoning_retry_suppressed,omitempty"`
+	MissingReasoningFallbacks  int `json:"missing_reasoning_fallbacks,omitempty"`
 	// Capability / Delivery routing counters (optional; zero for older readers).
 	CapabilityRoutes               int     `json:"capability_routes,omitempty"`
 	CapabilityRoutedCandidates     int     `json:"capability_routed_candidates,omitempty"`
@@ -117,6 +129,9 @@ type metricsSink struct {
 	// the snapshot goroutine reads the same fields.
 	mu sync.Mutex
 	m  RunMetrics
+	// childMutations counts how many distinct children mutated each path, so
+	// two children racing on one file is measurable rather than anecdotal.
+	childMutations map[string]int
 
 	// partialPath receives throttled in-flight snapshots, so a run killed by a
 	// timeout still leaves accounting behind instead of nothing. Empty disables
@@ -280,6 +295,39 @@ func (s *metricsSink) recordToolResult(t event.Tool) {
 		s.m.ToolFailuresByName = map[string]int{}
 	}
 	s.m.ToolFailuresByName[name]++
+}
+
+// RecordDelegationAudit folds one finished child run into the arm totals.
+func (s *metricsSink) RecordDelegationAudit(a evidence.DelegationAudit) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.m.SubagentRuns++
+	if a.Depth > 1 {
+		s.m.SubagentNestedRuns++
+	}
+	s.m.SubagentMutations += a.Mutations
+	s.m.WriteScopeViolations += a.ClaimViolations
+	s.m.CriterionDowngrades += a.Downgrades
+	if a.HasReport {
+		s.m.CompletionReports++
+	} else {
+		s.m.CompletionsProsedOnly++
+	}
+	if a.FalseCompletion() {
+		s.m.FalseCompletions++
+	}
+	if s.childMutations == nil {
+		s.childMutations = map[string]int{}
+	}
+	for _, path := range a.MutationPaths {
+		s.childMutations[path]++
+		if s.childMutations[path] == 2 {
+			s.m.DuplicateWorkPaths++
+		}
+	}
 }
 
 func (s *metricsSink) RecordReadinessAudit(a evidence.ReadinessAudit) {

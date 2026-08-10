@@ -61,6 +61,17 @@ type runMetrics struct {
 	Currency      string                 `json:"currency"`
 	Compactions   int                    `json:"compactions"`
 
+	// Delegation counters mirror internal/cli.RunMetrics. They are what makes a
+	// single-agent arm comparable against a delegated one for the same model.
+	SubagentRuns          int `json:"subagent_runs,omitempty"`
+	SubagentNestedRuns    int `json:"subagent_nested_runs,omitempty"`
+	SubagentMutations     int `json:"subagent_mutations,omitempty"`
+	CompletionReports     int `json:"completion_reports,omitempty"`
+	CompletionsProsedOnly int `json:"completions_prose_only,omitempty"`
+	FalseCompletions      int `json:"false_completions,omitempty"`
+	CriterionDowngrades   int `json:"criterion_downgrades,omitempty"`
+	WriteScopeViolations  int `json:"write_scope_violations,omitempty"`
+	DuplicateWorkPaths    int `json:"duplicate_work_paths,omitempty"`
 	// Optional Delivery capability counters (omitempty for baseline/old metrics).
 	ReadinessChecks            int     `json:"readiness_checks,omitempty"`
 	ReadinessRecoveries        int     `json:"readiness_recoveries,omitempty"`

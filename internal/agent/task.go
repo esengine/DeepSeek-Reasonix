@@ -164,6 +164,7 @@ func SubagentToolRegistryForDepthWithRuntime(parent *tool.Registry, names []stri
 	exclude = append(exclude, subagentJobTools...)
 	sub := FilterRegistry(parent, names, exclude...)
 	stripDirectMCPTools(sub)
+	AttachCompleteSubtaskTool(sub)
 	attachSubagentCapabilityProxy(parent, sub, names, runtime)
 	if bash, ok := sub.Get("bash"); ok {
 		sub.Add(foregroundOnlyBash{inner: bash})
@@ -586,22 +587,10 @@ func (r *ReadOnlyTaskTool) ResolveProfile(args json.RawMessage) *event.Profile {
 	return r.task.ResolveProfile(args)
 }
 
-func (r *ReadOnlyTaskTool) Execute(ctx context.Context, args json.RawMessage) (result string, err error) {
+func (r *ReadOnlyTaskTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	if r == nil || r.task == nil {
 		return "", fmt.Errorf("read_only_task is not configured")
 	}
-	// read_only_task shares the same progress tracker as RunProfileSpec so
-	// every sub-agent entry point emits the same phase machine. It owns its
-	// merger (no parent task group) and finishes on every exit path.
-	trk := newSubagentProgressTracker(ctx, subSink(ctx))
-	trk.running()
-	defer func() {
-		if p := recover(); p != nil {
-			trk.finish(nil, fmt.Errorf("panic: %v", p))
-			panic(p)
-		}
-		trk.finish(ctx.Err(), err)
-	}()
 	var p struct {
 		Prompt      string   `json:"prompt"`
 		Description string   `json:"description"`
@@ -613,48 +602,16 @@ func (r *ReadOnlyTaskTool) Execute(ctx context.Context, args json.RawMessage) (r
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
-	if strings.TrimSpace(p.Prompt) == "" {
-		return "", fmt.Errorf("prompt is required")
-	}
-
-	// Ordinary read_only_task keeps the concise default system prompt and does
-	// not accept profile/write_paths (use fleet with read_only for those).
-	releaseSlot, err := r.task.acquireSlot(ctx, AcquireRequest{
-		Writer: false,
-		Nested: SubagentDepth(ctx) > 0,
-		Label:  firstNonEmpty(p.Description, "read_only_task"),
-	})
+	// Every entry point compiles to a spec and runs through RunProfileSpec, so a
+	// boundary added there cannot be missed by one caller. read_only_task keeps
+	// its own promise of no durable side effects through Ephemeral.
+	spec, err := r.task.buildTaskSpec(ctx, p.Prompt, p.Description, "", nil, p.Tools, p.MaxSteps, p.Model, p.Effort, "", "", false, true)
 	if err != nil {
 		return "", err
 	}
-	defer releaseSlot()
-
-	maxSteps := r.task.childMaxSteps(p.MaxSteps)
-
-	childDepth, err := r.task.nextSubagentDepth(ctx)
-	if err != nil {
-		return "", err
-	}
-	subReg := ReadOnlySubagentToolRegistryForDepthWithRuntime(r.task.parentReg, p.Tools, childDepth, r.task.maxDepth(), r.task.capabilityRuntime)
-	if subReg.Len() == 0 {
-		return "", fmt.Errorf("read_only_task has no read-only tools available")
-	}
-	modelRef, effortRef := r.task.effectiveProfile(p.Model, p.Effort)
-	usageModelRef := r.task.usageModelRef(modelRef, effortRef)
-	prov, pricing, ctxWin, err := r.task.resolveSubSessionRuntime(modelRef, effortRef)
-	if err != nil {
-		return "", fmt.Errorf("read-only sub-agent profile: %w", err)
-	}
-	recoveryTaskID := subagentRecoveryTaskID(ctx, "")
-	var mutationObserver *checkpoint.MutationObserver
-	if r.task.mutationObserver != nil {
-		mutationObserver = r.task.mutationObserver.CloneForSubagent(recoveryTaskID, r.task.mutationObserver.OwnershipTurn(), false)
-	}
-	answer, err := r.task.runReadOnlySubSession(ctx, p.Prompt, subReg, trk.wrap(), maxSteps, prov, pricing, ctxWin, NewSession(DefaultReadOnlyTaskSystemPrompt), childDepth, recoveryTaskID, usageModelRef, mutationObserver)
-	if err != nil {
-		return "", err
-	}
-	return GuardSubagentHostDecisionText(answer), nil
+	spec.Worker.SystemPrompt = DefaultReadOnlyTaskSystemPrompt
+	spec.Context.Ephemeral = true
+	return r.task.RunProfileSpec(ctx, spec)
 }
 
 // childMaxSteps resolves a sub-agent's step budget. An explicit request wins.
@@ -719,17 +676,11 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 // single task/fleet item. forceReadOnly forces the read-only registry.
 func (t *TaskTool) buildTaskSpec(ctx context.Context, prompt, description, profile string, writePaths, tools []string, maxSteps int, model, effort, continueFrom, forkFrom string, background, forceReadOnly bool) (ProfileExecSpec, error) {
 	spec := ProfileExecSpec{
-		Kind:            "task",
-		Name:            "task",
-		Prompt:          prompt,
-		Description:     description,
-		CallTools:       tools,
-		MaxSteps:        maxSteps,
-		ContinueFrom:    strings.TrimSpace(continueFrom),
-		ForkFrom:        strings.TrimSpace(forkFrom),
-		RunInBackground: background,
-		Nested:          SubagentDepth(ctx) > 0,
-		SystemPrompt:    t.sysPrompt,
+		Task:    TaskSpec{Objective: prompt, Description: description},
+		Worker:  WorkerSpec{Kind: "task", Name: "task", SystemPrompt: t.sysPrompt},
+		Grant:   CapabilityGrant{CallTools: tools},
+		Context: ContextRequest{ContinueFrom: strings.TrimSpace(continueFrom), ForkFrom: strings.TrimSpace(forkFrom)},
+		Sched:   SchedulerPolicy{MaxSteps: maxSteps, RunInBackground: background, Nested: SubagentDepth(ctx) > 0},
 	}
 	profile = strings.TrimSpace(profile)
 	readOnly := forceReadOnly
@@ -740,19 +691,19 @@ func (t *TaskTool) buildTaskSpec(ctx context.Context, prompt, description, profi
 		if err != nil {
 			return ProfileExecSpec{}, err
 		}
-		spec.Profile = def.Name
-		spec.Name = def.Name
-		spec.Kind = "skill"
-		spec.SystemPrompt = def.Body
-		spec.UseProfilePrompt = true
+		spec.Worker.Profile = def.Name
+		spec.Worker.Name = def.Name
+		spec.Worker.Kind = "skill"
+		spec.Worker.SystemPrompt = def.Body
+		spec.Worker.UseProfilePrompt = true
 		profileTools = def.AllowedTools
 		profileModel, profileEffort = def.Model, def.Effort
 		if def.ReadOnly {
 			readOnly = true
 		}
 	}
-	spec.ReadOnly = readOnly
-	spec.ProfileTools = profileTools
+	spec.Grant.ReadOnly = readOnly
+	spec.Grant.ProfileTools = profileTools
 
 	configModel, configEffort := "", ""
 	if profile != "" {
@@ -763,7 +714,7 @@ func (t *TaskTool) buildTaskSpec(ctx context.Context, prompt, description, profi
 			configEffort = t.profileConfigEffort(profile)
 		}
 	}
-	spec.Model, spec.Effort = ResolveModelEffort(
+	spec.Worker.Model, spec.Worker.Effort = ResolveModelEffort(
 		configModel, configEffort,
 		model, effort,
 		profileModel, profileEffort,
@@ -781,7 +732,7 @@ func (t *TaskTool) buildTaskSpec(ctx context.Context, prompt, description, profi
 		if err != nil {
 			return ProfileExecSpec{}, err
 		}
-		spec.WritePaths = claims
+		spec.Grant.WritePaths = claims
 		if requireClaim && claims.Empty() {
 			return ProfileExecSpec{}, fmt.Errorf("writer claim resolved empty")
 		}
@@ -825,33 +776,33 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 		}
 		trk.finish(ctx.Err(), err)
 	}()
-	if !spec.RunInBackground {
+	if !spec.Sched.RunInBackground {
 		trk.running()
 	}
-	if strings.TrimSpace(spec.Prompt) == "" {
+	if strings.TrimSpace(spec.Task.Objective) == "" {
 		return "", fmt.Errorf("prompt is required")
 	}
-	if strings.TrimSpace(spec.SystemPrompt) == "" {
-		if spec.UseProfilePrompt {
+	if strings.TrimSpace(spec.Worker.SystemPrompt) == "" {
+		if spec.Worker.UseProfilePrompt {
 			return "", fmt.Errorf("profile system prompt is empty")
 		}
-		spec.SystemPrompt = t.sysPrompt
+		spec.Worker.SystemPrompt = t.sysPrompt
 	}
 
-	maxSteps := t.childMaxSteps(spec.MaxSteps)
+	maxSteps := t.childMaxSteps(spec.Sched.MaxSteps)
 	childDepth, err := t.nextSubagentDepth(ctx)
 	if err != nil {
 		return "", err
 	}
 
-	toolNames, err := IntersectToolLists(t.parentReg, spec.ProfileTools, spec.CallTools)
+	toolNames, err := IntersectToolLists(t.parentReg, spec.Grant.ProfileTools, spec.Grant.CallTools)
 	if err != nil {
 		return "", err
 	}
 	var subReg *tool.Registry
-	if spec.ReadOnly {
+	if spec.Grant.ReadOnly {
 		subReg = ReadOnlySubagentToolRegistryForDepthWithRuntime(t.parentReg, toolNames, childDepth, t.maxDepth(), t.capabilityRuntime)
-		if subReg.Len() == 0 && !spec.AllowNoTools {
+		if subReg.Len() == 0 && !spec.Grant.AllowNoTools {
 			return "", fmt.Errorf("no read-only tools available for this sub-agent")
 		}
 	} else {
@@ -860,9 +811,9 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 		// cannot honor it. A synthesized whole-workspace claim is a scheduling
 		// boundary for omitted write_paths; it preserves the legacy registry and
 		// the parent session's existing sandbox/permission boundaries.
-		if !spec.WritePaths.Empty() && !spec.WritePaths.WholeWorkspace {
+		if !spec.Grant.WritePaths.Empty() && !spec.Grant.WritePaths.WholeWorkspace {
 			keepBash := t.bashCanEnforceWriteRoots()
-			bound, removed := BindWritePaths(subReg, spec.WritePaths, t.workspaceRoot, keepBash)
+			bound, removed := BindWritePaths(subReg, spec.Grant.WritePaths, t.workspaceRoot, keepBash)
 			subReg = bound
 			if len(removed) > 0 && subReg.Len() == 0 {
 				return "", fmt.Errorf("no path-bound write tools available after dropping unbound writers: %s", strings.Join(removed, ", "))
@@ -870,10 +821,10 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 		}
 	}
 
-	modelRef, effortRef := spec.Model, spec.Effort
+	modelRef, effortRef := spec.Worker.Model, spec.Worker.Effort
 	usageModelRef := t.usageModelRef(modelRef, effortRef)
 	parentID, _, _, _ := CallContext(ctx)
-	run, err := t.prepareTranscriptRunWithPrompt(ctx, subReg, modelRef, effortRef, ParentSession(ctx), parentID, spec.ContinueFrom, spec.ForkFrom, spec.SystemPrompt, spec.Kind, spec.Name)
+	run, err := t.prepareTranscriptRunWithPrompt(ctx, subReg, modelRef, effortRef, spec.Context.parentSession(ctx), parentID, spec.Context.ContinueFrom, spec.Context.ForkFrom, spec.Worker.SystemPrompt, spec.Worker.Kind, spec.Worker.Name)
 	if err != nil {
 		return "", err
 	}
@@ -883,27 +834,27 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 		return "", fmt.Errorf("sub-agent profile: %w", err)
 	}
 
-	isWriter := !spec.ReadOnly
+	isWriter := !spec.Grant.ReadOnly
 	acquireReq := AcquireRequest{
 		Writer:     isWriter,
-		WritePaths: spec.WritePaths,
-		Nested:     spec.Nested,
-		Label:      firstNonEmpty(spec.Description, spec.Name, "task"),
+		WritePaths: spec.Grant.WritePaths,
+		Nested:     spec.Sched.Nested,
+		Label:      firstNonEmpty(spec.Task.Description, spec.Worker.Name, "task"),
 	}
 	// Defensive fallback for callers that manually construct a background spec
 	// instead of going through buildTaskSpec.
-	if isWriter && spec.WritePaths.Empty() && spec.RunInBackground {
+	if isWriter && spec.Grant.WritePaths.Empty() && spec.Sched.RunInBackground {
 		whole, werr := WholeWorkspaceWriteClaim(t.workspaceRoot)
 		if werr != nil {
 			run.Release()
 			return "", werr
 		}
 		acquireReq.WritePaths = whole
-		spec.WritePaths = whole
+		spec.Grant.WritePaths = whole
 	}
 
 	recoveryTaskID := subagentRecoveryTaskID(ctx, run.Ref)
-	backgroundWriter := (spec.RunInBackground || spec.BackgroundWriter) && !spec.ReadOnly
+	backgroundWriter := (spec.Sched.RunInBackground || spec.Sched.BackgroundWriter) && !spec.Grant.ReadOnly
 	var mutationObserver *checkpoint.MutationObserver
 	if t.mutationObserver != nil {
 		turn := t.mutationObserver.OwnershipTurn()
@@ -917,13 +868,13 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 			}
 			defer mutationObserver.UnregisterWriter(recoveryTaskID)
 		}
-		if spec.ReadOnly {
-			return t.runReadOnlySubSession(runCtx, spec.Prompt, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver)
+		if spec.Grant.ReadOnly {
+			return t.runReadOnlySubSession(runCtx, spec.Task.Objective, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver)
 		}
-		return t.runSubSession(runCtx, spec.Prompt, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver)
+		return t.runSubSession(WithSubagentWriteClaim(runCtx, spec.Grant.WritePaths), spec.Task.Objective, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver)
 	}
 
-	if spec.RunInBackground {
+	if spec.Sched.RunInBackground {
 		jm, ok := jobs.FromContext(ctx)
 		if !ok {
 			run.Release()
@@ -945,7 +896,7 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 		} else {
 			releaseStart = func() {}
 		}
-		label := firstNonEmpty(spec.Description, spec.Name, "task")
+		label := firstNonEmpty(spec.Task.Description, spec.Worker.Name, "task")
 		if t.transcripts != nil && run != nil && run.Ref != "" {
 			if err := t.transcripts.MarkRunning(run); err != nil {
 				releaseStart()
@@ -1092,6 +1043,7 @@ func (t *TaskTool) prepareTranscriptRunWithPrompt(ctx context.Context, subReg *t
 		ToolContext:      childToolIdentityContext(ctx),
 		Model:            identityModel,
 		Effort:           identityEffort,
+		ResumedFrom:      firstNonEmpty(continueFrom, legacyForkFrom),
 	}
 	if continueFrom != "" {
 		return t.transcripts.PrepareContinue(continueFrom, spec)
@@ -1661,7 +1613,7 @@ func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *too
 	// Capture the pristine task before host framing is prepended: delivery
 	// intent classification must judge the task, not the wrapper.
 	opts.ClassifierTaskText = prompt
-	prompt = t.withWorkspaceContext(prompt)
+	prompt = t.withWorkspaceContext(prompt) + "\n\n" + completeSubtaskContract
 	// The child provider owns the final vision decision. Text-only providers
 	// retain the attachment metadata but omit image parts during serialization.
 	ctx = WithUserImages(ctx, SubagentImageCandidates(ctx))
@@ -1881,7 +1833,7 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 		// Still merge any partial child evidence so parent gates see real writes.
 		mergeChildEvidence(ctx, sub)
 		if answer, ok := salvageReadinessExhaustedAnswer(sub, sess, opts, err); ok {
-			return answer, nil
+			return composeSubagentAnswer(ctx, answer, sub, SubagentWriteClaim(ctx)), nil
 		}
 		return "", fmt.Errorf("sub-agent: %w", err)
 	}
@@ -1909,7 +1861,7 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 	}
 	mergeChildEvidence(ctx, sub)
 	if answer := latestAssistantAnswer(sess); answer != "" {
-		return answer, nil
+		return composeSubagentAnswer(ctx, answer, sub, SubagentWriteClaim(ctx)), nil
 	}
 	return "", fmt.Errorf("sub-agent finished without producing a final answer")
 }
@@ -2139,17 +2091,5 @@ func subSinkFor(parentID string, parent event.Sink) event.Sink {
 	if parent == nil {
 		return event.Discard
 	}
-	return event.FuncSink(func(e event.Event) {
-		switch e.Kind {
-		case event.ToolDispatch, event.ToolResult, event.ToolProgress:
-			e.Tool.ParentID = parentID
-			e.Tool.ID = parentID + "/" + e.Tool.ID
-			parent.Emit(e)
-		case event.Usage:
-			if e.UsageSource == "" {
-				e.UsageSource = event.UsageSourceSubagent
-			}
-			parent.Emit(e)
-		}
-	})
+	return nestedSink{AuditForwarder: event.AuditForwarder{Inner: parent}, parentID: parentID, parent: parent}
 }

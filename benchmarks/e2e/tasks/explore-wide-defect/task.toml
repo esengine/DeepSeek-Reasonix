@@ -1,0 +1,4 @@
+prompt = "Every module under pkg/ exposes normalise(label), which must trim whitespace and drop a trailing colon. Exactly one module gets it wrong. Find it and fix it so that `python3 check.py` prints OK. Do not rewrite the modules that are already correct."
+class = "delegation"
+max_steps = 25
+timeout_sec = 420

@@ -656,6 +656,277 @@ Headless runs remain ephemeral and return fair bounded previews without refs.
 See [Subagent profiles](./SUBAGENT_PROFILES.md)
 for the user-facing command and file-format contract.
 
+A profile describes a worker, not a run. Delegation is five separate concepts:
+the profile says how a worker thinks, `TaskSpec` what this call wants,
+`CapabilityGrant` what it may touch, `ContextCapsule` what it starts from, and
+`SchedulerPolicy` when it runs. A field belongs to whichever member decides its
+value, so a profile may carry a capability *ceiling* (`allowed-tools`,
+`read-only`) but never a per-call value such as `max_turns`, `write_paths`, or a
+retry or verification policy — those are decided by the task or the scheduler.
+Skill frontmatter may keep growing; `agent.ProfileFromSkill` is the single
+narrowing point, and routing metadata (triggers, auto-use, cost, freshness)
+stops there because it decides *when* a worker is chosen, not how it thinks.
+`internal/agent/profile_boundary_test.go` fails on any widening.
+
+### 3.11 Sub-agents close with a host-adjudicated claim
+
+A writer sub-agent ends its run by calling `complete_subtask` with a `status`,
+a `summary`, the `acceptance_criteria` it was held to (each with the command it
+ran or the paths it changed), and whatever it left `unresolved`. Prose alone is
+still accepted, but it is no longer the interface the parent reasons over.
+
+The submitted status is a claim, not a verdict. Before the parent sees it, the
+host checks every citation against its own receipts: a `verification` criterion
+must name a command the host recorded as run, `diff`/`files` must name paths the
+host observed written or read, and a `manual` note is never self-backing. Any
+criterion the receipts cannot back is lowered to `unsatisfied`, a report holding
+one cannot stay `complete`, and the downgrade is printed with its reason. The
+host never raises a status.
+
+The parent therefore receives, in order: the adjudicated status and criteria,
+the child's own prose, and the host's own receipts of what it changed and ran.
+
+### 3.12 Write claims are enforced, not advisory
+
+A declared `write_paths` is one truth source used for both scheduling and
+enforcement. When a writer sub-agent declares explicit paths, the host binds its
+registry to that claim before the child runs:
+
+- path-aware built-in writers (`write_file`, `edit_file`, `multi_edit`,
+  `move_file`, `notebook_edit`, `delete_range`, `delete_symbol`) reject any
+  argument path outside the claim, with both ends of a `move_file` checked;
+- paths are compared after symlink resolution against the deepest existing
+  ancestor, so neither `..` traversal nor a symlink inside the claim can launder
+  a write out of it;
+- `bash` is kept only if the OS sandbox can rebind its write roots to the claim,
+  and is otherwise removed from the child's registry entirely;
+- MCP goes through `use_capability`, which refuses at resolve time — before any
+  MCP process runs — every target not proven read-only;
+- writers the host cannot path-scope (custom, unknown) are dropped;
+- after the run, the host compares the mutations it recorded against the claim
+  and reports any outside path to the parent in the sub-agent's host receipts.
+
+Omitting `write_paths` is not an unscoped writer: the run claims the whole
+workspace and therefore serialises against every other writer claim. That claim
+is a scheduling boundary only — inside the workspace nothing is refused, because
+no concurrent writer can hold an overlapping claim at the same time. Writes that
+leave the workspace are still reported as claim violations.
+
+Declaring paths is what buys parallelism; it costs `bash` on hosts where the OS
+sandbox cannot enforce write roots.
+
+### 3.13 Sub-agent context inheritance is explicit
+
+A child inherits nothing implicitly. What it receives is exactly this:
+
+| Given to the child | Where it comes from |
+| --- | --- |
+| System prompt | `DefaultTaskSystemPrompt`, `DefaultReadOnlyTaskSystemPrompt`, or the profile body — nothing else is composed into it |
+| Workspace root | `<workspace-context>` on the first user turn |
+| The task text | the user turn itself |
+| Completion contract | appended to a writer's task turn (§3.11) |
+| Delegation guidance | `<subagent-context>` on a nested child's fresh session |
+| Plan-mode marker, reasoning/response language | run options, when set |
+| A prior transcript | only via `continue_from` / `fork_from` |
+
+Not inherited, by construction: `REASONIX.md`, `AGENTS.md`, `CLAUDE.md`, project
+and global memory (the memory queue is disabled, so a child cannot record memory
+either), the parent conversation, the current Goal, planner output, and sibling
+sub-agent results. A constraint that must reach a child today has to be in its
+profile body or in the task text — there is no ambient channel.
+
+Every run records a `ContextCapsule` in its transcript sidecar: the workspace,
+the system-prompt source and hash, the resolved tool scope and schema hash, the
+model and effort, the parent session and tool-call id, any resumed transcript,
+and an `inherited` block whose fields are all false. `capsuleHash` is its stable
+identity, so *why did this reviewer not see that constraint* is answered from
+the record, and two runs that behaved differently can be diffed instead of
+guessed at. The capsule holds references and digests only — never copied parent
+context, which is what keeps delegation cheap and the child prefix cacheable.
+
+### 3.14 Fleet is a small dependency graph
+
+A fleet item may declare `id` and `depends_on`. That is the whole graph
+vocabulary: no conditions, no expressions, no dynamic fan-out. It is enough for
+
+```
+research ──▶ implement backend ──┐
+        └──▶ implement frontend ─┴──▶ integration test ──▶ review
+```
+
+Ids default to the 1-based position. A duplicate id, an id no task declares, a
+self-edge, or a cycle fails preflight, so a fleet that cannot finish never
+starts. Items run as soon as their dependencies complete; items with no ordering
+between them run in parallel under the same session scheduler as before.
+
+Dependencies are a property of the graph, never of a task: they live in the
+fleet plan and never reach `ProfileExecSpec`, which is what keeps `depends_on`
+from becoming the first keyword of a workflow language.
+
+The graph relaxes the write-claim preflight in the one place it should. Only
+items that can run at the same time need disjoint `write_paths`; an
+`implement → review` pair is serialised by its edge and may share paths, which
+a flat fleet could not express.
+
+Failure handling has one knob. A failed or skipped task always skips its whole
+downstream branch — running a dependent on a broken input only buys a result the
+parent must discard. Independent branches keep going unless `fail_fast` is set,
+which stops *starting* new tasks; tasks already running are left to finish so a
+writer is never abandoned mid-write.
+
+### 3.15 One child-construction primitive
+
+The APIs that spawn a child are many — `task`, `read_only_task`, `fleet`,
+`parallel_tasks`, `run_skill`, `/<profile>`, `reasonix subagent run|try`,
+desktop preview. The execution primitive behind them must stay one. Each entry
+point compiles its request into a `ProfileExecSpec` and hands it to
+`TaskTool.RunProfileSpec`, which is the only place that resolves depth, tool
+scope, permissions, sandbox, write claims, scheduler slots, the MCP frontend,
+the transcript and capsule, the evidence ledger, and the completion contract.
+
+This is not a style preference. A safety boundary spread across several
+construction paths only has to be forgotten once: past regressions where a
+preview path built unconfined file tools, and where a profile editor dropped
+`read-only` on save, were both one entry point missing one layer.
+
+An entry point that must not persist a transcript says so with
+`ContextRequest.Ephemeral` rather than building its own session, so its promise
+is a field on the spec instead of a second construction path.
+
+`internal/agent/spawn_boundary_test.go` enumerates the files that still call the
+low-level runners directly and fails on any new one. The remaining entries —
+`internal/boot` (skill runners), `internal/cli/review.go`, and
+`desktop/subagents_app.go` — are known debt, not precedent.
+
+### 3.16 MCP concurrency: read-only is not stateless
+
+Sub-agents share one session Host and its connections while each keeps its own
+`use_capability` frontend and ledger. For a stdio server that means they share
+one process, and therefore its session state.
+
+Read-only does not imply stateless. A browser server opens a page, selects a
+tab, scrolls; every one of those tools may honestly declare `readOnly` because
+nothing reaches the filesystem, yet two children calling it concurrently
+interleave on state neither of them can see. Write claims do not help — there is
+nothing to claim.
+
+A configured server therefore carries a concurrency policy:
+
+```toml
+[[mcp.servers]]
+name = "browser"
+concurrency = "serial"   # parallel (default) | serial
+```
+
+`serial` means the runtime never runs two calls to that server at once across
+the whole session, whichever child issues them. The gate lives on the shared
+runtime because the process being interleaved on is shared at exactly that
+scope, and a call waiting on it still honours its own cancellation. Servers
+whose names look known-stateful (browser, playwright, puppeteer, chrome,
+chromium, selenium) default to `serial`; explicit configuration always wins, and
+everything else stays parallel so the shared-Host tradeoff is unchanged.
+
+This is deliberately the conservative first version: one policy per server, not
+per capability. Per-tool `parallel_safe` / `exclusive` hints and explicit
+`concurrency_key` grouping are the later refinement, once real servers show
+which tools within one server genuinely differ.
+
+### 3.17 Measuring whether delegation pays
+
+Orchestration is easy to add and hard to justify: more agents always cost more
+tokens, and the extra tokens alone can look like an improvement. Comparing arms
+therefore has to hold the model fixed and read host-recorded facts, not prose.
+
+`reasonix run --json` emits per-run delegation counters alongside the existing
+token, cache, cost, and duration totals:
+
+| Counter | Answers |
+| --- | --- |
+| `subagent_runs`, `subagent_nested_runs` | which shape actually ran, not which was configured |
+| `tool_calls` − `subagent_tool_calls` | parent versus child work split |
+| `subagent_mutations`, `duplicate_work_paths` | did two children redo the same file |
+| `completion_reports`, `completions_prose_only` | how much of the run ended in a checkable claim |
+| `false_completions`, `criterion_downgrades` | claims the host refused to back |
+| `write_scope_violations` | writes that escaped a declared claim |
+
+The control axis is partial, and the counters are what revealed it.
+`--ablate subagent` removes `task`, `read_only_task`, `fleet`, and
+`parallel_tasks`, but a run can still delegate through a `runAs=subagent`
+profile skill: a measured `no-subagent` arm spent a child run on `explore`.
+Treat that arm as "no task-tool delegation", not "single agent", and read
+`subagent_runs` to see what actually happened rather than trusting the label.
+Nested depth is `agent.max_subagent_depth`.
+
+`false_completions` is the counter that matters most. It comes from the
+adjudication in §3.11, so it measures claims the host refused rather than a
+reviewer's opinion, and it is the one number that separates "the fleet finished
+faster" from "the fleet said it finished".
+
+Read these against the measured noise floor. Running the same arm twice over
+the same tasks moved per-task token use by a median of 19% and up to 54%, while
+the whole between-arm difference in that experiment was 2.5%. A single run per
+cell therefore proves nothing about delegation: the effect has to clear the
+variance before it is an effect. Budget repetitions, or restrict the comparison
+to tasks where `subagent_runs` shows delegation actually happened — in that
+experiment it happened on one task in six.
+
+What the counters have measured so far, on one model over four task shapes,
+each comparing a neutral prompt against a forced-delegation twin over identical
+work: three one-line fixes in separate modules cost 3.8x the tokens; a 24-file
+search 1.5x tokens and 2.2x wall; a 36-file three-package migration 2.6x tokens
+and 4.1x wall; three genuinely heterogeneous branches, the shape with the best
+theoretical case, 2.4x tokens and 3.7x wall over three repetitions. Success rate
+was 100% everywhere, and the forced arm's spread was about twice the neutral
+arm's, so delegation also buys variance.
+
+Read a child's token figure carefully: 27 measured child runs averaged 134k
+tokens each, but that is cumulative prompt tokens over 9.3 model calls with the
+same ~14k context re-sent each time, not 134k tokens of new material. At ~90%
+cache hit the real price of a child averaged ¥0.017. The 2-4x above is the
+number that matters, because both arms are counted the same way; the per-child
+total is not a threshold to compare a branch's size against.
+
+Why delegation is rare is answerable from the same runs, and the answer is not
+that the model weighs it and declines. Across 33 runs with delegation available,
+15% delegated and bash outnumbered every delegation-class call 10:1. The
+recorded reasoning shows the model deliberating over how to read efficiently —
+"that's 25 files... read them in parallel batches... I can read multiple files
+at once" — on a task built for `explore`, without delegation entering the
+decision at all.
+
+Three things explain that, and only one of them is a defect. The base system
+prompt never mentions delegation; every mention lives in the skills index, and
+each is a brake ("the heavy path... only when the task genuinely needs
+context-heavy work, not on weak relevance") next to an accelerator for inline
+skills ("even plausibly relevant... cheap"). The `task` tool description says
+what the tool does and never when to reach for it. And the model already has
+cheaper parallelism — several tool calls in one round trip, with no context
+duplicated — which is what it reasons in terms of.
+
+Given the measured 2.4-4.5x, a brake is the correct default; the gap is that
+nothing recognises the rare case where delegation would pay. Forcing it does not
+close that gap: in the forced fleet run the parent worked out all three fixes in
+its own reasoning before dispatching, so the children re-read the code to apply
+edits the parent had already derived. Delegation moved the typing, not the
+thinking.
+
+One hypothesis remains untested rather than disproved: delegation's isolation
+should pay when the parent is actually hurt by what it read. It could not be
+provoked here. Pinning a workspace `compact_ratio` down to 0.5% still produced
+zero compactions, because the agent keeps its session small by writing a script
+instead of reading — the same behaviour that wins it the comparisons. Context
+pressure needs a task that cannot be scripted away, which this corpus does not
+yet contain.
+
+The migration is the instructive one. Left alone the agent read a single file,
+wrote a script and changed 108 call sites in 28 seconds; split across three
+packages, no branch could see the transformation that solved all three. A task
+looking parallel-shaped is not evidence that splitting it is cheaper.
+
+Not yet measured, and deliberately not faked: rework-after-handoff needs
+mutation ordering across a whole run, which belongs to the harness driving the
+arms rather than the instrument recording one.
+
 ## 4. Data Types (`internal/provider`)
 
 ```go

@@ -1014,17 +1014,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		if !ok || sk.RunAs != skill.RunSubagent {
 			return agent.ProfileDefinition{}, false
 		}
-		sk = skillStore.Prepare(sk)
-		return agent.ProfileDefinition{
-			Name:         sk.Name,
-			Body:         sk.Body,
-			AllowedTools: sk.AllowedTools,
-			Model:        sk.Model,
-			Effort:       sk.Effort,
-			ReadOnly:     sk.ReadOnly,
-			Invocation:   sk.Invocation,
-			NamedBuiltin: agent.NamedBuiltinProfile(sk.Name),
-		}, true
+		return agent.ProfileFromSkill(skillStore.Prepare(sk)), true
 	}
 	profileConfigModel := func(profile string) string {
 		for _, key := range SubagentModelKeys(profile) {
@@ -1538,7 +1528,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 			return "read_only_skill tool is already enabled.\n\n" + skill.ReadOnlyIndexBlock(skills)
 		}
 		readOnlySkillToolsAdded = true
-		reg.Add(skill.NewReadOnlySkillTool(skillStore, readOnlySkillRunner, skillProfile))
+		reg.Add(skill.NewReadOnlySkillTool(skillStore, gateSubagentArm(opts.Ablation, readOnlySkillRunner), skillProfile))
 		return "enabled read_only_skill. Use read_only_skill for inline skills or read-only subagent skills on the next model request.\n\n" + skill.ReadOnlyIndexBlock(skills)
 	}
 	skillToolsAdded := false
@@ -1551,10 +1541,10 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		}
 		skillToolsAdded = true
 		addReadOnlySkillTools()
-		reg.Add(skill.NewRunSkillTool(skillStore, skillRunner, skillProfile))
+		reg.Add(skill.NewRunSkillTool(skillStore, gateSubagentArm(opts.Ablation, skillRunner), skillProfile))
 		reg.Add(skill.NewReadSkillTool(skillStore))
 		reg.Add(skill.NewInstallSkillTool(skillStore, nil))
-		for _, t := range skill.BuiltinSubagentTools(skillStore, skillRunner, skillProfile) {
+		for _, t := range builtinSubagentTools(opts.Ablation, skillStore, skillRunner, skillProfile) {
 			reg.Add(t)
 		}
 		addSlashCommandTool(implicitSkillInvocation)

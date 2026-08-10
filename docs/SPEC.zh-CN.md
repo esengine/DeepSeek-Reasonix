@@ -243,6 +243,131 @@ Bubble Tea TUI 的 modal overlay 必须隐藏 composer；slash/`@` autocomplete 
 
 `reasonix subagent try` 使用只读 Skill runner；`reasonix subagent run` 使用常规权限与 Sandbox。`task` 支持 `profile`、`model`、`effort` 和 `write_paths`；`fleet` 在 session scheduler 上并发调度多个任务。详见[子智能体 Profile](./SUBAGENT_PROFILES.zh-CN.md)。
 
+Profile 描述的是 worker，不是一次运行。委派由五个彼此独立的概念构成：profile 说明这个 worker 怎么思考，`TaskSpec` 说明本次要什么，`CapabilityGrant` 说明本次能碰什么，`ContextCapsule` 说明从什么上下文起步，`SchedulerPolicy` 说明何时以及怎么运行。字段归属于**决定其取值**的那一方，因此 profile 可以携带能力**上界**（`allowed-tools`、`read-only`），但绝不能携带 `max_turns`、`write_paths`、重试或验证策略这类按次取值——它们由任务或调度决定。Skill frontmatter 可以继续变胖；`agent.ProfileFromSkill` 是唯一的收窄点，路由元数据（triggers、auto-use、cost、freshness）到此为止，因为它决定的是**何时**选中一个 worker，而不是它怎么思考。`internal/agent/profile_boundary_test.go` 会在任何一次拓宽时失败。
+
+### 3.11 子智能体以 host 裁决过的结论收尾
+
+写入型子智能体通过调用 `complete_subtask` 结束运行，提交 `status`、`summary`、它被要求满足的 `acceptance_criteria`（每条附上实际跑过的命令或改动的路径），以及尚未解决的 `unresolved`。纯散文仍然接受，但它不再是父智能体据以判断的接口。
+
+提交的 status 是主张，不是判决。在父智能体看到之前，host 会用自己的 receipt 核对每一条引用：`verification` 必须指向 host 记录为执行过的命令，`diff`/`files` 必须指向 host 观测到读写过的路径，而 `manual` 永远不能自证。receipt 无法背书的条目一律降级为 `unsatisfied`，含有此类条目的报告不能保持 `complete`，且降级连同原因一并打印。host 只会下调，永不上调。
+
+因此父智能体收到的顺序是：裁决后的 status 与条目、子智能体自己的散文、host 关于改了什么和跑了什么的 receipt。
+
+### 3.12 写入声明是强制执行的，不是建议
+
+`write_paths` 是调度与强制执行共用的同一个真相来源。写入型子智能体声明了显式路径后，host 会在子智能体启动前把它的工具注册表绑定到该声明：
+
+- 支持路径参数的内建写工具（`write_file`、`edit_file`、`multi_edit`、`move_file`、`notebook_edit`、`delete_range`、`delete_symbol`）拒绝声明之外的任何路径，`move_file` 的源和目标两端都检查；
+- 路径先解析到最深的存在祖先并展开 symlink 后再比较，因此 `..` 穿越和声明目录内指向外部的 symlink 都无法把写入洗白；
+- 仅当 OS sandbox 能把 `bash` 的写根重绑到该声明时才保留 `bash`，否则直接从子智能体的注册表中移除；
+- MCP 一律经 `use_capability`，它在解析阶段——任何 MCP 进程启动之前——拒绝所有未被证明为只读的目标；
+- host 无法路径化约束的写工具（自定义、未知）被丢弃；
+- 运行结束后，host 用自己记录的变更与声明比对，任何越界路径都会写进该子智能体的 host receipts 交还给父智能体。
+
+省略 `write_paths` 并不等于不受约束：该次运行会声明整个 workspace，因而与其他所有写入声明串行。那是纯调度边界——workspace 内部不拒绝任何写入，因为同一时刻不可能有另一个持有重叠声明的并发写入者。但离开 workspace 的写入仍会被记为越界。
+
+声明路径换来的是并行能力；代价是在 OS sandbox 无法强制写根的宿主上失去 `bash`。
+
+### 3.13 子智能体的上下文继承是显式的
+
+子智能体不隐式继承任何东西。它拿到的恰好是这些：
+
+| 交给子智能体的 | 来源 |
+| --- | --- |
+| 系统提示 | `DefaultTaskSystemPrompt`、`DefaultReadOnlyTaskSystemPrompt` 或 profile body——不再合成任何其他内容 |
+| workspace 根目录 | 首个 user turn 里的 `<workspace-context>` |
+| 任务文本 | user turn 本身 |
+| 完成契约 | 追加在写入型子智能体的任务 turn 后（见 §3.11） |
+| 委派提示 | 嵌套子智能体全新会话上的 `<subagent-context>` |
+| plan-mode 标记、推理/回复语言 | 运行选项（设置时） |
+| 既有 transcript | 仅通过 `continue_from` / `fork_from` |
+
+按设计**不继承**：`REASONIX.md`、`AGENTS.md`、`CLAUDE.md`、项目与全局记忆（memory queue 被关闭，子智能体也无法写入记忆）、父对话、当前 Goal、planner 输出、同级子智能体的结果。今天要让一条约束抵达子智能体，只能写进它的 profile body 或任务文本——不存在环境通道。
+
+每次运行都会在其 transcript sidecar 中记录一份 `ContextCapsule`：workspace、系统提示来源与哈希、解析后的工具范围与 schema 哈希、model 与 effort、父会话与父工具调用 id、续接的 transcript，以及一个所有字段均为 false 的 `inherited` 块。`capsuleHash` 是它的稳定标识，因此"为什么这个 reviewer 没看到那条约束"可以从记录回答，两次行为不同的运行也可以直接比对而不是猜。capsule 只保存引用与摘要——绝不复制父上下文，这正是委派保持低成本、子前缀保持可缓存的原因。
+
+### 3.14 fleet 是一张小依赖图
+
+fleet item 可以声明 `id` 与 `depends_on`。图的词汇就这么多：没有条件、没有表达式、没有动态扩散。它足以表达
+
+```
+research ──▶ implement backend ──┐
+        └──▶ implement frontend ─┴──▶ integration test ──▶ review
+```
+
+id 默认取 1 起的序号。重复 id、指向不存在任务的 id、自环、成环都会在 preflight 失败——一个注定跑不完的 fleet 绝不会开始。依赖完成后条目立即启动；彼此无序的条目仍按既有 session scheduler 并发。
+
+依赖是图的性质，不是任务的性质：它只存在于 fleet plan 中，绝不进入 `ProfileExecSpec`。这正是让 `depends_on` 不至于成为某种 workflow 语言第一个关键字的原因。
+
+图恰好在该放松的地方放松了写声明 preflight：只有**可能同时运行**的条目才需要互不重叠的 `write_paths`；`implement → review` 这对被边串行化，可以共享路径——扁平 fleet 无法表达这一点。
+
+失败处理只有一个开关。失败或被跳过的任务永远会跳过其整条下游分支——在坏输入上跑依赖项，只会换来父智能体必须丢弃的结果。除非设置 `fail_fast`，独立分支继续推进；`fail_fast` 停止的是**启动**新任务，已在运行的任务留待自然结束，因此写入者绝不会被中途丢弃。
+
+### 3.15 只有一个子智能体构造原语
+
+对外能派生子智能体的 API 很多——`task`、`read_only_task`、`fleet`、`parallel_tasks`、`run_skill`、`/<profile>`、`reasonix subagent run|try`、桌面端预览。它们背后的执行原语必须只有一个：每个入口把请求编译成 `ProfileExecSpec`，交给 `TaskTool.RunProfileSpec`——那是唯一解析深度、工具范围、权限、sandbox、写声明、调度槽位、MCP 前端、transcript 与 capsule、evidence ledger 以及完成契约的地方。
+
+这不是风格偏好。散落在多条构造路径上的安全边界，只要被漏掉一次就够了：此前预览路径构造出未受约束的文件工具、profile 编辑器保存时丢掉 `read-only`，都是某一个入口少套了一层。
+
+必须不持久化 transcript 的入口用 `ContextRequest.Ephemeral` 声明，而不是自己造一个 session——它的承诺是 spec 上的一个字段，而不是第二条构造路径。
+
+`internal/agent/spawn_boundary_test.go` 登记了仍然直接调用底层 runner 的文件，出现新的就失败。剩余条目——`internal/boot`（skill runners）、`internal/cli/review.go`、`desktop/subagents_app.go`——是已知负债，不是先例。
+
+### 3.16 MCP 并发：read-only 不等于 stateless
+
+子智能体共享一个 session Host 及其连接，各自持有独立的 `use_capability` 前端与 ledger。对 stdio 服务器而言，这意味着它们共享同一个进程——以及那个进程的会话状态。
+
+read-only 并不蕴含 stateless。浏览器类服务器会打开页面、切换标签、滚动；这些工具**完全可能诚实地声明 `readOnly`**（确实没有任何东西落到文件系统），但两个子智能体并发调用它，就会在彼此都看不见的状态上交错。写声明在这里帮不上忙——根本没有可声明的东西。
+
+因此每个已配置服务器带一条并发策略：
+
+```toml
+[[mcp.servers]]
+name = "browser"
+concurrency = "serial"   # parallel（默认）| serial
+```
+
+`serial` 表示整个 session 内该服务器同一时刻只跑一次调用，无论由哪个子智能体发起。闸门放在共享 runtime 上，因为被交错的那个进程正好就是这个作用域共享的；排队中的调用仍然响应自身的取消。名字看起来是已知有状态的服务器（browser、playwright、puppeteer、chrome、chromium、selenium）默认 `serial`；显式配置永远优先，其余一律保持 parallel，共享 Host 的性能取舍不变。
+
+这是刻意保守的第一版：**一个服务器一条策略，而非按 capability**。按工具的 `parallel_safe` / `exclusive` 提示与显式 `concurrency_key` 分组是后续细化，等真实服务器暴露出同一服务器内工具确有差异时再做。
+
+### 3.17 度量委派是否真的划算
+
+编排容易加、难证明：agent 越多 token 一定越多，而多烧的 token 本身就可能看起来像"变好了"。因此对比实验臂必须**固定模型**并读取 host 记录的事实，而不是散文。
+
+`reasonix run --json` 在既有的 token / cache / 成本 / 耗时之外，额外输出每次运行的委派计数：
+
+| 计数 | 回答什么 |
+| --- | --- |
+| `subagent_runs`、`subagent_nested_runs` | 实际跑成了什么形状（而非配置成什么） |
+| `tool_calls` − `subagent_tool_calls` | 父/子工作量切分 |
+| `subagent_mutations`、`duplicate_work_paths` | 是否有两个子智能体重做了同一个文件 |
+| `completion_reports`、`completions_prose_only` | 多少运行以可检验的主张收尾 |
+| `false_completions`、`criterion_downgrades` | host 拒绝背书的主张 |
+| `write_scope_violations` | 逃出声明的写入 |
+
+控制轴目前是**不完整**的，而这正是这些计数暴露出来的：`--ablate subagent` 移除 `task`、`read_only_task`、`fleet`、`parallel_tasks`，但运行仍可通过 `runAs=subagent` 的 profile skill 委派——实测中 `no-subagent` 臂就把一次子运行花在了 `explore` 上。因此该臂应理解为"无 task 工具委派"，而非"单 agent"；实际发生了什么要读 `subagent_runs`，不要相信臂的标签。嵌套深度由 `agent.max_subagent_depth` 控制。
+
+`false_completions` 是其中最关键的一个。它来自 §3.11 的裁决，因此度量的是 **host 拒绝背书**的主张，而不是某个评审者的观感——它是区分"fleet 更快完成了"与"fleet 声称完成了"的唯一数字。
+
+读这些数字时必须对照实测的**噪声底**：同一个臂在同一批任务上重复跑一次，逐任务 token 用量的中位差为 19%、最大 54%，而该次实验里两臂之间的总差异只有 2.5%。因此每格只跑一次，对委派得不出任何结论——效应必须先高过方差才算效应。要么预算足够的重复次数，要么只在 `subagent_runs` 显示确实发生了委派的任务上比较——那次实验里六道题只有一道发生了委派。
+
+目前实测到的结论（单一模型、四种任务形状，每种都用中立 prompt 与强制委派孪生题在**同一份工作**上对比）：三个独立模块各一行修改 3.8x tokens；24 文件搜索 1.5x tokens / 2.2x wall；36 文件三包迁移 2.6x tokens / 4.1x wall；三个真正异质的分支——理论上委派最有胜算的形状——三次重复下 2.4x tokens / 3.7x wall。成功率四种形状全部 100%；强制臂的离散度约为中立臂的两倍——委派同时买来了方差。
+
+子 agent 的 token 数字要小心解读：实测 27 个子运行平均每个 13.4 万 tokens，但那是 9.3 次模型调用上**同一份约 1.4 万上下文被反复重发**的累计值，不是 13.4 万条新内容。在约 90% 缓存命中下，一个子 agent 的真实价格平均为 **¥0.017**。真正有意义的是上面那个 2–4 倍——因为两臂用同一种口径计数；单个子 agent 的累计值不是一个可以拿来和"分支工作量"比大小的阈值。
+
+委派为何罕见，可以从同一批运行里得到答案，而答案**不是"模型权衡后拒绝"**。在 33 次可委派的运行中只有 15% 发生了委派，bash 与全部委派类调用之比是 10:1。记录下来的推理显示，模型反复权衡的是**怎么高效地读**——"that's 25 files... read them in parallel batches... I can read multiple files at once"——而这道题正是为 `explore` 设计的，委派却从未进入它的决策空间。
+
+三个原因可以解释，其中只有一个算缺陷。基础系统提示从未提及委派；所有提及都在技能索引里，且每一处都是刹车（"the heavy path... only when the task genuinely needs context-heavy work, not on weak relevance"），紧挨着的却是对内联技能的油门（"even plausibly relevant... cheap"）。`task` 工具的描述只说它做什么，从不说何时该用它。而模型本就拥有更便宜的并行——**一次往返里发起多个工具调用，不复制任何上下文**——它正是按这个在推理。
+
+考虑到实测的 2.4–4.5 倍代价，"刹车"是正确的默认值；真正的缺口是**没有任何机制能识别出委派确实划算的那少数情况**。强行委派并不能补上这个缺口：在强制 fleet 的那次运行里，父智能体在派发之前就已经在自己的推理中得出了全部三个修复，子智能体只是重新读了一遍代码去执行父智能体已经想好的编辑。**委派转移的是打字，不是思考。**
+
+有一个假设是**未被证伪、而是没测成**：委派的隔离价值应当在父智能体真正被"读过的东西"拖累时才显现。这里没能制造出这种压力——把工作区 `compact_ratio` 压到 0.5% 仍然是零次压缩，因为 agent 靠写脚本而不是靠读把会话维持得很小，而这恰恰就是它赢下每一次对比的同一个行为。要制造上下文压力，需要一道无法被脚本化绕开的题，当前语料里还没有。
+
+其中最有启发的是迁移那道题：不干预时 agent 只读了一个文件、写了个脚本，28 秒改完 108 处调用点；一旦按包切成三份，没有任何一个分支能看见那个一次解决全部三包的变换。**"看起来像并行形状"不构成"切开更便宜"的证据。**
+
+尚未度量、且刻意不伪造的一项：handoff 后返工需要整次运行的变更时序，它属于驱动实验臂的 harness，而不属于记录单次运行的仪器。
+
 ## 4. 数据类型
 
 provider 层的核心类型包括 `Role`、`Message`、`ToolCall`、`ToolSchema`、`Request` 和 streaming `Chunk`。`Message` 保留 `tool_calls`、`tool_call_id` 与 `name`；`Chunk` 区分 text、tool call、done 和 error。字段定义以英文规范及 `internal/provider` 源码为准。

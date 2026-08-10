@@ -62,7 +62,7 @@ func (l *Ledger) MergeChild(summary ChildEvidenceSummary) {
 	for _, r := range summary.Receipts {
 		// Drop nested bookkeeping that the parent already owns.
 		switch r.ToolName {
-		case "todo_write", "complete_step", "ask":
+		case "todo_write", "complete_step", "complete_subtask", "ask":
 			continue
 		}
 		l.Record(r)

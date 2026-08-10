@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -94,6 +95,21 @@ func NormalizeWritePaths(workspaceRoot string, raw []string) (WritePathSet, erro
 		out.Paths = append(out.Paths, abs)
 	}
 	return out, nil
+}
+
+type subagentWriteClaimKey struct{}
+
+// WithSubagentWriteClaim carries a child's declared write claim into its run so
+// the host can audit, after the fact, that every mutation it observed fell
+// inside the claim the scheduler parallelized on.
+func WithSubagentWriteClaim(ctx context.Context, claims WritePathSet) context.Context {
+	return context.WithValue(ctx, subagentWriteClaimKey{}, claims)
+}
+
+// SubagentWriteClaim returns the write claim of the running child, if any.
+func SubagentWriteClaim(ctx context.Context) WritePathSet {
+	claims, _ := ctx.Value(subagentWriteClaimKey{}).(WritePathSet)
+	return claims
 }
 
 // WholeWorkspaceWriteClaim claims the entire workspace for a writer that did

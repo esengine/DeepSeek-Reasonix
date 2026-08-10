@@ -786,9 +786,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 				b.WriteString("# Raw MCP tool names with per-tool call timeouts.\n")
 				fmt.Fprintf(&b, "tool_timeout_seconds = %s\n", renderIntMap(pl.ToolTimeoutSeconds))
 			}
-			if pl.AutoStart != nil {
-				fmt.Fprintf(&b, "auto_start = %v\n", *pl.AutoStart)
-			}
+			renderPluginPolicy(&b, pl)
 		}
 	}
 
@@ -1264,9 +1262,7 @@ func RenderTOMLProjectDelta(c *Config) string {
 			b.WriteString("# Raw MCP tool names with per-tool call timeouts.\n")
 			fmt.Fprintf(&b, "tool_timeout_seconds = %s\n", renderIntMap(pl.ToolTimeoutSeconds))
 		}
-		if pl.AutoStart != nil {
-			fmt.Fprintf(&b, "auto_start = %v\n", *pl.AutoStart)
-		}
+		renderPluginPolicy(&b, pl)
 		b.WriteString("\n")
 	}
 

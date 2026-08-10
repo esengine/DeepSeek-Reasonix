@@ -203,6 +203,7 @@ func renderBody(results []result) string {
 	b.WriteString(renderOutcomeProgress(results))
 	b.WriteString(renderMemoryShadow(results))
 	b.WriteString(renderCognition(results))
+	b.WriteString(renderDelegation(results))
 	b.WriteString(renderDelegationAdmission(results))
 	b.WriteString(renderMechanismLedger(results))
 	if s.unaccounted > 0 {

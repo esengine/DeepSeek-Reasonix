@@ -330,28 +330,6 @@ type TodoStepMatch struct {
 	ActiveForm string
 }
 
-// Receipt is the host-runtime record of one tool call. It stays in memory for
-// the current agent turn and is not serialized into prompts or session state.
-type Receipt struct {
-	ToolName  string          `json:"tool_name"`
-	Args      json.RawMessage `json:"args,omitempty"`
-	Profile   string          `json:"profile,omitempty"`
-	Success   bool            `json:"success"`
-	Command   string          `json:"command,omitempty"`
-	Step      string          `json:"step,omitempty"`
-	StepProof bool            `json:"step_proof,omitempty"`
-	TodoStep  *TodoStepMatch  `json:"todo_step,omitempty"`
-	Paths     []string        `json:"paths,omitempty"`
-	Read      bool            `json:"read,omitempty"`
-	Write     bool            `json:"write,omitempty"`
-	Mutation  bool            `json:"mutation,omitempty"`
-	Todos     []TodoItem      `json:"todos,omitempty"`
-	// OutputBytes is the host-observed length of the tool's (redacted, trimmed)
-	// output. Content-evidence checks require it to be non-zero so a command
-	// that printed nothing (head -n 0, >/dev/null) can never count as reading.
-	OutputBytes int `json:"output_bytes,omitempty"`
-}
-
 // BackgroundLease identifies a background job whose evidence was provisionally
 // merged into the current turn's ledger. The host commits these leases only
 // after the turn passes its delivery gates, so a failed turn leaves the job's
