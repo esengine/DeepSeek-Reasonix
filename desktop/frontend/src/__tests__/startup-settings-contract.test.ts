@@ -27,7 +27,10 @@ const here = dirname(fileURLToPath(import.meta.url));
 const appSource = readFileSync(resolve(here, "../App.tsx"), "utf8");
 const bridgeSource = readFileSync(resolve(here, "../lib/bridge.ts"), "utf8");
 const settingsSource = readFileSync(resolve(here, "../components/SettingsPanel.tsx"), "utf8");
-const stylesSource = readFileSync(resolve(here, "../styles.css"), "utf8") + readFileSync(resolve(here, "../components/ProviderAccessSettings.css"), "utf8");
+const settingsNavigationSource = readFileSync(resolve(here, "../components/SettingsNavigation.tsx"), "utf8");
+const stylesSource = readFileSync(resolve(here, "../styles.css"), "utf8") +
+  readFileSync(resolve(here, "../components/ProviderAccessSettings.css"), "utf8") +
+  readFileSync(resolve(here, "../components/SettingsPanel.css"), "utf8");
 const enLocaleSource = readFileSync(resolve(here, "../locales/en.ts"), "utf8");
 const zhLocaleSource = readFileSync(resolve(here, "../locales/zh.ts"), "utf8");
 const zhTWLocaleSource = readFileSync(resolve(here, "../locales/zh-TW.ts"), "utf8");
@@ -41,6 +44,14 @@ ok(
 ok(
   appSource.includes("app.DesktopStartupSettings()"),
   "App loads startup chrome preferences through the lightweight settings call",
+);
+ok(
+  appSource.includes('hydrateReasoningDisplayMode("auto", false);'),
+  "startup failure preserves legacy reasoning-display migration precedence",
+);
+ok(
+  bridgeSource.includes('displayMode: "standard", reasoningDisplayMode: "auto", reasoningDisplayModeExplicit: false'),
+  "browser startup defaults match the classic standard/live-follow experience",
 );
 ok(
   !/const\s+reloadSidebarImConnections[\s\S]*?app\.Settings\(\)[\s\S]*?\}, \[t\]\);/.test(appSource),
@@ -106,19 +117,70 @@ ok(
   "GLM reasoning protocol is localized in every supported locale",
 );
 ok(
-  settingsSource.includes('settings.reasoningSummary') &&
-    settingsSource.includes('settings.reasoningSummary.on') &&
-    settingsSource.includes('setReasoningSummaryEnabled(enabled)'),
-  "General settings exposes live reasoning-summary options",
+  settingsSource.includes('settings.general.sectionConversation') &&
+    settingsSource.includes('settings.displayMode') &&
+    settingsSource.includes('["standard", "compact"]') &&
+    settingsSource.includes('settings.reasoningDisplay') &&
+    settingsSource.includes('["hidden", "summary", "auto"]') &&
+    settingsSource.includes('settings.processFold') &&
+    settingsSource.includes('["auto", "expanded"]') &&
+    settingsSource.includes('setProcessFoldPreference(pref)') &&
+    settingsSource.includes('app.SetReasoningDisplayMode(mode)'),
+  "General settings presents transcript density, reasoning display, and completed-work folding in one conversation section",
 );
 ok(
   [enLocaleSource, zhLocaleSource, zhTWLocaleSource].every((source) =>
-    source.includes('"settings.reasoningSummary"') &&
-    source.includes('"settings.reasoningSummaryHint"') &&
-    source.includes('"settings.reasoningSummary.on"') &&
-    source.includes('"settings.reasoningSummary.off"'),
+    source.includes('"settings.sessionContentDisplay"') &&
+    source.includes('"settings.sessionContentDisplayHint"') &&
+    source.includes('"settings.displayMode"') &&
+    source.includes('"settings.reasoningDisplay"') &&
+    source.includes('"settings.reasoningDisplay.hidden"') &&
+    source.includes('"settings.reasoningDisplay.summary"') &&
+    source.includes('"settings.reasoningDisplay.auto"') &&
+    source.includes('"settings.processFold"'),
   ),
-  "reasoning-summary switch labels are localized in every supported locale",
+  "conversation-content display group labels are localized in every supported locale",
+);
+ok(
+  stylesSource.includes(".settings-page--general .settings-section") &&
+    stylesSource.includes("grid-template-columns: minmax(260px, 1fr) max-content") &&
+    stylesSource.includes(".settings-field__copy--icon") &&
+    stylesSource.includes("@media (max-width: 900px)"),
+  "General controls use the selected flat responsive section layout",
+);
+ok(
+  settingsNavigationSource.includes('settings.searchPlaceholder') &&
+    settingsNavigationSource.includes('SETTINGS_TAB_GROUPS') &&
+    settingsNavigationSource.includes('settings-center__navgroup') &&
+    settingsNavigationSource.includes('settingsTabIcon(id)') &&
+    [enLocaleSource, zhLocaleSource, zhTWLocaleSource].every((source) =>
+      source.includes('"settings.navGroup.preferences"') &&
+      source.includes('"settings.searchNoResults"'),
+    ),
+  "settings navigation provides searchable localized groups and visible category icons",
+);
+ok(
+  /function settingsTabMeta[\s\S]*?case "skills":\s+return t\("settings\.tabSub\.skills"\)/.test(settingsSource) &&
+    enLocaleSource.includes('"settings.tab.skills": "Agent Skills"') &&
+    enLocaleSource.includes('"settings.tabSub.skills": "Reusable instructions, tools & workflows"') &&
+    zhLocaleSource.includes('"settings.tab.skills": "Agent Skills"') &&
+    zhLocaleSource.includes('"settings.tabSub.skills": "可复用的指令、工具与工作流"') &&
+    zhTWLocaleSource.includes('"settings.tab.skills": "Agent Skills"') &&
+    zhTWLocaleSource.includes('"settings.tabSub.skills": "可重複使用的指令、工具與工作流程"'),
+  "Agent Skills navigation uses the dedicated reusable-workflow description in every supported locale",
+);
+ok(
+  [settingsSource, enLocaleSource, zhLocaleSource, zhTWLocaleSource, stylesSource].every((source) =>
+    !source.includes("settings.workProcess") &&
+    !source.includes("settings-work-process"),
+  ),
+  "the superseded work-process-only visual group does not return",
+);
+ok(
+  [settingsSource, enLocaleSource, zhLocaleSource, zhTWLocaleSource].every((source) =>
+    !source.includes("settings.reasoningSummary"),
+  ),
+  "the retired standalone reasoning-summary setting does not return",
 );
 ok(
   !/mockPreset\("deepseek-anthropic",/.test(bridgeSource),

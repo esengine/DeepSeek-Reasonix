@@ -195,22 +195,50 @@ Call the advertised method while `session/prompt` is active:
 }
 ```
 
-A successful `{}` result means the active turn accepted the guidance. Reasonix
-adds it as a user message before the next safe model-call boundary, without
-cancelling the turn or consuming an extra tool-step budget. The message is
-persisted in normal history; transcript replay shows the original user text,
-not Reasonix's internal steer marker.
+A persistent session returns an item id and disposition:
+
+```json
+{"itemId":"inbox-item-id","disposition":"steer_accepted"}
+```
+
+Reasonix durably commits the guidance before returning. `steer_accepted` means
+the active turn accepted it; `queued_followup` means that admission lost a race
+or no turn was active, so the same item remains queued for a later turn. A
+pathless compatibility session may omit `itemId` and still returns
+`steer_accepted`. Applied guidance is persisted in normal history; transcript
+replay shows the original user text, not Reasonix's internal steer marker.
 
 | Condition | JSON-RPC result |
 | --- | --- |
-| Active prompt accepted the guidance | `{}` |
+| Active prompt accepted durable guidance | `{"itemId":"...","disposition":"steer_accepted"}` |
+| Guidance persisted but active admission was rejected | `{"itemId":"...","disposition":"queued_followup"}` |
 | Unknown session or empty prompt | `-32602 InvalidParams` |
-| Session has no active prompt | `-32600 InvalidRequest` |
+| Pathless compatibility session has no active prompt | `-32600 InvalidRequest` |
 | Client calls `session/steer` | `-32601 MethodNotFound` |
 
-On `InvalidRequest`, the guidance was not queued. A client may wait for the
-active prompt to finish and offer the text as a normal new prompt, but it should
-not silently report the failed steer as accepted.
+On `InvalidRequest`, the compatibility session did not queue the guidance.
+
+## Durable session inbox extension
+
+Discover the versioned queue at
+`agentCapabilities._meta["reasonix.io"].sessionInbox`. Schema version 1
+advertises method names in its `methods` map; clients must use those advertised
+names rather than constructing vendor method strings.
+
+| Key | Purpose | Main parameters |
+| --- | --- | --- |
+| `enqueue` | Persist a follow-up or steer | `sessionId`, `text`, optional `intent`, `idempotencyKey` |
+| `list` | Read metadata, capacity, pause and recovery state | `sessionId` |
+| `get` | Read one full envelope on demand | `sessionId`, `itemId` |
+| `update` / `delete` | Edit or delete pending work | `sessionId`, `itemId` |
+| `move` | Reorder pending work | `sessionId`, `itemId`, zero-based `toIndex` |
+| `setPaused` | Pause or resume dispatch | `sessionId`, `paused` |
+| `retry` / `refresh` | Retry uncertain work or re-freeze references | `sessionId`, `itemId` |
+
+`enqueue` returns `itemId`, `disposition`, `position`, `paused`, and
+`idempotent`. List responses contain previews and byte counts, never prompt
+bodies. A recovered inbox is paused; clients should let users inspect it before
+calling `setPaused` with `false`.
 
 ## Runtime reload and extension surface
 
@@ -242,8 +270,8 @@ any other slash command.
 | --- | --- | --- |
 | Existing ACP v1 methods | Their names and response shapes are unchanged. | Compatible |
 | Capability `_meta` | Unknown metadata may be ignored. | Compatible |
-| Persisted transcripts | No new persisted schema is required. | Compatible |
-| CLI, Desktop, and Bot steering | Their existing idle fallback remains unchanged. | Compatible |
+| Persisted transcripts | Transcript schema is unchanged; the inbox is a versioned sidecar. | Compatible |
+| CLI, Desktop, and Bot steering | Rejected steers remain durable follow-ups. | Compatible |
 
 Steering appends a user-requested message to normal conversation history. It
 does not change the system prompt, tool schemas, tool order, or other stable
@@ -260,7 +288,7 @@ earlier prefix remains reusable.
    a prompt is running.
 5. Show steer UI only when the Reasonix capability is advertised and a prompt
    is active.
-6. Treat a successful steer response as queued guidance, not immediate model
-   completion.
+6. Branch on the steer `disposition`; both accepted steer and queued follow-up
+   are durable, but only the former can affect the active turn.
 7. Use `session/close` for resource cleanup and `session/delete` only when the
    user intends to remove persisted history.

@@ -6,19 +6,23 @@ import (
 	"reasonix/internal/completion"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
+	"reasonix/internal/plancontract"
 	"reasonix/internal/taskcontract"
 	"reasonix/internal/taskintent"
 )
 
 // buildShadowContract replays a finished turn's receipts into a task
-// contract that observed everything and decided nothing: mutation-shaped
-// asks get the atomic contract, the latest todo list becomes the
-// requirement set, and the ledger drives evidence and epochs. Pure function
-// so the shadow is testable without an Agent.
-func buildShadowContract(input string, receipts []evidence.Receipt) *taskcontract.Contract {
+// contract that observed everything and decided nothing. An approved plan is
+// the contract's source of truth when there is one — its acceptance criteria
+// are what the work agreed to, and todo titles are only a restatement of the
+// steps. Without a plan the todo list stands in, as it always did.
+func buildShadowContract(input string, receipts []evidence.Receipt, plan *plancontract.Plan) *taskcontract.Contract {
 	var c *taskcontract.Contract
-	switch taskintent.Classify(input) {
-	case taskintent.Mutation, taskintent.PersistentAction:
+	switch {
+	case plan != nil:
+		c = taskcontract.FromPlan(input, planFacts(*plan))
+	case taskintent.Classify(input) == taskintent.Mutation,
+		taskintent.Classify(input) == taskintent.PersistentAction:
 		c = taskcontract.Atomic(input)
 	default:
 		c = taskcontract.New(input)
@@ -29,8 +33,12 @@ func buildShadowContract(input string, receipts []evidence.Receipt) *taskcontrac
 			todos = r.Todos
 		}
 	}
-	for i, todo := range todos {
-		c.AddRequirement(fmt.Sprintf("t%d", i+1), todo.Content, true)
+	// Todo titles restate the plan's steps, so they only become requirements
+	// when no plan supplied the real acceptance criteria.
+	if plan == nil {
+		for i, todo := range todos {
+			c.AddRequirement(fmt.Sprintf("t%d", i+1), todo.Content, true)
+		}
 	}
 	for _, r := range receipts {
 		c.Observe(r)
@@ -84,14 +92,36 @@ func intentName(i taskintent.Intent) string {
 	}
 }
 
-// emitTurnShadows records the end-of-turn shadow observations from one replay
-// of the turn's receipts: the contract's state, and the completion report
-// derived from it. Both observe; neither decides.
+// LiveContract is the contract as it stands right now: the same pure replay the
+// turn ends with, run against the receipts recorded so far. Rebuilding beats
+// keeping incremental state because one code path serves the per-round view and
+// the end-of-turn record, so the two can never disagree.
+func (a *Agent) LiveContract() *taskcontract.Contract {
+	if a == nil || a.evidence == nil {
+		return nil
+	}
+	return buildShadowContract(a.turnInput, a.evidence.Receipts(), a.planContractSnapshot())
+}
+
+// observeContractRound records the contract after one tool round, so a
+// trajectory carries how the evidence graph filled in rather than only where it
+// landed. It observes; it decides nothing.
+func (a *Agent) observeContractRound() {
+	c := a.LiveContract()
+	if c == nil || (len(c.Requirements) == 0 && len(c.Checks) == 0) {
+		return
+	}
+	event.RecordContractShadow(a.sink, contractShadowAudit(c))
+}
+
+// emitTurnShadows records the end-of-turn shadow observations: the contract's
+// state, and the completion report derived from it. Both observe; neither
+// decides.
 func (a *Agent) emitTurnShadows(input string) {
 	if a.evidence == nil {
 		return
 	}
-	c := buildShadowContract(input, a.evidence.Receipts())
+	c := buildShadowContract(input, a.evidence.Receipts(), a.planContractSnapshot())
 	event.RecordContractShadow(a.sink, contractShadowAudit(c))
 	rep := completion.Build(c, a.evidence)
 	a.completion = &rep
