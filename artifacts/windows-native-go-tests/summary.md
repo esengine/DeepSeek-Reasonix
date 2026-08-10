@@ -30,3 +30,7 @@
 - Desktop frontend：初始 JavaScript、最大 chunk、CSS 与本地化 chunk 的 gzip/raw 性能预算全部通过。
 
 本摘要记录产品代码基线的首次成功运行。提交本摘要后产生的最终重复验证链接记录在对应草稿 PR 中，以避免为更新 CI 链接持续制造新的证据提交。
+
+## 重复验证说明
+
+证据提交触发的第二次运行 [#31403367840](https://github.com/CharlesReveries/DeepSeek-Reasonix/actions/runs/31403367840) 再次通过 Root、SDK、Desktop 前端准备及绝大多数 Desktop 测试，但暴露 `TestAutosaveFailureRetriesAndRecoversOnNextTurnDone` 的 Windows 时序假失败：测试等待仅 2 秒，短于生产元数据锁单次 5 秒等待窗口。分支随后只扩展该故障恢复断言的等待范围，普通自动保存测试仍保留 2 秒门槛；最终修复验证以草稿 PR 中记录的最新 run 为准。

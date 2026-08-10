@@ -38,7 +38,12 @@ func controllerWithContent(t *testing.T, path string) *control.Controller {
 
 func waitForFile(t *testing.T, path, want string) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	waitForFileWithin(t, path, want, 2*time.Second)
+}
+
+func waitForFileWithin(t *testing.T, path, want string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if b, err := os.ReadFile(path); err == nil && strings.Contains(string(b), want) {
 			return
@@ -160,8 +165,13 @@ func TestAutosaveFailureRetriesAndRecoversOnNextTurnDone(t *testing.T) {
 		t.Fatalf("remove blocked dir: %v", err)
 	}
 	tab.sink.Emit(event.Event{Kind: event.TurnDone})
-	waitForFile(t, path, "remember this turn")
-	waitForAutosaveIdle(t, tab)
+	// A Windows antivirus or indexer can briefly retain the branch-meta
+	// sidecar after the deliberately failed first save. Production metadata
+	// lock acquisition allows five seconds per attempt, so the recovery
+	// assertion must cover that retry envelope instead of racing it at two
+	// seconds. The ordinary autosave tests keep the short default above.
+	waitForFileWithin(t, path, "remember this turn", 20*time.Second)
+	waitForAutosaveIdleWithin(t, tab, 20*time.Second)
 
 	tab.saveMu.Lock()
 	failures = tab.saveFailures
