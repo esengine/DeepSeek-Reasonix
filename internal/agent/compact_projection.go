@@ -189,7 +189,7 @@ func (a *Agent) compressVisibleRange(
 
 	res, err := a.foldToSummary(ctx, prepared.fold, prepared.instructions)
 	summary := res.Text
-	tele := compactionTelemetryFromSummary(trigger, a.CacheState(), result.SourceTokens, res)
+	tele := compactionTelemetryFromSummary(trigger, a.CacheState(), result.SourceTokens, res, a.tokPerChar())
 	if err != nil {
 		tele.Error = err.Error()
 		a.emitCompactionTelemetry(tele)
@@ -205,7 +205,7 @@ func (a *Agent) compressVisibleRange(
 	}
 
 	projection := buildVisibleCompressionProjection(snap.visible, plan, summary)
-	projectionTokens := estimateMessagesTokens(a.providerProjectionMessages(projection))
+	projectionTokens := a.estimatedPromptTokens(a.providerProjectionMessages(projection))
 	tele.ProjectionTokens = projectionTokens
 	result.Messages = len(plan.fold)
 	result.ProjectionTokens = projectionTokens
@@ -255,7 +255,7 @@ func (a *Agent) explicitCompressionSnapshotCurrent(snap explicitCompressionSnaps
 }
 
 func (a *Agent) planVisibleCompression(snap explicitCompressionSnapshot, direction string, anchorIndex int, preview string) (visibleCompressionPlan, bool) {
-	sourceTokens := estimateMessagesTokens(snap.visible)
+	sourceTokens := a.estimatedPromptTokens(snap.visible)
 	plan := visibleCompressionPlan{result: tool.CompressResult{
 		Status:           "noop",
 		Direction:        direction,
@@ -344,13 +344,14 @@ func buildVisibleCompressionProjection(visible []provider.Message, plan visibleC
 	return provider.ModelMessages(projection)
 }
 
-func compactionTelemetryFromSummary(trigger, cacheState string, sourceTokens int, res foldSummary) CompactionTelemetry {
+func compactionTelemetryFromSummary(trigger, cacheState string, sourceTokens int, res foldSummary, tpc float64) CompactionTelemetry {
 	tele := CompactionTelemetry{
 		Trigger: trigger, CacheState: cacheState, Mode: res.Mode,
 		SourceTokens:      sourceTokens,
 		ProviderRequestID: res.RequestID,
 		FoldTokens:        res.FoldTokens,
-		Spans:             1, // one application-layer summary request per transaction
+		Spans:             res.Spans,
+		TokPerChar:        tpc,
 	}
 	usage := res.Usage
 	if usage == nil {
@@ -378,7 +379,7 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 // stable prefix + one structured digest + recent verbatim tail.
 // The canonical transcript is never rewritten. CompactionNoop means nothing
 // was foldable; callers at physical overflow must treat that as hard failure.
-func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions string, force bool) (CompactionOutcome, error) {
+func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions string, force bool) (outcome CompactionOutcome, err error) {
 	a.compactionRunMu.Lock()
 	defer a.compactionRunMu.Unlock()
 	activeTurn := a.activeTurnCreatedAt.Load()
@@ -386,6 +387,16 @@ func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions s
 		return CompactionNoop, nil
 	}
 	canonical, transcriptVersion := a.session.snapshotMessagesVersion()
+	// Silent exits (Noop/aborted) must still land in the stats file: a fold
+	// that found nothing is the "compacted but nothing happened" case that
+	// was invisible (user-observed 2026-08-09). Success paths emit inside.
+	emitted := false
+	emit := func(t CompactionTelemetry) { a.emitCompactionTelemetry(t); emitted = true }
+	defer func() {
+		if outcome == CompactionNoop && !emitted {
+			emit(a.silentCompactionTelemetry(trigger, canonical, err))
+		}
+	}()
 	a.compactionMu.Lock()
 	stateSnapshot := a.compactionState
 	startProjectionVersion := a.compactionState.Projection.ProjectionVersion
@@ -418,7 +429,6 @@ func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions s
 			instructions += hookInstr
 		}
 	}
-	var err error
 	fold, instructions, err = a.interceptCompactionPrepare(ctx, fold, instructions)
 	if err != nil {
 		a.emitCompactionAborted(trigger)
@@ -432,17 +442,17 @@ func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions s
 	sourceTokens := a.estimatedPromptTokens(msgs)
 	res, err := a.foldToSummary(ctx, fold, instructions)
 	summary := res.Text
-	tele := compactionTelemetryFromSummary(trigger, a.CacheState(), sourceTokens, res)
+	tele := compactionTelemetryFromSummary(trigger, a.CacheState(), sourceTokens, res, a.tokPerChar())
 	if err != nil {
 		tele.Error = err.Error()
-		a.emitCompactionTelemetry(tele)
+		emit(tele)
 		a.emitCompactionAborted(trigger)
 		return CompactionNoop, err
 	}
 	summary, err = a.interceptCompactionComplete(ctx, summary)
 	if err != nil {
 		tele.Error = err.Error()
-		a.emitCompactionTelemetry(tele)
+		emit(tele)
 		a.emitCompactionAborted(trigger)
 		return CompactionNoop, err
 	}
@@ -451,7 +461,8 @@ func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions s
 	projTokens := a.estimatedPromptTokens(projMsgs)
 	fixedPrefixTokens = a.estimatedPromptTokens(msgs[:head])
 	tele.ProjectionTokens = projTokens
-	a.emitCompactionTelemetry(tele)
+	tele.Status = CompactionStatusInstalled
+	emit(tele)
 	if err := a.acceptCheckpointCandidate(trigger, force, sourceTokens, projTokens, fixedPrefixTokens); err != nil {
 		a.emitCompactionAborted(trigger)
 		return CompactionNoop, err

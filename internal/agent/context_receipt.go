@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"reasonix/internal/event"
@@ -123,17 +122,23 @@ func (a *Agent) recordContextMaintenanceOutcome(inputHash, trigger, action, stat
 }
 
 func (a *Agent) emitCompactionTelemetry(t CompactionTelemetry) {
-	detail := fmt.Sprintf("trigger=%s mode=%s cache=%s src=%d fold=%d spans=%d proj=%d in=%d out=%d hit=%d miss=%d write=%d reqs=%d",
-		t.Trigger, t.Mode, t.CacheState, t.SourceTokens, t.FoldTokens, t.Spans, t.ProjectionTokens,
-		t.InputTokens, t.OutputTokens, t.CacheHitTokens, t.CacheMissTokens, t.CacheWriteTokens, t.RequestCount)
+	detail := fmt.Sprintf("trigger=%s mode=%s status=%s cache=%s src=%d fold=%d spans=%d proj=%d in=%d out=%d hit=%d miss=%d write=%d reqs=%d tpc=%.3f",
+		t.Trigger, t.Mode, t.Status, t.CacheState, t.SourceTokens, t.FoldTokens, t.Spans, t.ProjectionTokens,
+		t.InputTokens, t.OutputTokens, t.CacheHitTokens, t.CacheMissTokens, t.CacheWriteTokens, t.RequestCount, t.TokPerChar)
 	if t.ProviderRequestID != "" {
 		detail += " provider_request_id=" + t.ProviderRequestID
 	}
+	level := event.LevelInfo
+	text := "compaction telemetry"
 	if t.Error != "" {
-		slog.Warn("agent: compaction failed", "detail", detail+" err_type="+t.Error)
-		return
+		// Errors must reach the stats file too: the Recorder persists the
+		// "compaction failed" notice as a row with err_type, so a failed pass
+		// is diagnosable from stats alone.
+		level = event.LevelWarn
+		text = "compaction failed"
+		detail += " err_type=" + t.Error
 	}
-	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "compaction telemetry", Detail: detail})
+	a.sink.Emit(event.Event{Kind: event.Notice, Level: level, Text: text, Detail: detail})
 }
 
 func (a *Agent) emitCompactionAborted(trigger string) {

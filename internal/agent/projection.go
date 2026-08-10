@@ -33,6 +33,7 @@ const (
 
 // Compaction trigger labels.
 const (
+	CompactionTriggerAuto     = "auto"
 	CompactionTriggerPressure = "pressure"
 	CompactionTriggerManual   = "manual"
 	CompactionTriggerOverflow = "overflow"
@@ -46,6 +47,13 @@ const (
 	CompactionModeSummarized = "summarized"
 	CompactionModeDegraded   = "degraded"
 	CompactionModeSnip       = "snip"
+)
+
+// Compaction telemetry status labels.
+const (
+	CompactionStatusInstalled = "installed"
+	CompactionStatusNoop      = "noop"
+	CompactionStatusAborted   = "aborted"
 )
 
 // ContextProjection is the model-visible view of a session. The canonical
@@ -134,9 +142,15 @@ type CompactionState struct {
 // CompactionTelemetry is the structured observability record for one
 // compaction attempt. Sensitive transcript content is intentionally omitted.
 type CompactionTelemetry struct {
-	Trigger           string `json:"trigger"`
-	CacheState        string `json:"cache_state"`
-	Mode              string `json:"mode"`
+	Trigger    string  `json:"trigger"`
+	CacheState string  `json:"cache_state"`
+	Mode       string  `json:"mode"`
+	Status     string  `json:"status,omitempty"` // installed | noop | aborted; "" on legacy paths
+	TokPerChar float64 `json:"tpc,omitempty"`    // usage-calibrated token/char at fold time; 0 until calibrated
+	// Results/SavedChars describe a prune/snip pass (mode=snip): how many stale
+	// tool results were elided and roughly how many characters were saved.
+	Results           int    `json:"results,omitempty"`
+	SavedChars        int    `json:"saved_chars,omitempty"`
 	Native            bool   `json:"native"`
 	SourceTokens      int    `json:"source_tokens"`
 	FoldTokens        int    `json:"fold_tokens"` // summarizer input after any shortening

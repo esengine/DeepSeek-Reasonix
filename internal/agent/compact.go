@@ -662,3 +662,23 @@ func summarizeToolArgs(args string) string {
 	sort.Strings(keys)
 	return fmt.Sprintf("{%s} (%d keys)", strings.Join(keys, ", "), len(parsed))
 }
+
+// silentCompactionTelemetry builds the telemetry record for a compaction pass
+// that folded nothing: status distinguishes "nothing to fold" (noop) from a
+// pass aborted by an error, so every exit lands in the stats file.
+func (a *Agent) silentCompactionTelemetry(trigger string, canonical []provider.Message, err error) CompactionTelemetry {
+	tele := CompactionTelemetry{
+		Trigger:      trigger,
+		CacheState:   a.CacheState(),
+		Mode:         CompactionModeSummarized,
+		SourceTokens: a.estimatedPromptTokens(canonical),
+		TokPerChar:   a.tokPerChar(),
+	}
+	if err != nil {
+		tele.Status = CompactionStatusAborted
+		tele.Error = err.Error()
+	} else {
+		tele.Status = CompactionStatusNoop
+	}
+	return tele
+}
