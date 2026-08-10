@@ -2,6 +2,456 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.22.0",
+      "date": "2026-08-10",
+      "channel": "stable",
+      "title": {
+        "en": "Reasonix 1.22.0",
+        "zh": "Reasonix 1.22.0"
+      },
+      "summary": {
+        "en": "Desktop session durability, context maintenance, and workspace improvements, plus CLI web handoff and provider output budget fixes.",
+        "zh": "桌面端会话持久性、上下文维护和工作区改进，以及 CLI Web 交接和提供商输出预算修复。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "CLI Web Handoff Guide",
+            "zh": "CLI Web 交接指南"
+          },
+          "body": {
+            "en": "Use `reasonix web` to start a local web interface and `/web` to hand off an active CLI session to a browser.",
+            "zh": "使用 `reasonix web` 启动本地 Web 界面，使用 `/web` 将活动 CLI 会话交接至浏览器。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/24be6e684f022166071ddc44736d86de6254f239/docs/GUIDE.md"
+        },
+        {
+          "title": {
+            "en": "Plugin Package Specification",
+            "zh": "插件包规范"
+          },
+          "body": {
+            "en": "Native v2 plugins now require explicit resource declarations in `reasonix-plugin.json`.",
+            "zh": "原生 v2 插件现在需要在 `reasonix-plugin.json` 中显式声明资源。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/24be6e684f022166071ddc44736d86de6254f239/docs/PLUGIN_PACKAGES.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Desktop topic archive no longer hangs",
+            "zh": "桌面端话题归档不再卡死"
+          },
+          "body": {
+            "en": "Archiving a topic now returns promptly and shows per-topic progress, preventing silent failures and UI freezes.",
+            "zh": "归档话题现在会立即返回并显示每个话题的进度，防止静默失败和界面冻结。"
+          },
+          "refs": [
+            8084
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Session sidecars are now durable",
+            "zh": "会话 sidecar 文件现已持久化"
+          },
+          "body": {
+            "en": "Title and display sidecars use atomic writes with fsync and cross-process locking to prevent data loss on crash.",
+            "zh": "标题和显示 sidecar 文件使用带 fsync 的原子写入和跨进程锁，防止崩溃时数据丢失。"
+          },
+          "refs": [
+            8051
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Context maintenance is now projection-idempotent",
+            "zh": "上下文维护现已投影幂等"
+          },
+          "body": {
+            "en": "Automatic context cleanup no longer repeatedly processes the same tool results, and summary transactions are atomic.",
+            "zh": "自动上下文清理不再重复处理相同的工具结果，摘要事务现在是原子的。"
+          },
+          "refs": [
+            8109
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "CLI web handoff",
+            "zh": "CLI Web 会话交接"
+          },
+          "body": {
+            "en": "Use `reasonix web` to start a local web interface and `/web` to hand off an active CLI session to a browser.",
+            "zh": "使用 `reasonix web` 启动本地 Web 界面，使用 `/web` 将活动 CLI 会话交接至浏览器。"
+          },
+          "refs": [
+            8059
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "DeepSeek output budget overflow",
+            "zh": "DeepSeek 输出预算溢出"
+          },
+          "body": {
+            "en": "Requests near the context window limit now clip the output budget to avoid HTTP 400 errors.",
+            "zh": "接近上下文窗口限制的请求现在会裁剪输出预算，避免 HTTP 400 错误。"
+          },
+          "refs": [
+            8057
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Status bar TPS updates after each request",
+            "zh": "状态栏 TPS 每次请求后更新"
+          },
+          "body": {
+            "en": "Throughput in the status bar now refreshes after every provider request instead of only at turn completion.",
+            "zh": "状态栏中的吞吐量现在在每次提供商请求后刷新，而不仅仅在回合完成时。"
+          },
+          "refs": [
+            8099
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Workspace path copy actions",
+            "zh": "工作区路径复制操作"
+          },
+          "body": {
+            "en": "Right-click a file or folder in the workspace tree to copy its relative or absolute path.",
+            "zh": "在工作区树中右键单击文件或文件夹，即可复制其相对或绝对路径。"
+          },
+          "refs": [
+            8076
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Legacy Windows shortcut repair",
+            "zh": "修复旧版 Windows 快捷方式"
+          },
+          "body": {
+            "en": "Shortcuts from older versions now self-heal their icon and target paths after migration to the versioned layout.",
+            "zh": "旧版本的快捷方式现在在迁移到版本化布局后会自动修复其图标和目标路径。"
+          },
+          "refs": [
+            8073
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Composer spellcheck disabled",
+            "zh": "禁用输入框拼写检查"
+          },
+          "body": {
+            "en": "Browser spellcheck, autocorrect, and autocapitalization are now disabled in the composer to avoid misleading underlines.",
+            "zh": "输入框中现已禁用浏览器拼写检查、自动更正和自动大写，以避免误导性下划线。"
+          },
+          "refs": [
+            8065
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Compact idle SSH status",
+            "zh": "精简空闲 SSH 状态栏"
+          },
+          "body": {
+            "en": "Disconnected SSH status now shows a compact label or icon, saving space while keeping full status accessible.",
+            "zh": "断开连接的 SSH 状态现在显示精简标签或图标，节省空间同时保持完整状态可访问。"
+          },
+          "refs": [
+            8088
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Native v2 plugin resources are now explicit",
+            "zh": "原生 v2 插件资源改为显式声明"
+          },
+          "body": {
+            "en": "Native v2 plugins no longer implicitly import Claude compatibility resources; all resources must be declared in the manifest.",
+            "zh": "原生 v2 插件不再隐式导入 Claude 兼容资源；所有资源必须在清单中声明。"
+          },
+          "refs": [
+            8077
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Core data-safety paths hardened",
+            "zh": "加固核心数据安全路径"
+          },
+          "body": {
+            "en": "Shell output is bounded, corrupted sessions remain visible, and metadata backfill is race-safe.",
+            "zh": "Shell 输出受到限制，损坏的会话保持可见，元数据回填是竞态安全的。"
+          },
+          "refs": [
+            8053
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "External opener for Global workspaces",
+            "zh": "为 Global 工作区启用外部打开按钮"
+          },
+          "body": {
+            "en": "Global tabs with a valid local workspace now show the external opener button.",
+            "zh": "具有有效本地工作区的 Global 标签页现在显示外部打开按钮。"
+          },
+          "refs": [
+            8087
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Wails CLI and library version unified",
+            "zh": "统一 Wails CLI 与依赖版本锁定"
+          },
+          "body": {
+            "en": "A single `.wails-version` pin now ensures consistent Wails toolchain across CI, builds, and contributor setups.",
+            "zh": "现在通过单一的 `.wails-version` 锁定文件确保 CI、构建和贡献者环境中的 Wails 工具链一致。"
+          },
+          "refs": [
+            8069
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "CLI web handoff",
+              "zh": "CLI Web 会话交接"
+            },
+            "body": {
+              "en": "Added `reasonix web` command and `/web` slash command to hand off CLI sessions to a browser.",
+              "zh": "新增 `reasonix web` 命令和 `/web` 斜杠命令，用于将 CLI 会话交接至浏览器。"
+            },
+            "refs": [
+              8059
+            ]
+          },
+          {
+            "title": {
+              "en": "Workspace path copy actions",
+              "zh": "工作区路径复制操作"
+            },
+            "body": {
+              "en": "Added Copy relative path and Copy absolute path to the workspace file-tree context menu.",
+              "zh": "在工作区文件树右键菜单中新增“复制相对路径”和“复制绝对路径”。"
+            },
+            "refs": [
+              8076
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Session sidecar durability",
+              "zh": "会话 sidecar 持久化"
+            },
+            "body": {
+              "en": "Title and display sidecars now use atomic writes with fsync and cross-process locking.",
+              "zh": "标题和显示 sidecar 文件现在使用带 fsync 的原子写入和跨进程锁。"
+            },
+            "refs": [
+              8051
+            ]
+          },
+          {
+            "title": {
+              "en": "Status bar TPS refresh",
+              "zh": "状态栏 TPS 刷新"
+            },
+            "body": {
+              "en": "Throughput now updates after each provider request instead of only at turn completion.",
+              "zh": "吞吐量现在在每次提供商请求后更新，而不仅仅在回合完成时。"
+            },
+            "refs": [
+              8099
+            ]
+          },
+          {
+            "title": {
+              "en": "Compact idle SSH status",
+              "zh": "精简空闲 SSH 状态栏"
+            },
+            "body": {
+              "en": "Disconnected SSH status shows a compact label or icon to save space.",
+              "zh": "断开连接的 SSH 状态显示精简标签或图标以节省空间。"
+            },
+            "refs": [
+              8088
+            ]
+          },
+          {
+            "title": {
+              "en": "Core data-safety hardening",
+              "zh": "核心数据安全加固"
+            },
+            "body": {
+              "en": "Bounded shell output, visible corrupted sessions, and race-safe metadata backfill.",
+              "zh": "限制 Shell 输出、损坏会话可见以及竞态安全的元数据回填。"
+            },
+            "refs": [
+              8053
+            ]
+          },
+          {
+            "title": {
+              "en": "Wails version unification",
+              "zh": "Wails 版本统一"
+            },
+            "body": {
+              "en": "A single `.wails-version` pin ensures consistent Wails toolchain across environments.",
+              "zh": "通过单一的 `.wails-version` 锁定文件确保各环境中 Wails 工具链一致。"
+            },
+            "refs": [
+              8069
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Topic archive hang",
+              "zh": "话题归档卡死"
+            },
+            "body": {
+              "en": "Archiving a topic no longer hangs or silently ignores clicks.",
+              "zh": "归档话题不再卡死或静默忽略点击。"
+            },
+            "refs": [
+              8084
+            ]
+          },
+          {
+            "title": {
+              "en": "Context maintenance idempotency",
+              "zh": "上下文维护幂等性"
+            },
+            "body": {
+              "en": "Automatic cleanup no longer repeatedly processes the same tool results.",
+              "zh": "自动清理不再重复处理相同的工具结果。"
+            },
+            "refs": [
+              8109
+            ]
+          },
+          {
+            "title": {
+              "en": "DeepSeek output budget overflow",
+              "zh": "DeepSeek 输出预算溢出"
+            },
+            "body": {
+              "en": "Requests near the context window limit now clip the output budget to avoid HTTP 400 errors.",
+              "zh": "接近上下文窗口限制的请求现在会裁剪输出预算，避免 HTTP 400 错误。"
+            },
+            "refs": [
+              8057
+            ]
+          },
+          {
+            "title": {
+              "en": "Legacy Windows shortcut repair",
+              "zh": "修复旧版 Windows 快捷方式"
+            },
+            "body": {
+              "en": "Shortcuts from older versions self-heal their icon and target paths after migration.",
+              "zh": "旧版本的快捷方式在迁移后会自动修复其图标和目标路径。"
+            },
+            "refs": [
+              8073
+            ]
+          },
+          {
+            "title": {
+              "en": "Composer spellcheck disabled",
+              "zh": "禁用输入框拼写检查"
+            },
+            "body": {
+              "en": "Browser spellcheck, autocorrect, and autocapitalization are now disabled in the composer.",
+              "zh": "输入框中现已禁用浏览器拼写检查、自动更正和自动大写。"
+            },
+            "refs": [
+              8065
+            ]
+          },
+          {
+            "title": {
+              "en": "Native v2 plugin resources explicit",
+              "zh": "原生 v2 插件资源显式声明"
+            },
+            "body": {
+              "en": "Native v2 plugins no longer implicitly import Claude compatibility resources.",
+              "zh": "原生 v2 插件不再隐式导入 Claude 兼容资源。"
+            },
+            "refs": [
+              8077
+            ]
+          },
+          {
+            "title": {
+              "en": "External opener for Global workspaces",
+              "zh": "Global 工作区外部打开按钮"
+            },
+            "body": {
+              "en": "Global tabs with a valid local workspace now show the external opener button.",
+              "zh": "具有有效本地工作区的 Global 标签页现在显示外部打开按钮。"
+            },
+            "refs": [
+              8087
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "esengine",
+        "erphenheimer",
+        "HaoyueQin"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.22.0",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.21.5...desktop-v1.22.0",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.22.0",
+      "baseVersion": "1.22.0",
+      "status": "reviewed",
+      "previousRelease": "1.21.5",
+      "builds": {
+        "cli": "v1.22.0",
+        "desktop": "v1.22.0",
+        "npm": "1.22.0"
+      }
+    },
+    {
       "version": "1.21.5",
       "date": "2026-08-09",
       "channel": "stable",
