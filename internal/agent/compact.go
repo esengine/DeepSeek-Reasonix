@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -15,30 +13,33 @@ import (
 	"reasonix/internal/ablation"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
+	"reasonix/internal/tool"
 )
 
 // Compaction is a low-frequency cache-reset point: the prompt grows append-only
-// (high cache hits) until a turn nears compactRatio of the window, then it is
-// compacted down to a tail budget. The budget is a fixed token count, not a
-// fraction of the window, so a huge window still compacts rarely while a small
-// one still lands below the trigger (which is what stops the re-compaction loop).
+// until compactRatio of the window is crossed, then one content-driven summary
+// checkpoint is installed (stable prefix + one structured digest + recent tail).
+// 50% is only the normal acceptance ceiling — candidates are never padded up to it.
 const (
-	defaultSoftCompactRatio    = 0.5   // report growing context here, but keep the cache-stable prefix intact
-	defaultToolResultSnipRatio = 0.6   // rewrite stale tool results cheaply before summary compaction
-	defaultCompactRatio        = 0.8   // trigger: prompt at this fraction of the window compacts
-	defaultCompactForceRatio   = 0.9   // force compaction at this high-water mark even for low-value folds
-	defaultCompactTarget       = 0.5   // safety cap: the kept tail never exceeds this fraction of the window
-	defaultTailTokens          = 16384 // verbatim recent-tail budget, in tokens
-	minRecentKeep              = 2     // never keep fewer recent messages than this
-	minCompactMessages         = 2     // skip compaction below this many compactable messages
-	fallbackTokPerChar         = 0.25  // ~4 chars/token, used before any usage is available to calibrate
-	maxPinnedFirstUserTokens   = 1500  // ceiling on pinning the first user turn verbatim; larger first turns (pasted content) stay foldable
-	pinnedFirstUserWindowFrac  = 0.15  // and never pin a first turn worth more than this fraction of the window
-	maxCarriedDigestTokens     = 12000 // ceiling on digests carried verbatim across folds before one consolidating fold merges them
-	maxEarlyUserTurns          = 3     // small user turns hoisted verbatim ahead of the digest; position-fixed (the first N of the fold region, never "the latest N") so the projection prefix stays byte-stable
+	defaultCompactRatio        = 0.85 // sole automatic maintenance trigger (new configs)
+	checkpointCeilingRatio     = 0.50 // normal auto-checkpoint acceptance ceiling
+	recentTailBudgetRatio      = 0.10 // recent verbatim tail as a fraction of the window
+	minRecentTailTokens        = 32 * 1024
+	maxRecentTailTokens        = 96 * 1024
+	summaryOutputMaxTokens     = 16 * 1024 // max digest output; further clipped by remaining candidate space
+	exceptionalMinSavingsRatio = 0.25      // when fixed prefix alone exceeds 50%, require at least this savings
+	minRecentKeep              = 2         // never keep fewer recent messages than this
+	minCompactMessages         = 2         // skip compaction below this many compactable messages
+	fallbackTokPerChar         = 0.25      // ~4 chars/token, used before any usage is available to calibrate
+	maxPinnedFirstUserTokens   = 1500      // ceiling on pinning the first user turn verbatim
+	pinnedFirstUserWindowFrac  = 0.15      // and never pin a first turn worth more than this fraction of the window
+	protocolReserveTokens      = 256       // provider framing and control fields not represented by message estimates
 )
 
-var errSummaryOutputTruncated = errors.New("summarizer output truncated")
+var (
+	errSummaryOutputTruncated = errors.New("summarizer output truncated")
+	errCheckpointRejected     = errors.New("checkpoint candidate rejected")
+)
 
 // summaryTag wraps the compaction summary so the model can distinguish it from
 // live user input and later strip or skip it when reasoning about the current turn.
@@ -51,12 +52,8 @@ const (
 // failure (then a mechanical fold) instead of hanging compaction indefinitely.
 const summaryTimeout = 90 * time.Second
 
-// summarySystemPrompt steers the executor to distill older history into a
-// structured briefing it can keep relying on after the originals are dropped.
-// The section layout mirrors what a coding agent actually needs to resume work
-// mid-task: the goal verbatim, the concrete state of the code, and an explicit
-// next step — so the post-compaction turn doesn't lose the thread or re-derive
-// decisions already made.
+// summarySystemPrompt asks for a structured resume briefing (facts, goal,
+// decisions, files, commands, errors, next step) under fixed headings.
 const summarySystemPrompt = `You are compacting the earlier part of a coding agent's conversation to save context.
 The agent keeps your summary alongside the user's own turns (kept verbatim) and the recent tail; your job is to fold the assistant/tool work into a briefing it can resume from.
 Write under these exact headings, omitting a heading only if it has no content:
@@ -84,99 +81,72 @@ What is still in progress or unstarted, and the single most concrete next action
 
 Rules: be terse — bullet points and fragments, not prose. Preserve identifiers, paths, and numbers exactly. Do NOT invent anything not present in the messages; if something is unknown, leave it out rather than guessing.`
 
-// compactThresholds returns the prompt-token boundaries maybeCompact switches
-// on. The compaction ablation arm collapses the snip and fold triggers onto
-// soft, so the cache-preserving deferral branch is unreachable and the session
-// folds as soon as it grows — what a harness with no prompt-cache strategy does.
-func (a *Agent) compactThresholds() (soft, snip, high int) {
-	high = int(float64(a.contextWindow) * a.compactRatio)
-	snip = int(float64(a.contextWindow) * a.toolResultSnipRatio)
-	soft = int(float64(a.contextWindow) * a.softCompactRatio)
-	if a.ablation.Off(ablation.Compaction) {
-		high, snip = soft, soft
+// compactTrigger is the sole automatic context-maintenance boundary. Output
+// budgets are intentionally absent: they are clipped against the final request
+// at send time and must never make compaction happen earlier than the user's
+// configured compact_ratio.
+func (a *Agent) compactTrigger() int {
+	if a == nil || a.contextWindow <= 0 {
+		return 0
 	}
-	return soft, snip, high
+	ratio := a.compactRatio
+	if ratio <= 0 {
+		ratio = defaultCompactRatio
+	}
+	if a.ablation.Off(ablation.Compaction) {
+		ratio = 0.5
+	}
+	return max(1, int(float64(a.contextWindow)*ratio))
 }
 
-// maybeCompact compacts into a context projection when the last turn's prompt
-// has grown to the configured fraction of the context window. It never rewrites
-// the canonical transcript. No-op when compaction is disabled or usage is
-// unavailable.
-func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
-	if a.contextWindow <= 0 || u == nil {
-		return
+// hardInputCeiling is a physical input-safety boundary, not another user
+// compaction threshold. Reply budgets are resolved independently at send time.
+func (a *Agent) hardInputCeiling() int {
+	if a == nil || a.contextWindow <= 0 {
+		return 0
 	}
-	promptTokens := u.LatestPromptTokens()
-	if promptTokens == 0 {
-		return
+	return max(1, a.contextWindow-protocolReserveTokens)
+}
+
+// recentTailBudget is the content-construction budget for the recent verbatim
+// tail. Production windows use clamp(window×10%, 32K, 96K). Smaller synthetic
+// windows (tests / constrained providers) drop the 32K floor so the tail cannot
+// alone exceed the window.
+func (a *Agent) recentTailBudget() int {
+	if a == nil || a.contextWindow <= 0 {
+		return minRecentTailTokens
 	}
-	soft, snip, high := a.compactThresholds()
-	// A turn that sits under the trigger is the breathing room a healthy
-	// compaction buys; it clears the stuck latch and the run counter. This has to
-	// happen before the soft/snip branches return, because a compaction that
-	// settles the prompt anywhere in [snip, high) is working exactly as intended:
-	// leaving a stale run count behind there would latch the *next* compaction as
-	// "the window is too small" and silently disable auto-compaction for the rest
-	// of the session.
-	if promptTokens < high {
-		a.consecutiveCompacts = 0
-		a.compactStuck = false
-	}
-	// Between the soft ratio and the trigger, report growing context once without
-	// rewriting the prefix — a compaction here would needlessly crater the cache.
-	if promptTokens >= soft && promptTokens < snip && !a.softCompactNoticed {
-		a.softCompactNoticed = true
-		detail := fmt.Sprintf("context reached %.0f%% of window; keeping cache-first prefix until compact threshold %.0f%%", a.softCompactRatio*100, a.compactRatio*100)
-		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Context is getting large; preserving cache until cleanup is needed.", Detail: detail})
-		return
-	}
-	if promptTokens >= snip && promptTokens < high {
-		// Snip only into a projection view — never rewrite the canonical log.
-		if err := a.snipToProjection(ctx); err != nil {
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Context snip skipped for now.", Detail: err.Error()})
-		}
-		return
-	}
-	if promptTokens < high {
-		return // the latch was already cleared above
-	}
-	if a.compactStuck {
-		return
-	}
-	force := promptTokens >= int(float64(a.contextWindow)*a.compactForceRatio)
-	// Projection-only prune before folding. Install the pruned view first so the
-	// next request (and its real usage) can measure whether a paid summarize is
-	// still needed — never rewrite the canonical transcript.
-	ratio := a.tokPerChar()
-	msgs := a.session.Messages
-	pruned, pst := a.applyToolResultMaintenanceView(msgs, toolResultPrune)
-	if pst.Results > 0 {
-		saved := int(float64(pst.SavedChars) * ratio)
-		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf(
-			"pruned %d stale tool results (~%d tokens est.) before compaction", pst.Results, saved)})
-		_ = a.installPruneProjection(pruned, pst)
-		if !force {
-			// Defer summarization until a later turn still reports pressure under
-			// the pruned projection. Force-ratio turns still fold immediately.
-			return
+	n := int(float64(a.contextWindow) * recentTailBudgetRatio)
+	if a.contextWindow >= minRecentTailTokens*2 {
+		if n < minRecentTailTokens {
+			n = minRecentTailTokens
 		}
 	}
-	if _, err := a.compactToProjection(ctx, "auto", "", force); err != nil {
-		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Context cleanup skipped for now.", Detail: fmt.Sprintf("compaction skipped: %v", err)})
-		return
+	if n > maxRecentTailTokens {
+		n = maxRecentTailTokens
 	}
-	// A healthy compaction drops the prompt under the trigger, so the next turn
-	// won't compact. Compacting on consecutive turns means the kept tail alone
-	// exceeds the trigger — the system prompt plus one verbatim turn is bigger than
-	// the window allows. Re-firing every turn is the loop users hit, so pause
-	// auto-compaction and say why, once.
-	a.consecutiveCompacts++
-	if a.consecutiveCompacts >= 2 {
-		a.compactStuck = true
-		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Automatic context cleanup paused because the context window is too small.", Detail: fmt.Sprintf(
-			"context_window=%d is too small for compaction to help (the system prompt plus one turn already exceeds %.0f%% of it); raise context_window or shrink tool output. Auto-compaction paused until the prompt drops.",
-			a.contextWindow, a.compactRatio*100)})
+	if max := a.contextWindow / 2; max > 0 && n > max {
+		n = max
 	}
+	return max(1, n)
+}
+
+// checkpointCeiling is the normal auto-checkpoint acceptance upper bound
+// (50% of the window). Candidates below this are accepted without padding.
+func (a *Agent) checkpointCeiling() int {
+	if a == nil || a.contextWindow <= 0 {
+		return 0
+	}
+	return max(1, int(float64(a.contextWindow)*checkpointCeilingRatio))
+}
+
+// exceptionalMinimumSavings is required only when the fixed prefix alone already
+// exceeds the 50% ceiling; otherwise ordinary candidates simply stay under 50%.
+func (a *Agent) exceptionalMinimumSavings() int {
+	if a == nil || a.contextWindow <= 0 {
+		return 0
+	}
+	return max(1, int(float64(a.contextWindow)*exceptionalMinSavingsRatio))
 }
 
 // foldEconomics estimates whether compacting the given region saves enough
@@ -322,12 +292,8 @@ func (a *Agent) pinnedPrefixLen(msgs []provider.Message) int {
 	return i
 }
 
-// fixedPinnableUserTurn reports whether a user turn is small enough to keep
-// verbatim in a position-stable prefix. Identity decisions must not use the
-// latest provider usage: after projection activates, that usage describes the
-// projection while the canonical transcript remains larger, which would make
-// the same turn drift in or out across compactions. Dynamic token calibration is
-// reserved for non-identity estimates such as tail sizing.
+// fixedPinnableUserTurn uses a fixed estimate only: provider usage after
+// projection would make the same turn drift across checkpoints.
 func (a *Agent) fixedPinnableUserTurn(m provider.Message) bool {
 	budget := maxPinnedFirstUserTokens
 	if a.contextWindow > 0 {
@@ -400,8 +366,27 @@ func isErrorMessage(m provider.Message) bool {
 	if m.Role != provider.RoleTool {
 		return false
 	}
+	if failedExecution(m.ToolExecution) {
+		return true
+	}
 	s := strings.TrimSpace(strings.ToLower(m.Content))
 	return strings.HasPrefix(s, "error:") || strings.HasPrefix(s, "blocked:")
+}
+
+// failedExecution reads the failure the host already recorded, rather than
+// guessing from the text. A `go test` run that reports FAIL exits non-zero
+// while its output starts with "=== RUN", which no prefix match can see.
+func failedExecution(ex *provider.ToolExecution) bool {
+	if ex == nil {
+		return false
+	}
+	if ex.State == tool.ShellStateFailed || ex.State == tool.ShellStateTimedOut {
+		return true
+	}
+	if ex.ExitCode != nil && *ex.ExitCode != 0 {
+		return true
+	}
+	return ex.Verification == tool.ShellVerificationFailed
 }
 
 func isUserMarked(m provider.Message) bool {
@@ -437,31 +422,36 @@ func toolCallIDs(m provider.Message) map[string]bool {
 	return ids
 }
 
-// planCompaction locates the region to summarize. head is the count of leading
-// messages preserved verbatim (see pinnedPrefixLen); start is where the preserved
-// recent tail begins, so msgs[head:start] is compacted. The tail is bounded by a
-// token budget (not a message count), so a few large tool outputs can't keep it
-// above the trigger and re-fire compaction every turn. ok is false when there is
-// too little to compact.
-func (a *Agent) planCompaction(msgs []provider.Message, min int) (head, start int, ok bool) {
+// planCompaction returns [head:start] to fold; the tail is recentTailBudget
+// unless force halves it so CompactNow still reduces mid-size sessions.
+func (a *Agent) planCompaction(msgs []provider.Message, min int, force bool) (head, start int, ok bool) {
 	head = a.pinnedPrefixLen(msgs)
 	if a.contextWindow > 0 {
-		budget := defaultTailTokens
-		if maxByWin := int(float64(a.contextWindow) * defaultCompactTarget); maxByWin < budget {
-			budget = maxByWin
+		budget := a.recentTailBudget()
+		if force {
+			if half := estimateMessagesTokens(provider.ModelMessages(msgs)) / 2; half > 0 && half < budget {
+				budget = half
+			}
 		}
 		start = tailStart(msgs, head, budget, a.tokPerChar(), a.tailFloor())
+		// Remeasure when force or non-strict roles; strict-alternating otherwise
+		// keeps a cheap tokPerChar overestimate of the tail under force.
+		floor := max(head, len(msgs)-a.tailFloor())
+		remeasure := force || !a.strictAlternatingRoles
+		for remeasure && start < floor && estimateMessagesTokens(provider.ModelMessages(msgs[start:])) > budget {
+			start++
+			for start < floor && start < len(msgs) && msgs[start].Role == provider.RoleTool {
+				start++
+			}
+		}
 	} else {
-		// No window to budget against (manual /compact on an unconfigured
-		// provider): keep a fixed count of recent messages, aligned off any tool.
+		// No window: keep a fixed recent count, aligned off tool results.
 		start = len(msgs) - a.tailFloor()
-		for start > head && msgs[start].Role == provider.RoleTool {
+		for start > head && start < len(msgs) && msgs[start].Role == provider.RoleTool {
 			start--
 		}
 	}
-	if start < head {
-		start = head
-	}
+	start = max(start, head)
 	if start-head < min {
 		return head, start, false
 	}
@@ -554,18 +544,31 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 		}
 	}()
 	defer trackPublishedHostStream(ctx, cancel)()
+	maxOut := summaryOutputMaxTokens
+	if a.maxOutputTokens > 0 && a.maxOutputTokens < maxOut {
+		maxOut = a.maxOutputTokens
+	}
 	req := provider.Request{
 		Messages: []provider.Message{
 			{Role: provider.RoleSystem, Content: sys},
 			{Role: provider.RoleUser, Content: renderTranscript(region)},
 		},
-		MaxTokens:   a.maxOutputTokens,
+		MaxTokens:   maxOut,
 		Temperature: provider.OptionalTemperature(a.temperature),
 	}
 	if budget, clipped, budgetErr := a.effectiveOutputBudget(req); budgetErr != nil {
 		return "", usage, budgetErr
 	} else if clipped {
 		req.MaxTokens = budget
+	}
+	if req.MaxTokens > summaryOutputMaxTokens {
+		req.MaxTokens = summaryOutputMaxTokens
+	}
+	if req.MaxTokens < 256 {
+		return "", usage, fmt.Errorf("summary output budget too small (%d tokens)", req.MaxTokens)
+	}
+	if a.prov == nil {
+		return "", usage, fmt.Errorf("summary unavailable")
 	}
 	ch, err := a.prov.Stream(ctx, req)
 	if err != nil {
@@ -601,15 +604,11 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 	}
 }
 
-// summarizeWithRetry retries one non-timeout failure; timeout/cancel do not retry.
-// Token and request counts from both attempts are merged into the returned Usage.
-func (a *Agent) summarizeWithRetry(ctx context.Context, fold []provider.Message, instructions string) (string, *provider.Usage, error) {
-	summary, usage, err := a.summarize(ctx, fold, instructions)
-	if err == nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || errors.Is(err, errSummaryOutputTruncated) {
-		return summary, usage, err
-	}
-	summary2, usage2, err2 := a.summarize(ctx, fold, instructions)
-	return summary2, mergeStreamUsage(usage, usage2), err2
+// summarizeOnce performs exactly one application-layer summary request.
+// Timeouts, empty results, stream errors, and output truncation all fail once
+// with no second attempt.
+func (a *Agent) summarizeOnce(ctx context.Context, fold []provider.Message, instructions string) (string, *provider.Usage, error) {
+	return a.summarize(ctx, fold, instructions)
 }
 
 // renderTranscript flattens messages into a readable transcript for summarization.
@@ -631,7 +630,11 @@ func renderTranscript(msgs []provider.Message) string {
 			}
 			b.WriteString("\n")
 		case provider.RoleTool:
-			fmt.Fprintf(&b, "[tool %s result]\n%s\n\n", m.Name, m.Content)
+			body := m.Content
+			if m.RawContent != "" {
+				body = m.RawContent
+			}
+			fmt.Fprintf(&b, "[tool %s result]\n%s\n\n", m.Name, body)
 		case provider.RoleSystem:
 			fmt.Fprintf(&b, "[system]\n%s\n\n", m.Content)
 		}
@@ -658,26 +661,4 @@ func summarizeToolArgs(args string) string {
 	}
 	sort.Strings(keys)
 	return fmt.Sprintf("{%s} (%d keys)", strings.Join(keys, ", "), len(parsed))
-}
-
-// archiveMessages writes the dropped originals to a timestamped .jsonl (one
-// message per line) under dir, returning the file path.
-func archiveMessages(dir string, msgs []provider.Message) (string, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	path := filepath.Join(dir, time.Now().Format("20060102-150405.000")+".jsonl")
-	f, err := os.Create(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-
-	enc := json.NewEncoder(f)
-	for _, m := range msgs {
-		if err := enc.Encode(m); err != nil {
-			return "", err
-		}
-	}
-	return path, nil
 }

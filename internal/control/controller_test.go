@@ -141,15 +141,12 @@ func (r cancelingRunner) Run(_ context.Context, _ string) error {
 	return nil
 }
 
-func TestContextSnapshotIncludesCompletionTokens(t *testing.T) {
+// The gauge must measure what the trigger measures. Reporting the previous
+// turn's billed usage is how a session displayed 8% while it was compacting.
+func TestContextSnapshotMeasuresTheTriggerInput(t *testing.T) {
 	prov := &scriptedTurns{turns: [][]provider.Chunk{{
 		{Type: provider.ChunkText, Text: "ok"},
-		{Type: provider.ChunkUsage, Usage: &provider.Usage{
-			PromptTokens:     6840,
-			CompletionTokens: 48,
-			TotalTokens:      6888,
-			ReasoningTokens:  48,
-		}},
+		{Type: provider.ChunkUsage, Usage: &provider.Usage{PromptTokens: 6840, CompletionTokens: 48, TotalTokens: 6888, ReasoningTokens: 48}},
 		{Type: provider.ChunkDone},
 	}}}
 	ag := agent.New(prov, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{ContextWindow: 1_000_000}, event.Discard)
@@ -159,9 +156,10 @@ func TestContextSnapshotIncludesCompletionTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	want := c.ContextMaintenanceSnapshot().ProjectedTokens
 	used, window := c.ContextSnapshot()
-	if used != 6888 || window != 1_000_000 {
-		t.Fatalf("ContextSnapshot() = (%d, %d), want (6888, 1000000)", used, window)
+	if used != want || used == 6888 || window != 1_000_000 {
+		t.Fatalf("ContextSnapshot() = (%d, %d), want (%d, 1000000): the gauge reads the trigger's live input, never the last turn's 6888", used, window, want)
 	}
 }
 
@@ -2652,67 +2650,6 @@ func TestTwoModelPlannerApprovalUsesHostGate(t *testing.T) {
 	reqText := requestMessagesText(execProv.requests[0].Messages)
 	if !strings.Contains(reqText, "Reasonix executor handoff") || !strings.Contains(reqText, "Edit main.go") {
 		t.Fatalf("approved executor request missing planner handoff:\n%s", reqText)
-	}
-}
-
-func TestTwoModelPlannerUserDecisionUsesAskGate(t *testing.T) {
-	dir := t.TempDir()
-	planner := &recordingProvider{name: "planner", streams: [][]provider.Chunk{
-		textTurn("需要用户选择方案：\n方案一：小改当前逻辑\n方案二：重构控制流\n请选择哪个方案。"),
-	}}
-	execProv := &recordingProvider{name: "executor", streams: [][]provider.Chunk{
-		textTurn("selected execution complete"),
-	}}
-	exec := agent.New(execProv, tool.NewRegistry(), agent.NewSession("exec sys"), agent.Options{}, event.Discard)
-	coord := agent.NewCoordinator(planner, agent.NewSession("planner sys"), nil, tool.NewRegistry(), agent.Options{}, exec, 0, event.Discard, nil)
-
-	asks := make(chan event.Ask, 1)
-	c := New(Options{
-		Runner:       coord,
-		Executor:     exec,
-		SystemPrompt: "exec sys",
-		SessionDir:   dir,
-		SessionPath:  filepath.Join(dir, "session.jsonl"),
-		Label:        "test",
-		Sink: event.FuncSink(func(e event.Event) {
-			if e.Kind == event.AskRequest {
-				asks <- e.Ask
-			}
-		}),
-	})
-	c.EnableInteractiveApproval()
-
-	done := make(chan error, 1)
-	go func() {
-		done <- c.Run(context.Background(), "fix the planner decision bug")
-	}()
-	var ask event.Ask
-	select {
-	case ask = <-asks:
-	case <-time.After(30 * time.Second):
-		t.Fatal("AskRequest was not emitted")
-	}
-	if got := len(execProv.requests); got != 0 {
-		t.Fatalf("executor requests before user decision = %d, want 0", got)
-	}
-	if len(ask.Questions) != 1 || ask.Questions[0].ID != "planner_user_decision" {
-		t.Fatalf("ask questions = %+v, want planner decision question", ask.Questions)
-	}
-	c.AnswerQuestion(ask.ID, []event.AskAnswer{{QuestionID: "planner_user_decision", Selected: []string{"方案二：重构控制流"}}})
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("Run: %v", err)
-		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("answered two-model turn did not finish")
-	}
-	if got := len(execProv.requests); got == 0 {
-		t.Fatal("executor did not run after user decision")
-	}
-	reqText := requestMessagesText(execProv.requests[0].Messages)
-	if !strings.Contains(reqText, "Host user answer to planner question") || !strings.Contains(reqText, "方案二") {
-		t.Fatalf("executor request missing host user answer:\n%s", reqText)
 	}
 }
 

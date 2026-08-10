@@ -2,6 +2,7 @@ package control
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -109,6 +110,13 @@ func TestParsePlanTodos(t *testing.T) {
 				t.Fatalf("got %d todos, want %d: %+v", len(got), len(tc.want), got)
 			}
 			for i := range got {
+				// Seeded ids are positional by construction and asserted in
+				// TestParsePlanTodosMintsStableStepIDs; clear them here so the
+				// table stays about parsing.
+				if want := fmt.Sprintf("plan_step_%02d", i+1); got[i].StepID != want {
+					t.Errorf("todo %d step_id = %q, want %q", i, got[i].StepID, want)
+				}
+				got[i].StepID = ""
 				if got[i] != tc.want[i] {
 					t.Errorf("todo %d = %+v, want %+v", i, got[i], tc.want[i])
 				}
@@ -137,6 +145,26 @@ func TestPlanTodosJSONAlwaysSatisfiesSerialContract(t *testing.T) {
 		if err := evidence.ValidateSerialTodos(payload.Todos); err != nil {
 			t.Fatalf("PlanTodosJSON(%q) emitted invalid state: %v\n%s", plan, err, args)
 		}
+	}
+}
+
+func TestParsePlanTodosMintsStableStepIDs(t *testing.T) {
+	args := PlanTodosJSON("1. Change the DB\n   - add the column\n2. Change the API")
+	var payload struct {
+		Todos []evidence.TodoItem `json:"todos"`
+	}
+	if err := json.Unmarshal([]byte(args), &payload); err != nil {
+		t.Fatalf("PlanTodosJSON: %v", err)
+	}
+	seen := make(map[string]bool, len(payload.Todos))
+	for i, todo := range payload.Todos {
+		if todo.StepID == "" {
+			t.Fatalf("seeded todo %d %q has no step_id; the model has nothing stable to cite", i+1, todo.Content)
+		}
+		if seen[todo.StepID] {
+			t.Fatalf("seeded todo %d reuses step_id %q", i+1, todo.StepID)
+		}
+		seen[todo.StepID] = true
 	}
 }
 

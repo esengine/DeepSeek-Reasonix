@@ -11,6 +11,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { ToolCard } from "../components/ToolCard";
 import { LocaleProvider } from "../lib/i18n";
+import { hydrateReasoningDisplayMode } from "../lib/reasoningDisplayPreference";
 import { setReasoningSummaryEnabled } from "../lib/reasoningSummaryPreference";
 import type { Item, SubagentProgress } from "../lib/useController";
 
@@ -95,6 +96,25 @@ function makeItem(phase: SubagentProgress["phase"], over: Partial<SubagentProgre
 }
 
 console.log("\nsubagent progress card");
+
+{
+  const dom = installDom();
+  const rootEl = document.getElementById("root");
+  if (!rootEl) throw new Error("missing root");
+  const root = createRoot(rootEl);
+  hydrateReasoningDisplayMode("auto", true);
+  await act(async () => {
+    root.render(React.createElement(LocaleProvider, null, React.createElement(ToolCard, { item: makeItem("reasoning") })));
+    for (let i = 0; i < 50; i += 1) {
+      await flushTimers();
+      if (document.querySelector(".tool__subagent-preview .md")) break;
+    }
+  });
+  ok(!!document.querySelector(".tool__subagent-preview .md"), "auto mode expands reasoning when the card mounts mid-stream");
+  await act(async () => root.unmount());
+  dom.window.close();
+  hydrateReasoningDisplayMode("summary", true);
+}
 
 {
   const dom = installDom();

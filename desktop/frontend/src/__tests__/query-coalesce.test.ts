@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { coalescesQuery, resetQueryCoalescing, shareQuery } from "../lib/queryCoalesce";
+import { coalescesQuery, invalidateSharedQuery, maybeShare, resetQueryCoalescing, shareQuery } from "../lib/queryCoalesce";
 
 function deferred<T>() {
   let resolve!: (v: T) => void;
@@ -30,6 +30,17 @@ async function differentArgumentsStayIndependent() {
   assert.equal(runs, 2, "another tab is another question");
 }
 
+async function mutationsInvalidateInflightAnswers() {
+  resetQueryCoalescing();
+  const stale = deferred<string>();
+  const first = shareQuery("MetaForTab", ["tab-1"], () => stale.promise);
+  await maybeShare("NewSessionForTab", ["tab-1"], async () => undefined);
+  const fresh = await shareQuery("MetaForTab", ["tab-1"], async () => "fresh");
+  assert.equal(fresh, "fresh", "a post-mutation query must not inherit the old session request");
+  stale.resolve("stale");
+  assert.equal(await first, "stale");
+}
+
 // A stale answer is worse than a slow one: a failure must not be inherited.
 async function rejectionIsNotSharedOnward() {
   resetQueryCoalescing();
@@ -39,6 +50,23 @@ async function rejectionIsNotSharedOnward() {
   const second = await shareQuery("ListTabs", [], async () => { runs++; return "ok"; });
   assert.equal(second, "ok");
   assert.equal(runs, 2, "the next caller retries instead of inheriting the failure");
+}
+
+async function invalidationStartsAFreshRead() {
+  resetQueryCoalescing();
+  let runs = 0;
+  const run = async () => ++runs;
+  assert.equal(await shareQuery("MetaForTab", ["tab-1"], run), 1);
+  invalidateSharedQuery("MetaForTab", ["tab-1"]);
+  assert.equal(await shareQuery("MetaForTab", ["tab-1"], run), 2);
+}
+
+async function settledTabListsAreNotShared() {
+  resetQueryCoalescing();
+  let runs = 0;
+  const run = async () => ++runs;
+  assert.equal(await shareQuery("ListTabs", [], run), 1);
+  assert.equal(await shareQuery("ListTabs", [], run), 2, "tab mutations must be visible after the in-flight burst");
 }
 
 // Anything that mutates or starts work must never be collapsed.
@@ -54,7 +82,10 @@ function onlyReadOnlyQueriesAreCoalesced() {
 const tests: Array<[string, () => unknown]> = [
   ["identical in-flight calls share one answer", identicalCallsInFlightShareOneAnswer],
   ["different arguments stay independent", differentArgumentsStayIndependent],
+  ["mutations invalidate in-flight answers", mutationsInvalidateInflightAnswers],
   ["a rejection is not shared onward", rejectionIsNotSharedOnward],
+  ["external state boundaries invalidate settled answers", invalidationStartsAFreshRead],
+  ["settled tab lists do not cross mutations", settledTabListsAreNotShared],
   ["only read-only queries are coalesced", onlyReadOnlyQueriesAreCoalesced],
 ];
 

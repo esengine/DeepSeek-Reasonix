@@ -3415,6 +3415,19 @@ a[href] {
   left: 0;
   width: 100%;
 }
+.transcript-selection-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-local-handle);
+  pointer-events: none;
+  overflow: visible;
+}
+.transcript-selection-overlay__rect {
+  position: absolute;
+  display: block;
+  border-radius: 2px;
+  background: color-mix(in srgb, Highlight 34%, transparent);
+}
 .transcript__row > * {
   max-width: var(--maxw);
   margin-left: auto;
@@ -10336,15 +10349,19 @@ body > .mermaid-diagram--fullscreen {
   padding: 7px 8px 3px;
 }
 .workspace-files__tools--embedded {
-  height: 0;
-  overflow: hidden;
-  justify-content: flex-start;
-  padding: 0;
-}
-.workspace-panel--split-preview .workspace-files__tools--embedded,
-.workspace-panel--tree-hidden .workspace-files__tools--embedded {
   height: 34px;
+  overflow: visible;
+  justify-content: flex-start;
   padding: 6px 10px 0;
+}
+.workspace-watch-status {
+  color: var(--text-muted, var(--fg-faint));
+  font-size: 18px;
+  line-height: 1;
+  cursor: help;
+}
+.workspace-iconbtn[aria-busy="true"] svg {
+  animation: spin 0.8s linear infinite;
 }
 .workspace-files__tabs {
   flex: 1 1 auto;
@@ -25019,6 +25036,19 @@ body > .mermaid-diagram--fullscreen {
   border-radius: 8px;
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--accent) 5%, var(--bg)) 0%, var(--bg) 100%);
+}
+
+.context-panel__maintenance {
+  min-width: 0;
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.context-panel__maintenance-rows {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 8px;
 }
 
 .context-panel__capacity-card--good {

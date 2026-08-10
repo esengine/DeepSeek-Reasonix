@@ -90,6 +90,8 @@ type AgentCapabilities struct {
 // ACP v1 reserves agentCapabilities._meta for vendor capability discovery.
 type ReasonixExtensionCapabilities struct {
 	SessionSteer *SessionSteerCapability `json:"sessionSteer,omitempty"`
+	// SessionInbox advertises the durable session-level instruction queue.
+	SessionInbox *SessionInboxCapability `json:"sessionInbox,omitempty"`
 	// SessionReloadExtensions advertises the vendor runtime-reload method.
 	SessionReloadExtensions *SessionReloadExtensionsCapability `json:"sessionReloadExtensions,omitempty"`
 	// ExtensionSurface advertises structured extension-UI surface support:
@@ -100,6 +102,12 @@ type ReasonixExtensionCapabilities struct {
 // SessionSteerCapability identifies the vendor-namespaced steering method.
 type SessionSteerCapability struct {
 	Method string `json:"method"`
+}
+
+// SessionInboxCapability advertises durable inbox methods (schemaVersion 1).
+type SessionInboxCapability struct {
+	SchemaVersion int               `json:"schemaVersion"`
+	Methods       map[string]string `json:"methods"`
 }
 
 // SessionReloadExtensionsCapability identifies the vendor-namespaced runtime
@@ -476,11 +484,61 @@ type SessionSteerParams struct {
 	Prompt    []ContentBlock `json:"prompt"`
 }
 
-// SessionSteerResult acknowledges that the active turn accepted the guidance.
-type SessionSteerResult struct{}
+// SessionSteerResult acknowledges durable steer admission.
+type SessionSteerResult struct {
+	ItemID      string `json:"itemId,omitempty"`
+	Disposition string `json:"disposition,omitempty"`
+}
 
 // sessionSteerMethod follows ACP v1's reserved vendor-extension namespace.
 const sessionSteerMethod = "_reasonix.io/session/steer"
+
+const (
+	sessionInboxSchemaVersion = 1
+	sessionInboxEnqueueMethod = "_reasonix.io/session/inbox/enqueue"
+	sessionInboxListMethod    = "_reasonix.io/session/inbox/list"
+	sessionInboxGetMethod     = "_reasonix.io/session/inbox/get"
+	sessionInboxUpdateMethod  = "_reasonix.io/session/inbox/update"
+	sessionInboxDeleteMethod  = "_reasonix.io/session/inbox/delete"
+	sessionInboxMoveMethod    = "_reasonix.io/session/inbox/move"
+	sessionInboxPauseMethod   = "_reasonix.io/session/inbox/setPaused"
+	sessionInboxRetryMethod   = "_reasonix.io/session/inbox/retry"
+	sessionInboxRefreshMethod = "_reasonix.io/session/inbox/refresh"
+)
+
+// SessionInboxEnqueueParams is the durable inbox enqueue request.
+type SessionInboxEnqueueParams struct {
+	SessionID      string `json:"sessionId"`
+	Text           string `json:"text"`
+	Intent         string `json:"intent,omitempty"` // followup | steer
+	IdempotencyKey string `json:"idempotencyKey,omitempty"`
+}
+
+// SessionInboxItemParams identifies one inbox item.
+type SessionInboxItemParams struct {
+	SessionID string `json:"sessionId"`
+	ItemID    string `json:"itemId"`
+}
+
+// SessionInboxUpdateParams rewrites an item body.
+type SessionInboxUpdateParams struct {
+	SessionID string `json:"sessionId"`
+	ItemID    string `json:"itemId"`
+	Text      string `json:"text"`
+}
+
+// SessionInboxMoveParams reorders an item (toIndex is 0-based).
+type SessionInboxMoveParams struct {
+	SessionID string `json:"sessionId"`
+	ItemID    string `json:"itemId"`
+	ToIndex   int    `json:"toIndex"`
+}
+
+// SessionInboxPauseParams toggles pause.
+type SessionInboxPauseParams struct {
+	SessionID string `json:"sessionId"`
+	Paused    bool   `json:"paused"`
+}
 
 // SessionReloadExtensionsParams addresses one live ACP session.
 type SessionReloadExtensionsParams struct {

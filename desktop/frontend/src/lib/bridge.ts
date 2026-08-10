@@ -16,7 +16,6 @@ import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems } from "./statusBarIt
 import { registerTrustedThemeBackgroundURLs } from "./themePack";
 import { modeHasAutoApproveTools, modeWithAutoApproveTools, modeWithPlan, normalizeCollaborationMode, normalizeMode, normalizeTokenMode, normalizeToolApprovalMode } from "./types";
 import { decisionSurfaceMockFromInput, isLongDecisionOptionsMockInput } from "./decisionSurfaceMock";
-
 import type {
   RemoteHostView,
   RemoteHostInput,
@@ -116,6 +115,7 @@ import type {
   WireEvent,
   WorkspaceChangeDetailView,
   WorkspaceChangesView,
+  WorkspaceRevisions,
   GitCommitView,
   GitCommitDetailView,
   WorkspaceView,
@@ -203,8 +203,43 @@ export interface AppBindings {
   RunShellForTab(tabID: string, command: string): Promise<void>;
   Steer(text: string): Promise<void>;
   SteerForTab(tabID: string, text: string): Promise<void>;
+  InboxSnapshot(tabID: string): Promise<{
+    revision: number;
+    paused: boolean;
+    recovered: boolean;
+    recoveredCount?: number;
+    items: Array<{
+      id: string;
+      intent: string;
+      state: string;
+      preview: string;
+      byteSize: number;
+      source?: string;
+      position: number;
+      blockReason?: string;
+    }>;
+    itemsCount: number;
+    bytes: number;
+    maxItems: number;
+    maxBytes: number;
+  }>;
+  EnqueueInboxFollowup(tabID: string, display: string, submit: string, idempotency: string): Promise<{ itemId: string; disposition: string; position: number; paused: boolean; idempotent?: boolean; error?: string }>;
+  EnqueueInboxFollowupWithInvocations(tabID: string, display: string, submit: string, invocations: InvocationRequest[], idempotency: string): Promise<{ itemId: string; disposition: string; position: number; paused: boolean; idempotent?: boolean; error?: string }>;
+  EnqueueInboxSteer(tabID: string, display: string, submit: string, idempotency: string): Promise<{ itemId: string; disposition: string; position: number; paused: boolean; idempotent?: boolean; error?: string }>;
+  SteerInboxItem(tabID: string, itemID: string): Promise<{
+    itemId: string; disposition: string; position: number; paused: boolean; idempotent?: boolean; error?: string;
+  }>;
+  ReadInboxItem(tabID: string, id: string): Promise<{ id: string; displayText: string; rawText: string; submitText: string }>;
+  UpdateInboxItem(tabID: string, id: string, display: string, submit: string): Promise<void>;
+  DeleteInboxItem(tabID: string, id: string): Promise<void>;
+  MoveInboxItem(tabID: string, id: string, toIndex: number): Promise<void>;
+  SetInboxPaused(tabID: string, paused: boolean): Promise<void>;
+  RetryInboxItem(tabID: string, id: string): Promise<void>;
+  RefreshInboxItem(tabID: string, id: string): Promise<void>;
+  InboxHasItems(tabID: string): Promise<boolean>;
   Cancel(): Promise<void>;
   CancelTab(tabID: string): Promise<void>;
+  CancelTabWithInboxItems(tabID: string, itemIDs: string[]): Promise<void>;
   Approve(id: string, allow: boolean, session: boolean, persist: boolean): Promise<void>;
   ApproveTab(tabID: string, id: string, allow: boolean, session: boolean, persist: boolean): Promise<void>;
   ResolvePlanDecision(id: string, action: "start_execution" | "revise_plan" | "exit_plan"): Promise<void>;
@@ -378,6 +413,7 @@ export interface AppBindings {
   SearchFileRefsForTab(tabID: string, query: string): Promise<DirEntry[]>;
   ReadFile(rel: string): Promise<FilePreview>;
   ReadFileForTab(tabID: string, rel: string): Promise<FilePreview>;
+  WorkspaceRevisionForTab(tabID: string): Promise<{ revisions: WorkspaceRevisions; watchState: "active" | "degraded" | "unavailable" }>;
   WorkspaceChanges(tabID: string): Promise<WorkspaceChangesView>;
   WorkspaceChangeDetail(tabID: string, path: string): Promise<WorkspaceChangeDetailView>;
   GitBranches(): Promise<string[]>;
@@ -489,7 +525,7 @@ export interface AppBindings {
   SetCloseBehavior(mode: string): Promise<void>;
   SetDisplayMode(mode: string): Promise<void>;
   SetStatusBarStyle(style: string): Promise<void>;
-  SetStatusBarItems(items: string[]): Promise<void>;
+  SetStatusBarItems(items: string[]): Promise<void>; SetReasoningDisplayMode(mode: "hidden" | "summary" | "auto"): Promise<void>;
   SetDesktopLanguage(lang: string): Promise<void>;
   SetDesktopCurrency(currency: string): Promise<void>;
   SetDesktopAppearance(theme: string, style: string): Promise<void>;
@@ -520,7 +556,6 @@ export interface AppBindings {
   SetDesktopConversationWidth(width: string): Promise<void>;
   MigrateDesktopPreferences(language: string, theme: string, style: string): Promise<void>;
   SetAgentParams(temperature: number, maxSteps: number, plannerMaxSteps: number, systemPrompt: string): Promise<void>;
-  SetColdResumePrune(enabled: boolean): Promise<void>;
   SetCompactRatio(ratio: number): Promise<void>;
   SetReasoningLanguage(lang: string): Promise<void>;
   SetTrayLocale(locale: "en" | "zh" | "zh-TW"): Promise<void>;
@@ -649,8 +684,8 @@ interface WailsRuntime {
 
 declare global {
   interface Window {
-    runtime?: WailsRuntime;
-    go?: { main?: { App?: AppBindings } };
+    runtime?: WailsRuntime; __REASONIX_WEBVIEW2_APPROVAL_SMOKE__?: boolean;
+    go?: { main?: { App?: AppBindings; WebView2ApprovalSmokeBridge?: { Complete(ok: boolean, detail: string): Promise<void> } } };
   }
 }
 
@@ -667,6 +702,7 @@ const WAILS_IPC_NULL_SEND_RE = /Cannot read properties of null \(reading 'send'\
 // once would pin the browser mock for the whole session (and show fake data — the
 // dev mock's model list leaking into the real app was exactly this bug).
 function realApp(): AppBindings | undefined {
+  if (typeof window !== "undefined" && window.__REASONIX_WEBVIEW2_APPROVAL_SMOKE__ === true) return undefined;
   return typeof window !== "undefined" ? window.go?.main?.App : undefined;
 }
 
@@ -982,7 +1018,7 @@ function bridgeBreadcrumb(method: string): string {
     return `turn ${method}`;
   if (/^(SetModel|SetEffort|SetTokenMode|SetDefaultModel|SetPlannerModel|SetSubagentModel|SetSubagentEffort|SetMaxSubagentDepth|SetMaxSubagentConcurrency|SetMaxParallelWriters)/.test(method))
     return `model ${method}`;
-  if (/^(SetDesktop|SetCloseBehavior|SetDisplayMode|SetStatusBar|SetExpandThinking|SetAutoPlan|SetDefaultToolApprovalMode|SetCompactRatio|SetReasoningLanguage)/.test(method))
+  if (/^(SetDesktop|SetCloseBehavior|SetDisplayMode|SetStatusBar|SetReasoningDisplayMode|SetExpandThinking|SetAutoPlan|SetDefaultToolApprovalMode|SetCompactRatio|SetReasoningLanguage)/.test(method))
     return `settings ${method}`;
   if (/^(SaveProvider|SetProviderWebSearch|SaveProviderModelCatalogs|AddOfficialProviderAccess|UpgradeDeepSeekProviderAccess|AddProviderPresetAccess|ResetProviderPresetAccess|RemoveProviderAccess|RemoveProviderAccesses|DeleteProvider|SaveProviderKey|SetProviderKey|ClearProviderKey|FetchProviderModels|FetchAllProviderModels|ConnectKey)/.test(method))
     return `provider ${method}`;
@@ -1119,11 +1155,11 @@ function browserPreviewEffectiveShell(prefer = "auto"): "bash" | "git-bash" | "p
   return browserPlatformOverride() === "windows" ? "git-bash" : "bash";
 }
 
-function mockScenario(): "demo" | "fresh" | "running" | "guidance" | "sandbox_escape" | "notice" | "deepseek_upgrade" | "bench" {
+function mockScenario(): "demo" | "fresh" | "running" | "guidance" | "recovery" | "sandbox_escape" | "notice" | "deepseek_upgrade" | "bench" {
   if (typeof window === "undefined") return "demo";
   const value = new URLSearchParams(window.location.search).get("mock")?.trim().toLowerCase();
   if (value === "fresh" || value === "empty" || value === "first-run") return "fresh";
-  if (value === "guidance" || value === "guide" || value === "steer") return "guidance";
+  if (typeof import.meta.env !== "undefined" && import.meta.env.DEV && (value === "recovery" || value === "inbox-recovery")) return "recovery"; if (value === "guidance" || value === "guide" || value === "steer") return "guidance";
   if (value === "running" || value === "busy" || value === "streaming") return "running";
   if (value === "sandbox_escape" || value === "sandbox-escape" || value === "sandboxescape") return "sandbox_escape";
   if (value === "notice" || value === "notices" || value === "notice-preview") return "notice";
@@ -1192,8 +1228,6 @@ const mockQwenPlanModels = ["qwen3.7-plus", "qwen3.6-plus", "kimi-k2.5", "glm-5"
 const mockQwenPlanVisionModels = ["qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus", "kimi-k2.5"];
 const mockStepFunModels = ["step-3.7-flash", "step-3.5-flash", "step-3.5-flash-2603"];
 const mockOpenCodeGoModels = ["glm-5.2", "glm-5.1", "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5-pro", "mimo-v2.5"];
-const mockOpenCodeGoAnthropicModels = ["qwen3.7-plus", "qwen3.7-max", "qwen3.6-plus", "minimax-m3", "minimax-m2.7", "minimax-m2.5"];
-const mockOpenCodeZenAnthropicModels = ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5", "qwen3.6-plus", "qwen3.5-plus", "qwen3.6-plus-free"];
 const mockNovitaModels = ["zai-org/glm-5.2", "moonshotai/kimi-k2.7-code", "minimax/minimax-m3", "deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-flash", "qwen/qwen3.7-max", "qwen/qwen3.6-plus", "zai-org/glm-5v-turbo"];
 const mockGMIModels = ["zai-org/GLM-5.2-FP8", "deepseek-ai/DeepSeek-V4-Pro", "deepseek-ai/DeepSeek-V4-Flash", "moonshotai/Kimi-K2.7-Code", "anthropic/claude-sonnet-4.6", "openai/gpt-5.5"];
 const mockVercelModels = ["anthropic/claude-sonnet-4.6", "anthropic/claude-opus-4.8", "openai/gpt-5.4", "openai/gpt-5.4-pro", "moonshotai/kimi-k2.7-code", "zai/glm-5.2", "deepseek/deepseek-v4-pro"];
@@ -1226,8 +1260,10 @@ const mockProviderPresetTemplates: MockProviderPresetTemplate[] = [
   mockPreset("zai-coding-plan-global", "Z.AI Coding Plan Global", "Z.AI international coding-plan endpoint.", "ZAI_CODING_API_KEY", mockProviderTemplate({ name: "zai-coding-plan-global", kind: "openai", baseUrl: "https://api.z.ai/api/coding/paas/v4", models: mockGLMCodingModels, default: "glm-5.2", apiKeyEnv: "ZAI_CODING_API_KEY", contextWindow: 1000000, thinking: "enabled", supportedEfforts: ["enabled", "disabled"], defaultEffort: "enabled" })),
   mockPreset("zai-coding-plan-global-anthropic", "Z.AI Coding Plan Global Anthropic", "Z.AI international coding-plan Anthropic-compatible endpoint.", "ZAI_CODING_API_KEY", mockProviderTemplate({ name: "zai-coding-plan-global-anthropic", kind: "anthropic", baseUrl: "https://api.z.ai/api/anthropic", models: mockGLMAnthropicModels, default: "glm-5.2", apiKeyEnv: "ZAI_CODING_API_KEY", authHeader: true, thinking: "adaptive", contextWindow: 1000000 })),
   mockPreset("opencode-go", "OpenCode Go", "OpenCode Go relay with per-model capability overrides.", "OPENCODE_GO_API_KEY", mockProviderTemplate({ name: "opencode-go", kind: "openai", baseUrl: "https://opencode.ai/zen/go/v1", models: mockOpenCodeGoModels, visionModels: ["kimi-k3"], default: "glm-5.2", apiKeyEnv: "OPENCODE_GO_API_KEY", contextWindow: 128000, modelOverrides: [{ model: "kimi-k3", reasoningProtocol: "openai", supportedEfforts: ["high", "max"], defaultEffort: "max", contextWindow: 1048576 }] })),
-  mockPreset("opencode-go-anthropic", "OpenCode Go Anthropic", "OpenCode Go subscription Anthropic-compatible route for Qwen and MiniMax models.", "OPENCODE_GO_API_KEY", mockProviderTemplate({ name: "opencode-go-anthropic", kind: "anthropic", baseUrl: "https://opencode.ai/zen/go", models: mockOpenCodeGoAnthropicModels, visionModels: ["qwen3.7-plus", "qwen3.6-plus"], default: "qwen3.7-plus", apiKeyEnv: "OPENCODE_GO_API_KEY", thinking: "adaptive", contextWindow: 262144 })),
-  mockPreset("opencode-zen-anthropic", "OpenCode Zen Anthropic", "OpenCode Zen Anthropic-compatible route for Claude and Qwen models.", "OPENCODE_API_KEY", mockProviderTemplate({ name: "opencode-zen-anthropic", kind: "anthropic", baseUrl: "https://opencode.ai/zen", models: mockOpenCodeZenAnthropicModels, visionModels: ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"], default: "claude-sonnet-4-6", apiKeyEnv: "OPENCODE_API_KEY", contextWindow: 262144 })),
+  mockPreset("opencode-go-anthropic", "OpenCode Go Anthropic", "OpenCode Go subscription Anthropic-compatible route for Qwen and MiniMax.", "OPENCODE_GO_API_KEY", mockProviderTemplate({ name: "opencode-go-anthropic", kind: "anthropic", baseUrl: "https://opencode.ai/zen/go", models: ["qwen3.7-plus", "qwen3.7-max", "qwen3.6-plus", "minimax-m3", "minimax-m2.7", "minimax-m2.5"], visionModels: ["qwen3.7-plus", "qwen3.6-plus"], default: "qwen3.7-plus", apiKeyEnv: "OPENCODE_GO_API_KEY", thinking: "adaptive", contextWindow: 262144 })),
+  mockPreset("opencode-go-deepseek-anthropic", "OpenCode Go DeepSeek Anthropic", "OpenCode Go Anthropic Messages route for DeepSeek Flash with server-side web search.", "OPENCODE_GO_API_KEY", mockProviderTemplate({ name: "opencode-go-deepseek-anthropic", kind: "anthropic", baseUrl: "https://opencode.ai/zen/go", models: ["deepseek-v4-flash"], default: "deepseek-v4-flash", apiKeyEnv: "OPENCODE_GO_API_KEY", thinking: "adaptive", webSearch: true, serverWebSearchCapability: true, contextWindow: 262144, supportedEfforts: ["disabled", "high", "max"], defaultEffort: "high" })),
+  mockPreset("opencode-go-deepseek-responses", "OpenCode Go DeepSeek Responses", "OpenCode Go stateless Responses API route for DeepSeek Flash with server-side web search.", "OPENCODE_GO_API_KEY", mockProviderTemplate({ name: "opencode-go-deepseek-responses", kind: "responses", baseUrl: "https://opencode.ai/zen/go/v1", models: ["deepseek-v4-flash"], default: "deepseek-v4-flash", apiKeyEnv: "OPENCODE_GO_API_KEY", webSearch: true, serverWebSearchCapability: true, contextWindow: 128000, supportedEfforts: ["disabled", "high", "max"], defaultEffort: "high" })),
+  mockPreset("opencode-zen-anthropic", "OpenCode Zen Anthropic", "OpenCode Zen Anthropic-compatible route for Claude and Qwen models.", "OPENCODE_API_KEY", mockProviderTemplate({ name: "opencode-zen-anthropic", kind: "anthropic", baseUrl: "https://opencode.ai/zen", models: ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5", "qwen3.6-plus", "qwen3.5-plus", "qwen3.6-plus-free"], visionModels: ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"], default: "claude-sonnet-4-6", apiKeyEnv: "OPENCODE_API_KEY", contextWindow: 262144 })),
   mockPreset("qwen-cn", "Qwen CN API", "Alibaba DashScope China standard OpenAI-compatible endpoint.", "QWEN_API_KEY", mockProviderTemplate({ name: "qwen-cn", kind: "openai", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", models: mockQwenAPIModels, visionModels: ["qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus", "kimi-k2.5"], default: "qwen3.7-plus", apiKeyEnv: "QWEN_API_KEY" })),
   mockPreset("qwen-global", "Qwen Global API", "Alibaba DashScope international standard OpenAI-compatible endpoint.", "QWEN_API_KEY", mockProviderTemplate({ name: "qwen-global", kind: "openai", baseUrl: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", models: mockQwenAPIModels, visionModels: ["qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus", "kimi-k2.5"], default: "qwen3.7-plus", apiKeyEnv: "QWEN_API_KEY" })),
   mockPreset("qwen-coding-plan-cn", "Qwen Coding Plan CN", "Alibaba Cloud Qwen Coding Plan China endpoint.", "QWEN_CODING_API_KEY", mockProviderTemplate({ name: "qwen-coding-plan-cn", kind: "openai", baseUrl: "https://coding.dashscope.aliyuncs.com/v1", models: mockQwenPlanModels, visionModels: mockQwenPlanVisionModels, default: "qwen3.7-plus", apiKeyEnv: "QWEN_CODING_API_KEY" })),
@@ -1292,7 +1328,7 @@ function mockExternalOpenerIconDataURL(color: string, label: string): string {
 function makeMockApp(): AppBindings {
   const scenario = mockScenario();
   const freshMock = scenario === "fresh";
-  const guidanceMock = scenario === "guidance";
+  const guidanceMock = scenario === "guidance", recoveryMock = typeof import.meta.env !== "undefined" && import.meta.env.DEV && scenario === "recovery";
   const runningMock = scenario === "running" || guidanceMock;
   const sandboxEscapeMock = scenario === "sandbox_escape";
   const noticePreviewMock = scenario === "notice";
@@ -1578,7 +1614,7 @@ function makeMockApp(): AppBindings {
       noProxy: "",
       proxy: { type: "socks5", server: "127.0.0.1", port: 7890, username: "", password: "" },
     },
-    agent: { temperature: 0.2, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "You are Reasonix, a coding agent.", coldResumePrune: true, reasoningLanguage: "auto", compactRatio: 0.8 },
+    agent: { temperature: 0.2, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "You are Reasonix, a coding agent.", reasoningLanguage: "auto", compactRatio: 0.8 },
     bot: {
       enabled: !freshMock,
       model: "",
@@ -1721,7 +1757,7 @@ function makeMockApp(): AppBindings {
     desktopTerminalTheme: "auto",
     conversationWidth: "standard",
     closeBehavior: "background",
-    displayMode: "compact",
+    displayMode: "standard", reasoningDisplayMode: "auto", reasoningDisplayModeExplicit: false,
     statusBarStyle: "text",
     statusBarItems: [...DEFAULT_STATUS_BAR_ITEMS],
     defaultToolApprovalMode: "auto",
@@ -2886,11 +2922,51 @@ function makeMockApp(): AppBindings {
         async SteerForTab(_tabID, _text) {
           await this.Steer(_text);
         },
+        async InboxSnapshot(_tabID) { if (recoveryMock) return (await import("./inboxRecoveryPreview")).inboxRecoveryPreviewSnapshot();
+          return {
+            revision: 0,
+            paused: false,
+            recovered: false,
+            items: [],
+            itemsCount: 0,
+            bytes: 0,
+            maxItems: 64,
+            maxBytes: 64 * 1024 * 1024,
+          };
+        },
+        async EnqueueInboxFollowup(_tabID, _display, _submit, _idempotency) {
+          return { itemId: `mock-${Date.now()}`, disposition: "queued_followup", position: 1, paused: false };
+        },
+        async EnqueueInboxFollowupWithInvocations(_tabID, _display, _submit, _invocations, _idempotency) {
+          return { itemId: `mock-invocation-${Date.now()}`, disposition: "queued_followup", position: 1, paused: false };
+        },
+        async EnqueueInboxSteer(_tabID, display, submit, _idempotency) {
+          const itemId = `mock-steer-${Date.now()}`;
+          emit({ kind: "steer", text: submit || display, itemId });
+          return { itemId, disposition: "steer_accepted", position: 1, paused: false };
+        },
+        async SteerInboxItem(_tabID, itemID) {
+          emit({ kind: "steer", itemId: itemID });
+          return { itemId: itemID, disposition: "steer_accepted", position: 1, paused: false };
+        },
+        async ReadInboxItem(_tabID, id) {
+          return { id, displayText: "", rawText: "", submitText: "" };
+        },
+        async UpdateInboxItem() {},
+        async DeleteInboxItem() {},
+        async MoveInboxItem() {},
+        async SetInboxPaused(_tabID, paused) { if (recoveryMock) (await import("./inboxRecoveryPreview")).setInboxRecoveryPreviewPaused(paused); },
+        async RetryInboxItem() {},
+        async RefreshInboxItem() {},
+        async InboxHasItems() { return recoveryMock; },
         async Cancel() {
           cancelled = true;
           emitMockTurnDone();
         },
         async CancelTab(_tabID) {
+          await withMockTabScope(_tabID, () => this.Cancel());
+        },
+        async CancelTabWithInboxItems(_tabID, _itemIDs) {
           await withMockTabScope(_tabID, () => this.Cancel());
         },
         async Approve(_id, allow, session, persist) {
@@ -3929,6 +4005,9 @@ function makeMockApp(): AppBindings {
     async ReadFileForTab(_tabID: string, rel: string) {
       return this.ReadFile(rel);
     },
+    async WorkspaceRevisionForTab(_tabID: string) {
+      return { revisions: { content: 0, tree: 0, workingTree: 0, gitMeta: 0, session: 0 }, watchState: "active" as const };
+    },
     async WorkspaceChanges(_tabID: string) {
       return {
         gitAvailable: true,
@@ -4280,7 +4359,7 @@ function makeMockApp(): AppBindings {
       return this.SaveDoc(path, body);
     },
     async DesktopStartupSettings() {
-      const { bot, desktopLanguage, desktopLayoutStyle, desktopTheme, desktopThemeStyle, desktopTerminalTheme, displayMode, statusBarStyle, statusBarItems, checkUpdates, conversationWidth } = settings;
+      const { bot, desktopLanguage, desktopLayoutStyle, desktopTheme, desktopThemeStyle, desktopTerminalTheme, displayMode, reasoningDisplayMode, reasoningDisplayModeExplicit, statusBarStyle, statusBarItems, checkUpdates, conversationWidth } = settings;
       return JSON.parse(JSON.stringify({
         bot,
         desktopLanguage,
@@ -4288,7 +4367,7 @@ function makeMockApp(): AppBindings {
         desktopTheme,
         desktopThemeStyle,
         desktopTerminalTheme,
-        displayMode,
+        displayMode, reasoningDisplayMode, reasoningDisplayModeExplicit,
         statusBarStyle,
         statusBarItems,
         checkUpdates,
@@ -4785,10 +4864,9 @@ function makeMockApp(): AppBindings {
         async SetDesktopMetrics(enabled: boolean) {
           settings.metrics = enabled;
         },
-        async SetDesktopConversationWidth(width: string) {
-          settings.conversationWidth = width;
-        },
-        async SetExpandThinking(_on: boolean) {},
+    async SetDesktopConversationWidth(width: string) { settings.conversationWidth = width; },
+    async SetReasoningDisplayMode(mode: "hidden" | "summary" | "auto") { if (!(["hidden", "summary", "auto"] as string[]).includes(mode)) throw new Error("invalid reasoning display mode"); settings.reasoningDisplayMode = mode; settings.reasoningDisplayModeExplicit = true; },
+        async SetExpandThinking(on: boolean) { settings.reasoningDisplayMode = on ? "auto" : "summary"; settings.reasoningDisplayModeExplicit = true; },
         async MigrateDesktopPreferences(language: string, theme: string, style: string) {
           if (!settings.desktopLanguage) settings.desktopLanguage = language === "en" || language === "zh" || language === "zh-TW" ? language : "";
           if (!settings.desktopTheme && !settings.desktopThemeStyle) {
@@ -4798,9 +4876,6 @@ function makeMockApp(): AppBindings {
         },
     async SetAgentParams(temperature: number, maxSteps: number, plannerMaxSteps: number, systemPrompt: string) {
       settings.agent = { ...settings.agent, temperature, maxSteps, plannerMaxSteps, systemPrompt };
-    },
-    async SetColdResumePrune(enabled: boolean) {
-      settings.agent = { ...settings.agent, coldResumePrune: enabled };
     },
     async SetCompactRatio(ratio: number) {
       if (!Number.isFinite(ratio) || ratio < 0.65 || ratio > 0.85) throw new Error("compact ratio must be between 0.65 and 0.85");

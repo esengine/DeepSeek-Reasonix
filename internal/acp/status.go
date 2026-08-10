@@ -80,6 +80,7 @@ type ReasonixGoalRuntime struct {
 	TurnsUsed        int    `json:"turnsUsed"`
 	TurnsLimit       int    `json:"turnsLimit"`
 	TokensUsed       int    `json:"tokensUsed"`
+	RequestsUsed     int    `json:"requestsUsed,omitempty"`
 	TokensLimit      int    `json:"tokensLimit"` // Deprecated: always 0; retained for protocol compatibility.
 	NoProgressTurns  int    `json:"noProgressTurns"`
 	NoProgressLimit  int    `json:"noProgressLimit"`
@@ -647,6 +648,7 @@ func (s *acpSession) statusSnapshot() ReasonixSessionStatus {
 				TurnsUsed:        rt.TurnsUsed,
 				TurnsLimit:       rt.TurnsLimit,
 				TokensUsed:       rt.TokensUsed,
+				RequestsUsed:     rt.RequestsUsed,
 				TokensLimit:      rt.TokensLimit,
 				NoProgressTurns:  rt.NoProgressTurns,
 				NoProgressLimit:  rt.NoProgressLimit,

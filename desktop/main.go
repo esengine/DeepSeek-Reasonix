@@ -99,8 +99,7 @@ func main() {
 	if handled, exitCode := maybeRunMacUpdateHandoff(os.Args[1:]); handled {
 		os.Exit(exitCode)
 	}
-	capturePreviousFatalCrash()
-	installFatalCrashOutput()
+	webView2ApprovalSmoke := prepareWebView2ApprovalSmoke()
 
 	launch := parseDesktopLaunchArgs(os.Args[1:])
 
@@ -109,7 +108,7 @@ func main() {
 	singleInstance := singleInstanceLock(app)
 	appMenu := app.createAppMenu()
 	dragAndDrop := &options.DragAndDrop{EnableFileDrop: true}
-	bindings := []any{app}
+	bindings := []any{app, &WebView2ApprovalSmokeBridge{app: app}}
 
 	if launch.RemoteWindowTicket != "" {
 		// A remote web child window: a second Reasonix process that hosts the
@@ -131,23 +130,14 @@ func main() {
 		appMenu = nil
 		dragAndDrop = &options.DragAndDrop{DisableWebViewDrop: true}
 		bindings = nil
-	} else {
+	} else if !webView2ApprovalSmoke {
 		// Observe previous run for crash diagnostics only. Startup tracking must
 		// never force Safe Mode, disable plugins, or select a previous binary.
 		app.previousRun = repair.NewStartupTracker("").ObservePreviousRun()
 		capturePendingUpdateHealthIdentity(app)
 	}
 
-	// Restore saved window size, or fall back to the default.
-	width, height := 1240, 720
-	if saved, ok := loadWindowState(); ok {
-		if saved.Width > 0 {
-			width = saved.Width
-		}
-		if saved.Height > 0 {
-			height = saved.Height
-		}
-	}
+	width, height := initialDesktopWindowSize()
 
 	// Restore saved desktop zoom factor (WebView2 ZoomFactor), or default to 1.0.
 	zoomFactor := 1.0
@@ -159,6 +149,7 @@ func main() {
 	// Other platforms provide a no-op implementation.
 	scheduleWebKitSignalHandlerRepair()
 
+	onStartup, onDomReady, onBeforeClose, onShutdown := app.webView2ApprovalSmokeLifecycle()
 	err := wails.Run(&options.App{
 		Title:     title,
 		Width:     width,
@@ -173,6 +164,7 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 			Middleware: assetserver.ChainMiddleware(
+				app.webView2ApprovalSmokeMiddleware(),
 				app.remoteWindowAssetMiddleware(),
 				app.jsProfilingMiddleware(),
 				app.remoteMarkdownImageMiddleware(),
@@ -180,10 +172,10 @@ func main() {
 				app.themeAssetMiddleware(),
 			),
 		},
-		OnStartup:          app.startup,
-		OnDomReady:         app.domReady,
-		OnBeforeClose:      app.beforeClose,
-		OnShutdown:         app.shutdown,
+		OnStartup:          onStartup,
+		OnDomReady:         onDomReady,
+		OnBeforeClose:      onBeforeClose,
+		OnShutdown:         onShutdown,
 		Bind:               bindings,
 		SingleInstanceLock: singleInstance,
 
@@ -229,6 +221,7 @@ func main() {
 	if err != nil {
 		println("Error:", err.Error())
 	}
+	finishWebView2ApprovalSmokeProcess(err)
 }
 
 // desktopLaunchOptions captures legacy argv that old installers/shortcuts may

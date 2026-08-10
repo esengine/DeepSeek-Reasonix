@@ -235,7 +235,7 @@ func (a *App) OpenWorkspaceInExternalOpenerForTab(tabID, id string) error {
 	if !ok {
 		return fmt.Errorf("external opener %q is not available", strings.TrimSpace(id))
 	}
-	return launchPlatformExternalOpener(spec, path)
+	return launchPlatformExternalOpener(spec, path, true)
 }
 
 func (a *App) externalOpenerWorkspacePathForTab(tabID string) (string, error) {
@@ -291,7 +291,7 @@ func (a *App) OpenLocalPathInExternalOpener(path, id string) error {
 	if !ok {
 		return fmt.Errorf("external opener %q is not available", strings.TrimSpace(id))
 	}
-	return launchPlatformExternalOpener(spec, path)
+	return launchPlatformExternalOpener(spec, path, info.IsDir())
 }
 
 // SaveLocalPathAs copies a local file to a user-selected destination without

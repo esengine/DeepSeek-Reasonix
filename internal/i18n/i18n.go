@@ -226,6 +226,7 @@ type Messages struct {
 	CmdClear            string // /clear
 	CmdCls              string // /cls
 	CmdCompact          string // /compact
+	CmdContext          string // /context
 	CmdRewind           string // /rewind
 	CmdTree             string // /tree
 	CmdBranch           string // /branch
@@ -319,7 +320,7 @@ type Messages struct {
 	GoalPausedReason             string
 	GoalPausedFmt                string // %s = stop cause
 	GoalBudgetExtended           string
-	GoalRuntimeFmt               string // turns used/limit, tokens used, no-progress, extensions
+	GoalRuntimeFmt               string // turns used/limit, tokens, requests, observational no-progress, extensions
 	GoalRuntimeLastReason        string
 	ModelSwitchUnavailable       string
 	ModelSwitchBusy              string
@@ -472,6 +473,7 @@ type Messages struct {
 	CustomPromptBaseURL  string // "Enter Base URL"
 	CustomPromptKeyEnv   string // "Enter API Key env var name"
 	CustomPromptAPIKey   string // "Enter API Key"
+	CustomPromptWindow   string // "Enter context window in tokens"
 	CustomAddedFmt       string // "Added custom model: %s"
 
 	// Anthropic compatible provider

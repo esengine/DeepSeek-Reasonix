@@ -23,7 +23,7 @@ type recordingRecoveryGate struct {
 func TestRecoveryPlanTransitionDetectsOnlyStructuralRewriteOfActivePlan(t *testing.T) {
 	a := &Agent{}
 	initial := json.RawMessage(`{"todos":[{"content":"Implement parser","status":"in_progress"}]}`)
-	if changed, _, _ := a.recoveryPlanTransition("todo_write", initial); changed {
+	if changed, _, _, _ := a.recoveryPlanTransition("todo_write", initial); changed {
 		t.Fatal("initial plan must stay on the fast path")
 	}
 
@@ -32,12 +32,12 @@ func TestRecoveryPlanTransitionDetectsOnlyStructuralRewriteOfActivePlan(t *testi
 		{Content: "Run tests", Status: "pending"},
 	})
 	progressOnly := json.RawMessage(`{"todos":[{"content":"Implement parser","status":"completed"},{"content":"Run tests","status":"in_progress"}]}`)
-	if changed, _, _ := a.recoveryPlanTransition("todo_write", progressOnly); changed {
+	if changed, _, _, _ := a.recoveryPlanTransition("todo_write", progressOnly); changed {
 		t.Fatal("progress-only update must not invoke the plan reviewer")
 	}
 
 	replacement := json.RawMessage(`{"todos":[{"content":"Replace parser architecture","status":"in_progress"},{"content":"Run tests","status":"pending"}]}`)
-	changed, before, after := a.recoveryPlanTransition("todo_write", replacement)
+	changed, before, after, _ := a.recoveryPlanTransition("todo_write", replacement)
 	if !changed {
 		t.Fatal("structural rewrite of active plan was not detected")
 	}
@@ -50,7 +50,7 @@ func TestRecoveryPlanTransitionIgnoresCompletedPriorPlan(t *testing.T) {
 	a := &Agent{}
 	a.setTodoState([]evidence.TodoItem{{Content: "Old task", Status: "completed"}})
 	next := json.RawMessage(`{"todos":[{"content":"New user task","status":"in_progress"}]}`)
-	if changed, _, _ := a.recoveryPlanTransition("todo_write", next); changed {
+	if changed, _, _, _ := a.recoveryPlanTransition("todo_write", next); changed {
 		t.Fatal("a new task after a completed plan is not a mid-plan transition")
 	}
 }

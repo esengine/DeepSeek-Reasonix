@@ -51,14 +51,10 @@ const (
 	// defaultBaseURL is the first-party endpoint; config may override it (e.g. a
 	// gateway). Bedrock/Vertex use a different request shape and are out of scope.
 	defaultBaseURL = "https://api.anthropic.com"
-	// defaultMaxTokens is the conservative output ceiling used when neither the
-	// provider config nor the request supplies one. Anthropic requires max_tokens,
-	// but support is model-specific, so native Anthropic and unknown compatible
-	// gateways must not inherit a universal 128K request.
-	defaultMaxTokens = provider.DefaultReasoningOutputTokens
-	// deepSeekDefaultMaxTokens is safe only for the official DeepSeek Anthropic-
-	// compatible endpoint, whose reasoning models support the higher ceiling.
-	deepSeekDefaultMaxTokens = provider.DefaultHighOutputTokens
+	// defaultMaxTokens is the mandatory Anthropic fallback when neither config
+	// nor request supplies max_tokens. Ordinary turns use 16K; reasoning-capable
+	// paths raise via AutoOutputBudget. 128K is never automatic.
+	defaultMaxTokens = provider.DefaultOrdinaryOutputTokens
 )
 
 func init() {
@@ -110,11 +106,21 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	authHeader, _ := cfg.Extra["auth_header"].(bool)
 	maxOutputTokens, _ := cfg.Extra["max_output_tokens"].(int)
 	if maxOutputTokens <= 0 {
-		// Messages requires max_tokens, so an optional-budget disable request
-		// falls back to the provider's stable mandatory default.
-		maxOutputTokens = defaultMaxTokens
+		// Messages requires max_tokens. 0 = automatic; negative also falls back
+		// because the wire field is mandatory.
+		reasoningOn := officialDeepSeek &&
+			!strings.EqualFold(thinking, "disabled") &&
+			!strings.EqualFold(effort, "disabled") &&
+			!strings.EqualFold(effort, "off") &&
+			!strings.EqualFold(effort, "none")
 		if officialDeepSeek {
-			maxOutputTokens = deepSeekDefaultMaxTokens
+			maxOutputTokens = provider.AutoOutputBudget(reasoningOn, effort)
+		} else {
+			// Native Anthropic and unknown gateways: conservative ordinary default.
+			maxOutputTokens = defaultMaxTokens
+			if strings.EqualFold(thinking, "adaptive") || strings.EqualFold(thinking, "enabled") {
+				maxOutputTokens = provider.AutoOutputBudget(true, effort)
+			}
 		}
 	}
 	httpClient, err := newHTTPClient(cfg)

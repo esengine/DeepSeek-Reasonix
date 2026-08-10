@@ -54,7 +54,7 @@ export function ContextWindowRing({ enabled = true, context, tabId, turnCost, cu
   const used = context?.used ?? 0;
   const windowTokens = context?.window ?? 0;
   const usagePct = windowTokens > 0 ? Math.min(100, Math.round((used / windowTokens) * 100)) : 0;
-  const compactRatio = context?.compactRatio && context.compactRatio > 0 ? context.compactRatio : 0.8;
+  const compactRatio = context?.compactRatio && context.compactRatio > 0 ? context.compactRatio : 0.85;
   const compactPct = Math.round(compactRatio * 100);
   const status = contextWindowStatus(usagePct, compactPct);
 

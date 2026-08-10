@@ -43,6 +43,41 @@ func IsOfficialDeepSeekWebSearchEndpoint(e *ProviderEntry) bool {
 	}
 }
 
+// IsOpenCodeGoDeepSeekWebSearchEndpoint matches the exact OpenCode Go routes
+// and model set verified to execute provider-side search. The capability is
+// model-scoped because the existing Anthropic preset also contains Qwen and
+// MiniMax models whose server-tool behavior is independent and not implied by
+// the shared endpoint.
+func IsOpenCodeGoDeepSeekWebSearchEndpoint(e *ProviderEntry) bool {
+	if !SupportsServerWebSearch(e) {
+		return false
+	}
+	u, err := url.Parse(strings.TrimSpace(e.BaseURL))
+	if err != nil || !strings.EqualFold(u.Scheme, "https") || !strings.EqualFold(u.Hostname(), "opencode.ai") ||
+		u.Port() != "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return false
+	}
+	models := e.ModelList()
+	if len(models) != 1 || !strings.EqualFold(strings.TrimSpace(models[0]), "deepseek-v4-flash") {
+		return false
+	}
+	path := strings.TrimRight(u.EscapedPath(), "/")
+	switch strings.ToLower(strings.TrimSpace(e.Kind)) {
+	case "responses":
+		return path == "/zen/go/v1"
+	case "anthropic":
+		return path == "/zen/go"
+	default:
+		return false
+	}
+}
+
+// HasServerWebSearchCapability reports backend-verified endpoint/model pairs
+// that the Desktop can safely expose as a provider-side web-search toggle.
+func HasServerWebSearchCapability(e *ProviderEntry) bool {
+	return IsOfficialDeepSeekWebSearchEndpoint(e) || IsOpenCodeGoDeepSeekWebSearchEndpoint(e)
+}
+
 // EffectiveWebSearch resolves the persisted tri-state. Official DeepSeek
 // Anthropic and Responses endpoints default on when old configuration omitted
 // web_search, while compatible third-party endpoints remain opt-in. An explicit

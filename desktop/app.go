@@ -125,7 +125,8 @@ type PromptHistoryResult struct {
 // flow the other way: each tab's controller emits to a tabEventSink that
 // forwards events tagged with tabId to the webview via runtime.EventsEmit.
 type App struct {
-	ctx context.Context
+	ctx          context.Context
+	workspaceHub *workspaceChangeHub
 
 	// taskCtrl is the process-wide task-monitor control service (lazy; see
 	// taskControl). One instance serializes control operations in-process.
@@ -539,6 +540,7 @@ func NewApp() *App {
 		remoteWindows:       newRemoteWindowRegistry(),
 		remoteWindowOwnerID: newRemoteWindowOwnerID(),
 	}
+	a.workspaceHub = newWorkspaceChangeHub(a)
 	a.terminals = newTerminalManager(a)
 	a.botBridge = a.newBotBridge()
 	return a
@@ -958,6 +960,9 @@ func (a *App) shutdown(context.Context) {
 	if a.remoteWindowTicket != "" {
 		// Remote web window child: nothing to snapshot or stop locally.
 		return
+	}
+	if a.workspaceHub != nil {
+		a.workspaceHub.close()
 	}
 	// A real quit also terminates surviving web windows: their tunnels die with
 	// this process, so a leftover window would only show a dead Serve page.
@@ -6639,21 +6644,6 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// ContextInfo is the prompt-vs-window gauge payload plus session totals. Used
-// and Window both zero means no context-window data yet.
-type ContextInfo struct {
-	Used            int                         `json:"used"`
-	Window          int                         `json:"window"`
-	SessionTokens   int                         `json:"sessionTokens"`
-	CompactRatio    float64                     `json:"compactRatio,omitempty"`
-	SessionCost     float64                     `json:"sessionCost,omitempty"`
-	SessionCurrency string                      `json:"sessionCurrency,omitempty"`
-	CacheHitTokens  int                         `json:"cacheHitTokens,omitempty"`
-	CacheMissTokens int                         `json:"cacheMissTokens,omitempty"`
-	Estimated       bool                        `json:"estimated,omitempty"`
-	Sources         map[string]usageSourceStats `json:"sources,omitempty"`
-}
-
 // ContextUsage returns the latest context-window gauge numbers.
 func (a *App) ContextUsage() ContextInfo {
 	return a.ContextUsageForTab("")
@@ -6692,17 +6682,13 @@ func (a *App) ContextUsageForTab(tabID string) ContextInfo {
 	if ctrl == nil {
 		return info
 	}
+	// The gauge measures the loaded view, so a rebound session reports its real
+	// fill immediately and no longer needs the persisted last-turn fallback.
 	used, window := ctrl.ContextSnapshot()
 	info.Used = used
 	info.Window = window
-	// Session rebind (project-tree switch) rebuilds the controller: the fresh
-	// executor has no per-turn usage yet, so ContextSnapshot reports used=0.
-	// Fall back to the telemetry-persisted last-used value so the status bar
-	// shows the fill percentage from the last turn instead of 0%.
-	if used == 0 && snap.Usage.LastUsedTokens > 0 {
-		info.Used = snap.Usage.LastUsedTokens
-	}
 	info.CompactRatio = ctrl.CompactRatio()
+	info.Maintenance = contextMaintenanceInfo(ctrl.ContextMaintenanceSnapshot())
 	return info
 }
 
@@ -6840,16 +6826,15 @@ type Meta struct {
 	Goal              string             `json:"goal,omitempty"`
 	GoalStatus        string             `json:"goalStatus,omitempty"`
 	GoalRuntime       *GoalRuntimeView   `json:"goalRuntime,omitempty"`
-	// A nil pointer means the controller cannot provide an authoritative snapshot;
-	// a non-nil pointer preserves an empty list as an explicit panel clear.
+	// Nil means no authoritative snapshot; non-nil empty means clear the panel.
 	CanonicalTodos *[]evidence.TodoItem `json:"canonicalTodos,omitempty"`
 }
 
-// GoalRuntimeView is the desktop-facing Goal budget/runtime summary.
 type GoalRuntimeView struct {
 	TurnsUsed        int    `json:"turnsUsed"`
 	TurnsLimit       int    `json:"turnsLimit"`
 	TokensUsed       int    `json:"tokensUsed"`
+	RequestsUsed     int    `json:"requestsUsed,omitempty"`
 	TokensLimit      int    `json:"tokensLimit"` // Deprecated: always 0; retained for bridge compatibility.
 	NoProgressTurns  int    `json:"noProgressTurns"`
 	NoProgressLimit  int    `json:"noProgressLimit"`
@@ -6867,6 +6852,7 @@ func goalRuntimeViewFromController(ctrl control.SessionAPI) *GoalRuntimeView {
 		TurnsUsed:        rt.TurnsUsed,
 		TurnsLimit:       rt.TurnsLimit,
 		TokensUsed:       rt.TokensUsed,
+		RequestsUsed:     rt.RequestsUsed,
 		TokensLimit:      rt.TokensLimit,
 		NoProgressTurns:  rt.NoProgressTurns,
 		NoProgressLimit:  rt.NoProgressLimit,

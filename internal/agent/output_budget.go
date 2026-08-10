@@ -16,6 +16,7 @@ type outputBudgetState struct {
 	outputBudget      int
 	activeReqShape    atomic.Pointer[requestCalibrationShape]
 	promptCalibration atomic.Pointer[promptTokenCalibration]
+	contextUsage      atomic.Pointer[contextUsage] // gauge's memoised prompt size
 }
 
 type promptTokenCalibration struct {
@@ -37,10 +38,14 @@ type requestCalibrationShape struct {
 	cjkBytes     int64
 }
 
+// resetOutputBudgetState drops what belongs to the transcript being replaced.
+// The prompt-token calibration is a property of the model's tokenizer, and a
+// model switch rebuilds the agent, so it outlives the swap: dropping it sent
+// every rebind — resume, tab switch, recovery adopt — back to the cold
+// estimate for a turn.
 func (a *Agent) resetOutputBudgetState() {
 	a.lastUsage.Store(nil)
 	a.activeReqShape.Store(nil)
-	a.promptCalibration.Store(nil)
 }
 
 func (a *Agent) setPromptTokenCalibration(promptTokens int, shape requestCalibrationShape) {
@@ -182,72 +187,43 @@ func (a *Agent) calibratedPromptTokens(shape requestCalibrationShape) (int, bool
 		ratio := float64(cal.promptTokens) / float64(cal.requestChars)
 		if ratio > 0.05 && ratio < 2 {
 			trustedChars := shape.requestChars
-			excessCJKRunes := int64(0)
+			excessCJKBytes := int64(0)
 			// A higher CJK share cannot safely reuse the aggregate ratio. Scale its
-			// represented share and apply the cold two-token floor only to excess,
+			// represented share and price only the excess at the cold rate,
 			// preserving exact calibration for stable CJK sessions.
 			if shape.cjkRunes*cal.requestChars > cal.cjkRunes*shape.requestChars {
-				trustedCJKBytes := cal.cjkBytes * shape.requestChars / cal.requestChars
-				trustedCJKRunes := cal.cjkRunes * shape.requestChars / cal.requestChars
-				trustedCJKBytes = min(trustedCJKBytes, shape.cjkBytes)
-				trustedCJKRunes = min(trustedCJKRunes, shape.cjkRunes)
-				trustedChars -= shape.cjkBytes - trustedCJKBytes
-				excessCJKRunes = shape.cjkRunes - trustedCJKRunes
+				trustedCJKBytes := min(cal.cjkBytes*shape.requestChars/cal.requestChars, shape.cjkBytes)
+				excessCJKBytes = shape.cjkBytes - trustedCJKBytes
+				trustedChars -= excessCJKBytes
 			}
-			return int(math.Ceil(float64(trustedChars)*ratio)) + int(2*excessCJKRunes), true
+			cold := math.Ceil(float64(excessCJKBytes) * fallbackTokPerChar)
+			return int(math.Ceil(float64(trustedChars)*ratio) + cold), true
 		}
 	}
 	return 0, false
 }
 
-// estimatedPromptTokens sizes the final provider-visible messages for overflow
-// protection. Real same-session usage calibrates the estimate; before that,
-// CJK text gets a conservative second token per rune to cover the measured
-// tokenizer gap that can otherwise postpone compaction past the hard limit.
+// estimatedPromptTokens sizes the provider-visible messages in real tokens —
+// the only unit comparable against the context window. Same-session usage
+// calibrates it; before that the wire character count carries the ~4 chars per
+// token shape. estimateMessagesTokens counts characters and is for internal
+// planning budgets only; against the window it would compact 4x early.
 func (a *Agent) estimatedPromptTokens(msgs []provider.Message) int {
-	est := estimateMessagesTokens(provider.ModelMessages(msgs))
-	if est <= 0 {
-		return 0
-	}
-	if calibrated, ok := a.calibratedPromptTokens(a.requestCalibrationShape(provider.Request{Messages: msgs})); ok {
-		return calibrated
-	}
-	return est + cjkRunesInMessages(msgs)
+	return a.estimatedShapeTokens(a.requestCalibrationShape(provider.Request{Messages: msgs}))
 }
 
 func (a *Agent) estimatedRequestTokens(req provider.Request) int {
-	if calibrated, ok := a.calibratedPromptTokens(a.requestCalibrationShape(req)); ok {
+	return a.estimatedShapeTokens(a.requestCalibrationShape(req))
+}
+
+func (a *Agent) estimatedShapeTokens(shape requestCalibrationShape) int {
+	if shape.requestChars <= 0 {
+		return 0
+	}
+	if calibrated, ok := a.calibratedPromptTokens(shape); ok {
 		return calibrated
 	}
-	return a.estimatedPromptTokens(req.Messages) + estimateToolSchemaTokens(req.Tools)
-}
-
-func cjkRunesInMessages(msgs []provider.Message) int {
-	total := 0
-	for _, msg := range msgs {
-		if msg.LocalOnly {
-			continue
-		}
-		total += cjkRunesIn(msg.Content) + cjkRunesIn(msg.ReasoningContent)
-		total += cjkRunesIn(msg.Name) + cjkRunesIn(msg.ToolCallID)
-		for _, call := range msg.ToolCalls {
-			total += cjkRunesIn(call.ID) + cjkRunesIn(call.Name) + cjkRunesIn(call.Arguments)
-		}
-		for _, item := range msg.ResponsesItems {
-			total += cjkRunesIn(string(item))
-		}
-	}
-	return total
-}
-
-func cjkRunesIn(s string) int {
-	total := 0
-	for _, r := range s {
-		if isCJKRune(r) {
-			total++
-		}
-	}
-	return total
+	return int(float64(shape.requestChars) * fallbackTokPerChar)
 }
 
 func isCJKRune(r rune) bool {
@@ -257,22 +233,8 @@ func isCJKRune(r rune) bool {
 		(r >= 0xAC00 && r <= 0xD7AF)
 }
 
-func estimateToolSchemaTokens(schemas []provider.ToolSchema) int {
-	total := 0
-	for _, schema := range schemas {
-		total += 8
-		total += estimateTextTokens(schema.Name)
-		total += estimateTextTokens(schema.Description)
-		total += estimateTextTokens(string(schema.Parameters))
-	}
-	return total
-}
-
-// effectiveOutputBudget returns an explicit smaller output budget only when a
-// shared-window request would otherwise exceed the configured context window.
-// The final extension-adjusted request is measured, so later payload rewrites
-// cannot invalidate the decision. An exhausted window fails locally instead of
-// sending a request the provider will reject with HTTP 400.
+// effectiveOutputBudget clips completion tokens at send time only; it never
+// moves compact_ratio. Exhausted windows fail locally before HTTP 400.
 func (a *Agent) effectiveOutputBudget(req provider.Request) (int, bool, error) {
 	if a == nil || a.contextWindow <= 0 || !sharesContextWindow(a.prov) {
 		return 0, false, nil

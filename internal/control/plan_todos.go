@@ -5,6 +5,7 @@ package control
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -17,6 +18,7 @@ type seedTodo struct {
 	Content string `json:"content"`
 	Status  string `json:"status"`
 	Level   int    `json:"level,omitempty"`
+	StepID  string `json:"step_id,omitempty"`
 }
 
 // seedPlanTodos turns an approved plan into a starter task list and emits it as a
@@ -153,6 +155,12 @@ func parsePlanTodos(plan string) []seedTodo {
 	if todos[0].Level == 1 {
 		todos[0].Level = 0
 	}
+	// The markdown has no identity of its own, so the host mints one per item.
+	// Seeded ids are what let a later rewrite retitle or insert steps without
+	// detaching the completions already signed off against them.
+	for i := range todos {
+		todos[i].StepID = fmt.Sprintf("plan_step_%02d", i+1)
+	}
 	normalized := evidence.NormalizeSerialTodos(seedTodoEvidenceState(todos))
 	for i := range todos {
 		todos[i].Status = normalized[i].Status
@@ -168,6 +176,7 @@ func seedTodoEvidenceState(todos []seedTodo) []evidence.TodoItem {
 			Content: todo.Content,
 			Status:  todo.Status,
 			Level:   todo.Level,
+			StepID:  todo.StepID,
 		}
 	}
 	return state

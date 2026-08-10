@@ -114,7 +114,6 @@ var (
 	legacyOpenCodeGoModels           = []string{"glm-5.2", "glm-5.1", "kimi-k2.7-code", "kimi-k2.6", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5-pro", "mimo-v2.5"}
 	opencodeGoModels                 = []string{"glm-5.2", "glm-5.1", "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5-pro", "mimo-v2.5"}
 	opencodeGoVisionModels           = []string{"kimi-k3"}
-	opencodeGoAnthropicModels        = []string{"qwen3.7-plus", "qwen3.7-max", "qwen3.6-plus", "minimax-m3", "minimax-m2.7", "minimax-m2.5"}
 	opencodeZenAnthropicModels       = []string{"claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5", "qwen3.6-plus", "qwen3.5-plus", "qwen3.6-plus-free"}
 	opencodeZenAnthropicVisionModels = []string{"claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"}
 
@@ -706,23 +705,9 @@ var curatedProviderPresets = []ProviderPreset{
 			},
 		}},
 	},
-	{
-		ID:          "opencode-go-anthropic",
-		Label:       "OpenCode Go Anthropic",
-		Description: "OpenCode Go subscription Anthropic-compatible route for Qwen and MiniMax models.",
-		KeyEnv:      "OPENCODE_GO_API_KEY",
-		Entries: []ProviderEntry{{
-			Name:          "opencode-go-anthropic",
-			Kind:          "anthropic",
-			BaseURL:       "https://opencode.ai/zen/go",
-			Models:        opencodeGoAnthropicModels,
-			VisionModels:  []string{"qwen3.7-plus", "qwen3.6-plus"},
-			Default:       "qwen3.7-plus",
-			APIKeyEnv:     "OPENCODE_GO_API_KEY",
-			Thinking:      "adaptive",
-			ContextWindow: 262144,
-		}},
-	},
+	opencodeGoAnthropicPreset,
+	opencodeGoDeepSeekAnthropicPreset,
+	opencodeGoDeepSeekResponsesPreset,
 	{
 		ID:          "opencode-zen-anthropic",
 		Label:       "OpenCode Zen Anthropic",

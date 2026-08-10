@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -27,10 +28,11 @@ func init() { tool.RegisterBuiltin(completeStep{}) }
 type completeStep struct{}
 
 type stepEvidence struct {
-	Kind    string   `json:"kind"`
-	Summary string   `json:"summary"`
-	Command string   `json:"command,omitempty"`
-	Paths   []string `json:"paths,omitempty"`
+	Kind        string   `json:"kind"`
+	Summary     string   `json:"summary"`
+	Command     string   `json:"command,omitempty"`
+	Paths       []string `json:"paths,omitempty"`
+	CriterionID string   `json:"criterion_id,omitempty"`
 }
 
 // validEvidenceKinds are the evidence forms a completion may cite. "checkpoint"
@@ -46,15 +48,16 @@ var validEvidenceKinds = map[string]bool{
 func (completeStep) Name() string { return "complete_step" }
 
 func (completeStep) Description() string {
-	return "Record the evidence-backed completion of ONE step of an approved plan. Call it as you finish each step instead of silently moving on: it signs the step off with PROOF it is done — the verification you ran (command + result), a completed built-in review that is fresh for any later changes, the diff/files you changed, or a manual check. A completion with no evidence is REJECTED, so don't claim a step is done until you can show why. The host advances the task list for you when you sign off — it marks this step completed and moves the next to in_progress, so you don't need a separate todo_write to mark completions. Fields: `step` (which step — its title or number, matching the task list), `result` (what is now true/changed), `evidence` (≥1 item, each with `kind` = verification|review|diff|files|manual and a `summary`, plus optional `command`/`paths`), and optional `notes`."
+	return "Record the evidence-backed completion of ONE step of an approved plan. Call it as you finish each step instead of silently moving on: it signs the step off with PROOF it is done — the verification you ran (command + result), a completed built-in review that is fresh for any later changes, the diff/files you changed, or a manual check. A completion with no evidence is REJECTED, so don't claim a step is done until you can show why. The host advances the task list for you when you sign off — it marks this step completed and moves the next to in_progress, so you don't need a separate todo_write to mark completions. Fields: `step` (which step — its title or number, matching the task list), `result` (what is now true/changed), `evidence` (≥1 item, each with `kind` = verification|review|diff|files|manual and a `summary`, plus optional `command`/`paths`, and `criterion_id` naming the acceptance criterion the proof satisfies), and optional `notes`."
 }
 
 func (completeStep) Schema() json.RawMessage {
 	return json.RawMessage(`{
 "type":"object",
 "properties":{
-  "step":{"type":"string","description":"Which plan step this completes — its title or number, matching the task list."},
-  "step_index":{"type":"integer","minimum":1,"description":"Optional 1-based task-list item number. Prefer this when the step title is long or easy to mistype."},
+  "step_id":{"type":"string","description":"PREFERRED: the stable step_id of the task-list item this completes, e.g. \"plan_step_02\". Unlike a title or a number it survives retitles, insertions, and reordering, so cite it whenever the item has one."},
+  "step":{"type":"string","description":"Which plan step this completes — its title or number, matching the task list. Use only when the item has no step_id."},
+  "step_index":{"type":"integer","minimum":1,"description":"Optional 1-based task-list item number. Use only when the item has no step_id; an index goes stale the moment a step is inserted above it."},
   "result":{"type":"string","description":"What is now true or changed as a result of finishing this step."},
   "evidence":{
     "type":"array",
@@ -63,6 +66,7 @@ func (completeStep) Schema() json.RawMessage {
     "items":{
       "type":"object",
       "properties":{
+        "criterion_id":{"type":"string","description":"The acceptance criterion this proof satisfies, as the plan renders it (e.g. \"c2\" from \"accept [c2]: ...\"). Cite it whenever the step has criteria: a command succeeding is not the same as a criterion being met, and the host records the proof against the criterion you name."},
         "kind":{"type":"string","enum":["verification","review","diff","files","manual"],"description":"verification = a command/test was run (command REQUIRED); review = a built-in review run completed and, after changes, inspected the latest changed result (the verdict/findings still apply separately); diff = a concrete code change (paths REQUIRED); files = files created/edited/inspected (paths REQUIRED); manual = a manual check."},
         "summary":{"type":"string","description":"The evidence itself: the test result, what the diff does, or what was confirmed."},
         "command":{"type":"string","description":"REQUIRED for verification evidence: the command as it actually ran (e.g. \"go test ./...\") — it is checked against this session's real command history."},
@@ -95,6 +99,7 @@ func (completeStep) PlanModeSafe() bool { return false }
 
 func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
+		StepID    string         `json:"step_id"`
 		Step      string         `json:"step"`
 		StepIndex int            `json:"step_index"`
 		Result    string         `json:"result"`
@@ -104,9 +109,9 @@ func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, 
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
-	step := completeStepIdentity(p.Step, p.StepIndex)
+	step := completeStepIdentity(p.StepID, p.Step, p.StepIndex)
 	if step == "" {
-		return "", fmt.Errorf("step or step_index is required — name the plan step you are completing, or cite its 1-based task-list number")
+		return "", fmt.Errorf("step_id, step, or step_index is required — cite the task-list item you are completing, preferring its stable step_id")
 	}
 	if p.StepIndex < 0 {
 		return "", fmt.Errorf("step_index must be a positive 1-based task-list number")
@@ -126,6 +131,9 @@ func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, 
 			return "", fmt.Errorf("evidence %d: summary is required — the evidence is the summary, not just its kind", i+1)
 		}
 		kinds = append(kinds, e.Kind)
+	}
+	if err := verifyCitedCriteria(ctx, p.Evidence); err != nil {
+		return "", err
 	}
 
 	todoMatch, hasTodo, err := verifyTodoStep(ctx, step)
@@ -163,7 +171,13 @@ func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, 
 		step, len(p.Evidence), strings.Join(kinds, ", "), hostStatus+todoStatus+projectStatus, advanceStatus), nil
 }
 
-func completeStepIdentity(step string, stepIndex int) string {
+// completeStepIdentity picks the citation to resolve against the task list,
+// most stable first: an id survives a replan, an index survives a retitle, a
+// title survives neither.
+func completeStepIdentity(stepID, step string, stepIndex int) string {
+	if id := strings.TrimSpace(stepID); id != "" {
+		return id
+	}
 	if stepIndex > 0 {
 		return strconv.Itoa(stepIndex)
 	}
@@ -295,6 +309,9 @@ func verifyTodoStep(ctx context.Context, step string) (evidence.TodoStepMatch, b
 		if allCompleted {
 			last := len(todos) - 1
 			return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q has no matching todo_write item and every current todo is already completed; this is a renewal sign-off, so retry complete_step with step_index %d (the final existing todo %q) and the fresh evidence — do not invent a new step or rewrite the completed list", step, last+1, todos[last].Content)
+		}
+		if ids := evidence.TodoStepIDs(todos); len(ids) > 0 {
+			return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q has no matching todo_write item in the current task list; cite the item's stable step_id — available ids: %s (list: %s)", step, strings.Join(ids, ", "), todoListInventory(todos))
 		}
 		return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q has no matching todo_write item in the current task list; cite a todo verbatim or by number: %s", step, todoListInventory(todos))
 	}
@@ -501,4 +518,23 @@ func extractCommandFromCall(name string, argsJSON string) string {
 		return name
 	}
 	return name + " " + args.Path
+}
+
+// verifyCitedCriteria rejects a proof citing a criterion the approved plan does
+// not have. Resolving an unknown id into nothing would leave the real criterion
+// unproven and only surface much later, as a completion the host refuses for a
+// reason the model never connected to this call.
+func verifyCitedCriteria(ctx context.Context, items []stepEvidence) error {
+	known, ok := evidence.AcceptanceCriteriaFromContext(ctx)
+	if !ok {
+		return nil
+	}
+	for i, item := range items {
+		id := strings.TrimSpace(item.CriterionID)
+		if id == "" || slices.Contains(known, id) {
+			continue
+		}
+		return fmt.Errorf("evidence %d: criterion_id %q is not in the approved plan; cite one of: %s", i+1, id, strings.Join(known, ", "))
+	}
+	return nil
 }

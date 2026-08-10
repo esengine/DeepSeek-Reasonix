@@ -106,15 +106,21 @@ func TestRequestUsesOnlySafeProviderOutputDefaults(t *testing.T) {
 
 	deepseek := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash"}).(*client)
 	deepseekBody, _, _ := deepseek.buildRequestBody(provider.Request{Messages: message})
-	if got := deepseekBody["max_output_tokens"]; got != 131072 {
-		t.Fatalf("DeepSeek max_output_tokens = %#v, want 131072", got)
+	if got := deepseekBody["max_output_tokens"]; got != provider.DefaultHighReasoningOutputTokens {
+		t.Fatalf("DeepSeek max_output_tokens = %#v, want high-reasoning auto %d", got, provider.DefaultHighReasoningOutputTokens)
+	}
+
+	high := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", Effort: "high"}).(*client)
+	highBody, _, _ := high.buildRequestBody(provider.Request{Messages: message})
+	if got := highBody["max_output_tokens"]; got != provider.DefaultHighReasoningOutputTokens {
+		t.Fatalf("high-effort DeepSeek budget = %#v, want %d", got, provider.DefaultHighReasoningOutputTokens)
 	}
 
 	for _, effort := range []string{"none", "disabled", "off", " NONE "} {
 		thinkingDisabled := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", Effort: effort}).(*client)
 		thinkingDisabledBody, _, _ := thinkingDisabled.buildRequestBody(provider.Request{Messages: message})
-		if _, exists := thinkingDisabledBody["max_output_tokens"]; exists {
-			t.Fatalf("thinking-disabled DeepSeek effort %q received an automatic output budget: %#v", effort, thinkingDisabledBody)
+		if got := thinkingDisabledBody["max_output_tokens"]; got != provider.DefaultOrdinaryOutputTokens {
+			t.Fatalf("thinking-disabled DeepSeek effort %q budget = %#v, want ordinary %d", effort, got, provider.DefaultOrdinaryOutputTokens)
 		}
 	}
 
@@ -302,7 +308,7 @@ func TestStreamToleratesWebSearchLifecycleEvents(t *testing.T) {
 	}
 }
 
-func TestDeepSeekStatelessReplayPreservesCompletedWebSearchCall(t *testing.T) {
+func TestEnabledStatelessWebSearchPreservesCompletedCallForCompatibleGateway(t *testing.T) {
 	var bodies []map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -323,10 +329,7 @@ func TestDeepSeekStatelessReplayPreservesCompletedWebSearchCall(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := New(Config{Name: "deepseek", APIKey: "key", BaseURL: server.URL, Model: "deepseek-v4-flash", Mode: "stateless", WebSearch: true}).(*client)
-	// The test server is local, so pin the vendor classification to the official
-	// DeepSeek behavior under test without weakening production URL detection.
-	client.vendor = "deepseek"
+	client := New(Config{Name: "compatible", APIKey: "key", BaseURL: server.URL, Model: "deepseek-v4-flash", Mode: "stateless", WebSearch: true}).(*client)
 	first := collect(t, client, provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "search"}}})
 	var replayItems []json.RawMessage
 	for _, chunk := range first {
@@ -360,7 +363,7 @@ func TestDeepSeekStatelessReplayPreservesCompletedWebSearchCall(t *testing.T) {
 	}
 }
 
-func TestResponsesItemsAreIgnoredOutsideOfficialDeepSeekWire(t *testing.T) {
+func TestResponsesItemsAreIgnoredWhenServerWebSearchIsDisabled(t *testing.T) {
 	raw := json.RawMessage(`{"id":"ws_1","type":"web_search_call","status":"completed"}`)
 	client := New(Config{Name: "compatible", BaseURL: "https://gateway.example", Model: "m", Mode: "stateless"}).(*client)
 	body, _, _ := client.buildRequestBody(provider.Request{Messages: []provider.Message{
@@ -383,7 +386,7 @@ func TestDeepSeekReplayDropsMalformedOrIncompleteSearchItems(t *testing.T) {
 		json.RawMessage(`{"id":"fc_1","type":"function_call","status":"completed"}`),
 		json.RawMessage(`{"id":`),
 	}
-	client := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", Mode: "stateless"}).(*client)
+	client := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", Mode: "stateless", WebSearch: true}).(*client)
 	body, _, _ := client.buildRequestBody(provider.Request{Messages: []provider.Message{
 		{Role: provider.RoleUser, Content: "search"},
 		{Role: provider.RoleAssistant, Content: "answer", ResponsesItems: items},
@@ -1151,27 +1154,23 @@ func TestReasoningMetaChunkEndToEnd(t *testing.T) {
 	}
 }
 
-// TestVendorTableMaxOutputTokens：默认输出预算完全由 vendor 表驱动——
-// mimo 128000（长思考不截断）、deepseek 128K、unknown 不设。
+// TestVendorTableMaxOutputTokens: automatic ladder is 16K/32K/64K, never 128K.
 func TestVendorTableMaxOutputTokens(t *testing.T) {
 	msg := []provider.Message{{Role: provider.RoleUser, Content: "hi"}}
 
-	// mimo：表默认 128000（思考模式不设会顶到服务端 32768 截断）
 	mimo := New(Config{Name: "mimo", BaseURL: "https://api.xiaomimimo.com/v1", Model: "mimo-v2.5-pro"}).(*client)
 	body, _, _ := mimo.buildRequestBody(provider.Request{Messages: msg})
-	if got := body["max_output_tokens"]; got != 128000 {
-		t.Fatalf("mimo max_output_tokens = %#v, want 128000 (vendor table)", got)
+	if got := body["max_output_tokens"]; got != provider.DefaultReasoningOutputTokens {
+		t.Fatalf("mimo max_output_tokens = %#v, want reasoning %d", got, provider.DefaultReasoningOutputTokens)
 	}
-	// mimo 思考禁用也设 128000（mimo 无 thinking-disabled 豁免——表无条件）
 	noThinking := New(Config{Name: "mimo", BaseURL: "https://api.xiaomimimo.com/v1", Model: "mimo-v2.5-pro", Effort: "none"}).(*client)
 	nb, _, _ := noThinking.buildRequestBody(provider.Request{Messages: msg})
-	if nb["max_output_tokens"] != 128000 {
-		t.Fatalf("mimo thinking-disabled budget = %#v, want 128000", nb["max_output_tokens"])
+	if nb["max_output_tokens"] != provider.DefaultOrdinaryOutputTokens {
+		t.Fatalf("mimo thinking-disabled budget = %#v, want ordinary %d", nb["max_output_tokens"], provider.DefaultOrdinaryOutputTokens)
 	}
-	// deepseek 值来自表（非硬编码常量）
 	ds := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro"}).(*client)
 	db, _, _ := ds.buildRequestBody(provider.Request{Messages: msg})
-	if got := db["max_output_tokens"]; got != capabilitiesFor("deepseek").defaultMaxOutputTokens {
-		t.Fatalf("deepseek budget must come from vendor table, got %#v", got)
+	if got := db["max_output_tokens"]; got != provider.DefaultHighReasoningOutputTokens {
+		t.Fatalf("deepseek auto budget = %#v, want high-reasoning %d", got, provider.DefaultHighReasoningOutputTokens)
 	}
 }

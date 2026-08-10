@@ -2,6 +2,8 @@
 // One event channel carries every kind; `kind` discriminates the payload.
 
 import type { Todo } from "./tools";
+import type { ContextMaintenanceInfo, WireContextMaintenance } from "./contextMaintenanceTypes";
+export type { ContextMaintenanceInfo, ContextMaintenanceReceipt, WireContextMaintenance } from "./contextMaintenanceTypes";
 
 export type EventKind =
   | "turn_started"
@@ -25,7 +27,9 @@ export type EventKind =
   | "guardian_assessment"
   | "extension_surface"
   | "extension_status"
-  | "stream_attempt";
+  | "stream_attempt"
+  | "context_maintenance"
+  | "workspace_changed";
 
 export type StreamAttemptAction = "begin" | "discard" | "commit";
 
@@ -292,6 +296,7 @@ export interface WireEvent {
   approval?: WireApproval;
   ask?: WireAsk;
   compaction?: WireCompaction;
+  maintenance?: WireContextMaintenance;
   guardian?: WireGuardian;
   decisionReceipt?: WireDecisionReceipt;
   extension?: WireExtensionSurface;
@@ -305,6 +310,9 @@ export interface WireEvent {
   /** Optional: "headers" | "stream". Older clients ignore unknown fields. */
   retryScope?: "headers" | "stream";
   streamAttempt?: WireStreamAttempt;
+  /** Durable session-inbox item id for steer / TurnDone correlation. */
+  itemId?: string;
+  workspace?: WireWorkspaceChanged;
   tabId?: string; // Go's tabEventSink tags events for the correct per-tab reducer.
   runtimeEpoch?: string;
   sessionHitTokens?: number;
@@ -313,6 +321,31 @@ export interface WireEvent {
   sessionCurrency?: string;
   // Deprecated compatibility alias. Prefer sessionCost + sessionCurrency.
   sessionCostUsd?: number;
+}
+
+export type WorkspaceWatchState = "active" | "degraded" | "unavailable";
+export type WorkspaceChangeOp = "create" | "write" | "remove" | "rename" | "unknown";
+
+export interface WorkspaceRevisions {
+  content: number;
+  tree: number;
+  workingTree: number;
+  gitMeta: number;
+  session: number;
+}
+
+export interface WorkspacePathChange {
+  path: string;
+  oldPath?: string;
+  op: WorkspaceChangeOp;
+}
+
+export interface WireWorkspaceChanged {
+  revisions: WorkspaceRevisions;
+  changes: WorkspacePathChange[];
+  allPaths: boolean;
+  source: "agent" | "filesystem" | "git" | "mixed" | "reconcile";
+  watchState: WorkspaceWatchState;
 }
 
 export type SessionRuntimePhase = "starting" | "ready" | "lease_blocked" | "failed" | "closing";
@@ -789,6 +822,7 @@ export interface ContextInfo {
   cacheMissTokens?: number;
   estimated?: boolean;
   sources?: Record<string, UsageSourceStats>;
+  maintenance?: ContextMaintenanceInfo;
 }
 
 export interface Meta {
@@ -822,22 +856,22 @@ export type ToolApprovalMode = "ask" | "auto" | "yolo";
 // "full" is the persisted compatibility value for the Balanced runtime profile.
 export type TokenMode = "full" | "economy" | "delivery";
 export type GoalStatus = "running" | "complete" | "blocked" | "stopped";
-
 // GoalRuntime is the optional Goal budget/runtime summary the backend attaches
 // to Meta. Absent for old hosts or when no goal is active.
 export interface GoalRuntime {
   turnsUsed: number;
   turnsLimit: number;
   tokensUsed: number;
+  requestsUsed?: number;
   /** @deprecated Goal has no hard token limit; retained as 0 for old hosts/clients. */
   tokensLimit: number;
   noProgressTurns: number;
+  /** @deprecated No longer enforced; retained for old hosts/clients. */
   noProgressLimit: number;
   lastReason?: string;
   stopCause?: string;
   budgetExtensions: number;
 }
-
 export function normalizeCollaborationMode(mode?: string, goal?: string, legacyMode?: Mode): CollaborationMode {
   if (mode === "plan" || mode === "goal" || mode === "normal") return mode;
   if (legacyMode && modeHasPlan(legacyMode)) return "plan";
@@ -1848,7 +1882,6 @@ export interface AgentView {
   maxSubagentConcurrency: number;
   maxParallelWriters: number;
   systemPrompt: string;
-  coldResumePrune: boolean;
   reasoningLanguage: string; // "auto" | "zh" | "en"
   compactRatio?: number; // Advanced global default; older backends omit it.
   effectiveCompactRatio?: number; // Active local session after project overrides.
@@ -2084,7 +2117,7 @@ export interface SettingsView {
   desktopThemeStyle: string;
   desktopTerminalTheme: string; // "auto" follows app | "dark" | "light"
   closeBehavior: string; // "background" | "quit"
-  displayMode: string;   // "standard" | "compact"
+  displayMode: string; reasoningDisplayMode: string; reasoningDisplayModeExplicit?: boolean;
   statusBarStyle: string; // "icon" | "text"
   statusBarItems: string[]; // ordered visible status bar item ids
   defaultToolApprovalMode: ToolApprovalMode | string; // default for newly-created sessions
@@ -2107,7 +2140,7 @@ export interface DesktopStartupSettingsView {
   desktopTheme: string; // "auto" | "dark" | "light"
   desktopThemeStyle: string;
   desktopTerminalTheme: string; // "auto" follows app | "dark" | "light"
-  displayMode: string;   // "standard" | "compact"
+  displayMode: string; reasoningDisplayMode: string; reasoningDisplayModeExplicit?: boolean;
   statusBarStyle: string; // "icon" | "text"
   statusBarItems: string[]; // ordered visible status bar item ids
   checkUpdates: boolean; // check for new versions on startup

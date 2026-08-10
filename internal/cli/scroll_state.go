@@ -1,5 +1,7 @@
 package cli
 
+import "strings"
+
 // scrollFollowMode is an explicit transcript tail-follow state machine.
 //
 // Previously the post-Update path used a single wasAtBottom snapshot taken
@@ -64,4 +66,22 @@ func (m *chatTUI) syncScrollModeAfterGesture() {
 		return
 	}
 	m.markUserScrolled()
+}
+
+// useLegacyViewportScrollClear limits the application-level redraw workaround
+// to Warp, where Bubble Tea's scroll optimization can strand stale rows. It is
+// disabled on Windows even if Warp identifies itself there because Bubble Tea
+// already avoids the incompatible optimization on that platform, and an extra
+// asynchronous ClearScreen visibly flickers (#8090).
+func useLegacyViewportScrollClear(goos string, environ []string) bool {
+	if goos == "windows" {
+		return false
+	}
+	for _, entry := range environ {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok && key == "TERM_PROGRAM" && strings.EqualFold(strings.TrimSpace(value), "WarpTerminal") {
+			return true
+		}
+	}
+	return false
 }

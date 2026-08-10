@@ -8,6 +8,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/provider"
+	"reasonix/internal/tool"
 )
 
 // probeAnswerContract rides with every probe question. A context full of tool
@@ -33,9 +34,13 @@ func invalidAnswer(s string) bool {
 // The question is asked against the compacted context, so a wrong answer means
 // compaction lost the fact — not that the model is weak.
 type probe struct {
-	class    string
-	plantAt  int
-	plant    func(*agent.Session)
+	class   string
+	plantAt int
+	plant   func(*agent.Session)
+	// later plants more of the same fact in later generations, so a decision
+	// that changes across folds is tested the way it actually happens: each
+	// revision lands on the far side of a compaction, not next to the last one.
+	later    map[int]func(*agent.Session)
 	question string
 	want     []string // answer must contain one of these, lowercased
 	reject   []string // ...and none of these: the pre-correction answer
@@ -52,6 +57,24 @@ func toolRound(id, name, args, result string) func(*agent.Session) {
 	}
 }
 
+// failedToolRound is a tool round the host recorded as failed, the way a real
+// non-zero bash run arrives. Without the execution record the keep policy sees
+// only text, which is exactly the gap the buried-evidence probe measures.
+func failedToolRound(id, name, args, result string, code int) func(*agent.Session) {
+	return func(s *agent.Session) {
+		exit := code
+		s.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: id, Name: name, Arguments: args}}})
+		s.Add(provider.Message{
+			Role: provider.RoleTool, ToolCallID: id, Name: name, Content: result,
+			ToolExecution: &provider.ToolExecution{
+				Kind:     "shell",
+				State:    tool.ShellStateFailed,
+				ExitCode: &exit,
+			},
+		})
+	}
+}
+
 func seq(fns ...func(*agent.Session)) func(*agent.Session) {
 	return func(s *agent.Session) {
 		for _, fn := range fns {
@@ -64,6 +87,50 @@ func seq(fns ...func(*agent.Session)) func(*agent.Session) {
 // freshness and correction probes are the ones summaries classically get wrong:
 // both have a plausible stale answer that reads as correct.
 func probeSuite() []probe {
+	suite := append(factProbes(), revisionProbes()...)
+	return append(suite, snipProbes()...)
+}
+
+// buriedTestLog is a `go test -v` log whose only failure detail sits in the
+// middle. Geometric snipping keeps the first 80 and last 12 lines, so this is
+// precisely the shape it drops while reporting a plausible-looking remainder.
+// It names a package no other probe touches: a run covering config/ would be a
+// truthful "yes" for verification-freshness and score that probe as lost.
+func buriedTestLog() string {
+	var b strings.Builder
+	pass := func(i int) {
+		fmt.Fprintf(&b, "=== RUN   TestEmitterCase%03d\n--- PASS: TestEmitterCase%03d (0.00s)\n", i, i)
+	}
+	for i := range 120 {
+		pass(i)
+	}
+	b.WriteString("=== RUN   TestEmitterQuoting\n")
+	b.WriteString("    emitter_test.go:412: assertion failed: expected beta-7d21, got gamma-4a88\n")
+	b.WriteString("--- FAIL: TestEmitterQuoting (0.01s)\n")
+	for i := 120; i < 200; i++ {
+		pass(i)
+	}
+	b.WriteString("FAIL\nexit status 1\nFAIL\treasonix/emitter\t0.234s\n")
+	return b.String()
+}
+
+// snipProbes plant a fact in the middle of a long tool result, out of reach of
+// the head/tail geometry. They score the maintenance pass rather than the fold:
+// every other probe in the suite is short enough that snipping cannot touch it.
+func snipProbes() []probe {
+	return []probe{
+		{
+			class:    "buried-evidence",
+			plantAt:  1,
+			plant:    failedToolRound("bt1", "bash", `{"cmd":"go test ./emitter -v"}`, buriedTestLog(), 1),
+			question: "In the failed test, what value did the assertion expect? Reply with just the value.",
+			want:     []string{"beta-7d21"},
+			reject:   []string{"gamma-4a88"},
+		},
+	}
+}
+
+func factProbes() []probe {
 	return []probe{
 		{
 			class:    "user-constraint",
@@ -165,6 +232,45 @@ func probeSuite() []probe {
 	}
 }
 
+// revisionProbes state a fact and then change it in a later generation. The
+// revision lands on the far side of a fold, so carrying it forward means
+// superseding the digest's own earlier claim rather than a neighbouring turn.
+func revisionProbes() []probe {
+	return []probe{
+		{
+			class:    "late-constraint",
+			plantAt:  3,
+			plant:    userTurn("New hard rule from here on: never edit anything under internal/store/."),
+			question: "Are you allowed to edit files under internal/store/? Answer yes or no.",
+			want:     []string{"no"},
+			reject:   []string{"yes"},
+		},
+		{
+			class:   "reversal-chain",
+			plantAt: 0,
+			plant:   userTurn("Use PostgreSQL for the datastore."),
+			later: map[int]func(*agent.Session){
+				1: userTurn("Change of plan: drop PostgreSQL, use SQLite instead."),
+				2: userTurn("Final call: back to PostgreSQL after all."),
+			},
+			question: "Which datastore is the current decision? Reply with one word.",
+			want:     []string{"postgresql", "postgres"},
+			reject:   []string{"sqlite"},
+		},
+		{
+			class:   "distractor-file",
+			plantAt: 1,
+			plant:   userTurn("Draft note: the fix might belong in config/legacy_parser.go."),
+			later: map[int]func(*agent.Session){
+				3: userTurn("Confirmed: the fix belongs in config/emitter.go; the legacy parser is not involved."),
+			},
+			question: "Which file does the fix belong in? Reply with just the filename, no path.",
+			want:     []string{"emitter"},
+			reject:   []string{"legacy"},
+		},
+	}
+}
+
 // score reports whether an answer keeps the planted fact. A rejected token
 // anywhere in the answer counts as lost even when the wanted token also
 // appears, so "yes, but it was not re-run" does not pass as "no".
@@ -194,4 +300,15 @@ func matchesToken(lowered, want string) bool {
 	}), want)
 }
 
-func (p probe) String() string { return fmt.Sprintf("%s@gen%d", p.class, p.plantAt) }
+// settledAt is the first generation whose answer is the one want/reject scores.
+// A probe revised across folds has a different correct answer while the chain is
+// still running, so asking before it settles would score a right answer as lost.
+func (p probe) settledAt() int {
+	at := p.plantAt
+	for gen := range p.later {
+		at = max(at, gen)
+	}
+	return at
+}
+
+func (p probe) String() string { return fmt.Sprintf("%s@gen%d", p.class, p.settledAt()) }

@@ -285,7 +285,7 @@ func linuxExternalOpenerCommand(spec externalOpenerSpec, path string) (*exec.Cmd
 	return cmd, nil
 }
 
-func launchPlatformExternalOpener(spec externalOpenerSpec, path string) error {
+func launchPlatformExternalOpener(spec externalOpenerSpec, path string, _ bool) error {
 	cmd, err := linuxExternalOpenerCommand(spec, path)
 	if err != nil {
 		return err

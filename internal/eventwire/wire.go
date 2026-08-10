@@ -12,30 +12,57 @@ import (
 // externalizable:"true" marks large string payloads the Remote protocol may
 // offload via content refs without changing provider-visible semantics.
 type Event struct {
-	Kind            string             `json:"kind"`
-	Text            string             `json:"text,omitempty" externalizable:"true"`
-	Detail          string             `json:"detail,omitempty" externalizable:"true"`
-	Code            string             `json:"code,omitempty"`
-	Reasoning       string             `json:"reasoning,omitempty" externalizable:"true"`
-	MemoryCitations []MemoryCitation   `json:"memoryCitations,omitempty"`
-	Level           string             `json:"level,omitempty"`
-	Tool            *Tool              `json:"tool,omitempty"`
-	Usage           *Usage             `json:"usage,omitempty"`
-	Approval        *Approval          `json:"approval,omitempty"`
-	Ask             *Ask               `json:"ask,omitempty"`
-	Compaction      *Compaction        `json:"compaction,omitempty"`
-	Guardian        *Guardian          `json:"guardian,omitempty"`
-	DecisionReceipt *DecisionReceipt   `json:"decisionReceipt,omitempty"`
-	Extension       *ExtensionSurface  `json:"extension,omitempty"`
-	Err             string             `json:"err,omitempty" externalizable:"true"`
-	Outcome         string             `json:"outcome,omitempty"`
-	Readiness       *FinalReadiness    `json:"readiness,omitempty"`
-	Receipt         *CompletionReceipt `json:"receipt,omitempty"`
-	CheckpointTurn  *int               `json:"checkpointTurn,omitempty"`
-	RetryAttempt    int                `json:"retryAttempt,omitempty"`
-	RetryMax        int                `json:"retryMax,omitempty"`
-	RetryScope      string             `json:"retryScope,omitempty"` // "headers" | "stream"; omit for older clients
-	StreamAttempt   *StreamAttempt     `json:"streamAttempt,omitempty"`
+	Kind            string              `json:"kind"`
+	Text            string              `json:"text,omitempty" externalizable:"true"`
+	Detail          string              `json:"detail,omitempty" externalizable:"true"`
+	Code            string              `json:"code,omitempty"`
+	Reasoning       string              `json:"reasoning,omitempty" externalizable:"true"`
+	MemoryCitations []MemoryCitation    `json:"memoryCitations,omitempty"`
+	Level           string              `json:"level,omitempty"`
+	Tool            *Tool               `json:"tool,omitempty"`
+	Usage           *Usage              `json:"usage,omitempty"`
+	Approval        *Approval           `json:"approval,omitempty"`
+	Ask             *Ask                `json:"ask,omitempty"`
+	Compaction      *Compaction         `json:"compaction,omitempty"`
+	Maintenance     *ContextMaintenance `json:"maintenance,omitempty"`
+	Guardian        *Guardian           `json:"guardian,omitempty"`
+	DecisionReceipt *DecisionReceipt    `json:"decisionReceipt,omitempty"`
+	Extension       *ExtensionSurface   `json:"extension,omitempty"`
+	Err             string              `json:"err,omitempty" externalizable:"true"`
+	Outcome         string              `json:"outcome,omitempty"`
+	Readiness       *FinalReadiness     `json:"readiness,omitempty"`
+	Receipt         *CompletionReceipt  `json:"receipt,omitempty"`
+	CheckpointTurn  *int                `json:"checkpointTurn,omitempty"`
+	RetryAttempt    int                 `json:"retryAttempt,omitempty"`
+	RetryMax        int                 `json:"retryMax,omitempty"`
+	RetryScope      string              `json:"retryScope,omitempty"` // "headers" | "stream"; omit for older clients
+	StreamAttempt   *StreamAttempt      `json:"streamAttempt,omitempty"`
+	// ItemID correlates Steer / TurnDone / unapplied-steer with a durable
+	// session-inbox entry. Empty for legacy text-only guidance.
+	ItemID    string            `json:"itemId,omitempty"`
+	Workspace *WorkspaceChanged `json:"workspace,omitempty"`
+}
+
+type WorkspaceChanged struct {
+	Revisions  WorkspaceRevision     `json:"revisions"`
+	Changes    []WorkspacePathChange `json:"changes"`
+	AllPaths   bool                  `json:"allPaths"`
+	Source     string                `json:"source"`
+	WatchState string                `json:"watchState"`
+}
+
+type WorkspaceRevision struct {
+	Content     uint64 `json:"content"`
+	Tree        uint64 `json:"tree"`
+	WorkingTree uint64 `json:"workingTree"`
+	GitMeta     uint64 `json:"gitMeta"`
+	Session     uint64 `json:"session"`
+}
+
+type WorkspacePathChange struct {
+	Path    string `json:"path"`
+	OldPath string `json:"oldPath,omitempty"`
+	Op      string `json:"op"`
 }
 
 // StreamAttempt is the JSON form of event.StreamAttemptInfo.
@@ -49,7 +76,7 @@ type StreamAttempt struct {
 
 // ToWire converts a typed runtime event into the shared frontend JSON contract.
 func ToWire(e event.Event) Event {
-	w := Event{Kind: kindNames[e.Kind], Text: e.Text, Detail: e.Detail, Reasoning: e.Reasoning}
+	w := Event{Kind: kindNames[e.Kind], Text: e.Text, Detail: e.Detail, Reasoning: e.Reasoning, ItemID: e.ItemID}
 	if len(e.MemoryCitations) > 0 {
 		w.MemoryCitations = ToWireMemoryCitations(e.MemoryCitations)
 	}
@@ -83,6 +110,19 @@ func ToWire(e event.Event) Event {
 			wt.Execution = toWireShellExecution(e.Tool.Execution)
 		}
 		w.Tool = wt
+	case event.WorkspaceChanged:
+		ws := e.Workspace
+		if ws == nil {
+			ws = &event.WorkspaceChangedPayload{}
+		}
+		changes := make([]WorkspacePathChange, 0, len(ws.Changes))
+		for _, c := range ws.Changes {
+			changes = append(changes, WorkspacePathChange{Path: c.Path, OldPath: c.OldPath, Op: c.Op})
+		}
+		w.Workspace = &WorkspaceChanged{
+			Revisions: WorkspaceRevision{Content: ws.Revisions.Content, Tree: ws.Revisions.Tree, WorkingTree: ws.Revisions.WorkingTree, GitMeta: ws.Revisions.GitMeta, Session: ws.Revisions.Session},
+			Changes:   changes, AllPaths: ws.AllPaths, Source: ws.Source, WatchState: string(ws.WatchState),
+		}
 	case event.Usage:
 		if u := e.Usage; u != nil {
 			w.Usage = &Usage{
@@ -137,6 +177,17 @@ func ToWire(e event.Event) Event {
 		w.Compaction = &Compaction{
 			Trigger: e.Compaction.Trigger, Messages: e.Compaction.Messages,
 			Summary: e.Compaction.Summary, Archive: e.Compaction.Archive,
+		}
+	case event.ContextMaintenanceEvent:
+		if m := e.Maintenance; m != nil {
+			w.Maintenance = &ContextMaintenance{
+				Status: m.Status, Action: m.Action, Trigger: m.Trigger,
+				OperationID: m.OperationID, InputTokens: m.InputTokens,
+				ResultTokens: m.ResultTokens, SavedTokens: m.SavedTokens,
+				AffectedToolResults: m.AffectedToolResults,
+				ProjectionVersion:   m.ProjectionVersion, CacheBreak: m.CacheBreak,
+				Reason: m.Reason,
+			}
 		}
 	case event.GuardianAssessment:
 		w.Guardian = ToWireGuardian(e.Guardian)
@@ -474,28 +525,45 @@ func KindName(kind event.Kind) (string, bool) {
 }
 
 var kindNames = map[event.Kind]string{
-	event.TurnStarted:        "turn_started",
-	event.Reasoning:          "reasoning",
-	event.Text:               "text",
-	event.Message:            "message",
-	event.ToolDispatch:       "tool_dispatch",
-	event.ToolResult:         "tool_result",
-	event.Usage:              "usage",
-	event.Notice:             "notice",
-	event.Phase:              "phase",
-	event.ApprovalRequest:    "approval_request",
-	event.AskRequest:         "ask_request",
-	event.TurnDone:           "turn_done",
-	event.CompactionStarted:  "compaction_started",
-	event.CompactionDone:     "compaction_done",
-	event.ToolProgress:       "tool_progress",
-	event.MCPSurfaceReady:    "mcp_surface_ready",
-	event.Retrying:           "retrying",
-	event.Steer:              "steer",
-	event.GuardianAssessment: "guardian_assessment",
-	event.ExtensionSurface:   "extension_surface",
-	event.ExtensionStatus:    "extension_status",
-	event.StreamAttempt:      "stream_attempt",
+	event.TurnStarted:             "turn_started",
+	event.Reasoning:               "reasoning",
+	event.Text:                    "text",
+	event.Message:                 "message",
+	event.ToolDispatch:            "tool_dispatch",
+	event.ToolResult:              "tool_result",
+	event.Usage:                   "usage",
+	event.Notice:                  "notice",
+	event.Phase:                   "phase",
+	event.ApprovalRequest:         "approval_request",
+	event.AskRequest:              "ask_request",
+	event.TurnDone:                "turn_done",
+	event.CompactionStarted:       "compaction_started",
+	event.CompactionDone:          "compaction_done",
+	event.ToolProgress:            "tool_progress",
+	event.MCPSurfaceReady:         "mcp_surface_ready",
+	event.Retrying:                "retrying",
+	event.Steer:                   "steer",
+	event.GuardianAssessment:      "guardian_assessment",
+	event.ExtensionSurface:        "extension_surface",
+	event.ExtensionStatus:         "extension_status",
+	event.StreamAttempt:           "stream_attempt",
+	event.ContextMaintenanceEvent: "context_maintenance",
+	event.WorkspaceChanged:        "workspace_changed",
+}
+
+// ContextMaintenance is the JSON form of event.ContextMaintenance.
+type ContextMaintenance struct {
+	Status              string `json:"status,omitempty"`
+	Action              string `json:"action,omitempty"`
+	Trigger             string `json:"trigger,omitempty"`
+	OperationID         string `json:"operationId,omitempty"`
+	InputTokens         int    `json:"inputTokens,omitempty"`
+	ResultTokens        int    `json:"resultTokens,omitempty"`
+	SavedTokens         int    `json:"savedTokens,omitempty"`
+	AffectedToolResults int    `json:"affectedToolResults,omitempty"`
+	ProjectionVersion   uint64 `json:"projectionVersion,omitempty"`
+	CacheBreak          bool   `json:"cacheBreak,omitempty"`
+	Reason              string `json:"reason,omitempty"`
 }
 
 // ExtensionSurface is the JSON form of an event.ExtensionSurfacePayload.

@@ -3,8 +3,8 @@ package responses
 import "testing"
 
 func TestSharedWindowOutputBudgetCapability(t *testing.T) {
-	deepseek := &client{vendor: "deepseek", maxOutputTokens: 128 * 1024}
-	if !deepseek.SharesContextWindow() || deepseek.OutputBudget() != 128*1024 {
+	deepseek := &client{vendor: "deepseek", maxOutputTokens: 32 * 1024}
+	if !deepseek.SharesContextWindow() || deepseek.OutputBudget() != 32*1024 {
 		t.Fatalf("DeepSeek capability = shared:%v budget:%d", deepseek.SharesContextWindow(), deepseek.OutputBudget())
 	}
 	policy := deepseek.SharedWindowInputPolicy()

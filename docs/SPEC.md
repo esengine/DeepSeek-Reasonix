@@ -248,57 +248,59 @@ prefix cache-stable:
   "cache-first" with "two-model collaboration": switching models *inside one
   shared conversation* would break the prefix and tank cache hits, so we don't.
 
-### 3.6 Context management (compaction)
+### 3.6 Context management (content-driven summary)
 
-Long tasks eventually fill the model's context window. Reasonix manages this with
-**low-frequency compaction** that respects the cache-first design:
+Long tasks fill the model window. Reasonix keeps a **cache-first, append-only**
+canonical transcript and installs a short **provider-visible checkpoint** only
+when the sole automatic threshold is crossed.
 
-- Each provider declares its `context_window` (tokens). Context maintenance is
-  tiered: below `agent.tool_result_snip_ratio` (default `0.6`) the session is
-  left untouched apart from the soft notice; at the snip ratio, stale tool
-  results before the recent tail are archived and shortened with deterministic
-  head/tail markers; at `agent.compact_ratio` (default `0.8`) stale tool results
-  are archived and pruned to short placeholders before any summary call; only if
-  pruning still leaves the prompt above the threshold does summary compaction
-  run. At `agent.compact_force_ratio` (default `0.9`), the existing forced fold
-  may proceed even when the fold economics would normally skip it.
-- Users can inspect or change the 65–85% automatic threshold with
-  `reasonix config compact-ratio [--local] [VALUE]`. The default is 80%; the
-  project-local value overrides the shared user config used by desktop and new
-  CLI sessions.
-- A positive `model_overrides.<model>.context_window` replaces the provider-wide
-  value after model resolution. Missing or zero model overrides inherit the
-  provider value; provider-level `context_window = 0` disables compaction.
-- `max_output_tokens` is a separate total-output budget, not a conversion from
-  the client reasoning byte guard. Zero selects the provider's safe default,
-  positive values set an explicit cap, and negative values omit optional wire
-  limits. `model_overrides.<model>.max_output_tokens` can specialize mixed
-  gateways; Anthropic still supplies a mandatory `max_tokens` fallback.
-- Tool-result snip/prune never removes messages, so assistant `tool_calls` and
-  tool results stay paired. `KeepErrors` preserves error/blocked tool outputs,
-  and the recent tail is not rewritten. Snipped results can later be upgraded to
-  pruned placeholders; already-pruned results are left alone.
-- When summary compaction runs, the fold region (everything between the pinned
-  prefix and the recent tail) is split three ways: the first few **small user
-  turns** are hoisted verbatim ahead of the digest, messages the keep policy
-  protects stay verbatim, and **everything else** — assistant/tool work, later
-  user turns, and any prior digest — is summarized into a single digest, using
-  the executor's own provider, no tools. The split is a partition: a message in
-  the region is either kept verbatim or reaches the summarizer, never neither.
-  The tail boundary is aligned backward off any tool result so the recent tail
-  never begins with an orphan tool message whose `tool_calls` were summarized
-  away.
-- One fold never outgrows one summarizer call. A fold region larger than such a
-  call can hold — the window minus room for the digest it must return, the
-  summary prompt, and the caller's instructions — first gives up the bulk of its
-  stale tool results: head and tail lines are kept, and only in the summarizer's
-  copy, never in the transcript or the projection. A region still too large is summarized in
-  consecutive parts whose digests are merged in a final pass, capped so a single
-  compaction cannot cost an unbounded number of calls; whatever a part had to
-  drop is stated in the text the summarizer reads.
-- The dropped originals are archived under the user config dir
-  (`reasonix/archive/<timestamp>.jsonl`; see §5 for its per-OS location), one
-  message per line, so the full history stays traceable.
+- Each provider declares `context_window` (tokens). The only automatic trigger is
+  `agent.compact_ratio` (default **0.85**; presets 0.70 / 0.80 / 0.85; range
+  0.65–0.85).
+  `triggerTokens = floor(context_window × compact_ratio)`.
+- **Below the trigger** history is never rewritten: no summary, no prune/snip
+  projection, no sidecar write, no projection-version bump, no maintenance event.
+  Any rewrite would invalidate the prompt cache from that point on.
+- **At the trigger** Reasonix runs **one** summary transaction:
+  `stable prefix + one structured digest + recent verbatim tail`.
+  Acceptance (normal path): candidate ≤ 50% of the window, strictly smaller than
+  the source, and below `triggerTokens`. Candidates are **not** padded toward 50%.
+  Typical landings are about 10%–30% of the window.
+  Internal construction budgets (not user settings):
+  `recentTailBudget = clamp(window×10%, 32K, 96K)`, summary output max **16K**.
+- Users inspect or change the threshold with
+  `reasonix config compact-ratio [--local] [VALUE]`. Project config overrides the
+  user-global value used by desktop and new CLI sessions. UI always shows the
+  **effective** ratio.
+- `max_output_tokens` is an independent **per-turn** completion ceiling.
+  Recommended: `0` (**automatic**, not unlimited; DeepSeek default high → ~64K).
+  User presets: `32768` ordinary coding / cost control, `65536` heavy reasoning /
+  long tool loops, `131072` only after repeated `finish_reason=length`.
+  Negative omits optional wire limits when the protocol allows. Clipped only at
+  send time against remaining window and **never** changes `triggerTokens` or
+  maintenance timing. Billing follows actual completion tokens, not the ceiling.
+- Giant tool results are bounded **once**, on first entry to the model:
+  `Content` is the stable ≤32KB visible form; `RawContent` holds the full original
+  only when they differ. Maintenance never rewrites old tool bodies.
+  `ModelMessages` strips `RawContent` so provider serialization and cache hashes
+  never include it.
+- Automatic maintenance is planned once in `ContextManager.Prepare` from the
+  current projection plus the append-only canonical tail. The canonical
+  transcript is never rewritten. Subsequent thresholds merge
+  **prior digest + new history** into a single digest (no multi-span merge, no
+  application-layer retry). Failure records a generation-scoped
+  `blocked`/`failed` receipt; the same generation does not pay for another
+  automatic summary. Manual `compress` can retry.
+- Old multi-threshold keys (`soft_compact_ratio`, `tool_result_snip_ratio`,
+  `compact_force_ratio`, `cold_resume_prune`, `context_editing`) are removed on
+  ordinary start and ignored at runtime. Native provider tool clearing is not
+  used; every provider uses the local summary checkpoint path.
+- Keep policy (`keep` / `recent_keep`) and the active tool turn remain protected
+  content. Restart restores an existing checkpoint without re-summarizing or
+  replaying timeline cards.
+- Full history remains in the session transcript. The read-only `history` tool
+  provides BM25 retrieval over sessions; new summary checkpoints do not create
+  prune archives.
 - The read-only `history` tool gives the agent on-demand BM25 retrieval over
   saved session JSONL files. `scope="project"` searches the current controller's
   session directory; `scope="global"` also searches the user-global session
@@ -336,8 +338,9 @@ Long tasks eventually fill the model's context window. Reasonix manages this wit
 
 **What survives a fold.** Verbatim, at every compaction: the system prompt, the
 first user turn when it is small enough to be a brief, the first few small user
-turns of the fold region, the messages the keep policy protects, and the recent
-tail. Everything else is **best-effort** — it reaches the summarizer and survives
+turns of the fold region, and the recent tail. The messages the keep policy
+protects also survive, though a failure with a recorded execution keeps only its
+failure-carrying lines. Everything else is **best-effort** — it reaches the summarizer and survives
 only as well as the digest captured it. That includes small user turns beyond the
 hoisted window, so a durable constraint is safest restated in a recent turn
 rather than assumed to hold from turn 4 of a long session.
@@ -503,12 +506,19 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   constraints, and relevant verification expectations to be satisfied or
   explicitly reported as unverified.
   Goal automatically selects a simple (10), write (20), or research (40) turn
-  budget from the objective. All classes use the same Goal FSM, host receipts,
-  Delivery readiness, and bounded evaluator; there is no second research
+  continuation backstop from the objective. A Goal Run defaults to 16 model
+  rounds when the user did not explicitly configure `max_steps`, followed by
+  one summary-only response and a resumable pause. Goal-scoped novelty accepts new read/search results and state changes
+  but rejects exact tool/argument/result repeats. All classes use the same Goal
+  FSM, host receipts, Delivery readiness, and bounded evaluator; there is no second research
   protocol or writable sidecar runtime. Legacy `.reasonix/autoresearch/...`
   archives remain read-only and explicit old paths recover as ordinary Goals.
   Outside goal mode, ordinary prompts never change collaboration mode; the user
   must choose Goal or use `/goal` explicitly.
+  Cross-turn no-progress streaks are observational. Within one Run, three
+  repeated host failures or six successful zero-evidence rounds trigger a
+  resumable structural-stuck pause. Token and provider-request totals remain
+  observational and are not request-admission limits.
   `/goal clear` removes the active goal. Switching into plan/normal mode clears
   the active goal in the desktop UI so the collaboration mode remains one of
   the three choices, while the underlying tool approval posture is preserved.
@@ -647,6 +657,277 @@ Headless runs remain ephemeral and return fair bounded previews without refs.
 See [Subagent profiles](./SUBAGENT_PROFILES.md)
 for the user-facing command and file-format contract.
 
+A profile describes a worker, not a run. Delegation is five separate concepts:
+the profile says how a worker thinks, `TaskSpec` what this call wants,
+`CapabilityGrant` what it may touch, `ContextCapsule` what it starts from, and
+`SchedulerPolicy` when it runs. A field belongs to whichever member decides its
+value, so a profile may carry a capability *ceiling* (`allowed-tools`,
+`read-only`) but never a per-call value such as `max_turns`, `write_paths`, or a
+retry or verification policy — those are decided by the task or the scheduler.
+Skill frontmatter may keep growing; `agent.ProfileFromSkill` is the single
+narrowing point, and routing metadata (triggers, auto-use, cost, freshness)
+stops there because it decides *when* a worker is chosen, not how it thinks.
+`internal/agent/profile_boundary_test.go` fails on any widening.
+
+### 3.11 Sub-agents close with a host-adjudicated claim
+
+A writer sub-agent ends its run by calling `complete_subtask` with a `status`,
+a `summary`, the `acceptance_criteria` it was held to (each with the command it
+ran or the paths it changed), and whatever it left `unresolved`. Prose alone is
+still accepted, but it is no longer the interface the parent reasons over.
+
+The submitted status is a claim, not a verdict. Before the parent sees it, the
+host checks every citation against its own receipts: a `verification` criterion
+must name a command the host recorded as run, `diff`/`files` must name paths the
+host observed written or read, and a `manual` note is never self-backing. Any
+criterion the receipts cannot back is lowered to `unsatisfied`, a report holding
+one cannot stay `complete`, and the downgrade is printed with its reason. The
+host never raises a status.
+
+The parent therefore receives, in order: the adjudicated status and criteria,
+the child's own prose, and the host's own receipts of what it changed and ran.
+
+### 3.12 Write claims are enforced, not advisory
+
+A declared `write_paths` is one truth source used for both scheduling and
+enforcement. When a writer sub-agent declares explicit paths, the host binds its
+registry to that claim before the child runs:
+
+- path-aware built-in writers (`write_file`, `edit_file`, `multi_edit`,
+  `move_file`, `notebook_edit`, `delete_range`, `delete_symbol`) reject any
+  argument path outside the claim, with both ends of a `move_file` checked;
+- paths are compared after symlink resolution against the deepest existing
+  ancestor, so neither `..` traversal nor a symlink inside the claim can launder
+  a write out of it;
+- `bash` is kept only if the OS sandbox can rebind its write roots to the claim,
+  and is otherwise removed from the child's registry entirely;
+- MCP goes through `use_capability`, which refuses at resolve time — before any
+  MCP process runs — every target not proven read-only;
+- writers the host cannot path-scope (custom, unknown) are dropped;
+- after the run, the host compares the mutations it recorded against the claim
+  and reports any outside path to the parent in the sub-agent's host receipts.
+
+Omitting `write_paths` is not an unscoped writer: the run claims the whole
+workspace and therefore serialises against every other writer claim. That claim
+is a scheduling boundary only — inside the workspace nothing is refused, because
+no concurrent writer can hold an overlapping claim at the same time. Writes that
+leave the workspace are still reported as claim violations.
+
+Declaring paths is what buys parallelism; it costs `bash` on hosts where the OS
+sandbox cannot enforce write roots.
+
+### 3.13 Sub-agent context inheritance is explicit
+
+A child inherits nothing implicitly. What it receives is exactly this:
+
+| Given to the child | Where it comes from |
+| --- | --- |
+| System prompt | `DefaultTaskSystemPrompt`, `DefaultReadOnlyTaskSystemPrompt`, or the profile body — nothing else is composed into it |
+| Workspace root | `<workspace-context>` on the first user turn |
+| The task text | the user turn itself |
+| Completion contract | appended to a writer's task turn (§3.11) |
+| Delegation guidance | `<subagent-context>` on a nested child's fresh session |
+| Plan-mode marker, reasoning/response language | run options, when set |
+| A prior transcript | only via `continue_from` / `fork_from` |
+
+Not inherited, by construction: `REASONIX.md`, `AGENTS.md`, `CLAUDE.md`, project
+and global memory (the memory queue is disabled, so a child cannot record memory
+either), the parent conversation, the current Goal, planner output, and sibling
+sub-agent results. A constraint that must reach a child today has to be in its
+profile body or in the task text — there is no ambient channel.
+
+Every run records a `ContextCapsule` in its transcript sidecar: the workspace,
+the system-prompt source and hash, the resolved tool scope and schema hash, the
+model and effort, the parent session and tool-call id, any resumed transcript,
+and an `inherited` block whose fields are all false. `capsuleHash` is its stable
+identity, so *why did this reviewer not see that constraint* is answered from
+the record, and two runs that behaved differently can be diffed instead of
+guessed at. The capsule holds references and digests only — never copied parent
+context, which is what keeps delegation cheap and the child prefix cacheable.
+
+### 3.14 Fleet is a small dependency graph
+
+A fleet item may declare `id` and `depends_on`. That is the whole graph
+vocabulary: no conditions, no expressions, no dynamic fan-out. It is enough for
+
+```
+research ──▶ implement backend ──┐
+        └──▶ implement frontend ─┴──▶ integration test ──▶ review
+```
+
+Ids default to the 1-based position. A duplicate id, an id no task declares, a
+self-edge, or a cycle fails preflight, so a fleet that cannot finish never
+starts. Items run as soon as their dependencies complete; items with no ordering
+between them run in parallel under the same session scheduler as before.
+
+Dependencies are a property of the graph, never of a task: they live in the
+fleet plan and never reach `ProfileExecSpec`, which is what keeps `depends_on`
+from becoming the first keyword of a workflow language.
+
+The graph relaxes the write-claim preflight in the one place it should. Only
+items that can run at the same time need disjoint `write_paths`; an
+`implement → review` pair is serialised by its edge and may share paths, which
+a flat fleet could not express.
+
+Failure handling has one knob. A failed or skipped task always skips its whole
+downstream branch — running a dependent on a broken input only buys a result the
+parent must discard. Independent branches keep going unless `fail_fast` is set,
+which stops *starting* new tasks; tasks already running are left to finish so a
+writer is never abandoned mid-write.
+
+### 3.15 One child-construction primitive
+
+The APIs that spawn a child are many — `task`, `read_only_task`, `fleet`,
+`parallel_tasks`, `run_skill`, `/<profile>`, `reasonix subagent run|try`,
+desktop preview. The execution primitive behind them must stay one. Each entry
+point compiles its request into a `ProfileExecSpec` and hands it to
+`TaskTool.RunProfileSpec`, which is the only place that resolves depth, tool
+scope, permissions, sandbox, write claims, scheduler slots, the MCP frontend,
+the transcript and capsule, the evidence ledger, and the completion contract.
+
+This is not a style preference. A safety boundary spread across several
+construction paths only has to be forgotten once: past regressions where a
+preview path built unconfined file tools, and where a profile editor dropped
+`read-only` on save, were both one entry point missing one layer.
+
+An entry point that must not persist a transcript says so with
+`ContextRequest.Ephemeral` rather than building its own session, so its promise
+is a field on the spec instead of a second construction path.
+
+`internal/agent/spawn_boundary_test.go` enumerates the files that still call the
+low-level runners directly and fails on any new one. The remaining entries —
+`internal/boot` (skill runners), `internal/cli/review.go`, and
+`desktop/subagents_app.go` — are known debt, not precedent.
+
+### 3.16 MCP concurrency: read-only is not stateless
+
+Sub-agents share one session Host and its connections while each keeps its own
+`use_capability` frontend and ledger. For a stdio server that means they share
+one process, and therefore its session state.
+
+Read-only does not imply stateless. A browser server opens a page, selects a
+tab, scrolls; every one of those tools may honestly declare `readOnly` because
+nothing reaches the filesystem, yet two children calling it concurrently
+interleave on state neither of them can see. Write claims do not help — there is
+nothing to claim.
+
+A configured server therefore carries a concurrency policy:
+
+```toml
+[[mcp.servers]]
+name = "browser"
+concurrency = "serial"   # parallel (default) | serial
+```
+
+`serial` means the runtime never runs two calls to that server at once across
+the whole session, whichever child issues them. The gate lives on the shared
+runtime because the process being interleaved on is shared at exactly that
+scope, and a call waiting on it still honours its own cancellation. Servers
+whose names look known-stateful (browser, playwright, puppeteer, chrome,
+chromium, selenium) default to `serial`; explicit configuration always wins, and
+everything else stays parallel so the shared-Host tradeoff is unchanged.
+
+This is deliberately the conservative first version: one policy per server, not
+per capability. Per-tool `parallel_safe` / `exclusive` hints and explicit
+`concurrency_key` grouping are the later refinement, once real servers show
+which tools within one server genuinely differ.
+
+### 3.17 Measuring whether delegation pays
+
+Orchestration is easy to add and hard to justify: more agents always cost more
+tokens, and the extra tokens alone can look like an improvement. Comparing arms
+therefore has to hold the model fixed and read host-recorded facts, not prose.
+
+`reasonix run --json` emits per-run delegation counters alongside the existing
+token, cache, cost, and duration totals:
+
+| Counter | Answers |
+| --- | --- |
+| `subagent_runs`, `subagent_nested_runs` | which shape actually ran, not which was configured |
+| `tool_calls` − `subagent_tool_calls` | parent versus child work split |
+| `subagent_mutations`, `duplicate_work_paths` | did two children redo the same file |
+| `completion_reports`, `completions_prose_only` | how much of the run ended in a checkable claim |
+| `false_completions`, `criterion_downgrades` | claims the host refused to back |
+| `write_scope_violations` | writes that escaped a declared claim |
+
+The control axis is partial, and the counters are what revealed it.
+`--ablate subagent` removes `task`, `read_only_task`, `fleet`, and
+`parallel_tasks`, but a run can still delegate through a `runAs=subagent`
+profile skill: a measured `no-subagent` arm spent a child run on `explore`.
+Treat that arm as "no task-tool delegation", not "single agent", and read
+`subagent_runs` to see what actually happened rather than trusting the label.
+Nested depth is `agent.max_subagent_depth`.
+
+`false_completions` is the counter that matters most. It comes from the
+adjudication in §3.11, so it measures claims the host refused rather than a
+reviewer's opinion, and it is the one number that separates "the fleet finished
+faster" from "the fleet said it finished".
+
+Read these against the measured noise floor. Running the same arm twice over
+the same tasks moved per-task token use by a median of 19% and up to 54%, while
+the whole between-arm difference in that experiment was 2.5%. A single run per
+cell therefore proves nothing about delegation: the effect has to clear the
+variance before it is an effect. Budget repetitions, or restrict the comparison
+to tasks where `subagent_runs` shows delegation actually happened — in that
+experiment it happened on one task in six.
+
+What the counters have measured so far, on one model over four task shapes,
+each comparing a neutral prompt against a forced-delegation twin over identical
+work: three one-line fixes in separate modules cost 3.8x the tokens; a 24-file
+search 1.5x tokens and 2.2x wall; a 36-file three-package migration 2.6x tokens
+and 4.1x wall; three genuinely heterogeneous branches, the shape with the best
+theoretical case, 2.4x tokens and 3.7x wall over three repetitions. Success rate
+was 100% everywhere, and the forced arm's spread was about twice the neutral
+arm's, so delegation also buys variance.
+
+Read a child's token figure carefully: 27 measured child runs averaged 134k
+tokens each, but that is cumulative prompt tokens over 9.3 model calls with the
+same ~14k context re-sent each time, not 134k tokens of new material. At ~90%
+cache hit the real price of a child averaged ¥0.017. The 2-4x above is the
+number that matters, because both arms are counted the same way; the per-child
+total is not a threshold to compare a branch's size against.
+
+Why delegation is rare is answerable from the same runs, and the answer is not
+that the model weighs it and declines. Across 33 runs with delegation available,
+15% delegated and bash outnumbered every delegation-class call 10:1. The
+recorded reasoning shows the model deliberating over how to read efficiently —
+"that's 25 files... read them in parallel batches... I can read multiple files
+at once" — on a task built for `explore`, without delegation entering the
+decision at all.
+
+Three things explain that, and only one of them is a defect. The base system
+prompt never mentions delegation; every mention lives in the skills index, and
+each is a brake ("the heavy path... only when the task genuinely needs
+context-heavy work, not on weak relevance") next to an accelerator for inline
+skills ("even plausibly relevant... cheap"). The `task` tool description says
+what the tool does and never when to reach for it. And the model already has
+cheaper parallelism — several tool calls in one round trip, with no context
+duplicated — which is what it reasons in terms of.
+
+Given the measured 2.4-4.5x, a brake is the correct default; the gap is that
+nothing recognises the rare case where delegation would pay. Forcing it does not
+close that gap: in the forced fleet run the parent worked out all three fixes in
+its own reasoning before dispatching, so the children re-read the code to apply
+edits the parent had already derived. Delegation moved the typing, not the
+thinking.
+
+One hypothesis remains untested rather than disproved: delegation's isolation
+should pay when the parent is actually hurt by what it read. It could not be
+provoked here. Pinning a workspace `compact_ratio` down to 0.5% still produced
+zero compactions, because the agent keeps its session small by writing a script
+instead of reading — the same behaviour that wins it the comparisons. Context
+pressure needs a task that cannot be scripted away, which this corpus does not
+yet contain.
+
+The migration is the instructive one. Left alone the agent read a single file,
+wrote a script and changed 108 call sites in 28 seconds; split across three
+packages, no branch could see the transformation that solved all three. A task
+looking parallel-shaped is not evidence that splitting it is cheaper.
+
+Not yet measured, and deliberately not faked: rework-after-handoff needs
+mutation ordering across a whole run, which belongs to the harness driving the
+arms rather than the instrument recording one.
+
 ## 4. Data Types (`internal/provider`)
 
 ```go
@@ -724,7 +1005,11 @@ default        = "deepseek-v4-flash"   # optional; defaults to models[0]
 api_key_env    = "DEEPSEEK_API_KEY"
 web_search     = true
 context_window = 1000000   # tokens; harness compacts older history near this limit (0 disables)
-max_output_tokens = 32768  # total visible + reasoning + tool-call output; 0 = provider default
+# max_output_tokens = 0              # recommended: automatic (DeepSeek default high → ~64K)
+# max_output_tokens = 32768          # ordinary coding / cost control
+# max_output_tokens = 65536          # heavy reasoning / long tool loops
+# max_output_tokens = 131072         # only after repeated finish_reason=length
+# max_output_tokens never changes compact_ratio
 # model_overrides = { "deepseek-v4-flash" = { context_window = 1000000, max_output_tokens = 32768 } }
 
 # A single-model entry still works for custom OpenAI-compatible endpoints.

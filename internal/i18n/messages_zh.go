@@ -242,6 +242,7 @@ var Chinese = Messages{
 	CmdClear:            "丢弃当前上下文",
 	CmdCls:              "清屏（保留 LLM 上下文）",
 	CmdCompact:          "压缩上下文",
+	CmdContext:          "查看上下文窗口、阈值与上次维护结果",
 	CmdRewind:           "回滚到更早的一轮",
 	CmdTree:             "查看对话分支树",
 	CmdBranch:           "创建对话分支",
@@ -332,7 +333,7 @@ var Chinese = Messages{
 	GoalPausedReason:             "用户手动暂停",
 	GoalPausedFmt:                "目标已暂停（%s）— 使用 /goal resume 继续",
 	GoalBudgetExtended:           "目标已恢复 — 追加了一档轮次数",
-	GoalRuntimeFmt:               "运行状态：轮次 %d/%d，token %d，无进展 %d/%d，追加 %d",
+	GoalRuntimeFmt:               "运行状态：轮次 %d/%d，token %d，请求 %d，无进展 %d（仅观测），追加 %d",
 	GoalRuntimeLastReason:        "最近原因",
 	ModelSwitchUnavailable:       "本会话不支持切换模型",
 	ModelSwitchBusy:              "请先完成或取消当前工作，并停止后台任务后再切换模型",
@@ -440,6 +441,7 @@ var Chinese = Messages{
 	CustomPromptBaseURL:  "请输入 Base URL",
 	CustomPromptKeyEnv:   "API Key 变量名（直接回车使用默认值，不是模型名）",
 	CustomPromptAPIKey:   "请输入 API Key",
+	CustomPromptWindow:   "上下文窗口(tokens,填得比模型真实窗口小会导致过早压缩)",
 	CustomAddedFmt:       "已添加自定义模型: %s",
 
 	// Anthropic 兼容 provider

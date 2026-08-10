@@ -49,6 +49,9 @@ func parseSignPathConfiguration(t *testing.T, name string) signPathArtifactConfi
 func TestWindowsReleaseSignsPayloadBeforeRepackaging(t *testing.T) {
 	workflow := readTestFile(t, "../.github/workflows/release-desktop.yml")
 	orderedSteps := []string{
+		"name: Build and package",
+		"name: Checkout protected release verifier",
+		"name: Smoke-test Wails approval in WebView2",
 		"name: Upload unsigned Windows payload for SignPath",
 		"name: Submit Windows payload for Authenticode signing",
 		"name: Approve and download signed Windows payload",
@@ -58,7 +61,6 @@ func TestWindowsReleaseSignsPayloadBeforeRepackaging(t *testing.T) {
 		"name: Submit installer for Authenticode signing",
 		"name: Approve and download signed Windows installer",
 		"name: Replace installer with signed build",
-		"name: Checkout protected release verifier",
 		"name: Verify Windows Authenticode release contract",
 		"name: Sign artifacts (minisign)",
 	}
@@ -93,8 +95,9 @@ func TestWindowsReleaseSignsPayloadBeforeRepackaging(t *testing.T) {
 		`go run ./cmd/sign sign ../signed-payload/reasonix-payload.json`,
 		`go run ./cmd/sign verify ../signed-payload/reasonix-payload.json`,
 		`REASONIX_REQUIRE_PAYLOAD_MANIFEST: "1"`,
-		`ref: ${{ github.sha }}`,
+		`ref: ${{ github.workflow_sha }}`,
 		`path: release-control`,
+		`./release-control/scripts/test-webview2-approval-smoke.ps1`,
 		`./release-control/scripts/verify-windows-authenticode.ps1`,
 	} {
 		if !strings.Contains(workflow, want) {

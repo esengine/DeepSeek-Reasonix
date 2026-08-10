@@ -69,21 +69,22 @@ if (localeChunks.length !== 2) {
 }
 for (const path of localeChunks) {
   const name = basename(path);
-<<<<<<< HEAD
   // Task Monitor adds 37 user-facing labels to each on-demand locale, while
   // Extension UI adds its own status and action copy. The retrieval system
   // (retrieve_info + knowledge cache) adds Simplified-Chinese guidance copy,
   // and upstream shell execution contract cards add verification strings.
-  // Keep both dictionaries within a measured, explicit allowance covering
-  // both additions; zh gets the same budget as zh-TW.
-  const budget = 54 * 1024;
+  // Reasoning display controls and status bar metrics add the latest copy.
+  // zh-TW takes the wider upstream measurement; zh keeps the PR-verified
+  // allowance covering the retrieval copy (54 > upstream 53.9).
+  const budget = name.startsWith("zh-TW-") ? 54.7 * 1024 : 54 * 1024;
   assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }
 
 const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
   .reduce((total, path) => total + statSync(path).size, 0);
 // Native Web Animations and frame-batched scrolling avoid an eager animation
-// runtime. Preserve the resulting startup headroom instead of letting the shell
-// drift back to the previous 2.27 MiB / 295 KiB-gzip edge.
-assertBudget("initial raw JavaScript and CSS", rawInitialBytes, 2_200 * 1024);
+// runtime. Goal request observability plus transcript scroll arbitration,
+// logical selection state/DOM adapters, and measurement invalidation add small
+// always-available contracts; keep raw allowance tight while gzip stays flat.
+assertBudget("initial raw JavaScript and CSS", rawInitialBytes, 2_240 * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

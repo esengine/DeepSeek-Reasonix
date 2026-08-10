@@ -40,6 +40,28 @@ func (s ChildEvidenceSummary) MutationPaths() []string {
 	return out
 }
 
+// EvidencePaths returns every distinct path the child produced a successful
+// receipt for, reads included. MutationPaths answers what the child changed;
+// this answers what it looked at, which is what evidence origin scores.
+func (s ChildEvidenceSummary) EvidencePaths() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, r := range s.Receipts {
+		if !r.Success {
+			continue
+		}
+		for _, p := range r.Paths {
+			if p == "" || seen[p] {
+				continue
+			}
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Summary returns a snapshot of every receipt recorded this turn in order.
 func (l *Ledger) Summary() ChildEvidenceSummary {
 	if l == nil {
@@ -62,7 +84,7 @@ func (l *Ledger) MergeChild(summary ChildEvidenceSummary) {
 	for _, r := range summary.Receipts {
 		// Drop nested bookkeeping that the parent already owns.
 		switch r.ToolName {
-		case "todo_write", "complete_step", "ask":
+		case "todo_write", "complete_step", "complete_subtask", "ask":
 			continue
 		}
 		l.Record(r)

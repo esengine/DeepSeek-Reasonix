@@ -231,6 +231,7 @@ var ChineseTraditional = Messages{
 	CmdNew:              "清空上下文並儲存歷史",
 	CmdCls:              "清除畫面（保留 LLM 上下文）",
 	CmdCompact:          "壓縮上下文",
+	CmdContext:          "檢視上下文視窗、閾值與上次維護結果",
 	CmdRewind:           "回滾到更早的一輪",
 	CmdTree:             "檢視對話分支樹",
 	CmdBranch:           "建立對話分支",
@@ -412,6 +413,7 @@ var ChineseTraditional = Messages{
 	CustomPromptBaseURL:  "請輸入 Base URL",
 	CustomPromptKeyEnv:   "API Key 變數名稱（直接按 Enter 使用預設值，不是模型名稱）",
 	CustomPromptAPIKey:   "請輸入 API Key",
+	CustomPromptWindow:   "上下文視窗(tokens,填得比模型真實視窗小會導致過早壓縮)",
 	CustomAddedFmt:       "已新增自訂模型: %s",
 
 	// Anthropic 相容 provider
@@ -560,7 +562,7 @@ var ChineseTraditional = Messages{
 	GoalPausedReason:           "使用者手動暫停",
 	GoalPausedFmt:              "目標已暫停（%s）— 使用 /goal resume 繼續",
 	GoalBudgetExtended:         "目標已恢復 — 追加了一檔輪次數",
-	GoalRuntimeFmt:             "執行狀態：輪次 %d/%d，token %d，無進展 %d/%d，追加 %d",
+	GoalRuntimeFmt:             "執行狀態：輪次 %d/%d，token %d，請求 %d，無進展 %d（僅觀測），追加 %d",
 	GoalRuntimeLastReason:      "最近原因",
 	ProviderErrAuthRejected:    "認證失敗 (HTTP 401)：服務端拒絕了你的 API key。可能是 key 錯誤或已過期，也可能是服務端出現瞬時鑑權/額度問題——已退避重試仍失敗。請稍後再試，或檢查 .env 中的金鑰 / 執行 `reasonix setup`。",
 	SelectMoreAboveFmt:         "  ↑ 上方還有 %d 個",

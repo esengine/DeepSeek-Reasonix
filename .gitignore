@@ -5,6 +5,8 @@
 /npm/.stage/
 /reasonix
 /reasonix.exe
+/e2ebench
+/e2ebench.exe
 
 # Website (Astro) build output
 /site/dist/
