@@ -17,10 +17,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out feature branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: feature/nextcloud-talk-bot
           fetch-depth: 0
+
+      - name: Set up root Go toolchain
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6.0.9
+        with:
+          version: 10
+          run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
 
       - name: Prepare deterministic source anchors
         run: |
@@ -77,28 +96,12 @@ jobs:
             desktop/nextcloud_talk_bot_test.go
           git diff --check
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.25.x'
-          cache: true
-
       - name: Run root Go tests
         run: go test ./...
 
       - name: Run desktop Go tests
         working-directory: desktop
         run: go test ./...
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: pnpm
-          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
-
-      - name: Enable pnpm
-        run: corepack enable
 
       - name: Install frontend dependencies
         working-directory: desktop/frontend
