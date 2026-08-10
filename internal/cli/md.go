@@ -27,6 +27,39 @@ type mdRenderer struct {
 	copyMath       bool
 	copyMathPrefix string
 	nextCopyMathID int
+	copyNoWrap     bool
+	copyRows       []mdCopyRow
+}
+
+// mdCopyRow is one semantic output row of a copy-mode render plus the rows it
+// expands to on the display layer. bases[j] is the semantic-text column of the
+// first visible character of display row j, so a screen selection can be
+// translated back to unwrapped source text without carrying wrap newlines.
+type mdCopyRow struct {
+	text  string
+	rows  []string
+	bases []int
+}
+
+// recordCopyRow appends one semantic row with its display mapping.
+func (r *mdRenderer) recordCopyRow(row mdCopyRow) {
+	r.copyRows = append(r.copyRows, row)
+}
+
+// blankCopyRow is the mapping for an empty semantic row (a blank display row).
+func blankCopyRow() mdCopyRow {
+	return mdCopyRow{rows: []string{""}, bases: []int{0}}
+}
+
+// copyRowBases derives per-row semantic column offsets from display widths.
+func copyRowBases(rows []string) []int {
+	bases := make([]int, len(rows))
+	acc := 0
+	for i, row := range rows {
+		bases[i] = acc
+		acc += ansi.StringWidth(row)
+	}
+	return bases
 }
 
 func newMarkdownRenderer(width int) *mdRenderer {
@@ -76,24 +109,34 @@ func (r *mdRenderer) Render(input string) string {
 // zero-width internal markers. The markers are consumed only when the user
 // copies a transcript selection, so display wrapping and selection coordinates
 // stay identical without maintaining a second raw transcript.
-func (r *mdRenderer) RenderCopy(input, prefix string) string {
+func (r *mdRenderer) RenderCopy(input, prefix string) (string, []mdCopyRow) {
 	if strings.TrimSpace(input) == "" {
-		return ""
+		return "", nil
 	}
 	input = fixCJKEmphasis(normalizeMath(input))
 	src := []byte(input)
 	doc := r.md.Parser().Parse(text.NewReader(src))
 	var buf strings.Builder
 	r.copyMath = true
+	r.copyNoWrap = true
 	r.copyMathPrefix = prefix
 	r.nextCopyMathID = 0
+	r.copyRows = nil
 	r.renderBlocks(&buf, doc, src, 0)
 	r.copyMath = false
+	r.copyNoWrap = false
 	out := strings.TrimRight(buf.String(), "\n")
-	if out == "" {
-		return ""
+	// copyRows holds one entry per written line; TrimRight drops trailing blank
+	// lines, so trim the tail entries by the line-count difference.
+	if removed := strings.Count(buf.String(), "\n") - (strings.Count(out, "\n") + 1); removed > 0 {
+		r.copyRows = r.copyRows[:len(r.copyRows)-removed]
 	}
-	return out + "\n"
+	if out == "" {
+		return "", nil
+	}
+	rows := r.copyRows
+	r.copyRows = nil
+	return out + "\n", rows
 }
 
 // fixCJKEmphasis works around goldmark's CommonMark parser not recognising
@@ -216,9 +259,12 @@ func (r *mdRenderer) renderBlock(buf *strings.Builder, node ast.Node, src []byte
 		r.renderTable(buf, n, src, indent)
 	case *ast.ThematicBreak:
 		w := max(r.width-indent, 8)
-		buf.WriteString(strings.Repeat(" ", indent))
-		buf.WriteString(dim(strings.Repeat("─", w)))
-		buf.WriteString("\n\n")
+		row := strings.Repeat(" ", indent) + dim(strings.Repeat("─", w))
+		r.recordCopyRow(mdCopyRow{text: row, rows: []string{row}, bases: []int{0}})
+		buf.WriteString(row)
+		buf.WriteString("\n")
+		r.recordCopyRow(blankCopyRow())
+		buf.WriteString("\n")
 	default:
 		// Unknown block: drop into children rather than dropping content.
 		r.renderBlocks(buf, node, src, indent)
@@ -227,17 +273,21 @@ func (r *mdRenderer) renderBlock(buf *strings.Builder, node ast.Node, src []byte
 
 func (r *mdRenderer) renderHeading(buf *strings.Builder, n *ast.Heading, src []byte, indent int) {
 	inline := r.collectInline(n, src)
-	buf.WriteString(strings.Repeat(" ", indent))
-	buf.WriteString(bold(accent(inline)))
+	ind := strings.Repeat(" ", indent)
+	head := ind + bold(accent(inline))
+	r.recordCopyRow(mdCopyRow{text: head, rows: []string{head}, bases: []int{0}})
+	buf.WriteString(head)
 	buf.WriteString("\n")
 	// Level-1 headings get an accent underline; deeper levels rely on
 	// bold+colour alone so the hierarchy reads at a glance without piling
 	// on visual weight on every "###" in a long response.
 	if n.Level == 1 {
-		buf.WriteString(strings.Repeat(" ", indent))
-		buf.WriteString(accent(strings.Repeat("─", visibleWidth(inline))))
+		rule := ind + accent(strings.Repeat("─", visibleWidth(inline)))
+		r.recordCopyRow(mdCopyRow{text: rule, rows: []string{rule}, bases: []int{0}})
+		buf.WriteString(rule)
 		buf.WriteString("\n")
 	}
+	r.recordCopyRow(blankCopyRow())
 	buf.WriteString("\n")
 }
 
@@ -252,6 +302,21 @@ func (r *mdRenderer) renderTextBlock(buf *strings.Builder, n *ast.TextBlock, src
 func (r *mdRenderer) renderInlineBlock(buf *strings.Builder, n ast.Node, src []byte, indent int, trailingBlank bool) {
 	inline := r.collectInline(n, src)
 	prefix := strings.Repeat(" ", indent)
+	if r.copyNoWrap {
+		rows := strings.Split(wrapAnsi(inline, r.width-indent), "\n")
+		for i := range rows {
+			rows[i] = prefix + rows[i]
+		}
+		r.recordCopyRow(mdCopyRow{text: prefix + inline, rows: rows, bases: copyRowBases(rows)})
+		buf.WriteString(prefix)
+		buf.WriteString(inline)
+		buf.WriteString("\n")
+		if trailingBlank {
+			r.recordCopyRow(blankCopyRow())
+			buf.WriteString("\n")
+		}
+		return
+	}
 	wrapped := wrapAnsi(inline, r.width-indent)
 	for line := range strings.SplitSeq(wrapped, "\n") {
 		buf.WriteString(prefix)
@@ -277,8 +342,6 @@ func (r *mdRenderer) renderList(buf *strings.Builder, n *ast.List, src []byte, i
 		} else {
 			marker = "•"
 		}
-		buf.WriteString(strings.Repeat(" ", indent))
-		buf.WriteString(accent(marker) + " ")
 		markerW := visibleWidth(marker) + 1
 
 		first := item.FirstChild()
@@ -288,21 +351,45 @@ func (r *mdRenderer) renderList(buf *strings.Builder, n *ast.List, src []byte, i
 		inlineHost := inlineCarrier(first)
 		if inlineHost != nil {
 			inline := r.collectInline(inlineHost, src)
-			wrapped := wrapAnsi(inline, r.width-indent-markerW)
-			lines := strings.Split(wrapped, "\n")
-			buf.WriteString(lines[0] + "\n")
-			for _, l := range lines[1:] {
-				buf.WriteString(strings.Repeat(" ", indent+markerW))
-				buf.WriteString(l + "\n")
+			if r.copyNoWrap {
+				head := strings.Repeat(" ", indent) + accent(marker) + " " + inline
+				lines := strings.Split(wrapAnsi(inline, r.width-indent-markerW), "\n")
+				rows := make([]string, 0, len(lines))
+				bases := make([]int, 0, len(lines))
+				contBase := visibleWidth(strings.Repeat(" ", indent)) + markerW
+				for i, l := range lines {
+					if i == 0 {
+						rows = append(rows, strings.Repeat(" ", indent)+accent(marker)+" "+l)
+						bases = append(bases, 0)
+					} else {
+						rows = append(rows, strings.Repeat(" ", indent+markerW)+l)
+						bases = append(bases, contBase)
+					}
+				}
+				r.recordCopyRow(mdCopyRow{text: head, rows: rows, bases: bases})
+				buf.WriteString(head)
+				buf.WriteString("\n")
+			} else {
+				buf.WriteString(strings.Repeat(" ", indent))
+				buf.WriteString(accent(marker) + " ")
+				wrapped := wrapAnsi(inline, r.width-indent-markerW)
+				lines := strings.Split(wrapped, "\n")
+				buf.WriteString(lines[0] + "\n")
+				for _, l := range lines[1:] {
+					buf.WriteString(strings.Repeat(" ", indent+markerW))
+					buf.WriteString(l + "\n")
+				}
 			}
 			for s := first.NextSibling(); s != nil; s = s.NextSibling() {
 				r.renderBlock(buf, s, src, indent+markerW)
 			}
 		} else {
+			r.recordCopyRow(blankCopyRow())
 			buf.WriteString("\n")
 			r.renderBlocks(buf, item, src, indent+2)
 		}
 	}
+	r.recordCopyRow(blankCopyRow())
 	buf.WriteString("\n")
 }
 
@@ -311,22 +398,38 @@ func (r *mdRenderer) renderFenced(buf *strings.Builder, n ast.Node, src []byte, 
 	for i := range n.Lines().Len() {
 		l := n.Lines().At(i)
 		line := strings.TrimRight(string(l.Value(src)), "\n")
-		buf.WriteString(prefix)
-		buf.WriteString(accent(line))
+		row := prefix + accent(line)
+		r.recordCopyRow(mdCopyRow{text: row, rows: []string{row}, bases: []int{0}})
+		buf.WriteString(row)
 		buf.WriteString("\n")
 	}
+	r.recordCopyRow(blankCopyRow())
 	buf.WriteString("\n")
 }
 
 func (r *mdRenderer) renderBlockquote(buf *strings.Builder, n *ast.Blockquote, src []byte, indent int) {
 	var inner strings.Builder
+	rowsStart := len(r.copyRows)
 	r.renderBlocks(&inner, n, src, 0)
 	prefix := strings.Repeat(" ", indent) + dim("▎ ")
-	for line := range strings.SplitSeq(strings.TrimRight(inner.String(), "\n"), "\n") {
+	innerStr := inner.String()
+	trimmed := strings.TrimRight(innerStr, "\n")
+	removed := strings.Count(innerStr, "\n") - strings.Count(trimmed, "\n")
+	// Inner rows already carry the semantic text; re-prefix them so the
+	// recorded mapping stays aligned with the ▎-prefixed output lines.
+	r.copyRows = r.copyRows[:len(r.copyRows)-removed]
+	for i := rowsStart; i < len(r.copyRows); i++ {
+		r.copyRows[i].text = prefix + r.copyRows[i].text
+		for j := range r.copyRows[i].rows {
+			r.copyRows[i].rows[j] = prefix + r.copyRows[i].rows[j]
+		}
+	}
+	for line := range strings.SplitSeq(trimmed, "\n") {
 		buf.WriteString(prefix)
 		buf.WriteString(dim(line))
 		buf.WriteString("\n")
 	}
+	r.recordCopyRow(blankCopyRow())
 	buf.WriteString("\n")
 }
 
@@ -461,18 +564,22 @@ func (r *mdRenderer) renderTable(buf *strings.Builder, n *extast.Table, src []by
 
 	if len(header) > 0 {
 		r.renderTableRow(buf, prefix, sep, header, widths, true)
-		buf.WriteString(prefix)
+		var rule strings.Builder
+		rule.WriteString(prefix)
 		for i := range widths {
 			if i > 0 {
-				buf.WriteString(dim("─┼─"))
+				rule.WriteString(dim("─┼─"))
 			}
-			buf.WriteString(dim(strings.Repeat("─", widths[i])))
+			rule.WriteString(dim(strings.Repeat("─", widths[i])))
 		}
+		r.recordCopyRow(mdCopyRow{text: rule.String(), rows: []string{rule.String()}, bases: []int{0}})
+		buf.WriteString(rule.String())
 		buf.WriteByte('\n')
 	}
 	for _, row := range rows {
 		r.renderTableRow(buf, prefix, sep, row, widths, false)
 	}
+	r.recordCopyRow(blankCopyRow())
 	buf.WriteByte('\n')
 }
 
@@ -493,6 +600,72 @@ func (r *mdRenderer) renderTableRow(buf *strings.Builder, prefix, sep string, ce
 		if len(wrapped[i]) > maxLines {
 			maxLines = len(wrapped[i])
 		}
+	}
+	if r.copyNoWrap {
+		// Semantic row: unwrapped cell text joined by rails, no column padding.
+		// Display rows still mirror the visible padded layout so selection
+		// coordinates translate back (pad columns map approximately).
+		var sem strings.Builder
+		sem.WriteString(prefix)
+		cellBase := make([]int, cols)
+		acc := 0
+		for i := range cols {
+			cellBase[i] = acc
+			acc += 3 // rail " │ "
+			if i < len(cells) {
+				acc += visibleWidth(cells[i])
+			}
+		}
+		for i := range cols {
+			if i > 0 {
+				sem.WriteString(" │ ")
+			}
+			if i < len(cells) {
+				sem.WriteString(cells[i])
+			}
+		}
+		rowsOut := make([]string, maxLines)
+		bases := make([]int, maxLines)
+		for line := range maxLines {
+			var b strings.Builder
+			b.WriteString(prefix)
+			for i := range cols {
+				if i > 0 {
+					b.WriteString(sep)
+				}
+				var cell string
+				if line < len(wrapped[i]) {
+					cell = wrapped[i][line]
+				}
+				padded := padRight(cell, widths[i])
+				if isHeader {
+					padded = bold(padded)
+				}
+				b.WriteString(padded)
+			}
+			rowsOut[line] = b.String()
+			for i := range cols {
+				var seg string
+				if line < len(wrapped[i]) {
+					seg = wrapped[i][line]
+				}
+				if seg == "" {
+					continue
+				}
+				segCol := 0
+				for t := 0; t < line && t < len(wrapped[i]); t++ {
+					segCol += visibleWidth(wrapped[i][t])
+				}
+				bases[line] = cellBase[i] + segCol
+				break
+			}
+		}
+		r.recordCopyRow(mdCopyRow{text: sem.String(), rows: rowsOut, bases: bases})
+		for line := range maxLines {
+			buf.WriteString(rowsOut[line])
+			buf.WriteByte('\n')
+		}
+		return
 	}
 	for line := range maxLines {
 		buf.WriteString(prefix)
