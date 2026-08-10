@@ -15071,6 +15071,29 @@ body > .mermaid-diagram--fullscreen {
   font: inherit;
   font-size: 13px;
 }
+.hist-pinned {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+  margin-bottom: 8px;
+}
+.hist-item__unpin {
+  --wails-draggable: no-drag;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--fg-faint);
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+.hist-item__unpin:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
 @media (max-width: 760px) {
   .management-modal-backdrop {
     align-items: stretch;
