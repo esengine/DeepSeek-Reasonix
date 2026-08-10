@@ -22,8 +22,45 @@ jobs:
           ref: feature/nextcloud-talk-bot
           fetch-depth: 0
 
+      - name: Prepare deterministic source anchors
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("desktop/frontend/src/App.tsx")
+          text = path.read_text(encoding="utf-8")
+          old = '''    allowAll: bot.allowlist.allowAll,
+              allowlistEnabled: bot.allowlist.enabled,
+              allowlistUsers,'''
+          # The compact source has two equivalent global allowlist blocks. Mark
+          # the QQ one so the integration transform can target the generic
+          # connection block unambiguously.
+          if text.count(old) == 2:
+              text = text.replace(old, old.replace("allowlistUsers,", "allowlistUsers, // nextcloud-transform-keep-qq"), 1)
+          path.write_text(text, encoding="utf-8")
+          PY
+
       - name: Apply integration wiring
-        run: python3 scripts/apply_nextcloud_talk_integration.py
+        run: |
+          python3 -m py_compile scripts/apply_nextcloud_talk_integration.py
+          python3 scripts/apply_nextcloud_talk_integration.py
+
+      - name: Normalize generated focused tests and temporary anchor
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          for name in (
+              "internal/botruntime/nextcloud_talk_test.go",
+              "internal/config/nextcloud_talk_bot_test.go",
+              "desktop/nextcloud_talk_bot_test.go",
+          ):
+              path = Path(name)
+              text = path.read_text(encoding="utf-8")
+              text = text.replace(r"\t", "\t")
+              path.write_text(text, encoding="utf-8")
+          app = Path("desktop/frontend/src/App.tsx")
+          text = app.read_text(encoding="utf-8").replace(" // nextcloud-transform-keep-qq", "")
+          app.write_text(text, encoding="utf-8")
+          PY
 
       - name: Format Go changes
         run: |
@@ -70,6 +107,13 @@ jobs:
       - name: Typecheck desktop frontend
         working-directory: desktop/frontend
         run: pnpm typecheck
+
+      - name: Verify Nextcloud integration is present
+        run: |
+          grep -q 'PlatformNextcloudTalk' internal/botruntime/runtime.go
+          grep -q 'nextcloud-talk' internal/cli/bot.go
+          grep -q 'settings.botNextcloudTalk' desktop/frontend/src/components/SettingsPanel.tsx
+          grep -q 'nextcloud-talk' desktop/frontend/src/App.tsx
 
       - name: Remove temporary integration helpers
         run: rm -f scripts/apply_nextcloud_talk_integration.py .github/workflows/apply-nextcloud-talk-integration.yml
