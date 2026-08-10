@@ -17,10 +17,8 @@ func normalizeLocalOpenPath(path string) (string, error) {
 	if path == "" {
 		return "", os.ErrInvalid
 	}
-	// Case-insensitive scheme prefix: FILE://evil.com/share must enter the
-	// file-URL branch where url.Parse rejects it (Scheme "FILE" != "file"),
-	// instead of falling through as a plain path that Windows shell would
-	// still resolve as a file: URL (SMB credential negotiation).
+	// Case-insensitive file:// prefix so FILE:// enters the URL branch
+	// where url.Parse rejects it (Scheme "FILE" != "file").
 	if len(path) >= len("file://") && strings.EqualFold(path[:len("file://")], "file://") {
 		parsed, err := url.Parse(path)
 		if err != nil || parsed.Scheme != "file" || parsed.Opaque != "" || parsed.User != nil || parsed.Port() != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
@@ -34,35 +32,20 @@ func normalizeLocalOpenPath(path string) (string, error) {
 		if host == "." || host == "?" {
 			return "", fmt.Errorf("unsafe local file URL authority %q", host)
 		}
-		// UNC hosts other than loopback are refused outright: file:// URLs in
-		// chat content are AI-generated/injected, and remote\share paths
-		// would trigger an SMB connection (Net-NTLM credential negotiation)
-		// to an attacker-controlled host on click. Loopback stays allowed for
-		// localhost-style references.
+		// Non-loopback file:// hosts are refused: AI-injected chat content
+		// could trigger SMB/NTLM credential negotiation to a remote host.
+		// Loopback (localhost/127.0.0.1/::1) stays allowed.
 		if host != "" {
 			if !isLoopbackHost(host) {
 				return "", fmt.Errorf("remote file URL authority %q is not allowed (SMB credential leak risk)", host)
 			}
-			// Loopback authority: drop it and keep the local path
-			// (//localhost/C:/x.txt would otherwise fail the device-colon
-			// check as a UNC remainder).
-			host = ""
 		}
-		// url.Parse does NOT normalize backslashes (unlike WHATWG URL), so a
-		// file:///\evil.example\share\x.txt decodes with a leading backslash
-		// and would evade the slash check below before the Windows-syntax
-		// check folds backslashes into a valid remote UNC. Normalize first so
-		// the "//" prefix test catches both spellings.
+		// url.Parse does not normalize backslashes; normalize first so the
+		// "//" prefix test catches backslash UNC spellings too.
 		decoded = strings.ReplaceAll(decoded, "\\", "/")
 		if strings.HasPrefix(decoded, "//") {
-			// Unified rejection AFTER the host branch so loopback hosts get
-			// the same guard: file:////host/share (4+ slashes, empty
-			// authority) and file://127.0.0.1//host/share both decode to a
-			// path starting with "//" — a remote UNC path that would trigger
-			// an SMB connection (Net-NTLM credential negotiation). Safe
-			// forms unaffected: file:///C:/x.txt (3 slashes) and
-			// file://localhost/C:/x.txt decode without the "//" prefix;
-			// "//C:/" device forms are also rejected by the colon check.
+			// Refuse "//"-prefixed paths: covers 4+ slash empty-authority
+			// URLs and loopback double-slash paths that decode to remote UNC.
 			return "", fmt.Errorf("remote file URL authority is not allowed (SMB credential leak risk)")
 		}
 		if len(decoded) >= 4 && decoded[0] == '/' && isASCIILetter(decoded[1]) && decoded[2] == ':' && decoded[3] == '/' {

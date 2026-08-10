@@ -11012,22 +11012,11 @@ func (a *App) RevealWorkspacePathForTab(tabID, rel string) error {
 
 // RevealPath shows an arbitrary absolute path in the native file manager.
 func (a *App) RevealPath(path string) error {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return os.ErrInvalid
-	}
-	// Same boundary as OpenLocalPath: the native boundary must validate
-	// independently because Wails methods are callable without the frontend.
-	// Without this, an XSS-compromised frontend could drive explorer to a
-	// remote UNC (\\evil.com\share) and trigger SMB/NTLM credential
-	// negotiation. normalizeLocalOpenPath refuses remote file:// authorities
-	// and empty-authority UNC spellings; plain UNC paths and local drives
-	// remain allowed by design (local network shares and file manager use).
-	normalized, err := normalizeLocalOpenPath(path)
+	path, err := normalizeLocalOpenPath(path)
 	if err != nil {
 		return err
 	}
-	return revealPath(normalized)
+	return revealPath(path)
 }
 
 var revealPath = defaultRevealPath
