@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"reasonix/internal/agent"
-	"reasonix/internal/tool"
 )
 
 // bindWorkflowTurnContext installs the per-turn contracts shared by Plan and
@@ -16,14 +15,8 @@ func (o *turnOrchestrator) bindWorkflowTurnContext(ctx context.Context, continua
 	requireVisibleFinal := c.planMode
 	c.mu.Unlock()
 
-	goalScopeID, goalTurn := c.goals.goalScopeIDForTurn(continuation)
+	ctx, goalTurn := c.bindTurnScope(ctx, continuation)
 	if goalTurn {
-		recorder := c.goals.newTurnRecorder(goalScopeID, c.goals.continuationToken())
-		if c.executor != nil {
-			recorder.setProgressBefore(c.executor.HostProgressSignature())
-		}
-		ctx = tool.WithGoalTurnRecorder(ctx, recorder)
-		c.goalUsageTee.setActiveRecorder(recorder)
 		requireVisibleFinal = true
 	}
 	if requireVisibleFinal {

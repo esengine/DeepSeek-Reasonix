@@ -126,14 +126,15 @@ func New(cfg Config) provider.Provider {
 	vendor := DetectVendor(cfg.BaseURL)
 	cap := capabilitiesFor(vendor)
 	maxOutputTokens := cfg.MaxOutputTokens
-	// 默认输出预算从 vendor 表取（deepseek 128K / mimo 128K）——消除硬编码
-
-	// 常量分叉（review：responses.go 硬编码与 caps.defaultMaxOutputTokens
-	// 职责重叠）。条件保留：thinking-disabled 的 deepseek 请求不设自动
-	// 预算（与 openai.go 一致——服务端默认即可；测试断言该行为）。
-	if maxOutputTokens == 0 && cap.defaultMaxOutputTokens > 0 &&
-		!(vendor == "deepseek" && responsesReasoningDisabled(cfg.Effort)) {
-		maxOutputTokens = cap.defaultMaxOutputTokens
+	// max_output_tokens=0 is automatic. Known vendors use the 16K/32K/64K ladder;
+	// thinking-disabled DeepSeek still gets the ordinary 16K auto budget.
+	// 128K is never chosen automatically. Compact_ratio is independent.
+	if maxOutputTokens == 0 && cap.defaultMaxOutputTokens > 0 {
+		if vendor == "deepseek" || vendor == "mimo" {
+			maxOutputTokens = responsesAutoOutputBudget(vendor, cfg.Effort)
+		} else {
+			maxOutputTokens = cap.defaultMaxOutputTokens
+		}
 	}
 	sessionCache := cap.sessionCacheHeader
 	if cfg.SessionCache != nil {
@@ -167,6 +168,20 @@ func responsesReasoningDisabled(effort string) bool {
 	default:
 		return false
 	}
+}
+
+// responsesAutoOutputBudget mirrors Chat Completions: DeepSeek defaults empty
+// effort to high (64K), low stays 32K, thinking disabled is ordinary 16K.
+// Never auto-selects 128K.
+func responsesAutoOutputBudget(vendor, effort string) int {
+	if responsesReasoningDisabled(effort) {
+		return provider.AutoOutputBudget(false, effort)
+	}
+	e := strings.ToLower(strings.TrimSpace(effort))
+	if vendor == "deepseek" && (e == "" || e == "auto") {
+		e = "high"
+	}
+	return provider.AutoOutputBudget(true, e)
 }
 
 func (c *client) Name() string { return c.name }
@@ -293,9 +308,9 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool, [
 		maxOutputTokens = c.maxOutputTokens
 	}
 	if maxOutputTokens == 0 && c.caps.defaultMaxOutputTokens > 0 {
-		// 与 New() 构造期默认同条件：thinking-disabled 的 deepseek 请求
-		// 不设自动预算（服务端默认即可——测试断言该行为）。
-		if !(c.vendor == "deepseek" && responsesReasoningDisabled(c.effort)) {
+		if c.vendor == "deepseek" || c.vendor == "mimo" {
+			maxOutputTokens = responsesAutoOutputBudget(c.vendor, c.effort)
+		} else {
 			maxOutputTokens = c.caps.defaultMaxOutputTokens
 		}
 	}

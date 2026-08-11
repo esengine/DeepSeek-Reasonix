@@ -1,0 +1,43 @@
+package agent
+
+// runLoopState holds sequential state for one Agent.Run invocation.
+type runLoopState struct {
+	runMaxSteps        int
+	runMaxStepsKey     string
+	runLimitHostOwned  bool
+	runPauseAfterFinal bool
+
+	emptyFinalBlocks         int
+	requireVisibleFinal      bool
+	visibleFinalRepair       bool
+	visibleFinalRepairRounds int
+	handoffNudges            int
+	usedAnyTool              bool
+	contextToolRepairs       int
+	graceRound               bool
+	recoveryGraceRound       bool
+	goalStuckGraceRound      bool
+	goalStuckLimit           int
+	goalStuckKey             string
+	goalStuckReason          string
+
+	todoProgress         int
+	trackingTodoProgress bool
+	todoStallRounds      int
+	seenTodoProgress     map[string]struct{}
+
+	executorHandoff bool
+	input           string
+	workDurationMs  func() int64
+}
+
+func (s *runLoopState) shouldSample(step int) bool {
+	return s.runMaxSteps <= 0 || step < s.runMaxSteps || s.graceRound ||
+		s.recoveryGraceRound || s.goalStuckGraceRound || s.visibleFinalRepair
+}
+
+func (s *runLoopState) beginSamplingRound() {
+	if s.visibleFinalRepair {
+		s.visibleFinalRepairRounds++
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -27,10 +28,11 @@ func init() { tool.RegisterBuiltin(completeStep{}) }
 type completeStep struct{}
 
 type stepEvidence struct {
-	Kind    string   `json:"kind"`
-	Summary string   `json:"summary"`
-	Command string   `json:"command,omitempty"`
-	Paths   []string `json:"paths,omitempty"`
+	Kind        string   `json:"kind"`
+	Summary     string   `json:"summary"`
+	Command     string   `json:"command,omitempty"`
+	Paths       []string `json:"paths,omitempty"`
+	CriterionID string   `json:"criterion_id,omitempty"`
 }
 
 // validEvidenceKinds are the evidence forms a completion may cite. "checkpoint"
@@ -46,7 +48,7 @@ var validEvidenceKinds = map[string]bool{
 func (completeStep) Name() string { return "complete_step" }
 
 func (completeStep) Description() string {
-	return "Record the evidence-backed completion of ONE step of an approved plan. Call it as you finish each step instead of silently moving on: it signs the step off with PROOF it is done — the verification you ran (command + result), a completed built-in review that is fresh for any later changes, the diff/files you changed, or a manual check. A completion with no evidence is REJECTED, so don't claim a step is done until you can show why. The host advances the task list for you when you sign off — it marks this step completed and moves the next to in_progress, so you don't need a separate todo_write to mark completions. Fields: `step` (which step — its title or number, matching the task list), `result` (what is now true/changed), `evidence` (≥1 item, each with `kind` = verification|review|diff|files|manual and a `summary`, plus optional `command`/`paths`), and optional `notes`."
+	return "Record the evidence-backed completion of ONE step of an approved plan. Call it as you finish each step instead of silently moving on: it signs the step off with PROOF it is done — the verification you ran (command + result), a completed built-in review that is fresh for any later changes, the diff/files you changed, or a manual check. A completion with no evidence is REJECTED, so don't claim a step is done until you can show why. The host advances the task list for you when you sign off — it marks this step completed and moves the next to in_progress, so you don't need a separate todo_write to mark completions. Fields: `step` (which step — its title or number, matching the task list), `result` (what is now true/changed), `evidence` (≥1 item, each with `kind` = verification|review|diff|files|manual and a `summary`, plus optional `command`/`paths`, and `criterion_id` naming the acceptance criterion the proof satisfies), and optional `notes`."
 }
 
 func (completeStep) Schema() json.RawMessage {
@@ -64,6 +66,7 @@ func (completeStep) Schema() json.RawMessage {
     "items":{
       "type":"object",
       "properties":{
+        "criterion_id":{"type":"string","description":"The acceptance criterion this proof satisfies, as the plan renders it (e.g. \"c2\" from \"accept [c2]: ...\"). Cite it whenever the step has criteria: a command succeeding is not the same as a criterion being met, and the host records the proof against the criterion you name."},
         "kind":{"type":"string","enum":["verification","review","diff","files","manual"],"description":"verification = a command/test was run (command REQUIRED); review = a built-in review run completed and, after changes, inspected the latest changed result (the verdict/findings still apply separately); diff = a concrete code change (paths REQUIRED); files = files created/edited/inspected (paths REQUIRED); manual = a manual check."},
         "summary":{"type":"string","description":"The evidence itself: the test result, what the diff does, or what was confirmed."},
         "command":{"type":"string","description":"REQUIRED for verification evidence: the command as it actually ran (e.g. \"go test ./...\") — it is checked against this session's real command history."},
@@ -128,6 +131,9 @@ func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, 
 			return "", fmt.Errorf("evidence %d: summary is required — the evidence is the summary, not just its kind", i+1)
 		}
 		kinds = append(kinds, e.Kind)
+	}
+	if err := verifyCitedCriteria(ctx, p.Evidence); err != nil {
+		return "", err
 	}
 
 	todoMatch, hasTodo, err := verifyTodoStep(ctx, step)
@@ -512,4 +518,23 @@ func extractCommandFromCall(name string, argsJSON string) string {
 		return name
 	}
 	return name + " " + args.Path
+}
+
+// verifyCitedCriteria rejects a proof citing a criterion the approved plan does
+// not have. Resolving an unknown id into nothing would leave the real criterion
+// unproven and only surface much later, as a completion the host refuses for a
+// reason the model never connected to this call.
+func verifyCitedCriteria(ctx context.Context, items []stepEvidence) error {
+	known, ok := evidence.AcceptanceCriteriaFromContext(ctx)
+	if !ok {
+		return nil
+	}
+	for i, item := range items {
+		id := strings.TrimSpace(item.CriterionID)
+		if id == "" || slices.Contains(known, id) {
+			continue
+		}
+		return fmt.Errorf("evidence %d: criterion_id %q is not in the approved plan; cite one of: %s", i+1, id, strings.Join(known, ", "))
+	}
+	return nil
 }

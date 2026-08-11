@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"reasonix/internal/agent"
@@ -22,6 +23,11 @@ type turnOrchestrator struct {
 	c             *Controller
 	lastTurnFinal string
 }
+
+const (
+	goalRunRoundLimit = 16
+	goalRunRoundKey   = "goal model rounds"
+)
 
 type orchestratedTurn struct {
 	input            string
@@ -92,7 +98,9 @@ func (o *turnOrchestrator) runSubagentSkillTurnsGoalLoop(ctx context.Context, sk
 	// The skill turn's model requests count against the active goal's token
 	// budget, so bind a recorder for the span even though the sub-agent cannot
 	// call update_goal itself.
-	if scopeID, _, ok := o.c.goals.deliveryScope(); ok {
+	if scopeID, goal, ok := o.c.goals.deliveryScope(); ok {
+		ctx = agent.WithDeliveryExecutionScope(ctx, agent.DeliveryExecutionScope{ID: scopeID, TaskText: goal})
+		ctx = agent.WithDefaultRunStepLimit(ctx, goalRunRoundLimit, goalRunRoundKey)
 		recorder := o.c.goals.newTurnRecorder(scopeID, o.c.goals.continuationToken())
 		o.c.goalUsageTee.setActiveRecorder(recorder)
 	}
@@ -101,8 +109,11 @@ func (o *turnOrchestrator) runSubagentSkillTurnsGoalLoop(ctx context.Context, sk
 			o.c.goalUsageTee.setActiveRecorder(nil)
 			o.c.stopGoal(GoalStatusStopped)
 		}
-		o.c.goalUsageTee.setActiveRecorder(nil)
-		return err
+		if !goalTurnErrorAbsorbable(err) || !o.c.goals.active() {
+			o.c.goalUsageTee.setActiveRecorder(nil)
+			return err
+		}
+		return o.continueGoal(ctx, expectedContinuationEpoch, err)
 	}
 	return o.continueGoal(ctx, expectedContinuationEpoch, nil)
 }
@@ -273,8 +284,7 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 		ctx = agent.WithDeliveryExecutionScope(ctx, agent.DeliveryExecutionScope{ID: scopeID, TaskText: task})
 	}
 	ctx, goalTurn := o.bindWorkflowTurnContext(ctx, continuation)
-	// This defer is registered after finishInFlightTurn, so it executes first
-	// and captures the final from the Session that owned this turn.
+	// Capture the Goal final before finishInFlightTurn can adopt another Session.
 	defer o.captureGoalTurnFinal(goalTurn, finalBoundary)
 	modelInput := input
 	if !turn.synthetic {
@@ -328,9 +338,7 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	}
 	proposal := finalBoundary.currentVisibleFinal(c)
 	if proposal == "" {
-		// A custom Runner may not own the Controller transcript. With no
-		// provable current proposal, fail closed by leaving Plan mode active
-		// and never opening the approval/execution gate.
+		// Without a provable current proposal, leave Plan mode active and keep the gate closed.
 		return nil
 	}
 	// The plan is already visible as the assistant's answer, so the request
@@ -405,8 +413,7 @@ func (o *turnOrchestrator) runGoalLoopWithPreparedTurn(ctx context.Context, turn
 			o.c.stopGoal(GoalStatusStopped)
 			return err
 		}
-		var readinessErr *agent.FinalReadinessError
-		if !errors.As(err, &readinessErr) || !o.c.goals.active() {
+		if !goalTurnErrorAbsorbable(err) || !o.c.goals.active() {
 			// Terminal provider/host error (or a plain non-Goal Delivery
 			// readiness failure): stop auto-continue. With no active Goal the
 			// error surfaces the recovery card; with a Goal it stays running so
@@ -437,8 +444,7 @@ func (o *turnOrchestrator) runEditedGoalLoopWithImageRefsRawDisplay(ctx context.
 			o.c.stopGoal(GoalStatusStopped)
 			return err
 		}
-		var readinessErr *agent.FinalReadinessError
-		if !errors.As(err, &readinessErr) || !o.c.goals.active() {
+		if !goalTurnErrorAbsorbable(err) || !o.c.goals.active() {
 			o.c.goalUsageTee.setActiveRecorder(nil)
 			return err
 		}
@@ -479,8 +485,7 @@ func (o *turnOrchestrator) continueGoal(ctx context.Context, expectedContinuatio
 				c.stopGoal(GoalStatusStopped)
 				return err
 			}
-			var readinessErr *agent.FinalReadinessError
-			if !errors.As(err, &readinessErr) {
+			if !goalTurnErrorAbsorbable(err) {
 				// Terminal provider/host error: stop auto-continue; the Goal
 				// stays running for the next user turn.
 				c.goalUsageTee.setActiveRecorder(nil)
@@ -494,6 +499,38 @@ func (o *turnOrchestrator) continueGoal(ctx context.Context, expectedContinuatio
 			return nil
 		}
 		expectedContinuationEpoch = res.continuationEpoch
+	}
+}
+
+func goalTurnErrorAbsorbable(err error) bool {
+	var readinessErr *agent.FinalReadinessError
+	if errors.As(err, &readinessErr) {
+		return true
+	}
+	_, _, ok := goalPauseFromRunError(err)
+	return ok
+}
+
+func goalPauseFromRunError(err error) (cause, reason string, ok bool) {
+	info, ok := agent.InspectRunPause(err)
+	if !ok {
+		return "", "", false
+	}
+	switch {
+	case info.Kind == "max_steps" && info.HostOwned && info.Key == goalRunRoundKey:
+		return stopCauseGoalRunBudget,
+			fmt.Sprintf("Goal run budget exhausted (%d model rounds); completed work is saved", info.Limit), true
+	case info.Kind == "goal_stuck" && info.HostOwned:
+		reason := strings.TrimSpace(info.Reason)
+		if reason == "" {
+			reason = "host-detected structural no-progress loop"
+		}
+		return stopCauseGoalStuck, reason, true
+	case info.Kind == "todo_stall" && info.HostOwned:
+		return stopCauseGoalStuck,
+			fmt.Sprintf("current todo stalled for %d model rounds without host-observed progress", info.Limit), true
+	default:
+		return "", "", false
 	}
 }
 
@@ -515,6 +552,7 @@ func (o *turnOrchestrator) advanceGoalAfterTurn(ctx context.Context, expectedCon
 	}
 
 	var readiness agent.ReadinessResult
+	pauseCause, pauseReason, runPaused := goalPauseFromRunError(turnErr)
 	var readinessErr *agent.FinalReadinessError
 	if errors.As(turnErr, &readinessErr) {
 		readiness = agent.ReadinessResult{
@@ -523,7 +561,7 @@ func (o *turnOrchestrator) advanceGoalAfterTurn(ctx context.Context, expectedCon
 			Reason:      readinessErr.Reason,
 			ProgressKey: readinessErr.Reason,
 		}
-	} else if turnErr != nil {
+	} else if turnErr != nil && !runPaused {
 		// Terminal provider/host error: stop auto-continue without an FSM
 		// transition; the goal stays running for the next user turn.
 		return goalAdvanceResult{cont: false}
@@ -553,23 +591,21 @@ func (o *turnOrchestrator) advanceGoalAfterTurn(ctx context.Context, expectedCon
 		}
 	}
 
-	var progressBefore, progressAfter string
-	if recorder != nil {
-		progressBefore = recorder.progressBeforeText()
-	}
+	var progressEvidence []string
 	if c.executor != nil {
-		progressAfter = c.executor.HostProgressSignature()
+		progressEvidence = c.executor.HostProgressSignatures()
 	}
 
 	res := c.goals.advance(goalAdvanceInput{
-		report:          report,
-		readiness:       readiness,
-		evaluator:       evaluator,
-		evaluatorFailed: evaluatorFailed,
-		todos:           c.goalTodos(),
-		progressBefore:  progressBefore,
-		progressAfter:   progressAfter,
-		expectedEpoch:   &expectedContinuationEpoch,
+		report:           report,
+		readiness:        readiness,
+		evaluator:        evaluator,
+		evaluatorFailed:  evaluatorFailed,
+		todos:            c.goalTodos(),
+		progressEvidence: progressEvidence,
+		pauseCause:       pauseCause,
+		pauseReason:      pauseReason,
+		expectedEpoch:    &expectedContinuationEpoch,
 	})
 	c.persistGoalState(res.path, res.data, res.ok)
 	if res.notice != "" {

@@ -4009,8 +4009,8 @@ export function Composer({
                       turnsUsed: goalRuntime.turnsUsed,
                       turnsLimit: goalRuntime.turnsLimit,
                       tokensUsed: formatTokens(goalRuntime.tokensUsed),
+                      requestsUsed: goalRuntime.requestsUsed ?? 0,
                       noProgressTurns: goalRuntime.noProgressTurns,
-                      noProgressLimit: goalRuntime.noProgressLimit,
                       extensions: goalRuntime.budgetExtensions,
                     })}
                   </span>

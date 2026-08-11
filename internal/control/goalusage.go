@@ -44,7 +44,7 @@ func (t *goalUsageTee) Emit(e event.Event) {
 		rec := t.active
 		t.mu.Unlock()
 		if rec != nil {
-			rec.addUsage(usageTotalTokens(e.Usage))
+			rec.addUsageWithRequests(usageTotalTokens(e.Usage), e.Usage.RequestCount)
 		}
 	}
 	if t.inner != nil {

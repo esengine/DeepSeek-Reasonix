@@ -5,34 +5,9 @@ import (
 	"testing"
 )
 
-// The buried-evidence probe only measures something if its planted fact sits
-// outside the head/tail window the snip geometry keeps. Guard the probe design
-// against a later edit that shortens the log back into reach.
-func TestBuriedFactSitsOutsideSnipGeometry(t *testing.T) {
-	const (
-		head = 80 // defaultReadOnlySnip.head
-		tail = 12 // defaultReadOnlySnip.tail
-	)
-	lines := strings.Split(buriedTestLog(), "\n")
-	idx := -1
-	for i, line := range lines {
-		if strings.Contains(line, "beta-7d21") {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
-		t.Fatal("buried fact absent from the planted log")
-	}
-	if idx < head || idx >= len(lines)-tail {
-		t.Errorf("fact at line %d of %d is inside the kept head(%d)/tail(%d); snipping would preserve it and the probe would measure nothing", idx, len(lines), head, tail)
-	}
-}
-
-// A tool result the host recorded as failed outranks the snip geometry: the
-// assertion detail sits where head/tail cannot reach it, so it survives only
-// because the keep policy reads the execution record rather than the text.
-func TestSnipKeepsRecordedFailure(t *testing.T) {
+// Automatic snip projections are gone. SnipStaleToolResults remains as a no-op
+// so older harness flags and call sites do not panic or rewrite history.
+func TestSnipIsNoOp(t *testing.T) {
 	dir, cleanup, err := tempDir()
 	if err != nil {
 		t.Fatal(err)
@@ -47,20 +22,20 @@ func TestSnipKeepsRecordedFailure(t *testing.T) {
 	}
 	before := renderAll(h.sess.Snapshot())
 	if !strings.Contains(before, "beta-7d21") {
-		t.Fatal("planted fact missing before the snip pass")
+		t.Fatal("planted fact missing before the snip call")
 	}
 	st, err := h.agentA.SnipStaleToolResults()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Results == 0 {
-		t.Fatal("snip pass rewrote nothing")
+	if st.Results != 0 || st.SavedChars != 0 {
+		t.Fatalf("snip no-op rewrote history: results=%d chars=%d", st.Results, st.SavedChars)
 	}
-	visible, err := visibleContext(h.path, h.sess)
-	if err != nil {
-		t.Fatal(err)
+	after := renderAll(h.sess.Snapshot())
+	if after != before {
+		t.Fatal("canonical transcript changed after SnipStaleToolResults")
 	}
-	if !strings.Contains(renderAll(visible), "beta-7d21") {
-		t.Errorf("recorded failure was snipped away (%d results, %d chars); keep policy did not protect it", st.Results, st.SavedChars)
+	if !strings.Contains(after, "beta-7d21") {
+		t.Error("planted fact missing after snip no-op")
 	}
 }

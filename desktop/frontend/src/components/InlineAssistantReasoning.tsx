@@ -54,7 +54,7 @@ export function InlineAssistantReasoning({ item, onManualOpen }: { item: Assista
         <span>{running ? t("msg.thinkingRunning") : t("msg.thinking")}</span>
         <ChevronRight className={`reasoning__chevron${open ? " reasoning__chevron--open" : ""}`} size={12} />
       </button>
-      {open ? <div className="turn-collapse__inline-reasoning"><Markdown text={visibleReasoning} streaming={running} /></div>
+      {open ? <div className="turn-collapse__inline-reasoning reasoning__body" data-transcript-selectable="reasoning"><Markdown text={visibleReasoning} streaming={running} /></div>
         : <ReasoningSummary text={shown.reasoning} streaming={running} onOpen={toggle} />}
     </div>
   );

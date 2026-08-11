@@ -8148,20 +8148,19 @@ func (a *App) ContextPanel(tabID string) ContextPanelInfo {
 		if sp := ctrl.SessionPath(); sp != "" {
 			tab.syncTelemetryToSession(sp)
 		}
-		used, window := ctrl.ContextSnapshot()
-		info.UsedTokens = used
+		_, window := ctrl.ContextSnapshot()
 		info.WindowTokens = window
-		// Session rebind rebuilds the controller: the fresh executor has no
-		// per-turn usage yet, so ContextSnapshot reports used=0. Fall back to
-		// the telemetry-persisted last-used value from the most recent turn.
-		if used == 0 {
+		// This panel breaks the last turn down into segments, so its total must
+		// be that turn's usage and not the live-view measurement the status-bar
+		// gauge reports — otherwise the segments stop summing to the total.
+		if u := ctrl.LastUsage(); u != nil {
+			info.UsedTokens = u.PromptTokens + u.CompletionTokens
+		}
+		if info.UsedTokens == 0 {
 			if snap := tab.telemetrySnapshot(); snap.Usage.LastUsedTokens > 0 {
 				info.UsedTokens = snap.Usage.LastUsedTokens
 			}
 		}
-		// Per-turn token breakdown from LastUsage (same snapshot as UsedTokens)
-		// so the donut segments are proportional to the current context fill,
-		// not inflated by cumulative session totals.
 		if u := ctrl.LastUsage(); u != nil {
 			info.PromptTokens = u.PromptTokens
 			info.CompletionTokens = u.CompletionTokens

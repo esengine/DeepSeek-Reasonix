@@ -99,6 +99,56 @@ func TestRunScopedVisibleFinalRequirementDoesNotLeakToNextRun(t *testing.T) {
 	}
 }
 
+func TestRunScopedVisibleFinalPreservesHostFinalizationBoundaries(t *testing.T) {
+	t.Run("default run limit pauses before a rendering repair", func(t *testing.T) {
+		prov := &scriptedProvider{name: "deepseek", turns: [][]provider.Chunk{
+			{{Type: provider.ChunkReasoning, Text: "performing the bounded action"}, toolCallChunk("work-1", "dangerous_test_tool", `{}`), {Type: provider.ChunkDone}},
+			reasoningOnlyStop("The bounded work is summarized internally."),
+		}}
+		reg := tool.NewRegistry()
+		reg.Add(&visibleFinalSideEffectTool{})
+		a := New(deepseekThinkingProvider{prov}, reg, NewSession("sys"), Options{}, event.Discard)
+		ctx := WithDefaultRunStepLimit(WithRequireVisibleFinal(context.Background()), 1, "goal model rounds")
+
+		err := a.Run(ctx, "perform bounded work")
+		info, ok := InspectRunPause(err)
+		if !ok || info.Kind != "max_steps" || !info.HostOwned || info.Limit != 1 {
+			t.Fatalf("pause = %+v ok=%v err=%v", info, ok, err)
+		}
+		if prov.call != 2 {
+			t.Fatalf("provider calls = %d, want work plus the host-owned summary", prov.call)
+		}
+		if sessionHasUserMessageContaining(a.session, "finalization-only repair") {
+			t.Fatal("visible-final repair overrode the host-owned run boundary")
+		}
+	})
+
+	t.Run("goal stuck pause wins over a rendering repair", func(t *testing.T) {
+		prov := &scriptedProvider{name: "deepseek", turns: [][]provider.Chunk{
+			{{Type: provider.ChunkReasoning, Text: "first attempt"}, toolCallChunk("failed-1", "missing_tool", `{}`), {Type: provider.ChunkDone}},
+			{{Type: provider.ChunkReasoning, Text: "second attempt"}, toolCallChunk("failed-2", "missing_tool", `{}`), {Type: provider.ChunkDone}},
+			{{Type: provider.ChunkReasoning, Text: "third attempt"}, toolCallChunk("failed-3", "missing_tool", `{}`), {Type: provider.ChunkDone}},
+			reasoningOnlyStop("The repeated host failure is summarized internally."),
+		}}
+		a := New(deepseekThinkingProvider{prov}, tool.NewRegistry(), NewSession("sys"), Options{}, event.Discard)
+		ctx := WithDeliveryExecutionScope(WithRequireVisibleFinal(context.Background()), DeliveryExecutionScope{
+			ID: "goal-visible-final-boundary", TaskText: "finish safely",
+		})
+
+		err := a.Run(ctx, "perform goal work")
+		info, ok := InspectRunPause(err)
+		if !ok || info.Kind != "goal_stuck" || !info.HostOwned {
+			t.Fatalf("pause = %+v ok=%v err=%v", info, ok, err)
+		}
+		if prov.call != stormBreakThreshold+1 {
+			t.Fatalf("provider calls = %d, want failures plus one host-owned summary", prov.call)
+		}
+		if sessionHasUserMessageContaining(a.session, "finalization-only repair") {
+			t.Fatal("visible-final repair overrode the Goal stuck boundary")
+		}
+	})
+}
+
 type visibleFinalSideEffectTool struct {
 	executions int
 }

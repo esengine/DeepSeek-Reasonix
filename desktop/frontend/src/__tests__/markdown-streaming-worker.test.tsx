@@ -14,7 +14,7 @@ import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { createServer } from "vite";
-import type { MarkdownBlock } from "../lib/markdownPipeline";
+import type { MarkdownBlock, MarkdownParseResult } from "../lib/markdownPipeline";
 import type { MarkdownWorkerClient as MarkdownWorkerClientType } from "../lib/markdownWorkerClient";
 
 let passed = 0;
@@ -76,6 +76,11 @@ const WORKER_BLOCKS: MarkdownBlock[] = [{
     children: [{ type: "text", value: "WORKER-PARSED-FINAL" }],
   }],
 }];
+const WORKER_RESULT: MarkdownParseResult = {
+  blocks: WORKER_BLOCKS,
+  selectionText: "WORKER-PARSED-FINAL",
+  selectionRevision: 1,
+};
 
 console.log("\nmarkdown streaming → worker final parse");
 
@@ -87,7 +92,7 @@ console.log("\nmarkdown streaming → worker final parse");
     onerror: null,
     postMessage(request: { id: number; text: string }) {
       parseCalls.push(request.text);
-      respond = () => this.onmessage?.({ data: { id: request.id, blocks: WORKER_BLOCKS } });
+      respond = () => this.onmessage?.({ data: { id: request.id, result: WORKER_RESULT } });
     },
     terminate() {},
   };

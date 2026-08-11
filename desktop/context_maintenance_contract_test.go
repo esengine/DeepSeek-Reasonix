@@ -8,16 +8,21 @@ import (
 
 func TestContextMaintenanceInfoUsesOptionalCamelCaseWailsFields(t *testing.T) {
 	b, err := json.Marshal(ContextInfo{Maintenance: &ContextMaintenanceInfo{
-		ProjectedTokens: 1200,
+		CanonicalTokens: 800_000, ProjectedTokens: 160_000,
+		TriggerTokens: 850_000, CheckpointState: "applied",
 		LastReceipt: &ContextMaintenanceReceiptInfo{
-			OperationID: "op", Action: "prune", SavedTokens: 4096,
+			OperationID: "op", Action: "summary", SavedTokens: 4096,
 		},
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := string(b)
-	for _, want := range []string{`"maintenance"`, `"projectedTokens":1200`, `"lastReceipt"`, `"operationId":"op"`, `"savedTokens":4096`} {
+	for _, want := range []string{
+		`"maintenance"`, `"projectedTokens":160000`, `"canonicalTokens":800000`,
+		`"triggerTokens":850000`, `"checkpointState":"applied"`,
+		`"lastReceipt"`, `"operationId":"op"`, `"savedTokens":4096`, `"action":"summary"`,
+	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("ContextInfo JSON missing %s: %s", want, got)
 		}

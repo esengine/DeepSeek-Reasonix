@@ -118,7 +118,7 @@ reasonix config compact-ratio 75           # set the user-global default
 reasonix config compact-ratio --local 75   # override in ./reasonix.toml
 ```
 
-The editable range is 65–85%, with 80% as the built-in default. Lower values
+The editable range is 65–85%, with 85% as the built-in default. Lower values
 compact earlier and may reduce prompt-prefix cache reuse; higher values retain
 more context before compaction. Project `reasonix.toml` takes precedence over
 the user config. Changes apply to new CLI sessions; an already-running session
@@ -435,7 +435,7 @@ the displayed list matches the commands the TUI accepts.
 | `/verbose` | Toggle expanded reasoning display. |
 | `/sandbox` | Inspect sandbox status. |
 | `/goal [objective]` | Start a long-running goal, or inspect the current goal and its budget runtime. |
-| `/goal status` | Show the active goal plus the turn/token/no-progress budget summary and the last continuation/evaluator reason. |
+| `/goal status` | Show the active goal plus outer turns, observational tokens/requests/no-progress, extensions, and the last continuation/evaluator reason. |
 | `/goal pause` | Pause the running goal (keeps todos, Delivery checkpoint, and budget). |
 | `/goal resume` | Resume a paused or blocked goal (budget pauses add one more budget slice). |
 | `/goal clear` | End goal mode permanently. |

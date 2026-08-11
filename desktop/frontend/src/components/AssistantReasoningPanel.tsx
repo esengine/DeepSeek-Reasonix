@@ -79,7 +79,7 @@ export function AssistantReasoningPanel({
         {meta && <span className="reasoning__meta">{meta}</span>}
         <ChevronRight className={`reasoning__chevron${open ? " reasoning__chevron--open" : ""}`} size={12} />
       </button>
-      {open ? <div ref={bodyRef} className="reasoning__body"><Markdown text={visibleReasoning} streaming={running} /></div>
+      {open ? <div ref={bodyRef} className="reasoning__body" data-transcript-selectable="reasoning"><Markdown text={visibleReasoning} streaming={running} /></div>
         : <ReasoningSummary text={item.reasoning} streaming={running} onOpen={toggle} />}
     </div>
   );
