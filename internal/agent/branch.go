@@ -210,6 +210,20 @@ func SaveBranchMeta(sessionPath string, m BranchMeta) error {
 	})
 }
 
+// saveBranchMetaKeepInFlightTurn is SaveBranchMeta for writers that replace a
+// meta they never read. A marker already on the path outlives the write unless
+// the caller brings its own, so an interrupted turn keeps its boundary.
+func saveBranchMetaKeepInFlightTurn(sessionPath string, m BranchMeta) error {
+	return UpdateBranchMeta(sessionPath, true, func(current *BranchMeta) error {
+		if m.InFlightTurn == nil {
+			m.InFlightTurn = current.InFlightTurn
+		}
+		preserveBranchMetaPersistence(&m, *current)
+		*current = m
+		return nil
+	})
+}
+
 func SaveBranchMetaPreserveUpdated(sessionPath string, m BranchMeta) error {
 	return UpdateBranchMeta(sessionPath, false, func(current *BranchMeta) error {
 		preserveBranchMetaPersistence(&m, *current)

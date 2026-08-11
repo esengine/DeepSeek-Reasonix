@@ -684,9 +684,10 @@ func (s *Session) SaveShutdownRecoveryBranch(opts RecoveryBranchOptions) (Recove
 }
 
 // SaveConflictRecoveryBranch persists an isolated copy when the ordinary
-// recovery chain has reached its depth cap. It deliberately uses a writer-
-// specific path; the caller must never force an older in-memory snapshot back
-// onto the contested canonical branch just to stop creating nested branches.
+// recovery chain has reached its depth cap. It uses a writer-specific path and
+// rewrites it on every conflicting save, so a capped chain costs one file per
+// writer, not one per save; the caller must never force an older in-memory
+// snapshot back onto the contested canonical branch instead.
 func (s *Session) SaveConflictRecoveryBranch(opts RecoveryBranchOptions) (RecoveryBranchInfo, error) {
 	return s.saveRecoveryBranch(opts, true)
 }
@@ -775,7 +776,7 @@ func (s *Session) saveRecoveryBranch(opts RecoveryBranchOptions, shutdown bool) 
 
 	recoveryPath := recoverySessionPath(originalPath, digest)
 	if shutdown {
-		recoveryPath = shutdownRecoverySessionPath(originalPath, digest)
+		recoveryPath = shutdownRecoverySessionPath(originalPath)
 	}
 	unlockRecovery := lockSessionSavePath(recoveryPath)
 	defer unlockRecovery()
@@ -812,7 +813,7 @@ func (s *Session) saveRecoveryBranch(opts RecoveryBranchOptions, shutdown bool) 
 		return RecoveryBranchInfo{}, err
 	}
 	if recoveryProbe.native {
-		if err := appendSessionReplaceEvent(recoveryPath, msgs, digest, 0, "recovery"); err != nil {
+		if err := writeRecoveryEventLog(recoveryPath, msgs, digest, shutdown); err != nil {
 			return RecoveryBranchInfo{}, err
 		}
 	}
@@ -864,7 +865,7 @@ func (s *Session) saveRecoveryBranchMeta(path string, opts RecoveryBranchOptions
 	if strings.TrimSpace(meta.WriterID) == "" {
 		meta.WriterID = SessionWriterID()
 	}
-	if err := SaveBranchMeta(path, meta); err != nil {
+	if err := saveBranchMetaKeepInFlightTurn(path, meta); err != nil {
 		return BranchMeta{}, err
 	}
 	if stored, ok, err := LoadBranchMeta(path); err != nil {
@@ -878,13 +879,6 @@ func (s *Session) saveRecoveryBranchMeta(path string, opts RecoveryBranchOptions
 func recoverySessionPath(originalPath string, digest [sha256.Size]byte) string {
 	parent := recoveryParentStem(BranchID(originalPath))
 	return filepath.Join(filepath.Dir(originalPath), fmt.Sprintf("%s-recovery-%x.jsonl", parent, digest[:8]))
-}
-
-func shutdownRecoverySessionPath(originalPath string, digest [sha256.Size]byte) string {
-	parent := recoveryParentStem(BranchID(originalPath))
-	writerDigest := sha256.Sum256([]byte(SessionWriterID()))
-	return filepath.Join(filepath.Dir(originalPath),
-		fmt.Sprintf("%s-recovery-%x-%x.jsonl", parent, digest[:8], writerDigest[:6]))
 }
 
 func recoveryParentStem(parent string) string {
