@@ -86,14 +86,15 @@ func (r *Runner) ToolMutationHooksEnabled() bool {
 
 // PreToolUse fires before a tool call. block=true means the call must be
 // refused; message is the reason (fed back to the model and shown to the user).
-func (r *Runner) PreToolUse(ctx context.Context, name string, args json.RawMessage) (block bool, message string) {
+func (r *Runner) PreToolUse(ctx context.Context, name string, args json.RawMessage) (block bool, message string, rewritten json.RawMessage) {
 	if !r.Enabled() {
-		return false, ""
+		return false, "", nil
 	}
 	p := r.payload(PreToolUse)
 	p.ToolName, p.ToolArgs = name, args
 	rep := Run(ctx, p, r.hooks, r.spawner)
-	return r.handle(rep)
+	block, message = r.handle(rep)
+	return block, message, rep.UpdatedInput
 }
 
 // PostToolUse fires after a tool call. It can't block; non-pass outcomes are

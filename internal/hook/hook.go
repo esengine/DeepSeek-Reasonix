@@ -151,8 +151,11 @@ type HookConfig struct {
 	Env map[string]string `json:"env,omitempty"`
 	// Async and PayloadFormat are internal compatibility metadata populated for
 	// imported Claude hooks. Native Reasonix settings keep their old behavior.
+	// PayloadFormat is overridable from settings.json ("claude") so a user can
+	// point a PreToolUse hook at a Claude-shaped hook command such as
+	// `rtk hook claude`, which reads tool_input.command and returns updatedInput.
 	Async         bool   `json:"-"`
-	PayloadFormat string `json:"-"`
+	PayloadFormat string `json:"payloadFormat,omitempty"`
 }
 
 // Settings is the shape of a settings.json (only hooks for now).
@@ -490,7 +493,11 @@ func MatchesTool(h ResolvedHook, toolName string) bool {
 	if h.PayloadFormat != "claude" {
 		return re.MatchString(toolName)
 	}
-	return slices.ContainsFunc(claudeMatchNames(toolName), re.MatchString)
+	// A Claude-format hook matches against both its Claude-facing name(s)
+	// (e.g. "Bash") and the internal Reasonix tool name (e.g. "bash"), so a
+	// `match` written against either spelling selects the hook.
+	names := append([]string{toolName}, claudeMatchNames(toolName)...)
+	return slices.ContainsFunc(names, re.MatchString)
 }
 
 // claudeAgentSpawningTools are every Reasonix tool that spawns a subagent and
@@ -913,6 +920,11 @@ type Report struct {
 	// explicit JSON "allow" decision on exit 0 (see claudeJSONAllow) — the
 	// caller should treat this as an auto-approval instead of prompting.
 	Allowed bool
+	// UpdatedInput carries a PreToolUse hook's rewritten tool args
+	// (hookSpecificOutput.updatedInput, a full replacement of the args object).
+	// When set, the caller should execute with these args instead of the
+	// original tool call's. Only meaningful on the PreToolUse event.
+	UpdatedInput json.RawMessage
 }
 
 // HookOutput is the parsed, model-facing part of a successful hook stdout.
@@ -930,6 +942,10 @@ type HookOutput struct {
 	// (hookSpecificOutput.decision.behavior == "allow"): the hook answers the
 	// permission dialog on the user's behalf instead of only observing it.
 	Allow bool
+	// UpdatedInput carries a PreToolUse hook's rewritten tool args
+	// (hookSpecificOutput.updatedInput). It is a full replacement of the args
+	// object, so a hook can rewrite e.g. a bash command. Empty when absent.
+	UpdatedInput json.RawMessage
 }
 
 type hookJSONOutput struct {
@@ -938,10 +954,11 @@ type hookJSONOutput struct {
 	Decision           string `json:"decision"`
 	Reason             string `json:"reason"`
 	HookSpecificOutput struct {
-		HookEventName            Event  `json:"hookEventName"`
-		AdditionalContext        string `json:"additionalContext"`
-		PermissionDecision       string `json:"permissionDecision"`
-		PermissionDecisionReason string `json:"permissionDecisionReason"`
+		HookEventName            Event           `json:"hookEventName"`
+		AdditionalContext        string          `json:"additionalContext"`
+		PermissionDecision       string          `json:"permissionDecision"`
+		PermissionDecisionReason string          `json:"permissionDecisionReason"`
+		UpdatedInput             json.RawMessage `json:"updatedInput"`
 		Decision                 struct {
 			Behavior string `json:"behavior"`
 		} `json:"decision"`
@@ -969,13 +986,16 @@ func ParseOutput(event Event, stdout string) (HookOutput, []string) {
 	topLevelDeny := event == UserPromptSubmit && strings.EqualFold(parsed.Decision, "block")
 	deny := strings.EqualFold(spec.PermissionDecision, "deny") || strings.EqualFold(spec.Decision.Behavior, "deny") || topLevelDeny
 	allow := event == PermissionRequest && strings.EqualFold(spec.Decision.Behavior, "allow")
-	if spec.HookEventName == "" && strings.TrimSpace(spec.AdditionalContext) == "" && !deny && !allow {
+	if spec.HookEventName == "" && strings.TrimSpace(spec.AdditionalContext) == "" && !deny && !allow && len(spec.UpdatedInput) == 0 {
 		return HookOutput{}, nil
 	}
 	if spec.HookEventName != "" && spec.HookEventName != event {
 		return HookOutput{}, []string{fmt.Sprintf("hook output event %q does not match current event %q", spec.HookEventName, event)}
 	}
 	out := HookOutput{AdditionalContext: strings.TrimSpace(spec.AdditionalContext)}
+	if len(spec.UpdatedInput) > 0 {
+		out.UpdatedInput = spec.UpdatedInput
+	}
 	if deny {
 		out.Deny = true
 		reason := spec.PermissionDecisionReason
@@ -1143,14 +1163,25 @@ func Run(ctx context.Context, payload Payload, hooks []ResolvedHook, spawner Spa
 		start := time.Now()
 		r := runResolvedHook(ctx, h, input, spawner)
 		decision := decideOutcome(h, r)
-		if decision == DecisionPass && h.PayloadFormat == "claude" {
-			if deny, reason := claudeJSONDeny(event, r.Stdout); deny {
-				decision = DecisionBlock
-				if reason != "" {
-					r.Stdout = reason
+		if decision == DecisionPass {
+			if h.PayloadFormat == "claude" {
+				if deny, reason := claudeJSONDeny(event, r.Stdout); deny {
+					decision = DecisionBlock
+					if reason != "" {
+						r.Stdout = reason
+					}
+				} else if claudeJSONAllow(event, r.Stdout) {
+					report.Allowed = true
 				}
-			} else if claudeJSONAllow(event, r.Stdout) {
-				report.Allowed = true
+			}
+			// A PreToolUse hook can rewrite the tool args via
+			// hookSpecificOutput.updatedInput. Parse only on success; the
+			// caller applies the rewrite to what actually executes. Works for
+			// both native and Claude-format hooks.
+			if event == PreToolUse {
+				if out, _ := ParseOutput(event, r.Stdout); len(out.UpdatedInput) > 0 {
+					report.UpdatedInput = out.UpdatedInput
+				}
 			}
 		}
 		report.Outcomes = append(report.Outcomes, Outcome{

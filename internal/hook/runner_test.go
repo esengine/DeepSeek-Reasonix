@@ -68,7 +68,7 @@ func TestToolMutationHooksEnabled(t *testing.T) {
 
 func TestRunnerPreToolUseNoHooks(t *testing.T) {
 	r := NewRunner(nil, "/tmp", nil, nil)
-	block, msg := r.PreToolUse(context.Background(), "bash", nil)
+	block, msg, _ := r.PreToolUse(context.Background(), "bash", nil)
 	if block || msg != "" {
 		t.Errorf("no hooks should pass: block=%v msg=%q", block, msg)
 	}
@@ -82,7 +82,7 @@ func TestRunnerPreToolUsePass(t *testing.T) {
 		return SpawnResult{ExitCode: 0}
 	}
 	r := NewRunner(hooks, "/tmp", spawner, nil)
-	block, msg := r.PreToolUse(context.Background(), "bash", nil)
+	block, msg, _ := r.PreToolUse(context.Background(), "bash", nil)
 	if block {
 		t.Errorf("exit 0 should not block: msg=%q", msg)
 	}
@@ -98,7 +98,7 @@ func TestRunnerPreToolUseBlock(t *testing.T) {
 	var notified string
 	notify := func(msg string) { notified = msg }
 	r := NewRunner(hooks, "/tmp", spawner, notify)
-	block, msg := r.PreToolUse(context.Background(), "bash", nil)
+	block, msg, _ := r.PreToolUse(context.Background(), "bash", nil)
 	if !block {
 		t.Error("exit 2 on PreToolUse should block")
 	}

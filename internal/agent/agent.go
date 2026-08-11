@@ -255,11 +255,13 @@ func NormalizeMaxSubagentDepth(depth int) int {
 
 // ToolHooks fires user-configured shell hooks around each tool call. PreToolUse
 // runs before the call and may block it (block=true; message is the reason fed
-// back to the model); PostToolUse runs after and only surfaces output to the
-// user (it can't block). It is interface-shaped so the agent stays independent
-// of the hook package — a nil hooks field disables hook firing entirely.
+// back to the model) or rewrite the tool args (rewritten, a full replacement of
+// the args object — the caller executes with these instead of the originals).
+// PostToolUse runs after and only surfaces output to the user (it can't block).
+// It is interface-shaped so the agent stays independent of the hook package — a
+// nil hooks field disables hook firing entirely.
 type ToolHooks interface {
-	PreToolUse(ctx context.Context, name string, args json.RawMessage) (block bool, message string)
+	PreToolUse(ctx context.Context, name string, args json.RawMessage) (block bool, message string, rewritten json.RawMessage)
 	PostToolUse(ctx context.Context, name string, args json.RawMessage, result string)
 	PostToolUseFailure(ctx context.Context, name string, args json.RawMessage, result string, err error)
 	// PostLLMCall fires after each model turn completes (streaming finishes)

@@ -134,6 +134,28 @@ func TestLoadDecodesUTF8BOMProjectSettings(t *testing.T) {
 	}
 }
 
+func TestLoadClaudePayloadFormatFromSettings(t *testing.T) {
+	// A settings.json may point a hook at a Claude-shaped hook command (e.g.
+	// `rtk hook claude`) by setting payloadFormat:"claude". It must survive
+	// loading so the hook is marshalled in Claude format and its
+	// updatedInput rewrites are honored.
+	home := t.TempDir()
+	proj := t.TempDir()
+	body := `{"hooks":{"PreToolUse":[{"match":"bash","command":"rtk hook claude","payloadFormat":"claude"}]}}`
+	writeHookTestBytes(t, ProjectSettingsPath(proj), []byte(body))
+
+	got := Load(LoadOptions{HomeDir: home, ProjectRoot: proj, Trusted: true})
+	if len(got) != 1 {
+		t.Fatalf("Load hooks = %+v, want one", got)
+	}
+	if got[0].PayloadFormat != "claude" {
+		t.Errorf("PayloadFormat = %q, want %q (from settings payloadFormat)", got[0].PayloadFormat, "claude")
+	}
+	if got[0].Match != "bash" || got[0].Command != "rtk hook claude" {
+		t.Errorf("decoded hook = %+v", got[0])
+	}
+}
+
 func TestLoadNormalizesQuotedNodeEvalHooksPerProject(t *testing.T) {
 	requireNode(t)
 
@@ -1120,6 +1142,14 @@ func TestMatchesToolTranslatesClaudeToolNames(t *testing.T) {
 	if !MatchesTool(claude("Bash"), "bash") {
 		t.Error(`Claude matcher "Bash" should match Reasonix tool "bash"`)
 	}
+	// A Claude-format hook's match may be written against Reasonix's own
+	// (internal lowercase) tool name, not just the Claude-facing spelling.
+	if !MatchesTool(claude("bash"), "bash") {
+		t.Error(`Claude matcher "bash" (internal Reasonix name) should match Reasonix tool "bash"`)
+	}
+	if MatchesTool(claude("bash"), "write_file") {
+		t.Error(`Claude matcher "bash" must not match Reasonix tool "write_file"`)
+	}
 	if !MatchesTool(claude("Write|Edit"), "write_file") {
 		t.Error(`Claude matcher "Write|Edit" should match Reasonix tool "write_file"`)
 	}
@@ -1521,6 +1551,67 @@ func TestRunNativeHookIgnoresPermissionDecisionField(t *testing.T) {
 		func(_ context.Context, in SpawnInput) SpawnResult { return SpawnResult{ExitCode: 0, Stdout: denyJSON} })
 	if rep.Blocked {
 		t.Fatal("native hook JSON output should not be interpreted as a Claude deny decision")
+	}
+}
+
+func TestRunExtractsUpdatedInputOnPreToolUse(t *testing.T) {
+	updated := `{"command":"rtk git status"}`
+	updatedJSON := `{"hookSpecificOutput":{"hookEventName":"PreToolUse","updatedInput":` + updated + `}}`
+
+	// Claude-format hook.
+	claudeRep := Run(context.Background(), Payload{Event: PreToolUse, ToolName: "bash"},
+		[]ResolvedHook{{HookConfig: HookConfig{Command: "guard", PayloadFormat: "claude"}, Event: PreToolUse}},
+		func(_ context.Context, in SpawnInput) SpawnResult { return SpawnResult{ExitCode: 0, Stdout: updatedJSON} })
+	if claudeRep.Blocked {
+		t.Fatal("an updatedInput rewrite must not block")
+	}
+	if string(claudeRep.UpdatedInput) != updated {
+		t.Errorf("claude UpdatedInput = %q, want %q", claudeRep.UpdatedInput, updated)
+	}
+
+	// Native-format hook takes the same path.
+	nativeRep := Run(context.Background(), Payload{Event: PreToolUse, ToolName: "bash"},
+		[]ResolvedHook{{HookConfig: HookConfig{Command: "guard"}, Event: PreToolUse}},
+		func(_ context.Context, in SpawnInput) SpawnResult { return SpawnResult{ExitCode: 0, Stdout: updatedJSON} })
+	if nativeRep.Blocked {
+		t.Fatal("an updatedInput rewrite must not block")
+	}
+	if string(nativeRep.UpdatedInput) != updated {
+		t.Errorf("native UpdatedInput = %q, want %q", nativeRep.UpdatedInput, updated)
+	}
+}
+
+func TestRunUpdatedInputNotAppliedWhenBlocked(t *testing.T) {
+	// A hook that both denies and rewrites must block without applying the
+	// rewrite: the caller should not execute a command the hook refused.
+	blockedJSON := `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"blocked","updatedInput":{"command":"rm -rf /"}}}`
+	rep := Run(context.Background(), Payload{Event: PreToolUse, ToolName: "bash"},
+		[]ResolvedHook{{HookConfig: HookConfig{Command: "guard", PayloadFormat: "claude"}, Event: PreToolUse}},
+		func(_ context.Context, in SpawnInput) SpawnResult { return SpawnResult{ExitCode: 0, Stdout: blockedJSON} })
+	if !rep.Blocked {
+		t.Fatal("a deny decision on PreToolUse should block")
+	}
+	if len(rep.UpdatedInput) != 0 {
+		t.Errorf("UpdatedInput should be empty when blocked, got %q", rep.UpdatedInput)
+	}
+}
+
+func TestParseOutputExtractsUpdatedInput(t *testing.T) {
+	updated := `{"command":"rtk git status"}`
+	stdout := `{"hookSpecificOutput":{"hookEventName":"PreToolUse","updatedInput":` + updated + `}}`
+	out, warns := ParseOutput(PreToolUse, stdout)
+	if len(warns) != 0 {
+		t.Fatalf("unexpected warnings: %v", warns)
+	}
+	if string(out.UpdatedInput) != updated {
+		t.Errorf("UpdatedInput = %q, want %q", out.UpdatedInput, updated)
+	}
+
+	// Absent updatedInput stays empty.
+	plain := `{"hookSpecificOutput":{"hookEventName":"PreToolUse"}}`
+	out, _ = ParseOutput(PreToolUse, plain)
+	if len(out.UpdatedInput) != 0 {
+		t.Errorf("UpdatedInput should be empty when absent, got %q", out.UpdatedInput)
 	}
 }
 

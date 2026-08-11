@@ -27,9 +27,9 @@ func (workspaceLeaseDenyGate) Check(context.Context, string, json.RawMessage, bo
 	return false, "test denial", nil
 }
 
-func (h *workspaceLeaseTestHooks) PreToolUse(context.Context, string, json.RawMessage) (bool, string) {
+func (h *workspaceLeaseTestHooks) PreToolUse(context.Context, string, json.RawMessage) (bool, string, json.RawMessage) {
 	h.preCalls.Add(1)
-	return false, ""
+	return false, "", nil
 }
 func (*workspaceLeaseTestHooks) PostToolUse(context.Context, string, json.RawMessage, string) {}
 func (*workspaceLeaseTestHooks) PostToolUseFailure(context.Context, string, json.RawMessage, string, error) {

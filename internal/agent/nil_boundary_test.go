@@ -21,8 +21,8 @@ func (*typedNilGate) Check(context.Context, string, json.RawMessage, bool) (bool
 
 type typedNilHooks struct{}
 
-func (*typedNilHooks) PreToolUse(context.Context, string, json.RawMessage) (bool, string) {
-	return false, ""
+func (*typedNilHooks) PreToolUse(context.Context, string, json.RawMessage) (bool, string, json.RawMessage) {
+	return false, "", nil
 }
 func (*typedNilHooks) PostToolUse(context.Context, string, json.RawMessage, string)               {}
 func (*typedNilHooks) PostToolUseFailure(context.Context, string, json.RawMessage, string, error) {}

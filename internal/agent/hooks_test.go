@@ -29,11 +29,13 @@ func TestToolHooksMayMutateWorkspaceUsesRunnerCapabilities(t *testing.T) {
 	}
 }
 
-// stubHooks blocks PreToolUse for named tools and records what it saw.
+// stubHooks blocks/rewrites PreToolUse for named tools and records what it saw.
 type stubHooks struct {
 	blockPre        map[string]bool
+	rewritePre      map[string]json.RawMessage // per-tool rewritten tool args to return
 	preSeen         []string
 	postSeen        []string
+	postArgsSeen    []json.RawMessage // args each successful PostToolUse received
 	postFailureSeen []string
 	preCompactOut   string   // returned from PreCompact (extra summary guidance)
 	subagentSeen    []string // last-answer text passed to each SubagentStop
@@ -43,16 +45,17 @@ type stubHooks struct {
 	postLLMTurns    []int    // turn number each PostLLMCall received
 }
 
-func (h *stubHooks) PreToolUse(_ context.Context, name string, _ json.RawMessage) (bool, string) {
+func (h *stubHooks) PreToolUse(_ context.Context, name string, _ json.RawMessage) (bool, string, json.RawMessage) {
 	h.preSeen = append(h.preSeen, name)
 	if h.blockPre[name] {
-		return true, "blocked by test hook"
+		return true, "blocked by test hook", nil
 	}
-	return false, ""
+	return false, "", h.rewritePre[name]
 }
 
-func (h *stubHooks) PostToolUse(_ context.Context, name string, _ json.RawMessage, _ string) {
+func (h *stubHooks) PostToolUse(_ context.Context, name string, args json.RawMessage, _ string) {
 	h.postSeen = append(h.postSeen, name)
+	h.postArgsSeen = append(h.postArgsSeen, args)
 }
 
 func (h *stubHooks) PostToolUseFailure(_ context.Context, name string, _ json.RawMessage, _ string, _ error) {
@@ -139,5 +142,31 @@ func TestPostToolUseFailureUsesFailureHook(t *testing.T) {
 	}
 	if len(h.postSeen) != 0 {
 		t.Fatalf("success hook fired for failure: %v", h.postSeen)
+	}
+}
+
+func TestPreToolUseRewriteAppliesToExecutionAndAudit(t *testing.T) {
+	reg := tool.NewRegistry()
+	rt := &recordingTool{name: "bash"}
+	reg.Add(rt)
+
+	rewritten := json.RawMessage(`{"command":"rtk git status"}`)
+	h := &stubHooks{rewritePre: map[string]json.RawMessage{"bash": rewritten}}
+	a := New(nil, reg, NewSession(""), Options{Hooks: h}, event.Discard)
+
+	out := a.executeOne(context.Background(), provider.ToolCall{Name: "bash", Arguments: `{"command":"git status"}`})
+	if out.blocked {
+		t.Fatalf("rewritten call should not be blocked: %+v", out)
+	}
+
+	// The concrete tool must execute the rewritten command, not the original.
+	if rt.execs != 1 || rt.gotArgs != string(rewritten) {
+		t.Errorf("executed args = %q (execs=%d), want %q", rt.gotArgs, rt.execs, rewritten)
+	}
+
+	// PostToolUse must observe the rewritten command so the audit trail
+	// reflects what actually ran.
+	if len(h.postArgsSeen) != 1 || string(h.postArgsSeen[0]) != string(rewritten) {
+		t.Errorf("PostToolUse args = %v, want %q", h.postArgsSeen, rewritten)
 	}
 }

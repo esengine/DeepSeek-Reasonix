@@ -649,7 +649,7 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	}
 	// Proxy tools fire hooks against the real MCP target name and arguments.
 	if a.hooks != nil {
-		if block, msg := a.hooks.PreToolUse(ctx, plan.permName, plan.permArgs); block {
+		if block, msg, rewritten := a.hooks.PreToolUse(ctx, plan.permName, plan.permArgs); block {
 			if msg == "" {
 				msg = "blocked by a PreToolUse hook"
 			}
@@ -658,6 +658,16 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 				blocked: true,
 				errMsg:  "blocked by PreToolUse hook",
 			}, true
+		} else if len(rewritten) > 0 {
+			// A hook rewrote the tool args (e.g. a bash command). Execute with
+			// the rewritten args, and carry them through evidence / PostToolUse
+			// so the audit trail reflects what actually ran. Permission /
+			// read-only classification is intentionally NOT re-run (user-decided):
+			// the RTK use case is an equivalent rewrite (git status -> rtk git
+			// status), so the earlier classification still holds.
+			plan.runArgs = rewritten
+			plan.evidenceArgs = rewritten
+			plan.permArgs = rewritten
 		}
 	}
 	cctx := tool.WithContextCompressor(withCallContext(ctx, plan.call.ID, a.sink, a.asker, a.planMode.Load()), a)

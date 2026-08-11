@@ -15,21 +15,23 @@ func (a *Agent) recordToolReceipts(plan *toolCallPlan, result string, execution 
 		return
 	}
 	call := plan.call
-	args := json.RawMessage(call.Arguments)
 	switch {
 	case call.Name == "complete_step":
-		rec := evidence.ReceiptFromToolCall(call.Name, args, err == nil, plan.readOnly)
+		rec := evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), err == nil, plan.readOnly)
 		a.evidence.Record(rec)
 		if err == nil {
 			a.advanceCanonicalTodo(rec.Step)
 		}
 	case plan.evidenceName != call.Name:
-		a.evidence.Record(evidence.ReceiptFromToolCall(call.Name, args, err == nil, true))
+		a.evidence.Record(evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), err == nil, true))
 		rec := evidence.ReceiptFromToolCall(plan.evidenceName, plan.evidenceArgs, err == nil, plan.readOnly)
 		decorateExecutionReceipt(&rec, result, execution)
 		a.evidence.Record(rec)
 	default:
-		rec := evidence.ReceiptFromToolCall(call.Name, args, err == nil, plan.tool.ReadOnly())
+		// evidenceArgs equals the original call args unless a PreToolUse hook
+		// rewrote them (e.g. a bash command), in which case it is the command
+		// that actually ran — the audit trail should reflect that.
+		rec := evidence.ReceiptFromToolCall(call.Name, plan.evidenceArgs, err == nil, plan.tool.ReadOnly())
 		decorateExecutionReceipt(&rec, result, execution)
 		a.evidence.Record(rec)
 		if err == nil && call.Name == "todo_write" {
