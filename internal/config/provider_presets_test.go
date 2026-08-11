@@ -138,6 +138,46 @@ func TestOpenCodeGoDeepSeekAlternativeProtocolPresets(t *testing.T) {
 	}
 }
 
+func TestOpenCodeGoContextWindowPresetsMatchModelsDev(t *testing.T) {
+	var cfg Config
+	preset, ok := CuratedProviderPreset("opencode-go")
+	if !ok || len(preset.Entries) != 1 {
+		t.Fatalf("opencode-go preset = %+v, found=%v", preset, ok)
+	}
+	if err := cfg.UpsertProvider(preset.Entries[0]); err != nil {
+		t.Fatalf("UpsertProvider(opencode-go): %v", err)
+	}
+	want := map[string]int{
+		"glm-5.2":           1_000_000,
+		"glm-5.1":           202_752,
+		"kimi-k3":           1_048_576,
+		"kimi-k2.7-code":    262_144,
+		"kimi-k2.6":         262_144,
+		"deepseek-v4-pro":   1_000_000,
+		"deepseek-v4-flash": 1_000_000,
+		"mimo-v2.5-pro":     1_048_576,
+		"mimo-v2.5":         1_000_000,
+	}
+	for model, window := range want {
+		entry, ok := cfg.ResolveModel("opencode-go/" + model)
+		if !ok {
+			t.Fatalf("opencode-go/%s did not resolve", model)
+		}
+		if entry.ContextWindow != window {
+			t.Fatalf("opencode-go/%s context_window = %d, want %d", model, entry.ContextWindow, window)
+		}
+	}
+	for _, id := range []string{"opencode-go-deepseek-anthropic", "opencode-go-deepseek-responses"} {
+		p, ok := CuratedProviderPreset(id)
+		if !ok || len(p.Entries) != 1 {
+			t.Fatalf("%s preset = %+v, found=%v", id, p, ok)
+		}
+		if got := p.Entries[0].ContextWindow; got != 1_000_000 {
+			t.Fatalf("%s context_window = %d, want 1000000", id, got)
+		}
+	}
+}
+
 func TestDeepSeekAnthropicPresetIsOptionalAndModelScoped(t *testing.T) {
 	preset, ok := CuratedProviderPreset("deepseek-anthropic")
 	if !ok || len(preset.Entries) != 1 {

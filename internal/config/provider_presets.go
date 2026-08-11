@@ -676,31 +676,47 @@ var curatedProviderPresets = []ProviderPreset{
 			APIKeyEnv:     "OPENCODE_GO_API_KEY",
 			ContextWindow: 128000,
 			ModelOverrides: map[string]ProviderModelOverride{
+				"glm-5.2": {
+					ContextWindow: 1_000_000,
+				},
+				"glm-5.1": {
+					ContextWindow: 202_752,
+				},
 				"deepseek-v4-flash": {
 					ReasoningProtocol: ReasoningProtocolDeepSeek,
 					SupportedEfforts:  []string{"disabled", "high", "max"},
 					DefaultEffort:     "high",
+					ContextWindow:     1_000_000,
 				},
 				"deepseek-v4-pro": {
 					ReasoningProtocol: ReasoningProtocolDeepSeek,
 					SupportedEfforts:  []string{"disabled", "high", "max"},
 					DefaultEffort:     "high",
+					ContextWindow:     1_000_000,
 				},
 				"kimi-k2.6": {
 					ReasoningProtocol: ReasoningProtocolOpenAI,
 					SupportedEfforts:  []string{"low", "medium", "high"},
 					DefaultEffort:     "high",
+					ContextWindow:     262_144,
 				},
 				"kimi-k2.7-code": {
 					ReasoningProtocol: ReasoningProtocolOpenAI,
 					SupportedEfforts:  []string{"low", "medium", "high"},
 					DefaultEffort:     "high",
+					ContextWindow:     262_144,
 				},
 				"kimi-k3": {
 					ReasoningProtocol: ReasoningProtocolOpenAI,
 					SupportedEfforts:  []string{"high", "max"},
 					DefaultEffort:     "max",
 					ContextWindow:     1_048_576,
+				},
+				"mimo-v2.5-pro": {
+					ContextWindow: 1_048_576,
+				},
+				"mimo-v2.5": {
+					ContextWindow: 1_000_000,
 				},
 			},
 		}},
