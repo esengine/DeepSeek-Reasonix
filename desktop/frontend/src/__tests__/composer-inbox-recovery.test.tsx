@@ -40,7 +40,7 @@ class TestResizeObserver {
   disconnect() {}
 }
 
-function installDom() {
+function installDom(language = "en-US") {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
     pretendToBeVisual: true,
     url: "http://localhost/",
@@ -49,6 +49,7 @@ function installDom() {
   globalThis.window = dom.window as unknown as Window & typeof globalThis;
   globalThis.document = dom.window.document;
   Object.defineProperty(globalThis, "navigator", { configurable: true, value: dom.window.navigator });
+  Object.defineProperty(dom.window.navigator, "language", { configurable: true, value: language });
   globalThis.Node = dom.window.Node;
   globalThis.HTMLElement = dom.window.HTMLElement;
   globalThis.HTMLTextAreaElement = dom.window.HTMLTextAreaElement;
@@ -100,7 +101,7 @@ function installBridgeApp(methods: Record<string, unknown>) {
   };
 }
 
-async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {}) {
+async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {}, strictMode = false) {
   const rootEl = document.getElementById("root");
   if (!rootEl) throw new Error("missing root");
   const root = createRoot(rootEl);
@@ -130,14 +131,15 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
   };
   const paint = async (nextProps: Partial<Parameters<typeof Composer>[0]> = {}) => {
     currentProps = { ...currentProps, ...nextProps };
+    const view = (
+      <LocaleProvider>
+        <ToastProvider>
+          <Composer {...currentProps} />
+        </ToastProvider>
+      </LocaleProvider>
+    );
     await act(async () => {
-      root.render(
-        <LocaleProvider>
-          <ToastProvider>
-            <Composer {...currentProps} />
-          </ToastProvider>
-        </LocaleProvider>,
-      );
+      root.render(strictMode ? <React.StrictMode>{view}</React.StrictMode> : view);
       await flushTimers();
     });
   };
@@ -220,6 +222,266 @@ console.log("\ncomposer inbox recovery");
   resolveTabA(recoveredSnapshot(2));
   await act(async () => { await flushTimers(); });
   ok(document.querySelector(".composer-inbox-recovery") === null, "stale snapshot cannot show recovery controls on another session");
+
+  await act(async () => { root.unmount(); });
+  dom.window.close();
+}
+
+{
+  const dom = installDom("zh-CN");
+  const snapshot = {
+    revision: 3,
+    paused: false,
+    recovered: false,
+    recoveredCount: 0,
+    items: [{
+      id: "queued-before-pause",
+      intent: "followup",
+      state: "queued",
+      preview: "引导当前回合",
+      byteSize: 64,
+      position: 1,
+    }],
+    itemsCount: 1,
+    bytes: 64,
+    maxItems: 64,
+    maxBytes: 64 * 1024 * 1024,
+  };
+  installBridgeApp({
+    InboxSnapshot: async () => snapshot,
+    SteerInboxItem: async () => { throw new Error("reasonix_error:inbox_paused"); },
+  });
+  const { root } = await renderComposer({ running: true });
+
+  await waitFor("queued guidance rendered for localization check", () => document.querySelector(".composer-guidance-item__guide") !== null);
+  const guide = document.querySelector(".composer-guidance-item__guide") as HTMLButtonElement;
+  await act(async () => { guide.click(); await flushTimers(); });
+  await waitFor("localized paused toast rendered", () => document.querySelector(".toast__text")?.textContent === "收件箱已暂停");
+  ok(document.querySelector(".toast__text")?.textContent === "收件箱已暂停", "coded paused error renders in the active Chinese locale");
+
+  await act(async () => { root.unmount(); });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  let snapshot = {
+    revision: 2,
+    paused: true,
+    recovered: false,
+    recoveredCount: 0,
+    items: [{
+      id: "paused-queued-1",
+      intent: "followup",
+      state: "queued",
+      preview: "Guide the active turn",
+      byteSize: 64,
+      position: 1,
+    }],
+    itemsCount: 1,
+    bytes: 64,
+    maxItems: 64,
+    maxBytes: 64 * 1024 * 1024,
+  };
+  const pauseCalls: boolean[] = [];
+  installBridgeApp({
+    InboxSnapshot: async () => snapshot,
+    SetInboxPaused: async (_tabId: string, paused: boolean) => {
+      pauseCalls.push(paused);
+      if (!paused) snapshot = { ...snapshot, paused: false };
+    },
+  });
+  const { root } = await renderComposer({ running: true }, true);
+
+  await waitFor("ordinary pause banner rendered", () => document.querySelector(".composer-inbox-recovery") !== null);
+  const pauseBanner = document.querySelector(".composer-inbox-recovery");
+  ok(pauseBanner?.textContent?.includes("Inbox is paused") === true, "non-recovered pause exposes an actionable pause banner");
+  const guide = document.querySelector(".composer-guidance-item__guide") as HTMLButtonElement | null;
+  ok(guide?.disabled === true, "paused inbox disables guide admission instead of surfacing a backend error");
+
+  const buttons = Array.from(document.querySelectorAll(".composer-inbox-recovery .btn")) as HTMLButtonElement[];
+  if (buttons[1]) {
+    await act(async () => { buttons[1].click(); await flushTimers(); });
+    ok(pauseCalls.at(-1) === false, "continue resumes a non-recovered paused inbox");
+    await waitFor("ordinary pause banner cleared after resume", () => document.querySelector(".composer-inbox-recovery") === null);
+  }
+
+  await act(async () => { root.unmount(); });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  let snapshot = {
+    revision: 4,
+    paused: false,
+    recovered: false,
+    recoveredCount: 0,
+    items: [
+      {
+        id: "idle-queued-1",
+        intent: "followup",
+        state: "queued",
+        preview: "Send the next instruction",
+        byteSize: 64,
+        position: 1,
+      },
+      {
+        id: "idle-queued-2",
+        intent: "followup",
+        state: "queued",
+        preview: "Wait behind the first instruction",
+        byteSize: 64,
+        position: 2,
+      },
+    ],
+    itemsCount: 2,
+    bytes: 128,
+    maxItems: 64,
+    maxBytes: 64 * 1024 * 1024,
+  };
+  const pauseCalls: Array<{ tabId: string; paused: boolean }> = [];
+  let steerCalls = 0;
+  installBridgeApp({
+    InboxSnapshot: async () => snapshot,
+    SetInboxPaused: async (tabId: string, paused: boolean) => {
+      pauseCalls.push({ tabId, paused });
+      snapshot = { ...snapshot, items: [], itemsCount: 0, bytes: 0 };
+    },
+    SteerInboxItem: async () => { steerCalls += 1; },
+  });
+  const { root } = await renderComposer({ running: false });
+
+  await waitFor("idle durable guidance rendered", () => document.querySelectorAll(".composer-guidance-item__guide").length === 2);
+  const guides = Array.from(document.querySelectorAll(".composer-guidance-item__guide")) as HTMLButtonElement[];
+  ok(!guides[0].disabled && guides[0].textContent === "Send", "idle FIFO head exposes an explicit send fallback");
+  ok(guides[0].getAttribute("aria-label") === "Send this guidance to the transcript", "idle send fallback has an accessible label");
+  ok(guides[1].disabled, "idle non-head guidance remains disabled to preserve FIFO order");
+  ok(guides[1].getAttribute("aria-label") === "Waiting for earlier queued guidance", "idle non-head guidance explains the FIFO gate");
+  await act(async () => { guides[0].click(); await flushTimers(); });
+  ok(pauseCalls.length === 1 && pauseCalls[0].tabId === "tab-a" && pauseCalls[0].paused === false, "idle send re-kicks the Controller drain without changing pause state");
+  ok(steerCalls === 0, "idle send never attempts active-turn steering");
+  await waitFor("idle durable guidance clears after dispatch kick", () => document.querySelector(".composer-guidance-item") === null);
+
+  await act(async () => { root.unmount(); });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  let steerCalls = 0;
+  let deleteCalls = 0;
+  installBridgeApp({
+    InboxSnapshot: async () => ({
+      revision: 4,
+      paused: false,
+      recovered: false,
+      recoveredCount: 0,
+      items: [{
+        id: "active-steer",
+        intent: "steer",
+        state: "steer_accepted",
+        preview: "Already admitted guidance",
+        byteSize: 64,
+        position: 1,
+      }],
+      itemsCount: 1,
+      bytes: 64,
+      maxItems: 64,
+      maxBytes: 64 * 1024 * 1024,
+    }),
+    SteerInboxItem: async () => { steerCalls += 1; },
+    DeleteInboxItem: async () => { deleteCalls += 1; },
+  });
+  const { root } = await renderComposer({ running: true });
+
+  await waitFor("active steer rendered", () => document.querySelector(".composer-guidance-item__guide") !== null);
+  const guide = document.querySelector(".composer-guidance-item__guide") as HTMLButtonElement;
+  const dismiss = document.querySelector(".composer-guidance-item__action") as HTMLButtonElement;
+  ok(guide.disabled && dismiss.disabled, "active steer disables send and delete actions");
+  ok(guide.getAttribute("aria-label") === "Guidance is already being applied", "active steer explains why actions are disabled");
+  await act(async () => { guide.click(); dismiss.click(); await flushTimers(); });
+  ok(steerCalls === 0 && deleteCalls === 0, "active steer never sends invalid backend operations");
+
+  await act(async () => { root.unmount(); });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  let retryCalls = 0;
+  let steerCalls = 0;
+  const snapshot = {
+    revision: 5,
+    paused: false,
+    recovered: true,
+    recoveredCount: 1,
+    items: [{
+      id: "uncertain-guidance",
+      intent: "followup",
+      state: "uncertain",
+      preview: "Retry recovered guidance",
+      byteSize: 64,
+      position: 1,
+    }],
+    itemsCount: 1,
+    bytes: 64,
+    maxItems: 64,
+    maxBytes: 64 * 1024 * 1024,
+  };
+  installBridgeApp({
+    InboxSnapshot: async () => snapshot,
+    RetryInboxItem: async () => { retryCalls += 1; },
+    SteerInboxItem: async () => { steerCalls += 1; },
+  });
+  const { root } = await renderComposer({ running: false });
+
+  await waitFor("uncertain guidance rendered", () => document.querySelector(".composer-guidance-item__guide") !== null);
+  const retry = document.querySelector(".composer-guidance-item__guide") as HTMLButtonElement;
+  ok(!retry.disabled && retry.textContent === "Retry", "uncertain idle guidance exposes an explicit retry action");
+  ok(retry.getAttribute("aria-label") === "Retry this guidance", "retry action has a state-aware accessible label");
+  await act(async () => { retry.click(); await flushTimers(); });
+  ok(retryCalls === 1 && steerCalls === 0, "idle retry requeues through the Controller without an invalid steer");
+
+  await act(async () => { root.unmount(); });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  let retryCalls = 0;
+  let steerCalls = 0;
+  installBridgeApp({
+    InboxSnapshot: async () => ({
+      revision: 6,
+      paused: false,
+      recovered: false,
+      recoveredCount: 0,
+      items: [{
+        id: "blocked-guidance",
+        intent: "steer",
+        state: "blocked",
+        preview: "Retry blocked guidance",
+        byteSize: 64,
+        position: 1,
+      }],
+      itemsCount: 1,
+      bytes: 64,
+      maxItems: 64,
+      maxBytes: 64 * 1024 * 1024,
+    }),
+    RetryInboxItem: async () => { retryCalls += 1; },
+    SteerInboxItem: async () => {
+      steerCalls += 1;
+      return { disposition: "queued_followup" };
+    },
+  });
+  const { root } = await renderComposer({ running: true });
+
+  await waitFor("blocked guidance rendered", () => document.querySelector(".composer-guidance-item__guide") !== null);
+  const retry = document.querySelector(".composer-guidance-item__guide") as HTMLButtonElement;
+  await act(async () => { retry.click(); await flushTimers(); });
+  ok(retryCalls === 1 && steerCalls === 1, "busy retry requeues before attempting active-turn admission");
 
   await act(async () => { root.unmount(); });
   dom.window.close();

@@ -25,14 +25,22 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: workers/crash-report/package-lock.json
+      - name: Validate
+        working-directory: workers/crash-report
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+      - name: Apply and verify diagnostics v2 D1 migration
+        working-directory: workers/crash-report
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npm run migrate:diagnostics-v2
       - name: Deploy
         working-directory: workers/crash-report
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          npm ci
-          npm run typecheck
-          npm test
           npx wrangler deploy
       # Mirrors the ALERT_WEBHOOK repo secret into the worker so the ingest
       # sentinel can push alerts (see runIngestSentinel). Managed here so

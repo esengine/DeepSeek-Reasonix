@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
+import { contextWindowPercentages } from "../lib/contextWindow";
 import { useI18n, type Locale, type Translator } from "../lib/i18n";
 import { formatMoneyLocalized } from "../lib/money";
 import { formatTokens, formatOptionalTokens } from "../lib/format";
@@ -116,24 +117,89 @@ export function contextCostDisplay({
   sessionCurrency,
   usage,
 }: {
-  info?: Pick<ContextPanelInfo, "sessionCost" | "sessionCurrency" | "sessionCostUsd"> | null;
+  info?: Pick<ContextPanelInfo, "sessionCost" | "sessionCurrency" | "sessionCostUsd" | "sessionCostComplete" | "sessionCostEstimated" | "sessionBillingMode" | "sessionCostQuote"> | null;
   sessionCost?: number;
   sessionCurrency?: string;
-  usage?: Pick<WireUsage, "cost" | "costUsd" | "currency">;
-}): { amount: number; currency?: string } {
-  // Session-scoped sources only: this value renders under the 会话费用 label,
-  // and falling back to a single request's usage.cost silently displayed one
-  // turn's spend as the whole session's. usage now contributes currency only.
+  usage?: Pick<WireUsage, "cost" | "costUsd" | "currency" | "currencyCode" | "costQuote">;
+}): {
+  amount: number;
+  currency?: string;
+  estimated?: boolean;
+  complete?: boolean;
+  billingMode?: string;
+  labelKind?: "estimated" | "payg_equivalent" | "fallback" | "bucketed" | "unavailable";
+} {
+  // Prefer structured session quote, then per-usage quote.
+  const quote = info?.sessionCostQuote || usage?.costQuote;
+  if (quote?.displayStatus === "bucketed" || quote?.aggregateMode === "currency_buckets") {
+    return {
+      amount: 0,
+      currency: undefined,
+      estimated: true,
+      complete: false,
+      labelKind: "bucketed",
+    };
+  }
+  const fallbackOriginal = quote?.displayStatus === "fallback_original";
+  if (!fallbackOriginal && (info?.sessionCostComplete === false || quote?.displayStatus === "unavailable" || quote?.costComplete === false)) {
+    return {
+      amount: 0,
+      currency: info?.sessionCurrency || sessionCurrency || usage?.currencyCode || usage?.currency,
+      estimated: true,
+      complete: false,
+      labelKind: "unavailable",
+    };
+  }
+  const selected = quote?.selected;
+  if (selected?.amount) {
+    const n = Number(selected.amount);
+    if (Number.isFinite(n) && n > 0) {
+      const mode = quote?.billingMode || info?.sessionBillingMode;
+      return {
+        amount: n,
+        currency: selected.currency || usage?.currencyCode || usage?.currency || info?.sessionCurrency,
+        estimated: quote?.estimated !== false,
+        complete: quote?.displayComplete !== false,
+        billingMode: mode,
+        labelKind: fallbackOriginal ? "fallback" : mode === "subscription_equivalent" ? "payg_equivalent" : "estimated",
+      };
+    }
+  }
+  // Session-scoped scalar fallbacks (legacy telemetry).
   if (info?.sessionCost && info.sessionCost > 0) {
-    return { amount: info.sessionCost, currency: info.sessionCurrency || sessionCurrency || usage?.currency };
+    return {
+      amount: info.sessionCost,
+      currency: info.sessionCurrency || sessionCurrency || usage?.currencyCode || usage?.currency,
+      estimated: true,
+      complete: true,
+      labelKind: "estimated",
+    };
   }
   if (sessionCost && sessionCost > 0) {
-    return { amount: sessionCost, currency: sessionCurrency || info?.sessionCurrency || usage?.currency };
+    return {
+      amount: sessionCost,
+      currency: sessionCurrency || info?.sessionCurrency || usage?.currencyCode || usage?.currency,
+      estimated: true,
+      complete: true,
+      labelKind: "estimated",
+    };
   }
   if (info?.sessionCostUsd && info.sessionCostUsd > 0) {
-    return { amount: info.sessionCostUsd, currency: info.sessionCurrency || sessionCurrency || usage?.currency };
+    return {
+      amount: info.sessionCostUsd,
+      currency: info.sessionCurrency || sessionCurrency || usage?.currencyCode || usage?.currency,
+      estimated: true,
+      complete: true,
+      labelKind: "estimated",
+    };
   }
-  return { amount: 0, currency: info?.sessionCurrency || sessionCurrency || usage?.currency };
+  return {
+    amount: 0,
+    currency: info?.sessionCurrency || sessionCurrency || usage?.currencyCode || usage?.currency,
+    estimated: true,
+    complete: false,
+    labelKind: "unavailable",
+  };
 }
 
 // contextSessionCache picks the session-cumulative cache hit/miss pair for the
@@ -241,7 +307,9 @@ export function contextBreakdown(
   };
 }
 
-export function contextWindowStatus(usagePct: number, compactPct: number): ContextWindowStatus {
+export function contextWindowStatus(rawUsagePct: number, compactPct: number): ContextWindowStatus {
+  if (rawUsagePct > 100) return { tone: "warn", key: "context.windowStatusOverLimit" };
+  const usagePct = Math.min(100, Math.max(0, rawUsagePct));
   if (usagePct >= 90) return { tone: "warn", key: "context.windowStatusNearLimit" };
   if (compactPct > 0 && usagePct >= compactPct) return { tone: "warn", key: "context.windowStatusPastCompact" };
   if (compactPct > 0 && usagePct >= Math.max(0, compactPct - 10)) return { tone: "notice", key: "context.windowStatusWatch" };
@@ -419,7 +487,9 @@ export function ContextPanel({
   const readFiles = asArray(info?.readFiles);
   const changedFiles = asArray(info?.changedFiles);
 
-  const usagePct = windowTokens > 0 ? Math.min(100, Math.round((usedTokens / windowTokens) * 100)) : 0;
+  const usagePercentages = contextWindowPercentages(usedTokens, windowTokens);
+  const rawUsagePct = usagePercentages.raw;
+  const usagePct = usagePercentages.display;
   const compactRatio = context?.compactRatio && context.compactRatio > 0 ? context.compactRatio : 0.85;
   const compactPct = Math.round(compactRatio * 100);
   const reportedTriggerTokens = context?.maintenance?.triggerTokens ?? 0;
@@ -439,13 +509,19 @@ export function ContextPanel({
   const elapsed = info?.elapsedMs && info.elapsedMs > 0 ? info.elapsedMs : derivedElapsed;
   const derivedRequestCount = Math.max(readFiles.length + changedFiles.length, 0);
   const requestCount = info?.requestCount && info.requestCount > 0 ? info.requestCount : derivedRequestCount;
-  const windowStatus = contextWindowStatus(usagePct, compactPct);
+  const windowStatus = contextWindowStatus(rawUsagePct, compactPct);
   const balanceLabel = balance?.available && balance.display ? balance.display : "-";
   const turnEstimated = usage?.estimated === true || info?.estimated === true;
   const sessionEstimated = info?.sessionEstimated === true || context?.estimated === true;
   const markEstimated = (value: string, estimated: boolean) => estimated && value !== "-" ? `≈${value}` : value;
   const turnCostLabel = markEstimated(formatMoneyLocalized(turnCost, sessionCurrency, { locale, empty: "dash" }), turnEstimated);
-  const sessionCostLabel = markEstimated(formatMoneyLocalized(cost.amount, cost.currency, { locale, empty: "dash" }), sessionEstimated);
+  const sessionCostLabel = cost.labelKind === "bucketed"
+    ? t("context.sessionCostBucketed")
+    : cost.labelKind === "unavailable"
+      ? t("context.sessionCostUnavailable")
+      : cost.labelKind === "fallback"
+        ? `${markEstimated(formatMoneyLocalized(cost.amount, cost.currency, { locale, empty: "dash" }), sessionEstimated)} (${t("context.sessionCostFallback")})`
+        : markEstimated(formatMoneyLocalized(cost.amount, cost.currency, { locale, empty: "dash" }), sessionEstimated);
   const totalTokensTitle = totalTokensMetric.exact === "-" ? "-" : t("context.tokensValue", { value: totalTokensMetric.exact });
   const usedLabel = formatTokens(usedTokens);
   const windowLabel = formatTokens(windowTokens);
@@ -453,7 +529,7 @@ export function ContextPanel({
   const compactMarkerPct = Math.max(0, Math.min(100, compactPct));
   const usageMarkerPct = Math.max(6, Math.min(94, usagePct));
   const compactLabelPct = Math.max(6, Math.min(94, compactMarkerPct));
-  const usageSummary = t("context.windowUsageSummary", { used: usedLabel, window: windowLabel, pct: usagePct });
+  const usageSummary = t("context.windowUsageSummary", { used: usedLabel, window: windowLabel, pct: rawUsagePct });
   const compactSummary = t("context.windowCompactRemaining", { used: usedLabel, window: windowLabel, tokens: compactRemainingLabel, pct: compactPct });
   const activeAnalysisView: UsageAnalysisView = showSourceUsageRows ? analysisView : "type";
   const tokenTypeRows = [
@@ -533,14 +609,11 @@ export function ContextPanel({
               </div>
               <div className="context-panel__usage-progress context-panel__capacity-meter" aria-label={`${t(windowStatus.key)}. ${usageSummary}. ${compactSummary}`}>
                 <div className="context-panel__capacity-scale" aria-hidden="true">
-                  <span className="context-panel__capacity-pin context-panel__capacity-pin--used" style={{ left: `${usageMarkerPct}%` }}>{usagePct}%</span>
+                  <span className="context-panel__capacity-pin context-panel__capacity-pin--used" style={{ left: `${usageMarkerPct}%` }}>{rawUsagePct}%</span>
                   <span className="context-panel__capacity-pin context-panel__capacity-pin--compact" style={{ left: `${compactLabelPct}%` }}>{compactPct}%</span>
                 </div>
                 <div className="context-panel__progress-track" aria-hidden="true">
-                  <span className="context-panel__progress-segment context-panel__progress-segment--prompt" style={{ width: `${breakdown.promptPct}%` }} />
-                  <span className="context-panel__progress-segment context-panel__progress-segment--completion" style={{ width: `${Math.max(0, breakdown.completionPct - breakdown.promptPct)}%` }} />
-                  <span className="context-panel__progress-segment context-panel__progress-segment--reasoning" style={{ width: `${Math.max(0, breakdown.reasoningPct - breakdown.completionPct)}%` }} />
-                  <span className="context-panel__progress-segment context-panel__progress-segment--other" style={{ width: `${Math.max(0, breakdown.otherPct - breakdown.reasoningPct)}%` }} />
+                  <span className="context-panel__progress-fill" style={{ width: `${usagePct}%` }} />
                   <span className="context-panel__compact-marker" style={{ left: `${compactMarkerPct}%` }} />
                 </div>
               </div>

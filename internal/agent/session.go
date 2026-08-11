@@ -54,6 +54,10 @@ type Session struct {
 	// cache-prefix change. DrainContentRewriteReasons (run_loop.go, once per
 	// provider request) is the sole consumer.
 	pendingContentReasons []string
+	// persistObserver receives non-blocking post-commit projection hints. It is
+	// deliberately session-local so multiple runtimes cannot steal each other's
+	// observer registration.
+	persistObserver SessionPersistObserver
 }
 
 // NewSession initializes a session with an optional system prompt.

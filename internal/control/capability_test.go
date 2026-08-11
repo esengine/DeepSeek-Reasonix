@@ -15,7 +15,9 @@ type capabilityRecordingRunner struct {
 	input string
 }
 
-func TestEconomyRoutesOnlyEconomyEligibleSkills(t *testing.T) {
+func TestRoleSettingDoesNotFilterSkillCapabilityRoutes(t *testing.T) {
+	// Skill profiles frontmatter is diagnostic-only: capability routing must
+	// surface every trigger match regardless of the session role setting.
 	runner := &capabilityRecordingRunner{}
 	reg := tool.NewRegistry()
 	reg.Add(capabilityTestTool{name: "run_skill"})
@@ -35,8 +37,8 @@ func TestEconomyRoutesOnlyEconomyEligibleSkills(t *testing.T) {
 	if !strings.Contains(runner.input, "skill:economy-review prefer") {
 		t.Fatalf("economy skill missing from route:\n%s", runner.input)
 	}
-	if strings.Contains(runner.input, "skill:balanced-review") {
-		t.Fatalf("balanced-only skill leaked into economy route:\n%s", runner.input)
+	if !strings.Contains(runner.input, "skill:balanced-review prefer") {
+		t.Fatalf("balanced skill should remain routable under light/economy role setting:\n%s", runner.input)
 	}
 }
 

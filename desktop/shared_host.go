@@ -1,14 +1,103 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 
+	"reasonix/internal/config"
 	"reasonix/internal/plugin"
 )
+
+// bumpExtensionGeneration records that plugin/MCP configuration changed while
+// controller builds may still be running off the lifecycle lock. In-flight
+// builds that finish with a stale generation must not publish.
+func (a *App) bumpExtensionGeneration() {
+	if a == nil {
+		return
+	}
+	a.extensionGeneration.Add(1)
+}
+
+func (a *App) currentExtensionGeneration() uint64 {
+	if a == nil {
+		return 0
+	}
+	return a.extensionGeneration.Load()
+}
+
+// lockMCPMutation serializes shared-Host boot with live MCP mutations without
+// holding runtimeAdmissionMu while an optimistic controller build finishes its
+// extension startup. A final generation bump invalidates builds that loaded
+// configuration while the mutation held the gate.
+func (a *App) lockMCPMutation(operation string) func() {
+	if hook := a.runtimeMutationBeforeLockHook; hook != nil {
+		hook(operation)
+	}
+	a.runtimeRebuildMu.Lock()
+	a.extensionBuildMu.Lock()
+	a.runtimeAdmissionMu.Lock()
+	return func() {
+		a.bumpExtensionGeneration()
+		a.runtimeAdmissionMu.Unlock()
+		a.extensionBuildMu.Unlock()
+		a.runtimeRebuildMu.Unlock()
+	}
+}
+
+type sharedHostMCPRegistration struct {
+	scope     *plugin.RegistrationScope
+	finished  bool
+	committed bool
+}
+
+// beginSharedHostMCPRegistration attributes only context-scoped connections to
+// this build. Unrelated Host writes never become rollback candidates.
+func beginSharedHostMCPRegistration(ctx context.Context, host *plugin.Host) (context.Context, *sharedHostMCPRegistration) {
+	registration := &sharedHostMCPRegistration{}
+	if host == nil {
+		return ctx, registration
+	}
+	registration.scope = host.BeginRegistrationScope()
+	return plugin.ContextWithRegistrationScope(ctx, registration.scope), registration
+}
+
+func (r *sharedHostMCPRegistration) rollback() {
+	if r == nil || r.finished {
+		return
+	}
+	r.finished = true
+	if r.scope != nil {
+		r.scope.AbortAndRollback()
+	}
+}
+
+func (r *sharedHostMCPRegistration) commit() bool {
+	if r == nil {
+		return true
+	}
+	if r.finished {
+		return r.committed
+	}
+	if r.scope != nil && !r.scope.Commit() {
+		r.finished = true
+		return false
+	}
+	r.finished = true
+	r.committed = true
+	return true
+}
+
+func (a *App) saveDesktopMCPServerAndBump(root string, entry config.PluginEntry) error {
+	if err := a.saveDesktopMCPServer(root, entry); err != nil {
+		return err
+	}
+	a.bumpExtensionGeneration()
+	return nil
+}
 
 // sharedPluginHost is a reference-counted plugin.Host shared across tabs
 // that share the same workspace root. Multiple controllers (one per tab)

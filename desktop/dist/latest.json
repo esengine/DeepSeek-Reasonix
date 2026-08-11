@@ -1,15 +1,15 @@
 {
-  "version": "v1.22.0",
+  "version": "v1.23.0",
   "notes": "",
   "pub_date": "",
   "download_page": "https://reasonix.io/?download=desktop#start",
-  "release_notes_url": "https://reasonix.io/changelog/v1.22.0/",
+  "release_notes_url": "https://reasonix.io/changelog/v1.23.0/",
   "platforms": {
     "windows-amd64": {
-      "url": "https://github.com/dxdw2021/DeepSeek-Reasonix/releases/download/desktop-v1.22.0/Reasonix-windows-amd64-installer.exe",
-      "sig": "https://github.com/dxdw2021/DeepSeek-Reasonix/releases/download/desktop-v1.22.0/Reasonix-windows-amd64-installer.exe.minisig",
-      "size": 47131014,
-      "sha256": "2d436b68e26afda25fa08fb7f74081e2308099a4964852691527c0ff2c469d1d"
+      "url": "https://github.com/dxdw2021/DeepSeek-Reasonix/releases/download/desktop-v1.23.0/Reasonix-windows-amd64-installer.exe",
+      "sig": "https://github.com/dxdw2021/DeepSeek-Reasonix/releases/download/desktop-v1.23.0/Reasonix-windows-amd64-installer.exe.minisig",
+      "size": 47163047,
+      "sha256": "ed09157d52af48d2eb2e4df4559f7b3be24dfa752eb987654d663522ada43f10"
     }
   }
 }

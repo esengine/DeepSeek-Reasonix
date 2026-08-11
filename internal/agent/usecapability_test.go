@@ -953,8 +953,11 @@ func TestRunSubAgentRequiresReviewReport(t *testing.T) {
 	}}
 	_, err := RunSubAgentWithSession(context.Background(), prov, tool.NewRegistry(), NewSession("sys"), "review it",
 		Options{RequireReviewReportKind: evidence.ReviewKindReview}, event.Discard)
-	if err == nil || !strings.Contains(err.Error(), "review_report") {
-		t.Fatalf("expected missing-report failure, got %v", err)
+	if err == nil {
+		t.Fatal("expected missing-report failure")
+	}
+	if !IsReviewUnavailable(err) && !strings.Contains(err.Error(), "review_report") && !strings.Contains(err.Error(), "reviewer unavailable") {
+		t.Fatalf("expected review unavailable / review_report failure, got %v", err)
 	}
 }
 

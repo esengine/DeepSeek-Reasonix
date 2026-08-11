@@ -53,7 +53,10 @@ func TestTrySteerRejectedBecomesFollowup(t *testing.T) {
 	dir := t.TempDir()
 	session := filepath.Join(dir, "s.jsonl")
 	_ = os.WriteFile(session, []byte("{}\n"), 0o644)
-	c := New(Options{SessionPath: session, SessionDir: dir, Sink: event.Discard})
+	runner := &gatedTurnRunner{started: make(chan struct{}), release: make(chan struct{})}
+	c := New(Options{Runner: runner, SessionPath: session, SessionDir: dir, Sink: event.Discard})
+	defer c.autosaveWG.Wait()
+	defer close(runner.release)
 	rec, err := c.EnqueueInbox(InboxRequest{
 		Intent: sessioninbox.IntentSteer,
 		Submit: "mid-turn please",
@@ -69,11 +72,16 @@ func TestTrySteerRejectedBecomesFollowup(t *testing.T) {
 	if got.Disposition != sessioninbox.DispositionQueuedFollowup {
 		t.Fatalf("disposition = %s, want queued_followup", got.Disposition)
 	}
+	select {
+	case <-runner.started:
+	case <-time.After(time.Second):
+		t.Fatal("rejected idle steer did not dispatch as a follow-up")
+	}
 	meta, _, err := c.ReadInboxItem(rec.ItemID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if meta.State != sessioninbox.StateQueued || meta.Intent != sessioninbox.IntentFollowup {
+	if meta.State != sessioninbox.StateRunning || meta.Intent != sessioninbox.IntentFollowup {
 		t.Fatalf("meta = %+v", meta)
 	}
 }

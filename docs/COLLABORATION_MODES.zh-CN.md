@@ -50,7 +50,7 @@ Reasonix 桌面端输入框左下角的菜单包含两条互相独立的轴：
 - 任务需要探索、实现、验证多个阶段。
 - 你希望减少中途反复下指令，让 Reasonix 在目标范围内持续推进。
 - 目标明显是长周期研究、排障或优化，例如“持续排查直到根因明确”“彻底实现并验证”
-  “不要原地打转”。这类目标会自动使用 40 轮研究预算，但仍由同一个 Goal 状态机推进。
+  “不要原地打转”。Goal 默认持续执行，不会因为固定轮数或无进展计数而暂停。
 
 ### 推荐目标写法
 
@@ -65,56 +65,61 @@ Goal 模式会把这些部分当作任务边界；除非下一步涉及不可逆
 - 目标模式不是跳过审批。遇到高风险操作、权限限制、阻塞或需要产品判断时，仍可能停下来询问。
 - 如果目标过大或边界不清，Reasonix 可能需要更多探索轮次，也会消耗更多 token。
 - 普通聊天不会因为目标文本看起来复杂或长周期而自动切换模式。只有明确选择“目标”或使用
-  `/goal` 后，Reasonix 才会进入 Goal，并自动选择简单、写入或研究轮次预算。
+  `/goal` 后，Reasonix 才会进入 Goal；旧简单/写入/研究参数仍可解析，但不再改变额度。
+- Goal 没有默认轮数、turn 数或时间上限。`--max-steps`、正数时间/成本预算仍可由用户显式选择。
 - 旧 `.reasonix/autoresearch/...` 目录不会被新版本创建或改写；显式引用旧任务路径时只会读取并恢复成普通 Goal。
 - 目标模式和计划模式是同一协作轴。切到计划模式时，会退出目标草稿/目标显示状态；运行模式不会因此改变。
 
-## 运行模式
+## 执行设定（Agent Preset）
 
-运行模式决定会话启动时的工具面和执行合约。每个标签页独立保存选择；切换模式会重建当前会话运行时，但保留会话历史。
+执行设定决定会话的宿主规划 / 验证 / 独立复审策略。三种执行设定共享同一套 provider
+可见核心工具面（直接编码工具 + 后台 shell 生命周期 + 稳定的 `use_capability` 代理）；
+可选能力一律经 `use_capability` 调度，不扩展 top-level schema。每个标签页独立保存选择；
+会话内切换就地更新执行设定，不重建 Controller。
 
-### 轻量 · 节省 Token（Economy）
+### 轻量（Light）
 
-Economy 对应原来的“省 token”模式。它不加载初始技能索引，只保留 `read_file`、`bash`、
-`edit_file`、`write_file`、后台 shell 生命周期工具、`ask` 和 `connect_tool_source`。
-专用搜索/文件操作、workflow、session、memory、slash command、Skills、MCP、
-CodeGraph/LSP、`web_fetch`、安装来源和 subagent 等能力都放到
-`connect_tool_source` 后按需启用。
+Light 对应旧的 economy / “省 token” 档。工具面与其他档一致，策略上优先直接执行、定向
+验证；仅高风险/安全类任务提升到强制独立复审与完整验证。
 
 - 适合日常问答、代码解释、小范围阅读和成本敏感任务。
-- 主要降低每轮固定携带的提示词与工具 schema token，不会降低模型本身的推理能力。
-- 首次使用某类可选工具时可能多一个按需启用步骤。
-- 简单阅读和编辑可直接开始；目录查看与搜索默认通过 `bash` 完成。
+- 不会降低模型本身的推理能力；差异在宿主策略门禁。
+- 旧值 `economy` / `eco` 映射为 Light。
 
 ### 均衡 · 默认（Balanced）
 
-Balanced 是默认档，对应旧版本持久化值 `full`。它一次性提供完整工具面，不增加额外执行合约，由模型根据任务自主决定探索、实现与验证深度。
+Balanced 是默认档，对应旧持久化值 `full`。按风险自动选择轻/全规划，分档验证，中风险
+多文件变更可条件触发独立复审。
 
 - 适合大多数普通开发与聊天任务。
-- `--profile balanced` 和不传 `--profile` 的运行语义不变；精简后的系统提示词会形成一次新的 provider 缓存前缀。
+- `--preset balanced` 和不传 `--preset` 的运行语义不变。
 - 旧 session/tab 中空值或 `full` 都会继续解释为 Balanced。
 
-### 交付优先 · 完整验证（Delivery）
+### 交付 · 完整验证（Delivery）
 
-Delivery 使用与 Balanced 相同的完整工具面，额外增加稳定的能力代理工具 `use_capability`（list/inspect/call/decline，用于按需调用含 `auto_start=false` 的 MCP，且不把动态工具写入主 Registry），并增加稳定的交付合约：明确验收标准；条件允许时先复现；检查项目规则和相关代码；修复根因；运行聚焦验证；复审 diff 与相邻行为；没有证据时不宣称成功，并明确标注未验证项或假设。配置了独立 `planner_model` 时，Balanced 会为 Planner 与 Executor 分别挂载固定代理 frontend（ledger/audit 隔离、Host 共享），使规划阶段发现的 MCP capability 能在 handoff 后按同一 ID 直接执行。
+Delivery 使用与其他档相同的统一工具面，并增加稳定交付合约：明确验收标准；条件允许时先
+复现；检查项目规则和相关代码；修复根因；运行聚焦验证；复审 diff 与相邻行为；没有证据时
+不宣称成功。
 
 - 适合编码、修 bug、跨文件实现和需要可靠交付证据的任务。
 - 通常会使用更多模型调用和 token，耗时也可能更长。
-- 宿主会在变更或验证命令前检查是否已有具体的 `todo_write` 验收清单；缺失时直接阻止执行并要求补齐。
-- 发生变更后，宿主会要求在最后一次变更之后复查结果、运行成功的验证命令，并用引用该命令的 `complete_step` 正式签收；不满足时拦截最终回答并自动要求继续。
-- 对明确要求实现、修复或修改的任务，如果没有观察到真实变更，宿主会拒绝“已经完成”的纯文本声明；只读分析仍可凭读取/检查证据正常结束。
-- Skill/MCP 的 `require`/`prefer` 路由由宿主门禁强制：`require` 必须成功调用（宿主确认不可用时可带真实 blocker 结束），`prefer` 缺失会提醒一次，之后必须调用或 `use_capability(action="decline")` 提交非空理由。
-- 中/高风险改动会强制运行结构化 `review` / `security_review`（通过审查子 Agent 的 `review_report`）；`task`/`run_skill` 等元工具本身不算 mutation，子 Agent 的真实写入会回传父级证据账本。
-- Delivery 的 system contract 与 `use_capability` Schema 是每个该 Profile 会话固定的 provider 前缀；按需连接 MCP 不会改变该固定代理 Schema。Balanced 双模型中的 Planner 代理同样稳定；Executor 刻意保留直接 `mcp__*` 工具，因此这些直接工具安装、连接或刷新时，Executor 的整体 provider 前缀仍可能变化。升级到本版本或从其他 Profile 切换过来会产生一次新的缓存前缀。
+- 宿主会在变更或验证命令前检查是否已有具体的 `todo_write` 验收清单；缺失时直接阻止。
+- 发生变更后，宿主会要求在最后一次变更之后复查结果、运行成功的验证命令，并用
+  `complete_step` 正式签收。
+- Skill/MCP 的 `require`/`prefer` 路由由宿主门禁强制。
+- 中/高风险改动会强制运行结构化 `review` / `security_review`。
 
 ### 怎么选择
 
-- 桌面端点击输入框左下角菜单，在“运行模式”下选择“轻量 · 节省 Token”“均衡 · 默认”或“交付优先 · 完整验证”。
-- 轻量和交付优先模式会在输入框下方显示“轻量”或“交付优先”标签；点击标签可回到均衡模式。
-- CLI 启动时使用 `reasonix --profile economy|balanced|delivery`，非交互运行使用 `reasonix run --profile ...`。
-- TUI 会话内使用 `/work-mode economy|balanced|delivery` 热切换；不带参数的 `/work-mode` 会列出三档并标记当前项。`/profile` 保留为技术兼容别名，但帮助和补全以 `/work-mode` 为主。
-- 会话内切换会在保留 history、session 路径、审批/Yolo 状态的前提下原子重建 Controller。当前 turn、审批/询问或后台任务仍在运行时不能切换；构建失败时旧运行时继续可用。
-- `/work-mode` 只修改当前会话，不写入全局默认值。跨 Profile 切换会形成一次新的 provider 缓存前缀；均衡与交付优先模式内 system contract 与工具 Schema 保持稳定，轻量模式内每次成功连接工具来源都会形成一次新前缀，之后在工具面再次变化前保持稳定。
+- 桌面端点击输入框左下角菜单，在“执行设定”下选择“轻量”“均衡”或“交付”。
+- CLI 启动时使用 `reasonix --preset light|balanced|delivery`，非交互运行使用
+  `reasonix run --preset ...`。兼容 `--profile economy|balanced|delivery`。
+- TUI 会话内使用 `/preset light|balanced|delivery` 热切换；不带参数的 `/preset` 会列出
+  三档并标记当前项。`/work-mode` 与 `/profile` 保留为兼容别名。
+- 会话内切换保留 history、session 路径、审批/Yolo 状态，不重建 Controller。当前 turn、
+  审批/询问或后台任务仍在运行时不能切换。
+- `/preset` 只修改当前会话，不写入全局默认值。三种执行设定共享统一工具 schema，切换不会
+  制造新的工具面缓存前缀。
 
 ## 协作方式与 Profile 如何组合
 

@@ -527,7 +527,7 @@ func (t *UseCapabilityTool) CloneForAgent(ledger *capability.Ledger, audit *capa
 func (*UseCapabilityTool) Name() string { return "use_capability" }
 
 func (*UseCapabilityTool) Description() string {
-	return "Stable capability proxy: list configured MCP servers without starting them, inspect Skill/MCP metadata, call MCP tools (including auto_start=false servers) without changing the provider tool schema, or decline a prefer capability with a non-empty reason. Skills still use run_skill; this tool only proxies MCP. The Planner leaves destructive MCP for the Executor; ordinary writer-capable agents trust installed or project-authorized MCP subject to explicit deny and mutation guards."
+	return "Unified capability proxy with a fixed schema: list catalog capabilities, inspect metadata, call a capability by stable id (tool:grep, skill:review, mcp-tool:server/tool, task:subagent, workflow:name, web:/lsp:/session:/memory: namespaces), or decline a prefer capability with a non-empty reason. Calling does not change the provider-visible tool schema. Resolved writers still pass permission, plan mode, sandbox, write-path, and workspace-lease checks. The Planner leaves destructive MCP for the Executor."
 }
 
 func (*UseCapabilityTool) ReadOnly() bool { return true }
@@ -571,7 +571,7 @@ func (t *UseCapabilityTool) ResolveCall(ctx context.Context, args json.RawMessag
 	}
 	switch action {
 	case "list":
-		out, err := t.listServers()
+		out, err := t.listCapabilities()
 		if err != nil {
 			if t.audit != nil {
 				t.audit.RecordMCPProxy(true, false, true)
@@ -703,6 +703,60 @@ type listServerInfo struct {
 	Status       string `json:"status"`
 	Authorized   bool   `json:"authorized"`
 	Connected    bool   `json:"connected"`
+}
+
+// listCapabilities returns the unified catalog summary: MCP servers plus
+// non-provider-visible tools and skills available through this proxy. The
+// top-level "servers" key stays compatible with restricted subagent list
+// filtering.
+func (t *UseCapabilityTool) listCapabilities() (string, error) {
+	type capInfo struct {
+		ID          string `json:"id"`
+		Kind        string `json:"kind"`
+		Name        string `json:"name"`
+		Status      string `json:"status,omitempty"`
+		ReadOnly    bool   `json:"read_only,omitempty"`
+		Description string `json:"description,omitempty"`
+	}
+	var caps []capInfo
+	if t.catalog != nil {
+		for _, e := range t.catalog().Entries {
+			// Skip provider-visible core tools — they are already top-level.
+			if e.Kind == capability.KindTool && t.registry != nil && t.registry.ProviderVisible(e.ToolName) {
+				continue
+			}
+			caps = append(caps, capInfo{
+				ID:          e.ID,
+				Kind:        string(e.Kind),
+				Name:        e.Name,
+				Status:      string(e.Status),
+				ReadOnly:    e.ReadOnly,
+				Description: e.Description,
+			})
+		}
+	}
+	serversJSON, err := t.listServers()
+	if err != nil {
+		return "", err
+	}
+	var serversPayload struct {
+		Servers []listServerInfo `json:"servers"`
+		Note    string           `json:"note"`
+	}
+	_ = json.Unmarshal([]byte(serversJSON), &serversPayload)
+	payload := map[string]any{
+		"capabilities": caps,
+		"servers":      serversPayload.Servers,
+		"note":         "Call action=call with a capability_id to invoke a non-core tool, skill, MCP tool, or other catalog entry without changing the provider tool schema.",
+	}
+	if serversPayload.Note != "" {
+		payload["note"] = payload["note"].(string) + " " + serversPayload.Note
+	}
+	b, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 // listServers returns sorted configured MCP server names, status, and
@@ -878,6 +932,25 @@ func inspectToolListJSON(server string, tools []tool.Tool) string {
 }
 
 func (t *UseCapabilityTool) resolveCall(ctx context.Context, id string, args json.RawMessage, base tool.ResolvedCall) (tool.ResolvedCall, error) {
+	// Registry-backed tools and skills share the unified proxy. Real writers
+	// still pass permission/plan/sandbox/lease checks via ResolvedCall.Target.
+	if name, ok := strings.CutPrefix(id, "tool:"); ok {
+		return t.resolveRegistryTool(strings.TrimSpace(name), id, args, base)
+	}
+	if name, ok := strings.CutPrefix(id, "skill:"); ok {
+		return t.resolveSkillCall(strings.TrimSpace(name), id, args, base)
+	}
+	if name, ok := strings.CutPrefix(id, "task:"); ok {
+		return t.resolveRegistryTool(taskToolName(name), id, args, base)
+	}
+	if name, ok := strings.CutPrefix(id, "workflow:"); ok {
+		return t.resolveRegistryTool(strings.TrimSpace(name), "tool:"+strings.TrimSpace(name), args, base)
+	}
+	for _, prefix := range []string{"web:", "lsp:", "session:", "memory:"} {
+		if rest, ok := strings.CutPrefix(id, prefix); ok {
+			return t.resolveRegistryTool(strings.TrimSpace(rest), id, args, base)
+		}
+	}
 	// Server-level call is the first-discovery path for servers with no
 	// schema cache: it resolves to a gated connect-and-list target so the
 	// model can learn tool names without inspect ever starting a process.
@@ -886,10 +959,6 @@ func (t *UseCapabilityTool) resolveCall(ctx context.Context, id string, args jso
 	}
 	server, raw, err := parseMCPCapabilityID(id)
 	if err != nil {
-		// Skills must use run_skill.
-		if strings.HasPrefix(id, "skill:") {
-			return tool.ResolvedCall{}, fmt.Errorf("call only proxies MCP tools; use run_skill for %s", id)
-		}
 		return tool.ResolvedCall{}, err
 	}
 	if !t.serverEnabled(server) {
@@ -990,6 +1059,89 @@ func (t *UseCapabilityTool) resolveCall(ctx context.Context, id string, args jso
 		base.Args = args
 	}
 	return base, nil
+}
+
+// resolveRegistryTool binds a registry tool by name for use_capability call.
+// Provider-visible core tools remain callable this way, but the catalog prefers
+// listing only non-visible tools so the model uses the top-level surface first.
+func (t *UseCapabilityTool) resolveRegistryTool(name, id string, args json.RawMessage, base tool.ResolvedCall) (tool.ResolvedCall, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return tool.ResolvedCall{}, fmt.Errorf("capability id %q is missing a tool name", id)
+	}
+	if name == "use_capability" {
+		return tool.ResolvedCall{}, fmt.Errorf("cannot proxy use_capability through itself")
+	}
+	if t.registry == nil {
+		return t.resolveUnavailable(base, id, name, "tool registry is unavailable"), nil
+	}
+	tl, ok := t.registry.Get(name)
+	if !ok {
+		return t.resolveUnavailable(base, id, name, fmt.Sprintf("tool %q is not registered in this session", name)), nil
+	}
+	base.Target = tl
+	base.TargetName = name
+	base.ReadOnly = tl.ReadOnly()
+	if len(args) == 0 {
+		base.Args = json.RawMessage(`{}`)
+	} else {
+		base.Args = args
+	}
+	return base, nil
+}
+
+// resolveSkillCall routes skill:<name> through run_skill / read_only_skill /
+// read_skill when present, preserving the real skill tool name for evidence.
+func (t *UseCapabilityTool) resolveSkillCall(skillName, id string, args json.RawMessage, base tool.ResolvedCall) (tool.ResolvedCall, error) {
+	skillName = strings.TrimSpace(skillName)
+	if skillName == "" {
+		return tool.ResolvedCall{}, fmt.Errorf("capability id %q is missing a skill name", id)
+	}
+	if t.registry == nil {
+		return t.resolveUnavailable(base, id, skillName, "tool registry is unavailable"), nil
+	}
+	// Prefer full run_skill; fall back to read-only variants when the session
+	// only exposes them (planner / plan mode).
+	for _, toolName := range []string{"run_skill", "read_only_skill", "read_skill"} {
+		if tl, ok := t.registry.Get(toolName); ok {
+			payload := args
+			if len(payload) == 0 || string(payload) == "null" {
+				payload = json.RawMessage(fmt.Sprintf(`{"name":%q}`, skillName))
+			} else {
+				var m map[string]any
+				if json.Unmarshal(payload, &m) == nil {
+					if _, has := m["name"]; !has {
+						m["name"] = skillName
+						if b, err := json.Marshal(m); err == nil {
+							payload = b
+						}
+					}
+				}
+			}
+			base.Target = tl
+			base.TargetName = toolName
+			base.ReadOnly = tl.ReadOnly()
+			base.Args = payload
+			return base, nil
+		}
+	}
+	return t.resolveUnavailable(base, id, skillName, fmt.Sprintf("skill tools are not available for %q", skillName)), nil
+}
+
+func taskToolName(name string) string {
+	name = strings.TrimSpace(name)
+	switch name {
+	case "subagent", "task":
+		return "task"
+	case "read_only_subagent", "read_only_task", "research":
+		return "read_only_task"
+	case "parallel", "parallel_tasks":
+		return "parallel_tasks"
+	case "fleet":
+		return "fleet"
+	default:
+		return name
+	}
 }
 
 // resolveUnavailable fills the host-proven unavailable shape shared by the

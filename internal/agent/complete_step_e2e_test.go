@@ -220,7 +220,7 @@ func TestE2ECrossTurnDiffEvidenceViaSessionFallback(t *testing.T) {
 	)
 	a := New(mp, evidenceRegistry(), NewSession("sys"), Options{}, event.Discard)
 
-	if err := a.Run(context.Background(), "edit x.go"); err != nil {
+	if err := a.Run(context.Background(), "edit x.go without tests"); err != nil {
 		t.Fatalf("turn 1: %v", err)
 	}
 	if err := a.Run(context.Background(), "now sign off that change"); err != nil {

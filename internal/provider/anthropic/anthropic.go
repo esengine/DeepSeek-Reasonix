@@ -89,6 +89,11 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	if root == "" {
 		root = defaultBaseURL
 	}
+	requestURL, _ := cfg.Extra["request_url"].(string)
+	requestURL = strings.TrimSpace(requestURL)
+	if requestURL == "" {
+		requestURL = root + "/v1/messages"
+	}
 	officialDeepSeek := openai.IsDeepSeek(root)
 	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
 	keySource, _ := cfg.Extra["api_key_source"].(string)
@@ -133,6 +138,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		keyEnv:           keyEnv,
 		keySource:        keySource,
 		baseURL:          root,
+		requestURL:       requestURL,
 		model:            cfg.Model,
 		nativeAnthropic:  strings.EqualFold(root, defaultBaseURL),
 		deepseek:         officialDeepSeek,
@@ -160,6 +166,7 @@ type client struct {
 	keyEnv           string // api_key_env name, surfaced in auth errors
 	keySource        string // source of keyEnv, surfaced in auth errors
 	baseURL          string
+	requestURL       string
 	model            string
 	nativeAnthropic  bool   // first-party endpoint: documented default-5m cache-write pricing applies
 	deepseek         bool   // official DeepSeek Anthropic endpoint: unsigned reasoning replay + automatic cache
@@ -224,7 +231,7 @@ func (c *client) MissingToolCallReasoningWarningIdentity() string {
 		protocol = "deepseek-anthropic"
 	}
 	return strings.Join([]string{
-		"anthropic", strings.TrimSpace(c.name), strings.TrimSpace(c.baseURL),
+		"anthropic", strings.TrimSpace(c.name), strings.TrimSpace(c.requestURL),
 		strings.TrimSpace(c.model), protocol, strings.TrimSpace(c.thinking), strings.TrimSpace(c.effort),
 	}, "\x00")
 }
@@ -291,7 +298,7 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 	bufPool.Put(buf)
 
 	newReq := func(ctx context.Context) (*http.Request, error) {
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/messages", bytes.NewReader(body))
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.requestURL, bytes.NewReader(body))
 		if err != nil {
 			return nil, err
 		}

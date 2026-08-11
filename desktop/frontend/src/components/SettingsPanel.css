@@ -211,6 +211,10 @@
   box-shadow: none;
 }
 
+.settings-page--general {
+  container: settings-general / inline-size;
+}
+
 .settings-page--general .settings-section__head {
   margin-bottom: 0;
   padding-bottom: 11px;
@@ -426,7 +430,23 @@
   letter-spacing: -0.015em;
 }
 
-@media (max-width: 900px) {
+@container settings-general (max-width: 620px) {
+  .settings-page--general .settings-field {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .settings-page--general .settings-field__control {
+    min-width: 0;
+  }
+
+  .settings-page--general .settings-field--stacked .settings-field__control {
+    width: 100%;
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 980px) {
   .settings-page--general .settings-field {
     grid-template-columns: 1fr;
     gap: 10px;

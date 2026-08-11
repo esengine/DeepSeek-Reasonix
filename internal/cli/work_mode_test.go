@@ -1,19 +1,15 @@
 package cli
 
 import (
-	"errors"
 	"strings"
 	"testing"
 	"time"
 
-	"reasonix/internal/agent"
 	"reasonix/internal/boot"
-	"reasonix/internal/command"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
-	"reasonix/internal/skill"
 )
 
 func TestRuntimeProfileDisplayLocalizesLabels(t *testing.T) {
@@ -22,7 +18,7 @@ func TestRuntimeProfileDisplayLocalizesLabels(t *testing.T) {
 		lang                        string
 		economy, balanced, delivery string
 	}{
-		{lang: "en", economy: "economy", balanced: "balanced", delivery: "delivery"},
+		{lang: "en", economy: "light", balanced: "balanced", delivery: "delivery"},
 		{lang: "zh", economy: "轻量", balanced: "均衡", delivery: "交付"},
 		{lang: "zh-TW", economy: "輕量", balanced: "均衡", delivery: "交付"},
 	} {
@@ -33,6 +29,7 @@ func TestRuntimeProfileDisplayLocalizesLabels(t *testing.T) {
 				boot.TokenModeFull:     tt.balanced,
 				"balanced":             tt.balanced,
 				boot.TokenModeDelivery: tt.delivery,
+				"light":                tt.economy,
 			} {
 				if got := runtimeProfileDisplay(profile); got != want {
 					t.Errorf("runtimeProfileDisplay(%q) = %q, want %q", profile, got, want)
@@ -44,7 +41,7 @@ func TestRuntimeProfileDisplayLocalizesLabels(t *testing.T) {
 
 func TestRenderWorkModesShowsAllOptionsAndCurrent(t *testing.T) {
 	out := renderWorkModes(100, boot.TokenModeFull)
-	for _, want := range []string{"economy", "balanced", "delivery", "current"} {
+	for _, want := range []string{"light", "balanced", "delivery", "current"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("renderWorkModes missing %q:\n%s", want, out)
 		}
@@ -54,6 +51,7 @@ func TestRenderWorkModesShowsAllOptionsAndCurrent(t *testing.T) {
 func TestParseWorkModeKeepsBalancedAsFullInternally(t *testing.T) {
 	for input, want := range map[string]string{
 		"economy":  boot.TokenModeEconomy,
+		"light":    boot.TokenModeEconomy,
 		"balanced": boot.TokenModeFull,
 		"full":     boot.TokenModeFull,
 		"delivery": boot.TokenModeDelivery,
@@ -68,18 +66,18 @@ func TestParseWorkModeKeepsBalancedAsFullInternally(t *testing.T) {
 func TestWorkModeCompletionPublishesPrimaryCommandAndAliasArguments(t *testing.T) {
 	m := newTestChatTUI()
 	m.runtimeProfile = boot.TokenModeFull
-	if !hasLabel(m.slashItems(), "/work-mode") {
-		t.Fatal("slash completion missing /work-mode")
+	if !hasLabel(m.slashItems(), "/preset") {
+		t.Fatal("slash completion missing /preset")
 	}
 	if hasLabel(m.slashItems(), "/profile") {
 		t.Fatal("technical /profile alias should not duplicate the primary command in the slash menu")
 	}
-	for _, input := range []string{"/work-mode ", "/profile "} {
+	for _, input := range []string{"/preset ", "/work-mode ", "/profile "} {
 		items, _, ok := m.slashArgItems(input)
 		if !ok {
-			t.Fatalf("%q did not activate work-mode argument completion", input)
+			t.Fatalf("%q did not activate preset argument completion", input)
 		}
-		for _, want := range []string{"economy", "balanced", "delivery"} {
+		for _, want := range []string{"light", "balanced", "delivery"} {
 			if !hasLabel(items, want) {
 				t.Errorf("%q completion missing %q: %v", input, want, labels(items))
 			}
@@ -88,8 +86,8 @@ func TestWorkModeCompletionPublishesPrimaryCommandAndAliasArguments(t *testing.T
 }
 
 func TestWorkModeHelpAndStatusUseUserFacingName(t *testing.T) {
-	if !hasLabel(builtinHelpItems(), "/work-mode") {
-		t.Fatal("built-in help missing /work-mode")
+	if !hasLabel(builtinHelpItems(), "/preset") {
+		t.Fatal("built-in help missing /preset")
 	}
 	if hasLabel(builtinHelpItems(), "/profile") {
 		t.Fatal("built-in help should not duplicate the technical /profile alias")
@@ -97,97 +95,42 @@ func TestWorkModeHelpAndStatusUseUserFacingName(t *testing.T) {
 	m := newChatTUI(control.New(control.Options{Label: "model"}), "", make(chan event.Event, 1), 80)
 	m.runtimeProfile = boot.TokenModeDelivery
 	if got := m.workModeTag(); !strings.Contains(got, "delivery") {
-		t.Fatalf("work-mode status tag = %q, want delivery", got)
+		t.Fatalf("role-setting status tag = %q, want delivery", got)
 	}
 	m.width = 30
 	if got := m.computeStatusLineCount(m.width); got < 2 {
-		t.Fatalf("status-line count with work-mode tag = %d, want at least 2", got)
+		t.Fatalf("status-line count with role-setting tag = %d, want at least 2", got)
 	}
 }
 
-func TestWorkModeSwitchBuildsTargetProfileAndSwapsAtomically(t *testing.T) {
+func TestWorkModeSwitchUpdatesInPlaceWithoutRebuild(t *testing.T) {
 	oldCtrl := control.New(control.Options{Label: "old"})
 	oldCtrl.SetToolApprovalMode(control.ToolApprovalAuto)
 	oldCtrl.SetPlanMode(true)
-	newCtrl := control.New(control.Options{
-		Label:    "new",
-		Commands: []command.Command{{Name: "fresh-command"}},
-		Skills:   []skill.Skill{{Name: "Fresh Skill"}},
-	})
 	m := newChatTUI(oldCtrl, "", make(chan event.Event, 1), 100)
 	m.modelRef = "provider/model"
 	m.runtimeProfile = boot.TokenModeFull
-	var gotSpec controllerBuildSpec
-	var gotCarry []provider.Message
-	m.buildController = func(spec controllerBuildSpec, carry []provider.Message, _ string, _ control.SessionAPI) (*control.Controller, error) {
-		gotSpec = spec
-		gotCarry = carry
-		return newCtrl, nil
-	}
-
-	cmd := m.runWorkModeCommand("/work-mode delivery")
-	if cmd == nil {
-		t.Fatal("work-mode switch did not schedule a controller build")
-	}
-	if m.ctrl != oldCtrl || m.runtimeProfile != boot.TokenModeFull {
-		t.Fatal("controller or profile changed before the replacement build completed")
-	}
-	next, _ := m.Update(cmd())
-	m = next.(chatTUI)
-
-	if gotSpec.ModelRef != "provider/model" || gotSpec.RuntimeProfile != boot.TokenModeDelivery {
-		t.Fatalf("build spec = %+v, want current model and delivery profile", gotSpec)
-	}
-	if gotSpec.ToolApprovalMode != control.ToolApprovalAuto {
-		t.Fatalf("build spec approval mode = %q, want auto", gotSpec.ToolApprovalMode)
-	}
-	if !gotSpec.PlanMode {
-		t.Fatal("build spec did not preserve plan mode")
-	}
-	if len(gotCarry) != len(oldCtrl.History()) {
-		t.Fatalf("carried history length = %d, want %d", len(gotCarry), len(oldCtrl.History()))
-	}
-	if m.ctrl != newCtrl || m.runtimeProfile != boot.TokenModeDelivery {
-		t.Fatalf("successful switch did not install replacement controller/profile: ctrl=%p profile=%q", m.ctrl, m.runtimeProfile)
-	}
-	if m.label != newCtrl.Label() || len(m.commands) != 1 || len(m.skills) != 1 || m.host != newCtrl.Host() {
-		t.Fatalf("successful switch did not refresh controller metadata: label=%q commands=%d skills=%d", m.label, len(m.commands), len(m.skills))
-	}
-	if len(m.oldControllers) != 1 || m.oldControllers[0] != oldCtrl {
-		t.Fatal("successful switch did not retain the old controller for exit-time cleanup")
-	}
-}
-
-func TestWorkModeSwitchFailureKeepsOldControllerAndProfile(t *testing.T) {
-	session := agent.NewSession("system")
-	session.Add(provider.Message{Role: provider.RoleUser, Content: "keep this history"})
-	exec := agent.New(nil, nil, session, agent.Options{}, event.Discard)
-	oldCtrl := control.New(control.Options{Label: "old", Executor: exec})
-	m := newChatTUI(oldCtrl, "", make(chan event.Event, 1), 100)
-	m.modelRef = "provider/model"
-	m.runtimeProfile = boot.TokenModeEconomy
+	builds := 0
 	m.buildController = func(controllerBuildSpec, []provider.Message, string, control.SessionAPI) (*control.Controller, error) {
-		return nil, errors.New("build failed")
+		builds++
+		return control.New(control.Options{Label: "new"}), nil
 	}
 
-	cmd := m.runSlashCommand("/profile delivery")
-	if cmd == nil {
-		t.Fatal("/profile alias did not schedule a controller build")
+	cmd := m.runWorkModeCommand("/preset delivery")
+	if cmd != nil {
+		t.Fatal("in-place preset switch must not schedule a controller rebuild")
 	}
-	next, _ := m.Update(cmd())
-	m = next.(chatTUI)
-
-	if m.ctrl != oldCtrl || m.runtimeProfile != boot.TokenModeEconomy {
-		t.Fatalf("failed switch changed live runtime: ctrl=%p profile=%q", m.ctrl, m.runtimeProfile)
+	if m.ctrl != oldCtrl {
+		t.Fatal("controller must stay the same instance")
 	}
-	if history := m.ctrl.History(); len(history) != 2 || history[1].Content != "keep this history" {
-		t.Fatalf("failed switch lost history: %#v", history)
+	if m.runtimeProfile != boot.TokenModeDelivery {
+		t.Fatalf("runtime profile = %q, want delivery", m.runtimeProfile)
 	}
-	if m.modelSwitchPending || m.pendingModelSwitch != nil {
-		t.Fatal("failed switch left the runtime-switch gate pending")
+	if m.ctrl.AgentPreset() != boot.AgentPresetDelivery {
+		t.Fatalf("controller preset = %q, want delivery", m.ctrl.AgentPreset())
 	}
-	if len(m.oldControllers) != 0 {
-		t.Fatal("failed switch retired the still-live old controller")
+	if builds != 0 {
+		t.Fatalf("unexpected rebuilds: %d", builds)
 	}
 }
 
@@ -203,20 +146,23 @@ func TestWorkModeSwitchRejectsInvalidSameAndBusyRequests(t *testing.T) {
 	}
 
 	for _, input := range []string{
-		"/work-mode unknown",
-		"/work-mode balanced",
-		"/work-mode economy extra",
+		"/preset unknown",
+		"/preset balanced",
+		"/preset economy extra",
 	} {
 		if cmd := m.runWorkModeCommand(input); cmd != nil {
-			t.Fatalf("%q unexpectedly scheduled a build", input)
+			t.Fatalf("%q unexpectedly scheduled a rebuild", input)
 		}
 	}
 	m.pendingApproval = &event.Approval{ID: "approval", Tool: "bash"}
-	if cmd := m.runWorkModeCommand("/work-mode economy"); cmd != nil {
-		t.Fatal("pending approval should block work-mode switching")
+	if cmd := m.runWorkModeCommand("/preset light"); cmd != nil {
+		t.Fatal("pending approval should block preset switching")
+	}
+	if m.runtimeProfile != boot.TokenModeFull {
+		t.Fatalf("busy switch changed profile to %q", m.runtimeProfile)
 	}
 	if builds != 0 {
-		t.Fatalf("rejected work-mode requests triggered %d builds", builds)
+		t.Fatalf("rejected preset requests triggered %d builds", builds)
 	}
 }
 
@@ -242,58 +188,13 @@ func TestWorkModeSwitchRejectsRunningTurn(t *testing.T) {
 		builds++
 		return control.New(control.Options{}), nil
 	}
-	if cmd := m.runWorkModeCommand("/work-mode delivery"); cmd != nil {
-		t.Fatal("running turn should block work-mode switching")
+	if cmd := m.runWorkModeCommand("/preset delivery"); cmd != nil {
+		t.Fatal("running turn should block preset switching")
+	}
+	if m.runtimeProfile != boot.TokenModeFull {
+		t.Fatalf("running-turn switch changed profile to %q", m.runtimeProfile)
 	}
 	if builds != 0 {
 		t.Fatalf("running-turn guard triggered %d builds", builds)
-	}
-}
-
-func TestRuntimeRebuildCommandsCarryCurrentWorkMode(t *testing.T) {
-	isolateUserConfig(t)
-	m := newTestChatTUI()
-	m.ctrl = control.New(control.Options{Label: "deepseek-flash"})
-	m.modelRef = "deepseek-flash/deepseek-v4-flash"
-	m.runtimeProfile = boot.TokenModeDelivery
-	var specs []controllerBuildSpec
-	m.buildController = func(spec controllerBuildSpec, _ []provider.Message, _ string, _ control.SessionAPI) (*control.Controller, error) {
-		specs = append(specs, spec)
-		return control.New(control.Options{Label: "deepseek-flash"}), nil
-	}
-
-	cmd := m.runEffortCommand("/effort max")
-	if cmd == nil {
-		t.Fatal("effort switch did not schedule a rebuild")
-	}
-	next, _ := m.Update(cmd())
-	m = next.(chatTUI)
-
-	m.runModelSubcommand("/model deepseek-flash/another-model")
-	if m.pendingModelSwitch == nil {
-		t.Fatal("model switch did not schedule a rebuild")
-	}
-	next, _ = m.Update(m.pendingModelSwitch())
-	m = next.(chatTUI)
-
-	if !m.scheduleSkillSessionRefresh("test", "") {
-		t.Fatal("skill refresh did not schedule a rebuild")
-	}
-	next, _ = m.Update(m.pendingModelSwitch())
-	m = next.(chatTUI)
-
-	if len(specs) != 3 {
-		t.Fatalf("runtime rebuild count = %d, want 3", len(specs))
-	}
-	if specs[0].EffortOverride == nil || *specs[0].EffortOverride != "max" {
-		t.Fatalf("effort rebuild override = %v, want max", specs[0].EffortOverride)
-	}
-	if specs[1].EffortOverride != nil || specs[2].EffortOverride != nil {
-		t.Fatalf("non-effort rebuilds unexpectedly replaced effort override: %+v", specs)
-	}
-	for i, spec := range specs {
-		if spec.RuntimeProfile != boot.TokenModeDelivery {
-			t.Errorf("rebuild %d lost delivery profile: %+v", i, spec)
-		}
 	}
 }

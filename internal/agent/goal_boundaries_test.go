@@ -2,7 +2,7 @@ package agent
 
 import (
 	"context"
-	"reflect"
+	"fmt"
 	"testing"
 
 	"reasonix/internal/agent/testutil"
@@ -11,26 +11,28 @@ import (
 	"reasonix/internal/tool"
 )
 
-func TestDefaultRunStepLimitYieldsAfterSummary(t *testing.T) {
+func TestGoalRunHasNoDefaultModelRoundCeiling(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "read_file", readOnly: true})
-	prov := testutil.NewMock("m",
-		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "r1", Name: "read_file", Arguments: `{"path":"a"}`}}},
-		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "r2", Name: "read_file", Arguments: `{"path":"b"}`}}},
-		testutil.Turn{Text: "Saved progress; more work remains."},
-	)
-	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
-	err := a.Run(WithDefaultRunStepLimit(context.Background(), 2, "goal model rounds"), "work")
-	info, ok := InspectRunPause(err)
-	if !ok || info.Kind != "max_steps" || !info.HostOwned || info.Limit != 2 || info.Key != "goal model rounds" {
-		t.Fatalf("pause = %+v ok=%v err=%v", info, ok, err)
+	turns := make([]testutil.Turn, 0, 102)
+	for i := range 101 {
+		turns = append(turns, testutil.Turn{ToolCalls: []provider.ToolCall{{
+			ID: fmt.Sprintf("r%d", i), Name: "read_file", Arguments: fmt.Sprintf(`{"path":"file-%d"}`, i),
+		}}})
 	}
-	if prov.CallCount() != 3 {
-		t.Fatalf("provider calls = %d, want two work rounds plus one summary", prov.CallCount())
+	turns = append(turns, testutil.Turn{Text: "Done."})
+	prov := testutil.NewMock("m", turns...)
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
+	ctx := WithDeliveryExecutionScope(context.Background(), DeliveryExecutionScope{ID: "goal-1", TaskText: "work"})
+	if err := a.Run(ctx, "work"); err != nil {
+		t.Fatalf("Goal run stopped at a default round boundary: %v", err)
+	}
+	if prov.CallCount() != 102 {
+		t.Fatalf("provider calls = %d, want 101 tool rounds plus final", prov.CallCount())
 	}
 }
 
-func TestExplicitMaxStepsOverridesGoalDefault(t *testing.T) {
+func TestExplicitMaxStepsStillAppliesToGoal(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "read_file", readOnly: true})
 	prov := testutil.NewMock("m",
@@ -40,15 +42,18 @@ func TestExplicitMaxStepsOverridesGoalDefault(t *testing.T) {
 		testutil.Turn{Text: "Done."},
 	)
 	a := New(prov, reg, NewSession(""), Options{MaxSteps: 3}, event.Discard)
-	if err := a.Run(WithDefaultRunStepLimit(context.Background(), 2, "goal model rounds"), "work"); err != nil {
-		t.Fatalf("explicit MaxSteps should own the run: %v", err)
+	ctx := WithDeliveryExecutionScope(context.Background(), DeliveryExecutionScope{ID: "goal-1", TaskText: "work"})
+	err := a.Run(ctx, "work")
+	info, ok := InspectRunPause(err)
+	if !ok || info.Kind != "max_steps" || info.HostOwned || info.Limit != 3 {
+		t.Fatalf("explicit MaxSteps pause = %+v ok=%v err=%v", info, ok, err)
 	}
 	if prov.CallCount() != 4 {
 		t.Fatalf("provider calls = %d, want explicit three rounds plus summary", prov.CallCount())
 	}
 }
 
-func TestGoalSameFailurePausesAfterStructuralThreshold(t *testing.T) {
+func TestGoalSameFailureRedirectsWithoutPausing(t *testing.T) {
 	turns := []testutil.Turn{
 		{ToolCalls: []provider.ToolCall{{ID: "x1", Name: "missing_tool", Arguments: `{}`}}},
 		{ToolCalls: []provider.ToolCall{{ID: "x2", Name: "missing_tool", Arguments: `{}`}}},
@@ -59,9 +64,8 @@ func TestGoalSameFailurePausesAfterStructuralThreshold(t *testing.T) {
 	a := New(prov, tool.NewRegistry(), NewSession(""), Options{}, event.Discard)
 	ctx := WithDeliveryExecutionScope(context.Background(), DeliveryExecutionScope{ID: "goal-1", TaskText: "finish"})
 	err := a.Run(ctx, "work")
-	info, ok := InspectRunPause(err)
-	if !ok || info.Kind != "goal_stuck" || info.Limit != stormBreakThreshold || info.Key != "goal repeated host outcome" {
-		t.Fatalf("pause = %+v ok=%v err=%v", info, ok, err)
+	if err != nil {
+		t.Fatalf("Goal structural guard paused the run: %v", err)
 	}
 	if prov.CallCount() != stormBreakThreshold+1 {
 		t.Fatalf("provider calls = %d, want threshold plus one summary", prov.CallCount())
@@ -74,7 +78,7 @@ func TestGoalSameFailurePausesAfterStructuralThreshold(t *testing.T) {
 	}
 }
 
-func TestGoalZeroEvidencePausesAfterSixRepeatedSuccesses(t *testing.T) {
+func TestGoalZeroEvidenceRedirectsAndContinues(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "read_file", readOnly: true})
 	turns := make([]testutil.Turn, 0, progressStopStreak+2)
@@ -88,39 +92,21 @@ func TestGoalZeroEvidencePausesAfterSixRepeatedSuccesses(t *testing.T) {
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
 	ctx := WithDeliveryExecutionScope(context.Background(), DeliveryExecutionScope{ID: "goal-1", TaskText: "research"})
 	err := a.Run(ctx, "work")
-	info, ok := InspectRunPause(err)
-	if !ok || info.Kind != "goal_stuck" || info.Limit != progressStopStreak || info.Key != "goal zero-evidence rounds" {
-		t.Fatalf("pause = %+v ok=%v err=%v", info, ok, err)
+	if err != nil {
+		t.Fatalf("Goal progress guard paused the run: %v", err)
 	}
 }
 
-func TestGoalDefaultBudgetFlowsToChild(t *testing.T) {
+func TestUnboundedGoalParentLeavesChildUnbounded(t *testing.T) {
 	task := &TaskTool{}
-	ctx := WithDefaultRunStepLimit(context.Background(), 16, "goal model rounds")
-	if got := task.childMaxStepsForContext(ctx, 0); got != 8 {
-		t.Fatalf("child steps = %d, want 8", got)
+	if got := task.childMaxStepsForContext(context.Background(), 0); got != 0 {
+		t.Fatalf("child steps = %d, want unlimited", got)
 	}
-	if got := task.childMaxStepsForContext(ctx, 3); got != 3 {
+	if got := task.childMaxStepsForContext(context.Background(), 3); got != 3 {
 		t.Fatalf("explicit child steps = %d, want 3", got)
 	}
-}
-
-func TestGoalDefaultBudgetDoesNotChangeNormalRequestPrefix(t *testing.T) {
-	plainProvider := testutil.NewMock("m", testutil.Turn{Text: "done"})
-	boundedProvider := testutil.NewMock("m", testutil.Turn{Text: "done"})
-	plain := New(plainProvider, tool.NewRegistry(), NewSession("stable system"), Options{}, event.Discard)
-	bounded := New(boundedProvider, tool.NewRegistry(), NewSession("stable system"), Options{}, event.Discard)
-	if err := plain.Run(context.Background(), "same input"); err != nil {
-		t.Fatal(err)
-	}
-	if err := bounded.Run(WithDefaultRunStepLimit(context.Background(), 16, "goal model rounds"), "same input"); err != nil {
-		t.Fatal(err)
-	}
-	plainReqs, boundedReqs := plainProvider.Requests(), boundedProvider.Requests()
-	if len(plainReqs) != 1 || len(boundedReqs) != 1 {
-		t.Fatalf("request counts = %d/%d", len(plainReqs), len(boundedReqs))
-	}
-	if !reflect.DeepEqual(plainReqs[0], boundedReqs[0]) {
-		t.Fatalf("host-only default budget changed the provider request\nplain=%+v\nbounded=%+v", plainReqs[0], boundedReqs[0])
+	task.maxSteps = 16
+	if got := task.childMaxStepsForContext(context.Background(), 0); got != 8 {
+		t.Fatalf("explicit parent child steps = %d, want 8", got)
 	}
 }

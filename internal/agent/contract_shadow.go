@@ -172,10 +172,24 @@ func (a *Agent) emitTurnShadows(input string) {
 		return
 	}
 	c := buildShadowContract(input, a.evidence.Receipts(), a.planContractSnapshot())
+	// Prefer the live contract when present so Suppressed/Partial state is not
+	// lost in the pure replay path.
+	if live := a.LiveContract(); live != nil && (live.HasSuppressed() || len(live.Requirements) > 0 || len(live.Checks) > 0) {
+		// Fold live statuses that the pure replay cannot reconstruct.
+		for i := range c.Checks {
+			for _, lc := range live.Checks {
+				if c.Checks[i].Command == lc.Command && lc.Status == taskcontract.Suppressed {
+					c.Checks[i].Status = taskcontract.Suppressed
+					c.Checks[i].SuppressReason = lc.SuppressReason
+				}
+			}
+		}
+	}
 	event.RecordContractShadow(a.sink, contractShadowAudit(c))
 	rep := completion.Build(c, a.evidence)
 	a.completion = &rep
 	event.RecordCompletionReport(a.sink, completionReportAudit(rep))
+	a.emitCompletionSummary(c)
 }
 
 // CompletionReceipt returns the turn's completion record for the host to

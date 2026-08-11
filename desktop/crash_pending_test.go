@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -197,18 +198,50 @@ func TestFlushPendingCrashDevGuard(t *testing.T) {
 }
 
 func TestFlushPendingCrashIgnoresSafeModeEnv(t *testing.T) {
-	// v1.20+: REASONIX_SAFE_MODE no longer blocks crash flush. With telemetry
-	// off/default, the pending file is consumed (sent or dropped).
+	// v1.20+: REASONIX_SAFE_MODE no longer blocks crash flush.
 	t.Setenv("REASONIX_SAFE_MODE", "1")
-	oldVersion := version
+	oldVersion, oldEndpoint := version, crashEndpoint
 	t.Cleanup(func() {
 		version = oldVersion
+		crashEndpoint = oldEndpoint
 		removeAllPendingCrashes()
 	})
 	version = "v9.9.9"
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+	crashEndpoint = srv.URL
 
 	writePendingCrash("safe", "boom", []byte("stack"))
 	NewApp().flushPendingCrash()
-	// Either sent or dropped is fine; must not retain solely because of Safe Mode env.
-	// When telemetry is off the file is removed; when on it is sent. Both clear it.
+	if hits.Load() != 1 {
+		t.Fatalf("server hits = %d, want 1", hits.Load())
+	}
+	if _, ok := readPending(t); ok {
+		t.Fatal("safe-mode compatibility left a sent report pending")
+	}
+}
+
+func TestPendingCrashDoesNotPersistInstallID(t *testing.T) {
+	removeAllPendingCrashes()
+	t.Cleanup(removeAllPendingCrashes)
+	report := baseCrashReport("crash")
+	report.Message = "pending"
+	if !writePendingReport(report, true) {
+		t.Fatal("writePendingReport failed")
+	}
+	paths := pendingCrashQueuePaths()
+	if len(paths) != 1 {
+		t.Fatalf("pending paths = %v", paths)
+	}
+	body, err := os.ReadFile(paths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(body, []byte("installId")) || bytes.Contains(body, []byte("install-id")) {
+		t.Fatalf("pending report persisted an installation identity: %s", body)
+	}
 }

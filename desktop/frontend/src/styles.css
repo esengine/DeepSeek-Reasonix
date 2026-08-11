@@ -5130,12 +5130,63 @@ button.reasoning-summary:focus-visible {
   border-radius: 5px;
   padding: 1px 5px;
 }
+/* Horizontal overflow only: never create a vertical nested scroller. CSS
+   forces overflow-y to "auto" when overflow-x is non-visible, so tables use a
+   wrapper (below) for x-scroll and the table itself stays overflow:visible. */
+.md-table-scroll {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin: 0 0 12px;
+}
+/* Large tables default to an in-flow preview; expand mounts the virtual
+   scroller only when the user opts in (see MarkdownTable.tsx). */
+.md-table-fold {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+.md-table-fold > .md-table-scroll,
+.md-table-fold > .md-table-virtual {
+  margin-bottom: 0;
+}
+.md-table-fold__toggle {
+  --wails-draggable: no-drag;
+  align-self: flex-start;
+  margin: 0;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-soft);
+  color: var(--fg-dim);
+  font-size: var(--text-xs, 12px);
+  line-height: 1.4;
+  cursor: pointer;
+}
+.md-table-fold__toggle:hover {
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 40%, var(--bg-soft));
+}
+.md-table-fold__toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+}
 .md table {
   border-collapse: collapse;
   margin: 0 0 12px;
   font-size: var(--font-content);
-  display: block;
-  overflow-x: auto;
+  width: 100%;
+  /* Keep tables in normal document flow so trackpad Y always drives .transcript.
+     Wide tables sit inside .md-table-scroll when a horizontal scroller is needed. */
+  overflow: visible;
+}
+.md-table-scroll > table {
+  margin-bottom: 0;
+  width: max-content;
+  min-width: 100%;
 }
 .md th,
 .md td {
@@ -5150,10 +5201,12 @@ button.reasoning-summary:focus-visible {
 /* Row-virtualized oversized markdown tables (see MarkdownTable.tsx): the
    wrapper owns vertical scroll, the thead stays pinned, and body rows are
    absolutely positioned by the virtualizer. Flex rows keep header/body cells
-   column-aligned without a full-table layout pass. */
+   column-aligned without a full-table layout pass. Marked data-nested-scroll
+   so transcript wheel handoff promotes edge gestures to .transcript. */
 .md-table-virtual {
   overflow-y: auto;
   overflow-x: auto;
+  overscroll-behavior: contain;
   margin: 0 0 12px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -5196,9 +5249,17 @@ button.reasoning-summary:focus-visible {
   font-family: var(--font-code-family);
   font-size: var(--font-code);
   line-height: 1.55;
-  overflow: auto;
+  /* Horizontal scroll only by default so trackpad Y drives the transcript.
+     Extremely tall blocks opt into nested Y via .code--scroll-y + handoff. */
+  overflow-x: auto;
+  overflow-y: hidden;
   white-space: pre;
   color: var(--code-fg, var(--fg));
+}
+.code--scroll-y {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  max-height: min(60vh, 28rem);
 }
 .code--loading {
   opacity: 0.55;
@@ -5828,7 +5889,32 @@ body > .mermaid-diagram--fullscreen {
   font: inherit;
   font-size: 11px;
   line-height: 1.25;
-  transition: color 0.12s, border-color 0.12s, background 0.12s;
+  transition: color 0.12s, border-color 0.12s, background 0.12s, gap 0.12s;
+}
+.turn-actions__label-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: max-width 0.12s;
+}
+.turn-actions__label-inline > span,
+.turn-actions__label-inline > svg {
+  flex-shrink: 0;
+}
+.turn-actions__btn:hover .turn-actions__label-inline,
+.turn-actions__btn:focus-visible .turn-actions__label-inline,
+.turn-actions__group--open .turn-actions__label-inline,
+.turn-actions__btn--confirm .turn-actions__label-inline {
+  max-width: 240px;
+}
+.turn-actions__btn:hover,
+.turn-actions__btn:focus-visible,
+.turn-actions__group--open .turn-actions__btn,
+.turn-actions__btn--confirm {
+  gap: 6px;
 }
 .turn-actions__btn:hover:not(:disabled),
 .turn-actions__btn:focus-visible:not(:disabled),
@@ -10283,6 +10369,30 @@ body > .mermaid-diagram--fullscreen {
   padding: 6px 8px;
   font-size: 11.5px;
 }
+.workspace-completion-summary--attention {
+  border-color: color-mix(in srgb, var(--warn) 35%, var(--border-soft));
+}
+.workspace-completion-summary__head,
+.workspace-completion-summary__metrics,
+.workspace-completion-summary__details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.workspace-completion-summary__head strong {
+  margin-right: auto;
+  color: var(--fg);
+}
+.workspace-completion-summary__metrics {
+  margin-top: 6px;
+  color: var(--fg);
+}
+.workspace-completion-summary__details {
+  margin-top: 4px;
+}
+.workspace-completion-summary__metric--attention {
+  color: var(--warn);
+}
 .floating-menu {
   --wails-draggable: no-drag;
   position: fixed;
@@ -10311,6 +10421,11 @@ body > .mermaid-diagram--fullscreen {
 }
 .floating-menu button:hover {
   background: var(--bg-soft);
+}
+.floating-menu__separator {
+  height: 1px;
+  margin: 5px 4px;
+  background: var(--border-soft);
 }
 .tooltip-trigger {
   display: inline-flex;
@@ -24833,6 +24948,13 @@ body > .mermaid-diagram--fullscreen {
   font-size: 13px;
 }
 
+.project-tree__catalog-progress {
+  padding: 4px 10px 6px;
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .project-tree__empty--subtle {
   padding: 8px 12px;
   font-size: 12px;
@@ -25387,17 +25509,6 @@ body > .mermaid-diagram--fullscreen {
   background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
 }
 
-.context-panel__progress-segment {
-  display: block;
-  height: 100%;
-  min-width: 0;
-}
-
-.context-panel__progress-segment--prompt { background: #13a7a5; }
-.context-panel__progress-segment--completion { background: #2f6df6; }
-.context-panel__progress-segment--reasoning { background: #f97316; }
-.context-panel__progress-segment--other { background: var(--border); }
-
 .context-panel__compact-marker {
   position: absolute;
   top: 0;
@@ -25412,7 +25523,11 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .context-panel__progress-fill {
-  display: none;
+  display: block;
+  height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 72%, #fff), var(--accent));
 }
 
 .context-panel__session-section,
@@ -30662,8 +30777,10 @@ body > .mermaid-diagram--fullscreen {
   display: none;
 }
 
-.app--creation .theme-card__swatches,
-:root[data-theme-style] .app--creation .theme-card__swatches {
+/* Scope compact swatches to real theme cards only — do not crush
+   AppearanceOverview hero (.appearance-overview__thumb-base.theme-card__swatches). */
+.app--creation .theme-card .theme-card__swatches,
+:root[data-theme-style] .app--creation .theme-card .theme-card__swatches {
   width: 30px;
   height: 7px;
   gap: 0;
@@ -30671,8 +30788,8 @@ body > .mermaid-diagram--fullscreen {
   border-radius: 999px;
 }
 
-.app--creation .theme-card__swatch,
-:root[data-theme-style] .app--creation .theme-card__swatch {
+.app--creation .theme-card .theme-card__swatch,
+:root[data-theme-style] .app--creation .theme-card .theme-card__swatch {
   min-width: 0;
   height: 7px;
   border-radius: 0;
@@ -30689,6 +30806,8 @@ body > .mermaid-diagram--fullscreen {
   display: none;
 }
 
+/* Creation Graphite swatch colors apply to both theme cards and
+   AppearanceOverview hero (do not nest under .theme-card). */
 :root[data-theme-style] .app--creation .theme-card__swatches[data-theme-style-card="graphite"] .theme-card__swatch--bg {
   background: #0c0d10;
 }
@@ -30725,6 +30844,17 @@ body > .mermaid-diagram--fullscreen {
   :root[data-theme-style]:not([data-theme]) .app--creation .theme-card__swatches[data-theme-style-card="graphite"] .theme-card__swatch--accent {
     background: linear-gradient(128deg, #604116 0%, #9b7226 28%, #d8ad4f 48%, #f3d77b 57%, #b9872d 78%, #704d19 100%);
   }
+}
+
+/* Keep the Creation hero readable without duplicating the shared overview skin. */
+.app--creation .appearance-overview__thumb-base.theme-card__swatches,
+:root[data-theme-style] .app--creation .appearance-overview__thumb-base.theme-card__swatches {
+  min-height: 108px;
+}
+
+.app--creation .appearance-overview__thumb-base .theme-card__swatch,
+:root[data-theme-style] .app--creation .appearance-overview__thumb-base .theme-card__swatch {
+  flex: 1;
 }
 
 .app--creation .workspace-tree__icon--dir,
@@ -31954,21 +32084,12 @@ body > .mermaid-diagram--fullscreen {
   overflow: hidden;
   background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
 }
-.context-ring-popover__seg {
+.context-ring-popover__fill {
   height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 72%, #fff), var(--accent));
   transition: width 0.3s var(--ease-out);
-}
-.context-ring-popover__seg--prompt {
-  background: color-mix(in srgb, var(--accent) 68%, var(--fg));
-}
-.context-ring-popover__seg--completion {
-  background: color-mix(in srgb, var(--accent) 48%, var(--fg));
-}
-.context-ring-popover__seg--reasoning {
-  background: color-mix(in srgb, var(--warn) 56%, var(--fg));
-}
-.context-ring-popover__seg--other {
-  background: color-mix(in srgb, var(--fg-faint) 22%, var(--fg));
 }
 /* 进度条标记线 */
 .context-ring-popover__mark {
@@ -34266,14 +34387,6 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .context-panel__compact-marker {
   background: color-mix(in srgb, var(--fg) 60%, var(--creation-panel-card));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--creation-panel-card) 88%, transparent);
-}
-
-.app--creation .context-panel__progress-fill {
-  display: block;
-  height: 100%;
-  min-width: 2px;
-  border-radius: inherit;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 72%, #fff), var(--accent));
 }
 
 .app--creation .context-panel__session-metrics {
@@ -37761,8 +37874,8 @@ body > .mermaid-diagram--fullscreen {
 .taskmonitor { background:var(--bg,#111); }
 .taskmonitor--popover { max-height:inherit; }
 .taskmonitor__head { display:flex; align-items:center; gap:6px; width:100%; padding:8px 12px; font-size:13px; }
-.taskmonitor__toggle,.taskmonitor__refresh,.taskmonitor__close { background:none; border:0; color:inherit; cursor:pointer; }
-.taskmonitor__toggle { display:flex; padding:0; }
+.taskmonitor__toggle,.taskmonitor__refresh,.taskmonitor__close { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; padding:0; border:0; border-radius:6px; background:none; color:inherit; cursor:pointer; }
+.taskmonitor__toggle:hover,.taskmonitor__refresh:hover,.taskmonitor__close:hover,.taskmonitor__toggle:focus-visible,.taskmonitor__refresh:focus-visible,.taskmonitor__close:focus-visible { background:var(--bg-elev-2); outline:none; }
 .taskmonitor__title { flex:1; text-align:left; font-weight:600; }
 .taskmonitor__count { background:var(--muted,#555); color:#fff; border-radius:10px; padding:0 6px; font-size:11px; line-height:18px; }
 .taskmonitor__body { max-height:360px; overflow-y:auto; }
@@ -37772,7 +37885,8 @@ body > .mermaid-diagram--fullscreen {
 .taskmonitor__state--error { color:#ef4444; }
 .taskmonitor__task { border-bottom:1px solid var(--border,#2a2a2a); }
 .taskmonitor__task-head { display:flex; align-items:center; }
-.taskmonitor__expand { display:flex; align-items:center; gap:6px; width:100%; padding:6px 12px; background:none; border:0; color:inherit; cursor:pointer; font-size:12px; }
+.taskmonitor__expand { display:flex; align-items:center; gap:6px; width:100%; min-height:32px; padding:6px 12px; background:none; border:0; color:inherit; cursor:pointer; font-size:12px; }
+.taskmonitor__expand:hover,.taskmonitor__expand:focus-visible { background:var(--bg-elev-2); outline:none; }
 .taskmonitor__dot { font-size:10px; width:14px; text-align:center; }
 .taskmonitor__id { font-family:monospace; font-size:11px; color:var(--muted,#888); }
 .taskmonitor__badge { font-size:10px; padding:1px 6px; border-radius:8px; font-weight:600; text-transform:uppercase; }
@@ -37785,7 +37899,15 @@ body > .mermaid-diagram--fullscreen {
 .taskmonitor__events { margin-top:8px; border-top:1px solid var(--border,#333); padding-top:6px; }
 .taskmonitor__event { display:flex; gap:8px; line-height:20px; }
 .taskmonitor__actions { display:flex; gap:8px; margin-top:10px; }
-.taskmonitor__actions button,.taskmonitor__confirm button { padding:4px 10px; border:1px solid var(--border,#555); border-radius:4px; background:var(--surface,#222); color:inherit; cursor:pointer; }
+.taskmonitor__actions button,.taskmonitor__confirm button { min-height:32px; padding:0 12px; border:1px solid var(--border,#555); border-radius:6px; background:var(--surface,#222); color:inherit; cursor:pointer; }
+.taskmonitor__actions button:hover:not(:disabled),.taskmonitor__confirm button:hover:not(:disabled),.taskmonitor__actions button:focus-visible,.taskmonitor__confirm button:focus-visible { border-color:var(--accent); outline:2px solid color-mix(in srgb,var(--accent) 38%,transparent); outline-offset:1px; }
+.taskmonitor__actions button:disabled,.taskmonitor__confirm button:disabled { cursor:not-allowed; opacity:.55; }
+.taskmonitor__actions .taskmonitor__stop { border-color:color-mix(in srgb,var(--danger,#ef4444) 48%,var(--border)); color:var(--danger,#ef4444); }
+.taskmonitor__confirm { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:10px; padding:10px 12px; border:1px solid color-mix(in srgb,var(--danger,#ef4444) 30%,var(--border)); border-radius:8px; background:color-mix(in srgb,var(--danger,#ef4444) 7%,var(--surface,#222)); }
+.taskmonitor__confirm-copy { flex:1 1 150px; font-weight:600; line-height:1.4; }
+.taskmonitor__confirm-actions { display:flex; gap:8px; }
+.taskmonitor__confirm .taskmonitor__confirm-stop { border-color:var(--danger,#ef4444); background:var(--danger,#ef4444); color:#fff; font-weight:650; }
+.taskmonitor__confirm .taskmonitor__confirm-stop:hover:not(:disabled),.taskmonitor__confirm .taskmonitor__confirm-stop:focus-visible { border-color:var(--danger,#ef4444); outline-color:color-mix(in srgb,var(--danger,#ef4444) 42%,transparent); }
 .taskmonitor__error { color:#ef4444; margin-top:6px; }
 .taskmonitor__message { color:#4ade80; margin-top:6px; }
 

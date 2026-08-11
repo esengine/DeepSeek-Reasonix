@@ -240,8 +240,8 @@ func TestCoordinatorSkipsPlannerForTrivialTurn(t *testing.T) {
 	if planner.lastReq.Messages != nil {
 		t.Error("planner should not be called for a skipped turn")
 	}
-	if got := lastUser(exec.lastReq); got != "what does this function do?" {
-		t.Errorf("executor saw %q, want the raw input with no plan handoff", got)
+	if got := lastUser(exec.lastReq); !strings.HasPrefix(got, "what does this function do?") || !strings.Contains(got, "<execution-policy") {
+		t.Errorf("executor saw %q, want the raw input with execution-policy and no plan handoff", got)
 	}
 	if n := len(plannerSess.Messages); n != 1 { // just the system message
 		t.Errorf("planner session has %d messages, want 1 (untouched)", n)
@@ -346,7 +346,7 @@ func TestCoordinatorPlanForApprovalDoesNotDependOnPlannerMarker(t *testing.T) {
 
 func TestCoordinatorPlanForApprovalHandsOffAfterApproval(t *testing.T) {
 	planner := &mockProvider{name: "planner", chunks: []provider.Chunk{
-		{Type: provider.ChunkText, Text: "1. inspect auth\n2. migrate tokens"},
+		{Type: provider.ChunkText, Text: "1. inspect the module\n2. document the flow"},
 		{Type: provider.ChunkDone},
 	}}
 	exec := &mockProvider{name: "executor", chunks: []provider.Chunk{
@@ -364,7 +364,9 @@ func TestCoordinatorPlanForApprovalHandsOffAfterApproval(t *testing.T) {
 	approval := &coordinatorApprovalGate{allow: true}
 	coord.SetPlannerPlanApprover(approval)
 
-	if err := coord.Run(context.Background(), "plan auth migration, then wait for my approval"); err != nil {
+	// Conversational plan request: avoid mutation/security wording so elevated
+	// delivery readiness does not arm on the planner/approval handoff itself.
+	if err := coord.Run(context.Background(), "outline steps for the feature, then wait for my approval"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if approval.calls != 1 {
@@ -373,7 +375,7 @@ func TestCoordinatorPlanForApprovalHandsOffAfterApproval(t *testing.T) {
 	if len(exec.requests) == 0 {
 		t.Fatal("executor did not run after approval")
 	}
-	if got := lastUser(exec.requests[0]); !strings.Contains(got, "migrate tokens") {
+	if got := lastUser(exec.requests[0]); !strings.Contains(got, "document the flow") {
 		t.Fatalf("executor handoff = %q, want approved planner output", got)
 	}
 }
@@ -1356,7 +1358,7 @@ func TestCoordinatorFallsBackToExecutorWhenPlannerFails(t *testing.T) {
 				t.Fatalf("executor requests = %d, want 1 fallback run", got)
 			}
 			got := lastUser(exec.requests[0])
-			if got != "fix the bug" || strings.Contains(got, "You are the executor now") {
+			if !strings.HasPrefix(got, "fix the bug") || strings.Contains(got, "You are the executor now") {
 				t.Fatalf("fallback executor input = %q, want the raw task without handoff boilerplate", got)
 			}
 			if n := len(plannerSess.Messages); n != 1 {

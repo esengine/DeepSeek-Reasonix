@@ -92,9 +92,10 @@ type Config struct {
   differing only in `base_url` / `model` / `api_key_env`. Adding another OpenAI-
   compatible model is a config edit, not a code change.
 - **A provider is a vendor endpoint** (one `base_url` + `api_key_env`) that offers
-  one or more models. OpenAI-compatible chat normally posts to
-  `base_url + "/chat/completions"`; set `chat_url` only for gateways that require a
-  full request URL. An entry declares either a single `model = "..."` or a
+  one or more models. `request_url`, when set, is the exact request target for
+  OpenAI-compatible, Anthropic-compatible, and Responses providers. Legacy
+  `chat_url` retains its historical OpenAI-only behavior; other legacy entries
+  derive the protocol path from `base_url`. An entry declares either a single `model = "..."` or a
   `models = ["...", "..."]` list (with an optional `default`); the list form lets
   one vendor expose several models without re-declaring the endpoint/key. A
   **model reference** (`default_model`, the `--model` flag, the desktop switcher)
@@ -505,20 +506,23 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   assumption. Completion requires the concrete request, output format,
   constraints, and relevant verification expectations to be satisfied or
   explicitly reported as unverified.
-  Goal automatically selects a simple (10), write (20), or research (40) turn
-  continuation backstop from the objective. A Goal Run defaults to 16 model
-  rounds when the user did not explicitly configure `max_steps`, followed by
-  one summary-only response and a resumable pause. Goal-scoped novelty accepts new read/search results and state changes
+  Goal has no default model-round, cross-Run turn, wall-clock, or numeric
+  no-progress boundary. Goal-scoped novelty accepts new read/search results and state changes
   but rejects exact tool/argument/result repeats. All classes use the same Goal
   FSM, host receipts, Delivery readiness, and bounded evaluator; there is no second research
   protocol or writable sidecar runtime. Legacy `.reasonix/autoresearch/...`
   archives remain read-only and explicit old paths recover as ordinary Goals.
   Outside goal mode, ordinary prompts never change collaboration mode; the user
   must choose Goal or use `/goal` explicitly.
-  Cross-turn no-progress streaks are observational. Within one Run, three
-  repeated host failures or six successful zero-evidence rounds trigger a
-  resumable structural-stuck pause. Token and provider-request totals remain
-  observational and are not request-admission limits.
+  Repeated host failures, zero-evidence rounds, and Todo stalls trigger bounded
+  strategy redirects and intervention-epoch resets, never a Goal pause. Turns,
+  tokens, provider requests, and active work duration remain observational when
+  the corresponding budget is not configured. Positive user-selected
+  `[agent].goal_token_budget`, `max_steps`, time, and cost budgets remain
+  explicit resumable boundaries. The Goal token budget defaults to `0` (off);
+  resuming a `budget_spend` pause grants a fresh slice without clearing
+  cumulative Goal statistics. `task_time_budget_minutes = 0` (and legacy
+  negative values) disables the time boundary.
   `/goal clear` removes the active goal. Switching into plan/normal mode clears
   the active goal in the desktop UI so the collaboration mode remains one of
   the three choices, while the underlying tool approval posture is preserved.
@@ -998,7 +1002,7 @@ reasoning_language = "auto"       # visible reasoning text: auto|zh|en
 name           = "deepseek"
 kind           = "anthropic"
 base_url       = "https://api.deepseek.com/anthropic"
-# chat_url     = "https://proxy.example.com/v1/chat/completions"   # optional full chat request URL
+# request_url  = "https://proxy.example.com/anthropic/v1/messages" # optional exact provider request URL
 # models_url   = "https://proxy.example.com/v1/models"             # optional model discovery URL
 models         = ["deepseek-v4-flash", "deepseek-v4-pro"]
 default        = "deepseek-v4-flash"   # optional; defaults to models[0]
@@ -1077,8 +1081,8 @@ release. Legacy channel configuration and arguments remain parseable during
 The executor tracks an adaptive progress lease while a todo is active. A new
 completion, unique successful read, command, or mutation renews the lease;
 exact repeats do not. After 8 no-progress tool-call rounds the host appends a
-one-shot reassessment nudge. After 16 it pauses and preserves work for a later
-user turn. The serial contract is level-aware while preserving the
+one-shot reassessment nudge. In Goal mode, the later threshold forces a re-plan
+and continues; outside Goal it may end the current attempt. The serial contract is level-aware while preserving the
 single-in_progress rule: in a two-level list the active level-1 sub-step is
 the only `in_progress` item and its level-0 phase stays `pending`; sub-steps
 complete in order, and the phase becomes `in_progress` — and signs off — only
@@ -1086,7 +1090,7 @@ after all of its sub-steps have completed. A level-1 item with no phase above
 it is rejected. Retired `[agent].max_steps` and `planner_max_steps` keys remain
 parseable for upgrade compatibility, but are ignored and removed by a one-time
 migration. The CLI `--max-steps` flag and `[bot].max_steps` remain separate,
-explicit controls for one-off and unattended execution.
+explicit controls for one-off and unattended execution; bot `0` means continuous.
 
 `reasonix setup` writes this default config so the CLI is usable out of the box.
 

@@ -226,8 +226,18 @@ func (f *configurableFactory) SessionConfigState(_ context.Context, p SessionCon
 	if runtimeProfile == "" || runtimeProfile == "full" {
 		runtimeProfile = "balanced"
 	}
+	if runtimeProfile == "light" {
+		runtimeProfile = "economy"
+	}
 	if runtimeProfile != "economy" && runtimeProfile != "balanced" && runtimeProfile != "delivery" {
 		return SessionConfigState{}, os.ErrInvalid
+	}
+	agentPreset := "balanced"
+	switch runtimeProfile {
+	case "economy":
+		agentPreset = "light"
+	case "delivery":
+		agentPreset = "delivery"
 	}
 	return SessionConfigState{
 		Model:          model,
@@ -240,6 +250,9 @@ func (f *configurableFactory) SessionConfigState(_ context.Context, p SessionCon
 		ConfigOptions: []SessionConfigOption{
 			{ID: "model", Name: "Model", Category: "model", Type: "select", CurrentValue: model, Options: modelOptions},
 			{ID: "effort", Name: "Effort", Category: "thought_level", Type: "select", CurrentValue: effort, Options: effortOptions},
+			{ID: "agent_preset", Name: "Execution Setting", Category: "agent_preset", Type: "select", CurrentValue: agentPreset, Options: []SessionConfigSelectOption{
+				{Value: "light", Name: "Light"}, {Value: "balanced", Name: "Balanced"}, {Value: "delivery", Name: "Delivery"},
+			}},
 			{ID: "work_mode", Name: "Work Mode", Category: "work_mode", Type: "select", CurrentValue: runtimeProfile, Options: []SessionConfigSelectOption{
 				{Value: "economy", Name: "Economy"}, {Value: "balanced", Name: "Balanced"}, {Value: "delivery", Name: "Delivery"},
 			}},
@@ -932,8 +945,17 @@ func TestServeSessionAxesStayIndependent(t *testing.T) {
 	seen := make(chan observed, 2)
 	factory := &configurableFactory{
 		withCtrl: func(_ context.Context, sink event.Sink, input string, p SessionParams, ctrl *control.Controller) error {
+			// Prefer live controller role setting; SessionParams are build-time.
+			profile := ctrl.AgentPreset()
+			if profile == "" {
+				profile = p.RuntimeProfile
+			}
+			// Dual-write: map light back to economy-style labels for observation.
+			if profile == "delivery" {
+				profile = "delivery"
+			}
 			seen <- observed{
-				profile:  p.RuntimeProfile,
+				profile:  profile,
 				approval: ctrl.ToolApprovalMode(),
 				plan:     ctrl.PlanMode(),
 				goal:     ctrl.Goal(),
@@ -956,11 +978,15 @@ func TestServeSessionAxesStayIndependent(t *testing.T) {
 	if !ok || work.CurrentValue != "balanced" {
 		t.Fatalf("initial work mode = %+v, want balanced", work)
 	}
+	if agentOpt, ok := findConfigOption(nr.ConfigOptions, "agent_preset"); !ok || agentOpt.CurrentValue != "balanced" {
+		t.Fatalf("initial agent_preset = %+v, want balanced", agentOpt)
+	}
 	approval, ok := findConfigOption(nr.ConfigOptions, "tool_approval")
 	if !ok || approval.CurrentValue != control.ToolApprovalAsk {
 		t.Fatalf("initial tool approval = %+v, want ask", approval)
 	}
 
+	buildsBefore := factory.buildCount()
 	setWork := client.call(t, "session/set_config_option", SetSessionConfigOptionParams{
 		SessionID: nr.SessionID,
 		ConfigID:  "work_mode",
@@ -969,8 +995,9 @@ func TestServeSessionAxesStayIndependent(t *testing.T) {
 	if setWork.Error != nil {
 		t.Fatalf("set work mode: %+v", setWork.Error)
 	}
-	if got := factory.buildAt(t, 1).RuntimeProfile; got != "delivery" {
-		t.Fatalf("rebuilt runtime profile = %q, want delivery", got)
+	// Role settings switch in place — no controller rebuild.
+	if got := factory.buildCount(); got != buildsBefore {
+		t.Fatalf("role setting rebuilt controller: builds=%d, want %d", got, buildsBefore)
 	}
 	buildsAfterWorkMode := factory.buildCount()
 
@@ -1330,11 +1357,15 @@ func TestQueuedRebuildPreservesControllerSideAxisDrift(t *testing.T) {
 				ctrl.SetPlanMode(false)
 				ctrl.SetToolApprovalMode(control.ToolApprovalAuto)
 			} else {
+				profile := ctrl.AgentPreset()
+				if profile == "" {
+					profile = p.RuntimeProfile
+				}
 				seen <- struct {
 					profile  string
 					approval string
 					plan     bool
-				}{p.RuntimeProfile, ctrl.ToolApprovalMode(), ctrl.PlanMode()}
+				}{profile, ctrl.ToolApprovalMode(), ctrl.PlanMode()}
 			}
 			sink.Emit(event.Event{Kind: event.Text, Text: "done"})
 			return nil
@@ -1360,16 +1391,32 @@ func TestQueuedRebuildPreservesControllerSideAxisDrift(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("first prompt did not start")
 	}
+	// Active turn must refuse role-setting switch with a busy error (no silent queue).
+	if resp := client.call(t, "session/set_config_option", SetSessionConfigOptionParams{
+		SessionID: nr.SessionID,
+		ConfigID:  "work_mode",
+		Value:     "delivery",
+	}); resp.Error == nil {
+		t.Fatal("expected busy error while a turn is running")
+	} else if !strings.Contains(resp.Error.Message, "active turn") && !strings.Contains(resp.Error.Message, "busy") {
+		t.Fatalf("busy error message = %q", resp.Error.Message)
+	}
+	close(release)
+	if _, resp := drainPrompt(t, client, firstPrompt); resp.Error != nil {
+		t.Fatalf("first prompt: %+v", resp.Error)
+	}
+
+	// Idle switch applies in place without rebuild.
+	buildsBefore := factory.buildCount()
 	if resp := client.call(t, "session/set_config_option", SetSessionConfigOptionParams{
 		SessionID: nr.SessionID,
 		ConfigID:  "work_mode",
 		Value:     "delivery",
 	}); resp.Error != nil {
-		t.Fatalf("queue work mode: %+v", resp.Error)
+		t.Fatalf("idle work mode switch: %+v", resp.Error)
 	}
-	close(release)
-	if _, resp := drainPrompt(t, client, firstPrompt); resp.Error != nil {
-		t.Fatalf("first prompt: %+v", resp.Error)
+	if factory.buildCount() != buildsBefore {
+		t.Fatalf("idle role setting must not rebuild controller")
 	}
 
 	secondPrompt := client.callAsync("session/prompt", SessionPromptParams{
@@ -1380,8 +1427,12 @@ func TestQueuedRebuildPreservesControllerSideAxisDrift(t *testing.T) {
 		t.Fatalf("second prompt: %+v", resp.Error)
 	}
 	got := <-seen
-	if got.profile != "delivery" || got.approval != control.ToolApprovalAuto || got.plan {
-		t.Fatalf("rebuilt axes = %+v, want delivery + auto + normal", got)
+	// Controller-side axes from the first turn must survive; role setting is live.
+	if got.approval != control.ToolApprovalAuto || got.plan {
+		t.Fatalf("axes = %+v, want auto + normal (plan cleared)", got)
+	}
+	if got.profile != "delivery" {
+		t.Fatalf("profile = %q, want delivery after idle switch", got.profile)
 	}
 }
 

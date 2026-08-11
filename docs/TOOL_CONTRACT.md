@@ -109,33 +109,28 @@ final answer by UTF-8 byte offset, so long parallel research remains lossless
 without injecting every report into the parent context at once. References are
 restricted to the current conversation lineage and workspace.
 
-`use_capability` (`action` = `list` | `inspect` | `call` | `decline`): Delivery
-Executor, plus both Planner and Executor in Balanced dual-model sessions; not
-enabled in Economy.
+`use_capability` (`action` = `list` | `inspect` | `call` | `decline`) is on the
+provider-visible surface for every execution setting (`light` | `balanced` |
+`delivery`). Optional tools stay registered for host dispatch but are not
+expanded into the top-level provider schema; the model reaches them through
+`use_capability` without cache-breaking schema churn.
 
 `internal/boot.TestBootToolContractMatchesProviderVisibleSurface` verifies the
 actual boot registry contract against the provider request, including read-only
 flags and canonical schemas.
 
-## Token Economy Boot Surface
+## Unified Boot Surface (all execution settings)
 
-In token economy mode, Reasonix starts with nine tools: four direct coding tools,
-the three background-shell lifecycle tools, `ask`, and the connector used to
-enable optional sources on demand:
+Every execution setting starts with the same lean provider-visible core: direct
+coding tools, background-shell lifecycle tools, and the stable capability proxy:
 
-`ask`, `bash`, `bash_output`, `connect_tool_source`, `edit_file`, `kill_shell`,
-`read_file`, `wait`, `write_file`.
+`bash`, `bash_output`, `edit_file`, `kill_shell`, `read_file`, `wait`,
+`write_file`, `compress` (when registered), and `use_capability`.
 
-Everything else is explicit and on demand. `connect_tool_source` supports
-`docs` (the read-only embedded `docs` tool), `search` (`code_index`, `glob`,
-`grep`, `ls`), `files` (specialized move,
-multi-edit, delete, and notebook tools), `workflow` (`todo_write`,
-`complete_step`), `sessions` (`history`, `list_sessions`, `read_session`),
-`memory` (`memory`, `remember`, `forget`), `commands` (`slash_command`),
-`skills`, `read_only_skill`, `mcp`, `lsp`, `web_fetch`, `install_source`,
-`task`, and `read_only_task`. Every source may be connected in Plan; subsequent
-reader and writer calls use the same Permissions/Sandbox path as Standard mode.
-`workflow` is the phase-specific exception: while planning it installs only
-`todo_write`; `complete_step` joins on a fresh `workflow` connect after plan
-approval. Use `bash` for listing and search until the dedicated `search` source
-is needed.
+Optional tools (`glob`, `grep`, `ls`, `web_fetch`, MCP, skills, subagents, docs,
+session history, memory mutation, workflow, and so on) remain in the host
+registry for dispatch. The model lists, inspects, calls, or declines them via
+`use_capability` without changing the provider tool list. Execution settings change
+host planning / verification / review policy, not which tools appear on the
+provider-visible surface. The retired `connect_tool_source` path is no longer
+registered.

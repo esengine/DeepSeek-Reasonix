@@ -225,7 +225,7 @@ func TestRunCancelledMidStreamLeavesResumableSession(t *testing.T) {
 		}
 	}
 	last := repaired[len(repaired)-1]
-	if last.Role != provider.RoleUser || last.Content != "do the thing" {
+	if last.Role != provider.RoleUser || StripTransientUserBlocks(last.Content) != "do the thing" {
 		t.Errorf("the pending user message should survive a cancel, got %+v", last)
 	}
 }
@@ -563,7 +563,7 @@ func TestRunGenericStreamErrorPersistsLocalDisplayAndInjectsBoundedRecovery(t *t
 	}
 	lastUser := req.Messages[len(req.Messages)-1]
 	if lastUser.Role != provider.RoleUser || !strings.Contains(lastUser.Content, "<interrupted-turn-recovery>") ||
-		!strings.Contains(lastUser.Content, "unsafe_partial_output: excluded") || !strings.HasSuffix(lastUser.Content, "continue") {
+		!strings.Contains(lastUser.Content, "unsafe_partial_output: excluded") || !strings.Contains(lastUser.Content, "continue") {
 		t.Fatalf("next user turn missing bounded recovery block: %+v", lastUser)
 	}
 	if got := StripTransientUserBlocks(lastUser.Content); got != "continue" {

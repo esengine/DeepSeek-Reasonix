@@ -210,7 +210,13 @@ const backendUnsupportedCustomProvider: ProviderView = {
   visionCapability: "unsupported",
 };
 
-function renderProviderEditor(initial?: ProviderView) {
+const legacyChatURLProvider: ProviderView = {
+  ...backendUnsupportedCustomProvider,
+  name: "legacy-chat-url",
+  chatUrl: "https://legacy.example.com/chat/completions/",
+};
+
+function renderProviderEditor(initial?: ProviderView, onSave: (provider: ProviderView) => void | Promise<void> = () => undefined) {
   return (
     <LocaleProvider>
       <ProviderEditor
@@ -219,7 +225,7 @@ function renderProviderEditor(initial?: ProviderView) {
         kinds={["openai"]}
         busy={false}
         onCancel={() => undefined}
-        onSave={() => undefined}
+        onSave={onSave}
       />
     </LocaleProvider>
   );
@@ -243,6 +249,14 @@ try {
 ok(!editorThrew, "provider editor can switch from built-in to custom without changing hook order");
 ok(rootEl.textContent?.includes("OpenAI-compatible") === true, "provider editor renders the custom provider fields after the switch");
 ok(rootEl.textContent?.includes("Kimi K3 reasoning (low / high / max)") === true, "custom provider editor exposes the explicit Kimi K3 reasoning protocol");
+const providerUrlInput = rootEl.querySelector<HTMLInputElement>(".provider-url-input");
+ok(rootEl.querySelectorAll('input[type="radio"]').length === 0, "custom provider editor exposes only one API address input");
+ok(providerUrlInput?.value === "", "new custom providers start with an empty exact request address");
+const providerUrlLabel = Array.from(rootEl.querySelectorAll<HTMLLabelElement>("label")).find(
+  (label) => label.htmlFor === providerUrlInput?.id,
+);
+ok(Boolean(providerUrlLabel) && providerUrlInput?.getAttribute("aria-describedby") !== null, "provider URL input has a programmatic label and description");
+ok(rootEl.textContent?.includes("Reasonix uses it unchanged.") === true, "provider URL helper explains exact request behavior");
 
 await act(async () => {
   root.render(<div />);
@@ -272,6 +286,49 @@ ok(
   rootEl.textContent?.includes("No image input") === true,
   "provider editor honors backend vision capability for endpoints outside the legacy frontend heuristic",
 );
+const customProviderUrlInput = rootEl.querySelector<HTMLInputElement>(".provider-url-input");
+ok(rootEl.querySelectorAll('input[type="radio"]').length === 0, "existing custom providers no longer expose an address mode selector");
+ok(customProviderUrlInput?.value === "https://eu.deepseek.com/v1/chat/completions", "legacy base-only providers display their previously effective request URL");
+
+let migratedProvider: ProviderView | undefined;
+await act(async () => {
+  root.render(renderProviderEditor(legacyChatURLProvider, (provider) => {
+    migratedProvider = provider;
+  }));
+  await flushPromises();
+});
+const legacyProviderUrlInput = rootEl.querySelector<HTMLInputElement>(".provider-url-input");
+ok(legacyProviderUrlInput?.value === "https://legacy.example.com/chat/completions", "legacy OpenAI chat URLs display their historically normalized effective endpoint");
+const saveButton = Array.from(rootEl.querySelectorAll<HTMLButtonElement>("button")).find(
+  (button) => button.textContent?.trim() === "Save",
+);
+await act(async () => {
+  saveButton?.click();
+  await flushPromises();
+});
+ok(migratedProvider?.requestUrl === "https://legacy.example.com/chat/completions" && migratedProvider?.baseUrl === legacyChatURLProvider.baseUrl, "saving migrates the legacy effective address without rewriting its baseUrl");
+ok(migratedProvider?.chatUrl === migratedProvider?.requestUrl, "saving mirrors the normalized legacy OpenAI endpoint for previous releases");
+
+let exactProvider: ProviderView | undefined;
+await act(async () => {
+  root.render(renderProviderEditor({
+    ...legacyChatURLProvider,
+    name: "exact-request-url",
+    requestUrl: "https://exact.example.com/custom/?token=1",
+  }, (provider) => {
+    exactProvider = provider;
+  }));
+  await flushPromises();
+});
+const exactSaveButton = Array.from(rootEl.querySelectorAll<HTMLButtonElement>("button")).find(
+  (button) => button.textContent?.trim() === "Save",
+);
+await act(async () => {
+  exactSaveButton?.click();
+  await flushPromises();
+});
+ok(exactProvider?.requestUrl === "https://exact.example.com/custom/?token=1" && exactProvider?.baseUrl === legacyChatURLProvider.baseUrl, "saving preserves an explicit requestUrl and independent baseUrl exactly");
+ok(exactProvider?.chatUrl === exactProvider?.requestUrl, "saving mirrors the exact OpenAI request URL for previous releases");
 
 await act(async () => {
   root.unmount();

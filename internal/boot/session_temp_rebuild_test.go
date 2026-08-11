@@ -20,6 +20,7 @@ func TestRebuildReusesSessionTempManager(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
 
 	workspace := t.TempDir()
+	fenceBootTestHistoryCatalog(t)
 	m := sessiontemp.New()
 	old := control.New(control.Options{
 		SessionTemp: m,

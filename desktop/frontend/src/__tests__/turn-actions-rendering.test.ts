@@ -58,6 +58,26 @@ function ruleBody(selector: string): string {
   return bodyEnd < 0 ? "" : styles.slice(bodyStart, bodyEnd);
 }
 
+const turnActionInlineLabelRule = ruleBody(".turn-actions__label-inline");
+const turnActionInlineLabelCount = messageSource.match(/className="turn-actions__label-inline"/g)?.length ?? 0;
+
+ok(
+  turnActionInlineLabelCount === 3 &&
+    /max-width:\s*0;/.test(turnActionInlineLabelRule) &&
+    /overflow:\s*hidden;/.test(turnActionInlineLabelRule) &&
+    /transition:\s*max-width 0\.12s;/.test(turnActionInlineLabelRule),
+  "fork, compress, and rewind labels share the copy action's collapsed inline-label contract",
+);
+
+ok(
+  styles.includes(".turn-actions__btn:hover .turn-actions__label-inline,") &&
+    styles.includes(".turn-actions__btn:focus-visible .turn-actions__label-inline,") &&
+    styles.includes(".turn-actions__group--open .turn-actions__label-inline,") &&
+    styles.includes(".turn-actions__btn--confirm .turn-actions__label-inline {") &&
+    styles.includes("max-width: 240px;"),
+  "turn action labels expand on hover and keyboard focus and stay visible for open or confirming actions",
+);
+
 const windowsPrimaryTranscriptSelector =
   ':root[data-platform="windows"] .app:not(.app--creation) .chat-pane > .main > .transcript-shell > .transcript';
 const windowsThemeTranscriptSelector =

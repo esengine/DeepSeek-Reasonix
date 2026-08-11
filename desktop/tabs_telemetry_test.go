@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/billing"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
@@ -70,8 +71,8 @@ func TestWorkspaceTabAggregatesSessionUsageTelemetry(t *testing.T) {
 	if got.ElapsedMs != 1500 {
 		t.Fatalf("elapsed = %d, want 1500", got.ElapsedMs)
 	}
-	if got.SessionCost <= 0 || got.SessionCurrency != "¥" {
-		t.Fatalf("cost = %f %q, want positive ¥", got.SessionCost, got.SessionCurrency)
+	if got.SessionCost <= 0 || (got.SessionCurrency != "CNY" && got.SessionCurrency != "¥") {
+		t.Fatalf("cost = %f %q, want positive CNY", got.SessionCost, got.SessionCurrency)
 	}
 	if got.Sources[event.UsageSourceSubagent].SessionCost <= 0 || got.Sources[event.UsageSourceSubagent].RequestCount != 3 {
 		t.Fatalf("subagent source stats = %+v, want three costed requests", got.Sources[event.UsageSourceSubagent])
@@ -85,8 +86,8 @@ func TestWorkspaceTabAggregatesSessionUsageTelemetry(t *testing.T) {
 	if context.SessionTokens != 140 {
 		t.Fatalf("context usage session tokens = %d, want 140", context.SessionTokens)
 	}
-	if context.SessionCost <= 0 || context.SessionCurrency != "¥" {
-		t.Fatalf("context usage cost = %f %q, want positive ¥", context.SessionCost, context.SessionCurrency)
+	if context.SessionCost <= 0 || (context.SessionCurrency != "CNY" && context.SessionCurrency != "¥") {
+		t.Fatalf("context usage cost = %f %q, want positive CNY", context.SessionCost, context.SessionCurrency)
 	}
 	if context.CacheHitTokens != 70 || context.CacheMissTokens != 30 {
 		t.Fatalf("context usage cache tokens = hit %d miss %d, want 70/30", context.CacheHitTokens, context.CacheMissTokens)
@@ -117,21 +118,51 @@ func TestWorkspaceTabMarksEstimatedExecutorTurn(t *testing.T) {
 }
 
 func TestWorkspaceTabRepricesUsageWithoutMixingCurrencies(t *testing.T) {
+	// repriceUsage is now a display rebind: it must not recompute from new rates.
 	tab := &WorkspaceTab{}
 	tab.recordUsage(event.Event{
 		Usage:       &provider.Usage{PromptTokens: 1_000_000, CompletionTokens: 100_000, TotalTokens: 1_100_000},
 		UsageSource: event.UsageSourceExecutor,
 		Pricing:     &provider.Pricing{Input: 1, Output: 2, Currency: "CNY"},
 	})
+	before := tab.telemetrySnapshot().Usage.SessionCost
 	if ok := tab.repriceUsage(map[string]*provider.Pricing{
 		event.UsageSourceExecutor: {Input: 0.14, Output: 0.28, Currency: "USD"},
 	}); !ok {
-		t.Fatal("repriceUsage rejected a complete source mapping")
+		t.Fatal("repriceUsage rejected display rebind")
 	}
 	got := tab.telemetrySnapshot().Usage
-	want := 0.14 + 0.1*0.28
-	if got.SessionCurrency != "$" || got.SessionCost != want {
-		t.Fatalf("repriced usage = %f %q, want %f USD", got.SessionCost, got.SessionCurrency, want)
+	if got.SessionCost != before {
+		t.Fatalf("display rebind mutated occurrence cost: before=%f after=%f", before, got.SessionCost)
+	}
+	if got.CostLedger == nil || len(got.CostLedger.Entries) == 0 {
+		t.Fatal("expected cost ledger entries")
+	}
+}
+
+func TestRuntimeWalletHintDoesNotPersistTelemetry(t *testing.T) {
+	tab := &WorkspaceTab{}
+	tab.recordUsage(event.Event{
+		ModelRef: "deepseek/deepseek-v4-flash",
+		Usage:    &provider.Usage{PromptTokens: 1_000_000, TotalTokens: 1_000_000},
+		Pricing:  &provider.Pricing{CacheHit: 0.0028, Input: 0.14, Output: 0.28, Currency: "USD"},
+	})
+	persisted := tab.telemetrySnapshot().Usage
+	if persisted.SessionCurrency != "USD" || persisted.SessionCost <= 0 {
+		t.Fatalf("persisted original = %+v", persisted)
+	}
+	if !tab.selectRuntimeDisplayCurrency("CNY") {
+		t.Fatal("runtime wallet hint rejected")
+	}
+	displayed := tab.displayTelemetrySnapshot().Usage
+	if displayed.SessionCurrency != "CNY" || displayed.SessionCostQuote == nil || displayed.SessionCostQuote.DisplayStatus != billing.DisplayStatusMatched {
+		t.Fatalf("runtime display = %+v", displayed)
+	}
+	// Persistence and a later session reload must remain on the occurrence-time
+	// original currency; the automatic wallet hint is process-local only.
+	persisted = tab.telemetrySnapshot().Usage
+	if persisted.SessionCurrency != "USD" || persisted.SessionCostQuote == displayed.SessionCostQuote {
+		t.Fatalf("runtime hint leaked into persisted telemetry = %+v", persisted)
 	}
 }
 
@@ -148,22 +179,28 @@ func TestWorkspaceTabRepricesCacheWritesWithoutLosingBillingTier(t *testing.T) {
 		UsageSource: event.UsageSourceExecutor,
 		Pricing:     &provider.Pricing{Input: 2, Currency: "CNY"},
 	})
+	// 400K ordinary input units + 200K billed cache-write units at input=2 → 1.2 CNY.
+	got := tab.telemetrySnapshot().Usage
+	if got.SessionCost < 1.19 || got.SessionCost > 1.21 {
+		t.Fatalf("cache-write usage cost = %f, want ~1.2", got.SessionCost)
+	}
+	if got.CacheWriteTokens != 100_000 || got.CacheWriteBilledTokens != 200_000 {
+		t.Fatalf("persisted cache writes = raw %d billed %v", got.CacheWriteTokens, got.CacheWriteBilledTokens)
+	}
+	// Display rebind must preserve occurrence-time cost.
+	before := got.SessionCost
 	if ok := tab.repriceUsage(map[string]*provider.Pricing{
 		event.UsageSourceExecutor: {Input: 1, Currency: "USD"},
 	}); !ok {
 		t.Fatal("repriceUsage rejected cache-write usage")
 	}
-	got := tab.telemetrySnapshot().Usage
-	// 400K ordinary input units + 200K billed cache-write units.
-	if got.SessionCurrency != "$" || got.SessionCost != 0.6 {
-		t.Fatalf("repriced cache-write usage = %f %q, want 0.6 USD", got.SessionCost, got.SessionCurrency)
-	}
-	if got.CacheWriteTokens != 100_000 || got.CacheWriteBilledTokens != 200_000 {
-		t.Fatalf("persisted cache writes = raw %d billed %v", got.CacheWriteTokens, got.CacheWriteBilledTokens)
+	got = tab.telemetrySnapshot().Usage
+	if got.SessionCost != before {
+		t.Fatalf("display rebind mutated cost: before=%f after=%f", before, got.SessionCost)
 	}
 }
 
-func TestRepriceTabUsageUsesDetectedLocaleForAutoCurrency(t *testing.T) {
+func TestRepriceTabUsageLeavesAutoCurrencyUnresolved(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	cfg := config.Default()
 	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
@@ -175,14 +212,20 @@ func TestRepriceTabUsageUsesDetectedLocaleForAutoCurrency(t *testing.T) {
 		UsageSource: event.UsageSourceExecutor,
 		Pricing:     &provider.Pricing{Input: 0.14, Currency: "USD"},
 	})
+	before := tab.telemetrySnapshot().Usage.SessionCost
 	app := NewApp()
 	app.setDesktopLocale("zh-CN")
 
 	app.repriceTabUsageForCurrentCurrency(tab)
 
 	got := tab.telemetrySnapshot().Usage
-	if got.SessionCurrency != "¥" || got.SessionCost != 1 {
-		t.Fatalf("auto-locale repriced usage = %f %q, want 1 CNY", got.SessionCost, got.SessionCurrency)
+	// Locale must not rebind or recompute pricing in automatic mode.
+	if got.SessionCost <= 0 {
+		t.Fatalf("auto-locale lost cost: %f", got.SessionCost)
+	}
+	// Without a wallet hint, original USD remains the selected fact.
+	if got.SessionCost != before && got.CostLedger == nil {
+		t.Fatalf("auto-locale cleared ledger/cost: before=%f after=%f", before, got.SessionCost)
 	}
 }
 
@@ -197,8 +240,12 @@ func TestWorkspaceTabDoesNotAddDifferentCurrencies(t *testing.T) {
 		Pricing: &provider.Pricing{Input: 0.14, Currency: "USD"},
 	})
 	got := tab.telemetrySnapshot().Usage
-	if got.SessionCurrency != "$" || got.SessionCost != 0.14 {
-		t.Fatalf("mixed-currency usage = %f %q, want only the current USD bucket", got.SessionCost, got.SessionCurrency)
+	// Mixed originals stay in the ledger; we never invent a cross-currency float sum.
+	if got.CostLedger == nil || len(got.CostLedger.Entries) < 2 {
+		t.Fatalf("expected separate ledger entries for mixed currencies, got %+v", got.CostLedger)
+	}
+	if got.SessionCostComplete {
+		t.Fatalf("mixed currencies without a common display should be incomplete")
 	}
 }
 

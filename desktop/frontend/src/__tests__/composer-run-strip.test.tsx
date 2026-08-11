@@ -210,13 +210,13 @@ console.log("\ncomposer run strip");
   const profileTrigger = document.querySelector(".composer-profile-trigger") as HTMLButtonElement | null;
   if (!profileTrigger) throw new Error("work mode trigger did not render");
   eq(profileTrigger.textContent?.trim(), "Balanced", "standalone control shows only the current profile");
-  eq(profileTrigger.getAttribute("aria-label"), "Work mode · Balanced", "work mode trigger keeps its full accessible name");
+  eq(profileTrigger.getAttribute("aria-label"), "Execution setting · Balanced", "execution setting trigger keeps its full accessible name");
   ok(profileTrigger.querySelector(".lucide-equal") !== null, "balanced work mode uses a simple equal icon");
   await act(async () => {
     profileTrigger.focus();
     await flushTimers();
   });
-  eq(document.querySelector('[role="tooltip"]')?.textContent, "Work mode · Balanced: Full tools, model-directed execution", "work mode tooltip combines category, value, and summary");
+  eq(document.querySelector('[role="tooltip"]')?.textContent, "Execution setting · Balanced: Auto planning, risk-tiered verification", "execution setting tooltip combines category, value, and summary");
   await act(async () => {
     profileTrigger.blur();
     await flushTimers();
