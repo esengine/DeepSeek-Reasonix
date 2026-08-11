@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/text/transform"
 
@@ -179,7 +180,7 @@ func (g grepTool) runNative(ctx context.Context, pattern, path string, info os.F
 		// Peek the first 8 KiB to reject binaries cheaply without reading
 		// the entire file into memory. Check BOM first (UTF-16 files have
 		// 0x00 for ASCII), then NUL.
-		n, _ := io.ReadFull(f, peekBuf)
+		n, rerr := io.ReadFull(f, peekBuf)
 		peek := peekBuf[:n]
 
 		bomKind := fileenc.DetectQuick(peek)
@@ -189,11 +190,9 @@ func (g grepTool) runNative(ctx context.Context, pattern, path string, info os.F
 			}
 		}
 
-		// Detect encoding from the peek alone — sufficient for the
-		// UTF-8 vs GB18030 distinction (utf8.Valid on 8 KiB is reliable).
-		// Then stream the rest through a decoder so the 200-match cap can
-		// stop reading early instead of buffering the entire file.
-		enc, _ := fileenc.Detect(peek)
+		// An 8 KiB peek can end mid multi-byte sequence; choose a character-safe
+		// detection sample without discarding evidence that the file is GB18030.
+		enc, _ := fileenc.Detect(detectSample(peek, rerr == nil))
 
 		var src io.Reader
 		if enc == fileenc.UTF16LE || enc == fileenc.UTF16BE {
@@ -266,6 +265,31 @@ func (g grepTool) runNative(ctx context.Context, pattern, path string, info os.F
 	}
 
 	return formatGrep(ctx, out, truncated, to), nil
+}
+
+// detectSample returns a character-safe encoding-detection sample. A bounded
+// read can end mid UTF-8 sequence and still be valid GB18030, so prefer a
+// strict UTF-8 prefix after dropping at most one maximum-width tail. If that
+// is impossible, retain a prefix that is demonstrably GB18030 instead of
+// trimming back to an ASCII-only line and losing the encoding evidence.
+func detectSample(peek []byte, more bool) []byte {
+	if !more {
+		return peek
+	}
+	maxTrim := min(3, len(peek))
+	for trim := 0; trim <= maxTrim; trim++ {
+		candidate := peek[:len(peek)-trim]
+		if utf8.Valid(candidate) {
+			return candidate
+		}
+	}
+	for trim := 0; trim <= maxTrim; trim++ {
+		candidate := peek[:len(peek)-trim]
+		if enc, _ := fileenc.Detect(candidate); enc == fileenc.GB18030 {
+			return candidate
+		}
+	}
+	return peek
 }
 
 // runRipgrep delegates the search to ripgrep, which already emits
