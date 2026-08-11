@@ -90,7 +90,7 @@ func (a *Agent) resetTurnEvidence() {
 	a.outcome = evidence.NewOutcomeTracker()
 	a.ebm = ebmState{}
 	a.governor = governorState{}
-	a.taskBudget = runBudget{}
+	a.taskBudget = runBudget{limit: a.taskBudget.limit}
 }
 
 // observeOutcomeShadow scores the round's receipts through the shadow outcome

@@ -321,7 +321,7 @@ func (a *Agent) runToolLoop(ctx context.Context, state *runLoopState) error {
 	// Only reached when a positive maxSteps guard is configured. The work so far
 	// is already in the session, so the user can just send another message to pick
 	// up where it left off.
-	return &maxStepsPause{steps: state.runMaxSteps, key: state.runMaxStepsKey, hostOwned: state.runLimitHostOwned}
+	return a.gracePause(state)
 }
 
 // streamWithSamplingRecovery coordinates Codex-style original-request replay
@@ -514,7 +514,7 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *runLoopState, te
 	readiness := a.finalReadinessCheckFor()
 	if state.graceRound && (readiness.reason != "" || !hasVisibleFinalAnswer(text)) {
 		a.contextManager().ObserveUsage(usage)
-		return false, &maxStepsPause{steps: state.runMaxSteps, key: state.runMaxStepsKey, hostOwned: state.runLimitHostOwned}
+		return false, a.gracePause(state)
 	}
 	if state.graceRound && state.runPauseAfterFinal {
 		// A host-owned limit is a real Goal yield boundary even when the model
@@ -664,17 +664,15 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 		return true, nil
 	}
 
-	// When the tool-call budget runs out this round, give the model
-	// one grace round to produce a final answer from completed work.
+	// Spend is checked before rounds: it is the axis a runaway is actually
+	// reported in, so on the turns both would catch it should be the one named.
+	if axis, detail := a.taskBudget.exceeded(a.taskBudget.limit); axis != "" {
+		a.armFinalizationRound(state, landCause{kind: "task_budget", axis: axis, detail: detail})
+		return true, nil
+	}
 	if state.runMaxSteps > 0 && step+1 >= state.runMaxSteps {
-		state.graceRound = true
-		nextStep := fmt.Sprintf("The user can increase %s or continue in the next turn if more work is needed.", state.runMaxStepsKey)
-		if state.runLimitHostOwned {
-			nextStep = "Use the evidence already collected, label remaining uncertainty, and keep the final answer actionable."
-		}
-		nudge := fmt.Sprintf("Do not call any more tools — your tool-call round limit (%s) has been reached. Instead, synthesize a final answer from all the work already completed: summarize what was accomplished, what remains to be done, and any decisions the user should make. %s", state.runMaxStepsKey, nextStep)
-		a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(nudge)})
-		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeToolBudget, Text: toolBudgetNoticeText(), Detail: fmt.Sprintf("budget (%s=%d) exhausted: one grace round to finalize", state.runMaxStepsKey, state.runMaxSteps)})
+		a.armFinalizationRound(state, landCause{kind: "max_steps", detail: fmt.Sprintf(
+			"budget (%s=%d) exhausted: one grace round to finalize", state.runMaxStepsKey, state.runMaxSteps)})
 	}
 	return true, nil
 }

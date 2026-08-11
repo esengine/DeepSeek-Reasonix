@@ -1,11 +1,42 @@
 package agent
 
 import (
+	"fmt"
 	"time"
 
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
+
+// TaskBudget bounds one task on the axes its failures are reported in.
+// Crossing either yields one tool-free summary and a resumable pause.
+type TaskBudget struct {
+	// Cost is off unless set: no amount of money is portable across models.
+	Cost float64
+	Wall time.Duration
+}
+
+// DefaultTaskWall is the only axis that ships with a default, because wall
+// clock is the only portable unit here: half an hour means the same thing on
+// every model, while an amount of money does not. A cost default loose enough
+// for a cheap model would stop a frontier model within a couple of answers, so
+// cost stays off until someone who knows what they are paying sets it.
+const DefaultTaskWall = 30 * time.Minute
+
+// taskBudgetOrDefault fills the wall-clock default and reads a negative value
+// on either axis as an explicit "disable this one".
+func taskBudgetOrDefault(b TaskBudget) TaskBudget {
+	switch {
+	case b.Wall == 0:
+		b.Wall = DefaultTaskWall
+	case b.Wall < 0:
+		b.Wall = 0
+	}
+	if b.Cost < 0 {
+		b.Cost = 0
+	}
+	return b
+}
 
 // runBudget accumulates what a turn has actually spent. Rounds are a poor proxy
 // for it: the same hundred of them cost minutes or hours depending on what each
@@ -20,6 +51,9 @@ type runBudget struct {
 	cost          float64
 	pricedRounds  int
 	unpricedTurns bool
+	// limit is configuration, not accumulation: it survives the reset that
+	// starts a new task.
+	limit TaskBudget
 }
 
 // observe folds one round's provider usage into the turn's running total.
@@ -61,9 +95,23 @@ func (b *runBudget) totals() event.RunBudgetTotals {
 	}
 }
 
-// observeRunBudget folds a round into both scopes and reports them. Shadow
-// only: nothing reads a verdict yet, and no threshold exists to read it against
-// until the recorded distribution says where one belongs.
+// exceeded names the first axis the task has spent past, or "" while inside
+// the budget. Cost only counts when the turn was actually priced: an unpriced
+// model reads as free, and a free reading must never look like a crossing.
+func (b *runBudget) exceeded(limit TaskBudget) (axis, detail string) {
+	if limit.Cost > 0 && b.pricedRounds > 0 && !b.unpricedTurns && b.cost >= limit.Cost {
+		return "cost", fmt.Sprintf("task spend %.4f reached the %.4f budget", b.cost, limit.Cost)
+	}
+	if limit.Wall > 0 {
+		if elapsed := b.elapsed(); elapsed >= limit.Wall {
+			return "time", fmt.Sprintf("task ran %s, past the %s budget",
+				elapsed.Round(time.Second), limit.Wall)
+		}
+	}
+	return "", ""
+}
+
+// observeRunBudget folds a round into both scopes and reports them.
 func (a *Agent) observeRunBudget(state *runLoopState, usage *provider.Usage) {
 	if state == nil {
 		return

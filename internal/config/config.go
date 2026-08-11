@@ -1278,6 +1278,11 @@ type AgentConfig struct {
 	SubagentEffort      string            `toml:"subagent_effort"`
 	SubagentEfforts     map[string]string `toml:"subagent_efforts"`
 	MaxSubagentDepth    int               `toml:"max_subagent_depth"`
+	// TaskCostBudget lands a task on one summary once it spends this much.
+	// Off unless set: no amount of money is portable across models.
+	TaskCostBudget float64 `toml:"task_cost_budget"`
+	// TaskTimeBudgetMinutes is the same gate on wall clock. 0 = default, <0 = off.
+	TaskTimeBudgetMinutes float64 `toml:"task_time_budget_minutes"`
 	// MaxSubagentConcurrency bounds how many sub-agents (task, fleet items,
 	// profile skills, nested children) may run at once in one session.
 	// 0 means the default (6). Values outside 1–32 are clamped on load.

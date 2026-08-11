@@ -13,6 +13,34 @@ import (
 	"reasonix/internal/tool"
 )
 
+// toolOutcome is one tool call's result. output is the first-visible bounded
+// form the model sees; rawOutput is the full original when truncation applied
+// (empty when identical so we avoid double storage). images ride outside text.
+type toolOutcome struct {
+	output                     string
+	rawOutput                  string // full original when different from output
+	images                     []string
+	blocked                    bool
+	errMsg                     string
+	truncated                  bool
+	truncMsg                   string
+	resolved                   bool
+	resolvedName               string
+	capabilityID               string
+	resolvedReadOnly, executed bool
+	workspaceMutation          *event.WorkspaceMutation
+	effective                  workspaceEffectiveCall
+	// execution is local shell metadata (optional). Provider messages strip it
+	// via ModelMessages; UI/event sinks surface it on ToolResult cards.
+	execution *tool.ShellExecution
+	// recoveryGeneration is the gate generation captured before execution so
+	// ObserveResult can ignore stale results after a mode switch.
+	recoveryGeneration uint64
+	// recoveryStopTurn is set when Auto Episode budgets are exhausted.
+	recoveryStopTurn   bool
+	recoveryStopReason string
+}
+
 // batchExecution is the result of one provider tool-call batch.
 type batchExecution struct {
 	results            []string

@@ -45,7 +45,9 @@ func isToolLoopPause(err error) bool {
 	var maxPause *maxStepsPause
 	var stallPause *todoStallPause
 	var stuckPause *goalStuckPause
-	return errors.As(err, &maxPause) || errors.As(err, &stallPause) || errors.As(err, &stuckPause)
+	var budgetPause *taskBudgetPause
+	return errors.As(err, &maxPause) || errors.As(err, &stallPause) ||
+		errors.As(err, &stuckPause) || errors.As(err, &budgetPause)
 }
 
 // HostProgressSignatures exposes successful evidence identities to the Goal FSM.
@@ -82,7 +84,7 @@ func (a *Agent) stopUnexecutedBoundaryCalls(state *runLoopState, calls []provide
 	switch {
 	case state.graceRound:
 		a.pairUnexecutedGraceCalls(calls, "blocked: the tool-call round budget is exhausted; no more tools will run in this turn")
-		return &maxStepsPause{steps: state.runMaxSteps, key: state.runMaxStepsKey, hostOwned: state.runLimitHostOwned}, true
+		return a.gracePause(state), true
 	case state.goalStuckGraceRound:
 		a.pairUnexecutedGraceCalls(calls, "blocked: Goal structural progress guard paused this run; no more tools will run until the user resumes")
 		return &goalStuckPause{limit: state.goalStuckLimit, key: state.goalStuckKey, reason: state.goalStuckReason}, true

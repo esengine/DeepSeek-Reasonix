@@ -27,7 +27,9 @@ type runLoopState struct {
 	input           string
 	workDurationMs  func() int64
 
-	// budget is the turn's spend axis: tokens, money, wall clock. Observed
-	// every round, read by nothing yet.
+	// budget is the turn's spend axis: tokens, money, wall clock.
 	budget runBudget
+	// landCause records why the grace round was armed, so the pause the Run
+	// ends with names the axis that actually stopped it.
+	landCause landCause
 }
