@@ -2532,7 +2532,7 @@ const loopGuardBlockErrMsg = "blocked by loop guard"
 // blocker (see loopGuardAllowsFinal). The hard maxSteps guard remains the
 // ultimate backstop; this just keeps the loop from burning that whole budget
 // bouncing off the same host refusals.
-func (a *Agent) applyStormBreaker(calls []provider.ToolCall, outcomes []toolOutcome, results []string, receiptMark int) string {
+func (a *Agent) applyStormBreaker(calls []provider.ToolCall, outcomes []toolOutcome, receiptMark int) intervention {
 	allBlocked := len(outcomes) > 0
 	for _, outcome := range outcomes {
 		if !outcome.blocked {
@@ -2564,7 +2564,7 @@ func (a *Agent) applyStormBreaker(calls []provider.ToolCall, outcomes []toolOutc
 	stormHit := ok && a.stormCount >= stormBreakThreshold
 	streakHit := allBlocked && a.blockedTurnStreak >= stormBreakThreshold
 	if !stormHit && !streakHit {
-		return ""
+		return intervention{}
 	}
 
 	const blockedAdvice = "Change approach: do not keep retrying a blocked tool by changing the tool, command, or arguments. Respect the permission, plan-mode, hook, or loop-guard blocker; use an already-allowed tool, ask the user for the specific approval or choice if appropriate, or explain the blocker in your final answer."
@@ -2603,10 +2603,13 @@ func (a *Agent) applyStormBreaker(calls []provider.ToolCall, outcomes []toolOutc
 			"loop guard: every tool call blocked %d turns in a row — nudging the model to change approach",
 			a.blockedTurnStreak)
 	}
-	results[0] = outcomes[0].output + "\n\n" + guard
-	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeLoopGuard, Text: loopGuardNoticeText(), Detail: detail})
 	a.armLoopGuardPass(receiptMark)
-	return detail
+	return intervention{
+		verdict:     verdictRedirect,
+		guidance:    guard,
+		notice:      noticeFor(event.NoticeCodeLoopGuard, event.LevelInfo, loopGuardNoticeText(), detail),
+		stuckReason: detail,
+	}
 }
 
 func loopGuardNoticeText() string {

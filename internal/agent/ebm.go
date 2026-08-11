@@ -32,21 +32,24 @@ type ebmState struct {
 }
 
 // applyEBM stamps eligibility on the round's sample and, when the experiment
-// arm is active, injects the nudge once per turn through the guard channel.
-func (a *Agent) applyEBM(sample *evidence.OutcomeSample, results []string, outcomes []toolOutcome) {
+// arm is active, asks once per turn for the cheapest discriminating check.
+func (a *Agent) applyEBM(sample *evidence.OutcomeSample, outcomes []toolOutcome) intervention {
 	if sample.DebtAge == 0 || sample.BlindMutations < ebmBlindThreshold {
-		return
+		return intervention{}
 	}
 	sample.EBMEligible = true
 	a.armForkCapture(*sample)
-	if !ebmEnabled || a.ebm.fired || len(results) == 0 || len(outcomes) == 0 {
-		return
+	if !ebmEnabled || a.ebm.fired || len(outcomes) == 0 {
+		return intervention{}
 	}
 	a.ebm.fired = true
 	a.ebm.captureArmed = false
 	sample.EBMFired = true
-	results[0] = outcomes[0].output + "\n\n" + ebmNudge
-	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeEvidenceNudge,
-		Text:   "Several mutations are unverified; asking for the cheapest discriminating check.",
-		Detail: "evidence nudge: verification debt open with blind mutations at threshold"})
+	return intervention{
+		verdict:  verdictAdvise,
+		guidance: ebmNudge,
+		notice: noticeFor(event.NoticeCodeEvidenceNudge, event.LevelInfo,
+			"Several mutations are unverified; asking for the cheapest discriminating check.",
+			"evidence nudge: verification debt open with blind mutations at threshold"),
+	}
 }
