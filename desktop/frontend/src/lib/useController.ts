@@ -17,6 +17,7 @@ import { applyLiveSegments, coalesceStreamDeltas, completeLiveReasoning, type St
 import { getTranscriptStore } from "./transcriptStore";
 import { uiPerfTracker } from "./uiPerf";
 import { getLocale, t, type DictKey } from "./i18n";
+import { estimateHistoryTokens, useResumeGuard } from "./useResumeGuard";
 import { sameTodoList } from "./todoVisibility";
 import { fileDiffFromWire, summarize, summarizeFileDiff, type ToolFileDiff } from "./tools";
 import { modeHasAutoApproveTools, normalizeMode, normalizeToolApprovalMode } from "./types";
@@ -2564,6 +2565,7 @@ export function replayPendingPromptsForActiveTab(activeTabId: string | undefined
 }
 
 export function useController() {
+  const { confirmOverThresholdResume, resumeGuardDialog } = useResumeGuard();
   const statesRef = useRef<TabStates>(new Map());
   const liveListenersByTabRef = useRef(new Map<string, Set<() => void>>());
   const balanceRefreshSeqByTab = useRef(new Map<string, number>());
@@ -3385,6 +3387,19 @@ export function useController() {
       if (e.kind === "turn_done" || e.kind === "context_maintenance") {
         void app.ContextUsageForTab(targetTabId).then((context) => dispatchTo(targetTabId, { type: "context", context })).catch(() => {});
       }
+      if (e.kind === "compaction_done") {
+        // Compaction rewrites the session behind the scenes (turn-end or
+        // resume-time); the gauge must follow the collapsed usage immediately
+        // instead of waiting for the next turn_done snapshot.
+        app
+          .ContextUsageForTab(targetTabId)
+          .then((context) => dispatchTo(targetTabId, { type: "context", context }))
+          .catch(() => {});
+        // BalanceForTab is coalesced for 200 ms; drop the shared burst answer
+        // so the refresh reads the post-compaction balance, not a stale one.
+        invalidateSharedQuery("BalanceForTab", [targetTabId]);
+        void refreshBalanceForTab(targetTabId);
+      }
       if (e.kind === "turn_done") {
         invalidateSharedQuery("BalanceForTab", [targetTabId]);
         void refreshBalanceForTab(targetTabId);
@@ -4053,6 +4068,17 @@ export function useController() {
     if (!navigationCompletionCurrent(navigationSeq, "session.resume", targetTabId)) return;
     const seq = bumpSessionLoadSeq(targetTabId);
     dispatchTo(targetTabId, { type: "hydrate_start", reason: "resume-session" });
+    // Preview is read-only, so the guard can ask before the mutating
+    // ResumeSessionPageForTab call rebinds the tab; cancelling leaves the
+    // session untouched.
+    const estimatedTokens = estimateHistoryTokens(asArray<HistoryMessage>(await app.PreviewSession(path).catch(() => [])));
+    if (!(await confirmOverThresholdResume(estimatedTokens, targetTabId))) {
+      if (isNavigationIntentCurrent(navigationSeq) && sessionLoadCurrent(targetTabId, seq)) {
+        dispatchTo(targetTabId, { type: "hydrate_error", reason: "resume-session", error: t("history.overThresholdResumeCancelled") });
+      }
+      return;
+    }
+    if (!navigationCompletionCurrent(navigationSeq, "session.resume", targetTabId) || !sessionLoadCurrent(targetTabId, seq)) return;
     let page: HistoryPage;
     try {
       page = tabId
@@ -4073,7 +4099,7 @@ export function useController() {
     if (!isNavigationIntentCurrent(navigationSeq) || !sessionLoadCurrent(targetTabId, seq)) return;
     app.ContextUsageForTab(targetTabId).then((context) => dispatchTo(targetTabId, { type: "context", context })).catch(() => {});
     void refreshCheckpoints(targetTabId);
-  }, [activeTabId, beginActiveNavigation, bumpSessionLoadSeq, dispatchTo, isNavigationIntentCurrent, navigationCompletionCurrent, refreshCheckpoints, refreshMetaOnlyForTab, sessionLoadCurrent, waitForBackendActiveTab, waitForTabReady]);
+  }, [activeTabId, beginActiveNavigation, bumpSessionLoadSeq, confirmOverThresholdResume, dispatchTo, isNavigationIntentCurrent, navigationCompletionCurrent, refreshCheckpoints, refreshMetaOnlyForTab, sessionLoadCurrent, waitForBackendActiveTab, waitForTabReady]);
 
   const openChannelSession = useCallback(async (path: string, tabId: string, navigationIntentSeq?: number) => {
     if (!tabId) return;
@@ -4082,6 +4108,16 @@ export function useController() {
     if (!navigationCompletionCurrent(navigationSeq, "session.channel", tabId)) return;
     const seq = bumpSessionLoadSeq(tabId);
     dispatchTo(tabId, { type: "hydrate_start", reason: "resume-session" });
+    // Same read-only preview guard as resumeSession: ask before the mutating
+    // OpenChannelSessionPageForTab call switches the tab's session binding.
+    const estimatedTokens = estimateHistoryTokens(asArray<HistoryMessage>(await app.PreviewSession(path).catch(() => [])));
+    if (!(await confirmOverThresholdResume(estimatedTokens, tabId))) {
+      if (isNavigationIntentCurrent(navigationSeq) && sessionLoadCurrent(tabId, seq)) {
+        dispatchTo(tabId, { type: "hydrate_error", reason: "resume-session", error: t("history.overThresholdResumeCancelled") });
+      }
+      return;
+    }
+    if (!navigationCompletionCurrent(navigationSeq, "session.channel", tabId) || !sessionLoadCurrent(tabId, seq)) return;
     let page: HistoryPage;
     try {
       page = await app.OpenChannelSessionPageForTab(tabId, path, HISTORY_PAGE_TURNS);
@@ -4100,7 +4136,7 @@ export function useController() {
     if (!isNavigationIntentCurrent(navigationSeq) || !sessionLoadCurrent(tabId, seq)) return;
     app.ContextUsageForTab(tabId).then((context) => dispatchTo(tabId, { type: "context", context })).catch(() => {});
     void refreshCheckpoints(tabId);
-  }, [beginActiveNavigation, bumpSessionLoadSeq, dispatchTo, isNavigationIntentCurrent, navigationCompletionCurrent, refreshCheckpoints, refreshMetaOnlyForTab, sessionLoadCurrent, waitForTabReady]);
+  }, [beginActiveNavigation, bumpSessionLoadSeq, confirmOverThresholdResume, dispatchTo, isNavigationIntentCurrent, navigationCompletionCurrent, refreshCheckpoints, refreshMetaOnlyForTab, sessionLoadCurrent, waitForTabReady]);
 
   const previewSession = useCallback(async (path: string): Promise<HistoryMessage[]> => asArray<HistoryMessage>(await app.PreviewSession(path).catch(() => [])), []);
   const deleteSession = useCallback((path: string) => app.DeleteSession(path).finally(() => invalidateCache()), []);
@@ -4718,6 +4754,7 @@ export function useController() {
     dismissExtensionForm, drainExtensionNotifications,
     setCollaborationMode, setCollaborationModeForTab, setToolApprovalMode, setToolApprovalModeForTab, setComposerProfileForTab, setGoal, setGoalForTab, clearGoal, clearGoalForTab, resumeGoal, resumeGoalForTab, pauseGoal, pauseGoalForTab,
     newSession, clearSession, listSessions, listTrashedSessions, resumeSession, openChannelSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,
+    resumeGuardDialog,
     loadOlderHistory,
     requestHistoryFullContent,
     refreshMeta, pickWorkspace, switchWorkspace, compact, rewind, rewindForTab, rewindForTabDetailed, undoRewindForTab, setModel, setEffort, setTokenMode, cancelJob,

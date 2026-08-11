@@ -4,7 +4,7 @@
     "commented-code": 0,
     "complexity": 2103,
     "essay": 4071,
-    "file-size": 109568,
+    "file-size": 109577,
     "function-size": 9153,
     "layering": 1,
     "marker": 0,
@@ -84,7 +84,7 @@
       "essay": 2
     },
     "desktop/frontend/src/App.tsx": {
-      "file-size": 4724
+      "file-size": 4696
     },
     "desktop/frontend/src/__tests__/app-chrome-tabs.test.ts": {
       "test-file-size": 19
@@ -177,7 +177,7 @@
       "file-size": 1511
     },
     "desktop/frontend/src/lib/useController.ts": {
-      "file-size": 3936
+      "file-size": 3973
     },
     "desktop/heartbeat.go": {
       "essay": 20,

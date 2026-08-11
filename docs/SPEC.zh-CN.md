@@ -158,6 +158,9 @@ transcript，仅在唯一自动阈值被跨越时安装 provider 可见的短 **
   `recentTailBudget = clamp(window×10%, 32K, 96K)`，摘要输出上限 **16K**。
 - 用户可用 `reasonix config compact-ratio [--local] [VALUE]` 查看或修改阈值。
   项目配置优先于桌面与新 CLI 会话共用的用户全局配置。UI 始终展示**实际生效**值。
+- 恢复一个估算 prompt 已超过 `triggerTokens` 的会话，会在恢复后的第一轮立即触发清理。
+  桌面端历史界面先从**只读预览**估算会话大小，并在恢复**之前**请求用户确认，
+  取消不会改动会话。
 - `max_output_tokens` 是独立的**本轮**输出上限。
   推荐 `0`（**自动**，不是无限；DeepSeek 默认 high → 约 64K）。
   用户侧常用值：`32768` 普通编码/控费，`65536` 重推理/长工具链，`131072` 仅在反复

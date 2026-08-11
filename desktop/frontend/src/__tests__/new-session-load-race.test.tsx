@@ -194,6 +194,7 @@ window.go = {
         newSessionCalls += 1;
         backendCanonicalTodos = [];
       },
+      PreviewSession: async () => [],
       ResumeSessionPageForTab: async () => {
         backendCanonicalTodos = [{ content: "Restored task", status: "completed" }];
         return {
