@@ -27,3 +27,40 @@ func TestBalanceSingleWalletCurrencyHint(t *testing.T) {
 		t.Fatalf("currencies = %v", got)
 	}
 }
+
+func TestDisplayFallbackPrefersFundedBalance(t *testing.T) {
+	// DeepSeek returns a zero CNY entry alongside the funded USD entry for
+	// USD-funded accounts, in non-deterministic order (see #8107). The
+	// fallback must show the funded currency, never the zero CNY entry.
+	usdFunded := Info{Currency: "USD", TotalBalance: "9.82"}
+	cnyZero := Info{Currency: "CNY", TotalBalance: "0.00"}
+	for _, infos := range [][]Info{
+		{cnyZero, usdFunded},
+		{usdFunded, cnyZero},
+	} {
+		if got := (&Balance{Infos: infos}).DisplayForCurrency(""); got != "$9.82" {
+			t.Fatalf("fallback display for %v = %q, want $9.82", infos, got)
+		}
+	}
+	// An explicit preference still wins even when its own balance is zero.
+	if got := (&Balance{Infos: []Info{cnyZero, usdFunded}}).DisplayForCurrency("CNY"); got != "¥0.00" {
+		t.Fatalf("explicit CNY display = %q, want ¥0.00", got)
+	}
+	// A USD-only wallet shows USD for every preference; unknown preferences
+	// are normalized to empty and render without a prefix.
+	usdOnly := &Balance{Infos: []Info{usdFunded}}
+	for pref, want := range map[string]string{
+		"":    "$9.82",
+		"USD": "$9.82",
+		"JPY": "$9.82",
+		"CNY": "USD $9.82",
+	} {
+		if got := usdOnly.DisplayForCurrency(pref); got != want {
+			t.Fatalf("USD-only display for %q = %q, want %q", pref, got, want)
+		}
+	}
+	// Malformed totals never win the fallback pick.
+	if got := (&Balance{Infos: []Info{{Currency: "CNY", TotalBalance: "oops"}, usdFunded}}).DisplayForCurrency(""); got != "$9.82" {
+		t.Fatalf("malformed-total fallback = %q, want $9.82", got)
+	}
+}

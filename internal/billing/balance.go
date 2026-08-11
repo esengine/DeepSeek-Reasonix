@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -151,23 +152,23 @@ func symbol(currency string) string {
 	}
 }
 
-// Display renders the primary balance compactly, e.g. "¥110.00". It preserves
-// the legacy CNY-first behavior for callers that have no display-currency
-// preference.
+// Display renders the primary balance compactly, e.g. "$9.82". It uses the
+// funded-first fallback for callers that have no display-currency preference.
 func (b *Balance) Display() string {
 	return b.DisplayForCurrency("")
 }
 
 // DisplayForCurrency renders the balance matching the requested pricing
 // currency. When the provider does not return that currency, it falls back to
-// Display's legacy CNY-first selection and prefixes the provider's real ISO
-// currency (for example "CNY ¥70.16"); it never performs an implicit
-// exchange-rate conversion.
+// the entry with the largest funded balance and prefixes the provider's real
+// ISO currency (for example "CNY ¥70.16"); it never performs an implicit
+// exchange-rate conversion. The funded-first fallback (rather than the legacy
+// CNY-first pick) keeps a zero CNY entry from hiding a funded USD balance on
+// DeepSeek accounts that report both currencies (see #8107).
 func (b *Balance) DisplayForCurrency(currency string) string {
 	if b == nil || len(b.Infos) == 0 {
 		return ""
 	}
-	pick := b.Infos[0]
 	preferred := normalizeCurrency(currency)
 	if preferred != "" {
 		for _, i := range b.Infos {
@@ -176,10 +177,10 @@ func (b *Balance) DisplayForCurrency(currency string) string {
 			}
 		}
 	}
-	for _, i := range b.Infos {
-		if normalizeCurrency(i.Currency) == "CNY" {
+	pick := b.Infos[0]
+	for _, i := range b.Infos[1:] {
+		if fundedValue(i) > fundedValue(pick) {
 			pick = i
-			break
 		}
 	}
 	display := symbol(pick.Currency) + strings.TrimSpace(pick.TotalBalance)
@@ -191,6 +192,16 @@ func (b *Balance) DisplayForCurrency(currency string) string {
 		return actual + " " + display
 	}
 	return display
+}
+
+// fundedValue parses TotalBalance for comparison purposes. Unparseable or
+// empty totals count as zero so malformed entries never win the fallback pick.
+func fundedValue(i Info) float64 {
+	v, err := strconv.ParseFloat(strings.TrimSpace(i.TotalBalance), 64)
+	if err != nil {
+		return 0
+	}
+	return v
 }
 
 func normalizeCurrency(currency string) string {

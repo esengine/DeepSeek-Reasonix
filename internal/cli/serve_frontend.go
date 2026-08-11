@@ -142,7 +142,11 @@ func startServeBalanceDiagnostics(ctrl *control.Controller) {
 		} else if balance == nil {
 			fmt.Fprintln(os.Stderr, "  balance: not configured (no balance_url for this provider)")
 		} else {
-			fmt.Printf("  balance: %s\n", balance.Display())
+			displayCurrency := ""
+			if cfg, err := config.LoadForRootReadOnly("."); err == nil && cfg != nil {
+				displayCurrency = cfg.ExplicitDisplayCurrency()
+			}
+			fmt.Printf("  balance: %s\n", balance.DisplayForCurrency(displayCurrency))
 		}
 	}()
 }
