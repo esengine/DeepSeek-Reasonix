@@ -4070,9 +4070,12 @@ func (c *Controller) commitRecoveredSession(originalPath, reason string, info ag
 	c.sessionPath = info.Path
 	c.guardianPath = guardian.PathFor(info.Path)
 	c.mu.Unlock()
-	// Recovery branch is a new lineage path; do not keep writing the original
-	// session's projection sidecar.
-	c.bindExecutorProjection(info.Path, false)
+	// Recovery branch is a new lineage path. Load its projection sidecar if the
+	// fork inherited one (saveRecoveryBranch carries a valid parent projection
+	// over), so the model view stays compressed across the fork instead of
+	// snapping back to the full canonical transcript and re-triggering a
+	// full-price compaction. A mismatched key is rebound to this path on load.
+	c.bindExecutorProjection(info.Path, true)
 	c.setActiveJobSession(info.Path)
 	c.rebindCheckpoints(info.Path)
 	c.transplantInFlightTurnMarker(originalPath, info.Path)

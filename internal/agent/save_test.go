@@ -2744,3 +2744,119 @@ func TestReconcileOverlongMigratesDiagnosticSidecars(t *testing.T) {
 		}
 	}
 }
+func TestSaveRecoveryBranchInheritsValidProjection(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+
+	// Parent session on disk: a compressed session whose projection sidecar
+	// covers the first messages of the canonical transcript.
+	parent := NewSession("sys")
+	parent.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	parent.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	parent.Add(provider.Message{Role: provider.RoleUser, Content: "second"})
+	if err := parent.Save(path); err != nil {
+		t.Fatalf("Save parent: %v", err)
+	}
+	parentMsgs, parentVersion := parent.snapshotMessagesVersion()
+	st := CompactionState{
+		SchemaVersion:     compactionStateSchemaCurrent,
+		TranscriptVersion: parentVersion,
+		PromptCacheKey:    promptCacheKey("ws", BranchID(path), "test/model"),
+		Projection: ContextProjection{
+			ProjectionVersion: 1,
+			CoveredCount:      2,
+			CoveredPrefixHash: coveredPrefixHash(parentMsgs, 2),
+			Messages: []provider.Message{
+				{Role: provider.RoleUser, Content: "summary"},
+				{Role: provider.RoleAssistant, Content: "one"},
+			},
+		},
+	}
+	if err := SaveCompactionState(path, st); err != nil {
+		t.Fatalf("SaveCompactionState: %v", err)
+	}
+
+	// Stale in-memory session (diverged tail) triggers a recovery fork.
+	stale := NewSession("sys")
+	stale.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	stale.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	stale.Add(provider.Message{Role: provider.RoleUser, Content: "second"})
+	stale.Add(provider.Message{Role: provider.RoleUser, Content: "local only"})
+	info, err := stale.SaveRecoveryBranch(RecoveryBranchOptions{OriginalPath: path})
+	if err != nil {
+		t.Fatalf("SaveRecoveryBranch: %v", err)
+	}
+
+	// The fork must carry the parent's valid projection sidecar over, so the
+	// model view stays compressed after the fork instead of snapping back to
+	// the full canonical transcript.
+	got, ok, err := LoadCompactionState(info.Path)
+	if err != nil || !ok {
+		t.Fatalf("LoadCompactionState recovery ok=%v err=%v, want inherited sidecar", ok, err)
+	}
+	if got.Projection.CoveredCount != 2 || got.Projection.CoveredPrefixHash != st.Projection.CoveredPrefixHash {
+		t.Fatalf("recovery projection = %+v, want parent projection inherited", got.Projection)
+	}
+	recovered, err := LoadSession(info.Path)
+	if err != nil {
+		t.Fatalf("LoadSession recovery: %v", err)
+	}
+	// The inherited sidecar's covered prefix must still match the recovery
+	// transcript (the same content the fork was created from).
+	recoveredMsgs, _ := recovered.snapshotMessagesVersion()
+	if n := got.Projection.CoveredCount; n <= 0 || n > len(recoveredMsgs) ||
+		coveredPrefixHash(recoveredMsgs, n) != got.Projection.CoveredPrefixHash {
+		t.Fatalf("inherited projection does not match the recovery transcript")
+	}
+}
+
+func TestSaveRecoveryBranchSkipsInvalidProjection(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+
+	parent := NewSession("sys")
+	parent.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	parent.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	parent.Add(provider.Message{Role: provider.RoleUser, Content: "second"})
+	if err := parent.Save(path); err != nil {
+		t.Fatalf("Save parent: %v", err)
+	}
+	parentMsgs, parentVersion := parent.snapshotMessagesVersion()
+	// A stale projection whose covered prefix no longer matches (content was
+	// edited) must NOT be inherited.
+	st := CompactionState{
+		SchemaVersion:     compactionStateSchemaCurrent,
+		TranscriptVersion: parentVersion,
+		PromptCacheKey:    promptCacheKey("ws", BranchID(path), "test/model"),
+		Projection: ContextProjection{
+			ProjectionVersion: 1,
+			CoveredCount:      2,
+			CoveredPrefixHash: coveredPrefixHash(parentMsgs, 2),
+			Messages: []provider.Message{
+				{Role: provider.RoleUser, Content: "summary"},
+				{Role: provider.RoleAssistant, Content: "one"},
+			},
+		},
+	}
+	if err := SaveCompactionState(path, st); err != nil {
+		t.Fatalf("SaveCompactionState: %v", err)
+	}
+	// Rewrite the canonical transcript so the covered prefix changes.
+	rewritten := parent.Snapshot()
+	rewritten[0] = provider.Message{Role: provider.RoleUser, Content: "edited"}
+	parent.Rewrite(rewritten, "test rewrite")
+	if err := parent.Save(path); err != nil {
+		t.Fatalf("Save rewritten parent: %v", err)
+	}
+
+	stale := NewSession("sys")
+	stale.Add(provider.Message{Role: provider.RoleUser, Content: "edited"})
+	stale.Add(provider.Message{Role: provider.RoleUser, Content: "local only"})
+	info, err := stale.SaveRecoveryBranch(RecoveryBranchOptions{OriginalPath: path})
+	if err != nil {
+		t.Fatalf("SaveRecoveryBranch: %v", err)
+	}
+	if _, ok, err := LoadCompactionState(info.Path); err != nil || ok {
+		t.Fatalf("LoadCompactionState recovery ok=%v err=%v, want no inherited sidecar", ok, err)
+	}
+}

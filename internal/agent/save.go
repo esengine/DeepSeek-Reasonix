@@ -804,6 +804,7 @@ func (s *Session) saveRecoveryBranch(opts RecoveryBranchOptions, shutdown bool) 
 			return RecoveryBranchInfo{}, digestErr
 		}
 		if bytes.Equal(existingDigest[:], digest[:]) {
+			s.inheritParentProjection(originalPath, recoveryPath, msgs, version)
 			meta, err := s.saveRecoveryBranchMeta(recoveryPath, opts, preview, turns, digestText, recoveryDepth)
 			if err != nil {
 				return RecoveryBranchInfo{}, err
@@ -833,6 +834,7 @@ func (s *Session) saveRecoveryBranch(opts RecoveryBranchOptions, shutdown bool) 
 	if err := writeSessionMessages(recoveryPath, msgs); err != nil {
 		return RecoveryBranchInfo{}, err
 	}
+	s.inheritParentProjection(originalPath, recoveryPath, msgs, version)
 	meta, err := s.saveRecoveryBranchMeta(recoveryPath, opts, preview, turns, digestText, recoveryDepth)
 	if err != nil {
 		return RecoveryBranchInfo{}, err
@@ -847,6 +849,41 @@ func (s *Session) saveRecoveryBranch(opts RecoveryBranchOptions, shutdown bool) 
 	}
 	s.markPersisted(recoveryPath, digest, version, meta.Revision, rewriteVersion)
 	return RecoveryBranchInfo{Path: recoveryPath, Digest: digestText, Meta: meta, Preview: preview, Turns: turns}, nil
+}
+
+// inheritParentProjection copies a valid context projection from the parent
+// session to the recovery fork. Compaction only ever writes the sidecar and
+// never rewrites the canonical transcript, so a fork produced from this
+// in-memory snapshot covers the same prefix the projection was built on.
+// Carrying the projection over keeps the model view compressed across the
+// fork instead of snapping back to the full canonical transcript, which would
+// re-trigger a full-price compaction on the fork and cascade into the
+// compact-recover-compact loop. Best-effort: a missing/invalid parent
+// projection or a sidecar write failure leaves the fork uncompressed but does
+// not fail the recovery itself. A fork that already has a sidecar (a prior
+// inheritance that was already rebound) is left untouched.
+func (s *Session) inheritParentProjection(originalPath, recoveryPath string, msgs []provider.Message, version uint64) {
+	if _, ok, err := LoadCompactionState(recoveryPath); err == nil && ok {
+		return
+	}
+	st, ok, err := LoadCompactionState(originalPath)
+	if err != nil || !ok {
+		return
+	}
+	// Content check, independent of the projection's lineage key: the covered
+	// prefix hash must still match the fork's transcript and the projection
+	// must cover a valid prefix (append-only growth past the covered count is
+	// fine; edited prefixes or overruns fail closed and rebuild on load).
+	n := st.Projection.CoveredCount
+	if len(st.Projection.Messages) == 0 || n <= 0 || n > len(msgs) ||
+		st.Projection.CoveredPrefixHash == "" ||
+		coveredPrefixHash(msgs, n) != st.Projection.CoveredPrefixHash {
+		return
+	}
+	if err := SaveCompactionState(recoveryPath, st); err != nil {
+		slog.Warn("session: recovery branch did not inherit context projection",
+			"path", recoveryPath, "err", err)
+	}
 }
 
 func (s *Session) saveRecoveryBranchMeta(path string, opts RecoveryBranchOptions, preview string, turns int, digest string, depth int) (BranchMeta, error) {
