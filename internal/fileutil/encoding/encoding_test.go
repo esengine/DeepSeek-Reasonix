@@ -317,3 +317,62 @@ func TestSurrogatePairRoundTrip(t *testing.T) {
 		t.Errorf("surrogate pair round-trip failed: got %q, want %q", decoded, original)
 	}
 }
+
+// trimPartialRune
+
+func TestTrimPartialRuneDropsOnlyTruncatedTail(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []byte
+		want []byte
+	}{
+		{"complete cjk", []byte("正文内容"), []byte("正文内容")},
+		{"cjk cut after lead byte", []byte("正文内容")[:len("正文内容")-2], []byte("正文内")},
+		{"cjk cut before last byte", []byte("正文内容")[:len("正文内容")-1], []byte("正文内")},
+		{"ascii tail", []byte("正文ab"), []byte("正文ab")},
+		{"emoji cut", []byte("hi 😀")[:len("hi 😀")-1], []byte("hi ")},
+		{"two-byte cut", []byte("é")[:1], []byte{}},
+		{"empty", []byte{}, []byte{}},
+		// A stray continuation byte is not a truncated sequence — leaving it in
+		// keeps Detect's utf8.Valid check able to reject genuine non-UTF-8 input.
+		{"stray continuation bytes", []byte{0xB2, 0xBB, 0xBA}, []byte{0xB2, 0xBB, 0xBA}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := trimPartialRune(c.in); !bytes.Equal(got, c.want) {
+				t.Errorf("trimPartialRune(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+// A detection window cut mid-character must not be mistaken for GB18030: that
+// decoder accepts nearly any byte string, so the misdetection is silent and
+// every CJK line comes back as mojibake.
+func TestDetectPrefixTrimsTruncatedCJKWindow(t *testing.T) {
+	full := bytes.Repeat([]byte("这是一段中文正文内容\n"), 64)
+	cut := full[:len(full)-2] // stops inside the last multi-byte character
+
+	if enc := DetectPrefix(cut, false); enc != GB18030 {
+		t.Fatalf("precondition: an untrimmed mid-character window detects as %v, want GB18030", enc)
+	}
+	if enc := DetectPrefix(cut, true); enc != UTF8 {
+		t.Errorf("truncated window detected as %v, want UTF8", enc)
+	}
+	if enc := DetectPrefix(full, true); enc != UTF8 {
+		t.Errorf("whole-character window detected as %v, want UTF8", enc)
+	}
+}
+
+// Trimming may shorten genuinely non-UTF-8 input by a byte when its tail looks
+// like a lead byte. What remains is still invalid UTF-8, so the cascade must
+// still reach GB18030.
+func TestDetectPrefixKeepsGB18030Detectable(t *testing.T) {
+	gbk, err := simplifiedchinese.GB18030.NewEncoder().Bytes([]byte("这是一段中文正文内容"))
+	if err != nil {
+		t.Fatalf("encode GB18030: %v", err)
+	}
+	if enc := DetectPrefix(gbk, true); enc != GB18030 {
+		t.Errorf("truncated GB18030 window detected as %v, want GB18030", enc)
+	}
+}

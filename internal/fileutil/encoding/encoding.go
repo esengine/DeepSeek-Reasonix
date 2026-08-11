@@ -70,6 +70,49 @@ func Detect(data []byte) (Kind, []byte) {
 	return LossyUTF8, data
 }
 
+// DetectPrefix classifies a stream from a leading window, where truncated says
+// more bytes follow. A truncated window is trimmed to a character boundary
+// first: Detect reads "not valid UTF-8" as a legacy charset and GB18030 accepts
+// nearly any bytes, so a window that merely stops mid-character would decode a
+// UTF-8 file into mojibake — a coin flip for 3-byte-per-character CJK text.
+func DetectPrefix(window []byte, truncated bool) Kind {
+	if truncated {
+		window = trimPartialRune(window)
+	}
+	k, _ := Detect(window)
+	return k
+}
+
+// trimPartialRune drops an incomplete trailing UTF-8 sequence. Bytes that
+// cannot begin a sequence stay, so genuinely non-UTF-8 input keeps failing
+// Detect's utf8.Valid check.
+func trimPartialRune(b []byte) []byte {
+	for i := len(b) - 1; i >= 0 && i >= len(b)-(utf8.UTFMax-1); i-- {
+		c := b[i]
+		if c&0xC0 == 0x80 {
+			continue // continuation byte — keep walking back to the lead byte
+		}
+		var width int
+		switch {
+		case c&0x80 == 0x00:
+			return b // ASCII: the window ends on a character boundary
+		case c&0xE0 == 0xC0:
+			width = 2
+		case c&0xF0 == 0xE0:
+			width = 3
+		case c&0xF8 == 0xF0:
+			width = 4
+		default:
+			return b // not a lead byte, so not a truncated sequence
+		}
+		if len(b)-i < width {
+			return b[:i]
+		}
+		return b
+	}
+	return b
+}
+
 // DetectQuick checks only for BOM prefixes in the first few bytes. This is
 // the fast path for peek-based binary rejection: BOM-prefixed files (UTF-16,
 // UTF-8 BOM) skip the NUL-byte check since 0x00 is normal in UTF-16. Returns

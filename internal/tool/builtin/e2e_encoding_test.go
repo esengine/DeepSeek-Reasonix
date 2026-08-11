@@ -164,3 +164,111 @@ func TestE2EDeleteRangePreservesGBK(t *testing.T) {
 		t.Errorf("delete_range removed the wrong lines: %q", s)
 	}
 }
+
+// grep classifies a file from its 8 KiB peek alone. CJK characters are three
+// bytes wide, so that window usually stops mid-character; treating the cut as
+// "not UTF-8" sent the file down the GB18030 branch and produced mojibake.
+func TestE2EGrepUTF8CJKLargerThanPeek(t *testing.T) {
+	dir := t.TempDir()
+	raw := cjkFixtureSplitAt(t, grepBinaryPeek, 12*1024,
+		"统一战线的形成过程\n", "这是一段中文正文内容用于填充文件长度\n", "尾部中文行 tail-marker-1931\n")
+	if err := os.WriteFile(filepath.Join(dir, "chapter.md"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	grepTL, _ := tool.LookupBuiltin("grep")
+	out, err := grepTL.Execute(context.Background(), e2eArgs(map[string]any{
+		"pattern": "统一战线",
+		"path":    dir,
+	}))
+	if err != nil {
+		t.Fatalf("grep: %v", err)
+	}
+	if !strings.Contains(out, "统一战线的形成过程") {
+		t.Errorf("grep missed a Chinese pattern in a UTF-8 file:\n%s", out)
+	}
+
+	// An ASCII pattern matched before the fix too, but printed the line as
+	// mojibake — the Chinese around it must survive the round trip.
+	out, err = grepTL.Execute(context.Background(), e2eArgs(map[string]any{
+		"pattern": "tail-marker-1931",
+		"path":    dir,
+	}))
+	if err != nil {
+		t.Fatalf("grep ascii pattern: %v", err)
+	}
+	if !strings.Contains(out, "尾部中文行") {
+		t.Errorf("grep mangled Chinese text on a matched line:\n%s", out)
+	}
+}
+
+// Trimming the detection window must not cost grep its GB18030 support.
+func TestE2EGrepGBKLargerThanPeek(t *testing.T) {
+	dir := t.TempDir()
+	var b strings.Builder
+	b.WriteString("统一战线的形成过程\n")
+	for b.Len() < 12*1024 {
+		b.WriteString("这是一段中文正文内容用于填充文件长度\n")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "gbk.txt"), gbkBytes(t, b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	grepTL, _ := tool.LookupBuiltin("grep")
+	out, err := grepTL.Execute(context.Background(), e2eArgs(map[string]any{
+		"pattern": "统一战线",
+		"path":    dir,
+	}))
+	if err != nil {
+		t.Fatalf("grep: %v", err)
+	}
+	if !strings.Contains(out, "统一战线的形成过程") {
+		t.Errorf("grep missed a Chinese pattern in a GBK file:\n%s", out)
+	}
+}
+
+// read_file bounds its detection sample at a newline, which leaves a file with
+// no newline in that window (single-line CJK export) cut mid-character.
+func TestE2EReadFileSingleLineCJKLargerThanSample(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "oneline.txt")
+	raw := cjkFixtureSplitAt(t, readFileDetectSample, readFileDetectSample+8*1024,
+		"统一战线", "这是一段中文正文内容没有任何换行符", "")
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	readTL, _ := tool.LookupBuiltin("read_file")
+	out, err := readTL.Execute(context.Background(), e2eArgs(map[string]any{"path": path}))
+	if err != nil {
+		t.Fatalf("read_file: %v", err)
+	}
+	if !strings.Contains(out, "统一战线") {
+		t.Errorf("read_file mangled a single-line UTF-8 CJK file:\n%.200s", out)
+	}
+}
+
+// cjkFixtureSplitAt builds a UTF-8 Chinese fixture of at least minSize bytes
+// whose byte at boundary falls inside a multi-byte character. ASCII padding
+// shifts the boundary a byte at a time, so one of three widths always splits
+// a 3-byte character.
+func cjkFixtureSplitAt(t *testing.T, boundary, minSize int, head, filler, tail string) []byte {
+	t.Helper()
+	for pad := range 3 {
+		var b strings.Builder
+		b.WriteString(strings.Repeat("x", pad))
+		b.WriteString(head)
+		for b.Len() < minSize {
+			b.WriteString(filler)
+		}
+		b.WriteString(tail)
+		raw := []byte(b.String())
+		if !utf8.Valid(raw) {
+			t.Fatal("fixture must be valid UTF-8")
+		}
+		if raw[boundary]&0xC0 == 0x80 {
+			return raw
+		}
+	}
+	t.Fatal("no fixture width split a character at the detection boundary")
+	return nil
+}
