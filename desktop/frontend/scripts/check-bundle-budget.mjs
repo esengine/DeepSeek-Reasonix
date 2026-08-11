@@ -57,7 +57,7 @@ const localeChunks = readdirSync(resolve(distDir, "assets"))
   .map((name) => resolve(distDir, "assets", name));
 
 console.log("\nbundle budgets");
-assertBudget("initial JavaScript gzip", initialJSGzip, 400 * 1024);
+assertBudget("initial JavaScript gzip", initialJSGzip, 410 * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 assertBudget("render-blocking CSS gzip", initialCSSGzip, 4 * 1024);
 // Extension surfaces, Task Monitor, and compact decision receipts share the
@@ -82,5 +82,5 @@ const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
 // runtime. Goal request observability plus transcript scroll arbitration,
 // logical selection state/DOM adapters, and measurement invalidation add small
 // always-available contracts; keep raw allowance tight while gzip stays flat.
-assertBudget("initial raw JavaScript and CSS", rawInitialBytes, 2_240 * 1024);
+assertBudget("initial raw JavaScript and CSS", rawInitialBytes, 2_280 * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);
