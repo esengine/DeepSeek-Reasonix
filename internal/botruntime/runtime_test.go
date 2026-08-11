@@ -3,6 +3,7 @@ package botruntime
 import (
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -150,6 +151,68 @@ func TestRememberInboundSessionKeepsDistinctGroupUsers(t *testing.T) {
 	}
 	if mappings[0].UserID != "ou-user-1" || mappings[0].SessionID != "path:/sessions/user-1.jsonl" || mappings[1].UserID != "ou-user-2" || mappings[1].SessionID != "path:/sessions/user-2.jsonl" {
 		t.Fatalf("mappings = %+v, want user-specific session ids", mappings)
+	}
+}
+
+func TestRememberInboundSessionSharesQQGroupAcrossMembers(t *testing.T) {
+	isolateUserConfig(t)
+	cfg := config.Default()
+	cfg.Bot.QQ = config.QQBotConfig{Enabled: true, AppID: "app-id", AppSecretEnv: "QQ_SECRET"}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	firstPath := filepath.Join(t.TempDir(), "group.jsonl")
+	secondPath := filepath.Join(filepath.Dir(firstPath), "group-new.jsonl")
+	if err := os.WriteFile(firstPath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secondPath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	first := bot.InboundMessage{Platform: bot.PlatformQQ, ConnectionID: "qq", ChatType: bot.ChatGroup, ChatID: "group-openid", UserID: "member-a"}
+	second := first
+	second.UserID = "member-b"
+	if err := RememberInboundSession(first, "path:"+firstPath); err != nil {
+		t.Fatalf("remember first member: %v", err)
+	}
+	if err := RememberInboundSession(second, "path:"+secondPath); err != nil {
+		t.Fatalf("remember second member: %v", err)
+	}
+	got := config.LoadForEdit(config.UserConfigPath())
+	if len(got.Bot.Connections) != 1 || len(got.Bot.Connections[0].SessionMappings) != 1 {
+		t.Fatalf("connections = %+v, want one shared mapping", got.Bot.Connections)
+	}
+	mapping := got.Bot.Connections[0].SessionMappings[0]
+	if mapping.UserID != "" || mapping.ChatType != string(bot.ChatGroup) || mapping.SessionID != "path:"+secondPath {
+		t.Fatalf("mapping = %+v, want shared QQ group target", mapping)
+	}
+	if got.ConfigVersion != config.CurrentConfigVersion {
+		t.Fatalf("config version = %d, want %d after QQ normalization", got.ConfigVersion, config.CurrentConfigVersion)
+	}
+}
+
+func TestAdapterBindingsTreatsOneBotProviderAsQQProtocol(t *testing.T) {
+	cfg := config.Default()
+	cfg.Bot.Connections = []config.BotConnectionConfig{{
+		ID: "qq-personal", Provider: "onebot", Enabled: true,
+		OneBot: config.OneBotConnectionOptions{WebSocketURL: "ws://127.0.0.1:3001", SelfID: "123"},
+	}}
+	bindings := AdapterBindings(cfg, map[bot.Platform]bool{bot.PlatformQQ: true}, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if len(bindings) != 1 || bindings[0].Protocol != "onebot-v11" || bindings[0].Adapter.Name() != "onebot-v11" {
+		t.Fatalf("bindings = %+v, want OneBot QQ binding", bindings)
+	}
+}
+
+func TestAdapterBindingsKeepsLegacyOfficialQQBesideOneBot(t *testing.T) {
+	cfg := config.Default()
+	cfg.Bot.QQ = config.QQBotConfig{Enabled: true, AppID: "official-app", AppSecretEnv: "QQ_SECRET"}
+	cfg.Bot.Connections = []config.BotConnectionConfig{{
+		ID: "qq-personal", Provider: "onebot", Protocol: "onebot-v11", Enabled: true,
+		OneBot: config.OneBotConnectionOptions{WebSocketURL: "ws://127.0.0.1:3001", SelfID: "123"},
+	}}
+	bindings := AdapterBindings(cfg, map[bot.Platform]bool{bot.PlatformQQ: true}, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if len(bindings) != 2 || bindings[0].Protocol != "onebot-v11" || bindings[1].Protocol != "official" {
+		t.Fatalf("bindings = %+v, want OneBot and legacy official QQ", bindings)
 	}
 }
 

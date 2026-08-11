@@ -64,6 +64,10 @@ type GatewayConfig struct {
 	// shut the gateway down in reaction to a callback must trigger the shutdown
 	// asynchronously.
 	OnInbound func(InboundMessage)
+	// OnRemoteTurnAccepted fires once a remote message has passed admission and
+	// is about to enter the shared Controller. Desktop uses it to fan the user
+	// turn into the already attached tab without creating a second runtime.
+	OnRemoteTurnAccepted func(InboundMessage, string, string)
 	// OnSessionReady notifies the host after the bot has created, reused, or
 	// recovered the controller for an inbound remote. Hosts may persist the
 	// concrete session ID or keep the remote as a read-only channel.
@@ -72,6 +76,12 @@ type GatewayConfig struct {
 	// The gateway updates the live session and in-memory defaults first; this
 	// callback lets desktop save the chosen connection mode to user config.
 	OnToolApprovalModeChange func(InboundMessage, string) error
+	// IngressJournal is an optional durable provider-event fence. Adapters that
+	// expose MessageID use it to suppress duplicate delivery across restarts.
+	IngressJournal *IngressJournal
+	// OutboundMediaPolicy limits typed attachments before an adapter sees them.
+	// URL resources remain references; only allowlisted local files are read.
+	OutboundMediaPolicy MediaPolicy
 	// Desktop, when the gateway is embedded in the desktop app, gives bot
 	// chats a god view over desktop sessions (/desktop commands): global
 	// status, event subscriptions, and remote approvals for any live desktop
@@ -118,6 +128,7 @@ type RouteConfig struct {
 // replies, and per-connection settings separated at runtime.
 type AdapterBinding struct {
 	ID       string
+	Protocol string
 	Domain   string
 	Platform Platform
 	Adapter  Adapter
@@ -146,20 +157,27 @@ type AccessConfig struct {
 
 // AdapterHealthSnapshot describes the gateway's current view of one adapter.
 type AdapterHealthSnapshot struct {
-	ID            string    `json:"id"`
-	Platform      Platform  `json:"platform"`
-	Domain        string    `json:"domain,omitempty"`
-	Name          string    `json:"name,omitempty"`
-	Status        string    `json:"status"`
-	StartedAt     time.Time `json:"started_at,omitempty"`
-	LastMessageAt time.Time `json:"last_message_at,omitempty"`
-	LastSendAt    time.Time `json:"last_send_at,omitempty"`
-	LastErrorAt   time.Time `json:"last_error_at,omitempty"`
-	LastError     string    `json:"last_error,omitempty"`
-	Messages      int64     `json:"messages"`
-	Sends         int64     `json:"sends"`
-	SendErrors    int64     `json:"send_errors"`
-	Closed        bool      `json:"closed"`
+	ID            string              `json:"id"`
+	Platform      Platform            `json:"platform"`
+	Protocol      string              `json:"protocol,omitempty"`
+	Domain        string              `json:"domain,omitempty"`
+	Name          string              `json:"name,omitempty"`
+	Status        string              `json:"status"`
+	Phase         string              `json:"phase,omitempty"`
+	Ready         bool                `json:"ready"`
+	RetryAt       time.Time           `json:"retry_at,omitempty"`
+	LastReadyAt   time.Time           `json:"last_ready_at,omitempty"`
+	LastErrorCode int                 `json:"last_error_code,omitempty"`
+	Capabilities  AdapterCapabilities `json:"capabilities,omitempty"`
+	StartedAt     time.Time           `json:"started_at,omitempty"`
+	LastMessageAt time.Time           `json:"last_message_at,omitempty"`
+	LastSendAt    time.Time           `json:"last_send_at,omitempty"`
+	LastErrorAt   time.Time           `json:"last_error_at,omitempty"`
+	LastError     string              `json:"last_error,omitempty"`
+	Messages      int64               `json:"messages"`
+	Sends         int64               `json:"sends"`
+	SendErrors    int64               `json:"send_errors"`
+	Closed        bool                `json:"closed"`
 }
 
 // BotGateway 是 reasonix bot 消息网关，管理 Controller 生命周期、session 并发、
@@ -189,6 +207,7 @@ type BotGateway struct {
 	adapterHealth           map[string]*AdapterHealthSnapshot
 	controlServer           *controlHTTPServer
 	sessionOverrides        map[string]sessionRuntimeOverride
+	interactions            *InteractionStore
 
 	logger *slog.Logger
 }
@@ -317,6 +336,7 @@ func NewGatewayWithAdapterBindings(cfg GatewayConfig, adapters []AdapterBinding,
 		outboundMessageIDs:      make(map[string]time.Time),
 		adapterHealth:           make(map[string]*AdapterHealthSnapshot),
 		sessionOverrides:        make(map[string]sessionRuntimeOverride),
+		interactions:            NewInteractionStore(10 * time.Minute),
 		logger:                  logger.With("component", "bot_gateway"),
 	}
 	gw.buildAllowlist()
@@ -340,6 +360,7 @@ func normalizeAdapterBindings(adapters []AdapterBinding) []AdapterBinding {
 			binding.ID = string(binding.Platform)
 		}
 		binding.ID = strings.TrimSpace(binding.ID)
+		binding.Protocol = strings.TrimSpace(binding.Protocol)
 		binding.Domain = strings.TrimSpace(binding.Domain)
 		out = append(out, binding)
 	}
@@ -476,6 +497,33 @@ func (gw *BotGateway) AdapterHealth() []AdapterHealthSnapshot {
 		}
 		out = append(out, *health)
 	}
+	for i := range out {
+		for _, binding := range gw.adapters {
+			id := strings.TrimSpace(binding.ID)
+			if id == "" && binding.Adapter != nil {
+				id = binding.Adapter.Name()
+			}
+			if id != out[i].ID || binding.Adapter == nil {
+				continue
+			}
+			if lifecycle, ok := binding.Adapter.(AdapterLifecycle); ok {
+				s := lifecycle.Lifecycle()
+				out[i].Phase = s.Phase
+				out[i].Ready = s.Ready
+				out[i].RetryAt = s.RetryAt
+				out[i].LastReadyAt = s.LastReadyAt
+				out[i].LastErrorCode = s.LastErrorCode
+				out[i].LastError = s.LastError
+				if s.Phase != "" {
+					out[i].Status = s.Phase
+				}
+			}
+			if capabilities, ok := binding.Adapter.(AdapterCapabilitiesProvider); ok {
+				out[i].Capabilities = capabilities.Capabilities()
+			}
+			break
+		}
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }
@@ -573,6 +621,7 @@ func (gw *BotGateway) ensureAdapterHealthLocked(binding AdapterBinding) *Adapter
 		gw.adapterHealth[id] = health
 	}
 	health.Platform = binding.Platform
+	health.Protocol = strings.TrimSpace(binding.Protocol)
 	health.Domain = strings.TrimSpace(binding.Domain)
 	if binding.Adapter != nil {
 		health.Name = binding.Adapter.Name()
@@ -717,11 +766,44 @@ func (gw *BotGateway) handleMessage(ctx context.Context, binding AdapterBinding,
 	if msg.ConnectionID == "" {
 		msg.ConnectionID = binding.ID
 	}
+	if msg.Protocol == "" {
+		msg.Protocol = binding.Protocol
+	}
 	if msg.Domain == "" {
 		msg.Domain = binding.Domain
 	}
+	if interaction, ok := msg.Raw.(Interaction); ok {
+		interaction.ConnectionID = msg.ConnectionID
+		interaction.ChatType = msg.ChatType
+		interaction.ChatID = msg.ChatID
+		interaction.UserID = msg.UserID
+		if strings.TrimSpace(interaction.MessageID) == "" {
+			interaction.MessageID = msg.MessageID
+		}
+		msg.Raw = interaction
+	}
+	var ingressID string
+	completeIngress := func() {
+		gw.completeIngressMessage(ctx, binding.Adapter, msg)
+	}
+	if gw.cfg.IngressJournal != nil && strings.TrimSpace(msg.MessageID) != "" {
+		ingressID = strings.TrimSpace(msg.ConnectionID) + "\x00" + strings.TrimSpace(msg.Protocol) + "\x00" + string(msg.Platform) + "\x00" + strings.TrimSpace(msg.MessageID)
+		duplicate, err := gw.cfg.IngressJournal.Begin(ingressID, msg)
+		if err != nil {
+			gw.logger.Error("persist bot ingress failed", "err", err)
+			return
+		}
+		if duplicate {
+			gw.logger.Info("duplicate bot ingress suppressed", "platform", msg.Platform, "connection", msg.ConnectionID, "message", hashID(msg.MessageID))
+			if state, _, recordErr := gw.cfg.IngressJournal.Record(ingressID); recordErr == nil && state == IngressCompleted {
+				gw.ackProviderIngress(ctx, binding.Adapter, msg.MessageID)
+			}
+			return
+		}
+	}
 	if gw.isSelfMessage(msg) {
 		gw.logger.Debug("bot ignored self message", "platform", binding.Platform, "connection", msg.ConnectionID, "chat", hashID(msg.ChatID), "message", hashID(msg.MessageID), "user", hashID(msg.UserID))
+		completeIngress()
 		return
 	}
 	src := msg.Session()
@@ -745,13 +827,24 @@ func (gw *BotGateway) handleMessage(ctx context.Context, binding AdapterBinding,
 	if !gw.checkAllowlist(binding.Platform, msg) {
 		gw.logger.Info("user not in allowlist", "platform", binding.Platform, "connection", msg.ConnectionID, "user", hashID(msg.UserID))
 		if gw.offerPairing(ctx, binding.Adapter, msg) {
+			completeIngress()
 			return
 		}
 		_ = gw.sendText(ctx, binding.Adapter, msg, "抱歉，您没有使用此 bot 的权限。")
+		completeIngress()
 		return
 	}
 	if gw.cfg.OnInbound != nil {
 		gw.cfg.OnInbound(msg)
+	}
+	if interaction, ok := msg.Raw.(Interaction); ok {
+		action, err := gw.interactions.Consume(interaction.CallbackID, interaction)
+		if err != nil {
+			_ = gw.sendText(ctx, binding.Adapter, msg, "这个按钮已过期、已使用或没有授权。请在桌面端重新发起操作。")
+			completeIngress()
+			return
+		}
+		msg.Text = action
 	}
 
 	if normalized, ok := gw.normalizeApprovalShortcut(key, msg.Text); ok {
@@ -760,6 +853,7 @@ func (gw *BotGateway) handleMessage(ctx context.Context, binding AdapterBinding,
 		msg.Text = normalized
 	} else if _, ok := decisionShortcutCommand(msg.Text); ok && gw.sessions.IsActive(key) {
 		_ = gw.sendText(ctx, binding.Adapter, msg, "没有找到可匹配的待处理操作。请重新触发一次操作后回复编号，或按消息中的 ID 使用 /approve、/deny 或 /answer。")
+		completeIngress()
 		return
 	}
 
@@ -767,6 +861,7 @@ func (gw *BotGateway) handleMessage(ctx context.Context, binding AdapterBinding,
 	if IsSlashBypass(msg.Text) {
 		gw.logger.Info("bot slash command", logFields...)
 		gw.handleSlashCommand(ctx, binding.Adapter, key, msg)
+		completeIngress()
 		return
 	}
 
@@ -774,6 +869,7 @@ func (gw *BotGateway) handleMessage(ctx context.Context, binding AdapterBinding,
 	// 会话机器（斜杠命令仍走上面的分支，/desktop release 永远可达）。
 	if gw.divertToDesktopTakeover(ctx, binding.Adapter, msg) {
 		gw.logger.Info("bot message diverted to desktop takeover", logFields...)
+		completeIngress()
 		return
 	}
 
@@ -1274,6 +1370,33 @@ func (gw *BotGateway) pendingApprovalIsRecovery(key, id string) bool {
 	return strings.EqualFold(strings.TrimSpace(a.Kind), "recovery") || a.Recovery != nil
 }
 
+// pendingApprovalState permits an owner/approver's private DM to resolve an
+// approval that originated in a group conversation. The connection boundary
+// is retained, so an opaque approval ID can never cross bot accounts.
+func (gw *BotGateway) pendingApprovalState(connectionID, fallbackKey, id string) (*sessionState, string, bool) {
+	gw.mu.Lock()
+	defer gw.mu.Unlock()
+	if state := gw.controllers[fallbackKey]; state != nil && state.ctrl != nil {
+		if state.pendingApprovals == nil {
+			// Compatibility for hosts that pre-seed a controller without the
+			// optional approval projection; the controller remains authoritative.
+			return state, fallbackKey, true
+		}
+		if _, ok := state.pendingApprovals[id]; ok {
+			return state, fallbackKey, true
+		}
+	}
+	for key, state := range gw.controllers {
+		if state == nil || state.connectionID != strings.TrimSpace(connectionID) || state.pendingApprovals == nil {
+			continue
+		}
+		if _, ok := state.pendingApprovals[id]; ok {
+			return state, key, true
+		}
+	}
+	return nil, "", false
+}
+
 func decisionShortcutCommand(text string) (string, bool) {
 	if command, ok := approvalShortcutCommand(text); ok {
 		return command, true
@@ -1443,17 +1566,15 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 			_ = gw.sendText(ctx, adapter, msg, "用法: /approve <id>")
 			return
 		}
-		gw.mu.Lock()
-		state, ok := gw.controllers[key]
-		gw.mu.Unlock()
+		state, approvalKey, ok := gw.pendingApprovalState(msg.ConnectionID, key, parts[1])
 		if ok && state.ctrl != nil {
 			// Recovery cards map allow → continue for older clients that only know Approve.
-			if gw.pendingApprovalIsRecovery(key, parts[1]) {
+			if gw.pendingApprovalIsRecovery(approvalKey, parts[1]) {
 				_ = state.ctrl.ResolveRecovery(parts[1], agent.RecoveryActionContinue, "")
 			} else {
 				state.ctrl.Approve(parts[1], true, false, false)
 			}
-			gw.forgetPendingApproval(key, parts[1])
+			gw.forgetPendingApproval(approvalKey, parts[1])
 			_ = gw.sendText(ctx, adapter, msg, "已批准。")
 		} else {
 			_ = gw.sendText(ctx, adapter, msg, "没有找到当前会话中的待审批操作，请重新触发一次操作。")
@@ -1468,16 +1589,14 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 			_ = gw.sendText(ctx, adapter, msg, "用法: /deny <id>")
 			return
 		}
-		gw.mu.Lock()
-		state, ok := gw.controllers[key]
-		gw.mu.Unlock()
+		state, approvalKey, ok := gw.pendingApprovalState(msg.ConnectionID, key, parts[1])
 		if ok && state.ctrl != nil {
-			if gw.pendingApprovalIsRecovery(key, parts[1]) {
+			if gw.pendingApprovalIsRecovery(approvalKey, parts[1]) {
 				_ = state.ctrl.ResolveRecovery(parts[1], agent.RecoveryActionRevise, "")
 			} else {
 				state.ctrl.Approve(parts[1], false, false, false)
 			}
-			gw.forgetPendingApproval(key, parts[1])
+			gw.forgetPendingApproval(approvalKey, parts[1])
 			_ = gw.sendText(ctx, adapter, msg, "已拒绝。")
 		} else {
 			_ = gw.sendText(ctx, adapter, msg, "没有找到当前会话中的待审批操作，请重新触发一次操作。")
@@ -1673,6 +1792,30 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 		}
 		_ = gw.sendText(ctx, adapter, msg, gw.handleSessionsCommand(msg.Text))
 
+	case slashCommandVerb(msg.Text) == "/session":
+		if !gw.requireCommandRole(ctx, adapter, msg, "admin") {
+			return
+		}
+		parts := strings.Fields(msg.Text)
+		if len(parts) < 2 || strings.EqualFold(parts[1], "current") {
+			_ = gw.sendText(ctx, adapter, msg, "当前远端会话："+key+"\n用法：/session new | /session use <会话> | /session current")
+			return
+		}
+		switch strings.ToLower(parts[1]) {
+		case "new":
+			msg.Text = "/new"
+			gw.handleSlashCommand(ctx, adapter, key, msg)
+		case "use":
+			if len(parts) < 3 {
+				_ = gw.sendText(ctx, adapter, msg, "用法：/session use <会话 ID 或关键词>")
+				return
+			}
+			msg.Text = "/attach session " + strings.Join(parts[2:], " ")
+			_ = gw.sendText(ctx, adapter, msg, gw.handleAttachSessionCommand(key, msg.Text))
+		default:
+			_ = gw.sendText(ctx, adapter, msg, "用法：/session current | /session new | /session use <会话>")
+		}
+
 	case slashCommandVerb(msg.Text) == "/attach":
 		if !gw.requireCommandRole(ctx, adapter, msg, "admin") {
 			return
@@ -1717,6 +1860,7 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 			"/projects [关键词] - 查看可切换项目索引\n" +
 			"/use project <id|名称> - 将当前远端会话切到某个项目\n" +
 			"/sessions search <关键词> - 搜索可 attach 的历史会话\n" +
+			"/session current|new|use <会话> - 管理当前远端会话绑定\n" +
 			"/attach session <id|关键词> - 绑定当前远端会话到已有历史会话\n" +
 			"/search all <关键词> - 跨已索引项目检索文件内容\n" +
 			"/desktop status|watch|approve|deny|answer - 桌面端上帝视角(需内嵌运行)\n" +
@@ -2126,10 +2270,6 @@ func toolApprovalModeLabel(mode string) string {
 	}
 }
 
-func (gw *BotGateway) runTurn(ctx context.Context, adapter Adapter, key string, msg InboundMessage, cleanup func()) {
-	gw.runTurnItem(ctx, adapter, key, msg, "", cleanup)
-}
-
 func (gw *BotGateway) runTurnItem(ctx context.Context, adapter Adapter, key string, msg InboundMessage, inboxItemID string, cleanup func()) {
 	gw.logger.Info("bot turn started", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8])
 	defer gw.finishTurnItem(ctx, adapter, key, msg, cleanup)
@@ -2138,6 +2278,7 @@ func (gw *BotGateway) runTurnItem(ctx context.Context, adapter Adapter, key stri
 	state := gw.getOrCreateSession(ctx, key, msg)
 	if state == nil || state.ctrl == nil {
 		_ = gw.sendText(ctx, adapter, msg, "内部错误：无法创建会话。")
+		gw.completeIngressMessage(ctx, adapter, msg)
 		return
 	}
 	gw.rememberSessionReady(msg, state.ctrl)
@@ -2156,9 +2297,12 @@ func (gw *BotGateway) runTurnItem(ctx context.Context, adapter Adapter, key stri
 		}
 		input = fmt.Sprintf("[%s] %s", userName, input)
 	}
-
 	// 发送"正在输入"状态
-	_ = adapter.SendTyping(ctx, msg.ChatID)
+	if typing, ok := adapter.(TypingMessageAdapter); ok {
+		_ = typing.SendTypingMessage(ctx, OutboundMessage{ConnectionID: msg.ConnectionID, Domain: msg.Domain, ChatID: msg.ChatID, ChatType: msg.ChatType})
+	} else {
+		_ = adapter.SendTyping(ctx, msg.ChatID)
+	}
 
 	// 创建事件渲染 sink
 	sink := newRenderSink(
@@ -2193,13 +2337,22 @@ func (gw *BotGateway) runTurnItem(ctx context.Context, adapter Adapter, key stri
 	// Finish initializing the sink before publishing it as the live target: once
 	// setTarget runs, other goroutines can reach this sink via state.sink.Emit.
 	sink.ctrl = state.ctrl
+	sink.setInteractionIssuer(func(requestID, action, messageID, chatID, userID string) string {
+		allowed := []string{userID}
+		if access, ok := gw.cfg.ConnectionAccess[msg.ConnectionID]; ok {
+			allowed = append(allowed, access.Approvers...)
+		} else {
+			allowed = append(allowed, gw.cfg.Allowlist.Approvers[msg.Platform]...)
+		}
+		return gw.interactions.Issue(msg.ConnectionID, msg.ChatType, chatID, messageID, requestID, action, allowed)
+	})
+	sink.setInteractionBinding(gw.interactions.BindMessage, gw.interactions.Revoke)
 	state.sink.setTarget(sink)
 	defer state.sink.setTarget(nil)
 
 	// 创建带取消的 context
 	turnCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-
 	gw.mu.Lock()
 	live := gw.controllers[key] == state
 	if live {
@@ -2213,6 +2366,26 @@ func (gw *BotGateway) runTurnItem(ctx context.Context, adapter Adapter, key stri
 		// abort the turn instead of running it uncancellable.
 		cancel()
 	}
+	// Renew provider typing indicators while the model is working. A failed
+	// notification only degrades the affordance; it never cancels the turn.
+	typingCtx, typingCancel := context.WithCancel(turnCtx)
+	defer typingCancel()
+	go func() {
+		ticker := time.NewTicker(8 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-typingCtx.Done():
+				return
+			case <-ticker.C:
+				if typing, ok := adapter.(TypingMessageAdapter); ok {
+					_ = typing.SendTypingMessage(typingCtx, OutboundMessage{ConnectionID: msg.ConnectionID, Domain: msg.Domain, ChatID: msg.ChatID, ChatType: msg.ChatType})
+				} else {
+					_ = adapter.SendTyping(typingCtx, msg.ChatID)
+				}
+			}
+		}
+	}()
 
 	// 运行一轮对话
 	var err error
@@ -2231,6 +2404,52 @@ func (gw *BotGateway) runTurnItem(ctx context.Context, adapter Adapter, key stri
 		return
 	}
 	gw.logger.Info("bot turn completed", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8])
+}
+
+func (gw *BotGateway) ingressIDForMessage(msg InboundMessage) string {
+	if gw == nil || gw.cfg.IngressJournal == nil || strings.TrimSpace(msg.MessageID) == "" {
+		return ""
+	}
+	return strings.TrimSpace(msg.ConnectionID) + "\x00" + strings.TrimSpace(msg.Protocol) + "\x00" + string(msg.Platform) + "\x00" + strings.TrimSpace(msg.MessageID)
+}
+
+func (gw *BotGateway) completeIngressMessage(ctx context.Context, adapter Adapter, msg InboundMessage) {
+	if gw == nil {
+		return
+	}
+	if id := gw.ingressIDForMessage(msg); id != "" && gw.cfg.IngressJournal != nil {
+		if err := gw.cfg.IngressJournal.Complete(id); err != nil {
+			gw.logger.Warn("complete bot ingress journal failed", "err", err)
+			return
+		}
+	}
+	gw.ackProviderIngress(ctx, adapter, msg.MessageID)
+}
+
+func (gw *BotGateway) ackProviderIngress(ctx context.Context, adapter Adapter, messageID string) {
+	ack, ok := adapter.(IngressAcknowledger)
+	if !ok || strings.TrimSpace(messageID) == "" {
+		return
+	}
+	if err := ack.AckIngress(ctx, messageID); err != nil {
+		gw.logger.Warn("ack provider ingress failed", "err", err)
+	}
+}
+
+func (gw *BotGateway) abandonIngressMessage(msg InboundMessage) {
+	if gw == nil || gw.cfg.IngressJournal == nil {
+		return
+	}
+	gw.cfg.IngressJournal.Abandon(gw.ingressIDForMessage(msg))
+}
+
+func (gw *BotGateway) retryProviderIngress(ctx context.Context, adapter Adapter, msg InboundMessage) {
+	gw.abandonIngressMessage(msg)
+	if retryer, ok := adapter.(IngressRetryer); ok {
+		if err := retryer.RetryIngress(ctx, msg.MessageID); err != nil {
+			gw.logger.Warn("request provider ingress retry failed", "err", err)
+		}
+	}
 }
 
 func (gw *BotGateway) inputTextWithMedia(ctx context.Context, adapter Adapter, msg InboundMessage, state *sessionState) string {
@@ -2314,6 +2533,8 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 		WorkspaceRoot:      profile.workspaceRoot,
 		SessionDir:         botSessionDir(profile.workspaceRoot),
 		ApprovalTimeout:    gw.approvalTimeout(),
+		PermissionDeny:     groupPermissionDenyRules(msg),
+		RecentKeep:         groupHistoryLimit(msg),
 		OnSessionRecovered: gw.botSessionRecoveredHandler(key, msg, state),
 	})
 	if err != nil {
@@ -2337,12 +2558,13 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 			return true
 		}
 		if err := leases.Rebind(profile.sessionPath); err != nil {
-			if !degrade("lease held elsewhere", err) {
-				ctrl.Close()
-				leases.Release()
-				gw.logger.Error("attached bot session is in use", "err", control.SessionInUseMessage(err))
-				return nil
-			}
+			// Never replace an existing mapping merely because another frontend
+			// currently owns its controller. Starting fresh here silently rewrites
+			// the mapping and forks one conversation into multiple sessions.
+			ctrl.Close()
+			leases.Release()
+			gw.logger.Error("mapped bot session is in use", "err", control.SessionInUseMessage(err))
+			return nil
 		} else if loaded, err := agent.LoadSession(profile.sessionPath); err != nil {
 			if !degrade("load failed", err) {
 				ctrl.Close()
@@ -2436,6 +2658,41 @@ func (gw *BotGateway) sessionProfileForMessage(msg InboundMessage) sessionRuntim
 		sessionPath:         canonicalBotPath(sessionPath),
 		sessionPathOptional: sessionPathOptional,
 	}
+}
+
+// groupPermissionDenyRules is a host-side boundary: a prompt cannot grant a
+// group chat access to the local filesystem, shell, or external side effects.
+// The normal conversational/read-only tools remain available, while an owner
+// may use a private chat or the desktop to perform the operation.
+func groupPermissionDenyRules(msg InboundMessage) []string {
+	if msg.ChatType != ChatGroup {
+		return nil
+	}
+	return []string{
+		"read_file(*)",
+		"ls(*)",
+		"grep(*)",
+		"glob(*)",
+		"bash(*)",
+		"git(*)",
+		"todo_write(*)",
+		"write_file(*)",
+		"edit_file(*)",
+		"multi_edit(*)",
+		"move_file(*)",
+		"delete_file(*)",
+		"apply_patch(*)",
+		"web_fetch(*)",
+		"web_search(*)",
+		"task(*)",
+	}
+}
+
+func groupHistoryLimit(msg InboundMessage) int {
+	if msg.ChatType == ChatGroup {
+		return 20
+	}
+	return 0
 }
 
 // sessionMappingPathForMessage resolves the persisted session_mappings entry
@@ -2736,7 +2993,12 @@ func sessionMappingIdentity(msg InboundMessage) (chatType string, userID string,
 	switch msg.ChatType {
 	case ChatGroup, ChatGuild:
 		chatType = string(msg.ChatType)
-		userID = strings.TrimSpace(msg.UserID)
+		// QQ group and guild mappings are conversation-scoped. The actor remains
+		// part of the structured turn context and authorization checks, but must
+		// not split one remote conversation into one session per member.
+		if msg.Platform != PlatformQQ {
+			userID = strings.TrimSpace(msg.UserID)
+		}
 	case ChatThread:
 		chatType = string(msg.ChatType)
 		threadID = strings.TrimSpace(msg.ThreadID)
@@ -2838,6 +3100,19 @@ func (gw *BotGateway) sendViaAdapter(ctx context.Context, binding AdapterBinding
 	}
 	if strings.TrimSpace(msg.Domain) == "" {
 		msg.Domain = binding.Domain
+	}
+	for i := range msg.Media {
+		policy := gw.cfg.OutboundMediaPolicy
+		if binding.Platform == PlatformQQ && binding.Protocol != "onebot-v11" && policy.MaxBytes < 100<<20 {
+			policy.MaxBytes = 100 << 20
+		}
+		prepared, err := PrepareOutboundMedia(ctx, msg.Media[i], policy)
+		if err != nil {
+			return SendResult{}, fmt.Errorf("prepare outbound media: %w", err)
+		}
+		msg.Media[i].Data = prepared.Data
+		msg.Media[i].Name = prepared.Name
+		msg.Media[i].MIME = prepared.MIME
 	}
 	result, err := binding.Adapter.Send(ctx, msg)
 	gw.markAdapterSend(binding, err)

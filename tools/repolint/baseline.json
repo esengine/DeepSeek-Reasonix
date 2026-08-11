@@ -2,14 +2,14 @@
   "limits": {
     "banner": 15,
     "commented-code": 0,
-    "complexity": 2101,
+    "complexity": 2148,
     "essay": 4072,
-    "file-size": 110143,
-    "function-size": 9157,
+    "file-size": 111134,
+    "function-size": 9380,
     "layering": 1,
     "marker": 0,
     "narrative": 64,
-    "test-file-size": 69921
+    "test-file-size": 69957
   },
   "files": {
     "cmd/e2ebench/main.go": {
@@ -42,13 +42,14 @@
       "essay": 11
     },
     "desktop/bot_connection_app.go": {
-      "file-size": 182
+      "file-size": 377
     },
     "desktop/bot_event_sink.go": {
       "essay": 2
     },
     "desktop/bot_runtime_app.go": {
-      "essay": 2
+      "essay": 2,
+      "function-size": 8
     },
     "desktop/cmd/sign/main.go": {
       "essay": 14
@@ -84,7 +85,7 @@
       "essay": 2
     },
     "desktop/frontend/src/App.tsx": {
-      "file-size": 4736
+      "file-size": 4746
     },
     "desktop/frontend/src/__tests__/app-chrome-tabs.test.ts": {
       "test-file-size": 19
@@ -108,7 +109,7 @@
       "test-file-size": 352
     },
     "desktop/frontend/src/__tests__/settings-refresh-snapshot.test.tsx": {
-      "test-file-size": 122
+      "test-file-size": 123
     },
     "desktop/frontend/src/__tests__/tab-switch-hydration.test.tsx": {
       "test-file-size": 162
@@ -141,7 +142,7 @@
       "file-size": 141
     },
     "desktop/frontend/src/components/SettingsPanel.tsx": {
-      "file-size": 6754
+      "file-size": 6887
     },
     "desktop/frontend/src/components/StatusBar.tsx": {
       "file-size": 20
@@ -165,7 +166,7 @@
       "file-size": 415
     },
     "desktop/frontend/src/lib/bridge.ts": {
-      "file-size": 4746
+      "file-size": 4769
     },
     "desktop/frontend/src/lib/crash.ts": {
       "file-size": 225
@@ -174,7 +175,7 @@
       "file-size": 269
     },
     "desktop/frontend/src/lib/types.ts": {
-      "file-size": 1456
+      "file-size": 1502
     },
     "desktop/frontend/src/lib/useController.ts": {
       "file-size": 3935
@@ -287,7 +288,7 @@
     "desktop/settings_app.go": {
       "complexity": 22,
       "essay": 26,
-      "file-size": 2795
+      "file-size": 2804
     },
     "desktop/settings_app_test.go": {
       "test-file-size": 1858
@@ -673,10 +674,10 @@
       "essay": 1
     },
     "internal/boot/boot.go": {
-      "complexity": 298,
+      "complexity": 299,
       "essay": 102,
-      "file-size": 2239,
-      "function-size": 1867,
+      "file-size": 2251,
+      "function-size": 1872,
       "narrative": 3
     },
     "internal/boot/boot_test.go": {
@@ -741,26 +742,30 @@
       "file-size": 210
     },
     "internal/bot/gateway.go": {
-      "complexity": 59,
+      "complexity": 77,
       "essay": 23,
-      "file-size": 2172,
-      "function-size": 274
+      "file-size": 2451,
+      "function-size": 359
     },
     "internal/bot/gateway_lock_test.go": {
       "essay": 8
     },
     "internal/bot/gateway_test.go": {
-      "test-file-size": 1705
+      "test-file-size": 1741
     },
     "internal/bot/project_index.go": {
       "file-size": 31
     },
     "internal/bot/qq/gateway.go": {
-      "function-size": 11
+      "complexity": 20,
+      "file-size": 646,
+      "function-size": 102
     },
     "internal/bot/render.go": {
+      "complexity": 7,
       "essay": 5,
-      "function-size": 24
+      "file-size": 101,
+      "function-size": 39
     },
     "internal/bot/turn_dispatch_test.go": {
       "essay": 3
@@ -797,7 +802,7 @@
     },
     "internal/cli/bot.go": {
       "complexity": 18,
-      "function-size": 113
+      "function-size": 125
     },
     "internal/cli/branch.go": {
       "essay": 2
@@ -977,7 +982,7 @@
     },
     "internal/config/config.go": {
       "essay": 54,
-      "file-size": 1508,
+      "file-size": 1563,
       "narrative": 2
     },
     "internal/config/credentials.go": {
@@ -1025,7 +1030,7 @@
       "test-file-size": 499
     },
     "internal/config/migrate.go": {
-      "file-size": 27
+      "file-size": 30
     },
     "internal/config/migrate_test.go": {
       "test-file-size": 358
@@ -1052,10 +1057,10 @@
       "file-size": 267
     },
     "internal/config/render.go": {
-      "complexity": 243,
+      "complexity": 250,
       "essay": 2,
-      "file-size": 989,
-      "function-size": 941
+      "file-size": 1056,
+      "function-size": 968
     },
     "internal/config/render_test.go": {
       "test-file-size": 757

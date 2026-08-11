@@ -491,6 +491,9 @@ func migrateLegacyQQConfig(cfg *Config, legacy legacyQQConfig) {
 	cfg.Bot.Allowlist.Enabled = true
 	cfg.Bot.Allowlist.QQUsers = mergeUniqueTrimmed(cfg.Bot.Allowlist.QQUsers, legacy.OwnerOpenID)
 	cfg.Bot.Allowlist.QQUsers = mergeUniqueTrimmed(cfg.Bot.Allowlist.QQUsers, legacy.Allowlist...)
+	if cfg.ConfigVersion < CurrentConfigVersion {
+		cfg.ConfigVersion = CurrentConfigVersion
+	}
 }
 
 func legacyQQConfigured(legacy legacyQQConfig) bool {

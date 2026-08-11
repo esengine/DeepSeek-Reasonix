@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -15,11 +16,12 @@ import (
 )
 
 type BotRuntimeStatusView struct {
-	Running     bool   `json:"running"`
-	Status      string `json:"status"`
-	Message     string `json:"message"`
-	Connections int    `json:"connections"`
-	StartedAt   string `json:"startedAt"`
+	Running     bool                        `json:"running"`
+	Status      string                      `json:"status"`
+	Message     string                      `json:"message"`
+	Connections int                         `json:"connections"`
+	StartedAt   string                      `json:"startedAt"`
+	Adapters    []bot.AdapterHealthSnapshot `json:"adapters"`
 }
 
 type desktopBotRuntime struct {
@@ -85,6 +87,10 @@ func (a *App) refreshBotRuntime() {
 		a.botRuntime.stop("error", err.Error())
 		return
 	}
+	// Expose the old [bot.qq] record through the same connection model as all
+	// other adapters. The normalization is idempotent and only in-memory here;
+	// session persistence writes it back atomically when a remote is received.
+	config.NormalizeLegacyQQConnection(cfg)
 	// Assign through a typed local so a nil *botBridgeHub never becomes a
 	// non-nil bot.DesktopBridge interface inside the gateway config.
 	var bridge bot.DesktopBridge
@@ -94,7 +100,7 @@ func (a *App) refreshBotRuntime() {
 		a.botBridge.seedWatchers(bridgeRoutesFromConfig(cfg.Bot.DesktopWatchers), watcherVersion)
 		bridge = a.botBridge
 	}
-	_ = a.botRuntime.apply(a.bootContext(), cfg, globalTabWorkspaceRoot(), a.persistRemoteBotToolApprovalMode, bridge)
+	_ = a.botRuntime.apply(a.bootContext(), cfg, globalTabWorkspaceRoot(), a.persistRemoteBotToolApprovalMode, bridge, a.remoteBotTurnAccepted)
 }
 
 func (a *App) loadDesktopBotConfig() (*config.Config, error) {
@@ -117,12 +123,12 @@ func (a *App) stopBotRuntime() {
 
 func (a *App) BotRuntimeStatus() BotRuntimeStatusView {
 	if a.botRuntime == nil {
-		return BotRuntimeStatusView{Status: "stopped", Message: "bot runtime is not started"}
+		return BotRuntimeStatusView{Status: "stopped", Message: "bot runtime is not started", Adapters: []bot.AdapterHealthSnapshot{}}
 	}
 	return a.botRuntime.snapshot()
 }
 
-func (r *desktopBotRuntime) apply(parent context.Context, cfg *config.Config, workspaceRoot string, onToolApprovalModeChange func(bot.InboundMessage, string) error, bridge bot.DesktopBridge) error {
+func (r *desktopBotRuntime) apply(parent context.Context, cfg *config.Config, workspaceRoot string, onToolApprovalModeChange func(bot.InboundMessage, string) error, bridge bot.DesktopBridge, onRemoteTurnAccepted func(bot.InboundMessage, string, string)) error {
 	if r == nil {
 		return nil
 	}
@@ -197,7 +203,24 @@ func (r *desktopBotRuntime) apply(parent context.Context, cfg *config.Config, wo
 		OnInbound:                botruntime.NewRemoteRememberer(logger),
 		OnSessionReady:           botruntime.NewSessionRemembererWithWorkspace(logger, workspaceRoot),
 		OnToolApprovalModeChange: onToolApprovalModeChange,
+		OnRemoteTurnAccepted:     onRemoteTurnAccepted,
 		Desktop:                  bridge,
+	}
+	mediaRoots := []string{}
+	gwCfg.OutboundMediaPolicy.ResolveDNS = true
+	if strings.TrimSpace(workspaceRoot) != "" {
+		mediaRoots = append(mediaRoots, workspaceRoot)
+	}
+	if home := config.ReasonixHomeDir(); strings.TrimSpace(home) != "" {
+		mediaRoots = append(mediaRoots, filepath.Join(home, "bot", "media"))
+		gwCfg.OutboundMediaPolicy.LocalRoots = mediaRoots
+		if journal, journalErr := bot.NewIngressJournal(filepath.Join(home, "bot", "ingress")); journalErr == nil {
+			gwCfg.IngressJournal = journal
+		} else {
+			logger.Warn("bot ingress journal disabled", "err", journalErr)
+		}
+	} else {
+		gwCfg.OutboundMediaPolicy.LocalRoots = mediaRoots
 	}
 	bindings := botruntime.AdapterBindings(cfg, plan.Enabled, nil, logger)
 	if len(bindings) == 0 {
@@ -229,6 +252,7 @@ func (r *desktopBotRuntime) apply(parent context.Context, cfg *config.Config, wo
 		Message:     message,
 		Connections: runningConnections,
 		StartedAt:   time.Now().UTC().Format(time.RFC3339),
+		Adapters:    gw.AdapterHealth(),
 	}
 	r.mu.Unlock()
 	return nil
@@ -327,6 +351,9 @@ func (r *desktopBotRuntime) stopCurrent() {
 }
 
 func (r *desktopBotRuntime) setStatus(status BotRuntimeStatusView) {
+	if status.Adapters == nil {
+		status.Adapters = []bot.AdapterHealthSnapshot{}
+	}
 	r.mu.Lock()
 	r.status = status
 	r.mu.Unlock()
@@ -335,7 +362,31 @@ func (r *desktopBotRuntime) setStatus(status BotRuntimeStatusView) {
 func (r *desktopBotRuntime) snapshot() BotRuntimeStatusView {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.status
+	status := r.status
+	if status.Adapters == nil {
+		status.Adapters = []bot.AdapterHealthSnapshot{}
+	}
+	if r.gw != nil {
+		status.Adapters = r.gw.AdapterHealth()
+		ready := 0
+		lifecycleAware := 0
+		for _, adapter := range status.Adapters {
+			if strings.TrimSpace(adapter.Phase) != "" {
+				lifecycleAware++
+			}
+			if adapter.Ready {
+				ready++
+			}
+		}
+		if lifecycleAware > 0 && ready == 0 && status.Running {
+			status.Status = "starting"
+			status.Message = "bot adapters are connecting; waiting for READY"
+		} else if lifecycleAware > 0 && ready < lifecycleAware {
+			status.Status = "degraded"
+			status.Message = fmt.Sprintf("%d/%d bot connection(s) online", ready, lifecycleAware)
+		}
+	}
+	return status
 }
 
 // updateConnectionToolApprovalMode updates a connection's tool approval mode

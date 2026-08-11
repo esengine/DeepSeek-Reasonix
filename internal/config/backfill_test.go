@@ -1539,7 +1539,7 @@ func TestApplyUserConfigUpgradesOnStartupVersion3NonWindowsAdvancesToV5(t *testi
 	if _, err := toml.DecodeFile(path, &got); err != nil {
 		t.Fatalf("decode migrated config: %v", err)
 	}
-	if got.ConfigVersion != 5 {
+	if got.ConfigVersion != CurrentConfigVersion {
 		t.Fatalf("config_version = %d, want 5", got.ConfigVersion)
 	}
 	deepseek, _ := got.Provider("deepseek")

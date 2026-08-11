@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,6 +16,8 @@ import (
 
 	"reasonix/internal/bot"
 	"reasonix/internal/bot/feishu"
+	"reasonix/internal/bot/onebot"
+	"reasonix/internal/bot/qq"
 	"reasonix/internal/bot/weixin"
 	"reasonix/internal/botruntime"
 	"reasonix/internal/config"
@@ -42,6 +46,9 @@ type BotConnectionSessionMappingView struct {
 type BotConnectionView struct {
 	ID               string                            `json:"id"`
 	Provider         string                            `json:"provider"`
+	Protocol         string                            `json:"protocol"`
+	QQ               QQConnectionOptionsView           `json:"qq"`
+	OneBot           OneBotConnectionOptionsView       `json:"onebot"`
 	Domain           string                            `json:"domain"`
 	Label            string                            `json:"label"`
 	Enabled          bool                              `json:"enabled"`
@@ -55,6 +62,20 @@ type BotConnectionView struct {
 	LastError        string                            `json:"lastError"`
 	CreatedAt        string                            `json:"createdAt"`
 	UpdatedAt        string                            `json:"updatedAt"`
+}
+
+type QQConnectionOptionsView struct {
+	Sandbox         bool   `json:"sandbox"`
+	IntentProfile   string `json:"intentProfile"`
+	NativeStreaming bool   `json:"nativeStreaming"`
+	RequireMention  bool   `json:"requireMention"`
+	HistoryLimit    int    `json:"historyLimit"`
+}
+
+type OneBotConnectionOptionsView struct {
+	WebSocketURL string `json:"websocketUrl"`
+	TokenEnv     string `json:"tokenEnv"`
+	SelfID       string `json:"selfId"`
 }
 
 type BotInstallStartResult struct {
@@ -74,6 +95,7 @@ type BotInstallPollResult struct {
 	Done       bool              `json:"done"`
 	Connection BotConnectionView `json:"connection"`
 	Status     string            `json:"status"`
+	URL        string            `json:"url,omitempty"`
 	Message    string            `json:"message"`
 	Error      string            `json:"error"`
 }
@@ -100,10 +122,27 @@ type botInstallSession struct {
 	StartedAt  time.Time
 	ExpireAt   time.Time
 	Weixin     *weixin.LoginSession
+	QQ         *qq.BindSession
 }
 
 func (a *App) StartBotConnectionInstall(provider, domain string) (BotInstallStartResult, error) {
 	provider, domain = normalizeBotInstallTarget(provider, domain)
+	if provider == "qq" {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		session, qrURL, err := qq.StartBind(ctx)
+		if err != nil {
+			return BotInstallStartResult{OK: false, Provider: provider, Domain: domain, Message: err.Error()}, nil
+		}
+		installID := randomInstallID()
+		a.mu.Lock()
+		if a.botInstalls == nil {
+			a.botInstalls = map[string]*botInstallSession{}
+		}
+		a.botInstalls[installID] = &botInstallSession{Provider: provider, Domain: domain, StartedAt: session.StartedAt, ExpireAt: session.ExpireAt, QQ: session}
+		a.mu.Unlock()
+		return BotInstallStartResult{OK: true, Provider: provider, Domain: domain, InstallID: installID, URL: qrURL, Interval: 2, ExpireIn: int(time.Until(session.ExpireAt).Seconds()), Message: "请使用 QQ 扫码完成 Bot 绑定。"}, nil
+	}
 	if provider == "weixin" {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
@@ -130,6 +169,9 @@ func (a *App) StartBotConnectionInstall(provider, domain string) (BotInstallStar
 			DeviceCode: session.QRCode, Interval: 3, ExpireIn: 120, Message: "请使用微信扫码完成连接。",
 		}, nil
 	}
+	if provider == "onebot" {
+		return BotInstallStartResult{OK: false, Provider: provider, Domain: domain, Message: "OneBot/NapCat 使用高级连接配置，请填写 WebSocket 地址和 Token，不走扫码安装。"}, nil
+	}
 	if provider != "feishu" {
 		return BotInstallStartResult{OK: false, Provider: provider, Domain: domain, Message: "unsupported bot provider"}, nil
 	}
@@ -154,6 +196,9 @@ func (a *App) PollBotConnectionInstall(installID string) (BotInstallPollResult, 
 	if time.Now().After(session.ExpireAt) {
 		a.deleteBotInstall(installID)
 		return BotInstallPollResult{Status: "expired", Error: "install session expired"}, nil
+	}
+	if session.Provider == "qq" {
+		return a.pollQQConnectionInstall(installID, session)
 	}
 	if session.Provider == "weixin" {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -194,6 +239,84 @@ func (a *App) PollBotConnectionInstall(installID string) (BotInstallPollResult, 
 	return a.pollFeishuConnectionInstall(installID, session)
 }
 
+func (a *App) pollQQConnectionInstall(installID string, session *botInstallSession) (BotInstallPollResult, error) {
+	if session == nil || session.QQ == nil {
+		return BotInstallPollResult{Status: "error", Error: "QQ 安装会话已失效。"}, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	result, err := session.QQ.Poll(ctx)
+	if err != nil {
+		return BotInstallPollResult{Status: "error", Error: err.Error()}, nil
+	}
+	switch result.Status {
+	case "none", "pending":
+		return BotInstallPollResult{Status: "pending", Message: "等待 QQ 扫码授权。"}, nil
+	case "expired":
+		newSession, qrURL, startErr := qq.StartBind(ctx)
+		if startErr != nil {
+			return BotInstallPollResult{Status: "error", Error: startErr.Error()}, nil
+		}
+		a.mu.Lock()
+		if current := a.botInstalls[installID]; current != nil {
+			current.QQ = newSession
+			current.ExpireAt = newSession.ExpireAt
+		}
+		a.mu.Unlock()
+		return BotInstallPollResult{Status: "pending", URL: qrURL, Message: "二维码已过期，已刷新。"}, nil
+	case "completed":
+		if strings.TrimSpace(result.BotAppID) == "" || strings.TrimSpace(result.BotSecret) == "" {
+			return BotInstallPollResult{Status: "error", Error: "QQ 绑定结果缺少 Bot 凭据。"}, nil
+		}
+		appID := strings.TrimSpace(result.BotAppID)
+		envName := qqSecretEnvName(appID)
+		connID := connectionID("qq", appID)
+		now := time.Now().UTC().Format(time.RFC3339)
+		conn := config.BotConnectionConfig{ID: connID, Provider: "qq", Protocol: "official", Domain: "qq", Label: "QQ Bot", Enabled: true, Status: "configured", Credential: config.BotConnectionCredential{AppID: appID, AppSecretEnv: envName}, QQ: config.QQConnectionOptions{IntentProfile: "group_and_c2c", NativeStreaming: true, RequireMention: true, HistoryLimit: 20}, Access: botInstallAccess(result.UserOpenID), CreatedAt: now, UpdatedAt: now}
+		err := config.EditUserConfigWithCredentials(func(c *config.Config) ([]config.CredentialChange, error) {
+			for i, existing := range c.Bot.Connections {
+				if existing.ID == conn.ID {
+					conn.CreatedAt = firstNonEmptyBot(existing.CreatedAt, conn.CreatedAt)
+					c.Bot.Connections[i] = conn
+					goto saved
+				}
+			}
+			c.Bot.Connections = append(c.Bot.Connections, conn)
+		saved:
+			c.Bot.Enabled = true
+			c.Bot.Allowlist.Enabled = true
+			c.Bot.Allowlist.QQUsers = appendUniqueBotString(c.Bot.Allowlist.QQUsers, result.UserOpenID)
+			c.Bot.Allowlist.QQApprovers = appendUniqueBotString(c.Bot.Allowlist.QQApprovers, result.UserOpenID)
+			c.Bot.Allowlist.QQAdmins = appendUniqueBotString(c.Bot.Allowlist.QQAdmins, result.UserOpenID)
+			return []config.CredentialChange{{Key: envName, Value: result.BotSecret}}, nil
+		})
+		if err != nil {
+			return BotInstallPollResult{Status: "error", Error: err.Error()}, nil
+		}
+		verifyCtx, verifyCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		_, verifyErr := qq.VerifyConnection(verifyCtx, config.QQBotConfig{
+			Enabled: true, AppID: appID, AppSecretEnv: envName,
+			IntentProfile: "group_and_c2c", NativeStreaming: true, RequireMention: true,
+		})
+		verifyCancel()
+		a.deleteBotInstall(installID)
+		a.refreshBotRuntimeAsync()
+		if verifyErr != nil {
+			return BotInstallPollResult{Done: true, Status: "configured", Connection: botConnectionView(conn), Message: "QQ Bot 凭据已保存，但 READY 检查未通过。请在连接诊断中重试。", Error: verifyErr.Error()}, nil
+		}
+		return BotInstallPollResult{Done: true, Status: "connected", Connection: botConnectionView(conn), Message: "QQ Bot 已绑定。请向 Bot 发送第一条消息完成回环测试。"}, nil
+	default:
+		return BotInstallPollResult{Status: "error", Error: "QQ 返回未知绑定状态。"}, nil
+	}
+}
+
+func qqSecretEnvName(appID string) string {
+	// App IDs are provider identifiers rather than secrets; keep the env key
+	// stable while avoiding punctuation and collisions.
+	sum := sha256.Sum256([]byte(strings.TrimSpace(appID)))
+	return "REASONIX_QQ_" + strings.ToUpper(hex.EncodeToString(sum[:])[:12]) + "_APP_SECRET"
+}
+
 func (a *App) DiagnoseBotConnection(id string) (BotConnectionDiagnostic, error) {
 	cfg, err := a.loadDesktopBotConfig()
 	if err != nil {
@@ -206,16 +329,43 @@ func (a *App) DiagnoseBotConnection(id string) (BotConnectionDiagnostic, error) 
 			phase := "config"
 			code := "config_ok"
 			reportable := false
+			runtimeObserved := false
+			if runtime := a.BotRuntimeStatus(); runtime.Adapters != nil {
+				for _, adapter := range runtime.Adapters {
+					if adapter.ID != conn.ID {
+						continue
+					}
+					runtimeObserved = true
+					phase = firstNonEmptyBot(adapter.Phase, adapter.Status)
+					if adapter.Ready {
+						status, message, code = "ok", "连接已达到 READY/RESUMED。", "gateway_ready"
+					} else if phase == "fatal" {
+						status, message, code, reportable = "error", firstNonEmptyBot(adapter.LastError, "网关拒绝连接。"), "gateway_fatal", true
+					} else if phase != "" {
+						status, message, code = phase, firstNonEmptyBot(adapter.LastError, "网关正在连接。"), "gateway_"+phase
+					}
+					break
+				}
+			}
 			if !conn.Enabled {
 				status = "disabled"
 				message = "连接已保存但未启用。"
 				code = "connection_disabled"
-			} else if conn.Status != "connected" {
+			} else if !runtimeObserved && conn.Status != "connected" {
 				status = firstNonEmptyBot(conn.Status, "pending")
 				message = firstNonEmptyBot(conn.LastError, "连接还未完成。")
 				phase = "install"
 				code = "connection_not_connected"
 				reportable = status == "error" || strings.TrimSpace(conn.LastError) != ""
+			} else if strings.EqualFold(strings.TrimSpace(conn.Protocol), "onebot-v11") || strings.EqualFold(strings.TrimSpace(conn.Protocol), "onebot") || strings.EqualFold(strings.TrimSpace(conn.Provider), "onebot") {
+				if strings.TrimSpace(conn.OneBot.WebSocketURL) == "" {
+					status, message, phase, code, reportable = "warning", "OneBot WebSocket 地址未设置。", "config", "onebot_url_missing", true
+				} else {
+					tokenEnv := firstNonEmptyBot(conn.OneBot.TokenEnv, conn.Credential.TokenEnv)
+					if tokenEnv != "" && !envIsSet(tokenEnv) {
+						status, message, phase, code, reportable = "warning", tokenEnv+" 未设置。", "credential", "secret_missing", true
+					}
+				}
 			} else if conn.Credential.AppSecretEnv != "" && strings.TrimSpace(conn.Credential.AppSecretEnv) != "" && !envIsSet(conn.Credential.AppSecretEnv) {
 				status = "warning"
 				message = conn.Credential.AppSecretEnv + " 未设置。"
@@ -257,29 +407,58 @@ func (a *App) TestBotConnection(id, target string) (BotConnectionDiagnostic, err
 		return botConnectionDiagnostic(nil, id, "missing", "config", "connection_missing", "未找到连接。", true), nil
 	}
 	target = firstNonEmptyBot(strings.TrimSpace(target), firstSessionRemoteID(conn.SessionMappings))
-	if conn.Provider != "feishu" && conn.Provider != "weixin" {
+	isOneBot := strings.EqualFold(strings.TrimSpace(conn.Protocol), "onebot-v11") || strings.EqualFold(strings.TrimSpace(conn.Protocol), "onebot") || strings.EqualFold(strings.TrimSpace(conn.Provider), "onebot")
+	if conn.Provider != "feishu" && conn.Provider != "weixin" && conn.Provider != "qq" && !isOneBot {
 		return botConnectionDiagnostic(conn, conn.ID, "warning", "send", "test_send_unsupported", "当前渠道暂不支持桌面端主动发送测试消息，可使用诊断检查基础配置。", false), nil
 	}
-	if target == "" {
+	if target == "" && !isOneBot {
 		return botConnectionDiagnostic(conn, conn.ID, "warning", "send", "test_target_missing", "请输入测试会话 ID 后再发送测试消息。", false), nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	var result bot.SendResult
-	switch conn.Provider {
-	case "feishu":
+	switch {
+	case isOneBot:
+		onebotCfg, cfgErr := onebot.FromConnection(*conn)
+		if cfgErr != nil {
+			err = cfgErr
+			break
+		}
+		adapter := onebot.New(onebotCfg, slog.Default())
+		err = adapter.Start(ctx)
+		if err == nil {
+			deadline := time.Now().Add(5 * time.Second)
+			for time.Now().Before(deadline) {
+				if lifecycle, ok := adapter.(bot.AdapterLifecycle); ok && lifecycle.Lifecycle().Ready {
+					break
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+			if lifecycle, ok := adapter.(bot.AdapterLifecycle); ok && !lifecycle.Lifecycle().Ready {
+				err = fmt.Errorf("onebot connection did not reach ready: %s", lifecycle.Lifecycle().LastError)
+			}
+		}
+		_ = adapter.Stop()
+	case conn.Provider == "feishu":
 		feishuCfg := cfg.Bot.Feishu
 		feishuCfg.Enabled = true
 		feishuCfg.Domain = firstNonEmptyBot(conn.Domain, feishuCfg.Domain)
 		feishuCfg.AppID = firstNonEmptyBot(conn.Credential.AppID, feishuCfg.AppID)
 		feishuCfg.AppSecretEnv = firstNonEmptyBot(conn.Credential.AppSecretEnv, feishuCfg.AppSecretEnv)
 		result, err = feishu.SendText(ctx, feishuCfg, target, "Reasonix bot 测试消息：连接和发送链路可用。")
-	case "weixin":
+	case conn.Provider == "weixin":
 		weixinCfg := cfg.Bot.Weixin
 		weixinCfg.Enabled = true
 		weixinCfg.AccountID = firstNonEmptyBot(conn.Credential.AccountID, weixinCfg.AccountID)
 		weixinCfg.TokenEnv = firstNonEmptyBot(conn.Credential.TokenEnv, weixinCfg.TokenEnv)
 		result, err = weixin.SendText(ctx, weixinCfg, target, "Reasonix bot 测试消息：连接和发送链路可用。")
+	case conn.Provider == "qq":
+		qqCfg := cfg.Bot.QQ
+		qqCfg.Enabled = true
+		qqCfg.AppID = firstNonEmptyBot(conn.Credential.AppID, qqCfg.AppID)
+		qqCfg.AppSecretEnv = firstNonEmptyBot(conn.Credential.AppSecretEnv, qqCfg.AppSecretEnv)
+		qqCfg.IntentProfile = firstNonEmptyBot(conn.QQ.IntentProfile, qqCfg.IntentProfile)
+		result, err = qq.SendText(ctx, qqCfg, target, "Reasonix bot 测试消息：连接和发送链路可用。")
 	}
 	if err != nil {
 		return botConnectionDiagnostic(conn, conn.ID, "error", "send", "test_send_failed", err.Error(), true), nil
@@ -649,6 +828,15 @@ func normalizeBotInstallTarget(provider, domain string) (string, string) {
 	if provider == "weixin" || provider == "wechat" {
 		return "weixin", "weixin"
 	}
+	if provider == "qq" || provider == "qqbot" {
+		return "qq", "qq"
+	}
+	if provider == "onebot" || provider == "onebot-v11" {
+		// OneBot/NapCat is a manual advanced connection. Keep it distinct from
+		// the official QQ QR flow so an API caller cannot silently fall through
+		// to Feishu's OAuth installer.
+		return "onebot", "qq"
+	}
 	if domain != "lark" {
 		domain = "feishu"
 	}
@@ -712,8 +900,10 @@ func postFeishuInstallFormResult(base string, body map[string]string) (map[strin
 
 func botConnectionView(conn config.BotConnectionConfig) BotConnectionView {
 	return BotConnectionView{
-		ID: conn.ID, Provider: conn.Provider, Domain: conn.Domain, Label: conn.Label, Enabled: conn.Enabled, Status: conn.Status,
-		Model: conn.Model, ToolApprovalMode: normalizeBotConnectionToolApprovalMode(conn.ToolApprovalMode), WorkspaceRoot: conn.WorkspaceRoot,
+		ID: conn.ID, Provider: conn.Provider, Protocol: conn.Protocol, Domain: conn.Domain, Label: conn.Label, Enabled: conn.Enabled, Status: conn.Status,
+		QQ:     QQConnectionOptionsView{Sandbox: conn.QQ.Sandbox, IntentProfile: conn.QQ.IntentProfile, NativeStreaming: conn.QQ.NativeStreaming, RequireMention: conn.QQ.RequireMention, HistoryLimit: conn.QQ.HistoryLimit},
+		OneBot: OneBotConnectionOptionsView{WebSocketURL: conn.OneBot.WebSocketURL, TokenEnv: conn.OneBot.TokenEnv, SelfID: conn.OneBot.SelfID},
+		Model:  conn.Model, ToolApprovalMode: normalizeBotConnectionToolApprovalMode(conn.ToolApprovalMode), WorkspaceRoot: conn.WorkspaceRoot,
 		Access: botAccessViewFromConfig(conn.Access),
 		Credential: BotConnectionCredentialView{
 			AppID: conn.Credential.AppID, AppSecretEnv: conn.Credential.AppSecretEnv, AccountID: conn.Credential.AccountID, TokenEnv: conn.Credential.TokenEnv,
@@ -776,6 +966,9 @@ func botConnectionConfig(view BotConnectionView) config.BotConnectionConfig {
 	return config.BotConnectionConfig{
 		ID:               strings.TrimSpace(view.ID),
 		Provider:         strings.TrimSpace(view.Provider),
+		Protocol:         strings.TrimSpace(view.Protocol),
+		QQ:               config.QQConnectionOptions{Sandbox: view.QQ.Sandbox, IntentProfile: strings.TrimSpace(view.QQ.IntentProfile), NativeStreaming: view.QQ.NativeStreaming, RequireMention: view.QQ.RequireMention, HistoryLimit: view.QQ.HistoryLimit},
+		OneBot:           config.OneBotConnectionOptions{WebSocketURL: strings.TrimSpace(view.OneBot.WebSocketURL), TokenEnv: strings.TrimSpace(view.OneBot.TokenEnv), SelfID: strings.TrimSpace(view.OneBot.SelfID)},
 		Domain:           strings.TrimSpace(view.Domain),
 		Label:            strings.TrimSpace(view.Label),
 		Enabled:          view.Enabled,
@@ -897,6 +1090,8 @@ func botInstallAccess(userID string) config.BotAccessConfig {
 	access := config.BotAccessConfig{Enabled: true, PairingEnabled: true}
 	if userID != "" {
 		access.Users = []string{userID}
+		access.Approvers = []string{userID}
+		access.Admins = []string{userID}
 	}
 	return access
 }

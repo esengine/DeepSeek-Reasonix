@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"reasonix/internal/bot"
 	"reasonix/internal/config"
@@ -26,6 +27,28 @@ func (a *App) newBotBridge() *botBridgeHub {
 		persistWatchers: a.bridgePersistWatchers,
 		takeoverChanged: a.emitProjectTreeChanged,
 		logger:          slog.Default(),
+	})
+}
+
+// remoteBotTurnAccepted is the Desktop fanout edge for a remote inbound turn.
+// It deliberately emits a lightweight event instead of building a second
+// controller. The existing tab/runtime may consume it immediately; opening a
+// tab later only hydrates the same persisted session.
+func (a *App) remoteBotTurnAccepted(msg bot.InboundMessage, sessionPath, displayText string) {
+	if a == nil {
+		return
+	}
+	a.emitRuntimeEvent("bot:turn-accepted", map[string]any{
+		"submissionId": bot.BuildSessionKey(msg.Session()) + ":" + strings.TrimSpace(msg.MessageID),
+		"sessionKey":   bot.BuildSessionKey(msg.Session()),
+		"connectionId": msg.ConnectionID,
+		"protocol":     msg.Protocol,
+		"chatType":     msg.ChatType,
+		"chatId":       msg.ChatID,
+		"userId":       msg.UserID,
+		"userName":     msg.UserName,
+		"text":         displayText,
+		"acceptedAt":   time.Now().UTC().Format(time.RFC3339Nano),
 	})
 }
 

@@ -574,7 +574,8 @@ ok(!document.getElementById("bot-step-access"), "bots tab omits the old global a
 ok(!document.getElementById("bot-step-behavior"), "bots tab omits global default behavior card");
 eq(document.querySelectorAll(".bot-step-chip").length, 0, "hero no longer shows the old two-step chips");
 
-eq(document.querySelectorAll(".bot-channel-tabs [role=\"tab\"]").length, 4, "bot manager uses four fixed channel tabs on the left");
+eq(document.querySelectorAll(".bot-channel-tabs [role=\"tab\"]").length, 5, "bot manager includes the advanced OneBot channel tab on the left");
+ok(Array.from(document.querySelectorAll(".bot-channel-tabs [role=\"tab\"]")).some((button) => button.textContent?.includes("OneBot")), "bot manager exposes OneBot as an explicit advanced channel");
 ok(document.querySelector(".bot-channel-setup-card")?.textContent?.includes("Configure QQ") === true, "unconfigured QQ tab shows key setup on the right");
 ok(document.body.textContent?.includes("Back to entry") === false, "bot manager does not show a return-to-entry action");
 

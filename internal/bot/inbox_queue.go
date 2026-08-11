@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -88,7 +89,7 @@ func enqueueViaInbox(ctrl control.SessionAPI, msg InboundMessage, intent session
 	if text == "" {
 		return sessioninbox.InboxReceipt{}, sessioninbox.ErrEmpty
 	}
-	idem := strings.TrimSpace(msg.MessageID)
+	idem := botMessageIdempotencyKey(msg)
 	req := control.InboxRequest{
 		Intent:      intent,
 		Display:     text,
@@ -104,6 +105,20 @@ func enqueueViaInbox(ctrl control.SessionAPI, msg InboundMessage, intent session
 	// Bot owns synchronous response rendering and drains the durable FIFO itself;
 	// detached Controller dispatch would lose the platform sink.
 	return ctrl.EnqueueInbox(req)
+}
+
+func botMessageIdempotencyKey(msg InboundMessage) string {
+	messageID := strings.TrimSpace(msg.MessageID)
+	if messageID == "" {
+		return ""
+	}
+	raw := strings.Join([]string{
+		strings.TrimSpace(msg.ConnectionID),
+		strings.TrimSpace(msg.Protocol),
+		string(msg.Platform),
+		messageID,
+	}, "\x00")
+	return fmt.Sprintf("bot-%x", sha256.Sum256([]byte(raw)))
 }
 
 // collectAppend tries to append text into the last queued follow-up blob within
@@ -123,7 +138,7 @@ func collectAppend(ctrl control.SessionAPI, msg InboundMessage, debounce time.Du
 	}
 	text := strings.TrimSpace(msg.Text)
 	if last != nil && debounce > 0 && time.Since(last.UpdatedAt) < debounce {
-		if _, err := ctrl.AppendInboxItem(last.ID, text, strings.TrimSpace(msg.MessageID), botInboxExtra(msg)); err == nil {
+		if _, err := ctrl.AppendInboxItem(last.ID, text, botMessageIdempotencyKey(msg), botInboxExtra(msg)); err == nil {
 			return sessioninbox.InboxReceipt{
 				ItemID:      last.ID,
 				Disposition: sessioninbox.DispositionQueuedFollowup,

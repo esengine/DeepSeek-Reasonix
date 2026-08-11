@@ -62,7 +62,7 @@ import {
   shortcutDefinitions,
   type ShortcutAction,
 } from "../lib/keyboardShortcuts";
-import type { BotAccessView, BotAllowlistView, BotConnectionDiagnostic, BotConnectionView, BotInstallStartResult, BotRouteView, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderModelCatalogUpdate, ProviderPresetView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
+import type { BotAccessView, BotAllowlistView, BotConnectionDiagnostic, BotConnectionView, BotInstallStartResult, BotRouteView, BotRuntimeStatusView, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderModelCatalogUpdate, ProviderPresetView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
 import { AppearanceOverview } from "./AppearanceOverview";
 import { applyConfiguredBaseAppearance, setBaseAppearance } from "../lib/themePack";
 import { InlineConfirmButton } from "./InlineConfirmButton";
@@ -1258,6 +1258,9 @@ function normalizeBotSettings(bot: BotSettingsView | null | undefined): BotSetti
       ...fallback.qq,
       ...bot?.qq,
       model: String(bot?.qq?.model ?? fallback.qq.model).trim(),
+	      intentProfile: String(bot?.qq?.intentProfile ?? fallback.qq.intentProfile).trim(),
+	      nativeStreaming: Boolean(bot?.qq?.nativeStreaming ?? fallback.qq.nativeStreaming),
+	      requireMention: Boolean(bot?.qq?.requireMention ?? fallback.qq.requireMention),
       toolApprovalMode: normalizeBotToolApprovalMode(bot?.qq?.toolApprovalMode),
       workspaceRoot: String(bot?.qq?.workspaceRoot ?? fallback.qq.workspaceRoot).trim(),
       access: normalizeBotAccess(bot?.qq?.access, fallback.qq.access),
@@ -1274,6 +1277,19 @@ function normalizeBotConnection(raw: any) {
   return {
     id: String(raw?.id ?? "").trim(),
     provider: String(raw?.provider ?? "").trim(),
+    protocol: String(raw?.protocol ?? (String(raw?.provider ?? "").trim() === "qq" ? "official" : "")).trim(),
+    qq: {
+		sandbox: Boolean(raw?.qq?.sandbox),
+      intentProfile: String(raw?.qq?.intentProfile ?? "").trim(),
+      nativeStreaming: Boolean(raw?.qq?.nativeStreaming),
+      requireMention: Boolean(raw?.qq?.requireMention),
+      historyLimit: Number(raw?.qq?.historyLimit ?? 0) || 0,
+    },
+    onebot: {
+      websocketUrl: String(raw?.onebot?.websocketUrl ?? "").trim(),
+      tokenEnv: String(raw?.onebot?.tokenEnv ?? "").trim(),
+      selfId: String(raw?.onebot?.selfId ?? "").trim(),
+    },
     domain: String(raw?.domain ?? "").trim(),
     label: String(raw?.label ?? "").trim(),
     enabled: raw?.enabled !== false,
@@ -2083,8 +2099,8 @@ function NetworkSection({ s, busy, apply }: SectionProps) {
   );
 }
 
-type BotInstallTarget = "qq" | "feishu" | "lark" | "weixin";
-type BotOfficialInstallTarget = Exclude<BotInstallTarget, "qq">;
+type BotInstallTarget = "qq" | "feishu" | "lark" | "weixin" | "onebot";
+type BotOfficialInstallTarget = BotInstallTarget;
 const BOT_ALLOWLIST_TEXT_KEYS = [
   "qqUsers",
   "feishuUsers",
@@ -2108,7 +2124,7 @@ type BotInstallState = {
   timeLeft: number;
   message: string;
 };
-const BOT_INSTALL_TARGETS: BotInstallTarget[] = ["qq", "feishu", "lark", "weixin"];
+const BOT_INSTALL_TARGETS: BotInstallTarget[] = ["qq", "feishu", "lark", "weixin", "onebot"];
 const BOT_INSTALL_DEFAULT_TIMEOUT_SECONDS = 300;
 const BOT_INSTALL_MIN_POLL_SECONDS = 3;
 const DEFAULT_QQ_SECRET_ENV = "QQ_BOT_APP_SECRET";
@@ -2145,6 +2161,24 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   const t = useT();
   const savedBot = normalizeBotSettings(s.bot);
   const [draft, setDraft] = useState<BotSettingsView>(savedBot);
+  const [botRuntimeStatus, setBotRuntimeStatus] = useState<BotRuntimeStatusView | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.runtime) return;
+    let active = true;
+    const refresh = () => {
+      void app.BotRuntimeStatus().then((status) => {
+        if (active) setBotRuntimeStatus(status);
+      }).catch(() => {
+        if (active) setBotRuntimeStatus(null);
+      });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 3000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, []);
   const [allowlistText, setAllowlistText] = useState<Record<BotAllowlistTextKey, string>>(() => botAllowlistTextValues(savedBot.allowlist));
   const [selfUserText, setSelfUserText] = useState<Record<BotSelfUserTextKey, string>>(() => botSelfUserTextValues(savedBot.selfUserIds));
   const [showAllPlatforms, setShowAllPlatforms] = useState(false);
@@ -2319,13 +2353,19 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   const qqAdded = qqBotAdded(draft.qq);
   const nativeRuntimeAvailable = typeof window !== "undefined" && Boolean(window.runtime);
   const browserPreviewBotConfigured = !nativeRuntimeAvailable && (qqAdded || draft.connections.length > 0);
-  const qqOnline = qqConfigured && nativeRuntimeAvailable;
+  const runtimeAdapterFor = (id: string) => botRuntimeStatus?.adapters?.find((adapter) => adapter.id === id);
+  const connectionOnline = (connection: BotConnectionView) => Boolean(runtimeAdapterFor(connection.id)?.ready);
+  const genericQQConnection = draft.connections.find((connection) => connection.provider === "qq");
+  const qqOnline = Boolean(
+    (qqConfigured && botRuntimeStatus?.adapters?.some((adapter) => adapter.platform === "qq" && adapter.ready)) ||
+    (genericQQConnection && connectionOnline(genericQQConnection)),
+  );
   const connectionItems: BotConnectionListItem[] = [
     ...(qqAdded ? [{ kind: "qq" as const }] : []),
     ...draft.connections.map((connection) => ({ kind: "connection" as const, connection })),
   ];
-  const selectedInstallConnection = isQQInstallTarget ? undefined : draft.connections.find((connection) => botInstallTargetMatchesConnection(installTarget, connection));
-  const selectedChannelConfigured = isQQInstallTarget ? qqAdded : Boolean(selectedInstallConnection);
+  const selectedInstallConnection = draft.connections.find((connection) => botInstallTargetMatchesConnection(installTarget, connection));
+  const selectedChannelConfigured = isQQInstallTarget ? qqAdded || Boolean(selectedInstallConnection) : Boolean(selectedInstallConnection);
   const routeConnectionOptions = [
     ...(qqAdded ? [{ id: "qq", label: "QQ" }] : []),
     ...draft.connections.map((connection) => ({
@@ -2364,7 +2404,7 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   }
   const startInstall = async (target: BotOfficialInstallTarget) => {
     if (installRequestInFlightRef.current) return;
-    const existing = draft.connections.find((connection) => botInstallTargetMatchesConnection(target, connection));
+    const existing = botChannelConnectionForTarget(target);
     if (existing) {
       installAttemptRef.current += 1;
       clearInstallTimers();
@@ -2376,7 +2416,7 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
     installAttemptRef.current = attempt;
     installRequestInFlightRef.current = true;
     setInstall({ target, result: null, status: "starting", timeLeft: 0, message: t("settings.botInstallStarting") });
-    const provider = target === "weixin" ? "weixin" : "feishu";
+    const provider = target === "qq" ? "qq" : target === "weixin" ? "weixin" : target === "onebot" ? "onebot" : "feishu";
     const domain = target === "lark" ? "lark" : target === "weixin" ? "weixin" : "feishu";
     try {
       const result = await app.StartBotConnectionInstall(provider, domain);
@@ -2419,6 +2459,9 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
       setInstall((prev) => ({ ...prev, status: "error", timeLeft: 0, message: poll.error }));
       return;
     }
+	if (poll.url) {
+		setInstall((prev) => ({ ...prev, result: prev.result ? { ...prev.result, url: poll.url } : prev.result }));
+	}
     setInstall((prev) => ({ ...prev, message: poll.message || t("settings.botInstallWaiting") }));
     scheduleInstallPoll(attempt, current.result.interval);
   };
@@ -2555,7 +2598,14 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
     setExpandedConnectionId("");
   };
   const selectedQQ = isQQInstallTarget && qqAdded;
-  const selectedConnection = isQQInstallTarget ? null : selectedInstallConnection ?? null;
+  const selectedConnection = selectedQQ ? null : selectedInstallConnection ?? null;
+  const selectedOneBot = selectedConnection?.protocol === "onebot-v11" || selectedConnection?.protocol === "onebot";
+  const selectedConnectionRuntime = selectedConnection ? runtimeAdapterFor(selectedConnection.id) : undefined;
+  const selectedConnectionOnline = Boolean(selectedConnectionRuntime?.ready);
+  const selectedConnectionStatus = selectedConnectionOnline
+    ? t("settings.botConnectionConnected")
+    : selectedConnectionRuntime?.phase || (selectedConnection?.status === "connected" ? t("settings.botConnectionConfigured") : selectedConnection?.status || t("settings.botConnectionDisconnected"));
+  const selectedOneBotOptions = selectedConnection?.onebot ?? { websocketUrl: "", tokenEnv: "", selfId: "" };
   const selectedDiagnostic = selectedConnection ? diagnostics[selectedConnection.id] : undefined;
   const selectedDiagnosticDetail = diagnosticReportDetail(selectedDiagnostic);
   const selectedConnectionRemote = selectedConnection ? firstConnectionRemote(selectedConnection) : "";
@@ -2571,13 +2621,42 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   const platformFilterAvailable = connectedPlatforms.size > 0 &&
     BOT_PLATFORM_KEYS.some((platform) => !connectedPlatforms.has(platform) && !platformHasAllowlistText(platform));
   const botChannelConnectionForTarget = (target: BotInstallTarget) =>
-    target === "qq" ? null : draft.connections.find((connection) => botInstallTargetMatchesConnection(target, connection));
+    draft.connections.find((connection) => botInstallTargetMatchesConnection(target, connection));
   const botChannelIsConfigured = (target: BotInstallTarget) =>
     target === "qq" ? qqAdded : Boolean(botChannelConnectionForTarget(target));
   const openBotChannel = (target: BotInstallTarget) => {
     setInstallTarget(target);
     const connection = botChannelConnectionForTarget(target);
     setExpandedConnectionId(target === "qq" && qqAdded ? QQ_CONNECTION_ID : connection?.id || "");
+  };
+  const addOneBotConnection = async () => {
+    if (botChannelConnectionForTarget("onebot")) {
+      setInstallTarget("onebot");
+      return;
+    }
+    const id = `onebot-${Date.now().toString(36)}`;
+    const connection: BotConnectionView = {
+      id,
+      provider: "onebot",
+      protocol: "onebot-v11",
+      domain: "qq",
+      label: "OneBot / NapCat",
+      enabled: false,
+      status: "pending",
+      model: "",
+      toolApprovalMode: "ask",
+      workspaceRoot: "",
+      access: defaultBotAccess(),
+      credential: { appId: "", appSecretEnv: "", accountId: "", tokenEnv: "QQ_ONEBOT_TOKEN", secretSet: false },
+      sessionMappings: [],
+      lastError: "",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      qq: { sandbox: false, intentProfile: "", nativeStreaming: false, requireMention: true, historyLimit: 20 },
+      onebot: { websocketUrl: "ws://127.0.0.1:3001", tokenEnv: "QQ_ONEBOT_TOKEN", selfId: "" },
+    };
+    await persistConnections((items) => [...items, connection]);
+    setInstallTarget("onebot");
   };
   const setSimpleAccessMode = (mode: "trusted" | "everyone") => {
     const patch = mode === "everyone"
@@ -2879,8 +2958,8 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
           <div className="bot-detail-card__title" id="bot-detail-title">
             {selectedConnection.label || botConnectionLabel(selectedConnection, t)}
             <span className="badge badge--neutral">{botConnectionLabel(selectedConnection, t)}</span>
-            <span className={`badge ${selectedConnection.status === "connected" ? "badge--project" : "badge--feedback"}`}>
-              {selectedConnection.status === "connected" ? t("settings.botConnectionConnected") : selectedConnection.status || t("settings.botConnectionDisconnected")}
+            <span className={`badge ${selectedConnectionOnline ? "badge--project" : "badge--feedback"}`}>
+              {selectedConnectionStatus}
             </span>
           </div>
           <div className="bot-detail-card__desc">{t("settings.botAutoSaveHint")}</div>
@@ -2889,8 +2968,8 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
           <button type="button" className="btn btn--small" disabled={busy} onClick={() => void diagnoseConnection(selectedConnection.id)}>
             {t("settings.botDiagnose")}
           </button>
-          {(selectedConnection.provider === "feishu" || selectedConnection.provider === "weixin") ? (
-            <button type="button" className="btn btn--small" disabled={busy || !selectedConnectionRemote} onClick={() => void testConnection(selectedConnection)}>
+          {(selectedConnection.provider === "feishu" || selectedConnection.provider === "weixin" || selectedConnection.provider === "qq" || selectedOneBot) ? (
+            <button type="button" className="btn btn--small" disabled={busy || (!selectedConnectionRemote && !selectedOneBot)} onClick={() => void testConnection(selectedConnection)}>
               {t("settings.botTest")}
             </button>
           ) : null}
@@ -2933,7 +3012,7 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
           </div>
           <div>
             <span>{t("settings.botConnectionColumnStatus")}</span>
-            <strong>{selectedConnection.status === "connected" ? t("settings.botConnectionConnected") : selectedConnection.status || t("settings.botConnectionDisconnected")}</strong>
+            <strong>{selectedConnectionStatus}</strong>
           </div>
         </div>
       </section>
@@ -2980,6 +3059,47 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
         (patch) => updateConnectionAccess(selectedConnection.id, patch),
         (patch) => void persistConnectionAccess(selectedConnection, patch),
       )}
+
+      {selectedOneBot ? (
+        <section className="bot-detail-section">
+          <div className="bot-detail-section__head">OneBot v11 / NapCat 高级接入</div>
+          <p className="bot-connect-panel__hint bot-connect-panel__hint--warning">
+            这是个人 QQ 高级方案：需要独立运行 NapCat 或其他 OneBot v11 端，涉及账号风控和额外运维。公网连接必须使用 wss:// 与 Token。
+          </p>
+          <SettingsField label="WebSocket 地址" hint="推荐本机正向 WebSocket；非 loopback 地址禁止明文 ws://。">
+            <input
+              className="mem-input"
+              value={selectedOneBotOptions.websocketUrl}
+              disabled={busy}
+              placeholder="ws://127.0.0.1:3001"
+              spellCheck={false}
+              onChange={(event) => updateConnection(selectedConnection.id, { onebot: { ...selectedOneBotOptions, websocketUrl: event.target.value } })}
+              onBlur={(event) => void persistConnection(selectedConnection.id, { onebot: { ...selectedOneBotOptions, websocketUrl: event.currentTarget.value } })}
+            />
+          </SettingsField>
+          <SettingsField label="Token 环境变量" hint="Token 只从 Reasonix credential store / 环境变量读取，不写入 TOML。">
+            <input
+              className="mem-input"
+              value={selectedOneBotOptions.tokenEnv}
+              disabled={busy}
+              placeholder="QQ_ONEBOT_TOKEN"
+              spellCheck={false}
+              onChange={(event) => updateConnection(selectedConnection.id, { onebot: { ...selectedOneBotOptions, tokenEnv: event.target.value } })}
+              onBlur={(event) => void persistConnection(selectedConnection.id, { onebot: { ...selectedOneBotOptions, tokenEnv: event.currentTarget.value } })}
+            />
+          </SettingsField>
+          <SettingsField label="Self ID" hint="用于群聊 @Bot 过滤；留空时由协议端登录信息校验。">
+            <input
+              className="mem-input"
+              value={selectedOneBotOptions.selfId}
+              disabled={busy}
+              spellCheck={false}
+              onChange={(event) => updateConnection(selectedConnection.id, { onebot: { ...selectedOneBotOptions, selfId: event.target.value } })}
+              onBlur={(event) => void persistConnection(selectedConnection.id, { onebot: { ...selectedOneBotOptions, selfId: event.currentTarget.value } })}
+            />
+          </SettingsField>
+        </section>
+      ) : null}
 
       <section className="bot-detail-section">
         <div className="bot-detail-section__head">{t("settings.botRuntimeSettings")}</div>
@@ -3183,7 +3303,8 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
         <div className="bot-channel-tabs" role="tablist" aria-label={t("settings.botChannelTabsLabel")}>
           {BOT_INSTALL_TARGETS.map((target) => {
             const configured = botChannelIsConfigured(target);
-            const connected = target === "qq" ? qqOnline : botChannelConnectionForTarget(target)?.status === "connected";
+            const targetConnection = botChannelConnectionForTarget(target);
+            const connected = target === "qq" ? qqOnline : Boolean(targetConnection && connectionOnline(targetConnection));
             return (
               <button
                 key={target}
@@ -3216,7 +3337,14 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
                 </div>
                 <span className="badge badge--neutral">{t("settings.botChannelNeedsSetup")}</span>
               </div>
-              {installPanelContent}
+              {installTarget === "onebot" ? (
+                <div className="bot-connect-panel">
+                  <p className="bot-connect-panel__hint bot-connect-panel__hint--warning">需要先运行 NapCat 或其他 OneBot v11 协议端。Reasonix 只连接正向 WebSocket，不托管个人 QQ 账号。</p>
+                  <button type="button" className="btn btn--primary" disabled={busy} onClick={() => void addOneBotConnection()}>
+                    创建 OneBot 连接配置
+                  </button>
+                </div>
+              ) : installPanelContent}
             </article>
           ) : selectedQQ ? (
             qqDetailCard
@@ -3679,6 +3807,7 @@ function diagnosticReportDetail(diag?: BotConnectionDiagnostic | string): string
 function botTargetLabel(target: BotInstallTarget, t: ReturnType<typeof useT>): string {
   switch (target) {
     case "qq": return "QQ";
+    case "onebot": return "OneBot / NapCat";
     case "lark": return "Lark";
     case "weixin": return t("settings.botWeixin");
     default: return t("settings.botFeishu");
@@ -3688,6 +3817,7 @@ function botTargetLabel(target: BotInstallTarget, t: ReturnType<typeof useT>): s
 function botTargetHint(target: BotInstallTarget, t: ReturnType<typeof useT>): string {
   switch (target) {
     case "qq": return t("settings.botInstallQQHint");
+    case "onebot": return "高级个人号接入";
     case "lark": return t("settings.botInstallLarkHint");
     case "weixin": return t("settings.botInstallWeixinHint");
     default: return t("settings.botInstallFeishuHint");
@@ -3714,12 +3844,15 @@ function botAccessReady(access: BotAccessView): boolean {
 }
 
 function botInstallTargetMatchesConnection(target: BotOfficialInstallTarget, connection: BotConnectionView): boolean {
+  if (target === "qq") return connection.provider === "qq";
+  if (target === "onebot") return connection.protocol === "onebot-v11" || connection.protocol === "onebot" || connection.provider === "onebot";
   if (target === "weixin") return connection.provider === "weixin";
   if (target === "lark") return connection.provider === "feishu" && connection.domain === "lark";
   return connection.provider === "feishu" && connection.domain !== "lark";
 }
 
 function botInstallTargetForConnection(connection: BotConnectionView): BotInstallTarget {
+  if (connection.protocol === "onebot-v11" || connection.protocol === "onebot" || connection.provider === "onebot") return "onebot";
   if (connection.provider === "weixin") return "weixin";
   if (connection.provider === "feishu" && connection.domain === "lark") return "lark";
   if (connection.provider === "qq") return "qq";
@@ -3755,11 +3888,11 @@ function botConnectionScopeLabel(connection: BotConnectionView, t: ReturnType<ty
 }
 
 function botConnectionSecretEnv(connection: BotConnectionView): string {
-  return connection.provider === "weixin" ? connection.credential.tokenEnv : connection.credential.appSecretEnv;
+	return connection.provider === "weixin" || connection.protocol === "onebot-v11" || connection.protocol === "onebot" ? connection.credential.tokenEnv || connection.onebot?.tokenEnv || "" : connection.credential.appSecretEnv;
 }
 
 function botConnectionSecretPatch(connection: BotConnectionView, value: string): Partial<BotConnectionView["credential"]> {
-  return connection.provider === "weixin" ? { tokenEnv: value } : { appSecretEnv: value };
+	return connection.provider === "weixin" || connection.protocol === "onebot-v11" || connection.protocol === "onebot" ? { tokenEnv: value } : { appSecretEnv: value };
 }
 
 function botConnectionCredentialSummary(connection: BotConnectionView, t: ReturnType<typeof useT>): string {

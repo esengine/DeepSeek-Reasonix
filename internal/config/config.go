@@ -87,6 +87,10 @@ type Config struct {
 	loadWarnings []string
 }
 
+// CurrentConfigVersion is the QQ Bot V2 schema generation. New configs and
+// migrated configs use the same version so feature detection is unambiguous.
+const CurrentConfigVersion = 6
+
 // KeepProjectSkillKey marks a skill field as an intentional project override.
 // An explicit empty/false project value must still be written so it can
 // override a non-default user setting in the layered configuration.
@@ -849,10 +853,16 @@ type BotAccessConfig struct {
 
 // QQBotConfig QQ 官方 Bot API v2 配置。
 type QQBotConfig struct {
-	Enabled          bool            `toml:"enabled"`
-	AppID            string          `toml:"app_id"`
-	AppSecretEnv     string          `toml:"app_secret_env"` // 环境变量名，如 QQ_BOT_APP_SECRET
-	Sandbox          bool            `toml:"sandbox"`        // true 使用 QQ 沙箱 API / gateway
+	Enabled      bool   `toml:"enabled"`
+	AppID        string `toml:"app_id"`
+	AppSecretEnv string `toml:"app_secret_env"` // 环境变量名，如 QQ_BOT_APP_SECRET
+	Sandbox      bool   `toml:"sandbox"`        // true 使用 QQ 沙箱 API / gateway
+	// IntentProfile selects the provider capability profile. The default
+	// "group_and_c2c" never requests the legacy GUILD_MESSAGES bit; "guild"
+	// explicitly opts into public guild/direct-message intents.
+	IntentProfile    string          `toml:"intent_profile"`
+	NativeStreaming  bool            `toml:"native_streaming"`
+	RequireMention   bool            `toml:"require_mention"`
 	Model            string          `toml:"model"`
 	ToolApprovalMode string          `toml:"tool_approval_mode"`
 	WorkspaceRoot    string          `toml:"workspace_root"`
@@ -889,9 +899,12 @@ type WeixinBotConfig struct {
 // knobs so the UI can expose a simple "connect first" flow while old configs
 // keep working.
 type BotConnectionConfig struct {
-	ID               string                        `toml:"id"`
-	Provider         string                        `toml:"provider"` // qq|feishu|weixin
-	Domain           string                        `toml:"domain"`   // feishu|lark|weixin|qq
+	ID       string `toml:"id"`
+	Provider string `toml:"provider"` // qq|feishu|weixin|onebot
+	// Protocol is the wire adapter for provider=qq. Empty means official QQ
+	// Bot; onebot-v11 is an explicitly advanced, user-account path.
+	Protocol         string                        `toml:"protocol"`
+	Domain           string                        `toml:"domain"` // feishu|lark|weixin|qq
 	Label            string                        `toml:"label"`
 	Enabled          bool                          `toml:"enabled"`
 	Status           string                        `toml:"status"` // disconnected|pending|connected|error
@@ -904,6 +917,22 @@ type BotConnectionConfig struct {
 	LastError        string                        `toml:"last_error"`
 	CreatedAt        string                        `toml:"created_at"`
 	UpdatedAt        string                        `toml:"updated_at"`
+	QQ               QQConnectionOptions           `toml:"qq"`
+	OneBot           OneBotConnectionOptions       `toml:"onebot"`
+}
+
+type QQConnectionOptions struct {
+	Sandbox         bool   `toml:"sandbox"`
+	IntentProfile   string `toml:"intent_profile"`
+	NativeStreaming bool   `toml:"native_streaming"`
+	RequireMention  bool   `toml:"require_mention"`
+	HistoryLimit    int    `toml:"history_limit"`
+}
+
+type OneBotConnectionOptions struct {
+	WebSocketURL string `toml:"websocket_url"`
+	TokenEnv     string `toml:"token_env"`
+	SelfID       string `toml:"self_id"`
 }
 
 type BotConnectionCredential struct {
@@ -923,6 +952,33 @@ type BotConnectionSessionMapping struct {
 	Scope         string `toml:"scope"`
 	WorkspaceRoot string `toml:"workspace_root"`
 	UpdatedAt     string `toml:"updated_at"`
+}
+
+// NormalizeLegacyQQConnection materializes the old [bot.qq] record as an
+// official generic connection. It is idempotent and never copies a secret.
+func NormalizeLegacyQQConnection(c *Config) bool {
+	if c == nil || !c.Bot.QQ.Enabled {
+		return false
+	}
+	for _, conn := range c.Bot.Connections {
+		provider := strings.ToLower(strings.TrimSpace(conn.Provider))
+		protocol := strings.ToLower(strings.TrimSpace(conn.Protocol))
+		if provider == "qq" && protocol != "onebot" && protocol != "onebot-v11" {
+			return false
+		}
+	}
+	c.Bot.Connections = append(c.Bot.Connections, BotConnectionConfig{
+		ID: "qq", Provider: "qq", Protocol: "official", Domain: "official",
+		Label: "QQ Bot", Enabled: true, Model: c.Bot.QQ.Model,
+		ToolApprovalMode: c.Bot.QQ.ToolApprovalMode, WorkspaceRoot: c.Bot.QQ.WorkspaceRoot,
+		Access:     c.Bot.QQ.Access,
+		Credential: BotConnectionCredential{AppID: c.Bot.QQ.AppID, AppSecretEnv: c.Bot.QQ.AppSecretEnv},
+		QQ:         QQConnectionOptions{Sandbox: c.Bot.QQ.Sandbox, IntentProfile: c.Bot.QQ.IntentProfile, NativeStreaming: c.Bot.QQ.NativeStreaming, RequireMention: c.Bot.QQ.RequireMention},
+	})
+	if c.ConfigVersion < CurrentConfigVersion {
+		c.ConfigVersion = CurrentConfigVersion
+	}
+	return true
 }
 
 // ServeConfig controls the HTTP serve frontend security settings.
@@ -1818,7 +1874,7 @@ const LanguagePolicy = `Reply in the same language the user is using in their mo
 // Default returns the built-in default configuration.
 func Default() *Config {
 	return &Config{
-		ConfigVersion:    5,
+		ConfigVersion:    CurrentConfigVersion,
 		DefaultModel:     "deepseek-flash",
 		CredentialsStore: CredentialsStoreAuto,
 		UI:               UIConfig{Theme: "auto", ShowTurnUsage: true},

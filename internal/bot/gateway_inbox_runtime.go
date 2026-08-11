@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"reasonix/internal/control"
 	"reasonix/internal/sessioninbox"
 )
 
@@ -26,7 +27,61 @@ func (gw *BotGateway) dispatchQueueResult(ctx context.Context, adapter Adapter, 
 	}
 	// Keep the dispatch loop free to deliver approval/answer replies while the
 	// active turn blocks. The per-session lock still serializes all turns.
-	gw.turnWG.Go(func() { gw.runTurn(ctx, adapter, key, msg, cleanup) })
+	gw.turnWG.Go(func() { gw.runInitialInboxTurn(ctx, adapter, key, msg, cleanup) })
+}
+
+func (gw *BotGateway) runInitialInboxTurn(ctx context.Context, adapter Adapter, key string, msg InboundMessage, cleanup func()) {
+	profile := gw.sessionProfileForMessage(msg)
+	state := gw.getOrCreateSession(ctx, key, msg)
+	if state == nil || state.ctrl == nil {
+		message := "内部错误：无法创建会话。"
+		if profile.sessionPath != "" {
+			message = "当前绑定会话正在另一个窗口中使用；本次消息未改绑、未创建重复会话。请稍后重试。"
+		}
+		_ = gw.sendText(ctx, adapter, msg, message)
+		gw.retryProviderIngress(ctx, adapter, msg)
+		gw.sessions.Release(key)
+		if cleanup != nil {
+			cleanup()
+		}
+		return
+	}
+	gw.rememberSessionReady(msg, state.ctrl)
+	prepared := gw.prepareDurableInboxMessage(ctx, adapter, msg, state)
+	api, ok := state.ctrl.(control.SessionAPI)
+	if !ok {
+		// ControllerFactory historically accepted the smaller Controller
+		// contract. Keep custom/test controllers working while production
+		// controllers use the durable inbox owner path below.
+		gw.logger.Debug("bot controller does not expose durable inbox; using direct turn", "session", key[:8])
+		gw.completeIngressMessage(ctx, adapter, msg)
+		if gw.cfg.OnRemoteTurnAccepted != nil {
+			gw.cfg.OnRemoteTurnAccepted(msg, state.ctrl.SessionPath(), prepared.Text)
+		}
+		gw.runTurnItem(ctx, adapter, key, prepared, "", cleanup)
+		return
+	}
+	receipt, err := enqueueViaInbox(api, prepared, sessioninbox.IntentFollowup)
+	if err != nil {
+		gw.logger.Warn("persist initial bot turn failed", "session", key[:8], "err", err)
+		_ = gw.sendText(ctx, adapter, msg, "消息暂时无法持久化，请稍后重试。")
+		gw.retryProviderIngress(ctx, adapter, msg)
+		gw.finishTurnItem(ctx, adapter, key, msg, cleanup)
+		return
+	}
+	gw.completeIngressMessage(ctx, adapter, msg)
+	if receipt.Idempotent {
+		meta, _, readErr := api.ReadInboxItem(receipt.ItemID)
+		if readErr != nil || meta.State != sessioninbox.StateQueued {
+			gw.logger.Info("duplicate durable bot turn suppressed", "session", key[:8], "item", receipt.ItemID, "state", meta.State)
+			gw.finishTurnItem(ctx, adapter, key, msg, cleanup)
+			return
+		}
+	}
+	if gw.cfg.OnRemoteTurnAccepted != nil {
+		gw.cfg.OnRemoteTurnAccepted(msg, state.ctrl.SessionPath(), prepared.Text)
+	}
+	gw.runTurnItem(ctx, adapter, key, prepared, receipt.ItemID, cleanup)
 }
 
 func (gw *BotGateway) finishTurnItem(ctx context.Context, adapter Adapter, key string, fallback InboundMessage, cleanup func()) {

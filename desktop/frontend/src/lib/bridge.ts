@@ -919,6 +919,28 @@ export function onProjectTreeChanged(cb: () => void): () => void {
   return () => {};
 }
 
+export type BotTurnAcceptedEvent = {
+  submissionId?: string;
+  sessionKey?: string;
+  connectionId?: string;
+  protocol?: string;
+  chatType?: string;
+  chatId?: string;
+  userId?: string;
+  userName?: string;
+  text?: string;
+  acceptedAt?: string;
+};
+
+export function onBotTurnAccepted(cb: (event: BotTurnAcceptedEvent) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("bot:turn-accepted", (payload?: unknown) => {
+      if (payload && typeof payload === "object") cb(payload as BotTurnAcceptedEvent);
+    });
+  }
+  return () => {};
+}
+
 // onTopicActivation subscribes to the "topic:activation" channel carrying the
 // lifecycle of ticketed StartTopicActivation requests (starting/ready/failed/
 // cancelled). Returns an unsubscribe.
@@ -4634,6 +4656,7 @@ function makeMockApp(): AppBindings {
             message: settings.bot.enabled && runningConnections > 0 ? `${runningConnections} bot connection(s) running` : "bot runtime is not started",
             connections: runningConnections,
             startedAt: settings.bot.enabled && runningConnections > 0 ? new Date(t0).toISOString() : "",
+            adapters: [],
           };
         },
         async StartBotConnectionInstall(provider: string, domain: string) {

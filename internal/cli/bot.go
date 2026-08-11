@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -148,6 +149,18 @@ func botStart(args []string, version string) int {
 		Debounce:       time.Duration(cfg.Bot.DebounceMs) * time.Millisecond,
 		OnInbound:      rememberInboundRemote,
 		OnSessionReady: botruntime.NewSessionRemembererWithWorkspace(logger, workspaceRoot),
+	}
+	gwCfg.OutboundMediaPolicy.ResolveDNS = true
+	if strings.TrimSpace(workspaceRoot) != "" {
+		gwCfg.OutboundMediaPolicy.LocalRoots = append(gwCfg.OutboundMediaPolicy.LocalRoots, workspaceRoot)
+	}
+	if home := config.ReasonixHomeDir(); strings.TrimSpace(home) != "" {
+		gwCfg.OutboundMediaPolicy.LocalRoots = append(gwCfg.OutboundMediaPolicy.LocalRoots, filepath.Join(home, "bot", "media"))
+		if journal, journalErr := bot.NewIngressJournal(filepath.Join(home, "bot", "ingress")); journalErr == nil {
+			gwCfg.IngressJournal = journal
+		} else {
+			logger.Warn("bot ingress journal disabled", "err", journalErr)
+		}
 	}
 
 	feishuDomains := botruntime.RequestedFeishuDomains(requestedChannels)

@@ -231,6 +231,9 @@ type QQBotView struct {
 	AppSecretEnv     string        `json:"appSecretEnv"`
 	SecretSet        bool          `json:"secretSet"`
 	Sandbox          bool          `json:"sandbox"`
+	IntentProfile    string        `json:"intentProfile"`
+	NativeStreaming  bool          `json:"nativeStreaming"`
+	RequireMention   bool          `json:"requireMention"`
 	Model            string        `json:"model"`
 	ToolApprovalMode string        `json:"toolApprovalMode"`
 	WorkspaceRoot    string        `json:"workspaceRoot"`
@@ -1119,6 +1122,9 @@ func botSettingsView(b config.BotConfig) BotSettingsView {
 			AppSecretEnv:     b.QQ.AppSecretEnv,
 			SecretSet:        strings.TrimSpace(b.QQ.AppSecretEnv) != "" && os.Getenv(b.QQ.AppSecretEnv) != "",
 			Sandbox:          b.QQ.Sandbox,
+			IntentProfile:    b.QQ.IntentProfile,
+			NativeStreaming:  b.QQ.NativeStreaming,
+			RequireMention:   b.QQ.RequireMention,
 			Model:            b.QQ.Model,
 			ToolApprovalMode: normalizeBotConnectionToolApprovalMode(b.QQ.ToolApprovalMode),
 			WorkspaceRoot:    b.QQ.WorkspaceRoot,
@@ -3150,6 +3156,9 @@ func (a *App) SetBotSettings(b BotSettingsView) error {
 			AppID:            strings.TrimSpace(b.QQ.AppID),
 			AppSecretEnv:     strings.TrimSpace(b.QQ.AppSecretEnv),
 			Sandbox:          b.QQ.Sandbox,
+			IntentProfile:    strings.TrimSpace(b.QQ.IntentProfile),
+			NativeStreaming:  b.QQ.NativeStreaming,
+			RequireMention:   b.QQ.RequireMention,
 			Model:            strings.TrimSpace(b.QQ.Model),
 			ToolApprovalMode: normalizeBotConnectionToolApprovalMode(b.QQ.ToolApprovalMode),
 			WorkspaceRoot:    strings.TrimSpace(b.QQ.WorkspaceRoot),

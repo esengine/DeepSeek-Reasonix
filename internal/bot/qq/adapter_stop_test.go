@@ -2,28 +2,38 @@ package qq
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
-	"golang.org/x/net/websocket"
+	"github.com/gorilla/websocket"
 )
 
 // Guards the Stop drain contract: the gateway loop blocks in websocket reads
 // that do not honor ctx, so Stop must close the tracked connection to unblock
 // them and must wait for the loop goroutine to exit before returning.
 func TestStopClosesTrackedConnAndWaitsForLoop(t *testing.T) {
-	srv := httptest.NewServer(websocket.Handler(func(ws *websocket.Conn) {
-		_, _ = io.Copy(io.Discard, ws) // hold the connection open, send nothing
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ws, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer ws.Close()
+		for {
+			if _, _, err := ws.ReadMessage(); err != nil {
+				return
+			}
+		}
 	}))
 	defer srv.Close()
 
-	conn, err := websocket.Dial("ws"+strings.TrimPrefix(srv.URL, "http"), "", srv.URL)
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http"), nil)
 	if err != nil {
 		t.Fatalf("dial test server: %v", err)
 	}
@@ -41,7 +51,7 @@ func TestStopClosesTrackedConnAndWaitsForLoop(t *testing.T) {
 		defer a.dropConn(conn)
 		close(tracked)
 		var payload gatewayPayload
-		_ = json.NewDecoder(conn).Decode(&payload) // blocks like connectGateway's reads
+		_ = conn.ReadJSON(&payload) // blocks like connectGateway's reads
 		close(decodeReturned)
 	})
 	select {

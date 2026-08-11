@@ -33,6 +33,15 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	if c == nil {
 		c = Default()
 	}
+	// Keep legacy [bot.qq] readable while materializing the v2 connection mirror
+	// on every config rewrite. Work on a shallow copy so rendering itself never
+	// mutates the caller's in-memory config.
+	if c.Bot.QQ.Enabled {
+		copyConfig := *c
+		copyConfig.Bot.Connections = append([]BotConnectionConfig(nil), c.Bot.Connections...)
+		NormalizeLegacyQQConnection(&copyConfig)
+		c = &copyConfig
+	}
 	switch scope {
 	case RenderScopeUser, RenderScopeProject:
 	default:
@@ -597,6 +606,15 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		fmt.Fprintf(&b, "app_id = %q\n", c.Bot.QQ.AppID)
 		fmt.Fprintf(&b, "app_secret_env = %q\n", c.Bot.QQ.AppSecretEnv)
 		fmt.Fprintf(&b, "sandbox = %v\n", c.Bot.QQ.Sandbox)
+		if strings.TrimSpace(c.Bot.QQ.IntentProfile) != "" {
+			fmt.Fprintf(&b, "intent_profile = %q\n", strings.TrimSpace(c.Bot.QQ.IntentProfile))
+		}
+		if c.Bot.QQ.NativeStreaming {
+			b.WriteString("native_streaming = true\n")
+		}
+		if c.Bot.QQ.RequireMention {
+			b.WriteString("require_mention = true\n")
+		}
 		if strings.TrimSpace(c.Bot.QQ.Model) != "" {
 			fmt.Fprintf(&b, "model = %q\n", strings.TrimSpace(c.Bot.QQ.Model))
 		}
@@ -630,6 +648,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			b.WriteString("\n[[bot.connections]]\n")
 			fmt.Fprintf(&b, "id = %q\n", conn.ID)
 			fmt.Fprintf(&b, "provider = %q\n", conn.Provider)
+			if strings.TrimSpace(conn.Protocol) != "" {
+				fmt.Fprintf(&b, "protocol = %q\n", conn.Protocol)
+			}
 			fmt.Fprintf(&b, "domain = %q\n", conn.Domain)
 			fmt.Fprintf(&b, "label = %q\n", conn.Label)
 			fmt.Fprintf(&b, "enabled = %v\n", conn.Enabled)
@@ -657,6 +678,12 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			}
 			if parts := renderBotCredential(conn.Credential); parts != "" {
 				fmt.Fprintf(&b, "credential = %s\n", parts)
+			}
+			if parts := renderQQConnectionOptions(conn.QQ); parts != "" {
+				fmt.Fprintf(&b, "qq = %s\n", parts)
+			}
+			if parts := renderOneBotConnectionOptions(conn.OneBot); parts != "" {
+				fmt.Fprintf(&b, "onebot = %s\n", parts)
 			}
 			if len(conn.SessionMappings) > 0 {
 				fmt.Fprintf(&b, "session_mappings = %s\n", renderBotSessionMappings(conn.SessionMappings))
@@ -1647,6 +1674,46 @@ func renderBotCredential(cred BotConnectionCredential) string {
 		return ""
 	}
 	return renderStringMap(parts)
+}
+
+func renderQQConnectionOptions(opts QQConnectionOptions) string {
+	var parts []string
+	if opts.Sandbox {
+		parts = append(parts, "sandbox = true")
+	}
+	if strings.TrimSpace(opts.IntentProfile) != "" {
+		parts = append(parts, fmt.Sprintf("intent_profile = %q", strings.TrimSpace(opts.IntentProfile)))
+	}
+	if opts.NativeStreaming {
+		parts = append(parts, "native_streaming = true")
+	}
+	if opts.RequireMention {
+		parts = append(parts, "require_mention = true")
+	}
+	if opts.HistoryLimit > 0 {
+		parts = append(parts, fmt.Sprintf("history_limit = %d", opts.HistoryLimit))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "{ " + strings.Join(parts, ", ") + " }"
+}
+
+func renderOneBotConnectionOptions(opts OneBotConnectionOptions) string {
+	var parts []string
+	if strings.TrimSpace(opts.WebSocketURL) != "" {
+		parts = append(parts, fmt.Sprintf("websocket_url = %q", strings.TrimSpace(opts.WebSocketURL)))
+	}
+	if strings.TrimSpace(opts.TokenEnv) != "" {
+		parts = append(parts, fmt.Sprintf("token_env = %q", strings.TrimSpace(opts.TokenEnv)))
+	}
+	if strings.TrimSpace(opts.SelfID) != "" {
+		parts = append(parts, fmt.Sprintf("self_id = %q", strings.TrimSpace(opts.SelfID)))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "{ " + strings.Join(parts, ", ") + " }"
 }
 
 func renderBotAccess(access BotAccessConfig) string {

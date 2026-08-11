@@ -106,6 +106,13 @@ type Options struct {
 	// --allowed-tools). They override configured ask rules but never deny rules
 	// and are not persisted.
 	PermissionAllow []string
+	// PermissionDeny adds process-local fail-closed rules for constrained hosts
+	// such as QQ group conversations. They are merged with configured denies and
+	// are never persisted or exposed as a provider prompt/schema change.
+	PermissionDeny []string
+	// RecentKeep overrides the configured compaction keep count for a host
+	// session. Zero preserves the configured value.
+	RecentKeep int
 	// AdditionalDirs grants this session's file writers and sandboxed shell
 	// access to extra directories without changing persisted sandbox config.
 	AdditionalDirs []string
@@ -230,6 +237,10 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	cfg, err := config.LoadForRoot(root)
 	if err != nil {
 		return nil, err
+	}
+	recentKeep := cfg.Agent.RecentKeep
+	if opts.RecentKeep > 0 {
+		recentKeep = opts.RecentKeep
 	}
 	deepSeekProtocolMigErr = deepSeekProtocolMigrationNoticeError(handleConfigLoadWarnings(opts, cfg), deepSeekProtocolMigErr)
 	applyRuntimeAutoPricingCurrency(cfg, opts.AutoPricingCurrency)
@@ -952,7 +963,8 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// weaker path around the parent gate.
 	// Sub-agents always run headless: they have no UI to answer a prompt, so they
 	// inherit this same gate.
-	policy := permission.New(cfg.Permissions.Mode, cfg.Permissions.Allow, cfg.Permissions.Ask, cfg.Permissions.Deny).
+	denyRules := append(append([]string(nil), cfg.Permissions.Deny...), opts.PermissionDeny...)
+	policy := permission.New(cfg.Permissions.Mode, cfg.Permissions.Allow, cfg.Permissions.Ask, denyRules).
 		WithAllowDynamicBashFallback(cfg.Permissions.AllowDynamicBash).
 		WithSessionAllow(opts.PermissionAllow)
 	headlessGate := control.NewSharedHeadlessGate(policy, opts.HeadlessApprovalMode)
@@ -1058,7 +1070,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 			ParentRegistry:      reg,
 			MaxSteps:            maxSteps,
 			ContextWindow:       entry.ContextWindow,
-			RecentKeep:          cfg.Agent.RecentKeep,
+			RecentKeep:          recentKeep,
 			SoftCompactRatio:    cfg.Agent.SoftCompactRatio,
 			ToolResultSnipRatio: cfg.Agent.ToolResultSnipRatio,
 			CompactRatio:        cfg.Agent.CompactRatio,
@@ -1202,7 +1214,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 			UsageSource:         event.UsageSourceSubagent,
 			Gate:                headlessGate,
 			ContextWindow:       ctxWin,
-			RecentKeep:          cfg.Agent.RecentKeep,
+			RecentKeep:          recentKeep,
 			SoftCompactRatio:    cfg.Agent.SoftCompactRatio,
 			ToolResultSnipRatio: cfg.Agent.ToolResultSnipRatio,
 			CompactRatio:        cfg.Agent.CompactRatio,
@@ -1836,7 +1848,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		CompactRatio:                 cfg.Agent.CompactRatio,
 		CompactForceRatio:            cfg.Agent.CompactForceRatio,
 		ContextEditing:               cfg.Agent.ContextEditing,
-		RecentKeep:                   cfg.Agent.RecentKeep,
+		RecentKeep:                   recentKeep,
 		ArchiveDir:                   config.ArchiveDir(),
 		KeepPolicy:                   keepPolicy,
 		ReasoningLanguage:            cfg.ReasoningLanguage(),
@@ -1892,7 +1904,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 				CompactRatio:                 cfg.Agent.CompactRatio,
 				CompactForceRatio:            cfg.Agent.CompactForceRatio,
 				ContextEditing:               cfg.Agent.ContextEditing,
-				RecentKeep:                   cfg.Agent.RecentKeep,
+				RecentKeep:                   recentKeep,
 				ArchiveDir:                   config.ArchiveDir(),
 				KeepPolicy:                   keepPolicy,
 				ReasoningLanguage:            cfg.ReasoningLanguage(),

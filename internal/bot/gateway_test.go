@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1818,6 +1819,14 @@ func TestGatewayDefaultQueueSteersMediaOnlyActiveTurn(t *testing.T) {
 		_, _ = w.Write([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'})
 	}))
 	defer imageServer.Close()
+	oldValidator := botMediaURLValidator
+	oldClient := botMediaHTTPClient
+	botMediaURLValidator = func(*url.URL) error { return nil }
+	botMediaHTTPClient = imageServer.Client()
+	defer func() {
+		botMediaURLValidator = oldValidator
+		botMediaHTTPClient = oldClient
+	}()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	gw := NewGateway(GatewayConfig{
@@ -2366,6 +2375,20 @@ func TestGatewaySessionOptionsAllowSessionMappingGlobalWorkspace(t *testing.T) {
 	}
 }
 
+func TestQQGroupSessionMappingIgnoresActorID(t *testing.T) {
+	mapping := SessionMapping{RemoteID: "group-openid", ChatType: string(ChatGroup)}
+	for _, actor := range []string{"member-a", "member-b"} {
+		msg := InboundMessage{Platform: PlatformQQ, ChatType: ChatGroup, ChatID: "group-openid", UserID: actor}
+		if !sessionMappingMatches(mapping, msg) {
+			t.Fatalf("QQ group mapping did not match actor %q", actor)
+		}
+	}
+	feishu := InboundMessage{Platform: PlatformFeishu, ChatType: ChatGroup, ChatID: "group-openid", UserID: "member-a"}
+	if sessionMappingMatches(mapping, feishu) {
+		t.Fatal("non-QQ group mapping unexpectedly ignored actor identity")
+	}
+}
+
 func TestSessionStateMatchesRuntimeRejectsWorkspaceOrModelMismatch(t *testing.T) {
 	ctrl := control.New(control.Options{WorkspaceRoot: "/old"})
 	defer ctrl.Close()
@@ -2496,6 +2519,19 @@ func TestDegradedMappingStateStaysStable(t *testing.T) {
 	hard := sessionRuntimeProfile{sessionPath: "/some/mapped.jsonl"}
 	if sessionStateMatchesRuntime(s, hard) {
 		t.Fatal("an explicit attach must still force a rebuild")
+	}
+}
+
+func TestQQGroupPermissionBoundaryDisablesWorkspaceAndSideEffects(t *testing.T) {
+	rules := groupPermissionDenyRules(InboundMessage{ChatType: ChatGroup})
+	joined := strings.Join(rules, "\n")
+	for _, want := range []string{"read_file(*)", "ls(*)", "grep(*)", "glob(*)", "bash(*)", "git(*)", "apply_patch(*)", "task(*)"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("group deny rules missing %q: %v", want, rules)
+		}
+	}
+	if got := groupPermissionDenyRules(InboundMessage{ChatType: ChatDM}); got != nil {
+		t.Fatalf("DM deny rules = %v, want nil", got)
 	}
 }
 

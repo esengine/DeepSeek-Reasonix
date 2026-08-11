@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +22,14 @@ func TestSaveInboundMediaStoresWorkspaceImageAttachment(t *testing.T) {
 		_, _ = w.Write(raw)
 	}))
 	defer srv.Close()
+	oldValidator := botMediaURLValidator
+	oldClient := botMediaHTTPClient
+	botMediaURLValidator = func(*url.URL) error { return nil }
+	botMediaHTTPClient = srv.Client()
+	defer func() {
+		botMediaURLValidator = oldValidator
+		botMediaHTTPClient = oldClient
+	}()
 	workspace := t.TempDir()
 
 	ref, err := saveOneInboundMedia(context.Background(), workspace, srv.URL+"/shot.png")

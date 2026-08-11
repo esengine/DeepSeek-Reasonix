@@ -4,15 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"reasonix/internal/bot"
 	"reasonix/internal/config"
+
+	"github.com/gorilla/websocket"
 )
 
 func TestHandleDispatchDirectMessageUsesDirectChatType(t *testing.T) {
@@ -72,6 +76,119 @@ func TestHandleDispatchC2CUsesUserOpenID(t *testing.T) {
 	}
 	if msg.ChatType != bot.ChatDM {
 		t.Fatalf("chat type = %q, want %q", msg.ChatType, bot.ChatDM)
+	}
+}
+
+func TestHandleDispatchGroupUsesMemberOpenIDForActor(t *testing.T) {
+	a := &adapter{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), msgCh: make(chan bot.InboundMessage, 1)}
+	raw, err := json.Marshal(map[string]any{
+		"id": "msg-group", "content": "@bot hello", "group_openid": "group-1",
+		"author": map[string]string{"user_openid": "global-user", "member_openid": "group-member", "username": "member"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.handleDispatch(gatewayPayload{T: "GROUP_AT_MESSAGE_CREATE", D: raw})
+	msg := <-a.msgCh
+	if msg.ChatID != "group-1" || msg.UserID != "group-member" || msg.ChatType != bot.ChatGroup {
+		t.Fatalf("message = %+v, want group conversation/member actor", msg)
+	}
+}
+
+func TestHandleDispatchCarriesAttachments(t *testing.T) {
+	a := &adapter{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), msgCh: make(chan bot.InboundMessage, 1)}
+	raw := []byte(`{"id":"msg-media","content":"see this","author":{"user_openid":"user-1"},"attachments":[{"url":"https://cdn.example/image.png","filename":"image.png"}]}`)
+	if !a.handleDispatch(gatewayPayload{T: "C2C_MESSAGE_CREATE", D: raw}) {
+		t.Fatal("handleDispatch returned false")
+	}
+	msg := <-a.msgCh
+	if len(msg.MediaURLs) != 1 || msg.MediaURLs[0] != "https://cdn.example/image.png" {
+		t.Fatalf("media urls = %+v", msg.MediaURLs)
+	}
+}
+
+func TestHandleInteractionCarriesSourceMessageIDForAuthorization(t *testing.T) {
+	a := &adapter{
+		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		msgCh:         make(chan bot.InboundMessage, 1),
+		interactionCh: make(chan bot.Interaction, 1),
+	}
+	raw := []byte(`{"id":"interaction-1","message_id":"keyboard-message-1","group_openid":"","chat_type":"c2c","user":{"user_openid":"owner-1"},"data":{"resolved":{"button_id":"rx:opaque"}}}`)
+	if !a.handleInteraction(gatewayPayload{T: "INTERACTION_CREATE", D: raw}) {
+		t.Fatal("handleInteraction returned false")
+	}
+	interaction := <-a.interactionCh
+	if interaction.MessageID != "keyboard-message-1" || interaction.CallbackID != "rx:opaque" {
+		t.Fatalf("interaction = %+v, want source message ID and opaque callback", interaction)
+	}
+	message := <-a.msgCh
+	if got, ok := message.Raw.(bot.Interaction); !ok || got.MessageID != "keyboard-message-1" {
+		t.Fatalf("inbound interaction raw = %#v, want source message ID", message.Raw)
+	}
+}
+
+func TestQQDefaultIntentsDoNotRequestLegacyGuildMessages(t *testing.T) {
+	got := qqDefaultIntents(config.QQBotConfig{})
+	if got&(1<<9) != 0 {
+		t.Fatalf("default intents = %b, unexpectedly includes GUILD_MESSAGES (1<<9)", got)
+	}
+	if got != (qqIntentGroupAndC2C | qqIntentInteraction) {
+		t.Fatalf("default intents = %b, want group/c2c + interaction", got)
+	}
+	if guild := qqDefaultIntents(config.QQBotConfig{IntentProfile: "guild"}); guild&(1<<30) == 0 || guild&(1<<12) == 0 {
+		t.Fatalf("guild profile intents = %b, want public guild and direct-message bits", guild)
+	}
+}
+
+func TestQQRetryScheduleIsBounded(t *testing.T) {
+	for _, tt := range []struct {
+		attempt int
+		want    time.Duration
+	}{
+		{attempt: 1, want: 2 * time.Second},
+		{attempt: 2, want: 5 * time.Second},
+		{attempt: 3, want: 10 * time.Second},
+		{attempt: 4, want: 30 * time.Second},
+	} {
+		if got := qqNextRetryDelay(time.Second, tt.attempt); got != tt.want {
+			t.Fatalf("attempt %d delay = %s, want %s", tt.attempt, got, tt.want)
+		}
+	}
+	if got := qqNextRetryDelay(5*time.Minute, 99); got != 5*time.Minute {
+		t.Fatalf("max retry delay = %s, want 5m", got)
+	}
+}
+
+func TestQQFatalAuthErrorStopsRetry(t *testing.T) {
+	if !qqFatalAuthError(fmt.Errorf("qq token api error 401: invalid client")) {
+		t.Fatal("401 token error not classified fatal")
+	}
+	if qqFatalAuthError(fmt.Errorf("qq token api error 500: temporary")) {
+		t.Fatal("temporary token error classified fatal")
+	}
+}
+
+func TestQQFatalConfigurationErrorStopsRetry(t *testing.T) {
+	if !qqFatalConfigurationError(fmt.Errorf("qq app_id is empty")) {
+		t.Fatal("missing app id not classified fatal")
+	}
+	if qqFatalConfigurationError(fmt.Errorf("temporary gateway timeout")) {
+		t.Fatal("temporary network error classified fatal")
+	}
+}
+
+func TestQQGatewayCloseCodesAreClassified(t *testing.T) {
+	for _, code := range []int{4914, 4915} {
+		err := classifyQQGatewayReadError("read ready", &websocket.CloseError{Code: code, Text: "intent unauthorized"})
+		var ge *qqGatewayError
+		if !errors.As(err, &ge) || !ge.fatal || ge.code != code {
+			t.Fatalf("close %d classified as %#v, want fatal", code, err)
+		}
+	}
+	err := classifyQQGatewayReadError("read gateway message", &websocket.CloseError{Code: 4008, Text: "rate limited"})
+	var ge *qqGatewayError
+	if !errors.As(err, &ge) || ge.fatal || ge.retryAfter < time.Minute {
+		t.Fatalf("close 4008 classified as %#v, want >=1m retry", err)
 	}
 }
 

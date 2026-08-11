@@ -44,6 +44,12 @@ func TestBuildSessionKey(t *testing.T) {
 			wantSame: false,
 		},
 		{
+			name:     "qq group shared conversation",
+			src:      SessionSource{Platform: PlatformQQ, ConnectionID: "qq-main", ChatType: ChatGroup, ChatID: "group1", UserID: "a"},
+			src2:     SessionSource{Platform: PlatformQQ, ConnectionID: "qq-main", ChatType: ChatGroup, ChatID: "group1", UserID: "b"},
+			wantSame: true,
+		},
+		{
 			name:     "group same user different chat",
 			src:      SessionSource{Platform: PlatformFeishu, ChatType: ChatGroup, ChatID: "group1", UserID: "a"},
 			src2:     SessionSource{Platform: PlatformFeishu, ChatType: ChatGroup, ChatID: "group2", UserID: "a"},
@@ -110,6 +116,17 @@ func TestIsSlashBypass(t *testing.T) {
 		if got != tt.bypass {
 			t.Errorf("IsSlashBypass(%q) = %v, want %v", tt.text, got, tt.bypass)
 		}
+	}
+}
+
+func TestBuildSessionKeySeparatesProtocols(t *testing.T) {
+	base := SessionSource{Platform: PlatformQQ, ConnectionID: "qq-main", ChatType: ChatDM, ChatID: "user-1"}
+	official := base
+	official.Protocol = "official"
+	onebot := base
+	onebot.Protocol = "onebot-v11"
+	if BuildSessionKey(official) == BuildSessionKey(onebot) {
+		t.Fatal("official QQ and OneBot sessions must not share a key")
 	}
 }
 

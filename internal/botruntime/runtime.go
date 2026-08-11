@@ -2,6 +2,7 @@ package botruntime
 
 import (
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -9,6 +10,7 @@ import (
 
 	"reasonix/internal/bot"
 	"reasonix/internal/bot/feishu"
+	"reasonix/internal/bot/onebot"
 	"reasonix/internal/bot/qq"
 	"reasonix/internal/bot/weixin"
 	"reasonix/internal/config"
@@ -98,7 +100,8 @@ func PlatformConfigured(cfg *config.Config, platform bot.Platform) bool {
 		}
 	}
 	for _, conn := range cfg.Bot.Connections {
-		if conn.Enabled && bot.Platform(strings.TrimSpace(conn.Provider)) == platform {
+		provider := strings.ToLower(strings.TrimSpace(conn.Provider))
+		if conn.Enabled && (bot.Platform(provider) == platform || (provider == "onebot" && platform == bot.PlatformQQ)) {
 			return true
 		}
 	}
@@ -114,7 +117,11 @@ func ChannelConfigs(connections []config.BotConnectionConfig, includeModel bool,
 		if !conn.Enabled {
 			continue
 		}
-		plat := bot.Platform(strings.TrimSpace(conn.Provider))
+		provider := strings.ToLower(strings.TrimSpace(conn.Provider))
+		if provider == "onebot" {
+			provider = string(bot.PlatformQQ)
+		}
+		plat := bot.Platform(provider)
 		switch plat {
 		case bot.PlatformQQ, bot.PlatformFeishu, bot.PlatformWeixin:
 		default:
@@ -309,23 +316,47 @@ func AdapterBindings(cfg *config.Config, enabled map[bot.Platform]bool, feishuDo
 	}
 	var bindings []bot.AdapterBinding
 	hasConnection := make(map[bot.Platform]bool)
+	hasOfficialQQ := false
 	for _, conn := range cfg.Bot.Connections {
 		if !conn.Enabled {
 			continue
 		}
-		platform := bot.Platform(strings.TrimSpace(conn.Provider))
+		provider := strings.ToLower(strings.TrimSpace(conn.Provider))
+		onebotProvider := provider == "onebot"
+		if provider == "onebot" {
+			provider = string(bot.PlatformQQ)
+		}
+		platform := bot.Platform(provider)
 		if !enabled[platform] {
 			continue
 		}
 		id := ConnectionRuntimeID(conn)
 		switch platform {
 		case bot.PlatformQQ:
+			if onebotProvider || strings.EqualFold(strings.TrimSpace(conn.Protocol), "onebot-v11") || strings.EqualFold(strings.TrimSpace(conn.Protocol), "onebot") {
+				onebotCfg, err := onebot.FromConnection(conn)
+				if err != nil {
+					continue
+				}
+				bindings = append(bindings, bot.AdapterBinding{ID: id, Protocol: "onebot-v11", Domain: strings.TrimSpace(conn.Domain), Platform: platform, Adapter: onebot.New(onebotCfg, logger)})
+				hasConnection[platform] = true
+				continue
+			}
 			qqCfg := cfg.Bot.QQ
 			qqCfg.Enabled = true
 			qqCfg.AppID = firstNonEmptyString(strings.TrimSpace(conn.Credential.AppID), qqCfg.AppID)
 			qqCfg.AppSecretEnv = firstNonEmptyString(strings.TrimSpace(conn.Credential.AppSecretEnv), qqCfg.AppSecretEnv)
-			bindings = append(bindings, bot.AdapterBinding{ID: id, Domain: strings.TrimSpace(conn.Domain), Platform: platform, Adapter: qq.New(qqCfg, logger)})
+			qqCfg.Sandbox = conn.QQ.Sandbox
+			qqCfg.IntentProfile = firstNonEmptyString(strings.TrimSpace(conn.QQ.IntentProfile), qqCfg.IntentProfile)
+			if conn.QQ.NativeStreaming {
+				qqCfg.NativeStreaming = true
+			}
+			if conn.QQ.RequireMention {
+				qqCfg.RequireMention = true
+			}
+			bindings = append(bindings, bot.AdapterBinding{ID: id, Protocol: "official", Domain: strings.TrimSpace(conn.Domain), Platform: platform, Adapter: qq.New(qqCfg, logger)})
 			hasConnection[platform] = true
+			hasOfficialQQ = true
 		case bot.PlatformFeishu:
 			feishuCfg := cfg.Bot.Feishu
 			feishuCfg.Enabled = true
@@ -346,8 +377,8 @@ func AdapterBindings(cfg *config.Config, enabled map[bot.Platform]bool, feishuDo
 			hasConnection[platform] = true
 		}
 	}
-	if enabled[bot.PlatformQQ] && !hasConnection[bot.PlatformQQ] {
-		bindings = append(bindings, bot.AdapterBinding{ID: string(bot.PlatformQQ), Platform: bot.PlatformQQ, Adapter: qq.New(cfg.Bot.QQ, logger)})
+	if enabled[bot.PlatformQQ] && cfg.Bot.QQ.Enabled && !hasOfficialQQ {
+		bindings = append(bindings, bot.AdapterBinding{ID: string(bot.PlatformQQ), Protocol: "official", Platform: bot.PlatformQQ, Adapter: qq.New(cfg.Bot.QQ, logger)})
 	}
 	if enabled[bot.PlatformFeishu] && !hasConnection[bot.PlatformFeishu] {
 		if feishuDomains == nil || feishuDomains[feishuDomainKey(cfg.Bot.Feishu.Domain)] {
@@ -522,17 +553,21 @@ func rememberInbound(msg bot.InboundMessage, sessionID string, actualWorkspaceRo
 
 	cfg := config.LoadForEdit(userPath)
 	now := time.Now().UTC().Format(time.RFC3339)
-	changed := false
+	changed := msg.Platform == bot.PlatformQQ && config.NormalizeLegacyQQConnection(cfg)
 	for i := range cfg.Bot.Connections {
 		conn := &cfg.Bot.Connections[i]
-		if strings.TrimSpace(conn.Provider) != string(platform) || !conn.Enabled || !connectionMatchesInbound(*conn, msg) {
+		provider := strings.ToLower(strings.TrimSpace(conn.Provider))
+		if ((provider != string(platform)) && !(platform == bot.PlatformQQ && provider == "onebot")) || !conn.Enabled || !connectionMatchesInbound(*conn, msg) {
 			continue
 		}
 		mappingIndex := -1
 		for j := range conn.SessionMappings {
-			if botSessionMappingMatches(conn.SessionMappings[j], msg) {
+			if !botSessionMappingMatches(conn.SessionMappings[j], msg) ||
+				(msg.Platform == bot.PlatformQQ && msg.ChatType == bot.ChatGroup && !botSessionMappingFileValid(conn.SessionMappings[j])) {
+				continue
+			}
+			if mappingIndex < 0 || botSessionMappingNewer(conn.SessionMappings[j], conn.SessionMappings[mappingIndex]) {
 				mappingIndex = j
-				break
 			}
 		}
 		if mappingIndex >= 0 {
@@ -596,7 +631,7 @@ func botSessionMappingMatches(mapping config.BotConnectionSessionMapping, msg bo
 	if mappingChatType != chatType {
 		return false
 	}
-	if strings.TrimSpace(mapping.UserID) != userID {
+	if msg.Platform != bot.PlatformQQ && strings.TrimSpace(mapping.UserID) != userID {
 		return false
 	}
 	return strings.TrimSpace(mapping.ThreadID) == threadID
@@ -606,7 +641,12 @@ func botSessionMappingIdentity(msg bot.InboundMessage) (chatType string, userID 
 	switch msg.ChatType {
 	case bot.ChatGroup, bot.ChatGuild:
 		chatType = string(msg.ChatType)
-		userID = strings.TrimSpace(msg.UserID)
+		// QQ group/guild sessions are conversations, not per-member DMs. The
+		// actor remains available on the inbound turn for attribution and
+		// authorization, while mappings use only the remote conversation ID.
+		if msg.Platform != bot.PlatformQQ {
+			userID = strings.TrimSpace(msg.UserID)
+		}
 	case bot.ChatThread:
 		chatType = string(msg.ChatType)
 		threadID = strings.TrimSpace(msg.ThreadID)
@@ -615,6 +655,28 @@ func botSessionMappingIdentity(msg bot.InboundMessage) (chatType string, userID 
 		}
 	}
 	return chatType, userID, threadID
+}
+
+func botSessionMappingNewer(a, b config.BotConnectionSessionMapping) bool {
+	at, aerr := time.Parse(time.RFC3339, strings.TrimSpace(a.UpdatedAt))
+	bt, berr := time.Parse(time.RFC3339, strings.TrimSpace(b.UpdatedAt))
+	if aerr == nil && berr == nil {
+		return at.After(bt)
+	}
+	return strings.TrimSpace(a.UpdatedAt) > strings.TrimSpace(b.UpdatedAt)
+}
+
+func botSessionMappingFileValid(mapping config.BotConnectionSessionMapping) bool {
+	id := strings.TrimSpace(mapping.SessionID)
+	if id == "" {
+		return true
+	}
+	path := normalizedBotSessionPath(id)
+	if path == "" {
+		return true
+	}
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func botSessionMappingHasExplicitTarget(mapping config.BotConnectionSessionMapping) bool {

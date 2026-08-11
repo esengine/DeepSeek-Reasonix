@@ -20,19 +20,24 @@ type messageEditor interface {
 
 // renderSink 将 Reasonix 事件流渲染为平台消息。
 type renderSink struct {
-	ctx        context.Context
-	adapter    Adapter
-	editor     messageEditor // 非 nil 时启用原地编辑流式输出
-	connID     string
-	domain     string
-	chatID     string
-	chatType   ChatType
-	userID     string
-	replyTo    string
-	logger     *slog.Logger
-	ctrl       botController
-	onApproval func(event.Approval)
-	onAsk      func(event.Ask)
+	ctx               context.Context
+	adapter           Adapter
+	editor            messageEditor // 非 nil 时启用原地编辑流式输出
+	stream            OutboundStream
+	streamTried       bool
+	connID            string
+	domain            string
+	chatID            string
+	chatType          ChatType
+	userID            string
+	replyTo           string
+	logger            *slog.Logger
+	ctrl              botController
+	onApproval        func(event.Approval)
+	onAsk             func(event.Ask)
+	issueInteraction  func(requestID, action, messageID, chatID, userID string) string
+	bindInteraction   func(token string, messageIDs ...string) error
+	revokeInteraction func(token string)
 
 	// 渲染缓冲
 	buf           strings.Builder
@@ -77,6 +82,30 @@ func newRenderSink(ctx context.Context, adapter Adapter, connID, domain, chatID 
 	}
 }
 
+// keyboardSupported is capability-based so the generic OneBot adapter (which
+// exposes the QQ platform for session compatibility) does not accidentally
+// receive official QQ Interaction keyboards that it cannot deliver or ACK.
+// Legacy adapters without a capability provider retain the platform default.
+func keyboardSupported(adapter Adapter) bool {
+	if provider, ok := adapter.(AdapterCapabilitiesProvider); ok {
+		return provider.Capabilities().Keyboard
+	}
+	return adapter != nil && adapter.Platform() == PlatformQQ
+}
+
+func (s *renderSink) setInteractionIssuer(fn func(requestID, action, messageID, chatID, userID string) string) {
+	if s != nil {
+		s.issueInteraction = fn
+	}
+}
+
+func (s *renderSink) setInteractionBinding(bind func(string, ...string) error, revoke func(string)) {
+	if s != nil {
+		s.bindInteraction = bind
+		s.revokeInteraction = revoke
+	}
+}
+
 func (s *renderSink) Emit(e event.Event) {
 	switch e.Kind {
 	case event.TurnStarted:
@@ -89,6 +118,8 @@ func (s *renderSink) Emit(e event.Event) {
 		s.liveMsgID = ""
 		s.liveSentBytes = 0
 		s.lastEdit = time.Time{}
+		s.stream = nil
+		s.streamTried = false
 
 	case event.Reasoning:
 		if !s.inThinking {
@@ -133,6 +164,11 @@ func (s *renderSink) Emit(e event.Event) {
 			s.onApproval(e.Approval)
 		}
 		approvalText := renderApprovalText(e.Approval)
+		if s.adapter.Platform() == PlatformQQ && s.chatType == ChatGroup {
+			// A group button is visible to every member, but approval authority is
+			// intentionally private. Do not expose an actionable control in a group.
+			approvalText = fmt.Sprintf("⚠️ 此审批涉及受限操作（ID: `%s`）。为保护权限，请审批者私聊 Bot 后发送 `/approve %s` 或 `/deny %s`；群聊不会提供可执行按钮。", e.Approval.ID, e.Approval.ID, e.Approval.ID)
+		}
 		msg := OutboundMessage{
 			ConnectionID: s.connID,
 			Domain:       s.domain,
@@ -143,10 +179,15 @@ func (s *renderSink) Emit(e event.Event) {
 		}
 		switch s.adapter.Platform() {
 		case PlatformQQ:
-			if isRecoveryApproval(e.Approval) {
+			if !keyboardSupported(s.adapter) || s.chatType == ChatGroup {
+				msg.Keyboard = nil
+			} else if isRecoveryApproval(e.Approval) {
 				msg.Keyboard = recoveryKeyboard(e.Approval)
 			} else {
 				msg.Keyboard = approvalKeyboard(e.Approval.ID)
+			}
+			if s.issueInteraction != nil {
+				msg.Keyboard = s.tokenizeKeyboard(msg.Keyboard, e.Approval.ID)
 			}
 		case PlatformFeishu:
 			if isRecoveryApproval(e.Approval) {
@@ -170,6 +211,9 @@ func (s *renderSink) Emit(e event.Event) {
 			ChatType:     s.chatType,
 			Text:         askText,
 			ReplyToMsgID: s.replyTo,
+		}
+		if s.adapter.Platform() == PlatformQQ && keyboardSupported(s.adapter) && s.chatType == ChatDM {
+			msg.Keyboard = s.tokenizeKeyboard(askKeyboard(e.Ask), e.Ask.ID)
 		}
 		if s.adapter.Platform() == PlatformFeishu {
 			msg.Card = askCard(e.Ask, askText, s.chatType, s.userID)
@@ -223,7 +267,41 @@ func (s *renderSink) Emit(e event.Event) {
 	}
 }
 
+func (s *renderSink) tokenizeKeyboard(keyboard *InlineKeyboard, requestID string) *InlineKeyboard {
+	if keyboard == nil || s.issueInteraction == nil {
+		return keyboard
+	}
+	copyKeyboard := &InlineKeyboard{Rows: make([]InlineKeyboardRow, len(keyboard.Rows))}
+	for i, row := range keyboard.Rows {
+		copyKeyboard.Rows[i].Buttons = make([]InlineKeyboardButton, len(row.Buttons))
+		for j, button := range row.Buttons {
+			copyKeyboard.Rows[i].Buttons[j] = button
+			action := strings.TrimSpace(button.CallbackID)
+			if action == "" {
+				continue
+			}
+			// The provider assigns the keyboard message ID only after Send. Bind
+			// the opaque token in send() once the response contains that ID.
+			copyKeyboard.Rows[i].Buttons[j].CallbackID = s.issueInteraction(requestID, action, "", s.chatID, s.userID)
+		}
+	}
+	return copyKeyboard
+}
+
 func (s *renderSink) flush() {
+	if s.stream != nil {
+		text := strings.TrimSpace(s.buf.String())
+		if text != "" {
+			if _, err := s.stream.Complete(s.ctx, text); err != nil {
+				s.logger.Warn("bot native stream completion failed; falling back to final message", "err", err)
+				_ = s.send(s.textMessage(text))
+			}
+		}
+		s.stream = nil
+		s.buf.Reset()
+		s.lastFlush = time.Now()
+		return
+	}
 	for strings.TrimSpace(s.buf.String()) != "" {
 		raw := s.buf.String()
 		// When streaming into a live message, finalize the whole remaining text
@@ -295,6 +373,33 @@ func (s *renderSink) flushPrefix(idx int) {
 // live 消息。仅当适配器支持原地编辑时启用；限频间隔复用 renderSoftFlushAfter
 // （1.2s，低于飞书单消息 Patch 的 QPS 上限）。
 func (s *renderSink) maybeStream() {
+	if s.stream == nil && !s.streamTried && s.chatType == ChatDM {
+		s.streamTried = true
+		if streamer, ok := s.adapter.(StreamingAdapter); ok {
+			stream, err := streamer.OpenStream(s.ctx, s.textMessage(""))
+			if err == nil {
+				s.stream = stream
+			}
+		}
+	}
+	if s.stream != nil {
+		raw := s.buf.String()
+		if strings.TrimSpace(raw) == "" {
+			return
+		}
+		if time.Since(s.lastEdit) < 500*time.Millisecond && len([]rune(raw)) < 24 {
+			return
+		}
+		if _, err := s.stream.Update(s.ctx, raw); err != nil {
+			s.logger.Warn("bot native stream update failed; falling back to final message", "err", err)
+			_ = s.stream.Abort(context.Background())
+			s.stream = nil
+			s.lastFlush = time.Now()
+			return
+		}
+		s.lastEdit = time.Now()
+		return
+	}
 	if s.editor == nil {
 		return
 	}
@@ -506,8 +611,45 @@ func byteIndexForRuneLimit(text string, maxRunes int) int {
 }
 
 func (s *renderSink) send(msg OutboundMessage) error {
-	_, err := s.adapter.Send(s.ctx, msg)
+	result, err := s.adapter.Send(s.ctx, msg)
+	tokens := keyboardInteractionTokens(msg.Keyboard)
+	if len(tokens) == 0 || s.bindInteraction == nil {
+		return err
+	}
+	messageIDs := append([]string(nil), result.MessageIDs...)
+	if strings.TrimSpace(result.MessageID) != "" {
+		messageIDs = append(messageIDs, result.MessageID)
+	}
+	for _, token := range tokens {
+		if err != nil || len(messageIDs) == 0 {
+			if s.revokeInteraction != nil {
+				s.revokeInteraction(token)
+			}
+			continue
+		}
+		if bindErr := s.bindInteraction(token, messageIDs...); bindErr != nil {
+			s.logger.Warn("bind bot interaction message failed", "err", bindErr)
+			if s.revokeInteraction != nil {
+				s.revokeInteraction(token)
+			}
+		}
+	}
 	return err
+}
+
+func keyboardInteractionTokens(keyboard *InlineKeyboard) []string {
+	if keyboard == nil {
+		return nil
+	}
+	var tokens []string
+	for _, row := range keyboard.Rows {
+		for _, button := range row.Buttons {
+			if strings.HasPrefix(strings.TrimSpace(button.CallbackID), "rx:") {
+				tokens = append(tokens, strings.TrimSpace(button.CallbackID))
+			}
+		}
+	}
+	return tokens
 }
 
 func approvalKeyboard(id string) *InlineKeyboard {
@@ -729,6 +871,29 @@ func askCard(ask event.Ask, fallback string, chatType ChatType, userID string) *
 		card.Elements = append(card.Elements, InteractiveCardElement{Tag: "action", Extra: map[string]any{"actions": actions}})
 	}
 	return card
+}
+
+func askKeyboard(ask event.Ask) *InlineKeyboard {
+	if !askSupportsNumericShortcut(ask) {
+		return nil
+	}
+	buttons := make([]InlineKeyboardButton, 0, len(ask.Questions[0].Options))
+	for i, opt := range ask.Questions[0].Options {
+		label := strings.TrimSpace(opt.Label)
+		if label == "" {
+			label = fmt.Sprintf("选项 %d", i+1)
+		}
+		buttons = append(buttons, InlineKeyboardButton{
+			ID:         fmt.Sprintf("ask_%s_%d", ask.ID, i+1),
+			Label:      label,
+			Style:      1,
+			CallbackID: fmt.Sprintf("/answer %s %d", ask.ID, i+1),
+		})
+	}
+	if len(buttons) == 0 {
+		return nil
+	}
+	return &InlineKeyboard{Rows: []InlineKeyboardRow{{Buttons: buttons}}}
 }
 
 func askSupportsNumericShortcut(ask event.Ask) bool {

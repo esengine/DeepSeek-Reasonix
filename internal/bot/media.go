@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
+	"slices"
 	"strings"
 	"time"
 
@@ -16,7 +18,13 @@ import (
 
 const maxBotMediaBytes = 25 * 1024 * 1024
 
-var botMediaHTTPClient = &http.Client{Timeout: 30 * time.Second}
+var botMediaHTTPClient = &http.Client{Timeout: 30 * time.Second, Transport: pinnedMediaTransport(MediaPolicy{ResolveDNS: true}), CheckRedirect: func(req *http.Request, via []*http.Request) error {
+	if len(via) >= 3 {
+		return fmt.Errorf("too many media redirects")
+	}
+	return validatePublicMediaURL(req.URL)
+}}
+var botMediaURLValidator = validatePublicMediaURL
 
 func saveInboundMedia(ctx context.Context, workspaceRoot string, mediaURLs []string) (refs []string, errs []error) {
 	for _, rawURL := range mediaURLs {
@@ -41,6 +49,9 @@ func saveOneInboundMedia(ctx context.Context, workspaceRoot, rawURL string) (str
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return "", fmt.Errorf("unsupported media URL scheme %q", u.Scheme)
+	}
+	if err := botMediaURLValidator(u); err != nil {
+		return "", err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
@@ -73,6 +84,24 @@ func saveOneInboundMedia(ctx context.Context, workspaceRoot, rawURL string) (str
 		return control.SaveImageBytesInRoot(workspaceRoot, contentType, raw)
 	}
 	return control.SaveAttachmentBytesInRoot(workspaceRoot, name, raw)
+}
+
+func validatePublicMediaURL(u *url.URL) error {
+	if u == nil || u.User != nil || u.Hostname() == "" {
+		return fmt.Errorf("invalid media URL")
+	}
+	host := strings.ToLower(strings.TrimSpace(u.Hostname()))
+	if ip := net.ParseIP(host); ip != nil && isPrivateMediaIP(ip) {
+		return fmt.Errorf("media URL resolves to a private address")
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return fmt.Errorf("resolve media URL host: %w", err)
+	}
+	if slices.ContainsFunc(ips, isPrivateMediaIP) {
+		return fmt.Errorf("media URL resolves to a private address")
+	}
+	return nil
 }
 
 func saveInboundMediaItems(ctx context.Context, workspaceRoot string, items []InboundMedia) (refs, fallbacks []string, errs []error) {

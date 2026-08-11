@@ -87,7 +87,7 @@ func NormalizeQueueDrop(drop string) string {
 
 // BuildSessionKey 根据 Hermes 模式生成稳定的 session key：
 //   - DM：按 chat 隔离（同一 DM 会话共享历史）
-//   - 群聊：按 user 隔离（每人独立会话）
+//   - 群聊/频道：按远端 conversation 隔离，成员只作为署名和权限
 //   - thread：共享（thread 内所有人共享上下文）
 func BuildSessionKey(src SessionSource) string {
 	var scope string
@@ -96,9 +96,19 @@ func BuildSessionKey(src SessionSource) string {
 	case ChatDM:
 		scope = fmt.Sprintf("%s:dm:%s", source, src.ChatID)
 	case ChatGroup:
-		scope = fmt.Sprintf("%s:group:%s:%s", source, src.ChatID, src.UserID)
+		if src.Platform == PlatformQQ {
+			scope = fmt.Sprintf("%s:group:%s", source, src.ChatID)
+		} else {
+			// Preserve the established per-member semantics for existing
+			// adapters until they opt into a shared conversation contract.
+			scope = fmt.Sprintf("%s:group:%s:%s", source, src.ChatID, src.UserID)
+		}
 	case ChatGuild:
-		scope = fmt.Sprintf("%s:guild:%s:%s", source, src.ChatID, src.UserID)
+		if src.Platform == PlatformQQ {
+			scope = fmt.Sprintf("%s:guild:%s", source, src.ChatID)
+		} else {
+			scope = fmt.Sprintf("%s:guild:%s:%s", source, src.ChatID, src.UserID)
+		}
 	case ChatDirect:
 		scope = fmt.Sprintf("%s:direct:%s", source, src.ChatID)
 	case ChatThread:
@@ -116,6 +126,9 @@ func BuildSessionKey(src SessionSource) string {
 
 func sessionSourceID(src SessionSource) string {
 	if src.ConnectionID != "" {
+		if protocol := strings.TrimSpace(src.Protocol); protocol != "" {
+			return fmt.Sprintf("%s:%s", src.ConnectionID, protocol)
+		}
 		return src.ConnectionID
 	}
 	if src.Domain != "" {
@@ -138,6 +151,7 @@ var slashCommands = map[string]bool{
 	"/projects": true,
 	"/use":      true,
 	"/sessions": true,
+	"/session":  true,
 	"/attach":   true,
 	"/search":   true,
 	"/desktop":  true,

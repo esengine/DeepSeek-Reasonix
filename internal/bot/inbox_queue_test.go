@@ -50,3 +50,28 @@ func TestCollectAppendDeduplicatesPlatformRedelivery(t *testing.T) {
 		t.Fatalf("durable route metadata was not updated: %+v", recovered)
 	}
 }
+
+func TestEnqueueViaInboxUsesConnectionScopedIdempotency(t *testing.T) {
+	dir := t.TempDir()
+	ctrl := control.New(control.Options{SessionPath: filepath.Join(dir, "s.jsonl"), SessionDir: dir, Sink: event.Discard})
+	msg := InboundMessage{Platform: PlatformQQ, Protocol: "official", ConnectionID: "qq-a", ChatType: ChatDM, ChatID: "user", UserID: "user", MessageID: "same-provider-id", Text: "hello"}
+	first, err := enqueueViaInbox(ctrl, msg, sessioninbox.IntentFollowup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := enqueueViaInbox(ctrl, msg, sessioninbox.IntentFollowup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !replayed.Idempotent || replayed.ItemID != first.ItemID {
+		t.Fatalf("replayed receipt = %+v, want idempotent hit for %s", replayed, first.ItemID)
+	}
+	msg.ConnectionID = "qq-b"
+	other, err := enqueueViaInbox(ctrl, msg, sessioninbox.IntentFollowup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other.Idempotent || other.ItemID == first.ItemID {
+		t.Fatalf("second account receipt = %+v, want isolated item", other)
+	}
+}
