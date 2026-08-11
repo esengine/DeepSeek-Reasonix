@@ -72,10 +72,13 @@ export function createTranscriptMeasureElement({
   tabId,
   getLayoutSnapshot,
   cache = transcriptHeightCache,
+  skipCacheWriteWhen,
 }: {
   tabId: string;
   getLayoutSnapshot: () => TranscriptLayoutSnapshot;
   cache?: TranscriptHeightCache;
+  /** Rows matching this predicate are measured but never written to the cache. */
+  skipCacheWriteWhen?: (element: HTMLDivElement) => boolean;
 }) {
   return (
     element: HTMLDivElement,
@@ -83,12 +86,18 @@ export function createTranscriptMeasureElement({
     instance: Virtualizer<HTMLDivElement, HTMLDivElement>,
   ): number => {
     const height = measureVirtualElement(element, entry, instance);
-    cache.set(
-      tabId,
-      getLayoutSnapshot().signature,
-      element.dataset.rowKey ?? String(element.dataset.index ?? ""),
-      height,
-    );
+    // A streaming row's height is a moving target (tail growth, live code
+    // highlighting, worker swaps); caching intermediate values poisons later
+    // estimates for the same row key (re-mounts replay that mid-stream
+    // height). Settled rows keep writing their final measured height.
+    if (!skipCacheWriteWhen?.(element)) {
+      cache.set(
+        tabId,
+        getLayoutSnapshot().signature,
+        element.dataset.rowKey ?? String(element.dataset.index ?? ""),
+        height,
+      );
+    }
     return height;
   };
 }
