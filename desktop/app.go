@@ -9708,13 +9708,10 @@ func (a *App) ModelsForTab(tabID string) []ModelInfo {
 	return mergeExtensionModelInfos(out, extensionCatalog, curModel)
 }
 
-// mergeExtensionModelInfos folds the tab controller's extension provider
-// catalog into the config-backed switcher list. ProviderCatalog is merged, so
-// only fully namespaced extension refs (plugin/<plugin>/<provider>/<model>)
-// belong here; unnamespaced base descriptors are already represented by out.
-// Extension refs need no provider-access gate: installing/enabling the plugin
-// package is the host-level grant. A nil catalog (no provider-declaring
-// sidecar) leaves the list untouched.
+// mergeExtensionModelInfos adds namespaced plugin models from the controller's
+// merged provider catalog. Base descriptors are already represented by out;
+// plugin refs need no provider-access gate because enabling the package grants
+// access. A nil catalog leaves the config-backed list untouched.
 func mergeExtensionModelInfos(out []ModelInfo, catalog []provider.Descriptor, curModel string) []ModelInfo {
 	if len(catalog) == 0 {
 		return out
