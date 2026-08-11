@@ -30600,40 +30600,42 @@ body > .mermaid-diagram--fullscreen {
   display: none;
 }
 
-:root[data-theme-style] .app--creation .theme-card .theme-card__swatches[data-theme-style-card="graphite"] .theme-card__swatch--bg {
+/* Creation Graphite swatch colors apply to both theme cards and
+   AppearanceOverview hero (do not nest under .theme-card). */
+:root[data-theme-style] .app--creation .theme-card__swatches[data-theme-style-card="graphite"] .theme-card__swatch--bg {
   background: #0c0d10;
 }
 
-:root[data-theme-style] .app--creation .theme-card .theme-card__swatches[data-theme-style-card="graphite"] .theme-card__swatch--surface {
+:root[data-theme-style] .app--creation .theme-card__swatches[data-theme-style-card="graphite"] .theme-card__swatch--surface {
   background: #15161a;
 }
 
-:root[data-theme-style] .app--creation .theme-card .theme-card__swatches[data-theme-style-card="graphite"] .theme-card__swatch--accent {
+:root[data-theme-style] .app--creation .theme-card__swatches[data-theme-style-card="graphite"] .theme-card__swatch--accent {
   background: linear-gradient(128deg, #604116 0%, #9b7226 28%, #d8ad4f 48%, #f3d77b 57%, #b9872d 78%, #704d19 100%);
 }
 
-:root[data-theme="light"][data-theme-style] .app--creation .theme-card .theme-card__swatches[data-theme-style-card="graphite"] .theme-card__swatch--bg {
+:root[data-theme="light"][data-theme-style] .app--creation .theme-card__swatches[data-theme-style-card="graphite"] .theme-card__swatch--bg {
   background: #f4f3ef;
 }
 
-:root[data-theme="light"][data-theme-style] .app--creation .theme-card .theme-card__swatches[data-theme-style-card="graphite"] .theme-card__swatch--surface {
+:root[data-theme="light"][data-theme-style] .app--creation .theme-card__swatches[data-theme-style-card="graphite"] .theme-card__swatch--surface {
   background: #ffffff;
 }
 
-:root[data-theme="light"][data-theme-style] .app--creation .theme-card .theme-card__swatches[data-theme-style-card="graphite"] .theme-card__swatch--accent {
+:root[data-theme="light"][data-theme-style] .app--creation .theme-card__swatches[data-theme-style-card="graphite"] .theme-card__swatch--accent {
   background: linear-gradient(128deg, #604116 0%, #9b7226 28%, #d8ad4f 48%, #f3d77b 57%, #b9872d 78%, #704d19 100%);
 }
 
 @media (prefers-color-scheme: light) {
-  :root[data-theme-style]:not([data-theme]) .app--creation .theme-card .theme-card__swatches[data-theme-style-card="graphite"] .theme-card__swatch--bg {
+  :root[data-theme-style]:not([data-theme]) .app--creation .theme-card__swatches[data-theme-style-card="graphite"] .theme-card__swatch--bg {
     background: #f4f3ef;
   }
 
-  :root[data-theme-style]:not([data-theme]) .app--creation .theme-card .theme-card__swatches[data-theme-style-card="graphite"] .theme-card__swatch--surface {
+  :root[data-theme-style]:not([data-theme]) .app--creation .theme-card__swatches[data-theme-style-card="graphite"] .theme-card__swatch--surface {
     background: #ffffff;
   }
 
-  :root[data-theme-style]:not([data-theme]) .app--creation .theme-card .theme-card__swatches[data-theme-style-card="graphite"] .theme-card__swatch--accent {
+  :root[data-theme-style]:not([data-theme]) .app--creation .theme-card__swatches[data-theme-style-card="graphite"] .theme-card__swatch--accent {
     background: linear-gradient(128deg, #604116 0%, #9b7226 28%, #d8ad4f 48%, #f3d77b 57%, #b9872d 78%, #704d19 100%);
   }
 }
