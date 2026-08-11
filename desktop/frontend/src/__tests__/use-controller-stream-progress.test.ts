@@ -490,5 +490,33 @@ function ev(s: typeof initialState, e: WireEvent) {
   }
 }
 
+// --- 8. context occupancy uses prompt tokens and keeps legacy fallback semantics ---
+{
+  let s = ev({
+    ...initialState,
+    running: true,
+    turnActive: true,
+    context: { ...initialState.context, window: 1_000 },
+  }, { kind: "usage", usage: {
+    promptTokens: 500,
+    completionTokens: 20,
+    totalTokens: 520,
+    contextPromptTokens: 0,
+    contextCompletionTokens: 20,
+    source: "executor",
+  } } as WireEvent);
+  eq(s.context.used, 500, "completion-only latest usage falls back to aggregate prompt occupancy");
+
+  s = ev({ ...s, running: true, turnActive: true }, { kind: "usage", usage: {
+    promptTokens: 700,
+    completionTokens: 30,
+    totalTokens: 730,
+    contextPromptTokens: 450,
+    contextCompletionTokens: 0,
+    source: "executor",
+  } } as WireEvent);
+  eq(s.context.used, 450, "latest-attempt prompt occupancy excludes completion tokens");
+}
+
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

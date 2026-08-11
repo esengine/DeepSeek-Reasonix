@@ -754,17 +754,9 @@ type Usage struct {
 	ContextCacheMissTokens  int
 }
 
-// ContextFillTokens returns the latest-attempt context fill (prompt+completion)
-// used by status bars and context panels. Falls back to billable totals when
-// no Context* fields were set (single-attempt / legacy usage events).
+// ContextFillTokens returns the latest prompt occupancy used by context gauges.
 func (u *Usage) ContextFillTokens() int {
-	if u == nil {
-		return 0
-	}
-	if u.ContextPromptTokens > 0 || u.ContextCompletionTokens > 0 {
-		return u.ContextPromptTokens + u.ContextCompletionTokens
-	}
-	return u.PromptTokens + u.CompletionTokens
+	return u.LatestPromptTokens()
 }
 
 // LatestPromptTokens returns the latest-attempt prompt size for context-aware

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"reasonix/internal/diff"
 	"reasonix/internal/provider"
@@ -284,6 +285,7 @@ type Registry struct {
 	order     []string
 	canon     map[string]json.RawMessage
 	suspended map[string]bool
+	schemaRev atomic.Uint64
 }
 
 // NewRegistry returns an empty registry.
@@ -309,6 +311,7 @@ func (r *Registry) Add(t Tool) {
 	}
 	r.tools[name] = t
 	r.canon[name] = provider.CanonicalizeSchema(t.Schema())
+	r.schemaRev.Add(1)
 }
 
 // MCPNamePrefix is the namespace every MCP tool name carries: the
@@ -349,6 +352,9 @@ func (r *Registry) RemovePrefix(prefix string) int {
 		kept = append(kept, name)
 	}
 	r.order = kept
+	if removed > 0 {
+		r.schemaRev.Add(1)
+	}
 	return removed
 }
 
@@ -373,6 +379,9 @@ func (r *Registry) SuspendPrefix(prefix string) int {
 		kept = append(kept, name)
 	}
 	r.order = kept
+	if removed > 0 {
+		r.schemaRev.Add(1)
+	}
 	return removed
 }
 
@@ -513,6 +522,14 @@ func (r *Registry) Len() int {
 	defer r.mu.RUnlock()
 
 	return len(r.order)
+}
+
+// SchemaRevision changes whenever the provider-visible tool set changes.
+func (r *Registry) SchemaRevision() uint64 {
+	if r == nil {
+		return 0
+	}
+	return r.schemaRev.Load()
 }
 
 // Names returns the registered tool names in insertion order.

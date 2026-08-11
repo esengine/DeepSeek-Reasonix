@@ -25,7 +25,7 @@ func (bigSchemaTool) Schema() json.RawMessage {
 		`"},"query":{"type":"string","description":"another long field to inflate the schema"}}}`)
 }
 func (bigSchemaTool) Execute(context.Context, json.RawMessage) (string, error) { return "", nil }
-func (bigSchemaTool) ReadOnly() bool                                            { return true }
+func (bigSchemaTool) ReadOnly() bool                                           { return true }
 
 func usageFixture(t *testing.T, toolResults int) *Agent {
 	t.Helper()
@@ -94,6 +94,42 @@ func TestContextUsedTokensIncludesToolSchemasLikeTheTrigger(t *testing.T) {
 	// message-only estimator ignored them and reported exactly the message cost.
 	if msgOnly := a.estimatedPromptTokens(a.modelVisibleMessages()); used <= msgOnly {
 		t.Fatalf("gauge = %d, message-only estimate = %d; the gauge must price tool schemas like the trigger", used, msgOnly)
+	}
+}
+
+func TestContextUsedTokensFollowsLiveToolRegistry(t *testing.T) {
+	reg := tool.NewRegistry()
+	a := New(nil, reg, &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "system"},
+		{Role: provider.RoleUser, Content: "task"},
+	}}, Options{ContextWindow: 1_000_000, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
+
+	withoutTools := a.ContextUsedTokens()
+	reg.Add(bigSchemaTool{})
+	withTools := a.ContextUsedTokens()
+	if got := a.ContextMaintenanceSnapshot().ProjectedTokens; withTools != got {
+		t.Fatalf("gauge after tool registration = %d, trigger input = %d", withTools, got)
+	}
+	if withTools <= withoutTools {
+		t.Fatalf("gauge did not grow after tool registration: %d -> %d", withoutTools, withTools)
+	}
+
+	if removed := reg.RemovePrefix("big_"); removed != 1 {
+		t.Fatalf("removed %d tools, want 1", removed)
+	}
+	if got := a.ContextUsedTokens(); got != withoutTools {
+		t.Fatalf("gauge after tool removal = %d, want %d", got, withoutTools)
+	}
+
+	reg.Add(bigSchemaTool{})
+	if got := a.ContextUsedTokens(); got != withTools {
+		t.Fatalf("gauge after re-registration = %d, want %d", got, withTools)
+	}
+	if removed := reg.SuspendPrefix("big_"); removed != 1 {
+		t.Fatalf("suspended %d tools, want 1", removed)
+	}
+	if got := a.ContextUsedTokens(); got != withoutTools {
+		t.Fatalf("gauge after tool suspension = %d, want %d", got, withoutTools)
 	}
 }
 
