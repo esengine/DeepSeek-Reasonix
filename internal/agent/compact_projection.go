@@ -552,7 +552,7 @@ func (a *Agent) planFoldRegion(msgs []provider.Message, force bool) (head, start
 }
 
 func (a *Agent) partitionFoldForProjection(region []provider.Message) (early, carried, kept, fold []provider.Message) {
-	policyKeep := keepIndexes(region, a.keepPolicy)
+	policyKeep := a.keepIndexes(region)
 	for i, m := range region {
 		switch {
 		case m.LocalOnly: // display-only output never reaches a provider

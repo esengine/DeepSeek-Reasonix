@@ -75,7 +75,7 @@ var ErrUnknownModel = errors.New("unknown model")
 
 func agentKeepPolicy(keep []string) agent.KeepPolicy {
 	if keep == nil {
-		return agent.KeepErrors
+		return agent.KeepErrors | agent.KeepUserMarked
 	}
 	var p agent.KeepPolicy
 	for _, k := range keep {

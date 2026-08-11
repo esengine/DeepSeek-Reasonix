@@ -168,7 +168,7 @@ func TestKeepIndexesKeepsSiblingToolResultsForKeptError(t *testing.T) {
 		{Role: provider.RoleTool, ToolCallID: "ok", Name: "read_file", Content: "package main"},
 	}
 
-	keep := keepIndexes(region, KeepErrors)
+	keep := (&Agent{keepPolicy: KeepErrors}).keepIndexes(region)
 	for i, kept := range keep {
 		if !kept {
 			t.Fatalf("keep[%d] = false, want all sibling tool-call messages kept: %v", i, keep)
@@ -186,7 +186,7 @@ func TestKeepIndexesScopesPolicyAfterLatestSummary(t *testing.T) {
 		{Role: provider.RoleTool, ToolCallID: "new", Name: "bash", Content: "error: new failure"},
 	}
 
-	keep := keepIndexes(region, KeepErrors)
+	keep := (&Agent{keepPolicy: KeepErrors}).keepIndexes(region)
 	want := []bool{false, false, false, true, true}
 	for i := range want {
 		if keep[i] != want[i] {
@@ -195,19 +195,25 @@ func TestKeepIndexesScopesPolicyAfterLatestSummary(t *testing.T) {
 	}
 }
 
+// The marker is what lets a user turn exceed the size budget keepUserTurns
+// applies, so it is asserted directly: at keepIndexes level every small user
+// turn is kept regardless, which would hide a broken marker match.
 func TestKeepUserMarkedRequiresUserPrefixMarker(t *testing.T) {
-	region := []provider.Message{
-		{Role: provider.RoleAssistant, Content: "[keep] assistant output"},
-		{Role: provider.RoleUser, Content: "ordinary prose mentioning [keep] later"},
-		{Role: provider.RoleUser, Content: "  <keep> exact requirement"},
+	cases := []struct {
+		name string
+		msg  provider.Message
+		want bool
+	}{
+		{"assistant marker ignored", provider.Message{Role: provider.RoleAssistant, Content: "[keep] assistant output"}, false},
+		{"marker must lead", provider.Message{Role: provider.RoleUser, Content: "ordinary prose mentioning [keep] later"}, false},
+		{"leading marker after space", provider.Message{Role: provider.RoleUser, Content: "  <keep> exact requirement"}, true},
 	}
-
-	keep := keepIndexes(region, KeepUserMarked)
-	want := []bool{false, false, true}
-	for i := range want {
-		if keep[i] != want[i] {
-			t.Fatalf("keep = %v, want %v", keep, want)
-		}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isUserMarked(tc.msg); got != tc.want {
+				t.Fatalf("isUserMarked = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
