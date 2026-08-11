@@ -1282,6 +1282,9 @@ type AgentConfig struct {
 	TaskCostBudget float64 `toml:"task_cost_budget"`
 	// TaskTimeBudgetMinutes is the same gate on wall clock. Both ship off.
 	TaskTimeBudgetMinutes float64 `toml:"task_time_budget_minutes"`
+	// GoalTokenBudget bounds an unattended Goal loop by cumulative tokens.
+	// Off unless set: a Goal runs until it finishes or you stop it.
+	GoalTokenBudget int `toml:"goal_token_budget"`
 	// MaxSubagentConcurrency bounds how many sub-agents (task, fleet items,
 	// profile skills, nested children) may run at once in one session.
 	// 0 means the default (6). Values outside 1–32 are clamped on load.

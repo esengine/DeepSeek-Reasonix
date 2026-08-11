@@ -505,6 +505,12 @@ func goalPauseFromRunError(err error) (cause, reason string, ok bool) {
 		return "", "", false
 	}
 	switch {
+	case info.Kind == "task_budget" && info.HostOwned:
+		reason := strings.TrimSpace(info.Reason)
+		if reason == "" {
+			reason = "the Goal reached its spend budget"
+		}
+		return stopCauseBudgetSpend, reason, true
 	case info.Kind == "goal_stuck" && info.HostOwned:
 		reason := strings.TrimSpace(info.Reason)
 		if reason == "" {

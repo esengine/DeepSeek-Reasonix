@@ -43,7 +43,8 @@ const (
 // blocked either way. stopCauseBudgetTokens is only for recognizing and
 // auto-resuming old token-limit pauses.
 const (
-	stopCauseBudgetTurns   = "budget_turns"
+	stopCauseBudgetTurns   = "budget_turns" // legacy; the class-derived turn quota is gone
+	stopCauseBudgetSpend   = "budget_spend"
 	stopCauseBudgetTokens  = "budget_tokens"   // legacy; never written by current runtime
 	stopCauseNoProgress    = "no_progress"     // legacy; never written by current runtime
 	stopCauseGoalRunBudget = "goal_run_budget" // legacy; the per-Run round ceiling is gone
@@ -52,12 +53,6 @@ const (
 	stopCauseLegacyArchive = "legacy_archive"
 	stopCauseManual        = "manual"
 )
-
-// budgetQuota returns the default turn quota for a budget class. Token hard
-// limits were removed; callers no longer receive a token ceiling.
-func budgetQuota(class string) (turns int) {
-	return taskintent.BudgetTurns(class)
-}
 
 // budgetClassForLegacyMode translates old sidecars and deprecated CLI flags at
 // the compatibility boundary. The active Goal runtime stores only budgetClass.
@@ -89,6 +84,8 @@ type goalMachine struct {
 	block              string
 	strict             bool
 	continuationEpoch  uint64
+
+	tokenBudget int // configured ceiling for an unattended loop; 0 = unbounded
 
 	// Runtime budget state, persisted across turns and restarts.
 	// tokensUsed is observational only (no hard limit). tokensLimit is kept at
@@ -281,6 +278,9 @@ func (g *goalMachine) statusForDisplay() string {
 
 // budgetExhausted reports whether the goal's turn budget is spent. Token usage
 // never exhausts the goal by itself.
+// budgetExhausted reports a spent turn quota. The quota is retired, so this is
+// false for every Goal started by the current runtime; a restored sidecar that
+// still carries a limit keeps answering truthfully until it resumes.
 func (g *goalMachine) budgetExhausted() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -348,8 +348,8 @@ func (g *goalMachine) installGoalLocked(goal, preferredBudgetClass string) {
 		g.scopeID = newGoalScopeID()
 		g.deliveryCheckpoint = evidence.DeliveryCheckpoint{ScopeID: g.scopeID}
 		g.budgetClass = preferredBudgetClass
-		g.turnsLimit = budgetQuota(g.budgetClass)
-		g.tokensLimit = 0 // no token hard limit
+		g.turnsLimit = 0 // retired; the spend budget bounds a Goal now
+		g.tokensLimit = g.tokenBudget
 		g.noProgressLimit = noProgressQuota(g.budgetClass)
 	}
 	// Installing a normal Goal always abandons any pending legacy migration.
@@ -412,21 +412,27 @@ func (g *goalMachine) resume(todos []evidence.TodoItem) (path string, data []byt
 	// can resume without understanding the removed hard limit.
 	extend := g.stopCause == stopCauseBudgetTurns ||
 		g.stopCause == stopCauseBudgetTokens ||
+		g.stopCause == stopCauseBudgetSpend ||
 		(g.turnsLimit > 0 && g.turnsUsed >= g.turnsLimit)
+	// Resuming a spend pause grants the budget again rather than leaving the
+	// goal instantly re-exhausted (openai/codex#34215 has the opposite).
+	spentBudget := g.stopCause == stopCauseBudgetSpend
 	g.continuationEpoch++
 	g.status = GoalStatusRunning
 	g.block = ""
 	g.stopCause = ""
 	g.noProgressTurns = 0
-	g.tokensLimit = 0
+	g.tokensLimit = g.tokenBudget
+	if spentBudget {
+		g.tokensUsed = 0
+	}
 	if g.scopeID == "" {
 		g.scopeID = newGoalScopeID()
 	}
 	if extend {
-		if g.budgetClass == "" {
-			g.budgetClass = taskintent.ClassifyGoalBudget(g.goal)
-		}
-		g.turnsLimit += budgetQuota(g.budgetClass)
+		// An old sidecar paused on the retired turn quota resumes by clearing
+		// it, not by being granted more turns.
+		g.turnsLimit = 0
 		g.budgetExtensions++
 	}
 	path, data, persist = g.buildStateLocked(todos)
@@ -569,10 +575,10 @@ func (g *goalMachine) advance(in goalAdvanceInput) goalAdvanceResult {
 		g.block = clipGoalReason(reason)
 		g.lastEvaluatorReason = clipGoalReason(reason)
 		notice = "goal paused: " + reason
-	case g.turnsLimit > 0 && g.turnsUsed >= g.turnsLimit:
-		reason := fmt.Sprintf("turn budget exhausted (%d/%d turns used)", g.turnsUsed, g.turnsLimit)
+	case g.tokensLimit > 0 && g.tokensUsed >= g.tokensLimit:
+		reason := fmt.Sprintf("token budget reached (%d/%d tokens used)", g.tokensUsed, g.tokensLimit)
 		g.status = GoalStatusBlocked
-		g.stopCause = stopCauseBudgetTurns
+		g.stopCause = stopCauseBudgetSpend
 		g.block = clipGoalReason(reason)
 		notice = "goal paused: " + reason
 	case in.pauseCause != "":
@@ -840,9 +846,6 @@ func (g *goalMachine) restoreFromState(sessionPath string) (path string, data []
 		}
 		if legacy.taskID != "" {
 			g.budgetClass = budgetClassResearch
-		}
-		if g.turnsLimit == 0 {
-			g.turnsLimit = budgetQuota(g.budgetClass)
 		}
 		g.noProgressLimit = resolvedNoProgressLimit(g.noProgressLimit, g.budgetClass)
 		if g.migrateRemovedGoalPause() {

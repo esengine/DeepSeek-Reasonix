@@ -22,12 +22,18 @@ import (
 // returns the TurnDone/Notice channel for waiting.
 func goalRuntimeController(t *testing.T, prov provider.Provider, eval goaleval.Evaluator) (*Controller, *agent.Agent, <-chan event.Event) {
 	t.Helper()
+	return goalRuntimeControllerWithTokenBudget(t, prov, eval, 0)
+}
+
+func goalRuntimeControllerWithTokenBudget(t *testing.T, prov provider.Provider, eval goaleval.Evaluator, tokens int) (*Controller, *agent.Agent, <-chan event.Event) {
+	t.Helper()
 	ag := agent.New(prov, goalRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
 	events := make(chan event.Event, 8)
 	c := New(Options{
-		Runner:        ag,
-		Executor:      ag,
-		GoalEvaluator: eval,
+		Runner:          ag,
+		Executor:        ag,
+		GoalEvaluator:   eval,
+		GoalTokenBudget: tokens,
 		Sink: event.FuncSink(func(e event.Event) {
 			if e.Kind == event.TurnDone || e.Kind == event.Notice {
 				events <- e
@@ -104,18 +110,27 @@ func TestEvaluatorOutcomesDriveFSM(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			prov := &scriptedTurns{turns: [][]provider.Chunk{textTurn("done.")}}
-			c, _, events := goalRuntimeController(t, prov, &fakeGoalEvaluator{outcome: tc.outcome, reason: "verdict"})
+			turn := textTurn("done.")
+			// A continue verdict loops forever unless a budget is configured.
+			budget := 0
+			if tc.wantStatus == GoalStatusRunning {
+				budget = 1
+				turn = []provider.Chunk{
+					{Type: provider.ChunkText, Text: "done."},
+					{Type: provider.ChunkUsage, Usage: &provider.Usage{PromptTokens: 100, CompletionTokens: 10, TotalTokens: 110, RequestCount: 1}},
+					{Type: provider.ChunkDone},
+				}
+			}
+			prov := &scriptedTurns{turns: [][]provider.Chunk{turn}}
+			c, _, events := goalRuntimeControllerWithTokenBudget(t, prov, &fakeGoalEvaluator{outcome: tc.outcome, reason: "verdict"}, budget)
 			c.Submit("/goal assess the impact")
 			waitGoalTurnDone(t, events)
 			if tc.wantStatus == GoalStatusRunning {
-				// Continue keeps the loop going until the recoverable outer turn
-				// backstop; cross-turn no-progress is observational only.
 				if got := c.GoalStatus(); got != GoalStatusBlocked {
-					t.Fatalf("GoalStatus() = %q, want the loop to keep going until a pause", got)
+					t.Fatalf("GoalStatus() = %q, want the loop to keep going until its spend budget", got)
 				}
-				if rt := c.GoalRuntime(); rt.StopCause != stopCauseBudgetTurns || rt.TurnsUsed != rt.TurnsLimit {
-					t.Fatalf("runtime = %+v, want outer turn-budget pause", rt)
+				if rt := c.GoalRuntime(); rt.StopCause != stopCauseBudgetSpend {
+					t.Fatalf("runtime = %+v, want a spend-budget pause", rt)
 				}
 				return
 			}
@@ -161,17 +176,22 @@ func TestEvaluatorUnavailablePausesFirstTurn(t *testing.T) {
 // TestEvaluatorCompleteStillGatedByReadiness: the evaluator's complete claim
 // must pass host readiness — seeded incomplete todos keep the goal going.
 func TestEvaluatorCompleteStillGatedByReadiness(t *testing.T) {
-	prov := &scriptedTurns{turns: [][]provider.Chunk{
-		textTurn("done."),
-		textTurn("done again."),
-	}}
+	billedTurn := []provider.Chunk{
+		{Type: provider.ChunkText, Text: "done."},
+		{Type: provider.ChunkUsage, Usage: &provider.Usage{PromptTokens: 100, CompletionTokens: 10, TotalTokens: 110, RequestCount: 1}},
+		{Type: provider.ChunkDone},
+	}
+	prov := &scriptedTurns{turns: [][]provider.Chunk{billedTurn, billedTurn}}
 	ag := agent.New(prov, goalRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
 	ag.SeedTodoState([]evidence.TodoItem{{Content: "Fix the parser", Status: "in_progress"}})
 	done := make(chan event.Event, 1)
 	c := New(Options{
-		Runner:        ag,
-		Executor:      ag,
-		GoalEvaluator: &fakeGoalEvaluator{outcome: goaleval.OutcomeComplete, reason: "all done"},
+		Runner:   ag,
+		Executor: ag,
+		// A rejected complete keeps the loop going; without a configured
+		// budget nothing would ever end it.
+		GoalTokenBudget: 1,
+		GoalEvaluator:   &fakeGoalEvaluator{outcome: goaleval.OutcomeComplete, reason: "all done"},
 		Sink: event.FuncSink(func(e event.Event) {
 			if e.Kind == event.TurnDone {
 				done <- e
@@ -181,12 +201,12 @@ func TestEvaluatorCompleteStillGatedByReadiness(t *testing.T) {
 	c.Submit("/goal fix everything")
 	<-done
 	// The evaluator's complete claim is rejected (incomplete todos) and the
-	// goal continues until the outer continuation backstop.
+	// goal continues until its configured spend budget.
 	if got := c.GoalStatus(); got != GoalStatusBlocked {
-		t.Fatalf("GoalStatus() = %q, want blocked (turn budget after rejected complete)", got)
+		t.Fatalf("GoalStatus() = %q, want blocked (spend budget after rejected complete)", got)
 	}
-	if rt := c.GoalRuntime(); rt.StopCause != stopCauseBudgetTurns {
-		t.Fatalf("StopCause = %q, want %q", rt.StopCause, stopCauseBudgetTurns)
+	if rt := c.GoalRuntime(); rt.StopCause != stopCauseBudgetSpend {
+		t.Fatalf("StopCause = %q, want %q", rt.StopCause, stopCauseBudgetSpend)
 	}
 }
 
@@ -311,7 +331,7 @@ func TestGoalUsageTeeAttributesScopedBillableCallsAndExcludesTitle(t *testing.T)
 	tee := NewGoalUsageTee(event.Discard).(*goalUsageTee)
 	g := &goalMachine{goal: "ship it", status: GoalStatusRunning}
 	g.budgetClass = budgetClassWrite
-	g.turnsLimit = budgetQuota(budgetClassWrite)
+	g.turnsLimit = legacyTurnQuota(budgetClassWrite)
 	g.tokensLimit = 0
 	g.noProgressLimit = noProgressQuota(g.budgetClass)
 	g.scopeID = newGoalScopeID()
@@ -355,7 +375,7 @@ func TestBudgetClassForBareFaultIsWrite(t *testing.T) {
 	if class != budgetClassWrite {
 		t.Fatalf("budget class = %q, want write", class)
 	}
-	if turns := budgetQuota(class); turns != 20 {
+	if turns := legacyTurnQuota(class); turns != 20 {
 		t.Fatalf("write turn quota = %d, want 20", turns)
 	}
 	// Consultative / diagnostic fault statements stay simple.
@@ -496,11 +516,13 @@ func TestGoalSidecarCompatRestoresOldAndNewFields(t *testing.T) {
 		if rt.TokensUsed != 0 {
 			t.Fatalf("TokensUsed = %d, want 0 (no legacy token record)", rt.TokensUsed)
 		}
-		if rt.TurnsLimit == 0 {
-			t.Fatalf("turn limit not re-derived: %+v", rt)
+		// The class-derived turn quota is retired and is not re-derived on
+		// restore; an unconfigured goal carries no ceiling of either kind.
+		if rt.TurnsLimit != 0 {
+			t.Fatalf("turn quota re-derived on restore: %+v", rt)
 		}
 		if rt.TokensLimit != 0 {
-			t.Fatalf("TokensLimit = %d, want 0 (no hard token limit)", rt.TokensLimit)
+			t.Fatalf("TokensLimit = %d, want 0 when no budget is configured", rt.TokensLimit)
 		}
 	})
 
@@ -589,8 +611,8 @@ func TestGoalRuntimeViewPopulatesFromController(t *testing.T) {
 	c := New(Options{Sink: event.Discard})
 	c.SetGoal("finish the migration")
 	rt := c.GoalRuntime()
-	if rt.TurnsUsed != 0 || rt.TurnsLimit == 0 || rt.NoProgressLimit == 0 {
-		t.Fatalf("runtime view = %+v, want derived turn budget defaults", rt)
+	if rt.TurnsUsed != 0 || rt.TurnsLimit != 0 || rt.NoProgressLimit == 0 {
+		t.Fatalf("runtime view = %+v, want no derived turn quota", rt)
 	}
 	if rt.TokensLimit != 0 {
 		t.Fatalf("TokensLimit = %d, want 0 (no hard token limit)", rt.TokensLimit)
@@ -601,17 +623,22 @@ func TestGoalRuntimeViewPopulatesFromController(t *testing.T) {
 // historical [goal:complete] footer in the latest answer never influences the
 // FSM — only the structured tool report does.
 func TestFooterTextDoesNotDriveGoalState(t *testing.T) {
-	prov := &scriptedTurns{turns: [][]provider.Chunk{textTurn("All done.\n\n[goal:complete]")}}
-	c, _, events := goalRuntimeController(t, prov, &fakeGoalEvaluator{outcome: goaleval.OutcomeContinue, reason: "work is ongoing"})
+	prov := &scriptedTurns{turns: [][]provider.Chunk{{
+		{Type: provider.ChunkText, Text: "All done.\n\n[goal:complete]"},
+		{Type: provider.ChunkUsage, Usage: &provider.Usage{PromptTokens: 100, CompletionTokens: 10, TotalTokens: 110, RequestCount: 1}},
+		{Type: provider.ChunkDone},
+	}}}
+	// The evaluator says continue, so only a configured budget ends this run.
+	c, _, events := goalRuntimeControllerWithTokenBudget(t, prov, &fakeGoalEvaluator{outcome: goaleval.OutcomeContinue, reason: "work is ongoing"}, 1)
 	c.Submit("/goal migrate the storage")
 	waitGoalTurnDone(t, events)
 	// The footer alone must never complete the goal: the evaluator's continue
-	// keeps it going until the outer continuation backstop pauses it.
+	// keeps it going until the spend budget pauses it.
 	if got := c.GoalStatus(); got == GoalStatusComplete {
 		t.Fatal("a [goal:complete] footer must not complete the goal")
 	}
-	if rt := c.GoalRuntime(); rt.StopCause != stopCauseBudgetTurns {
-		t.Fatalf("runtime = %+v, want turn-budget pause (footer ignored)", rt)
+	if rt := c.GoalRuntime(); rt.StopCause != stopCauseBudgetSpend {
+		t.Fatalf("runtime = %+v, want spend-budget pause (footer ignored)", rt)
 	}
 	c.ClearGoal()
 	for _, m := range c.History() {

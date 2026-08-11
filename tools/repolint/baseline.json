@@ -9,7 +9,7 @@
     "layering": 1,
     "marker": 0,
     "narrative": 64,
-    "test-file-size": 69921
+    "test-file-size": 69938
   },
   "files": {
     "cmd/e2ebench/main.go": {
@@ -675,8 +675,8 @@
     "internal/boot/boot.go": {
       "complexity": 298,
       "essay": 102,
-      "file-size": 2239,
-      "function-size": 1867,
+      "file-size": 2241,
+      "function-size": 1869,
       "narrative": 3
     },
     "internal/boot/boot_test.go": {
@@ -977,7 +977,7 @@
     },
     "internal/config/config.go": {
       "essay": 54,
-      "file-size": 1508,
+      "file-size": 1510,
       "narrative": 2
     },
     "internal/config/credentials.go": {
@@ -1072,13 +1072,13 @@
     "internal/control/controller.go": {
       "complexity": 10,
       "essay": 162,
-      "file-size": 5463,
-      "function-size": 75,
+      "file-size": 5469,
+      "function-size": 78,
       "narrative": 4
     },
     "internal/control/controller_test.go": {
       "essay": 10,
-      "test-file-size": 4608
+      "test-file-size": 4610
     },
     "internal/control/errmsg.go": {
       "essay": 2
@@ -1097,11 +1097,11 @@
     "internal/control/goal.go": {
       "complexity": 3,
       "essay": 11,
-      "file-size": 274,
+      "file-size": 277,
       "function-size": 1
     },
     "internal/control/goal_test.go": {
-      "test-file-size": 243
+      "test-file-size": 249
     },
     "internal/control/goalusage.go": {
       "essay": 2
@@ -1171,7 +1171,7 @@
     },
     "internal/control/turn_orchestrator_test.go": {
       "essay": 1,
-      "test-file-size": 429
+      "test-file-size": 439
     },
     "internal/control/yolo_test.go": {
       "test-file-size": 473

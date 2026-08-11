@@ -334,33 +334,43 @@ type recordingSessionRunner struct {
 
 type deliveryScopeErrorRunner struct {
 	scopes []agent.DeliveryExecutionScope
+	// usage stands in for the billable work a real executor would report; the
+	// goal's spend budget is measured in it.
+	usage event.Sink
 }
 
 func (r *deliveryScopeErrorRunner) Run(ctx context.Context, _ string) error {
 	if scope, ok := agent.DeliveryExecutionScopeFromContext(ctx); ok {
 		r.scopes = append(r.scopes, scope)
 	}
+	if r.usage != nil {
+		r.usage.Emit(event.Event{Kind: event.Usage, UsageSource: event.UsageSourceExecutor,
+			Usage: &provider.Usage{PromptTokens: 100, CompletionTokens: 10, TotalTokens: 110, RequestCount: 1}})
+	}
 	return &agent.FinalReadinessError{Attempts: 1, Reason: "missing verification", Missing: []string{"verification"}}
 }
 
-func TestGoalReadinessFailureContinuesThenPausesOnTurnBudget(t *testing.T) {
+func TestGoalReadinessFailureContinuesThenPausesOnSpendBudget(t *testing.T) {
 	runner := &deliveryScopeErrorRunner{}
 	executor := agent.New(nil, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
-	c := New(Options{Runner: runner, Executor: executor})
+	// Readiness failures are absorbed and retried forever; only a configured
+	// budget ends an unattended loop.
+	c := New(Options{Runner: runner, Executor: executor, GoalTokenBudget: 200})
+	runner.usage = c.goalUsageTee
 	c.SetGoal("ship the integration")
 
 	err := newTurnOrchestrator(c).runGoalLoopWithRawDisplay(context.Background(), "start", "start", "")
 	if err != nil {
-		t.Fatalf("run err = %v, want the loop to absorb FinalReadinessError and pause on the turn budget", err)
+		t.Fatalf("run err = %v, want the loop to absorb FinalReadinessError and pause on its budget", err)
 	}
 	// The FSM absorbs the readiness failure and continues with the missing
-	// requirements; cross-turn no-progress remains observational and the outer
-	// continuation backstop eventually pauses the goal.
+	// requirements; cross-turn no-progress remains observational and the spend
+	// budget eventually pauses the goal.
 	if got := c.GoalStatus(); got != GoalStatusBlocked {
-		t.Fatalf("GoalStatus = %q, want blocked (turn-budget pause)", got)
+		t.Fatalf("GoalStatus = %q, want blocked (spend-budget pause)", got)
 	}
-	if rt := c.GoalRuntime(); rt.StopCause != stopCauseBudgetTurns {
-		t.Fatalf("stop cause = %q, want %q", rt.StopCause, stopCauseBudgetTurns)
+	if rt := c.GoalRuntime(); rt.StopCause != stopCauseBudgetSpend {
+		t.Fatalf("stop cause = %q, want %q", rt.StopCause, stopCauseBudgetSpend)
 	}
 	if len(runner.scopes) < 2 || runner.scopes[0].ID == "" || runner.scopes[0].TaskText != "ship the integration" {
 		t.Fatalf("delivery scopes = %+v, want scoped continuation turns", runner.scopes)

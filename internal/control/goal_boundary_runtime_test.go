@@ -42,11 +42,25 @@ func TestMergeGoalProgressEvidenceIsNovelAndBounded(t *testing.T) {
 	}
 }
 
-func TestTurnTokenNoProgressPausesAndResumeExtendsBudget(t *testing.T) {
+// legacyTurnQuota reproduces the retired class-derived turn quota. Fixtures
+// below only ever needed "some plausible number of turns"; the runtime no
+// longer derives one.
+func legacyTurnQuota(class string) int {
+	switch class {
+	case budgetClassResearch:
+		return 40
+	case budgetClassWrite:
+		return 20
+	default:
+		return 10
+	}
+}
+
+func TestTurnCountNeverPausesAndResumeClearsLegacyBudget(t *testing.T) {
 	newMachine := func() *goalMachine {
 		g := &goalMachine{goal: "fix the parser", status: GoalStatusRunning}
 		g.budgetClass = budgetClassWrite
-		g.turnsLimit = budgetQuota(budgetClassWrite)
+		g.turnsLimit = legacyTurnQuota(budgetClassWrite)
 		g.noProgressLimit = noProgressQuota(g.budgetClass)
 		return g
 	}
@@ -54,16 +68,19 @@ func TestTurnTokenNoProgressPausesAndResumeExtendsBudget(t *testing.T) {
 		return goalAdvanceInput{report: report, progressEvidence: progress}
 	}
 
-	t.Run("turn budget pauses", func(t *testing.T) {
+	// Turn count is not a resource. A goal that keeps reporting progress runs
+	// as long as it keeps making it; a ceiling now lives on spend, and only
+	// when the user sets one.
+	t.Run("turn count never pauses", func(t *testing.T) {
 		g := newMachine()
-		for i := range g.turnsLimit {
+		for i := range g.turnsLimit * 3 {
 			res := g.advance(in(&goalTurnReport{status: GoalStatusRunning, reason: "keep going"}, "sig-"+fmt.Sprint(i)))
-			if res.cont && i == g.turnsLimit-1 {
-				t.Fatal("last turn must pause")
+			if !res.cont {
+				t.Fatalf("goal paused at turn %d on turn count alone", i+1)
 			}
 		}
-		if g.status != GoalStatusBlocked || g.stopCause != stopCauseBudgetTurns {
-			t.Fatalf("machine = (%q, %q), want blocked+budget_turns", g.status, g.stopCause)
+		if g.status != GoalStatusRunning || g.stopCause != "" {
+			t.Fatalf("machine = (%q, %q), want it still running", g.status, g.stopCause)
 		}
 	})
 
@@ -110,7 +127,7 @@ func TestTurnTokenNoProgressPausesAndResumeExtendsBudget(t *testing.T) {
 
 	t.Run("research accepts new read evidence but keeps a larger synthesis budget", func(t *testing.T) {
 		g := &goalMachine{goal: "research", status: GoalStatusRunning, budgetClass: budgetClassResearch,
-			turnsLimit: budgetQuota(budgetClassResearch), noProgressLimit: noProgressQuota(budgetClassResearch)}
+			turnsLimit: legacyTurnQuota(budgetClassResearch), noProgressLimit: noProgressQuota(budgetClassResearch)}
 		for i := range 8 {
 			if res := g.advance(in(&goalTurnReport{status: GoalStatusRunning}, "read-"+fmt.Sprint(i))); !res.cont {
 				t.Fatalf("new research evidence paused at turn %d", i+1)
@@ -121,28 +138,27 @@ func TestTurnTokenNoProgressPausesAndResumeExtendsBudget(t *testing.T) {
 		}
 	})
 
-	t.Run("resume extension contract", func(t *testing.T) {
+	// An old sidecar paused on the retired quota resumes by clearing it, not
+	// by being granted more turns.
+	t.Run("resume clears a legacy turn budget", func(t *testing.T) {
 		g := newMachine()
-		for range g.turnsLimit {
-			g.advance(in(&goalTurnReport{status: GoalStatusRunning}))
-		}
-		before := g.turnsLimit
+		g.turnsUsed = g.turnsLimit
+		g.pauseFor(stopCauseBudgetTurns, "turn budget exhausted", nil)
 		_, _, _, resumed, extended := g.resume(nil)
-		if !resumed || !extended || g.turnsLimit != before+budgetQuota(budgetClassWrite) || g.budgetExtensions != 1 {
-			t.Fatalf("budget resume failed: %+v", g)
+		if !resumed || !extended || g.turnsLimit != 0 || g.budgetExtensions != 1 {
+			t.Fatalf("legacy budget resume failed: %+v", g)
 		}
 		g.pauseFor(stopCauseManual, "user paused", nil)
-		before = g.turnsLimit
 		_, _, _, resumed, extended = g.resume(nil)
-		if !resumed || extended || g.turnsLimit != before {
-			t.Fatalf("manual resume extended budget: %+v", g)
+		if !resumed || extended {
+			t.Fatalf("manual resume treated as a budget extension: %+v", g)
 		}
 	})
 }
 
 func TestWireContinueDoesNotKeepExactRepeatedEvidenceAlive(t *testing.T) {
 	g := &goalMachine{goal: "repeat", status: GoalStatusRunning, budgetClass: budgetClassSimple,
-		turnsLimit: budgetQuota(budgetClassSimple), noProgressLimit: noProgressQuota(budgetClassSimple), scopeID: newGoalScopeID()}
+		turnsLimit: legacyTurnQuota(budgetClassSimple), noProgressLimit: noProgressQuota(budgetClassSimple), scopeID: newGoalScopeID()}
 	advance := func() goalAdvanceResult {
 		epoch := g.continuationEpoch
 		rec := g.newTurnRecorder(g.scopeID, epoch)
@@ -241,7 +257,7 @@ func TestGoalRunBoundariesPauseAfterTerminalDecisions(t *testing.T) {
 func TestGoalProgressEvidenceRestoresAsBoundedNoveltyState(t *testing.T) {
 	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
 	state := goalState{Goal: "research", Status: GoalStatusRunning, BudgetClass: budgetClassResearch,
-		TurnsLimit: budgetQuota(budgetClassResearch), NoProgressTurns: 2, NoProgressLimit: defaultNoProgressLimit,
+		TurnsLimit: legacyTurnQuota(budgetClassResearch), NoProgressTurns: 2, NoProgressLimit: defaultNoProgressLimit,
 		ProgressEvidence: []string{"read-a", "read-a", "read-b", strings.Repeat("x", 129)}}
 	raw, err := json.Marshal(state)
 	if err != nil {

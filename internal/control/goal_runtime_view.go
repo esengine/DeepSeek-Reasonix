@@ -26,7 +26,7 @@ func (g *goalMachine) runtimeView() GoalRuntimeView {
 	return GoalRuntimeView{
 		TurnsUsed: g.turnsUsed, TurnsLimit: g.turnsLimit,
 		TokensUsed: g.tokensUsed, RequestsUsed: g.requestsUsed,
-		TokensLimit: 0, NoProgressTurns: g.noProgressTurns,
+		TokensLimit: g.tokensLimit, NoProgressTurns: g.noProgressTurns,
 		NoProgressLimit: g.noProgressLimit, LastReason: last,
 		StopCause: g.stopCause, BudgetExtensions: g.budgetExtensions,
 	}

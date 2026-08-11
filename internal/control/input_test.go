@@ -847,21 +847,21 @@ func TestGoalAutoResearchTriggersForLongHorizonGoals(t *testing.T) {
 	if !strings.Contains(got, "<active-goal>") || strings.Contains(strings.ToLower(got), "autoresearch") {
 		t.Fatalf("unified research Goal prompt = %q", got)
 	}
-	if c.GoalRuntime().TurnsLimit != 40 {
-		t.Fatalf("research budget = %+v", c.GoalRuntime())
+	if got := c.goals.budgetClass; got != budgetClassResearch {
+		t.Fatalf("research budget class = %q, want %q", got, budgetClassResearch)
 	}
 }
 
 func TestGoalAutoResearchCanBeForcedOrDisabled(t *testing.T) {
 	c := New(Options{})
 	c.SetGoalWithResearchMode("fix the typo and add a test", GoalResearchOn)
-	if got := c.Compose("start"); strings.Contains(strings.ToLower(got), "autoresearch") || c.GoalRuntime().TurnsLimit != 40 {
-		t.Fatalf("forced research Goal should use hidden 40-turn budget: %q %+v", got, c.GoalRuntime())
+	if got := c.Compose("start"); strings.Contains(strings.ToLower(got), "autoresearch") || c.goals.budgetClass != budgetClassResearch {
+		t.Fatalf("forced research Goal should select the research class: %q %q", got, c.goals.budgetClass)
 	}
 
 	c.SetGoalWithResearchMode("持续排查这个线上卡顿直到根因明确", GoalResearchOff)
-	if got := c.Compose("start"); strings.Contains(strings.ToLower(got), "autoresearch") || c.GoalRuntime().TurnsLimit == 40 {
-		t.Fatalf("simple override should use non-research budget: %q %+v", got, c.GoalRuntime())
+	if got := c.Compose("start"); strings.Contains(strings.ToLower(got), "autoresearch") || c.goals.budgetClass == budgetClassResearch {
+		t.Fatalf("simple override should not select the research class: %q %q", got, c.goals.budgetClass)
 	}
 }
 
@@ -870,8 +870,8 @@ func TestGoalCommandPreservesResearchModeFlags(t *testing.T) {
 	if !c.applyGoalCommand("/goal --research fix the typo", "") {
 		t.Fatal("goal command was not parsed")
 	}
-	if got := c.Compose("start"); strings.Contains(strings.ToLower(got), "autoresearch") || c.GoalRuntime().TurnsLimit != 40 {
-		t.Fatalf("/goal --research should select research budget: %q %+v", got, c.GoalRuntime())
+	if got := c.Compose("start"); strings.Contains(strings.ToLower(got), "autoresearch") || c.goals.budgetClass != budgetClassResearch {
+		t.Fatalf("/goal --research should select the research class: %q %q", got, c.goals.budgetClass)
 	}
 
 	c = New(Options{})

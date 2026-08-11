@@ -80,8 +80,8 @@ func TestGoalSidecarWriterFencesLegacyAutoResearchForEveryBudget(t *testing.T) {
 			if state.ResearchMode != GoalResearchOff || state.AutoResearchTaskID != "" {
 				t.Fatalf("legacy reader fence missing: %+v", state)
 			}
-			if state.BudgetClass != tt.class || state.TurnsLimit != budgetQuota(tt.class) {
-				t.Fatalf("budget state = %+v, want %s/%d", state, tt.class, budgetQuota(tt.class))
+			if state.BudgetClass != tt.class || state.TurnsLimit != 0 {
+				t.Fatalf("budget state = %+v, want %s with no turn quota", state, tt.class)
 			}
 			// Frozen previous readers treated any non-Off mode or retained task id
 			// as an AutoResearch activation signal.
@@ -100,8 +100,8 @@ func TestGoalSidecarWriterFencesLegacyAutoResearchForEveryBudget(t *testing.T) {
 			}
 			reloaded := &goalMachine{}
 			reloaded.restoreFromState(sessionPath)
-			if reloaded.budgetClass != tt.class || reloaded.turnsLimit != budgetQuota(tt.class) {
-				t.Fatalf("reloaded budget = %q/%d, want %q/%d", reloaded.budgetClass, reloaded.turnsLimit, tt.class, budgetQuota(tt.class))
+			if reloaded.budgetClass != tt.class || reloaded.turnsLimit != 0 {
+				t.Fatalf("reloaded budget = %q/%d, want %q with no turn quota", reloaded.budgetClass, reloaded.turnsLimit, tt.class)
 			}
 		})
 	}
@@ -133,8 +133,8 @@ func TestGoalSetIdempotencyUsesEffectiveBudgetClass(t *testing.T) {
 	if _, _, ok := g.set("same goal", budgetClassResearch, nil); !ok {
 		t.Fatal("budget class change was incorrectly treated as idempotent")
 	}
-	if g.budgetClass != budgetClassResearch || g.turnsLimit != budgetQuota(budgetClassResearch) {
-		t.Fatalf("budget upgrade = class:%q turns:%d", g.budgetClass, g.turnsLimit)
+	if g.budgetClass != budgetClassResearch || g.turnsLimit != 0 {
+		t.Fatalf("budget upgrade = class:%q turns:%d, want the class kept and no turn quota", g.budgetClass, g.turnsLimit)
 	}
 }
 
@@ -215,8 +215,9 @@ func TestLegacySidecarArchiveFailureBlocksWithRetryableTaskID(t *testing.T) {
 		t.Fatalf("retried status = %q, want running", got)
 	}
 	runtime := c.GoalRuntime()
-	if runtime.TurnsUsed != 3 || runtime.TurnsLimit != 40 || runtime.TokensUsed != 1234 || runtime.NoProgressTurns != 2 || runtime.BudgetExtensions != 1 {
-		t.Fatalf("retried runtime = %+v, want preserved legacy consumption", runtime)
+	// Consumption counters survive the migration; the retired turn quota does not.
+	if runtime.TurnsUsed != 3 || runtime.TurnsLimit != 0 || runtime.TokensUsed != 1234 || runtime.NoProgressTurns != 2 || runtime.BudgetExtensions != 1 {
+		t.Fatalf("retried runtime = %+v, want preserved legacy consumption without a turn quota", runtime)
 	}
 	if got := exec.CanonicalTodoState(); len(got) != 1 || got[0] != wantTodo {
 		t.Fatalf("retried todos = %+v, want %+v", got, wantTodo)
@@ -398,8 +399,8 @@ func TestLegacySidecarArchiveCanRetryInSameController(t *testing.T) {
 	if got := c.Goal(); got != "recover objective in the same controller" {
 		t.Fatalf("Goal() = %q, want recovered archive objective", got)
 	}
-	if runtime := c.GoalRuntime(); runtime.TurnsUsed != 5 || runtime.TurnsLimit != 40 {
-		t.Fatalf("runtime = %+v, want preserved use with research quota", runtime)
+	if runtime := c.GoalRuntime(); runtime.TurnsUsed != 5 || runtime.TurnsLimit != 0 {
+		t.Fatalf("runtime = %+v, want preserved use without a turn quota", runtime)
 	}
 	persisted, err := os.ReadFile(goalStatePath(sessionPath))
 	if err != nil {
@@ -607,7 +608,7 @@ func TestExplicitLegacyGoalRetryNeverRunsArchivePathAsGoal(t *testing.T) {
 	if got := c.Goal(); got != "recover the original objective" {
 		t.Fatalf("Goal() = %q, want archive objective", got)
 	}
-	if c.GoalStatus() != GoalStatusRunning || c.GoalRuntime().TurnsLimit != 40 {
+	if c.GoalStatus() != GoalStatusRunning || c.GoalRuntime().TurnsLimit != 0 {
 		t.Fatalf("recovered runtime = status:%q %+v", c.GoalStatus(), c.GoalRuntime())
 	}
 }

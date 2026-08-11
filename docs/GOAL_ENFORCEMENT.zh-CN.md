@@ -10,7 +10,7 @@ Reasonix 的 Goal 模式（`/goal`）将目标推进（Goal）、验收（Delive
 | 完成校验 | 默认 | `complete` 声明必须通过 Delivery readiness（todos、验证、review、签收、能力门禁）才会真正完成；不满足时用缺失项开启下一轮 |
 | 完成自述与对账 | `update_goal` 的 `completion` | `complete` 可附带自述：`verified` 命令逐条与本会话真实 receipt 对账，没跑过 / 跑失败 / 早于最后一次改动都记为 unbacked claim；`unverified` 与 `risks` 是宿主推断不出的声明，只增不减，永远不阻塞完成 |
 | 独立评审 | 无报告时 | 模型未调用 `update_goal` 时，宿主调用一次独立 bounded evaluator 判定；评审不可用/出错/不确定时安全暂停，绝不默认继续 |
-| 执行预算 | 默认 | **真实执行轮次 + 结构化卡死检测**：简单/写入/研究型跨 Run 总预算为 10/20/40 轮；用户未显式配置 `max_steps` 时，每次 Goal Run 默认 16 个模型轮次并提供一次仅总结响应。相同宿主失败 3 次或成功轮连续 6 次没有新证据时结构化暂停。累计 token、provider 请求数和跨 turn 无进展只做观测，**没有 token/请求数硬上限** |
+| 执行预算 | 默认 | **默认不设任何上限**：没有轮数预算，也没有单次 Run 的轮次上限。需要为无人值守循环设护栏时，配置 `[agent].goal_token_budget`（整个 Goal 累计 token），越线产出一次总结并进入可恢复的 `budget_spend` 暂停。结构化卡死检测保留：相同宿主失败 3 次或成功轮连续 6 次没有新证据时暂停。跨 turn 无进展仍只做观测 |
 | 暂停/恢复 | `/goal pause` / `/goal resume` | 暂停保留 Goal、todo、Delivery checkpoint 与运行历史；轮次型暂停恢复时追加一档同类别**轮数**（`budget_extensions` 统计轮次追加次数） |
 | 立即阻塞 | `blocked` 报告 | 单个 blocked 报告立即结束目标，不再重复三轮确认 |
 | 并行调度 | `parallel_tasks` 工具 | 并发派发多个子 agent，各自独立显示结果 |
@@ -59,7 +59,7 @@ Reasonix 的 Goal 模式（`/goal`）将目标推进（Goal）、验收（Delive
 - 没有 provider 请求前的 token 预留/准入；
 - 累计 token 再大也不会单独暂停 Goal。
 
-可停止 Goal 的条件：10/20/40 外层轮次耗尽、单次 Run 的 16 轮默认边界、结构化卡死、evaluator 故障、显式 `blocked`、账号额度或人工暂停。跨 Goal turn 的 `noProgressTurns` 继续记录新颖证据变化，但不再直接停止 Goal。
+可停止 Goal 的条件：目标达成、显式 `blocked`、evaluator 故障或不确定（fail-closed）、结构化卡死、配置了 `goal_token_budget` 时的 token 预算耗尽、账号额度或人工暂停。**轮数不再是其中任何一条**。跨 Goal turn 的 `noProgressTurns` 继续记录新颖证据变化，但不直接停止 Goal。
 
 达到轮次预算后目标安全暂停（持久化层表现为 `blocked` + `stop_cause`，旧客户端安全显示为 blocked，不会误恢复自动运行）。`/goal status` 显示完整运行摘要：
 
@@ -67,7 +67,7 @@ Reasonix 的 Goal 模式（`/goal`）将目标推进（Goal）、验收（Delive
 runtime: turns 12/20, tokens 214000, requests 37, no-progress 6 (observational), extensions 0
 ```
 
-`/goal resume` 恢复目标：只有 10/20/40 外层轮次型暂停才追加一档同类别轮数；`goal_run_budget` 与 `goal_stuck` 只开启一个新的 Run，不增加外层额度。累计 token、请求数与 `budget_extensions` 保留。旧版本因 `budget_tokens` 或 `no_progress` 暂停的 sidecar 在新版本加载时会自动改为 `running` 并立即持久化；旧 `noProgressLimit` 字段继续兼容读写但不再参与决策。
+`/goal resume` 恢复目标：`budget_spend` 暂停会重新授予一次完整 token 预算（而不是恢复后立刻再次耗尽）；`goal_stuck` 只开启一个新的 Run。请求数与 `budget_extensions` 保留。旧版本因 `budget_tokens` 或 `no_progress` 暂停的 sidecar 在新版本加载时会自动改为 `running` 并立即持久化；旧 `noProgressLimit` 字段继续兼容读写但不再参与决策。
 
 上下文压缩继续使用全局既有策略：仅由 `compact_ratio`（默认 85%）触发一次内容驱动摘要 checkpoint，不另设 soft/snip/force 多阈值。Goal 开启本身不额外触发 summarizer，也不改变工具 Schema 或稳定 prompt 前缀。
 

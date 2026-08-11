@@ -138,9 +138,7 @@ func (g *goalMachine) fillGoalTextIfEmpty(expectedEpoch uint64, goal string) (ui
 		g.stopCause, g.block = "", ""
 	}
 	g.budgetClass = budgetClassResearch
-	if g.turnsLimit < budgetQuota(g.budgetClass) {
-		g.turnsLimit = budgetQuota(g.budgetClass)
-	}
+	g.turnsLimit = 0 // retired quota; a migrated goal is not re-bounded by turns
 	if g.noProgressLimit == 0 {
 		g.noProgressLimit = noProgressQuota(g.budgetClass)
 	}
@@ -169,9 +167,7 @@ func (g *goalMachine) resumeLegacyArchive(expectedEpoch uint64, goal string) (ui
 	g.status = GoalStatusRunning
 	g.stopCause, g.block = "", ""
 	g.budgetClass = budgetClassResearch
-	if g.turnsLimit < budgetQuota(g.budgetClass) {
-		g.turnsLimit = budgetQuota(g.budgetClass)
-	}
+	g.turnsLimit = 0 // retired quota; a migrated goal is not re-bounded by turns
 	if g.noProgressLimit == 0 {
 		g.noProgressLimit = noProgressQuota(g.budgetClass)
 	}

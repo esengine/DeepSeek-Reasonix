@@ -664,7 +664,7 @@ Mode and display shortcuts:
 | `/theme [auto|light|dark|style]` | Shows or switches the CLI theme | Bare `/theme` lists background modes and named accent palettes. The choice is saved to the user config; `REASONIX_THEME` and `REASONIX_THEME_STYLE` can override it for one run. |
 | `Ctrl+O` | Toggles verbose reasoning display | Also available through `/verbose`. |
 | `Ctrl+B` | Expands or collapses long shell output | Long shell-output hint lines can also be clicked in the transcript; text selection is handled in-app while the full-screen TUI has mouse reporting enabled. |
-| `/goal <objective>`, `/goal status`, `/goal pause`, `/goal resume`, `/goal clear` | Starts, checks, pauses, resumes, or clears Goal | Goal automatically selects a simple, write, or research turn budget. |
+| `/goal <objective>`, `/goal status`, `/goal pause`, `/goal resume`, `/goal clear` | Starts, checks, pauses, resumes, or clears Goal | A Goal is unbounded unless `[agent].goal_token_budget` is set. |
 | `/migrate`, `/migrate --from <legacy-dir>` | Retries legacy migration or imports sessions from a chosen v0.x source | Use `--from` for custom Windows v0.52 install/data directories; it imports sessions only. See [Configuration paths](./CONFIG_PATHS.md). |
 
 Picker and approval shortcuts:
@@ -1139,11 +1139,20 @@ until the goal is complete, blocked, paused, or cleared. Ordinary chat never
 changes collaboration mode implicitly; choose Goal in the composer or use
 `/goal` to start a long-running objective.
 
-Goal runs under a per-class **turn** budget: simple goals get 10 turns, write
-goals 20 turns, and research goals 40 turns. This is a cross-Run continuation
-backstop. Each Goal Run also defaults to 16 model rounds when no explicit
-`max_steps` is configured, then gets one summary-only response before a
-resumable `goal_run_budget` pause. Progress is goal-scoped and novelty based:
+A Goal runs until it finishes, hits a blocker, stops making progress, or you
+stop it. **Nothing bounds it by default** — not turns, not rounds. If you want
+a ceiling on an unattended loop, set one:
+
+```toml
+[agent]
+goal_token_budget = 20000000   # cumulative tokens across the whole goal
+```
+
+Reaching it produces one summary and a resumable `budget_spend` pause, and
+`/goal resume` grants the budget again rather than resuming into an
+immediately exhausted one. Tokens are the unit because they catch both a slow
+expensive loop and a fast empty one, where wall clock catches only the first
+and money is not portable across models. Progress is goal-scoped and novelty based:
 new read/search results, mutations, verification, todo/signoff changes, and
 reviews advance the goal; an exact tool/argument/result repeat does not.
 Cumulative token and real provider request usage is tracked and shown for
@@ -1151,11 +1160,11 @@ diagnostics, but there is
 **no token hard limit** and no pre-provider request admission. In Goal mode, a
 bare bug/crash/exception statement defaults to the write turn class unless the
 user asks only for analysis/explanation or forbids changes. A paused goal keeps its todos, Delivery
-checkpoint, and runtime history — use `/goal resume` to continue (turn-budget
-pauses add one more slice of turns of the same class; Run-budget and structural
-stuck pauses start a fresh Run without extending the outer budget), or `/goal pause` to pause
-a running goal manually. `/goal status` shows the full runtime summary (turns
-used/limit, tokens, requests, observational no-progress streak, extensions).
+checkpoint, and runtime history — use `/goal resume` to continue (a spend pause
+resumes with its budget granted again; structural stuck pauses start a fresh
+Run), or `/goal pause` to pause a running goal manually. `/goal status` shows
+the full runtime summary (turns used, tokens used/limit, requests,
+observational no-progress streak, extensions).
 Within one Run, three repeated identical host failures or six successful
 zero-evidence rounds produce a resumable `goal_stuck` pause. At the end of every goal turn
 the model reports its disposition through the structured `update_goal` tool
