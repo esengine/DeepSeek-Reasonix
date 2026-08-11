@@ -440,8 +440,8 @@
     },
     "internal/agent/agent.go": {
       "complexity": 37,
-      "essay": 97,
-      "file-size": 2508,
+      "essay": 84,
+      "file-size": 2357,
       "function-size": 102
     },
     "internal/agent/ask.go": {
@@ -618,6 +618,9 @@
     },
     "internal/agent/session_removal.go": {
       "essay": 6
+    },
+    "internal/agent/storm_breaker.go": {
+      "essay": 13
     },
     "internal/agent/steer_flush_test.go": {
       "essay": 1

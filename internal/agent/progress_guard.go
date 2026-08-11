@@ -80,7 +80,9 @@ func (a *Agent) applyBatchGuards(ctx context.Context, cancelled bool, calls []pr
 	return goalStuckSignal{}
 }
 
-// resetTurnEvidence clears the ledger and both progress scorers together.
+// resetTurnEvidence clears the ledger and both progress scorers together. The
+// task budget resets with them: a fresh ledger is what "a new task" means here,
+// and a continuation keeps both.
 func (a *Agent) resetTurnEvidence() {
 	a.evidence.Reset()
 	a.progress.reset()
@@ -88,6 +90,7 @@ func (a *Agent) resetTurnEvidence() {
 	a.outcome = evidence.NewOutcomeTracker()
 	a.ebm = ebmState{}
 	a.governor = governorState{}
+	a.taskBudget = runBudget{}
 }
 
 // observeOutcomeShadow scores the round's receipts through the shadow outcome

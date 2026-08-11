@@ -48,32 +48,38 @@ func (b *runBudget) elapsed() time.Duration {
 	return time.Since(b.started)
 }
 
-// sample is the per-round shadow reading: counts and money, never content.
-func (b *runBudget) sample(currency string) event.RunBudgetSample {
-	return event.RunBudgetSample{
+// totals is the shadow reading for one scope: counts and money, never content.
+func (b *runBudget) totals() event.RunBudgetTotals {
+	return event.RunBudgetTotals{
 		Rounds:       b.rounds,
 		Requests:     b.requests,
 		PromptTokens: b.promptTokens,
 		OutputTokens: b.outputTokens,
 		Cost:         b.cost,
-		Currency:     currency,
 		Priced:       !b.unpricedTurns && b.pricedRounds > 0,
 		ElapsedMs:    b.elapsed().Milliseconds(),
 	}
 }
 
-// observeRunBudget records the turn's spend after a round and reports it to
-// sinks that opt in. Shadow only: nothing reads the verdict yet, and no
-// threshold exists to read it against until the recorded distribution says
-// where one belongs.
+// observeRunBudget folds a round into both scopes and reports them. Shadow
+// only: nothing reads a verdict yet, and no threshold exists to read it against
+// until the recorded distribution says where one belongs.
 func (a *Agent) observeRunBudget(state *runLoopState, usage *provider.Usage) {
 	if state == nil {
 		return
 	}
 	state.budget.observe(usage, a.pricing)
+	if a.taskBudget.started.IsZero() {
+		a.taskBudget.started = state.budget.started
+	}
+	a.taskBudget.observe(usage, a.pricing)
 	currency := ""
 	if a.pricing != nil {
 		currency = a.pricing.Symbol()
 	}
-	event.RecordRunBudget(a.sink, state.budget.sample(currency))
+	event.RecordRunBudget(a.sink, event.RunBudgetSample{
+		Turn:     state.budget.totals(),
+		Task:     a.taskBudget.totals(),
+		Currency: currency,
+	})
 }
