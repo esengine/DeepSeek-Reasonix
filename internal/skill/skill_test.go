@@ -484,6 +484,29 @@ func TestRunAsOnlyFlatClaudeMarkdownIsSkillLike(t *testing.T) {
 	}
 }
 
+func TestSuppressWarningsQuietsMissingDescription(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".claude/skills/noisy.md", "---\nname: noisy\n---\nbody")
+
+	var stderr bytes.Buffer
+	st := New(Options{HomeDir: home, DisableBuiltins: true, Stderr: &stderr})
+	if _, ok := find(st.List(), "noisy"); !ok {
+		t.Fatal("skill without description should still load")
+	}
+	if got := stderr.String(); !strings.Contains(got, "has no description") {
+		t.Fatalf("missing description should warn by default, got %q", got)
+	}
+
+	stderr.Reset()
+	quiet := New(Options{HomeDir: home, DisableBuiltins: true, Stderr: &stderr, SuppressWarnings: true})
+	if _, ok := find(quiet.List(), "noisy"); !ok {
+		t.Fatal("suppression must not change which skills load")
+	}
+	if got := stderr.String(); strings.Contains(got, "has no description") {
+		t.Fatalf("suppress_warnings should quiet the missing-description warning, got %q", got)
+	}
+}
+
 func TestExcludedPathsHideConventionRoots(t *testing.T) {
 	home := t.TempDir()
 	writeSkill(t, home, ".reasonix/skills/keep.md", "---\ndescription: keep\n---\nb")

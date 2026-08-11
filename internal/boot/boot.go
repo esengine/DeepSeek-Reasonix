@@ -641,6 +641,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 			ProjectRoot: root, CustomPaths: cfg.SkillCustomPaths(), PluginPaths: cfg.PluginPackageSkillOwners(),
 			PluginAgentPaths: cfg.PluginPackageAgentOwners(), ExcludedPaths: cfg.SkillExcludedPaths(),
 			DisabledNames: cfg.DisabledSkillNames(), MaxDepth: cfg.SkillMaxDepth(), Stderr: opts.Stderr,
+			SuppressWarnings: cfg.SkillSuppressWarnings(),
 		})
 		skillStore.ConfigureInvocationPolicy(string(runtimeProfile), nil)
 		skills = skillStore.List()
