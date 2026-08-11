@@ -24,6 +24,7 @@ const OWNED_ELSEWHERE = new Map(Object.entries({
   "task-monitor-navigation.test.ts": "test:task-monitor",
   "workspace-refresh-store.test.ts": "test:workspace",
   "workspace-changes-errors.test.tsx": "test:workspace",
+  "workspace-context-menu.test.tsx": "test:workspace",
   "rich-composer-selection.test.tsx": "pretest",
   "context-center-contract.test.ts": "pretest",
   "provider-model-cache.test.ts": "pretest",
