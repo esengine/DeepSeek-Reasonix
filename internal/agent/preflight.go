@@ -112,6 +112,21 @@ func (a *Agent) LoadProjectionSidecar(sessionPath string) {
 		st.BlockedInputHash != "" ||
 		(st.LastReceipt != nil && (st.LastReceipt.Status == "blocked" || st.LastReceipt.Status == "failed" ||
 			st.LastReceipt.Status == "applied"))
+	if key != "" && !keyOK {
+		// Lineage key changed (upgrade, model/workspace switch). The projection
+		// body is provider-neutral; when it still matches the canonical covered
+		// prefix, rebind it to the current key instead of dropping back to the
+		// full canonical transcript. Content mismatches (edited prefix, missing
+		// prefix hash) still fail closed and are rebuilt.
+		var msgs []provider.Message
+		var version uint64
+		if a.session != nil {
+			msgs, version = a.session.snapshotMessagesVersion()
+		}
+		if projectionContentValid(st, msgs, version) {
+			normalized, keyOK = key, true
+		}
+	}
 	if (key != "" && !keyOK) || !hasMaintenanceSignal {
 		a.compactionState = CompactionState{}
 		a.checkpointState = "none"

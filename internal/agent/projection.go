@@ -315,15 +315,28 @@ func projectionValid(st CompactionState, msgs []provider.Message, transcriptVers
 	if len(st.Projection.Messages) == 0 {
 		return false
 	}
-	n := st.Projection.CoveredCount
-	if n <= 0 || n > len(msgs) {
-		return false
-	}
 	// Current lineage known: stored key must match (legacy native suffix ok).
 	if cacheKey != "" {
 		if _, ok := lineageKeyCompatible(st.PromptCacheKey, cacheKey); !ok {
 			return false
 		}
+	}
+	return projectionContentValid(st, msgs, transcriptVersion)
+}
+
+// projectionContentValid reports whether st's projection body still matches the
+// canonical transcript, independent of provider/model lineage. It is the
+// key-agnostic half of projectionValid: LoadProjectionSidecar uses it to decide
+// whether a sidecar whose lineage key changed (upgrade, model/workspace switch)
+// can be rebound to the current key instead of dropping back to the full
+// canonical transcript.
+func projectionContentValid(st CompactionState, msgs []provider.Message, transcriptVersion uint64) bool {
+	if len(st.Projection.Messages) == 0 {
+		return false
+	}
+	n := st.Projection.CoveredCount
+	if n <= 0 || n > len(msgs) {
+		return false
 	}
 	// Prefix hash is required; legacy sidecars without it are rebuilt.
 	if st.Projection.CoveredPrefixHash == "" {

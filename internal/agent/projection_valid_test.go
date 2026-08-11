@@ -130,17 +130,72 @@ func TestCoveredPrefixHashIncludesProviderVisibleFields(t *testing.T) {
 	}
 }
 
+func TestLoadProjectionSidecarRebindsMatchingContentAcrossLineage(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.jsonl")
+	msgs := []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "task"},
+	}
+	hash := coveredPrefixHash(msgs, 2)
+	if err := SaveCompactionState(path, CompactionState{
+		SchemaVersion:     compactionStateSchemaV1,
+		PromptCacheKey:    "ws|s|other-model",
+		TranscriptVersion: 1,
+		Projection: ContextProjection{
+			Messages:          []provider.Message{{Role: provider.RoleSystem, Content: "sys summary"}},
+			CoveredCount:      2,
+			CoveredPrefixHash: hash,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sess := NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "task"})
+	a := New(nil, nil, sess, Options{
+		SessionPath: path,
+		WorkspaceID: "ws",
+		ModelRef:    "this-model",
+	}, event.Discard)
+	// New() already called LoadProjectionSidecar; the projection body matches
+	// the canonical covered prefix, so it must be rebound to the current key
+	// instead of being dropped (upgrade / model-switch path).
+	if len(a.compactionState.Projection.Messages) == 0 {
+		t.Fatal("matching projection body was dropped on lineage change")
+	}
+	wantKey := promptCacheKey("ws", BranchID(path), "this-model")
+	if a.compactionState.PromptCacheKey != wantKey {
+		t.Fatalf("PromptCacheKey = %q, want %q", a.compactionState.PromptCacheKey, wantKey)
+	}
+	if a.checkpointState != "restored" {
+		t.Fatalf("checkpointState = %q, want restored", a.checkpointState)
+	}
+	// The rebind must be persisted so the next launch does not re-downgrade.
+	disk, ok, err := LoadCompactionState(path)
+	if err != nil || !ok {
+		t.Fatalf("sidecar should remain on disk: ok=%v err=%v", ok, err)
+	}
+	if disk.PromptCacheKey != wantKey {
+		t.Fatalf("persisted PromptCacheKey = %q, want %q", disk.PromptCacheKey, wantKey)
+	}
+}
+
 func TestLoadProjectionSidecarDropsForeignCacheKey(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "s.jsonl")
 	msgs := []provider.Message{{Role: provider.RoleSystem, Content: "sys"}}
+	// The covered prefix hash is computed from different content than the
+	// session actually holds, so content validation fails even though the
+	// stored key differs only by model: a lineage change must not resurrect
+	// a projection whose canonical prefix no longer matches.
+	foreign := []provider.Message{{Role: provider.RoleSystem, Content: "sys-old"}}
 	if err := SaveCompactionState(path, CompactionState{
 		SchemaVersion:  compactionStateSchemaV1,
 		PromptCacheKey: "ws|s|other-model",
 		Projection: ContextProjection{
 			Messages:          msgs,
 			CoveredCount:      1,
-			CoveredPrefixHash: coveredPrefixHash(msgs, 1),
+			CoveredPrefixHash: coveredPrefixHash(foreign, 1),
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -150,11 +205,11 @@ func TestLoadProjectionSidecarDropsForeignCacheKey(t *testing.T) {
 		WorkspaceID: "ws",
 		ModelRef:    "this-model",
 	}, event.Discard)
-	// New() already called LoadProjectionSidecar; foreign key must be dropped.
+	// New() already called LoadProjectionSidecar; mismatched content must drop
+	// the projection body and keep the sidecar file for the other model.
 	if len(a.compactionState.Projection.Messages) != 0 {
 		t.Fatalf("foreign projection loaded: %+v", a.compactionState.Projection)
 	}
-	// Sidecar file remains for the other model.
 	if _, ok, err := LoadCompactionState(path); err != nil || !ok {
 		t.Fatalf("sidecar should remain on disk: ok=%v err=%v", ok, err)
 	}
