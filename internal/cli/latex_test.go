@@ -3,6 +3,8 @@ package cli
 import (
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/colorprofile"
 )
 
 func TestLatexToUnicode(t *testing.T) {
@@ -53,7 +55,7 @@ func TestNormalizeMath(t *testing.T) {
 }
 
 func TestRenderInlineMath(t *testing.T) {
-	colorEnabled = false
+	activeColorProfile = colorprofile.NoTTY
 	r := newMarkdownRenderer(80)
 
 	out := r.Render(`The mass-energy relation is $E = mc^2$ exactly.`)

@@ -3,6 +3,7 @@ package memory
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -70,5 +71,30 @@ func TestAppendDocNormalizesNote(t *testing.T) {
 	body := string(b)
 	if !strings.Contains(body, "- line one line two with spaces") {
 		t.Fatalf("note not normalised to one line:\n%s", body)
+	}
+}
+
+func TestAppendDocRejectsSymlinkDestination(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on common Windows setups")
+	}
+	outside := filepath.Join(t.TempDir(), "outside.md")
+	if err := os.WriteFile(outside, []byte("keep me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "AGENTS.md")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := AppendDoc(link, "must stay local"); err == nil {
+		t.Fatal("AppendDoc followed a symlink destination")
+	}
+	body, err := os.ReadFile(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "keep me" {
+		t.Fatalf("outside target changed to %q", body)
 	}
 }

@@ -18,6 +18,12 @@ func StripGoalMarkers(text string) string {
 		if trimmed == "[goal:complete]" || trimmed == "[goal:continue]" {
 			continue
 		}
+		// Planner conclusion markers are coordinator protocol, not prose: the
+		// relay path trusts them (isNoOpPlan / plan approval) but users should
+		// see the planner's words, not the contract.
+		if lower := strings.ToLower(trimmed); lower == "[no_changes]" || lower == "[planner_requires_approval]" {
+			continue
+		}
 		if strings.HasPrefix(trimmed, "[goal:blocked:") && strings.HasSuffix(trimmed, "]") {
 			reason := strings.TrimPrefix(trimmed, "[goal:blocked:")
 			reason = strings.TrimSuffix(reason, "]")
@@ -29,4 +35,39 @@ func StripGoalMarkers(text string) string {
 		cleaned = append(cleaned, line)
 	}
 	return strings.TrimSpace(strings.Join(cleaned, "\n"))
+}
+
+const (
+	autoResearchEvidenceOpen  = "<autoresearch-evidence>"
+	autoResearchEvidenceClose = "</autoresearch-evidence>"
+)
+
+// StripAutoResearchEvidenceBlocks removes historical <autoresearch-evidence>
+// blocks at display boundaries only. Raw transcripts remain unchanged; current
+// Goal semantics never parse these blocks or write state from them.
+func StripAutoResearchEvidenceBlocks(text string) string {
+	var b strings.Builder
+	rest := text
+	for {
+		start := strings.Index(rest, autoResearchEvidenceOpen)
+		if start < 0 {
+			b.WriteString(rest)
+			return strings.TrimSpace(b.String())
+		}
+		b.WriteString(rest[:start])
+		afterOpen := rest[start+len(autoResearchEvidenceOpen):]
+		_, after, ok := strings.Cut(afterOpen, autoResearchEvidenceClose)
+		if !ok {
+			return strings.TrimSpace(b.String())
+		}
+		rest = after
+	}
+}
+
+// DisplayAssistantText is the single display filter for assistant answer text:
+// it removes every protocol artifact ([goal:*] markers, autoresearch evidence
+// blocks) before the text reaches a sink. Session history keeps the raw text —
+// apply this at emission or render boundaries only.
+func DisplayAssistantText(text string) string {
+	return StripGoalMarkers(StripAutoResearchEvidenceBlocks(text))
 }

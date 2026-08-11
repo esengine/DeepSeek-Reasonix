@@ -1,0 +1,28 @@
+---
+import Account from '../layouts/Account.astro';
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+---
+<Account
+  title="Reset password — Reasonix"
+  titleEn="Reset password — Reasonix"
+  titleZh="找回密码 — Reasonix"
+  description="Reset your Reasonix account password.">
+  <div class="auth-head">
+    <h1><span class="l-en">Reset your password</span><span class="l-zh">找回密码</span></h1>
+    <p><span class="l-en">We'll email you a link to set a new one.</span><span class="l-zh">我们会给你发一封重置链接邮件。</span></p>
+  </div>
+
+  <div id="forgot-msg" class="auth-msg" hidden></div>
+
+  <form id="forgot-form" class="auth-form" novalidate>
+    <div class="field">
+      <label for="email"><span class="l-en">Email</span><span class="l-zh">邮箱</span></label>
+      <input id="email" name="email" type="email" autocomplete="email" required />
+    </div>
+    <button type="submit" class="btn btn-dark"><span class="l-en">Send reset link</span><span class="l-zh">发送重置链接</span></button>
+  </form>
+
+  <p class="auth-alt">
+    <a href={`${base}/login/`}><span class="l-en">Back to sign in</span><span class="l-zh">返回登录</span></a>
+  </p>
+</Account>

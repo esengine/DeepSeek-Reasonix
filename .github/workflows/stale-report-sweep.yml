@@ -1,0 +1,68 @@
+name: Sweep stale version reports
+
+# Reports filed many minors back cannot be confirmed against a current build,
+# and 65% of the open tracker has never had a reply. This asks, waits, then
+# closes — never closing anything that was not asked first.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Print what would happen without commenting
+        required: false
+        default: true
+        type: boolean
+      limit:
+        description: Maximum issues to touch in this run
+        required: false
+        default: '40'
+        type: string
+  schedule:
+    - cron: '17 3 * * 1'
+  push:
+    branches:
+      - main-v2
+    paths:
+      - '.github/workflows/stale-report-sweep.yml'
+      - 'scripts/stale-report-sweep.mjs'
+      - 'scripts/stale-report-sweep.test.mjs'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: stale-report-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    if: github.repository == 'esengine/DeepSeek-Reasonix'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Test sweeper
+        run: node --test scripts/stale-report-sweep.test.mjs
+      # A push that only touched the sweeper runs its tests and stops there.
+      - name: Sweep
+        if: github.event_name != 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LIMIT: ${{ github.event.inputs.limit || '40' }}
+          # Posting stays off until this repository variable is set to "true", so
+          # merging the sweeper cannot start commenting on its own.
+          ENABLED: ${{ vars.STALE_SWEEP_ENABLED }}
+          REQUESTED_DRY_RUN: ${{ github.event.inputs.dry_run || 'true' }}
+        run: |
+          set -euo pipefail
+          args=(--limit "$LIMIT")
+          if [ "$ENABLED" != "true" ] || [ "$REQUESTED_DRY_RUN" = "true" ]; then
+            args+=(--dry-run)
+            echo "::notice::dry run (STALE_SWEEP_ENABLED=${ENABLED:-unset})"
+          fi
+          node scripts/stale-report-sweep.mjs "${args[@]}"

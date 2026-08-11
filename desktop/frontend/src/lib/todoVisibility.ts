@@ -1,5 +1,42 @@
 import type { Todo } from "./tools";
 
+export interface TodoPanelScopeInput {
+  activeTabId?: string | null;
+  activeTab?: {
+    id?: string | null;
+    scope?: string | null;
+    workspaceRoot?: string | null;
+    topicId?: string | null;
+    sessionPath?: string | null;
+  } | null;
+  eventChannel?: string | null;
+}
+
+export function resolveTodoPanelTodos(
+  canonical: Todo[] | null | undefined,
+  live?: Todo[] | null,
+): Todo[] {
+  // `live` is set only when the transcript has a completed top-level todo_write.
+  // Prefer it over MetaForTab — meta only refreshes on turn_done / focus change,
+  // so mid-turn status flips otherwise freeze until the user switches tabs (#7642).
+  if (live !== undefined && live !== null) return live;
+  return Array.isArray(canonical) ? canonical : [];
+}
+
+export function sameTodoList(a: Todo[] | null | undefined, b: Todo[] | null | undefined): boolean {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  return a.every((todo, index) => {
+    const other = b[index];
+    return (
+      todo.content === other.content &&
+      todo.status === other.status &&
+      todo.activeForm === other.activeForm &&
+      todo.level === other.level
+    );
+  });
+}
+
 export function todoDismissalKey(todos: Todo[]): string {
   if (todos.length === 0) return "";
   return JSON.stringify(todos.map((todo) => ({
@@ -10,6 +47,50 @@ export function todoDismissalKey(todos: Todo[]): string {
   })));
 }
 
+export function todoPanelScope({ activeTab, activeTabId, eventChannel }: TodoPanelScopeInput): string {
+  const tabId = String(activeTabId ?? "").trim();
+  const tab = !tabId || activeTab?.id === tabId ? activeTab : null;
+  const sessionPath = tab?.sessionPath?.trim();
+  if (sessionPath) return `session:${sessionPath}`;
+  if (tabId) return `tab:${tabId}`;
+  const topicId = tab?.topicId?.trim();
+  if (tab && topicId) return `topic:${tab.scope ?? ""}:${tab.workspaceRoot ?? ""}:${topicId}`;
+  const channel = String(eventChannel ?? "").trim();
+  return channel ? `event:${channel}` : "";
+}
+
+export function scopedTodoDismissalKey(scope: string | null | undefined, todoKey: string | null | undefined): string {
+  const key = String(todoKey ?? "").trim();
+  if (!key) return "";
+  const prefix = String(scope ?? "").trim();
+  return prefix ? `${prefix}\0${key}` : key;
+}
+
+export function dismissedTodoKeyForScope(
+  scope: string | null | undefined,
+  dismissedKeys: ReadonlySet<string> | null | undefined,
+  todoKey: string | null | undefined,
+): string | null {
+  const scopedKey = scopedTodoDismissalKey(scope, todoKey);
+  if (!scopedKey || !dismissedKeys?.has(scopedKey)) return null;
+  return todoKey ?? null;
+}
+
+export function todoBatchKey(todos: Todo[]): string {
+  if (todos.length === 0) return "";
+  return JSON.stringify(todos.map((todo) => ({
+    content: String(todo.content ?? ""),
+    level: typeof todo.level === "number" ? todo.level : 0,
+  })));
+}
+
+export function scopedTodoBatchKey(scope: string | null | undefined, batchKey: string | null | undefined): string {
+  const key = String(batchKey ?? "").trim();
+  if (!key) return "";
+  const prefix = String(scope ?? "").trim();
+  return prefix ? `${prefix}\0${key}` : key;
+}
+
 export function shouldShowTodoPanel(
   todoKey: string | null | undefined,
   dismissedTodoKey: string | null,
@@ -18,6 +99,10 @@ export function shouldShowTodoPanel(
   if (!todoKey || todos.length === 0) return false;
   if (hasIncompleteTodos(todos)) return true;
   return todoKey !== dismissedTodoKey;
+}
+
+export function shouldOpenTodoPanelByDefault(): boolean {
+  return false;
 }
 
 function todoStatus(status: unknown): string {

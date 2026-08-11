@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestExpandVars(t *testing.T) {
 	t.Setenv("REASONIX_TEST_TOKEN", "sk-123")
@@ -45,5 +48,60 @@ func TestExpandedPlugin(t *testing.T) {
 	// The original entry must be untouched (we returned a copy).
 	if e.Headers["Authorization"] != "Bearer ${REASONIX_TEST_KEY}" {
 		t.Error("ExpandedPlugin mutated the original entry")
+	}
+}
+
+func TestForbidReadRootsForRootResolvesRelativePathsAndScopedEnv(t *testing.T) {
+	root := t.TempDir()
+	cfg := Default()
+	cfg.setExpansionEnv(map[string]string{"REASONIX_TEST_SECRET_DIR": "from-dotenv"})
+	cfg.Sandbox.ForbidRead = []string{
+		"relative-secret",
+		"${REASONIX_TEST_SECRET_DIR}",
+		filepath.Join(root, "absolute-secret"),
+	}
+
+	got := cfg.ForbidReadRootsForRoot(root)
+	want := []string{
+		filepath.Join(root, "relative-secret"),
+		filepath.Join(root, "from-dotenv"),
+		filepath.Join(root, "absolute-secret"),
+	}
+	if len(got) != len(want) {
+		t.Fatalf("ForbidReadRootsForRoot returned %d roots, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("root %d = %q, want %q (all roots: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestWriteRootsForRootExpandsMavenAllowWrite(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg := Default()
+	cfg.Sandbox.AllowWrite = []string{
+		"${HOME}/.m2",
+		"${HOME}/.m2/repository",
+	}
+
+	got := cfg.WriteRootsForRoot(project)
+	// WriteRootsForRoot expands variables but leaves configured separators intact;
+	// the writer confiner normalizes roots later.
+	want := []string{
+		project,
+		home + "/.m2",
+		home + "/.m2/repository",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("WriteRootsForRoot() returned %d roots, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("root %d = %q, want %q (all roots: %v)", i, got[i], want[i], got)
+		}
 	}
 }

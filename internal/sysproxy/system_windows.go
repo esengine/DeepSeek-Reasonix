@@ -3,6 +3,7 @@
 package sysproxy
 
 import (
+	"log/slog"
 	"net/url"
 	"strings"
 	"unsafe"
@@ -59,7 +60,12 @@ func ForURL(target *url.URL) (*url.URL, error) {
 		return nil, nil
 	}
 	var ie ieProxyConfig
-	if r, _, _ := procGetIEProxyConfig.Call(uintptr(unsafe.Pointer(&ie))); r == 0 {
+	if r, _, callErr := procGetIEProxyConfig.Call(uintptr(unsafe.Pointer(&ie))); r == 0 {
+		// A service account or an RDP session with no per-user IE config fails
+		// here, which is indistinguishable from "system is set to direct"
+		// unless the errno is recorded (#4798).
+		slog.Debug("sysproxy: WinHttpGetIEProxyConfigForCurrentUser failed",
+			"err", callErr, "host", target.Hostname())
 		return nil, nil
 	}
 	defer globalFree(ie.lpszProxy)
@@ -84,6 +90,11 @@ func ForURL(target *url.URL) (*url.URL, error) {
 			return u, nil
 		}
 	}
+	slog.Debug("sysproxy: no system proxy applies; using a direct connection",
+		"host", target.Hostname(),
+		"static_proxy", ie.lpszProxy != nil,
+		"auto_detect", ie.fAutoDetect != 0,
+		"pac_url", ie.lpszAutoConfigURL != nil)
 	return nil, nil
 }
 

@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// --- splitFrontmatter ---
+// splitFrontmatter
 
 func TestSplitFrontmatterNoFence(t *testing.T) {
 	fm, body := splitFrontmatter("just plain text\nno frontmatter")
@@ -79,7 +79,7 @@ func TestSplitFrontmatterQuotedValues(t *testing.T) {
 	}
 }
 
-// --- slug ---
+// slug
 
 func TestSlug(t *testing.T) {
 	cases := []struct {
@@ -93,6 +93,9 @@ func TestSlug(t *testing.T) {
 		{"", ""},
 		{"---", ""},
 		{"hello_world", "hello-world"},
+		{"中文标题", "中文标题"},
+		{"HÉLLO", "héllo"},
+		{"日本語123", "日本語123"},
 	}
 	for _, c := range cases {
 		got := slug(c.input)
@@ -102,7 +105,21 @@ func TestSlug(t *testing.T) {
 	}
 }
 
-// --- oneLine ---
+func TestStoreSaveUnicodeAndRejectsEmptySlug(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	path, err := s.Save(Memory{Name: "中文标题", Description: "d", Type: TypeProject, Body: "body"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(path) != "中文标题.md" {
+		t.Fatalf("unicode name path = %q", path)
+	}
+	if _, err := s.Save(Memory{Name: "---", Description: "d", Type: TypeProject, Body: "body"}); err == nil {
+		t.Fatal("punctuation-only name should be rejected")
+	}
+}
+
+// oneLine
 
 func TestOneLine(t *testing.T) {
 	cases := []struct {
@@ -123,7 +140,7 @@ func TestOneLine(t *testing.T) {
 	}
 }
 
-// --- render ---
+// render
 
 func TestRenderRoundTrip(t *testing.T) {
 	m := Memory{
@@ -140,8 +157,8 @@ func TestRenderRoundTrip(t *testing.T) {
 	if fm["description"] != "A test fact" {
 		t.Errorf("description = %q", fm["description"])
 	}
-	if fm["type"] != "user" {
-		t.Errorf("type = %q", fm["type"])
+	if got := persistedFactType(fm); got != TypeUser {
+		t.Errorf("type = %q", got)
 	}
 	if !strings.Contains(body, "The body of the fact.") {
 		t.Errorf("body = %q", body)
@@ -157,7 +174,7 @@ func TestRenderNormalizesType(t *testing.T) {
 	}
 }
 
-// --- loadMemory ---
+// loadMemory
 
 func TestLoadMemoryNoFrontmatter(t *testing.T) {
 	dir := t.TempDir()
@@ -196,7 +213,7 @@ func TestLoadMemoryEmptyFile(t *testing.T) {
 	}
 }
 
-// --- Store.List edge cases ---
+// Store.List edge cases
 
 func TestListSkipsNonMdFiles(t *testing.T) {
 	dir := t.TempDir()
@@ -235,7 +252,7 @@ func TestListSortedByName(t *testing.T) {
 	}
 }
 
-// --- Store.Save edge cases ---
+// Store.Save edge cases
 
 func TestSaveEmptyName(t *testing.T) {
 	s := Store{Dir: t.TempDir()}
@@ -257,7 +274,7 @@ func TestSaveCreatesDir(t *testing.T) {
 	}
 }
 
-// --- Store.Path ---
+// Store.Path
 
 func TestStorePath(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "memory")

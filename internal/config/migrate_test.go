@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -328,6 +329,57 @@ command = "late-bin"
 	}
 }
 
+func TestMCPMigrationMarkerMakesCurrentConfigAuthoritativeAfterRemoval(t *testing.T) {
+	src, dest, _ := legacyHome(t)
+	writeLegacy(t, src, `{
+		"mcpServers": {
+			"legacy-only": {"command": "legacy-mcp-bin"}
+		}
+	}`)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte("config_version = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := MigrateMCPToUserConfigOnUpgrade(nil)
+	if err != nil {
+		t.Fatalf("MigrateMCPToUserConfigOnUpgrade: %v", err)
+	}
+	if res == nil || res.Added != 1 {
+		t.Fatalf("migration result = %+v, want one imported MCP", res)
+	}
+
+	removed, err := RemovePluginFromSourcesForRoot(t.TempDir(), "legacy-only")
+	if err != nil {
+		t.Fatalf("RemovePluginFromSourcesForRoot: %v", err)
+	}
+	if !removed {
+		t.Fatal("RemovePluginFromSourcesForRoot reported no removal")
+	}
+
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load after removal: %v", err)
+	}
+	for _, p := range loaded.Plugins {
+		if p.Name == "legacy-only" {
+			t.Fatalf("removed MCP was resurrected from legacy config: %+v", loaded.Plugins)
+		}
+	}
+	if got := loadLegacyMCP(src); len(got) != 0 {
+		t.Fatalf("an older runtime would resurrect the removed legacy MCP: %+v", got)
+	}
+	legacyRaw, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatalf("read legacy source: %v", err)
+	}
+	if !strings.Contains(string(legacyRaw), `"legacy-only"`) || !strings.Contains(string(legacyRaw), `"mcpDisabled"`) {
+		t.Fatalf("legacy source should retain the server and add a compatibility disable marker:\n%s", legacyRaw)
+	}
+}
+
 func TestMigrateMCPToUserConfigOnUpgradeDoesNotMarkEmptyScan(t *testing.T) {
 	_, _, _ = legacyHome(t)
 	res, err := MigrateMCPToUserConfigOnUpgrade(nil)
@@ -443,7 +495,7 @@ command = "legacy-bin"
 		t.Fatalf("read migrated config: %v", err)
 	}
 	text := string(got)
-	for _, want := range []string{`config_version = 3`, `[desktop]`, `close_behavior = "quit"`, `name    = "legacy-v1"`} {
+	for _, want := range []string{`config_version = 6`, `[desktop]`, `close_behavior = "quit"`, `name    = "legacy-v1"`} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("migrated TOML missing %q:\n%s", want, text)
 		}
@@ -664,14 +716,14 @@ func TestMigrateImportsLegacyCredentialsEvenWhenPrimaryConfigExists(t *testing.T
 
 func TestMigrateImportsLegacyKeyringCredentials(t *testing.T) {
 	legacyHome(t)
-	old := legacyKeyringCredentialValueLookup
-	legacyKeyringCredentialValueLookup = func(key string) (string, bool) {
+	old := legacyKeyringProbeLookup
+	legacyKeyringProbeLookup = func(_ context.Context, key string) legacyKeyringOutcome {
 		if key == "DEEPSEEK_API_KEY" {
-			return "sk-old-keyring", true
+			return legacyKeyringOutcome{Status: legacyKeyringFound, Value: "sk-old-keyring"}
 		}
-		return "", false
+		return legacyKeyringOutcome{Status: legacyKeyringAbsent}
 	}
-	t.Cleanup(func() { legacyKeyringCredentialValueLookup = old })
+	t.Cleanup(func() { legacyKeyringProbeLookup = old })
 
 	res, err := MigrateLegacyIfNeeded()
 	if err != nil {
@@ -709,14 +761,14 @@ api_key_env = "WORKSPACE_ONLY_KEY"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	old := legacyKeyringCredentialValueLookup
-	legacyKeyringCredentialValueLookup = func(key string) (string, bool) {
+	old := legacyKeyringProbeLookup
+	legacyKeyringProbeLookup = func(_ context.Context, key string) legacyKeyringOutcome {
 		if key == "WORKSPACE_ONLY_KEY" {
-			return "sk-workspace", true
+			return legacyKeyringOutcome{Status: legacyKeyringFound, Value: "sk-workspace"}
 		}
-		return "", false
+		return legacyKeyringOutcome{Status: legacyKeyringAbsent}
 	}
-	t.Cleanup(func() { legacyKeyringCredentialValueLookup = old })
+	t.Cleanup(func() { legacyKeyringProbeLookup = old })
 
 	if err := MigrateLegacyCredentialsForRoot(project); err != nil {
 		t.Fatalf("MigrateLegacyCredentialsForRoot: %v", err)
@@ -727,6 +779,33 @@ api_key_env = "WORKSPACE_ONLY_KEY"
 	}
 	if string(data) != "WORKSPACE_ONLY_KEY=sk-workspace\n" {
 		t.Fatalf("migrated credentials = %q", data)
+	}
+}
+
+func TestMigrateLegacyCredentialsSkipsKeyringWhenIsolated(t *testing.T) {
+	home := t.TempDir()
+	isolated := filepath.Join(home, "isolated-home")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("REASONIX_HOME", isolated)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+
+	old := legacyKeyringProbeLookup
+	legacyKeyringProbeLookup = func(_ context.Context, key string) legacyKeyringOutcome {
+		if key == "DEEPSEEK_API_KEY" {
+			return legacyKeyringOutcome{Status: legacyKeyringFound, Value: "legacy-keyring-value"}
+		}
+		return legacyKeyringOutcome{Status: legacyKeyringAbsent}
+	}
+	t.Cleanup(func() { legacyKeyringProbeLookup = old })
+
+	if err := MigrateLegacyCredentialsForRoot("."); err != nil {
+		t.Fatalf("MigrateLegacyCredentialsForRoot: %v", err)
+	}
+	if _, err := os.Stat(UserCredentialsPath()); !os.IsNotExist(err) {
+		t.Fatalf("isolated runtime imported legacy credentials to %s; stat err=%v", UserCredentialsPath(), err)
 	}
 }
 
@@ -816,6 +895,42 @@ func TestMigrateSkipsLegacyCredentialsAlreadyInCurrentAutoStore(t *testing.T) {
 	}
 }
 
+func TestMigrateImportsLegacyStateHomeDotEnvCredentials(t *testing.T) {
+	_, dest, _ := legacyHome(t)
+	state := t.TempDir()
+	t.Setenv("REASONIX_STATE_HOME", state)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "")
+	os.Unsetenv("REASONIX_CREDENTIALS_STORE")
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte(`default_model = "deepseek-flash/deepseek-chat"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(state, ".env"), []byte("DEEPSEEK_API_KEY=state-env-value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	currentCred := UserCredentialsPath()
+	if strings.HasPrefix(currentCred, state) {
+		t.Fatalf("current credentials path should not be under REASONIX_STATE_HOME: %q", currentCred)
+	}
+	res, err := MigrateLegacyIfNeeded()
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if res != nil {
+		t.Fatalf("primary config exists, config migration should be skipped, got %+v", res)
+	}
+	data, err := os.ReadFile(currentCred)
+	if err != nil {
+		t.Fatalf("read current credentials: %v", err)
+	}
+	if string(data) != "DEEPSEEK_API_KEY=state-env-value\n" {
+		t.Fatalf("migrated credentials = %q", data)
+	}
+}
+
 func TestMigrateNoLegacyIsNoop(t *testing.T) {
 	legacyHome(t)
 	res, err := MigrateLegacyIfNeeded()
@@ -856,9 +971,36 @@ func TestMigrateCustomBaseURLWarns(t *testing.T) {
 	}
 	for _, name := range []string{"deepseek-flash", "deepseek-pro"} {
 		p, ok := cfg.Provider(name)
-		if !ok || p.BaseURL != "https://my-proxy.example/v1" {
+		if !ok || p.Kind != "openai" || p.BaseURL != "https://my-proxy.example/v1" ||
+			p.Thinking != "" || p.WebSearch != nil || len(p.SupportedEfforts) != 0 || p.DefaultEffort != "" {
 			t.Fatalf("%s base_url was not migrated: %+v", name, p)
 		}
+	}
+}
+
+func TestMigrateOfficialLegacyBaseURLUsesAnthropicEndpoint(t *testing.T) {
+	for _, baseURL := range []string{
+		"https://api.deepseek.com",
+		"https://api.deepseek.com/v1/",
+	} {
+		t.Run(baseURL, func(t *testing.T) {
+			src, _, _ := legacyHome(t)
+			writeLegacy(t, src, `{"apiKey":"sk-official","baseUrl":"`+baseURL+`"}`)
+
+			if _, err := MigrateLegacyIfNeeded(); err != nil {
+				t.Fatalf("migrate: %v", err)
+			}
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("load migrated config: %v", err)
+			}
+			for _, name := range []string{"deepseek-flash", "deepseek-pro"} {
+				p, ok := cfg.Provider(name)
+				if !ok || p.Kind != "anthropic" || p.BaseURL != deepSeekAnthropicBaseURL || !EffectiveWebSearch(p) {
+					t.Fatalf("%s official migration = %+v, want Anthropic endpoint with web search", name, p)
+				}
+			}
+		})
 	}
 }
 
@@ -948,5 +1090,69 @@ func TestMigrateSupportData(t *testing.T) {
 				t.Fatalf("migrated %s mode = %o, want %o", check.rel, got, check.perm)
 			}
 		}
+	}
+}
+
+func TestMigrateLegacyCredentialsFileImportIgnoresKeyringMarker(t *testing.T) {
+	_, dest, _ := legacyHome(t)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte(`default_model = "deepseek-flash/deepseek-chat"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := markLegacyKeyringMigrationDone("DEEPSEEK_API_KEY"); err != nil {
+		t.Fatal(err)
+	}
+	paths := legacyCredentialsPaths()
+	if len(paths) == 0 {
+		t.Skip("no legacy credentials paths on this platform")
+	}
+	target := paths[0]
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("DEEPSEEK_API_KEY=sk-from-file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	oldLookup := legacyKeyringProbeLookup
+	legacyKeyringProbeLookup = func(context.Context, string) legacyKeyringOutcome {
+		return legacyKeyringOutcome{Status: legacyKeyringAbsent}
+	}
+	t.Cleanup(func() {
+		legacyKeyringProbeLookup = oldLookup
+	})
+
+	if err := MigrateLegacyCredentialsForRoot("."); err != nil {
+		t.Fatalf("MigrateLegacyCredentialsForRoot: %v", err)
+	}
+	data, err := os.ReadFile(UserCredentialsPath())
+	if err != nil {
+		t.Fatalf("read migrated credentials: %v", err)
+	}
+	if !strings.Contains(string(data), "sk-from-file") {
+		t.Fatalf("file import blocked by keyring marker: %q", data)
+	}
+}
+
+func TestMigrateLegacyCredentialsErrorDoesNotWriteKeyringMarker(t *testing.T) {
+	legacyHome(t)
+	oldLookup := legacyKeyringProbeLookup
+	legacyKeyringProbeLookup = func(context.Context, string) legacyKeyringOutcome {
+		return legacyKeyringOutcome{Status: legacyKeyringError}
+	}
+	t.Cleanup(func() {
+		legacyKeyringProbeLookup = oldLookup
+	})
+
+	if err := MigrateLegacyCredentialsForRoot("."); err != nil {
+		t.Fatalf("MigrateLegacyCredentialsForRoot: %v", err)
+	}
+	if legacyKeyringMigrationDone("DEEPSEEK_API_KEY") {
+		t.Fatal("keyring error must not write a migration-done marker")
+	}
+	if credentialCurrentStoreHasKey("DEEPSEEK_API_KEY") {
+		t.Fatal("keyring error must not store a credential")
 	}
 }

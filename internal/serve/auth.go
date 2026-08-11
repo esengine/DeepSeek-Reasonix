@@ -9,7 +9,9 @@ import (
 	_ "embed"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -218,6 +220,16 @@ func (ag *authGate) middleware(next http.Handler) http.Handler {
 			return
 		}
 		if ag.mode == authToken {
+			if r.URL.Path == "/auth/token" {
+				ag.handleTokenBootstrap(w, r)
+				return
+			}
+			// Let the inert shell trade its URL fragment for an HttpOnly cookie
+			// before API or SSE calls; query-token links use the legacy path below.
+			if r.URL.Query().Get("token") == "" && tokenBootstrapPublicPath(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			ag.checkToken(w, r, next)
 			return
 		}
@@ -226,9 +238,69 @@ func (ag *authGate) middleware(next http.Handler) http.Handler {
 	})
 }
 
-// checkToken validates the token from cookie or query parameter. If the query
-// parameter is valid, it sets a cookie and redirects to strip the token from the
-// URL (preventing it from leaking via browser history or referrer headers).
+func tokenBootstrapPublicPath(r *http.Request) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	if r.URL.Path == "/" || r.URL.Path == "/assets/logo-wordmark.svg" {
+		return true
+	}
+	// Only one non-empty session segment is an inert shell entry point; this
+	// prevents API-like paths from becoming public in token mode.
+	const prefix = "/sessions/"
+	id := strings.TrimPrefix(r.URL.Path, prefix)
+	return id != r.URL.Path && id != "" && !strings.Contains(id, "/")
+}
+
+// handleTokenBootstrap validates a token delivered from the URL fragment by
+// the Web shell. The token travels in a bounded JSON body rather than the URL,
+// keeping it out of request lines, access logs, browser history, and referrers.
+func (ag *authGate) handleTokenBootstrap(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	contentType := r.Header.Get("Content-Type")
+	if i := strings.IndexByte(contentType, ';'); i >= 0 {
+		contentType = contentType[:i]
+	}
+	if !strings.EqualFold(strings.TrimSpace(contentType), "application/json") {
+		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
+	var body struct {
+		Token string `json:"token"`
+	}
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(&body); err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(body.Token), []byte(ag.token)) != 1 {
+		ag.deny(w, r)
+		return
+	}
+	ag.setAuthCookie(w, r, &http.Cookie{
+		Name:     cookieToken,
+		Value:    ag.token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(sessionDuration.Seconds()),
+	})
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// checkToken validates the token from a cookie or the legacy query parameter.
+// New links use a URL fragment and handleTokenBootstrap; query links remain
+// supported so previously shared URLs keep working.
 func (ag *authGate) checkToken(w http.ResponseWriter, r *http.Request, next http.Handler) {
 	// 1. Check cookie first (fast path).
 	if c, err := r.Cookie(cookieToken); err == nil && strings.TrimSpace(c.Value) != "" {
@@ -392,19 +464,12 @@ func (ag *authGate) loginSubmit(w http.ResponseWriter, r *http.Request) {
 
 func (ag *authGate) setAuthCookie(w http.ResponseWriter, r *http.Request, c *http.Cookie) {
 	c.Secure = ag.authCookieSecure(r)
-	// codeql[go/cookie-secure-not-set] Loopback HTTP serve must keep local browser auth usable; non-loopback HTTP still sets Secure cookies.
+	// codeql[go/cookie-secure-not-set] Secure cookies are only sent back over HTTPS; plain-HTTP serve must keep token/password auth usable.
 	http.SetCookie(w, c)
 }
 
 func (ag *authGate) authCookieSecure(r *http.Request) bool {
-	if ag.isTLS(r) {
-		return true
-	}
-	host := r.Host
-	if host == "" && r.URL != nil {
-		host = r.URL.Host
-	}
-	return !isLoopbackHost(host)
+	return ag.isTLS(r)
 }
 
 func safeRedirectTarget(raw string) string {
@@ -456,7 +521,14 @@ func redirectToSafeTarget(w http.ResponseWriter, r *http.Request, raw string, st
 func (ag *authGate) signSession() string {
 	expiry := time.Now().Add(sessionDuration).Unix()
 	nonce := make([]byte, 16)
-	_, _ = rand.Read(nonce)
+	if _, err := rand.Read(nonce); err != nil {
+		// crypto/rand.Read cannot fail on modern systems; panic rather than
+		// fall back to an all-zero nonce. Forging a cookie still requires the
+		// PBKDF2-derived sessKey, so this is not an auth bypass, but a constant
+		// nonce weakens session token uniqueness/unpredictability and is the
+		// same anti-pattern generateToken/sessionKeyForPasswordHash panic on.
+		panic("serve/auth: crypto/rand.Read failed: " + err.Error())
+	}
 
 	payload := strconv.FormatInt(expiry, 10) + "|" + base64.RawURLEncoding.EncodeToString(nonce)
 	mac := hmac.New(sha256.New, ag.sessKey)
@@ -489,11 +561,11 @@ func (ag *authGate) verifySession(token string) bool {
 	}
 
 	// Check expiry (format: "unix_timestamp|base64nonce").
-	pipe := strings.IndexByte(payload, '|')
-	if pipe < 0 {
+	before, _, ok := strings.Cut(payload, "|")
+	if !ok {
 		return false
 	}
-	expiry, err := strconv.ParseInt(payload[:pipe], 10, 64)
+	expiry, err := strconv.ParseInt(before, 10, 64)
 	if err != nil {
 		return false
 	}
@@ -531,7 +603,7 @@ func generateToken() string {
 
 // acceptsHTML reports whether the request's Accept header prefers text/html.
 func acceptsHTML(r *http.Request) bool {
-	for _, h := range strings.Fields(r.Header.Get("Accept")) {
+	for h := range strings.FieldsSeq(r.Header.Get("Accept")) {
 		if strings.HasPrefix(h, "text/html") {
 			return true
 		}
@@ -546,8 +618,8 @@ func acceptsHTML(r *http.Request) bool {
 func (ag *authGate) clientIP(r *http.Request) string {
 	if ag.behindProxy {
 		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-			if i := strings.IndexByte(fwd, ','); i >= 0 {
-				return strings.TrimSpace(fwd[:i])
+			if before, _, ok := strings.Cut(fwd, ","); ok {
+				return strings.TrimSpace(before)
 			}
 			return strings.TrimSpace(fwd)
 		}
@@ -587,4 +659,15 @@ func isLoopbackHost(hostport string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+// PlainHTTPAuthWarning reports whether serve is exposing authenticated access
+// over a non-loopback plain-HTTP listener. The listener may still be valid for a
+// trusted LAN or reverse-proxy setup, but users should see the risk explicitly.
+func PlainHTTPAuthWarning(cfg config.ServeConfig, addr string) string {
+	mode, err := NormalizeAuthMode(cfg.AuthMode)
+	if err != nil || mode == "none" || isLoopbackHost(addr) {
+		return ""
+	}
+	return "warning: authenticated serve is listening on non-loopback HTTP; use HTTPS via a trusted reverse proxy or bind to 127.0.0.1 for local-only access"
 }

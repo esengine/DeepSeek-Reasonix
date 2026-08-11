@@ -1,0 +1,36 @@
+---
+import Base from './Base.astro';
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const repo = 'https://github.com/esengine/DeepSeek-Reasonix';
+const { title, description, titleEn, titleZh, wide } = Astro.props;
+---
+<Base title={title} description={description} titleEn={titleEn} titleZh={titleZh}>
+  <header class="nav auth-nav scrolled">
+    <div class="nav-inner">
+      <a class="brand" href={`${base}/`}><img src={`${base}/logo.svg`} alt="Reasonix logo" /><span>Reasonix</span></a>
+      <div class="lang-switch" role="group" aria-label="Language" style="margin-left:auto">
+        <button type="button" data-lang="en" class="active">EN</button>
+        <button type="button" data-lang="zh">中文</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="auth-main">
+    <div class={wide ? 'auth-card wide' : 'auth-card'}>
+      <slot />
+    </div>
+  </main>
+
+  <footer>
+    <div class="foot-sub" style="border-top:none">
+      <a class="brand" href={`${base}/`}><img src={`${base}/logo.svg`} alt="Reasonix logo" /><span>Reasonix</span></a>
+      <nav class="foot-links">
+        <a href={`${base}/`}><span class="l-en">Home</span><span class="l-zh">首页</span></a>
+        <a href={`${base}/docs/`}><span class="l-en">Docs</span><span class="l-zh">文档</span></a>
+        <a href={repo}>GitHub</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script>import '../scripts/auth.js';</script>
+</Base>

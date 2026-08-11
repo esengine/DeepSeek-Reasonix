@@ -2,11 +2,80 @@ package cli
 
 import (
 	"errors"
-	"reflect"
+	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/colorprofile"
+
+	"github.com/charmbracelet/x/ansi"
+
+	"reasonix/internal/provider"
 )
+
+func TestAssistantMarkdownHasIdentityAndIndentedBody(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.NoTTY
+	configureCLITheme("dark")
+
+	rendered := renderAssistantMarkdown("A concise answer that wraps across the available width.", 32)
+	lines := strings.Split(ansi.Strip(rendered), "\n")
+	if len(lines) < 4 {
+		t.Fatalf("assistant block should contain a header, gap, and wrapped body:\n%s", rendered)
+	}
+	if lines[0] != "  ◆ Reasonix" {
+		t.Fatalf("assistant header = %q, want %q", lines[0], "  ◆ Reasonix")
+	}
+	if lines[1] != "" {
+		t.Fatalf("assistant header/body separator = %q, want blank row", lines[1])
+	}
+	for i, line := range lines[2:] {
+		if line != "" && !strings.HasPrefix(line, assistantTranscriptIndent) {
+			t.Fatalf("assistant body row %d lacks the two-cell gutter: %q", i+2, line)
+		}
+		if width := visibleWidth(line); width > 32 {
+			t.Fatalf("assistant row %d width = %d, want <= 32: %q", i+2, width, line)
+		}
+	}
+}
+
+func TestReplaySectionsKeepAssistantIdentity(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.NoTTY
+	configureCLITheme("dark")
+
+	sections := replaySectionsFor([]provider.Message{
+		{Role: provider.RoleUser, Content: "Which version?"},
+		{Role: provider.RoleAssistant, Content: "Version 1.2.3"},
+	}, 48)
+	if len(sections) != 2 {
+		t.Fatalf("replay sections = %d, want user and assistant", len(sections))
+	}
+	if plain := ansi.Strip(sections[1]); !strings.HasPrefix(plain, "  ◆ Reasonix\n\n  Version 1.2.3") {
+		t.Fatalf("replayed assistant answer lost its identity: %q", plain)
+	}
+}
+
+func TestReplaySectionsRestoreInterruptedLocalOutput(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.NoTTY
+	configureCLITheme("dark")
+
+	sections := replaySectionsFor([]provider.Message{
+		{Role: provider.RoleUser, Content: "change config"},
+		{
+			Role: provider.RoleTool, ToolCallID: provider.LocalOnlyToolID, Name: provider.LocalOnlyToolName,
+			LocalOnly: true, Content: "partial answer", ReasoningContent: "checking config",
+			ToolCalls:       []provider.ToolCall{{ID: "p1", Name: "write_file"}},
+			InterruptedTurn: &provider.InterruptedTurnRecovery{Pending: true},
+		},
+	}, 64)
+	plain := ansi.Strip(strings.Join(sections, ""))
+	for _, want := range []string{"change config", "checking config", "partial answer", "Write", "bounded recovery summary"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("replayed interrupted history missing %q:\n%s", want, plain)
+		}
+	}
+}
 
 func TestScrollbarThumb(t *testing.T) {
 	if _, size := scrollbarThumb(10, 0, 5); size != 0 {
@@ -70,29 +139,252 @@ func TestSelectedTextMultiLine(t *testing.T) {
 	}
 }
 
-func TestCopyToClipboardPlatformSuccess(t *testing.T) {
-	defer func(fn func(string) error) { clipboardWriteAll = fn }(clipboardWriteAll)
-	var got string
-	clipboardWriteAll = func(s string) error { got = s; return nil }
+func TestSelectedTextRestoresMathWithoutReusingRawColumns(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.NoTTY
+	configureCLITheme("dark")
 
-	if msg := copyToClipboard("hello")(); msg != nil {
-		t.Errorf("platform write succeeded; want nil msg (no OSC 52 fallback), got %#v", msg)
+	m := newTestChatTUI()
+	m.width = 80
+	contentWidth := transcriptContentWidth(m.width, m.nativeScrollback)
+	m.viewport.SetWidth(contentWidth)
+	source := transcriptSource{kind: transcriptSourceMarkdown, raw: `before $\alpha$ after`}
+	rendered := m.renderTranscriptSource(source, m.width)
+	m.transcript = []string{rendered}
+	m.transcriptSources = []transcriptSource{source}
+	m.wrappedLines = strings.Split(wrapTranscript(rendered, contentWidth), "\n")
+
+	lineIndex := -1
+	for i, line := range m.wrappedLines {
+		if strings.Contains(ansi.Strip(line), "before α after") {
+			lineIndex = i
+			break
+		}
 	}
-	if got != "hello" {
-		t.Errorf("clipboardWriteAll got %q, want %q", got, "hello")
+	if lineIndex < 0 {
+		t.Fatalf("rendered transcript did not contain the math line:\n%s", ansi.Strip(rendered))
+	}
+
+	plain := ansi.Strip(m.wrappedLines[lineIndex])
+	before, _, ok := strings.Cut(plain, "α")
+	before0, _, ok0 := strings.Cut(plain, "after")
+	if !ok || !ok0 {
+		t.Fatalf("math line = %q", plain)
+	}
+	formulaCol := ansi.StringWidth(before)
+	afterCol := ansi.StringWidth(before0)
+
+	m.sel = selection{
+		active: true,
+		anchor: selPos{line: lineIndex, col: formulaCol},
+		head:   selPos{line: lineIndex, col: formulaCol + ansi.StringWidth("α")},
+	}
+	if got, want := m.selectedText(), `$\alpha$`; got != want {
+		t.Fatalf("formula selection = %q, want %q", got, want)
+	}
+
+	m.sel = selection{
+		active: true,
+		anchor: selPos{line: lineIndex, col: afterCol},
+		head:   selPos{line: lineIndex, col: afterCol + ansi.StringWidth("after")},
+	}
+	if got, want := m.selectedText(), "after"; got != want {
+		t.Fatalf("text after formula = %q, want %q", got, want)
 	}
 }
 
-func TestCopyToClipboardOSC52Fallback(t *testing.T) {
-	defer func(fn func(string) error) { clipboardWriteAll = fn }(clipboardWriteAll)
-	clipboardWriteAll = func(string) error { return errors.New("no display (tmux/ssh)") }
+func TestSelectedTextRestoresMathFromReplayBundle(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.NoTTY
+	configureCLITheme("dark")
 
-	// On failure the command must return the *message* tea.SetClipboard yields —
-	// the runtime handles it by emitting OSC 52 (bubbletea tea.go: setClipboardMsg
-	// -> ansi.SetSystemClipboard). Returning the command itself would be dropped.
-	got := copyToClipboard("copied text")()
-	want := tea.SetClipboard("copied text")()
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("fallback msg = %#v (%T), want the runtime-handled setClipboardMsg %#v (%T)", got, got, want, want)
+	m := newTestChatTUI()
+	m.width = 80
+	contentWidth := transcriptContentWidth(m.width, m.nativeScrollback)
+	m.viewport.SetWidth(contentWidth)
+	source := transcriptSource{
+		kind: transcriptSourceReplayBundle,
+		history: []provider.Message{
+			{Role: provider.RoleAssistant, Content: `before $\alpha$ after`},
+			{LocalOnly: true, Content: `local $\beta$ recovery`},
+		},
+	}
+	rendered := m.renderTranscriptSource(source, m.width)
+	m.transcript = []string{rendered}
+	m.transcriptSources = []transcriptSource{source}
+	m.wrappedLines = strings.Split(wrapTranscript(rendered, contentWidth), "\n")
+
+	lineIndex := -1
+	formulaCol := -1
+	for i, line := range m.wrappedLines {
+		plain := ansi.Strip(line)
+		before, _, ok := strings.Cut(plain, "α")
+		if !ok {
+			continue
+		}
+		lineIndex = i
+		formulaCol = ansi.StringWidth(before)
+		break
+	}
+	if lineIndex < 0 {
+		t.Fatalf("rendered replay bundle did not contain the formula:\n%s", ansi.Strip(rendered))
+	}
+
+	m.sel = selection{
+		active: true,
+		anchor: selPos{line: lineIndex, col: formulaCol},
+		head:   selPos{line: lineIndex, col: formulaCol + ansi.StringWidth("α")},
+	}
+	if got, want := m.selectedText(), `$\alpha$`; got != want {
+		t.Fatalf("replayed formula selection = %q, want %q", got, want)
+	}
+
+	copyLines, ok := m.copyTranscriptLines()
+	if !ok {
+		t.Fatal("copy rendition diverged from the displayed replay bundle")
+	}
+	sourcesByID := make(map[string]string)
+	for _, line := range copyLines {
+		for _, span := range line.math {
+			if source, exists := sourcesByID[span.id]; exists && source != span.source {
+				t.Fatalf("formula marker %q reused for %q and %q", span.id, source, span.source)
+			}
+			sourcesByID[span.id] = span.source
+		}
+	}
+	if len(sourcesByID) != 2 {
+		t.Fatalf("replay formula markers = %v, want two unique formulas", sourcesByID)
+	}
+	foundSources := make(map[string]bool)
+	for _, source := range sourcesByID {
+		foundSources[source] = true
+	}
+	for _, want := range []string{`$\alpha$`, `$\beta$`} {
+		if !foundSources[want] {
+			t.Fatalf("replay formula markers = %v, missing %q", sourcesByID, want)
+		}
+	}
+}
+
+func TestSelectedTextPreservesProseAroundMath(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.NoTTY
+	configureCLITheme("dark")
+
+	m := newTestChatTUI()
+	m.width = 80
+	contentWidth := transcriptContentWidth(m.width, m.nativeScrollback)
+	m.viewport.SetWidth(contentWidth)
+	source := transcriptSource{kind: transcriptSourceMarkdown, raw: `before $\frac{1}{2}$ after`}
+	rendered := m.renderTranscriptSource(source, m.width)
+	m.transcript = []string{rendered}
+	m.transcriptSources = []transcriptSource{source}
+	m.wrappedLines = strings.Split(wrapTranscript(rendered, contentWidth), "\n")
+
+	for i, line := range m.wrappedLines {
+		plain := ansi.Strip(line)
+		before, _, ok := strings.Cut(plain, "before")
+		endByte := strings.Index(plain, " after")
+		if !ok || endByte < 0 {
+			continue
+		}
+		startCol := ansi.StringWidth(before)
+		endCol := ansi.StringWidth(plain[:endByte+len(" after")])
+		m.sel = selection{
+			active: true,
+			anchor: selPos{line: i, col: startCol},
+			head:   selPos{line: i, col: endCol},
+		}
+		if got, want := m.selectedText(), `before $\frac{1}{2}$ after`; got != want {
+			t.Fatalf("mixed selection = %q, want %q", got, want)
+		}
+		return
+	}
+	t.Fatalf("rendered transcript did not contain the expected mixed line:\n%s", ansi.Strip(rendered))
+}
+
+func TestSelectedTextRestoresMathWrappedAcrossDisplayLinesOnce(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.NoTTY
+	configureCLITheme("dark")
+
+	m := newTestChatTUI()
+	m.width = 10
+	contentWidth := transcriptContentWidth(m.width, m.nativeScrollback)
+	m.viewport.SetWidth(contentWidth)
+	const latex = `\alpha+\beta+\gamma+\delta+\epsilon+\zeta`
+	source := transcriptSource{kind: transcriptSourceMarkdown, raw: `$` + latex + `$`}
+	rendered := m.renderTranscriptSource(source, m.width)
+	m.transcript = []string{rendered}
+	m.transcriptSources = []transcriptSource{source}
+	m.wrappedLines = strings.Split(wrapTranscript(rendered, contentWidth), "\n")
+
+	copyLines, ok := m.copyTranscriptLines()
+	if !ok {
+		t.Fatal("copy rendition diverged from the displayed transcript")
+	}
+	firstLine, lastLine := -1, -1
+	firstCol, lastCol := 0, 0
+	for i, line := range copyLines {
+		if len(line.math) == 0 {
+			continue
+		}
+		if firstLine < 0 {
+			firstLine = i
+			firstCol = line.math[0].start
+		}
+		lastLine = i
+		lastCol = line.math[len(line.math)-1].end
+	}
+	if firstLine < 0 || lastLine <= firstLine {
+		t.Fatalf("expected formula to wrap across lines:\n%s", ansi.Strip(rendered))
+	}
+
+	m.sel = selection{
+		active: true,
+		anchor: selPos{line: firstLine, col: firstCol},
+		head:   selPos{line: lastLine, col: lastCol},
+	}
+	if got, want := m.selectedText(), `$`+latex+`$`; got != want {
+		t.Fatalf("wrapped formula selection = %q, want %q", got, want)
+	}
+}
+
+func TestCopyToClipboard(t *testing.T) {
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_CLIENT", "")
+	t.Setenv("SSH_TTY", "")
+	previous := writeNativeClipboardText
+	t.Cleanup(func() { writeNativeClipboardText = previous })
+
+	var written string
+	writeNativeClipboardText = func(text string) error {
+		written = text
+		return nil
+	}
+	message := copyToClipboard("hello")()
+	got, ok := message.(clipboardCopyMsg)
+	if !ok {
+		t.Fatalf("copyToClipboard returned %T, want clipboardCopyMsg", message)
+	}
+	if written != "hello" || got.text != "hello" || got.err != nil || got.osc52 {
+		t.Fatalf("native clipboard result = %+v, written %q", got, written)
+	}
+
+	wantErr := errors.New("clipboard unavailable")
+	writeNativeClipboardText = func(string) error { return wantErr }
+	got = copyToClipboard("fallback")().(clipboardCopyMsg)
+	if !errors.Is(got.err, wantErr) || got.osc52 {
+		t.Fatalf("failed native clipboard result = %+v", got)
+	}
+
+	t.Setenv("SSH_CONNECTION", "host 22 client 1234")
+	writeNativeClipboardText = func(string) error {
+		t.Fatal("SSH copy must not write the remote host's native clipboard")
+		return nil
+	}
+	got = copyToClipboard("remote")().(clipboardCopyMsg)
+	if !got.osc52 || got.text != "remote" {
+		t.Fatalf("SSH clipboard result = %+v, want OSC 52", got)
 	}
 }

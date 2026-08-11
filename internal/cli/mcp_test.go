@@ -1,8 +1,12 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -11,8 +15,18 @@ import (
 
 	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/mcpregistry"
 	"reasonix/internal/plugin"
 )
+
+func stubMCPReadinessProbe(t *testing.T) {
+	t.Helper()
+	previous := mcpProbeForInstall
+	mcpProbeForInstall = func(entry config.PluginEntry) (plugin.MCPInstallResult, error) {
+		return plugin.ReadyInstallResult(entry.Name, 3), nil
+	}
+	t.Cleanup(func() { mcpProbeForInstall = previous })
+}
 
 func TestParseMCPAddStdio(t *testing.T) {
 	e, err := parseMCPAdd([]string{"fs", "npx", "-y", "@modelcontextprotocol/server-filesystem", "."})
@@ -80,11 +94,64 @@ func TestParseMCPAddErrors(t *testing.T) {
 		"command and url":   {"x", "--http", "https://x", "node"},
 		"unknown flag":      {"x", "--bogus", "y", "cmd"},
 		"env without value": {"x", "--env"},
+		"bare dash dash":    {"--"},
 	}
 	for name, args := range cases {
 		if _, err := parseMCPAdd(args); err == nil {
 			t.Errorf("%s: expected an error for %v", name, args)
 		}
+	}
+}
+
+func TestParseMCPAddDashDashArgv(t *testing.T) {
+	e, err := parseMCPAdd([]string{"--", "npx", "-y", "chrome-devtools-mcp@latest"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if e.Name != "chrome-devtools-mcp" {
+		t.Fatalf("name = %q, want chrome-devtools-mcp", e.Name)
+	}
+	if e.Command != "npx" || !reflect.DeepEqual(e.Args, []string{"-y", "chrome-devtools-mcp@latest"}) {
+		t.Fatalf("command/args = %q/%v", e.Command, e.Args)
+	}
+
+	named, err := parseMCPAdd([]string{"chrome", "--", "npx", "-y", "chrome-devtools-mcp@latest"})
+	if err != nil {
+		t.Fatalf("named -- form: %v", err)
+	}
+	if named.Name != "chrome" || named.Command != "npx" {
+		t.Fatalf("named entry = %+v", named)
+	}
+}
+
+func TestParseMCPAddDashDashNamesLauncherPackageNotTrailingArgument(t *testing.T) {
+	e, err := parseMCPAdd([]string{"--", "npx", "-y", "@modelcontextprotocol/server-filesystem", "/srv/shared"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Name != "server-filesystem" {
+		t.Fatalf("name = %q, want server-filesystem", e.Name)
+	}
+
+	python, err := parseMCPAdd([]string{"--", "python", "-m", "mcp_server_time", "--local-timezone=UTC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if python.Name != "mcp-server-time" {
+		t.Fatalf("python module name = %q, want mcp-server-time", python.Name)
+	}
+}
+
+func TestParseMCPAddBareURL(t *testing.T) {
+	e, err := parseMCPAdd([]string{"https://mcp.example.com/path"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if e.Type != "http" || e.URL != "https://mcp.example.com/path" {
+		t.Fatalf("type/url = %q/%q", e.Type, e.URL)
+	}
+	if e.Name != "mcp" {
+		t.Fatalf("name = %q, want mcp", e.Name)
 	}
 }
 
@@ -97,6 +164,240 @@ func TestTokenizeArgs(t *testing.T) {
 	// Single quotes work too, and surrounding whitespace collapses.
 	if got := tokenizeArgs("  a  'b c'  d "); !reflect.DeepEqual(got, []string{"a", "b c", "d"}) {
 		t.Fatalf("tokenizeArgs single-quote = %v", got)
+	}
+}
+
+func TestMCPGetOpenDesignStyleInstall(t *testing.T) {
+	isolateCLIConfigHome(t)
+	stubMCPReadinessProbe(t)
+
+	addOut := captureStdout(t, func() {
+		if rc := Run([]string{
+			"mcp", "add", "open-design",
+			"--env", "OD_DAEMON_URL=http://127.0.0.1:7456",
+			"--env", "OPEN_DESIGN_TOKEN=placeholder-value",
+			"node", "open-design-mcp.js", "--stdio",
+		}, "test-version"); rc != 0 {
+			t.Fatalf("mcp add rc = %d, want 0", rc)
+		}
+	})
+	if !strings.Contains(addOut, `added MCP server "open-design"`) {
+		t.Fatalf("mcp add output = %q", addOut)
+	}
+
+	getOut := captureStdout(t, func() {
+		if rc := Run([]string{"mcp", "get", "open-design"}, "test-version"); rc != 0 {
+			t.Fatalf("mcp get rc = %d, want 0", rc)
+		}
+	})
+	for _, want := range []string{
+		"name: open-design",
+		"type: stdio",
+		"command: node",
+		"args: open-design-mcp.js",
+		"      --stdio",
+		"OD_DAEMON_URL=http://127.0.0.1:7456",
+		"OPEN_DESIGN_TOKEN=<redacted>",
+	} {
+		if !strings.Contains(getOut, want) {
+			t.Fatalf("mcp get output missing %q:\n%s", want, getOut)
+		}
+	}
+	if strings.Contains(getOut, "placeholder-value") {
+		t.Fatalf("mcp get leaked sensitive env value:\n%s", getOut)
+	}
+}
+
+func TestMCPGetMissingServerFails(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	errOut := captureStderr(t, func() {
+		if rc := Run([]string{"mcp", "get", "open-design"}, "test-version"); rc != 1 {
+			t.Fatalf("mcp get missing rc = %d, want 1", rc)
+		}
+	})
+	if !strings.Contains(errOut, `no MCP server named "open-design"`) {
+		t.Fatalf("mcp get missing stderr = %q", errOut)
+	}
+}
+
+func TestMCPDisablePersistsProjectWorkspaceActivation(t *testing.T) {
+	isolateCLIConfigHome(t)
+	workspace := mcpCLIWorkspaceRoot()
+	if err := os.WriteFile(filepath.Join(workspace, "reasonix.toml"), []byte(`
+[[plugins]]
+name = "project-mcp"
+command = "project-mcp"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	captureStdout(t, func() {
+		if rc := mcpEnableCLI([]string{"project-mcp"}, false); rc != 0 {
+			t.Fatalf("mcp disable rc = %d, want 0", rc)
+		}
+	})
+	cfg, err := config.LoadForRoot(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := cfg.Plugins[0]
+	enabled, err := config.DefaultMCPActivationStore().IsEnabled(entry, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled {
+		t.Fatal("project MCP remained enabled after CLI disable")
+	}
+	scope, _, source, owner := config.ActivationIdentity(entry, workspace)
+	if _, found, err := config.DefaultMCPActivationStore().Lookup(scope, "", source, owner, entry.Name); err != nil {
+		t.Fatal(err)
+	} else if found {
+		t.Fatal("project MCP activation was incorrectly stored under an empty workspace fingerprint")
+	}
+}
+
+func TestPersistCLIInstalledMCPAlwaysWritesGlobalConfig(t *testing.T) {
+	isolateCLIConfigHome(t)
+	workspace := mcpCLIWorkspaceRoot()
+	projectPath := filepath.Join(workspace, "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte(`
+[[plugins]]
+name = "project-mcp"
+command = "project-mcp"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := persistCLIInstalledMCP(workspace, config.PluginEntry{
+		Name: "global-mcp", Command: "global-mcp",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	userCfg := config.LoadForEdit(config.UserConfigPath())
+	if entry, ok := findCLIPlugin(userCfg.Plugins, "global-mcp"); !ok || entry.Command != "global-mcp" {
+		t.Fatalf("global config entry = %+v, found=%v", entry, ok)
+	}
+	projectCfg := config.LoadForEdit(projectPath)
+	if _, ok := findCLIPlugin(projectCfg.Plugins, "global-mcp"); ok {
+		t.Fatalf("CLI-installed global MCP leaked into project config: %+v", projectCfg.Plugins)
+	}
+}
+
+func findCLIPlugin(entries []config.PluginEntry, name string) (config.PluginEntry, bool) {
+	for _, entry := range entries {
+		if entry.Name == name {
+			return entry, true
+		}
+	}
+	return config.PluginEntry{}, false
+}
+
+func TestMCPUpdateProbesCandidateWithoutRewritingConfig(t *testing.T) {
+	isolateCLIConfigHome(t)
+	stubMCPReadinessProbe(t)
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := config.PluginEntry{Name: "chrome", Command: "npx", Args: []string{"-y", "chrome-devtools-mcp@latest"}}
+	if err := cfg.UpsertPlugin(entry); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureStdout(t, func() {
+		if rc := mcpUpdateCLI([]string{"chrome"}); rc != 0 {
+			t.Fatalf("mcp update rc = %d", rc)
+		}
+	})
+	if !strings.Contains(out, "candidate handshake passed with 3 tools") {
+		t.Fatalf("mcp update output = %q", out)
+	}
+	after, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.Plugins) != 1 || !reflect.DeepEqual(after.Plugins[0].Args, entry.Args) {
+		t.Fatalf("candidate verification unexpectedly rewrote config: %+v", after.Plugins)
+	}
+}
+
+func TestMCPBrowseAndInstallOfficialRegistryEntry(t *testing.T) {
+	isolateCLIConfigHome(t)
+	stubMCPReadinessProbe(t)
+	registry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"servers": []any{map[string]any{"server": map[string]any{
+			"name": "io.example/demo", "title": "Demo MCP", "version": "1.0.0",
+			"remotes": []any{map[string]any{"type": "streamable-http", "url": "https://mcp.example.test/mcp"}},
+		}}}})
+	}))
+	defer registry.Close()
+	client := mcpregistry.New("")
+	client.BaseURL = registry.URL
+
+	browseOut := captureStdout(t, func() {
+		if rc := mcpBrowseWithClient([]string{"demo", "--limit", "5"}, client); rc != 0 {
+			t.Fatalf("mcp browse rc = %d", rc)
+		}
+	})
+	for _, want := range []string{"io.example/demo", "1.0.0", "http", "Demo MCP"} {
+		if !strings.Contains(browseOut, want) {
+			t.Fatalf("mcp browse output missing %q: %s", want, browseOut)
+		}
+	}
+
+	installOut := captureStdout(t, func() {
+		if rc := mcpInstallWithClient([]string{"io.example/demo", "--as", "demo-market"}, client); rc != 0 {
+			t.Fatalf("mcp install rc = %d", rc)
+		}
+	})
+	if !strings.Contains(installOut, `installed MCP Registry server "io.example/demo" as "demo-market"`) {
+		t.Fatalf("mcp install output = %q", installOut)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Plugins) != 1 || cfg.Plugins[0].Name != "demo-market" || cfg.Plugins[0].Type != "http" || cfg.Plugins[0].URL != "https://mcp.example.test/mcp" {
+		t.Fatalf("installed plugins = %+v", cfg.Plugins)
+	}
+}
+
+func TestMCPGetRedactsRemoteAuthMaterial(t *testing.T) {
+	isolateCLIConfigHome(t)
+	stubMCPReadinessProbe(t)
+
+	_ = captureStdout(t, func() {
+		if rc := Run([]string{
+			"mcp", "add", "stripe",
+			"--http", "https://mcp.example.test/mcp?access_token=abc&key=xyz&workspace=main",
+			"--header", "Authorization=Bearer abc",
+		}, "test-version"); rc != 0 {
+			t.Fatalf("mcp add remote rc = %d, want 0", rc)
+		}
+	})
+
+	getOut := captureStdout(t, func() {
+		if rc := Run([]string{"mcp", "get", "stripe"}, "test-version"); rc != 0 {
+			t.Fatalf("mcp get remote rc = %d, want 0", rc)
+		}
+	})
+	for _, want := range []string{
+		"type: http",
+		"workspace=main",
+		"access_token=%3Credacted%3E",
+		"key=%3Credacted%3E",
+		"Authorization=<redacted>",
+	} {
+		if !strings.Contains(getOut, want) {
+			t.Fatalf("mcp get remote output missing %q:\n%s", want, getOut)
+		}
+	}
+	if strings.Contains(getOut, "Bearer abc") || strings.Contains(getOut, "access_token=abc") || strings.Contains(getOut, "key=xyz") {
+		t.Fatalf("mcp get leaked remote auth material:\n%s", getOut)
 	}
 }
 
@@ -129,7 +430,7 @@ func TestRenderMCPStatusGroupsAndCompactsResources(t *testing.T) {
 
 func TestRenderMCPStatusCapsLongSections(t *testing.T) {
 	var resources []plugin.Resource
-	for i := 0; i < mcpMaxItemsPerSection+2; i++ {
+	for range mcpMaxItemsPerSection + 2 {
 		resources = append(resources, plugin.Resource{Server: "fs", URI: "file:///tmp/resource.md"})
 	}
 	got := renderMCPStatus(80,
@@ -140,6 +441,98 @@ func TestRenderMCPStatusCapsLongSections(t *testing.T) {
 	)
 	if !strings.Contains(got, "+2 more resources") {
 		t.Fatalf("rendered MCP status should cap long resource sections:\n%s", got)
+	}
+}
+
+func TestRenderMCPStatusShowsQuarantinedTools(t *testing.T) {
+	got := renderMCPStatus(200,
+		[]plugin.ServerStatus{{
+			Name: "yakit", Transport: "stdio", Tools: 1,
+			ToolList: []plugin.ToolInfo{
+				{Name: "echo", Description: "available"},
+				{Name: "generate_yso_bytes", SchemaError: "invalid input schema: bad type at /properties/options/items/type"},
+			},
+		}},
+		nil,
+		nil,
+		nil,
+	)
+	for _, want := range []string{"1 tool", "1 unavailable tool", "unavailable tools", "generate_yso_bytes", "invalid input schema"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered MCP status missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderMCPStatusShowsConfigSource(t *testing.T) {
+	got := renderMCPStatus(120,
+		[]plugin.ServerStatus{{
+			Name: "docs", Transport: "stdio", ConfigSource: "project_config", Tools: 1,
+			ToolList: []plugin.ToolInfo{{Name: "search", Description: "find docs"}},
+		}},
+		nil, nil, nil,
+	)
+	for _, want := range []string{"docs", "source=project_config", "tools", "search", "source=project_config"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered MCP status missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderMCPStatusStripsControlSequencesFromExternalText(t *testing.T) {
+	// Malicious MCP description with CSI clear + OSC clipboard poke must not
+	// survive into the TUI payload.
+	evil := "safe\x1b[2J\x1b]52;c;AAAA\x07 payload"
+	got := renderMCPStatus(160,
+		[]plugin.ServerStatus{{
+			Name: "evil\x1b[31m", Transport: "stdio", ConfigSource: "user\x1b[0m",
+			Tools: 1,
+			ToolList: []plugin.ToolInfo{
+				{Name: "ok", Description: evil},
+				{Name: "bad", SchemaError: "schema\x1b[1merr"},
+			},
+		}},
+		[]plugin.Prompt{{Server: "evil", Name: "p", Description: "prompt\x1b[2J"}},
+		[]plugin.Resource{{Server: "evil", URI: "file:///x", Name: "res\x1b]0;x\x07"}},
+		[]plugin.Failure{{Name: "fail", Error: "boom\x1b[2J"}},
+	)
+	for _, ban := range []string{"\x1b", "\x07", "]52;", "[2J", "[31m", "[1m"} {
+		if strings.Contains(got, ban) {
+			t.Fatalf("control sequence %q leaked into MCP status:\n%q", ban, got)
+		}
+	}
+	if !strings.Contains(got, "safe") || !strings.Contains(got, "payload") {
+		t.Fatalf("sanitized description lost content:\n%s", got)
+	}
+	// Invalid tools must not appear under the ordinary tools list.
+	toolsIdx := strings.Index(got, "tools")
+	unavailIdx := strings.Index(got, "unavailable tools")
+	if toolsIdx < 0 || unavailIdx < 0 {
+		t.Fatalf("expected tools and unavailable sections:\n%s", got)
+	}
+	toolsSection := got[toolsIdx:unavailIdx]
+	if strings.Contains(toolsSection, "bad") {
+		t.Fatalf("invalid tool listed under tools:\n%s", toolsSection)
+	}
+	if !strings.Contains(got[unavailIdx:], "bad") {
+		t.Fatalf("invalid tool missing from unavailable:\n%s", got)
+	}
+}
+
+func TestSanitizeExternalDisplayText(t *testing.T) {
+	in := "hello\x1b[2J\x1b]52;c;QQ\x07 world\n\t!"
+	got := sanitizeExternalDisplayText(in)
+	if strings.ContainsAny(got, "\x1b\x07\n\t") {
+		t.Fatalf("controls remain: %q", got)
+	}
+	if got != "hello world !" {
+		t.Fatalf("sanitize = %q", got)
+	}
+}
+
+func TestMCPCapabilitiesTextUsesAdvertisedTools(t *testing.T) {
+	if got := mcpCapabilitiesText(mcpServerView{HasTools: true}); got != "tools" {
+		t.Fatalf("mcpCapabilitiesText = %q, want tools", got)
 	}
 }
 
@@ -159,9 +552,10 @@ func TestRenderMCPStatusShowsFailures(t *testing.T) {
 
 func TestRenderMCPManagerListGroupsRuntimeAndConfiguredServers(t *testing.T) {
 	p := &mcpManager{snapshot: mcpSnapshot{
-		configPath: "reasonix.toml",
+		configPath: "config.toml",
 		servers: []mcpServerView{
 			{Name: "managed-search", Transport: "stdio", Status: "connected", BuiltIn: true, Tools: 4},
+			{Name: "project-docs", Transport: "http", Status: "deferred", Configured: true, Source: config.MCPSourceProjectConfig},
 			{Name: "github", Transport: "stdio", Status: "deferred", Configured: true, Tier: "background", Tools: 12},
 			{Name: "figma", Transport: "http", Status: "failed", Configured: true, Tier: "background", URL: "https://mcp.figma.com", Error: "connect: 401 unauthorized"},
 		},
@@ -169,11 +563,14 @@ func TestRenderMCPManagerListGroupsRuntimeAndConfiguredServers(t *testing.T) {
 	got := p.renderList(120)
 	for _, want := range []string{
 		"Manage MCP servers",
-		"3 servers",
+		"4 servers",
 		"Managed MCPs",
-		"User MCPs (reasonix.toml)",
+		"Project MCPs",
+		"Global MCPs (config.toml)",
 		"managed-search",
 		"connected",
+		"project-docs",
+		"preparing in background",
 		"github",
 		"preparing in background",
 		"figma",
@@ -185,12 +582,73 @@ func TestRenderMCPManagerListGroupsRuntimeAndConfiguredServers(t *testing.T) {
 	}
 }
 
+func TestBuildMCPSnapshotUsesControllerWorkspaceAndPerServerConfigPaths(t *testing.T) {
+	isolateCLIConfigHome(t)
+	workspace := t.TempDir()
+	other := t.TempDir()
+	t.Chdir(other)
+	userPath := config.UserConfigPath()
+	userCfg := config.LoadForEdit(userPath)
+	userCfg.Plugins = []config.PluginEntry{
+		{Name: "global-only", Command: "global-only"},
+		{Name: "shared", Command: "global-shared"},
+	}
+	if err := userCfg.SaveTo(userPath); err != nil {
+		t.Fatal(err)
+	}
+	projectPath := filepath.Join(workspace, "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte(`
+[[plugins]]
+name = "project-only"
+command = "project-only"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mcpJSONPath := filepath.Join(workspace, ".mcp.json")
+	if err := os.WriteFile(mcpJSONPath, []byte(`{
+  "mcpServers": {
+    "shared": { "command": "project-shared" }
+  }
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctrl := control.New(control.Options{WorkspaceRoot: workspace, Host: plugin.NewHost()})
+	defer ctrl.Close()
+	m := newTestChatTUI()
+	m.ctrl = ctrl
+	m.host = ctrl.Host()
+	snapshot := m.buildMCPSnapshot()
+	byName := map[string]mcpServerView{}
+	for _, server := range snapshot.servers {
+		byName[server.Name] = server
+	}
+	if got := byName["global-only"]; got.Source != config.MCPSourceUserConfig || got.ConfigPath != userPath {
+		t.Fatalf("global-only view = %+v, want global source path %q", got, userPath)
+	}
+	if got := byName["project-only"]; got.Source != config.MCPSourceProjectConfig || got.ConfigPath != projectPath {
+		t.Fatalf("project-only view = %+v, want project source path %q", got, projectPath)
+	}
+	if got := byName["shared"]; got.Source != config.MCPSourceProjectMCPJSON || got.ConfigPath != mcpJSONPath || got.Command != "project-shared" {
+		t.Fatalf("shared view = %+v, want project .mcp.json to override global", got)
+	}
+}
+
+func TestMCPConfigPathForViewPrefersSelectedServerSource(t *testing.T) {
+	if got := mcpConfigPathForView(mcpServerView{ConfigPath: "/project/.mcp.json"}, "/global/config.toml"); got != "/project/.mcp.json" {
+		t.Fatalf("selected config path = %q", got)
+	}
+	if got := mcpConfigPathForView(mcpServerView{}, "/global/config.toml"); got != "/global/config.toml" {
+		t.Fatalf("fallback config path = %q", got)
+	}
+}
+
 func TestRenderMCPManagerListCompactsLongNames(t *testing.T) {
 	p := &mcpManager{snapshot: mcpSnapshot{servers: []mcpServerView{
 		{Name: "@modelcontextprotocol/server-sequential-thinking", Transport: "stdio", Status: "deferred", Configured: true, Tier: "background"},
 	}}}
 	got := p.renderList(80)
-	for _, line := range strings.Split(got, "\n") {
+	for line := range strings.SplitSeq(got, "\n") {
 		if visibleWidth(line) > 80 {
 			t.Fatalf("line exceeds width 80 (%d): %q\n%s", visibleWidth(line), line, got)
 		}
@@ -229,6 +687,35 @@ func TestRenderMCPManagerAuthFailureActions(t *testing.T) {
 	}
 	if strings.Contains(got, "Retry") {
 		t.Fatalf("auth failures should prefer Authenticate over Retry:\n%s", got)
+	}
+}
+
+func TestRenderMCPManagerProjectServerIsReadyWithoutInstallAction(t *testing.T) {
+	p := &mcpManager{
+		stage: mcpStageDetail,
+		name:  "project-docs",
+		snapshot: mcpSnapshot{
+			configPath: "reasonix.toml",
+			servers: []mcpServerView{{
+				Name: "project-docs", Transport: "http", Status: "connected", Configured: true,
+				Source: config.MCPSourceProjectConfig, URL: "https://example.test/mcp",
+				Tools: 2, HasTools: true,
+			}},
+		},
+	}
+	got := p.renderDetail(120)
+	for _, want := range []string{
+		"connected",
+		"current project reasonix.toml",
+		"View tools",
+		"Disable for this session",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered project MCP details missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Install and use") || strings.Contains(got, "Authorize") {
+		t.Fatalf("trusted project MCP must not expose an installation or authorization action:\n%s", got)
 	}
 }
 
@@ -303,7 +790,7 @@ func TestRenderMCPManagerDetailCompactsConfigPath(t *testing.T) {
 		},
 	}
 	got := p.renderDetail(80)
-	for _, line := range strings.Split(got, "\n") {
+	for line := range strings.SplitSeq(got, "\n") {
 		if visibleWidth(line) > 80 {
 			t.Fatalf("detail line exceeds width 80 (%d): %q\n%s", visibleWidth(line), line, got)
 		}
@@ -331,11 +818,211 @@ func TestMCPEditConfigLaunchUsesVisualBeforeEditor(t *testing.T) {
 	if launch.editor != "vim" {
 		t.Fatalf("editor = %q, want vim", launch.editor)
 	}
-	if len(launch.cmd.Args) != 3 || launch.cmd.Args[0] != "sh" || launch.cmd.Args[1] != "-lc" {
-		t.Fatalf("VISUAL should run through shell, args=%v", launch.cmd.Args)
+	// VISUAL must run the editor binary directly (not via sh -lc) so that
+	// shell metacharacters in the env value cannot be executed. argv is
+	// [editorBinary, path].
+	if len(launch.cmd.Args) != 2 || launch.cmd.Args[0] != "vim" || launch.cmd.Args[1] != path {
+		t.Fatalf("VISUAL should invoke editor binary directly, args=%v", launch.cmd.Args)
 	}
-	if want := "vim " + shellQuote(path); launch.cmd.Args[2] != want {
-		t.Fatalf("shell command = %q, want %q", launch.cmd.Args[2], want)
+}
+
+// TestMCPEditConfigLaunchEditorWithArgs confirms that an EDITOR/VISUAL value
+// carrying arguments (e.g. "code --wait") is split into argv correctly and
+// the path is appended as the final argument, without going through a shell.
+func TestMCPEditConfigLaunchEditorWithArgs(t *testing.T) {
+	t.Setenv("VISUAL", "code --wait")
+	t.Setenv("EDITOR", "")
+
+	path := "/tmp/reasonix.toml"
+	launch, err := mcpEditConfigLaunchCommand(path, func(string) (string, error) {
+		t.Fatal("lookPath should not be called when VISUAL is set")
+		return "", errors.New("unexpected lookup")
+	})
+	if err != nil {
+		t.Fatalf("edit command: %v", err)
+	}
+	if launch.editor != "code" {
+		t.Fatalf("editor display name = %q, want code", launch.editor)
+	}
+	want := []string{"code", "--wait", path}
+	if len(launch.cmd.Args) != len(want) {
+		t.Fatalf("args length = %d, want %d, args=%v", len(launch.cmd.Args), len(want), launch.cmd.Args)
+	}
+	for i, w := range want {
+		if launch.cmd.Args[i] != w {
+			t.Fatalf("args[%d] = %q, want %q, full args=%v", i, launch.cmd.Args[i], w, launch.cmd.Args)
+		}
+	}
+}
+
+func TestMCPEditConfigLaunchEditorParsesShellStyleQuotes(t *testing.T) {
+	path := "/tmp/reasonix.toml"
+	cases := []struct {
+		name       string
+		editor     string
+		wantEditor string
+		wantArgs   []string
+	}{
+		{
+			name:       "empty fallback arg",
+			editor:     "emacsclient -c -a ''",
+			wantEditor: "emacsclient",
+			wantArgs:   []string{"emacsclient", "-c", "-a", "", path},
+		},
+		{
+			name:       "quoted editor path",
+			editor:     "'/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code' --wait",
+			wantEditor: "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+			wantArgs:   []string{"/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code", "--wait", path},
+		},
+		{
+			name:       "escaped whitespace",
+			editor:     `/opt/My\ Editor/bin/edit --flag`,
+			wantEditor: "/opt/My Editor/bin/edit",
+			wantArgs:   []string{"/opt/My Editor/bin/edit", "--flag", path},
+		},
+		{
+			name:       "quoted arg",
+			editor:     `nvim --cmd "set tabstop=2"`,
+			wantEditor: "nvim",
+			wantArgs:   []string{"nvim", "--cmd", "set tabstop=2", path},
+		},
+		{
+			name:       "double quoted literal backslashes",
+			editor:     `nvim "C:\tmp\file"`,
+			wantEditor: "nvim",
+			wantArgs:   []string{"nvim", `C:\tmp\file`, path},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("VISUAL", c.editor)
+			t.Setenv("EDITOR", "")
+			launch, err := mcpEditConfigLaunchCommand(path, func(string) (string, error) {
+				t.Fatal("lookPath should not be called when VISUAL is set")
+				return "", errors.New("unexpected lookup")
+			})
+			if err != nil {
+				t.Fatalf("edit command: %v", err)
+			}
+			if launch.editor != c.wantEditor {
+				t.Fatalf("editor display name = %q, want %q", launch.editor, c.wantEditor)
+			}
+			if !reflect.DeepEqual(launch.cmd.Args, c.wantArgs) {
+				t.Fatalf("args = %#v, want %#v", launch.cmd.Args, c.wantArgs)
+			}
+		})
+	}
+}
+
+func TestMCPEditConfigLaunchEditorRejectsUnterminatedQuote(t *testing.T) {
+	t.Setenv("VISUAL", `code --wait "unterminated`)
+	t.Setenv("EDITOR", "")
+
+	_, err := mcpEditConfigLaunchCommand("/tmp/reasonix.toml", func(string) (string, error) {
+		t.Fatal("lookPath should not be called when VISUAL is set")
+		return "", errors.New("unexpected lookup")
+	})
+	if err == nil {
+		t.Fatal("expected unterminated quote error")
+	}
+}
+
+// TestMCPEditConfigLaunchEditorRejectsShellMetachars confirms that shell
+// metacharacters in EDITOR/VISUAL are rejected before launch — the previous
+// sh -lc construction would have run "rm" here.
+func TestMCPEditConfigLaunchEditorRejectsShellMetachars(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "vim; rm -rf /tmp/should-not-exist")
+
+	path := "/tmp/reasonix.toml"
+	_, err := mcpEditConfigLaunchCommand(path, func(string) (string, error) {
+		t.Fatal("lookPath should not be called when EDITOR is set")
+		return "", errors.New("unexpected lookup")
+	})
+	if err == nil || !strings.Contains(err.Error(), "shell control syntax") {
+		t.Fatalf("expected shell control rejection, got %v", err)
+	}
+}
+
+// TestMCPEditConfigLaunchEditorExpandsEnvVar confirms that $VAR references
+// in EDITOR/VISUAL are expanded without going through a shell, preserving
+// the behavior of the prior sh -lc path for users who set values such as
+// EDITOR="$HOME/bin/myeditor" verbatim (rather than relying on the shell
+// to expand at export time).
+func TestMCPEditConfigLaunchEditorExpandsEnvVar(t *testing.T) {
+	t.Setenv("REASONIX_TEST_EDITOR_BIN", "/opt/custom/bin/myed")
+	t.Setenv("VISUAL", "$REASONIX_TEST_EDITOR_BIN --flag")
+	t.Setenv("EDITOR", "")
+
+	path := "/tmp/reasonix.toml"
+	launch, err := mcpEditConfigLaunchCommand(path, func(string) (string, error) {
+		t.Fatal("lookPath should not be called when VISUAL is set")
+		return "", errors.New("unexpected lookup")
+	})
+	if err != nil {
+		t.Fatalf("edit command: %v", err)
+	}
+	want := []string{"/opt/custom/bin/myed", "--flag", path}
+	if len(launch.cmd.Args) != len(want) {
+		t.Fatalf("args length = %d, want %d, args=%v", len(launch.cmd.Args), len(want), launch.cmd.Args)
+	}
+	for i, w := range want {
+		if launch.cmd.Args[i] != w {
+			t.Fatalf("args[%d] = %q, want %q, full args=%v", i, launch.cmd.Args[i], w, launch.cmd.Args)
+		}
+	}
+}
+
+// TestMCPEditConfigLaunchEditorExpandsTilde confirms that a leading ~ or ~/
+// in EDITOR/VISUAL is expanded to the user's home directory without a shell.
+func TestMCPEditConfigLaunchEditorExpandsTilde(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("cannot determine home dir: %v", err)
+	}
+	cases := []struct {
+		name   string
+		editor string
+		want0  string
+	}{
+		{"tilde_slash", "~/bin/myed", home + "/bin/myed"},
+		{"bare_tilde", "~", home},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("VISUAL", c.editor+" --wait")
+			t.Setenv("EDITOR", "")
+			launch, err := mcpEditConfigLaunchCommand("/tmp/reasonix.toml", func(string) (string, error) {
+				t.Fatal("lookPath should not be called when VISUAL is set")
+				return "", errors.New("unexpected lookup")
+			})
+			if err != nil {
+				t.Fatalf("edit command: %v", err)
+			}
+			if launch.cmd.Args[0] != c.want0 {
+				t.Fatalf("args[0] = %q, want %q", launch.cmd.Args[0], c.want0)
+			}
+			if launch.cmd.Args[1] != "--wait" {
+				t.Fatalf("args[1] = %q, want --wait", launch.cmd.Args[1])
+			}
+		})
+	}
+}
+
+// TestMCPEditConfigLaunchEditorTildeNotInPayload confirms that a tilde
+// appearing in an injection payload cannot be used because shell control syntax
+// is rejected before any expansion beyond the leading editor token matters.
+func TestMCPEditConfigLaunchEditorTildeNotInPayload(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "vim; rm -rf ~/should-not-exist")
+
+	_, err := mcpEditConfigLaunchCommand("/tmp/reasonix.toml", func(string) (string, error) {
+		t.Fatal("lookPath should not be called when EDITOR is set")
+		return "", errors.New("unexpected lookup")
+	})
+	if err == nil || !strings.Contains(err.Error(), "shell control syntax") {
+		t.Fatalf("expected shell control rejection, got %v", err)
 	}
 }
 

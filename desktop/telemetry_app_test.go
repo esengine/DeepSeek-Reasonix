@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -24,6 +27,66 @@ func TestInstallIDStableAcrossCalls(t *testing.T) {
 	}
 	if second != first {
 		t.Errorf("second call returned %q, want stable %q", second, first)
+	}
+}
+
+func TestInstallIDConcurrentFirstUseGeneratesOneIdentity(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	originalRandRead := installIDRandRead
+	defer func() { installIDRandRead = originalRandRead }()
+
+	firstGenerationStarted := make(chan struct{})
+	releaseGeneration := make(chan struct{})
+	var generations atomic.Int32
+	installIDRandRead = func(p []byte) (int, error) {
+		if generations.Add(1) == 1 {
+			close(firstGenerationStarted)
+			<-releaseGeneration
+		}
+		return rand.Read(p)
+	}
+
+	const callers = 16
+	start := make(chan struct{})
+	results := make(chan string, callers)
+	errors := make(chan error, callers)
+	var ready sync.WaitGroup
+	var done sync.WaitGroup
+	for range callers {
+		ready.Add(1)
+		done.Go(func() {
+			ready.Done()
+			<-start
+			id, err := installID()
+			if err != nil {
+				errors <- err
+				return
+			}
+			results <- id
+		})
+	}
+	ready.Wait()
+	close(start)
+	<-firstGenerationStarted
+	close(releaseGeneration)
+	done.Wait()
+	close(results)
+	close(errors)
+
+	for err := range errors {
+		t.Fatalf("installID: %v", err)
+	}
+	var canonical string
+	for id := range results {
+		if canonical == "" {
+			canonical = id
+		}
+		if id != canonical {
+			t.Fatalf("concurrent install IDs differ: got %q, want %q", id, canonical)
+		}
+	}
+	if got := generations.Load(); got != 1 {
+		t.Fatalf("identity generations = %d, want 1", got)
 	}
 }
 

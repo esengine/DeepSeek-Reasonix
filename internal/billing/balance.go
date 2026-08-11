@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 )
@@ -21,6 +22,45 @@ type Balance struct {
 	Available bool   // the provider reports the account can still serve API calls
 	Infos     []Info // one entry per currency the provider returns
 }
+
+// Currencies returns the distinct ISO currency codes reported by the wallet,
+// in stable order. It never converts or combines balances.
+func (b *Balance) Currencies() []string {
+	if b == nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	for _, info := range b.Infos {
+		cur := strings.ToUpper(strings.TrimSpace(info.Currency))
+		if normalized := normalizeCurrency(cur); normalized != "" {
+			cur = normalized
+		}
+		if cur != "" {
+			seen[cur] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(seen))
+	for cur := range seen {
+		result = append(result, cur)
+	}
+	sort.Strings(result)
+	return result
+}
+
+// PrimaryCurrency returns the sole usable wallet currency, if there is one.
+func (b *Balance) PrimaryCurrency() string {
+	currencies := b.Currencies()
+	if len(currencies) != 1 {
+		return ""
+	}
+	if currencies[0] != "CNY" && currencies[0] != "USD" {
+		return ""
+	}
+	return currencies[0]
+}
+
+// MultiCurrency reports whether more than one wallet currency is present.
+func (b *Balance) MultiCurrency() bool { return len(b.Currencies()) > 1 }
 
 // Info is one currency's balance (DeepSeek returns one per currency).
 type Info struct {
@@ -111,18 +151,55 @@ func symbol(currency string) string {
 	}
 }
 
-// Display renders the primary balance compactly, e.g. "¥110.00". It prefers CNY,
-// then the first currency reported. "" when there's nothing to show.
+// Display renders the primary balance compactly, e.g. "¥110.00". It preserves
+// the legacy CNY-first behavior for callers that have no display-currency
+// preference.
 func (b *Balance) Display() string {
+	return b.DisplayForCurrency("")
+}
+
+// DisplayForCurrency renders the balance matching the requested pricing
+// currency. When the provider does not return that currency, it falls back to
+// Display's legacy CNY-first selection and prefixes the provider's real ISO
+// currency (for example "CNY ¥70.16"); it never performs an implicit
+// exchange-rate conversion.
+func (b *Balance) DisplayForCurrency(currency string) string {
 	if b == nil || len(b.Infos) == 0 {
 		return ""
 	}
 	pick := b.Infos[0]
+	preferred := normalizeCurrency(currency)
+	if preferred != "" {
+		for _, i := range b.Infos {
+			if normalizeCurrency(i.Currency) == preferred {
+				return symbol(i.Currency) + strings.TrimSpace(i.TotalBalance)
+			}
+		}
+	}
 	for _, i := range b.Infos {
-		if strings.EqualFold(i.Currency, "CNY") {
+		if normalizeCurrency(i.Currency) == "CNY" {
 			pick = i
 			break
 		}
 	}
-	return symbol(pick.Currency) + strings.TrimSpace(pick.TotalBalance)
+	display := symbol(pick.Currency) + strings.TrimSpace(pick.TotalBalance)
+	actual := strings.ToUpper(strings.TrimSpace(pick.Currency))
+	if normalized := normalizeCurrency(actual); normalized != "" {
+		actual = normalized
+	}
+	if preferred != "" && actual != "" && actual != preferred {
+		return actual + " " + display
+	}
+	return display
+}
+
+func normalizeCurrency(currency string) string {
+	switch strings.ToUpper(strings.TrimSpace(currency)) {
+	case "CNY", "RMB", "CNH", "¥", "￥":
+		return "CNY"
+	case "USD", "$", "US$":
+		return "USD"
+	default:
+		return ""
+	}
 }

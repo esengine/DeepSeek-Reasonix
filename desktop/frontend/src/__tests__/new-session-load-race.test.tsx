@@ -3,9 +3,10 @@
 import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
-import { useController } from "../lib/useController";
+import { initialState, reducer, useController, type Item } from "../lib/useController";
+import { historySliceFromMessages } from "./mockHistorySlice";
 import type { AppBindings } from "../lib/bridge";
-import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, JobView, Meta, TabMeta } from "../lib/types";
+import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, HistorySliceRequest, JobView, Meta, TabMeta, WireEvent } from "../lib/types";
 
 let passed = 0;
 let failed = 0;
@@ -74,7 +75,7 @@ function tabMeta(overrides: Partial<TabMeta> = {}): TabMeta {
   };
 }
 
-function meta(): Meta {
+function meta(overrides: Partial<Meta> = {}): Meta {
   return {
     label: "model",
     ready: true,
@@ -91,10 +92,34 @@ function meta(): Meta {
     tokenMode: "full",
     goal: "",
     goalStatus: "stopped",
+    ...overrides,
   };
 }
 
 console.log("\nnew session load race");
+
+const resetSourceItems: Item[] = [{ kind: "user", id: "old-user", text: "old prompt" }];
+const resetPlaceholderItems: Item[] = [{ kind: "user", id: "placeholder-user", text: "placeholder prompt" }];
+const resetState = reducer(
+  {
+    ...initialState,
+    items: resetSourceItems,
+    hydrating: true,
+    hydrateReason: "open-topic",
+    hydratePlaceholderItems: resetPlaceholderItems,
+  },
+  { type: "reset" },
+);
+eq(resetState.items.length, 0, "reset clears real transcript items");
+eq(resetState.hydratePlaceholderItems?.length, 1, "reset preserves hydration placeholder separately");
+
+const emptyHistoryState = reducer(resetState, { type: "history", messages: [] });
+eq(emptyHistoryState.items.length, 0, "empty history keeps the real transcript empty");
+eq(emptyHistoryState.hydrateHistoryLoaded, true, "empty history marks transcript hydration loaded");
+eq(emptyHistoryState.hydratePlaceholderItems?.length ?? 0, 0, "empty history clears hydration placeholder items");
+
+const hydrateDoneState = reducer(emptyHistoryState, { type: "hydrate_done" });
+eq(Boolean(hydrateDoneState.hydrateHistoryLoaded), false, "hydrate_done clears the history-loaded marker");
 
 const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
   pretendToBeVisual: true,
@@ -115,7 +140,12 @@ globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.win
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
 
 const staleHistory = deferred<HistoryMessage[]>();
+const staleSessionMeta = deferred<Meta>();
 let newSessionCalls = 0;
+let backendCanonicalTodos = [{ content: "Old task", status: "in_progress" }];
+let holdNextMeta = false;
+let staleMetaStarted = false;
+const eventHandlers: Array<(event: WireEvent) => void> = [];
 const context: ContextInfo = { used: 12, window: 100, sessionTokens: 12 };
 const effort: EffortInfo = { supported: true, current: "auto", default: "auto", levels: ["auto"] };
 const balance: BalanceInfo = { available: false, display: "" };
@@ -123,23 +153,56 @@ const jobs: JobView[] = [];
 const checkpoints: CheckpointMeta[] = [];
 
 window.runtime = {
-  EventsOn: () => () => {},
+  EventsOn: (name: string, cb: (...data: unknown[]) => void) => {
+    if (name === "agent:event") eventHandlers.push(cb as (event: WireEvent) => void);
+    return () => {};
+  },
   BrowserOpenURL: () => {},
 };
 window.go = {
   main: {
     App: {
       ListTabs: async () => [tabMeta()],
-      MetaForTab: async () => meta(),
+      MetaForTab: async () => {
+        if (holdNextMeta) {
+          holdNextMeta = false;
+          staleMetaStarted = true;
+          return staleSessionMeta.promise;
+        }
+        return meta({ canonicalTodos: backendCanonicalTodos });
+      },
       ContextUsageForTab: async () => context,
       EffortForTab: async () => effort,
       BalanceForTab: async () => balance,
       JobsForTab: async () => jobs,
       CheckpointsForTab: async () => checkpoints,
       HistoryForTab: async () => staleHistory.promise,
+      HistoryPageForTab: async () => {
+        const messages = await staleHistory.promise;
+        return { messages, startTurn: 0, endTurn: messages.filter((message) => message.role === "user").length, totalTurns: messages.filter((message) => message.role === "user").length, hasOlder: false };
+      },
+      HistorySliceForTab: async (tabID: string, req: HistorySliceRequest) =>
+        historySliceFromMessages(tabID, await staleHistory.promise, req),
+      HistoryCheckpointTurnsForTab: async () => [],
       ReplayPendingPrompts: async () => {},
       NewSession: async () => {
         newSessionCalls += 1;
+        backendCanonicalTodos = [];
+      },
+      NewSessionForTab: async (tabID: string) => {
+        if (tabID !== "tab-a") throw new Error(`unexpected new-session target ${tabID}`);
+        newSessionCalls += 1;
+        backendCanonicalTodos = [];
+      },
+      ResumeSessionPageForTab: async () => {
+        backendCanonicalTodos = [{ content: "Restored task", status: "completed" }];
+        return {
+          messages: [{ role: "user", content: "restore" }, { role: "assistant", content: "done" }],
+          startTurn: 0,
+          endTurn: 1,
+          totalTurns: 1,
+          hasOlder: false,
+        };
       },
     } as Partial<AppBindings> as AppBindings,
   },
@@ -164,11 +227,32 @@ await act(async () => {
 await waitFor("active tab", () => controller?.activeTabId === "tab-a");
 
 await act(async () => {
+  await controller?.refreshMeta();
+  await flushPromises();
+});
+eq(controller?.state.meta?.canonicalTodos?.[0]?.content, "Old task", "pre-reset metadata exposes the current session todo");
+
+holdNextMeta = true;
+await act(async () => {
+  for (const handler of eventHandlers) handler({ kind: "turn_done", tabId: "tab-a" });
+  await flushPromises();
+});
+await waitFor("stale metadata request", () => staleMetaStarted);
+
+await act(async () => {
   await controller?.newSession();
   await flushPromises();
 });
-eq(newSessionCalls, 1, "NewSession is called once");
+eq(newSessionCalls, 1, "tab-scoped NewSession is called once");
 eq(controller?.state.items.length, 0, "new session clears the visible transcript");
+eq(controller?.state.meta?.canonicalTodos?.length, 0, "new session refresh replaces the previous session todo with an authoritative empty list");
+
+await act(async () => {
+  staleSessionMeta.resolve(meta({ canonicalTodos: [{ content: "Old task", status: "in_progress" }] }));
+  await staleSessionMeta.promise;
+  await flushPromises();
+});
+eq(controller?.state.meta?.canonicalTodos?.length, 0, "metadata started before a session transition cannot restore the previous todo");
 
 await act(async () => {
   staleHistory.resolve([{ role: "user", content: "old prompt" }]);
@@ -179,7 +263,233 @@ await act(async () => {
 eq(controller?.state.items.length, 0, "stale history load cannot repopulate a new blank session");
 
 await act(async () => {
+  await controller?.resumeSession("/sessions/restored.jsonl", "tab-a");
+  await flushPromises();
+});
+eq(controller?.state.meta?.canonicalTodos?.[0]?.status, "completed", "resuming a session refreshes its authoritative canonical todo state");
+
+await act(async () => {
   root.unmount();
+});
+
+// Reusing a blank tab must invalidate the old hydration request. The backend
+// may return the same tab id, so the request sequence (not the tab id) is the
+// session boundary that prevents orphaned tool cards from coming back.
+const reusedOldHistory = deferred<{
+  messages: HistoryMessage[];
+  startTurn: number;
+  endTurn: number;
+  totalTurns: number;
+  hasOlder: boolean;
+}>();
+const reusedHistoryCalls: string[] = [];
+const reusedTab = tabMeta({ id: "tab-reused", sessionPath: "/sessions/old.jsonl" });
+const reusedTabPage = {
+  messages: [
+    { role: "assistant", content: "", toolCalls: [{ id: "old-call", name: "bash", arguments: "pwd" }] },
+    { role: "tool", toolCallId: "old-call", toolName: "bash", content: "/old" },
+  ] as HistoryMessage[],
+  startTurn: 0,
+  endTurn: 0,
+  totalTurns: 0,
+  hasOlder: false,
+};
+const reusedEmptyPage = { messages: [], startTurn: 0, endTurn: 0, totalTurns: 0, hasOlder: false };
+window.go.main.App = {
+  ListTabs: async () => [reusedTab],
+  MetaForTab: async () => meta({ sessionPath: "/sessions/new.jsonl" }),
+  ContextUsageForTab: async () => context,
+  EffortForTab: async () => effort,
+  BalanceForTab: async () => balance,
+  JobsForTab: async () => jobs,
+  CheckpointsForTab: async () => checkpoints,
+  HistoryPageForTab: async () => {
+    reusedHistoryCalls.push("history");
+    return reusedHistoryCalls.length === 1 ? reusedOldHistory.promise : reusedEmptyPage;
+  },
+  HistorySliceForTab: async (tabID: string, req: HistorySliceRequest) => {
+    reusedHistoryCalls.push("history");
+    const page = reusedHistoryCalls.length === 1 ? await reusedOldHistory.promise : reusedEmptyPage;
+    return historySliceFromMessages(tabID, page.messages, req);
+  },
+  HistoryCheckpointTurnsForTab: async () => [],
+  ReplayPendingPrompts: async () => {},
+  EnsureBlankTab: async () => ({ ...reusedTab, sessionPath: "/sessions/new.jsonl", active: true }),
+} as Partial<AppBindings> as AppBindings;
+
+controller = undefined;
+const reuseRoot = createRoot(rootEl);
+await act(async () => {
+  reuseRoot.render(<Probe />);
+  await flushPromises();
+});
+await waitFor("reused tab startup history", () => reusedHistoryCalls.length === 1);
+
+await act(async () => {
+  await controller?.ensureBlankTab("project", "/repo");
+  await flushPromises();
+});
+eq(reusedHistoryCalls.length, 2, "reusing a blank tab forces a fresh history request");
+eq(controller?.state.items.some((item) => item.kind === "tool" && item.id === "old-call"), false, "fresh blank-tab hydration has no old tool card");
+
+await act(async () => {
+  reusedOldHistory.resolve(reusedTabPage);
+  await reusedOldHistory.promise;
+  await flushPromises();
+});
+eq(controller?.state.items.some((item) => item.kind === "tool" && item.id === "old-call"), false, "late old-session history cannot restore an orphaned tool card");
+
+await act(async () => {
+  reuseRoot.unmount();
+});
+
+// A tab-bar click can overtake EnsureBlankTab while its backend call is still
+// in flight. Its intent must invalidate the older completion immediately, and
+// the stale backend activation must be repaired after it eventually returns.
+const queuedBlank = deferred<TabMeta>();
+const raceTabA = tabMeta({ id: "race-a", active: true, sessionPath: "/sessions/race-a.jsonl" });
+const raceTabB = tabMeta({ id: "race-b", active: false, sessionPath: "/sessions/race-b.jsonl" });
+const raceBlank = tabMeta({ id: "race-blank", active: false, sessionPath: "/sessions/race-blank.jsonl" });
+let raceBackendActiveId = raceTabA.id;
+const raceHistoryCalls: string[] = [];
+const raceSetActiveCalls: string[] = [];
+window.go.main.App = {
+  ListTabs: async () => [raceTabA, raceTabB, raceBlank].map((tab) => ({ ...tab, active: tab.id === raceBackendActiveId })),
+  MetaForTab: async (tabID: string) => meta({ sessionPath: `/sessions/${tabID}.jsonl` }),
+  ContextUsageForTab: async () => context,
+  EffortForTab: async () => effort,
+  BalanceForTab: async () => balance,
+  JobsForTab: async () => jobs,
+  CheckpointsForTab: async () => checkpoints,
+  HistoryPageForTab: async (tabID: string) => {
+    raceHistoryCalls.push(tabID);
+    return reusedEmptyPage;
+  },
+  HistorySliceForTab: async (tabID: string, req: HistorySliceRequest) => {
+    raceHistoryCalls.push(tabID);
+    return historySliceFromMessages(tabID, reusedEmptyPage.messages, req);
+  },
+  HistoryCheckpointTurnsForTab: async () => [],
+  ReplayPendingPrompts: async () => {},
+  EnsureBlankTab: async () => {
+    const tab = await queuedBlank.promise;
+    raceBackendActiveId = tab.id;
+    return tab;
+  },
+  SetActiveTab: async (tabID: string) => {
+    raceSetActiveCalls.push(tabID);
+    raceBackendActiveId = tabID;
+  },
+} as Partial<AppBindings> as AppBindings;
+
+controller = undefined;
+const queuedRaceRoot = createRoot(rootEl);
+await act(async () => {
+  queuedRaceRoot.render(<Probe />);
+  await flushPromises();
+});
+await waitFor("queued blank race startup", () => controller?.activeTabId === raceTabA.id);
+
+let pendingBlank: Promise<TabMeta> | undefined;
+await act(async () => {
+  pendingBlank = controller?.ensureBlankTab("project", "/repo");
+  await flushPromises();
+});
+const tabClickIntent = controller?.noteNavigationIntent();
+if (tabClickIntent === undefined) throw new Error("missing queued tab intent");
+
+let pendingTabSwitch: Promise<TabMeta[] | undefined> | undefined;
+await act(async () => {
+  pendingTabSwitch = controller?.switchTab(raceTabB.id, raceTabB, tabClickIntent);
+  await pendingTabSwitch;
+  await flushPromises();
+});
+eq(controller?.activeTabId, raceTabB.id, "queued tab click becomes visible before the older blank completion");
+eq(raceBackendActiveId, raceTabB.id, "queued tab click becomes backend-active before the older blank completion");
+
+await act(async () => {
+  queuedBlank.resolve({ ...raceBlank, active: true });
+  await pendingBlank;
+  await flushPromises();
+});
+eq(controller?.activeTabId, raceTabB.id, "late blank completion cannot replace the newer visible tab");
+eq(raceHistoryCalls.includes(raceBlank.id), false, "stale blank completion does not hydrate the abandoned tab");
+eq(raceBackendActiveId, raceTabB.id, "late blank completion reasserts the newer backend-active tab");
+eq(raceSetActiveCalls.join(","), `${raceTabB.id},${raceTabB.id}`, "stale blank completion repairs backend focus exactly once");
+
+await act(async () => {
+  queuedRaceRoot.unmount();
+});
+
+const guardedStartupTabs = deferred<TabMeta[]>();
+const staleProjectA = "/repo/project-a";
+const targetProjectB = "/repo/project-b";
+const ensureBlankSurfaceCalls: Array<{ scope: string; workspaceRoot: string }> = [];
+window.go.main.App = {
+  ListTabs: async () => guardedStartupTabs.promise,
+  MetaForTab: async (tabID: string) => tabID === "tab-new"
+    ? meta({ cwd: targetProjectB, workspaceRoot: targetProjectB, workspaceName: "project-b", workspacePath: targetProjectB })
+    : meta({ cwd: staleProjectA, workspaceRoot: staleProjectA, workspaceName: "project-a", workspacePath: staleProjectA }),
+  ContextUsageForTab: async () => context,
+  EffortForTab: async () => effort,
+  BalanceForTab: async () => balance,
+  JobsForTab: async () => jobs,
+  CheckpointsForTab: async () => checkpoints,
+  HistoryForTab: async () => [],
+  HistoryPageForTab: async () => ({ messages: [], startTurn: 0, endTurn: 0, totalTurns: 0, hasOlder: false }),
+  HistoryCheckpointTurnsForTab: async () => [],
+  ReplayPendingPrompts: async () => {},
+  EnsureBlankSurface: async (scope: string, workspaceRoot: string) => {
+    ensureBlankSurfaceCalls.push({ scope, workspaceRoot });
+    return tabMeta({
+      id: "tab-new",
+      topicId: "topic-new",
+      topicTitle: "New session",
+      workspaceRoot: targetProjectB,
+      workspaceName: "project-b",
+      workspacePath: targetProjectB,
+      cwd: targetProjectB,
+    });
+  },
+} as Partial<AppBindings> as AppBindings;
+
+controller = undefined;
+const guardRoot = createRoot(rootEl);
+
+await act(async () => {
+  guardRoot.render(<Probe />);
+  await flushPromises();
+});
+
+await act(async () => {
+  await controller?.ensureBlankSurface("project", targetProjectB);
+  await flushPromises();
+});
+
+eq(ensureBlankSurfaceCalls.length, 1, "EnsureBlankSurface is called once");
+eq(ensureBlankSurfaceCalls[0]?.workspaceRoot, targetProjectB, "EnsureBlankSurface keeps the requested project root");
+eq(controller?.activeTabId, "tab-new", "blank surface becomes active before startup sync resolves");
+eq(controller?.state.meta?.workspaceRoot, targetProjectB, "blank surface exposes the new project root");
+
+await act(async () => {
+  guardedStartupTabs.resolve([tabMeta({
+    id: "tab-old",
+    topicId: "topic-old",
+    topicTitle: "Old session",
+    workspaceRoot: staleProjectA,
+    workspaceName: "project-a",
+    workspacePath: staleProjectA,
+    cwd: staleProjectA,
+  })]);
+  await guardedStartupTabs.promise;
+  await flushPromises();
+});
+
+eq(controller?.activeTabId, "tab-new", "guarded startup sync cannot restore an older active tab");
+eq(controller?.state.meta?.workspaceRoot, targetProjectB, "guarded startup sync cannot restore the old project root");
+
+await act(async () => {
+  guardRoot.unmount();
 });
 dom.window.close();
 

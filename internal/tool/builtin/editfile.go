@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"reasonix/internal/tool"
 )
@@ -12,11 +11,15 @@ import (
 func init() { tool.RegisterBuiltin(editFile{}) }
 
 // editFile replaces an exact string in a file. roots confines the target to the
-// workspace when non-empty (see writeFile); workDir, when non-empty, is the
-// directory a relative path resolves against (see resolveIn).
+// workspace when non-empty (see writeFile); guard rejects Reasonix session-data
+// targets (see SessionDataGuard); workDir, when non-empty, is the directory a
+// relative path resolves against (see resolveIn).
 type editFile struct {
 	roots   []string
+	guard   SessionDataGuard
+	managed ManagedConfigPaths
 	workDir string
+	overlay FileOverlay
 }
 
 func (editFile) Name() string { return "edit_file" }
@@ -47,28 +50,31 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		return "", fmt.Errorf("old_string is required")
 	}
 	p.Path = resolveIn(e.workDir, p.Path)
-	if err := confine(e.roots, p.Path); err != nil {
+	if err := confineWrite(ctx, e.roots, e.guard, e.managed, p.Path); err != nil {
 		return "", err
 	}
 
-	content, enc, err := readFileEncoded(p.Path)
+	src, err := readEditSource(ctx, e.overlay, p.Path)
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", p.Path, err)
 	}
 
-	old, newStr := matchLineEndings(content, p.OldString, p.NewString)
-	switch strings.Count(content, old) {
-	case 0:
-		return "", fmt.Errorf("old_string not found in %s", p.Path)
-	case 1:
+	applied := applyOldStringEdit(src.content, p.OldString, p.NewString, false)
+	switch {
+	case applied.applied == 1:
 		// ok
+	case applied.matches == 0:
+		return "", oldStringNotFoundError(p.Path, p.OldString, src.content)
 	default:
-		return "", fmt.Errorf("old_string is not unique in %s; add more surrounding context", p.Path)
+		return "", oldStringNotUniqueError(p.Path, p.OldString, src.content, applied.matches, false)
 	}
 
-	updated := strings.Replace(content, old, newStr, 1)
-	if err := writeFileEncoded(p.Path, updated, enc); err != nil {
+	if err := src.write(ctx, e.overlay, p.Path, applied.updated); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}
-	return fmt.Sprintf("edited %s", p.Path), nil
+	summary := fmt.Sprintf("edited %s", p.Path)
+	if applied.fuzzy {
+		summary += " (fuzzy match)"
+	}
+	return withActualPostWriteReceipts(summary, []editReplacementReceipt{applied.receipt}), nil
 }

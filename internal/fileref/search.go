@@ -17,9 +17,33 @@ var skipEntryNames = map[string]bool{
 	"Thumbs.db":    true,
 }
 
+// skipDirNames are build outputs across ecosystems: their contents are
+// generated, so an "@" hit inside one points at a file nobody edits (#3900).
 var skipDirNames = map[string]bool{
-	"build": true,
-	"dist":  true,
+	"build":         true,
+	"dist":          true,
+	"target":        true,
+	"__pycache__":   true,
+	"venv":          true,
+	".venv":         true,
+	".gradle":       true,
+	".next":         true,
+	".nuxt":         true,
+	".svelte-kit":   true,
+	".pytest_cache": true,
+	".mypy_cache":   true,
+	".tox":          true,
+	".terraform":    true,
+	".dart_tool":    true,
+}
+
+// SkipEntry reports whether a workspace entry is hidden from file pickers. rel
+// is the entry's slash-separated path from the workspace root.
+func SkipEntry(rel, name string, isDir bool) bool {
+	if skipEntryNames[name] {
+		return true
+	}
+	return isDir && (skipDirNames[name] || skipDirPaths[rel])
 }
 
 var skipDirPaths = map[string]bool{
@@ -83,7 +107,7 @@ func Search(root, query string, limit int) []SearchResult {
 				return filepath.SkipDir
 			}
 			rel = filepath.ToSlash(rel)
-			if skipEntryNames[name] || skipDirNames[name] || skipDirPaths[rel] || (!showHidden && strings.HasPrefix(name, ".")) {
+			if SkipEntry(rel, name, true) || (!showHidden && strings.HasPrefix(name, ".")) {
 				return filepath.SkipDir
 			}
 			// Allow matching directory names so the user can select a
@@ -125,10 +149,7 @@ func Search(root, query string, limit int) []SearchResult {
 	// out by a large number of file matches.
 	const dirQuota = 5
 	out := make([]SearchResult, 0, limit)
-	nDirs := len(dirHits)
-	if nDirs > dirQuota {
-		nDirs = dirQuota
-	}
+	nDirs := min(len(dirHits), dirQuota)
 	out = append(out, dirHits[:nDirs]...)
 	remaining := limit - len(out)
 	if remaining > 0 {
@@ -153,7 +174,7 @@ func Search(root, query string, limit int) []SearchResult {
 // directories above the file (e.g. "src/planind/index.tsx" with query
 // "planind" matches the "planind" segment).
 func pathSegmentContains(relSlash, queryLower string) bool {
-	for _, seg := range strings.Split(relSlash, "/") {
+	for seg := range strings.SplitSeq(relSlash, "/") {
 		if strings.Contains(strings.ToLower(seg), queryLower) {
 			return true
 		}

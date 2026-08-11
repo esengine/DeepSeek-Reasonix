@@ -3,6 +3,8 @@ package encoding
 import (
 	"bytes"
 	"encoding/binary"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"unicode/utf16"
@@ -10,7 +12,7 @@ import (
 	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
-// --- Detect ---
+// Detect
 
 func TestDetectUTF8Plain(t *testing.T) {
 	enc, _ := Detect([]byte("hello world\n"))
@@ -69,13 +71,27 @@ func TestDetectEmpty(t *testing.T) {
 	}
 }
 
-// --- Decode ---
+// Decode
 
 func TestDecodeUTF8(t *testing.T) {
 	in := []byte("hello\n世界")
 	out := Decode(in, UTF8)
 	if string(out) != "hello\n世界" {
 		t.Errorf("got %q", out)
+	}
+}
+
+func TestReadFileUTF8DecodesGB18030(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(path, Encode(`{"label":"中文"}`, GB18030), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadFileUTF8(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != `{"label":"中文"}` {
+		t.Fatalf("ReadFileUTF8 = %q", got)
 	}
 }
 
@@ -130,7 +146,7 @@ func TestDecodeLossyUTF8(t *testing.T) {
 	}
 }
 
-// --- Encode ---
+// Encode
 
 func TestEncodeUTF8(t *testing.T) {
 	out := Encode("hello", UTF8)
@@ -179,7 +195,7 @@ func TestEncodeGB18030(t *testing.T) {
 	}
 }
 
-// --- Round-trip ---
+// Round-trip
 
 func TestRoundTripGB18030(t *testing.T) {
 	original := "你好世界\n第二行\n"
@@ -219,7 +235,7 @@ func TestRoundTripUTF8BOM(t *testing.T) {
 	}
 }
 
-// --- BOM-less UTF-16 ---
+// BOM-less UTF-16
 
 func utf16NoBOM(t *testing.T, s string, order binary.ByteOrder) []byte {
 	t.Helper()
@@ -290,7 +306,7 @@ func TestRoundTripUTF16LENoBOM(t *testing.T) {
 	}
 }
 
-// --- UTF-16 supplementary plane (surrogate pairs) ---
+// UTF-16 supplementary plane (surrogate pairs)
 
 func TestSurrogatePairRoundTrip(t *testing.T) {
 	// U+1F600 (😀) is in the supplementary plane and requires a surrogate pair.

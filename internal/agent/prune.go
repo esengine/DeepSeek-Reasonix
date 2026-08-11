@@ -5,78 +5,132 @@ import (
 	"strings"
 
 	"reasonix/internal/provider"
+	"reasonix/internal/tool"
 )
 
-// Pruning is the free half of context maintenance: stale tool results are
-// re-derivable (files can be re-read, commands re-run), so eliding them needs
-// no summarizer call and never drops a message — tool_call/result pairing and
-// assistant content (including signed reasoning) are untouched by construction.
+// Tool-result helpers serve first-visible bounding and summary fold input.
+// Automatic prune/snip projections are gone; the public APIs are no-ops.
 const (
+	snippedMarker = "[snipped tool result — "
 	prunedMarker  = "[elided tool result — "
 	minPruneBytes = 1024
 )
 
-// PruneStats reports one prune pass.
+type toolResultMaintenanceMode int
+
+const (
+	toolResultSnip toolResultMaintenanceMode = iota
+	toolResultPrune
+)
+
+// PruneStats reports one maintenance pass.
 type PruneStats struct {
 	Results    int
 	SavedChars int
 	Archive    string
+	Mode       toolResultMaintenanceMode
+	InputHash  string
+	Force      bool
 }
 
-// PruneStaleToolResults elides tool-result content older than the protected
-// recent tail, archiving the originals first. Idempotent; a no-op when
-// compaction is disabled (no context window).
+// SnipStaleToolResults is a no-op: automatic prune/snip projections are gone.
+func (a *Agent) SnipStaleToolResults() (PruneStats, error) {
+	return PruneStats{Mode: toolResultSnip}, nil
+}
+
+// PruneStaleToolResults is a no-op: automatic prune/snip projections are gone.
 func (a *Agent) PruneStaleToolResults() (PruneStats, error) {
-	var st PruneStats
-	if a.contextWindow <= 0 {
-		return st, nil
+	return PruneStats{Mode: toolResultPrune}, nil
+}
+
+func snipToolResult(m provider.Message, archive string, strategy snipStrategy) string {
+	if archive == "" {
+		archive = "the canonical transcript"
 	}
-	msgs := a.session.Messages
-	head, start, ok := a.planCompaction(msgs, 1)
-	if !ok {
-		return st, nil
+	lines := strings.Split(m.Content, "\n")
+	if len(lines) <= strategy.head+strategy.tail {
+		headChars := minInt(strategy.headChars, len(m.Content)/2)
+		tailChars := minInt(strategy.tailChars, len(m.Content)/4)
+		return fmt.Sprintf("%s%s, %d bytes; full original retained in %s; single large line truncated]\n%s\n[... %d bytes omitted ...]\n%s",
+			snippedMarker, m.Name, len(m.Content), archive,
+			firstRunes(m.Content, headChars),
+			omittedBytes(m.Content, headChars, tailChars),
+			lastRunes(m.Content, tailChars))
 	}
-	var idx []int
-	for i := head; i < start; i++ {
-		m := msgs[i]
-		if m.Role != provider.RoleTool || len(m.Content) < minPruneBytes || strings.HasPrefix(m.Content, prunedMarker) {
-			continue
+	head := strings.Join(lines[:strategy.head], "\n")
+	tail := strings.Join(lines[len(lines)-strategy.tail:], "\n")
+	return fmt.Sprintf("%s%s, %d bytes; full original retained in %s; showing first %d lines and last %d lines]\n%s\n[... %d lines omitted ...]\n%s",
+		snippedMarker, m.Name, len(m.Content), archive, strategy.head, strategy.tail,
+		head, len(lines)-strategy.head-strategy.tail, tail)
+}
+
+type snipStrategy struct {
+	head      int
+	tail      int
+	headChars int
+	tailChars int
+}
+
+var (
+	defaultReadOnlySnip      = snipStrategy{head: 80, tail: 12, headChars: 10000, tailChars: 2000}
+	defaultSideEffectingSnip = snipStrategy{head: 40, tail: 40, headChars: 8000, tailChars: 8000}
+)
+
+func (a *Agent) snipStrategyFor(name string) snipStrategy {
+	if a.tools != nil {
+		if t, ok := a.tools.Get(name); ok {
+			if h, ok := t.(tool.SnipHinter); ok {
+				return snipStrategyFromHint(h.SnipHint())
+			}
+			if t.ReadOnly() {
+				return defaultReadOnlySnip
+			}
+			return defaultSideEffectingSnip
 		}
-		// Honor the keep policy before pruning: an error:/blocked: tool result
-		// that KeepErrors would preserve must reach compact() verbatim.
-		// Eliding it here rewrites Content to the [elided ...] marker, so the
-		// KeepErrors predicate sees only the placeholder and the failure is
-		// lost on the next fold. Long build/test failures sit beyond the recent
-		// tail, exactly this range.
-		if a.keepPolicy&KeepErrors != 0 && isErrorMessage(m) {
-			continue
-		}
-		idx = append(idx, i)
 	}
-	if len(idx) == 0 {
-		return st, nil
+	return defaultReadOnlySnip
+}
+
+func snipStrategyFromHint(h tool.SnipHint) snipStrategy {
+	return snipStrategy{head: h.Head, tail: h.Tail, headChars: h.HeadChars, tailChars: h.TailChars}
+}
+
+func firstRunes(s string, n int) string {
+	if len(s) <= n {
+		return s
 	}
-	if a.archiveDir != "" {
-		originals := make([]provider.Message, 0, len(idx))
-		for _, i := range idx {
-			originals = append(originals, msgs[i])
-		}
-		path, err := archiveMessages(a.archiveDir, originals)
-		if err != nil {
-			return st, fmt.Errorf("archive: %w", err)
-		}
-		st.Archive = path
+	for n > 0 && !isRuneBoundary(s, n) {
+		n--
 	}
-	next := append([]provider.Message(nil), msgs...)
-	for _, i := range idx {
-		m := next[i]
-		placeholder := fmt.Sprintf("%s%s, %d bytes dropped to save context; re-run the tool if the data is needed again]", prunedMarker, m.Name, len(m.Content))
-		st.SavedChars += len(m.Content) - len(placeholder)
-		m.Content = placeholder
-		next[i] = m
-		st.Results++
+	return s[:n]
+}
+
+func lastRunes(s string, n int) string {
+	if len(s) <= n {
+		return s
 	}
-	a.session.Replace(next)
-	a.session.IncrementRewrite()
-	return st, nil
+	start := len(s) - n
+	for start < len(s) && !isRuneBoundary(s, start) {
+		start++
+	}
+	return s[start:]
+}
+
+func omittedBytes(s string, head, tail int) int {
+	omitted := len(s) - head - tail
+	if omitted < 0 {
+		return 0
+	}
+	return omitted
+}
+
+func isRuneBoundary(s string, i int) bool {
+	return i == 0 || i == len(s) || (i > 0 && i < len(s) && (s[i]&0xc0) != 0x80)
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

@@ -3,9 +3,17 @@ import logo from "../assets/logo.svg";
 import { useT } from "../lib/i18n";
 import { app, openExternal } from "../lib/bridge";
 
-// Full-window first-run gate: validate a pasted key via Go, then onComplete
-// unmounts us so the rebuilt controller's main UI takes over.
-export function OnboardingOverlay({ onComplete }: { onComplete: () => void }) {
+// Full-window first-run guide: DeepSeek stays the fastest path, while users can
+// open the provider settings or defer setup without being trapped in the gate.
+export function OnboardingOverlay({
+  onComplete,
+  onChooseProvider,
+  onSkip,
+}: {
+  onComplete: () => void;
+  onChooseProvider: () => void;
+  onSkip: () => void;
+}) {
   const t = useT();
   const [value, setValue] = useState("");
   const [state, setState] = useState<"idle" | "validating" | "error">("idle");
@@ -41,10 +49,10 @@ export function OnboardingOverlay({ onComplete }: { onComplete: () => void }) {
   }, [t, value, onComplete]);
 
   return (
-    <div className="onboarding">
+    <div className="onboarding" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
       <div className="onboarding__card">
         <img src={logo} className="onboarding__logo" alt="Reasonix" draggable={false} />
-        <div className="onboarding__title">{t("onboarding.title")}</div>
+        <div id="onboarding-title" className="onboarding__title">{t("onboarding.title")}</div>
         <div className="onboarding__tag">{t("onboarding.tagline")}</div>
 
         <label className="onboarding__label" htmlFor="onboarding-key">
@@ -57,6 +65,7 @@ export function OnboardingOverlay({ onComplete }: { onComplete: () => void }) {
           type="password"
           autoComplete="off"
           spellCheck={false}
+          autoFocus
           placeholder={t("onboarding.inputPlaceholder")}
           value={value}
           onChange={(e) => {
@@ -93,6 +102,15 @@ export function OnboardingOverlay({ onComplete }: { onComplete: () => void }) {
           )}
         </button>
 
+        <button
+          type="button"
+          className="onboarding__provider"
+          onClick={onChooseProvider}
+          disabled={state === "validating"}
+        >
+          {t("onboarding.chooseProvider")}
+        </button>
+
         <div className="onboarding__links">
           <button
             type="button"
@@ -108,7 +126,7 @@ export function OnboardingOverlay({ onComplete }: { onComplete: () => void }) {
         <button
           type="button"
           className="onboarding__skip"
-          onClick={onComplete}
+          onClick={onSkip}
           disabled={state === "validating"}
         >
           {t("onboarding.skip")}

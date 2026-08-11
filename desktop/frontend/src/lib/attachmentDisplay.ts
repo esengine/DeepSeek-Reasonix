@@ -1,6 +1,7 @@
+import { escapeRefPath, refTokenRe, unescapeRefPath } from "./refToken";
+
 const attachmentRefRe = /@(\.reasonix\/attachments\/[^\s]+)/g;
 const namedAttachmentRefRe = /(^|\s)@\[([^\]\r\n]+)\]\(([^)\s]+)\)/g;
-const referenceRefRe = /(^|\s)@([^\s]+)/g;
 const trailingPunctuationRe = /[.,;!?)\]}，。；！？）】]+$/;
 
 export interface DisplayAttachment {
@@ -86,11 +87,14 @@ export function formatAttachmentRefForDisplay(attachment: Pick<DisplayAttachment
   if (attachment.source === "attachment") {
     return `@[${displayRefName(attachment.name || baseName(attachment.path) || "attachment")}](${attachment.path})`;
   }
-  return `@${attachment.path}`;
+  return `@${escapeRefPath(attachment.path)}`;
 }
 
+// Whitespace in the path is escaped so the ref survives @-token parsing on
+// submit; attachment-store paths are generated without spaces, so this is a
+// no-op for them.
 export function formatAttachmentRefForSubmit(attachment: Pick<DisplayAttachment, "path">): string {
-  return `@${attachment.path}`;
+  return `@${escapeRefPath(attachment.path)}`;
 }
 
 export function parseAttachmentRefsForDisplay(text: string): { text: string; attachments: DisplayAttachment[] } {
@@ -103,11 +107,12 @@ export function parseAttachmentRefsForDisplay(text: string): { text: string; att
       attachments.push(displayAttachment(core, name));
       return lead + suffix;
     })
-    .replace(referenceRefRe, (_full, lead: string, token: string) => {
+    .replace(refTokenRe(), (_full, lead: string, token: string) => {
       const { core, suffix } = splitTrailingPunctuation(token);
-      if (!core || !isDisplayReference(core)) return _full;
-      const name = baseName(core) || "attachment";
-      const attachment = displayAttachment(core, name);
+      const path = unescapeRefPath(core);
+      if (!path || !isDisplayReference(path)) return _full;
+      const name = baseName(path) || "attachment";
+      const attachment = displayAttachment(path, name);
       attachments.push(attachment);
       return lead + suffix;
     })

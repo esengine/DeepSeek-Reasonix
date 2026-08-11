@@ -3,18 +3,26 @@ package control
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
+	"reasonix/internal/fileref"
+	"reasonix/internal/instruction"
 	"reasonix/internal/proc"
+	"reasonix/internal/secrets"
 )
 
 // maxFileRefBytes caps how much of an @-referenced file is injected into a
@@ -44,24 +52,61 @@ const (
 
 // ref is a resolved @reference found in a submitted line.
 type ref struct {
-	kind   refKind
-	server string // refResource
-	uri    string // refResource
-	path   string // refFile
-	raw    string // the original token after '@', for labelling
+	kind        refKind
+	server      string // refResource
+	uri         string // refResource
+	path        string // refFile, relative to baseDir when baseDir is set
+	baseDir     string // refFile override for session-authorized external roots
+	displayPath string // refFile label/path exposed in the resolved context block
+	raw         string // the original token after '@', for labelling
 }
 
-// refTokenRe matches an @reference token: '@' then a run of non-space chars.
-var refTokenRe = regexp.MustCompile(`@([^\s]+)`)
+// ExternalFolderRefEntry is a session-authorized entry under a dropped external
+// folder. Path is the opaque @ token path to submit; display fields are safe for
+// UI labels and transcripts.
+type ExternalFolderRefEntry struct {
+	Name        string
+	Path        string
+	DisplayName string
+	DisplayPath string
+	IsDir       bool
+}
+
 var pathLocationSuffixRe = regexp.MustCompile(`:\d+(?::\d+)?:?$`)
 
+const externalFolderRefPrefix = "__reasonix_external_folder"
+
 // parseRefTokens extracts the deduped, punctuation-trimmed tokens following '@'
-// in a line. Pure: classification (server? file?) happens in classifyRef.
+// in a line. A token is a run of non-whitespace bytes, except that a
+// backslash-escaped space or tab is part of the token with the backslash
+// dropped — that is how a path containing spaces survives the
+// whitespace-delimited grammar (EscapeRefPath produces that form). Any other
+// backslash stays literal so Windows separators keep their meaning. Pure:
+// classification (server? file?) happens in classifyRef.
 func parseRefTokens(line string) []string {
 	var toks []string
 	seen := map[string]bool{}
-	for _, g := range refTokenRe.FindAllStringSubmatch(line, -1) {
-		t := strings.TrimRight(g[1], ".,;!?)]}")
+	for i := 0; i < len(line); i++ {
+		if line[i] != '@' {
+			continue
+		}
+		var b strings.Builder
+		j := i + 1
+		for j < len(line) {
+			ch := line[j]
+			if ch == '\\' && j+1 < len(line) && (line[j+1] == ' ' || line[j+1] == '\t') {
+				b.WriteByte(line[j+1])
+				j += 2
+				continue
+			}
+			if isRefTokenBoundary(ch) {
+				break
+			}
+			b.WriteByte(ch)
+			j++
+		}
+		i = j - 1
+		t := strings.TrimRight(b.String(), ".,;!?)]}")
 		if t == "" || seen[t] {
 			continue
 		}
@@ -69,6 +114,53 @@ func parseRefTokens(line string) []string {
 		toks = append(toks, t)
 	}
 	return toks
+}
+
+// isRefTokenBoundary matches the whitespace class the old `@([^\s]+)` token
+// regexp stopped at.
+func isRefTokenBoundary(ch byte) bool {
+	switch ch {
+	case ' ', '\t', '\n', '\r', '\f':
+		return true
+	default:
+		return false
+	}
+}
+
+// EscapeRefPath returns path with spaces and tabs backslash-escaped so the
+// result survives whitespace-delimited @-token parsing (parseRefTokens
+// reverses it). Every other byte, including backslashes, passes through
+// unchanged so Windows separators keep their meaning.
+func EscapeRefPath(path string) string {
+	if !strings.ContainsAny(path, " \t") {
+		return path
+	}
+	var b strings.Builder
+	b.Grow(len(path) + 8)
+	for i := range len(path) {
+		if path[i] == ' ' || path[i] == '\t' {
+			b.WriteByte('\\')
+		}
+		b.WriteByte(path[i])
+	}
+	return b.String()
+}
+
+// UnescapeRefPath reverses EscapeRefPath: a backslash before a space or tab is
+// dropped; any other backslash stays literal.
+func UnescapeRefPath(path string) string {
+	if !strings.Contains(path, `\`) {
+		return path
+	}
+	var b strings.Builder
+	b.Grow(len(path))
+	for i := range len(path) {
+		if path[i] == '\\' && i+1 < len(path) && (path[i+1] == ' ' || path[i+1] == '\t') {
+			continue
+		}
+		b.WriteByte(path[i])
+	}
+	return b.String()
 }
 
 // classifyRef decides what a token refers to. A "server:uri" token whose server
@@ -103,6 +195,309 @@ func isImageAttachmentRef(token string) bool {
 	return false
 }
 
+// RegisterExternalFolderRef authorizes one dropped directory outside the
+// workspace as a structured @reference for this controller session. The returned
+// token is path-like and whitespace-free so it survives the existing @ token
+// parser even when the real directory path contains spaces or Windows drive
+// punctuation.
+func (c *Controller) RegisterExternalFolderRef(path string) (token, displayPath string, err error) {
+	if c == nil {
+		return "", "", fmt.Errorf("controller is not ready")
+	}
+	abs, err := normalizeExternalFolderRoot(path)
+	if err != nil {
+		return "", "", err
+	}
+	token = externalFolderRefToken(abs)
+	c.externalFolderRefsMu.Lock()
+	if c.externalFolderRefs == nil {
+		c.externalFolderRefs = map[string]string{}
+	}
+	c.externalFolderRefs[token] = abs
+	c.externalFolderRefsMu.Unlock()
+	if c.externalFolderToolRefs != nil {
+		c.externalFolderToolRefs.RegisterReadRoot(token, abs)
+	}
+	return token, filepath.ToSlash(abs), nil
+}
+
+func normalizeExternalFolderRoot(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", os.ErrInvalid
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	abs = filepath.Clean(abs)
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = filepath.Clean(resolved)
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("%s is not a directory", path)
+	}
+	return abs, nil
+}
+
+func externalFolderRefToken(abs string) string {
+	sum := sha256.Sum256([]byte(filepath.Clean(abs)))
+	hash := hex.EncodeToString(sum[:])[:12]
+	name := safeExternalFolderRefComponent(filepath.Base(abs))
+	return externalFolderRefPrefix + "/" + hash + "/" + name
+}
+
+func safeExternalFolderRefComponent(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" || name == "." || name == string(filepath.Separator) {
+		return "folder"
+	}
+	var b strings.Builder
+	lastDash := false
+	for _, r := range name {
+		ok := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-'
+		if ok {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	out := strings.Trim(b.String(), ".-")
+	if out == "" {
+		return "folder"
+	}
+	return out
+}
+
+func normalizeExternalFolderRefToken(token string) string {
+	token = strings.TrimSpace(token)
+	token = strings.TrimPrefix(token, "@")
+	token = filepath.ToSlash(token)
+	token = strings.TrimRight(token, "/")
+	return token
+}
+
+func (c *Controller) externalFolderRef(token string) (ref, bool) {
+	_, rel, abs, ok := c.externalFolderRefTarget(token)
+	if !ok {
+		return ref{}, false
+	}
+	displayPath := externalFolderDisplayPath(abs, rel)
+	return ref{kind: refFile, path: rel, baseDir: abs, displayPath: displayPath, raw: token}, true
+}
+
+func (c *Controller) externalFolderRefTarget(token string) (rootToken, rel, abs string, ok bool) {
+	key := normalizeExternalFolderRefToken(token)
+	if !strings.HasPrefix(key, externalFolderRefPrefix+"/") {
+		return "", "", "", false
+	}
+	c.externalFolderRefsMu.RLock()
+	defer c.externalFolderRefsMu.RUnlock()
+	if abs, ok := c.externalFolderRefs[key]; ok {
+		return key, ".", abs, true
+	}
+	for registered, abs := range c.externalFolderRefs {
+		if !strings.HasPrefix(key, registered+"/") {
+			continue
+		}
+		sub, ok := cleanExternalFolderSubpath(strings.TrimPrefix(key, registered+"/"))
+		if !ok {
+			return "", "", "", false
+		}
+		return registered, sub, abs, true
+	}
+	return "", "", "", false
+}
+
+func cleanExternalFolderSubpath(sub string) (string, bool) {
+	sub = strings.TrimPrefix(filepath.ToSlash(strings.TrimSpace(sub)), "/")
+	if sub == "" || sub == "." {
+		return ".", true
+	}
+	cleaned := filepath.Clean(filepath.FromSlash(sub))
+	if cleaned == "." {
+		return ".", true
+	}
+	if !filepath.IsLocal(cleaned) {
+		return "", false
+	}
+	return filepath.ToSlash(cleaned), true
+}
+
+func externalFolderDisplayPath(abs, rel string) string {
+	if rel == "" || rel == "." {
+		return filepath.ToSlash(abs)
+	}
+	return filepath.ToSlash(filepath.Join(abs, filepath.FromSlash(rel)))
+}
+
+func externalFolderDisplayName(abs, rel string) string {
+	name := filepath.Base(abs)
+	if rel != "" && rel != "." {
+		name = filepath.ToSlash(filepath.Join(name, filepath.FromSlash(rel)))
+	}
+	return name
+}
+
+// ListExternalFolderRefDir lists one directory level under a registered
+// external folder token. handled is true only when tokenPath targets a
+// registered external folder; callers can fall back to workspace listing when it
+// is false.
+func (c *Controller) ListExternalFolderRefDir(tokenPath string) (entries []ExternalFolderRefEntry, handled bool) {
+	rootToken, rel, abs, ok := c.externalFolderRefTarget(tokenPath)
+	if !ok {
+		return nil, false
+	}
+	root, err := os.OpenRoot(abs)
+	if err != nil {
+		return nil, true
+	}
+	defer root.Close()
+	info, err := root.Stat(rel)
+	if err != nil || !info.IsDir() {
+		return nil, true
+	}
+	f, err := root.Open(rel)
+	if err != nil {
+		return nil, true
+	}
+	dirEntries, err := f.ReadDir(-1)
+	f.Close()
+	if err != nil {
+		return nil, true
+	}
+	dirs, files := []ExternalFolderRefEntry{}, []ExternalFolderRefEntry{}
+	for _, e := range dirEntries {
+		name := e.Name()
+		if skipRefDirEntry(name, e.IsDir()) {
+			continue
+		}
+		childRel := name
+		if rel != "." {
+			childRel = filepath.ToSlash(filepath.Join(rel, name))
+		}
+		item := ExternalFolderRefEntry{
+			Name:        name,
+			Path:        rootToken + "/" + childRel,
+			DisplayName: name,
+			DisplayPath: externalFolderDisplayPath(abs, childRel),
+			IsDir:       e.IsDir(),
+		}
+		if e.IsDir() {
+			dirs = append(dirs, item)
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		files = append(files, item)
+	}
+	sortExternalFolderRefEntries(dirs)
+	sortExternalFolderRefEntries(files)
+	return append(dirs, files...), true
+}
+
+// SearchExternalFolderRefs finds entries under all registered external folders.
+// Returned Path values are opaque token paths, so selecting one stays within the
+// current session's authorization boundary.
+func (c *Controller) SearchExternalFolderRefs(query string, limit int) []ExternalFolderRefEntry {
+	query = strings.TrimSpace(query)
+	if limit <= 0 || len(query) < 2 || strings.ContainsAny(query, `/\`) {
+		return nil
+	}
+	c.externalFolderRefsMu.RLock()
+	roots := make([]struct {
+		token string
+		abs   string
+	}, 0, len(c.externalFolderRefs))
+	for token, abs := range c.externalFolderRefs {
+		roots = append(roots, struct {
+			token string
+			abs   string
+		}{token: token, abs: abs})
+	}
+	c.externalFolderRefsMu.RUnlock()
+	sort.Slice(roots, func(i, j int) bool {
+		return externalFolderDisplayPath(roots[i].abs, ".") < externalFolderDisplayPath(roots[j].abs, ".")
+	})
+	out := make([]ExternalFolderRefEntry, 0, limit)
+	queryLower := strings.ToLower(query)
+	for _, root := range roots {
+		if len(out) >= limit {
+			break
+		}
+		if info, err := os.Stat(root.abs); err != nil || !info.IsDir() {
+			continue
+		}
+		if strings.Contains(strings.ToLower(filepath.Base(root.abs)), queryLower) {
+			out = append(out, ExternalFolderRefEntry{
+				Name:        filepath.Base(root.abs),
+				Path:        root.token,
+				DisplayName: externalFolderDisplayName(root.abs, "."),
+				DisplayPath: externalFolderDisplayPath(root.abs, "."),
+				IsDir:       true,
+			})
+			if len(out) >= limit {
+				break
+			}
+		}
+		for _, result := range fileref.Search(root.abs, query, limit-len(out)) {
+			rel := filepath.ToSlash(result.Path)
+			out = append(out, ExternalFolderRefEntry{
+				Name:        rel,
+				Path:        root.token + "/" + rel,
+				DisplayName: externalFolderDisplayName(root.abs, rel),
+				DisplayPath: externalFolderDisplayPath(root.abs, rel),
+				IsDir:       result.IsDir,
+			})
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out
+}
+
+// ExternalFolderRefLocalPath resolves a registered external-folder token path to
+// the local filesystem path authorized for this controller session.
+func (c *Controller) ExternalFolderRefLocalPath(tokenPath string) (path, displayPath string, ok bool) {
+	_, rel, abs, ok := c.externalFolderRefTarget(tokenPath)
+	if !ok {
+		return "", "", false
+	}
+	return filepath.Join(abs, filepath.FromSlash(rel)), externalFolderDisplayPath(abs, rel), true
+}
+
+func sortExternalFolderRefEntries(entries []ExternalFolderRefEntry) {
+	sort.Slice(entries, func(i, j int) bool {
+		return strings.ToLower(entries[i].DisplayName) < strings.ToLower(entries[j].DisplayName)
+	})
+}
+
+func skipRefDirEntry(name string, isDir bool) bool {
+	switch name {
+	case ".DS_Store", "Thumbs.db":
+		return true
+	}
+	if !isDir {
+		return false
+	}
+	switch name {
+	case ".codex", ".git", ".idea", ".npm", ".pnpm-store", ".vscode", "__pycache__", "build", "dist", "node_modules":
+		return true
+	}
+	return false
+}
+
 // detectRefs finds the @references in a line: MCP resources for connected
 // servers, and local paths that exist on disk.
 func (c *Controller) detectRefs(line string) []ref {
@@ -119,6 +514,10 @@ func (c *Controller) detectRefsMode(line string, scopedOnly bool) []ref {
 	for _, tok := range parseRefTokens(line) {
 		if i := strings.Index(tok, ":"); i > 0 && i+1 < len(tok) && known[tok[:i]] {
 			refs = append(refs, ref{kind: refResource, server: tok[:i], uri: tok[i+1:], raw: tok})
+			continue
+		}
+		if r, ok := c.externalFolderRef(tok); ok {
+			refs = append(refs, r)
 			continue
 		}
 		if c.workspaceRoot != "" {
@@ -154,9 +553,23 @@ func (c *Controller) HasRefs(line string) bool {
 // turn can carry them to a vision-capable model. Best-effort: an unreadable image
 // is skipped — the @ref still lands as text via ResolveRefs.
 func (c *Controller) inputImages(line string) []string {
+	if !c.imageInputEnabled() {
+		return nil
+	}
+	return c.resolveInputImageCandidates(line)
+}
+
+// resolveInputImageCandidates resolves authorized image references without
+// consulting the active model capability. The parent controller uses this only
+// to hand candidates to a child; the child decides whether to embed them.
+func (c *Controller) resolveInputImageCandidates(line string) []string {
 	var urls []string
 	for _, r := range c.detectRefs(line) {
-		if url, err := visionRefImageDataURL(r, c.workspaceRoot); err == nil {
+		baseDir := c.workspaceRoot
+		if r.baseDir != "" {
+			baseDir = r.baseDir
+		}
+		if url, err := visionRefImageDataURL(r, baseDir); err == nil {
 			urls = append(urls, url)
 		}
 	}
@@ -308,7 +721,14 @@ func FileRefLine(line string) (string, bool) {
 	if info, err := os.Stat(p); err != nil || info.IsDir() {
 		return "", false
 	}
-	return "@" + p, true
+	return "@" + EscapeRefPath(p), true
+}
+
+// SlashCodeCommentLine reports whether a slash-prefixed line is ordinary source
+// text rather than a Reasonix slash command.
+func SlashCodeCommentLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "/*")
 }
 
 // SlashPathLineRef reports whether a slash-prefixed line starts with a local file
@@ -433,6 +853,14 @@ func (c *Controller) resolveRefs(ctx context.Context, line string, scopedOnly bo
 	refs := c.detectRefsMode(line, scopedOnly)
 	refs = resolveBareNames(refs, c.workspaceRoot)
 	var b strings.Builder
+	includedInstructionPaths := map[string]bool{}
+	includedInstructionBodies := map[string]bool{}
+	if current := c.memory.current(); current != nil {
+		for _, doc := range current.Docs {
+			includedInstructionPaths[cleanAbsPath(doc.Path)] = true
+			includedInstructionBodies[doc.Body] = true
+		}
+	}
 	for _, r := range refs {
 		switch r.kind {
 		case refResource:
@@ -443,21 +871,82 @@ func (c *Controller) resolveRefs(ctx context.Context, line string, scopedOnly bo
 			}
 			appendRefBlock(&b, "resource", `ref="@`+r.raw+`"`, text)
 		case refFile:
-			text, isDir, err := readFileRef(r.path, c.workspaceRoot)
+			baseDir := c.workspaceRoot
+			if r.baseDir != "" {
+				baseDir = r.baseDir
+			}
+			text, isDir, err := readFileRef(r.path, baseDir)
 			if err != nil {
 				errs = append(errs, "@"+r.raw+" — "+err.Error())
 				continue
+			}
+			pathInstructions, diagnostics := c.resolveReferencedInstructions(r, baseDir, includedInstructionPaths, includedInstructionBodies)
+			if pathInstructions != "" {
+				appendRefBlock(&b, "path-instructions", `target="`+html.EscapeString(displayPathForRef(r))+`"`, pathInstructions)
+			}
+			for _, diagnostic := range diagnostics {
+				errs = append(errs, "@"+r.raw+" — "+diagnostic.Message)
 			}
 			tag := "file"
 			if isDir {
 				tag = "dir"
 			}
-			appendRefBlock(&b, tag, `path="`+r.path+`"`, text)
+			displayPath := r.path
+			if r.displayPath != "" {
+				displayPath = r.displayPath
+			}
+			appendRefBlock(&b, tag, `path="`+displayPath+`"`, text)
 		case refImage:
-			appendRefBlock(&b, "image", `path="`+r.path+`"`, "[image attachment available at @"+r.path+" and attached to this turn as model image input when the selected model supports vision; no local extraction tool is needed for direct visual understanding]")
+			appendRefBlock(&b, "image", `path="`+r.path+`"`, "[image attachment available at @"+r.path+"; sent as direct model image input only when the selected model supports vision. Text-only models can still use an available OCR/image/vision tool with this local path; image bytes are not inlined into prompt text.]")
 		}
 	}
 	return b.String(), errs
+}
+
+func (c *Controller) resolveReferencedInstructions(r ref, baseDir string, includedPaths, includedBodies map[string]bool) (string, []instruction.Diagnostic) {
+	mem := c.memory.current()
+	if mem == nil || strings.TrimSpace(c.workspaceRoot) == "" || r.baseDir != "" {
+		return "", nil
+	}
+	absPath, absBase, ok := resolveAbsRef(r.path, baseDir)
+	if !ok || cleanAbsPath(absBase) != cleanAbsPath(c.workspaceRoot) {
+		return "", nil
+	}
+	targetDir := absPath
+	if info, err := os.Stat(absPath); err != nil || !info.IsDir() {
+		targetDir = filepath.Dir(absPath)
+	}
+	resolved := instruction.Resolve(instruction.ResolveOptions{
+		WorkspaceRoot: c.workspaceRoot,
+		TargetDir:     targetDir,
+		UserDir:       mem.UserDir,
+	})
+	var delta []instruction.Document
+	for _, doc := range resolved.Documents {
+		pathKey := cleanAbsPath(doc.Path)
+		if includedPaths[pathKey] || includedBodies[doc.Body] {
+			continue
+		}
+		includedPaths[pathKey] = true
+		includedBodies[doc.Body] = true
+		delta = append(delta, doc)
+	}
+	return instruction.Block(delta), resolved.Diagnostics
+}
+
+func displayPathForRef(r ref) string {
+	if r.displayPath != "" {
+		return r.displayPath
+	}
+	return r.path
+}
+
+func cleanAbsPath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	return filepath.Clean(abs)
 }
 
 func appendRefBlock(b *strings.Builder, tag, attr, body string) {
@@ -470,6 +959,12 @@ func appendRefBlock(b *strings.Builder, tag, attr, body string) {
 // maxDirEntries caps how many directory entries are injected so @some-huge-dir
 // can't blow the context window.
 const maxDirEntries = 100
+
+const maxDirDepth = 16
+
+func directoryRefNote() string {
+	return fmt.Sprintf("[directory listing only; file contents are not inlined. Mention a listed file path to read its content. Common generated/vendor folders are skipped. Listing is capped at %d entries and %d nested levels.]", maxDirEntries, maxDirDepth)
+}
 
 // readFileRef reads an @-referenced path for injection. A directory yields a
 // recursive listing capped at maxDirEntries; a binary file (NUL in the first
@@ -505,8 +1000,10 @@ func readFileRef(path, baseDir string) (content string, isDir bool, err error) {
 	}
 	if info.IsDir() {
 		var b strings.Builder
+		b.WriteString(directoryRefNote())
+		b.WriteString("\n\n")
 		n := 0
-		err := walkRootDir(root, rel, &b, &n, 0)
+		err := walkRootDir(root, rel, rel, &b, &n, 0)
 		if n >= maxDirEntries {
 			b.WriteString("\n…[truncated; directory has more entries]…")
 		}
@@ -528,7 +1025,7 @@ func readFileRef(path, baseDir string) (content string, isDir bool, err error) {
 
 	buf := make([]byte, maxFileRefBytes+1)
 	n, rerr := io.ReadFull(f, buf)
-	if rerr != nil && rerr != io.ErrUnexpectedEOF && rerr != io.EOF {
+	if rerr != nil && !errors.Is(rerr, io.ErrUnexpectedEOF) && !errors.Is(rerr, io.EOF) {
 		return "", false, rerr
 	}
 	data := buf[:n]
@@ -554,6 +1051,8 @@ func readFileRefUnscoped(path string) (content string, isDir bool, err error) {
 	}
 	if info.IsDir() {
 		var b strings.Builder
+		b.WriteString(directoryRefNote())
+		b.WriteString("\n\n")
 		n := 0
 		err := filepath.WalkDir(path, func(p string, d os.DirEntry, wErr error) error {
 			if wErr != nil {
@@ -565,11 +1064,11 @@ func readFileRefUnscoped(path string) (content string, isDir bool, err error) {
 			if p == path {
 				return nil
 			}
-			if d.IsDir() {
-				switch d.Name() {
-				case ".git", "node_modules", ".DS_Store", "__pycache__", ".idea", ".vscode":
+			if skipRefDirEntry(d.Name(), d.IsDir()) {
+				if d.IsDir() {
 					return filepath.SkipDir
 				}
+				return nil
 			}
 			rel, rErr := filepath.Rel(path, p)
 			if rErr != nil {
@@ -605,7 +1104,7 @@ func readFileRefUnscoped(path string) (content string, isDir bool, err error) {
 
 	buf := make([]byte, maxFileRefBytes+1)
 	n, rerr := io.ReadFull(f, buf)
-	if rerr != nil && rerr != io.ErrUnexpectedEOF && rerr != io.EOF {
+	if rerr != nil && !errors.Is(rerr, io.ErrUnexpectedEOF) && !errors.Is(rerr, io.EOF) {
 		return "", false, rerr
 	}
 	data := buf[:n]
@@ -624,16 +1123,16 @@ func readFileRefUnscoped(path string) (content string, isDir bool, err error) {
 
 func imageFileRefNote(displayPath, mime string, size int64, attached bool) string {
 	if attached {
-		return fmt.Sprintf("[image file %s, mime=%s, %d bytes — attached to this turn as model image input when the selected model supports vision; no local extraction tool is needed for direct visual understanding.]", displayPath, mime, size)
+		return fmt.Sprintf("[image file %s, mime=%s, %d bytes — sent as direct model image input only when the selected model supports vision. Text-only models can still use an available OCR/image/vision tool with this local path; image bytes are not inlined into prompt text.]", displayPath, mime, size)
 	}
-	return fmt.Sprintf("[image file %s, mime=%s, %d bytes — not attached as model image input because no workspace root is available. Use a workspace-scoped file reference or image attachment to send it to a vision-capable model.]", displayPath, mime, size)
+	return fmt.Sprintf("[image file %s, mime=%s, %d bytes — not sent as direct model image input because no workspace root is available. Use a workspace-scoped file reference, image attachment, or an available OCR/image/vision tool with a readable local path.]", displayPath, mime, size)
 }
 
 // walkRootDir walks a directory under a sandboxed *os.Root and writes each
-// entry (skipping noisy ones like .git and node_modules) into b until n hits
-// maxDirEntries.
-func walkRootDir(root *os.Root, dir string, b *strings.Builder, n *int, depth int) error {
-	if depth > 16 || *n >= maxDirEntries {
+// entry relative to base (skipping noisy ones like .git and node_modules) into b
+// until n hits maxDirEntries.
+func walkRootDir(root *os.Root, dir, base string, b *strings.Builder, n *int, depth int) error {
+	if depth > maxDirDepth || *n >= maxDirEntries {
 		return nil
 	}
 	f, err := root.Open(dir)
@@ -645,25 +1144,33 @@ func walkRootDir(root *os.Root, dir string, b *strings.Builder, n *int, depth in
 	if err != nil {
 		return err
 	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].IsDir() != entries[j].IsDir() {
+			return entries[i].IsDir()
+		}
+		return strings.ToLower(entries[i].Name()) < strings.ToLower(entries[j].Name())
+	})
 	for _, e := range entries {
 		if *n >= maxDirEntries {
 			return nil
 		}
 		name := e.Name()
+		child := filepath.ToSlash(filepath.Join(dir, name))
 		entry := name
+		if rel, err := filepath.Rel(base, child); err == nil && filepath.IsLocal(rel) {
+			entry = filepath.ToSlash(rel)
+		}
+		if skipRefDirEntry(name, e.IsDir()) {
+			continue
+		}
 		if e.IsDir() {
-			switch name {
-			case ".git", "node_modules", ".DS_Store", "__pycache__", ".idea", ".vscode":
-				continue
-			}
 			entry += "/"
 		}
 		b.WriteString(entry)
 		b.WriteByte('\n')
 		*n++
 		if e.IsDir() {
-			child := filepath.ToSlash(filepath.Join(dir, name))
-			if err := walkRootDir(root, child, b, n, depth+1); err != nil {
+			if err := walkRootDir(root, child, base, b, n, depth+1); err != nil {
 				return err
 			}
 		}
@@ -731,14 +1238,14 @@ func extractPDFTextDefault(path string) (pdfExtractResult, error) {
 	python, err := findPython()
 	if err != nil {
 		if firstErr != nil {
-			return pdfExtractResult{}, fmt.Errorf("pdftotext failed (%v), and Python PDF libraries are not available", firstErr)
+			return pdfExtractResult{}, fmt.Errorf("pdftotext failed (%w), and Python PDF libraries are not available", firstErr)
 		}
 		return pdfExtractResult{}, fmt.Errorf("pdftotext and Python PDF libraries are not available")
 	}
 	text, truncated, err := runPDFTextCommand(python, []string{"-c", pythonPDFExtractScript, path})
 	if err != nil {
 		if firstErr != nil {
-			return pdfExtractResult{}, fmt.Errorf("pdftotext failed (%v), Python PDF extraction failed (%w)", firstErr, err)
+			return pdfExtractResult{}, fmt.Errorf("pdftotext failed (%w), Python PDF extraction failed (%w)", firstErr, err)
 		}
 		return pdfExtractResult{}, err
 	}
@@ -758,6 +1265,7 @@ func runPDFTextCommand(name string, args []string) (string, bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), pdfExtractTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = secrets.ProcessEnv()
 	setShellKillTree(cmd)
 	cmd.WaitDelay = pdfExtractWaitDelay
 	proc.HideWindow(cmd)

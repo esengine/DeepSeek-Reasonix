@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { publishPackages } from "./publish.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -23,7 +24,15 @@ if (!tag) {
 }
 // npm ships on its own `npm-v*` tag (release-npm.yml); also accept a bare `v*`.
 const version = tag.replace(/^(npm-)?v/, "");
+const binaryVersion = `v${version}`;
 const publish = process.argv.includes("--publish");
+const candidateSha = execFileSync("git", ["rev-parse", "HEAD"], {
+  cwd: ROOT,
+  encoding: "utf8",
+}).trim();
+const gitCommit = candidateSha.slice(0, 12);
+// Real UTC build clock for version --verbose/--json (not VCS commit time).
+const buildTimeUTC = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 
 rmSync(STAGE, { recursive: true, force: true });
 mkdirSync(STAGE, { recursive: true });
@@ -42,7 +51,7 @@ for (const t of TARGETS) {
       "build",
       "-trimpath",
       "-ldflags",
-      `-s -w -X main.version=${tag}`,
+      `-s -w -X main.version=${binaryVersion} -X main.gitCommit=${gitCommit} -X main.buildTimeUTC=${buildTimeUTC} -X reasonix/internal/productdocs.linkedVersion=${binaryVersion} -X reasonix/internal/productdocs.linkedRevision=${candidateSha}`,
       "-o",
       join(dir, "bin", exe),
       "./cmd/reasonix",
@@ -69,6 +78,7 @@ for (const t of TARGETS) {
           type: "git",
           url: "git+https://github.com/esengine/DeepSeek-Reasonix.git",
         },
+        reasonixCandidateSha: candidateSha,
       },
       null,
       2,
@@ -86,6 +96,7 @@ const mainPkg = JSON.parse(
   readFileSync(join(HERE, "reasonix", "package.json"), "utf8"),
 );
 mainPkg.version = version;
+mainPkg.reasonixCandidateSha = candidateSha;
 for (const key of Object.keys(mainPkg.optionalDependencies)) {
   mainPkg.optionalDependencies[key] = version;
 }
@@ -99,21 +110,11 @@ if (!publish) {
   process.exit(0);
 }
 
-// Three independent dist-tags: 0.x stable is the promoted default (`latest`); a
-// `-canary.` build is the opt-in tester channel (`canary`); everything else — the
-// 1.x line and rc prereleases — ships under `next`. Only a `--tag canary` publish
-// moves canary, so `next`/`latest` users never resolve a canary. Promote a 1.x
-// stable to default with a manual `npm dist-tag add reasonix@<ver> latest`.
-const distTag = version.includes("-canary.")
-  ? "canary"
-  : version.startsWith("0.") && !version.includes("-")
-    ? "latest"
-    : "next";
-const publishArgs = ["publish", "--access", "public", "--tag", distTag];
-
-for (const sub of subPackages) {
-  console.log(`publish ${sub.name}@${version} (${distTag})`);
-  execFileSync("npm", publishArgs, { cwd: sub.dir, stdio: "inherit" });
-}
-console.log(`publish reasonix@${version} (${distTag})`);
-execFileSync("npm", publishArgs, { cwd: mainDir, stdio: "inherit" });
+// Publish every immutable package before advancing the public channel. Recovery
+// reuses packages that already prove the same candidate SHA, fills only missing
+// packages, and never moves latest/next/canary back to an older version.
+publishPackages({
+  packages: [...subPackages, { name: "reasonix", dir: mainDir }],
+  version,
+  candidateSha,
+});

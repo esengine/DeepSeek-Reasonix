@@ -1,0 +1,4 @@
+prompt = "balance.py reports wrong balances: withdrawals increase the total, and amounts containing thousands separators (1,200.50) crash parsing. deposit 1,200.50 / withdraw 200.50 / deposit 100 must net to 1100."
+class = "ebm-positive"
+max_steps = 18
+timeout_sec = 300

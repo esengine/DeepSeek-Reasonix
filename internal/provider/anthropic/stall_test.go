@@ -63,3 +63,24 @@ func TestStreamStallTimesOut(t *testing.T) {
 		}
 	}
 }
+
+func TestReadStreamSendUnblocksOnContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader("data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n"))}
+	out := make(chan provider.Chunk)
+	done := make(chan struct{})
+
+	go func() {
+		(&client{name: "anthropic"}).readStream(ctx, resp, out)
+		close(done)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("readStream remained blocked sending to an abandoned reader after context cancellation")
+	}
+}

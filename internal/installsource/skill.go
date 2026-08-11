@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"reasonix/internal/config"
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/frontmatter"
 	"reasonix/internal/skill"
 )
@@ -170,7 +171,7 @@ func (t *installSourceTool) skillConflictTargets(name, scope string) ([]string, 
 // readSkillFile reads and validates a single skill file. The fallback name
 // is used when the frontmatter does not declare one.
 func readSkillFile(path, fallbackName string, strict bool) (skillCandidate, error) {
-	b, err := os.ReadFile(path)
+	b, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return skillCandidate{}, err
 	}
@@ -189,15 +190,28 @@ func readSkillFile(path, fallbackName string, strict bool) (skillCandidate, erro
 func parseSkillContent(content, fallbackName, source string, strict bool) (skillCandidate, error) {
 	bom := "\uFEFF"
 	content = strings.TrimPrefix(strings.ReplaceAll(content, "\r\n", "\n"), bom)
-	fm, body := frontmatter.Split(content)
+	var meta struct {
+		Name        string `yaml:"name"`
+		Description string `yaml:"description"`
+	}
+	body, err := frontmatter.Decode(content, &meta, frontmatter.DecodeOptions{})
+	if err != nil {
+		return skillCandidate{}, newErr(ErrInvalidManifest, "skill frontmatter at %s is invalid YAML: %v", source, err)
+	}
+	fm, _ := frontmatter.Split(content)
 	name := strings.TrimSpace(fallbackName)
-	if v := strings.TrimSpace(fm["name"]); v != "" {
+	if v := strings.TrimSpace(meta.Name); v != "" {
+		name = v
+	} else if v := strings.TrimSpace(fm["name"]); v != "" {
 		name = v
 	}
 	if !config.IsValidSkillName(name) {
 		return skillCandidate{}, newErr(ErrInvalidManifest, "skill %q at %s has an invalid name", name, source)
 	}
-	desc := collapseSpaces(fm["description"])
+	desc := collapseSpaces(meta.Description)
+	if desc == "" {
+		desc = collapseSpaces(fm["description"])
+	}
 	if strict {
 		if desc == "" {
 			return skillCandidate{}, newErr(ErrInvalidManifest, "skill %q at %s is missing description frontmatter", name, source)
@@ -296,10 +310,19 @@ func mustRel(base, path string) string {
 
 // copyDir walks src and writes a parallel tree under dst. O_EXCL refuses to
 // overwrite a leaf; a leftover partial tree is left on disk for the user to
-// inspect (we never rm -rf). Symlinks inside src are followed once and
-// copied as the resolved file, which is what skill directories expect.
+// inspect (we never rm -rf). A symlink is materialized as its resolved
+// content only when it points at a regular file INSIDE src — discovery
+// (skills and commands) follows links, so dropping an in-tree alias would
+// install less than the plan counted. Everything else a link can be —
+// escaping the tree, broken, or a directory — is skipped, never followed:
+// the plugin-package apply path verifies capability counts after the copy,
+// so a skipped link fails the install closed instead of silently shrinking it.
 func copyDir(src, dst string) error {
 	var copied int64
+	srcRoot := src
+	if resolved, err := filepath.EvalSymlinks(src); err == nil {
+		srcRoot = resolved
+	}
 	return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -315,10 +338,26 @@ func copyDir(src, dst string) error {
 			}
 			return os.MkdirAll(target, 0o755)
 		}
+		source := path
 		if !d.Type().IsRegular() {
-			return nil
+			if d.Type()&os.ModeSymlink == 0 {
+				return nil
+			}
+			resolved, err := filepath.EvalSymlinks(path)
+			if err != nil {
+				return nil // broken link
+			}
+			relToRoot, err := filepath.Rel(srcRoot, resolved)
+			if err != nil || relToRoot == ".." || strings.HasPrefix(relToRoot, ".."+string(filepath.Separator)) {
+				return nil // escapes the tree — never follow
+			}
+			info, err := os.Stat(resolved)
+			if err != nil || !info.Mode().IsRegular() {
+				return nil // directory or otherwise unmaterializable link
+			}
+			source = resolved
 		}
-		info, err := d.Info()
+		info, err := os.Stat(source)
 		if err != nil {
 			return err
 		}
@@ -326,7 +365,7 @@ func copyDir(src, dst string) error {
 		if copied > maxSkillCopyBytes {
 			return newErr(ErrInvalidManifest, "skill directory exceeds %d bytes", maxSkillCopyBytes)
 		}
-		in, err := os.Open(path)
+		in, err := os.Open(source)
 		if err != nil {
 			return err
 		}
@@ -334,7 +373,14 @@ func copyDir(src, dst string) error {
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
-		out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		mode := os.FileMode(0o644)
+		if info.Mode().Perm()&0o111 != 0 {
+			// Plugin hook binaries and scripts must remain executable after copy.
+			// Normalize to ordinary executable permissions instead of carrying
+			// special source mode bits such as setuid/setgid into the install.
+			mode = 0o755
+		}
+		out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
 		if err != nil {
 			return err
 		}

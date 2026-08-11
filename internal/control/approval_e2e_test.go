@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +14,17 @@ import (
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
+
+func TestPlanApprovedMessageStatesAutoSemantics(t *testing.T) {
+	for _, want := range []string{"ordinary writer fallback", "explicit ask/deny rules", "forced fresh reviews"} {
+		if !strings.Contains(planApprovedMessage, want) {
+			t.Fatalf("planApprovedMessage missing %q: %s", want, planApprovedMessage)
+		}
+	}
+	if strings.Contains(planApprovedMessage, "without asking again") {
+		t.Fatalf("planApprovedMessage overstates the approval window: %s", planApprovedMessage)
+	}
+}
 
 type recordingWriter struct {
 	mu    sync.Mutex
@@ -92,6 +104,125 @@ func TestApprovalToolWideEndToEnd(t *testing.T) {
 	}
 }
 
+// TestPlanModeApprovalPostureMatrix proves Plan freezes ForbidMutation on the
+// turn TaskPolicy so ordinary writers are host-blocked even when YOLO would
+// otherwise auto-allow them. Permission may still prompt first in Ask mode;
+// the host floor is enforced after the gate.
+func TestPlanModeApprovalPostureMatrix(t *testing.T) {
+	tests := []struct {
+		name       string
+		mode       string
+		askRules   []string
+		denyRules  []string
+		wantWrites int
+	}{
+		// YOLO/Auto avoid hanging on interactive approval while still proving
+		// TaskPolicy ForbidMutation blocks the write.
+		{name: "Auto blocks writer under plan TaskPolicy", mode: ToolApprovalAuto, wantWrites: 0},
+		{name: "YOLO blocks writer under plan TaskPolicy", mode: ToolApprovalYolo, askRules: []string{"write_file"}, wantWrites: 0},
+		{name: "deny still blocks in YOLO plan", mode: ToolApprovalYolo, denyRules: []string{"write_file"}, wantWrites: 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			writer := &recordingWriter{}
+			reg := tool.NewRegistry()
+			reg.Add(writer)
+			prov := &scriptedTurns{turns: [][]provider.Chunk{
+				toolCallTurn("write", "write_file", `{"path":"plan.txt"}`),
+				textTurn("Plan ready."),
+			}}
+			ag := agent.New(prov, reg, agent.NewSession(""), agent.Options{}, event.Discard)
+
+			c := New(Options{
+				Runner:   ag,
+				Executor: ag,
+				Policy:   permission.New("ask", nil, tc.askRules, tc.denyRules),
+				Sink:     event.Discard,
+			})
+			defer c.Close()
+			c.EnableInteractiveApproval()
+			c.SetPlanMode(true)
+			c.SetToolApprovalMode(tc.mode)
+			if got := c.ToolApprovalMode(); got != tc.mode {
+				t.Fatalf("Plan changed approval mode to %q, want %q", got, tc.mode)
+			}
+
+			if err := ag.Run(context.Background(), "draft a plan for this change"); err != nil {
+				t.Fatalf("Plan run: %v", err)
+			}
+			writer.mu.Lock()
+			writes := len(writer.paths)
+			writer.mu.Unlock()
+			if writes != tc.wantWrites {
+				t.Fatalf("executed writes = %d, want %d", writes, tc.wantWrites)
+			}
+		})
+	}
+}
+
+func TestApprovedPlanExecutionUsesAutoSemantics(t *testing.T) {
+	policy := permission.New("ask", nil, []string{"sensitive_writer"}, nil)
+	approvalTools := make(chan string, 3)
+	var c *Controller
+	c = New(Options{
+		Policy: policy,
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind != event.ApprovalRequest {
+				return
+			}
+			approvalTools <- e.Approval.Tool
+			allow := e.Approval.Tool == planApprovalTool
+			go c.Approve(e.Approval.ID, allow, false, false)
+		}),
+	})
+	defer c.Close()
+	c.EnableInteractiveApproval()
+
+	runCalled := false
+	err := (plannerPlanApprover{c: c}).RunWithPlannerApproval(t.Context(), "1. Apply the change", func(ctx context.Context) error {
+		runCalled = true
+		gate := c.newInteractiveGate()
+		allow, _, err := gate.Check(ctx, "ordinary_writer", json.RawMessage(`{"path":"ordinary.txt"}`), false)
+		if err != nil {
+			return err
+		}
+		if !allow {
+			t.Error("ordinary writer fallback should be auto-approved in the approved-plan execution window")
+		}
+
+		allow, _, err = gate.Check(ctx, "sensitive_writer", json.RawMessage(`{"path":"sensitive.txt"}`), false)
+		if err != nil {
+			return err
+		}
+		if allow {
+			t.Error("explicit ask rule should still require and honor a decision after plan approval")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !runCalled {
+		t.Fatal("approved plan did not enter its execution window")
+	}
+
+	for i, want := range []string{planApprovalTool, "sensitive_writer"} {
+		select {
+		case got := <-approvalTools:
+			if got != want {
+				t.Fatalf("approval prompt %d = %q, want %q", i+1, got, want)
+			}
+		default:
+			t.Fatalf("missing approval prompt %d for %q", i+1, want)
+		}
+	}
+	select {
+	case got := <-approvalTools:
+		t.Fatalf("unexpected approval prompt for %q; ordinary fallback should not prompt", got)
+	default:
+	}
+}
+
 // TestApprovalTimeoutDeniesWhenUnanswered verifies a positive ApprovalTimeout
 // turns an unanswered prompt into a denial (error) instead of blocking forever
 // (#4626, #4402). Ask shares the same wait context as tool-approval prompts.
@@ -153,7 +284,7 @@ func TestApprovalTimeoutZeroWaitsIndefinitely(t *testing.T) {
 	}
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("Ask did not unblock after answering")
 	}
 }

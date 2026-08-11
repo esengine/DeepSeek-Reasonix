@@ -122,7 +122,7 @@ api_key_env = "PROJECT_API_KEY"
 	if !got.Supported || got.Current != "auto" || got.Default != "high" {
 		t.Fatalf("EffortForTab model registry = %+v, want supported auto/high", got)
 	}
-	wantLevels := []string{"auto", "high", "max"}
+	wantLevels := []string{"auto", "disabled", "low", "high", "max"}
 	if len(got.Levels) != len(wantLevels) {
 		t.Fatalf("levels = %v, want %v", got.Levels, wantLevels)
 	}
@@ -200,7 +200,7 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	}
 }
 
-func TestSaveTabsPersistsTokenModeOnlyWhenEconomy(t *testing.T) {
+func TestSaveTabsPersistsNonBalancedTokenModes(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	app := NewApp()
@@ -222,6 +222,16 @@ func TestSaveTabsPersistsTokenModeOnlyWhenEconomy(t *testing.T) {
 		t.Fatalf("saved token mode = %q, want economy", got.Tabs[0].TokenMode)
 	}
 
+	tab.tokenMode = "delivery"
+	app.mu.Lock()
+	app.saveTabsLocked()
+	app.mu.Unlock()
+
+	got = loadTabsFile()
+	if got.Tabs[0].TokenMode != "delivery" {
+		t.Fatalf("saved token mode = %q, want delivery", got.Tabs[0].TokenMode)
+	}
+
 	tab.tokenMode = "full"
 	app.mu.Lock()
 	app.saveTabsLocked()
@@ -229,7 +239,7 @@ func TestSaveTabsPersistsTokenModeOnlyWhenEconomy(t *testing.T) {
 
 	got = loadTabsFile()
 	if got.Tabs[0].TokenMode != "" {
-		t.Fatalf("full token mode should be omitted from persistence, got %q", got.Tabs[0].TokenMode)
+		t.Fatalf("balanced/full token mode should be omitted from persistence, got %q", got.Tabs[0].TokenMode)
 	}
 }
 
@@ -394,6 +404,54 @@ func TestToolApprovalModesPreserveCollaborationMode(t *testing.T) {
 	}
 }
 
+func TestSetComposerProfileForTabAppliesAllAxes(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	if drained, err := app.SetComposerProfileForTab("missing", "normal", control.ToolApprovalAsk, ""); err == nil || drained == nil {
+		t.Fatal("missing tab returned a nil drained-id slice")
+	}
+	tab := testTab("a", t.TempDir())
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+	defer tab.Ctrl.Close()
+
+	if _, err := app.SetComposerProfileForTab(tab.ID, "plan", control.ToolApprovalYolo, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := currentTabCollaborationMode(tab); got != "plan" {
+		t.Fatalf("collaboration mode = %q, want plan", got)
+	}
+	if !tab.Ctrl.PlanMode() {
+		t.Fatal("controller plan mode is off")
+	}
+	if got := tab.Ctrl.ToolApprovalMode(); got != control.ToolApprovalYolo {
+		t.Fatalf("tool approval mode = %q, want yolo", got)
+	}
+
+	if _, err := app.SetComposerProfileForTab(tab.ID, "goal", control.ToolApprovalAuto, "finish the profile migration"); err != nil {
+		t.Fatal(err)
+	}
+	if got := currentTabCollaborationMode(tab); got != "goal" {
+		t.Fatalf("collaboration mode = %q, want goal", got)
+	}
+	if tab.Ctrl.PlanMode() {
+		t.Fatal("goal profile kept controller plan mode on")
+	}
+	if got := tab.Ctrl.ToolApprovalMode(); got != control.ToolApprovalAuto {
+		t.Fatalf("tool approval mode = %q, want auto", got)
+	}
+	if got := tab.Ctrl.Goal(); got != "finish the profile migration" {
+		t.Fatalf("controller goal = %q", got)
+	}
+
+	got := loadTabsFile()
+	if len(got.Tabs) != 1 || got.Tabs[0].Goal != "finish the profile migration" || got.Tabs[0].ToolApprovalMode != control.ToolApprovalAuto {
+		t.Fatalf("persisted profile = %+v", got.Tabs)
+	}
+}
+
 func TestMetaReportsGoalStatus(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
@@ -429,6 +487,32 @@ func TestMetaReportsGoalStatus(t *testing.T) {
 	meta = app.MetaForTab(tab.ID)
 	if meta.CollaborationMode != "plan" || meta.TokenMode != boot.TokenModeEconomy {
 		t.Fatalf("profile meta = %+v, want plan + economy", meta)
+	}
+}
+
+func TestMetaReportsStoredCollaborationModeWhileControllerRebuilds(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	tab := testTab("a", t.TempDir())
+	tab.Ctrl.Close()
+	tab.Ctrl = nil
+	tab.mode = "plan-yolo"
+	tab.toolApprovalMode = control.ToolApprovalYolo
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	meta := app.MetaForTab(tab.ID)
+	if meta.CollaborationMode != "plan" || meta.ToolApprovalMode != control.ToolApprovalYolo {
+		t.Fatalf("rebuilding plan-yolo meta = %+v, want plan/yolo", meta)
+	}
+
+	tab.mode = "normal"
+	tab.goal = "finish the goal runner"
+	meta = app.MetaForTab(tab.ID)
+	if meta.CollaborationMode != "goal" || meta.Goal != "finish the goal runner" || meta.GoalStatus != control.GoalStatusRunning {
+		t.Fatalf("rebuilding goal meta = %+v, want running goal", meta)
 	}
 }
 

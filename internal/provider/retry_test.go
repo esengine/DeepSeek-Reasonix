@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -85,8 +86,24 @@ func TestBackoffDelay(t *testing.T) {
 	if d := backoffDelay(5, 3*time.Second); d != 3*time.Second {
 		t.Errorf("Retry-After should win: %v", d)
 	}
-	if d := backoffDelay(1, time.Hour); d != maxBackoff {
-		t.Errorf("Retry-After should be capped to %v, got %v", maxBackoff, d)
+	if d := backoffDelay(1, 45*time.Second); d != 45*time.Second {
+		t.Errorf("Retry-After beyond the backoff cap should still be honored: %v", d)
+	}
+	if d := backoffDelay(1, time.Hour); d != maxRetryAfter {
+		t.Errorf("Retry-After should be capped to %v, got %v", maxRetryAfter, d)
+	}
+}
+
+func TestParseRetryAfterAcceptsHTTPDate(t *testing.T) {
+	resp := &http.Response{Header: http.Header{}}
+	resp.Header.Set("Retry-After", time.Now().Add(30*time.Second).UTC().Format(http.TimeFormat))
+	if d := parseRetryAfter(resp); d < 25*time.Second || d > 31*time.Second {
+		t.Errorf("http-date Retry-After = %v, want ~30s", d)
+	}
+
+	resp.Header.Set("Retry-After", time.Now().Add(-time.Minute).UTC().Format(http.TimeFormat))
+	if d := parseRetryAfter(resp); d != 0 {
+		t.Errorf("elapsed http-date Retry-After = %v, want 0", d)
 	}
 }
 
@@ -108,6 +125,20 @@ func TestSendWithRetryFailsFastOnClientErrors(t *testing.T) {
 	}
 }
 
+func TestSendWithRetryPreservesProviderTraceID(t *testing.T) {
+	cl := &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
+		return statusResp(422, map[string]string{"trace_id": "minimax-trace-123"}), nil
+	})}
+	_, err := SendWithRetry(context.Background(), cl, SendOptions{Provider: "minimax-cn-api"}, newDummyReq)
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("want *APIError, got %T: %v", err, err)
+	}
+	if apiErr.TraceID != "minimax-trace-123" {
+		t.Fatalf("TraceID = %q, want minimax-trace-123", apiErr.TraceID)
+	}
+}
+
 func TestSendWithRetryAuthError(t *testing.T) {
 	calls := 0
 	cl := &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
@@ -121,6 +152,9 @@ func TestSendWithRetryAuthError(t *testing.T) {
 	var authErr *AuthError
 	if !errors.As(err, &authErr) || authErr.KeyEnv != "DEEPSEEK_API_KEY" {
 		t.Errorf("want *AuthError naming the key env, got %v", err)
+	}
+	if authErr != nil && authErr.Body != "body" {
+		t.Errorf("AuthError should carry the response body, got %q", authErr.Body)
 	}
 }
 
@@ -138,7 +172,7 @@ func TestSendWithRetryRetriesTransientAuthForKnownKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a previously-good key should recover from a transient 401: %v", err)
 	}
-	if resp.StatusCode != 200 || calls != 3 {
+	if resp.StatusCode != http.StatusOK || calls != 3 {
 		t.Fatalf("status=%d calls=%d, want 200 after 3 calls", resp.StatusCode, calls)
 	}
 }
@@ -160,6 +194,68 @@ func TestSendWithRetryAuthGivesUpAfterMaxAuthRetries(t *testing.T) {
 	}
 }
 
+// stallingBody sends headers' worth of promise and then never delivers: Read
+// blocks until Close, mimicking a half-open 502/524 gateway that stalls after
+// the status line. Close is what the errorBodyReadTimeout timer fires.
+type stallingBody struct {
+	closeOnce sync.Once
+	closed    chan struct{}
+}
+
+func newStallingBody() *stallingBody { return &stallingBody{closed: make(chan struct{})} }
+
+func (b *stallingBody) Read(p []byte) (int, error) {
+	<-b.closed
+	return 0, errors.New("body closed")
+}
+
+func (b *stallingBody) Close() error {
+	b.closeOnce.Do(func() { close(b.closed) })
+	return nil
+}
+
+// TestSendWithRetryUnblocksStalledErrorBody locks in the #6607 freeze fix: a
+// retryable status whose body never arrives must not wedge the retry loop —
+// the deadline closes the body, the attempt is retried, and the eventual OK
+// response is returned. Without the timer in readErrorBody this test hangs on
+// the first 502 body and fails via the watchdog below.
+func TestSendWithRetryUnblocksStalledErrorBody(t *testing.T) {
+	prev := errorBodyReadTimeout
+	errorBodyReadTimeout = 50 * time.Millisecond
+	defer func() { errorBodyReadTimeout = prev }()
+
+	calls := 0
+	cl := &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if calls == 1 {
+			return &http.Response{StatusCode: http.StatusBadGateway, Body: newStallingBody(), Header: http.Header{}}, nil
+		}
+		return statusResp(200, nil), nil
+	})}
+
+	type result struct {
+		resp *http.Response
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		resp, err := SendWithRetry(context.Background(), cl, SendOptions{Provider: "p", KeyEnv: "KEY"}, newDummyReq)
+		done <- result{resp, err}
+	}()
+
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("should recover after the stalled 502: %v", r.err)
+		}
+		if r.resp.StatusCode != http.StatusOK || calls != 2 {
+			t.Fatalf("status=%d calls=%d, want 200 after 2 calls", r.resp.StatusCode, calls)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("SendWithRetry wedged on a stalled error body — read deadline did not fire")
+	}
+}
+
 func TestSendWithRetryRecoversAndNotifies(t *testing.T) {
 	calls := 0
 	cl := &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
@@ -170,16 +266,44 @@ func TestSendWithRetryRecoversAndNotifies(t *testing.T) {
 		return statusResp(200, nil), nil
 	})}
 	var infos []RetryInfo
-	ctx := WithRetryNotify(context.Background(), func(i RetryInfo) { infos = append(infos, i) })
+	ctx := WithRequestAttemptCounter(context.Background())
+	ctx = WithRetryNotify(ctx, func(i RetryInfo) { infos = append(infos, i) })
 
 	resp, err := SendWithRetry(ctx, cl, SendOptions{Provider: "p", KeyEnv: "KEY"}, newDummyReq)
 	if err != nil {
 		t.Fatalf("should recover after one retry: %v", err)
 	}
-	if resp.StatusCode != 200 || calls != 2 {
+	if resp.StatusCode != http.StatusOK || calls != 2 {
 		t.Fatalf("status=%d calls=%d, want 200 after 2 calls", resp.StatusCode, calls)
 	}
 	if len(infos) != 1 || infos[0].Attempt != 1 || infos[0].Max != MaxRetries {
 		t.Fatalf("retry notify = %#v, want one Attempt 1/%d", infos, MaxRetries)
+	}
+	if got := RequestAttemptCount(ctx); got != 2 {
+		t.Fatalf("request attempt count = %d, want 2", got)
+	}
+}
+
+func TestRequestAttemptCountSurvivesRetriesThenTerminalFailure(t *testing.T) {
+	calls := 0
+	cl := &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if calls < 3 {
+			return statusResp(http.StatusServiceUnavailable, nil), nil
+		}
+		return statusResp(http.StatusBadRequest, nil), nil
+	})}
+	ctx := WithRequestAttemptCounter(context.Background())
+	providerCtx := WithRequestAttemptCounter(ctx)
+
+	if _, err := SendWithRetry(providerCtx, cl, SendOptions{Provider: "p"}, newDummyReq); err == nil {
+		t.Fatal("expected terminal provider error")
+	}
+	if got := RequestAttemptCount(ctx); got != 3 {
+		t.Fatalf("request attempt count = %d, want 3", got)
+	}
+	usage := UsageWithRequestAttemptCount(ctx, nil)
+	if usage == nil || usage.TotalTokens != 0 || usage.RequestCount != 3 {
+		t.Fatalf("failed request usage = %+v, want tokens=0 requests=3", usage)
 	}
 }

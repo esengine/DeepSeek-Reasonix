@@ -1,0 +1,36 @@
+---
+import Account from '../layouts/Account.astro';
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+---
+<Account
+  title="Sign in — Reasonix"
+  titleEn="Sign in — Reasonix"
+  titleZh="登录 — Reasonix"
+  description="Sign in to your Reasonix account.">
+  <div class="auth-head">
+    <h1><span class="l-en">Welcome back</span><span class="l-zh">欢迎回来</span></h1>
+    <p><span class="l-en">Sign in to your Reasonix account.</span><span class="l-zh">登录你的 Reasonix 账号。</span></p>
+  </div>
+
+  <div id="login-msg" class="auth-msg" hidden></div>
+
+  <form id="login-form" class="auth-form" novalidate>
+    <div class="field">
+      <label for="email"><span class="l-en">Email</span><span class="l-zh">邮箱</span></label>
+      <input id="email" name="email" type="email" autocomplete="email" required />
+    </div>
+    <div class="field">
+      <div class="auth-row">
+        <label for="password"><span class="l-en">Password</span><span class="l-zh">密码</span></label>
+        <a class="auth-small" href={`${base}/forgot/`}><span class="l-en">Forgot?</span><span class="l-zh">忘记密码？</span></a>
+      </div>
+      <input id="password" name="password" type="password" autocomplete="current-password" required />
+    </div>
+    <button type="submit" class="btn btn-dark"><span class="l-en">Sign in</span><span class="l-zh">登录</span></button>
+  </form>
+
+  <p class="auth-alt">
+    <span class="l-en">New to Reasonix? <a href={`${base}/register/`}>Create an account</a></span>
+    <span class="l-zh">还没有账号？<a href={`${base}/register/`}>注册一个</a></span>
+  </p>
+</Account>

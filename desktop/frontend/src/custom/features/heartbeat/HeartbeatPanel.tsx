@@ -3,7 +3,7 @@
 // Renders a list of tasks with add/edit/delete controls, plus a manual
 // "run now" button for each. The panel is opened from the sidebar nav item.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Activity,
   ChevronLeft,
@@ -144,7 +144,13 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
   const statusFilterRef = useRef<HTMLButtonElement>(null);
   const [workspaceMap, setWorkspaceMap] = useState<Record<string, string>>({});
   const backdropRef = useRef<HTMLDivElement>(null);
+  const dirtyRef = useRef(false);
   const startedRef = useRef(false);
+
+  // Reset dirty ref when leaving edit mode
+  useEffect(() => {
+    if (!editing) dirtyRef.current = false;
+  }, [editing]);
 
   const loadTasks = useCallback(async () => {
     setLoading(true);
@@ -189,9 +195,11 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
           interval: "30m",
           enabled: true,
           approvalMode: "yolo",
+          newConversationEachRun: false,
+          notifyChannels: false,
           createdAt: Date.now(),
         });
-      });
+      }).catch(() => {});
     }
   }, [open, startNew]);
 
@@ -201,23 +209,31 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
       try {
         await heartbeatSaveTasks(next);
       } catch {
-        // ignore
+        // A concurrent external edit wins; reload the authoritative config so
+        // the panel cannot continue editing a stale task list.
+        await loadTasks();
       }
     },
-    [],
+    [loadTasks],
   );
 
   const handleAdd = useCallback(async () => {
-    const id = await heartbeatGenerateID();
-    setEditing({
-      id,
-      title: "",
-      prompt: "",
-      interval: "30m",
-      enabled: true,
-      approvalMode: "yolo",
-      createdAt: Date.now(),
-    });
+    try {
+      const id = await heartbeatGenerateID();
+      setEditing({
+        id,
+        title: "",
+        prompt: "",
+        interval: "30m",
+        enabled: true,
+        approvalMode: "yolo",
+        newConversationEachRun: false,
+        notifyChannels: false,
+        createdAt: Date.now(),
+      });
+    } catch {
+      // ignore
+    }
   }, []);
 
   const handleEdit = useCallback((task: HeartbeatTask) => {
@@ -234,8 +250,12 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
 
   const handleTrigger = useCallback(
     async (id: string) => {
-      await heartbeatTriggerNow(id);
-      void loadTasks();
+      try {
+        await heartbeatTriggerNow(id);
+        void loadTasks();
+      } catch {
+        // ignore
+      }
     },
     [loadTasks],
   );
@@ -257,7 +277,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
 
   const handleBackdrop = useCallback(
     (e: React.MouseEvent) => {
-      if (e.target === backdropRef.current) onClose();
+      if (e.target === backdropRef.current && !dirtyRef.current) onClose();
     },
     [onClose],
   );
@@ -265,7 +285,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
   useEffect(() => {
     if (!open) return;
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && !dirtyRef.current && !document.querySelector("[data-anchored-popover='active']")) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -274,8 +294,8 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
   if (!open) return null;
 
   const scopeFilterLabel = (filter: string, map: Record<string, string>): string => {
-    if (filter === "all") return "全部项目";
-    if (filter === "global") return "全局";
+    if (filter === "all") return t("heartbeat.filterAllProjects");
+    if (filter === "global") return t("heartbeat.scopeGlobal");
     return map[filter] || filter.split("/").pop() || filter;
   };
 
@@ -286,7 +306,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
   };
 
   return (
-    <div ref={backdropRef} className="heartbeat-backdrop" onClick={handleBackdrop}>
+    <div ref={backdropRef} className="heartbeat-backdrop" onMouseDown={handleBackdrop}>
       <div className="heartbeat-modal">
         <header className="heartbeat-modal__header">
           {editing ? (
@@ -296,7 +316,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
           ) : (
             <Activity size={16} />
           )}
-          <span>{editing ? t("heartbeat.editTask") : "自动化任务"}</span>
+          <span>{editing ? t("heartbeat.editTask") : t("heartbeat.scheduler")}</span>
           <button
             className="heartbeat-modal__close"
             onClick={onClose}
@@ -307,7 +327,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
         </header>
 
         {editing ? (
-          <TaskEditor key={editing.id} task={editing} onSave={handleSaveEdit} onCancel={() => setEditing(null)} onDelete={() => { handleDelete(editing.id); setEditing(null); }} />
+          <TaskEditor key={editing.id} task={editing} onSave={handleSaveEdit} onCancel={() => setEditing(null)} onDelete={() => { handleDelete(editing.id); setEditing(null); }} onDirtyChange={(d) => { dirtyRef.current = d; }} />
         ) : (
           <div className="heartbeat-modal__body">
             <div className="heartbeat-toolbar">
@@ -384,7 +404,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
                       type="button"
                       onClick={() => { setScopeFilter("all"); setScopeFilterOpen(false); }}
                     >
-                      <span>全部项目</span>
+                      <span>{t("heartbeat.filterAllProjects")}</span>
                       {scopeFilter === "all" && <Check size={12} className="heartbeat-filter-menu__check" />}
                     </button>
                     <button
@@ -394,7 +414,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
                       type="button"
                       onClick={() => { setScopeFilter("global"); setScopeFilterOpen(false); }}
                     >
-                      <span>全局</span>
+                      <span>{t("heartbeat.scopeGlobal")}</span>
                       {scopeFilter === "global" && <Check size={12} className="heartbeat-filter-menu__check" />}
                     </button>
                     {(() => {
@@ -465,7 +485,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
               ) : filtered.length === 0 ? (
                 <div className="heartbeat-empty">
                   <Heart size={24} />
-                  <span>{tasks.length === 0 ? t("heartbeat.noTasks") : "没有匹配的任务"}</span>
+                  <span>{tasks.length === 0 ? t("heartbeat.noTasks") : t("heartbeat.noMatchingTasks")}</span>
                 </div>
               ) : (
                 <ul className="heartbeat-tasklist">
@@ -489,10 +509,6 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
                 </ul>
               );
             })()}
-
-            <div className="heartbeat-hint">
-              <span>{t("heartbeat.configHint")}</span>
-            </div>
           </div>
         )}
       </div>
@@ -607,13 +623,13 @@ function TaskCard({
 // ── Cycle Editor ──────────────────────────────────────────────────────────────
 
 const WEEKDAYS = [
-  { key: "mon", label: "周一" },
-  { key: "tue", label: "周二" },
-  { key: "wed", label: "周三" },
-  { key: "thu", label: "周四" },
-  { key: "fri", label: "周五" },
-  { key: "sat", label: "周六" },
-  { key: "sun", label: "周日" },
+  { key: "mon", labelKey: "heartbeat.weekdayMon" },
+  { key: "tue", labelKey: "heartbeat.weekdayTue" },
+  { key: "wed", labelKey: "heartbeat.weekdayWed" },
+  { key: "thu", labelKey: "heartbeat.weekdayThu" },
+  { key: "fri", labelKey: "heartbeat.weekdayFri" },
+  { key: "sat", labelKey: "heartbeat.weekdaySat" },
+  { key: "sun", labelKey: "heartbeat.weekdaySun" },
 ] as const;
 
 const ALL_WEEKDAYS = WEEKDAYS.map(w => w.key);
@@ -727,11 +743,11 @@ function CycleEditor({
 
   const MONTHS = Array.from({ length: 12 }, (_, i) => ({
     value: String(i + 1),
-    label: `${i + 1}月`,
+    label: t("heartbeat.monthOption", { n: i + 1 }),
   }));
   const DAYS = Array.from({ length: 31 }, (_, i) => ({
     value: String(i + 1),
-    label: `${i + 1}日`,
+    label: t("heartbeat.dayOption", { n: i + 1 }),
   }));
 
   return (
@@ -801,7 +817,7 @@ function CycleEditor({
                 onClick={() => onDayToggle(wd.key)}
                 aria-pressed={selectedDays.includes(wd.key)}
               >
-                {wd.label}
+                {t(wd.labelKey)}
               </button>
             ))}
           </div>
@@ -823,11 +839,13 @@ function TaskEditor({
   onSave,
   onCancel,
   onDelete,
+  onDirtyChange,
 }: {
   task: HeartbeatTask;
   onSave: (t: HeartbeatTask) => void;
   onCancel: () => void;
   onDelete: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const t = useT();
   const titleRef = useRef<HTMLInputElement>(null);
@@ -853,7 +871,37 @@ function TaskEditor({
   }, [projectOpen]);
 
   const [draft, setDraft] = useState(task);
+  const initialTaskRef = useRef(task);
+  const isDirty = draft.title !== initialTaskRef.current.title
+    || draft.prompt !== initialTaskRef.current.prompt
+    || draft.interval !== initialTaskRef.current.interval
+    || draft.enabled !== initialTaskRef.current.enabled
+    || draft.approvalMode !== initialTaskRef.current.approvalMode
+    || draft.newConversationEachRun !== initialTaskRef.current.newConversationEachRun
+    || draft.notifyChannels !== initialTaskRef.current.notifyChannels
+    || draft.scope !== initialTaskRef.current.scope
+    || draft.workspaceRoot !== initialTaskRef.current.workspaceRoot
+    || draft.timeWindowStart !== initialTaskRef.current.timeWindowStart
+    || draft.timeWindowEnd !== initialTaskRef.current.timeWindowEnd;
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
+
   const intervalBeforeCycle = useRef<string | null>(null);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-grow prompt textarea: shrink-to-fit then cap at 180px
+  const autoGrowPrompt = useCallback(() => {
+    const el = promptRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 180) + "px";
+  }, []);
+
+  useLayoutEffect(() => {
+    autoGrowPrompt();
+  }, [draft.prompt, autoGrowPrompt]);
   const set = useCallback((field: keyof HeartbeatTask, value: string | boolean) => {
     setDraft((prev) => ({ ...prev, [field]: value }));
   }, []);
@@ -870,8 +918,9 @@ function TaskEditor({
 
   return (
     <div className="heartbeat-editor">
-      {/* Title */}
-      <div className="heartbeat-editor__field">
+      <div className="heartbeat-editor__fields">
+        {/* Title */}
+        <div className="heartbeat-editor__field">
         <label>{t("heartbeat.fieldTitle")}</label>
         <input
           ref={titleRef}
@@ -929,45 +978,93 @@ function TaskEditor({
       <div className="heartbeat-editor__field">
         <label>{t("heartbeat.fieldPrompt")}</label>
         <textarea
+          ref={promptRef}
           className="heartbeat-editor__textarea"
           value={draft.prompt}
-          onChange={(e) => set("prompt", e.target.value)}
+          onChange={(e) => {
+            set("prompt", e.target.value);
+            // autoGrowPrompt is called via useEffect watching draft.prompt
+          }}
           placeholder={t("heartbeat.promptPlaceholder")}
-          rows={5}
         />
       </div>
 
-      {/* Approval Mode */}
+      {/* Approval Mode + Push to bot (side by side) */}
+      <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
+        <div className="heartbeat-editor__field" style={{ flex: "1 1 45%", minWidth: "200px" }}>
+          <label>{t("heartbeat.fieldApprovalMode")}</label>
+          <div className="set-seg" style={{ alignSelf: "flex-start" }}>
+            <button
+              className={`set-seg__btn${normalizeMode(draft.approvalMode) === "ask" ? " set-seg__btn--on" : ""}`}
+              onClick={() => setDraft((prev) => ({ ...prev, approvalMode: "ask" }))}
+              title={t("heartbeat.approvalModeAskTooltip")}
+            >
+              {t("heartbeat.approvalModeAsk")}
+            </button>
+            <button
+              className={`set-seg__btn${normalizeMode(draft.approvalMode) === "auto" ? " set-seg__btn--on" : ""}`}
+              onClick={() => setDraft((prev) => ({ ...prev, approvalMode: "auto" }))}
+              title={t("heartbeat.approvalModeAutoTooltip")}
+            >
+              {t("heartbeat.approvalModeAuto")}
+            </button>
+            <button
+              className={`set-seg__btn${normalizeMode(draft.approvalMode) === "yolo" ? " set-seg__btn--on" : ""}`}
+              onClick={() => setDraft((prev) => ({ ...prev, approvalMode: "yolo" }))}
+              title={t("heartbeat.approvalModeYoloTooltip")}
+            >
+              {t("heartbeat.approvalModeYolo")}
+            </button>
+          </div>
+          <span className="heartbeat-editor__mode-hint">
+            {normalizeMode(draft.approvalMode) === "yolo" ? t("heartbeat.approvalModeYoloHint") :
+             normalizeMode(draft.approvalMode) === "auto" ? t("heartbeat.approvalModeAutoHint") :
+             t("heartbeat.approvalModeAskHint")}
+          </span>
+        </div>
+
+        {/* Push to bot channels */}
+        <div className="heartbeat-editor__field" style={{ flex: "1 1 45%", minWidth: "200px", textAlign: "left" }}>
+          <label>{t("heartbeat.notifyChannels")} <span className="heartbeat-editor__optional">{t("heartbeat.optional")}</span></label>
+          <div className="set-seg" style={{ alignSelf: "flex-start" }}>
+            <button
+              className={`set-seg__btn${draft.notifyChannels === true ? " set-seg__btn--on" : ""}`}
+              onClick={() => setDraft((prev) => ({ ...prev, notifyChannels: true }))}
+            >
+              {t("heartbeat.notifyChannelsOn")}
+            </button>
+            <button
+              className={`set-seg__btn${draft.notifyChannels !== true ? " set-seg__btn--on" : ""}`}
+              onClick={() => setDraft((prev) => ({ ...prev, notifyChannels: false }))}
+            >
+              {t("heartbeat.notifyChannelsOff")}
+            </button>
+          </div>
+          <span className="heartbeat-editor__mode-hint">
+            {draft.notifyChannels === true
+              ? t("heartbeat.notifyChannelsOnHint")
+              : t("heartbeat.notifyChannelsOffHint")}
+          </span>
+        </div>
+      </div>
+
+      {/* New conversation per run */}
       <div className="heartbeat-editor__field">
-        <label>{t("heartbeat.fieldApprovalMode")}</label>
+        <label>{t("heartbeat.fieldNewConversation")}</label>
         <div className="set-seg" style={{ alignSelf: "flex-start" }}>
           <button
-            className={`set-seg__btn${normalizeMode(draft.approvalMode) === "ask" ? " set-seg__btn--on" : ""}`}
-            onClick={() => setDraft((prev) => ({ ...prev, approvalMode: "ask" }))}
-            title={t("heartbeat.approvalModeAskTooltip")}
+            className={`set-seg__btn${!draft.newConversationEachRun ? " set-seg__btn--on" : ""}`}
+            onClick={() => setDraft((prev) => ({ ...prev, newConversationEachRun: false }))}
           >
-            {t("heartbeat.approvalModeAsk")}
+            {t("heartbeat.newConversationEachRunOff")}
           </button>
           <button
-            className={`set-seg__btn${normalizeMode(draft.approvalMode) === "auto" ? " set-seg__btn--on" : ""}`}
-            onClick={() => setDraft((prev) => ({ ...prev, approvalMode: "auto" }))}
-            title={t("heartbeat.approvalModeAutoTooltip")}
+            className={`set-seg__btn${draft.newConversationEachRun ? " set-seg__btn--on" : ""}`}
+            onClick={() => setDraft((prev) => ({ ...prev, newConversationEachRun: true }))}
           >
-            {t("heartbeat.approvalModeAuto")}
-          </button>
-          <button
-            className={`set-seg__btn${normalizeMode(draft.approvalMode) === "yolo" ? " set-seg__btn--on" : ""}`}
-            onClick={() => setDraft((prev) => ({ ...prev, approvalMode: "yolo" }))}
-            title={t("heartbeat.approvalModeYoloTooltip")}
-          >
-            {t("heartbeat.approvalModeYolo")}
+            {t("heartbeat.newConversationEachRunOn")}
           </button>
         </div>
-        <span className="heartbeat-editor__mode-hint">
-          {normalizeMode(draft.approvalMode) === "yolo" ? t("heartbeat.approvalModeYoloHint") :
-           normalizeMode(draft.approvalMode) === "auto" ? t("heartbeat.approvalModeAutoHint") :
-           t("heartbeat.approvalModeAskHint")}
-        </span>
       </div>
 
       {/* Frequency */}
@@ -1080,6 +1177,8 @@ function TaskEditor({
         )}
       </div>
 
+      </div>
+
       {/* Actions */}
       <div className="heartbeat-editor__actions">
         {!isNew && !confirmingDelete && (
@@ -1102,7 +1201,8 @@ function TaskEditor({
         <button
           className="heartbeat-btn heartbeat-btn--primary"
           onClick={() => onSave(draft)}
-          disabled={!draft.title.trim() || !draft.prompt.trim()}
+          disabled={!draft.title.trim() || !draft.prompt.trim() || !isDirty}
+          title={!draft.title.trim() || !draft.prompt.trim() ? t("heartbeat.requiredFields") : !isDirty ? t("heartbeat.noChanges") : undefined}
         >
           {isNew ? t("heartbeat.add") : t("heartbeat.save")}
         </button>

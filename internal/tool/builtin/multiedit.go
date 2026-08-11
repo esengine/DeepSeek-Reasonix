@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"reasonix/internal/tool"
 )
@@ -12,11 +11,15 @@ import (
 func init() { tool.RegisterBuiltin(multiEdit{}) }
 
 // multiEdit applies a batch of edits to one file. roots confines the target to
-// the workspace when non-empty (see writeFile); workDir, when non-empty, is the
+// the workspace when non-empty (see writeFile); guard rejects Reasonix
+// session-data targets (see SessionDataGuard); workDir, when non-empty, is the
 // directory a relative path resolves against (see resolveIn).
 type multiEdit struct {
 	roots   []string
+	guard   SessionDataGuard
+	managed ManagedConfigPaths
 	workDir string
+	overlay FileOverlay
 }
 
 // editStep is one edit in a multi_edit operation. Mirrors edit_file's args
@@ -76,47 +79,47 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 		return "", fmt.Errorf("edits must not be empty")
 	}
 	p.Path = resolveIn(m.workDir, p.Path)
-	if err := confine(m.roots, p.Path); err != nil {
+	if err := confineWrite(ctx, m.roots, m.guard, m.managed, p.Path); err != nil {
 		return "", err
 	}
 
-	content, enc, err := readFileEncoded(p.Path)
+	src, err := readEditSource(ctx, m.overlay, p.Path)
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", p.Path, err)
 	}
+	content := src.content
 
 	// Apply edits in order against the running in-memory buffer. Any failure
 	// returns before the write, leaving the file untouched — that's the
 	// safety guarantee that makes multi_edit preferable to chained
 	// edit_file calls.
 	applied := 0
+	usedFuzzy := false
+	receipts := make([]editReplacementReceipt, 0, len(p.Edits))
 	for i, step := range p.Edits {
 		if step.OldString == "" {
 			return "", fmt.Errorf("edit %d: old_string is required", i+1)
 		}
-		old, newStr := matchLineEndings(content, step.OldString, step.NewString)
-		if step.ReplaceAll {
-			count := strings.Count(content, old)
-			if count == 0 {
-				return "", fmt.Errorf("edit %d: old_string not found", i+1)
-			}
-			content = strings.ReplaceAll(content, old, newStr)
-			applied += count
-			continue
-		}
-		switch strings.Count(content, old) {
-		case 0:
-			return "", fmt.Errorf("edit %d: old_string not found", i+1)
-		case 1:
-			content = strings.Replace(content, old, newStr, 1)
-			applied++
+		result := applyOldStringEdit(content, step.OldString, step.NewString, step.ReplaceAll)
+		switch {
+		case result.applied > 0:
+			content = result.updated
+			applied += result.applied
+			usedFuzzy = usedFuzzy || result.fuzzy
+			receipts = append(receipts, result.receipt)
+		case result.matches == 0:
+			return "", fmt.Errorf("edit %d: %w", i+1, oldStringNotFoundError(p.Path, step.OldString, content))
 		default:
-			return "", fmt.Errorf("edit %d: old_string is not unique; add more surrounding context or set replace_all", i+1)
+			return "", fmt.Errorf("edit %d: %w", i+1, oldStringNotUniqueError(p.Path, step.OldString, content, result.matches, true))
 		}
 	}
 
-	if err := writeFileEncoded(p.Path, content, enc); err != nil {
+	if err := src.write(ctx, m.overlay, p.Path, content); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}
-	return fmt.Sprintf("multi_edit %s: %d edits applied (%d total replacements)", p.Path, len(p.Edits), applied), nil
+	summary := fmt.Sprintf("multi_edit %s: %d edits applied (%d total replacements)", p.Path, len(p.Edits), applied)
+	if usedFuzzy {
+		summary += " (fuzzy match)"
+	}
+	return withActualPostWriteReceipts(summary, receipts), nil
 }

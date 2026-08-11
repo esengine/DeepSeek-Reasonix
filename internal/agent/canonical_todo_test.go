@@ -16,20 +16,20 @@ func TestFinalReadinessFallsBackToCanonicalTodos(t *testing.T) {
 	// Turn did work (a successful bash) but issued no todo_write this turn, so the
 	// per-turn ledger has no list — the canonical state must still gate.
 	a := &Agent{evidence: readinessLedger(ran), todoState: open}
-	if got := a.finalReadinessFailure(); !strings.Contains(got, "incomplete") {
-		t.Fatalf("cross-turn gate = %q, want it to report incomplete canonical todos", got)
+	if got := a.ReadinessResult(); !strings.Contains(got.Reason, "incomplete") {
+		t.Fatalf("cross-turn gate = %q, want it to report incomplete canonical todos", got.Reason)
 	}
 
 	// A turn that touched nothing (pure Q&A) must never gate on stale canonical state.
 	idle := &Agent{evidence: evidence.NewLedger(), todoState: open}
-	if got := idle.finalReadinessFailure(); got != "" {
-		t.Fatalf("no-work turn gated on canonical todos: %q", got)
+	if got := idle.ReadinessResult(); !got.Ready {
+		t.Fatalf("no-work turn gated on canonical todos: %+v", got)
 	}
 
 	// All canonical items completed → no gate even after work.
 	done := &Agent{evidence: readinessLedger(ran), todoState: []evidence.TodoItem{{Content: "push", Status: "completed"}}}
-	if got := done.finalReadinessFailure(); got != "" {
-		t.Fatalf("completed canonical todos still gated: %q", got)
+	if got := done.ReadinessResult(); !got.Ready {
+		t.Fatalf("completed canonical todos still gated: %+v", got)
 	}
 }
 
@@ -55,14 +55,44 @@ func TestAdvanceCanonicalTodoCompletesAndPromotes(t *testing.T) {
 	}
 }
 
-func TestAdvanceCanonicalTodoMatchesByNumber(t *testing.T) {
+func TestAdvanceCanonicalTodoRejectsPendingMatchByNumber(t *testing.T) {
 	a := &Agent{sink: event.Discard, todoState: []evidence.TodoItem{
 		{Content: "first", Status: "in_progress"},
 		{Content: "second", Status: "pending"},
 	}}
 	a.advanceCanonicalTodo("2")
-	if a.todoState[1].Status != "completed" {
-		t.Fatalf("numeric step did not complete the second todo: %+v", a.todoState)
+	if a.todoState[1].Status != "pending" || a.todoState[0].Status != "in_progress" {
+		t.Fatalf("pending numeric step advanced out of order: %+v", a.todoState)
+	}
+}
+
+func TestRebuildTodoStateIgnoresHistoricalPendingSignoff(t *testing.T) {
+	msgs := []provider.Message{
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID: "t1", Name: "todo_write",
+			Arguments: `{"todos":[{"content":"a","status":"in_progress"},{"content":"b","status":"pending"}]}`,
+		}}},
+		{Role: provider.RoleTool, ToolCallID: "t1", Name: "todo_write", Content: "Todos updated"},
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID: "c1", Name: "complete_step", Arguments: `{"step":"b"}`,
+		}}},
+		{Role: provider.RoleTool, ToolCallID: "c1", Name: "complete_step", Content: "signed off"},
+	}
+	a := &Agent{}
+	a.rebuildTodoState(msgs)
+	if a.todoState[0].Status != "in_progress" || a.todoState[1].Status != "pending" {
+		t.Fatalf("historical pending signoff restored invalid state: %+v", a.todoState)
+	}
+}
+
+func TestSetTodoStateNormalizesLegacyOutOfOrderSnapshot(t *testing.T) {
+	a := &Agent{}
+	a.setTodoState([]evidence.TodoItem{
+		{Content: "first", Status: "in_progress"},
+		{Content: "second", Status: "completed"},
+	})
+	if a.todoState[0].Status != "in_progress" || a.todoState[1].Status != "pending" {
+		t.Fatalf("legacy snapshot was not normalized: %+v", a.todoState)
 	}
 }
 
@@ -202,5 +232,35 @@ func TestSeedTodoStateAllowsAdvanceAfterSeed(t *testing.T) {
 	}
 	if a.todoState[1].Status != "in_progress" {
 		t.Fatalf("advance after seed: item 1 status = %q, want in_progress", a.todoState[1].Status)
+	}
+}
+
+func TestAdvanceCanonicalTodoWalksPhaseChain(t *testing.T) {
+	a := &Agent{sink: event.Discard, todoState: []evidence.TodoItem{
+		{Content: "Port the parser", Status: "pending"},
+		{Content: "move files", Status: "in_progress", Level: 1},
+		{Content: "fix imports", Status: "pending", Level: 1},
+		{Content: "Ship it", Status: "pending"},
+		{Content: "run tests", Status: "pending", Level: 1},
+	}}
+
+	a.advanceCanonicalTodo("Port the parser")
+	if a.todoState[0].Status != "pending" {
+		t.Fatalf("pending phase advanced ahead of its sub-steps: %+v", a.todoState)
+	}
+
+	a.advanceCanonicalTodo("move files")
+	if a.todoState[1].Status != "completed" || a.todoState[2].Status != "in_progress" {
+		t.Fatalf("completing a sub-step should promote its sibling: %+v", a.todoState)
+	}
+
+	a.advanceCanonicalTodo("fix imports")
+	if a.todoState[2].Status != "completed" || a.todoState[0].Status != "in_progress" {
+		t.Fatalf("after the last sub-step the phase should become the signable item: %+v", a.todoState)
+	}
+
+	a.advanceCanonicalTodo("Port the parser")
+	if a.todoState[0].Status != "completed" || a.todoState[3].Status != "pending" || a.todoState[4].Status != "in_progress" {
+		t.Fatalf("phase sign-off should promote the next phase's first sub-step: %+v", a.todoState)
 	}
 }

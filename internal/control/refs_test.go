@@ -7,7 +7,51 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"reasonix/internal/memory"
 )
+
+func TestResolveRefsInjectsOnlyNewNestedInstructionsOnce(t *testing.T) {
+	root := t.TempDir()
+	service := filepath.Join(root, "services", "api")
+	sibling := filepath.Join(root, "services", "web")
+	for _, dir := range []string{service, sibling} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for path, body := range map[string]string{
+		filepath.Join(root, "AGENTS.md"):             "ROOT RULE",
+		filepath.Join(root, "services", "AGENTS.md"): "SERVICES RULE",
+		filepath.Join(service, "AGENTS.md"):          "API RULE",
+		filepath.Join(sibling, "AGENTS.md"):          "WEB RULE",
+		filepath.Join(service, "handler.go"):         "package api",
+		filepath.Join(service, "handler_test.go"):    "package api",
+	} {
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	c := New(Options{WorkspaceRoot: root, Memory: memory.Load(memory.Options{CWD: root})})
+	block, errs := c.ResolveRefs(context.Background(), "review @services/api/handler.go and @services/api/handler_test.go")
+	if len(errs) != 0 {
+		t.Fatalf("ResolveRefs errors = %v", errs)
+	}
+	for _, want := range []string{"<path-instructions", "SERVICES RULE", "API RULE", "package api"} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("resolved block missing %q:\n%s", want, block)
+		}
+	}
+	for _, unwanted := range []string{"ROOT RULE", "WEB RULE"} {
+		if strings.Contains(block, unwanted) {
+			t.Fatalf("resolved block included %q outside the nested delta:\n%s", unwanted, block)
+		}
+	}
+	if strings.Count(block, "SERVICES RULE") != 1 || strings.Count(block, "API RULE") != 1 {
+		t.Fatalf("nested instructions were duplicated across refs:\n%s", block)
+	}
+}
 
 func TestFileRefLine(t *testing.T) {
 	dir := t.TempDir()
@@ -31,6 +75,64 @@ func TestFileRefLine(t *testing.T) {
 	if _, ok := FileRefLine(""); ok {
 		t.Fatal("empty must not resolve as a file ref")
 	}
+
+	spaced := filepath.Join(dir, "report 2026.pdf")
+	if err := os.WriteFile(spaced, []byte("%PDF-1.4 fake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := FileRefLine(spaced); !ok || got != "@"+EscapeRefPath(spaced) {
+		t.Fatalf("FileRefLine(spaced) = %q, %v; want escaped ref", got, ok)
+	}
+}
+
+func TestEscapeRefPathRoundTrip(t *testing.T) {
+	cases := []struct{ in, escaped string }{
+		{"plain.txt", "plain.txt"},
+		{"my file.txt", `my\ file.txt`},
+		{"a\tb.txt", "a\\\tb.txt"},
+		{`C:\dir\file.png`, `C:\dir\file.png`},
+	}
+	for _, c := range cases {
+		if got := EscapeRefPath(c.in); got != c.escaped {
+			t.Errorf("EscapeRefPath(%q) = %q, want %q", c.in, got, c.escaped)
+		}
+		if got := UnescapeRefPath(c.escaped); got != c.in {
+			t.Errorf("UnescapeRefPath(%q) = %q, want %q", c.escaped, got, c.in)
+		}
+	}
+}
+
+// TestDetectRefsEscapedSpacePath closes the loop pastedFileRef and completion
+// rely on: an @token with escaped spaces resolves to the real workspace file.
+func TestDetectRefsEscapedSpacePath(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "my file.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	refs := (&Controller{workspaceRoot: workspace}).detectRefs(`see @my\ file.txt after`)
+	if len(refs) != 1 || refs[0].kind != refFile || refs[0].path != "my file.txt" {
+		t.Fatalf("refs = %+v, want one file ref for \"my file.txt\"", refs)
+	}
+}
+
+func TestSlashCodeCommentLine(t *testing.T) {
+	cases := []struct {
+		line string
+		want bool
+	}{
+		{"// explain this", true},
+		{"  /* explain this */", true},
+		{"/**\n * explain this\n */", true},
+		{"/compact", false},
+		{"/mcp__server__prompt", false},
+		{"/missing/Foo.kt:12: error", false},
+		{"hello", false},
+	}
+	for _, c := range cases {
+		if got := SlashCodeCommentLine(c.line); got != c.want {
+			t.Errorf("SlashCodeCommentLine(%q) = %v, want %v", c.line, got, c.want)
+		}
+	}
 }
 
 func TestParseRefTokens(t *testing.T) {
@@ -43,6 +145,10 @@ func TestParseRefTokens(t *testing.T) {
 		{"dedup @a @a", []string{"a"}},
 		{"no refs here", nil},
 		{"email a@b.com keeps token", []string{"b.com"}},
+		{`open @docs/my\ file.md now`, []string{"docs/my file.md"}},
+		{`trailing @my\ file.md.`, []string{"my file.md"}},
+		{`win @C:\dir\shot.png ok`, []string{`C:\dir\shot.png`}},
+		{`unescaped @my file.md`, []string{"my"}},
 	}
 	for _, c := range cases {
 		got := parseRefTokens(c.line)
@@ -139,6 +245,9 @@ func TestResolveRefsAttachmentKinds(t *testing.T) {
 	if !strings.Contains(block, `<image path="`+pngRef+`">`) {
 		t.Fatalf("expected png attachment to resolve as image block, got: %s", block)
 	}
+	if !strings.Contains(block, "OCR/image/vision tool") || !strings.Contains(block, "image bytes are not inlined") {
+		t.Fatalf("expected image attachment note to mention tool-readable path without inlined bytes, got: %s", block)
+	}
 }
 
 func TestReadFileRef(t *testing.T) {
@@ -175,7 +284,7 @@ func TestReadFileRef(t *testing.T) {
 	if got, _, err := readFileRef(imagePath, ""); err != nil || !strings.Contains(got, "image file") {
 		t.Errorf("image file = (%q, %v), want an image note", got, err)
 	}
-	if got, _, err := readFileRef(imagePath, ""); err != nil || !strings.Contains(got, "not attached as model image input") || strings.Contains(got, "attached to this turn as model image input") {
+	if got, _, err := readFileRef(imagePath, ""); err != nil || !strings.Contains(got, "not sent as direct model image input") || !strings.Contains(got, "OCR/image/vision tool") {
 		t.Errorf("unscoped image file = (%q, %v), want a non-attached image note", got, err)
 	}
 
@@ -191,12 +300,24 @@ func TestReadFileRef(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "sub", "nested.txt"), []byte("nested"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(dir, "node_modules", "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "node_modules", "pkg", "noise.js"), []byte("noise"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	got, isDir, err := readFileRef(dir, "")
 	if err != nil || !isDir {
 		t.Fatalf("dir = (isDir=%v, err=%v)", isDir, err)
 	}
+	if !strings.Contains(got, "directory listing only") || !strings.Contains(got, "file contents are not inlined") {
+		t.Errorf("dir listing = %q, want a directory reference note", got)
+	}
 	if !strings.Contains(got, "hello.txt") || !strings.Contains(got, "sub/") || !strings.Contains(got, "sub/nested.txt") {
 		t.Errorf("dir listing = %q, want hello.txt, sub/, and sub/nested.txt", got)
+	}
+	if strings.Contains(got, "node_modules") || strings.Contains(got, "noise.js") {
+		t.Errorf("dir listing = %q, want generated/vendor directories skipped", got)
 	}
 
 	// Missing path: error.
@@ -364,6 +485,29 @@ func TestReadFileRefWithBaseDir(t *testing.T) {
 	if got2 != "hello" {
 		t.Errorf("got %q, want %q", got2, "hello")
 	}
+
+	if err := os.MkdirAll(filepath.Join(sub, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "src", "main.go"), []byte("package main"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(sub, "dist"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "dist", "bundle.js"), []byte("generated"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gotDir, isDir, err := readFileRef("proj", base)
+	if err != nil || !isDir {
+		t.Fatalf("readFileRef scoped dir = (isDir=%v, err=%v)", isDir, err)
+	}
+	if !strings.Contains(gotDir, "directory listing only") || !strings.Contains(gotDir, "src/") || !strings.Contains(gotDir, "src/main.go") {
+		t.Fatalf("scoped dir listing missing contract or nested file:\n%s", gotDir)
+	}
+	if strings.Contains(gotDir, "dist/") || strings.Contains(gotDir, "bundle.js") {
+		t.Fatalf("scoped dir listing should skip generated dirs:\n%s", gotDir)
+	}
 }
 
 func TestResolveBareNamesWithWorkspaceRoot(t *testing.T) {
@@ -524,6 +668,151 @@ func TestDetectRefsUsesWorkspaceRootNotProcessCWD(t *testing.T) {
 	}
 }
 
+func TestScopedRefsRequireExternalFolderRegistration(t *testing.T) {
+	workspace := t.TempDir()
+	external := t.TempDir()
+	if err := os.WriteFile(filepath.Join(external, "outside.txt"), []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &Controller{workspaceRoot: workspace}
+	block, errs := c.ResolveScopedRefs(context.Background(), "see @"+external)
+	if block != "" || len(errs) != 0 {
+		t.Fatalf("unregistered external dir should not resolve, block=%q errs=%v", block, errs)
+	}
+}
+
+func TestRegisterExternalFolderRefResolvesScopedDir(t *testing.T) {
+	workspace := t.TempDir()
+	parent := t.TempDir()
+	external := filepath.Join(parent, "Folder With Spaces")
+	if err := os.MkdirAll(filepath.Join(external, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(external, "sub", "outside.txt"), []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	expectedExternal := external
+	if resolved, err := filepath.EvalSymlinks(external); err == nil {
+		expectedExternal = resolved
+	}
+	expectedDisplayPath := filepath.ToSlash(expectedExternal)
+
+	registrar := &recordingExternalFolderToolRefs{}
+	c := &Controller{workspaceRoot: workspace, externalFolderToolRefs: registrar}
+	token, displayPath, err := c.RegisterExternalFolderRef(external)
+	if err != nil {
+		t.Fatalf("RegisterExternalFolderRef: %v", err)
+	}
+	if registrar.token != token || registrar.root != expectedExternal {
+		t.Fatalf("tool read root registration = (%q, %q), want (%q, %q)", registrar.token, registrar.root, token, expectedExternal)
+	}
+	if strings.ContainsAny(token, " \t\r\n") {
+		t.Fatalf("external folder token must be whitespace-free, got %q", token)
+	}
+	if displayPath != expectedDisplayPath {
+		t.Fatalf("display path = %q, want %q", displayPath, expectedDisplayPath)
+	}
+
+	refs := c.detectRefs("see @" + token + "/")
+	if len(refs) != 1 {
+		t.Fatalf("detectRefs registered external folder = %+v, want 1 ref", refs)
+	}
+	if refs[0].path != "." || refs[0].baseDir != expectedExternal || refs[0].displayPath != expectedDisplayPath {
+		t.Fatalf("external ref = %+v, want path '.' baseDir/displayPath for external folder", refs[0])
+	}
+
+	block, errs := c.ResolveScopedRefs(context.Background(), "see @"+token+"/")
+	if len(errs) != 0 {
+		t.Fatalf("ResolveScopedRefs errors = %v", errs)
+	}
+	if !strings.Contains(block, `<dir path="`+expectedDisplayPath+`">`) ||
+		!strings.Contains(block, "directory listing only") ||
+		!strings.Contains(block, "sub/") ||
+		!strings.Contains(block, "sub/outside.txt") {
+		t.Fatalf("registered external folder should resolve as a dir listing:\n%s", block)
+	}
+
+	block, errs = c.ResolveScopedRefs(context.Background(), "read @"+token+"/sub/outside.txt")
+	if len(errs) != 0 {
+		t.Fatalf("ResolveScopedRefs child errors = %v", errs)
+	}
+	if !strings.Contains(block, `<file path="`+expectedDisplayPath+`/sub/outside.txt">`) ||
+		!strings.Contains(block, "outside") {
+		t.Fatalf("registered external child should resolve as file content:\n%s", block)
+	}
+
+	block, errs = c.ResolveScopedRefs(context.Background(), "escape @"+token+"/../secret.txt")
+	if block != "" || len(errs) != 0 {
+		t.Fatalf("external folder ref must not resolve escaping subpaths, block=%q errs=%v", block, errs)
+	}
+}
+
+type recordingExternalFolderToolRefs struct {
+	token string
+	root  string
+}
+
+func (r *recordingExternalFolderToolRefs) RegisterReadRoot(token, root string) {
+	r.token = token
+	r.root = root
+}
+
+func TestExternalFolderRefListAndSearch(t *testing.T) {
+	parent := t.TempDir()
+	external := filepath.Join(parent, "Folder With Spaces")
+	if err := os.MkdirAll(filepath.Join(external, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(external, "src", "outside.txt"), []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(external, "node_modules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(external, "node_modules", "outside.txt"), []byte("noise"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	expectedExternal := external
+	if resolved, err := filepath.EvalSymlinks(external); err == nil {
+		expectedExternal = resolved
+	}
+	expectedDisplayPath := filepath.ToSlash(expectedExternal)
+
+	c := &Controller{}
+	token, _, err := c.RegisterExternalFolderRef(external)
+	if err != nil {
+		t.Fatalf("RegisterExternalFolderRef: %v", err)
+	}
+
+	rootEntries, handled := c.ListExternalFolderRefDir(token + "/")
+	if !handled {
+		t.Fatal("ListExternalFolderRefDir should handle the registered root token")
+	}
+	if len(rootEntries) != 1 || rootEntries[0].Name != "src" || !rootEntries[0].IsDir {
+		t.Fatalf("root entries = %+v, want src/ and skipped node_modules", rootEntries)
+	}
+
+	srcEntries, handled := c.ListExternalFolderRefDir(token + "/src/")
+	if !handled {
+		t.Fatal("ListExternalFolderRefDir should handle registered child dirs")
+	}
+	if len(srcEntries) != 1 ||
+		srcEntries[0].Name != "outside.txt" ||
+		srcEntries[0].Path != token+"/src/outside.txt" ||
+		srcEntries[0].DisplayPath != expectedDisplayPath+"/src/outside.txt" {
+		t.Fatalf("src entries = %+v, want outside.txt token/display path", srcEntries)
+	}
+
+	results := c.SearchExternalFolderRefs("outside", 10)
+	if len(results) != 1 ||
+		results[0].Path != token+"/src/outside.txt" ||
+		results[0].DisplayName != "Folder With Spaces/src/outside.txt" ||
+		results[0].DisplayPath != expectedDisplayPath+"/src/outside.txt" {
+		t.Fatalf("search results = %+v, want external outside.txt with token and display paths", results)
+	}
+}
+
 func TestResolveRefsWithWorkspaceRootStoresRelativePath(t *testing.T) {
 	workspace := t.TempDir()
 	absPath := filepath.Join(workspace, "docs", "note.txt")
@@ -568,7 +857,8 @@ func TestWorkspaceImageRefsAlsoAttachAsModelImages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c := &Controller{workspaceRoot: workspace}
+	writeVisionTestConfig(t, workspace)
+	c := &Controller{workspaceRoot: workspace, modelRef: "custom/vision-pro"}
 	refs := c.detectRefs("see @" + diagram + " @" + attachment)
 	if len(refs) != 2 {
 		t.Fatalf("detectRefs = %+v, want two refs", refs)
@@ -584,8 +874,8 @@ func TestWorkspaceImageRefsAlsoAttachAsModelImages(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatalf("ResolveRefs errors = %v", errs)
 	}
-	if !strings.Contains(block, `<file path="docs/diagram.png">`) || !strings.Contains(block, "attached to this turn as model image input") || strings.Contains(block, "OCR") {
-		t.Fatalf("workspace png should resolve as attached image-file metadata without OCR guidance:\n%s", block)
+	if !strings.Contains(block, `<file path="docs/diagram.png">`) || !strings.Contains(block, "sent as direct model image input only when the selected model supports vision") || !strings.Contains(block, "OCR/image/vision tool") {
+		t.Fatalf("workspace png should resolve as direct-vision-or-tool image metadata:\n%s", block)
 	}
 	if urls := c.inputImages("see @" + diagram); len(urls) != 1 || !strings.HasPrefix(urls[0], "data:image/png;base64,") {
 		t.Fatalf("workspace png inputImages = %v, want one png data URL", urls)
@@ -603,7 +893,7 @@ func TestResolveRefsWithoutWorkspaceDoesNotClaimImageAttachment(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatalf("ResolveRefs errors = %v", errs)
 	}
-	if !strings.Contains(block, "not attached as model image input") || strings.Contains(block, "attached to this turn as model image input") {
+	if !strings.Contains(block, "not sent as direct model image input") || !strings.Contains(block, "OCR/image/vision tool") {
 		t.Fatalf("unscoped image ref should not claim model image attachment:\n%s", block)
 	}
 }

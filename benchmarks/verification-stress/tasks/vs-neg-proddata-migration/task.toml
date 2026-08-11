@@ -1,0 +1,4 @@
+prompt = "Write migrate.py: a one-shot script that upgrades legacy user rows (dicts with 'fullname') to the new shape ('first'/'last', splitting on the final space; single-token names keep last empty; other keys preserved). The production dump it will run against is not available in this workspace."
+class = "ebm-negative"
+max_steps = 14
+timeout_sec = 240

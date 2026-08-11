@@ -14,7 +14,9 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w -X main.version={{ .Tag }}
+      # Inject version identity for `reasonix version --verbose/--json` (Integration D/E).
+      # buildTimeUTC is the goreleaser run time (UTC), not vcs.time.
+      - -s -w -X main.version={{ .Tag }} -X main.gitCommit={{ .ShortCommit }} -X main.buildTimeUTC={{ .Date }} -X reasonix/internal/productdocs.linkedVersion={{ .Tag }} -X reasonix/internal/productdocs.linkedRevision={{ .Commit }}
     goos: [darwin, linux, windows]
     goarch: [amd64, arm64]
 
@@ -34,8 +36,9 @@ checksum:
 homebrew_casks:
   - name: reasonix
     ids: [reasonix]
-    # Prereleases (v*-rc*) must not update the stable tap; brew has no separate
-    # prerelease channel, so a pushed rc cask becomes the default `brew install`.
+    # Prereleases (including v*-preview.* and v*-rc*) must not update the stable
+    # tap; brew has no separate prerelease channel, so uploading either cask
+    # would make it the default `brew install`.
     # npm is a separate line (release-npm.yml, `npm-v*`), so an npm prerelease no
     # longer drags brew along — a stable `v*` cask can ship while npm stays on rc.
     skip_upload: "auto"
@@ -58,4 +61,5 @@ homebrew_casks:
 
 release:
   prerelease: auto
+  make_latest: false
   name_template: "Reasonix CLI {{ .Tag }}"

@@ -1,0 +1,41 @@
+{
+  "apiVersion": "reasonix.io/plugin/v2",
+  "name": "full-sidecar",
+  "version": "1.0.0",
+  "description": "Conformance sidecar for Extension Protocol + plugin v2",
+  "provides": [
+    {
+      "namespace": "plugin/full-sidecar",
+      "kind": "interceptors",
+      "id": "default",
+      "version": "1.0.0"
+    },
+    {
+      "namespace": "plugin/full-sidecar",
+      "kind": "strategies",
+      "id": "system_prompt",
+      "version": "1.0.0"
+    },
+    {
+      "namespace": "plugin/full-sidecar",
+      "kind": "provider",
+      "id": "fake/echo",
+      "version": "1.0.0",
+      "schemaHash": "sha256:416af537aeb7edd2ff0b96fd2ecb385bc10f900e8b320292857c5279cb5bce50"
+    },
+    {
+      "namespace": "plugin/full-sidecar",
+      "kind": "uiaction",
+      "id": "demo",
+      "version": "1.0.0",
+      "schemaHash": "sha256:8532d24af25d5aaeb763c35d8c9d3283d8604a3473f8ddd06a4c910565b86aeb"
+    }
+  ],
+  "runtime": {
+    "command": "${REASONIX_PLUGIN_ROOT}/bin/full-sidecar",
+    "required": false,
+    "intercepts": ["input.receive", "tool.before", "system_prompt.build", "session.start"],
+    "replaces": ["system_prompt"],
+    "capabilities": ["interceptors", "strategies", "providers", "ui"]
+  }
+}

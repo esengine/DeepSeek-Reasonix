@@ -16,6 +16,8 @@ func TestCommandMatches(t *testing.T) {
 			"rm -v scripts/test_lines.txt && ls -la scripts/test_lines.txt 2>&1 || true", true},
 		{"quote style drift", `test -f test-tools.md && echo 'still exists' || echo 'deleted'`,
 			`test -f test-tools.md && echo "still exists" || echo "deleted"`, true},
+		{"quoted pipe is not a segment separator", `printf "%s\n" "a | b"`,
+			`printf '%s\n' 'a | b'`, true},
 		{"pipe tail dropped", "go test ./internal/tool/... -count=1 -timeout 60s",
 			"cd /f/Reasonix && go test ./internal/tool/... -count=1 -timeout 60s 2>&1 | tail -10", true},
 		{"whitespace collapse", "go  test   ./...", "go test ./...", true},

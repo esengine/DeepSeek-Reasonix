@@ -20,15 +20,41 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: workers/crash-report/package-lock.json
+      - name: Validate
+        working-directory: workers/crash-report
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+      - name: Apply and verify diagnostics v2 D1 migration
+        working-directory: workers/crash-report
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npm run migrate:diagnostics-v2
       - name: Deploy
         working-directory: workers/crash-report
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          npm ci
           npx wrangler deploy
+      # Mirrors the ALERT_WEBHOOK repo secret into the worker so the ingest
+      # sentinel can push alerts (see runIngestSentinel). Managed here so
+      # nobody needs local Cloudflare credentials; when the repo secret is
+      # unset the sentinel stays log-only.
+      - name: Sync alert webhook secret
+        working-directory: workers/crash-report
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ALERT_WEBHOOK: ${{ secrets.ALERT_WEBHOOK }}
+        run: |
+          if [ -z "$ALERT_WEBHOOK" ]; then
+            echo "ALERT_WEBHOOK repo secret not set; removing any existing worker secret."
+            printf '{"ALERT_WEBHOOK":null}' | npx wrangler secret bulk
+            exit 0
+          fi
+          printf '%s' "$ALERT_WEBHOOK" | npx wrangler secret put ALERT_WEBHOOK

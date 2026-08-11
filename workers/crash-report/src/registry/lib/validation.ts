@@ -1,0 +1,251 @@
+import type { Context } from "hono";
+import { z } from "zod";
+import type { AppEnv } from "../env";
+import { ApiError } from "../http/errors";
+
+// A capability slug: lowercase, 1–64 chars of [a-z0-9._-], starting and ending
+// with an alphanumeric. Matches the skill-name rules install_source enforces.
+const slug = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/, "Use 1–64 chars: letters, digits, '.', '_', '-'.")
+  .max(64);
+
+const httpUrl = z.string().trim().url().max(500);
+
+// A publishable install source. The registry stores only a pointer; the real
+// install runs client-side through install_source, so a source it cannot
+// classify is dead on arrival. These mirror internal/installsource/names.go
+// (isURL || git: shorthand || looksLikePackage); a bare local path is refused
+// because it resolves on the publisher's machine, never the installer's.
+const pkgSegment = /^[a-zA-Z0-9._-]+$/;
+const unsafeSourceCharacter = /[\s\u0000-\u001f\u007f-\u009f]/u;
+
+function hasUnsafeSourceCharacters(source: string): boolean {
+  return unsafeSourceCharacter.test(source);
+}
+
+function looksLikePackage(source: string): boolean {
+  if (/[\s\\]/.test(source) || source.startsWith(".") || source.startsWith("/")) return false;
+  if (source.startsWith("@")) {
+    const parts = source.split("/");
+    return parts.length === 2 && pkgSegment.test(parts[0].slice(1)) && pkgSegment.test(parts[1]);
+  }
+  return pkgSegment.test(source);
+}
+
+function isHttpUrl(source: string): boolean {
+  if (hasUnsafeSourceCharacters(source)) return false;
+  try {
+    const u = new URL(source);
+    return (u.protocol === "http:" || u.protocol === "https:") && u.hostname !== "";
+  } catch {
+    return false;
+  }
+}
+
+function isInstallableSource(source: string): boolean {
+  const raw = source.trim();
+  if (hasUnsafeSourceCharacters(raw)) return false;
+  if (raw.startsWith("git:github.com/") && raw.length > "git:github.com/".length) return true;
+  return isHttpUrl(raw) || looksLikePackage(raw);
+}
+
+function isGitHubRepoSource(source: string): boolean {
+  let raw = source.trim();
+  if (hasUnsafeSourceCharacters(raw) || raw.includes("\\")) return false;
+  if (raw.startsWith("git:github.com/")) raw = `https://github.com/${raw.slice("git:github.com/".length)}`;
+  try {
+    const u = new URL(raw);
+    if (
+      (u.protocol !== "http:" && u.protocol !== "https:") ||
+      u.hostname.toLowerCase() !== "github.com" ||
+      u.username !== "" ||
+      u.password !== "" ||
+      u.port !== "" ||
+      u.search !== "" ||
+      u.hash !== ""
+    ) {
+      return false;
+    }
+
+    // URL parsers normalize dot segments before exposing pathname. Inspect
+    // the original encoded path so /tree/main/../outside cannot become a
+    // seemingly safe repository path during validation.
+    const authorityStart = raw.indexOf("://") + 3;
+    const pathStart = raw.indexOf("/", authorityStart);
+    const authorityEnd = pathStart === -1 ? raw.length : pathStart;
+    if (raw.slice(authorityStart, authorityEnd).toLowerCase() !== "github.com") return false;
+    let encodedPath = pathStart === -1 ? "" : raw.slice(pathStart);
+    if (encodedPath.endsWith("/")) encodedPath = encodedPath.slice(0, -1);
+    if (!encodedPath.startsWith("/") || encodedPath.includes("//")) return false;
+
+    const parts = encodedPath
+      .slice(1)
+      .split("/")
+      .map((part) => {
+        try {
+          return decodeURIComponent(part);
+        } catch {
+          return "";
+        }
+      });
+    if (
+      parts.some(
+        (part) =>
+          part === "" ||
+          part === "." ||
+          part === ".." ||
+          part.includes("/") ||
+          part.includes("\\") ||
+          hasUnsafeSourceCharacters(part),
+      )
+    ) {
+      return false;
+    }
+
+    const owner = parts[0] ?? "";
+    const repo = (parts[1] ?? "").replace(/\.git$/i, "");
+    if (!pkgSegment.test(owner) || !pkgSegment.test(repo)) return false;
+    if (parts.length === 2) return true;
+    return parts.length >= 4 && parts[2] === "tree";
+  } catch {
+    return false;
+  }
+}
+
+const sourcePointer = z
+  .string()
+  .trim()
+  .min(1)
+  .max(500)
+  .refine(isInstallableSource, {
+    message:
+      "source must be an http(s) URL (SKILL.md, .mcp.json, a repo, or a repo path), a git:github.com/… shorthand, or a package name — not free text or a local path.",
+  });
+
+// A GitHub source that points at a whole repo — a bare owner/repo root, or a
+// branch root with no sub-path — rather than one skill. The installsource
+// planner scans such a source recursively and pulls EVERY SKILL.md it finds, so
+// a package that claims to be a single skill must not publish one: it would
+// silently mass-install the repo's entire skill library under this package name.
+function isWholeGitHubRepoSource(source: string): boolean {
+  let raw = source.trim();
+  if (raw.startsWith("git:github.com/")) raw = `https://github.com/${raw.slice("git:github.com/".length)}`;
+  else if (/^github\.com\//i.test(raw)) raw = `https://${raw}`;
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (u.hostname.toLowerCase() !== "github.com") return false;
+  const parts = u.pathname.split("/").filter(Boolean);
+  // owner/repo                       → whole repo
+  // owner/repo/tree/<branch>         → whole repo at a branch (no sub-path)
+  // owner/repo/tree/<branch>/<path…> → scoped to a path (allowed)
+  // owner/repo/blob/<branch>/<file>  → a specific file (allowed)
+  if (parts.length === 2) return true;
+  if (parts.length === 4 && parts[2].toLowerCase() === "tree") return true;
+  return false;
+}
+
+export const PublishSchema = z
+  .object({
+    kind: z.enum(["skill", "plugin", "mcp"]),
+    name: slug,
+    summary: z.string().trim().max(200).default(""),
+    description: z.string().trim().max(8000).default(""),
+    source: sourcePointer,
+    installKind: z.enum(["auto", "skill", "plugin", "mcp"]).default("auto"),
+    version: z.string().trim().max(40).default(""),
+    homepage: z.union([httpUrl, z.literal("")]).default(""),
+    repoUrl: z.union([httpUrl, z.literal("")]).default(""),
+    tags: z.array(z.string().trim().min(1).max(30)).max(8).default([]),
+    manifest: z.string().max(16000).default(""),
+    contentHash: z.string().trim().max(128).default(""),
+    riskLevel: z.string().trim().max(20).default(""),
+  })
+  .strict()
+  .superRefine((val, ctx) => {
+    if (val.kind === "skill" && isWholeGitHubRepoSource(val.source)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["source"],
+        message:
+          "source points at a whole GitHub repo, which installs every skill in it. Point it at one skill — e.g. https://github.com/<owner>/<repo>/tree/<branch>/skills/<name> or a raw SKILL.md URL.",
+      });
+    }
+    // A skill lives in a SKILL.md file/dir; install_source only reaches the
+    // npx-package branch for kind auto/mcp, so a bare package-name source
+    // (e.g. "123") resolves as an MCP server, never a skill.
+    if (val.kind === "skill" && looksLikePackage(val.source)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["source"],
+        message:
+          "a skill source must be a SKILL.md URL or a GitHub repo path, not a bare package name.",
+      });
+    }
+    // Explicit plugin installs clone a GitHub package repository/path; they do
+    // not use the generic URL or npm-package MCP fallbacks.
+    if (val.kind === "plugin" && !isGitHubRepoSource(val.source)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["source"],
+        message:
+          "a plugin source must point at a GitHub repository or path containing reasonix-plugin.json, .codex-plugin/plugin.json, .claude-plugin/plugin.json, or a supported .claude-plugin/marketplace.json.",
+      });
+    }
+    if (val.installKind !== "auto" && val.installKind !== val.kind) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["installKind"],
+        message: "installKind must match kind (or be omitted).",
+      });
+    }
+  })
+  .transform((val) => ({
+    ...val,
+    // The registry's public kind is also the installer's capability boundary.
+    // Never persist `auto`: the client planner probes plugins first for auto
+    // sources, which could otherwise install more than the publisher declared.
+    installKind: val.installKind === "auto" ? val.kind : val.installKind,
+  }));
+
+export type PublishInput = z.infer<typeof PublishSchema>;
+
+export const ListQuerySchema = z.object({
+  kind: z.enum(["skill", "plugin", "mcp", "all"]).default("all"),
+  q: z.string().trim().max(100).default(""),
+  sort: z.enum(["new", "trending", "installs"]).default("new"),
+  limit: z.coerce.number().int().min(1).max(100).default(24),
+  offset: z.coerce.number().int().min(0).max(10000).default(0),
+});
+
+function firstIssue(error: z.ZodError): string {
+  const issue = error.issues[0];
+  if (!issue) return "Some fields are invalid.";
+  const path = issue.path.join(".");
+  return path ? `${path}: ${issue.message}` : issue.message;
+}
+
+export async function parseBody<S extends z.ZodTypeAny>(c: Context<AppEnv>, schema: S): Promise<z.infer<S>> {
+  let raw: unknown;
+  try {
+    raw = await c.req.json();
+  } catch {
+    throw new ApiError(400, "invalid_json", "Request body must be valid JSON.");
+  }
+  const result = schema.safeParse(raw);
+  if (!result.success) throw new ApiError(422, "invalid_input", firstIssue(result.error));
+  return result.data;
+}
+
+export function parseQuery<S extends z.ZodTypeAny>(c: Context<AppEnv>, schema: S): z.infer<S> {
+  const params = Object.fromEntries(new URL(c.req.url).searchParams);
+  const result = schema.safeParse(params);
+  if (!result.success) throw new ApiError(422, "invalid_input", firstIssue(result.error));
+  return result.data;
+}

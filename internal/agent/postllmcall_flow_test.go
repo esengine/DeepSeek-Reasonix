@@ -36,6 +36,12 @@ func assistantReasoning(msgs []provider.Message) string {
 	return ""
 }
 
+type reasoningRoundTripScriptedProvider struct {
+	*scriptedProvider
+}
+
+func (reasoningRoundTripScriptedProvider) RequiresReasoningRoundTrip() bool { return true }
+
 // TestPostLLMCallAbsentStreamsReasoningLive is the regression guard: with no
 // PostLLMCall hook, reasoning must still stream chunk-by-chunk (one Reasoning
 // event per delta) so the live "thinking…" display keeps working.
@@ -84,6 +90,56 @@ func TestPostLLMCallTransformsReasoningOnce(t *testing.T) {
 	if got := assistantReasoning(a.session.Messages); got != "TRANSLATED" {
 		t.Fatalf("stored reasoning = %q, want the hook's replacement", got)
 	}
+}
+
+func TestPostLLMCallKeepsOriginalForReasoningRoundTripProvider(t *testing.T) {
+	prov := reasoningRoundTripScriptedProvider{&scriptedProvider{name: "p", turns: reasoningTurn()}}
+	h := &stubHooks{hasPostLLM: true, postLLMOut: "TRANSLATED"}
+	a := New(prov, tool.NewRegistry(), NewSession(""), Options{Hooks: h}, event.Discard)
+
+	if err := a.Run(context.Background(), "go"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := assistantReasoning(a.session.Messages); got != "think A think B" {
+		t.Fatalf("stored reasoning = %q, want raw provider reasoning for replay", got)
+	}
+}
+
+// TestPostLLMCallKeepsOriginalForProviderReasoningMetadata proves that a
+// provider-issued reasoning item ID/status pins the original reasoning text.
+// Replaying hook-transformed text beside that metadata can make the provider
+// reject the next request because the ID no longer identifies the same item.
+func TestPostLLMCallKeepsOriginalForProviderReasoningMetadata(t *testing.T) {
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{{
+		{Type: provider.ChunkReasoning, Text: "think A "},
+		{Type: provider.ChunkReasoning, Text: "think B"},
+		{Type: provider.ChunkReasoning, ReasoningID: "rs_123", ReasoningStatus: "completed"},
+		{Type: provider.ChunkText, Text: "answer"},
+		{Type: provider.ChunkDone},
+	}}}
+	var reasoningEvents []string
+	h := &stubHooks{hasPostLLM: true, postLLMOut: "TRANSLATED"}
+	a := New(prov, tool.NewRegistry(), NewSession(""), Options{Hooks: h}, recordReasoning(&reasoningEvents))
+
+	if err := a.Run(context.Background(), "go"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(reasoningEvents) != 1 || reasoningEvents[0] != "TRANSLATED" {
+		t.Fatalf("want transformed reasoning shown live, got %v", reasoningEvents)
+	}
+	for _, m := range a.session.Messages {
+		if m.Role != provider.RoleAssistant {
+			continue
+		}
+		if m.ReasoningContent != "think A think B" {
+			t.Fatalf("stored reasoning = %q, want original provider text", m.ReasoningContent)
+		}
+		if m.ReasoningID != "rs_123" || m.ReasoningStatus != "completed" {
+			t.Fatalf("stored reasoning metadata = (%q, %q), want (rs_123, completed)", m.ReasoningID, m.ReasoningStatus)
+		}
+		return
+	}
+	t.Fatal("assistant message was not stored")
 }
 
 // TestPostLLMCallConfiguredButNoReasoning makes sure a hook with an empty

@@ -1,13 +1,15 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode } from "react";
-import { Check, CheckCircle2, ChevronDown, ChevronUp, Clipboard, GripVertical, KeyRound, Loader2, Play, QrCode, RefreshCw, Send } from "lucide-react";
+import { lazy, memo, Suspense, startTransition, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { ArrowRight, Bot as BotIcon, BrainCircuit, Check, CheckCircle2, ChevronDown, ChevronUp, CircleDollarSign, Clipboard, ExternalLink, KeyRound, Languages, ListChecks, Loader2, MessageCircle, Monitor, MoreHorizontal, PanelBottom, Play, Power, QrCode, RefreshCw, Send, ShieldCheck, SlidersHorizontal, Trash2, Volume2 } from "lucide-react";
 import { asArray } from "../lib/array";
 import { useDeferredClose } from "../lib/useMountTransition";
-import { app } from "../lib/bridge";
+import { app, openExternal } from "../lib/bridge";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
-import { apiKeyEnvFromProviderName, inferredVisionModels, mergedFetchedProviderModels, providerApiKeyEnvForSave, providerDefaultModel, providerIsConfigured, providerModelCandidates, providerRequiresKey } from "../lib/providerModels";
+import { apiKeyEnvFromProviderName, createLatestRequestGate, inferredVisionModels, mergedFetchedProviderModels, mergeProviderModelContextWindows, providerApiKeyEnvForSave, providerDefaultModel, providerIsConfigured, providerModelCandidates, providerModelContextWindowDrafts, providerModelContextWindowIsSmall, providerRequiresKey } from "../lib/providerModels";
+import { cachedFetchProviderModels, invalidateProviderCacheByAPIKeyEnv, shouldSkipAutoRefresh } from "../lib/providerModelCache";
+import { providerBaseURLForSave, providerRequestURLFromConfig, trimmedBaseURL } from "../lib/providerEndpoint";
+import { opencodeGoPresetDescriptionKeys } from "../lib/providerPresetDescriptions";
 import { useUpdater } from "../lib/useUpdater";
 import {
-  THEME_STYLES,
   applyTheme,
   getTheme,
   getThemeStyle,
@@ -16,7 +18,21 @@ import {
   type Theme,
   type ThemeStyle,
 } from "../lib/theme";
-import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
+import {
+  applyTerminalThemePreference,
+  createTerminalThemeSaveQueue,
+  getTerminalThemePreference,
+  normalizeTerminalThemePreference,
+  type TerminalThemePreference,
+} from "../lib/terminalTheme";
+import {
+  applyConversationWidth,
+  getCachedConversationWidth,
+  normalizeConversationWidth,
+  type ConversationWidth,
+} from "../lib/conversationWidth";
+import { applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
+import { snapZoom, zoomToPercent, saveRestartZoom, getRestartZoom, type ZoomLevel } from "../lib/dpiScale";
 import {
   applyFontFamily,
   applyMonoFontFamily,
@@ -29,9 +45,11 @@ import {
   type FontFamily,
   type MonoFontFamily,
 } from "../lib/fontFamily";
-import { getAvailableFontFamilies, getAvailableMonoFontFamilies } from "../lib/fontAvailability";
 import { getDisplayMode, onDisplayModeChange, setDisplayMode as setLocalDisplayMode } from "../lib/displayMode";
-import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
+import { getProcessFoldPreference, onProcessFoldPreferenceChange, setProcessFoldPreference, type ProcessFoldPreference } from "../lib/processFoldPreference";
+import { applyReasoningDisplayMode, useReasoningDisplayMode, type ReasoningDisplayMode } from "../lib/reasoningDisplayPreference";
+import { normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
+import { normalizeToolApprovalMode } from "../lib/types";
 import {
   comboFromKeyboardEvent,
   detectShortcutPlatform,
@@ -40,11 +58,14 @@ import {
   resetCustomShortcuts,
   resolvedShortcutCombo,
   saveCustomShortcut,
+  shortcutAcceptsCombo,
   shortcutConflict,
   shortcutDefinitions,
   type ShortcutAction,
 } from "../lib/keyboardShortcuts";
-import type { BotAllowlistView, BotConnectionDiagnostic, BotConnectionView, BotInstallStartResult, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
+import type { BotAccessView, BotAllowlistView, BotConnectionDiagnostic, BotConnectionView, BotInstallStartResult, BotRouteView, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderModelCatalogUpdate, ProviderPresetView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
+import { AppearanceOverview } from "./AppearanceOverview";
+import { applyConfiguredBaseAppearance, setBaseAppearance } from "../lib/themePack";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { Tooltip } from "./Tooltip";
 import { AnchoredPopover } from "./AnchoredPopover";
@@ -53,63 +74,135 @@ import { SoundSelect } from "./SoundSelect";
 import { getSuccessPreference, setSuccessPreference, getAttentionPreference, setAttentionPreference, playSuccessChime, playAttentionChime, type SoundWavPref } from "../lib/sound";
 import { ModalCloseButton } from "./ModalCloseButton";
 import { ShortcutComboDisplay } from "./ShortcutComboDisplay";
-
-const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "skills", "memory", "hooks", "shortcuts", "permissions", "sandbox", "network", "appearance", "updates"];
-export type SettingsInitialFocus = { target: "bot-allowlist"; connectionId?: string };
+import { SettingsNavigation, SETTINGS_NAV_TABS } from "./SettingsNavigation";
+import { StatusBarItemsEditor } from "./StatusBarItemsEditor";
+export type SettingsInitialFocus =
+  | { target: "bot-allowlist"; connectionId?: string; requestId?: number }
+  | { target: "model-access"; requestId?: number }
+  | { target: "model-stats"; requestId: number };
+type DesktopPlatform = "darwin" | "windows" | "linux";
 
 const MCPServersSettingsPage = lazy(() => import("./CapabilitiesPanel").then((module) => ({ default: module.MCPServersSettingsPage })));
+const RemoteHostsPage = lazy(() => import("./RemoteHostsPage").then((module) => ({ default: module.RemoteHostsPage })));
 const SkillsSettingsPage = lazy(() => import("./CapabilitiesPanel").then((module) => ({ default: module.SkillsSettingsPage })));
+const PluginsSettingsPage = lazy(() => import("./CapabilitiesPanel").then((module) => ({ default: module.PluginsSettingsPage })));
 const MemorySettingsPage = lazy(() => import("./MemoryPanel").then((module) => ({ default: module.MemorySettingsPage })));
+const SubagentsSettingsPage = lazy(() => import("./SubagentsPanel").then((module) => ({ default: module.SubagentsSettingsPage })));
+const DiagnosticsSettingsPage = lazy(() => import("./DiagnosticsSettingsPage").then((module) => ({ default: module.DiagnosticsSettingsPage })));
+const StorageSettingsPage = lazy(() => import("./StorageSettingsPage").then((module) => ({ default: module.StorageSettingsPage })));
+const UsageStatsPanel = lazy(() => import("./UsageStatsPanel").then((module) => ({ default: module.UsageStatsPanel })));
 const QRCodeSVG = lazy(() => import("qrcode.react").then((module) => ({ default: module.QRCodeSVG })));
 
-// SettingsPanel is the desktop settings centre — a centred modal with left
-// navigation and a right content area. It hosts all settings pages plus MCP,
-// Skills, and Memory management, replacing the old per-feature drawers.
+// SettingsPanel is the desktop settings centre: a modal hosting settings pages and capability management.
 export function SettingsPanel({
   onClose,
   onChanged,
   initialTab,
   initialFocus,
   agentRunning = false,
+  desktopPlatform,
+  onUseSubagent,
+  activeWorkspaceKey = "",
 }: {
   onClose: () => void;
   onChanged: (settings?: SettingsView | null) => void;
   initialTab?: SettingsTab;
   initialFocus?: SettingsInitialFocus;
   agentRunning?: boolean;
+  desktopPlatform: DesktopPlatform;
+  onUseSubagent: (command: string) => void;
+  activeWorkspaceKey?: string;
 }) {
   const t = useT();
   const [s, setS] = useState<SettingsView | null>(null);
+  const [loadingSettings, setLoadingSettings] = useState(true);
+  const [settingsLoadFailed, setSettingsLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [theme, setThemeState] = useState<Theme>(getTheme());
   const [themeStyle, setThemeStyleState] = useState<ThemeStyle>(() => getThemeStyle(getTheme()));
+  const [terminalTheme, setTerminalThemeState] = useState<TerminalThemePreference>(getTerminalThemePreference());
+  const [conversationWidth, setConversationWidth] = useState<ConversationWidth>(() => getCachedConversationWidth());
   const [textSize, setTextSizeState] = useState<TextSize>(getTextSize());
+  const [zoomPct, setZoomPct] = useState<number>(zoomToPercent(getRestartZoom()));
   const [fontFamily, setFontFamilyState] = useState<FontFamily>(getFontFamily());
   const [monoFontFamily, setMonoFontFamilyState] = useState<MonoFontFamily>(getMonoFontFamily());
   const [customFontName, setCustomFontNameState] = useState<string>(getCustomFontName());
   const [customMonoFontName, setCustomMonoFontNameState] = useState<string>(getCustomMonoFontName());
   const [tab, setTab] = useState<SettingsTab>(initialTab === "providers" ? "models" : initialTab ?? "general");
-  // Play the modal exit animation, then let the parent unmount us.
-  const { status, requestClose } = useDeferredClose(onClose, 240);
+  const settingsContentRef = useRef<HTMLElement>(null);
+  const pendingSubagentCommandRef = useRef<string | null>(null);
+  // Play the modal exit animation, then let the parent unmount us and focus
+  // the composer with the selected slash command.
+  const { status, requestClose } = useDeferredClose(() => {
+    const command = pendingSubagentCommandRef.current;
+    pendingSubagentCommandRef.current = null;
+    onClose();
+    if (command) onUseSubagent(command);
+  }, 240);
+  const zoomSaveSeq = useRef(0);
+  const terminalThemeSaveSeq = useRef(0);
+  const terminalThemeSavePending = useRef(false);
+  const terminalThemeSaveQueue = useRef<ReturnType<typeof createTerminalThemeSaveQueue> | null>(null);
+  if (!terminalThemeSaveQueue.current) {
+    terminalThemeSaveQueue.current = createTerminalThemeSaveQueue((next) => app.SetDesktopTerminalTheme(next));
+  }
 
   const reload = useCallback(async () => {
-    const next = normalizeSettingsView(await app.Settings().catch(() => null));
-    setS(next);
-    return next;
+    setLoadingSettings(true);
+    setSettingsLoadFailed(false);
+    try {
+      const next = normalizeSettingsView(await app.Settings());
+      setS(next);
+      return next;
+    } catch {
+      setS(null);
+      setSettingsLoadFailed(true);
+      return null;
+    } finally {
+      setLoadingSettings(false);
+    }
   }, []);
   useEffect(() => {
     void reload();
     if (initialTab) setTab(initialTab === "providers" ? "models" : initialTab);
   }, [initialTab, reload]);
   useEffect(() => {
+    const content = settingsContentRef.current;
+    if (!content) return;
+    content.scrollTop = 0;
+    content.scrollLeft = 0;
+  }, [tab]);
+  useEffect(() => {
     if (!s) return;
     const nextTheme = normalizeThemePreference(s.desktopTheme);
     const nextStyle = normalizeThemeStyleForTheme(s.desktopThemeStyle, nextTheme);
     setThemeState(nextTheme);
     setThemeStyleState(nextStyle);
-  }, [s?.desktopTheme, s?.desktopThemeStyle]);
+    if (!terminalThemeSavePending.current) {
+      setTerminalThemeState(applyTerminalThemePreference(s.desktopTerminalTheme));
+    }
+    setConversationWidth(applyConversationWidth(s.conversationWidth));
+  }, [s?.conversationWidth, s?.desktopTheme, s?.desktopThemeStyle, s?.desktopTerminalTheme]);
+  useEffect(() => {
+    if (desktopPlatform !== "windows") return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const persisted = await app.GetDesktopZoomFactor();
+        if (cancelled || typeof persisted !== "number" || !Number.isFinite(persisted)) return;
+        const snapped = snapZoom(persisted);
+        saveRestartZoom(snapped);
+        setZoomPct(zoomToPercent(snapped));
+      } catch {
+        // Older mocks or startup races can lack the binding; keep the local fallback.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [desktopPlatform]);
 
   // apply runs a mutation, re-reads settings, and refreshes the topbar/model.
   const apply = useCallback(async (fn: () => Promise<unknown>) => {
@@ -120,15 +213,29 @@ export function SettingsPanel({
       const result = await fn();
       const next = await reload();
       onChanged(next);
+      window.dispatchEvent(new Event("reasonix:model-catalog-changed"));
       if (typeof result === "string" && result.trim()) {
         setWarning(result.trim());
       }
+      return true;
     } catch (e) {
-      setErr(String((e as Error)?.message ?? e));
+      // Settings writes can be two-phase: persistence may succeed before a
+      // runtime refresh reports a real boot error. Re-read the authoritative
+      // state even on failure so the UI never offers an action that already
+      // committed (for example, a DeepSeek protocol upgrade).
+      try {
+        const next = await reload();
+        onChanged(next);
+        window.dispatchEvent(new Event("reasonix:model-catalog-changed"));
+      } catch {
+        // Keep the original mutation error; it is the actionable failure.
+      }
+      setErr(formatSettingsError(e, t));
+      return false;
     } finally {
       setBusy(false);
     }
-  }, [reload, onChanged]);
+  }, [reload, onChanged, t]);
   const backgroundApply = useCallback(async (fn: () => Promise<void>) => {
     setErr(null);
     setWarning(null);
@@ -136,10 +243,55 @@ export function SettingsPanel({
       await fn();
       const next = await reload();
       onChanged(next);
+      window.dispatchEvent(new Event("reasonix:model-catalog-changed"));
     } catch (e) {
-      setErr(String((e as Error)?.message ?? e));
+      setErr(formatSettingsError(e, t));
     }
-  }, [reload, onChanged]);
+  }, [reload, onChanged, t]);
+  const setTerminalThemePreference = useCallback((next: TerminalThemePreference) => {
+    const seq = ++terminalThemeSaveSeq.current;
+    const previous = getTerminalThemePreference();
+    terminalThemeSavePending.current = true;
+    setErr(null);
+    setWarning(null);
+    applyTerminalThemePreference(next);
+    setTerminalThemeState(next);
+
+    void terminalThemeSaveQueue.current!(next)
+      .then(async () => {
+        if (seq !== terminalThemeSaveSeq.current) return;
+        const refreshed = await reload();
+        if (seq !== terminalThemeSaveSeq.current) return;
+        terminalThemeSavePending.current = false;
+        onChanged(refreshed);
+      })
+      .catch(async (error) => {
+        if (seq !== terminalThemeSaveSeq.current) return;
+        const refreshed = await reload();
+        if (seq !== terminalThemeSaveSeq.current) return;
+        const restored = normalizeTerminalThemePreference(refreshed?.desktopTerminalTheme ?? previous);
+        applyTerminalThemePreference(restored);
+        setTerminalThemeState(restored);
+        terminalThemeSavePending.current = false;
+        setErr(formatSettingsError(error, t));
+        onChanged(refreshed);
+      });
+  }, [onChanged, reload, t]);
+  const setRestartZoom = useCallback(async (zoom: ZoomLevel) => {
+    const snapped = snapZoom(zoom);
+    const seq = ++zoomSaveSeq.current;
+    setErr(null);
+    setWarning(null);
+    setZoomPct(zoomToPercent(snapped));
+    try {
+      await app.SetDesktopZoomFactor(snapped);
+      if (seq === zoomSaveSeq.current) saveRestartZoom(snapped);
+    } catch (e) {
+      if (seq !== zoomSaveSeq.current) return;
+      setErr(formatSettingsError(e, t));
+      setZoomPct(zoomToPercent(getRestartZoom()));
+    }
+  }, [t]);
 
   // Close on Esc
   useEffect(() => {
@@ -150,14 +302,22 @@ export function SettingsPanel({
     return () => document.removeEventListener("keydown", onKey);
   }, [requestClose]);
 
-  // The settings-reliant pages (general, models, network, permissions,
-  // sandbox, appearance, updates) need SettingsView loaded. MCP, Skills, and Memory
-  // load their own data and render regardless.
-  const needsSettings = tab === "general" || tab === "models" || tab === "bots" || tab === "network" || tab === "permissions" || tab === "sandbox" || tab === "appearance" || tab === "updates";
+  // These pages need SettingsView; capability pages load their own data.
+  const needsSettings = tab === "general" || tab === "models" || tab === "bots" || tab === "subagents" || tab === "network" || tab === "permissions" || tab === "sandbox" || tab === "appearance" || tab === "updates";
   const lazySettingsPageFallback = <div className="empty">{t("settings.loading")}</div>;
+  const settingsNavigationItems = useMemo(() => SETTINGS_NAV_TABS.map((id) => ({
+    id,
+    label: settingsTabLabel(id, t),
+    meta: s ? settingsTabMeta(id, s, t) : "",
+    searchTerms: id === "general" ? [
+      "settings.desktopLayoutStyle", "settings.language", "settings.currency", "settings.displayMode",
+      "settings.reasoningDisplay", "settings.processFold", "settings.closeBehavior",
+      "settings.defaultToolApprovalMode", "settings.sound", "settings.statusBarStyle", "settings.statusBarItems",
+    ].map((key) => t(key as DictKey)).join(" ") : "",
+  })), [s, t]);
 
   return (
-    <div className="management-modal-backdrop settings-modal-backdrop" data-state={status} onClick={(e) => { if (e.target === e.currentTarget) requestClose(); }}>
+    <div className="management-modal-backdrop settings-modal-backdrop" data-state={status} onMouseDown={(e) => { if (e.target === e.currentTarget) requestClose(); }}>
       <div className="management-modal settings-modal" data-state={status}>
         <header className="management-modal__head settings-modal__head">
           <div className="management-modal__title settings-modal__title">{t("settings.title")}</div>
@@ -165,60 +325,75 @@ export function SettingsPanel({
         </header>
 
         <div className="settings-center">
-          <nav className="settings-center__nav" aria-label={t("settings.title")}>
-            {SETTINGS_TABS.map((id) => (
-              <button
-                key={id}
-                className={`settings-center__navitem${tab === id ? " settings-center__navitem--active" : ""}`}
-                onClick={() => setTab(id)}
-              >
-                <span>{settingsTabLabel(id, t)}</span>
-                {s && <small>{settingsTabMeta(id, s, t)}</small>}
-              </button>
-            ))}
-          </nav>
-          <main className="settings-center__content">
+          <SettingsNavigation items={settingsNavigationItems} activeTab={tab} onSelect={setTab} />
+          <main ref={settingsContentRef} className="settings-center__content">
+            {needsSettings && settingsLoadFailed && (
+              <div className="banner banner--error settings-load-error" role="alert">
+                <span>{t("settings.loadFailed")}</span>
+                <button className="btn btn--small" type="button" onClick={() => void reload()}>{t("common.retry")}</button>
+              </div>
+            )}
             {needsSettings && err && <div className="banner banner--error">{err}</div>}
             {needsSettings && warning && <div className="banner banner--warning">{warning}</div>}
             {needsSettings && !s ? (
-              <div className="empty">{t("settings.loading")}</div>
+              loadingSettings ? <div className="empty">{t("settings.loading")}</div> : null
             ) : (
               <>
                 {tab === "general" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><GeneralSection s={s} busy={busy} apply={apply} agentRunning={agentRunning} /></SettingsPageShell>}
-                {tab === "models" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><ModelsSection s={s} busy={busy} apply={apply} backgroundApply={backgroundApply} /></SettingsPageShell>}
+                {tab === "models" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><ModelsSection s={s} busy={busy} apply={apply} backgroundApply={backgroundApply} initialFocus={initialFocus} /></SettingsPageShell>}
                 {tab === "bots" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><BotsSection s={s} busy={busy} apply={apply} initialFocus={initialFocus} /></SettingsPageShell>}
                 {tab === "mcp" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><MCPServersSettingsPage /></Suspense></SettingsPageShell>}
-                {tab === "skills" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><SkillsSettingsPage /></Suspense></SettingsPageShell>}
+                {tab === "remote" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><RemoteHostsPage /></Suspense></SettingsPageShell>}
+                {tab === "skills" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><SkillsSettingsPage activeWorkspaceKey={activeWorkspaceKey} /></Suspense></SettingsPageShell>}
+                {tab === "subagents" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><Suspense fallback={lazySettingsPageFallback}><SubagentsSettingsPage s={s} onUseInChat={(command) => {
+                  pendingSubagentCommandRef.current = command;
+                  requestClose();
+                }} /></Suspense></SettingsPageShell>}
+                {tab === "plugins" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><PluginsSettingsPage /></Suspense></SettingsPageShell>}
                 {tab === "memory" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><MemorySettingsPage /></Suspense></SettingsPageShell>}
                 {tab === "hooks" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><HooksSection onChanged={onChanged} /></SettingsPageShell>}
+                {tab === "diagnostics" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><DiagnosticsSettingsPage onNavigate={setTab} /></Suspense></SettingsPageShell>}
                 {tab === "shortcuts" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><ShortcutsSection /></SettingsPageShell>}
                 {tab === "permissions" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><PermissionsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
-                {tab === "sandbox" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
+                {tab === "sandbox" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} windows={desktopPlatform === "windows"} /></SettingsPageShell>}
                 {tab === "network" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><NetworkSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "appearance" && s && (
                   <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}>
-                    <AppearanceSection
+                    <AppearanceOverview
                       theme={theme}
                       themeStyle={themeStyle}
+                      terminalTheme={terminalTheme}
+                      conversationWidth={conversationWidth}
                       textSize={textSize}
+                      showDisplayZoom={desktopPlatform === "windows"}
+                      zoomPct={zoomPct}
                       fontFamily={fontFamily}
                       monoFontFamily={monoFontFamily}
                       customFontName={customFontName}
                       customMonoFontName={customMonoFontName}
                       onTheme={(nextTheme) => {
-                        applyTheme(nextTheme, themeStyle, { persist: false });
+                        applyConfiguredBaseAppearance(nextTheme, themeStyle);
                         setThemeState(nextTheme);
                         void apply(() => app.SetDesktopAppearance(nextTheme, themeStyle));
                       }}
-                      onThemeStyle={(style) => {
-                        applyTheme(theme, style, { persist: false });
-                        setThemeStyleState(style);
-                        void apply(() => app.SetDesktopAppearance(theme, style));
+                      onConversationWidth={(width) => {
+                        applyConversationWidth(width);
+                        setConversationWidth(width);
+                        void apply(() => app.SetDesktopConversationWidth(width));
                       }}
+                      onThemeStyle={(style) => {
+                        // AppearanceOverview already persists via ActivateBaseStyle /
+                        // experience APIs. Parent only mirrors React + DOM state.
+                        applyTheme(getTheme(), style, { persist: false });
+                        setThemeStyleState(style);
+                        setBaseAppearance(getTheme(), style);
+                      }}
+                      onTerminalTheme={setTerminalThemePreference}
                       onTextSize={(size) => {
                         applyTextSize(size);
                         setTextSizeState(size);
                       }}
+                      onRestartZoom={setRestartZoom}
                       onFontFamily={(font) => {
                         applyFontFamily(font);
                         setFontFamilyState(font);
@@ -240,10 +415,12 @@ export function SettingsPanel({
                     />
                   </SettingsPageShell>
                 )}
+                {tab === "storage" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><StorageSettingsPage /></Suspense></SettingsPageShell>}
                 {tab === "updates" && s && (
                   <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}>
                     <UpdatesSection
                       configPath={s.configPath}
+                      shadowedByPath={s.shadowedByPath}
                       checkUpdates={s.checkUpdates}
                       telemetry={s.telemetry !== false}
                       metrics={s.metrics !== false}
@@ -261,16 +438,18 @@ export function SettingsPanel({
   );
 }
 
-function SettingsPageShell({ s: _s, tab, children }: { s: SettingsView | null; tab: SettingsTab; busy: boolean; apply: (fn: () => Promise<unknown>) => Promise<void>; children: ReactNode }) {
+function SettingsPageShell({ s: _s, tab, children }: { s: SettingsView | null; tab: SettingsTab; busy: boolean; apply: (fn: () => Promise<unknown>) => Promise<boolean>; children: ReactNode }) {
   const t = useT();
   const descKey = `settings.pageDesc.${tab}` as keyof typeof import("../locales/en").en;
   const desc = t(descKey as any);
   return (
     <div className={`settings-page settings-page--${settingsPageKind(tab)} settings-page--${tab}`}>
-      <div className="settings-page__header">
-        <h2 className="settings-page__title">{settingsTabPageTitle(tab, t)}</h2>
-        {typeof desc === "string" && desc !== `settings.pageDesc.${tab}` && <p className="settings-page__desc">{desc}</p>}
-      </div>
+      {tab !== "appearance" ? (
+        <div className="settings-page__header">
+          <h2 className="settings-page__title">{settingsTabPageTitle(tab, t)}</h2>
+          {typeof desc === "string" && desc !== `settings.pageDesc.${tab}` && <p className="settings-page__desc">{desc}</p>}
+        </div>
+      ) : null}
       {children}
     </div>
   );
@@ -280,8 +459,12 @@ function settingsPageKind(tab: SettingsTab): "form" | "manager" {
   switch (tab) {
     case "models":
     case "mcp":
+    case "remote":
     case "skills":
+    case "subagents":
+    case "plugins":
     case "memory":
+    case "appearance":
       return "manager";
     default:
       return "form";
@@ -323,25 +506,30 @@ function SettingsSection({
 function SettingsField({
   label,
   hint,
+  icon,
   children,
   className,
   stacked = false,
 }: {
   label: ReactNode;
   hint?: ReactNode;
+  icon?: ReactNode;
   children: ReactNode;
   className?: string;
   stacked?: boolean;
 }) {
   return (
     <div className={`settings-field${stacked ? " settings-field--stacked" : ""}${className ? ` ${className}` : ""}`}>
-      <div className="settings-field__copy">
-        <div className="settings-field__label">{label}</div>
-        {hint && (
-          <div className="settings-field__hint">
-            <SettingsHint hint={hint} />
-          </div>
-        )}
+      <div className={`settings-field__copy${icon ? " settings-field__copy--icon" : ""}`}>
+        {icon && <span className="settings-field__icon" aria-hidden="true">{icon}</span>}
+        <div className="settings-field__copy-body">
+          <div className="settings-field__label">{label}</div>
+          {hint && (
+            <div className="settings-field__hint">
+              <SettingsHint hint={hint} />
+            </div>
+          )}
+        </div>
       </div>
       <div className="settings-field__control">{children}</div>
     </div>
@@ -364,7 +552,9 @@ function settingsTabPageTitle(id: SettingsTab, t: ReturnType<typeof useT>): stri
   switch (id) {
     case "mcp": return t("settings.tab.mcp");
     case "skills": return t("settings.tab.skills");
+    case "plugins": return t("settings.tab.plugins");
     case "memory": return t("settings.tab.memory");
+    case "diagnostics": return t("settings.tab.diagnostics");
     case "shortcuts": return t("settings.tab.shortcuts");
     default: return settingsTabLabel(id, t);
   }
@@ -373,11 +563,12 @@ function settingsTabPageTitle(id: SettingsTab, t: ReturnType<typeof useT>): stri
 type SectionProps = {
   s: SettingsView;
   busy: boolean;
-  apply: (fn: () => Promise<unknown>) => Promise<void>;
+  apply: (fn: () => Promise<unknown>) => Promise<boolean>;
 };
 
 type ModelsSectionProps = SectionProps & {
   backgroundApply: (fn: () => Promise<void>) => Promise<void>;
+  initialFocus?: SettingsInitialFocus;
 };
 
 function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
@@ -392,12 +583,20 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
       return t("settings.tab.bots");
     case "mcp":
       return t("settings.tab.mcp");
+    case "remote":
+      return t("settings.tab.remote");
     case "skills":
       return t("settings.tab.skills");
+    case "subagents":
+      return t("settings.tab.subagents");
+    case "plugins":
+      return t("settings.tab.plugins");
     case "memory":
       return t("settings.tab.memory");
     case "hooks":
       return t("settings.tab.hooks");
+    case "diagnostics":
+      return t("settings.tab.diagnostics");
     case "shortcuts":
       return t("settings.tab.shortcuts");
     case "network":
@@ -406,8 +605,8 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
       return t("settings.tab.permissions");
     case "sandbox":
       return t("settings.tab.sandbox");
-    case "appearance":
-      return t("settings.tab.appearance");
+    case "appearance": return t("settings.tab.appearance");
+    case "storage": return t("settings.tab.storage");
     case "updates":
       return t("settings.tab.updates");
   }
@@ -425,12 +624,20 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
       return botSettingsMeta(s.bot, t);
     case "mcp":
       return t("caps.connectorsTab");
+    case "remote":
+      return t("remote.tabHint");
     case "skills":
-      return t("caps.skillsTab");
+      return t("settings.tabSub.skills");
+    case "subagents":
+      return t("subagents.tabHint");
+    case "plugins":
+      return t("settings.tabSub.plugins");
     case "memory":
       return t("settings.tabSub.memory");
     case "hooks":
       return t("settings.tabSub.hooks");
+    case "diagnostics":
+      return t("settings.tabSub.diagnostics");
     case "shortcuts":
       return t("settings.tabSub.shortcuts");
     case "network":
@@ -439,8 +646,8 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
       return permissionModeLabel(s.permissions.mode, t);
     case "sandbox":
       return sandboxModeLabel(s.sandbox.bash, t);
-    case "appearance":
-      return t("settings.appearanceMeta");
+    case "appearance": return t("settings.appearanceMeta");
+    case "storage": return t("settings.storageMeta");
     case "updates":
       return t("settings.updatesMeta");
   }
@@ -464,28 +671,58 @@ function botSettingsMeta(bot: BotSettingsView, t: ReturnType<typeof useT>): stri
   return t("settings.botConnectionCount", { n: connections });
 }
 
-function ShortcutsSection() {
+export function ShortcutsSection() {
   const t = useT();
   const [platform] = useState(() => detectShortcutPlatform());
   const [revision, setRevision] = useState(0);
   const [recording, setRecording] = useState<ShortcutAction | null>(null);
   const [conflict, setConflict] = useState<{ action: ShortcutAction; conflictAction: ShortcutAction } | null>(null);
+  const [unsupportedAction, setUnsupportedAction] = useState<ShortcutAction | null>(null);
 
   useEffect(() => onShortcutsChanged(() => setRevision((value) => value + 1)), []);
 
   const definitions = shortcutDefinitions();
   const commitShortcut = (action: ShortcutAction, event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      setConflict(null);
+      setUnsupportedAction(null);
+      setRecording(null);
+      return;
+    }
     const combo = comboFromKeyboardEvent(event.nativeEvent);
     if (!combo) return;
+    if (!shortcutAcceptsCombo(action, combo)) {
+      // Let the browser move focus before onBlur cancels recording. Updating
+      // recording state synchronously here can keep focus on the re-rendered
+      // button in WebKit.
+      if (event.key === "Tab") {
+        const recorder = event.currentTarget;
+        queueMicrotask(() => {
+          // Native Tab normally moves focus first. If this WebView does not,
+          // release focus so the recorder cannot become a keyboard trap.
+          if (document.activeElement === recorder) recorder.blur();
+        });
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setConflict(null);
+      setUnsupportedAction(action);
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     const conflictDefinition = shortcutConflict(action, combo, platform);
     if (conflictDefinition) {
+      setUnsupportedAction(null);
       setConflict({ action, conflictAction: conflictDefinition.action });
       return;
     }
     saveCustomShortcut(action, combo);
     setConflict(null);
+    setUnsupportedAction(null);
     setRecording(null);
     setRevision((value) => value + 1);
   };
@@ -503,6 +740,7 @@ function ShortcutsSection() {
           onClick={() => {
             resetCustomShortcuts();
             setConflict(null);
+            setUnsupportedAction(null);
             setRecording(null);
             setRevision((value) => value + 1);
           }}
@@ -517,6 +755,13 @@ function ShortcutsSection() {
             {t("settings.shortcutsConflict", {
               action: t(definitions.find((definition) => definition.action === conflict.action)?.labelKey ?? "settings.tab.shortcuts"),
               conflict: t(definitions.find((definition) => definition.action === conflict.conflictAction)?.labelKey ?? "settings.tab.shortcuts"),
+            })}
+          </div>
+        )}
+        {unsupportedAction && (
+          <div className="shortcuts-settings__conflict" role="alert">
+            {t("settings.shortcutsEnterOnly", {
+              action: t(definitions.find((definition) => definition.action === unsupportedAction)?.labelKey ?? "settings.tab.shortcuts"),
             })}
           </div>
         )}
@@ -536,12 +781,24 @@ function ShortcutsSection() {
                 <button
                   className={`shortcuts-settings__key${isRecording ? " shortcuts-settings__key--recording" : ""}${definition.configurable === false ? " shortcuts-settings__key--locked" : ""}`}
                   type="button"
+                  data-shortcut-action={definition.action}
                   disabled={definition.configurable === false}
                   aria-label={isRecording ? t("settings.shortcutsRecording") : display}
                   aria-pressed={isRecording}
-                  onClick={() => {
+                  onClick={(event) => {
                     setRecording(definition.action);
                     setConflict(null);
+                    setUnsupportedAction(null);
+                    // WebKit (the desktop WKWebView) does not focus buttons on
+                    // click, and the recorder listens for keys on the button —
+                    // without this the recorder never receives any keydown.
+                    event.currentTarget.focus();
+                  }}
+                  onBlur={() => {
+                    if (!isRecording) return;
+                    setConflict(null);
+                    setUnsupportedAction(null);
+                    setRecording(null);
                   }}
                   onKeyDown={(event) => isRecording && commitShortcut(definition.action, event)}
                 >
@@ -554,6 +811,7 @@ function ShortcutsSection() {
                   onClick={() => {
                     saveCustomShortcut(definition.action, null);
                     setConflict(null);
+                    setUnsupportedAction(null);
                     setRecording(null);
                     setRevision((value) => value + 1);
                   }}
@@ -570,7 +828,7 @@ function ShortcutsSection() {
 }
 
 // allRefs flattens providers into "provider/model" refs for the model selectors.
-function allRefs(s: SettingsView): string[] {
+export function allRefs(s: SettingsView): string[] {
   const out: string[] = [];
   for (const p of s.providers) {
     if (!p.added || !providerIsConfigured(p)) continue;
@@ -581,7 +839,7 @@ function allRefs(s: SettingsView): string[] {
 
 // toRef normalises a stored model id (a provider name, a bare model, or a ref) to
 // a "provider/model" ref so a <select> of refs can show it selected.
-function toRef(model: string, s: SettingsView): string {
+export function toRef(model: string, s: SettingsView): string {
   if (!model) return "";
   if (model.includes("/")) return model;
   const byName = s.providers.find((p) => p.name === model);
@@ -593,20 +851,26 @@ function toRef(model: string, s: SettingsView): string {
 
 const PROXY_MODES = ["auto", "custom", "off"] as const;
 
-// EFFORT_PRESETS is the canonical union of /effort levels the kernel
-// recognises. The settings UI exposes these as toggleable checkboxes; users
-// can additionally add arbitrary custom names via the "Add" input. The order
-// here is what the user sees in the dropdown.
-const EFFORT_PRESETS: readonly string[] = ["low", "medium", "high", "xhigh", "max"];
-const REASONING_PROTOCOLS: readonly string[] = ["", "deepseek", "openai", "none"];
+// EFFORT_PRESETS is the canonical union of /effort levels the kernel recognises.
+// The settings UI uses it for subagent defaults; provider-specific levels are
+// inferred by the backend or edited in TOML for rare gateways.
+export const EFFORT_PRESETS: readonly string[] = ["low", "medium", "high", "xhigh", "max"];
+const COMPACT_RATIO_PRESETS = [
+  [0.7, "settings.compactRatioPreset.70"],
+  [0.8, "settings.compactRatioPreset.80"],
+  [0.85, "settings.compactRatioPreset.85"],
+] as const;
+const REASONING_PROTOCOLS: readonly string[] = ["", "deepseek", "glm", "kimi-k3", "openai", "none"];
+const THINKING_MODES: readonly string[] = ["", "enabled", "disabled", "adaptive"];
 const PROXY_TYPES = ["http", "https", "socks5", "socks5h"] as const;
 const LANGUAGE_PREFS: LangPref[] = ["", "zh", "en"];
-const AUTO_PLAN_MODES = ["off", "on"] as const;
+const TOOL_APPROVAL_MODES = ["ask", "auto", "yolo"] as const;
 const BOT_TOOL_APPROVAL_MODES = ["", "ask", "auto", "yolo"] as const;
+const BOT_QUEUE_MODES = ["steer", "followup", "collect", "interrupt"] as const;
+const BOT_QUEUE_DROPS = ["summarize", "old", "new"] as const;
+const BOT_ROUTE_CHAT_TYPES = ["", "dm", "group", "guild", "direct", "thread"] as const;
 
 type ProxyMode = (typeof PROXY_MODES)[number];
-type AutoPlanMode = (typeof AUTO_PLAN_MODES)[number];
-type BotConnectionToolApprovalMode = (typeof BOT_TOOL_APPROVAL_MODES)[number];
 
 function normalizeProxyMode(mode: string): ProxyMode {
   switch (mode) {
@@ -623,17 +887,214 @@ function normalizeNetworkView(network: NetworkView): NetworkView {
   return { ...network, proxyMode: normalizeProxyMode(network.proxyMode) };
 }
 
-function normalizeAutoPlan(mode: string | undefined): AutoPlanMode {
-  return mode === "ask" || mode === "on" ? "on" : "off";
-}
-
 function normalizeReasoningProtocol(protocol: string | undefined): string {
   return REASONING_PROTOCOLS.includes(protocol ?? "") ? protocol ?? "" : "";
+}
+
+function normalizeThinkingMode(thinking: string | undefined): string {
+  const v = String(thinking ?? "").trim().toLowerCase();
+  return THINKING_MODES.includes(v) ? v : "";
+}
+
+export function providerEditorEffectiveKind(isNewCustomProvider: boolean, kind: string, kinds: string[]): string {
+  void isNewCustomProvider;
+  const selected = kind.trim();
+  return selected || kinds[0] || "openai";
+}
+
+function formatProviderHeaders(headers: Record<string, string> | null | undefined): string {
+  const entries = Object.entries(headers ?? {})
+    .map(([key, value]) => [key.trim(), String(value ?? "").trim()] as const)
+    .filter(([key, value]) => key && value)
+    .sort(([a], [b]) => a.localeCompare(b));
+  return entries.map(([key, value]) => `${key}: ${value}`).join("\n");
+}
+
+function parseProviderHeaders(raw: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const colon = trimmed.indexOf(":");
+    const eq = trimmed.indexOf("=");
+    const cut = colon >= 0 && (eq < 0 || colon < eq) ? colon : eq;
+    if (cut <= 0) continue;
+    const key = trimmed.slice(0, cut).trim();
+    const value = trimmed.slice(cut + 1).trim();
+    if (key && value) out[key] = value;
+  }
+  return out;
+}
+
+function sortedJSONValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortedJSONValue);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value as Record<string, unknown>).sort((a, b) => a.localeCompare(b))) {
+      out[key] = sortedJSONValue((value as Record<string, unknown>)[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
+function formatSettingsError(error: unknown, t: ReturnType<typeof useT>): string {
+  const msg = String((error as Error)?.message ?? error ?? "").trim();
+  const unknownModel = /^unknown model (.+)$/i.exec(msg);
+  if (unknownModel) return t("settings.errorUnknownModel", { model: unknownModel[1] });
+  const providerNotAdded = /^model (.+) is not available because provider (.+) is not added$/i.exec(msg);
+  if (providerNotAdded) return t("settings.errorModelProviderMissing", { model: providerNotAdded[1], provider: providerNotAdded[2] });
+  const providerNoKey = /^model (.+) is not available because provider (.+) has no key$/i.exec(msg);
+  if (providerNoKey) return t("settings.errorModelProviderNoKey", { model: providerNoKey[1], provider: providerNoKey[2] });
+  if (/^background session is still open; reopen or close it before upgrading the DeepSeek provider protocol$/i.test(msg)) {
+    return t("settings.errorProviderDetached");
+  }
+  const removeAccessBusy = /^finish or cancel active work using (.+) before removing the provider access$/i.exec(msg);
+  if (removeAccessBusy) return t("settings.errorRemoveAccessBusy", { provider: removeAccessBusy[1] });
+  const removeAccessDetached = /^background session is still using (.+); reopen or close it before removing the provider access$/i.exec(msg);
+  if (removeAccessDetached) return t("settings.errorProviderDetached");
+  const removeAccessNoFallback = /^remove provider access: (.+) is in use and no other configured provider exists$/i.exec(msg);
+  if (removeAccessNoFallback) return t("settings.errorRemoveProviderNoFallback", { provider: removeAccessNoFallback[1] });
+  const deleteProviderNoFallback = /^remove provider: (.+) is in use and no other configured provider exists$/i.exec(msg);
+  if (deleteProviderNoFallback) return t("settings.errorRemoveProviderNoFallback", { provider: deleteProviderNoFallback[1] });
+  const deleteProviderBusy = /^finish or cancel active work using (.+) before deleting the provider$/i.exec(msg);
+  if (deleteProviderBusy) return t("settings.errorDeleteProviderBusy", { provider: deleteProviderBusy[1] });
+  const deleteProviderDetached = /^background session is still using (.+); reopen or close it before deleting the provider$/i.exec(msg);
+  if (deleteProviderDetached) return t("settings.errorProviderDetached");
+  const saveBeforeRemoveAccess = /^save current session before removing provider access: (.+)$/is.exec(msg);
+  if (saveBeforeRemoveAccess) return t("settings.errorSaveBeforeRemoveAccess", { err: saveBeforeRemoveAccess[1] });
+  const saveBeforeDeleteProvider = /^save current session before deleting provider: (.+)$/is.exec(msg);
+  if (saveBeforeDeleteProvider) return t("settings.errorSaveBeforeDeleteProvider", { err: saveBeforeDeleteProvider[1] });
+  const removeProviderUsed = /^remove provider: (.+) is used by open tabs and no other configured provider exists$/i.exec(msg);
+  if (removeProviderUsed) return t("settings.errorRemoveProviderNoFallback", { provider: removeProviderUsed[1] });
+  return msg || t("settings.errorUnknown");
+}
+
+function validateProviderExtraBodyValue(value: unknown, path = "extra_body", t?: ReturnType<typeof useT>): void {
+  if (value === null) {
+    throw new Error(t ? t("settings.providerExtraBodyNull", { path }) : `${path} cannot contain null`);
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => validateProviderExtraBodyValue(item, `${path}[${index}]`, t));
+    return;
+  }
+  if (typeof value === "object") {
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      validateProviderExtraBodyValue(child, `${path}.${key}`, t);
+    }
+  }
+}
+
+export function formatProviderExtraBody(extraBody: Record<string, unknown> | null | undefined): string {
+  const cleaned: Record<string, unknown> = {};
+  for (const [rawKey, value] of Object.entries(extraBody ?? {})) {
+    const key = rawKey.trim();
+    if (!key || value === undefined) continue;
+    cleaned[key] = value;
+  }
+  if (Object.keys(cleaned).length === 0) return "";
+  return JSON.stringify(sortedJSONValue(cleaned), null, 2);
+}
+
+export function parseProviderExtraBody(raw: string, t?: ReturnType<typeof useT>): Record<string, unknown> {
+  const trimmed = raw.trim();
+  if (!trimmed) return {};
+  const parsed = JSON.parse(trimmed) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(t ? t("settings.providerExtraBodyObjectRequired") : "extra body must be a JSON object");
+  }
+  validateProviderExtraBodyValue(parsed, "extra_body", t);
+  const out: Record<string, unknown> = {};
+  for (const [rawKey, value] of Object.entries(parsed as Record<string, unknown>)) {
+    const key = rawKey.trim();
+    if (key) out[key] = value;
+  }
+  return out;
+}
+
+export function providerExtraBodyParseError(error: unknown, t: ReturnType<typeof useT>): string {
+  if (error instanceof SyntaxError) return t("settings.providerExtraBodyError");
+  const message = String((error as Error)?.message ?? error ?? "").trim();
+  return message || t("settings.providerExtraBodyError");
+}
+
+function providerModelFetchFallbackMessage(error: unknown, t: ReturnType<typeof useT>): string {
+  const message = String((error as Error)?.message ?? error);
+  if (/\bstatus\s+(401|403)\b/i.test(message)) {
+    return t("settings.fetchModelsManualFallbackAuth");
+  }
+  if (/\bstatus\s+(404|405)\b/i.test(message)) {
+    return t("settings.fetchModelsManualFallbackUnsupported");
+  }
+  if (/\b(status\s+5\d\d|request failed|network|timeout|timed out|connection|deadline|fetch failed)\b/i.test(message)) {
+    return t("settings.fetchModelsManualFallbackNetwork");
+  }
+  if (/\b(decode response|invalid character|unexpected end|unexpected format)\b/i.test(message)) {
+    return t("settings.fetchModelsManualFallbackDecode");
+  }
+  return t("settings.fetchModelsManualFallbackGeneric", { err: message });
 }
 
 function normalizeReasoningLanguage(lang: string | undefined): string {
   const v = String(lang ?? "").trim().toLowerCase();
   return v === "zh" || v === "en" ? v : "auto";
+}
+
+function normalizeBotQueueMode(mode: unknown): string {
+  const raw = String(mode ?? "").trim().toLowerCase();
+  return BOT_QUEUE_MODES.includes(raw as any) ? raw : "steer";
+}
+
+function normalizeBotQueueDrop(mode: unknown): string {
+  const raw = String(mode ?? "").trim().toLowerCase();
+  return BOT_QUEUE_DROPS.includes(raw as any) ? raw : "summarize";
+}
+
+function normalizeBotRouteChatType(value: unknown): string {
+  const raw = String(value ?? "").trim().toLowerCase();
+  return BOT_ROUTE_CHAT_TYPES.includes(raw as any) ? raw : "";
+}
+
+function normalizeBotRoute(raw: any): BotRouteView {
+  return {
+    connectionId: String(raw?.connectionId ?? "").trim(),
+    platform: String(raw?.platform ?? "").trim().toLowerCase(),
+    chatType: normalizeBotRouteChatType(raw?.chatType),
+    chatId: String(raw?.chatId ?? "").trim(),
+    userId: String(raw?.userId ?? "").trim(),
+    threadId: String(raw?.threadId ?? "").trim(),
+    model: String(raw?.model ?? "").trim(),
+    toolApprovalMode: normalizeBotToolApprovalMode(raw?.toolApprovalMode),
+    workspaceRoot: String(raw?.workspaceRoot ?? "").trim(),
+  };
+}
+
+function emptyBotRoute(): BotRouteView {
+  return {
+    connectionId: "",
+    platform: "",
+    chatType: "",
+    chatId: "",
+    userId: "",
+    threadId: "",
+    model: "",
+    toolApprovalMode: "",
+    workspaceRoot: "",
+  };
+}
+
+function botRouteHasValue(route: BotRouteView): boolean {
+  return Boolean(
+    route.connectionId ||
+    route.platform ||
+    route.chatType ||
+    route.chatId ||
+    route.userId ||
+    route.threadId ||
+    route.model ||
+    route.toolApprovalMode ||
+    route.workspaceRoot
+  );
 }
 
 function defaultBotSettings(): BotSettingsView {
@@ -643,17 +1104,43 @@ function defaultBotSettings(): BotSettingsView {
     toolApprovalMode: "ask",
     maxSteps: 0,
     debounceMs: 1500,
+    queueMode: "steer",
+    queueCap: 20,
+    queueDrop: "summarize",
+    ignoreSelfMessages: true,
+    selfUserIds: {
+      qq: [],
+      feishu: [],
+      weixin: [],
+    },
+    control: {
+      enabled: false,
+      addr: "127.0.0.1:37913",
+      tokenEnv: "REASONIX_BOT_CONTROL_TOKEN",
+    },
+    pairing: {
+      enabled: true,
+      requestTtlMinutes: 60,
+      maxPendingPerPlatform: 3,
+    },
+    routes: [],
     allowlist: {
       enabled: true,
       allowAll: false,
       qqUsers: [],
       feishuUsers: [],
       weixinUsers: [],
+      qqApprovers: [],
+      feishuApprovers: [],
+      weixinApprovers: [],
+      qqAdmins: [],
+      feishuAdmins: [],
+      weixinAdmins: [],
       qqGroups: [],
       feishuGroups: [],
       weixinGroups: [],
     },
-    qq: { enabled: false, appId: "", appSecretEnv: "QQ_BOT_APP_SECRET", secretSet: false, sandbox: false },
+    qq: { enabled: false, appId: "", appSecretEnv: "QQ_BOT_APP_SECRET", secretSet: false, sandbox: false, model: "", toolApprovalMode: "ask", workspaceRoot: "", access: defaultBotAccess() },
     feishu: {
       enabled: false,
       domain: "feishu",
@@ -676,9 +1163,37 @@ function defaultBotSettings(): BotSettingsView {
   };
 }
 
+function defaultBotAccess(): BotAccessView {
+  return {
+    enabled: true,
+    allowAll: false,
+    pairingEnabled: true,
+    users: [],
+    groups: [],
+    approvers: [],
+    admins: [],
+  };
+}
+
+function normalizeBotAccess(raw: any, fallback: BotAccessView = defaultBotAccess()): BotAccessView {
+  const access = raw ?? fallback;
+  return {
+    enabled: access.enabled !== false,
+    allowAll: Boolean(access.allowAll),
+    pairingEnabled: access.pairingEnabled !== false,
+    users: asArray(access.users),
+    groups: asArray(access.groups),
+    approvers: asArray(access.approvers),
+    admins: asArray(access.admins),
+  };
+}
+
 function normalizeBotSettings(bot: BotSettingsView | null | undefined): BotSettingsView {
   const fallback = defaultBotSettings();
   const allowlist = bot?.allowlist ?? fallback.allowlist;
+  const selfUserIds = bot?.selfUserIds ?? fallback.selfUserIds;
+  const control = bot?.control ?? fallback.control;
+  const pairing = bot?.pairing ?? fallback.pairing;
   const mode = bot?.feishu?.mode === "websocket" ? "websocket" : "webhook";
   return {
     ...fallback,
@@ -686,17 +1201,50 @@ function normalizeBotSettings(bot: BotSettingsView | null | undefined): BotSetti
     toolApprovalMode: normalizeBotToolApprovalMode(bot?.toolApprovalMode),
     maxSteps: Math.max(0, Number(bot?.maxSteps ?? fallback.maxSteps) || 0),
     debounceMs: Number(bot?.debounceMs) || fallback.debounceMs,
+    queueMode: normalizeBotQueueMode(bot?.queueMode),
+    queueCap: Math.max(0, Math.floor(Number(bot?.queueCap ?? fallback.queueCap) || 0)),
+    queueDrop: normalizeBotQueueDrop(bot?.queueDrop),
+    ignoreSelfMessages: bot?.ignoreSelfMessages !== false,
+    selfUserIds: {
+      qq: asArray(selfUserIds.qq),
+      feishu: asArray(selfUserIds.feishu),
+      weixin: asArray(selfUserIds.weixin),
+    },
+    control: {
+      enabled: Boolean(control.enabled),
+      addr: String(control.addr ?? fallback.control.addr),
+      tokenEnv: String(control.tokenEnv ?? fallback.control.tokenEnv),
+    },
+    pairing: {
+      enabled: pairing.enabled !== false,
+      requestTtlMinutes: Math.max(0, Math.floor(Number(pairing.requestTtlMinutes ?? fallback.pairing.requestTtlMinutes) || 0)),
+      maxPendingPerPlatform: Math.max(0, Math.floor(Number(pairing.maxPendingPerPlatform ?? fallback.pairing.maxPendingPerPlatform) || 0)),
+    },
+    routes: asArray(bot?.routes).map(normalizeBotRoute).filter(botRouteHasValue),
     allowlist: {
       ...fallback.allowlist,
       ...allowlist,
       qqUsers: asArray(allowlist.qqUsers),
       feishuUsers: asArray(allowlist.feishuUsers),
       weixinUsers: asArray(allowlist.weixinUsers),
+      qqApprovers: asArray(allowlist.qqApprovers),
+      feishuApprovers: asArray(allowlist.feishuApprovers),
+      weixinApprovers: asArray(allowlist.weixinApprovers),
+      qqAdmins: asArray(allowlist.qqAdmins),
+      feishuAdmins: asArray(allowlist.feishuAdmins),
+      weixinAdmins: asArray(allowlist.weixinAdmins),
       qqGroups: asArray(allowlist.qqGroups),
       feishuGroups: asArray(allowlist.feishuGroups),
       weixinGroups: asArray(allowlist.weixinGroups),
     },
-    qq: { ...fallback.qq, ...bot?.qq },
+    qq: {
+      ...fallback.qq,
+      ...bot?.qq,
+      model: String(bot?.qq?.model ?? fallback.qq.model).trim(),
+      toolApprovalMode: normalizeBotToolApprovalMode(bot?.qq?.toolApprovalMode),
+      workspaceRoot: String(bot?.qq?.workspaceRoot ?? fallback.qq.workspaceRoot).trim(),
+      access: normalizeBotAccess(bot?.qq?.access, fallback.qq.access),
+    },
     feishu: { ...fallback.feishu, ...bot?.feishu, domain: bot?.feishu?.domain === "lark" ? "lark" : "feishu", mode },
     weixin: { ...fallback.weixin, ...bot?.weixin },
     connections: asArray(bot?.connections).map(normalizeBotConnection),
@@ -716,6 +1264,7 @@ function normalizeBotConnection(raw: any) {
     model: String(raw?.model ?? "").trim(),
     toolApprovalMode: normalizeBotToolApprovalMode(raw?.toolApprovalMode, true),
     workspaceRoot,
+    access: normalizeBotAccess(raw?.access),
     credential: {
       appId: String(credential.appId ?? "").trim(),
       appSecretEnv: String(credential.appSecretEnv ?? "").trim(),
@@ -756,21 +1305,90 @@ function normalizeBotMappingScope(scope: unknown, workspaceRoot: unknown): "glob
   return String(workspaceRoot ?? "").trim() ? "project" : "global";
 }
 
-function normalizeProviderView(p: ProviderView): ProviderView {
+function normalizeStringMap(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, string> = {};
+  for (const [rawKey, rawValue] of Object.entries(value as Record<string, unknown>)) {
+    const key = rawKey.trim();
+    const val = String(rawValue ?? "").trim();
+    if (key && val) out[key] = val;
+  }
+  return out;
+}
+
+function normalizeExtraBodyMap(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, unknown> = {};
+  for (const [rawKey, rawValue] of Object.entries(value as Record<string, unknown>)) {
+    const key = rawKey.trim();
+    if (key && rawValue !== undefined) out[key] = rawValue;
+  }
+  return out;
+}
+
+export function normalizeProviderView(p: ProviderView): ProviderView {
   const visionModels = asArray(p.visionModels);
   const requiresKey = providerRequiresKey(p);
   return {
     ...p,
+    name: String(p.name ?? ""),
+    baseUrl: String(p.baseUrl ?? ""),
     builtIn: Boolean(p.builtIn),
     added: Boolean(p.added),
+    chatUrl: p.chatUrl ?? "",
+    requestUrl: p.requestUrl ?? "",
     models: asArray(p.models),
     visionModels,
     visionModelsConfigured: Boolean(p.visionModelsConfigured ?? visionModels.length > 0),
+    visionCapability: p.visionCapability === "unsupported" || p.visionCapability === "configurable"
+      ? p.visionCapability
+      : undefined,
     modelsUrl: p.modelsUrl ?? "",
+    headers: normalizeStringMap(p.headers),
+    extraBody: normalizeExtraBodyMap(p.extraBody),
+    authHeader: Boolean(p.authHeader),
     reasoningProtocol: normalizeReasoningProtocol(p.reasoningProtocol),
+    thinking: normalizeThinkingMode(p.thinking),
+    webSearch: Boolean(p.webSearch),
+    serverWebSearchCapability: typeof p.serverWebSearchCapability === "boolean"
+      ? p.serverWebSearchCapability
+      : undefined,
     supportedEfforts: asArray(p.supportedEfforts),
+    modelOverrides: asArray(p.modelOverrides),
+    recommendedUpgradeAvailable: Boolean(p.recommendedUpgradeAvailable),
     requiresKey,
     configured: providerIsConfigured({ ...p, requiresKey }),
+    keySource: p.keySource ?? "",
+    keySourcePath: p.keySourcePath ?? "",
+    modelCatalogFingerprint: p.modelCatalogFingerprint ?? "",
+  };
+}
+
+type ProviderPresetStatus = NonNullable<ProviderPresetView["status"]>;
+
+function normalizeProviderPresetStatus(status: ProviderPresetView["status"] | undefined, added: boolean): ProviderPresetStatus {
+  if (status === "installed" || status === "installed_modified" || status === "name_conflict" || status === "similar_existing") return status;
+  return added ? "installed" : "available";
+}
+
+function normalizeProviderPresetView(p: ProviderPresetView): ProviderPresetView {
+  const requiresKey = Boolean(p.requiresKey ?? p.keyEnv);
+  const configured = Boolean(p.configured ?? (!requiresKey || p.keySet));
+  const status = normalizeProviderPresetStatus(p.status, Boolean(p.added));
+  return {
+    ...p,
+    id: String(p.id ?? "").trim(),
+    label: String(p.label ?? "").trim(),
+    description: String(p.description ?? "").trim(),
+    keyEnv: String(p.keyEnv ?? "").trim(),
+    providerNames: asArray(p.providerNames),
+    models: asArray(p.models),
+    added: Boolean(p.added || status === "installed" || status === "installed_modified" || status === "name_conflict"),
+    status,
+    statusProviderNames: asArray(p.statusProviderNames),
+    keySet: Boolean(p.keySet),
+    requiresKey,
+    configured,
     keySource: p.keySource ?? "",
     keySourcePath: p.keySourcePath ?? "",
   };
@@ -779,21 +1397,28 @@ function normalizeProviderView(p: ProviderView): ProviderView {
 function normalizeSettingsView(view: SettingsView | null | undefined): SettingsView | null {
   if (!view) return null;
   const permissions = view.permissions ?? { mode: "ask", allow: [], ask: [], deny: [] };
-  const sandbox = view.sandbox ?? { bash: "enforce", network: false, workspaceRoot: "", allowWrite: [], shell: "auto" };
+  const sandbox = view.sandbox ?? { bash: "enforce", network: false, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: "", effectiveWriteRoots: [], shell: "auto", effectiveShell: "" };
   const network = view.network ?? {
     proxyMode: "auto",
     proxyUrl: "",
     noProxy: "",
     proxy: { type: "socks5", server: "", port: 0, username: "", password: "" },
   };
-  const agent = view.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto" };
+  const agent = view.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "", reasoningLanguage: "auto", compactRatio: 0.85 };
   agent.plannerMaxSteps = Number.isFinite(agent.plannerMaxSteps) ? Math.max(0, Math.trunc(agent.plannerMaxSteps)) : 0;
   agent.maxSteps = Number.isFinite(agent.maxSteps) ? Math.max(0, Math.trunc(agent.maxSteps)) : 0;
+  agent.maxSubagentDepth = Number.isFinite(agent.maxSubagentDepth) && agent.maxSubagentDepth <= 1 ? 1 : 2;
   agent.reasoningLanguage = normalizeReasoningLanguage(agent.reasoningLanguage);
+  agent.compactRatio = Number.isFinite(agent.compactRatio) && Number(agent.compactRatio) > 0 ? Number(agent.compactRatio) : 0.85;
+  agent.effectiveCompactRatio = Number.isFinite(agent.effectiveCompactRatio) && Number(agent.effectiveCompactRatio) > 0
+    ? Number(agent.effectiveCompactRatio)
+    : agent.compactRatio;
+  agent.compactRatioOverridden = Boolean(agent.compactRatioOverridden);
   return {
     ...view,
     providers: asArray(view.providers).map(normalizeProviderView),
     officialProviders: asArray(view.officialProviders).map(normalizeProviderView),
+    providerPresets: asArray(view.providerPresets).map(normalizeProviderPresetView).filter((p) => p.id),
     providerKinds: asArray(view.providerKinds),
     permissions: {
       ...permissions,
@@ -804,6 +1429,9 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     sandbox: {
       ...sandbox,
       allowWrite: asArray(sandbox.allowWrite),
+      effectiveWorkspaceRoot: String(sandbox.effectiveWorkspaceRoot ?? ""),
+      effectiveWriteRoots: asArray(sandbox.effectiveWriteRoots),
+      effectiveShell: String(sandbox.effectiveShell ?? sandbox.shell ?? ""),
     },
     network: {
       ...network,
@@ -811,19 +1439,30 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     },
     agent,
     bot: normalizeBotSettings(view.bot),
-    autoPlan: normalizeAutoPlan(view.autoPlan),
+    autoPlan: "off",
+    defaultToolApprovalMode: normalizeToolApprovalMode(view.defaultToolApprovalMode),
     autoApproveTools: Boolean(view.autoApproveTools ?? view.bypass),
     bypass: Boolean(view.autoApproveTools ?? view.bypass),
     desktopLanguage: normalizeLangPref(view.desktopLanguage),
+    desktopCurrency: normalizeDesktopCurrency(view.desktopCurrency),
     desktopLayoutStyle: normalizeDesktopLayoutStyle(view.desktopLayoutStyle),
     desktopTheme: normalizeThemePreference(view.desktopTheme),
     desktopThemeStyle: normalizeThemeStyleForTheme(view.desktopThemeStyle, normalizeThemePreference(view.desktopTheme)),
+    desktopTerminalTheme: normalizeTerminalThemePreference(view.desktopTerminalTheme),
     closeBehavior: normalizeCloseBehavior(view.closeBehavior),
     displayMode: normalizeDisplayMode(view.displayMode),
     statusBarStyle: normalizeStatusBarStyle(view.statusBarStyle),
     statusBarItems: normalizeStatusBarItems(view.statusBarItems),
+    conversationWidth: normalizeConversationWidth(view.conversationWidth),
     checkUpdates: view.checkUpdates !== false,
+    updateChannel: "stable",
   };
+}
+
+type DesktopCurrency = "" | "CNY" | "USD";
+
+function normalizeDesktopCurrency(currency: string | undefined): DesktopCurrency {
+  return currency === "CNY" || currency === "USD" ? currency : "";
 }
 
 type CloseBehavior = "background" | "quit";
@@ -851,12 +1490,6 @@ function desktopLayoutStyleLabel(style: DesktopLayoutStyle, t: ReturnType<typeof
 }
 
 type StatusBarStyle = "icon" | "text";
-type StatusBarDropPlacement = "before" | "after";
-type StatusBarDragTarget = {
-  id: StatusBarItemId;
-  placement: StatusBarDropPlacement;
-};
-
 function normalizeStatusBarStyle(style: string | undefined): StatusBarStyle {
   return style === "icon" ? "icon" : "text";
 }
@@ -877,6 +1510,12 @@ function statusBarItemLabel(id: StatusBarItemId, t: ReturnType<typeof useT>): st
       return t("status.sessionTokensLabel");
     case "turn_tokens":
       return t("status.turnTokensLabel");
+    case "turn_tps":
+      return t("status.tpsLabel");
+    case "turn_output_tokens":
+      return t("status.outputTokensLabel");
+    case "turn_cache_tokens":
+      return t("status.cacheTokensLabel");
     case "turn_cost":
       return t("status.turnCostLabel");
     case "session_turns":
@@ -911,10 +1550,27 @@ function sandboxModeLabel(mode: string, t: ReturnType<typeof useT>): string {
   return mode === "off" ? t("settings.bashOffShort") : t("settings.bashEnforceShort");
 }
 
+function providerKindLabel(kind: string, t: ReturnType<typeof useT>): string {
+  switch (kind) {
+    case "anthropic":
+      return t("settings.providerProtocolAnthropic");
+    case "openai":
+      return t("settings.providerProtocolOpenAI");
+    default:
+      return kind;
+  }
+}
+
+function providerKindHint(kind: string, t: ReturnType<typeof useT>): string {
+  return kind === "anthropic" ? t("settings.providerProtocolAnthropicHint") : t("settings.providerProtocolOpenAIHint");
+}
+
 function reasoningProtocolLabel(protocol: string, t: ReturnType<typeof useT>): string {
   switch (protocol) {
     case "deepseek":
       return t("settings.reasoningProtocol.deepseek");
+    case "glm": return t("settings.reasoningProtocol.glm");
+    case "kimi-k3": return t("settings.reasoningProtocol.kimiK3");
     case "openai":
       return t("settings.reasoningProtocol.openai");
     case "none":
@@ -924,22 +1580,35 @@ function reasoningProtocolLabel(protocol: string, t: ReturnType<typeof useT>): s
   }
 }
 
+function thinkingModeLabel(mode: string, t: ReturnType<typeof useT>): string {
+  switch (mode) {
+    case "enabled":
+      return t("settings.thinkingMode.enabled");
+    case "disabled":
+      return t("settings.thinkingMode.disabled");
+    case "adaptive":
+      return t("settings.thinkingMode.adaptive");
+    default:
+      return t("settings.thinkingMode.auto");
+  }
+}
+
 function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agentRunning: boolean }) {
   const { t, setPref } = useI18n();
   const closeBehavior = normalizeCloseBehavior(s.closeBehavior);
   const [displayMode, setDisplayMode] = useState<DisplayMode>(() => normalizeDisplayMode(getDisplayMode()));
-  const [statusBarItemsExpanded, setStatusBarItemsExpanded] = useState(false);
-  const [draggingStatusBarItem, setDraggingStatusBarItem] = useState<StatusBarItemId | null>(null);
-  const [statusBarDragTarget, setStatusBarDragTargetState] = useState<StatusBarDragTarget | null>(null);
-  const draggingStatusBarItemRef = useRef<StatusBarItemId | null>(null);
-  const statusBarDragTargetRef = useRef<StatusBarDragTarget | null>(null);
-  const mouseDragCleanupRef = useRef<(() => void) | null>(null);
+  const [processFold, setProcessFold] = useState<ProcessFoldPreference>(getProcessFoldPreference);
+  const reasoningDisplayMode = useReasoningDisplayMode();
   const soundPanelId = useId();
-  const statusBarItemsPanelId = useId();
   useEffect(() => onDisplayModeChange((mode) => setDisplayMode(mode)), []);
-  useEffect(() => () => mouseDragCleanupRef.current?.(), []);
-  const autoPlan = normalizeAutoPlan(s.autoPlan);
+  useEffect(() => onProcessFoldPreferenceChange((pref) => setProcessFold(pref)), []);
+  const defaultToolApprovalMode = normalizeToolApprovalMode(s.defaultToolApprovalMode);
+  const saveReasoningDisplayMode = useCallback(async (mode: ReasoningDisplayMode) => {
+    const ok = await apply(() => app.SetReasoningDisplayMode(mode));
+    if (ok) applyReasoningDisplayMode(mode);
+  }, [apply]);
   const languagePref = normalizeLangPref(s.desktopLanguage);
+  const desktopCurrency = normalizeDesktopCurrency(s.desktopCurrency);
   const desktopLayoutStyle = normalizeDesktopLayoutStyle(s.desktopLayoutStyle);
   const [genMusicPreset, setGenMusicPreset] = useState<GenerativePreset>(getGenerativePreset());
   const [soundPref, setSoundPref] = useState<SoundWavPref>(getSuccessPreference());
@@ -948,11 +1617,6 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
   const statusBarStyle = normalizeStatusBarStyle(s.statusBarStyle);
   const statusBarItems = normalizeStatusBarItems(s.statusBarItems);
   const soundStatus = summarizeSoundStatus(genMusicPreset, soundPref, attentionPref);
-  const visibleStatusItems = new Set<StatusBarItemId>(statusBarItems);
-  const orderedStatusItems = [
-    ...statusBarItems,
-    ...DEFAULT_STATUS_BAR_ITEMS.filter((id) => !visibleStatusItems.has(id)),
-  ];
   const applyStatusBarItems = (items: StatusBarItemId[]) => {
     const contentScrollTop = document.querySelector<HTMLElement>(".settings-center__content")?.scrollTop ?? 0;
     const navScrollTop = document.querySelector<HTMLElement>(".settings-center__nav")?.scrollTop ?? 0;
@@ -969,135 +1633,28 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
       });
     });
   };
-  const toggleStatusBarItem = (id: StatusBarItemId) => {
-    if (visibleStatusItems.has(id)) {
-      if (statusBarItems.length <= 1) return;
-      applyStatusBarItems(statusBarItems.filter((item) => item !== id));
-      return;
-    }
-    applyStatusBarItems([...statusBarItems, id]);
-  };
-  const moveStatusBarItem = (id: StatusBarItemId, direction: -1 | 1) => {
-    const idx = statusBarItems.indexOf(id);
-    const nextIdx = idx + direction;
-    if (idx < 0 || nextIdx < 0 || nextIdx >= statusBarItems.length) return;
-    const next = [...statusBarItems];
-    [next[idx], next[nextIdx]] = [next[nextIdx], next[idx]];
-    applyStatusBarItems(next);
-  };
-  const reorderStatusBarItem = (fromId: StatusBarItemId, toId: StatusBarItemId, placement: StatusBarDropPlacement) => {
-    const fromIdx = statusBarItems.indexOf(fromId);
-    const toIdx = statusBarItems.indexOf(toId);
-    if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return;
-    const next = statusBarItems.filter((item) => item !== fromId);
-    const insertAt = next.indexOf(toId);
-    if (insertAt < 0) return;
-    next.splice(placement === "after" ? insertAt + 1 : insertAt, 0, fromId);
-    if (next.every((item, index) => item === statusBarItems[index])) return;
-    applyStatusBarItems(next);
-  };
-  const statusBarItemFromPoint = (x: number, y: number): StatusBarDragTarget | null => {
-    const row = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-statusbar-setting-item]");
-    const id = row?.dataset.statusbarSettingItem as StatusBarItemId | undefined;
-    if (!row || !id || !statusBarItems.includes(id)) return null;
-    const rect = row.getBoundingClientRect();
-    return { id, placement: y < rect.top + rect.height / 2 ? "before" : "after" };
-  };
-  const setStatusBarDragTarget = (target: StatusBarDragTarget | null) => {
-    const current = statusBarDragTargetRef.current;
-    if (current?.id === target?.id && current?.placement === target?.placement) return;
-    statusBarDragTargetRef.current = target;
-    setStatusBarDragTargetState(target);
-  };
-  const beginStatusBarDrag = (id: StatusBarItemId, visible: boolean): boolean => {
-    if (busy || !visible) return false;
-    mouseDragCleanupRef.current?.();
-    mouseDragCleanupRef.current = null;
-    draggingStatusBarItemRef.current = id;
-    statusBarDragTargetRef.current = null;
-    setDraggingStatusBarItem(id);
-    setStatusBarDragTargetState(null);
-    return true;
-  };
-  const updateStatusBarDrag = (clientX: number, clientY: number) => {
-    const draggingId = draggingStatusBarItemRef.current;
-    if (!draggingId) return;
-    const target = statusBarItemFromPoint(clientX, clientY);
-    setStatusBarDragTarget(target && target.id !== draggingId ? target : null);
-  };
-  const finishStatusBarDrag = (clientX?: number, clientY?: number) => {
-    const draggingId = draggingStatusBarItemRef.current;
-    let target = statusBarDragTargetRef.current;
-    if (draggingId && clientX !== undefined && clientY !== undefined) {
-      const pointerTarget = statusBarItemFromPoint(clientX, clientY);
-      if (pointerTarget && pointerTarget.id !== draggingId) target = pointerTarget;
-    }
-    if (draggingId && target) reorderStatusBarItem(draggingId, target.id, target.placement);
-    draggingStatusBarItemRef.current = null;
-    statusBarDragTargetRef.current = null;
-    setDraggingStatusBarItem(null);
-    setStatusBarDragTargetState(null);
-  };
-  const cancelStatusBarDrag = () => {
-    mouseDragCleanupRef.current?.();
-    mouseDragCleanupRef.current = null;
-    draggingStatusBarItemRef.current = null;
-    statusBarDragTargetRef.current = null;
-    setDraggingStatusBarItem(null);
-    setStatusBarDragTargetState(null);
-  };
-  const startStatusBarPointerDrag = (event: PointerEvent<HTMLElement>, id: StatusBarItemId, visible: boolean) => {
-    if (event.button !== 0 || !beginStatusBarDrag(id, visible)) return;
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-  };
-  const moveStatusBarPointerDrag = (event: PointerEvent<HTMLElement>) => {
-    if (!draggingStatusBarItemRef.current) return;
-    event.preventDefault();
-    updateStatusBarDrag(event.clientX, event.clientY);
-  };
-  const endStatusBarPointerDrag = (event: PointerEvent<HTMLElement>) => {
-    if (!draggingStatusBarItemRef.current) return;
-    event.preventDefault();
-    try {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    } catch {
-      // Pointer capture may already be released by the browser.
-    }
-    finishStatusBarDrag(event.clientX, event.clientY);
-  };
-  const cancelStatusBarPointerDrag = (event: PointerEvent<HTMLElement>) => {
-    event.preventDefault();
-    cancelStatusBarDrag();
-  };
-  const startStatusBarMouseDrag = (event: ReactMouseEvent<HTMLElement>, id: StatusBarItemId, visible: boolean) => {
-    if (event.button !== 0 || !beginStatusBarDrag(id, visible)) return;
-    event.preventDefault();
-    const handleMove = (moveEvent: MouseEvent) => {
-      moveEvent.preventDefault();
-      updateStatusBarDrag(moveEvent.clientX, moveEvent.clientY);
-    };
-    const cleanup = () => {
-      window.removeEventListener("mousemove", handleMove);
-      window.removeEventListener("mouseup", handleUp);
-    };
-    const handleUp = (upEvent: MouseEvent) => {
-      upEvent.preventDefault();
-      cleanup();
-      mouseDragCleanupRef.current = null;
-      finishStatusBarDrag(upEvent.clientX, upEvent.clientY);
-    };
-    window.addEventListener("mousemove", handleMove);
-    window.addEventListener("mouseup", handleUp);
-    mouseDragCleanupRef.current = cleanup;
-  };
   const setLanguage = (next: LangPref) => {
     setPref(next);
     void apply(() => app.SetDesktopLanguage(next));
   };
   return (
-    <SettingsSection>
-      <SettingsField label={t("settings.language")}>
+    <>
+      <SettingsSection title={t("settings.general.sectionAppearance")} description={t("settings.general.sectionAppearanceHint")}>
+      <SettingsField label={t("settings.desktopLayoutStyle")} hint={t("settings.desktopLayoutStyleHint")} icon={<Monitor size={18} />}>
+        <div className="set-seg">
+          {(["workbench", "classic", "creation"] as const).map((style) => (
+            <button
+              key={style}
+              className={`set-seg__btn${desktopLayoutStyle === style ? " set-seg__btn--on" : ""}`}
+              disabled={busy}
+              onClick={() => void apply(() => app.SetDesktopLayoutStyle(style))}
+            >
+              {desktopLayoutStyleLabel(style, t)}
+            </button>
+          ))}
+        </div>
+      </SettingsField>
+      <SettingsField label={t("settings.language")} hint={t("settings.languageHint")} icon={<Languages size={18} />}>
         <div className="set-seg">
           {LANGUAGE_PREFS.map((pref) => (
             <button
@@ -1111,21 +1668,78 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
           ))}
         </div>
       </SettingsField>
-      <SettingsField label={t("settings.desktopLayoutStyle")}>
+      <SettingsField label={t("settings.currency")} hint={t("settings.currencyHint")} icon={<CircleDollarSign size={18} />}>
         <div className="set-seg">
-          {(["classic", "workbench", "creation"] as const).map((style) => (
+          {(["", "CNY", "USD"] as DesktopCurrency[]).map((currency) => (
             <button
-              key={style}
-              className={`set-seg__btn${desktopLayoutStyle === style ? " set-seg__btn--on" : ""}`}
-              disabled={busy}
-              onClick={() => void apply(() => app.SetDesktopLayoutStyle(style))}
+              key={currency || "auto"}
+              className={`set-seg__btn${desktopCurrency === currency ? " set-seg__btn--on" : ""}`}
+              disabled={busy || agentRunning}
+              onClick={() => void apply(() => app.SetDesktopCurrency(currency))}
             >
-              {desktopLayoutStyleLabel(style, t)}
+              {currency === "" ? t("settings.currencyAuto") : currency}
             </button>
           ))}
         </div>
       </SettingsField>
-      <SettingsField label={t("settings.closeBehavior")}>
+      </SettingsSection>
+
+      <SettingsSection title={t("settings.general.sectionConversation")} description={t("settings.sessionContentDisplayHint")}>
+        <SettingsField label={t("settings.displayMode")} hint={t("settings.displayModeHint")} icon={<SlidersHorizontal size={18} />}>
+          <div className="set-seg" role="radiogroup" aria-label={t("settings.displayMode")}>
+            {(["standard", "compact"] as const).map((mode) => (
+              <button key={mode} type="button"
+                className={`set-seg__btn${displayMode === mode ? " set-seg__btn--on" : ""}`}
+                aria-pressed={displayMode === mode}
+                disabled={busy}
+                onClick={() => {
+                  setLocalDisplayMode(mode);
+                  void apply(() => app.SetDisplayMode(mode));
+                }}
+              >
+                {t(`settings.displayMode.${mode}`)}
+              </button>
+            ))}
+          </div>
+        </SettingsField>
+        <SettingsField label={t("settings.reasoningDisplay")} hint={t("settings.reasoningDisplayHint")} icon={<BrainCircuit size={18} />}>
+          <div>
+            <div className="set-seg" role="radiogroup" aria-label={t("settings.reasoningDisplay")}>
+              {(["hidden", "summary", "auto"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={`set-seg__btn${reasoningDisplayMode === mode ? " set-seg__btn--on" : ""}`}
+                  aria-pressed={reasoningDisplayMode === mode}
+                  disabled={busy}
+                  onClick={() => void saveReasoningDisplayMode(mode)}
+                >
+                  {t(`settings.reasoningDisplay.${mode}`)}
+                </button>
+              ))}
+            </div>
+            {reasoningDisplayMode === "legacy-collapsed" && <div className="settings-inline-hint" role="status">{t("settings.reasoningDisplay.legacy")}</div>}
+          </div>
+        </SettingsField>
+        <SettingsField label={t("settings.processFold")} hint={t("settings.processFoldHint")} icon={<ListChecks size={18} />}>
+          <div className="set-seg" role="radiogroup" aria-label={t("settings.processFold")}>
+            {(["auto", "expanded"] as const).map((pref) => (
+              <button
+                key={pref}
+                type="button"
+                className={`set-seg__btn${processFold === pref ? " set-seg__btn--on" : ""}`}
+                aria-pressed={processFold === pref}
+                onClick={() => setProcessFoldPreference(pref)}
+              >
+                {t(`settings.processFold.${pref}`)}
+              </button>
+            ))}
+          </div>
+        </SettingsField>
+      </SettingsSection>
+
+      <SettingsSection title={t("settings.general.sectionSystem")} description={t("settings.general.sectionSystemHint")}>
+      <SettingsField label={t("settings.closeBehavior")} hint={t("settings.closeBehaviorHint")} icon={<Power size={18} />}>
         <div className="set-seg">
           {(["background", "quit"] as const).map((mode) => (
             <button
@@ -1139,38 +1753,21 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
           ))}
         </div>
       </SettingsField>
-      <SettingsField label={t("settings.displayMode")}>
+      <SettingsField label={t("settings.defaultToolApprovalMode")} hint={t("settings.defaultToolApprovalModeHint")} icon={<ShieldCheck size={18} />}>
         <div className="set-seg">
-          {(["standard", "compact"] as const).map((mode) => (
+          {TOOL_APPROVAL_MODES.map((mode) => (
             <button
               key={mode}
-              className={`set-seg__btn${displayMode === mode ? " set-seg__btn--on" : ""}`}
+              className={`set-seg__btn${defaultToolApprovalMode === mode ? " set-seg__btn--on" : ""}`}
               disabled={busy}
-              onClick={() => {
-                setLocalDisplayMode(mode);
-                void apply(() => app.SetDisplayMode(mode));
-              }}
+              onClick={() => void apply(() => app.SetDefaultToolApprovalMode(mode))}
             >
-              {t(`settings.displayMode.${mode}`)}
+              {t(`settings.defaultToolApprovalMode.${mode}`)}
             </button>
           ))}
         </div>
       </SettingsField>
-      <SettingsField label={t("settings.autoPlan")}>
-        <div className="set-seg">
-          {AUTO_PLAN_MODES.map((mode) => (
-            <button
-              key={mode}
-              className={`set-seg__btn${autoPlan === mode ? " set-seg__btn--on" : ""}`}
-              disabled={busy}
-              onClick={() => void apply(() => app.SetAutoPlan(mode))}
-            >
-              {t(`settings.autoPlan.${mode}`)}
-            </button>
-          ))}
-        </div>
-      </SettingsField>
-      <SettingsField label={t("settings.sound")} hint={t("settings.soundHint")} stacked>
+      <SettingsField label={t("settings.sound")} hint={t("settings.soundHint")} icon={<Volume2 size={18} />} stacked>
         <div className={`settings-sound-editor${soundExpanded ? " settings-sound-editor--expanded" : ""}`}>
           <div className="settings-sound-editor__summary">
             <span className={`settings-sound-editor__status settings-sound-editor__status--${soundStatus}`}>
@@ -1243,7 +1840,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
           )}
         </div>
       </SettingsField>
-      <SettingsField label={t("settings.statusBarStyle")}>
+      <SettingsField label={t("settings.statusBarStyle")} hint={t("settings.statusBarStyleHint")} icon={<PanelBottom size={18} />}>
         <div className="set-seg">
           {(["icon", "text"] as const).map((style) => (
             <button
@@ -1257,109 +1854,16 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
           ))}
         </div>
       </SettingsField>
-      <SettingsField label={t("settings.statusBarItems")} hint={t("settings.statusBarItemsHint")} stacked>
-        <div className={`status-bar-items-editor${statusBarItemsExpanded ? " status-bar-items-editor--expanded" : ""}`}>
-          <div className="status-bar-items-editor__summary">
-            <span className="status-bar-items-editor__summary-text">
-              {t("settings.statusBarItemsSummary", { visible: statusBarItems.length, total: DEFAULT_STATUS_BAR_ITEMS.length })}
-            </span>
-            <Tooltip label={t(statusBarItemsExpanded ? "settings.statusBarItemsCollapse" : "settings.statusBarItemsExpand")}>
-              <button
-                type="button"
-                className="status-bar-items-editor__toggle"
-                aria-expanded={statusBarItemsExpanded}
-                aria-controls={statusBarItemsPanelId}
-                aria-label={t(statusBarItemsExpanded ? "settings.statusBarItemsCollapse" : "settings.statusBarItemsExpand")}
-                onClick={() => setStatusBarItemsExpanded((open) => !open)}
-              >
-                {statusBarItemsExpanded ? <ChevronUp size={15} aria-hidden="true" /> : <ChevronDown size={15} aria-hidden="true" />}
-              </button>
-            </Tooltip>
-          </div>
-          {statusBarItemsExpanded && (
-            <div className="status-bar-items-editor__list" id={statusBarItemsPanelId}>
-              {orderedStatusItems.map((id) => {
-                const label = statusBarItemLabel(id, t);
-                const visible = visibleStatusItems.has(id);
-                const visibleIndex = statusBarItems.indexOf(id);
-                const disableHide = visible && statusBarItems.length <= 1;
-                const dragLabel = t("settings.statusBarItem.drag", { label });
-                const moveUpLabel = t("settings.statusBarItem.moveUp", { label });
-                const moveDownLabel = t("settings.statusBarItem.moveDown", { label });
-                const dropPlacement = statusBarDragTarget?.id === id ? statusBarDragTarget.placement : null;
-                return (
-                  <div
-                    className={[
-                      "status-bar-item-row",
-                      visible ? "" : "status-bar-item-row--hidden",
-                      draggingStatusBarItem === id ? "status-bar-item-row--dragging" : "",
-                      dropPlacement ? "status-bar-item-row--drag-over" : "",
-                      dropPlacement === "before" ? "status-bar-item-row--drop-before" : "",
-                      dropPlacement === "after" ? "status-bar-item-row--drop-after" : "",
-                    ].filter(Boolean).join(" ")}
-                    data-statusbar-setting-item={id}
-                    key={id}
-                  >
-                    <Tooltip label={dragLabel}>
-                      <button
-                        type="button"
-                        className="status-bar-item-row__drag"
-                        disabled={!visible || busy}
-                        aria-label={dragLabel}
-                        title={dragLabel}
-                        onPointerDown={(event) => startStatusBarPointerDrag(event, id, visible)}
-                        onPointerMove={moveStatusBarPointerDrag}
-                        onPointerUp={endStatusBarPointerDrag}
-                        onPointerCancel={cancelStatusBarPointerDrag}
-                        onMouseDown={(event) => startStatusBarMouseDrag(event, id, visible)}
-                      >
-                        <GripVertical size={14} aria-hidden="true" />
-                      </button>
-                    </Tooltip>
-                    <label className="status-bar-item-row__toggle">
-                      <input
-                        type="checkbox"
-                        checked={visible}
-                        disabled={busy || disableHide}
-                        onChange={() => toggleStatusBarItem(id)}
-                      />
-                      <span className="status-bar-item-row__check" aria-hidden="true">
-                        {visible && <Check size={12} />}
-                      </span>
-                      <span className="status-bar-item-row__label">{label}</span>
-                    </label>
-                    <div className="status-bar-item-row__actions">
-                      <Tooltip label={moveUpLabel}>
-                        <button
-                          type="button"
-                          className="status-bar-item-row__order"
-                          disabled={busy || !visible || visibleIndex <= 0}
-                          onClick={() => moveStatusBarItem(id, -1)}
-                          aria-label={moveUpLabel}
-                        >
-                          <ChevronUp size={14} aria-hidden="true" />
-                        </button>
-                      </Tooltip>
-                      <Tooltip label={moveDownLabel}>
-                        <button
-                          type="button"
-                          className="status-bar-item-row__order"
-                          disabled={busy || !visible || visibleIndex < 0 || visibleIndex >= statusBarItems.length - 1}
-                          onClick={() => moveStatusBarItem(id, 1)}
-                          aria-label={moveDownLabel}
-                        >
-                          <ChevronDown size={14} aria-hidden="true" />
-                        </button>
-                      </Tooltip>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+      <SettingsField label={t("settings.statusBarItems")} hint={t("settings.statusBarItemsHint")} icon={<ListChecks size={18} />} className="status-bar-items-setting" stacked>
+        <StatusBarItemsEditor
+          items={statusBarItems}
+          busy={busy}
+          onChange={applyStatusBarItems}
+          itemLabel={(id) => statusBarItemLabel(id, t)}
+        />
       </SettingsField>
     </SettingsSection>
+    </>
   );
 }
 
@@ -1445,80 +1949,6 @@ function GenMusicSelect({
       </AnchoredPopover>
     </div>
   );
-}
-
-function StepLimitControl({
-  value,
-  presets,
-  busy,
-  onChange,
-}: {
-  value: number;
-  presets: number[];
-  busy: boolean;
-  onChange: (value: number) => void;
-}) {
-  const t = useT();
-  const normalized = normalizeStepLimit(value);
-  const presetSet = new Set(presets.map(normalizeStepLimit));
-  const [custom, setCustom] = useState(String(normalized));
-  useEffect(() => setCustom(String(normalized)), [normalized]);
-  const isCustom = !presetSet.has(normalized);
-  const commitCustom = () => {
-    const next = normalizeStepLimit(Number(custom));
-    setCustom(String(next));
-    if (next !== normalized) onChange(next);
-  };
-  return (
-    <div className="step-limit-control">
-      <div className="set-seg">
-        {presets.map((preset) => {
-          const n = normalizeStepLimit(preset);
-          return (
-            <button
-              key={n}
-              type="button"
-              className={`set-seg__btn${normalized === n ? " set-seg__btn--on" : ""}`}
-              disabled={busy}
-              onClick={() => n !== normalized && onChange(n)}
-            >
-              {stepLimitLabel(n, t)}
-            </button>
-          );
-        })}
-        <button
-          type="button"
-          className={`set-seg__btn${isCustom ? " set-seg__btn--on" : ""}`}
-          disabled={busy}
-          onClick={() => {
-            if (!isCustom) setCustom(String(normalized || 12));
-          }}
-        >
-          {t("settings.stepLimit.custom")}
-        </button>
-      </div>
-      <input
-        className="mem-input step-limit-control__custom"
-        value={custom}
-        disabled={busy}
-        inputMode="numeric"
-        aria-label={t("settings.stepLimit.custom")}
-        onChange={(e) => setCustom(e.target.value.replace(/[^\d]/g, ""))}
-        onBlur={commitCustom}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") e.currentTarget.blur();
-        }}
-      />
-    </div>
-  );
-}
-
-function normalizeStepLimit(value: number): number {
-  return Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
-}
-
-function stepLimitLabel(value: number, t: ReturnType<typeof useT>): string {
-  return value === 0 ? t("settings.stepLimit.unlimited") : String(value);
 }
 
 function NetworkSection({ s, busy, apply }: SectionProps) {
@@ -1639,8 +2069,22 @@ function NetworkSection({ s, busy, apply }: SectionProps) {
 
 type BotInstallTarget = "qq" | "feishu" | "lark" | "weixin";
 type BotOfficialInstallTarget = Exclude<BotInstallTarget, "qq">;
-const BOT_ALLOWLIST_TEXT_KEYS = ["qqUsers", "feishuUsers", "weixinUsers", "qqGroups", "feishuGroups", "weixinGroups"] as const;
+const BOT_ALLOWLIST_TEXT_KEYS = [
+  "qqUsers",
+  "feishuUsers",
+  "weixinUsers",
+  "qqApprovers",
+  "feishuApprovers",
+  "weixinApprovers",
+  "qqAdmins",
+  "feishuAdmins",
+  "weixinAdmins",
+  "qqGroups",
+  "feishuGroups",
+  "weixinGroups",
+] as const;
 type BotAllowlistTextKey = typeof BOT_ALLOWLIST_TEXT_KEYS[number];
+type BotSelfUserTextKey = keyof BotSettingsView["selfUserIds"];
 type BotInstallState = {
   target: BotInstallTarget | "";
   result: BotInstallStartResult | null;
@@ -1653,6 +2097,27 @@ const BOT_INSTALL_DEFAULT_TIMEOUT_SECONDS = 300;
 const BOT_INSTALL_MIN_POLL_SECONDS = 3;
 const DEFAULT_QQ_SECRET_ENV = "QQ_BOT_APP_SECRET";
 const QQ_CONNECTION_ID = "__qq_bot__";
+const BOT_PLATFORM_KEYS = ["qq", "feishu", "weixin"] as const;
+type BotPlatformKey = typeof BOT_PLATFORM_KEYS[number];
+const BOT_ALLOWLIST_ROLES = ["Users", "Groups", "Approvers", "Admins"] as const;
+type BotAllowlistRole = typeof BOT_ALLOWLIST_ROLES[number];
+type BotAccessListField = "users" | "groups" | "approvers" | "admins";
+
+function botAllowlistKey(platform: BotPlatformKey, role: BotAllowlistRole): BotAllowlistTextKey {
+  return `${platform}${role}`;
+}
+
+function botConnectionPlatform(connection: BotConnectionView): BotPlatformKey {
+  if (connection.provider === "weixin") return "weixin";
+  if (connection.provider === "qq") return "qq";
+  return "feishu";
+}
+
+function botPlatformLabel(platform: BotPlatformKey, t: ReturnType<typeof useT>): string {
+  if (platform === "qq") return "QQ";
+  if (platform === "weixin") return t("settings.botWeixin");
+  return t("settings.botPlatformFeishuLark");
+}
 
 type BotConnectionListItem =
   | { kind: "qq" }
@@ -1665,54 +2130,57 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   const savedBot = normalizeBotSettings(s.bot);
   const [draft, setDraft] = useState<BotSettingsView>(savedBot);
   const [allowlistText, setAllowlistText] = useState<Record<BotAllowlistTextKey, string>>(() => botAllowlistTextValues(savedBot.allowlist));
-  const [allowlistFocused, setAllowlistFocused] = useState(false);
-  const [allowlistOpen, setAllowlistOpen] = useState(false);
+  const [selfUserText, setSelfUserText] = useState<Record<BotSelfUserTextKey, string>>(() => botSelfUserTextValues(savedBot.selfUserIds));
+  const [showAllPlatforms, setShowAllPlatforms] = useState(false);
   const [installTarget, setInstallTarget] = useState<BotInstallTarget>("qq");
   const [install, setInstall] = useState<BotInstallState>({ target: "qq", result: null, status: "idle", timeLeft: 0, message: "" });
   const [diagnostics, setDiagnostics] = useState<Record<string, BotConnectionDiagnostic | string>>({});
   const [testTargets, setTestTargets] = useState<Record<string, string>>({});
   const [connectionSecrets, setConnectionSecrets] = useState<Record<string, string>>({});
+  const [accessText, setAccessText] = useState<Record<string, string>>({});
   const [qqSecretValue, setQQSecretValue] = useState("");
   const [expandedConnectionId, setExpandedConnectionId] = useState("");
+  const [advancedMode, setAdvancedMode] = useState(false);
   const installRef = useRef(install);
   const installPollTimerRef = useRef<number | null>(null);
   const installCountdownTimerRef = useRef<number | null>(null);
   const installRequestInFlightRef = useRef(false);
   const installAttemptRef = useRef(0);
-  const allowlistRef = useRef<HTMLDetailsElement | null>(null);
+  const stepConnectRef = useRef<HTMLElement | null>(null);
   const initialFocusHandledRef = useRef("");
-  const pendingAllowlistFocusRef = useRef(false);
   const refs = allRefs(s);
 
   useEffect(() => {
     const nextBot = normalizeBotSettings(s.bot);
     setDraft(nextBot);
     setAllowlistText(botAllowlistTextValues(nextBot.allowlist));
+    setSelfUserText(botSelfUserTextValues(nextBot.selfUserIds));
     setConnectionSecrets({});
+    setAccessText({});
     setQQSecretValue("");
     setTestTargets({});
   }, [s.bot]);
+  const focusAccessStep = () => {
+    if (!expandedConnectionId && connectionItems.length > 0) {
+      const first = connectionItems[0];
+      if (first.kind === "qq") {
+        setInstallTarget("qq");
+        setExpandedConnectionId(QQ_CONNECTION_ID);
+      } else {
+        const nextTarget = botInstallTargetForConnection(first.connection);
+        setInstallTarget(nextTarget);
+        setExpandedConnectionId(first.connection.id);
+      }
+    }
+    window.setTimeout(() => stepConnectRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }), 60);
+  };
   useEffect(() => {
     if (initialFocus?.target !== "bot-allowlist") return;
     const focusKey = `${initialFocus.target}:${initialFocus.connectionId ?? ""}`;
     if (initialFocusHandledRef.current === focusKey) return;
-    let focusConnectionId = "";
-    if (initialFocus.connectionId === QQ_CONNECTION_ID && qqBotAdded(draft.qq)) {
-      focusConnectionId = QQ_CONNECTION_ID;
-    } else if (initialFocus.connectionId && draft.connections.some((connection) => connection.id === initialFocus.connectionId)) {
-      focusConnectionId = initialFocus.connectionId;
-    } else {
-      focusConnectionId = draft.connections[0]?.id ?? "";
-    }
-    if (!focusConnectionId) return;
     initialFocusHandledRef.current = focusKey;
-    pendingAllowlistFocusRef.current = true;
-    setExpandedConnectionId(focusConnectionId);
-    setAllowlistOpen(false);
-  }, [draft.connections, draft.qq, initialFocus]);
-  useEffect(() => {
-    setAllowlistOpen(false);
-  }, [expandedConnectionId]);
+    focusAccessStep();
+  }, [initialFocus]);
   useEffect(() => {
     installRef.current = install;
   }, [install]);
@@ -1742,6 +2210,11 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
     setConnections((items) => items.map((item) => item.id === id ? { ...item, ...patch } : item));
   const persistConnection = (id: string, patch: Partial<BotConnectionView>) =>
     persistConnections((items) => items.map((item) => item.id === id ? { ...item, ...patch } : item));
+  const persistConnectionToolApprovalMode = (id: string, mode: string) => {
+    const normalizedMode = normalizeBotToolApprovalMode(mode, true);
+    setConnections((items) => items.map((item) => item.id === id ? { ...item, toolApprovalMode: normalizedMode } : item));
+    void apply(() => app.SetBotConnectionToolApprovalMode(id, normalizedMode));
+  };
   const updateConnectionCredential = (id: string, patch: Partial<BotConnectionView["credential"]>) =>
     setConnections((items) => items.map((item) => item.id === id ? { ...item, credential: { ...item.credential, ...patch } } : item));
   const persistConnectionCredential = (id: string, patch: Partial<BotConnectionView["credential"]>) =>
@@ -1755,10 +2228,60 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
     setAllowlistText((prev) => ({ ...prev, [key]: entries.join("\n") }));
     void persistAllowlist({ [key]: entries } as Partial<BotAllowlistView>);
   };
+  const updateBotSettings = (patch: Partial<BotSettingsView>) =>
+    setDraft((prev) => ({ ...prev, ...patch }));
+  const persistBotSettings = (patch: Partial<BotSettingsView>) =>
+    persistBotDraft({ ...draft, ...patch });
+  const updateSelfUserText = (key: BotSelfUserTextKey, value: string) =>
+    setSelfUserText((prev) => ({ ...prev, [key]: value }));
+  const persistSelfUserText = (key: BotSelfUserTextKey, value: string) => {
+    const entries = parseBotListInput(value);
+    const nextSelfUserIds = { ...draft.selfUserIds, [key]: entries };
+    setSelfUserText((prev) => ({ ...prev, [key]: entries.join("\n") }));
+    void persistBotSettings({ selfUserIds: nextSelfUserIds });
+  };
+  const updateRoute = (index: number, patch: Partial<BotRouteView>) =>
+    setDraft((prev) => ({
+      ...prev,
+      routes: prev.routes.map((route, routeIndex) => routeIndex === index ? normalizeBotRoute({ ...route, ...patch }) : route),
+    }));
+  const persistRoute = (index: number, patch: Partial<BotRouteView>) =>
+    persistBotDraft({
+      ...draft,
+      routes: draft.routes.map((route, routeIndex) => routeIndex === index ? normalizeBotRoute({ ...route, ...patch }) : route),
+    });
+  const addRoute = () =>
+    setDraft((prev) => ({ ...prev, routes: [...prev.routes, emptyBotRoute()] }));
+  const removeRoute = (index: number) =>
+    void persistBotDraft({ ...draft, routes: draft.routes.filter((_, routeIndex) => routeIndex !== index) });
   const updateQQ = (patch: Partial<BotSettingsView["qq"]>) =>
     setDraft((prev) => ({ ...prev, qq: { ...prev.qq, ...patch } }));
   const persistQQ = (patch: Partial<BotSettingsView["qq"]>) =>
     persistBotDraft({ ...draft, qq: { ...draft.qq, ...patch } });
+  const updateQQAccess = (patch: Partial<BotAccessView>) =>
+    updateQQ({ access: normalizeBotAccess({ ...draft.qq.access, ...patch }) });
+  const persistQQAccess = (patch: Partial<BotAccessView>) =>
+    persistQQ({ access: normalizeBotAccess({ ...draft.qq.access, ...patch }) });
+  const updateConnectionAccess = (id: string, patch: Partial<BotAccessView>) =>
+    setConnections((items) => items.map((item) => item.id === id ? { ...item, access: normalizeBotAccess({ ...item.access, ...patch }) } : item));
+  const persistConnectionAccess = (connection: BotConnectionView, patch: Partial<BotAccessView>) =>
+    persistConnection(connection.id, { access: normalizeBotAccess({ ...connection.access, ...patch }) });
+  const accessTextKey = (id: string, field: BotAccessListField) => `${id}:${field}`;
+  const accessListText = (id: string, access: BotAccessView, field: BotAccessListField) =>
+    accessText[accessTextKey(id, field)] ?? access[field].join("\n");
+  const setAccessListText = (id: string, field: BotAccessListField, value: string) =>
+    setAccessText((prev) => ({ ...prev, [accessTextKey(id, field)]: value }));
+  const persistAccessListText = (
+    id: string,
+    access: BotAccessView,
+    field: BotAccessListField,
+    value: string,
+    persistAccess: (patch: Partial<BotAccessView>) => void,
+  ) => {
+    const entries = parseBotListInput(value);
+    setAccessText((prev) => ({ ...prev, [accessTextKey(id, field)]: entries.join("\n") }));
+    persistAccess({ ...access, [field]: entries } as Partial<BotAccessView>);
+  };
   const removeConnection = async (connection: BotConnectionView) => {
     const nextDraft = botDraftWithDerivedGatewayState({
       ...draft,
@@ -1771,12 +2294,11 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   const installQrURL = install.result?.url ?? "";
   const installQrIsImage = installQrURL.startsWith("data:image/");
   const isQQInstallTarget = installTarget === "qq";
-  const selectedInstallConnection = isQQInstallTarget ? undefined : draft.connections.find((connection) => botInstallTargetMatchesConnection(installTarget, connection));
   const selectedInstallLabel = botTargetLabel(installTarget, t);
   const installUserCode = install.result?.userCode && installTarget !== "weixin" ? formatInstallUserCode(install.result.userCode) : "";
   const qqSecretEnv = draft.qq.appSecretEnv.trim() || DEFAULT_QQ_SECRET_ENV;
   const qqConfigured = draft.qq.enabled && draft.qq.appId.trim() && qqSecretEnv && draft.qq.secretSet;
-  const qqCanEnableAccess = qqAccessReady(draft.allowlist);
+  const qqCanEnableAccess = botAccessReady(draft.qq.access);
   const qqCanSaveAndEnable = Boolean(draft.qq.appId.trim() && qqSecretEnv && (draft.qq.secretSet || qqSecretValue.trim()) && qqCanEnableAccess);
   const qqAdded = qqBotAdded(draft.qq);
   const nativeRuntimeAvailable = typeof window !== "undefined" && Boolean(window.runtime);
@@ -1785,6 +2307,15 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
   const connectionItems: BotConnectionListItem[] = [
     ...(qqAdded ? [{ kind: "qq" as const }] : []),
     ...draft.connections.map((connection) => ({ kind: "connection" as const, connection })),
+  ];
+  const selectedInstallConnection = isQQInstallTarget ? undefined : draft.connections.find((connection) => botInstallTargetMatchesConnection(installTarget, connection));
+  const selectedChannelConfigured = isQQInstallTarget ? qqAdded : Boolean(selectedInstallConnection);
+  const routeConnectionOptions = [
+    ...(qqAdded ? [{ id: "qq", label: "QQ" }] : []),
+    ...draft.connections.map((connection) => ({
+      id: connection.id || [connection.provider, connection.domain].filter(Boolean).join("-"),
+      label: connection.label || botConnectionLabel(connection, t),
+    })).filter((item) => item.id),
   ];
 
   const saveBot = () => app.SetBotSettings(botDraftWithDerivedGatewayState(draft));
@@ -1965,11 +2496,9 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
     setQQSecretValue("");
   };
   const focusQQAccessSettings = () => {
-    pendingAllowlistFocusRef.current = true;
-    setExpandedConnectionId(QQ_CONNECTION_ID);
-    setAllowlistOpen(true);
-    setAllowlistFocused(true);
     setDiagnostics((prev) => ({ ...prev, [QQ_CONNECTION_ID]: t("settings.botQQAccessRequired") }));
+    setExpandedConnectionId(QQ_CONNECTION_ID);
+    window.setTimeout(() => stepConnectRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }), 60);
   };
   const saveQQAndEnable = async () => {
     if (!qqCanEnableAccess) {
@@ -1999,7 +2528,7 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
     const env = draft.qq.appSecretEnv.trim() || DEFAULT_QQ_SECRET_ENV;
     const nextDraft = botDraftWithDerivedGatewayState({
       ...draft,
-      qq: { enabled: false, appId: "", appSecretEnv: DEFAULT_QQ_SECRET_ENV, secretSet: false, sandbox: false },
+      qq: { enabled: false, appId: "", appSecretEnv: DEFAULT_QQ_SECRET_ENV, secretSet: false, sandbox: false, model: "", toolApprovalMode: "ask", workspaceRoot: "", access: defaultBotAccess() },
     });
     await apply(async () => {
       await app.SetBotSettings(nextDraft);
@@ -2009,780 +2538,1114 @@ function BotsSection({ s, busy, apply, initialFocus }: BotsSectionProps) {
     setQQSecretValue("");
     setExpandedConnectionId("");
   };
-  const onlineConnections = (qqOnline ? 1 : 0) + draft.connections.filter((connection) => connection.enabled && connection.status === "connected").length;
-  const selectedQQ = qqAdded && expandedConnectionId === QQ_CONNECTION_ID;
-  const selectedConnection = selectedQQ ? null : draft.connections.find((connection) => connection.id === expandedConnectionId) ?? null;
+  const selectedQQ = isQQInstallTarget && qqAdded;
+  const selectedConnection = isQQInstallTarget ? null : selectedInstallConnection ?? null;
   const selectedDiagnostic = selectedConnection ? diagnostics[selectedConnection.id] : undefined;
   const selectedDiagnosticDetail = diagnosticReportDetail(selectedDiagnostic);
   const selectedConnectionRemote = selectedConnection ? firstConnectionRemote(selectedConnection) : "";
-  const selectedConnectionToolApprovalMode = selectedConnection ? normalizeBotToolApprovalMode(selectedConnection.toolApprovalMode, true) : "";
-  const selectedAllowlistTargetReady = selectedQQ || Boolean(selectedConnection);
-  useEffect(() => {
-    if (!pendingAllowlistFocusRef.current || !selectedAllowlistTargetReady) return;
-    setAllowlistOpen(true);
-    const scrollTimer = window.setTimeout(() => {
-      if (!allowlistRef.current) return;
-      pendingAllowlistFocusRef.current = false;
-      allowlistRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
-      setAllowlistFocused(true);
-    }, 80);
-    const clearTimer = window.setTimeout(() => setAllowlistFocused(false), 2100);
-    return () => {
-      window.clearTimeout(scrollTimer);
-      window.clearTimeout(clearTimer);
+  const selectedConnectionToolApprovalMode = selectedConnection ? normalizeBotToolApprovalMode(selectedConnection.toolApprovalMode) : "ask";
+  const simpleAccessMode = draft.allowlist.allowAll ? "everyone" : "trusted";
+  const connectedPlatforms = new Set<BotPlatformKey>();
+  if (qqAdded) connectedPlatforms.add("qq");
+  for (const connection of draft.connections) connectedPlatforms.add(botConnectionPlatform(connection));
+  const platformHasAllowlistText = (platform: BotPlatformKey) =>
+    BOT_ALLOWLIST_ROLES.some((role) => allowlistText[botAllowlistKey(platform, role)].trim());
+  const visibleAccessPlatforms = BOT_PLATFORM_KEYS.filter((platform) =>
+    showAllPlatforms || connectedPlatforms.size === 0 || connectedPlatforms.has(platform) || platformHasAllowlistText(platform));
+  const platformFilterAvailable = connectedPlatforms.size > 0 &&
+    BOT_PLATFORM_KEYS.some((platform) => !connectedPlatforms.has(platform) && !platformHasAllowlistText(platform));
+  const botChannelConnectionForTarget = (target: BotInstallTarget) =>
+    target === "qq" ? null : draft.connections.find((connection) => botInstallTargetMatchesConnection(target, connection));
+  const botChannelIsConfigured = (target: BotInstallTarget) =>
+    target === "qq" ? qqAdded : Boolean(botChannelConnectionForTarget(target));
+  const openBotChannel = (target: BotInstallTarget) => {
+    setInstallTarget(target);
+    const connection = botChannelConnectionForTarget(target);
+    setExpandedConnectionId(target === "qq" && qqAdded ? QQ_CONNECTION_ID : connection?.id || "");
+  };
+  const setSimpleAccessMode = (mode: "trusted" | "everyone") => {
+    const patch = mode === "everyone"
+      ? { enabled: false, allowAll: true }
+      : { enabled: true, allowAll: false };
+    updateAllowlist(patch);
+    void persistAllowlist(patch);
+  };
+  const renderBotAccessSection = (
+    id: string,
+    access: BotAccessView,
+    updateAccess: (patch: Partial<BotAccessView>) => void,
+    persistAccess: (patch: Partial<BotAccessView>) => void,
+  ) => {
+    const mode = access.allowAll ? "everyone" : "trusted";
+    const setMode = (nextMode: "trusted" | "everyone") => {
+      const patch = nextMode === "everyone"
+        ? { enabled: false, allowAll: true }
+        : { enabled: true, allowAll: false };
+      updateAccess(patch);
+      persistAccess(patch);
     };
-  }, [selectedAllowlistTargetReady]);
-
-  return (
-    <div className="bot-phone-connect">
-        <div className="bot-connection-list">
-          <div className="bot-connection-list__head">
-            <div className="bot-connection-list__title">
-              <strong>{t("settings.botConnectedBots")}</strong>
-              <span>{t("settings.botConnectedBotsSummary", { online: onlineConnections, total: connectionItems.length })}</span>
+    return (
+      <section className="bot-detail-section bot-detail-section--access">
+        <div>
+          <div className="bot-detail-section__head">{t("settings.botAccessControl")}</div>
+          <p>{access.allowAll ? t("settings.botSimpleAccessEveryoneSummary") : t("settings.botSimpleAccessTrustedSummary", { count: botAccessEntryCount(access) })}</p>
+        </div>
+        <div className="bot-choice-grid bot-choice-grid--access">
+          <button
+            type="button"
+            className={`bot-choice-card${mode === "trusted" ? " bot-choice-card--active" : ""}`}
+            disabled={busy}
+            onClick={() => setMode("trusted")}
+          >
+            <strong>{t("settings.botAccessTrusted")}</strong>
+            <span>{t("settings.botAccessTrustedHint")}</span>
+          </button>
+          <button
+            type="button"
+            className={`bot-choice-card${mode === "everyone" ? " bot-choice-card--active" : ""}`}
+            disabled={busy}
+            onClick={() => setMode("everyone")}
+          >
+            <strong>{t("settings.botAccessEveryone")}</strong>
+            <span>{t("settings.botAccessEveryoneHint")}</span>
+          </button>
+        </div>
+        <div className="bot-pairing-row">
+          <div>
+            <strong>{t("settings.botAccessPairing")}</strong>
+            <span>{t("settings.botAccessPairingHint")}</span>
+          </div>
+          <ToggleSegment
+            value={access.pairingEnabled}
+            disabled={busy}
+            onChange={(pairingEnabled) => {
+              updateAccess({ pairingEnabled });
+              persistAccess({ pairingEnabled });
+            }}
+          />
+        </div>
+        {access.allowAll ? (
+          <div className="bot-access-panel__warning">{t("settings.botAllowAllWarn")}</div>
+        ) : (
+          <div className="bot-access-platforms bot-access-platforms--single">
+            <div className="bot-access-platform">
+              <BotListInput
+                label={t("settings.botListUsers")}
+                value={accessListText(id, access, "users")}
+                disabled={busy}
+                placeholder={t("settings.botListPlaceholder")}
+                onChange={(value) => setAccessListText(id, "users", value)}
+                onBlur={(value) => persistAccessListText(id, access, "users", value, persistAccess)}
+              />
+              <BotListInput
+                label={t("settings.botListGroups")}
+                value={accessListText(id, access, "groups")}
+                disabled={busy}
+                placeholder={t("settings.botListPlaceholder")}
+                onChange={(value) => setAccessListText(id, "groups", value)}
+                onBlur={(value) => persistAccessListText(id, access, "groups", value, persistAccess)}
+              />
             </div>
           </div>
-          {browserPreviewBotConfigured ? (
-            <div className="bot-connection-warning">{t("settings.botBrowserPreviewWarning")}</div>
-          ) : null}
-          {connectionItems.length === 0 ? (
-            <div className="bot-connection-empty">{t("settings.botConnectionsEmpty")}</div>
-          ) : (
-            <div className="bot-connection-table" role="table" aria-label={t("settings.botConnectedBots")}>
-              <div className="bot-connection-table__header" role="row">
-                <span>{t("settings.botConnectionColumnChannel")}</span>
-                <span>{t("settings.botConnectionColumnName")}</span>
-                <span>{t("settings.botConnectionColumnStatus")}</span>
-                <span>{t("settings.botConnectionColumnActions")}</span>
+        )}
+        <details className="bot-access-panel bot-simple-roles">
+          <summary className="bot-access-panel__summary">
+            <span>
+              <strong>{t("settings.botRoleAccess")}</strong>
+              <small>{t("settings.botRoleAccessHint")}</small>
+            </span>
+            <ChevronDown className="bot-access-panel__chevron" size={16} aria-hidden="true" />
+          </summary>
+          <div className="bot-access-panel__body">
+            <div className="bot-access-platforms bot-access-platforms--single">
+              <div className="bot-access-platform">
+                <BotListInput
+                  label={t("settings.botListApprovers")}
+                  value={accessListText(id, access, "approvers")}
+                  disabled={busy || access.allowAll}
+                  placeholder={t("settings.botListPlaceholder")}
+                  onChange={(value) => setAccessListText(id, "approvers", value)}
+                  onBlur={(value) => persistAccessListText(id, access, "approvers", value, persistAccess)}
+                />
+                <BotListInput
+                  label={t("settings.botListAdmins")}
+                  value={accessListText(id, access, "admins")}
+                  disabled={busy || access.allowAll}
+                  placeholder={t("settings.botListPlaceholder")}
+                  onChange={(value) => setAccessListText(id, "admins", value)}
+                  onBlur={(value) => persistAccessListText(id, access, "admins", value, persistAccess)}
+                />
               </div>
-              {connectionItems.map((item) => {
-                if (item.kind === "qq") {
-                  const appID = draft.qq.appId.trim();
-                  const qqDiagMessage = diagnosticMessage(diagnostics[QQ_CONNECTION_ID]);
-                  const statusText = qqOnline
-                    ? t("settings.botConnectionConnected")
-                    : qqConfigured
-                      ? t("settings.botConnectionConfigured")
-                      : draft.qq.secretSet
-                      ? t("settings.botConnectionDisconnected")
-                      : t("settings.botSecretMissing");
-                  return (
-                    <div key={QQ_CONNECTION_ID} className="bot-connection-row" role="rowgroup">
-                      <div className="bot-connection-row__grid" role="row">
-                      <div className="bot-connection-row__channel" role="cell">
-                        <span>QQ</span>
-                      </div>
-                      <div className="bot-connection-row__identity-cell" role="cell">
-                        <button
-                          type="button"
-                          className="bot-connection-identity"
-                          disabled={busy}
-                          onClick={() => setExpandedConnectionId((current) => current === QQ_CONNECTION_ID ? "" : QQ_CONNECTION_ID)}
-                          title={appID || "QQ Bot"}
-                        >
-                          <span className="bot-connection-identity__main">
-                            <strong>QQ Bot</strong>
-                            <code>{appID || "—"}</code>
-                          </span>
-                        </button>
-                      </div>
-                      <div className="bot-connection-row__state" role="cell">
-                        <span className={`bot-connection-row__status bot-connection-row__status--${qqOnline ? "connected" : qqConfigured ? "configured" : "disconnected"}`}>
-                            {statusText}
-                          </span>
-                          <ToggleSegment
-                            value={draft.qq.enabled}
-                            disabled={busy}
-                            onChange={(enabled) => {
-                              if (enabled && !qqCanEnableAccess) {
-                                focusQQAccessSettings();
-                                return;
-                              }
-                              updateQQ({ enabled });
-                              void persistQQ({ enabled });
-                            }}
-                          />
-                        </div>
-                        <div className="bot-connection-row__actions" role="cell">
-                          <button
-                            type="button"
-                            className={`btn btn--small${selectedQQ ? " btn--primary" : " btn--secondary"}`}
-                            disabled={busy}
-                            onClick={() => setExpandedConnectionId((current) => current === QQ_CONNECTION_ID ? "" : QQ_CONNECTION_ID)}
-                          >
-                            {t("settings.botManage")}
-                          </button>
-                        </div>
-                      </div>
-                      {qqDiagMessage ? <em className="bot-connection-row__diag">{qqDiagMessage}</em> : null}
-                    </div>
-                  );
-                }
-                const connection = item.connection;
-                const sessionID = firstConnectionRemote(connection);
-                const diagMessage = diagnosticMessage(diagnostics[connection.id]);
-                const connectionStatusClass = connection.status === "connected" ? "connected" : "disconnected";
-                return (
-                  <div key={connection.id} className="bot-connection-row" role="rowgroup">
-                    <div className="bot-connection-row__grid" role="row">
-                      <div className="bot-connection-row__channel" role="cell">
-                        <span>{botConnectionLabel(connection, t)}</span>
-                      </div>
-                      <div className="bot-connection-row__identity-cell" role="cell">
-                        <button
-                          type="button"
-                          className="bot-connection-identity"
-                          disabled={busy}
-                          onClick={() => setExpandedConnectionId((current) => current === connection.id ? "" : connection.id)}
-                          title={sessionID || connection.label || botConnectionLabel(connection, t)}
-                        >
-                          <span className="bot-connection-identity__main">
-                            <strong>{connection.label || botConnectionLabel(connection, t)}</strong>
-                            <code>{sessionID || "—"}</code>
-                          </span>
-                        </button>
-                      </div>
-                      <div className="bot-connection-row__state" role="cell">
-                        <span className={`bot-connection-row__status bot-connection-row__status--${connectionStatusClass}`}>
-                          {connection.status === "connected" ? t("settings.botConnectionConnected") : connection.status || t("settings.botConnectionDisconnected")}
-                        </span>
-                        <ToggleSegment
-                          value={connection.enabled}
-                          disabled={busy}
-                          onChange={(enabled) => void persistConnection(connection.id, { enabled })}
-                        />
-                      </div>
-                      <div className="bot-connection-row__actions" role="cell">
-                        <button
-                          type="button"
-                          className={`btn btn--small${expandedConnectionId === connection.id ? " btn--primary" : " btn--secondary"}`}
-                          disabled={busy}
-                          onClick={() => setExpandedConnectionId((current) => current === connection.id ? "" : connection.id)}
-                        >
-                          {t("settings.botManage")}
-                        </button>
-                      </div>
-                    </div>
-                    {diagMessage ? <em className="bot-connection-row__diag">{diagMessage}</em> : null}
-                  </div>
-                );
-              })}
             </div>
-          )}
+          </div>
+        </details>
+      </section>
+    );
+  };
+  const qqDetailCard = (
+    <article className="bot-detail-card" aria-labelledby="bot-detail-title">
+      <div className="bot-detail-card__head">
+        <div className="bot-detail-card__identity">
+          <div className="bot-detail-card__title" id="bot-detail-title">
+            QQ Bot
+            <span className="badge badge--neutral">QQ</span>
+            <span className={`badge ${qqOnline ? "badge--project" : qqConfigured ? "badge--feedback" : "badge--feedback"}`}>
+              {qqOnline ? t("settings.botConnectionConnected") : qqConfigured ? t("settings.botConnectionConfigured") : t("settings.botConnectionDisconnected")}
+            </span>
+          </div>
+          <div className="bot-detail-card__desc">{t("settings.botAutoSaveHint")}</div>
         </div>
+      </div>
 
-        {selectedQQ ? (
-          <article className="bot-detail-card" aria-labelledby="bot-detail-title">
-            <div className="bot-detail-card__head">
-              <div className="bot-detail-card__identity">
-                <div className="bot-detail-card__title" id="bot-detail-title">
-                  QQ Bot
-                  <span className="badge badge--neutral">QQ</span>
-                  <span className={`badge ${qqOnline ? "badge--project" : qqConfigured ? "badge--feedback" : "badge--feedback"}`}>
-                    {qqOnline ? t("settings.botConnectionConnected") : qqConfigured ? t("settings.botConnectionConfigured") : t("settings.botConnectionDisconnected")}
-                  </span>
-                </div>
-                <div className="bot-detail-card__desc">{t("settings.botAutoSaveHint")}</div>
-              </div>
-              <div className="bot-detail-card__actions">
-                <button type="button" className="btn btn--small" onClick={() => setExpandedConnectionId("")}>
-                  {t("common.collapse")}
-                </button>
-              </div>
+      <section className="bot-detail-section">
+        <div className="bot-detail-section__head">{t("settings.botConnectionSummary")}</div>
+        <div className="bot-detail-summary">
+          <div>
+            <span>{t("settings.botConnectionColumnChannel")}</span>
+            <strong>QQ</strong>
+          </div>
+          <div>
+            <span>{t("settings.botConnectionColumnRemote")}</span>
+            <code title={draft.qq.appId.trim() || undefined}>{draft.qq.appId.trim() || "—"}</code>
+          </div>
+          <div>
+            <span>{t("settings.botConnectionColumnScope")}</span>
+            <strong>{t("settings.botScopeGlobal")}</strong>
+          </div>
+          <div>
+            <span>{t("settings.botConnectionColumnStatus")}</span>
+            <strong>{qqOnline ? t("settings.botConnectionConnected") : qqConfigured ? t("settings.botConnectionConfigured") : t("settings.botConnectionDisconnected")}</strong>
+          </div>
+        </div>
+      </section>
+
+      <section className="bot-detail-section bot-detail-section--runtime-primary">
+        <SettingsField label={t("settings.botEnableBot")} hint={t("settings.botGatewayEnabled")}>
+          <ToggleSegment
+            value={draft.qq.enabled}
+            disabled={busy}
+            onChange={(enabled) => {
+              if (enabled && !qqCanEnableAccess) {
+                focusQQAccessSettings();
+                return;
+              }
+              updateQQ({ enabled });
+              void persistQQ({ enabled });
+            }}
+          />
+        </SettingsField>
+        <SettingsField label={t("settings.botToolApprovalMode")} hint={t("settings.botToolApprovalModeHint")}>
+          <div className="provider-add-segmented" role="group" aria-label={t("settings.botToolApprovalMode")}>
+            {TOOL_APPROVAL_MODES.map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                className={normalizeBotToolApprovalMode(draft.qq.toolApprovalMode) === mode ? "provider-add-segmented__item provider-add-segmented__item--active" : "provider-add-segmented__item"}
+                disabled={busy}
+                onClick={() => void persistQQ({ toolApprovalMode: mode })}
+              >
+                {t(`settings.botToolApprovalMode.${mode}` as DictKey)}
+              </button>
+            ))}
+          </div>
+        </SettingsField>
+        <SettingsField label={t("settings.botChannelModel")} hint={t("settings.botChannelModelHint")}>
+          <ModelPicker
+            s={s}
+            refs={refs}
+            value={toRef(draft.qq.model, s)}
+            disabled={busy}
+            emptyOptionLabel={t("settings.botChannelModelAuto")}
+            emptyOptionHint={settingsModelMeta(s, t)}
+            onPick={(model) => void persistQQ({ model })}
+          />
+        </SettingsField>
+      </section>
+
+      {renderBotAccessSection(QQ_CONNECTION_ID, draft.qq.access, updateQQAccess, (patch) => void persistQQAccess(patch))}
+
+      <section className="bot-detail-section">
+        <div className="bot-detail-section__head">{t("settings.botRuntimeSettings")}</div>
+        <SettingsField label={t("settings.botSandbox")} hint={t("settings.botInstallQQHint")}>
+          <ToggleSegment
+            value={draft.qq.sandbox}
+            disabled={busy}
+            onLabel={t("settings.toggleOn")}
+            offLabel={t("settings.toggleOff")}
+            onChange={(sandbox) => {
+              updateQQ({ sandbox });
+              void persistQQ({ sandbox });
+            }}
+          />
+        </SettingsField>
+        <SettingsField label={t("settings.botWorkspaceRoot")} hint={t("settings.botWorkspaceRootHint")}>
+          <input
+            className="mem-input"
+            value={draft.qq.workspaceRoot}
+            disabled={busy}
+            placeholder={t("settings.botWorkspaceRootPlaceholder")}
+            spellCheck={false}
+            onChange={(event) => updateQQ({ workspaceRoot: event.target.value })}
+            onBlur={(event) => void persistQQ({ workspaceRoot: event.currentTarget.value })}
+          />
+        </SettingsField>
+      </section>
+
+      <section className="bot-detail-section">
+        <div className="bot-detail-section__head">{t("settings.botCredential")}</div>
+        <div className="bot-credential-stack">
+          <div className="bot-credential-line">
+            <span>{draft.qq.appId.trim() ? t("settings.botCredentialApp", { value: draft.qq.appId.trim() }) : t("settings.botCredentialConfigured")}</span>
+            <strong>{draft.qq.secretSet ? t("settings.botSecretSet") : t("settings.botSecretMissing")}</strong>
+          </div>
+          <div className="bot-secret-row bot-secret-row--qq">
+            <input
+              className="mem-input"
+              value={draft.qq.appId}
+              disabled={busy}
+              placeholder={t("settings.botAppId")}
+              spellCheck={false}
+              aria-label={t("settings.botAppId")}
+              onChange={(event) => updateQQ({ appId: event.target.value })}
+              onBlur={(event) => void persistQQ({ appId: event.currentTarget.value })}
+            />
+            <input
+              className="mem-input"
+              value={draft.qq.appSecretEnv || DEFAULT_QQ_SECRET_ENV}
+              disabled={busy}
+              placeholder={DEFAULT_QQ_SECRET_ENV}
+              spellCheck={false}
+              aria-label={t("settings.botSecretEnv")}
+              onChange={(event) => updateQQ({ appSecretEnv: event.target.value })}
+              onBlur={(event) => void persistQQ({ appSecretEnv: event.currentTarget.value || DEFAULT_QQ_SECRET_ENV })}
+            />
+            <input
+              className="mem-input"
+              type="password"
+              value={qqSecretValue}
+              disabled={busy}
+              placeholder={draft.qq.secretSet ? t("settings.botSecretReplace") : t("settings.botSecretPaste")}
+              aria-label={t("settings.botSecretValue")}
+              onChange={(event) => setQQSecretValue(event.target.value)}
+            />
+            <button type="button" className="btn btn--secondary btn--small" disabled={busy || !qqCanSaveAndEnable} onClick={() => void saveQQAndEnable()}>
+              {draft.qq.secretSet ? t("settings.saveKey") : t("settings.botSaveAndEnable")}
+            </button>
+            <button type="button" className="btn btn--secondary btn--small" disabled={busy || !draft.qq.secretSet} onClick={() => void clearQQSecret()}>
+              {t("settings.clearKey")}
+            </button>
+          </div>
+          {!qqCanEnableAccess ? <div className="bot-connect-panel__hint bot-connect-panel__hint--warning">{t("settings.botQQAccessRequired")}</div> : null}
+        </div>
+      </section>
+
+      <section className="bot-detail-section bot-detail-section--danger">
+        <div>
+          <div className="bot-detail-section__head">{t("settings.botDangerZone")}</div>
+          <p>{t("settings.deleteBotHint")}</p>
+        </div>
+        <InlineConfirmButton
+          label={t("settings.deleteBot")}
+          confirmLabel={t("settings.confirmDeleteBot")}
+          cancelLabel={t("common.cancel")}
+          disabled={busy}
+          danger
+          onConfirm={() => void removeQQBot()}
+        />
+      </section>
+    </article>
+  );
+
+  const connectionDetailCard = selectedConnection ? (
+    <article className="bot-detail-card" aria-labelledby="bot-detail-title">
+      <div className="bot-detail-card__head">
+        <div className="bot-detail-card__identity">
+          <div className="bot-detail-card__title" id="bot-detail-title">
+            {selectedConnection.label || botConnectionLabel(selectedConnection, t)}
+            <span className="badge badge--neutral">{botConnectionLabel(selectedConnection, t)}</span>
+            <span className={`badge ${selectedConnection.status === "connected" ? "badge--project" : "badge--feedback"}`}>
+              {selectedConnection.status === "connected" ? t("settings.botConnectionConnected") : selectedConnection.status || t("settings.botConnectionDisconnected")}
+            </span>
+          </div>
+          <div className="bot-detail-card__desc">{t("settings.botAutoSaveHint")}</div>
+        </div>
+        <div className="bot-detail-card__actions">
+          <button type="button" className="btn btn--small" disabled={busy} onClick={() => void diagnoseConnection(selectedConnection.id)}>
+            {t("settings.botDiagnose")}
+          </button>
+          {(selectedConnection.provider === "feishu" || selectedConnection.provider === "weixin") ? (
+            <button type="button" className="btn btn--small" disabled={busy || !selectedConnectionRemote} onClick={() => void testConnection(selectedConnection)}>
+              {t("settings.botTest")}
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      {diagnosticMessage(selectedDiagnostic) ? (
+        <div className="bot-detail-notice">
+          <span>{diagnosticMessage(selectedDiagnostic)}</span>
+          {selectedDiagnosticDetail ? (
+            <div className="bot-diagnostic-actions">
+              <button type="button" className="btn btn--secondary btn--small" disabled={busy} onClick={() => void copyConnectionDiagnostic(selectedConnection)}>
+                <Clipboard aria-hidden="true" />
+                {t("settings.botCopyDiagnostic")}
+              </button>
+              <button type="button" className="btn btn--primary btn--small" disabled={busy} onClick={() => void reportConnectionDiagnostic(selectedConnection)}>
+                <Send aria-hidden="true" />
+                {t("settings.botSendDiagnostic")}
+              </button>
+              <small>{t("settings.botDiagnosticPrivacy")}</small>
             </div>
+          ) : null}
+        </div>
+      ) : null}
 
-            <section className="bot-detail-section">
-              <div className="bot-detail-section__head">{t("settings.botConnectionSummary")}</div>
-              <div className="bot-detail-summary">
-                <div>
-                  <span>{t("settings.botConnectionColumnChannel")}</span>
-                  <strong>QQ</strong>
-                </div>
-                <div>
-                  <span>{t("settings.botConnectionColumnRemote")}</span>
-                  <code title={draft.qq.appId.trim() || undefined}>{draft.qq.appId.trim() || "—"}</code>
-                </div>
-                <div>
-                  <span>{t("settings.botConnectionColumnScope")}</span>
-                  <strong>{t("settings.botScopeGlobal")}</strong>
-                </div>
-                <div>
-                  <span>{t("settings.botConnectionColumnStatus")}</span>
-                  <strong>{qqOnline ? t("settings.botConnectionConnected") : qqConfigured ? t("settings.botConnectionConfigured") : t("settings.botConnectionDisconnected")}</strong>
-                </div>
+      <section className="bot-detail-section">
+        <div className="bot-detail-section__head">{t("settings.botConnectionSummary")}</div>
+        <div className="bot-detail-summary">
+          <div>
+            <span>{t("settings.botConnectionColumnChannel")}</span>
+            <strong>{botConnectionLabel(selectedConnection, t)}</strong>
+          </div>
+          <div>
+            <span>{t("settings.botConnectionColumnRemote")}</span>
+            <code title={selectedConnectionRemote || undefined}>{selectedConnectionRemote || "—"}</code>
+          </div>
+          <div>
+            <span>{t("settings.botConnectionColumnScope")}</span>
+            <strong>{botConnectionScopeLabel(selectedConnection, t)}</strong>
+          </div>
+          <div>
+            <span>{t("settings.botConnectionColumnStatus")}</span>
+            <strong>{selectedConnection.status === "connected" ? t("settings.botConnectionConnected") : selectedConnection.status || t("settings.botConnectionDisconnected")}</strong>
+          </div>
+        </div>
+      </section>
+
+      <section className="bot-detail-section bot-detail-section--runtime-primary">
+        <SettingsField label={t("settings.botEnableBot")} hint={t("settings.botGatewayEnabled")}>
+          <ToggleSegment
+            value={selectedConnection.enabled}
+            disabled={busy}
+            onChange={(enabled) => void persistConnection(selectedConnection.id, { enabled })}
+          />
+        </SettingsField>
+        <SettingsField label={t("settings.botToolApprovalMode")} hint={t("settings.botToolApprovalModeHint")}>
+          <div className="provider-add-segmented" role="group" aria-label={t("settings.botToolApprovalMode")}>
+            {TOOL_APPROVAL_MODES.map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                className={selectedConnectionToolApprovalMode === mode ? "provider-add-segmented__item provider-add-segmented__item--active" : "provider-add-segmented__item"}
+                disabled={busy}
+                onClick={() => persistConnectionToolApprovalMode(selectedConnection.id, mode)}
+              >
+                {t(`settings.botToolApprovalMode.${mode}` as DictKey)}
+              </button>
+            ))}
+          </div>
+        </SettingsField>
+        <SettingsField label={t("settings.botChannelModel")} hint={t("settings.botChannelModelHint")}>
+          <ModelPicker
+            s={s}
+            refs={refs}
+            value={toRef(selectedConnection.model, s)}
+            disabled={busy}
+            emptyOptionLabel={t("settings.botChannelModelAuto")}
+            emptyOptionHint={settingsModelMeta(s, t)}
+            onPick={(model) => void persistConnection(selectedConnection.id, { model })}
+          />
+        </SettingsField>
+      </section>
+
+      {renderBotAccessSection(
+        selectedConnection.id,
+        selectedConnection.access,
+        (patch) => updateConnectionAccess(selectedConnection.id, patch),
+        (patch) => void persistConnectionAccess(selectedConnection, patch),
+      )}
+
+      <section className="bot-detail-section">
+        <div className="bot-detail-section__head">{t("settings.botRuntimeSettings")}</div>
+        <SettingsField label={t("settings.botWorkspaceRoot")} hint={t("settings.botWorkspaceRootHint")}>
+          <input
+            className="mem-input"
+            value={selectedConnection.workspaceRoot}
+            disabled={busy}
+            placeholder={t("settings.botWorkspaceRootPlaceholder")}
+            spellCheck={false}
+            onChange={(event) => updateConnection(selectedConnection.id, { workspaceRoot: event.target.value })}
+            onBlur={(event) => void persistConnection(selectedConnection.id, { workspaceRoot: event.currentTarget.value })}
+          />
+        </SettingsField>
+      </section>
+
+      <section className="bot-detail-section">
+        <div className="bot-detail-section__head">{t("settings.botCredential")}</div>
+        <div className="bot-credential-stack">
+          <div className="bot-credential-line">
+            <span>{botConnectionCredentialSummary(selectedConnection, t)}</span>
+            <strong>{selectedConnection.credential.secretSet ? t("settings.botSecretSet") : t("settings.botSecretMissing")}</strong>
+          </div>
+          {botConnectionSecretEnv(selectedConnection) ? (
+            <div className="bot-secret-row">
+              <input
+                className="mem-input"
+                value={botConnectionSecretEnv(selectedConnection)}
+                disabled={busy}
+                spellCheck={false}
+                onChange={(event) => updateConnectionCredential(selectedConnection.id, botConnectionSecretPatch(selectedConnection, event.target.value))}
+                onBlur={(event) => void persistConnectionCredential(selectedConnection.id, botConnectionSecretPatch(selectedConnection, event.currentTarget.value))}
+              />
+              <input
+                className="mem-input"
+                type="password"
+                value={connectionSecrets[selectedConnection.id] ?? ""}
+                disabled={busy}
+                placeholder={selectedConnection.credential.secretSet ? t("settings.botSecretReplace") : t("settings.botSecretPaste")}
+                onChange={(event) => setConnectionSecrets((prev) => ({ ...prev, [selectedConnection.id]: event.target.value }))}
+              />
+              <button type="button" className="btn btn--secondary btn--small" disabled={busy || !(connectionSecrets[selectedConnection.id] ?? "").trim()} onClick={() => void saveConnectionSecret(selectedConnection)}>
+                {t("settings.saveKey")}
+              </button>
+              <button type="button" className="btn btn--secondary btn--small" disabled={busy || !selectedConnection.credential.secretSet} onClick={() => void clearConnectionSecret(selectedConnection)}>
+                {t("settings.clearKey")}
+              </button>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="bot-detail-section bot-detail-section--danger">
+        <div>
+          <div className="bot-detail-section__head">{t("settings.botDangerZone")}</div>
+          <p>{t("settings.deleteBotHint")}</p>
+        </div>
+        <InlineConfirmButton
+          label={t("settings.deleteBot")}
+          confirmLabel={t("settings.confirmDeleteBot")}
+          cancelLabel={t("common.cancel")}
+          disabled={busy}
+          danger
+          onConfirm={() => removeConnection(selectedConnection)}
+        />
+      </section>
+    </article>
+  ) : null;
+
+  const installPanelContent = (
+    <>
+      {isQQInstallTarget ? (
+        <div className="bot-connect-panel bot-connect-panel--manual bot-connect-panel--qq">
+          <div className="bot-connect-panel__body">
+            <div className="bot-qq-simple__head">
+              <div>
+                <strong>{selectedInstallLabel}</strong>
+                <p>{t("settings.botInstallManualQQ")}</p>
               </div>
-            </section>
-
-            <section className="bot-detail-section">
-              <div className="bot-detail-section__head">{t("settings.botRuntimeSettings")}</div>
-              <SettingsField label={t("settings.botEnableBot")} hint={t("settings.botGatewayEnabled")}>
-                <ToggleSegment
-                  value={draft.qq.enabled}
-                  disabled={busy}
-                  onChange={(enabled) => {
-                    if (enabled && !qqCanEnableAccess) {
-                      focusQQAccessSettings();
-                      return;
-                    }
-                    updateQQ({ enabled });
-                    void persistQQ({ enabled });
-                  }}
-                />
-              </SettingsField>
-              <SettingsField label={t("settings.botSandbox")} hint={t("settings.botInstallQQHint")}>
-                <ToggleSegment
-                  value={draft.qq.sandbox}
-                  disabled={busy}
-                  onLabel={t("settings.toggleOn")}
-                  offLabel={t("settings.toggleOff")}
-                  onChange={(sandbox) => {
-                    updateQQ({ sandbox });
-                    void persistQQ({ sandbox });
-                  }}
-                />
-              </SettingsField>
-            </section>
-
-            <section className="bot-detail-section">
-              <div className="bot-detail-section__head">{t("settings.botCredential")}</div>
-              <div className="bot-credential-stack">
-                <div className="bot-credential-line">
-                  <span>{draft.qq.appId.trim() ? t("settings.botCredentialApp", { value: draft.qq.appId.trim() }) : t("settings.botCredentialConfigured")}</span>
-                  <strong>{draft.qq.secretSet ? t("settings.botSecretSet") : t("settings.botSecretMissing")}</strong>
-                </div>
-                <div className="bot-secret-row bot-secret-row--qq">
+              <span className={`bot-qq-simple__status${qqConfigured ? " bot-qq-simple__status--ready" : ""}`}>
+                {qqConfigured ? <CheckCircle2 aria-hidden="true" /> : <KeyRound aria-hidden="true" />}
+                {draft.qq.secretSet ? t("settings.botSecretSet") : t("settings.botSecretMissing")}
+              </span>
+            </div>
+            <div className="bot-manual-form bot-manual-form--qq">
+              <div className="bot-card-field">
+                <span>{t("settings.botAppId")}</span>
+                <div>
                   <input
                     className="mem-input"
+                    aria-label={t("settings.botAppId")}
                     value={draft.qq.appId}
                     disabled={busy}
-                    placeholder={t("settings.botAppId")}
                     spellCheck={false}
-                    aria-label={t("settings.botAppId")}
                     onChange={(event) => updateQQ({ appId: event.target.value })}
                     onBlur={(event) => void persistQQ({ appId: event.currentTarget.value })}
                   />
-                  <input
-                    className="mem-input"
-                    value={draft.qq.appSecretEnv || DEFAULT_QQ_SECRET_ENV}
-                    disabled={busy}
-                    placeholder={DEFAULT_QQ_SECRET_ENV}
-                    spellCheck={false}
-                    aria-label={t("settings.botSecretEnv")}
-                    onChange={(event) => updateQQ({ appSecretEnv: event.target.value })}
-                    onBlur={(event) => void persistQQ({ appSecretEnv: event.currentTarget.value || DEFAULT_QQ_SECRET_ENV })}
-                  />
+                </div>
+              </div>
+              <div className="bot-card-field">
+                <span>{t("settings.botAppSecret")}</span>
+                <div>
                   <input
                     className="mem-input"
                     type="password"
                     value={qqSecretValue}
                     disabled={busy}
-                    placeholder={draft.qq.secretSet ? t("settings.botSecretReplace") : t("settings.botSecretPaste")}
+                    placeholder={draft.qq.secretSet ? t("settings.botSecretSavedOptional") : t("settings.botSecretPaste")}
+                    spellCheck={false}
                     aria-label={t("settings.botSecretValue")}
                     onChange={(event) => setQQSecretValue(event.target.value)}
                   />
-                  <button type="button" className="btn btn--secondary btn--small" disabled={busy || !qqCanSaveAndEnable} onClick={() => void saveQQAndEnable()}>
-                    {draft.qq.secretSet ? t("settings.saveKey") : t("settings.botSaveAndEnable")}
-                  </button>
-                  <button type="button" className="btn btn--secondary btn--small" disabled={busy || !draft.qq.secretSet} onClick={() => void clearQQSecret()}>
-                    {t("settings.clearKey")}
-                  </button>
                 </div>
-                {!qqCanEnableAccess ? <div className="bot-connect-panel__hint bot-connect-panel__hint--warning">{t("settings.botQQAccessRequired")}</div> : null}
               </div>
-            </section>
-
-            <details
-              ref={allowlistRef}
-              className={`bot-access-panel${allowlistFocused ? " bot-access-panel--focused" : ""}`}
-              data-focus-target="bot-allowlist"
-              open={allowlistOpen}
-              onToggle={(event) => setAllowlistOpen(event.currentTarget.open)}
-            >
-              <summary className="bot-access-panel__summary">
-                <span>
-                  <strong>{t("settings.botAccessControl")}</strong>
-                  <small>{t("settings.botAllowlistHint")}</small>
-                </span>
-                <ChevronDown className="bot-access-panel__chevron" size={16} aria-hidden="true" />
-              </summary>
-              {allowlistOpen ? (
-                <div className="bot-access-panel__body">
-                  <SettingsField label={t("settings.botAccessMode")} hint={t("settings.botAccessControlHint")}>
-                    <ToggleSegment
-                      value={!draft.allowlist.allowAll}
-                      disabled={busy}
-                      onLabel={t("settings.botAccessWhitelist")}
-                      offLabel={t("settings.botAccessAll")}
-                      onChange={(whitelistOnly) => {
-                        const patch = { enabled: whitelistOnly, allowAll: !whitelistOnly };
-                        updateAllowlist(patch);
-                        void persistAllowlist(patch);
-                      }}
-                    />
-                  </SettingsField>
-                  {draft.allowlist.allowAll ? <div className="bot-access-panel__warning">{t("settings.botAllowAllWarn")}</div> : null}
-                  <SettingsField label={t("settings.botAllowlistEntries")} hint={t("settings.botListPlaceholder")}>
-                    <div className="bot-list-grid bot-list-grid--qq">
-                      <label className="bot-list-input">
-                        <span>{t("settings.botQQUsers")}</span>
-                        <textarea
-                          className="mem-input bot-list-input__textarea"
-                          value={allowlistText.qqUsers}
-                          disabled={busy || draft.allowlist.allowAll}
-                          placeholder={t("settings.botListPlaceholder")}
-                          spellCheck={false}
-                          onChange={(event) => setAllowlistText((prev) => ({ ...prev, qqUsers: event.target.value }))}
-                          onBlur={(event) => persistAllowlistText("qqUsers", event.currentTarget.value)}
-                        />
-                      </label>
-                      <label className="bot-list-input">
-                        <span>{t("settings.botQQGroups")}</span>
-                        <textarea
-                          className="mem-input bot-list-input__textarea"
-                          value={allowlistText.qqGroups}
-                          disabled={busy || draft.allowlist.allowAll}
-                          placeholder={t("settings.botListPlaceholder")}
-                          spellCheck={false}
-                          onChange={(event) => setAllowlistText((prev) => ({ ...prev, qqGroups: event.target.value }))}
-                          onBlur={(event) => persistAllowlistText("qqGroups", event.currentTarget.value)}
-                        />
-                      </label>
-                    </div>
-                  </SettingsField>
-                </div>
-              ) : null}
-            </details>
-
-            <section className="bot-detail-section bot-detail-section--danger">
-              <div>
-                <div className="bot-detail-section__head">{t("settings.botDangerZone")}</div>
-                <p>{t("settings.deleteBotHint")}</p>
-              </div>
-              <InlineConfirmButton
-                label={t("settings.deleteBot")}
-                confirmLabel={t("settings.confirmDeleteBot")}
-                cancelLabel={t("common.cancel")}
-                disabled={busy}
-                danger
-                onConfirm={() => void removeQQBot()}
-              />
-            </section>
-          </article>
-        ) : null}
-
-        {selectedConnection ? (
-          <article className="bot-detail-card" aria-labelledby="bot-detail-title">
-            <div className="bot-detail-card__head">
-              <div className="bot-detail-card__identity">
-                <div className="bot-detail-card__title" id="bot-detail-title">
-                  {selectedConnection.label || botConnectionLabel(selectedConnection, t)}
-                  <span className="badge badge--neutral">{botConnectionLabel(selectedConnection, t)}</span>
-                  <span className={`badge ${selectedConnection.status === "connected" ? "badge--project" : "badge--feedback"}`}>
-                    {selectedConnection.status === "connected" ? t("settings.botConnectionConnected") : selectedConnection.status || t("settings.botConnectionDisconnected")}
-                  </span>
-                </div>
-                <div className="bot-detail-card__desc">{t("settings.botAutoSaveHint")}</div>
-              </div>
-              <div className="bot-detail-card__actions">
-                <button type="button" className="btn btn--small" disabled={busy} onClick={() => void diagnoseConnection(selectedConnection.id)}>
-                  {t("settings.botDiagnose")}
-                </button>
-                {(selectedConnection.provider === "feishu" || selectedConnection.provider === "weixin") ? (
-                  <button type="button" className="btn btn--small" disabled={busy || !selectedConnectionRemote} onClick={() => void testConnection(selectedConnection)}>
-                    {t("settings.botTest")}
-                  </button>
-                ) : null}
-                <button type="button" className="btn btn--small" onClick={() => setExpandedConnectionId("")}>
-                  {t("common.collapse")}
+              <div className="bot-qq-simple__actions">
+                <button type="button" className="btn btn--primary btn--small" disabled={busy || !qqCanSaveAndEnable} onClick={() => void saveQQAndEnable()}>
+                  {t("settings.botSaveAndEnable")}
                 </button>
               </div>
-            </div>
-
-              {diagnosticMessage(selectedDiagnostic) ? (
-                <div className="bot-detail-notice">
-                  <span>{diagnosticMessage(selectedDiagnostic)}</span>
-                  {selectedDiagnosticDetail ? (
-                    <div className="bot-diagnostic-actions">
-                      <button type="button" className="btn btn--secondary btn--small" disabled={busy} onClick={() => void copyConnectionDiagnostic(selectedConnection)}>
-                        <Clipboard aria-hidden="true" />
-                        {t("settings.botCopyDiagnostic")}
-                      </button>
-                      <button type="button" className="btn btn--primary btn--small" disabled={busy} onClick={() => void reportConnectionDiagnostic(selectedConnection)}>
-                        <Send aria-hidden="true" />
-                        {t("settings.botSendDiagnostic")}
-                      </button>
-                      <small>{t("settings.botDiagnosticPrivacy")}</small>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-
-              <section className="bot-detail-section">
-                <div className="bot-detail-section__head">{t("settings.botConnectionSummary")}</div>
-                <div className="bot-detail-summary">
-                  <div>
-                    <span>{t("settings.botConnectionColumnChannel")}</span>
-                    <strong>{botConnectionLabel(selectedConnection, t)}</strong>
-                  </div>
-                  <div>
-                    <span>{t("settings.botConnectionColumnRemote")}</span>
-                    <code title={selectedConnectionRemote || undefined}>{selectedConnectionRemote || "—"}</code>
-                  </div>
-                  <div>
-                    <span>{t("settings.botConnectionColumnScope")}</span>
-                    <strong>{botConnectionScopeLabel(selectedConnection, t)}</strong>
-                  </div>
-                  <div>
-                    <span>{t("settings.botConnectionColumnStatus")}</span>
-                    <strong>{selectedConnection.status === "connected" ? t("settings.botConnectionConnected") : selectedConnection.status || t("settings.botConnectionDisconnected")}</strong>
-                  </div>
-                </div>
-              </section>
-
-              <details
-                ref={allowlistRef}
-                className={`bot-access-panel${allowlistFocused ? " bot-access-panel--focused" : ""}`}
-                data-focus-target="bot-allowlist"
-                open={allowlistOpen}
-                onToggle={(event) => setAllowlistOpen(event.currentTarget.open)}
-              >
-                <summary className="bot-access-panel__summary">
-                  <span>
-                    <strong>{t("settings.botAccessControl")}</strong>
-                    <small>{t("settings.botAllowlistHint")}</small>
-                  </span>
-                  <ChevronDown className="bot-access-panel__chevron" size={16} aria-hidden="true" />
-                </summary>
-                {allowlistOpen ? (
-                  <div className="bot-access-panel__body">
-                    <SettingsField label={t("settings.botAccessMode")} hint={t("settings.botAccessControlHint")}>
-                      <ToggleSegment
-                        value={!draft.allowlist.allowAll}
-                        disabled={busy}
-                        onLabel={t("settings.botAccessWhitelist")}
-                        offLabel={t("settings.botAccessAll")}
-                        onChange={(whitelistOnly) => {
-                          const patch = { enabled: whitelistOnly, allowAll: !whitelistOnly };
-                          updateAllowlist(patch);
-                          void persistAllowlist(patch);
-                        }}
-                      />
-                    </SettingsField>
-                    {draft.allowlist.allowAll ? <div className="bot-access-panel__warning">{t("settings.botAllowAllWarn")}</div> : null}
-                    <SettingsField label={t("settings.botAllowlistEntries")} hint={t("settings.botListPlaceholder")}>
-                      <div className="bot-list-grid">
-                        <label className="bot-list-input">
-                          <span>{t("settings.botQQUsers")}</span>
-                          <textarea
-                            className="mem-input bot-list-input__textarea"
-                            value={allowlistText.qqUsers}
-                            disabled={busy || draft.allowlist.allowAll}
-                            placeholder={t("settings.botListPlaceholder")}
-                            spellCheck={false}
-                            onChange={(event) => setAllowlistText((prev) => ({ ...prev, qqUsers: event.target.value }))}
-                            onBlur={(event) => persistAllowlistText("qqUsers", event.currentTarget.value)}
-                          />
-                        </label>
-                        <label className="bot-list-input">
-                          <span>{t("settings.botFeishuLarkUsers")}</span>
-                          <textarea
-                            className="mem-input bot-list-input__textarea"
-                            value={allowlistText.feishuUsers}
-                            disabled={busy || draft.allowlist.allowAll}
-                            placeholder={t("settings.botListPlaceholder")}
-                            spellCheck={false}
-                            onChange={(event) => setAllowlistText((prev) => ({ ...prev, feishuUsers: event.target.value }))}
-                            onBlur={(event) => persistAllowlistText("feishuUsers", event.currentTarget.value)}
-                          />
-                        </label>
-                        <label className="bot-list-input">
-                          <span>{t("settings.botWeixinUsers")}</span>
-                          <textarea
-                            className="mem-input bot-list-input__textarea"
-                            value={allowlistText.weixinUsers}
-                            disabled={busy || draft.allowlist.allowAll}
-                            placeholder={t("settings.botListPlaceholder")}
-                            spellCheck={false}
-                            onChange={(event) => setAllowlistText((prev) => ({ ...prev, weixinUsers: event.target.value }))}
-                            onBlur={(event) => persistAllowlistText("weixinUsers", event.currentTarget.value)}
-                          />
-                        </label>
-                        <label className="bot-list-input">
-                          <span>{t("settings.botQQGroups")}</span>
-                          <textarea
-                            className="mem-input bot-list-input__textarea"
-                            value={allowlistText.qqGroups}
-                            disabled={busy || draft.allowlist.allowAll}
-                            placeholder={t("settings.botListPlaceholder")}
-                            spellCheck={false}
-                            onChange={(event) => setAllowlistText((prev) => ({ ...prev, qqGroups: event.target.value }))}
-                            onBlur={(event) => persistAllowlistText("qqGroups", event.currentTarget.value)}
-                          />
-                        </label>
-                        <label className="bot-list-input">
-                          <span>{t("settings.botFeishuLarkGroups")}</span>
-                          <textarea
-                            className="mem-input bot-list-input__textarea"
-                            value={allowlistText.feishuGroups}
-                            disabled={busy || draft.allowlist.allowAll}
-                            placeholder={t("settings.botListPlaceholder")}
-                            spellCheck={false}
-                            onChange={(event) => setAllowlistText((prev) => ({ ...prev, feishuGroups: event.target.value }))}
-                            onBlur={(event) => persistAllowlistText("feishuGroups", event.currentTarget.value)}
-                          />
-                        </label>
-                        <label className="bot-list-input">
-                          <span>{t("settings.botWeixinGroups")}</span>
-                          <textarea
-                            className="mem-input bot-list-input__textarea"
-                            value={allowlistText.weixinGroups}
-                            disabled={busy || draft.allowlist.allowAll}
-                            placeholder={t("settings.botListPlaceholder")}
-                            spellCheck={false}
-                            onChange={(event) => setAllowlistText((prev) => ({ ...prev, weixinGroups: event.target.value }))}
-                            onBlur={(event) => persistAllowlistText("weixinGroups", event.currentTarget.value)}
-                          />
-                        </label>
-                      </div>
-                    </SettingsField>
-                  </div>
-                ) : null}
-              </details>
-
-              <section className="bot-detail-section">
-                <div className="bot-detail-section__head">{t("settings.botRuntimeSettings")}</div>
-                <SettingsField label={t("settings.botToolApprovalMode")} hint={t("settings.botToolApprovalModeHint")}>
-                  <div className="provider-add-segmented" role="group" aria-label={t("settings.botToolApprovalMode")}>
-                    {BOT_TOOL_APPROVAL_MODES.map((mode) => (
-                      <button
-                        key={mode || "inherit"}
-                        type="button"
-                        className={selectedConnectionToolApprovalMode === mode ? "provider-add-segmented__item provider-add-segmented__item--active" : "provider-add-segmented__item"}
-                        disabled={busy}
-                        onClick={() => void persistConnection(selectedConnection.id, { toolApprovalMode: mode as BotConnectionToolApprovalMode })}
-                      >
-                        {t(`settings.botToolApprovalMode.${mode || "inherit"}` as DictKey)}
-                      </button>
-                    ))}
-                  </div>
-                </SettingsField>
-                <SettingsField label={t("settings.botChannelModel")} hint={t("settings.botChannelModelHint")}>
-                  <ModelPicker
-                    s={s}
-                    refs={refs}
-                    value={toRef(selectedConnection.model, s)}
-                    disabled={busy}
-                    emptyOptionLabel={t("settings.botChannelModelAuto")}
-                    emptyOptionHint={settingsModelMeta(s, t)}
-                    onPick={(model) => void persistConnection(selectedConnection.id, { model })}
-                  />
-                </SettingsField>
-                <SettingsField label={t("settings.botWorkspaceRoot")} hint={t("settings.botWorkspaceRootHint")}>
-                  <input
-                    className="mem-input"
-                    value={selectedConnection.workspaceRoot}
-                    disabled={busy}
-                    placeholder={t("settings.botWorkspaceRootPlaceholder")}
-                    spellCheck={false}
-                    onChange={(event) => updateConnection(selectedConnection.id, { workspaceRoot: event.target.value })}
-                    onBlur={(event) => void persistConnection(selectedConnection.id, { workspaceRoot: event.currentTarget.value })}
-                  />
-                </SettingsField>
-              </section>
-
-              <section className="bot-detail-section">
-                <div className="bot-detail-section__head">{t("settings.botCredential")}</div>
-                <div className="bot-credential-stack">
-                  <div className="bot-credential-line">
-                    <span>{botConnectionCredentialSummary(selectedConnection, t)}</span>
-                    <strong>{selectedConnection.credential.secretSet ? t("settings.botSecretSet") : t("settings.botSecretMissing")}</strong>
-                  </div>
-                  {botConnectionSecretEnv(selectedConnection) ? (
-                    <div className="bot-secret-row">
-                      <input
-                        className="mem-input"
-                        value={botConnectionSecretEnv(selectedConnection)}
-                        disabled={busy}
-                        spellCheck={false}
-                        onChange={(event) => updateConnectionCredential(selectedConnection.id, botConnectionSecretPatch(selectedConnection, event.target.value))}
-                        onBlur={(event) => void persistConnectionCredential(selectedConnection.id, botConnectionSecretPatch(selectedConnection, event.currentTarget.value))}
-                      />
-                      <input
-                        className="mem-input"
-                        type="password"
-                        value={connectionSecrets[selectedConnection.id] ?? ""}
-                        disabled={busy}
-                        placeholder={selectedConnection.credential.secretSet ? t("settings.botSecretReplace") : t("settings.botSecretPaste")}
-                        onChange={(event) => setConnectionSecrets((prev) => ({ ...prev, [selectedConnection.id]: event.target.value }))}
-                      />
-                      <button type="button" className="btn btn--secondary btn--small" disabled={busy || !(connectionSecrets[selectedConnection.id] ?? "").trim()} onClick={() => void saveConnectionSecret(selectedConnection)}>
-                        {t("settings.saveKey")}
-                      </button>
-                      <button type="button" className="btn btn--secondary btn--small" disabled={busy || !selectedConnection.credential.secretSet} onClick={() => void clearConnectionSecret(selectedConnection)}>
-                        {t("settings.clearKey")}
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-              </section>
-
-              <section className="bot-detail-section bot-detail-section--danger">
-                <div>
-                  <div className="bot-detail-section__head">{t("settings.botDangerZone")}</div>
-                  <p>{t("settings.deleteBotHint")}</p>
-                </div>
-                <InlineConfirmButton
-                  label={t("settings.deleteBot")}
-                  confirmLabel={t("settings.confirmDeleteBot")}
-                  cancelLabel={t("common.cancel")}
-                  disabled={busy}
-                  danger
-                  onConfirm={() => removeConnection(selectedConnection)}
-                />
-              </section>
-          </article>
-        ) : null}
-
-        <div className="bot-add-panel">
-          <div className="bot-phone-connect__top">
-            <div className="bot-phone-connect__title">
-              <strong>{t("settings.botConnectPhoneTitle")}</strong>
-              <span>{t("settings.botConnectPhoneSubtitle")}</span>
+              {!qqCanEnableAccess ? <div className="bot-connect-panel__hint bot-connect-panel__hint--warning">{t("settings.botQQAccessRequired")}</div> : null}
             </div>
           </div>
+        </div>
+      ) : (
+        <div className="bot-connect-panel bot-connect-panel--phone">
+          <div className="bot-connect-panel__qr">
+            {selectedInstallConnection ? (
+              <div className="bot-connect-panel__state bot-connect-panel__state--success">
+                <CheckCircle2 aria-hidden="true" />
+              </div>
+            ) : install.status === "showing" && installQrURL ? (
+              installQrIsImage ? (
+                <img src={installQrURL} alt={t("settings.botInstallQrAlt")} />
+              ) : (
+                <Suspense fallback={<div className="bot-connect-panel__state"><QrCode aria-hidden="true" /></div>}>
+                  <QRCodeSVG className="bot-connect-panel__qr-code" value={installQrURL} size={196} marginSize={1} />
+                </Suspense>
+              )
+            ) : install.status === "starting" ? (
+              <div className="bot-connect-panel__state">
+                <Loader2 className="bot-spin" aria-hidden="true" />
+                <span>{t("settings.botInstallStarting")}</span>
+              </div>
+            ) : install.status === "error" ? (
+              <div className="bot-connect-panel__state bot-connect-panel__state--error">
+                <RefreshCw aria-hidden="true" />
+              </div>
+            ) : (
+              <div className="bot-connect-panel__state">
+                <QrCode aria-hidden="true" />
+              </div>
+            )}
+          </div>
+          <div className="bot-connect-panel__body">
+            <strong>{selectedInstallLabel}</strong>
+            <p>
+              {selectedInstallConnection
+                ? t("settings.botInstallAlreadyConnected", { provider: selectedInstallLabel })
+                : install.message || botTargetHint(installTarget, t)}
+            </p>
+            {install.status === "showing" && install.timeLeft > 0 ? (
+              <span className="bot-connect-panel__timer">{t("settings.botInstallTimeLeft", { time: formatInstallTimeLeft(install.timeLeft) })}</span>
+            ) : null}
+            {installUserCode ? <code>{installUserCode}</code> : null}
+            <div className="bot-connect-panel__actions">
+              {!selectedInstallConnection && install.status !== "showing" && install.status !== "starting" ? (
+                <button type="button" className="btn btn--primary btn--small" disabled={busy} onClick={() => void startInstall(installTarget)}>
+                  {install.status === "error" ? <RefreshCw aria-hidden="true" /> : <QrCode aria-hidden="true" />}
+                  {install.status === "error" ? t("settings.botInstallRetry") : t("settings.botInstallGenerate")}
+                </button>
+              ) : null}
+              {install.status === "showing" ? (
+                <button type="button" className="btn btn--secondary btn--small" disabled={busy} onClick={() => void pollInstall()}>
+                  {t("settings.botInstallCheck")}
+                </button>
+              ) : null}
+              {selectedInstallConnection ? (
+                <button type="button" className="btn btn--secondary btn--small" disabled={busy} onClick={() => void diagnoseConnection(selectedInstallConnection.id)}>
+                  {t("settings.botDiagnose")}
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
 
-          <div className="bot-phone-targets" role="tablist" aria-label={t("settings.botChannels")}>
-            {BOT_INSTALL_TARGETS.map((target) => (
+  const botManager = (
+    <section ref={stepConnectRef} id="bot-step-connect" className="bot-channel-manager-card">
+      <div className="bot-channel-manager-card__head">
+        <div>
+          <strong>{t("settings.botManageBots")}</strong>
+          <span>{t("settings.botManageBotsHint")}</span>
+        </div>
+      </div>
+      {browserPreviewBotConfigured ? (
+        <div className="bot-connection-warning">{t("settings.botBrowserPreviewWarning")}</div>
+      ) : null}
+      <div className="bot-channel-manager">
+        <div className="bot-channel-tabs" role="tablist" aria-label={t("settings.botChannelTabsLabel")}>
+          {BOT_INSTALL_TARGETS.map((target) => {
+            const configured = botChannelIsConfigured(target);
+            const connected = target === "qq" ? qqOnline : botChannelConnectionForTarget(target)?.status === "connected";
+            return (
               <button
                 key={target}
                 type="button"
                 role="tab"
                 aria-selected={installTarget === target}
-                className={`bot-phone-target${installTarget === target ? " bot-phone-target--active" : ""}`}
+                className={`bot-channel-tab${installTarget === target ? " bot-channel-tab--active" : ""}`}
                 disabled={busy || install.status === "starting"}
-                onClick={() => setInstallTarget(target)}
+                onClick={() => openBotChannel(target)}
               >
-                <strong>{botTargetLabel(target, t)}</strong>
-                <span>{botTargetHint(target, t)}</span>
+                <span className="bot-channel-tab__icon" aria-hidden="true">
+                  {target === "qq" || target === "weixin" ? <MessageCircle size={24} /> : <BotIcon size={24} />}
+                </span>
+                <span className="bot-channel-tab__text">
+                  <strong>{botTargetLabel(target, t)}</strong>
+                  <small>{botTargetHint(target, t)}</small>
+                </span>
+                <span className={`bot-channel-tab__dot${connected ? " bot-channel-tab__dot--online" : configured ? " bot-channel-tab__dot--configured" : ""}`} />
               </button>
-            ))}
-          </div>
-
-          {isQQInstallTarget ? (
-            <div className="bot-connect-panel bot-connect-panel--manual bot-connect-panel--qq">
-              <div className="bot-connect-panel__body">
-                <div className="bot-qq-simple__head">
-                  <div>
-                    <strong>{selectedInstallLabel}</strong>
-                    <p>{t("settings.botInstallManualQQ")}</p>
-                  </div>
-                  <span className={`bot-qq-simple__status${qqConfigured ? " bot-qq-simple__status--ready" : ""}`}>
-                    {qqConfigured ? <CheckCircle2 aria-hidden="true" /> : <KeyRound aria-hidden="true" />}
-                    {draft.qq.secretSet ? t("settings.botSecretSet") : t("settings.botSecretMissing")}
-                  </span>
+            );
+          })}
+        </div>
+        <div className="bot-channel-manager__detail" role="tabpanel" aria-label={selectedInstallLabel}>
+          {!selectedChannelConfigured ? (
+            <article className="bot-channel-setup-card">
+              <div className="bot-channel-setup-card__head">
+                <div>
+                  <strong>{t("settings.botChannelSetupTitle", { provider: selectedInstallLabel })}</strong>
+                  <span>{t("settings.botChannelSetupHint")}</span>
                 </div>
-                <div className="bot-manual-form bot-manual-form--qq">
-                  <div className="bot-card-field">
-                    <span>{t("settings.botAppId")}</span>
-                    <div>
-                      <input
-                        className="mem-input"
-                        aria-label={t("settings.botAppId")}
-                        value={draft.qq.appId}
-                        disabled={busy}
-                        spellCheck={false}
-                        onChange={(event) => updateQQ({ appId: event.target.value })}
-                        onBlur={(event) => void persistQQ({ appId: event.currentTarget.value })}
-                      />
-                    </div>
-                  </div>
-                  <div className="bot-card-field">
-                    <span>{t("settings.botAppSecret")}</span>
-                    <div>
-                      <input
-                        className="mem-input"
-                        type="password"
-                        value={qqSecretValue}
-                        disabled={busy}
-                        placeholder={draft.qq.secretSet ? t("settings.botSecretSavedOptional") : t("settings.botSecretPaste")}
-                        spellCheck={false}
-                        aria-label={t("settings.botSecretValue")}
-                        onChange={(event) => setQQSecretValue(event.target.value)}
-                      />
-                    </div>
-                  </div>
-                  <div className="bot-qq-simple__actions">
-                    <button type="button" className="btn btn--primary btn--small" disabled={busy || !qqCanSaveAndEnable} onClick={() => void saveQQAndEnable()}>
-                      {t("settings.botSaveAndEnable")}
-                    </button>
-                  </div>
-                  {!qqCanEnableAccess ? <div className="bot-connect-panel__hint bot-connect-panel__hint--warning">{t("settings.botQQAccessRequired")}</div> : null}
-                </div>
+                <span className="badge badge--neutral">{t("settings.botChannelNeedsSetup")}</span>
               </div>
-            </div>
+              {installPanelContent}
+            </article>
+          ) : selectedQQ ? (
+            qqDetailCard
+          ) : selectedConnection ? (
+            connectionDetailCard
           ) : (
-            <div className="bot-connect-panel bot-connect-panel--phone">
-              <div className="bot-connect-panel__qr">
-                {selectedInstallConnection ? (
-                  <div className="bot-connect-panel__state bot-connect-panel__state--success">
-                    <CheckCircle2 aria-hidden="true" />
-                  </div>
-                ) : install.status === "showing" && installQrURL ? (
-                  installQrIsImage ? (
-                    <img src={installQrURL} alt={t("settings.botInstallQrAlt")} />
-                  ) : (
-                    <Suspense fallback={<div className="bot-connect-panel__state"><QrCode aria-hidden="true" /></div>}>
-                      <QRCodeSVG className="bot-connect-panel__qr-code" value={installQrURL} size={196} marginSize={1} />
-                    </Suspense>
-                  )
-                ) : install.status === "starting" ? (
-                  <div className="bot-connect-panel__state">
-                    <Loader2 className="bot-spin" aria-hidden="true" />
-                    <span>{t("settings.botInstallStarting")}</span>
-                  </div>
-                ) : install.status === "error" ? (
-                  <div className="bot-connect-panel__state bot-connect-panel__state--error">
-                    <RefreshCw aria-hidden="true" />
-                  </div>
-                ) : (
-                  <div className="bot-connect-panel__state">
-                    <QrCode aria-hidden="true" />
-                  </div>
-                )}
-              </div>
-              <div className="bot-connect-panel__body">
-                <strong>{selectedInstallLabel}</strong>
-                <p>
-                  {selectedInstallConnection
-                    ? t("settings.botInstallAlreadyConnected", { provider: selectedInstallLabel })
-                    : install.message || botTargetHint(installTarget, t)}
-                </p>
-                {install.status === "showing" && install.timeLeft > 0 ? (
-                  <span className="bot-connect-panel__timer">{t("settings.botInstallTimeLeft", { time: formatInstallTimeLeft(install.timeLeft) })}</span>
-                ) : null}
-                {installUserCode ? <code>{installUserCode}</code> : null}
-                <div className="bot-connect-panel__actions">
-                  {!selectedInstallConnection && install.status !== "showing" && install.status !== "starting" ? (
-                    <button type="button" className="btn btn--primary btn--small" disabled={busy} onClick={() => void startInstall(installTarget)}>
-                      {install.status === "error" ? <RefreshCw aria-hidden="true" /> : <QrCode aria-hidden="true" />}
-                      {install.status === "error" ? t("settings.botInstallRetry") : t("settings.botInstallGenerate")}
-                    </button>
-                  ) : null}
-                  {install.status === "showing" ? (
-                    <button type="button" className="btn btn--secondary btn--small" disabled={busy} onClick={() => void pollInstall()}>
-                      {t("settings.botInstallCheck")}
-                    </button>
-                  ) : null}
-                  {selectedInstallConnection ? (
-                    <button type="button" className="btn btn--secondary btn--small" disabled={busy} onClick={() => void diagnoseConnection(selectedInstallConnection.id)}>
-                      {t("settings.botDiagnose")}
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            </div>
+            <div className="bot-manager__empty">{t("settings.botSelectBotHint")}</div>
           )}
         </div>
+      </div>
+    </section>
+  );
+
+  return (
+    <div className="bot-phone-connect">
+      {botManager}
+
+	      <details
+        id="bot-advanced-settings"
+        className="bot-simple-advanced"
+        open={advancedMode}
+        onToggle={(event) => {
+          const nextOpen = event.currentTarget.open;
+          setAdvancedMode((current) => current === nextOpen ? current : nextOpen);
+        }}
+      >
+        <summary className="bot-simple-advanced__summary">
+          <span>
+            <strong>{t("settings.botShowAdvancedSettings")}</strong>
+            <small>{t("settings.botAdvancedSettingsHint")}</small>
+          </span>
+          <span className="bot-simple-advanced__toggle">
+            {advancedMode ? t("common.collapse") : t("common.expand")}
+            <ChevronDown aria-hidden="true" size={16} />
+          </span>
+	        </summary>
+	        <div className="bot-simple-advanced__body">
+	          <details className="bot-access-panel bot-global-access-panel">
+	            <summary className="bot-access-panel__summary">
+	              <span>
+	                <strong>{t("settings.botGlobalAllowlist")}</strong>
+	                <small>{t("settings.botGlobalAllowlistHint")}</small>
+	              </span>
+	              <ChevronDown className="bot-access-panel__chevron" size={16} aria-hidden="true" />
+	            </summary>
+	            <div className="bot-access-panel__body">
+	              <div className="bot-choice-grid bot-choice-grid--access">
+	                <button
+	                  type="button"
+	                  className={`bot-choice-card${simpleAccessMode === "trusted" ? " bot-choice-card--active" : ""}`}
+	                  disabled={busy}
+	                  onClick={() => setSimpleAccessMode("trusted")}
+	                >
+	                  <strong>{t("settings.botAccessTrusted")}</strong>
+	                  <span>{t("settings.botAccessTrustedHint")}</span>
+	                </button>
+	                <button
+	                  type="button"
+	                  className={`bot-choice-card${simpleAccessMode === "everyone" ? " bot-choice-card--active" : ""}`}
+	                  disabled={busy}
+	                  onClick={() => setSimpleAccessMode("everyone")}
+	                >
+	                  <strong>{t("settings.botAccessEveryone")}</strong>
+	                  <span>{t("settings.botAccessEveryoneHint")}</span>
+	                </button>
+	              </div>
+	              <div className="bot-pairing-row">
+	                <div>
+	                  <strong>{t("settings.botAccessPairing")}</strong>
+	                  <span>{t("settings.botAccessPairingHint")}</span>
+	                </div>
+	                <ToggleSegment
+	                  value={draft.pairing.enabled}
+	                  disabled={busy}
+	                  onChange={(enabled) => void persistBotSettings({ pairing: { ...draft.pairing, enabled } })}
+	                />
+	              </div>
+	              {draft.allowlist.allowAll ? (
+	                <div className="bot-access-panel__warning">{t("settings.botAllowAllWarn")}</div>
+	              ) : (
+	                <>
+	                  <div className="bot-access-platforms">
+	                    {visibleAccessPlatforms.map((platform) => (
+	                      <div className="bot-access-platform" key={platform}>
+	                        <div className="bot-access-platform__name">{botPlatformLabel(platform, t)}</div>
+	                        <BotListInput
+	                          label={t("settings.botListUsers")}
+	                          value={allowlistText[botAllowlistKey(platform, "Users")]}
+	                          disabled={busy}
+	                          placeholder={t("settings.botListPlaceholder")}
+	                          onChange={(value) => setAllowlistText((prev) => ({ ...prev, [botAllowlistKey(platform, "Users")]: value }))}
+	                          onBlur={(value) => persistAllowlistText(botAllowlistKey(platform, "Users"), value)}
+	                        />
+	                        <BotListInput
+	                          label={t("settings.botListGroups")}
+	                          value={allowlistText[botAllowlistKey(platform, "Groups")]}
+	                          disabled={busy}
+	                          placeholder={t("settings.botListPlaceholder")}
+	                          onChange={(value) => setAllowlistText((prev) => ({ ...prev, [botAllowlistKey(platform, "Groups")]: value }))}
+	                          onBlur={(value) => persistAllowlistText(botAllowlistKey(platform, "Groups"), value)}
+	                        />
+	                      </div>
+	                    ))}
+	                  </div>
+	                  {platformFilterAvailable ? (
+	                    <button type="button" className="bot-access-platforms__toggle" onClick={() => setShowAllPlatforms((value) => !value)}>
+	                      {showAllPlatforms ? t("settings.botAccessShowConnectedOnly") : t("settings.botAccessShowAllPlatforms")}
+	                    </button>
+	                  ) : null}
+	                </>
+	              )}
+	              <details className="bot-access-panel bot-simple-roles">
+	                <summary className="bot-access-panel__summary">
+	                  <span>
+	                    <strong>{t("settings.botRoleAccess")}</strong>
+	                    <small>{t("settings.botRoleAccessHint")}</small>
+	                  </span>
+	                  <ChevronDown className="bot-access-panel__chevron" size={16} aria-hidden="true" />
+	                </summary>
+	                <div className="bot-access-panel__body">
+	                  <div className="bot-access-platforms">
+	                    {visibleAccessPlatforms.map((platform) => (
+	                      <div className="bot-access-platform" key={platform}>
+	                        <div className="bot-access-platform__name">{botPlatformLabel(platform, t)}</div>
+	                        <BotListInput
+	                          label={t("settings.botListApprovers")}
+	                          value={allowlistText[botAllowlistKey(platform, "Approvers")]}
+	                          disabled={busy || draft.allowlist.allowAll}
+	                          placeholder={t("settings.botListPlaceholder")}
+	                          onChange={(value) => setAllowlistText((prev) => ({ ...prev, [botAllowlistKey(platform, "Approvers")]: value }))}
+	                          onBlur={(value) => persistAllowlistText(botAllowlistKey(platform, "Approvers"), value)}
+	                        />
+	                        <BotListInput
+	                          label={t("settings.botListAdmins")}
+	                          value={allowlistText[botAllowlistKey(platform, "Admins")]}
+	                          disabled={busy || draft.allowlist.allowAll}
+	                          placeholder={t("settings.botListPlaceholder")}
+	                          onChange={(value) => setAllowlistText((prev) => ({ ...prev, [botAllowlistKey(platform, "Admins")]: value }))}
+	                          onBlur={(value) => persistAllowlistText(botAllowlistKey(platform, "Admins"), value)}
+	                        />
+	                      </div>
+	                    ))}
+	                  </div>
+	                </div>
+	              </details>
+	            </div>
+	          </details>
+	          <details className="bot-access-panel bot-gateway-panel">
+            <summary className="bot-access-panel__summary">
+              <span>
+                <strong>{t("settings.botGatewayDefaults")}</strong>
+                <small>{t("settings.botGatewayDefaultsHint")}</small>
+              </span>
+              <ChevronDown className="bot-access-panel__chevron" size={16} aria-hidden="true" />
+            </summary>
+            <div className="bot-access-panel__body">
+              <SettingsField label={t("settings.botRuntime")} hint={t("settings.botRuntimeHint")}>
+                <div className="bot-inline-grid bot-inline-grid--runtime">
+                  <label>
+                    <span>{t("settings.botMaxSteps")}</span>
+                    <input
+                      className="mem-input"
+                      type="number"
+                      min={0}
+                      value={draft.maxSteps}
+                      disabled={busy}
+                      onChange={(event) => updateBotSettings({ maxSteps: Number(event.target.value) || 0 })}
+                      onBlur={(event) => void persistBotSettings({ maxSteps: Number(event.currentTarget.value) || 0 })}
+                    />
+                  </label>
+                  <label>
+                    <span>{t("settings.botDebounceMs")}</span>
+                    <input
+                      className="mem-input"
+                      type="number"
+                      min={0}
+                      value={draft.debounceMs}
+                      disabled={busy}
+                      onChange={(event) => updateBotSettings({ debounceMs: Number(event.target.value) || 0 })}
+                      onBlur={(event) => void persistBotSettings({ debounceMs: Number(event.currentTarget.value) || 0 })}
+                    />
+                  </label>
+                  <label>
+                    <span>{t("settings.botQueueCap")}</span>
+                    <input
+                      className="mem-input"
+                      type="number"
+                      min={0}
+                      value={draft.queueCap}
+                      disabled={busy}
+                      onChange={(event) => updateBotSettings({ queueCap: Number(event.target.value) || 0 })}
+                      onBlur={(event) => void persistBotSettings({ queueCap: Number(event.currentTarget.value) || 0 })}
+                    />
+                  </label>
+                </div>
+              </SettingsField>
+              <SettingsField label={t("settings.botQueueModeSimple")} hint={t("settings.botQueueModeSimpleHint")}>
+                <select
+                  className="mem-select"
+                  value={normalizeBotQueueMode(draft.queueMode)}
+                  disabled={busy}
+                  onChange={(event) => void persistBotSettings({ queueMode: event.target.value })}
+                >
+                  {BOT_QUEUE_MODES.map((mode) => (
+                    <option key={mode} value={mode}>{t(`settings.botQueueMode.${mode}` as DictKey)}</option>
+                  ))}
+                </select>
+              </SettingsField>
+              <SettingsField label={t("settings.botQueueDropLabel")} hint={t("settings.botQueueDropHint")}>
+                <select
+                  className="mem-select"
+                  value={normalizeBotQueueDrop(draft.queueDrop)}
+                  disabled={busy}
+                  onChange={(event) => void persistBotSettings({ queueDrop: event.target.value })}
+                >
+                  {BOT_QUEUE_DROPS.map((mode) => (
+                    <option key={mode} value={mode}>{t(`settings.botQueueDrop.${mode}` as DictKey)}</option>
+                  ))}
+                </select>
+              </SettingsField>
+              <SettingsField label={t("settings.botIgnoreSelfMessages")} hint={t("settings.botIgnoreSelfMessagesHint")}>
+                <ToggleSegment
+                  value={draft.ignoreSelfMessages}
+                  disabled={busy}
+                  onChange={(ignoreSelfMessages) => void persistBotSettings({ ignoreSelfMessages })}
+                />
+              </SettingsField>
+              <SettingsField label={t("settings.botSelfUserIds")} hint={t("settings.botSelfUserIdsHint")}>
+                <div className="bot-list-grid">
+                  <BotListInput
+                    label={t("settings.botQQUsers")}
+                    value={selfUserText.qq}
+                    disabled={busy}
+                    placeholder={t("settings.botListPlaceholder")}
+                    onChange={(value) => updateSelfUserText("qq", value)}
+                    onBlur={(value) => persistSelfUserText("qq", value)}
+                  />
+                  <BotListInput
+                    label={t("settings.botFeishuLarkUsers")}
+                    value={selfUserText.feishu}
+                    disabled={busy}
+                    placeholder={t("settings.botListPlaceholder")}
+                    onChange={(value) => updateSelfUserText("feishu", value)}
+                    onBlur={(value) => persistSelfUserText("feishu", value)}
+                  />
+                  <BotListInput
+                    label={t("settings.botWeixinUsers")}
+                    value={selfUserText.weixin}
+                    disabled={busy}
+                    placeholder={t("settings.botListPlaceholder")}
+                    onChange={(value) => updateSelfUserText("weixin", value)}
+                    onBlur={(value) => persistSelfUserText("weixin", value)}
+                  />
+                </div>
+              </SettingsField>
+              <SettingsField label={t("settings.botPairing")} hint={t("settings.botPairingDetailHint")}>
+                <div className="bot-inline-grid bot-inline-grid--runtime">
+                  <label>
+                    <span>{t("settings.botPairingTTL")}</span>
+                    <input
+                      className="mem-input"
+                      type="number"
+                      min={0}
+                      value={draft.pairing.requestTtlMinutes}
+                      disabled={busy}
+                      onChange={(event) => updateBotSettings({ pairing: { ...draft.pairing, requestTtlMinutes: Number(event.target.value) || 0 } })}
+                      onBlur={(event) => void persistBotSettings({ pairing: { ...draft.pairing, requestTtlMinutes: Number(event.currentTarget.value) || 0 } })}
+                    />
+                  </label>
+                  <label>
+                    <span>{t("settings.botPairingMaxPending")}</span>
+                    <input
+                      className="mem-input"
+                      type="number"
+                      min={0}
+                      value={draft.pairing.maxPendingPerPlatform}
+                      disabled={busy}
+                      onChange={(event) => updateBotSettings({ pairing: { ...draft.pairing, maxPendingPerPlatform: Number(event.target.value) || 0 } })}
+                      onBlur={(event) => void persistBotSettings({ pairing: { ...draft.pairing, maxPendingPerPlatform: Number(event.currentTarget.value) || 0 } })}
+                    />
+                  </label>
+                </div>
+              </SettingsField>
+            </div>
+          </details>
+
+          <details className="bot-access-panel bot-routes-panel">
+            <summary className="bot-access-panel__summary">
+              <span>
+                <strong>{t("settings.botRoutes")}</strong>
+                <small>{t("settings.botRoutesHint")}</small>
+              </span>
+              <ChevronDown className="bot-access-panel__chevron" size={16} aria-hidden="true" />
+            </summary>
+            <div className="bot-access-panel__body">
+              {draft.routes.length === 0 ? (
+                <div className="bot-route-empty">{t("settings.botRoutesEmpty")}</div>
+              ) : (
+                <div className="bot-route-list">
+                  {draft.routes.map((route, index) => (
+                    <div className="bot-route-row" key={index}>
+                      <div className="bot-route-row__head">
+                        <strong>{t("settings.botRouteTitle", { n: index + 1 })}</strong>
+                        <button type="button" className="btn btn--secondary btn--small" disabled={busy} onClick={() => removeRoute(index)}>
+                          {t("common.delete")}
+                        </button>
+                      </div>
+                      <div className="bot-route-grid">
+                        <label>
+                          <span>{t("settings.botRouteConnection")}</span>
+                          <select
+                            className="mem-select"
+                            value={route.connectionId}
+                            disabled={busy}
+                            onChange={(event) => {
+                              updateRoute(index, { connectionId: event.target.value });
+                              void persistRoute(index, { connectionId: event.target.value });
+                            }}
+                          >
+                            <option value="">{t("settings.botRouteAny")}</option>
+                            {routeConnectionOptions.map((option) => (
+                              <option key={option.id} value={option.id}>{option.label} · {option.id}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          <span>{t("settings.botRoutePlatform")}</span>
+                          <select
+                            className="mem-select"
+                            value={route.platform}
+                            disabled={busy}
+                            onChange={(event) => {
+                              updateRoute(index, { platform: event.target.value });
+                              void persistRoute(index, { platform: event.target.value });
+                            }}
+                          >
+                            <option value="">{t("settings.botRouteAny")}</option>
+                            <option value="qq">QQ</option>
+                            <option value="feishu">{t("settings.botFeishu")}</option>
+                            <option value="weixin">{t("settings.botWeixin")}</option>
+                          </select>
+                        </label>
+                        <label>
+                          <span>{t("settings.botRouteChatType")}</span>
+                          <select
+                            className="mem-select"
+                            value={route.chatType}
+                            disabled={busy}
+                            onChange={(event) => {
+                              updateRoute(index, { chatType: event.target.value });
+                              void persistRoute(index, { chatType: event.target.value });
+                            }}
+                          >
+                            {BOT_ROUTE_CHAT_TYPES.map((chatType) => (
+                              <option key={chatType || "any"} value={chatType}>{t(`settings.botRouteChatType.${chatType || "any"}` as DictKey)}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          <span>{t("settings.botRouteChatId")}</span>
+                          <input
+                            className="mem-input"
+                            value={route.chatId}
+                            disabled={busy}
+                            spellCheck={false}
+                            onChange={(event) => updateRoute(index, { chatId: event.target.value })}
+                            onBlur={(event) => void persistRoute(index, { chatId: event.currentTarget.value })}
+                          />
+                        </label>
+                        <label>
+                          <span>{t("settings.botRouteUserId")}</span>
+                          <input
+                            className="mem-input"
+                            value={route.userId}
+                            disabled={busy}
+                            spellCheck={false}
+                            onChange={(event) => updateRoute(index, { userId: event.target.value })}
+                            onBlur={(event) => void persistRoute(index, { userId: event.currentTarget.value })}
+                          />
+                        </label>
+                        <label>
+                          <span>{t("settings.botRouteThreadId")}</span>
+                          <input
+                            className="mem-input"
+                            value={route.threadId}
+                            disabled={busy}
+                            spellCheck={false}
+                            onChange={(event) => updateRoute(index, { threadId: event.target.value })}
+                            onBlur={(event) => void persistRoute(index, { threadId: event.currentTarget.value })}
+                          />
+                        </label>
+                      </div>
+                      <div className="bot-route-grid bot-route-grid--outputs">
+                        <label>
+                          <span>{t("settings.botWorkspaceRoot")}</span>
+                          <input
+                            className="mem-input"
+                            value={route.workspaceRoot}
+                            disabled={busy}
+                            placeholder={t("settings.botWorkspaceRootPlaceholder")}
+                            spellCheck={false}
+                            onChange={(event) => updateRoute(index, { workspaceRoot: event.target.value })}
+                            onBlur={(event) => void persistRoute(index, { workspaceRoot: event.currentTarget.value })}
+                          />
+                        </label>
+                        <label>
+                          <span>{t("settings.botChannelModel")}</span>
+                          <ModelPicker
+                            s={s}
+                            refs={refs}
+                            value={toRef(route.model, s)}
+                            disabled={busy}
+                            emptyOptionLabel={t("settings.botChannelModelAuto")}
+                            emptyOptionHint={settingsModelMeta(s, t)}
+                            onPick={(model) => void persistRoute(index, { model })}
+                          />
+                        </label>
+                        <label>
+                          <span>{t("settings.botToolApprovalMode")}</span>
+                          <select
+                            className="mem-select"
+                            value={route.toolApprovalMode}
+                            disabled={busy}
+                            onChange={(event) => {
+                              updateRoute(index, { toolApprovalMode: event.target.value });
+                              void persistRoute(index, { toolApprovalMode: event.target.value });
+                            }}
+                          >
+                            {BOT_TOOL_APPROVAL_MODES.map((mode) => (
+                              <option key={mode || "inherit"} value={mode}>{t(`settings.botToolApprovalMode.${mode || "inherit"}` as DictKey)}</option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button type="button" className="btn btn--secondary btn--small bot-route-add" disabled={busy} onClick={addRoute}>
+                {t("settings.botAddRoute")}
+              </button>
+            </div>
+          </details>
+        </div>
+      </details>
     </div>
   );
 }
@@ -2819,16 +3682,32 @@ function qqBotAdded(qq: BotSettingsView["qq"]): boolean {
   return Boolean(qq.enabled || qq.secretSet || qq.appId.trim());
 }
 
-function qqAccessReady(allowlist: BotAllowlistView): boolean {
-  if (allowlist.allowAll) return true;
-  if (!allowlist.enabled) return false;
-  return asArray(allowlist.qqUsers).some((value) => value.trim()) || asArray(allowlist.qqGroups).some((value) => value.trim());
+function botAccessEntryCount(access: BotAccessView): number {
+  return [
+    ...asArray(access.users),
+    ...asArray(access.groups),
+    ...asArray(access.approvers),
+    ...asArray(access.admins),
+  ].filter((value) => value.trim()).length;
+}
+
+function botAccessReady(access: BotAccessView): boolean {
+  if (access.allowAll || access.pairingEnabled) return true;
+  if (!access.enabled) return false;
+  return botAccessEntryCount(access) > 0;
 }
 
 function botInstallTargetMatchesConnection(target: BotOfficialInstallTarget, connection: BotConnectionView): boolean {
   if (target === "weixin") return connection.provider === "weixin";
   if (target === "lark") return connection.provider === "feishu" && connection.domain === "lark";
   return connection.provider === "feishu" && connection.domain !== "lark";
+}
+
+function botInstallTargetForConnection(connection: BotConnectionView): BotInstallTarget {
+  if (connection.provider === "weixin") return "weixin";
+  if (connection.provider === "feishu" && connection.domain === "lark") return "lark";
+  if (connection.provider === "qq") return "qq";
+  return "feishu";
 }
 
 function formatInstallUserCode(code: string): string {
@@ -2915,6 +3794,37 @@ function ToggleSegment({
   );
 }
 
+function BotListInput({
+  label,
+  value,
+  disabled,
+  placeholder,
+  onChange,
+  onBlur,
+}: {
+  label: ReactNode;
+  value: string;
+  disabled: boolean;
+  placeholder: string;
+  onChange: (value: string) => void;
+  onBlur: (value: string) => void;
+}) {
+  return (
+    <label className="bot-list-input">
+      <span>{label}</span>
+      <textarea
+        className="mem-input bot-list-input__textarea"
+        value={value}
+        disabled={disabled}
+        placeholder={placeholder}
+        spellCheck={false}
+        onChange={(event) => onChange(event.target.value)}
+        onBlur={(event) => onBlur(event.currentTarget.value)}
+      />
+    </label>
+  );
+}
+
 function sanitizeBotDraft(draft: BotSettingsView): BotSettingsView {
   const bot = normalizeBotSettings(draft);
   return {
@@ -2923,11 +3833,36 @@ function sanitizeBotDraft(draft: BotSettingsView): BotSettingsView {
     toolApprovalMode: normalizeBotToolApprovalMode(bot.toolApprovalMode),
     maxSteps: Math.max(0, Math.floor(bot.maxSteps || 0)),
     debounceMs: Math.max(0, Math.floor(bot.debounceMs || 0)),
+    queueMode: normalizeBotQueueMode(bot.queueMode),
+    queueCap: Math.max(0, Math.floor(bot.queueCap || 0)),
+    queueDrop: normalizeBotQueueDrop(bot.queueDrop),
+    selfUserIds: {
+      qq: uniqueStrings(bot.selfUserIds.qq.map((v) => v.trim())),
+      feishu: uniqueStrings(bot.selfUserIds.feishu.map((v) => v.trim())),
+      weixin: uniqueStrings(bot.selfUserIds.weixin.map((v) => v.trim())),
+    },
+    control: {
+      enabled: bot.control.enabled,
+      addr: bot.control.addr.trim(),
+      tokenEnv: bot.control.tokenEnv.trim(),
+    },
+    pairing: {
+      enabled: bot.pairing.enabled,
+      requestTtlMinutes: Math.max(0, Math.floor(bot.pairing.requestTtlMinutes || 0)),
+      maxPendingPerPlatform: Math.max(0, Math.floor(bot.pairing.maxPendingPerPlatform || 0)),
+    },
+    routes: bot.routes.map(normalizeBotRoute).filter(botRouteHasValue),
     allowlist: {
       ...bot.allowlist,
       qqUsers: uniqueStrings(bot.allowlist.qqUsers.map((v) => v.trim())),
       feishuUsers: uniqueStrings(bot.allowlist.feishuUsers.map((v) => v.trim())),
       weixinUsers: uniqueStrings(bot.allowlist.weixinUsers.map((v) => v.trim())),
+      qqApprovers: uniqueStrings(bot.allowlist.qqApprovers.map((v) => v.trim())),
+      feishuApprovers: uniqueStrings(bot.allowlist.feishuApprovers.map((v) => v.trim())),
+      weixinApprovers: uniqueStrings(bot.allowlist.weixinApprovers.map((v) => v.trim())),
+      qqAdmins: uniqueStrings(bot.allowlist.qqAdmins.map((v) => v.trim())),
+      feishuAdmins: uniqueStrings(bot.allowlist.feishuAdmins.map((v) => v.trim())),
+      weixinAdmins: uniqueStrings(bot.allowlist.weixinAdmins.map((v) => v.trim())),
       qqGroups: uniqueStrings(bot.allowlist.qqGroups.map((v) => v.trim())),
       feishuGroups: uniqueStrings(bot.allowlist.feishuGroups.map((v) => v.trim())),
       weixinGroups: uniqueStrings(bot.allowlist.weixinGroups.map((v) => v.trim())),
@@ -2936,6 +3871,10 @@ function sanitizeBotDraft(draft: BotSettingsView): BotSettingsView {
       ...bot.qq,
       appId: bot.qq.appId.trim(),
       appSecretEnv: bot.qq.appSecretEnv.trim(),
+      model: bot.qq.model.trim(),
+      toolApprovalMode: normalizeBotToolApprovalMode(bot.qq.toolApprovalMode),
+      workspaceRoot: bot.qq.workspaceRoot.trim(),
+      access: sanitizeBotAccess(bot.qq.access),
     },
     feishu: {
       ...bot.feishu,
@@ -2952,7 +3891,18 @@ function sanitizeBotDraft(draft: BotSettingsView): BotSettingsView {
       tokenEnv: bot.weixin.tokenEnv.trim(),
       apiBase: bot.weixin.apiBase.trim().replace(/\/+$/, ""),
     },
-    connections: bot.connections.map(normalizeBotConnection).filter((conn) => conn.id && conn.provider),
+    connections: bot.connections.map((conn) => ({ ...normalizeBotConnection(conn), access: sanitizeBotAccess(conn.access) })).filter((conn) => conn.id && conn.provider),
+  };
+}
+
+function sanitizeBotAccess(access: BotAccessView): BotAccessView {
+  const normalized = normalizeBotAccess(access);
+  return {
+    ...normalized,
+    users: uniqueStrings(normalized.users.map((v) => v.trim()).filter(Boolean)),
+    groups: uniqueStrings(normalized.groups.map((v) => v.trim()).filter(Boolean)),
+    approvers: uniqueStrings(normalized.approvers.map((v) => v.trim()).filter(Boolean)),
+    admins: uniqueStrings(normalized.admins.map((v) => v.trim()).filter(Boolean)),
   };
 }
 
@@ -2964,10 +3914,25 @@ function botDraftWithDerivedGatewayState(draft: BotSettingsView): BotSettingsVie
   };
 }
 
-function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) {
+function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: ModelsSectionProps) {
   const t = useT();
-  const [subtab, setSubtab] = useState<"usage" | "access">("usage");
+  const [subtab, setSubtab] = useState<"usage" | "access" | "stats">(
+    initialFocus?.target === "model-access"
+      ? "access"
+      : initialFocus?.target === "model-stats"
+        ? "stats"
+        : "usage",
+  );
+  // The command palette may re-target this section while the settings panel is
+  // already open (the subtab state is not remounted by a tab change). Each
+  // freshly allocated focus request runs this effect once, including repeated
+  // requests for the same target after the user changes subtabs.
+  useEffect(() => {
+    if (initialFocus?.target !== "model-access" && initialFocus?.target !== "model-stats") return;
+    setSubtab(initialFocus.target === "model-access" ? "access" : "stats");
+  }, [initialFocus?.target, initialFocus?.requestId]);
   const autoRefreshKeyRef = useRef("");
+  const autoRefreshGenerationRef = useRef(0);
   const refs = useMemo(() => allRefs(s), [s.providers]);
   const defaultRef = toRef(s.defaultModel, s);
   const plannerRef = toRef(s.plannerModel, s);
@@ -2980,12 +3945,80 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
     : !providerIsConfigured(defaultProviderView)
       ? t("settings.modelNeedsKey", { provider: modelProviderLabel(defaultProvider, defaultProviderView, t) })
       : "";
-  const agent = s.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto" };
-  const setAgentSteps = (maxSteps: number, plannerMaxSteps: number) => (
-    app.SetAgentParams(agent.temperature, maxSteps, plannerMaxSteps, agent.systemPrompt)
-  );
+  const agent = s.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "", reasoningLanguage: "auto", compactRatio: 0.85 };
+  const compactRatio = agent.compactRatio ?? 0.85;
+  const compactRatioPercent = Math.round(compactRatio * 1000) / 10;
+  const [compactRatioDraft, setCompactRatioDraft] = useState(() => String(compactRatioPercent));
+  const [compactRatioCustomOpen, setCompactRatioCustomOpen] = useState(false);
+  const compactRatioCustomInputRef = useRef<HTMLInputElement>(null);
+  const compactRatioPreset = COMPACT_RATIO_PRESETS.find(([ratio]) => Math.abs(compactRatio - ratio) < 0.0001);
+  const compactRatioDraftPercent = Number(compactRatioDraft);
+  const compactRatioDraftValid = compactRatioDraft !== ""
+    && Number.isFinite(compactRatioDraftPercent)
+    && compactRatioDraftPercent >= 65
+    && compactRatioDraftPercent <= 85;
+  const compactRatioDraftDirty = compactRatioDraftValid
+    && Math.abs(compactRatioDraftPercent / 100 - compactRatio) > 0.0001;
+  const defaultModel = defaultRef.startsWith(`${defaultProvider}/`) ? defaultRef.slice(defaultProvider.length + 1) : "";
+  const modelContextWindow = defaultProviderView?.modelOverrides?.find((override) => override.model === defaultModel)?.contextWindow ?? 0;
+  const effectiveContextWindow = modelContextWindow > 0 ? modelContextWindow : (defaultProviderView?.contextWindow ?? 0);
+  const compactTokens = effectiveContextWindow > 0 ? Math.round(effectiveContextWindow * compactRatio) : 0;
+  const compactRatioImpact = compactTokens > 0
+    ? t("settings.compactRatioImpactWithTokens", { percent: compactRatioPercent, tokens: compactTokens.toLocaleString() })
+    : t("settings.compactRatioImpact", { percent: compactRatioPercent });
+  const compactRatioSelection = compactRatioPreset
+    ? t(compactRatioPreset[1])
+    : t("settings.compactRatioCustomValue", { percent: compactRatioPercent });
+  const compactRatioOverrideHint = agent.compactRatioOverridden
+    ? t("settings.compactRatioProjectOverride", { percent: Math.round((agent.effectiveCompactRatio ?? compactRatio) * 100) })
+    : "";
+  const subagentDepth = Number.isFinite(agent.maxSubagentDepth) && agent.maxSubagentDepth <= 1 ? 1 : 2;
+  const subagentConcurrency = Number.isFinite(agent.maxSubagentConcurrency) && agent.maxSubagentConcurrency > 0
+    ? Math.max(1, Math.min(32, Math.floor(agent.maxSubagentConcurrency)))
+    : 6;
+  const parallelWriters = Number.isFinite(agent.maxParallelWriters) && agent.maxParallelWriters > 0
+    ? Math.max(1, Math.min(subagentConcurrency, Math.floor(agent.maxParallelWriters)))
+    : Math.min(3, subagentConcurrency);
 
   useEffect(() => {
+    setCompactRatioDraft(String(compactRatioPercent));
+  }, [compactRatioPercent]);
+
+  useEffect(() => {
+    if (compactRatioCustomOpen) compactRatioCustomInputRef.current?.focus();
+  }, [compactRatioCustomOpen]);
+
+  const persistCompactRatio = async (ratio: number) => {
+    if (await apply(() => app.SetCompactRatio(ratio))) setCompactRatioCustomOpen(false);
+  };
+
+  const openCompactRatioCustom = () => {
+    setCompactRatioDraft(String(compactRatioPercent));
+    setCompactRatioCustomOpen(true);
+  };
+
+  const closeCompactRatioCustom = () => {
+    setCompactRatioDraft(String(compactRatioPercent));
+    setCompactRatioCustomOpen(false);
+  };
+
+  const selectCompactRatioPreset = async (ratio: number) => {
+    if (Math.abs(compactRatio - ratio) < 0.0001) {
+      closeCompactRatioCustom();
+      return;
+    }
+    await persistCompactRatio(ratio);
+  };
+
+  const saveCompactRatioDraft = async () => {
+    if (!compactRatioDraftValid || !compactRatioDraftDirty || busy) return;
+    await persistCompactRatio(compactRatioDraftPercent / 100);
+  };
+
+  useEffect(() => {
+    const generation = ++autoRefreshGenerationRef.current;
+    let cancelled = false;
+    const stale = () => cancelled || autoRefreshGenerationRef.current !== generation;
     if (subtab !== "usage") return;
     const groups = providerAccessGroups(s.providers.filter((p) => p.added), t);
     const candidates = groups
@@ -2994,29 +4027,74 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
         return provider ? { group, provider } : null;
       })
       .filter((item): item is { group: ProviderAccessGroup; provider: ProviderView } => Boolean(item));
-    const refreshKey = candidates.map(({ group, provider }) => `${group.id}:${provider.apiKeyEnv || provider.name}:${provider.baseUrl}`).join("|");
+    // The backend token covers provider identity, current catalog, headers,
+    // and credential revision without persisting sensitive header values in
+    // sessionStorage. Older payloads without the token simply skip this
+    // opportunistic background refresh; manual refresh remains available.
+    if (candidates.some(({ provider }) => !provider.modelCatalogFingerprint?.trim())) return;
+    const refreshKey = candidates.map(({ group, provider }) => JSON.stringify([
+      group.id,
+      provider.modelCatalogFingerprint!.trim(),
+    ])).join("|");
     if (!refreshKey || autoRefreshKeyRef.current === refreshKey) return;
+
+    // Session-level cooldown per provider set: reopening the panel does not
+    // refetch the same providers, while a changed set refreshes immediately.
+    const autoRefreshStorageKey = `settings-auto-refresh-at:${refreshKey}`;
+    const lastAutoRefresh = sessionStorage.getItem(autoRefreshStorageKey);
+    if (lastAutoRefresh && Date.now() - Number(lastAutoRefresh) < 30_000) return;
+
+    // Respect slow network hints; background model-list refresh can wait.
+    if (shouldSkipAutoRefresh()) return;
+
     autoRefreshKeyRef.current = refreshKey;
+    sessionStorage.setItem(autoRefreshStorageKey, String(Date.now()));
 
     void backgroundApply(async () => {
+      // Batch-fetch models for all candidates in one round-trip.
+      const providersToFetch = candidates.map((c) => c.provider).filter((p) => p.models && p.models.length > 0);
+      let batchResults: Record<string, string[]> = {};
+      try {
+        batchResults = await app.FetchAllProviderModels(providersToFetch) as Record<string, string[]>;
+      } catch {
+        // Batch failed entirely — fall back to per-provider cached calls below.
+      }
+      if (stale()) return;
+
+      const updates: ProviderModelCatalogUpdate[] = [];
       for (const { provider } of candidates) {
-        // Background auto-refresh only protects a user-curated model list.
-        // If the user hasn't specified any models, don't silently populate
-        // the provider with every model from the API.
+        if (stale()) return;
         if (!provider.models || provider.models.length === 0) continue;
         try {
-          const fetched = await app.FetchProviderModels(provider);
-          if (fetched.length === 0) continue;
+          const fetched = batchResults[provider.name]
+            ?? await cachedFetchProviderModels((p) => app.FetchProviderModels(p), provider);
+          if (stale()) return;
+          if (!fetched || fetched.length === 0) continue;
           const models = mergedFetchedProviderModels(provider.models, fetched, { preserveCurated: true });
           const currentDefault = providerDefaultModel(provider.default, models);
           const visionModels = provider.visionModels.filter((model) => models.includes(model));
           if (sameStringList(provider.models, models) && provider.default === currentDefault && sameStringList(provider.visionModels, visionModels)) continue;
-          await app.SaveProvider({ ...provider, models, default: currentDefault, visionModels });
+          const expectedFingerprint = provider.modelCatalogFingerprint?.trim() ?? "";
+          if (!expectedFingerprint) continue;
+          updates.push({ name: provider.name, expectedFingerprint, models, default: currentDefault, visionModels });
         } catch {
           // Background discovery is opportunistic; manual refresh shows errors.
         }
       }
+      if (updates.length > 0) {
+        try {
+          if (stale()) return;
+          // Compare and apply narrow catalog updates in one transaction.
+          await app.SaveProviderModelCatalogs(updates);
+        } catch {
+          // Background discovery is opportunistic; explicit edits show errors.
+        }
+      }
     });
+    return () => {
+      cancelled = true;
+      if (autoRefreshGenerationRef.current === generation) autoRefreshGenerationRef.current += 1;
+    };
   }, [backgroundApply, s.providers, subtab, t]);
 
   return (
@@ -3038,12 +4116,20 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
         >
           {t("settings.modelTab.access")}
         </button>
+        <button
+          type="button"
+          className={`settings-subtab${subtab === "stats" ? " settings-subtab--active" : ""}`}
+          aria-selected={subtab === "stats"}
+          onClick={() => setSubtab("stats")}
+        >
+          {t("settings.modelTab.stats")}
+        </button>
       </div>
 
       {subtab === "usage" ? (
         <>
           <SettingsSection title={t("settings.modelUsage")}>
-            <SettingsField label={t("settings.defaultModel")}>
+            <SettingsField label={t("settings.defaultModel")} hint={t("settings.defaultModelHint")}>
               <ModelPicker
                 s={s}
                 refs={refs}
@@ -3092,39 +4178,58 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
               </select>
             </SettingsField>
 
-            {modelIssue && <div className="provider-fetch-banner provider-fetch-banner--warn">{modelIssue}</div>}
-          </SettingsSection>
-          <SettingsSection title={t("settings.agentRuntime")} description={t("settings.agentRuntimeHint")}>
-            <SettingsField label={t("settings.executorMaxSteps")} hint={t("settings.executorMaxStepsHint")}>
-              <StepLimitControl
-                value={agent.maxSteps}
-                presets={[10, 25, 50, 0]}
-                busy={busy}
-                onChange={(next) => void apply(() => setAgentSteps(next, agent.plannerMaxSteps))}
-              />
-            </SettingsField>
-            <SettingsField label={t("settings.plannerMaxSteps")} hint={plannerSelectRef ? t("settings.plannerMaxStepsHint") : t("settings.plannerMaxStepsDisabledHint")}>
-              <StepLimitControl
-                value={agent.plannerMaxSteps}
-                presets={[6, 12, 25, 0]}
-                busy={busy}
-                onChange={(next) => void apply(() => setAgentSteps(agent.maxSteps, next))}
-              />
-            </SettingsField>
-            <SettingsField label={t("settings.coldResumePrune")} hint={t("settings.coldResumePruneHint")}>
-              <div className="set-seg">
-                {([true, false] as const).map((on) => (
+            <SettingsField label={t("settings.subagentDepth")} hint={t("settings.subagentDepthHint")}>
+              <div className="provider-add-segmented" role="group" aria-label={t("settings.subagentDepth")}>
+                {[1, 2].map((depth) => (
                   <button
-                    key={on ? "on" : "off"}
-                    className={`set-seg__btn${agent.coldResumePrune === on ? " set-seg__btn--on" : ""}`}
+                    key={depth}
+                    type="button"
+                    className={subagentDepth === depth ? "provider-add-segmented__item provider-add-segmented__item--active" : "provider-add-segmented__item"}
                     disabled={busy}
-                    onClick={() => void apply(() => app.SetColdResumePrune(on))}
+                    aria-pressed={subagentDepth === depth}
+                    onClick={() => void apply(() => app.SetMaxSubagentDepth(depth))}
                   >
-                    {on ? t("settings.coldResumePrune.on") : t("settings.coldResumePrune.off")}
+                    {depth === 1 ? t("settings.subagentDepthOne") : t("settings.subagentDepthTwo")}
                   </button>
                 ))}
               </div>
             </SettingsField>
+
+            <SettingsField label={t("settings.subagentConcurrency")} hint={t("settings.subagentConcurrencyHint")}>
+              <input
+                className="mem-input"
+                type="number"
+                min={1}
+                max={32}
+                value={subagentConcurrency}
+                disabled={busy}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  if (!Number.isFinite(n)) return;
+                  void apply(() => app.SetMaxSubagentConcurrency(n));
+                }}
+              />
+            </SettingsField>
+
+            <SettingsField label={t("settings.parallelWriters")} hint={t("settings.parallelWritersHint")}>
+              <input
+                className="mem-input"
+                type="number"
+                min={1}
+                max={subagentConcurrency}
+                value={parallelWriters}
+                disabled={busy}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  if (!Number.isFinite(n)) return;
+                  void apply(() => app.SetMaxParallelWriters(n));
+                }}
+              />
+            </SettingsField>
+
+            {modelIssue && <div className="provider-fetch-banner provider-fetch-banner--warn">{modelIssue}</div>}
+          </SettingsSection>
+          <SettingsSection title={t("settings.agentRuntime")} description={t("settings.agentRuntimeHint")}>
             <SettingsField label={t("settings.reasoningLanguage")} hint={t("settings.reasoningLanguageHint")}>
               <div className="set-seg">
                 {(["auto", "zh", "en"] as const).map((lang) => (
@@ -3139,10 +4244,100 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
                 ))}
               </div>
             </SettingsField>
+            <SettingsField label={t("settings.compactRatio")} hint={t("settings.compactRatioHint")} stacked>
+              <div className="compact-ratio-controls">
+                <div className="set-seg compact-ratio-presets" role="group" aria-label={t("settings.compactRatio")}>
+                  {COMPACT_RATIO_PRESETS.map(([ratio, labelKey]) => (
+                    <button
+                      key={ratio}
+                      type="button"
+                      className={`set-seg__btn${Math.abs(compactRatio - ratio) < 0.0001 ? " set-seg__btn--on" : ""}`}
+                      disabled={busy}
+                      aria-label={t(labelKey)}
+                      aria-pressed={Math.abs(compactRatio - ratio) < 0.0001}
+                      onClick={() => void selectCompactRatioPreset(ratio)}
+                    >
+                      <span className="compact-ratio-preset__percent" aria-hidden="true">{Math.round(ratio * 100)}%</span>
+                      <span className="compact-ratio-preset__caption" aria-hidden="true">{t(labelKey).split(" · ")[1]}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="compact-ratio-summary">
+                  <div className="compact-ratio-current">{t("settings.compactRatioCurrent", { value: compactRatioSelection })}</div>
+                  <button
+                    type="button"
+                    className="btn btn--small compact-ratio-custom-toggle"
+                    disabled={busy}
+                    aria-expanded={compactRatioCustomOpen}
+                    aria-controls="settings-compact-ratio-custom-panel"
+                    onClick={compactRatioCustomOpen ? closeCompactRatioCustom : openCompactRatioCustom}
+                  >
+                    {t("settings.compactRatioCustomOption")}
+                  </button>
+                </div>
+                <div className="compact-ratio-impact">{compactRatioImpact}</div>
+                {compactRatioCustomOpen && (
+                  <div id="settings-compact-ratio-custom-panel" className="compact-ratio-custom-panel">
+                    <div className="settings-inline-controls compact-ratio-custom">
+                      <label className="set-label" htmlFor="settings-compact-ratio-custom">{t("settings.compactRatioCustom")}</label>
+                      <input
+                        ref={compactRatioCustomInputRef}
+                        id="settings-compact-ratio-custom"
+                        className="mem-input set-narrow"
+                        type="number"
+                        min={65}
+                        max={85}
+                        step={0.1}
+                        inputMode="decimal"
+                        value={compactRatioDraft}
+                        disabled={busy}
+                        aria-label={t("settings.compactRatioCustomAria")}
+                        aria-describedby="settings-compact-ratio-custom-hint"
+                        aria-invalid={!compactRatioDraftValid}
+                        onInput={(event) => setCompactRatioDraft(event.currentTarget.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            void saveCompactRatioDraft();
+                          }
+                          if (event.key === "Escape") {
+                            event.preventDefault();
+                            closeCompactRatioCustom();
+                          }
+                        }}
+                      />
+                      <span className="compact-ratio-custom__suffix" aria-hidden="true">%</span>
+                      <button
+                        type="button"
+                        className="btn btn--small"
+                        disabled={busy || !compactRatioDraftValid || !compactRatioDraftDirty}
+                        onClick={() => void saveCompactRatioDraft()}
+                      >
+                        {t("settings.compactRatioApply")}
+                      </button>
+                      <button type="button" className="btn btn--small" disabled={busy} onClick={closeCompactRatioCustom}>
+                        {t("common.cancel")}
+                      </button>
+                    </div>
+                    <div
+                      id="settings-compact-ratio-custom-hint"
+                      className={`compact-ratio-custom__hint${compactRatioDraftValid ? "" : " compact-ratio-custom__hint--invalid"}`}
+                    >
+                      {t("settings.compactRatioCustomHint")}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </SettingsField>
+            {compactRatioOverrideHint && <div className="provider-fetch-banner provider-fetch-banner--warn">{compactRatioOverrideHint}</div>}
           </SettingsSection>
         </>
-      ) : (
+      ) : subtab === "access" ? (
         <ProvidersSection s={s} busy={busy} apply={apply} />
+      ) : (
+        <Suspense fallback={<div className="empty">{t("settings.loading")}</div>}>
+          <UsageStatsPanel />
+        </Suspense>
       )}
     </>
   );
@@ -3155,12 +4350,13 @@ type ModelPickerOption = {
   providerView?: ProviderView;
 };
 
-function ModelPicker({
+export function ModelPicker({
   s,
   refs,
   value,
   disabled,
   includeSameDefault = false,
+  ariaLabel,
   emptyOptionLabel,
   emptyOptionHint,
   onPick,
@@ -3170,6 +4366,7 @@ function ModelPicker({
   value: string;
   disabled: boolean;
   includeSameDefault?: boolean;
+  ariaLabel?: string;
   emptyOptionLabel?: string;
   emptyOptionHint?: string;
   onPick: (ref: string) => void;
@@ -3251,6 +4448,7 @@ function ModelPicker({
         type="button"
         className="settings-model-picker__trigger"
         disabled={disabled || (!includeSameDefault && !emptyOptionLabel && refs.length === 0)}
+        aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((next) => !next)}
@@ -3386,10 +4584,20 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
   const defaultProvider = toRef(s.defaultModel, s).split("/")[0];
   const [editing, setEditing] = useState<string | null>(null);
   const [adding, setAdding] = useState<AddProviderMode>(null);
-  const [fetchingProvider, setFetchingProvider] = useState<string | null>(null);
+  const [revealedProvider, setRevealedProvider] = useState<string | null>(null);
+  const [fetchingProviders, setFetchingProviders] = useState<Set<string>>(() => new Set());
+  const fetchGate = useMemo(createLatestRequestGate, []);
   const [fetchResults, setFetchResults] = useState<Record<string, ProviderFetchResult>>({});
   const [modelDrafts, setModelDrafts] = useState<Record<string, ProviderModelDraft>>({});
-  const groups = useMemo(() => providerAccessGroups(s.providers.filter((p) => p.added), t), [s.providers, t]);
+  const visibleProviders = useMemo(() => s.providers.filter((p) => p.added || p.name === revealedProvider), [s.providers, revealedProvider]);
+  const groups = useMemo(() => providerAccessGroups(visibleProviders, t), [visibleProviders, t]);
+
+  useEffect(() => {
+    if (revealedProvider && !s.providers.some((p) => p.name === revealedProvider)) {
+      setRevealedProvider(null);
+      if (editing === revealedProvider) setEditing(null);
+    }
+  }, [editing, revealedProvider, s.providers]);
 
   const setGroupFetchResult = (groupID: string, result: ProviderFetchResult | null) => {
     setFetchResults((prev) => {
@@ -3409,15 +4617,54 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
     });
   };
 
+  const beginGroupFetch = (groupID: string): number => {
+    const generation = fetchGate.begin(groupID);
+    setFetchingProviders((current) => {
+      if (current.has(groupID)) return current;
+      const next = new Set(current);
+      next.add(groupID);
+      return next;
+    });
+    return generation;
+  };
+
+  const groupFetchIsCurrent = (groupID: string, generation: number): boolean => (
+    fetchGate.isCurrent(groupID, generation)
+  );
+
+  const finishGroupFetch = (groupID: string, generation: number) => {
+    if (!groupFetchIsCurrent(groupID, generation)) return;
+    setFetchingProviders((current) => {
+      if (!current.has(groupID)) return current;
+      const next = new Set(current);
+      next.delete(groupID);
+      return next;
+    });
+  };
+
+  const cancelGroupFetch = (groupID: string) => {
+    fetchGate.cancel(groupID);
+    setFetchingProviders((current) => {
+      if (!current.has(groupID)) return current;
+      const next = new Set(current);
+      next.delete(groupID);
+      return next;
+    });
+  };
+
   const modelDraftForFetch = (p: ProviderView, fetched: string[]): ProviderModelDraft => {
     const candidates = providerModelCandidates(p.models, fetched);
     const selected = mergedFetchedProviderModels(p.models, fetched, { preserveCurated: true });
-    const visionSource = p.visionModelsConfigured ? p.visionModels : inferredVisionModels(candidates);
+    const visionCapability = providerVisionCapabilityForView(p);
+    const visionSource = visionCapability === "unsupported"
+      ? []
+      : (p.visionModelsConfigured ? p.visionModels : inferredVisionModels(candidates));
     return {
       providerName: p.name,
       candidates,
       selected: candidates.filter((model) => selected.includes(model)),
       visionModels: candidates.filter((model) => visionSource.includes(model)),
+      visionCapability,
     };
   };
 
@@ -3453,20 +4700,22 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
   };
 
   const refreshModels = async (group: ProviderAccessGroup, p: ProviderView) => {
-    setFetchingProvider(group.id);
+    const generation = beginGroupFetch(group.id);
     setGroupFetchResult(group.id, null);
     setGroupModelDraft(group.id, null);
     try {
       let fetched: string[];
       try {
-        fetched = await app.FetchProviderModels(p);
+        fetched = await cachedFetchProviderModels((provider) => app.FetchProviderModels(provider), p, true);
       } catch (e) {
+        if (!groupFetchIsCurrent(group.id, generation)) return;
         setGroupFetchResult(group.id, {
           kind: "warn",
           text: t("settings.fetchModelsFailedForProvider", { provider: group.label, err: String((e as Error)?.message ?? e) }),
         });
         return;
       }
+      if (!groupFetchIsCurrent(group.id, generation)) return;
       if (fetched.length === 0) {
         setGroupFetchResult(group.id, {
           kind: "warn",
@@ -3475,33 +4724,31 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
         return;
       }
       const draft = modelDraftForFetch(p, fetched);
-      setGroupModelDraft(group.id, draft);
-      setGroupFetchResult(group.id, {
-        kind: "ok",
-        text: t("settings.fetchModelsReadyForProvider", { provider: group.label, n: draft.candidates.length }),
+      startTransition(() => {
+        setGroupModelDraft(group.id, draft);
+        setGroupFetchResult(group.id, {
+          kind: "ok",
+          text: t("settings.fetchModelsReadyForProvider", { provider: group.label, n: draft.candidates.length }),
+        });
       });
     } finally {
-      setFetchingProvider(null);
+      finishGroupFetch(group.id, generation);
     }
-  };
-
-  const refreshGroup = async (group: ProviderAccessGroup) => {
-    const probe = group.providers[0];
-    if (!probe) return;
-    await refreshModels(group, probe);
   };
 
   const saveKeyEnvAndAutoRefresh = async (group: ProviderAccessGroup, apiKeyEnv: string, value: string) => {
     const probe = group.providers[0];
     if (!probe || !apiKeyEnv) return;
-    setFetchingProvider(group.id);
+    const generation = beginGroupFetch(group.id);
     setGroupFetchResult(group.id, null);
     setGroupModelDraft(group.id, null);
     try {
       await apply(async () => {
-        await app.SetProviderKey(apiKeyEnv, value);
+        await app.SaveProviderKey(apiKeyEnv, value);
+        invalidateProviderCacheByAPIKeyEnv(apiKeyEnv);
         try {
-          const fetched = await app.FetchProviderModels({ ...probe, apiKeyEnv });
+          const fetched = await cachedFetchProviderModels((provider) => app.FetchProviderModels(provider), { ...probe, apiKeyEnv });
+          if (!groupFetchIsCurrent(group.id, generation)) return;
           if (fetched.length > 0) {
             const draft = modelDraftForFetch({ ...probe, apiKeyEnv }, fetched);
             setGroupModelDraft(group.id, draft);
@@ -3516,6 +4763,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
             text: t("settings.fetchModelsEmptyForProvider", { provider: group.label }),
           });
         } catch (e) {
+          if (!groupFetchIsCurrent(group.id, generation)) return;
           setGroupFetchResult(group.id, {
             kind: "warn",
             text: t("settings.fetchModelsAfterKeyFailedForProvider", { provider: group.label, err: String((e as Error)?.message ?? e) }),
@@ -3523,20 +4771,38 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
         }
       });
     } finally {
-      setFetchingProvider(null);
+      finishGroupFetch(group.id, generation);
     }
   };
 
   const saveProviderKey = async (group: ProviderAccessGroup, apiKeyEnv: string, value: string) => {
     if (!apiKeyEnv) return;
+    cancelGroupFetch(group.id);
     setGroupFetchResult(group.id, null);
     setGroupModelDraft(group.id, null);
-    await apply(() => app.SetProviderKey(apiKeyEnv, value));
+    await apply(async () => {
+      const warning = await app.SetProviderKey(apiKeyEnv, value);
+      invalidateProviderCacheByAPIKeyEnv(apiKeyEnv);
+      return warning;
+    });
   };
 
-  const clearProviderKey = async (apiKeyEnv: string) => {
+  const clearProviderKey = async (group: ProviderAccessGroup, apiKeyEnv: string) => {
     if (!apiKeyEnv) return;
-    await apply(() => app.ClearProviderKey(apiKeyEnv));
+    cancelGroupFetch(group.id);
+    await apply(async () => {
+      await app.ClearProviderKey(apiKeyEnv);
+      invalidateProviderCacheByAPIKeyEnv(apiKeyEnv);
+    });
+  };
+
+  const saveProvider = async (provider: ProviderView, key: string) => {
+    if (key) {
+      const warning = await app.SaveProviderWithKey(provider, key);
+      invalidateProviderCacheByAPIKeyEnv(provider.apiKeyEnv);
+      return warning;
+    }
+    await app.SaveProvider(provider);
   };
 
   const saveModelDraft = async (group: ProviderAccessGroup) => {
@@ -3550,7 +4816,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
       await app.SaveProvider({
         ...provider,
         models,
-        visionModels,
+        visionModels: draft.visionCapability === "unsupported" ? [] : visionModels,
         visionModelsConfigured: true,
         default: providerDefaultModel(provider.default, models),
       });
@@ -3593,11 +4859,20 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
           <AddProviderPanel
             mode={adding}
             kinds={s.providerKinds}
+            officialProviders={s.officialProviders}
+            providerPresets={s.providerPresets}
             busy={busy}
             onMode={setAdding}
             onCancel={() => setAdding(null)}
             onAddOfficial={(kind, key) => apply(() => app.AddOfficialProviderAccess(kind, key)).then(() => setAdding(null))}
-            onAddCustom={(pv) => apply(() => app.SaveProvider(pv)).then(() => setAdding(null))}
+            onAddPreset={(id, key) => apply(() => app.AddProviderPresetAccess(id, key)).then(() => setAdding(null))}
+            onViewPresetConflict={(providerName) => {
+              setRevealedProvider(providerName);
+              setEditing(providerName);
+              setAdding(null);
+            }}
+            onResetPreset={(id) => apply(() => app.ResetProviderPresetAccess(id)).then(() => setAdding(null))}
+            onAddCustom={(pv, key) => apply(() => saveProvider(pv, key ?? "")).then(() => setAdding(null))}
           />
         )}
         {adding === null && groups.map((group) => (
@@ -3605,7 +4880,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
             key={group.id}
             group={group}
             busy={busy}
-            fetching={fetchingProvider === group.id || group.providers.some((p) => fetchingProvider === p.name)}
+            fetching={fetchingProviders.has(group.id)}
             fetchResult={fetchResults[group.id]}
             modelDraft={modelDrafts[group.id]}
             defaultProvider={defaultProvider}
@@ -3613,11 +4888,14 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
             kinds={s.providerKinds}
             onEdit={setEditing}
             onCancelEdit={() => setEditing(null)}
-            onSave={(pv) => apply(() => app.SaveProvider(pv)).then(() => {
-              setEditing(null);
-              setGroupModelDraft(group.id, null);
-            })}
-            onRefresh={() => void refreshGroup(group)}
+            onSave={(pv, key) => {
+              cancelGroupFetch(group.id);
+              return apply(() => saveProvider(pv, key ?? "")).then(() => {
+                setEditing(null);
+                setGroupModelDraft(group.id, null);
+              });
+            }}
+            onRefresh={(provider) => void refreshModels(group, provider)}
             onToggleDraftModel={(model) => updateModelDraftSelection(group.id, (draft) => (
               draft.selected.includes(model)
                 ? draft.selected.filter((candidate) => candidate !== model)
@@ -3626,11 +4904,37 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
             onToggleDraftVision={(model) => toggleModelDraftVision(group.id, model)}
             onSelectAllDraftModels={() => updateModelDraftSelection(group.id, (draft) => draft.candidates)}
             onClearDraftModels={() => updateModelDraftSelection(group.id, () => [])}
-            onCancelDraftModels={() => setGroupModelDraft(group.id, null)}
+            onCancelDraftModels={() => {
+              setGroupModelDraft(group.id, null);
+              setGroupFetchResult(group.id, null);
+            }}
             onSaveDraftModels={() => void saveModelDraft(group)}
+            onToggleWebSearch={(enabled) => {
+              const providerNames = group.providers.map((provider) => provider.name);
+              if (providerNames.length === 0) return;
+              void apply(() => app.SetProviderWebSearch(providerNames, enabled));
+            }}
+            onUpgradeRecommended={(name) => {
+              cancelGroupFetch(group.id);
+              return apply(() => app.UpgradeDeepSeekProviderAccess(name)).then((upgraded) => {
+                if (upgraded) {
+                  setEditing(null);
+                  setGroupModelDraft(group.id, null);
+                }
+              });
+            }}
             onSaveEditorKey={(env, value) => group.builtIn ? saveProviderKey(group, env, value) : saveKeyEnvAndAutoRefresh(group, env, value)}
-            onClearEditorKey={clearProviderKey}
-            onDelete={(p) => apply(() => app.RemoveProviderAccess(p.name))}
+            onClearEditorKey={(env) => clearProviderKey(group, env)}
+            onDelete={(providers) => {
+              cancelGroupFetch(group.id);
+              const providerNames = providers.map(({ name }) => name);
+              return apply(() => app.RemoveProviderAccesses(providerNames)).then(() => {
+                if (revealedProvider && providerNames.includes(revealedProvider)) {
+                  setRevealedProvider(null);
+                  setEditing(null);
+                }
+              });
+            }}
           />
         ))}
       </div>
@@ -3638,7 +4942,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
   );
 }
 
-type ProviderAccessGroup = {
+export type ProviderAccessGroup = {
   id: string;
   label: string;
   description: string;
@@ -3653,6 +4957,7 @@ type ProviderAccessGroup = {
   baseUrl: string;
   kind: string;
   models: string[];
+  recommendedUpgradeAvailable: boolean;
 };
 
 type ProviderFetchResult = {
@@ -3665,6 +4970,7 @@ type ProviderModelDraft = {
   candidates: string[];
   selected: string[];
   visionModels: string[];
+  visionCapability: ProviderVisionCapability;
 };
 
 type AddProviderMode = null | "official" | "custom";
@@ -3674,27 +4980,205 @@ const OFFICIAL_PROVIDER_CHOICES: Array<{ kind: OfficialProviderKind; labelKey: D
   { kind: "deepseek", labelKey: "settings.addProvider.official.deepseek", descKey: "settings.addProvider.official.deepseekDesc", keyEnv: "DEEPSEEK_API_KEY" },
 ];
 
-function AddProviderPanel({
+type ProviderTemplateChoice =
+  | { id: string; source: "official"; kind: OfficialProviderKind; label: string; description: string; keyEnv: string; added: boolean; keySet: boolean }
+  | { id: string; source: "preset"; presetID: string; label: string; description: string; keyEnv: string; added: boolean; status: ProviderPresetStatus; statusProviderNames: string[]; keySet: boolean };
+
+function providerTemplateCanAdd(choice: ProviderTemplateChoice | undefined): boolean {
+  if (!choice) return false;
+  if (choice.source === "official") return !choice.added;
+  return choice.status !== "installed" && choice.status !== "installed_modified" && choice.status !== "name_conflict";
+}
+
+function providerTemplateStatusBadge(choice: ProviderTemplateChoice, t: ReturnType<typeof useT>): string {
+  if (choice.source === "official") return choice.added ? t("settings.addProvider.addedBadge") : "";
+  if (choice.status === "installed") return t("settings.addProvider.addedBadge");
+  if (choice.status === "installed_modified") return t("settings.addProvider.modifiedBadge");
+  if (choice.status === "name_conflict") return t("settings.addProvider.nameConflictBadge");
+  if (choice.status === "similar_existing") return t("settings.addProvider.similarExistingBadge");
+  return "";
+}
+
+function providerTemplateActionLabel(choice: ProviderTemplateChoice | undefined, t: ReturnType<typeof useT>): string {
+  if (!choice) return t("settings.addProvider.confirm");
+  if (choice.source === "preset" && choice.status === "name_conflict") return t("settings.addProvider.nameConflictAction");
+  if (!providerTemplateCanAdd(choice)) return t("settings.addProvider.alreadyAddedAction");
+  return t("settings.addProvider.confirm");
+}
+
+function providerTemplateStatusClass(choice: ProviderTemplateChoice): string {
+  if (choice.source !== "preset" || choice.status === "available") return "";
+  return ` provider-template-card--${choice.status.split("_").join("-")}`;
+}
+
+function providerTemplateConflictProviderName(choice: ProviderTemplateChoice): string {
+  if (choice.source !== "preset" || (choice.status !== "name_conflict" && choice.status !== "installed_modified")) return "";
+  return choice.statusProviderNames[0] ?? "";
+}
+
+function providerPresetDescription(preset: ProviderPresetView, t: ReturnType<typeof useT>): string {
+  switch (preset.id) {
+    case "deepseek-responses":
+      return t("settings.addProvider.preset.deepseekResponsesDesc");
+    case "longcat-openai":
+      return t("settings.addProvider.preset.longcatOpenAIDesc");
+    case "longcat-anthropic":
+      return t("settings.addProvider.preset.longcatAnthropicDesc");
+    case "token-rhythm":
+      return t("settings.addProvider.preset.tokenRhythmDesc");
+    case "kimi-cn":
+      return t("settings.addProvider.preset.kimiCnDesc");
+    case "kimi-global":
+      return t("settings.addProvider.preset.kimiGlobalDesc");
+    case "kimi-coding-plan":
+      return t("settings.addProvider.preset.kimiCodingPlanDesc");
+    case "mimo-api":
+      return t("settings.addProvider.preset.mimoApiDesc");
+    case "mimo-anthropic":
+      return t("settings.addProvider.preset.mimoAnthropicDesc");
+    case "mimo-token-plan-cn":
+      return t("settings.addProvider.preset.mimoTokenPlanCnDesc");
+    case "mimo-token-plan-cn-anthropic":
+      return t("settings.addProvider.preset.mimoTokenPlanCnAnthropicDesc");
+    case "mimo-token-plan-sgp":
+      return t("settings.addProvider.preset.mimoTokenPlanSgpDesc");
+    case "mimo-token-plan-sgp-anthropic":
+      return t("settings.addProvider.preset.mimoTokenPlanSgpAnthropicDesc");
+    case "mimo-token-plan-ams":
+      return t("settings.addProvider.preset.mimoTokenPlanAmsDesc");
+    case "mimo-token-plan-ams-anthropic":
+      return t("settings.addProvider.preset.mimoTokenPlanAmsAnthropicDesc");
+    case "minimax-cn-api":
+      return t("settings.addProvider.preset.minimaxCnApiDesc");
+    case "minimax-global-api":
+      return t("settings.addProvider.preset.minimaxGlobalApiDesc");
+    case "minimax-cn-anthropic":
+      return t("settings.addProvider.preset.minimaxCnAnthropicDesc");
+    case "minimax-global-anthropic":
+      return t("settings.addProvider.preset.minimaxGlobalAnthropicDesc");
+    case "glm-cn":
+      return t("settings.addProvider.preset.glmCnDesc");
+    case "zai-global":
+      return t("settings.addProvider.preset.zaiGlobalDesc");
+    case "glm-coding-plan-cn":
+      return t("settings.addProvider.preset.glmCodingPlanCnDesc");
+    case "glm-coding-plan-cn-anthropic":
+      return t("settings.addProvider.preset.glmCodingPlanCnAnthropicDesc");
+    case "zai-coding-plan-global":
+      return t("settings.addProvider.preset.zaiCodingPlanGlobalDesc");
+    case "zai-coding-plan-global-anthropic":
+      return t("settings.addProvider.preset.zaiCodingPlanGlobalAnthropicDesc");
+    case "opencode-go": case "opencode-go-anthropic":
+    case "opencode-go-deepseek-anthropic": case "opencode-go-deepseek-responses":
+      return t(opencodeGoPresetDescriptionKeys[preset.id]);
+    case "opencode-zen-anthropic":
+      return t("settings.addProvider.preset.opencodeZenAnthropicDesc");
+    case "qwen-cn":
+      return t("settings.addProvider.preset.qwenCnDesc");
+    case "qwen-global":
+      return t("settings.addProvider.preset.qwenGlobalDesc");
+    case "qwen-coding-plan-cn":
+      return t("settings.addProvider.preset.qwenCodingPlanCnDesc");
+    case "qwen-coding-plan-cn-anthropic":
+      return t("settings.addProvider.preset.qwenCodingPlanCnAnthropicDesc");
+    case "qwen-coding-plan-global":
+      return t("settings.addProvider.preset.qwenCodingPlanGlobalDesc");
+    case "qwen-coding-plan-global-anthropic":
+      return t("settings.addProvider.preset.qwenCodingPlanGlobalAnthropicDesc");
+    case "stepfun":
+      return t("settings.addProvider.preset.stepfunDesc");
+    case "stepfun-anthropic":
+      return t("settings.addProvider.preset.stepfunAnthropicDesc");
+    case "novita":
+      return t("settings.addProvider.preset.novitaDesc");
+    case "gmi":
+      return t("settings.addProvider.preset.gmiDesc");
+    case "vercel-ai-gateway":
+      return t("settings.addProvider.preset.vercelAiGatewayDesc");
+    case "huggingface":
+      return t("settings.addProvider.preset.huggingfaceDesc");
+    case "nvidia":
+      return t("settings.addProvider.preset.nvidiaDesc");
+    case "kilocode":
+      return t("settings.addProvider.preset.kilocodeDesc");
+    case "ollama-cloud":
+      return t("settings.addProvider.preset.ollamaCloudDesc");
+    default:
+      return preset.description;
+  }
+}
+
+function providerPresetLabel(preset: ProviderPresetView, t: ReturnType<typeof useT>): string {
+  switch (preset.id) {
+    case "deepseek-responses":
+      return t("settings.addProvider.preset.deepseekResponsesLabel");
+    case "token-rhythm":
+      return t("settings.addProvider.preset.tokenRhythmLabel");
+    default:
+      return preset.label;
+  }
+}
+
+export function AddProviderPanel({
   mode,
   kinds,
+  officialProviders,
+  providerPresets,
   busy,
   onMode,
   onCancel,
   onAddOfficial,
+  onAddPreset,
+  onViewPresetConflict,
+  onResetPreset,
   onAddCustom,
 }: {
-  mode: AddProviderMode;
-  kinds: string[];
+  mode: AddProviderMode; kinds: string[]; officialProviders: ProviderView[];
+  providerPresets: ProviderPresetView[];
   busy: boolean;
   onMode: (mode: AddProviderMode) => void;
   onCancel: () => void;
   onAddOfficial: (kind: OfficialProviderKind, key: string) => Promise<void>;
-  onAddCustom: (p: ProviderView) => void | Promise<void>;
+  onAddPreset: (id: string, key: string) => Promise<void>;
+  onViewPresetConflict: (providerName: string) => void;
+  onResetPreset: (id: string) => Promise<void>;
+  onAddCustom: (p: ProviderView, key?: string) => void | Promise<void>;
 }) {
   const t = useT();
-  const [officialKind, setOfficialKind] = useState<OfficialProviderKind>("deepseek");
+  const templateChoices = useMemo<ProviderTemplateChoice[]>(() => [
+    ...OFFICIAL_PROVIDER_CHOICES.map((choice) => {
+      const state = officialProviders.find((provider) => officialProviderKind(provider) === choice.kind);
+      return {
+        id: `official:${choice.kind}`,
+        source: "official" as const, kind: choice.kind,
+        label: t(choice.labelKey), description: t(choice.descKey),
+        keyEnv: state?.apiKeyEnv || choice.keyEnv,
+        added: Boolean(state?.added), keySet: Boolean(state?.keySet),
+      };
+    }),
+    ...providerPresets.map((preset) => ({
+      id: `preset:${preset.id}`,
+      source: "preset" as const,
+      presetID: preset.id,
+      label: providerPresetLabel(preset, t),
+      description: providerPresetDescription(preset, t),
+      keyEnv: preset.keyEnv,
+      added: preset.added,
+      status: normalizeProviderPresetStatus(preset.status, preset.added),
+      statusProviderNames: asArray(preset.statusProviderNames),
+      keySet: preset.keySet,
+    })),
+  ], [officialProviders, providerPresets, t]);
+  const [templateID, setTemplateID] = useState("official:deepseek");
   const [key, setKey] = useState("");
-  const selected = OFFICIAL_PROVIDER_CHOICES.find((choice) => choice.kind === officialKind) ?? OFFICIAL_PROVIDER_CHOICES[0];
+  const firstAvailableTemplateID = templateChoices.find(providerTemplateCanAdd)?.id ?? templateChoices[0]?.id ?? "";
+  const selected = templateChoices.find((choice) => choice.id === templateID) ?? templateChoices.find((choice) => choice.id === firstAvailableTemplateID) ?? templateChoices[0];
+  useEffect(() => {
+    const current = templateChoices.find((choice) => choice.id === templateID);
+    if (firstAvailableTemplateID && (!current || (!providerTemplateCanAdd(current) && firstAvailableTemplateID !== templateID))) {
+      setTemplateID(firstAvailableTemplateID);
+    }
+  }, [firstAvailableTemplateID, templateChoices, templateID]);
 
   const header = (
     <div className="provider-add-panel__head">
@@ -3739,26 +5223,66 @@ function AddProviderPanel({
         {modeSwitch}
         <div className="provider-add-panel__hint">{t("settings.addProvider.officialHint")}</div>
         <div className="provider-template-grid">
-          {OFFICIAL_PROVIDER_CHOICES.map((choice) => (
-            <button
-              key={choice.kind}
-              type="button"
-              className={`provider-template-card${officialKind === choice.kind ? " provider-template-card--active" : ""}`}
-              disabled={busy}
-              onClick={() => setOfficialKind(choice.kind)}
-            >
-              <strong>{t(choice.labelKey)}</strong>
-              <span>{t(choice.descKey)}</span>
-            </button>
-          ))}
+          {templateChoices.map((choice) => {
+            const canAdd = providerTemplateCanAdd(choice);
+            const badge = providerTemplateStatusBadge(choice, t);
+            const conflictProviderName = providerTemplateConflictProviderName(choice);
+            if (choice.source === "preset" && (choice.status === "name_conflict" || choice.status === "installed_modified")) {
+              return (
+                <div
+                  key={choice.id}
+                  className={`provider-template-card${providerTemplateStatusClass(choice)}`}
+                >
+                  <strong>
+                    {choice.label}
+                    {badge ? ` · ${badge}` : ""}
+                  </strong>
+                  <span>{choice.description}</span>
+                  <div className="provider-template-card__actions">
+                    <button
+                      type="button"
+                      className="btn btn--small"
+                      disabled={busy || !conflictProviderName}
+                      onClick={() => onViewPresetConflict(conflictProviderName)}
+                    >
+                      {choice.status === "installed_modified" ? t("settings.addProvider.viewPresetProvider") : t("settings.addProvider.viewConflictProvider")}
+                    </button>
+                    <InlineConfirmButton
+                      label={t("settings.addProvider.resetPreset")}
+                      confirmLabel={t("settings.addProvider.confirmResetPreset")}
+                      cancelLabel={t("common.cancel")}
+                      disabled={busy}
+                      danger
+                      onConfirm={() => onResetPreset(choice.presetID)}
+                    />
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <button
+                key={choice.id}
+                type="button"
+                className={`provider-template-card${selected?.id === choice.id ? " provider-template-card--active" : ""}${providerTemplateStatusClass(choice)}`}
+                disabled={busy || !canAdd}
+                onClick={() => setTemplateID(choice.id)}
+              >
+                <strong>
+                  {choice.label}
+                  {badge ? ` · ${badge}` : ""}
+                </strong>
+                <span>{choice.description}</span>
+              </button>
+            );
+          })}
         </div>
         <label className="set-label">{t("settings.providerKeyOptional")}</label>
         <input
           className="mem-input"
           type="password"
-          placeholder={t("settings.setKey", { env: selected.keyEnv })}
+          placeholder={selected ? t("settings.setKey", { env: selected.keyEnv }) : ""}
           value={key}
-          disabled={busy}
+          disabled={busy || !providerTemplateCanAdd(selected)}
           onChange={(e) => setKey(e.target.value)}
         />
         <div className="prov-card__actions">
@@ -3768,10 +5292,14 @@ function AddProviderPanel({
           <button
             type="button"
             className="btn btn--primary btn--small"
-            disabled={busy}
-            onClick={() => void onAddOfficial(officialKind, key.trim())}
+            disabled={busy || !providerTemplateCanAdd(selected)}
+            onClick={() => {
+              if (!providerTemplateCanAdd(selected)) return;
+              if (selected.source === "official") void onAddOfficial(selected.kind, key.trim());
+              else void onAddPreset(selected.presetID, key.trim());
+            }}
           >
-            {t("settings.addProvider.confirm")}
+            {providerTemplateActionLabel(selected, t)}
           </button>
         </div>
       </div>
@@ -3796,7 +5324,7 @@ function AddProviderPanel({
   return null;
 }
 
-function ProviderAccessCard({
+export function ProviderAccessCard({
   group,
   busy,
   fetching,
@@ -3815,6 +5343,8 @@ function ProviderAccessCard({
   onClearDraftModels,
   onCancelDraftModels,
   onSaveDraftModels,
+  onToggleWebSearch,
+  onUpgradeRecommended,
   onSaveEditorKey,
   onClearEditorKey,
   onDelete,
@@ -3829,23 +5359,28 @@ function ProviderAccessCard({
   kinds: string[];
   onEdit: (name: string) => void;
   onCancelEdit: () => void;
-  onSave: (p: ProviderView) => void | Promise<void>;
-  onRefresh: () => void;
+  onSave: (p: ProviderView, key?: string) => void | Promise<void>;
+  onRefresh: (p: ProviderView) => void;
   onToggleDraftModel: (model: string) => void;
   onToggleDraftVision: (model: string) => void;
   onSelectAllDraftModels: () => void;
   onClearDraftModels: () => void;
   onCancelDraftModels: () => void;
   onSaveDraftModels: () => void;
+  onToggleWebSearch: (enabled: boolean) => void;
+  onUpgradeRecommended: (name: string) => void | Promise<void>;
   onSaveEditorKey: (apiKeyEnv: string, value: string) => Promise<void>;
   onClearEditorKey?: (apiKeyEnv: string) => Promise<void>;
-  onDelete?: (p: ProviderView) => Promise<void>;
+  onDelete?: (providers: ProviderView[]) => Promise<void>;
 }) {
   const t = useT();
   const editableProvider = group.providers[0];
   const isDefault = group.providers.some((p) => p.name === defaultProvider);
   const editingProvider = group.providers.find((p) => editing === p.name);
+  const upgradeProvider = group.providers.find((p) => p.recommendedUpgradeAvailable);
   const primaryProviderExpanded = Boolean(editableProvider && editing === editableProvider.name);
+  const supportsServerWebSearch = group.providers.length > 0 && group.providers.every(providerSupportsServerWebSearchForView);
+  const webSearchEnabled = supportsServerWebSearch && group.providers.every((provider) => Boolean(provider.webSearch));
   const visibleModels = group.models.slice(0, 6);
   const hiddenModelCount = Math.max(0, group.models.length - visibleModels.length);
   return (
@@ -3861,7 +5396,6 @@ function ProviderAccessCard({
               {providerKeyStatusLabel(group, t)}
             </span>
           </div>
-          <div className="provider-access-card__desc">{group.description}</div>
         </div>
         <div className="provider-access-card__actions">
           {editableProvider && (
@@ -3874,64 +5408,66 @@ function ProviderAccessCard({
               {primaryProviderExpanded ? t("common.collapse") : t("settings.configureProvider")}
             </button>
           )}
-          <button
-            className="btn btn--small"
-            disabled={busy || fetching || !group.baseUrl || !group.configured}
-            onClick={onRefresh}
-          >
-            {fetching ? t("settings.fetchingModels") : t("settings.fetchModels")}
-          </button>
+          {editableProvider && group.providers.length === 1 && (
+            <button
+              className="btn btn--small"
+              disabled={busy || fetching || !editableProvider.baseUrl || !group.configured}
+              onClick={() => onRefresh(editableProvider)}
+            >
+              {fetching ? t("settings.fetchingModels") : t("settings.fetchModels")}
+            </button>
+          )}
           {editableProvider && onDelete && (
-            isDefault && !group.builtIn ? (
-              <Tooltip label={t("settings.cantDeleteDefault")}>
-                <button className="btn btn--small" disabled>{t("settings.removeProviderAccess")}</button>
-              </Tooltip>
-            ) : (
-              <InlineConfirmButton
-                label={t("settings.removeProviderAccess")}
-                confirmLabel={group.builtIn ? t("settings.confirmRemoveProviderAccess") : t("settings.confirmDeleteProvider")}
-                cancelLabel={t("common.cancel")}
-                disabled={busy}
-                danger={!group.builtIn}
-                onConfirm={() => onDelete(editableProvider)}
-              />
-            )
+            <ProviderAccessMoreMenu
+              busy={busy}
+              removeDisabled={isDefault && !group.builtIn}
+              builtIn={group.builtIn}
+              onRemove={() => onDelete(group.providers)}
+            />
           )}
         </div>
       </div>
+      {group.description && <div className="provider-access-card__desc">{group.description}</div>}
 
-      <div className="provider-access-meta">
-        <span>{group.kind}</span>
-        <span>{group.baseUrl}</span>
-        <span>{group.apiKeyEnv || t("common.none")}</span>
-        {group.keySource && <span title={group.keySourcePath || undefined}>{t("settings.keySource", { source: group.keySource })}</span>}
-      </div>
-
-      <div className="provider-card-block">
-        <div className="provider-card-block__label">{t(group.configured ? "settings.enabledModels" : "settings.modelList")}</div>
-        <div className="provider-model-chips" aria-label={t(group.configured ? "settings.enabledModels" : "settings.modelList")}>
-          {visibleModels.length > 0 ? visibleModels.map((model) => (
-            <span className="provider-model-chip" key={model}>
-              {model}
-            </span>
-          )) : <span className="provider-model-chip provider-model-chip--empty">{t("settings.noModelsConfigured")}</span>}
-          {hiddenModelCount > 0 && (
-            <span className="provider-model-chip provider-model-chip--more">
-              {t("settings.moreModels", { n: hiddenModelCount })}
-            </span>
-          )}
+      {upgradeProvider && (
+        <div className="provider-protocol-upgrade">
+          <div className="provider-protocol-upgrade__copy">
+            <div className="provider-protocol-upgrade__title">
+              {t("settings.providerProtocol")}: OpenAI Chat Completions
+            </div>
+            <div className="provider-protocol-upgrade__desc">{t("settings.addProvider.official.deepseekDesc")}</div>
+          </div>
+          <div className="provider-protocol-upgrade__actions">
+            <InlineConfirmButton
+              label={<>{t("settings.upgradeRecommendedProtocol")}<ArrowRight size={13} aria-hidden="true" /></>}
+              confirmLabel={t("common.confirm")}
+              cancelLabel={t("common.cancel")}
+              disabled={busy}
+              primary
+              onConfirm={() => onUpgradeRecommended(canonicalOfficialProviderName(upgradeProvider.name))}
+            />
+          </div>
         </div>
-        {!group.configured && group.requiresKey && (
-          <div className="provider-card-status provider-card-status--warn">
-            {t("settings.modelsRequireKey")}
-          </div>
-        )}
-        {fetchResult && (
-          <div className={`provider-card-status provider-card-status--${fetchResult.kind}`}>
-            {fetchResult.text}
-          </div>
-        )}
-      </div>
+      )}
+
+      {!supportsServerWebSearch && (
+        <ProviderModelSummary
+          configured={group.configured}
+          models={visibleModels}
+          hiddenModelCount={hiddenModelCount}
+        />
+      )}
+
+      {!group.configured && group.requiresKey && (
+        <div className="provider-card-status provider-card-status--warn">
+          {t("settings.modelsRequireKey")}
+        </div>
+      )}
+      {fetchResult && (
+        <div className={`provider-card-status provider-card-status--${fetchResult.kind}`}>
+          {fetchResult.text}
+        </div>
+      )}
 
       {modelDraft && (
         <ProviderModelDraftPicker
@@ -3947,6 +5483,21 @@ function ProviderAccessCard({
         />
       )}
 
+      {editableProvider && (
+        <ProviderServiceCapabilities
+          supported={supportsServerWebSearch}
+          configured={group.configured}
+          models={visibleModels}
+          hiddenModelCount={hiddenModelCount}
+          showModelSummary
+          enabled={webSearchEnabled}
+          disabled={busy}
+          onChange={onToggleWebSearch}
+        />
+      )}
+
+      <ProviderTechnicalDetails group={group} />
+
       {group.providers.length > 1 && (
         <div className="provider-profiles">
           {group.providers.map((p) => {
@@ -3956,7 +5507,14 @@ function ProviderAccessCard({
                 <span>{p.name}</span>
                 <span>{p.models.join(", ") || t("common.none")}</span>
                 <button
-                  className="btn btn--small"
+                  className="btn btn--small provider-profile-row__refresh"
+                  disabled={busy || fetching || !p.baseUrl || !providerIsConfigured(p)}
+                  onClick={() => onRefresh(p)}
+                >
+                  {fetching ? t("settings.fetchingModels") : t("settings.fetchModels")}
+                </button>
+                <button
+                  className="btn btn--small provider-profile-row__configure"
                   disabled={busy}
                   aria-expanded={profileExpanded}
                   onClick={() => profileExpanded ? onCancelEdit() : onEdit(p.name)}
@@ -3971,6 +5529,7 @@ function ProviderAccessCard({
 
       {editingProvider && (
         <ProviderEditor
+          key={editingProvider.name}
           initial={editingProvider}
           kinds={kinds}
           busy={busy}
@@ -3981,6 +5540,146 @@ function ProviderAccessCard({
         />
       )}
     </article>
+  );
+}
+
+function ProviderModelSummary({
+  configured,
+  models,
+  hiddenModelCount,
+  compact = false,
+}: {
+  configured: boolean;
+  models: string[];
+  hiddenModelCount: number;
+  compact?: boolean;
+}) {
+  const t = useT();
+  const label = t(configured ? "settings.enabledModels" : "settings.modelList");
+  return (
+    <div className={`provider-card-block${compact ? " provider-card-block--inline" : ""}`}>
+      <div className="provider-card-block__label">{label}</div>
+      <div className="provider-model-chips" aria-label={label}>
+        {models.length > 0 ? models.map((model) => (
+          <span className="provider-model-chip" key={model}>
+            {model}
+          </span>
+        )) : <span className="provider-model-chip provider-model-chip--empty">{t("settings.noModelsConfigured")}</span>}
+        {hiddenModelCount > 0 && (
+          <span className="provider-model-chip provider-model-chip--more">
+            {t("settings.moreModels", { n: hiddenModelCount })}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ProviderTechnicalDetails({ group }: { group: ProviderAccessGroup }) {
+  const t = useT();
+  const imageInputUnsupported = group.providers.length > 0 && group.providers.every((provider) => providerVisionCapabilityForView(provider) === "unsupported");
+  return (
+    <details className="provider-technical-details">
+      <summary>{t("settings.providerAccess")}</summary>
+      <dl>
+        {group.providers.length === 1 ? (
+          <>
+            <div><dt>{t("settings.providerProtocol")}</dt><dd>{providerProtocolDisplayName(group.kind)}</dd></div>
+            <div><dt>{t("settings.providerBaseUrlLabel")}</dt><dd>{group.baseUrl || t("common.none")}</dd></div>
+          </>
+        ) : group.providers.map((provider) => (
+          <div key={provider.name}><dt>{provider.name}</dt><dd>{providerProtocolDisplayName(provider.kind)} · {provider.baseUrl || t("common.none")}</dd></div>
+        ))}
+        <div>
+          <dt>{t("settings.providerApiKeyEnv")}</dt>
+          <dd>{group.apiKeyEnv || t("common.none")}</dd>
+        </div>
+        {imageInputUnsupported && (
+          <div>
+            <dt>{t("settings.visionModel")}</dt>
+            <dd>{t("settings.imageInputUnsupported")}</dd>
+          </div>
+        )}
+        {group.keySource && (
+          <div>
+            <dt>{t("settings.providerKey")}</dt>
+            <dd title={group.keySourcePath || undefined}>{group.keySource}</dd>
+          </div>
+        )}
+      </dl>
+    </details>
+  );
+}
+
+function providerProtocolDisplayName(kind: string): string {
+  switch (kind.trim().toLowerCase()) {
+    case "anthropic":
+      return "Anthropic Messages";
+    case "responses":
+      return "Responses API";
+    case "openai":
+      return "OpenAI Chat Completions";
+    default:
+      return kind;
+  }
+}
+
+function ProviderAccessMoreMenu({
+  busy,
+  removeDisabled,
+  builtIn,
+  onRemove,
+}: {
+  busy: boolean;
+  removeDisabled: boolean;
+  builtIn: boolean;
+  onRemove: () => void | Promise<void>;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const disabled = busy || removeDisabled;
+  const tooltip = removeDisabled ? t("settings.cantDeleteDefault") : t("settings.themeGallery.moreActions");
+
+  return (
+    <div className="provider-access-more">
+      <Tooltip label={tooltip}>
+        <button
+          ref={triggerRef}
+          type="button"
+          className="btn btn--small provider-access-more__trigger"
+          aria-label={t("settings.themeGallery.moreActions")}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          disabled={disabled}
+          onClick={() => setOpen((current) => !current)}
+        >
+          <MoreHorizontal size={16} aria-hidden="true" />
+        </button>
+      </Tooltip>
+      <AnchoredPopover
+        open={open && !disabled}
+        anchorRef={triggerRef}
+        onClose={() => setOpen(false)}
+        className="provider-access-more__menu"
+        align="end"
+        placement="bottom"
+      >
+        <div className="provider-access-more__items" role="menu" aria-label={t("settings.themeGallery.moreActions")}>
+          <InlineConfirmButton
+            label={<><Trash2 size={14} aria-hidden="true" />{t("settings.removeProviderAccess")}</>}
+            confirmLabel={builtIn ? t("settings.confirmRemoveProviderAccess") : t("settings.confirmDeleteProvider")}
+            cancelLabel={t("common.cancel")}
+            danger={!builtIn}
+            buttonRole="menuitem"
+            onConfirm={async () => {
+              setOpen(false);
+              await onRemove();
+            }}
+          />
+        </div>
+      </AnchoredPopover>
+    </div>
   );
 }
 
@@ -4016,9 +5715,11 @@ function ProviderModelDraftPicker({
   const selected = new Set(draft.selected);
   const vision = new Set(draft.visionModels);
   const q = debouncedQuery.trim().toLowerCase();
-  const visibleCandidates = q
-    ? draft.candidates.filter((model) => model.toLowerCase().includes(q))
-    : draft.candidates;
+  const visibleCandidates = useMemo(
+    () => (q ? draft.candidates.filter((model) => model.toLowerCase().includes(q)) : draft.candidates),
+    [draft.candidates, q],
+  );
+  const deferredCandidates = useDeferredValue(visibleCandidates);
   const disabled = busy || fetching;
 
   return (
@@ -4045,10 +5746,10 @@ function ProviderModelDraftPicker({
         onChange={(e) => setQuery(e.target.value)}
       />
       <div className="provider-model-draft__list" role="list" aria-label={t("settings.modelCandidates")}>
-        {visibleCandidates.length > 0 ? visibleCandidates.map((model) => {
+        {deferredCandidates.length > 0 ? deferredCandidates.map((model) => {
           const enabled = selected.has(model);
           return (
-            <div className="provider-model-draft__option" key={model}>
+            <div className="provider-model-draft__option" key={model} role="listitem" style={{ contentVisibility: "auto", containIntrinsicSize: "auto 48px" }}>
               <label className="provider-model-draft__model">
                 <input
                   type="checkbox"
@@ -4058,15 +5759,23 @@ function ProviderModelDraftPicker({
                 />
                 <span>{model}</span>
               </label>
-              <label className="provider-model-draft__vision">
-                <input
-                  type="checkbox"
-                  checked={enabled && vision.has(model)}
-                  disabled={disabled || !enabled}
-                  onChange={() => onToggleVision(model)}
-                />
-                <span>{t("settings.visionModel")}</span>
-              </label>
+              {draft.visionCapability === "configurable" ? (
+                <label className="provider-model-draft__vision">
+                  <input
+                    type="checkbox"
+                    checked={enabled && vision.has(model)}
+                    disabled={disabled || !enabled}
+                    aria-label={t("settings.visionModelAria", { model })}
+                    onChange={() => onToggleVision(model)}
+                  />
+                  <span>{t("settings.visionModel")}</span>
+                </label>
+              ) : (
+                <div className="provider-model-draft__capabilities" aria-label={t("settings.modelCapabilitiesAria", { model })}>
+                  <span>{t("settings.textInput")}</span>
+                  <span>{t("settings.imageInputUnsupported")}</span>
+                </div>
+              )}
             </div>
           );
         }) : (
@@ -4085,6 +5794,62 @@ function ProviderModelDraftPicker({
   );
 }
 
+function ProviderServiceCapabilities({
+  supported,
+  configured,
+  models,
+  hiddenModelCount,
+  showModelSummary = false,
+  enabled,
+  disabled,
+  onChange,
+}: {
+  supported: boolean;
+  configured?: boolean;
+  models: string[];
+  hiddenModelCount?: number;
+  showModelSummary?: boolean;
+  enabled: boolean;
+  disabled: boolean;
+  onChange: (enabled: boolean) => void;
+}) {
+  const t = useT();
+  const capabilityID = useId();
+  if (!supported) return null;
+  return (
+    <section className="provider-capabilities" aria-labelledby={capabilityID}>
+      <div className="provider-card-block__label" id={capabilityID}>
+        {t("settings.providerCapabilities")}
+      </div>
+      {showModelSummary && (
+        <ProviderModelSummary
+          configured={Boolean(configured)}
+          models={models}
+          hiddenModelCount={hiddenModelCount ?? 0}
+          compact
+        />
+      )}
+      <label className="provider-capability-row">
+        <span className="provider-capability-row__copy">
+          <span className="provider-capability-row__title">
+            {t("settings.serverWebSearch")}
+            <span className="badge badge--project">{t("settings.recommended")}</span>
+          </span>
+          <span>{t("settings.serverWebSearchHint")}</span>
+        </span>
+        <input
+          className="provider-capability-row__switch"
+          type="checkbox"
+          role="switch"
+          checked={enabled}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.checked)}
+        />
+      </label>
+    </section>
+  );
+}
+
 function providerAccessGroups(providers: ProviderView[], t: ReturnType<typeof useT>): ProviderAccessGroup[] {
   const groups = new Map<string, ProviderAccessGroup>();
   for (const p of providers) {
@@ -4096,6 +5861,10 @@ function providerAccessGroups(providers: ProviderView[], t: ReturnType<typeof us
       existing.keySet = existing.keySet || p.keySet;
       existing.requiresKey = existing.requiresKey && providerRequiresKey(p);
       existing.configured = existing.configured || providerIsConfigured(p);
+      existing.recommendedUpgradeAvailable = existing.recommendedUpgradeAvailable || Boolean(p.recommendedUpgradeAvailable);
+      if (existing.recommendedUpgradeAvailable && existing.id === "builtin:deepseek") {
+        existing.description = "";
+      }
       if (!existing.keySource && p.keySource) existing.keySource = p.keySource;
       if (!existing.keySourcePath && p.keySourcePath) existing.keySourcePath = p.keySourcePath;
       existing.models = uniqueStrings([...existing.models, ...p.models]);
@@ -4116,6 +5885,7 @@ function providerAccessGroups(providers: ProviderView[], t: ReturnType<typeof us
       baseUrl: p.baseUrl,
       kind: p.kind,
       models: uniqueStrings(p.models),
+      recommendedUpgradeAvailable: Boolean(p.recommendedUpgradeAvailable),
     });
   }
   return Array.from(groups.values());
@@ -4127,6 +5897,68 @@ function providerBaseHost(baseUrl: string): string {
   } catch {
     return "";
   }
+}
+
+type ProviderVisionCapability = "configurable" | "unsupported";
+
+function isDeepSeekOfficialEndpoint(baseUrl: string): boolean {
+  return providerBaseHost(baseUrl).endsWith(".deepseek.com");
+}
+
+export function providerSupportsServerWebSearch(kind: string, baseUrl: string): boolean {
+  try {
+    const endpoint = new URL(baseUrl.trim());
+    if (
+      endpoint.protocol !== "https:" ||
+      endpoint.hostname.toLowerCase() !== "api.deepseek.com" ||
+      endpoint.port ||
+      endpoint.username ||
+      endpoint.password ||
+      endpoint.search ||
+      endpoint.hash
+    ) return false;
+    const path = endpoint.pathname.replace(/\/+$/, "");
+    switch (kind.trim().toLowerCase()) {
+      case "responses":
+        return path === "";
+      case "anthropic":
+        return path === "/anthropic";
+      default:
+        return false;
+    }
+  } catch {
+    return false;
+  }
+}
+
+export function providerSupportsServerWebSearchForView(
+  provider: Pick<ProviderView, "kind" | "baseUrl" | "serverWebSearchCapability">,
+): boolean {
+  if (typeof provider.serverWebSearchCapability === "boolean") {
+    return provider.serverWebSearchCapability;
+  }
+  return providerSupportsServerWebSearch(provider.kind, provider.baseUrl);
+}
+
+function providerVisionCapability(kind: string, baseUrl: string): ProviderVisionCapability {
+  if (!isDeepSeekOfficialEndpoint(baseUrl)) return "configurable";
+  switch (kind.trim().toLowerCase()) {
+    case "openai":
+    case "responses":
+    case "anthropic":
+      return "unsupported";
+    default:
+      return "configurable";
+  }
+}
+
+export function providerVisionCapabilityForView(
+  provider: Pick<ProviderView, "kind" | "baseUrl" | "visionCapability">,
+): ProviderVisionCapability {
+  if (provider.visionCapability === "unsupported" || provider.visionCapability === "configurable") {
+    return provider.visionCapability;
+  }
+  return providerVisionCapability(provider.kind, provider.baseUrl);
 }
 
 function canonicalOfficialProviderName(name: string): string {
@@ -4161,8 +5993,10 @@ function providerGroupLabel(p: ProviderView, t?: ReturnType<typeof useT>): strin
 
 function providerGroupDescription(p: ProviderView, t: ReturnType<typeof useT>): string {
   const id = providerGroupID(p);
-  if (id === "builtin:deepseek") return t("settings.providerDesc.deepseek");
-  return p.baseUrl;
+  if (id === "builtin:deepseek") {
+    return p.recommendedUpgradeAvailable ? "" : t("settings.providerDesc.deepseek");
+  }
+  return "";
 }
 
 function uniqueStrings(values: string[]): string[] {
@@ -4189,9 +6023,23 @@ function botAllowlistTextValues(allowlist: BotAllowlistView): Record<BotAllowlis
     qqUsers: allowlist.qqUsers.join("\n"),
     feishuUsers: allowlist.feishuUsers.join("\n"),
     weixinUsers: allowlist.weixinUsers.join("\n"),
+    qqApprovers: allowlist.qqApprovers.join("\n"),
+    feishuApprovers: allowlist.feishuApprovers.join("\n"),
+    weixinApprovers: allowlist.weixinApprovers.join("\n"),
+    qqAdmins: allowlist.qqAdmins.join("\n"),
+    feishuAdmins: allowlist.feishuAdmins.join("\n"),
+    weixinAdmins: allowlist.weixinAdmins.join("\n"),
     qqGroups: allowlist.qqGroups.join("\n"),
     feishuGroups: allowlist.feishuGroups.join("\n"),
     weixinGroups: allowlist.weixinGroups.join("\n"),
+  };
+}
+
+function botSelfUserTextValues(selfUserIds: BotSettingsView["selfUserIds"]): Record<BotSelfUserTextKey, string> {
+  return {
+    qq: selfUserIds.qq.join("\n"),
+    feishu: selfUserIds.feishu.join("\n"),
+    weixin: selfUserIds.weixin.join("\n"),
   };
 }
 
@@ -4202,24 +6050,136 @@ function parseBotListInput(value: string): string[] {
     .filter(Boolean));
 }
 
-// Memoized model chips for ProviderEditor — prevents re-render when typing
-// in name/key/baseUrl fields.
-const ModelChips = memo(function ModelChips({ modelNames }: { modelNames: string[] }) {
+export const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker({
+  candidates,
+  selectedModels,
+  visionModels,
+  visionCapability = "configurable",
+  contextWindows,
+  disabled,
+  onToggleModel,
+  onToggleVision,
+  onContextWindowChange,
+  onSelectAll,
+  onClear,
+}: {
+  candidates: string[];
+  selectedModels: string[];
+  visionModels: string[];
+  visionCapability?: ProviderVisionCapability;
+  contextWindows: Record<string, string>;
+  disabled: boolean;
+  onToggleModel: (model: string) => void;
+  onToggleVision: (model: string) => void;
+  onContextWindowChange: (model: string, value: string) => void;
+  onSelectAll: () => void;
+  onClear: () => void;
+}) {
   const t = useT();
-  if (modelNames.length === 0) return null;
+  const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 150);
+    return () => clearTimeout(timer);
+  }, [query]);
+  const q = debouncedQuery.trim().toLowerCase();
+  const visibleCandidates = q
+    ? candidates.filter((model) => model.toLowerCase().includes(q))
+    : candidates;
+  const deferredCandidates = useDeferredValue(visibleCandidates);
+  if (candidates.length === 0) return null;
+  const selected = new Set(selectedModels);
+  const vision = new Set(visionModels);
   return (
-    <div className="provider-model-chips">
-      {modelNames.slice(0, 8).map((model) => (
-        <span className="provider-model-chip" key={model}>{model}</span>
-      ))}
-      {modelNames.length > 8 && (
-        <span className="provider-model-chip provider-model-chip--more">{t("settings.moreModels", { n: modelNames.length - 8 })}</span>
+    <div className="provider-model-draft provider-model-draft--inline">
+      <div className="provider-model-draft__head">
+        <div>
+          <div className="provider-card-block__label">{t("settings.modelCandidates")}</div>
+          <span>{t("settings.modelCandidatesSelected", { n: selectedModels.length })}</span>
+        </div>
+        <div className="provider-model-draft__tools">
+          <button type="button" className="btn btn--small" disabled={disabled || selectedModels.length === candidates.length} onClick={onSelectAll}>
+            {t("settings.selectAllModels")}
+          </button>
+          <button type="button" className="btn btn--small" disabled={disabled || selectedModels.length === 0} onClick={onClear}>
+            {t("settings.clearModelSelection")}
+          </button>
+        </div>
+      </div>
+      <div className="provider-model-draft__context-guide">{t("settings.modelContextWindowGuide")}</div>
+      {candidates.length > 8 && (
+        <input
+          className="mem-input provider-model-draft__search"
+          placeholder={t("settings.modelCandidateSearch")}
+          value={query}
+          disabled={disabled}
+          onChange={(e) => setQuery(e.target.value)}
+        />
       )}
+      <div className="provider-model-draft__list" role="list" aria-label={t("settings.modelCandidates")}>
+        {deferredCandidates.length > 0 ? deferredCandidates.map((model) => {
+          const enabled = selected.has(model);
+          return (
+            <div className="provider-model-draft__option" key={model} role="listitem" style={{ contentVisibility: "auto", containIntrinsicSize: "auto 48px" }}>
+              <label className="provider-model-draft__model">
+                <input
+                  type="checkbox"
+                  checked={enabled}
+                  disabled={disabled}
+                  onChange={() => onToggleModel(model)}
+                />
+                <span>{model}</span>
+              </label>
+              {visionCapability === "configurable" ? (
+                <label className="provider-model-draft__vision">
+                  <input
+                    type="checkbox"
+                    checked={enabled && vision.has(model)}
+                    disabled={disabled || !enabled}
+                    aria-label={t("settings.visionModelAria", { model })}
+                    onChange={() => onToggleVision(model)}
+                  />
+                  <span>{t("settings.visionModel")}</span>
+                </label>
+              ) : (
+                <div className="provider-model-draft__capabilities" aria-label={t("settings.modelCapabilitiesAria", { model })}>
+                  <span>{t("settings.textInput")}</span>
+                  <span>{t("settings.imageInputUnsupported")}</span>
+                </div>
+              )}
+              <div className="provider-model-draft__context-field">
+                <label className="provider-model-draft__context">
+                  <span>{t("settings.modelContextWindow")}</span>
+                  <input
+                    className="mem-input provider-model-draft__context-input"
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    disabled={disabled || !enabled}
+                    placeholder={t("settings.modelContextWindowPlaceholder")}
+                    title={t("settings.modelContextWindowHint")}
+                    aria-label={t("settings.modelContextWindowAria", { model })}
+                    value={contextWindows[model] ?? ""}
+                    onChange={(event) => onContextWindowChange(model, event.target.value)}
+                  />
+                </label>
+                {enabled && providerModelContextWindowIsSmall(contextWindows[model]) && (
+                  <div className="provider-model-draft__context-warning" role="status">
+                    {t("settings.modelContextWindowSmallWarning")}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        }) : (
+          <div className="provider-model-draft__empty">{t("settings.noMatchingCandidateModels")}</div>
+        )}
+      </div>
     </div>
   );
 });
 
-function ProviderEditor({
+export function ProviderEditor({
   initial,
   kinds,
   busy,
@@ -4232,98 +6192,159 @@ function ProviderEditor({
   kinds: string[];
   busy: boolean;
   onCancel: () => void;
-  onSave: (p: ProviderView) => void;
+  onSave: (p: ProviderView, key?: string) => void | Promise<void>;
   onSaveKey?: (apiKeyEnv: string, value: string) => Promise<void>;
   onClearKey?: (apiKeyEnv: string) => Promise<void>;
 }) {
   const t = useT();
   const [name, setName] = useState(initial?.name ?? "");
-  const [kind, setKind] = useState(initial?.kind ?? kinds[0] ?? "openai");
-  const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? "");
+  const [kind, setKind] = useState(initial?.kind ?? "openai");
+  const [requestUrl, setRequestUrl] = useState(() => providerRequestURLFromConfig(
+    initial?.kind ?? "openai",
+    initial?.baseUrl ?? "",
+    initial?.requestUrl ?? "",
+    initial?.chatUrl ?? "",
+  ));
+  const providerUrlInputId = useId();
+  const providerUrlHelpId = useId();
   const [models, setModels] = useState((initial?.models ?? []).join(", "));
+  const [modelCandidates, setModelCandidates] = useState<string[]>(initial?.models ?? []);
   const [visionModels, setVisionModels] = useState((initial?.visionModels ?? []).join(", "));
   const [visionModelsConfigured, setVisionModelsConfigured] = useState(
     Boolean(initial?.visionModelsConfigured ?? ((initial?.visionModels ?? []).length > 0)),
   );
-  const [modelsUrl] = useState(initial?.modelsUrl ?? "");
+  const [modelsUrl, setModelsUrl] = useState(initial?.modelsUrl ?? "");
   const [apiKeyEnv, setApiKeyEnv] = useState(initial?.apiKeyEnv ?? "");
+  const [headersDraft, setHeadersDraft] = useState(formatProviderHeaders(initial?.headers));
+  const [extraBodyDraft, setExtraBodyDraft] = useState(formatProviderExtraBody(initial?.extraBody));
+  const [authHeader, setAuthHeader] = useState(Boolean(initial?.authHeader));
   const [keyDraft, setKeyDraft] = useState("");
   const [balanceUrl, setBalanceUrl] = useState(initial?.balanceUrl ?? "");
-  // Empty when unset so the placeholder (and its "0 = default" hint) reads instead
+  // Empty when unset so the placeholder (and its "0 = disabled" hint) reads instead
   // of a bare "0"; saved back as 0.
   const [ctx, setCtx] = useState(initial?.contextWindow ? String(initial.contextWindow) : "");
+  const [modelContextWindows, setModelContextWindows] = useState<Record<string, string>>(
+    () => providerModelContextWindowDrafts(initial?.modelOverrides),
+  );
   const [reasoningProtocol, setReasoningProtocol] = useState(normalizeReasoningProtocol(initial?.reasoningProtocol));
-  const [supportedEfforts, setSupportedEfforts] = useState<string[]>(initial?.supportedEfforts ?? []);
-  const [customEffortDraft, setCustomEffortDraft] = useState("");
-  const [defaultEffort, setDefaultEffort] = useState(initial?.defaultEffort ?? "");
+  const [thinking, setThinking] = useState(normalizeThinkingMode(initial?.thinking));
+  const [webSearch, setWebSearch] = useState(Boolean(initial?.webSearch));
+  const [supportedEfforts] = useState<string[]>(initial?.supportedEfforts ?? []);
+  const [defaultEffort] = useState(initial?.defaultEffort ?? "");
   const [fetchingModels, setFetchingModels] = useState(false);
   const [fetchStatus, setFetchStatus] = useState<string | null>(null);
-  const [fetchErr, setFetchErr] = useState<string | null>(null);
+  const [fetchFallback, setFetchFallback] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const builtIn = initial?.builtIn ?? false;
   const isNewCustomProvider = !initial;
-
-  // Offer the kinds the kernel actually registered; if the stored kind is a
-  // legacy/unknown one, keep it as an option so editing doesn't silently change it.
-  const kindOptions = kind && !kinds.includes(kind) ? [kind, ...kinds] : kinds;
-
-  // Split supportedEfforts into the 5 canonical presets (for checkbox UI) and
-  // any user-added custom names (rendered as removable chips). The preset order
-  // is fixed; custom names keep insertion order.
-  const presetEfforts = supportedEfforts.filter((e) => EFFORT_PRESETS.includes(e));
-  const customEfforts = supportedEfforts.filter((e) => !EFFORT_PRESETS.includes(e));
-
-  const togglePreset = (level: string) => {
-    const has = presetEfforts.includes(level);
-    const nextPresets = has ? presetEfforts.filter((e) => e !== level) : [...presetEfforts, level];
-    setSupportedEfforts([...nextPresets, ...customEfforts]);
-    // If the removed preset was the default, fall back to "auto" (empty string).
-    if (has && defaultEffort === level) setDefaultEffort("");
-  };
-
-  const addCustomEffort = () => {
-    const v = customEffortDraft.trim().toLowerCase();
-    if (!v || supportedEfforts.includes(v)) {
-      setCustomEffortDraft("");
-      return;
+  const providerKindChoices = useMemo(() => {
+    const choices = uniqueStrings([kind, ...kinds].map((candidate) => candidate.trim()).filter(Boolean));
+    return choices.length > 0 ? choices : ["openai"];
+  }, [kind, kinds]);
+  const effectiveKind = providerEditorEffectiveKind(isNewCustomProvider, kind, providerKindChoices);
+  const effectiveRequestUrl = requestUrl.trim();
+  const effectiveBaseUrl = providerBaseURLForSave(initial, effectiveKind, effectiveRequestUrl);
+  const effectiveLegacyChatUrl = effectiveKind.toLowerCase() === "openai" ? effectiveRequestUrl : initial?.chatUrl ?? "";
+  const effectiveModelsUrl = modelsUrl.trim();
+  const initialEffectiveBaseUrl = initial ? trimmedBaseURL(initial.baseUrl) : "";
+  const retainedVisionCapability = initial &&
+    effectiveKind.trim().toLowerCase() === initial.kind.trim().toLowerCase() &&
+    trimmedBaseURL(effectiveBaseUrl) === initialEffectiveBaseUrl
+    ? initial.visionCapability
+    : undefined;
+  const effectiveVisionCapability = providerVisionCapabilityForView({
+    kind: effectiveKind,
+    baseUrl: effectiveBaseUrl,
+    visionCapability: retainedVisionCapability,
+  });
+  const retainedServerWebSearchCapability = initial &&
+    effectiveKind.trim().toLowerCase() === initial.kind.trim().toLowerCase() &&
+    trimmedBaseURL(effectiveBaseUrl) === initialEffectiveBaseUrl
+    ? initial.serverWebSearchCapability
+    : undefined;
+  const effectiveServerWebSearchCapability = retainedServerWebSearchCapability ??
+    providerSupportsServerWebSearch(effectiveKind, effectiveBaseUrl);
+  const effectiveHeaders = parseProviderHeaders(headersDraft);
+  const extraBodyParse = useMemo(() => {
+    try {
+      return { value: parseProviderExtraBody(extraBodyDraft, t), error: "" };
+    } catch (e) {
+      return { value: {}, error: providerExtraBodyParseError(e, t) };
     }
-    setSupportedEfforts([...presetEfforts, ...customEfforts, v]);
-    setCustomEffortDraft("");
-  };
+  }, [extraBodyDraft, t]);
+  const effectiveExtraBody = extraBodyParse.value;
+  const extraBodyInvalid = Boolean(extraBodyDraft.trim() && extraBodyParse.error);
+  const modelNames = useMemo(
+    () => parseProviderListInput(models),
+    [models],
+  );
+  const modelCandidateNames = useMemo(
+    () => uniqueStrings([...modelCandidates, ...modelNames]),
+    [modelCandidates, modelNames],
+  );
+  const visionModelNames = useMemo(
+    () => parseProviderListInput(visionModels).filter((model) => modelNames.includes(model)),
+    [modelNames, visionModels],
+  );
 
-  const removeCustomEffort = (level: string) => {
-    setSupportedEfforts(supportedEfforts.filter((e) => e !== level));
-    if (defaultEffort === level) setDefaultEffort("");
-  };
+  // Empty supportedEfforts means "use protocol defaults". The simplified
+  // provider flow no longer edits these levels directly, but it preserves
+  // existing advanced TOML unless the user explicitly disables reasoning.
+  const cleanedSupportedEfforts = reasoningProtocol !== "none"
+    ? uniqueStrings(
+        supportedEfforts
+          .map((level) => level.toLowerCase().trim())
+          .filter((level) => level && level !== "auto")
+      )
+    : [];
+  const normalizedDefaultEffort = defaultEffort.toLowerCase().trim();
+  const cleanDefaultEffort = cleanedSupportedEfforts.includes(normalizedDefaultEffort) ? normalizedDefaultEffort : "";
 
   const fetchModels = async () => {
+    if (extraBodyInvalid) return;
     setFetchingModels(true);
     setFetchStatus(null);
-    setFetchErr(null);
+    setFetchFallback(null);
     try {
       const effectiveApiKeyEnv = providerApiKeyEnvForSave(name, apiKeyEnv, keyDraft);
       if (!apiKeyEnv.trim()) setApiKeyEnv(effectiveApiKeyEnv);
-      if (keyDraft.trim()) await app.SetProviderKey(effectiveApiKeyEnv, keyDraft.trim());
-      const fetched = await app.FetchProviderModels({
+      if (keyDraft.trim()) {
+        await app.SaveProviderKey(effectiveApiKeyEnv, keyDraft.trim());
+        invalidateProviderCacheByAPIKeyEnv(effectiveApiKeyEnv);
+      }
+      const fetched = await cachedFetchProviderModels((provider) => app.FetchProviderModels(provider), {
         name: name.trim() || t("settings.newProviderDraftName"),
         builtIn: initial?.builtIn ?? false,
         added: initial?.added ?? true,
-        kind: kind.trim() || kinds[0] || "openai",
-        baseUrl: baseUrl.trim(),
-        modelsUrl,
+        kind: effectiveKind,
+        baseUrl: effectiveBaseUrl,
+        chatUrl: effectiveLegacyChatUrl,
+        requestUrl: effectiveRequestUrl,
+        modelsUrl: effectiveModelsUrl,
         models: [],
         visionModels: [],
         visionModelsConfigured: false,
         default: "",
         apiKeyEnv: effectiveApiKeyEnv,
+        headers: effectiveHeaders,
+        extraBody: effectiveExtraBody,
+        authHeader,
         keySet: Boolean(keyDraft.trim()) || (initial?.keySet ?? false),
         balanceUrl: balanceUrl.trim(),
         contextWindow: Number(ctx) || 0,
         reasoningProtocol,
-        supportedEfforts,
-        defaultEffort,
-      });
-      if (fetched.length === 0) throw new Error(t("settings.fetchModelsEmpty"));
+        thinking,
+        webSearch: effectiveServerWebSearchCapability && webSearch,
+        serverWebSearchCapability: effectiveServerWebSearchCapability,
+        supportedEfforts: cleanedSupportedEfforts,
+        defaultEffort: cleanDefaultEffort,
+        modelOverrides: mergeProviderModelContextWindows(initial?.modelOverrides, parseProviderListInput(models), modelContextWindows),
+      }, true);
+      if (fetched.length === 0) {
+        setFetchFallback(t("settings.fetchModelsManualFallbackEmpty"));
+        return;
+      }
+      setModelCandidates(fetched);
       setModels(fetched.join(", "));
       setVisionModels((current) => {
         const existing = parseProviderListInput(current).filter((model) => fetched.includes(model));
@@ -4331,41 +6352,58 @@ function ProviderEditor({
       });
       setVisionModelsConfigured(true);
       if (keyDraft.trim()) setKeyDraft("");
-      setDefaultEffort((v) => v);
       setFetchStatus(t("settings.fetchModelsSuccess", { n: fetched.length }));
     } catch (e) {
-      setFetchErr(String((e as Error)?.message ?? e));
+      setFetchFallback(providerModelFetchFallbackMessage(e, t));
     } finally {
       setFetchingModels(false);
     }
   };
 
   const save = async () => {
+    if (extraBodyInvalid) return;
+    setFetchStatus(null);
+    setFetchFallback(null);
     const ms = parseProviderListInput(models);
-    const vms = parseProviderListInput(visionModels).filter((model) => ms.includes(model));
+    const vms = effectiveVisionCapability === "unsupported"
+      ? []
+      : parseProviderListInput(visionModels).filter((model) => ms.includes(model));
     const effectiveApiKeyEnv = providerApiKeyEnvForSave(name, apiKeyEnv, keyDraft);
-    if (keyDraft.trim()) await app.SetProviderKey(effectiveApiKeyEnv, keyDraft.trim());
-    onSave({
+    const provider: ProviderView = {
       name: name.trim(),
       builtIn: initial?.builtIn ?? false,
       added: initial?.added ?? true,
-      kind: kind.trim() || kinds[0] || "openai",
-      baseUrl: baseUrl.trim(),
+      kind: effectiveKind,
+      baseUrl: effectiveBaseUrl,
+      chatUrl: effectiveLegacyChatUrl,
+      requestUrl: effectiveRequestUrl,
       models: ms,
       visionModels: vms,
       visionModelsConfigured: visionModelsConfigured || vms.length > 0,
       default: ms[0] ?? "",
       apiKeyEnv: effectiveApiKeyEnv,
-      modelsUrl,
+      headers: effectiveHeaders,
+      extraBody: effectiveExtraBody,
+      authHeader,
+      modelsUrl: effectiveModelsUrl,
       keySet: Boolean(keyDraft.trim()) || (initial?.keySet ?? false),
       balanceUrl: balanceUrl.trim(),
       contextWindow: Number(ctx) || 0,
       reasoningProtocol,
-      supportedEfforts,
+      thinking,
+      webSearch: effectiveServerWebSearchCapability && webSearch,
+      serverWebSearchCapability: effectiveServerWebSearchCapability,
+      supportedEfforts: cleanedSupportedEfforts,
       // Clear the stored default if no levels are selected; the backend's
       // NormalizeEffort would otherwise silently ignore an unsupported value.
-      defaultEffort: supportedEfforts.length > 0 ? defaultEffort : "",
-    });
+      defaultEffort: cleanedSupportedEfforts.length > 0 ? cleanDefaultEffort : "",
+      modelOverrides: mergeProviderModelContextWindows(initial?.modelOverrides, ms, modelContextWindows),
+    };
+    try {
+      await onSave(provider, keyDraft.trim() || undefined);
+    } catch (e) {
+      setFetchFallback(String((e as Error)?.message ?? e));
+    }
   };
 
   if (builtIn) {
@@ -4402,30 +6440,68 @@ function ProviderEditor({
     );
   }
 
-  const modelNames = useMemo(
-    () => models.split(",").map((m) => m.trim()).filter(Boolean),
-    [models],
-  );
-  const canFetch = Boolean(name.trim() && baseUrl.trim());
+  const canFetch = Boolean(name.trim() && effectiveBaseUrl);
 
-  const protocolField = initial ? (
-    <select className="mem-select" value={kind} onChange={(e) => setKind(e.target.value)}>
-      {kindOptions.map((k) => (
-        <option key={k} value={k}>
-          {k === "openai" ? t("settings.providerProtocolOpenAI") : k}
-        </option>
-      ))}
-    </select>
-  ) : (
-    <div className="provider-readonly-field provider-readonly-field--stacked" aria-readonly="true">
-      <strong>{t("settings.providerProtocolOpenAI")}</strong>
-      <span>{t("settings.providerProtocolOpenAIHint")}</span>
-    </div>
-  );
+  const setModelsFromList = (nextModels: string[]) => {
+    setModels(uniqueStrings(nextModels).join(", "));
+  };
+
+  const updateManualModels = (value: string) => {
+    setModels(value);
+    const typedModels = parseProviderListInput(value);
+    if (typedModels.length > 0) {
+      setModelCandidates((current) => uniqueStrings([...current, ...typedModels]));
+    }
+  };
+
+  const toggleEditorModel = (model: string) => {
+    const selected = new Set(modelNames);
+    if (selected.has(model)) {
+      selected.delete(model);
+      setVisionModels(visionModelNames.filter((candidate) => candidate !== model).join(", "));
+    } else {
+      selected.add(model);
+    }
+    setModelsFromList(modelCandidateNames.filter((candidate) => selected.has(candidate)));
+    setVisionModelsConfigured(true);
+  };
+
+  const toggleEditorVisionModel = (model: string) => {
+    if (!modelNames.includes(model)) return;
+    const vision = new Set(visionModelNames);
+    if (vision.has(model)) vision.delete(model);
+    else vision.add(model);
+    setVisionModels(modelCandidateNames.filter((candidate) => vision.has(candidate)).join(", "));
+    setVisionModelsConfigured(true);
+  };
+
+  const updateEditorModelContextWindow = (model: string, value: string) => {
+    setModelContextWindows((current) => ({ ...current, [model]: value }));
+  };
+
+  const selectAllEditorModels = () => {
+    setModelsFromList(modelCandidateNames);
+    setVisionModels(visionModelNames.filter((model) => modelCandidateNames.includes(model)).join(", "));
+    setVisionModelsConfigured(true);
+  };
+
+  const clearEditorModels = () => {
+    setModels("");
+    setVisionModels("");
+    setVisionModelsConfigured(true);
+  };
 
   const advancedFields = (
     <details className="provider-editor-advanced" open={advancedOpen} onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}>
-      <summary>{t("settings.providerAdvancedSettings")}</summary>
+      <summary>
+        <span className="provider-editor-advanced__title">
+          <ChevronDown className="provider-editor-advanced__icon" size={16} aria-hidden="true" />
+          {t("settings.providerAdvancedSettings")}
+        </span>
+        <span className="provider-editor-advanced__hint">
+          {advancedOpen ? t("settings.providerAdvancedCollapseHint") : t("settings.providerAdvancedExpandHint")}
+        </span>
+      </summary>
       <div className="provider-editor-advanced__body">
         <label className="set-label">{t("settings.providerApiKeyEnv")}</label>
         <input
@@ -4435,23 +6511,43 @@ function ProviderEditor({
           onChange={(e) => setApiKeyEnv(e.target.value)}
         />
         <div className="mem-hint">{t("settings.providerApiKeyEnvHint")}</div>
-        <label className="set-label">{t("settings.providerBalanceUrl")}</label>
-        <input className="mem-input" placeholder={t("settings.balanceUrlPlaceholder")} value={balanceUrl} onChange={(e) => setBalanceUrl(e.target.value)} />
-        <div className="mem-hint">{t("settings.balanceUrlHint")}</div>
-        <label className="set-label">{t("settings.providerContextWindow")}</label>
-        <input className="mem-input" placeholder={t("settings.contextWindowPlaceholder")} value={ctx} onChange={(e) => setCtx(e.target.value)} inputMode="numeric" />
-        <div className="mem-hint">{t("settings.contextWindowHint")}</div>
-        <label className="set-label">{t("settings.visionModels")}</label>
+        <label className="set-label">{t("settings.providerModelsUrl")}</label>
         <input
           className="mem-input"
-          placeholder={t("settings.providerModels")}
-          value={visionModels}
-          onChange={(e) => {
-            setVisionModelsConfigured(true);
-            setVisionModels(e.target.value);
-          }}
+          placeholder={t("settings.providerModelsUrlPlaceholder")}
+          value={modelsUrl}
+          onChange={(e) => setModelsUrl(e.target.value)}
         />
-        <div className="mem-hint">{t("settings.visionModelsHint")}</div>
+        <div className="mem-hint">{t("settings.providerModelsUrlHint")}</div>
+        <label className="set-label">{t("settings.providerHeaders")}</label>
+        <textarea
+          className="mem-textarea provider-headers-textarea"
+          placeholder={t("settings.providerHeadersPlaceholder")}
+          value={headersDraft}
+          onChange={(e) => setHeadersDraft(e.target.value)}
+          rows={3}
+        />
+        <div className="mem-hint">{t("settings.providerHeadersHint")}</div>
+        <label className="set-label">{t("settings.providerExtraBody")}</label>
+        <textarea
+          className="mem-textarea provider-headers-textarea"
+          placeholder={t("settings.providerExtraBodyPlaceholder")}
+          value={extraBodyDraft}
+          onChange={(e) => setExtraBodyDraft(e.target.value)}
+          rows={4}
+        />
+        <div className={`mem-hint${extraBodyInvalid ? " mem-hint--error" : ""}`}>
+          {extraBodyInvalid ? extraBodyParse.error : t("settings.providerExtraBodyHint")}
+        </div>
+        <label className="set-check">
+          <input
+            type="checkbox"
+            checked={authHeader}
+            onChange={(e) => setAuthHeader(e.target.checked)}
+          />
+          {t("settings.providerAuthHeader")}
+        </label>
+        <div className="mem-hint">{t("settings.providerAuthHeaderHint")}</div>
         <label className="set-label">{t("settings.reasoningProtocol")}</label>
         <select className="mem-select" value={reasoningProtocol} onChange={(e) => setReasoningProtocol(e.target.value)}>
           {REASONING_PROTOCOLS.map((protocol) => (
@@ -4461,81 +6557,34 @@ function ProviderEditor({
           ))}
         </select>
         <div className="mem-hint">{t("settings.reasoningProtocolHint")}</div>
-        <label className="set-label">{t("settings.supportedEfforts")}</label>
-        {EFFORT_PRESETS.map((level) => (
-          <label key={level} className="set-check">
-            <input
-              type="checkbox"
-              checked={presetEfforts.includes(level)}
-              onChange={() => togglePreset(level)}
-            />
-            {level}
-          </label>
-        ))}
-        <div className="set-row">
-          <input
-            className="mem-input set-grow"
-            placeholder={t("settings.supportedEffortsCustomPlaceholder")}
-            value={customEffortDraft}
-            onChange={(e) => setCustomEffortDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                addCustomEffort();
-              }
-            }}
-          />
-          <button
-            type="button"
-            className="btn btn--small"
-            disabled={
-              !customEffortDraft.trim() || supportedEfforts.includes(customEffortDraft.trim().toLowerCase())
-            }
-            onClick={addCustomEffort}
-          >
-            {t("common.add")}
-          </button>
-        </div>
-        {customEfforts.length > 0 && (
-          <div className="set-rules__chips">
-            {customEfforts.map((level) => (
-              <span className="set-rule" key={level}>
-                {level}
-                <Tooltip label={t("common.delete")}>
-                  <button
-                    type="button"
-                    className="set-rule__x"
-                    disabled={busy}
-                    onClick={() => removeCustomEffort(level)}
-                  >
-                    ×
-                  </button>
-                </Tooltip>
-              </span>
-            ))}
-          </div>
-        )}
-        <div className="mem-hint">{t("settings.supportedEffortsHint")}</div>
-        <label className="set-label">{t("settings.defaultEffort")}</label>
-        {supportedEfforts.length > 0 ? (
-          <select
-            className="mem-select"
-            value={defaultEffort}
-            onChange={(e) => setDefaultEffort(e.target.value)}
-          >
-            <option value="">{t("settings.defaultEffortAuto")}</option>
-            {supportedEfforts.map((level) => (
-              <option key={level} value={level}>
-                {level}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <select className="mem-select" value="" disabled>
-            <option value="">{t("settings.defaultEffortAuto")}</option>
-          </select>
-        )}
-        <div className="mem-hint">{t("settings.defaultEffortHint")}</div>
+        <label className="set-label">{t("settings.thinkingMode")}</label>
+        <select className="mem-select" value={thinking} onChange={(e) => setThinking(normalizeThinkingMode(e.target.value))}>
+          {THINKING_MODES.map((mode) => (
+            <option key={mode || "auto"} value={mode}>
+              {thinkingModeLabel(mode, t)}
+            </option>
+          ))}
+        </select>
+        <div className="mem-hint">{t("settings.thinkingModeHint")}</div>
+        <label className="set-label">{t("settings.providerBalanceUrl")}</label>
+        <input
+          className="mem-input"
+          placeholder={t("settings.balanceUrlPlaceholder")}
+          value={balanceUrl}
+          onChange={(e) => setBalanceUrl(e.target.value)}
+        />
+        <div className="mem-hint">{t("settings.balanceUrlHint")}</div>
+        <label className="set-label">{t("settings.providerContextWindow")}</label>
+        <input
+          className="mem-input"
+          inputMode="numeric"
+          min={0}
+          placeholder={t("settings.contextWindowPlaceholder")}
+          type="number"
+          value={ctx}
+          onChange={(e) => setCtx(e.target.value)}
+        />
+        <div className="mem-hint">{t("settings.contextWindowHint")}</div>
       </div>
     </details>
   );
@@ -4545,9 +6594,28 @@ function ProviderEditor({
       <label className="set-label">{t("settings.customProviderName")}</label>
       <input className="mem-input" placeholder={t("settings.customProviderNamePlaceholder")} value={name} onChange={(e) => setName(e.target.value)} disabled={!!initial} />
       <label className="set-label">{t("settings.providerProtocol")}</label>
-      {protocolField}
-      <label className="set-label">{t("settings.providerBaseUrlLabel")}</label>
-      <input className="mem-input" placeholder={t("settings.providerBaseUrl")} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+      <select className="mem-select" value={kind} onChange={(e) => setKind(e.target.value)}>
+        {providerKindChoices.map((choice) => (
+          <option key={choice} value={choice}>
+            {providerKindLabel(choice, t)}
+          </option>
+        ))}
+      </select>
+      <div className="mem-hint">{providerKindHint(effectiveKind, t)}</div>
+      <label className="set-label" htmlFor={providerUrlInputId}>
+        {t("settings.providerBaseUrlLabel")}
+      </label>
+      <input
+        id={providerUrlInputId}
+        className="mem-input provider-url-input"
+        aria-describedby={providerUrlHelpId}
+        placeholder={t("settings.providerChatUrlPlaceholder")}
+        value={requestUrl}
+        onChange={(e) => setRequestUrl(e.target.value)}
+      />
+      <div id={providerUrlHelpId} className="mem-hint">
+        {t("settings.providerRequestUrlHint")}
+      </div>
       {!initial && (
         <>
           <label className="set-label">{t("settings.providerKey")}</label>
@@ -4580,7 +6648,7 @@ function ProviderEditor({
         <button
           type="button"
           className="btn btn--small"
-          disabled={busy || fetchingModels || !canFetch}
+          disabled={busy || fetchingModels || !canFetch || extraBodyInvalid}
           onClick={() => void fetchModels()}
         >
           {fetchingModels ? t("settings.fetchingModels") : t("settings.testFetchModels")}
@@ -4588,22 +6656,36 @@ function ProviderEditor({
         <span>{t("settings.testFetchModelsHint")}</span>
       </div>
       {fetchStatus && <div className="provider-fetch-status provider-fetch-status--ok">{fetchStatus}</div>}
-      {fetchErr && <div className="provider-fetch-status provider-fetch-status--error">{fetchErr}</div>}
-      {modelNames.length > 0 && (
-        <div className="provider-card-block">
-          <div className="provider-card-block__label">{t("settings.availableModels")}</div>
-          <ModelChips modelNames={modelNames} />
-        </div>
-      )}
+      {fetchFallback && <div className="provider-fetch-status provider-fetch-status--warn">{fetchFallback}</div>}
       <label className="set-label">{t("settings.manualModels")}</label>
-      <input className="mem-input" placeholder={t("settings.providerModels")} value={models} onChange={(e) => setModels(e.target.value)} />
+      <input className="mem-input" placeholder={t("settings.providerModels")} value={models} onChange={(e) => updateManualModels(e.target.value)} />
       <div className="mem-hint">{t("settings.manualModelsHint")}</div>
+      <ProviderEditorModelPicker
+        candidates={modelCandidateNames}
+        selectedModels={modelNames}
+        visionModels={visionModelNames}
+        visionCapability={effectiveVisionCapability}
+        contextWindows={modelContextWindows}
+        disabled={busy || fetchingModels}
+        onToggleModel={toggleEditorModel}
+        onToggleVision={toggleEditorVisionModel}
+        onContextWindowChange={updateEditorModelContextWindow}
+        onSelectAll={selectAllEditorModels}
+        onClear={clearEditorModels}
+      />
+      <ProviderServiceCapabilities
+        supported={effectiveServerWebSearchCapability}
+        models={modelNames}
+        enabled={webSearch}
+        disabled={busy || fetchingModels}
+        onChange={setWebSearch}
+      />
       {advancedFields}
       <div className="prov-card__actions">
         <button className="btn btn--small" onClick={onCancel} disabled={busy}>
           {t("common.cancel")}
         </button>
-        <button className="btn btn--primary btn--small" onClick={() => void save()} disabled={busy || !name.trim() || !baseUrl.trim() || !models.trim()}>
+        <button className="btn btn--primary btn--small" onClick={() => void save()} disabled={busy || !name.trim() || !effectiveBaseUrl || !models.trim() || extraBodyInvalid}>
           {t("common.save")}
         </button>
       </div>
@@ -4674,8 +6756,8 @@ function PermissionsSection({ s, busy, apply }: SectionProps) {
             list={list}
             rules={s.permissions[list]}
             busy={busy}
-            onAdd={(rule) => apply(() => app.AddPermissionRule(list, rule))}
-            onRemove={(rule) => apply(() => app.RemovePermissionRule(list, rule))}
+            onAdd={async (rule) => { await apply(() => app.AddPermissionRule(list, rule)); }}
+            onRemove={async (rule) => { await apply(() => app.RemovePermissionRule(list, rule)); }}
           />
         ))}
       </div>
@@ -4716,7 +6798,7 @@ function RuleList({
         {rules.length === 0 && <span className="mem-empty">{t("common.none")}</span>}
         {rules.map((r) => (
           <span className="set-rule" key={r}>
-            {r}
+            <span className="set-rule__text" title={r}>{r}</span>
             <Tooltip label={t("common.delete")}>
               <button className="set-rule__x" disabled={busy} onClick={() => void onRemove(r)}>
                 ✕
@@ -4812,7 +6894,7 @@ function HooksSection({ onChanged }: { onChanged: (settings?: SettingsView | nul
 
   const parseHooksEditorJSON = (raw = jsonText): { hooks: HookConfigView[]; text: string } | null => {
     try {
-      const hooks = parseHooksJSON(raw, view?.events ?? []);
+      const hooks = parseHooksJSON(raw, view?.events ?? [], t);
       const text = formatHooksJSON(hooks, view?.events ?? []);
       setJsonText(text);
       setJsonError(null);
@@ -4876,31 +6958,12 @@ function HooksSection({ onChanged }: { onChanged: (settings?: SettingsView | nul
       setBusy(false);
     }
   };
-  const trustProject = async () => {
-    const projectRoot = view?.projectRoot?.trim() ?? "";
-    if (!projectRoot) {
-      setErr(t("settings.hooksProjectRootUnavailable"));
-      return;
-    }
-    setBusy(true);
-    setErr(null);
-    try {
-      await app.TrustProjectHooksForRoot(projectRoot);
-      await load("project");
-      onChanged();
-    } catch (e) {
-      setErr(String((e as Error)?.message ?? e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <>
       {err && <div className="banner banner--error">{err}</div>}
       <SettingsSection title={t("settings.hooksScopeSection")} description={t("settings.hooksScopeHint")}>
         <SettingsField label={t("settings.hooksScopeField")}>
-          <select className="mem-select set-grow" value={scope} disabled={busy} onChange={(e) => setScope(e.target.value === "project" ? "project" : "global")}>
+          <select name="hooks-scope" className="mem-select set-grow" value={scope} disabled={busy} onChange={(e) => setScope(e.target.value === "project" ? "project" : "global")}>
             <option value="global">{t("settings.hooksGlobal")}</option>
             <option value="project">{t("settings.hooksProject")}</option>
           </select>
@@ -4916,19 +6979,6 @@ function HooksSection({ onChanged }: { onChanged: (settings?: SettingsView | nul
             {pathMessage && <div className="hooks-path-display__message">{pathMessage}</div>}
           </div>
         </SettingsField>
-        {scope === "project" && (
-          <SettingsField label={t("settings.hooksTrust")} hint={t("settings.hooksTrustHint")}>
-            <div className="hooks-trust-stack">
-              <div className="hooks-trust-row">
-                <span className={`set-rule${view?.trusted ? "" : " set-rule--warn"}`}>{view?.trusted ? t("settings.hooksTrusted") : t("settings.hooksUntrusted")}</span>
-                <button className="btn btn--small" disabled={busy || view?.trusted || !view?.projectRoot} onClick={() => void trustProject()}>{t("settings.hooksTrustProject")}</button>
-              </div>
-              <code className={`hooks-trust-root${view?.projectRoot ? "" : " hooks-trust-root--empty"}`} title={view?.projectRoot || t("settings.hooksProjectRootUnavailable")}>
-                {view?.projectRoot || t("settings.hooksProjectRootUnavailable")}
-              </code>
-            </div>
-          </SettingsField>
-        )}
       </SettingsSection>
 
       <SettingsSection
@@ -4952,6 +7002,7 @@ function HooksSection({ onChanged }: { onChanged: (settings?: SettingsView | nul
               </div>
             </div>
             <textarea
+              name="hooks-json"
               className="mem-textarea hooks-json-panel__textarea"
               value={jsonText}
               disabled={busy}
@@ -5003,7 +7054,7 @@ function formatHooksJSON(hooks: HookConfigView[], eventOrder: string[]): string 
   return JSON.stringify({ hooks: ordered }, null, 2);
 }
 
-function parseHooksJSON(raw: string, validEvents: string[]): HookConfigView[] {
+function parseHooksJSON(raw: string, validEvents: string[], t: ReturnType<typeof useT>): HookConfigView[] {
   const trimmed = raw.trim();
   if (!trimmed) return [];
   let parsed: unknown;
@@ -5013,21 +7064,21 @@ function parseHooksJSON(raw: string, validEvents: string[]): HookConfigView[] {
     throw new Error(String((e as Error)?.message ?? e));
   }
   if (Array.isArray(parsed)) {
-    return parsed.map((item) => normalizeHookConfig(parseHookArrayItem(item, validEvents))).filter((h) => h.event);
+    return parsed.map((item) => normalizeHookConfig(parseHookArrayItem(item, validEvents, t))).filter((h) => h.event);
   }
   if (!parsed || typeof parsed !== "object") {
-    throw new Error("expected an object or array");
+    throw new Error(t("settings.hooksJsonExpectedObjectArray"));
   }
   const obj = parsed as Record<string, unknown>;
   const hooksValue = obj.hooks && typeof obj.hooks === "object" && !Array.isArray(obj.hooks) ? obj.hooks : obj;
-  return flattenHooksMap(hooksValue as Record<string, unknown>, validEvents);
+  return flattenHooksMap(hooksValue as Record<string, unknown>, validEvents, t);
 }
 
-function parseHookArrayItem(item: unknown, validEvents: string[]): HookConfigView {
-  if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("hook item must be an object");
+function parseHookArrayItem(item: unknown, validEvents: string[], t: ReturnType<typeof useT>): HookConfigView {
+  if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(t("settings.hooksJsonItemObject"));
   const obj = item as Record<string, unknown>;
   const event = stringField(obj, "event") || "PreToolUse";
-  if (validEvents.length > 0 && !validEvents.includes(event)) throw new Error(`unknown hook event ${event}`);
+  if (validEvents.length > 0 && !validEvents.includes(event)) throw new Error(t("settings.hooksJsonUnknownEvent", { event }));
   return {
     event,
     match: stringField(obj, "match"),
@@ -5038,14 +7089,14 @@ function parseHookArrayItem(item: unknown, validEvents: string[]): HookConfigVie
   };
 }
 
-function flattenHooksMap(hooks: Record<string, unknown>, validEvents: string[]): HookConfigView[] {
+function flattenHooksMap(hooks: Record<string, unknown>, validEvents: string[], t: ReturnType<typeof useT>): HookConfigView[] {
   const valid = new Set(validEvents);
   const out: HookConfigView[] = [];
   for (const [event, value] of Object.entries(hooks)) {
-    if (valid.size > 0 && !valid.has(event)) throw new Error(`unknown hook event ${event}`);
+    if (valid.size > 0 && !valid.has(event)) throw new Error(t("settings.hooksJsonUnknownEvent", { event }));
     const items = Array.isArray(value) ? value : [value];
     for (const item of items) {
-      if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`hook ${event} item must be an object`);
+      if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(t("settings.hooksJsonEventItemObject", { event }));
       const obj = item as Record<string, unknown>;
       out.push(normalizeHookConfig({
         event,
@@ -5081,26 +7132,57 @@ function normalizeHookConfig(h: HookConfigView): HookConfigView {
   };
 }
 
-function SandboxSection({ s, busy, apply }: SectionProps) {
+function effectiveShellLabel(value: string, t: ReturnType<typeof useT>): string {
+  switch (value) {
+    case "git-bash": return t("settings.effectiveShellGitBash");
+    case "pwsh": return t("settings.effectiveShellPwsh");
+    case "powershell": return t("settings.effectiveShellPowershell");
+    case "bash": return t("settings.effectiveShellBash");
+    case "auto": return t("common.auto");
+    default: return value.trim() || t("common.none");
+  }
+}
+
+function SandboxSection({ s, busy, apply, windows }: SectionProps & { windows: boolean }) {
   const t = useT();
   const sb = s.sandbox;
   const [root, setRoot] = useState(sb.workspaceRoot);
+  const effectiveWriteRoots = asArray(sb.effectiveWriteRoots).filter((path) => String(path).trim());
+  const effectiveShell = effectiveShellLabel(String(sb.effectiveShell || sb.shell || ""), t);
   const set = (next: Partial<typeof sb>) =>
     apply(() => app.SetSandbox(next.bash ?? sb.bash, next.network ?? sb.network, next.workspaceRoot ?? sb.workspaceRoot, next.allowWrite ?? sb.allowWrite, next.shell ?? sb.shell));
+  const reload = () => apply(() => app.ReloadSettings());
 
   return (
-    <SettingsSection title={t("settings.sandboxTitle")}>
+    <SettingsSection
+      title={t("settings.sandboxTitle")}
+      description={t("settings.sandboxBoundaryHint")}
+      actions={
+        <Tooltip label={t("settings.reloadSessionConfigHint")}>
+          <button className="btn btn--small" disabled={busy} title={t("settings.reloadSessionConfigHint")} onClick={() => void reload()}>
+            <RefreshCw size={14} aria-hidden="true" />
+            <span>{t("settings.reloadSessionConfig")}</span>
+          </button>
+        </Tooltip>
+      }
+    >
       <SettingsField label={t("settings.shellInterpreter")}>
         <select className="mem-select set-grow" value={sb.shell || "auto"} disabled={busy} onChange={(e) => void set({ shell: e.target.value })}>
-          <option value="auto">{t("settings.shellAuto")}</option>
+          <option value="auto">{windows ? t("settings.shellAutoWindows") : t("settings.shellAuto")}</option>
           <option value="bash">{t("settings.shellBash")}</option>
           <option value="powershell">{t("settings.shellPowershell")}</option>
           <option value="pwsh">{t("settings.shellPwsh")}</option>
         </select>
       </SettingsField>
-      <SettingsField label={t("settings.bashSandbox")}>
-        <select className="mem-select set-grow" value={sb.bash} disabled={busy} onChange={(e) => void set({ bash: e.target.value })}>
-          <option value="enforce">{t("settings.bashEnforce")}</option>
+      <SettingsField label={t("settings.effectiveShell")}>
+        <div className="settings-readonly-field">{effectiveShell}</div>
+      </SettingsField>
+      <SettingsField label={t("settings.bashSandbox")} hint={windows ? t("settings.bashUnavailableWindows") : undefined}>
+        {/* Windows has no OS-level Bash backend and config.BashModeForGOOS fixes
+            the effective value to off. Keep the control visibly immutable and
+            omit enforce so the UI cannot imply a dormant capability. */}
+        <select className="mem-select set-grow" value={windows ? "off" : sb.bash} disabled={busy || windows} onChange={(e) => void set({ bash: e.target.value })}>
+          {!windows && <option value="enforce">{t("settings.bashEnforce")}</option>}
           <option value="off">{t("settings.bashOff")}</option>
         </select>
       </SettingsField>
@@ -5120,234 +7202,27 @@ function SandboxSection({ s, busy, apply }: SectionProps) {
           onBlur={() => root !== sb.workspaceRoot && void set({ workspaceRoot: root })}
         />
       </SettingsField>
+      <SettingsField label={t("settings.effectiveWriteRoots")} hint={t("settings.effectiveWriteRootsHint")} stacked>
+        <div className="set-rules set-rules--readonly">
+          <div className="set-rules__chips">
+            {effectiveWriteRoots.length === 0 && <span className="mem-empty">{t("settings.noEffectiveWriteRoots")}</span>}
+            {effectiveWriteRoots.map((path, index) => (
+              <span className="set-rule set-rule--path" key={`${path}-${index}`}>
+                {path}
+              </span>
+            ))}
+          </div>
+        </div>
+      </SettingsField>
       <RuleList
         list="allow_write"
         rules={sb.allowWrite}
         busy={busy}
-        onAdd={(d) => set({ allowWrite: [...sb.allowWrite, d] })}
-        onRemove={(d) => set({ allowWrite: sb.allowWrite.filter((x) => x !== d) })}
+        onAdd={async (d) => { await set({ allowWrite: [...sb.allowWrite, d] }); }}
+        onRemove={async (d) => { await set({ allowWrite: sb.allowWrite.filter((x) => x !== d) }); }}
       />
     </SettingsSection>
   );
-}
-
-// Visual-style metadata for the appearance theme cards. The two surface
-// swatches + accent are read from CSS variables at render time so they always
-// reflect the live token values for the currently-resolved light/dark mode.
-const THEME_STYLE_META: Record<ThemeStyle, { name: string; zh: DictKey; note: DictKey; desc: DictKey }> = {
-  graphite: { name: "Graphite", zh: "settings.style.graphite.zh", note: "settings.style.graphite.note", desc: "settings.style.graphite.desc" },
-  aurora: { name: "Aurora", zh: "settings.style.aurora.zh", note: "settings.style.aurora.note", desc: "settings.style.aurora.desc" },
-  slate: { name: "Slate", zh: "settings.style.slate.zh", note: "settings.style.slate.note", desc: "settings.style.slate.desc" },
-  carbon: { name: "Carbon", zh: "settings.style.carbon.zh", note: "settings.style.carbon.note", desc: "settings.style.carbon.desc" },
-  nocturne: { name: "Nocturne", zh: "settings.style.nocturne.zh", note: "settings.style.nocturne.note", desc: "settings.style.nocturne.desc" },
-  amber: { name: "Amber", zh: "settings.style.amber.zh", note: "settings.style.amber.note", desc: "settings.style.amber.desc" },
-};
-
-function AppearanceSection({
-  theme,
-  themeStyle,
-  textSize,
-  fontFamily,
-  monoFontFamily,
-  customFontName,
-  customMonoFontName,
-  onTheme,
-  onThemeStyle,
-  onTextSize,
-  onFontFamily,
-  onMonoFontFamily,
-  onCustomFontNameChange,
-  onCustomMonoFontNameChange,
-}: {
-  theme: Theme;
-  themeStyle: ThemeStyle;
-  textSize: TextSize;
-  fontFamily: FontFamily;
-  monoFontFamily: MonoFontFamily;
-  customFontName: string;
-  customMonoFontName: string;
-  onTheme: (t: Theme) => void;
-  onThemeStyle: (style: ThemeStyle) => void;
-  onTextSize: (size: TextSize) => void;
-  onFontFamily: (font: FontFamily) => void;
-  onMonoFontFamily: (font: MonoFontFamily) => void;
-  onCustomFontNameChange: (name: string) => void;
-  onCustomMonoFontNameChange: (name: string) => void;
-}) {
-  const t = useT();
-  const themeOptions: Theme[] = ["auto", "light", "dark"];
-  const availableFontFamilies = useMemo(() => getAvailableFontFamilies(fontFamily), [fontFamily]);
-  const availableMonoFontFamilies = useMemo(() => getAvailableMonoFontFamilies(monoFontFamily), [monoFontFamily]);
-  return (
-    <SettingsSection title={t("settings.appearance")}>
-      <SettingsField label={t("settings.theme")}>
-        <div className="set-seg">
-          {themeOptions.map((opt) => (
-            <button
-              key={opt}
-              className={`set-seg__btn${theme === opt ? " set-seg__btn--on" : ""}`}
-              onClick={() => onTheme(opt)}
-            >
-              {themeName(opt, t)}
-            </button>
-          ))}
-        </div>
-      </SettingsField>
-      <SettingsField label={t("settings.themeStyle")} stacked>
-        <div className="theme-card-grid">
-          {THEME_STYLES.map((opt) => {
-            const meta = THEME_STYLE_META[opt];
-            const selected = themeStyle === opt;
-            return (
-              <button
-                key={opt}
-                type="button"
-                role="radio"
-                aria-checked={selected}
-                className={`theme-card${selected ? " theme-card--on" : ""}`}
-                onClick={() => onThemeStyle(opt)}
-              >
-                <span className="theme-card__head">
-                  <span className="theme-card__name">
-                    {meta.name} <span className="theme-card__zh">{t(meta.zh)}</span>
-                  </span>
-                  <span className="theme-card__tag">{t(meta.note)}</span>
-                </span>
-                <span className="theme-card__swatches" data-theme-style-card={opt}>
-                  <span className="theme-card__swatch theme-card__swatch--bg" />
-                  <span className="theme-card__swatch theme-card__swatch--surface" />
-                  <span className="theme-card__swatch theme-card__swatch--accent" />
-                </span>
-                <span className="theme-card__desc">{t(meta.desc)}</span>
-                <span className="theme-card__check" aria-hidden="true">
-                  <Check size={13} strokeWidth={3} />
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </SettingsField>
-      <SettingsField label={t("settings.textSize")}>
-        <div className="set-seg">
-          {TEXT_SIZES.map((size) => (
-            <button
-              key={size}
-              className={`set-seg__btn${textSize === size ? " set-seg__btn--on" : ""}`}
-              onClick={() => onTextSize(size)}
-            >
-              {textSizeName(size, t)}
-            </button>
-          ))}
-        </div>
-      </SettingsField>
-      <SettingsField label={t("settings.fontFamily")}>
-        <div className="set-seg">
-          {availableFontFamilies.map((font) => (
-            <button
-              key={font}
-              className={`set-seg__btn${fontFamily === font ? " set-seg__btn--on" : ""}`}
-              onClick={() => onFontFamily(font)}
-            >
-              {fontFamilyName(font, t)}
-            </button>
-          ))}
-        </div>
-      </SettingsField>
-      {fontFamily === "custom" && (
-        <SettingsField label={t("settings.fontFamilyCustomName")}>
-          <textarea
-            className="mem-input"
-            style={{ width: "100%", resize: "vertical" }}
-            rows={2}
-            placeholder={t("settings.fontFamilyCustomPlaceholder")}
-            value={customFontName}
-            onChange={(e) => onCustomFontNameChange(e.target.value)}
-          />
-        </SettingsField>
-      )}
-      <SettingsField label={t("settings.monoFontFamily")}>
-        <div className="set-seg">
-          {availableMonoFontFamilies.map((font) => (
-            <button
-              key={font}
-              className={`set-seg__btn${monoFontFamily === font ? " set-seg__btn--on" : ""}`}
-              onClick={() => onMonoFontFamily(font)}
-            >
-              {monoFontFamilyName(font, t)}
-            </button>
-          ))}
-        </div>
-      </SettingsField>
-      {monoFontFamily === "custom" && (
-        <SettingsField label={t("settings.monoFontFamilyCustomName")}>
-          <textarea
-            className="mem-input"
-            style={{ width: "100%", resize: "vertical" }}
-            rows={2}
-            placeholder={t("settings.monoFontFamilyCustomPlaceholder")}
-            value={customMonoFontName}
-            onChange={(e) => onCustomMonoFontNameChange(e.target.value)}
-          />
-        </SettingsField>
-      )}
-    </SettingsSection>
-  );
-}
-
-function themeName(theme: Theme, t: ReturnType<typeof useT>): string {
-  switch (theme) {
-    case "auto":
-      return t("settings.themeAuto");
-    case "light":
-      return t("settings.themeLight");
-    case "dark":
-      return t("settings.themeDark");
-  }
-}
-
-function textSizeName(size: TextSize, t: ReturnType<typeof useT>): string {
-  switch (size) {
-    case "small":
-      return t("settings.textSizeSmall");
-    case "default":
-      return t("settings.textSizeDefault");
-    case "large":
-      return t("settings.textSizeLarge");
-    case "xlarge":
-      return t("settings.textSizeXLarge");
-    case "xxlarge":
-      return t("settings.textSizeXXLarge");
-  }
-}
-
-function fontFamilyName(font: FontFamily, t: ReturnType<typeof useT>): string {
-  switch (font) {
-    case "system":
-      return t("settings.fontFamilySystem");
-    case "yahei":
-      return t("settings.fontFamilyYaHei");
-    case "pingfang":
-      return t("settings.fontFamilyPingFang");
-    case "noto":
-      return t("settings.fontFamilyNoto");
-    case "custom":
-      return t("settings.fontFamilyCustom");
-  }
-}
-
-function monoFontFamilyName(font: MonoFontFamily, t: ReturnType<typeof useT>): string {
-  switch (font) {
-    case "system":
-      return t("settings.monoFontFamilySystem");
-    case "cascadia":
-      return t("settings.monoFontFamilyCascadia");
-    case "jetbrains":
-      return t("settings.monoFontFamilyJetBrains");
-    case "sfmono":
-      return t("settings.monoFontFamilySFMono");
-    case "custom":
-      return t("settings.monoFontFamilyCustom");
-  }
 }
 
 const MB = 1024 * 1024;
@@ -5355,10 +7230,11 @@ const mb = (n: number) => (n / MB).toFixed(1);
 
 // UpdatesSection is the manual side of the auto-updater: it shows the startup
 // check preference, running version, and a Check button, then the same state
-// machine the top banner uses (useUpdater) — available → download → install, with
-// progress and errors inline.
+// machine the top banner uses (useUpdater) — a single "update and restart"
+// action with inline progress and errors.
 function UpdatesSection({
   configPath,
+  shadowedByPath,
   checkUpdates,
   telemetry,
   metrics,
@@ -5366,101 +7242,278 @@ function UpdatesSection({
   applySettings,
 }: {
   configPath: string;
+  shadowedByPath?: string;
   checkUpdates: boolean;
   telemetry: boolean;
   metrics: boolean;
   settingsBusy: boolean;
-  applySettings: (fn: () => Promise<void>) => Promise<void>;
+  applySettings: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useT();
-  const { status, check, download: downloadUpdate, install: installUpdate } = useUpdater();
+  const { status, check, apply: applyUpdate, openDownload, abandonPending } = useUpdater();
   const [version, setVersion] = useState("");
   useEffect(() => {
     app.Version().then(setVersion).catch(() => {});
   }, []);
 
   const updaterBusy =
-    status.kind === "checking" || status.kind === "downloading" || status.kind === "verifying" || status.kind === "installing";
+    status.kind === "checking" ||
+    status.kind === "downloading" ||
+    status.kind === "verifying" ||
+    status.kind === "authorizing" ||
+    status.kind === "installing" ||
+    status.kind === "relaunching";
+  const updateStatus =
+    status.kind === "checking" ? t("updater.checking") :
+    status.kind === "upToDate" ? t("updater.upToDate") :
+    status.kind === "available" ? t("updater.available", { v: status.info.latest }) :
+    status.kind === "downloading" ? t("updater.downloading", {
+      done: mb(status.received),
+      total: mb(status.total),
+      pct: status.total > 0 ? Math.round((status.received / status.total) * 100) : 0,
+    }) :
+    status.kind === "verifying" ? t("updater.verifying") :
+    status.kind === "authorizing" ? t("updater.authorizing") :
+    status.kind === "installing" ? (
+      status.info?.requiresElevation || status.info?.installMode === "deb"
+        ? t("updater.installingPackage")
+        : t("updater.installing")
+    ) :
+    status.kind === "relaunching" || status.kind === "done" ? t("updater.done") :
+    status.kind === "error" ? "" :
+    "";
+  const updateStatusTone =
+    status.kind === "error" ? "error" :
+    status.kind === "available" ? "available" :
+    status.kind === "upToDate" || status.kind === "done" || status.kind === "relaunching" ? "success" :
+    status.kind === "checking" || updaterBusy ? "busy" :
+    "neutral";
+  const updateErrorTitle = status.kind === "error"
+    ? status.disposition === "recovery"
+      ? t("updater.recoveryBlocked")
+      : status.disposition === "manual"
+        ? t("updater.manualUpdateRequired")
+        : t("updater.failed", { msg: status.message })
+    : "";
+  const updateErrorHint = status.kind === "error"
+    ? status.disposition === "recovery"
+      ? t("updater.recoveryHint")
+      : status.disposition === "manual"
+        ? t("updater.manualFallbackHint")
+        : ""
+    : "";
+  const downloadIsPrimary = status.kind === "error" && status.disposition !== "retryable";
 
   return (
-    <SettingsSection title={t("updater.title")}>
+    <SettingsSection>
       <SettingsField
-        className="settings-field--wide-copy"
-        label={t("updater.autoCheckLabel")}
-        hint={t("updater.autoCheckHint")}
+        className="settings-field--wide-copy updates-control"
+        label={
+          <div className="updates-control__summary">
+            <div className="updates-control__version">
+              {t("updater.currentVersion", { v: version || "…" })}
+            </div>
+            <div className={`updates-control__status updates-control__status--${updateStatusTone}`} role="status" aria-live="polite">
+              {updateStatus && (
+                <>
+                  {updateStatusTone === "success" && <CheckCircle2 size={14} aria-hidden="true" />}
+                  {updateStatusTone === "busy" && <Loader2 className="updates-control__spinner" size={14} aria-hidden="true" />}
+                  <span>{updateStatus}</span>
+                </>
+              )}
+            </div>
+          </div>
+        }
       >
-        <ToggleSegment
-          value={checkUpdates}
-          disabled={settingsBusy}
-          onChange={(enabled) => void applySettings(() => app.SetDesktopCheckUpdates(enabled))}
-        />
-      </SettingsField>
-      <SettingsField
-        className="settings-field--wide-copy"
-        label={t("settings.telemetryLabel")}
-        hint={t("settings.telemetryHint")}
-      >
-        <ToggleSegment
-          value={telemetry}
-          disabled={settingsBusy}
-          onChange={(enabled) => void applySettings(() => app.SetDesktopTelemetry(enabled))}
-        />
-      </SettingsField>
-      <SettingsField
-        className="settings-field--wide-copy"
-        label={t("settings.metricsLabel")}
-        hint={t("settings.metricsHint")}
-      >
-        <ToggleSegment
-          value={metrics}
-          disabled={settingsBusy}
-          onChange={(enabled) => void applySettings(() => app.SetDesktopMetrics(enabled))}
-        />
-      </SettingsField>
-      <SettingsField label={t("updater.currentVersion", { v: version || "…" })}>
-        <button className="btn btn--small" disabled={updaterBusy} onClick={() => void check()}>
-          {status.kind === "checking" ? t("updater.checking") : t("updater.checkButton")}
-        </button>
-      </SettingsField>
-      {status.kind === "available" && (
-        <div className="mem-hint">{t("updater.channelLabel", { channel: status.info.channel || "stable" })}</div>
-      )}
-      {status.kind === "upToDate" && <div className="mem-hint">{t("updater.upToDate")}</div>}
-      {status.kind === "available" && (
-        <>
-          <SettingsField label={t("updater.available", { v: status.info.latest })}>
-            <button className="btn btn--primary btn--small" onClick={() => downloadUpdate(status.info)}>
-              {status.info.canSelfUpdate ? t("updater.downloadUpdate") : t("updater.goToDownload")}
+        <div className="updates-control__controls">
+          <Tooltip label={t("updater.checkButton")}>
+            <button
+              className="chip chip--icon"
+              type="button"
+              disabled={settingsBusy || updaterBusy}
+              aria-label={t("updater.checkButton")}
+              onClick={() => void check()}
+            >
+              <RefreshCw className={status.kind === "checking" ? "updates-control__spinner" : undefined} size={14} aria-hidden="true" />
             </button>
-          </SettingsField>
-          {!status.info.canSelfUpdate && <div className="mem-hint">{status.info.manualReason || t("updater.macHint")}</div>}
-        </>
-      )}
-      {status.kind === "downloading" && (
-        <div className="mem-hint">
-          {t("updater.downloading", {
-            done: mb(status.received),
-            total: mb(status.total),
-            pct: status.total > 0 ? Math.round((status.received / status.total) * 100) : 0,
-          })}
+          </Tooltip>
+        </div>
+      </SettingsField>
+      <div
+        className="updates-control__hint"
+        style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "4px 8px" }}
+      >
+        <span>{t("updater.officialReleaseHint")}</span>
+        <button
+          className="btn btn--small"
+          type="button"
+          onClick={openDownload}
+          style={{
+            height: "auto",
+            minHeight: 0,
+            padding: 0,
+            borderColor: "transparent",
+            background: "transparent",
+            color: "var(--fg-dim)",
+            textDecoration: "underline",
+            textUnderlineOffset: 2,
+          }}
+        >
+          {t("updater.officialDownload")}
+          <ExternalLink size={13} aria-hidden="true" />
+        </button>
+      </div>
+      {status.kind === "available" && (
+        <div className="updates-control__action">
+          <div className="updates-control__action-copy">
+            {!status.info.canSelfUpdate && <div>{status.info.manualReason || t("updater.macHint")}</div>}
+          </div>
+          <button
+            className="btn btn--primary btn--small"
+            disabled={settingsBusy || updaterBusy}
+            onClick={() => applyUpdate(status.info)}
+          >
+            {status.info.canSelfUpdate ? t("updater.updateAndRestart") : t("updater.goToDownload")}
+          </button>
         </div>
       )}
-      {status.kind === "verifying" && <div className="mem-hint">{t("updater.verifying")}</div>}
-      {status.kind === "downloaded" && (
-        <SettingsField label={t("updater.downloaded", { v: status.info.latest })}>
-          <button className="btn btn--primary btn--small" onClick={installUpdate}>
-            {t("updater.restartInstall")}
+      {status.kind === "error" && (
+        <div
+          className="banner banner--update banner--error"
+          role="alert"
+          style={{ alignItems: "flex-start", flexWrap: "wrap", marginBottom: 12 }}
+        >
+          <div style={{ flex: "1 1 360px", minWidth: 0 }}>
+            <div>{updateErrorTitle}</div>
+            {updateErrorHint && <div className="banner__hint">{updateErrorHint}</div>}
+            {status.disposition !== "retryable" && (
+              <div className="banner__hint" style={{ overflowWrap: "anywhere" }}>
+                {t("updater.errorDetails", { msg: status.message })}
+              </div>
+            )}
+          </div>
+          <span className="banner__spacer" />
+          {status.disposition === "recovery" && (
+            <button
+              className="btn btn--small"
+              type="button"
+              disabled={settingsBusy || updaterBusy}
+              onClick={() => void abandonPending()}
+            >
+              {t("updater.discardPrevious")}
+            </button>
+          )}
+          {downloadIsPrimary && (
+            <button className="btn btn--primary btn--small" type="button" onClick={openDownload}>
+              {t("updater.officialDownload")}
+              <ExternalLink size={14} aria-hidden="true" />
+            </button>
+          )}
+          <button
+            className={`btn btn--small${downloadIsPrimary ? "" : " btn--primary"}`}
+            type="button"
+            disabled={settingsBusy || updaterBusy}
+            onClick={() => status.info ? applyUpdate(status.info) : void check()}
+          >
+            {t("updater.retry")}
           </button>
-        </SettingsField>
+        </div>
       )}
-      {status.kind === "installing" && <div className="mem-hint">{t("updater.installing")}</div>}
-      {status.kind === "done" && <div className="mem-hint">{t("updater.done")}</div>}
-      {status.kind === "error" && <div className="banner banner--error">{t("updater.failed", { msg: status.message })}</div>}
-      {configPath && (
-        <Tooltip label={configPath} fill block className="mem-hint settings-config-path">
-          {t("settings.config", { path: configPath })}
-        </Tooltip>
-      )}
+      <SettingsField
+        className="settings-field--wide-copy"
+        label={t("changelog.title")}
+        hint={t("changelog.subtitle")}
+      >
+        <button className="btn btn--small" onClick={() => void openExternal("https://reasonix.io/changelog/")}>
+          {t("changelog.openWeb")}
+          <ExternalLink size={14} aria-hidden="true" />
+        </button>
+      </SettingsField>
+      <SettingsField
+        className="settings-field--wide-copy"
+        label={t("feedback.title")}
+        hint={t("feedback.subtitle")}
+      >
+        <div className="settings-inline-controls">
+          <button
+            className="btn btn--small"
+            onClick={() => void openExternal("https://github.com/esengine/DeepSeek-Reasonix/issues/new/choose")}
+          >
+            {t("feedback.submitIssue")}
+            <ExternalLink size={14} aria-hidden="true" />
+          </button>
+          <button
+            className="btn btn--small"
+            onClick={() => void openExternal("https://github.com/esengine/DeepSeek-Reasonix/issues")}
+          >
+            {t("feedback.viewIssues")}
+            <ExternalLink size={14} aria-hidden="true" />
+          </button>
+        </div>
+      </SettingsField>
+      <details
+        className="provider-editor-advanced"
+        style={{
+          marginTop: 0,
+          borderRight: 0,
+          borderBottom: 0,
+          borderLeft: 0,
+          borderRadius: 0,
+          background: "transparent",
+        }}
+      >
+        <summary style={{ padding: "0 2px" }}>
+          <span className="provider-editor-advanced__title">
+            <ChevronDown className="provider-editor-advanced__icon" size={16} aria-hidden="true" />
+            {t("updater.privacyAndUpdatePreferences")}
+          </span>
+        </summary>
+        <div className="provider-editor-advanced__body">
+          <SettingsField
+            className="settings-field--wide-copy"
+            label={t("updater.autoCheckLabel")}
+            hint={t("updater.autoCheckHint")}
+          >
+            <ToggleSegment
+              value={checkUpdates}
+              disabled={settingsBusy}
+              onChange={(enabled) => void applySettings(() => app.SetDesktopCheckUpdates(enabled))}
+            />
+          </SettingsField>
+          <SettingsField
+            className="settings-field--wide-copy"
+            label={t("settings.telemetryLabel")}
+            hint={t("settings.telemetryHint")}
+          >
+            <ToggleSegment
+              value={telemetry}
+              disabled={settingsBusy}
+              onChange={(enabled) => void applySettings(() => app.SetDesktopTelemetry(enabled))}
+            />
+          </SettingsField>
+          <SettingsField
+            className="settings-field--wide-copy"
+            label={t("settings.metricsLabel")}
+            hint={t("settings.metricsHint")}
+          >
+            <ToggleSegment
+              value={metrics}
+              disabled={settingsBusy}
+              onChange={(enabled) => void applySettings(() => app.SetDesktopMetrics(enabled))}
+            />
+          </SettingsField>
+          {configPath && (
+            <Tooltip label={configPath} fill block className="mem-hint settings-config-path">
+              {t("settings.config", { path: configPath })}
+            </Tooltip>
+          )}
+          {shadowedByPath && (
+            <Tooltip label={shadowedByPath} fill block className="mem-hint settings-config-path settings-config-path--shadowed">
+              {t("settings.configShadowed", { path: shadowedByPath })}
+            </Tooltip>
+          )}
+        </div>
+      </details>
     </SettingsSection>
   );
 }

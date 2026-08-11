@@ -1,0 +1,130 @@
+---
+type ActiveItem = 'features' | 'surfaces' | 'skills' | 'community' | 'docs' | 'changelog';
+
+const {
+  active,
+  scrolled = false,
+  accountSlot = false,
+} = Astro.props as {
+  active?: ActiveItem;
+  scrolled?: boolean;
+  accountSlot?: boolean;
+};
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const repo = 'https://github.com/esengine/DeepSeek-Reasonix';
+const items: Array<{
+  id: ActiveItem;
+  href: string;
+  en: string;
+  zh: string;
+  secondary?: boolean;
+}> = [
+  { id: 'features', href: `${base}/#features`, en: 'Features', zh: '特性' },
+  { id: 'surfaces', href: `${base}/#surfaces`, en: 'Surfaces', zh: '使用形态', secondary: true },
+  { id: 'skills', href: `${base}/skills/`, en: 'Skills', zh: '技能市场' },
+  { id: 'community', href: `${base}/#community`, en: 'Community', zh: '社区', secondary: true },
+  { id: 'docs', href: `${base}/docs/`, en: 'Docs', zh: '文档' },
+  { id: 'changelog', href: `${base}/changelog/`, en: 'Changelog', zh: '更新日志' },
+];
+---
+
+<header class:list={['nav', { scrolled }]}>
+  <div class="nav-inner">
+    <a class="brand" href={`${base}/`}>
+      <picture class="brand-picture">
+        <source media="(max-width: 400px)" srcset={`${base}/favicon.svg`} />
+        <img src={`${base}/logo.svg`} alt="Reasonix logo" />
+      </picture>
+    </a>
+    <nav class="nav-links" aria-label="Primary navigation">
+      {items.map((item) => (
+        <a
+          class:list={[{ here: active === item.id, 'nav-link--secondary': item.secondary }]}
+          href={item.href}
+          aria-current={active === item.id ? 'page' : undefined}
+        >
+          <span class="l-en">{item.en}</span>
+          <span class="l-zh">{item.zh}</span>
+        </a>
+      ))}
+    </nav>
+    <a
+      class="nav-github"
+      href={repo}
+      target="_blank"
+      rel="noreferrer"
+      aria-label="Reasonix GitHub repository"
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path fill="currentColor" d="M12 .7a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.3c-3.3.7-4-1.4-4-1.4-.5-1.4-1.3-1.8-1.3-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.6-.3-5.4-1.3-5.4-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.7 1.6.3 2.8.1 3.1.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.4 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .7Z" />
+      </svg>
+      <span class="nav-github-label">GitHub</span>
+    </a>
+    <div class="lang-switch" role="group" aria-label="Language">
+      <button type="button" data-lang="en" class="active">EN</button>
+      <button type="button" data-lang="zh">中文</button>
+    </div>
+    <div class="theme-switch" role="group" aria-label="Theme">
+      <button type="button" data-theme="system" class="active" aria-label="System theme"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></button>
+      <button type="button" data-theme="light" aria-label="Light theme"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="4.2" y1="4.2" x2="6.3" y2="6.3"/><line x1="17.7" y1="17.7" x2="19.8" y2="19.8"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/><line x1="4.2" y1="19.8" x2="6.3" y2="17.7"/><line x1="17.7" y1="6.3" x2="19.8" y2="4.2"/></svg></button>
+      <button type="button" data-theme="dark" aria-label="Dark theme"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </div>
+    {accountSlot ? (
+      <span class="nav-acct" data-account-slot></span>
+    ) : (
+      <a class="btn btn-ghost nav-sign-in" href={`${base}/login/`}>
+        <span class="l-en">Sign in</span>
+        <span class="l-zh">登录</span>
+      </a>
+    )}
+    <a class="btn btn-dark nav-install" href={`${base}/#start`}>
+      <span class="l-en">Install</span>
+      <span class="l-zh">安装</span>
+    </a>
+    <button
+      class="nav-menu-toggle"
+      type="button"
+      data-mobile-nav-toggle
+      aria-controls="site-mobile-nav"
+      aria-expanded="false"
+      aria-label="Open navigation"
+      title="Open navigation"
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 6h16M4 12h16M4 18h16" />
+      </svg>
+    </button>
+  </div>
+  <div class="mobile-nav" id="site-mobile-nav" data-mobile-nav hidden>
+    <button class="mobile-nav-backdrop" type="button" data-mobile-nav-close aria-label="Close navigation"></button>
+    <aside class="mobile-nav-panel" role="dialog" aria-modal="true" aria-labelledby="site-mobile-nav-title">
+      <div class="mobile-nav-head">
+        <span id="site-mobile-nav-title"><span class="l-en">Navigation</span><span class="l-zh">导航</span></span>
+        <button class="mobile-nav-close" type="button" data-mobile-nav-close aria-label="Close navigation" title="Close navigation">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+        </button>
+      </div>
+      <nav class="mobile-nav-links" aria-label="Mobile primary navigation">
+        {items.map((item) => (
+          <a class:list={[{ here: active === item.id }]} href={item.href} aria-current={active === item.id ? 'page' : undefined}>
+            <span class="l-en">{item.en}</span>
+            <span class="l-zh">{item.zh}</span>
+          </a>
+        ))}
+      </nav>
+      <div class="mobile-nav-actions">
+        <a class="mobile-nav-github" href={repo} target="_blank" rel="noreferrer">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 .7a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.3c-3.3.7-4-1.4-4-1.4-.5-1.4-1.3-1.8-1.3-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.6-.3-5.4-1.3-5.4-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.7 1.6.3 2.8.1 3.1.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.4 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .7Z" /></svg>
+          GitHub
+        </a>
+        {accountSlot ? (
+          <span class="nav-acct" data-account-slot></span>
+        ) : (
+          <a class="btn btn-ghost" href={`${base}/login/`}><span class="l-en">Sign in</span><span class="l-zh">登录</span></a>
+        )}
+        <a class="btn btn-dark" href={`${base}/#start`}><span class="l-en">Install</span><span class="l-zh">安装</span></a>
+      </div>
+    </aside>
+  </div>
+</header>

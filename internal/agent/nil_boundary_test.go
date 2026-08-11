@@ -24,11 +24,12 @@ type typedNilHooks struct{}
 func (*typedNilHooks) PreToolUse(context.Context, string, json.RawMessage) (bool, string) {
 	return false, ""
 }
-func (*typedNilHooks) PostToolUse(context.Context, string, json.RawMessage, string) {}
-func (*typedNilHooks) PostLLMCall(context.Context, string, int) string              { return "" }
-func (*typedNilHooks) HasPostLLMCall() bool                                         { return false }
-func (*typedNilHooks) SubagentStop(context.Context, string)                         {}
-func (*typedNilHooks) PreCompact(context.Context, string) string                    { return "" }
+func (*typedNilHooks) PostToolUse(context.Context, string, json.RawMessage, string)               {}
+func (*typedNilHooks) PostToolUseFailure(context.Context, string, json.RawMessage, string, error) {}
+func (*typedNilHooks) PostLLMCall(context.Context, string, int) string                            { return "" }
+func (*typedNilHooks) HasPostLLMCall() bool                                                       { return false }
+func (*typedNilHooks) SubagentStop(context.Context, string)                                       {}
+func (*typedNilHooks) PreCompact(context.Context, string) string                                  { return "" }
 
 func TestNewNormalizesTypedNilInterfaces(t *testing.T) {
 	var sink *typedNilAgentSink

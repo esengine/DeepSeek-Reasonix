@@ -41,8 +41,12 @@ func (m *chatTUI) runEffortCommand(input string) tea.Cmd {
 		m.notice("model switching is unavailable in this session")
 		return nil
 	}
-	if m.ctrl.Running() {
-		m.notice("finish or cancel the current turn before changing effort")
+	if m.runtimeSwitchBusy() {
+		m.notice("finish or cancel active work and stop background jobs before changing effort")
+		return nil
+	}
+	if m.modelSwitchPending {
+		m.notice("wait for the current runtime switch to finish")
 		return nil
 	}
 
@@ -51,24 +55,27 @@ func (m *chatTUI) runEffortCommand(input string) tea.Cmd {
 		m.notice("effort: cannot resolve user config directory")
 		return nil
 	}
-	edit := config.LoadForEdit(path)
-	if _, ok := edit.Provider(entry.Name); !ok {
-		if err := edit.UpsertProvider(*entry); err != nil {
-			m.notice("effort: " + err.Error())
-			return nil
+	// Lock only the load-modify-save cycle; the snapshot and controller
+	// rebuild below run off-lock.
+	if err := func() error {
+		unlock := config.LockUserConfigEdits()
+		defer unlock()
+		edit := config.LoadForEdit(path)
+		if _, ok := edit.Provider(entry.Name); !ok {
+			if err := edit.UpsertProvider(*entry); err != nil {
+				return err
+			}
 		}
-	}
-	if entry.Kind == "anthropic" && effort != "" && entry.Thinking == "" {
-		if err := edit.SetProviderThinking(entry.Name, "adaptive"); err != nil {
-			m.notice("effort: " + err.Error())
-			return nil
+		if entry.Kind == "anthropic" && effort != "" && entry.Thinking == "" {
+			if err := edit.SetProviderThinking(entry.Name, "adaptive"); err != nil {
+				return err
+			}
 		}
-	}
-	if err := edit.SetProviderEffort(entry.Name, effort); err != nil {
-		m.notice("effort: " + err.Error())
-		return nil
-	}
-	if err := edit.SaveTo(path); err != nil {
+		if err := edit.SetProviderEffort(entry.Name, effort); err != nil {
+			return err
+		}
+		return edit.SaveTo(path)
+	}(); err != nil {
 		m.notice("effort: " + err.Error())
 		return nil
 	}
@@ -78,16 +85,34 @@ func (m *chatTUI) runEffortCommand(input string) tea.Cmd {
 		display = "auto"
 	}
 	m.notice(fmt.Sprintf("setting effort for %s to %s…", entry.Name, display))
-	carried := m.ctrl.History()
-	prevPath := m.ctrl.SessionPath()
 	if err := m.ctrl.Snapshot(); err != nil {
 		m.notice("effort: snapshot: " + err.Error())
+	}
+	// Capture the resume path and history only after Snapshot: a snapshot
+	// conflict can retarget the controller to a recovery branch (or adopt the
+	// newer disk transcript), and a pre-snapshot capture would bind the rebuilt
+	// controller back to the original file, re-conflicting on every later save.
+	carried := m.ctrl.History()
+	prevPath := m.ctrl.SessionPath()
+	// Move the lease before the rebuilt controller binds prevPath for writing
+	// (AdoptHistory resumes there): after a snapshot retarget the lease still
+	// guards the old path, and the async build must not open an unguarded
+	// writer on the recovery branch.
+	if err := m.rebindSessionLease(prevPath); err != nil {
+		m.notice("effort: " + sessionLeaseHeldNotice(err))
+		return nil
 	}
 	oldCtrl := m.ctrl
 	build := m.buildController
 	m.modelSwitchPending = true
 	m.pendingModelSwitch = func() tea.Msg {
-		c, err := build(ref, carried, prevPath)
+		c, err := build(controllerBuildSpec{
+			ModelRef:         ref,
+			RuntimeProfile:   m.runtimeProfile,
+			ToolApprovalMode: oldCtrl.ToolApprovalMode(),
+			PlanMode:         oldCtrl.PlanMode(),
+			EffortOverride:   &effort,
+		}, carried, prevPath, oldCtrl)
 		if err != nil {
 			return modelSwitchMsg{ref: ref, err: err}
 		}
@@ -97,7 +122,7 @@ func (m *chatTUI) runEffortCommand(input string) tea.Cmd {
 			oldCtrl:  oldCtrl,
 			label:    c.Label(),
 			commands: c.Commands(),
-			skills:   c.Skills(),
+			skills:   c.SlashSkills(),
 			host:     c.Host(),
 		}
 	}
@@ -110,9 +135,20 @@ func (m *chatTUI) currentConfigProvider() (*config.ProviderEntry, string, error)
 	if err != nil {
 		return nil, "", err
 	}
+	// When the per-tab ref is empty we are inheriting the configured
+	// default — let resolveModelForCLI fall through a keyless default to
+	// the next configured provider (issue #6996). When m.modelRef is
+	// already set we honor it verbatim: the user picked that model
+	// explicitly (via /model, on the model switcher, or in the bootstrap
+	// step) and we must not silently swap to a different provider just
+	// because the entry happens to be keyless.
 	ref := m.modelRef
 	if strings.TrimSpace(ref) == "" {
-		ref = cfg.DefaultModel
+		var rerr error
+		ref, _, rerr = resolveModelForCLI("", cfg)
+		if rerr != nil {
+			return nil, "", rerr
+		}
 	}
 	entry, ok := cfg.ResolveModel(ref)
 	if !ok {

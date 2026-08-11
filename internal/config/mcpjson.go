@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"reasonix/internal/fileutil"
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/mcpdiag"
 )
 
@@ -19,16 +20,20 @@ import (
 const mcpJSONFile = ".mcp.json"
 
 // mcpServerSpec mirrors one entry of Claude Code's "mcpServers" map. The field
-// names and semantics match PluginEntry (and Claude): command/args/env describe
-// a local stdio server; type/url/headers describe a remote one.
+// names and semantics match PluginEntry: command/args/env describe a local
+// stdio server; type/url/headers describe a remote one. Reasonix also accepts
+// startup and call timeout fields as Reasonix policy extensions.
 type mcpServerSpec struct {
-	Type      string            `json:"type"`
-	Command   string            `json:"command"`
-	Args      []string          `json:"args"`
-	Env       map[string]string `json:"env"`
-	URL       string            `json:"url"`
-	Headers   map[string]string `json:"headers"`
-	AutoStart *bool             `json:"auto_start"`
+	Type                  string            `json:"type"`
+	Command               string            `json:"command"`
+	Args                  []string          `json:"args"`
+	Env                   map[string]string `json:"env"`
+	URL                   string            `json:"url"`
+	Headers               map[string]string `json:"headers"`
+	StartupTimeoutSeconds int               `json:"startup_timeout_seconds"`
+	CallTimeoutSeconds    int               `json:"call_timeout_seconds"`
+	ToolTimeoutSeconds    map[string]int    `json:"tool_timeout_seconds"`
+	AutoStart             *bool             `json:"auto_start"`
 }
 
 // loadMCPJSON reads path (Claude Code's .mcp.json) and returns its servers as
@@ -36,7 +41,11 @@ type mcpServerSpec struct {
 // file is not an error (returns nil, nil). A present-but-malformed file is an
 // error so a typo surfaces loudly instead of silently dropping every server.
 func loadMCPJSON(path string) ([]PluginEntry, error) {
-	b, err := os.ReadFile(path)
+	resolved, err := resolveConfigAccessPath(path, false)
+	if err != nil {
+		return nil, fmt.Errorf("mcp config %s: %w", path, err)
+	}
+	b, err := fileencoding.ReadFileUTF8(resolved)
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -79,13 +88,18 @@ func specsToEntries(specs map[string]mcpServerSpec, skip map[string]bool) []Plug
 	sort.Strings(names)
 	entries := make([]PluginEntry, 0, len(names))
 	for _, name := range names {
-		entries = append(entries, pluginEntryFromMCPSpec(name, specs[name]))
+		entry := pluginEntryFromMCPSpec(name, specs[name])
+		entry.Source = MCPSourceProjectMCPJSON
+		entries = append(entries, entry)
 	}
 	return entries
 }
 
 // legacyConfigPath is the v0.x (TypeScript line) config file, ~/.reasonix/config.json.
 func legacyConfigPath() string {
+	if IsolatedHomeDir() != "" {
+		return ""
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
@@ -105,7 +119,7 @@ func loadLegacyMCP(path string) []PluginEntry {
 	if path == "" {
 		return nil
 	}
-	b, err := os.ReadFile(path)
+	b, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return nil
 	}
@@ -143,6 +157,9 @@ func loadLegacyMCP(path string) []PluginEntry {
 		have[pe.Name] = true
 		pe, _ = NormalizePluginCommandLine(pe)
 		entries = append(entries, pe)
+	}
+	for i := range entries {
+		entries[i].Source = MCPSourceLegacyUser
 	}
 	return entries
 }
@@ -186,14 +203,17 @@ func anonymousMCPName(i int) string {
 
 func pluginEntryFromMCPSpec(name string, s mcpServerSpec) PluginEntry {
 	e := PluginEntry{
-		Name:      name,
-		Type:      s.Type,
-		Command:   s.Command,
-		Args:      s.Args,
-		Env:       s.Env,
-		URL:       s.URL,
-		Headers:   s.Headers,
-		AutoStart: s.AutoStart,
+		Name:                  name,
+		Type:                  s.Type,
+		Command:               s.Command,
+		Args:                  s.Args,
+		Env:                   s.Env,
+		URL:                   s.URL,
+		Headers:               s.Headers,
+		StartupTimeoutSeconds: s.StartupTimeoutSeconds,
+		CallTimeoutSeconds:    s.CallTimeoutSeconds,
+		ToolTimeoutSeconds:    s.ToolTimeoutSeconds,
+		AutoStart:             s.AutoStart,
 	}
 	e, _ = NormalizePluginCommandLine(e)
 	return e
@@ -204,15 +224,21 @@ func pluginEntryFromMCPSpec(name string, s mcpServerSpec) PluginEntry {
 // Reasonix-specific, more explicit of the two, so it overrides the shared,
 // checked-in .mcp.json rather than the other way round.
 func (c *Config) mergeMCPJSON(entries []PluginEntry) {
-	have := make(map[string]bool, len(c.Plugins))
-	for _, p := range c.Plugins {
-		have[p.Name] = true
+	index := make(map[string]int, len(c.Plugins))
+	for i, p := range c.Plugins {
+		index[p.Name] = i
 	}
 	for _, e := range entries {
-		if have[e.Name] {
+		if i, exists := index[e.Name]; exists {
+			// Project configuration always wins over user-global configuration.
+			// Within one project, reasonix.toml remains more specific than the
+			// Claude-compatible .mcp.json file.
+			if e.Source == MCPSourceProjectMCPJSON && !c.Plugins[i].Source.ProjectScoped() {
+				c.Plugins[i] = e
+			}
 			continue
 		}
-		have[e.Name] = true
+		index[e.Name] = len(c.Plugins)
 		c.Plugins = append(c.Plugins, e)
 	}
 }
@@ -235,7 +261,9 @@ func UpsertMCPJSONPlugin(path string, entry PluginEntry) (bool, error) {
 			return false, fmt.Errorf("mcp config %s: server %q is not an object", path, entry.Name)
 		}
 	}
-	applyPluginEntryToMCPJSONServer(server, entry)
+	if err := applyPluginEntryToMCPJSONServer(server, entry); err != nil {
+		return false, fmt.Errorf("mcp config %s: server %q: %w", path, entry.Name, err)
+	}
 	updatedRaw, err := json.Marshal(server)
 	if err != nil {
 		return false, fmt.Errorf("mcp config %s: server %q: %w", path, entry.Name, err)
@@ -270,7 +298,11 @@ func RemoveMCPJSONPlugin(path, name string) (bool, error) {
 func readMCPJSONRaw(path string) (map[string]json.RawMessage, map[string]json.RawMessage, error) {
 	root := map[string]json.RawMessage{}
 	servers := map[string]json.RawMessage{}
-	b, err := os.ReadFile(path)
+	resolved, err := resolveConfigAccessPath(path, false)
+	if err != nil {
+		return nil, nil, fmt.Errorf("mcp config %s: %w", path, err)
+	}
+	b, err := fileencoding.ReadFileUTF8(resolved)
 	if os.IsNotExist(err) {
 		return root, servers, nil
 	}
@@ -290,7 +322,7 @@ func readMCPJSONRaw(path string) (map[string]json.RawMessage, map[string]json.Ra
 	return root, servers, nil
 }
 
-func applyPluginEntryToMCPJSONServer(server map[string]json.RawMessage, entry PluginEntry) {
+func applyPluginEntryToMCPJSONServer(server map[string]json.RawMessage, entry PluginEntry) error {
 	transport := strings.ToLower(strings.TrimSpace(entry.Type))
 	if transport == "" {
 		transport = "stdio"
@@ -310,7 +342,60 @@ func applyPluginEntryToMCPJSONServer(server map[string]json.RawMessage, entry Pl
 		delete(server, "command")
 		delete(server, "args")
 	}
+	setMCPJSONInt(server, "startup_timeout_seconds", entry.StartupTimeoutSeconds)
+	setMCPJSONInt(server, "call_timeout_seconds", entry.CallTimeoutSeconds)
+	setMCPJSONIntMap(server, "tool_timeout_seconds", entry.ToolTimeoutSeconds)
+	// The removed per-tool reader list is accepted on load for compatibility but
+	// never persisted. Explicitly delete it when updating an existing shared
+	// .mcp.json entry so the obsolete setting disappears naturally.
+	delete(server, "trusted_read_only_tools")
+	delete(server, "default_tools_approval_mode")
+	delete(server, "approvals_reviewer")
 	setMCPJSONBool(server, "auto_start", entry.AutoStart)
+	if err := removeMCPJSONApprovalModes(server); err != nil {
+		return err
+	}
+	return nil
+}
+
+func removeMCPJSONApprovalModes(server map[string]json.RawMessage) error {
+	const key = "tools"
+	tools := map[string]json.RawMessage{}
+	if raw, ok := server[key]; ok && len(raw) > 0 && strings.TrimSpace(string(raw)) != "null" {
+		if err := json.Unmarshal(raw, &tools); err != nil || tools == nil {
+			return fmt.Errorf("%s must be an object", key)
+		}
+	}
+
+	// Remove Reasonix's retired approval_mode while preserving tool fields owned
+	// by other MCP clients.
+	for name, raw := range tools {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+			continue
+		}
+		delete(fields, "approval_mode")
+		if len(fields) == 0 {
+			delete(tools, name)
+			continue
+		}
+		updated, err := json.Marshal(fields)
+		if err != nil {
+			return fmt.Errorf("%s[%q]: %w", key, name, err)
+		}
+		tools[name] = updated
+	}
+
+	if len(tools) == 0 {
+		delete(server, key)
+		return nil
+	}
+	raw, err := json.Marshal(tools)
+	if err != nil {
+		return fmt.Errorf("%s: %w", key, err)
+	}
+	server[key] = raw
+	return nil
 }
 
 func writeMCPJSONServers(path string, root map[string]json.RawMessage, servers map[string]json.RawMessage) error {
@@ -323,20 +408,9 @@ func writeMCPJSONServers(path string, root map[string]json.RawMessage, servers m
 }
 
 func clearMCPJSONAuthentication(path, name string) (PluginEntry, bool, error) {
-	b, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return PluginEntry{}, false, fmt.Errorf("clear plugin authentication: no plugin %q", name)
-	}
+	root, servers, err := readMCPJSONRaw(path)
 	if err != nil {
-		return PluginEntry{}, false, fmt.Errorf("mcp config %s: %w", path, err)
-	}
-	var root map[string]json.RawMessage
-	if err := json.Unmarshal(b, &root); err != nil {
-		return PluginEntry{}, false, fmt.Errorf("mcp config %s: %w", path, err)
-	}
-	var servers map[string]json.RawMessage
-	if err := json.Unmarshal(root["mcpServers"], &servers); err != nil || servers == nil {
-		return PluginEntry{}, false, fmt.Errorf("clear plugin authentication: no plugin %q", name)
+		return PluginEntry{}, false, err
 	}
 	raw, ok := servers[name]
 	if !ok {
@@ -416,6 +490,39 @@ func setMCPJSONStringArray(server map[string]json.RawMessage, key string, values
 	server[key] = raw
 }
 
+func setMCPJSONInt(server map[string]json.RawMessage, key string, value int) {
+	if value <= 0 {
+		delete(server, key)
+		return
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		delete(server, key)
+		return
+	}
+	server[key] = raw
+}
+
+func setMCPJSONIntMap(server map[string]json.RawMessage, key string, values map[string]int) {
+	clean := make(map[string]int, len(values))
+	for k, v := range values {
+		if strings.TrimSpace(k) == "" || v <= 0 {
+			continue
+		}
+		clean[k] = v
+	}
+	if len(clean) == 0 {
+		delete(server, key)
+		return
+	}
+	raw, err := json.Marshal(clean)
+	if err != nil {
+		delete(server, key)
+		return
+	}
+	server[key] = raw
+}
+
 func setMCPJSONBool(server map[string]json.RawMessage, key string, value *bool) {
 	if value == nil {
 		delete(server, key)
@@ -435,7 +542,11 @@ func writeMCPJSON(path string, root map[string]json.RawMessage) error {
 		return fmt.Errorf("mcp config %s: %w", path, err)
 	}
 	out = append(out, '\n')
-	dir := filepath.Dir(path)
+	resolved, err := resolveConfigAccessPath(path, false)
+	if err != nil {
+		return fmt.Errorf("mcp config %s: %w", path, err)
+	}
+	dir := filepath.Dir(resolved)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("mcp config %s: create dir: %w", path, err)
 	}
@@ -453,7 +564,7 @@ func writeMCPJSON(path string, root map[string]json.RawMessage) error {
 		os.Remove(tmpPath)
 		return fmt.Errorf("mcp config %s: close temp: %w", path, err)
 	}
-	if err := fileutil.ReplaceFile(tmpPath, path); err != nil {
+	if err := fileutil.ReplaceFile(tmpPath, resolved); err != nil {
 		os.Remove(tmpPath)
 		return err
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,7 +50,12 @@ func waitForFile(t *testing.T, path, want string) {
 
 func waitForAutosaveIdle(t *testing.T, tab *WorkspaceTab) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	waitForAutosaveIdleWithin(t, tab, 2*time.Second)
+}
+
+func waitForAutosaveIdleWithin(t *testing.T, tab *WorkspaceTab, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		tab.saveMu.Lock()
 		idle := !tab.saving && !tab.saveAgain
@@ -87,13 +93,12 @@ func appWithTab(t *testing.T, path string) (*App, *WorkspaceTab) {
 // nil sink ctx (no webview) must not disable persistence.
 func TestTurnDonePersistsSession(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
-	_ = path
-	a, tab := appWithTab(t, path)
+	_, tab := appWithTab(t, path)
 
 	tab.sink.Emit(event.Event{Kind: event.TurnDone})
 
 	waitForFile(t, path, "remember this turn")
-	_ = a
+	waitForAutosaveIdle(t, tab)
 }
 
 // TestNonTurnDoneDoesNotPersist confirms only TurnDone triggers a save, so the
@@ -119,17 +124,337 @@ func TestScheduleSnapshotCoalesces(t *testing.T) {
 	_ = a
 
 	var wg sync.WaitGroup
-	for i := 0; i < 64; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 64 {
+		wg.Go(func() {
 			tab.sink.Emit(event.Event{Kind: event.TurnDone})
-		}()
+		})
 	}
 	wg.Wait()
 
 	waitForFile(t, path, "acknowledged")
 	waitForAutosaveIdle(t, tab)
+}
+
+func TestAutosaveFailureRetriesAndRecoversOnNextTurnDone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "blocked.jsonl")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("mkdir blocked path: %v", err)
+	}
+	a, tab := appWithTab(t, path)
+	_ = a
+
+	tab.sink.Emit(event.Event{Kind: event.TurnDone})
+	waitForAutosaveIdleWithin(t, tab, 5*time.Second)
+
+	tab.saveMu.Lock()
+	failures := tab.saveFailures
+	tab.saveMu.Unlock()
+	if failures == 0 {
+		t.Fatal("autosave failure should be recorded and retried")
+	}
+	if info, err := os.Stat(path); err != nil || !info.IsDir() {
+		t.Fatalf("blocked session path should still be the directory, info=%v err=%v", info, err)
+	}
+
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove blocked dir: %v", err)
+	}
+	tab.sink.Emit(event.Event{Kind: event.TurnDone})
+	waitForFile(t, path, "remember this turn")
+	waitForAutosaveIdle(t, tab)
+
+	tab.saveMu.Lock()
+	failures = tab.saveFailures
+	tab.saveMu.Unlock()
+	if failures != 0 {
+		t.Fatalf("autosave failures after recovery = %d, want 0", failures)
+	}
+}
+
+func TestDesktopSnapshotConflictRecoveryUpdatesTabAndProjectTree(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	root := globalTabWorkspaceRoot()
+	dir := desktopSessionDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	originalPath := filepath.Join(dir, "session.jsonl")
+	originalTopic := "topic_original"
+	if err := setTopicTitle("", originalTopic, "Original"); err != nil {
+		t.Fatalf("set original topic title: %v", err)
+	}
+	current := agent.NewSession("sys")
+	current.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	current.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	current.Add(provider.Message{Role: provider.RoleUser, Content: "disk second"})
+	if err := current.Save(originalPath); err != nil {
+		t.Fatalf("Save current: %v", err)
+	}
+	if err := agent.SaveBranchMeta(originalPath, agent.BranchMeta{
+		Scope:         "global",
+		TopicID:       originalTopic,
+		TopicTitle:    "Original",
+		Preview:       "first",
+		Turns:         2,
+		SchemaVersion: agent.BranchMetaCountsVersion,
+	}); err != nil {
+		t.Fatalf("SaveBranchMeta original: %v", err)
+	}
+
+	staleSess := agent.NewSession("sys")
+	staleSess.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	staleSess.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	staleSess.Add(provider.Message{Role: provider.RoleUser, Content: "local second"})
+	staleExec := agent.New(stubProvider{}, tool.NewRegistry(), staleSess, agent.Options{}, event.Discard)
+	app := &App{
+		tabs:             map[string]*WorkspaceTab{},
+		detachedSessions: map[string]*WorkspaceTab{},
+		activeTabID:      "recovery_tab",
+	}
+	tab := &WorkspaceTab{
+		ID:            "recovery_tab",
+		Scope:         "global",
+		WorkspaceRoot: root,
+		TopicID:       originalTopic,
+		TopicTitle:    "Original",
+		SessionPath:   originalPath,
+		Ready:         true,
+		model:         "test-model",
+		disabledMCP:   map[string]ServerView{},
+	}
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	tab.Ctrl = control.New(control.Options{
+		Executor:            staleExec,
+		SessionDir:          dir,
+		SessionPath:         originalPath,
+		Label:               "test",
+		Sink:                tab.sink,
+		SessionRecoveryMeta: app.tabSessionRecoveryMeta(tab),
+		OnSessionRecovered:  app.handleTabSessionRecovered(tab),
+	})
+	app.tabs[tab.ID] = tab
+
+	if err := tab.Ctrl.Snapshot(); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	recoveryPath := tab.Ctrl.SessionPath()
+	if recoveryPath == "" || recoveryPath == originalPath {
+		t.Fatalf("recovery path = %q, want distinct path", recoveryPath)
+	}
+	if tab.SessionPath != recoveryPath {
+		t.Fatalf("tab session path = %q, want recovery path %q", tab.SessionPath, recoveryPath)
+	}
+	saved := loadTabsFile()
+	if len(saved.Tabs) != 1 || saved.Tabs[0].ID != tab.ID {
+		t.Fatalf("saved tabs = %+v, want recovered tab %q", saved.Tabs, tab.ID)
+	}
+	if got := saved.Tabs[0].SessionPath; got != recoveryPath {
+		t.Fatalf("saved tab session path = %q, want recovery path %q", got, recoveryPath)
+	}
+	if tab.TopicID != originalTopic {
+		t.Fatalf("tab topic ID = %q, want original topic %q", tab.TopicID, originalTopic)
+	}
+	meta, ok, err := agent.LoadBranchMeta(recoveryPath)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta recovery ok=%v err=%v", ok, err)
+	}
+	if !meta.Recovered || meta.TopicID != tab.TopicID || meta.TopicTitle != tab.TopicTitle {
+		t.Fatalf("recovery meta = %+v, tab topic=%q/%q", meta, tab.TopicID, tab.TopicTitle)
+	}
+	tabMeta := app.tabMeta(tab, true)
+	if !tabMeta.Recovered || tabMeta.RecoveryDigest != meta.RecoveryDigest || tabMeta.RecoveryParentID != string(meta.ParentID) {
+		t.Fatalf("tab recovery meta = %+v, want digest %q parent %q", tabMeta, meta.RecoveryDigest, meta.ParentID)
+	}
+	nodes := app.ListProjectTree()
+	foundOriginal := false
+	var walk func([]ProjectNode)
+	walk = func(list []ProjectNode) {
+		for _, node := range list {
+			if node.Recovered {
+				t.Fatalf("project tree should hide recovery metadata, got node %+v", node)
+			}
+			if node.TopicID == originalTopic {
+				foundOriginal = true
+			}
+			walk(node.Children)
+		}
+	}
+	walk(nodes)
+	if !foundOriginal {
+		t.Fatalf("project tree did not include original topic %q: %#v", originalTopic, nodes)
+	}
+}
+
+func TestDesktopSnapshotConflictRecoveryRequiresRecoveryLease(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	root := globalTabWorkspaceRoot()
+	dir := desktopSessionDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	originalPath := filepath.Join(dir, "session.jsonl")
+	current := agent.NewSession("sys")
+	current.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	current.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	current.Add(provider.Message{Role: provider.RoleUser, Content: "disk second"})
+	if err := current.Save(originalPath); err != nil {
+		t.Fatalf("Save current: %v", err)
+	}
+
+	staleSess := agent.NewSession("sys")
+	staleSess.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	staleSess.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	staleSess.Add(provider.Message{Role: provider.RoleUser, Content: "local second"})
+	recovery, err := staleSess.SaveRecoveryBranch(agent.RecoveryBranchOptions{
+		OriginalPath: originalPath,
+		BranchMeta: agent.BranchMeta{
+			Name:       agent.RecoveryBranchDefaultName,
+			Scope:      "global",
+			TopicID:    "topic_recovery",
+			TopicTitle: "Recovery",
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveRecoveryBranch: %v", err)
+	}
+	lease, err := agent.TryAcquireSessionLease(recovery.Path)
+	if err != nil {
+		t.Fatalf("TryAcquireSessionLease recovery: %v", err)
+	}
+	defer lease.Release()
+
+	staleExec := agent.New(stubProvider{}, tool.NewRegistry(), staleSess, agent.Options{}, event.Discard)
+	runtimeEvents := make(chan runtimeEventEnvelope, 4)
+	app := &App{
+		ctx:              context.Background(),
+		tabs:             map[string]*WorkspaceTab{},
+		detachedSessions: map[string]*WorkspaceTab{},
+		activeTabID:      "recovery_tab",
+	}
+	app.runtimeEvents.emit = func(ctx context.Context, name string, payload ...any) {
+		runtimeEvents <- runtimeEventEnvelope{
+			ctx:     ctx,
+			name:    name,
+			payload: append([]any(nil), payload...),
+		}
+	}
+	tab := &WorkspaceTab{
+		ID:            "recovery_tab",
+		Scope:         "global",
+		WorkspaceRoot: root,
+		TopicID:       "topic_original",
+		TopicTitle:    "Original",
+		SessionPath:   originalPath,
+		Ready:         true,
+		model:         "test-model",
+		disabledMCP:   map[string]ServerView{},
+	}
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	tab.Ctrl = control.New(control.Options{
+		Executor:            staleExec,
+		SessionDir:          dir,
+		SessionPath:         originalPath,
+		Label:               "test",
+		Sink:                tab.sink,
+		SessionRecoveryMeta: app.tabSessionRecoveryMeta(tab),
+		OnSessionRecovered:  app.handleTabSessionRecovered(tab),
+	})
+	app.tabs[tab.ID] = tab
+	app.mu.Lock()
+	app.saveTabsLocked()
+	app.mu.Unlock()
+
+	err = tab.Ctrl.Snapshot()
+	if !errors.Is(err, agent.ErrSessionLeaseHeld) {
+		t.Fatalf("Snapshot err = %v, want ErrSessionLeaseHeld", err)
+	}
+	if got := tab.Ctrl.SessionPath(); got != originalPath {
+		t.Fatalf("controller session path = %q, want original %q", got, originalPath)
+	}
+	if tab.SessionPath != originalPath {
+		t.Fatalf("tab session path = %q, want original %q", tab.SessionPath, originalPath)
+	}
+	if tab.TopicID != "topic_original" {
+		t.Fatalf("tab topic ID = %q, want original topic", tab.TopicID)
+	}
+	saved := loadTabsFile()
+	if len(saved.Tabs) != 1 || saved.Tabs[0].SessionPath != originalPath {
+		t.Fatalf("saved tabs after failed recovery = %+v, want original path %q", saved.Tabs, originalPath)
+	}
+
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case emitted := <-runtimeEvents:
+			if emitted.name != "session:recovery-failed" {
+				continue
+			}
+			if len(emitted.payload) != 1 {
+				t.Fatalf("session:recovery-failed payload count = %d, want 1", len(emitted.payload))
+			}
+			failed, ok := emitted.payload[0].(sessionRecoveryFailedEvent)
+			if !ok {
+				t.Fatalf("session:recovery-failed payload type = %T, want sessionRecoveryFailedEvent", emitted.payload[0])
+			}
+			if failed.Reason != "lease_held" {
+				t.Fatalf("session:recovery-failed reason = %q, want lease_held", failed.Reason)
+			}
+			return
+		case <-deadline:
+			t.Fatal("session:recovery-failed event was not emitted")
+		}
+	}
+}
+
+func TestSetActiveTabBlocksWhenCurrentSessionCannotPersist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "blocked.jsonl")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("mkdir blocked path: %v", err)
+	}
+	a, _ := appWithTab(t, path)
+	a.tabs["target_tab"] = &WorkspaceTab{
+		ID:          "target_tab",
+		Scope:       "global",
+		Ready:       true,
+		disabledMCP: map[string]ServerView{},
+	}
+	a.tabOrder = []string{"test_tab", "target_tab"}
+
+	err := a.SetActiveTab("target_tab")
+	if err == nil || !strings.Contains(err.Error(), "save current session before switching tabs") {
+		t.Fatalf("SetActiveTab error = %v, want persistence failure", err)
+	}
+	if a.activeTabID != "test_tab" {
+		t.Fatalf("active tab = %q, want original tab after failed save", a.activeTabID)
+	}
+}
+
+func TestRebindSessionBlocksWhenCurrentSessionCannotPersist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "blocked.jsonl")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("mkdir blocked path: %v", err)
+	}
+	a, tab := appWithTab(t, path)
+	target := filepath.Join(t.TempDir(), "target.jsonl")
+	sess := agent.NewSession("system")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "target prompt"})
+	if err := sess.Save(target); err != nil {
+		t.Fatalf("save target: %v", err)
+	}
+	loaded, err := agent.LoadSession(target)
+	if err != nil {
+		t.Fatalf("load target: %v", err)
+	}
+
+	err = a.rebindTabToLoadedSessionPath(tab, target, loaded)
+	if err == nil || !strings.Contains(err.Error(), "save current session before switching sessions") {
+		t.Fatalf("rebind error = %v, want persistence failure", err)
+	}
+	if tab.Ctrl == nil || tab.Ctrl.SessionPath() != path {
+		t.Fatalf("tab controller/path changed after failed save: ctrl=%v path=%q", tab.Ctrl, tab.currentSessionPath())
+	}
 }
 
 // TestCloseTabNoResurrectionFromAutosave is the regression test for #4384.
@@ -184,6 +509,34 @@ func TestCloseTabNoResurrectionFromAutosave(t *testing.T) {
 	// can write either.
 	if got := doomedTab.Ctrl.SessionPath(); got != "" {
 		t.Fatalf("controller session path = %q after CloseTab, want empty so snapshots no-op", got)
+	}
+}
+
+func TestCloseTabBlocksWhenSessionCannotPersist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "blocked.jsonl")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("mkdir blocked path: %v", err)
+	}
+	a, tab := appWithTab(t, path)
+	survivor := &WorkspaceTab{
+		ID:          "survivor_tab",
+		Scope:       "global",
+		Ready:       true,
+		disabledMCP: map[string]ServerView{},
+	}
+	survivor.sink = &tabEventSink{tabID: survivor.ID, app: a}
+	a.tabs[survivor.ID] = survivor
+	a.tabOrder = []string{tab.ID, survivor.ID}
+
+	err := a.CloseTab(tab.ID)
+	if err == nil || !strings.Contains(err.Error(), "save current session before closing tab") {
+		t.Fatalf("CloseTab error = %v, want persistence failure", err)
+	}
+	if _, ok := a.tabs[tab.ID]; !ok {
+		t.Fatal("tab was removed even though its session could not be saved")
+	}
+	if tab.Ctrl == nil || tab.Ctrl.SessionPath() != path {
+		t.Fatalf("tab controller/path changed after failed close: ctrl=%v path=%q", tab.Ctrl, tab.currentSessionPath())
 	}
 }
 

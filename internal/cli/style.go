@@ -3,43 +3,41 @@ package cli
 import (
 	"os"
 
-	"golang.org/x/term"
+	"github.com/charmbracelet/colorprofile"
 )
 
-// colorEnabled is decided once at startup: only colorize when writing to a real
-// terminal and the user hasn't opted out via NO_COLOR (https://no-color.org) or
-// a dumb TERM. Piped/redirected output and CI stay plain so scripts aren't broken.
-var colorEnabled = detectColor()
+// activeColorProfile is the single description of what the terminal can render.
+// colorprofile owns the NO_COLOR, CLICOLOR_FORCE, TERM=dumb and isatty rules,
+// so piped output stays plain. Colour fidelity is derived from it, never probed
+// a second time.
+var activeColorProfile = detectColorProfile(ansiConsoleReady())
 
-func detectColor() bool {
-	if os.Getenv("NO_COLOR") != "" {
-		return false
+func detectColorProfile(ansiReady bool) colorprofile.Profile {
+	if !ansiReady {
+		return colorprofile.ASCII
 	}
-	if os.Getenv("TERM") == "dumb" {
-		return false
-	}
-	return term.IsTerminal(int(os.Stdout.Fd()))
+	return colorprofile.Detect(os.Stdout, os.Environ())
+}
+
+func colorOn() bool {
+	return activeColorProfile > colorprofile.ASCII
+}
+
+func trueColorTerminal() bool {
+	return activeColorProfile == colorprofile.TrueColor
 }
 
 const (
 	ansiReset   = "\033[0m"
 	ansiBold    = "\033[1m"
-	ansiDim     = "\033[2m"
-	ansiGreen   = "\033[32m"
-	ansiRed     = "\033[31m"
-	ansiYellow  = "\033[33m"
-	ansiBlue    = "\033[38;5;39m"
-	ansiCyan    = "\033[38;5;44m"
-	ansiMagenta = "\033[38;5;176m"
 	ansiReverse = "\033[7m"
-	// ansiAccent is the dark theme fallback for Reasonix's warm copper brand
-	// colour. accent() uses the active CLI theme, but tests and legacy callers can
-	// still refer to this concrete escape sequence.
+	// ansiAccent is the dark graphite accent as a literal escape, for tests that
+	// pin the concrete sequence instead of the active theme.
 	ansiAccent = "\033[38;5;173m"
 )
 
 func sgr(code, s string) string {
-	if !colorEnabled {
+	if !colorOn() {
 		return s
 	}
 	return code + s + ansiReset

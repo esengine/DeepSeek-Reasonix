@@ -1,0 +1,5 @@
+node_modules/
+.wrangler/
+dist/
+# Local-only secrets for `wrangler dev` (RESEND_API_KEY, SESSION_PEPPER, ...)
+.dev.vars

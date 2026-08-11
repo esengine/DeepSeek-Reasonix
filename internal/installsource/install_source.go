@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"reasonix/internal/config"
+	"reasonix/internal/pluginpkg"
 	"reasonix/internal/skill"
 	"reasonix/internal/tool"
 )
@@ -66,6 +67,12 @@ type installSourceTool struct {
 	connectMCP   MCPConnector
 	onDisconnect OnDisconnectFunc
 	approval     ApprovalFunc
+	// preparePlugin overrides plugin source preparation in tests. nil uses
+	// preparePluginSource. Plan and apply both resolve the source through the
+	// same function, and git sources additionally report the resolved commit,
+	// so the capability set the approval covers is by construction the one
+	// that gets installed (apply pins the approved commit on divergence).
+	preparePlugin func(ctx context.Context, source, mode string) (root, commit string, cleanup func(), err error)
 }
 
 // NewTool returns a tool.Tool that callers register with the agent's
@@ -118,7 +125,7 @@ func (*installSourceTool) Name() string   { return "install_source" }
 func (*installSourceTool) ReadOnly() bool { return false }
 
 func (*installSourceTool) Description() string {
-	return "Plan, install, or uninstall a Reasonix skill or MCP server from a URL, local file/folder, .mcp.json, executable, or package name. Two-phase: with apply=false (default) returns a deterministic plan with per-action risk level; with apply=true copies/registers skills or connects and persists MCP servers after validation. op='uninstall' removes a previously installed skill (by name) or MCP server (by name) from the active config and the live session."
+	return "Plan, install, or uninstall a Reasonix skill, MCP server, or plugin package from a URL, local file/folder, .mcp.json, executable, or package name. Two-phase: with apply=false (default) returns a deterministic plan with per-action risk level; with apply=true copies/registers skills, connects/persists MCP servers, or installs plugin packages after validation. op='uninstall' removes a previously installed skill, MCP server, or plugin package by name."
 }
 
 func (*installSourceTool) Schema() json.RawMessage {
@@ -127,7 +134,7 @@ func (*installSourceTool) Schema() json.RawMessage {
 "properties":{
   "op":{"type":"string","enum":["install","uninstall"],"description":"Whether to install (default) or uninstall."},
   "source":{"type":"string","description":"URL, local file/folder path, .mcp.json path, or package name to install from. Ignored when op=uninstall (use name instead)."},
-  "kind":{"type":"string","enum":["auto","skill","mcp"],"description":"Capability kind. Defaults to auto."},
+  "kind":{"type":"string","enum":["auto","skill","mcp","plugin"],"description":"Capability kind. Defaults to auto."},
   "apply":{"type":"boolean","description":"false (default) only returns an install plan; true performs the planned writes/connects. Ignored for op=uninstall."},
   "scope":{"type":"string","enum":["project","global"],"description":"Where to persist config or copy skills. MCP installs default to global so every project can use them; project-root .mcp.json imports default to project; skills default to project when a workspace exists, otherwise global."},
   "mode":{"type":"string","enum":["auto","copy","link","register"],"description":"Skill install mode. auto registers multi-skill roots and copies single skills into the canonical <skill-name>/SKILL.md layout; copy copies skill files/folders; link creates symlinks; register adds a skill root to [skills].paths."},
@@ -181,8 +188,20 @@ func (t *installSourceTool) Execute(ctx context.Context, raw json.RawMessage) (s
 
 	actions, warnings, err := t.plan(ctx, req)
 	if err != nil {
+		if errors.Is(err, ErrNoCompatibleCapabilities) {
+			return marshalJSON(response{
+				OK: false, Status: "blocked", Op: req.Op, Applied: false,
+				Source: req.Source, Kind: "plugin", Scope: req.Scope, Mode: req.Mode,
+				Warnings: warnings, Error: err.Error(),
+				Next: "Choose a plugin that exports a supported skill, command, agent, hook, or MCP server.",
+			}), nil
+		}
 		return "", err
 	}
+	// Marketplace planning may keep one temporary clone alive so apply can
+	// reuse the exact approved snapshot. Clean it on every exit path, including
+	// plan-ID mismatch or host approval denial before executeApply runs.
+	defer cleanupActionResources(actions)
 	planID := computePlanID(req, actions)
 	if len(actions) == 0 {
 		out := response{
@@ -196,7 +215,7 @@ func (t *installSourceTool) Execute(ctx context.Context, raw json.RawMessage) (s
 			Mode:     req.Mode,
 			PlanID:   planID,
 			Warnings: warnings,
-			Next:     "No installable Reasonix skill or MCP server was detected. Ask the user for a direct SKILL.md, skill root, .mcp.json, MCP endpoint, or package name.",
+			Next:     "No installable Reasonix skill, MCP server, or plugin package was detected. Ask the user for a direct SKILL.md, skill root, .mcp.json, plugin manifest, MCP endpoint, or package name.",
 		}
 		return marshalJSON(out), nil
 	}
@@ -296,6 +315,15 @@ func (t *installSourceTool) executeApply(ctx context.Context, req request, actio
 		Warnings: warnings,
 		Next:     next,
 	})
+}
+
+func cleanupActionResources(actions []action) {
+	for i := range actions {
+		if actions[i].cleanup != nil {
+			actions[i].cleanup()
+			actions[i].cleanup = nil
+		}
+	}
 }
 
 // executeUninstall handles op=uninstall. It locates the named entry in the
@@ -418,6 +446,31 @@ func (t *installSourceTool) uninstallActionsForScope(name, scope string) []actio
 				},
 			})
 			break
+		}
+	}
+	if scope == "global" || scope == "" {
+		if st, err := pluginpkg.LoadState(t.reasonixHome); err == nil {
+			for _, p := range st.Plugins {
+				if p.Name != name {
+					continue
+				}
+				root := pluginpkg.ResolveRoot(t.reasonixHome, p.Root)
+				actions = append(actions, action{
+					Kind:         "plugin",
+					Action:       "remove_plugin_package",
+					Name:         p.Name,
+					Target:       root,
+					Scope:        "global",
+					ConfigPath:   pluginpkg.StatePath(t.reasonixHome),
+					ManifestKind: p.ManifestKind,
+					Version:      p.Version,
+					RiskLevel:    RiskMedium,
+					RiskReasons: []string{
+						"removes a plugin package and disables its skills, hooks, and MCP servers",
+					},
+				})
+				break
+			}
 		}
 	}
 	return actions
@@ -636,6 +689,8 @@ func kindCounts(actions []action) kindTally {
 			out.Skill++
 		case "mcp":
 			out.MCP++
+		case "plugin":
+			out.Plugin++
 		}
 	}
 	return out

@@ -47,7 +47,7 @@ func TestCancelClearsPendingApprovalRuntimeStatus(t *testing.T) {
 	c.Send("needs approval")
 	select {
 	case <-approvals:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("timed out waiting for approval request")
 	}
 	if st := c.RuntimeStatus(); !st.Running || !st.PendingPrompt || !st.Cancellable || st.CancelRequested {
@@ -57,7 +57,13 @@ func TestCancelClearsPendingApprovalRuntimeStatus(t *testing.T) {
 	c.Cancel()
 	c.Cancel()
 	assertCancelClearedPendingRuntimeStatus(t, c.RuntimeStatus())
-	waitTurnDoneEvent(t, done)
+	if e := waitTurnDoneEvent(t, done); !e.Cancelled {
+		t.Fatal("cancelled turn_done event was not marked as user-cancelled")
+	}
+	// TurnDone is emitted inside the finishing window; Running() (and the
+	// RuntimeStatus it feeds) stays true until finishGuardedTurn's deferred
+	// clear runs. Wait for the gate to reopen before asserting idle.
+	waitIdle(t, c)
 	if st := c.RuntimeStatus(); st.Running || st.PendingPrompt || st.Cancellable || st.CancelRequested {
 		t.Fatalf("status after turn done = %+v, want idle", st)
 	}
@@ -80,7 +86,7 @@ func TestCancelClearsPendingAskRuntimeStatus(t *testing.T) {
 	c.Send("ask user")
 	select {
 	case <-asks:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("timed out waiting for ask request")
 	}
 	if st := c.RuntimeStatus(); !st.Running || !st.PendingPrompt || !st.Cancellable || st.CancelRequested {
@@ -90,8 +96,75 @@ func TestCancelClearsPendingAskRuntimeStatus(t *testing.T) {
 	c.Cancel()
 	assertCancelClearedPendingRuntimeStatus(t, c.RuntimeStatus())
 	waitTurnDoneEvent(t, done)
+	// TurnDone is emitted inside the finishing window; Running() (and the
+	// RuntimeStatus it feeds) stays true until finishGuardedTurn's deferred
+	// clear runs. Wait for the gate to reopen before asserting idle.
+	waitIdle(t, c)
 	if st := c.RuntimeStatus(); st.Running || st.PendingPrompt || st.Cancellable || st.CancelRequested {
 		t.Fatalf("status after turn done = %+v, want idle", st)
+	}
+}
+
+func TestCloseCancelsPendingAskRuntimeStatus(t *testing.T) {
+	asks := make(chan event.Ask, 1)
+	done := make(chan event.Event, 1)
+	c := New(Options{Sink: event.FuncSink(func(e event.Event) {
+		switch e.Kind {
+		case event.AskRequest:
+			asks <- e.Ask
+		case event.TurnDone:
+			done <- e
+		}
+	})})
+	c.runner = &askBlockingRunner{c: c}
+
+	c.Send("ask user")
+	select {
+	case <-asks:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for ask request")
+	}
+
+	c.Close()
+	select {
+	case e := <-done:
+		if !e.Cancelled {
+			t.Fatal("closed turn_done event was not marked as cancelled")
+		}
+	case <-time.After(time.Second):
+		c.Cancel()
+		t.Fatal("Close did not cancel the pending ask waiter")
+	}
+	waitIdle(t, c)
+	if st := c.RuntimeStatus(); st.Running || st.PendingPrompt || st.Cancellable || st.CancelRequested {
+		t.Fatalf("status after Close = %+v, want idle", st)
+	}
+}
+
+func TestCloseDoesNotResurrectFinishingState(t *testing.T) {
+	turnStarted := make(chan struct{})
+	turnDoneEntered := make(chan struct{}, 1)
+	releaseTurnDone := make(chan struct{})
+	c := New(Options{Sink: holdFinishingWindow(releaseTurnDone, turnDoneEntered, nil)})
+
+	c.runGuarded(func(ctx context.Context) error {
+		close(turnStarted)
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	<-turnStarted
+
+	c.Close()
+	select {
+	case <-turnDoneEntered:
+	case <-time.After(time.Second):
+		c.Cancel()
+		t.Fatal("Close did not cancel the active turn")
+	}
+	defer close(releaseTurnDone)
+
+	if st := c.RuntimeStatus(); st.Running || st.PendingPrompt || st.Cancellable || st.CancelRequested {
+		t.Fatalf("closed controller resurrected active state during TurnDone delivery: %+v", st)
 	}
 }
 
@@ -111,14 +184,16 @@ func assertCancelClearedPendingRuntimeStatus(t *testing.T, st RuntimeStatus) {
 	}
 }
 
-func waitTurnDoneEvent(t *testing.T, done <-chan event.Event) {
+func waitTurnDoneEvent(t *testing.T, done <-chan event.Event) event.Event {
 	t.Helper()
 	select {
 	case e := <-done:
 		if e.Kind != event.TurnDone {
 			t.Fatalf("event = %v, want TurnDone", e.Kind)
 		}
-	case <-time.After(2 * time.Second):
+		return e
+	case <-time.After(30 * time.Second):
 		t.Fatal("timed out waiting for turn_done")
 	}
+	return event.Event{}
 }

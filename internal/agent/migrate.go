@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -9,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/provider"
 )
 
@@ -29,8 +32,9 @@ type legacyEvent struct {
 type legacyToolCall struct {
 	ID       string `json:"id"`
 	Function struct {
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
+		Name             string `json:"name"`
+		Arguments        string `json:"arguments"`
+		ThoughtSignature string `json:"thought_signature"`
 	} `json:"function"`
 }
 
@@ -79,14 +83,39 @@ func MigrateLegacySessionsFromConfigDir(srcDir, globalDest string, projectDir fu
 	return migrateLegacySessions(srcDir, globalDest, legacyRoutedConfigImportMarker, projectDir)
 }
 
+// MigrateLegacySessionsFromExplicitDir imports sessions from a user-selected
+// legacy directory. It uses a source-specific marker so a previous default
+// /migrate pass cannot hide later imports from a custom Windows install/data
+// directory.
+func MigrateLegacySessionsFromExplicitDir(srcDir, globalDest string, projectDir func(workspaceRoot string) string) (int, error) {
+	marker := explicitLegacyImportMarker(srcDir)
+	return migrateLegacySessionsWithMarkers(srcDir, globalDest, marker, marker+".jsonl", projectDir)
+}
+
+func explicitLegacyImportMarker(srcDir string) string {
+	key := strings.TrimSpace(srcDir)
+	if abs, err := filepath.Abs(key); err == nil {
+		key = abs
+	}
+	sum := sha256.Sum256([]byte(filepath.Clean(key)))
+	return ".legacy-imported.explicit." + hex.EncodeToString(sum[:8])
+}
+
 func migrateLegacySessions(srcDir, globalDest, marker string, projectDir func(string) string) (int, error) {
+	return migrateLegacySessionsWithMarkers(srcDir, globalDest, marker, legacyJsonlPassMarker, projectDir)
+}
+
+func migrateLegacySessionsWithMarkers(srcDir, globalDest, marker, jsonlMarker string, projectDir func(string) string) (int, error) {
 	if strings.TrimSpace(marker) == "" {
 		marker = legacyImportMarker
+	}
+	if strings.TrimSpace(jsonlMarker) == "" {
+		jsonlMarker = legacyJsonlPassMarker
 	}
 	// Gate on both the routed marker AND the jsonl marker: an existing upgrader
 	// whose events pass already stamped the routed marker must still reach the
 	// .jsonl-only / subdir passes below (Pass 1 is idempotent via dest checks).
-	if importMarkerExists(globalDest, marker) && importMarkerExists(globalDest, legacyJsonlPassMarker) {
+	if importMarkerExists(globalDest, marker) && importMarkerExists(globalDest, jsonlMarker) {
 		// The one-time full passes already ran for this source. Still run the
 		// bounded re-home pass: a user who downgrades to a pre-routing build
 		// (which writes every session to the flat dir) and then upgrades again
@@ -105,7 +134,7 @@ func migrateLegacySessions(srcDir, globalDest, marker string, projectDir func(st
 	hasEvents := map[string]bool{}
 	for _, e := range entries {
 		name := e.Name()
-		if !e.IsDir() && strings.HasSuffix(name, ".events.jsonl") {
+		if !e.IsDir() && strings.HasSuffix(name, ".events.jsonl") && !isNativeSessionEventLog(filepath.Join(srcDir, name)) {
 			hasEvents[strings.TrimSuffix(name, ".events.jsonl")] = true
 		}
 	}
@@ -119,6 +148,9 @@ func migrateLegacySessions(srcDir, globalDest, marker string, projectDir func(st
 	for _, e := range entries {
 		name := e.Name()
 		if e.IsDir() || !strings.HasSuffix(name, ".events.jsonl") {
+			continue
+		}
+		if isNativeSessionEventLog(filepath.Join(srcDir, name)) {
 			continue
 		}
 		base := strings.TrimSuffix(name, ".events.jsonl")
@@ -162,7 +194,10 @@ func migrateLegacySessions(srcDir, globalDest, marker string, projectDir func(st
 			continue
 		}
 		s := &Session{Messages: msgs}
-		if err := s.Save(dest); err != nil {
+		if err := s.SaveIfAbsent(dest); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				continue
+			}
 			return imported, err
 		}
 		if eventsInfo != nil {
@@ -177,7 +212,7 @@ func migrateLegacySessions(srcDir, globalDest, marker string, projectDir func(st
 	// desktop, subagent, and later-version chat sessions). The pass is gated by
 	// its own marker so existing upgraders whose events passes completed still
 	// get their .jsonl-only sessions imported.
-	if !importMarkerExists(globalDest, legacyJsonlPassMarker) {
+	if !importMarkerExists(globalDest, jsonlMarker) {
 		n, failed := importJsonlSessions(entries, srcDir, globalDest, hasEvents, projectDir)
 		imported += n
 		hadArtifactFailure = hadArtifactFailure || failed
@@ -261,7 +296,7 @@ func migrateLegacySessions(srcDir, globalDest, marker string, projectDir func(st
 	if hadArtifactFailure {
 		return imported, nil
 	}
-	writeImportMarkers(globalDest, marker, legacyImportMarker, legacyEventsHomeImportMarker, legacyEventsConfigImportMarker, legacyJsonlPassMarker)
+	writeImportMarkers(globalDest, marker, legacyImportMarker, legacyEventsHomeImportMarker, legacyEventsConfigImportMarker, jsonlMarker)
 	return imported, nil
 }
 
@@ -302,7 +337,11 @@ func importJsonlSessions(entries []os.DirEntry, srcDir, globalDest string, hasEv
 			continue
 		}
 		srcInfo, _ := e.Info()
-		if err := transformAndCopyJsonl(jsonlPath, dest); err != nil {
+		if isNativeSessionEventLog(SessionEventLogPath(jsonlPath)) {
+			if err := saveNativeSessionCopy(jsonlPath, dest); err != nil {
+				continue
+			}
+		} else if err := transformAndCopyJsonl(jsonlPath, dest); err != nil {
 			continue
 		}
 		if srcInfo != nil {
@@ -357,7 +396,7 @@ func migrateSubDirectory(subDir, globalDest string, projectDir func(string) stri
 	hasEvents := map[string]bool{}
 	for _, e := range entries {
 		name := e.Name()
-		if !e.IsDir() && strings.HasSuffix(name, ".events.jsonl") {
+		if !e.IsDir() && strings.HasSuffix(name, ".events.jsonl") && !isNativeSessionEventLog(filepath.Join(subDir, name)) {
 			hasEvents[strings.TrimSuffix(name, ".events.jsonl")] = true
 		}
 	}
@@ -372,6 +411,9 @@ func migrateSubDirectory(subDir, globalDest string, projectDir func(string) stri
 		reconstruct := false
 		switch {
 		case strings.HasSuffix(name, ".events.jsonl"):
+			if isNativeSessionEventLog(filepath.Join(subDir, name)) {
+				continue
+			}
 			base = strings.TrimSuffix(name, ".events.jsonl")
 			srcPath = filepath.Join(subDir, name)
 			// Prefer .jsonl sidecar if it's newer.
@@ -421,8 +463,15 @@ func migrateSubDirectory(subDir, globalDest string, projectDir func(string) stri
 				continue
 			}
 			s := &Session{Messages: msgs}
-			if err := s.Save(dest); err != nil {
+			if err := s.SaveIfAbsent(dest); err != nil {
+				if errors.Is(err, os.ErrExist) {
+					continue
+				}
 				return imported, err
+			}
+		} else if isNativeSessionEventLog(SessionEventLogPath(srcPath)) {
+			if err := saveNativeSessionCopy(srcPath, dest); err != nil {
+				continue
 			}
 		} else {
 			if err := transformAndCopyJsonl(srcPath, dest); err != nil {
@@ -453,6 +502,23 @@ func isMessageFormat(path string) bool {
 	return strings.HasPrefix(s, `{"role":`)
 }
 
+// isNativeSessionEventLog reports whether the file at an .events.jsonl path is
+// a native session event log (as opposed to a legacy v0.x event transcript
+// that happens to share the suffix).
+func isNativeSessionEventLog(path string) bool {
+	sessionPath := strings.TrimSuffix(path, ".events.jsonl") + ".jsonl"
+	probe, err := probeSessionEventLog(sessionPath)
+	return err == nil && probe.native && probe.size > 0
+}
+
+func saveNativeSessionCopy(src, dst string) error {
+	session, err := LoadSession(src)
+	if err != nil {
+		return err
+	}
+	return session.SaveIfAbsent(dst)
+}
+
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
@@ -471,8 +537,9 @@ type legacyAssistantMsg struct {
 type legacyToolCallObj struct {
 	ID       string `json:"id"`
 	Function struct {
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
+		Name             string `json:"name"`
+		Arguments        string `json:"arguments"`
+		ThoughtSignature string `json:"thought_signature"`
 	} `json:"function"`
 }
 
@@ -530,9 +597,10 @@ func transformAndCopyJsonl(src, dst string) error {
 		flatCalls := make([]provider.ToolCall, len(legacyCalls))
 		for i, tc := range legacyCalls {
 			flatCalls[i] = provider.ToolCall{
-				ID:        tc.ID,
-				Name:      tc.Function.Name,
-				Arguments: tc.Function.Arguments,
+				ID:               tc.ID,
+				Name:             tc.Function.Name,
+				Arguments:        tc.Function.Arguments,
+				ThoughtSignature: tc.Function.ThoughtSignature,
 			}
 		}
 		// Re-serialize the full message with flat tool_calls. We only modify
@@ -560,7 +628,7 @@ func transformAndCopyJsonl(src, dst string) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpPath, dst); err != nil {
+	if err := publishFileNoReplace(tmpPath, dst); err != nil {
 		return err
 	}
 	ok = true
@@ -571,7 +639,7 @@ func transformAndCopyJsonl(src, dst string) error {
 // sidecars yield the zero value (session routes to the global dir, untitled).
 func readLegacyMeta(srcDir, base string) legacyMeta {
 	var m legacyMeta
-	b, err := os.ReadFile(filepath.Join(srcDir, base+".meta.json"))
+	b, err := fileencoding.ReadFileUTF8(filepath.Join(srcDir, base+".meta.json"))
 	if err != nil {
 		return m
 	}
@@ -586,25 +654,25 @@ func dirExists(path string) bool {
 	return err == nil && info.IsDir()
 }
 
-// moveFlatImport re-homes a session the flat import left in the global dir.
-// The legacy event log's mtime was stamped onto the imported file, so a match
-// identifies it; a same-named native v1+ session never matches and stays put.
-func moveFlatImport(oldPath, newPath string, srcInfo os.FileInfo) bool {
-	if srcInfo == nil {
-		return false
+// publishFileNoReplace atomically publishes a completed sibling temp file
+// without replacing a destination another startup/import writer created.
+// The temp and destination share a directory, so a hard link is atomic and
+// portable across the filesystems Reasonix supports.
+func publishFileNoReplace(tmp, dst string) error {
+	if err := linkFileNoReplace(tmp, dst); err != nil {
+		return err
 	}
-	info, err := os.Stat(oldPath)
-	if err != nil {
-		return false
+	return os.Remove(tmp)
+}
+
+func linkFileNoReplace(src, dst string) error {
+	if err := os.Link(src, dst); err != nil {
+		if os.IsExist(err) {
+			return os.ErrExist
+		}
+		return err
 	}
-	d := info.ModTime().Sub(srcInfo.ModTime())
-	if d < -2*time.Second || d > 2*time.Second {
-		return false
-	}
-	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
-		return false
-	}
-	return os.Rename(oldPath, newPath) == nil
+	return nil
 }
 
 // recordImportedTitle stores the legacy summary as the session's display title
@@ -616,7 +684,7 @@ func recordImportedTitle(destDir, base, summary string) {
 	}
 	path := filepath.Join(destDir, ".titles.json")
 	titles := map[string]string{}
-	if b, err := os.ReadFile(path); err == nil {
+	if b, err := fileencoding.ReadFileUTF8(path); err == nil {
 		_ = json.Unmarshal(b, &titles)
 	}
 	key := base + ".jsonl"
@@ -915,7 +983,10 @@ func reconstructSession(path string) ([]provider.Message, error) {
 		case "model.final":
 			m := provider.Message{Role: provider.RoleAssistant, Content: e.Content, ReasoningContent: e.ReasoningContent}
 			for _, tc := range e.ToolCalls {
-				m.ToolCalls = append(m.ToolCalls, provider.ToolCall{ID: tc.ID, Name: tc.Function.Name, Arguments: tc.Function.Arguments})
+				m.ToolCalls = append(m.ToolCalls, provider.ToolCall{
+					ID: tc.ID, Name: tc.Function.Name, Arguments: tc.Function.Arguments,
+					ThoughtSignature: tc.Function.ThoughtSignature,
+				})
 				toolName[tc.ID] = tc.Function.Name
 			}
 			msgs = append(msgs, m)

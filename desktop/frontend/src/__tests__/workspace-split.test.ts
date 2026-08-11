@@ -9,6 +9,8 @@ import {
 } from "../lib/workspaceSplit";
 import { resolveWorkspacePanelWidth } from "../lib/workspaceLayout";
 import { closeWorkspacePreviewTab } from "../lib/workspacePreviewTabs";
+import { shouldScrollWorkspaceTreeSelection } from "../lib/workspaceTreeReveal";
+import { mergeWorkspaceSearchResults } from "../lib/workspaceTreeSearch";
 
 let passed = 0;
 let failed = 0;
@@ -192,6 +194,63 @@ eq(
   }),
   effectiveEvenTreeWidth,
   "entering manual resize from even split keeps the currently rendered tree width",
+);
+
+eq(
+  shouldScrollWorkspaceTreeSelection({
+    selectedPath: "src/App.tsx",
+    pendingRevealPath: "src/App.tsx",
+    actualTreeVisible: true,
+    selectedIndex: 42,
+  }),
+  true,
+  "pending file reveal scrolls once the selected row is present",
+);
+
+eq(
+  shouldScrollWorkspaceTreeSelection({
+    selectedPath: "src/App.tsx",
+    pendingRevealPath: null,
+    actualTreeVisible: true,
+    selectedIndex: 42,
+  }),
+  false,
+  "manual folder changes do not re-scroll to the previous selected file",
+);
+
+eq(
+  shouldScrollWorkspaceTreeSelection({
+    selectedPath: "src/App.tsx",
+    pendingRevealPath: "src/App.tsx",
+    actualTreeVisible: true,
+    selectedIndex: -1,
+  }),
+  false,
+  "pending file reveal waits until async directory loading exposes the row",
+);
+
+eq(
+  mergeWorkspaceSearchResults(
+    [{ path: "README.md", entry: { name: "README.md", isDir: false } }],
+    [
+      { name: "src/deep/README.md", isDir: false },
+      { name: "README.md", isDir: false },
+    ],
+  ).map((row) => `${row.path}:${row.entry.name}`).join("|"),
+  "README.md:README.md|src/deep/README.md:README.md",
+  "workspace filter merges backend deep search results without duplicating loaded rows",
+);
+
+eq(
+  mergeWorkspaceSearchResults(
+    [{ path: "docs/assets/", entry: { name: "assets", isDir: true } }],
+    [
+      { name: "docs/assets", isDir: true },
+      { name: "docs/guides", isDir: true },
+    ],
+  ).map((row) => `${row.path}:${row.entry.name}:${row.entry.isDir}`).join("|"),
+  "docs/assets/:assets:true|docs/guides/:guides:true",
+  "workspace filter normalizes directory search results to tree row paths",
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -348,6 +348,7 @@ func (m *chatTUI) refreshSkillPickerData() {
 	st := m.skillStore()
 	skills := st.List()
 	m.skills = skills
+	m.invalidateSlashCatalog()
 	if m.skillPick != nil {
 		sorted := sortedSkills(skills)
 		m.skillPick.skills = sorted
@@ -370,7 +371,8 @@ func (p *skillPicker) filteredSkills() []skill.Skill {
 	q := strings.ToLower(p.query)
 	var out []skill.Skill
 	for _, s := range p.skills {
-		if strings.Contains(strings.ToLower(s.Name), q) ||
+		if strings.Contains(strings.ToLower(s.SlashName()), q) ||
+			strings.Contains(strings.ToLower(s.Plugin), q) ||
 			strings.Contains(strings.ToLower(s.Description), q) {
 			out = append(out, s)
 		}

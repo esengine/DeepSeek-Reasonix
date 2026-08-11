@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
 	"reasonix/internal/config"
-	"reasonix/internal/hook"
+	"reasonix/internal/control"
 	"reasonix/internal/skill"
 )
 
@@ -59,7 +60,7 @@ func (m *chatTUI) runSkillSubcommand(input string) {
 func (m *chatTUI) skillList() {
 	skills := m.skills
 	if m.ctrl != nil {
-		skills = m.ctrl.AllSkills()
+		skills = managementSlashSkills(m.ctrl)
 	}
 	if len(skills) == 0 {
 		m.notice("no skills found. Add SKILL.md / <name>.md under .reasonix/skills (project) or ~/.reasonix/skills (global); .agents/.agent/.claude skills dirs also work. Invoke with /<name> or run_skill.")
@@ -71,10 +72,10 @@ func (m *chatTUI) skillList() {
 func (m *chatTUI) skillShow(name string) {
 	skills := m.skills
 	if m.ctrl != nil {
-		skills = m.ctrl.AllSkills()
+		skills = managementSlashSkills(m.ctrl)
 	}
 	for _, s := range skills {
-		if s.Name == name {
+		if s.Name == name || s.SlashName() == strings.TrimPrefix(name, "/") {
 			disabled := false
 			if m.ctrl != nil {
 				disabled = !m.ctrl.SkillEnabled(s.Name)
@@ -84,6 +85,17 @@ func (m *chatTUI) skillShow(name string) {
 		}
 	}
 	m.notice("unknown skill: " + name)
+}
+
+func managementSlashSkills(ctrl control.SessionAPI) []skill.Skill {
+	if ctrl == nil {
+		return nil
+	}
+	// AllSkills preserves disabled entries; SlashSkills adds every enabled
+	// package-qualified alias when multiple plugins export the same bare name.
+	all := append([]skill.Skill(nil), ctrl.AllSkills()...)
+	all = append(all, ctrl.SlashSkills()...)
+	return skill.VisibleSlashSkills(all)
 }
 
 func (m *chatTUI) disabledSkillNames() map[string]bool {
@@ -113,28 +125,46 @@ func (m *chatTUI) skillSaveEnabledChanges(changes map[string]bool) {
 		m.notice("skill toggle unavailable in this session")
 		return
 	}
-	if m.ctrl.Running() {
-		m.notice("cannot change skills while a turn is running")
+	if m.runtimeSwitchBusy() {
+		m.notice("finish or cancel active work and stop background jobs before changing skills")
+		return
+	}
+	if m.modelSwitchPending {
+		m.notice("wait for the current runtime switch to finish")
 		return
 	}
 	known := map[string]string{}
 	for _, sk := range m.ctrl.AllSkills() {
 		known[config.SkillNameKey(sk.Name)] = sk.Name
 	}
-	cfg := config.LoadForEdit(config.UserConfigPath())
-	for name, enabled := range changes {
-		canonical, ok := known[config.SkillNameKey(name)]
-		if !ok {
-			m.notice("skill " + enableVerb(enabled) + ": unknown skill: " + name)
-			return
-		}
-		if err := cfg.SetSkillEnabled(canonical, enabled); err != nil {
-			m.notice("skill " + enableVerb(enabled) + ": " + err.Error())
-			return
-		}
+	for _, sk := range m.ctrl.SlashSkills() {
+		known[sk.SlashName()] = sk.Name
 	}
-	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
-		m.notice("skill toggle: " + err.Error())
+	// Lock only the load-modify-save cycle; the session refresh below runs
+	// off-lock. The closure returns a non-empty notice on failure.
+	if failNotice := func() string {
+		unlock := config.LockUserConfigEdits()
+		defer unlock()
+		cfg := config.LoadForEdit(config.UserConfigPath())
+		for name, enabled := range changes {
+			key := config.SkillNameKey(name)
+			if key == "" {
+				key = strings.TrimPrefix(strings.TrimSpace(name), "/")
+			}
+			canonical, ok := known[key]
+			if !ok {
+				return "skill " + enableVerb(enabled) + ": unknown skill: " + name
+			}
+			if err := cfg.SetSkillEnabled(canonical, enabled); err != nil {
+				return "skill " + enableVerb(enabled) + ": " + err.Error()
+			}
+		}
+		if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+			return "skill toggle: " + err.Error()
+		}
+		return ""
+	}(); failNotice != "" {
+		m.notice(failNotice)
 		return
 	}
 	notice := ""
@@ -163,14 +193,29 @@ func (m *chatTUI) scheduleSkillSessionRefresh(reason, notice string) bool {
 	if m.ctrl == nil {
 		return false
 	}
-	if m.ctrl.Running() {
-		m.notice("cannot refresh skills while a turn is running")
+	if m.runtimeSwitchBusy() {
+		m.notice("finish or cancel active work and stop background jobs before refreshing skills")
 		return false
 	}
-	carried := m.ctrl.History()
-	prevPath := m.ctrl.SessionPath()
+	if m.modelSwitchPending {
+		m.notice("wait for the current runtime switch to finish")
+		return false
+	}
 	if err := m.ctrl.Snapshot(); err != nil {
 		slog.Warn(reason+": snapshot failed", "err", err)
+	}
+	// Snapshot can retarget the controller to a recovery branch. Carry the
+	// post-snapshot path so the rebuild does not bind recovered history back to
+	// the stale original transcript.
+	carried := m.ctrl.History()
+	prevPath := m.ctrl.SessionPath()
+	// Move the lease before the rebuilt controller binds prevPath for writing
+	// (AdoptHistory resumes there): after a snapshot retarget the lease still
+	// guards the old path, and the async build must not open an unguarded
+	// writer on the recovery branch.
+	if err := m.rebindSessionLease(prevPath); err != nil {
+		m.notice(reason + ": " + sessionLeaseHeldNotice(err))
+		return false
 	}
 	if notice != "" {
 		m.notice(notice)
@@ -180,7 +225,12 @@ func (m *chatTUI) scheduleSkillSessionRefresh(reason, notice string) bool {
 	ref := m.modelRef
 	m.modelSwitchPending = true
 	m.pendingModelSwitch = func() tea.Msg {
-		c, err := build(ref, carried, prevPath)
+		c, err := build(controllerBuildSpec{
+			ModelRef:         ref,
+			RuntimeProfile:   m.runtimeProfile,
+			ToolApprovalMode: oldCtrl.ToolApprovalMode(),
+			PlanMode:         oldCtrl.PlanMode(),
+		}, carried, prevPath, oldCtrl)
 		if err != nil {
 			return modelSwitchMsg{ref: ref, err: err}
 		}
@@ -190,7 +240,7 @@ func (m *chatTUI) scheduleSkillSessionRefresh(reason, notice string) bool {
 			oldCtrl:  oldCtrl,
 			label:    c.Label(),
 			commands: c.Commands(),
-			skills:   c.Skills(),
+			skills:   c.SlashSkills(),
 			host:     c.Host(),
 		}
 	}
@@ -227,13 +277,17 @@ func (m *chatTUI) skillStore() *skill.Store {
 	cwd, _ := os.Getwd()
 	var custom []string
 	var excluded []string
+	var pluginPaths map[string][]string
+	var pluginAgentPaths map[string][]string
 	maxDepth := 3
 	if cfg, err := config.Load(); err == nil {
 		custom = cfg.SkillCustomPaths()
 		excluded = cfg.SkillExcludedPaths()
+		pluginPaths = cfg.PluginPackageSkillOwners()
+		pluginAgentPaths = cfg.PluginPackageAgentOwners()
 		maxDepth = cfg.SkillMaxDepth()
 	}
-	return skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: custom, ExcludedPaths: excluded, MaxDepth: maxDepth})
+	return skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: custom, PluginPaths: pluginPaths, PluginAgentPaths: pluginAgentPaths, ExcludedPaths: excluded, MaxDepth: maxDepth})
 }
 
 func (m *chatTUI) runHooksSubcommand(input string) {
@@ -247,27 +301,18 @@ func (m *chatTUI) runHooksSubcommand(input string) {
 	case "", "list", "ls":
 		m.hooksList(cwd)
 	case "trust":
-		if err := hook.Trust(cwd, ""); err != nil {
-			m.notice("hooks trust: " + err.Error())
-			return
-		}
-		m.notice("trusted this project's hooks — restart Reasonix to load them")
+		// Backward-compatible response for old clients and saved commands.
+		m.notice("project hooks are enabled automatically; no trust action is required")
 	default:
-		m.notice("unknown /hooks subcommand " + args[1] + " — try: /hooks, /hooks trust")
+		m.notice("unknown /hooks subcommand " + args[1] + " — try: /hooks or /hooks list")
 	}
 }
 
 func (m *chatTUI) hooksList(cwd string) {
 	active := m.ctrl.HookRunner().Hooks()
-	trusted := hook.IsTrusted(cwd, "")
-	m.commitLine(renderHooks(m.width, active, trusted, hook.ProjectDefinesHooks(cwd)))
+	m.commitLine(renderHooks(m.width, active))
 }
 
 func containsArg(args []string, flag string) bool {
-	for _, a := range args {
-		if a == flag {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(args, flag)
 }

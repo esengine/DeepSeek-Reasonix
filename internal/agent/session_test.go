@@ -9,7 +9,7 @@ import (
 	"reasonix/internal/provider"
 )
 
-// --- NewSession ---
+// NewSession
 
 func TestNewSessionEmpty(t *testing.T) {
 	s := NewSession("")
@@ -31,7 +31,7 @@ func TestNewSessionWithSystem(t *testing.T) {
 	}
 }
 
-// --- Session.Add ---
+// Session.Add
 
 func TestSessionAdd(t *testing.T) {
 	s := NewSession("")
@@ -48,7 +48,34 @@ func TestSessionAdd(t *testing.T) {
 	}
 }
 
-// --- Session.HasContent ---
+func TestSessionAddDecisionReceiptKeepsToolResultsAdjacent(t *testing.T) {
+	s := NewSession("")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "run the check"})
+	s.Add(provider.Message{
+		Role:      provider.RoleAssistant,
+		ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "bash", Arguments: `{}`}},
+	})
+	receipt := &provider.DecisionReceipt{ID: "approval-1", Kind: "tool", Tool: "bash", Outcome: "allow_once"}
+
+	s.AddDecisionReceipt(receipt)
+	s.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "call-1", Name: "bash", Content: "ok"})
+
+	got := s.Snapshot()
+	if len(got) != 3 {
+		t.Fatalf("messages = %d, want the original three-message tool turn", len(got))
+	}
+	if len(got[1].DecisionReceipts) != 1 || got[1].DecisionReceipts[0] != receipt {
+		t.Fatalf("assistant receipts = %+v, want approval receipt", got[1].DecisionReceipts)
+	}
+	if got[2].Role != provider.RoleTool || got[2].ToolCallID != "call-1" {
+		t.Fatalf("tool result no longer follows assistant directly: %+v", got)
+	}
+	if !s.NeedsRewriteSave() {
+		t.Fatal("attaching receipt to an existing message must require a rewrite save")
+	}
+}
+
+// Session.HasContent
 
 func TestHasContentEmpty(t *testing.T) {
 	s := NewSession("")
@@ -88,7 +115,56 @@ func TestHasContentWithTool(t *testing.T) {
 	}
 }
 
-// --- Save / LoadSession round-trip ---
+// Session.HasSystemMessage
+
+func TestHasSystemMessageWithSystem(t *testing.T) {
+	s := NewSession("system prompt")
+	if !s.HasSystemMessage() {
+		t.Error("session with system message should report HasSystemMessage true")
+	}
+}
+
+func TestHasSystemMessageWithoutSystem(t *testing.T) {
+	s := NewSession("")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "hello"})
+	if s.HasSystemMessage() {
+		t.Error("session without system message should report HasSystemMessage false")
+	}
+}
+
+func TestHasSystemMessageAfterReplaceWithoutSystem(t *testing.T) {
+	s := NewSession("system")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "kept"})
+	// Replace with messages that have no system message — simulates a
+	// compact/summarise path that failed to preserve the system prompt.
+	s.Replace([]provider.Message{
+		{Role: provider.RoleUser, Content: "replaced"},
+	})
+	if s.HasContent() {
+		// HasContent returns true because the user message exists.
+		if s.HasSystemMessage() {
+			t.Error("session replaced without system message should report HasSystemMessage false")
+		}
+	} else {
+		t.Error("session with user message should have content")
+	}
+}
+
+func TestHasSystemMessageCompactedKeepsSystem(t *testing.T) {
+	// This is the healthy path: compact preserves the system message at index 0.
+	s := NewSession("system")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "answer"})
+	s.Replace([]provider.Message{
+		{Role: provider.RoleSystem, Content: "system"},
+		{Role: provider.RoleUser, Content: "summary"},
+	})
+	if !s.HasSystemMessage() {
+		t.Error("compacted session should still have system message at index 0")
+	}
+}
+
+// Save / LoadSession round-trip
 
 func TestSaveLoadSessionRoundTrip(t *testing.T) {
 	dir := t.TempDir()
@@ -162,7 +238,7 @@ func TestLoadSessionMalformed(t *testing.T) {
 	}
 }
 
-// --- ListSessions ---
+// ListSessions
 
 func TestListSessionsMissingDirReturnsNil(t *testing.T) {
 	sessions, err := ListSessions("/nonexistent/dir")
@@ -240,7 +316,7 @@ func TestListSessionsSkipsNonJSONL(t *testing.T) {
 	}
 }
 
-// --- previewSession ---
+// previewSession
 
 func TestPreviewSession(t *testing.T) {
 	dir := t.TempDir()
@@ -264,6 +340,22 @@ func TestPreviewSessionStripsTransientReasoningLanguageBlock(t *testing.T) {
 	path := filepath.Join(dir, "session.jsonl")
 	s := NewSession("system")
 	s.Add(provider.Message{Role: provider.RoleUser, Content: "<reasoning-language>\nVisible reasoning/thinking text preference: use Simplified Chinese.\n</reasoning-language>\n\nHelp me debug the auth module"})
+	s.Save(path)
+
+	preview, turns := previewSession(path)
+	if turns != 1 {
+		t.Errorf("turns = %d, want 1", turns)
+	}
+	if preview != "Help me debug the auth module" {
+		t.Errorf("preview = %q, want user prompt", preview)
+	}
+}
+
+func TestPreviewSessionStripsTransientResponseLanguageBlock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	s := NewSession("system")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "<response-language>\nFinal answer language preference: use English.\n</response-language>\n\nHelp me debug the auth module"})
 	s.Save(path)
 
 	preview, turns := previewSession(path)
@@ -304,7 +396,7 @@ func TestPreviewSessionMalformed(t *testing.T) {
 	}
 }
 
-// --- NewSessionPath ---
+// NewSessionPath
 
 func TestNewSessionPath(t *testing.T) {
 	dir := t.TempDir()
@@ -331,9 +423,275 @@ func TestNewSessionPathSanitizesSlashes(t *testing.T) {
 	}
 }
 
+func TestNewSessionPathSanitizesWindowsReservedPunctuation(t *testing.T) {
+	dir := t.TempDir()
+	path := NewSessionPath(dir, `nemotron-3-nano:30b<>"|?*`)
+	base := filepath.Base(path)
+	if strings.ContainsAny(base, `:<>"|?*`) {
+		t.Fatalf("filename contains Windows-reserved punctuation: %s", base)
+	}
+	if !strings.Contains(base, "nemotron-3-nano-30b") {
+		t.Fatalf("colon should be replaced without hiding the model hint: %s", base)
+	}
+
+	s := NewSession("")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "hello"})
+	if err := s.Save(path); err != nil {
+		t.Fatalf("save session with sanitized model filename: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("stat saved session: %v", err)
+	}
+}
+
 func TestNewSessionPathEmptyModel(t *testing.T) {
 	path := NewSessionPath("/dir", "")
 	if !strings.Contains(path, "session") {
 		t.Errorf("empty model should use 'session' fallback: %s", path)
+	}
+}
+
+// rewrite-save baseline
+
+// TestNeedsRewriteSaveFollowsSaves pins the baseline's lifecycle on the
+// session object itself: an in-memory rewrite demands a rewrite save, every
+// successful save re-anchors, and the baseline never moves backwards when a
+// slower save reports an older capture.
+func TestNeedsRewriteSaveFollowsSaves(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "hi"})
+	if s.NeedsRewriteSave() {
+		t.Fatal("fresh session should not need a rewrite save")
+	}
+	s.IncrementRewrite()
+	if !s.NeedsRewriteSave() {
+		t.Fatal("in-memory rewrite must demand a rewrite save")
+	}
+	if err := s.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if s.NeedsRewriteSave() {
+		t.Fatal("Save must re-anchor the rewrite baseline")
+	}
+	s.IncrementRewrite()
+	if err := s.SaveRewrite(path); err != nil {
+		t.Fatalf("SaveRewrite: %v", err)
+	}
+	if s.NeedsRewriteSave() {
+		t.Fatal("SaveRewrite must re-anchor the rewrite baseline")
+	}
+
+	// A slower save that captured an older rewriteVersion must not roll the
+	// baseline back below what a faster save already persisted.
+	digest, err := digestSessionMessages(s.Snapshot())
+	if err != nil {
+		t.Fatalf("digest: %v", err)
+	}
+	s.markPersisted(path, digest, 1, 1, 0)
+	if s.NeedsRewriteSave() {
+		t.Fatal("stale capture rolled the rewrite baseline backwards")
+	}
+}
+
+func TestUpdateToolCallPreviewPersistsAfterMidTurnSnapshot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("system")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "edit twice"})
+	s.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{
+		{ID: "c1", Name: "edit_file", Arguments: `{}`},
+		{ID: "c2", Name: "edit_file", Arguments: `{}`},
+	}})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("mid-turn snapshot: %v", err)
+	}
+
+	refreshed := provider.ToolCall{ID: "c2", Diff: "@@ -1 +1 @@\n-ready\n+done\n", Added: 1, Removed: 1}
+	if !s.UpdateToolCallPreview(refreshed) {
+		t.Fatal("matching tool call was not updated")
+	}
+	s.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "c1", Name: "edit_file", Content: "ready"})
+	s.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "c2", Name: "edit_file", Content: "done"})
+	if !s.NeedsRewriteSave() {
+		t.Fatal("mutating a snapshotted assistant message must require rewrite save")
+	}
+	if err := s.SaveRewrite(path); err != nil {
+		t.Fatalf("rewrite refreshed preview: %v", err)
+	}
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	var got provider.ToolCall
+	for _, msg := range loaded.Messages {
+		for _, call := range msg.ToolCalls {
+			if call.ID == "c2" {
+				got = call
+			}
+		}
+	}
+	if got.Diff != refreshed.Diff || got.Added != 1 || got.Removed != 1 {
+		t.Fatalf("persisted preview = %+v, want %+v", got, refreshed)
+	}
+}
+
+func TestUpdateToolCallResolutionPersistsAfterMidTurnSnapshot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("system")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "use MCP"})
+	s.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+		ID: "c1", Name: "use_capability",
+		Arguments: `{"action":"call","capability_id":"mcp-tool:db/write"}`,
+	}}})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("mid-turn snapshot: %v", err)
+	}
+
+	readOnly := false
+	resolved := provider.ToolCall{
+		ID: "c1", ResolvedName: "mcp__db__write",
+		CapabilityID: "mcp-tool:db/write", ResolvedReadOnly: &readOnly,
+	}
+	if !s.UpdateToolCallResolution(resolved) {
+		t.Fatal("matching tool call resolution was not updated")
+	}
+	s.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "c1", Name: "use_capability", Content: "done"})
+	if !s.NeedsRewriteSave() {
+		t.Fatal("resolved metadata on a snapshotted assistant message must require rewrite save")
+	}
+	if err := s.SaveRewrite(path); err != nil {
+		t.Fatalf("rewrite resolved metadata: %v", err)
+	}
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	got := loaded.Messages[2].ToolCalls[0]
+	if got.ResolvedReadOnly == nil || *got.ResolvedReadOnly ||
+		got.ResolvedName != resolved.ResolvedName || got.CapabilityID != resolved.CapabilityID {
+		t.Fatalf("persisted resolved metadata = %+v, want %+v", got, resolved)
+	}
+}
+
+// TestRewriteBaselineStaysWithClones: an unpersisted rewrite travels with the
+// clone, and the source persisting later does not mark the clone's copy as
+// saved — each session object owns its own baseline, so no swap can orphan or
+// misattribute it.
+func TestRewriteBaselineStaysWithClones(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "hi"})
+	s.IncrementRewrite()
+	clone := s.CloneWithMessages(s.Snapshot())
+	if !clone.NeedsRewriteSave() {
+		t.Fatal("clone must inherit the unpersisted rewrite")
+	}
+	if err := s.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if s.NeedsRewriteSave() {
+		t.Fatal("source baseline not re-anchored by save")
+	}
+	if !clone.NeedsRewriteSave() {
+		t.Fatal("saving the source must not mark the clone's rewrite persisted")
+	}
+}
+
+func TestHasUnsavedChangesProtectsIdleHistoryAfterSaveFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "durable"})
+	if !s.HasUnsavedChanges(path) {
+		t.Fatal("new transcript without a baseline must be considered unsaved")
+	}
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("initial save: %v", err)
+	}
+	if s.HasUnsavedChanges(path) {
+		t.Fatal("saved transcript still reported unsaved")
+	}
+
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "pending"})
+	if !s.HasUnsavedChanges(path) {
+		t.Fatal("in-memory suffix was not reported as unsaved")
+	}
+	// A future retry can persist the suffix; until then an idle history refresh
+	// must keep rendering the controller's copy instead of replacing it from the
+	// older checkpoint/WAL state.
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("retry save: %v", err)
+	}
+	if s.HasUnsavedChanges(path) {
+		t.Fatal("successful retry left the transcript marked unsaved")
+	}
+}
+
+// TestMessageRangeReturnsClampedCopy: the window is clamped to the log bounds
+// and detached from the live slice.
+func TestMessageRangeReturnsClampedCopy(t *testing.T) {
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "a"})
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "b"})
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "c"})
+
+	got := s.MessageRange(1, 3)
+	if len(got) != 2 || got[0].Content != "a" || got[1].Content != "b" {
+		t.Fatalf("MessageRange(1,3) = %+v", got)
+	}
+	if got := s.MessageRange(-5, 99); len(got) != 4 {
+		t.Fatalf("clamped MessageRange = %d messages, want 4", len(got))
+	}
+	if got := s.MessageRange(3, 3); len(got) != 0 {
+		t.Fatalf("empty MessageRange = %d messages, want 0", len(got))
+	}
+	got[0].Content = "mutated"
+	if s.Messages[1].Content != "a" {
+		t.Fatal("MessageRange must return a copy")
+	}
+}
+
+// TestPersistedStateTracksBaseline: the exported baseline view follows saves,
+// appends, and rewrites.
+func TestPersistedStateTracksBaseline(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "hi"})
+
+	if _, ok := s.PersistedState(path); ok {
+		t.Fatal("PersistedState before any save should not be anchored")
+	}
+	if err := s.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	ps, ok := s.PersistedState(path)
+	if !ok {
+		t.Fatal("PersistedState after save should be anchored")
+	}
+	if !ps.RevisionKnown || ps.Revision != 1 {
+		t.Fatalf("revision = %d known=%v, want 1/true", ps.Revision, ps.RevisionKnown)
+	}
+	if ps.DigestHex == "" {
+		t.Fatal("DigestHex should be populated")
+	}
+	if !ps.AppendOnlyTail || !ps.UnchangedSincePersisted {
+		t.Fatalf("right after save: AppendOnlyTail=%v Unchanged=%v, want true/true", ps.AppendOnlyTail, ps.UnchangedSincePersisted)
+	}
+
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "there"})
+	ps, _ = s.PersistedState(path)
+	if !ps.AppendOnlyTail || ps.UnchangedSincePersisted {
+		t.Fatalf("after append: AppendOnlyTail=%v Unchanged=%v, want true/false", ps.AppendOnlyTail, ps.UnchangedSincePersisted)
+	}
+
+	msgs := s.Snapshot()
+	s.Rewrite(msgs[:1], "compact")
+	ps, _ = s.PersistedState(path)
+	if ps.AppendOnlyTail {
+		t.Fatal("after rewrite: AppendOnlyTail should be false")
 	}
 }

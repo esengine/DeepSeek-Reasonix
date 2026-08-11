@@ -73,3 +73,25 @@ func TestManifestAsset(t *testing.T) {
 		t.Fatal("Asset() should report absence for an empty manifest")
 	}
 }
+
+// TestManifestNativePackage covers the optional native_packages field: present
+// assets resolve, and older manifests without the field report absence cleanly.
+func TestManifestNativePackage(t *testing.T) {
+	want := Asset{URL: "https://example/app.deb", SHA256: "def", Size: 99}
+	m := Manifest{NativePackages: map[string]Asset{CurrentPlatform(): want}}
+	got, ok := m.NativePackage()
+	if !ok || got != want {
+		t.Fatalf("NativePackage() = %+v, %v; want %+v, true", got, ok, want)
+	}
+	if _, ok := (Manifest{}).NativePackage(); ok {
+		t.Fatal("NativePackage() should report absence when native_packages is nil")
+	}
+	// Old clients ignore unknown fields; new clients must still read platforms.
+	legacy := Manifest{Platforms: map[string]Asset{CurrentPlatform(): {URL: "tar"}}}
+	if _, ok := legacy.NativePackage(); ok {
+		t.Fatal("legacy manifest without native_packages must not invent one")
+	}
+	if a, ok := legacy.Asset(); !ok || a.URL != "tar" {
+		t.Fatalf("legacy platforms still resolve: %+v %v", a, ok)
+	}
+}

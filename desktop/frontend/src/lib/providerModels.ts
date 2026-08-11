@@ -1,3 +1,37 @@
+import type { ProviderModelOverrideView, ProviderView } from "./types";
+
+export type LatestRequestGate = {
+  begin(key: string): number;
+  cancel(key: string): void;
+  isCurrent(key: string, generation: number): boolean;
+};
+
+// Async provider discovery is last-request-wins per access card. A stale
+// completion may settle, but it cannot replace a newer draft or loading state.
+export function createLatestRequestGate(): LatestRequestGate {
+  const generations = new Map<string, number>();
+  const advance = (key: string) => {
+    const generation = (generations.get(key) ?? 0) + 1;
+    generations.set(key, generation);
+    return generation;
+  };
+  return {
+    begin: advance,
+    cancel: (key) => {
+      advance(key);
+    },
+    isCurrent: (key, generation) => generations.get(key) === generation,
+  };
+}
+
+export function removeProviderAccessesForMock(providers: ProviderView[], names: string[]): ProviderView[] {
+  const requested = new Set(names);
+  return providers.flatMap((provider) => {
+    if (!requested.has(provider.name)) return [provider];
+    return provider.builtIn ? [{ ...provider, added: false }] : [];
+  });
+}
+
 export function mergedFetchedProviderModels(current: string[], fetched: string[], options: { preserveCurated?: boolean } = {}): string[] {
   const saved = uniqueStrings(current);
   if (options.preserveCurated && saved.length > 0) return saved;
@@ -14,6 +48,62 @@ export function inferredVisionModels(models: string[]): string[] {
 
 export function providerDefaultModel(currentDefault: string, models: string[]): string {
   return currentDefault && models.includes(currentDefault) ? currentDefault : models[0] ?? "";
+}
+
+export function providerModelContextWindowDrafts(overrides: ProviderModelOverrideView[] | null | undefined): Record<string, string> {
+  const drafts: Record<string, string> = {};
+  for (const override of overrides ?? []) {
+    const model = override.model.trim();
+    const contextWindow = normalizedContextWindow(override.contextWindow);
+    if (model && contextWindow > 0) drafts[model] = String(contextWindow);
+  }
+  return drafts;
+}
+
+export function providerModelContextWindowIsSmall(value: unknown): boolean {
+  const contextWindow = normalizedContextWindow(value);
+  return contextWindow > 0 && contextWindow < 16_384;
+}
+
+export function mergeProviderModelContextWindows(
+  overrides: ProviderModelOverrideView[] | null | undefined,
+  models: string[],
+  drafts: Record<string, string>,
+): ProviderModelOverrideView[] {
+  const existing = new Map((overrides ?? []).map((override) => [override.model.trim(), override]));
+  const merged: ProviderModelOverrideView[] = [];
+  for (const model of uniqueStrings(models)) {
+    const previous = existing.get(model);
+    const parsedContextWindow = normalizedContextWindow(drafts[model]);
+    const override: ProviderModelOverrideView = {
+      model,
+      reasoningProtocol: previous?.reasoningProtocol ?? "",
+      supportedEfforts: previous?.supportedEfforts ?? [],
+      defaultEffort: previous?.defaultEffort ?? "",
+      vision: previous?.vision ?? null,
+      contextWindow: Math.max(parsedContextWindow, 0),
+      ...(typeof previous?.maxOutputTokens === "number"
+        ? { maxOutputTokens: previous.maxOutputTokens }
+        : {}),
+    };
+    if (
+      override.reasoningProtocol.trim()
+      || override.supportedEfforts.length > 0
+      || override.defaultEffort.trim()
+      || override.vision != null
+      || (override.contextWindow ?? 0) > 0
+      || (override.maxOutputTokens ?? 0) !== 0
+    ) {
+      merged.push(override);
+    }
+  }
+  return merged;
+}
+
+function normalizedContextWindow(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.min(Math.trunc(parsed), Number.MAX_SAFE_INTEGER);
 }
 
 export function providerRequiresKey(provider: { requiresKey?: boolean; apiKeyEnv?: string }): boolean {
@@ -38,7 +128,27 @@ export function apiKeyEnvFromProviderName(name: string): string {
     .toUpperCase()
     .replace(/[^A-Z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
-  return stem ? `${stem}_API_KEY` : "CUSTOM_API_KEY";
+  if (stem) {
+    // Dotenv/environment variable names cannot start with a digit. Keep the
+    // readable name while giving digit-leading providers (for example
+    // "9router") a valid, stable credential slot.
+    const validStem = /^[0-9]/.test(stem) ? `CUSTOM_${stem}` : stem;
+    return `${validStem}_API_KEY`;
+  }
+  // When the provider name is entirely non-ASCII (e.g. Chinese characters),
+  // generate a stable hash suffix so each custom provider gets a unique slot.
+  const hash = fnv1a32(name.trim());
+  return `CUSTOM_${hash}_API_KEY`;
+}
+
+/** 32-bit FNV-1a hash, returns 8-char lowercase hex. Stable and deterministic. */
+function fnv1a32(s: string): string {
+  let hash = 0x811c9dc5 >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    hash ^= s.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
 }
 
 export function isLikelyChatModel(model: string): boolean {

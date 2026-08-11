@@ -1,14 +1,103 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 
+	"reasonix/internal/config"
 	"reasonix/internal/plugin"
 )
+
+// bumpExtensionGeneration records that plugin/MCP configuration changed while
+// controller builds may still be running off the lifecycle lock. In-flight
+// builds that finish with a stale generation must not publish.
+func (a *App) bumpExtensionGeneration() {
+	if a == nil {
+		return
+	}
+	a.extensionGeneration.Add(1)
+}
+
+func (a *App) currentExtensionGeneration() uint64 {
+	if a == nil {
+		return 0
+	}
+	return a.extensionGeneration.Load()
+}
+
+// lockMCPMutation serializes shared-Host boot with live MCP mutations without
+// holding runtimeAdmissionMu while an optimistic controller build finishes its
+// extension startup. A final generation bump invalidates builds that loaded
+// configuration while the mutation held the gate.
+func (a *App) lockMCPMutation(operation string) func() {
+	if hook := a.runtimeMutationBeforeLockHook; hook != nil {
+		hook(operation)
+	}
+	a.runtimeRebuildMu.Lock()
+	a.extensionBuildMu.Lock()
+	a.runtimeAdmissionMu.Lock()
+	return func() {
+		a.bumpExtensionGeneration()
+		a.runtimeAdmissionMu.Unlock()
+		a.extensionBuildMu.Unlock()
+		a.runtimeRebuildMu.Unlock()
+	}
+}
+
+type sharedHostMCPRegistration struct {
+	scope     *plugin.RegistrationScope
+	finished  bool
+	committed bool
+}
+
+// beginSharedHostMCPRegistration attributes only context-scoped connections to
+// this build. Unrelated Host writes never become rollback candidates.
+func beginSharedHostMCPRegistration(ctx context.Context, host *plugin.Host) (context.Context, *sharedHostMCPRegistration) {
+	registration := &sharedHostMCPRegistration{}
+	if host == nil {
+		return ctx, registration
+	}
+	registration.scope = host.BeginRegistrationScope()
+	return plugin.ContextWithRegistrationScope(ctx, registration.scope), registration
+}
+
+func (r *sharedHostMCPRegistration) rollback() {
+	if r == nil || r.finished {
+		return
+	}
+	r.finished = true
+	if r.scope != nil {
+		r.scope.AbortAndRollback()
+	}
+}
+
+func (r *sharedHostMCPRegistration) commit() bool {
+	if r == nil {
+		return true
+	}
+	if r.finished {
+		return r.committed
+	}
+	if r.scope != nil && !r.scope.Commit() {
+		r.finished = true
+		return false
+	}
+	r.finished = true
+	r.committed = true
+	return true
+}
+
+func (a *App) saveDesktopMCPServerAndBump(root string, entry config.PluginEntry) error {
+	if err := a.saveDesktopMCPServer(root, entry); err != nil {
+		return err
+	}
+	a.bumpExtensionGeneration()
+	return nil
+}
 
 // sharedPluginHost is a reference-counted plugin.Host shared across tabs
 // that share the same workspace root. Multiple controllers (one per tab)
@@ -73,7 +162,7 @@ func (a *App) reapOrphanCodeGraph() {
 	ours := map[int]bool{}
 	out, err := exec.Command("pgrep", "-P", strconv.Itoa(myPID)).Output()
 	if err == nil {
-		for _, f := range strings.Fields(string(out)) {
+		for f := range strings.FieldsSeq(string(out)) {
 			if pid, err := strconv.Atoi(f); err == nil {
 				ours[pid] = true
 			}
@@ -85,7 +174,7 @@ func (a *App) reapOrphanCodeGraph() {
 	if err != nil {
 		return
 	}
-	for _, f := range strings.Fields(string(out)) {
+	for f := range strings.FieldsSeq(string(out)) {
 		pid, err := strconv.Atoi(f)
 		if err != nil || pid == myPID || ours[pid] {
 			continue
@@ -135,12 +224,33 @@ func (a *App) releaseSharedHost(root string) {
 }
 
 func (a *App) releaseTabSharedHost(tab *WorkspaceTab) {
-	if tab == nil || tab.SharedHostKey == "" {
+	if tab == nil {
 		return
+	}
+	// SharedHostKey is a.mu-guarded (the build goroutine publishes it under
+	// the lock); do the take under the lock and the slow host release after.
+	// Callers must not hold a.mu.
+	a.mu.Lock()
+	key := takeTabSharedHostKey(tab)
+	a.mu.Unlock()
+	if key == "" {
+		return
+	}
+	a.releaseSharedHost(key)
+}
+
+// takeTabSharedHostKey clears the tab's shared-host key and returns it so the
+// caller can release it later. Use from inside a.mu critical sections:
+// releaseSharedHost may close the host and reap MCP subprocesses, which is far
+// too slow to run under the app lock — call a.releaseSharedHost(key) after
+// unlocking.
+func takeTabSharedHostKey(tab *WorkspaceTab) string {
+	if tab == nil || tab.SharedHostKey == "" {
+		return ""
 	}
 	key := tab.SharedHostKey
 	tab.SharedHostKey = ""
-	a.releaseSharedHost(key)
+	return key
 }
 
 // closeAllSharedHosts closes every shared host. Called during app shutdown.

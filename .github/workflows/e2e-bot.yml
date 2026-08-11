@@ -46,14 +46,26 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
+
+      - name: Install and verify Linux sandbox backend
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          if sysctl -n kernel.unprivileged_userns_clone >/dev/null 2>&1; then
+            sudo sysctl -w kernel.unprivileged_userns_clone=1
+          fi
+          if sysctl -n kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --ro-bind / / --dev /dev --proc /proc -- true
 
       - name: Build harness + fallback agent from the default branch
         # Harness (e2ebench) and suite always come from main-v2 so a PR can't weaken
@@ -93,10 +105,12 @@ jobs:
           echo "agent under test: $src"
 
       - name: Write provider config
+        env:
+          REASONIX_HOME: ${{ runner.temp }}/reasonix-e2e-home
         # User config covers suite tasks (they run in temp dirs); the repo-root copy
         # covers diff mode (the agent runs in the repo root, where project config wins).
         run: |
-          mkdir -p ~/.config/reasonix
+          mkdir -p "$REASONIX_HOME"
           cat > /tmp/reasonix-e2e.toml <<EOF
           default_model = "e2e"
 
@@ -120,19 +134,25 @@ jobs:
           [codegraph]
           enabled = false
           EOF
-          cp /tmp/reasonix-e2e.toml ~/.config/reasonix/config.toml
+          cp /tmp/reasonix-e2e.toml "$REASONIX_HOME/config.toml"
           cp /tmp/reasonix-e2e.toml ./reasonix.toml
 
       - name: Run e2e
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          REASONIX_HOME: ${{ runner.temp }}/reasonix-e2e-home
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
           if [ -z "$DEEPSEEK_API_KEY" ]; then
             printf 'missing DEEPSEEK_API_KEY secret\n\nAdd a repository secret named DEEPSEEK_API_KEY to enable the e2e bot.\n' > report.md
-            exit 0
+            exit 1
           fi
+          # Provider credentials are deliberately loaded only from Reasonix's
+          # global credential file, not inherited process variables. Keep this
+          # ephemeral runner copy private and outside the checked-out project.
+          umask 077
+          printf 'DEEPSEEK_API_KEY=%s\n' "$DEEPSEEK_API_KEY" > "$REASONIX_HOME/.env"
           if printf '%s' "$COMMENT_BODY" | grep -q '/e2e[[:space:]]\+diff'; then
             ATTEMPTS=$(printf '%s' "$COMMENT_BODY" | sed -nE 's@.*/e2e[[:space:]]+diff[[:space:]]+x([0-9]+).*@\1@p' | head -1)
             [ -z "$ATTEMPTS" ] && ATTEMPTS=1
@@ -142,10 +162,21 @@ jobs:
             BASE=$(git merge-base "origin/$BASE_REF" HEAD)
             "$RUNNER_TEMP/e2ebench" -mode diff -bin "${{ steps.agent.outputs.bin }}" -repo . -base "$BASE" -model e2e -attempts "$ATTEMPTS" -out report.md
           else
-            "$RUNNER_TEMP/e2ebench" -bin "${{ steps.agent.outputs.bin }}" -suite "$RUNNER_TEMP/suite" -model e2e -out report.md -json report.json -budget 400000
+            # The current five-task baseline can exceed 400k after only three
+            # successful tasks. Keep bounded headroom so every scenario is graded.
+            "$RUNNER_TEMP/e2ebench" -bin "${{ steps.agent.outputs.bin }}" -suite "$RUNNER_TEMP/suite" -model e2e -out report.md -json report.json -budget 800000
+            node -e '
+              const results = require("./report.json");
+              const unsuccessful = results.filter((result) => !result.Passed || result.Skipped);
+              if (results.length === 0 || unsuccessful.length > 0) {
+                console.error(`e2e suite incomplete: ${unsuccessful.length}/${results.length} unsuccessful`);
+                process.exit(1);
+              }
+            '
           fi
 
       - name: Post report
+        if: always() && hashFiles('report.md') != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TRIGGER_USER: ${{ github.event.comment.user.login }}

@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 
 	"reasonix/internal/evidence"
 	"reasonix/internal/instruction"
+	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
@@ -25,16 +28,18 @@ func init() { tool.RegisterBuiltin(completeStep{}) }
 type completeStep struct{}
 
 type stepEvidence struct {
-	Kind    string   `json:"kind"`
-	Summary string   `json:"summary"`
-	Command string   `json:"command,omitempty"`
-	Paths   []string `json:"paths,omitempty"`
+	Kind        string   `json:"kind"`
+	Summary     string   `json:"summary"`
+	Command     string   `json:"command,omitempty"`
+	Paths       []string `json:"paths,omitempty"`
+	CriterionID string   `json:"criterion_id,omitempty"`
 }
 
 // validEvidenceKinds are the evidence forms a completion may cite. "checkpoint"
 // (main's fourth kind) is omitted — v2 has no checkpoint system.
 var validEvidenceKinds = map[string]bool{
 	"verification": true, // a command/test was run; cite it and its outcome
+	"review":       true, // a completed built-in review run, fresh for any later mutation
 	"diff":         true, // a concrete code change; cite what changed
 	"files":        true, // files created/edited/inspected; cite the paths
 	"manual":       true, // a manual check; cite what was confirmed and how
@@ -43,14 +48,16 @@ var validEvidenceKinds = map[string]bool{
 func (completeStep) Name() string { return "complete_step" }
 
 func (completeStep) Description() string {
-	return "Record the evidence-backed completion of ONE step of an approved plan. Call it as you finish each step instead of silently moving on: it signs the step off with PROOF it is done — the verification you ran (command + result), the diff/files you changed, or a manual check. A completion with no evidence is REJECTED, so don't claim a step is done until you can show why. The host advances the task list for you when you sign off — it marks this step completed and moves the next to in_progress, so you don't need a separate todo_write to mark completions. Fields: `step` (which step — its title or number, matching the task list), `result` (what is now true/changed), `evidence` (≥1 item, each with `kind` = verification|diff|files|manual and a `summary`, plus optional `command`/`paths`), and optional `notes`."
+	return "Record the evidence-backed completion of ONE step of an approved plan. Call it as you finish each step instead of silently moving on: it signs the step off with PROOF it is done — the verification you ran (command + result), a completed built-in review that is fresh for any later changes, the diff/files you changed, or a manual check. A completion with no evidence is REJECTED, so don't claim a step is done until you can show why. The host advances the task list for you when you sign off — it marks this step completed and moves the next to in_progress, so you don't need a separate todo_write to mark completions. Fields: `step` (which step — its title or number, matching the task list), `result` (what is now true/changed), `evidence` (≥1 item, each with `kind` = verification|review|diff|files|manual and a `summary`, plus optional `command`/`paths`, and `criterion_id` naming the acceptance criterion the proof satisfies), and optional `notes`."
 }
 
 func (completeStep) Schema() json.RawMessage {
 	return json.RawMessage(`{
 "type":"object",
 "properties":{
-  "step":{"type":"string","description":"Which plan step this completes — its title or number, matching the task list."},
+  "step_id":{"type":"string","description":"PREFERRED: the stable step_id of the task-list item this completes, e.g. \"plan_step_02\". Unlike a title or a number it survives retitles, insertions, and reordering, so cite it whenever the item has one."},
+  "step":{"type":"string","description":"Which plan step this completes — its title or number, matching the task list. Use only when the item has no step_id."},
+  "step_index":{"type":"integer","minimum":1,"description":"Optional 1-based task-list item number. Use only when the item has no step_id; an index goes stale the moment a step is inserted above it."},
   "result":{"type":"string","description":"What is now true or changed as a result of finishing this step."},
   "evidence":{
     "type":"array",
@@ -59,7 +66,8 @@ func (completeStep) Schema() json.RawMessage {
     "items":{
       "type":"object",
       "properties":{
-        "kind":{"type":"string","enum":["verification","diff","files","manual"],"description":"verification = a command/test was run (command REQUIRED); diff = a concrete code change (paths REQUIRED); files = files created/edited/inspected (paths REQUIRED); manual = a manual check."},
+        "criterion_id":{"type":"string","description":"The acceptance criterion this proof satisfies, as the plan renders it (e.g. \"c2\" from \"accept [c2]: ...\"). Cite it whenever the step has criteria: a command succeeding is not the same as a criterion being met, and the host records the proof against the criterion you name."},
+        "kind":{"type":"string","enum":["verification","review","diff","files","manual"],"description":"verification = a command/test was run (command REQUIRED); review = a built-in review run completed and, after changes, inspected the latest changed result (the verdict/findings still apply separately); diff = a concrete code change (paths REQUIRED); files = files created/edited/inspected (paths REQUIRED); manual = a manual check."},
         "summary":{"type":"string","description":"The evidence itself: the test result, what the diff does, or what was confirmed."},
         "command":{"type":"string","description":"REQUIRED for verification evidence: the command as it actually ran (e.g. \"go test ./...\") — it is checked against this session's real command history."},
         "paths":{"type":"array","items":{"type":"string"},"description":"REQUIRED for diff/files evidence: the files this evidence refers to, as the paths were passed to the tools that touched them."}
@@ -69,7 +77,7 @@ func (completeStep) Schema() json.RawMessage {
   },
   "notes":{"type":"string","description":"Optional caveats, follow-ups, or anything deferred."}
 },
-"required":["step","result","evidence"]
+"required":["result","evidence"]
 }`)
 }
 
@@ -77,18 +85,36 @@ func (completeStep) Schema() json.RawMessage {
 // effect), so it never needs approval and stays available alongside todo_write.
 func (completeStep) ReadOnly() bool { return true }
 
+// complete_step signs off execution work and is unavailable during planning.
+// The host Plan gate remains authoritative for stale or hallucinated calls.
+func (completeStep) ProviderVisible(ctx context.Context) bool {
+	return !planmode.Active(ctx)
+}
+
+// PlanModeSafe reports false: although complete_step is read-only, it signs off a
+// completed execution step, which is meaningful only after plan approval — not
+// during planning. This explicit phase opt-out is the Plan gate's enforced
+// exception to the ordinary Permissions/Sandbox path.
+func (completeStep) PlanModeSafe() bool { return false }
+
 func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
-		Step     string         `json:"step"`
-		Result   string         `json:"result"`
-		Evidence []stepEvidence `json:"evidence"`
-		Notes    string         `json:"notes"`
+		StepID    string         `json:"step_id"`
+		Step      string         `json:"step"`
+		StepIndex int            `json:"step_index"`
+		Result    string         `json:"result"`
+		Evidence  []stepEvidence `json:"evidence"`
+		Notes     string         `json:"notes"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
-	if strings.TrimSpace(p.Step) == "" {
-		return "", fmt.Errorf("step is required — name the plan step you are completing")
+	step := completeStepIdentity(p.StepID, p.Step, p.StepIndex)
+	if step == "" {
+		return "", fmt.Errorf("step_id, step, or step_index is required — cite the task-list item you are completing, preferring its stable step_id")
+	}
+	if p.StepIndex < 0 {
+		return "", fmt.Errorf("step_index must be a positive 1-based task-list number")
 	}
 	if strings.TrimSpace(p.Result) == "" {
 		return "", fmt.Errorf("result is required — state what is now true after finishing this step")
@@ -106,13 +132,19 @@ func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, 
 		}
 		kinds = append(kinds, e.Kind)
 	}
+	if err := verifyCitedCriteria(ctx, p.Evidence); err != nil {
+		return "", err
+	}
 
-	hostVerified, manualUnverified, err := verifyStepEvidence(ctx, p.Evidence)
+	todoMatch, hasTodo, err := verifyTodoStep(ctx, step)
 	if err != nil {
 		return "", err
 	}
-	todoMatch, hasTodo, err := verifyTodoStep(ctx, p.Step)
+	hostVerified, manualUnverified, err := verifyStepEvidence(ctx, p.Evidence)
 	if err != nil {
+		if hasTodo && todoMatch.Status == "in_progress" {
+			return "", fmt.Errorf("%w; todo %d %q remains in_progress — repair the evidence and retry this step before moving on", err, todoMatch.Index, todoMatch.Content)
+		}
 		return "", err
 	}
 	projectVerified, err := verifyProjectChecks(ctx, p.Evidence)
@@ -125,14 +157,31 @@ func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, 
 	}
 	todoStatus := ""
 	if hasTodo {
-		todoStatus = fmt.Sprintf(" Todo step: todo-matched %d.", todoMatch.Index)
+		todoStatus = fmt.Sprintf(" Todo step: todo-matched %d (%q).", todoMatch.Index, todoMatch.Content)
 	}
 	projectStatus := ""
 	if projectVerified > 0 {
 		projectStatus = fmt.Sprintf(" Project checks: project checks %d.", projectVerified)
 	}
-	return fmt.Sprintf("Step %q signed off with %d evidence item(s) [%s].%s The host advanced the task list; continue with the next step.",
-		p.Step, len(p.Evidence), strings.Join(kinds, ", "), hostStatus+todoStatus+projectStatus), nil
+	advanceStatus := " The host advanced the task list; continue with the next step."
+	if hasTodo && todoMatch.Status == "completed" {
+		advanceStatus = " The matched todo was already completed; the task list is unchanged."
+	}
+	return fmt.Sprintf("Step %q signed off with %d evidence item(s) [%s].%s%s",
+		step, len(p.Evidence), strings.Join(kinds, ", "), hostStatus+todoStatus+projectStatus, advanceStatus), nil
+}
+
+// completeStepIdentity picks the citation to resolve against the task list,
+// most stable first: an id survives a replan, an index survives a retitle, a
+// title survives neither.
+func completeStepIdentity(stepID, step string, stepIndex int) string {
+	if id := strings.TrimSpace(stepID); id != "" {
+		return id
+	}
+	if stepIndex > 0 {
+		return strconv.Itoa(stepIndex)
+	}
+	return strings.TrimSpace(step)
 }
 
 func verifyStepEvidence(ctx context.Context, items []stepEvidence) (hostVerified int, manualUnverified int, err error) {
@@ -151,7 +200,17 @@ func verifyStepEvidence(ctx context.Context, items []stepEvidence) (hostVerified
 				if ledger.HasFailedCommand(command) {
 					return 0, 0, fmt.Errorf("evidence %d: verification command %q ran but exited non-zero, so it can't prove the step; if the non-zero exit is itself the expected proof (e.g. a file is gone), re-run it so it succeeds (append \"|| true\") and sign off again", i+1, command)
 				}
-				return 0, 0, fmt.Errorf("evidence %d: verification command %q has no matching successful bash receipt in this turn%s", i+1, command, receiptHint("commands run this turn", ledger.SuccessfulCommands(5)))
+				hint := allCommandHints(ctx, ledger)
+				return 0, 0, fmt.Errorf("evidence %d: verification command %q has no matching successful receipt — cite the command exactly as it ran in the session%s", i+1, command, hint)
+			}
+			_, deliveryHasMutation := ledger.LatestSuccessfulMutationIndex()
+			if evidence.DeliveryProfileFromContext(ctx) && deliveryHasMutation && !evidence.IsDeliveryVerificationCommand(command) {
+				return 0, 0, fmt.Errorf("evidence %d: command %q ran successfully but is not a recognized delivery verification; do not cite an opaque command as verification. Use a project test/check/lint command, or for JavaScript syntax use node --check <file> (a read-only extraction pipeline ending in node --check also works). If this was only a visible/manual inspection, cite kind manual or files without a command, then rerun and cite a recognized verifier after any opaque mutation", i+1, command)
+			}
+			hostVerified++
+		case "review":
+			if !ledger.HasCompletedReview() {
+				return 0, 0, fmt.Errorf("evidence %d: review evidence requires a completed review run in this turn; after a mutation, the review must be newer and cover the changed result", i+1)
 			}
 			hostVerified++
 		case "diff":
@@ -228,21 +287,58 @@ func checkSource(check instruction.VerifyCheck) string {
 
 func verifyTodoStep(ctx context.Context, step string) (evidence.TodoStepMatch, bool, error) {
 	ledger, ok := evidence.FromContext(ctx)
-	if !ok {
+	var todos []evidence.TodoItem
+	if ok {
+		todos, _ = ledger.LatestTodos()
+	}
+	if len(todos) == 0 {
+		todos, _ = evidence.TodoStateFromContext(ctx)
+	}
+	if len(todos) == 0 {
 		return evidence.TodoStepMatch{}, false, nil
 	}
-	match, hasTodo := ledger.MatchLatestTodoStep(step)
-	if !hasTodo {
-		return evidence.TodoStepMatch{}, false, nil
-	}
-	if !match.Found {
-		return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q has no matching todo_write item in this turn; cite a todo verbatim or by number: %s", step, todoInventory(ledger))
+	match, found := evidence.MatchStep(step, todos)
+	if !found {
+		allCompleted := true
+		for _, todo := range todos {
+			if strings.TrimSpace(todo.Status) != "completed" {
+				allCompleted = false
+				break
+			}
+		}
+		if allCompleted {
+			last := len(todos) - 1
+			return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q has no matching todo_write item and every current todo is already completed; this is a renewal sign-off, so retry complete_step with step_index %d (the final existing todo %q) and the fresh evidence — do not invent a new step or rewrite the completed list", step, last+1, todos[last].Content)
+		}
+		if ids := evidence.TodoStepIDs(todos); len(ids) > 0 {
+			return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q has no matching todo_write item in the current task list; cite the item's stable step_id — available ids: %s (list: %s)", step, strings.Join(ids, ", "), todoListInventory(todos))
+		}
+		return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q has no matching todo_write item in the current task list; cite a todo verbatim or by number: %s", step, todoListInventory(todos))
 	}
 	switch match.Status {
-	case "", "pending", "in_progress", "completed":
+	case "in_progress":
+		if unfinished, ok := evidence.FirstUnfinishedSubStep(todos, match.Index-1); ok && unfinished >= 0 {
+			return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q matches phase %d %q whose sub-steps are unfinished; complete sub-step %d %q first, then sign the phase off", step, match.Index, match.Content, unfinished+1, todos[unfinished].Content)
+		}
 		return match, true, nil
+	case "completed":
+		return match, true, nil
+	case "", "pending":
+		current := ""
+		for i, todo := range todos {
+			if strings.TrimSpace(todo.Status) != "in_progress" {
+				continue
+			}
+			// The deepest in_progress item is the signable end of the current
+			// chain: prefer an active sub-step over its phase header.
+			current = fmt.Sprintf("; finish todo %d %q first", i+1, todo.Content)
+			if todo.Level == 1 {
+				break
+			}
+		}
+		return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q matches pending todo %d %q; complete_step only signs the current in_progress item%s", step, match.Index, match.Content, current)
 	default:
-		return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q matches todo %d (%q) but its status is %q; complete_step requires pending, in_progress, or completed", step, match.Index, match.Content, match.Status)
+		return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q matches todo %d (%q) but its status is %q; complete_step requires in_progress or completed", step, match.Index, match.Content, match.Status)
 	}
 }
 
@@ -251,6 +347,10 @@ func todoInventory(ledger *evidence.Ledger) string {
 	if !ok || len(todos) == 0 {
 		return "(no todos recorded this turn)"
 	}
+	return todoListInventory(todos)
+}
+
+func todoListInventory(todos []evidence.TodoItem) string {
 	parts := make([]string, 0, len(todos))
 	for i, t := range todos {
 		content := t.Content
@@ -339,6 +439,56 @@ func receiptHint(label string, items []string) string {
 	return fmt.Sprintf("; %s: %q — cite one as it actually ran, or run the check now", label, items)
 }
 
+// allCommandHints builds a combined hint from both the per-turn ledger and the
+// full session history, so the model can self-correct a mismatched citation.
+func allCommandHints(ctx context.Context, ledger *evidence.Ledger) string {
+	seen := map[string]bool{}
+	var cmds []string
+	if ledger != nil {
+		for _, c := range ledger.SuccessfulCommands(8) {
+			if !seen[c] {
+				seen[c] = true
+				cmds = append(cmds, c)
+			}
+		}
+	}
+	if msgs, ok := evidence.SessionMessagesFromContext(ctx); ok {
+		failed := failedCallIDs(msgs)
+		for _, msg := range msgs {
+			for _, tc := range msg.ToolCalls {
+				if failed[tc.ID] {
+					continue
+				}
+				if tc.Name == "todo_write" || tc.Name == "complete_step" {
+					continue
+				}
+				c := extractCommandFromCall(tc.Name, tc.Arguments)
+				if c == "" || seen[c] {
+					continue
+				}
+				seen[c] = true
+				cmds = append(cmds, c)
+				if len(cmds) >= 12 {
+					break
+				}
+			}
+			if len(cmds) >= 12 {
+				break
+			}
+		}
+	}
+	if len(cmds) == 0 {
+		return ""
+	}
+	// Truncate long entries for readability.
+	for i, c := range cmds {
+		if len(c) > 80 {
+			cmds[i] = c[:80] + "…"
+		}
+	}
+	return fmt.Sprintf("; commands that ran: %q — pick the matching one and retry complete_step", cmds)
+}
+
 func firstWord(s string) string {
 	s = strings.TrimSpace(s)
 	if idx := strings.IndexAny(s, " \t\n"); idx >= 0 {
@@ -368,4 +518,23 @@ func extractCommandFromCall(name string, argsJSON string) string {
 		return name
 	}
 	return name + " " + args.Path
+}
+
+// verifyCitedCriteria rejects a proof citing a criterion the approved plan does
+// not have. Resolving an unknown id into nothing would leave the real criterion
+// unproven and only surface much later, as a completion the host refuses for a
+// reason the model never connected to this call.
+func verifyCitedCriteria(ctx context.Context, items []stepEvidence) error {
+	known, ok := evidence.AcceptanceCriteriaFromContext(ctx)
+	if !ok {
+		return nil
+	}
+	for i, item := range items {
+		id := strings.TrimSpace(item.CriterionID)
+		if id == "" || slices.Contains(known, id) {
+			continue
+		}
+		return fmt.Errorf("evidence %d: criterion_id %q is not in the approved plan; cite one of: %s", i+1, id, strings.Join(known, ", "))
+	}
+	return nil
 }

@@ -2,21 +2,42 @@ package control
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"unicode"
 
+	"reasonix/internal/ablation"
 	"reasonix/internal/agent"
+	"reasonix/internal/event"
+	"reasonix/internal/memory"
+	"reasonix/internal/planmode"
 	"reasonix/internal/skill"
 )
+
+// InvocationRequest is an explicit user-selected Skill or Subagent entity.
+// Offset is used only to preserve the visual order chosen in the composer.
+type InvocationRequest struct {
+	Name   string `json:"name"`
+	Kind   string `json:"kind"`
+	Offset int    `json:"offset"`
+}
 
 // PlanModeMarker is prepended to every user turn while plan mode is on. It rides
 // in the user message (not the system prompt or tools), so the cache-stable
 // prompt prefix is left untouched and the toggle costs nothing in cache hits.
-const PlanModeMarker = "[Plan mode — read-only. Explore the codebase first (read_file, ls, grep, glob, web_fetch, task, ask are available; writers are refused by the harness). Before planning, if a decision that is genuinely the user's — tech stack, an ambiguous requirement, scope, an irreversible choice — would materially shape the plan and you can't settle it from the codebase or a sensible default, use the ask tool to clarify it first; otherwise pick the obvious default and state the assumption in the plan instead of asking. Then present a LAYERED plan as your reply and stop — do not write files, edit, or run side-effecting bash. Structure the plan as a two-level markdown list so it becomes a layered task list: each PHASE is a top-level numbered list item (a coherent milestone, e.g. \"1. Add the config loader\"), and each phase's concrete, verifiable sub-steps are bullets indented beneath it (e.g. \"   - parse the TOML into Config\"). Use plain numbered list items for phases — do NOT write phases as markdown headings (##, ###) — so both levels parse. Keep phases few (about 2-6). The user will be asked to approve before any changes are made.]"
+const PlanModeMarker = planmode.Marker
+
+const legacyPlanModeMarker = "[Plan mode — read-only. Explore the codebase first (read_file, ls, grep, glob, web_fetch, task, ask are available; writers are refused by the harness). Before planning, if a decision that is genuinely the user's — tech stack, an ambiguous requirement, scope, an irreversible choice — would materially shape the plan and you can't settle it from the codebase or a sensible default, use the ask tool to clarify it first; otherwise pick the obvious default and state the assumption in the plan instead of asking. Then present a LAYERED plan as your reply and stop — do not write files, edit, or run side-effecting bash. Structure the plan as a two-level markdown list so it becomes a layered task list: each PHASE is a top-level numbered list item (a coherent milestone, e.g. \"1. Add the config loader\"), and each phase's concrete, verifiable sub-steps are bullets indented beneath it (e.g. \"   - parse the TOML into Config\"). Use plain numbered list items for phases — do NOT write phases as markdown headings (##, ###) — so both levels parse. Keep phases few (about 2-6). The user will be asked to approve before any changes are made.]"
 
 const (
 	activeGoalOpen  = "<active-goal>"
 	activeGoalClose = "</active-goal>"
+	hookContextTag  = "hook-context"
+)
+
+const (
+	maxHookContextChars      = 10000
+	maxTotalHookContextChars = 20000
 )
 
 const (
@@ -43,10 +64,15 @@ const (
 // feature, or synthetic user messages injected by the controller).
 func StripComposePrefixes(content string) string {
 	s := agent.StripTransientUserBlocks(content)
-	s = strings.TrimPrefix(s, PlanModeMarker+"\n\n")
-	s = strings.TrimPrefix(s, PlanModeMarker)
+	s = stripComposeMarker(s, PlanModeMarker)
+	s = stripComposeMarker(s, legacyPlanModeMarker)
 	s = strings.TrimSpace(s)
 	return s
+}
+
+func stripComposeMarker(s, marker string) string {
+	s = strings.TrimPrefix(s, marker+"\n\n")
+	return strings.TrimPrefix(s, marker)
 }
 
 // StripReferencedContextPrefix removes the "Referenced context:" preamble and
@@ -96,59 +122,54 @@ func StripReferencedContextPrefix(content string) string {
 // approval, stream recovery, readiness retry, etc.). These should not be shown
 // in the chat UI.
 func IsSyntheticUserMessage(content string) bool {
-	trimmed := strings.TrimSpace(agent.StripTransientUserBlocks(content))
-	if trimmed == planApprovedMessage {
+	if trimmed := strings.TrimSpace(agent.StripTransientUserBlocks(content)); trimmed == planApprovedMessage {
 		return true
 	}
-	for _, prefix := range syntheticPrefixes {
-		if strings.HasPrefix(trimmed, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
-// syntheticPrefixes must be kept in sync with the synthetic user messages
-// injected by the controller (planApprovedMessage, goal loop turns), agent loop
-// (streamRecoveryMessage, finalReadinessRetryMessage, emptyFinalRetryMessage,
-// executorHandoffRetryMessage in internal/agent/agent.go), and compaction
-// folds (internal/agent/compact.go), which store summaries as user-role
-// messages the chat UI must never render as user bubbles (#3653).
-var syntheticPrefixes = []string{
-	"Plan approved — plan mode is off",
-	"Host final-answer readiness check failed",
-	"You are already in the executor phase",
-	"The previous assistant response was interrupted while a tool call",
-	"The previous assistant response was interrupted during streaming",
-	"The previous assistant response was interrupted before visible",
-	"The previous assistant response finished without any visible answer",
-	"<compaction-summary>",
-	"Summary of the later conversation (compacted from here on):",
-	"Summary of earlier conversation (compacted up to here):",
-	"Continue pursuing the active goal.",
-	"The agent signaled goal completion and all tasks are marked done.",
-	"Goal signaled complete but issues remain:",
-	"No tool calls in recent turns.",
+	// The prefix list lives in internal/agent (agent.SyntheticUserPrefixes) so
+	// preview/title/turn-count derivations there share the exact same filter
+	// (#3653).
+	return agent.IsSyntheticUserText(content)
 }
 
 // Compose applies the plan-mode marker to a turn's text when plan mode is on,
 // returning the message to actually send to the model. The frontend keeps
 // showing the raw text as the user bubble.
 func (c *Controller) Compose(text string) string {
+	return c.compose(text, text, true)
+}
+
+func (c *Controller) compose(text, source string, includeHookContext bool) string {
+	goal, goalStatus := c.goals.snapshot()
+	return c.composeWithGoal(
+		text,
+		source,
+		includeHookContext,
+		goal,
+		goalStatus,
+	)
+}
+
+func (c *Controller) composeWithGoal(
+	text, source string,
+	includeHookContext bool,
+	goal, goalStatus string,
+) string {
 	c.mu.Lock()
 	plan := c.planMode
+	responseLanguage := c.responseLanguage
 	reasoningLanguage := c.reasoningLanguage
 	c.mu.Unlock()
 	notes := c.memory.drainPending()
-	goal, goalStatus, goalResearchMode := c.goals.snapshot()
 
 	if strings.TrimSpace(goal) != "" && goalStatus == GoalStatusRunning {
-		text = activeGoalBlock(goal, goalResearchMode) + "\n\n" + text
+		prefix := activeGoalBlock(goal)
+		text = prefix + "\n\n" + text
 	}
 	if plan {
 		text = PlanModeMarker + "\n\n" + text
 	}
-	text = agent.WithReasoningLanguage(text, reasoningLanguage)
+	text = agent.WithResponseLanguage(text, responseLanguage)
+	text = agent.WithReasoningLanguageForSource(text, reasoningLanguage, source)
 
 	// Memory added mid-session rides the turn (never the cached system prefix),
 	// so it takes effect now without invalidating the prompt cache. It folds into
@@ -172,7 +193,97 @@ func (c *Controller) Compose(text string) string {
 			text = "<background-jobs>\n" + note + "\n</background-jobs>\n\n" + text
 		}
 	}
+	if includeHookContext {
+		if block := c.drainHookContextBlock(); block != "" {
+			text = block + "\n\n" + text
+		}
+		// Relevant facts ride only the real user-turn tail. This preserves the
+		// stable system/tool prefix and keeps synthetic recovery turns free of
+		// accidental recall. A just-written fact already arrives in memory-update.
+		if len(notes) == 0 && !c.ablation.Off(ablation.Retrieval) {
+			result := c.memory.recall(source)
+			event.RecordMemoryRecall(c.sink, memoryRecallAudit(result))
+			if block := result.Block(); block != "" {
+				text = strings.TrimRight(text, "\n") + "\n\n" + block
+			}
+		} else if len(notes) > 0 {
+			c.memory.recordRecall(memory.RecallResult{
+				Query:      strings.TrimSpace(source),
+				Suppressed: "memory update already supplies the new fact",
+			})
+		}
+	}
 	return text
+}
+
+// LastMemoryRecall returns the last real turn's automatic-recall decision for
+// diagnostics and context-management surfaces.
+func (c *Controller) LastMemoryRecall() memory.RecallResult {
+	return c.memory.lastRecallResult()
+}
+
+func (c *Controller) enqueueHookContexts(contexts []string) {
+	if len(contexts) == 0 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, context := range contexts {
+		context = strings.TrimSpace(context)
+		if context == "" {
+			continue
+		}
+		c.hookContexts = append(c.hookContexts, context)
+	}
+}
+
+func (c *Controller) drainHookContextBlock() string {
+	c.mu.Lock()
+	contexts := c.hookContexts
+	c.hookContexts = nil
+	c.mu.Unlock()
+	if len(contexts) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<hook-context event="SessionStart">`)
+	b.WriteString("\n")
+	total := 0
+	for i, context := range contexts {
+		text, truncated := clipHookContext(context, maxHookContextChars)
+		remaining := maxTotalHookContextChars - total
+		if remaining <= 0 {
+			fmt.Fprintf(&b, "[truncated: omitted %d additional hook context item(s)]\n", len(contexts)-i)
+			break
+		}
+		text, totalTruncated := clipHookContext(text, remaining)
+		total += len([]rune(text))
+		if i > 0 {
+			b.WriteString("\n---\n")
+		}
+		b.WriteString(escapeHookContext(text))
+		b.WriteString("\n")
+		if truncated || totalTruncated {
+			b.WriteString("[truncated]\n")
+		}
+	}
+	b.WriteString(`</hook-context>`)
+	return b.String()
+}
+
+func clipHookContext(s string, max int) (string, bool) {
+	r := []rune(s)
+	if len(r) <= max {
+		return s, false
+	}
+	if max < 0 {
+		max = 0
+	}
+	return string(r[:max]), true
+}
+
+func escapeHookContext(s string) string {
+	return strings.ReplaceAll(s, "</"+hookContextTag+">", "<\\/"+hookContextTag+">")
 }
 
 func reasoningLanguageBlock(lang string) string {
@@ -181,12 +292,14 @@ func reasoningLanguageBlock(lang string) string {
 
 func (c *Controller) ComposeSynthetic(text string) string {
 	c.mu.Lock()
+	responseLang := c.responseLanguage
 	lang := c.reasoningLanguage
 	c.mu.Unlock()
-	return agent.WithReasoningLanguage(text, lang)
+	text = agent.WithResponseLanguage(text, responseLang)
+	return agent.WithReasoningLanguageForSource(text, lang, text)
 }
 
-func activeGoalBlock(goal string, researchMode GoalResearchMode) string {
+func activeGoalBlock(goal string) string {
 	goal = strings.TrimSpace(goal)
 	goal = strings.ReplaceAll(goal, activeGoalClose, "<\\/active-goal>")
 	var b strings.Builder
@@ -194,168 +307,19 @@ func activeGoalBlock(goal string, researchMode GoalResearchMode) string {
 	b.WriteString("\n")
 	b.WriteString(goal)
 	b.WriteString("\n\n")
-	b.WriteString("Goal mode: pursue this goal autonomously. Keep working across turns until the goal is complete. Prefer sensible defaults over asking the user; use ask only when you are truly blocked on a user-owned decision. Do not stop after describing a plan; execute the next useful step. End every goal-mode assistant reply with exactly one status marker on its own line: [goal:continue], [goal:complete], or [goal:blocked:<short reason>].")
-	if shouldUseAutoResearch(goal, researchMode) {
-		b.WriteString("\n\n")
-		b.WriteString(autoResearchGoalInstructions)
-	}
+	b.WriteString(goalTaskContractInstructions)
 	b.WriteString("\n")
 	b.WriteString(activeGoalClose)
 	return b.String()
 }
 
-const autoResearchGoalInstructions = `AutoResearch protocol: this goal looks like long-horizon research, debugging, optimization, or implementation work. Treat AutoResearch as a durable strategy for this Goal, not as a background daemon or a global skill.
-- Say briefly in the first visible reply that the goal is being handled with AutoResearch and that state will live under .reasonix/autoresearch/<task-id>/.
-- Keep dynamic state out of REASONIX.md, AGENTS.md, project memory, system prompts, and tool schemas. Use project-local .reasonix/autoresearch/ state only.
-- For a new task, create a collision-resistant task id YYYYMMDD-HHMMSS-slug, check .reasonix/autoresearch/ first, and append -2, -3, etc. only on collision. Reuse an explicitly supplied .reasonix/autoresearch/<task-id>/ path exactly.
-- Maintain state/task_spec.md, state/progress.json, state/findings.jsonl, state/directions_tried.json, state/iteration_log.jsonl, and logs/heartbeat.jsonl. Record goal, scope, non-goals, allowed operations, success criteria, verification gates, iteration direction, evidence, stale_count, pivots, blockers, and completion summary.
-- Before each iteration, read the existing state files as authoritative, append a heartbeat, choose a direction that differs materially from directions already tried, execute the smallest evidence-producing chunk, verify it, then persist JSON/JSONL state before reporting.
-- Increment stale_count when an iteration lacks accepted evidence or repeats a prior direction. At stale_count >= 2, make a structural pivot such as changing evidence source, entrypoint, implementation boundary, test oracle, benchmark, decomposition, environment, platform, or refutation angle. At stale_count >= 4, stop autonomous digging and ask for the smallest external input needed.
-- Workers or subagents may gather evidence, but the orchestrator owns canonical state writes. Workers must not publish, push, delete, contact external systems, or write canonical state unless explicitly designated.
-- Complete only after auditing every success criterion in task_spec.md against direct evidence. Public publishing, destructive changes, credential use, payments, external notifications, privacy-sensitive output, and cache-sensitive changes still require the normal Reasonix gates.`
+const goalTaskContractInstructions = `Goal mode: pursue this goal autonomously. Treat the user's goal as a task contract:
+- Honor Context, Request, Output format, Constraints, and Checkpoint/Pause policy sections when present; otherwise infer a lightweight contract from the conversation and workspace.
+- Preserve scope and output format. Do not invent requirements or hide uncertainty; state assumptions when sensible defaults are enough to proceed.
+- Pause only when the next step involves an irreversible or externally visible operation, the requested scope has changed, or progress requires information only the user can provide. Otherwise keep working and report assumptions at the end.
+- Complete only when the concrete request is done, the output format and constraints are satisfied, and relevant verification was attempted or reported unavailable.
 
-func shouldUseAutoResearch(goal string, mode GoalResearchMode) bool {
-	switch mode {
-	case GoalResearchOn:
-		return true
-	case GoalResearchOff:
-		return false
-	}
-	return isAutoResearchGoal(goal)
-}
-
-func shouldAutoStartResearchGoal(input string) bool {
-	trimmed := strings.TrimSpace(input)
-	if trimmed == "" || strings.HasPrefix(trimmed, "/") || strings.HasPrefix(trimmed, "!") {
-		return false
-	}
-	lower := strings.ToLower(trimmed)
-	if strings.Contains(lower, ".reasonix/autoresearch/") {
-		return true
-	}
-	for _, phrase := range autoResearchAutoStartPhrases {
-		if strings.Contains(lower, phrase) {
-			return true
-		}
-	}
-	categories := autoResearchPhaseCount(lower)
-	switch {
-	case strings.Contains(lower, "彻底") && categories >= 3:
-		return true
-	case strings.Contains(lower, "完整") && categories >= 3:
-		return true
-	case strings.Contains(lower, "长期") && categories >= 2 && containsAnyGoalKeyword(lower, []string{"实验", "验证", "修复", "排查", "优化"}):
-		return true
-	case strings.Contains(lower, "thoroughly") && categories >= 3:
-		return true
-	case strings.Contains(lower, "complete") && categories >= 3:
-		return true
-	}
-	return false
-}
-
-func isAutoResearchGoal(goal string) bool {
-	trimmed := strings.TrimSpace(goal)
-	if trimmed == "" {
-		return false
-	}
-	lower := strings.ToLower(trimmed)
-	if strings.Contains(lower, ".reasonix/autoresearch/") {
-		return true
-	}
-	for _, kw := range autoResearchStrongKeywords {
-		if strings.Contains(lower, kw) {
-			return true
-		}
-	}
-	return autoResearchPhaseCount(lower) >= 4
-}
-
-func autoResearchPhaseCount(lower string) int {
-	categories := 0
-	for _, group := range autoResearchPhaseKeywords {
-		if containsAnyGoalKeyword(lower, group) {
-			categories++
-		}
-	}
-	return categories
-}
-
-var autoResearchAutoStartPhrases = []string{
-	"直到根因",
-	"根因明确",
-	"多轮排查",
-	"不要原地打转",
-	"别原地打转",
-	"完整做成方案",
-	"完整方案并验证",
-	"跑实验",
-	"反复验证",
-	"系统性研究",
-	"持续研究",
-	"持续排查",
-	"持续推进",
-	"长期跑",
-	"until the root cause",
-	"root cause is clear",
-	"debug until",
-	"do not spin",
-	"don't spin",
-	"keep researching",
-	"long-horizon",
-	"long horizon",
-	"long-running",
-}
-
-var autoResearchStrongKeywords = []string{
-	"持续",
-	"长期",
-	"彻底",
-	"直到根因",
-	"根因明确",
-	"多轮",
-	"不要原地打转",
-	"别原地打转",
-	"完整方案",
-	"完整做成方案",
-	"跑实验",
-	"反复验证",
-	"长期优化",
-	"系统性研究",
-	"持续研究",
-	"持续排查",
-	"持续推进",
-	"长期跑",
-	"long-horizon",
-	"long horizon",
-	"long-running",
-	"keep researching",
-	"keep working",
-	"root cause",
-	"until the root cause",
-	"do not spin",
-	"don't spin",
-	"thoroughly",
-	"systematically",
-}
-
-var autoResearchPhaseKeywords = [][]string{
-	{"研究", "调研", "排查", "分析", "定位", "诊断", "research", "investigate", "diagnose", "analyze", "analysis"},
-	{"实现", "修复", "改造", "开发", "重构", "implement", "build", "fix", "refactor"},
-	{"验证", "测试", "复现", "联调", "benchmark", "verify", "validate", "test", "reproduce"},
-	{"优化", "完善", "提升", "收敛", "optimize", "improve", "tune", "polish"},
-	{"文档", "方案", "说明", "总结", "document", "docs", "writeup", "plan"},
-	{"发布", "上线", "提交", "pull request", "publish", "ship", "deploy"},
-}
-
-func containsAnyGoalKeyword(s string, needles []string) bool {
-	for _, needle := range needles {
-		if strings.Contains(s, needle) {
-			return true
-		}
-	}
-	return false
-}
+Do not stop after describing a plan; execute the next useful step. End every goal-mode turn by calling the update_goal tool with your disposition: continue (work is ongoing — give the next concrete step in next_action), complete (only when fully done and verified), or blocked (only when the user can unblock). The host validates your claim and decides whether to continue automatically.`
 
 // MemoryQuickAddNote parses the "# <note>" memory shortcut. The space after
 // "#" is intentional: "#7", "#issue", and "#标题" are ordinary user prompts,
@@ -393,14 +357,19 @@ const (
 	GoalCommandStatus GoalCommandAction = iota + 1
 	GoalCommandSet
 	GoalCommandClear
+	GoalCommandPause
+	GoalCommandResume
 )
 
 type GoalCommand struct {
-	Action       GoalCommandAction
-	Text         string
-	Strict       bool
-	ResearchMode GoalResearchMode
+	Action               GoalCommandAction
+	Text                 string
+	Strict               bool
+	ResearchMode         GoalResearchMode
+	DeprecatedBudgetFlag bool
 }
+
+const GoalBudgetFlagDeprecatedNotice = "This /goal budget flag is deprecated and no longer changes the execution limit; Goal now runs continuously by default."
 
 func ParseGoalCommand(input string) (GoalCommand, bool) {
 	trimmed := strings.TrimSpace(input)
@@ -409,14 +378,19 @@ func ParseGoalCommand(input string) (GoalCommand, bool) {
 	}
 	args := strings.TrimSpace(trimmed[len("/goal"):])
 	strict, researchMode, actionArgs := parseLeadingGoalFlags(args)
+	deprecatedBudgetFlag := researchMode != GoalResearchAuto
 
 	switch strings.ToLower(actionArgs) {
 	case "", "status":
-		return GoalCommand{Action: GoalCommandStatus, Strict: strict, ResearchMode: researchMode}, true
+		return GoalCommand{Action: GoalCommandStatus, Strict: strict, ResearchMode: researchMode, DeprecatedBudgetFlag: deprecatedBudgetFlag}, true
 	case "clear", "off", "stop", "done":
-		return GoalCommand{Action: GoalCommandClear, Strict: strict, ResearchMode: researchMode}, true
+		return GoalCommand{Action: GoalCommandClear, Strict: strict, ResearchMode: researchMode, DeprecatedBudgetFlag: deprecatedBudgetFlag}, true
+	case "pause":
+		return GoalCommand{Action: GoalCommandPause, Strict: strict, ResearchMode: researchMode, DeprecatedBudgetFlag: deprecatedBudgetFlag}, true
+	case "resume":
+		return GoalCommand{Action: GoalCommandResume, Strict: strict, ResearchMode: researchMode, DeprecatedBudgetFlag: deprecatedBudgetFlag}, true
 	default:
-		return GoalCommand{Action: GoalCommandSet, Text: actionArgs, Strict: strict, ResearchMode: researchMode}, true
+		return GoalCommand{Action: GoalCommandSet, Text: actionArgs, Strict: strict, ResearchMode: researchMode, DeprecatedBudgetFlag: deprecatedBudgetFlag}, true
 	}
 }
 
@@ -467,22 +441,33 @@ func (c *Controller) CustomCommand(input string) (sent string, found bool) {
 	return "", false
 }
 
-// RunSkill resolves a "/<name> args…" line against the loaded skills, returning
-// the skill's rendered body to send as a turn (found=false when no skill
-// matches). Invoking a skill by slash always inlines its body — the model reads
-// and follows the playbook in the main loop; a subagent skill's isolation is
-// only engaged when the model calls it via run_skill / the dedicated tool. The
-// caller applies Compose for plan-mode/memory framing.
-func (c *Controller) RunSkill(input string) (sent string, found bool) {
+// resolveSkillInvocation resolves a "/<name> args…" line to its live Skill and
+// task text. Submit uses RunAs to choose inline main-loop execution or isolated
+// subagent execution; RunSkill remains the compatibility renderer used by
+// management/existence checks and callers that explicitly need the body.
+func (c *Controller) resolveSkillInvocation(input string) (skill.Skill, string, bool) {
 	fields := strings.Fields(input)
 	if len(fields) == 0 {
-		return "", false
+		return skill.Skill{}, "", false
 	}
 	name := strings.TrimPrefix(fields[0], "/")
-	if sk, ok := c.skills.byName(name); ok {
-		return skill.Render(sk, strings.Join(fields[1:], " ")), true
+	sk, ok := c.skills.bySlashName(name)
+	if !ok {
+		return skill.Skill{}, "", false
 	}
-	return "", false
+	return sk, strings.Join(fields[1:], " "), true
+}
+
+// RunSkill resolves a "/<name> args…" line against the loaded skills and
+// renders its body. Controller.Submit does not use this renderer for
+// runAs=subagent skills: direct slash invocation executes those through the
+// isolated SkillRunner instead.
+func (c *Controller) RunSkill(input string) (sent string, found bool) {
+	sk, task, ok := c.resolveSkillInvocation(input)
+	if !ok {
+		return "", false
+	}
+	return c.skills.render(sk, task), true
 }
 
 // MCPPrompt resolves a "/mcp__server__prompt args…" line: it maps the positional

@@ -7,13 +7,16 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
+	"reasonix/internal/ablation"
 	"reasonix/internal/acp"
 	"reasonix/internal/boot"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/extension/providerext"
 	"reasonix/internal/i18n"
 	"reasonix/internal/netclient"
 	"reasonix/internal/provider"
@@ -33,14 +36,52 @@ import (
 func acpCommand(args []string, version string) int {
 	fs := flag.NewFlagSet("acp", flag.ContinueOnError)
 	model := fs.String("model", "", "provider name (default: config default_model)")
-	if err := fs.Parse(args); err != nil {
+	profileFlag := fs.String("profile", "balanced", "runtime profile: economy | balanced | delivery")
+	plannerFlag := fs.String("planner", "auto", "planner policy: auto | off")
+	networkFlag := fs.String("sandbox-network", "auto", "sandbox network policy: auto | on | off")
+	bashFlag := fs.String("sandbox-bash", "auto", "bash sandbox policy: auto | enforce")
+	workspaceOnly := fs.Bool("workspace-only", false, "ignore configured extra write roots and confine writes to the session cwd")
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
+	}
+	plannerMode := strings.ToLower(strings.TrimSpace(*plannerFlag))
+	if plannerMode != "auto" && plannerMode != "off" {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "planner must be auto or off")
+		return 2
+	}
+	networkMode := strings.ToLower(strings.TrimSpace(*networkFlag))
+	var networkOverride *bool
+	switch networkMode {
+	case "auto":
+	case "on":
+		on := true
+		networkOverride = &on
+	case "off":
+		off := false
+		networkOverride = &off
+	default:
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "sandbox-network must be auto, on, or off")
+		return 2
+	}
+	bashMode := strings.ToLower(strings.TrimSpace(*bashFlag))
+	if bashMode != "auto" && bashMode != "enforce" {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "sandbox-bash must be auto or enforce")
+		return 2
+	}
+	profile, err := parseRuntimeProfile(*profileFlag)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	factory := &acpFactory{model: *model}
+	factory := &acpFactory{
+		model: *model, profile: profile, plannerOff: plannerMode == "off",
+		networkOverride: networkOverride, workspaceOnly: *workspaceOnly,
+		bashOverride: bashMode, requireSandbox: bashMode == "enforce",
+	}
 	info := acp.AgentInfo{Name: "reasonix", Version: version}
 	if err := acp.Serve(ctx, os.Stdin, os.Stdout, factory, info); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
@@ -54,16 +95,62 @@ func acpCommand(args []string, version string) int {
 // desktop, and serve assembly while still adding the host-supplied MCP servers
 // for this session only.
 type acpFactory struct {
-	model string
+	model            string
+	profile          string
+	plannerOff       bool
+	networkOverride  *bool
+	bashOverride     string
+	workspaceOnly    bool
+	requireSandbox   bool
+	sandboxAvailable func() bool
 }
 
 func (f *acpFactory) SessionDir() string {
 	return config.SessionDir()
 }
 
+// ablationSet maps the ACP --planner=off hard override onto the shared
+// subsystem switch boot consults.
+func (f *acpFactory) ablationSet() ablation.Set {
+	if f.plannerOff {
+		return ablation.New(ablation.Planner)
+	}
+	return ablation.Set{}
+}
+
 // NewSession assembles the per-session controller. Resources (MCP subprocesses)
 // are released via the controller's Cleanup, run on ctrl.Close().
 func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*control.Controller, error) {
+	opts, err := f.sessionBootOptions(p)
+	if err != nil {
+		return nil, err
+	}
+	return boot.Build(ctx, opts)
+}
+
+// RebuildSession implements acp.SessionRebuilder: the replacement controller
+// comes from boot.Rebuild with the same boot.Options NewSession would use, so
+// _reasonix.io/session/reloadExtensions refreshes tool/skill/command/hook/
+// MCP/provider discovery while the session state migrates inside the boot
+// layer. ACP sessions hold no SharedHost — each controller owns its plugin
+// host, and the service releases the outgoing one only after the swap.
+func (f *acpFactory) RebuildSession(ctx context.Context, p acp.SessionParams, old *control.Controller) (*control.Controller, error) {
+	opts, err := f.sessionBootOptions(p)
+	if err != nil {
+		return nil, err
+	}
+	res, err := boot.Rebuild(ctx, old, opts)
+	if err != nil {
+		return nil, err
+	}
+	// The stage-3a runtime set is always empty, so nothing leaks by returning
+	// only the controller (see boot.Build's compatibility wrapper).
+	return res.Controller, nil
+}
+
+// sessionBootOptions builds the boot.Options every ACP session controller —
+// initial build or boot.Rebuild replacement — is assembled from.
+func (f *acpFactory) sessionBootOptions(p acp.SessionParams) (boot.Options, error) {
 	root := strings.TrimSpace(p.Cwd)
 	if root == "" {
 		if wd, err := os.Getwd(); err == nil {
@@ -71,18 +158,111 @@ func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*cont
 		}
 	}
 	if root != "" && !filepath.IsAbs(root) {
-		return nil, fmt.Errorf("session cwd must be an absolute path: %s", root)
+		return boot.Options{}, fmt.Errorf("session cwd must be an absolute path: %s", root)
 	}
-	return boot.Build(ctx, boot.Options{
+	bashOverride := ""
+	if f.bashOverride == "enforce" {
+		bashOverride = "enforce"
+	}
+	return boot.Options{
 		Model:                    firstNonEmpty(p.Model, f.model),
+		TokenMode:                firstNonEmpty(p.RuntimeProfile, f.profile),
+		AgentPreset:              boot.NormalizeAgentPreset(firstNonEmpty(p.RuntimeProfile, f.profile)),
 		RequireKey:               true,
 		Sink:                     p.Sink,
+		StatsSource:              "cli",
 		EffortOverride:           p.EffortOverride,
 		Stderr:                   os.Stderr,
 		WorkspaceRoot:            root,
 		ExtraPlugins:             p.MCPServers,
 		CleanupPendingReconciler: acp.ReconcileCleanupPending,
-	})
+		OnSessionRecovered:       p.OnSessionRecovered,
+		FileOverlay:              p.FileOverlay,
+		TerminalRunner:           p.Terminal,
+		Ablation:                 f.ablationSet(),
+		SandboxNetworkOverride:   f.networkOverride,
+		SandboxBashOverride:      bashOverride,
+		WorkspaceOnly:            f.workspaceOnly,
+	}, nil
+}
+
+func (f *acpFactory) SessionRuntimeState(_ context.Context, p acp.SessionRuntimeStateParams) (acp.SessionRuntimeState, error) {
+	cfg, err := config.LoadForRoot(p.Cwd)
+	if err != nil {
+		return acp.SessionRuntimeState{}, err
+	}
+	plannerMode := effectiveACPPlannerMode(cfg, f.plannerOff, p.Model, p.RuntimeProfile)
+	writeRoots := cfg.WriteRootsForRoot(p.Cwd)
+	if f.workspaceOnly {
+		writeRoots = []string{p.Cwd}
+	}
+	networkEnabled := cfg.Sandbox.Network
+	if f.networkOverride != nil {
+		networkEnabled = *f.networkOverride
+	}
+	effectiveBash := cfg.BashMode()
+	if f.bashOverride == "enforce" {
+		effectiveBash = "enforce"
+	}
+	sandboxAvailable := true
+	if effectiveBash == "enforce" {
+		sandboxAvailable = f.isSandboxAvailable()
+	} else {
+		// Without an OS sandbox the shell is intentionally unconfined, including
+		// network access; report the actual posture rather than the inert config bit.
+		networkEnabled = true
+	}
+	if f.requireSandbox && !sandboxAvailable {
+		return acp.SessionRuntimeState{}, fmt.Errorf("effective bash sandbox unavailable: %s", sandbox.UnavailableMessage())
+	}
+	return acp.SessionRuntimeState{
+		PlannerMode: plannerMode,
+		Sandbox: acp.SessionSandboxState{
+			Mode:           effectiveBash,
+			Engine:         acpSandboxEngine(effectiveBash),
+			Available:      sandboxAvailable,
+			WorkspaceRoot:  p.Cwd,
+			WriteRoots:     writeRoots,
+			NetworkEnabled: networkEnabled,
+		},
+	}, nil
+}
+
+func (f *acpFactory) isSandboxAvailable() bool {
+	if f.sandboxAvailable != nil {
+		return f.sandboxAvailable()
+	}
+	return sandbox.Available()
+}
+
+func effectiveACPPlannerMode(cfg *config.Config, disabled bool, model, profile string) string {
+	if cfg == nil || disabled || acpRuntimeProfile(profile) == "economy" {
+		return "off"
+	}
+	plannerRef := strings.TrimSpace(cfg.Agent.PlannerModel)
+	if plannerRef == "" {
+		return "off"
+	}
+	planner, plannerOK := cfg.ResolveModel(plannerRef)
+	executor, executorOK := cfg.ResolveModel(strings.TrimSpace(model))
+	if !plannerOK || !executorOK || planner.Model == executor.Model {
+		return "off"
+	}
+	return "on"
+}
+
+func acpSandboxEngine(mode string) string {
+	if mode != "enforce" {
+		return "none"
+	}
+	switch runtime.GOOS {
+	case "darwin":
+		return "seatbelt"
+	case "linux":
+		return "bubblewrap"
+	default:
+		return "none"
+	}
 }
 
 func (f *acpFactory) SessionConfigState(_ context.Context, p acp.SessionConfigStateParams) (acp.SessionConfigState, error) {
@@ -102,33 +282,55 @@ func (f *acpFactory) SessionConfigState(_ context.Context, p acp.SessionConfigSt
 		return acp.SessionConfigState{}, err
 	}
 
-	ref := firstNonEmpty(p.Model, f.model, cfg.DefaultModel)
+	// explicit wins over the configured default: p.Model is the session
+	// override requested by the ACP client, f.model is the factory-level
+	// override. Either being non-empty is an explicit choice that the
+	// helper treats as strict (no silent fallback). Only when both are
+	// empty do we let resolveModelForCLI apply the keyless-default
+	// fallback to the next configured provider (issue #6996).
+	explicit := firstNonEmpty(p.Model, f.model)
+	ref, _, err := resolveModelForCLI(explicit, cfg)
+	if err != nil {
+		return acp.SessionConfigState{}, err
+	}
 	if strings.TrimSpace(ref) == "" {
 		return acp.SessionConfigState{}, fmt.Errorf("no default_model configured")
 	}
+	// Plugin-namespaced refs belong to extension sidecars: they never resolve
+	// through the config catalog, so their configured/current handling keys off
+	// the ref itself and boot's merged resolver is the gate.
+	pluginRef := providerext.PluginRefOwner(ref) != ""
 	entry, ok := cfg.ResolveModel(ref)
-	if !ok {
+	if !ok && !pluginRef {
 		return acp.SessionConfigState{}, fmt.Errorf("unknown model %q", ref)
 	}
-	if !entry.Configured() {
+	if ok && !entry.Configured() {
 		return acp.SessionConfigState{}, fmt.Errorf("model %q is not configured", ref)
 	}
-	currentModel := entry.Name + "/" + entry.Model
+	currentModel := ref
+	entryDescription := ""
+	if ok {
+		currentModel = entry.Name + "/" + entry.Model
+		entryDescription = entry.Name
+	}
 	modelOptions, modelInfos := acpModelOptions(cfg)
 	if !hasModelOption(modelOptions, currentModel) {
 		modelOptions = append(modelOptions, acp.SessionConfigSelectOption{
 			Value:       currentModel,
 			Name:        currentModel,
-			Description: entry.Name,
+			Description: entryDescription,
 		})
 		modelInfos = append(modelInfos, acp.ModelInfo{
 			ModelID:     currentModel,
 			Name:        currentModel,
-			Description: entry.Name,
+			Description: entryDescription,
 		})
 	}
 
-	effortEntry := *entry
+	effortEntry := config.ProviderEntry{}
+	if ok {
+		effortEntry = *entry
+	}
 	effortOverride := cloneStringPtr(p.EffortOverride)
 	hadEffortOverride := effortOverride != nil
 	if effortOverride != nil {
@@ -147,6 +349,7 @@ func (f *acpFactory) SessionConfigState(_ context.Context, p acp.SessionConfigSt
 		}
 	}
 
+	runtimeProfile := acpRuntimeProfile(firstNonEmpty(p.RuntimeProfile, f.profile))
 	options := []acp.SessionConfigOption{{
 		ID:           "model",
 		Name:         "Model",
@@ -174,10 +377,39 @@ func (f *acpFactory) SessionConfigState(_ context.Context, p acp.SessionConfigSt
 		cleared := ""
 		effortOverride = &cleared
 	}
+	agentPreset := boot.NormalizeAgentPreset(runtimeProfile)
+	// New option id is agent_preset; work_mode remains for one compatibility version.
+	presetOptions := []acp.SessionConfigSelectOption{
+		{Value: "light", Name: "Light", Description: "Fast and reliable: on-demand capabilities, targeted verification"},
+		{Value: "balanced", Name: "Balanced", Description: "Adaptive planning and risk-tiered verification"},
+		{Value: "delivery", Name: "Delivery", Description: "Evidence closed-loop: full acceptance, verification, independent review"},
+	}
+	options = append(options, acp.SessionConfigOption{
+		ID:           "agent_preset",
+		Name:         "Execution Setting",
+		Category:     "agent_preset",
+		Type:         "select",
+		CurrentValue: agentPreset,
+		Options:      presetOptions,
+	})
+	// Deprecated dual-write option for older ACP clients.
+	options = append(options, acp.SessionConfigOption{
+		ID:           "work_mode",
+		Name:         "Work Mode (deprecated)",
+		Category:     "work_mode",
+		Type:         "select",
+		CurrentValue: runtimeProfile,
+		Options: []acp.SessionConfigSelectOption{
+			{Value: "economy", Name: "Economy", Description: "Deprecated alias for light"},
+			{Value: "balanced", Name: "Balanced", Description: "Deprecated alias for balanced"},
+			{Value: "delivery", Name: "Delivery", Description: "Deprecated alias for delivery"},
+		},
+	})
 
 	return acp.SessionConfigState{
 		Model:          currentModel,
 		EffortOverride: effortOverride,
+		RuntimeProfile: runtimeProfile,
 		Models: &acp.SessionModelState{
 			AvailableModels: modelInfos,
 			CurrentModelID:  currentModel,
@@ -186,15 +418,28 @@ func (f *acpFactory) SessionConfigState(_ context.Context, p acp.SessionConfigSt
 	}, nil
 }
 
+func acpRuntimeProfile(value string) string {
+	// Dual-write: return legacy economy|balanced|delivery for RuntimeProfile.
+	switch boot.NormalizeAgentPreset(value) {
+	case boot.AgentPresetLight:
+		return "economy"
+	case boot.AgentPresetDelivery:
+		return "delivery"
+	default:
+		return "balanced"
+	}
+}
+
 func acpBuiltinTools(cfg *config.Config, cwd string, writeRoots []string) []tool.Tool {
 	bashSpec := sandbox.Spec{Mode: cfg.BashMode(), WriteRoots: writeRoots, Network: cfg.Sandbox.Network}
 	ws := builtin.Workspace{
-		Dir:         cwd,
-		WriteRoots:  writeRoots,
-		Bash:        bashSpec,
-		BashTimeout: time.Duration(cfg.BashTimeoutSeconds()) * time.Second,
-		Search:      builtin.ResolveSearch(cfg.Tools.Search.Engine, cfg.Tools.Search.RgPath, nil),
-		ProxySpec:   cfg.NetworkProxySpec(),
+		Dir:          cwd,
+		WriteRoots:   writeRoots,
+		Bash:         bashSpec,
+		BashTimeout:  time.Duration(cfg.BashTimeoutSeconds()) * time.Second,
+		Search:       builtin.ResolveSearch(cfg.Tools.Search.Engine, cfg.Tools.Search.RgPath, nil),
+		ProxySpec:    cfg.NetworkProxySpec(),
+		SessionGuard: builtin.NewSessionDataGuard(config.MemoryUserDir(), cfg.AllowWriteRoots()),
 	}
 	return ws.Tools(cfg.Tools.Enabled...)
 }

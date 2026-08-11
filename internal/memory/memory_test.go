@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 // TestComposeEmptyIsIdentity is the cache-first invariant: with no memory at
@@ -33,6 +35,111 @@ func TestComposeAppendsAfterBase(t *testing.T) {
 	}
 	if !strings.Contains(got, "Use tabs.") {
 		t.Fatalf("doc body missing from composed prompt:\n%q", got)
+	}
+}
+
+func TestBlockSeparatesStandingInstructionsFromBackgroundMemory(t *testing.T) {
+	set := &Set{
+		Docs:  []Source{{Path: "/p/AGENTS.md", Scope: ScopeProject, Directory: "/p", Body: "Always run tests.", Depth: 0}},
+		Index: "- [API decision](api-decision.md) — [project/project] Chosen in an earlier session",
+		Store: Store{Dir: "/memory/project"},
+	}
+	block := set.Block()
+	for _, want := range []string{"# Instructions", "## workspace/AGENTS.md (project", "## Background memory index", "background, not standing instructions"} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("Block() missing %q:\n%s", want, block)
+		}
+	}
+	for _, privatePath := range []string{"/p/AGENTS.md", "/memory/project"} {
+		if strings.Contains(block, privatePath) {
+			t.Fatalf("Block() exposed machine-local path %q:\n%s", privatePath, block)
+		}
+	}
+}
+
+func TestLoadIncludesStableGlobalPreferencesAndFeedback(t *testing.T) {
+	root := t.TempDir()
+	user := filepath.Join(root, "user")
+	proj := filepath.Join(root, "project")
+	mustMkdir(t, filepath.Join(proj, ".git"))
+	mustWrite(t, filepath.Join(proj, "AGENTS.md"), "STANDING INSTRUCTION BODY")
+	store := StoreFor(user, proj)
+	if _, err := store.Save(Memory{Name: "alpha-user", Description: "global preference", Type: TypeUser, Scope: FactScopeGlobal, Body: "GLOBAL USER BODY"}); err != nil {
+		t.Fatal(err)
+	}
+	legacyFeedback := "---\nname: zeta-feedback\ndescription: legacy global feedback\nmetadata:\n  type: feedback\n---\n\nGLOBAL FEEDBACK BODY\n"
+	mustWrite(t, filepath.Join(store.GlobalDir, "zeta-feedback.md"), legacyFeedback)
+	if err := reindexIn(store.GlobalDir, "zeta-feedback", Memory{Name: "zeta-feedback", Description: "legacy global feedback", Type: TypeFeedback, Scope: FactScopeGlobal}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Save(Memory{Name: "global-reference", Description: "global reference", Type: TypeReference, Scope: FactScopeGlobal, Body: "GLOBAL REFERENCE BODY"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Save(Memory{Name: "project-feedback", Description: "project feedback", Type: TypeFeedback, Scope: FactScopeProject, Body: "PROJECT FEEDBACK BODY"}); err != nil {
+		t.Fatal(err)
+	}
+
+	set := Load(Options{CWD: proj, UserDir: user})
+	if len(set.PinnedGuidance) != 2 {
+		t.Fatalf("global guidance = %+v, want user + feedback only", set.PinnedGuidance)
+	}
+	block := set.Block()
+	for _, want := range []string{"## Pinned preferences and feedback", "GLOBAL USER BODY", "GLOBAL FEEDBACK BODY"} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("Block() missing %q:\n%s", want, block)
+		}
+	}
+	for _, excluded := range []string{"GLOBAL REFERENCE BODY", "PROJECT FEEDBACK BODY"} {
+		if strings.Contains(block, excluded) {
+			t.Fatalf("Block() promoted non-guidance body %q:\n%s", excluded, block)
+		}
+	}
+	if strings.Index(block, "GLOBAL FEEDBACK BODY") > strings.Index(block, "GLOBAL USER BODY") {
+		t.Fatalf("pinned guidance must sort most-recently-updated first:\n%s", block)
+	}
+	if strings.Index(block, "## Pinned preferences and feedback") > strings.Index(block, "# Instructions") && strings.Contains(block, "# Instructions") {
+		t.Fatalf("lower-priority global guidance must precede standing instructions:\n%s", block)
+	}
+	if again := set.Block(); again != block {
+		t.Fatal("unchanged memory snapshot produced unstable prompt bytes")
+	}
+}
+
+func TestLoadProjectFactSuppressesEquivalentGlobalGuidance(t *testing.T) {
+	root := t.TempDir()
+	user := filepath.Join(root, "user")
+	proj := filepath.Join(root, "project")
+	mustMkdir(t, filepath.Join(proj, ".git"))
+	store := StoreFor(user, proj)
+	if _, err := store.Save(Memory{
+		Name: "response-style", Type: TypeFeedback, Scope: FactScopeGlobal,
+		Description: "global style", Body: "Always be verbose.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Save(Memory{
+		Name: "response-style", Type: TypeFeedback, Scope: FactScopeProject,
+		Description: "project style", Body: "Be concise in this project.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Save(Memory{
+		Name: "language", Type: TypeUser, Scope: FactScopeGlobal,
+		Description: "global language", Body: "Answer in Chinese.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	set := Load(Options{CWD: proj, UserDir: user})
+	if len(set.PinnedGuidance) != 1 || set.PinnedGuidance[0].Name != "language" {
+		t.Fatalf("global guidance = %+v, want only unshadowed language preference", set.PinnedGuidance)
+	}
+	block := set.Block()
+	if strings.Contains(block, "Always be verbose.") {
+		t.Fatalf("shadowed global guidance leaked into stable prefix:\n%s", block)
+	}
+	if !strings.Contains(block, "Answer in Chinese.") {
+		t.Fatalf("unshadowed global guidance missing from stable prefix:\n%s", block)
 	}
 }
 
@@ -69,6 +176,20 @@ func TestDiscoverPrecedenceOrder(t *testing.T) {
 	}
 }
 
+func TestDiscoverDecodesGB18030PrimaryDoc(t *testing.T) {
+	proj := t.TempDir()
+	mustMkdir(t, filepath.Join(proj, ".git"))
+	body := "# 项目约定\n\n始终使用中文回答。"
+	if err := os.WriteFile(filepath.Join(proj, "AGENTS.md"), fileencoding.Encode(body, fileencoding.GB18030), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	set := Load(Options{CWD: proj})
+	if len(set.Docs) != 1 || !strings.Contains(set.Docs[0].Body, "始终使用中文回答") {
+		t.Fatalf("decoded docs = %+v", set.Docs)
+	}
+}
+
 // TestImportResolution checks "@path" inlining, including a relative import.
 func TestImportResolution(t *testing.T) {
 	proj := t.TempDir()
@@ -89,6 +210,48 @@ func TestImportResolution(t *testing.T) {
 	}
 }
 
+func TestImportResolutionRejectsEscapes(t *testing.T) {
+	proj := t.TempDir()
+	mustMkdir(t, filepath.Join(proj, ".git"))
+	outside := t.TempDir()
+	mustWrite(t, filepath.Join(outside, "secret.md"), "SECRET")
+	mustWrite(t, filepath.Join(proj, "REASONIX.md"), "Top\n@/abs/path.md\n@~/secret.md\n@../secret.md\nBottom")
+
+	set := Load(Options{CWD: proj})
+	if len(set.Docs) != 1 {
+		t.Fatalf("want 1 doc, got %d", len(set.Docs))
+	}
+	body := set.Docs[0].Body
+	if strings.Contains(body, "SECRET") {
+		t.Fatalf("unsafe import was inlined: %q", body)
+	}
+	for _, directive := range []string{"@/abs/path.md", "@~/secret.md", "@../secret.md"} {
+		if !strings.Contains(body, directive) {
+			t.Fatalf("unsafe directive %q should be left visible, body: %q", directive, body)
+		}
+	}
+}
+
+func TestImportResolutionRejectsSymlinkEscape(t *testing.T) {
+	proj := t.TempDir()
+	mustMkdir(t, filepath.Join(proj, ".git"))
+	outside := t.TempDir()
+	mustWrite(t, filepath.Join(outside, "secret.md"), "SECRET")
+	if err := os.Symlink(filepath.Join(outside, "secret.md"), filepath.Join(proj, "linked.md")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	mustWrite(t, filepath.Join(proj, "REASONIX.md"), "Top\n@linked.md\nBottom")
+
+	set := Load(Options{CWD: proj})
+	if len(set.Docs) != 1 {
+		t.Fatalf("want 1 doc, got %d", len(set.Docs))
+	}
+	body := set.Docs[0].Body
+	if strings.Contains(body, "SECRET") || !strings.Contains(body, "@linked.md") {
+		t.Fatalf("symlink escape should not be inlined, body: %q", body)
+	}
+}
+
 // TestImportCycleDoesNotHang verifies cycle detection terminates.
 func TestImportCycleDoesNotHang(t *testing.T) {
 	proj := t.TempDir()
@@ -101,27 +264,6 @@ func TestImportCycleDoesNotHang(t *testing.T) {
 	body := set.Docs[0].Body
 	if !strings.Contains(body, "A") || !strings.Contains(body, "B") {
 		t.Fatalf("cycle import dropped content: %q", body)
-	}
-}
-
-// TestImportTargetClassification guards the "@mention vs @import" heuristic.
-func TestImportTargetClassification(t *testing.T) {
-	cases := []struct {
-		line string
-		want bool
-	}{
-		{"@docs/setup.md", true},
-		{"@./notes.txt", true},
-		{"@/abs/path.md", true},
-		{"@mention", false},      // prose-y, no separator/dot
-		{"@", false},             // bare
-		{"@a/b and more", false}, // not the only token
-		{"plain text", false},
-	}
-	for _, c := range cases {
-		if _, got := importTarget(c.line); got != c.want {
-			t.Errorf("importTarget(%q) = %v, want %v", c.line, got, c.want)
-		}
 	}
 }
 
@@ -155,8 +297,8 @@ func TestImportDiamondAndCycle(t *testing.T) {
 	body := set.Docs[0].Body
 
 	count := strings.Count(body, "SHARED CONTENT")
-	if count != 2 {
-		t.Errorf("expected 'SHARED CONTENT' to appear twice, got %d times. Body:\n%s", count, body)
+	if count != 1 {
+		t.Errorf("expected exact imported content to appear once, got %d times. Body:\n%s", count, body)
 	}
 	if strings.Contains(body, "skipped: import cycle") {
 		t.Errorf("body contains incorrect import cycle message:\n%s", body)
@@ -175,5 +317,29 @@ func TestImportDiamondAndCycle(t *testing.T) {
 	bodyCycle := setCycle.Docs[0].Body
 	if !strings.Contains(bodyCycle, "skipped: import cycle") {
 		t.Errorf("expected import cycle to be detected and reported. Body:\n%s", bodyCycle)
+	}
+}
+
+func TestLoadHidesMemoryUnderExperimentEnv(t *testing.T) {
+	root := t.TempDir()
+	user := filepath.Join(root, "user")
+	proj := filepath.Join(root, "project")
+	mustMkdir(t, filepath.Join(proj, ".git"))
+	mustWrite(t, filepath.Join(proj, "AGENTS.md"), "STANDING INSTRUCTION BODY")
+	store := StoreFor(user, proj)
+	if _, err := store.Save(Memory{Name: "pinned-pref", Description: "always on", Activation: ActivationPinned, Body: "PINNED BODY"}); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("REASONIX_EXPERIMENT_NO_MEMORY", "1")
+	set := Load(Options{CWD: proj, UserDir: user})
+	if len(set.PinnedGuidance) != 0 || strings.TrimSpace(set.Index) != "" || set.Store.Dir != "" {
+		t.Fatalf("memory-off arm leaked store state: %+v", set)
+	}
+	if !strings.Contains(set.Block(), "STANDING INSTRUCTION BODY") {
+		t.Fatal("instruction docs must survive the memory-off arm")
+	}
+	if AutoRecall(set.Store, "always on pinned pref", RecallOptions{}).Hits != nil {
+		t.Fatal("a zero store must not recall")
 	}
 }

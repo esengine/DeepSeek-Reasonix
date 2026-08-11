@@ -1,7 +1,7 @@
 import { memo, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { useT } from "../lib/i18n";
-import { useGSAPCollapse } from "../lib/useGSAPCollapse";
+import { useCollapseAnimation } from "../lib/useCollapseAnimation";
 import type { Item } from "../lib/useController";
 import { ToolCard } from "./ToolCard";
 
@@ -102,6 +102,7 @@ function toolDisplayName(name: string): string {
     case "kill_shell": return "Kill Shell";
     case "wait":
     case "waitJob": return "Wait";
+    case "use_capability": return "MCP";
     default: return titleCaseName(name);
   }
 }
@@ -120,7 +121,7 @@ export const ToolGroup = memo(function ToolGroup({
   const t = useT();
   const [open, setOpen] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
-  useGSAPCollapse(bodyRef, open);
+  useCollapseAnimation(bodyRef, open);
 
   if (items.length === 0) return null;
 

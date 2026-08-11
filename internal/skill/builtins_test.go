@@ -3,6 +3,7 @@ package skill
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -23,6 +24,27 @@ func (t builtinTestTool) Execute(context.Context, json.RawMessage) (string, erro
 	return "", nil
 }
 func (t builtinTestTool) ReadOnly() bool { return t.readOnly }
+
+// TestBuiltinReviewSkillsDeclareReadOnly pins the tool-boundary contract behind
+// the review/security-review "Read-only" promise: runners select the read-only
+// subagent registry from this flag, so losing it silently re-opens writer bash.
+func TestBuiltinReviewSkillsDeclareReadOnly(t *testing.T) {
+	want := map[string]bool{
+		"explore":         false,
+		"research":        false,
+		"review":          true,
+		"security-review": true,
+	}
+	for _, sk := range builtinSkills() {
+		expected, tracked := want[sk.Name]
+		if !tracked {
+			continue
+		}
+		if sk.ReadOnly != expected {
+			t.Errorf("builtin %q ReadOnly = %v, want %v", sk.Name, sk.ReadOnly, expected)
+		}
+	}
+}
 
 func TestCodeGraphReadToolsRequireKnownNameAndReadOnly(t *testing.T) {
 	reg := tool.NewRegistry()
@@ -79,13 +101,7 @@ func TestBuiltinSkillsIncludeCodeGraphHintAndToolsWhenDiscovered(t *testing.T) {
 			t.Fatalf("explore body missing priority hint %q:\n%s", want, explore.Body)
 		}
 	}
-	found := false
-	for _, name := range explore.AllowedTools {
-		if name == "mcp__codegraph__symbols" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(explore.AllowedTools, "mcp__codegraph__symbols")
 	if !found {
 		t.Fatalf("explore allowed tools = %v, want codegraph tool", explore.AllowedTools)
 	}

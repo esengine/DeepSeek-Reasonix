@@ -19,7 +19,10 @@ import (
 
 func init() { tool.RegisterBuiltin(codeIndex{}) }
 
-type codeIndex struct{ workDir string }
+type codeIndex struct {
+	workDir     string
+	forbidRoots []string
+}
 
 func (codeIndex) Name() string { return "code_index" }
 
@@ -107,6 +110,9 @@ func (c codeIndex) Execute(ctx context.Context, args json.RawMessage) (string, e
 }
 
 func (c codeIndex) collect(ctx context.Context, root string, limit int, outline bool) ([]codeSymbol, bool, error) {
+	if confineRead(c.forbidRoots, root) {
+		return nil, false, nil
+	}
 	info, err := os.Stat(root)
 	if err != nil {
 		return nil, false, fmt.Errorf("code_index %s: %w", root, err)
@@ -125,12 +131,15 @@ func (c codeIndex) collect(ctx context.Context, root string, limit int, outline 
 				return nil
 			}
 			if d.IsDir() {
+				if skipForbidDir(path, c.forbidRoots) {
+					return filepath.SkipDir
+				}
 				if path != root && skipCodeIndexDir(d.Name()) {
 					return filepath.SkipDir
 				}
 				return nil
 			}
-			if supportedCodeIndexFile(path) {
+			if supportedCodeIndexFile(path) && !confineRead(c.forbidRoots, path) {
 				files = append(files, path)
 				if len(files) >= codeIndexMaxFiles {
 					return filepath.SkipAll
@@ -181,6 +190,10 @@ func (c codeIndex) parseFile(path string) ([]codeSymbol, error) {
 	}
 	if filepath.Ext(path) == ".go" {
 		return c.parseGo(path)
+	}
+	if treeSymbols, ok, err := c.parseTreeSitter(path); ok && err == nil {
+		textSymbols, _ := c.parseText(path)
+		return mergeCodeSymbols(treeSymbols, textSymbols), nil
 	}
 	return c.parseText(path)
 }
@@ -319,6 +332,33 @@ func formatCodeSymbols(symbols []codeSymbol, truncated bool) string {
 		b.WriteString("... (truncated; narrow path/query/kind or raise limit)\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+func mergeCodeSymbols(primary, fallback []codeSymbol) []codeSymbol {
+	if len(primary) == 0 {
+		return fallback
+	}
+	if len(fallback) == 0 {
+		return primary
+	}
+	out := append([]codeSymbol(nil), primary...)
+	seen := make(map[string]struct{}, len(primary)+len(fallback))
+	for _, s := range primary {
+		seen[codeSymbolIdentity(s)] = struct{}{}
+	}
+	for _, s := range fallback {
+		key := codeSymbolIdentity(s)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, s)
+	}
+	return out
+}
+
+func codeSymbolIdentity(s codeSymbol) string {
+	return fmt.Sprintf("%s:%d:%s:%s:%s", s.File, s.Line, s.Kind, s.Parent, s.Name)
 }
 
 func supportedCodeIndexFile(path string) bool {

@@ -27,11 +27,39 @@ func TestForgetToolDeletes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if !strings.Contains(out, "Forgot memory") || !strings.Contains(out, "archived to") {
+	if !strings.Contains(out, "Forgot memory") || !strings.Contains(out, "archived from project/stale-fact.md") {
 		t.Fatalf("unexpected tool output: %q", out)
+	}
+	if strings.Contains(out, store.Dir) {
+		t.Fatalf("forget output exposed the absolute store path: %q", out)
 	}
 	if len(store.List()) != 0 {
 		t.Fatalf("memory not deleted: %+v", store.List())
+	}
+}
+
+func TestForgetToolArchivesOnlyQualifiedScope(t *testing.T) {
+	root := t.TempDir()
+	store := Store{Dir: root + "/project", GlobalDir: root + "/global"}
+	if _, err := store.SaveWithOptions(Memory{Name: "project/shared.md", Description: "project", Body: "project body"}, SaveOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveWithOptions(Memory{Name: "global/shared.md", Description: "global", Body: "global body"}, SaveOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := NewForgetTool(store).Execute(context.Background(), []byte(`{"name":"global/shared.md"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "archived from global/shared.md") || strings.Contains(out, root) {
+		t.Fatalf("qualified forget output = %q", out)
+	}
+	if _, ok := store.Read("global/shared.md"); ok {
+		t.Fatal("global fact remained active")
+	}
+	if project, ok := store.Read("project/shared.md"); !ok || project.Body != "project body" {
+		t.Fatalf("project fact was disturbed: %+v, ok=%v", project, ok)
 	}
 }
 
@@ -61,7 +89,8 @@ func TestForgetToolQueuesDisregardNote(t *testing.T) {
 	if _, err := NewForgetTool(store).Execute(ctx, []byte(`{"name":"old-fact"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if len(q.notes) != 1 || !strings.Contains(q.notes[0], "old-fact") {
-		t.Fatalf("expected one queued note naming the deleted memory, got %v", q.notes)
+	if len(q.notes) != 1 || !strings.Contains(q.notes[0], "old-fact") ||
+		!strings.Contains(q.notes[0], "disregard its loaded guidance") {
+		t.Fatalf("expected one queued note revoking the deleted memory, got %v", q.notes)
 	}
 }

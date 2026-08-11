@@ -10,6 +10,7 @@ type PopoverPhase = "closed" | "open" | "closing";
 
 const EDGE_GAP = 8;
 const DEFAULT_OFFSET = 8;
+const MAX_INITIAL_POSITION_RETRY_FRAMES = 8;
 export const ANCHORED_POPOVER_CLOSE_MS = 140;
 
 function clamp(value: number, min: number, max: number): number {
@@ -68,6 +69,7 @@ export function AnchoredPopover({
   const [position, setPosition] = useState<PopoverPosition | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const phaseRef = useRef<PopoverPhase>(phase);
+  const positionRef = useRef<PopoverPosition | null>(position);
 
   useLayoutEffect(() => {
     let id: number | undefined;
@@ -83,6 +85,7 @@ export function AnchoredPopover({
     id = window.setTimeout(() => {
       phaseRef.current = "closed";
       setPhase("closed");
+      positionRef.current = null;
       setPosition(null);
     }, reduceMotion ? 0 : ANCHORED_POPOVER_CLOSE_MS);
     return () => {
@@ -94,21 +97,38 @@ export function AnchoredPopover({
 
   useLayoutEffect(() => {
     if (!rendered) {
+      positionRef.current = null;
       setPosition(null);
       return;
     }
     let frame: number | null = null;
+    let initialMeasurementRetries = 0;
+    const scheduleUpdate = () => {
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(updatePosition);
+    };
     const updatePosition = () => {
       frame = null;
       const anchor = anchorRef.current?.getBoundingClientRect();
       const menu = popoverRef.current?.getBoundingClientRect();
-      if (!anchor || !menu) return;
+      // Keep an existing valid position while either element is temporarily
+      // unavailable. Before the first measurement, the render fallback below
+      // keeps the popover visible without pretending layout is ready. Retry a
+      // bounded number of frames so a late anchor can still become measurable.
+      if (!anchor || !menu) {
+        if (
+          positionRef.current === null &&
+          initialMeasurementRetries < MAX_INITIAL_POSITION_RETRY_FRAMES
+        ) {
+          initialMeasurementRetries += 1;
+          scheduleUpdate();
+        }
+        return;
+      }
+      initialMeasurementRetries = 0;
       const next = calculatePosition(anchor, menu, align, offset, placement);
+      positionRef.current = next;
       setPosition((current) => (samePosition(current, next) ? current : next));
-    };
-    const scheduleUpdate = () => {
-      if (frame !== null) return;
-      frame = window.requestAnimationFrame(updatePosition);
     };
     updatePosition();
     scheduleUpdate();
@@ -169,9 +189,9 @@ export function AnchoredPopover({
       className={`anchored-popover ${className}`}
       style={{
         ...style,
-        left: position?.left ?? -9999,
-        top: position?.top ?? -9999,
-        visibility: position ? "visible" : "hidden",
+        left: position?.left ?? EDGE_GAP,
+        top: position?.top ?? EDGE_GAP,
+        visibility: "visible",
       }}
       onMouseDown={(event) => {
         event.stopPropagation();

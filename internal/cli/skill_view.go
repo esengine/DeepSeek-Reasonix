@@ -13,7 +13,7 @@ func renderSkillList(width int, skills []skill.Skill, disabled map[string]bool) 
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n", viewHeader("skills (%d)", len(skills)))
 	for _, s := range skills {
-		name := "/" + s.Name
+		name := "/" + s.SlashName()
 		scope := "(" + string(s.Scope) + ")"
 		tag := ""
 		if s.RunAs == skill.RunSubagent {
@@ -32,11 +32,14 @@ func renderSkillList(width int, skills []skill.Skill, disabled map[string]bool) 
 
 func renderSkillShow(width int, s skill.Skill, disabled bool) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s %s\n", viewHeader("skill:"), viewCompactText(s.Name, viewBudget(width, 7)))
+	fmt.Fprintf(&b, "%s %s\n", viewHeader("skill:"), viewCompactText(s.SlashName(), viewBudget(width, 7)))
 	if s.RunAs == skill.RunSubagent {
 		fmt.Fprintf(&b, "  %s  %s\n", viewMeta(string(s.Scope)), viewStatus("subagent"))
 	} else {
 		fmt.Fprintf(&b, "  %s\n", viewMeta(string(s.Scope)))
+	}
+	if s.Plugin != "" {
+		fmt.Fprintf(&b, "  %s\n", viewMeta("plugin "+s.Plugin))
 	}
 	if disabled {
 		fmt.Fprintf(&b, "  %s\n", viewMeta("disabled"))

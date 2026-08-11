@@ -4,6 +4,7 @@ package config
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"reasonix/internal/provider/openai"
@@ -36,17 +37,35 @@ func (e *ProviderEntry) FetchModels(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	var lastErr error
+	var firstHardErr error
+	authMode := modelFetchAuthMode(e)
 	for _, u := range candidates {
-		models, err := openai.FetchModels(ctx, u, key)
+		models, err := openai.FetchModelsWithOptions(ctx, u, key, openai.FetchModelsOptions{
+			Headers:  e.Headers,
+			AuthMode: authMode,
+		})
 		if err == nil {
 			return models, nil
 		}
 		lastErr = err
-		if !openai.IsModelFetchEndpointMiss(err) {
-			break
+		if !openai.IsModelFetchEndpointMiss(err) && firstHardErr == nil {
+			firstHardErr = err
 		}
 	}
+	if firstHardErr != nil {
+		return nil, firstHardErr
+	}
 	return nil, lastErr
+}
+
+func modelFetchAuthMode(e *ProviderEntry) openai.ModelFetchAuthMode {
+	if e == nil || !strings.EqualFold(strings.TrimSpace(e.Kind), "anthropic") {
+		return openai.ModelFetchAuthAuto
+	}
+	if e.AuthHeader {
+		return openai.ModelFetchAuthBearer
+	}
+	return openai.ModelFetchAuthXAPIKey
 }
 
 // BuildModelFetchURLs derives likely OpenAI-compatible model-list endpoints.
@@ -107,13 +126,7 @@ func uniqueStrings(in []string) []string {
 		if s == "" {
 			continue
 		}
-		seen := false
-		for _, existing := range out {
-			if existing == s {
-				seen = true
-				break
-			}
-		}
+		seen := slices.Contains(out, s)
 		if !seen {
 			out = append(out, s)
 		}

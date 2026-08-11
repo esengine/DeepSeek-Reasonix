@@ -18,6 +18,7 @@ type Sender interface {
 
 // Sink forwards every event to inner and mirrors configured attention events to sender.
 type Sink struct {
+	event.AuditForwarder
 	inner  event.Sink
 	sender Sender
 	cfg    config.NotificationsConfig
@@ -25,7 +26,7 @@ type Sink struct {
 
 // NewSink wraps an existing event sink with best-effort notification delivery.
 func NewSink(inner event.Sink, sender Sender, cfg config.NotificationsConfig) *Sink {
-	return &Sink{inner: inner, sender: sender, cfg: cfg}
+	return &Sink{AuditForwarder: event.AuditForwarder{Inner: inner}, inner: inner, sender: sender, cfg: cfg}
 }
 
 // Emit preserves the underlying event stream before attempting notification side effects.

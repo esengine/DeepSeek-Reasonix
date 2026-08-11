@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// --- splitLines ---
+// splitLines
 
 func TestSplitLinesEmpty(t *testing.T) {
 	lines, eol := splitLines("")
@@ -60,7 +60,7 @@ func TestSplitLinesSingleLineWithNewline(t *testing.T) {
 	}
 }
 
-// --- isBinary ---
+// isBinary
 
 func TestIsBinaryEmpty(t *testing.T) {
 	if isBinary("") {
@@ -86,7 +86,7 @@ func TestIsBinaryNULAtEnd(t *testing.T) {
 	}
 }
 
-// --- Build edge cases ---
+// Build edge cases
 
 func TestBuildBothEmpty(t *testing.T) {
 	c := Build("empty.txt", "", "", Modify)
@@ -134,7 +134,7 @@ func TestBuildWhitespaceOnly(t *testing.T) {
 func TestBuildLargeFile(t *testing.T) {
 	// Build a large file with one changed line in the middle.
 	var oldB, newB strings.Builder
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		oldB.WriteString("line\n")
 		if i == 500 {
 			newB.WriteString("CHANGED\n")
@@ -148,7 +148,7 @@ func TestBuildLargeFile(t *testing.T) {
 	}
 }
 
-// --- Kind constants ---
+// Kind constants
 
 func TestKindConstants(t *testing.T) {
 	if Create != "create" {
@@ -162,7 +162,7 @@ func TestKindConstants(t *testing.T) {
 	}
 }
 
-// --- itoa ---
+// itoa
 
 func TestItoa(t *testing.T) {
 	cases := []struct {
@@ -178,59 +178,5 @@ func TestItoa(t *testing.T) {
 		if got := itoa(c.n); got != c.want {
 			t.Errorf("itoa(%d) = %q, want %q", c.n, got, c.want)
 		}
-	}
-}
-
-// --- rangeSpec ---
-
-func TestRangeSpec(t *testing.T) {
-	if got := rangeSpec(5, 1); got != "5" {
-		t.Errorf("rangeSpec(5,1) = %q", got)
-	}
-	if got := rangeSpec(5, 3); got != "5,3" {
-		t.Errorf("rangeSpec(5,3) = %q", got)
-	}
-}
-
-// --- lastLineNumbers ---
-
-func TestLastLineNumbers(t *testing.T) {
-	refs := []lineRef{
-		{op: op{opEqual, "a"}, oldNo: 1, newNo: 1},
-		{op: op{opDelete, "b"}, oldNo: 2},
-		{op: op{opInsert, "c"}, newNo: 2},
-		{op: op{opEqual, "d"}, oldNo: 3, newNo: 3},
-	}
-	lastOld, lastNew := lastLineNumbers(refs)
-	if lastOld != 3 || lastNew != 3 {
-		t.Errorf("lastOld=%d, lastNew=%d", lastOld, lastNew)
-	}
-}
-
-// --- group ---
-
-func TestGroupNoChanges(t *testing.T) {
-	refs := []lineRef{
-		{op: op{opEqual, "a"}, oldNo: 1, newNo: 1},
-	}
-	hunks := group(refs, 3)
-	if len(hunks) != 0 {
-		t.Errorf("no changes should yield no hunks, got %d", len(hunks))
-	}
-}
-
-func TestGroupMergeAdjacent(t *testing.T) {
-	// Two changes close together should merge into one hunk.
-	refs := make([]lineRef, 10)
-	for i := range refs {
-		refs[i] = lineRef{op: op{opEqual, "x"}, oldNo: i + 1, newNo: i + 1}
-	}
-	refs[3] = lineRef{op: op{opDelete, "y"}, oldNo: 4}
-	refs[4] = lineRef{op: op{opInsert, "z"}, newNo: 4}
-	refs[6] = lineRef{op: op{opDelete, "w"}, oldNo: 7}
-	refs[7] = lineRef{op: op{opInsert, "v"}, newNo: 7}
-	hunks := group(refs, 3)
-	if len(hunks) != 1 {
-		t.Errorf("adjacent changes should merge, got %d hunks", len(hunks))
 	}
 }

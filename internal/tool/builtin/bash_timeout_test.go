@@ -2,6 +2,8 @@ package builtin
 
 import (
 	"context"
+	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -59,6 +61,21 @@ func TestWorkspacePassesBashTimeout(t *testing.T) {
 	}
 }
 
+func TestNormalizeBashRunErrorAllowsPreservedWaitDelay(t *testing.T) {
+	if err := normalizeBashRunError(context.Background(), exec.ErrWaitDelay, true); err != nil {
+		t.Fatalf("preserved post-exit WaitDelay should be ignored, got %v", err)
+	}
+	if err := normalizeBashRunError(context.Background(), exec.ErrWaitDelay, false); !errors.Is(err, exec.ErrWaitDelay) {
+		t.Fatalf("ordinary WaitDelay should remain visible, got %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := normalizeBashRunError(ctx, exec.ErrWaitDelay, true); !errors.Is(err, exec.ErrWaitDelay) {
+		t.Fatalf("cancelled WaitDelay should remain visible, got %v", err)
+	}
+}
+
 func longSleepCommand(sh sandbox.Shell) string {
 	if sh.Kind == sandbox.ShellPowerShell {
 		return "Start-Sleep -Seconds 2"
@@ -96,7 +113,7 @@ func BenchmarkBashForegroundTimeoutConfiguredCap(b *testing.B) {
 		timeout := bt.foregroundTimeout()
 		if timeout > 0 {
 			var cancel context.CancelFunc
-			runCtx, cancel = context.WithTimeoutCause(ctx, timeout, errBashTimeout)
+			runCtx, cancel = context.WithTimeoutCause(ctx, timeout, errors.New("bash foreground timeout"))
 			cancel()
 		}
 		if runCtx == nil {

@@ -4,12 +4,28 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"reasonix/internal/config"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
+	"reasonix/internal/recovery"
 )
+
+type recoveryMetricsDeltaStub struct {
+	deltas []recovery.Metrics
+}
+
+func (s *recoveryMetricsDeltaStub) DrainRecoveryMetrics() recovery.Metrics {
+	if len(s.deltas) == 0 {
+		return recovery.Metrics{}
+	}
+	next := s.deltas[0]
+	s.deltas = s.deltas[1:]
+	return next
+}
 
 func TestObserveClassifiesEvents(t *testing.T) {
 	m := newMetricsAggregator(t.TempDir())
@@ -18,8 +34,9 @@ func TestObserveClassifiesEvents(t *testing.T) {
 		{Kind: event.Usage, Usage: &provider.Usage{FinishReason: "tool_calls", CacheHitTokens: 60, CacheMissTokens: 40}},
 		{Kind: event.ToolResult, Tool: event.Tool{Name: "bash", Err: "blocked by permission policy"}},
 		{Kind: event.CompactionDone},
-		{Kind: event.Notice, Text: "empty final answer blocked: model returned no visible answer text; retrying"},
+		{Kind: event.Notice, Text: "No visible answer was produced; asking the assistant to respond again.", Detail: "empty final answer blocked: model returned no visible answer text; retrying"},
 		{Kind: event.TurnDone, Err: errors.New("deepseek-flash: status 429: rate limited")},
+		{Kind: event.TurnDone, Err: errors.New("automatic recovery paused"), Outcome: event.TurnOutcomeRecoveryPaused},
 		{Kind: event.TurnDone},
 	}
 	for _, e := range feed {
@@ -33,7 +50,7 @@ func TestObserveClassifiesEvents(t *testing.T) {
 		"compaction":     {"total": 1},
 		"empty_final":    {"total": 1},
 		"provider_error": {"http_429": 1},
-		"turns":          {"total": 2},
+		"turns":          {"total": 3},
 	}
 	for sig, buckets := range want {
 		for b, n := range buckets {
@@ -41,6 +58,27 @@ func TestObserveClassifiesEvents(t *testing.T) {
 				t.Errorf("%s/%s = %d, want %d", sig, b, got, n)
 			}
 		}
+	}
+}
+
+func TestObserveControllerRecoveryMetricsConsumesOnlyNewDelta(t *testing.T) {
+	m := newMetricsAggregator(t.TempDir())
+	ctrl := &recoveryMetricsDeltaStub{deltas: []recovery.Metrics{
+		{FailureEvents: 1, HumanPrompts: 1, ReviewLatencyMsSum: 750, ReviewLatencyCount: 1},
+		{},
+	}}
+
+	observeControllerRecoveryMetrics(m, ctrl)
+	observeControllerRecoveryMetrics(m, ctrl)
+
+	if got := m.c["recovery_failure"]["total"]; got != 1 {
+		t.Fatalf("recovery_failure/total = %d, want 1", got)
+	}
+	if got := m.c["recovery_human_prompt"]["total"]; got != 1 {
+		t.Fatalf("recovery_human_prompt/total = %d, want 1", got)
+	}
+	if got := m.c["recovery_review_latency"]["lt_2s"]; got != 1 {
+		t.Fatalf("recovery_review_latency/lt_2s = %d, want 1", got)
 	}
 }
 
@@ -69,9 +107,6 @@ func TestObserveSettingsSnapshotUsesSafeBuckets(t *testing.T) {
 	}
 	if err := cfg.SetDesktopDisplayMode("compact"); err != nil {
 		t.Fatalf("SetDesktopDisplayMode: %v", err)
-	}
-	if err := cfg.SetAutoPlan("on"); err != nil {
-		t.Fatalf("SetAutoPlan: %v", err)
 	}
 	if err := cfg.SetDesktopStatusBarStyle("icon"); err != nil {
 		t.Fatalf("SetDesktopStatusBarStyle: %v", err)
@@ -112,7 +147,6 @@ func TestObserveSettingsSnapshotUsesSafeBuckets(t *testing.T) {
 		"settings_theme_style":             "graphite",
 		"settings_close_behavior":          "quit",
 		"settings_display_mode":            "compact",
-		"settings_auto_plan":               "on",
 		"settings_status_bar_style":        "icon",
 		"settings_status_bar_items_count":  "n_3",
 		"settings_check_updates":           "off",
@@ -158,6 +192,11 @@ func TestErrorClass(t *testing.T) {
 		"read: connection reset by peer":      "stream_interrupted",
 		"stream interrupted mid-flight":       "stream_interrupted",
 		"context deadline exceeded (timeout)": "timeout",
+		"update: authorization cancelled":     "authorization_cancelled",
+		"update: authorization failed":        "authorization_failed",
+		"update: package manager busy":        "package_manager_busy",
+		"update: package install failed":      "package_install_failed",
+		"update: package verify failed":       "package_verify_failed",
 		"some unrecognized failure":           "other",
 	}
 	for msg, want := range cases {
@@ -207,5 +246,66 @@ func TestPersistMergesAcrossSessions(t *testing.T) {
 	}
 	if n := len(flatten(readCounters(path))); n != 1 {
 		t.Errorf("flatten produced %d counters, want 1", n)
+	}
+}
+
+func TestRecordDroppedWebRuntimeEventsDrainsAtomicCount(t *testing.T) {
+	oldVersion := version
+	version = "v1.23.0"
+	t.Cleanup(func() { version = oldVersion })
+
+	dir := t.TempDir()
+	app := NewApp()
+	app.metrics.Store(newMetricsAggregator(dir))
+	var dropped atomic.Uint64
+	dropped.Store(3)
+
+	recordDroppedWebRuntimeEvents(app, "webview2", &dropped)
+	recordDroppedWebRuntimeEvents(app, "webview2", &dropped)
+
+	if got := dropped.Load(); got != 0 {
+		t.Fatalf("dropped count = %d, want drained", got)
+	}
+	if got := readCounters(filepath.Join(dir, metricsPendingFile))["desktop_web_runtime_dropped"]["webview2"]; got != 3 {
+		t.Fatalf("desktop_web_runtime_dropped/webview2 = %d, want 3", got)
+	}
+}
+
+func TestErrorClassSeparatesBadRequestCauses(t *testing.T) {
+	// Verbatim provider bodies from reported issues, each needing a different fix.
+	cases := map[string]string{
+		`status 400: messages[203]: unknown variant ` + "`image_url`" + `, expected ` + "`text`": "http_400_content",
+		`status 400: Invalid schema for function 'ls': null is not of type "array"`:              "http_400_schema",
+		"status 400: The `content[].thinking` in the thinking mode must be passed back":          "http_400_reasoning_replay",
+		"status 400: thinking: invalid type: map, expected a boolean":                            "http_400_thinking_shape",
+		"status 400: This model's maximum context length is 65536 tokens":                        "http_400_context_length",
+		"status 400: missing field name at line 1":                                               "http_400_tool_calls",
+		"status 400: something nobody has classified yet":                                        "http_400",
+	}
+	for msg, want := range cases {
+		if got := errorClass(msg); got != want {
+			t.Errorf("errorClass(%q) = %q, want %q", msg, got, want)
+		}
+	}
+}
+
+func TestErrorClassNeverEchoesProviderText(t *testing.T) {
+	// The bucket is uploaded; the message is not. A label must be a fixed token,
+	// so no substring of a body carrying user code or prompt text can reach it.
+	secrets := []string{
+		"status 400: Invalid schema for function 'ls': /home/alice/secret-project is not of type \"array\"",
+		"status 400: unknown variant `image_url` in ~/work/client-contract.pdf",
+		"status 400: thinking: invalid type: map, expected a boolean, key=sk-abc123",
+	}
+	for _, msg := range secrets {
+		got := errorClass(msg)
+		for _, leak := range []string{"alice", "secret", "client-contract", "sk-abc123", "/home", "~/work"} {
+			if strings.Contains(got, leak) {
+				t.Fatalf("errorClass(%q) = %q, leaked %q", msg, got, leak)
+			}
+		}
+		if !strings.HasPrefix(got, "http_400") {
+			t.Errorf("errorClass(%q) = %q, want an http_400 label", msg, got)
+		}
 	}
 }

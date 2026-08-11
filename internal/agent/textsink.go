@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -80,18 +81,54 @@ func (s *TextSink) Emit(e event.Event) {
 
 	case event.ToolDispatch:
 		// The early (Partial) dispatch carries no args — the full one prints the
-		// line. Without this the headless stream shows every call twice.
-		if e.Tool.Partial {
+		// line. A same-ID preview refresh is for upsert-capable frontends; this
+		// append-only stream ignores it so every tool still prints exactly once.
+		if e.Tool.Partial || e.Tool.Refreshed {
 			break
 		}
-		fmt.Fprintf(s.out, "  -> %s %s\n", e.Tool.Name, CompactArgs(e.Tool.Args))
+		fmt.Fprintf(s.out, "  -> %s\n", textSinkToolHead(e.Tool.Name, e.Tool.Args))
 		s.wroteAnything = true
 
 	case event.ToolResult:
 		// A successful result is silent (it only feeds the model); a blocked
 		// call surfaces the same "⊘ name <reason>" line the agent used to print.
 		if e.Tool.Err != "" {
-			fmt.Fprintf(s.out, "  ⊘ %s %s\n", e.Tool.Name, e.Tool.Err)
+			name := e.Tool.Name
+			if e.Tool.Name == "use_capability" {
+				name = textSinkToolHead(e.Tool.Name, e.Tool.Args)
+			} else if e.Tool.Name == "bash" && e.Tool.Execution != nil && e.Tool.Execution.Shell != "" {
+				name = e.Tool.Execution.Shell
+				switch e.Tool.Execution.Shell {
+				case "powershell":
+					name = "Windows PowerShell"
+				case "pwsh":
+					name = "PowerShell 7+"
+				case "git-bash":
+					name = "Git Bash"
+				}
+			}
+			errText := e.Tool.Err
+			if e.Tool.Execution != nil {
+				var parts []string
+				if e.Tool.Execution.ExitCode != nil {
+					parts = append(parts, fmt.Sprintf("exit %d", *e.Tool.Execution.ExitCode))
+				}
+				if e.Tool.Execution.FailurePhase != "" {
+					parts = append(parts, e.Tool.Execution.FailurePhase)
+				}
+				switch e.Tool.Execution.FailurePhase {
+				case "preflight", "authorization", "dependency", "launch":
+					parts = append(parts, "not executed")
+				default:
+					if e.Tool.Execution.MutationRisk == "may_be_partial" {
+						parts = append(parts, "may be partial")
+					}
+				}
+				if len(parts) > 0 {
+					errText = strings.Join(parts, " · ") + " · " + errText
+				}
+			}
+			fmt.Fprintf(s.out, "  ⊘ %s %s\n", name, errText)
 			s.wroteAnything = true
 		}
 
@@ -129,11 +166,32 @@ func (s *TextSink) Emit(e event.Event) {
 			break // aborted pass — the caller's Notice already explained why
 		}
 		fmt.Fprintln(s.out, dimText(fmt.Sprintf("  ⋯ compacted %d messages (%s)", c.Messages, c.Trigger)))
-		for _, ln := range strings.Split(strings.TrimRight(c.Summary, "\n"), "\n") {
+		for ln := range strings.SplitSeq(strings.TrimRight(c.Summary, "\n"), "\n") {
 			fmt.Fprintln(s.out, dimText("    "+ln))
 		}
 		s.wroteAnything = true
 	}
+}
+
+func textSinkToolHead(name, args string) string {
+	if name != "use_capability" {
+		return name + " " + CompactArgs(args)
+	}
+	var call struct {
+		Action       string `json:"action"`
+		CapabilityID string `json:"capability_id"`
+	}
+	if json.Unmarshal([]byte(args), &call) != nil {
+		return "MCP"
+	}
+	subject := strings.TrimSpace(call.CapabilityID)
+	if subject == "" {
+		subject = strings.TrimSpace(call.Action)
+	}
+	if subject == "" {
+		return "MCP"
+	}
+	return "MCP(" + subject + ")"
 }
 
 // closeTextStream ends the streamed answer. With a renderer wired in and the

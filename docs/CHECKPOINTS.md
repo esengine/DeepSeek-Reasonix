@@ -7,6 +7,10 @@ here. Snapshot-based and aligned with Claude Code. An optional git-backed mode i
 the remaining (lower-priority) follow-up. Tracks the most requested missing
 capability from v1 — an edit safety net / undo.
 
+This document describes rewind snapshots. For the autonomous-run rule about when
+the agent should pause and ask the user, see
+[`TASK_CONTRACT.md`](TASK_CONTRACT.md).
+
 ## Goal
 
 Let a user rewind a session to a previous point and restore **code**,

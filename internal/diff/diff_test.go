@@ -51,6 +51,35 @@ func TestBuild_ModifyMiddle(t *testing.T) {
 	}
 }
 
+func TestBuildWithOptionsPreviewLabelsAndContext(t *testing.T) {
+	old := "1\n2\n3\n4\n5\n"
+	neu := "1\n2\nThree\n4\n5\n"
+	c := BuildWithOptions("m.txt", old, neu, Modify, BuildOptions{ContextLines: 0, Mode: OutputModePreview})
+	if c.Mode != string(OutputModePreview) {
+		t.Fatalf("Mode = %q", c.Mode)
+	}
+	if !strings.Contains(c.Diff, "--- before/m.txt") || !strings.Contains(c.Diff, "+++ after/m.txt") {
+		t.Fatalf("preview labels missing:\n%s", c.Diff)
+	}
+	if strings.Contains(c.Diff, " 1") || strings.Contains(c.Diff, " 5") {
+		t.Fatalf("zero-context diff leaked unchanged context:\n%s", c.Diff)
+	}
+	if c.Hunks != 1 {
+		t.Fatalf("Hunks = %d, want 1:\n%s", c.Hunks, c.Diff)
+	}
+}
+
+func TestBuildWithOptionsCustomLabels(t *testing.T) {
+	c := BuildWithOptions("x.txt", "old\n", "new\n", Modify, BuildOptions{
+		ContextLines: 1,
+		OldLabel:     "left",
+		NewLabel:     "right",
+	})
+	if !strings.Contains(c.Diff, "--- left") || !strings.Contains(c.Diff, "+++ right") {
+		t.Fatalf("custom labels missing:\n%s", c.Diff)
+	}
+}
+
 func TestBuild_Prepend(t *testing.T) {
 	c := Build("p.txt", "b\nc\n", "a\nb\nc\n", Modify)
 	if c.Added != 1 || c.Removed != 0 {
@@ -101,10 +130,10 @@ func TestBuild_Binary(t *testing.T) {
 	}
 }
 
-// TestMyers_MinimalEditScript checks the diff is the shortest edit script: a
-// single line inserted into a run of identical lines must not be rendered as a
-// block delete+insert.
-func TestMyers_MinimalEditScript(t *testing.T) {
+// TestBuild_MinimalEditScript checks the third-party line diff keeps the same
+// user-visible contract: a single line inserted into a run of identical lines
+// must not be rendered as a block delete+insert.
+func TestBuild_MinimalEditScript(t *testing.T) {
 	old := "x\nx\nx\n"
 	neu := "x\nx\ny\nx\n"
 	c := Build("min.txt", old, neu, Modify)
@@ -113,62 +142,27 @@ func TestMyers_MinimalEditScript(t *testing.T) {
 	}
 }
 
-func TestMyersMaxD_CapsWithoutOverflow(t *testing.T) {
-	maxInt := int(^uint(0) >> 1)
-	cases := []struct {
-		name string
-		n    int
-		m    int
-		want int
-	}{
-		{name: "small", n: 3, m: 4, want: 7},
-		{name: "at cap", n: maxDiffEdits - 1, m: 1, want: maxDiffEdits},
-		{name: "over cap", n: maxDiffEdits - 1, m: 2, want: maxDiffEdits},
-		{name: "huge n", n: maxInt, m: 1, want: maxDiffEdits},
-		{name: "huge m", n: 1, m: maxInt, want: maxDiffEdits},
+func TestChangedWindowSize(t *testing.T) {
+	oldLines, _ := splitLines("a\nb\nc\nd\ne\n")
+	newLines, _ := splitLines("a\nb\nC\nd\ne\n")
+	if got := changedWindowSize(oldLines, newLines); got != 2 {
+		t.Fatalf("single changed line window = %d, want 2", got)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := myersMaxD(tc.n, tc.m); got != tc.want {
-				t.Fatalf("myersMaxD(%d, %d) = %d, want %d", tc.n, tc.m, got, tc.want)
-			}
-		})
+	oldLines, _ = splitLines("a\nb\nc\nd\ne\n")
+	newLines, _ = splitLines("a\nB\nc\nD\ne\n")
+	if got := changedWindowSize(oldLines, newLines); got != 6 {
+		t.Fatalf("separate changed lines window = %d, want 6", got)
 	}
 }
 
-// TestApplyOpsReconstruct verifies the op stream is internally consistent: the
-// equal+delete lines reproduce the old file and equal+insert lines reproduce
-// the new file, for a spread of cases.
-func TestApplyOpsReconstruct(t *testing.T) {
-	cases := [][2]string{
-		{"", "abc\n"},
-		{"abc\n", ""},
-		{"a\nb\nc\n", "a\nc\n"},
-		{"a\nc\n", "a\nb\nc\n"},
-		{"one\ntwo\nthree\n", "ONE\ntwo\nTHREE\nfour\n"},
-		{"same\nsame\n", "same\nsame\n"},
+func TestExactDiffTooLarge(t *testing.T) {
+	oldLines := make([]string, maxDiffEdits+1)
+	newLines := make([]string, maxDiffEdits+1)
+	for i := range oldLines {
+		oldLines[i] = "old"
+		newLines[i] = "new"
 	}
-	for _, tc := range cases {
-		oldLines, _ := splitLines(tc[0])
-		newLines, _ := splitLines(tc[1])
-		ops, _ := myers(oldLines, newLines)
-		var gotOld, gotNew []string
-		for _, o := range ops {
-			switch o.typ {
-			case opEqual:
-				gotOld = append(gotOld, o.line)
-				gotNew = append(gotNew, o.line)
-			case opDelete:
-				gotOld = append(gotOld, o.line)
-			case opInsert:
-				gotNew = append(gotNew, o.line)
-			}
-		}
-		if strings.Join(gotOld, "\n") != strings.Join(oldLines, "\n") {
-			t.Errorf("old reconstruction mismatch for %q→%q", tc[0], tc[1])
-		}
-		if strings.Join(gotNew, "\n") != strings.Join(newLines, "\n") {
-			t.Errorf("new reconstruction mismatch for %q→%q", tc[0], tc[1])
-		}
+	if !exactDiffTooLarge(oldLines, newLines) {
+		t.Fatal("large changed window should skip exact diff")
 	}
 }

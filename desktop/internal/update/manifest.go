@@ -10,13 +10,16 @@ import "runtime"
 // Manifest is the latest.json published alongside a desktop release. The updater
 // fetches it from the R2 mirror (primary) or GitHub releases (fallback), compares
 // Version against the running build, and looks up the running platform's artifact
-// via Asset.
+// via Asset / NativePackage.
 type Manifest struct {
-	Version      string           `json:"version"`       // release version, e.g. "v1.1.0"
-	Notes        string           `json:"notes"`         // markdown release notes
-	PubDate      string           `json:"pub_date"`      // RFC3339, optional
-	DownloadPage string           `json:"download_page"` // human-facing download page (macOS manual-update fallback)
-	Platforms    map[string]Asset `json:"platforms"`     // keyed by PlatformKey, e.g. "darwin-arm64"
+	Version         string           `json:"version"`                     // release version, e.g. "v1.1.0"
+	Notes           string           `json:"notes"`                       // markdown release notes
+	PubDate         string           `json:"pub_date"`                    // RFC3339, optional
+	DownloadPage    string           `json:"download_page"`               // human-facing download page (macOS manual-update fallback)
+	ReleaseNotesURL string           `json:"release_notes_url,omitempty"` // exact version history page; older manifests omit it
+	Platforms       map[string]Asset `json:"platforms"`                   // keyed by PlatformKey, e.g. "darwin-arm64"
+	NativePackages  map[string]Asset `json:"native_packages,omitempty"`   // optional OS package assets, e.g. linux-amd64 → .deb
+	Downloads       map[string]Asset `json:"downloads,omitempty"`         // optional signed human-download assets keyed by exact filename
 }
 
 // Asset is one platform's downloadable artifact plus the metadata the updater
@@ -26,6 +29,11 @@ type Asset struct {
 	Sig    string `json:"sig"`    // URL of the detached minisign (.minisig) signature
 	Size   int64  `json:"size"`   // artifact size in bytes (download-progress denominator)
 	SHA256 string `json:"sha256"` // lowercase hex digest, for a second integrity check after verify
+	// InstallLayout identifies the on-disk layout the artifact expects after
+	// install. Empty means the pre-v1.20 flat layout (ignored by old clients).
+	// New clients require "versioned-v1" for self-update and reject unknown
+	// values without changing the active install.
+	InstallLayout string `json:"install_layout,omitempty"`
 }
 
 // PlatformKey is the map key used in Manifest.Platforms for the given OS/arch.
@@ -36,8 +44,18 @@ func PlatformKey(goos, goarch string) string { return goos + "-" + goarch }
 // CurrentPlatform is PlatformKey for the running binary.
 func CurrentPlatform() string { return PlatformKey(runtime.GOOS, runtime.GOARCH) }
 
-// Asset returns the artifact for the running platform, if the manifest lists one.
+// Asset returns the portable/tarball artifact for the running platform, if listed.
 func (m Manifest) Asset() (Asset, bool) {
 	a, ok := m.Platforms[CurrentPlatform()]
+	return a, ok
+}
+
+// NativePackage returns the OS package artifact for the running platform, if listed.
+// Older manifests omit native_packages; callers must treat absence as "no package".
+func (m Manifest) NativePackage() (Asset, bool) {
+	if m.NativePackages == nil {
+		return Asset{}, false
+	}
+	a, ok := m.NativePackages[CurrentPlatform()]
 	return a, ok
 }

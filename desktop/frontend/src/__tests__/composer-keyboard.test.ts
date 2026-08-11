@@ -4,10 +4,17 @@
 
 import {
   canUsePromptHistory,
+  composerEscapeAction,
+  composerEnterAction,
+  composerMenuKeyAction,
+  insertComposerNewline,
   isFnKeyEvent,
+  isImeKeyEvent,
   promptHistoryDirectionFromEvent,
   type PromptHistoryDirection,
 } from "../lib/composerKeyboard";
+import { resetCustomShortcuts, saveCustomShortcut } from "../lib/keyboardShortcuts";
+import type { ComposerInvocation } from "../lib/invocationDisplay";
 
 let passed = 0;
 let failed = 0;
@@ -64,6 +71,96 @@ eq(eligible("up", { value: "line1\nline2", selectionStart: 7, selectionEnd: 7 })
 eq(eligible("up", { value: "history", selectionStart: 7, selectionEnd: 7, historyIndex: 0 }), true, "history mode allows repeated ArrowUp");
 eq(eligible("up", { value: "", selectionStart: 0, selectionEnd: 0, fnKey: true }), false, "Fn-modified arrows are not history shortcuts");
 eq(eligible("up", { value: "", selectionStart: 0, selectionEnd: 0, shiftKey: true }), false, "Shift+Arrow preserves selection behavior");
+
+console.log("\ncomposerEnterAction");
+
+resetCustomShortcuts();
+eq(composerEnterAction({ key: "Enter" }, "darwin"), "send", "plain Enter sends by default");
+eq(composerEnterAction({ key: "Enter", shiftKey: true }, "darwin"), "newline-native", "Shift+Enter keeps the native line break by default");
+eq(composerEnterAction({ key: "Enter", ctrlKey: true }, "windows"), "send", "Ctrl+Enter keeps the legacy default send behavior");
+eq(composerEnterAction({ key: "Enter", metaKey: true }, "darwin"), "send", "Cmd+Enter keeps the legacy default send behavior");
+eq(composerEnterAction({ key: "Enter", altKey: true }, "linux"), "send", "Alt+Enter keeps the legacy default send behavior");
+eq(composerEnterAction({ key: "a" }, "darwin"), null, "non-Enter keys are ignored");
+
+saveCustomShortcut("composer.newline", { key: "Enter", ctrl: true });
+eq(composerEnterAction({ key: "Enter", ctrlKey: true }, "windows"), "newline-insert", "custom Ctrl+Enter inserts a newline manually");
+eq(composerEnterAction({ key: "Enter", shiftKey: true }, "windows"), "none", "Shift+Enter does nothing once the newline chord moved to Ctrl+Enter");
+eq(composerEnterAction({ key: "Enter" }, "windows"), "send", "plain Enter still sends with a custom newline chord");
+resetCustomShortcuts();
+
+saveCustomShortcut("composer.send", { key: "Enter", ctrl: true });
+eq(composerEnterAction({ key: "Enter", ctrlKey: true }, "linux"), "send", "custom Ctrl+Enter sends (WeChat-style layout)");
+eq(composerEnterAction({ key: "Enter" }, "linux"), "newline-insert", "plain Enter breaks the line when the send chord moved to Ctrl+Enter");
+eq(composerEnterAction({ key: "Enter", shiftKey: true }, "linux"), "newline-native", "Shift+Enter still breaks the line in the WeChat-style layout");
+eq(composerEnterAction({ key: "Enter", altKey: true }, "linux"), "none", "a custom send chord disables legacy modified-Enter aliases");
+
+resetCustomShortcuts();
+eq(composerEnterAction({ key: "Enter" }, "darwin"), "send", "reset restores plain-Enter send");
+eq(composerEnterAction({ key: "Enter", shiftKey: true }, "darwin"), "newline-native", "reset restores the Shift+Enter default");
+
+console.log("\ncomposerEscapeAction / IME gating");
+
+eq(composerEscapeAction({ key: "Escape" }, true, true), "pass-through", "Escape passes through while composition is active");
+eq(composerEscapeAction({ key: "Escape" }, true, false), "cancel", "plain Escape cancels a running turn");
+eq(composerEscapeAction({ key: "Escape" }, false, false), "pass-through", "Escape does not cancel an idle composer");
+eq(composerEscapeAction({ key: "Enter" }, true, false), "pass-through", "non-Escape keys do not trigger cancellation");
+
+console.log("\ncomposerMenuKeyAction / IME gating");
+
+eq(composerMenuKeyAction({ key: "Escape" }, true), "pass-through", "IME Escape stays with the input");
+eq(composerMenuKeyAction({ key: "Enter" }, true), "pass-through", "IME Enter stays with the input");
+eq(composerMenuKeyAction({ key: "ArrowDown" }, true), "pass-through", "IME ArrowDown stays with the input");
+eq(composerMenuKeyAction({ key: "Escape" }, false), "handle", "plain Escape is handled by the menu");
+eq(composerMenuKeyAction({ key: "Enter" }, false), "handle", "plain Enter is handled by the menu");
+eq(composerMenuKeyAction({ key: "a" }, false), "pass-through", "typing keys pass through menu navigation");
+
+const now = 10_000;
+eq(
+  isImeKeyEvent({ key: "Escape", isComposing: true }, false, 0, now),
+  true,
+  "native isComposing protects IME Escape",
+);
+eq(
+  isImeKeyEvent({ key: "Escape", keyCode: 229 }, false, 0, now),
+  true,
+  "legacy keyCode 229 protects IME Escape",
+);
+eq(
+  isImeKeyEvent({ key: "Escape" }, true, 0, now),
+  true,
+  "composition ref protects IME Escape",
+);
+eq(
+  isImeKeyEvent({ key: "Escape" }, false, now - 99, now),
+  true,
+  "recent compositionend grace protects IME Escape",
+);
+eq(
+  isImeKeyEvent({ key: "Escape" }, false, now - 100, now),
+  false,
+  "compositionend grace expires at its boundary",
+);
+eq(
+  isImeKeyEvent({ key: "Escape" }, false, now - 101, now),
+  false,
+  "stale compositionend does not block plain Escape",
+);
+
+const boundaryInvocations: ComposerInvocation[] = [
+  { id: "first", offset: 0, command: { name: "first", description: "First skill", kind: "skill" } },
+  { id: "second", offset: 0, command: { name: "second", description: "Second subagent", kind: "subagent" } },
+];
+const newlineAfterFirst = insertComposerNewline("task", boundaryInvocations, {
+  start: 0,
+  end: 0,
+  afterInvocationId: "first",
+});
+eq(newlineAfterFirst.text, "\ntask", "custom newline updates the composer text");
+eq(
+  JSON.stringify(newlineAfterFirst.invocations.map((invocation) => [invocation.id, invocation.offset])),
+  JSON.stringify([["first", 0], ["second", 1]]),
+  "custom newline stays after the invocation at the caret boundary",
+);
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

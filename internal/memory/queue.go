@@ -1,6 +1,9 @@
 package memory
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+)
 
 // Queue receives a one-line note about a memory change a tool just made, so the
 // controller can fold it into the current turn — taking effect this session
@@ -9,15 +12,37 @@ import "context"
 // manager.
 type Queue interface{ QueueMemory(note string) }
 
+type autoMemoryWriteClaimer interface {
+	ClaimAutoMemoryWrite(args json.RawMessage) bool
+}
+
 type queueKey struct{}
+type noQueue struct{}
 
 // WithQueue stamps q onto ctx for the remember/forget tools to find.
 func WithQueue(ctx context.Context, q Queue) context.Context {
 	return context.WithValue(ctx, queueKey{}, q)
 }
 
+// WithoutQueue shadows an ancestor queue. Child agents may persist memory but
+// must not inject turn-tail notes into the parent's live conversation.
+func WithoutQueue(ctx context.Context) context.Context {
+	return context.WithValue(ctx, queueKey{}, noQueue{})
+}
+
 // QueueFromContext returns the memory queue the agent stamped, if any.
 func QueueFromContext(ctx context.Context) (Queue, bool) {
 	q, ok := ctx.Value(queueKey{}).(Queue)
 	return q, ok && q != nil
+}
+
+// ClaimAutoMemoryWriteFromContext consumes a host-issued create-only grant.
+// Manual/approved writes have no claim and retain the legacy update behavior.
+func ClaimAutoMemoryWriteFromContext(ctx context.Context, args json.RawMessage) bool {
+	q, ok := QueueFromContext(ctx)
+	if !ok {
+		return false
+	}
+	claimer, ok := q.(autoMemoryWriteClaimer)
+	return ok && claimer.ClaimAutoMemoryWrite(args)
 }

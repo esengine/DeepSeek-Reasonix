@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"reasonix/internal/event"
+	"reasonix/internal/evidence"
 )
 
 type recordingSink struct {
@@ -60,6 +61,243 @@ func waitFor(t *testing.T, cond func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("condition not met within deadline")
+}
+
+func TestStartForSessionStampsJobContext(t *testing.T) {
+	m := NewManager(event.Discard)
+	defer m.Close()
+	seen := make(chan string, 1)
+	j := m.StartForSession("session-a", "task", "scoped", func(ctx context.Context, _ io.Writer) (string, error) {
+		seen <- SessionFromContext(ctx)
+		return "done", nil
+	})
+	if got := <-seen; got != "session-a" {
+		t.Fatalf("job context session = %q, want session-a", got)
+	}
+	if res := m.WaitForSession(context.Background(), "session-a", []string{j.ID}, 5); len(res) != 1 || res[0].Status != Done {
+		t.Fatalf("job result = %+v, want done", res)
+	}
+}
+
+func TestJobStartObserverSeesLifetimeUntilTerminal(t *testing.T) {
+	observed := make(chan (<-chan struct{}), 1)
+	release := make(chan struct{})
+	m := NewManager(event.Discard, WithJobStartObserver(func(done <-chan struct{}) {
+		observed <- done
+	}))
+	t.Cleanup(m.Close)
+	job := m.StartForSession("session-a", "bash", "lifetime", func(context.Context, io.Writer) (string, error) {
+		<-release
+		return "", nil
+	})
+	var lifetime <-chan struct{}
+	select {
+	case lifetime = <-observed:
+	case <-time.After(time.Second):
+		t.Fatal("job start observer was not called")
+	}
+	select {
+	case <-lifetime:
+		t.Fatal("job lifetime closed before run completed")
+	default:
+	}
+	close(release)
+	if results := m.WaitForSession(context.Background(), "session-a", []string{job.ID}, 2); len(results) != 1 || results[0].Status != Done {
+		t.Fatalf("wait results = %+v", results)
+	}
+	select {
+	case <-lifetime:
+	case <-time.After(time.Second):
+		t.Fatal("job lifetime did not close at terminal status")
+	}
+}
+
+func TestReserveStartForSessionIsAtomic(t *testing.T) {
+	m := NewManager(event.Discard)
+	defer m.Close()
+
+	const callers = 16
+	start := make(chan struct{})
+	releases := make(chan func(), callers)
+	results := make(chan bool, callers)
+	for range callers {
+		go func() {
+			<-start
+			release, _, ok := m.ReserveStartForSession("session-a", "task", 3)
+			if ok {
+				releases <- release
+			}
+			results <- ok
+		}()
+	}
+	close(start)
+	reserved := 0
+	for range callers {
+		if <-results {
+			reserved++
+		}
+	}
+	if reserved != 3 {
+		t.Fatalf("concurrent reservations = %d, want exactly 3", reserved)
+	}
+	for range reserved {
+		(<-releases)()
+	}
+	if release, running, ok := m.ReserveStartForSession("session-a", "task", 3); !ok || running != 0 {
+		t.Fatalf("reservation after release = (running=%d, ok=%v), want (0, true)", running, ok)
+	} else {
+		release()
+	}
+}
+
+func TestReserveStartForSessionCountsKilledJobUntilExit(t *testing.T) {
+	m := NewManager(event.Discard)
+	defer m.Close()
+	exit := make(chan struct{})
+	j := m.StartForSession("session-a", "task", "unwinding", func(context.Context, io.Writer) (string, error) {
+		<-exit
+		return "done", nil
+	})
+	if !m.KillForSession("session-a", j.ID) {
+		t.Fatal("KillForSession did not find running job")
+	}
+	if got := m.RunningForSession("session-a"); len(got) != 1 || got[0].ID != j.ID || got[0].Status != string(Running) {
+		t.Fatalf("running view while killed job unwinds = %+v, want one operationally-running job", got)
+	}
+	if release, running, ok := m.ReserveStartForSession("session-a", "task", 1); ok {
+		release()
+		t.Fatal("reserved a replacement while killed writer goroutine was still running")
+	} else if running != 1 {
+		t.Fatalf("unwinding writer count = %d, want 1", running)
+	}
+	close(exit)
+	if res := m.WaitForSession(context.Background(), "session-a", []string{j.ID}, 5); len(res) != 1 || res[0].Status != Killed {
+		t.Fatalf("killed job result = %+v", res)
+	}
+	if got := m.RunningForSession("session-a"); len(got) != 0 {
+		t.Fatalf("running view after killed job exited = %+v, want empty", got)
+	}
+	if release, running, ok := m.ReserveStartForSession("session-a", "task", 1); !ok || running != 0 {
+		t.Fatalf("reservation after exit = (running=%d, ok=%v), want (0, true)", running, ok)
+	} else {
+		release()
+	}
+}
+
+func TestLeaseEvidenceWaitsForKilledJobExit(t *testing.T) {
+	m := NewManager(event.Discard)
+	defer m.Close()
+	exit := make(chan struct{})
+	j := m.StartForSession("session-a", "task", "partial writer", func(ctx context.Context, _ io.Writer) (string, error) {
+		<-exit
+		PublishEvidence(ctx, evidence.ChildEvidenceSummary{Receipts: []evidence.Receipt{{
+			ToolName: "write_file", Success: true, Mutation: true, Paths: []string{"partial.go"},
+		}}})
+		return "stopped", nil
+	})
+	if !m.KillForSession("session-a", j.ID) {
+		t.Fatal("KillForSession did not find running job")
+	}
+	if early := m.LeaseEvidenceForSession("session-a", j.ID); len(early.Receipts) != 0 {
+		t.Fatalf("collected evidence before killed job exited: %+v", early)
+	}
+	close(exit)
+	if res := m.WaitForSession(context.Background(), "session-a", []string{j.ID}, 5); len(res) != 1 || res[0].Status != Killed {
+		t.Fatalf("killed job result = %+v", res)
+	}
+	if got := m.LeaseEvidenceForSession("session-a", j.ID); !got.HasMutation() {
+		t.Fatalf("partial evidence lost after killed job exit: %+v", got)
+	}
+	// Lease does not consume: a second lease still returns the receipts, and a
+	// commit is required to drain them.
+	if again := m.LeaseEvidenceForSession("session-a", j.ID); !again.HasMutation() {
+		t.Fatalf("lease consumed evidence without a commit: %+v", again)
+	}
+	m.CommitEvidenceForSession("session-a", j.ID)
+	if after := m.LeaseEvidenceForSession("session-a", j.ID); len(after.Receipts) != 0 {
+		t.Fatalf("committed evidence still leasable: %+v", after)
+	}
+}
+
+func TestTryLeaseEvidenceForSessionReportsReadiness(t *testing.T) {
+	m := NewManager(event.Discard)
+	defer m.Close()
+	exit := make(chan struct{})
+	j := m.StartForSession("session-a", "task", "partial writer", func(ctx context.Context, _ io.Writer) (string, error) {
+		<-exit
+		PublishEvidence(ctx, evidence.ChildEvidenceSummary{Receipts: []evidence.Receipt{{
+			ToolName: "write_file", Success: true, Mutation: true, Paths: []string{"partial.go"},
+		}}})
+		return "stopped", nil
+	})
+	if _, ready := m.TryLeaseEvidenceForSession("session-a", "no-such-job"); ready {
+		t.Fatal("unknown job reported ready")
+	}
+	if _, ready := m.TryLeaseEvidenceForSession("session-a", j.ID); ready {
+		t.Fatal("running job reported ready before it reached a terminal state")
+	}
+	if !m.KillForSession("session-a", j.ID) {
+		t.Fatal("KillForSession did not find running job")
+	}
+	// Killed flips the status synchronously but the goroutine has not exited yet
+	// (still blocked on exit): must not report ready.
+	if _, ready := m.TryLeaseEvidenceForSession("session-a", j.ID); ready {
+		t.Fatal("killed-but-unwinding job reported ready before its evidence was flushed")
+	}
+	close(exit)
+	if res := m.WaitForSession(context.Background(), "session-a", []string{j.ID}, 5); len(res) != 1 || res[0].Status != Killed {
+		t.Fatalf("killed job result = %+v", res)
+	}
+	summary, ready := m.TryLeaseEvidenceForSession("session-a", j.ID)
+	if !ready || !summary.HasMutation() {
+		t.Fatalf("ready/summary after exit = %v/%+v, want ready with the published mutation", ready, summary)
+	}
+	m.CommitEvidenceForSession("session-a", j.ID)
+	if summary, ready := m.TryLeaseEvidenceForSession("session-a", j.ID); !ready || len(summary.Receipts) != 0 {
+		t.Fatalf("post-commit ready/summary = %v/%+v, want ready with no receipts", ready, summary)
+	}
+}
+
+func TestPendingEvidenceJobIDsForSession(t *testing.T) {
+	m := NewManager(event.Discard)
+	defer m.Close()
+
+	running := m.StartForSession("session-a", "task", "still going", func(ctx context.Context, _ io.Writer) (string, error) {
+		<-ctx.Done()
+		return "", ctx.Err()
+	})
+	mutator := m.StartForSession("session-a", "task", "writer", func(ctx context.Context, _ io.Writer) (string, error) {
+		PublishEvidence(ctx, evidence.ChildEvidenceSummary{Receipts: []evidence.Receipt{{
+			ToolName: "write_file", Success: true, Mutation: true, Paths: []string{"changed.go"},
+		}}})
+		return "done", nil
+	})
+	readOnly := m.StartForSession("session-a", "task", "reader", func(context.Context, io.Writer) (string, error) {
+		return "no changes", nil
+	})
+	otherSession := m.StartForSession("session-b", "task", "writer", func(ctx context.Context, _ io.Writer) (string, error) {
+		PublishEvidence(ctx, evidence.ChildEvidenceSummary{Receipts: []evidence.Receipt{{
+			ToolName: "write_file", Success: true, Mutation: true, Paths: []string{"other.go"},
+		}}})
+		return "done", nil
+	})
+	if res := m.WaitForSession(context.Background(), "session-a", []string{mutator.ID, readOnly.ID}, 5); len(res) != 2 {
+		t.Fatalf("wait = %+v, want mutator and read-only jobs done", res)
+	}
+	if res := m.WaitForSession(context.Background(), "session-b", []string{otherSession.ID}, 5); len(res) != 1 {
+		t.Fatalf("wait = %+v, want other-session job done", res)
+	}
+
+	pending := m.PendingEvidenceJobIDsForSession("session-a")
+	if len(pending) != 1 || pending[0] != mutator.ID {
+		t.Fatalf("pending = %v, want only %q (running job excluded, read-only job has no receipts, other session excluded)", pending, mutator.ID)
+	}
+
+	m.CommitEvidenceForSession("session-a", mutator.ID)
+	if pending := m.PendingEvidenceJobIDsForSession("session-a"); len(pending) != 0 {
+		t.Fatalf("pending after commit = %v, want none", pending)
+	}
+	_ = running // still running when the test ends; Close() cancels and reaps it
 }
 
 func TestStalledWarningIgnoresReturnedJobBeforeTerminalStatusPublished(t *testing.T) {
@@ -181,8 +419,10 @@ func TestJobPanicRecoveredAsFailed(t *testing.T) {
 		t.Fatalf("panic output = %q, want internal panic message", res[0].Output)
 	}
 	waitFor(t, func() bool {
-		for _, text := range sink.texts() {
-			if strings.Contains(text, "background task failed") && strings.Contains(text, j.ID) && strings.Contains(text, "panic: boom") {
+		sink.mu.Lock()
+		defer sink.mu.Unlock()
+		for _, ev := range sink.events {
+			if strings.Contains(ev.Text, "background task failed") && strings.Contains(ev.Detail, j.ID) && strings.Contains(ev.Detail, "panic: boom") {
 				return true
 			}
 		}
@@ -247,12 +487,15 @@ func TestKillStatusObservableBeforeGoroutineReturns(t *testing.T) {
 	if len(res) != 1 || res[0].Status != Killed {
 		t.Fatalf("want Killed before the goroutine returns, got %+v", res)
 	}
-	if n := len(m.Running()); n != 0 {
-		t.Fatalf("a killed job should not still be Running(), got %d", n)
+	if n := len(m.Running()); n != 1 {
+		t.Fatalf("a killed-but-unwinding job must remain operationally running, got %d", n)
 	}
 
 	close(release)
 	m.Wait(context.Background(), []string{j.ID}, 5)
+	if n := len(m.Running()); n != 0 {
+		t.Fatalf("job remained operationally running after goroutine exit, got %d", n)
+	}
 }
 
 // Close cancels every still-running job.
@@ -554,13 +797,16 @@ func TestCloseWithGraceTimesOutForNonCooperativeJob(t *testing.T) {
 	if got := result.TimedOut[0]; got.ID != j.ID || got.Kind != "task" || got.Label != "cleanup" || got.Waited <= 0 {
 		t.Fatalf("timed out job = %+v, want id=%s kind=task label=cleanup waited>0", got, j.ID)
 	}
-	if running := m.Running(); len(running) != 0 {
-		t.Fatalf("cancelled close jobs should not remain Running, got %+v", running)
+	if running := m.Running(); len(running) != 1 || running[0].ID != j.ID {
+		t.Fatalf("timed-out close job must remain operationally running, got %+v", running)
 	}
 
 	releaseJob()
 	res := m.Wait(context.Background(), []string{j.ID}, 5)
 	if len(res) != 1 || res[0].Status != Killed {
 		t.Fatalf("want killed after delayed close cleanup, got %+v", res)
+	}
+	if running := m.Running(); len(running) != 0 {
+		t.Fatalf("close job remained running after delayed cleanup, got %+v", running)
 	}
 }

@@ -7,6 +7,8 @@
 // When running inside the Wails shell, applyTheme also syncs the native window
 // theme (title bar, traffic lights, etc.) so the OS chrome matches the webview.
 
+import { baseCodeReadabilityStylesheet } from "./codeReadability";
+
 export type Theme = "auto" | "light" | "dark";
 export type ResolvedTheme = Exclude<Theme, "auto">;
 
@@ -38,6 +40,7 @@ const DEFAULT_THEME: Theme = "auto";
 const THEME_KEY = "reasonix-theme";
 const STYLE_KEY = "reasonix-theme-style";
 const AUTO_THEME_MEDIA_QUERY = "(prefers-color-scheme: light)";
+const BASE_CODE_READABILITY_STYLE_ID = "reasonix-base-code-readability";
 let currentTheme: Theme = DEFAULT_THEME;
 let currentThemeStyle: ThemeStyle = DEFAULT_THEME_STYLE;
 let autoThemeMediaQuery: MediaQueryList | null = null;
@@ -101,6 +104,7 @@ export function normalizeThemeStyleForTheme(style: string | undefined, _theme?: 
 
 export function applyTheme(theme: Theme, style: ThemeStyle = getThemeStyle(theme), options: { persist?: boolean } = {}): void {
   if (typeof document === "undefined") return;
+  ensureBaseCodeReadabilityStyle();
   const root = document.documentElement;
   root.removeAttribute("data-theme-mode");
   root.removeAttribute("data-theme-scheme");
@@ -127,6 +131,14 @@ export function applyTheme(theme: Theme, style: ThemeStyle = getThemeStyle(theme
   }
 
   void options;
+}
+
+function ensureBaseCodeReadabilityStyle(): void {
+  if (document.getElementById(BASE_CODE_READABILITY_STYLE_ID)) return;
+  const style = document.createElement("style");
+  style.id = BASE_CODE_READABILITY_STYLE_ID;
+  style.textContent = baseCodeReadabilityStylesheet(THEME_STYLES);
+  document.head.appendChild(style);
 }
 
 function syncAutoThemeBackgroundListener(theme: Theme): void {

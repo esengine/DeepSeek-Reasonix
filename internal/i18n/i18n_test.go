@@ -15,7 +15,7 @@ func TestCatalogsComplete(t *testing.T) {
 	typ := en.Type()
 	catalogs := map[string]reflect.Value{"zh": reflect.ValueOf(Chinese), "zh-TW": reflect.ValueOf(ChineseTraditional)}
 	for tag, cat := range catalogs {
-		for i := 0; i < typ.NumField(); i++ {
+		for i := range typ.NumField() {
 			name := typ.Field(i).Name
 			if strings.TrimSpace(cat.Field(i).String()) == "" {
 				t.Errorf("%s catalogue: field %q is empty", tag, name)
@@ -31,7 +31,7 @@ func TestCatalogsComplete(t *testing.T) {
 func TestCatalogsAgreeOnPlaceholders(t *testing.T) {
 	en := reflect.ValueOf(English)
 	typ := en.Type()
-	for i := 0; i < typ.NumField(); i++ {
+	for i := range typ.NumField() {
 		name := typ.Field(i).Name
 		if !strings.HasSuffix(name, "Fmt") {
 			continue
@@ -45,6 +45,37 @@ func TestCatalogsAgreeOnPlaceholders(t *testing.T) {
 		if want != gotTW {
 			t.Errorf("%s: en has %d verbs, zh-TW has %d", name, want, gotTW)
 		}
+	}
+}
+
+func TestPlanApprovalChoicesExposeThreeExplicitActions(t *testing.T) {
+	tests := []struct {
+		tag   string
+		value string
+		want  []string
+	}{
+		{tag: "en", value: English.PlanApprovalChoices, want: []string{"Start execution", "Revise plan", "Exit without executing"}},
+		{tag: "zh", value: Chinese.PlanApprovalChoices, want: []string{"开始执行", "修改计划", "暂不执行，退出计划模式"}},
+		{tag: "zh-TW", value: ChineseTraditional.PlanApprovalChoices, want: []string{"開始執行", "修改計畫", "暫不執行，退出計畫模式"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.tag, func(t *testing.T) {
+			numbered := 0
+			for line := range strings.SplitSeq(tt.value, "\n") {
+				line = strings.TrimSpace(line)
+				if len(line) >= 3 && line[0] >= '1' && line[0] <= '9' && line[1] == '.' {
+					numbered++
+				}
+			}
+			if numbered != 3 {
+				t.Fatalf("numbered Plan actions = %d, want 3:\n%s", numbered, tt.value)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(tt.value, want) {
+					t.Errorf("Plan choices missing %q:\n%s", want, tt.value)
+				}
+			}
+		})
 	}
 }
 
@@ -119,5 +150,11 @@ func TestDetectLanguagePriority(t *testing.T) {
 
 	if got := DetectLanguage("zh"); got != "zh" {
 		t.Errorf("override=zh: got %q, want zh", got)
+	}
+	if got := CurrentLanguage(); got != "zh" {
+		t.Errorf("current language = %q, want zh", got)
+	}
+	if got := DetectLanguage("zh-TW"); got != "zh-TW" || CurrentLanguage() != "zh-TW" {
+		t.Errorf("traditional Chinese current language = %q/%q, want zh-TW", got, CurrentLanguage())
 	}
 }

@@ -3,13 +3,17 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
 
+	"reasonix/internal/agent"
+	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/provider"
 )
 
 // fakeNotifier captures Notify calls and answers Request via an injectable hook,
@@ -75,6 +79,21 @@ func (f *fakeNotifier) updateMap(t *testing.T, i int) map[string]any {
 		t.Errorf("notif %d sessionId = %q, want sess-1", i, decoded.SessionID)
 	}
 	return decoded.Update
+}
+
+func TestUpdateSinkReplayStripsSteerWrapper(t *testing.T) {
+	fn := &fakeNotifier{}
+	sink := newUpdateSink(fn, "sess-1")
+	sink.replay([]provider.Message{{
+		Role:    provider.RoleUser,
+		Content: agent.MidTurnSteerPrefix + "\nuse plan B",
+	}})
+
+	u := fn.updateMap(t, 0)
+	content, _ := u["content"].(map[string]any)
+	if content["text"] != "use plan B" {
+		t.Fatalf("replayed steer = %v, want raw user text", content["text"])
+	}
 }
 
 func TestUpdateSinkMapsEvents(t *testing.T) {
@@ -189,6 +208,31 @@ type approveCall struct {
 	persist bool
 }
 
+func invalidACPv1PermissionOptionKind(options []PermissionOption) (PermissionOption, bool) {
+	// ACP v1 schema only accepts these four PermissionOptionKind values. ACP hosts
+	// own cross-session persistence, so Reasonix-specific persistent approvals must
+	// not appear in session/request_permission options.
+	valid := map[PermissionOptionKind]bool{
+		OptAllowOnce:    true,
+		OptAllowAlways:  true,
+		OptRejectOnce:   true,
+		OptRejectAlways: true,
+	}
+	for _, opt := range options {
+		if !valid[opt.Kind] {
+			return opt, true
+		}
+	}
+	return PermissionOption{}, false
+}
+
+func assertACPv1PermissionOptionKinds(t *testing.T, options []PermissionOption) {
+	t.Helper()
+	if opt, ok := invalidACPv1PermissionOptionKind(options); ok {
+		t.Fatalf("permission option %q uses non-ACP-v1 kind %q", opt.OptionID, opt.Kind)
+	}
+}
+
 func TestUpdateSinkApprovalAllowAlways(t *testing.T) {
 	fn := &fakeNotifier{onReq: func(method string, params any) (json.RawMessage, error) {
 		if method != "session/request_permission" {
@@ -208,6 +252,7 @@ func TestUpdateSinkApprovalAllowAlways(t *testing.T) {
 		if p.ToolCall.ToolCallID != "gate-9" {
 			t.Errorf("toolCallId = %q, want gate-9", p.ToolCall.ToolCallID)
 		}
+		assertACPv1PermissionOptionKinds(t, p.Options)
 		res, _ := json.Marshal(PermissionRequestResult{
 			Outcome: PermissionOutcome{Outcome: "selected", OptionID: string(OptAllowAlways)},
 		})
@@ -229,6 +274,56 @@ func TestUpdateSinkApprovalAllowAlways(t *testing.T) {
 	}
 }
 
+func TestUpdateSinkPermissionCarriesStructuredContext(t *testing.T) {
+	fn := &fakeNotifier{onReq: func(_ string, params any) (json.RawMessage, error) {
+		raw, _ := json.Marshal(params)
+		var p PermissionRequestParams
+		if err := json.Unmarshal(raw, &p); err != nil {
+			t.Fatalf("permission params: %v", err)
+		}
+		if string(p.ToolCall.RawInput) != `{"path":"src/main.go","content":"next"}` {
+			t.Fatalf("rawInput = %s", p.ToolCall.RawInput)
+		}
+		if len(p.ToolCall.Locations) != 1 || !strings.HasSuffix(filepath.ToSlash(p.ToolCall.Locations[0].Path), "/src/main.go") {
+			t.Fatalf("locations = %+v", p.ToolCall.Locations)
+		}
+		meta, ok := p.ToolCall.Meta["reasonix.io"].(map[string]any)
+		if !ok || meta["tool"] != "write_file" || meta["approvalId"] != "structured" || meta["reason"] != "write requested by the active goal" {
+			t.Fatalf("metadata = %#v", p.ToolCall.Meta)
+		}
+		var wire map[string]any
+		if err := json.Unmarshal(raw, &wire); err != nil {
+			t.Fatalf("permission wire shape: %v", err)
+		}
+		toolCall, ok := wire["toolCall"].(map[string]any)
+		if !ok {
+			t.Fatalf("toolCall wire shape = %#v", wire["toolCall"])
+		}
+		if _, present := toolCall["reason"]; present {
+			t.Fatalf("ACP v1 toolCall has non-standard root reason: %#v", toolCall)
+		}
+		res, _ := json.Marshal(PermissionRequestResult{Outcome: PermissionOutcome{Outcome: "selected", OptionID: string(OptRejectOnce)}})
+		return res, nil
+	}}
+	sink := newUpdateSink(fn, "sess-structured")
+	sink.bindCwd(t.TempDir())
+	got := make(chan approveCall, 1)
+	sink.bindApprove(func(id string, allow, session, persist bool) { got <- approveCall{id, allow, session, persist} })
+	sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{
+		ID: "structured", Tool: "write_file", Subject: "src/main.go",
+		Reason:   "write requested by the active goal",
+		RawInput: json.RawMessage(`{"path":"src/main.go","content":"next"}`),
+	}})
+	select {
+	case decision := <-got:
+		if decision.allow {
+			t.Fatalf("rejected permission was allowed: %+v", decision)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("permission was never resolved")
+	}
+}
+
 func TestUpdateSinkApprovalBashPrefix(t *testing.T) {
 	fn := &fakeNotifier{onReq: func(_ string, params any) (json.RawMessage, error) {
 		raw, _ := json.Marshal(params)
@@ -236,22 +331,30 @@ func TestUpdateSinkApprovalBashPrefix(t *testing.T) {
 		if err := json.Unmarshal(raw, &p); err != nil {
 			t.Fatalf("permission params: %v", err)
 		}
-		// Bash with a safe prefix now uses the same standard options as any
-		// other tool (allow_always / allow_persistent); the old prefix-specific
-		// OptAllowPrefix/OptPersistPrefix are gone.
-		var hasSession, hasPersistent bool
+		// ACP permission options stay within the official spec kinds, and ACP
+		// mode leaves cross-session persistence to the host.
+		assertACPv1PermissionOptionKinds(t, p.Options)
+		var hasOnce, hasSession, hasReject bool
 		for _, opt := range p.Options {
-			hasSession = hasSession || opt.OptionID == string(OptAllowAlways)
-			hasPersistent = hasPersistent || opt.OptionID == string(OptAllowPersistent)
+			switch opt.OptionID {
+			case string(OptAllowOnce):
+				hasOnce = opt.Kind == OptAllowOnce
+			case string(OptAllowAlways):
+				hasSession = opt.Kind == OptAllowAlways
+			case string(OptRejectOnce):
+				hasReject = opt.Kind == OptRejectOnce
+			default:
+				t.Fatalf("unexpected ACP permission option %+v in %+v", opt, p.Options)
+			}
 		}
-		if !hasSession || !hasPersistent {
-			t.Fatalf("options = %+v, want standard session and persistent choices", p.Options)
+		if !hasOnce || !hasSession || !hasReject {
+			t.Fatalf("options = %+v, want allow once, session, reject", p.Options)
 		}
-		if len(p.Options) != 4 {
-			t.Fatalf("options = %+v, want allow once, session, persistent, reject", p.Options)
+		if len(p.Options) != 3 {
+			t.Fatalf("options = %+v, want allow once, session, reject", p.Options)
 		}
 		res, _ := json.Marshal(PermissionRequestResult{
-			Outcome: PermissionOutcome{Outcome: "selected", OptionID: string(OptAllowPersistent)},
+			Outcome: PermissionOutcome{Outcome: "selected", OptionID: string(OptAllowAlways)},
 		})
 		return res, nil
 	}}
@@ -263,7 +366,103 @@ func TestUpdateSinkApprovalBashPrefix(t *testing.T) {
 
 	select {
 	case c := <-got:
-		want := approveCall{id: "10", allow: true, session: true, persist: true}
+		want := approveCall{id: "10", allow: true, session: true, persist: false}
+		if c != want {
+			t.Errorf("approve = %+v, want %+v", c, want)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("approve was never called")
+	}
+}
+
+func TestPermissionMetaOnlyTrustsForegroundStaticBash(t *testing.T) {
+	cwd := t.TempDir()
+	sink := newUpdateSink(&fakeNotifier{}, "sess-static-command")
+	sink.bindCwd(cwd)
+
+	for _, tc := range []struct {
+		name     string
+		rawInput string
+		wantArgv []string
+	}{
+		{name: "static", rawInput: `{"command":"go test ./..."}`, wantArgv: []string{"go", "test", "./..."}},
+		{name: "quoted static", rawInput: `{"command":"node -e 'process.exit(0)'"}`, wantArgv: []string{"node", "-e", "process.exit(0)"}},
+		{name: "expansion", rawInput: `{"command":"go test $PACKAGE"}`},
+		{name: "glob expansion", rawInput: `{"command":"go test ./*.go"}`},
+		{name: "brace expansion", rawInput: `{"command":"printf '%s' {a,b}"}`},
+		{name: "tilde expansion", rawInput: `{"command":"test -f ~/.config/reasonix.toml"}`},
+		{name: "control syntax", rawInput: `{"command":"go test ./... && git status"}`},
+		{name: "background", rawInput: `{"command":"go test ./...","run_in_background":true}`},
+		{name: "preserved descendants", rawInput: `{"command":"go test ./...","preserve_background_processes":true}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			meta := sink.permissionMeta(event.Approval{
+				ID: "command", Tool: "bash", Subject: "command", RawInput: json.RawMessage(tc.rawInput),
+			})
+			reasonix, ok := meta["reasonix.io"].(map[string]any)
+			if !ok {
+				t.Fatalf("reasonix metadata = %#v", meta)
+			}
+			argv, present := reasonix["argv"]
+			if len(tc.wantArgv) == 0 {
+				if present {
+					t.Fatalf("unsafe command received trusted argv: %#v", argv)
+				}
+				return
+			}
+			got, ok := argv.([]string)
+			if !ok || strings.Join(got, "\x00") != strings.Join(tc.wantArgv, "\x00") {
+				t.Fatalf("argv = %#v, want %#v", argv, tc.wantArgv)
+			}
+			if reasonix["commandSchemaVersion"] != 1 || reasonix["cwd"] != filepath.Clean(cwd) {
+				t.Fatalf("trusted command metadata = %#v", reasonix)
+			}
+		})
+	}
+}
+
+func TestUpdateSinkSandboxEscapeApprovalOffersSessionGrant(t *testing.T) {
+	fn := &fakeNotifier{onReq: func(_ string, params any) (json.RawMessage, error) {
+		raw, _ := json.Marshal(params)
+		var p PermissionRequestParams
+		if err := json.Unmarshal(raw, &p); err != nil {
+			t.Fatalf("permission params: %v", err)
+		}
+		assertACPv1PermissionOptionKinds(t, p.Options)
+		var hasOnce, hasSession, hasReject bool
+		for _, opt := range p.Options {
+			switch opt.OptionID {
+			case string(OptAllowOnce):
+				hasOnce = opt.Kind == OptAllowOnce
+			case string(OptAllowAlways):
+				hasSession = opt.Kind == OptAllowAlways && opt.Name == "Use real environment for this session"
+			case string(OptRejectOnce):
+				hasReject = opt.Kind == OptRejectOnce
+			default:
+				t.Fatalf("unexpected ACP permission option %+v in %+v", opt, p.Options)
+			}
+		}
+		if len(p.Options) != 3 || !hasOnce || !hasSession || !hasReject {
+			t.Fatalf("options = %+v, want allow once, session, reject", p.Options)
+		}
+		res, _ := json.Marshal(PermissionRequestResult{
+			Outcome: PermissionOutcome{Outcome: "selected", OptionID: string(OptAllowAlways)},
+		})
+		return res, nil
+	}}
+	sink := newUpdateSink(fn, "sess-1")
+	got := make(chan approveCall, 1)
+	sink.bindApprove(func(id string, allow, session, persist bool) { got <- approveCall{id, allow, session, persist} })
+
+	sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{
+		ID:      "11",
+		Tool:    control.SandboxEscapeApprovalTool,
+		Subject: "run unconfined once: go test ./...",
+	}})
+
+	select {
+	case c := <-got:
+		want := approveCall{id: "11", allow: true, session: true, persist: false}
 		if c != want {
 			t.Errorf("approve = %+v, want %+v", c, want)
 		}
@@ -328,6 +527,7 @@ func TestUpdateSinkAskRequestUsesPermissionChoices(t *testing.T) {
 		if len(p.Options) != 3 {
 			t.Fatalf("options = %+v, want two answers plus cancel", p.Options)
 		}
+		assertACPv1PermissionOptionKinds(t, p.Options)
 		if p.Options[0].Name != "Tests - Run the suite" || p.Options[0].Kind != OptAllowOnce {
 			t.Fatalf("first option = %+v", p.Options[0])
 		}
@@ -427,6 +627,30 @@ func TestUpdateSinkApprovalUsesTurnContext(t *testing.T) {
 	}
 }
 
+func TestApprovalOptionsFreshDynamicToolOnlyAllowOnceOrReject(t *testing.T) {
+	options := approvalOptions("extension__wipe", "extension/wipe", true)
+	if len(options) != 2 || options[0].Kind != OptAllowOnce || options[1].Kind != OptRejectOnce {
+		t.Fatalf("fresh dynamic-tool options = %+v, want allow-once/reject", options)
+	}
+	for _, option := range options {
+		if option.Kind == OptAllowAlways {
+			t.Fatalf("fresh dynamic-tool decision offered remembered permission: %+v", options)
+		}
+	}
+}
+
+func TestDynamicBashApprovalOptionsUseExactSessionLiteral(t *testing.T) {
+	const command = "git status $(touch /tmp/reasonix-dynamic-approval)"
+	options := approvalOptions("bash", command, false)
+	if len(options) != 3 || options[1].Kind != OptAllowAlways {
+		t.Fatalf("dynamic Bash options = %+v, want ordinary options with session grant", options)
+	}
+	want := "Bash=" + command
+	if !strings.Contains(options[1].Name, want) {
+		t.Fatalf("dynamic Bash session option = %q, want exact rule %q", options[1].Name, want)
+	}
+}
+
 func TestClipKeepsValidUTF8(t *testing.T) {
 	text := strings.Repeat("a", maxResultChars-1) + "界" + strings.Repeat("b", 20)
 	got := clip(text)
@@ -449,5 +673,60 @@ func TestClip(t *testing.T) {
 	}
 	if !strings.Contains(got, "10 more chars truncated") {
 		t.Errorf("clip note missing: %q", got[len(got)-40:])
+	}
+}
+
+// Replay must show the user-authored view, not the persisted wire form:
+// injected transient blocks and protocol markers stay in history for parsing
+// but never reach the client (#6882).
+func TestUpdateSinkReplayStripsInjectedWrappers(t *testing.T) {
+	fn := &fakeNotifier{}
+	sink := newUpdateSink(fn, "sess-1")
+	sink.replay([]provider.Message{
+		{
+			Role: provider.RoleUser,
+			Content: "<response-language>\nFinal answer language preference: use Simplified Chinese.\n</response-language>\n" +
+				"Introduce yourself",
+		},
+		{
+			Role:    provider.RoleAssistant,
+			Content: "Here you go.\n[goal:continue]",
+		},
+	})
+
+	u := fn.updateMap(t, 0)
+	content, _ := u["content"].(map[string]any)
+	if content["text"] != "Introduce yourself" {
+		t.Fatalf("replayed user text = %v, want the authored text only", content["text"])
+	}
+	u = fn.updateMap(t, 1)
+	content, _ = u["content"].(map[string]any)
+	if content["text"] != "Here you go." {
+		t.Fatalf("replayed assistant text = %v, want goal marker stripped", content["text"])
+	}
+}
+
+// TestUpdateSinkDropsSubagentProgress locks the ACP policy for the reserved
+// sub-agent progress ToolProgress channels: every body stays out of ACP
+// notifications, exactly like ordinary ToolProgress (which has no handler).
+func TestUpdateSinkDropsSubagentProgress(t *testing.T) {
+	fn := &fakeNotifier{}
+	sink := newUpdateSink(fn, "sess-1")
+
+	sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{
+		ID: "task-1", Name: event.SubagentProgressStatusName, Output: "running",
+	}})
+	sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{
+		ID: "task-1", Name: event.SubagentProgressReasoningName, Output: "thinking",
+	}})
+	sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{
+		ID: "task-1", Name: event.SubagentProgressTextName, Output: "answer preview",
+	}})
+	sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{
+		ID: "task-1", Name: event.SubagentProgressNoticeName, Output: "heads up",
+		Truncated: true,
+	}})
+	if got := len(fn.notifs); got != 0 {
+		t.Fatalf("sub-agent progress produced %d notifications, want 0", got)
 	}
 }

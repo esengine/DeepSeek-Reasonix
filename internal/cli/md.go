@@ -22,8 +22,11 @@ import (
 // for anything else. Word-wrapping respects CJK widths and skips over ANSI
 // SGR codes when counting columns.
 type mdRenderer struct {
-	md    goldmark.Markdown
-	width int
+	md             goldmark.Markdown
+	width          int
+	copyMath       bool
+	copyMathPrefix string
+	nextCopyMathID int
 }
 
 func newMarkdownRenderer(width int) *mdRenderer {
@@ -44,7 +47,7 @@ func newMarkdownRenderer(width int) *mdRenderer {
 }
 
 func italic(s string) string {
-	if !colorEnabled {
+	if !colorOn() {
 		return s
 	}
 	return "\033[3m" + s + "\033[0m"
@@ -62,6 +65,30 @@ func (r *mdRenderer) Render(input string) string {
 	doc := r.md.Parser().Parse(text.NewReader(src))
 	var buf strings.Builder
 	r.renderBlocks(&buf, doc, src, 0)
+	out := strings.TrimRight(buf.String(), "\n")
+	if out == "" {
+		return ""
+	}
+	return out + "\n"
+}
+
+// RenderCopy mirrors Render's visible output while surrounding math spans with
+// zero-width internal markers. The markers are consumed only when the user
+// copies a transcript selection, so display wrapping and selection coordinates
+// stay identical without maintaining a second raw transcript.
+func (r *mdRenderer) RenderCopy(input, prefix string) string {
+	if strings.TrimSpace(input) == "" {
+		return ""
+	}
+	input = fixCJKEmphasis(normalizeMath(input))
+	src := []byte(input)
+	doc := r.md.Parser().Parse(text.NewReader(src))
+	var buf strings.Builder
+	r.copyMath = true
+	r.copyMathPrefix = prefix
+	r.nextCopyMathID = 0
+	r.renderBlocks(&buf, doc, src, 0)
+	r.copyMath = false
 	out := strings.TrimRight(buf.String(), "\n")
 	if out == "" {
 		return ""
@@ -188,10 +215,7 @@ func (r *mdRenderer) renderBlock(buf *strings.Builder, node ast.Node, src []byte
 	case *extast.Table:
 		r.renderTable(buf, n, src, indent)
 	case *ast.ThematicBreak:
-		w := r.width - indent
-		if w < 8 {
-			w = 8
-		}
+		w := max(r.width-indent, 8)
 		buf.WriteString(strings.Repeat(" ", indent))
 		buf.WriteString(dim(strings.Repeat("─", w)))
 		buf.WriteString("\n\n")
@@ -229,7 +253,7 @@ func (r *mdRenderer) renderInlineBlock(buf *strings.Builder, n ast.Node, src []b
 	inline := r.collectInline(n, src)
 	prefix := strings.Repeat(" ", indent)
 	wrapped := wrapAnsi(inline, r.width-indent)
-	for _, line := range strings.Split(wrapped, "\n") {
+	for line := range strings.SplitSeq(wrapped, "\n") {
 		buf.WriteString(prefix)
 		buf.WriteString(line)
 		buf.WriteString("\n")
@@ -284,7 +308,7 @@ func (r *mdRenderer) renderList(buf *strings.Builder, n *ast.List, src []byte, i
 
 func (r *mdRenderer) renderFenced(buf *strings.Builder, n ast.Node, src []byte, indent int) {
 	prefix := strings.Repeat(" ", indent) + dim("│ ")
-	for i := 0; i < n.Lines().Len(); i++ {
+	for i := range n.Lines().Len() {
 		l := n.Lines().At(i)
 		line := strings.TrimRight(string(l.Value(src)), "\n")
 		buf.WriteString(prefix)
@@ -298,7 +322,7 @@ func (r *mdRenderer) renderBlockquote(buf *strings.Builder, n *ast.Blockquote, s
 	var inner strings.Builder
 	r.renderBlocks(&inner, n, src, 0)
 	prefix := strings.Repeat(" ", indent) + dim("▎ ")
-	for _, line := range strings.Split(strings.TrimRight(inner.String(), "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(inner.String(), "\n"), "\n") {
 		buf.WriteString(prefix)
 		buf.WriteString(dim(line))
 		buf.WriteString("\n")
@@ -346,7 +370,20 @@ func (r *mdRenderer) appendInline(b *strings.Builder, n ast.Node, src []byte) {
 		case *ast.RawHTML:
 			// drop — rare in chat output and would print as literal escapes
 		case *mathNode:
-			b.WriteString(italic(v.value))
+			rendered := italic(v.value)
+			if !r.copyMath {
+				b.WriteString(rendered)
+				break
+			}
+			source := "$" + v.source + "$"
+			if v.display {
+				source = "$$" + v.source + "$$"
+			}
+			id := fmt.Sprintf("%s-%d", r.copyMathPrefix, r.nextCopyMathID)
+			r.nextCopyMathID++
+			b.WriteString(copyMathStartMarker(id, source))
+			b.WriteString(rendered)
+			b.WriteString(copyMathEndMarker(id))
 		case *ast.String:
 			b.Write(v.Value)
 		default:
@@ -408,20 +445,14 @@ func (r *mdRenderer) renderTable(buf *strings.Builder, n *extast.Table, src []by
 	// widths + separators (3 chars each) + indent. Distribute the budget
 	// proportionally to the natural widths so columns with rich content
 	// keep more space than narrow ones.
-	available := r.width - indent - 3*(cols-1)
-	if available < cols*3 {
-		available = cols * 3
-	}
+	available := max(r.width-indent-3*(cols-1), cols*3)
 	total := 0
 	for _, w := range widths {
 		total += w
 	}
 	if total > available {
 		for i := range widths {
-			widths[i] = widths[i] * available / total
-			if widths[i] < 3 {
-				widths[i] = 3
-			}
+			widths[i] = max(widths[i]*available/total, 3)
 		}
 	}
 
@@ -453,7 +484,7 @@ func (r *mdRenderer) renderTableRow(buf *strings.Builder, prefix, sep string, ce
 	cols := len(widths)
 	wrapped := make([][]string, cols)
 	maxLines := 1
-	for i := 0; i < cols; i++ {
+	for i := range cols {
 		var text string
 		if i < len(cells) {
 			text = cells[i]
@@ -463,9 +494,9 @@ func (r *mdRenderer) renderTableRow(buf *strings.Builder, prefix, sep string, ce
 			maxLines = len(wrapped[i])
 		}
 	}
-	for line := 0; line < maxLines; line++ {
+	for line := range maxLines {
 		buf.WriteString(prefix)
-		for i := 0; i < cols; i++ {
+		for i := range cols {
 			if i > 0 {
 				buf.WriteString(sep)
 			}

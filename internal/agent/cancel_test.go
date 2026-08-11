@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -109,6 +110,241 @@ var (
 	executedMu sync.Mutex
 	executed   []string
 )
+
+type stuckStreamProvider struct{}
+
+func (stuckStreamProvider) Name() string { return "stuck-stream" }
+
+func (stuckStreamProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+	return make(chan provider.Chunk), nil
+}
+
+type closedStreamProvider struct{}
+
+func (closedStreamProvider) Name() string { return "closed-stream" }
+
+func (closedStreamProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+	ch := make(chan provider.Chunk)
+	close(ch)
+	return ch, nil
+}
+
+func TestCanceledContextClosedProviderStreamReturnsCancel(t *testing.T) {
+	for i := range 100 {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		a := New(closedStreamProvider{}, tool.NewRegistry(), NewSession(""), Options{}, &recordSink{})
+		err := a.Run(ctx, "already cancelled")
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run error on iteration %d = %v, want context cancellation", i, err)
+		}
+	}
+}
+
+func TestCancelDuringStuckProviderStreamReturnsPromptly(t *testing.T) {
+	a := New(stuckStreamProvider{}, tool.NewRegistry(), NewSession(""), Options{}, &recordSink{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- a.Run(ctx, "wait on provider")
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("Run returned nil after context cancellation")
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run error = %v, want context cancellation", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Run did not return promptly after provider stream context cancellation")
+	}
+}
+
+type activeReasoningUntilCancelProvider struct{}
+
+func (activeReasoningUntilCancelProvider) Name() string { return "active-reasoning" }
+
+func (p activeReasoningUntilCancelProvider) Stream(ctx context.Context, _ provider.Request) (<-chan provider.Chunk, error) {
+	ch := make(chan provider.Chunk)
+	go func() {
+		defer close(ch)
+		for offset := 224; ; offset += 4 {
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- provider.Chunk{Type: provider.ChunkReasoning, Text: fmt.Sprintf("%d unknown\n", offset)}:
+			}
+		}
+	}()
+	return ch, nil
+}
+
+type reasoningGuardCancelProvider struct {
+	canceled chan struct{}
+}
+
+func (reasoningGuardCancelProvider) Name() string { return "reasoning-guard-cancel" }
+
+func (p reasoningGuardCancelProvider) Stream(ctx context.Context, _ provider.Request) (<-chan provider.Chunk, error) {
+	ch := make(chan provider.Chunk)
+	go func() {
+		defer close(ch)
+		defer close(p.canceled)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- provider.Chunk{Type: provider.ChunkReasoning, Text: "0123456789abcdef"}:
+			}
+		}
+	}()
+	return ch, nil
+}
+
+func TestRunawayReasoningStopsAtAgentSideByteGuard(t *testing.T) {
+	sink := &recordSink{}
+	a := New(activeReasoningUntilCancelProvider{}, tool.NewRegistry(), NewSession(""), Options{ReasoningByteLimit: 64}, sink)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	err := a.Run(ctx, "parse this binary by offset")
+	if !errors.Is(err, errReasoningByteLimitExceeded) {
+		t.Fatalf("Run error = %v, want reasoning limit guard", err)
+	}
+	if got := len(sink.kinds(event.Reasoning)); got == 0 {
+		t.Fatal("no reasoning chunks emitted; repro did not exercise the active-output path")
+	}
+	usages := sink.kinds(event.Usage)
+	if len(usages) != 1 {
+		t.Fatalf("usage events = %d, want one best-effort usage event", len(usages))
+	}
+	if u := usages[0].Usage; u == nil || u.FinishReason != "client_reasoning_limit" || !u.Estimated || u.TotalTokens <= 0 || u.ReasoningTokens <= 0 {
+		t.Fatalf("usage = %+v, want client reasoning limit with estimated reasoning tokens", u)
+	}
+}
+
+func TestReasoningByteGuardCancelsProviderStream(t *testing.T) {
+	canceled := make(chan struct{})
+	a := New(reasoningGuardCancelProvider{canceled: canceled}, tool.NewRegistry(), NewSession(""), Options{ReasoningByteLimit: 32}, event.Discard)
+
+	if err := a.Run(context.Background(), "trigger the reasoning guard"); !errors.Is(err, errReasoningByteLimitExceeded) {
+		t.Fatalf("Run error = %v, want reasoning limit guard", err)
+	}
+	select {
+	case <-canceled:
+	case <-time.After(time.Second):
+		t.Fatal("provider context remained live after the reasoning guard returned")
+	}
+}
+
+func TestInterruptedReasoningEmitsBestEffortUsage(t *testing.T) {
+	sink := &recordSink{}
+	a := New(activeReasoningUntilCancelProvider{}, tool.NewRegistry(), NewSession(""), Options{}, sink)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- a.Run(ctx, "parse this binary by offset")
+	}()
+
+	deadline := time.After(500 * time.Millisecond)
+	for len(sink.kinds(event.Reasoning)) == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for streamed reasoning")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run error = %v, want context cancellation", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Run did not return after cancellation")
+	}
+
+	usages := sink.kinds(event.Usage)
+	if len(usages) != 1 {
+		t.Fatalf("usage events = %d, want one best-effort usage event", len(usages))
+	}
+	if u := usages[0].Usage; u == nil || u.FinishReason != "interrupted" || !u.Estimated || u.TotalTokens <= 0 || u.ReasoningTokens <= 0 {
+		t.Fatalf("usage = %+v, want interrupted finish with estimated reasoning tokens", u)
+	}
+}
+
+func TestReasoningByteGuardDoesNotSetProviderOutputBudget(t *testing.T) {
+	tests := []struct {
+		name  string
+		limit int
+	}{
+		{name: "default"},
+		{name: "custom", limit: 65},
+		{name: "disabled", limit: -1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prov := testutil.NewMock("m", testutil.Turn{Text: "done"})
+			a := New(prov, tool.NewRegistry(), NewSession(""), Options{ReasoningByteLimit: tt.limit}, event.Discard)
+			if err := a.Run(context.Background(), "go"); err != nil {
+				t.Fatal(err)
+			}
+			req := prov.LastRequest()
+			if req == nil || req.MaxTokens != 0 {
+				t.Fatalf("request = %+v, reasoning bytes must not become a total output budget", req)
+			}
+		})
+	}
+
+	t.Run("stable across tool loop", func(t *testing.T) {
+		prov := testutil.NewMock("m",
+			testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "read", Arguments: `{}`}}},
+			testutil.Turn{Text: "done"},
+		)
+		registry := tool.NewRegistry()
+		registry.Add(fakeTool{name: "read", readOnly: true})
+		a := New(prov, registry, NewSession(""), Options{MaxOutputTokens: 8192}, event.Discard)
+		if err := a.Run(context.Background(), "go"); err != nil {
+			t.Fatal(err)
+		}
+		requests := prov.Requests()
+		if len(requests) != 2 {
+			t.Fatalf("requests = %d, want two provider turns", len(requests))
+		}
+		for i, req := range requests {
+			if req.MaxTokens != 8192 {
+				t.Fatalf("request %d max_tokens = %d, want stable 8192", i+1, req.MaxTokens)
+			}
+		}
+	})
+}
+
+func TestBestEffortStreamUsageMarksOnlySyntheticCountsEstimated(t *testing.T) {
+	exact := &provider.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30, ReasoningTokens: 15}
+	got := bestEffortStreamUsage(exact, 4, 4, "interrupted")
+	if got.Estimated {
+		t.Fatalf("usage = %+v, exact counts should remain exact", got)
+	}
+	if got.FinishReason != "interrupted" {
+		t.Fatalf("finish reason = %q, want interrupted", got.FinishReason)
+	}
+
+	got = bestEffortStreamUsage(exact, 200, 400, "interrupted")
+	if !got.Estimated || got.CompletionTokens != 150 || got.ReasoningTokens != 100 || got.TotalTokens != 160 {
+		t.Fatalf("usage = %+v, want byte-derived estimates", got)
+	}
+}
 
 // TestCancelDuringToolExecutionBreaksOutPromptly verifies that when the context
 // is cancelled while tools are executing, the agent loop breaks out immediately
@@ -338,7 +574,7 @@ func TestCancelInsideLargeParallelBatchStopsSchedulingNewTools(t *testing.T) {
 	reg.Add(trackingTool{name: "readonly_tracking", readOnly: true})
 
 	var calls []provider.ToolCall
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		calls = append(calls, provider.ToolCall{
 			ID:        fmt.Sprintf("call-%02d", i),
 			Name:      "readonly_tracking",
@@ -393,7 +629,7 @@ func TestCancelInsideLargeParallelBatchStopsSchedulingNewTools(t *testing.T) {
 func toolMessagesByID(msgs []provider.Message) map[string]string {
 	out := make(map[string]string)
 	for _, m := range msgs {
-		if m.Role == provider.RoleTool {
+		if m.Role == provider.RoleTool && !m.LocalOnly {
 			out[m.ToolCallID] = m.Content
 		}
 	}

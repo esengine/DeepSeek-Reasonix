@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Reasonix Provider Setup</title>
+<style>
+*,*::before,*::after{box-sizing:border-box}
+:root{color-scheme:dark;--bg:#121316;--panel:#1c1e22;--border:#353840;--text:#f1f2f4;--muted:#a4a8b2;--accent:#e1663f;--accent-hover:#ed7650;--danger:#ff806f}
+body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at top,#22242a 0,var(--bg) 52%);color:var(--text);font:15px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.card{width:min(520px,100%);padding:28px;border:1px solid var(--border);border-radius:18px;background:var(--panel);box-shadow:0 24px 80px rgba(0,0,0,.34)}
+.brand{display:flex;align-items:center;gap:12px;margin-bottom:24px}.brand img{width:132px;height:auto}.badge{margin-left:auto;padding:4px 9px;border-radius:999px;background:rgba(225,102,63,.14);color:#ff9a79;font-size:12px}
+h1{margin:0 0 8px;font-size:24px;line-height:1.2}p{margin:0;color:var(--muted)}
+.meta{display:grid;grid-template-columns:92px 1fr;gap:8px 14px;margin:24px 0;padding:16px;border-radius:12px;background:#15171a}.meta dt{color:var(--muted)}.meta dd{margin:0;min-width:0;overflow-wrap:anywhere;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+label{display:block;margin:0 0 8px;font-weight:600}.field{width:100%;height:44px;padding:0 12px;border:1px solid var(--border);border-radius:10px;background:#111215;color:var(--text);font:14px ui-monospace,SFMono-Regular,Menlo,monospace;outline:none}.field:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(225,102,63,.16)}
+.hint{margin-top:8px;font-size:12px}.actions{display:flex;align-items:center;gap:12px;margin-top:22px}button{height:42px;padding:0 18px;border:0;border-radius:10px;background:var(--accent);color:white;font:600 14px system-ui;cursor:pointer}button:hover{background:var(--accent-hover)}button:disabled{cursor:wait;opacity:.62}.status{min-height:22px;color:var(--muted);font-size:13px}.status.error{color:var(--danger)}
+</style>
+</head>
+<body>
+<main class="card">
+  <div class="brand"><img src="/assets/logo-wordmark.svg" alt="Reasonix" /><span class="badge" id="remote-badge">Remote</span></div>
+  <h1 id="title">Configure the remote Provider</h1>
+  <p id="intro">This Reasonix Serve is ready, but its selected Provider has no saved API key on this host.</p>
+  <dl class="meta">
+    <dt id="provider-label">Provider</dt><dd id="provider">—</dd>
+    <dt id="model-label">Model</dt><dd id="model">—</dd>
+    <dt id="key-label">Credential</dt><dd id="key-env">—</dd>
+  </dl>
+  <form id="setup-form">
+    <label for="api-key" id="api-key-label">API Key</label>
+    <input class="field" id="api-key" type="password" autocomplete="off" spellcheck="false" required />
+    <p class="hint" id="hint">The key is stored only in this remote host's Reasonix credential file.</p>
+    <div class="actions"><button id="save" type="submit">Save and open Reasonix</button><span class="status" id="status" role="status"></span></div>
+  </form>
+</main>
+<script>
+const langPref='__LANG__';
+const zh=String(langPref).toLowerCase().startsWith('zh');
+const copy=zh?{
+  badge:'远端',title:'配置远端 Provider',intro:'Reasonix Serve 已可访问，但这台主机尚未保存当前 Provider 的 API Key。',provider:'Provider',model:'模型',credential:'凭据变量',apiKey:'API Key',hint:'密钥只会保存到这台远端主机的 Reasonix 凭据文件。',pendingHint:'API Key 已安全保存。现在只需重试激活 Provider。',save:'保存并打开 Reasonix',retry:'重试激活',saving:'正在保存…',activating:'正在激活…',failed:'保存失败，请重试。'
+}:{badge:'Remote',title:'Configure the remote Provider',intro:'This Reasonix Serve is ready, but its selected Provider has no saved API key on this host.',provider:'Provider',model:'Model',credential:'Credential',apiKey:'API Key',hint:"The key is stored only in this remote host's Reasonix credential file.",pendingHint:'The API key is safely stored. Retry Provider activation without entering it again.',save:'Save and open Reasonix',retry:'Retry activation',saving:'Saving…',activating:'Activating…',failed:'Setup failed. Try again.'};
+const $=id=>document.getElementById(id);
+const __nativeFetch=window.fetch.bind(window);
+function bootstrapFragmentToken(){
+  const fragment=new URLSearchParams(window.location.hash.slice(1)),token=fragment.get('token');
+  if(!token)return Promise.resolve();
+  fragment.delete('token');const cleanHash=fragment.toString();
+  window.history.replaceState(null,'',window.location.pathname+window.location.search+(cleanHash?'#'+cleanHash:''));
+  return __nativeFetch('/auth/token',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token})}).then(response=>{if(!response.ok)throw new Error(copy.failed);});
+}
+const __authReady=bootstrapFragmentToken();
+window.fetch=(...args)=>__authReady.then(()=>__nativeFetch(...args));
+$('remote-badge').textContent=copy.badge;$('title').textContent=copy.title;$('intro').textContent=copy.intro;$('provider-label').textContent=copy.provider;$('model-label').textContent=copy.model;$('key-label').textContent=copy.credential;$('api-key-label').textContent=copy.apiKey;$('hint').textContent=copy.hint;$('save').textContent=copy.save;
+let activationPending=false;
+async function load(){
+  const response=await fetch('/provider-setup',{cache:'no-store'});
+  if(!response.ok)throw new Error(copy.failed);
+  const state=await response.json();
+  if(!state.required){location.reload();return;}
+  activationPending=state.activationPending===true;
+  const input=$('api-key');
+  $('provider').textContent=state.provider||'—';$('model').textContent=state.model||'—';$('key-env').textContent=state.keyEnv||'—';
+  $('api-key-label').hidden=activationPending;input.hidden=activationPending;input.required=!activationPending;
+  $('hint').textContent=activationPending?copy.pendingHint:copy.hint;$('save').textContent=activationPending?copy.retry:copy.save;
+  $('status').textContent='';$('status').classList.remove('error');
+  if(state.error){$('status').textContent=state.error;$('status').classList.add('error');}
+}
+$('setup-form').addEventListener('submit',async event=>{
+  event.preventDefault();const input=$('api-key'),button=$('save'),status=$('status');
+  button.disabled=true;status.classList.remove('error');status.textContent=activationPending?copy.activating:copy.saving;
+  try{
+    const response=await fetch('/provider-setup',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({apiKey:activationPending?'':input.value})});
+    input.value='';
+    if(!response.ok)throw new Error((await response.text()).trim()||copy.failed);
+    location.reload();
+  }catch(error){input.value='';let refreshed=false;try{await load();refreshed=status.classList.contains('error');}catch{}if(!refreshed){status.textContent=error instanceof Error?error.message:copy.failed;status.classList.add('error');}button.disabled=false;if(!activationPending)input.focus();}
+});
+load().catch(error=>{$('status').textContent=error instanceof Error?error.message:copy.failed;$('status').classList.add('error');});
+</script>
+</body>
+</html>

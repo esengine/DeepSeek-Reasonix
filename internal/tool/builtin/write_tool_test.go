@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// --- write_file extended tests ---
+// write_file extended tests
 
 func TestWriteFileCreatesParentDirs(t *testing.T) {
 	dir := t.TempDir()
@@ -29,6 +29,27 @@ func TestWriteFileOverwrites(t *testing.T) {
 	got, _ := os.ReadFile(f)
 	if string(got) != "new" {
 		t.Errorf("after overwrite = %q", got)
+	}
+}
+
+func TestWriteFileRecordsLocalPrior(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "receipt.txt")
+	if err := os.WriteFile(f, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var gotPath string
+	var gotPrior []byte
+	var gotHadPrior bool
+	w := writeFile{receipt: func(path string, hadPrior bool, prior []byte) {
+		gotPath = path
+		gotHadPrior = hadPrior
+		gotPrior = append([]byte(nil), prior...)
+	}}
+	if _, err := w.Execute(context.Background(), argsJSON(t, map[string]any{"path": f, "content": "new"})); err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != f || !gotHadPrior || string(gotPrior) != "old" {
+		t.Fatalf("receipt = path:%q hadPrior:%v prior:%q", gotPath, gotHadPrior, gotPrior)
 	}
 }
 
@@ -81,7 +102,7 @@ func TestWriteFileInvalidArgs(t *testing.T) {
 	}
 }
 
-// --- move_file tests ---
+// move_file tests
 
 func TestMoveFileMovesIntoParentDir(t *testing.T) {
 	dir := t.TempDir()
@@ -244,7 +265,7 @@ func TestMoveFileFallsBackForCrossDeviceRename(t *testing.T) {
 	}
 }
 
-// --- edit_file extended tests ---
+// edit_file extended tests
 
 func TestEditFileNotFound(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "missing.txt")
@@ -265,6 +286,9 @@ func TestEditFileOldStringNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for old_string not found")
 	}
+	if !strings.Contains(err.Error(), "Re-read the current file") {
+		t.Fatalf("not-found error should include recovery hint, got: %v", err)
+	}
 	// File should be unchanged.
 	got, _ := os.ReadFile(f)
 	if string(got) != "hello world" {
@@ -272,15 +296,93 @@ func TestEditFileOldStringNotFound(t *testing.T) {
 	}
 }
 
+func TestEditFileNotUniqueReportsMatchingLines(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "map.html")
+	separator := "    // ═══════════════════════════════════════"
+	body := strings.Join([]string{
+		separator,
+		"const a = 1;",
+		separator,
+		"const b = 2;",
+		separator,
+		"",
+	}, "\n")
+	os.WriteFile(f, []byte(body), 0o644)
+
+	_, err := editFile{}.Execute(context.Background(), argsJSON(t, map[string]any{
+		"path": f, "old_string": separator, "new_string": "// section",
+	}))
+	if err == nil {
+		t.Fatal("expected not-unique error")
+	}
+	for _, want := range []string{"not unique", "matching lines include 1, 3, 5", "repeated separator lines"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q: %v", want, err)
+		}
+	}
+}
+
 func TestEditFileDelete(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "a.txt")
 	os.WriteFile(f, []byte("remove this line\nkeep this\n"), 0o644)
-	runTool(t, editFile{}, map[string]any{
+	out := runTool(t, editFile{}, map[string]any{
 		"path": f, "old_string": "remove this line\n", "new_string": "",
 	})
+	for _, want := range []string{"Actual replacement receipt after write:", "-remove this line", "+<empty>"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("delete result should contain %q in actual post-write receipt:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, " keep this") {
+		t.Fatalf("actual receipt should not auto-upload unchanged neighboring lines:\n%s", out)
+	}
 	got, _ := os.ReadFile(f)
 	if string(got) != "keep this\n" {
 		t.Errorf("after delete = %q", got)
+	}
+}
+
+func TestEditFileActualDiffIsBounded(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "large.txt")
+	old := strings.Repeat("old line with enough content to grow the diff\n", 300)
+	newText := strings.Repeat("new line with enough content to grow the diff\n", 300)
+	os.WriteFile(f, []byte(old), 0o644)
+
+	out := runTool(t, editFile{}, map[string]any{
+		"path": f, "old_string": old, "new_string": newText,
+	})
+	if len(out) > maxPostWriteReceiptBytes+1024 {
+		t.Fatalf("bounded edit result is too large: %d bytes", len(out))
+	}
+	if !strings.Contains(out, postWriteSpanTruncated) {
+		t.Fatalf("bounded edit result should disclose truncation:\n%s", out)
+	}
+}
+
+func TestEditFileReceiptDoesNotExposeUnchangedSameLineContent(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "private.txt")
+	const privateMarker = "PRIVATE_SAME_LINE_CONTEXT_6504"
+	seed := "customer_note=" + privateMarker + " enabled=false\n"
+	os.WriteFile(f, []byte(seed), 0o600)
+
+	out := runTool(t, editFile{}, map[string]any{
+		"path": f, "old_string": "false", "new_string": "true",
+	})
+	if strings.Contains(out, privateMarker) || strings.Contains(out, "customer_note") || strings.Contains(out, "enabled=") {
+		t.Fatalf("replacement receipt exposed unchanged same-line content:\n%s", out)
+	}
+	for _, want := range []string{"-false", "+true"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("replacement receipt should contain %q:\n%s", want, out)
+		}
+	}
+	got, err := os.ReadFile(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "customer_note=" + privateMarker + " enabled=true\n"
+	if string(got) != want {
+		t.Fatalf("file = %q, want %q", got, want)
 	}
 }
 
@@ -311,7 +413,7 @@ func TestEditFileInvalidArgs(t *testing.T) {
 	}
 }
 
-// --- multi_edit extended tests ---
+// multi_edit extended tests
 
 func TestMultiEditEmptyEdits(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "a.txt")
@@ -345,6 +447,11 @@ func TestMultiEditStepNotFound(t *testing.T) {
 	}))
 	if err == nil {
 		t.Fatal("expected error for missing edit step")
+	}
+	for _, want := range []string{"edit 2", "Re-read the current file"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("multi_edit error should mention %q, got: %v", want, err)
+		}
 	}
 	// File should be unchanged (atomicity).
 	got, _ := os.ReadFile(f)
@@ -420,7 +527,7 @@ func TestMultiEditChained(t *testing.T) {
 	}
 }
 
-// --- confine tests ---
+// confine tests
 
 func TestConfineRejectsEscape(t *testing.T) {
 	dir := t.TempDir()
@@ -448,7 +555,7 @@ func TestConfineEmptyRootsAllowsAll(t *testing.T) {
 	}
 }
 
-// --- resolveIn tests ---
+// resolveIn tests
 
 func TestResolveInAbsolute(t *testing.T) {
 	abs := filepath.Join(t.TempDir(), "absolute", "path")

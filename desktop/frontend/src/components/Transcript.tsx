@@ -1,48 +1,97 @@
-import { createContext, memo, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { Item, LiveStream } from "../lib/useController";
+import { memo, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
+import type { ControllerLiveStore, Item, LiveStream } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
+import type { InvocationMetadataMap } from "../lib/invocationDisplay";
 import { useT } from "../lib/i18n";
-import { AssistantMessage, TurnActions, UserMessage } from "./Message";
+import { AssistantMessage, InvocationMetadataContext, TurnActions, UserMessage } from "./Message";
 import { ProcessCompactIcon, ProcessPhaseIcon } from "./ProcessCard";
 import { ToolCard } from "./ToolCard";
-import { ArrowDown, ChevronRight } from "lucide-react";
+import { ExtensionCard } from "./ExtensionCard";
+import { ArrowDown, ChevronRight, CirclePlay, FileSearch, Info, TriangleAlert } from "lucide-react";
 import { Welcome } from "./Welcome";
 import { ReadOnlyBatch } from "./ReadOnlyBatch";
-import { ToolGroup, isCreationGroupableTool, toolGroupKind, type ToolGroupKind } from "./ToolGroup";
-import { getDisplayMode, onDisplayModeChange, type DisplayMode } from "../lib/displayMode";
-import { isReadOnlyTool } from "../lib/useController";
-import { useGSAPCollapse } from "../lib/useGSAPCollapse";
-import { useEntranceAnimation } from "../lib/useEntranceAnimation";
-import { useScrollManager } from "../lib/useScrollManager";
-import { buildTurnGroups, compactQuestionText, questionAnchorId, scrollVersion, warmUserPreview, type QuestionAnchor, type TurnGroup } from "../lib/transcriptGrouping";
-
-type ToolItem = Extract<Item, { kind: "tool" }>;
-type AssistantItem = Extract<Item, { kind: "assistant" }>;
+import { ToolGroup } from "./ToolGroup";
+import { getProcessFoldPreference, onProcessFoldPreferenceChange, type ProcessFoldPreference } from "../lib/processFoldPreference";
+import { STEER_NOTICE_PREFIX, isSteerNoticeText } from "../lib/useController";
+import { useTranscriptEntranceAnimation } from "../lib/useEntranceAnimation";
+import { useTranscriptScrollController } from "../lib/useTranscriptScrollController";
+import { shouldAdjustScrollOnItemSizeChange, shouldRunStreamEndRepin } from "../lib/transcriptScrollController";
+import { useTranscriptSelectionRetention } from "../lib/useTranscriptSelectionRetention";
+import { useTranscriptMeasurementInvalidation } from "../lib/useTranscriptMeasurementInvalidation";
+import { useTranscriptRowMeasurements } from "../lib/useTranscriptRowMeasurements";
+import { compactQuestionText, lastQuestionTurn, questionAnchorId, questionTurnsById, scrollVersion, type QuestionAnchor } from "../lib/transcriptGrouping";
+import {
+  buildTranscriptRows,
+  buildTurnModels,
+  foldMapWithReasoningOpen,
+  foldMapWithToggle,
+  foldSegmentStates,
+  historyEntryIdForRow,
+  reconcileFoldEntries,
+  userRowKey,
+  EMPTY_FOLDS,
+  NO_LIVE,
+  type AssistantItem,
+  type FoldMap,
+  type NoticeItem,
+  type SegmentModel,
+  type ToolItem,
+  type TranscriptLiveFlags,
+  type TranscriptRow,
+} from "../lib/transcriptRows";
+import { getTranscriptStore } from "../lib/transcriptStore";
+import { acquireMarkdownWorkerClient, releaseMarkdownWorkerClient } from "../lib/markdownWorkerClient";
+import { noteTranscriptRowCounts } from "../lib/sessionDiagnostics";
+import { useReasoningDisplayMode } from "../lib/reasoningDisplayPreference";
+import { InlineAssistantReasoning } from "./InlineAssistantReasoning";
+import { LiveStreamContext } from "./LiveStreamContext";
+import { useTranscriptSelectableRows } from "../lib/useTranscriptSelectableRows";
+import { TranscriptSelectionOverlay } from "./TranscriptSelectionOverlay";
+import { useCreationTranscriptScrollbar } from "../lib/useCreationTranscriptScrollbar";
+import { useTranscriptScrollInteractions } from "../lib/useTranscriptScrollInteractions";
 type OpenTurnAction = { turn: number; menu: "summary" | "rewind" };
-
 const QUESTION_NAV_MIN_COUNT = 2;
-const LiveStreamContext = createContext<LiveStream | undefined>(undefined);
+type AssistantReasoningDisplay = "normal" | "hide";
 
 const LiveAssistantMessage = memo(function LiveAssistantMessage({
   item,
   defaultExpanded = false,
-  expandWhileStreaming = true,
+  expandWhileStreaming = false,
   truncateStreamingReasoning = false,
   creationMode = false,
+  reasoningDisplay = "normal",
 }: {
   item: AssistantItem;
   defaultExpanded?: boolean;
   expandWhileStreaming?: boolean;
   truncateStreamingReasoning?: boolean;
   creationMode?: boolean;
+  reasoningDisplay?: AssistantReasoningDisplay;
 }) {
   const live = useContext(LiveStreamContext);
   const shown = useMemo(
-    () =>
-      live && live.id === item.id
-        ? { ...item, text: live.text, reasoning: live.reasoning, streaming: true, reasoningComplete: live.reasoningComplete }
-        : item,
-    [item, live?.id, live?.text, live?.reasoning, live?.reasoningComplete],
+    () => {
+      const merged =
+        live && live.id === item.id
+          ? {
+              ...item,
+              text: live.text,
+              reasoning: live.reasoning,
+              streaming: true,
+              reasoningComplete: live.reasoningComplete,
+              reasoningDurationMs:
+                live.reasoningStartedAt && live.reasoningCompletedAt && live.reasoningCompletedAt >= live.reasoningStartedAt
+                  ? live.reasoningCompletedAt - live.reasoningStartedAt
+                  : item.reasoningDurationMs,
+            }
+          : item;
+      if (reasoningDisplay === "hide") {
+        return { ...merged, reasoning: "", reasoningComplete: true, reasoningDurationMs: undefined };
+      }
+      return merged;
+    },
+    [item, live?.id, live?.text, live?.reasoning, live?.reasoningComplete, live?.reasoningStartedAt, live?.reasoningCompletedAt, reasoningDisplay],
   );
   return (
     <AssistantMessage
@@ -54,34 +103,50 @@ const LiveAssistantMessage = memo(function LiveAssistantMessage({
     />
   );
 });
-
-// ── Layer budgets ─────────────────────────────────────────────────────────────
-// Hot zone: the most recent N user turns are always fully rendered. All data
-// stays in memory (items[]), so expanding a warm turn is instant — no API call.
-// Cold zone: a "load more" button paginates the warm zone in batches.
-//
-//   items[0]  ─┐
-//   ...        │ Cold zone  ───  paginated, shown on "load more"
-//              ├────────────  warmTurnStart
-//   ...        │ Warm zone  ───  collapsible summary cards (individual expand)
-//              ├────────────  hotStartIdx
-//   items[N]  ─┤ Hot zone   ───  fully rendered
-//   ...        │
-//   items[end] ┘
-
-const HOT_TURNS = 30;
-const WARM_PAGE_SIZE = 20; // cold-zone pagination batch
+const VIRTUAL_OVERSCAN_ROWS = 8;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function useTick(on: boolean): number {
+  const [, setN] = useState(0);
+  useEffect(() => {
+    if (!on) return;
+    const id = window.setInterval(() => setN((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [on]);
+  return Date.now();
+}
+function formatWorkDuration(durationMs: number, t: ReturnType<typeof useT>): string {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return "";
+  const totalSeconds = Math.max(1, Math.round(durationMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes <= 0) return t("transcript.durationSeconds", { s: totalSeconds });
+  if (seconds <= 0) return t("transcript.durationMinutes", { m: minutes });
+  return t("transcript.durationMinutesSeconds", { m: minutes, s: seconds });
+}
+function workStatusLabel(durationMs: number, running: boolean, t: ReturnType<typeof useT>): string {
+  const duration = formatWorkDuration(durationMs, t);
+  if (running) {
+    return duration ? t("transcript.workingDuration", { duration }) : t("transcript.working");
+  }
+  return duration ? t("transcript.workedDuration", { duration }) : t("transcript.worked");
+}
+function assistantAnswerOnly(item: AssistantItem): AssistantItem {
+  return { ...item, reasoning: "", reasoningComplete: true, reasoningDurationMs: undefined };
+}
 
 // ── Transcript component ──────────────────────────────────────────────────────
 
 export function Transcript({
   items,
-  live,
+  live: liveProp,
+  liveStore,
   tabId,
   footerHeight = 0,
   onPrompt,
+  onDeliveryContinue,
+  onOpenChanges,
   onEditPrompt,
   onRewind,
   checkpoints = [],
@@ -94,12 +159,22 @@ export function Transcript({
   actionHoverMenus = false,
   rewindSignal = 0,
   revealSignal = 0,
+  hydrating = false,
+  hasOlderHistory = false,
+  olderHistoryCount = 0,
+  loadingOlderHistory = false,
+  onLoadOlderHistory,
+  turnStartAt,
+  invocationMetadata = {},
 }: {
   items: Item[];
   live?: LiveStream;
+  liveStore?: ControllerLiveStore;
   tabId?: string;
   footerHeight?: number;
   onPrompt: (text: string) => void;
+  onDeliveryContinue?: () => void;
+  onOpenChanges?: () => void;
   onEditPrompt?: (turn: number, displayText: string, submitText?: string) => boolean | void | Promise<boolean | void>;
   onRewind?: (turn: number, scope: string) => void;
   checkpoints?: CheckpointMeta[];
@@ -112,52 +187,122 @@ export function Transcript({
   actionHoverMenus?: boolean;
   rewindSignal?: number;
   revealSignal?: number;
+  hydrating?: boolean;
+  hasOlderHistory?: boolean;
+  olderHistoryCount?: number;
+  loadingOlderHistory?: boolean;
+  onLoadOlderHistory?: () => void;
+  turnStartAt?: number;
+  invocationMetadata?: InvocationMetadataMap;
 }) {
   const t = useT();
+  const subscribeLive = useCallback(
+    (listener: () => void) => liveStore?.subscribe(tabId, listener) ?? (() => {}),
+    [liveStore, tabId],
+  );
+  const getLiveSnapshot = useCallback(
+    () => liveStore?.getSnapshot(tabId) ?? liveProp,
+    [liveProp, liveStore, tabId],
+  );
+  const live = useSyncExternalStore(subscribeLive, getLiveSnapshot, getLiveSnapshot);
   const {
     scrollRef,
     stick,
     onScroll,
+    onScrollEnd,
+    onWheelIntent,
+    onPointerDownIntent,
+    onNestedScrollIntent,
+    onTouchStartIntent,
+    onTouchMoveIntent,
+    onKeyScrollIntent,
     isAtBottom,
-    smoothScrollTo,
     scrollToBottomAfterLayout,
     trackQuestions,
-    repinIfWasPinned,
+    scheduleRepinIfWasPinned,
     resizeFrame,
     lastClientHeight,
     lastFooterHeight,
-  } = useScrollManager();
+    setMode: setScrollMode,
+    modeRef: scrollModeRef,
+    writeOffset,
+    resetGeneration,
+    canVirtualizerAdjust,
+    captureViewportAnchor,
+    reconcileViewportAnchor,
+    onGestureIdle,
+    finishProgrammaticScroll,
+  } = useTranscriptScrollController();
   const autoScrollFrame = useRef<number | null>(null);
   const pendingRevealBottomScroll = useRef(false);
-  const sessionKey = useMemo(() => `${items[0]?.id ?? ""}|${items[items.length - 1]?.id ?? ""}`, [items]);
-  const entranceRef = useEntranceAnimation<HTMLDivElement>(sessionKey, items.length);
 
-  const [displayMode, setDisplayMode] = useState<DisplayMode>(() => getDisplayMode());
-  useEffect(() => onDisplayModeChange((mode) => setDisplayMode(mode)), []);
+  const entranceRef = useTranscriptEntranceAnimation<HTMLDivElement>(tabId, revealSignal, items);
+
+  // Lease the markdown parse worker for as long as a transcript surface is
+  // mounted; the last release terminates the thread (it re-spawns lazily).
+  useEffect(() => {
+    acquireMarkdownWorkerClient();
+    return () => releaseMarkdownWorkerClient();
+  }, []);
+
+  const cancelStreamingAutoScroll = useCallback(() => {
+    if (autoScrollFrame.current !== null) {
+      cancelAnimationFrame(autoScrollFrame.current);
+      autoScrollFrame.current = null;
+    }
+  }, []);
+
+  const {
+    state: creationScrollbar,
+    handleScroll: handleCreationScroll,
+    onThumbPointerDown: handleCreationScrollbarThumbPointerDown,
+    onRailPointerDown: handleCreationScrollbarRailPointerDown,
+  } = useCreationTranscriptScrollbar({
+    enabled: creationMode,
+    contentRevision: items.length,
+    scrollRef,
+    onScroll,
+    setScrollMode,
+    writeOffset,
+    finishProgrammaticScroll,
+  });
 
   const questions = useMemo<QuestionAnchor[]>(() => {
     const anchors: QuestionAnchor[] = [];
     let turn = 0;
     for (const it of items) {
       if (it.kind !== "user") continue;
-      anchors.push({ id: it.id, text: compactQuestionText(it.text), turn });
+      anchors.push({ id: it.id, text: compactQuestionText(it.text), turn, checkpointTurn: it.checkpointTurn });
       turn += 1;
     }
     return anchors;
   }, [items]);
   const showQuestionNav = questionNavigator && questions.length >= QUESTION_NAV_MIN_COUNT;
 
-  // Track question count and auto-scroll on new messages.
-  useEffect(() => { trackQuestions(questions.length); }, [questions.length, trackQuestions]);
+  // Track question count and auto-scroll on new messages. A "new question" is
+  // a tail append — prepending an older-history page also grows the question
+  // list but must not yank the reader to the bottom (the virtualizer's anchor
+  // compensation keeps their position instead).
+  const questionTailRef = useRef({ length: 0, lastId: "" });
+  const newQuestionCount = useRef(0);
+  useEffect(() => {
+    const lastId = questions[questions.length - 1]?.id ?? "";
+    const prev = questionTailRef.current;
+    questionTailRef.current = { length: questions.length, lastId };
+    if (questions.length > prev.length && lastId !== prev.lastId) {
+      newQuestionCount.current += 1;
+    }
+    trackQuestions(newQuestionCount.current);
+  }, [questions, trackQuestions]);
 
   // Reset the auto-scroll pin when switching tabs so the new session always
   // starts at the bottom. Without this, stick.current from the previous tab
   // persists across React re-renders (Transcript is not keyed by tabId) and
   // disables auto-scroll when the user had scrolled up in the old tab (#4584).
   useEffect(() => {
-    stick.current = true;
+    resetGeneration(tabId, revealSignal);
     pendingRevealBottomScroll.current = true;
-  }, [tabId, revealSignal]);
+  }, [resetGeneration, revealSignal, tabId]);
 
   useEffect(() => {
     if (!pendingRevealBottomScroll.current || items.length === 0) return;
@@ -179,9 +324,9 @@ export function Transcript({
       autoScrollFrame.current = null;
       if (!stick.current) return;
       const el = scrollRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
+      if (el) writeOffset("stream", el.scrollHeight);
     });
-  }, [contentVersion, live?.text?.length ?? 0, live?.reasoning?.length ?? 0]);
+  }, [contentVersion, live?.text?.length ?? 0, live?.reasoning?.length ?? 0, writeOffset]);
   useEffect(() => {
     return () => {
       if (autoScrollFrame.current !== null) {
@@ -191,16 +336,32 @@ export function Transcript({
     };
   }, []);
 
+  // The settled assistant row can grow after turn_done while markdown swaps
+  // from the live renderer to parsed blocks. Run a passive fallback while the
+  // reader is still pinned; row measurements below cover later async growth.
+  const previousLiveRef = useRef<{ tabId: string | undefined; id: string | undefined }>({ tabId, id: undefined });
+  useEffect(() => {
+    const previous = previousLiveRef.current;
+    const sameTab = previous.tabId === tabId;
+    const hadLive = sameTab && previous.id !== undefined;
+    const hasLive = live?.id !== undefined;
+    previousLiveRef.current = { tabId, id: live?.id };
+    if (shouldRunStreamEndRepin(hadLive, hasLive, stick.current)) {
+      scrollToBottomAfterLayout(3, "stream");
+    }
+  }, [live?.id, scrollToBottomAfterLayout, stick, tabId]);
+
   // ResizeObserver for container height changes.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     lastClientHeight.current = el.clientHeight;
-    const observer = new ResizeObserver(() => {
-      const previous = lastClientHeight.current ?? el.clientHeight;
-      lastClientHeight.current = el.clientHeight;
+    const observer = new ResizeObserver((entries) => {
+      const height = entries[0]?.contentRect.height ?? el.clientHeight;
+      const previous = lastClientHeight.current ?? height;
+      lastClientHeight.current = height;
       if (items.length === 0) return;
-      repinIfWasPinned(el.clientHeight - previous);
+      scheduleRepinIfWasPinned(height - previous, "container-resize");
     });
     observer.observe(el);
     return () => {
@@ -210,29 +371,17 @@ export function Transcript({
         resizeFrame.current = null;
       }
     };
-  }, [items.length]);
+  }, [items.length, scheduleRepinIfWasPinned]);
 
-  // Footer height changes → smooth scroll repin with GSAP.
+  // Footer height changes → frame-batched scroll repin.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const previous = lastFooterHeight.current ?? footerHeight;
     lastFooterHeight.current = footerHeight;
     if (items.length === 0) return;
-    repinIfWasPinned(previous - footerHeight);
-  }, [footerHeight, items.length]);
-
-  // After a non-fork rewind, scroll to the last user message (the
-  // rewound-to point) so the user knows where they are.
-  useEffect(() => {
-    if (rewindSignal <= 0 || questions.length === 0) return;
-    const lastQ = questions[questions.length - 1];
-    const el = document.getElementById(questionAnchorId(lastQ.id));
-    if (!el || !scrollRef.current) return;
-    stick.current = false;
-    scrollRef.current.scrollTop = el.offsetTop - scrollRef.current.offsetTop - 12;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rewindSignal]);
+    scheduleRepinIfWasPinned(previous - footerHeight, "footer-resize");
+  }, [footerHeight, items.length, scheduleRepinIfWasPinned]);
 
   // Sub-agent calls carry a parentId; collect them under their parent `task`
   // call so the parent card can render them nested, and skip them at top level.
@@ -248,30 +397,45 @@ export function Transcript({
     return m;
   }, [items]);
 
-  // ── Layer state ────────────────────────────────────────────────────────────
-  const [expandedWarmTurns, setExpandedWarmTurns] = useState<Set<number>>(new Set());
-  const [coldPage, setColdPage] = useState(0);
+  // ── Turn models, fold state, virtual rows ─────────────────────────────────
+  // The row model only depends on structural inputs and live PRESENCE flags —
+  // streaming tokens flow through LiveStreamContext and never rebuild it.
+  const liveId = live?.id;
+  const liveHasAnswerText = Boolean(live?.text.trim());
+  const liveHasReasoning = Boolean(live?.reasoning);
+  const liveReasoningComplete = live?.reasoningComplete;
+  const reasoningDisplayMode = useReasoningDisplayMode();
+  const hideReasoning = reasoningDisplayMode === "hidden" || reasoningDisplayMode === "pending";
+  const liveFlags = useMemo<TranscriptLiveFlags>(
+    () => (liveId
+      ? { id: liveId, hasAnswerText: liveHasAnswerText, hasReasoning: liveHasReasoning, reasoningComplete: liveReasoningComplete }
+      : NO_LIVE),
+    [liveId, liveHasAnswerText, liveHasReasoning, liveReasoningComplete],
+  );
+  const turnModels = useMemo(() => buildTurnModels(items, liveFlags, running, hideReasoning), [items, liveFlags, running, hideReasoning]);
+  const segmentStates = useMemo(() => foldSegmentStates(turnModels), [turnModels]);
 
-  // Compute turn groups from the structural item list. Streaming text updates
-  // keep the same items[] reference, so this stays out of the token hot path.
-  const turnGroups = useMemo(() => buildTurnGroups(items), [items]);
+  const [foldPreference, setFoldPreference] = useState<ProcessFoldPreference>(getProcessFoldPreference);
+  useEffect(() => onProcessFoldPreferenceChange(setFoldPreference), []);
+  const foldPreferenceRef = useRef(foldPreference);
+  const [folds, setFolds] = useState<FoldMap>(EMPTY_FOLDS);
 
-  // hotStartIdx: first index of the hot zone in items[].
-  const hotStartIdx = useMemo(() => {
-    let needed = HOT_TURNS;
-    for (let i = items.length - 1; i >= 0; i--) {
-      if (items[i].kind === "user") {
-        needed--;
-        if (needed <= 0) return i;
-      }
-    }
-    return 0;
-  }, [items]);
+  // Hoisted TurnCollapse effects: auto-open while running, auto-close on
+  // completion, preference switches apply to folds already on screen.
+  useEffect(() => {
+    const preferenceChanged = foldPreferenceRef.current !== foldPreference;
+    foldPreferenceRef.current = foldPreference;
+    setFolds((prev) => reconcileFoldEntries(prev, segmentStates, foldPreference, preferenceChanged) ?? prev);
+  }, [segmentStates, foldPreference]);
 
-  // How many turns are in the cold zone (not yet shown).
-  const warmTurnCount = turnGroups.length - Math.min(turnGroups.length, HOT_TURNS);
-  const shownWarmStart = Math.max(0, warmTurnCount - coldPage * WARM_PAGE_SIZE);
-  const coldTurnCount = shownWarmStart;
+  const handleFoldToggle = useCallback((segmentKey: string, currentlyOpen: boolean) => {
+    setFolds((prev) => foldMapWithToggle(prev, segmentKey, currentlyOpen));
+  }, []);
+
+  const handleReasoningManualOpen = useCallback((segmentKey: string) => {
+    const running = segmentStates.find((segment) => segment.key === segmentKey)?.hasRunningWork ?? false;
+    setFolds((prev) => foldMapWithReasoningOpen(prev, segmentKey, running));
+  }, [segmentStates]);
 
   // ── The turn action menu ──────────────────────────────────────────────────
   const [openAction, setOpenAction] = useState<OpenTurnAction | null>(null);
@@ -285,363 +449,331 @@ export function Transcript({
     return () => document.removeEventListener("mousedown", onDown);
   }, [openAction]);
 
-  const userTurn = useMemo(() => new Map(questions.map((question) => [question.id, question.turn])), [questions]);
+  const userTurn = useMemo(() => questionTurnsById(questions), [questions]);
+  const lastTurn = useMemo(() => lastQuestionTurn(questions, userTurn), [questions, userTurn]);
   const checkpointsByTurn = useMemo(() => new Map(checkpoints.map((checkpoint) => [checkpoint.turn, checkpoint])), [checkpoints]);
+  const hasCheckpointForTurn = useCallback((turn: number) => checkpointsByTurn.has(turn), [checkpointsByTurn]);
+
+  const turnForUser = useCallback((item: Extract<Item, { kind: "user" }>) => userTurn.get(item.id), [userTurn]);
+  const rows = useMemo(
+    () => buildTranscriptRows(turnModels, { folds, foldPreference, hasOlderHistory, creationMode, turnForUser, hasCheckpointForTurn }),
+    [turnModels, folds, foldPreference, hasOlderHistory, creationMode, turnForUser, hasCheckpointForTurn],
+  );
+  const rowIndexByKey = useMemo(() => {
+    const map = new Map<string, number>();
+    rows.forEach((row, index) => map.set(String(row.key), index));
+    return map;
+  }, [rows]);
+  const [selectableRows, liveSelectableRows] = useTranscriptSelectableRows(rows, live);
+  const selectionRetention = useTranscriptSelectionRetention({
+    tabId,
+    revealSignal,
+    rowIndexByKey,
+    selectableRows,
+    selectableRowOverrides: liveSelectableRows,
+    scrollRef,
+    setScrollMode,
+    writeOffset,
+    cancelStreamingScroll: cancelStreamingAutoScroll,
+    captureViewportAnchor,
+    reconcileViewportAnchor,
+  });
+  const scrollInteractions = useTranscriptScrollInteractions({
+    scrollRef,
+    cancelStreamingScroll: cancelStreamingAutoScroll,
+    onWheelIntent,
+    onTouchMoveIntent,
+    onKeyScrollIntent,
+    onPointerDownIntent,
+    onNestedScrollIntent,
+    onScrollEnd,
+    onSelectionPointerDown: selectionRetention.onPointerDownCapture,
+  });
+  const getRowKey = useCallback((index: number) => `${tabId ?? ""}:${String(rows[index]?.key ?? index)}`, [rows, tabId]);
+  const { estimateSize: estimateRowSize, layoutSnapshotRef, measureElement: measureRowSize } = useTranscriptRowMeasurements(tabId, rows);
+  const trackRowSizeChange = useCallback(
+    (element: HTMLDivElement, entry: ResizeObserverEntry | undefined, instance: Virtualizer<HTMLDivElement, HTMLDivElement>) => {
+      const height = measureRowSize(element, entry, instance);
+      if (stick.current) scheduleRepinIfWasPinned(0, "row-size");
+      return height;
+    },
+    [measureRowSize, scheduleRepinIfWasPinned, stick],
+  );
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scrollRef.current,
+    getItemKey: getRowKey,
+    estimateSize: estimateRowSize,
+    measureElement: trackRowSizeChange,
+    overscan: VIRTUAL_OVERSCAN_ROWS,
+    rangeExtractor: selectionRetention.rangeExtractor,
+    // Key-anchored compensation: prepended history pages, fold toggles and
+    // async row growth restore the scroll position of the anchor row.
+    anchorTo: "end",
+    scrollToFn: (offset, options) => {
+      writeOffset("virtualizer", offset + (options.adjustments ?? 0), options.behavior ?? "auto");
+    },
+    // Measurement callbacks can arrive during React's commit phase. Let the
+    // virtualizer update stable row positions directly instead of dispatching a
+    // reducer update for every ResizeObserver measurement (React #185).
+    directDomUpdates: true,
+    // Batch ResizeObserver measurements into one layout read per frame.
+    useAnimationFrameWithResizeObserver: true,
+    onChange: () => selectionRetention.reconcileLogicalFocus(),
+  });
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => (
+    canVirtualizerAdjust()
+    && shouldAdjustScrollOnItemSizeChange(stick.current, scrollModeRef.current)
+  );
+  useTranscriptMeasurementInvalidation({
+    scrollRef,
+    layoutSnapshotRef,
+    virtualizer,
+    selectionActive: selectionRetention.active,
+    canMeasure: canVirtualizerAdjust,
+    onMeasureIdle: onGestureIdle,
+    captureViewportAnchor,
+    reconcileViewportAnchor,
+  });
+
+  const sizerRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      virtualizer.containerRef(el);
+      entranceRef.current = el;
+    },
+    [virtualizer, entranceRef],
+  );
+  const virtualItems = virtualizer.getVirtualItems();
+  const virtualRevision = virtualItems.map((item) => `${item.key}:${item.start}:${item.size}`).join("|");
+  useEffect(() => {
+    noteTranscriptRowCounts(virtualItems.length, rows.length);
+  }, [virtualItems.length, rows.length]);
 
   // ── JumpBar integration ───────────────────────────────────────────────────
-  const jumpToQuestion = (question: QuestionAnchor) => {
-    const node = document.getElementById(questionAnchorId(question.id));
-    if (!node) return;
-    stick.current = false;
-    smoothScrollTo(node, 12);
-  };
-
   const handleJumpToQuestion = useCallback((question: QuestionAnchor) => {
-    // Auto-expand the warm turn when jumping to an old question.
-    const warmTurnStart = turnGroups.length - HOT_TURNS;
-    if (question.turn < warmTurnStart) {
-      setExpandedWarmTurns((prev) => {
-        if (prev.has(question.turn)) return prev;
-        return new Set([...prev, question.turn]);
-      });
-    }
-    jumpToQuestion(question);
-  }, [turnGroups.length]);
+    const index = rowIndexByKey.get(String(userRowKey(question.id)));
+    if (index == null) return;
+    stick.current = false;
+    setScrollMode("programmatic", "jump");
+    virtualizer.scrollToIndex(index, { align: "start", behavior: "smooth" });
+  }, [rowIndexByKey, setScrollMode, stick, virtualizer]);
 
-  // ── Hot zone: fully rendered from hotStartIdx to end ─────────────────────
-  // Memoized separately from the assembly so streaming tokens don't rebuild
-  // the warm/cold zone JSX trees. Uses LiveStreamContext for streaming data
-  // (added by upstream PR #3423) instead of per-call renderSegments.
+  // After a non-fork rewind, scroll to the last user message (the
+  // rewound-to point) so the user knows where they are.
+  useEffect(() => {
+    if (rewindSignal <= 0 || questions.length === 0) return;
+    const lastQ = questions[questions.length - 1];
+    const index = rowIndexByKey.get(String(userRowKey(lastQ.id)));
+    if (index == null) return;
+    stick.current = false;
+    setScrollMode("programmatic", "rewind");
+    virtualizer.scrollToIndex(index, { align: "start" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rewindSignal]);
+
   const empty = items.length === 0;
 
   useLayoutEffect(() => {
     if (!empty) return;
     const el = scrollRef.current;
     if (!el) return;
-    el.scrollTop = 0;
+    setScrollMode("programmatic", "empty-transcript");
+    writeOffset("jump-bottom", 0);
     stick.current = false;
     const frame = requestAnimationFrame(() => {
-      el.scrollTop = 0;
+      writeOffset("jump-bottom", 0);
     });
     return () => cancelAnimationFrame(frame);
-  }, [empty, scrollRef, stick, tabId]);
+  }, [empty, scrollRef, setScrollMode, stick, tabId, writeOffset]);
 
-  // In compact mode, break each turn into step groups.
-  // A step = one assistant + its tool results, from one assistant to the next.
-  // Each completed non-final step is folded into "Processed".
-  const stepGroups = useMemo(() => {
-    if (displayMode === "standard") return null;
-    const groups: { items: Item[]; isFinal: boolean; isComplete: boolean }[] = [];
-    let current: Item[] = [];
-
-    for (let i = hotStartIdx; i < items.length; i++) {
-      const it = items[i];
-      if (it.kind === "user") {
-        if (current.length > 0) {
-          const first = current[0];
-          const isFinal = first.kind === "assistant" && !first.streaming && first.text.trim() !== "";
-          groups.push({ items: current, isFinal, isComplete: true });
-          current = [];
-        }
-        groups.push({ items: [it], isFinal: false, isComplete: true });
-        continue;
+  // ── Row rendering ─────────────────────────────────────────────────────────
+  const renderRow = (row: TranscriptRow): ReactNode => {
+    switch (row.kind) {
+      case "older-history":
+        return (
+          <button
+            type="button"
+            className="warm-collapse transcript__older"
+            onClick={onLoadOlderHistory}
+            disabled={loadingOlderHistory}
+          >
+            {loadingOlderHistory ? t("common.loading") : t("transcript.showEarlierHistory", { n: olderHistoryCount })}
+          </button>
+        );
+      case "user": {
+        const user = row.item;
+        const checkpoint = row.turn == null ? undefined : checkpointsByTurn.get(row.turn);
+        return (
+          <UserMessage
+            id={user.id}
+            text={user.text}
+            submitText={user.submitText}
+            failed={user.failed}
+            createdAt={user.createdAt}
+            turn={row.turn}
+            anchorId={questionAnchorId(user.id)}
+            onEdit={onEditPrompt}
+            editDisabled={rewindDisabled || !checkpoint?.canConversation}
+          />
+        );
       }
-      if (it.kind === "assistant") {
-        if (current.length > 0) {
-          groups.push({ items: current, isFinal: false, isComplete: true });
-          current = [];
-        }
-        current.push(it);
-      } else {
-        current.push(it);
-      }
-    }
-    if (current.length > 0) {
-      const first = current[0];
-      const isFinal = first.kind === "assistant" && !first.streaming && first.text.trim() !== "";
-      groups.push({ items: current, isFinal, isComplete: false });
-    }
-    return groups;
-  }, [displayMode, hotStartIdx, items]);
-
-  const hotZoneNodes = useMemo<ReactNode[]>(() => {
-    const out: ReactNode[] = [];
-    let actionText = "";
-    let actionReady = false;
-    let activeTurn: number | undefined;
-    const pushTurnActions = () => {
-      if (activeTurn == null || !actionReady || actionText.trim() === "") return;
-      const turn = activeTurn;
-      const openMenu = openAction && openAction.turn === turn ? openAction.menu : null;
-      out.push(
-        <TurnActions
-          key={`ta-${turn}`}
-          text={actionText}
-          turn={turn}
-          openMenu={openMenu}
-          onOpenMenu={(menu) => setOpenAction(menu ? { turn, menu } : null)}
-          checkpoint={checkpointsByTurn.get(turn)}
-          actionPending={actionPending}
-          rewindDisabled={rewindDisabled}
-          hoverMenus={actionHoverMenus}
-          onRewind={(targetTurn, scope) => {
-            onRewind?.(targetTurn, scope);
-            setOpenAction(null);
-          }}
-        />,
-      );
-      actionText = "";
-      actionReady = false;
-    };
-
-    // Compact mode: step-based rendering
-    // Standard mode: flat rendering (no step groups)
-    if (stepGroups) {
-      // Collect consecutive completed non-final steps into batches
-      let collapseBatch: Item[] = [];
-      let collapseBatchStart: string | null = null;
-      const flushCollapseBatch = () => {
-        if (collapseBatch.length === 0) return;
-        const dur = collapseBatch.reduce((ms, it) => ms + (it.kind === "tool" ? it.durationMs ?? 0 : 0), 0);
-        out.push(
-          <TurnCollapse
-            key={`step-batch-${collapseBatchStart}`}
-            items={collapseBatch}
-            durationMs={dur}
-            mode={displayMode}
-            subcalls={subcallsByParent}
-            tabId={tabId}
+      case "process-header":
+        return (
+          <ProcessFoldHeader
+            segment={row.segment}
+            open={row.open}
+            onToggle={() => handleFoldToggle(row.segment.key, row.open)}
+            turnStartAt={row.segment.turnActive ? turnStartAt : undefined}
+          />
+        );
+      case "reasoning":
+        return (
+          <div className="turn-collapse__body">
+            <InlineAssistantReasoning item={row.item} onManualOpen={() => handleReasoningManualOpen(row.segmentKey)} />
+          </div>
+        );
+      case "tool":
+        return (
+          <div className="turn-collapse__body">
+            <ToolCard item={row.item} subcalls={subcallsByParent.get(row.item.id)} tabId={tabId} />
+          </div>
+        );
+      case "tool-batch":
+        return (
+          <div className="turn-collapse__body">
+            <ReadOnlyBatch items={row.items} subcalls={subcallsByParent} tabId={tabId} />
+          </div>
+        );
+      case "tool-group":
+        return (
+          <div className="turn-collapse__body">
+            <ToolGroup kind={row.groupKind} items={row.items} subcalls={subcallsByParent} tabId={tabId} />
+          </div>
+        );
+      case "phase":
+        return (
+          <div className="turn-collapse__body">
+            <PhaseCard id={row.item.id} text={row.item.text} />
+          </div>
+        );
+      case "process-notice":
+        return (
+          <div className="turn-collapse__body">
+            <NoticeCard item={row.item} />
+          </div>
+        );
+      case "compaction":
+        return (
+          <div className="turn-collapse__body">
+            <CompactionCard item={row.item} />
+          </div>
+        );
+      case "answer":
+        return (
+          <LiveAssistantMessage
+            item={assistantAnswerOnly(row.item)}
+            defaultExpanded={false}
+            expandWhileStreaming={false}
+            truncateStreamingReasoning={true}
             creationMode={creationMode}
-          />,
+            reasoningDisplay="hide"
+          />
         );
-        collapseBatch = [];
-        collapseBatchStart = null;
-      };
-
-      for (const group of stepGroups) {
-        const first = group.items[0];
-
-        if (first.kind === "user") {
-          flushCollapseBatch();
-          pushTurnActions();
-          const tn = userTurn.get(first.id);
-          const checkpoint = tn == null ? undefined : checkpointsByTurn.get(tn);
-          activeTurn = tn;
-          out.push(
-            <UserMessage
-              key={first.id}
-              id={first.id}
-              text={first.text}
-              submitText={first.submitText}
-              failed={first.failed}
-              createdAt={first.createdAt}
-              turn={tn}
-              anchorId={questionAnchorId(first.id)}
-              onEdit={onEditPrompt}
-              editDisabled={rewindDisabled || !checkpoint?.canConversation}
-            />,
-          );
-          continue;
+      case "notice":
+        if (isSteerNoticeText(row.item.text)) {
+          return <SteerCard id={row.item.id} text={row.item.text} />;
         }
-
-        // Completed non-final step → batch it
-        if (group.isComplete && !group.isFinal) {
-          if (!collapseBatchStart) collapseBatchStart = first.id;
-          collapseBatch.push(...group.items);
-          continue;
-        }
-
-        // Final answer or active step → flush any pending batch then render
-        flushCollapseBatch();
-        const nonAssistantItems = group.items.filter(
-          (it) => it.kind !== "assistant" || (it.streaming && !it.text.trim())
+        return (
+          <NoticeCard
+            item={row.item}
+            actionDisabled={running}
+            onAction={row.item.action === "continue_delivery"
+              ? (onDeliveryContinue ?? (() => onPrompt(t("notice.deliveryIncompleteContinuePrompt"))))
+              : row.item.action === "open_changes"
+                ? onOpenChanges
+                : undefined}
+          />
         );
-        const hasRunning = nonAssistantItems.some((it) => it.kind === "tool" && it.status === "running");
-        if (nonAssistantItems.length > 0 && !hasRunning) {
-          const dur = nonAssistantItems.reduce((ms, it) => ms + (it.kind === "tool" ? ((it as ToolItem).durationMs ?? 0) : 0), 0);
-          out.push(
-            <TurnCollapse
-              key={`step-${first.id}`}
-              items={nonAssistantItems}
-              durationMs={dur}
-              mode={displayMode}
-              subcalls={subcallsByParent}
-              tabId={tabId}
-              creationMode={creationMode}
-            />,
-          );
-        } else if (nonAssistantItems.length > 0) {
-          for (const it of nonAssistantItems) {
-            if (it.kind === "tool") {
-              if (it.parentId) continue;
-              if (it.name === "todo_write" || it.name === "exit_plan_mode") continue;
-              out.push(<ToolCard key={it.id} item={it as ToolItem} subcalls={subcallsByParent.get(it.id)} tabId={tabId} />);
-            }
-            if (it.kind === "phase") out.push(<PhaseCard key={it.id} text={it.text} />);
-          }
-        }
-        // Render the final assistant message (if any) directly
-        for (const it of group.items) {
-          if (it.kind !== "assistant") continue;
-          out.push(
-            <LiveAssistantMessage
-              key={it.id}
-              item={it as AssistantItem}
-              defaultExpanded={false}
-              expandWhileStreaming={false}
-              truncateStreamingReasoning={true}
-              creationMode={creationMode}
-            />,
-          );
-          if (!it.streaming && it.text.trim() !== "") {
-            actionText = it.text;
-            actionReady = true;
-          }
-        }
+      case "extension":
+        return <ExtensionCard item={row.item} tabId={tabId} />;
+      case "turn-actions": {
+        const openMenu = openAction && openAction.turn === row.turn ? openAction.menu : null;
+        return (
+          <TurnActions
+            text={row.text}
+            turn={row.turn}
+            openMenu={openMenu}
+            onOpenMenu={(menu) => setOpenAction(menu ? { turn: row.turn, menu } : null)}
+            checkpoint={checkpointsByTurn.get(row.turn)}
+            actionPending={actionPending}
+            rewindDisabled={rewindDisabled}
+            hoverMenus={actionHoverMenus}
+            isLastTurn={row.turn === lastTurn}
+            onRewind={(targetTurn, scope) => {
+              onRewind?.(targetTurn, scope);
+              setOpenAction(null);
+            }}
+          />
+        );
       }
-      flushCollapseBatch();
-      if (!running) pushTurnActions();
-    } else {
-      // Standard mode: flat rendering
-      const roBatch: ToolItem[] = [];
-      const toolBatch: ToolItem[] = [];
-      let toolBatchKind: ToolGroupKind | null = null;
-      const flushRO = () => {
-        if (roBatch.length === 0) return;
-        out.push(<ReadOnlyBatch key={`rob-${roBatch[0].id}`} items={[...roBatch]} subcalls={subcallsByParent} tabId={tabId} />);
-        roBatch.length = 0;
-      };
-      const flushToolBatch = () => {
-        if (!toolBatchKind || toolBatch.length === 0) return;
-        out.push(<ToolGroup key={`tg-${toolBatch[0].id}`} kind={toolBatchKind} items={[...toolBatch]} subcalls={subcallsByParent} tabId={tabId} />);
-        toolBatch.length = 0;
-        toolBatchKind = null;
-      };
-      for (let i = hotStartIdx; i < items.length; i++) {
-        const it = items[i];
-        if (creationMode && it.kind === "tool" && isCreationGroupableTool(it as ToolItem)) {
-          const kind = toolGroupKind(it as ToolItem);
-          if (kind) {
-            if (toolBatchKind && toolBatchKind !== kind) flushToolBatch();
-            toolBatchKind = kind;
-            toolBatch.push(it as ToolItem);
-            continue;
-          }
-        }
-        if (
-          !creationMode &&
-          it.kind === "tool" &&
-          !it.parentId &&
-          it.status !== "running" &&
-          it.name !== "todo_write" &&
-          it.name !== "exit_plan_mode" &&
-          isReadOnlyTool(it.name)
-        ) {
-          roBatch.push(it as ToolItem);
-          continue;
-        }
-        flushToolBatch();
-        flushRO();
-        switch (it.kind) {
-          case "user": {
-            pushTurnActions();
-            const tn = userTurn.get(it.id);
-            const checkpoint = tn == null ? undefined : checkpointsByTurn.get(tn);
-            activeTurn = tn;
-            out.push(
-              <UserMessage
-                key={it.id}
-                id={it.id}
-                text={it.text}
-                submitText={it.submitText}
-                failed={it.failed}
-                createdAt={it.createdAt}
-                turn={tn}
-                anchorId={questionAnchorId(it.id)}
-                onEdit={onEditPrompt}
-                editDisabled={rewindDisabled || !checkpoint?.canConversation}
-              />,
-            );
-            break;
-          }
-          case "assistant":
-            out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} defaultExpanded={false} creationMode={creationMode} />);
-            if (!it.streaming && it.text.trim() !== "") {
-              actionText = it.text;
-              actionReady = true;
-            }
-            break;
-          case "tool":
-            if (it.parentId) break;
-            if (it.name === "todo_write") break;
-            if (it.name === "exit_plan_mode") break;
-            out.push(<ToolCard key={it.id} item={it} subcalls={subcallsByParent.get(it.id)} tabId={tabId} />);
-            break;
-          case "phase": out.push(<PhaseCard key={it.id} text={it.text} />); break;
-          case "notice": out.push(<NoticeCard key={it.id} level={it.level} text={it.text} />); break;
-          case "compaction": out.push(<CompactionCard key={it.id} item={it} />); break;
-        }
-      }
-      flushToolBatch();
-      flushRO();
-      if (!running) pushTurnActions();
     }
-    return out;
-  }, [hotStartIdx, items, openAction, actionPending, rewindDisabled, running, onEditPrompt, onRewind, subcallsByParent, userTurn, checkpointsByTurn, displayMode, stepGroups, tabId, actionHoverMenus, creationMode]);
+  };
 
   // ── Assemble rendered output ──────────────────────────────────────────────
-  // Warm/cold zone is a separate memo'd WarmZone component so streaming tokens
-  // don't rebuild it. The hot zone uses LiveAssistantMessage (reads live from
-  // LiveStreamContext) so streaming updates are captured immediately.
   return (
+    <InvocationMetadataContext.Provider value={invocationMetadata}>
     <div className="transcript-shell">
       <div
-        className={`transcript${empty ? " transcript--empty" : ""}`}
+        className={`transcript${empty ? " transcript--empty" : ""}${creationMode ? " transcript--creation-scrollbar" : ""}${creationMode && creationScrollbar.hot ? " transcript--scrollbar-hot" : ""}`}
         ref={scrollRef}
-        onScroll={onScroll}
+        onScroll={creationMode ? handleCreationScroll : onScroll}
+        onWheelCapture={scrollInteractions.onWheelCapture}
+        onTouchStartCapture={onTouchStartIntent}
+        onTouchMoveCapture={scrollInteractions.onTouchMoveCapture}
+        onKeyDownCapture={scrollInteractions.onKeyDownCapture}
+        onPointerDownCapture={scrollInteractions.onPointerDownCapture}
       >
-        {empty && <Welcome onPrompt={onPrompt} variant={welcomeVariant} />}
-
-        {!empty && showQuestionNav && (
-          <QuestionJumpBar questions={questions} onJump={handleJumpToQuestion} />
-        )}
+        {empty && !hydrating && <Welcome onPrompt={onPrompt} variant={welcomeVariant} />}
 
         <LiveStreamContext.Provider value={live}>
-          {turnGroups.length > HOT_TURNS && (
-            <WarmZone
-              turnGroups={turnGroups}
-              expandedWarmTurns={expandedWarmTurns}
-              shownWarmStart={shownWarmStart}
-              coldTurnCount={coldTurnCount}
-              scrollRef={scrollRef}
-              warmItems={items}
-              warmSubcalls={subcallsByParent}
-              warmUserTurn={userTurn}
-              warmCheckpoints={checkpointsByTurn}
-              warmOpenAction={openAction}
-              warmActionPending={actionPending}
-              warmRewindDisabled={rewindDisabled}
-              warmActionHoverMenus={actionHoverMenus}
-              warmOnRewind={onRewind}
-              warmSetOpenAction={setOpenAction}
-              warmOnEdit={onEditPrompt}
-              tabId={tabId}
-              creationMode={creationMode}
-              onToggleColdPage={() => setColdPage((p) => p + 1)}
-              onToggleWarmTurn={(g, expand) => {
-                setExpandedWarmTurns((prev) => {
-                  const next = new Set(prev);
-                  if (expand) next.add(g); else next.delete(g);
-                  return next;
-                });
-              }}
-            />
-          )}
-          <div ref={entranceRef}>
-            {hotZoneNodes}
+          <div ref={sizerRef} className="transcript__virtual-sizer">
+            <TranscriptSelectionOverlay tabId={tabId ?? ""} scrollElement={scrollRef.current} virtualRevision={virtualRevision} />
+            {virtualItems.map((virtualRow) => {
+              const row = rows[virtualRow.index];
+              if (!row) return null;
+              return (
+                <TranscriptRowShell
+                  key={virtualRow.key}
+                  index={virtualRow.index}
+                  row={row}
+                  measureElement={virtualizer.measureElement}
+                  tabId={tabId}
+                >
+                  {renderRow(row)}
+                </TranscriptRowShell>
+              );
+            })}
           </div>
         </LiveStreamContext.Provider>
       </div>
+
+      {creationMode && creationScrollbar.visible && (
+        <div
+          className={`transcript__scrollbar${creationScrollbar.hot ? " transcript__scrollbar--hot" : ""}`}
+          onPointerDown={handleCreationScrollbarRailPointerDown}
+          aria-hidden="true"
+        >
+          <div
+            className="transcript__scrollbar-thumb"
+            style={{ top: creationScrollbar.thumbTop, height: creationScrollbar.thumbHeight } as CSSProperties}
+            onPointerDown={handleCreationScrollbarThumbPointerDown}
+          />
+        </div>
+      )}
+
+      {!empty && showQuestionNav && (
+        <QuestionJumpBar questions={questions} onJump={handleJumpToQuestion} />
+      )}
 
       {!empty && !isAtBottom && (
         <button
@@ -655,455 +787,95 @@ export function Transcript({
         </button>
       )}
     </div>
+    </InvocationMetadataContext.Provider>
   );
 }
 
-// ── WarmZone sub-component (React.memo for streaming isolation) ────────────
-// Receives structural props only; reads streaming state (items, live) via refs
-// so it never invalidates on streaming token arrival.
+// ── Virtual row shell ─────────────────────────────────────────────────────────
+// Owns the measured wrapper element. Mounting implies the row is in or near
+// the viewport (overscan), so history-backed rows resolve their lazy
+// full-content refs here — the transcript store patches the item by stable id
+// and the row re-renders in place.
 
-const WarmZone = memo(function WarmZone({
-  turnGroups,
-  expandedWarmTurns,
-  shownWarmStart,
-  coldTurnCount,
-  scrollRef,
-  warmItems,
-  warmSubcalls,
-  warmUserTurn,
-  warmCheckpoints,
-  warmOpenAction,
-  warmActionPending,
-  warmRewindDisabled,
-  warmActionHoverMenus,
-  warmOnRewind,
-  warmSetOpenAction,
-  warmOnEdit,
+function TranscriptRowShell({
+  index,
+  row,
+  measureElement,
   tabId,
-  creationMode,
-  onToggleColdPage,
-  onToggleWarmTurn,
-}: {
-  turnGroups: TurnGroup[];
-  expandedWarmTurns: ReadonlySet<number>;
-  shownWarmStart: number;
-  coldTurnCount: number;
-  scrollRef: React.RefObject<HTMLDivElement | null>;
-  warmItems: readonly Item[];
-  warmSubcalls: ReadonlyMap<string, ToolItem[]>;
-  warmUserTurn: ReadonlyMap<string, number>;
-  warmCheckpoints: ReadonlyMap<number, CheckpointMeta>;
-  warmOpenAction: OpenTurnAction | null;
-  warmActionPending: boolean;
-  warmRewindDisabled: boolean;
-  warmActionHoverMenus: boolean;
-  warmOnRewind: ((turn: number, scope: string) => void) | undefined;
-  warmSetOpenAction: (action: OpenTurnAction | null) => void;
-  warmOnEdit?: (turn: number, displayText: string, submitText?: string) => boolean | void | Promise<boolean | void>;
-  tabId?: string;
-  creationMode?: boolean;
-  onToggleColdPage: () => void;
-  onToggleWarmTurn: (g: number, expand: boolean) => void;
-}) {
-  const t = useT();
-  const out: React.ReactNode[] = [];
-
-  // 1. Cold zone: paginated warm turns (show more button).
-  if (coldTurnCount > 0) {
-    out.push(
-      <button
-        key="cold-load-more"
-        type="button"
-        className="warm-collapse"
-        onClick={onToggleColdPage}
-      >
-        {t("transcript.showEarlierHistory", { n: coldTurnCount })}
-      </button>,
-    );
-  }
-
-  // 2. Warm zone: collapsed/expanded warm turn cards.
-  let warmStartTurn = 0;
-  if (turnGroups.length > HOT_TURNS) {
-    warmStartTurn = turnGroups.length - HOT_TURNS - shownWarmStart;
-    for (let g = warmStartTurn; g < turnGroups.length - HOT_TURNS; g++) {
-      const group = turnGroups[g];
-      if (!group) continue;
-      const expanded = expandedWarmTurns.has(g);
-
-      if (expanded) {
-        const userText = group.userItem.kind === "user" ? group.userItem.text : "";
-        out.push(
-          <WarmTurnCard
-            key={`warm-${g}`}
-            userText={warmUserPreview(userText)}
-            assistantPreview={group.assistantPreview}
-            toolCount={group.toolCount}
-            expanded={true}
-            onToggle={() => onToggleWarmTurn(g, false)}
-          >
-            {/* Expanded warm turns render items that are stable (never the
-                streaming turn), so this captures items/live via a ref. */}
-            <WarmTurnItems
-              startIdx={group.startIdx}
-              endIdx={group.endIdx}
-              items={warmItems}
-              subcalls={warmSubcalls}
-              userTurnMap={warmUserTurn}
-              checkpoints={warmCheckpoints}
-              openAction={warmOpenAction}
-              actionPending={warmActionPending}
-              rewindDisabled={warmRewindDisabled}
-              actionHoverMenus={warmActionHoverMenus}
-              onRewind={warmOnRewind}
-              setOpenAction={warmSetOpenAction}
-              onEdit={warmOnEdit}
-              tabId={tabId}
-              creationMode={creationMode}
-            />
-          </WarmTurnCard>,
-        );
-      } else {
-        const userText = group.userItem.kind === "user" ? group.userItem.text : "";
-        out.push(
-          <WarmTurnCard
-            key={`warm-${g}`}
-            userText={warmUserPreview(userText)}
-            assistantPreview={group.assistantPreview}
-            toolCount={group.toolCount}
-            expanded={false}
-            onToggle={() => {
-              onToggleWarmTurn(g, true);
-              const el = scrollRef.current;
-              const node = document.getElementById(questionAnchorId(group.userItem.id));
-              if (el && node) {
-                requestAnimationFrame(() => {
-                  el.scrollTo({ top: node.offsetTop - el.offsetTop - 80, behavior: "smooth" });
-                });
-              }
-            }}
-          />,
-        );
-      }
-    }
-  }
-
-  return out;
-});
-
-function WarmTurnItems({
-  startIdx,
-  endIdx,
-  items,
-  subcalls,
-  userTurnMap,
-  checkpoints,
-  openAction,
-  actionPending,
-  rewindDisabled,
-  actionHoverMenus,
-  onRewind,
-  setOpenAction,
-  onEdit,
-  tabId,
-  creationMode = false,
-}: {
-  startIdx: number;
-  endIdx: number;
-  items: readonly Item[];
-  subcalls: ReadonlyMap<string, ToolItem[]>;
-  userTurnMap: ReadonlyMap<string, number>;
-  checkpoints: ReadonlyMap<number, CheckpointMeta>;
-  openAction: OpenTurnAction | null;
-  actionPending: boolean;
-  rewindDisabled: boolean;
-  actionHoverMenus: boolean;
-  onRewind: ((turn: number, scope: string) => void) | undefined;
-  setOpenAction: (action: OpenTurnAction | null) => void;
-  onEdit?: (turn: number, displayText: string, submitText?: string) => boolean | void | Promise<boolean | void>;
-  tabId?: string;
-  creationMode?: boolean;
-}) {
-  const nodes: React.ReactNode[] = [];
-  let actionText = "";
-  let actionReady = false;
-  let activeTurn: number | undefined;
-  const pushTurnActions = () => {
-    if (activeTurn == null || !actionReady || actionText.trim() === "") return;
-    const turn = activeTurn;
-    const openMenu = openAction && openAction.turn === turn ? openAction.menu : null;
-    nodes.push(
-      <TurnActions
-        key={`ta-${turn}`}
-        text={actionText}
-        turn={turn}
-        openMenu={openMenu}
-        onOpenMenu={(menu) => setOpenAction(menu ? { turn, menu } : null)}
-        checkpoint={checkpoints.get(turn)}
-        actionPending={actionPending}
-        rewindDisabled={rewindDisabled}
-        hoverMenus={actionHoverMenus}
-        onRewind={(targetTurn, scope) => {
-          onRewind?.(targetTurn, scope);
-          setOpenAction(null);
-        }}
-      />,
-    );
-    actionText = "";
-    actionReady = false;
-  };
-
-  // Group consecutive completed read-only tools into ReadOnlyBatch
-  const roBatch: ToolItem[] = [];
-  const toolBatch: ToolItem[] = [];
-  let toolBatchKind: ToolGroupKind | null = null;
-  const flushRO = () => {
-    if (roBatch.length === 0) return;
-    nodes.push(<ReadOnlyBatch key={`rob-${roBatch[0].id}`} items={[...roBatch]} subcalls={subcalls} tabId={tabId} />);
-    roBatch.length = 0;
-  };
-  const flushToolBatch = () => {
-    if (!toolBatchKind || toolBatch.length === 0) return;
-    nodes.push(<ToolGroup key={`tg-${toolBatch[0].id}`} kind={toolBatchKind} items={[...toolBatch]} subcalls={subcalls} tabId={tabId} />);
-    toolBatch.length = 0;
-    toolBatchKind = null;
-  };
-
-  for (let i = startIdx; i < endIdx && i < items.length; i++) {
-    const it = items[i];
-
-    // Completed read-only tools → batch into ReadOnlyBatch
-    if (creationMode && it.kind === "tool" && isCreationGroupableTool(it as ToolItem)) {
-      const kind = toolGroupKind(it as ToolItem);
-      if (kind) {
-        if (toolBatchKind && toolBatchKind !== kind) flushToolBatch();
-        toolBatchKind = kind;
-        toolBatch.push(it as ToolItem);
-        continue;
-      }
-    }
-    if (!creationMode && it.kind === "tool" && !it.parentId && it.name !== "todo_write" && it.name !== "exit_plan_mode" && isReadOnlyTool(it.name)) {
-      roBatch.push(it as ToolItem);
-      continue;
-    }
-    flushToolBatch();
-    flushRO();
-
-    switch (it.kind) {
-      case "user": {
-        pushTurnActions();
-        const tn = userTurnMap.get(it.id);
-        const checkpoint = tn == null ? undefined : checkpoints.get(tn);
-        activeTurn = tn;
-        nodes.push(
-          <UserMessage
-            key={it.id}
-            text={it.text}
-            submitText={it.submitText}
-            failed={it.failed}
-            createdAt={it.createdAt}
-            turn={tn}
-            anchorId={questionAnchorId(it.id)}
-            onEdit={onEdit}
-            editDisabled={rewindDisabled || !checkpoint?.canConversation}
-          />,
-        );
-        break;
-      }
-      case "assistant": {
-        nodes.push(<AssistantMessage key={it.id} item={it} defaultExpanded={false} creationMode={creationMode} />);
-        if (!it.streaming && it.text.trim() !== "") {
-          actionText = it.text;
-          actionReady = true;
-        }
-        break;
-      }
-      case "tool": {
-        if (it.parentId) break;
-        if (it.name === "todo_write") break;
-        if (it.name === "exit_plan_mode") break;
-        nodes.push(<ToolCard key={it.id} item={it} subcalls={subcalls.get(it.id)} tabId={tabId} />);
-        break;
-      }
-      case "phase": nodes.push(<PhaseCard key={it.id} text={it.text} />); break;
-      case "notice": nodes.push(<NoticeCard key={it.id} level={it.level} text={it.text} />); break;
-      case "compaction": nodes.push(<CompactionCard key={it.id} item={it} />); break;
-    }
-  }
-  flushToolBatch();
-  flushRO();
-  pushTurnActions();
-  return nodes;
-}
-
-// ── Warm turn summary card ────────────────────────────────────────────────────
-
-function WarmTurnCard({
-  userText,
-  assistantPreview,
-  toolCount,
-  expanded,
-  onToggle,
   children,
 }: {
-  userText: string;
-  assistantPreview: string;
-  toolCount: number;
-  expanded: boolean;
-  onToggle: () => void;
-  children?: React.ReactNode;
+  index: number;
+  row: TranscriptRow;
+  measureElement: (element: HTMLDivElement | null) => void;
+  tabId?: string;
+  children: ReactNode;
 }) {
-  const t = useT();
-  const contentRef = useRef<HTMLDivElement>(null);
-  const prevHeightRef = useRef(0);
-  useGSAPCollapse(contentRef, expanded, { prevHeight: prevHeightRef.current });
-  // Always render both children so the container's scrollHeight reflects
-  // the correct content at all times.  The inactive one is display:none.
+  const entryId = historyEntryIdForRow(row);
+  useEffect(() => {
+    if (entryId) getTranscriptStore().requestEntryFullContent(tabId, entryId);
+  }, [entryId, tabId]);
   return (
-    <div className={`warm-turn${expanded ? " warm-turn--expanded" : ""}`}>
-      <button
-        type="button"
-        className="warm-turn__head"
-        onClick={() => {
-          // Capture height before DOM swap so the collapse animation
-          // starts from the correct (expanded) height.
-          const el = contentRef.current;
-          if (el) {
-            el.style.height = "auto";
-            prevHeightRef.current = el.scrollHeight;
-          }
-          onToggle();
-        }}
-        aria-expanded={expanded}
-      >
-        <span className="warm-turn__chevron">
-          <ChevronRight className={expanded ? "warm-turn__chevron--open" : ""} size={13} />
-        </span>
-        <span className="warm-turn__preview">{userText}</span>
-        <span className="warm-turn__meta">
-          {toolCount > 0 && <span>{t("transcript.toolCount", { n: toolCount })}</span>}
-        </span>
-      </button>
-      <div ref={contentRef} className="warm-turn__content">
-        <div className="warm-turn__body" style={{ display: expanded ? undefined : "none" }}>{children}</div>
-        {assistantPreview && (
-          <div className="warm-turn__assistant" style={{ display: expanded ? "none" : undefined }}>{assistantPreview}</div>
-        )}
-      </div>
+    <div data-index={index} data-row-key={String(row.key)} ref={measureElement} className="transcript__row">
+      {children}
     </div>
   );
 }
 
-// ── TurnCollapse: compact mode grouping ──────────────────────────────────────
+// ── ProcessFoldHeader: the fold header row of one process segment ────────────
+// The fold body is NOT rendered here: an open fold contributes its body rows
+// to the virtual row model (they mount only when scrolled into view), a closed
+// fold builds no React subtree at all.
 
-type TurnCollapseProps = {
-  items: Item[];       // intermediate items (tools, reasoning, phase)
-  durationMs: number;  // summed tool execution time across the batch; 0 when unknown
-  mode: DisplayMode;
-  subcalls: Map<string, ToolItem[]>;
-  tabId?: string;
-  creationMode?: boolean;
-};
-
-function TurnCollapse({ items, durationMs, mode, subcalls, tabId, creationMode = false }: TurnCollapseProps) {
+function ProcessFoldHeader({
+  segment,
+  open,
+  onToggle,
+  turnStartAt,
+}: {
+  segment: SegmentModel;
+  open: boolean;
+  onToggle: () => void;
+  turnStartAt?: number;
+}) {
   const t = useT();
-  const [open, setOpen] = useState(false);
-  const bodyRef = useRef<HTMLDivElement>(null);
-  useGSAPCollapse(bodyRef, open);
+  const live = useContext(LiveStreamContext);
+  const displayItems = segment.displayItems;
 
-  // Keep only items the body will actually render — an expandable fold over
-  // nothing is worse than no fold.
-  const displayItems = useMemo(() => {
-    return items.filter((it) => {
-      if (it.kind === "assistant") {
-        if (it.text.trim() !== "") return true;
-        return Boolean(it.reasoning);
-      }
-      if (it.kind === "phase") return true;
-      if (it.kind !== "tool") return false;
-      if (it.parentId || it.name === "todo_write" || it.name === "exit_plan_mode") return false;
-      return true;
-    });
-  }, [items, mode]);
+  const hasRunningWork = segment.hasRunningWork;
+  const now = useTick(hasRunningWork);
+  const runningDurationMs = hasRunningWork
+    ? turnStartAt
+      ? Math.max(0, now - turnStartAt)
+      : live?.reasoningStartedAt
+        ? Math.max(0, now - live.reasoningStartedAt)
+        : 0
+    : 0;
+  const effectiveDurationMs = hasRunningWork ? Math.max(segment.durationMs, runningDurationMs) : segment.durationMs;
 
-  const seconds = Math.round(durationMs / 1000);
-  const label = seconds > 0 ? t("transcript.processedDuration", { s: seconds }) : t("transcript.processed");
-
-  if (displayItems.length === 0) return null;
-
-  const collapseKind = displayItems.some((it) => it.kind === "tool")
-    ? "tool"
-    : displayItems.some((it) => it.kind === "assistant" && Boolean(it.reasoning))
-      ? "reasoning"
-      : "process";
-  const creationLabel = collapseKind === "tool"
-    ? t("creation.toolCallsLabel")
-    : collapseKind === "reasoning"
-      ? t("creation.reasoningLabel")
-      : label;
-
-  // Pre-compute body: group consecutive completed read-only tools into ReadOnlyBatch
-  const body: ReactNode[] = [];
-  const roBatch: ToolItem[] = [];
-  const toolBatch: ToolItem[] = [];
-  let toolBatchKind: ToolGroupKind | null = null;
-  const flushRO = () => {
-    if (roBatch.length === 0) return;
-    body.push(<ReadOnlyBatch key={`rob-${roBatch[0].id}`} items={[...roBatch]} subcalls={subcalls} tabId={tabId} />);
-    roBatch.length = 0;
-  };
-  const flushToolBatch = () => {
-    if (!toolBatchKind || toolBatch.length === 0) return;
-    body.push(<ToolGroup key={`tg-${toolBatch[0].id}`} kind={toolBatchKind} items={[...toolBatch]} subcalls={subcalls} tabId={tabId} />);
-    toolBatch.length = 0;
-    toolBatchKind = null;
-  };
-  for (const it of displayItems) {
-    if (creationMode && it.kind === "tool" && isCreationGroupableTool(it as ToolItem)) {
-      const kind = toolGroupKind(it as ToolItem);
-      if (kind) {
-        if (toolBatchKind && toolBatchKind !== kind) flushToolBatch();
-        toolBatchKind = kind;
-        toolBatch.push(it as ToolItem);
-        continue;
-      }
-    }
-    if (!creationMode && it.kind === "tool" && !it.parentId && it.name !== "todo_write" && it.name !== "exit_plan_mode" && it.status !== "running" && isReadOnlyTool(it.name)) {
-      roBatch.push(it as ToolItem);
-      continue;
-    }
-    flushToolBatch();
-    flushRO();
-    switch (it.kind) {
-      case "tool":
-        if (it.parentId) break;
-        if (it.name === "todo_write") break;
-        if (it.name === "exit_plan_mode") break;
-        body.push(<ToolCard key={it.id} item={it as ToolItem} subcalls={subcalls.get(it.id)} tabId={tabId} />);
-        break;
-      case "phase": body.push(<PhaseCard key={it.id} text={it.text} />); break;
-      case "assistant": {
-        const displayItem = it;
-        body.push(<AssistantMessage key={it.id} item={displayItem as AssistantItem} creationMode={creationMode} />);
-        break;
-      }
-    }
-  }
-  flushToolBatch();
-  flushRO();
-
+  const baseLabel = workStatusLabel(effectiveDurationMs, hasRunningWork, t);
+  // Surface what the closed fold hides — a bare duration reads as pure timing
+  // and users have no way to know process detail sits behind it.
+  const toolCount = displayItems.reduce((n, it) => n + (it.kind === "tool" ? 1 : 0), 0);
+  const thoughtCount = displayItems.reduce((n, it) => n + (it.kind === "assistant" ? 1 : 0), 0);
+  const countParts: string[] = [];
+  if (toolCount > 0) countParts.push(t("transcript.toolCount", { n: toolCount }));
+  if (thoughtCount > 0) countParts.push(t("transcript.thoughtCount", { n: thoughtCount }));
+  const label = segment.labelStyle === "counts"
+    ? (countParts.length > 0 ? countParts.join(" · ") : t("transcript.processed"))
+    : countParts.length > 0
+      ? `${baseLabel} · ${countParts.join(" · ")}`
+      : baseLabel;
   return (
-    <div className={`turn-collapse${open ? " turn-collapse--open" : ""}`} data-kind={collapseKind} data-entrance={displayItems[0]?.id || undefined}>
+    <div className={`turn-collapse${open ? " turn-collapse--open" : ""}`} data-kind="reasoning" data-entrance={displayItems[0]?.id || undefined}>
       <button
         type="button"
         className="reasoning__head"
-        onClick={() => setOpen((v) => !v)}
+        onClick={onToggle}
         aria-expanded={open}
       >
-        <ChevronRight className={`reasoning__chevron${open ? " reasoning__chevron--open" : ""}`} size={12} />
-        <span className="turn-collapse__label" data-creation-label={creationLabel}>{label}</span>
+        <span className="turn-collapse__label" data-creation-label={label}>{label}</span>
+        {!hasRunningWork && <ChevronRight className={`reasoning__chevron${open ? " reasoning__chevron--open" : ""}`} size={12} />}
       </button>
-      <div ref={bodyRef} className="turn-collapse__body">{body}</div>
     </div>
   );
 }
@@ -1239,17 +1011,93 @@ function QuestionJumpBar({ questions, onJump }: { questions: QuestionAnchor[]; o
 }
 
 type CompactionItem = Extract<Item, { kind: "compaction" }>;
-type NoticeItem = Extract<Item, { kind: "notice" }>;
 
-function PhaseCard({ text }: { text: string }) {
-  return <div className="phase" data-entrance="true"><ProcessPhaseIcon size={12} /><span>{text}</span></div>;
+function PhaseCard({ id, text }: { id: string; text: string }) {
+  return <div className="phase" data-entrance={id}><ProcessPhaseIcon size={12} /><span>{text}</span></div>;
 }
 
-function NoticeCard({ level, text }: { level: NoticeItem["level"]; text: string }) {
+// A mid-turn steer is the user's own message, so it renders on the user side
+// of the transcript instead of disappearing into the work fold.
+function SteerCard({ id, text }: { id: string; text: string }) {
+  const t = useT();
+  const body = text.startsWith(STEER_NOTICE_PREFIX) ? text.slice(STEER_NOTICE_PREFIX.length) : text;
   return (
-    <div className={`notice-line notice-line--${level}`} data-entrance="true">
-      <span className="notice-line__icon">{level === "warn" ? "⚠ " : "ℹ "}</span>
-      <span className="notice-line__text">{text}</span>
+    <div className="steer-line" data-entrance={id}>
+      <div className="steer-line__bubble" title={t("transcript.steer")}>
+        <span className="steer-line__icon" aria-hidden="true">↪</span>
+        <span className="steer-line__text">{body}</span>
+      </div>
+    </div>
+  );
+}
+
+function DecisionReceiptLine({ receipt }: { receipt: NonNullable<NoticeItem["decisionReceipt"]> }) {
+  const t = useT();
+  const titleKey = receipt.kind === "ask"
+    ? "notice.decisionReceiptAsk"
+    : receipt.kind === "plan"
+    ? "notice.decisionReceiptPlan"
+    : receipt.kind === "recovery"
+    ? "notice.decisionReceiptRecovery"
+    : "notice.decisionReceiptTool";
+  const outcomeKeys: Record<string, string> = {
+    allow_once: "notice.decisionAllowOnce",
+    allow_session: "notice.decisionAllowSession",
+    allow_persistent: "notice.decisionAllowPersistent",
+    deny: "notice.decisionDeny",
+    start_execution: "notice.decisionStartExecution",
+    revise_plan: "notice.decisionRevisePlan",
+    exit_plan: "notice.decisionExitPlan",
+    recovery_continue: "notice.decisionRecoveryContinue",
+    recovery_continue_task: "notice.decisionRecoveryContinueTask",
+    recovery_revise: "notice.decisionRecoveryRevise",
+    answered: "notice.decisionAnswered",
+  };
+  const outcome = outcomeKeys[receipt.outcome]
+    ? t(outcomeKeys[receipt.outcome] as never)
+    : receipt.outcome || t("notice.decisionReceiptTitle");
+  const showOutcome = receipt.kind !== "ask" || receipt.outcome !== "answered";
+  return (
+    <div className="notice-line__decision-receipt">
+      <span className="notice-line__decision-title">{t(titleKey as never)}</span>
+      {showOutcome && <span className="notice-line__decision-outcome">{outcome}</span>}
+      {receipt.tool && <code>{receipt.tool}</code>}
+      {receipt.subject && <span className="notice-line__decision-subject">{receipt.subject}</span>}
+    </div>
+  );
+}
+
+export function NoticeCard({ item, onAction, actionDisabled = false }: { item: NoticeItem; onAction?: () => void; actionDisabled?: boolean }) {
+  const t = useT();
+  const StatusIcon = item.level === "warn" ? TriangleAlert : Info;
+  const ActionIcon = item.action === "open_changes" ? FileSearch : CirclePlay;
+  return (
+    <div className={`notice-line notice-line--${item.level}${item.variant ? ` notice-line--${item.variant}` : ""}`} data-entrance={item.id}>
+      <StatusIcon className="notice-line__icon" size={14} aria-hidden="true" />
+      <div className="notice-line__text">
+        {item.decisionReceipt ? (
+          <DecisionReceiptLine receipt={item.decisionReceipt} />
+        ) : (
+          <>
+            {item.title ? <div className="notice-line__title">{item.title}</div> : null}
+            <div className="notice-line__body">{item.text}</div>
+          </>
+        )}
+        {item.action && onAction ? (
+          <div className="notice-line__actions">
+            <button className="btn btn--small" type="button" onClick={onAction} disabled={actionDisabled}>
+              <ActionIcon size={13} aria-hidden="true" />
+              <span>{item.action === "open_changes" ? t("notice.completionViewChanges") : t("notice.deliveryIncompleteContinue")}</span>
+            </button>
+          </div>
+        ) : null}
+        {item.detail ? (
+          <details className="notice-line__details">
+            <summary>{t("notice.details")}</summary>
+            <div>{item.detail}</div>
+          </details>
+        ) : null}
+      </div>
     </div>
   );
 }

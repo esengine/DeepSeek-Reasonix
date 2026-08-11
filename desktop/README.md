@@ -34,8 +34,9 @@ vet / test ./...` skip this directory, while the import path stays under
 ## Prerequisites
 
 - Go (matches the parent module).
-- Node + **pnpm** (`npm i -g pnpm`).
-- Wails CLI: `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
+- Node 24+ and **pnpm 10** (`npm install -g pnpm@10`).
+- Wails CLI matching the library: run `make wails-install` from the repository
+  root. The target reads the shared `.wails-version` pin.
 - Platform webview libs: macOS ships WebKit; Windows needs the Edge **WebView2**
   runtime; Linux needs `libgtk-3-dev` plus WebKitGTK. The default build links
   against **WebKitGTK 4.0**; distros that only ship **4.1** (Fedora 40+, Ubuntu
@@ -61,6 +62,24 @@ In a plain browser the native bindings are absent, so `bridge.ts` falls back to 
 **mock** that streams a canned turn (text + one `edit_file` tool call) through the
 exact same event contract — so layout, streaming, markdown, tool cards, and the
 diff seam can all be built without rebuilding Go.
+
+## Test
+
+The desktop package is a nested Go module, so parent `go test ./...` does not run
+it. Use the full lane before merging desktop changes, and the short lane for fast
+local feedback:
+
+```sh
+make desktop-test        # cd desktop && go test .
+make desktop-test-short  # skips slow desktop integration/e2e checks
+```
+
+To find the next bottleneck, rank individual test cases from the JSON stream:
+
+```sh
+make desktop-test-times
+# or: cd desktop && go test -count=1 -json . | python3 ../scripts/desktop-test-times.py
+```
 
 ### Frontend UI review checklist
 
@@ -101,7 +120,10 @@ Desktop releases ride their own tag namespace, `desktop-v<semver>` (plain `v*`
 tags are the CLI release). Pushing one triggers `.github/workflows/release-desktop.yml`,
 which builds on a native runner per platform (Wails can't cross-compile a
 CGO/WebKit binary), packages each artifact, signs it with minisign, generates a
-`latest.json` manifest, publishes a GitHub release, and mirrors everything to R2.
+`latest.json` manifest, publishes a GitHub release, marks the desktop release as
+GitHub's repository-wide `Latest`, mirrors everything to R2, and attaches the
+current desktop manifest to the matching CLI release for old clients that still
+ask GitHub's repository-wide `latest` release for it.
 The Linux artifact links against WebKitGTK 4.1 (`-tags webkit2_41`), so it needs
 `libwebkit2gtk-4.1-0` at runtime — present by default on Ubuntu 22.04+, Fedora 40+.
 
@@ -109,33 +131,47 @@ The Linux artifact links against WebKitGTK 4.1 (`-tags webkit2_41`), so it needs
 git tag desktop-v1.1.0 && git push origin desktop-v1.1.0
 ```
 
-The app checks `latest.json` on startup (R2 first, GitHub as fallback) and shows
-an update banner when a newer version is published; **Settings → Software update**
-has a manual check. Self-update behavior by platform:
+The app checks `latest.json` on startup (R2 first, then the
+`crash.reasonix.io` desktop release gateway) and shows an update banner when a
+newer version is published; **Settings → Software update** has a manual check.
+The gateway resolves only the desktop `desktop-v*` release line and never uses
+GitHub's repository-wide `/releases/latest` shortcut, so updater behavior does
+not depend on homepage badge semantics. Self-update behavior by platform:
 
-- **Linux / Windows** — download, verify the minisign signature, then update in
-  place: Linux replaces the binary and relaunches; Windows runs the per-user NSIS
-  installer (no admin rights needed).
+- **Linux portable (`.tar.gz`)** — download, verify the minisign signature, replace
+  the binaries in the install directory, and relaunch through Guard. No elevation.
+- **Linux Debian/Ubuntu (`.deb`)** — download the signed `.deb`, request administrator
+  authorization via Polkit (`pkexec`), re-verify and install with `apt-get
+  --only-upgrade`, then relaunch through Guard. The first build that ships the
+  update helper and Polkit policy is a one-time bootstrap: existing `.deb` users
+  should overwrite-install once with
+  `sudo apt install ./Reasonix-linux-amd64.deb` (no uninstall required). After
+  that, in-app authorized updates work. If Polkit/`pkexec` is unavailable, use
+  the same manual command. Failed installs leave the running app intact so you
+  can retry; successful installs are managed by apt/dpkg and are not auto-downgraded.
+- **Windows** — download, verify the minisign signature, then run the per-user
+  NSIS installer (no admin rights needed).
 - **macOS** — *not* self-updating yet. The build is unsigned/un-notarized, so an
   in-place swap would be blocked by Gatekeeper; the banner links to the download
   page for a manual update instead.
 
-### Unsigned builds — first launch
+### Code signing — first launch
 
-There are no Apple/Windows code-signing certificates yet, so a downloaded build
-trips the OS gatekeepers on first run:
-
-- **macOS** — open `Reasonix-darwin-universal.dmg` and drag Reasonix into
-  Applications. Gatekeeper may then report the app "is damaged" or is from an
-  unidentified developer; clear the quarantine attribute and open it:
+- **Windows** — stable builds carry an Authenticode signature (SignPath, approved
+  per release; `release-desktop.yml` verifies every payload binary through
+  `scripts/verify-windows-authenticode.ps1` and fails the release otherwise). A
+  brand-new version can still show SmartScreen until the signature accumulates
+  reputation: *More info → Run anyway*.
+- **macOS** — still unsigned and un-notarized. Open
+  `Reasonix-darwin-universal.dmg`, drag Reasonix into Applications, then clear the
+  quarantine attribute when Gatekeeper reports the app "is damaged" or is from an
+  unidentified developer:
   ```sh
   xattr -dr com.apple.quarantine /Applications/Reasonix.app
   ```
-- **Windows** — SmartScreen shows "Windows protected your PC". Click *More info →
-  Run anyway*.
-
-When Developer ID / Authenticode certificates are added, the release workflow's
-`HAS_APPLE_CERT` gate flips to the signed path and these steps go away.
+  This is also why macOS has no in-place self-update: the swap would be blocked.
+  Adding a Developer ID certificate flips the release workflow's `HAS_APPLE_CERT`
+  gate to the signed path and removes both.
 
 ### Verifying a download
 
@@ -148,16 +184,17 @@ minisign -Vm Reasonix-darwin-arm64.zip \
   -P RWSw66n0RsoSr6Zhh6qt5YO95YkpCayTOCMFVDNUQSjJYwxoYngNVBSq
 ```
 
-## Editor seam (Monaco / CodeMirror)
+## Editor seams and workspace file previews
 
-Code and diff rendering go through two components with stable prop contracts and a
-lazy boundary, so a heavy editor stays out of the initial bundle and dropping one
-in is a one-line change — no consumer touches:
+Code and diff rendering go through two components with stable prop contracts and
+lazy boundaries, so heavier viewers stay out of the initial bundle. `CodeViewer`
+keeps the compact highlighted viewer for chat, Markdown, and tool output, while
+workspace file previews opt into the searchable line-number viewer:
 
 | Component | Props | Default impl | Upgrade |
 |---|---|---|---|
-| `components/CodeViewer.tsx` | `EditorProps` | `editors/PlainCode.tsx` (`<pre>`) | swap the lazy import for `editors/MonacoCode` or `editors/CodeMirrorCode` |
-| `components/DiffView.tsx` | `DiffProps` | `editors/PlainDiff.tsx` (LCS line diff) | swap for `editors/MonacoDiff` or `editors/CodeMirrorMerge` |
+| `components/CodeViewer.tsx` | `EditorProps` | `editors/HljsCode.tsx`; `editors/LineNumberCode.tsx` when `showLineNumbers` is enabled | extend the implementation selection for Monaco or CodeMirror |
+| `components/DiffView.tsx` | `DiffProps` | `editors/HljsDiff.tsx` (highlighted LCS/unified diff) | swap for `editors/MonacoDiff` or `editors/CodeMirrorMerge` |
 
 ```sh
 # Monaco
@@ -167,14 +204,19 @@ pnpm add @uiw/react-codemirror @codemirror/lang-javascript @codemirror/merge
 ```
 
 Then add `editors/MonacoCode.tsx` (default-export a component taking
-`EditorProps`) and point `CodeViewer.tsx`'s `lazy(() => import(...))` at it.
+`EditorProps`) and update the implementation selection in `CodeViewer.tsx`.
 `ToolCard` already routes `edit_file` calls' `old_string`/`new_string` through
 `DiffView`, and `Markdown` routes fenced code blocks through `CodeViewer`, so
 both seams light up everywhere at once.
 
-Markdown itself is currently minimal (fenced code + plain text). Upgrade path:
-`pnpm add react-markdown remark-gfm` and render in `components/Markdown.tsx`,
-keeping fenced code delegated to `CodeViewer`.
+`WorkspacePanel` passes `showLineNumbers` for text-file previews. The resulting
+viewer provides a line-number gutter, viewer-scoped Ctrl/Cmd+F search with case
+and whole-word options, copy support, and virtualized rendering above 100 lines.
+Search marks are applied only to visible rows so query input does not rebuild the
+entire highlighted document. Files above 512 KiB or 20,000 lines keep line
+numbers, search, copy, and virtualization but use escaped plain text instead of
+syntax highlighting. Workspace files are previewed up to 2 MiB; larger files
+display the first 2 MiB with a localized truncation notice.
 
 ## Multi-platform adaptation
 
@@ -183,16 +225,31 @@ the **native** webview per OS, so the rough edges are platform-specific. What's
 handled here, and what to reach for if a target misbehaves:
 
 - **Linux / WebKitGTK** is the one real pain point — rendering varies by distro &
-  GPU driver. `main.go` sets `WebviewGpuPolicy: OnDemand` to avoid blank/flickering
-  webviews from forced compositing. If artifacts persist, launch with
-  `WEBKIT_DISABLE_COMPOSITING_MODE=1`. Test on at least one GTK target before
-  release; the CSS deliberately avoids `backdrop-filter`/blur (slow & inconsistent
-  there).
+  GPU driver. `main.go` keeps `WebviewGpuPolicy: OnDemand` when a DRI render node
+  is usable, and falls back to `Never` for xrdp/headless/software-rendered sessions
+  that cannot access `/dev/dri`. If artifacts persist, launch with
+  `WEBKIT_DISABLE_COMPOSITING_MODE=1`. Test on at least one GTK target before release;
+  the CSS deliberately avoids `backdrop-filter`/blur (slow & inconsistent there).
+  - **Wayland + NVIDIA**: On KDE Plasma Wayland with NVIDIA GPUs, WebKitGTK can
+    crash at startup (`Error 71: Protocol error`) due to an upstream WebKit
+    explicit-sync bug (WebKit #280210, #317089, NVIDIA/egl-wayland #179).
+    Reasonix automatically sets `__NV_DISABLE_EXPLICIT_SYNC=1` when it detects
+    Wayland + NVIDIA GPU. To opt out, set `__NV_DISABLE_EXPLICIT_SYNC=0`.
+    Alternative fallbacks: `WEBKIT_DISABLE_DMABUF_RENDERER=1` (poor performance)
+    or `GDK_BACKEND=x11` (forces XWayland).
 - **Windows / WebView2** — `Theme: SystemDefault` follows the OS light/dark
   setting; the installer embeds the WebView2 bootstrapper. Canary builds disable
   WebView2 GPU acceleration by default to smoke-test blank-window reports; set
-  `REASONIX_DESKTOP_DISABLE_WEBVIEW2_GPU=1` or `0` to force the fallback on or
-  off.
+  `REASONIX_DISABLE_WEBVIEW2_GPU=1` or `0` to force the fallback on or off. The
+  older `REASONIX_DESKTOP_DISABLE_WEBVIEW2_GPU` name remains accepted. The WebView2 shell always uses a direct connection for embedded assets
+  and loopback remote-workspace pages; provider and other outbound traffic keeps
+  using Reasonix's own proxy configuration. Remote Markdown images are fetched
+  by the Go backend with the same proxy settings and re-served from the local
+  asset origin, so WebView2 never bypasses the configured proxy for them. Image
+  hosts must resolve locally to public addresses; direct, HTTP(S)-proxy, and
+  SOCKS-proxy connections are pinned to those vetted IPs while preserving the
+  original Host and TLS SNI. If the DOM is still not ready after 15 seconds, the
+  hidden startup window is shown with a native recovery prompt.
 - **macOS / WebKit** — inset/hidden title bar (`TitleBarHiddenInset`); the CSS
   marks the top bar as an OS drag region (`--wails-draggable: drag`) and leaves
   room for the traffic lights.
@@ -226,17 +283,26 @@ desktop/
 ## Telemetry
 
 The desktop app sends one anonymous ping per launch to `crash.reasonix.io`:
-a random install id (generated locally, tied to nothing), app version, OS,
-arch, and OS version. It exists solely to count active installs. It never
-includes conversations, API keys, file contents, or paths.
+a random anonymous install id (generated locally and not an account id), app
+version, OS, architecture, Windows build/revision or bounded Linux
+distribution/kernel/session facts, and Web Runtime/GPU mode. When the previous
+process ended abnormally, the next normal launch may also send a bounded native
+diagnostic (lifecycle phase, symbolized stack, WebView2 or WebKitGTK Runtime,
+process reason/exit code/recovery fields, window failure kind, and coarse device
+facts).
+Panic values are removed and paths/secrets are scrubbed before the report is
+queued. The install id is attached only while sending and is not stored in a
+pending crash file. It never includes conversations, account data, API keys,
+file contents, usernames, hostnames, GPU driver details, or full local paths.
 
 Opt out any time: Settings > Updates > "Anonymous usage ping", or set
 `telemetry = false` under `[desktop]` in the global config. Dev builds
-never ping. Crash and performance-pressure reports are separate and only
-ever sent when the user clicks "Send report" on the diagnostic UI.
+never ping or upload queued native diagnostics. Frontend crash and
+performance-pressure reports remain separate and are sent only when the user
+clicks "Send report" on the diagnostic UI.
 
 Aggregate quality metrics are also enabled by default and can be disabled from
 Settings > Updates > "Share aggregate quality metrics", or by setting
 `metrics = false` under `[desktop]`. These metrics are anonymous signal/bucket
-counts and preference buckets; they never include conversations, prompts, keys,
-paths, base URLs, or file contents.
+counts, lifecycle/window failure buckets, and preference buckets; they never
+include conversations, prompts, keys, paths, base URLs, or file contents.

@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "id": "official-cyan-stage",
+  "name": "Cyan Stage",
+  "author": "Reasonix Contributors",
+  "description": "Airy cyan future stage with light rings and an original digital performer.",
+  "license": "MIT",
+  "baseStyle": "carbon",
+  "tokens": {
+    "light": {
+      "bg": "#F1FCFD",
+      "bgSoft": "#E4F5F7",
+      "bgElev": "#FAFEFE",
+      "panel": "#FAFEFE",
+      "sidebar": "#E3F4F6",
+      "chat": "#F6FDFE",
+      "workspace": "#FAFEFE",
+      "workspaceFiles": "#E8F6F8",
+      "border": "#9CCFD7",
+      "borderSoft": "#DAEDF0",
+      "fg": "#173238",
+      "fgDim": "#43606A",
+      "fgFaint": "#71939D",
+      "accent": "#007C92",
+      "accentFg": "#F1FCFD"
+    },
+    "dark": {
+      "bg": "#07181D",
+      "bgSoft": "#0C2229",
+      "bgElev": "#112C34",
+      "panel": "#0E252D",
+      "sidebar": "#0B2128",
+      "chat": "#0A2027",
+      "workspace": "#112C34",
+      "workspaceFiles": "#0C232A",
+      "border": "#1F4550",
+      "borderSoft": "#16333C",
+      "fg": "#E9FCFF",
+      "fgDim": "#AEDBE2",
+      "fgFaint": "#6FA5AF",
+      "accent": "#37D7E4",
+      "accentFg": "#04222a"
+    }
+  },
+  "recipes": {
+    "density": "comfortable",
+    "corners": "round"
+  },
+  "background": {
+    "image": "background.webp",
+    "focusX": 0.74,
+    "focusY": 0.45,
+    "safeArea": "left",
+    "homeOpacity": 0.96,
+    "taskOpacity": 0.18,
+    "overlayStrength": 0.72,
+    "paneOpacity": 0.5
+  }
+}

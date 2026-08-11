@@ -1,13 +1,12 @@
 package builtin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"reasonix/internal/diff"
-	fileenc "reasonix/internal/fileutil/encoding"
 )
 
 // preview.go gives the file-writing built-ins the optional tool.Previewer
@@ -23,7 +22,7 @@ import (
 
 // Preview computes the change write_file would make. A path that does not yet
 // exist is a Create; an existing one is a Modify.
-func (w writeFile) Preview(args json.RawMessage) (diff.Change, error) {
+func (w writeFile) Preview(ctx context.Context, args json.RawMessage) (diff.Change, error) {
 	var p struct {
 		Path    string `json:"path"`
 		Content string `json:"content"`
@@ -37,9 +36,8 @@ func (w writeFile) Preview(args json.RawMessage) (diff.Change, error) {
 	p.Path = resolveIn(w.workDir, p.Path)
 
 	old, kind := "", diff.Create
-	if data, err := os.ReadFile(p.Path); err == nil {
-		enc, _ := fileenc.Detect(data)
-		old, kind = string(fileenc.Decode(data, enc)), diff.Modify
+	if src, err := readEditSource(ctx, w.overlay, p.Path); err == nil {
+		old, kind = src.content, diff.Modify
 	} else if !os.IsNotExist(err) {
 		return diff.Change{}, fmt.Errorf("read %s: %w", p.Path, err)
 	}
@@ -49,7 +47,7 @@ func (w writeFile) Preview(args json.RawMessage) (diff.Change, error) {
 // Preview computes the change edit_file would make. It enforces the same
 // "old_string must occur exactly once" rule as Execute, returning that error
 // when it doesn't — so a preview never shows a change the call couldn't make.
-func (e editFile) Preview(args json.RawMessage) (diff.Change, error) {
+func (e editFile) Preview(ctx context.Context, args json.RawMessage) (diff.Change, error) {
 	var p struct {
 		Path      string `json:"path"`
 		OldString string `json:"old_string"`
@@ -66,29 +64,30 @@ func (e editFile) Preview(args json.RawMessage) (diff.Change, error) {
 	}
 	p.Path = resolveIn(e.workDir, p.Path)
 
-	content, _, err := readFileEncoded(p.Path)
+	src, err := readEditSource(ctx, e.overlay, p.Path)
 	if err != nil {
 		return diff.Change{}, fmt.Errorf("read %s: %w", p.Path, err)
 	}
+	content := src.content
 
-	switch strings.Count(content, p.OldString) {
-	case 0:
-		return diff.Change{}, fmt.Errorf("old_string not found in %s", p.Path)
-	case 1:
+	applied := applyOldStringEdit(content, p.OldString, p.NewString, false)
+	switch {
+	case applied.applied == 1:
 		// ok
+	case applied.matches == 0:
+		return diff.Change{}, oldStringNotFoundError(p.Path, p.OldString, content)
 	default:
-		return diff.Change{}, fmt.Errorf("old_string is not unique in %s; add more surrounding context", p.Path)
+		return diff.Change{}, oldStringNotUniqueError(p.Path, p.OldString, content, applied.matches, false)
 	}
 
-	updated := strings.Replace(content, p.OldString, p.NewString, 1)
-	return diff.Build(p.Path, content, updated, diff.Modify), nil
+	return diff.Build(p.Path, content, applied.updated, diff.Modify), nil
 }
 
 // Preview computes the change multi_edit would make by replaying every edit
 // against an in-memory buffer — exactly as Execute does — and diffing the
 // result against the original. Any edit error surfaces here too, so a preview
 // of an invalid batch fails the same way the call would.
-func (m multiEdit) Preview(args json.RawMessage) (diff.Change, error) {
+func (m multiEdit) Preview(ctx context.Context, args json.RawMessage) (diff.Change, error) {
 	var p struct {
 		Path  string     `json:"path"`
 		Edits []editStep `json:"edits"`
@@ -104,30 +103,25 @@ func (m multiEdit) Preview(args json.RawMessage) (diff.Change, error) {
 	}
 	p.Path = resolveIn(m.workDir, p.Path)
 
-	content, _, err := readFileEncoded(p.Path)
+	src, err := readEditSource(ctx, m.overlay, p.Path)
 	if err != nil {
 		return diff.Change{}, fmt.Errorf("read %s: %w", p.Path, err)
 	}
+	content := src.content
 	original := content
 
 	for i, step := range p.Edits {
 		if step.OldString == "" {
 			return diff.Change{}, fmt.Errorf("edit %d: old_string is required", i+1)
 		}
-		if step.ReplaceAll {
-			if strings.Count(content, step.OldString) == 0 {
-				return diff.Change{}, fmt.Errorf("edit %d: old_string not found", i+1)
-			}
-			content = strings.ReplaceAll(content, step.OldString, step.NewString)
-			continue
-		}
-		switch strings.Count(content, step.OldString) {
-		case 0:
-			return diff.Change{}, fmt.Errorf("edit %d: old_string not found", i+1)
-		case 1:
-			content = strings.Replace(content, step.OldString, step.NewString, 1)
+		result := applyOldStringEdit(content, step.OldString, step.NewString, step.ReplaceAll)
+		switch {
+		case result.applied > 0:
+			content = result.updated
+		case result.matches == 0:
+			return diff.Change{}, fmt.Errorf("edit %d: %w", i+1, oldStringNotFoundError(p.Path, step.OldString, content))
 		default:
-			return diff.Change{}, fmt.Errorf("edit %d: old_string is not unique; add more surrounding context or set replace_all", i+1)
+			return diff.Change{}, fmt.Errorf("edit %d: %w", i+1, oldStringNotUniqueError(p.Path, step.OldString, content, result.matches, true))
 		}
 	}
 	return diff.Build(p.Path, original, content, diff.Modify), nil

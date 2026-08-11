@@ -1,16 +1,19 @@
 package config
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
-	"github.com/BurntSushi/toml"
+	"github.com/joho/godotenv"
 
 	"reasonix/internal/fileutil"
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 const (
@@ -54,8 +57,20 @@ var credentialSourceTracker = struct {
 	byKey map[string]trackedCredentialSource
 }{byKey: map[string]trackedCredentialSource{}}
 
+// userCredentialEditMu serializes Reasonix-owned credential-store writes.
+// LockUserCredentialEdits also takes a path-derived advisory file lock so a
+// Desktop window, CLI process, or background catalog save can share one
+// compare-and-apply boundary with credential rotation.
+var userCredentialEditMu sync.Mutex
+
 var storedCredentialValueLookup = storedCredentialValue
-var legacyKeyringCredentialValueLookup = legacyKeyringCredentialValue
+
+// legacyKeyringProbeLookup is the test-facing single-key hook returning the full
+// four-state outcome under a caller-owned context (shared 1s migration budget).
+var legacyKeyringProbeLookup = legacyKeyringProbe
+
+// legacyKeyringLookupTimeout is the shared budget for one legacy keyring scan.
+var legacyKeyringLookupTimeout = time.Second
 
 // CredentialResolver resolves credentials repeatedly for one caller-owned view
 // build. It keeps expensive global credential-store lookups bounded to one per
@@ -123,7 +138,7 @@ func credentialsStoreMode() string {
 		CredentialsStore string `toml:"credentials_store"`
 	}
 	if path := userConfigLoadPath(); path != "" {
-		_, _ = toml.DecodeFile(path, &partial)
+		_, _ = decodeTOMLFile(path, &partial)
 	}
 	return normalizeCredentialsStore(partial.CredentialsStore)
 }
@@ -173,8 +188,37 @@ func credentialEnvNamesFromConfig(cfg *Config) []string {
 		add(conn.Credential.AppSecretEnv)
 		add(conn.Credential.TokenEnv)
 	}
+	for _, h := range cfg.Remote.Hosts {
+		add(h.PassphraseEnv)
+		add(h.PasswordEnv)
+	}
 	sort.Strings(out)
 	return out
+}
+
+// CredentialEnvNames returns every environment-variable name whose value can
+// be loaded from Reasonix's global credential store. This includes configured
+// provider/bot keys and stored keys that are no longer referenced by the
+// current config: loadCredentialStoreForRoot loads the whole credential file,
+// so stale entries must remain outside child-process environments too.
+func (c *Config) CredentialEnvNames() []string {
+	names := credentialEnvNamesFromConfig(c)
+	seen := make(map[string]bool, len(names))
+	for _, name := range names {
+		seen[name] = true
+	}
+	if file, ok := readDotEnvFile(UserCredentialsPath()); ok {
+		for name := range file.Values {
+			name = strings.TrimSpace(name)
+			if !isCredentialKey(name) || seen[name] {
+				continue
+			}
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 func resolveProviderCredentialsForRoot(root string, cfg *Config) {
@@ -231,6 +275,43 @@ func StoreCredentialLines(lines []string) (string, error) {
 	if len(assignments) == 0 {
 		return CredentialsTargetDescription(), nil
 	}
+	unlock, err := LockUserCredentialEdits()
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+	return storeCredentialAssignmentsLocked(assignments)
+}
+
+// storeCredentialIfAbsentAndNotCleared writes key=value only when the current
+// credential store still lacks a value and a cleared tombstone for key. The
+// re-check and write share LockUserCredentialEdits so a concurrent settings
+// save or tombstone cannot be overwritten by a stale keyring import.
+// stored is false when the write was skipped because the key is already present
+// or cleared; err is non-nil only on lock/IO failures.
+func storeCredentialIfAbsentAndNotCleared(key, value string) (stored bool, err error) {
+	key = strings.TrimSpace(key)
+	if key == "" || !isCredentialKey(key) {
+		return false, nil
+	}
+	if strings.ContainsAny(value, "\r\n") {
+		return false, fmt.Errorf("credential value for %s contains a newline", key)
+	}
+	unlock, err := LockUserCredentialEdits()
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+	if credentialCurrentStoreHasKey(key) || credentialCurrentStoreClearedKey(key) {
+		return false, nil
+	}
+	if _, err := storeCredentialAssignmentsLocked(map[string]string{key: value}); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func storeCredentialAssignmentsLocked(assignments map[string]string) (string, error) {
 	if err := storeCredentialsInFile(UserCredentialsPath(), assignments); err != nil {
 		return "", err
 	}
@@ -249,17 +330,104 @@ func SetCredential(key, value string) (string, error) {
 	return StoreCredentialLines([]string{key + "=" + value})
 }
 
+// SetCredentialIfRevision stores one credential only when the global
+// credential file still has expectedRevision. The comparison and write share
+// the same process and advisory file lock, preventing a stale setup page in one
+// Reasonix process from overwriting a credential saved by another process.
+func SetCredentialIfRevision(key, value, expectedRevision string) (string, bool, error) {
+	key = strings.TrimSpace(key)
+	if !isCredentialKey(key) {
+		return "", false, fmt.Errorf("invalid credential key %q", key)
+	}
+	if strings.ContainsAny(value, "\r\n") {
+		return "", false, fmt.Errorf("credential value for %s contains a newline", key)
+	}
+	assignments := parseCredentialLines([]string{key + "=" + value})
+	if len(assignments) != 1 {
+		return "", false, fmt.Errorf("invalid credential assignment for %s", key)
+	}
+
+	unlock, err := LockUserCredentialEdits()
+	if err != nil {
+		return "", false, err
+	}
+	defer unlock()
+	if expectedRevision == "" || CredentialStoreRevision() != expectedRevision {
+		return CredentialsTargetDescription(), false, nil
+	}
+	path, err := storeCredentialAssignmentsLocked(assignments)
+	if err != nil {
+		return "", false, err
+	}
+	return path, true, nil
+}
+
+// IsValidCredentialKey reports whether key can be stored in Reasonix's dotenv
+// credential file and exposed as an environment variable.
+func IsValidCredentialKey(key string) bool {
+	return isCredentialKey(strings.TrimSpace(key))
+}
+
 func RemoveCredential(key string) error {
 	key = strings.TrimSpace(key)
 	if key == "" || !isCredentialKey(key) {
 		return nil
 	}
+	unlock, err := LockUserCredentialEdits()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if path := UserCredentialsPath(); path != "" {
 		if err := removeCredentialFromFile(path, key); err != nil {
 			return err
 		}
 	}
 	return os.Unsetenv(key)
+}
+
+// LockUserCredentialEdits serializes credential-store compare/write
+// transactions in this process and across Reasonix processes. When both the
+// user config and credential store are needed, acquire LockUserConfigEdits
+// first, then this lock.
+func LockUserCredentialEdits() (func(), error) {
+	userCredentialEditMu.Lock()
+	path := UserCredentialsPath()
+	if strings.TrimSpace(path) == "" {
+		userCredentialEditMu.Unlock()
+		return nil, fmt.Errorf("credentials store unavailable")
+	}
+	unlockFile, err := acquireConfigFileEditLockWithTimeout(path, configEditLockTimeout)
+	if err != nil {
+		userCredentialEditMu.Unlock()
+		return nil, fmt.Errorf("lock credential edits: %w", err)
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			unlockFile()
+			userCredentialEditMu.Unlock()
+		})
+	}, nil
+}
+
+// CredentialStoreRevision returns a content-derived revision for the current
+// Reasonix credential store. Callers performing compare-and-apply must hold
+// LockUserCredentialEdits from this read through their commit.
+func CredentialStoreRevision() string {
+	path := UserCredentialsPath()
+	if strings.TrimSpace(path) == "" {
+		return "unavailable"
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "missing"
+		}
+		return "unreadable"
+	}
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("sha256:%x", sum[:])
 }
 
 func CredentialIsSet(key string) bool {
@@ -301,17 +469,20 @@ func CredentialsTargetDescription() string {
 func parseCredentialLines(lines []string) map[string]string {
 	out := map[string]string{}
 	for _, raw := range lines {
-		line := strings.TrimPrefix(strings.TrimSpace(raw), "export ")
-		if line == "" || strings.HasPrefix(line, "#") {
+		if strings.ContainsAny(raw, "\r\n") {
 			continue
 		}
-		key, value, ok := strings.Cut(line, "=")
-		key = strings.TrimSpace(key)
-		value = strings.Trim(strings.TrimSpace(value), `"'`)
-		if !ok || !isCredentialKey(key) || strings.ContainsAny(value, "\r\n") {
+		values, err := godotenv.Unmarshal(raw)
+		if err != nil {
 			continue
 		}
-		out[key] = value
+		for key, value := range values {
+			key = strings.TrimSpace(key)
+			if !isCredentialKey(key) || strings.ContainsAny(value, "\r\n") {
+				continue
+			}
+			out[key] = value
+		}
 	}
 	return out
 }
@@ -478,8 +649,10 @@ func credentialSourceCandidates(root string) []CredentialSource {
 	if p := UserCredentialsPath(); p != "" {
 		out = append(out, CredentialSource{Kind: CredentialSourceCredentials, Path: p})
 	}
-	if home, err := os.UserHomeDir(); err == nil {
-		out = append(out, CredentialSource{Kind: CredentialSourceHomeEnv, Path: filepath.Join(home, ".env")})
+	if IsolatedHomeDir() == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			out = append(out, CredentialSource{Kind: CredentialSourceHomeEnv, Path: filepath.Join(home, ".env")})
+		}
 	}
 	return out
 }
@@ -519,7 +692,7 @@ func storeCredentialsInFile(path string, assignments map[string]string) error {
 			continue
 		}
 		if value, hit := assignments[key]; hit {
-			lines[i] = key + "=" + value
+			lines[i] = formatCredentialLine(key, value)
 			replaced[key] = true
 		}
 	}
@@ -530,10 +703,28 @@ func storeCredentialsInFile(path string, assignments map[string]string) error {
 	sort.Strings(keys)
 	for _, key := range keys {
 		if !replaced[key] {
-			lines = append(lines, key+"="+assignments[key])
+			lines = append(lines, formatCredentialLine(key, assignments[key]))
 		}
 	}
 	return writeCredentialFileLines(path, lines)
+}
+
+func formatCredentialLine(key, value string) string {
+	if isBareDotEnvValue(value) {
+		return key + "=" + value
+	}
+	line, err := godotenv.Marshal(map[string]string{key: value})
+	if err != nil {
+		return key + "=" + value
+	}
+	return line
+}
+
+func isBareDotEnvValue(value string) bool {
+	if value == "" {
+		return true
+	}
+	return !strings.ContainsAny(value, " \t\r\n#'\"\\")
 }
 
 func removeCredentialFromFile(path, key string) error {
@@ -556,7 +747,7 @@ func removeCredentialFromFile(path, key string) error {
 }
 
 func readCredentialFileLines(path string) ([]string, error) {
-	data, err := os.ReadFile(path)
+	data, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil

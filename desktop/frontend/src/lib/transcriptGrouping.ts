@@ -1,7 +1,7 @@
 import { replaceAttachmentRefsForDisplay } from "./attachmentDisplay";
 import type { Item } from "./useController";
 
-export type QuestionAnchor = { id: string; text: string; turn: number };
+export type QuestionAnchor = { id: string; text: string; turn: number; checkpointTurn?: number };
 
 export interface TurnGroup {
   userItem: Item;
@@ -9,6 +9,12 @@ export interface TurnGroup {
   toolCount: number;
   startIdx: number;
   endIdx: number;
+}
+
+export interface StepGroup {
+  items: Item[];
+  isFinal: boolean;
+  isComplete: boolean;
 }
 
 export function questionAnchorId(id: string): string {
@@ -19,6 +25,27 @@ export function compactQuestionText(text: string): string {
   const cleaned = replaceAttachmentRefsForDisplay(text).replace(/\s+/g, " ").trim();
   if (cleaned.length <= 80) return cleaned;
   return cleaned.slice(0, 80);
+}
+
+export function questionTurnsById(questions: QuestionAnchor[]): Map<string, number> {
+  const hasCheckpointTurns = questions.some((question) => question.checkpointTurn != null);
+  const turns = new Map<string, number>();
+  for (const question of questions) {
+    if (question.checkpointTurn != null) {
+      turns.set(question.id, question.checkpointTurn);
+    } else if (!hasCheckpointTurns) {
+      turns.set(question.id, question.turn);
+    }
+  }
+  return turns;
+}
+
+export function lastQuestionTurn(questions: readonly QuestionAnchor[], turns: ReadonlyMap<string, number>): number | undefined {
+  for (let i = questions.length - 1; i >= 0; i -= 1) {
+    const turn = turns.get(questions[i].id);
+    if (turn != null) return turn;
+  }
+  return undefined;
 }
 
 export function scrollVersion(items: Item[]): string {
@@ -36,7 +63,7 @@ export function scrollVersion(items: Item[]): string {
     .join("|");
 }
 
-export function warmUserPreview(text: string): string {
+function warmUserPreview(text: string): string {
   const cleaned = replaceAttachmentRefsForDisplay(text).replace(/\s+/g, " ").trim();
   return cleaned.length <= 80 ? cleaned : cleaned.slice(0, 77) + "...";
 }
@@ -72,4 +99,34 @@ export function buildTurnGroups(items: Item[]): TurnGroup[] {
     }
   }
   return groups;
+}
+
+export function buildStepGroups(items: Item[], startIdx = 0): StepGroup[] {
+  const groups: StepGroup[] = [];
+  let current: Item[] = [];
+
+  const flush = (isComplete: boolean) => {
+    if (current.length === 0) return;
+    groups.push({ items: current, isFinal: hasVisibleAssistantText(current), isComplete });
+    current = [];
+  };
+
+  for (let i = startIdx; i < items.length; i++) {
+    const it = items[i];
+    if (it.kind === "user") {
+      flush(true);
+      groups.push({ items: [it], isFinal: false, isComplete: true });
+      continue;
+    }
+    if (it.kind === "assistant") {
+      flush(true);
+    }
+    current.push(it);
+  }
+  flush(false);
+  return groups;
+}
+
+function hasVisibleAssistantText(items: Item[]): boolean {
+  return items.some((it) => it.kind === "assistant" && !it.streaming && it.text.trim() !== "");
 }

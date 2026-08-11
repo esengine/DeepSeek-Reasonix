@@ -14,6 +14,20 @@ func platformOSVersion() string {
 	return fmt.Sprintf("Windows %d.%d build %d", v.MajorVersion, v.MinorVersion, v.BuildNumber)
 }
 
+func platformOSBuild() (int, int) {
+	v := windows.RtlGetVersion()
+	revision := 0
+	if k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows NT\CurrentVersion`, registry.QUERY_VALUE); err == nil {
+		defer k.Close()
+		if ubr, _, readErr := k.GetIntegerValue("UBR"); readErr == nil {
+			revision = int(ubr)
+		}
+	}
+	return int(v.BuildNumber), revision
+}
+
+func platformEnvironmentInfo() platformEnvironment { return platformEnvironment{} }
+
 func platformCPU() string {
 	k, err := registry.OpenKey(registry.LOCAL_MACHINE, `HARDWARE\DESCRIPTION\System\CentralProcessor\0`, registry.QUERY_VALUE)
 	if err != nil {

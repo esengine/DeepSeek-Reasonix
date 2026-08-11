@@ -37,17 +37,23 @@ func (m *chatTUI) runReasoningLanguageCommand(input string) {
 		m.notice("reasoning-language: cannot resolve config path")
 		return
 	}
-	edit := config.LoadForEdit(path)
-	if err := edit.SetReasoningLanguage(mode); err != nil {
-		m.notice("reasoning-language: " + err.Error())
-		return
-	}
-	if err := edit.SaveTo(path); err != nil {
+	mode, err = func() (string, error) {
+		unlock := config.LockUserConfigEdits()
+		defer unlock()
+		edit := config.LoadForEdit(path)
+		if err := edit.SetReasoningLanguage(mode); err != nil {
+			return "", err
+		}
+		if err := edit.SaveTo(path); err != nil {
+			return "", err
+		}
+		return edit.ReasoningLanguage(), nil
+	}()
+	if err != nil {
 		m.notice("reasoning-language: " + err.Error())
 		return
 	}
 
-	mode = edit.ReasoningLanguage()
 	if m.ctrl != nil {
 		m.ctrl.SetReasoningLanguage(mode)
 	}

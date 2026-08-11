@@ -2,15 +2,18 @@ package config
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
-	"github.com/BurntSushi/toml"
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 // legacyConfig is the subset of the v0.x (~/.reasonix/config.json) schema this
@@ -92,11 +95,19 @@ func MigrateLegacyIfNeeded() (*MigrationResult, error) {
 }
 
 func MigrateLegacyIfNeededForRoot(root string) (*MigrationResult, error) {
+	if IsolatedHomeDir() != "" {
+		return nil, nil
+	}
 	credErr := migrateLegacyCredentialsIfNeededForRoot(root)
 	dest := userConfigPath()
 	if dest == "" {
 		return nil, credErr
 	}
+	unlock, err := LockConfigFileEdits(dest)
+	if err != nil {
+		return nil, errors.Join(credErr, err)
+	}
+	defer unlock()
 	if _, err := os.Stat(dest); err == nil {
 		return nil, credErr
 	}
@@ -111,7 +122,7 @@ func MigrateLegacyIfNeededForRoot(root string) (*MigrationResult, error) {
 		return res, err
 	}
 	src := filepath.Join(home, ".reasonix", "config.json")
-	data, err := os.ReadFile(src)
+	data, err := fileencoding.ReadFileUTF8(src)
 	if err != nil {
 		return nil, nil
 	}
@@ -168,6 +179,9 @@ func MigrateLegacyIfNeededForRoot(root string) (*MigrationResult, error) {
 }
 
 func MigrateLegacyCredentialsForRoot(root string) error {
+	if IsolatedHomeDir() != "" {
+		return nil
+	}
 	return migrateLegacyCredentialsIfNeededForRoot(root)
 }
 
@@ -177,6 +191,16 @@ func MigrateLegacyCredentialsForRoot(root string) error {
 // settings page is stable across Global/project tabs. Existing global entries win
 // on name collisions, and source files are left untouched.
 func MigrateMCPToUserConfigOnUpgrade(projectRoots []string) (*MCPGlobalMigrationResult, error) {
+	dest := userConfigPath()
+	if dest == "" {
+		return nil, nil
+	}
+	unlock, err := LockConfigFileEdits(dest)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+
 	marker := mcpGlobalMigrationMarkerPath()
 	if marker == "" {
 		return nil, nil
@@ -208,7 +232,7 @@ func migrateMCPToUserConfig(projectRoots []string) (*MCPGlobalMigrationResult, e
 	if dest == "" {
 		return nil, nil
 	}
-	userCfg, err := loadForEditStrict(dest, true)
+	userCfg, err := loadForEditStrict(dest, true, true)
 	if err != nil {
 		return nil, err
 	}
@@ -231,6 +255,7 @@ func migrateMCPToUserConfig(projectRoots []string) (*MCPGlobalMigrationResult, e
 			if name == "" || have[name] || validatePlugin(entry) != nil {
 				continue
 			}
+			entry.Source = MCPSourceUserConfig
 			userCfg.Plugins = append(userCfg.Plugins, entry)
 			have[name] = true
 			result.Added++
@@ -268,6 +293,15 @@ func mcpGlobalMigrationMarkerPath() string {
 	return filepath.Join(dir, "mcp-global-migration-v1")
 }
 
+func mcpGlobalMigrationComplete() bool {
+	marker := mcpGlobalMigrationMarkerPath()
+	if marker == "" {
+		return false
+	}
+	_, err := os.Stat(marker)
+	return err == nil
+}
+
 func mcpMigrationLegacyTOMLPaths(dest, home string) []string {
 	var paths []string
 	for _, path := range legacyTOMLPaths(dest, home) {
@@ -288,7 +322,7 @@ func loadPluginEntriesFromTOML(path string) []PluginEntry {
 		return nil
 	}
 	var cfg Config
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+	if _, err := decodeTOMLFile(path, &cfg); err != nil {
 		return nil
 	}
 	out := make([]PluginEntry, 0, len(cfg.Plugins))
@@ -303,7 +337,7 @@ func loadLegacyConfigPlugins(path string) []PluginEntry {
 	if strings.TrimSpace(path) == "" {
 		return nil
 	}
-	data, err := os.ReadFile(path)
+	data, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return nil
 	}
@@ -338,29 +372,58 @@ func normalizedMCPMigrationRoots(roots []string) []string {
 
 func migrateLegacyCredentialsIfNeededForRoot(root string) error {
 	missing := map[string]string{}
-	skip := func(key string) bool {
+	// File import ignores keyring markers: a marker only means "do not re-probe
+	// keyring for this env name", never "skip legacy credential files".
+	skipStore := func(key string) bool {
 		return credentialCurrentStoreHasKey(key) || credentialCurrentStoreClearedKey(key)
 	}
-	for _, key := range credentialEnvNamesForRoot(root) {
-		if skip(key) {
-			continue
-		}
-		if value, ok := legacyKeyringCredentialValueLookup(key); ok {
-			missing[key] = value
-		}
-	}
+	// Prefer legacy credential files first so a healthy file import does not
+	// depend on Secret Service / D-Bus (#7507).
 	for _, src := range legacyCredentialsPaths() {
 		if src == "" {
 			continue
 		}
-		data, err := os.ReadFile(src)
+		data, err := fileencoding.ReadFileUTF8(src)
 		if err != nil {
 			continue
 		}
 		assignments := parseCredentialLines(strings.Split(string(data), "\n"))
 		for key, value := range assignments {
-			if _, exists := missing[key]; !exists && !skip(key) {
+			if _, exists := missing[key]; !exists && !skipStore(key) {
 				missing[key] = value
+			}
+		}
+	}
+	keys := credentialEnvNamesForRoot(root)
+	needKeyring := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if skipStore(key) {
+			continue
+		}
+		if _, exists := missing[key]; exists {
+			continue
+		}
+		// Marker only filters keyring probes.
+		if legacyKeyringMigrationDone(key) {
+			continue
+		}
+		needKeyring = append(needKeyring, key)
+	}
+	if len(needKeyring) > 0 {
+		outcomes := lookupLegacyKeyringBatch(needKeyring, legacyKeyringLookupTimeout)
+		for _, key := range needKeyring {
+			o := outcomes[key]
+			switch o.Status {
+			case legacyKeyringFound:
+				// Secret was stored by the probe path (helper or in-process).
+				// Do not trust Value from the parent-visible outcome map.
+			case legacyKeyringAbsent:
+				// Confirmed empty probe only — never on error/timeout.
+				_ = markLegacyKeyringMigrationDone(key)
+			case legacyKeyringError, legacyKeyringTimeout:
+				// Leave unmarked so the next launch retries.
+			default:
+				// Unknown status: treat as timeout (no marker).
 			}
 		}
 	}
@@ -369,6 +432,38 @@ func migrateLegacyCredentialsIfNeededForRoot(root string) error {
 	}
 	_, err := StoreCredentialLines(credentialLines(missing))
 	return err
+}
+
+func legacyKeyringMigrationMarkerPath(key string) string {
+	home := ReasonixHomeDir()
+	key = strings.TrimSpace(key)
+	if strings.TrimSpace(home) == "" || key == "" {
+		return ""
+	}
+	// Env var names are identifiers, not secrets. RawURL base64 is collision-free
+	// and filesystem-safe without hashing secret material.
+	name := base64.RawURLEncoding.EncodeToString([]byte(key))
+	return filepath.Join(home, "state", "legacy-keyring-checked", name)
+}
+
+func legacyKeyringMigrationDone(key string) bool {
+	path := legacyKeyringMigrationMarkerPath(key)
+	if path == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func markLegacyKeyringMigrationDone(key string) error {
+	path := legacyKeyringMigrationMarkerPath(key)
+	if path == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte("v1\n"), 0o644)
 }
 
 func credentialLines(assignments map[string]string) []string {
@@ -489,10 +584,30 @@ func migrateLegacyBaseURL(cfg *Config, baseURL string) {
 	if cfg == nil || baseURL == "" {
 		return
 	}
+	officialDeepSeek := isOfficialDeepSeekOpenAIEndpoint(baseURL)
 	for i := range cfg.Providers {
-		if cfg.Providers[i].APIKeyEnv == "DEEPSEEK_API_KEY" {
-			cfg.Providers[i].BaseURL = baseURL
+		p := &cfg.Providers[i]
+		if p.APIKeyEnv != "DEEPSEEK_API_KEY" {
+			continue
 		}
+		if officialDeepSeek {
+			// v0.x stored the official OpenAI-compatible root (or /v1). The
+			// current built-in provider is Anthropic, whose documented endpoint
+			// has a distinct /anthropic prefix.
+			p.Kind = "anthropic"
+			p.BaseURL = deepSeekAnthropicBaseURL
+			continue
+		}
+		// A non-official v0.x base URL was an OpenAI-compatible endpoint. Keep
+		// that wire protocol instead of applying the new Anthropic defaults to a
+		// custom gateway that may not implement Messages API.
+		p.Kind = "openai"
+		p.BaseURL = baseURL
+		p.Thinking = ""
+		p.WebSearch = nil
+		p.SupportedEfforts = nil
+		p.DefaultEffort = ""
+		p.ModelOverrides = nil
 	}
 }
 
@@ -576,12 +691,8 @@ func mergeEnv(base, overlay map[string]string) map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(base)+len(overlay))
-	for k, v := range base {
-		out[k] = v
-	}
-	for k, v := range overlay {
-		out[k] = v
-	}
+	maps.Copy(out, base)
+	maps.Copy(out, overlay)
 	return out
 }
 
@@ -602,7 +713,9 @@ func writeCredentialsEnv(home string, lines []string) error {
 
 func migrateSupportData(legacyDir, newDir string) []string {
 	var warnings []string
-	items := []string{"sessions", "projects", "skills", "archive", "hooks.json"}
+	// settings.json carries the global hooks; leaving it out silently emptied
+	// them for anyone whose home moved (#4652).
+	items := []string{"sessions", "projects", "skills", "archive", "hooks.json", "settings.json"}
 	for _, item := range items {
 		src := filepath.Join(legacyDir, item)
 		fi, err := os.Stat(src)
@@ -621,6 +734,12 @@ func migrateSupportData(legacyDir, newDir string) []string {
 				warnings = append(warnings, fmt.Sprintf("successfully migrated directory %s", item))
 			}
 		} else {
+			if _, err := os.Stat(dst); err == nil {
+				// A file already written at the destination is newer than the
+				// legacy copy; never overwrite user state during migration.
+				warnings = append(warnings, fmt.Sprintf("kept existing file %s", item))
+				continue
+			}
 			if err := copyFile(src, dst); err != nil {
 				warnings = append(warnings, fmt.Sprintf("failed to migrate file %s: %v", item, err))
 			} else {

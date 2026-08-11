@@ -15,9 +15,9 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"reasonix/internal/bot"
+	"reasonix/internal/textutil"
 
 	"golang.org/x/net/websocket"
 )
@@ -33,6 +33,7 @@ const (
 	qqMaxHeartbeat                 = time.Minute
 	qqStartupValidationTimeout     = 10 * time.Second
 	qqPassiveReplyTruncationNotice = "\n\n[Truncated: QQ allows at most 5 passive replies for one incoming message.]"
+	qqHTTPTimeout                  = 30 * time.Second
 
 	opDispatch     = 0
 	opHeartbeat    = 1
@@ -45,6 +46,8 @@ const (
 )
 
 var qqMarkdownWrapperRe = regexp.MustCompile("(?is)^```(?:markdown|md)\\s*\\r?\\n([\\s\\S]*?)\\r?\\n```$")
+
+var qqHTTPClient = &http.Client{Timeout: qqHTTPTimeout}
 
 var allowedGatewayHosts = []string{
 	"api.sgroup.qq.com",
@@ -133,7 +136,7 @@ func (a *adapter) getAccessToken(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("qq app_id is empty")
 	}
 	if appSecret == "" {
-		return "", fmt.Errorf("qq app secret is empty: set %s or QQ_SECRET", a.appSecretEnvName())
+		return "", fmt.Errorf("qq app secret is empty: set the %s environment variable", a.appSecretEnvName())
 	}
 	body, err := json.Marshal(map[string]string{
 		"appId":        appID,
@@ -143,13 +146,13 @@ func (a *adapter) getAccessToken(ctx context.Context) (string, error) {
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", qqTokenURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, qqTokenURL, bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := qqHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -219,23 +222,20 @@ func (a *adapter) connectGateway(ctx context.Context, token string) error {
 	if parsed, parseErr := url.Parse(gatewayURL); parseErr == nil {
 		a.logger.Info("qq gateway endpoint resolved", "host", parsed.Hostname(), "sandbox", a.cfg.Sandbox)
 	}
-	cfg, err := websocket.NewConfig(gatewayURL, gatewayURL)
-	if err != nil {
-		return err
-	}
-	cfg.Header = http.Header{}
-	cfg.Header.Set("Authorization", "QQBot "+token)
-	cfg.Header.Set("X-Union-Appid", a.appID())
-
-	conn, err := websocket.DialConfig(cfg)
+	conn, err := a.dialGateway(ctx, gatewayURL, token)
 	if err != nil {
 		return fmt.Errorf("dial gateway: %w", err)
 	}
 	defer conn.Close()
+	defer a.dropConn(conn)
+	if !a.trackConn(ctx, conn) {
+		// Stop already closed the tracked conn slot; entering a blocking read
+		// now would leave a connection Stop can no longer unblock.
+		return ctx.Err()
+	}
 	a.logger.Info("qq gateway connected", "sandbox", a.cfg.Sandbox)
 
 	ws := &wsClient{conn: conn, token: token, logger: a.logger}
-	a.ws = ws
 
 	var msg gatewayPayload
 	decoder := json.NewDecoder(conn)
@@ -347,6 +347,54 @@ func (a *adapter) connectGateway(ctx context.Context, token string) error {
 	}
 }
 
+// dialGateway dials the QQ gateway honoring ctx. The conn only becomes
+// trackable after the dial returns, so Stop can interrupt a stalled TCP dial
+// or WebSocket/TLS handshake only through ctx cancellation —
+// websocket.DialConfig would dial with context.Background() and leave Stop's
+// loopWG.Wait blocked with nothing to close.
+func (a *adapter) dialGateway(ctx context.Context, gatewayURL, token string) (*websocket.Conn, error) {
+	cfg, err := websocket.NewConfig(gatewayURL, gatewayURL)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Header = http.Header{}
+	cfg.Header.Set("Authorization", "QQBot "+token)
+	cfg.Header.Set("X-Union-Appid", a.appID())
+	return cfg.DialContext(ctx)
+}
+
+// trackConn publishes the live gateway connection so Stop can close it and
+// unblock the blocking websocket reads, which do not honor ctx. Publication is
+// refused once ctx is cancelled, so a conn that finishes dialing concurrently
+// with Stop can never be left open but unreachable.
+func (a *adapter) trackConn(ctx context.Context, conn *websocket.Conn) bool {
+	a.connMu.Lock()
+	defer a.connMu.Unlock()
+	if ctx.Err() != nil {
+		return false
+	}
+	a.conn = conn
+	return true
+}
+
+func (a *adapter) dropConn(conn *websocket.Conn) {
+	a.connMu.Lock()
+	if a.conn == conn {
+		a.conn = nil
+	}
+	a.connMu.Unlock()
+}
+
+func (a *adapter) closeConn() {
+	a.connMu.Lock()
+	conn := a.conn
+	a.conn = nil
+	a.connMu.Unlock()
+	if conn != nil {
+		conn.Close()
+	}
+}
+
 func (a *adapter) appID() string {
 	if value := strings.TrimSpace(a.cfg.AppID); value != "" {
 		return value
@@ -362,10 +410,7 @@ func (a *adapter) appSecretEnvName() string {
 }
 
 func (a *adapter) appSecret() string {
-	if value := strings.TrimSpace(os.Getenv(a.appSecretEnvName())); value != "" {
-		return value
-	}
-	return strings.TrimSpace(os.Getenv("QQ_SECRET"))
+	return strings.TrimSpace(os.Getenv(a.appSecretEnvName()))
 }
 
 func (a *adapter) apiBaseURL() string {
@@ -376,12 +421,12 @@ func (a *adapter) apiBaseURL() string {
 }
 
 func (a *adapter) getGatewayURL(ctx context.Context, token string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", a.apiBaseURL()+"/gateway", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.apiBaseURL()+"/gateway", nil)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Authorization", "QQBot "+token)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := qqHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -515,7 +560,7 @@ func (a *adapter) sendMessage(ctx context.Context, msg bot.OutboundMessage) (bot
 	if truncated {
 		a.logger.Warn("qq passive reply truncated", "chat_type", msg.ChatType, "chunks", originalChunkCount, "limit", len(chunks))
 	}
-	var last bot.SendResult
+	var delivered bot.SendResult
 	for _, chunk := range chunks {
 		seq := a.nextMessageSeq(msg.ReplyToMsgID)
 		var result bot.SendResult
@@ -532,12 +577,12 @@ func (a *adapter) sendMessage(ctx context.Context, msg bot.OutboundMessage) (bot
 		}
 		if err != nil {
 			a.logger.Error("qq message send failed", "chat_type", msg.ChatType, "err", err)
-			return last, err
+			return delivered, err
 		}
 		a.logger.Info("qq message sent", "chat_type", msg.ChatType, "message_id_set", strings.TrimSpace(result.MessageID) != "")
-		last = result
+		delivered.Merge(result)
 	}
-	return last, nil
+	return delivered, nil
 }
 
 func (a *adapter) sendPlainMessageChunk(ctx context.Context, msg bot.OutboundMessage, text string, seq int) (bot.SendResult, error) {
@@ -571,7 +616,7 @@ func (a *adapter) sendMessageChunk(ctx context.Context, msg bot.OutboundMessage,
 			}
 			rows = append(rows, map[string]any{"buttons": buttons})
 		}
-		payload["keyboard"] = map[string]interface{}{
+		payload["keyboard"] = map[string]any{
 			"content": rows,
 		}
 		return a.sendMessagePayload(ctx, msg, payload, seq)
@@ -598,7 +643,7 @@ func (a *adapter) sendMessagePayload(ctx context.Context, msg bot.OutboundMessag
 	url := a.qqSendURL(msg)
 
 	body, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(body))
 	if err != nil {
 		return bot.SendResult{}, err
 	}
@@ -606,7 +651,7 @@ func (a *adapter) sendMessagePayload(ctx context.Context, msg bot.OutboundMessag
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Union-Appid", a.appID())
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := qqHTTPClient.Do(req)
 	if err != nil {
 		return bot.SendResult{}, err
 	}
@@ -731,33 +776,7 @@ func fitQQChunkWithSuffix(text, suffix string, maxBytes int) string {
 }
 
 func fitUTF8Slice(text string, maxBytes int) string {
-	if maxBytes <= 0 {
-		return ""
-	}
-	end := 0
-	used := 0
-	for len(text[end:]) > 0 {
-		r, size := utf8.DecodeRuneInString(text[end:])
-		if r == utf8.RuneError && size == 0 {
-			break
-		}
-		if used > 0 && used+size > maxBytes {
-			break
-		}
-		end += size
-		used += size
-		if used >= maxBytes {
-			break
-		}
-	}
-	if end > 0 {
-		return text[:end]
-	}
-	_, size := utf8.DecodeRuneInString(text)
-	if size == 0 {
-		return ""
-	}
-	return text[:size]
+	return textutil.FitGraphemeBytes(text, maxBytes)
 }
 
 func pickNaturalSplit(candidate string) int {

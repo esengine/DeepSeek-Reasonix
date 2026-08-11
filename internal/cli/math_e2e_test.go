@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/colorprofile"
+
 	"github.com/charmbracelet/x/ansi"
 
 	"reasonix/internal/event"
@@ -15,7 +17,7 @@ import (
 // actually streams tokens. It proves a half-written $...$ / $$...$$ is never
 // flushed as raw LaTeX and the committed transcript shows finished Unicode.
 func TestMathStreamingEndToEnd(t *testing.T) {
-	colorEnabled = false
+	activeColorProfile = colorprofile.NoTTY
 	m := newTestChatTUI()
 
 	chunks := []string{
@@ -52,8 +54,8 @@ func TestMathStreamingEndToEnd(t *testing.T) {
 // TestMathStreamingStyledPath repeats the commit with colour on so the real
 // ANSI-styled output is exercised, then asserts the Unicode survives a strip.
 func TestMathStreamingStyledPath(t *testing.T) {
-	colorEnabled = true
-	defer func() { colorEnabled = false }()
+	activeColorProfile = colorprofile.ANSI256
+	defer func() { activeColorProfile = colorprofile.NoTTY }()
 	m := newTestChatTUI()
 
 	m.ingestEvent(event.Event{Kind: event.Text, Text: `The relation $a^2 + b^2 = c^2$ holds.`})

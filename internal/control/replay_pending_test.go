@@ -2,6 +2,8 @@ package control
 
 import (
 	"context"
+	"encoding/json"
+	"reflect"
 	"testing"
 
 	"reasonix/internal/event"
@@ -22,7 +24,7 @@ func TestReplayPendingPromptsReEmitsBlockedApproval(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, _, _ = gateApprover{c}.Approve(context.Background(), "bash", "go test ./...", nil)
+		_, _, _ = gateApprover{c}.Approve(context.Background(), "bash", "go test ./...", json.RawMessage(`{"command":"go test ./..."}`))
 	}()
 
 	first := <-reqs
@@ -33,7 +35,7 @@ func TestReplayPendingPromptsReEmitsBlockedApproval(t *testing.T) {
 	c.ReplayPendingPrompts()
 
 	replayed := <-reqs
-	if replayed != first {
+	if !reflect.DeepEqual(replayed, first) {
 		t.Fatalf("replayed = %+v, want identical re-emit of %+v", replayed, first)
 	}
 

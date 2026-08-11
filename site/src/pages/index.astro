@@ -1,23 +1,17 @@
 ---
 import Base from '../layouts/Base.astro';
+import SiteHeader from '../components/SiteHeader.astro';
 import community from '../data/community.json';
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
-const R2_LATEST = 'https://dl.reasonix.io/latest';
 const repo = 'https://github.com/esengine/DeepSeek-Reasonix';
+const repoReleases = `${repo}/releases`;
+const desktopStableFallback = repoReleases;
+const vscodeMarketplace = 'https://marketplace.visualstudio.com/items?itemName=SivanLiu.reasonix-agent';
+const openVsx = 'https://open-vsx.org/extension/SivanLiu/reasonix-agent';
+const vscodeExtensionRepo = 'https://github.com/SivanCola/reasonix-vscode';
 
-let desktopVersion = 'v1.1.0';
-let goVer = '1.1.0';
-try {
-  const r = await fetch(`${R2_LATEST}/latest.json`);
-  if (r.ok) {
-    const d = await r.json();
-    const version = String(d.version || desktopVersion).replace(/^v?/, 'v');
-    desktopVersion = version;
-    goVer = desktopVersion.replace(/^v/, '') || goVer;
-  }
-} catch {}
-const R2_DESKTOP = `https://dl.reasonix.io/desktop-${desktopVersion}`;
+const goVer = 'latest';
 
 const fmtN = (n) => Number(n).toLocaleString('en-US');
 const avClass = (i) => 'av' + (i % 5 === 2 ? ' sm' : i % 7 === 3 ? ' lg' : '');
@@ -25,7 +19,7 @@ const half = Math.ceil(community.list.length / 2);
 const rowA = community.list.slice(0, half);
 const rowB = community.list.slice(half);
 
-const desc = "Open-source AI coding agent for your terminal and browser, engineered around DeepSeek's byte-stable prefix cache. Long sessions hold 90%+ cache hit and input-token cost collapses to ~1/5. A single Go binary. npm · Homebrew · desktop · web UI. MIT.";
+const desc = "Open-source AI coding agent you can leave running. One local engine, four ways in — terminal, desktop app, browser, or your editor over ACP. Plan mode, permissions, a workspace sandbox and checkpoints keep long autonomous runs reviewable. A single Go binary, no runtime to install. MIT.";
 const ld = {
   '@context': 'https://schema.org',
   '@type': 'SoftwareApplication',
@@ -34,64 +28,80 @@ const ld = {
   url: 'https://reasonix.io/',
   applicationCategory: 'DeveloperApplication',
   operatingSystem: 'macOS, Windows, Linux',
-  softwareVersion: goVer,
   license: `${repo}/blob/main-v2/LICENSE`,
   downloadUrl: `${repo}/releases`,
   offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
 };
 ---
 <Base
-  title="Reasonix — DeepSeek-native coding agent for your terminal"
-  titleEn="Reasonix — DeepSeek-native coding agent for your terminal"
-  titleZh="Reasonix — DeepSeek 原生的终端编码 Agent"
+  title="Reasonix — a coding agent you can leave running"
+  titleEn="Reasonix — a coding agent you can leave running"
+  titleZh="Reasonix — 可以一直开着跑的编码 Agent"
   description={desc}>
 
   <script type="application/ld+json" set:html={JSON.stringify(ld)} slot="head" is:inline />
 
-  <header class="nav">
-    <div class="nav-inner">
-      <a class="brand" href={`${base}/`}><img src={`${base}/logo.svg`} alt="Reasonix logo" /><span>Reasonix</span></a>
-      <nav class="nav-links">
-        <a href="#features"><span class="l-en">Features</span><span class="l-zh">特性</span></a>
-        <a href="#how"><span class="l-en">How it works</span><span class="l-zh">工作原理</span></a>
-        <a href="#community"><span class="l-en">Community</span><span class="l-zh">社区</span></a>
-        <a href={`${base}/docs/`}><span class="l-en">Docs</span><span class="l-zh">文档</span></a>
-        <a href="#start"><span class="l-en">Get started</span><span class="l-zh">快速开始</span></a>
-      </nav>
-      <div class="lang-switch" role="group" aria-label="Language">
-        <button type="button" data-lang="en" class="active">EN</button>
-        <button type="button" data-lang="zh">中文</button>
-      </div>
-      <a class="btn btn-dark" href="#start"><span class="l-en">Install</span><span class="l-zh">安装</span></a>
-    </div>
-  </header>
+  <SiteHeader />
 
   <main>
   <section class="hero">
-    <canvas class="hero-dots"></canvas>
     <div class="wrap">
-      <div class="eyebrow reveal"><span class="dot"></span><span class="l-en">DeepSeek-native · built for your terminal · MIT</span><span class="l-zh">DeepSeek 原生 · 为终端而生 · MIT</span></div>
+      <div class="eyebrow reveal"><span class="dot"></span><span class="l-en">Open source · MIT · a single Go binary</span><span class="l-zh">开源 · MIT · 单个 Go 二进制</span></div>
       <h1 class="reveal" style="--d:0.06s">
-        <span class="l-en">A <span class="grad">DeepSeek</span>-native agent<br />for your terminal.</span>
-        <span class="l-zh"><span class="grad">DeepSeek</span> 原生的<br />终端编码 Agent。</span>
+        <span class="l-en">A coding agent you can<br /><span class="tt">leave running</span>.</span>
+        <span class="l-zh">可以<span class="tt">一直开着跑</span>的<br />编码 Agent。</span>
       </h1>
       <p class="sub reveal" style="--d:0.12s">
-        <span class="l-en">The loop is append-only, aligned to DeepSeek's byte-stable prefix cache — so long sessions hold <b>90%+ cache hit</b> and input-token cost collapses to <b>~1/5</b>. Terminal-first, with a local browser UI when you want one.</span>
-        <span class="l-zh">运行循环 append-only,对齐 DeepSeek 字节稳定的 prefix-cache —— 长会话缓存命中 <b>90%+</b>,输入 token 成本降到 <b>约 1/5</b>。终端优先,需要时也可启动本地浏览器 UI。</span>
+        <span class="l-en">One local engine, four ways in — terminal, desktop app, browser, or your editor over ACP. Plan mode, permissions, a workspace sandbox and per-turn checkpoints keep a long autonomous run something you can still read and undo.</span>
+        <span class="l-zh">一套本地引擎,四个入口——终端、桌面端、浏览器,或通过 ACP 接入你的编辑器。计划模式、权限、工作区沙箱与逐轮 checkpoint,让长时间自治运行始终可读、可撤销。</span>
       </p>
-      <div class="hero-cta reveal" style="--d:0.18s">
-        <a class="btn btn-dark" data-os-dl data-goto="desktop" href="#start"><span class="l-en">Download for <span class="os-name">macOS</span></span><span class="l-zh">下载 <span class="os-name">macOS</span> 版</span></a>
-        <span class="install"><span class="ps1">$</span>npm i -g reasonix@next<button data-copy="npm i -g reasonix@next">Copy</button></span>
-        <a class="btn btn-ghost" href="#how"><span class="l-en">How it works ↓</span><span class="l-zh">工作原理 ↓</span></a>
+      <div class="hero-install reveal" style="--d:0.18s" aria-label="Reasonix install options">
+        <div class="install-option install-option--desktop">
+          <canvas class="particle-canvas"></canvas>
+          <span class="install-kicker"><span class="l-en">Desktop app</span><span class="l-zh">桌面端</span></span>
+          <strong><span class="l-en">Visual workspace for sessions, settings, approvals, and updates.</span><span class="l-zh">可视化管理会话、设置、审批与自动更新。</span></strong>
+          <a class="btn btn-dark" data-os-dl data-goto="desktop" href="#start"><span class="l-en">Download desktop</span><span class="l-zh">下载桌面版</span></a>
+        </div>
+        <div class="install-option install-option--cli">
+          <canvas class="particle-canvas"></canvas>
+          <span class="install-kicker"><span class="l-en">CLI / TUI</span><span class="l-zh">CLI / TUI</span></span>
+          <strong><span class="l-en">Terminal-native agent with the same local Reasonix engine.</span><span class="l-zh">终端原生入口,使用同一套本地 Reasonix 引擎。</span></strong>
+          <span class="install"><span class="ps1">$</span><span class="install-command">npm i -g reasonix</span><button data-copy="npm i -g reasonix">Copy</button></span>
+        </div>
       </div>
-      <div class="also reveal" style="--d:0.22s"><span class="l-en">Also via <a href="#start" data-goto="brew">Homebrew</a> and <a href="#start" data-goto="desktop">desktop apps</a> · run <code>reasonix serve</code> for the browser UI</span><span class="l-zh">也可通过 <a href="#start" data-goto="brew">Homebrew</a> 与<a href="#start" data-goto="desktop">桌面端</a>安装 · 运行 <code>reasonix serve</code> 打开浏览器 UI</span></div>
+      <nav class="also reveal" style="--d:0.22s" aria-label="More ways to use Reasonix / 更多使用方式">
+        <span class="l-en also-row">
+          <strong class="also-label">More ways to use Reasonix:</strong>
+          <span class="also-links">
+            <a href="?download=vscode#start" data-goto="vscode">Editor extension</a>
+            <span class="also-sep" aria-hidden="true">·</span>
+            <a href="#start" data-goto="brew">Homebrew</a>
+            <span class="also-sep" aria-hidden="true">·</span>
+            <span>Local Web UI: <code>reasonix serve</code></span>
+            <span class="also-sep" aria-hidden="true">·</span>
+            <a href={`${base}/docs/#acp`}>ACP editor integration</a>
+          </span>
+        </span>
+        <span class="l-zh also-row">
+          <strong class="also-label">更多使用方式：</strong>
+          <span class="also-links">
+            <a href="?download=vscode#start" data-goto="vscode">编辑器扩展</a>
+            <span class="also-sep" aria-hidden="true">·</span>
+            <a href="#start" data-goto="brew">Homebrew</a>
+            <span class="also-sep" aria-hidden="true">·</span>
+            <span>本地 Web UI：<code>reasonix serve</code></span>
+            <span class="also-sep" aria-hidden="true">·</span>
+            <a href={`${base}/docs/#acp`}>ACP 编辑器接入</a>
+          </span>
+        </span>
+      </nav>
 
       <div class="term-stage reveal" style="--d:0.26s">
-        <div class="fig"><span class="l-en">fig. 01 — a live session, cache still warm</span><span class="l-zh">图 01 —— 一场实时会话,缓存依然温热</span></div>
+        <div class="fig"><span class="l-en">fig. 01 — one task, start to finish</span><span class="l-zh">图 01 —— 一个任务,从开始到结束</span></div>
         <div class="term">
           <div class="term-bar"><i></i><i></i><i></i><span class="title">~/app — reasonix</span></div>
-          <div class="term-body"><span class="tl"><span class="t-acc">◆</span> reasonix <span class="t-dim">v<span class="rxv">{goVer}</span> · deepseek-v4-flash · ~/app</span></span><span class="tl"><span class="t-vio">›</span> add retry with backoff to the http client</span><span class="tl"><span class="t-ok">✓</span> edit <span class="t-dim">internal/net/client.go</span>  <span class="t-add">+24 −3</span></span><span class="tl"><span class="t-ok">✓</span> edit <span class="t-dim">internal/net/client_test.go</span>  <span class="t-add">+41 −0</span></span><span class="tl"><span class="t-ok">✓</span> run <span class="t-dim">go test ./internal/net/</span>  <span class="t-ok">ok</span> <span class="t-dim">(0.21s)</span></span><span class="tl"><span class="t-warm">●</span> <span class="t-dim">2 files · cache 94.2% → 95.1%</span></span><span class="tl"><span class="t-vio">›</span> <span class="caret"></span></span></div>
-          <div class="term-stat"><span>cache <b data-cnt="95.1" data-dec="1" data-suf="% hit">95.1% hit</b></span><span>session <b data-cnt="18" data-suf="m">18m</b></span><span>model <b>deepseek-v4-flash</b></span><span>cost <b data-cnt="0.043" data-dec="3" data-pre="$">$0.043</b></span></div>
+          <div class="term-body"><span class="tl"><span class="t-acc">◆</span> reasonix <span class="t-dim"><span class="rxv">{goVer}</span> · deepseek-v4-flash · ~/app</span></span><span class="tl"><span class="t-vio">›</span> add retry with backoff to the http client</span><span class="tl"><span class="t-acc">◇</span> plan <span class="t-dim">3 steps · 2 files · 1 test run</span></span><span class="tl"><span class="t-warm">●</span> allow <span class="t-dim">edit internal/net/client.go</span>  <span class="t-ok">yes</span></span><span class="tl"><span class="t-ok">✓</span> edit <span class="t-dim">internal/net/client.go</span>  <span class="t-add">+24 −3</span></span><span class="tl"><span class="t-ok">✓</span> edit <span class="t-dim">internal/net/client_test.go</span>  <span class="t-add">+41 −0</span></span><span class="tl"><span class="t-ok">✓</span> run <span class="t-dim">go test ./internal/net/</span>  <span class="t-ok">ok</span> <span class="t-dim">(0.21s)</span></span><span class="tl"><span class="t-acc">◆</span> checkpoint <span class="t-dim">#14 — revert this turn anytime</span></span><span class="tl"><span class="t-vio">›</span> <span class="caret"></span></span></div>
+          <div class="term-stat"><span>surface <b>cli</b></span><span>tools <b data-cnt="9" data-suf=" calls">9 calls</b></span><span>session <b data-cnt="18" data-suf="m">18m</b></span><span>cost <b data-cnt="0.043" data-dec="3" data-pre="$">$0.043</b></span></div>
         </div>
       </div>
     </div>
@@ -101,42 +111,41 @@ const ld = {
     <div class="wrap">
       <div class="sec-head split reveal">
         <span class="kicker"><span class="l-en">Features</span><span class="l-zh">特性</span></span>
-        <h2><span class="l-en">Built for long, <span class="em">cheap</span> sessions.</span><span class="l-zh">为长会话、<span class="em">低成本</span>而生。</span></h2>
-        <p><span class="l-en">Most agents pay full price for the same growing prompt every turn. Reasonix keeps the prefix byte-identical so DeepSeek's cache does the heavy lifting — and everything else follows.</span><span class="l-zh">多数 agent 每回合都为同一段不断增长的 prompt 付全价。Reasonix 让前缀逐字节稳定,让 DeepSeek 的缓存替你扛下来——其余一切由此而来。</span></p>
+        <h2><span class="l-en">Autonomy you can <span class="em">actually audit.</span></span><span class="l-zh">可以<span class="em">真正审阅</span>的自治。</span></h2>
+        <p><span class="l-en">Letting an agent run for hours is only useful if you can see what it did and undo the parts you don't want. Every layer here exists for that: plan first, gate each tool call, checkpoint every turn.</span><span class="l-zh">让 agent 跑上几个小时,前提是你能看清它做了什么、并撤销你不想要的部分。这里的每一层都为此存在:先规划、逐次工具调用受控、逐轮 checkpoint。</span></p>
       </div>
       <div class="feat-grid">
         <div class="feat reveal">
-          <span class="tag">01 / cache-first</span>
-          <h3><span class="l-en">Cache-first loop</span><span class="l-zh">缓存优先循环</span></h3>
-          <p><span class="l-en">Append-only history aligned to DeepSeek's prefix cache. 90%+ hit on long sessions; input tokens bill at ~1/5.</span><span class="l-zh">append-only 历史对齐 DeepSeek prefix-cache。长会话 90%+ 命中,输入 token 约 1/5 计费。</span></p>
-          <div class="feat-viz" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="n"></i><i class="n"></i><i class="n"></i></div>
+          <span class="tag">01 / permissions</span>
+          <h3><span class="l-en">Every tool call is gated</span><span class="l-zh">每次工具调用都受控</span></h3>
+          <p><span class="l-en">Reads, writes, and shell commands each ask separately, and the workspace sandbox bounds what a command can touch even after you say yes.</span><span class="l-zh">读取、写入、shell 命令分别询问；即便你放行,工作区沙箱仍限定命令能触碰的范围。</span></p>
+          <code class="feat-chip">$ allow edit internal/net/client.go? [y/n/always]</code>
         </div>
         <div class="feat reveal" style="--d:0.06s">
-          <span class="tag">02 / single binary</span>
-          <h3><span class="l-en">Single Go binary</span><span class="l-zh">单个 Go 二进制</span></h3>
-          <p><span class="l-en">CGO-free, cross-compiled for darwin/linux/windows × amd64/arm64. No Node runtime to install or babysit.</span><span class="l-zh">无 CGO,交叉编译覆盖 darwin/linux/windows × amd64/arm64。运行不需要 Node。</span></p>
+          <span class="tag">02 / checkpoints</span>
+          <h3><span class="l-en">Undo any turn</span><span class="l-zh">任意一轮都可回退</span></h3>
+          <p><span class="l-en">Each turn writes a checkpoint outside git, so a six-hour run rewinds to any point without touching your commit history.</span><span class="l-zh">每轮在 git 之外写入 checkpoint,六小时的运行可回退到任意一点,且不污染你的提交历史。</span></p>
         </div>
         <div class="feat reveal" style="--d:0.04s">
-          <span class="tag">03 / mcp</span>
-          <h3>MCP first-class</h3>
-          <p><span class="l-en">stdio, SSE, streamable HTTP. External servers merge their tools into one registry under a prefix.</span><span class="l-zh">stdio、SSE、streamable HTTP。外部服务器的工具以前缀合并进同一 registry。</span></p>
+          <span class="tag">03 / plan mode</span>
+          <h3><span class="l-en">Plan before it touches anything</span><span class="l-zh">动手前先给出计划</span></h3>
+          <p><span class="l-en"><code>/plan</code> holds every write until you've read the plan and approved it.</span><span class="l-zh"><code>/plan</code> 会先给出计划,在你读过并批准前不写入任何东西。</span></p>
         </div>
         <div class="feat reveal" style="--d:0.1s">
-          <span class="tag">04 / plan + sandbox</span>
-          <h3><span class="l-en">Plan mode &amp; sandbox</span><span class="l-zh">计划模式 + 沙箱</span></h3>
-          <p><span class="l-en">Writers are jailed to the workspace; <code>/plan</code> gates the session read-only until you approve.</span><span class="l-zh">写工具被关进工作区;<code>/plan</code> 进只读门,批准前不写盘。</span></p>
-          <code class="feat-chip">$ /plan → read-only until approved</code>
+          <span class="tag">04 / mcp + skills</span>
+          <h3><span class="l-en">Extend it without forking it</span><span class="l-zh">不用 fork 就能扩展</span></h3>
+          <p><span class="l-en">MCP over stdio, SSE, and streamable HTTP merges external tools into one registry. Markdown skills and subagents — explore, research, review, security-review — run with their own isolated tool sets.</span><span class="l-zh">MCP 支持 stdio、SSE 与 streamable HTTP,把外部工具合并进同一 registry。Markdown 技能与子智能体(explore / research / review / security-review)各自持有隔离的工具集。</span></p>
+          <code class="feat-chip">$ reasonix mcp add · ~/.reasonix/skills/</code>
         </div>
         <div class="feat reveal" style="--d:0.06s">
-          <span class="tag">05 / subagents</span>
-          <h3><span class="l-en">Subagents &amp; skills</span><span class="l-zh">子智能体与技能</span></h3>
-          <p><span class="l-en">explore / research / review / security-review agents, plus Markdown skill scripts with isolated tools.</span><span class="l-zh">explore / research / review / security-review 子智能体,加 Markdown 技能脚本与隔离工具。</span></p>
+          <span class="tag">05 / single binary</span>
+          <h3><span class="l-en">One file, no runtime</span><span class="l-zh">一个文件,零运行时</span></h3>
+          <p><span class="l-en">CGO-free Go, cross-compiled for darwin/linux/windows × amd64/arm64. Nothing to install underneath it.</span><span class="l-zh">无 CGO 的 Go,交叉编译覆盖 darwin/linux/windows × amd64/arm64。底下不需要装任何东西。</span></p>
         </div>
         <div class="feat reveal" style="--d:0.1s">
-          <span class="tag">06 / cli + web</span>
-          <h3><span class="l-en">Terminal or browser</span><span class="l-zh">终端或浏览器</span></h3>
-          <p><span class="l-en">Use <code>reasonix</code> in the terminal, or run <code>reasonix serve</code> for a local browser UI with approvals, Goal, todos, and balance.</span><span class="l-zh">在终端使用 <code>reasonix</code>,或运行 <code>reasonix serve</code> 打开本地浏览器 UI,包含审批、Goal、Todo 与余额。</span></p>
-          <code class="feat-chip">$ reasonix serve --auth token</code>
+          <span class="tag">06 / local-first</span>
+          <h3><span class="l-en">Your key, your machine</span><span class="l-zh">你的 Key,你的机器</span></h3>
+          <p><span class="l-en">Bring your own DeepSeek key. The engine runs locally — your code goes to the model you configured and nowhere else. MIT licensed, developed in public.</span><span class="l-zh">使用你自己的 DeepSeek Key。引擎在本地运行——代码只发往你配置的模型,不去别处。MIT 许可,公开开发。</span></p>
         </div>
       </div>
     </div>
@@ -144,35 +153,57 @@ const ld = {
 
   <div class="divider" aria-hidden="true"><span class="line"></span></div>
 
-  <section id="how">
-    <div class="how-track">
-      <div class="how-stage">
-        <div class="wrap">
-          <div class="sec-head center reveal">
-            <span class="kicker"><span class="l-en">How it works</span><span class="l-zh">工作原理</span></span>
-            <h2><span class="l-en">Every turn reuses <span class="em">the last.</span></span><span class="l-zh">每一轮都复用<span class="em">上一轮。</span></span></h2>
-            <p><span class="l-en">Each request replays the exact same byte-for-byte prefix, so the model only computes what's new. Long sessions get cheaper per turn — not more expensive.</span><span class="l-zh">每次请求都逐字节重放完全相同的前缀,模型只计算新增部分。会话越长,每轮越便宜——而不是越贵。</span></p>
+  <section id="surfaces">
+    <div class="wrap">
+      <div class="sec-head split reveal">
+        <span class="kicker"><span class="l-en">Surfaces</span><span class="l-zh">使用形态</span></span>
+        <h2><span class="l-en">One engine. <span class="em">Four ways in.</span></span><span class="l-zh">同一个引擎。<span class="em">四个入口。</span></span></h2>
+        <p><span class="l-en">Not four products — one local engine behind four front ends. Sessions, permissions, skills and MCP servers are shared, so a task you start in the terminal is waiting for you in the desktop app.</span><span class="l-zh">不是四个产品,而是一个本地引擎配四个前端。会话、权限、技能与 MCP 服务器都共享——在终端起的任务,打开桌面端就在那儿等着。</span></p>
+      </div>
+      <div class="surf-grid">
+        <div class="surf reveal">
+          <div class="surf-art" aria-hidden="true">
+            <span class="surf-win cli">
+              <i class="bar"></i>
+              <span class="body"><i class="l" style="--w:62%"></i><i class="l" style="--w:44%"></i><i class="l ok" style="--w:70%"></i><i class="l" style="--w:38%"></i><i class="cur"></i></span>
+            </span>
           </div>
-          <div class="cache-panel reveal">
-            <div class="cache-grid">
-              <div class="cache-steps">
-                <span class="cap" data-step="1"><span class="n">01</span><span class="l-en">Cold start — everything is computed</span><span class="l-zh">冷启动——全部需要计算</span></span>
-                <span class="cap" data-step="2"><span class="n">02</span><span class="l-en">The previous turn replays from cache</span><span class="l-zh">上一轮全部从缓存重放</span></span>
-                <span class="cap" data-step="3"><span class="n">03</span><span class="l-en">Only the new request is computed</span><span class="l-zh">只计算新增的请求</span></span>
-                <span class="cap" data-step="4"><span class="n">04</span><span class="l-en">90%+ cache hit — cheaper every turn</span><span class="l-zh">命中 90%+——越跑越便宜</span></span>
-              </div>
-              <div class="cache-rows-wrap">
-                <div class="cache-row"><span class="lbl">turn 1</span><span class="blk new"></span><span class="blk new"></span><span class="blk new"></span></div>
-                <div class="cache-row"><span class="lbl">turn 2</span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk new"></span><span class="blk new"></span></div>
-                <div class="cache-row"><span class="lbl">turn 3</span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk new"></span><span class="blk new"></span><span class="blk new"></span></div>
-                <div class="cache-row"><span class="lbl">turn 4</span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk new"></span><span class="blk new"></span></div>
-                <div class="cache-legend">
-                  <span><i style="background: var(--accent);"></i><span class="l-en">new tokens — computed</span><span class="l-zh">新 token——需要计算</span></span>
-                  <span><i style="background: color-mix(in oklch, var(--accent) 12%, transparent); border: 1px solid color-mix(in oklch, var(--accent) 40%, transparent);"></i><span class="l-en">cached prefix — replayed, billed at ~1/5</span><span class="l-zh">缓存前缀——重放,约 1/5 计费</span></span>
-                </div>
-              </div>
-            </div>
+          <h3><span class="l-en">Terminal</span><span class="l-zh">终端</span></h3>
+          <p><span class="l-en">Full-screen TUI — diff review, approvals, slash commands.</span><span class="l-zh">全屏 TUI——diff 审阅、审批、斜杠命令。</span></p>
+          <code>reasonix</code>
+        </div>
+        <div class="surf reveal" style="--d:0.06s">
+          <div class="surf-art" aria-hidden="true">
+            <span class="surf-win app">
+              <i class="bar"></i>
+              <span class="body"><span class="side"><i></i><i></i><i></i></span><span class="main"><i class="l" style="--w:80%"></i><i class="l" style="--w:55%"></i><i class="l ok" style="--w:66%"></i></span></span>
+            </span>
           </div>
+          <h3><span class="l-en">Desktop app</span><span class="l-zh">桌面端</span></h3>
+          <p><span class="l-en">Sessions side by side, settings, approvals, auto-update.</span><span class="l-zh">多会话并列、设置、审批与自动更新。</span></p>
+          <code><span class="l-en">macOS · Windows · Linux</span><span class="l-zh">macOS · Windows · Linux</span></code>
+        </div>
+        <div class="surf reveal" style="--d:0.12s">
+          <div class="surf-art" aria-hidden="true">
+            <span class="surf-win web">
+              <i class="bar url"></i>
+              <span class="body"><i class="l" style="--w:72%"></i><i class="l" style="--w:48%"></i><i class="l ok" style="--w:60%"></i><i class="l" style="--w:36%"></i></span>
+            </span>
+          </div>
+          <h3><span class="l-en">Browser</span><span class="l-zh">浏览器</span></h3>
+          <p><span class="l-en">A local web UI on your own machine. Add auth before you expose it.</span><span class="l-zh">跑在你自己机器上的本地 Web UI。对外暴露前先开认证。</span></p>
+          <code>reasonix serve</code>
+        </div>
+        <div class="surf reveal" style="--d:0.18s">
+          <div class="surf-art" aria-hidden="true">
+            <span class="surf-win ide">
+              <i class="bar"></i>
+              <span class="body"><span class="tree"><i></i><i></i><i></i><i></i></span><span class="main"><i class="l" style="--w:70%"></i><i class="l add" style="--w:52%"></i><i class="l add" style="--w:44%"></i><i class="l" style="--w:64%"></i></span></span>
+            </span>
+          </div>
+          <h3><span class="l-en">Your editor</span><span class="l-zh">你的编辑器</span></h3>
+          <p><span class="l-en">VS Code and VSCodium via the extension; anything else that speaks ACP.</span><span class="l-zh">通过扩展接入 VS Code 与 VSCodium；其他支持 ACP 的编辑器同样可用。</span></p>
+          <code>reasonix acp</code>
         </div>
       </div>
     </div>
@@ -187,12 +218,12 @@ const ld = {
           <span class="num">01</span>
           <h3><span class="l-en">Install</span><span class="l-zh">安装</span></h3>
           <p><span class="l-en">One command. macOS, Linux, Windows, and WSL.</span><span class="l-zh">一条命令,支持 macOS、Linux、Windows 与 WSL。</span></p>
-          <code>npm i -g reasonix@next</code>
+          <code>npm i -g reasonix</code>
         </div>
         <div class="step reveal" style="--d:0.08s">
           <span class="num">02</span>
           <h3><span class="l-en">Point it at a repo</span><span class="l-zh">指向你的仓库</span></h3>
-          <p><span class="l-en">Reasonix maps the codebase once, then keeps that map in the warm prefix.</span><span class="l-zh">Reasonix 只做一次代码库测绘,然后把这份地图常驻在温热的前缀缓存里。</span></p>
+          <p><span class="l-en">It maps the codebase once and keeps that map for the rest of the session.</span><span class="l-zh">只做一次代码库测绘,这份地图在整场会话里一直有效。</span></p>
           <code>cd your-project &amp;&amp; reasonix</code>
         </div>
         <div class="step reveal" style="--d:0.16s">
@@ -256,65 +287,48 @@ const ld = {
     <p class="reveal" style="--d:0.08s"><span class="l-en">Open source under MIT. Bring your own DeepSeek API key — your code never leaves your machine and the model.</span><span class="l-zh">MIT 开源。使用你自己的 DeepSeek API Key——代码不会离开你的机器与模型。</span></p>
 
     <div class="dl reveal" style="--d:0.14s">
-      <div class="dl-tabs" role="tablist">
-        <button class="dl-tab active" type="button" data-pane="npm" role="tab">npm</button>
-        <button class="dl-tab" type="button" data-pane="brew" role="tab">Homebrew</button>
-        <button class="dl-tab" type="button" data-pane="desktop" role="tab"><span class="l-en">Desktop</span><span class="l-zh">桌面端</span></button>
+      <div class="dl-tabs" role="tablist" aria-label="Download method / 下载方式">
+        <button class="dl-tab active" id="download-tab-desktop" type="button" data-pane="desktop" role="tab" aria-controls="download-pane-desktop" aria-selected="true" tabindex="0"><span class="l-en">Desktop</span><span class="l-zh">桌面端</span></button>
+        <button class="dl-tab" id="download-tab-cli" type="button" data-pane="cli" role="tab" aria-controls="download-pane-cli" aria-selected="false" tabindex="-1">CLI</button>
+        <button class="dl-tab" id="download-tab-npm" type="button" data-pane="npm" role="tab" aria-controls="download-pane-npm" aria-selected="false" tabindex="-1">npm</button>
+        <button class="dl-tab" id="download-tab-brew" type="button" data-pane="brew" role="tab" aria-controls="download-pane-brew" aria-selected="false" tabindex="-1">Homebrew</button>
+        <button class="dl-tab" id="download-tab-vscode" type="button" data-pane="vscode" role="tab" aria-controls="download-pane-vscode" aria-selected="false" tabindex="-1"><span class="l-en">Editor extension</span><span class="l-zh">编辑器扩展</span></button>
       </div>
 
-      <div class="dl-pane active" data-pane="npm">
-        <span class="install"><span class="ps1">$</span>npm i -g reasonix@next<button data-copy="npm i -g reasonix@next">Copy</button></span>
-        <div class="chan">
-          <div class="chan-row rec">
-            <code>npm i -g reasonix@next</code><span class="v">v<span class="rxv">{goVer}</span></span>
-            <span class="s"><span class="l-en">Go rewrite · one binary · no Node · actively developed</span><span class="l-zh">Go 重写 · 单二进制 · 无需 Node · 主力开发中</span></span>
-            <span class="chan-badge"><span class="l-en">recommended</span><span class="l-zh">推荐</span></span>
-          </div>
-          <div class="chan-row">
-            <code>npm i -g reasonix</code><span class="v">v0.53</span>
-            <span class="s"><span class="l-en">deprecated 0.x line · no longer maintained</span><span class="l-zh">已废弃的 0.x 线 · 不再维护</span></span>
-            <span class="chan-badge pre"><span class="l-en">deprecated</span><span class="l-zh">已废弃</span></span>
-          </div>
+      <div class="dl-pane active" id="download-pane-desktop" data-pane="desktop" role="tabpanel" aria-labelledby="download-tab-desktop">
+        <div class="release-channel-summary" data-release-summary="desktop" aria-live="polite">
+          <span><span class="l-en">Current official version <span data-release-version="desktop">latest</span></span><span class="l-zh">当前正式版本 <span data-release-version="desktop">latest</span></span></span>
         </div>
-        <div class="dl-note"><span class="l-en">macOS / Linux / Windows / WSL · the <span class="mono">latest</span> tag is pinned at v0.53 — always install from <span class="mono">@next</span> · <a class="rxnotes" href={`${repo}/releases/tag/v${goVer}`}>v<span class="rxv">{goVer}</span> release notes →</a></span><span class="l-zh">macOS / Linux / Windows / WSL · <span class="mono">latest</span> 标签固定在 v0.53——请始终通过 <span class="mono">@next</span> 安装 · <a class="rxnotes" href={`${repo}/releases/tag/v${goVer}`}>v<span class="rxv">{goVer}</span> 更新说明 →</a></span></div>
-      </div>
-
-      <div class="dl-pane" data-pane="brew">
-        <span class="install"><span class="ps1">$</span>brew install esengine/reasonix/reasonix<button data-copy="brew install esengine/reasonix/reasonix">Copy</button></span>
-        <div class="dl-note"><span class="l-en">v<span class="rxv">{goVer}</span> (Go rewrite) · macOS &amp; Linux · update with <span class="mono">brew upgrade</span></span><span class="l-zh">v<span class="rxv">{goVer}</span>(Go 重写)· macOS 与 Linux · 通过 <span class="mono">brew upgrade</span> 更新</span></div>
-      </div>
-
-      <div class="dl-pane" data-pane="desktop">
         <div class="os-grid">
           <div class="os-card" data-os="mac">
             <h4>macOS</h4>
             <span class="meta"><span class="l-en">Universal DMG · Apple Silicon &amp; Intel</span><span class="l-zh">通用 DMG · Apple Silicon 与 Intel</span></span>
-            <a class="btn btn-light" href={`${R2_DESKTOP}/Reasonix-darwin-universal.dmg`} data-desktop-asset="Reasonix-darwin-universal.dmg" download><span class="l-en">Download Universal · v<span class="rxv">{goVer}</span></span><span class="l-zh">下载通用版 · v<span class="rxv">{goVer}</span></span></a>
+            <a class="btn btn-light" href={desktopStableFallback} data-desktop-asset="Reasonix-darwin-universal.dmg"><span class="l-en">Download Universal · <span data-release-version="desktop">latest</span></span><span class="l-zh">下载通用版 · <span data-release-version="desktop">latest</span></span></a>
             <div class="os-options" aria-label="macOS alternate downloads">
-              <a href={`${R2_DESKTOP}/Reasonix-darwin-arm64.zip`} data-desktop-asset="Reasonix-darwin-arm64.zip" download>Apple Silicon zip</a>
-              <a href={`${R2_DESKTOP}/Reasonix-darwin-amd64.zip`} data-desktop-asset="Reasonix-darwin-amd64.zip" download>Intel zip</a>
+              <a href={desktopStableFallback} data-desktop-asset="Reasonix-darwin-arm64.zip">Apple Silicon zip</a>
+              <a href={desktopStableFallback} data-desktop-asset="Reasonix-darwin-amd64.zip">Intel zip</a>
             </div>
           </div>
           <div class="os-card" data-os="win">
             <h4>Windows</h4>
             <span class="meta"><span class="l-en">Installer · Windows 10+ · x64 / ARM64</span><span class="l-zh">安装器 · Windows 10+ · x64 / ARM64</span></span>
-            <a class="btn btn-light" href={`${R2_DESKTOP}/Reasonix-windows-amd64-installer.exe`} data-desktop-asset="Reasonix-windows-amd64-installer.exe" download><span class="l-en">Download · v<span class="rxv">{goVer}</span></span><span class="l-zh">下载 · v<span class="rxv">{goVer}</span></span></a>
+            <a class="btn btn-light" href={desktopStableFallback} data-desktop-asset="Reasonix-windows-amd64-installer.exe"><span class="l-en">Download · <span data-release-version="desktop">latest</span></span><span class="l-zh">下载 · <span data-release-version="desktop">latest</span></span></a>
             <div class="os-options" aria-label="Windows alternate downloads">
-              <a href={`${R2_DESKTOP}/Reasonix-windows-arm64-installer.exe`} data-desktop-asset="Reasonix-windows-arm64-installer.exe" download>ARM64 installer</a>
-              <a href={`${R2_DESKTOP}/Reasonix-windows-amd64.zip`} data-desktop-asset="Reasonix-windows-amd64.zip" download>Portable zip</a>
+              <a href={desktopStableFallback} data-desktop-asset="Reasonix-windows-arm64-installer.exe">ARM64 installer</a>
+              <a href={desktopStableFallback} data-desktop-asset="Reasonix-windows-amd64.zip">Portable zip</a>
             </div>
           </div>
           <div class="os-card" data-os="linux">
             <h4>Linux</h4>
             <span class="meta"><span class="l-en">Debian / Ubuntu package · amd64</span><span class="l-zh">Debian / Ubuntu 安装包 · amd64</span></span>
-            <a class="btn btn-light" href={`${R2_DESKTOP}/Reasonix-linux-amd64.deb`} data-desktop-asset="Reasonix-linux-amd64.deb" download><span class="l-en">Download .deb · v<span class="rxv">{goVer}</span></span><span class="l-zh">下载 .deb · v<span class="rxv">{goVer}</span></span></a>
+            <a class="btn btn-light" href={desktopStableFallback} data-desktop-asset="Reasonix-linux-amd64.deb"><span class="l-en">Download .deb · <span data-release-version="desktop">latest</span></span><span class="l-zh">下载 .deb · <span data-release-version="desktop">latest</span></span></a>
             <div class="os-options" aria-label="Linux alternate downloads">
-              <a href={`${R2_DESKTOP}/Reasonix-linux-amd64.tar.gz`} data-desktop-asset="Reasonix-linux-amd64.tar.gz" download>Generic tar.gz</a>
+              <a href={desktopStableFallback} data-desktop-asset="Reasonix-linux-amd64.tar.gz">Generic tar.gz</a>
               <a href={`${repo}/releases`}><span class="l-en">All releases</span><span class="l-zh">全部版本</span></a>
             </div>
           </div>
         </div>
-        <div class="dl-note"><span class="l-en">v<span class="rxv">{goVer}</span> · built-in auto-updates · same engine as the CLI · <a href={`${repo}/releases`}>all releases →</a></span><span class="l-zh">v<span class="rxv">{goVer}</span> · 内置自动更新 · 与 CLI 同一引擎 · <a href={`${repo}/releases`}>全部版本 →</a></span></div>
+        <div class="dl-note"><span class="l-en">Reasonix checks official releases automatically · <a href={`${base}/changelog/`} data-release-notes="desktop">release notes →</a> · <a href={`${repo}/releases`}>all releases →</a></span><span class="l-zh">Reasonix 会自动检查正式版本 · <a href={`${base}/changelog/`} data-release-notes="desktop">更新日志 →</a> · <a href={`${repo}/releases`}>全部版本 →</a></span></div>
         <div class="dl-help">
           <strong><span class="l-en">macOS opens with a quarantine warning?</span><span class="l-zh">macOS 提示无法打开或已损坏?</span></strong>
           <span><span class="l-en">If the app was installed from the official download and placed in <code>/Applications</code>, quit Reasonix, then run:</span><span class="l-zh">如果来自官网下载并已放入 <code>/Applications</code>,先退出 Reasonix,再运行:</span></span>
@@ -322,6 +336,73 @@ const ld = {
           <button type="button" data-copy="sudo xattr -rd com.apple.quarantine /Applications/Reasonix.app">Copy</button>
           <a href={`${base}/docs/#macos-quarantine`}><span class="l-en">When to use this →</span><span class="l-zh">查看适用场景 →</span></a>
         </div>
+      </div>
+
+      <div class="dl-pane" id="download-pane-cli" data-pane="cli" role="tabpanel" aria-labelledby="download-tab-cli" hidden>
+        <div class="release-channel-summary" data-release-summary="cli" aria-live="polite">
+          <span><span class="l-en">Current official version <span data-release-version="cli">latest</span></span><span class="l-zh">当前正式版本 <span data-release-version="cli">latest</span></span></span>
+        </div>
+        <span class="install release-upgrade-command"><span class="ps1">$</span><span data-release-command="cli">reasonix upgrade</span><button data-copy="reasonix upgrade">Copy</button></span>
+        <div class="os-grid cli-os-grid">
+          <div class="os-card" data-os="mac">
+            <h4>macOS</h4>
+            <span class="meta">Apple Silicon / Intel · tar.gz</span>
+            <a class="btn btn-light" href={repoReleases} data-cli-asset="reasonix-darwin-arm64.tar.gz"><span class="l-en">Apple Silicon · <span data-release-version="cli">latest</span></span><span class="l-zh">Apple Silicon · <span data-release-version="cli">latest</span></span></a>
+            <div class="os-options"><a href={repoReleases} data-cli-asset="reasonix-darwin-amd64.tar.gz">Intel tar.gz</a></div>
+          </div>
+          <div class="os-card" data-os="win">
+            <h4>Windows</h4>
+            <span class="meta">Windows 10+ · x64 / ARM64 · zip</span>
+            <a class="btn btn-light" href={repoReleases} data-cli-asset="reasonix-windows-amd64.zip"><span class="l-en">Download x64 · <span data-release-version="cli">latest</span></span><span class="l-zh">下载 x64 · <span data-release-version="cli">latest</span></span></a>
+            <div class="os-options"><a href={repoReleases} data-cli-asset="reasonix-windows-arm64.zip">ARM64 zip</a></div>
+          </div>
+          <div class="os-card" data-os="linux">
+            <h4>Linux</h4>
+            <span class="meta">amd64 / ARM64 · tar.gz</span>
+            <a class="btn btn-light" href={repoReleases} data-cli-asset="reasonix-linux-amd64.tar.gz"><span class="l-en">Download amd64 · <span data-release-version="cli">latest</span></span><span class="l-zh">下载 amd64 · <span data-release-version="cli">latest</span></span></a>
+            <div class="os-options"><a href={repoReleases} data-cli-asset="reasonix-linux-arm64.tar.gz">ARM64 tar.gz</a></div>
+          </div>
+        </div>
+        <div class="dl-note"><span class="l-en"><a href={repoReleases} data-cli-asset="SHA256SUMS">SHA256SUMS →</a> · <a href={`${base}/changelog/`} data-release-notes="cli">release notes →</a> · npm and Homebrew track the same official version</span><span class="l-zh"><a href={repoReleases} data-cli-asset="SHA256SUMS">SHA256SUMS →</a> · <a href={`${base}/changelog/`} data-release-notes="cli">更新日志 →</a> · npm 与 Homebrew 跟随同一正式版本</span></div>
+      </div>
+
+      <div class="dl-pane" id="download-pane-vscode" data-pane="vscode" role="tabpanel" aria-labelledby="download-tab-vscode" hidden>
+        <div class="os-grid editor-grid">
+          <div class="os-card editor-card editor-card--primary">
+            <span class="os-chip"><span class="l-en">recommended</span><span class="l-zh">推荐</span></span>
+            <h4>Visual Studio Marketplace</h4>
+            <span class="meta"><span class="l-en">For Microsoft Visual Studio Code</span><span class="l-zh">适用于微软 Visual Studio Code</span></span>
+            <a class="btn btn-dark" href={vscodeMarketplace} target="_blank" rel="noreferrer"><span class="l-en">Install extension</span><span class="l-zh">安装扩展</span></a>
+          </div>
+          <div class="os-card editor-card">
+            <h4>Open VSX Registry</h4>
+            <span class="meta"><span class="l-en">For VSCodium, Eclipse Theia, and compatible editors</span><span class="l-zh">适用于 VSCodium、Eclipse Theia 及兼容编辑器</span></span>
+            <a class="btn btn-light" href={openVsx} target="_blank" rel="noreferrer"><span class="l-en">Install from Open VSX</span><span class="l-zh">从 Open VSX 安装</span></a>
+          </div>
+        </div>
+        <div class="dl-note editor-note"><span class="l-en">Extension ID <code>SivanLiu.reasonix-agent</code> · requires Reasonix 1.0+ installed and configured locally · the extension connects to <code>reasonix acp</code> and does not bundle the CLI · <a href={vscodeExtensionRepo}>source code →</a></span><span class="l-zh">扩展 ID <code>SivanLiu.reasonix-agent</code> · 需要先在本机安装并配置 Reasonix 1.0+ · 扩展连接 <code>reasonix acp</code>，不内置 CLI · <a href={vscodeExtensionRepo}>查看源码 →</a></span></div>
+      </div>
+
+      <div class="dl-pane" id="download-pane-npm" data-pane="npm" role="tabpanel" aria-labelledby="download-tab-npm" hidden>
+        <span class="install"><span class="ps1">$</span>npm i -g reasonix<button data-copy="npm i -g reasonix">Copy</button></span>
+        <div class="chan">
+          <div class="chan-row rec">
+            <code>npm i -g reasonix</code><span class="v"><span class="rxv">{goVer}</span></span>
+            <span class="s"><span class="l-en">Reasonix 1.x · one binary · no Node · actively developed</span><span class="l-zh">Reasonix 1.x · 单二进制 · 无需 Node · 主力开发中</span></span>
+            <span class="chan-badge"><span class="l-en">recommended</span><span class="l-zh">推荐</span></span>
+          </div>
+          <div class="chan-row">
+            <code>npm i -g reasonix@0.53.2</code><span class="v">v0.53.2</span>
+            <span class="s"><span class="l-en">deprecated 0.x line · no longer maintained</span><span class="l-zh">已废弃的 0.x 线 · 不再维护</span></span>
+            <span class="chan-badge pre"><span class="l-en">deprecated</span><span class="l-zh">已废弃</span></span>
+          </div>
+        </div>
+        <div class="dl-note"><span class="l-en">macOS / Linux / Windows / WSL · npm <span class="mono">latest</span> tracks the current official release · <a class="rxnotes" href={`${base}/changelog/`}><span class="rxv">{goVer}</span> release notes →</a></span><span class="l-zh">macOS / Linux / Windows / WSL · npm <span class="mono">latest</span> 指向当前正式版 · <a class="rxnotes" href={`${base}/changelog/`}><span class="rxv">{goVer}</span> 更新说明 →</a></span></div>
+      </div>
+
+      <div class="dl-pane" id="download-pane-brew" data-pane="brew" role="tabpanel" aria-labelledby="download-tab-brew" hidden>
+        <span class="install"><span class="ps1">$</span>brew install esengine/reasonix/reasonix<button data-copy="brew install esengine/reasonix/reasonix">Copy</button></span>
+        <div class="dl-note"><span class="l-en"><span class="rxv">{goVer}</span> (Go rewrite) · macOS &amp; Linux · update with <span class="mono">brew upgrade</span></span><span class="l-zh"><span class="rxv">{goVer}</span>(Go 重写)· macOS 与 Linux · 通过 <span class="mono">brew upgrade</span> 更新</span></div>
       </div>
     </div>
   </section>
@@ -341,8 +422,73 @@ const ld = {
       </nav>
     </div>
     <div class="foot-sub">
-      <span><span class="l-en">Engineered around DeepSeek's prefix cache.</span><span class="l-zh">围绕 DeepSeek 前缀缓存而设计。</span></span>
-      <span class="ver">v<span class="rxv">{goVer}</span> · @next</span>
+      <span><span class="l-en">Built to be left running.</span><span class="l-zh">为长时间常驻运行而造。</span></span>
+      <span class="ver"><span class="rxv">{goVer}</span> · official</span>
     </div>
   </footer>
+
+  <script>
+
+    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      document.querySelectorAll('.install-option').forEach((col) => {
+        const canvas = col.querySelector('.particle-canvas');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        let particles = [];
+        let rafId = null;
+
+        canvas.style.willChange = 'transform';
+
+        function resize() {
+          const r = col.getBoundingClientRect();
+          canvas.width = Math.max(1, Math.round(r.width * devicePixelRatio));
+          canvas.height = Math.max(1, Math.round(r.height * devicePixelRatio));
+          ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+        }
+        resize();
+
+        function loop() {
+          const r = col.getBoundingClientRect();
+          const isDark = document.documentElement.dataset.theme === 'dark';
+          const base = isDark ? '255,255,255' : '0,0,0';
+          ctx.clearRect(0, 0, r.width, r.height);
+          particles = particles.filter((p) => p.life > 0);
+          particles.forEach((p) => {
+            p.x += p.vx;
+            p.y += p.vy;
+            p.vy += 0.01;
+            p.life -= p.decay;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(${base},${(p.life * 0.28).toFixed(3)})`;
+            ctx.fill();
+          });
+          rafId = particles.length ? requestAnimationFrame(loop) : null;
+        }
+
+        col.addEventListener('mousemove', (e) => {
+          const r = col.getBoundingClientRect();
+          const mx = e.clientX - r.left;
+          const my = e.clientY - r.top;
+
+          if (particles.length > 80) return;
+
+          for (let i = 0; i < 2; i++) {
+            particles.push({
+              x: mx + (Math.random() - 0.5) * 20,
+              y: my + (Math.random() - 0.5) * 20,
+              vx: (Math.random() - 0.5) * 1.2,
+              vy: (Math.random() - 0.5) * 1.2 - 0.3,
+              life: 1,
+              decay: 0.015 + Math.random() * 0.015,
+              size: 1.2 + Math.random() * 1.8,
+            });
+          }
+          if (!rafId) loop();
+        });
+
+        window.addEventListener('resize', resize);
+      });
+    }
+  </script>
 </Base>

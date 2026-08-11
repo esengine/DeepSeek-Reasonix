@@ -4,6 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/ansi"
+
 	"reasonix/internal/event"
 )
 
@@ -23,7 +26,7 @@ func TestDiffBodyDropsHeadersKeepsLineNumbers(t *testing.T) {
 func TestDiffBodyFolds(t *testing.T) {
 	var b strings.Builder
 	b.WriteString("--- a/x\n+++ b/x\n@@ -1,8 +1,8 @@\n")
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		b.WriteString("+line\n")
 	}
 	body := diffBody(event.FileDiff{Diff: b.String()}, "x", 80, 5)
@@ -67,8 +70,8 @@ func TestDiffPath(t *testing.T) {
 }
 
 func TestDiffBarReappliesBackground(t *testing.T) {
-	defer func(prev bool) { colorEnabled = prev }(colorEnabled)
-	colorEnabled = true
+	defer func(prev colorprofile.Profile) { activeColorProfile = prev }(activeColorProfile)
+	activeColorProfile = colorprofile.ANSI256
 
 	line := diffBar('+', "a + b", "x.go", 40, bgDiffAdd, fgDiffAdd, 12, 3)
 	// Syntax highlighting emits multiple \033[0m resets; each must re-arm the bar
@@ -78,5 +81,52 @@ func TestDiffBarReappliesBackground(t *testing.T) {
 	}
 	if !strings.HasSuffix(line, ansiReset) {
 		t.Fatalf("row should end with a reset: %q", line)
+	}
+}
+
+func TestActiveDiffChromaStyleFollowsCLITheme(t *testing.T) {
+	previous := activeCLITheme
+	defer func() { activeCLITheme = previous }()
+
+	tests := []struct {
+		name  string
+		theme cliPalette
+		want  string
+	}{
+		{name: "dark", theme: cliDarkTheme, want: "github-dark"},
+		{name: "light", theme: cliLightTheme, want: "github"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			activeCLITheme = tt.theme
+			if got := activeDiffChromaStyle().Name; got != tt.want {
+				t.Fatalf("diff syntax style = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHighlightCodeUpdatesOnThemeSwitch(t *testing.T) {
+	previousTheme := activeCLITheme
+	previousProfile := activeColorProfile
+	defer func() {
+		activeCLITheme = previousTheme
+		activeColorProfile = previousProfile
+	}()
+	activeColorProfile = colorprofile.ANSI256
+
+	code := `const answer = "value"`
+	activeCLITheme = cliLightTheme
+	light := highlightCode("example.ts", code)
+	activeCLITheme = cliDarkTheme
+	dark := highlightCode("example.ts", code)
+
+	if light == dark {
+		t.Fatalf("light and dark themes produced identical highlighting: %q", light)
+	}
+	for name, got := range map[string]string{"light": light, "dark": dark} {
+		if plain := ansi.Strip(got); plain != code {
+			t.Fatalf("%s theme changed code text: got %q, want %q", name, plain, code)
+		}
 	}
 }

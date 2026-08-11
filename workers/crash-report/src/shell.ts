@@ -105,6 +105,10 @@ th{text-align:left;color:var(--ink-3);font-weight:500;font-size:12.5px;padding:0
 td{padding:8px 14px 8px 0;border-top:1px solid var(--line);vertical-align:middle}
 td.n{font-family:var(--mono);font-size:13px}
 td.summary{max-width:480px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--mono);font-size:12.5px}
+.reg-table{table-layout:fixed}
+.reg-table .c-pkg{width:32%}.reg-table .c-kind{width:8%}.reg-table .c-pub{width:14%}
+.reg-table .c-ver{width:16%}.reg-table .c-sub{width:10%}.reg-table .c-act{width:20%}
+.rowlinks{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:6px}
 .muted{color:var(--ink-3)}
 p.summary{font-family:var(--mono);font-size:14px;margin:2px 0 6px;word-break:break-word}
 a.fp{font-family:var(--mono);font-size:13px;color:var(--accent);text-decoration:none}

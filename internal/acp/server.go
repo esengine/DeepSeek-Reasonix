@@ -20,6 +20,13 @@ const maxMessageBytes = 32 << 20 // 32 MiB
 // *RPCError; any other error becomes ErrInternal.
 type RequestHandler func(ctx context.Context, params json.RawMessage) (any, error)
 
+// responseWithAfter lets a request handler schedule work that must run only
+// after its successful JSON-RPC response has been written to the wire.
+type responseWithAfter interface {
+	Response() any
+	AfterResponse()
+}
+
 // NotificationHandler reacts to an inbound notification. It cannot reply, so it
 // returns nothing — errors have nowhere to go on the wire (stderr would corrupt
 // stdout, which is the JSON-RPC channel).
@@ -163,7 +170,7 @@ func readLine(br *bufio.Reader) ([]byte, error) {
 		if len(buf) > maxMessageBytes {
 			return nil, errors.New("acp: message exceeds size limit")
 		}
-		if err == bufio.ErrBufferFull {
+		if errors.Is(err, bufio.ErrBufferFull) {
 			continue
 		}
 		// Trim the trailing newline (and CR) if present.
@@ -201,18 +208,14 @@ func (c *Conn) dispatch(ctx context.Context, line []byte) {
 	hasID := len(in.ID) > 0
 	switch {
 	case in.Method != "" && hasID:
-		c.wg.Add(1)
-		go func() {
-			defer c.wg.Done()
+		c.wg.Go(func() {
 			c.serveRequest(ctx, in.ID, in.Method, in.Params)
-		}()
+		})
 	case in.Method != "" && !hasID:
 		if h := c.notH[in.Method]; h != nil {
-			c.wg.Add(1)
-			go func() {
-				defer c.wg.Done()
+			c.wg.Go(func() {
 				h(ctx, in.Params)
-			}()
+			})
 		}
 	case in.Method == "" && hasID:
 		c.resolve(in)
@@ -238,12 +241,22 @@ func (c *Conn) serveRequest(ctx context.Context, id json.RawMessage, method stri
 		c.writeError(id, code, err.Error())
 		return
 	}
+	var after func()
+	if r, ok := result.(responseWithAfter); ok {
+		result = r.Response()
+		after = r.AfterResponse
+	}
 	raw, err := json.Marshal(result)
 	if err != nil {
 		c.writeError(id, ErrInternal, "marshal result: "+err.Error())
 		return
 	}
-	_ = c.write(outbound{JSONRPC: "2.0", ID: id, Result: raw})
+	if err := c.write(outbound{JSONRPC: "2.0", ID: id, Result: raw}); err != nil {
+		return
+	}
+	if after != nil {
+		after()
+	}
 }
 
 // resolve delivers a response to the goroutine waiting on its outbound request.

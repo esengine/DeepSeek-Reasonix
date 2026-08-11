@@ -25,7 +25,7 @@ func robustTempDir(t *testing.T) string {
 	}
 	t.Cleanup(func() {
 		var rmErr error
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			if rmErr = os.RemoveAll(dir); rmErr == nil {
 				return
 			}

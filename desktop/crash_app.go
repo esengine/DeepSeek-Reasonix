@@ -9,10 +9,13 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+
+	"reasonix/internal/config"
 )
 
-// crash_app.go is the crash/feedback/performance reporting surface. Reports are
-// sent only on an explicit user click in the frontend UI — never automatically.
+// crash_app.go is the crash/feedback/performance reporting surface. Frontend
+// reports are sent on an explicit user click. Native fatal/lifecycle reports are
+// queued locally and sent on a later launch only when desktop telemetry is on.
 
 var crashEndpoint = "https://crash.reasonix.io/v1/report"
 
@@ -59,45 +62,52 @@ type crashBreadcrumb struct {
 }
 
 type crashReport struct {
-	Kind           string            `json:"kind"`
-	Version        string            `json:"version"`
-	OS             string            `json:"os"`
-	Arch           string            `json:"arch"`
-	Message        string            `json:"message"`
-	Device         deviceInfo        `json:"device"`
-	SchemaVersion  int               `json:"schemaVersion,omitempty"`
-	Source         string            `json:"source,omitempty"`
-	Label          string            `json:"label,omitempty"`
-	ErrorType      string            `json:"errorType,omitempty"`
-	ErrorMessage   string            `json:"errorMessage,omitempty"`
-	Stack          string            `json:"stack,omitempty"`
-	ComponentStack string            `json:"componentStack,omitempty"`
-	TopFrame       string            `json:"topFrame,omitempty"`
-	BuildCommit    string            `json:"buildCommit,omitempty"`
-	Channel        string            `json:"channel,omitempty"`
-	Language       string            `json:"language,omitempty"`
-	View           string            `json:"view,omitempty"`
-	Breadcrumbs    []crashBreadcrumb `json:"breadcrumbs,omitempty"`
-	OccurredAt     string            `json:"occurredAt,omitempty"`
+	InstallID       string                `json:"installId,omitempty"`
+	Kind            string                `json:"kind"`
+	Version         string                `json:"version"`
+	OS              string                `json:"os"`
+	Arch            string                `json:"arch"`
+	Message         string                `json:"message"`
+	Device          deviceInfo            `json:"device"`
+	SchemaVersion   int                   `json:"schemaVersion,omitempty"`
+	Source          string                `json:"source,omitempty"`
+	Label           string                `json:"label,omitempty"`
+	ErrorType       string                `json:"errorType,omitempty"`
+	ErrorMessage    string                `json:"errorMessage,omitempty"`
+	Stack           string                `json:"stack,omitempty"`
+	ComponentStack  string                `json:"componentStack,omitempty"`
+	TopFrame        string                `json:"topFrame,omitempty"`
+	FingerprintHint string                `json:"fingerprintHint,omitempty"`
+	BuildCommit     string                `json:"buildCommit,omitempty"`
+	Channel         string                `json:"channel,omitempty"`
+	Language        string                `json:"language,omitempty"`
+	View            string                `json:"view,omitempty"`
+	Breadcrumbs     []crashBreadcrumb     `json:"breadcrumbs,omitempty"`
+	OccurredAt      string                `json:"occurredAt,omitempty"`
+	WebRuntime      *webRuntimeDiagnostic `json:"webRuntime,omitempty"`
+	// WebView2 is retained only so pending reports written by preview builds can
+	// still be decoded and forwarded after upgrade. New reports use WebRuntime.
+	WebView2 *webView2Diagnostic `json:"webview2,omitempty"`
 }
 
 type frontendCrashPayload struct {
-	SchemaVersion  int               `json:"schemaVersion"`
-	Kind           string            `json:"kind"`
-	Source         string            `json:"source"`
-	Label          string            `json:"label"`
-	Message        string            `json:"message"`
-	ErrorType      string            `json:"errorType"`
-	ErrorMessage   string            `json:"errorMessage"`
-	Stack          string            `json:"stack"`
-	ComponentStack string            `json:"componentStack"`
-	TopFrame       string            `json:"topFrame"`
-	BuildCommit    string            `json:"buildCommit"`
-	Channel        string            `json:"channel"`
-	Language       string            `json:"language"`
-	View           string            `json:"view"`
-	Breadcrumbs    []crashBreadcrumb `json:"breadcrumbs"`
-	OccurredAt     string            `json:"occurredAt"`
+	SchemaVersion   int               `json:"schemaVersion"`
+	Kind            string            `json:"kind"`
+	Source          string            `json:"source"`
+	Label           string            `json:"label"`
+	Message         string            `json:"message"`
+	ErrorType       string            `json:"errorType"`
+	ErrorMessage    string            `json:"errorMessage"`
+	Stack           string            `json:"stack"`
+	ComponentStack  string            `json:"componentStack"`
+	TopFrame        string            `json:"topFrame"`
+	FingerprintHint string            `json:"fingerprintHint"`
+	BuildCommit     string            `json:"buildCommit"`
+	Channel         string            `json:"channel"`
+	Language        string            `json:"language"`
+	View            string            `json:"view"`
+	Breadcrumbs     []crashBreadcrumb `json:"breadcrumbs"`
+	OccurredAt      string            `json:"occurredAt"`
 }
 
 func normalizeReportKind(kind string) (string, bool) {
@@ -152,7 +162,7 @@ func baseCrashReport(kind string) crashReport {
 }
 
 func topFrameFromStack(stack string) string {
-	for _, line := range strings.Split(stack, "\n") {
+	for line := range strings.SplitSeq(stack, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -213,6 +223,7 @@ func crashReportFromDetail(kind, detail string) (crashReport, error) {
 		r.Stack = sanitizeCrashText(payload.Stack, maxCrashStackBytes)
 		r.ComponentStack = sanitizeCrashText(payload.ComponentStack, maxCrashStackBytes)
 		r.TopFrame = sanitizeCrashText(payload.TopFrame, 300)
+		r.FingerprintHint = sanitizeCrashText(payload.FingerprintHint, 300)
 		r.BuildCommit = sanitizeCrashField(payload.BuildCommit, 64)
 		r.Channel = sanitizeCrashField(payload.Channel, 32)
 		r.Language = sanitizeCrashField(payload.Language, 64)
@@ -254,6 +265,13 @@ func (a *App) ReportCrash(kind, detail string) error {
 }
 
 func postCrashReport(ctx context.Context, c *http.Client, endpoint string, r crashReport) error {
+	// Pending crash files deliberately omit the anonymous installation id. Add
+	// it only at send time, under the same desktop.telemetry opt-in as pings.
+	if cfg, err := config.Load(); err == nil && cfg.DesktopTelemetry() {
+		if id, idErr := installID(); idErr == nil {
+			r.InstallID = id
+		}
+	}
 	body, err := json.Marshal(r)
 	if err != nil {
 		return err

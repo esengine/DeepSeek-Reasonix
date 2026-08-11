@@ -25,6 +25,7 @@ export default function HljsDiff({ original = "", modified = "", diff = "", lang
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 24,
     overscan: 10,
+    directDomUpdates: true,
   });
 
   const renderRow = (r: typeof rows[0], idx: number) => (
@@ -53,9 +54,9 @@ export default function HljsDiff({ original = "", modified = "", diff = "", lang
     >
       {isVirtual ? (
         <div
+          ref={virtualizer.containerRef}
           className="diff__table"
           style={{
-            height: virtualizer.getTotalSize(),
             width: "100%",
             position: "relative",
           }}
@@ -73,7 +74,6 @@ export default function HljsDiff({ original = "", modified = "", diff = "", lang
                   top: 0,
                   left: 0,
                   width: "100%",
-                  transform: `translateY(${row.start}px)`,
                 }}
               >
                 {renderRow(item, row.index)}

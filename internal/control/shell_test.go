@@ -1,11 +1,16 @@
 package control
 
 import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"reasonix/internal/event"
+	"reasonix/internal/i18n"
 	"reasonix/internal/sandbox"
 )
 
@@ -63,6 +68,9 @@ func TestRunShell_EmitsEvents(t *testing.T) {
 	td := (*events)[len(*events)-1]
 	if td.Kind != event.TurnDone {
 		t.Errorf("last event: want TurnDone, got %v", td.Kind)
+	}
+	if td.CheckpointTurn != nil {
+		t.Errorf("shell TurnDone checkpoint = %d, want nil", *td.CheckpointTurn)
 	}
 
 	// Penultimate event: ToolResult
@@ -146,7 +154,7 @@ func TestRunShell_FailingCommand(t *testing.T) {
 }
 
 func TestRunShell_CancelStopsCommand(t *testing.T) {
-	sink, done, _ := collectSink()
+	sink, done, events := collectSink()
 	ctrl := &Controller{sink: sink}
 
 	command := "sleep 30"
@@ -166,4 +174,117 @@ func TestRunShell_CancelStopsCommand(t *testing.T) {
 	if e.Kind != event.TurnDone {
 		t.Fatalf("done event kind = %v, want TurnDone", e.Kind)
 	}
+	if e.Err != nil {
+		t.Fatalf("cancelled shell TurnDone err = %v, want nil", e.Err)
+	}
+	var result *event.Event
+	for i := range *events {
+		if (*events)[i].Kind == event.ToolResult {
+			result = &(*events)[i]
+			break
+		}
+	}
+	if result == nil {
+		t.Fatal("expected ToolResult for cancelled shell")
+	}
+	if result.Tool.Err != i18n.M.TurnCancelled {
+		t.Fatalf("cancelled shell result err = %q, want %q", result.Tool.Err, i18n.M.TurnCancelled)
+	}
+}
+
+func TestRunShell_HeredocCancelReleasesTurn(t *testing.T) {
+	sh := requireRunShellHereDocBash(t)
+	sink, done, events := collectSink()
+	root := t.TempDir()
+	target := filepath.Join(root, "test_redact.go")
+	ctrl := &Controller{sink: sink, shell: sh, workspaceRoot: root}
+
+	command := strings.Join([]string{
+		"cat > " + controlShellQuote(filepath.ToSlash(target)) + " <<'EOF'",
+		"package main",
+		"",
+		"import (",
+		"\t\"encoding/json\"",
+		"\t\"fmt\"",
+		")",
+		"",
+		"func main() {",
+		"\tdata := []byte(`{\"accounts\":[{\"id\":\"a1\",\"username\":\"alice\",\"token\":\"TOKEN_EXAMPLE\"}]}`)",
+		"\tvar v any",
+		"\tjson.Unmarshal(data, &v)",
+		"\tfmt.Printf(\"before: %v\\n\", v)",
+		"}",
+		"EOF",
+		"sleep 30",
+	}, "\n")
+
+	ctrl.RunShell(command)
+	if !waitForFileContainingWithin(target, "TOKEN_EXAMPLE", 2*time.Second) {
+		ctrl.Cancel()
+		waitForDoneWithin(t, done, shellWaitDelay+10*time.Second)
+		t.Fatalf("heredoc target body was not written before cancel: %s", target)
+	}
+	ctrl.Cancel()
+
+	e := waitForDoneWithin(t, done, shellWaitDelay+10*time.Second)
+	if e.Kind != event.TurnDone {
+		t.Fatalf("done event kind = %v, want TurnDone", e.Kind)
+	}
+	if e.Err != nil {
+		t.Fatalf("cancelled heredoc shell TurnDone err = %v, want nil", e.Err)
+	}
+	var result *event.Event
+	for i := range *events {
+		if (*events)[i].Kind == event.ToolResult {
+			result = &(*events)[i]
+			break
+		}
+	}
+	if result == nil {
+		t.Fatal("expected ToolResult for cancelled heredoc shell")
+	}
+	if result.Tool.Err != i18n.M.TurnCancelled {
+		t.Fatalf("cancelled heredoc shell result err = %q, want %q", result.Tool.Err, i18n.M.TurnCancelled)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read heredoc target: %v", err)
+	}
+	if !strings.Contains(string(data), "TOKEN_EXAMPLE") {
+		t.Fatalf("heredoc target missing expected body:\n%s", data)
+	}
+}
+
+func requireRunShellHereDocBash(t *testing.T) sandbox.Shell {
+	t.Helper()
+	sh := sandbox.ResolveShell("bash", "", nil)
+	if sh.Kind != sandbox.ShellBash {
+		t.Skipf("bash heredoc regression requires bash, got %s", sh.Kind.String())
+	}
+	path := sh.Path
+	if path == "" {
+		path = "bash"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := exec.CommandContext(ctx, path, "-c", "true").Run(); err != nil {
+		t.Skipf("bash heredoc regression requires a runnable bash: %v", err)
+	}
+	sh.Path = path
+	return sh
+}
+
+func waitForFileContainingWithin(path, want string, d time.Duration) bool {
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if data, err := os.ReadFile(path); err == nil && strings.Contains(string(data), want) {
+			return true
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return false
+}
+
+func controlShellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }

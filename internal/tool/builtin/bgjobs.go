@@ -7,7 +7,9 @@ import (
 	"regexp"
 	"strings"
 
+	"reasonix/internal/evidence"
 	"reasonix/internal/jobs"
+	"reasonix/internal/planmode"
 	"reasonix/internal/tool"
 )
 
@@ -24,7 +26,7 @@ func init() {
 	tool.RegisterBuiltin(waitJob{})
 }
 
-// --- bash_output: poll a background job's new output (non-blocking) ---
+// bash_output: poll a background job's new output (non-blocking)
 
 type bashOutput struct{}
 
@@ -39,6 +41,11 @@ func (bashOutput) Schema() json.RawMessage {
 }
 
 func (bashOutput) ReadOnly() bool { return true }
+
+func (bashOutput) ProviderVisible(ctx context.Context) bool {
+	_, ok := jobs.FromContext(ctx)
+	return ok
+}
 
 func (bashOutput) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
@@ -58,6 +65,9 @@ func (bashOutput) Execute(ctx context.Context, args json.RawMessage) (string, er
 	text, status, found := jm.OutputForSession(jobs.SessionFromContext(ctx), p.JobID)
 	if !found {
 		return "", fmt.Errorf("no background job %q", p.JobID)
+	}
+	if status != jobs.Running {
+		collectBackgroundEvidence(ctx, jm, p.JobID)
 	}
 	if p.Filter != "" && text != "" {
 		filtered, err := filterLines(text, p.Filter)
@@ -80,7 +90,7 @@ func filterLines(s, re string) (string, error) {
 		return "", fmt.Errorf("invalid filter regexp: %w", err)
 	}
 	var keep []string
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		if rx.MatchString(line) {
 			keep = append(keep, line)
 		}
@@ -88,7 +98,7 @@ func filterLines(s, re string) (string, error) {
 	return strings.Join(keep, "\n"), nil
 }
 
-// --- kill_shell: terminate a running background job ---
+// kill_shell: terminate a running background job
 
 type killShell struct{}
 
@@ -103,6 +113,11 @@ func (killShell) Schema() json.RawMessage {
 }
 
 func (killShell) ReadOnly() bool { return false }
+
+func (killShell) ProviderVisible(ctx context.Context) bool {
+	_, ok := jobs.FromContext(ctx)
+	return ok
+}
 
 func (killShell) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
@@ -124,7 +139,7 @@ func (killShell) Execute(ctx context.Context, args json.RawMessage) (string, err
 	return fmt.Sprintf("Background job %q was not running (already finished or unknown).", p.JobID), nil
 }
 
-// --- wait: block until background jobs finish, then return their results ---
+// wait: block until background jobs finish, then return their results
 
 type waitJob struct{}
 
@@ -139,6 +154,11 @@ func (waitJob) Schema() json.RawMessage {
 }
 
 func (waitJob) ReadOnly() bool { return true }
+
+func (waitJob) ProviderVisible(ctx context.Context) bool {
+	_, ok := jobs.FromContext(ctx)
+	return ok
+}
 
 func (waitJob) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
@@ -160,6 +180,9 @@ func (waitJob) Execute(ctx context.Context, args json.RawMessage) (string, error
 	}
 	var b strings.Builder
 	for i, r := range results {
+		if r.Status != jobs.Running {
+			collectBackgroundEvidence(ctx, jm, r.ID)
+		}
 		if i > 0 {
 			b.WriteString("\n\n")
 		}
@@ -173,4 +196,39 @@ func (waitJob) Execute(ctx context.Context, args json.RawMessage) (string, error
 		}
 	}
 	return b.String(), nil
+}
+
+func collectBackgroundEvidence(ctx context.Context, jm *jobs.Manager, jobID string) {
+	// A Plan turn should not consume a finished background writer's mutation
+	// receipts before the workflow reaches execution. Writers may still run after
+	// Permissions approval; leave their evidence on the job so the first
+	// post-approval collection can merge and audit it.
+	if planmode.Active(ctx) {
+		return
+	}
+	ledger, ok := evidence.FromContext(ctx)
+	if !ok || ledger == nil || jm == nil {
+		return
+	}
+	session := jobs.SessionFromContext(ctx)
+	// A non-Running status from bash_output/wait does not guarantee the job's
+	// run goroutine has actually flushed PublishEvidence and closed done: kill_shell
+	// flips status to Killed synchronously, well before its cancelled goroutine
+	// unwinds. Check readiness before noting the lease — noting it on an empty,
+	// not-yet-ready read would dedupe away every later retry in this turn (the
+	// lease is idempotent per turn) while the job later publishes real mutation
+	// evidence nobody ever merges or reviews.
+	summary, ready := jm.TryLeaseEvidenceForSession(session, jobID)
+	if !ready {
+		return
+	}
+	// Note the lease before merging so a second wait/bash_output in the same
+	// turn does not double-count. The merge is provisional: the lease does not
+	// consume, so if this turn fails the agent never commits and the next turn
+	// re-collects. The agent commits leased jobs only after the turn passes its
+	// delivery gates.
+	if !ledger.NoteBackgroundLease(session, jobID) {
+		return
+	}
+	ledger.MergeChild(summary)
 }

@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { buildTurnGroups } from "../lib/transcriptGrouping";
+import { buildStepGroups, buildTurnGroups, lastQuestionTurn, questionTurnsById } from "../lib/transcriptGrouping";
 import type { Item } from "../lib/useController";
 
 let passed = 0;
@@ -66,6 +66,61 @@ console.log("\ntranscript grouping contract");
   eq(groups[0].endIdx, 4, "first group end index");
   eq(groups[0].toolCount, 2, "counts top-level tools in a turn");
   eq(groups[2].assistantPreview, "answer 2", "keeps latest assistant preview for each turn");
+}
+
+{
+  const groups = buildStepGroups([
+    { kind: "user", id: "u0", text: "fix this" },
+    { kind: "assistant", id: "a1", text: "visible answer before retry", reasoning: "", streaming: false },
+    { kind: "notice", id: "s1", level: "info", text: "↪ steer" },
+    { kind: "assistant", id: "a2", text: "", reasoning: "", streaming: true },
+  ] as Item[]);
+  eq(groups[1]?.isFinal, true, "visible assistant text before a later assistant stays outside processed folds");
+}
+
+{
+  const groups = buildStepGroups([
+    { kind: "user", id: "u0", text: "use tools" },
+    { kind: "assistant", id: "a1", text: "", reasoning: "", streaming: false },
+    { kind: "tool", id: "t1", name: "read_file", args: "{}", readOnly: true, status: "done" },
+    { kind: "assistant", id: "a2", text: "final answer", reasoning: "", streaming: false },
+  ] as Item[]);
+  eq(groups[1]?.isFinal, false, "tool-only completed steps still fold in compact mode");
+  eq(groups[2]?.isFinal, true, "later visible final answer renders directly");
+}
+
+{
+  const visibleTurns = questionTurnsById([
+    { id: "u0", text: "first", turn: 0 },
+    { id: "u1", text: "second", turn: 1 },
+  ]);
+  eq(visibleTurns.get("u0"), 0, "falls back to visible ordinal when no checkpoint turns exist");
+  eq(visibleTurns.get("u1"), 1, "visible ordinal fallback increments by question");
+
+  const backendTurns = questionTurnsById([
+    { id: "u0", text: "first", turn: 0, checkpointTurn: 0 },
+    { id: "u1", text: "live without server stamp yet", turn: 1 },
+    { id: "u2", text: "after hidden synthetic", turn: 2, checkpointTurn: 3 },
+  ]);
+  eq(backendTurns.get("u0"), 0, "uses backend checkpoint turn zero when present");
+  eq(backendTurns.get("u2"), 3, "uses non-contiguous backend checkpoint turn");
+  ok(!backendTurns.has("u1"), "does not mix visible ordinal fallback into authoritative checkpoint sessions");
+  eq(lastQuestionTurn([
+    { id: "u0", text: "first", turn: 0 },
+    { id: "u1", text: "second", turn: 1 },
+  ], visibleTurns), 1, "last question turn follows visible ordinal fallback");
+  eq(lastQuestionTurn([
+    { id: "u0", text: "first", turn: 0, checkpointTurn: 0 },
+    { id: "u1", text: "live without server stamp yet", turn: 1 },
+    { id: "u2", text: "after hidden synthetic", turn: 2, checkpointTurn: 3 },
+  ], backendTurns), 3, "last question turn follows non-contiguous backend turn");
+
+  const pagedTurns = questionTurnsById([
+    { id: "u-recent", text: "recent prompt", turn: 0, checkpointTurn: 1060 },
+  ]);
+  eq(lastQuestionTurn([
+    { id: "u-recent", text: "recent prompt", turn: 0, checkpointTurn: 1060 },
+  ], pagedTurns), 1060, "last question turn supports paged history windows");
 }
 
 {

@@ -8,6 +8,7 @@ import { projectColorValue } from "../lib/projectColors";
 import { useT } from "../lib/i18n";
 import { Tooltip } from "./Tooltip";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
+import { WorktreeBadge } from "./WorktreeBadge";
 
 interface TabBarProps {
   tabs: TabMeta[];
@@ -137,6 +138,14 @@ export function TabBar({ tabs, activeTabId, onTabChange, onTabClose, onTabsClose
     onTabChange(tabId);
   };
 
+  const handleTabAuxClick = (event: ReactMouseEvent<HTMLButtonElement>, tabId: string) => {
+    // DOM MouseEvent.button: 1 is the auxiliary button, normally the middle/wheel button.
+    if (event.button !== 1) return;
+    event.preventDefault();
+    event.stopPropagation();
+    handleClose(tabId);
+  };
+
   const openTabMenu = (event: ReactMouseEvent<HTMLButtonElement> | ReactKeyboardEvent<HTMLButtonElement>, tabId: string) => {
     event.preventDefault();
     event.stopPropagation();
@@ -224,6 +233,11 @@ export function TabBar({ tabs, activeTabId, onTabChange, onTabClose, onTabsClose
               aria-label={annotatedTitle}
               style={projectAccentStyle(tab.projectColor)}
               onClick={() => handleTabClick(tab.id)}
+              onAuxClick={(event) => handleTabAuxClick(event, tab.id)}
+              onMouseDown={(event) => {
+                // Prevent the browser/webview middle-click auto-scroll before auxclick fires.
+                if (event.button === 1) event.preventDefault();
+              }}
               onContextMenu={(event) => openTabMenu(event, tab.id)}
               onKeyDown={(event) => {
                 if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
@@ -246,6 +260,7 @@ export function TabBar({ tabs, activeTabId, onTabChange, onTabClose, onTabsClose
                 />
               )}
               <span className="tabbar__tab-label">{displayTitle}</span>
+              {tab.isolatedWorktree && <WorktreeBadge size={11} />}
               {planMode && <span className="tabbar__mode-badge tabbar__mode-badge--plan">plan</span>}
               {goalMode && <span className="tabbar__mode-badge tabbar__mode-badge--plan">goal</span>}
               {toolApprovalMode === "auto" && <span className="tabbar__mode-badge tabbar__mode-badge--plan">auto</span>}

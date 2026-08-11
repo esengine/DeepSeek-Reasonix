@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -14,6 +15,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
+	"reasonix/internal/skill"
 )
 
 // writeAt creates dir/rel (with parents) holding content, for fs-backed tests.
@@ -28,6 +30,16 @@ func writeAt(t *testing.T, dir, rel, content string) {
 	}
 }
 
+func TestCustomCommandHintIdentifiesPluginSource(t *testing.T) {
+	got := customCommandHint(command.Command{Description: "Create a plan", Plugin: "pwf", ShortName: "plan"})
+	if got != "plugin pwf · Create a plan" {
+		t.Fatalf("customCommandHint = %q", got)
+	}
+	if got := customCommandHint(command.Command{Description: "Project plan"}); got != "Project plan" {
+		t.Fatalf("project hint changed = %q", got)
+	}
+}
+
 func TestSlashCompletionFilterAndAccept(t *testing.T) {
 	m := newTestChatTUI()
 	m.input.SetValue("/co")
@@ -36,9 +48,10 @@ func TestSlashCompletionFilterAndAccept(t *testing.T) {
 	if !m.completion.active || m.completion.kind != compSlash {
 		t.Fatalf("typing /co should open the slash menu: %+v", m.completion)
 	}
-	// Only /compact matches the "/co" prefix among the built-ins.
-	if len(m.completion.items) != 1 || m.completion.items[0].label != "/compact" {
-		t.Fatalf("filter = %v, want just /compact", labels(m.completion.items))
+	// /compact, /context and /copy all start with "/co", in that order.
+	want := []string{"/compact", "/context", "/copy"}
+	if got := labels(m.completion.items); !slices.Equal(got, want) {
+		t.Fatalf("filter = %v, want %v", got, want)
 	}
 
 	m.acceptCompletion()
@@ -58,6 +71,106 @@ func TestSlashCompletionIncludesCustomCommands(t *testing.T) {
 
 	if !hasLabel(m.completion.items, "/review") {
 		t.Errorf("custom command should appear in completion: %v", labels(m.completion.items))
+	}
+}
+
+func TestSlashCompletionDocsShowsOnlyRuntimeWinner(t *testing.T) {
+	tests := []struct {
+		name     string
+		commands []command.Command
+		skills   []skill.Skill
+		wantHint string
+	}{
+		{
+			name:     "custom command shadows builtin",
+			commands: []command.Command{{Name: "docs", Description: "custom docs"}},
+			wantHint: "custom docs",
+		},
+		{
+			name:     "skill shadows builtin",
+			skills:   []skill.Skill{{Name: "docs", Description: "docs skill"}},
+			wantHint: "docs skill",
+		},
+		{
+			name:     "custom command shadows skill and builtin",
+			commands: []command.Command{{Name: "docs", Description: "custom docs"}},
+			skills:   []skill.Skill{{Name: "docs", Description: "docs skill"}},
+			wantHint: "custom docs",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestChatTUI()
+			m.commands = tt.commands
+			m.skills = tt.skills
+			var docs []compItem
+			for _, item := range m.slashItems() {
+				if item.label == "/docs" {
+					docs = append(docs, item)
+				}
+			}
+			if len(docs) != 1 || docs[0].hint != tt.wantHint {
+				t.Fatalf("/docs completion entries = %+v, want one entry with hint %q", docs, tt.wantHint)
+			}
+			if !hasLabel(m.slashItems(), "/reasonix:docs") {
+				t.Fatalf("shadowed built-in docs fallback missing: %v", labels(m.slashItems()))
+			}
+		})
+	}
+}
+
+func TestSlashCompletionDocsAccountsForHiddenCompatibilityAliases(t *testing.T) {
+	tests := []struct {
+		name          string
+		commands      []command.Command
+		skills        []skill.Skill
+		wantCanonical string
+	}{
+		{
+			name: "hidden plugin command alias",
+			commands: []command.Command{
+				{Name: "docs", Plugin: "manuals", Hidden: true},
+				{Name: "manuals:docs", Plugin: "manuals"},
+			},
+			wantCanonical: "/manuals:docs",
+		},
+		{
+			name:          "compatible plugin skill alias",
+			skills:        []skill.Skill{{Name: "docs", Plugin: "manuals"}},
+			wantCanonical: "/manuals:docs",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestChatTUI()
+			m.commands = tt.commands
+			m.skills = tt.skills
+			items := m.slashItems()
+			if hasLabel(items, "/docs") {
+				t.Fatalf("hidden runtime owner left a misleading /docs entry: %v", labels(items))
+			}
+			for _, want := range []string{"/reasonix:docs", tt.wantCanonical} {
+				if !hasLabel(items, want) {
+					t.Fatalf("completion missing %q: %v", want, labels(items))
+				}
+			}
+		})
+	}
+}
+
+func TestSlashCompletionDocsDoesNotDisplaceQualifiedCustomCommands(t *testing.T) {
+	m := newTestChatTUI()
+	m.commands = []command.Command{
+		{Name: "docs", Description: "custom docs"},
+		{Name: "reasonix:docs", Description: "qualified custom docs"},
+		{Name: "reasonix:builtin:docs", Description: "second qualified custom docs"},
+	}
+	items := m.slashItems()
+	for _, want := range []string{"/docs", "/reasonix:docs", "/reasonix:builtin:docs", "/reasonix:builtin:docs:2"} {
+		if !hasLabel(items, want) {
+			t.Fatalf("completion displaced %q: %v", want, labels(items))
+		}
 	}
 }
 
@@ -109,12 +222,51 @@ func TestActiveAtToken(t *testing.T) {
 		{"a@b.com", "", false, 0},  // '@' not whitespace-preceded → not a ref
 		{"@foo bar", "", false, 0}, // cursor token after the space isn't an @ref
 		{"plain text", "", false, 0},
+		{`@docs/my\ file.md`, `docs/my\ file.md`, true, 0}, // escaped space stays in the token
+		{`see @my\ dir/`, `my\ dir/`, true, 4},
 	}
 	for _, c := range cases {
-		at, tok, ok := activeAtToken(c.val)
+		at, end, tok, ok := activeAtToken(c.val, len(c.val))
 		if ok != c.wantOK || (ok && (tok != c.wantTok || at != c.wantAt)) {
-			t.Errorf("activeAtToken(%q) = (%d,%q,%v), want (%d,%q,%v)", c.val, at, tok, ok, c.wantAt, c.wantTok, c.wantOK)
+			t.Errorf("activeAtToken(%q) = (%d,%d,%q,%v), want (%d,_,%q,%v)", c.val, at, end, tok, ok, c.wantAt, c.wantTok, c.wantOK)
 		}
+		if ok {
+			if end < at || end > len(c.val) || !strings.HasPrefix(c.val[at:end], "@") {
+				t.Errorf("activeAtToken(%q) span [%d,%d) invalid", c.val, at, end)
+			}
+			// At EOF, caret-limited query equals the full token after '@'.
+			fullTok := c.val[at+1 : end]
+			if !strings.HasPrefix(fullTok, tok) {
+				t.Errorf("activeAtToken(%q) query %q is not a prefix of full token %q", c.val, tok, fullTok)
+			}
+		}
+	}
+}
+
+// TestFileItemsEscapedSpaces verifies names with spaces complete as
+// escaped @tokens and that completion can descend through such a directory:
+// the escaped token is unescaped for filesystem reads.
+func TestFileItemsEscapedSpaces(t *testing.T) {
+	dir := t.TempDir()
+	writeAt(t, dir, "my file.md", "x")
+	writeAt(t, dir, "my dir/inner.md", "y")
+
+	m := newTestChatTUI()
+	items := m.fileItems(dir + "/")
+	wantFile := "@" + dir + `/my\ file.md`
+	wantDir := "@" + dir + `/my\ dir/`
+	var gotFile, gotDir bool
+	for _, it := range items {
+		gotFile = gotFile || it.insert == wantFile
+		gotDir = gotDir || it.insert == wantDir
+	}
+	if !gotFile || !gotDir {
+		t.Fatalf("inserts should escape spaces, want %q and %q in %v", wantFile, wantDir, labels(items))
+	}
+
+	deeper := m.fileItems(dir + `/my\ dir/`)
+	if !hasLabel(deeper, "inner.md") {
+		t.Fatalf("descending through an escaped dir should list its entries, got %v", labels(deeper))
 	}
 }
 
@@ -214,7 +366,7 @@ func TestFileItemsSearchRespectsMenuCap(t *testing.T) {
 	defer os.Chdir(orig)
 
 	dir := t.TempDir()
-	for i := 0; i < maxCompItems; i++ {
+	for i := range maxCompItems {
 		writeAt(t, dir, filepath.Join("aa-dir-"+fmt.Sprintf("%03d", i), "file.txt"), "x")
 	}
 	writeAt(t, dir, "nested/aa-deep.js", "y")
@@ -365,6 +517,7 @@ func TestEnterOnExactSlashArgSubmitsWhenPrefixAlsoMatches(t *testing.T) {
 		items:       []compItem{{label: "1", insert: "1"}, {label: "10", insert: "10"}},
 		sel:         0,
 		replaceFrom: len("/resume "),
+		replaceTo:   len("/resume 1"),
 	}
 
 	got, _ := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -447,20 +600,17 @@ func TestSlashArgCompletionLanguage(t *testing.T) {
 	}
 }
 
-func TestSlashArgCompletionAutoPlan(t *testing.T) {
+func TestSlashArgCompletionCurrency(t *testing.T) {
 	m := newTestChatTUI()
-	m.input.SetValue("/auto-plan ")
+	m.input.SetValue("/currency ")
 	m.updateCompletion()
 	if !m.completion.active || m.completion.kind != compSlashArg {
-		t.Fatalf("/auto-plan should open arg completion: %+v", m.completion)
+		t.Fatalf("/currency should open arg completion: %+v", m.completion)
 	}
-	for _, want := range []string{"off", "on"} {
+	for _, want := range []string{"auto", "CNY", "USD"} {
 		if !hasLabel(m.completion.items, want) {
-			t.Fatalf("/auto-plan completion missing %q: %v", want, labels(m.completion.items))
+			t.Fatalf("/currency completion missing %q: %v", want, labels(m.completion.items))
 		}
-	}
-	if hasLabel(m.completion.items, "ask") {
-		t.Fatalf("/auto-plan completion should not include legacy ask: %v", labels(m.completion.items))
 	}
 }
 
@@ -498,7 +648,7 @@ func hasLabel(items []compItem, label string) bool {
 	return false
 }
 
-// --- fuzzy matching for / completion ---
+// fuzzy matching for / completion
 
 // TestFuzzyFilterSlashSubsequence proves the slash-menu fuzzy filter matches
 // command labels whose letters appear in order, even when they are not a
@@ -522,7 +672,8 @@ func TestFuzzyFilterSlashSubsequence(t *testing.T) {
 
 // TestFuzzyFilterSlashPrefixFirst proves prefix hits rank ahead of
 // subsequence-only hits, matching the menu behavior we want: typing "/mo"
-// should put /model at the top, not buried after non-prefix matches.
+// should put /model and /mouse (both true "/mo" prefixes) at the top, not
+// buried after non-prefix matches.
 func TestFuzzyFilterSlashPrefixFirst(t *testing.T) {
 	m := newTestChatTUI()
 	m.input.SetValue("/mo")
@@ -531,15 +682,17 @@ func TestFuzzyFilterSlashPrefixFirst(t *testing.T) {
 	if !m.completion.active {
 		t.Fatal("menu should open for /mo")
 	}
-	// /model is the only built-in whose label starts with /mo.
-	if len(m.completion.items) == 0 || m.completion.items[0].label != "/model" {
-		t.Fatalf("prefix hit /model should rank first, got %v", labels(m.completion.items))
+	// /model and /mouse are the only built-ins whose label starts with /mo;
+	// slashItems() declares /model first, and the filter is stable, so it
+	// leads.
+	if len(m.completion.items) < 2 || m.completion.items[0].label != "/model" || m.completion.items[1].label != "/mouse" {
+		t.Fatalf("prefix hits /model, /mouse should rank first in declaration order, got %v", labels(m.completion.items))
 	}
 	// Any other built-ins in the list are subsequence-only matches and must
 	// therefore NOT be prefix hits of /mo.
-	for _, it := range m.completion.items[1:] {
+	for _, it := range m.completion.items[2:] {
 		if strings.HasPrefix(it.label, "/mo") {
-			t.Errorf("%q should not appear after /model (it is a prefix hit too)", it.label)
+			t.Errorf("%q should not appear after the /mo prefix hits", it.label)
 		}
 	}
 }

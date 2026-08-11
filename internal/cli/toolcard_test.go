@@ -17,6 +17,8 @@ func TestToolCard(t *testing.T) {
 		{"grep", `{"pattern":"TODO","path":"."}`, []string{"Search", "TODO"}, nil},
 		{"wait", `{"job_ids":["bash-1","bash-2"],"timeout_seconds":300}`, []string{"Wait", "bash-1", "bash-2"}, []string{"timeout_seconds", "300", "job_ids"}},
 		{"web_fetch", `{"url":"https://x.dev"}`, []string{"Fetch", "https://x.dev"}, nil},
+		{"use_capability", `{"action":"call","capability_id":"mcp-tool:github/search_issues","arguments":{"query":"bug"}}`, []string{"MCP", "mcp-tool:github/search_issues"}, []string{`"arguments"`, `"query"`, "bug"}},
+		{"use_capability", `{"action":"list"}`, []string{"MCP", "list"}, []string{"action"}},
 	}
 	for _, c := range cases {
 		got := toolCard(c.name, c.args, 120)

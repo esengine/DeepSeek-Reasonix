@@ -20,6 +20,7 @@
 /build/darwin/*
 !/build/darwin/entitlements.plist
 !/build/darwin/icon.icns
+!/build/darwin/appicon.svg
 
 # Commit the hand-written Linux .deb packaging inputs and app icon assets.
 # `wails build` does not generate these, so they must live in git. The .deb is built
@@ -28,6 +29,8 @@
 /build/linux/*
 !/build/linux/nfpm.yaml
 !/build/linux/reasonix.desktop
+!/build/linux/io.reasonix.desktop.update.policy
+!/build/linux/postinstall.sh
 !/build/linux/icons
 !/build/linux/icons/**
 

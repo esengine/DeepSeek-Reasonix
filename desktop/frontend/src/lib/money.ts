@@ -20,9 +20,29 @@ export function currencySymbol(currency?: string): string {
 export function formatMoney(amount?: number, currency?: string, empty: "zero" | "dash" = "zero"): string {
   const symbol = currencySymbol(currency);
   if (typeof amount !== "number" || amount <= 0) {
-    return empty === "dash" ? "-" : `${symbol}0.0000`;
+    // Prefer dash over a fake zero when cost cannot be estimated.
+    return empty === "dash" ? "-" : empty === "zero" ? `${symbol}0.0000` : "-";
   }
   return `${symbol}${amount < 1 ? amount.toFixed(4) : amount.toFixed(2)}`;
+}
+
+/** Format an estimated cost with the product-wide "≈" cue. */
+export function formatEstimatedCost(amount?: number, currency?: string, incomplete?: boolean): string {
+  if (incomplete || typeof amount !== "number" || amount <= 0) {
+    return "-";
+  }
+  return `≈${formatMoney(amount, currency, "dash")}`;
+}
+
+export function formatMoneyAmount(amount?: string, currency?: string, empty: "zero" | "dash" = "dash"): string {
+  if (!amount || amount === "0") {
+    return empty === "dash" ? "-" : formatMoney(0, currency, empty);
+  }
+  const n = Number(amount);
+  if (!Number.isFinite(n) || n <= 0) {
+    return empty === "dash" ? "-" : formatMoney(0, currency, empty);
+  }
+  return formatMoney(n, currency, empty);
 }
 
 interface MoneyFormatOptions {

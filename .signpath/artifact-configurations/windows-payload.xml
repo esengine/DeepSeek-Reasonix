@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sign every executable that the NSIS installer writes to disk. GitHub Actions
+     wraps the flat payload directory in this zip before SignPath receives it. -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="reasonix-desktop.exe">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file path="reasonix-guard.exe">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file path="reasonix-launcher.exe">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file path="reasonix-update-helper.exe">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file path="reasonix-cli.exe">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file path="reasonix-uninstall.exe">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

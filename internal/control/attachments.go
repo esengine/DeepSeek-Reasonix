@@ -2,6 +2,7 @@ package control
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"reasonix/internal/proc"
+	"reasonix/internal/secrets"
 )
 
 const maxImageAttachmentBytes = 10 * 1024 * 1024
@@ -31,14 +33,22 @@ var safeAttachmentExt = regexp.MustCompile(`^\.[a-z0-9]{1,12}$`)
 // origName supplies only the extension; the stored name is generated.
 func SaveAttachmentDataURL(origName, dataURL string) (string, error) {
 	const marker = ";base64,"
-	i := strings.Index(dataURL, marker)
-	if !strings.HasPrefix(dataURL, "data:") || i < 0 {
+	_, after, ok := strings.Cut(dataURL, marker)
+	if !strings.HasPrefix(dataURL, "data:") || !ok {
 		return "", fmt.Errorf("unsupported pasted file")
 	}
-	raw, err := base64.StdEncoding.DecodeString(dataURL[i+len(marker):])
+	raw, err := base64.StdEncoding.DecodeString(after)
 	if err != nil {
 		return "", fmt.Errorf("decode pasted file: %w", err)
 	}
+	return SaveAttachmentBytes(origName, raw)
+}
+
+func SaveAttachmentBytes(origName string, raw []byte) (string, error) {
+	return SaveAttachmentBytesInRoot(".", origName, raw)
+}
+
+func SaveAttachmentBytesInRoot(root, origName string, raw []byte) (string, error) {
 	if len(raw) == 0 || len(raw) > maxFileAttachmentBytes {
 		return "", fmt.Errorf("attachment must be between 1 byte and 25 MB")
 	}
@@ -46,23 +56,7 @@ func SaveAttachmentDataURL(origName, dataURL string) (string, error) {
 	if !safeAttachmentExt.MatchString(ext) {
 		ext = ".bin"
 	}
-	if err := ensureAttachmentRoot(); err != nil {
-		return "", err
-	}
-	rel, f, err := createAttachmentFile(ext)
-	if err != nil {
-		return "", err
-	}
-	if _, err := f.Write(raw); err != nil {
-		_ = f.Close()
-		_ = os.Remove(rel)
-		return "", err
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(rel)
-		return "", err
-	}
-	return filepath.ToSlash(rel), nil
+	return saveAttachmentBytesInRoot(root, ext, raw)
 }
 
 func SaveImageDataURL(dataURL string) (string, error) {
@@ -84,6 +78,10 @@ func SaveImageDataURL(dataURL string) (string, error) {
 }
 
 func SaveImageBytes(declaredMime string, raw []byte) (string, error) {
+	return SaveImageBytesInRoot(".", declaredMime, raw)
+}
+
+func SaveImageBytesInRoot(root, declaredMime string, raw []byte) (string, error) {
 	if len(raw) == 0 || len(raw) > maxImageAttachmentBytes {
 		return "", fmt.Errorf("pasted image must be between 1 byte and 10 MB")
 	}
@@ -95,24 +93,35 @@ func SaveImageBytes(declaredMime string, raw []byte) (string, error) {
 		return "", fmt.Errorf("unsupported image type: %s", declaredMime)
 	}
 	ext := imageExt(mime)
-	if err := ensureAttachmentRoot(); err != nil {
+	return saveAttachmentBytesInRoot(root, ext, raw)
+}
+
+func saveAttachmentBytesInRoot(root, ext string, raw []byte) (string, error) {
+	if strings.TrimSpace(root) == "" {
+		root = "."
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
 		return "", err
 	}
-	rel, f, err := createAttachmentFile(ext)
+	if err := ensureAttachmentRootIn(absRoot); err != nil {
+		return "", err
+	}
+	rel, f, err := createAttachmentFileIn(absRoot, ext)
 	if err != nil {
 		return "", err
 	}
 	if n, err := f.Write(raw); err != nil {
 		_ = f.Close()
-		_ = os.Remove(rel)
+		_ = os.Remove(filepath.Join(absRoot, rel))
 		return "", err
 	} else if n != len(raw) {
 		_ = f.Close()
-		_ = os.Remove(rel)
+		_ = os.Remove(filepath.Join(absRoot, rel))
 		return "", io.ErrShortWrite
 	}
 	if err := f.Close(); err != nil {
-		_ = os.Remove(rel)
+		_ = os.Remove(filepath.Join(absRoot, rel))
 		return "", err
 	}
 	return filepath.ToSlash(rel), nil
@@ -238,10 +247,12 @@ $ms = New-Object System.IO.MemoryStream
 $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
 [Convert]::ToBase64String($ms.ToArray())`
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	cmd.Env = secrets.ProcessEnv()
 	proc.HideWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && len(ee.Stderr) > 0 {
 			return "", fmt.Errorf("read clipboard image: %s", strings.TrimSpace(string(ee.Stderr)))
 		}
 		return "", fmt.Errorf("read clipboard image: %w", err)
@@ -259,7 +270,9 @@ func saveLinuxClipboardImage() (string, error) {
 		{"wl-paste", "--type", "image/png", "--no-newline"},
 		{"xclip", "-selection", "clipboard", "-t", "image/png", "-o"},
 	} {
-		if out, err := exec.Command(c[0], c[1:]...).Output(); err == nil && len(out) > 0 {
+		cmd := exec.Command(c[0], c[1:]...)
+		cmd.Env = secrets.ProcessEnv()
+		if out, err := cmd.Output(); err == nil && len(out) > 0 {
 			return SaveImageBytes("", out)
 		}
 	}
@@ -360,7 +373,7 @@ func rejectSymlinkComponents(path, root string) error {
 		return fmt.Errorf("attachment path is outside .reasonix/attachments")
 	}
 	cur := root
-	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+	for part := range strings.SplitSeq(rel, string(filepath.Separator)) {
 		if part == "" || part == "." {
 			continue
 		}
@@ -377,7 +390,11 @@ func rejectSymlinkComponents(path, root string) error {
 }
 
 func ensureAttachmentRoot() error {
-	root := filepath.Join(".reasonix", "attachments")
+	return ensureAttachmentRootIn(".")
+}
+
+func ensureAttachmentRootIn(base string) error {
+	root := filepath.Join(base, ".reasonix", "attachments")
 	if info, err := os.Lstat(root); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("attachment directory must not be a symlink")
@@ -447,7 +464,9 @@ on error errMsg
 	error errMsg
 end try
 `, abs, class)
-	if out, err := exec.Command("osascript", "-e", script).CombinedOutput(); err != nil {
+	clip := exec.Command("osascript", "-e", script)
+	clip.Env = secrets.ProcessEnv()
+	if out, err := clip.CombinedOutput(); err != nil {
 		_ = os.Remove(rel)
 		return "", fmt.Errorf("read clipboard image: %s", strings.TrimSpace(string(out)))
 	}
@@ -460,9 +479,13 @@ end try
 }
 
 func createAttachmentFile(ext string) (string, *os.File, error) {
+	return createAttachmentFileIn(".", ext)
+}
+
+func createAttachmentFileIn(base, ext string) (string, *os.File, error) {
 	for range maxAttachmentCreateAttempts {
 		rel := attachmentPath(ext)
-		f, err := os.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		f, err := os.OpenFile(filepath.Join(base, rel), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 		if os.IsExist(err) {
 			continue
 		}

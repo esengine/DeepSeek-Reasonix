@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Canary-only configuration. SignPath test certificates intentionally do not
+     chain to a Windows trusted root, so authenticode-verify cannot be used for
+     the already test-signed payload. The workflow verifies that every payload
+     executable is signed and hash-identical to the rebuilt portable package.
+     Stable and RC releases use windows-installer-v2 instead. -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="*installer*.exe">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

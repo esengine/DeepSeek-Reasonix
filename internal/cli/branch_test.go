@@ -3,12 +3,14 @@ package cli
 import (
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/colorprofile"
 )
 
 func TestRenderBranchTreeStylesVisualWeight(t *testing.T) {
-	oldColor := colorEnabled
-	colorEnabled = true
-	defer func() { colorEnabled = oldColor }()
+	oldColor := activeColorProfile
+	activeColorProfile = colorprofile.ANSI256
+	defer func() { activeColorProfile = oldColor }()
 
 	got := renderBranchTree("branches:\n├─ 0601-030143.318  你是谁  3 turns\n│  └─ 0601-033937.165  JSON response: success  1 turn\n└─ 0601-035153.346  JSON array  1 turn  current")
 	for _, want := range []string{

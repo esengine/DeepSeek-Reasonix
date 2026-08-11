@@ -34,6 +34,10 @@ func (t desktopCountingTool) Execute(context.Context, json.RawMessage) (string, 
 }
 
 func TestDesktopE2EBlocksRepeatedSuccessfulBashFileWrite(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping desktop E2E repeat-guard test in short mode")
+	}
+
 	var calls int32
 	reg := tool.NewRegistry()
 	reg.Add(desktopCountingTool{name: "bash", calls: &calls})

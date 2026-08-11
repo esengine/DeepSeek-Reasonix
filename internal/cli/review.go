@@ -11,8 +11,10 @@ import (
 	"reasonix/internal/boot"
 	"reasonix/internal/config"
 	"reasonix/internal/event"
+	"reasonix/internal/sandbox"
 	"reasonix/internal/skill"
 	"reasonix/internal/tool"
+	"reasonix/internal/tool/builtin"
 )
 
 func reviewCommand(args []string) int {
@@ -21,8 +23,8 @@ func reviewCommand(args []string) int {
 	commit := fs.String("commit", "", "review a specific commit (shows changes introduced by that commit)")
 	model := fs.String("model", "", "provider name override (default: config default_model)")
 	instructions := fs.String("instructions", "", "extra review instructions appended to the prompt")
-	if err := fs.Parse(args); err != nil {
-		return 2
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
 	}
 
 	// 1. Get the diff.
@@ -36,15 +38,20 @@ func reviewCommand(args []string) int {
 		return 0
 	}
 
-	// 2. Load config and resolve model.
+	// 2. Load config and resolve model. resolveModelForCLI transparently
+	// falls through a keyless default to the next configured provider
+	// (issue #6996), so a user whose default_model no longer has a key
+	// (e.g. they migrated providers) does not have to add --model to
+	// every `reasonix review` invocation.
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error: failed to load config:", err)
 		return 1
 	}
-	modelName := *model
-	if modelName == "" {
-		modelName = cfg.DefaultModel
+	modelName, _, err := resolveModelForCLI(*model, cfg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 1
 	}
 	entry, ok := cfg.ResolveModel(modelName)
 	if !ok {
@@ -77,14 +84,19 @@ func reviewCommand(args []string) int {
 	}
 
 	// 5. Build a review-scoped sub-agent registry.
-	reg := buildReviewSubagentRegistry(reviewSk)
+	reg := buildReviewSubagentRegistry(reviewSk, cfg, root)
 
 	// 6. Prepare the review prompt.
 	task := buildReviewTask(diff, *instructions)
 
 	// 7. Run the review subagent.
 	ctx := context.Background()
-	result, err := agent.RunSubAgentWithSession(ctx, prov, reg, agent.NewSession(reviewSk.Body), task, agent.Options{
+	// Deliberately minimal Options: this one-shot CLI path has no gate, no
+	// compaction, and no session, unlike the in-session sub-agent paths built
+	// through TaskTool.subagentOptions / boot's subagentSkillOptions. If a new
+	// Options field becomes load-bearing for sub-agents, decide explicitly
+	// whether this path needs it too.
+	result, err := agent.RunReadOnlySubAgentWithSession(ctx, prov, reg, agent.NewSession(reviewSk.Body), task, agent.Options{
 		MaxSteps:      12,
 		Temperature:   cfg.Agent.Temperature,
 		Pricing:       entry.Price,
@@ -99,7 +111,7 @@ func reviewCommand(args []string) int {
 	return 0
 }
 
-func buildReviewSubagentRegistry(reviewSk skill.Skill) *tool.Registry {
+func buildReviewSubagentRegistry(reviewSk skill.Skill, cfg *config.Config, root string) *tool.Registry {
 	// The shared helper strips subagent-unavailable background capabilities while
 	// preserving foreground bash. This direct CLI path does not go through boot,
 	// so it first builds the small parent set from the review skill allow-list.
@@ -108,6 +120,37 @@ func buildReviewSubagentRegistry(reviewSk skill.Skill) *tool.Registry {
 		if tl, ok := tool.LookupBuiltin(name); ok {
 			parentReg.Add(tl)
 		}
+	}
+	// Replace the unconfined init-time defaults with confined instances,
+	// mirroring boot's addBuiltins: readers/search bound to the configured
+	// forbid-read roots, bash to the OS sandbox spec plus the session-data
+	// guard. The zero-value tools registered at init honor none of the user's
+	// [sandbox] config, so `reasonix review` previously read forbid_read
+	// paths a normal session would refuse.
+	writeRoots := cfg.WriteRootsForRoot(root)
+	forbidReadRoots := boot.RuntimeForbidReadRoots(cfg, root)
+	guard := builtin.NewSessionDataGuard(config.MemoryUserDir(), cfg.AllowWriteRoots())
+	bashSpec := sandbox.Spec{
+		Mode:            cfg.BashMode(),
+		WriteRoots:      writeRoots,
+		ForbidReadRoots: forbidReadRoots,
+		Network:         cfg.Sandbox.Network,
+	}
+	searchSpec := builtin.ResolveSearch(cfg.Tools.Search.Engine, cfg.Tools.Search.RgPath, os.Stderr)
+	confined := append(builtin.ConfineReaders(forbidReadRoots),
+		builtin.ConfineBash(bashSpec, guard),
+		builtin.ConfineSearch(searchSpec, bashSpec, forbidReadRoots))
+	for _, tl := range confined {
+		if _, ok := parentReg.Get(tl.Name()); ok {
+			parentReg.Add(tl)
+		}
+	}
+	if reviewSk.ReadOnly {
+		// The built-in review skill declares read-only; enforce it here exactly
+		// like the in-session runner does (writer tools stripped, bash under the
+		// permission-classified read-only policy) so `reasonix review` is not a
+		// writable backdoor.
+		return agent.ReadOnlySubagentToolRegistry(parentReg, reviewSk.AllowedTools)
 	}
 	return agent.SubagentToolRegistry(parentReg, reviewSk.AllowedTools)
 }

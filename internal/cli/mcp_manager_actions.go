@@ -16,6 +16,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/mcpdiag"
 	"reasonix/internal/plugin"
+	"reasonix/internal/shellparse"
 )
 
 func (m chatTUI) applyMCPAction(v mcpServerView, action mcpAction) (tea.Model, tea.Cmd) {
@@ -26,7 +27,7 @@ func (m chatTUI) applyMCPAction(v mcpServerView, action mcpAction) (tea.Model, t
 		m.mcp.stage = mcpStageMode
 		m.mcp.mode = mcpModeIndex(v.Tier)
 	case mcpActionEdit:
-		return m.openMCPConfig()
+		return m.openMCPConfig(v)
 	case mcpActionAuth:
 		return m.authenticateMCP(v)
 	case mcpActionClearAuth:
@@ -61,7 +62,7 @@ func (m chatTUI) connectSelectedMCP(v mcpServerView) (tea.Model, tea.Cmd) {
 	if m.mcpDisabled != nil {
 		delete(m.mcpDisabled, v.Name)
 	}
-	m.host = m.ctrl.Host()
+	m.refreshHostAndInvalidateSlashCatalog()
 	m.refreshMCPManager()
 	if m.mcp != nil {
 		m.mcp.stage = mcpStageDetail
@@ -82,7 +83,7 @@ func (m chatTUI) disableSelectedMCP(v mcpServerView) (tea.Model, tea.Cmd) {
 	}
 	m.mcpDisabled[v.Name] = true
 	m.ctrl.DisconnectMCPServer(v.Name)
-	m.host = m.ctrl.Host()
+	m.refreshHostAndInvalidateSlashCatalog()
 	m.refreshMCPManager()
 	if m.mcp != nil {
 		m.mcp.stage = mcpStageDetail
@@ -115,7 +116,7 @@ func (m chatTUI) removeSelectedMCP() (tea.Model, tea.Cmd) {
 	if m.mcpDisabled != nil {
 		delete(m.mcpDisabled, v.Name)
 	}
-	m.host = m.ctrl.Host()
+	m.refreshHostAndInvalidateSlashCatalog()
 	m.refreshMCPManager()
 	if m.mcp != nil {
 		m.mcp.stage = mcpStageList
@@ -134,20 +135,21 @@ func (m chatTUI) applyMCPMode(tier string) (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	cfg, err := config.Load()
+	workspace := m.mcpWorkspaceRoot()
+	cfg, err := config.LoadForRoot(workspace)
 	if err != nil {
 		m.notice("mcp mode: " + err.Error())
 		return m, nil
 	}
 	found := false
 	var selected config.PluginEntry
-	for i := range cfg.Plugins {
-		if cfg.Plugins[i].Name == v.Name {
-			cfg.Plugins[i].Tier = normalizeMCPTierForCLI(tier)
-			if !cfg.Plugins[i].ShouldAutoStart() {
-				cfg.Plugins[i].AutoStart = mcpBoolPtr(true)
+	for _, entry := range cfg.Plugins {
+		if entry.Name == v.Name {
+			entry.Tier = normalizeMCPTierForCLI(tier)
+			if !entry.ShouldAutoStart() {
+				entry.AutoStart = mcpBoolPtr(true)
 			}
-			selected = cfg.Plugins[i]
+			selected = entry
 			found = true
 			break
 		}
@@ -156,7 +158,7 @@ func (m chatTUI) applyMCPMode(tier string) (tea.Model, tea.Cmd) {
 		m.notice(fmt.Sprintf("mcp mode: no configured MCP server named %q", v.Name))
 		return m, nil
 	}
-	if err := cfg.Save(); err != nil {
+	if _, err := config.UpsertPluginInSourceForRoot(workspace, selected); err != nil {
 		m.notice("mcp mode: " + err.Error())
 		return m, nil
 	}
@@ -168,7 +170,7 @@ func (m chatTUI) applyMCPMode(tier string) (tea.Model, tea.Cmd) {
 			recordMCPModePluginFailure(m.ctrl, selected, err)
 			m.notice("saved connection mode, but connect failed: " + err.Error())
 		}
-		m.host = m.ctrl.Host()
+		m.refreshHostAndInvalidateSlashCatalog()
 	}
 	m.refreshMCPManager()
 	if m.mcp != nil {
@@ -195,14 +197,12 @@ func recordMCPModePluginFailure(ctrl control.Capabilities, e config.PluginEntry,
 	}, err)
 }
 
-func (m chatTUI) openMCPConfig() (tea.Model, tea.Cmd) {
-	path := ""
-	if m.mcp != nil {
-		path = m.mcp.snapshot.configPath
+func (m chatTUI) openMCPConfig(v mcpServerView) (tea.Model, tea.Cmd) {
+	fallback := config.UserConfigPath()
+	if m.mcp != nil && strings.TrimSpace(m.mcp.snapshot.configPath) != "" {
+		fallback = m.mcp.snapshot.configPath
 	}
-	if strings.TrimSpace(path) == "" {
-		path = mcpConfigLocation()
-	}
+	path := mcpConfigPathForView(v, fallback)
 	launch, err := mcpEditConfigLaunchCommand(path, exec.LookPath)
 	if err != nil {
 		m.notice("edit config: " + err.Error())
@@ -219,19 +219,44 @@ func (m chatTUI) openMCPConfig() (tea.Model, tea.Cmd) {
 }
 
 func (m chatTUI) authenticateMCP(v mcpServerView) (tea.Model, tea.Cmd) {
-	u := mcpAuthURL(v)
-	if u == "" {
-		m.notice("mcp auth: no authorization URL was returned; view logs for details")
+	if mcpAuthStatus(v) != mcpdiag.AuthRequired {
+		m.notice("mcp auth: this server is not requesting OAuth authorization")
 		return m, nil
 	}
-	cmd, err := mcpOpenCommand(u)
+	executable, err := os.Executable()
 	if err != nil {
 		m.notice("mcp auth: " + err.Error())
 		return m, nil
 	}
+	cmd := exec.Command(executable, "mcp", "auth", v.Name)
+	cmd.Dir = m.mcpWorkspaceRoot()
 	return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
-		return mcpExternalDoneMsg{label: "authorization page", target: u, err: err}
+		return mcpExternalDoneMsg{label: "MCP authorization", target: v.Name, server: v.Name, err: err}
 	})
+}
+
+func (m *chatTUI) handleMCPExternalDone(msg mcpExternalDoneMsg) {
+	if msg.err != nil {
+		m.notice(msg.label + ": " + msg.err.Error())
+		return
+	}
+	if msg.server == "" || m.ctrl == nil {
+		if msg.target != "" {
+			m.notice(msg.label + ": " + msg.target)
+		}
+		return
+	}
+	n, err := m.ctrl.ConnectConfiguredMCPServer(msg.server)
+	if err != nil {
+		m.notice("MCP authorization saved, but reconnect failed: " + err.Error())
+		return
+	}
+	if m.host != nil {
+		m.host.ClearFailure(msg.server)
+	}
+	m.refreshHostAndInvalidateSlashCatalog()
+	m.refreshMCPManager()
+	m.notice(fmt.Sprintf("authorized and connected %s — %d tools (available next message)", msg.server, n))
 }
 
 func (m chatTUI) clearSelectedMCPAuthentication() (tea.Model, tea.Cmd) {
@@ -251,7 +276,15 @@ func (m chatTUI) clearMCPAuthentication(v mcpServerView) (tea.Model, tea.Cmd) {
 		m.notice("managed MCP servers do not store authentication")
 		return m, nil
 	}
-	_, changed, _, err := config.ClearPluginAuthenticationInSource(v.Name)
+	workspace := m.mcpWorkspaceRoot()
+	if _, err := plugin.ClearHTTPMCPOAuth(plugin.Spec{
+		Name:     v.Name,
+		StateDir: plugin.MCPStateDir(config.ReasonixHomeDir(), workspace, v.Name),
+	}); err != nil {
+		m.notice("clear authentication: " + err.Error())
+		return m, nil
+	}
+	_, changed, _, err := config.ClearPluginAuthenticationInSourceForRoot(workspace, v.Name)
 	if err != nil {
 		m.notice("clear authentication: " + err.Error())
 		return m, nil
@@ -261,7 +294,7 @@ func (m chatTUI) clearMCPAuthentication(v mcpServerView) (tea.Model, tea.Cmd) {
 		if h := m.ctrl.Host(); h != nil {
 			h.ClearFailure(v.Name)
 		}
-		m.host = m.ctrl.Host()
+		m.refreshHostAndInvalidateSlashCatalog()
 	}
 	m.refreshMCPManager()
 	if m.mcp != nil {
@@ -299,19 +332,6 @@ func normalizeMCPTierForCLI(tier string) string {
 	}
 }
 
-func mcpConfigLocation() string {
-	if path := config.SourcePath(); path != "" {
-		return path
-	}
-	if _, err := os.Stat(".mcp.json"); err == nil {
-		return ".mcp.json"
-	}
-	if path := config.UserConfigPath(); path != "" {
-		return path
-	}
-	return "reasonix.toml"
-}
-
 type mcpEditConfigLaunch struct {
 	cmd           *exec.Cmd
 	editor        string
@@ -324,14 +344,22 @@ func mcpEditConfigLaunchCommand(path string, lookPath func(string) (string, erro
 		return mcpEditConfigLaunch{}, fmt.Errorf("no config path available")
 	}
 	if editor := strings.TrimSpace(os.Getenv("VISUAL")); editor != "" {
+		cmd, err := editorLaunchCmd(editor, path)
+		if err != nil {
+			return mcpEditConfigLaunch{}, err
+		}
 		return mcpEditConfigLaunch{
-			cmd:    exec.Command("sh", "-lc", editor+" "+shellQuote(path)),
+			cmd:    cmd,
 			editor: mcpEditorDisplayName(editor),
 		}, nil
 	}
 	if editor := strings.TrimSpace(os.Getenv("EDITOR")); editor != "" {
+		cmd, err := editorLaunchCmd(editor, path)
+		if err != nil {
+			return mcpEditConfigLaunch{}, err
+		}
 		return mcpEditConfigLaunch{
-			cmd:    exec.Command("sh", "-lc", editor+" "+shellQuote(path)),
+			cmd:    cmd,
 			editor: mcpEditorDisplayName(editor),
 		}, nil
 	}
@@ -354,8 +382,8 @@ func mcpEditConfigLaunchCommand(path string, lookPath func(string) (string, erro
 }
 
 func mcpEditorDisplayName(editor string) string {
-	fields := strings.Fields(editor)
-	if len(fields) == 0 {
+	fields, err := splitEditorCommand(os.ExpandEnv(editor))
+	if err != nil || len(fields) == 0 {
 		return ""
 	}
 	return fields[0]
@@ -376,23 +404,21 @@ func mcpOpenCommand(target string) (*exec.Cmd, error) {
 	}
 }
 
-func mcpAuthURL(v mcpServerView) string {
-	auth := mcpAuthDiagnosis(v)
-	if auth.Status != mcpdiag.AuthRequired {
-		return ""
-	}
-	return strings.TrimSpace(auth.URL)
-}
-
 func mcpAuthStatus(v mcpServerView) string {
 	return mcpAuthDiagnosis(v).Status
 }
 
 func mcpAuthDiagnosis(v mcpServerView) mcpdiag.AuthDiagnosis {
+	var diagnosis mcpdiag.AuthDiagnosis
 	if v.AuthStatus != "" {
-		return mcpdiag.AuthDiagnosis{Status: v.AuthStatus, URL: v.AuthURL}
+		diagnosis = mcpdiag.AuthDiagnosis{Status: v.AuthStatus, URL: v.AuthURL}
+	} else {
+		diagnosis = mcpdiag.DiagnoseAuth(v.Transport, v.Status, v.Error, v.URL, v.authConfigured)
 	}
-	return mcpdiag.DiagnoseAuth(v.Transport, v.Status, v.Error, v.URL, v.authConfigured)
+	if diagnosis.Status != mcpdiag.AuthNone && !mcpdiag.CanUseHTTPMCPOAuth(v.Transport, v.URL, v.authConfigured) {
+		return mcpdiag.AuthDiagnosis{Status: mcpdiag.AuthNone}
+	}
+	return diagnosis
 }
 
 func mcpCanClearAuth(v mcpServerView) bool {
@@ -417,8 +443,63 @@ func mcpConnected(ctrl control.Capabilities, name string) bool {
 	return false
 }
 
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+// editorLaunchCmd builds an exec.Cmd for an editor invocation read from the
+// VISUAL/EDITOR environment variable. The editor string may carry arguments
+// (e.g. "code --wait", "nvim -p") and shell variable / tilde references
+// (e.g. "$HOME/bin/myeditor", "~/bin/myeditor"); these are expanded without
+// invoking a shell, and the editor binary is resolved by the OS directly.
+// Shell metacharacters in the value cannot be executed: the expanded value must
+// parse as one static shell command. Control operators, redirection,
+// substitution, globbing, assignments, and other shell-shaping syntax are
+// rejected before launch.
+//
+// This matches the safe pattern already used by the terminal-editor
+// fallback (exec.Command(bin, path)) in the same function and avoids the
+// previous sh -lc construction that concatenated the raw editor value into
+// a shell command string.
+//
+// Quoting and backslash escaping are honored for word splitting only; shell
+// operators, globbing, command substitution, and redirection are rejected.
+// Tilde expansion only covers the leading-token forms "~" and "~/..."; "~user"
+// is not supported (and was not reliably supported by the prior sh -lc path
+// either, since $HOME for another user is not available without getpwuid).
+func editorLaunchCmd(editor, path string) (*exec.Cmd, error) {
+	expanded := os.ExpandEnv(editor)
+	args, err := splitEditorCommand(expanded)
+	if err != nil {
+		return nil, fmt.Errorf("invalid EDITOR/VISUAL value: %w", err)
+	}
+	if len(args) == 0 {
+		return nil, fmt.Errorf("invalid EDITOR/VISUAL value: %q", editor)
+	}
+	args[0] = expandLeadingTilde(args[0])
+	return exec.Command(args[0], append(args[1:], path)...), nil
+}
+
+func splitEditorCommand(s string) ([]string, error) {
+	args, malformed := shellparse.StaticFields(s)
+	if malformed != "" {
+		return nil, fmt.Errorf("%s", malformed)
+	}
+	return args, nil
+}
+
+// expandLeadingTilde replaces a leading "~" or "~/" prefix with the current
+// user's home directory. Other forms (e.g. "~user") are returned unchanged.
+// If the home directory cannot be determined the value is returned as-is so
+// the caller surfaces the exec failure rather than panicking.
+func expandLeadingTilde(p string) string {
+	if p != "~" && !strings.HasPrefix(p, "~/") {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return p
+	}
+	if p == "~" {
+		return home
+	}
+	return home + p[1:]
 }
 
 func mcpBoolPtr(v bool) *bool { return &v }

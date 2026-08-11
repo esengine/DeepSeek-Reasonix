@@ -97,6 +97,40 @@ func TestProviderFetchModelsFallsBackToV1Models(t *testing.T) {
 	}
 }
 
+func TestProviderFetchModelsContinuesAfterRootAuthFailure(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/models":
+			http.Error(w, `{"error":"wrong endpoint"}`, http.StatusUnauthorized)
+		case "/v1/models":
+			if r.Header.Get("Authorization") != "Bearer test-key" {
+				http.Error(w, "bad key", http.StatusUnauthorized)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]string{{"id": "model-a"}},
+			})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	p := ProviderEntry{Name: "test", BaseURL: srv.URL, APIKeyEnv: "FETCH_MODELS_TEST_KEY", resolvedAPIKey: "test-key"}
+	got, err := p.FetchModels(context.Background())
+	if err != nil {
+		t.Fatalf("FetchModels: %v", err)
+	}
+	if len(got) != 1 || got[0] != "model-a" {
+		t.Fatalf("got %v, want [model-a]", got)
+	}
+	if len(paths) != 2 || paths[0] != "/models" || paths[1] != "/v1/models" {
+		t.Fatalf("paths = %v, want [/models /v1/models]", paths)
+	}
+}
+
 func TestProviderFetchModelsUsesSetupProbeEnv(t *testing.T) {
 	const key = "FETCH_MODELS_PROBE_KEY"
 	t.Setenv(key, "probe-key")
@@ -141,5 +175,71 @@ func TestProviderFetchModelsAllowsNoAuthEndpoint(t *testing.T) {
 	}
 	if len(got) != 2 || got[0] != "local-a" || got[1] != "local-b" {
 		t.Fatalf("got %v, want [local-a local-b]", got)
+	}
+}
+
+func TestProviderFetchModelsUsesAnthropicAuthMode(t *testing.T) {
+	tests := []struct {
+		name       string
+		authHeader bool
+		assertAuth func(t *testing.T, r *http.Request)
+	}{
+		{
+			name:       "x-api-key",
+			authHeader: false,
+			assertAuth: func(t *testing.T, r *http.Request) {
+				t.Helper()
+				if got := r.Header.Get("x-api-key"); got != "anthropic-key" {
+					t.Fatalf("x-api-key = %q, want anthropic-key", got)
+				}
+				if got := r.Header.Get("Authorization"); got != "" {
+					t.Fatalf("Authorization = %q, want omitted", got)
+				}
+			},
+		},
+		{
+			name:       "bearer",
+			authHeader: true,
+			assertAuth: func(t *testing.T, r *http.Request) {
+				t.Helper()
+				if got := r.Header.Get("Authorization"); got != "Bearer anthropic-key" {
+					t.Fatalf("Authorization = %q, want Bearer anthropic-key", got)
+				}
+				if got := r.Header.Get("x-api-key"); got != "" {
+					t.Fatalf("x-api-key = %q, want omitted", got)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/anthropic/models" {
+					t.Fatalf("unexpected path %s", r.URL.Path)
+				}
+				tt.assertAuth(t, r)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"data": []map[string]string{{"id": "anthropic-model"}},
+				})
+			}))
+			defer srv.Close()
+
+			p := ProviderEntry{
+				Name:           "anthropic-compatible",
+				Kind:           "anthropic",
+				BaseURL:        srv.URL + "/anthropic",
+				APIKeyEnv:      "ANTHROPIC_COMPATIBLE_KEY",
+				AuthHeader:     tt.authHeader,
+				resolvedAPIKey: "anthropic-key",
+			}
+			got, err := p.FetchModels(context.Background())
+			if err != nil {
+				t.Fatalf("FetchModels: %v", err)
+			}
+			if len(got) != 1 || got[0] != "anthropic-model" {
+				t.Fatalf("got %v, want [anthropic-model]", got)
+			}
+		})
 	}
 }

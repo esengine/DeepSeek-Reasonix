@@ -137,6 +137,14 @@ func TestSplitQQMessageKeepsUTF8Budget(t *testing.T) {
 	}
 }
 
+func TestFitUTF8SliceKeepsGraphemeCluster(t *testing.T) {
+	cluster := "👨‍👩‍👧‍👦"
+	got := fitUTF8Slice(cluster+"!", len([]byte(cluster)))
+	if got != cluster {
+		t.Fatalf("fitUTF8Slice split grapheme cluster: %q", got)
+	}
+}
+
 func TestCapQQPassiveReplyChunks(t *testing.T) {
 	chunks := splitQQMessage(strings.Repeat("chunk-", 1800), qqMaxChunkBytes)
 	if len(chunks) <= qqMaxPassiveReplyChunks {
@@ -287,6 +295,47 @@ func TestSendMessageMarkdownFallbackDisablesMarkdown(t *testing.T) {
 	}
 	if bodies[2]["msg_type"] != float64(0) || bodies[2]["content"] != "**next**" || bodies[2]["msg_seq"] != float64(3) {
 		t.Fatalf("second body = %#v, want plain msg_seq=3", bodies[2])
+	}
+}
+
+func TestSendMessageReturnsAllChunkIDs(t *testing.T) {
+	t.Setenv("QQ_BOT_APP_SECRET", "secret")
+	origTransport := http.DefaultTransport
+	defer func() { http.DefaultTransport = origTransport }()
+
+	sendCount := 0
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Host {
+		case "bots.qq.com":
+			return jsonResponse(200, map[string]any{"access_token": "token", "expires_in": 3600}), nil
+		case "api.sgroup.qq.com":
+			sendCount++
+			return jsonResponse(200, map[string]any{"id": fmt.Sprintf("sent-%d", sendCount)}), nil
+		default:
+			t.Fatalf("unexpected request host: %s", req.URL.Host)
+			return nil, nil
+		}
+	})
+
+	text := strings.Repeat("chunk-", 1800)
+	wantChunks := len(splitQQMessage(text, qqMaxChunkBytes))
+	a := &adapter{
+		cfg:    config.QQBotConfig{AppID: "app-id", AppSecretEnv: "QQ_BOT_APP_SECRET"},
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	result, err := a.sendMessage(context.Background(), bot.OutboundMessage{
+		ChatType: bot.ChatDM,
+		ChatID:   "openid-user",
+		Text:     text,
+	})
+	if err != nil {
+		t.Fatalf("send message: %v", err)
+	}
+	if len(result.MessageIDs) != wantChunks {
+		t.Fatalf("message IDs = %v, want %d chunk IDs", result.MessageIDs, wantChunks)
+	}
+	if result.MessageID != fmt.Sprintf("sent-%d", wantChunks) {
+		t.Fatalf("compatibility message ID = %q, want last chunk", result.MessageID)
 	}
 }
 

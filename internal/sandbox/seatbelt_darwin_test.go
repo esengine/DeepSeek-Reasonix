@@ -4,11 +4,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
 
-// --- sbplString ---
+// sbplString
 
 func TestSbplString(t *testing.T) {
 	cases := []struct {
@@ -29,7 +30,7 @@ func TestSbplString(t *testing.T) {
 	}
 }
 
-// --- writeAllowDirs ---
+// writeAllowDirs
 
 func TestWriteAllowDirsDeduplication(t *testing.T) {
 	dirs := writeAllowDirs([]string{"/tmp", "/tmp", "/tmp"})
@@ -62,15 +63,19 @@ func TestWriteAllowDirsIncludesTemp(t *testing.T) {
 	dirs := writeAllowDirs(nil)
 	tmpDir := os.TempDir()
 	realTmp, _ := filepath.EvalSymlinks(tmpDir)
-	found := false
-	for _, d := range dirs {
-		if d == realTmp {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(dirs, realTmp)
 	if !found {
 		t.Errorf("writeAllowDirs should include temp dir %s, got %v", tmpDir, dirs)
+	}
+}
+
+func TestWriteAllowDirsIncludesSessionTemp(t *testing.T) {
+	private := t.TempDir()
+	dirs := writeAllowDirsForSpec(Spec{SessionTemp: private, MinimalWrites: true})
+	real, _ := filepath.EvalSymlinks(private)
+	found := slices.Contains(dirs, real)
+	if !found {
+		t.Fatalf("SessionTemp must be allowed under Seatbelt even with MinimalWrites: %v", dirs)
 	}
 }
 
@@ -95,7 +100,7 @@ func TestWriteAllowDirsNoDuplicates(t *testing.T) {
 	}
 }
 
-// --- seatbeltProfile ---
+// seatbeltProfile
 
 func TestSeatbeltProfileDeniesNetwork(t *testing.T) {
 	spec := Spec{Mode: "enforce", Network: false, WriteRoots: []string{"/workspace"}}
@@ -139,6 +144,30 @@ func TestSeatbeltProfileContainsRoots(t *testing.T) {
 	}
 }
 
+func TestMinimalWriteProfileOnlyAddsExplicitRootsAndDev(t *testing.T) {
+	root := t.TempDir()
+	dirs := writeAllowDirsForSpec(Spec{Mode: "enforce", WriteRoots: []string{root}, MinimalWrites: true})
+	if !containsDarwinPath(dirs, root) || !containsDarwinPath(dirs, "/dev") {
+		t.Fatalf("minimal write dirs = %v", dirs)
+	}
+	for _, forbidden := range []string{"/tmp", "/private/tmp", filepath.Join(os.Getenv("HOME"), ".npm"), filepath.Join(os.Getenv("HOME"), ".cache")} {
+		if forbidden != "" && containsDarwinPath(dirs, forbidden) {
+			t.Fatalf("minimal MCP profile unexpectedly allowed broad write root %q: %v", forbidden, dirs)
+		}
+	}
+}
+
+func containsDarwinPath(paths []string, want string) bool {
+	abs, err := filepath.Abs(want)
+	if err != nil {
+		return false
+	}
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = real
+	}
+	return slices.Contains(paths, abs)
+}
+
 func TestCommandUnwrappedWhenOff(t *testing.T) {
 	argv, wrapped := Command(Spec{Mode: "off"}, Shell{Kind: ShellBash, Path: "bash"}, "echo hi")
 	if wrapped {
@@ -150,19 +179,25 @@ func TestCommandUnwrappedWhenOff(t *testing.T) {
 }
 
 func TestProfileNetworkAndRoots(t *testing.T) {
-	with := seatbeltProfile(Spec{Mode: "enforce", WriteRoots: []string{"/work/proj"}, Network: true})
+	with := seatbeltProfile(Spec{Mode: "enforce", WriteRoots: []string{"/work/proj"}, ForbidReadRoots: []string{"/etc/ssh", "/home/user/.ssh"}, Network: true})
 	if strings.Contains(with, "(deny network*)") {
 		t.Error("network=true should not deny network")
 	}
-	if !strings.Contains(with, "(allow default)") || !strings.Contains(with, "(deny file-write*)") {
+	if !strings.Contains(with, "(allow default)") || !strings.Contains(with, "(deny file-write*)") || !strings.Contains(with, "(deny file-read* (subpath") {
 		t.Error("profile missing base allow/deny structure")
 	}
 	if !strings.Contains(with, `(subpath "/work/proj")`) {
 		t.Errorf("profile missing the write-root subpath:\n%s", with)
 	}
+	if !strings.Contains(with, `(subpath "/home/user/.ssh")`) {
+		t.Errorf("profile missing the forbid-read subpath:\n%s", with)
+	}
 	without := seatbeltProfile(Spec{Mode: "enforce", Network: false})
 	if !strings.Contains(without, "(deny network*)") {
 		t.Error("network=false should deny network")
+	}
+	if strings.Contains(without, "deny file-read") {
+		t.Error("profile should not contain file-read rules when forbid-read is empty")
 	}
 }
 
@@ -258,5 +293,46 @@ func TestGoBuildUnderSandbox(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(work, "sbtest")); err != nil {
 		t.Errorf("build output missing: %v", err)
+	}
+}
+
+// fakeSandboxExec writes an executable named sandbox-exec into a fresh temp
+// dir and returns its path. Tests probe the returned path directly so they do
+// not depend on process-global PATH state while the package runs in parallel
+// with the rest of the repository.
+func fakeSandboxExec(t *testing.T, exitCode string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sandbox-exec")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit "+exitCode+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// TestAvailableFalseWhenSandboxExecUnusable covers the macOS 10.14+ case where
+// sandbox-exec is installed but sandbox_apply is refused (exit 71): the probe
+// must report unavailable so enforce mode fails loudly at boot instead of
+// silently on every command.
+func TestAvailableFalseWhenSandboxExecUnusable(t *testing.T) {
+	path := fakeSandboxExec(t, "71")
+	sandboxExecUsability.Delete(path) // the fake is fresh per test; re-probe it
+	if usableSandboxExecPath(path) {
+		t.Fatal("sandbox-exec probe = true, want false: executable is unusable (exit 71)")
+	}
+}
+
+func TestAvailableTrueWhenSandboxExecUsable(t *testing.T) {
+	path := fakeSandboxExec(t, "0")
+	sandboxExecUsability.Delete(path)
+	if !usableSandboxExecPath(path) {
+		t.Fatal("sandbox-exec probe = false, want true: working sandbox-exec")
+	}
+}
+
+func TestAvailableFalseWhenSandboxExecMissing(t *testing.T) {
+	t.Setenv("PATH", t.TempDir()) // no sandbox-exec anywhere on PATH
+	if Available() {
+		t.Fatal("Available() = true, want false: sandbox-exec not on PATH")
 	}
 }

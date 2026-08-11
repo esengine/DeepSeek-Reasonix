@@ -12,19 +12,47 @@ func CanonicalizeSchema(raw json.RawMessage) json.RawMessage {
 		// A tool with no parameters (common for MCP tools) yields an empty
 		// schema. An empty json.RawMessage makes json.Marshal of the enclosing
 		// request fail ("unexpected end of JSON input") and bricks the whole
-		// provider; emit a valid empty-object schema instead.
-		return json.RawMessage(`{"type":"object"}`)
+		// provider; emit a strict OpenAI-compatible empty-object schema instead.
+		return json.RawMessage(`{"properties":{},"type":"object"}`)
 	}
 	var v any
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return raw
 	}
+	if v == nil {
+		// A nil RawMessage persists as JSON null in the MCP schema cache. Treat
+		// both forms as the same no-argument schema so old cache entries remain
+		// usable and never reach a strict provider as parameters: null.
+		return json.RawMessage(`{"properties":{},"type":"object"}`)
+	}
 	canon := canonicalizeSchemaValue(v)
+	ensureRootObjectProperties(canon)
 	b, err := json.Marshal(canon)
 	if err != nil {
 		return raw
 	}
 	return json.RawMessage(b)
+}
+
+func ensureRootObjectProperties(v any) {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return
+	}
+	if _, ok := m["type"]; !ok {
+		// MCP servers routinely omit the root type (or advertise a bare {}),
+		// while MCP and the Anthropic/OpenAI tool contracts require tool
+		// parameters to declare type "object". Tool arguments are always JSON
+		// objects, so the omission can only mean an object schema; make it
+		// explicit instead of letting validation quarantine a usable tool.
+		m["type"] = "object"
+	}
+	if m["type"] != "object" {
+		return
+	}
+	if _, ok := m["properties"]; !ok {
+		m["properties"] = map[string]any{}
+	}
 }
 
 func canonicalizeSchemaValue(v any) any {

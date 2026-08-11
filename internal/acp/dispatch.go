@@ -4,14 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"unicode/utf8"
 
+	"reasonix/internal/agent"
+	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/eventwire"
 	"reasonix/internal/permission"
 	"reasonix/internal/provider"
+	"reasonix/internal/shellparse"
 )
 
 // notifier is the slice of Conn the dispatch sink depends on: it pushes
@@ -46,15 +51,31 @@ const maxResultChars = 8000
 type updateSink struct {
 	conn      notifier
 	sessionID string
-	approve   func(id string, allow, session, persist bool)
-	answer    func(id string, answers []event.AskAnswer)
-	mu        sync.Mutex
-	turnCtx   context.Context
+	// cwd resolves relative tool-arg paths for tool_call locations. Set once
+	// via bindCwd before the sink receives events.
+	cwd     string
+	approve func(id string, allow, session, persist bool)
+	answer  func(id string, answers []event.AskAnswer)
+	status  func(event.Event)
+	// extensionSurface records the client's negotiated
+	// reasonix.extensionSurface support: structured surfaces go out as vendor
+	// session/update payloads on top of the always-sent text fallback.
+	extensionSurface bool
+	// speculativeToolIDs tracks parent-sampling tool IDs published under the
+	// active stream_attempt (attempt-scoped partials only). Guarded by mu —
+	// parent sampling and background sub-agents may Emit concurrently.
+	speculativeToolIDs map[string]struct{}
+	activeAttemptID    string
+	mu                 sync.Mutex
+	turnCtx            context.Context
 }
 
 func newUpdateSink(conn notifier, sessionID string) *updateSink {
 	return &updateSink{conn: conn, sessionID: sessionID}
 }
+
+// bindCwd installs the session root used to absolutize tool_call locations.
+func (s *updateSink) bindCwd(cwd string) { s.cwd = cwd }
 
 // bindApprove installs the controller's Approve callback, called by the service
 // once the controller exists (the sink is built first, to hand to the Factory).
@@ -71,6 +92,14 @@ func (s *updateSink) bindApprove(fn func(id string, allow, session, persist bool
 func (s *updateSink) bindAnswer(fn func(id string, answers []event.AskAnswer)) {
 	s.answer = fn
 }
+
+// bindStatus installs the vendor-status observer. It receives typed events,
+// never raw reasoning text or terminal transcripts.
+func (s *updateSink) bindStatus(fn func(event.Event)) { s.status = fn }
+
+// bindExtensionSurface records whether the client negotiated structured
+// extension-surface support in the initialize handshake.
+func (s *updateSink) bindExtensionSurface(supported bool) { s.extensionSurface = supported }
 
 func (s *updateSink) setTurnContext(ctx context.Context) {
 	s.mu.Lock()
@@ -97,6 +126,9 @@ func (s *updateSink) currentTurnContext() context.Context {
 // Emit implements event.Sink. The agent calls it serially (see event.Sink), so no
 // locking is needed; write serialization lives in Conn.
 func (s *updateSink) Emit(e event.Event) {
+	if s.status != nil {
+		s.status(e)
+	}
 	switch e.Kind {
 	case event.Reasoning:
 		if e.Text == "" {
@@ -110,11 +142,36 @@ func (s *updateSink) Emit(e event.Event) {
 		}
 		s.send(messageChunk{SessionUpdate: "agent_message_chunk", Content: textBlock(e.Text)})
 
+	case event.StreamAttempt:
+		// Attempt bookkeeping only. ACP still skips partial ToolDispatch (no
+		// pending card until full args arrive after commit), so discard must not
+		// invent failures for unpublished IDs. Full dispatches and parentId
+		// nested tools are real work and are never speculative.
+		s.mu.Lock()
+		switch e.StreamAttempt.Action {
+		case event.StreamAttemptBegin:
+			s.activeAttemptID = e.StreamAttempt.ID
+			s.speculativeToolIDs = nil
+		case event.StreamAttemptCommit, event.StreamAttemptDiscard:
+			s.activeAttemptID = ""
+			s.speculativeToolIDs = nil
+		}
+		s.mu.Unlock()
+
 	case event.ToolDispatch:
-		// Skip the early (Partial) dispatch: it carries no args, and the full one
-		// that follows is the single pending tool_call the protocol expects.
-		if e.Tool.Partial {
+		// Skip the early (Partial) dispatch and later same-ID preview refresh: ACP
+		// expects one pending tool_call and has no file-diff update payload.
+		if e.Tool.Partial || e.Tool.Refreshed {
 			return
+		}
+		// Full dispatches only arrive after a committed sampling attempt (or from
+		// nested sub-agents). Never mark them speculative.
+		// todo_write is the agent's task list; mirror it as an ACP plan update so
+		// the client renders structured progress alongside the tool_call.
+		if e.Tool.Name == "todo_write" {
+			if entries, ok := planEntriesFromTodoArgs(e.Tool.Args); ok {
+				s.send(planUpdate{SessionUpdate: "plan", Entries: entries})
+			}
 		}
 		s.send(toolCall{
 			SessionUpdate: "tool_call",
@@ -123,6 +180,7 @@ func (s *updateSink) Emit(e event.Event) {
 			Kind:          toolKindFor(e.Tool.Name),
 			Status:        "pending",
 			RawInput:      rawJSON(e.Tool.Args),
+			Locations:     s.toolLocations(e.Tool.Name, e.Tool.Args),
 		})
 
 	case event.ToolResult:
@@ -131,6 +189,11 @@ func (s *updateSink) Emit(e event.Event) {
 		if e.Tool.Err != "" {
 			status = "failed"
 			text = e.Tool.Err
+		}
+		if e.Tool.ID != "" {
+			s.mu.Lock()
+			delete(s.speculativeToolIDs, e.Tool.ID)
+			s.mu.Unlock()
 		}
 		s.send(toolCallUpdateMsg{
 			SessionUpdate: "tool_call_update",
@@ -172,7 +235,100 @@ func (s *updateSink) Emit(e event.Event) {
 		// clients such as Zed already know how to render this interaction.
 		turnCtx := s.currentTurnContext()
 		go s.requestAsk(turnCtx, e.Ask)
+
+	case event.ExtensionSurface, event.ExtensionStatus:
+		s.emitExtension(e)
 	}
+}
+
+// emitExtension maps one extension structured-UI event onto ACP updates. A
+// client that negotiated reasonix.extensionSurface receives the structured DTO
+// (the shared eventwire JSON contract) in a vendor session/update variant;
+// every client — including that one, belt and suspenders — also receives the
+// flattened text fallback as an ordinary agent_message_chunk. Blocking
+// form/request prompts never arrive here: the hub routes those through
+// AskRequest, which already rides the session/request_permission round-trip.
+func (s *updateSink) emitExtension(e event.Event) {
+	p := e.Extension
+	if p == nil {
+		return
+	}
+	if s.extensionSurface {
+		if dto := eventwire.ToWireExtensionSurface(p); dto != nil {
+			s.send(extensionSurfaceUpdate{
+				SessionUpdate: extensionSurfaceUpdateKind,
+				Meta: map[string]any{
+					"reasonix.io": map[string]any{
+						"extensionSurface": dto,
+					},
+				},
+			})
+		}
+	}
+	text := extensionSurfaceText(p)
+	if text == "" {
+		return
+	}
+	prefix := "\n\n"
+	if extensionSeverityWarns(p) {
+		prefix += "[warning] "
+	}
+	s.send(messageChunk{SessionUpdate: "agent_message_chunk", Content: textBlock(prefix + text)})
+}
+
+// extensionSurfaceText flattens one extension surface payload to plain text
+// for clients without structured-surface support: status →
+// "[plugin] label: detail", card → title + body + fields, form → title +
+// message, notification → title + body.
+func extensionSurfaceText(p *event.ExtensionSurfacePayload) string {
+	var b strings.Builder
+	write := func(s string) {
+		if s == "" {
+			return
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(s)
+	}
+	switch {
+	case p.Status != nil:
+		line := "[" + p.PluginID + "] " + p.Status.Label
+		if p.Status.Detail != "" {
+			line += ": " + p.Status.Detail
+		}
+		write(line)
+	case p.Card != nil:
+		write(p.Card.Title)
+		body := p.Card.Text
+		if p.Card.Markdown != "" {
+			body = p.Card.Markdown
+		}
+		write(body)
+		for _, f := range p.Card.Fields {
+			write(f.Key + ": " + f.Value)
+		}
+	case p.Form != nil:
+		write(p.Form.Title)
+		write(p.Form.Message)
+	case p.Notification != nil:
+		write(p.Notification.Title)
+		write(p.Notification.Body)
+	}
+	return b.String()
+}
+
+// extensionSeverityWarns reports whether the payload carries a warn/error
+// severity, which earns the same "[warning] " prefix as event.Notice.
+func extensionSeverityWarns(p *event.ExtensionSurfacePayload) bool {
+	severity := ""
+	if p.Status != nil {
+		severity = p.Status.Severity
+	}
+	if p.Notification != nil {
+		severity = p.Notification.Severity
+	}
+	return severity == "warn" || severity == "error"
 }
 
 func (s *updateSink) send(update any) {
@@ -187,15 +343,27 @@ func (s *updateSink) replay(msgs []provider.Message) {
 	for _, m := range msgs {
 		switch m.Role {
 		case provider.RoleUser:
-			if m.Content != "" {
-				s.send(messageChunk{SessionUpdate: "user_message_chunk", Content: textBlock(m.Content)})
+			// Replay the user-authored view, not the persisted wire form:
+			// UserMessageText strips injected transient blocks (<response-language>
+			// etc.) and unwraps memory-compiler contracts, same as every other
+			// surface (#6882). A turn that was pure injection replays as nothing.
+			text := m.Content
+			if steer, ok := agent.SteerText(text); ok {
+				text = steer
+			} else {
+				text = agent.UserMessageText(m)
+			}
+			if text != "" {
+				s.send(messageChunk{SessionUpdate: "user_message_chunk", Content: textBlock(text)})
 			}
 		case provider.RoleAssistant:
 			if m.ReasoningContent != "" {
 				s.send(messageChunk{SessionUpdate: "agent_thought_chunk", Content: textBlock(m.ReasoningContent)})
 			}
-			if m.Content != "" {
-				s.send(messageChunk{SessionUpdate: "agent_message_chunk", Content: textBlock(m.Content)})
+			// Same display filter as live emission: goal markers and evidence
+			// blocks stay in history for parsing but never reach the client.
+			if display := agent.DisplayAssistantText(m.Content); display != "" {
+				s.send(messageChunk{SessionUpdate: "agent_message_chunk", Content: textBlock(display)})
 			}
 			for _, tc := range m.ToolCalls {
 				s.send(toolCall{
@@ -205,7 +373,15 @@ func (s *updateSink) replay(msgs []provider.Message) {
 					Kind:          toolKindFor(tc.Name),
 					Status:        "completed",
 					RawInput:      rawJSON(tc.Arguments),
+					Locations:     s.toolLocations(tc.Name, tc.Arguments),
 				})
+				// Replaying the latest plan keeps the client's plan view in sync
+				// with the restored conversation; each update replaces the last.
+				if tc.Name == "todo_write" {
+					if entries, ok := planEntriesFromTodoArgs(tc.Arguments); ok {
+						s.send(planUpdate{SessionUpdate: "plan", Entries: entries})
+					}
+				}
 			}
 		case provider.RoleTool:
 			s.send(toolCallUpdateMsg{
@@ -230,7 +406,7 @@ func (s *updateSink) requestPermission(ctx context.Context, a event.Approval) {
 	if a.Subject != "" {
 		title = a.Tool + " " + a.Subject
 	}
-	options := approvalOptions(a.Tool, a.Subject)
+	options := approvalOptions(a.Tool, a.Subject, a.Fresh)
 	params := PermissionRequestParams{
 		SessionID: s.sessionID,
 		ToolCall: PermissionToolCall{
@@ -238,6 +414,9 @@ func (s *updateSink) requestPermission(ctx context.Context, a event.Approval) {
 			Title:      title,
 			Kind:       toolKindFor(a.Tool),
 			Status:     "pending",
+			RawInput:   rawJSON(string(a.RawInput)),
+			Locations:  s.toolLocations(a.Tool, string(a.RawInput)),
+			Meta:       s.permissionMeta(a),
 		},
 		Options: options,
 	}
@@ -251,12 +430,55 @@ func (s *updateSink) requestPermission(ctx context.Context, a event.Approval) {
 				allow = true
 			case OptAllowAlways:
 				allow, session = true, true
-			case OptAllowPersistent:
-				allow, session, persist = true, true, true
 			}
 		}
 	}
 	s.approve(a.ID, allow, session, persist)
+}
+
+// permissionMeta carries Reasonix-owned structured data that an ACP supervisor
+// may trust independently from model-supplied rawInput. A foreground bash call
+// receives argv only when the command is a single static command: shell
+// expansion, control operators, redirects, assignments, and background jobs all
+// fail closed and remain interactive.
+func (s *updateSink) permissionMeta(a event.Approval) map[string]any {
+	reasonix := map[string]any{
+		"approvalId": a.ID,
+		"tool":       a.Tool,
+		"subject":    a.Subject,
+		"fresh":      a.Fresh,
+	}
+	if reason := strings.TrimSpace(a.Reason); reason != "" {
+		reasonix["reason"] = reason
+	}
+	if a.Tool == "bash" && strings.TrimSpace(s.cwd) != "" {
+		var input struct {
+			Command                     string `json:"command"`
+			RunInBackground             bool   `json:"run_in_background"`
+			PreserveBackgroundProcesses bool   `json:"preserve_background_processes"`
+		}
+		if json.Unmarshal(a.RawInput, &input) == nil &&
+			!input.RunInBackground && !input.PreserveBackgroundProcesses {
+			cwd, cwdErr := filepath.Abs(s.cwd)
+			features, featureOK := shellparse.AnalyzeApprovalFeatures(input.Command)
+			command, commandErr := shellparse.ParseStaticCommand(input.Command, shellparse.StaticCommandPolicy{})
+			exact := featureOK && !features.DynamicCommandName && !features.NestedExecution &&
+				!features.Expansion && !features.Assignment && !features.Redirection &&
+				!shellparse.ContainsUnquotedGlob(input.Command)
+			for _, arg := range command.Argv {
+				// Tilde expansion is shell-dependent and therefore not exact argv.
+				if strings.HasPrefix(arg, "~") {
+					exact = false
+				}
+			}
+			if cwdErr == nil && commandErr == nil && exact && len(command.Argv) > 0 {
+				reasonix["commandSchemaVersion"] = 1
+				reasonix["argv"] = command.Argv
+				reasonix["cwd"] = cwd
+			}
+		}
+	}
+	return map[string]any{"reasonix.io": reasonix}
 }
 
 func (s *updateSink) requestAsk(ctx context.Context, a event.Ask) {
@@ -331,18 +553,32 @@ func (s *updateSink) requestAskQuestion(ctx context.Context, askID string, q eve
 	return label, ok
 }
 
-func approvalOptionNames(tool, subject string) (session, persistent string) {
+func approvalSessionOptionName(tool, subject string) string {
+	if tool == control.SandboxEscapeApprovalTool {
+		return "Use real environment for this session"
+	}
 	sessionRule := permission.SessionGrantRuleForScope(tool, subject)
-	persistentRule := permission.RememberRuleForScope(tool, subject)
-	return "Allow " + sessionRule + " for this session", "Always allow " + persistentRule + " (save to config)"
+	return "Allow " + sessionRule + " for this session"
 }
 
-func approvalOptions(tool, subject string) []PermissionOption {
-	allowSessionName, allowPersistentName := approvalOptionNames(tool, subject)
+func approvalOptions(tool, subject string, fresh bool) []PermissionOption {
+	if fresh || control.RequiresFreshHumanApprovalTool(tool) {
+		if tool == control.SandboxEscapeApprovalTool {
+			return []PermissionOption{
+				{OptionID: string(OptAllowOnce), Name: "Allow", Kind: OptAllowOnce},
+				{OptionID: string(OptAllowAlways), Name: approvalSessionOptionName(tool, subject), Kind: OptAllowAlways},
+				{OptionID: string(OptRejectOnce), Name: "Reject", Kind: OptRejectOnce},
+			}
+		}
+		return []PermissionOption{
+			{OptionID: string(OptAllowOnce), Name: "Allow", Kind: OptAllowOnce},
+			{OptionID: string(OptRejectOnce), Name: "Reject", Kind: OptRejectOnce},
+		}
+	}
+	allowSessionName := approvalSessionOptionName(tool, subject)
 	options := []PermissionOption{
 		{OptionID: string(OptAllowOnce), Name: "Allow", Kind: OptAllowOnce},
 		{OptionID: string(OptAllowAlways), Name: allowSessionName, Kind: OptAllowAlways},
-		{OptionID: string(OptAllowPersistent), Name: allowPersistentName, Kind: OptAllowPersistent},
 		{OptionID: string(OptRejectOnce), Name: "Reject", Kind: OptRejectOnce},
 	}
 	return options
@@ -387,6 +623,8 @@ func toolKindFor(name string) string {
 		return "edit"
 	case "bash":
 		return "execute"
+	case control.SandboxEscapeApprovalTool:
+		return "execute"
 	}
 	n := strings.ToLower(name)
 	switch {
@@ -401,4 +639,86 @@ func toolKindFor(name string) string {
 	default:
 		return "other"
 	}
+}
+
+// locationTools names the builtin tools whose "path" argument is a real file
+// target worth a follow-along location. Search/list tools are excluded: their
+// path is a directory scope, not a file the user would want opened.
+var locationTools = map[string]bool{
+	"read_file":     true,
+	"write_file":    true,
+	"edit_file":     true,
+	"multi_edit":    true,
+	"notebook_edit": true,
+	"delete_range":  true,
+	"delete_symbol": true,
+	"code_index":    true,
+}
+
+// toolLocations derives the file location a tool call touches from its raw
+// args, so the client can follow along in the editor. Unknown tools and
+// path-less args yield nil.
+func (s *updateSink) toolLocations(name, rawArgs string) []ToolCallLocation {
+	if !locationTools[name] {
+		return nil
+	}
+	var p struct {
+		Path   string `json:"path"`
+		Offset int    `json:"offset"`
+	}
+	if json.Unmarshal([]byte(rawArgs), &p) != nil || strings.TrimSpace(p.Path) == "" {
+		return nil
+	}
+	loc := ToolCallLocation{Path: s.absPath(p.Path)}
+	// read_file's offset is a 0-based start line; surface it so the editor can
+	// jump to the region being read.
+	if name == "read_file" && p.Offset > 0 {
+		line := p.Offset + 1
+		loc.Line = &line
+	}
+	return []ToolCallLocation{loc}
+}
+
+func (s *updateSink) absPath(p string) string {
+	if filepath.IsAbs(p) || s.cwd == "" {
+		return p
+	}
+	return filepath.Join(s.cwd, p)
+}
+
+// planEntriesFromTodoArgs maps a todo_write argument payload onto ACP plan
+// entries. Phase items (level 0) rank high, sub-steps medium; unknown statuses
+// degrade to pending so a malformed item cannot poison the whole update.
+func planEntriesFromTodoArgs(rawArgs string) ([]PlanEntry, bool) {
+	var p struct {
+		Todos []struct {
+			Content string `json:"content"`
+			Status  string `json:"status"`
+			Level   int    `json:"level"`
+		} `json:"todos"`
+	}
+	if json.Unmarshal([]byte(rawArgs), &p) != nil || len(p.Todos) == 0 {
+		return nil, false
+	}
+	entries := make([]PlanEntry, 0, len(p.Todos))
+	for _, t := range p.Todos {
+		if strings.TrimSpace(t.Content) == "" {
+			continue
+		}
+		status := t.Status
+		switch status {
+		case "pending", "in_progress", "completed":
+		default:
+			status = "pending"
+		}
+		priority := "medium"
+		if t.Level == 0 {
+			priority = "high"
+		}
+		entries = append(entries, PlanEntry{Content: t.Content, Priority: priority, Status: status})
+	}
+	if len(entries) == 0 {
+		return nil, false
+	}
+	return entries, true
 }

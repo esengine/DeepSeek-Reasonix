@@ -189,6 +189,35 @@ func TestCodeIndexWorkspaceBinding(t *testing.T) {
 	}
 }
 
+func TestCodeIndexForbidRead(t *testing.T) {
+	root := t.TempDir()
+	mkfile(t, filepath.Join(root, "allowed.go"), "package demo\nfunc AllowedNeedle() {}\n")
+	secretDir := filepath.Join(root, "secret")
+	mkfile(t, filepath.Join(secretDir, "secret.go"), "package secret\nfunc SecretNeedle() {}\n")
+
+	ci := codeIndex{workDir: root, forbidRoots: realRoots([]string{secretDir})}
+	out := runTool(t, ci, map[string]any{
+		"action": "search",
+		"query":  "Needle",
+		"path":   ".",
+	})
+	if !strings.Contains(out, "AllowedNeedle") {
+		t.Fatalf("code_index should still return allowed symbols, got:\n%s", out)
+	}
+	if strings.Contains(out, "SecretNeedle") || strings.Contains(out, "secret.go") {
+		t.Fatalf("code_index leaked forbidden symbols:\n%s", out)
+	}
+
+	out = runTool(t, ci, map[string]any{
+		"action": "search",
+		"query":  "SecretNeedle",
+		"path":   "secret",
+	})
+	if out != "(no symbols)" {
+		t.Fatalf("code_index forbidden root = %q, want (no symbols)", out)
+	}
+}
+
 func TestCodeIndexIgnoresLargeFiles(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "huge.ts"), []byte(strings.Repeat("x", codeIndexMaxFileSize+1)), 0o644); err != nil {

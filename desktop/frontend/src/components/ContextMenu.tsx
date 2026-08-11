@@ -10,6 +10,7 @@ export type ContextMenuItem =
       key: string;
       icon?: ReactNode;
       label: ReactNode;
+      shortcut?: string;
       disabled?: boolean;
       danger?: boolean;
       variant?: "section";
@@ -45,6 +46,7 @@ export function ContextMenu({
   point,
   items,
   onClose,
+  className,
   minWidth = 180,
   ariaLabel = "Context menu",
 }: {
@@ -52,6 +54,7 @@ export function ContextMenu({
   point: ContextMenuPoint | null;
   items: ContextMenuItem[];
   onClose: () => void;
+  className?: string;
   minWidth?: number;
   ariaLabel?: string;
 }) {
@@ -94,7 +97,7 @@ export function ContextMenu({
   return createPortal(
     <div
       ref={menuRef}
-      className="context-menu"
+      className={`context-menu${className ? ` ${className}` : ""}`}
       role="menu"
       aria-label={ariaLabel}
       style={{ left: position.left, top: position.top, minWidth }}
@@ -126,6 +129,7 @@ export function ContextMenu({
           >
             {item.icon}
             <span>{item.label}</span>
+            {item.shortcut && <span className="context-menu__shortcut">{item.shortcut}</span>}
           </button>
         );
       })}

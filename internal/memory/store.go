@@ -6,21 +6,25 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"reasonix/internal/config"
+	"reasonix/internal/fileutil"
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/frontmatter"
 )
 
-// Store is the per-project auto-memory: a directory of one-fact-per-file
-// Markdown notes with frontmatter, plus a MEMORY.md index of one line per fact.
+// Store is the scoped auto-memory store: project and global directories of
+// one-fact-per-file Markdown notes, each with a MEMORY.md index.
 // The model maintains it through the `remember` tool; the index loads into the
 // cached system-prompt prefix at boot so the model always knows what it has
-// saved, and reads individual facts on demand with read_file. The whole thing is
-// plain files the user can edit by hand.
+// saved, and reads individual facts on demand with the `memory` tool. The whole
+// thing is plain files the user can edit by hand.
 //
-// Memories of type "user" and "feedback" are routed to GlobalDir (shared across
-// all projects), while "project" and "reference" stay in the project-specific Dir.
+// Scope and type are independent: callers choose whether a fact belongs to the
+// current project or every project, while Type only classifies its contents.
 // List() and Index() merge both directories so every session sees the full set.
 type Store struct {
 	Dir       string // ...reasonix/projects/<slug>/memory
@@ -51,13 +55,43 @@ func NormalizeType(s string) Type {
 	return TypeProject
 }
 
+// FactScope controls where an auto-memory fact is active. It is intentionally
+// separate from Type: project feedback should not silently become global merely
+// because it is classified as feedback.
+type FactScope string
+
+const (
+	FactScopeProject FactScope = "project"
+	FactScopeGlobal  FactScope = "global"
+)
+
+// NormalizeFactScope defaults to the current project. Global memory must be an
+// explicit choice because it affects every workspace.
+func NormalizeFactScope(s string) FactScope {
+	if FactScope(strings.ToLower(strings.TrimSpace(s))) == FactScopeGlobal {
+		return FactScopeGlobal
+	}
+	return FactScopeProject
+}
+
 // Memory is one stored fact.
 type Memory struct {
-	Name        string // kebab-case slug; also the file stem (<name>.md)
-	Title       string // human-readable index label; falls back to a de-kebabed Name
-	Description string // one-line summary used for the index and recall
-	Type        Type
-	Body        string // the fact itself (Markdown)
+	ID             string // immutable identity; Name may change without changing ID
+	Revision       int    // monotonic content revision, starting at 1
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	Name           string // kebab-case slug; also the file stem (<name>.md)
+	Title          string // human-readable index label; falls back to a de-kebabed Name
+	Description    string // one-line summary used for the index and recall
+	Type           Type
+	Scope          FactScope  // project by default; global only when explicitly requested
+	Activation     Activation // persisted choice; "" = unset, resolved by ResolveActivation
+	Volatility     Volatility // how fast the fact ages; "" = unset, type default applies
+	SubjectKey     string     // which question the fact answers (project.package_manager); one active value per scope+subject
+	ExpiresAt      time.Time  // hard freshness boundary; zero = never expires
+	LastVerifiedAt time.Time  // last explicit confirmation; renews the freshness clock
+	Keywords       string     // search aliases (bilingual synonyms, related commands); recall-only, never rendered into the index
+	Body           string     // the fact itself (Markdown)
 }
 
 // ArchivedMemory is a saved fact that has been removed from active memory but
@@ -77,17 +111,15 @@ func StoreFor(userDir, cwd string) Store {
 		return Store{}
 	}
 	return Store{
-		Dir:       filepath.Join(userDir, "projects", slugify(absOf(cwd)), "memory"),
+		Dir:       filepath.Join(userDir, "projects", config.WorkspaceSlug(absOf(cwd)), "memory"),
 		GlobalDir: filepath.Join(userDir, "memory", "global"),
 	}
 }
 
-// DirFor returns the directory a memory of the given type should be stored in.
-// TypeUser and TypeFeedback go to GlobalDir (shared across all projects);
-// everything else goes to the project-specific Dir. When GlobalDir is empty,
-// all types fall back to Dir.
-func (s Store) DirFor(t Type) string {
-	if s.GlobalDir != "" && (t == TypeUser || t == TypeFeedback) {
+// DirFor returns the directory for an explicit fact scope. When GlobalDir is
+// unavailable, global writes fall back to Dir rather than being dropped.
+func (s Store) DirFor(scope FactScope) string {
+	if s.GlobalDir != "" && NormalizeFactScope(string(scope)) == FactScopeGlobal {
 		return s.GlobalDir
 	}
 	return s.Dir
@@ -95,14 +127,6 @@ func (s Store) DirFor(t Type) string {
 
 // indexFile is the human-readable index of saved memories.
 const indexFile = "MEMORY.md"
-
-// slugify turns an absolute project path into a single filesystem-safe segment,
-// matching the auto-memory convention (path separators → '-'), e.g.
-// "/Users/me/proj" → "-Users-me-proj".
-func slugify(absPath string) string {
-	r := strings.NewReplacer(string(os.PathSeparator), "-", "/", "-", "\\", "-", ":", "-")
-	return r.Replace(absPath)
-}
 
 // dirs returns the directories to read from, in order: GlobalDir first (shared
 // memories), then Dir (project-specific).
@@ -113,49 +137,22 @@ func (s Store) dirs() []string {
 	return []string{s.Dir}
 }
 
-// Index returns the MEMORY.md contents (the per-line index of saved memories),
-// or "" if there are none yet. This is what loads into the cached prefix.
-// When both GlobalDir and Dir have indexes, they are merged with deduplication
-// (global first).
-func (s Store) Index() string {
-	managed := map[string]string{}
-	for _, dir := range s.dirs() {
-		if dir == "" {
-			continue
-		}
-		b, err := os.ReadFile(filepath.Join(dir, indexFile))
-		if err != nil {
-			continue
-		}
-		for _, line := range strings.Split(string(b), "\n") {
-			if mt := indexLineRe.FindStringSubmatch(line); mt != nil {
-				if _, exists := managed[mt[1]]; !exists {
-					managed[mt[1]] = strings.TrimRight(line, "\r")
-				}
-			}
-		}
-	}
-	if len(managed) == 0 {
-		return ""
-	}
-	names := make([]string, 0, len(managed))
-	for n := range managed {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	var b strings.Builder
-	for _, n := range names {
-		b.WriteString(managed[n])
-		b.WriteString("\n")
-	}
-	return b.String()
-}
-
 // Path returns the absolute file path a memory with the given name lives at.
 // It checks GlobalDir first, then Dir, returning the first match. If no file
-// exists yet, it returns the path in Dir (the default for project types).
+// exists yet, it returns the path in Dir (the default project scope).
 func (s Store) Path(name string) string {
-	stem := slug(name) + ".md"
+	if _, path, ok := s.findActive(name); ok {
+		return path
+	}
+	ref := parseMemoryReference(name)
+	stem := ref.name + ".md"
+	if ref.qualified {
+		p, err := safeJoin(s.DirFor(ref.scope), stem)
+		if err != nil {
+			return ""
+		}
+		return p
+	}
 	for _, dir := range s.dirs() {
 		if dir == "" {
 			continue
@@ -180,36 +177,8 @@ func (s Store) Path(name string) string {
 // editor, and any future importer all go through here so the index never drifts
 // from the files. Returns the path written.
 func (s Store) Save(m Memory) (string, error) {
-	dir := s.DirFor(m.Type)
-	if dir == "" {
-		return "", fmt.Errorf("memory store unavailable (no user config dir)")
-	}
-	name := slug(m.Name)
-	if name == "" {
-		return "", fmt.Errorf("memory needs a name")
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	path, err := safeJoin(dir, name+".md")
-	if err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(path, []byte(render(m, name)), 0o644); err != nil {
-		return "", err
-	}
-	if err := reindexIn(dir, name, m); err != nil {
-		return path, err
-	}
-	for _, otherDir := range s.dirs() {
-		if sameDir(otherDir, dir) {
-			continue
-		}
-		if err := removeActiveMemoryInDir(otherDir, name); err != nil {
-			return path, err
-		}
-	}
-	return path, nil
+	result, err := s.SaveWithOptions(m, SaveOptions{})
+	return result.Path, err
 }
 
 // Archive removes a memory from the active store and moves its file under
@@ -219,10 +188,31 @@ func (s Store) Save(m Memory) (string, error) {
 // When both GlobalDir and Dir exist, it archives from every directory the
 // memory appears in (handles migration duplicates).
 func (s Store) Archive(name string) (string, error) {
+	memoryStoreMutationMu.Lock()
+	defer memoryStoreMutationMu.Unlock()
+	return s.archiveLocked(name)
+}
+
+func (s Store) archiveLocked(name string) (string, error) {
 	if s.Dir == "" && s.GlobalDir == "" {
 		return "", fmt.Errorf("memory store unavailable (no user config dir)")
 	}
-	name = slug(name)
+	ref := strings.TrimSpace(name)
+	parsed := parseMemoryReference(ref)
+	if active, path, ok := s.findActive(ref); ok && ref == active.ID {
+		return archiveMemoryInDir(filepath.Dir(path), active.Name)
+	} else if ok && parsed.qualified {
+		return archiveMemoryInDir(filepath.Dir(path), active.Name)
+	} else if ok {
+		name = active.Name
+	} else if parsed.qualified {
+		if parsed.name == "" {
+			return "", fmt.Errorf("memory needs a name")
+		}
+		return archiveMemoryInDir(s.DirFor(parsed.scope), parsed.name)
+	} else {
+		name = slug(name)
+	}
 	if name == "" {
 		return "", fmt.Errorf("memory needs a name")
 	}
@@ -247,18 +237,17 @@ func (s Store) Archive(name string) (string, error) {
 	return lastPath, nil
 }
 
-func removeActiveMemoryInDir(dir, name string) error {
-	if strings.TrimSpace(dir) == "" {
-		return nil
-	}
-	p, err := archiveInDir(dir, name)
+func archiveMemoryInDir(dir, name string) (string, error) {
+	path, err := archiveInDir(dir, name)
 	if err != nil {
-		return err
+		return "", err
 	}
-	if p != "" || indexContainsIn(dir, name) {
-		return flushIndexIn(dir, indexLinesExceptIn(dir, name))
+	if path != "" || indexContainsIn(dir, name) {
+		if err := flushIndexIn(dir, indexLinesExceptIn(dir, name)); err != nil {
+			return "", err
+		}
 	}
-	return nil
+	return path, nil
 }
 
 // Delete removes a memory from the active store and its MEMORY.md line — the
@@ -379,36 +368,17 @@ func repairOwnerWrite(root *os.Root, path string, dir bool) {
 	_ = root.Chmod(path, info.Mode().Perm()|need)
 }
 
-// render serializes a memory to frontmatter + body. The frontmatter mirrors the
-// auto-memory shape (name / description / metadata.type) so the files are
-// interchangeable with that ecosystem and re-readable by loadMemory.
-func render(m Memory, name string) string {
-	var b strings.Builder
-	b.WriteString("---\n")
-	b.WriteString("name: " + name + "\n")
-	if t := oneLine(m.Title); t != "" {
-		b.WriteString("title: " + t + "\n")
-	}
-	b.WriteString("description: " + oneLine(m.Description) + "\n")
-	b.WriteString("metadata:\n")
-	b.WriteString("  type: " + string(NormalizeType(string(m.Type))) + "\n")
-	b.WriteString("---\n\n")
-	b.WriteString(strings.TrimSpace(m.Body))
-	b.WriteString("\n")
-	return b.String()
-}
-
 // indexLineRe matches a managed index line so reindex/Delete can target the line
 // for one memory by its filename without disturbing the rest of a hand-edited
 // MEMORY.md.
-var indexLineRe = regexp.MustCompile(`\]\(([^)]+)\.md\)`)
+var indexLineRe = regexp.MustCompile(`(?m)^\s*-\s\[.+?\]\(([^)]+)\.md\)\s*—\s.*$`)
 
 // indexLinesExceptIn returns the managed MEMORY.md lines keyed by filename stem
 // in the given directory, dropping the entry for name (a missing index → empty map).
 func indexLinesExceptIn(dir, name string) map[string]string {
-	existing, _ := os.ReadFile(filepath.Join(dir, indexFile))
+	existing, _ := fileencoding.ReadFileUTF8(filepath.Join(dir, indexFile))
 	keep := map[string]string{}
-	for _, line := range strings.Split(string(existing), "\n") {
+	for line := range strings.SplitSeq(string(existing), "\n") {
 		if mt := indexLineRe.FindStringSubmatch(line); mt != nil && mt[1] != name {
 			keep[mt[1]] = strings.TrimRight(line, "\r")
 		}
@@ -417,11 +387,11 @@ func indexLinesExceptIn(dir, name string) map[string]string {
 }
 
 func indexContainsIn(dir, name string) bool {
-	existing, err := os.ReadFile(filepath.Join(dir, indexFile))
+	existing, err := fileencoding.ReadFileUTF8(filepath.Join(dir, indexFile))
 	if err != nil {
 		return false
 	}
-	for _, line := range strings.Split(string(existing), "\n") {
+	for line := range strings.SplitSeq(string(existing), "\n") {
 		if mt := indexLineRe.FindStringSubmatch(line); mt != nil && mt[1] == name {
 			return true
 		}
@@ -430,29 +400,76 @@ func indexContainsIn(dir, name string) bool {
 }
 
 // flushIndexIn rewrites MEMORY.md in the given directory from the managed lines,
-// sorted by filename.
+// preserving hand-written content. Managed lines are updated or removed, and
+// new managed entries are appended in sorted order.
 func flushIndexIn(dir string, lines map[string]string) error {
+	path := filepath.Join(dir, indexFile)
+	existing, _ := fileencoding.ReadFileUTF8(path)
+	processed := map[string]bool{}
+	var preserved strings.Builder
+	preservedEmpty := true
+	for line := range strings.SplitSeq(string(existing), "\n") {
+		trimmed := strings.TrimRight(line, "\r")
+		if mt := indexLineRe.FindStringSubmatch(trimmed); mt != nil {
+			name := mt[1]
+			if fresh, ok := lines[name]; ok {
+				preserved.WriteString(fresh)
+				preserved.WriteString("\n")
+				processed[name] = true
+				preservedEmpty = false
+			}
+			continue
+		}
+		preserved.WriteString(trimmed)
+		preserved.WriteString("\n")
+		if strings.TrimSpace(trimmed) != "" {
+			preservedEmpty = false
+		}
+	}
+
 	names := make([]string, 0, len(lines))
 	for n := range lines {
-		names = append(names, n)
+		if !processed[n] {
+			names = append(names, n)
+		}
 	}
 	sort.Strings(names)
 
 	var b strings.Builder
-	b.WriteString("# Memory\n\n")
+	if preservedEmpty && len(names) > 0 {
+		b.WriteString("# Memory\n\n")
+	} else {
+		b.WriteString(preserved.String())
+	}
 	for _, n := range names {
 		b.WriteString(lines[n])
 		b.WriteString("\n")
 	}
-	return os.WriteFile(filepath.Join(dir, indexFile), []byte(b.String()), 0o644)
+	result := strings.TrimRight(b.String(), "\n")
+	if result != "" {
+		result += "\n"
+	}
+	// The index is derived state, but a torn write would still hide facts
+	// from the next session's prefix until the next reindex.
+	return fileutil.AtomicWriteFile(path, []byte(result), 0o644)
 }
 
 // reindexIn rewrites the MEMORY.md line for name in the given directory,
 // preserving every other managed line.
 func reindexIn(dir, name string, m Memory) error {
 	lines := indexLinesExceptIn(dir, name)
-	lines[name] = fmt.Sprintf("- [%s](%s.md) — %s", displayTitle(m.Title, name), name, oneLine(m.Description))
+	lines[name] = renderIndexLine(name, m)
 	return flushIndexIn(dir, lines)
+}
+
+func renderIndexLine(name string, m Memory) string {
+	marker := ""
+	if ResolveActivation(m) == ActivationPinned {
+		marker = " pinned" // the body already rides the prefix; no need to read it
+	}
+	return fmt.Sprintf("- [%s](%s.md) — [%s/%s%s] %s",
+		displayTitle(m.Title, name), name,
+		NormalizeFactScope(string(m.Scope)), NormalizeType(string(m.Type)), marker, oneLine(m.Description))
 }
 
 // List returns the saved memories parsed from their files, sorted by name. Used
@@ -478,6 +495,9 @@ func (s Store) List() []Memory {
 				continue
 			}
 			if m, ok := loadMemory(filepath.Join(dir, e.Name())); ok {
+				if m.Scope == "" {
+					m.Scope = s.scopeForDir(dir)
+				}
 				if !seen[m.Name] {
 					out = append(out, m)
 					seen[m.Name] = true
@@ -486,6 +506,138 @@ func (s Store) List() []Memory {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// ListAll returns every active fact from both scopes without the legacy
+// name-based deduplication performed by List. Callers that understand scope can
+// use it to resolve project-over-global overrides without hiding either source.
+func (s Store) ListAll() []Memory {
+	if s.Dir == "" && s.GlobalDir == "" {
+		return nil
+	}
+	var out []Memory
+	for _, dir := range s.dirs() {
+		if dir == "" {
+			continue
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || entry.Name() == indexFile || !strings.HasSuffix(entry.Name(), ".md") {
+				continue
+			}
+			memory, ok := loadMemory(filepath.Join(dir, entry.Name()))
+			if !ok {
+				continue
+			}
+			if memory.Scope == "" {
+				memory.Scope = s.scopeForDir(dir)
+			}
+			out = append(out, memory)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		if out[i].Scope != out[j].Scope {
+			return out[i].Scope < out[j].Scope
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
+// PinnedGuidanceBudgetChars caps the total pinned-body runes the stable prefix
+// carries. Guidance that must always hold belongs in REASONIX.md/AGENTS.md
+// instructions; pinned memory is the bounded middle tier between instructions
+// and retrieval-only facts, and the cap is enforced at write time so the
+// prefix always equals exactly what the user curated.
+const PinnedGuidanceBudgetChars = 1500
+
+// pinnedGuidance snapshots explicitly pinned facts (plus legacy global
+// user/feedback, which ResolveActivation keeps pinned for compatibility) for
+// the stable session prefix, most recently updated first.
+func (s Store) pinnedGuidance() []Memory {
+	var out []Memory
+	for _, dir := range s.dirs() {
+		if dir == "" {
+			continue
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() || e.Name() == indexFile || !strings.HasSuffix(e.Name(), ".md") {
+				continue
+			}
+			m, ok := loadMemory(filepath.Join(dir, e.Name()))
+			if !ok {
+				continue
+			}
+			if m.Scope == "" {
+				m.Scope = s.scopeForDir(dir)
+			}
+			if ResolveActivation(m) != ActivationPinned || strings.TrimSpace(m.Body) == "" {
+				continue
+			}
+			out = append(out, m)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
+			return out[i].UpdatedAt.After(out[j].UpdatedAt)
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
+// pinnedGuidanceForProject removes pinned guidance shadowed by an equivalent
+// project fact before the stable session prefix is built. This makes the
+// documented project-over-global rule deterministic on the first turn instead
+// of depending on whether automatic recall happens to match the request.
+func (s Store) pinnedGuidanceForProject() []Memory {
+	guidance := s.pinnedGuidance()
+	if len(guidance) == 0 || s.Dir == "" {
+		return guidance
+	}
+	projectKeys := map[string]bool{}
+	for _, fact := range s.ListAll() {
+		if NormalizeFactScope(string(fact.Scope)) != FactScopeProject {
+			continue
+		}
+		for _, key := range recallIdentityKeys(fact) {
+			if strings.HasSuffix(key, ":") {
+				continue
+			}
+			projectKeys[key] = true
+		}
+	}
+	if len(projectKeys) == 0 {
+		return guidance
+	}
+	out := guidance[:0]
+	for _, fact := range guidance {
+		// Project pinned facts always stay: the shadow rule only suppresses a
+		// GLOBAL fact that an equivalent project fact overrides.
+		shadowed := false
+		if NormalizeFactScope(string(fact.Scope)) == FactScopeGlobal {
+			for _, key := range recallIdentityKeys(fact) {
+				if projectKeys[key] {
+					shadowed = true
+					break
+				}
+			}
+		}
+		if !shadowed {
+			out = append(out, fact)
+		}
+	}
 	return out
 }
 
@@ -515,6 +667,9 @@ func (s Store) ListArchived() []ArchivedMemory {
 			m, ok := loadMemory(path)
 			if !ok {
 				continue
+			}
+			if m.Scope == "" {
+				m.Scope = s.scopeForDir(base)
 			}
 			when := archiveTimeFromName(e.Name())
 			if when.IsZero() {
@@ -553,22 +708,99 @@ func archiveTimeFromName(name string) time.Time {
 // frontmatter render writes; a file without frontmatter still loads with its
 // body and a name derived from the filename.
 func loadMemory(path string) (Memory, bool) {
-	b, err := os.ReadFile(path)
+	b, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return Memory{}, false
 	}
 	fm, body := splitFrontmatter(string(b))
 	m := Memory{
-		Name:        fm["name"],
-		Title:       fm["title"],
-		Description: fm["description"],
-		Type:        NormalizeType(fm["type"]),
-		Body:        strings.TrimSpace(body),
+		ID:             fm["id"],
+		Revision:       parsePositiveInt(fm["revision"]),
+		CreatedAt:      parseMemoryTime(fm["created_at"]),
+		UpdatedAt:      parseMemoryTime(fm["updated_at"]),
+		Name:           fm["name"],
+		Title:          fm["title"],
+		Description:    fm["description"],
+		Keywords:       fm["keywords"],
+		Activation:     NormalizeActivation(fm["activation"]),
+		Volatility:     NormalizeVolatility(fm["volatility"]),
+		SubjectKey:     NormalizeSubjectKey(fm["subject_key"]),
+		ExpiresAt:      parseMemoryTime(fm["expires_at"]),
+		LastVerifiedAt: parseMemoryTime(fm["last_verified_at"]),
+		Type:           persistedFactType(fm),
+		Scope:          factScopeFromFrontmatter(fm["scope"]),
+		Body:           strings.TrimSpace(body),
 	}
 	if m.Name == "" {
 		m.Name = strings.TrimSuffix(filepath.Base(path), ".md")
 	}
+	if m.ID == "" {
+		m.ID = legacyMemoryID(m.Name, legacyIdentityScope(m))
+	}
+	if m.Revision <= 0 {
+		m.Revision = 1
+	}
+	if info, err := os.Stat(path); err == nil {
+		if m.CreatedAt.IsZero() {
+			m.CreatedAt = info.ModTime().UTC()
+		}
+		if m.UpdatedAt.IsZero() {
+			m.UpdatedAt = info.ModTime().UTC()
+		}
+	}
 	return m, true
+}
+
+func legacyIdentityScope(m Memory) FactScope {
+	if m.Scope != "" {
+		return NormalizeFactScope(string(m.Scope))
+	}
+	if m.Type == TypeUser || m.Type == TypeFeedback {
+		return FactScopeGlobal
+	}
+	return FactScopeProject
+}
+
+func parsePositiveInt(value string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || n < 1 {
+		return 0
+	}
+	return n
+}
+
+func parseMemoryTime(value string) time.Time {
+	when, _ := time.Parse(time.RFC3339Nano, strings.TrimSpace(value))
+	return when
+}
+
+func persistedFactType(fm map[string]string) Type {
+	if t := Type(strings.ToLower(strings.TrimSpace(fm["fact_type"]))); validTypes[t] {
+		return t
+	}
+	return NormalizeType(fm["type"])
+}
+
+func factScopeFromFrontmatter(s string) FactScope {
+	switch FactScope(strings.ToLower(strings.TrimSpace(s))) {
+	case FactScopeProject:
+		return FactScopeProject
+	case FactScopeGlobal:
+		return FactScopeGlobal
+	default:
+		return ""
+	}
+}
+
+func (s Store) scopeForDir(dir string) FactScope {
+	if s.GlobalDir != "" && sameDir(dir, s.GlobalDir) {
+		return FactScopeGlobal
+	}
+	return FactScopeProject
+}
+
+func (s Store) scopeForPath(path string) FactScope {
+	return s.scopeForDir(filepath.Dir(path))
 }
 
 // splitFrontmatter is a thin wrapper; the real parser lives in
@@ -577,12 +809,17 @@ func splitFrontmatter(s string) (map[string]string, string) {
 	return frontmatter.Split(s)
 }
 
-// slugRe strips everything but lowercase alphanumerics and dashes.
-var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
+// slugRe strips everything but Unicode letters and digits.
+var slugRe = regexp.MustCompile(`[^\p{L}\p{N}]+`)
 
-// slug normalises a name into a kebab-case, filesystem-safe stem.
+// slug normalises a name into a kebab-case, filesystem-safe stem. The stem is
+// bounded so `<stem>.md` stays under the 255-byte filename component limit —
+// a name distilled from a long title/description previously failed the write
+// with ENAMETOOLONG. Names short enough to have ever been written are
+// returned unchanged, so existing files keep resolving.
 func slug(s string) string {
-	return strings.Trim(slugRe.ReplaceAllString(strings.ToLower(strings.TrimSpace(s)), "-"), "-")
+	stem := strings.Trim(slugRe.ReplaceAllString(strings.ToLower(strings.TrimSpace(s)), "-"), "-")
+	return config.BoundFilenameComponent(stem, 255-len(".md"))
 }
 
 // oneLine collapses whitespace so a description can't break the single-line

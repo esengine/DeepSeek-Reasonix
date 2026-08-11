@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 
 	"reasonix/internal/skill"
 )
@@ -18,6 +19,9 @@ var githubAPIBaseURL = "https://api.github.com"
 // plan turns a request into a list of actions plus a warnings slice. It
 // does not touch the disk; the apply phase is responsible for side effects.
 func (t *installSourceTool) plan(ctx context.Context, req request) ([]action, []string, error) {
+	if after, ok := strings.CutPrefix(req.Source, "git:github.com/"); ok {
+		req.Source = "https://github.com/" + after
+	}
 	if isURL(req.Source) {
 		return t.planURL(ctx, req)
 	}
@@ -35,6 +39,15 @@ func (t *installSourceTool) plan(ctx context.Context, req request) ([]action, []
 
 func (t *installSourceTool) planURL(ctx context.Context, req request) ([]action, []string, error) {
 	rawURL := rawGitHubBlobURL(req.Source)
+	if req.Kind == "auto" || req.Kind == "plugin" {
+		actions, warnings, err := t.planGitHubPluginPackage(ctx, req)
+		if err == nil && len(actions) > 0 {
+			return actions, warnings, nil
+		}
+		if req.Kind == "plugin" {
+			return nil, warnings, err
+		}
+	}
 	if req.Kind == "mcp" && !looksLikeMarkdownURL(rawURL) && !looksLikeMCPJSONURL(rawURL) {
 		return []action{t.remoteMCPAction(req, rawURL)}, nil, nil
 	}
@@ -138,21 +151,59 @@ func (s githubRepoSource) branches() []string {
 
 func parseGitHubRepoSource(source string) (githubRepoSource, bool) {
 	u, err := url.Parse(source)
-	if err != nil || !strings.EqualFold(u.Hostname(), "github.com") {
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") ||
+		!strings.EqualFold(u.Hostname(), "github.com") || u.User != nil ||
+		u.Port() != "" || u.RawQuery != "" || u.Fragment != "" ||
+		hasUnsafeGitHubSourceCharacters(source) {
 		return githubRepoSource{}, false
 	}
-	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
-	if len(parts) < 2 {
+	escapedPath := u.EscapedPath()
+	if !strings.HasPrefix(escapedPath, "/") || strings.Contains(strings.TrimPrefix(escapedPath, "/"), "//") {
 		return githubRepoSource{}, false
 	}
-	out := githubRepoSource{Owner: parts[0], Repo: strings.TrimSuffix(parts[1], ".git")}
-	if len(parts) >= 4 && parts[2] == "tree" {
-		out.Branch = parts[3]
-		if len(parts) > 4 {
-			out.Path = strings.Join(parts[4:], "/")
+	escapedPath = strings.TrimPrefix(escapedPath, "/")
+	escapedPath = strings.TrimSuffix(escapedPath, "/")
+	if escapedPath == "" {
+		return githubRepoSource{}, false
+	}
+	escapedParts := strings.Split(escapedPath, "/")
+	parts := make([]string, 0, len(escapedParts))
+	for _, escapedPart := range escapedParts {
+		part, err := url.PathUnescape(escapedPart)
+		if err != nil || part == "" || part == "." || part == ".." ||
+			strings.ContainsAny(part, "/\\") || hasUnsafeGitHubSourceCharacters(part) {
+			return githubRepoSource{}, false
 		}
+		parts = append(parts, part)
+	}
+	if len(parts) < 2 || !packageNameRe.MatchString(parts[0]) {
+		return githubRepoSource{}, false
+	}
+	repo := strings.TrimSuffix(parts[1], ".git")
+	if !packageNameRe.MatchString(repo) {
+		return githubRepoSource{}, false
+	}
+	out := githubRepoSource{Owner: parts[0], Repo: repo}
+	if len(parts) == 2 {
+		return out, true
+	}
+	if len(parts) < 4 || parts[2] != "tree" {
+		return githubRepoSource{}, false
+	}
+	out.Branch = parts[3]
+	if len(parts) > 4 {
+		out.Path = strings.Join(parts[4:], "/")
 	}
 	return out, true
+}
+
+func hasUnsafeGitHubSourceCharacters(value string) bool {
+	for _, r := range value {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
 }
 
 type githubContentEntry struct {
@@ -299,6 +350,16 @@ func joinURLPath(parts ...string) string {
 func (t *installSourceTool) planLocal(req request, path string, info os.FileInfo) ([]action, []string, error) {
 	var actions []action
 	var warnings []string
+	if info.IsDir() && (req.Kind == "auto" || req.Kind == "plugin") {
+		pluginAction, pluginWarnings, err := t.localPluginPackageAction(req, path)
+		if err == nil {
+			return []action{pluginAction}, pluginWarnings, nil
+		}
+		if req.Kind == "plugin" {
+			return nil, pluginWarnings, err
+		}
+		warnings = append(warnings, err.Error())
+	}
 	if req.Kind == "auto" || req.Kind == "mcp" {
 		mcpPath := path
 		if info.IsDir() {
@@ -330,7 +391,7 @@ func (t *installSourceTool) planLocal(req request, path string, info os.FileInfo
 		actions = append(actions, skillActions...)
 	}
 	if len(actions) == 0 {
-		return nil, warnings, newErr(ErrManifestMissing, "no installable MCP server or skill found at %s", path)
+		return nil, warnings, newErr(ErrManifestMissing, "no installable MCP server, skill, or plugin package found at %s", path)
 	}
 	sort.SliceStable(actions, func(i, j int) bool {
 		if actions[i].Kind != actions[j].Kind {

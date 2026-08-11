@@ -219,7 +219,7 @@ func firstNonEmpty(vs ...string) string {
 
 func normalizeKind(kind string) string {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "skill", "mcp":
+	case "skill", "mcp", "plugin":
 		return strings.ToLower(strings.TrimSpace(kind))
 	default:
 		return "auto"

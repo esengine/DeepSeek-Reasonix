@@ -1,0 +1,19 @@
+version: 1
+project_slug: DeepSeek-Reasonix
+signing_policy_slug: release-signing
+repository_url: https://github.com/esengine/DeepSeek-Reasonix.git
+allowed_branch_names:
+  - main-v2
+allowed_build_definitions:
+  - .github/workflows/release-stable.yml
+  - .github/workflows/release-desktop.yml
+fingerprint_files:
+  - .github/workflows/release-stable.yml
+  - .github/workflows/release-stable-trigger.yml
+  - .github/workflows/release-desktop.yml
+  - .signpath/artifact-configurations/windows-payload.xml
+  - .signpath/artifact-configurations/windows-installer-v2.xml
+  - scripts/complete-signpath-request.ps1
+  - scripts/package-windows-desktop.sh
+  - scripts/verify-windows-authenticode.ps1
+  - cmd/signpath-contract/main.go

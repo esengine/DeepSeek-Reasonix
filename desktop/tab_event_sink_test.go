@@ -10,6 +10,99 @@ import (
 	"reasonix/internal/event"
 )
 
+type closeTrackingSink struct {
+	closed atomic.Bool
+}
+
+func (s *closeTrackingSink) Emit(event.Event) {}
+
+func (s *closeTrackingSink) Close() {
+	s.closed.Store(true)
+}
+
+type blockingCloseTrackingSink struct {
+	closeTrackingSink
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingCloseTrackingSink) Emit(event.Event) {
+	close(s.entered)
+	<-s.release
+}
+
+func TestTabEventSinkSetBotSinkClosesPreviousSink(t *testing.T) {
+	sink := &tabEventSink{}
+	first := &closeTrackingSink{}
+	second := &closeTrackingSink{}
+
+	sink.SetBotSink(first)
+	if first.closed.Load() {
+		t.Fatal("newly attached sink was closed")
+	}
+
+	sink.SetBotSink(second)
+	if !first.closed.Load() {
+		t.Fatal("previous sink was not closed when replaced")
+	}
+	if second.closed.Load() {
+		t.Fatal("replacement sink was closed too early")
+	}
+
+	sink.SetBotSink(nil)
+	if !second.closed.Load() {
+		t.Fatal("second sink was not closed when cleared")
+	}
+}
+
+func TestTabEventSinkOldTurnDoneDoesNotClearReplacement(t *testing.T) {
+	sink := &tabEventSink{}
+	old := &blockingCloseTrackingSink{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	replacement := &closeTrackingSink{}
+
+	if !sink.tryBeginTurn() {
+		t.Fatal("failed to reserve initial turn")
+	}
+	sink.SetBotSink(old)
+	done := make(chan struct{})
+	go func() {
+		sink.Emit(event.Event{Kind: event.TurnDone})
+		close(done)
+	}()
+	select {
+	case <-old.entered:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("old forwarder did not receive TurnDone")
+	}
+
+	sink.SetBotSink(replacement)
+	if sink.tryBeginTurn() {
+		t.Fatal("new turn admitted before old TurnDone completed")
+	}
+	close(old.release)
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("TurnDone did not finish")
+	}
+
+	if replacement.closed.Load() {
+		t.Fatal("old TurnDone cleared the replacement forwarder")
+	}
+	got, _ := sink.botSinkSnapshot()
+	if got != replacement {
+		t.Fatalf("attached forwarder = %T, want replacement", got)
+	}
+	if !sink.tryBeginTurn() {
+		t.Fatal("next turn was not admitted after TurnDone completed")
+	}
+	sink.cancelTurnStart()
+	sink.SetBotSink(nil)
+}
+
 func TestTabEventSinkDoesNotBlockOnRuntimeEventsEmit(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
@@ -17,7 +110,7 @@ func TestTabEventSinkDoesNotBlockOnRuntimeEventsEmit(t *testing.T) {
 	var calls atomic.Int32
 
 	sink := &tabEventSink{tabID: "tab", ctx: context.Background()}
-	sink.runtimeEvents.emit = func(_ context.Context, name string, payload ...interface{}) {
+	sink.runtimeEvents.emit = func(_ context.Context, name string, payload ...any) {
 		if name != eventChannel {
 			t.Errorf("event name = %q, want %q", name, eventChannel)
 		}
@@ -77,7 +170,7 @@ func TestEmitProjectTreeChangedDoesNotBlockOnRuntimeEventsEmit(t *testing.T) {
 	var calls atomic.Int32
 
 	app := &App{ctx: context.Background()}
-	app.runtimeEvents.emit = func(_ context.Context, name string, payload ...interface{}) {
+	app.runtimeEvents.emit = func(_ context.Context, name string, payload ...any) {
 		if name != "project-tree:changed" {
 			t.Errorf("event name = %q, want project-tree:changed", name)
 		}
@@ -128,7 +221,7 @@ func TestAsyncRuntimeEmitterDrainsBacklogInOrder(t *testing.T) {
 	var calls atomic.Int32
 
 	emitter := &asyncRuntimeEmitter{}
-	emitter.emit = func(_ context.Context, _ string, payload ...interface{}) {
+	emitter.emit = func(_ context.Context, _ string, payload ...any) {
 		if len(payload) != 1 {
 			t.Errorf("payload count = %d, want 1", len(payload))
 			return
@@ -146,7 +239,7 @@ func TestAsyncRuntimeEmitterDrainsBacklogInOrder(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	for i := 0; i < backlog; i++ {
+	for i := range backlog {
 		emitter.Emit(ctx, "agent:event", strconv.Itoa(i))
 	}
 
@@ -157,7 +250,7 @@ func TestAsyncRuntimeEmitterDrainsBacklogInOrder(t *testing.T) {
 	}
 	close(release)
 
-	for i := 0; i < backlog; i++ {
+	for i := range backlog {
 		select {
 		case got := <-delivered:
 			if want := strconv.Itoa(i); got != want {

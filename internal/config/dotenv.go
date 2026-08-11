@@ -1,11 +1,21 @@
 package config
 
 import (
-	"bufio"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+
+	"github.com/joho/godotenv"
+
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
+
+type dotEnvFile struct {
+	Path       string
+	Values     map[string]string
+	Duplicates []string
+}
 
 // loadDotEnv loads Reasonix's global .env for provider credentials. The
 // workspace .env values returned by loadDotEnvForRoot are ignored here because
@@ -35,7 +45,11 @@ func loadProjectDotEnvForExpansion(root string) map[string]string {
 	if current := UserCredentialsPath(); current != "" && samePath(path, current) {
 		return nil
 	}
-	return readDotEnvFileMap(path, func(key string) bool {
+	file, ok := readDotEnvFile(path)
+	if !ok {
+		return nil
+	}
+	return file.filtered(func(key string) bool {
 		return !isProjectDotEnvControlKey(key)
 	})
 }
@@ -80,6 +94,7 @@ func legacyCredentialsPaths() []string {
 	}
 	if dir := userSupportDir(); dir != "" {
 		add(filepath.Join(dir, "credentials"))
+		add(filepath.Join(dir, ".env"))
 	}
 	for _, cfg := range legacyXDGConfigPaths() {
 		add(filepath.Join(filepath.Dir(cfg), "credentials"))
@@ -88,25 +103,12 @@ func legacyCredentialsPaths() []string {
 }
 
 func loadDotEnvFileAs(path string, source CredentialSource) {
-	f, err := os.Open(path)
-	if err != nil {
+	file, ok := readDotEnvFile(path)
+	if !ok {
 		return
 	}
-	defer f.Close()
-
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		line = strings.TrimPrefix(line, "export ")
-		key, val, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
+	for key, val := range file.Values {
 		key = strings.TrimSpace(key)
-		val = strings.Trim(strings.TrimSpace(val), `"'`)
 		if key == "" {
 			continue
 		}
@@ -121,30 +123,30 @@ func loadDotEnvFileAs(path string, source CredentialSource) {
 	}
 }
 
-func readDotEnvFileMap(path string, allow func(string) bool) map[string]string {
-	f, err := os.Open(path)
+func readDotEnvFile(path string) (dotEnvFile, bool) {
+	raw, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
-		return nil
+		return dotEnvFile{}, false
 	}
-	defer f.Close()
+	values, err := godotenv.Unmarshal(string(raw))
+	if err != nil {
+		return dotEnvFile{}, false
+	}
+	return dotEnvFile{
+		Path:       path,
+		Values:     values,
+		Duplicates: detectDotEnvDuplicateKeys(path),
+	}, true
+}
 
+func (f dotEnvFile) filtered(allow func(string) bool) map[string]string {
 	out := map[string]string{}
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		line = strings.TrimPrefix(line, "export ")
-		key, val, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
+	for key, val := range f.Values {
 		key = strings.TrimSpace(key)
 		if key == "" || allow != nil && !allow(key) {
 			continue
 		}
-		out[key] = strings.Trim(strings.TrimSpace(val), `"'`)
+		out[key] = val
 	}
 	if len(out) == 0 {
 		return nil
@@ -152,30 +154,53 @@ func readDotEnvFileMap(path string, allow func(string) bool) map[string]string {
 	return out
 }
 
-func envFileValue(path, wantKey string) (string, bool) {
-	f, err := os.Open(path)
+func (f dotEnvFile) warnings() []string {
+	if len(f.Duplicates) == 0 {
+		return nil
+	}
+	warnings := make([]string, 0, len(f.Duplicates))
+	for _, key := range f.Duplicates {
+		warnings = append(warnings, "duplicate .env key "+key+" in "+f.Path+"; last parsed value wins")
+	}
+	return warnings
+}
+
+func detectDotEnvDuplicateKeys(path string) []string {
+	raw, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	dups := map[string]bool{}
+	for line := range strings.SplitSeq(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n") {
+		values, err := godotenv.Unmarshal(line)
+		if err != nil {
+			continue
+		}
+		for key := range values {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			if seen[key] {
+				dups[key] = true
+			}
+			seen[key] = true
+		}
+	}
+	out := make([]string, 0, len(dups))
+	for key := range dups {
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func envFileValue(path, wantKey string) (string, bool) {
+	file, ok := readDotEnvFile(path)
+	if !ok {
 		return "", false
 	}
-	defer f.Close()
-
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		line = strings.TrimPrefix(line, "export ")
-		key, val, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		key = strings.TrimSpace(key)
-		if key != wantKey {
-			continue
-		}
-		val = strings.Trim(strings.TrimSpace(val), `"'`)
-		return val, true
-	}
-	return "", false
+	val, ok := file.Values[wantKey]
+	return val, ok
 }

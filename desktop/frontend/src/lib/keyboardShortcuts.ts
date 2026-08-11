@@ -1,4 +1,4 @@
-import { useEffect, type DependencyList } from "react";
+import { useEffect, useState, type DependencyList } from "react";
 import type { DictKey } from "./i18n";
 
 export type ShortcutPlatform = "darwin" | "windows" | "linux";
@@ -6,9 +6,16 @@ export type ShortcutPlatform = "darwin" | "windows" | "linux";
 export type ShortcutAction =
   | "app.newSession"
   | "commandPalette.open"
+  | "composer.newline"
+  | "composer.redo"
+  | "composer.send"
+  | "composer.undo"
+  | "selection.addToChat"
   | "settings.open"
   | "tab.close"
   | "shell.toggle"
+  | "terminal.toggle"
+  | "terminal.newSession"
   | "sidebar.toggle"
   | "textSize.increase"
   | "textSize.decrease"
@@ -48,6 +55,7 @@ export type ShortcutDefinition = {
   preventDefault?: boolean;
   allowInEditable?: boolean;
   configurable?: boolean;
+  allowedKeys?: readonly string[];
 };
 
 const SHORTCUTS_STORAGE_KEY = "reasonix.customShortcuts";
@@ -87,6 +95,60 @@ export const SHORTCUT_DEFINITIONS: readonly ShortcutDefinition[] = [
     defaults: modCombo("w"),
     preventDefault: true,
   },
+  // Composer-owned shortcuts are handled inside its keydown path rather than
+  // useGlobalShortcut. Undo/redo stay locked to the platform editing standard
+  // so native textarea history and Reasonix transactions share one chord.
+  {
+    action: "composer.send",
+    section: "session",
+    labelKey: "shortcuts.action.composerSend",
+    descriptionKey: "shortcuts.desc.composerSend",
+    defaults: allPlatforms({ key: "Enter" }),
+    allowInEditable: true,
+    allowedKeys: ["Enter"],
+  },
+  {
+    action: "composer.newline",
+    section: "session",
+    labelKey: "shortcuts.action.composerNewline",
+    descriptionKey: "shortcuts.desc.composerNewline",
+    defaults: allPlatforms({ key: "Enter", shift: true }),
+    allowInEditable: true,
+    allowedKeys: ["Enter"],
+  },
+  {
+    action: "composer.undo",
+    section: "session",
+    labelKey: "shortcuts.action.composerUndo",
+    descriptionKey: "shortcuts.desc.composerUndo",
+    defaults: modCombo("z"),
+    allowInEditable: true,
+    configurable: false,
+  },
+  {
+    action: "composer.redo",
+    section: "session",
+    labelKey: "shortcuts.action.composerRedo",
+    descriptionKey: "shortcuts.desc.composerRedo",
+    defaults: {
+      darwin: { key: "z", meta: true, shift: true },
+      windows: { key: "z", ctrl: true, shift: true },
+      linux: { key: "z", ctrl: true, shift: true },
+    },
+    allowInEditable: true,
+    configurable: false,
+  },
+  {
+    action: "selection.addToChat",
+    section: "session",
+    labelKey: "shortcuts.action.addSelectionToChat",
+    descriptionKey: "shortcuts.desc.addSelectionToChat",
+    defaults: modCombo("l"),
+    preventDefault: true,
+    // The handler only arms while the transcript selection action is visible,
+    // so firing from an editable target (composer focus) is safe and expected.
+    allowInEditable: true,
+  },
   {
     action: "shell.toggle",
     section: "view",
@@ -98,6 +160,24 @@ export const SHORTCUT_DEFINITIONS: readonly ShortcutDefinition[] = [
       linux: { key: "b", ctrl: true, shift: true },
     },
     preventDefault: true,
+  },
+  {
+    action: "terminal.toggle",
+    section: "view",
+    labelKey: "shortcuts.action.terminalToggle",
+    descriptionKey: "shortcuts.desc.terminalToggle",
+    defaults: allPlatforms({ key: "`", ctrl: true }),
+    preventDefault: true,
+    allowInEditable: true,
+  },
+  {
+    action: "terminal.newSession",
+    section: "view",
+    labelKey: "shortcuts.action.terminalNewSession",
+    descriptionKey: "shortcuts.desc.terminalNewSession",
+    defaults: allPlatforms({ key: "`", ctrl: true, shift: true }),
+    preventDefault: true,
+    allowInEditable: true,
   },
   {
     action: "sidebar.toggle",
@@ -392,6 +472,16 @@ export function matchesShortcut(event: KeyboardShortcutEvent, action: ShortcutAc
   return definition.aliases?.[platform]?.some((alias) => sameCombo(combo, alias)) ?? false;
 }
 
+export function isReservedComposerHistoryShortcut(
+  event: KeyboardShortcutEvent,
+  platform: ShortcutPlatform,
+): boolean {
+  const combo = comboFromKeyboardEvent(event);
+  if (!combo) return false;
+  return sameCombo(combo, defaultShortcutCombo("composer.undo", platform))
+    || sameCombo(combo, defaultShortcutCombo("composer.redo", platform));
+}
+
 export function shortcutConflict(
   action: ShortcutAction,
   combo: ShortcutCombo,
@@ -401,6 +491,13 @@ export function shortcutConflict(
     if (definition.action === action) return false;
     return sameCombo(resolvedShortcutCombo(definition.action, platform), combo);
   }) ?? null;
+}
+
+export function shortcutAcceptsCombo(action: ShortcutAction, combo: ShortcutCombo): boolean {
+  const allowedKeys = shortcutDefinition(action).allowedKeys;
+  if (!allowedKeys || allowedKeys.length === 0) return true;
+  const key = normalizeCombo(combo).key;
+  return allowedKeys.some((allowedKey) => normalizeKey(allowedKey) === key);
 }
 
 export function useGlobalShortcut(
@@ -415,7 +512,12 @@ export function useGlobalShortcut(
     const platform = detectShortcutPlatform();
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (isShortcutRecorderTarget(event.target)) return;
-      if (!definition.allowInEditable && isEditableTarget(event.target)) return;
+      const editableTarget = isEditableTarget(event.target);
+      if (!definition.allowInEditable && editableTarget) return;
+      // Existing installations may already have a global action stored on
+      // Cmd/Ctrl+Z. Keep that legacy binding outside editors, but never let it
+      // intercept the platform undo/redo chord while text is being edited.
+      if (editableTarget && isReservedComposerHistoryShortcut(event, platform)) return;
       if (!matchesShortcut(event, action, platform)) return;
       if (definition.preventDefault !== false) event.preventDefault();
       handler(event);
@@ -424,6 +526,16 @@ export function useGlobalShortcut(
     return () => document.removeEventListener("keydown", onKey, { capture: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [action, enabled, handler, ...deps]);
+}
+
+// useShortcutComboLabel resolves an action's current combo as display text
+// (e.g. "Enter", "⌃Enter") and re-renders when the user rebinds shortcuts, so
+// tooltips and hints never show a stale key.
+export function useShortcutComboLabel(action: ShortcutAction): string {
+  const [, setRevision] = useState(0);
+  useEffect(() => onShortcutsChanged(() => setRevision((value) => value + 1)), []);
+  const platform = detectShortcutPlatform();
+  return formatShortcutCombo(resolvedShortcutCombo(action, platform), platform);
 }
 
 export function isCloseTabShortcut(event: KeyboardShortcutEvent, platform: ShortcutPlatform): boolean {
