@@ -1,5 +1,5 @@
 import { memo, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
 import type { ControllerLiveStore, Item, LiveStream } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
 import type { InvocationMetadataMap } from "../lib/invocationDisplay";
@@ -16,6 +16,7 @@ import { getProcessFoldPreference, onProcessFoldPreferenceChange, type ProcessFo
 import { STEER_NOTICE_PREFIX, isSteerNoticeText } from "../lib/useController";
 import { useTranscriptEntranceAnimation } from "../lib/useEntranceAnimation";
 import { useTranscriptScrollController } from "../lib/useTranscriptScrollController";
+import { shouldAdjustScrollOnItemSizeChange, shouldRunStreamEndRepin } from "../lib/transcriptScrollController";
 import { useTranscriptSelectionRetention } from "../lib/useTranscriptSelectionRetention";
 import { useTranscriptMeasurementInvalidation } from "../lib/useTranscriptMeasurementInvalidation";
 import { useTranscriptRowMeasurements } from "../lib/useTranscriptRowMeasurements";
@@ -217,9 +218,9 @@ export function Transcript({
     lastClientHeight,
     lastFooterHeight,
     setMode: setScrollMode,
+    modeRef: scrollModeRef,
     writeOffset,
     resetGeneration,
-    canVirtualizerAdjust,
     captureViewportAnchor,
     reconcileViewportAnchor,
   } = useTranscriptScrollController();
@@ -494,6 +495,22 @@ export function Transcript({
     };
   }, []);
 
+  // Stream-end fallback repin: when the live stream settles (turn_done clears
+  // the live snapshot) and the transcript is still pinned, wait a few frames
+  // for the synchronous markdown layout to settle and force the viewport to
+  // the bottom. Async worker-rendered growth lands after this and is covered
+  // by the row-measurement repin above. A user who scrolled away during the
+  // stream (not pinned) is never yanked back.
+  const prevLiveIdRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const hadLive = prevLiveIdRef.current !== undefined;
+    const hasLive = live?.id !== undefined;
+    prevLiveIdRef.current = live?.id;
+    if (shouldRunStreamEndRepin(hadLive, hasLive, stick.current)) {
+      scrollToBottomAfterLayout(3);
+    }
+  }, [live?.id, scrollToBottomAfterLayout, stick]);
+
   // ResizeObserver for container height changes.
   useEffect(() => {
     const el = scrollRef.current;
@@ -623,12 +640,26 @@ export function Transcript({
   });
   const getRowKey = useCallback((index: number) => `${tabId ?? ""}:${String(rows[index]?.key ?? index)}`, [rows, tabId]);
   const { estimateSize: estimateRowSize, layoutSnapshotRef, measureElement: measureRowSize } = useTranscriptRowMeasurements(tabId, rows);
+  // Row-size changes arrive from ResizeObserver-backed measurements (streaming
+  // tail growth, async markdown worker swaps, images). While pinned to the
+  // bottom, fold each measured change into the frame-batched repin so the
+  // viewport follows instead of relying on the virtualizer's anchor
+  // compensation (which would lift the viewport off the tail and, through the
+  // bottom-state re-evaluation, permanently disable auto-scroll).
+  const trackRowSizeChange = useCallback(
+    (element: HTMLDivElement, entry: ResizeObserverEntry | undefined, instance: Virtualizer<HTMLDivElement, HTMLDivElement>) => {
+      const height = measureRowSize(element, entry, instance);
+      if (stick.current) scheduleRepinIfWasPinned(0, "row-size");
+      return height;
+    },
+    [measureRowSize, scheduleRepinIfWasPinned, stick],
+  );
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
     getItemKey: getRowKey,
     estimateSize: estimateRowSize,
-    measureElement: measureRowSize,
+    measureElement: trackRowSizeChange,
     overscan: VIRTUAL_OVERSCAN_ROWS,
     rangeExtractor: selectionRetention.rangeExtractor,
     // Key-anchored compensation: prepended history pages, fold toggles and
@@ -645,7 +676,7 @@ export function Transcript({
     useAnimationFrameWithResizeObserver: true,
     onChange: () => selectionRetention.reconcileLogicalFocus(),
   });
-  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => canVirtualizerAdjust();
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => shouldAdjustScrollOnItemSizeChange(stick.current, scrollModeRef.current);
   useTranscriptMeasurementInvalidation({
     scrollRef,
     layoutSnapshotRef,
