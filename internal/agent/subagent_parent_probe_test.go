@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 )
@@ -198,5 +199,51 @@ func TestCleanupStaleRunningRechecksLiveParentBeforeMetadataRewrite(t *testing.T
 		if meta.Status != SubagentRunning {
 			t.Fatalf("status(%s) = %q, want running", ref, meta.Status)
 		}
+	}
+}
+
+func TestCleanupStaleRunningPublishesMaintenanceLease(t *testing.T) {
+	sessionDir := t.TempDir()
+	store := NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	spec := testSubagentSpec(t, "maintenance")
+	spec.ParentSession = "parent"
+	run, err := store.PrepareFresh(spec)
+	if err != nil {
+		t.Fatalf("PrepareFresh: %v", err)
+	}
+	if err := store.MarkRunning(run); err != nil {
+		t.Fatalf("MarkRunning: %v", err)
+	}
+	run.Release()
+
+	cleanupHoldingLease := make(chan struct{})
+	allowCleanup := make(chan struct{})
+	store.cleanupBeforeReread = func(string, string) {
+		close(cleanupHoldingLease)
+		<-allowCleanup
+	}
+	cleanupDone := make(chan error, 1)
+	go func() {
+		_, err := store.CleanupStaleRunning()
+		cleanupDone <- err
+	}()
+	<-cleanupHoldingLease
+
+	parentPath := filepath.Join(sessionDir, spec.ParentSession+".jsonl")
+	_, conflict := TryAcquireSessionLease(parentPath)
+	if !errors.Is(conflict, ErrSessionLeaseHeld) {
+		close(allowCleanup)
+		<-cleanupDone
+		t.Fatalf("startup conflict = %v, want ErrSessionLeaseHeld", conflict)
+	}
+	if !IsSessionMaintenanceLeaseConflict(conflict) {
+		close(allowCleanup)
+		<-cleanupDone
+		t.Fatal("CleanupStaleRunning holder was not marked as maintenance")
+	}
+
+	close(allowCleanup)
+	if err := <-cleanupDone; err != nil {
+		t.Fatalf("CleanupStaleRunning: %v", err)
 	}
 }

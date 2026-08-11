@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"reasonix/internal/agent"
 )
 
 func TestCreateEmptySessionFileConcurrentPathsAreUnique(t *testing.T) {
@@ -109,5 +111,104 @@ func TestTopicSessionResolutionKeepsDistinctTopicsIsolated(t *testing.T) {
 	}
 	if sessionRuntimeKey(resolvedA) == sessionRuntimeKey(resolvedB) {
 		t.Fatalf("distinct topics resolved to one session runtime key %q", sessionRuntimeKey(resolvedA))
+	}
+}
+
+// TestIssue8372ConcurrentSessionIdentityAndRestartStress exercises the P3
+// acceptance shape directly: 20 sessions are created concurrently in one
+// workspace for 100 rounds, for both same-model and different-model inputs.
+// Every path must be globally unique, acquire/release its lease, and reacquire
+// after a simulated close/restart without leaving an in-process busy marker.
+func TestIssue8372ConcurrentSessionIdentityAndRestartStress(t *testing.T) {
+	const (
+		rounds  = 100
+		workers = 20
+	)
+	tests := []struct {
+		name  string
+		model func(round, worker int) string
+	}{
+		{
+			name: "same model",
+			model: func(int, int) string {
+				return "provider/shared-model"
+			},
+		},
+		{
+			name: "different models",
+			model: func(round, worker int) string {
+				return fmt.Sprintf("provider-%02d/model-%03d-%02d", worker%5, round, worker)
+			},
+		},
+	}
+	type result struct {
+		path string
+		err  error
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			seen := make(map[string]string, rounds*workers)
+			for round := range rounds {
+				start := make(chan struct{})
+				results := make(chan result, workers)
+				var wg sync.WaitGroup
+				for worker := range workers {
+					wg.Add(1)
+					go func(worker int) {
+						defer wg.Done()
+						<-start
+						path, err := createEmptySessionFile(dir, tt.model(round, worker))
+						if err != nil {
+							results <- result{err: fmt.Errorf("create session: %w", err)}
+							return
+						}
+						lease, err := agent.TryAcquireSessionLease(path)
+						if err != nil {
+							results <- result{path: path, err: fmt.Errorf("initial lease: %w", err)}
+							return
+						}
+						lease.Release()
+						if agent.SessionLeaseHeldByCurrentRuntime(path) {
+							results <- result{path: path, err: fmt.Errorf("lease remained busy after close")}
+							return
+						}
+						restarted, err := agent.TryAcquireSessionLease(path)
+						if err != nil {
+							results <- result{path: path, err: fmt.Errorf("restart lease: %w", err)}
+							return
+						}
+						restarted.Release()
+						results <- result{path: path}
+					}(worker)
+				}
+				close(start)
+				wg.Wait()
+				close(results)
+
+				roundKeys := make(map[string]string, workers)
+				for result := range results {
+					if result.err != nil {
+						t.Fatalf("round %d path %q: %v", round, result.path, result.err)
+					}
+					key := sessionRuntimeKey(result.path)
+					if previous, exists := roundKeys[key]; exists {
+						t.Fatalf("round %d duplicate runtime key %q for %q and %q", round, key, previous, result.path)
+					}
+					roundKeys[key] = result.path
+					if previous, exists := seen[key]; exists {
+						t.Fatalf("runtime key reused across rounds %q for %q and %q", key, previous, result.path)
+					}
+					seen[key] = result.path
+				}
+				if len(roundKeys) != workers {
+					t.Fatalf("round %d unique runtime keys = %d, want %d", round, len(roundKeys), workers)
+				}
+			}
+			if len(seen) != rounds*workers {
+				t.Fatalf("unique runtime keys = %d, want %d", len(seen), rounds*workers)
+			}
+		})
 	}
 }

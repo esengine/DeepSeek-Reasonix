@@ -12,14 +12,14 @@ import (
 	"reasonix/internal/config"
 )
 
-// TestEnsureTabSessionLeaseForRebuildSurvivesTransientHolder reproduces the
+// TestEnsureTabSessionLeaseForRebuildWaitsForMaintenanceHolder reproduces the
 // startup "this session is already open in another Reasonix window" false
 // positive: a transient lease holder — CleanupStaleRunning probing a running
 // subagent's parent session during a concurrent controller build — holds the
 // session lease for a few milliseconds while the tab's own startup bind runs.
 // The bind must retry against the genuinely-free lease instead of surfacing a
 // spurious ErrSessionLeaseHeld.
-func TestEnsureTabSessionLeaseForRebuildSurvivesTransientHolder(t *testing.T) {
+func TestEnsureTabSessionLeaseForRebuildWaitsForMaintenanceHolder(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := config.SessionDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -44,7 +44,7 @@ func TestEnsureTabSessionLeaseForRebuildSurvivesTransientHolder(t *testing.T) {
 	probeDone := make(chan struct{})
 	go func() {
 		defer close(probeDone)
-		lease, err := agent.TryAcquireSessionLease(key)
+		lease, err := agent.TryAcquireSessionMaintenanceLease(key)
 		if err != nil {
 			t.Errorf("probe lease acquire: %v", err)
 			close(acquired)
@@ -62,9 +62,10 @@ func TestEnsureTabSessionLeaseForRebuildSurvivesTransientHolder(t *testing.T) {
 		bindErr <- app.ensureTabSessionLeaseForRebuild(tab, path, "")
 	}()
 
-	// Give the first bind attempt time to fail against the held lease, then
-	// release the probe: the bind must succeed on a later attempt.
-	time.Sleep(50 * time.Millisecond)
+	// Keep the maintenance owner past the old 2x50ms sleep-based retry window.
+	// Startup must wait for this exact generation's release signal, not time out
+	// and misreport another Reasonix window.
+	time.Sleep(200 * time.Millisecond)
 	close(releaseProbe)
 
 	select {
@@ -82,12 +83,11 @@ func TestEnsureTabSessionLeaseForRebuildSurvivesTransientHolder(t *testing.T) {
 	}
 }
 
-// TestIssue8372CharacterizesCurrentProcessHolderOutlastingStartupRetry pins the
-// desktop symptom once a process-local maintenance holder outlives the bounded
-// startup retry window. The public message stays sanitized, while the wrapped
-// SessionLeaseError and runtime issue retain enough holder data to distinguish
-// an in-process race from a genuinely foreign Reasonix window.
-func TestIssue8372CharacterizesCurrentProcessHolderOutlastingStartupRetry(t *testing.T) {
+// TestCurrentProcessRuntimeHolderRemainsARealConflict proves P2 does not turn
+// every same-process ErrSessionLeaseHeld into success. Only explicit
+// maintenance generations are waitable; a live runtime remains protected and
+// keeps the sanitized user-facing error plus structured diagnostics.
+func TestCurrentProcessRuntimeHolderRemainsARealConflict(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := config.SessionDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -101,22 +101,17 @@ func TestIssue8372CharacterizesCurrentProcessHolderOutlastingStartupRetry(t *tes
 	}
 	t.Cleanup(holder.Release)
 
-	previousInterval := sessionLeaseContentionRetryInterval
-	previousAttempts := sessionLeaseContentionRetryAttempts
-	sessionLeaseContentionRetryInterval = time.Millisecond
-	sessionLeaseContentionRetryAttempts = 2
-	t.Cleanup(func() {
-		sessionLeaseContentionRetryInterval = previousInterval
-		sessionLeaseContentionRetryAttempts = previousAttempts
-	})
-
 	tab := &WorkspaceTab{ID: "tab-8372", Scope: "global", SessionPath: path}
 	app := NewApp()
 	app.tabs[tab.ID] = tab
 	app.tabOrder = []string{tab.ID}
 	t.Cleanup(tab.releaseSessionLease)
 
+	started := time.Now()
 	startupErr := app.ensureTabSessionLeaseForRebuild(tab, path, "")
+	if elapsed := time.Since(started); elapsed > 250*time.Millisecond {
+		t.Fatalf("runtime conflict waited %s instead of failing immediately", elapsed)
+	}
 	if !errors.Is(startupErr, agent.ErrSessionLeaseHeld) {
 		t.Fatalf("startup error = %v, want ErrSessionLeaseHeld", startupErr)
 	}
@@ -142,5 +137,34 @@ func TestIssue8372CharacterizesCurrentProcessHolderOutlastingStartupRetry(t *tes
 	}
 	if issue.HolderPID != os.Getpid() || strings.TrimSpace(issue.HolderHost) == "" || issue.AcquiredAt == "" {
 		t.Fatalf("runtime issue holder diagnostics incomplete: %#v", issue)
+	}
+}
+
+func TestMaintenanceLeaseWaitDoesNotRetryForeignHolder(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "foreign-session.jsonl")
+	foreignErr := &agent.SessionLeaseError{
+		Path: path,
+		Info: &agent.SessionLeaseInfo{
+			SessionPath: path,
+			WriterID:    "other-window-writer",
+			PID:         os.Getpid() + 1,
+			Hostname:    "other-host",
+			AcquiredAt:  time.Now().UTC(),
+		},
+	}
+	attempts := 0
+	started := time.Now()
+	_, err := withSessionMaintenanceLeaseWait(func() (struct{}, error) {
+		attempts++
+		return struct{}{}, foreignErr
+	})
+	if !errors.Is(err, agent.ErrSessionLeaseHeld) {
+		t.Fatalf("foreign holder err = %v, want ErrSessionLeaseHeld", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("foreign holder attempts = %d, want exactly one", attempts)
+	}
+	if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
+		t.Fatalf("foreign holder waited %s instead of failing immediately", elapsed)
 	}
 }

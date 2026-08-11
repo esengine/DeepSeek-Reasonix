@@ -20,10 +20,11 @@ import (
 // a plain RemoveAll lets another process acquire the lease between the two
 // steps and then loses its lock file, breaking cross-process mutual exclusion.
 type SessionRemovalGuard struct {
-	path         string
-	saveLock     *sessionLockFile
-	leaseLock    *sessionLockFile
-	restoreOwner uint64
+	path             string
+	saveLock         *sessionLockFile
+	leaseLock        *sessionLockFile
+	restoreOwner     uint64
+	leaseCoordinator *sessionLeaseCoordinator
 }
 
 func tryTakeSessionLeaseLock(path string) (*sessionLockFile, error) {
@@ -88,13 +89,16 @@ func (l *SessionLease) TryConvertToRemovalGuard() (*SessionRemovalGuard, error) 
 	// rollback immune to an in-process lease race.
 	sessionLeaseActiveOwners.CompareAndDelete(l.path, l.ownerID)
 	leaseLock := l.leaseLock
+	coordinator := l.coordinator
 	l.leaseLock = nil
+	l.coordinator = nil
 	l.released = true
 	return &SessionRemovalGuard{
-		path:         l.path,
-		saveLock:     saveLock,
-		leaseLock:    leaseLock,
-		restoreOwner: l.ownerID,
+		path:             l.path,
+		saveLock:         saveLock,
+		leaseLock:        leaseLock,
+		restoreOwner:     l.ownerID,
+		leaseCoordinator: coordinator,
 	}, nil
 }
 
@@ -113,8 +117,9 @@ func (g *SessionRemovalGuard) RestoreSessionLease() (*SessionLease, error) {
 	}
 	sessionLeaseActiveOwners.Delete(g.path)
 	sessionLeaseActiveOwners.Store(g.path, ownerID)
-	lease := &SessionLease{path: g.path, ownerID: ownerID, leaseLock: g.leaseLock}
+	lease := &SessionLease{path: g.path, ownerID: ownerID, coordinator: g.leaseCoordinator, leaseLock: g.leaseLock}
 	g.leaseLock = nil
+	g.leaseCoordinator = nil
 	g.saveLock.Unlock()
 	g.saveLock = nil
 	g.restoreOwner = 0
@@ -133,7 +138,7 @@ func (g *SessionRemovalGuard) Release() {
 		// identity sidecar naming a writer after an abort that chose not to
 		// restore the runtime lease.
 		sessionLeaseActiveOwners.CompareAndDelete(g.path, g.restoreOwner)
-		sessionLeaseOwners.CompareAndDelete(g.path, g.restoreOwner)
+		retireSessionLeaseCoordinator(g.path, g.restoreOwner, g.leaseCoordinator)
 		_ = os.Remove(store.SessionLeaseInfo(g.path))
 		g.restoreOwner = 0
 	}
@@ -145,6 +150,8 @@ func (g *SessionRemovalGuard) Release() {
 		g.leaseLock.Unlock()
 		g.leaseLock = nil
 	}
+	g.leaseCoordinator.close()
+	g.leaseCoordinator = nil
 }
 
 // RemoveSidecarsAndRelease deletes the lease info and both lock files
@@ -157,7 +164,7 @@ func (g *SessionRemovalGuard) RemoveSidecarsAndRelease() error {
 	var errs []error
 	if g.restoreOwner != 0 {
 		sessionLeaseActiveOwners.CompareAndDelete(g.path, g.restoreOwner)
-		sessionLeaseOwners.CompareAndDelete(g.path, g.restoreOwner)
+		retireSessionLeaseCoordinator(g.path, g.restoreOwner, g.leaseCoordinator)
 	}
 	if err := os.Remove(store.SessionLeaseInfo(g.path)); err != nil && !os.IsNotExist(err) {
 		errs = append(errs, err)
@@ -174,6 +181,8 @@ func (g *SessionRemovalGuard) RemoveSidecarsAndRelease() error {
 		}
 		g.leaseLock = nil
 	}
+	g.leaseCoordinator.close()
+	g.leaseCoordinator = nil
 	g.restoreOwner = 0
 	return errors.Join(errs...)
 }

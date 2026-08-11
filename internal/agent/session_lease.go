@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,8 +30,34 @@ var ErrSessionLeaseHeld = errors.New("session lease held by another runtime")
 var (
 	sessionLeaseOwners       sync.Map
 	sessionLeaseActiveOwners sync.Map
+	sessionLeaseCoordinators sync.Map
+	sessionLeaseRegistryMu   sync.Mutex
 	sessionLeaseSeq          atomic.Uint64
 )
+
+type sessionLeasePurpose uint8
+
+const (
+	sessionLeasePurposeRuntime sessionLeasePurpose = iota
+	sessionLeasePurposeMaintenance
+)
+
+// sessionLeaseCoordinator lets an in-process contender wait for a specific
+// short-lived maintenance owner to release the OS lease. The signal belongs to
+// one owner generation, so a stale Release cannot wake waiters for a newer
+// lease on the same path.
+type sessionLeaseCoordinator struct {
+	ownerID uint64
+	purpose sessionLeasePurpose
+	done    chan struct{}
+	once    sync.Once
+}
+
+func (c *sessionLeaseCoordinator) close() {
+	if c != nil {
+		c.once.Do(func() { close(c.done) })
+	}
+}
 
 type SessionLeaseInfo struct {
 	SessionPath string    `json:"session_path"`
@@ -43,6 +70,8 @@ type SessionLeaseInfo struct {
 type SessionLeaseError struct {
 	Path string
 	Info *SessionLeaseInfo
+
+	maintenanceRelease <-chan struct{}
 }
 
 func (e *SessionLeaseError) Error() string {
@@ -62,6 +91,7 @@ func (e *SessionLeaseError) Unwrap() error {
 type SessionLease struct {
 	path            string
 	ownerID         uint64
+	coordinator     *sessionLeaseCoordinator
 	mu              sync.Mutex
 	leaseLock       *sessionLockFile
 	released        bool
@@ -81,6 +111,19 @@ type SessionLease struct {
 }
 
 func TryAcquireSessionLease(path string) (*SessionLease, error) {
+	return tryAcquireSessionLease(path, sessionLeasePurposeRuntime)
+}
+
+// TryAcquireSessionMaintenanceLease acquires the same durable session lease as
+// TryAcquireSessionLease, but marks this owner as a short-lived in-process
+// maintenance operation. Contenders may wait for this exact generation's
+// release instead of guessing with sleep-based retries. It does not weaken the
+// cross-process lock and must not be used for a live controller runtime.
+func TryAcquireSessionMaintenanceLease(path string) (*SessionLease, error) {
+	return tryAcquireSessionLease(path, sessionLeasePurposeMaintenance)
+}
+
+func tryAcquireSessionLease(path string, purpose sessionLeasePurpose) (*SessionLease, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, fmt.Errorf("empty session path")
 	}
@@ -89,13 +132,26 @@ func TryAcquireSessionLease(path string) (*SessionLease, error) {
 		return nil, err
 	}
 	ownerID := sessionLeaseSeq.Add(1)
-	if _, loaded := sessionLeaseOwners.LoadOrStore(path, ownerID); loaded {
+	coordinator := &sessionLeaseCoordinator{ownerID: ownerID, purpose: purpose, done: make(chan struct{})}
+	sessionLeaseRegistryMu.Lock()
+	_, loaded := sessionLeaseOwners.LoadOrStore(path, ownerID)
+	var currentCoordinator *sessionLeaseCoordinator
+	if loaded {
+		if current, ok := sessionLeaseCoordinators.Load(path); ok {
+			currentCoordinator, _ = current.(*sessionLeaseCoordinator)
+		}
+	} else {
+		sessionLeaseCoordinators.Store(path, coordinator)
+	}
+	sessionLeaseRegistryMu.Unlock()
+	if loaded {
 		info, _ := LoadSessionLeaseInfo(path)
-		return nil, &SessionLeaseError{Path: path, Info: info}
+		return nil, newSessionLeaseError(path, info, currentCoordinator)
 	}
 	leaseLock, err := tryTakeSessionLeaseLock(path)
 	if err != nil {
-		sessionLeaseOwners.CompareAndDelete(path, ownerID)
+		retireSessionLeaseCoordinator(path, ownerID, coordinator)
+		coordinator.close()
 		if errors.Is(err, ErrSessionLeaseHeld) {
 			info, _ := LoadSessionLeaseInfo(path)
 			return nil, &SessionLeaseError{Path: path, Info: info}
@@ -105,13 +161,62 @@ func TryAcquireSessionLease(path string) (*SessionLease, error) {
 	// The OS lock proves any active-registry entry left without its reservation
 	// is stale. Clear it before publishing this generation.
 	sessionLeaseActiveOwners.Delete(path)
-	lease := &SessionLease{path: path, ownerID: ownerID, leaseLock: leaseLock}
+	lease := &SessionLease{path: path, ownerID: ownerID, coordinator: coordinator, leaseLock: leaseLock}
 	if err := SaveSessionLeaseInfo(path, newSessionLeaseInfo(path)); err != nil {
 		lease.Release()
 		return nil, err
 	}
 	sessionLeaseActiveOwners.Store(path, ownerID)
 	return lease, nil
+}
+
+func newSessionLeaseError(path string, info *SessionLeaseInfo, coordinator *sessionLeaseCoordinator) *SessionLeaseError {
+	err := &SessionLeaseError{Path: path, Info: info}
+	if coordinator != nil && coordinator.purpose == sessionLeasePurposeMaintenance {
+		err.maintenanceRelease = coordinator.done
+	}
+	return err
+}
+
+// WaitForSessionMaintenanceLeaseRelease waits only when err identifies an
+// in-process maintenance lease generation. Runtime leases and foreign-process
+// locks return false immediately; callers must continue surfacing those as real
+// ownership conflicts. A true result means the maintenance owner released its
+// OS lock before ctx ended and the caller may retry acquisition.
+func WaitForSessionMaintenanceLeaseRelease(ctx context.Context, err error) bool {
+	var leaseErr *SessionLeaseError
+	if !errors.As(err, &leaseErr) || leaseErr == nil || leaseErr.maintenanceRelease == nil {
+		return false
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-leaseErr.maintenanceRelease:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// IsSessionMaintenanceLeaseConflict reports whether err names a live,
+// in-process maintenance generation. Callers use it to avoid treating that
+// deliberate short hold as an orphan eligible for reclaim.
+func IsSessionMaintenanceLeaseConflict(err error) bool {
+	var leaseErr *SessionLeaseError
+	return errors.As(err, &leaseErr) && leaseErr != nil && leaseErr.maintenanceRelease != nil
+}
+
+// retireSessionLeaseCoordinator removes only the named owner generation from
+// the process-local registry. Closing happens separately after the OS lock is
+// unlocked, so waiters never wake into a registry-free-but-still-locked gap.
+func retireSessionLeaseCoordinator(path string, ownerID uint64, coordinator *sessionLeaseCoordinator) {
+	sessionLeaseRegistryMu.Lock()
+	sessionLeaseOwners.CompareAndDelete(path, ownerID)
+	if current, ok := sessionLeaseCoordinators.Load(path); ok && current == coordinator && coordinator != nil && coordinator.ownerID == ownerID {
+		sessionLeaseCoordinators.Delete(path)
+	}
+	sessionLeaseRegistryMu.Unlock()
 }
 
 // TryReclaimCurrentProcessSessionLease re-acquires a lease whose in-process
@@ -157,9 +262,20 @@ func TryReclaimCurrentProcessSessionLease(path string) (*SessionLease, error) {
 	// the lock above and never reach this store, and a stale lease released
 	// later misses its CompareAndDelete against the new owner id.
 	ownerID := sessionLeaseSeq.Add(1)
-	lease := &SessionLease{path: path, ownerID: ownerID, leaseLock: leaseLock}
+	coordinator := &sessionLeaseCoordinator{ownerID: ownerID, purpose: sessionLeasePurposeRuntime, done: make(chan struct{})}
+	lease := &SessionLease{path: path, ownerID: ownerID, coordinator: coordinator, leaseLock: leaseLock}
 	sessionLeaseActiveOwners.Delete(path)
+	sessionLeaseRegistryMu.Lock()
+	var previousCoordinator *sessionLeaseCoordinator
+	if previous, ok := sessionLeaseCoordinators.Load(path); ok {
+		previousCoordinator, _ = previous.(*sessionLeaseCoordinator)
+	}
 	sessionLeaseOwners.Store(path, ownerID)
+	sessionLeaseCoordinators.Store(path, coordinator)
+	sessionLeaseRegistryMu.Unlock()
+	if previousCoordinator != coordinator {
+		previousCoordinator.close()
+	}
 	if err := SaveSessionLeaseInfo(path, newSessionLeaseInfo(path)); err != nil {
 		lease.Release()
 		return nil, err
@@ -267,6 +383,8 @@ func (l *SessionLease) Release() {
 	leaseLock := l.leaseLock
 	l.leaseLock = nil
 	beforeReleaseLock := l.beforeReleaseLock
+	coordinator := l.coordinator
+	l.coordinator = nil
 	l.mu.Unlock()
 
 	// Revoke ownership-sensitive repair before the OS lock becomes available
@@ -274,9 +392,6 @@ func (l *SessionLease) Release() {
 	// deauthorizing a newer reclaimed lease.
 	sessionLeaseActiveOwners.CompareAndDelete(l.path, l.ownerID)
 	_ = os.Remove(sessionLeaseInfoPath(l.path))
-	// Only remove the entry this lease owns: after a reclaim the map may
-	// already point at a newer lease for the same path.
-	sessionLeaseOwners.CompareAndDelete(l.path, l.ownerID)
 	if beforeReleaseLock != nil {
 		beforeReleaseLock()
 	}
@@ -286,6 +401,10 @@ func (l *SessionLease) Release() {
 		// handoff to SessionRemovalGuard without an unlock/reacquire window.
 		_ = leaseLock.RemoveAndUnlock()
 	}
+	// Keep the generation discoverable until the OS lock is free so every
+	// contender during release can wait on this exact maintenance owner.
+	retireSessionLeaseCoordinator(l.path, l.ownerID, coordinator)
+	coordinator.close()
 	_ = removeStaleSessionLockSidecar(l.path, store.SessionLockFile(l.path))
 }
 
