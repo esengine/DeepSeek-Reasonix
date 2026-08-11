@@ -334,15 +334,13 @@ func restoreTrashedSessionFile(dir, path string) error {
 
 func checkRestoreSessionArtifactConflicts(itemDir, target, key string) error {
 	for _, artifact := range sessionTrashArtifacts(target, key) {
-		trashed := filepath.Join(itemDir, artifact.name)
-		if _, err := os.Lstat(trashed); os.IsNotExist(err) {
-			continue
-		} else if err != nil {
-			return err
-		}
 		if _, err := os.Lstat(artifact.src); err == nil {
 			return fmt.Errorf("session artifact already exists: %s", artifact.name)
 		} else if !os.IsNotExist(err) {
+			return err
+		}
+		trashed := filepath.Join(itemDir, artifact.name)
+		if _, err := os.Lstat(trashed); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}

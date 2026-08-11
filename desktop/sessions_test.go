@@ -584,6 +584,35 @@ func TestRestoreTrashedSessionFileRejectsSidecarConflict(t *testing.T) {
 	}
 }
 
+func TestRestoreTrashedSessionFileRejectsStaleSidecarConflict(t *testing.T) {
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "session.jsonl")
+	if err := os.WriteFile(sessionPath, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := deleteSessionFile(dir, sessionPath); err != nil {
+		t.Fatalf("trash: %v", err)
+	}
+	goalPath := store.SessionGoalState(sessionPath)
+	if err := os.WriteFile(goalPath, []byte(`{"goal":"stale"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	trashPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jsonl")
+	if err := restoreTrashedSessionFile(dir, trashPath); err == nil {
+		t.Fatal("restore should fail when an active sidecar exists even if trash lacks that sidecar")
+	}
+	if _, err := os.Stat(trashPath); err != nil {
+		t.Fatalf("trash item should remain after failed restore: %v", err)
+	}
+	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) {
+		t.Fatalf("session file should not be restored after stale sidecar conflict, stat err = %v", err)
+	}
+	if b, err := os.ReadFile(goalPath); err != nil || string(b) != `{"goal":"stale"}` {
+		t.Fatalf("stale sidecar = %q, %v; want original stale goal", b, err)
+	}
+}
+
 func TestPurgeTrashedSessionFile(t *testing.T) {
 	dir := t.TempDir()
 	sessionPath := filepath.Join(dir, "session.jsonl")
