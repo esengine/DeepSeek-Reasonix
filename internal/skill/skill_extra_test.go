@@ -1,13 +1,49 @@
 package skill
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/config"
 )
 
 // IsValidName
+
+func TestPluginSkillRootIgnoresDocumentationMarkdown(t *testing.T) {
+	home := t.TempDir()
+	pluginRoot := filepath.Join(t.TempDir(), "skills")
+	writeSkill(t, pluginRoot, "plan/SKILL.md", "---\ndescription: plan work\n---\nbody")
+	writeSkill(t, pluginRoot, "guide.md", "# Plugin documentation, not a skill.")
+	writeSkill(t, pluginRoot, "notes.md", "---\ntitle: Notes\n---\n# Notes")
+
+	var stderr bytes.Buffer
+	st := New(Options{
+		HomeDir:         home,
+		CustomPaths:     []string{pluginRoot},
+		PluginPaths:     map[string][]string{config.CanonicalSkillPath(pluginRoot): {"superpowers"}},
+		DisableBuiltins: true,
+		Stderr:          &stderr,
+	})
+	list := st.List()
+	if _, ok := find(list, "plan"); !ok {
+		t.Fatal("real plugin directory skill should be discovered")
+	}
+	for _, name := range []string{"guide", "notes"} {
+		if _, ok := find(list, name); ok {
+			t.Errorf("plugin documentation markdown %q should not be registered as a skill", name)
+		}
+	}
+	slash := st.SlashList()
+	if len(slash) != 1 || slash[0].SlashName() != "superpowers:plan" {
+		t.Fatalf("slash skills = %+v, want only superpowers:plan", slash)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("documentation markdown should not warn during List, got %q", got)
+	}
+}
 
 func TestIsValidName(t *testing.T) {
 	cases := []struct {
