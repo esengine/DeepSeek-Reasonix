@@ -2270,6 +2270,7 @@ const noticeCodeKeys: Record<string, DictKey> = {
   empty_final: "notice.emptyFinal",
   executor_handoff: "notice.executorHandoff",
   tool_budget: "notice.toolBudget",
+  prompt_queued: "notice.promptQueued",
   loop_guard: "notice.loopGuard",
   workspace_lease: "notice.workspaceLease",
   cancelled_turn_display: "notice.cancelledTurnDisplay",

@@ -177,7 +177,7 @@
       "file-size": 1456
     },
     "desktop/frontend/src/lib/useController.ts": {
-      "file-size": 3935
+      "file-size": 3936
     },
     "desktop/heartbeat.go": {
       "essay": 20,
@@ -1072,7 +1072,7 @@
     "internal/control/controller.go": {
       "complexity": 10,
       "essay": 162,
-      "file-size": 5416,
+      "file-size": 5463,
       "function-size": 75,
       "narrative": 4
     },
@@ -1196,7 +1196,7 @@
     },
     "internal/event/event.go": {
       "essay": 10,
-      "file-size": 46,
+      "file-size": 47,
       "narrative": 1
     },
     "internal/event/subagent_progress.go": {

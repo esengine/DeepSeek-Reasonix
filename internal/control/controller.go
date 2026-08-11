@@ -336,6 +336,7 @@ type pendingApproval struct {
 type pendingAsk struct {
 	questions []event.AskQuestion
 	reply     chan []event.AskAnswer
+	queued    bool // registered but not yet shown; replay must skip it
 }
 
 type plannerSessionResetter interface {
@@ -2421,6 +2422,45 @@ func (c *Controller) SteerConsumed() bool {
 	return true
 }
 
+// promptQueueNoticeDelay is how long a prompt may wait behind another before
+// the user is told why nothing has appeared. Short enough to beat "it's stuck",
+// long enough that an approval answered promptly never emits a notice.
+var promptQueueNoticeDelay = 3 * time.Second
+
+// lockPromptFor acquires the prompt lock, emitting one notice if the wait is
+// long enough to look like a hang. It reports false only when ctx ended first;
+// the lock is held on true.
+func (c *Controller) lockPromptFor(ctx context.Context, kind string) bool {
+	acquired := make(chan struct{})
+	go func() {
+		c.approval.promptMu.Lock()
+		close(acquired)
+	}()
+	select {
+	case <-acquired:
+		return true
+	case <-ctx.Done():
+	case <-time.After(promptQueueNoticeDelay):
+	}
+	if ctx.Err() == nil {
+		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodePromptQueued,
+			Text:   "A " + kind + " is waiting for you to answer the prompt ahead of it.",
+			Detail: "the assistant asked something while an earlier approval or question was still open; it appears once that one is answered"})
+	}
+	select {
+	case <-acquired:
+		return true
+	case <-ctx.Done():
+		// The lock may still be handed to the goroutine above; release it so the
+		// next prompt is not blocked by this abandoned wait.
+		go func() {
+			<-acquired
+			c.approval.promptMu.Unlock()
+		}()
+		return false
+	}
+}
+
 // Ask implements agent.Asker: it emits an AskRequest and blocks until
 // AnswerQuestion(ID, …) answers or ctx is cancelled. promptMu serialises it
 // against tool-approval prompts so at most one user prompt is outstanding.
@@ -2428,11 +2468,18 @@ func (c *Controller) SteerConsumed() bool {
 // tool exists to get a genuine user decision, and YOLO only auto-approves
 // tool calls; it must not answer the user's questions for them.
 func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]event.AskAnswer, error) {
-	c.approval.promptMu.Lock()
+	// Registering after the lock left a queued question invisible everywhere:
+	// no event, absent from the snapshot, unreachable by ReplayPendingPrompts.
+	id, reply := c.approval.registerAsk(questions)
+
+	if !c.lockPromptFor(ctx, "question") {
+		c.approval.cancelAsk(id)
+		return nil, ctx.Err()
+	}
 	defer c.approval.promptMu.Unlock()
 
 	c.approval.promptEmitMu.Lock()
-	id, reply := c.approval.registerAsk(questions)
+	c.approval.markAskEmitted(id)
 	c.sink.Emit(event.Event{Kind: event.AskRequest, Ask: event.Ask{ID: id, Questions: questions}})
 	c.approval.promptEmitMu.Unlock()
 

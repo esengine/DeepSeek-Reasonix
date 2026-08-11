@@ -1997,6 +1997,7 @@ export const zhTW: Record<DictKey, string> = {
   "notice.emptyFinal": "沒有產生可見回覆，已要求助手重新作答。",
   "notice.executorHandoff": "助手尚未執行必要操作，已要求它使用相應工具。",
   "notice.toolBudget": "工具呼叫輪數已達上限，已要求助手總結目前進度。",
+  "notice.promptQueued": "有一個問題正在等你先回答前面的提示。",
   "notice.loopGuard": "助手沒有取得有效進展，已要求它重新評估目前步驟。",
   "notice.workspaceLease": "另一個交付會話正在寫入此工作區；安全後本會話會自動繼續。",
   "notice.cancelledTurnDisplay": "本輪已中斷。上方的部分輸出會永久保留供查看；只有完整工具呼叫及結果和有界恢復摘要會進入模型下一輪。繼續或回復前請先檢查目前工作區。",

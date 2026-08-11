@@ -2900,6 +2900,7 @@ export const zh: Record<DictKey, string> = {
   "notice.emptyFinal": "没有生成可见回复，已要求助手重新作答。",
   "notice.executorHandoff": "助手尚未执行必要操作，已要求它使用相应工具。",
   "notice.toolBudget": "工具调用轮数已达上限，已要求助手总结当前进展。",
+  "notice.promptQueued": "有一个问题在等你先回答前面的提示。",
   "notice.loopGuard": "助手没有取得有效进展，已要求它重新评估当前步骤。",
   "notice.workspaceLease": "另一个交付会话正在写入此工作区；安全后本会话会自动继续。",
   "notice.cancelledTurnDisplay": "本轮已中断。上方的部分输出会永久保留供查看；只有完整工具调用及结果和有界恢复摘要会进入模型下一轮。继续或回滚前请先检查当前工作区。",
