@@ -37,7 +37,12 @@ func AppendDoc(path, note string) error {
 		return err
 	}
 
-	existing, _ := fileencoding.ReadFileUTF8(path) // missing → new file
+	existing, err := fileencoding.ReadFileUTF8(path)
+	if err != nil && !os.IsNotExist(err) {
+		// An existing but unreadable file must not be treated as empty: that
+		// would rebuild the document from scratch and destroy its content.
+		return fmt.Errorf("read %q before appending: %w", path, err)
+	}
 	body := string(existing)
 	bullet := "- " + note
 
