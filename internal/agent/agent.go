@@ -1299,7 +1299,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		prov:                      prov,
 		tools:                     tools,
 		session:                   session,
-		taskBudget:                runBudget{limit: taskBudgetOrDefault(opts.TaskBudget)},
+		taskBudget:                runBudget{limit: normalizeTaskBudget(opts.TaskBudget)},
 		maxSteps:                  opts.MaxSteps,
 		maxStepsKey:               maxStepsKey,
 		reasoningByteLimit:        reasoningByteLimit,

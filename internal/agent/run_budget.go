@@ -9,31 +9,23 @@ import (
 )
 
 // TaskBudget bounds one task on the axes its failures are reported in.
-// Crossing either yields one tool-free summary and a resumable pause.
+// Crossing either yields one tool-free summary and a resumable pause. Both
+// axes ship off: stopping a task is the user's call, since only they know
+// which model they are paying for and whether a long task is a runaway or the
+// job they asked for.
 type TaskBudget struct {
-	// Cost is off unless set: no amount of money is portable across models.
 	Cost float64
 	Wall time.Duration
 }
 
-// DefaultTaskWall is the only axis that ships with a default, because wall
-// clock is the only portable unit here: half an hour means the same thing on
-// every model, while an amount of money does not. A cost default loose enough
-// for a cheap model would stop a frontier model within a couple of answers, so
-// cost stays off until someone who knows what they are paying sets it.
-const DefaultTaskWall = 30 * time.Minute
-
-// taskBudgetOrDefault fills the wall-clock default and reads a negative value
-// on either axis as an explicit "disable this one".
-func taskBudgetOrDefault(b TaskBudget) TaskBudget {
-	switch {
-	case b.Wall == 0:
-		b.Wall = DefaultTaskWall
-	case b.Wall < 0:
-		b.Wall = 0
-	}
+// normalizeTaskBudget reads a negative value as unset, so a disabled axis and
+// an unconfigured one behave identically.
+func normalizeTaskBudget(b TaskBudget) TaskBudget {
 	if b.Cost < 0 {
 		b.Cost = 0
+	}
+	if b.Wall < 0 {
+		b.Wall = 0
 	}
 	return b
 }

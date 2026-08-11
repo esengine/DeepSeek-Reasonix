@@ -98,28 +98,33 @@ func TestTaskBudgetGateFiresOnWallClock(t *testing.T) {
 	}
 }
 
-// No amount of money is portable across models: a default loose enough for a
-// cheap model lands a frontier model within a couple of answers. Only wall
-// clock, which means the same everywhere, ships with a default.
-func TestTaskBudgetShipsNoCostDefault(t *testing.T) {
-	got := taskBudgetOrDefault(TaskBudget{})
-	if got.Cost != 0 {
-		t.Fatalf("default cost = %v, want it off until the user sets it", got.Cost)
-	}
-	if got.Wall != DefaultTaskWall {
-		t.Fatalf("default wall = %v, want %v", got.Wall, DefaultTaskWall)
+// Nothing is bounded out of the box. Stopping a task is the user's call: only
+// they know which model they are paying for, and whether a long task is a
+// runaway or the job they asked for.
+func TestTaskBudgetShipsNoLimits(t *testing.T) {
+	if got := normalizeTaskBudget(TaskBudget{}); got.Cost != 0 || got.Wall != 0 {
+		t.Fatalf("default budget = %+v, want both axes off", got)
 	}
 }
 
-func TestTaskBudgetAxesDisableIndependently(t *testing.T) {
-	got := taskBudgetOrDefault(TaskBudget{Cost: 1.5, Wall: -1})
+func TestTaskBudgetAxesSetIndependently(t *testing.T) {
+	got := normalizeTaskBudget(TaskBudget{Cost: 1.5, Wall: -1})
 	if got.Cost != 1.5 || got.Wall != 0 {
-		t.Fatalf("budget = %+v, want the explicit cost kept and wall clock disabled", got)
+		t.Fatalf("budget = %+v, want the explicit cost kept and wall clock off", got)
 	}
-	// Setting cost alone must not drop the wall-clock default: that is the
-	// axis an unpriced or free model still needs.
-	if got := taskBudgetOrDefault(TaskBudget{Cost: 1.5}); got.Wall != DefaultTaskWall {
-		t.Fatalf("budget = %+v, want the wall default kept alongside an explicit cost", got)
+	if got := normalizeTaskBudget(TaskBudget{Wall: time.Minute}); got.Wall != time.Minute || got.Cost != 0 {
+		t.Fatalf("budget = %+v, want the explicit wall kept and cost off", got)
+	}
+}
+
+// However long an unconfigured task runs and however much it spends, nothing
+// lands it. This is the promise the defaults make.
+func TestUnconfiguredBudgetNeverCrosses(t *testing.T) {
+	b := runBudget{started: time.Now().Add(-8 * time.Hour)}
+	b.observe(&provider.Usage{PromptTokens: 50_000_000, CompletionTokens: 5_000_000, RequestCount: 1},
+		&provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2})
+	if axis, detail := b.exceeded(normalizeTaskBudget(TaskBudget{})); axis != "" {
+		t.Fatalf("unconfigured budget crossed %q (%s); nothing should stop by default", axis, detail)
 	}
 }
 

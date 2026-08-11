@@ -1254,33 +1254,34 @@ one-time notice. This prevents a stale hidden limit from truncating automatic
 progress or inherited subagent work. Use the one-off CLI `--max-steps` flag when
 an explicit run budget is needed; unattended bots retain `[bot].max_steps`.
 
-An ordinary chat task is instead bounded by what it spends. Rounds never
-measured the thing worth stopping — the same hundred cost minutes or hours
-depending on what each one read — so the gate is cost and wall clock. On
-reaching either, the task produces one tool-free summary and pauses; the work
-is saved and the next message continues it.
+**An ordinary chat task has no limit of any kind by default** — not rounds, not
+tokens, not time, not money. It runs until the model finishes, an adaptive
+guard decides it stopped making progress, or you stop it.
+
+An optional spend gate is available when you want one. It bounds a whole task
+(every "continue" included, until you start unrelated work), and on crossing it
+the task produces one tool-free summary and pauses; the work is saved and the
+next message continues it.
 
 ```toml
 [agent]
-task_cost_budget = 5.0            # model pricing currency; off unless you set it
-task_time_budget_minutes = 60     # 0 = default (30); negative disables the axis
+task_cost_budget = 5.0            # in the model's pricing currency
+task_time_budget_minutes = 60     # wall clock across the whole task
 ```
 
-**Only wall clock has a default**, and it is deliberately loose — a gate that
-fires on real work is worse than no gate. There is no cost default because no
-amount of money is portable across models: a budget loose enough for a cheap
-model would land a frontier model within a couple of answers. Set
-`task_cost_budget` yourself when you know which model you are paying for.
+Both are off unless set. Neither has a default, because a stop is a judgement
+only you can make: no amount of money is portable across models — a budget
+loose enough for a cheap model would land a frontier model within a couple of
+answers — and a long task is as often the job you asked for as it is a runaway.
 
-Cost also applies only to a priced model. Without a price table that axis stays
-inactive rather than reading the task as free, and wall clock still bounds it —
-including a free or local model's loop, the one case cost cannot see at all.
+Cost applies only to a priced model. Without a price table that axis stays
+inactive rather than reading the task as free; use the time axis for a free or
+local model.
 
-Ordinary chat has no round ceiling. A turn that reaches a high round count
-without crossing either budget is one whose rounds are individually cheap and
-fast, which is the case least worth interrupting; rounds carry no information
-the two axes above do not already have. Use the one-off `--max-steps` flag when
-you specifically want a run bounded by rounds.
+Rounds are deliberately not an axis. A turn that reaches a high round count
+without spending much is one whose rounds are individually cheap and fast,
+which is the case least worth interrupting. Use the one-off `--max-steps` flag
+when you specifically want a run bounded by rounds.
 
 Subagent skills inherit the executor model by default. Set `subagent_model` to
 run them on another configured model, or use `subagent_models` to override only
