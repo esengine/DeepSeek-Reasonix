@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { activeWorkBusyNoticeText } from "../lib/capabilityMutations";
 import { t } from "../lib/i18n";
+import { effortSwitchNoticeText, modelSwitchNoticeText, tokenModeSwitchNoticeText } from "../lib/useController";
 
 function ok(value: unknown, message: string) {
   if (!value) throw new Error(message);
@@ -18,8 +19,24 @@ ok(
   "a pending prompt takes priority over the running-answer explanation",
 );
 ok(
-  activeWorkBusyNoticeText(activeWorkError(false, false, 2), t) === "2 background jobs are still running. Stop them before changing this setting.",
+  activeWorkBusyNoticeText(activeWorkError(false, false, 2), t) === "This setting cannot change while background work is active. Active jobs: 2. Stop them first.",
   "capability mutations report the blocking background-job count",
+);
+ok(
+  activeWorkBusyNoticeText(activeWorkError(false, false, 1), t) === "This setting cannot change while background work is active. Active jobs: 1. Stop them first.",
+  "a single background job uses grammatically neutral guidance",
+);
+ok(
+  modelSwitchNoticeText(activeWorkError(false, false, 1).message.replace("MCP server", "model")) === "The model cannot change while background work is active. Active jobs: 1. Open Background jobs in the status bar to stop them.",
+  "model switching uses grammatically neutral single-job guidance",
+);
+ok(
+  effortSwitchNoticeText(activeWorkError(false, false, 1).message.replace("MCP server", "effort")) === "Reasoning effort cannot change while background work is active. Active jobs: 1. Open Background jobs in the status bar to stop them.",
+  "effort switching uses grammatically neutral single-job guidance",
+);
+ok(
+  tokenModeSwitchNoticeText(activeWorkError(false, false, 1).message.replace("MCP server", "token mode")) === "Work mode cannot change while background work is active. Active jobs: 1. Open Background jobs in the status bar to stop them.",
+  "work-mode switching uses grammatically neutral single-job guidance",
 );
 ok(
   activeWorkBusyNoticeText(
@@ -36,4 +53,9 @@ const capabilitiesSource = readFileSync(new URL("../components/CapabilitiesPanel
 ok(
   (capabilitiesSource.match(/setErr\(activeWorkBusyNoticeText\(e, t\) \?\?/g) ?? []).length === 4,
   "all four capability mutation surfaces localize active-work failures",
+);
+const subagentsSource = readFileSync(new URL("../components/SubagentsPanel.tsx", import.meta.url), "utf8");
+ok(
+  (subagentsSource.match(/setErr\(activeWorkBusyNoticeText\(e, t\) \?\?/g) ?? []).length === 1,
+  "subagent profile mutations localize active-work failures",
 );
