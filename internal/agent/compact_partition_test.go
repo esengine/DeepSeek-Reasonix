@@ -12,9 +12,15 @@ import (
 // every provider-visible message in the region lands in exactly one group.
 func partitionCoversRegion(t *testing.T, a *Agent, region []provider.Message) (kept, fold []provider.Message) {
 	t.Helper()
-	early, carried, kept, fold := a.partitionFoldForProjection(region)
-	if len(early) != 0 || len(carried) != 0 {
-		t.Fatalf("early=%d carried=%d, want both empty under content-driven summary", len(early), len(carried))
+	kept, fold, retention := a.partitionFoldForProjection(region)
+	userTurns := 0
+	for _, m := range region {
+		if m.Role == provider.RoleUser && !m.LocalOnly && !isCompactionSummary(m) {
+			userTurns++
+		}
+	}
+	if got := retention.Kept + retention.Dropped; got != userTurns {
+		t.Errorf("retention accounts for %d user turns, region has %d", got, userTurns)
 	}
 	seen := map[string]int{}
 	for _, group := range [][]provider.Message{kept, fold} {

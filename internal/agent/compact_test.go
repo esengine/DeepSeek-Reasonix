@@ -168,7 +168,7 @@ func TestKeepIndexesKeepsSiblingToolResultsForKeptError(t *testing.T) {
 		{Role: provider.RoleTool, ToolCallID: "ok", Name: "read_file", Content: "package main"},
 	}
 
-	keep := (&Agent{keepPolicy: KeepErrors}).keepIndexes(region)
+	keep, _ := (&Agent{keepPolicy: KeepErrors}).keepIndexes(region)
 	for i, kept := range keep {
 		if !kept {
 			t.Fatalf("keep[%d] = false, want all sibling tool-call messages kept: %v", i, keep)
@@ -186,7 +186,7 @@ func TestKeepIndexesScopesPolicyAfterLatestSummary(t *testing.T) {
 		{Role: provider.RoleTool, ToolCallID: "new", Name: "bash", Content: "error: new failure"},
 	}
 
-	keep := (&Agent{keepPolicy: KeepErrors}).keepIndexes(region)
+	keep, _ := (&Agent{keepPolicy: KeepErrors}).keepIndexes(region)
 	want := []bool{false, false, false, true, true}
 	for i := range want {
 		if keep[i] != want[i] {
@@ -515,9 +515,12 @@ func TestInterruptedDisplayStaysOutOfCompactionPromptAndProjection(t *testing.T)
 		InterruptedTurn: &provider.InterruptedTurnRecovery{Pending: true},
 	}
 	a := &Agent{}
-	early, carried, kept, fold := a.partitionFoldForProjection([]provider.Message{local})
-	if len(early) != 0 || len(carried) != 0 || len(kept) != 0 || len(fold) != 0 {
-		t.Fatalf("compaction partition early=%+v carried=%+v kept=%+v fold=%+v, want display-only output in none of them", early, carried, kept, fold)
+	kept, fold, retention := a.partitionFoldForProjection([]provider.Message{local})
+	if len(kept) != 0 || len(fold) != 0 {
+		t.Fatalf("compaction partition kept=%+v fold=%+v, want display-only output in neither", kept, fold)
+	}
+	if retention.Kept != 0 || retention.Dropped != 0 {
+		t.Fatalf("retention = %+v, want display-only output counted as neither kept nor dropped", retention)
 	}
 	if transcript := renderTranscript([]provider.Message{local}); transcript != "" {
 		t.Fatalf("local interrupted output leaked into compaction prompt: %q", transcript)

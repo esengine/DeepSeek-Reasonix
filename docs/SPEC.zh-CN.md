@@ -162,6 +162,9 @@ transcript，仅在唯一自动阈值被跨越时安装 provider 可见的短 **
   工作区重新推导。预算是必须的：无上限地保留会把候选撑过验收天花板，使压缩直接
   失败而非降级。该保护不以最近一次 digest 为界，因此能跨多次压缩存活；超出预算的
   轮次可用 `[[keep]]` 前缀（keep 策略 `user_marked`，默认开启）强制原样保留。
+  丢弃不是静默的：压缩 telemetry 带 `user_kept` / `user_dropped` 计数，且已提交的
+  checkpoint 若折叠了用户轮次会发出提示 `[[keep]]` 的警告——两种情况下 projection
+  读起来都是完整的，计数是唯一能区分它们的东西。
 - 用户可用 `reasonix config compact-ratio [--local] [VALUE]` 查看或修改阈值。
   项目配置优先于桌面与新 CLI 会话共用的用户全局配置。UI 始终展示**实际生效**值。
 - `max_output_tokens` 是独立的**本轮**输出上限。
