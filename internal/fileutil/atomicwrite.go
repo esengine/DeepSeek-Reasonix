@@ -1,9 +1,12 @@
 package fileutil
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"syscall"
 	"time"
 )
 
@@ -29,22 +32,38 @@ func Crash(op, path string) {
 	}
 }
 
-// AtomicWriteFile writes data to a sibling temporary file, fsyncs it, then
-// publishes it via ReplaceFile. On filesystems that support replacement rename,
-// readers see either the old file or the complete new file. ReplaceFile retains
-// its compatibility copy fallback for Windows filter drivers that reject a
-// same-directory rename as cross-device; callers that cannot tolerate that
-// non-atomic fallback must use AtomicWriteFileStrict.
+// AtomicWriteFile writes via temp + fsync + ReplaceFile. On rename-capable
+// filesystems readers see only the old or complete new file. ReplaceFile may
+// copy on Windows filter-driver EXDEV; callers that cannot tolerate that must
+// use AtomicWriteFileStrict.
 func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	return atomicWriteFile(path, data, perm, true)
 }
 
-// AtomicWriteFileStrict publishes data only through an atomic rename. Unlike
-// AtomicWriteFile, a cross-device/filter-driver error is returned without ever
-// truncating path. Use it for commit pointers whose corruption would make the
-// surrounding state impossible to recover automatically.
+// AtomicWriteFileStrict publishes only via atomic rename (no EXDEV copy).
+// After a successful rename it best-effort fsyncs the parent directory so the
+// directory entry can survive power loss. A returned error always means the
+// destination was not published; post-rename dir-sync problems are not errors
+// (callers that roll back in-memory state on error would otherwise fork from
+// the on-disk pointer).
 func AtomicWriteFileStrict(path string, data []byte, perm os.FileMode) error {
 	return atomicWriteFile(path, data, perm, false)
+}
+
+// syncParentDirFn is the post-publish parent-dir fsync implementation.
+// Tests replace it via SetSyncParentDirForTest.
+var syncParentDirFn = syncParentDir
+
+// SetSyncParentDirForTest replaces post-rename parent-dir fsync. Restore with
+// the returned function. Production must leave the default in place.
+func SetSyncParentDirForTest(fn func(path string) error) (restore func()) {
+	prev := syncParentDirFn
+	if fn == nil {
+		syncParentDirFn = syncParentDir
+	} else {
+		syncParentDirFn = fn
+	}
+	return func() { syncParentDirFn = prev }
 }
 
 func atomicWriteFile(path string, data []byte, perm os.FileMode, allowCrossDeviceCopy bool) error {
@@ -57,7 +76,39 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode, allowCrossDevic
 		os.Remove(tmpPath)
 		return err
 	}
+	// Strict only: parent-dir fsync is power-loss durability after publish.
+	// Never surface failures here — rename already committed the new file.
+	if !allowCrossDeviceCopy {
+		_ = syncParentDirFn(path)
+	}
 	return nil
+}
+
+// syncParentDir fsyncs path's parent after rename (including "."). Unsupported
+// dir sync on Windows / some network FS is ignored.
+func syncParentDir(path string) error {
+	dirPath := filepath.Dir(path)
+	if dirPath == "" {
+		dirPath = "."
+	}
+	f, err := os.Open(dirPath)
+	if err != nil {
+		return fmt.Errorf("open parent dir for fsync %s: %w", path, err)
+	}
+	defer f.Close()
+	if err := f.Sync(); err != nil {
+		if runtime.GOOS == "windows" || isDirSyncUnsupported(err) {
+			return nil
+		}
+		return fmt.Errorf("fsync parent dir for %s: %w", path, err)
+	}
+	return nil
+}
+
+func isDirSyncUnsupported(err error) bool {
+	return errors.Is(err, syscall.EINVAL) ||
+		errors.Is(err, syscall.ENOTSUP) ||
+		errors.Is(err, syscall.ENOSYS)
 }
 
 // AtomicCreateFile publishes a complete file only when path is still absent.

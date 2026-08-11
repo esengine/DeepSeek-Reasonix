@@ -628,14 +628,14 @@ func TestSetCompactRatio(t *testing.T) {
 		}
 	}
 
+	// Deprecated snip/force ratios no longer constrain SetCompactRatio.
 	c.Agent.ToolResultSnipRatio = 0.75
-	if err := c.SetCompactRatio(0.7); err == nil {
-		t.Fatal("SetCompactRatio should reject a value at or below the configured snip ratio")
-	}
-	c.Agent.ToolResultSnipRatio = 0.6
 	c.Agent.CompactForceRatio = 0.8
-	if err := c.SetCompactRatio(0.8); err == nil {
-		t.Fatal("SetCompactRatio should reject a value at or above the configured force ratio")
+	if err := c.SetCompactRatio(0.7); err != nil {
+		t.Fatalf("SetCompactRatio(0.7) with legacy snip/force fields: %v", err)
+	}
+	if err := c.SetCompactRatio(0.8); err != nil {
+		t.Fatalf("SetCompactRatio(0.8) with legacy force field: %v", err)
 	}
 }
 

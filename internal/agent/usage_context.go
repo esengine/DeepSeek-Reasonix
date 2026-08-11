@@ -13,7 +13,4 @@ func applyLatestContextShape(dst, latest *provider.Usage) {
 	dst.ContextReasoningTokens = latest.ReasoningTokens
 	dst.ContextCacheHitTokens = latest.CacheHitTokens
 	dst.ContextCacheMissTokens = latest.CacheMissTokens
-	dst.ContextEditingType = latest.ContextEditingType
-	dst.ContextEditingClearedToolUses = latest.ContextEditingClearedToolUses
-	dst.ContextEditingClearedTokens = latest.ContextEditingClearedTokens
 }

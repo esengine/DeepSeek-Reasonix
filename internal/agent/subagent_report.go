@@ -60,7 +60,7 @@ func decorateExecutionReceipt(rec *evidence.Receipt, result string, ex *tool.She
 	if rec == nil {
 		return
 	}
-	rec.OutputBytes = len(strings.TrimSpace(result))
+	rec.ObserveOutput(result)
 	if ex == nil {
 		return
 	}

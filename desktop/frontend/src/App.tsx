@@ -44,7 +44,6 @@ import { generativeMusic, isGenerativeMusicEnabled } from "./lib/generative-musi
 import { clearAttentionChimeKeys, playAttentionChime, playSuccessChime, shouldPlayAttentionChimeForEvent } from "./lib/sound";
 import { NoticeCard, Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
-import { TranscriptSelectionMenu } from "./components/TranscriptSelectionMenu";
 import { TodoPanel } from "./components/TodoPanel";
 import { ApprovalModal } from "./components/ApprovalModal";
 import { AskCard } from "./components/AskCard";
@@ -66,7 +65,6 @@ import { RemoteWorkspaceLaunchGate, resolveRemoteWorkspace } from "./lib/remoteW
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { UpdaterProvider } from "./lib/useUpdater";
-import { ContextPanel } from "./components/ContextPanel";
 import { Tooltip } from "./components/Tooltip";
 import { StartupSplash } from "./components/StartupSplash";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
@@ -293,6 +291,8 @@ function NoticePreviewPanel() {
   );
 }
 
+const TranscriptSelectionMenu = lazy(() => import("./components/TranscriptSelectionMenu").then((module) => ({ default: module.TranscriptSelectionMenu })));
+const ContextPanel = lazy(() => import("./components/ContextPanel").then((module) => ({ default: module.ContextPanel })));
 const HistoryPanel = lazy(() => import("./components/HistoryPanel").then((module) => ({ default: module.HistoryPanel })));
 const SettingsPanel = lazy(() => import("./components/SettingsPanelEntry").then((module) => ({ default: module.SettingsPanel })));
 const RemotePanel = lazy(() => import("./components/RemotePanel").then((module) => ({ default: module.RemotePanel })));
@@ -5297,21 +5297,23 @@ export default function App() {
                   <RemotePanel onClose={() => setWorkspacePanel(false)} />
                 </Suspense>
               ) : rightDockMode === "context" && desktopLayoutStyle !== "creation" ? (
-                <ContextPanel
-                  tabId={activeTabId}
-                  context={state.context}
-                  usage={state.usage}
-                  sessionTokens={state.sessionTokens}
-                  sessionCost={state.sessionCost}
-                  sessionCurrency={state.sessionCurrency}
-                  sessionTurns={sessionTurns}
-                  turnTokens={state.turnTotalTokens}
-                  turnCost={state.turnCost}
-                  balance={state.balance}
-                  sessionGen={state.sessionGen}
-                  refreshKey={dockRefreshKey + state.contextPanelSeq}
-                  usageSeq={state.usageSeq}
-                />
+                <Suspense fallback={null}>
+                  <ContextPanel
+                    tabId={activeTabId}
+                    context={state.context}
+                    usage={state.usage}
+                    sessionTokens={state.sessionTokens}
+                    sessionCost={state.sessionCost}
+                    sessionCurrency={state.sessionCurrency}
+                    sessionTurns={sessionTurns}
+                    turnTokens={state.turnTotalTokens}
+                    turnCost={state.turnCost}
+                    balance={state.balance}
+                    sessionGen={state.sessionGen}
+                    refreshKey={dockRefreshKey + state.contextPanelSeq}
+                    usageSeq={state.usageSeq}
+                  />
+                </Suspense>
               ) : (
                 <Suspense fallback={null}>
                   <WorkspacePanel
@@ -5515,11 +5517,12 @@ export default function App() {
       <HeartbeatPanel open={heartbeatOpen} onClose={() => setHeartbeatOpen(false)} onOpenTopic={(scope, workspaceRoot, topicId) => {
         void handleOpenTopic(scope, workspaceRoot, topicId);
       }} />
-      <TranscriptSelectionMenu
+      <Suspense fallback={null}><TranscriptSelectionMenu
         enabled={Boolean(activeTabId && !activeTab?.readOnly && !decisionSurface && !sidebarImDetailConnection && !hydratePlaceholderActive)}
         resetKey={activeTabId ?? ""}
         onAddToChat={addSelectedTextToComposer}
       />
+      </Suspense>
       {windowsFramelessChrome && (
         <WindowsWindowControls
           maximised={mainWindowMaximised}

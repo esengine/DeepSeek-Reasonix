@@ -52,8 +52,7 @@ func (a *Agent) currentPromptCacheKey() string {
 }
 
 func (a *Agent) currentPromptCacheKeyLocked() string {
-	key := promptCacheKey(a.workspaceID, BranchID(a.sessionPath), a.modelRef)
-	return key + a.contextEditingLineageSuffixLocked()
+	return promptCacheKey(a.workspaceID, BranchID(a.sessionPath), a.modelRef)
 }
 
 // InvalidateProjection drops the in-memory and on-disk projection after
@@ -84,15 +83,11 @@ func (a *Agent) LoadProjectionSidecar(sessionPath string) {
 	if a == nil {
 		return
 	}
-	_, effective, policyVersion := resolveContextEditing(a.requestedContextEditing, a.prov)
 	a.compactionMu.Lock()
 	a.sessionPath = sessionPath
-	a.contextEditing = effective
-	a.contextEditingPolicyVersion = policyVersion
 	a.compactionState = CompactionState{}
+	a.checkpointState = "none"
 	a.compactionMu.Unlock()
-	a.nativeContextEditingAccepted.Store(false)
-	a.contextEditingRuntimeFallback.Store(false)
 	if sessionPath == "" {
 		a.resetCompactionState()
 		return
@@ -109,31 +104,80 @@ func (a *Agent) LoadProjectionSidecar(sessionPath string) {
 		return
 	}
 	a.compactionMu.Lock()
-	if st.ContextEditingFallbackLocal && !st.NativeContextEditingAccepted && a.contextEditing == "native" {
-		a.contextEditing = "local"
-		a.contextEditingRuntimeFallback.Store(true)
-	}
-	// Fail closed: known lineage requires an exact stored key (including
-	// rejecting blank keys on early sidecars written before this field).
 	key := a.currentPromptCacheKeyLocked()
-	if (key != "" && st.PromptCacheKey != key) ||
-		(st.Projection.CoveredPrefixHash == "" && st.BlockedInputHash == "" &&
-			!st.ContextEditingFallbackLocal && !st.NativeContextEditingAccepted) {
-		a.contextEditing = effective
-		a.contextEditingPolicyVersion = policyVersion
+	normalized, keyOK := lineageKeyCompatible(st.PromptCacheKey, key)
+	// Keep receipt-only blocked/failed sidecars (no projection body) and legacy
+	// top-level BlockedInputHash so generation-scoped suppressions survive restart.
+	hasMaintenanceSignal := st.Projection.CoveredPrefixHash != "" ||
+		st.BlockedInputHash != "" ||
+		(st.LastReceipt != nil && (st.LastReceipt.Status == "blocked" || st.LastReceipt.Status == "failed" ||
+			st.LastReceipt.Status == "applied"))
+	if (key != "" && !keyOK) || !hasMaintenanceSignal {
 		a.compactionState = CompactionState{}
-		a.contextEditingRuntimeFallback.Store(false)
+		a.checkpointState = "none"
 		a.compactionMu.Unlock()
 		return
 	}
+	// Only rewrite legacy native-editing lineage keys; exact matches stay pure-read.
+	needsNormalization := false
+	if keyOK && key != "" && normalized != st.PromptCacheKey {
+		st.PromptCacheKey = normalized
+		needsNormalization = true
+	}
+	// Only mark restored when the projection still matches the transcript.
+	var msgs []provider.Message
+	var version uint64
+	if a.session != nil {
+		msgs, version = a.session.snapshotMessagesVersion()
+	}
+	valid := len(st.Projection.Messages) > 0 && projectionValid(st, msgs, version, key)
+	if !valid && len(st.Projection.Messages) > 0 {
+		// Keep blocked receipts / telemetry; drop unusable projection body.
+		st.Projection = ContextProjection{}
+	}
 	a.compactionState = st
+	if valid {
+		a.checkpointState = "restored"
+		if needsNormalization {
+			if err := a.persistCompactionStateLocked(); err != nil {
+				slog.Warn("agent: persist normalized projection lineage", "err", err)
+			}
+		}
+	} else {
+		a.checkpointState = "none"
+	}
 	a.compactionMu.Unlock()
-	a.nativeContextEditingAccepted.Store(st.NativeContextEditingAccepted)
+}
+
+// lineageKeyCompatible reports whether a stored PromptCacheKey still belongs to
+// the current session/model lineage. Legacy native context-editing keys used a
+// "|context-editing-native-..." suffix on an otherwise matching base key.
+func lineageKeyCompatible(stored, current string) (normalized string, ok bool) {
+	stored, current = strings.TrimSpace(stored), strings.TrimSpace(current)
+	if current == "" {
+		// Unknown current lineage: accept any stored key as-is.
+		return stored, true
+	}
+	if stored == "" {
+		return "", false
+	}
+	if stored == current {
+		return current, true
+	}
+	const nativeSuffix = "|context-editing-native"
+	if strings.HasPrefix(stored, current+nativeSuffix) {
+		return current, true
+	}
+	if i := strings.Index(stored, nativeSuffix); i > 0 && stored[:i] == current {
+		return current, true
+	}
+	return "", false
 }
 
 func (a *Agent) resetCompactionState() {
 	a.compactionMu.Lock()
 	a.compactionState = CompactionState{}
+	a.checkpointState = "none"
 	a.compactionMu.Unlock()
 }
 
@@ -148,16 +192,12 @@ func (a *Agent) BindSessionPath(path string, loadSidecar bool) {
 		a.LoadProjectionSidecar(path)
 		return
 	}
-	_, effective, policyVersion := resolveContextEditing(a.requestedContextEditing, a.prov)
 	a.compactionMu.Lock()
 	a.sessionPath = path
-	a.contextEditing = effective
-	a.contextEditingPolicyVersion = policyVersion
 	a.compactionState = CompactionState{}
+	a.checkpointState = "none"
 	a.cacheState = CacheStateUnknown
 	a.compactionMu.Unlock()
-	a.nativeContextEditingAccepted.Store(false)
-	a.contextEditingRuntimeFallback.Store(false)
 	a.compactStuck = false
 	a.consecutiveCompacts = 0
 	a.lastCompactionTurn.Store(0)
@@ -221,85 +261,6 @@ func (a *Agent) persistCompactionStateLocked() error {
 		return nil
 	}
 	return SaveCompactionState(a.sessionPath, a.compactionState)
-}
-
-// maintenanceReplacement is the rewrite for one stale tool result. Both the
-// planning pass and the re-write that follows archiving go through it, so a
-// result cannot be shortened one way while planning and another way on install.
-// ok is false when the policy protects the message outright.
-func (a *Agent) maintenanceReplacement(m provider.Message, mode toolResultMaintenanceMode, archive string) (string, bool) {
-	if a.keepPolicy&KeepErrors != 0 && isErrorMessage(m) {
-		// A recorded failure stays recognisable once its text is rewritten, so
-		// its passing noise can go. A text-only failure has no such anchor:
-		// eliding it would hide that it was ever an error.
-		if !failedExecution(m.ToolExecution) {
-			return "", false
-		}
-		return snipFailureResult(m.Content), true
-	}
-	return rewriteToolResult(m, mode, archive, a.snipStrategyFor(m.Name)), true
-}
-
-// applyToolResultMaintenanceView returns a copy of msgs with stale tool results
-// snipped or pruned. The canonical transcript is never modified.
-func (a *Agent) applyToolResultMaintenanceView(msgs []provider.Message, mode toolResultMaintenanceMode) ([]provider.Message, PruneStats) {
-	st := PruneStats{Mode: mode}
-	if a.contextWindow <= 0 || len(msgs) == 0 {
-		return msgs, st
-	}
-	st.InputHash = providerVisibleFingerprint(provider.ModelMessages(msgs))
-	head, start, ok := a.planCompaction(msgs, 1)
-	if !ok {
-		if mode != toolResultPrune {
-			return msgs, st
-		}
-		head = 1
-		start = len(msgs) - a.recentKeep
-		if start < head {
-			return msgs, st
-		}
-	}
-	next := append([]provider.Message(nil), msgs...)
-	changed := false
-	for i := head; i < start; i++ {
-		m := next[i]
-		if !shouldMaintainToolResult(m, mode) {
-			continue
-		}
-		replacement, ok := a.maintenanceReplacement(m, mode, "projection-view")
-		if !ok {
-			continue
-		}
-		if replacement == m.Content {
-			continue
-		}
-		st.SavedChars += len(m.Content) - len(replacement)
-		m.Content = replacement
-		next[i] = m
-		st.Results++
-		changed = true
-	}
-	if !changed {
-		return msgs, st
-	}
-	return next, st
-}
-
-// installProjectionIfCurrent closes the compare-and-install window for
-// maintenance callers that performed network work from an earlier snapshot.
-func (a *Agent) installProjectionIfCurrent(st CompactionState, projectionVersion, generation uint64) error {
-	a.compactionMu.Lock()
-	defer a.compactionMu.Unlock()
-	if a.compactionState.Projection.ProjectionVersion != projectionVersion || a.compactionState.Generation != generation {
-		return errCompressStaleContext
-	}
-	prev := a.compactionState
-	a.compactionState = st
-	if err := a.persistCompactionStateLocked(); err != nil {
-		a.compactionState = prev
-		return err
-	}
-	return nil
 }
 
 // promptCacheKey builds a stable lineage key for session + model identity.

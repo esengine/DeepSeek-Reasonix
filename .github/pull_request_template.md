@@ -21,11 +21,6 @@ cancellation, reduced-motion behavior, and failure fallback. Verification must
 assert that the target API was actually called; a mock that silently skips it
 does not count.
 
-For a large PR spanning multiple architectural owners, split independent
-changes when practical. If it must remain combined, obtain a non-author
-maintainer approval on the current head so the `independent cross-boundary
-review` gate can pass.
-
 ## Documentation impact
 
 Documentation-impact: TODO

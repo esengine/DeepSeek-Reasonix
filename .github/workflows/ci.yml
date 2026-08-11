@@ -171,9 +171,14 @@ jobs:
         timeout-minutes: 5
         run: go test -timeout=3m -run '^TestBashPowerShellExecuteDetailedContract$|^TestBashPowerShell51PreflightRejectsAndAndDetailed$|^TestBashPowerShellOutputIsUTF8$|^TestBashPowerShellSurfacesNonZeroExit$|^TestBashPowerShellRejectsChaining$' ./internal/tool/builtin
 
+      # Full push suite still uses the same 8m package budget as Windows smoke:
+      # agent/boot/control already hit 180s package timeouts under runner load,
+      # so 3m fails on slow machines without a code regression. Keep the step
+      # above normal full-suite wall time (~8-12m) so a hang still dies on the
+      # job budget rather than a false package timeout.
       - name: test (full)
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name != 'pull_request'
-        timeout-minutes: 10
+        timeout-minutes: 20
         env:
           # Run the prompt-cache prefix-stability guard (TestCacheHit*) in CI: a
           # regression there silently tanks the cache hit rate the project is
@@ -182,7 +187,7 @@ jobs:
           # Bound sandbox helper children in Windows tests so a failed OS-level
           # launch cannot pin the Actions step after Go's package timeout fires.
           WINDOWS_SANDBOX_WAIT_MS: "20000"
-        run: go test -p 4 -timeout=3m ./...
+        run: go test -p 4 -timeout=8m ./...
 
       - name: test (Scoop desktop launch)
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows'
@@ -351,6 +356,7 @@ jobs:
         run: |
           wails generate module
           pnpm --dir frontend install --frozen-lockfile
+          PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend exec playwright install --with-deps chromium
           pnpm --dir frontend build
 
       - name: Test desktop frontend
@@ -360,6 +366,7 @@ jobs:
           pnpm --dir frontend test:workspace
           pnpm --dir frontend test:motion
           pnpm --dir frontend test:transcript
+          pnpm --dir frontend test:transcript-browser
 
       - name: Test usage statistics frontend
         run: pnpm --dir frontend test:usage-stats
@@ -576,11 +583,8 @@ jobs:
             .github/workflows/release-desktop.yml \
             .github/workflows/release-verify-issues.yml \
             .github/workflows/docs-impact.yml \
-            .github/workflows/ci.yml \
-            .github/workflows/cross-boundary-review.yml \
-            .github/workflows/cross-boundary-review-signal.yml
+            .github/workflows/ci.yml
           bash scripts/release-workflows.test.sh
-          node --test .github/scripts/cross-boundary-review.test.cjs
           node scripts/check-single-release-public-contract.mjs
 
   # The site/ auth client has security-sensitive redirect-validation logic

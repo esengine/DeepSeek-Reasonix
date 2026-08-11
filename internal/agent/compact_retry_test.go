@@ -12,22 +12,26 @@ import (
 )
 
 func TestMaybeCompactIgnoresRetryAggregateBelowContextThreshold(t *testing.T) {
+	// compact_ratio is the sole trigger; LatestPromptTokens (context attempt)
+	// must drive the decision, not the billable retry aggregate.
+	const window = 10_000
 	sess := &Session{Messages: []provider.Message{
 		{Role: provider.RoleSystem, Content: "sys"},
-		{Role: provider.RoleUser, Content: strings.Repeat("large earlier request ", 500)},
-		{Role: provider.RoleAssistant, Content: "earlier answer"},
+		{Role: provider.RoleUser, Content: "task"},
+		{Role: provider.RoleAssistant, Content: strings.Repeat("large earlier request ", 500)},
 		{Role: provider.RoleUser, Content: "current request"},
 		{Role: provider.RoleAssistant, Content: "current answer"},
 	}}
 	a := New(&fakeProvider{reply: "summary"}, tool.NewRegistry(), sess, Options{
-		ContextWindow: 100,
+		ContextWindow: window,
+		CompactRatio:  0.85,
 		RecentKeep:    2,
-		ArchiveDir:    t.TempDir(),
 	}, event.Discard)
 
+	// Aggregate 9000 would be above fold (8500); latest context attempt 4000 is not.
 	prepareForObservedUsage(a, context.Background(), &provider.Usage{
-		PromptTokens:        80,
-		ContextPromptTokens: 40,
+		PromptTokens:        9000,
+		ContextPromptTokens: 4000,
 	})
 
 	if hasCompactionSummary(visibleContext(a)) {
@@ -36,22 +40,24 @@ func TestMaybeCompactIgnoresRetryAggregateBelowContextThreshold(t *testing.T) {
 }
 
 func TestMaybeCompactStillTriggersAtLatestContextThreshold(t *testing.T) {
+	const window = 10_000
 	sess := &Session{Messages: []provider.Message{
 		{Role: provider.RoleSystem, Content: "sys"},
-		{Role: provider.RoleUser, Content: strings.Repeat("large earlier request ", 500)},
-		{Role: provider.RoleAssistant, Content: "earlier answer"},
+		{Role: provider.RoleUser, Content: "task"},
+		{Role: provider.RoleAssistant, Content: strings.Repeat("large earlier request ", 500)},
 		{Role: provider.RoleUser, Content: "current request"},
 		{Role: provider.RoleAssistant, Content: "current answer"},
 	}}
 	a := New(&fakeProvider{reply: "summary"}, tool.NewRegistry(), sess, Options{
-		ContextWindow: 100,
+		ContextWindow: window,
+		CompactRatio:  0.85,
 		RecentKeep:    2,
-		ArchiveDir:    t.TempDir(),
 	}, event.Discard)
 
+	// Latest context attempt at/above fold trigger (8500) must install a summary.
 	prepareForObservedUsage(a, context.Background(), &provider.Usage{
-		PromptTokens:        160,
-		ContextPromptTokens: 80,
+		PromptTokens:        16000,
+		ContextPromptTokens: 8600,
 	})
 
 	if !hasCompactionSummary(visibleContext(a)) {

@@ -4,7 +4,7 @@
 // JSON-serializable HAST blocks. The worker never cancels in-flight work; the
 // client drops stale responses by request id.
 
-import { parseMarkdownToBlocks } from "../lib/markdownPipeline";
+import { parseMarkdown } from "../lib/markdownPipeline";
 import type { MarkdownParseRequest, MarkdownParseResponse } from "../lib/markdownWorkerClient";
 
 const workerScope = globalThis as unknown as {
@@ -15,7 +15,7 @@ const workerScope = globalThis as unknown as {
 workerScope.onmessage = (event) => {
   const { id, text } = event.data;
   try {
-    workerScope.postMessage({ id, blocks: parseMarkdownToBlocks(text) });
+    workerScope.postMessage({ id, result: parseMarkdown(text) });
   } catch (error) {
     workerScope.postMessage({
       id,

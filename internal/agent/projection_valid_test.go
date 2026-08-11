@@ -186,7 +186,7 @@ func TestForceThresholdNoopReturnsCompactionRequired(t *testing.T) {
 	}
 }
 
-func TestSummarizeWithRetryMergesUsage(t *testing.T) {
+func TestSummarizeOnceDoesNotRetry(t *testing.T) {
 	fp := &retryUsageProvider{
 		failOnce: errors.New("transient"),
 		reply:    "digest body",
@@ -194,24 +194,14 @@ func TestSummarizeWithRetryMergesUsage(t *testing.T) {
 		usage2:   &provider.Usage{PromptTokens: 11, CompletionTokens: 3, TotalTokens: 14, RequestCount: 1},
 	}
 	a := New(fp, tool.NewRegistry(), NewSession("sys"), Options{}, event.Discard)
-	summary, usage, err := a.summarizeWithRetry(context.Background(), []provider.Message{
+	_, _, err := a.summarizeOnce(context.Background(), []provider.Message{
 		{Role: provider.RoleUser, Content: "fold me"},
 	}, "")
-	if err != nil {
-		t.Fatalf("summarizeWithRetry: %v", err)
+	if err == nil {
+		t.Fatal("expected first-attempt failure to surface without retry")
 	}
-	if summary != "digest body" {
-		t.Fatalf("summary = %q", summary)
-	}
-	if usage == nil {
-		t.Fatal("usage is nil")
-	}
-	// Both attempts contribute billable tokens and request count.
-	if usage.PromptTokens < 21 || usage.CompletionTokens < 5 {
-		t.Fatalf("merged usage under-counted: %+v", usage)
-	}
-	if usage.RequestCount < 2 {
-		t.Fatalf("RequestCount = %d, want >= 2 (both attempts)", usage.RequestCount)
+	if fp.calls != 1 {
+		t.Fatalf("provider calls = %d, want exactly 1", fp.calls)
 	}
 }
 

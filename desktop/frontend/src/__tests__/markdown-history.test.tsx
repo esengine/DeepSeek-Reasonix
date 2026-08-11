@@ -9,7 +9,7 @@ import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import MarkdownHistory from "../components/MarkdownHistory";
-import { parseMarkdownToBlocks, markdownContentRevision } from "../lib/markdownPipeline";
+import { parseMarkdown, markdownContentRevision } from "../lib/markdownPipeline";
 import {
   disposeMarkdownWorkerClient,
   MarkdownWorkerClient,
@@ -81,7 +81,7 @@ const parseCalls: string[] = [];
 const newSpyClient = () => new MarkdownWorkerClient({
   parseInProcess: (text) => {
     parseCalls.push(text);
-    return parseMarkdownToBlocks(text);
+    return parseMarkdown(text);
   },
 });
 
@@ -95,14 +95,14 @@ console.log("\nmarkdown history rendering");
   // A deferred fake worker keeps the parse in flight so the fallback can be
   // observed; the global Worker stub routes the client down the worker path.
   (globalThis as { Worker?: unknown }).Worker = class {};
-  let resolveParse: ((blocks: ReturnType<typeof parseMarkdownToBlocks>) => void) | null = null;
+  let resolveParse: ((result: ReturnType<typeof parseMarkdown>) => void) | null = null;
   const deferred = new MarkdownWorkerClient({
     createWorker: () => Promise.resolve({
       onmessage: null,
       onerror: null,
       postMessage(request) {
-        resolveParse = (blocks) => {
-          const message = { data: { id: request.id, blocks } };
+        resolveParse = (result) => {
+          const message = { data: { id: request.id, result } };
           (this.onmessage as ((event: unknown) => void) | null)?.(message);
         };
       },
@@ -116,7 +116,7 @@ console.log("\nmarkdown history rendering");
   });
   eq(rootEl.textContent, text, "fallback shows the full text while parsing");
   await act(async () => {
-    resolveParse?.(parseMarkdownToBlocks(text));
+    resolveParse?.(parseMarkdown(text));
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
   ok(rootEl.querySelector('.md[data-markdown-blocks="3"]'), "parsed blocks render after the worker resolves");

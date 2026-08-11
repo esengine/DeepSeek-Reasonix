@@ -11,7 +11,7 @@ import {
   type MarkdownParseResponse,
   type MarkdownWorkerLike,
 } from "../lib/markdownWorkerClient";
-import type { MarkdownBlock } from "../lib/markdownPipeline";
+import type { MarkdownBlock, MarkdownParseResult } from "../lib/markdownPipeline";
 
 let passed = 0;
 let failed = 0;
@@ -47,8 +47,8 @@ class FakeWorker implements MarkdownWorkerLike {
   postMessage(request: MarkdownParseRequest): void {
     this.sent.push(request);
   }
-  respond(id: number, blocks: MarkdownBlock[]): void {
-    this.onmessage?.({ data: { id, blocks } } as MessageEvent<MarkdownParseResponse>);
+  respond(id: number, result: MarkdownParseResult): void {
+    this.onmessage?.({ data: { id, result } } as MessageEvent<MarkdownParseResponse>);
   }
   fail(id: number, error: string): void {
     this.onmessage?.({ data: { id, error } } as MessageEvent<MarkdownParseResponse>);
@@ -62,6 +62,7 @@ class FakeWorker implements MarkdownWorkerLike {
 }
 
 const BLOCKS: MarkdownBlock[] = [{ key: "b0", children: [{ type: "text", value: "hi" }] }];
+const RESULT: MarkdownParseResult = { blocks: BLOCKS, selectionText: "hi", selectionRevision: 1 };
 
 console.log("\nmarkdown worker client");
 
@@ -72,9 +73,9 @@ console.log("\nmarkdown worker client");
   const handle = client.parse("hello");
   await tick();
   eq(worker.sent.length, 1, "request posted to the worker");
-  worker.respond(worker.sent[0].id, BLOCKS);
-  const blocks = await handle.promise;
-  eq(blocks, BLOCKS, "response resolves with parsed blocks");
+  worker.respond(worker.sent[0].id, RESULT);
+  const result = await handle.promise;
+  eq(result, RESULT, "response resolves with the full parse result");
   eq(client.pendingCount, 0, "pending map drains after a response");
 }
 
@@ -88,7 +89,7 @@ console.log("\nmarkdown worker client");
   const cancelled = await handle.promise;
   eq(cancelled, undefined, "cancelled parse resolves undefined");
   eq(worker.terminated, 1, "cancelling active work terminates the stale parser");
-  worker.respond(worker.sent[0].id, BLOCKS); // late response for a dead id
+  worker.respond(worker.sent[0].id, RESULT); // late response for a dead id
   await tick();
   eq(client.pendingCount, 0, "late response for a cancelled id is dropped");
 }
@@ -144,8 +145,8 @@ console.log("\nmarkdown worker client");
   const retry = client.parse("again");
   await tick();
   eq(creations, 2, "a fresh parse recreates the worker after a crash");
-  worker.respond(worker.sent[worker.sent.length - 1].id, BLOCKS);
-  eq(await retry.promise, BLOCKS, "recreated worker serves the retry");
+  worker.respond(worker.sent[worker.sent.length - 1].id, RESULT);
+  eq(await retry.promise, RESULT, "recreated worker serves the retry");
 }
 
 // ── in-process fallback when Worker is unavailable ───────────────────────────
@@ -155,11 +156,11 @@ console.log("\nmarkdown worker client");
   const client = new MarkdownWorkerClient({
     parseInProcess: (text) => {
       seen.push(text);
-      return BLOCKS;
+      return RESULT;
     },
   });
   const blocks = await client.parse("fallback text").promise;
-  eq(blocks, BLOCKS, "fallback resolves parsed blocks without a Worker");
+  eq(blocks, RESULT, "fallback resolves the parse result without a Worker");
   eq(seen.join(","), "fallback text", "fallback receives the exact source text");
   (globalThis as { Worker?: unknown }).Worker = class {};
 }
@@ -194,9 +195,9 @@ console.log("\nmarkdown worker client");
       const id = worker.sent[worker.sent.length - 1].id;
       if (cycle % 3 === 0) {
         handle.cancel();
-        worker.respond(id, BLOCKS); // dropped
+        worker.respond(id, RESULT); // dropped
       } else if (cycle % 3 === 1) {
-        worker.respond(id, BLOCKS);
+        worker.respond(id, RESULT);
       } else {
         worker.fail(id, `error ${cycle}`);
       }
@@ -219,7 +220,7 @@ console.log("\nmarkdown worker client");
   const b = client.parse("b");
   await tick();
   eq(worker.sent.length, 1, "worker queue runs only one parse at a time");
-  worker.respond(worker.sent[0].id, BLOCKS);
+  worker.respond(worker.sent[0].id, RESULT);
   await a.promise;
   await tick();
   ok(worker.sent[1].id > worker.sent[0].id, "request ids increase monotonically");

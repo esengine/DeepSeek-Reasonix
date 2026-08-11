@@ -33,15 +33,30 @@ func contractPlan() plancontract.Plan {
 }
 
 func TestPlanFactsSeparatesCriteriaByKind(t *testing.T) {
-	facts := planFacts(contractPlan())
-	if !slices.Equal(facts.AcceptanceCriteria, []string{"two model refs never share an entry"}) {
+	plan := contractPlan()
+	facts := planFacts(plan)
+	texts := func(cs []taskcontract.PlanCriterion) []string {
+		out := make([]string, 0, len(cs))
+		for _, c := range cs {
+			if c.ID == "" {
+				t.Errorf("criterion %q lost the identity a proof must cite", c.Text)
+			}
+			out = append(out, c.Text)
+		}
+		return out
+	}
+	if !slices.Equal(texts(facts.AcceptanceCriteria), []string{"two model refs never share an entry"}) {
 		t.Errorf("acceptance = %v", facts.AcceptanceCriteria)
 	}
-	if !slices.Equal(facts.Regressions, []string{"existing hits keep hitting"}) {
+	if !slices.Equal(texts(facts.Regressions), []string{"existing hits keep hitting"}) {
 		t.Errorf("regressions = %v", facts.Regressions)
 	}
-	if !slices.Equal(facts.Optional, []string{"the hit rate is logged"}) {
+	if !slices.Equal(texts(facts.Optional), []string{"the hit rate is logged"}) {
 		t.Errorf("optional = %v", facts.Optional)
+	}
+	// The id the plan assigned is the id the contract must carry.
+	if got, want := facts.AcceptanceCriteria[0].ID, plan.Steps[0].Acceptance[0].ID; got != want {
+		t.Errorf("criterion id = %q, want the plan's %q", got, want)
 	}
 	if !slices.Equal(facts.Verifications, []string{"go test ./internal/provider/"}) {
 		t.Errorf("verifications = %v", facts.Verifications)
@@ -83,8 +98,8 @@ func TestShadowContractPrefersPlanCriteriaOverTodoTitles(t *testing.T) {
 // An optional criterion is recorded but must never hold completion open.
 func TestOptionalCriterionDoesNotBlockCompletion(t *testing.T) {
 	c := taskcontract.FromPlan("o", taskcontract.PlanFacts{
-		AcceptanceCriteria: []string{"required one"},
-		Optional:           []string{"nice to have"},
+		AcceptanceCriteria: []taskcontract.PlanCriterion{{Text: "required one"}},
+		Optional:           []taskcontract.PlanCriterion{{Text: "nice to have"}},
 	})
 	for _, req := range c.Requirements {
 		if req.Text == "required one" {

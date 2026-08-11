@@ -1,6 +1,11 @@
 package evidence
 
-import "encoding/json"
+import (
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"strings"
+)
 
 // Receipt is the host-runtime record of one tool call. It stays in memory for
 // the current agent turn and is not serialized into prompts or session state.
@@ -22,6 +27,10 @@ type Receipt struct {
 	// output. Content-evidence checks require it to be non-zero so a command
 	// that printed nothing (head -n 0, >/dev/null) can never count as reading.
 	OutputBytes int `json:"output_bytes,omitempty"`
+	// OutputDigest is a bounded host-derived identity for the model-visible
+	// output. Goal progress uses it to distinguish a genuinely changed read or
+	// command result from an exact successful repeat without retaining content.
+	OutputDigest string `json:"output_digest,omitempty"`
 	// ExitCode is the status the child process actually returned. Success only
 	// says the tool call itself completed, so a failing test run the tool
 	// reported cleanly stays distinguishable here. Zero differs from unset.
@@ -29,6 +38,22 @@ type Receipt struct {
 	// Verification is the host's classification of a shell call: one of the
 	// Verification* values. Empty means the host never classified this receipt.
 	Verification string `json:"verification,omitempty"`
+}
+
+// ObserveOutput records the trimmed output size and a compact digest without
+// retaining model-visible content in the evidence ledger.
+func (r *Receipt) ObserveOutput(output string) {
+	if r == nil {
+		return
+	}
+	trimmed := strings.TrimSpace(output)
+	r.OutputBytes = len(trimmed)
+	if trimmed == "" {
+		r.OutputDigest = ""
+		return
+	}
+	sum := sha256.Sum256([]byte(trimmed))
+	r.OutputDigest = fmt.Sprintf("%x", sum[:16])
 }
 
 // Verification classifications mirror tool.ShellVerification*, duplicated so

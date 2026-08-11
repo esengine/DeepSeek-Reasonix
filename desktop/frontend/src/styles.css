@@ -3432,6 +3432,19 @@ a[href] {
   left: 0;
   width: 100%;
 }
+.transcript-selection-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-local-handle);
+  pointer-events: none;
+  overflow: visible;
+}
+.transcript-selection-overlay__rect {
+  position: absolute;
+  display: block;
+  border-radius: 2px;
+  background: color-mix(in srgb, Highlight 34%, transparent);
+}
 .transcript__row > * {
   max-width: var(--maxw);
   margin-left: auto;

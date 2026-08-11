@@ -21,6 +21,7 @@ func TestSetGoalDurableRollsBackAllRuntimeStateOnWriteFailure(t *testing.T) {
 	c.goals.noProgressTurns = 2
 	c.goals.lastContinuationReason = "preserve this reason"
 	c.goals.budgetExtensions = 1
+	c.goals.progressEvidence = []string{"existing-read"}
 	c.goals.mu.Unlock()
 	want := c.GoalRuntime()
 
@@ -34,5 +35,10 @@ func TestSetGoalDurableRollsBackAllRuntimeStateOnWriteFailure(t *testing.T) {
 	}
 	if got := c.GoalRuntime(); got != want {
 		t.Fatalf("GoalRuntime() after failed durable write = %+v, want %+v", got, want)
+	}
+	c.goals.mu.Lock()
+	defer c.goals.mu.Unlock()
+	if len(c.goals.progressEvidence) != 1 || c.goals.progressEvidence[0] != "existing-read" {
+		t.Fatalf("Goal evidence after rollback = %v, want preserved", c.goals.progressEvidence)
 	}
 }

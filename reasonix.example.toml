@@ -35,10 +35,7 @@ temperature       = 0.0
 # recovery_model = ""               # optional reviewer for low-risk automatic recovery; falls back to guardian_model then main model
 # reasoning_language = "auto"   # visible reasoning text: auto|zh|en
 # plan_mode_read_only_commands = ["gh issue view"]   # legacy compatibility only; Plan bash uses Permissions
-soft_compact_ratio  = 0.5   # notice only; keeps the cache-first prefix intact
-tool_result_snip_ratio = 0.6   # snip stale tool results before summary compaction
-compact_ratio       = 0.8   # try compacting when prompt reaches this fraction
-compact_force_ratio = 0.9   # force compacting at this high-water mark
+compact_ratio       = 0.85  # sole auto trigger; presets 0.70 (active) / 0.80 (steady) / 0.85 (recommended default)
 # planner_model = "deepseek-pro"   # optional: enable two-model collaboration
 # subagent_model = "deepseek-pro"   # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }   # per-skill overrides
@@ -64,6 +61,11 @@ models      = ["deepseek-v4-flash", "deepseek-v4-pro"]
 default     = "deepseek-v4-flash"   # optional; defaults to the first of `models`
 api_key_env = "DEEPSEEK_API_KEY"
 context_window = 1000000
+# Per-turn total output budget (does not change compact_ratio):
+# max_output_tokens = 0       # recommended: automatic (DeepSeek default high → ~64K)
+# max_output_tokens = 32768   # ordinary coding / cost control
+# max_output_tokens = 65536   # heavy reasoning / long tool loops
+# max_output_tokens = 131072  # only after repeated finish_reason=length
 # Optional per-model context budgets. Omitted models inherit context_window.
 # model_overrides = { "deepseek-v4-flash" = { context_window = 1000000 } }
 # Official DeepSeek providers use CNY or USD regional prices from
