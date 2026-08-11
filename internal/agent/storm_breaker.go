@@ -26,9 +26,6 @@ const (
 	// todoProgressNudgeRounds is the first adaptive checkpoint. The host asks
 	// the model to reassess, but keeps the turn alive so it can recover.
 	todoProgressNudgeRounds = 8
-	// maxTodoStallRounds pauses only after the reassessment also failed to
-	// produce a new completion or unique host-observed work receipt.
-	maxTodoStallRounds = 16
 )
 
 func todoProgressNudgeMessage(rounds int) string {

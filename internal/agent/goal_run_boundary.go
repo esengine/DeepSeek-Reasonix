@@ -33,21 +33,11 @@ func (e *goalStuckPause) Error() string {
 	return "goal paused after a structural no-progress loop: " + e.reason
 }
 
-type todoStallPause struct {
-	rounds int
-}
-
-func (e *todoStallPause) Error() string {
-	return fmt.Sprintf("paused after %d tool-call rounds without advancing the current todo — the work so far is saved; inspect the blocker or send another message to continue", e.rounds)
-}
-
 func isToolLoopPause(err error) bool {
 	var maxPause *maxStepsPause
-	var stallPause *todoStallPause
 	var stuckPause *goalStuckPause
 	var budgetPause *taskBudgetPause
-	return errors.As(err, &maxPause) || errors.As(err, &stallPause) ||
-		errors.As(err, &stuckPause) || errors.As(err, &budgetPause)
+	return errors.As(err, &maxPause) || errors.As(err, &stuckPause) || errors.As(err, &budgetPause)
 }
 
 // HostProgressSignatures exposes successful evidence identities to the Goal FSM.
@@ -100,9 +90,14 @@ func (a *Agent) stopUnexecutedBoundaryCalls(state *runLoopState, calls []provide
 	}
 }
 
-func (a *Agent) trackTodoProgress(state *runLoopState, receiptMark int) error {
+// trackTodoProgress advances the stall streak and asks the model to reassess
+// once, at the checkpoint. It never ends a run: the zero-evidence ladder and
+// the storm breaker already own that decision on the same receipts, and they
+// reach it far earlier, so a second stop keyed to a todo only added a way for
+// the host to end a turn the user never asked it to end.
+func (a *Agent) trackTodoProgress(state *runLoopState, receiptMark int) {
 	if a.planMode.Load() {
-		return nil
+		return
 	}
 	nextProgress, nextTracking := a.canonicalTodoProgress()
 	hostProgress := false
@@ -126,12 +121,6 @@ func (a *Agent) trackTodoProgress(state *runLoopState, receiptMark int) error {
 		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeLoopGuard,
 			Text: loopGuardNoticeText(), Detail: fmt.Sprintf("the current todo has no new completion, unique read, command, or mutation for %d consecutive tool-call rounds; asking the assistant to reassess", state.todoStallRounds)})
 	}
-	if state.todoStallRounds < maxTodoStallRounds {
-		return nil
-	}
-	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeLoopGuard,
-		Text: "Task progress stalled; pausing before more tools are called.", Detail: fmt.Sprintf("the current todo has no new completion, unique read, command, or mutation for %d consecutive tool-call rounds after a host reassessment; work is saved and can be resumed", state.todoStallRounds)})
-	return &todoStallPause{rounds: state.todoStallRounds}
 }
 
 func (a *Agent) armGoalStuckFinalization(state *runLoopState, stuck goalStuckSignal) bool {

@@ -520,9 +520,6 @@ func goalPauseFromRunError(err error) (cause, reason string, ok bool) {
 			reason = "host-detected structural no-progress loop"
 		}
 		return stopCauseGoalStuck, reason, true
-	case info.Kind == "todo_stall" && info.HostOwned:
-		return stopCauseGoalStuck,
-			fmt.Sprintf("current todo stalled for %d model rounds without host-observed progress", info.Limit), true
 	default:
 		return "", "", false
 	}

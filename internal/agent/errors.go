@@ -18,10 +18,6 @@ func PauseClass(err error) string {
 	if errors.As(err, &maxSteps) {
 		return "max_steps"
 	}
-	var stall *todoStallPause
-	if errors.As(err, &stall) {
-		return "todo_stall"
-	}
 	var stuck *goalStuckPause
 	if errors.As(err, &stuck) {
 		return "goal_stuck"
@@ -57,10 +53,6 @@ func InspectRunPause(err error) (RunPauseInfo, bool) {
 	var stuck *goalStuckPause
 	if errors.As(err, &stuck) {
 		return RunPauseInfo{Kind: "goal_stuck", Limit: stuck.limit, Key: stuck.key, HostOwned: true, Reason: stuck.reason}, true
-	}
-	var stall *todoStallPause
-	if errors.As(err, &stall) {
-		return RunPauseInfo{Kind: "todo_stall", Limit: stall.rounds, Key: "todo progress", HostOwned: true, Reason: "the current todo made no host-observed progress"}, true
 	}
 	var budget *taskBudgetPause
 	if errors.As(err, &budget) {
