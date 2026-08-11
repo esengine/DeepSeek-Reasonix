@@ -6,7 +6,6 @@
 // @ts-ignore `wails generate module` creates this locally; fresh checkouts keep
 // typecheck green by falling back to a disabled drift check below.
 import type * as GeneratedApp from "../../wailsjs/go/main/App";
-import type { main } from "../../wailsjs/go/models";
 import type { InvocationRequest } from "./invocationDisplay";
 
 import { addBreadcrumb } from "./breadcrumbs";
@@ -662,24 +661,12 @@ export interface AppBindings {
   RemoteLastWorkspace(hostId: string): Promise<string>;
   ScanRemoteLegacyWorkbenchData(): Promise<RemoteLegacyWorkbenchData>;
   CleanRemoteLegacyWorkbenchData(target: "mirrors" | "trust"): Promise<void>;
-  // ── AutoResearch / Workbench（合并上游 main-v2 新增的 binding）──
-  AutoResearchCurrent(): Promise<main.AutoResearchStatusView>;
-  AutoResearchFindings(arg1: string, arg2: number): Promise<Array<main.AutoResearchFindingView>>;
-  AutoResearchList(arg1: string): Promise<Array<main.AutoResearchStatusView>>;
-  AutoResearchOpenTask(arg1: string): Promise<void>;
-  AutoResearchRecordEvidence(arg1: string, arg2: string, arg3: main.AutoResearchEvidenceView): Promise<void>;
-  AutoResearchStatus(arg1: string): Promise<main.AutoResearchStatusView>;
-  EnsureRemoteServer(arg1: string, arg2: string): Promise<void>;
   OpenUserConfigPath(): Promise<void>;
   ReloadUserConfig(): Promise<DesktopStartupSettingsView>;
-  WorkbenchActiveTarget(): Promise<Record<string, any>>;
-  WorkbenchConnectRemote(arg1: string, arg2: string): Promise<void>;
-  WorkbenchDisconnectRemote(): Promise<void>;
-  WorkbenchLastRemoteHint(): Promise<Record<string, string>>;
-  WorkbenchPendingProviderTrust(): Promise<main.ProviderTrustPromptView>;
-  WorkbenchRemoteRequest(arg1: string, arg2: string): Promise<string>;
-  WorkbenchResolveProviderTrust(arg1: boolean): Promise<void>;
-  WorkbenchSwitchLocal(): Promise<Record<string, any>>;
+  ExternalOpenersForTab(tabID: string): Promise<ExternalOpenersView>;
+  OpenLocalPathInExternalOpener(path: string, id: string): Promise<void>;
+  SaveLocalPathAs(path: string): Promise<string>;
+  SetReasoningDisplayMode(mode: string): Promise<void>;
 }
 
 // Compile-time drift check. Exclude<A, B> extracts keys in A that are missing
@@ -5733,22 +5720,6 @@ function makeMockApp(): AppBindings {
     },
     async SubmitExtensionForm() {},
     async CleanRemoteLegacyWorkbenchData() {},
-    // ── AutoResearch / Workbench mocks（合并上游 main-v2 新增 binding）──
-    async AutoResearchCurrent() { return null as unknown as main.AutoResearchStatusView; },
-    async AutoResearchFindings() { return [] as main.AutoResearchFindingView[]; },
-    async AutoResearchList() { return [] as main.AutoResearchStatusView[]; },
-    async AutoResearchOpenTask() {},
-    async AutoResearchRecordEvidence() {},
-    async AutoResearchStatus() { return null as unknown as main.AutoResearchStatusView; },
-    async EnsureRemoteServer() {},
-    async WorkbenchActiveTarget() { return {}; },
-    async WorkbenchConnectRemote() {},
-    async WorkbenchDisconnectRemote() {},
-    async WorkbenchLastRemoteHint() { return {}; },
-    async WorkbenchPendingProviderTrust() { return null as unknown as main.ProviderTrustPromptView; },
-    async WorkbenchRemoteRequest() { return ""; },
-    async WorkbenchResolveProviderTrust() {},
-    async WorkbenchSwitchLocal() { return {}; },
   };
 }
 
