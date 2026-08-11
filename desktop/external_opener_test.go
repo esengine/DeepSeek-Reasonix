@@ -140,6 +140,54 @@ func TestSetPreferredExternalOpenerRejectsRendererCommands(t *testing.T) {
 	}
 }
 
+func TestExternalOpenerWorkspaceCapabilityUsesTheTabDirectoryNotScope(t *testing.T) {
+	projectRoot := t.TempDir()
+	globalRoot := t.TempDir()
+	missingRoot := filepath.Join(t.TempDir(), "missing")
+	fileRoot := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(fileRoot, []byte("file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	app.tabs = map[string]*WorkspaceTab{
+		"project": {ID: "project", Scope: "project", WorkspaceRoot: projectRoot},
+		"global":  {ID: "global", Scope: "global", WorkspaceRoot: globalRoot},
+		"missing": {ID: "missing", Scope: "project", WorkspaceRoot: missingRoot},
+		"file":    {ID: "file", Scope: "global", WorkspaceRoot: fileRoot},
+		"empty":   {ID: "empty", Scope: "global"},
+	}
+
+	for _, tabID := range []string{"project", "global"} {
+		if _, err := app.externalOpenerWorkspacePathForTab(tabID); err != nil {
+			t.Errorf("externalOpenerWorkspacePathForTab(%q) = %v, want available", tabID, err)
+		}
+	}
+	for _, tabID := range []string{"missing", "file", "empty", "unknown"} {
+		if _, err := app.externalOpenerWorkspacePathForTab(tabID); err == nil {
+			t.Errorf("externalOpenerWorkspacePathForTab(%q) succeeded, want unavailable", tabID)
+		}
+	}
+}
+
+func TestExternalOpenersForGlobalTabReportsWorkspaceCapability(t *testing.T) {
+	app := NewApp()
+	app.tabs = map[string]*WorkspaceTab{
+		"global": {ID: "global", Scope: "global", WorkspaceRoot: t.TempDir()},
+	}
+	view := app.ExternalOpenersForTab("global")
+	if !view.WorkspaceOpenable {
+		t.Fatal("ExternalOpenersForTab(global) workspaceOpenable = false, want true")
+	}
+	if view.Openers == nil {
+		t.Fatal("ExternalOpenersForTab(global) openers = nil, want a Wails-safe array")
+	}
+	unavailable := app.ExternalOpenersForTab("unknown")
+	if unavailable.WorkspaceOpenable || unavailable.Openers == nil {
+		t.Fatalf("ExternalOpenersForTab(unknown) = %+v, want unavailable with an empty Wails-safe array", unavailable)
+	}
+}
+
 func TestLocalSaveDestinationIsSourceDetectsFilesystemAliases(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "Readme.md")
@@ -293,5 +341,31 @@ func TestExternalOpenerViewIconIsBackwardCompatible(t *testing.T) {
 	}
 	if !strings.Contains(string(withIcon), `"iconDataUrl":"data:image/png;base64,AA=="`) {
 		t.Fatalf("native icon missing from JSON contract: %s", withIcon)
+	}
+
+	withoutCapability, err := json.Marshal(ExternalOpenersView{Openers: []ExternalOpenerView{}, Preferred: "finder"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(withoutCapability), "workspaceOpenable") {
+		t.Fatalf("false workspace capability should be omitted for old readers: %s", withoutCapability)
+	}
+	withCapability, err := json.Marshal(ExternalOpenersView{
+		Openers:           []ExternalOpenerView{},
+		Preferred:         "finder",
+		WorkspaceOpenable: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(withCapability), `"workspaceOpenable":true`) {
+		t.Fatalf("workspace capability missing from JSON contract: %s", withCapability)
+	}
+	var oldReader struct {
+		Openers   []ExternalOpenerView `json:"openers"`
+		Preferred string               `json:"preferred"`
+	}
+	if err := json.Unmarshal(withCapability, &oldReader); err != nil || oldReader.Preferred != "finder" || oldReader.Openers == nil {
+		t.Fatalf("old reader rejected additive workspace capability: reader=%+v err=%v", oldReader, err)
 	}
 }

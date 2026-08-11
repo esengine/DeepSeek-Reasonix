@@ -1,6 +1,26 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestCurrentBuiltInAnthropicCompatibleProvidersRemainLocalByCapability(t *testing.T) {
+	var entries []ProviderEntry
+	entries = append(entries, Default().Providers...)
+	for _, preset := range CuratedProviderPresets() {
+		entries = append(entries, preset.Entries...)
+	}
+	for _, entry := range entries {
+		if entry.Kind != "anthropic" {
+			continue
+		}
+		root := strings.TrimSuffix(strings.TrimRight(entry.BaseURL, "/"), "/v1")
+		if strings.EqualFold(root, "https://api.anthropic.com") {
+			t.Fatalf("built-in provider %q unexpectedly targets official Anthropic; add an explicit native-capability UX before enabling it", entry.Name)
+		}
+	}
+}
 
 func TestCuratedProviderPresetsCoverRequestedProviders(t *testing.T) {
 	wantIDs := []string{
@@ -31,6 +51,8 @@ func TestCuratedProviderPresetsCoverRequestedProviders(t *testing.T) {
 		"zai-coding-plan-global-anthropic",
 		"opencode-go",
 		"opencode-go-anthropic",
+		"opencode-go-deepseek-anthropic",
+		"opencode-go-deepseek-responses",
 		"opencode-zen-anthropic",
 		"qwen-cn",
 		"qwen-global",
@@ -74,6 +96,45 @@ func TestCuratedProviderPresetsCoverRequestedProviders(t *testing.T) {
 		if _, ok := got[id]; !ok {
 			t.Fatalf("missing preset %q", id)
 		}
+	}
+}
+
+func TestOpenCodeGoDeepSeekAlternativeProtocolPresets(t *testing.T) {
+	responsesPreset, ok := CuratedProviderPreset("opencode-go-deepseek-responses")
+	if !ok || len(responsesPreset.Entries) != 1 {
+		t.Fatalf("opencode-go-deepseek-responses preset = %+v, found=%v", responsesPreset, ok)
+	}
+	responses := responsesPreset.Entries[0]
+	if responses.Kind != "responses" || responses.BaseURL != "https://opencode.ai/zen/go/v1" || responses.ResponsesMode != "stateless" || responses.Default != "deepseek-v4-flash" {
+		t.Fatalf("opencode-go-deepseek-responses entry = %+v", responses)
+	}
+	if !responses.HasModel("deepseek-v4-flash") || responses.HasModel("deepseek-v4-pro") {
+		t.Fatalf("opencode-go-deepseek-responses models = %v, want currently verified Flash only", responses.ModelList())
+	}
+	if !EffectiveWebSearch(&responses) || !HasServerWebSearchCapability(&responses) {
+		t.Fatalf("opencode-go-deepseek-responses web search = effective:%t capability:%t", EffectiveWebSearch(&responses), HasServerWebSearchCapability(&responses))
+	}
+	if cap := EffortCapabilityForEntry(&responses); !cap.Supported || cap.Default != "high" || !containsString(cap.Levels, "disabled") || !containsString(cap.Levels, "max") {
+		t.Fatalf("opencode-go-deepseek-responses effort capability = %+v", cap)
+	}
+
+	anthropicPreset, ok := CuratedProviderPreset("opencode-go-deepseek-anthropic")
+	if !ok || len(anthropicPreset.Entries) != 1 {
+		t.Fatalf("opencode-go-deepseek-anthropic preset = %+v, found=%v", anthropicPreset, ok)
+	}
+	var cfg Config
+	if err := cfg.UpsertProvider(anthropicPreset.Entries[0]); err != nil {
+		t.Fatalf("UpsertProvider(opencode-go-deepseek-anthropic): %v", err)
+	}
+	flash, ok := cfg.ResolveModel("opencode-go-deepseek-anthropic/deepseek-v4-flash")
+	if !ok {
+		t.Fatal("opencode-go-deepseek-anthropic/deepseek-v4-flash did not resolve")
+	}
+	if cfgEntry, _ := cfg.Provider("opencode-go-deepseek-anthropic"); cfgEntry.HasModel("deepseek-v4-pro") || !EffectiveWebSearch(cfgEntry) || !HasServerWebSearchCapability(cfgEntry) {
+		t.Fatalf("opencode-go-deepseek-anthropic entry = %+v, want Flash-only web search capability", cfgEntry)
+	}
+	if cap := EffortCapabilityForEntry(flash); !cap.Supported || cap.Default != "high" || !containsString(cap.Levels, "max") {
+		t.Fatalf("opencode-go-deepseek-anthropic Flash effort capability = %+v", cap)
 	}
 }
 
@@ -543,7 +604,7 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	if !ok {
 		t.Fatal("opencode-go-anthropic provider missing")
 	}
-	if goAnthropic.Kind != "anthropic" || goAnthropic.BaseURL != "https://opencode.ai/zen/go" || goAnthropic.DefaultModel() != "qwen3.7-plus" || !goAnthropic.HasModel("minimax-m3") {
+	if goAnthropic.Kind != "anthropic" || goAnthropic.BaseURL != "https://opencode.ai/zen/go" || goAnthropic.DefaultModel() != "qwen3.7-plus" || !goAnthropic.HasModel("minimax-m3") || goAnthropic.HasModel("deepseek-v4-flash") {
 		t.Fatalf("opencode-go-anthropic capability mismatch: %+v", goAnthropic)
 	}
 

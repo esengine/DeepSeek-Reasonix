@@ -15,6 +15,12 @@ release workflow then asks that reporter to verify once the fix ships.
 
 -
 
+For a GSAP to WAAPI/CSS migration (or any cross-API replacement), document
+the source-to-target contract here: easing syntax, time units, callbacks,
+cancellation, reduced-motion behavior, and failure fallback. Verification must
+assert that the target API was actually called; a mock that silently skips it
+does not count.
+
 ## Documentation impact
 
 Documentation-impact: TODO

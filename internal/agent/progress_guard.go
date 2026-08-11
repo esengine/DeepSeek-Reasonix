@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 
 	"reasonix/internal/event"
@@ -22,6 +23,12 @@ const (
 type progressGuard struct {
 	tracker *evidence.ProgressTracker
 	streak  int
+}
+
+type goalStuckSignal struct {
+	limit  int
+	key    string
+	reason string
 }
 
 func (g *progressGuard) reset() {
@@ -48,50 +55,70 @@ func (g *progressGuard) observe(receipts []Receipt) int {
 // Receipt aliases the evidence receipt for the guard's signature.
 type Receipt = evidence.Receipt
 
-// applyBatchGuards runs both post-batch guards: the storm breaker (failure
-// fixation) and the progress guard (zero-gain repetition). The outcome shadow
-// observes the same receipts afterwards without influencing either guard.
-func (a *Agent) applyBatchGuards(calls []provider.ToolCall, outcomes []toolOutcome, results []string, receiptMark int) {
-	a.applyStormBreaker(calls, outcomes, results, receiptMark)
-	a.applyProgressGuard(results, outcomes, receiptMark)
-	a.observeOutcomeShadow(receiptMark, results, outcomes)
+// applyBatchGuards collects this round's signals — storm breaker (failure
+// fixation), progress guard (zero-gain repetition), evidence nudge — and lets
+// the arbiter deliver them as one tail. The shadow trackers observe the same
+// receipts without influencing any verdict.
+func (a *Agent) applyBatchGuards(ctx context.Context, cancelled bool, calls []provider.ToolCall, outcomes []toolOutcome, results []string, receiptMark int) goalStuckSignal {
+	if cancelled {
+		return goalStuckSignal{}
+	}
+	storm := a.applyStormBreaker(calls, outcomes, receiptMark)
+	progress := a.applyProgressGuard(outcomes, receiptMark)
+	shadow := a.observeOutcomeShadow(receiptMark, outcomes)
+	a.applyInterventions(results, outcomes, storm, progress, shadow)
 	a.observeDelegationAdmission(calls)
+	if _, scoped := DeliveryExecutionScopeFromContext(ctx); !scoped {
+		return goalStuckSignal{}
+	}
+	if storm.stuckReason != "" {
+		return goalStuckSignal{limit: stormBreakThreshold, key: "goal repeated host outcome", reason: storm.stuckReason}
+	}
+	if progress.stuckReason != "" {
+		return goalStuckSignal{limit: progressStopStreak, key: "goal zero-evidence rounds", reason: progress.stuckReason}
+	}
+	return goalStuckSignal{}
 }
 
-// resetTurnEvidence clears the ledger and both progress scorers together.
+// resetTurnEvidence clears the ledger and both progress scorers together. The
+// task budget resets with them: a fresh ledger is what "a new task" means here,
+// and a continuation keeps both.
 func (a *Agent) resetTurnEvidence() {
 	a.evidence.Reset()
 	a.progress.reset()
+	a.stormSig, a.stormCount, a.blockedTurnStreak = "", 0, 0
 	a.outcome = evidence.NewOutcomeTracker()
 	a.ebm = ebmState{}
 	a.governor = governorState{}
+	a.taskBudget = runBudget{limit: a.taskBudget.limit}
 }
 
 // observeOutcomeShadow scores the round's receipts through the shadow outcome
 // tracker, lets the EBM policy stamp (and under its arm, act on) the sample,
 // then records it. Unlike the guards it observes every round.
-func (a *Agent) observeOutcomeShadow(receiptMark int, results []string, outcomes []toolOutcome) {
+func (a *Agent) observeOutcomeShadow(receiptMark int, outcomes []toolOutcome) intervention {
 	if a.evidence == nil {
-		return
+		return intervention{}
 	}
 	if a.outcome == nil {
 		a.outcome = evidence.NewOutcomeTracker()
 	}
 	sample := a.outcome.ScoreRound(a.evidence.ReceiptsSince(receiptMark))
-	a.applyEBM(&sample, results, outcomes)
+	iv := a.applyEBM(&sample, outcomes)
 	a.applyGovernor(&sample)
 	a.armGovernorCapture(sample)
 	event.RecordOutcomeProgress(a.sink, sample)
+	a.observeContractRound()
+	return iv
 }
 
 // applyProgressGuard escalates when consecutive rounds stop producing new
-// evidence. It rides the same channel as the storm breaker: guidance appended
-// to the round's first tool result, a loop-guard notice for the frontend, and
-// at the stop tier the loop-guard pass so final readiness stands down and the
-// model can deliver its answer instead of being sent back for more receipts.
-func (a *Agent) applyProgressGuard(results []string, outcomes []toolOutcome, receiptMark int) {
-	if a.evidence == nil || len(results) == 0 || len(outcomes) == 0 {
-		return
+// evidence. At the stop tier it also arms the loop-guard pass so final
+// readiness stands down and the model can deliver its answer instead of being
+// sent back for more receipts.
+func (a *Agent) applyProgressGuard(outcomes []toolOutcome, receiptMark int) intervention {
+	if a.evidence == nil || len(outcomes) == 0 {
+		return intervention{}
 	}
 	receipts := a.evidence.ReceiptsSince(receiptMark)
 	// Rounds where nothing succeeded are the storm breaker's jurisdiction
@@ -105,10 +132,11 @@ func (a *Agent) applyProgressGuard(results []string, outcomes []toolOutcome, rec
 		}
 	}
 	if !anySuccess {
-		return
+		return intervention{}
 	}
 	streak := a.progress.observe(receipts)
 	var guard, detail string
+	tier := verdictAdvise
 	warn := false
 	// Fire only when a threshold is crossed: repeating the injected guidance
 	// every round would inflate prompts (and can even tip compaction).
@@ -118,6 +146,7 @@ func (a *Agent) applyProgressGuard(results []string, outcomes []toolOutcome, rec
 			"[progress guard] %d tool rounds in a row produced no new evidence (no new files, results, or changes). Stop exploring: produce your final answer now, stating what was established and what remains unknown.",
 			streak)
 		detail = fmt.Sprintf("progress guard: %d zero-gain rounds — demanding a final answer", streak)
+		tier = verdictLand
 		warn = true
 		a.armLoopGuardPass(receiptMark)
 	case progressPivotStreak:
@@ -125,20 +154,28 @@ func (a *Agent) applyProgressGuard(results []string, outcomes []toolOutcome, rec
 			"[progress guard] still no new evidence after %d rounds. Change strategy now: take a different angle or tool, delegate a focused sub-task, or reduce the scope of what you are verifying.",
 			streak)
 		detail = fmt.Sprintf("progress guard: %d zero-gain rounds — forcing a strategy change", streak)
+		tier = verdictRedirect
 	case progressNudgeStreak:
 		guard = fmt.Sprintf(
 			"[progress guard] the last %d tool rounds repeated earlier reads or commands without new results. Narrow the investigation or adjust the plan before continuing.",
 			streak)
 		detail = fmt.Sprintf("progress guard: %d zero-gain rounds — nudging to narrow", streak)
 	default:
-		return
+		return intervention{}
 	}
-	results[0] = outcomes[0].output + "\n\n" + guard
 	level := event.LevelInfo
 	if warn {
 		level = event.LevelWarn
 	}
-	a.sink.Emit(event.Event{Kind: event.Notice, Level: level, Code: event.NoticeCodeProgressGuard, Text: progressGuardNoticeText(), Detail: detail})
+	iv := intervention{
+		verdict:  tier,
+		guidance: guard,
+		notice:   noticeFor(event.NoticeCodeProgressGuard, level, progressGuardNoticeText(), detail),
+	}
+	if streak >= progressStopStreak {
+		iv.stuckReason = fmt.Sprintf("%d consecutive successful tool rounds produced no new host evidence", streak)
+	}
+	return iv
 }
 
 func progressGuardNoticeText() string {

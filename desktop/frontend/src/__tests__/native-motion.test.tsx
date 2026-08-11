@@ -6,7 +6,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { CSS_EASE_OUT } from "../lib/motion";
 import { useCollapseAnimation } from "../lib/useCollapseAnimation";
-import { useEntranceAnimation } from "../lib/useEntranceAnimation";
+import { transcriptEntranceResetKey, useEntranceAnimation } from "../lib/useEntranceAnimation";
 import { useMountTransition } from "../lib/useMountTransition";
 
 let passed = 0;
@@ -153,6 +153,19 @@ function MountHarness({ open, duration }: { open: boolean; duration: number }) {
 }
 
 console.log("\nnative motion fallbacks");
+
+// Transcript tail appends keep one entrance generation; real surface changes
+// and history prepends reset it before virtual rows mount.
+{
+  const base = [{ id: "u1" }, { id: "a1" }];
+  const appended = [...base, { id: "u2" }];
+  const prepended = [{ id: "old-u" }, ...base];
+  const initialKey = transcriptEntranceResetKey("tab-a", 0, base);
+  eq(transcriptEntranceResetKey("tab-a", 0, appended), initialKey, "tail append preserves transcript entrance reset key");
+  ok(transcriptEntranceResetKey("tab-a", 0, prepended) !== initialKey, "history prepend changes transcript entrance reset key");
+  ok(transcriptEntranceResetKey("tab-b", 0, base) !== initialKey, "tab switch changes transcript entrance reset key");
+  ok(transcriptEntranceResetKey("tab-a", 1, base) !== initialKey, "reveal signal changes transcript entrance reset key");
+}
 
 // Valid native motion waits for completion and settles exactly once.
 {

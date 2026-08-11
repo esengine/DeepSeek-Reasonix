@@ -138,16 +138,7 @@ func main() {
 		capturePendingUpdateHealthIdentity(app)
 	}
 
-	// Restore saved window size, or fall back to the default.
-	width, height := 1240, 720
-	if saved, ok := loadWindowState(); ok {
-		if saved.Width > 0 {
-			width = saved.Width
-		}
-		if saved.Height > 0 {
-			height = saved.Height
-		}
-	}
+	width, height := initialDesktopWindowSize()
 
 	// Restore saved desktop zoom factor (WebView2 ZoomFactor), or default to 1.0.
 	zoomFactor := 1.0

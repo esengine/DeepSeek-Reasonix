@@ -9,9 +9,16 @@ import (
 )
 
 // admissionGatedDelegations are the delegation tools expensive enough to need
-// an admission reason on local-fix turns. Research first: one call cost 65% of
-// the worst benchmark task's wall clock.
-var admissionGatedDelegations = map[string]bool{"research": true}
+// an admission reason on local-fix turns. task/fleet/explore joined research
+// after a paired measurement: forcing delegation on identical work cost 2-4x
+// the tokens and wall clock with no change in outcome. Shadow-only — a deny is
+// recorded, never enforced; two tasks do not justify blocking a user's call.
+var admissionGatedDelegations = map[string]bool{
+	"research": true,
+	"explore":  true,
+	"task":     true,
+	"fleet":    true,
+}
 
 // researchRequestMarkers is the V1 shadow heuristic for "the user explicitly
 // asked for external research"; deliberately narrow — a miss records a deny

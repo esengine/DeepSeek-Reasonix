@@ -917,7 +917,7 @@ export const RichComposerInput = forwardRef<RichComposerInputHandle, {
       id="composer-input"
       ref={rootRef}
       className="composer__rich-input"
-      contentEditable={!disabled}
+      contentEditable={!disabled} spellCheck={false} autoCorrect="off" autoCapitalize="off"
       suppressContentEditableWarning
       role="textbox"
       aria-multiline="true"

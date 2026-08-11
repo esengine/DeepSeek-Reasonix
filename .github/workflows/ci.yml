@@ -171,9 +171,14 @@ jobs:
         timeout-minutes: 5
         run: go test -timeout=3m -run '^TestBashPowerShellExecuteDetailedContract$|^TestBashPowerShell51PreflightRejectsAndAndDetailed$|^TestBashPowerShellOutputIsUTF8$|^TestBashPowerShellSurfacesNonZeroExit$|^TestBashPowerShellRejectsChaining$' ./internal/tool/builtin
 
+      # Full push suite still uses the same 8m package budget as Windows smoke:
+      # agent/boot/control already hit 180s package timeouts under runner load,
+      # so 3m fails on slow machines without a code regression. Keep the step
+      # above normal full-suite wall time (~8-12m) so a hang still dies on the
+      # job budget rather than a false package timeout.
       - name: test (full)
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name != 'pull_request'
-        timeout-minutes: 10
+        timeout-minutes: 20
         env:
           # Run the prompt-cache prefix-stability guard (TestCacheHit*) in CI: a
           # regression there silently tanks the cache hit rate the project is
@@ -182,7 +187,7 @@ jobs:
           # Bound sandbox helper children in Windows tests so a failed OS-level
           # launch cannot pin the Actions step after Go's package timeout fires.
           WINDOWS_SANDBOX_WAIT_MS: "20000"
-        run: go test -p 4 -timeout=3m ./...
+        run: go test -p 4 -timeout=8m ./...
 
       - name: test (Scoop desktop launch)
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows'
@@ -321,7 +326,7 @@ jobs:
       - name: Install Wails CLI
         run: |
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          go install "github.com/wailsapp/wails/v2/cmd/wails@$(cat "$GITHUB_WORKSPACE/.wails-version")"
 
       - name: gofmt
         run: |
@@ -351,12 +356,18 @@ jobs:
         run: |
           wails generate module
           pnpm --dir frontend install --frozen-lockfile
+          PLAYWRIGHT_BROWSERS_PATH=.pw-browsers pnpm --dir frontend exec playwright install --with-deps chromium
           pnpm --dir frontend build
 
       - name: Test desktop frontend
         run: |
           pnpm --dir frontend test:terminal
           pnpm --dir frontend test:task-monitor
+          pnpm --dir frontend test:workspace
+          pnpm --dir frontend test:motion
+          pnpm --dir frontend test:motion-browser
+          pnpm --dir frontend test:transcript
+          pnpm --dir frontend test:transcript-browser
 
       - name: Test usage statistics frontend
         run: pnpm --dir frontend test:usage-stats
@@ -449,7 +460,7 @@ jobs:
       - name: Install Wails CLI
         run: |
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          go install "github.com/wailsapp/wails/v2/cmd/wails@$(cat "$GITHUB_WORKSPACE/.wails-version")"
 
       # go:embed of frontend/dist needs a built frontend before the package
       # compiles, same as the ubuntu desktop leg.
@@ -458,6 +469,30 @@ jobs:
           wails generate module
           pnpm --dir frontend install --frozen-lockfile
           pnpm --dir frontend build
+
+      - name: Test native motion contracts
+        run: pnpm --dir frontend test:motion
+
+      - name: Test WebView2 native smoke state machine
+        shell: pwsh
+        run: ../scripts/test-webview2-native-smoke.ps1 -SelfTest
+
+      # Build the real Wails executable on every desktop PR and exercise the
+      # exact production startup path in Microsoft's installed WebView2 runtime.
+      # The frontend and bindings were already built above, so this skips only
+      # duplicate build work, not the native shell.
+      - name: Build Wails executable for native startup smoke
+        timeout-minutes: 10
+        run: wails build -clean -s -skipbindings -nopackage -platform windows/amd64 -webview2 embed
+
+      - name: Smoke-test Wails/WebView2 native startup
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          ../scripts/test-webview2-native-smoke.ps1 `
+            -ExecutablePath "build/bin/reasonix-desktop.exe" `
+            -TimeoutSeconds 60 `
+            -HealthySeconds 5
 
       - name: test (Windows desktop and update helper)
         timeout-minutes: 15
@@ -489,8 +524,32 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - if: github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false'
+        uses: pnpm/action-setup@v6.0.9
+        with:
+          version: 10
+          run_install: false
+
+      - if: github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false'
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
+
+      - name: required native motion contracts
+        if: github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false'
+        run: |
+          pnpm --dir desktop/frontend install --frozen-lockfile
+          pnpm --dir desktop/frontend test:motion
+
       - name: repo standards
         run: go run ./tools/repolint
+
+      - name: wails version pin
+        run: |
+          bash scripts/check-wails-pin.sh
+          bash scripts/check-wails-pin.test.sh
 
       # `make lint-install` reads the same file, so a local run and this job
       # cannot drift onto different linter versions.
@@ -512,9 +571,9 @@ jobs:
           set -euo pipefail
           command -v golangci-lint
           for target in "darwin ." "windows ." "windows desktop"; do
-            set -- $target
-            echo "::group::golangci-lint GOOS=$1 ($2)"
-            (cd "$2" && GOOS="$1" golangci-lint run --timeout=5m ./...)
+            read -r target_os target_dir <<< "$target"
+            echo "::group::golangci-lint GOOS=$target_os ($target_dir)"
+            (cd "$target_dir" && GOOS="$target_os" golangci-lint run --timeout=5m ./...)
             echo "::endgroup::"
           done
 
@@ -529,7 +588,8 @@ jobs:
             .github/workflows/release-npm.yml \
             .github/workflows/release-desktop.yml \
             .github/workflows/release-verify-issues.yml \
-            .github/workflows/docs-impact.yml
+            .github/workflows/docs-impact.yml \
+            .github/workflows/ci.yml
           bash scripts/release-workflows.test.sh
           node scripts/check-single-release-public-contract.mjs
 

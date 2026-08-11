@@ -22,6 +22,7 @@ type builtinSlashSpec struct {
 func builtinSlashSpecs() []builtinSlashSpec {
 	return []builtinSlashSpec{
 		{name: "/compact", insert: "/compact ", hint: i18n.M.CmdCompact, showInHelp: true},
+		{name: "/context", insert: "/context", hint: i18n.M.CmdContext, showInHelp: true},
 		{name: "/new", insert: "/new ", hint: i18n.M.CmdNew, showInHelp: true},
 		{name: "/clear", insert: "/clear", hint: i18n.M.CmdClear, showInHelp: true},
 		{name: "/cls", insert: "/cls", hint: i18n.M.CmdCls, showInHelp: true},
@@ -55,6 +56,7 @@ func builtinSlashSpecs() []builtinSlashSpec {
 		{name: "/language", insert: "/language ", hint: i18n.M.CmdLanguage, descend: true, showInHelp: true},
 		{name: "/currency", insert: "/currency ", hint: i18n.M.CmdCurrency, descend: true, showInHelp: true},
 		{name: "/help", insert: "/help", hint: i18n.M.CmdHelp, showInHelp: true},
+		{name: "/web", insert: "/web", hint: i18n.M.CmdWeb, showInHelp: true},
 		{name: "/docs", aliases: []string{"/reasonix:docs"}, insert: "/docs ", hint: i18n.M.CmdDocs, showInHelp: true},
 		{name: "/memory", insert: "/memory ", hint: i18n.M.CmdMemory, showInHelp: true},
 		{name: "/migrate", aliases: []string{"/migration"}, insert: "/migrate", hint: i18n.M.CmdMigrate, showInHelp: true},

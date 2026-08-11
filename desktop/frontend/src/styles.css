@@ -3415,6 +3415,19 @@ a[href] {
   left: 0;
   width: 100%;
 }
+.transcript-selection-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-local-handle);
+  pointer-events: none;
+  overflow: visible;
+}
+.transcript-selection-overlay__rect {
+  position: absolute;
+  display: block;
+  border-radius: 2px;
+  background: color-mix(in srgb, Highlight 34%, transparent);
+}
 .transcript__row > * {
   max-width: var(--maxw);
   margin-left: auto;
@@ -5097,12 +5110,63 @@ button.reasoning-summary:focus-visible {
   border-radius: 5px;
   padding: 1px 5px;
 }
+/* Horizontal overflow only: never create a vertical nested scroller. CSS
+   forces overflow-y to "auto" when overflow-x is non-visible, so tables use a
+   wrapper (below) for x-scroll and the table itself stays overflow:visible. */
+.md-table-scroll {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin: 0 0 12px;
+}
+/* Large tables default to an in-flow preview; expand mounts the virtual
+   scroller only when the user opts in (see MarkdownTable.tsx). */
+.md-table-fold {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+.md-table-fold > .md-table-scroll,
+.md-table-fold > .md-table-virtual {
+  margin-bottom: 0;
+}
+.md-table-fold__toggle {
+  --wails-draggable: no-drag;
+  align-self: flex-start;
+  margin: 0;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-soft);
+  color: var(--fg-dim);
+  font-size: var(--text-xs, 12px);
+  line-height: 1.4;
+  cursor: pointer;
+}
+.md-table-fold__toggle:hover {
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 40%, var(--bg-soft));
+}
+.md-table-fold__toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+}
 .md table {
   border-collapse: collapse;
   margin: 0 0 12px;
   font-size: var(--font-content);
-  display: block;
-  overflow-x: auto;
+  width: 100%;
+  /* Keep tables in normal document flow so trackpad Y always drives .transcript.
+     Wide tables sit inside .md-table-scroll when a horizontal scroller is needed. */
+  overflow: visible;
+}
+.md-table-scroll > table {
+  margin-bottom: 0;
+  width: max-content;
+  min-width: 100%;
 }
 .md th,
 .md td {
@@ -5117,10 +5181,12 @@ button.reasoning-summary:focus-visible {
 /* Row-virtualized oversized markdown tables (see MarkdownTable.tsx): the
    wrapper owns vertical scroll, the thead stays pinned, and body rows are
    absolutely positioned by the virtualizer. Flex rows keep header/body cells
-   column-aligned without a full-table layout pass. */
+   column-aligned without a full-table layout pass. Marked data-nested-scroll
+   so transcript wheel handoff promotes edge gestures to .transcript. */
 .md-table-virtual {
   overflow-y: auto;
   overflow-x: auto;
+  overscroll-behavior: contain;
   margin: 0 0 12px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -5163,9 +5229,17 @@ button.reasoning-summary:focus-visible {
   font-family: var(--font-code-family);
   font-size: var(--font-code);
   line-height: 1.55;
-  overflow: auto;
+  /* Horizontal scroll only by default so trackpad Y drives the transcript.
+     Extremely tall blocks opt into nested Y via .code--scroll-y + handoff. */
+  overflow-x: auto;
+  overflow-y: hidden;
   white-space: pre;
   color: var(--code-fg, var(--fg));
+}
+.code--scroll-y {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  max-height: min(60vh, 28rem);
 }
 .code--loading {
   opacity: 0.55;
@@ -10174,6 +10248,11 @@ body > .mermaid-diagram--fullscreen {
 .floating-menu button:hover {
   background: var(--bg-soft);
 }
+.floating-menu__separator {
+  height: 1px;
+  margin: 5px 4px;
+  background: var(--border-soft);
+}
 .tooltip-trigger {
   display: inline-flex;
   min-width: 0;
@@ -10336,15 +10415,19 @@ body > .mermaid-diagram--fullscreen {
   padding: 7px 8px 3px;
 }
 .workspace-files__tools--embedded {
-  height: 0;
-  overflow: hidden;
-  justify-content: flex-start;
-  padding: 0;
-}
-.workspace-panel--split-preview .workspace-files__tools--embedded,
-.workspace-panel--tree-hidden .workspace-files__tools--embedded {
   height: 34px;
+  overflow: visible;
+  justify-content: flex-start;
   padding: 6px 10px 0;
+}
+.workspace-watch-status {
+  color: var(--text-muted, var(--fg-faint));
+  font-size: 18px;
+  line-height: 1;
+  cursor: help;
+}
+.workspace-iconbtn[aria-busy="true"] svg {
+  animation: spin 0.8s linear infinite;
 }
 .workspace-files__tabs {
   flex: 1 1 auto;
@@ -22948,11 +23031,11 @@ body > .mermaid-diagram--fullscreen {
   position: relative;
   display: inline-flex;
   align-items: stretch;
-  height: 32px;
+  height: 28px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 7px;
   background: var(--bg-elev);
-  box-shadow: 0 1px 1px color-mix(in srgb, #000 9%, transparent);
+  box-shadow: none;
   overflow: visible;
   --wails-draggable: no-drag;
 }
@@ -22964,6 +23047,7 @@ body > .mermaid-diagram--fullscreen {
 
 .external-opener__primary-wrap {
   display: inline-flex;
+  height: 100%;
 }
 
 .external-opener__primary,
@@ -22971,7 +23055,7 @@ body > .mermaid-diagram--fullscreen {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 30px;
+  height: 100%;
   padding: 0;
   border: none;
   background: transparent;
@@ -22980,13 +23064,13 @@ body > .mermaid-diagram--fullscreen {
 
 .external-opener__primary {
   width: 38px;
-  border-radius: 9px 0 0 9px;
+  border-radius: 6px 0 0 6px;
 }
 
 .external-opener__menu-trigger {
   width: 27px;
   border-left: 1px solid var(--border-soft);
-  border-radius: 0 9px 9px 0;
+  border-radius: 0 6px 6px 0;
 }
 
 .external-opener__primary:hover:not(:disabled),
@@ -23010,8 +23094,8 @@ body > .mermaid-diagram--fullscreen {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 23px;
-  height: 23px;
+  width: 18px;
+  height: 18px;
 }
 
 .external-opener__app-icon img {
@@ -25219,17 +25303,6 @@ body > .mermaid-diagram--fullscreen {
   background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
 }
 
-.context-panel__progress-segment {
-  display: block;
-  height: 100%;
-  min-width: 0;
-}
-
-.context-panel__progress-segment--prompt { background: #13a7a5; }
-.context-panel__progress-segment--completion { background: #2f6df6; }
-.context-panel__progress-segment--reasoning { background: #f97316; }
-.context-panel__progress-segment--other { background: var(--border); }
-
 .context-panel__compact-marker {
   position: absolute;
   top: 0;
@@ -25244,7 +25317,11 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .context-panel__progress-fill {
-  display: none;
+  display: block;
+  height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 72%, #fff), var(--accent));
 }
 
 .context-panel__session-section,
@@ -30016,9 +30093,16 @@ body > .mermaid-diagram--fullscreen {
   }
 }
 
+.project-tree__topic-action--busy svg,
+.project-tree__archive-spinner {
+  animation: project-tree-spin 0.9s linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .sidebar--workbench .project-tree__topic-state--thinking,
-  .sidebar--workbench .project-tree__topic-state--streaming {
+  .sidebar--workbench .project-tree__topic-state--streaming,
+  .project-tree__topic-action--busy svg,
+  .project-tree__archive-spinner {
     animation: none;
   }
 }
@@ -30776,7 +30860,7 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .app--creation .topicbar__actions .external-opener {
   height: 28px;
   border: none;
-  border-radius: 8px;
+  border-radius: 7px;
   background: transparent;
   box-shadow: none;
 }
@@ -31779,21 +31863,12 @@ body > .mermaid-diagram--fullscreen {
   overflow: hidden;
   background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
 }
-.context-ring-popover__seg {
+.context-ring-popover__fill {
   height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 72%, #fff), var(--accent));
   transition: width 0.3s var(--ease-out);
-}
-.context-ring-popover__seg--prompt {
-  background: color-mix(in srgb, var(--accent) 68%, var(--fg));
-}
-.context-ring-popover__seg--completion {
-  background: color-mix(in srgb, var(--accent) 48%, var(--fg));
-}
-.context-ring-popover__seg--reasoning {
-  background: color-mix(in srgb, var(--warn) 56%, var(--fg));
-}
-.context-ring-popover__seg--other {
-  background: color-mix(in srgb, var(--fg-faint) 22%, var(--fg));
 }
 /* 进度条标记线 */
 .context-ring-popover__mark {
@@ -34091,14 +34166,6 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .context-panel__compact-marker {
   background: color-mix(in srgb, var(--fg) 60%, var(--creation-panel-card));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--creation-panel-card) 88%, transparent);
-}
-
-.app--creation .context-panel__progress-fill {
-  display: block;
-  height: 100%;
-  min-width: 2px;
-  border-radius: inherit;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 72%, #fff), var(--accent));
 }
 
 .app--creation .context-panel__session-metrics {
@@ -37349,6 +37416,7 @@ body > .mermaid-diagram--fullscreen {
   display: inline-flex;
   align-items: center;
   max-width: 190px;
+  min-height: 24px;
   gap: 4px;
   padding: 1px 7px;
   cursor: pointer;
@@ -37356,14 +37424,32 @@ body > .mermaid-diagram--fullscreen {
   font: inherit;
   white-space: nowrap;
 }
-.statusbar__remote > span {
+.statusbar__remote-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.statusbar__remote-state-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 7px;
+}
 .statusbar__remote-wrap {
   display: inline-flex;
   min-width: 0;
+}
+@media (max-width: 820px) {
+  .statusbar__remote--idle {
+    width: 24px;
+    min-width: 24px;
+    justify-content: center;
+    padding-inline: 4px;
+  }
+  .statusbar__remote--idle .statusbar__remote-label {
+    display: none;
+  }
 }
 .remote-switcher {
   z-index: var(--z-local-popover);

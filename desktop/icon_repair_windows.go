@@ -87,6 +87,9 @@ func repairExistingWindowsShortcuts(paths []string, launcher string, repair func
 }
 
 func repairWindowsShortcut(shortcutPath, launcher string) (bool, error) {
+	root := filepath.Dir(filepath.Clean(strings.TrimSpace(launcher)))
+	versionedLayout := installlayout.HasCurrent(root)
+
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	if err := ole.CoInitializeEx(0, ole.COINIT_APARTMENTTHREADED); err != nil {
@@ -130,7 +133,7 @@ func repairWindowsShortcut(shortcutPath, launcher string) (bool, error) {
 	}
 	iconLocation := iconValue.ToString()
 	_ = iconValue.Clear()
-	repointTarget, fixIcon := repairWindowsShortcutPlan(target, iconLocation, launcher)
+	repointTarget, fixIcon := repairWindowsShortcutPlan(target, iconLocation, launcher, versionedLayout)
 	if !repointTarget && !fixIcon {
 		return false, nil
 	}
@@ -205,13 +208,32 @@ func reasonixWindowsVersionedTarget(target, launcher string) bool {
 
 // repairWindowsShortcutPlan decides which owned-shortcut properties need
 // rewriting. repointTarget is true when TargetPath points into a versioned
-// directory the updater can delete; fixIcon is true when IconLocation points
-// at the versioned desktop binary instead of the stable launcher.
-func repairWindowsShortcutPlan(target, iconLocation, launcher string) (repointTarget, fixIcon bool) {
-	return reasonixWindowsVersionedTarget(target, launcher), reasonixWindowsStaleIcon(iconLocation, launcher)
+// directory the updater can delete or at a legacy root-level desktop binary
+// after the versioned layout is active; fixIcon applies the same policy to
+// IconLocation. Flat installs keep their live root-level binary untouched.
+func repairWindowsShortcutPlan(target, iconLocation, launcher string, versionedLayout bool) (repointTarget, fixIcon bool) {
+	repointTarget = reasonixWindowsVersionedTarget(target, launcher) ||
+		reasonixWindowsFlatDesktopTarget(target, launcher, versionedLayout)
+	return repointTarget, reasonixWindowsStaleIcon(iconLocation, launcher, versionedLayout)
 }
 
-func reasonixWindowsStaleIcon(iconLocation, launcher string) bool {
+// reasonixWindowsFlatDesktopTarget reports whether target points at the legacy
+// root-level desktop binary after versioned layout activation or after the file
+// disappeared. A valid current.json is the commit point, so a leftover flat
+// binary is not a live flat install when best-effort cleanup could not remove it.
+func reasonixWindowsFlatDesktopTarget(target, launcher string, versionedLayout bool) bool {
+	flat := filepath.Join(filepath.Dir(filepath.Clean(strings.TrimSpace(launcher))), "reasonix-desktop.exe")
+	if !strings.EqualFold(filepath.Clean(strings.TrimSpace(target)), flat) {
+		return false
+	}
+	if versionedLayout {
+		return true
+	}
+	_, err := os.Lstat(flat)
+	return os.IsNotExist(err)
+}
+
+func reasonixWindowsStaleIcon(iconLocation, launcher string, versionedLayout bool) bool {
 	iconPath := strings.TrimSpace(iconLocation)
 	if comma := strings.LastIndex(iconPath, ","); comma >= 0 {
 		if _, err := strconv.Atoi(strings.TrimSpace(iconPath[comma+1:])); err == nil {
@@ -228,8 +250,21 @@ func reasonixWindowsStaleIcon(iconLocation, launcher string) bool {
 		return false
 	}
 	parts := strings.Split(rel, string(filepath.Separator))
-	return len(parts) == 3 && strings.EqualFold(parts[0], "versions") &&
-		strings.EqualFold(parts[2], "reasonix-desktop.exe")
+	if len(parts) == 3 && strings.EqualFold(parts[0], "versions") &&
+		strings.EqualFold(parts[2], "reasonix-desktop.exe") {
+		return true
+	}
+	// Legacy root-level icon: stale once the versioned layout is committed, even
+	// if best-effort cleanup left the old binary behind. Without current.json,
+	// require the file to be gone so a live flat install keeps its working icon.
+	if len(parts) == 1 && strings.EqualFold(parts[0], "reasonix-desktop.exe") {
+		if versionedLayout {
+			return true
+		}
+		_, err := os.Lstat(filepath.Clean(iconPath))
+		return os.IsNotExist(err)
+	}
+	return false
 }
 
 func notifyWindowsShortcutChanged(path string) {

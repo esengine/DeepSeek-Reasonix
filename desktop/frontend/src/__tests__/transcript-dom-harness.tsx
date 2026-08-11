@@ -28,6 +28,7 @@ export interface TranscriptHarness {
   render: (items: Item[], props?: Record<string, unknown>) => Promise<void>;
   flush: () => Promise<void>;
   settle: () => Promise<void>;
+  waitFor: (condition: () => boolean, description: string, attempts?: number) => Promise<void>;
   unmount: () => Promise<void>;
   close: () => Promise<void>;
   loadModule: <T>(path: string) => Promise<T>;
@@ -113,6 +114,13 @@ export async function createTranscriptHarness(options: TranscriptHarnessOptions 
       return 0;
     },
   });
+  Object.defineProperty(proto, "clientWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      if (this.classList.contains("transcript")) return 800;
+      return 0;
+    },
+  });
   Object.defineProperty(proto, "scrollHeight", {
     configurable: true,
     get(this: HTMLElement) {
@@ -167,6 +175,18 @@ export async function createTranscriptHarness(options: TranscriptHarnessOptions 
     }
   };
 
+  // Each attempt costs one 30ms flush, so the default is a three-second budget,
+  // not eight tries. It returns the moment the condition holds, so a generous
+  // cap is free on the happy path and only makes a genuine failure slower —
+  // which beats failing a correct test on a loaded runner.
+  const waitFor = async (condition: () => boolean, description: string, attempts = 100) => {
+    for (let i = 0; i < attempts; i += 1) {
+      if (condition()) return;
+      await flush();
+    }
+    if (!condition()) throw new Error(`timed out waiting for ${description}`);
+  };
+
   return {
     dom,
     container,
@@ -190,6 +210,7 @@ export async function createTranscriptHarness(options: TranscriptHarnessOptions 
     },
     flush,
     settle,
+    waitFor,
     unmount: async () => {
       const current = root;
       root = null;

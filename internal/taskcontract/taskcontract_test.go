@@ -142,8 +142,8 @@ func TestTrivialRejectsComplexContracts(t *testing.T) {
 
 func TestFromPlanBuildsContractFromPlannerOutput(t *testing.T) {
 	c := FromPlan("fix stale cache invalidation", PlanFacts{
-		AcceptanceCriteria: []string{"fix stale cache invalidation"},
-		Regressions:        []string{"existing cache tests continue passing"},
+		AcceptanceCriteria: []PlanCriterion{{Text: "fix stale cache invalidation"}},
+		Regressions:        []PlanCriterion{{Text: "existing cache tests continue passing"}},
 		Verifications:      []string{"go test ./internal/cache/", ""},
 		Risky:              true,
 		Touchpoints:        []string{"cache.go", "invalidate.go"},
@@ -164,7 +164,7 @@ func TestFromPlanBuildsContractFromPlannerOutput(t *testing.T) {
 
 func TestExecutionViewIsAViewNotAParallelDescription(t *testing.T) {
 	c := FromPlan("fix it", PlanFacts{
-		AcceptanceCriteria: []string{"behavior fixed"},
+		AcceptanceCriteria: []PlanCriterion{{Text: "behavior fixed"}},
 		Verifications:      []string{"go test ./..."},
 	})
 	todos := c.ExecutionView()
@@ -269,8 +269,8 @@ func TestFinalizeSignalFiresOnlyWhenFullyProven(t *testing.T) {
 	}
 
 	c = FromPlan("fix cache", PlanFacts{
-		AcceptanceCriteria: []string{"fix stale cache invalidation"},
-		Regressions:        []string{"cache tests keep passing"},
+		AcceptanceCriteria: []PlanCriterion{{Text: "fix stale cache invalidation"}},
+		Regressions:        []PlanCriterion{{Text: "cache tests keep passing"}},
 		Verifications:      []string{"go test ./cache/"},
 	})
 	if s := c.FinalizeSignal(); s != "" {
@@ -299,8 +299,8 @@ func TestFinalizeSignalFiresOnlyWhenFullyProven(t *testing.T) {
 
 func TestFinalRejectionNamesExactlyWhatIsUnproven(t *testing.T) {
 	c := FromPlan("fix cache", PlanFacts{
-		AcceptanceCriteria: []string{"fix stale cache invalidation"},
-		Regressions:        []string{"cache tests keep passing"},
+		AcceptanceCriteria: []PlanCriterion{{Text: "fix stale cache invalidation"}},
+		Regressions:        []PlanCriterion{{Text: "cache tests keep passing"}},
 		Verifications:      []string{"go test ./cache/"},
 	})
 	c.Observe(evidence.Receipt{ToolName: "edit_file", Mutation: true, Success: true})
@@ -342,7 +342,7 @@ func TestGoalVerdictDeterministicHotPath(t *testing.T) {
 	}
 
 	c := FromPlan("fix cache", PlanFacts{
-		AcceptanceCriteria: []string{"fix invalidation"},
+		AcceptanceCriteria: []PlanCriterion{{Text: "fix invalidation"}},
 		Verifications:      []string{"go test ./cache/"},
 	})
 	if v := c.GoalVerdict(); v != VerdictContinue {
@@ -381,7 +381,7 @@ func TestGoalVerdictDeterministicHotPath(t *testing.T) {
 
 func TestGateMutationAfterGreen(t *testing.T) {
 	c := FromPlan("fix cache", PlanFacts{
-		AcceptanceCriteria: []string{"fix invalidation"},
+		AcceptanceCriteria: []PlanCriterion{{Text: "fix invalidation"}},
 		Verifications:      []string{"go test ./cache/"},
 	})
 	c.AddRequirement("opt1", "nice-to-have cleanup", false)

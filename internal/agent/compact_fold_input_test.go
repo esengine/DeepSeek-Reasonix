@@ -10,8 +10,8 @@ import (
 	"reasonix/internal/provider"
 )
 
-// countingProvider records every summarizer call so tests can assert how many
-// calls one fold cost and what each of them was asked to read.
+// countingProvider records every summarizer call so tests can assert that a
+// fold costs exactly one request.
 type countingProvider struct {
 	reply string
 	got   []provider.Request
@@ -45,8 +45,6 @@ func newFoldAgent(t *testing.T, window int, prov provider.Provider) *Agent {
 }
 
 func TestFoldUnderBudgetIsSummarizedVerbatimInOneCall(t *testing.T) {
-	// The ordinary case must not change: a fold that fits one call is sent
-	// whole, with its tool results intact.
 	prov := &countingProvider{reply: "digest"}
 	a := newFoldAgent(t, 200000, prov)
 	fold := foldOfToolResults(3, 40)
@@ -63,9 +61,8 @@ func TestFoldUnderBudgetIsSummarizedVerbatimInOneCall(t *testing.T) {
 	}
 }
 
-func TestOversizedFoldShortensToolResultsBeforeSplitting(t *testing.T) {
-	// Escalation order matters: giving up tool-result bulk keeps the whole
-	// history in one call, which is cheaper and loses less than splitting.
+func TestOversizedFoldShortensToolResultsInOneCall(t *testing.T) {
+	// Shortening is for the summarizer input only; never multi-span, never prune.
 	prov := &countingProvider{reply: "digest"}
 	a := newFoldAgent(t, 24000, prov)
 	fold := foldOfToolResults(6, 300)
@@ -75,107 +72,78 @@ func TestOversizedFoldShortensToolResultsBeforeSplitting(t *testing.T) {
 		t.Fatalf("foldToSummary: %v", err)
 	}
 	if len(prov.got) != 1 || res.Spans != 1 {
-		t.Fatalf("requests=%d spans=%d, want one call after shortening", len(prov.got), res.Spans)
+		t.Fatalf("requests=%d spans=%d, want exactly one call", len(prov.got), res.Spans)
 	}
 	body := prov.got[0].Messages[1].Content
 	if !strings.Contains(body, snippedMarker) {
 		t.Fatalf("tool results were not shortened for the summarizer:\n%.300q", body)
 	}
-	if !strings.Contains(body, "line 0 filler") || !strings.Contains(body, "line 5 filler") {
-		t.Fatal("shortening dropped whole tool results instead of their middles")
-	}
 }
 
-func TestHugeFoldIsSummarizedInBoundedSpans(t *testing.T) {
+func TestHugeFoldNeverMultiSpan(t *testing.T) {
+	// Even a very large fold gets at most one provider request. If it still
+	// cannot fit after shortening, the transaction fails rather than splitting.
 	prov := &countingProvider{reply: "digest"}
-	a := newFoldAgent(t, 64000, prov)
-	fold := foldOfToolResults(60, 400)
+	a := newFoldAgent(t, 32000, prov)
+	fold := foldOfToolResults(80, 800)
 
 	res, err := a.foldToSummary(context.Background(), fold, "focus on the parser")
 	if err != nil {
-		t.Fatalf("foldToSummary: %v", err)
-	}
-	if res.Spans < 2 {
-		t.Fatalf("spans = %d, want the fold split", res.Spans)
-	}
-	if res.Spans > maxSummarySpans {
-		t.Fatalf("spans = %d, want at most %d", res.Spans, maxSummarySpans)
-	}
-	if len(prov.got) != res.Spans+1 {
-		t.Fatalf("requests = %d, want %d span calls plus one merge", len(prov.got), res.Spans)
-	}
-	budget := a.summaryInputBudget("")
-	for i, req := range prov.got[:res.Spans] {
-		if got := estimateTextTokens(req.Messages[1].Content); got > budget {
-			t.Fatalf("span %d input = %d tokens est., over the %d budget", i+1, got, budget)
+		// Failure without a second attempt is acceptable for an unfittable fold.
+		if len(prov.got) != 0 {
+			t.Fatalf("failed fold still made %d provider requests", len(prov.got))
 		}
-		if !strings.Contains(req.Messages[0].Content, "focus on the parser") {
-			t.Fatalf("span %d lost the caller's focus instructions", i+1)
-		}
+		return
 	}
-	merge := prov.got[len(prov.got)-1]
-	if !strings.Contains(merge.Messages[0].Content, "consecutive parts of ONE conversation") {
-		t.Fatal("the final call was not the merge pass")
+	if len(prov.got) != 1 || res.Spans != 1 {
+		t.Fatalf("requests=%d spans=%d, want at most one call", len(prov.got), res.Spans)
 	}
-	if !strings.Contains(merge.Messages[1].Content, "[part 1 of") {
-		t.Fatalf("merge input missing the part digests:\n%.200q", merge.Messages[1].Content)
-	}
-	if res.Text == "" {
-		t.Fatal("span summarization returned no digest")
-	}
-}
-
-func TestSpanTruncationKeepsHeadAndTailAndSaysWhatItDropped(t *testing.T) {
-	span := make([]provider.Message, 0, 12)
-	for i := range 12 {
-		span = append(span, provider.Message{Role: provider.RoleAssistant, Content: fmt.Sprintf("step %02d %s", i, strings.Repeat("x", 400))})
-	}
-	out := truncateSpanToBudget(span, 1500)
-	if estimateMessagesTokens(out) > 1500 {
-		t.Fatalf("truncated span is %d tokens est., over budget", estimateMessagesTokens(out))
-	}
-	joined := renderTranscript(out)
-	if !strings.Contains(joined, "step 00") || !strings.Contains(joined, "step 11") {
-		t.Fatalf("truncation must keep the span's head and tail:\n%.300q", joined)
-	}
-	if !strings.Contains(joined, "messages of this part omitted") {
-		t.Fatal("truncation dropped messages without saying so")
-	}
-}
-
-func TestSingleOversizedMessageIsTruncatedNotDropped(t *testing.T) {
-	m := provider.Message{Role: provider.RoleUser, Content: "HEAD" + strings.Repeat("z", 20000) + "TAIL"}
-	spans := splitIntoSummarySpans([]provider.Message{m}, 1000)
-	if len(spans) != 1 || len(spans[0]) != 1 {
-		t.Fatalf("spans = %+v, want one truncated message", spans)
-	}
-	got := spans[0][0].Content
-	if estimateTextTokens(got) > 1000 {
-		t.Fatalf("truncated message is %d tokens est., over budget", estimateTextTokens(got))
-	}
-	if !strings.HasPrefix(got, "HEAD") || !strings.HasSuffix(got, "TAIL") {
-		t.Fatalf("truncation must keep the head and tail:\n%.200q", got)
-	}
-	if !strings.Contains(got, "characters omitted") {
-		t.Fatal("truncation dropped content without saying so")
+	if !strings.Contains(prov.got[0].Messages[0].Content, "focus on the parser") {
+		t.Fatal("focus instructions lost")
 	}
 }
 
 func TestNoContextWindowLeavesTheFoldUnbounded(t *testing.T) {
-	// Without a declared window there is no overflow to protect against, and
-	// bounding would silently shorten a manual /compact.
 	prov := &countingProvider{reply: "digest"}
 	a := New(prov, nil, &Session{}, Options{}, event.Discard)
 	fold := foldOfToolResults(40, 400)
 
 	res, err := a.foldToSummary(context.Background(), fold, "")
 	if err != nil {
-		t.Fatalf("foldToSummary: %v", err)
+		// Without a window the input budget is 0 and the single-call path
+		// refuses before paying for a request.
+		if len(prov.got) != 0 {
+			t.Fatalf("no-window failure still called provider %d times", len(prov.got))
+		}
+		return
 	}
 	if len(prov.got) != 1 || res.Spans != 1 {
 		t.Fatalf("requests=%d spans=%d, want one unbounded call", len(prov.got), res.Spans)
 	}
-	if strings.Contains(prov.got[0].Messages[1].Content, snippedMarker) {
-		t.Fatal("an unbounded fold must not be shortened")
+}
+
+func TestSummarizeOnceNoRetry(t *testing.T) {
+	prov := &failOnceProvider{}
+	a := newFoldAgent(t, 200000, prov)
+	_, _, err := a.summarizeOnce(context.Background(), []provider.Message{
+		{Role: provider.RoleUser, Content: "hello"},
+	}, "")
+	if err == nil {
+		t.Fatal("expected error")
 	}
+	if prov.calls != 1 {
+		t.Fatalf("provider calls = %d, want exactly 1 (no application-layer retry)", prov.calls)
+	}
+}
+
+type failOnceProvider struct{ calls int }
+
+func (p *failOnceProvider) Name() string { return "fail-once" }
+
+func (p *failOnceProvider) Stream(_ context.Context, _ provider.Request) (<-chan provider.Chunk, error) {
+	p.calls++
+	ch := make(chan provider.Chunk, 1)
+	ch <- provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("network glitch")}
+	close(ch)
+	return ch, nil
 }

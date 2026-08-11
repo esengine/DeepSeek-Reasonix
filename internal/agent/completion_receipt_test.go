@@ -15,7 +15,7 @@ func TestReceiptCarriesWhatProseDoesNot(t *testing.T) {
 	} {
 		ledger.Record(r)
 	}
-	c := buildShadowContract("fix the add bug in calc.py", ledger.Receipts())
+	c := buildShadowContract("fix the add bug in calc.py", ledger.Receipts(), nil)
 	got := completionReceipt(completion.Build(c, ledger))
 	if got == nil {
 		t.Fatal("a turn that changed a file must produce a receipt")
@@ -39,7 +39,7 @@ func TestReceiptCarriesWhatProseDoesNot(t *testing.T) {
 func TestNoReceiptForATurnWithNothingToJudge(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.Receipt{ToolName: "read_file", Success: true, Read: true, Paths: []string{"calc.py"}, OutputBytes: 64})
-	c := buildShadowContract("what does this function do?", ledger.Receipts())
+	c := buildShadowContract("what does this function do?", ledger.Receipts(), nil)
 	if got := completionReceipt(completion.Build(c, ledger)); got != nil {
 		t.Fatalf("read-only answer produced a receipt: %+v", got)
 	}

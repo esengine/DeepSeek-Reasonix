@@ -140,11 +140,20 @@ func Atomic(input string) *Contract {
 // PlanFacts is a completed full plan's contract-relevant output, extracted
 // by the coordinator (plain data; this package never sees the plan text).
 type PlanFacts struct {
-	AcceptanceCriteria []string
-	Regressions        []string // must-keep-passing criteria
-	Verifications      []string // command-level checks; "" entries mean any
+	AcceptanceCriteria []PlanCriterion
+	Regressions        []PlanCriterion // must-keep-passing criteria
+	Optional           []PlanCriterion // nice-to-have; recorded but never blocking
+	Verifications      []string        // command-level checks; "" entries mean any
 	Risky              bool
 	Touchpoints        []string
+}
+
+// PlanCriterion is one criterion with the identity the plan gave it. The id
+// travels rather than being regenerated here: a proof cites the criterion the
+// user approved, and a boundary that re-keys identity breaks that citation.
+type PlanCriterion struct {
+	ID   string
+	Text string
 }
 
 // FromPlan builds the contract straight from a plan the planner already
@@ -152,16 +161,20 @@ type PlanFacts struct {
 // instead of re-deriving a parallel set: Planner → Contract → Executor.
 func FromPlan(input string, facts PlanFacts) *Contract {
 	c := New(input)
-	for i, text := range facts.AcceptanceCriteria {
-		c.Requirements = append(c.Requirements, Requirement{
-			ID: fmt.Sprintf("r%d", i+1), Kind: "behavior", Text: text, Required: true,
-		})
+	add := func(criteria []PlanCriterion, kind, fallback string, required bool) {
+		for i, criterion := range criteria {
+			id := criterion.ID
+			if id == "" {
+				id = fmt.Sprintf("%s%d", fallback, i+1)
+			}
+			c.Requirements = append(c.Requirements, Requirement{
+				ID: id, Kind: kind, Text: criterion.Text, Required: required,
+			})
+		}
 	}
-	for i, text := range facts.Regressions {
-		c.Requirements = append(c.Requirements, Requirement{
-			ID: fmt.Sprintf("g%d", i+1), Kind: "regression", Text: text, Required: true,
-		})
-	}
+	add(facts.AcceptanceCriteria, "behavior", "r", true)
+	add(facts.Regressions, "regression", "g", true)
+	add(facts.Optional, "behavior", "o", false)
 	for _, command := range facts.Verifications {
 		c.AddCheck(command)
 	}
@@ -535,7 +548,14 @@ func (c *Contract) Outstanding() []string {
 	var out []string
 	for _, req := range c.Requirements {
 		if req.Required && req.Status != Satisfied {
-			out = append(out, fmt.Sprintf("requirement %s: %s", req.ID, req.Text))
+			// Stale is said out loud here as it already is for checks: "verify
+			// it" and "re-verify it because the code moved" are different
+			// instructions, and only one of them is actionable after a change.
+			entry := fmt.Sprintf("requirement %s: %s", req.ID, req.Text)
+			if req.Status == Stale {
+				entry += " (stale: re-verify after the latest mutation)"
+			}
+			out = append(out, entry)
 		}
 	}
 	for _, check := range c.Checks {

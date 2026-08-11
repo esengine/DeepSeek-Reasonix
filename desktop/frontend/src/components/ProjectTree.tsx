@@ -13,6 +13,7 @@ import type { ProjectNode, ProjectTopicStatus } from "../lib/types";
 import { topicActivityTime } from "../lib/session";
 import { getLocale, useT, type DictKey, type Translator } from "../lib/i18n";
 import { PROJECT_COLOR_OPTIONS, projectColorValue } from "../lib/projectColors";
+import { useProjectTreeArchiveState } from "../lib/projectTreeArchive";
 import { topicShortcutLabel, type TopicShortcutEntry } from "../lib/topicShortcuts";
 import type { ShortcutPlatform } from "../lib/keyboardShortcuts";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
@@ -650,7 +651,7 @@ export function ProjectTree({
   const [hoverCard, setHoverCard] = useState<{ key: string; card: ProjectTreeTopicHoverCard; left: number; top: number } | null>(null);
   const hoverCardTimerRef = useRef<number | null>(null);
   const creatingRef = useRef(false);
-  const trashingRef = useRef(false);
+  const { trashingTopics, beginTrashingTopic, endTrashingTopic } = useProjectTreeArchiveState();
   const clickTimerRef = useRef<ProjectTreePendingTopicOpen | null>(null);
   useEffect(() => {
     return () => {
@@ -1042,8 +1043,7 @@ export function ProjectTree({
   };
 
   const trashTopic = async (topicId: string) => {
-    if (trashingRef.current) return;
-    trashingRef.current = true;
+    if (!beginTrashingTopic(topicId)) return;
     try {
       await app.TrashTopic(topicId);
       setMenuTopic(null);
@@ -1054,10 +1054,9 @@ export function ProjectTree({
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), "error");
     } finally {
-      trashingRef.current = false;
+      endTrashingTopic(topicId);
     }
   };
-
   const setTopicPinned = async (topicId: string, pinned: boolean) => {
     try {
       await app.SetTopicPinned(topicId, pinned);
@@ -1323,6 +1322,7 @@ export function ProjectTree({
       const showSideTime = sideTimeVisible && !showWaitingPill;
       const unread = projectTreeTopicHasUnreadActivity(node, readActivity, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath);
       const topicId = node.topicId ?? "";
+      const topicTrashing = trashingTopics.has(topicId);
       const imSource = scope === "global" && topicId ? imTopicSources[topicId] : undefined;
       const imSourceLabel = imSource?.label || "";
       const imSourceTitle = imSourceLabel ? t("msg.fromIm", { source: imSourceLabel }) : "";
@@ -1361,9 +1361,9 @@ export function ProjectTree({
         },
         {
           key: "trash",
-          icon: <Archive size={13} />,
+          icon: <Archive className={topicTrashing ? "project-tree__archive-spinner" : undefined} size={13} />,
           label: confirmAction?.topicId === topicId && confirmAction.action === "trash" ? t("history.confirmMoveToTrash") : t("history.moveToTrash"),
-          disabled: archiveBlocked,
+          disabled: archiveBlocked || topicTrashing,
           danger: true,
           onSelect: () => {
             if (confirmAction?.topicId === topicId && confirmAction.action === "trash") void trashTopic(topicId);
@@ -1529,17 +1529,17 @@ export function ProjectTree({
               </Tooltip>
               <Tooltip label={t("projectTree.archiveTopic")} side="top" className="project-tree__topic-action-slot">
                 <button
-                  className="project-tree__topic-action project-tree__topic-action--archive"
+                  className={`project-tree__topic-action project-tree__topic-action--archive${topicTrashing ? " project-tree__topic-action--busy" : ""}`}
                   type="button"
                   aria-label={t("projectTree.archiveTopic")}
-                  disabled={archiveBlocked}
+                  aria-busy={topicTrashing} disabled={archiveBlocked || topicTrashing}
                   onClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
                     void trashTopic(topicId);
                   }}
                 >
-                  <Archive size={15} aria-hidden="true" />
+                  <Archive className={topicTrashing ? "project-tree__archive-spinner" : undefined} size={15} aria-hidden="true" />
                 </button>
               </Tooltip>
             </span>
@@ -1750,11 +1750,11 @@ export function ProjectTree({
       },
       {
         key: "archive-active-topic",
-        icon: <Archive size={13} />,
+        icon: <Archive className={activeTopicId && trashingTopics.has(activeTopicId) ? "project-tree__archive-spinner" : undefined} size={13} />,
         label: activeTopicId && confirmAction?.topicId === activeTopicId && confirmAction.action === "trash"
           ? t("history.confirmMoveToTrash")
           : t("projectTree.archiveConversation"),
-        disabled: !activeTopicInProject || !activeTopicId || activeTopicArchiveBlocked,
+        disabled: !activeTopicInProject || !activeTopicId || activeTopicArchiveBlocked || Boolean(activeTopicId && trashingTopics.has(activeTopicId)),
         danger: true,
         onSelect: () => {
           if (!activeTopicId) return;

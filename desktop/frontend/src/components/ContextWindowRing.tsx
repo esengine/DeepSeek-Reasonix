@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { app } from "../lib/bridge";
+import { contextWindowPercentages } from "../lib/contextWindow";
 import { useI18n } from "../lib/i18n";
 import { formatMoneyLocalized } from "../lib/money";
 import type { BalanceInfo, ContextInfo, ContextPanelInfo } from "../lib/types";
 import { AnchoredPopover } from "./AnchoredPopover";
 import {
-  contextBreakdown,
   contextWindowStatus,
   formatCacheHitRate,
 } from "./ContextPanel";
@@ -53,10 +53,12 @@ export function ContextWindowRing({ enabled = true, context, tabId, turnCost, cu
 
   const used = context?.used ?? 0;
   const windowTokens = context?.window ?? 0;
-  const usagePct = windowTokens > 0 ? Math.min(100, Math.round((used / windowTokens) * 100)) : 0;
-  const compactRatio = context?.compactRatio && context.compactRatio > 0 ? context.compactRatio : 0.8;
+  const usagePercentages = contextWindowPercentages(used, windowTokens);
+  const rawUsagePct = usagePercentages.raw;
+  const usagePct = usagePercentages.display;
+  const compactRatio = context?.compactRatio && context.compactRatio > 0 ? context.compactRatio : 0.85;
   const compactPct = Math.round(compactRatio * 100);
-  const status = contextWindowStatus(usagePct, compactPct);
+  const status = contextWindowStatus(rawUsagePct, compactPct);
 
   const loadInfo = useCallback(() => {
     if (!enabled || !tabId) return;
@@ -107,10 +109,6 @@ export function ContextWindowRing({ enabled = true, context, tabId, turnCost, cu
 
   if (!enabled) return null;
 
-  const promptTokens = info?.promptTokens ?? 0;
-  const completionTokens = info?.completionTokens ?? 0;
-  const reasoningTokens = info?.reasoningTokens ?? 0;
-  const breakdown = contextBreakdown(used, windowTokens, promptTokens, completionTokens, reasoningTokens);
   const turnCacheHit = cacheHitTokens ?? info?.cacheHitTokens ?? 0;
   const turnCacheMiss = cacheMissTokens ?? info?.cacheMissTokens ?? 0;
   const turnCacheRate = formatCacheHitRate(turnCacheHit, turnCacheMiss);
@@ -131,7 +129,7 @@ export function ContextWindowRing({ enabled = true, context, tabId, turnCost, cu
         className={`context-ring${open ? " context-ring--open" : ""} context-ring--${status.tone}`}
         onMouseEnter={onEnter}
         onMouseLeave={onLeave}
-        aria-label={t("context.windowUsageSummary", { used: String(used), window: String(windowTokens), pct: usagePct })}
+        aria-label={t("context.windowUsageSummary", { used: String(used), window: String(windowTokens), pct: rawUsagePct })}
       >
         <svg width={RING} height={RING} viewBox={`0 0 ${RING} ${RING}`} className="context-ring__svg">
           <circle className="context-ring__track" cx={RING / 2} cy={RING / 2} r={RING_R} fill="none" strokeWidth={3} />
@@ -159,16 +157,11 @@ export function ContextWindowRing({ enabled = true, context, tabId, turnCost, cu
             <span className="context-ring-popover__title">
               {fmtCompact(used)} / {fmtCompact(windowTokens)}
             </span>
-            <span className="context-ring-popover__pct">{usagePct}%</span>
+            <span className="context-ring-popover__pct">{rawUsagePct}%</span>
           </div>
           <div className="context-ring-popover__gauge">
             <div className="context-ring-popover__bar">
-              <span className="context-ring-popover__seg context-ring-popover__seg--prompt" style={{ width: `${breakdown.promptPct}%` }} />
-              <span className="context-ring-popover__seg context-ring-popover__seg--completion" style={{ width: `${Math.max(0, breakdown.completionPct - breakdown.promptPct)}%` }} />
-              {breakdown.reasoningTokens > 0 && (
-                <span className="context-ring-popover__seg context-ring-popover__seg--reasoning" style={{ width: `${Math.max(0, breakdown.reasoningPct - breakdown.completionPct)}%` }} />
-              )}
-              <span className="context-ring-popover__seg context-ring-popover__seg--other" style={{ width: `${Math.max(0, breakdown.otherPct - breakdown.reasoningPct)}%` }} />
+              <span className="context-ring-popover__fill" style={{ width: `${usagePct}%` }} />
               <span className="context-ring-popover__mark context-ring-popover__mark--compact" style={{ left: `${compactPct}%` }} />
               <span className="context-ring-popover__mark context-ring-popover__mark--attention" style={{ left: `30%` }} />
             </div>

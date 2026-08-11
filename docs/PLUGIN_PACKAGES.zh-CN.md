@@ -279,6 +279,10 @@ Reasonix 原生扩展使用精确的 v2 `apiVersion`：
   v1 与缺失版本都会被拒绝；不提供 v1 双读或自动迁移路径。
 - v2 是严格的：根对象或 `contributes`/`runtime` 下的任何未知字段都会
   报错并指明字段路径，避免拼写错误静默失效。
+- v2 的资源发现是显式的。Reasonix 只加载原生 manifest 中声明的 skills、
+  agents、commands、prompts、hooks、MCP servers、themes 与 runtime；不会隐式
+  导入根目录 `CLAUDE.md`、`hooks/hooks.json`、`.claude/settings.json` 或
+  `.mcp.json` 等宿主专用 sidecar。
 - minor 别名（如 `reasonix.io/plugin/v2.0`、`v2.1`）及未知 major version
   都会被拒绝。
 - `requires` 与 `provides` 声明依赖约束和能力上限；Sidecar handshake
@@ -346,7 +350,8 @@ Reasonix 的对应实现，并不代表导入 Hook 的每一种运行时决策�
 中的同名插件。对象来源仅接受 GitHub 仓库 URL 加完整 commit SHA；未固定版本的
 外部字符串、npm、`strict: false` 以及其他高级 marketplace 协议在整库安装时会
 跳过，按名称选中时则直接报错。
-对于 Superpowers 和 Claude 风格 skill 包，Reasonix 会映射：
+对于 Superpowers 和 Claude 风格 skill 包，Reasonix 会映射以下兼容约定。
+原生 v2 manifest 只使用显式声明，不应用这些回退规则：
 
 - `skills` 到 Reasonix skill root。Claude 清单若未声明 `skills` 字段，会回退到
   约定目录 `skills/`（或 `.claude/skills/`），与 Claude 自身的自动发现一致。
@@ -367,8 +372,9 @@ Reasonix 的对应实现，并不代表导入 Hook 的每一种运行时决策�
   `mcp__*__search` 这类 MCP 通配符。Agent 使用独立的
   `/<插件>:agent:<名称>` 命名空间，因此上游 Agent 与 Skill 同名时不会互相遮蔽。
 - 如果存在 `hooks/session-start-codex`，映射为 Reasonix `SessionStart` hook。
-- 插件根目录的 `CLAUDE.md` 会映射为内置的 `SessionStart` 上下文 hook。
-  Reasonix 会直接读取该文件，不通过 shell 命令。
+- 对 Codex 兼容包，插件根目录的 `CLAUDE.md` 会映射为内置的 `SessionStart`
+  上下文 hook，Reasonix 会直接读取该文件，不通过 shell 命令。Claude 插件
+  manifest 会忽略该文件，与 Claude Code 的插件契约保持一致。
 - `.claude/settings.json` 和 `hooks/hooks.json` 里的 command hooks 会按同名事件映射。
   `matcher`、`args`、`shell`、`async`、`env` 和 timeout 均会保留。Claude 的执行契约
   也会完整保留：只要出现 `args`（即使是空数组）就按 exec form 执行，并逐项原样传参；

@@ -1580,6 +1580,11 @@ func (s *tabEventSink) Emit(e event.Event) {
 	}
 	tabID, app := s.binding()
 	if app != nil {
+		if e.Kind == event.TurnDone {
+			// Keep the legacy completion as a cheap missed-event safety net. The
+			// hub owns the actual resource invalidation and coalesces this probe.
+			app.reconcileWorkspaceForTab(tabID)
+		}
 		switch e.Kind {
 		case event.TurnStarted:
 			s.resetDisplayTurn()
@@ -1739,10 +1744,9 @@ type runtimeEventEnvelope struct {
 	payload []any
 }
 
-// asyncRuntimeEmitter decouples Wails' runtime event bridge from agent
-// emission. runtime.EventsEmit can block when the single webview event channel
-// backs up; callers enqueue in-order work and return without holding the
-// agent's event.Sync lock.
+// asyncRuntimeEmitter decouples Wails' runtime event bridge from agent emission.
+// runtime.EventsEmit can block when the single webview event channel backs up;
+// callers enqueue in-order work and return without holding the agent event lock.
 // runtimeEventsEmitFallback is the emit used when no per-instance override is
 // installed. Production keeps the real Wails bridge; the test binary swaps in
 // a no-op via TestMain, because Wails EventsEmit log.Fatals outside a running
@@ -1751,11 +1755,12 @@ type runtimeEventEnvelope struct {
 var runtimeEventsEmitFallback runtimeEventEmitFunc = runtime.EventsEmit
 
 type asyncRuntimeEmitter struct {
-	mu      sync.Mutex
-	emit    runtimeEventEmitFunc
-	queue   []runtimeEventEnvelope
-	head    int
-	running bool
+	mu                     sync.Mutex
+	emit                   runtimeEventEmitFunc
+	queue                  []runtimeEventEnvelope
+	head                   int
+	running                bool
+	configWarningsRevision atomic.Uint64
 }
 
 func (e *asyncRuntimeEmitter) Emit(ctx context.Context, name string, payload ...any) {
@@ -3266,6 +3271,9 @@ func (a *App) closeTab(tabID string, allowDetach bool) error {
 	closeCtrl := tab.Ctrl
 	closeSink := tab.sink
 	a.mu.Unlock()
+	if a.workspaceHub != nil {
+		a.workspaceHub.reconcileRoots()
+	}
 
 	// Tear down outside App.mu while retaining the lifecycle barrier acquired
 	// before the tab binding was removed.
@@ -3907,10 +3915,10 @@ func (a *App) buildTabControllerWithContextAdmissionHeld(tab *WorkspaceTab, load
 	sink := a.desktopControllerSink(buildSink, cfg.Notifications)
 
 	ctrl, err := boot.Build(buildCtx, boot.Options{
-		Model:                    model,
-		RequireKey:               false,
-		AutoPricingCurrency:      a.desktopAutoPricingCurrency(),
-		StatsSource:              "desktop",
+		Model:               model,
+		RequireKey:          false,
+		AutoPricingCurrency: a.desktopAutoPricingCurrency(),
+		StatsSource:         "desktop", OnConfigLoadWarnings: a.configLoadWarningsHandler(),
 		Sink:                     sink,
 		WorkspaceRoot:            root,
 		SessionDir:               sessionDir,
@@ -4304,6 +4312,9 @@ func (a *App) applySessionBindingToTab(tab *WorkspaceTab, binding sessionBinding
 	}
 	sink := tab.sink
 	a.mu.Unlock()
+	if workspaceChanged && a.workspaceHub != nil {
+		a.workspaceHub.reconcileRoots()
+	}
 	if reopenTerminalGate {
 		a.terminals.reopenForTab(tab.ID)
 	}
@@ -7660,173 +7671,6 @@ func (a *App) SetTopicPinned(topicID string, pinned bool) error {
 	return nil
 }
 
-var errTopicHasActiveWork = errors.New("wait for the session to finish, answer pending prompts, and stop background jobs before archiving this topic")
-
-// TrashTopic removes an idle topic from the project tree and moves its saved
-// session records into the session trash. Idle in-process runtimes are detached
-// first, so their autosave cannot recreate state after the topic is gone.
-func (a *App) TrashTopic(topicID string) error {
-	return friendlySessionFileError(a.trashTopic(topicID))
-}
-
-func (a *App) topicHasActiveRuntimeWork(topicID string) bool {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	for _, tabs := range []map[string]*WorkspaceTab{a.tabs, a.detachedSessions} {
-		for _, tab := range tabs {
-			if tab != nil && tab.TopicID == topicID && tab.hasActiveRuntimeWork() {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func (a *App) trashTopic(topicID string) error {
-	if strings.TrimSpace(topicID) == "" {
-		return fmt.Errorf("topicID is required")
-	}
-
-	var fallback fallbackRuntimeTarget
-	var changedDirs []string
-	if err := func() error {
-		defer a.lockRuntimeMutation("trash-topic")()
-		a.sessionRemovalMu.Lock()
-		defer a.sessionRemovalMu.Unlock()
-		if a.topicHasActiveRuntimeWork(topicID) {
-			return errTopicHasActiveWork
-		}
-
-		targets, err := a.topicTrashTargets(topicID)
-		if err != nil {
-			return err
-		}
-		for _, target := range targets {
-			changedDirs = append(changedDirs, target.dir)
-		}
-		removed, nextFallback := a.removeTopicRuntimeBindings(topicID)
-		fallback = nextFallback
-		if err := a.prepareRemovedSessionRuntimes(removed); err != nil {
-			a.closeRemainingRemovedSessionRuntimesAdmissionHeld(removed, map[control.SessionAPI]bool{})
-			return err
-		}
-		destroyBegun := false
-		closedRemoved := map[control.SessionAPI]bool{}
-		defer func() {
-			if destroyBegun {
-				a.closeRemainingRemovedSessionRuntimesAfterDestroyAdmissionHeld(removed, closedRemoved)
-				return
-			}
-			a.closeRemainingRemovedSessionRuntimesAdmissionHeld(removed, closedRemoved)
-		}()
-
-		for _, target := range targets {
-			destroys := a.destroyHandlesForSession(target.dir, target.sessionPath, removed)
-			if len(destroys) > 0 {
-				destroyBegun = true
-			}
-			teardownTimedOut := waitDestroyHandles(destroys)
-			a.closeRemovedSessionRuntimesForSessionAfterDestroyAdmissionHeld(removed, target.dir, target.sessionPath, closedRemoved)
-			if teardownTimedOut {
-				if err := agent.MarkCleanupPending(target.sessionPath, "delete"); err != nil {
-					return err
-				}
-				go delayedDesktopSessionTrash(target.dir, target.sessionPath, target.key, destroys)
-			} else {
-				err := trashSessionArtifacts(target.dir, target.sessionPath, target.key)
-				finishDestroyHandles(destroys)
-				if err != nil {
-					return err
-				}
-			}
-		}
-		return a.deleteTopic(topicID)
-	}(); err != nil {
-		return err
-	}
-	if fallback.needs {
-		fallback.topicID = ""
-		if err := a.openFallbackRuntime(fallback); err != nil {
-			return err
-		}
-	}
-	if len(changedDirs) > 0 {
-		a.emitProjectTreeChangedForSessionDirs(changedDirs...)
-	} else {
-		a.emitProjectTreeMetadataChanged()
-	}
-	return nil
-}
-
-type topicTrashTarget struct {
-	dir         string
-	sessionPath string
-	key         string
-}
-
-func (a *App) topicTrashTargets(topicID string) ([]topicTrashTarget, error) {
-	topicID = strings.TrimSpace(topicID)
-	var targets []topicTrashTarget
-	seen := map[string]bool{}
-	addTarget := func(dir, path string) error {
-		sessionPath, key, err := validateSessionPath(dir, path)
-		if err != nil {
-			return err
-		}
-		id := dir + "\x00" + sessionPath
-		if seen[id] {
-			return nil
-		}
-		seen[id] = true
-		if err := validateSessionTrashTarget(dir, sessionPath, key); err != nil {
-			return err
-		}
-		targets = append(targets, topicTrashTarget{dir: dir, sessionPath: sessionPath, key: key})
-		return nil
-	}
-	for _, dir := range a.knownSessionDirs() {
-		index, err := topicSessionIndexForDir(dir)
-		if err != nil {
-			return nil, err
-		}
-		for _, match := range index.byTopic[topicID] {
-			if agent.IsCleanupPending(match.path) {
-				continue
-			}
-			if err := addTarget(dir, match.path); err != nil {
-				return nil, err
-			}
-		}
-	}
-	a.mu.RLock()
-	var runtimeTargets []struct {
-		dir  string
-		path string
-	}
-	for _, tab := range a.runtimeTabsLocked() {
-		if tab == nil || tab.TopicID != topicID {
-			continue
-		}
-		if path := canonicalTabSessionPath(tab.currentSessionPath()); path != "" {
-			dir := tabSessionDir(tab)
-			if filepath.IsAbs(path) {
-				dir = filepath.Dir(path)
-			}
-			runtimeTargets = append(runtimeTargets, struct {
-				dir  string
-				path string
-			}{dir: dir, path: path})
-		}
-	}
-	a.mu.RUnlock()
-	for _, target := range runtimeTargets {
-		if err := addTarget(target.dir, target.path); err != nil {
-			return nil, err
-		}
-	}
-	return targets, nil
-}
-
 // ListProjectTree builds the sidebar tree: project folders each containing
 // their topics, plus a Global section.
 // topicSummary is used by ListProjectTree and mergeSessionInfos to track
@@ -8304,20 +8148,19 @@ func (a *App) ContextPanel(tabID string) ContextPanelInfo {
 		if sp := ctrl.SessionPath(); sp != "" {
 			tab.syncTelemetryToSession(sp)
 		}
-		used, window := ctrl.ContextSnapshot()
-		info.UsedTokens = used
+		_, window := ctrl.ContextSnapshot()
 		info.WindowTokens = window
-		// Session rebind rebuilds the controller: the fresh executor has no
-		// per-turn usage yet, so ContextSnapshot reports used=0. Fall back to
-		// the telemetry-persisted last-used value from the most recent turn.
-		if used == 0 {
+		// This panel breaks the last turn down into segments, so its total must
+		// be that turn's usage and not the live-view measurement the status-bar
+		// gauge reports — otherwise the segments stop summing to the total.
+		if u := ctrl.LastUsage(); u != nil {
+			info.UsedTokens = u.PromptTokens + u.CompletionTokens
+		}
+		if info.UsedTokens == 0 {
 			if snap := tab.telemetrySnapshot(); snap.Usage.LastUsedTokens > 0 {
 				info.UsedTokens = snap.Usage.LastUsedTokens
 			}
 		}
-		// Per-turn token breakdown from LastUsage (same snapshot as UsedTokens)
-		// so the donut segments are proportional to the current context fill,
-		// not inflated by cumulative session totals.
 		if u := ctrl.LastUsage(); u != nil {
 			info.PromptTokens = u.PromptTokens
 			info.CompletionTokens = u.CompletionTokens

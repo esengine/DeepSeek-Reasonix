@@ -2,7 +2,6 @@ package evidence
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -21,11 +20,15 @@ import (
 )
 
 // TodoItem mirrors the todo_write item shape the host needs for step matching.
+// StepID is the item's stable identity: it survives a retitle and a reorder, so
+// completion attribution never has to be inferred from wording or position. It
+// is optional — a list written freehand has none, and matches by text instead.
 type TodoItem struct {
 	Content    string `json:"content"`
 	Status     string `json:"status"`
 	ActiveForm string `json:"activeForm,omitempty"`
 	Level      int    `json:"level,omitempty"`
+	StepID     string `json:"step_id,omitempty"`
 }
 
 // ValidateSerialTodos enforces the task-list state machine promised by
@@ -320,36 +323,15 @@ func AdvanceSerialTodo(todos []TodoItem, index int) bool {
 	return true
 }
 
-// TodoStepMatch is the result of matching complete_step.step against the latest
-// successful todo_write list in this turn.
+// TodoStepMatch is the result of matching a complete_step citation against the
+// latest successful todo_write list in this turn.
 type TodoStepMatch struct {
 	Found      bool
 	Index      int
 	Content    string
 	Status     string
 	ActiveForm string
-}
-
-// Receipt is the host-runtime record of one tool call. It stays in memory for
-// the current agent turn and is not serialized into prompts or session state.
-type Receipt struct {
-	ToolName  string          `json:"tool_name"`
-	Args      json.RawMessage `json:"args,omitempty"`
-	Profile   string          `json:"profile,omitempty"`
-	Success   bool            `json:"success"`
-	Command   string          `json:"command,omitempty"`
-	Step      string          `json:"step,omitempty"`
-	StepProof bool            `json:"step_proof,omitempty"`
-	TodoStep  *TodoStepMatch  `json:"todo_step,omitempty"`
-	Paths     []string        `json:"paths,omitempty"`
-	Read      bool            `json:"read,omitempty"`
-	Write     bool            `json:"write,omitempty"`
-	Mutation  bool            `json:"mutation,omitempty"`
-	Todos     []TodoItem      `json:"todos,omitempty"`
-	// OutputBytes is the host-observed length of the tool's (redacted, trimmed)
-	// output. Content-evidence checks require it to be non-zero so a command
-	// that printed nothing (head -n 0, >/dev/null) can never count as reading.
-	OutputBytes int `json:"output_bytes,omitempty"`
+	StepID     string
 }
 
 // BackgroundLease identifies a background job whose evidence was provisionally
@@ -541,54 +523,6 @@ func (l *Ledger) HasWriteOrCommandSince(index int) bool {
 		}
 	}
 	return false
-}
-
-// SuccessfulProgressSignaturesSince returns stable identities for successful
-// host-observed work recorded at or after index. Callers can keep a per-turn set
-// of these signatures so a new read, command, or mutation renews an execution
-// lease while exact repeats do not masquerade as progress.
-func (l *Ledger) SuccessfulProgressSignaturesSince(index int) []string {
-	if l == nil {
-		return nil
-	}
-	if index < 0 {
-		index = 0
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	var out []string
-	for i := index; i < len(l.receipts); i++ {
-		if sig, ok := progressReceiptSignature(l.receipts[i]); ok {
-			out = append(out, sig)
-		}
-	}
-	return out
-}
-
-func progressReceiptSignature(r Receipt) (string, bool) {
-	if !r.Success {
-		return "", false
-	}
-	kind := ""
-	switch {
-	case r.Mutation || r.Write:
-		kind = "mutation"
-	case r.Command != "":
-		kind = "command"
-	case r.Read && r.OutputBytes > 0:
-		kind = "read"
-	default:
-		return "", false
-	}
-	payload := strings.TrimSpace(string(r.Args))
-	var decoded any
-	if json.Unmarshal(r.Args, &decoded) == nil {
-		if canonical, err := json.Marshal(decoded); err == nil {
-			payload = string(canonical)
-		}
-	}
-	sum := sha256.Sum256([]byte(kind + "\x00" + r.ToolName + "\x00" + payload))
-	return fmt.Sprintf("%x", sum), true
 }
 
 func (l *Ledger) HasSuccessfulCommand(command string) bool {
@@ -1063,7 +997,7 @@ func MatchStep(step string, todos []TodoItem) (TodoStepMatch, bool) {
 func MatchTodoIdentity(todo TodoItem, todos []TodoItem) (TodoStepMatch, bool) {
 	for i, candidate := range todos {
 		if sameTodoIdentity(todo, candidate) {
-			return TodoStepMatch{Found: true, Index: i + 1, Content: candidate.Content, Status: candidate.Status, ActiveForm: candidate.ActiveForm}, true
+			return todoMatchAt(i+1, candidate), true
 		}
 	}
 	found := -1
@@ -1081,7 +1015,7 @@ func MatchTodoIdentity(todo TodoItem, todos []TodoItem) (TodoStepMatch, bool) {
 		return TodoStepMatch{}, false
 	}
 	candidate := todos[found]
-	return TodoStepMatch{Found: true, Index: found + 1, Content: candidate.Content, Status: candidate.Status, ActiveForm: candidate.ActiveForm}, true
+	return todoMatchAt(found+1, candidate), true
 }
 
 // PreservesCompletedTodoPositions reports whether every previously completed
@@ -1603,6 +1537,31 @@ func ReceiptFromToolCall(toolName string, args json.RawMessage, success bool, re
 		r.Read = true
 	}
 	return r
+}
+
+// ToolCallPaths returns the bounded, structurally declared file paths in a
+// tool call. It intentionally does not attempt to parse shell scripts; callers
+// must treat bash and unknown targets as allPaths when invalidation is needed.
+func ToolCallPaths(args json.RawMessage) []string {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(args, &fields); err != nil {
+		return nil
+	}
+	paths := extractPaths(fields)
+	seen := make(map[string]struct{}, len(paths))
+	out := make([]string, 0, len(paths))
+	for _, path := range paths {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		out = append(out, path)
+	}
+	return out
 }
 
 // ToolCallMutates is the delivery profile's conservative state-change
@@ -2600,7 +2559,13 @@ func stringField(fields map[string]json.RawMessage, key string) string {
 	return strings.TrimSpace(s)
 }
 
+// completeStepIdentity is the citation a receipt records, most stable first: a
+// step id survives a replan, an index survives a retitle, the title survives
+// neither.
 func completeStepIdentity(fields map[string]json.RawMessage) string {
+	if id := stringField(fields, "step_id"); id != "" {
+		return id
+	}
 	if n, ok := intField(fields, "step_index"); ok && n > 0 {
 		return strconv.Itoa(n)
 	}
@@ -2719,10 +2684,6 @@ func previousTodoCompleted(index int, current TodoItem, previous []TodoItem) boo
 	return false
 }
 
-func sameTodoIdentity(a, b TodoItem) bool {
-	return sameStepText(a.Content, b.Content) || sameStepText(a.ActiveForm, b.ActiveForm)
-}
-
 func hasSuccessfulCompleteStepForTodo(receipts []Receipt, index int, current []TodoItem) bool {
 	for _, r := range receipts {
 		if !r.Success || r.ToolName != "complete_step" || strings.TrimSpace(r.Step) == "" {
@@ -2758,31 +2719,20 @@ func latestTodoStep(step string, receipts []Receipt) TodoStepMatch {
 	return TodoStepMatch{}
 }
 
-func sameTodoMatch(todo TodoItem, match TodoStepMatch) bool {
-	return sameStepText(todo.Content, match.Content) || sameStepText(todo.ActiveForm, match.ActiveForm)
-}
-
-// todoContentRelates reports whether a todo item's preferred text has a
-// recognisable semantic relationship (substring overlap) with the step match
-// that was stored against a previous todo_write list.  It returns true when
-// the model has rephrased the same task, not swapped it for a different one.
-func todoContentRelates(todo TodoItem, match TodoStepMatch) bool {
-	return textOverlaps(todo.Content, match.Content) ||
-		textOverlaps(todo.ActiveForm, match.ActiveForm)
-}
-
-func textOverlaps(a, b string) bool {
-	return stepTextContains(normalizeStepText(a), normalizeStepText(b))
-}
-
+// matchTodoStep resolves a citation to a todo. A stable id wins outright; only
+// a list without ids falls back to position and wording, which a retitle or an
+// inserted step silently invalidates.
 func matchTodoStep(step string, todos []TodoItem) TodoStepMatch {
+	if m, ok := MatchStepID(step, todos); ok {
+		return m
+	}
 	if n, ok := parseStepIndex(normalizeStepText(step)); ok && n >= 1 && n <= len(todos) {
 		t := todos[n-1]
-		return TodoStepMatch{Found: true, Index: n, Content: t.Content, Status: t.Status, ActiveForm: t.ActiveForm}
+		return todoMatchAt(n, t)
 	}
 	for i, t := range todos {
 		if sameStepText(step, t.Content) || sameStepText(step, t.ActiveForm) {
-			return TodoStepMatch{Found: true, Index: i + 1, Content: t.Content, Status: t.Status, ActiveForm: t.ActiveForm}
+			return todoMatchAt(i+1, t)
 		}
 	}
 	// Containment fallback for wording drift; an ambiguous citation (containing
@@ -2799,7 +2749,7 @@ func matchTodoStep(step string, todos []TodoItem) TodoStepMatch {
 	}
 	if found >= 0 {
 		t := todos[found]
-		return TodoStepMatch{Found: true, Index: found + 1, Content: t.Content, Status: t.Status, ActiveForm: t.ActiveForm}
+		return todoMatchAt(found+1, t)
 	}
 	return TodoStepMatch{}
 }

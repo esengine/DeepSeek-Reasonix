@@ -72,6 +72,9 @@ func TestFriendlySessionFileErrorPassesThroughOtherErrors(t *testing.T) {
 	if got := friendlySessionFileError(errSessionBusyElsewhere); !errors.Is(got, errSessionBusyElsewhere) {
 		t.Fatalf("sanitized busy error rewritten to %v", got)
 	}
+	if got := friendlySessionFileError(agent.ErrSessionFileLockHeld); !errors.Is(got, errSessionBusyElsewhere) {
+		t.Fatalf("bounded session file lock error = %v, want %v", got, errSessionBusyElsewhere)
+	}
 	notExist := &os.PathError{Op: "lstat", Path: "gone.jsonl", Err: syscall.ENOENT}
 	if got := friendlySessionFileError(notExist); !errors.Is(got, error(notExist)) {
 		t.Fatalf("not-exist error rewritten to %v", got)

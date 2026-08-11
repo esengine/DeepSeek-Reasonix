@@ -13,7 +13,6 @@ import {
   ChevronRight,
   FileText,
   Folder,
-  FolderOpen,
   FolderTree,
   FolderX,
   GitBranch,
@@ -22,7 +21,6 @@ import {
   Minimize2,
   RefreshCw,
   Search,
-  TerminalSquare,
   X,
 } from "lucide-react";
 import { asArray } from "../lib/array";
@@ -39,6 +37,9 @@ import {
 } from "../lib/workspaceSplit";
 import { createRafResizeUpdater } from "../lib/resizeDrag";
 import { closeWorkspacePreviewTab } from "../lib/workspacePreviewTabs";
+import { useWorkspaceRefresh } from "../lib/workspaceRefreshStore";
+import { useWorkspaceRefreshInvalidation, workspaceRefreshFallbackSequence } from "../lib/workspaceRefreshInvalidation";
+import { createWorkspaceRefreshScheduler } from "../lib/workspaceRefreshScheduler";
 import { shouldScrollWorkspaceTreeSelection } from "../lib/workspaceTreeReveal";
 import { mergeWorkspaceSearchResults } from "../lib/workspaceTreeSearch";
 import {
@@ -68,6 +69,7 @@ import { Markdown } from "./Markdown";
 import { Tooltip } from "./Tooltip";
 import { AnchoredPopover } from "./AnchoredPopover";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon";
+import { WorkspaceTreeMenu } from "./WorkspaceTreeMenu";
 
 const WORKSPACE_TREE_MIN_WIDTH = 140;
 const WORKSPACE_TREE_DEFAULT_WIDTH = 300;
@@ -75,8 +77,6 @@ const WORKSPACE_TREE_RAIL_WIDTH = 44;
 const WORKSPACE_PREVIEW_MIN_WIDTH = 140;
 const WORKSPACE_PREVIEW_TARGET_WIDTH = 360;
 const WORKSPACE_DUAL_PANEL_TARGET_WIDTH = WORKSPACE_TREE_DEFAULT_WIDTH + WORKSPACE_PREVIEW_TARGET_WIDTH;
-const WORKSPACE_CONTEXT_MENU_FILE_HEIGHT = 136;
-const WORKSPACE_CONTEXT_MENU_REF_HEIGHT = 92;
 const WORKSPACE_CONTEXT_MENU_SELECTION_HEIGHT = 48;
 const WORKSPACE_MAX_PREVIEW_TABS = 5;
 
@@ -199,7 +199,6 @@ export function WorkspacePanel({
   onRequestPanelWidth,
   onFileTreeRefresh,
   onSessionRevertCommitted,
-  refreshKey,
   initialViewMode = "files",
   revealPathRequest,
   changeRevealRequest,
@@ -225,7 +224,6 @@ export function WorkspacePanel({
   onRequestPanelWidth?: (width: number) => void;
   onFileTreeRefresh?: () => void;
   onSessionRevertCommitted?: (tabId: string, result: RewindResultView) => void;
-  refreshKey?: number;
   initialViewMode?: "files" | "changed";
   revealPathRequest?: WorkspaceRevealRequest | null;
   changeRevealRequest?: WorkspaceRevealRequest | null;
@@ -242,6 +240,7 @@ export function WorkspacePanel({
   const workspaceScopeKey = workspaceScopeKeyProp ?? `${workspaceTabId}\u0000${cwd ?? ""}`;
   const workspaceMemoryKey = workspaceMemoryKeyProp ?? workspaceScopeKey;
   const workspaceMemoryVisitId = workspaceMemoryVisitIdProp ?? workspaceTreeVisitId(workspaceMemoryKey);
+  const workspaceRefresh = useWorkspaceRefresh(workspaceTabId, workspaceScopeKey, open);
   const initialWorkspaceMemory = readWorkspaceTreeMemory(workspaceMemoryKey);
   const panelRef = useRef<HTMLElement>(null);
   const treeRef = useRef<HTMLDivElement>(null);
@@ -259,6 +258,10 @@ export function WorkspacePanel({
   const [preview, setPreview] = useState<FilePreview | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [viewMode, setViewMode] = useState<"files" | "changed">(initialViewMode);
+  // Both creation and regular workspaces use the same three-layer change view;
+  // keep the prop in the seam for older callers while making history collapsed
+  // by default everywhere.
+  const groupedChangesLayout = creationMode !== false || viewMode === "changed";
   const [gitHistory, setGitHistory] = useState<GitCommitView[]>([]);
   const [workspaceChanges, setWorkspaceChanges] = useState<WorkspaceChangesView | null>(null);
   const [changeDetail, setChangeDetail] = useState<WorkspaceChangeDetailView | null>(null);
@@ -298,6 +301,7 @@ export function WorkspacePanel({
   const workspaceChangesRequestIdRef = useRef(0);
   const changeDetailRequestIdRef = useRef(0);
   const gitHistoryRequestIdRef = useRef(0);
+  const previewRequestIdRef = useRef(0);
   const commitDetailRequestIdRef = useRef(0);
   const dirLoadGenerationRef = useRef(0);
   const dirLoadRequestIdsRef = useRef<Record<string, number>>({});
@@ -305,6 +309,14 @@ export function WorkspacePanel({
   const recentAnchorRef = useRef<HTMLButtonElement>(null);
   const openDirsRef = useRef(openDirs);
   const pendingTreeRevealPathRef = useRef<string | null>(null);
+  const workingTreeRefreshSchedulerRef = useRef<ReturnType<typeof createWorkspaceRefreshScheduler> | null>(null);
+  const gitMetaRefreshSchedulerRef = useRef<ReturnType<typeof createWorkspaceRefreshScheduler> | null>(null);
+  if (!workingTreeRefreshSchedulerRef.current) {
+    workingTreeRefreshSchedulerRef.current = createWorkspaceRefreshScheduler(300);
+  }
+  if (!gitMetaRefreshSchedulerRef.current) {
+    gitMetaRefreshSchedulerRef.current = createWorkspaceRefreshScheduler(750);
+  }
   currentWorkspaceScopeKeyRef.current = workspaceScopeKey;
 
   useEffect(() => {
@@ -526,6 +538,8 @@ export function WorkspacePanel({
     if (!open) return;
     if (lastWorkspaceScopeKeyRef.current === workspaceScopeKey) return;
     lastWorkspaceScopeKeyRef.current = workspaceScopeKey;
+    workingTreeRefreshSchedulerRef.current?.cancel();
+    gitMetaRefreshSchedulerRef.current?.cancel();
     workspaceChangesRequestIdRef.current += 1;
     changeDetailRequestIdRef.current += 1;
     gitHistoryRequestIdRef.current += 1;
@@ -549,6 +563,11 @@ export function WorkspacePanel({
       setPreview(null);
     }
   }, [open, viewMode, workspaceScopeKey]);
+
+  useEffect(() => () => {
+    workingTreeRefreshSchedulerRef.current?.cancel();
+    gitMetaRefreshSchedulerRef.current?.cancel();
+  }, []);
 
   // A tab/scope switch must discard the floating menus: their text and paths
   // were captured from the previous scope, while add-to-chat routes to
@@ -657,8 +676,7 @@ export function WorkspacePanel({
     setCommitDetail(null);
     setSelectionMenu(null);
     setTreeMenu(null);
-    void loadGitHistory();
-  }, [changeListRequest, loadGitHistory, open, scopedChangeRows, viewMode]);
+  }, [changeListRequest, open, scopedChangeRows, viewMode]);
 
   useEffect(() => {
     if (!open || revealPathRequest) return;
@@ -721,26 +739,16 @@ export function WorkspacePanel({
   useEffect(() => {
     if (!open) return;
     if (viewMode === "changed") {
-      void loadGitHistory();
       void loadWorkspaceChanges();
       if (selectedPath) void loadChangeDetail();
+      if (commitHistoryOpen) void loadGitHistory();
     } else {
       changeDetailRequestIdRef.current += 1;
       setChangeDetail(null);
       setChangeDetailErr("");
       setLoadingChangeDetail(false);
     }
-  }, [selectedPath, viewMode, loadChangeDetail, loadGitHistory, loadWorkspaceChanges, open]);
-
-  useEffect(() => {
-    if (!open || !refreshKey) return;
-    if (viewMode === "changed") {
-      void loadGitHistory();
-      void loadWorkspaceChanges();
-      if (selectedPath) void loadChangeDetail();
-    }
-    openDirsRef.current.forEach((dir) => void loadDir(dir));
-  }, [loadChangeDetail, loadGitHistory, loadWorkspaceChanges, loadDir, open, refreshKey, selectedPath, viewMode]);
+  }, [commitHistoryOpen, selectedPath, viewMode, loadChangeDetail, loadGitHistory, loadWorkspaceChanges, open]);
 
   useEffect(() => {
     if (!selectionMenu && !treeMenu) return;
@@ -772,9 +780,13 @@ export function WorkspacePanel({
     setSelectionMenu(null);
     setTreeMenu(null);
     if (viewMode === "changed") {
-      void loadGitHistory();
+      workingTreeRefreshSchedulerRef.current?.cancel();
+      gitMetaRefreshSchedulerRef.current?.cancel();
       void loadWorkspaceChanges();
       if (selectedPath) void loadChangeDetail();
+      // Manual refresh is the explicit escape hatch and includes collapsed
+      // history even when ordinary file writes do not.
+      void loadGitHistory();
       return;
     }
     onFileTreeRefresh?.();
@@ -784,15 +796,17 @@ export function WorkspacePanel({
 
   const refreshSelected = useCallback(() => {
     if (!selectedPath) return;
+    const requestId = ++previewRequestIdRef.current;
+    const requestScopeKey = workspaceScopeKey;
     let live = true;
     setLoadingPreview(true);
     app
       .ReadFileForTab(workspaceTabId, selectedPath)
       .then((next) => {
-        if (live) setPreview(next);
+        if (live && previewRequestIdRef.current === requestId && currentWorkspaceScopeKeyRef.current === requestScopeKey) setPreview(next);
       })
       .catch((err) => {
-        if (live) {
+        if (live && previewRequestIdRef.current === requestId && currentWorkspaceScopeKeyRef.current === requestScopeKey) {
           setPreview({
             path: selectedPath,
             body: "",
@@ -804,19 +818,35 @@ export function WorkspacePanel({
         }
       })
       .finally(() => {
-        if (live) setLoadingPreview(false);
+        if (live && previewRequestIdRef.current === requestId && currentWorkspaceScopeKeyRef.current === requestScopeKey) setLoadingPreview(false);
       });
     return () => {
       live = false;
     };
   }, [selectedPath, workspaceScopeKey, workspaceTabId]);
 
-
-
   useEffect(() => {
     if (!open || !selectedPath) return;
     return refreshSelected();
   }, [open, refreshSelected, selectedPath]);
+
+  useWorkspaceRefreshInvalidation({ commitHistoryOpen,
+    filter,
+    gitMetaSchedulerRef: gitMetaRefreshSchedulerRef,
+    loadChangeDetail,
+    loadDir,
+    loadGitHistory,
+    loadWorkspaceChanges,
+    open,
+    openDirsRef,
+    refreshSelected,
+    selectedPath,
+    setSearchResults,
+    viewMode,
+    workingTreeSchedulerRef: workingTreeRefreshSchedulerRef,
+    workspaceRefresh,
+    workspaceScopeKey,
+  });
 
   const toggleDir = useCallback(
     (dir: string, compactPaths: string[] = [dir]) => {
@@ -951,6 +981,8 @@ export function WorkspacePanel({
     : currentFileDir;
   const recentFiles = useMemo(() => [...openTabs].reverse(), [openTabs]);
 
+  const workspaceSearchFallbackSequence = workspaceRefreshFallbackSequence(workspaceRefresh);
+
   useEffect(() => {
     const q = filter.trim();
     if (!open || viewMode === "changed" || !q || scopedFilePaths) {
@@ -964,7 +996,7 @@ export function WorkspacePanel({
       if (!cancelled) setSearchResults(null);
     });
     return () => { cancelled = true; };
-  }, [filter, viewMode, scopedFilePaths, open, workspaceScopeKey, workspaceTabId]);
+  }, [filter, viewMode, scopedFilePaths, open, workspaceRefresh.revisions.tree, workspaceSearchFallbackSequence, workspaceScopeKey, workspaceTabId]);
 
   const flattened = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -1092,7 +1124,7 @@ export function WorkspacePanel({
   const actualTreeVisible = changedMode ? false : treeVisible && (!previewVisible || splitPanesFit);
   const previewModeActive = open && (filePreviewActive || changeDetailActive);
   const embeddedDockMode = !showViewTabs;
-  const showFileTools = showViewTabs || filePreviewActive;
+  const showFileTools = true;
   const effectiveTreeWidth = useMemo(
     () =>
       resolveWorkspaceSplitTreeWidth({
@@ -1361,12 +1393,6 @@ export function WorkspacePanel({
       if (currentWorkspaceScopeKeyRef.current !== requestScopeKey) return;
       onAddToChat?.(formatWorkspaceReference(target.path, false));
     }
-  };
-
-  const revealInFileManager = () => {
-    if (!treeMenu) return;
-    setTreeMenu(null);
-    void app.RevealWorkspacePathForTab(workspaceTabId, treeMenu.path).catch(() => {});
   };
 
   const renderNormalRow = (row: TreeRow) => {
@@ -1652,7 +1678,6 @@ export function WorkspacePanel({
                       setSelectedPath(null);
                       setExpandedCommit(null);
                       setCommitDetail(null);
-                      void loadGitHistory();
                     }}
                   >
                     <X size={12} />
@@ -1695,7 +1720,7 @@ export function WorkspacePanel({
                   {workspaceGitWarning}
                 </div>
               )}
-              {creationMode ? (
+              {groupedChangesLayout ? (
                 <>
                   {sessionChanges.length > 0 && renderChangeScope(t("context.sessionChanges"), sessionChanges)}
                   {gitWorkingChanges.length > 0 && renderChangeScope(t("workspace.workingChanges"), gitWorkingChanges)}
@@ -1704,7 +1729,7 @@ export function WorkspacePanel({
                   )}
                   {loadingHistory ? (
                     <div className="workspace-empty">{t("workspace.loading")}</div>
-                  ) : gitHistory.length > 0 ? (
+                  ) : (
                     <section className={`workspace-commit-history${commitHistoryOpen ? " workspace-commit-history--open" : ""}`}>
                       <button
                         className="workspace-commit-history__toggle"
@@ -1766,7 +1791,7 @@ export function WorkspacePanel({
                         </div>
                       )}
                     </section>
-                  ) : null}
+                  )}
                 </>
               ) : (
                 <>
@@ -1920,7 +1945,9 @@ export function WorkspacePanel({
           ) : loadingPreview ? (
             <div className="workspace-empty">{t("workspace.loading")}</div>
           ) : preview?.err ? (
-            <div className="workspace-empty workspace-empty--error">{preview.err}</div>
+            <div className="workspace-empty workspace-empty--error">
+              {/no such file|not found|enoent/i.test(preview.err) ? t("workspace.fileDeleted") : preview.err}
+            </div>
           ) : preview?.kind ? (
             renderMediaPreview(preview)
           ) : preview?.binary ? (
@@ -2017,7 +2044,6 @@ export function WorkspacePanel({
                   className={viewMode === "changed" ? "workspace-files__tab workspace-files__tab--active" : "workspace-files__tab"}
                   onClick={() => {
                     setViewMode("changed");
-                    void loadGitHistory();
                   }}
                 >
                   <GitBranch size={13} />
@@ -2025,12 +2051,29 @@ export function WorkspacePanel({
                 </button>
               </div>
             )}
-            {showViewTabs && (
-              <Tooltip label={t("workspace.refreshChanges")}>
-                <button className="workspace-iconbtn" onClick={() => { void loadGitHistory(); void loadWorkspaceChanges(); }}>
-                  <RefreshCw size={14} />
-                </button>
-              </Tooltip>
+            <Tooltip label={t("workspace.refreshChanges")}>
+              <button
+                className="workspace-iconbtn"
+                type="button"
+                aria-label={t("workspace.refreshChanges")}
+                aria-busy={loadingPreview || loadingHistory}
+                onClick={() => {
+                  refreshWorkspaceList();
+                  void refreshSelected();
+                }}
+              >
+                <RefreshCw size={14} />
+              </button>
+            </Tooltip>
+            {workspaceRefresh.watchState !== "active" && (
+              <span
+                className="workspace-watch-status"
+                role="status"
+                title={t(workspaceRefresh.watchState === "degraded" ? "workspace.watchDegraded" : "workspace.watchUnavailable")}
+                aria-label={t(workspaceRefresh.watchState === "degraded" ? "workspace.watchDegraded" : "workspace.watchUnavailable")}
+              >
+                •
+              </span>
             )}
           </div>
         )}
@@ -2101,47 +2144,15 @@ export function WorkspacePanel({
         </div>
       </section>
       {treeMenu && (
-        <FloatingMenu
-          x={treeMenu.x}
-          y={treeMenu.y}
-          estimatedHeight={treeMenu.isDir ? WORKSPACE_CONTEXT_MENU_REF_HEIGHT : WORKSPACE_CONTEXT_MENU_FILE_HEIGHT}
-          className="workspace-tree-menu"
-        >
-          <FloatingMenuItems
-            items={[
-              {
-                icon: <MessageSquarePlus size={14} />,
-                label: treeMenu.isDir ? t("workspace.addFolderReferenceToChat") : t("workspace.addFileReferenceToChat"),
-                onSelect: addTreeReferenceToChat,
-              },
-              ...(treeMenu.isDir
-                ? []
-                : [
-                    {
-                      icon: <FileText size={14} />,
-                      label: t("workspace.addFileContentToChat"),
-                      onSelect: () => void addTreeFileToChat(),
-                    },
-                  ]),
-              {
-                icon: <FolderOpen size={14} />,
-                label: t("workspace.revealInFileManager"),
-                onSelect: revealInFileManager,
-              },
-              ...(onOpenInTerminal
-                ? [{
-                    icon: <TerminalSquare size={14} />,
-                    label: t("workspace.openInTerminal"),
-                    onSelect: () => {
-                      const target = treeMenu;
-                      setTreeMenu(null);
-                      onOpenInTerminal(target.path);
-                    },
-                  }]
-                : []),
-            ]}
-          />
-        </FloatingMenu>
+        <WorkspaceTreeMenu
+          target={treeMenu}
+          workspaceTabId={workspaceTabId}
+          isScopeCurrent={() => currentWorkspaceScopeKeyRef.current === workspaceScopeKey}
+          onClose={() => setTreeMenu(null)}
+          onOpenInTerminal={onOpenInTerminal}
+          onAddReference={addTreeReferenceToChat}
+          onAddFile={() => void addTreeFileToChat()}
+        />
       )}
       <ContextMenu
         open={Boolean(treeBlankMenuPoint)}

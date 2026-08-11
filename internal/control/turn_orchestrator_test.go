@@ -343,7 +343,7 @@ func (r *deliveryScopeErrorRunner) Run(ctx context.Context, _ string) error {
 	return &agent.FinalReadinessError{Attempts: 1, Reason: "missing verification", Missing: []string{"verification"}}
 }
 
-func TestGoalReadinessFailureContinuesThenPausesOnNoProgress(t *testing.T) {
+func TestGoalReadinessFailureContinuesThenPausesOnTurnBudget(t *testing.T) {
 	runner := &deliveryScopeErrorRunner{}
 	executor := agent.New(nil, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
 	c := New(Options{Runner: runner, Executor: executor})
@@ -351,16 +351,16 @@ func TestGoalReadinessFailureContinuesThenPausesOnNoProgress(t *testing.T) {
 
 	err := newTurnOrchestrator(c).runGoalLoopWithRawDisplay(context.Background(), "start", "start", "")
 	if err != nil {
-		t.Fatalf("run err = %v, want the loop to absorb FinalReadinessError and pause on no-progress", err)
+		t.Fatalf("run err = %v, want the loop to absorb FinalReadinessError and pause on the turn budget", err)
 	}
 	// The FSM absorbs the readiness failure and continues with the missing
-	// requirements; with no host-verifiable progress across turns the
-	// no-progress gate pauses the goal instead of looping forever.
+	// requirements; cross-turn no-progress remains observational and the outer
+	// continuation backstop eventually pauses the goal.
 	if got := c.GoalStatus(); got != GoalStatusBlocked {
-		t.Fatalf("GoalStatus = %q, want blocked (no-progress pause)", got)
+		t.Fatalf("GoalStatus = %q, want blocked (turn-budget pause)", got)
 	}
-	if rt := c.GoalRuntime(); rt.StopCause != stopCauseNoProgress {
-		t.Fatalf("stop cause = %q, want %q", rt.StopCause, stopCauseNoProgress)
+	if rt := c.GoalRuntime(); rt.StopCause != stopCauseBudgetTurns {
+		t.Fatalf("stop cause = %q, want %q", rt.StopCause, stopCauseBudgetTurns)
 	}
 	if len(runner.scopes) < 2 || runner.scopes[0].ID == "" || runner.scopes[0].TaskText != "ship the integration" {
 		t.Fatalf("delivery scopes = %+v, want scoped continuation turns", runner.scopes)

@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef } from "react";
 import { reasoningSummaryText } from "../lib/reasoningSummary";
-import { useReasoningSummaryEnabled } from "../lib/reasoningSummaryPreference";
+import { useReasoningDisplayMode } from "../lib/reasoningDisplayPreference";
 
 export const ReasoningSummary = memo(function ReasoningSummary({
   text,
@@ -15,7 +15,8 @@ export const ReasoningSummary = memo(function ReasoningSummary({
   onOpen?: () => void;
   maxChars?: number;
 }) {
-  const enabled = useReasoningSummaryEnabled();
+  const displayMode = useReasoningDisplayMode();
+  const enabled = displayMode === "summary" || displayMode === "auto";
   const summary = useMemo(() => enabled ? reasoningSummaryText(text, { streaming, maxChars }) : "", [enabled, text, streaming, maxChars]);
   const ref = useRef<HTMLElement>(null);
 

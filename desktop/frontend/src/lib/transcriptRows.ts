@@ -164,9 +164,10 @@ export interface TurnModel {
 // nothing is worse than no fold. Assistant items reach the fold stripped to
 // their reasoning (answer text renders outside), so reasoning presence is the
 // only thing that keeps them.
-function foldDisplayItems(items: readonly Item[], live: TranscriptLiveFlags): Item[] {
+function foldDisplayItems(items: readonly Item[], live: TranscriptLiveFlags, hideReasoning: boolean): Item[] {
   return items.filter((it) => {
     if (it.kind === "assistant") {
+      if (hideReasoning) return false;
       return Boolean(it.reasoning || (live.id === it.id && live.hasReasoning));
     }
     if (it.kind === "phase") return true;
@@ -193,6 +194,7 @@ export function buildTurnModels(
   items: readonly Item[],
   live: TranscriptLiveFlags = NO_LIVE,
   running = false,
+  hideReasoning = false,
 ): TurnModel[] {
   const turns: TurnModel[] = [];
   let currentUser: UserItem | undefined;
@@ -228,7 +230,7 @@ export function buildTurnModels(
     const turnHasOutsideContent = segments.some((segment) => segment.outsideItems.length > 0);
     model.segments = segments.map((segment, segmentIndex) => {
       const isLastSegment = segmentIndex === segments.length - 1;
-      const displayItems = foldDisplayItems(segment.processItems, live);
+      const displayItems = foldDisplayItems(segment.processItems, live, hideReasoning);
       const turnActive = model.isActive && isLastSegment;
       return {
         key: segment.processItems[0]?.id ?? "",
@@ -362,13 +364,21 @@ export function foldMapWithToggle(prev: FoldMap, key: string, currentlyOpen: boo
   return next;
 }
 
+/** Preserve an inner reasoning expansion when the enclosing process fold settles. */
+export function foldMapWithReasoningOpen(prev: FoldMap, key: string, running: boolean): Map<string, FoldEntry> {
+  const next = new Map(prev);
+  const entry = prev.get(key);
+  next.set(key, { open: true, userOverridden: true, running: entry?.running ?? running });
+  return next;
+}
+
 // ── Virtual rows ──────────────────────────────────────────────────────────────
 
 export type TranscriptRow =
   | { kind: "older-history"; key: string }
   | { kind: "user"; key: string; item: UserItem; turn: number | undefined }
   | { kind: "process-header"; key: string; segment: SegmentModel; open: boolean }
-  | { kind: "reasoning"; key: string; item: AssistantItem }
+  | { kind: "reasoning"; key: string; item: AssistantItem; segmentKey: string }
   | { kind: "tool"; key: string; item: ToolItem }
   | { kind: "tool-batch"; key: string; items: ToolItem[] }
   | { kind: "tool-group"; key: string; items: ToolItem[]; groupKind: ToolGroupKind }
@@ -442,7 +452,7 @@ function processBodyRows(segment: SegmentModel, creationMode: boolean): Transcri
       case "assistant":
         // Answer text renders outside the fold (partitionTurnItems strips it),
         // so the fold only ever shows the reasoning segment.
-        rows.push({ kind: "reasoning", key: `r:${it.id}`, item: it as AssistantItem });
+        rows.push({ kind: "reasoning", key: `r:${it.id}`, item: it as AssistantItem, segmentKey: segment.key });
         break;
     }
   }

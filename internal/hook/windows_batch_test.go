@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"reasonix/internal/pluginpkg"
 	"reasonix/internal/sandbox"
@@ -210,11 +211,15 @@ func TestDefaultSpawnerRunsCompoundCmdShellHook(t *testing.T) {
 }
 
 func TestDefaultSpawnerRunsPowerShellHookWithNestedQuotes(t *testing.T) {
+	// Cold PowerShell start under the Windows full suite (-p 4) can exceed the
+	// default 60s real-spawn budget when the runner is already hot from
+	// agent/boot/control packages. Keep the assertion, give the host longer.
+	timeout := max(realSpawnTimeout, 2*time.Minute)
 	result := DefaultSpawner(context.Background(), SpawnInput{
 		Command: `$items = @("a b", "c'd", 'e"f', "中文", "🧪"); Write-Output ($items -join "|")`,
 		Mode:    ExecutionShell,
 		Shell:   "powershell",
-		Timeout: realSpawnTimeout,
+		Timeout: timeout,
 	})
 	if result.ExitCode != 0 || result.SpawnErr != nil {
 		t.Fatalf("PowerShell hook failed: %+v", result)

@@ -107,6 +107,12 @@ const (
 	// host-local only — never persisted or sent to the model. Appended last to
 	// keep earlier Kind values wire-stable; older clients ignore unknown kinds.
 	StreamAttempt
+	// ContextMaintenance reports a free tool-result maintenance or a durable
+	// blocked/noop outcome. It is separate from CompactionStarted/Done so UIs do
+	// not render a paid-summary card for a cache-preserving view update.
+	ContextMaintenanceEvent
+	// WorkspaceChanged reports a debounced host-side workspace mutation.
+	WorkspaceChanged
 	// KindCount is a sentinel one past the last real Kind. New event kinds must
 	// be inserted above it so completeness tests cover them automatically.
 	KindCount
@@ -222,6 +228,10 @@ type Tool struct {
 	// Execution is optional local shell metadata (ToolResult). Never sent to
 	// model providers; omitempty keeps old wire readers compatible.
 	Execution *ShellExecution
+	// Workspace mutation metadata is host-only and is omitted from eventwire.
+	WorkspaceMutation bool
+	WorkspacePaths    []string
+	WorkspaceAllPaths bool
 }
 
 // ShellExecution mirrors tool.ShellExecution for event sinks without importing
@@ -412,6 +422,22 @@ type Compaction struct {
 	Archive  string // Done: path the dropped originals were archived to ("" if none)
 }
 
+// ContextMaintenance is the typed wire-safe receipt for snip/prune/noop/
+// blocked operations. Transcript bytes are represented by hashes and counts.
+type ContextMaintenance struct {
+	Status              string `json:"status,omitempty"`
+	Action              string `json:"action,omitempty"`
+	Trigger             string `json:"trigger,omitempty"`
+	OperationID         string `json:"operationId,omitempty"`
+	InputTokens         int    `json:"inputTokens,omitempty"`
+	ResultTokens        int    `json:"resultTokens,omitempty"`
+	SavedTokens         int    `json:"savedTokens,omitempty"`
+	AffectedToolResults int    `json:"affectedToolResults,omitempty"`
+	ProjectionVersion   uint64 `json:"projectionVersion,omitempty"`
+	CacheBreak          bool   `json:"cacheBreak,omitempty"`
+	Reason              string `json:"reason,omitempty"`
+}
+
 // GuardianResult carries the outcome of a guardian sub-agent safety review.
 // Emitted with Kind=GuardianAssessment after each review completes.
 type GuardianResult struct {
@@ -477,23 +503,23 @@ const (
 // wording edits in Go no longer silently break localization. Values are
 // wire-stable: never rename or reuse one once shipped.
 const (
-	NoticeCodeFinalReadiness                = "final_readiness"
-	NoticeCodeEmptyFinal                    = "empty_final"
-	NoticeCodeExecutorHandoff               = "executor_handoff"
-	NoticeCodeToolBudget                    = "tool_budget"
-	NoticeCodeLoopGuard                     = "loop_guard"
-	NoticeCodeProgressGuard                 = "progress_guard"
-	NoticeCodeEvidenceNudge                 = "evidence_nudge"
-	NoticeCodeReasoningGovernor             = "reasoning_governor"
-	NoticeCodeWorkspaceLease                = "workspace_lease"
-	NoticeCodeCancelledTurn                 = "cancelled_turn_display"
-	NoticeCodeUnappliedSteer                = "unapplied_steer"
-	NoticeCodeSessionRecoveryForked         = "session_recovery_forked"
-	NoticeCodeSessionRecoveryAdopted        = "session_recovery_adopted"
-	NoticeCodeSessionRecoveryAdoptedCovered = "session_recovery_adopted_covered"
-	NoticeCodeSessionRecoveryDepthCap       = "session_recovery_depth_cap"
-	NoticeCodeSessionShutdownRecoveryForked = "session_shutdown_recovery_forked"
-	NoticeCodeDecisionReceipt               = "decision_receipt"
+	NoticeCodeFinalReadiness                                    = "final_readiness"
+	NoticeCodeEmptyFinal                                        = "empty_final"
+	NoticeCodeExecutorHandoff                                   = "executor_handoff"
+	NoticeCodeToolBudget                                        = "tool_budget"
+	NoticeCodeLoopGuard                                         = "loop_guard"
+	NoticeCodeProgressGuard                                     = "progress_guard"
+	NoticeCodeEvidenceNudge                                     = "evidence_nudge"
+	NoticeCodeReasoningGovernor                                 = "reasoning_governor"
+	NoticeCodeWorkspaceLease                                    = "workspace_lease"
+	NoticeCodeCancelledTurn                                     = "cancelled_turn_display"
+	NoticeCodeUnappliedSteer                                    = "unapplied_steer"
+	NoticeCodeSessionRecoveryForked                             = "session_recovery_forked"
+	NoticeCodeSessionRecoveryAdopted                            = "session_recovery_adopted"
+	NoticeCodeSessionRecoveryAdoptedCovered                     = "session_recovery_adopted_covered"
+	NoticeCodeSessionRecoveryDepthCap                           = "session_recovery_depth_cap"
+	NoticeCodeSessionShutdownRecoveryForked                     = "session_shutdown_recovery_forked"
+	NoticeCodeDecisionReceipt, NoticeCodeContextEditingFallback = "decision_receipt", "context_editing_fallback"
 )
 
 type Event struct {
@@ -528,12 +554,47 @@ type Event struct {
 	Receipt         *CompletionReceipt       // TurnDone: what the host verified, and what it could not
 	CheckpointTurn  *int                     // TurnDone: authoritative checkpoint for this turn's visible user message
 	Compaction      Compaction               // Compaction
+	Maintenance     *ContextMaintenance      // ContextMaintenanceEvent
 	Guardian        GuardianResult
 	DecisionReceipt *provider.DecisionReceipt // Notice: durable user decision receipt
 	RetryAttempt    int                       // Retrying: 1-based attempt about to be made
 	RetryMax        int                       // Retrying: total attempts before giving up
 	RetryScope      RetryScope                // Retrying: optional "headers" | "stream"; empty for older emitters
 	StreamAttempt   StreamAttemptInfo         // StreamAttempt lifecycle
+	// ItemID correlates Steer / unapplied-steer / TurnDone with a durable
+	// session-inbox entry. Empty for legacy callers that still use text only.
+	ItemID    string
+	Workspace *WorkspaceChangedPayload // WorkspaceChanged (host-local)
+}
+
+type WorkspaceWatchState string
+
+const (
+	WorkspaceWatchActive      WorkspaceWatchState = "active"
+	WorkspaceWatchDegraded    WorkspaceWatchState = "degraded"
+	WorkspaceWatchUnavailable WorkspaceWatchState = "unavailable"
+)
+
+type WorkspaceRevision struct {
+	Content     uint64 `json:"content"`
+	Tree        uint64 `json:"tree"`
+	WorkingTree uint64 `json:"workingTree"`
+	GitMeta     uint64 `json:"gitMeta"`
+	Session     uint64 `json:"session"`
+}
+
+type WorkspacePathChange struct {
+	Path    string `json:"path"`
+	OldPath string `json:"oldPath,omitempty"`
+	Op      string `json:"op"`
+}
+
+type WorkspaceChangedPayload struct {
+	Revisions  WorkspaceRevision
+	Changes    []WorkspacePathChange
+	AllPaths   bool
+	Source     string
+	WatchState WorkspaceWatchState
 }
 
 // ReadinessAuditSink is an optional sink capability. Sinks that do not care

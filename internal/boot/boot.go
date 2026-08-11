@@ -120,14 +120,14 @@ type Options struct {
 	// so each tab loads its own config/skills/hooks without changing the process
 	// cwd — enabling concurrent multi-project sessions.
 	WorkspaceRoot string
-	// AutoPricingCurrency supplies a frontend-resolved pricing region when the
-	// persisted desktop currency and language settings are all automatic. It is
-	// applied to the in-memory config only and never turns Auto into a persisted
-	// CNY/USD choice.
+	// AutoPricingCurrency applies a frontend-resolved pricing region in memory
+	// without persisting an automatic choice.
 	AutoPricingCurrency string
-	// StatsSource labels this frontend's usage records (desktop/cli/serve).
-	// Empty disables usage recording for this controller.
+	// StatsSource labels usage records; empty disables usage recording.
 	StatsSource string
+	// OnConfigLoadWarnings accepts resilient-loader warnings. Returning true
+	// lets boot suppress the duplicate migration diagnostic.
+	OnConfigLoadWarnings func([]string) bool
 	// ExtraPlugins are session-scoped MCP servers supplied by a host transport
 	// (for example ACP session/new). They are connected eagerly for this
 	// controller but are not persisted to reasonix.toml.
@@ -219,18 +219,19 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	// One-time import of v1/v0.5 legacy config — runs before Load so the freshly
-	// written config + ~/.env are picked up this same boot. CLI Run also calls this
-	// before config-only commands; this call stays as the shared frontend fallback.
+	// Import v1/v0.5 config before Load so this boot sees the new config + ~/.env.
+	// CLI Run also calls this before config-only commands; keep a shared fallback.
 	migrated, migErr := config.MigrateLegacyIfNeededForRoot(root)
 	deepSeekProtocolMigrated, deepSeekProtocolMigErr := config.MigrateLegacyDeepSeekProtocolUserConfig()
 	stepLimitsMigrated, stepLimitMigErr := config.MigrateLegacyAgentStepLimitsForRoot(root)
 	redactToolOutputMigrated, redactToolOutputMigErr := config.MigrateLegacyRedactToolOutputForRoot(root)
 	memoryCompilerMigrated, memoryCompilerMigErr := config.MigrateLegacyMemoryCompilerForRoot(root)
+	multiThresholdMigrated, multiThresholdMigErr := config.MigrateLegacyMultiThresholdCompactionForRoot(root)
 	cfg, err := config.LoadForRoot(root)
 	if err != nil {
 		return nil, err
 	}
+	deepSeekProtocolMigErr = deepSeekProtocolMigrationNoticeError(handleConfigLoadWarnings(opts, cfg), deepSeekProtocolMigErr)
 	applyRuntimeAutoPricingCurrency(cfg, opts.AutoPricingCurrency)
 	// Arm the credential-protection layers from the user-global [secrets]
 	// section before any tool, hook, or plugin subprocess can spawn. Package
@@ -481,6 +482,17 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 			level = event.LevelWarn
 			text = "Deprecated memory_compiler setting was ignored."
 			detail += " The old key could not be removed: " + memoryCompilerMigErr.Error()
+		}
+		sink.Emit(event.Event{Kind: event.Notice, Level: level, Text: text, Detail: detail})
+	}
+	if multiThresholdMigrated || multiThresholdMigErr != nil {
+		level := event.LevelInfo
+		text := "上下文维护已简化为单一自动压缩阈值。"
+		detail := "Context maintenance now uses a single automatic compact_ratio (default 0.85). soft_compact_ratio, tool_result_snip_ratio, compact_force_ratio, cold_resume_prune, and context_editing were removed from config."
+		if multiThresholdMigErr != nil {
+			level = event.LevelWarn
+			text = "Deprecated multi-threshold compaction keys were ignored."
+			detail += " The old keys could not be removed: " + multiThresholdMigErr.Error()
 		}
 		sink.Emit(event.Event{Kind: event.Notice, Level: level, Text: text, Detail: detail})
 	}
@@ -1014,17 +1026,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		if !ok || sk.RunAs != skill.RunSubagent {
 			return agent.ProfileDefinition{}, false
 		}
-		sk = skillStore.Prepare(sk)
-		return agent.ProfileDefinition{
-			Name:         sk.Name,
-			Body:         sk.Body,
-			AllowedTools: sk.AllowedTools,
-			Model:        sk.Model,
-			Effort:       sk.Effort,
-			ReadOnly:     sk.ReadOnly,
-			Invocation:   sk.Invocation,
-			NamedBuiltin: agent.NamedBuiltinProfile(sk.Name),
-		}, true
+		return agent.ProfileFromSkill(skillStore.Prepare(sk)), true
 	}
 	profileConfigModel := func(profile string) string {
 		for _, key := range SubagentModelKeys(profile) {
@@ -1042,9 +1044,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		}
 		return ""
 	}
-	bashSandboxEnforced := func() bool {
-		return bashSpec.Enforce()
-	}
+	bashSandboxEnforced := bashSpec.Enforce
 	taskToolAdded := false
 	readOnlyTaskToolAdded := false
 	var taskTool *agent.TaskTool
@@ -1063,6 +1063,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 			ToolResultSnipRatio: cfg.Agent.ToolResultSnipRatio,
 			CompactRatio:        cfg.Agent.CompactRatio,
 			CompactForceRatio:   cfg.Agent.CompactForceRatio,
+			ContextEditing:      cfg.Agent.ContextEditing,
 			Temperature:         cfg.Agent.Temperature,
 			ArchiveDir:          config.ArchiveDir(),
 			SysPrompt:           "",
@@ -1206,6 +1207,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 			ToolResultSnipRatio: cfg.Agent.ToolResultSnipRatio,
 			CompactRatio:        cfg.Agent.CompactRatio,
 			CompactForceRatio:   cfg.Agent.CompactForceRatio,
+			ContextEditing:      cfg.Agent.ContextEditing,
 			ArchiveDir:          config.ArchiveDir(),
 			KeepPolicy:          keepPolicy,
 			ResponseLanguage:    agent.ResponseLanguageFromContext(sctx),
@@ -1538,7 +1540,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 			return "read_only_skill tool is already enabled.\n\n" + skill.ReadOnlyIndexBlock(skills)
 		}
 		readOnlySkillToolsAdded = true
-		reg.Add(skill.NewReadOnlySkillTool(skillStore, readOnlySkillRunner, skillProfile))
+		reg.Add(skill.NewReadOnlySkillTool(skillStore, gateSubagentArm(opts.Ablation, readOnlySkillRunner), skillProfile))
 		return "enabled read_only_skill. Use read_only_skill for inline skills or read-only subagent skills on the next model request.\n\n" + skill.ReadOnlyIndexBlock(skills)
 	}
 	skillToolsAdded := false
@@ -1551,10 +1553,10 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		}
 		skillToolsAdded = true
 		addReadOnlySkillTools()
-		reg.Add(skill.NewRunSkillTool(skillStore, skillRunner, skillProfile))
+		reg.Add(skill.NewRunSkillTool(skillStore, gateSubagentArm(opts.Ablation, skillRunner), skillProfile))
 		reg.Add(skill.NewReadSkillTool(skillStore))
 		reg.Add(skill.NewInstallSkillTool(skillStore, nil))
-		for _, t := range skill.BuiltinSubagentTools(skillStore, skillRunner, skillProfile) {
+		for _, t := range builtinSubagentTools(opts.Ablation, skillStore, skillRunner, skillProfile) {
 			reg.Add(t)
 		}
 		addSlashCommandTool(implicitSkillInvocation)
@@ -1812,6 +1814,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		MaxSteps:    maxSteps,
 		MaxStepsKey: opts.MaxStepsKey,
 		Temperature: cfg.Agent.Temperature,
+		TaskBudget:  taskBudgetFromConfig(cfg),
 		Pricing:     entry.Price,
 		ModelRef:    modelRef,
 		Gate:        headlessGate,
@@ -1832,6 +1835,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		ToolResultSnipRatio:          cfg.Agent.ToolResultSnipRatio,
 		CompactRatio:                 cfg.Agent.CompactRatio,
 		CompactForceRatio:            cfg.Agent.CompactForceRatio,
+		ContextEditing:               cfg.Agent.ContextEditing,
 		RecentKeep:                   cfg.Agent.RecentKeep,
 		ArchiveDir:                   config.ArchiveDir(),
 		KeepPolicy:                   keepPolicy,
@@ -1887,6 +1891,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 				ToolResultSnipRatio:          cfg.Agent.ToolResultSnipRatio,
 				CompactRatio:                 cfg.Agent.CompactRatio,
 				CompactForceRatio:            cfg.Agent.CompactForceRatio,
+				ContextEditing:               cfg.Agent.ContextEditing,
 				RecentKeep:                   cfg.Agent.RecentKeep,
 				ArchiveDir:                   config.ArchiveDir(),
 				KeepPolicy:                   keepPolicy,
