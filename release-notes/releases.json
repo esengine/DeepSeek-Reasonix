@@ -2,6 +2,240 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.24.1",
+      "date": "2026-08-11",
+      "channel": "stable",
+      "title": {
+        "en": "Reasonix Desktop v1.24.1",
+        "zh": "Reasonix Desktop v1.24.1"
+      },
+      "summary": {
+        "en": "Fixes recovery catalog and Windows startup regressions, and improves compaction to keep user constraints verbatim.",
+        "zh": "修复恢复会话目录与 Windows 启动回归问题，并改进压缩以逐字保留用户约束。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Configuration Paths",
+            "zh": "配置路径"
+          },
+          "body": {
+            "en": "Learn about configuration file locations and overrides.",
+            "zh": "了解配置文件位置和覆盖方式。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/6382d24ee149f5054f76070789fa9dd52a46ed6d/docs/CONFIG_PATHS.md"
+        },
+        {
+          "title": {
+            "en": "配置路径",
+            "zh": "配置路径"
+          },
+          "body": {
+            "en": "了解配置文件位置和覆盖方式。",
+            "zh": "了解配置文件位置和覆盖方式。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/6382d24ee149f5054f76070789fa9dd52a46ed6d/docs/CONFIG_PATHS.zh-CN.md"
+        },
+        {
+          "title": {
+            "en": "Session Catalog",
+            "zh": "会话目录"
+          },
+          "body": {
+            "en": "Understand the session catalog and recovery copy management.",
+            "zh": "了解会话目录和恢复副本管理。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/6382d24ee149f5054f76070789fa9dd52a46ed6d/docs/SESSION_CATALOG.md"
+        },
+        {
+          "title": {
+            "en": "会话目录",
+            "zh": "会话目录"
+          },
+          "body": {
+            "en": "了解会话目录和恢复副本管理。",
+            "zh": "了解会话目录和恢复副本管理。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/6382d24ee149f5054f76070789fa9dd52a46ed6d/docs/SESSION_CATALOG.zh-CN.md"
+        },
+        {
+          "title": {
+            "en": "Specification",
+            "zh": "规范"
+          },
+          "body": {
+            "en": "Read the full specification for compaction and retention.",
+            "zh": "阅读压缩和保留的完整规范。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/6382d24ee149f5054f76070789fa9dd52a46ed6d/docs/SPEC.md"
+        },
+        {
+          "title": {
+            "en": "规范",
+            "zh": "规范"
+          },
+          "body": {
+            "en": "阅读压缩和保留的完整规范。",
+            "zh": "阅读压缩和保留的完整规范。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/6382d24ee149f5054f76070789fa9dd52a46ed6d/docs/SPEC.zh-CN.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Windows startup no longer flashes console windows",
+            "zh": "Windows 启动不再闪现控制台窗口"
+          },
+          "body": {
+            "en": "Git probes during cold start now use the hardened command wrapper, preventing `git.exe` console windows from appearing.",
+            "zh": "冷启动期间的 Git 探测现在使用加固的命令包装器，防止出现 `git.exe` 控制台窗口。"
+          },
+          "refs": [
+            8425
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Recovery copies are correctly classified in the session catalog",
+            "zh": "恢复副本在会话目录中正确分类"
+          },
+          "body": {
+            "en": "Recovery branches now carry the `RecoveryCopy` flag, preventing duplicate-looking sessions and enabling safe cleanup.",
+            "zh": "恢复分支现在带有 `RecoveryCopy` 标志，防止出现重复会话并支持安全清理。"
+          },
+          "refs": [
+            8425
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Compaction keeps user constraints verbatim",
+            "zh": "压缩逐字保留用户约束"
+          },
+          "body": {
+            "en": "User turns in the fold region are now retained verbatim within a budget, ensuring constraints like API compatibility are not lost during summarization.",
+            "zh": "折叠区域中的用户轮次现在在预算内逐字保留，确保 API 兼容性等约束在摘要过程中不会丢失。"
+          },
+          "refs": [
+            8419
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Compaction reports when retention budget is exceeded",
+            "zh": "压缩报告保留预算超出情况"
+          },
+          "body": {
+            "en": "Telemetry now includes `user_kept` and `user_dropped` counts, and a warning is emitted when a turn must be dropped, guiding use of `[[keep]]`.",
+            "zh": "遥测现在包含 `user_kept` 和 `user_dropped` 计数，并在必须丢弃轮次时发出警告，指导使用 `[[keep]]`。"
+          },
+          "refs": [
+            8424
+          ]
+        }
+      ],
+      "changes": {
+        "new": [],
+        "improved": [
+          {
+            "title": {
+              "en": "Compaction retains user turns within a budget",
+              "zh": "压缩在预算内保留用户轮次"
+            },
+            "body": {
+              "en": "All user turns in the fold region are now kept verbatim up to a token budget, preventing loss of stated constraints.",
+              "zh": "折叠区域中的所有用户轮次现在在令牌预算内逐字保留，防止丢失声明的约束。"
+            },
+            "refs": [
+              8419
+            ]
+          },
+          {
+            "title": {
+              "en": "Compaction telemetry reports retention outcomes",
+              "zh": "压缩遥测报告保留结果"
+            },
+            "body": {
+              "en": "Compaction now reports how many user turns were kept or dropped, and warns when a turn exceeds the budget.",
+              "zh": "压缩现在报告保留或丢弃的用户轮次数量，并在轮次超出预算时发出警告。"
+            },
+            "refs": [
+              8424
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Windows startup console flash",
+              "zh": "Windows 启动控制台闪现"
+            },
+            "body": {
+              "en": "Git probes now use the hardened command wrapper, eliminating `git.exe` console windows on cold start.",
+              "zh": "Git 探测现在使用加固的命令包装器，消除冷启动时的 `git.exe` 控制台窗口。"
+            },
+            "refs": [
+              8425
+            ]
+          },
+          {
+            "title": {
+              "en": "Recovery copy classification in session catalog",
+              "zh": "会话目录中的恢复副本分类"
+            },
+            "body": {
+              "en": "Recovery branches are now correctly marked as `RecoveryCopy`, preventing clutter and enabling safe cleanup.",
+              "zh": "恢复分支现在正确标记为 `RecoveryCopy`，防止混乱并支持安全清理。"
+            },
+            "refs": [
+              8425
+            ]
+          },
+          {
+            "title": {
+              "en": "Recovery copy double-counting and cleanup race",
+              "zh": "恢复副本重复计数和清理竞争"
+            },
+            "body": {
+              "en": "Adopted recovery turns are no longer double-counted, and cleanup now atomically guards against concurrent access.",
+              "zh": "采用的恢复轮次不再重复计数，清理现在原子性地防止并发访问。"
+            },
+            "refs": [
+              8425
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "esengine"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.24.1",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.24.0...desktop-v1.24.1",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.24.1",
+      "baseVersion": "1.24.1",
+      "status": "reviewed",
+      "previousRelease": "1.24.0",
+      "builds": {
+        "cli": "v1.24.1",
+        "desktop": "v1.24.1",
+        "npm": "1.24.1"
+      }
+    },
+    {
       "version": "1.24.0",
       "date": "2026-08-11",
       "channel": "stable",
