@@ -1,6 +1,5 @@
-// useController is the frontend's state machine over the agent event stream. Per-tab
-// state preserves background streaming output, tools, and approvals across tab switches;
-// components render only the active tab's state.
+// useController is the frontend's state machine over the agent event stream,
+// keeping per-tab streaming, tool, and approval state across tab switches.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { asArray } from "./array";
@@ -11,9 +10,9 @@ import { formatInboxCancelError, inboxSteerQueuedMessage } from "./inboxError";
 import { formatContextMaintenanceNotice, isNewMaintenanceOperation, rememberMaintenanceOperation } from "./contextMaintenanceTypes";
 import { formatGuardianAssessmentNotice } from "./guardianEvents";
 import { invalidateSharedQuery } from "./queryCoalesce";
-import { createRafBatch } from "./rafBatch";
+import { classifyWireEvent, createProgressBatch, createTextBatch, flushOnTypeSwitch, shouldSkipBackgroundBump } from "./wireEventBatching";
 import { aliasActivationRequest, noteActivationRequested, noteActivationSettled, noteActivationStarted } from "./sessionDiagnostics";
-import { applyLiveSegments, coalesceStreamDeltas, completeLiveReasoning, type StreamDeltaEntry, type StreamSegment } from "./streamDeltaBatch";
+import { applyLiveSegments, completeLiveReasoning, type StreamSegment } from "./streamDeltaBatch";
 import { getTranscriptStore } from "./transcriptStore";
 import { uiPerfTracker } from "./uiPerf";
 import { getLocale, t, type DictKey } from "./i18n";
@@ -2673,10 +2672,11 @@ export function useController() {
         prev.pendingUser === next.pendingUser &&
         prev.retry === next.retry;
       // Text/reasoning-only deltas only update the live stream — which the
-      // frontend reads through its own subscription — so they must not bump the
-      // full controller tree (the run-strip TPS estimate subscribes to the live
-      // stream directly and updates itself).
-      if (!streamDeltaOnly) bump();
+      // frontend reads through its own subscription — so they must not bump
+      // the full controller tree (the TPS estimate subscribes to the stream).
+      if (!streamDeltaOnly && !shouldSkipBackgroundBump(tabId, activeTabIdRef.current, action)) {
+        bump();
+      }
     }
   }, [bump, notifyLiveListeners]);
   const clearBalanceForTab = useCallback((tabId: string): void => {
@@ -3357,10 +3357,8 @@ export function useController() {
   }, [dispatchTo, ensureTranscriptSubscription, isNavigationIntentCurrent, loadSessionDataForTab, reconcileTabRuntime]);
 
   useEffect(() => {
-    const textBatch = createRafBatch<StreamDeltaEntry>((batch) => {
-      uiPerfTracker.onStreamDispatch();
-      for (const b of coalesceStreamDeltas(batch)) dispatchTo(b.tabId, { type: "stream_batch", segments: b.segments });
-    });
+    const textBatch = createTextBatch(dispatchTo);
+    const progressBatch = createProgressBatch(dispatchTo);
     const off = onEvent((e) => {
       // Untagged compatibility events belong to the tab that the backend has
       // actually activated, not the frontend's optimistic selection. During a
@@ -3375,11 +3373,13 @@ export function useController() {
       }
       uiPerfTracker.onWireEvent(targetTabId, e.kind);
       if (TURN_ACTIVITY_KINDS.has(e.kind)) lastTurnActivityAtByTab.current.set(targetTabId, Date.now());
-      if (e.kind === "text" || e.kind === "reasoning") {
+      const batchKind = flushOnTypeSwitch(classifyWireEvent(e), textBatch, progressBatch);
+      if (batchKind === "text") {
         if (e.submissionId) dispatchTo(targetTabId, { type: "send_confirmed", submissionId: e.submissionId });
         textBatch.push({ tabId: targetTabId, e });
+      } else if (batchKind === "progress") {
+        progressBatch.push({ tabId: targetTabId, e });
       } else {
-        textBatch.drain();
         dispatchTo(targetTabId, { type: "event", e });
       }
       if (e.kind === "turn_done" || e.kind === "context_maintenance") {
