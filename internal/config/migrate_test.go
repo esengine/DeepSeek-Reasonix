@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // legacyHome points HOME / config-dir / .env resolution at a fresh temp tree and
@@ -805,6 +806,24 @@ func TestMigrateLegacyCredentialsSkipsKeyringWhenIsolated(t *testing.T) {
 	}
 	if _, err := os.Stat(UserCredentialsPath()); !os.IsNotExist(err) {
 		t.Fatalf("isolated runtime imported legacy credentials to %s; stat err=%v", UserCredentialsPath(), err)
+	}
+}
+
+func TestLegacyKeyringLookupSkipsWithoutSessionBus(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Secret Service lookup is Linux-specific")
+	}
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "")
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = legacyKeyringCredentialValue("DEEPSEEK_API_KEY")
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("legacy keyring lookup did not return without a session bus")
 	}
 }
 
