@@ -26,4 +26,8 @@ type runLoopState struct {
 	executorHandoff bool
 	input           string
 	workDurationMs  func() int64
+
+	// budget is the turn's spend axis: tokens, money, wall clock. Observed
+	// every round, read by nothing yet.
+	budget runBudget
 }
