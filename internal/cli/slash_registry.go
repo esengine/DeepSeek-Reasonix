@@ -38,6 +38,7 @@ func builtinSlashSpecs() []builtinSlashSpec {
 		{name: "/plugins", aliases: []string{"/plugin"}, insert: "/plugins", hint: i18n.M.CmdPlugins, showInHelp: true},
 		{name: "/model", insert: "/model", hint: i18n.M.CmdModel, descend: true, showInHelp: true},
 		{name: "/status", insert: "/status", hint: i18n.M.CmdStatus, showInHelp: true},
+		{name: "/version", insert: "/version", hint: i18n.M.CmdVersion, showInHelp: true},
 		{name: "/preset", aliases: []string{"/work-mode", "/profile"}, insert: "/preset ", hint: i18n.M.CmdWorkMode, descend: true, showInHelp: true},
 		{name: "/provider", insert: "/provider", hint: i18n.M.CmdProvider, descend: true, showInHelp: true},
 		{name: "/skills", aliases: []string{"/skill"}, insert: "/skills", hint: i18n.M.CmdSkill, showInHelp: true},

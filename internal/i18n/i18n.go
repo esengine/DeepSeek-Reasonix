@@ -241,6 +241,7 @@ type Messages struct {
 	CmdRename           string // /rename
 	CmdModel            string // /model
 	CmdStatus           string // /status
+	CmdVersion          string // /version
 	CmdWorkMode         string // /work-mode
 	CmdDocs             string // /docs
 	CmdMemory           string // /memory
