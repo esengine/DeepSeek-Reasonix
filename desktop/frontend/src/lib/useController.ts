@@ -12,6 +12,7 @@ import { formatContextMaintenanceNotice, isNewMaintenanceOperation, rememberMain
 import { formatGuardianAssessmentNotice } from "./guardianEvents";
 import { invalidateSharedQuery } from "./queryCoalesce";
 import { createRafBatch } from "./rafBatch";
+import { classifyWireEvent, isBackgroundStreamingAction } from "./wireEventBatching";
 import { aliasActivationRequest, noteActivationRequested, noteActivationSettled, noteActivationStarted } from "./sessionDiagnostics";
 import { applyLiveSegments, coalesceStreamDeltas, completeLiveReasoning, type StreamDeltaEntry, type StreamSegment } from "./streamDeltaBatch";
 import { getTranscriptStore } from "./transcriptStore";
@@ -2674,8 +2675,13 @@ export function useController() {
       // Text/reasoning-only deltas only update the live stream — which the
       // frontend reads through its own subscription — so they must not bump the
       // full controller tree (the run-strip TPS estimate subscribes to the live
-      // stream directly and updates itself).
-      if (!streamDeltaOnly) bump();
+      // stream directly and updates itself). The same applies to pure streaming
+      // deltas (text/reasoning/progress) landing on a background tab: its state
+      // updates for when it becomes active again, but the visible tree must not
+      // re-render N times per frame for N background sessions.
+      if (!streamDeltaOnly && !(tabId !== activeTabIdRef.current && isBackgroundStreamingAction(action))) {
+        bump();
+      }
     }
   }, [bump, notifyLiveListeners]);
   const clearBalanceForTab = useCallback((tabId: string): void => {
@@ -3360,6 +3366,13 @@ export function useController() {
       uiPerfTracker.onStreamDispatch();
       for (const b of coalesceStreamDeltas(batch)) dispatchTo(b.tabId, { type: "stream_batch", segments: b.segments });
     });
+    // Pure progress deltas (tool output chunks, subagent previews) coalesce
+    // into the same animation-frame budget: a frame's worth of chunks becomes
+    // one dispatch pass, and React 18 auto-batching turns that into one commit
+    // per frame instead of one full-tree re-render per chunk.
+    const progressBatch = createRafBatch<{ tabId: string; e: WireEvent }>((batch) => {
+      for (const { tabId, e } of batch) dispatchTo(tabId, { type: "event", e });
+    });
     const off = onEvent((e) => {
       // Untagged compatibility events belong to the tab that the backend has
       // actually activated, not the frontend's optimistic selection. During a
@@ -3374,11 +3387,15 @@ export function useController() {
       }
       uiPerfTracker.onWireEvent(targetTabId, e.kind);
       if (TURN_ACTIVITY_KINDS.has(e.kind)) lastTurnActivityAtByTab.current.set(targetTabId, Date.now());
-      if (e.kind === "text" || e.kind === "reasoning") {
+      const batchKind = classifyWireEvent(e);
+      if (batchKind === "text") {
         if (e.submissionId) dispatchTo(targetTabId, { type: "send_confirmed", submissionId: e.submissionId });
         textBatch.push({ tabId: targetTabId, e });
+      } else if (batchKind === "progress") {
+        progressBatch.push({ tabId: targetTabId, e });
       } else {
         textBatch.drain();
+        progressBatch.drain();
         dispatchTo(targetTabId, { type: "event", e });
       }
       if (e.kind === "turn_done" || e.kind === "context_maintenance") {
