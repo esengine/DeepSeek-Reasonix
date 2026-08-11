@@ -208,7 +208,11 @@ func truncateRunes(s string, max int) string {
 }
 
 // modelFromPath extracts the model name from a session file path.
-// Filename format: "20060102-150405.000000000-model-name.jsonl"
+// Filename formats:
+//   - legacy: "20060102-150405.000000000-model-name.jsonl"
+//   - current: "20060102-150405.000000000.<nonce>-model-name.jsonl"
+//
+// Both keep the model after the second '-' separator.
 func modelFromPath(path string) string {
 	name := filepath.Base(path)
 	name = strings.TrimSuffix(name, ".jsonl")

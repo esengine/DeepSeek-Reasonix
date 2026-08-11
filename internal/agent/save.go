@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -2254,13 +2255,32 @@ func ContinueSessionPath(prevPath, dir, model string) string {
 	return NewSessionPath(dir, model)
 }
 
+var sessionPathSequence atomic.Uint64
+
+func newSessionPathNonce() string {
+	sequence := sessionPathSequence.Add(1)
+	var nonce [8]byte
+	if _, err := rand.Read(nonce[:]); err == nil {
+		return hex.EncodeToString(nonce[:])
+	}
+	// crypto/rand failures must not collapse concurrent callers back onto the
+	// coarse platform clock. The process-unique writer identity plus a monotonic
+	// sequence preserves uniqueness without weakening session persistence.
+	digest := sha256.Sum256([]byte(fmt.Sprintf("%s-%d", SessionWriterID(), sequence)))
+	return hex.EncodeToString(digest[:8])
+}
+
 // NewSessionPath returns the path to use for a fresh session, namespaced by
-// the model so the filename hints at what the conversation was with. dir is
-// typically config.SessionDir().
+// the model so the filename hints at what the conversation was with. A random
+// nonce follows the timestamp because Windows' clock can return the same
+// nanosecond text to many concurrent callers; timestamp-only names exhausted
+// desktop's O_EXCL retries and could route two controller builds to one path
+// (#8372). Placing the nonce before the model preserves legacy model parsing.
+// dir is typically config.SessionDir().
 func NewSessionPath(dir, model string) string {
 	safe := strings.NewReplacer("/", "-", "\\", "-", ":", "-", "<", "-", ">", "-", "\"", "-", "|", "-", "?", "-", "*", "-").Replace(model)
 	if safe == "" {
 		safe = "session"
 	}
-	return filepath.Join(dir, fmt.Sprintf("%s-%s.jsonl", time.Now().UTC().Format("20060102-150405.000000000"), safe))
+	return filepath.Join(dir, fmt.Sprintf("%s.%s-%s.jsonl", time.Now().UTC().Format("20060102-150405.000000000"), newSessionPathNonce(), safe))
 }

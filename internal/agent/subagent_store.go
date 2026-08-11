@@ -327,7 +327,10 @@ func (s *SubagentStore) CleanupStaleRunning() (int, error) {
 	cleaned := 0
 	for _, parentID := range parentIDs {
 		parent := parents[parentID]
-		if s.parentSessionProbe != nil && s.parentSessionProbe(parent.sessionPath) {
+		parentLive := func() bool {
+			return s.parentSessionProbe != nil && s.parentSessionProbe(parent.sessionPath)
+		}
+		if parentLive() {
 			continue
 		}
 		lease, err := TryAcquireSessionLease(parent.sessionPath)
@@ -337,9 +340,23 @@ func (s *SubagentStore) CleanupStaleRunning() (int, error) {
 		if err != nil {
 			return cleaned, fmt.Errorf("acquire parent session lease %q: %w", parentID, err)
 		}
+		// The parent can become live after the optimistic pre-lease probe but
+		// before this cleanup acquires the durable lease. Re-check while holding
+		// the lease so a newly-published desktop runtime wins the handoff instead
+		// of seeing a spurious ErrSessionLeaseHeld during startup (#8372).
+		if parentLive() {
+			lease.Release()
+			continue
+		}
 		for _, ref := range parent.refs {
 			if s.cleanupBeforeReread != nil {
 				s.cleanupBeforeReread(parentID, ref)
+			}
+			// Large parent groups can take longer than the desktop's bounded lease
+			// retry window. Stop before each metadata rewrite if the parent became
+			// live while earlier entries were being inspected.
+			if parentLive() {
+				break
 			}
 			// Re-read after acquiring the parent lease: the former owner may
 			// have completed the child between the initial scan and handoff.
@@ -353,6 +370,12 @@ func (s *SubagentStore) CleanupStaleRunning() (int, error) {
 			}
 			if meta.Status != SubagentRunning || strings.TrimSpace(meta.ParentSession) != parentID {
 				continue
+			}
+			// Loading metadata can involve filesystem and decoder work. Check once
+			// more immediately before the lifecycle rewrite so a tab published
+			// during that read is not interrupted as stale.
+			if parentLive() {
+				break
 			}
 			meta.Status = SubagentInterrupted
 			meta.UpdatedAt = now
