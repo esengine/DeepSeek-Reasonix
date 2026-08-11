@@ -272,6 +272,11 @@ when the sole automatic threshold is crossed.
   `reasonix config compact-ratio [--local] [VALUE]`. Project config overrides the
   user-global value used by desktop and new CLI sessions. UI always shows the
   **effective** ratio.
+- Resuming a session whose estimated prompt already exceeds `triggerTokens`
+  would run the cleanup pass on the first turn after restore. The desktop
+  history UI estimates the session from a read-only preview and asks for
+  confirmation **before** the restore, so cancelling leaves the session
+  untouched.
 - `max_output_tokens` is an independent **per-turn** completion ceiling.
   Recommended: `0` (**automatic**, not unlimited; DeepSeek default high → ~64K).
   User presets: `32768` ordinary coding / cost control, `65536` heavy reasoning /

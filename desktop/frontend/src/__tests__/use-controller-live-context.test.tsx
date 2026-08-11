@@ -624,6 +624,39 @@ ok(
   "failed close preserves model balance reconciliation",
 );
 
+{
+  // Compaction rewrites the session: the gauge must follow the collapsed
+  // usage immediately, even when no turn_done snapshot follows. The refresh
+  // itself invalidates the coalesced balance query, so no manual share drop
+  // is needed here.
+  const beforeCalls = contextCalls;
+  const beforeBalanceCalls = balanceCalls;
+  backendContext = {
+    used: 120,
+    window: 1_000,
+    sessionTokens: 130,
+    cacheHitTokens: 0,
+    cacheMissTokens: 120,
+  };
+  backendBalance = { available: true, display: "¥80.00" };
+  await act(async () => {
+    for (const handler of eventHandlers) {
+      handler({
+        kind: "compaction_done",
+        tabId: "tab-live-context",
+        compaction: { trigger: "auto", messages: 5, summary: "collapsed" },
+      });
+    }
+    await flushPromises();
+  });
+  ok(
+    await settleUntil(() => controller?.state.context.used === 120),
+    "compaction_done refreshes context usage immediately",
+  );
+  ok(contextCalls > beforeCalls, "compaction_done triggers a new ContextUsageForTab snapshot");
+  ok(balanceCalls > beforeBalanceCalls, "compaction_done also refreshes balance");
+}
+
 await act(async () => {
   root.unmount();
 });
