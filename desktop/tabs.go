@@ -1550,6 +1550,10 @@ type tabEventSink struct {
 	botSink       event.Sink // optional: when set, events are also forwarded here
 	botSinkGen    uint64
 	turn          turnSubmissionState // stays reserved through the end of TurnDone fan-out
+	// webviewCoalescer merges per-chunk text/reasoning deltas before the Wails
+	// webview channel (see tab_stream_coalescer.go). nil keeps the legacy
+	// per-event emission (used by tests constructing bare sinks).
+	webviewCoalescer *webviewStreamCoalescer
 }
 
 type closeableEventSink interface {
@@ -1557,6 +1561,15 @@ type closeableEventSink interface {
 }
 
 // binding snapshots the sink's current tab routing under the sink lock.
+// newTabEventSink builds a tab sink whose webview coalescer reads the sink's
+// own context (set later via setContext when the tab activates) so merged
+// events only emit while the tab runtime is live.
+func (a *App) newTabEventSink(tabID string) *tabEventSink {
+	s := &tabEventSink{tabID: tabID, app: a}
+	s.webviewCoalescer = newWebviewStreamCoalescer(s.context, nil)
+	return s
+}
+
 func (s *tabEventSink) binding() (string, *App) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1608,7 +1621,13 @@ func (s *tabEventSink) Emit(e event.Event) {
 			s.flushDisplay(e.Cancelled)
 		}
 	}
-	s.emitRuntimeEvent(eventChannel, toWireTabWithSubmission(e, tabID, s.runtimeEpochSnapshot(), s.submissionIDSnapshot()))
+	epoch := s.runtimeEpochSnapshot()
+	submissionID := s.submissionIDSnapshot()
+	if s.webviewCoalescer != nil {
+		s.webviewCoalescer.Push(e, tabID, epoch, submissionID)
+	} else {
+		s.emitRuntimeEvent(eventChannel, toWireTabWithSubmission(e, tabID, epoch, submissionID))
+	}
 	if app != nil {
 		if status, update := topicActivityStatusFromEvent(e); update {
 			changed := app.setTabActivityStatus(tabID, status)
@@ -2470,7 +2489,7 @@ func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionP
 		disabledMCP:      map[string]ServerView{},
 	}
 	applyTabSessionProfile(tab, profile)
-	tab.sink = &tabEventSink{tabID: tabID, app: a}
+	tab.sink = a.newTabEventSink(tabID)
 
 	a.tabs[tabID] = tab
 	a.tabOrder = append(a.tabOrder, tabID)
@@ -2725,7 +2744,7 @@ func (a *App) ensureBlankTab(scope, workspaceRoot, forcedTokenMode string) (TabM
 			disabledMCP:      inheritedDisabledMCP,
 			mcpOrder:         inheritedMCPOrder,
 		}
-		created.sink = &tabEventSink{tabID: tabID, app: a}
+		created.sink = a.newTabEventSink(tabID)
 		a.tabs[tabID] = created
 		a.tabOrder = append(a.tabOrder, tabID)
 		a.activeTabID = tabID
@@ -2781,7 +2800,7 @@ func (a *App) ensureBlankTab(scope, workspaceRoot, forcedTokenMode string) (TabM
 		disabledMCP:      inheritedDisabledMCP,
 		mcpOrder:         inheritedMCPOrder,
 	}
-	created.sink = &tabEventSink{tabID: tabID, app: a}
+	created.sink = a.newTabEventSink(tabID)
 	a.tabs[tabID] = created
 	a.tabOrder = append(a.tabOrder, tabID)
 	a.activeTabID = tabID
@@ -3271,6 +3290,11 @@ func (a *App) closeTab(tabID string, allowDetach bool) error {
 	closeCtrl := tab.Ctrl
 	closeSink := tab.sink
 	a.mu.Unlock()
+	// Drain the webview coalescer so the final ≤16ms of streamed text is not
+	// silently dropped when the tab closes (the sink's timer may never fire).
+	if closeSink != nil && closeSink.webviewCoalescer != nil {
+		closeSink.webviewCoalescer.Flush()
+	}
 	if a.workspaceHub != nil {
 		a.workspaceHub.reconcileRoots()
 	}
