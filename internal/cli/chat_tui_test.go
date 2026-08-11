@@ -305,6 +305,9 @@ func TestCompletionMenuPadsWithNonBreakingSpaces(t *testing.T) {
 func TestTranscriptViewportSizing(t *testing.T) {
 	ctrl := control.New(control.Options{})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	// Pin the working directory so the bottom region stays at the documented
+	// 4 rows (input 1 + border 2 + status 1) regardless of where the suite runs.
+	m.cwd = ""
 
 	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = m0.(chatTUI)
@@ -331,6 +334,10 @@ func TestTranscriptViewportSizing(t *testing.T) {
 func TestStatusLineWrapAccounting(t *testing.T) {
 	ctrl := control.New(control.Options{})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 30)
+	// Pin the working directory so the wrap accounting is deterministic
+	// regardless of where the test suite runs (the real cwd would otherwise
+	// shift the status block by an environment-dependent number of rows).
+	m.cwd = ""
 
 	// Narrow terminal: mode+state line and data line will both wrap.
 	m0, _ := m.Update(tea.WindowSizeMsg{Width: 30, Height: 12})

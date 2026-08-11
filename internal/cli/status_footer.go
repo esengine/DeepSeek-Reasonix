@@ -372,29 +372,65 @@ func (m chatTUI) layoutGitTelemetry(width int) string {
 	telemetryGroups := m.statusTelemetryGroups()
 	telemetry := strings.Join(telemetryGroups, "  ")
 	hasGit := strings.TrimSpace(m.gitStatus.Repo) != "" && strings.TrimSpace(m.gitStatus.Branch) != ""
-	if !hasGit {
-		// Without a Git identity there is no left-hand peer to balance. Keep the
-		// telemetry anchored to the normal footer indent instead of leaving a
-		// repo-sized visual hole across most of a wide terminal.
+	if !hasGit && m.cwd == "" {
+		// Without a working directory or Git identity there is no left-hand
+		// peer to balance. Keep the telemetry anchored to the normal footer
+		// indent instead of leaving a repo-sized visual hole across most of a
+		// wide terminal.
 		return packStatusGroups(telemetryGroups, width)
 	}
 
-	fullGitBudget := max(width-visibleWidth(statusFooterIndent), 1)
-	git := m.gitStatus.RenderWithin(fullGitBudget, activeCLITheme.warn)
-	gitLine := statusFooterIndent + git
+	fullBudget := max(width-visibleWidth(statusFooterIndent), 1)
+	identity := m.identityLine(fullBudget)
+	if identity == "" {
+		return packStatusGroups(telemetryGroups, width)
+	}
+	identityLine := statusFooterIndent + identity
 	if telemetry == "" {
-		return gitLine
+		return identityLine
 	}
 
 	telemetryWidth := visibleWidth(telemetry)
-	if visibleWidth(gitLine)+statusFooterGroupGap+telemetryWidth <= width {
-		return gitLine + strings.Repeat(" ", width-visibleWidth(gitLine)-telemetryWidth) + telemetry
+	if visibleWidth(identityLine)+statusFooterGroupGap+telemetryWidth <= width {
+		return identityLine + strings.Repeat(" ", width-visibleWidth(identityLine)-telemetryWidth) + telemetry
 	}
 
-	// Under width pressure Git gets its own full row instead of being shortened
-	// merely to keep telemetry beside it. Telemetry then packs left-to-right by
-	// semantic group, so no right-aligned fragment floats on a continuation row.
-	return gitLine + "\n" + packStatusGroups(telemetryGroups, width)
+	// Under width pressure the identity row keeps its own full row instead of
+	// being shortened merely to keep telemetry beside it. Telemetry then packs
+	// left-to-right by semantic group, so no right-aligned fragment floats on a
+	// continuation row.
+	return identityLine + "\n" + packStatusGroups(telemetryGroups, width)
+}
+
+// identityLine renders the left-hand identity of the status data band: the
+// session working directory followed by the Git repo@branch. The path owns the
+// flexible slot — it is home-shortened and compacted before the branch so the
+// repo identity survives width pressure. Empty when there is neither a cwd nor
+// a Git identity.
+func (m chatTUI) identityLine(maxWidth int) string {
+	hasGit := strings.TrimSpace(m.gitStatus.Repo) != "" && strings.TrimSpace(m.gitStatus.Branch) != ""
+	git := ""
+	if hasGit {
+		git = m.gitStatus.RenderWithin(maxWidth, activeCLITheme.warn)
+	}
+	if m.cwd == "" {
+		return git
+	}
+	path := displayPath(m.cwd)
+	sep := ""
+	if git != "" {
+		sep = footerHint(" · ")
+	}
+	if visibleWidth(path+sep+git) <= maxWidth {
+		return footerValue(path) + sep + git
+	}
+	// The path yields first: compact it to whatever the branch leaves over.
+	pathBudget := maxWidth - visibleWidth(git) - visibleWidth(sep)
+	if pathBudget >= 4 {
+		return footerValue(compactMiddle(path, pathBudget)) + sep + git
+	}
+	// Not even a path stub fits beside the branch; keep the repo identity alone.
+	return git
 }
 
 func packStatusGroups(groups []string, width int) string {

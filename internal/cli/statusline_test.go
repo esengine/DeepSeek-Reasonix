@@ -247,6 +247,9 @@ func TestStatuslineShowsWorkModeAndBalanceInPersistentFooter(t *testing.T) {
 
 	ctrl := control.New(control.Options{})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 120)
+	// The layout tests pin the working directory so the footer geometry is
+	// deterministic regardless of where the test suite runs.
+	m.cwd = ""
 	m.label = "deepseek-v4-flash"
 	m.runtimeProfile = "delivery"
 	m.balance = "¥12.34"
@@ -329,6 +332,9 @@ func renderStatuslineViewWithEffort(t *testing.T, effort string) string {
 
 	ctrl := control.New(control.Options{})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 120)
+	// The layout tests pin the working directory so the footer geometry is
+	// deterministic regardless of where the test suite runs.
+	m.cwd = ""
 	m.label = "deepseek-v4-flash"
 	m.effortLevel = effort
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
@@ -340,6 +346,9 @@ func renderStatuslineViewWithGitAndEffort(t *testing.T) string {
 
 	ctrl := control.New(control.Options{})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 120)
+	// The layout tests pin the working directory so the footer geometry is
+	// deterministic regardless of where the test suite runs.
+	m.cwd = ""
 	m.label = "deepseek-v4-flash"
 	m.effortLevel = "auto"
 	m.gitStatus = gitStatus{
@@ -372,6 +381,9 @@ func renderStatuslineViewWithCache(t *testing.T) string {
 	}
 	ctrl := control.New(control.Options{Executor: exec})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 160)
+	// The layout tests pin the working directory so the footer geometry is
+	// deterministic regardless of where the test suite runs.
+	m.cwd = ""
 	m.label = "deepseek-v4-flash"
 	m.effortLevel = "auto"
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
