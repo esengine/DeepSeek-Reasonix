@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ChevronDown, ChevronRight, CircleAlert, Folder, Plus, RefreshCw, Search, Server as ServerIcon } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
+import { activeWorkBusyNoticeText, installMCPServer } from "../lib/capabilityMutations";
 import { useT } from "../lib/i18n";
 import { mcpServerLifecycleActions, mcpServerRetryableFromAvailableList } from "../lib/mcpServerLifecycle";
 import { canUseNativeMCPOAuth } from "../lib/mcpOAuthEligibility";
-import type { CapabilitiesView, MCPInstallResult, MCPMarketplaceEntry, MCPMarketplaceView, MCPServerInput, PluginAgentView, PluginCommandView, PluginCompatibilityIssue, PluginHookView, PluginInstallOptions, PluginMCPServerView, PluginSkillView, PluginView, ServerView, SkillRootSkillView, SkillRootView, SkillsSettingsView, SkillView, TabMeta } from "../lib/types";
+import type { CapabilitiesView, MCPMarketplaceEntry, MCPMarketplaceView, MCPServerInput, PluginAgentView, PluginCommandView, PluginCompatibilityIssue, PluginHookView, PluginInstallOptions, PluginMCPServerView, PluginSkillView, PluginView, ServerView, SkillRootSkillView, SkillRootView, SkillsSettingsView, SkillView, TabMeta } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { ResizableDrawer } from "./ResizableDrawer";
 import { Tooltip } from "./Tooltip";
@@ -18,25 +19,6 @@ import { ModalCloseButton } from "./ModalCloseButton";
 type CapTab = "servers" | "skills";
 
 type SettingsSnapshot<T> = { key: string; value: T };
-
-export function activeWorkBusyNoticeText(error: unknown, translate: ReturnType<typeof useT>): string | null {
-  const message = String((error as Error)?.message ?? error ?? "").trim();
-  const lower = message.toLowerCase();
-  if (!lower.startsWith("active work is still running;") || !lower.includes("before changing ")) return null;
-
-  const detail = /running=(true|false);\s*pending_prompt=(true|false);\s*background_jobs=(\d+)/i.exec(message);
-  if (detail?.[2] === "true") return translate("caps.switchBusyPrompt");
-  if (detail?.[1] === "true") return translate("caps.switchBusyRunning");
-  const jobs = Number(detail?.[3] ?? 0);
-  if (jobs > 0) return translate("caps.switchBusyJobs", { n: jobs });
-  return translate("caps.switchBusy");
-}
-
-async function installMCPServer(input: MCPServerInput): Promise<MCPInstallResult> {
-  const result = await app.InstallMCPServer(input);
-  if (result.state === "issue") throw new Error(result.message);
-  return result;
-}
 
 function connectMCPServer(name: string, servers: ServerView[]): Promise<void> {
   const server = servers.find((candidate) => candidate.name === name);
