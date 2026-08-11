@@ -248,71 +248,59 @@ prefix cache-stable:
   "cache-first" with "two-model collaboration": switching models *inside one
   shared conversation* would break the prefix and tank cache hits, so we don't.
 
-### 3.6 Context management (compaction)
+### 3.6 Context management (content-driven summary)
 
-Long tasks eventually fill the model's context window. Reasonix manages this with
-**low-frequency compaction** that respects the cache-first design:
+Long tasks fill the model window. Reasonix keeps a **cache-first, append-only**
+canonical transcript and installs a short **provider-visible checkpoint** only
+when the sole automatic threshold is crossed.
 
-- Each provider declares its `context_window` (tokens). Context maintenance is
-  tiered: below `agent.tool_result_snip_ratio` (default `0.6`) the session is
-  left untouched apart from the soft notice; at the snip ratio, stale tool
-  results before the recent tail are archived and shortened with deterministic
-  head/tail markers; at `agent.compact_ratio` (default `0.8`) stale tool results
-  are archived and pruned to short placeholders before any summary call; only if
-  pruning still leaves the prompt above the threshold does summary compaction
-  run. At `agent.compact_force_ratio` (default `0.9`), the existing forced fold
-  may proceed even when the fold economics would normally skip it.
-- Users can inspect or change the 65–85% automatic threshold with
-  `reasonix config compact-ratio [--local] [VALUE]`. The default is 80%; the
-  project-local value overrides the shared user config used by desktop and new
-  CLI sessions.
-- A positive `model_overrides.<model>.context_window` replaces the provider-wide
-  value after model resolution. Missing or zero model overrides inherit the
-  provider value; provider-level `context_window = 0` disables compaction.
-- `max_output_tokens` is a separate total-output budget, not a conversion from
-  the client reasoning byte guard. Zero selects the provider's safe default,
-  positive values set an explicit cap, and negative values omit optional wire
-  limits. `model_overrides.<model>.max_output_tokens` can specialize mixed
-  gateways; Anthropic still supplies a mandatory `max_tokens` fallback.
-- Tool-result snip/prune never removes messages, so assistant `tool_calls` and
-  tool results stay paired. `KeepErrors` preserves failed tool outputs,
-  recognised from the recorded execution (state, exit code, verification) or,
-  when there is none, an `error:`/`blocked:` text prefix. A failure with a
-  recorded execution keeps its failure-carrying lines rather than the whole
-  result, since the record still identifies it as a failure after a rewrite; a
-  text-only failure has no such anchor and is kept whole. The recent tail is not
-  rewritten. Snipped results can later be upgraded to pruned placeholders;
-  already-pruned results are left alone.
-- Automatic maintenance is planned once before a sampling request from the
-  current visible projection plus its append-only canonical tail. It never
-  rewrites the canonical transcript. A failed or non-convergent view fingerprint
-  is durably blocked until the transcript, model, provider policy, or projection
-  lineage changes, preventing the same cleanup or summary from looping.
-- `agent.context_editing` defaults to `"local"`. Setting it to `"native"` opts
-  the official Anthropic endpoint into native tool-use clearing; DeepSeek and
-  other Anthropic-compatible gateways remain on local maintenance. Native tool
-  clearing does not replace Reasonix summary folding or canonical history.
-- When summary compaction runs, the fold region (everything between the pinned
-  prefix and the recent tail) is split three ways: the first few **small user
-  turns** are hoisted verbatim ahead of the digest, messages the keep policy
-  protects are kept, and **everything else** — assistant/tool work, later
-  user turns, and any prior digest — is summarized into a single digest, using
-  the executor's own provider, no tools. The split is a partition: a message in
-  the region is either kept verbatim or reaches the summarizer, never neither.
-  The tail boundary is aligned backward off any tool result so the recent tail
-  never begins with an orphan tool message whose `tool_calls` were summarized
-  away.
-- One fold never outgrows one summarizer call. A fold region larger than such a
-  call can hold — the window minus room for the digest it must return, the
-  summary prompt, and the caller's instructions — first gives up the bulk of its
-  stale tool results: head and tail lines are kept, and only in the summarizer's
-  copy, never in the transcript or the projection. A region still too large is summarized in
-  consecutive parts whose digests are merged in a final pass, capped so a single
-  compaction cannot cost an unbounded number of calls; whatever a part had to
-  drop is stated in the text the summarizer reads.
-- The dropped originals are archived under the user config dir
-  (`reasonix/archive/<timestamp>.jsonl`; see §5 for its per-OS location), one
-  message per line, so the full history stays traceable.
+- Each provider declares `context_window` (tokens). The only automatic trigger is
+  `agent.compact_ratio` (default **0.85**; presets 0.70 / 0.80 / 0.85; range
+  0.65–0.85).
+  `triggerTokens = floor(context_window × compact_ratio)`.
+- **Below the trigger** history is never rewritten: no summary, no prune/snip
+  projection, no sidecar write, no projection-version bump, no maintenance event.
+  Any rewrite would invalidate the prompt cache from that point on.
+- **At the trigger** Reasonix runs **one** summary transaction:
+  `stable prefix + one structured digest + recent verbatim tail`.
+  Acceptance (normal path): candidate ≤ 50% of the window, strictly smaller than
+  the source, and below `triggerTokens`. Candidates are **not** padded toward 50%.
+  Typical landings are about 10%–30% of the window.
+  Internal construction budgets (not user settings):
+  `recentTailBudget = clamp(window×10%, 32K, 96K)`, summary output max **16K**.
+- Users inspect or change the threshold with
+  `reasonix config compact-ratio [--local] [VALUE]`. Project config overrides the
+  user-global value used by desktop and new CLI sessions. UI always shows the
+  **effective** ratio.
+- `max_output_tokens` is an independent **per-turn** completion ceiling.
+  Recommended: `0` (**automatic**, not unlimited; DeepSeek default high → ~64K).
+  User presets: `32768` ordinary coding / cost control, `65536` heavy reasoning /
+  long tool loops, `131072` only after repeated `finish_reason=length`.
+  Negative omits optional wire limits when the protocol allows. Clipped only at
+  send time against remaining window and **never** changes `triggerTokens` or
+  maintenance timing. Billing follows actual completion tokens, not the ceiling.
+- Giant tool results are bounded **once**, on first entry to the model:
+  `Content` is the stable ≤32KB visible form; `RawContent` holds the full original
+  only when they differ. Maintenance never rewrites old tool bodies.
+  `ModelMessages` strips `RawContent` so provider serialization and cache hashes
+  never include it.
+- Automatic maintenance is planned once in `ContextManager.Prepare` from the
+  current projection plus the append-only canonical tail. The canonical
+  transcript is never rewritten. Subsequent thresholds merge
+  **prior digest + new history** into a single digest (no multi-span merge, no
+  application-layer retry). Failure records a generation-scoped
+  `blocked`/`failed` receipt; the same generation does not pay for another
+  automatic summary. Manual `compress` can retry.
+- Old multi-threshold keys (`soft_compact_ratio`, `tool_result_snip_ratio`,
+  `compact_force_ratio`, `cold_resume_prune`, `context_editing`) are removed on
+  ordinary start and ignored at runtime. Native provider tool clearing is not
+  used; every provider uses the local summary checkpoint path.
+- Keep policy (`keep` / `recent_keep`) and the active tool turn remain protected
+  content. Restart restores an existing checkpoint without re-summarizing or
+  replaying timeline cards.
+- Full history remains in the session transcript. The read-only `history` tool
+  provides BM25 retrieval over sessions; new summary checkpoints do not create
+  prune archives.
 - The read-only `history` tool gives the agent on-demand BM25 retrieval over
   saved session JSONL files. `scope="project"` searches the current controller's
   session directory; `scope="global"` also searches the user-global session
@@ -518,12 +506,19 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   constraints, and relevant verification expectations to be satisfied or
   explicitly reported as unverified.
   Goal automatically selects a simple (10), write (20), or research (40) turn
-  budget from the objective. All classes use the same Goal FSM, host receipts,
-  Delivery readiness, and bounded evaluator; there is no second research
+  continuation backstop from the objective. A Goal Run defaults to 16 model
+  rounds when the user did not explicitly configure `max_steps`, followed by
+  one summary-only response and a resumable pause. Goal-scoped novelty accepts new read/search results and state changes
+  but rejects exact tool/argument/result repeats. All classes use the same Goal
+  FSM, host receipts, Delivery readiness, and bounded evaluator; there is no second research
   protocol or writable sidecar runtime. Legacy `.reasonix/autoresearch/...`
   archives remain read-only and explicit old paths recover as ordinary Goals.
   Outside goal mode, ordinary prompts never change collaboration mode; the user
   must choose Goal or use `/goal` explicitly.
+  Cross-turn no-progress streaks are observational. Within one Run, three
+  repeated host failures or six successful zero-evidence rounds trigger a
+  resumable structural-stuck pause. Token and provider-request totals remain
+  observational and are not request-admission limits.
   `/goal clear` removes the active goal. Switching into plan/normal mode clears
   the active goal in the desktop UI so the collaboration mode remains one of
   the three choices, while the underlying tool approval posture is preserved.
@@ -1010,7 +1005,11 @@ default        = "deepseek-v4-flash"   # optional; defaults to models[0]
 api_key_env    = "DEEPSEEK_API_KEY"
 web_search     = true
 context_window = 1000000   # tokens; harness compacts older history near this limit (0 disables)
-max_output_tokens = 32768  # total visible + reasoning + tool-call output; 0 = provider default
+# max_output_tokens = 0              # recommended: automatic (DeepSeek default high → ~64K)
+# max_output_tokens = 32768          # ordinary coding / cost control
+# max_output_tokens = 65536          # heavy reasoning / long tool loops
+# max_output_tokens = 131072         # only after repeated finish_reason=length
+# max_output_tokens never changes compact_ratio
 # model_overrides = { "deepseek-v4-flash" = { context_window = 1000000, max_output_tokens = 32768 } }
 
 # A single-model entry still works for custom OpenAI-compatible endpoints.

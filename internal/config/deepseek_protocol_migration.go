@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -27,6 +28,13 @@ func MigrateLegacyDeepSeekProtocolUserConfig() (bool, error) {
 		return false, nil
 	}
 	return editLegacyDeepSeekProtocolFile(path, "", true)
+}
+
+// IsDeepSeekProtocolConfigParseError reports whether migration failed while
+// parsing the user configuration rather than reading, locking, or writing it.
+func IsDeepSeekProtocolConfigParseError(err error) bool {
+	var parseErr toml.ParseError
+	return errors.As(err, &parseErr)
 }
 
 // UpgradeDeepSeekProviderProtocol switches one official DeepSeek provider

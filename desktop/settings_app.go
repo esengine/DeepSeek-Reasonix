@@ -162,7 +162,6 @@ type AgentView struct {
 	MaxSubagentConcurrency int     `json:"maxSubagentConcurrency"`
 	MaxParallelWriters     int     `json:"maxParallelWriters"`
 	SystemPrompt           string  `json:"systemPrompt"`
-	ColdResumePrune        bool    `json:"coldResumePrune"`
 	ReasoningLanguage      string  `json:"reasoningLanguage"`
 	CompactRatio           float64 `json:"compactRatio,omitempty"`
 	EffectiveCompactRatio  float64 `json:"effectiveCompactRatio,omitempty"`
@@ -349,10 +348,10 @@ type DesktopStartupSettingsView struct {
 	CheckUpdates                 bool            `json:"checkUpdates"`
 	UpdateChannel                string          `json:"updateChannel"`
 	ConversationWidth            string          `json:"conversationWidth,omitempty"`
-	// ConfigWarnings are non-blocking notices when user/project config was
-	// recovered in memory (last-known-good or defaults) without rewriting files.
-	ConfigWarnings []string `json:"configWarnings,omitempty"`
-	ConfigPath     string   `json:"configPath,omitempty"`
+	// ConfigWarnings report in-memory recovery without rewriting user/project files.
+	ConfigWarnings         []string `json:"configWarnings,omitempty"`
+	ConfigWarningsRevision uint64   `json:"configWarningsRevision"`
+	ConfigPath             string   `json:"configPath,omitempty"`
 }
 
 // shadowingConfigPath returns the config file that outranks writePath for the
@@ -898,27 +897,27 @@ func officialProviderAddedSet(cfg *config.Config) map[string]bool {
 	return out
 }
 
-// DesktopStartupSettings returns only the desktop chrome preferences needed at
-// app startup. Keep provider/key status in Settings(), where the Settings panel
-// actually needs it.
-func (a *App) DesktopStartupSettings() DesktopStartupSettingsView {
+// DesktopStartupSettings returns startup chrome preferences without provider/key state.
+func (a *App) DesktopStartupSettings() (view DesktopStartupSettingsView) {
+	revision := a.nextConfigLoadWarningsRevision()
+	defer func() { view.ConfigWarningsRevision = revision }()
 	// Prefer the resilient workspace load so config warnings surface on first paint.
 	if cfg, err := config.LoadForRootReadOnly(a.activeWorkspaceRoot()); err == nil {
-		view := desktopStartupSettingsFromConfig(cfg)
+		view = desktopStartupSettingsFromConfig(cfg)
 		view.ConfigWarnings = cfg.LoadWarnings()
 		view.ConfigPath = config.UserConfigPath()
 		return view
 	}
 	cfg, path, err := a.loadDesktopUserConfigForView()
 	if err != nil {
-		view := desktopStartupSettingsFromConfig(nil)
+		view = desktopStartupSettingsFromConfig(nil)
 		view.ConfigWarnings = []string{
 			"user configuration could not be loaded; using built-in defaults. Run: reasonix doctor repair",
 		}
 		view.ConfigPath = config.UserConfigPath()
 		return view
 	}
-	view := desktopStartupSettingsFromConfig(cfg)
+	view = desktopStartupSettingsFromConfig(cfg)
 	view.ConfigPath = path
 	return view
 }
@@ -1003,7 +1002,6 @@ func (a *App) Settings() SettingsView {
 			MaxSubagentConcurrency: desktopSubagentConcurrency(cfg.Agent.MaxSubagentConcurrency),
 			MaxParallelWriters:     desktopParallelWriters(cfg.Agent.MaxParallelWriters, cfg.Agent.MaxSubagentConcurrency),
 			SystemPrompt:           cfg.Agent.SystemPrompt,
-			ColdResumePrune:        cfg.ColdResumePruneEnabled(),
 			ReasoningLanguage:      cfg.ReasoningLanguage(),
 			CompactRatio:           cfg.Agent.CompactRatio,
 			EffectiveCompactRatio:  cfg.Agent.CompactRatio,
@@ -1954,9 +1952,9 @@ func (a *App) rebuildSettingTurnLockedWithModel(setting string, tab *WorkspaceTa
 func (a *App) buildSettingReplacementController(tab *WorkspaceTab, snap tabRuntimeSnapshot, runtime normalizedTabRuntime, model, prevPath, setting string, oldCtrl control.SessionAPI, carried []provider.Message, reload bool) (control.SessionAPI, normalizedTabRuntime, string, error) {
 	opts := boot.Options{
 		Model: model, RequireKey: false,
-		RuntimeReload:            boot.RuntimeReload{ForceFullRebuild: reload},
-		AutoPricingCurrency:      a.desktopAutoPricingCurrency(),
-		StatsSource:              "desktop",
+		RuntimeReload:       boot.RuntimeReload{ForceFullRebuild: reload},
+		AutoPricingCurrency: a.desktopAutoPricingCurrency(),
+		StatsSource:         "desktop", OnConfigLoadWarnings: a.configLoadWarningsHandler(),
 		Sink:                     snap.sink,
 		WorkspaceRoot:            snap.workspaceRoot,
 		SessionDir:               sessionDirForSnapshot(snap),
@@ -3503,10 +3501,6 @@ func (a *App) SetAgentParams(temperature float64, maxSteps int, plannerMaxSteps 
 		c.Agent.SystemPrompt = systemPrompt
 		return nil
 	})
-}
-
-func (a *App) SetColdResumePrune(enabled bool) error {
-	return a.applyConfigChange(func(c *config.Config) error { return c.SetColdResumePrune(enabled) })
 }
 
 func (a *App) SetCompactRatio(ratio float64) error {

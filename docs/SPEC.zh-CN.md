@@ -73,7 +73,7 @@ func New(kind string, cfg Config) (Provider, error)
 - OpenAI-compatible vendor 只是 `kind = "openai"` 的不同配置实例，通过 `base_url`、`model`、`api_key_env` 区分；新增兼容模型通常只需改配置。
 - 一个 provider 表示一个 vendor endpoint，可通过 `models` 暴露多个模型，并以 `default` 指定默认项。`default_model`、`--model` 和桌面端模型选择器都经 `Config.ResolveModel` 解析，可接受 provider 名、裸模型名或 `provider/model`。
 - `context_window` 是 provider 级默认值；`model_overrides.<model>.context_window` 可覆盖单个模型。
-- `max_output_tokens` 是独立的总输出预算，不由客户端 reasoning 字节上限换算。0 表示使用 provider 安全默认值，正数表示显式上限，负数表示在协议允许时省略；混合网关可用 `model_overrides.<model>.max_output_tokens` 覆盖单个模型。Anthropic 因协议要求仍会提供 `max_tokens` 默认值。
+- `max_output_tokens` 是独立的本轮输出上限，不由客户端 reasoning 字节上限换算，也不参与 `compact_ratio`。推荐 `0`（自动：DeepSeek 默认 high 约 64K）；显式 `32768` 控费/普通编码，`65536` 重推理/长工具链，`131072` 仅在反复 `finish_reason=length` 时再考虑。正数为显式上限，负数为在协议允许时省略；混合网关可用 `model_overrides.<model>.max_output_tokens` 覆盖单个模型。Anthropic 因协议要求仍会提供 `max_tokens` 默认值。
 - streaming tool-call delta 在 provider 内按 index 聚合，只向上层发出完整 `ToolCall`。
 
 ### 3.2 Tool 与 registry（`internal/tool`）
@@ -140,49 +140,45 @@ type Tool interface {
 - executor 在另一 session 中验证候选假设，并使用完整工具执行计划；
 - 两条会话互不混合，prompt prefix 都只追加增长，避免切换模型破坏 prefix cache。
 
-### 3.6 上下文管理
+### 3.6 上下文管理（内容驱动摘要）
 
-Reasonix 通过低频 compaction 保持 cache-first：
+长任务会填满模型窗口。Reasonix 保持 **cache-first、append-only** 的 canonical
+transcript，仅在唯一自动阈值被跨越时安装 provider 可见的短 **checkpoint**。
 
-- 低于 `agent.tool_result_snip_ratio` 时不改写历史；
-- 达到 snip ratio 后，归档并缩短较旧 tool result；
-- 达到 `agent.compact_ratio` 后，先把旧 tool result 修剪为占位符，仍超阈值才调用摘要；
-- 达到 `agent.compact_force_ratio` 后，可执行强制折叠；
-- `context_window = 0` 会关闭该实例的 compaction。
-
-用户可用 `reasonix config compact-ratio [--local] [VALUE]` 查看或修改 65–85% 的自动
-压缩阈值，内置默认值为 80%。项目级设置优先于桌面端与新 CLI 会话共用的用户全局配置。
-
-tool result 的 snip/prune 不删除消息，确保 assistant `tool_calls` 与 tool result 配对。
-
-每次自动维护只在模型请求前规划一次，输入是当前可见 projection 加上 canonical 的追加 tail；
-维护流程绝不改写 canonical transcript。失败或无法收敛的视图指纹会持久进入 blocked 状态，
-直到 transcript、模型、provider 策略或 projection lineage 变化，避免相同裁剪或摘要循环重试。
-
-`agent.context_editing` 默认为 `"local"`。显式设为 `"native"` 时，只有官方 Anthropic
-端点启用原生 tool-use clearing；DeepSeek 与其他 Anthropic 兼容网关仍使用本地维护。
-原生工具清理不会替代 Reasonix 的摘要折叠，也不会修改 canonical history。
-
-摘要折叠时，固定前缀与近期 tail 之间的区间被划分为三部分：开头若干条小体量用户回合原样提升到
-digest 之前，keep policy 保护的消息予以保留，其余全部——assistant/tool 工作、后续用户回合、以及
-已有 digest——折叠进同一条 digest。三者构成一个划分：区间内的消息要么原样保留，要么进入摘要输入，
-不存在两者皆非的情况。
-
-一次折叠不会超出一次摘要调用。折叠区间超过单次调用能容纳的量（窗口减去 digest 出参、摘要提示词与
-调用方 instructions 所占空间）时，先让旧 tool result 交出主体
-（只保留首尾若干行，且仅作用于送给摘要器的副本，transcript 与 projection 都不改）；仍然过大的区间
-被拆成连续几部分分别摘要，再由最后一次调用合并，并对份数设上限，使单次 compaction 的调用数有界；
-某一部分被迫丢弃的内容，会写在摘要器读到的文本里。
-
-因此逐字保留的是：system prompt、体量足够小的首个用户回合、折叠区间开头若干条小体量用户回合，
-以及近期 tail。keep policy 保护的消息同样留存，但带有执行记录的失败只保留承载失败的若干行。
-其余均为尽力而为——只在 digest 抓住它的前提下留存，
-其中包括超出提升窗口的小体量用户回合，所以长期有效的约束更适合在近期回合中重述。
-
-两个性质限制了这种损失：每次折叠都从 canonical transcript 重新生成 digest，而不是在上一条 digest
-之上再摘要，因此 digest 不会形成链条，反复压缩也不会累积摘要漂移；同时 compaction 只写 projection，
-canonical transcript 保留全部原文，被折叠的细节仍可通过 `history` tool 与归档
-（`reasonix/archive/<timestamp>.jsonl`）取回。
+- 每个 provider 声明 `context_window`（tokens）。唯一自动触发值是
+  `agent.compact_ratio`（默认 **0.85**；预设 0.70 / 0.80 / 0.85；范围 0.65–0.85）。
+  `triggerTokens = floor(context_window × compact_ratio)`。
+- **阈值以下**绝不改写历史：不摘要、不安装 prune/snip projection、不写 sidecar、
+  不增加 projection version、不发维护事件。任何改写都会使该点之后的 prompt 缓存失效。
+- **达到阈值**时运行 **一次** 摘要事务：
+  `稳定前缀 + 一个结构化摘要 + 最近原文尾部`。
+  正常验收：候选 ≤ 窗口 50%、严格小于源、且低于 `triggerTokens`；**不会**向 50% 回填。
+  典型落地约占窗口 10%–30%。
+  内部构造预算（非用户设置）：
+  `recentTailBudget = clamp(window×10%, 32K, 96K)`，摘要输出上限 **16K**。
+- 用户可用 `reasonix config compact-ratio [--local] [VALUE]` 查看或修改阈值。
+  项目配置优先于桌面与新 CLI 会话共用的用户全局配置。UI 始终展示**实际生效**值。
+- `max_output_tokens` 是独立的**本轮**输出上限。
+  推荐 `0`（**自动**，不是无限；DeepSeek 默认 high → 约 64K）。
+  用户侧常用值：`32768` 普通编码/控费，`65536` 重推理/长工具链，`131072` 仅在反复
+  `finish_reason=length` 时再考虑。负数为在协议允许时省略。仅在发送阶段按剩余
+  窗口裁剪，**绝不**改变 `triggerTokens` 或维护时机。计费按实际 completion，不按配置上限。
+- 巨型工具结果只在**第一次**进入模型前限长：`Content` 为稳定 ≤32KB 可见版；
+  超限时 `RawContent` 保存完整原文。后续维护不得回头改写。`ModelMessages` 会去掉
+  `RawContent`，provider 序列化与缓存 hash 永不包含它。
+- 自动维护只在 `ContextManager.Prepare` 中规划一次，输入为当前 projection 加上
+  append-only canonical tail；canonical 永不改写。后续阈值合并
+  **上一摘要 + 新增历史** 为单条 digest（无 multi-span、无应用层重试）。
+  失败以 generation 为边界记录 `blocked`/`failed`，同 generation 不自动再付费；
+  手动 `compress` 可重试。
+- 旧多阈值键（`soft_compact_ratio`、`tool_result_snip_ratio`、
+  `compact_force_ratio`、`cold_resume_prune`、`context_editing`）在普通启动时删除，
+  运行时忽略。不再使用 provider 原生 tool clearing；所有 provider 走本地 summary
+  checkpoint。
+- `keep` / `recent_keep` 与活跃工具轮次仍受保护。重启只恢复既有 checkpoint，
+  不重新摘要、不重放时间线卡片。
+- 完整历史保留在会话 transcript 中；`history` tool 提供 BM25 检索。新 checkpoint
+  不再创建 prune archive。
 
 `history` tool 支持对 session 与归档进行 BM25 搜索；`memory` tool 用于检索自动记忆，
 `remember` 与 `forget` 负责写入和归档。每个真实用户回合前，Reasonix 会用原始用户消息执行
@@ -216,7 +212,7 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
 - 安装 MCP server 即授权其全部工具，不再有 server、raw tool、writer 或 destructive 的第二套审批策略；项目 `reasonix.toml` 与 `.mcp.json` 声明同样默认可信，不需要额外启动确认，显式全局 `deny` 仍然优先。全局安装写入用户 `config.toml`，项目声明保留在原项目文件；同名时项目覆盖全局，项目内部 `reasonix.toml` 高于 `.mcp.json`。编辑写回当前生效来源，删除高优先级声明后露出下一层。`readOnlyHint` 与 `destructiveHint` 仅用于调度、Plan/严格只读边界及缓存到实时安全分类复核，不会新增逐调用审批。严格只读子智能体 registry 仍仅暴露已授权且 `readOnlyHint: true`、无 `destructiveHint` 的 MCP；双模型 Planner 通过固定 `use_capability` 代理（从不暴露直接 `mcp__*` schema）调用已授权、非 destructive 的 MCP，不再要求 `readOnlyHint`，destructive 工具留给 Executor。Balanced 双模型的 Executor 使用独立 frontend 复用同一稳定代理，因此 Planner 发现的 capability ID 可在 handoff 后直接执行，同时保持两侧 ledger/audit 隔离。分发前代理会再次复核当前 controller 的 enable、授权和完整运行时连接身份；共享 Host 中仅 server 同名不构成复用权限。
 - Plan 是协作流程，不等于全工具只读。普通 built-in 与 Bash 仍走 Ask/Auto/YOLO 和 Sandbox；独立双模型 Planner 允许已授权、非 destructive 的 MCP（即使没有 `readOnlyHint`），但在规划阶段持续阻止 destructive 与未授权目标；没有独立 Planner 的单模型 Plan 仍阻止 MCP writer/destructive。
 - Plan 只能由用户显式选择进入，与当前工具审批姿态相互独立；普通聊天不会自动切换到 Plan。Auto/YOLO 不会回答 `ask`，也不会替用户批准 `exit_plan_mode`，获批计划的短期自动执行窗口也不会自动批准后续计划或嵌套/间接 Bash。
-- 桌面端协作模式分为 `normal`、`plan` 和 `goal`。Goal 会持续推进目标，直到完成、阻塞、用户停止或达到轮次/无进展安全边界，并按目标自动选择简单（10）、写入（20）或研究（40）轮预算。三类预算共用同一个 Goal FSM、宿主 receipt、Delivery readiness 和有界 evaluator，不再存在第二套研究协议或可写 sidecar。普通聊天不会隐式切换协作模式；旧 `.reasonix/autoresearch/.../` 目录只读，显式旧路径可恢复为普通 Goal。
+- 桌面端协作模式分为 `normal`、`plan` 和 `goal`。Goal 会持续推进目标，直到完成、阻塞、用户停止或达到执行安全边界，并按目标自动选择简单（10）、写入（20）或研究（40）轮的跨 Run continuation backstop。用户未显式配置 `max_steps` 时，每次 Goal Run 默认 16 个模型轮次并提供一次仅总结响应；未完成时以 `goal_run_budget` 可恢复暂停。跨 turn 无进展只做观测；单次 Run 内相同宿主失败连续 3 次或成功工具轮连续 6 次没有新证据时，以 `goal_stuck` 暂停。Goal 范围的新颖证据允许新的读取/搜索结果推进任务，但拒绝完全相同的工具、参数和结果重复。累计 token 和真实 provider 请求数只做观测。三类预算共用同一个 Goal FSM、宿主 receipt、Delivery readiness 和有界 evaluator，不再存在第二套研究协议或可写 sidecar。普通聊天不会隐式切换协作模式；旧 `.reasonix/autoresearch/.../` 目录只读，显式旧路径可恢复为普通 Goal。
 
 ### 3.8 Slash command
 
@@ -399,7 +395,10 @@ default        = "deepseek-v4-flash"
 api_key_env    = "DEEPSEEK_API_KEY"
 web_search     = true
 context_window = 1000000
-max_output_tokens = 32768  # 正文、reasoning 与工具调用共用的总输出预算；0 使用 provider 默认值
+# max_output_tokens = 0              # 推荐：自动（DeepSeek 默认 high → 约 64K）
+# max_output_tokens = 32768          # 普通编码 / 控制费用
+# max_output_tokens = 65536          # 重推理、长工具链
+# max_output_tokens = 131072         # 仅在反复 finish_reason=length 时再考虑
 
 [tools]
 enabled = []

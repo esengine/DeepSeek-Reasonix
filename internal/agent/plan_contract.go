@@ -1,6 +1,11 @@
 package agent
 
 import (
+	"context"
+	"encoding/json"
+	"path/filepath"
+
+	"reasonix/internal/evidence"
 	"reasonix/internal/plancontract"
 	"reasonix/internal/taskcontract"
 )
@@ -43,13 +48,14 @@ func planFacts(plan plancontract.Plan) taskcontract.PlanFacts {
 	seen := map[string]bool{}
 	for _, step := range plan.Steps {
 		for _, c := range step.Acceptance {
+			criterion := taskcontract.PlanCriterion{ID: c.ID, Text: c.Text}
 			switch {
 			case c.Optional:
-				facts.Optional = append(facts.Optional, c.Text)
+				facts.Optional = append(facts.Optional, criterion)
 			case c.Regression:
-				facts.Regressions = append(facts.Regressions, c.Text)
+				facts.Regressions = append(facts.Regressions, criterion)
 			default:
-				facts.AcceptanceCriteria = append(facts.AcceptanceCriteria, c.Text)
+				facts.AcceptanceCriteria = append(facts.AcceptanceCriteria, criterion)
 			}
 		}
 		for _, v := range step.Verification {
@@ -79,4 +85,76 @@ func appendUnseen(dst []string, seen map[string]bool, add []string) []string {
 		dst = append(dst, s)
 	}
 	return dst
+}
+
+// acceptanceCriterionIDs lists the approved plan's criterion ids so a tool call
+// can check a citation against the plan the user approved.
+func (a *Agent) acceptanceCriterionIDs() []string {
+	plan := a.planContractSnapshot()
+	if plan == nil {
+		return nil
+	}
+	var ids []string
+	for _, step := range plan.Steps {
+		for _, c := range step.Acceptance {
+			if c.ID != "" {
+				ids = append(ids, c.ID)
+			}
+		}
+	}
+	return ids
+}
+
+// withContractState attaches what a tool call needs to check a claim against the
+// approved work: the canonical task list, and the criterion ids a proof may
+// cite. They travel together because both answer "does this claim name
+// something real".
+func (a *Agent) withContractState(ctx context.Context) context.Context {
+	ctx = evidence.WithTodoState(ctx, a.CanonicalTodoState())
+	return evidence.WithAcceptanceCriteria(ctx, a.acceptanceCriterionIDs())
+}
+
+// outstandingPlanCriteria lists what the approved plan still lacks fresh
+// evidence for, empty when the turn is unplanned. It is the contract's answer to
+// "is this actually done", named criterion by criterion, including proofs that
+// went stale under a later mutation.
+func (a *Agent) outstandingPlanCriteria() []string {
+	if a == nil || a.planContractSnapshot() == nil {
+		return nil
+	}
+	c := a.LiveContract()
+	if c == nil {
+		return nil
+	}
+	return c.Outstanding()
+}
+
+// mutationEscapesPlan reports whether a pending write touches a path the
+// approved plan never named. A plan that named no touchpoints says nothing
+// about scope, so nothing escapes it: silence is not a claim that everything is
+// out of bounds. Directory containment counts — a plan naming a file implies
+// its directory is in play, which is how a test file beside it stays in scope.
+func (a *Agent) mutationEscapesPlan(toolName string, args json.RawMessage) bool {
+	plan := a.planContractSnapshot()
+	if plan == nil {
+		return false
+	}
+	allowed := map[string]bool{}
+	for _, step := range plan.Steps {
+		for _, p := range append(append([]string{}, step.VerifiedFiles...), step.CandidateFiles...) {
+			clean := filepath.Clean(p)
+			allowed[clean] = true
+			allowed[filepath.Dir(clean)] = true
+		}
+	}
+	if len(allowed) == 0 {
+		return false
+	}
+	for _, p := range evidence.ReceiptFromToolCall(toolName, args, false, true).Paths {
+		clean := filepath.Clean(p)
+		if !allowed[clean] && !allowed[filepath.Dir(clean)] {
+			return true
+		}
+	}
+	return false
 }

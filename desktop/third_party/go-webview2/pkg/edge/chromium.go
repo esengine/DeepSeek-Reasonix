@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -31,6 +30,7 @@ const (
 	shouldDetectMonitorScaleChanges = true
 	reasonixNoProxyServerBrowserArg = "--no-proxy-server"
 	reasonixProcessRecoveryCooldown = 30 * time.Second
+	reasonixProcessRecoveryTimeout  = 30 * time.Second
 )
 
 func globalErrorHandler(err error) {
@@ -75,10 +75,10 @@ type Chromium struct {
 	permissionRequested              *iCoreWebView2PermissionRequestedEventHandler
 	webResourceRequested             *iCoreWebView2WebResourceRequestedEventHandler
 	acceleratorKeyPressed            *ICoreWebView2AcceleratorKeyPressedEventHandler
+	navigationStarting               *ICoreWebView2NavigationStartingEventHandler
 	navigationCompleted              *ICoreWebView2NavigationCompletedEventHandler
 	processFailed                    *ICoreWebView2ProcessFailedEventHandler
-	processRecoveryMu                sync.Mutex
-	lastProcessRecovery              time.Time
+	processRecovery                  reasonixRecoveryState[ProcessFailedDiagnostic]
 
 	environment            *ICoreWebView2Environment
 	webview2RuntimeVersion string
@@ -134,6 +134,7 @@ func NewChromium() *Chromium {
 	e.permissionRequested = newICoreWebView2PermissionRequestedEventHandler(e)
 	e.webResourceRequested = newICoreWebView2WebResourceRequestedEventHandler(e)
 	e.acceleratorKeyPressed = newICoreWebView2AcceleratorKeyPressedEventHandler(e)
+	e.navigationStarting = newICoreWebView2NavigationStartingEventHandler(e)
 	e.navigationCompleted = newICoreWebView2NavigationCompletedEventHandler(e)
 	e.processFailed = newICoreWebView2ProcessFailedEventHandler(e)
 	e.containsFullScreenElementChanged = newICoreWebView2ContainsFullScreenElementChangedEventHandler(e)
@@ -160,11 +161,18 @@ func NewChromium() *Chromium {
 
 func (e *Chromium) ShuttingDown() {
 	e.shuttingDown = true
+	_, _ = e.processRecovery.finish()
 }
 
 func (e *Chromium) errorCallback(err error) {
 	e.globalErrorCallback(err)
 	os.Exit(1)
+}
+
+func (e *Chromium) nonFatalErrorCallback(err error) {
+	if e.globalErrorCallback != nil {
+		e.globalErrorCallback(err)
+	}
 }
 
 func (e *Chromium) SetErrorCallback(callback func(error)) {
@@ -389,6 +397,10 @@ func (e *Chromium) CreateCoreWebView2ControllerCompleted(res uintptr, controller
 	if err != nil {
 		e.errorCallback(err)
 	}
+	err = e.webview.AddNavigationStarting(e.navigationStarting, &token)
+	if err != nil {
+		e.errorCallback(err)
+	}
 	err = e.webview.AddProcessFailed(e.processFailed, &token)
 	if err != nil {
 		e.errorCallback(err)
@@ -564,13 +576,38 @@ func boolToInt(input bool) int {
 }
 
 func (e *Chromium) NavigationCompleted(sender *ICoreWebView2, args *ICoreWebView2NavigationCompletedEventArgs) uintptr {
+	if diagnostic, ok := e.completeFailedRendererRecovery(args); ok {
+		notifyProcessFailedObserver(diagnostic)
+	}
 	if e.NavigationCompletedCallback != nil {
 		e.NavigationCompletedCallback(sender, args)
 	}
 	return 0
 }
 
+func (e *Chromium) NavigationStarting(_ *ICoreWebView2, args *ICoreWebView2NavigationStartingEventArgs) uintptr {
+	if !e.processRecovery.hasPending() {
+		return 0
+	}
+	navigationID, err := args.GetNavigationID()
+	if err != nil {
+		e.nonFatalErrorCallback(fmt.Errorf("read WebView2 reload navigation ID: %w", err))
+		return 0
+	}
+	// Renderer recovery is armed immediately before Reload on WebView2's STA.
+	// Bind the first subsequent top-level navigation and accept only its exact
+	// completion ID; programmatic Reload is not reported as user initiated.
+	e.processRecovery.bindNavigation(navigationID)
+	return 0
+}
+
 func (e *Chromium) ProcessFailed(sender *ICoreWebView2, args *ICoreWebView2ProcessFailedEventArgs) uintptr {
+	diagnostic := collectProcessFailedDiagnostic(args)
+	if diagnostic.Kind == COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED {
+		// Wails calls os.Exit(-1) for this kind. Persist the native details before
+		// control reaches the public callback so the fatal event is not lost.
+		notifyProcessFailedObserver(diagnostic)
+	}
 	if e.ProcessFailedCallback != nil {
 		e.ProcessFailedCallback(sender, args)
 	}
@@ -578,29 +615,76 @@ func (e *Chromium) ProcessFailed(sender *ICoreWebView2, args *ICoreWebView2Proce
 	// WebView2 creates a replacement renderer after a main-frame renderer exit,
 	// but leaves it on an error page. A renderer reported as unresponsive also
 	// needs a native COM reload because JavaScript in that process may no longer
-	// run. Keep recovery below the public callback so Wails/Reasonix records the
-	// original failure first, and throttle it to avoid a crash/reload loop.
-	kind, err := args.GetProcessFailedKind()
-	if err == nil && e.shouldReloadFailedRenderer(kind, time.Now()) {
-		if err := sender.Reload(); err != nil {
-			e.errorCallback(fmt.Errorf("reload failed WebView2 renderer: %w", err))
-		}
+	// run. Reload returning S_OK only means the navigation was accepted, so wait
+	// for NavigationCompleted before publishing the recovery outcome. Repeated
+	// renderer events are suppressed during the recovery cooldown.
+	kind := diagnostic.Kind
+	if kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED ||
+		kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE {
+		e.handleFailedRendererRecovery(diagnostic, time.Now(), sender.Reload)
+	} else if kind != COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED {
+		notifyProcessFailedObserver(diagnostic)
 	}
 	return 0
 }
 
-func (e *Chromium) shouldReloadFailedRenderer(kind COREWEBVIEW2_PROCESS_FAILED_KIND, now time.Time) bool {
-	if kind != COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED &&
-		kind != COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE {
-		return false
+func (e *Chromium) handleFailedRendererRecovery(diagnostic ProcessFailedDiagnostic, now time.Time, reload func() error) {
+	if !e.beginFailedRendererRecovery(diagnostic, now) {
+		// Cooldown suppresses another native reload, not the diagnostic event.
+		// Recording it as not_applicable preserves every renderer failure while
+		// keeping recovery bounded to one attempt.
+		diagnostic.Recovery = "not_applicable"
+		notifyProcessFailedObserver(diagnostic)
+		return
 	}
-	e.processRecoveryMu.Lock()
-	defer e.processRecoveryMu.Unlock()
-	if !e.lastProcessRecovery.IsZero() && now.Sub(e.lastProcessRecovery) < reasonixProcessRecoveryCooldown {
-		return false
+	if err := reload(); err != nil {
+		if failed, ok := e.finishFailedRendererRecovery("reload_failed"); ok {
+			notifyProcessFailedObserver(failed)
+		}
+		e.nonFatalErrorCallback(fmt.Errorf("reload failed WebView2 renderer: %w", err))
 	}
-	e.lastProcessRecovery = now
-	return true
+}
+
+func (e *Chromium) beginFailedRendererRecovery(diagnostic ProcessFailedDiagnostic, now time.Time) bool {
+	return e.processRecovery.begin(
+		diagnostic,
+		now,
+		reasonixProcessRecoveryCooldown,
+		reasonixProcessRecoveryTimeout,
+		func(failed ProcessFailedDiagnostic) {
+			failed.Recovery = "reload_failed"
+			notifyProcessFailedObserver(failed)
+		},
+	)
+}
+
+func (e *Chromium) completeFailedRendererRecovery(args *ICoreWebView2NavigationCompletedEventArgs) (ProcessFailedDiagnostic, bool) {
+	navigationID, err := args.GetNavigationID()
+	if err != nil {
+		e.nonFatalErrorCallback(fmt.Errorf("read WebView2 completed navigation ID: %w", err))
+		return ProcessFailedDiagnostic{}, false
+	}
+	diagnostic, ok := e.processRecovery.completeNavigation(navigationID)
+	if !ok {
+		return ProcessFailedDiagnostic{}, false
+	}
+	recovery := "reload_failed"
+	if succeeded, err := args.GetIsSuccess(); err == nil && succeeded {
+		recovery = "reload_succeeded"
+	} else if err != nil {
+		e.nonFatalErrorCallback(fmt.Errorf("read WebView2 renderer reload outcome: %w", err))
+	}
+	diagnostic.Recovery = recovery
+	return diagnostic, true
+}
+
+func (e *Chromium) finishFailedRendererRecovery(recovery string) (ProcessFailedDiagnostic, bool) {
+	diagnostic, ok := e.processRecovery.finish()
+	if !ok {
+		return ProcessFailedDiagnostic{}, false
+	}
+	diagnostic.Recovery = recovery
+	return diagnostic, true
 }
 
 func (e *Chromium) NotifyParentWindowPositionChanged() error {

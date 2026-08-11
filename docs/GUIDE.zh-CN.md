@@ -62,8 +62,12 @@ reasoning_language = "auto"      # 可见思考过程语言：auto|zh|en
 # max_subagent_depth = 2              # 子代理嵌套委派深度；设为 1 可恢复旧的单层边界
 # max_subagent_concurrency = 6        # 会话级子代理总并发（task/fleet/skills）
 # max_parallel_writers = 3            # 互不重叠 write_paths 时的并行写入上限
-tool_result_snip_ratio = 0.6       # 在摘要 compaction 前先缩短旧工具输出
-# context_editing = "native"       # 仅官方 Anthropic 端点显式启用；默认 local
+# compact_ratio 是唯一自动维护阈值（默认 0.85；预设 0.70/0.80/0.85）
+# max_output_tokens = 0            # 推荐：自动（DeepSeek 默认 high → 约 64K；不是无限）
+# max_output_tokens = 32768        # 普通编码 / 控制费用
+# max_output_tokens = 65536        # 重推理、长工具链
+# max_output_tokens = 131072       # 仅在反复 finish_reason=length 时再考虑
+# max_output_tokens 不参与 compact_ratio；只在发送阶段裁剪本轮最长输出
 
 [[providers]]
 name        = "deepseek-flash"
@@ -891,11 +895,18 @@ Goal 是长期目标的统一运行机制。Reasonix 会持续推进，直到完
 普通聊天不会隐式改变协作模式；需要长目标时，请在输入框中明确选择 Goal，或使用 `/goal` 启动。
 
 Goal 按类别运行在**轮次**预算内：简单目标 10 轮，写入型 20 轮，研究型 40 轮；
-连续 4 轮没有宿主可验证进展会暂停。累计 token 仍会统计并展示（便于诊断），但**没有
+这是跨 Run 的 continuation backstop。用户未显式配置 `max_steps` 时，每次 Goal Run 默认
+最多 16 个模型轮次，随后获得一次仅总结响应；若仍未完成则以 `goal_run_budget` 可恢复暂停。
+进展按 Goal 范围的新颖性计算：新的读取/搜索
+结果、mutation、verification、todo/签收变化和 review 会推进目标；完全相同的工具、参数与
+结果重复不会推进。单次 Run 内，相同宿主失败连续 3 次，或成功工具轮连续 6 次没有新证据，
+会以 `goal_stuck` 可恢复暂停。跨 Goal turn 的无进展数只做观测，不再按 4/6/10 强制暂停。
+累计 token 与真实 provider 请求数仍会统计并展示（便于诊断），但**没有
 token 硬上限**，也不会在 provider 请求前做 token 准入拦截。Goal 中只陈述 BUG/崩溃/异常
 且未要求分析或禁止修改时，默认按写入型轮数类别。暂停会保留 Goal、todo、Delivery
-checkpoint 与运行历史——用 `/goal resume` 继续（轮次型暂停会追加一档同类别轮数），
-`/goal pause` 可手动暂停运行中的目标，`/goal status` 显示完整的轮次/累计 token/无进展
+checkpoint 与运行历史——用 `/goal resume` 继续（外层轮次型暂停会追加一档同类别轮数，
+Run 预算/结构化卡死暂停只开启新 Run，不增加外层额度），`/goal pause` 可手动暂停运行中的目标，
+`/goal status` 显示完整的轮次/累计 token/请求数/观测性无进展
 运行摘要。每个目标 turn 结束时，模型通过结构化的 `update_goal` 工具报告
 continue/complete/blocked；没有报告时由独立的有界 evaluator 判定一次，任何 evaluator
 故障都会安全暂停目标而不是静默继续。
@@ -906,7 +917,7 @@ Output format、Constraints 和 Pause policy。Goal 模式会把这些部分当�
 
 带有明显长周期信号或多个独立阶段的目标会自动获得研究型预算，不需要配置单独的研究模式或
 运行时。Goal 状态只保存在普通会话 sidecar；进展只来自宿主工具 receipt、canonical todo、
-`complete_step`、review 与 Delivery checkpoint，最终由 Delivery readiness 和有界 Goal
+`complete_step`、review 与 Delivery checkpoint 中的新证据，最终由 Delivery readiness 和有界 Goal
 evaluator 判定。旧 `.reasonix/autoresearch/<task-id>/` 目录保持只读：显式引用旧路径时可恢复为
 普通 Goal，但新版本不会创建或改写这些目录。旧预算 flags 仅为兼容继续接受，不再出现在帮助和补全中。
 
@@ -962,6 +973,29 @@ Reasonix 会自动管理正常执行：活跃 Todo 连续 8 个工具调用轮�
 升级时仍可解析已有的 `[agent].max_steps` 和 `planner_max_steps`，但其值会被忽略，并在一次性
 迁移提示后从配置中移除，避免隐藏的旧上限截断自动进度管理或子 Agent 的继承任务。确实需要
 为单次运行设置预算时使用 CLI `--max-steps`；无人值守 Bot 仍保留 `[bot].max_steps`。
+
+**普通对话任务默认没有任何上限**——轮数、token、时长、花费都不限。它一直跑到模型自己
+结束、自适应守卫判定它不再产生进展，或者你手动停止为止。
+
+需要时可以自行开启花费闸门。它约束的是**整个任务**（包括每一次"继续"，直到你开始不相关的
+新工作）；越过阈值时会产出一次不带工具的总结然后暂停，已完成的工作全部保留，下一条消息
+即可继续。
+
+```toml
+[agent]
+task_cost_budget = 5.0            # 模型定价货币
+task_time_budget_minutes = 60     # 整个任务累计的墙钟时长
+```
+
+两个维度都默认关闭，也都没有默认值——**该不该停是只有你能下的判断**：金额在不同模型之间
+不可移植（对便宜模型足够宽松的额度，换成前沿模型可能问两句就触发），而任务跑得久，既可能
+是失控，也可能就是你要的活。
+
+成本维度只对有定价的模型生效：没有价目表时该维度直接不参与判断，而不是把任务读成免费；
+免费或本地模型请改用时长维度。
+
+轮数刻意不作为一个维度。能跑到很高轮数却没花多少钱的任务，说明它每一轮都又便宜又快，
+这恰恰是最不该打断的情况。确实想按轮数限制某次运行时，用一次性的 `--max-steps`。
 
 Subagent skills 默认继承执行器模型。设置 `subagent_model` 可让它们统一走另一个已配置
 模型；设置 `subagent_models` 则只覆盖 `review`、`security_review` 等指定 skill。

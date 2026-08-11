@@ -1,6 +1,7 @@
 // Run: tsx src/__tests__/context-panel-breakdown.test.ts
 
 import { cacheHitTone, contextBreakdown, contextCostDisplay, contextSessionCache, contextSourceRows, contextUsageRefreshKey, contextWindowStatus, formatCacheHitRate, formatMetricTokens, formatSharePercent, liveTurnUsageBreakdown } from "../components/ContextPanel";
+import { contextWindowPercentages } from "../lib/contextWindow";
 import { currencySymbol, formatMoney, formatMoneyLocalized } from "../lib/money";
 import type { WireUsage } from "../lib/types";
 
@@ -168,10 +169,21 @@ eq(
 
 console.log("\ncontext window status");
 
+eq(
+  contextWindowPercentages(1_400_000, 1_000_000),
+  { raw: 140, display: 100 },
+  "over-limit context preserves the raw percentage while capping the meter fill",
+);
+eq(
+  contextWindowPercentages(1_001, 1_000),
+  { raw: 101, display: 100 },
+  "just-over-limit context remains visibly over 100 percent after integer formatting",
+);
 eq(contextWindowStatus(33, 80), { tone: "good", key: "context.windowStatusHealthy" }, "low usage stays healthy");
 eq(contextWindowStatus(72, 80), { tone: "notice", key: "context.windowStatusWatch" }, "usage near compact threshold warns early");
 eq(contextWindowStatus(80, 80), { tone: "warn", key: "context.windowStatusPastCompact" }, "compact threshold reached takes warning tone");
 eq(contextWindowStatus(91, 80), { tone: "warn", key: "context.windowStatusNearLimit" }, "near hard limit overrides compact status");
+eq(contextWindowStatus(140, 80), { tone: "warn", key: "context.windowStatusOverLimit" }, "over-limit context has a distinct status");
 
 console.log("\ncontext panel cost");
 

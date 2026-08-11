@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"reasonix/internal/config"
+	"reasonix/internal/extension/providerext"
 	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
 )
@@ -197,7 +198,7 @@ func mergeExtensionModelRefs(base []string, catalog []provider.Descriptor) []str
 	}
 	for _, d := range catalog {
 		ref := strings.TrimSpace(d.Ref)
-		if ref == "" || seen[ref] {
+		if ref == "" || providerext.PluginRefOwner(ref) == "" || seen[ref] {
 			continue
 		}
 		seen[ref] = true

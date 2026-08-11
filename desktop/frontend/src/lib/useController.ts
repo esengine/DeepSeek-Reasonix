@@ -1,14 +1,14 @@
-// useController is the frontend's state machine over the agent's event stream. It
-// maintains per-tab state so background tabs preserve their streaming output, tool
-// states, and approvals when the user switches away and back. The active tab's state
-// is what components render.
+// useController is the frontend's state machine over the agent event stream. Per-tab
+// state preserves background streaming output, tools, and approvals across tab switches;
+// components render only the active tab's state.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { asArray } from "./array";
 import { addBreadcrumb } from "./breadcrumbs";
 import { app, onEvent, onReady, onRuntimeRebuilt, onTabMeta, onTopicActivation } from "./bridge";
 import { invalidateCache } from "./composerHistory";
-import { formatContextMaintenanceNotice } from "./contextMaintenanceTypes";
+import { formatInboxCancelError, inboxSteerQueuedMessage } from "./inboxError";
+import { formatContextMaintenanceNotice, isNewMaintenanceOperation, rememberMaintenanceOperation } from "./contextMaintenanceTypes";
 import { formatGuardianAssessmentNotice } from "./guardianEvents";
 import { invalidateSharedQuery } from "./queryCoalesce";
 import { createRafBatch } from "./rafBatch";
@@ -16,7 +16,7 @@ import { aliasActivationRequest, noteActivationRequested, noteActivationSettled,
 import { applyLiveSegments, coalesceStreamDeltas, completeLiveReasoning, type StreamDeltaEntry, type StreamSegment } from "./streamDeltaBatch";
 import { getTranscriptStore } from "./transcriptStore";
 import { uiPerfTracker } from "./uiPerf";
-import { t, type DictKey } from "./i18n";
+import { getLocale, t, type DictKey } from "./i18n";
 import { sameTodoList } from "./todoVisibility";
 import { fileDiffFromWire, summarize, summarizeFileDiff, type ToolFileDiff } from "./tools";
 import { modeHasAutoApproveTools, normalizeMode, normalizeToolApprovalMode } from "./types";
@@ -467,6 +467,9 @@ interface State {
   // title…). Drives right-panel snapshot refreshes so sub-agent activity keeps
   // the session metrics live; state.usage stays executor-gated for the gauge.
   usageSeq: number;
+  // Bounded set of context_maintenance operationIds already shown as notices
+  // so reconnect/replay does not insert duplicate timeline cards.
+  seenMaintenanceOps: string[];
   // Extension UI surfaces (stage 8b2). See the ExtensionStatusEntry block
   // above for the keying/lifecycle rules.
   extensionStatuses: Record<string, ExtensionStatusEntry>;
@@ -524,6 +527,7 @@ export const initialState: State = {
   sessionGen: 0,
   contextPanelSeq: 0,
   usageSeq: 0,
+  seenMaintenanceOps: [],
   extensionStatuses: {},
   extensionNotifications: [],
   extensionGenerations: {},
@@ -1665,15 +1669,15 @@ function applyEvent(s: State, e: WireEvent): State {
       // subagent, and auxiliary usage still contributes to session totals and
       // usageSeq, but must not close or inflate the executor TPS interval.
       const settled = updateContextGauge ? endTurnModelActivity(s, Date.now(), true) : s;
-      const hasRequestContext = (e.usage?.contextPromptTokens ?? 0) > 0 || (e.usage?.contextCompletionTokens ?? 0) > 0;
+      const hasRequestCompletion = (e.usage?.contextCompletionTokens ?? 0) > 0;
       const requestModelMs = updateContextGauge ? (settled.pendingRequestModelMs ?? 0) : 0;
-      const requestTokens = updateContextGauge ? (hasRequestContext ? (e.usage?.contextCompletionTokens ?? 0) : (e.usage?.completionTokens ?? 0)) : 0;
+      const requestTokens = updateContextGauge ? (hasRequestCompletion ? (e.usage?.contextCompletionTokens ?? 0) : (e.usage?.completionTokens ?? 0)) : 0;
       const lastRequestTps = updateContextGauge ? (requestTokens > 0 && requestModelMs >= 500 ? requestTokens / (requestModelMs / 1000) : null) : s.lastRequestTps;
       // Context* is the latest sampling attempt; other token fields are billable aggregates.
       let used = settled.context.used;
-      if (e.usage && settled.context.window && updateContextGauge) used = hasRequestContext
-        ? (e.usage.contextPromptTokens ?? 0) + (e.usage.contextCompletionTokens ?? 0)
-        : (e.usage.promptTokens ?? 0) + (e.usage.completionTokens ?? 0);
+      if (e.usage && settled.context.window && updateContextGauge) used = (e.usage.contextPromptTokens ?? 0) > 0
+        ? (e.usage.contextPromptTokens ?? 0)
+        : (e.usage.promptTokens ?? 0);
       const turnTokens = settled.turnTokens + (e.usage?.completionTokens ?? 0);
       const turnOutputTokens = updateContextGauge
         ? settled.turnOutputTokens + (e.usage?.completionTokens ?? 0)
@@ -1701,7 +1705,9 @@ function applyEvent(s: State, e: WireEvent): State {
     case "context_maintenance": {
       const m = e.maintenance;
       if (!m || m.status === "noop") return s;
-      return appendNoticeToState(s, m.status === "failed" ? "warn" : "info", formatContextMaintenanceNotice(m, t), m.reason);
+      if (!isNewMaintenanceOperation(s.seenMaintenanceOps, m.operationId)) return s;
+      const next = appendNoticeToState(s, m.status === "failed" ? "warn" : "info", formatContextMaintenanceNotice(m, t), m.reason);
+      return { ...next, seenMaintenanceOps: rememberMaintenanceOperation(s.seenMaintenanceOps, m.operationId) };
     }
     case "phase":
       return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "phase", id: `p${s.seq}`, text: e.text ?? "" }] };
@@ -2264,6 +2270,7 @@ const noticeCodeKeys: Record<string, DictKey> = {
   empty_final: "notice.emptyFinal",
   executor_handoff: "notice.executorHandoff",
   tool_budget: "notice.toolBudget",
+  prompt_queued: "notice.promptQueued",
   loop_guard: "notice.loopGuard",
   workspace_lease: "notice.workspaceLease",
   cancelled_turn_display: "notice.cancelledTurnDisplay",
@@ -3702,7 +3709,7 @@ export function useController() {
     const receipt = await app.EnqueueInboxSteer(tabId, text, text, "");
     if (receipt?.error) throw new Error(receipt.error);
     if (receipt?.disposition && receipt.disposition !== "steer_accepted") {
-      throw new Error("the turn ended before guidance could be applied; it will remain queued for the next turn");
+      throw new Error(inboxSteerQueuedMessage(getLocale()));
     }
   }, []);
 
@@ -3738,7 +3745,7 @@ export function useController() {
     cancelRequest
       .then(() => scheduleCancelReconcile(tabId, 0, cancelHydrateGeneration))
       .catch((error) => {
-        dispatchTo(tabId, { type: "local_notice", level: "warn", text: `Cancel failed: ${errorMessage(error)}` });
+        dispatchTo(tabId, { type: "local_notice", level: "warn", text: formatInboxCancelError(error, getLocale()) });
       });
   }, [bumpCancelHydrateSeq, dispatchTo, scheduleCancelReconcile]);
 

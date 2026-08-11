@@ -235,8 +235,9 @@ func TestResearchGoalUsesUnifiedGoalBudgetWithoutArchive(t *testing.T) {
 	c.Resume(sess, sessionPath)
 	c.SetGoalWithResearchMode("fix the typo and add a test", GoalResearchOn)
 	defer c.Close()
-	if got := c.GoalRuntime().TurnsLimit; got != 40 {
-		t.Fatalf("research Goal turns limit = %d, want 40", got)
+	// The class still drives behaviour; it just no longer mints a turn quota.
+	if got := c.goals.budgetClass; got != budgetClassResearch {
+		t.Fatalf("research Goal budget class = %q, want %q", got, budgetClassResearch)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".reasonix", "autoresearch")); !os.IsNotExist(err) {
 		t.Fatalf("research Goal created legacy archive: %v", err)
@@ -261,8 +262,8 @@ func TestLegacyGoalSidecarMigratesToResearchBudgetWithoutTaskID(t *testing.T) {
 	c := New(Options{WorkspaceRoot: root, SessionDir: root, Executor: exec})
 	c.Resume(sess, sessionPath)
 	defer c.Close()
-	if got := c.GoalRuntime().TurnsLimit; got != 40 {
-		t.Fatalf("migrated Goal turns limit = %d, want 40", got)
+	if got := c.goals.budgetClass; got != budgetClassResearch {
+		t.Fatalf("migrated Goal budget class = %q, want %q", got, budgetClassResearch)
 	}
 	if got := c.Goal(); got != "investigate runtime" {
 		t.Fatalf("migrated Goal = %q, want sidecar goal", got)
@@ -361,8 +362,8 @@ func TestExplicitLegacyTaskPathRestoresOriginalGoal(t *testing.T) {
 	if got := c.Goal(); got != "find the original root cause" {
 		t.Fatalf("Goal() = %q, want original archive goal", got)
 	}
-	if got := c.GoalRuntime().TurnsLimit; got != 40 {
-		t.Fatalf("turns limit = %d, want research budget", got)
+	if got := c.goals.budgetClass; got != budgetClassResearch {
+		t.Fatalf("budget class = %q, want %q", got, budgetClassResearch)
 	}
 	if got := c.GoalStatus(); got != GoalStatusRunning {
 		t.Fatalf("status = %q", got)
@@ -882,14 +883,18 @@ func TestCompleteRemainingGoalTodosEdgeCases(t *testing.T) {
 
 // TestRepeatedCompleteWithIncompleteTodosPausesOnBudget verifies that a goal
 // whose model keeps reporting complete while todos stay unfinished is
-// intercepted every turn (no override path) and finally pauses on the turn
+// intercepted every turn (no override path) and finally pauses on its spend
 // budget instead of completing.
 func TestRepeatedCompleteWithIncompleteTodosPausesOnBudget(t *testing.T) {
-	// The write-class budget is 20 turns; give the scripted provider a full
-	// pair per turn so the model keeps reporting complete each time.
+	// Nothing bounds an unattended loop unless the user configures it, so this
+	// sets a token budget and bills a turn against it.
 	turns := flattenTurns()
 	for range 21 {
 		turns = append(turns, goalToolTurn(GoalStatusComplete, "", "")...)
+	}
+	for i := range turns {
+		turns[i] = append([]provider.Chunk{{Type: provider.ChunkUsage,
+			Usage: &provider.Usage{PromptTokens: 100, CompletionTokens: 10, TotalTokens: 110, RequestCount: 1}}}, turns[i]...)
 	}
 	prov := &scriptedTurns{turns: turns}
 	ag := agent.New(prov, goalRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
@@ -899,8 +904,9 @@ func TestRepeatedCompleteWithIncompleteTodosPausesOnBudget(t *testing.T) {
 
 	done := make(chan event.Event, 1)
 	c := New(Options{
-		Runner:   ag,
-		Executor: ag,
+		Runner:          ag,
+		Executor:        ag,
+		GoalTokenBudget: 1,
 		Sink: event.FuncSink(func(e event.Event) {
 			if e.Kind == event.TurnDone {
 				done <- e
@@ -909,7 +915,7 @@ func TestRepeatedCompleteWithIncompleteTodosPausesOnBudget(t *testing.T) {
 	})
 
 	c.Submit("/goal fix everything")
-	<-done // wait for the whole loop (intercept until the turn budget pauses)
+	<-done // wait for the whole loop (intercept until the spend budget pauses)
 
 	if c.GoalStatus() == GoalStatusComplete {
 		t.Fatal("goal must not complete with incomplete todos")
@@ -918,11 +924,11 @@ func TestRepeatedCompleteWithIncompleteTodosPausesOnBudget(t *testing.T) {
 		t.Fatalf("GoalStatus() = %q, want blocked (budget pause)", got)
 	}
 	rt := c.GoalRuntime()
-	if rt.StopCause == "" {
-		t.Fatal("expected a stop cause for the budget pause")
+	if rt.StopCause != stopCauseBudgetSpend {
+		t.Fatalf("stop cause = %q, want the spend budget", rt.StopCause)
 	}
-	if rt.TurnsUsed != rt.TurnsLimit {
-		t.Fatalf("turn budget was not enforced: %d/%d", rt.TurnsUsed, rt.TurnsLimit)
+	if rt.TokensUsed < rt.TokensLimit {
+		t.Fatalf("spend budget was not enforced: %d/%d tokens", rt.TokensUsed, rt.TokensLimit)
 	}
 }
 

@@ -3,6 +3,7 @@ import { Activity, CircleDollarSign, CircleGauge, Database, FileOutput, Folder, 
 import { AnchoredPopover } from "./AnchoredPopover";
 import { RemoteConnectionErrorDialog } from "./RemoteConnectionErrorDialog";
 import { Tooltip } from "./Tooltip";
+import { contextWindowPercentages } from "../lib/contextWindow";
 import { useI18n, type Translator } from "../lib/i18n";
 import { formatMoneyLocalized } from "../lib/money";
 import { normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
@@ -14,8 +15,7 @@ import { useRemoteStore } from "../store/remote";
 type StatusBarLabelStyle = "icon" | "text";
 
 function formatRate(hit: number, denom: number): string | null {
-  if (denom <= 0) return null;
-  return ((hit / denom) * 100).toFixed(2);
+  return denom > 0 ? ((hit / denom) * 100).toFixed(2) : null;
 }
 
 // nowRate is the SINGLE-TURN prompt cache-hit % (latest turn) — the higher,
@@ -230,7 +230,7 @@ export function StatusBar({
   extensionStatuses?: ExtensionStatusEntry[];
 }) {
   const { locale, t } = useI18n();
-  const pct = context.window ? Math.min(100, Math.round((context.used / context.window) * 100)) : null;
+  const pct = context.window > 0 ? contextWindowPercentages(context.used, context.window).raw : null;
   const compactPct = context.compactRatio ? Math.round(context.compactRatio * 100) : null;
   const compactNear = pct !== null && compactPct !== null && pct >= Math.max(0, compactPct - 10);
   const compactReached = pct !== null && compactPct !== null && pct >= compactPct;

@@ -26,6 +26,7 @@ function ok(cond: boolean, label: string) {
 const here = dirname(fileURLToPath(import.meta.url));
 const appSource = readFileSync(resolve(here, "../App.tsx"), "utf8");
 const bridgeSource = readFileSync(resolve(here, "../lib/bridge.ts"), "utf8");
+const configWarningsSource = readFileSync(resolve(here, "../lib/useConfigLoadWarnings.ts"), "utf8");
 const settingsSource = readFileSync(resolve(here, "../components/SettingsPanel.tsx"), "utf8");
 const settingsNavigationSource = readFileSync(resolve(here, "../components/SettingsNavigation.tsx"), "utf8");
 const stylesSource = readFileSync(resolve(here, "../styles.css"), "utf8") +
@@ -44,6 +45,17 @@ ok(
 ok(
   appSource.includes("app.DesktopStartupSettings()"),
   "App loads startup chrome preferences through the lightweight settings call",
+);
+ok(
+  configWarningsSource.includes('EventsOn("config:load-warnings"') &&
+    appSource.includes("useConfigLoadWarnings()") &&
+    appSource.includes("settings.configWarningsRevision"),
+  "runtime config warnings update the persistent desktop banner",
+);
+ok(
+  configWarningsSource.includes("revision < latestRevision.current") &&
+    configWarningsSource.includes("seenKeys.current.has(key)"),
+  "startup and reload barriers reject stale events while repeated session builds stay deduplicated",
 );
 ok(
   appSource.includes('hydrateReasoningDisplayMode("auto", false);'),

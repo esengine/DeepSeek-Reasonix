@@ -15,34 +15,66 @@ import (
 	_ "reasonix/internal/tool/builtin"
 )
 
-func TestTodoProgressGuardPausesSemanticToolDrift(t *testing.T) {
+// stalledTodoTurns drives a todo that never advances: the first unique read
+// renews the lease, exact repeats after it do not.
+func stalledTodoTurns(extra int) []testutil.Turn {
 	turns := []testutil.Turn{{ToolCalls: []provider.ToolCall{{
 		ID: "todo", Name: "todo_write",
 		Arguments: `{"todos":[{"content":"finish the task","status":"in_progress"}]}`,
 	}}}}
-	// The first unique read renews the lease; exact repeats after it do not.
-	for i := range maxTodoStallRounds + 1 {
+	for i := range todoProgressNudgeRounds*2 + extra {
 		turns = append(turns, testutil.Turn{ToolCalls: []provider.ToolCall{{
 			ID: fmt.Sprintf("read-%d", i), Name: "inspect", Arguments: `{"path":"same"}`,
 		}}})
 	}
+	return turns
+}
 
+func stalledTodoAgent(t *testing.T, turns []testutil.Turn) (*Agent, *testutil.MockProvider) {
+	t.Helper()
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "inspect", readOnly: true})
 	reg.Add(mustBuiltinTool(t, "todo_write"))
 	mp := testutil.NewMock("m", turns...)
-	a := New(mp, reg, NewSession(""), Options{}, event.Discard)
+	return New(mp, reg, NewSession(""), Options{}, event.Discard), mp
+}
 
-	err := a.Run(context.Background(), "work until the todo is complete")
-	var pause *todoStallPause
-	if !errors.As(err, &pause) {
-		t.Fatalf("Run error = %v, want todoStallPause", err)
-	}
-	if mp.CallCount() != maxTodoStallRounds+2 {
-		t.Fatalf("provider calls = %d, want %d", mp.CallCount(), maxTodoStallRounds+2)
-	}
-	if !sessionContains(a, "Host progress check") {
-		t.Fatal("semantic drift did not receive the adaptive progress nudge")
+// A stalled todo never ends a run, under Goal or ordinary chat. The model is
+// asked to reassess once; what it does after that is its own call, and the
+// zero-evidence ladder already owns the structural stop on the same receipts.
+func TestTodoProgressGuardNeverPausesARun(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ctx  func() context.Context
+	}{
+		{"chat", context.Background},
+		{"goal", func() context.Context {
+			return WithDeliveryExecutionScope(context.Background(), DeliveryExecutionScope{ID: "goal-1"})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			turns := append(stalledTodoTurns(4), testutil.Turn{Text: "Done."})
+			a, mp := stalledTodoAgent(t, turns)
+
+			err := a.Run(tc.ctx(), "work until the todo is complete")
+			if err != nil && !isToolLoopPause(err) {
+				t.Fatalf("Run error = %v", err)
+			}
+			if err != nil {
+				// Goal's structural guard may stop first on its own terms; what
+				// must not exist is a stop keyed to the todo streak.
+				if got := PauseClass(err); got == "todo_stall" {
+					t.Fatalf("pause class = %q, want the todo stall pause gone", got)
+				}
+				return
+			}
+			if got, want := mp.CallCount(), len(turns); got != want {
+				t.Fatalf("provider calls = %d, want all %d turns to run past the old threshold", got, want)
+			}
+			if !sessionContains(a, "Host progress check") {
+				t.Fatal("the reassessment nudge went missing; only the pause was meant to go")
+			}
+		})
 	}
 }
 

@@ -31,7 +31,8 @@ func goalStateNeedsMigration(state goalState, normalizedBudgetClass string) bool
 		expectedMode = GoalResearchOn
 	}
 	return state.TokensLimit != 0 || state.ResearchMode != expectedMode ||
-		(state.BudgetClass != "" && state.BudgetClass != normalizedBudgetClass)
+		(state.BudgetClass != "" && state.BudgetClass != normalizedBudgetClass) ||
+		(state.NoProgressLimit > 0 && state.NoProgressLimit != resolvedNoProgressLimit(state.NoProgressLimit, normalizedBudgetClass))
 }
 
 // blockLegacyRestore fails closed only while the decoded sidecar still owns the
@@ -137,11 +138,9 @@ func (g *goalMachine) fillGoalTextIfEmpty(expectedEpoch uint64, goal string) (ui
 		g.stopCause, g.block = "", ""
 	}
 	g.budgetClass = budgetClassResearch
-	if g.turnsLimit < budgetQuota(g.budgetClass) {
-		g.turnsLimit = budgetQuota(g.budgetClass)
-	}
+	g.turnsLimit = 0 // retired quota; a migrated goal is not re-bounded by turns
 	if g.noProgressLimit == 0 {
-		g.noProgressLimit = defaultNoProgressLimit
+		g.noProgressLimit = noProgressQuota(g.budgetClass)
 	}
 	if g.scopeID == "" {
 		g.scopeID = newGoalScopeID()
@@ -168,11 +167,9 @@ func (g *goalMachine) resumeLegacyArchive(expectedEpoch uint64, goal string) (ui
 	g.status = GoalStatusRunning
 	g.stopCause, g.block = "", ""
 	g.budgetClass = budgetClassResearch
-	if g.turnsLimit < budgetQuota(g.budgetClass) {
-		g.turnsLimit = budgetQuota(g.budgetClass)
-	}
+	g.turnsLimit = 0 // retired quota; a migrated goal is not re-bounded by turns
 	if g.noProgressLimit == 0 {
-		g.noProgressLimit = defaultNoProgressLimit
+		g.noProgressLimit = noProgressQuota(g.budgetClass)
 	}
 	if g.scopeID == "" {
 		g.scopeID = newGoalScopeID()

@@ -12,6 +12,8 @@ type ContextMaintenanceSnapshot struct {
 	SnipTrigger       int
 	FoldTrigger       int
 	ForceTrigger      int
+	TriggerTokens     int
+	CheckpointState   string
 	HardInputCeiling  int
 	Headroom          int
 	ProjectionVersion uint64
@@ -26,37 +28,62 @@ func (a *Agent) ContextMaintenanceSnapshot() ContextMaintenanceSnapshot {
 	canonical, version := a.session.snapshotMessagesVersion()
 	a.compactionMu.Lock()
 	state := a.compactionState
+	checkpointState := a.checkpointState
 	a.compactionMu.Unlock()
 	visible := canonical
-	if projectionValid(state, canonical, version, a.currentPromptCacheKey()) {
+	valid := projectionValid(state, canonical, version, a.currentPromptCacheKey())
+	if valid {
 		if projected := modelVisibleFromProjection(state.Projection, canonical); len(projected) > 0 {
 			visible = projected
 		}
 	}
-	_, snip, fold := a.compactThresholds()
+	trigger := a.compactTrigger()
+	// UI checkpoint label requires a still-valid covered prefix, not merely
+	// that the sidecar loaded.
+	uiCheckpoint := "none"
+	if valid && len(state.Projection.Messages) > 0 {
+		uiCheckpoint = stateCheckpointState(checkpointState, state)
+	}
 	snapshot := ContextMaintenanceSnapshot{
-		CanonicalTokens:   a.estimatedPromptTokens(provider.ModelMessages(canonical)),
-		ProjectedTokens:   a.estimatedPromptTokens(provider.ModelMessages(visible)),
-		SnipTrigger:       snip,
-		FoldTrigger:       fold,
-		ForceTrigger:      a.forceCompactThreshold(fold),
+		CanonicalTokens:   a.estimatedVisibleRequestTokens(canonical),
+		ProjectedTokens:   a.estimatedVisibleRequestTokens(visible),
+		FoldTrigger:       trigger,
+		TriggerTokens:     trigger,
+		CheckpointState:   uiCheckpoint,
 		HardInputCeiling:  a.hardInputCeiling(),
 		ProjectionVersion: state.Projection.ProjectionVersion,
 	}
 	for _, msg := range visible {
 		if isCompactionSummary(msg) {
-			snapshot.SummaryTokens += estimateMessagesTokens([]provider.Message{msg})
+			snapshot.SummaryTokens += a.estimatedPromptTokens([]provider.Message{msg})
 		}
 	}
 	snapshot.Headroom = max(0, snapshot.HardInputCeiling-snapshot.ProjectedTokens)
 	currentHash := a.contextMaintenanceInputHash(visible)
-	snapshot.Blocked = state.BlockedInputHash != "" && state.BlockedInputHash == currentHash
 	if state.LastReceipt != nil {
 		receipt := *state.LastReceipt
 		snapshot.LastReceipt = &receipt
-		if receipt.Status == "applied" && (receipt.Action == "snip" || receipt.Action == "prune" || receipt.Action == "native_tool_clear") {
+		if receipt.Status == "applied" && (receipt.Action == "prune" || receipt.Action == "summary") {
 			snapshot.LastSavedTokens = receipt.SavedTokens
 		}
+		// Generation-scoped blocked/failed receipts match contextMaintenanceBlocked.
+		if receipt.Status == "blocked" || receipt.Status == "failed" {
+			snapshot.Blocked = true
+		}
+	}
+	// Legacy sidecars may only have top-level BlockedInputHash.
+	if !snapshot.Blocked && state.BlockedInputHash != "" && state.BlockedInputHash == currentHash {
+		snapshot.Blocked = true
 	}
 	return snapshot
+}
+
+func stateCheckpointState(runtimeState string, state CompactionState) string {
+	if len(state.Projection.Messages) == 0 {
+		return "none"
+	}
+	if runtimeState == "applied" {
+		return "applied"
+	}
+	return "restored"
 }

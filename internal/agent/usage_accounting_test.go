@@ -88,8 +88,12 @@ func TestFinalizeSamplingUsageKeepsLatestPromptContext(t *testing.T) {
 	if got.ContextPromptTokens != 30000 || got.ContextCompletionTokens != 10 {
 		t.Fatalf("context shape = prompt %d completion %d, want latest 30000/10", got.ContextPromptTokens, got.ContextCompletionTokens)
 	}
-	if got.ContextFillTokens() != 30010 {
-		t.Fatalf("ContextFillTokens = %d, want 30010", got.ContextFillTokens())
+	if got.ContextFillTokens() != 30000 {
+		t.Fatalf("ContextFillTokens = %d, want 30000", got.ContextFillTokens())
+	}
+	completionOnly := &provider.Usage{PromptTokens: 500, ContextCompletionTokens: 20}
+	if fill := completionOnly.ContextFillTokens(); fill != 500 {
+		t.Fatalf("completion-only ContextFillTokens = %d, want prompt fallback 500", fill)
 	}
 	if got.CompletionTokens != 30 || got.RequestCount != 3 {
 		t.Fatalf("billable fields = %+v, want summed completion/requests", got)

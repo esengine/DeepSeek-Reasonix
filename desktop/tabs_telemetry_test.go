@@ -351,7 +351,9 @@ func TestTelemetryLastContextRoundTripAndLegacyDefaults(t *testing.T) {
 	}
 }
 
-func TestContextFallbackUsesPersistedExecutorUsageAfterRebind(t *testing.T) {
+// The gauge measures the rebound session's own view, so it no longer needs the
+// persisted last-used fallback. The panel breakdown still comes from telemetry.
+func TestContextGaugeMeasuresLiveViewAfterRebind(t *testing.T) {
 	ag := agent.New(
 		usageProvider{usage: nil},
 		tool.NewRegistry(),
@@ -383,8 +385,8 @@ func TestContextFallbackUsesPersistedExecutorUsageAfterRebind(t *testing.T) {
 	app := &App{tabs: map[string]*WorkspaceTab{"tab": tab}}
 
 	context := app.ContextUsageForTab("tab")
-	if context.Used != 120 || context.Window != 200 {
-		t.Fatalf("context fallback = used:%d window:%d, want 120/200", context.Used, context.Window)
+	if want := tab.Ctrl.ContextMaintenanceSnapshot().ProjectedTokens; context.Used != want || context.Window != 200 {
+		t.Fatalf("context gauge = used:%d window:%d, want %d/200 — the live view, not the persisted 120", context.Used, context.Window, want)
 	}
 	panel := app.ContextPanel("tab")
 	if panel.UsedTokens != 120 ||
@@ -399,7 +401,8 @@ func TestContextFallbackUsesPersistedExecutorUsageAfterRebind(t *testing.T) {
 
 // TestContextFallbackUsesLatestAttemptAfterMultiAttemptUsage locks the stream-
 // recovery telemetry contract: billable Prompt/Completion may be 2×30K, but
-// Last* fields (and rebind fallback) must use Context* from the latest attempt.
+// Last* fields and the panel breakdown must use Context* from the latest
+// attempt. The gauge itself measures the live view instead.
 func TestContextFallbackUsesLatestAttemptAfterMultiAttemptUsage(t *testing.T) {
 	ag := agent.New(
 		usageProvider{usage: nil},
@@ -443,8 +446,8 @@ func TestContextFallbackUsesLatestAttemptAfterMultiAttemptUsage(t *testing.T) {
 
 	app := &App{tabs: map[string]*WorkspaceTab{"tab": tab}}
 	context := app.ContextUsageForTab("tab")
-	if context.Used != 30_002 {
-		t.Fatalf("rebind context Used = %d, want latest fill 30002 (not billable 60005)", context.Used)
+	if want := tab.Ctrl.ContextMaintenanceSnapshot().ProjectedTokens; context.Used != want {
+		t.Fatalf("context gauge = %d, want the live view %d (never the billable 60005)", context.Used, want)
 	}
 	panel := app.ContextPanel("tab")
 	if panel.UsedTokens != 30_002 ||

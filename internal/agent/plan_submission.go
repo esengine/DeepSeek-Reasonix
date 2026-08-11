@@ -14,6 +14,7 @@ import (
 type PlanSubmission struct {
 	mu       sync.Mutex
 	plan     plancontract.Plan
+	previous plancontract.Plan
 	attempts int
 }
 
@@ -48,8 +49,24 @@ func (s *PlanSubmission) Plan() (plancontract.Plan, bool) {
 func (s *PlanSubmission) record(p plancontract.Plan) plancontract.Plan {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.previous = s.plan
 	s.attempts++
 	p.Revision = s.attempts
 	s.plan = p
 	return p
+}
+
+// Revised compares a resubmission against the revision it replaces, so the
+// planner is told what its own edit changed rather than assuming. ok is false
+// for a first submission, which replaces nothing.
+func (s *PlanSubmission) Revised() (plancontract.Diff, bool) {
+	if s == nil {
+		return plancontract.Diff{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.attempts < 2 {
+		return plancontract.Diff{}, false
+	}
+	return plancontract.Compare(s.previous, s.plan), true
 }

@@ -421,21 +421,11 @@ func (c *Config) SetColdResumePrune(enabled bool) error {
 	return nil
 }
 
-// SetCompactRatio updates the user-controlled auto-compaction threshold.
-// Keep the editable range inside the default snip/force guard rails so lowering
-// the threshold cannot accidentally turn normal cache growth into constant
-// compaction, while higher values still retain context-exhaustion headroom.
+// SetCompactRatio updates the sole user-controlled automatic compaction
+// threshold. Allowed range is 0.65–0.85; presets are 0.70 / 0.80 / 0.85.
 func (c *Config) SetCompactRatio(ratio float64) error {
 	if math.IsNaN(ratio) || math.IsInf(ratio, 0) || ratio < 0.65 || ratio > 0.85 {
 		return fmt.Errorf("compact ratio %v: must be between 0.65 and 0.85", ratio)
-	}
-	snip := c.Agent.ToolResultSnipRatio
-	force := c.Agent.CompactForceRatio
-	if snip > 0 && ratio <= snip {
-		return fmt.Errorf("compact ratio %.2f: must be greater than tool result snip ratio %.2f", ratio, snip)
-	}
-	if force > 0 && ratio >= force {
-		return fmt.Errorf("compact ratio %.2f: must be less than force ratio %.2f", ratio, force)
 	}
 	c.Agent.CompactRatio = ratio
 	return nil

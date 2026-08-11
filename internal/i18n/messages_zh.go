@@ -333,7 +333,7 @@ var Chinese = Messages{
 	GoalPausedReason:             "用户手动暂停",
 	GoalPausedFmt:                "目标已暂停（%s）— 使用 /goal resume 继续",
 	GoalBudgetExtended:           "目标已恢复 — 追加了一档轮次数",
-	GoalRuntimeFmt:               "运行状态：轮次 %d/%d，token %d，无进展 %d/%d，追加 %d",
+	GoalRuntimeFmt:               "运行状态：轮次 %d/%d，token %d，请求 %d，无进展 %d（仅观测），追加 %d",
 	GoalRuntimeLastReason:        "最近原因",
 	ModelSwitchUnavailable:       "本会话不支持切换模型",
 	ModelSwitchBusy:              "请先完成或取消当前工作，并停止后台任务后再切换模型",

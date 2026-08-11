@@ -124,6 +124,9 @@ type RecoveryProposal struct {
 	// the isolated reviewer. They are internal evidence, not persisted wire state.
 	PlanBefore string
 	PlanAfter  string
+	// PlanDiff pairs the two revisions by step id, so the reviewer is told what
+	// moved instead of diffing two clipped renderings itself.
+	PlanDiff string
 	// SafeRetry is true when the host can prove this is a same-strategy
 	// verification/idempotent retry (e.g. re-running the same test command).
 	SafeRetry bool

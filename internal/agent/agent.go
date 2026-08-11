@@ -303,7 +303,7 @@ type Agent struct {
 	// never nil because New defaults it to event.Discard.
 	sink                event.Sink
 	requireVisibleFinal bool // internal callers require final Content
-	// lastUsage caches the latest provider telemetry for the CLI context gauge.
+	// lastUsage caches the latest provider telemetry for per-turn readouts.
 	// The run loop writes it while a frontend reads it, so it is atomic.
 	lastUsage atomic.Pointer[provider.Usage]
 	outputBudgetState
@@ -540,19 +540,10 @@ type Agent struct {
 	subagentDepth    int
 	maxSubagentDepth int
 
-	// Context management: when a turn's prompt nears contextWindow, the older
-	// middle of the session is summarized away, keeping a token-bounded recent
-	// tail verbatim (recentKeep is the message floor) and archiving the originals
-	// under archiveDir. compactStuck latches when compaction can't get the prompt
-	// under the window (consecutiveCompacts crosses the limit), so auto-compaction
-	// pauses instead of looping. softCompactNoticed gates the one-shot soft-ratio
-	// notice so it fires once per approach, not every turn.
+	// Context management keeps the canonical transcript immutable and installs
+	// at most one provider-visible checkpoint each time compactRatio is crossed.
 	contextWindow       int
-	softCompactRatio    float64
-	toolResultSnipRatio float64
 	compactRatio        float64
-	compactForceRatio   float64
-	softCompactNoticed  bool
 	recentKeep          int
 	archiveDir          string
 	keepPolicy          KeepPolicy
@@ -560,7 +551,8 @@ type Agent struct {
 	consecutiveCompacts int
 	sessionPath         string // bound transcript path for projection sidecars
 	workspaceID         string // stable prompt-cache lineage component
-	cacheState          string // warm/cold/unknown; never provider-visible
+	cacheState          string // legacy resume telemetry; never provider-visible
+	checkpointState     string // none|restored|applied; runtime-only
 	compactionState     CompactionState
 	// compactionMu guards projection snapshots/install and the in-memory sidecar
 	// generation. Network summarization never runs while this lock is held.
@@ -572,7 +564,6 @@ type Agent struct {
 	// from paying for two summaries during one active tool loop.
 	lastCompactionTurn     atomic.Int64
 	strictAlternatingRoles bool // coalesce adjacent user turns on provider request copies
-	contextEditingState
 	// activeTurnCreatedAt identifies the real/synthetic user message that began
 	// the currently running turn. Compaction may rewrite older history while a
 	// tool loop is active, but it must keep this message and everything after it
@@ -599,6 +590,12 @@ type Agent struct {
 	// outcome shadows progress with an outcome-decomposed scorer whose samples
 	// only feed trajectory recording; it never influences guard behavior.
 	outcome *evidence.OutcomeTracker
+
+	// taskBudget accumulates spend across every Run continuing one task and
+	// resets with the evidence ledger: one ledger, one task, one bill. A
+	// per-Run total cannot see the failures worth stopping — those are
+	// measured in hours, and every "continue" starts a fresh Run.
+	taskBudget runBudget
 
 	// ebm is the Evidence-Before-More-Mutation nudge's once-per-turn state.
 	ebm ebmState
@@ -1102,8 +1099,10 @@ type Options struct {
 	// protocols to omit the budget (Anthropic still requires max_tokens).
 	MaxOutputTokens int
 	Temperature     float64
-	Pricing         *provider.Pricing // optional, for per-turn cost display
-	UsageSource     string            // optional billable usage source; default executor
+	// TaskBudget bounds a task's spend; zero uses DefaultTaskBudget.
+	TaskBudget  TaskBudget
+	Pricing     *provider.Pricing // optional, for per-turn cost display
+	UsageSource string            // optional billable usage source; default executor
 	// ModelRef names the canonical "provider/model" ref backing this agent's
 	// provider instance. It is attached to emitted Usage events so downstream
 	// usage accounting can attribute tokens to the exact model.
@@ -1135,10 +1134,12 @@ type Options struct {
 
 	// Context management. ContextWindow <= 0 disables compaction. Ratios and
 	// RecentKeep fall back to defaults when unset.
-	ContextWindow          int
+	ContextWindow int
+	CompactRatio  float64
+	// Deprecated compatibility inputs. New agents ignore these fields; automatic
+	// maintenance is controlled only by CompactRatio.
 	SoftCompactRatio       float64
 	ToolResultSnipRatio    float64
-	CompactRatio           float64
 	CompactForceRatio      float64
 	RecentKeep             int
 	ArchiveDir             string
@@ -1146,7 +1147,7 @@ type Options struct {
 	SessionPath            string // projection sidecar path; empty = memory only
 	WorkspaceID            string // prompt-cache lineage component
 	StrictAlternatingRoles bool   // merge adjacent user turns for strict providers at request time
-	ContextEditing         string // local (default) or native (explicit opt-in)
+	ContextEditing         string // deprecated; native provider editing was removed
 
 	// Hooks fires PreToolUse / PostToolUse shell hooks around tool calls. nil
 	// disables hook firing.
@@ -1252,20 +1253,8 @@ type Options struct {
 // provider errors (compaction keeps the context bounded). A nil sink is replaced
 // with event.Discard so the agent can always emit unconditionally.
 func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Options, sink event.Sink) *Agent {
-	if opts.SoftCompactRatio <= 0 {
-		opts.SoftCompactRatio = defaultSoftCompactRatio
-	}
-	if opts.ToolResultSnipRatio <= 0 {
-		opts.ToolResultSnipRatio = defaultToolResultSnipRatio
-	}
 	if opts.CompactRatio <= 0 {
 		opts.CompactRatio = defaultCompactRatio
-	}
-	if opts.ToolResultSnipRatio >= opts.CompactRatio {
-		opts.ToolResultSnipRatio = opts.CompactRatio
-	}
-	if opts.CompactForceRatio <= 0 {
-		opts.CompactForceRatio = defaultCompactForceRatio
 	}
 	if opts.RecentKeep <= 0 {
 		opts.RecentKeep = minRecentKeep
@@ -1312,6 +1301,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		prov:                      prov,
 		tools:                     tools,
 		session:                   session,
+		taskBudget:                runBudget{limit: normalizeTaskBudget(opts.TaskBudget)},
 		maxSteps:                  opts.MaxSteps,
 		maxStepsKey:               maxStepsKey,
 		reasoningByteLimit:        reasoningByteLimit,
@@ -1347,10 +1337,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		capabilityLedger:          opts.CapabilityLedger,
 		capabilityAudit:           opts.CapabilityAudit,
 		contextWindow:             opts.ContextWindow,
-		softCompactRatio:          opts.SoftCompactRatio,
-		toolResultSnipRatio:       opts.ToolResultSnipRatio,
 		compactRatio:              opts.CompactRatio,
-		compactForceRatio:         opts.CompactForceRatio,
 		recentKeep:                opts.RecentKeep,
 		archiveDir:                opts.ArchiveDir,
 		keepPolicy:                opts.KeepPolicy,
@@ -1358,7 +1345,6 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		workspaceID:               strings.TrimSpace(opts.WorkspaceID),
 		cacheState:                CacheStateUnknown,
 		strictAlternatingRoles:    opts.StrictAlternatingRoles,
-		contextEditingState:       newContextEditingState(opts.ContextEditing, prov),
 		subagentDepth:             subagentDepth,
 		maxSubagentDepth:          maxSubagentDepth,
 		mutationObserver:          opts.MutationObserver,
@@ -1411,24 +1397,23 @@ func (a *Agent) reserveParentWrite(runTool tool.Tool, args json.RawMessage, read
 }
 
 // Run appends the user input and drives the tool loop until the model returns a
-// final answer (no tool calls), the context is cancelled, or the provider errors.
-// With maxSteps <= 0 the loop is unbounded — the natural termination is the model
-// finishing, and the real safety bounds are user cancellation and compaction, not
-// a round count. A positive maxSteps imposes an optional hard guard, surfaced as
-// a resumable notice when hit.
-// Run is the agent lifecycle entry point: lifecycle setup, turn initialization,
-// tool-round loop, and deferred cleanup. Turn policy lives in beginRunTurn /
-// runToolLoop / handleFinalResponse / handleToolRound so the state machine stays
-// readable without changing provider-visible behavior or lock ownership.
+// final answer, the context is cancelled, or the provider errors. maxSteps <= 0
+// leaves the loop unbounded here: bounding it is the host's call, and the
+// adaptive stop is the no-progress ladder rather than a round count. Turn policy
+// lives in beginRunTurn / runToolLoop / handleFinalResponse / handleToolRound.
 func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	runMaxSteps := a.maxSteps
 	runMaxStepsKey := a.maxStepsKey
 	runLimitHostOwned := false
+	runPauseAfterFinal := false
 	if limit, ok := runStepLimitFromContext(ctx); ok {
-		runMaxSteps = limit.steps
-		runLimitHostOwned = true
-		if limit.key != "" {
-			runMaxStepsKey = limit.key
+		if !limit.defaultOnly || a.maxSteps <= 0 {
+			runMaxSteps = limit.steps
+			runLimitHostOwned = true
+			runPauseAfterFinal = limit.pauseAfterFinal
+			if limit.key != "" {
+				runMaxStepsKey = limit.key
+			}
 		}
 	}
 	a.recoveryRunSeq.Add(1)
@@ -1481,6 +1466,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	state.runMaxSteps = runMaxSteps
 	state.runMaxStepsKey = runMaxStepsKey
 	state.runLimitHostOwned = runLimitHostOwned
+	state.runPauseAfterFinal = runPauseAfterFinal
 	state.workDurationMs = workDurationMs
 	return a.runToolLoop(ctx, state)
 }
@@ -1573,34 +1559,6 @@ func (a *Agent) observeMissingToolCallReasoning(calls []provider.ToolCall, reaso
 	return true, true
 }
 
-// maxStepsPause is the deliberate stop when a positive tool-call budget runs
-// out: the session already holds the completed work and the user is asked to
-// continue. It is a control-flow signal, not a provider failure. Coordinator
-// treats planner research budgets specially: ordinary plan-and-execute work
-// falls back to the executor, while explicit execution boundaries fail closed.
-type maxStepsPause struct {
-	steps int
-	key   string
-}
-
-func (e *maxStepsPause) Error() string {
-	return fmt.Sprintf("paused after %d tool-call rounds (%s) — the work so far is saved; send another message to continue, or set %s higher or to 0 for no limit", e.steps, e.key, e.key)
-}
-
-type todoStallPause struct {
-	rounds int
-}
-
-func (e *todoStallPause) Error() string {
-	return fmt.Sprintf("paused after %d tool-call rounds without advancing the current todo — the work so far is saved; inspect the blocker or send another message to continue", e.rounds)
-}
-
-func isToolLoopPause(err error) bool {
-	var maxPause *maxStepsPause
-	var stallPause *todoStallPause
-	return errors.As(err, &maxPause) || errors.As(err, &stallPause)
-}
-
 // ReadinessResult is the host-consumable outcome of the Delivery final-answer
 // readiness check. The Controller reads it after each goal turn; plain turns
 // receive the same outcome as a FinalReadinessError.
@@ -1633,234 +1591,11 @@ func (a *Agent) ReadinessResult() ReadinessResult {
 	}
 }
 
-// HostProgressSignature returns a compact signature of host-observable progress
-// across the current delivery scope: successful writes, commands, todo writes,
-// signoffs, and reviews. Identical signatures across consecutive goal turns
-// mean no host-verifiable progress was made — reads, reworded answers, and
-// repeated continue reasons never reset the stall counter.
-func (a *Agent) HostProgressSignature() string {
-	if a == nil || a.evidence == nil {
-		return ""
-	}
-	s := a.evidence.ReceiptProgressSummary()
-	return fmt.Sprintf("w=%d;c=%d;t=%d;s=%d;r=%d", s.Writes, s.Commands, s.Todos, s.Signoffs, s.Reviews)
-}
-
-type finalReadinessCheck struct {
-	applies                   bool
-	reason                    string
-	missingProjectChecks      int
-	incompleteTodos           int
-	missingAcceptanceCriteria int
-	missingVerification       int
-	missingReview             int
-	missingSignoff            int
-	missingActionEvidence     int
-	missingMutation           int
-	missingCapabilities       int
-}
-
-func (c finalReadinessCheck) progressSignature() string {
-	return fmt.Sprintf("%d/%d/%d/%d/%d/%d/%d/%d/%d/%d\x00%s",
-		c.missingProjectChecks,
-		c.incompleteTodos,
-		c.missingAcceptanceCriteria,
-		c.missingVerification,
-		c.missingReview,
-		c.missingSignoff,
-		c.missingActionEvidence,
-		c.missingMutation,
-		c.missingCapabilities,
-		boolInt(c.applies),
-		c.reason,
-	)
-}
-
-func (c finalReadinessCheck) missingIDs() []string {
-	missing := make([]string, 0, 9)
-	add := func(id string, count int) {
-		if count > 0 {
-			missing = append(missing, id)
-		}
-	}
-	add("project_check", c.missingProjectChecks)
-	add("todo", c.incompleteTodos)
-	add("criteria", c.missingAcceptanceCriteria)
-	add("verification", c.missingVerification)
-	add("review", c.missingReview)
-	add("signoff", c.missingSignoff)
-	add("action", c.missingActionEvidence)
-	add("mutation", c.missingMutation)
-	add("capability", c.missingCapabilities)
-	return missing
-}
-
 func boolInt(v bool) int {
 	if v {
 		return 1
 	}
 	return 0
-}
-
-func (c finalReadinessCheck) audit(result evidence.ReadinessAuditResult, recovered bool) evidence.ReadinessAudit {
-	return evidence.ReadinessAudit{
-		Result:                    result,
-		Recovered:                 recovered,
-		MissingProjectChecks:      c.missingProjectChecks,
-		IncompleteTodos:           c.incompleteTodos,
-		CommandMismatchMissing:    c.missingProjectChecks,
-		MissingAcceptanceCriteria: c.missingAcceptanceCriteria,
-		MissingVerification:       c.missingVerification,
-		MissingReview:             c.missingReview,
-		MissingSignoff:            c.missingSignoff,
-		MissingActionEvidence:     c.missingActionEvidence,
-		MissingMutation:           c.missingMutation,
-		MissingCapabilities:       c.missingCapabilities,
-	}
-}
-
-func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
-	if a.evidence == nil || a.ablation.Off(ablation.Evidence) {
-		return finalReadinessCheck{}
-	}
-	var missing []string
-	out := finalReadinessCheck{}
-	// Planning returns a proposal to the controller, which owns the approval gate
-	// and starts a fresh execution turn after Plan is disabled. Delivery completion
-	// requirements, including required capabilities, wait for that execution turn:
-	// forcing them here could make a writer requirement contradict the plan-first
-	// workflow. This is a workflow boundary only; model-initiated tool calls above
-	// still use the normal Permissions/Sandbox path.
-	if a.planMode.Load() {
-		return out
-	}
-	{
-		incomplete, hasTodos := a.evidence.IncompleteLatestTodos()
-		if !hasTodos && a.evidence.HasAnySuccessfulReceipt() {
-			incomplete, hasTodos = a.incompleteCanonicalTodos()
-		}
-		if hasTodos && len(incomplete) > 0 && a.evidence.HasSuccessfulTodoProgressReceipt() {
-			out.applies = true
-			out.incompleteTodos = len(incomplete)
-			missing = append(missing, finalReadinessIncompleteTodos(incomplete))
-		}
-	}
-	writer, hasWriter := a.evidence.LatestSuccessfulWriterIndex()
-	deliveryMutation := false
-	deliveryVerificationOnly := false
-	checkpoint := a.deliveryCheckpoint
-	checkpointApplies := a.deliveryScopeActive && checkpoint.ScopeID == a.deliveryScopeID
-	if a.deliveryProfile {
-		if mutation, ok := a.evidence.LatestSuccessfulMutationIndex(); ok {
-			writer, hasWriter = mutation, true
-			deliveryMutation = true
-		} else if checkpointApplies && checkpoint.PendingMutation {
-			// The mutation happened before a controller rebuild/restart. Treat it as
-			// the baseline so this run can satisfy verification/review/sign-off
-			// without manufacturing another write.
-			writer, hasWriter = -1, true
-			deliveryMutation = true
-		} else if checkpointApplies && checkpoint.MutationObserved {
-			deliveryMutation = true
-		}
-		workObserved := a.evidence.HasSuccessfulWorkReceipt() || (checkpointApplies && checkpoint.WorkObserved)
-		if a.deliveryTaskExpected && !a.deliveryPersistentExpected && !workObserved {
-			out.missingActionEvidence++
-			missing = append(missing, "perform host-observable work for this technical task before answering")
-		}
-		if a.deliveryPersistentExpected && !a.evidence.HasSuccessfulToolReceipt("remember") {
-			out.missingMutation++
-			missing = append(missing, "save the requested durable memory with the remember tool before answering")
-		}
-		if a.deliveryMutationExpected && !deliveryMutation {
-			out.missingMutation++
-			missing = append(missing, "the request requires a state change, but no successful mutation was observed")
-		}
-		if !hasWriter && a.evidence.HasSuccessfulVerificationCommand() {
-			writer, hasWriter = -1, true
-			deliveryVerificationOnly = true
-		}
-		// Required/preferred capability gates apply before the no-writer fast
-		// path below: a user-required Skill/MCP must not be skippable by
-		// answering from ordinary reads alone.
-		if msg := a.capabilityGateFailure(); msg != "" {
-			out.applies = true
-			out.missingCapabilities++
-			missing = append(missing, msg)
-		}
-		if a.deliveryPersistentExpected && !a.deliveryMutationExpected && !a.evidence.HasSuccessfulMutationOtherThan("remember") {
-			// A durable-memory-only request has its own concrete receipt contract.
-			// It must not inherit code-delivery todo/test/diff/review ceremonies;
-			// any unrelated mutation falls through to the full contract below.
-			out.applies = true
-			if len(missing) > 0 {
-				out.reason = strings.Join(missing, "; ")
-			}
-			return out
-		}
-	}
-	if !hasWriter {
-		if len(missing) > 0 {
-			if a.loopGuardAllowsFinal() {
-				return out
-			}
-			out.reason = strings.Join(missing, "; ")
-		}
-		return out
-	}
-	hasProjectChecks := len(a.projectChecks) > 0
-	hasTodoReceipt := a.evidence.HasSuccessfulTodoWrite()
-	if !a.deliveryProfile && !hasProjectChecks && !hasTodoReceipt && len(missing) == 0 {
-		return finalReadinessCheck{}
-	}
-	out.applies = true
-	if a.deliveryProfile {
-		criteriaEstablished := a.deliveryCriteriaEstablished || (checkpointApplies && checkpoint.CriteriaEstablished)
-		if !criteriaEstablished {
-			out.missingAcceptanceCriteria++
-			missing = append(missing, "establish concrete acceptance criteria with todo_write before changing state")
-		}
-		hasCompleteStep := a.evidence.HasSuccessfulCompleteStepAfter(writer)
-		if !hasCompleteStep {
-			out.missingSignoff++
-			missing = append(missing, "call complete_step after the latest mutation")
-		}
-		if !a.evidence.HasSuccessfulDeliverySignoffAfter(writer) {
-			out.missingVerification++
-			missing = append(missing, "run relevant verification after the latest mutation and cite that successful command in complete_step")
-		}
-		if deliveryMutation && !a.evidence.HasSuccessfulReviewAfter(writer) {
-			out.missingReview++
-			missing = append(missing, "inspect the changed result after the latest mutation (read the touched file or run git diff/status)")
-		}
-		if msg := a.deliveryReviewGateFailure(); msg != "" {
-			out.missingReview++
-			missing = append(missing, msg)
-		}
-		// The capability gate already ran before the no-writer fast path above.
-	}
-	for _, check := range a.projectChecks {
-		if deliveryVerificationOnly {
-			break
-		}
-		command := strings.TrimSpace(check.Command)
-		if command == "" {
-			continue
-		}
-		if !a.evidence.HasSuccessfulCommandAfter(command, writer) {
-			out.missingProjectChecks++
-			missing = append(missing, fmt.Sprintf("run %q from %s after the latest write", command, finalReadinessCheckSource(check)))
-		}
-	}
-
-	if len(missing) == 0 {
-		return out
-	}
-	if a.loopGuardAllowsFinal() {
-		return out
-	}
-	out.reason = strings.Join(missing, "; ")
-	return out
 }
 
 // DeliveryCheckpoint returns the compact Goal-scoped delivery state. It is safe
@@ -1929,18 +1664,6 @@ func (a *Agent) deliveryMutationCheckpointReady() bool {
 		a.evidence.HasSuccessfulDeliverySignoffAfter(mutation) &&
 		a.evidence.HasSuccessfulReviewAfter(mutation) &&
 		a.deliveryReviewGateFailure() == ""
-}
-
-func finalReadinessIncompleteTodos(items []evidence.TodoStepMatch) string {
-	parts := make([]string, 0, len(items))
-	for _, item := range items {
-		label := strings.TrimSpace(item.Content)
-		if label == "" {
-			label = fmt.Sprintf("todo %d", item.Index)
-		}
-		parts = append(parts, fmt.Sprintf("%s: %s", label, item.Status))
-	}
-	return "latest successful todo_write still has incomplete items: " + strings.Join(parts, ", ")
 }
 
 func (a *Agent) setTodoState(todos []evidence.TodoItem) {
@@ -2093,17 +1816,6 @@ func toolResultFailed(content string) bool {
 		strings.HasPrefix(content, "blocked:") ||
 		strings.HasPrefix(content, "Error:") ||
 		strings.HasPrefix(content, "[error")
-}
-
-func finalReadinessCheckSource(check instruction.VerifyCheck) string {
-	source := strings.TrimSpace(check.SourcePath)
-	if source == "" {
-		source = "project memory"
-	}
-	if check.Line > 0 {
-		return fmt.Sprintf("%s:%d", source, check.Line)
-	}
-	return source
 }
 
 func shouldNudgeExecutorHandoff(input, answer string) bool {
@@ -2783,189 +2495,6 @@ func (a *Agent) withPreviewFileDiffs(ctx context.Context, calls []provider.ToolC
 	return out
 }
 
-// stormBreakThreshold is how many times in a row the same tool may fail the same
-// way before the loop stops echoing the raw error back and instead returns a
-// directive to change approach. Two natural self-corrections are healthy; the
-// third identical failure is a death-spiral — the dominant case being a tool call
-// whose arguments are truncated at the output-token ceiling, which the model then
-// re-emits (re-worded but still over-long), truncating the same way again.
-const stormBreakThreshold = 3
-
-// repeatSuccessBreakThreshold is how many identical write-like successes the
-// agent allows before refusing another copy in the same user turn. Two gives the
-// model room for a natural self-correction; the third repeat is usually a
-// no-op/write loop and should be redirected to a different tool or final answer.
-const repeatSuccessBreakThreshold = 2
-
-const (
-	// todoProgressNudgeRounds is the first adaptive checkpoint. The host asks
-	// the model to reassess, but keeps the turn alive so it can recover.
-	todoProgressNudgeRounds = 8
-	// maxTodoStallRounds pauses only after the reassessment also failed to
-	// produce a new completion or unique host-observed work receipt.
-	maxTodoStallRounds = 16
-)
-
-func todoProgressNudgeMessage(rounds int) string {
-	return fmt.Sprintf("Host progress check: the current todo has produced no new completion, unique read, command, or mutation for %d tool-call rounds. Reassess before using more tools: sign off the current item if it is done, narrow the remaining work without replacing the active item, or explain/ask about a real blocker. Do not repeat reads, commands, or writes just to reset this guard.", rounds)
-}
-
-// loopGuardBlockErrMsg is the errMsg carried by a repeat-success loop-guard
-// block. applyStormBreaker matches it to arm the final-readiness loop-guard
-// pass, since that guard also invites the model to report the blocker.
-const loopGuardBlockErrMsg = "blocked by loop guard"
-
-// applyStormBreaker detects a run of zero-progress turns and, past the
-// threshold, rewrites the model-facing result (results[0]) into a directive to
-// change approach. Two detectors, because a stuck model varies its retries two
-// ways. The signature detector keys on each call's (tool, error/blocker) — not
-// its args — since a stuck model reworks the arguments cosmetically while
-// hitting the same host refusal or failure (see the stormSig field doc). The
-// streak detector counts consecutive turns in which every call was blocked,
-// regardless of shape: rotating tools, reordering a batch, or a blocker whose
-// text varies per attempt escapes the signature but is still zero progress —
-// only a host refusal (not a plain error) proves that, so the streak requires
-// blocked outcomes. Any success resets both. When a guard fires — or when a
-// call in the batch was already blocked by the per-call repeat-success guard —
-// the final-readiness loop-guard pass is armed so the model may report the
-// blocker (see loopGuardAllowsFinal). The hard maxSteps guard remains the
-// ultimate backstop; this just keeps the loop from burning that whole budget
-// bouncing off the same host refusals.
-func (a *Agent) applyStormBreaker(calls []provider.ToolCall, outcomes []toolOutcome, results []string, receiptMark int) {
-	allBlocked := len(outcomes) > 0
-	for _, outcome := range outcomes {
-		if !outcome.blocked {
-			allBlocked = false
-			break
-		}
-	}
-	if allBlocked {
-		a.blockedTurnStreak++
-	} else {
-		a.blockedTurnStreak = 0
-	}
-	for _, outcome := range outcomes {
-		if outcome.blocked && outcome.errMsg == loopGuardBlockErrMsg {
-			a.armLoopGuardPass(receiptMark)
-			break
-		}
-	}
-
-	sig, ok := batchStormSignature(calls, outcomes)
-	switch {
-	case !ok:
-		a.stormSig, a.stormCount = "", 0
-	case sig != a.stormSig:
-		a.stormSig, a.stormCount = sig, 1
-	default:
-		a.stormCount++
-	}
-	stormHit := ok && a.stormCount >= stormBreakThreshold
-	streakHit := allBlocked && a.blockedTurnStreak >= stormBreakThreshold
-	if !stormHit && !streakHit {
-		return
-	}
-
-	const blockedAdvice = "Change approach: do not keep retrying a blocked tool by changing the tool, command, or arguments. Respect the permission, plan-mode, hook, or loop-guard blocker; use an already-allowed tool, ask the user for the specific approval or choice if appropriate, or explain the blocker in your final answer."
-	var guard, detail string
-	if stormHit {
-		subject := fmt.Sprintf("%q", calls[0].Name)
-		short := calls[0].Name
-		if len(calls) > 1 {
-			subject = fmt.Sprintf("this batch of %d tool calls", len(calls))
-			short = fmt.Sprintf("a batch of %d calls", len(calls))
-		}
-		anyBlocked := false
-		for _, outcome := range outcomes {
-			if outcome.blocked {
-				anyBlocked = true
-				break
-			}
-		}
-		action := "failed"
-		advice := "Change approach: if an argument is being truncated, write less in one call and split the work into several smaller calls; otherwise fix the arguments, use a different tool, or explain the blocker in your final answer."
-		if anyBlocked {
-			action = "been blocked or failed"
-			advice = blockedAdvice
-		}
-		guard = fmt.Sprintf(
-			"[loop guard] %s has now %s %d times in a row with the same host response. Re-sending it — even with the wording changed — will not help: the calls keep hitting the same outcome. %s",
-			subject, action, a.stormCount, advice)
-		detail = fmt.Sprintf(
-			"loop guard: %s hit the same host response %d× — nudging the model to change approach",
-			short, a.stormCount)
-	} else {
-		guard = fmt.Sprintf(
-			"[loop guard] every tool call in the last %d turns has been blocked by the host (permission, plan mode, hook, or loop guard). Switching tools, reordering calls, or rewording arguments will not help while the blockers stand. %s",
-			a.blockedTurnStreak, blockedAdvice)
-		detail = fmt.Sprintf(
-			"loop guard: every tool call blocked %d turns in a row — nudging the model to change approach",
-			a.blockedTurnStreak)
-	}
-	results[0] = outcomes[0].output + "\n\n" + guard
-	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeLoopGuard, Text: loopGuardNoticeText(), Detail: detail})
-	a.armLoopGuardPass(receiptMark)
-}
-
-func loopGuardNoticeText() string {
-	return "The assistant is not making progress; asking it to change approach."
-}
-
-// batchStormSignature returns a per-turn fixation signature — each call's
-// (name, error/blocker) in order — and ok=true only when every call errored or
-// was blocked. ok=false (any success) means the turn made progress, so the
-// caller resets the counter. Keying on the host response rather than the args is
-// deliberate: a stuck model reworks the arguments while hitting the same
-// response, so identical-args matching would miss the loop.
-func batchStormSignature(calls []provider.ToolCall, outcomes []toolOutcome) (string, bool) {
-	if len(calls) == 0 {
-		return "", false
-	}
-	var sb strings.Builder
-	for i := range calls {
-		if outcomes[i].errMsg == "" {
-			return "", false
-		}
-		sb.WriteString(calls[i].Name)
-		sb.WriteByte(0)
-		sb.WriteString(outcomes[i].errMsg)
-		sb.WriteByte(0)
-	}
-	return sb.String(), true
-}
-
-// toolOutcome is one tool call's result, split into the model-facing output and
-// the display-facing notice bits. errMsg is the short failure reason (empty on
-// success) — a refused call, an unknown tool, or an execution error — so a sink
-// renders the result as failed ("⊘ name <errMsg>" / a red card) instead of OK;
-// blocked narrows that to a refusal (plan mode / permission). truncMsg is set
-// (without the "· " prefix) when the output was head+tailed. images carries
-// data URLs from a tool.ImageTool result; they ride outside output so text
-// truncation can never corrupt an image payload.
-type toolOutcome struct {
-	output                     string
-	images                     []string
-	blocked                    bool
-	errMsg                     string
-	truncated                  bool
-	truncMsg                   string
-	resolved                   bool
-	resolvedName               string
-	capabilityID               string
-	resolvedReadOnly, executed bool
-	workspaceMutation          *event.WorkspaceMutation
-	effective                  workspaceEffectiveCall
-	// execution is local shell metadata (optional). Provider messages strip it
-	// via ModelMessages; UI/event sinks surface it on ToolResult cards.
-	execution *tool.ShellExecution
-	// recoveryGeneration is the gate generation captured before execution so
-	// ObserveResult can ignore stale results after a mode switch.
-	recoveryGeneration uint64
-	// recoveryStopTurn is set when Auto Episode budgets are exhausted.
-	recoveryStopTurn   bool
-	recoveryStopReason string
-}
-
 // completedMCPConnect recognizes a synthetic cache-miss connect call whose
 // background discovery finished after the provider request was serialized. The
 // connect placeholder is intentionally absent once real tools replace it, but
@@ -2989,24 +2518,24 @@ func completedMCPConnect(reg *tool.Registry, name string) (string, bool) {
 // task list. Initial plans and progress-only status updates stay on the fast
 // path; changing step identity, order, or hierarchy while work remains is a
 // semantic transition for the independent Auto reviewer.
-func (a *Agent) recoveryPlanTransition(toolName string, args json.RawMessage) (bool, string, string) {
+func (a *Agent) recoveryPlanTransition(toolName string, args json.RawMessage) (bool, string, string, string) {
 	if a == nil || toolName != "todo_write" || a.planMode.Load() {
-		return false, "", ""
+		return false, "", "", ""
 	}
 	before := a.CanonicalTodoState()
 	if len(before) == 0 || len(evidence.IncompleteTodos(before)) == 0 {
-		return false, "", ""
+		return false, "", "", ""
 	}
 	after := evidence.ReceiptFromToolCall("todo_write", args, true, true).Todos
 	if len(after) == 0 || evidence.ValidateSerialTodos(after) != nil || !evidence.PreservesCompletedTodoPositions(before, after) {
 		// Let todo_write report malformed or invalid state directly; an invalid
 		// task list is not a meaningful plan proposal for the reviewer.
-		return false, "", ""
+		return false, "", "", ""
 	}
 	if samePlanStructure(before, after) {
-		return false, "", ""
+		return false, "", "", ""
 	}
-	return true, planReviewText(before), planReviewText(after)
+	return true, planReviewText(before), planReviewText(after), planTransitionDiff(before, after)
 }
 
 func samePlanStructure(a, b []evidence.TodoItem) bool {
@@ -3497,20 +3026,77 @@ func firstLine(s string) string {
 	return s
 }
 
-// truncateToolOutput head+tails s when it exceeds maxToolOutputBytes, slicing
-// on rune boundaries so we never split a multibyte glyph. Returns the possibly
-// trimmed body plus a one-line user-facing notice when truncation happened
-// (empty when it didn't, without the "· " display prefix).
+// truncateToolOutput is the first-visible hard cap for a tool result. Under-cap
+// bodies are returned byte-identical. Over-cap bodies keep a tool-aware head and
+// tail under maxToolOutputBytes; the full original is stored separately as
+// RawContent by the session writer. The bounded form is stable for the message
+// lifetime and is never re-truncated by later maintenance.
 func truncateToolOutput(s string) (string, string) {
+	return truncateToolOutputFor(s, "", "")
+}
+
+// truncateToolOutputFor is the tool-aware first-visible limiter. toolName and
+// toolCallID populate the truncation marker so the model can re-fetch.
+func truncateToolOutputFor(s, toolName, toolCallID string) (string, string) {
 	if len(s) <= maxToolOutputBytes {
 		return s, ""
 	}
-	keep := maxToolOutputBytes / 2
-	head := snapToRuneBoundary(s, 0, keep)
-	tail := snapToRuneBoundary(s, len(s)-keep, len(s))
+	strategy := snipStrategy{head: 40, tail: 40, headChars: 8000, tailChars: 8000}
+	switch {
+	case toolName == "bash" || toolName == "shell" || strings.Contains(toolName, "bash"):
+		strategy = snipStrategy{head: 40, tail: 40, headChars: 8000, tailChars: 8000}
+	case toolName == "read_file" || toolName == "web_fetch" || strings.Contains(toolName, "read"):
+		strategy = snipStrategy{head: 120, tail: 12, headChars: 12000, tailChars: 2000}
+	case toolName == "grep" || toolName == "glob" || toolName == "ls" || toolName == "list_dir":
+		strategy = snipStrategy{head: 80, tail: 8, headChars: 10000, tailChars: 1000}
+	}
+	headKeep := strategy.headChars
+	tailKeep := strategy.tailChars
+	if headKeep+tailKeep > maxToolOutputBytes-512 {
+		headKeep = maxToolOutputBytes * 2 / 3
+		tailKeep = maxToolOutputBytes - headKeep - 512
+	}
+	if headKeep < 1024 {
+		headKeep = maxToolOutputBytes / 2
+		tailKeep = maxToolOutputBytes / 2
+	}
+	// Prefer more tail when the body looks like a failure.
+	lower := strings.ToLower(s)
+	if strings.Contains(lower, "error:") || strings.Contains(lower, "panic:") || strings.Contains(lower, "fatal:") {
+		tailKeep = max(tailKeep, maxToolOutputBytes/3)
+		if headKeep+tailKeep > maxToolOutputBytes-512 {
+			headKeep = maxToolOutputBytes - 512 - tailKeep
+		}
+	}
+	head := snapToRuneBoundary(s, 0, headKeep)
+	tail := snapToRuneBoundary(s, len(s)-tailKeep, len(s))
 	omitted := len(s) - len(head) - len(tail)
+	namePart := toolName
+	if namePart == "" {
+		namePart = "tool"
+	}
+	idPart := toolCallID
+	if idPart == "" {
+		idPart = "-"
+	}
 	notice := fmt.Sprintf("tool output truncated: %d of %d bytes elided", omitted, len(s))
-	body := head + fmt.Sprintf("\n\n…[truncated %d of %d bytes — rerun with narrower args to see the middle]…\n\n", omitted, len(s)) + tail
+	marker := fmt.Sprintf(
+		"\n\n…[truncated tool=%s call_id=%s original_bytes=%d kept_bytes=%d — full original retained in canonical transcript; re-read or retry with narrower args]…\n\n",
+		namePart, idPart, len(s), len(head)+len(tail),
+	)
+	body := head + marker + tail
+	if len(body) > maxToolOutputBytes {
+		overflow := len(body) - maxToolOutputBytes
+		trimHead := overflow / 2
+		trimTail := overflow - trimHead
+		if trimHead < len(head) {
+			head = snapToRuneBoundary(head, 0, len(head)-trimHead)
+		}
+		if trimTail < len(tail) {
+			tail = snapToRuneBoundary(tail, trimTail, len(tail))
+		}
+		body = head + marker + tail
+	}
 	return body, notice
 }
 

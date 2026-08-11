@@ -160,9 +160,10 @@ func TestNewSelectsMaxOutputTokenDefaultByEndpoint(t *testing.T) {
 		extra   map[string]any
 		want    int
 	}{
-		{name: "native anthropic", want: provider.DefaultReasoningOutputTokens},
-		{name: "unknown compatible gateway", baseURL: "https://proxy.example.com/anthropic", want: provider.DefaultReasoningOutputTokens},
-		{name: "official deepseek", baseURL: "https://api.deepseek.com/anthropic", want: provider.DefaultHighOutputTokens},
+		{name: "native anthropic", want: provider.DefaultOrdinaryOutputTokens},
+		{name: "unknown compatible gateway", baseURL: "https://proxy.example.com/anthropic", want: provider.DefaultOrdinaryOutputTokens},
+		{name: "official deepseek", baseURL: "https://api.deepseek.com/anthropic", want: provider.DefaultReasoningOutputTokens},
+		{name: "official deepseek high", baseURL: "https://api.deepseek.com/anthropic", extra: map[string]any{"effort": "high"}, want: provider.DefaultHighReasoningOutputTokens},
 		{name: "explicit override", baseURL: "https://api.deepseek.com/anthropic", extra: map[string]any{"max_output_tokens": 8192}, want: 8192},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

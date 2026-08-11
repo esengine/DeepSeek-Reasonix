@@ -17,6 +17,11 @@ const (
 	gainRepeatFailure = -2
 )
 
+// explorationRunLimit is how many consecutive look-only rounds still count as
+// progress. Deep investigation rarely runs longer before touching something;
+// a wandering loop runs until someone notices.
+const explorationRunLimit = 6
+
 // ProgressTracker scores each tool round's receipts for new evidence so the
 // agent can react to stalled investigation adaptively instead of at a fixed
 // round count. State is per user turn, like the ledger it observes.
@@ -25,6 +30,7 @@ type ProgressTracker struct {
 	commandRuns map[string]bool
 	commandFail map[string]bool
 	actionSigs  map[string]bool
+	exploreRun  int
 }
 
 func NewProgressTracker() *ProgressTracker {
@@ -37,16 +43,36 @@ func NewProgressTracker() *ProgressTracker {
 }
 
 // ScoreRound folds one round's receipts into the tracker and returns the
-// round's evidence gain.
+// round's evidence gain. Reading something new is progress only while it leads
+// somewhere: past explorationRunLimit look-only rounds the novelty stops
+// counting, because a loop that keeps opening files it has never opened scored
+// positive every round and so could never reach the no-progress ladder.
 func (t *ProgressTracker) ScoreRound(receipts []Receipt) int {
 	if t == nil {
 		return 0
 	}
 	gain := 0
+	acted := false
 	for _, r := range receipts {
 		gain += t.scoreReceipt(r)
+		acted = acted || roundActedOn(r)
+	}
+	if acted {
+		t.exploreRun = 0
+		return gain
+	}
+	t.exploreRun++
+	if t.exploreRun > explorationRunLimit {
+		return 0
 	}
 	return gain
+}
+
+// roundActedOn reports whether a receipt did something other than look: a
+// mutation, or any command run. Either one means the exploration led somewhere
+// and the run starts over.
+func roundActedOn(r Receipt) bool {
+	return r.Mutation || r.Write || strings.TrimSpace(r.Command) != ""
 }
 
 func (t *ProgressTracker) scoreReceipt(r Receipt) int {

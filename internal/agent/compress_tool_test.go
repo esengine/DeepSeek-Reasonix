@@ -59,19 +59,17 @@ func TestCompressContextBeforePreservesCanonicalAndTail(t *testing.T) {
 	if len(prov.got) < 2 || strings.Contains(prov.got[1].Content, local.Content) {
 		t.Fatalf("LocalOnly content reached summarizer: %+v", prov.got)
 	}
-	if reasons := sess.DrainContentRewriteReasons(); !reflect.DeepEqual(reasons, []string{"compact_tool"}) {
-		t.Fatalf("cache reasons = %v, want [compact_tool]", reasons)
-	}
 	state := a.compactionState
 	if state.Generation != 1 || state.Projection.ViewInputHash == "" || state.Projection.ViewOutputHash == "" {
 		t.Fatalf("range compression did not install complete v3 lineage: %+v", state)
 	}
 	if state.LastReceipt == nil || state.LastReceipt.Status != "applied" || state.LastReceipt.Action != "summary" ||
-		state.LastReceipt.Trigger != CompactionTriggerTool || state.LastReceipt.Archive == "" {
+		state.LastReceipt.Trigger != CompactionTriggerTool {
 		t.Fatalf("range compression receipt = %+v", state.LastReceipt)
 	}
-	if _, err := os.Stat(state.LastReceipt.Archive); err != nil {
-		t.Fatalf("committed archive: %v", err)
+	// New summary checkpoints do not create archives; full originals stay in canonical.
+	if state.LastReceipt.Archive != "" {
+		t.Fatalf("summary checkpoint should not create archive, got %q", state.LastReceipt.Archive)
 	}
 }
 
@@ -338,7 +336,7 @@ func TestRangeCompressionSharesSummarySingleflight(t *testing.T) {
 	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
 	autoErr := make(chan error, 1)
 	go func() {
-		_, err := a.compactToProjection(context.Background(), CompactionTriggerPressure, "", true)
+		_, err := a.compactToProjection(context.Background(), CompactionTriggerPressure, "", true, false)
 		autoErr <- err
 	}()
 	<-prov.started

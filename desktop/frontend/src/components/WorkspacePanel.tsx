@@ -13,7 +13,6 @@ import {
   ChevronRight,
   FileText,
   Folder,
-  FolderOpen,
   FolderTree,
   FolderX,
   GitBranch,
@@ -22,7 +21,6 @@ import {
   Minimize2,
   RefreshCw,
   Search,
-  TerminalSquare,
   X,
 } from "lucide-react";
 import { asArray } from "../lib/array";
@@ -63,7 +61,6 @@ import { workspaceGitStatusLabel } from "../lib/workspaceChanges";
 import { formatWorkspaceReference, WORKSPACE_REF_DRAG_TYPE } from "../lib/workspaceDrag";
 import { formatSelectionReference, languageFor } from "../lib/selectedTextContext";
 import { cleanGitDiff } from "../lib/diff";
-import { WORKSPACE_CONTEXT_MENU_FILE_HEIGHT, WORKSPACE_CONTEXT_MENU_REF_HEIGHT, workspacePathCopyMenuItems } from "../lib/workspacePathCopyMenuItems";
 import { CodeViewer } from "./CodeViewer";
 import { DiffView } from "./DiffView";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
@@ -72,6 +69,7 @@ import { Markdown } from "./Markdown";
 import { Tooltip } from "./Tooltip";
 import { AnchoredPopover } from "./AnchoredPopover";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon";
+import { WorkspaceTreeMenu } from "./WorkspaceTreeMenu";
 
 const WORKSPACE_TREE_MIN_WIDTH = 140;
 const WORKSPACE_TREE_DEFAULT_WIDTH = 300;
@@ -1397,12 +1395,6 @@ export function WorkspacePanel({
     }
   };
 
-  const revealInFileManager = () => {
-    if (!treeMenu) return;
-    setTreeMenu(null);
-    void app.RevealWorkspacePathForTab(workspaceTabId, treeMenu.path).catch(() => {});
-  };
-
   const renderNormalRow = (row: TreeRow) => {
     const { path, depth, entry, isOpen, active, compactPaths = [path], displayName = entry.name } = row;
     return (
@@ -2152,48 +2144,15 @@ export function WorkspacePanel({
         </div>
       </section>
       {treeMenu && (
-        <FloatingMenu
-          x={treeMenu.x}
-          y={treeMenu.y}
-          estimatedHeight={treeMenu.isDir ? WORKSPACE_CONTEXT_MENU_REF_HEIGHT : WORKSPACE_CONTEXT_MENU_FILE_HEIGHT}
-          className="workspace-tree-menu"
-        >
-          <FloatingMenuItems
-            items={[
-              {
-                icon: <MessageSquarePlus size={14} />,
-                label: treeMenu.isDir ? t("workspace.addFolderReferenceToChat") : t("workspace.addFileReferenceToChat"),
-                onSelect: addTreeReferenceToChat,
-              },
-              ...(treeMenu.isDir
-                ? []
-                : [
-                    {
-                      icon: <FileText size={14} />,
-                      label: t("workspace.addFileContentToChat"),
-                      onSelect: () => void addTreeFileToChat(),
-                    },
-                  ]),
-              ...workspacePathCopyMenuItems({ path: treeMenu.path, resolveAbsolutePath: () => app.ResolveWorkspacePathForTab(workspaceTabId, treeMenu.path), isScopeCurrent: () => currentWorkspaceScopeKeyRef.current === workspaceScopeKey, close: () => setTreeMenu(null), relativeLabel: t("workspace.copyRelativePath"), absoluteLabel: t("workspace.copyAbsolutePath") }),
-              {
-                icon: <FolderOpen size={14} />,
-                label: t("workspace.revealInFileManager"),
-                onSelect: revealInFileManager,
-              },
-              ...(onOpenInTerminal
-                ? [{
-                    icon: <TerminalSquare size={14} />,
-                    label: t("workspace.openInTerminal"),
-                    onSelect: () => {
-                      const target = treeMenu;
-                      setTreeMenu(null);
-                      onOpenInTerminal(target.path);
-                    },
-                  }]
-                : []),
-            ]}
-          />
-        </FloatingMenu>
+        <WorkspaceTreeMenu
+          target={treeMenu}
+          workspaceTabId={workspaceTabId}
+          isScopeCurrent={() => currentWorkspaceScopeKeyRef.current === workspaceScopeKey}
+          onClose={() => setTreeMenu(null)}
+          onOpenInTerminal={onOpenInTerminal}
+          onAddReference={addTreeReferenceToChat}
+          onAddFile={() => void addTreeFileToChat()}
+        />
       )}
       <ContextMenu
         open={Boolean(treeBlankMenuPoint)}

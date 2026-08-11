@@ -97,7 +97,7 @@ console.log("\nuse controller meta");
 {
   eq(
     modelSwitchNoticeText("active work is still running; running=false; pending_prompt=false; background_jobs=2; finish or cancel the current turn, answer pending prompts, and stop background jobs before changing model"),
-    "The model cannot change while 2 background jobs are running. Open Background jobs in the status bar to stop them.",
+    "The model cannot change while background work is active. Active jobs: 2. Open Background jobs in the status bar to stop them.",
     "model busy guard names the background-job blocker",
   );
   eq(
