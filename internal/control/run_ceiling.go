@@ -7,19 +7,19 @@ import (
 	"reasonix/internal/tool"
 )
 
-// chatRunRoundLimit bounds one ordinary chat Run. Crossing it yields one
-// tool-free summary and a resumable pause, so setting it too low costs a
-// "continue" while leaving it unset costs hours.
+// chatRunRoundLimit is a backstop, not a budget. Judging when a turn stopped
+// earning its rounds belongs to the no-progress ladder, which covers the
+// wandering shape since evidence.explorationRunLimit; this only bounds a turn
+// whose judgement is wrong in a shape nobody has seen yet. Rounds count per
+// Run, so a "continue" starts them over — it does not bound a whole task.
 const (
 	chatRunRoundLimit = 100
 	chatRunRoundKey   = "chat model rounds"
 )
 
 // bindTurnScope installs the turn's Run ceiling and, for a Goal turn, the usage
-// recorder whose span stays active until the FSM commits. Ordinary chat had no
-// ceiling: max_steps was retired, and the adaptive guards cannot stand in —
-// they escalate on repetition and stay silent while a loop keeps finding
-// something new. An explicit max_steps still owns either turn.
+// recorder whose span stays active until the FSM commits. An explicit max_steps
+// still owns either turn.
 func (c *Controller) bindTurnScope(ctx context.Context, continuation *goalContinuationSnapshot) context.Context {
 	goalScopeID, goalScoped := c.goals.goalScopeIDForTurn(continuation)
 	if !goalScoped {

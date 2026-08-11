@@ -1386,15 +1386,10 @@ func (a *Agent) reserveParentWrite(runTool tool.Tool, args json.RawMessage, read
 }
 
 // Run appends the user input and drives the tool loop until the model returns a
-// final answer (no tool calls), the context is cancelled, or the provider errors.
-// With maxSteps <= 0 the loop is unbounded — the natural termination is the model
-// finishing, and the real safety bounds are user cancellation and compaction, not
-// a round count. A positive maxSteps imposes an optional hard guard, surfaced as
-// a resumable notice when hit.
-// Run is the agent lifecycle entry point: lifecycle setup, turn initialization,
-// tool-round loop, and deferred cleanup. Turn policy lives in beginRunTurn /
-// runToolLoop / handleFinalResponse / handleToolRound so the state machine stays
-// readable without changing provider-visible behavior or lock ownership.
+// final answer, the context is cancelled, or the provider errors. maxSteps <= 0
+// leaves the loop unbounded here: bounding it is the host's call, and the
+// adaptive stop is the no-progress ladder rather than a round count. Turn policy
+// lives in beginRunTurn / runToolLoop / handleFinalResponse / handleToolRound.
 func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	runMaxSteps := a.maxSteps
 	runMaxStepsKey := a.maxStepsKey
