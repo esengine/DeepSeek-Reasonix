@@ -1107,21 +1107,24 @@ func TestToolAfterFailurePolicy(t *testing.T) {
 
 // newCompactionAgent builds an agent whose session has a foldable middle
 // (large assistant turns) so CompactNow always finds a region, with the
-// summarizer scripted to answer "SUMMARY TEXT".
+// summarizer scripted to answer "SUMMARY TEXT". The recent tail stays small so
+// the content-driven candidate lands well under compact_ratio and the 50% ceiling.
 func newCompactionAgent(t *testing.T, d *dispatch.Dispatcher) (*mockProvider, *Agent) {
 	t.Helper()
 	mp := &mockProvider{name: "p", chunks: []provider.Chunk{
 		{Type: provider.ChunkText, Text: "SUMMARY TEXT"}, {Type: provider.ChunkDone},
 	}}
 	sess := NewSession("sys")
-	big := strings.Repeat("a", 4000)
+	big := strings.Repeat("a", 8000)
 	sess.Add(provider.Message{Role: provider.RoleUser, Content: "task"})
 	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: big})
 	sess.Add(provider.Message{Role: provider.RoleUser, Content: "more"})
 	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: big})
-	sess.Add(provider.Message{Role: provider.RoleUser, Content: "again"})
-	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: big})
-	return mp, New(mp, tool.NewRegistry(), sess, Options{ContextWindow: 1000, Extensions: d}, event.Discard)
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "next"})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "ok"})
+	return mp, New(mp, tool.NewRegistry(), sess, Options{
+		ContextWindow: 50_000, CompactRatio: 0.85, RecentKeep: 2, Extensions: d,
+	}, event.Discard)
 }
 
 func TestCompactionPrepareReplaceGuidance(t *testing.T) {

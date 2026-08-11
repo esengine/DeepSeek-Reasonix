@@ -117,19 +117,18 @@ grep -Fq 'name: Smoke-test Wails approval in WebView2' "$repo_root/.github/workf
 grep -Fq '../scripts/test-webview2-approval-smoke.ps1' "$repo_root/.github/workflows/ci.yml"
 grep -Fq 'wails build -clean -s -skipbindings -nopackage -platform windows/amd64 -webview2 embed' \
 	"$repo_root/.github/workflows/ci.yml"
-review_gate="$repo_root/.github/workflows/cross-boundary-review.yml"
-review_signal="$repo_root/.github/workflows/cross-boundary-review-signal.yml"
-grep -Eq '^  pull_request_target:$' "$review_gate"
-grep -Eq '^  workflow_run:$' "$review_gate"
-grep -Eq '^  workflow_dispatch:$' "$review_gate"
-! grep -Eq '^  pull_request_review:$' "$review_gate"
-grep -Fq 'ref: ${{ github.workflow_sha }}' "$review_gate"
-grep -Fq 'persist-credentials: false' "$review_gate"
-grep -Fq 'review-control/.github/scripts/cross-boundary-review.cjs' "$review_gate"
-grep -Eq '^  pull_request_review:$' "$review_signal"
-! grep -Eq 'statuses: write|pull-requests: write|contents: write' "$review_signal"
-grep -Fq 'review.commit_id' "$repo_root/.github/scripts/cross-boundary-review.cjs"
-grep -Fq 'pull.head.sha' "$repo_root/.github/scripts/cross-boundary-review.cjs"
+for retired_review_gate in \
+	"$repo_root/.github/workflows/cross-boundary-review.yml" \
+	"$repo_root/.github/workflows/cross-boundary-review-signal.yml" \
+	"$repo_root/.github/scripts/cross-boundary-review.cjs" \
+	"$repo_root/.github/scripts/cross-boundary-review.test.cjs"; do
+	if [ -e "$retired_review_gate" ]; then
+		echo "Retired cross-boundary review gate still exists: $retired_review_gate" >&2
+		exit 1
+	fi
+done
+! grep -Fq 'cross-boundary-review' "$repo_root/.github/workflows/ci.yml"
+! grep -Fq 'independent cross-boundary review' "$repo_root/.github/pull_request_template.md"
 desktop_build_line="$(grep -n -m1 'name: Build and package' "$repo_root/.github/workflows/release-desktop.yml" | cut -d: -f1)"
 webview2_smoke_line="$(grep -n -m1 'name: Smoke-test Wails approval in WebView2' "$repo_root/.github/workflows/release-desktop.yml" | cut -d: -f1)"
 signpath_upload_line="$(grep -n -m1 'name: Upload unsigned Windows payload for SignPath' "$repo_root/.github/workflows/release-desktop.yml" | cut -d: -f1)"

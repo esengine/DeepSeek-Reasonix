@@ -434,7 +434,7 @@ export function UserMessage({
       data-history-restore={id && id.startsWith("h") ? "" : undefined}
       data-entrance={id || undefined}
     >
-      <div className={`msg__body${editing ? " msg__body--editing" : ""}`}>
+      <div className={`msg__body${editing ? " msg__body--editing" : ""}`} data-transcript-selectable="message">
         {editing ? (
           <form className="msg-edit" onSubmit={(event) => void submitEdit(event)}>
             {orderedDraftAttachments.length > 0 && (
@@ -484,13 +484,13 @@ export function UserMessage({
           </form>
         ) : imSource ? (
           <div className="im-source-card">
-            <div className="im-source-card__head">
+            <div className="im-source-card__head" data-transcript-selection-ignore>
               <MessageSquare size={14} />
               <span>{t("msg.fromIm", { source: sourceLabel })}</span>
             </div>
             {displayText && <div className="im-source-card__text">{displayText}</div>}
             {(imSource.sender || imSource.chat) && (
-              <div className="im-source-card__meta">
+              <div className="im-source-card__meta" data-transcript-selection-ignore>
                 {imSource.sender && <span>{t("msg.imSender", { id: imSource.sender })}</span>}
                 {imSource.chat && <span>{imSource.chat}</span>}
               </div>
@@ -519,7 +519,7 @@ export function UserMessage({
               return (
                 <div className="msg-pasted" key={seg.key}>
                   <div className="msg-pasted-block">
-                    <div className="msg-pasted-head">
+                    <div className="msg-pasted-head" data-transcript-selection-ignore>
                       {seg.kind === "chat" ? <MessageSquare size={15} /> : <FileText size={15} />}
                       <span className="msg-pasted-label">{seg.block.label}</span>
                       <div className="msg-pasted-actions">
@@ -545,9 +545,9 @@ export function UserMessage({
             })}
           </>
         )}
-        {failed && <div className="msg__send-failed">{t("msg.sendFailed")}</div>}
+        {failed && <div className="msg__send-failed" data-transcript-selection-ignore>{t("msg.sendFailed")}</div>}
         {orderedAttachments.length > 0 && (
-          <div className="msg-attachments" aria-label={t("msg.attachments")}>
+          <div className="msg-attachments" aria-label={t("msg.attachments")} data-transcript-selection-ignore>
             {orderedAttachments.map((attachment, index) => {
               const isImage = attachment.kind === "image";
               const el = (
@@ -876,7 +876,7 @@ export const AssistantMessage = memo(function AssistantMessage({
         />
       )}
       {hasText && (
-        <div className="msg__body">
+        <div className="msg__body" data-transcript-selectable="message">
           <Markdown
             text={item.text}
             plainStatusBlocks={creationMode}

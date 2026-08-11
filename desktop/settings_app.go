@@ -162,7 +162,6 @@ type AgentView struct {
 	MaxSubagentConcurrency int     `json:"maxSubagentConcurrency"`
 	MaxParallelWriters     int     `json:"maxParallelWriters"`
 	SystemPrompt           string  `json:"systemPrompt"`
-	ColdResumePrune        bool    `json:"coldResumePrune"`
 	ReasoningLanguage      string  `json:"reasoningLanguage"`
 	CompactRatio           float64 `json:"compactRatio,omitempty"`
 	EffectiveCompactRatio  float64 `json:"effectiveCompactRatio,omitempty"`
@@ -1003,7 +1002,6 @@ func (a *App) Settings() SettingsView {
 			MaxSubagentConcurrency: desktopSubagentConcurrency(cfg.Agent.MaxSubagentConcurrency),
 			MaxParallelWriters:     desktopParallelWriters(cfg.Agent.MaxParallelWriters, cfg.Agent.MaxSubagentConcurrency),
 			SystemPrompt:           cfg.Agent.SystemPrompt,
-			ColdResumePrune:        cfg.ColdResumePruneEnabled(),
 			ReasoningLanguage:      cfg.ReasoningLanguage(),
 			CompactRatio:           cfg.Agent.CompactRatio,
 			EffectiveCompactRatio:  cfg.Agent.CompactRatio,
@@ -3503,10 +3501,6 @@ func (a *App) SetAgentParams(temperature float64, maxSteps int, plannerMaxSteps 
 		c.Agent.SystemPrompt = systemPrompt
 		return nil
 	})
-}
-
-func (a *App) SetColdResumePrune(enabled bool) error {
-	return a.applyConfigChange(func(c *config.Config) error { return c.SetColdResumePrune(enabled) })
 }
 
 func (a *App) SetCompactRatio(ratio float64) error {

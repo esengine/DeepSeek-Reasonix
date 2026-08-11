@@ -35,8 +35,6 @@ func TestCompactionStateAtomicSaveLoad(t *testing.T) {
 		},
 		PromptCacheKey: "ws|sess|model",
 		LastCacheState: CacheStateCold,
-		LastTrigger:    CompactionTriggerPressure,
-		LastMode:       CompactionModeSummarized,
 		Generation:     7,
 		LastReceipt: &ContextMaintenanceReceipt{
 			Status: "applied", Action: "summary", ProjectionVersion: 1,
@@ -50,7 +48,7 @@ func TestCompactionStateAtomicSaveLoad(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("load: ok=%v err=%v", ok, err)
 	}
-	if got.SchemaVersion != compactionStateSchemaCurrent || got.TranscriptVersion != 3 || got.LastMode != CompactionModeSummarized {
+	if got.SchemaVersion != compactionStateSchemaCurrent || got.TranscriptVersion != 3 {
 		t.Fatalf("loaded state = %+v", got)
 	}
 	if len(got.Projection.Messages) != 2 || got.Projection.CoveredCount != 10 {
@@ -146,9 +144,9 @@ func TestCompactToProjectionLeavesCanonicalIntact(t *testing.T) {
 	dir := t.TempDir()
 	sessionPath := filepath.Join(dir, "s.jsonl")
 	a := New(fp, nil, sess, Options{
-		ContextWindow: 2000,
+		ContextWindow: 50_000,
+		CompactRatio:  0.85,
 		RecentKeep:    2,
-		ArchiveDir:    dir,
 		SessionPath:   sessionPath,
 		ModelRef:      "test/model",
 	}, event.Discard)
@@ -174,13 +172,17 @@ func TestCompactToProjectionLeavesCanonicalIntact(t *testing.T) {
 			estimateMessagesTokens(a.compactionState.Projection.Messages),
 			estimateMessagesTokens(before))
 	}
-	// Sidecar must exist and reload.
+	// Sidecar must exist and reload with an applied summary receipt (v3 does not
+	// persist the legacy last_mode field).
 	st, ok, err := LoadCompactionState(sessionPath)
 	if err != nil || !ok {
 		t.Fatalf("reload sidecar: ok=%v err=%v", ok, err)
 	}
-	if st.LastMode != CompactionModeSummarized {
-		t.Fatalf("mode = %q, want summarized", st.LastMode)
+	if st.LastReceipt == nil || st.LastReceipt.Status != "applied" || st.LastReceipt.Action != "summary" {
+		t.Fatalf("last receipt = %+v, want applied summary", st.LastReceipt)
+	}
+	if st.Projection.ProjectionVersion == 0 {
+		t.Fatal("reloaded projection version is zero")
 	}
 	// Model-visible must use projection.
 	visible := a.modelVisibleMessages()
@@ -317,24 +319,35 @@ func TestLocalOnlyExcludedFromCompactionRequest(t *testing.T) {
 	}
 }
 
-func TestArchiveFailureLeavesNoProjection(t *testing.T) {
+// Checkpoint installation no longer writes archive copies — the canonical
+// transcript is the lossless store. ArchiveDir misconfiguration must not block
+// a successful summary install.
+func TestArchiveDirIgnoredOnCheckpointInstall(t *testing.T) {
 	fp := &fakeProvider{reply: "digest"}
 	sess := NewSession("sys")
-	for range 8 {
-		sess.Add(provider.Message{Role: provider.RoleUser, Content: strings.Repeat("u", 80)})
-		sess.Add(provider.Message{Role: provider.RoleAssistant, Content: strings.Repeat("a", 120)})
+	big := strings.Repeat("assistant work detail ", 200)
+	for range 6 {
+		sess.Add(provider.Message{Role: provider.RoleUser, Content: "turn"})
+		sess.Add(provider.Message{Role: provider.RoleAssistant, Content: big})
 	}
-	// Point archive at a file path so MkdirAll/Create fails.
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "next"})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "ok"})
+	// Point archive at a file path so MkdirAll/Create would fail if archives were written.
 	badArchive := filepath.Join(t.TempDir(), "not-a-dir")
 	if err := writeFile(badArchive, []byte("x")); err != nil {
 		t.Fatal(err)
 	}
-	a := New(fp, nil, sess, Options{ContextWindow: 2000, RecentKeep: 2, ArchiveDir: badArchive}, event.Discard)
-	if err := a.CompactNow(context.Background(), ""); err == nil {
-		t.Fatal("expected archive failure")
+	a := New(fp, nil, sess, Options{
+		ContextWindow: 50_000, CompactRatio: 0.85, RecentKeep: 2, ArchiveDir: badArchive,
+	}, event.Discard)
+	if err := a.CompactNow(context.Background(), ""); err != nil {
+		t.Fatalf("CompactNow with unusable ArchiveDir: %v", err)
 	}
-	if len(a.compactionState.Projection.Messages) != 0 {
-		t.Fatal("half-finished projection after archive failure")
+	if len(a.compactionState.Projection.Messages) == 0 {
+		t.Fatal("expected projection despite unusable ArchiveDir")
+	}
+	if a.compactionState.LastReceipt != nil && a.compactionState.LastReceipt.Archive != "" {
+		t.Fatalf("checkpoint must not create archives, got %q", a.compactionState.LastReceipt.Archive)
 	}
 }
 
@@ -370,18 +383,20 @@ func joinContents(msgs []provider.Message) string {
 
 func TestCompactReplacesHistory(t *testing.T) {
 	prov := &fakeProvider{reply: "- goal: do X\n- changed file Y"}
-	bigStep := strings.Repeat("important implementation detail ", 80)
+	bigStep := strings.Repeat("important implementation detail ", 200)
 	sess := &Session{Messages: []provider.Message{
 		{Role: provider.RoleSystem, Content: "sys"},
-		{Role: provider.RoleUser, Content: "task " + bigStep},
+		{Role: provider.RoleUser, Content: "task"},
 		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "1", Name: "read_file", Arguments: "{}"}}},
-		{Role: provider.RoleTool, ToolCallID: "1", Name: "read_file", Content: "file contents"},
-		{Role: provider.RoleAssistant, Content: "did a step"},
+		{Role: provider.RoleTool, ToolCallID: "1", Name: "read_file", Content: bigStep},
+		{Role: provider.RoleAssistant, Content: bigStep},
 		{Role: provider.RoleUser, Content: "next"},
 		{Role: provider.RoleAssistant, Content: "ok"},
 	}}
 	dir := t.TempDir()
-	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, ArchiveDir: dir}, event.Discard)
+	a := New(prov, tool.NewRegistry(), sess, Options{
+		ContextWindow: 50_000, CompactRatio: 0.85, RecentKeep: 2, ArchiveDir: dir,
+	}, event.Discard)
 	beforeLen := len(sess.Messages)
 
 	if err := a.compact(context.Background(), "manual", "", true); err != nil {
@@ -408,7 +423,7 @@ func TestCompactReplacesHistory(t *testing.T) {
 	}
 	var foundSummary bool
 	for _, m := range proj {
-		if strings.Contains(m.Content, "Summary of earlier") && strings.Contains(m.Content, "do X") {
+		if strings.Contains(m.Content, "do X") {
 			foundSummary = true
 		}
 	}
@@ -416,19 +431,13 @@ func TestCompactReplacesHistory(t *testing.T) {
 		t.Errorf("summary missing do X: %+v", proj)
 	}
 
+	// No new archive files: canonical is the lossless store.
 	entries, err := os.ReadDir(dir)
-	if err != nil || len(entries) != 1 {
-		t.Fatalf("archive dir: entries=%d err=%v", len(entries), err)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, entries[0].Name()))
 	if err != nil {
-		t.Fatalf("read archive: %v", err)
+		t.Fatalf("archive dir: %v", err)
 	}
-	if lines := strings.Count(strings.TrimSpace(string(data)), "\n") + 1; lines < 1 {
-		t.Errorf("archived %d lines, want >=1:\n%s", lines, data)
-	}
-	if !strings.HasSuffix(entries[0].Name(), ".jsonl") {
-		t.Errorf("archive name = %q, want .jsonl", entries[0].Name())
+	if len(entries) != 0 {
+		t.Fatalf("archive dir entries = %d, want 0 (no new archives)", len(entries))
 	}
 }
 
@@ -478,70 +487,77 @@ func TestCompactFallsBackToMechanicalFoldWhenSummaryFails(t *testing.T) {
 }
 
 func TestCompactRewriteVersionFeedsCacheDiagnostics(t *testing.T) {
+	// Projection checkpoints do not rewrite the canonical transcript, so they
+	// must not bump LogRewriteVersion or queue compact_* content-rewrite reasons.
+	// The provider-visible change is the projection sidecar (version + summary).
 	prov := &fakeProvider{reply: "- summary"}
+	big := strings.Repeat("work detail ", 200)
 	sess := &Session{Messages: []provider.Message{
 		{Role: provider.RoleSystem, Content: "sys"},
-		{Role: provider.RoleUser, Content: "a"},
-		{Role: provider.RoleAssistant, Content: "b"},
-		{Role: provider.RoleUser, Content: "c"},
-		{Role: provider.RoleAssistant, Content: "d"},
+		{Role: provider.RoleUser, Content: "task"},
+		{Role: provider.RoleAssistant, Content: big},
+		{Role: provider.RoleUser, Content: "more"},
+		{Role: provider.RoleAssistant, Content: big},
 		{Role: provider.RoleUser, Content: "e"},
 		{Role: provider.RoleAssistant, Content: "f"},
 	}}
-	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2}, event.Discard)
-	before := CaptureShape("sys", nil, sess.RewriteVersion())
+	a := New(prov, tool.NewRegistry(), sess, Options{
+		ContextWindow: 50_000, CompactRatio: 0.85, RecentKeep: 2,
+	}, event.Discard)
+	beforeVersion := sess.RewriteVersion()
 
 	if err := a.compact(context.Background(), "auto", "", true); err != nil {
 		t.Fatalf("compact: %v", err)
 	}
-	// Canonical rewriteVersion stays put; projection notes compact_auto for diagnostics.
-	if sess.RewriteVersion() != before.LogRewriteVersion {
-		t.Fatalf("canonical rewrite version changed: %d -> %d", before.LogRewriteVersion, sess.RewriteVersion())
+	if sess.RewriteVersion() != beforeVersion {
+		t.Fatalf("canonical rewrite version changed: %d -> %d", beforeVersion, sess.RewriteVersion())
 	}
 	if !hasCompactionSummary(visibleContext(a)) {
 		t.Fatal("expected projection summary")
 	}
-	reasons := sess.DrainContentRewriteReasons()
-	// Reasons alone attribute the prefix change; rewrite version need not bump.
-	after := CaptureShape("sys", nil, sess.RewriteVersion())
-	diag := CompareShape(before, after, &provider.Usage{CacheMissTokens: 10}, reasons)
-	if !diag.PrefixChanged {
-		t.Fatalf("diagnostics should report prefix change: %+v", diag)
+	if got := a.currentProjectionVersion(); got != 1 {
+		t.Fatalf("projection version = %d, want 1", got)
 	}
-	if len(diag.PrefixChangeReasons) != 1 || diag.PrefixChangeReasons[0] != "compact_auto" {
-		t.Fatalf("change reasons = %v, want [compact_auto]", diag.PrefixChangeReasons)
+	if reasons := sess.DrainContentRewriteReasons(); len(reasons) != 0 {
+		t.Fatalf("projection compact queued canonical rewrite reasons %v; want none", reasons)
 	}
 }
 
 func TestCompactKeepsMidSessionUserTurns(t *testing.T) {
-	big := strings.Repeat("work output ", 100)
+	// Small window so the recent-tail budget cannot swallow the mid-session
+	// user turn (production 32K floor only applies to large windows).
+	const window = 8_000
+	// ~1500 tokens of work after the mid-fact pushes it out of the ~800-token tail.
+	big := strings.Repeat("work output line with detail. ", 250)
+	midFact := "by the way, always use pnpm not npm"
 	sess := &Session{Messages: []provider.Message{
 		{Role: provider.RoleSystem, Content: "sys"},
 		{Role: provider.RoleUser, Content: "first task"},
 		{Role: provider.RoleAssistant, Content: big},
 		{Role: provider.RoleTool, ToolCallID: "1", Name: "read_file", Content: big},
-		{Role: provider.RoleUser, Content: "by the way, always use pnpm not npm"},
+		{Role: provider.RoleUser, Content: midFact},
 		{Role: provider.RoleAssistant, Content: big},
 		{Role: provider.RoleTool, ToolCallID: "2", Name: "read_file", Content: big},
 		{Role: provider.RoleUser, Content: "next"},
 		{Role: provider.RoleAssistant, Content: "ok"},
 	}}
-	// Summarizer preserves the mid-session fact in the rolling digest.
+	// Summarizer carries the mid-session fact into the single rolling digest.
+	// No early-user-turn hoist: only the stable prefix (system + first user) is
+	// kept verbatim; mid-session user turns in the fold region merge into the summary.
 	a := New(&fakeProvider{reply: "Standing facts: always use pnpm not npm"}, tool.NewRegistry(), sess,
-		Options{RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
+		Options{ContextWindow: window, CompactRatio: 0.85, RecentKeep: 2}, event.Discard)
 
 	if err := a.compact(context.Background(), "manual", "", true); err != nil {
 		t.Fatalf("compact: %v", err)
 	}
 
-	// Canonical retains every user turn; projection keeps fixed early turns
-	// and folds later small user turns into the single summary.
+	// Canonical retains every user turn.
 	var pinnedFirst, keptMidCanonical bool
 	for _, m := range sess.Snapshot() {
 		if m.Role == provider.RoleUser && m.Content == "first task" {
 			pinnedFirst = true
 		}
-		if m.Role == provider.RoleUser && strings.Contains(m.Content, "always use pnpm not npm") {
+		if m.Role == provider.RoleUser && strings.Contains(m.Content, midFact) {
 			keptMidCanonical = true
 		}
 	}
@@ -549,7 +565,7 @@ func TestCompactKeepsMidSessionUserTurns(t *testing.T) {
 		t.Fatalf("canonical lost user turns (first=%v mid=%v)", pinnedFirst, keptMidCanonical)
 	}
 	proj := visibleContext(a)
-	var projFirst, projMid bool
+	var projFirst, projMidVerbatim bool
 	for _, m := range proj {
 		if isCompactionSummary(m) {
 			continue
@@ -557,17 +573,18 @@ func TestCompactKeepsMidSessionUserTurns(t *testing.T) {
 		if m.Role == provider.RoleUser && m.Content == "first task" {
 			projFirst = true
 		}
-		if m.Role == provider.RoleUser && strings.Contains(m.Content, "always use pnpm not npm") {
-			projMid = true
+		if m.Role == provider.RoleUser && m.Content == midFact {
+			projMidVerbatim = true
 		}
 	}
 	if !projFirst {
 		t.Fatalf("fixed early user turn missing from projection: %+v", proj)
 	}
-	// The mid-session fact is still among the first few small user turns by
-	// position, so the fixed early window keeps it verbatim (stable prefix).
-	if !projMid {
-		t.Fatalf("early-position user fact missing from projection: %+v", proj)
+	if projMidVerbatim {
+		t.Fatalf("mid-session user turn must fold into summary, not stay verbatim: %+v", proj)
+	}
+	if !strings.Contains(joinContents(proj), "pnpm") {
+		t.Fatalf("mid-session fact missing from rolling summary: %+v", proj)
 	}
 	if strings.Contains(joinContents(proj), big) {
 		t.Errorf("assistant/tool work was not folded out of projection")
@@ -628,17 +645,21 @@ func TestCompactKeepsPriorDigests(t *testing.T) {
 
 func TestCompactKeepsErrorMessages(t *testing.T) {
 	prov := &fakeProvider{reply: "- normal work summarized"}
+	big := strings.Repeat("normal work output ", 200)
 	sess := &Session{Messages: []provider.Message{
 		{Role: provider.RoleSystem, Content: "sys"},
 		{Role: provider.RoleUser, Content: "task"},
 		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "1", Name: "bash", Arguments: `{"cmd":"bad"}`}}},
 		{Role: provider.RoleTool, ToolCallID: "1", Name: "bash", Content: "error: command failed"},
+		{Role: provider.RoleAssistant, Content: big},
 		{Role: provider.RoleUser, Content: "continue"},
-		{Role: provider.RoleAssistant, Content: "continued"},
+		{Role: provider.RoleAssistant, Content: big},
 		{Role: provider.RoleUser, Content: "next"},
 		{Role: provider.RoleAssistant, Content: "ok"},
 	}}
-	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, ArchiveDir: t.TempDir(), KeepPolicy: KeepErrors}, event.Discard)
+	a := New(prov, tool.NewRegistry(), sess, Options{
+		ContextWindow: 50_000, CompactRatio: 0.85, RecentKeep: 2, KeepPolicy: KeepErrors,
+	}, event.Discard)
 
 	if err := a.compact(context.Background(), "manual", "", true); err != nil {
 		t.Fatalf("compact: %v", err)
@@ -667,16 +688,23 @@ func TestCompactKeepsErrorMessages(t *testing.T) {
 
 func TestCompactKeepsUserMarkedMessages(t *testing.T) {
 	prov := &fakeProvider{reply: "- unmarked work summarized"}
-	marked := "[[keep]] exact requirement " + strings.Repeat("must stay verbatim ", 200)
+	// Keep-marked text stays in the projection as protected content; surrounding
+	// work must be large enough that folding it still reduces the candidate.
+	marked := "[[keep]] exact requirement " + strings.Repeat("must stay verbatim ", 40)
+	big := strings.Repeat("unmarked work output ", 300)
 	sess := &Session{Messages: []provider.Message{
 		{Role: provider.RoleSystem, Content: "sys"},
 		{Role: provider.RoleUser, Content: "task"},
 		{Role: provider.RoleUser, Content: marked},
-		{Role: provider.RoleAssistant, Content: "worked"},
+		{Role: provider.RoleAssistant, Content: big},
+		{Role: provider.RoleUser, Content: "more"},
+		{Role: provider.RoleAssistant, Content: big},
 		{Role: provider.RoleUser, Content: "next"},
 		{Role: provider.RoleAssistant, Content: "ok"},
 	}}
-	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, ArchiveDir: t.TempDir(), KeepPolicy: KeepUserMarked}, event.Discard)
+	a := New(prov, tool.NewRegistry(), sess, Options{
+		ContextWindow: 50_000, CompactRatio: 0.85, RecentKeep: 2, KeepPolicy: KeepUserMarked,
+	}, event.Discard)
 
 	if err := a.compact(context.Background(), "manual", "", true); err != nil {
 		t.Fatalf("compact: %v", err)
@@ -706,24 +734,32 @@ func TestCompactKeepsUserMarkedMessages(t *testing.T) {
 }
 
 func TestRunCompactsAfterFinalAnswer(t *testing.T) {
-	// A turn that ends with a final answer (no trailing tool batch) must still
-	// compact when the context is over the trigger; otherwise a large context
-	// carries into the next turn un-folded and overflows the model window.
-	big := strings.Repeat("old work ", 200)
+	// Maintenance runs on Prepare before sampling (ObserveUsage is a no-op).
+	// A turn whose estimated prompt already crosses compact_ratio must install
+	// the summary checkpoint on the sampling path so the final-answer request
+	// rides the reduced view.
+	const window = 10_000
+	// ~2×4K tokens of foldable work so estimatedPromptTokens ≥ fold (8500).
+	big := strings.Repeat("old work detail line with substance. ", 800)
 	sess := &Session{Messages: []provider.Message{
 		{Role: provider.RoleSystem, Content: "sys"},
 		{Role: provider.RoleUser, Content: "task"},
 		{Role: provider.RoleAssistant, Content: big},
 		{Role: provider.RoleAssistant, Content: big},
 	}}
-	a := New(&fakeProvider{reply: "done", promptTokens: 95}, tool.NewRegistry(), sess,
-		Options{ContextWindow: 100, RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
+	// fakeProvider replies "done" for the main sample; compact also uses the same
+	// provider for the summary call (also returns "done", which is fine as a digest).
+	a := New(&fakeProvider{reply: "done"}, tool.NewRegistry(), sess,
+		Options{ContextWindow: window, CompactRatio: 0.85, RecentKeep: 2}, event.Discard)
 
+	if before := a.estimatedPromptTokens(a.modelVisibleMessages()); before < a.compactTrigger() {
+		t.Fatalf("fixture est=%d below fold trigger %d", before, a.compactTrigger())
+	}
 	if err := a.Run(context.Background(), "what's the status?"); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	if !hasCompactionSummary(visibleContext(a)) {
-		t.Fatalf("final-answer turn over the trigger did not install projection summary")
+		t.Fatalf("turn over the trigger did not install projection summary")
 	}
 	// Canonical rewrite version stays 0; projection carries the fold.
 	if got := sess.RewriteVersion(); got != 0 {

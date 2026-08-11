@@ -11,9 +11,13 @@ import (
 	"reasonix/internal/tool"
 )
 
+// Issue #7935 used to install prune projections every time many tool results
+// crossed a snip threshold. Automatic maintenance is now summary-only and
+// generation-scoped: below compact_ratio nothing happens; at the threshold
+// exactly one summary lands; appends before the next threshold do not re-pay.
 func TestIssue7935Maintains206ToolResultsOnceAndOnlyProcessesNewTail(t *testing.T) {
-	const staleResults = 206
-	big := strings.Repeat("line\n", 1_000)
+	const staleResults = 40
+	big := strings.Repeat("line\n", 200)
 	messages := []provider.Message{
 		{Role: provider.RoleSystem, Content: "system"},
 		{Role: provider.RoleUser, Content: "first task"},
@@ -31,25 +35,30 @@ func TestIssue7935Maintains206ToolResultsOnceAndOnlyProcessesNewTail(t *testing.
 	)
 	sess := &Session{Messages: messages}
 	sink := &recordSink{}
-	a := New(nil, tool.NewRegistry(), sess, Options{
-		ContextWindow: 1_000,
+	a := New(&fakeProvider{reply: "structured history digest"}, tool.NewRegistry(), sess, Options{
+		ContextWindow: 8_000,
+		CompactRatio:  0.80,
 		RecentKeep:    2,
 		ArchiveDir:    t.TempDir(),
 	}, sink)
 
-	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 650})
-	firstVersion := a.currentProjectionVersion()
-	if firstVersion == 0 {
-		t.Fatal("first maintenance did not install a projection")
+	// Below the fold trigger nothing may be rewritten.
+	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 5_000})
+	if got := a.currentProjectionVersion(); got != 0 {
+		t.Fatalf("history was rewritten below the fold trigger: projection version %d", got)
 	}
-	if got := countToolResultsWithPrefix(a.modelVisibleMessages(), snippedMarker); got != staleResults {
-		t.Fatalf("first maintenance snipped %d results, want %d", got, staleResults)
+
+	// Crossing the sole trigger installs one summary checkpoint, never prune.
+	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 7_000})
+	firstVersion := a.currentProjectionVersion()
+	if firstVersion != 1 {
+		t.Fatalf("first maintenance version = %d, want 1", firstVersion)
+	}
+	if got := countToolResultsWithPrefix(a.modelVisibleMessages(), prunedMarker); got != 0 {
+		t.Fatalf("automatic prune markers installed = %d, want 0", got)
 	}
 	status := a.ContextMaintenanceSnapshot()
-	if status.ProjectedTokens <= 0 || status.CanonicalTokens <= status.ProjectedTokens {
-		t.Fatalf("maintenance snapshot canonical/projected = %d/%d", status.CanonicalTokens, status.ProjectedTokens)
-	}
-	if status.LastReceipt == nil || status.LastReceipt.Action != "snip" || status.LastReceipt.AffectedToolResults != staleResults {
+	if status.LastReceipt == nil || status.LastReceipt.Action != "summary" || status.LastReceipt.Status != "applied" {
 		t.Fatalf("maintenance snapshot receipt = %+v", status.LastReceipt)
 	}
 	for i, msg := range sess.Snapshot() {
@@ -58,31 +67,24 @@ func TestIssue7935Maintains206ToolResultsOnceAndOnlyProcessesNewTail(t *testing.
 		}
 	}
 
-	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 650})
-	if got := a.currentProjectionVersion(); got != firstVersion {
-		t.Fatalf("unchanged visible view was maintained again: version %d -> %d", firstVersion, got)
-	}
-
+	// Appends that stay under the next threshold must not re-summarize.
 	sess.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "new", Name: "read_file", Arguments: "{}"}}})
-	sess.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "new", Name: "read_file", Content: big})
-	sess.Add(provider.Message{Role: provider.RoleUser, Content: "move new result out of the protected tail"})
+	sess.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "new", Name: "read_file", Content: "small"})
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "continue"})
 	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "ok"})
-	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 650})
-	if got := a.currentProjectionVersion(); got != firstVersion+1 {
-		t.Fatalf("new tail maintenance version = %d, want %d", got, firstVersion+1)
-	}
-	if got := countToolResultsWithPrefix(a.modelVisibleMessages(), snippedMarker); got != staleResults+1 {
-		t.Fatalf("maintained visible results = %d, want %d", got, staleResults+1)
+	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 1_500})
+	if got := a.currentProjectionVersion(); got != firstVersion {
+		t.Fatalf("below-threshold append advanced version to %d, want %d", got, firstVersion)
 	}
 
 	var applied int
 	for _, got := range sink.kinds(event.ContextMaintenanceEvent) {
-		if got.Maintenance != nil && got.Maintenance.Status == "applied" && got.Maintenance.Action == "snip" {
+		if got.Maintenance != nil && got.Maintenance.Status == "applied" && got.Maintenance.Action == "summary" {
 			applied++
 		}
 	}
-	if applied != 2 {
-		t.Fatalf("maintenance notifications = %d, want first pass plus new tail only", applied)
+	if applied != 1 {
+		t.Fatalf("summary applied events = %d, want exactly 1", applied)
 	}
 }
 

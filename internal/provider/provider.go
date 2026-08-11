@@ -47,9 +47,11 @@ type Message struct {
 	// Content is the provider-visible conversation content. Keeping this legacy
 	// field provider-visible preserves replay for older CLI/Desktop releases.
 	Content string `json:"content,omitempty"`
-	// RawContent is the user-authored form of a user turn, when it differs from
-	// Content because the host added transient context. Older releases ignore
-	// this field and still replay the provider-visible Content safely.
+	// RawContent holds the full original when it differs from Content:
+	// for user turns, the user-authored text before host-injected context;
+	// for tool turns, the complete tool result when first-visible Content was
+	// bounded. ModelMessages always clears it so provider serialization, prompt
+	// cache hashes, and projection hashes never include it.
 	RawContent string `json:"raw_content,omitempty"`
 	// ProviderContent is a transitional field written by early Context Engine v2
 	// builds. Loaders migrate it into Content/RawContent before normal use.
@@ -221,10 +223,6 @@ type Request struct {
 	// entirely — the common path must stay byte-stable for prompt caching.
 	ResponseFormat *ResponseFormat `json:"ResponseFormat,omitempty"`
 	EffortOverride string          `json:"EffortOverride,omitempty"` // per-call reasoning-depth override; adapters apply it only when the endpoint's effort vocabulary accepts it
-	// ContextEditing is an explicit provider capability request. Providers that
-	// do not support native editing ignore it; local compaction remains the
-	// default when it is nil.
-	ContextEditing *ContextEditingPolicy `json:"ContextEditing,omitempty"`
 }
 
 // ResponseFormat asks a provider to constrain its output shape.
@@ -234,19 +232,26 @@ type ResponseFormat struct {
 	Type string `json:"type"`
 }
 
-// DefaultReasoningOutputTokens is the conservative provider-side budget used
-// for official reasoning APIs whose documented contract safely accepts 32K.
-// Unknown compatible gateways must opt in through configuration instead of
-// inheriting this value merely because they implement an OpenAI-shaped wire.
-const DefaultReasoningOutputTokens = 32 * 1024
+// Auto ladder for max_output_tokens=0. Bounds completion only; never compact_ratio.
+const (
+	DefaultOrdinaryOutputTokens      = 16 * 1024  // non-reasoning
+	DefaultReasoningOutputTokens     = 32 * 1024  // ordinary reasoning
+	DefaultHighReasoningOutputTokens = 64 * 1024  // high/max effort
+	DefaultHighOutputTokens          = 128 * 1024 // explicit only; never auto
+)
 
-// DefaultHighOutputTokens is the raised output budget for reasoning APIs whose
-// documented contract safely accepts 128K-class ceilings (DeepSeek Responses
-// API allows up to 384K; MiMo allows up to 131072). Long reasoning turns
-// truncate under 32K, forcing many small write→test→fix iterations; a 128K
-// budget lets the model finish in one pass. Kept in one place so the three
-// protocols (Responses / Chat Completions / Anthropic) cannot drift apart.
-const DefaultHighOutputTokens = 128 * 1024
+// AutoOutputBudget maps max_output_tokens=0 to 16K/32K/64K by reasoning effort.
+func AutoOutputBudget(reasoningEnabled bool, effort string) int {
+	if !reasoningEnabled {
+		return DefaultOrdinaryOutputTokens
+	}
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "high", "max":
+		return DefaultHighReasoningOutputTokens
+	default:
+		return DefaultReasoningOutputTokens
+	}
+}
 
 // TemperaturePtr wraps v in a pointer so callers that explicitly want a
 // specific temperature, including 0 for deterministic output, can distinguish
@@ -747,10 +752,6 @@ type Usage struct {
 	ContextReasoningTokens  int
 	ContextCacheHitTokens   int
 	ContextCacheMissTokens  int
-	// Native context-editing observations from the latest committed request.
-	ContextEditingType            string
-	ContextEditingClearedToolUses int
-	ContextEditingClearedTokens   int
 }
 
 // ContextFillTokens returns the latest-attempt context fill (prompt+completion)

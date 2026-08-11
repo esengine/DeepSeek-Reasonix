@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 
 	"reasonix/internal/event"
@@ -22,6 +23,12 @@ const (
 type progressGuard struct {
 	tracker *evidence.ProgressTracker
 	streak  int
+}
+
+type goalStuckSignal struct {
+	limit  int
+	key    string
+	reason string
 }
 
 func (g *progressGuard) reset() {
@@ -51,17 +58,31 @@ type Receipt = evidence.Receipt
 // applyBatchGuards runs both post-batch guards: the storm breaker (failure
 // fixation) and the progress guard (zero-gain repetition). The outcome shadow
 // observes the same receipts afterwards without influencing either guard.
-func (a *Agent) applyBatchGuards(calls []provider.ToolCall, outcomes []toolOutcome, results []string, receiptMark int) {
-	a.applyStormBreaker(calls, outcomes, results, receiptMark)
-	a.applyProgressGuard(results, outcomes, receiptMark)
+func (a *Agent) applyBatchGuards(ctx context.Context, cancelled bool, calls []provider.ToolCall, outcomes []toolOutcome, results []string, receiptMark int) goalStuckSignal {
+	if cancelled {
+		return goalStuckSignal{}
+	}
+	stormReason := a.applyStormBreaker(calls, outcomes, results, receiptMark)
+	progressReason := a.applyProgressGuard(results, outcomes, receiptMark)
 	a.observeOutcomeShadow(receiptMark, results, outcomes)
 	a.observeDelegationAdmission(calls)
+	if _, scoped := DeliveryExecutionScopeFromContext(ctx); !scoped {
+		return goalStuckSignal{}
+	}
+	if stormReason != "" {
+		return goalStuckSignal{limit: stormBreakThreshold, key: "goal repeated host outcome", reason: stormReason}
+	}
+	if progressReason != "" {
+		return goalStuckSignal{limit: progressStopStreak, key: "goal zero-evidence rounds", reason: progressReason}
+	}
+	return goalStuckSignal{}
 }
 
 // resetTurnEvidence clears the ledger and both progress scorers together.
 func (a *Agent) resetTurnEvidence() {
 	a.evidence.Reset()
 	a.progress.reset()
+	a.stormSig, a.stormCount, a.blockedTurnStreak = "", 0, 0
 	a.outcome = evidence.NewOutcomeTracker()
 	a.ebm = ebmState{}
 	a.governor = governorState{}
@@ -90,9 +111,9 @@ func (a *Agent) observeOutcomeShadow(receiptMark int, results []string, outcomes
 // to the round's first tool result, a loop-guard notice for the frontend, and
 // at the stop tier the loop-guard pass so final readiness stands down and the
 // model can deliver its answer instead of being sent back for more receipts.
-func (a *Agent) applyProgressGuard(results []string, outcomes []toolOutcome, receiptMark int) {
+func (a *Agent) applyProgressGuard(results []string, outcomes []toolOutcome, receiptMark int) string {
 	if a.evidence == nil || len(results) == 0 || len(outcomes) == 0 {
-		return
+		return ""
 	}
 	receipts := a.evidence.ReceiptsSince(receiptMark)
 	// Rounds where nothing succeeded are the storm breaker's jurisdiction
@@ -106,7 +127,7 @@ func (a *Agent) applyProgressGuard(results []string, outcomes []toolOutcome, rec
 		}
 	}
 	if !anySuccess {
-		return
+		return ""
 	}
 	streak := a.progress.observe(receipts)
 	var guard, detail string
@@ -132,7 +153,7 @@ func (a *Agent) applyProgressGuard(results []string, outcomes []toolOutcome, rec
 			streak)
 		detail = fmt.Sprintf("progress guard: %d zero-gain rounds — nudging to narrow", streak)
 	default:
-		return
+		return ""
 	}
 	results[0] = outcomes[0].output + "\n\n" + guard
 	level := event.LevelInfo
@@ -140,6 +161,10 @@ func (a *Agent) applyProgressGuard(results []string, outcomes []toolOutcome, rec
 		level = event.LevelWarn
 	}
 	a.sink.Emit(event.Event{Kind: event.Notice, Level: level, Code: event.NoticeCodeProgressGuard, Text: progressGuardNoticeText(), Detail: detail})
+	if streak >= progressStopStreak {
+		return fmt.Sprintf("%d consecutive successful tool rounds produced no new host evidence", streak)
+	}
+	return ""
 }
 
 func progressGuardNoticeText() string {

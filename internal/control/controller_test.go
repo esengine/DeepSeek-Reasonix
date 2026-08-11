@@ -141,15 +141,12 @@ func (r cancelingRunner) Run(_ context.Context, _ string) error {
 	return nil
 }
 
-func TestContextSnapshotIncludesCompletionTokens(t *testing.T) {
+// The gauge must measure what the trigger measures. Reporting the previous
+// turn's billed usage is how a session displayed 8% while it was compacting.
+func TestContextSnapshotMeasuresTheTriggerInput(t *testing.T) {
 	prov := &scriptedTurns{turns: [][]provider.Chunk{{
 		{Type: provider.ChunkText, Text: "ok"},
-		{Type: provider.ChunkUsage, Usage: &provider.Usage{
-			PromptTokens:     6840,
-			CompletionTokens: 48,
-			TotalTokens:      6888,
-			ReasoningTokens:  48,
-		}},
+		{Type: provider.ChunkUsage, Usage: &provider.Usage{PromptTokens: 6840, CompletionTokens: 48, TotalTokens: 6888, ReasoningTokens: 48}},
 		{Type: provider.ChunkDone},
 	}}}
 	ag := agent.New(prov, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{ContextWindow: 1_000_000}, event.Discard)
@@ -159,9 +156,10 @@ func TestContextSnapshotIncludesCompletionTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	want := c.ContextMaintenanceSnapshot().ProjectedTokens
 	used, window := c.ContextSnapshot()
-	if used != 6888 || window != 1_000_000 {
-		t.Fatalf("ContextSnapshot() = (%d, %d), want (6888, 1000000)", used, window)
+	if used != want || used == 6888 || window != 1_000_000 {
+		t.Fatalf("ContextSnapshot() = (%d, %d), want (%d, 1000000): the gauge reads the trigger's live input, never the last turn's 6888", used, window, want)
 	}
 }
 

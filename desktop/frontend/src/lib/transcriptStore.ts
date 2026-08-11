@@ -32,8 +32,9 @@
 
 import { asArray } from "./array";
 import { app } from "./bridge";
-import type { MarkdownBlock } from "./markdownPipeline";
 import { noteHistoryPage, registerTranscriptCacheDiagnostics } from "./sessionDiagnostics";
+import { TranscriptMarkdownCache, type ParsedMarkdownValue } from "./transcriptMarkdownCache";
+export type { ParsedMarkdownValue } from "./transcriptMarkdownCache";
 import { fileDiffFromWire, summarizeFileDiff } from "./tools";
 import {
   historyToolError,
@@ -408,43 +409,22 @@ function applyResolvedField(rec: TranscriptRecord, ref: HistoryContentRef, data:
   }
 }
 
-interface MarkdownCacheEntry {
-  value: ParsedMarkdownValue;
-  bytes: number;
-}
-
-/**
- * Parsed-markdown cache payload (Phase E): the HAST blocks a worker parse
- * produced, plus the exact source text they came from. Callers compare
- * `source` against the text at hand before using the blocks — the entryId +
- * revision key is a content hash, and this comparison is the backstop.
- */
-export interface ParsedMarkdownValue {
-  source: string;
-  blocks: MarkdownBlock[];
-  /** Precomputed byte weight: source UTF-16 size + estimated HAST size. */
-  bytes: number;
-}
-
 export class TranscriptStore {
   private readonly backend: TranscriptBackend;
   private readonly maxResidentSessions: number;
   private readonly historyBodyBudgetBytes: number;
-  private readonly markdownBudgetBytes: number;
   /** Insertion-ordered (oldest first); touch re-inserts at the end. */
   private readonly sessions = new Map<string, SessionTranscript>();
   private readonly tabPins = new Map<string, { live: boolean; active: boolean }>();
   private readonly listeners = new Map<string, Set<(change: TranscriptContentChange) => void>>();
-  private readonly markdownCache = new Map<string, MarkdownCacheEntry>();
-  private markdownBytes = 0;
+  private readonly markdown: TranscriptMarkdownCache;
   private historyEvictions = 0;
-  private markdownEvictions = 0;
 
   constructor(backend: TranscriptBackend, options: TranscriptStoreOptions = {}) {
     this.backend = backend;
     this.maxResidentSessions = Math.max(1, options.maxResidentSessions ?? DEFAULT_MAX_RESIDENT_SESSIONS);
     this.historyBodyBudgetBytes = Math.max(0, options.historyBodyBudgetBytes ?? DEFAULT_HISTORY_BODY_BUDGET);
-    this.markdownBudgetBytes = Math.max(0, options.markdownBudgetBytes ?? DEFAULT_MARKDOWN_BUDGET);
+    this.markdown = new TranscriptMarkdownCache(Math.max(0, options.markdownBudgetBytes ?? DEFAULT_MARKDOWN_BUDGET));
   }
 
   // ── session identity / LRU ────────────────────────────────────────────────
@@ -608,10 +588,10 @@ export class TranscriptStore {
       maxResidentSessions: this.maxResidentSessions,
       bodyBytes: this.totalBodyBytes(),
       bodyBudgetBytes: this.historyBodyBudgetBytes,
-      markdownBytes: this.markdownBytes,
-      markdownBudgetBytes: this.markdownBudgetBytes,
+      markdownBytes: this.markdown.bytes,
+      markdownBudgetBytes: this.markdown.budgetBytes,
       historyEvictions: this.historyEvictions,
-      markdownEvictions: this.markdownEvictions,
+      markdownEvictions: this.markdown.evictions,
     };
   }
 
@@ -1026,38 +1006,20 @@ export class TranscriptStore {
 
   // ── markdown cache (populated by the rendering/worker phase) ──────────────
 
-  private markdownKey(entryId: string, revision: number): string {
-    return `${entryId}@${revision}`;
-  }
-
   getMarkdown(entryId: string, revision: number): ParsedMarkdownValue | undefined {
-    const key = this.markdownKey(entryId, revision);
-    const entry = this.markdownCache.get(key);
-    if (!entry) return undefined;
-    this.markdownCache.delete(key);
-    this.markdownCache.set(key, entry); // LRU touch
-    return entry.value;
+    return this.markdown.get(entryId, revision);
   }
 
   setMarkdown(entryId: string, revision: number, value: ParsedMarkdownValue): void {
-    const key = this.markdownKey(entryId, revision);
-    const previous = this.markdownCache.get(key);
-    if (previous) this.markdownBytes -= previous.bytes;
-    const bytes = Math.max(0, value.bytes);
-    this.markdownCache.set(key, { value, bytes });
-    this.markdownBytes += bytes;
-    while (this.markdownBytes > this.markdownBudgetBytes && this.markdownCache.size > 1) {
-      const oldest = this.markdownCache.keys().next();
-      if (oldest.done) break;
-      const victim = this.markdownCache.get(oldest.value);
-      if (victim) this.markdownBytes -= victim.bytes;
-      this.markdownCache.delete(oldest.value);
-      this.markdownEvictions += 1;
-    }
+    this.markdown.set(entryId, revision, value);
+  }
+
+  pinMarkdown(entryId: string, revision: number): () => void {
+    return this.markdown.pin(entryId, revision);
   }
 
   markdownCacheSize(): number {
-    return this.markdownCache.size;
+    return this.markdown.size();
   }
 
   // ── subscriptions ─────────────────────────────────────────────────────────
