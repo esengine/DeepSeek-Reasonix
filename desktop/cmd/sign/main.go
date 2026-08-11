@@ -223,12 +223,13 @@ func genManifest(dir, version, tag string, notesVersions ...string) error {
 		notesVersion = notesVersions[0]
 	}
 	m := update.Manifest{
-		Version:         version,
-		DownloadPage:    "https://reasonix.io/?download=desktop#start",
-		ReleaseNotesURL: "https://reasonix.io/changelog/" + notesVersion + "/",
-		Platforms:       map[string]update.Asset{},
-		NativePackages:  map[string]update.Asset{},
-		Downloads:       map[string]update.Asset{},
+		Version:           version,
+		DownloadPage:      "https://reasonix.io/?download=desktop#start",
+		ReleaseNotesURL:   "https://reasonix.io/changelog/" + notesVersion + "/",
+		Platforms:         map[string]update.Asset{},
+		NativePackages:    map[string]update.Asset{},
+		Downloads:         map[string]update.Asset{},
+		BrowserComponents: map[string]update.Asset{},
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -237,6 +238,16 @@ func genManifest(dir, version, tag string, notesVersions ...string) error {
 	for _, e := range entries {
 		name := e.Name()
 		if e.IsDir() || strings.HasSuffix(name, ".minisig") || name == "latest.json" {
+			continue
+		}
+		if componentKey, ok := matchBrowserComponent(name); ok {
+			size, sum, err := hashFile(filepath.Join(dir, name))
+			if err != nil {
+				return err
+			}
+			url := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", repo, tag, name)
+			m.BrowserComponents[componentKey] = update.Asset{URL: url, Sig: url + ".minisig", Size: size, SHA256: sum}
+			fmt.Printf("manifest browser component: %s -> %s (%d bytes)\n", componentKey, name, size)
 			continue
 		}
 		key, kind := matchArtifact(name)
@@ -274,11 +285,31 @@ func genManifest(dir, version, tag string, notesVersions ...string) error {
 	if len(m.Downloads) == 0 {
 		m.Downloads = nil
 	}
+	if len(m.BrowserComponents) == 0 {
+		m.BrowserComponents = nil
+	}
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(filepath.Join(dir, "latest.json"), append(b, '\n'), 0o644)
+}
+
+func matchBrowserComponent(name string) (string, bool) {
+	switch name {
+	case "Reasonix-Browser-darwin-arm64.zip":
+		return "darwin-arm64", true
+	case "Reasonix-Browser-darwin-amd64.zip":
+		return "darwin-amd64", true
+	case "Reasonix-Browser-windows-amd64.zip":
+		return "windows-amd64", true
+	case "Reasonix-Browser-windows-arm64.zip":
+		return "windows-arm64", true
+	case "Reasonix-Browser-linux-amd64.tar.gz":
+		return "linux-amd64", true
+	default:
+		return "", false
+	}
 }
 
 const (

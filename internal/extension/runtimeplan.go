@@ -114,6 +114,12 @@ func (p *RuntimePlan) AffectsProviders() bool {
 // from may be nil (cold start). PrefixChanged remains false here because graph
 // identity cannot prove provider-visible byte changes; boot observes it after
 // the next RuntimeSnapshot has been frozen.
+//
+// Activity transitions:
+//   - Inactive → Active: Added (start client)
+//   - Active → Inactive: Removed (drain client)
+//   - both Inactive: Unchanged but never started
+//   - both Active with identity/epoch change: Reloaded
 func DiffRuntimePlan(from, to *DependencyGraph, fromGen, toGen uint64) *RuntimePlan {
 	plan := &RuntimePlan{
 		FromGeneration: fromGen,
@@ -131,19 +137,37 @@ func DiffRuntimePlan(from, to *DependencyGraph, fromGen, toGen uint64) *RuntimeP
 
 	var added, removed, reloaded, unchanged []ComponentID
 	for id, neo := range toIDs {
+		toActive := to.IsActive(id)
 		old, ok := fromIDs[id]
+		fromActive := ok && from != nil && from.IsActive(id)
 		if !ok {
+			if toActive {
+				added = append(added, id)
+			} else {
+				// Present but Inactive on cold start: stay Unchanged, never start.
+				unchanged = append(unchanged, id)
+			}
+			continue
+		}
+		switch {
+		case !fromActive && toActive:
 			added = append(added, id)
-			continue
-		}
-		if componentIdentityChanged(old, neo) || epochsChanged(from, to, id) {
+		case fromActive && !toActive:
+			removed = append(removed, id)
+		case !fromActive && !toActive:
+			unchanged = append(unchanged, id)
+		case componentIdentityChanged(old, neo) || epochsChanged(from, to, id):
 			reloaded = append(reloaded, id)
-			continue
+		default:
+			unchanged = append(unchanged, id)
 		}
-		unchanged = append(unchanged, id)
 	}
 	for id := range fromIDs {
-		if _, ok := toIDs[id]; !ok {
+		if _, ok := toIDs[id]; ok {
+			continue
+		}
+		// Fully removed from the target graph. Only drain when it was Active.
+		if from != nil && from.IsActive(id) {
 			removed = append(removed, id)
 		}
 	}

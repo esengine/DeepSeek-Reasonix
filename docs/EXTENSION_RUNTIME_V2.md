@@ -23,15 +23,67 @@ Controller = published generation consumer (admission bound to RuntimeOwner)
 
 Component states: `Inactive → Preparing → Active → Draining → Inactive` (or `Failed`).
 
+### Inactive dependency semantics
+
+Missing non-optional requirements no longer fail the whole runtime build.
+Instead the consumer is marked **Inactive** with deterministic reasons and is
+excluded from `ActivateOrder` and sidecar start sets:
+
+```text
+plugin/x state=Inactive
+  - missing required capability reasonix/browser/companion
+  - browser host is unavailable on this frontend
+```
+
+Optional missing requirements remain diagnostics only. Active-side duplicate
+providers, illegal capabilities, and required cycles are still hard build
+errors. `runtime.required:true` still makes a start/handshake failure fatal
+**after** dependencies are satisfied; missing host capabilities never block
+session start.
+
+RuntimePlan activity transitions:
+
+- Inactive → Active = Added (start client)
+- Active → Inactive = Removed (drain client)
+- both Inactive = Unchanged (never start)
+
+### Host browser capability
+
+When `boot.Options.BrowserHost != nil` (local desktop only), the synthetic
+`host` component provides:
+
+```json
+{
+  "namespace": "reasonix",
+  "kind": "browser",
+  "id": "companion",
+  "version": "1.0.0",
+  "schemaHash": "<browser RPC DTO hash>"
+}
+```
+
+This advertises API support, not companion install/ready state. CLI, Serve,
+ACP, and TUI leave `BrowserHost` nil so browser-dependent plugins stay
+Inactive. Companion stopped/ready/crashed never changes the capability,
+tool schemas, or CacheHash.
+
+Generation-scoped `browserhost.Binding` wraps the tab-bound backend for each
+sidecar client. Calls require `owner.Gate.Published() == generation`; Dispose
+cancels plugin browser work without stopping Chromium or the shared login
+session. Plugin `tab/open` and `tab/act` record irreversible receipts without
+URL/text/page content.
+
 ## Rebuild
 
 - Prefer `boot.RebuildFrom(previousBuildResult, opts)`.
+- `RebuildFrom` inherits previous `HostTools` / `BrowserHost` when the caller
+  does not override them; desktop always re-supplies the current tab binding.
 - No-op / interceptor / UI / provider / MCP-only plans use **true subgraph patch** (no `BuildRuntime`); set `ReusedController` so callers must not `Close` the old pointer.
 - Provider/MCP subgraph: live sidecar contributions refresh interceptor/provider/UI catalog via `WithLiveContributions`; **system prompt + tool schemas + CacheHash stay stable** (backend roll only). Tool schema renames still require full rebuild.
 - Narrow path is **stage → ready → commit** (fail-atomic):
   - **Stage**: start/adopt sidecars, build next dispatcher/resolver; does **not** install stream routers or `BindGeneration` on the UI hub.
   - **Ready**: await sidecar readiness.
-  - **Commit**: install stream routers, bind UI generation, replace controller bindings, then publish.
+  - **Commit**: install stream routers, bind UI generation, swap generation-scoped browser handlers (including adopted clients), replace controller bindings, then publish.
   - On any stage/ready/commit failure: `RollbackPlanStart` reattaches Unchanged clients; pre-stage stream routers keep consuming `stream/chunk` / `stream/end`.
 - **UI during stage**: the previous UI hub generation stays bound until commit. Sidecars that emit `host/ui/publish` or `host/ui/request` with the staged (next) generation during handshake/ready are **dropped as stale**. Protocol policy: do not rely on UI visibility before the runtime generation is published.
 - After successful migration: **publish** new generation, then **drain** old sidecars.

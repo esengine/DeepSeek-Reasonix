@@ -61,8 +61,44 @@ Everything else is optional and declared through `Options`: an `Observer`
 for fire-and-forget events, a `Provider` for extension-hosted model
 providers, `UI` callbacks plus the `HostUI` client for structured surfaces
 (status, cards, forms, notifications and blocking prompts — never HTML/JS),
+`HostBrowser` for the restricted desktop browser surface (list/open/snapshot/
+wait/act — never arbitrary CDP, cookies, or screenshots),
 `ReadContentRef`/`ResolveExternalized` for large externalized payloads, and a
 `Shutdown` hook.
+
+## Browser companion (desktop only)
+
+Plugins that need the built-in browser must declare a non-optional requirement
+in the v2 manifest:
+
+```json
+{
+  "namespace": "reasonix",
+  "kind": "browser",
+  "id": "companion",
+  "versionRange": ">=1.0.0",
+  "schemaHash": "<published browser capability schema hash>"
+}
+```
+
+On desktop, the host advertises `reasonix/browser/companion@1.0.0` and the
+SDK client can call:
+
+```go
+var browser extension.HostBrowser
+tabs, err := browser.List(ctx)
+tab, err := browser.Open(ctx, "https://example.com/", extension.BrowserDispositionForeground)
+snap, err := browser.Snapshot(ctx, tab.TabID, nil)
+tab, err = browser.Wait(ctx, tab.TabID, extension.BrowserWaitLoad, nil)
+tab, err = browser.Act(ctx, extension.BrowserTabActParams{
+	TabID: tab.TabID, ExpectedOrigin: snap.Origin,
+	Action: extension.BrowserActClick, Ref: "e1",
+})
+```
+
+On CLI/Serve/ACP the host does not provide the capability: the plugin stays
+Inactive and is never started. Direct plugin browser RPCs do not re-enter
+`tool.before` / `tool.after`.
 
 ## Concurrency contract
 

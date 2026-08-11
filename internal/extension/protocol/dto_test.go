@@ -149,7 +149,36 @@ var methodFixtures = map[Method]struct {
 			Encoding: ContentUTF8,
 		},
 	},
+	MethodHostBrowserTabList: {
+		params: BrowserTabListParams{},
+		result: BrowserTabListResult{Tabs: []BrowserTab{{
+			TabID: "tab-1", URL: "https://example.com/", Title: "Example", Active: true, Generation: 1,
+		}}},
+	},
+	MethodHostBrowserTabOpen: {
+		params: BrowserTabOpenParams{URL: "https://example.com/", Disposition: BrowserDispositionForeground},
+		result: BrowserTabOpenResult{Tab: BrowserTab{TabID: "tab-1", URL: "https://example.com/", Title: "Example", Active: true, Generation: 1}},
+	},
+	MethodHostBrowserTabSnapshot: {
+		params: BrowserTabSnapshotParams{TabID: "tab-1", MaxChars: intPtr(1000)},
+		result: BrowserTabSnapshotResult{
+			Tab:    BrowserTab{TabID: "tab-1", URL: "https://example.com/", Title: "Example", Active: true, Generation: 1},
+			Origin: "https://example.com", Snapshot: "root",
+		},
+	},
+	MethodHostBrowserTabWait: {
+		params: BrowserTabWaitParams{TabID: "tab-1", WaitUntil: BrowserWaitLoad, TimeoutMillis: intPtr(1000)},
+		result: BrowserTabWaitResult{Tab: BrowserTab{TabID: "tab-1", URL: "https://example.com/", Title: "Example", Active: true, Generation: 1}},
+	},
+	MethodHostBrowserTabAct: {
+		params: BrowserTabActParams{
+			TabID: "tab-1", ExpectedOrigin: "https://example.com", Action: BrowserActClick, Ref: "e1",
+		},
+		result: BrowserTabActResult{Tab: BrowserTab{TabID: "tab-1", URL: "https://example.com/", Title: "Example", Active: true, Generation: 1}},
+	},
 }
+
+func intPtr(v int) *int { return &v }
 
 func floatPtr(v float64) *float64 { return &v }
 func int64Ptr(v int64) *int64     { return &v }

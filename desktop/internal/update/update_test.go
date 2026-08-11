@@ -95,3 +95,14 @@ func TestManifestNativePackage(t *testing.T) {
 		t.Fatalf("legacy platforms still resolve: %+v %v", a, ok)
 	}
 }
+
+func TestManifestBrowserComponent(t *testing.T) {
+	want := Asset{URL: "component", SHA256: "sum"}
+	m := Manifest{BrowserComponents: map[string]Asset{CurrentPlatform(): want}}
+	if got, ok := m.BrowserComponent(); !ok || got != want {
+		t.Fatalf("BrowserComponent() = %+v, %v; want %+v, true", got, ok, want)
+	}
+	if _, ok := (Manifest{}).BrowserComponent(); ok {
+		t.Fatal("legacy manifest unexpectedly has a browser component")
+	}
+}

@@ -50,6 +50,58 @@ type UIHandler interface {
 	Request(ctx context.Context, p protocol.UIRequestParams) (protocol.UIRequestResult, error)
 }
 
+// BrowserHandler serves the extension's Extension → Host browser RPCs.
+// Generation-scoped Bindings implement this; the nil default returns
+// browser_unavailable. Direct plugin browser RPCs never re-enter
+// tool.before/tool.after.
+type BrowserHandler interface {
+	List(ctx context.Context, p protocol.BrowserTabListParams) (protocol.BrowserTabListResult, error)
+	Open(ctx context.Context, p protocol.BrowserTabOpenParams) (protocol.BrowserTabOpenResult, error)
+	Snapshot(ctx context.Context, p protocol.BrowserTabSnapshotParams) (protocol.BrowserTabSnapshotResult, error)
+	Wait(ctx context.Context, p protocol.BrowserTabWaitParams) (protocol.BrowserTabWaitResult, error)
+	Act(ctx context.Context, p protocol.BrowserTabActParams) (protocol.BrowserTabActResult, error)
+}
+
+// unavailableBrowserHandler rejects every browser call. Used when the host
+// has no BrowserHost or the plugin did not declare the capability.
+type unavailableBrowserHandler struct{}
+
+func (unavailableBrowserHandler) List(context.Context, protocol.BrowserTabListParams) (protocol.BrowserTabListResult, error) {
+	return protocol.BrowserTabListResult{}, protocol.MustProtocolError(protocol.ErrBrowserUnavailable)
+}
+func (unavailableBrowserHandler) Open(context.Context, protocol.BrowserTabOpenParams) (protocol.BrowserTabOpenResult, error) {
+	return protocol.BrowserTabOpenResult{}, protocol.MustProtocolError(protocol.ErrBrowserUnavailable)
+}
+func (unavailableBrowserHandler) Snapshot(context.Context, protocol.BrowserTabSnapshotParams) (protocol.BrowserTabSnapshotResult, error) {
+	return protocol.BrowserTabSnapshotResult{}, protocol.MustProtocolError(protocol.ErrBrowserUnavailable)
+}
+func (unavailableBrowserHandler) Wait(context.Context, protocol.BrowserTabWaitParams) (protocol.BrowserTabWaitResult, error) {
+	return protocol.BrowserTabWaitResult{}, protocol.MustProtocolError(protocol.ErrBrowserUnavailable)
+}
+func (unavailableBrowserHandler) Act(context.Context, protocol.BrowserTabActParams) (protocol.BrowserTabActResult, error) {
+	return protocol.BrowserTabActResult{}, protocol.MustProtocolError(protocol.ErrBrowserUnavailable)
+}
+
+// capabilityDeniedBrowserHandler rejects browser calls when the installed
+// manifest did not declare reasonix/browser/companion.
+type capabilityDeniedBrowserHandler struct{}
+
+func (capabilityDeniedBrowserHandler) List(context.Context, protocol.BrowserTabListParams) (protocol.BrowserTabListResult, error) {
+	return protocol.BrowserTabListResult{}, protocol.MustProtocolError(protocol.ErrCapabilityNotDeclared)
+}
+func (capabilityDeniedBrowserHandler) Open(context.Context, protocol.BrowserTabOpenParams) (protocol.BrowserTabOpenResult, error) {
+	return protocol.BrowserTabOpenResult{}, protocol.MustProtocolError(protocol.ErrCapabilityNotDeclared)
+}
+func (capabilityDeniedBrowserHandler) Snapshot(context.Context, protocol.BrowserTabSnapshotParams) (protocol.BrowserTabSnapshotResult, error) {
+	return protocol.BrowserTabSnapshotResult{}, protocol.MustProtocolError(protocol.ErrCapabilityNotDeclared)
+}
+func (capabilityDeniedBrowserHandler) Wait(context.Context, protocol.BrowserTabWaitParams) (protocol.BrowserTabWaitResult, error) {
+	return protocol.BrowserTabWaitResult{}, protocol.MustProtocolError(protocol.ErrCapabilityNotDeclared)
+}
+func (capabilityDeniedBrowserHandler) Act(context.Context, protocol.BrowserTabActParams) (protocol.BrowserTabActResult, error) {
+	return protocol.BrowserTabActResult{}, protocol.MustProtocolError(protocol.ErrCapabilityNotDeclared)
+}
+
 // UIBinder is the optional interface a UIHandler implements to receive
 // per-plugin bindings and crash notifications from StartPackages (the stage-8
 // UI hub). HandlerFor returns the handler installed on one client's
@@ -101,6 +153,10 @@ type ClientOptions struct {
 	Session protocol.SessionContext
 	// UI routes host/ui/* calls; nil means "ui not available".
 	UI UIHandler
+	// Browser routes host/browser/* calls; nil means browser_unavailable.
+	// Capability checks still reject plugins that did not declare the
+	// reasonix/browser/companion requirement.
+	Browser BrowserHandler
 	// Streams routes provider stream notifications; nil drops them.
 	Streams StreamRouter
 	// OnCrash fires exactly once when a started sidecar's connection ends
@@ -141,6 +197,13 @@ const (
 )
 
 // Client is one live sidecar connection: the rpcwire transport, the handshake
+// browserHandlerBox keeps a single concrete type in atomic.Value while the
+// BrowserHandler interface implementation changes across generations.
+type browserHandlerBox struct {
+	h BrowserHandler
+}
+
+// Client is one live sidecar connection: the rpcwire transport, the handshake
 // state, the content store, and the process handle.
 type Client struct {
 	pluginID         string
@@ -155,6 +218,7 @@ type Client struct {
 	conn             *rpcwire.Conn
 	store            *Store
 	ui               UIHandler
+	browser          atomic.Value // *browserHandlerBox; type-stable for atomic.Value
 	streams          StreamRouter
 	streamsMu        sync.RWMutex
 	onCrash          func(error)
@@ -226,6 +290,10 @@ func newClient(p *process, opts ClientOptions) *Client {
 	if version == "" {
 		version = strings.TrimSpace(opts.Package.Manifest.Version)
 	}
+	browser := opts.Browser
+	if browser == nil {
+		browser = unavailableBrowserHandler{}
+	}
 	c := &Client{
 		pluginID:         p.pluginID,
 		version:          version,
@@ -242,6 +310,7 @@ func newClient(p *process, opts ClientOptions) *Client {
 		onCrash:          opts.OnCrash,
 		serveExited:      make(chan struct{}),
 	}
+	c.browser.Store(&browserHandlerBox{h: browser})
 	c.conn = rpcwire.NewConn(p.stdout, p.stdin, rpcwire.Options{
 		Name:                   "extension:" + p.pluginID,
 		MaxInboundBytes:        protocol.FrameBytes,
@@ -255,9 +324,62 @@ func newClient(p *process, opts ClientOptions) *Client {
 	c.conn.Handle(string(protocol.MethodHostContentRead), c.store.ReadHandler)
 	c.conn.Handle(string(protocol.MethodHostUIPublish), c.handleUIPublish)
 	c.conn.Handle(string(protocol.MethodHostUIRequest), c.handleUIRequest)
+	c.conn.Handle(string(protocol.MethodHostBrowserTabList), c.handleBrowserTabList)
+	c.conn.Handle(string(protocol.MethodHostBrowserTabOpen), c.handleBrowserTabOpen)
+	c.conn.Handle(string(protocol.MethodHostBrowserTabSnapshot), c.handleBrowserTabSnapshot)
+	c.conn.Handle(string(protocol.MethodHostBrowserTabWait), c.handleBrowserTabWait)
+	c.conn.Handle(string(protocol.MethodHostBrowserTabAct), c.handleBrowserTabAct)
 	c.conn.HandleNotify(string(protocol.MethodExtensionProviderStreamChunk), c.handleStreamChunk)
 	c.conn.HandleNotify(string(protocol.MethodExtensionProviderStreamEnd), c.handleStreamEnd)
 	return c
+}
+
+// SetBrowserHandler atomically replaces the generation-scoped browser host
+// binding. Nil restores browser_unavailable. Safe during concurrent RPCs:
+// in-flight calls keep the handler they already loaded.
+func (c *Client) SetBrowserHandler(h BrowserHandler) {
+	if c == nil {
+		return
+	}
+	if h == nil {
+		h = unavailableBrowserHandler{}
+	}
+	c.browser.Store(&browserHandlerBox{h: h})
+}
+
+// BrowserHandler returns the currently installed browser handler.
+func (c *Client) BrowserHandler() BrowserHandler {
+	if c == nil {
+		return unavailableBrowserHandler{}
+	}
+	if v := c.browser.Load(); v != nil {
+		if box, ok := v.(*browserHandlerBox); ok && box != nil && box.h != nil {
+			return box.h
+		}
+	}
+	return unavailableBrowserHandler{}
+}
+
+// DeclaresBrowserCapability reports whether the installed manifest requires
+// reasonix/browser/companion (non-optional). Client permission checks use the
+// installed requires, never sidecar self-report.
+func (c *Client) DeclaresBrowserCapability() bool {
+	if c == nil {
+		return false
+	}
+	for _, req := range c.requires {
+		if req.Namespace == "reasonix" && req.Kind == "browser" && req.ID == "companion" && !req.Optional {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Client) browserHandlerOrDenied() BrowserHandler {
+	if !c.DeclaresBrowserCapability() {
+		return capabilityDeniedBrowserHandler{}
+	}
+	return c.BrowserHandler()
 }
 
 // supervise runs the read loop for the life of the connection and turns an
@@ -722,6 +844,69 @@ func (c *Client) handleUIRequest(ctx context.Context, raw json.RawMessage) (any,
 		return nil, protocol.MustProtocolError(protocol.ErrInvalidParams).RPCError()
 	}
 	result, err := c.ui.Request(ctx, decoded.(protocol.UIRequestParams))
+	if err != nil {
+		return nil, mapHandlerError(err)
+	}
+	return result, nil
+}
+
+func (c *Client) handleBrowserTabList(ctx context.Context, raw json.RawMessage) (any, error) {
+	decoded, err := protocol.DecodeExtensionRequestParams(protocol.MethodHostBrowserTabList, raw)
+	if err != nil {
+		return nil, protocol.MustProtocolError(protocol.ErrInvalidParams).RPCError()
+	}
+	result, err := c.browserHandlerOrDenied().List(ctx, decoded.(protocol.BrowserTabListParams))
+	if err != nil {
+		return nil, mapHandlerError(err)
+	}
+	if result.Tabs == nil {
+		result.Tabs = []protocol.BrowserTab{}
+	}
+	return result, nil
+}
+
+func (c *Client) handleBrowserTabOpen(ctx context.Context, raw json.RawMessage) (any, error) {
+	decoded, err := protocol.DecodeExtensionRequestParams(protocol.MethodHostBrowserTabOpen, raw)
+	if err != nil {
+		return nil, protocol.MustProtocolError(protocol.ErrInvalidParams).RPCError()
+	}
+	result, err := c.browserHandlerOrDenied().Open(ctx, decoded.(protocol.BrowserTabOpenParams))
+	if err != nil {
+		return nil, mapHandlerError(err)
+	}
+	return result, nil
+}
+
+func (c *Client) handleBrowserTabSnapshot(ctx context.Context, raw json.RawMessage) (any, error) {
+	decoded, err := protocol.DecodeExtensionRequestParams(protocol.MethodHostBrowserTabSnapshot, raw)
+	if err != nil {
+		return nil, protocol.MustProtocolError(protocol.ErrInvalidParams).RPCError()
+	}
+	result, err := c.browserHandlerOrDenied().Snapshot(ctx, decoded.(protocol.BrowserTabSnapshotParams))
+	if err != nil {
+		return nil, mapHandlerError(err)
+	}
+	return result, nil
+}
+
+func (c *Client) handleBrowserTabWait(ctx context.Context, raw json.RawMessage) (any, error) {
+	decoded, err := protocol.DecodeExtensionRequestParams(protocol.MethodHostBrowserTabWait, raw)
+	if err != nil {
+		return nil, protocol.MustProtocolError(protocol.ErrInvalidParams).RPCError()
+	}
+	result, err := c.browserHandlerOrDenied().Wait(ctx, decoded.(protocol.BrowserTabWaitParams))
+	if err != nil {
+		return nil, mapHandlerError(err)
+	}
+	return result, nil
+}
+
+func (c *Client) handleBrowserTabAct(ctx context.Context, raw json.RawMessage) (any, error) {
+	decoded, err := protocol.DecodeExtensionRequestParams(protocol.MethodHostBrowserTabAct, raw)
+	if err != nil {
+		return nil, protocol.MustProtocolError(protocol.ErrInvalidParams).RPCError()
+	}
+	result, err := c.browserHandlerOrDenied().Act(ctx, decoded.(protocol.BrowserTabActParams))
 	if err != nil {
 		return nil, mapHandlerError(err)
 	}

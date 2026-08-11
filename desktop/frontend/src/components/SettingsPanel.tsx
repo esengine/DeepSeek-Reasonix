@@ -2,7 +2,7 @@ import { lazy, memo, Suspense, startTransition, useCallback, useDeferredValue, u
 import { ArrowRight, Bot as BotIcon, BrainCircuit, Check, CheckCircle2, ChevronDown, ChevronUp, CircleDollarSign, Clipboard, ExternalLink, KeyRound, Languages, ListChecks, Loader2, MessageCircle, Monitor, MoreHorizontal, PanelBottom, Play, Power, QrCode, RefreshCw, Send, ShieldCheck, SlidersHorizontal, Trash2, Volume2 } from "lucide-react";
 import { asArray } from "../lib/array";
 import { useDeferredClose } from "../lib/useMountTransition";
-import { app, openExternal } from "../lib/bridge";
+import { app, openExternal, type BrowserSettingsView, type BrowserStatusView } from "../lib/bridge";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
 import { apiKeyEnvFromProviderName, createLatestRequestGate, inferredVisionModels, mergedFetchedProviderModels, mergeProviderModelContextWindows, providerApiKeyEnvForSave, providerDefaultModel, providerIsConfigured, providerModelCandidates, providerModelContextWindowDrafts, providerModelContextWindowIsSmall, providerRequiresKey } from "../lib/providerModels";
 import { cachedFetchProviderModels, invalidateProviderCacheByAPIKeyEnv, shouldSkipAutoRefresh } from "../lib/providerModelCache";
@@ -7287,9 +7287,40 @@ function UpdatesSection({
   const t = useT();
   const { status, check, apply: applyUpdate, openDownload, abandonPending } = useUpdater();
   const [version, setVersion] = useState("");
+  const [browserStatus, setBrowserStatus] = useState<BrowserStatusView | null>(null);
+  const [browserSettings, setBrowserSettings] = useState<BrowserSettingsView>({ defaultOpenMode: "builtin" });
+  const [browserBusy, setBrowserBusy] = useState(false);
+  const [browserError, setBrowserError] = useState("");
   useEffect(() => {
     app.Version().then(setVersion).catch(() => {});
+    void Promise.all([app.GetBrowserStatus(), app.GetBrowserSettings()]).then(([nextStatus, nextSettings]) => {
+      setBrowserStatus(nextStatus);
+      setBrowserSettings(nextSettings);
+    }).catch(() => {});
   }, []);
+
+  const installBrowser = async () => {
+    setBrowserBusy(true);
+    setBrowserError("");
+    try {
+      await app.InstallOrRepairBrowserComponent();
+      setBrowserStatus(await app.GetBrowserStatus());
+    } catch (error) {
+      setBrowserError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBrowserBusy(false);
+    }
+  };
+
+  const setBrowserOpenMode = async (mode: string) => {
+    const next = mode === "system" ? "system" : "builtin";
+    setBrowserSettings({ defaultOpenMode: next });
+    try {
+      await app.UpdateBrowserSettings({ defaultOpenMode: next });
+    } catch (error) {
+      setBrowserError(error instanceof Error ? error.message : String(error));
+    }
+  };
 
   const updaterBusy =
     status.kind === "checking" ||
@@ -7486,6 +7517,38 @@ function UpdatesSection({
           </button>
         </div>
       </SettingsField>
+      <SettingsField
+        className="settings-field--wide-copy"
+        label={t("browser.installButton")}
+        hint={browserStatus?.installedComponent
+          ? browserStatus.installedComponent
+          : undefined}
+      >
+        <button
+          className="btn btn--small"
+          type="button"
+          disabled={browserBusy}
+          onClick={() => void installBrowser()}
+        >
+          {browserBusy && <Loader2 className="updates-control__spinner" size={14} aria-hidden="true" />}
+          {t("browser.installButton")}
+        </button>
+      </SettingsField>
+      <SettingsField
+        className="settings-field--wide-copy"
+        label={t("browser.defaultOpenTitle")}
+      >
+        <select
+          className="mem-select set-grow"
+          value={browserSettings.defaultOpenMode === "system" ? "system" : "builtin"}
+          disabled={browserBusy}
+          onChange={(event) => void setBrowserOpenMode(event.target.value)}
+        >
+          <option value="builtin">{t("browser.openBuiltin")}</option>
+          <option value="system">{t("browser.openSystem")}</option>
+        </select>
+      </SettingsField>
+      {browserError && <div className="banner banner--error" role="alert">{browserError}</div>}
       <details
         className="provider-editor-advanced"
         style={{

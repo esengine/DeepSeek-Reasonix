@@ -47,6 +47,11 @@ const (
 	MethodExtensionShutdown             = "extension/shutdown"
 	MethodExtensionUIAction             = "extension/ui/action"
 	MethodExtensionUISubmit             = "extension/ui/submit"
+	MethodHostBrowserTabAct             = "host/browser/tab/act"
+	MethodHostBrowserTabList            = "host/browser/tab/list"
+	MethodHostBrowserTabOpen            = "host/browser/tab/open"
+	MethodHostBrowserTabSnapshot        = "host/browser/tab/snapshot"
+	MethodHostBrowserTabWait            = "host/browser/tab/wait"
 	MethodHostContentRead               = "host/content/read"
 	MethodHostUIPublish                 = "host/ui/publish"
 	MethodHostUIRequest                 = "host/ui/request"
@@ -67,26 +72,34 @@ type errorSpec struct {
 // frozenErrorSpecs mirrors the host's frozen error table. Adding an entry
 // is a conscious protocol change.
 var frozenErrorSpecs = map[ErrorReason]errorSpec{
-	ErrActivationFailed:      {DomainErrorCode, "Component activation failed; the new generation was not published.", false},
-	ErrCapabilityNotDeclared: {DomainErrorCode, "The extension used a capability its manifest did not declare.", false},
-	ErrCleanupFailed:         {DomainErrorCode, "Component cleanup failed while disposing scoped effects.", true},
-	ErrContentRefExpired:     {DomainErrorCode, "The referenced content has expired.", true},
-	ErrDependencyCycle:       {DomainErrorCode, "The dependency graph contains a required cycle.", false},
-	ErrDependencyUnsatisfied: {DomainErrorCode, "A required dependency is missing or not version-compatible.", false},
-	ErrFrameTooLarge:         {DomainErrorCode, "The frame exceeds the frozen protocol size limit.", false},
-	ErrInterceptTimeout:      {DomainErrorCode, "The extension did not answer an intercept within its timeout.", true},
-	ErrInternal:              {CodeInternal, "An internal extension protocol error occurred.", true},
-	ErrInvalidParams:         {CodeInvalidParams, "The params do not match the registered method schema.", false},
-	ErrProtocolError:         {CodeInvalidRequest, "The extension protocol frame or envelope is invalid.", false},
-	ErrProviderFailed:        {DomainErrorCode, "The extension provider stream failed.", true},
-	ErrProviderInterrupted:   {DomainErrorCode, "The extension provider stream was interrupted.", true},
-	ErrSchemaMismatch:        {DomainErrorCode, "A capability schema hash does not match the expected pin.", false},
-	ErrShutdownTimeout:       {DomainErrorCode, "The extension did not shut down within the requested timeout.", true},
-	ErrStaleGeneration:       {DomainErrorCode, "The message belongs to a superseded runtime generation.", false},
-	ErrStreamCancelled:       {DomainErrorCode, "The provider stream was cancelled.", false},
-	ErrStreamGap:             {DomainErrorCode, "A provider stream chunk is missing from the ordered sequence.", true},
-	ErrUnknownMethod:         {CodeMethodNotFound, "The method is not registered in Extension Protocol v2.", false},
-	ErrUnsupportedVersion:    {DomainErrorCode, "The peer's extension protocol version is not supported.", false},
+	ErrActivationFailed:        {DomainErrorCode, "Component activation failed; the new generation was not published.", false},
+	ErrBrowserCancelled:        {DomainErrorCode, "The browser call was cancelled by runtime drain, sidecar disconnect, or the caller.", false},
+	ErrBrowserOriginMismatch:   {DomainErrorCode, "The tab origin does not match the expected origin.", false},
+	ErrBrowserPermissionDenied: {DomainErrorCode, "The browser action was denied by a sensitive-field, permission, or human-input gate.", false},
+	ErrBrowserStaleRef:         {DomainErrorCode, "The element ref is no longer valid after navigation.", false},
+	ErrBrowserTabBusy:          {DomainErrorCode, "The tab, renderer, lease, or pending request limit is exhausted.", true},
+	ErrBrowserTabNotFound:      {DomainErrorCode, "The tab does not exist or does not belong to this chat.", false},
+	ErrBrowserTimeout:          {DomainErrorCode, "The browser wait or action timed out.", true},
+	ErrBrowserUnavailable:      {DomainErrorCode, "The browser host API is unavailable or the companion cannot start.", true},
+	ErrCapabilityNotDeclared:   {DomainErrorCode, "The extension used a capability its manifest did not declare.", false},
+	ErrCleanupFailed:           {DomainErrorCode, "Component cleanup failed while disposing scoped effects.", true},
+	ErrContentRefExpired:       {DomainErrorCode, "The referenced content has expired.", true},
+	ErrDependencyCycle:         {DomainErrorCode, "The dependency graph contains a required cycle.", false},
+	ErrDependencyUnsatisfied:   {DomainErrorCode, "A required dependency is missing or not version-compatible.", false},
+	ErrFrameTooLarge:           {DomainErrorCode, "The frame exceeds the frozen protocol size limit.", false},
+	ErrInterceptTimeout:        {DomainErrorCode, "The extension did not answer an intercept within its timeout.", true},
+	ErrInternal:                {CodeInternal, "An internal extension protocol error occurred.", true},
+	ErrInvalidParams:           {CodeInvalidParams, "The params do not match the registered method schema.", false},
+	ErrProtocolError:           {CodeInvalidRequest, "The extension protocol frame or envelope is invalid.", false},
+	ErrProviderFailed:          {DomainErrorCode, "The extension provider stream failed.", true},
+	ErrProviderInterrupted:     {DomainErrorCode, "The extension provider stream was interrupted.", true},
+	ErrSchemaMismatch:          {DomainErrorCode, "A capability schema hash does not match the expected pin.", false},
+	ErrShutdownTimeout:         {DomainErrorCode, "The extension did not shut down within the requested timeout.", true},
+	ErrStaleGeneration:         {DomainErrorCode, "The message belongs to a superseded runtime generation.", false},
+	ErrStreamCancelled:         {DomainErrorCode, "The provider stream was cancelled.", false},
+	ErrStreamGap:               {DomainErrorCode, "A provider stream chunk is missing from the ordered sequence.", true},
+	ErrUnknownMethod:           {CodeMethodNotFound, "The method is not registered in Extension Protocol v2.", false},
+	ErrUnsupportedVersion:      {DomainErrorCode, "The peer's extension protocol version is not supported.", false},
 }
 
 // EventParams is a generated Extension Protocol v2 wire DTO.
@@ -463,6 +476,106 @@ type UISubmitResult struct {
 	Accepted bool `json:"accepted"`
 }
 
+// BrowserTabActParams is a generated Extension Protocol v2 wire DTO.
+type BrowserTabActParams struct {
+	TabID          string           `json:"tabId" validate:"nonempty"`
+	ExpectedOrigin string           `json:"expectedOrigin" validate:"nonempty"`
+	Action         BrowserActAction `json:"action"`
+	Ref            string           `json:"ref,omitempty"`
+	Text           string           `json:"text,omitempty"`
+	Key            string           `json:"key,omitempty"`
+	Value          string           `json:"value,omitempty"`
+	Delta          *int             `json:"delta,omitempty"`
+}
+
+// BrowserActAction is a generated Extension Protocol v2 string enum.
+type BrowserActAction string
+
+const (
+	BrowserActClick  BrowserActAction = "click"
+	BrowserActHover  BrowserActAction = "hover"
+	BrowserActScroll BrowserActAction = "scroll"
+	BrowserActType   BrowserActAction = "type"
+	BrowserActPress  BrowserActAction = "press"
+	BrowserActSelect BrowserActAction = "select"
+)
+
+// BrowserTabActResult is a generated Extension Protocol v2 wire DTO.
+type BrowserTabActResult struct {
+	Tab BrowserTab `json:"tab"`
+}
+
+// BrowserTab is a generated Extension Protocol v2 wire DTO.
+type BrowserTab struct {
+	TabID      string `json:"tabId" validate:"nonempty"`
+	URL        string `json:"url"`
+	Title      string `json:"title"`
+	Active     bool   `json:"active"`
+	Generation uint64 `json:"generation"`
+}
+
+// BrowserTabListParams is a generated Extension Protocol v2 wire DTO.
+type BrowserTabListParams struct{}
+
+// BrowserTabListResult is a generated Extension Protocol v2 wire DTO.
+type BrowserTabListResult struct {
+	Tabs []BrowserTab `json:"tabs"`
+}
+
+// BrowserTabOpenParams is a generated Extension Protocol v2 wire DTO.
+type BrowserTabOpenParams struct {
+	URL         string                `json:"url" validate:"nonempty"`
+	Disposition BrowserTabDisposition `json:"disposition"`
+}
+
+// BrowserTabDisposition is a generated Extension Protocol v2 string enum.
+type BrowserTabDisposition string
+
+const (
+	BrowserDispositionForeground BrowserTabDisposition = "foreground"
+	BrowserDispositionBackground BrowserTabDisposition = "background"
+)
+
+// BrowserTabOpenResult is a generated Extension Protocol v2 wire DTO.
+type BrowserTabOpenResult struct {
+	Tab BrowserTab `json:"tab"`
+}
+
+// BrowserTabSnapshotParams is a generated Extension Protocol v2 wire DTO.
+type BrowserTabSnapshotParams struct {
+	TabID    string `json:"tabId" validate:"nonempty"`
+	MaxChars *int   `json:"maxChars,omitempty" validate:"min=1"`
+}
+
+// BrowserTabSnapshotResult is a generated Extension Protocol v2 wire DTO.
+type BrowserTabSnapshotResult struct {
+	Tab      BrowserTab `json:"tab"`
+	Origin   string     `json:"origin"`
+	Snapshot string     `json:"snapshot"`
+}
+
+// BrowserTabWaitParams is a generated Extension Protocol v2 wire DTO.
+type BrowserTabWaitParams struct {
+	TabID         string           `json:"tabId" validate:"nonempty"`
+	WaitUntil     BrowserWaitUntil `json:"waitUntil"`
+	TimeoutMillis *int             `json:"timeoutMillis,omitempty" validate:"min=1,max=30000"`
+}
+
+// BrowserWaitUntil is a generated Extension Protocol v2 string enum.
+type BrowserWaitUntil string
+
+const (
+	BrowserWaitLoad             BrowserWaitUntil = "load"
+	BrowserWaitNetworkIdle      BrowserWaitUntil = "network_idle"
+	BrowserWaitDomContentLoaded BrowserWaitUntil = "dom_content_loaded"
+	BrowserWaitNavigation       BrowserWaitUntil = "navigation"
+)
+
+// BrowserTabWaitResult is a generated Extension Protocol v2 wire DTO.
+type BrowserTabWaitResult struct {
+	Tab BrowserTab `json:"tab"`
+}
+
 // ContentReadParams is a generated Extension Protocol v2 wire DTO.
 type ContentReadParams struct {
 	ContentRef string `json:"contentRef" validate:"nonempty"`
@@ -619,24 +732,32 @@ type ProtocolErrorData struct {
 type ErrorReason string
 
 const (
-	ErrActivationFailed      ErrorReason = "activation_failed"
-	ErrCapabilityNotDeclared ErrorReason = "capability_not_declared"
-	ErrCleanupFailed         ErrorReason = "cleanup_failed"
-	ErrContentRefExpired     ErrorReason = "content_ref_expired"
-	ErrDependencyCycle       ErrorReason = "dependency_cycle"
-	ErrDependencyUnsatisfied ErrorReason = "dependency_unsatisfied"
-	ErrFrameTooLarge         ErrorReason = "frame_too_large"
-	ErrInterceptTimeout      ErrorReason = "intercept_timeout"
-	ErrInternal              ErrorReason = "internal"
-	ErrInvalidParams         ErrorReason = "invalid_params"
-	ErrProtocolError         ErrorReason = "protocol_error"
-	ErrProviderFailed        ErrorReason = "provider_failed"
-	ErrProviderInterrupted   ErrorReason = "provider_interrupted"
-	ErrSchemaMismatch        ErrorReason = "schema_mismatch"
-	ErrShutdownTimeout       ErrorReason = "shutdown_timeout"
-	ErrStaleGeneration       ErrorReason = "stale_generation"
-	ErrStreamCancelled       ErrorReason = "stream_cancelled"
-	ErrStreamGap             ErrorReason = "stream_gap"
-	ErrUnknownMethod         ErrorReason = "unknown_method"
-	ErrUnsupportedVersion    ErrorReason = "unsupported_version"
+	ErrActivationFailed        ErrorReason = "activation_failed"
+	ErrBrowserCancelled        ErrorReason = "browser_cancelled"
+	ErrBrowserOriginMismatch   ErrorReason = "browser_origin_mismatch"
+	ErrBrowserPermissionDenied ErrorReason = "browser_permission_denied"
+	ErrBrowserStaleRef         ErrorReason = "browser_stale_ref"
+	ErrBrowserTabBusy          ErrorReason = "browser_tab_busy"
+	ErrBrowserTabNotFound      ErrorReason = "browser_tab_not_found"
+	ErrBrowserTimeout          ErrorReason = "browser_timeout"
+	ErrBrowserUnavailable      ErrorReason = "browser_unavailable"
+	ErrCapabilityNotDeclared   ErrorReason = "capability_not_declared"
+	ErrCleanupFailed           ErrorReason = "cleanup_failed"
+	ErrContentRefExpired       ErrorReason = "content_ref_expired"
+	ErrDependencyCycle         ErrorReason = "dependency_cycle"
+	ErrDependencyUnsatisfied   ErrorReason = "dependency_unsatisfied"
+	ErrFrameTooLarge           ErrorReason = "frame_too_large"
+	ErrInterceptTimeout        ErrorReason = "intercept_timeout"
+	ErrInternal                ErrorReason = "internal"
+	ErrInvalidParams           ErrorReason = "invalid_params"
+	ErrProtocolError           ErrorReason = "protocol_error"
+	ErrProviderFailed          ErrorReason = "provider_failed"
+	ErrProviderInterrupted     ErrorReason = "provider_interrupted"
+	ErrSchemaMismatch          ErrorReason = "schema_mismatch"
+	ErrShutdownTimeout         ErrorReason = "shutdown_timeout"
+	ErrStaleGeneration         ErrorReason = "stale_generation"
+	ErrStreamCancelled         ErrorReason = "stream_cancelled"
+	ErrStreamGap               ErrorReason = "stream_gap"
+	ErrUnknownMethod           ErrorReason = "unknown_method"
+	ErrUnsupportedVersion      ErrorReason = "unsupported_version"
 )

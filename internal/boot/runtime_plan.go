@@ -1,14 +1,20 @@
 package boot
 
 import (
+	"slices"
 	"strings"
 
+	"reasonix/internal/browserhost"
 	"reasonix/internal/config"
 	"reasonix/internal/extension"
 	"reasonix/internal/extension/dispatch"
 	"reasonix/internal/extension/sidecar"
 	"reasonix/internal/extensioncontract"
 )
+
+func sortComponentIDs(ids []extension.ComponentID) {
+	slices.Sort(ids)
+}
 
 // RuntimeReload is previous-generation state for incremental sidecar adoption
 // and subgraph-classified rebuild.
@@ -30,6 +36,15 @@ type RuntimeReload struct {
 	// ReuseAssembly, when set with a compatible plan, skips skill/command/hook
 	// rediscovery inside BuildRuntime.
 	ReuseAssembly *ReusedAssembly
+}
+
+// hostProvidesForOptions returns the synthetic host capabilities for this
+// frontend. Browser companion is advertised iff BrowserHost != nil.
+func hostProvidesForOptions(opts Options) []extensioncontract.Capability {
+	if opts.BrowserHost == nil {
+		return nil
+	}
+	return []extensioncontract.Capability{browserhost.Capability()}
 }
 
 // buildRuntimeGraph constructs the dependency graph for installed native
@@ -109,42 +124,46 @@ func attachPlanAndStatus(res *BuildResult, from *extension.DependencyGraph, to *
 		status.Receipts = res.Runtime.Receipts()
 	}
 	if to != nil {
-		for _, id := range to.ActivateOrder() {
+		// Report both Active (ActivateOrder) and graph-Inactive components.
+		// Deterministic order: ActivateOrder first, then remaining sorted.
+		seen := map[extension.ComponentID]bool{}
+		ordered := append([]extension.ComponentID(nil), to.ActivateOrder()...)
+		for _, id := range ordered {
+			seen[id] = true
+		}
+		var rest []extension.ComponentID
+		for id := range to.Components {
+			if !seen[id] {
+				rest = append(rest, id)
+			}
+		}
+		sortComponentIDs(rest)
+		ordered = append(ordered, rest...)
+		for _, id := range ordered {
 			life.Ensure(id)
 			_ = life.Transition(id, extension.ComponentPreparing, "")
-			// Structured inactive reasons: missing requirements + graph diagnostics.
-			inactive := false
-			var diags []string
-			for _, d := range to.Diagnostics {
-				if strings.Contains(d, string(id)) {
-					inactive = true
-					diags = append(diags, d)
+			if reasons := to.InactiveReasons(id); len(reasons) > 0 {
+				// One diagnostic entry per reason for doctor multi-line output.
+				for _, reason := range reasons {
+					_ = life.Transition(id, extension.ComponentInactive, reason)
 				}
+				continue
 			}
 			if desc, ok := to.Components[id]; ok {
-				for _, req := range desc.Requires {
-					if req.Optional {
-						continue
-					}
-					if _, found := to.EpochFor(id, req); !found {
-						inactive = true
-						diags = append(diags, "missing required capability "+req.Key.String()+" (versionRange="+req.VersionRange+")")
-					}
-				}
 				// Declared provides with no live client → Unavailable diagnostic.
 				if res.Extensions != nil && strings.HasPrefix(string(id), "plugin/") {
 					name := sidecar.PluginNameFromComponentID(id)
 					if name != "" && res.Extensions.Client(name) == nil && len(desc.Provides) > 0 {
-						inactive = true
+						var diags []string
 						for _, cap := range desc.Provides {
 							diags = append(diags, "capability Unavailable: "+cap.Key.String()+" (runtime client not started)")
 						}
+						_ = life.Transition(id, extension.ComponentInactive, strings.Join(diags, "; "))
+						continue
 					}
 				}
 			}
-			if inactive {
-				_ = life.Transition(id, extension.ComponentInactive, strings.Join(diags, "; "))
-			} else if res.Extensions != nil && strings.HasPrefix(string(id), "plugin/") {
+			if res.Extensions != nil && strings.HasPrefix(string(id), "plugin/") {
 				name := sidecar.PluginNameFromComponentID(id)
 				if name != "" && res.Extensions.Client(name) == nil {
 					_ = life.Transition(id, extension.ComponentInactive, "runtime client not started")
@@ -162,11 +181,11 @@ func attachPlanAndStatus(res *BuildResult, from *extension.DependencyGraph, to *
 }
 
 // planForPreflight builds the RuntimePlan used to adopt Unchanged sidecars.
+// Cold start always builds a plan so Inactive browser plugins are never
+// launched, even when there is no previous Manager.
 func planForPreflight(opts Options, toGen uint64) *extension.RuntimePlan {
-	if opts.Extensions == nil && opts.Graph == nil {
-		return nil
-	}
-	toGraph, err := buildRuntimeGraph(config.ReasonixHomeDir(), nil)
+	hostCaps := hostProvidesForOptions(opts)
+	toGraph, err := buildRuntimeGraph(config.ReasonixHomeDir(), hostCaps)
 	if err != nil {
 		return nil
 	}
@@ -179,7 +198,11 @@ func finalizeBuildResult(res *BuildResult, publish bool) *BuildResult {
 	if res == nil {
 		return nil
 	}
-	if graph, err := buildRuntimeGraph(config.ReasonixHomeDir(), nil); err == nil {
+	hostCaps := []extensioncontract.Capability(nil)
+	if res.BrowserHost != nil {
+		hostCaps = []extensioncontract.Capability{browserhost.Capability()}
+	}
+	if graph, err := buildRuntimeGraph(config.ReasonixHomeDir(), hostCaps); err == nil {
 		attachPlanAndStatus(res, nil, graph, 0, nil)
 	}
 	if publish {
@@ -201,6 +224,10 @@ func publishBuildResult(res *BuildResult) {
 		owner = extension.RuntimeOwnerOrDefault(nil)
 		res.Owner = owner
 	}
+	// Ensure every live client has the generation-scoped browser binding
+	// before publish so cold start and full rebuilds can call immediately.
+	// Subgraph commit already swapped handlers; rebinding is idempotent.
+	bindBrowserHandlers(res.Extensions, res.BrowserHost, owner, gen)
 	gate := owner.Gate
 	// Expire any previous drain TTLs before publishing the new generation.
 	_ = gate.SweepAndForceExpire()

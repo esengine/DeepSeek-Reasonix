@@ -32,42 +32,75 @@ func PluginNameFromComponentID(id extension.ComponentID) string {
 // StartPackagesWithPlan starts Added/Reloaded packages and adopts Unchanged
 // clients from previous. previous may be nil. Required start failures fail
 // the whole call and close the new Manager's resources.
+//
+// Only Active graph nodes ever spawn. Inactive components (for example
+// browser plugins without a BrowserHost) never start, on cold start or rebuild.
 func StartPackagesWithPlan(ctx context.Context, home string, sessionCtx protocol.SessionContext, ui UIHandler, previous *Manager, plan *extension.RuntimePlan) (*Manager, []string, error) {
 	packages, warnings := LoadRuntimePackages(home)
-	if plan == nil || plan.IsNoOp() && previous == nil {
+	if plan == nil {
+		// No plan: filter by a fresh graph so Inactive packages still never start.
 		startupCtx, cancel := context.WithTimeout(ctx, packageStartupBudget)
 		defer cancel()
-		m, runtimeWarnings, err := startLoadedPackages(startupCtx, packages, sessionCtx, ui, StartClient)
-		warnings = append(warnings, runtimeWarnings...)
-		return m, warnings, err
+		return startLoadedPackages(startupCtx, packages, sessionCtx, ui, StartClient)
 	}
 	if plan.IsNoOp() && previous != nil {
 		// No component change: adopt every live client from previous.
 		return adoptAll(previous), warnings, nil
 	}
 
-	activate := map[string]bool{}
-	for _, id := range plan.Added {
-		if name := PluginNameFromComponentID(id); name != "" {
-			activate[name] = true
+	// Active set from the target graph. Prefer ActivateOrder when present.
+	active := map[string]bool{}
+	if plan.Graph != nil {
+		for _, id := range plan.Graph.ActivateOrder() {
+			if name := PluginNameFromComponentID(id); name != "" {
+				active[name] = true
+			}
+		}
+	} else {
+		// Fallback: Added + Reloaded + Active Unchanged names.
+		for _, id := range plan.Added {
+			if name := PluginNameFromComponentID(id); name != "" {
+				active[name] = true
+			}
+		}
+		for _, id := range plan.Reloaded {
+			if name := PluginNameFromComponentID(id); name != "" {
+				active[name] = true
+			}
 		}
 	}
-	for _, id := range plan.Reloaded {
-		if name := PluginNameFromComponentID(id); name != "" {
-			activate[name] = true
-		}
-	}
+
+	// When rebuilding with a previous manager, only start Added/Reloaded;
+	// adopt Unchanged Active clients. Cold start (previous == nil) starts
+	// every Active package.
+	startNow := map[string]bool{}
 	unchanged := map[string]bool{}
-	for _, id := range plan.Unchanged {
-		if name := PluginNameFromComponentID(id); name != "" {
-			unchanged[name] = true
+	if previous == nil {
+		for name := range active {
+			startNow[name] = true
+		}
+	} else {
+		for _, id := range plan.Added {
+			if name := PluginNameFromComponentID(id); name != "" && active[name] {
+				startNow[name] = true
+			}
+		}
+		for _, id := range plan.Reloaded {
+			if name := PluginNameFromComponentID(id); name != "" && active[name] {
+				startNow[name] = true
+			}
+		}
+		for _, id := range plan.Unchanged {
+			if name := PluginNameFromComponentID(id); name != "" && active[name] {
+				unchanged[name] = true
+			}
 		}
 	}
 
 	var toStart []pluginpkg.InstalledPackage
 	for _, item := range packages {
 		name := item.Installed.Name
-		if activate[name] {
+		if startNow[name] {
 			toStart = append(toStart, item)
 		}
 	}

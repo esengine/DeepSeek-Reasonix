@@ -993,6 +993,176 @@ func validateFormPayload(p UIFormPayload) error {
 	return nil
 }
 
+// HostBrowser: Extension → Host restricted browser client
+
+// HostBrowser is the sidecar's client for the host's restricted browser
+// surface (host/browser/tab/*). The plugin must declare a non-optional
+// reasonix/browser/companion requirement; the host binds owner and generation
+// from the connection. Params never carry ownerId or raw CDP options.
+type HostBrowser struct{}
+
+// List returns the current chat's managed browser tabs.
+func (HostBrowser) List(ctx context.Context) (BrowserTabListResult, error) {
+	s := serverFrom(ctx)
+	if s == nil {
+		return BrowserTabListResult{}, ErrNoConnection
+	}
+	raw, err := s.callHost(ctx, MethodHostBrowserTabList, BrowserTabListParams{})
+	if err != nil {
+		return BrowserTabListResult{}, err
+	}
+	var result BrowserTabListResult
+	if err := strictDecode(raw, &result); err != nil {
+		return BrowserTabListResult{}, &ProtocolError{Reason: ErrProtocolError, Message: "invalid host/browser/tab/list result"}
+	}
+	if result.Tabs == nil {
+		result.Tabs = []BrowserTab{}
+	}
+	return result, nil
+}
+
+// Open opens an absolute http(s) URL in a managed tab.
+func (HostBrowser) Open(ctx context.Context, url string, disposition BrowserTabDisposition) (BrowserTab, error) {
+	s := serverFrom(ctx)
+	if s == nil {
+		return BrowserTab{}, ErrNoConnection
+	}
+	params := BrowserTabOpenParams{URL: url, Disposition: disposition}
+	if err := validateBrowserOpenParams(params); err != nil {
+		return BrowserTab{}, err
+	}
+	raw, err := s.callHost(ctx, MethodHostBrowserTabOpen, params)
+	if err != nil {
+		return BrowserTab{}, err
+	}
+	var result BrowserTabOpenResult
+	if err := strictDecode(raw, &result); err != nil {
+		return BrowserTab{}, &ProtocolError{Reason: ErrProtocolError, Message: "invalid host/browser/tab/open result"}
+	}
+	return result.Tab, nil
+}
+
+// Snapshot captures a compact accessibility-tree view of a tab.
+func (HostBrowser) Snapshot(ctx context.Context, tabID string, maxChars *int) (BrowserTabSnapshotResult, error) {
+	s := serverFrom(ctx)
+	if s == nil {
+		return BrowserTabSnapshotResult{}, ErrNoConnection
+	}
+	params := BrowserTabSnapshotParams{TabID: tabID, MaxChars: maxChars}
+	if strings.TrimSpace(tabID) == "" {
+		return BrowserTabSnapshotResult{}, &ProtocolError{Reason: ErrInvalidParams, Message: "tabId is required"}
+	}
+	if maxChars != nil && *maxChars < 1 {
+		return BrowserTabSnapshotResult{}, &ProtocolError{Reason: ErrInvalidParams, Message: "maxChars must be >= 1"}
+	}
+	raw, err := s.callHost(ctx, MethodHostBrowserTabSnapshot, params)
+	if err != nil {
+		return BrowserTabSnapshotResult{}, err
+	}
+	var result BrowserTabSnapshotResult
+	if err := strictDecode(raw, &result); err != nil {
+		return BrowserTabSnapshotResult{}, &ProtocolError{Reason: ErrProtocolError, Message: "invalid host/browser/tab/snapshot result"}
+	}
+	return result, nil
+}
+
+// Wait waits for a page readiness condition on a tab.
+func (HostBrowser) Wait(ctx context.Context, tabID string, waitUntil BrowserWaitUntil, timeoutMillis *int) (BrowserTab, error) {
+	s := serverFrom(ctx)
+	if s == nil {
+		return BrowserTab{}, ErrNoConnection
+	}
+	params := BrowserTabWaitParams{TabID: tabID, WaitUntil: waitUntil, TimeoutMillis: timeoutMillis}
+	if err := validateBrowserWaitParams(params); err != nil {
+		return BrowserTab{}, err
+	}
+	raw, err := s.callHost(ctx, MethodHostBrowserTabWait, params)
+	if err != nil {
+		return BrowserTab{}, err
+	}
+	var result BrowserTabWaitResult
+	if err := strictDecode(raw, &result); err != nil {
+		return BrowserTab{}, &ProtocolError{Reason: ErrProtocolError, Message: "invalid host/browser/tab/wait result"}
+	}
+	return result.Tab, nil
+}
+
+// Act performs one restricted input action on a tab.
+func (HostBrowser) Act(ctx context.Context, params BrowserTabActParams) (BrowserTab, error) {
+	s := serverFrom(ctx)
+	if s == nil {
+		return BrowserTab{}, ErrNoConnection
+	}
+	if err := validateBrowserActParams(params); err != nil {
+		return BrowserTab{}, err
+	}
+	raw, err := s.callHost(ctx, MethodHostBrowserTabAct, params)
+	if err != nil {
+		return BrowserTab{}, err
+	}
+	var result BrowserTabActResult
+	if err := strictDecode(raw, &result); err != nil {
+		return BrowserTab{}, &ProtocolError{Reason: ErrProtocolError, Message: "invalid host/browser/tab/act result"}
+	}
+	return result.Tab, nil
+}
+
+func validateBrowserOpenParams(p BrowserTabOpenParams) error {
+	if strings.TrimSpace(p.URL) == "" {
+		return &ProtocolError{Reason: ErrInvalidParams, Message: "url is required"}
+	}
+	if !strings.HasPrefix(strings.ToLower(p.URL), "http://") && !strings.HasPrefix(strings.ToLower(p.URL), "https://") {
+		return &ProtocolError{Reason: ErrInvalidParams, Message: "url must be absolute http(s)"}
+	}
+	switch p.Disposition {
+	case BrowserDispositionForeground, BrowserDispositionBackground:
+	default:
+		return &ProtocolError{Reason: ErrInvalidParams, Message: "disposition must be foreground or background"}
+	}
+	return nil
+}
+
+func validateBrowserWaitParams(p BrowserTabWaitParams) error {
+	if strings.TrimSpace(p.TabID) == "" {
+		return &ProtocolError{Reason: ErrInvalidParams, Message: "tabId is required"}
+	}
+	switch p.WaitUntil {
+	case BrowserWaitLoad, BrowserWaitNetworkIdle, BrowserWaitDomContentLoaded, BrowserWaitNavigation:
+	default:
+		return &ProtocolError{Reason: ErrInvalidParams, Message: "waitUntil is invalid"}
+	}
+	if p.TimeoutMillis != nil && (*p.TimeoutMillis < 1 || *p.TimeoutMillis > 30000) {
+		return &ProtocolError{Reason: ErrInvalidParams, Message: "timeoutMillis must be 1-30000"}
+	}
+	return nil
+}
+
+func validateBrowserActParams(p BrowserTabActParams) error {
+	if strings.TrimSpace(p.TabID) == "" {
+		return &ProtocolError{Reason: ErrInvalidParams, Message: "tabId is required"}
+	}
+	if strings.TrimSpace(p.ExpectedOrigin) == "" {
+		return &ProtocolError{Reason: ErrInvalidParams, Message: "expectedOrigin is required"}
+	}
+	switch p.Action {
+	case BrowserActClick, BrowserActHover, BrowserActType, BrowserActSelect:
+		if strings.TrimSpace(p.Ref) == "" {
+			return &ProtocolError{Reason: ErrInvalidParams, Message: "ref is required for this action"}
+		}
+	case BrowserActScroll:
+		if p.Delta == nil || *p.Delta == 0 {
+			return &ProtocolError{Reason: ErrInvalidParams, Message: "delta must be non-zero for scroll"}
+		}
+	case BrowserActPress:
+		if strings.TrimSpace(p.Key) == "" {
+			return &ProtocolError{Reason: ErrInvalidParams, Message: "key is required for press"}
+		}
+	default:
+		return &ProtocolError{Reason: ErrInvalidParams, Message: "action is invalid"}
+	}
+	return nil
+}
+
 // Content refs (Extension → Host)
 
 // ReadContentRef pages one whole content ref back from the host in

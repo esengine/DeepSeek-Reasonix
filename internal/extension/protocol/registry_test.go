@@ -10,8 +10,8 @@ func TestRegistryIsSortedAndPinned(t *testing.T) {
 		t.Fatalf("ValidateRegistry: %v", err)
 	}
 	registry := Registry()
-	if len(registry) != 16 {
-		t.Fatalf("registry has %d methods, want 16", len(registry))
+	if len(registry) != 21 {
+		t.Fatalf("registry has %d methods, want 21", len(registry))
 	}
 	for i := 1; i < len(registry); i++ {
 		if registry[i-1].Name >= registry[i].Name {
@@ -38,9 +38,14 @@ func TestRegistryMethodDirections(t *testing.T) {
 		MethodHostUIPublish:                 DirectionExtensionToHostRequest,
 		MethodHostUIRequest:                 DirectionExtensionToHostRequest,
 		MethodHostContentRead:               DirectionExtensionToHostRequest,
+		MethodHostBrowserTabList:            DirectionExtensionToHostRequest,
+		MethodHostBrowserTabOpen:            DirectionExtensionToHostRequest,
+		MethodHostBrowserTabSnapshot:        DirectionExtensionToHostRequest,
+		MethodHostBrowserTabWait:            DirectionExtensionToHostRequest,
+		MethodHostBrowserTabAct:             DirectionExtensionToHostRequest,
 	}
-	if len(want) != 16 {
-		t.Fatalf("test pins %d methods, want 16", len(want))
+	if len(want) != 21 {
+		t.Fatalf("test pins %d methods, want 21", len(want))
 	}
 	for method, direction := range want {
 		spec, ok := LookupMethod(method)
@@ -77,6 +82,11 @@ func TestRegistryClasses(t *testing.T) {
 		MethodHostUIPublish:                 ClassUI,
 		MethodHostUIRequest:                 ClassUI,
 		MethodHostContentRead:               ClassContent,
+		MethodHostBrowserTabList:            ClassBrowser,
+		MethodHostBrowserTabOpen:            ClassBrowser,
+		MethodHostBrowserTabSnapshot:        ClassBrowser,
+		MethodHostBrowserTabWait:            ClassBrowser,
+		MethodHostBrowserTabAct:             ClassBrowser,
 	}
 	for method, class := range want {
 		spec, _ := LookupMethod(method)

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Reasonix Browser</title>
+  <link rel="stylesheet" href="chrome.css" />
+</head>
+<body>
+  <header class="chrome">
+    <nav class="toolbar" aria-label="Browser controls">
+      <button id="back" class="icon-btn" title="Back" aria-label="Back">&#x2190;</button>
+      <button id="forward" class="icon-btn" title="Forward" aria-label="Forward">&#x2192;</button>
+      <button id="reload" class="icon-btn" title="Reload" aria-label="Reload">&#x21bb;</button>
+      <input id="address" class="address" type="text" spellcheck="false" placeholder="Search or enter address" aria-label="Address bar" />
+      <button id="new-tab" class="icon-btn" title="New tab" aria-label="New tab">+</button>
+      <span id="agent-badge" class="agent-badge hidden" title="Agent is controlling this tab">Agent</span>
+      <button id="takeover" class="takeover hidden" title="Take control back from the agent" aria-label="Take control">Take over</button>
+    </nav>
+    <div id="tabstrip" class="tabstrip" role="tablist" aria-label="Tabs"></div>
+  </header>
+  <script src="chrome-renderer.js"></script>
+</body>
+</html>

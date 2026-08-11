@@ -34,6 +34,14 @@ func RebuildFrom(ctx context.Context, previous *BuildResult, opts Options) (*Bui
 	if previous.Owner != nil {
 		opts.Owner = previous.Owner
 	}
+	// Inherit host services when the caller did not override them. Desktop
+	// always re-supplies the current tab's browser tools/backend explicitly.
+	if opts.HostTools == nil && previous.HostTools != nil {
+		opts.HostTools = previous.HostTools
+	}
+	if opts.BrowserHost == nil && previous.BrowserHost != nil {
+		opts.BrowserHost = previous.BrowserHost
+	}
 	return rebuildWithPrevious(ctx, previous.Controller, previous, opts)
 }
 
@@ -105,10 +113,11 @@ func rebuildWithPrevious(ctx context.Context, old *control.Controller, previous 
 	home := config.ReasonixHomeDir()
 	// fromGraph must be the PREVIOUS generation's graph when available.
 	// Building "current disk" for both from and to collapses every plan to no-op.
+	hostCaps := hostProvidesForOptions(opts)
 	var fromGraph *extension.DependencyGraph
 	if previous != nil && previous.Plan != nil && previous.Plan.Graph != nil {
 		fromGraph = previous.Plan.Graph
-	} else if g, err := buildRuntimeGraph(home, nil); err == nil {
+	} else if g, err := buildRuntimeGraph(home, hostCaps); err == nil {
 		fromGraph = g
 	}
 	opts.Graph = fromGraph
@@ -129,7 +138,7 @@ func rebuildWithPrevious(ctx context.Context, old *control.Controller, previous 
 	}
 
 	var toGraph *extension.DependencyGraph
-	if g, err := buildRuntimeGraph(home, nil); err == nil {
+	if g, err := buildRuntimeGraph(home, hostCaps); err == nil {
 		toGraph = g
 	}
 	var previousSnapshot *extension.RuntimeSnapshot

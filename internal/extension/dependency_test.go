@@ -44,7 +44,7 @@ func TestDependencyGraphExactAndRange(t *testing.T) {
 }
 
 func TestDependencyGraphSchemaMismatch(t *testing.T) {
-	_, err := BuildDependencyGraph([]ComponentDescriptor{
+	g, err := BuildDependencyGraph([]ComponentDescriptor{
 		{ID: "host", Provides: []extensioncontract.Capability{cap("reasonix", "provider", "p", "1.0.0", "sha256:a")}},
 		{ID: "plug", Requires: []extensioncontract.Requirement{{
 			Capability: extensioncontract.Capability{
@@ -54,8 +54,105 @@ func TestDependencyGraphSchemaMismatch(t *testing.T) {
 			VersionRange: ">=1.0.0",
 		}}},
 	})
-	if err == nil || !strings.Contains(err.Error(), "dependency_unsatisfied") {
+	if err != nil {
 		t.Fatalf("err = %v", err)
+	}
+	if g.IsActive("plug") {
+		t.Fatal("schema-mismatched consumer must be Inactive")
+	}
+	reasons := g.InactiveReasons("plug")
+	if len(reasons) == 0 || !strings.Contains(reasons[0], "missing required capability") {
+		t.Fatalf("inactive reasons = %v", reasons)
+	}
+	if order := g.ActivateOrder(); len(order) != 1 || order[0] != "host" {
+		t.Fatalf("activate order = %v, want only host", order)
+	}
+}
+
+func TestDependencyGraphInactiveMissingRequired(t *testing.T) {
+	g, err := BuildDependencyGraph([]ComponentDescriptor{
+		{ID: "plugin/browser-user", Requires: []extensioncontract.Requirement{
+			req("reasonix", "browser", "companion", ">=1.0.0", false),
+		}},
+		{ID: "plugin/independent"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.IsActive("plugin/browser-user") {
+		t.Fatal("browser-dependent plugin must be Inactive without host capability")
+	}
+	if !g.IsActive("plugin/independent") {
+		t.Fatal("independent plugin must stay Active")
+	}
+	reasons := strings.Join(g.InactiveReasons("plugin/browser-user"), "; ")
+	if !strings.Contains(reasons, "reasonix/browser/companion") {
+		t.Fatalf("reasons = %q", reasons)
+	}
+	if !strings.Contains(reasons, "browser host is unavailable") {
+		t.Fatalf("reasons missing frontend note: %q", reasons)
+	}
+	order := g.ActivateOrder()
+	if len(order) != 1 || order[0] != "plugin/independent" {
+		t.Fatalf("activate order = %v", order)
+	}
+}
+
+func TestDependencyGraphInactivePropagates(t *testing.T) {
+	g, err := BuildDependencyGraph([]ComponentDescriptor{
+		{ID: "mid", Requires: []extensioncontract.Requirement{req("reasonix", "browser", "companion", ">=1.0.0", false)},
+			Provides: []extensioncontract.Capability{cap("ns", "tool", "t", "1.0.0", "sha256:t")}},
+		{ID: "leaf", Requires: []extensioncontract.Requirement{req("ns", "tool", "t", ">=1.0.0", false)}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.IsActive("mid") || g.IsActive("leaf") {
+		t.Fatalf("both should be Inactive: mid=%v leaf=%v", g.IsActive("mid"), g.IsActive("leaf"))
+	}
+	if !strings.Contains(strings.Join(g.InactiveReasons("leaf"), " "), "provider mid is Inactive") {
+		t.Fatalf("leaf reasons = %v", g.InactiveReasons("leaf"))
+	}
+}
+
+func TestDiffRuntimePlanActivityTransitions(t *testing.T) {
+	from, err := BuildDependencyGraph([]ComponentDescriptor{
+		{ID: "plugin/x", Requires: []extensioncontract.Requirement{req("reasonix", "browser", "companion", ">=1.0.0", false)}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	to, err := BuildDependencyGraph([]ComponentDescriptor{
+		{ID: "host", Provides: []extensioncontract.Capability{cap("reasonix", "browser", "companion", "1.0.0", "sha256:b")}},
+		{ID: "plugin/x", Requires: []extensioncontract.Requirement{req("reasonix", "browser", "companion", ">=1.0.0", false)}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := DiffRuntimePlan(from, to, 1, 2)
+	if len(plan.Added) != 2 { // host + plugin/x become active
+		// host is new Active; plugin/x Inactive→Active is Added
+		t.Fatalf("added = %v", plan.Added)
+	}
+	hasPlugin := false
+	for _, id := range plan.Added {
+		if id == "plugin/x" {
+			hasPlugin = true
+		}
+	}
+	if !hasPlugin {
+		t.Fatalf("plugin/x should be Added on Inactive→Active, plan=%+v", plan)
+	}
+	// Reverse: Active → Inactive is Removed.
+	plan2 := DiffRuntimePlan(to, from, 2, 3)
+	hasRemoved := false
+	for _, id := range plan2.Removed {
+		if id == "plugin/x" {
+			hasRemoved = true
+		}
+	}
+	if !hasRemoved {
+		t.Fatalf("plugin/x should be Removed on Active→Inactive, plan=%+v", plan2)
 	}
 }
 

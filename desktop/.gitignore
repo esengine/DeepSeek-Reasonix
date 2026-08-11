@@ -46,3 +46,8 @@
 /desktop
 # Wails dependency-change cache
 /frontend/package.json.md5
+
+# Browser Companion build artifacts (desktop/browser-companion)
+browser-companion/dist/
+browser-companion/dist-test/
+browser-companion/node_modules/

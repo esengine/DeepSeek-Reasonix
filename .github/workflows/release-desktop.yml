@@ -395,6 +395,22 @@ jobs:
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
         run: scripts/desktop-build.sh "${{ matrix.platform }}" "${{ needs.resolve.outputs.version }}" "${{ needs.resolve.outputs.channel }}"
 
+      # package-component.mjs copies/renames the official Electron executable
+      # byte-for-byte. Fail closed if a public Windows release ever loses the
+      # upstream Authenticode signature before the minisigned archive is made.
+      - name: Verify browser companion Authenticode
+        if: runner.os == 'Windows' && github.repository == 'esengine/DeepSeek-Reasonix'
+        shell: pwsh
+        run: |
+          $componentVersion = (Get-Content desktop/browser-companion/package.json | ConvertFrom-Json).version
+          $targetArch = if ("${{ matrix.platform }}" -eq "windows/arm64") { "arm64" } else { "amd64" }
+          $binary = "desktop/build/browser-components/$targetArch/browser-component/$componentVersion/browser/reasonix-browser-companion.exe"
+          $signature = Get-AuthenticodeSignature -LiteralPath $binary
+          if ($signature.Status -ne "Valid" -or $null -eq $signature.SignerCertificate) {
+            throw "Browser companion Authenticode is not valid: $($signature.Status) $binary"
+          }
+          Write-Host "Browser companion Authenticode valid: $($signature.SignerCertificate.Subject)"
+
       # Candidate code is immutable, but release validation belongs to the
       # protected workflow control plane. Reuse this sparse checkout later for
       # Authenticode verification rather than trusting a candidate-owned test.
@@ -812,6 +828,9 @@ jobs:
             | if .downloads then
                 .downloads |= with_entries(.value |= rewrite_asset)
               else . end
+            | if .browser_components then
+                .browser_components |= with_entries(.value |= rewrite_asset)
+              else . end
           ' "$f" > "$f.new"
           mv "$f.new" "$f"
           cat "$f"
@@ -1174,7 +1193,7 @@ jobs:
             fi
           fi
 
-          jq -r '(.platforms[] | .url, .sig), ((.native_packages // {})[] | .url, .sig), ((.downloads // {})[] | .url, .sig)' "$f" | while IFS= read -r asset; do
+          jq -r '(.platforms[] | .url, .sig), ((.native_packages // {})[] | .url, .sig), ((.downloads // {})[] | .url, .sig), ((.browser_components // {})[] | .url, .sig)' "$f" | while IFS= read -r asset; do
             [ -n "$asset" ] || continue
             key="${asset#https://dl.reasonix.io/}"
             aws s3api head-object --bucket "$R2_BUCKET" --key "$key" --endpoint-url "$ENDPOINT" >/dev/null

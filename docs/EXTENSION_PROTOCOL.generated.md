@@ -5,7 +5,7 @@
 - Protocol ID: `reasonix.extension.v2`
 - Protocol major: `2`
 - Schema: `internal/extension/protocol/schema.generated.json`
-- Schema hash: `sha256:3a713e254fa6df3f1eee91fe402de3b2bd2723672086374c3899b1e3e9c975de`
+- Schema hash: `sha256:f93ad7f8681773864a17fcb899705d7b3f7f0dce62d0940ae8ac30b3c4f46b8f`
 
 Within major v2 only optional fields, new enum values, and new methods may
 be added; existing required fields, directions, limits, error reasons, and
@@ -28,6 +28,11 @@ semantics never change.
 | `extension/shutdown` | `host_to_extension_request` | `lifecycle` | `ShutdownParams` | `ShutdownResult` |
 | `extension/ui/action` | `host_to_extension_request` | `ui` | `UIActionParams` | `UIActionResult` |
 | `extension/ui/submit` | `host_to_extension_request` | `ui` | `UISubmitParams` | `UISubmitResult` |
+| `host/browser/tab/act` | `extension_to_host_request` | `browser` | `BrowserTabActParams` | `BrowserTabActResult` |
+| `host/browser/tab/list` | `extension_to_host_request` | `browser` | `BrowserTabListParams` | `BrowserTabListResult` |
+| `host/browser/tab/open` | `extension_to_host_request` | `browser` | `BrowserTabOpenParams` | `BrowserTabOpenResult` |
+| `host/browser/tab/snapshot` | `extension_to_host_request` | `browser` | `BrowserTabSnapshotParams` | `BrowserTabSnapshotResult` |
+| `host/browser/tab/wait` | `extension_to_host_request` | `browser` | `BrowserTabWaitParams` | `BrowserTabWaitResult` |
 | `host/content/read` | `extension_to_host_request` | `content` | `ContentReadParams` | `ContentReadResult` |
 | `host/ui/publish` | `extension_to_host_request` | `ui` | `UIPublishParams` | `UIPublishResult` |
 | `host/ui/request` | `extension_to_host_request` | `ui` | `UIRequestParams` | `UIRequestResult` |
@@ -69,6 +74,14 @@ these frozen hook points:
 | Reason | JSON-RPC code | Retryable | Message |
 | --- | --- | --- | --- |
 | `activation_failed` | -32000 | false | Component activation failed; the new generation was not published. |
+| `browser_cancelled` | -32000 | false | The browser call was cancelled by runtime drain, sidecar disconnect, or the caller. |
+| `browser_origin_mismatch` | -32000 | false | The tab origin does not match the expected origin. |
+| `browser_permission_denied` | -32000 | false | The browser action was denied by a sensitive-field, permission, or human-input gate. |
+| `browser_stale_ref` | -32000 | false | The element ref is no longer valid after navigation. |
+| `browser_tab_busy` | -32000 | true | The tab, renderer, lease, or pending request limit is exhausted. |
+| `browser_tab_not_found` | -32000 | false | The tab does not exist or does not belong to this chat. |
+| `browser_timeout` | -32000 | true | The browser wait or action timed out. |
+| `browser_unavailable` | -32000 | true | The browser host API is unavailable or the companion cannot start. |
 | `capability_not_declared` | -32000 | false | The extension used a capability its manifest did not declare. |
 | `cleanup_failed` | -32000 | true | Component cleanup failed while disposing scoped effects. |
 | `content_ref_expired` | -32000 | true | The referenced content has expired. |

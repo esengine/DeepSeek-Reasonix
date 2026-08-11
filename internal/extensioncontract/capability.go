@@ -138,7 +138,7 @@ func (r Requirement) SatisfiedBy(provided Capability) bool {
 
 func requiresSchemaHash(kind string) bool {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "provider", "tool", "ui", "uiaction":
+	case "provider", "tool", "ui", "uiaction", "browser":
 		return true
 	default:
 		return false

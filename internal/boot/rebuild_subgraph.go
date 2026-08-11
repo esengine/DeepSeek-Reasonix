@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"reasonix/internal/browserhost"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/extension"
@@ -27,7 +28,7 @@ func tryRebuildSubgraph(ctx context.Context, old *control.Controller, previous *
 		from = previous.Plan.Graph
 	}
 	graphStart := time.Now()
-	to, gerr := buildRuntimeGraph(config.ReasonixHomeDir(), nil)
+	to, gerr := buildRuntimeGraph(config.ReasonixHomeDir(), hostProvidesForOptions(opts))
 	extension.DefaultLifecycleMetrics.ObserveGraphBuild(time.Since(graphStart))
 	if gerr != nil {
 		return nil, false, nil
@@ -60,6 +61,15 @@ func tryRebuildSubgraph(ctx context.Context, old *control.Controller, previous *
 	prevUISession := controllerSessionID(previous.Controller)
 	prevUIGen := previous.Snapshot.Generation()
 
+	browserHost := opts.BrowserHost
+	if browserHost == nil {
+		browserHost = previous.BrowserHost
+	}
+	hostTools := opts.HostTools
+	if hostTools == nil {
+		hostTools = previous.HostTools
+	}
+
 	res = &BuildResult{
 		Controller:           previous.Controller,
 		Snapshot:             previous.Snapshot.WithGeneration(gen),
@@ -73,6 +83,8 @@ func tryRebuildSubgraph(ctx context.Context, old *control.Controller, previous *
 		Assembly:             previous.Assembly,
 		Plan:                 plan,
 		ReusedController:     true,
+		HostTools:            hostTools,
+		BrowserHost:          browserHost,
 	}
 	session := protocol.SessionContext{
 		SessionID:     controllerSessionID(previous.Controller),
@@ -234,6 +246,24 @@ func stageSidecarSubgraph(ctx context.Context, res *BuildResult, oldMgr *sidecar
 	if merged != nil {
 		res.ProviderResolver = merged
 	}
+	// Stage: newly started clients receive the next-generation binding (calls
+	// are stale_generation until publish). Adopted clients keep their previous
+	// binding until commit.
+	if res.Extensions != nil {
+		for _, client := range res.Extensions.Clients() {
+			if oldMgr != nil && oldMgr.Client(client.PluginID()) != nil {
+				// Adopted: leave previous handler in place.
+				continue
+			}
+			binding := browserhost.NewBinding(browserhost.BindingOptions{
+				Backend:    res.BrowserHost,
+				Owner:      res.Owner,
+				Generation: gen,
+				PluginID:   client.PluginID(),
+			})
+			client.SetBrowserHandler(binding)
+		}
+	}
 	return nil
 }
 
@@ -267,6 +297,9 @@ func commitControllerExtPatch(res *BuildResult, session protocol.SessionContext,
 		res.ExtensionUI.BindGeneration(session.SessionID, gen)
 		res.Controller.SetExtensionUI(res.ExtensionUI)
 	}
+	// Commit swaps browser bindings on every client (including adopted) before
+	// publish so the new generation can call immediately after Publish.
+	bindBrowserHandlers(res.Extensions, res.BrowserHost, res.Owner, gen)
 	return nil
 }
 

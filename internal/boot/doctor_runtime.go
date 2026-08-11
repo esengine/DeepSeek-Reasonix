@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"reasonix/internal/browserhost"
 	"reasonix/internal/extension"
 )
 
@@ -17,7 +18,12 @@ type RuntimeDoctorReport struct {
 	PublishedGen          uint64                             `json:"publishedGeneration"`
 	DrainingGens          []uint64                           `json:"drainingGenerations,omitempty"`
 	RuntimeOwnerFallbacks uint64                             `json:"runtimeOwnerFallbacks"`
-	Text                  string                             `json:"-"`
+	// BrowserHostSupported is true when this BuildResult was assembled with a
+	// non-nil BrowserHost (desktop). Independent of companion install state.
+	BrowserHostSupported bool                        `json:"browserHostSupported"`
+	BrowserCapability    string                      `json:"browserCapability,omitempty"`
+	BrowserMetrics       browserhost.MetricsSnapshot `json:"browserMetrics"`
+	Text                 string                      `json:"-"`
 }
 
 // CollectRuntimeDoctor builds a report from an optional live BuildResult and
@@ -38,9 +44,14 @@ func CollectRuntimeDoctor(res *BuildResult) RuntimeDoctorReport {
 		RuntimeOwnerFallbacks: extension.RuntimeOwnerFallbackCount(),
 		Recoverability:        owner.AssessRecoverability(gen),
 		Resume:                owner.DecideResume(gen),
+		BrowserMetrics:        browserhost.DefaultMetrics.Snapshot(),
 	}
 	if res != nil {
 		report.Status = res.Status
+		report.BrowserHostSupported = res.BrowserHost != nil
+		if res.BrowserHost != nil {
+			report.BrowserCapability = browserhost.Capability().Key.String() + "@" + browserhost.CapabilityVersion
+		}
 		if res.Status != nil {
 			report.Text = FormatRuntimeStatus(res.Status)
 		}
@@ -53,6 +64,16 @@ func CollectRuntimeDoctor(res *BuildResult) RuntimeDoctorReport {
 	if report.Text == "" {
 		report.Text = FormatRuntimeStatus(report.Status)
 	}
+	// Append browser host diagnostics.
+	report.Text += fmt.Sprintf("browser host supported: %v\n", report.BrowserHostSupported)
+	if report.BrowserCapability != "" {
+		report.Text += "browser capability: " + report.BrowserCapability + "\n"
+	} else {
+		report.Text += "browser capability: (not provided on this frontend)\n"
+	}
+	bm := report.BrowserMetrics
+	report.Text += fmt.Sprintf("browser rpc: inFlight=%d admitReject=%d staleDrop=%d timeout=%d cancel=%d irreversibleReceipts=%d\n",
+		bm.InFlight, bm.AdmissionRejected, bm.StaleResponseDrop, bm.Timeouts, bm.Cancels, bm.IrreversibleReceipts)
 	return report
 }
 

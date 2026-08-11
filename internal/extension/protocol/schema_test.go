@@ -78,8 +78,8 @@ func TestSchemaDocumentStructure(t *testing.T) {
 	if !ok {
 		t.Fatal("methods is missing")
 	}
-	if len(methods) != 16 {
-		t.Fatalf("methods has %d entries, want 16", len(methods))
+	if len(methods) != 21 {
+		t.Fatalf("methods has %d entries, want 21", len(methods))
 	}
 
 	for _, spec := range Registry() {

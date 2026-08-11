@@ -89,6 +89,7 @@ type toolSourceConnector struct {
 	search        func(context.Context) (string, error)
 	files         func(context.Context) (string, error)
 	workflow      func(context.Context) (string, error)
+	browser       func(context.Context) (string, error)
 	mcp           func(context.Context, string) (string, error)
 	mcpNames      []string
 }
@@ -105,7 +106,7 @@ func (*toolSourceConnector) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type":"object",
 		"properties":{
-			"source":{"type":"string","description":"Tool source to enable: docs, search, files, workflow, sessions, memory, commands, skills, read_only_skill, mcp, lsp, web_fetch, install_source, task, or read_only_task."},
+			"source":{"type":"string","description":"Tool source to enable: docs, search, files, workflow, browser, sessions, memory, commands, skills, read_only_skill, mcp, lsp, web_fetch, install_source, task, or read_only_task."},
 			"name":{"type":"string","description":"For source=mcp, the configured server name. Omit to list configured MCP servers without connecting them."}
 		},
 		"required":["source"]
@@ -182,6 +183,8 @@ func (t *toolSourceConnector) executeLocked(ctx context.Context, source, name, r
 		out, err = runSourceInstaller(ctx, "files", t.files)
 	case "workflow":
 		out, err = runSourceInstaller(ctx, "workflow", t.workflow)
+	case "browser":
+		out, err = runSourceInstaller(ctx, "browser", t.browser)
 	case "mcp":
 		if name == "" {
 			if len(t.mcpNames) == 0 {
@@ -229,6 +232,8 @@ func normalizeToolSource(source string) string {
 		return "files"
 	case "workflow", "workflows", "todo", "todos":
 		return "workflow"
+	case "browser", "browsers", "web_browser", "webbrowser":
+		return "browser"
 	case "read_only_task", "readonly_task", "read-only-task", "read_only_subagent", "readonly_subagent", "read-only-subagent", "research_task", "research-subagent":
 		return "read_only_task"
 	case "task", "subagent", "subagents":
@@ -272,6 +277,9 @@ func (t *toolSourceConnector) availableSources() []string {
 	}
 	if t.workflow != nil {
 		out = append(out, "workflow")
+	}
+	if t.browser != nil {
+		out = append(out, "browser")
 	}
 	if t.webFetch != nil {
 		out = append(out, "web_fetch")

@@ -56,10 +56,17 @@ func (e ComponentEpoch) String() string {
 // DependencyGraph is the resolved capability graph for one generation.
 type DependencyGraph struct {
 	Components map[ComponentID]ComponentDescriptor
-	// Edges maps consumer → providers it depends on.
+	// Edges maps consumer → providers it depends on. Only active consumers
+	// that successfully resolved a requirement appear here.
 	Edges map[ComponentID][]ComponentID
 	// Providers maps capability key string → component IDs that provide it.
+	// Inactive providers are still listed here for diagnostics, but active
+	// edges only form against Active providers.
 	Providers map[string][]ComponentID
+	// Inactive maps component ID → deterministic reasons the component must
+	// not activate (missing required capability, inactive provider cascade,
+	// …). Optional missing requirements never put a consumer here.
+	Inactive map[ComponentID][]string
 	// Diagnostics collects optional-missing and non-fatal notes.
 	Diagnostics []string
 }
@@ -88,13 +95,16 @@ func (e *GraphError) Error() string {
 	return "extension: " + e.Reason
 }
 
-// BuildDependencyGraph validates descriptors, resolves requirements, detects
-// required cycles, and records optional-missing diagnostics.
+// BuildDependencyGraph validates descriptors, resolves requirements, marks
+// missing non-optional dependencies as Inactive (rather than failing the
+// whole build), propagates inactivity through dependents, detects required
+// cycles among active edges, and records optional-missing diagnostics.
 func BuildDependencyGraph(components []ComponentDescriptor) (*DependencyGraph, error) {
 	g := &DependencyGraph{
 		Components: make(map[ComponentID]ComponentDescriptor, len(components)),
 		Edges:      make(map[ComponentID][]ComponentID),
 		Providers:  make(map[string][]ComponentID),
+		Inactive:   make(map[ComponentID][]string),
 	}
 	for _, c := range components {
 		if c.ID == "" {
@@ -124,6 +134,14 @@ func BuildDependencyGraph(components []ComponentDescriptor) (*DependencyGraph, e
 		g.Providers[k] = ids
 	}
 
+	// First pass: resolve each requirement. Missing non-optional providers
+	// mark the consumer Inactive; duplicates among candidates are still hard
+	// errors (active graph integrity). Optional missing is diagnostic only.
+	type pendingEdge struct {
+		consumer ComponentID
+		provider ComponentID
+	}
+	var pending []pendingEdge
 	for _, c := range components {
 		for _, req := range c.Requires {
 			key := req.Key.String()
@@ -142,13 +160,14 @@ func BuildDependencyGraph(components []ComponentDescriptor) (*DependencyGraph, e
 					g.Diagnostics = append(g.Diagnostics, fmt.Sprintf("optional dependency unsatisfied: %s requires %s", c.ID, key))
 					continue
 				}
-				return nil, &GraphError{
-					Reason: "dependency_unsatisfied",
-					Detail: fmt.Sprintf("%s requires %s", c.ID, key),
+				reason := fmt.Sprintf("missing required capability %s", key)
+				if kindBrowserHostMissing(req) {
+					reason += "; browser host is unavailable on this frontend"
 				}
+				g.Inactive[c.ID] = appendUniqueReason(g.Inactive[c.ID], reason)
+				continue
 			}
 			if len(matched) > 1 {
-				// Multiple providers for the same key without explicit selection.
 				parts := make([]string, len(matched))
 				for i, id := range matched {
 					parts[i] = string(id)
@@ -158,23 +177,82 @@ func BuildDependencyGraph(components []ComponentDescriptor) (*DependencyGraph, e
 					Detail: fmt.Sprintf("%s: providers %s", key, strings.Join(parts, ", ")),
 				}
 			}
-			g.Edges[c.ID] = append(g.Edges[c.ID], matched[0])
-		}
-		// Deterministic edge order.
-		if edges := g.Edges[c.ID]; len(edges) > 1 {
-			slices.Sort(edges)
-			g.Edges[c.ID] = edges
+			pending = append(pending, pendingEdge{consumer: c.ID, provider: matched[0]})
 		}
 	}
 
+	// Propagate inactivity: a consumer depending on an inactive provider is
+	// itself inactive. Repeat until fixed point for deterministic cascades.
+	changed := true
+	for changed {
+		changed = false
+		for _, edge := range pending {
+			if _, inactive := g.Inactive[edge.consumer]; inactive {
+				continue
+			}
+			if reasons, providerInactive := g.Inactive[edge.provider]; providerInactive {
+				msg := fmt.Sprintf("provider %s is Inactive", edge.provider)
+				if len(reasons) > 0 {
+					msg += " (" + reasons[0] + ")"
+				}
+				g.Inactive[edge.consumer] = appendUniqueReason(g.Inactive[edge.consumer], msg)
+				changed = true
+			}
+		}
+	}
+
+	// Active edges only: both consumer and provider must be Active.
+	for _, edge := range pending {
+		if _, inactive := g.Inactive[edge.consumer]; inactive {
+			continue
+		}
+		if _, inactive := g.Inactive[edge.provider]; inactive {
+			continue
+		}
+		g.Edges[edge.consumer] = append(g.Edges[edge.consumer], edge.provider)
+	}
+	for consumer, edges := range g.Edges {
+		if len(edges) > 1 {
+			slices.Sort(edges)
+			g.Edges[consumer] = edges
+		}
+	}
+
+	// Cycles among active edges remain hard build errors.
 	if cycle := detectRequiredCycle(g); len(cycle) > 0 {
 		return nil, &GraphError{Reason: "dependency_cycle", Cycle: cycle}
+	}
+	// Deterministic reason order.
+	for id, reasons := range g.Inactive {
+		slices.Sort(reasons)
+		g.Inactive[id] = reasons
 	}
 	slices.Sort(g.Diagnostics)
 	return g, nil
 }
 
-// ActivateOrder returns the deterministic topological activation order.
+// IsActive reports whether the component may activate (present and not Inactive).
+func (g *DependencyGraph) IsActive(id ComponentID) bool {
+	if g == nil {
+		return false
+	}
+	if _, ok := g.Components[id]; !ok {
+		return false
+	}
+	_, inactive := g.Inactive[id]
+	return !inactive
+}
+
+// InactiveReasons returns the reasons a component is Inactive, or nil.
+func (g *DependencyGraph) InactiveReasons(id ComponentID) []string {
+	if g == nil {
+		return nil
+	}
+	return append([]string(nil), g.Inactive[id]...)
+}
+
+// ActivateOrder returns the deterministic topological activation order of
+// Active components only. Inactive components never start sidecars.
 func (g *DependencyGraph) ActivateOrder() []ComponentID {
 	if g == nil {
 		return nil
@@ -182,12 +260,23 @@ func (g *DependencyGraph) ActivateOrder() []ComponentID {
 	return topoOrder(g, false)
 }
 
-// DrainOrder returns reverse topological order for draining.
+// DrainOrder returns reverse topological order for draining Active components.
 func (g *DependencyGraph) DrainOrder() []ComponentID {
 	if g == nil {
 		return nil
 	}
 	return topoOrder(g, true)
+}
+
+func appendUniqueReason(reasons []string, reason string) []string {
+	if slices.Contains(reasons, reason) {
+		return reasons
+	}
+	return append(reasons, reason)
+}
+
+func kindBrowserHostMissing(req extensioncontract.Requirement) bool {
+	return req.Key.Namespace == "reasonix" && req.Key.Kind == "browser" && req.Key.ID == "companion"
 }
 
 // EpochFor returns the epoch identity a consumer should pin for req.
@@ -264,17 +353,33 @@ func detectRequiredCycle(g *DependencyGraph) []ComponentID {
 }
 
 func topoOrder(g *DependencyGraph, reverse bool) []ComponentID {
-	// Kahn's algorithm with deterministic ready-set ordering.
-	indeg := make(map[ComponentID]int, len(g.Components))
+	// Kahn's algorithm with deterministic ready-set ordering over Active
+	// components only. Inactive nodes are excluded from activation/drain.
+	active := make(map[ComponentID]bool, len(g.Components))
+	for id := range g.Components {
+		if g.IsActive(id) {
+			active[id] = true
+		}
+	}
+	indeg := make(map[ComponentID]int, len(active))
 	// Build reverse adjacency: provider → consumers (activation needs providers first).
 	// Edges are consumer → provider, so provider must activate before consumer.
 	consumersOf := make(map[ComponentID][]ComponentID)
-	for id := range g.Components {
+	for id := range active {
 		indeg[id] = 0
 	}
 	for consumer, providers := range g.Edges {
-		indeg[consumer] = len(providers)
+		if !active[consumer] {
+			continue
+		}
+		var activeProviders []ComponentID
 		for _, p := range providers {
+			if active[p] {
+				activeProviders = append(activeProviders, p)
+			}
+		}
+		indeg[consumer] = len(activeProviders)
+		for _, p := range activeProviders {
 			consumersOf[p] = append(consumersOf[p], consumer)
 		}
 	}

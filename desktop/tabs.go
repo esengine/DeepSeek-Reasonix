@@ -3924,6 +3924,8 @@ func (a *App) buildTabControllerWithContextAdmissionHeld(tab *WorkspaceTab, load
 		SessionDir:               sessionDir,
 		EffortOverride:           cloneStringPtr(buildEffort),
 		TokenMode:                buildTokenMode,
+		HostTools:                a.browserHostToolsForTab(tab.ID),
+		BrowserHost:              a.browserHostForTab(tab.ID),
 		SharedHost:               sharedHost,
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
 		SubagentParentLive:       a.subagentParentProbeForBuild(tab),

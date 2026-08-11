@@ -1034,6 +1034,13 @@ write_desktop_manifest() {
 			downloads: {
 				"Reasonix-darwin-universal.dmg": asset("Reasonix-darwin-universal.dmg"),
 				"Reasonix-windows-amd64.zip": asset("Reasonix-windows-amd64.zip")
+			},
+			browser_components: {
+				"darwin-arm64": asset("Reasonix-Browser-darwin-arm64.zip"),
+				"darwin-amd64": asset("Reasonix-Browser-darwin-amd64.zip"),
+				"windows-amd64": asset("Reasonix-Browser-windows-amd64.zip"),
+				"windows-arm64": asset("Reasonix-Browser-windows-arm64.zip"),
+				"linux-amd64": asset("Reasonix-Browser-linux-amd64.tar.gz")
 			}
 		}
 	' >"$output"

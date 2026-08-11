@@ -81,6 +81,13 @@ var (
 		{group: "downloads", key: "Reasonix-darwin-universal.dmg", filename: "Reasonix-darwin-universal.dmg"},
 		{group: "downloads", key: "Reasonix-windows-amd64.zip", filename: "Reasonix-windows-amd64.zip"},
 	}
+	requiredBrowserComponentAssets = []requiredDesktopAsset{
+		{group: "browser_components", key: "darwin-arm64", filename: "Reasonix-Browser-darwin-arm64.zip"},
+		{group: "browser_components", key: "darwin-amd64", filename: "Reasonix-Browser-darwin-amd64.zip"},
+		{group: "browser_components", key: "windows-amd64", filename: "Reasonix-Browser-windows-amd64.zip"},
+		{group: "browser_components", key: "windows-arm64", filename: "Reasonix-Browser-windows-arm64.zip"},
+		{group: "browser_components", key: "linux-amd64", filename: "Reasonix-Browser-linux-amd64.tar.gz"},
+	}
 )
 
 // githubManifestFallback is the stable channel's last-resort manifest source.
@@ -394,6 +401,25 @@ func validateDesktopManifest(selected string, m *update.Manifest) error {
 			return fmt.Errorf("%s manifest mixes asset bases %q and %q", selected, base, assetBase)
 		}
 		base = assetBase
+	}
+	// browser_components is optional for old releases. Once present, it is a
+	// complete five-platform set on the same immutable release base as the
+	// desktop artifacts; partial/mixed-origin component maps are rejected.
+	if m.BrowserComponents != nil {
+		for _, required := range requiredBrowserComponentAssets {
+			asset, ok := m.BrowserComponents[required.key]
+			if !ok {
+				return fmt.Errorf("%s manifest has no browser component for %s", selected, required.key)
+			}
+			assetBase, err := validateManifestAsset(selected, m.Version, required.filename, asset, false)
+			if err != nil {
+				return fmt.Errorf("browser component %s: %w", required.key, err)
+			}
+			if base != "" && assetBase != base {
+				return fmt.Errorf("%s manifest mixes asset bases %q and %q", selected, base, assetBase)
+			}
+			base = assetBase
+		}
 	}
 	return nil
 }

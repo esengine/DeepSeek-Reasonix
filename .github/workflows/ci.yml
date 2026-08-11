@@ -424,6 +424,33 @@ jobs:
           working-directory: desktop
           args: --timeout=5m
 
+  browser-companion:
+    needs: changes
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false')
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: desktop/browser-companion
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6.0.9
+        with:
+          version: 10
+          run_install: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/browser-companion/pnpm-lock.yaml
+      - name: Install companion dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck and protocol tests
+        run: pnpm typecheck && pnpm build && pnpm test
+      - name: Real Electron integration
+        run: xvfb-run --auto-servernum pnpm test:integration
+      - name: Chromium performance budgets
+        run: xvfb-run --auto-servernum pnpm test:performance
+
   # Desktop project-root matching is case-insensitive only on Windows
   # (sameDesktopPath folds case when os.PathSeparator is '\'), so the
   # regression tests for that contract are named *OnWindows and can never

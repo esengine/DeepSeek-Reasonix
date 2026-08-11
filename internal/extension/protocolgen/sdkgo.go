@@ -22,18 +22,23 @@ import (
 // none: its values already read as Go names ("provider_failed" →
 // ProviderFailed).
 var sdkEnumPrefixes = map[string]string{
-	"InterceptEvent":    "Event",
-	"InterceptDecision": "Decision",
-	"UIHostKind":        "UIHost",
-	"UISurfaceKind":     "UISurface",
-	"UIRequestKind":     "UIRequest",
-	"UIFieldKind":       "UIField",
-	"UISeverity":        "UISeverity",
-	"ProviderRole":      "ProviderRole",
-	"ProviderChunkType": "Chunk",
-	"ProviderErrorCode": "",
-	"ContentEncoding":   "Content",
-	"ErrorReason":       "Err",
+	"InterceptEvent":        "Event",
+	"InterceptDecision":     "Decision",
+	"UIHostKind":            "UIHost",
+	"UISurfaceKind":         "UISurface",
+	"UIRequestKind":         "UIRequest",
+	"UIFieldKind":           "UIField",
+	"UISeverity":            "UISeverity",
+	"ProviderRole":          "ProviderRole",
+	"ProviderChunkType":     "Chunk",
+	"ProviderErrorCode":     "",
+	"ContentEncoding":       "Content",
+	"ErrorReason":           "Err",
+	"BrowserTabDisposition": "BrowserDisposition",
+	"BrowserWaitUntil":      "BrowserWait",
+	"BrowserActAction":      "BrowserAct",
+	"OperationClass":        "Class",
+	"Direction":             "Direction",
 }
 
 // sdkEnumConstantExceptions pins constant names that mechanical mangling

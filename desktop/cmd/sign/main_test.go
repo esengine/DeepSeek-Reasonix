@@ -64,6 +64,11 @@ func TestGenManifest(t *testing.T) {
 		"Reasonix-linux-amd64.deb",            // human download, not the updater channel
 		"Reasonix-linux-amd64.tar.gz.minisig", // must be skipped
 		"README.txt",                          // unmatched, must be skipped
+		"Reasonix-Browser-darwin-arm64.zip",
+		"Reasonix-Browser-darwin-amd64.zip",
+		"Reasonix-Browser-windows-amd64.zip",
+		"Reasonix-Browser-windows-arm64.zip",
+		"Reasonix-Browser-linux-amd64.tar.gz",
 	}
 	for _, n := range names {
 		if err := os.WriteFile(filepath.Join(dir, n), []byte(n), 0o644); err != nil {
@@ -154,6 +159,14 @@ func TestGenManifest(t *testing.T) {
 			asset.Size == 0 {
 			t.Fatalf("website download %q incomplete: %+v", name, asset)
 		}
+	}
+	if len(m.BrowserComponents) != 5 {
+		t.Fatalf("want 5 browser components, got %d: %+v", len(m.BrowserComponents), m.BrowserComponents)
+	}
+	component := m.BrowserComponents["windows-amd64"]
+	if !strings.HasSuffix(component.URL, "/Reasonix-Browser-windows-amd64.zip") ||
+		component.Sig != component.URL+".minisig" || component.SHA256 == "" || component.Size == 0 {
+		t.Fatalf("windows browser component incomplete: %+v", component)
 	}
 }
 

@@ -12,7 +12,7 @@ fi
 entries="$(mktemp)"
 trap 'rm -f "$entries"' EXIT
 jq -er '
-	[.platforms, .native_packages, (.downloads // {})]
+	[.platforms, .native_packages, (.downloads // {}), (.browser_components // {})]
 	| map(to_entries)
 	| add[]
 	| [.value.url, .value.sha256, (.value.size | tostring)]

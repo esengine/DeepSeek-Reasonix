@@ -35,6 +35,15 @@ const (
 
 	// Externalized content reads (Extension → Host).
 	MethodHostContentRead Method = "host/content/read"
+
+	// Restricted browser surface (Extension → Host). Plugins must declare a
+	// non-optional reasonix/browser/companion requirement; owner and generation
+	// are host-bound and never appear in params.
+	MethodHostBrowserTabList     Method = "host/browser/tab/list"
+	MethodHostBrowserTabOpen     Method = "host/browser/tab/open"
+	MethodHostBrowserTabSnapshot Method = "host/browser/tab/snapshot"
+	MethodHostBrowserTabWait     Method = "host/browser/tab/wait"
+	MethodHostBrowserTabAct      Method = "host/browser/tab/act"
 )
 
 // MethodSpec is one frozen registry entry: the method name, its direction,
@@ -88,6 +97,11 @@ var frozenRegistry = []MethodSpec{
 	extensionRequest[UIPublishParams, UIPublishResult](MethodHostUIPublish, ClassUI),
 	extensionRequest[UIRequestParams, UIRequestResult](MethodHostUIRequest, ClassUI),
 	extensionRequest[ContentReadParams, ContentReadResult](MethodHostContentRead, ClassContent),
+	extensionRequest[BrowserTabListParams, BrowserTabListResult](MethodHostBrowserTabList, ClassBrowser),
+	extensionRequest[BrowserTabOpenParams, BrowserTabOpenResult](MethodHostBrowserTabOpen, ClassBrowser),
+	extensionRequest[BrowserTabSnapshotParams, BrowserTabSnapshotResult](MethodHostBrowserTabSnapshot, ClassBrowser),
+	extensionRequest[BrowserTabWaitParams, BrowserTabWaitResult](MethodHostBrowserTabWait, ClassBrowser),
+	extensionRequest[BrowserTabActParams, BrowserTabActResult](MethodHostBrowserTabAct, ClassBrowser),
 }
 
 var frozenRegistryByName = buildRegistryIndex(frozenRegistry)
@@ -191,11 +205,11 @@ func ValidateRegistry() error {
 		}
 	}
 	// Extension Protocol v2: 8 lifecycle/intercept/provider/UI Host →
-	// Extension requests, 3 Extension → Host requests (UI publish/request,
-	// content read), 3 Host → Extension notifications, 2 provider stream
-	// notifications.
-	if len(frozenRegistry) != 16 || hostReq != 8 || extReq != 3 || hostNotif != 3 || extNotif != 2 {
-		return fmt.Errorf("registry count = total=%d hostReq=%d extReq=%d hostNotif=%d extNotif=%d, want 16/8/3/3/2",
+	// Extension requests, 8 Extension → Host requests (UI publish/request,
+	// content read, five browser methods), 3 Host → Extension notifications,
+	// 2 provider stream notifications. Browser methods are additive.
+	if len(frozenRegistry) != 21 || hostReq != 8 || extReq != 8 || hostNotif != 3 || extNotif != 2 {
+		return fmt.Errorf("registry count = total=%d hostReq=%d extReq=%d hostNotif=%d extNotif=%d, want 21/8/8/3/2",
 			len(frozenRegistry), hostReq, extReq, hostNotif, extNotif)
 	}
 	return nil

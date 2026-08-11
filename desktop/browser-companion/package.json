@@ -1,0 +1,29 @@
+{
+  "name": "reasonix-browser-companion",
+  "version": "43.3.0-r1",
+  "private": true,
+  "description": "Reasonix built-in browser: an isolated Electron/Chromium companion speaking the reasonix.browser.ipc.v1 frame protocol over stdin/stdout",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
+    "start": "electron .",
+    "typecheck": "tsc --noEmit",
+    "test": "tsc -p tsconfig.test.json && node --test dist-test/__tests__/protocol.test.js",
+    "test:integration": "pnpm build && node scripts/run-integration.cjs",
+    "test:performance": "pnpm build && node scripts/run-performance.cjs",
+    "package:component": "pnpm build && node scripts/package-component.mjs"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron"
+    ]
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "electron": "43.3.0",
+    "typescript": "5.9.2"
+  }
+}

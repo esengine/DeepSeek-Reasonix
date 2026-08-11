@@ -431,6 +431,15 @@ export interface AppBindings {
   RevealWorkspacePathForTab(tabID: string, rel: string): Promise<void>;
   RevealPath(path: string): Promise<void>;
   OpenLocalPath(path: string): Promise<void>;
+  OpenBrowserURL(tabID: string, url: string, disposition: string): Promise<void>;
+  OpenBrowserWindow(tabID: string): Promise<void>;
+  GetBrowserStatus(): Promise<BrowserStatusView>;
+  GetBrowserSettings(): Promise<BrowserSettingsView>;
+  UpdateBrowserSettings(patch: BrowserSettingsPatch): Promise<void>;
+  ClearBrowserData(request: BrowserDataClearRequest): Promise<string[]>;
+  ListBrowserSiteGrants(): Promise<BrowserSiteGrantsView>;
+  RevokeBrowserSiteGrant(origin: string): Promise<void>;
+  InstallOrRepairBrowserComponent(): Promise<void>;
   SavePastedImage(dataUrl: string): Promise<string>;
   SaveClipboardImage(): Promise<string>;
   SavePastedFile(name: string, dataUrl: string): Promise<string>;
@@ -707,6 +716,53 @@ function realApp(): AppBindings | undefined {
 }
 
 let mockSingleton: AppBindings | null = null;
+// --- built-in browser surface ----------------------------------------------
+
+export type BrowserCoordinatorState =
+  | "stopped"
+  | "starting"
+  | "ready"
+  | "crashed"
+  | "disabled";
+
+export interface BrowserStatusView {
+  state: BrowserCoordinatorState;
+  componentVersion: string;
+  protocolVersion: number;
+  electronVersion: string;
+  chromiumVersion: string;
+  pid: number;
+  lastError?: string;
+  recoveryAvailable: boolean;
+  retryable: boolean;
+  installedComponent?: string;
+  pendingRequests: number;
+  capabilities: string[];
+  agentBrowserToolEnabled: boolean;
+}
+
+export interface BrowserSettingsView {
+  defaultOpenMode: string; // "builtin" | "system"
+}
+
+export interface BrowserSettingsPatch {
+  defaultOpenMode?: string;
+}
+
+export interface BrowserDataClearRequest {
+  scopes: string[];
+}
+
+export interface BrowserSiteGrant {
+  origin: string;
+  grantedAt: string;
+  capabilities: string[];
+}
+
+export interface BrowserSiteGrantsView {
+  grants: BrowserSiteGrant[];
+}
+
 function getMock(): AppBindings {
   if (!mockSingleton) mockSingleton = makeMockApp();
   return mockSingleton;
@@ -4053,6 +4109,47 @@ function makeMockApp(): AppBindings {
     },
     async OpenWorkspacePath(rel: string) {
       console.info("mock OpenWorkspacePath", rel);
+    },
+    async OpenBrowserURL(tabID: string, url: string, disposition: string) {
+      console.info("mock OpenBrowserURL", { tabID, url, disposition });
+      if (disposition !== "background") window.open(url, "_blank", "noopener");
+    },
+    async OpenBrowserWindow(tabID: string) {
+      console.info("mock OpenBrowserWindow", tabID);
+    },
+    async GetBrowserStatus(): Promise<BrowserStatusView> {
+      return {
+        state: "stopped",
+        componentVersion: "",
+        protocolVersion: 1,
+        electronVersion: "",
+        chromiumVersion: "",
+        pid: 0,
+        recoveryAvailable: true,
+        retryable: false,
+        pendingRequests: 0,
+        capabilities: [],
+        agentBrowserToolEnabled: false,
+      };
+    },
+    async GetBrowserSettings(): Promise<BrowserSettingsView> {
+      return { defaultOpenMode: "builtin" };
+    },
+    async UpdateBrowserSettings(patch: BrowserSettingsPatch) {
+      console.info("mock UpdateBrowserSettings", patch);
+    },
+    async ClearBrowserData(request: BrowserDataClearRequest): Promise<string[]> {
+      console.info("mock ClearBrowserData", request);
+      return [];
+    },
+    async ListBrowserSiteGrants(): Promise<BrowserSiteGrantsView> {
+      return { grants: [] };
+    },
+    async RevokeBrowserSiteGrant(origin: string) {
+      console.info("mock RevokeBrowserSiteGrant", origin);
+    },
+    async InstallOrRepairBrowserComponent() {
+      console.info("mock InstallOrRepairBrowserComponent");
     },
     async OpenLocalPath(path: string) {
       console.info("mock OpenLocalPath", path);

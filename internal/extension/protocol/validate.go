@@ -30,19 +30,22 @@ var sha256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 // The strict decoder rejects anything outside these sets; the schema
 // generator emits them as JSON Schema enums.
 var enumTypes = map[reflect.Type][]string{
-	reflect.TypeFor[Direction]():         values(DirectionHostToExtensionRequest, DirectionExtensionToHostRequest, DirectionHostToExtensionNotification, DirectionExtensionToHostNotification),
-	reflect.TypeFor[OperationClass]():    values(ClassLifecycle, ClassIntercept, ClassObservation, ClassProvider, ClassUI, ClassContent),
-	reflect.TypeFor[InterceptEvent]():    interceptEventValues(),
-	reflect.TypeFor[InterceptDecision](): values(DecisionContinue, DecisionBlock, DecisionReplace, DecisionAllow, DecisionDeny),
-	reflect.TypeFor[UIHostKind]():        values(UIHostTUI, UIHostDesktop, UIHostACP, UIHostHeadless),
-	reflect.TypeFor[UISurfaceKind]():     values(UISurfaceStatus, UISurfaceCard, UISurfaceForm, UISurfaceNotification),
-	reflect.TypeFor[UIRequestKind]():     values(UIRequestConfirm, UIRequestInput, UIRequestSelect, UIRequestMultiselect),
-	reflect.TypeFor[UIFieldKind]():       values(UIFieldConfirm, UIFieldInput, UIFieldSelect, UIFieldMultiselect),
-	reflect.TypeFor[UISeverity]():        values(UISeverityInfo, UISeverityWarn, UISeverityError),
-	reflect.TypeFor[ProviderRole]():      values(ProviderRoleSystem, ProviderRoleUser, ProviderRoleAssistant, ProviderRoleTool),
-	reflect.TypeFor[ProviderChunkType](): values(ChunkText, ChunkReasoning, ChunkToolCallStart, ChunkToolCallDelta, ChunkToolCall, ChunkUsage, ChunkDone, ChunkError),
-	reflect.TypeFor[ProviderErrorCode](): values(ProviderFailed, ProviderInterrupted),
-	reflect.TypeFor[ContentEncoding]():   values(ContentUTF8),
+	reflect.TypeFor[Direction]():             values(DirectionHostToExtensionRequest, DirectionExtensionToHostRequest, DirectionHostToExtensionNotification, DirectionExtensionToHostNotification),
+	reflect.TypeFor[OperationClass]():        values(ClassLifecycle, ClassIntercept, ClassObservation, ClassProvider, ClassUI, ClassContent, ClassBrowser),
+	reflect.TypeFor[BrowserTabDisposition](): values(BrowserDispositionForeground, BrowserDispositionBackground),
+	reflect.TypeFor[BrowserWaitUntil]():      values(BrowserWaitLoad, BrowserWaitNetworkIdle, BrowserWaitDOMContentLoaded, BrowserWaitNavigation),
+	reflect.TypeFor[BrowserActAction]():      values(BrowserActClick, BrowserActHover, BrowserActScroll, BrowserActType, BrowserActPress, BrowserActSelect),
+	reflect.TypeFor[InterceptEvent]():        interceptEventValues(),
+	reflect.TypeFor[InterceptDecision]():     values(DecisionContinue, DecisionBlock, DecisionReplace, DecisionAllow, DecisionDeny),
+	reflect.TypeFor[UIHostKind]():            values(UIHostTUI, UIHostDesktop, UIHostACP, UIHostHeadless),
+	reflect.TypeFor[UISurfaceKind]():         values(UISurfaceStatus, UISurfaceCard, UISurfaceForm, UISurfaceNotification),
+	reflect.TypeFor[UIRequestKind]():         values(UIRequestConfirm, UIRequestInput, UIRequestSelect, UIRequestMultiselect),
+	reflect.TypeFor[UIFieldKind]():           values(UIFieldConfirm, UIFieldInput, UIFieldSelect, UIFieldMultiselect),
+	reflect.TypeFor[UISeverity]():            values(UISeverityInfo, UISeverityWarn, UISeverityError),
+	reflect.TypeFor[ProviderRole]():          values(ProviderRoleSystem, ProviderRoleUser, ProviderRoleAssistant, ProviderRoleTool),
+	reflect.TypeFor[ProviderChunkType]():     values(ChunkText, ChunkReasoning, ChunkToolCallStart, ChunkToolCallDelta, ChunkToolCall, ChunkUsage, ChunkDone, ChunkError),
+	reflect.TypeFor[ProviderErrorCode]():     values(ProviderFailed, ProviderInterrupted),
+	reflect.TypeFor[ContentEncoding]():       values(ContentUTF8),
 }
 
 func init() {

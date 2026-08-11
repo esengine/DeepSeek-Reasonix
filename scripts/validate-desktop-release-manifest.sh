@@ -101,6 +101,22 @@ jq -e \
 	(.platforms["linux-amd64"] | valid_asset("Reasonix-linux-amd64.tar.gz")) and
 	(.native_packages | exact_keys(["linux-amd64"])) and
 	(.native_packages["linux-amd64"] | valid_asset("Reasonix-linux-amd64.deb")) and
+	(if $legacy and (.browser_components == null)
+		then true
+		else
+			(.browser_components | exact_keys([
+				"darwin-arm64",
+				"darwin-amd64",
+				"windows-amd64",
+				"windows-arm64",
+				"linux-amd64"
+			])) and
+			(.browser_components["darwin-arm64"] | valid_asset("Reasonix-Browser-darwin-arm64.zip")) and
+			(.browser_components["darwin-amd64"] | valid_asset("Reasonix-Browser-darwin-amd64.zip")) and
+			(.browser_components["windows-amd64"] | valid_asset("Reasonix-Browser-windows-amd64.zip")) and
+			(.browser_components["windows-arm64"] | valid_asset("Reasonix-Browser-windows-arm64.zip")) and
+			(.browser_components["linux-amd64"] | valid_asset("Reasonix-Browser-linux-amd64.tar.gz"))
+	end) and
 	(if $legacy and (.downloads == null)
 		then true
 		else

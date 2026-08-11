@@ -17,26 +17,34 @@ const DomainErrorCode = -32000
 type ErrorReason string
 
 const (
-	ErrProtocolError         ErrorReason = "protocol_error"
-	ErrUnknownMethod         ErrorReason = "unknown_method"
-	ErrInvalidParams         ErrorReason = "invalid_params"
-	ErrFrameTooLarge         ErrorReason = "frame_too_large"
-	ErrContentRefExpired     ErrorReason = "content_ref_expired"
-	ErrUnsupportedVersion    ErrorReason = "unsupported_version"
-	ErrCapabilityNotDeclared ErrorReason = "capability_not_declared"
-	ErrShutdownTimeout       ErrorReason = "shutdown_timeout"
-	ErrStreamGap             ErrorReason = "stream_gap"
-	ErrStreamCancelled       ErrorReason = "stream_cancelled"
-	ErrProviderFailed        ErrorReason = "provider_failed"
-	ErrProviderInterrupted   ErrorReason = "provider_interrupted"
-	ErrInterceptTimeout      ErrorReason = "intercept_timeout"
-	ErrDependencyUnsatisfied ErrorReason = "dependency_unsatisfied"
-	ErrDependencyCycle       ErrorReason = "dependency_cycle"
-	ErrSchemaMismatch        ErrorReason = "schema_mismatch"
-	ErrActivationFailed      ErrorReason = "activation_failed"
-	ErrStaleGeneration       ErrorReason = "stale_generation"
-	ErrCleanupFailed         ErrorReason = "cleanup_failed"
-	ErrInternal              ErrorReason = "internal"
+	ErrProtocolError           ErrorReason = "protocol_error"
+	ErrUnknownMethod           ErrorReason = "unknown_method"
+	ErrInvalidParams           ErrorReason = "invalid_params"
+	ErrFrameTooLarge           ErrorReason = "frame_too_large"
+	ErrContentRefExpired       ErrorReason = "content_ref_expired"
+	ErrUnsupportedVersion      ErrorReason = "unsupported_version"
+	ErrCapabilityNotDeclared   ErrorReason = "capability_not_declared"
+	ErrShutdownTimeout         ErrorReason = "shutdown_timeout"
+	ErrStreamGap               ErrorReason = "stream_gap"
+	ErrStreamCancelled         ErrorReason = "stream_cancelled"
+	ErrProviderFailed          ErrorReason = "provider_failed"
+	ErrProviderInterrupted     ErrorReason = "provider_interrupted"
+	ErrInterceptTimeout        ErrorReason = "intercept_timeout"
+	ErrDependencyUnsatisfied   ErrorReason = "dependency_unsatisfied"
+	ErrDependencyCycle         ErrorReason = "dependency_cycle"
+	ErrSchemaMismatch          ErrorReason = "schema_mismatch"
+	ErrActivationFailed        ErrorReason = "activation_failed"
+	ErrStaleGeneration         ErrorReason = "stale_generation"
+	ErrCleanupFailed           ErrorReason = "cleanup_failed"
+	ErrBrowserUnavailable      ErrorReason = "browser_unavailable"
+	ErrBrowserTabNotFound      ErrorReason = "browser_tab_not_found"
+	ErrBrowserTabBusy          ErrorReason = "browser_tab_busy"
+	ErrBrowserStaleRef         ErrorReason = "browser_stale_ref"
+	ErrBrowserOriginMismatch   ErrorReason = "browser_origin_mismatch"
+	ErrBrowserPermissionDenied ErrorReason = "browser_permission_denied"
+	ErrBrowserTimeout          ErrorReason = "browser_timeout"
+	ErrBrowserCancelled        ErrorReason = "browser_cancelled"
+	ErrInternal                ErrorReason = "internal"
 )
 
 type errorSpec struct {
@@ -49,26 +57,34 @@ type errorSpec struct {
 // protocol change: the table is frozen into the generated schema document and
 // pinned by tests.
 var frozenErrorSpecs = map[ErrorReason]errorSpec{
-	ErrProtocolError:         {rpcwire.ErrInvalidRequest, "The extension protocol frame or envelope is invalid.", false},
-	ErrUnknownMethod:         {rpcwire.ErrMethodNotFound, "The method is not registered in Extension Protocol v2.", false},
-	ErrInvalidParams:         {rpcwire.ErrInvalidParams, "The params do not match the registered method schema.", false},
-	ErrFrameTooLarge:         {DomainErrorCode, "The frame exceeds the frozen protocol size limit.", false},
-	ErrContentRefExpired:     {DomainErrorCode, "The referenced content has expired.", true},
-	ErrUnsupportedVersion:    {DomainErrorCode, "The peer's extension protocol version is not supported.", false},
-	ErrCapabilityNotDeclared: {DomainErrorCode, "The extension used a capability its manifest did not declare.", false},
-	ErrShutdownTimeout:       {DomainErrorCode, "The extension did not shut down within the requested timeout.", true},
-	ErrStreamGap:             {DomainErrorCode, "A provider stream chunk is missing from the ordered sequence.", true},
-	ErrStreamCancelled:       {DomainErrorCode, "The provider stream was cancelled.", false},
-	ErrProviderFailed:        {DomainErrorCode, "The extension provider stream failed.", true},
-	ErrProviderInterrupted:   {DomainErrorCode, "The extension provider stream was interrupted.", true},
-	ErrInterceptTimeout:      {DomainErrorCode, "The extension did not answer an intercept within its timeout.", true},
-	ErrDependencyUnsatisfied: {DomainErrorCode, "A required dependency is missing or not version-compatible.", false},
-	ErrDependencyCycle:       {DomainErrorCode, "The dependency graph contains a required cycle.", false},
-	ErrSchemaMismatch:        {DomainErrorCode, "A capability schema hash does not match the expected pin.", false},
-	ErrActivationFailed:      {DomainErrorCode, "Component activation failed; the new generation was not published.", false},
-	ErrStaleGeneration:       {DomainErrorCode, "The message belongs to a superseded runtime generation.", false},
-	ErrCleanupFailed:         {DomainErrorCode, "Component cleanup failed while disposing scoped effects.", true},
-	ErrInternal:              {rpcwire.ErrInternal, "An internal extension protocol error occurred.", true},
+	ErrProtocolError:           {rpcwire.ErrInvalidRequest, "The extension protocol frame or envelope is invalid.", false},
+	ErrUnknownMethod:           {rpcwire.ErrMethodNotFound, "The method is not registered in Extension Protocol v2.", false},
+	ErrInvalidParams:           {rpcwire.ErrInvalidParams, "The params do not match the registered method schema.", false},
+	ErrFrameTooLarge:           {DomainErrorCode, "The frame exceeds the frozen protocol size limit.", false},
+	ErrContentRefExpired:       {DomainErrorCode, "The referenced content has expired.", true},
+	ErrUnsupportedVersion:      {DomainErrorCode, "The peer's extension protocol version is not supported.", false},
+	ErrCapabilityNotDeclared:   {DomainErrorCode, "The extension used a capability its manifest did not declare.", false},
+	ErrShutdownTimeout:         {DomainErrorCode, "The extension did not shut down within the requested timeout.", true},
+	ErrStreamGap:               {DomainErrorCode, "A provider stream chunk is missing from the ordered sequence.", true},
+	ErrStreamCancelled:         {DomainErrorCode, "The provider stream was cancelled.", false},
+	ErrProviderFailed:          {DomainErrorCode, "The extension provider stream failed.", true},
+	ErrProviderInterrupted:     {DomainErrorCode, "The extension provider stream was interrupted.", true},
+	ErrInterceptTimeout:        {DomainErrorCode, "The extension did not answer an intercept within its timeout.", true},
+	ErrDependencyUnsatisfied:   {DomainErrorCode, "A required dependency is missing or not version-compatible.", false},
+	ErrDependencyCycle:         {DomainErrorCode, "The dependency graph contains a required cycle.", false},
+	ErrSchemaMismatch:          {DomainErrorCode, "A capability schema hash does not match the expected pin.", false},
+	ErrActivationFailed:        {DomainErrorCode, "Component activation failed; the new generation was not published.", false},
+	ErrStaleGeneration:         {DomainErrorCode, "The message belongs to a superseded runtime generation.", false},
+	ErrCleanupFailed:           {DomainErrorCode, "Component cleanup failed while disposing scoped effects.", true},
+	ErrBrowserUnavailable:      {DomainErrorCode, "The browser host API is unavailable or the companion cannot start.", true},
+	ErrBrowserTabNotFound:      {DomainErrorCode, "The tab does not exist or does not belong to this chat.", false},
+	ErrBrowserTabBusy:          {DomainErrorCode, "The tab, renderer, lease, or pending request limit is exhausted.", true},
+	ErrBrowserStaleRef:         {DomainErrorCode, "The element ref is no longer valid after navigation.", false},
+	ErrBrowserOriginMismatch:   {DomainErrorCode, "The tab origin does not match the expected origin.", false},
+	ErrBrowserPermissionDenied: {DomainErrorCode, "The browser action was denied by a sensitive-field, permission, or human-input gate.", false},
+	ErrBrowserTimeout:          {DomainErrorCode, "The browser wait or action timed out.", true},
+	ErrBrowserCancelled:        {DomainErrorCode, "The browser call was cancelled by runtime drain, sidecar disconnect, or the caller.", false},
+	ErrInternal:                {rpcwire.ErrInternal, "An internal extension protocol error occurred.", true},
 }
 
 // ProtocolErrorData is the structured JSON-RPC error data for extension

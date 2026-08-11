@@ -14,7 +14,10 @@ func TestErrorTableCoversRequiredReasons(t *testing.T) {
 		ErrShutdownTimeout, ErrStreamGap, ErrStreamCancelled,
 		ErrProviderFailed, ErrProviderInterrupted, ErrInterceptTimeout,
 		ErrDependencyUnsatisfied, ErrDependencyCycle, ErrSchemaMismatch,
-		ErrActivationFailed, ErrStaleGeneration, ErrCleanupFailed, ErrInternal,
+		ErrActivationFailed, ErrStaleGeneration, ErrCleanupFailed,
+		ErrBrowserUnavailable, ErrBrowserTabNotFound, ErrBrowserTabBusy,
+		ErrBrowserStaleRef, ErrBrowserOriginMismatch, ErrBrowserPermissionDenied,
+		ErrBrowserTimeout, ErrBrowserCancelled, ErrInternal,
 	}
 	if len(frozenErrorSpecs) != len(required) {
 		t.Fatalf("frozen error table has %d entries, want %d", len(frozenErrorSpecs), len(required))

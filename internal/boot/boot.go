@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -25,6 +26,7 @@ import (
 
 	"reasonix/internal/ablation"
 	"reasonix/internal/agent"
+	"reasonix/internal/browserhost"
 	"reasonix/internal/capability"
 	"reasonix/internal/command"
 	"reasonix/internal/config"
@@ -120,6 +122,17 @@ type Options struct {
 	// so each tab loads its own config/skills/hooks without changing the process
 	// cwd — enabling concurrent multi-project sessions.
 	WorkspaceRoot string
+	// HostTools are frontend-provided tools (desktop built-in browser) with
+	// fixed schemas. They are installed in stable order for Full/Delivery
+	// sessions; Economy installs them only after connect_tool_source requests
+	// their Source. CLI, serve, and Remote Workbench never set this field.
+	HostTools []tool.HostTool
+	// BrowserHost is the current chat's restricted browser backend. Non-nil
+	// advertises reasonix/browser/companion on the dependency graph (desktop).
+	// Nil means this frontend does not support browser (CLI/Serve/ACP/TUI);
+	// browser-dependent plugins stay Inactive and are never started. Companion
+	// install/ready/crashed state does not change this field.
+	BrowserHost browserhost.Backend
 	// AutoPricingCurrency applies a frontend-resolved pricing region in memory
 	// without persisting an automatic choice.
 	AutoPricingCurrency string
@@ -1178,6 +1191,32 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		addMemoryTools()
 	}
 
+	// Host tools (frontend-provided, e.g. the desktop built-in browser) keep
+	// fixed schemas for the whole session. Full/Delivery installs them up
+	// front; Economy exposes them per source through connect_tool_source. The
+	// tool set must not depend on whether the underlying service is currently
+	// available — availability is an execution-time result.
+	hostToolsInstalled := map[string]bool{}
+	addHostTools := func(filterSource string) []string {
+		installed := []string{}
+		for _, ht := range opts.HostTools {
+			if filterSource != "" && ht.Source != filterSource {
+				continue
+			}
+			if hostToolsInstalled[ht.Name] {
+				continue
+			}
+			reg.Add(tool.NewHostTool(ht))
+			hostToolsInstalled[ht.Name] = true
+			installed = append(installed, ht.Name)
+		}
+		sort.Strings(installed)
+		return installed
+	}
+	if !tokenEconomy {
+		addHostTools("")
+	}
+
 	// The `ask` tool puts structured multiple-choice questions to the user. It
 	// reaches them through the Asker on the call context, which interactive
 	// frontends wire to the controller (EnableInteractiveApproval); a headless run
@@ -1603,6 +1642,13 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 			return "enabled " + strings.Join(installed, ", ") + "."
 		}
 		reg.Add(&toolSourceConnector{
+			browser: func(context.Context) (string, error) {
+				names := addHostTools("browser")
+				if len(names) == 0 {
+					return "browser tools are not available in this session.", nil
+				}
+				return "enabled " + strings.Join(names, ", ") + ".", nil
+			},
 			docs: func(context.Context) (string, error) {
 				return addDocsTool(), nil
 			},
@@ -2194,7 +2240,12 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		Registry:                reg,
 		ImplicitSkillInvocation: implicitSkillInvocation,
 	}
-	return finalizeBuildResult(&BuildResult{Controller: ctrl, Snapshot: snap, Runtime: runtimeSet, Owner: owner, Extensions: extensionMgr, Dispatcher: extensionDispatcher, ExtensionUI: extUIHub, ProviderResolver: providerResolver, BaseProviderResolver: baseResolver, Assembly: assembly}, !opts.deferPublish), nil
+	return finalizeBuildResult(&BuildResult{
+		Controller: ctrl, Snapshot: snap, Runtime: runtimeSet, Owner: owner,
+		Extensions: extensionMgr, Dispatcher: extensionDispatcher, ExtensionUI: extUIHub,
+		ProviderResolver: providerResolver, BaseProviderResolver: baseResolver, Assembly: assembly,
+		HostTools: opts.HostTools, BrowserHost: opts.BrowserHost,
+	}, !opts.deferPublish), nil
 }
 
 // effectivePlannerModel centralizes planner precedence. The explicit ACP hard

@@ -38,6 +38,7 @@ WINDOWS_CLINAME="reasonix-cli" # Windows cannot store Reasonix.exe and reasonix.
 GUARDNAME="reasonix-guard"
 LAUNCHERNAME="reasonix-launcher"
 windows_resource_tool_dir=""
+browser_component_build_root="$ROOT/desktop/build/browser-components"
 windows_host_include=""
 
 # desktop/ is a nested Go module, so the Go toolchain cannot discover the
@@ -96,6 +97,35 @@ build_cli() {
 	else
 		(cd "$ROOT" && GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w $cli_identity_ldflags" -o "$cli_out" ./cmd/reasonix)
 	fi
+}
+
+prepare_browser_component() {
+	local target_arch="$1"
+	local electron_arch="$target_arch"
+	[ "$electron_arch" = "amd64" ] && electron_arch="x64"
+	local component_root="$browser_component_build_root/$target_arch/browser-component"
+	local companion="$ROOT/desktop/browser-companion"
+	local electron_dist="$companion/node_modules/electron/dist"
+	local host_arch
+	host_arch=$(node -p 'process.arch')
+
+	if [ "$host_arch" != "$electron_arch" ]; then
+		local electron_version archive_name download_dir expected
+		electron_version=$(node -p 'require(process.argv[1]).devDependencies.electron' "$companion/package.json")
+		archive_name="electron-v${electron_version}-${os}-${electron_arch}.zip"
+		download_dir=$(mktemp -d)
+		curl -fsSL "https://github.com/electron/electron/releases/download/v${electron_version}/SHASUMS256.txt" -o "$download_dir/SHASUMS256.txt"
+		expected=$(awk -v name="$archive_name" '$2 == name || $2 == "*" name {print $1}' "$download_dir/SHASUMS256.txt")
+		[ -n "$expected" ] || { echo "Electron checksum missing for $archive_name" >&2; exit 1; }
+		curl -fL "https://github.com/electron/electron/releases/download/v${electron_version}/${archive_name}" -o "$download_dir/$archive_name"
+		echo "$expected  $download_dir/$archive_name" | shasum -a 256 -c -
+		mkdir -p "$download_dir/dist"
+		unzip -q "$download_dir/$archive_name" -d "$download_dir/dist"
+		electron_dist="$download_dir/dist"
+	fi
+
+	echo "==> package Reasonix Browser companion ($os/$target_arch)"
+	(cd "$companion" && pnpm package:component -- "$electron_dist" "$component_root")
 }
 
 stamp_windows_executable() {
@@ -167,6 +197,17 @@ build_args+=(-platform "$PLATFORM" -ldflags "$ldflags")
 
 echo "==> wails build ${build_args[*]}"
 wails build "${build_args[@]}"
+
+# Build the Chromium companion independently from the Wails shell. The
+# component is published as a minisign-authenticated on-demand archive, so the
+# ordinary desktop download and idle startup remain unchanged in size/cost.
+(cd "$ROOT/desktop/browser-companion" && pnpm install --frozen-lockfile)
+if [ "$os" = darwin ] && [ "$arch" = universal ]; then
+	prepare_browser_component arm64
+	prepare_browser_component amd64
+else
+	prepare_browser_component "$arch"
+fi
 if [ "$os" != windows ]; then
 	# Linux still ships a one-shot migrator named reasonix-guard in the portable
 	# tarball so 1.18–1.19.1 updaters can hand off. macOS does not bundle Guard.
@@ -241,6 +282,35 @@ darwin)
 		codesign --force --deep -s - "$app"
 	fi
 
+	# Sign/notarize each independently downloadable companion. It uses the same
+	# Developer ID identity and entitlements as the desktop shell; fork builds
+	# remain ad-hoc signed and clearly unnotarized.
+	component_arches=("$arch")
+	[ "$arch" = universal ] && component_arches=(arm64 amd64)
+	for component_arch in "${component_arches[@]}"; do
+		component_root="$browser_component_build_root/$component_arch/browser-component"
+		component_app="$component_root/$(node -p 'require(process.argv[1]).version' "$ROOT/desktop/browser-companion/package.json")/browser/Reasonix Browser.app"
+		/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier io.reasonix.browser" "$component_app/Contents/Info.plist"
+		/usr/libexec/PlistBuddy -c "Set :CFBundleName Reasonix Browser" "$component_app/Contents/Info.plist"
+		/usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Reasonix Browser" "$component_app/Contents/Info.plist"
+		component_zip="$ROOT/dist/Reasonix-Browser-darwin-${component_arch}.zip"
+		if [ "${HAS_APPLE_CERT:-}" = "true" ]; then
+			codesign --force --deep --timestamp --options runtime \
+				--entitlements "$ROOT/desktop/build/darwin/entitlements.plist" \
+				-s "$identity" "$component_app"
+		else
+			codesign --force --deep -s - "$component_app"
+		fi
+		(cd "$component_root" && ditto -c -k --sequesterRsrc . "$component_zip")
+		if [ "${HAS_APPLE_CERT:-}" = "true" ]; then
+			xcrun notarytool submit "$component_zip" \
+				--key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY_ID" \
+				--issuer "$APPLE_API_ISSUER_ID" --wait
+			xcrun stapler staple "$component_app"
+			(cd "$component_root" && ditto -c -k --sequesterRsrc . "$component_zip")
+		fi
+	done
+
 	if [ "$arch" = universal ]; then
 		# One universal .app covers Intel + Apple Silicon; publish it under both
 		# manifest keys so the updater's darwin-arm64/darwin-amd64 lookup finds it
@@ -284,6 +354,15 @@ darwin)
 	rm -rf "$staging"
 	;;
 windows)
+	component_root="$browser_component_build_root/$arch/browser-component"
+	component_zip="$ROOT/dist/Reasonix-Browser-windows-${arch}.zip"
+	component_root_win="$component_root"
+	component_zip_win="$component_zip"
+	if command -v cygpath >/dev/null 2>&1; then
+		component_root_win="$(cygpath -w "$component_root")"
+		component_zip_win="$(cygpath -w "$component_zip")"
+	fi
+	powershell.exe -NoProfile -Command "Compress-Archive -Force -Path '$component_root_win\\*' -DestinationPath '$component_zip_win'"
 	# Keep one canonical flat payload for SignPath. The release workflow signs
 	# these files, then calls package-windows-desktop.sh again so both the
 	# portable archive and the files embedded by NSIS carry Authenticode.
@@ -299,6 +378,8 @@ windows)
 	"$ROOT/scripts/package-windows-desktop.sh" "$arch" "$payload_dir"
 	;;
 linux)
+	component_root="$browser_component_build_root/$arch/browser-component"
+	tar -czf "$ROOT/dist/Reasonix-Browser-linux-${arch}.tar.gz" -C "$component_root" .
 	for desktop_contract in \
 		'Exec=reasonix-launcher' \
 		'Icon=reasonix-desktop' \

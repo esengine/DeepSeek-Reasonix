@@ -22,15 +22,61 @@ Controller = 已发布 generation 的消费者（admission 绑定 RuntimeOwner�
 
 组件状态：`Inactive → Preparing → Active → Draining → Inactive`（或 `Failed`）。
 
+### Inactive 依赖语义
+
+缺失非 optional 依赖不再使整个 runtime 构建失败，而是将 consumer 标为
+**Inactive**，给出确定性原因，并从 `ActivateOrder` 与 sidecar 启动集合中排除：
+
+```text
+plugin/x state=Inactive
+  - missing required capability reasonix/browser/companion
+  - browser host is unavailable on this frontend
+```
+
+optional 依赖缺失只记诊断。活跃组件之间的重复 provider、非法 capability 与
+required cycle 仍是硬错误。`runtime.required:true` 只在依赖满足后使
+启动/握手失败致命；缺少宿主 capability 不会阻断会话启动。
+
+RuntimePlan 活跃性迁移：
+
+- Inactive → Active = Added（启动 client）
+- Active → Inactive = Removed（drain client）
+- 两侧均 Inactive = Unchanged（永不启动）
+
+### 宿主浏览器 capability
+
+当 `boot.Options.BrowserHost != nil`（仅本地桌面）时，合成 `host` 组件提供：
+
+```json
+{
+  "namespace": "reasonix",
+  "kind": "browser",
+  "id": "companion",
+  "version": "1.0.0",
+  "schemaHash": "<browser RPC DTO hash>"
+}
+```
+
+这表示 API 支持，不表示 Companion 已安装或 ready。CLI / Serve / ACP / TUI
+不设置 `BrowserHost`，依赖浏览器的插件保持 Inactive。Companion 的
+stopped/ready/crashed 状态不改变 capability、工具 schema 或 CacheHash。
+
+按 generation 作用域的 `browserhost.Binding` 为每个 sidecar 包装 tab 绑定的
+backend。调用要求 `owner.Gate.Published() == generation`；Dispose 只取消插件
+浏览器在途调用，不停止 Chromium 或共享登录 Session。插件的 `tab/open` 与
+`tab/act` 记录不可逆 receipt，且不保存 URL/文本/页面内容。
+
 ## 重载
 
 - 优先 `boot.RebuildFrom(previousBuildResult, opts)`。
+- `RebuildFrom` 在调用方未覆盖时继承上一代的 `HostTools` / `BrowserHost`；桌面
+  始终显式传入当前 tab 绑定。
 - no-op / interceptor / UI / provider / MCP-only 走 **真子图 patch**（不进 `BuildRuntime`）；`ReusedController` 时调用方不得 `Close` 旧指针。
 - Provider/MCP 子图：`WithLiveContributions` 刷新 interceptor/provider/UI 目录；**system prompt + tool schemas + CacheHash 保持稳定**（只滚 backend）。工具 schema 改名仍需全量 rebuild。
 - 窄路径为 **stage → ready → commit**（失败原子）：
   - **Stage**：启动/收养 sidecar，构建下一代 dispatcher/resolver；**不**安装 stream router，也**不**对 UI hub 调用 `BindGeneration`。
   - **Ready**：等待 sidecar 就绪。
-  - **Commit**：安装 stream router、绑定 UI generation、替换 controller 绑定，再 publish。
+  - **Commit**：安装 stream router、绑定 UI generation、交换 generation 作用域的 browser handler（含 adopted client）、替换 controller 绑定，再 publish。
   - stage/ready/commit 任一步失败：`RollbackPlanStart` 回挂 Unchanged 客户端；stage 前的 stream router 继续消费 `stream/chunk` / `stream/end`。
 - **Stage 期间的 UI**：在 commit 之前仍绑定旧 generation。sidecar 在 handshake/ready 期间若用**下一代** generation 发 `host/ui/publish` 或 `host/ui/request`，会被当作 stale **丢弃**。协议约定：在 runtime generation 发布前，不要依赖 UI 可见性。
 - 迁移成功后：**发布** 新 generation，再 **排空** 旧 sidecar。

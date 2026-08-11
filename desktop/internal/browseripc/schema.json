@@ -1,0 +1,977 @@
+{
+  "format": "reasonix.browser.ipc.v1",
+  "protocolVersion": 1,
+  "limits": {
+    "frameBytes": 16777216,
+    "pendingRequests": 64,
+    "responseTimeoutMs": 30000,
+    "shutdownGraceMs": 3000,
+    "maxTextChars": 50000,
+    "maxScreenshotBytes": 8388608,
+    "maxRequestIdBytes": 64,
+    "maxOwnerIdBytes": 128,
+    "maxMethodBytes": 64,
+    "maxTabIdBytes": 64,
+    "maxOriginBytes": 1024,
+    "maxUrlBytes": 8192
+  },
+  "errorCodes": [
+    "cancelled",
+    "component_missing",
+    "crashed",
+    "frame_too_large",
+    "internal",
+    "invalid_params",
+    "not_ready",
+    "owner_not_found",
+    "permission_denied",
+    "protocol_mismatch",
+    "stale_ref",
+    "tab_busy",
+    "tab_not_found",
+    "timeout",
+    "unknown_method",
+    "unsupported",
+    "user_takeover_required",
+    "user_took_control"
+  ],
+  "methods": [
+    {
+      "name": "hello",
+      "direction": "client_request",
+      "params": {
+        "type": "object",
+        "properties": {
+          "hostName": {
+            "type": "string"
+          },
+          "hostVersion": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "hostName",
+          "hostVersion"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "protocolVersion": {
+            "type": "integer"
+          },
+          "componentVersion": {
+            "type": "string"
+          },
+          "electronVersion": {
+            "type": "string"
+          },
+          "chromiumVersion": {
+            "type": "string"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "capabilities": {
+            "type": "object",
+            "properties": {
+              "maxProtocolVersion": {
+                "type": "integer"
+              },
+              "methods": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "events": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "maxProtocolVersion",
+              "methods",
+              "events"
+            ]
+          }
+        },
+        "required": [
+          "protocolVersion",
+          "componentVersion",
+          "electronVersion",
+          "chromiumVersion",
+          "pid",
+          "capabilities"
+        ]
+      }
+    },
+    {
+      "name": "request.cancel",
+      "direction": "client_request",
+      "params": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "requestId"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "window.open",
+      "direction": "client_request",
+      "params": {
+        "type": "object",
+        "properties": {
+          "ownerId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ownerId"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "window.focus",
+      "direction": "client_request",
+      "params": {
+        "type": "object",
+        "properties": {
+          "ownerId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ownerId"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "window.close",
+      "direction": "client_request",
+      "params": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "result": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "owner.activate",
+      "direction": "client_request",
+      "params": {
+        "type": "object",
+        "properties": {
+          "ownerId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ownerId"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "owner.remove",
+      "direction": "client_request",
+      "params": {
+        "type": "object",
+        "properties": {
+          "ownerId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ownerId"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "tab.open",
+      "direction": "client_request",
+      "params": {
+        "type": "object",
+        "properties": {
+          "ownerId": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "disposition": {
+            "type": "string",
+            "enum": [
+              "foreground",
+              "background"
+            ]
+          },
+          "fromAgent": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ownerId",
+          "url",
+          "disposition"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "generation": {
+            "type": "integer"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "tabId",
+          "url",
+          "title",
+          "generation",
+          "active"
+        ]
+      }
+    },
+    {
+      "name": "tab.list",
+      "direction": "client_request",
+      "params": {
+        "type": "object",
+        "properties": {
+          "ownerId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ownerId"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "tabs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tabId": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "active": {
+                  "type": "boolean"
+                },
+                "generation": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "tabId",
+                "url",
+                "title",
+                "active",
+                "generation"
+              ]
+            }
+          }
+        },
+        "required": [
+          "tabs"
+        ]
+      }
+    },
+    {
+      "name": "tab.activate",
+      "direction": "client_request",
+      "params": {
+        "type": "object",
+        "properties": {
+          "ownerId": {
+            "type": "string"
+          },
+          "tabId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ownerId",
+          "tabId"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "tab.close",
+      "direction": "client_request",
+      "params": {
+        "type": "object",
+        "properties": {
+          "ownerId": {
+            "type": "string"
+          },
+          "tabId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ownerId",
+          "tabId"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "tab.navigate",
+      "direction": "client_request",
+      "params": {
+        "type": "object",
+        "properties": {
+          "ownerId": {
+            "type": "string"
+          },
+          "tabId": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ownerId",
+          "tabId",
+          "url"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "generation": {
+            "type": "integer"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "tabId",
+          "url",
+          "title",
+          "generation",
+          "active"
+        ]
+      }
+    },
+    {
+      "name": "tab.snapshot",
+      "direction": "client_request",
+      "params": {
+        "type": "object",
+        "properties": {
+          "ownerId": {
+            "type": "string"
+          },
+          "tabId": {
+            "type": "string"
+          },
+          "maxChars": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ownerId",
+          "tabId"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "generation": {
+            "type": "integer"
+          },
+          "snapshot": {
+            "type": "object",
+            "properties": {
+              "tree": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "tree",
+              "text",
+              "truncated"
+            ]
+          }
+        },
+        "required": [
+          "tabId",
+          "url",
+          "title",
+          "generation",
+          "snapshot"
+        ]
+      }
+    },
+    {
+      "name": "tab.screenshot",
+      "direction": "client_request",
+      "params": {
+        "type": "object",
+        "properties": {
+          "ownerId": {
+            "type": "string"
+          },
+          "tabId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ownerId",
+          "tabId"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "generation": {
+            "type": "integer"
+          },
+          "width": {
+            "type": "integer"
+          },
+          "height": {
+            "type": "integer"
+          },
+          "imageDataUrl": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tabId",
+          "url",
+          "title",
+          "generation",
+          "width",
+          "height",
+          "imageDataUrl"
+        ]
+      }
+    },
+    {
+      "name": "tab.wait",
+      "direction": "client_request",
+      "params": {
+        "type": "object",
+        "properties": {
+          "ownerId": {
+            "type": "string"
+          },
+          "tabId": {
+            "type": "string"
+          },
+          "waitUntil": {
+            "type": "string",
+            "enum": [
+              "load",
+              "network_idle",
+              "dom_content_loaded",
+              "navigation"
+            ]
+          },
+          "timeoutMs": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ownerId",
+          "tabId",
+          "waitUntil"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "generation": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tabId",
+          "url",
+          "title",
+          "generation"
+        ]
+      }
+    },
+    {
+      "name": "tab.act",
+      "direction": "client_request",
+      "params": {
+        "type": "object",
+        "properties": {
+          "ownerId": {
+            "type": "string"
+          },
+          "tabId": {
+            "type": "string"
+          },
+          "expectedOrigin": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "click",
+              "hover",
+              "scroll",
+              "type",
+              "press",
+              "select"
+            ]
+          },
+          "ref": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "delta": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ownerId",
+          "tabId",
+          "action"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "tabId": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "generation": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tabId",
+          "url",
+          "title",
+          "generation"
+        ]
+      }
+    },
+    {
+      "name": "data.clear",
+      "direction": "client_request",
+      "params": {
+        "type": "object",
+        "properties": {
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "history",
+                "cookies",
+                "cache",
+                "downloads",
+                "all"
+              ]
+            }
+          }
+        },
+        "required": [
+          "scopes"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "cleared": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "cleared"
+        ]
+      }
+    },
+    {
+      "name": "permissions.list",
+      "direction": "client_request",
+      "params": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "grants": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "origin": {
+                  "type": "string"
+                },
+                "grantedAt": {
+                  "type": "string"
+                },
+                "capabilities": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "origin",
+                "grantedAt",
+                "capabilities"
+              ]
+            }
+          }
+        },
+        "required": [
+          "grants"
+        ]
+      }
+    },
+    {
+      "name": "permissions.revoke",
+      "direction": "client_request",
+      "params": {
+        "type": "object",
+        "properties": {
+          "origin": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "origin"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    }
+  ],
+  "events": [
+    {
+      "name": "tab.changed",
+      "data": {
+        "type": "object",
+        "properties": {
+          "ownerId": {
+            "type": "string"
+          },
+          "tabId": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "generation": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ownerId",
+          "tabId",
+          "url",
+          "title",
+          "active",
+          "generation"
+        ]
+      }
+    },
+    {
+      "name": "navigation",
+      "data": {
+        "type": "object",
+        "properties": {
+          "ownerId": {
+            "type": "string"
+          },
+          "tabId": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "started",
+              "committed",
+              "failed"
+            ]
+          }
+        },
+        "required": [
+          "ownerId",
+          "tabId",
+          "url",
+          "title",
+          "state"
+        ]
+      }
+    },
+    {
+      "name": "download",
+      "data": {
+        "type": "object",
+        "properties": {
+          "ownerId": {
+            "type": "string"
+          },
+          "tabId": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "mime": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "started",
+              "completed",
+              "cancelled",
+              "failed"
+            ]
+          }
+        },
+        "required": [
+          "ownerId",
+          "tabId",
+          "filename",
+          "mime",
+          "state"
+        ]
+      }
+    },
+    {
+      "name": "permission.request",
+      "data": {
+        "type": "object",
+        "properties": {
+          "ownerId": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "capability": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ownerId",
+          "origin",
+          "capability"
+        ]
+      }
+    },
+    {
+      "name": "agent.takeover",
+      "data": {
+        "type": "object",
+        "properties": {
+          "ownerId": {
+            "type": "string"
+          },
+          "tabId": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "user",
+              "permission",
+              "sensitive_field"
+            ]
+          }
+        },
+        "required": [
+          "ownerId",
+          "tabId",
+          "reason"
+        ]
+      }
+    },
+    {
+      "name": "renderer.crash",
+      "data": {
+        "type": "object",
+        "properties": {
+          "ownerId": {
+            "type": "string"
+          },
+          "tabId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ownerId",
+          "tabId"
+        ]
+      }
+    },
+    {
+      "name": "cdp.detach",
+      "data": {
+        "type": "object",
+        "properties": {
+          "ownerId": {
+            "type": "string"
+          },
+          "tabId": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ownerId",
+          "tabId",
+          "reason"
+        ]
+      }
+    }
+  ]
+}

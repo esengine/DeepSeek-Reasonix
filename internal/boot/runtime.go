@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"reasonix/internal/browserhost"
 	"reasonix/internal/command"
 	"reasonix/internal/control"
 	"reasonix/internal/extension"
@@ -73,6 +74,10 @@ type BuildResult struct {
 	// controller pointer (no control.New / BuildRuntime). Callers must not
 	// Close the "old" controller when it is the same pointer as Controller.
 	ReusedController bool
+	// HostTools and BrowserHost are the host services this generation was
+	// built with. RebuildFrom inherits them when the caller does not override.
+	HostTools   []tool.HostTool
+	BrowserHost browserhost.Backend
 }
 
 // runtimeGeneration is the process-wide build generation counter. The first
