@@ -1674,10 +1674,17 @@ function applyEvent(s: State, e: WireEvent): State {
       const requestTokens = updateContextGauge ? (hasRequestContext ? (e.usage?.contextCompletionTokens ?? 0) : (e.usage?.completionTokens ?? 0)) : 0;
       const lastRequestTps = updateContextGauge ? (requestTokens > 0 && requestModelMs >= 500 ? requestTokens / (requestModelMs / 1000) : null) : s.lastRequestTps;
       // Context* is the latest sampling attempt; other token fields are billable aggregates.
+      // The context gauge must measure what the compaction trigger measures: the
+      // prompt that the next request sends. Counting the last turn's completion
+      // tokens here inflated the displayed fill (a 25K output round read as 25K
+      // of "used context"), so the gauge showed e.g. 90% while the trigger still
+      // sat below compact_ratio — the compaction never fired and the session ran
+      // into a real overflow. Completion belongs in the output metrics, not the
+      // occupancy gauge.
       let used = settled.context.used;
       if (e.usage && settled.context.window && updateContextGauge) used = hasRequestContext
-        ? (e.usage.contextPromptTokens ?? 0) + (e.usage.contextCompletionTokens ?? 0)
-        : (e.usage.promptTokens ?? 0) + (e.usage.completionTokens ?? 0);
+        ? (e.usage.contextPromptTokens ?? 0)
+        : (e.usage.promptTokens ?? 0);
       const turnTokens = settled.turnTokens + (e.usage?.completionTokens ?? 0);
       const turnOutputTokens = updateContextGauge
         ? settled.turnOutputTokens + (e.usage?.completionTokens ?? 0)

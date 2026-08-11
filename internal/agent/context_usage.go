@@ -16,6 +16,14 @@ type contextUsage struct {
 // gauge fed from the last turn's usage instead lags a turn, counts completion
 // tokens the trigger ignores, and reads zero on a rebound session — which is
 // how a session displays 8% while it is compacting.
+//
+// The gauge must use the exact same estimator as the trigger
+// (estimatedVisibleRequestTokens: messages + role projection + tool schemas).
+// The message-only estimator (estimatedPromptTokens) under-reported the fill
+// by the tool schemas' token cost, so the gauge could sit below compact_ratio
+// while the trigger had already crossed it — and the desktop gauge (which
+// additionally counted the last turn's completion tokens) showed the opposite
+// skew. One estimator, one number, everywhere the UI reads context pressure.
 func (a *Agent) ContextUsedTokens() int {
 	if a == nil {
 		return 0
@@ -33,7 +41,7 @@ func (a *Agent) ContextUsedTokens() int {
 		cached.calibration == calibration {
 		return cached.tokens
 	}
-	tokens := a.estimatedPromptTokens(a.modelVisibleMessages())
+	tokens := a.estimatedVisibleRequestTokens(a.modelVisibleMessages())
 	a.contextUsage.Store(&contextUsage{
 		transcriptVersion: transcriptVersion,
 		projectionVersion: projectionVersion,
