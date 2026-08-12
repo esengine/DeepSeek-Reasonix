@@ -513,8 +513,10 @@ func (c *Catalog) ListTopics(ctx context.Context, req TopicPageRequest) (TopicPa
 		if err != nil {
 			return out, err
 		}
-		rawCount := 0
-		var lastScanned TopicRecord
+		// Drain the page before hydrating sessions: an open cursor holds a
+		// connection, and listTopicSessions needs a second one, so nesting them
+		// deadlocks whenever the pool is saturated (always in memory mode).
+		scanned := []TopicRecord{}
 		for rows.Next() {
 			var item TopicRecord
 			if err := rows.Scan(&item.Scope, &item.WorkspaceRoot, &item.TopicID, &item.Title,
@@ -523,13 +525,20 @@ func (c *Catalog) ListTopics(ctx context.Context, req TopicPageRequest) (TopicPa
 				_ = rows.Close()
 				return out, err
 			}
-			rawCount++
-			lastScanned = item
+			scanned = append(scanned, item)
+		}
+		rowsErr := rows.Err()
+		_ = rows.Close()
+		if rowsErr != nil {
+			return out, rowsErr
+		}
+		rawCount := len(scanned)
+		overflow := false
+		for _, item := range scanned {
 			sessions, err := c.listTopicSessions(ctx, TopicKey{
 				Scope: item.Scope, WorkspaceRoot: item.WorkspaceRoot, TopicID: item.TopicID,
 			})
 			if err != nil {
-				_ = rows.Close()
 				return TopicPage{Items: []TopicRecord{}, Revision: out.Revision}, err
 			}
 			if len(sessions) == 0 {
@@ -538,17 +547,14 @@ func (c *Catalog) ListTopics(ctx context.Context, req TopicPageRequest) (TopicPa
 			item.Sessions = sessions
 			out.Items = append(out.Items, item)
 			if len(out.Items) > req.Limit {
+				overflow = true
 				break
 			}
 		}
-		rowsErr := rows.Err()
-		_ = rows.Close()
-		if rowsErr != nil {
-			return out, rowsErr
-		}
-		if len(out.Items) > req.Limit || rawCount < scanLimit || rawCount == 0 {
+		if overflow || rawCount < scanLimit || rawCount == 0 {
 			break
 		}
+		lastScanned := scanned[rawCount-1]
 		pinned := 0
 		if lastScanned.Pinned {
 			pinned = 1

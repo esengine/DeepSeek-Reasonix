@@ -4,9 +4,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/sessioncatalog"
 )
 
@@ -114,5 +116,100 @@ func TestProjectTreeShellSurvivesCatalogRevisionRace(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("snapshot projects = %#v, want Shell Race", snapshot.Projects)
+	}
+}
+
+func TestListProjectTopicsSurfacesLiveTabWhileCatalogLags(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	root := t.TempDir()
+	if err := addProject(root, "Lagging Catalog"); err != nil {
+		t.Fatal(err)
+	}
+	sessionDir := desktopSessionDir(root)
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp()
+	installSessionCatalogForTest(t, app, sessionDir, "project", root)
+	app.tabs["tab-1"] = &WorkspaceTab{
+		ID: "tab-1", Scope: "project", WorkspaceRoot: root,
+		TopicID: "topic_20260812-082637_live", TopicTitle: "Ownership Hub",
+	}
+
+	page, err := app.ListProjectTopics(ProjectTopicPageRequest{Scope: "project", WorkspaceRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].TopicID != "topic_20260812-082637_live" {
+		t.Fatalf("page items = %#v, want the live tab's topic", page.Items)
+	}
+	if page.Items[0].CreatedAt <= 0 {
+		t.Fatalf("createdAt = %d, want the topic's creation time", page.Items[0].CreatedAt)
+	}
+}
+
+func TestListProjectTopicsDoesNotDuplicateIndexedLiveTab(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	root := t.TempDir()
+	if err := addProject(root, "Indexed"); err != nil {
+		t.Fatal(err)
+	}
+	sessionDir := desktopSessionDir(root)
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionPath := filepath.Join(sessionDir, "live.jsonl")
+	if err := os.WriteFile(sessionPath, []byte(`{"role":"user","content":"hi"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := agent.UpdateBranchMeta(sessionPath, false, func(meta *agent.BranchMeta) error {
+		meta.TopicID = "topic-indexed"
+		meta.TopicTitle = "Indexed Topic"
+		meta.WorkspaceRoot = root
+		meta.Scope = "project"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp()
+	installSessionCatalogForTest(t, app, sessionDir, "project", root)
+	app.tabs["tab-1"] = &WorkspaceTab{
+		ID: "tab-1", Scope: "project", WorkspaceRoot: root,
+		TopicID: "topic-indexed", TopicTitle: "Indexed Topic", SessionPath: sessionPath,
+	}
+
+	page, err := app.ListProjectTopics(ProjectTopicPageRequest{Scope: "project", WorkspaceRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("page items = %#v, want the catalog row only", page.Items)
+	}
+}
+
+// The catalog goroutine outlives every request, so an unbounded metadata sync
+// there can hold the catalog's single-writer mutex forever and freeze the whole
+// sidebar. Guard the call shape, not just today's behaviour.
+func TestSessionCatalogGoroutineOnlySyncsMetadataWithATimeout(t *testing.T) {
+	source, err := os.ReadFile("session_catalog.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(source)
+	start := strings.Index(body, "func (a *App) startSessionCatalog(")
+	if start < 0 {
+		t.Fatal("startSessionCatalog not found")
+	}
+	end := strings.Index(body[start+1:], "\nfunc ")
+	if end < 0 {
+		t.Fatal("end of startSessionCatalog not found")
+	}
+	for line := range strings.SplitSeq(body[start:start+1+end], "\n") {
+		if !strings.Contains(line, "syncSessionCatalogMetadata(") {
+			continue
+		}
+		if !strings.Contains(line, "syncSessionCatalogMetadataBounded(") {
+			t.Fatalf("unbounded metadata sync in startSessionCatalog: %s", strings.TrimSpace(line))
+		}
 	}
 }
