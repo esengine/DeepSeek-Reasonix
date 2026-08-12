@@ -2308,6 +2308,9 @@ func (a *App) syncTabWorkspaceRootSpellings() {
 func (a *App) registerProjectRoot(workspaceRoot string) {
 	_ = addProject(workspaceRoot, "")
 	a.syncTabWorkspaceRootSpellings()
+	if strings.TrimSpace(workspaceRoot) != "" {
+		a.requestSessionCatalogReconcile(desktopSessionDir(workspaceRoot))
+	}
 }
 
 // OpenProjectTab builds a controller scoped to workspaceRoot and opens the
