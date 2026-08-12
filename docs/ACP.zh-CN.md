@@ -150,8 +150,12 @@ Reasonix 把互不相关的选择拆成独立控制轴，而不是混在一个 m
 - 当前 mode 和配置项更新；
 - 针对受权限控制工具及用户问题的 `session/request_permission` 请求。
 
-Host 应让 `session/prompt` 请求保持打开，直到 Reasonix 返回停止原因；期间仍需同时处理
-双向 request 和 notification。
+Host 应让 `session/prompt` 请求保持打开，直到 Reasonix 返回停止原因或 JSON-RPC error；
+期间仍需同时处理双向 request 和 notification。
+
+正常完成和受控的自动恢复暂停返回 `end_turn`；客户端取消返回 `cancelled`。如果回合因
+其他原因失败，Reasonix 会返回 `-32603 InternalError`，并携带经脱敏、限制长度的错误
+摘要，而不是构造规范外的停止原因。
 
 ## 回合中引导扩展
 
