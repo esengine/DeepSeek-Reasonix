@@ -106,6 +106,7 @@ func TestLegacySSETransportSupportsRootsToolsAndProgress(t *testing.T) {
 			emit(map[string]any{"jsonrpc": "2.0", "method": "notifications/progress", "params": map[string]any{
 				"progressToken": token, "progress": 1, "total": 2, "message": "Working",
 			}})
+			emit(map[string]any{"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
 			emit(map[string]any{"jsonrpc": "2.0", "id": id, "result": map[string]any{
 				"content": []any{map[string]any{"type": "text", "text": "done"}},
 			}})
@@ -154,6 +155,13 @@ func TestLegacySSETransportSupportsRootsToolsAndProgress(t *testing.T) {
 	if len(tools) != 1 || tools[0].Name() != "mcp__legacy__work" {
 		t.Fatalf("tools = %v", names(tools))
 	}
+	toolsChanged := make(chan struct{}, 1)
+	unsubscribe := host.SubscribeToolListChanges(ctx, func(spec Spec, tools []tool.Tool) {
+		if spec.Name == "legacy" && len(tools) == 1 {
+			toolsChanged <- struct{}{}
+		}
+	})
+	defer unsubscribe()
 
 	progress := make(chan string, 1)
 	toolCtx := tool.WithProgress(ctx, func(chunk string) { progress <- chunk })
@@ -168,6 +176,11 @@ func TestLegacySSETransportSupportsRootsToolsAndProgress(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("legacy SSE progress was not routed")
+	}
+	select {
+	case <-toolsChanged:
+	case <-time.After(time.Second):
+		t.Fatal("legacy SSE tools/list_changed notification was not routed")
 	}
 	select {
 	case err := <-serverErr:

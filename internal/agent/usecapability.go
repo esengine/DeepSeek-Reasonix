@@ -66,6 +66,9 @@ func NewMCPCapabilityRuntime(lifeCtx context.Context, host *plugin.Host, specs [
 		state:    &mcpProxySharedState{connected: map[string]bool{}},
 	}
 	r.ConfigureServers(nil, specs, nil)
+	if host != nil {
+		host.SubscribeToolListChanges(lifeCtx, r.applyToolListChange)
+	}
 	return r
 }
 
@@ -1354,21 +1357,7 @@ func (t *UseCapabilityTool) serverToolsForSpec(ctx context.Context, server strin
 	if err != nil {
 		return nil, err
 	}
-	snap := make([]plugin.CachedTool, 0, len(tools))
-	for _, tl := range tools {
-		m, ok := tl.(tool.MCPMetadata)
-		if !ok || m.MCPRawToolName() == "" {
-			continue
-		}
-		snap = append(snap, plugin.CachedTool{
-			Name:        m.MCPRawToolName(),
-			Description: tl.Description(),
-			Schema:      tl.Schema(),
-			ReadOnly:    tl.ReadOnly(),
-			Destructive: mcpDestructiveHint(tl),
-		})
-	}
-	t.ensureState().setLiveTools(server, snap)
+	t.ensureState().setLiveTools(server, snapshotMCPTools(tools))
 	return tools, nil
 }
 

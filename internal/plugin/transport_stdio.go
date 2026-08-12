@@ -51,9 +51,10 @@ type stdioTransport struct {
 	pending map[int]chan rpcResponse
 	readErr error // set once the reader goroutine exits; further calls fail fast
 
-	waitOnce    sync.Once
-	releaseSlot func() // returns a bounded instance slot (e.g. CodeGraph) on close; nil when unbounded
-	progress    progressRouter
+	waitOnce      sync.Once
+	releaseSlot   func() // returns a bounded instance slot (e.g. CodeGraph) on close; nil when unbounded
+	progress      progressRouter
+	notifications notificationRouter
 }
 
 func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
@@ -590,44 +591,12 @@ func (t *stdioTransport) replyLoop(replies <-chan any) {
 	}
 }
 
-func (t *stdioTransport) handleInboundLine(line []byte, replies chan<- any) {
-	probe, ok := decodeInboundMessage(line)
-	if !ok {
-		return // unparseable line cannot be routed; keep the transport alive
-	}
-	if probe.Method != "" {
-		if isNotificationID(probe.ID) {
-			if probe.Method == "notifications/progress" {
-				t.progress.dispatchProgress(probe.Params)
-			}
-			return
-		}
-		response := serverRequestReply(probe.ID, probe.Method, t.roots)
-		select {
-		case replies <- response:
-		default:
-			// The reply writer is stalled behind a full stdin pipe. An
-			// unanswered request degrades to the server's own timeout; a
-			// blocked readLoop could deadlock both pipes.
-		}
-		return
-	}
-
-	var resp rpcResponse
-	if err := json.Unmarshal(line, &resp); err != nil {
-		return
-	}
-	t.mu.Lock()
-	ch := t.pending[resp.ID]
-	delete(t.pending, resp.ID)
-	t.mu.Unlock()
-	if ch != nil {
-		ch <- resp // buffered(1): never blocks, even if the caller already left
-	}
-}
-
 func (t *stdioTransport) registerProgress(token string, sink tool.ProgressFunc) func() {
 	return t.progress.registerProgress(token, sink)
+}
+
+func (t *stdioTransport) registerNotification(method string, callback func(json.RawMessage)) func() {
+	return t.notifications.registerNotification(method, callback)
 }
 
 // failAll records the terminal read error and unblocks every pending call by

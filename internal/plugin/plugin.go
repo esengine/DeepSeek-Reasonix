@@ -19,7 +19,6 @@ import (
 	"net/http"
 	"reflect"
 	"regexp"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,7 +26,6 @@ import (
 
 	"reasonix/internal/event"
 	"reasonix/internal/mcplaunch"
-	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/secrets"
 	"reasonix/internal/tool"
@@ -204,6 +202,8 @@ type Host struct {
 	// Detached stats/schema-cache writers from Start; off the boot path but
 	// drained by Close so cleanup can't race a still-open cache file.
 	bgWrites sync.WaitGroup
+
+	toolListChanges toolListSubscriptions
 }
 
 // ReadResource reads a resource uri from the named server. It is how the chat
@@ -380,7 +380,7 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 				ch <- result{idx: idx, spec: spec, err: fmt.Errorf("start plugin %q: %w", spec.Name, err)}
 				return
 			}
-
+			h.bindToolListChanges(c)
 			ts, err := c.listTools(callCtx)
 			if err != nil {
 				phaseADur := recordedPhaseADur()
@@ -393,8 +393,6 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 				ch <- result{idx: idx, spec: spec, err: fmt.Errorf("list tools from %q: %w", spec.Name, err)}
 				return
 			}
-			c.toolCount = len(ts)
-
 			// Persist for next launch on the side: a slow stats/cache write
 			// must not delay tools coming online, and either failure is
 			// recoverable (we just re-handshake or skip auto-demote).
@@ -443,14 +441,15 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 			}
 			continue
 		}
-		if err := h.noteClientLocked(r.client, nil); err != nil {
+		current, err := h.registerStartedClient(r.client, r.tools)
+		if err != nil {
 			r.client.close()
 			if firstErr == nil {
 				firstErr = err
 			}
 			continue
 		}
-		tools = append(tools, r.tools...)
+		tools = append(tools, current...)
 		// prompts/resources are filled in later by StartPhaseB.
 	}
 	if firstErr != nil {
@@ -485,6 +484,7 @@ func (h *Host) Close() {
 	proxies := h.proxies
 	h.proxies = nil
 	h.clients = nil
+	h.toolListChanges.subscribers = nil
 	h.mu.Unlock()
 	closeServerProxies(proxies)
 	for _, c := range clients {
@@ -610,7 +610,7 @@ type Client struct {
 	// parallel startup can collect them per-client before merging into Host.
 	prompts   []Prompt
 	resources []Resource
-	toolsMu   sync.Mutex
+	toolsMu   sync.RWMutex
 	tools     []ToolInfo
 
 	// toolAdapters caches the model-visible remote tool adapters produced by
@@ -619,6 +619,8 @@ type Client struct {
 	// MCP servers just to rebuild identical schemas.
 	toolsListed  bool
 	toolAdapters []tool.Tool
+	closeOnce    sync.Once
+	refresh      toolListRefreshState
 	progressID   atomic.Uint64
 }
 
@@ -742,6 +744,7 @@ func (h *Host) Servers() []ServerStatus {
 	defer h.mu.RUnlock()
 	out := make([]ServerStatus, 0, len(h.clients))
 	for _, c := range h.clients {
+		c.toolsMu.Lock()
 		s := ServerStatus{
 			Name:         c.name,
 			Transport:    c.transport,
@@ -749,7 +752,6 @@ func (h *Host) Servers() []ServerStatus {
 			Tools:        c.toolCount,
 			HasTools:     c.hasTools,
 		}
-		c.toolsMu.Lock()
 		s.ToolList = append([]ToolInfo(nil), c.tools...)
 		c.toolsMu.Unlock()
 		for _, p := range h.prompts {
@@ -1247,13 +1249,13 @@ func (h *Host) addConnectedWithLifecycle(lifeCtx, callCtx context.Context, s Spe
 	if err != nil {
 		return nil, err
 	}
+	h.bindToolListChanges(c)
 	ts, err := c.listTools(callCtx)
 	if err != nil {
 		c.close()
 		err = newStartupFailure("tools/list", startupStarted, c.startupStderr(), err)
 		return nil, fmt.Errorf("list tools: %w", err)
 	}
-	c.toolCount = len(ts)
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
@@ -1280,6 +1282,9 @@ func (h *Host) addConnectedWithLifecycle(lifeCtx, callCtx context.Context, s Spe
 	}
 	h.clearFailure(s.Name)
 	h.mu.Unlock()
+	if cached, ok := c.cachedTools(); ok {
+		ts = cached
+	}
 	// Prompts and resources stream in on the long lifeCtx the caller passed (Host.Add
 	// uses the session-scoped PluginCtx, not a per-turn ctx), so the slow list
 	// calls cannot starve a /mcp add of its return value. nil sink keeps hot-add
@@ -1371,7 +1376,21 @@ func start(lifeCtx, callCtx context.Context, s Spec) (*Client, error) {
 	if tt == "" {
 		tt = "stdio"
 	}
-	c := &Client{name: s.Name, t: t, spec: s, transport: tt}
+	refreshCtx := lifeCtx
+	if refreshCtx == nil {
+		refreshCtx = context.Background()
+	}
+	refreshCtx, cancelRefresh := context.WithCancel(refreshCtx)
+	c := &Client{
+		name:      s.Name,
+		t:         t,
+		spec:      s,
+		transport: tt,
+		refresh: toolListRefreshState{
+			ctx:    refreshCtx,
+			cancel: cancelRefresh,
+		},
+	}
 	if err := c.initialize(callCtx); err != nil {
 		c.close()
 		err = newStartupFailure("initialize", started, c.startupStderr(), err)
@@ -1633,159 +1652,6 @@ type mcpTool struct {
 	} `json:"annotations"`
 }
 
-func (c *Client) listTools(ctx context.Context) ([]tool.Tool, error) {
-	c.toolsMu.Lock()
-	defer c.toolsMu.Unlock()
-	if c.toolsListed {
-		return append([]tool.Tool(nil), c.toolAdapters...), nil
-	}
-
-	out, err := c.listToolsRawSettled(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateMCPToolNames(out); err != nil {
-		return nil, fmt.Errorf("plugin %q: %w", c.name, err)
-	}
-
-	toolInfos := make([]ToolInfo, 0, len(out))
-	tools := make([]tool.Tool, 0, len(out))
-	normalizedSchemas := make(map[string]json.RawMessage, len(out))
-	for _, t := range out {
-		schema, err := normalizeAndValidateToolSchema(t.InputSchema)
-		if err != nil {
-			continue
-		}
-		normalizedSchemas[t.Name] = schema
-	}
-	for _, t := range out {
-		readOnlyHint := t.Annotations != nil && t.Annotations.ReadOnlyHint
-		destructiveHint := t.Annotations != nil && t.Annotations.DestructiveHint
-		info := ToolInfo{Name: t.Name, Description: t.Description, ReadOnlyHint: readOnlyHint, DestructiveHint: destructiveHint}
-		schema, ok := normalizedSchemas[t.Name]
-		if !ok {
-			if _, err := normalizeAndValidateToolSchema(t.InputSchema); err != nil {
-				info.SchemaError = schemaValidationError(err)
-			}
-			toolInfos = append(toolInfos, info)
-			continue
-		}
-		visibleName := t.Name
-		if c.spec.StripRawPrefix != "" {
-			visibleName = strings.TrimPrefix(visibleName, c.spec.StripRawPrefix)
-		}
-		readOnly := readOnlyHint
-		toolInfos = append(toolInfos, info)
-		tools = append(tools, &remoteTool{
-			client:           c,
-			name:             toolName(c.name, visibleName),
-			rawName:          t.Name,
-			visibleName:      visibleName,
-			desc:             t.Description,
-			schema:           schema,
-			outputSchema:     t.OutputSchema,
-			declaredReadOnly: readOnlyHint,
-			readOnly:         readOnly,
-			destructive:      destructiveHint,
-		})
-	}
-	sort.SliceStable(toolInfos, func(i, j int) bool { return toolInfos[i].Name < toolInfos[j].Name })
-	sortedTools := sortToolsByName(tools)
-	c.tools = toolInfos
-	c.toolAdapters = append([]tool.Tool(nil), sortedTools...)
-	c.toolsListed = true
-	return append([]tool.Tool(nil), sortedTools...), nil
-}
-
-func normalizeAndValidateToolSchema(raw json.RawMessage) (json.RawMessage, error) {
-	schema := canonicalizeSchema(raw)
-	if err := provider.ValidateToolSchema(schema); err != nil {
-		return nil, err
-	}
-	return schema, nil
-}
-
-func schemaValidationError(err error) string {
-	const maxRunes = 512
-	msg := strings.TrimSpace(err.Error())
-	runes := []rune(msg)
-	if len(runes) > maxRunes {
-		msg = string(runes[:maxRunes]) + "..."
-	}
-	return "invalid input schema: " + msg
-}
-
-func (c *Client) listToolsRaw(ctx context.Context) ([]mcpTool, error) {
-	res, err := c.call(ctx, "tools/list", map[string]any{})
-	if err != nil {
-		return nil, err
-	}
-	var out struct {
-		Tools []mcpTool `json:"tools"`
-	}
-	if err := json.Unmarshal(res, &out); err != nil {
-		return nil, fmt.Errorf("plugin %q: decode tools/list: %w", c.name, err)
-	}
-	return out.Tools, nil
-}
-
-// listToolsRawSettled gives dynamically registering servers a bounded startup
-// window before their initial tool catalog is considered complete.
-func (c *Client) listToolsRawSettled(ctx context.Context) ([]mcpTool, error) {
-	out, err := c.listToolsRaw(ctx)
-	if err != nil || !c.hasTools || len(out) > 0 {
-		return out, err
-	}
-	for _, delay := range advertisedToolsEmptyListRetryDelays {
-		if err := sleepContext(ctx, delay); err != nil {
-			return nil, err
-		}
-		out, err = c.listToolsRaw(ctx)
-		if err != nil || len(out) > 0 {
-			return out, err
-		}
-	}
-	return out, nil
-}
-
-func validateMCPToolNames(tools []mcpTool) error {
-	seen := make(map[string]bool, len(tools))
-	for _, candidate := range tools {
-		name := strings.TrimSpace(candidate.Name)
-		if name == "" {
-			return fmt.Errorf("tools/list returned an empty tool name")
-		}
-		if seen[candidate.Name] {
-			return fmt.Errorf("tools/list returned duplicate tool name %q", candidate.Name)
-		}
-		seen[candidate.Name] = true
-	}
-	return nil
-}
-
-func sleepContext(ctx context.Context, delay time.Duration) error {
-	if delay <= 0 {
-		return nil
-	}
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
-func (c *Client) cachedTools() ([]tool.Tool, bool) {
-	c.toolsMu.Lock()
-	defer c.toolsMu.Unlock()
-	if !c.toolsListed {
-		return nil, false
-	}
-	return append([]tool.Tool(nil), c.toolAdapters...), true
-}
-
 // toolName builds Reasonix's canonical model-visible name
 // "mcp__<server>__<tool>". The registry separately resolves unique portable
 // and Claude plugin-qualified references without exposing duplicate schemas.
@@ -1912,8 +1778,8 @@ func (t *remoteTool) securitySnapshot() (declaredReadOnly, readOnly, destructive
 	if t.client == nil {
 		return t.declaredReadOnly, t.readOnly, t.destructive
 	}
-	t.client.toolsMu.Lock()
-	defer t.client.toolsMu.Unlock()
+	t.client.toolsMu.RLock()
+	defer t.client.toolsMu.RUnlock()
 	return t.declaredReadOnly, t.readOnly, t.destructive
 }
 
@@ -1943,13 +1809,28 @@ func (t *remoteTool) Execute(ctx context.Context, args json.RawMessage) (string,
 // content items, which callers with a structural image channel (the agent)
 // forward to vision models instead of relying on the text placeholders alone.
 func (t *remoteTool) ExecuteWithImages(ctx context.Context, args json.RawMessage) (string, []string, error) {
+	if t.client == nil {
+		return "", nil, errors.New("MCP tool client is unavailable")
+	}
+	t.client.toolsMu.RLock()
+	defer t.client.toolsMu.RUnlock()
+	current := false
+	for _, candidate := range t.client.toolAdapters {
+		if candidate == t {
+			current = true
+			break
+		}
+	}
+	if !current {
+		return "", nil, fmt.Errorf("MCP server %q changed tool %q after this call was authorized; retry so Reasonix can apply the current schema and safety metadata", t.client.name, t.rawName)
+	}
 	var argMap map[string]any
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &argMap); err != nil {
 			return "", nil, fmt.Errorf("invalid args: %w", err)
 		}
 	}
-	_, readOnly, destructive := t.securitySnapshot()
+	readOnly, destructive := t.readOnly, t.destructive
 	if tool.HasReaderExecutionIntent(ctx) {
 		// Final, linearizable check for a reader-authorized call: the snapshot
 		// above and every live security reconciliation serialize on the owning
