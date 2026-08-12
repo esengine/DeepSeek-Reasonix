@@ -9,6 +9,7 @@
     "layering": 1,
     "marker": 0,
     "narrative": 64,
+    "struct-state": 159,
     "test-file-size": 69298
   },
   "files": {
@@ -29,7 +30,8 @@
       "complexity": 63,
       "essay": 96,
       "file-size": 11341,
-      "function-size": 371
+      "function-size": 371,
+      "struct-state": 15
     },
     "desktop/app_autosave_test.go": {
       "essay": 1
@@ -312,7 +314,8 @@
       "complexity": 41,
       "essay": 112,
       "file-size": 7716,
-      "function-size": 372
+      "function-size": 372,
+      "struct-state": 23
     },
     "desktop/tabs_order_test.go": {
       "test-file-size": 395
@@ -433,7 +436,8 @@
     "internal/acp/service.go": {
       "essay": 66,
       "file-size": 2285,
-      "function-size": 97
+      "function-size": 97,
+      "struct-state": 2
     },
     "internal/acp/service_lock_test.go": {
       "essay": 7,
@@ -449,7 +453,8 @@
       "complexity": 37,
       "essay": 85,
       "file-size": 2404,
-      "function-size": 102
+      "function-size": 102,
+      "struct-state": 47
     },
     "internal/agent/ask.go": {
       "essay": 4
@@ -779,6 +784,9 @@
     "internal/bot/turn_dispatch_test.go": {
       "essay": 3
     },
+    "internal/capability/audit.go": {
+      "struct-state": 12
+    },
     "internal/capability/catalog.go": {
       "essay": 1
     },
@@ -1088,7 +1096,8 @@
       "essay": 162,
       "file-size": 5553,
       "function-size": 82,
-      "narrative": 4
+      "narrative": 4,
+      "struct-state": 17
     },
     "internal/control/controller_test.go": {
       "essay": 10,
@@ -1112,7 +1121,8 @@
       "complexity": 3,
       "essay": 11,
       "file-size": 277,
-      "function-size": 1
+      "function-size": 1,
+      "struct-state": 10
     },
     "internal/control/goal_test.go": {
       "test-file-size": 249
@@ -1262,6 +1272,9 @@
     },
     "internal/extension/intercept.go": {
       "essay": 1
+    },
+    "internal/extension/metrics.go": {
+      "struct-state": 5
     },
     "internal/extension/plugin_resources_test.go": {
       "essay": 2
@@ -1426,7 +1439,8 @@
     "internal/jobs/jobs.go": {
       "essay": 42,
       "file-size": 1271,
-      "function-size": 12
+      "function-size": 12,
+      "struct-state": 6
     },
     "internal/jobs/jobs_extra_test.go": {
       "essay": 1
@@ -1547,7 +1561,8 @@
       "complexity": 45,
       "essay": 36,
       "file-size": 125,
-      "function-size": 154
+      "function-size": 154,
+      "struct-state": 6
     },
     "internal/provider/anthropic/anthropic_test.go": {
       "essay": 1,
@@ -1560,7 +1575,8 @@
       "complexity": 68,
       "essay": 41,
       "file-size": 547,
-      "function-size": 267
+      "function-size": 267,
+      "struct-state": 10
     },
     "internal/provider/openai/openai_test.go": {
       "essay": 5,
@@ -1577,7 +1593,8 @@
       "complexity": 54,
       "essay": 25,
       "file-size": 105,
-      "function-size": 181
+      "function-size": 181,
+      "struct-state": 6
     },
     "internal/provider/responses/responses_test.go": {
       "essay": 6,
