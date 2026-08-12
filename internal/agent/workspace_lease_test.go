@@ -94,7 +94,7 @@ func TestDeliveryWriterWaitsBeforeToolExecutionButReaderDoesNot(t *testing.T) {
 	}
 
 	hooks := &workspaceLeaseTestHooks{}
-	a.hooks = hooks
+	a.svc.hooks = hooks
 	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
 	defer cancel()
 	outcome := a.executeOne(ctx, &a.turn, providerToolCall("write", writer.Name()))
@@ -115,7 +115,7 @@ func TestDeniedDeliveryWriterDoesNotAcquireWorkspaceLease(t *testing.T) {
 	probeOwner, _ := workspacelease.New(root, locks, nil)
 	writer := &workspaceLeaseTestTool{name: "denied_writer"}
 	a := deliveryLeaseTestAgent(t, deniedOwner, writer)
-	a.gate = workspaceLeaseDenyGate{}
+	a.svc.gate = workspaceLeaseDenyGate{}
 	deniedOwner.BeginRun()
 	outcome := a.executeOne(context.Background(), &a.turn, providerToolCall("write", writer.Name()))
 	deniedOwner.EndRun()

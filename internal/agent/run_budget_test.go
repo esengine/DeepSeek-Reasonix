@@ -186,7 +186,7 @@ func TestRunBudgetCountsRoundsWithoutUsage(t *testing.T) {
 
 func TestRunBudgetIgnoresSinksThatDoNotOptIn(t *testing.T) {
 	plain := event.FuncSink(func(event.Event) {})
-	a := &Agent{sink: plain}
+	a := &Agent{svc: agentServices{sink: plain}}
 	state := &turnRuntime{}
 	a.observeRunBudget(state, &provider.Usage{PromptTokens: 5, RequestCount: 1})
 	if state.budget.rounds != 1 || state.budget.promptTokens != 5 {

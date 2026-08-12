@@ -21,7 +21,7 @@ func TestDeliveryReviewGateExplainsOpaqueMutationRecovery(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "review", readOnly: true})
 	reg.Add(fakeTool{name: "security_review", readOnly: true})
-	a := &Agent{deliveryProfile: true, task: taskRuntime{ledger: ledger}, tools: reg}
+	a := &Agent{deliveryProfile: true, task: taskRuntime{ledger: ledger}, svc: agentServices{tools: reg}}
 
 	got := a.deliveryReviewGateFailure()
 	for _, want := range []string{"high-risk", "git status --short", "git diff", "mutation did not report file paths"} {
@@ -62,7 +62,7 @@ func TestNonDeliveryProfileNeverRequiresStructuredReview(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "review", readOnly: true})
 	reg.Add(fakeTool{name: "security_review", readOnly: true})
-	a := &Agent{deliveryProfile: false, task: taskRuntime{ledger: ledger}, tools: reg}
+	a := &Agent{deliveryProfile: false, task: taskRuntime{ledger: ledger}, svc: agentServices{tools: reg}}
 
 	if got := a.deliveryReviewGateFailure(); got != "" {
 		t.Fatalf("non-Delivery review gate = %q, want disabled", got)
@@ -76,7 +76,7 @@ func TestDeliveryReviewGateHighRiskStillRequiresSecurityReview(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "review", readOnly: true})
 	reg.Add(fakeTool{name: "security_review", readOnly: true})
-	a := &Agent{deliveryProfile: true, task: taskRuntime{ledger: ledger}, tools: reg}
+	a := &Agent{deliveryProfile: true, task: taskRuntime{ledger: ledger}, svc: agentServices{tools: reg}}
 
 	if got := a.deliveryReviewGateFailure(); !strings.Contains(got, "high-risk") {
 		t.Fatalf("review gate = %q, want high-risk review demand", got)
@@ -115,7 +115,7 @@ func TestDeliveryReviewGateMediumAcceptsHostProvenVerificationAndCoverage(t *tes
 
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "review", readOnly: true})
-	a := &Agent{deliveryProfile: true, task: taskRuntime{ledger: ledger}, tools: reg}
+	a := &Agent{deliveryProfile: true, task: taskRuntime{ledger: ledger}, svc: agentServices{tools: reg}}
 	if got := a.deliveryReviewGateFailure(); got != "" {
 		t.Fatalf("medium-risk host proof was rejected: %q", got)
 	}
@@ -136,7 +136,7 @@ func TestDeliveryReviewGateDefersToParentInSubagents(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "review", readOnly: true})
 	reg.Add(fakeTool{name: "security_review", readOnly: true})
-	a := &Agent{agentConfig: agentConfig{subagentDepth: 1}, deliveryProfile: true, task: taskRuntime{ledger: ledger}, tools: reg}
+	a := &Agent{agentConfig: agentConfig{subagentDepth: 1}, deliveryProfile: true, task: taskRuntime{ledger: ledger}, svc: agentServices{tools: reg}}
 
 	// Inside a sub-agent the structured-review contract belongs to the parent,
 	// which receives the child's mutation receipts via mergeChildEvidence. The

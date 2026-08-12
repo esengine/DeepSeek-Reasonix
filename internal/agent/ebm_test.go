@@ -25,7 +25,7 @@ func deliverEBM(a *Agent, sample *evidence.OutcomeSample, results []string, outc
 }
 
 func TestApplyEBMStampsEligibilityWithoutFiringByDefault(t *testing.T) {
-	a := &Agent{sink: &ebmSink{}}
+	a := &Agent{svc: agentServices{sink: &ebmSink{}}}
 	sample := evidence.OutcomeSample{DebtAge: 2, BlindMutations: 3}
 	results, outcomes := ebmRound()
 	deliverEBM(a, &sample, results, outcomes)
@@ -43,7 +43,7 @@ func TestApplyEBMFiresOncePerTurnWhenEnabled(t *testing.T) {
 	defer func() { ebmEnabled = old }()
 
 	sink := &ebmSink{}
-	a := &Agent{sink: sink}
+	a := &Agent{svc: agentServices{sink: sink}}
 
 	below := evidence.OutcomeSample{DebtAge: 1, BlindMutations: 2}
 	results, outcomes := ebmRound()

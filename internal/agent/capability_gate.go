@@ -238,8 +238,8 @@ func (a *Agent) deliveryReviewGateFailure() string {
 		}
 	}
 	paths := productionPaths(a.task.ledger.PathsSince(mutation))
-	hasReviewTool := a.tools != nil && (toolPresent(a.tools, "review") || toolPresent(a.tools, "run_skill") || toolPresent(a.tools, "use_capability"))
-	hasSecurityTool := a.tools != nil && (toolPresent(a.tools, "security_review") || toolPresent(a.tools, "run_skill") || toolPresent(a.tools, "use_capability"))
+	hasReviewTool := a.svc.tools != nil && (toolPresent(a.svc.tools, "review") || toolPresent(a.svc.tools, "run_skill") || toolPresent(a.svc.tools, "use_capability"))
+	hasSecurityTool := a.svc.tools != nil && (toolPresent(a.svc.tools, "security_review") || toolPresent(a.svc.tools, "run_skill") || toolPresent(a.svc.tools, "use_capability"))
 	switch risk {
 	case evidence.RiskLow:
 		// Existing light review (read/diff) already checked elsewhere.

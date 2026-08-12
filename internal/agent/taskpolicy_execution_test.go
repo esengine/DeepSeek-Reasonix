@@ -95,8 +95,8 @@ func TestTaskPolicyRequiresPostMutationVerification(t *testing.T) {
 	writer := evidence.Receipt{ToolName: "write_file", Success: true, Write: true, Mutation: true}
 	check := evidence.Receipt{ToolName: "bash", Success: true, Command: "go test ./..."}
 	a := &Agent{
-		task:  taskRuntime{ledger: readinessLedger(check, writer)},
-		tools: reg,
+		task: taskRuntime{ledger: readinessLedger(check, writer)},
+		svc:  agentServices{tools: reg},
 		turn: turnRuntime{
 			policy:    taskpolicy.TaskPolicy{Verification: taskpolicy.VerifyTargeted},
 			policySet: true,

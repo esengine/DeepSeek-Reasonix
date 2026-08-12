@@ -287,7 +287,7 @@ func TestParentWriteReservationBashClaimsWholeWorkspace(t *testing.T) {
 func TestAgentReserveParentWriteSkipsSubagentDepth(t *testing.T) {
 	root := t.TempDir()
 	sched := NewSubagentScheduler(4, 2)
-	a := &Agent{agentConfig: agentConfig{writeWorkspaceRoot: root, subagentDepth: 1}, writeScheduler: sched}
+	a := &Agent{agentConfig: agentConfig{writeWorkspaceRoot: root, subagentDepth: 1}, svc: agentServices{writeScheduler: sched}}
 	inner := &recordingWriter{name: "write_file"}
 	release, err := a.reserveParentWrite(inner, mustJSON(t, map[string]string{
 		"path": filepath.Join(root, "a.md"), "content": "x",
@@ -305,7 +305,7 @@ func TestAgentReserveParentWriteSkipsSubagentDepth(t *testing.T) {
 func TestAgentReserveParentWriteHoldsClaim(t *testing.T) {
 	root := t.TempDir()
 	sched := NewSubagentScheduler(4, 2)
-	a := &Agent{agentConfig: agentConfig{writeWorkspaceRoot: root, subagentDepth: 0}, writeScheduler: sched}
+	a := &Agent{agentConfig: agentConfig{writeWorkspaceRoot: root, subagentDepth: 0}, svc: agentServices{writeScheduler: sched}}
 	inner := &recordingWriter{name: "write_file"}
 	release, err := a.reserveParentWrite(inner, mustJSON(t, map[string]string{
 		"path": filepath.Join(root, "a.md"), "content": "x",

@@ -345,7 +345,7 @@ func (c *Coordinator) Run(ctx context.Context, input string) error {
 	}
 	routeDetail := fmt.Sprintf("planner route=%s depth=%s reason=%s", decision.Route, decision.Depth, decision.Reason)
 	if decision.Route == PlannerRouteExecutorOnly {
-		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.prov.Name() + " · executing", Detail: routeDetail, Source: event.UsageSourceExecutor})
+		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.svc.prov.Name() + " · executing", Detail: routeDetail, Source: event.UsageSourceExecutor})
 		return c.executor.Run(ctx, input)
 	}
 	c.sink.Emit(event.Event{Kind: event.Phase, Text: c.planner.Name() + " · planning", Detail: routeDetail, Source: event.UsageSourcePlanner})
@@ -375,7 +375,7 @@ func (c *Coordinator) Run(ctx context.Context, input string) error {
 				Detail: plannerResearchPauseDetail(err),
 				Source: event.UsageSourcePlanner,
 			})
-			c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.prov.Name() + " · executing", Source: event.UsageSourceExecutor})
+			c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.svc.prov.Name() + " · executing", Source: event.UsageSourceExecutor})
 			return c.executor.Run(ctx, input)
 		}
 		// Plan-only explicitly excludes execution, while plan-for-approval
@@ -389,7 +389,7 @@ func (c *Coordinator) Run(ctx context.Context, input string) error {
 		// healthy and owns the full tool set, so degrade to single-model for
 		// this turn.
 		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: plannerFallbackNotice, Detail: "planner failed; running the executor without a plan: " + err.Error(), Source: event.UsageSourcePlanner})
-		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.prov.Name() + " · executing", Source: event.UsageSourceExecutor})
+		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.svc.prov.Name() + " · executing", Source: event.UsageSourceExecutor})
 		return c.executor.Run(ctx, input)
 	}
 	return c.deliverPlan(ctx, input, outcome, decision)
@@ -414,7 +414,7 @@ func (c *Coordinator) deliverPlan(ctx context.Context, input string, outcome pla
 		if outcome.structured {
 			c.executor.SetPlanContract(&outcome.plan)
 		}
-		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.prov.Name() + " · executing", Source: event.UsageSourceExecutor})
+		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.svc.prov.Name() + " · executing", Source: event.UsageSourceExecutor})
 		return c.executor.Run(ctx, formatHandoffWithDecision(input, planText, decision, executorToolHandoffContext(c.executor)))
 	}
 	runWithPlanApproval := func() error {
@@ -724,10 +724,10 @@ Carry out the task, adapting the plan as needed.`, executorHandoffMarker, task, 
 // executor carries MCP tools; the built-in tool list would just restate the
 // schema already attached to the request and pay its tokens every planned turn.
 func executorToolHandoffContext(a *Agent) string {
-	if a == nil || a.tools == nil {
+	if a == nil || a.svc.tools == nil {
 		return ""
 	}
-	schemas := a.tools.Schemas()
+	schemas := a.svc.tools.Schemas()
 	if len(schemas) == 0 {
 		return ""
 	}

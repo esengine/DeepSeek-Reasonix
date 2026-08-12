@@ -243,8 +243,8 @@ func applyForkTreatment(messages []provider.Message, nudge string) {
 // maybeWrapForkCaptureProvider interposes the capture wrapper when the
 // experiment env asks for bundles; inert otherwise.
 func (a *Agent) maybeWrapForkCaptureProvider() {
-	if os.Getenv("REASONIX_EXPERIMENT_FORK_CAPTURE_DIR") != "" && a.prov != nil {
-		a.prov = &forkCaptureProvider{inner: a.prov, a: a}
+	if os.Getenv("REASONIX_EXPERIMENT_FORK_CAPTURE_DIR") != "" && a.svc.prov != nil {
+		a.svc.prov = &forkCaptureProvider{inner: a.svc.prov, a: a}
 	}
 }
 

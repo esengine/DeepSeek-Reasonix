@@ -16,7 +16,7 @@ type samplingRequest struct {
 }
 
 func (a *Agent) streamProviderRequest(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
-	return a.prov.Stream(ctx, req)
+	return a.svc.prov.Stream(ctx, req)
 }
 
 func (a *Agent) handleSamplingError(
@@ -32,7 +32,7 @@ func (a *Agent) handleSamplingError(
 		streamSink.Discard()
 		reason := provider.StreamInterruptReason(result.err)
 		a.emitStreamAttempt(attemptID, event.StreamAttemptDiscard, attempt, reason, result.err)
-		a.sink.Emit(event.Event{
+		a.svc.sink.Emit(event.Event{
 			Kind: event.Retrying, RetryAttempt: attempt, RetryMax: maxStreamRecoveries,
 			RetryScope: event.RetryScopeStream,
 		})
@@ -108,7 +108,7 @@ func (a *Agent) buildSamplingRequest(ctx context.Context, trigger string) (sampl
 	}
 	req := provider.Request{
 		Messages:       requestMessages,
-		Tools:          a.tools.Schemas(),
+		Tools:          a.svc.tools.Schemas(),
 		MaxTokens:      a.maxOutputTokens,
 		Temperature:    provider.OptionalTemperature(a.temperature),
 		ResponseFormat: responseFormatFromRequest(ctx),

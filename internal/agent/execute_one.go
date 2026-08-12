@@ -108,7 +108,7 @@ func (a *Agent) executeOne(ctx context.Context, turn *turnRuntime, call provider
 // parseToolCall resolves the canonical tool, rejects ambiguity/unknown tools,
 // and applies repeat-success and stale-anchor guards.
 func (a *Agent) parseToolCall(ctx context.Context, plan *toolCallPlan) (toolOutcome, bool) {
-	t, canonicalName, ambiguous := a.tools.ResolveCall(plan.call.Name)
+	t, canonicalName, ambiguous := a.svc.tools.ResolveCall(plan.call.Name)
 	if len(ambiguous) > 0 {
 		msg := fmt.Sprintf("ambiguous MCP tool reference %q; use one of: %s", plan.call.Name, strings.Join(ambiguous, ", "))
 		return toolOutcome{
@@ -117,7 +117,7 @@ func (a *Agent) parseToolCall(ctx context.Context, plan *toolCallPlan) (toolOutc
 		}, true
 	}
 	if t == nil {
-		if server, ok := completedMCPConnect(a.tools, plan.call.Name); ok {
+		if server, ok := completedMCPConnect(a.svc.tools, plan.call.Name); ok {
 			return toolOutcome{
 				output: fmt.Sprintf("MCP server %q is connected; its real tools are now available", server),
 			}, true
@@ -488,7 +488,7 @@ func (a *Agent) applyRecoveryAndPermission(ctx context.Context, plan *toolCallPl
 		plan.recoveryGen = ctrl.Generation()
 		episodeStopped = ctrl.EpisodeStopped(a.recovery.taskID)
 	}
-	if a.recoveryGate != nil && (plan.mutates || plan.verification || plan.planTransition || episodeStopped) {
+	if a.svc.recoveryGate != nil && (plan.mutates || plan.verification || plan.planTransition || episodeStopped) {
 		subject := recoverySubject(plan.evidenceName, plan.evidenceArgs)
 		if plan.planTransition {
 			subject = "Update the active execution plan"
@@ -504,7 +504,7 @@ func (a *Agent) applyRecoveryAndPermission(ctx context.Context, plan *toolCallPl
 		if ctrl := a.recoveryEpisodeControl(); ctrl != nil {
 			episodeID = ctrl.EpisodeID()
 		}
-		dec, rerr := a.recoveryGate.BeforeMutation(ctx, a.recoveryProposal(plan, episodeID, subject, preview))
+		dec, rerr := a.svc.recoveryGate.BeforeMutation(ctx, a.recoveryProposal(plan, episodeID, subject, preview))
 		if dec.Generation != 0 {
 			plan.recoveryGen = dec.Generation
 		}
@@ -549,15 +549,15 @@ func (a *Agent) applyRecoveryAndPermission(ctx context.Context, plan *toolCallPl
 				errMsg:  "blocked: MCP server identity is not authorized",
 			}, true
 		}
-		if denyGate, ok := a.gate.(ExplicitDenyGate); ok && denyGate.ExplicitlyDenies(plan.permName, plan.permArgs) {
+		if denyGate, ok := a.svc.gate.(ExplicitDenyGate); ok && denyGate.ExplicitlyDenies(plan.permName, plan.permArgs) {
 			return toolOutcome{
 				output:  "blocked: denied by permission policy — this tool/command is on the deny list. Do not retry it; choose another approach or stop and explain.",
 				blocked: true,
 				errMsg:  "blocked by permission policy",
 			}, true
 		}
-	} else if a.gate != nil {
-		allow, reason, err := a.gate.Check(ctx, plan.permName, plan.permArgs, plan.readOnly)
+	} else if a.svc.gate != nil {
+		allow, reason, err := a.svc.gate.Check(ctx, plan.permName, plan.permArgs, plan.readOnly)
 		if err != nil {
 			return toolOutcome{
 				output:  fmt.Sprintf("blocked: %s (%v)", reason, err),
@@ -598,8 +598,8 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	// concurrent and avoids holding the workspace during an approval prompt while
 	// still covering every write-side action that follows authorization.
 	// Lazy workspace lease on the first real writer for every role setting.
-	if plan.mutates && a.workspaceLease != nil {
-		if err := a.workspaceLease.AcquireWrite(ctx); err != nil {
+	if plan.mutates && a.svc.workspaceLease != nil {
+		if err := a.svc.workspaceLease.AcquireWrite(ctx); err != nil {
 			return toolOutcome{
 				output:  fmt.Sprintf("blocked: the workspace did not become available for writing: %v", err),
 				blocked: true,
@@ -636,8 +636,8 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	// Acquire the checkpoint barrier before preimage capture and any hook. It is
 	// held through post hooks and AfterMutation so rewind cannot interleave with
 	// writer-side user code.
-	if !plan.readOnly && a.mutationObserver != nil && a.mutationObserver.Store() != nil {
-		barrier := a.mutationObserver.Store().Barrier()
+	if !plan.readOnly && a.svc.mutationObserver != nil && a.svc.mutationObserver.Store() != nil {
+		barrier := a.svc.mutationObserver.Store().Barrier()
 		if err := barrier.EnterWrite(); err != nil {
 			return toolOutcome{output: "blocked: " + err.Error(), blocked: true, errMsg: "blocked: mutation barrier unavailable"}, true
 		}
@@ -651,13 +651,13 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	if !plan.readOnly {
 		a.observeBeforeMutation(ctx, plan)
 		plan.mutationObserved = plan.mutationPath != ""
-		if toolHooksMayMutateWorkspace(a.hooks) && a.mutationObserver != nil {
-			a.mutationObserver.RecordGap(checkpoint.CoverageGap{Reason: checkpoint.GapHookWrite, Tool: plan.evidenceName, Detail: "tool hook may write paths that are not declared by the tool"})
+		if toolHooksMayMutateWorkspace(a.svc.hooks) && a.svc.mutationObserver != nil {
+			a.svc.mutationObserver.RecordGap(checkpoint.CoverageGap{Reason: checkpoint.GapHookWrite, Tool: plan.evidenceName, Detail: "tool hook may write paths that are not declared by the tool"})
 		}
 	}
 	// Proxy tools fire hooks against the real MCP target name and arguments.
-	if a.hooks != nil {
-		if block, msg := a.hooks.PreToolUse(ctx, plan.permName, plan.permArgs); block {
+	if a.svc.hooks != nil {
+		if block, msg := a.svc.hooks.PreToolUse(ctx, plan.permName, plan.permArgs); block {
 			if msg == "" {
 				msg = "blocked by a PreToolUse hook"
 			}
@@ -668,7 +668,7 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 			}, true
 		}
 	}
-	cctx := tool.WithContextCompressor(withCallContext(ctx, plan.call.ID, a.sink, a.asker, a.planMode.Load()), a)
+	cctx := tool.WithContextCompressor(withCallContext(ctx, plan.call.ID, a.svc.sink, a.svc.asker, a.planMode.Load()), a)
 	cctx = WithSubagentDepth(cctx, a.subagentDepth)
 	if a.task.ledger != nil {
 		cctx = evidence.WithLedger(cctx, a.task.ledger)
@@ -686,14 +686,14 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	if len(a.projectChecks) > 0 {
 		cctx = instruction.WithChecks(cctx, a.projectChecks)
 	}
-	if a.jobs != nil {
-		cctx = jobs.WithManager(cctx, a.jobs)
+	if a.svc.jobs != nil {
+		cctx = jobs.WithManager(cctx, a.svc.jobs)
 	}
-	if a.sandboxEscapeApprover != nil {
-		cctx = sandbox.WithEscapeApprover(cctx, a.sandboxEscapeApprover)
+	if a.svc.sandboxEscape != nil {
+		cctx = sandbox.WithEscapeApprover(cctx, a.svc.sandboxEscape)
 	}
-	if a.configWriteApprover != nil {
-		cctx = tool.WithConfigWriteApprover(cctx, a.configWriteApprover)
+	if a.svc.configWrite != nil {
+		cctx = tool.WithConfigWriteApprover(cctx, a.svc.configWrite)
 	}
 	if v := a.responseLanguage.Load(); v != nil {
 		if lang, ok := v.(string); ok {
@@ -705,12 +705,12 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 			cctx = WithReasoningLanguagePreference(cctx, lang)
 		}
 	}
-	if a.memQueue != nil {
-		cctx = memory.WithQueue(cctx, a.memQueue)
+	if a.svc.memQueue != nil {
+		cctx = memory.WithQueue(cctx, a.svc.memQueue)
 	}
 	callID := plan.call.ID
 	cctx = tool.WithProgress(cctx, func(chunk string) {
-		a.sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: callID, Output: chunk}})
+		a.svc.sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: callID, Output: chunk}})
 	})
 	plan.cctx = cctx
 	return toolOutcome{}, false
@@ -805,18 +805,18 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	a.noteCapabilityInvocation(call.Name, json.RawMessage(call.Arguments), err)
 	// Success and failure hooks observe the result after the tool ran. Use the
 	// real target name for proxied tools.
-	if a.hooks != nil {
+	if a.svc.hooks != nil {
 		if err != nil {
-			a.hooks.PostToolUseFailure(ctx, permName, permArgs, result, err)
+			a.svc.hooks.PostToolUseFailure(ctx, permName, permArgs, result, err)
 		} else {
-			a.hooks.PostToolUse(ctx, permName, permArgs, result)
+			a.svc.hooks.PostToolUse(ctx, permName, permArgs, result)
 		}
 	}
 	// Always re-read after post hooks — partial writes and hook side effects can
 	// change the previewed path even when the concrete tool returned an error.
 	a.observeAfterMutation(plan)
 	plan.mutationAfterDone = true
-	if a.recoveryGate != nil {
+	if a.svc.recoveryGate != nil {
 		a.observeRecoveryResult(ctx, evidenceName, evidenceArgs, readOnly, mutates, result, err, false, false, recoveryGen)
 	}
 	if err != nil {
@@ -847,8 +847,8 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	// A foreground `task` sub-agent just finished — its result is the final answer.
 	// (A backgrounded one returns a "Started…" string and stops later in a job, so
 	// it doesn't fire here.) SubagentStop lets a hook react to delegated work.
-	if a.hooks != nil && call.Name == "task" && !isBackgroundTaskCall(call.Arguments) {
-		a.hooks.SubagentStop(ctx, result)
+	if a.svc.hooks != nil && call.Name == "task" && !isBackgroundTaskCall(call.Arguments) {
+		a.svc.hooks.SubagentStop(ctx, result)
 	}
 	body, truncMsg := truncateToolOutputFor(result, call.Name, call.ID)
 	out := toolOutcome{
@@ -871,7 +871,7 @@ func (a *Agent) observeBeforeMutation(ctx context.Context, plan *toolCallPlan) {
 	if toolName == "" {
 		toolName = plan.call.Name
 	}
-	obs := a.mutationObserver
+	obs := a.svc.mutationObserver
 	if obs != nil {
 		if pv, ok := plan.execTool.(tool.Previewer); ok {
 			if change, perr := pv.Preview(ctx, plan.execArgs); perr == nil && change.Path != "" {
@@ -893,10 +893,10 @@ func (a *Agent) observeBeforeMutation(ctx context.Context, plan *toolCallPlan) {
 		return
 	}
 	// Legacy onPreEdit path.
-	if a.onPreEdit != nil {
+	if a.svc.preEdit != nil {
 		if pv, ok := plan.execTool.(tool.Previewer); ok {
 			if change, perr := pv.Preview(ctx, plan.execArgs); perr == nil {
-				a.onPreEdit(change)
+				a.svc.preEdit(change)
 				plan.mutationPath = change.Path
 			}
 		}
@@ -906,12 +906,12 @@ func (a *Agent) observeBeforeMutation(ctx context.Context, plan *toolCallPlan) {
 // observeAfterMutation records the after fingerprint when a concrete path was
 // known before execution, regardless of tool success or failure.
 func (a *Agent) observeAfterMutation(plan *toolCallPlan) {
-	if a == nil || plan == nil || plan.mutationPath == "" || a.mutationObserver == nil {
+	if a == nil || plan == nil || plan.mutationPath == "" || a.svc.mutationObserver == nil {
 		return
 	}
 	toolName := plan.evidenceName
 	if toolName == "" {
 		toolName = plan.call.Name
 	}
-	a.mutationObserver.AfterMutation(plan.mutationPath, toolName)
+	a.svc.mutationObserver.AfterMutation(plan.mutationPath, toolName)
 }

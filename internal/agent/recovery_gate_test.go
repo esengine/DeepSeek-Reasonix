@@ -122,7 +122,7 @@ func TestPlanTransitionNeedsDedicatedReplacementAuthorization(t *testing.T) {
 
 func TestObserveRecoveryResultMarksCancellation(t *testing.T) {
 	gate := &recordingRecoveryGate{}
-	a := &Agent{recoveryGate: gate}
+	a := &Agent{svc: agentServices{recoveryGate: gate}}
 	a.observeRecoveryResult(
 		context.Background(),
 		"write_file",
@@ -145,7 +145,7 @@ func TestObserveRecoveryResultMarksCancellation(t *testing.T) {
 
 func TestObserveRecoveryResultKeepsToolOwnedDeadlineAsFailure(t *testing.T) {
 	gate := &recordingRecoveryGate{}
-	a := &Agent{recoveryGate: gate}
+	a := &Agent{svc: agentServices{recoveryGate: gate}}
 	a.observeRecoveryResult(
 		context.Background(),
 		"mcp__server__write",
@@ -168,7 +168,7 @@ func TestObserveRecoveryResultKeepsToolOwnedDeadlineAsFailure(t *testing.T) {
 
 func TestObserveRecoveryResultMarksParentDeadlineCancellation(t *testing.T) {
 	gate := &recordingRecoveryGate{}
-	a := &Agent{recoveryGate: gate}
+	a := &Agent{svc: agentServices{recoveryGate: gate}}
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
 	a.observeRecoveryResult(

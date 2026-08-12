@@ -135,16 +135,16 @@ func (a *Agent) observeRunBudget(state *turnRuntime, usage *provider.Usage) {
 	if state == nil {
 		return
 	}
-	state.budget.observe(usage, a.pricing)
+	state.budget.observe(usage, a.svc.pricing)
 	if a.task.budget.started.IsZero() {
 		a.task.budget.started = state.budget.started
 	}
-	a.task.budget.observe(usage, a.pricing)
+	a.task.budget.observe(usage, a.svc.pricing)
 	currency := ""
-	if a.pricing != nil {
-		currency = a.pricing.Symbol()
+	if a.svc.pricing != nil {
+		currency = a.svc.pricing.Symbol()
 	}
-	event.RecordRunBudget(a.sink, event.RunBudgetSample{
+	event.RecordRunBudget(a.svc.sink, event.RunBudgetSample{
 		Turn:     state.budget.totals(),
 		Task:     a.task.budget.totals(),
 		Currency: currency,

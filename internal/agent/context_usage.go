@@ -31,7 +31,7 @@ func (a *Agent) ContextUsedTokens() int {
 	transcriptVersion := session.TranscriptVersion()
 	projectionVersion := a.currentProjectionVersion()
 	calibration := a.sess.output.promptCalibration.Load()
-	tools := a.tools
+	tools := a.svc.tools
 	toolSchemaRevision := tools.SchemaRevision()
 	if cached := a.sess.output.contextUsage.Load(); cached != nil &&
 		cached.transcriptVersion == transcriptVersion &&

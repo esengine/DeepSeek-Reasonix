@@ -83,7 +83,7 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 	earlierWriterRan := false
 	surfaceWriters := make([]bool, len(calls))
 	run := func(i int) {
-		t, _, ambiguous := a.tools.ResolveCall(calls[i].Name)
+		t, _, ambiguous := a.svc.tools.ResolveCall(calls[i].Name)
 		known := t != nil && len(ambiguous) == 0
 		writer := known && !t.ReadOnly()
 		surfaceWriters[i] = writer
@@ -107,7 +107,7 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 			return
 		}
 		outcomes[i] = a.executeOne(ctx, turn, calls[i])
-		recordWorkspaceMutation(a.sink, outcomes[i].workspaceMutation)
+		recordWorkspaceMutation(a.svc.sink, outcomes[i].workspaceMutation)
 		if outcomes[i].executed {
 			surfaceWriters[i] = outcomes[i].workspaceMutation != nil
 		}
@@ -204,7 +204,7 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 				if isVerification {
 					ex.Verification = tool.ShellVerificationNotRun
 				}
-				if t, _, amb := a.tools.ResolveCall(calls[j].Name); t != nil && len(amb) == 0 {
+				if t, _, amb := a.svc.tools.ResolveCall(calls[j].Name); t != nil && len(amb) == 0 {
 					if bt, ok := t.(tool.DetailedExecutor); ok {
 						if desc := bt.ExecutionDescriptor(json.RawMessage(calls[j].Arguments)); desc != nil {
 							ex.Shell = desc.Shell
@@ -227,7 +227,7 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 		mutationBatchStop = true
 	}
 
-	for _, batch := range partitionToolCalls(a.tools, calls) {
+	for _, batch := range partitionToolCalls(a.svc.tools, calls) {
 		if ctx.Err() != nil {
 			markCancelled(batch.start)
 			break
@@ -280,7 +280,7 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 				if results[i] != "" {
 					continue
 				}
-				t, _, ambiguous := a.tools.ResolveCall(calls[i].Name)
+				t, _, ambiguous := a.svc.tools.ResolveCall(calls[i].Name)
 				known := t != nil && len(ambiguous) == 0
 				readOnly := known && t.ReadOnly()
 				if calls[i].Name == "bash" && permission.BashCommandIsReadOnly(json.RawMessage(calls[i].Arguments)) {
@@ -329,7 +329,7 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 
 	for i, c := range calls {
 		o := outcomes[i]
-		t, _, ambiguous := a.tools.ResolveCall(c.Name)
+		t, _, ambiguous := a.svc.tools.ResolveCall(c.Name)
 		ok := t != nil && len(ambiguous) == 0
 		readOnly := ok && t.ReadOnly()
 		if c.ResolvedReadOnly != nil {
@@ -357,9 +357,9 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 				tr.WorkspaceAllPaths = mutation.AllPaths
 			}
 		}
-		a.sink.Emit(event.Event{Kind: event.ToolResult, Tool: tr})
+		a.svc.sink.Emit(event.Event{Kind: event.ToolResult, Tool: tr})
 		if o.truncated && o.truncMsg != "" {
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: o.truncMsg})
+			a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: o.truncMsg})
 		}
 	}
 	a.applyBatchGuards(ctx, cancelled, calls, outcomes, results, receiptMark)
@@ -395,7 +395,7 @@ func batchCallIsMutatingFailure(a *Agent, call provider.ToolCall, o toolOutcome)
 	readOnly := false
 	toolName := call.Name
 	toolArgs := json.RawMessage(call.Arguments)
-	t, _, ambiguous := a.tools.ResolveCall(call.Name)
+	t, _, ambiguous := a.svc.tools.ResolveCall(call.Name)
 	known := t != nil && len(ambiguous) == 0
 	if known {
 		readOnly = t.ReadOnly()
@@ -437,7 +437,7 @@ func batchCallIsMutatingFailure(a *Agent, call provider.ToolCall, o toolOutcome)
 // not_run/dependency without resolving a proxy. Proxies and unknown tools
 // return false so executeOne can resolve the real target first.
 func batchCallStaticallySkippable(a *Agent, call provider.ToolCall) bool {
-	t, _, ambiguous := a.tools.ResolveCall(call.Name)
+	t, _, ambiguous := a.svc.tools.ResolveCall(call.Name)
 	if t == nil || len(ambiguous) > 0 {
 		// Unknown / ambiguous: fail closed via executeOne path.
 		return false

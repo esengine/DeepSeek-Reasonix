@@ -88,7 +88,7 @@ func (a *Agent) observeOutcomeShadow(receiptMark int, outcomes []toolOutcome) in
 	iv := a.applyEBM(&sample, outcomes)
 	a.applyGovernor(&sample)
 	a.armGovernorCapture(sample)
-	event.RecordOutcomeProgress(a.sink, sample)
+	event.RecordOutcomeProgress(a.svc.sink, sample)
 	a.observeContractRound()
 	return iv
 }

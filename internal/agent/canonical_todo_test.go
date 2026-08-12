@@ -35,7 +35,7 @@ func TestFinalReadinessFallsBackToCanonicalTodos(t *testing.T) {
 
 func TestAdvanceCanonicalTodoCompletesAndPromotes(t *testing.T) {
 	a := &Agent{
-		sink: event.Discard,
+		svc: agentServices{sink: event.Discard},
 		sess: sessionRuntime{todoState: []evidence.TodoItem{
 			{Content: "sync branch", Status: "in_progress"},
 			{Content: "push to origin", Status: "pending"},
@@ -56,7 +56,7 @@ func TestAdvanceCanonicalTodoCompletesAndPromotes(t *testing.T) {
 }
 
 func TestAdvanceCanonicalTodoRejectsPendingMatchByNumber(t *testing.T) {
-	a := &Agent{sink: event.Discard, sess: sessionRuntime{todoState: []evidence.TodoItem{
+	a := &Agent{svc: agentServices{sink: event.Discard}, sess: sessionRuntime{todoState: []evidence.TodoItem{
 		{Content: "first", Status: "in_progress"},
 		{Content: "second", Status: "pending"},
 	}}}
@@ -194,7 +194,7 @@ func TestRebuildTodoStateHonorsEmptyTodoWriteClear(t *testing.T) {
 }
 
 func TestSeedTodoState(t *testing.T) {
-	a := &Agent{sink: event.Discard}
+	a := &Agent{svc: agentServices{sink: event.Discard}}
 	todos := []evidence.TodoItem{
 		{Content: "step 1", Status: "in_progress"},
 		{Content: "step 2", Status: "pending"},
@@ -209,7 +209,7 @@ func TestSeedTodoState(t *testing.T) {
 }
 
 func TestSeedTodoStateReplacesExisting(t *testing.T) {
-	a := &Agent{sink: event.Discard, sess: sessionRuntime{todoState: []evidence.TodoItem{
+	a := &Agent{svc: agentServices{sink: event.Discard}, sess: sessionRuntime{todoState: []evidence.TodoItem{
 		{Content: "existing", Status: "in_progress"},
 	}}}
 	a.SeedTodoState([]evidence.TodoItem{
@@ -221,7 +221,7 @@ func TestSeedTodoStateReplacesExisting(t *testing.T) {
 }
 
 func TestSeedTodoStateAllowsAdvanceAfterSeed(t *testing.T) {
-	a := &Agent{sink: event.Discard}
+	a := &Agent{svc: agentServices{sink: event.Discard}}
 	a.SeedTodoState([]evidence.TodoItem{
 		{Content: "step 1", Status: "in_progress"},
 		{Content: "step 2", Status: "pending"},
@@ -236,7 +236,7 @@ func TestSeedTodoStateAllowsAdvanceAfterSeed(t *testing.T) {
 }
 
 func TestAdvanceCanonicalTodoWalksPhaseChain(t *testing.T) {
-	a := &Agent{sink: event.Discard, sess: sessionRuntime{todoState: []evidence.TodoItem{
+	a := &Agent{svc: agentServices{sink: event.Discard}, sess: sessionRuntime{todoState: []evidence.TodoItem{
 		{Content: "Port the parser", Status: "pending"},
 		{Content: "move files", Status: "in_progress", Level: 1},
 		{Content: "fix imports", Status: "pending", Level: 1},

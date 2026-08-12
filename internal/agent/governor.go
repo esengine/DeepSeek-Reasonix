@@ -54,7 +54,7 @@ func (a *Agent) applyGovernor(sample *evidence.OutcomeSample) {
 		a.task.governor.engaged = true
 		if !a.task.governor.noticed {
 			a.task.governor.noticed = true
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeReasoningGovernor,
+			a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeReasoningGovernor,
 				Text:   "Exploration phase with expensive thinking; riding reduced reasoning depth until evidence work starts.",
 				Detail: "reasoning governor engaged: no verification debt, no local execution, previous round over the reasoning threshold"})
 		}

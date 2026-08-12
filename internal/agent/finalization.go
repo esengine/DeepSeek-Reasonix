@@ -44,7 +44,7 @@ func (a *Agent) armFinalizationRound(state *turnRuntime, cause landCause) {
 	state.graceRound = true
 	state.landCause = cause
 	a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(cause.nudge(state))})
-	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeToolBudget,
+	a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeToolBudget,
 		Text: cause.noticeText(), Detail: cause.detail})
 }
 

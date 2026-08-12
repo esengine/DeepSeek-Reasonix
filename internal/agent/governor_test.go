@@ -11,7 +11,7 @@ import (
 )
 
 func TestApplyGovernorStampsEligibilityWithoutEngagingByDefault(t *testing.T) {
-	a := &Agent{sink: &ebmSink{}, turn: turnRuntime{lastReasoning: govReasoningThreshold}}
+	a := &Agent{svc: agentServices{sink: &ebmSink{}}, turn: turnRuntime{lastReasoning: govReasoningThreshold}}
 	sample := evidence.OutcomeSample{}
 	a.applyGovernor(&sample)
 	if !sample.GovernorEligible || sample.GovernorEngaged {
@@ -28,7 +28,7 @@ func TestApplyGovernorEngagesAndExitsWhenEnabled(t *testing.T) {
 	defer func() { governorEnabled = old }()
 
 	sink := &ebmSink{}
-	a := &Agent{sink: sink, turn: turnRuntime{lastReasoning: govReasoningThreshold}}
+	a := &Agent{svc: agentServices{sink: sink}, turn: turnRuntime{lastReasoning: govReasoningThreshold}}
 
 	cheap := evidence.OutcomeSample{}
 	a.turn.lastReasoning = govReasoningThreshold - 1

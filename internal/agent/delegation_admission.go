@@ -55,7 +55,7 @@ func (a *Agent) observeDelegationAdmission(calls []provider.ToolCall) {
 			continue
 		}
 		verdict, reason, intent := delegationAdmission(a.turn.recoveryTaskSummary, call.Arguments)
-		event.RecordDelegationAdmission(a.sink, event.DelegationAdmissionAudit{
+		event.RecordDelegationAdmission(a.svc.sink, event.DelegationAdmissionAudit{
 			Tool: call.Name, Verdict: verdict, Reason: reason, Intent: intentName(intent),
 		})
 	}

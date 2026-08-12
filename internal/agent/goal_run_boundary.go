@@ -84,7 +84,7 @@ func (a *Agent) trackTodoProgress(ctx context.Context, state *turnRuntime, recei
 	state.todoProgress, state.trackingTodoProgress = nextProgress, nextTracking
 	if state.todoStallRounds == todoProgressNudgeRounds {
 		a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(todoProgressNudgeMessage(state.todoStallRounds))})
-		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeLoopGuard,
+		a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeLoopGuard,
 			Text: loopGuardNoticeText(), Detail: fmt.Sprintf("the current todo has no new completion, unique read, command, or mutation for %d consecutive tool-call rounds; asking the assistant to reassess", state.todoStallRounds)})
 	}
 	if state.todoStallRounds < maxTodoStallRounds {
@@ -95,7 +95,7 @@ func (a *Agent) trackTodoProgress(ctx context.Context, state *turnRuntime, recei
 		state.todoStallRounds = 0
 		nudge := fmt.Sprintf("Host progress redirect: the current todo still has no new completion or unique host-observed work after %d tool-call rounds. Re-plan and continue: shrink the active step, switch tools or approach, delegate a focused sub-task, or use update_goal(blocked) only if a user or external condition is the sole blocker. Do not repeat the same calls.", rounds)
 		a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(nudge)})
-		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeLoopGuard,
+		a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeLoopGuard,
 			Text: loopGuardNoticeText(), Detail: fmt.Sprintf("the current Goal todo made no host-observed progress for %d rounds; resetting the intervention epoch and requiring a new plan", rounds)})
 		return
 	}

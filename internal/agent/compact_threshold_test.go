@@ -6,7 +6,7 @@ import "testing"
 // sole compact_ratio trigger. Output is clipped only at send time.
 func TestCompactTriggerIndependentOfOutputBudget(t *testing.T) {
 	a := &Agent{
-		prov:        &sharedWindowTestProvider{budget: 131_072, shared: true},
+		svc:         agentServices{prov: &sharedWindowTestProvider{budget: 131_072, shared: true}},
 		agentConfig: agentConfig{contextWindow: 128_000, compactRatio: defaultCompactRatio},
 		sess:        sessionRuntime{output: outputBudgetState{outputBudget: 131_072}},
 	}

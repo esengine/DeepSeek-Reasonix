@@ -161,7 +161,7 @@ func (a *Agent) observeContractRound() {
 	if c == nil || (len(c.Requirements) == 0 && len(c.Checks) == 0) {
 		return
 	}
-	event.RecordContractShadow(a.sink, contractShadowAudit(c))
+	event.RecordContractShadow(a.svc.sink, contractShadowAudit(c))
 }
 
 // emitTurnShadows records the end-of-turn shadow observations: the contract's
@@ -185,10 +185,10 @@ func (a *Agent) emitTurnShadows(input string) {
 			}
 		}
 	}
-	event.RecordContractShadow(a.sink, contractShadowAudit(c))
+	event.RecordContractShadow(a.svc.sink, contractShadowAudit(c))
 	rep := completion.Build(c, a.task.ledger)
 	a.turn.completion = &rep
-	event.RecordCompletionReport(a.sink, completionReportAudit(rep))
+	event.RecordCompletionReport(a.svc.sink, completionReportAudit(rep))
 	a.emitCompletionSummary(c)
 }
 

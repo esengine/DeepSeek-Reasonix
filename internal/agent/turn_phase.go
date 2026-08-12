@@ -8,17 +8,17 @@ import (
 
 // emitTurnPhase publishes a content-free host phase for the active turn.
 func (a *Agent) emitTurnPhase(phase event.TurnPhaseName) {
-	if a == nil || a.sink == nil || phase == "" {
+	if a == nil || a.svc.sink == nil || phase == "" {
 		return
 	}
-	a.sink.Emit(event.Event{Kind: event.TurnPhase, PhaseName: phase, Text: string(phase)})
+	a.svc.sink.Emit(event.Event{Kind: event.TurnPhase, PhaseName: phase, Text: string(phase)})
 }
 
 // emitCompletionSummary publishes the content-free end-of-turn quality summary
 // when the turn mutated state or finished Partial/Blocked. Pure conversation
 // and ordinary read-only success do not emit a quality card.
 func (a *Agent) emitCompletionSummary(c *taskcontract.Contract) {
-	if a == nil || a.sink == nil || c == nil {
+	if a == nil || a.svc.sink == nil || c == nil {
 		return
 	}
 	mutations := 0
@@ -92,7 +92,7 @@ func (a *Agent) emitCompletionSummary(c *taskcontract.Contract) {
 	case taskcontract.VerdictContinue:
 		summaryVerdict = "continue"
 	}
-	a.sink.Emit(event.Event{
+	a.svc.sink.Emit(event.Event{
 		Kind: event.CompletionSummary,
 		Completion: &event.CompletionSummaryInfo{
 			Preset:             a.AgentPreset(),

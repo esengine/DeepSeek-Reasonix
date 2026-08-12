@@ -156,10 +156,10 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	// change without the final-readiness gate ever seeing it. Plan turns defer
 	// this lease like collectBackgroundEvidence does so execution evidence is
 	// consumed and audited only after plan approval.
-	if a.task.ledger != nil && a.jobs != nil && !a.planMode.Load() {
+	if a.task.ledger != nil && a.svc.jobs != nil && !a.planMode.Load() {
 		session := jobs.SessionFromContext(ctx)
-		for _, jobID := range a.jobs.PendingEvidenceJobIDsForSession(session) {
-			summary, ready := a.jobs.TryLeaseEvidenceForSession(session, jobID)
+		for _, jobID := range a.svc.jobs.PendingEvidenceJobIDsForSession(session) {
+			summary, ready := a.svc.jobs.TryLeaseEvidenceForSession(session, jobID)
 			if !ready {
 				continue
 			}
@@ -188,7 +188,7 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	}
 	intent := taskintent.Classify(a.turn.turnInput)
 	a.turn.deliveryTaskExpected = intent.NeedsEvidence()
-	a.turn.deliveryMutationExpected = intent == taskintent.Mutation && registryHasWriterTools(a.tools)
+	a.turn.deliveryMutationExpected = intent == taskintent.Mutation && registryHasWriterTools(a.svc.tools)
 	a.turn.deliveryPersistentExpected = taskintent.NeedsPersistentAction(a.turn.turnInput)
 	a.turn.recoveryTaskSummary = boundedRecoveryTaskSummary(a.turn.turnInput)
 	// Freeze TaskPolicy for this turn from the session role setting. Subsequent
@@ -221,7 +221,7 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	// once; the user's raw text remains the classifier source above.
 	providerInput = withInterruptedRecovery(providerInput, a.pendingInterruptedRecovery())
 	a.task.prepareScope(scoped, scope.ID)
-	a.sink.Emit(event.Event{Kind: event.TurnStarted})
+	a.svc.sink.Emit(event.Event{Kind: event.TurnStarted})
 	a.emitTurnPhase(event.TurnPhaseWorking)
 	input = a.withTurnPreferences(providerInput)
 	// Persist the short execution-policy block in provider Content; keep the
@@ -269,13 +269,13 @@ func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) error {
 		// steer is unavoidable — the model must see the new instruction.
 		if text, itemID, ok := a.consumeSteer(); ok {
 			a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(midTurnSteerMessage(text))})
-			a.sink.Emit(event.Event{Kind: event.Steer, Text: text, ItemID: itemID})
+			a.svc.sink.Emit(event.Event{Kind: event.Steer, Text: text, ItemID: itemID})
 		} else if itemID != "" {
 			// Loader failed after dequeue: durable entry stays for inspection
 			// (unapplied path marks uncertain + pause via the notice sink).
 			a.RecordUnappliedSteer("(body load failed)", itemID)
 		}
-		schemas := a.tools.Schemas()
+		schemas := a.svc.tools.Schemas()
 		prefixShape := a.capturePrefixShape(schemas)
 		prevPrefixShape := a.sess.lastPrefixShape
 		if !a.sess.haveLastPrefixShape {
@@ -300,7 +300,7 @@ func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) error {
 			a.emitTurnUsage(usage, &cacheDiagnostics)
 			a.observeRunBudget(state, usage)
 			if msg, ok := finishReasonMessage(usage); ok {
-				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg})
+				a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg})
 			}
 			// Exhausted stream retries (or a non-retryable error): persist one
 			// bounded LocalOnly recovery record for the next real user message.
@@ -313,7 +313,7 @@ func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) error {
 		a.emitTurnUsage(usage, &cacheDiagnostics)
 		a.observeRunBudget(state, usage)
 		if msg, ok := finishReasonMessage(usage); ok {
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg})
+			a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg})
 		}
 
 		// Commit boundary: only a clean terminal attempt reaches here.
@@ -398,9 +398,9 @@ func (a *Agent) streamWithSamplingRecovery(ctx context.Context, turn int) stream
 		a.emitStreamAttempt(attemptID, event.StreamAttemptBegin, attempt, "", nil)
 
 		var streamSink *deferredStreamSink
-		attemptSink := a.sink
-		if provider.WarnOnMissingToolCallReasoning(a.prov) {
-			streamSink = newReasoningAwareStreamSink(a.sink)
+		attemptSink := a.svc.sink
+		if provider.WarnOnMissingToolCallReasoning(a.svc.prov) {
+			streamSink = newReasoningAwareStreamSink(a.svc.sink)
 			attemptSink = streamSink
 		}
 
@@ -425,10 +425,10 @@ func (a *Agent) streamWithSamplingRecovery(ctx context.Context, turn int) stream
 		// exact replay of the same frozen request (no synthetic prompt).
 		missing, shouldRetry := a.observeMissingToolCallReasoning(result.calls, result.reasoning)
 		if missing {
-			event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningDetected})
+			event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningDetected})
 			if shouldRetry && strings.TrimSpace(result.text) == "" {
-				event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryAttempted})
-				retrySink := newDeferredStreamSink(a.sink)
+				event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryAttempted})
+				retrySink := newDeferredStreamSink(a.svc.sink)
 				retry := runAttempt(attemptID, retrySink)
 				billable = mergeSamplingUsage(billable, retry.usage)
 				if retry.err != nil {
@@ -444,7 +444,7 @@ func (a *Agent) streamWithSamplingRecovery(ctx context.Context, turn int) stream
 					streamSink.Flush()
 					a.storeLatestRequestUsage(result.usage)
 					result.usage = finalizeSamplingUsage(billable, result.usage)
-					event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
+					event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
 					a.emitStreamAttempt(attemptID, event.StreamAttemptCommit, attempt, "", nil)
 					return result
 				}
@@ -454,21 +454,21 @@ func (a *Agent) streamWithSamplingRecovery(ctx context.Context, turn int) stream
 				retry.usage = finalizeSamplingUsage(billable, retry.usage)
 				retryMissing, _ := a.observeMissingToolCallReasoning(retry.calls, retry.reasoning)
 				if retryMissing {
-					event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningDetected})
-					event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
+					event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningDetected})
+					event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
 				} else if len(retry.calls) == 0 {
-					event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryReplaced})
+					event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryReplaced})
 				} else {
-					event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryRecovered})
+					event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryRecovered})
 				}
 				a.emitStreamAttempt(attemptID, event.StreamAttemptCommit, attempt, "", nil)
 				return retry
 			}
 			if !shouldRetry || strings.TrimSpace(result.text) != "" {
-				event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetrySuppressed})
-				event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
+				event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetrySuppressed})
+				event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
 			} else {
-				event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
+				event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
 			}
 		}
 
@@ -484,7 +484,7 @@ func (a *Agent) emitStreamAttempt(id string, action event.StreamAttemptAction, a
 	if reason == "" && err != nil {
 		reason = provider.StreamInterruptReason(err)
 	}
-	a.sink.Emit(event.Event{
+	a.svc.sink.Emit(event.Event{
 		Kind: event.StreamAttempt,
 		StreamAttempt: event.StreamAttemptInfo{
 			ID: id, Action: action, Attempt: attempt, Max: maxSamplingAttempts, Reason: reason,
@@ -555,7 +555,7 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 		// what happens next. In Goal mode the FSM auto-continues under budget
 		// with the missing list as the next turn; plain Delivery turns surface
 		// the recovery card for an explicit user continuation.
-		event.RecordReadinessAudit(a.sink, readiness.audit(evidence.ReadinessErrored, false))
+		event.RecordReadinessAudit(a.svc.sink, readiness.audit(evidence.ReadinessErrored, false))
 		a.pending.deliveryRecovery = true
 		return false, &FinalReadinessError{Attempts: 1, Reason: readiness.reason, Missing: readiness.missingIDs()}
 	}
@@ -568,12 +568,12 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 		// "still thinking after the task is done" symptom), so honour the
 		// stop when reasoning carried the substance of the answer and treat
 		// the turn as a final answer instead of retrying.
-		if a.requireVisibleFinal || !reasoningOnlyFinishHonoured(a.prov, usage, reasoning) {
+		if a.requireVisibleFinal || !reasoningOnlyFinishHonoured(a.svc.prov, usage, reasoning) {
 			state.emptyFinalBlocks++
 			if state.emptyFinalBlocks >= maxEmptyFinalBlocks {
 				return false, fmt.Errorf("model finished without a visible final answer %d times", state.emptyFinalBlocks)
 			}
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeEmptyFinal, Text: emptyFinalNotice(), Detail: emptyFinalNoticeDetail(a.prov.Name(), usage, len(reasoning))})
+			a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeEmptyFinal, Text: emptyFinalNotice(), Detail: emptyFinalNoticeDetail(a.svc.prov.Name(), usage, len(reasoning))})
 			a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(emptyFinalRetryMessage())})
 			a.contextManager().ObserveUsage(usage)
 			return true, nil
@@ -581,13 +581,13 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 	}
 	if state.executorHandoff && !state.usedAnyTool && state.handoffNudges < maxExecutorHandoffNudges && shouldNudgeExecutorHandoff(state.input, text) {
 		state.handoffNudges++
-		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeExecutorHandoff, Text: executorHandoffNoticeText(), Detail: "executor answered without taking any action; nudging it to use its tools"})
+		a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeExecutorHandoff, Text: executorHandoffNoticeText(), Detail: "executor answered without taking any action; nudging it to use its tools"})
 		a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(executorHandoffRetryMessage())})
 		a.contextManager().ObserveUsage(usage)
 		return true, nil
 	}
 	if readiness.applies {
-		event.RecordReadinessAudit(a.sink, readiness.audit(evidence.ReadinessAllowed, a.turn.readinessRecovered))
+		event.RecordReadinessAudit(a.svc.sink, readiness.audit(evidence.ReadinessAllowed, a.turn.readinessRecovered))
 	}
 	a.emitTurnShadows(a.turn.turnInput)
 	if !a.closeSteerIntakeIfIdle() {
@@ -708,13 +708,13 @@ func (a *Agent) unavailableContextualToolCalls(ctx context.Context, calls []prov
 	if len(calls) == 0 {
 		return nil
 	}
-	if a == nil || a.tools == nil {
+	if a == nil || a.svc.tools == nil {
 		return nil
 	}
 	names := make([]string, 0, len(calls))
 	seen := make(map[string]struct{}, len(calls))
 	for _, call := range calls {
-		t, canonical, ambiguous := a.tools.ResolveCall(call.Name)
+		t, canonical, ambiguous := a.svc.tools.ResolveCall(call.Name)
 		if t == nil || len(ambiguous) > 0 {
 			continue
 		}

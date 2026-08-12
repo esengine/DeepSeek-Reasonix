@@ -168,7 +168,7 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 		return out
 	}
 	if !a.deliveryProfile && a.turn.policySet && a.turn.policy.Verification >= taskpolicy.VerifyTargeted &&
-		a.turn.policy.AllowsTests() && toolPresent(a.tools, "bash") &&
+		a.turn.policy.AllowsTests() && toolPresent(a.svc.tools, "bash") &&
 		!a.task.ledger.HasSuccessfulVerificationCommandAfter(writer) {
 		out.applies = true
 		out.missingVerification++

@@ -187,7 +187,7 @@ const (
 )
 
 func (a *Agent) observeRecoveryResult(ctx context.Context, toolName string, args json.RawMessage, readOnly, mutates bool, result string, err error, blocked, userRejected bool, generation uint64) {
-	if a == nil || a.recoveryGate == nil {
+	if a == nil || a.svc.recoveryGate == nil {
 		return
 	}
 	verification := toolName == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(args))
@@ -212,13 +212,13 @@ func (a *Agent) observeRecoveryResult(ctx context.Context, toolName string, args
 		cancelled = true
 	}
 	episodeID := ""
-	if ctrl, ok := a.recoveryGate.(RecoveryEpisodeControl); ok {
+	if ctrl, ok := a.svc.recoveryGate.(RecoveryEpisodeControl); ok {
 		episodeID = ctrl.EpisodeID()
 		if generation == 0 {
 			generation = ctrl.Generation()
 		}
 	}
-	guidance := a.recoveryGate.ObserveResult(ctx, RecoveryObservation{
+	guidance := a.svc.recoveryGate.ObserveResult(ctx, RecoveryObservation{
 		AgentID:      a.recovery.agentID,
 		TaskID:       a.recovery.taskID,
 		TaskScopeID:  recoveryTaskScopeID(a.task.scopeID, a.recovery.runSeq.Load()),
@@ -248,10 +248,10 @@ func (a *Agent) observeRecoveryResult(ctx context.Context, toolName string, args
 }
 
 func (a *Agent) recoveryEpisodeControl() RecoveryEpisodeControl {
-	if a == nil || a.recoveryGate == nil {
+	if a == nil || a.svc.recoveryGate == nil {
 		return nil
 	}
-	ctrl, _ := a.recoveryGate.(RecoveryEpisodeControl)
+	ctrl, _ := a.svc.recoveryGate.(RecoveryEpisodeControl)
 	return ctrl
 }
 

@@ -150,13 +150,13 @@ func (a *Agent) withAgentContext(ctx context.Context) context.Context {
 	if a == nil {
 		return ctx
 	}
-	if a.jobs != nil {
-		ctx = jobs.WithManager(ctx, a.jobs)
+	if a.svc.jobs != nil {
+		ctx = jobs.WithManager(ctx, a.svc.jobs)
 	} else {
 		ctx = jobs.WithoutManager(ctx)
 	}
-	if a.memQueue != nil {
-		ctx = memory.WithQueue(ctx, a.memQueue)
+	if a.svc.memQueue != nil {
+		ctx = memory.WithQueue(ctx, a.svc.memQueue)
 	} else {
 		ctx = memory.WithoutQueue(ctx)
 	}
@@ -282,32 +282,21 @@ type ToolHooks interface {
 // into the main loop.
 type Agent struct {
 	agentConfig
-	prov  provider.Provider
-	tools *tool.Registry
+	// svc are the collaborators this agent talks to; see services.go.
+	svc agentServices
 	// sess is the state one conversation owns; SetSession restarts it. See
 	// sessionstate.go.
 	sess sessionRuntime
 	// executorHandoffGuard is enabled by Coordinator only for the executor agent.
 	executorHandoffGuard bool
-	pricing              *provider.Pricing
 	responseLanguage     atomic.Value // string: auto|zh|en
 	reasoningLanguage    atomic.Value // string: auto|zh|en
 
-	// sink receives the turn's typed event stream (reasoning/text deltas, tool
-	// dispatch/results, usage, notices). Frontends decide how to render it;
-	// never nil because New defaults it to event.Discard.
-	sink                event.Sink
 	requireVisibleFinal bool // internal callers require final Content
 
 	// unwrittenResolve is the resolve watermark a failed state write still owes.
 	// It outlives the conversation, which is why it is not in sessionRuntime.
 	unwrittenResolve unwrittenResolve
-
-	// missingReasoningWarnState rate-limits recovery retries across sessions and
-	// processes by an opaque provider-configuration fingerprint (#7059). The
-	// legacy type/file names preserve the on-disk v2 contract. nil (no dir in
-	// Options) keeps in-memory active-incident gating only.
-	missingReasoningWarnState *missingReasoningWarnState
 
 	// planMode enables planning workflow instructions and explicit phase opt-outs.
 	// It does not replace the permission or sandbox boundary. The system prompt and
@@ -333,74 +322,11 @@ type Agent struct {
 	// false and still require readOnlyHint.
 	plannerMCPExecution bool
 
-	// gate, when non-nil, is the per-call permission gate for both standard and
-	// Plan workflows. nil disables gating entirely.
-	gate Gate
-
-	// extensions, when non-nil, is the frozen Extension Protocol v2 dispatcher
-	// for this controller generation. The run loop consults it at the
-	// agent-side intercept points (see extensions.go); nil means no runtime
-	// packages are installed and every point passes through byte-identically.
-	extensions *dispatch.Dispatcher
-
-	// recoveryGate, when non-nil, is the Auto Guard boundary for Auto mode.
-	// Shared by root and sub-agents for the same controller task. nil disables
-	// recovery checks (Ask/YOLO, headless without wiring, or feature off).
-	recoveryGate RecoveryGate
 	// recovery is who this agent is to the shared gate above.
 	recovery recoveryIdentity
 
-	// planModeReadOnlyTrust is retained for legacy controller wiring. The main
-	// Plan execution path no longer consults it.
-	planModeReadOnlyTrust PlanModeReadOnlyTrustGate
-
-	// sandboxEscapeApprover, when non-nil, can ask the user whether one shell
-	// command may rerun unconfined after the OS sandbox failed to start.
-	sandboxEscapeApprover sandbox.EscapeApprover
-
-	// configWriteApprover, when non-nil, can ask the user whether a file tool
-	// may write a Reasonix-managed config file outside the workspace roots.
-	configWriteApprover tool.ConfigWriteApprover
-
-	// hooks, when non-nil, fires PreToolUse / PostToolUse shell hooks around each
-	// tool call. nil disables hook firing.
-	hooks ToolHooks
-
-	// asker, when non-nil, lets the `ask` tool put questions to the user. nil in
-	// headless runs (no interactive user). Set via SetAsker.
-	asker Asker
-
-	// onPreEdit, when non-nil, is called with a writer tool's previewed change
-	// just before it runs — the seam the checkpoint store uses to snapshot a
-	// file's pre-edit content. Only fires for non-ReadOnly tools that implement
-	// tool.Previewer (so bash, whose targets are unknowable, is never tracked).
-	// Set via SetPreEditHook. Prefer mutationObserver when both are set.
-	onPreEdit func(diff.Change)
-
-	// mutationObserver is the host-side unified file mutation observer. It
-	// captures preimages before tools run and after-fingerprints regardless of
-	// success/failure. Passed through Options to sub-agents; never changes
-	// provider-visible tool schemas or prompts.
-	mutationObserver *checkpoint.MutationObserver
-
-	// jobs, when non-nil, is the session's background-job manager. executeOne
-	// stamps it onto each tool call's context so the background tools (bash
-	// run_in_background, task run_in_background, bash_output/kill_shell/wait) can
-	// reach it. nil leaves those tools to degrade gracefully.
-	jobs *jobs.Manager
-
-	// writeScheduler coordinates parent-agent writes against background
-	// subagent write claims. Set on the parent executor only (subagentDepth 0);
-	// reservation is taken around Execute so late-loaded MCP/Economy tools are
-	// covered without registry wrapping. Provider-visible schemas are unchanged.
-	writeScheduler *SubagentScheduler
 	// writeWorkspaceRoot is the workspace used to normalize parent write
 	// reservations when writeScheduler is set.
-
-	// workspaceLease is shared by every writer-capable agent in one Delivery
-	// session. It is acquired lazily on the first mutation and held through the
-	// final participating run/background job so verification remains isolated.
-	workspaceLease *workspacelease.Owner
 
 	// steerQueue holds mid-turn guidance admitted while the agent is running.
 	// Entries keep a durable inbox item ID plus a loader so full bodies are not
@@ -464,11 +390,6 @@ type Agent struct {
 	// capabilityGate is the turn's gate memory across final-answer retries.
 	capabilityGate capabilityGateState
 
-	// memQueue, when non-nil, lets the remember/forget tools fold a turn-tail note
-	// about a just-made memory change into the next turn, so it applies this
-	// session without touching the cache-stable prefix. Set via SetMemoryQueue.
-	memQueue memory.Queue
-
 	// subagentDepth tracks the current agent's nesting depth. maxSubagentDepth
 	// caps delegation; when reached, recursive agent/skill tools are excluded.
 
@@ -512,7 +433,7 @@ func (a *Agent) SetTools(tools *tool.Registry) {
 	if a == nil {
 		return
 	}
-	a.tools = tools
+	a.svc.tools = tools
 }
 
 // SetReasoningLanguage updates the visible reasoning language preference for
@@ -540,7 +461,7 @@ func (a *Agent) SetGate(g Gate) {
 	if nilutil.IsNil(g) {
 		g = nil
 	}
-	a.gate = g
+	a.svc.gate = g
 }
 
 // SetExtensions installs the extension dispatcher after construction. Boot
@@ -551,7 +472,7 @@ func (a *Agent) SetExtensions(d *dispatch.Dispatcher) {
 	if a == nil {
 		return
 	}
-	a.extensions = d
+	a.svc.extensions = d
 }
 
 // SetRecoveryGate installs Auto Guard. Safe to call before the run loop starts;
@@ -563,7 +484,7 @@ func (a *Agent) SetRecoveryGate(g RecoveryGate) {
 	if nilutil.IsNil(g) {
 		g = nil
 	}
-	a.recoveryGate = g
+	a.svc.recoveryGate = g
 }
 
 // SetRecoveryIdentity sets the agent/task labels used on recovery cards.
@@ -580,7 +501,7 @@ func (a *Agent) RecoveryGate() RecoveryGate {
 	if a == nil {
 		return nil
 	}
-	return a.recoveryGate
+	return a.svc.recoveryGate
 }
 
 // SetPlanModeReadOnlyTrustGate retains the legacy confirmation bridge for old
@@ -589,7 +510,7 @@ func (a *Agent) SetPlanModeReadOnlyTrustGate(g PlanModeReadOnlyTrustGate) {
 	if nilutil.IsNil(g) {
 		g = nil
 	}
-	a.planModeReadOnlyTrust = g
+	a.svc.planTrust = g
 }
 
 // SetSandboxEscapeApprover installs the optional one-shot approval path used by
@@ -598,7 +519,7 @@ func (a *Agent) SetSandboxEscapeApprover(g sandbox.EscapeApprover) {
 	if nilutil.IsNil(g) {
 		g = nil
 	}
-	a.sandboxEscapeApprover = g
+	a.svc.sandboxEscape = g
 }
 
 // SetConfigWriteApprover installs the optional per-write approval path used by
@@ -608,7 +529,7 @@ func (a *Agent) SetConfigWriteApprover(g tool.ConfigWriteApprover) {
 	if nilutil.IsNil(g) {
 		g = nil
 	}
-	a.configWriteApprover = g
+	a.svc.configWrite = g
 }
 
 func (a *Agent) withTurnPreferences(input string) string {
@@ -637,26 +558,26 @@ func (a *Agent) withTurnPreferences(input string) string {
 
 // SetAsker installs the asker the `ask` tool uses to question the user.
 // Interactive frontends wire one in; headless runs leave it nil.
-func (a *Agent) SetAsker(as Asker) { a.asker = as }
+func (a *Agent) SetAsker(as Asker) { a.svc.asker = as }
 
 // SetMemoryQueue installs the sink the remember/forget tools use to apply a
 // memory change in the current session. The controller wires itself in.
-func (a *Agent) SetMemoryQueue(q memory.Queue) { a.memQueue = q }
+func (a *Agent) SetMemoryQueue(q memory.Queue) { a.svc.memQueue = q }
 
 // SetPreEditHook installs the pre-edit snapshot hook (see onPreEdit). The
 // controller wires it to its per-session checkpoint store; nil disables capture.
 // Prefer SetMutationObserver for v2 capture (before+after fingerprints).
-func (a *Agent) SetPreEditHook(fn func(diff.Change)) { a.onPreEdit = fn }
+func (a *Agent) SetPreEditHook(fn func(diff.Change)) { a.svc.preEdit = fn }
 
 // SetMutationObserver installs the unified mutation observer. When set, it
 // supersedes onPreEdit for capture and also records after-mutation fingerprints.
 // When a task tool is already registered it inherits the observer for sub-agents.
 func (a *Agent) SetMutationObserver(obs *checkpoint.MutationObserver) {
-	a.mutationObserver = obs
-	if a.tools == nil || obs == nil {
+	a.svc.mutationObserver = obs
+	if a.svc.tools == nil || obs == nil {
 		return
 	}
-	if t, ok := a.tools.Get("task"); ok {
+	if t, ok := a.svc.tools.Get("task"); ok {
 		if task, ok := t.(*TaskTool); ok {
 			task.WithMutationObserver(obs)
 		}
@@ -668,7 +589,7 @@ func (a *Agent) MutationObserver() *checkpoint.MutationObserver {
 	if a == nil {
 		return nil
 	}
-	return a.mutationObserver
+	return a.svc.mutationObserver
 }
 
 // Session returns the agent's current conversation, useful for persistence
@@ -819,7 +740,7 @@ func (a *Agent) SetSink(sink event.Sink) {
 	if nilutil.IsNil(sink) {
 		sink = event.Discard
 	}
-	a.sink = sink
+	a.svc.sink = sink
 }
 
 func (a *Agent) consumeSteer() (text, itemID string, ok bool) {
@@ -906,7 +827,7 @@ func (a *Agent) RecordUnappliedSteer(text string, itemID ...string) {
 		Name:       provider.LocalOnlyToolName,
 		LocalOnly:  true,
 	})
-	a.sink.Emit(event.Event{
+	a.svc.sink.Emit(event.Event{
 		Kind:   event.Notice,
 		Level:  event.LevelWarn,
 		Code:   event.NoticeCodeUnappliedSteer,
@@ -1153,6 +1074,8 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		reasoningByteLimit = defaultReasoningByteLimit
 	}
 	a := &Agent{
+		svc: newAgentServices(prov, tools, sink, gate, planModeReadOnlyTrust,
+			sandboxEscapeApprover, configWriteApprover, hooks, opts),
 		agentConfig: agentConfig{
 			maxSteps:           opts.MaxSteps,
 			maxStepsKey:        maxStepsKey,
@@ -1171,8 +1094,6 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 			recentKeep:         opts.RecentKeep,
 			archiveDir:         opts.ArchiveDir,
 		},
-		prov:  prov,
-		tools: tools,
 		sess: sessionRuntime{
 			conversation: session,
 			path:         strings.TrimSpace(opts.SessionPath),
@@ -1182,35 +1103,20 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 			ledger: evidence.NewLedger(),
 			budget: runBudget{limit: normalizeTaskBudget(opts.TaskBudget)},
 		},
-		pricing:             opts.Pricing,
-		sink:                sink,
 		requireVisibleFinal: opts.RequireVisibleFinal,
-		gate:                gate,
-		extensions:          opts.Extensions,
-		recoveryGate:        opts.RecoveryGate,
 		recovery: recoveryIdentity{
 			agentID: strings.TrimSpace(opts.RecoveryAgentID),
 			taskID:  strings.TrimSpace(opts.RecoveryTaskID),
 		},
-		readOnlyExecution:         opts.ReadOnlyExecution,
-		plannerMCPExecution:       opts.PlannerMCPExecution,
-		planModeReadOnlyTrust:     planModeReadOnlyTrust,
-		sandboxEscapeApprover:     sandboxEscapeApprover,
-		configWriteApprover:       configWriteApprover,
-		hooks:                     hooks,
-		jobs:                      opts.Jobs,
-		memQueue:                  opts.MemoryQueue,
-		writeScheduler:            opts.WriteScheduler,
-		workspaceLease:            opts.WorkspaceLease,
-		missingReasoningWarnState: missingReasoningWarnStateFor(opts.MissingReasoningWarnStateDir),
-		projectChecks:             append([]instruction.VerifyCheck(nil), opts.ProjectChecks...),
-		deliveryProfile:           opts.DeliveryProfile || agentpreset.Normalize(opts.AgentPreset) == agentpreset.Delivery,
-		ablation:                  opts.Ablation,
-		capabilityLedger:          opts.CapabilityLedger,
-		capabilityAudit:           opts.CapabilityAudit,
-		keepPolicy:                opts.KeepPolicy,
-		strictAlternatingRoles:    opts.StrictAlternatingRoles,
-		mutationObserver:          opts.MutationObserver,
+		readOnlyExecution:      opts.ReadOnlyExecution,
+		plannerMCPExecution:    opts.PlannerMCPExecution,
+		projectChecks:          append([]instruction.VerifyCheck(nil), opts.ProjectChecks...),
+		deliveryProfile:        opts.DeliveryProfile || agentpreset.Normalize(opts.AgentPreset) == agentpreset.Delivery,
+		ablation:               opts.Ablation,
+		capabilityLedger:       opts.CapabilityLedger,
+		capabilityAudit:        opts.CapabilityAudit,
+		keepPolicy:             opts.KeepPolicy,
+		strictAlternatingRoles: opts.StrictAlternatingRoles,
 	}
 	a.sess.output.outputBudget = outputBudgetOf(prov)
 	if a.sess.path != "" {
@@ -1294,7 +1200,7 @@ func missingReasoningWarnStateFor(dir string) *missingReasoningWarnState {
 // (subagent, read-only, no scheduler, or non-write tool).
 func (a *Agent) reserveParentWrite(runTool tool.Tool, args json.RawMessage, readOnly bool) (release func(), err error) {
 	noop := func() {}
-	if a == nil || a.writeScheduler == nil || a.subagentDepth > 0 || readOnly || runTool == nil {
+	if a == nil || a.svc.writeScheduler == nil || a.subagentDepth > 0 || readOnly || runTool == nil {
 		return noop, nil
 	}
 	name := runTool.Name()
@@ -1305,7 +1211,7 @@ func (a *Agent) reserveParentWrite(runTool tool.Tool, args json.RawMessage, read
 	if err != nil {
 		return noop, err
 	}
-	return a.writeScheduler.ReserveParentWrite(claim)
+	return a.svc.writeScheduler.ReserveParentWrite(claim)
 }
 
 // Run appends the user input and drives the tool loop until the model returns a
@@ -1327,9 +1233,9 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	a.recovery.runSeq.Add(1)
 	// All role settings participate in the workspace lease for the run; the
 	// exclusive write lock is still acquired lazily on the first real writer.
-	if a.workspaceLease != nil {
-		a.workspaceLease.BeginRun()
-		defer a.workspaceLease.EndRun()
+	if a.svc.workspaceLease != nil {
+		a.svc.workspaceLease.BeginRun()
+		defer a.svc.workspaceLease.EndRun()
 	}
 	turnStartedAt := time.Now()
 	workDurationMs := func() int64 {
@@ -1351,11 +1257,11 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	// job's evidence can be permanently drained. A failed or cancelled turn
 	// leaves the lease uncommitted so the next turn re-collects it.
 	defer func() {
-		if runErr != nil || a.task.ledger == nil || a.jobs == nil {
+		if runErr != nil || a.task.ledger == nil || a.svc.jobs == nil {
 			return
 		}
 		for _, lease := range a.task.ledger.BackgroundLeases() {
-			a.jobs.CommitEvidenceForSession(lease.Session, lease.JobID)
+			a.svc.jobs.CommitEvidenceForSession(lease.Session, lease.JobID)
 		}
 	}()
 	if _, scoped := DeliveryExecutionScopeFromContext(ctx); scoped {
@@ -1567,9 +1473,9 @@ func (a *Agent) emitTodoState(todos []evidence.TodoItem, itemIndex int) {
 	}
 	id := fmt.Sprintf("host-advance-%d-%d", a.hostAdvanceSeq.Add(1), itemIndex)
 	t := event.Tool{ID: id, Name: "todo_write", Args: string(args), ReadOnly: true}
-	a.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: t})
+	a.svc.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: t})
 	t.Output = "task list advanced by complete_step"
-	a.sink.Emit(event.Event{Kind: event.ToolResult, Tool: t})
+	a.svc.sink.Emit(event.Event{Kind: event.ToolResult, Tool: t})
 }
 
 // RebuildTodoState re-derives canonical task state from the current session
@@ -1878,7 +1784,7 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 	// up we buffer reasoning silently and emit the transformed text once after the
 	// stream. With no such hook the reasoning streams live, chunk by chunk, as
 	// before — the common case must not lose its live "thinking…" display.
-	transformReasoning := a.hooks != nil && a.hooks.HasPostLLMCall()
+	transformReasoning := a.svc.hooks != nil && a.svc.hooks.HasPostLLMCall()
 
 	var text, reasoning strings.Builder
 	var signature string                    // provider-issued proof for the reasoning (Anthropic thinking)
@@ -1905,14 +1811,14 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 		original := reasoning.String()
 		display = original
 		if transformReasoning && original != "" {
-			display = a.hooks.PostLLMCall(ctx, original, turn)
+			display = a.svc.hooks.PostLLMCall(ctx, original, turn)
 			if display != "" {
 				sink.Emit(event.Event{Kind: event.Reasoning, Text: display})
 			}
 		}
 		stored = display
 		providerBound := signature != "" || reasoningID != "" || reasoningStatus != ""
-		if providerBound || provider.RequiresReasoningRoundTrip(a.prov) || (len(calls) > 0 && provider.RequiresToolCallReasoning(a.prov)) {
+		if providerBound || provider.RequiresReasoningRoundTrip(a.svc.prov) || (len(calls) > 0 && provider.RequiresToolCallReasoning(a.svc.prov)) {
 			stored = original
 		}
 		return stored, display
@@ -2223,7 +2129,7 @@ func toProviderToolExecution(in *tool.ShellExecution) *provider.ToolExecution {
 }
 
 func (a *Agent) emitFullToolDispatch(ctx context.Context, c provider.ToolCall, refreshed bool) {
-	t, _, ambiguous := a.tools.ResolveCall(c.Name)
+	t, _, ambiguous := a.svc.tools.ResolveCall(c.Name)
 	ok := t != nil && len(ambiguous) == 0
 	ev := event.Tool{ID: c.ID, Name: c.Name, Args: c.Arguments, ReadOnly: ok && t.ReadOnly(), Refreshed: refreshed}
 	ev.FileDiff = event.FileDiff{Diff: c.Diff, Added: c.Added, Removed: c.Removed}
@@ -2239,7 +2145,7 @@ func (a *Agent) emitFullToolDispatch(ctx context.Context, c provider.ToolCall, r
 			ev.Profile = pr.ResolveProfile(json.RawMessage(c.Arguments))
 		}
 	}
-	a.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: ev})
+	a.svc.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: ev})
 }
 
 // emitResolvedToolDispatch upserts the real target classification of a stable
@@ -2250,13 +2156,13 @@ func (a *Agent) emitResolvedToolDispatch(c provider.ToolCall) {
 		return
 	}
 	if c.ResolvedName != "" && c.ResolvedName != c.Name {
-		EmitProxyAudit(a.sink, tool.ResolvedCall{
+		EmitProxyAudit(a.svc.sink, tool.ResolvedCall{
 			DisplayName:  c.Name,
 			TargetName:   c.ResolvedName,
 			CapabilityID: c.CapabilityID,
 		})
 	}
-	a.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
+	a.svc.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
 		ID:           c.ID,
 		Name:         c.Name,
 		Args:         c.Arguments,
@@ -2302,7 +2208,7 @@ func (a *Agent) withPreviewFileDiffs(ctx context.Context, calls []provider.ToolC
 		if out[i].Diff != "" || out[i].Added != 0 || out[i].Removed != 0 {
 			continue
 		}
-		t, _, ambiguous := a.tools.ResolveCall(out[i].Name)
+		t, _, ambiguous := a.svc.tools.ResolveCall(out[i].Name)
 		ok := t != nil && len(ambiguous) == 0
 		if !ok {
 			continue
@@ -2834,7 +2740,7 @@ func isBackgroundTaskCall(args string) bool {
 // toolReadOnly reports a tool's ReadOnly classification by name (false for an
 // unknown tool), for stamping early ToolDispatch events.
 func (a *Agent) toolReadOnly(name string) bool {
-	t, _, ambiguous := a.tools.ResolveCall(name)
+	t, _, ambiguous := a.svc.tools.ResolveCall(name)
 	return t != nil && len(ambiguous) == 0 && t.ReadOnly()
 }
 

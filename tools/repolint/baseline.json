@@ -3,8 +3,8 @@
     "banner": 15,
     "commented-code": 0,
     "complexity": 2069,
-    "essay": 3990,
-    "file-size": 108213,
+    "essay": 3983,
+    "file-size": 108119,
     "function-size": 8846,
     "layering": 1,
     "marker": 0,
@@ -448,8 +448,8 @@
     },
     "internal/agent/agent.go": {
       "complexity": 37,
-      "essay": 62,
-      "file-size": 2155,
+      "essay": 55,
+      "file-size": 2061,
       "function-size": 102,
       "struct-state": 3
     },
