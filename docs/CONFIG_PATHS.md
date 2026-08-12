@@ -150,6 +150,12 @@ providers accidentally share `CUSTOM_API_KEY`, edit each provider's
 
 The desktop custom-provider form treats its **API address** as the exact request
 URL and stores it in `request_url`; Reasonix does not append or rewrite its path.
+The one curated shorthand is SiliconFlow's official OpenAI-compatible base URL,
+`https://api.siliconflow.cn/v1`: the form keeps that base URL visible for model
+discovery and stores `https://api.siliconflow.cn/v1/chat/completions` as the exact
+chat request URL. The recommended-provider list also includes a one-click
+SiliconFlow preset with these endpoints. Other SiliconFlow paths and custom
+gateways remain unchanged.
 Existing TOML entries are not reinterpreted: legacy `chat_url` keeps its former
 OpenAI-only behavior, while Anthropic and Responses continue deriving their path
 from `base_url` until the provider is explicitly saved in the current desktop UI.

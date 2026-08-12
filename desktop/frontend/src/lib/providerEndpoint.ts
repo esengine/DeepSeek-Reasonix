@@ -5,8 +5,35 @@ export interface ProviderEndpointConfig {
   chatUrl?: string;
 }
 
+const SILICONFLOW_API_HOST = "api.siliconflow.cn";
+const SILICONFLOW_API_BASE_PATH = "/v1";
+const OPENAI_CHAT_COMPLETIONS_PATH = "/chat/completions";
+
 export function trimmedBaseURL(value: string): string {
   return value.trim().replace(/\/+$/, "");
+}
+
+function officialSiliconFlowBaseURL(kind: string, value: string): string {
+  if (kind.trim().toLowerCase() !== "openai") return "";
+  try {
+    const parsed = new URL(value.trim());
+    const pathname = parsed.pathname.replace(/\/+$/, "") || "/";
+    if (
+      parsed.protocol !== "https:" ||
+      parsed.host.toLowerCase() !== SILICONFLOW_API_HOST ||
+      parsed.username ||
+      parsed.password ||
+      parsed.search ||
+      parsed.hash ||
+      pathname !== SILICONFLOW_API_BASE_PATH
+    ) {
+      return "";
+    }
+    parsed.pathname = SILICONFLOW_API_BASE_PATH;
+    return trimmedBaseURL(parsed.toString());
+  } catch {
+    return "";
+  }
 }
 
 export function providerRequestURLFromConfig(
@@ -32,6 +59,27 @@ export function providerRequestURLFromConfig(
     default:
       return `${base}/chat/completions`;
   }
+}
+
+export function providerRequestURLForSave(kind: string, inputUrl: string): string {
+  const input = inputUrl.trim();
+  const siliconFlowBaseURL = officialSiliconFlowBaseURL(kind, input);
+  return siliconFlowBaseURL
+    ? `${siliconFlowBaseURL}${OPENAI_CHAT_COMPLETIONS_PATH}`
+    : input;
+}
+
+export function providerInputURLFromConfig(
+  kind: string,
+  baseUrl: string,
+  requestUrl: string,
+  legacyChatUrl = "",
+): string {
+  const effectiveRequestURL = providerRequestURLFromConfig(kind, baseUrl, requestUrl, legacyChatUrl);
+  const siliconFlowBaseURL = officialSiliconFlowBaseURL(kind, baseUrl);
+  return siliconFlowBaseURL && effectiveRequestURL === `${siliconFlowBaseURL}${OPENAI_CHAT_COMPLETIONS_PATH}`
+    ? siliconFlowBaseURL
+    : effectiveRequestURL;
 }
 
 export function providerBaseURLFromRequestURL(kind: string, requestUrl: string): string {
