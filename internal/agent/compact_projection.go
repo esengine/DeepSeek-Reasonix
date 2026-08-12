@@ -491,7 +491,7 @@ func checkpointProjectionMessages(msgs []provider.Message, head, start int, kept
 	projMsgs = append(projMsgs, formatSummaryMessage(summary))
 	projMsgs = append(projMsgs, kept...)
 	projMsgs = append(projMsgs, msgs[start:]...)
-	return provider.ModelMessages(projMsgs)
+	return provider.ProjectionMessages(projMsgs)
 }
 
 // acceptCheckpointCandidate: ≤50% + smaller for auto; force may exceed 50%

@@ -344,6 +344,15 @@ the keep policy protects also survive, though a failure with a recorded executio
 keeps only its failure-carrying lines. Everything else is **best-effort** — it
 reaches the summarizer and survives only as well as the digest captured it.
 
+That protection has to hold across *repeated* folds, which is why a stored
+projection keeps the host's `ToolExecution` record while a provider request does
+not. `KeepErrors` classifies a failure from that record rather than from text,
+because a real `go test` log opens with `=== RUN` and no prefix match can see
+it; a projection written without the record would leave the *next* fold unable
+to classify what the current one just protected. The strip therefore belongs at
+the provider boundary — `ModelMessages` — and not at projection write time,
+where `ProjectionMessages` preserves it.
+
 User turns are held to a different standard than the work they govern. A
 constraint stated at turn 4 ("do not change the public API") exists nowhere but
 the transcript, while the code it constrains stays re-derivable from the

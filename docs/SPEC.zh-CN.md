@@ -165,6 +165,11 @@ transcript，仅在唯一自动阈值被跨越时安装 provider 可见的短 **
   丢弃不是静默的：压缩 telemetry 带 `user_kept` / `user_dropped` 计数，且已提交的
   checkpoint 若折叠了用户轮次会发出提示 `[[keep]]` 的警告——两种情况下 projection
   读起来都是完整的，计数是唯一能区分它们的东西。
+- **失败保护必须跨多次折叠成立**：`KeepErrors` 依据宿主的 `ToolExecution` 记录而非
+  文本判定失败（真实 `go test` 日志以 `=== RUN` 开头，前缀匹配看不见它），因此存储的
+  projection 保留该记录，而发往 provider 的请求不带。剥离发生在 provider 边界
+  (`ModelMessages`)，projection 写入用 `ProjectionMessages` 保留——否则下一次折叠
+  将无法分类上一次刚刚保护下来的失败。
 - 用户可用 `reasonix config compact-ratio [--local] [VALUE]` 查看或修改阈值。
   项目配置优先于桌面与新 CLI 会话共用的用户全局配置。UI 始终展示**实际生效**值。
 - `max_output_tokens` 是独立的**本轮**输出上限。
