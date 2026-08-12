@@ -307,7 +307,11 @@ func (r *mdRenderer) renderList(buf *strings.Builder, n *ast.List, src []byte, i
 }
 
 func (r *mdRenderer) renderFenced(buf *strings.Builder, n ast.Node, src []byte, indent int) {
-	prefix := strings.Repeat(" ", indent) + dim("│ ")
+	// Fixed two-space indent, mirroring Claude Code. A "│ " rail or an
+	// indent-tracking prefix would be copied verbatim with the source, so keep
+	// the copy clean and mark the block with a constant, small indent instead of
+	// growing with the surrounding nesting.
+	prefix := strings.Repeat(" ", 2)
 	for i := range n.Lines().Len() {
 		l := n.Lines().At(i)
 		line := strings.TrimRight(string(l.Value(src)), "\n")
