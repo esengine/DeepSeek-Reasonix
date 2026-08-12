@@ -7768,7 +7768,7 @@ func migratedPinnedTabSessionPath(dir, sessionPath string) (string, bool) {
 	if base == "." || base == string(filepath.Separator) || !strings.HasSuffix(base, ".jsonl") {
 		return "", false
 	}
-	path, _, err := validateSessionPath(dir, filepath.Join(dir, base))
+	path, _, err := validateLiveSessionPath(dir, filepath.Join(dir, base))
 	if err != nil {
 		return "", false
 	}
@@ -7780,7 +7780,7 @@ func pinnedTabSessionPath(dir, sessionPath string) (string, bool) {
 	if sessionPath == "" || dir == "" {
 		return "", false
 	}
-	path, _, err := validateSessionPath(dir, sessionPath)
+	path, _, err := validateLiveSessionPath(dir, sessionPath)
 	if err != nil {
 		if filepath.IsAbs(sessionPath) {
 			return "", false
@@ -7789,7 +7789,7 @@ func pinnedTabSessionPath(dir, sessionPath string) (string, bool) {
 		if base == "." || base == string(filepath.Separator) || !strings.HasSuffix(base, ".jsonl") {
 			return "", false
 		}
-		path, _, err = validateSessionPath(dir, filepath.Join(dir, base))
+		path, _, err = validateLiveSessionPath(dir, filepath.Join(dir, base))
 		if err != nil {
 			return "", false
 		}
@@ -7934,7 +7934,7 @@ func (a *App) tabSessionMetaSnapshotForCurrentSession(tab *WorkspaceTab) (tabSes
 	}
 	runtimeDir := sessionDir
 	if ctrlDir != "" {
-		if _, _, err := validateSessionPath(ctrlDir, currentPath); err == nil {
+		if _, _, err := validateLiveSessionPath(ctrlDir, currentPath); err == nil {
 			runtimeDir = ctrlDir
 		}
 	}
@@ -8119,7 +8119,7 @@ func canonicalTabSessionPath(path string) string {
 	if path == "" {
 		return ""
 	}
-	if validPath, _, err := validateSessionPath(config.SessionDir(), path); err == nil {
+	if validPath, _, err := validateLiveSessionPath(config.SessionDir(), path); err == nil {
 		return validPath
 	}
 	// Project-scope sessions live outside config.SessionDir(), so validation
