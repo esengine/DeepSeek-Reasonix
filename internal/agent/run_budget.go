@@ -131,7 +131,7 @@ func (a *Agent) ResetTaskBudget() {
 }
 
 // observeRunBudget folds a round into both scopes and reports them.
-func (a *Agent) observeRunBudget(state *runLoopState, usage *provider.Usage) {
+func (a *Agent) observeRunBudget(state *turnRuntime, usage *provider.Usage) {
 	if state == nil {
 		return
 	}

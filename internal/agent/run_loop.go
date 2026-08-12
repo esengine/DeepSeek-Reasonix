@@ -109,20 +109,20 @@ func (s *deferredStreamSink) Discard() {
 // evidence re-lease, and the initial user-turn persistence. Callers still own
 // all Run-level defers (workspace lease, evidence commit, delivery checkpoint,
 // steer queue, active-turn timestamp).
-func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string, state *runLoopState) {
+func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string, state *turnRuntime) {
 	rawInput = RawUserInput(ctx, input)
 	providerInput := input
 	// A fresh user turn starts from zeroed per-turn host state; the new turn's
 	// values are computed below. Cross-turn state (checkpoint, scope, failure
-	// budgets) lives directly on Agent and is reconciled field by field.
-	a.perTurnState = perTurnState{}
+	// budgets) lives in taskRuntime and is reconciled there.
+	a.turn = turnRuntime{}
 	a.resetStructuralRunGuards()
 	scope, scoped := DeliveryExecutionScopeFromContext(ctx)
-	preserveEvidence := a.preserveEvidenceOnce
+	preserveEvidence := a.pending.preserveEvidence
 	// A run that starts with a pending readiness recovery (or an explicit
 	// evidence-preserving continuation) and then passes readiness counts as a
 	// recovery in the final audit.
-	a.readinessRecovered = preserveEvidence || a.deliveryRecoveryPending
+	a.turn.readinessRecovered = preserveEvidence || a.pending.deliveryRecovery
 	if a.task.ledger != nil {
 		switch {
 		case preserveEvidence:
@@ -133,16 +133,16 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 			a.resetTurnEvidence()
 		}
 	}
-	a.preserveEvidenceOnce = false
+	a.pending.preserveEvidence = false
 	if !preserveEvidence {
-		a.deliveryRecoveryPending = false
+		a.pending.deliveryRecovery = false
 	}
 	if scoped {
 		a.task.scopeID = scope.ID
 	} else if !preserveEvidence {
 		a.task.scopeID = ""
 	}
-	a.deliveryScopeActive = scoped
+	a.turn.deliveryScopeActive = scoped
 	if scoped && a.task.checkpoint.ScopeID != scope.ID {
 		a.task.checkpoint = evidence.DeliveryCheckpoint{ScopeID: scope.ID}
 	}
@@ -169,7 +169,7 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 			a.task.ledger.MergeChild(summary)
 		}
 	}
-	a.deliveryCriteriaEstablished = a.hasIncompleteCanonicalCriteria() ||
+	a.turn.deliveryCriteriaEstablished = a.hasIncompleteCanonicalCriteria() ||
 		(a.task.ledger != nil && a.task.ledger.HasSuccessfulTodoWrite()) ||
 		(scoped && a.task.checkpoint.CriteriaEstablished)
 	// Classify delivery expectations from the task text. Sub-agent spawners
@@ -180,38 +180,38 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	// deadlocked read-only subagents. Without the override the raw input is
 	// classified verbatim: stripping user-controllable markup here would let
 	// input dressed up as host framing disarm the delivery gates.
-	a.turnInput = a.classifierTaskText
+	a.turn.turnInput = a.classifierTaskText
 	if scoped && strings.TrimSpace(scope.TaskText) != "" {
-		a.turnInput = scope.TaskText
-	} else if strings.TrimSpace(a.turnInput) == "" {
-		a.turnInput = rawInput
+		a.turn.turnInput = scope.TaskText
+	} else if strings.TrimSpace(a.turn.turnInput) == "" {
+		a.turn.turnInput = rawInput
 	}
-	intent := taskintent.Classify(a.turnInput)
-	a.deliveryTaskExpected = intent.NeedsEvidence()
-	a.deliveryMutationExpected = intent == taskintent.Mutation && registryHasWriterTools(a.tools)
-	a.deliveryPersistentExpected = taskintent.NeedsPersistentAction(a.turnInput)
-	a.recoveryTaskSummary = boundedRecoveryTaskSummary(a.turnInput)
+	intent := taskintent.Classify(a.turn.turnInput)
+	a.turn.deliveryTaskExpected = intent.NeedsEvidence()
+	a.turn.deliveryMutationExpected = intent == taskintent.Mutation && registryHasWriterTools(a.tools)
+	a.turn.deliveryPersistentExpected = taskintent.NeedsPersistentAction(a.turn.turnInput)
+	a.turn.recoveryTaskSummary = boundedRecoveryTaskSummary(a.turn.turnInput)
 	// Freeze TaskPolicy for this turn from the session role setting. Subsequent
 	// SetAgentPreset calls must not change this turn's route/review floor.
 	if policy, ok := taskpolicy.FromContext(ctx); ok {
-		a.turnPolicy = policy
+		a.turn.policy = policy
 	} else {
-		a.turnPolicy = taskpolicy.Derive(taskpolicy.Input{
-			Raw:         a.turnInput,
-			Instruction: taskpolicy.StripQuotedConstraints(a.turnInput),
+		a.turn.policy = taskpolicy.Derive(taskpolicy.Input{
+			Raw:         a.turn.turnInput,
+			Instruction: taskpolicy.StripQuotedConstraints(a.turn.turnInput),
 			Preset:      agentpreset.AgentPreset(a.AgentPreset()),
 			PlanMode:    a.planMode.Load(),
 		})
 	}
-	a.turnPolicySet = true
+	a.turn.policySet = true
 	// Align legacy delivery gates with the frozen role setting. Delivery always
 	// enables the full readiness contract. Light/Balanced only elevate when the
 	// turn is a mutation that requires forced review or is high-risk.
 	switch {
 	case a.AgentPreset() == string(agentpreset.Delivery):
 		a.deliveryProfile = true
-	case a.turnPolicy.Intent == taskintent.Mutation &&
-		(a.turnPolicy.RequiresIndependentReview() || a.turnPolicy.Risk >= taskpolicy.RiskHigh):
+	case a.turn.policy.Intent == taskintent.Mutation &&
+		(a.turn.policy.RequiresIndependentReview() || a.turn.policy.Risk >= taskpolicy.RiskHigh):
 		a.deliveryProfile = true
 	default:
 		a.deliveryProfile = false
@@ -226,7 +226,7 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	input = a.withTurnPreferences(providerInput)
 	// Persist the short execution-policy block in provider Content; keep the
 	// original user text in RawContent for history/title/rewind stripping.
-	policyBlock := taskpolicy.ExecutionPolicyBlock(a.turnPolicy)
+	policyBlock := taskpolicy.ExecutionPolicyBlock(a.turn.policy)
 	if !strings.Contains(input, "<execution-policy") {
 		input = strings.TrimSpace(input) + "\n\n" + policyBlock
 	}
@@ -234,25 +234,21 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	a.activeTurnCreatedAt.Store(userCreatedAt)
 	rawContent := rawInput
 	if rawContent == "" {
-		rawContent = a.turnInput
+		rawContent = a.turn.turnInput
 	}
 	a.sess.conversation.Add(provider.Message{
 		Role: provider.RoleUser, Content: input, RawContent: rawContent,
 		Images: userImages(ctx), CreatedAt: userCreatedAt,
 	})
 
-	state = &runLoopState{
-		emptyFinalBlocks:   0,
-		handoffNudges:      0,
-		usedAnyTool:        false,
-		graceRound:         false,
-		recoveryGraceRound: false,
-		todoStallRounds:    0,
-		seenTodoProgress:   make(map[string]struct{}),
-		executorHandoff:    a.executorHandoffGuard && strings.Contains(input, executorHandoffMarker),
-		input:              input,
-		budget:             runBudget{started: time.Now()},
-	}
+	// The loop fields join the classification computed above rather than
+	// opening a second object: one turn, one turnRuntime. The zero values the
+	// old literal spelled out are already there from the reset at the top.
+	state = &a.turn
+	state.seenTodoProgress = make(map[string]struct{})
+	state.executorHandoff = a.executorHandoffGuard && strings.Contains(input, executorHandoffMarker)
+	state.input = input
+	state.budget = runBudget{started: time.Now()}
 	state.todoProgress, state.trackingTodoProgress = a.canonicalTodoProgress()
 	if a.task.ledger != nil {
 		for _, sig := range a.task.ledger.SuccessfulProgressSignaturesSince(0) {
@@ -264,7 +260,7 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 
 // runToolLoop owns the main tool-round budget and dispatches each streamed
 // assistant turn into final-response or tool-round handling.
-func (a *Agent) runToolLoop(ctx context.Context, state *runLoopState) error {
+func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) error {
 	ctx = a.withAgentContext(ctx)
 	for step := 0; state.runMaxSteps <= 0 || step < state.runMaxSteps || state.graceRound || state.recoveryGraceRound; step++ {
 		// Consume a queued steer and persist it to the session so it
@@ -526,7 +522,7 @@ func sleepStreamRetryBackoff(ctx context.Context, attempt int) bool {
 // readiness retry, empty final retry, executor handoff nudge, steer drain, and
 // final compaction. cont=true continues the tool loop; cont=false returns err
 // from Run (err may be nil for a clean final answer).
-func (a *Agent) handleFinalResponse(ctx context.Context, state *runLoopState, text, reasoning string, usage *provider.Usage) (cont bool, err error) {
+func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, text, reasoning string, usage *provider.Usage) (cont bool, err error) {
 	// Recovery finalization produced a summary. Keep it in the session,
 	// but still pause so Goal auto-continue cannot open another Run with
 	// a fresh finalization round. turn_done reports recovery_paused.
@@ -560,7 +556,7 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *runLoopState, te
 		// with the missing list as the next turn; plain Delivery turns surface
 		// the recovery card for an explicit user continuation.
 		event.RecordReadinessAudit(a.sink, readiness.audit(evidence.ReadinessErrored, false))
-		a.deliveryRecoveryPending = true
+		a.pending.deliveryRecovery = true
 		return false, &FinalReadinessError{Attempts: 1, Reason: readiness.reason, Missing: readiness.missingIDs()}
 	}
 	if !hasVisibleFinalAnswer(text) {
@@ -591,9 +587,9 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *runLoopState, te
 		return true, nil
 	}
 	if readiness.applies {
-		event.RecordReadinessAudit(a.sink, readiness.audit(evidence.ReadinessAllowed, a.readinessRecovered))
+		event.RecordReadinessAudit(a.sink, readiness.audit(evidence.ReadinessAllowed, a.turn.readinessRecovered))
 	}
-	a.emitTurnShadows(a.turnInput)
+	a.emitTurnShadows(a.turn.turnInput)
 	if !a.closeSteerIntakeIfIdle() {
 		return true, nil
 	}
@@ -608,7 +604,7 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *runLoopState, te
 // cancellation, todo stall tracking, recovery finalization pause, and the
 // max-steps grace round. cont=true continues the tool loop; cont=false returns
 // err from Run.
-func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step int, text, reasoning string, calls []provider.ToolCall, usage *provider.Usage) (cont bool, err error) {
+func (a *Agent) handleToolRound(ctx context.Context, state *turnRuntime, step int, text, reasoning string, calls []provider.ToolCall, usage *provider.Usage) (cont bool, err error) {
 	state.emptyFinalBlocks = 0
 	state.usedAnyTool = true
 	unavailableContextTools := a.unavailableContextualToolCalls(ctx, calls)
@@ -634,7 +630,7 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 	if a.task.ledger != nil {
 		receiptMark = a.task.ledger.Len()
 	}
-	batch := a.executeBatch(ctx, calls)
+	batch := a.executeBatch(ctx, state, calls)
 	results, images := batch.results, batch.images
 	for i, call := range calls {
 		msg := provider.Message{

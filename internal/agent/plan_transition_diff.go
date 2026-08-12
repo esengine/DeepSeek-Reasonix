@@ -53,7 +53,7 @@ func (a *Agent) recoveryProposal(plan *toolCallPlan, episodeID, subject, preview
 		TaskID:         a.recovery.taskID,
 		TaskScopeID:    recoveryTaskScopeID(a.task.scopeID, a.recovery.runSeq.Load()),
 		EpisodeID:      episodeID,
-		TaskSummary:    a.recoveryTaskSummary,
+		TaskSummary:    a.turn.recoveryTaskSummary,
 		Tool:           plan.evidenceName,
 		Args:           plan.evidenceArgs,
 		Subject:        subject,

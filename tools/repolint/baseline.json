@@ -3,13 +3,13 @@
     "banner": 15,
     "commented-code": 0,
     "complexity": 2069,
-    "essay": 4012,
-    "file-size": 108250,
-    "function-size": 8850,
+    "essay": 3990,
+    "file-size": 108204,
+    "function-size": 8846,
     "layering": 1,
     "marker": 0,
     "narrative": 64,
-    "struct-state": 122,
+    "struct-state": 115,
     "test-file-size": 69236
   },
   "files": {
@@ -448,10 +448,10 @@
     },
     "internal/agent/agent.go": {
       "complexity": 37,
-      "essay": 71,
-      "file-size": 2201,
+      "essay": 62,
+      "file-size": 2155,
       "function-size": 102,
-      "struct-state": 10
+      "struct-state": 3
     },
     "internal/agent/ask.go": {
       "essay": 4
@@ -583,7 +583,7 @@
     "internal/agent/run_loop.go": {
       "complexity": 5,
       "essay": 27,
-      "function-size": 31
+      "function-size": 27
     },
     "internal/agent/run_usage.go": {
       "complexity": 1,
@@ -673,9 +673,6 @@
     },
     "internal/agent/turn_phase.go": {
       "complexity": 6
-    },
-    "internal/agent/turnstate.go": {
-      "essay": 13
     },
     "internal/agent/usecapability.go": {
       "essay": 9,

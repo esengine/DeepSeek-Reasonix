@@ -35,11 +35,11 @@ func (a *Agent) HostProgressSignatures() []string {
 }
 
 func (a *Agent) resetStructuralRunGuards() {
-	a.stormSig, a.stormCount, a.blockedTurnStreak = "", 0, 0
-	a.progress.reset()
+	a.turn.stormSig, a.turn.stormCount, a.turn.blockedTurnStreak = "", 0, 0
+	a.turn.progress.reset()
 }
 
-func (a *Agent) stopUnexecutedBoundaryCalls(state *runLoopState, calls []provider.ToolCall, usage *provider.Usage) (error, bool) {
+func (a *Agent) stopUnexecutedBoundaryCalls(state *turnRuntime, calls []provider.ToolCall, usage *provider.Usage) (error, bool) {
 	switch {
 	case state.graceRound:
 		a.pairUnexecutedGraceCalls(calls, "blocked: the tool-call round budget is exhausted; no more tools will run in this turn")
@@ -61,7 +61,7 @@ func (a *Agent) stopUnexecutedBoundaryCalls(state *runLoopState, calls []provide
 // the storm breaker already own that decision on the same receipts, and they
 // reach it far earlier, so a second stop keyed to a todo only added a way for
 // the host to end a turn the user never asked it to end.
-func (a *Agent) trackTodoProgress(ctx context.Context, state *runLoopState, receiptMark int) {
+func (a *Agent) trackTodoProgress(ctx context.Context, state *turnRuntime, receiptMark int) {
 	if a.planMode.Load() {
 		return
 	}

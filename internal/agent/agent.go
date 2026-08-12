@@ -435,7 +435,7 @@ type Agent struct {
 	// deliveryProfile enables the runtime-enforced delivery contract. The stable
 	// profile prompt explains intent; this is host state and never enters the
 	// provider-cached prefix. The scope ID and checkpoint it works against live
-	// in task; the per-turn expectations live in perTurnState.
+	// in task; the per-turn expectations live in turn.
 	// When agentPreset is set, deliveryProfile is derived for baseline Delivery
 	// and may be elevated per-turn by TaskPolicy (e.g. Light high-risk).
 	deliveryProfile bool
@@ -444,36 +444,17 @@ type Agent struct {
 	// update subsequent turns without rebuilding the agent.
 	agentPreset atomic.Value // string light|balanced|delivery
 
-	// turnPolicy is frozen at the start of the current Run and never observes
-	// mid-turn SetAgentPreset changes.
-	turnPolicy taskpolicy.TaskPolicy
-	// turnPolicySet is true once beginRunTurn derived turnPolicy.
-	turnPolicySet bool
-
-	// perTurnState groups the host flags that are valid for exactly one
-	// Agent.Run. beginRunTurn zeroes the whole struct in one assignment, so a
-	// field added here can never be forgotten in the reset; state that must
-	// survive turns stays directly on Agent.
-	perTurnState
+	// turn is the state of the Run currently executing; beginRunTurn replaces
+	// it wholesale. See turnruntime.go.
+	turn turnRuntime
 
 	// ablation names the subsystems a benchmark arm switched off. The zero value
 	// is the control arm.
 	ablation ablation.Set
 
-	// classifierTaskText is the host-trusted task text for delivery intent
-	// classification, set by sub-agent spawners whose Run input carries host
-	// framing. Empty means classify the raw input verbatim.
-	classifierTaskText string
-
-	// preserveEvidenceOnce makes the next Run keep the turn evidence ledger
-	// instead of resetting it. RunSubAgentWithSession sets it before a
-	// review_report completion nudge so the retry can cite the read receipts
-	// the subagent already earned; consumed (cleared) by that Run.
-	preserveEvidenceOnce bool
-	// deliveryRecoveryPending is armed only when this agent exhausts final
-	// readiness. An explicit host recovery action can consume it to preserve the
-	// failed turn's receipts once; an ordinary user turn still resets evidence.
-	deliveryRecoveryPending bool
+	// pending is what an external caller arms before the next Run; see
+	// turnruntime.go.
+	pending pendingTurn
 
 	// capabilityLedger tracks require/prefer outcomes for this user turn only.
 	// Never serialized into prompts or session state.
@@ -482,8 +463,6 @@ type Agent struct {
 	capabilityAudit *capability.Audit
 	// capabilityGate is the turn's gate memory across final-answer retries.
 	capabilityGate capabilityGateState
-	// pendingReviewWarnings are warn-level findings to surface in the final summary.
-	pendingReviewWarnings []string
 
 	// memQueue, when non-nil, lets the remember/forget tools fold a turn-tail note
 	// about a just-made memory change into the next turn, so it applies this
@@ -502,31 +481,6 @@ type Agent struct {
 	// tool loop is active, but it must keep this message and everything after it
 	// verbatim so cancellation/crash recovery can retain completed tool pairs.
 	activeTurnCreatedAt atomic.Int64
-
-	// stormSig / stormCount track a run of turns that keep failing or getting
-	// blocked the same way so the loop can break a death-spiral. The signature is
-	// each call's (tool, error/blocker) in order, NOT (tool, args): a stuck model
-	// reliably reworks the arguments cosmetically (a re-worded essay, a reordered
-	// object, a different shell command) while the host returns the same refusal or
-	// failure every time — keying on args misses the loop entirely. Because errors
-	// that embed their subject (e.g. "file not found: /x") differ per target,
-	// genuine varied probing does not collapse to one signature. Reset whenever a
-	// turn does anything else (a different failure/block shape, or any success).
-	// See applyStormBreaker.
-	stormSig   string
-	stormCount int
-
-	// progress escalates adaptively on consecutive zero-evidence-gain rounds
-	// (see progress_guard.go); reset with the evidence ledger each turn.
-	progress progressGuard
-
-	// forkRestore, when armed, swaps the frozen fork-bundle conversation in
-	// right after beginRunTurn — the counterfactual-continuation seam.
-	forkRestore func(*runLoopState)
-
-	// lastReasoning is the previous executor round's reasoning-token spend,
-	// read by the governor trigger (live policy and fork capture alike).
-	lastReasoning int
 }
 
 type repeatFailureRecord struct {
@@ -1208,6 +1162,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 			usageSource:        usageSourceOrDefault(opts.UsageSource, event.UsageSourceExecutor),
 			modelRef:           strings.TrimSpace(opts.ModelRef),
 			workspaceID:        strings.TrimSpace(opts.WorkspaceID),
+			classifierTaskText: opts.ClassifierTaskText,
 			writeWorkspaceRoot: strings.TrimSpace(opts.WriteWorkspaceRoot),
 			subagentDepth:      subagentDepth,
 			maxSubagentDepth:   maxSubagentDepth,
@@ -1251,7 +1206,6 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		projectChecks:             append([]instruction.VerifyCheck(nil), opts.ProjectChecks...),
 		deliveryProfile:           opts.DeliveryProfile || agentpreset.Normalize(opts.AgentPreset) == agentpreset.Delivery,
 		ablation:                  opts.Ablation,
-		classifierTaskText:        opts.ClassifierTaskText,
 		capabilityLedger:          opts.CapabilityLedger,
 		capabilityAudit:           opts.CapabilityAudit,
 		keepPolicy:                opts.KeepPolicy,
@@ -1312,10 +1266,10 @@ func (a *Agent) AgentPreset() string {
 
 // TurnPolicy returns the frozen TaskPolicy for the active turn, if any.
 func (a *Agent) TurnPolicy() (taskpolicy.TaskPolicy, bool) {
-	if a == nil || !a.turnPolicySet {
+	if a == nil || !a.turn.policySet {
 		return taskpolicy.TaskPolicy{}, false
 	}
-	return a.turnPolicy, true
+	return a.turn.policy, true
 }
 
 func usageSourceOrDefault(source, fallback string) string {
@@ -1416,8 +1370,8 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 
 	_, state := a.beginRunTurn(ctx, input)
-	if a.forkRestore != nil {
-		a.forkRestore(state)
+	if a.pending.forkRestore != nil {
+		a.pending.forkRestore(state)
 	}
 	state.runMaxSteps = runMaxSteps
 	state.runMaxStepsKey = runMaxStepsKey
@@ -1486,25 +1440,25 @@ func (a *Agent) RestoreDeliveryCheckpoint(checkpoint evidence.DeliveryCheckpoint
 // one explicit continuation. It returns false when there is no matching
 // readiness failure, so normal follow-up turns cannot inherit stale mutations.
 func (a *Agent) PrepareDeliveryRecovery() bool {
-	if !a.deliveryProfile || !a.deliveryRecoveryPending {
+	if !a.deliveryProfile || !a.pending.deliveryRecovery {
 		return false
 	}
-	a.preserveEvidenceOnce = true
-	a.deliveryRecoveryPending = false
+	a.pending.preserveEvidence = true
+	a.pending.deliveryRecovery = false
 	return true
 }
 
 func (a *Agent) updateDeliveryCheckpoint(runErr error) {
-	if !a.deliveryScopeActive || a.task.scopeID == "" || a.task.ledger == nil {
+	if !a.turn.deliveryScopeActive || a.task.scopeID == "" || a.task.ledger == nil {
 		return
 	}
 	cp := a.task.checkpoint
 	if cp.ScopeID != a.task.scopeID {
 		cp = evidence.DeliveryCheckpoint{ScopeID: a.task.scopeID}
 	}
-	cp.CriteriaEstablished = cp.CriteriaEstablished || a.deliveryCriteriaEstablished || a.task.ledger.HasSuccessfulTodoWrite()
+	cp.CriteriaEstablished = cp.CriteriaEstablished || a.turn.deliveryCriteriaEstablished || a.task.ledger.HasSuccessfulTodoWrite()
 	cp.WorkObserved = cp.WorkObserved || a.task.ledger.HasSuccessfulWorkReceipt()
-	persistentOnlyReady := a.deliveryPersistentExpected && !a.deliveryMutationExpected &&
+	persistentOnlyReady := a.turn.deliveryPersistentExpected && !a.turn.deliveryMutationExpected &&
 		a.task.ledger.HasSuccessfulToolReceipt("remember") && !a.task.ledger.HasSuccessfulMutationOtherThan("remember")
 	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok && !persistentOnlyReady {
 		cp.MutationObserved = true
@@ -1520,7 +1474,7 @@ func (a *Agent) updateDeliveryCheckpoint(runErr error) {
 }
 
 func (a *Agent) deliveryMutationCheckpointReady() bool {
-	if a.task.ledger == nil || !a.deliveryCriteriaEstablished {
+	if a.task.ledger == nil || !a.turn.deliveryCriteriaEstablished {
 		return false
 	}
 	mutation, ok := a.task.ledger.LatestSuccessfulMutationIndex()
@@ -2089,7 +2043,7 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 				responsesItems = append(responsesItems, append(json.RawMessage(nil), chunk.ResponsesItem...))
 			}
 		case provider.ChunkUsage:
-			usage, a.lastReasoning = chunk.Usage, chunk.Usage.ReasoningTokens
+			usage, a.turn.lastReasoning = chunk.Usage, chunk.Usage.ReasoningTokens
 			a.storeLatestRequestUsage(chunk.Usage)
 			a.sess.cacheHit.Add(int64(chunk.Usage.CacheHitTokens))
 			a.sess.cacheMiss.Add(int64(chunk.Usage.CacheMissTokens))
@@ -2635,10 +2589,10 @@ func (a *Agent) planModeDecision(toolName string, readOnly bool, safety planmode
 
 func (a *Agent) repeatedSuccessBlock(call provider.ToolCall, t tool.Tool) (string, bool) {
 	sig, ok := repeatSuccessSignature(call, t)
-	if !ok || a.repeatSuccessCounts == nil {
+	if !ok || a.turn.repeatSuccessCounts == nil {
 		return "", false
 	}
-	count := a.repeatSuccessCounts[sig]
+	count := a.turn.repeatSuccessCounts[sig]
 	if count < repeatSuccessBreakThreshold {
 		return "", false
 	}
@@ -2683,10 +2637,10 @@ func (a *Agent) recordRepeatSuccess(call provider.ToolCall, t tool.Tool) {
 	if !ok {
 		return
 	}
-	if a.repeatSuccessCounts == nil {
-		a.repeatSuccessCounts = make(map[string]int)
+	if a.turn.repeatSuccessCounts == nil {
+		a.turn.repeatSuccessCounts = make(map[string]int)
 	}
-	a.repeatSuccessCounts[sig]++
+	a.turn.repeatSuccessCounts[sig]++
 }
 
 func repeatSuccessSignature(call provider.ToolCall, t tool.Tool) (string, bool) {

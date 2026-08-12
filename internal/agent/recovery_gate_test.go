@@ -82,7 +82,7 @@ func TestAuthorizedRecoveryPlanTransitionCanReplaceCurrentTodo(t *testing.T) {
 		{Content: "Run tests", Status: "pending"},
 	})
 
-	out := a.executeOne(context.Background(), provider.ToolCall{
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
 		ID:   "replace-plan",
 		Name: "todo_write",
 		Arguments: `{"todos":[
@@ -110,7 +110,7 @@ func TestPlanTransitionNeedsDedicatedReplacementAuthorization(t *testing.T) {
 	a := New(nil, reg, NewSession(""), Options{RecoveryGate: gate}, event.Discard)
 	a.SeedTodoState([]evidence.TodoItem{{Content: "Implement parser", Status: "in_progress"}})
 
-	out := a.executeOne(context.Background(), provider.ToolCall{
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
 		ID:        "replace-plan-without-authorization",
 		Name:      "todo_write",
 		Arguments: `{"todos":[{"content":"Replace parser architecture","status":"in_progress"}]}`,
@@ -196,7 +196,7 @@ func TestRecoveryBlockSurfacesConcreteReason(t *testing.T) {
 		Message: "blocked: Auto stopped repeating this operation after 3 consecutive failures: write a.go. Other operations remain available.",
 	}}
 	a := New(nil, reg, NewSession(""), Options{RecoveryGate: gate}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
 		ID: "blocked-write", Name: "write_file", Arguments: `{"path":"a.go","content":"x"}`,
 	})
 	if !out.blocked || !strings.Contains(out.errMsg, "stopped repeating this operation") || strings.Contains(out.errMsg, "Auto Guard") {

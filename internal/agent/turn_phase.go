@@ -48,8 +48,8 @@ func (a *Agent) emitCompletionSummary(c *taskcontract.Contract) {
 		}
 	}
 	review := "none"
-	if a.turnPolicySet {
-		switch a.turnPolicy.Review {
+	if a.turn.policySet {
+		switch a.turn.policy.Review {
 		case taskpolicy.ReviewNone:
 			review = "none"
 		default:
@@ -57,7 +57,7 @@ func (a *Agent) emitCompletionSummary(c *taskcontract.Contract) {
 				if mut, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok {
 					if a.task.ledger.HasSuccessfulReviewAfter(mut) {
 						review = "passed"
-					} else if a.turnPolicy.RequiresIndependentReview() {
+					} else if a.turn.policy.RequiresIndependentReview() {
 						review = "unavailable"
 					}
 				}
@@ -80,7 +80,7 @@ func (a *Agent) emitCompletionSummary(c *taskcontract.Contract) {
 			break
 		}
 	}
-	constraintDegraded := a.turnPolicySet && (a.turnPolicy.Constraints.ForbidTests || len(a.turnPolicy.Constraints.AllowedChecks) > 0)
+	constraintDegraded := a.turn.policySet && (a.turn.policy.Constraints.ForbidTests || len(a.turn.policy.Constraints.AllowedChecks) > 0)
 	summaryVerdict := verdict.String()
 	switch verdict {
 	case taskcontract.VerdictComplete:

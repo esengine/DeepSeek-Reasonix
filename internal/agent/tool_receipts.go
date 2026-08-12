@@ -35,7 +35,7 @@ func (a *Agent) recordToolReceipts(plan *toolCallPlan, result string, execution 
 		if err == nil && call.Name == "todo_write" {
 			a.setTodoState(rec.Todos)
 			if len(rec.Todos) > 0 {
-				a.deliveryCriteriaEstablished = true
+				a.turn.deliveryCriteriaEstablished = true
 			}
 		}
 	}

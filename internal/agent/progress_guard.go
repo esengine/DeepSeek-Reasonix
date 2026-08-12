@@ -70,8 +70,8 @@ func (a *Agent) applyBatchGuards(ctx context.Context, cancelled bool, calls []pr
 // and a continuation keeps both.
 func (a *Agent) resetTurnEvidence() {
 	a.task.restartLedger()
-	a.progress.reset()
-	a.stormSig, a.stormCount, a.blockedTurnStreak = "", 0, 0
+	a.turn.progress.reset()
+	a.turn.stormSig, a.turn.stormCount, a.turn.blockedTurnStreak = "", 0, 0
 }
 
 // observeOutcomeShadow scores the round's receipts through the shadow outcome
@@ -115,7 +115,7 @@ func (a *Agent) applyProgressGuard(outcomes []toolOutcome, receiptMark int, goal
 	if !anySuccess {
 		return intervention{}
 	}
-	streak := a.progress.observe(receipts)
+	streak := a.turn.progress.observe(receipts)
 	var guard, detail string
 	tier := verdictAdvise
 	warn := false
@@ -131,7 +131,7 @@ func (a *Agent) applyProgressGuard(outcomes []toolOutcome, receiptMark int, goal
 			tier = verdictRedirect
 			// Start a fresh intervention epoch. The evidence tracker stays intact,
 			// so repeated work remains visible while a changed strategy can recover.
-			a.progress.streak = 0
+			a.turn.progress.streak = 0
 		} else {
 			guard = fmt.Sprintf(
 				"[progress guard] %d tool rounds in a row produced no new evidence (no new files, results, or changes). Stop exploring: produce your final answer now, stating what was established and what remains unknown.",
@@ -175,8 +175,8 @@ func progressGuardNoticeText() string {
 // guarded batch ran, so a successful write or command receipt recorded after
 // it counts as real progress and revokes the pass (see loopGuardAllowsFinal).
 func (a *Agent) armLoopGuardPass(receiptMark int) {
-	a.loopGuardArmed = true
-	a.loopGuardReceiptMark = receiptMark
+	a.turn.loopGuardArmed = true
+	a.turn.loopGuardReceiptMark = receiptMark
 }
 
 // loopGuardAllowsFinal reports whether final readiness should stand down: a
@@ -185,11 +185,11 @@ func (a *Agent) armLoopGuardPass(receiptMark int) {
 // demanding them would restart the loop the guard broke — while bookkeeping
 // (ask, todo_write, complete_step) keeps the pass and real progress revokes it.
 func (a *Agent) loopGuardAllowsFinal() bool {
-	if a == nil || !a.loopGuardArmed {
+	if a == nil || !a.turn.loopGuardArmed {
 		return false
 	}
 	if a.task.ledger == nil {
 		return true
 	}
-	return !a.task.ledger.HasWriteOrCommandSince(a.loopGuardReceiptMark)
+	return !a.task.ledger.HasWriteOrCommandSince(a.turn.loopGuardReceiptMark)
 }

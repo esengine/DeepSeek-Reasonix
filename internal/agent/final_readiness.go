@@ -108,7 +108,7 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 	deliveryMutation := false
 	deliveryVerificationOnly := false
 	checkpoint := a.task.checkpoint
-	checkpointApplies := a.deliveryScopeActive && checkpoint.ScopeID == a.task.scopeID
+	checkpointApplies := a.turn.deliveryScopeActive && checkpoint.ScopeID == a.task.scopeID
 	if a.deliveryProfile {
 		if mutation, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok {
 			writer, hasWriter = mutation, true
@@ -123,15 +123,15 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 			deliveryMutation = true
 		}
 		workObserved := a.task.ledger.HasSuccessfulWorkReceipt() || (checkpointApplies && checkpoint.WorkObserved)
-		if a.deliveryTaskExpected && !a.deliveryPersistentExpected && !workObserved {
+		if a.turn.deliveryTaskExpected && !a.turn.deliveryPersistentExpected && !workObserved {
 			out.missingActionEvidence++
 			missing = append(missing, "perform host-observable work for this technical task before answering")
 		}
-		if a.deliveryPersistentExpected && !a.task.ledger.HasSuccessfulToolReceipt("remember") {
+		if a.turn.deliveryPersistentExpected && !a.task.ledger.HasSuccessfulToolReceipt("remember") {
 			out.missingMutation++
 			missing = append(missing, "save the requested durable memory with the remember tool before answering")
 		}
-		if a.deliveryMutationExpected && !deliveryMutation {
+		if a.turn.deliveryMutationExpected && !deliveryMutation {
 			out.missingMutation++
 			missing = append(missing, "the request requires a state change, but no successful mutation was observed")
 		}
@@ -147,7 +147,7 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 			out.missingCapabilities++
 			missing = append(missing, msg)
 		}
-		if a.deliveryPersistentExpected && !a.deliveryMutationExpected && !a.task.ledger.HasSuccessfulMutationOtherThan("remember") {
+		if a.turn.deliveryPersistentExpected && !a.turn.deliveryMutationExpected && !a.task.ledger.HasSuccessfulMutationOtherThan("remember") {
 			// A durable-memory-only request has its own concrete receipt contract.
 			// It must not inherit code-delivery todo/test/diff/review ceremonies;
 			// any unrelated mutation falls through to the full contract below.
@@ -167,8 +167,8 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 		}
 		return out
 	}
-	if !a.deliveryProfile && a.turnPolicySet && a.turnPolicy.Verification >= taskpolicy.VerifyTargeted &&
-		a.turnPolicy.AllowsTests() && toolPresent(a.tools, "bash") &&
+	if !a.deliveryProfile && a.turn.policySet && a.turn.policy.Verification >= taskpolicy.VerifyTargeted &&
+		a.turn.policy.AllowsTests() && toolPresent(a.tools, "bash") &&
 		!a.task.ledger.HasSuccessfulVerificationCommandAfter(writer) {
 		out.applies = true
 		out.missingVerification++
@@ -182,7 +182,7 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 	out.applies = true
 	if a.deliveryProfile {
 		a.emitTurnPhase(event.TurnPhaseVerifying)
-		criteriaEstablished := a.deliveryCriteriaEstablished || (checkpointApplies && checkpoint.CriteriaEstablished)
+		criteriaEstablished := a.turn.deliveryCriteriaEstablished || (checkpointApplies && checkpoint.CriteriaEstablished)
 		if !criteriaEstablished {
 			out.missingAcceptanceCriteria++
 			missing = append(missing, "establish concrete acceptance criteria with todo_write before changing state")

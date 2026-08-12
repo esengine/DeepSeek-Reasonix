@@ -70,7 +70,7 @@ func TestBindWritePathsKeepsCapabilitySchemaButBlocksResolvedWriter(t *testing.T
 		t.Fatal("path-bound wrapper changed provider-visible use_capability contract")
 	}
 	a := New(nil, bound, NewSession("sys"), Options{}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
 		ID: "writer", Name: "use_capability",
 		Arguments: `{"action":"call","capability_id":"mcp-tool:fs/write","arguments":{}}`,
 	})
@@ -100,7 +100,7 @@ func TestBindWritePathsAllowsResolvedReadOnlyCapability(t *testing.T) {
 	}})
 	bound, _ := BindWritePaths(reg, claim, root, false)
 	a := New(nil, bound, NewSession("sys"), Options{}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
 		ID: "reader", Name: "use_capability",
 		Arguments: `{"action":"call","capability_id":"mcp-tool:search/query","arguments":{}}`,
 	})
@@ -247,7 +247,7 @@ func TestAgentReservesParentWriteBeforePreToolUse(t *testing.T) {
 		WriteWorkspaceRoot: root,
 	}, event.Discard)
 
-	out := a.executeOne(context.Background(), provider.ToolCall{
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
 		ID:        "write-1",
 		Name:      "write_file",
 		Arguments: string(mustJSON(t, map[string]string{"path": "hook-race.md", "content": "parent"})),

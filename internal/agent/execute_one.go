@@ -64,7 +64,7 @@ type toolCallPlan struct {
 // executeOne runs a single tool call. It is pure with respect to the event sink
 // — the caller emits ToolDispatch/ToolResult — so it is safe to invoke from
 // parallel goroutines. Stages: parse → policy → prepare → finish.
-func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) (out toolOutcome) {
+func (a *Agent) executeOne(ctx context.Context, turn *turnRuntime, call provider.ToolCall) (out toolOutcome) {
 	ctx = a.withAgentContext(ctx)
 	plan := &toolCallPlan{call: call}
 	defer func() {
@@ -96,7 +96,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) (out too
 	if blocked, early := a.interceptToolBefore(ctx, plan); early {
 		return blocked
 	}
-	if blocked, early := a.resolveToolPolicy(ctx, plan); early {
+	if blocked, early := a.resolveToolPolicy(ctx, turn, plan); early {
 		return blocked
 	}
 	if blocked, early := a.prepareToolExecution(ctx, plan); early {
@@ -170,14 +170,14 @@ func (a *Agent) parseToolCall(ctx context.Context, plan *toolCallPlan) (toolOutc
 
 // resolveToolPolicy applies Plan mode, proxy resolution, delivery gates, Auto
 // Guard, and permission checks. Permission must complete before any write lease.
-func (a *Agent) resolveToolPolicy(ctx context.Context, plan *toolCallPlan) (toolOutcome, bool) {
+func (a *Agent) resolveToolPolicy(ctx context.Context, turn *turnRuntime, plan *toolCallPlan) (toolOutcome, bool) {
 	if blocked, early := a.applyPlanModeAndProxy(ctx, plan); early {
 		return blocked, true
 	}
 	if blocked, early := a.applyContextualToolGate(ctx, plan); early {
 		return blocked, true
 	}
-	if blocked, early := a.applyDeliveryPolicyGates(plan); early {
+	if blocked, early := a.applyDeliveryPolicyGates(turn, plan); early {
 		return blocked, true
 	}
 	// After proxy resolution, re-apply the batch mutation barrier using the
@@ -391,7 +391,7 @@ func (a *Agent) applyPlanModeAndProxy(ctx context.Context, plan *toolCallPlan) (
 
 // applyDeliveryPolicyGates enforces global deterministic shell contracts plus
 // delivery-profile-only criteria rules, and classifies mutation/verification.
-func (a *Agent) applyDeliveryPolicyGates(plan *toolCallPlan) (toolOutcome, bool) {
+func (a *Agent) applyDeliveryPolicyGates(turn *turnRuntime, plan *toolCallPlan) (toolOutcome, bool) {
 	// Global deterministic shell contract (ordinary + Delivery). PowerShell 5.1
 	// &&/|| is enforced inside the bash tool itself so descriptor and error text
 	// stay shell-accurate; the agent layers apply command-shape protections.
@@ -454,8 +454,8 @@ func (a *Agent) applyDeliveryPolicyGates(plan *toolCallPlan) (toolOutcome, bool)
 	}
 
 	plan.mutates = evidence.ToolCallMutates(plan.evidenceName, plan.evidenceArgs, plan.readOnly)
-	persistentWorkflowCall := a.deliveryPersistentExpected && !a.deliveryMutationExpected && plan.evidenceName == "remember"
-	if a.deliveryProfile && !persistentWorkflowCall && evidence.ToolCallRequiresDeliveryCriteria(plan.evidenceName, plan.evidenceArgs, plan.readOnly) && !a.deliveryCriteriaEstablished {
+	persistentWorkflowCall := turn.deliveryPersistentExpected && !turn.deliveryMutationExpected && plan.evidenceName == "remember"
+	if a.deliveryProfile && !persistentWorkflowCall && evidence.ToolCallRequiresDeliveryCriteria(plan.evidenceName, plan.evidenceArgs, plan.readOnly) && !turn.deliveryCriteriaEstablished {
 		return toolOutcome{
 			output:  "blocked: delivery-first mode requires acceptance criteria before state-changing work. Call todo_write with a concrete, verifiable task list, then retry this tool call.",
 			blocked: true,

@@ -54,7 +54,7 @@ func (a *Agent) armGovernorCapture(sample evidence.OutcomeSample) {
 	if forkCapturePolicy() != "governor" || governorEnabled || a.task.ebm.captured || a.task.ebm.captureArmed {
 		return
 	}
-	if !governorTrigger(sample, a.lastReasoning) {
+	if !governorTrigger(sample, a.turn.lastReasoning) {
 		return
 	}
 	a.task.ebm.captureArmed = true
@@ -209,7 +209,7 @@ const actFirstNudge = "[guidance] Prefer cheap repository evidence or a targeted
 // arm's single treatment, placed in the live policy's slot; the dose disarms
 // every runtime policy for the continuation.
 func (a *Agent) armForkContinuation(b *ForkBundle, nudge string) {
-	a.forkRestore = func(_ *runLoopState) {
+	a.pending.forkRestore = func(_ *turnRuntime) {
 		messages := append([]provider.Message(nil), b.Messages...)
 		if nudge != "" {
 			applyForkTreatment(messages, nudge)

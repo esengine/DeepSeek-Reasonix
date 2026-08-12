@@ -114,7 +114,7 @@ func TestTaskBudgetSurvivesAContinuation(t *testing.T) {
 	afterFirst := sink.samples[len(sink.samples)-1]
 
 	// What the host does for a continuation: keep the evidence ledger.
-	a.preserveEvidenceOnce = true
+	a.pending.preserveEvidence = true
 	if err := a.Run(context.Background(), "continue"); err != nil {
 		t.Fatalf("continuation Run: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestRunBudgetCountsRoundsWithoutUsage(t *testing.T) {
 func TestRunBudgetIgnoresSinksThatDoNotOptIn(t *testing.T) {
 	plain := event.FuncSink(func(event.Event) {})
 	a := &Agent{sink: plain}
-	state := &runLoopState{}
+	state := &turnRuntime{}
 	a.observeRunBudget(state, &provider.Usage{PromptTokens: 5, RequestCount: 1})
 	if state.budget.rounds != 1 || state.budget.promptTokens != 5 {
 		t.Fatalf("budget = %+v, want the round still accumulated locally", state.budget)

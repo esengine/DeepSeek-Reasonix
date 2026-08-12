@@ -15,7 +15,7 @@ type landCause struct {
 	detail string
 }
 
-func (c landCause) nudge(state *runLoopState) string {
+func (c landCause) nudge(state *turnRuntime) string {
 	const close = "Do not call any more tools. Synthesize a final answer from the work already completed: what was accomplished, what remains, and any decision the user should make."
 	if c.kind == "task_budget" {
 		return fmt.Sprintf("This task has reached its %s budget. %s Use the evidence already collected and label what is still uncertain; the user can continue in the next message.", c.axis, close)
@@ -37,7 +37,7 @@ func (c landCause) noticeText() string {
 // armFinalizationRound is the single place a turn is told to stop using tools.
 // The grace round it sets — not the wording — is what enforces that: unexecuted
 // calls in the next round are paired and refused by stopUnexecutedBoundaryCalls.
-func (a *Agent) armFinalizationRound(state *runLoopState, cause landCause) {
+func (a *Agent) armFinalizationRound(state *turnRuntime, cause landCause) {
 	if state.graceRound {
 		return
 	}
@@ -50,7 +50,7 @@ func (a *Agent) armFinalizationRound(state *runLoopState, cause landCause) {
 
 // gracePause is the resumable stop a finalized turn ends with, chosen by what
 // caused the landing.
-func (a *Agent) gracePause(state *runLoopState) error {
+func (a *Agent) gracePause(state *turnRuntime) error {
 	if state.landCause.kind == "task_budget" {
 		return &taskBudgetPause{axis: state.landCause.axis, detail: state.landCause.detail}
 	}

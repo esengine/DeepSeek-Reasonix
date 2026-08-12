@@ -43,7 +43,7 @@ func governorExit(sample evidence.OutcomeSample) bool {
 // applyGovernor stamps eligibility on the round's sample and, under the
 // experiment arm, toggles the per-request depth override.
 func (a *Agent) applyGovernor(sample *evidence.OutcomeSample) {
-	sample.GovernorEligible = governorTrigger(*sample, a.lastReasoning)
+	sample.GovernorEligible = governorTrigger(*sample, a.turn.lastReasoning)
 	if !governorEnabled {
 		return
 	}
