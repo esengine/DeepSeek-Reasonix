@@ -638,17 +638,16 @@ func (a *App) WorkspaceGitCommitDetail(tabID string, hash string, path string) (
 	}
 
 	// Project level: list of files changed
-	cmd := workspaceGit("-C", base, "diff-tree", "--relative", "--no-commit-id", "--name-only", "-r", hash)
+	cmd := workspaceGit("-C", base, "diff-tree", "--relative", "--no-commit-id", "--name-only", "-z", "-r", hash)
 	raw, err := cmd.Output()
 	if err != nil {
 		return GitCommitDetailView{}, err
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
 	var files []string
-	for _, line := range lines {
-		if line != "" {
-			files = append(files, line)
+	for path := range bytes.SplitSeq(raw, []byte{0}) {
+		if len(path) > 0 {
+			files = append(files, string(path))
 		}
 	}
 	return GitCommitDetailView{Files: files}, nil
