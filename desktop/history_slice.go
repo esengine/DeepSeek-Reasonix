@@ -1727,8 +1727,8 @@ func (a *App) rebuildHistoryIndexForLiveSession(sessionPath string) {
 
 // startHistoryIndexMigration arms the startup background worker that builds
 // display indexes for session files that predate the sidecar. Like
-// enableDeferredRebuildRetry it is only called from the Wails startup hook, so
-// test-constructed Apps never spawn the worker.
+// enableDeferredRebuildRetry it is only called from the Wails startup/DOM-ready
+// path, so test-constructed Apps never spawn the worker.
 func (a *App) startHistoryIndexMigration() {
 	if a.ctx == nil {
 		return
