@@ -486,7 +486,7 @@ func (a *Agent) applyRecoveryAndPermission(ctx context.Context, plan *toolCallPl
 	episodeStopped := false
 	if ctrl := a.recoveryEpisodeControl(); ctrl != nil {
 		plan.recoveryGen = ctrl.Generation()
-		episodeStopped = ctrl.EpisodeStopped(a.recoveryTaskID)
+		episodeStopped = ctrl.EpisodeStopped(a.recovery.taskID)
 	}
 	if a.recoveryGate != nil && (plan.mutates || plan.verification || plan.planTransition || episodeStopped) {
 		subject := recoverySubject(plan.evidenceName, plan.evidenceArgs)

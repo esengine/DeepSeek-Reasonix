@@ -370,14 +370,8 @@ type Agent struct {
 	// Shared by root and sub-agents for the same controller task. nil disables
 	// recovery checks (Ask/YOLO, headless without wiring, or feature off).
 	recoveryGate RecoveryGate
-	// recoveryAgentID labels this agent on recovery cards (empty = root).
-	recoveryAgentID string
-	// recoveryTaskID isolates recovery state across concurrent top-level tasks.
-	// Empty shares the root task bucket.
-	recoveryTaskID string
-	// recoveryRunSeq gives ordinary (non-goal) runs a collision-free host scope.
-	// Goal runs use their stable delivery scope instead.
-	recoveryRunSeq atomic.Uint64
+	// recovery is who this agent is to the shared gate above.
+	recovery recoveryIdentity
 
 	// planModeReadOnlyTrust is retained for legacy controller wiring. The main
 	// Plan execution path no longer consults it.
@@ -703,8 +697,8 @@ func (a *Agent) SetRecoveryIdentity(agentID, taskID string) {
 	if a == nil {
 		return
 	}
-	a.recoveryAgentID = strings.TrimSpace(agentID)
-	a.recoveryTaskID = strings.TrimSpace(taskID)
+	a.recovery.agentID = strings.TrimSpace(agentID)
+	a.recovery.taskID = strings.TrimSpace(taskID)
 }
 
 // RecoveryGate returns the attached Auto Guard (may be nil).
@@ -1301,25 +1295,27 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		reasoningByteLimit = defaultReasoningByteLimit
 	}
 	a := &Agent{
-		prov:                      prov,
-		tools:                     tools,
-		session:                   session,
-		taskBudget:                runBudget{limit: normalizeTaskBudget(opts.TaskBudget)},
-		maxSteps:                  opts.MaxSteps,
-		maxStepsKey:               maxStepsKey,
-		reasoningByteLimit:        reasoningByteLimit,
-		maxOutputTokens:           opts.MaxOutputTokens,
-		temperature:               opts.Temperature,
-		pricing:                   opts.Pricing,
-		usageSource:               usageSourceOrDefault(opts.UsageSource, event.UsageSourceExecutor),
-		modelRef:                  strings.TrimSpace(opts.ModelRef),
-		sink:                      sink,
-		requireVisibleFinal:       opts.RequireVisibleFinal,
-		gate:                      gate,
-		extensions:                opts.Extensions,
-		recoveryGate:              opts.RecoveryGate,
-		recoveryAgentID:           strings.TrimSpace(opts.RecoveryAgentID),
-		recoveryTaskID:            strings.TrimSpace(opts.RecoveryTaskID),
+		prov:                prov,
+		tools:               tools,
+		session:             session,
+		taskBudget:          runBudget{limit: normalizeTaskBudget(opts.TaskBudget)},
+		maxSteps:            opts.MaxSteps,
+		maxStepsKey:         maxStepsKey,
+		reasoningByteLimit:  reasoningByteLimit,
+		maxOutputTokens:     opts.MaxOutputTokens,
+		temperature:         opts.Temperature,
+		pricing:             opts.Pricing,
+		usageSource:         usageSourceOrDefault(opts.UsageSource, event.UsageSourceExecutor),
+		modelRef:            strings.TrimSpace(opts.ModelRef),
+		sink:                sink,
+		requireVisibleFinal: opts.RequireVisibleFinal,
+		gate:                gate,
+		extensions:          opts.Extensions,
+		recoveryGate:        opts.RecoveryGate,
+		recovery: recoveryIdentity{
+			agentID: strings.TrimSpace(opts.RecoveryAgentID),
+			taskID:  strings.TrimSpace(opts.RecoveryTaskID),
+		},
 		readOnlyExecution:         opts.ReadOnlyExecution,
 		plannerMCPExecution:       opts.PlannerMCPExecution,
 		planModeReadOnlyTrust:     planModeReadOnlyTrust,
@@ -1464,7 +1460,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 			runMaxStepsKey = limit.key
 		}
 	}
-	a.recoveryRunSeq.Add(1)
+	a.recovery.runSeq.Add(1)
 	// All role settings participate in the workspace lease for the run; the
 	// exclusive write lock is still acquired lazily on the first real writer.
 	if a.workspaceLease != nil {

@@ -534,7 +534,7 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *runLoopState, te
 		a.contextManager().ObserveUsage(usage)
 		reason := ""
 		if ctrl := a.recoveryEpisodeControl(); ctrl != nil {
-			_, _ = ctrl.ConsumeFinalization(a.recoveryTaskID)
+			_, _ = ctrl.ConsumeFinalization(a.recovery.taskID)
 		}
 		return false, &RecoveryPauseError{
 			Message:    "Automatic retries paused. Reasonix stopped repeated attempts and kept completed work. Send \"continue\" to start a fresh attempt, or add instructions to change direction.",
@@ -682,7 +682,7 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 	if batch.recoveryStopTurn && !state.recoveryGraceRound {
 		state.recoveryGraceRound = true
 		if ctrl := a.recoveryEpisodeControl(); ctrl != nil {
-			ctrl.MarkFinalizationOffered(a.recoveryTaskID)
+			ctrl.MarkFinalizationOffered(a.recovery.taskID)
 		}
 		nudge := "Auto recovery has reached its limit for this turn. Do not call any more tools. Summarize what was completed, what failed, and what the user should do next. The user can continue in the next message."
 		a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(nudge)})
