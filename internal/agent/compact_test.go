@@ -655,11 +655,7 @@ func TestMaybeCompactDefersWhenOnlyActiveTurnRemains(t *testing.T) {
 }
 
 func TestCompactTriggerIgnoresConfiguredOutputBudget(t *testing.T) {
-	a := &Agent{
-		contextWindow:   100_000,
-		maxOutputTokens: 20_000,
-		compactRatio:    0.85,
-	}
+	a := &Agent{agentConfig: agentConfig{contextWindow: 100_000, maxOutputTokens: 20_000, compactRatio: 0.85}}
 	if got := a.compactTrigger(); got != 85_000 {
 		t.Fatalf("trigger = %d, want 85000 (output budget must not change it)", got)
 	}

@@ -281,20 +281,14 @@ type ToolHooks interface {
 // Agent drives a single task: a Provider, a tool Registry, and a Session wired
 // into the main loop.
 type Agent struct {
-	prov               provider.Provider
-	tools              *tool.Registry
-	session            *Session
-	sessMu             sync.Mutex // guards the session pointer for external Session()/SetSession
-	maxSteps           int
-	maxStepsKey        string
-	reasoningByteLimit int
-	maxOutputTokens    int
+	agentConfig
+	prov    provider.Provider
+	tools   *tool.Registry
+	session *Session
+	sessMu  sync.Mutex // guards the session pointer for external Session()/SetSession
 	// executorHandoffGuard is enabled by Coordinator only for the executor agent.
 	executorHandoffGuard bool
-	temperature          float64
 	pricing              *provider.Pricing
-	usageSource          string
-	modelRef             string
 	responseLanguage     atomic.Value // string: auto|zh|en
 	reasoningLanguage    atomic.Value // string: auto|zh|en
 
@@ -419,7 +413,6 @@ type Agent struct {
 	writeScheduler *SubagentScheduler
 	// writeWorkspaceRoot is the workspace used to normalize parent write
 	// reservations when writeScheduler is set.
-	writeWorkspaceRoot string
 
 	// workspaceLease is shared by every writer-capable agent in one Delivery
 	// session. It is acquired lazily on the first mutation and held through the
@@ -524,15 +517,9 @@ type Agent struct {
 
 	// subagentDepth tracks the current agent's nesting depth. maxSubagentDepth
 	// caps delegation; when reached, recursive agent/skill tools are excluded.
-	subagentDepth    int
-	maxSubagentDepth int
 
 	// Context management keeps the canonical transcript immutable and installs
 	// at most one provider-visible checkpoint each time compactRatio is crossed.
-	contextWindow   int
-	compactRatio    float64
-	recentKeep      int
-	archiveDir      string
 	keepPolicy      KeepPolicy
 	compaction      compactionProgress
 	sessionPath     string // bound transcript path for projection sidecars
@@ -1291,18 +1278,27 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		reasoningByteLimit = defaultReasoningByteLimit
 	}
 	a := &Agent{
+		agentConfig: agentConfig{
+			maxSteps:           opts.MaxSteps,
+			maxStepsKey:        maxStepsKey,
+			reasoningByteLimit: reasoningByteLimit,
+			maxOutputTokens:    opts.MaxOutputTokens,
+			temperature:        opts.Temperature,
+			usageSource:        usageSourceOrDefault(opts.UsageSource, event.UsageSourceExecutor),
+			modelRef:           strings.TrimSpace(opts.ModelRef),
+			writeWorkspaceRoot: strings.TrimSpace(opts.WriteWorkspaceRoot),
+			subagentDepth:      subagentDepth,
+			maxSubagentDepth:   maxSubagentDepth,
+			contextWindow:      opts.ContextWindow,
+			compactRatio:       opts.CompactRatio,
+			recentKeep:         opts.RecentKeep,
+			archiveDir:         opts.ArchiveDir,
+		},
 		prov:                prov,
 		tools:               tools,
 		session:             session,
 		taskBudget:          runBudget{limit: normalizeTaskBudget(opts.TaskBudget)},
-		maxSteps:            opts.MaxSteps,
-		maxStepsKey:         maxStepsKey,
-		reasoningByteLimit:  reasoningByteLimit,
-		maxOutputTokens:     opts.MaxOutputTokens,
-		temperature:         opts.Temperature,
 		pricing:             opts.Pricing,
-		usageSource:         usageSourceOrDefault(opts.UsageSource, event.UsageSourceExecutor),
-		modelRef:            strings.TrimSpace(opts.ModelRef),
 		sink:                sink,
 		requireVisibleFinal: opts.RequireVisibleFinal,
 		gate:                gate,
@@ -1321,7 +1317,6 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		jobs:                      opts.Jobs,
 		memQueue:                  opts.MemoryQueue,
 		writeScheduler:            opts.WriteScheduler,
-		writeWorkspaceRoot:        strings.TrimSpace(opts.WriteWorkspaceRoot),
 		workspaceLease:            opts.WorkspaceLease,
 		missingReasoningWarnState: missingReasoningWarnStateFor(opts.MissingReasoningWarnStateDir),
 		evidence:                  evidence.NewLedger(),
@@ -1331,17 +1326,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		classifierTaskText:        opts.ClassifierTaskText,
 		capabilityLedger:          opts.CapabilityLedger,
 		capabilityAudit:           opts.CapabilityAudit,
-		contextWindow:             opts.ContextWindow,
-		compactRatio:              opts.CompactRatio,
-		recentKeep:                opts.RecentKeep,
-		archiveDir:                opts.ArchiveDir,
 		keepPolicy:                opts.KeepPolicy,
 		sessionPath:               strings.TrimSpace(opts.SessionPath),
 		workspaceID:               strings.TrimSpace(opts.WorkspaceID),
 		cacheState:                CacheStateUnknown,
 		strictAlternatingRoles:    opts.StrictAlternatingRoles,
-		subagentDepth:             subagentDepth,
-		maxSubagentDepth:          maxSubagentDepth,
 		mutationObserver:          opts.MutationObserver,
 	}
 	a.outputBudget = outputBudgetOf(prov)

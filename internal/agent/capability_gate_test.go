@@ -136,7 +136,7 @@ func TestDeliveryReviewGateDefersToParentInSubagents(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "review", readOnly: true})
 	reg.Add(fakeTool{name: "security_review", readOnly: true})
-	a := &Agent{deliveryProfile: true, evidence: ledger, tools: reg, subagentDepth: 1}
+	a := &Agent{agentConfig: agentConfig{subagentDepth: 1}, deliveryProfile: true, evidence: ledger, tools: reg}
 
 	// Inside a sub-agent the structured-review contract belongs to the parent,
 	// which receives the child's mutation receipts via mergeChildEvidence. The
