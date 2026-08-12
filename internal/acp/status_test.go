@@ -42,6 +42,33 @@ func TestUsageAccumulatorTotalsMoreThanAuditLimit(t *testing.T) {
 	}
 }
 
+func TestUsageAccumulatorExposesAuthoritativeTotalWithoutCacheDoubleCount(t *testing.T) {
+	var accumulator usageAccumulator
+	accumulator.addQuoted(&provider.Usage{
+		PromptTokens: 1_000, CompletionTokens: 500, ReasoningTokens: 300,
+		CacheHitTokens: 800, CacheMissTokens: 200,
+	}, nil, nil, event.UsageSourceExecutor)
+
+	wire := accumulator.wire()
+	if wire.TotalTokens != 1_500 {
+		t.Fatalf("total tokens = %d, want 1500: %+v", wire.TotalTokens, wire)
+	}
+	if wire.PromptTokens != wire.CacheHitTokens+wire.CacheMissTokens {
+		t.Fatalf("cache split no longer partitions prompt tokens: %+v", wire)
+	}
+}
+
+func TestRestoreUsageReconstructsTotalTokensFromLegacySnapshot(t *testing.T) {
+	wire := restoreUsage(persistedUsageAccumulator{
+		PromptTokens: 1_000, CompletionTokens: 500,
+		CacheHitTokens: 800, CacheMissTokens: 200,
+	}).wire()
+
+	if wire.TotalTokens != 1_500 {
+		t.Fatalf("restored total tokens = %d, want 1500: %+v", wire.TotalTokens, wire)
+	}
+}
+
 func TestRestoredUsageKeepsFullScalarTotalAfterNewQuote(t *testing.T) {
 	complete := true
 	accumulator := restoreUsage(persistedUsageAccumulator{
@@ -151,7 +178,7 @@ func TestStatusExtensionTracksMultipleSessionsAndUsage(t *testing.T) {
 		t.Fatalf("effective runtime status = %+v", firstStatus)
 	}
 	usage := firstStatus.Usage.Cumulative
-	if usage.PromptTokens != 15 || usage.CompletionTokens != 5 || usage.ReasoningTokens != 2 || usage.CacheHitTokens != 7 || usage.CacheMissTokens != 8 {
+	if usage.TotalTokens != 20 || usage.PromptTokens != 15 || usage.CompletionTokens != 5 || usage.ReasoningTokens != 2 || usage.CacheHitTokens != 7 || usage.CacheMissTokens != 8 {
 		t.Fatalf("cumulative usage = %+v", usage)
 	}
 	if usage.UsageSource != "mixed" || usage.CacheHitRatio == nil || usage.EstimatedCost == nil || usage.Currency == nil || *usage.Currency != "USD" {
