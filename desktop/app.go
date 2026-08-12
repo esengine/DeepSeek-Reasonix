@@ -3760,28 +3760,6 @@ func (a *App) ResumeSessionPage(path string, limit int) (HistoryPage, error) {
 	return a.ResumeSessionPageForTab("", path, limit)
 }
 
-func (a *App) ResumeSessionPageForTab(tabID, path string, limit int) (HistoryPage, error) {
-	tab, ctrl := a.tabAndCtrlByID(tabID)
-	if tab == nil || ctrl == nil {
-		return HistoryPage{}, fmt.Errorf("tab is not ready")
-	}
-	sessionPath, _, err := validateSessionPath(controllerSessionDir(ctrl), path)
-	if err != nil {
-		return HistoryPage{}, err
-	}
-	loaded, err := loadResumableSession(sessionPath)
-	if err != nil {
-		return HistoryPage{}, err
-	}
-	if sessionRuntimeKey(tab.currentSessionPath()) != sessionRuntimeKey(sessionPath) {
-		if err := a.rebindTabToLoadedSessionPath(tab, sessionPath, loaded); err != nil {
-			return HistoryPage{}, err
-		}
-	}
-	a.setTabReadOnly(tab.ID, false)
-	return a.HistoryPageForTab(tab.ID, 0, limit), nil
-}
-
 // ResumeSessionForTab is the tab-scoped form of ResumeSession. A saved session
 // path is a runtime identity, so changing to a different path must replace the
 // tab's controller binding rather than mutating the current controller in place.
@@ -5304,13 +5282,17 @@ const (
 )
 
 type HistoryPage struct {
-	Messages   []HistoryMessage `json:"messages"`
-	StartTurn  int              `json:"startTurn"`
-	EndTurn    int              `json:"endTurn"`
-	TotalTurns int              `json:"totalTurns"`
-	HasOlder   bool             `json:"hasOlder"`
-	Revision   int64            `json:"revision,omitempty"`
-	Digest     string           `json:"digest,omitempty"`
+	Messages           []HistoryMessage           `json:"messages"`
+	StartTurn          int                        `json:"startTurn"`
+	EndTurn            int                        `json:"endTurn"`
+	TotalTurns         int                        `json:"totalTurns"`
+	HasOlder           bool                       `json:"hasOlder"`
+	Revision           int64                      `json:"revision,omitempty"`
+	Digest             string                     `json:"digest,omitempty"`
+	ResolvedPath       string                     `json:"resolvedPath,omitempty"`
+	Redirected         bool                       `json:"redirected,omitempty"`
+	SelectionRequired  bool                       `json:"selectionRequired,omitempty"`
+	RecoveryCandidates []RecoverySessionCandidate `json:"recoveryCandidates,omitempty"`
 }
 
 // historyProviderMessagesWithPersistedTimes overlays legacy event-record

@@ -20,6 +20,7 @@ import { getLocale, t, type DictKey } from "./i18n";
 import { applyHydrateErrorState, hydratePlaceholderItems as resolveHydratePlaceholders } from "./hydrateErrorState";
 import { hydrateIdentityCurrent } from "./sessionIdentity";
 import { sameTodoList } from "./todoVisibility";
+import { requestRecoveryResume } from "./recoveryResume";
 import { fileDiffFromWire, summarize, summarizeFileDiff, type ToolFileDiff } from "./tools";
 import { modeHasAutoApproveTools, normalizeMode, normalizeToolApprovalMode } from "./types";
 import type {
@@ -4074,13 +4075,14 @@ export function useController() {
     const m = statesRef.current.get(id)?.meta;
     await loadSessionDataForTab(id, false, "startup", { sessionPath: m?.sessionPath, sessionRevision: m?.sessionRevision, sessionDigest: m?.sessionDigest, preserveCachedHistory: false });
   }, [loadSessionDataForTab]);
+  const resumeSessionInFlightRef = useRef(new Set<string>());
   const resumeSession = useCallback(async (path: string, tabId?: string, navigationIntentSeq?: number) => {
     const targetTabId = tabId || activeTabId;
     if (!targetTabId) return;
+    if (resumeSessionInFlightRef.current.has(targetTabId)) return;
+    resumeSessionInFlightRef.current.add(targetTabId);
+    try {
     const navigationSeq = navigationIntentSeq ?? beginActiveNavigation();
-    const existingMeta = statesRef.current.get(targetTabId)?.meta;
-    if (existingMeta) dispatchTo(targetTabId, { type: "optimistic_meta", meta: { ...existingMeta, sessionPath: path } });
-    void loadSessionDataForTab(targetTabId, false, "resume-session", { sessionPath: path, preserveCachedHistory: true });
     if (tabId) await waitForTabReady(tabId);
     else if (!(await waitForBackendActiveTab(targetTabId))) return;
     if (!navigationCompletionCurrent(navigationSeq, "session.resume", targetTabId)) return;
@@ -4088,9 +4090,19 @@ export function useController() {
     dispatchTo(targetTabId, { type: "hydrate_start", reason: "resume-session" });
     let page: HistoryPage;
     try {
-      page = tabId
-        ? await app.ResumeSessionPageForTab(tabId, path, HISTORY_PAGE_TURNS)
-        : await app.ResumeSessionPage(path, HISTORY_PAGE_TURNS);
+      if (tabId) {
+        const outcome = await requestRecoveryResume(
+          { tabId, path, limit: HISTORY_PAGE_TURNS },
+          app.ResumeSessionPageForTab,
+        );
+        if (outcome.kind === "selection") {
+          dispatchTo(targetTabId, { type: "hydrate_done" });
+          return outcome;
+        }
+        page = outcome.page;
+      } else {
+        page = await app.ResumeSessionPage(path, HISTORY_PAGE_TURNS);
+      }
     } catch (err) {
       if (isNavigationIntentCurrent(navigationSeq) && sessionLoadCurrent(targetTabId, seq)) {
         dispatchTo(targetTabId, { type: "hydrate_error", reason: "resume-session", error: errorMessage(err) });
@@ -4106,7 +4118,30 @@ export function useController() {
     if (!isNavigationIntentCurrent(navigationSeq) || !sessionLoadCurrent(targetTabId, seq)) return;
     app.ContextUsageForTab(targetTabId).then((context) => dispatchTo(targetTabId, { type: "context", context })).catch(() => {});
     void refreshCheckpoints(targetTabId);
+    return { kind: "loaded" as const, page };
+    } finally {
+      resumeSessionInFlightRef.current.delete(targetTabId);
+    }
   }, [activeTabId, beginActiveNavigation, bumpSessionLoadSeq, dispatchTo, isNavigationIntentCurrent, loadSessionDataForTab, navigationCompletionCurrent, refreshCheckpoints, refreshMetaOnlyForTab, sessionLoadCurrent, waitForBackendActiveTab, waitForTabReady]);
+
+  const resumeRecoveryCandidate = useCallback(async (tabId: string, originalPath: string, selectedPath: string) => {
+    const seq = bumpSessionLoadSeq(tabId);
+    dispatchTo(tabId, { type: "hydrate_start", reason: "resume-session" });
+    try {
+      const page = await app.ResumeRecoveryCandidatePageForTab(tabId, originalPath, selectedPath, HISTORY_PAGE_TURNS);
+      if (!sessionLoadCurrent(tabId, seq)) return;
+      dispatchTo(tabId, { type: "reset" });
+      dispatchTo(tabId, { type: "history_page", page, mode: "replace" });
+      dispatchTo(tabId, { type: "hydrate_done" });
+      await refreshMetaOnlyForTab(tabId);
+      void refreshCheckpoints(tabId);
+    } catch (err) {
+      if (sessionLoadCurrent(tabId, seq)) {
+        dispatchTo(tabId, { type: "hydrate_error", reason: "resume-session", error: errorMessage(err) });
+      }
+      throw err;
+    }
+  }, [bumpSessionLoadSeq, dispatchTo, refreshCheckpoints, refreshMetaOnlyForTab, sessionLoadCurrent]);
 
   const openChannelSession = useCallback(async (path: string, tabId: string, navigationIntentSeq?: number) => {
     if (!tabId) return;
@@ -4546,10 +4581,12 @@ export function useController() {
     return meta;
   }, [beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, navigationCompletionCurrent, reassertVisibleTabAfterStaleNavigation, reconcileTabRuntime]);
 
-  const openTopicSession = useCallback(async (scope: string, workspaceRoot: string, topicId: string, sessionPath: string, navigationIntentSeq?: number): Promise<TabMeta> => {
+  const openTopicSession = useCallback(async (scope: string, workspaceRoot: string, topicId: string, sessionPath: string, navigationIntentSeq?: number, recoveryOriginalPath = ""): Promise<TabMeta> => {
     const navigationSeq = navigationIntentSeq ?? beginActiveNavigation();
     const snapshotAt = promptEventClock();
-    const meta = await app.OpenTopicSession(scope, workspaceRoot, topicId, sessionPath);
+    const meta = recoveryOriginalPath
+      ? await app.OpenConfirmedTopicSession(scope, workspaceRoot, topicId, recoveryOriginalPath, sessionPath)
+      : await app.OpenTopicSession(scope, workspaceRoot, topicId, sessionPath);
     if (!navigationCompletionCurrent(navigationSeq, "tab.open-session", meta.id)) {
       await reassertVisibleTabAfterStaleNavigation("tab.open-session", meta.id);
       return meta;
@@ -4575,7 +4612,7 @@ export function useController() {
     return meta;
   }, [beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, navigationCompletionCurrent, reassertVisibleTabAfterStaleNavigation, reconcileTabRuntime]);
 
-  const activateTopic = useCallback(async (scope: string, workspaceRoot: string, topicId: string, sessionPath = "", navigationIntentSeq?: number): Promise<TabMeta> => {
+  const activateTopic = useCallback(async (scope: string, workspaceRoot: string, topicId: string, sessionPath = "", navigationIntentSeq?: number, recoveryOriginalPath = ""): Promise<TabMeta> => {
     const navigationSeq = navigationIntentSeq ?? beginActiveNavigation();
     const snapshotAt = promptEventClock();
     // Ticketed two-phase activation: the backend switches the visible surface
@@ -4595,6 +4632,7 @@ export function useController() {
       topicId,
       sessionPath,
       requestId: pending.requestId,
+      recoveryOriginalPath,
     });
     const meta = ticket.meta;
     pending.tabId = ticket.tabId;
@@ -4750,7 +4788,7 @@ export function useController() {
     send, sendToTab, recoverDeliveryToTab, runShell, runShellForTab, steer, steerForTab, notice, cancel, approve, resolvePlanDecision, resolveRecovery, answerQuestion, setControllerMode,
     dismissExtensionForm, drainExtensionNotifications,
     setCollaborationMode, setCollaborationModeForTab, setToolApprovalMode, setToolApprovalModeForTab, setComposerProfileForTab, setGoal, setGoalForTab, clearGoal, clearGoalForTab, resumeGoal, resumeGoalForTab, pauseGoal, pauseGoalForTab,
-    newSession, clearSession, listSessions, listTrashedSessions, retrySessionHistory, resumeSession, openChannelSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,
+    newSession, clearSession, listSessions, listTrashedSessions, retrySessionHistory, resumeSession, resumeRecoveryCandidate, openChannelSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,
     loadOlderHistory,
     requestHistoryFullContent,
     refreshMeta, pickWorkspace, switchWorkspace, compact, rewind, rewindForTab, rewindForTabDetailed, undoRewindForTab, setModel, setEffort, setTokenMode, cancelJob,

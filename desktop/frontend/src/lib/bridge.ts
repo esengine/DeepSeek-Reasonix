@@ -313,6 +313,9 @@ export interface AppBindings extends SessionCatalogBindings, HistoryCatalogBindi
   ResumeSessionForTab(tabID: string, path: string): Promise<HistoryMessage[]>;
   ResumeSessionPage(path: string, limit: number): Promise<HistoryPage>;
   ResumeSessionPageForTab(tabID: string, path: string, limit: number): Promise<HistoryPage>;
+  ResolveRecoverySession(path: string): Promise<import("./types").RecoverySessionResolution>;
+  ConfirmRecoverySessionCandidate(originalPath: string, selectedPath: string): Promise<string>;
+  ResumeRecoveryCandidatePageForTab(tabID: string, originalPath: string, selectedPath: string, limit: number): Promise<HistoryPage>;
   OpenChannelSessionForTab(tabID: string, path: string): Promise<HistoryMessage[]>;
   OpenChannelSessionPageForTab(tabID: string, path: string, limit: number): Promise<HistoryPage>;
   PreviewSession(path: string): Promise<HistoryMessage[]>;
@@ -593,6 +596,7 @@ export interface AppBindings extends SessionCatalogBindings, HistoryCatalogBindi
   CreateDeliveryWorktree(workspaceRoot: string): Promise<DeliveryWorktreeOpenResult>;
   OpenGlobalTab(topicID: string): Promise<TabMeta>;
   OpenTopicSession(scope: string, workspaceRoot: string, topicID: string, sessionPath: string): Promise<TabMeta>;
+  OpenConfirmedTopicSession(scope: string, workspaceRoot: string, topicID: string, originalPath: string, selectedPath: string): Promise<TabMeta>;
   EnsureBlankTab(scope: string, workspaceRoot: string): Promise<TabMeta>;
   ActivateTopic(scope: string, workspaceRoot: string, topicID: string, sessionPath: string): Promise<TabMeta>;
   // Two-phase ticketed topic activation (supersedes ActivateTopic for topic
@@ -3293,6 +3297,15 @@ function makeMockApp(): AppBindings {
 	    async ResumeSessionPageForTab(_tabID: string, path: string, limit = 60) {
 	      return this.ResumeSessionPage(path, limit);
 	    },
+	    async ResolveRecoverySession(path: string) {
+	      return { path };
+	    },
+	    async ConfirmRecoverySessionCandidate(_originalPath: string, selectedPath: string) {
+	      return selectedPath;
+	    },
+	    async ResumeRecoveryCandidatePageForTab(_tabID: string, _originalPath: string, selectedPath: string, limit = 60) {
+	      return this.ResumeSessionPage(selectedPath, limit);
+	    },
 	    async OpenChannelSessionForTab(tabID: string, path: string) {
 	      mockTabs = mockTabs.map((tab) => tab.id === tabID ? { ...tab, sessionPath: path, readOnly: true } : tab);
 	      return this.ResumeSession(path);
@@ -5111,6 +5124,9 @@ function makeMockApp(): AppBindings {
       const active = { ...tab, sessionPath };
       mockTabs = mockTabs.map((item) => (item.id === tab.id ? active : item));
       return { ...active };
+    },
+    async OpenConfirmedTopicSession(scope: string, workspaceRoot: string, topicID: string, _originalPath: string, selectedPath: string) {
+      return this.OpenTopicSession(scope, workspaceRoot, topicID, selectedPath);
     },
     async EnsureBlankTab(scope: string, workspaceRoot: string) {
       const targetScope = scope === "project" && workspaceRoot ? "project" : "global";

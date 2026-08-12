@@ -2477,7 +2477,23 @@ func (a *App) OpenTopicSession(scope, workspaceRoot, topicID, sessionPath string
 	return a.openTopicSession(scope, workspaceRoot, topicID, sessionPath)
 }
 
+func (a *App) OpenConfirmedTopicSession(scope, workspaceRoot, topicID, originalPath, selectedPath string) (TabMeta, error) {
+	confirmedPath, err := a.ConfirmRecoverySessionCandidate(originalPath, selectedPath)
+	if err != nil {
+		return TabMeta{}, err
+	}
+	return a.openResolvedTopicSession(scope, workspaceRoot, topicID, confirmedPath)
+}
+
 func (a *App) openTopicSession(scope, workspaceRoot, topicID, sessionPath string) (TabMeta, error) {
+	resolution := a.resolveCanonicalSession(sessionPath)
+	if len(resolution.Candidates) > 0 {
+		return TabMeta{}, fmt.Errorf("recovery session selection is required")
+	}
+	return a.openResolvedTopicSession(scope, workspaceRoot, topicID, resolution.Path)
+}
+
+func (a *App) openResolvedTopicSession(scope, workspaceRoot, topicID, sessionPath string) (TabMeta, error) {
 	scope = strings.TrimSpace(scope)
 	if scope != "project" {
 		scope = "global"

@@ -722,6 +722,24 @@ export interface HistoryPage {
   hasOlder: boolean;
   revision?: number;
   digest?: string;
+  resolvedPath?: string;
+  redirected?: boolean;
+  selectionRequired?: boolean;
+  recoveryCandidates?: RecoverySessionCandidate[];
+}
+
+export interface RecoverySessionCandidate {
+  path: string;
+  lastActivityAt: number;
+  summary: string;
+  turns: number;
+}
+
+export interface RecoverySessionResolution {
+  path: string;
+  redirected?: boolean;
+  selectionRequired?: boolean;
+  recoveryCandidates?: RecoverySessionCandidate[];
 }
 
 // ── Windowed history paging (desktop/history_slice.go) ──────────────────────
@@ -793,6 +811,7 @@ export interface TopicActivationRequest {
   topicId: string;
   sessionPath: string;
   requestId?: string;
+  recoveryOriginalPath?: string;
 }
 
 export interface TopicActivationTicket {

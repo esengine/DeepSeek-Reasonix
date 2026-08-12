@@ -49,6 +49,7 @@ import { ApprovalModal } from "./components/ApprovalModal";
 import { AskCard } from "./components/AskCard";
 import { ExtensionFormDialog } from "./components/ExtensionFormDialog";
 import { ClearContextCard } from "./components/ClearContextCard";
+import { RecoverySessionDialog } from "./components/RecoverySessionDialog";
 import { RuntimeDecisionCard } from "./components/RuntimeDecisionCard";
 import { decisionSurfaceMockFromInput, type DecisionSurfaceKind as MockDecisionSurfaceKind } from "./lib/decisionSurfaceMock";
 const UndoRewindBanner = lazy(() => import("./components/UndoRewindBanner").then((module) => ({ default: module.UndoRewindBanner })));
@@ -446,8 +447,8 @@ type DesktopNavigationIntent =
   | { kind: "topic"; scope: string; workspaceRoot: string; topicId: string; sessionPath?: string }
   | { kind: "blank"; scope: string; workspaceRoot: string }
   | { kind: "delivery-worktree"; workspaceRoot: string }
-  | { kind: "sidebar-im"; connection: SidebarImConnection }
-  | { kind: "resume-session"; session: SessionMeta };
+  | { kind: "sidebar-im"; connection: SidebarImConnection; sessionPathOverride?: string; recoveryOriginalPath?: string }
+  | { kind: "resume-session"; session: SessionMeta; recoveryOriginalPath?: string };
 type DesktopNavigationInput = DesktopNavigationIntent & { navigationIntentSeq: number };
 type PendingDesktopNavigationRequest = PendingNavigationRequest<DesktopNavigationInput>;
 type SidebarImTopicSource = {
@@ -1078,6 +1079,7 @@ export default function App() {
     listSessions,
     listTrashedSessions,
     resumeSession,
+    resumeRecoveryCandidate,
     openChannelSession,
     previewSession,
     deleteSession,
@@ -1136,6 +1138,12 @@ export default function App() {
   const { configLoadWarnings, applySnapshot: applyConfigWarningSnapshot, reload: reloadConfigWarnings, dismiss: dismissConfigWarnings } = useConfigLoadWarnings();
   const [startupUpdateChecksEnabled, setStartupUpdateChecksEnabled] = useState<boolean | null>(null);
   const [histView, setHistView] = useState<HistoryViewState | null>(null);
+  const [recoverySelection, setRecoverySelection] = useState<{
+    originalPath: string;
+    candidates: import("./lib/types").RecoverySessionCandidate[];
+    busy: boolean;
+    intent: DesktopNavigationIntent;
+  } | null>(null);
   const paletteOpen = useOverlayStore((s) => s.paletteOpen);
   const setPaletteOpen = useOverlayStore((s) => s.setPaletteOpen);
   const paletteExtensionActions = useOverlayStore((s) => s.paletteExtensionActions);
@@ -3674,9 +3682,9 @@ export default function App() {
       if (latest()) setTabMetas(tabs);
       return tabs;
     };
-    const openTopicTarget = async (scope: string, workspaceRoot: string, topicId: string, sessionPath?: string): Promise<TabMeta> => {
-      if (singleSurfaceLayout) return activateTopic(scope, workspaceRoot, topicId, sessionPath || "", request.navigationIntentSeq);
-      if (sessionPath) return openTopicSession(scope, workspaceRoot, topicId, sessionPath, request.navigationIntentSeq);
+    const openTopicTarget = async (scope: string, workspaceRoot: string, topicId: string, sessionPath?: string, recoveryOriginalPath = ""): Promise<TabMeta> => {
+      if (singleSurfaceLayout) return activateTopic(scope, workspaceRoot, topicId, sessionPath || "", request.navigationIntentSeq, recoveryOriginalPath);
+      if (sessionPath) return openTopicSession(scope, workspaceRoot, topicId, sessionPath, request.navigationIntentSeq, recoveryOriginalPath);
       if (scope === "global") return openGlobalTab(topicId, request.navigationIntentSeq);
       return openProjectTab(workspaceRoot, topicId, request.navigationIntentSeq);
     };
@@ -3737,14 +3745,38 @@ export default function App() {
           return;
         }
         let openedTab: TabMeta | undefined;
+        let resolvedPath = request.sessionPathOverride || (target.kind === "path" ? target.value : "");
+        if (target.kind === "path" && !request.recoveryOriginalPath) {
+          const resolution = await app.ResolveRecoverySession(target.value);
+          if (!latest()) return;
+          if (resolution.selectionRequired) {
+            setRecoverySelection({
+              originalPath: target.value,
+              candidates: resolution.recoveryCandidates ?? [],
+              busy: false,
+              intent: { kind: "sidebar-im", connection },
+            });
+            return;
+          }
+          resolvedPath = resolution.path;
+          if (resolution.redirected) showToast(t("history.recoveryRedirected"), "info");
+        }
         if (connection.sessionSource === "auto" && target.kind === "path") {
           openedTab = await openBlankTarget(connection.scope, connection.workspaceRoot);
           if (!latest()) return;
-          await openChannelSession(target.value, openedTab.id, request.navigationIntentSeq);
+          await openChannelSession(resolvedPath, openedTab.id, request.navigationIntentSeq);
         } else if (target.kind === "path") {
           openedTab = await openBlankTarget(connection.scope, connection.workspaceRoot);
           if (!latest()) return;
-          await resumeSession(target.value, openedTab.id, request.navigationIntentSeq);
+          if (request.recoveryOriginalPath) {
+            await resumeRecoveryCandidate(openedTab.id, request.recoveryOriginalPath, resolvedPath);
+          }
+          const outcome = request.recoveryOriginalPath ? undefined : await resumeSession(resolvedPath, openedTab.id, request.navigationIntentSeq);
+          if (outcome?.kind === "selection") {
+            setRecoverySelection({ originalPath: target.value, candidates: outcome.candidates, busy: false, intent: { kind: "sidebar-im", connection } });
+            return;
+          }
+          if (outcome?.kind === "loaded" && outcome.page.redirected) showToast(t("history.recoveryRedirected"), "info");
         } else {
           openedTab = await openTopicTarget(connection.scope, connection.workspaceRoot, target.value);
         }
@@ -3758,7 +3790,22 @@ export default function App() {
         return;
       }
 
-      const { session } = request;
+      let { session } = request;
+      if (!request.recoveryOriginalPath) {
+        const resolution = await app.ResolveRecoverySession(session.path);
+        if (!latest()) return;
+        if (resolution.selectionRequired) {
+          setRecoverySelection({
+            originalPath: session.path,
+            candidates: resolution.recoveryCandidates ?? [],
+            busy: false,
+            intent: { kind: "resume-session", session },
+          });
+          return;
+        }
+        if (resolution.redirected) showToast(t("history.recoveryRedirected"), "info");
+        session = { ...session, path: resolution.path };
+      }
       const scope = session.scope || (session.workspaceRoot ? "project" : "global");
       let targetTab: TabMeta;
       if (isChannelSession(session)) {
@@ -3766,9 +3813,9 @@ export default function App() {
         if (!latest()) return;
         await openChannelSession(session.path, targetTab.id, request.navigationIntentSeq);
       } else if (scope === "project" && session.workspaceRoot && session.topicId) {
-        targetTab = await openTopicTarget("project", session.workspaceRoot, session.topicId, session.path);
+        targetTab = await openTopicTarget("project", session.workspaceRoot, session.topicId, session.path, request.recoveryOriginalPath);
       } else if (scope === "global" && session.topicId) {
-        targetTab = await openTopicTarget("global", "", session.topicId, session.path);
+        targetTab = await openTopicTarget("global", "", session.topicId, session.path, request.recoveryOriginalPath);
       } else {
         throw new Error(scope === "global" && !session.topicId
           ? t("history.failedOpenSession")
@@ -3830,6 +3877,23 @@ export default function App() {
     const navigationIntentSeq = noteNavigationIntent();
     return enqueueNavigationWithIntent(input, navigationIntentSeq);
   }, [enqueueNavigationWithIntent, noteNavigationIntent]);
+
+  const confirmRecoverySelection = useCallback(async (selectedPath: string) => {
+    const pending = recoverySelection;
+    if (!pending || pending.busy) return;
+    setRecoverySelection({ ...pending, busy: true });
+    try {
+      const confirmedPath = await app.ConfirmRecoverySessionCandidate(pending.originalPath, selectedPath);
+      setRecoverySelection(null);
+      const intent = pending.intent.kind === "resume-session"
+        ? { ...pending.intent, session: { ...pending.intent.session, path: confirmedPath }, recoveryOriginalPath: pending.originalPath }
+        : { ...pending.intent, sessionPathOverride: confirmedPath, recoveryOriginalPath: pending.originalPath };
+      await enqueueNavigation(intent);
+    } catch (err) {
+      setRecoverySelection({ ...pending, busy: false });
+      showToast(err instanceof Error ? err.message : String(err), "error");
+    }
+  }, [enqueueNavigation, recoverySelection, showToast]);
 
   const openBlankSession = useCallback((scope: string, workspaceRoot: string): Promise<void> =>
     enqueueNavigation({ kind: "blank", scope, workspaceRoot: scope === "project" ? workspaceRoot : "" }),
@@ -5384,6 +5448,17 @@ export default function App() {
             onClose={closeHistory}
           />
         </Suspense>
+      )}
+
+      {recoverySelection !== null && (
+        <RecoverySessionDialog
+          candidates={recoverySelection.candidates}
+          busy={recoverySelection.busy}
+          onConfirm={(path) => void confirmRecoverySelection(path)}
+          onCancel={() => {
+            if (!recoverySelection.busy) setRecoverySelection(null);
+          }}
+        />
       )}
 
       {settingsTarget !== null && (
