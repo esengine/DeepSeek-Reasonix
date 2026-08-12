@@ -95,10 +95,19 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		requestURL = root + "/v1/messages"
 	}
 	officialDeepSeek := openai.IsDeepSeek(root)
+	minimax := openai.IsMiniMax(root)
+	reasoningProtocol, _ := cfg.Extra["reasoning_protocol"].(string)
+	reasoningDisabled := strings.EqualFold(strings.TrimSpace(reasoningProtocol), "none")
+	if reasoningDisabled {
+		minimax = false
+	}
 	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
 	keySource, _ := cfg.Extra["api_key_source"].(string)
 	thinking, _ := cfg.Extra["thinking"].(string)
 	thinking = strings.ToLower(strings.TrimSpace(thinking))
+	if reasoningDisabled {
+		thinking = ""
+	}
 	effort, _ := cfg.Extra["effort"].(string)
 	effort = strings.ToLower(strings.TrimSpace(effort))
 	vision, _ := cfg.Extra["vision"].(bool)
@@ -142,6 +151,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		model:            cfg.Model,
 		nativeAnthropic:  strings.EqualFold(root, defaultBaseURL),
 		deepseek:         officialDeepSeek,
+		minimax:          minimax,
 		thinking:         thinking,
 		effort:           effort,
 		vision:           vision,
@@ -170,6 +180,7 @@ type client struct {
 	model            string
 	nativeAnthropic  bool   // first-party endpoint: documented default-5m cache-write pricing applies
 	deepseek         bool   // official DeepSeek Anthropic endpoint: unsigned reasoning replay + automatic cache
+	minimax          bool   // official MiniMax endpoint: adaptive|disabled thinking.type without output_config
 	thinking         string // "adaptive" enables extended thinking; "" = off (config-driven)
 	effort           string // output_config.effort: low|medium|high|xhigh|max; "" = provider default
 	vision           bool   // model accepts image input — embed attached images as base64 image blocks
@@ -475,6 +486,12 @@ func (c *client) buildRequest(_ context.Context, req provider.Request) anthReque
 				r.OutputConfig = &outputConfig{Effort: effort}
 			}
 		}
+	} else if c.minimax {
+		t := c.effort
+		if t == "" {
+			t = "adaptive"
+		}
+		r.Thinking = &thinkingConfig{Type: t}
 	} else {
 		switch c.thinking {
 		case "adaptive":

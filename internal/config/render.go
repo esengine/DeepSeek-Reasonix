@@ -382,6 +382,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			if p.VisionModels != nil {
 				fmt.Fprintf(&b, "vision_models = %s   # models in this provider that accept image input\n", renderStringArray(p.VisionModels))
 			}
+			if p.VideoModels != nil {
+				fmt.Fprintf(&b, "video_models = %s   # models in this provider that accept video input\n", renderStringArray(p.VideoModels))
+			}
 			if p.VisionDetail != "" {
 				fmt.Fprintf(&b, "vision_detail = %q   # openai image detail hint: low|high; empty = auto\n", p.VisionDetail)
 			}
@@ -1075,6 +1078,9 @@ func RenderTOMLProjectDelta(c *Config) string {
 			if p.VisionModels != nil {
 				fmt.Fprintf(&b, "vision_models = %s\n", renderStringArray(p.VisionModels))
 			}
+			if p.VideoModels != nil {
+				fmt.Fprintf(&b, "video_models = %s\n", renderStringArray(p.VideoModels))
+			}
 			if p.VisionDetail != "" {
 				fmt.Fprintf(&b, "vision_detail = %q\n", p.VisionDetail)
 			}
@@ -1274,8 +1280,11 @@ func renderPricingInline(p *provider.Pricing) string {
 	if p == nil {
 		return "{}"
 	}
-	return fmt.Sprintf("{ cache_hit = %v, input = %v, output = %v, currency = %q }",
-		p.CacheHit, p.Input, p.Output, p.Symbol())
+	if p.CacheWrite > 0 {
+		return fmt.Sprintf("{ cache_hit = %v, cache_write = %v, input = %v, output = %v, currency = %q }",
+			p.CacheHit, p.CacheWrite, p.Input, p.Output, p.Symbol())
+	}
+	return fmt.Sprintf("{ cache_hit = %v, input = %v, output = %v, currency = %q }", p.CacheHit, p.Input, p.Output, p.Symbol())
 }
 
 func renderPricingMap(prices map[string]*provider.Pricing) string {

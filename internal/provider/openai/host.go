@@ -109,13 +109,11 @@ func normalizeModelID(baseURL, model string) string {
 	return model
 }
 
-// IsMiniMax reports whether baseURL points at MiniMax's OpenAI-compatible
-// endpoint (api.minimaxi.com or any *.minimaxi.com subdomain).
-//
-// The host string is matched exactly — the spelling is `minimaxi`, not
-// `minimax` — to avoid clashing with any future minimax-branded gateway.
+// IsMiniMax reports whether baseURL points at MiniMax's China or international
+// OpenAI-compatible endpoint.
 func IsMiniMax(baseURL string) bool {
-	return matchesVendorHost(baseURL, "minimaxi.com", "api.minimaxi.com")
+	return matchesVendorHost(baseURL, "minimaxi.com", "api.minimaxi.com") ||
+		matchesVendorHost(baseURL, "minimax.io", "api.minimax.io")
 }
 
 // IsMiMo reports whether baseURL points at Xiaomi MiMo's OpenAI-compatible API.

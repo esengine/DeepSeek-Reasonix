@@ -480,6 +480,15 @@ func TestPricingCostUsesCacheWriteBillingTier(t *testing.T) {
 	}
 }
 
+func TestPricingCostUsesExplicitCacheWriteRate(t *testing.T) {
+	p := &Pricing{Input: 0.30, CacheWrite: 0.375}
+	u := &Usage{CacheMissTokens: 500_000, CacheWriteTokens: 100_000}
+	// 400K ordinary input at $0.30/M plus 100K cache writes at $0.375/M.
+	if got := p.Cost(u); got != 0.1575 {
+		t.Errorf("Cost = %f, want 0.1575", got)
+	}
+}
+
 func TestPricingCostCacheWriteFieldsAreBackwardCompatible(t *testing.T) {
 	p := &Pricing{Input: 2.0}
 

@@ -54,3 +54,12 @@ func TestOriginalCostMatchesLegacySemantics(t *testing.T) {
 		t.Fatalf("cost = %v, want ~1.2", got)
 	}
 }
+
+func TestOriginalCostUsesExplicitCacheWriteRate(t *testing.T) {
+	amt := OriginalCostAmount(RateCard{Input: 0.30, CacheWrite: 0.375, Currency: "USD"}, UsageTokens{
+		CacheMissTokens: 500_000, CacheWriteTokens: 100_000,
+	})
+	if got := amt.Float64(); got < 0.15749 || got > 0.15751 {
+		t.Fatalf("cost = %v, want ~0.1575", got)
+	}
+}

@@ -496,6 +496,30 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	if cap := EffortCapabilityForEntry(minimax); !cap.Supported || cap.Default != "adaptive" || !containsString(cap.Levels, "disabled") {
 		t.Fatalf("minimax effort capability = %+v, want adaptive/disabled", cap)
 	}
+	if minimax.ContextWindow != 1_000_000 || !minimax.HasVideoModel("MiniMax-M3") {
+		t.Fatalf("minimax M3 context/video capability mismatch: %+v", minimax)
+	}
+	if price := minimax.Price; price == nil || price.CacheHit != 0.12 || price.Input != 0.60 || price.Output != 2.40 || price.Currency != "$" {
+		t.Fatalf("minimax M3 price = %+v, want USD 0.12/0.60/2.40", price)
+	}
+	for _, providerID := range []string{"minimax-cn-api", "minimax-global-api", "minimax-cn-anthropic", "minimax-global-anthropic"} {
+		m27, ok := cfg.ResolveModel(providerID + "/MiniMax-M2.7")
+		if !ok {
+			t.Fatalf("%s MiniMax-M2.7 did not resolve", providerID)
+		}
+		if m27.ContextWindow != 204_800 || ReasoningProtocolForEntry(m27) != ReasoningProtocolNone {
+			t.Fatalf("%s MiniMax-M2.7 context/reasoning mismatch: %+v", providerID, m27)
+		}
+		if cap := EffortCapabilityForEntry(m27); cap.Supported {
+			t.Fatalf("%s MiniMax-M2.7 effort capability = %+v, want provider-controlled thinking", providerID, cap)
+		}
+		if m27.HasVideoModel("MiniMax-M2.7") {
+			t.Fatalf("%s MiniMax-M2.7 unexpectedly advertises video input", providerID)
+		}
+		if price := m27.Price; price == nil || price.CacheHit != 0.06 || price.CacheWrite != 0.375 || price.Input != 0.30 || price.Output != 1.20 || price.Currency != "$" {
+			t.Fatalf("%s MiniMax-M2.7 price = %+v, want USD 0.06/0.375/0.30/1.20", providerID, price)
+		}
+	}
 	minimaxGlobalAPI, ok := cfg.Provider("minimax-global-api")
 	if !ok {
 		t.Fatal("minimax-global-api provider missing")

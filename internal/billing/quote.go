@@ -114,10 +114,11 @@ type RateSnapshot struct {
 // RateCard is the per-1M-token price used to compute original cost. It mirrors
 // provider.Pricing without importing that package (billing is a leaf).
 type RateCard struct {
-	CacheHit float64 // per 1M cached prompt tokens
-	Input    float64 // per 1M uncached prompt tokens
-	Output   float64 // per 1M completion tokens
-	Currency string  // ISO or symbol; normalized on quote
+	CacheHit   float64 // per 1M cached prompt tokens
+	CacheWrite float64 // per 1M prompt tokens written to cache; zero falls back to Input
+	Input      float64 // per 1M uncached prompt tokens
+	Output     float64 // per 1M completion tokens
+	Currency   string  // ISO or symbol; normalized on quote
 }
 
 // UsageTokens is the token breakdown needed for cost. Mirrors provider.Usage
@@ -171,10 +172,14 @@ func OriginalCostAmount(rates RateCard, u UsageTokens) Amount {
 			billedWrite = float64(write)
 		}
 	}
-	inputTokenUnits := float64(miss-write) + billedWrite
+	inputTokenUnits := float64(miss - write)
+	writeCost := billedWrite * rates.Input
+	if rates.CacheWrite > 0 {
+		writeCost = float64(write) * rates.CacheWrite
+	}
 	// Combine cached input, uncached input, and output charges per million tokens.
 	total := (float64(hit)*rates.CacheHit +
-		inputTokenUnits*rates.Input +
+		inputTokenUnits*rates.Input + writeCost +
 		float64(u.CompletionTokens)*rates.Output) / 1e6
 	return NewAmountFromFloat(total)
 }
@@ -183,6 +188,9 @@ func OriginalCostAmount(rates RateCard, u UsageTokens) Amount {
 func PricingFingerprint(rates RateCard) string {
 	cur := NormalizeCurrency(rates.Currency)
 	raw := fmt.Sprintf("%s|%.12g|%.12g|%.12g", cur, rates.CacheHit, rates.Input, rates.Output)
+	if rates.CacheWrite > 0 {
+		raw += fmt.Sprintf("|%.12g", rates.CacheWrite)
+	}
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:8])
 }

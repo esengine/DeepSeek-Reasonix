@@ -994,6 +994,8 @@ func TestProjectRenderPreservesNonDefaultLegacySections(t *testing.T) {
 
 func TestRenderTOMLRoundTripsPerModelPrices(t *testing.T) {
 	orig := Default()
+	prices := DeepSeekV4PricesForCurrency("CNY")
+	prices["deepseek-v4-flash"].CacheWrite = 1.25
 	orig.Providers = []ProviderEntry{{
 		Name:      "deepseek",
 		Kind:      "openai",
@@ -1001,7 +1003,7 @@ func TestRenderTOMLRoundTripsPerModelPrices(t *testing.T) {
 		Models:    []string{"deepseek-v4-flash", "deepseek-v4-pro"},
 		Default:   "deepseek-v4-flash",
 		APIKeyEnv: "DEEPSEEK_API_KEY",
-		Prices:    DeepSeekV4PricesForCurrency("CNY"),
+		Prices:    prices,
 	}}
 
 	var got Config
@@ -1012,7 +1014,7 @@ func TestRenderTOMLRoundTripsPerModelPrices(t *testing.T) {
 	if !ok {
 		t.Fatal("deepseek provider missing after round trip")
 	}
-	if p.Prices["deepseek-v4-flash"].Input != 1 || p.Prices["deepseek-v4-pro"].Output != 6 {
+	if p.Prices["deepseek-v4-flash"].Input != 1 || p.Prices["deepseek-v4-flash"].CacheWrite != 1.25 || p.Prices["deepseek-v4-pro"].Output != 6 {
 		t.Fatalf("prices after round trip = %+v", p.Prices)
 	}
 }
@@ -1028,6 +1030,7 @@ func TestRenderTOMLRoundTripsVisionModels(t *testing.T) {
 			Default:      "text-only",
 			APIKeyEnv:    "CUSTOM_API_KEY",
 			VisionModels: []string{"qwen-vl-plus"},
+			VideoModels:  []string{"qwen-video-plus"},
 			VisionDetail: "low",
 		},
 		{
@@ -1044,6 +1047,9 @@ func TestRenderTOMLRoundTripsVisionModels(t *testing.T) {
 	rendered := RenderTOML(orig)
 	if !strings.Contains(rendered, `vision_models = ["qwen-vl-plus"]`) {
 		t.Fatalf("rendered TOML missing vision_models:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, `video_models = ["qwen-video-plus"]`) {
+		t.Fatalf("rendered TOML missing video_models:\n%s", rendered)
 	}
 	if !strings.Contains(rendered, `vision_models = []`) {
 		t.Fatalf("rendered TOML missing explicit empty vision_models:\n%s", rendered)
@@ -1062,6 +1068,9 @@ func TestRenderTOMLRoundTripsVisionModels(t *testing.T) {
 	}
 	if !reflect.DeepEqual(p.VisionModels, []string{"qwen-vl-plus"}) {
 		t.Fatalf("vision_models after round trip = %v, want [qwen-vl-plus]", p.VisionModels)
+	}
+	if !reflect.DeepEqual(p.VideoModels, []string{"qwen-video-plus"}) {
+		t.Fatalf("video_models after round trip = %v, want [qwen-video-plus]", p.VideoModels)
 	}
 	if p.VisionDetail != "low" {
 		t.Fatalf("vision_detail after round trip = %q, want low", p.VisionDetail)

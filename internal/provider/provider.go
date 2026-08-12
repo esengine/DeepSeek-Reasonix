@@ -741,10 +741,11 @@ func (u *Usage) LatestPromptTokens() int {
 // Pricing is a provider's per-1M-token rates, used to estimate spend. Currency
 // is a display symbol or ISO-like code (default "¥"). toml tags let config decode it.
 type Pricing struct {
-	CacheHit float64 `toml:"cache_hit"` // per 1M cached prompt tokens
-	Input    float64 `toml:"input"`     // per 1M uncached prompt tokens
-	Output   float64 `toml:"output"`    // per 1M completion tokens
-	Currency string  `toml:"currency"`
+	CacheHit   float64 `toml:"cache_hit"`   // per 1M cached prompt tokens
+	CacheWrite float64 `toml:"cache_write"` // per 1M prompt tokens written to cache; zero falls back to Input
+	Input      float64 `toml:"input"`       // per 1M uncached prompt tokens
+	Output     float64 `toml:"output"`      // per 1M completion tokens
+	Currency   string  `toml:"currency"`
 }
 
 // Cost estimates the spend for a usage record. Compatibility adapter only —
@@ -777,9 +778,13 @@ func (p *Pricing) Cost(u *Usage) float64 {
 			billedWrite = float64(write)
 		}
 	}
-	inputTokenUnits := float64(miss-write) + billedWrite
+	inputTokenUnits := float64(miss - write)
+	writeCost := billedWrite * p.Input
+	if p.CacheWrite > 0 {
+		writeCost = float64(write) * p.CacheWrite
+	}
 	return (float64(hit)*p.CacheHit +
-		inputTokenUnits*p.Input +
+		inputTokenUnits*p.Input + writeCost +
 		float64(u.CompletionTokens)*p.Output) / 1e6
 }
 

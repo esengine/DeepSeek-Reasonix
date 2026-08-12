@@ -214,10 +214,11 @@ func QuoteForUsage(price *provider.Pricing, usage *provider.Usage, display strin
 		return billing.CostQuote{Estimated: true, CostComplete: false, DisplayComplete: false, Complete: false, DisplayStatus: billing.DisplayStatusUnavailable, IncompleteReason: "missing_price_or_usage"}
 	}
 	card := billing.RateCard{
-		CacheHit: price.CacheHit,
-		Input:    price.Input,
-		Output:   price.Output,
-		Currency: billing.NormalizeCurrency(price.Currency),
+		CacheHit:   price.CacheHit,
+		CacheWrite: price.CacheWrite,
+		Input:      price.Input,
+		Output:     price.Output,
+		Currency:   billing.NormalizeCurrency(price.Currency),
 	}
 	if card.Currency == "" {
 		card.Currency = "CNY"

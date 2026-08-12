@@ -97,6 +97,7 @@ var (
 
 	minimaxMSeriesModels       = []string{"MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"}
 	minimaxMSeriesVisionModels = []string{"MiniMax-M3"}
+	minimaxMSeriesVideoModels  = []string{"MiniMax-M3"}
 
 	glmAPIModels       = []string{"glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-5v-turbo", "glm-4.7", "glm-4.7-flash", "glm-4.7-flashx", "glm-4.6", "glm-4.5", "glm-4.5-air", "glm-4.5-flash"}
 	glmAPIVisionModels = []string{"glm-5v-turbo"}
@@ -476,15 +477,19 @@ var curatedProviderPresets = []ProviderPreset{
 		Description: "MiniMax China OpenAI-compatible M-series API endpoint.",
 		KeyEnv:      "MINIMAX_API_KEY",
 		Entries: []ProviderEntry{{
-			Name:          "minimax-cn-api",
-			Kind:          "openai",
-			BaseURL:       "https://api.minimaxi.com/v1",
-			Models:        minimaxMSeriesModels,
-			VisionModels:  minimaxMSeriesVisionModels,
-			Default:       "MiniMax-M3",
-			APIKeyEnv:     "MINIMAX_API_KEY",
-			ContextWindow: 1048576,
-			ExtraBody:     map[string]any{"reasoning_split": true},
+			Name:            "minimax-cn-api",
+			Kind:            "openai",
+			BaseURL:         "https://api.minimaxi.com/v1",
+			Models:          minimaxMSeriesModels,
+			VisionModels:    minimaxMSeriesVisionModels,
+			VideoModels:     minimaxMSeriesVideoModels,
+			Default:         "MiniMax-M3",
+			APIKeyEnv:       "MINIMAX_API_KEY",
+			ContextWindow:   1_000_000,
+			Prices:          minimaxMSeriesPricesUSD(),
+			BillingCurrency: "USD",
+			ModelOverrides:  minimaxMSeriesModelOverrides(),
+			ExtraBody:       map[string]any{"reasoning_split": true},
 		}},
 	},
 	{
@@ -493,15 +498,19 @@ var curatedProviderPresets = []ProviderPreset{
 		Description: "MiniMax international OpenAI-compatible M-series API endpoint.",
 		KeyEnv:      "MINIMAX_API_KEY",
 		Entries: []ProviderEntry{{
-			Name:          "minimax-global-api",
-			Kind:          "openai",
-			BaseURL:       "https://api.minimax.io/v1",
-			Models:        minimaxMSeriesModels,
-			VisionModels:  minimaxMSeriesVisionModels,
-			Default:       "MiniMax-M3",
-			APIKeyEnv:     "MINIMAX_API_KEY",
-			ContextWindow: 1048576,
-			ExtraBody:     map[string]any{"reasoning_split": true},
+			Name:            "minimax-global-api",
+			Kind:            "openai",
+			BaseURL:         "https://api.minimax.io/v1",
+			Models:          minimaxMSeriesModels,
+			VisionModels:    minimaxMSeriesVisionModels,
+			VideoModels:     minimaxMSeriesVideoModels,
+			Default:         "MiniMax-M3",
+			APIKeyEnv:       "MINIMAX_API_KEY",
+			ContextWindow:   1_000_000,
+			Prices:          minimaxMSeriesPricesUSD(),
+			BillingCurrency: "USD",
+			ModelOverrides:  minimaxMSeriesModelOverrides(),
+			ExtraBody:       map[string]any{"reasoning_split": true},
 		}},
 	},
 	{
@@ -510,15 +519,20 @@ var curatedProviderPresets = []ProviderPreset{
 		Description: "MiniMax China Anthropic-compatible M-series endpoint.",
 		KeyEnv:      "MINIMAX_PLAN_API_KEY",
 		Entries: []ProviderEntry{{
-			Name:          "minimax-cn-anthropic",
-			Kind:          "anthropic",
-			BaseURL:       "https://api.minimaxi.com/anthropic",
-			Models:        minimaxMSeriesModels,
-			VisionModels:  minimaxMSeriesVisionModels,
-			Default:       "MiniMax-M3",
-			APIKeyEnv:     "MINIMAX_PLAN_API_KEY",
-			AuthHeader:    true,
-			ContextWindow: 1048576,
+			Name:            "minimax-cn-anthropic",
+			Kind:            "anthropic",
+			BaseURL:         "https://api.minimaxi.com/anthropic",
+			Models:          minimaxMSeriesModels,
+			VisionModels:    minimaxMSeriesVisionModels,
+			VideoModels:     minimaxMSeriesVideoModels,
+			Default:         "MiniMax-M3",
+			APIKeyEnv:       "MINIMAX_PLAN_API_KEY",
+			AuthHeader:      true,
+			Thinking:        "adaptive",
+			ContextWindow:   1_000_000,
+			Prices:          minimaxMSeriesPricesUSD(),
+			BillingCurrency: "USD",
+			ModelOverrides:  minimaxMSeriesModelOverrides(),
 		}},
 	},
 	{
@@ -527,15 +541,20 @@ var curatedProviderPresets = []ProviderPreset{
 		Description: "MiniMax international Anthropic-compatible endpoint with Bearer auth.",
 		KeyEnv:      "MINIMAX_API_KEY",
 		Entries: []ProviderEntry{{
-			Name:          "minimax-global-anthropic",
-			Kind:          "anthropic",
-			BaseURL:       "https://api.minimax.io/anthropic",
-			Models:        minimaxMSeriesModels,
-			VisionModels:  minimaxMSeriesVisionModels,
-			Default:       "MiniMax-M3",
-			APIKeyEnv:     "MINIMAX_API_KEY",
-			AuthHeader:    true,
-			ContextWindow: 1048576,
+			Name:            "minimax-global-anthropic",
+			Kind:            "anthropic",
+			BaseURL:         "https://api.minimax.io/anthropic",
+			Models:          minimaxMSeriesModels,
+			VisionModels:    minimaxMSeriesVisionModels,
+			VideoModels:     minimaxMSeriesVideoModels,
+			Default:         "MiniMax-M3",
+			APIKeyEnv:       "MINIMAX_API_KEY",
+			AuthHeader:      true,
+			Thinking:        "adaptive",
+			ContextWindow:   1_000_000,
+			Prices:          minimaxMSeriesPricesUSD(),
+			BillingCurrency: "USD",
+			ModelOverrides:  minimaxMSeriesModelOverrides(),
 		}},
 	},
 	{
@@ -967,6 +986,20 @@ func boolPointer(value bool) *bool {
 	return &value
 }
 
+func minimaxMSeriesModelOverrides() map[string]ProviderModelOverride {
+	return map[string]ProviderModelOverride{
+		"MiniMax-M3": {
+			SupportedEfforts: []string{"adaptive", "disabled"},
+			DefaultEffort:    "adaptive",
+			ContextWindow:    1_000_000,
+		},
+		"MiniMax-M2.7": {
+			ReasoningProtocol: ReasoningProtocolNone,
+			ContextWindow:     204_800,
+		},
+	}
+}
+
 func cloneProviderPreset(p ProviderPreset) ProviderPreset {
 	p.Entries = cloneProviderEntries(p.Entries)
 	for i := range p.Entries {
@@ -999,6 +1032,7 @@ func cloneProviderEntry(e ProviderEntry) ProviderEntry {
 	}
 	e.Models = append([]string(nil), e.Models...)
 	e.VisionModels = append([]string(nil), e.VisionModels...)
+	e.VideoModels = append([]string(nil), e.VideoModels...)
 	e.SupportedEfforts = append([]string(nil), e.SupportedEfforts...)
 	e.Headers = cloneStringMap(e.Headers)
 	e.ExtraBody = cloneAnyMap(e.ExtraBody)
