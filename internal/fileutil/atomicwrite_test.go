@@ -412,3 +412,49 @@ func TestAtomicOverwriteFileUsesDefaultPermForNewFile(t *testing.T) {
 		t.Fatalf("perm = %o, want 600", perm)
 	}
 }
+
+// The claim's whole value is that exactly one caller can win it, so the copy
+// fallback ReplaceFile takes for undoable renames must never apply here: a copy
+// would leave both claimants holding the record.
+func TestClaimRenameNeverFallsBackToCopy(t *testing.T) {
+	oldBase, oldMax := replaceRetryBase, maxReplaceRetries
+	replaceRetryBase, maxReplaceRetries = 0, 2
+	t.Cleanup(func() { replaceRetryBase, maxReplaceRetries = oldBase, oldMax })
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "record.json")
+	if err := os.WriteFile(src, []byte("payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dir, "blocked")
+	if err := os.Mkdir(dst, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := ClaimRename(src, dst); err == nil {
+		t.Fatal("want an error when the claim cannot rename")
+	}
+	if entries, err := os.ReadDir(dst); err != nil || len(entries) != 0 {
+		t.Fatalf("destination directory = %v, %v — the claim copied into it", entries, err)
+	}
+	if got, err := os.ReadFile(src); err != nil || string(got) != "payload" {
+		t.Fatalf("source = %q, %v — a failed claim must leave the record in place", got, err)
+	}
+}
+
+// A source that has already been claimed by someone else is the loser of a
+// race, not a lock worth waiting out.
+func TestClaimRenameDoesNotRetryWhenSourceIsGone(t *testing.T) {
+	oldBase := replaceRetryBase
+	replaceRetryBase = 10 * time.Second
+	t.Cleanup(func() { replaceRetryBase = oldBase })
+
+	dir := t.TempDir()
+	start := time.Now()
+	err := ClaimRename(filepath.Join(dir, "taken.json"), filepath.Join(dir, "taken.json.claimed"))
+	if err == nil {
+		t.Fatal("want an error when the record is already claimed")
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("lost claim took %v — it retried a race it had already lost", elapsed)
+	}
+}
