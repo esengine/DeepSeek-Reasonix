@@ -3,8 +3,6 @@
 // not wait 500ms. Covers the fix for native scrollbar drag and middle-button
 // autoscroll suppression during a bottomRequest window.
 
-import { equal } from "node:assert/strict";
-
 let passed = 0;
 let failed = 0;
 

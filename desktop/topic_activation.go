@@ -50,11 +50,12 @@ const (
 // resolves to its latest session. RequestID is optional — the backend
 // generates one when empty.
 type TopicActivationRequest struct {
-	Scope         string `json:"scope"`
-	WorkspaceRoot string `json:"workspaceRoot"`
-	TopicID       string `json:"topicId"`
-	SessionPath   string `json:"sessionPath"`
-	RequestID     string `json:"requestId"`
+	Scope                string `json:"scope"`
+	WorkspaceRoot        string `json:"workspaceRoot"`
+	TopicID              string `json:"topicId"`
+	SessionPath          string `json:"sessionPath"`
+	RequestID            string `json:"requestId"`
+	RecoveryOriginalPath string `json:"recoveryOriginalPath,omitempty"`
 }
 
 // TopicActivationTicket is returned synchronously by StartTopicActivation. The
@@ -166,7 +167,15 @@ func (a *App) StartTopicActivation(req TopicActivationRequest) (TopicActivationT
 	var meta TabMeta
 	var err error
 	if strings.TrimSpace(req.SessionPath) != "" {
-		meta, err = a.openTopicSession(req.Scope, req.WorkspaceRoot, req.TopicID, req.SessionPath)
+		if strings.TrimSpace(req.RecoveryOriginalPath) != "" {
+			confirmedPath, confirmErr := a.ConfirmRecoverySessionCandidate(req.RecoveryOriginalPath, req.SessionPath)
+			if confirmErr != nil {
+				return TopicActivationTicket{}, confirmErr
+			}
+			meta, err = a.openResolvedTopicSession(req.Scope, req.WorkspaceRoot, req.TopicID, confirmedPath)
+		} else {
+			meta, err = a.openTopicSession(req.Scope, req.WorkspaceRoot, req.TopicID, req.SessionPath)
+		}
 	} else if strings.TrimSpace(req.Scope) == "project" {
 		meta, err = a.openProjectTab(req.WorkspaceRoot, req.TopicID)
 	} else {

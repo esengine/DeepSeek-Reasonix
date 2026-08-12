@@ -4,7 +4,7 @@
     "commented-code": 0,
     "complexity": 2069,
     "essay": 4012,
-    "file-size": 108250,
+    "file-size": 108396,
     "function-size": 8850,
     "layering": 1,
     "marker": 0,
@@ -29,7 +29,7 @@
     "desktop/app.go": {
       "complexity": 59,
       "essay": 96,
-      "file-size": 11308,
+      "file-size": 11290,
       "function-size": 367,
       "struct-state": 15
     },
@@ -86,7 +86,7 @@
       "essay": 2
     },
     "desktop/frontend/src/App.tsx": {
-      "file-size": 4678
+      "file-size": 4753
     },
     "desktop/frontend/src/__tests__/app-chrome-tabs.test.ts": {
       "test-file-size": 19
@@ -167,7 +167,7 @@
       "file-size": 415
     },
     "desktop/frontend/src/lib/bridge.ts": {
-      "file-size": 4756
+      "file-size": 4772
     },
     "desktop/frontend/src/lib/crash.ts": {
       "file-size": 225
@@ -176,10 +176,10 @@
       "file-size": 269
     },
     "desktop/frontend/src/lib/types.ts": {
-      "file-size": 1527
+      "file-size": 1546
     },
     "desktop/frontend/src/lib/useController.ts": {
-      "file-size": 3969
+      "file-size": 4007
     },
     "desktop/heartbeat.go": {
       "essay": 20,
@@ -310,7 +310,7 @@
     "desktop/tabs.go": {
       "complexity": 41,
       "essay": 111,
-      "file-size": 7704,
+      "file-size": 7720,
       "function-size": 369,
       "struct-state": 23
     },

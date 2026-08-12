@@ -8521,6 +8521,18 @@ body > .mermaid-diagram--fullscreen {
 }
 .reasonix-confirm-dialog__actions .btn { min-width: 84px; }
 .reasonix-confirm-dialog__actions .btn--danger { font-weight: 600; }
+.recovery-session-backdrop { z-index: var(--z-overlay-backdrop); }
+.recovery-session-dialog { max-width: 560px; color: var(--fg); }
+.recovery-session-dialog__title { margin: 0 0 6px; font-size: 17px; }
+.recovery-session-dialog__body { margin: 0 0 16px; color: var(--fg-dim); font-size: var(--font-control); }
+.recovery-session-dialog__list { display: grid; gap: 8px; max-height: 360px; margin-bottom: 18px; overflow: auto; }
+.recovery-session-dialog__option { display: flex; gap: 10px; padding: 11px; border: 1px solid var(--border); border-radius: 7px; cursor: pointer; }
+.recovery-session-dialog__option:has(input:checked) { border-color: var(--accent); background: var(--bg-soft); }
+.recovery-session-dialog__option input { flex: 0 0 auto; margin-top: 3px; }
+.recovery-session-dialog__content { min-width: 0; display: grid; gap: 7px; }
+.recovery-session-dialog__content strong { overflow-wrap: anywhere; font-size: var(--font-control); }
+.recovery-session-dialog__meta { display: flex; flex-wrap: wrap; gap: 12px; color: var(--fg-dim); font-size: 12px; }
+.recovery-session-dialog__meta span { display: inline-flex; align-items: center; gap: 5px; }
 .btn {
   display: inline-flex;
   align-items: center;
