@@ -2,6 +2,258 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.24.2",
+      "date": "2026-08-12",
+      "channel": "stable",
+      "title": {
+        "en": "Reasonix Desktop 1.24.2",
+        "zh": "Reasonix Desktop 1.24.2"
+      },
+      "summary": {
+        "en": "Stability and recovery improvements for session persistence, transcript scrolling, and Windows startup.",
+        "zh": "会话持久化、对话滚动和 Windows 启动的稳定性与恢复改进。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Session Catalog",
+            "zh": "会话目录"
+          },
+          "body": {
+            "en": "Learn how the session catalog organizes recovery copies and logical sessions.",
+            "zh": "了解会话目录如何组织恢复副本和逻辑会话。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/f53edb599a929afe0c6fa514c8e441899c166afc/docs/SESSION_CATALOG.md"
+        },
+        {
+          "title": {
+            "en": "Configuration Paths",
+            "zh": "配置路径"
+          },
+          "body": {
+            "en": "Reference for configuration file locations and environment variables.",
+            "zh": "配置文件位置和环境变量参考。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/f53edb599a929afe0c6fa514c8e441899c166afc/docs/CONFIG_PATHS.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Recovery lineages now appear as a single logical session",
+            "zh": "恢复谱系现在显示为单个逻辑会话"
+          },
+          "body": {
+            "en": "Recovery copies are folded into one ordinary list row, preventing duplicate-looking sessions after upgrades.",
+            "zh": "恢复副本折叠为单个普通列表行，防止升级后出现重复会话。"
+          },
+          "refs": [
+            8599
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Sidebar no longer freezes on a wedged projection",
+            "zh": "侧边栏不再因投影卡死而冻结"
+          },
+          "body": {
+            "en": "Bounded sidebar reads and background metadata sync prevent permanent freezes when the session catalog pool is saturated.",
+            "zh": "限制侧边栏读取和后台元数据同步，防止会话目录连接池饱和时永久冻结。"
+          },
+          "refs": [
+            8594
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Stable transcript scrolling during async row growth",
+            "zh": "异步行高变化时对话滚动稳定"
+          },
+          "body": {
+            "en": "React Virtuoso now owns virtual measurement, preventing jumps when Markdown or code blocks finish loading.",
+            "zh": "React Virtuoso 现在负责虚拟测量，防止 Markdown 或代码块加载完成时跳动。"
+          },
+          "refs": [
+            8492,
+            8429,
+            8586
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Windows startup no longer flashes console windows",
+            "zh": "Windows 启动不再闪现控制台窗口"
+          },
+          "body": {
+            "en": "Startup git probes now use the hardened command wrapper, hiding console windows.",
+            "zh": "启动时的 git 探测现在使用加固的命令包装器，隐藏控制台窗口。"
+          },
+          "refs": [
+            8425
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Lifecycle records are no longer lost to Windows sharing violations",
+            "zh": "生命周期记录不再因 Windows 共享冲突而丢失"
+          },
+          "body": {
+            "en": "Retry logic for rename and re-read operations ensures crash evidence is preserved when multiple instances start together.",
+            "zh": "重命名和重读操作的重试逻辑确保多个实例同时启动时保留崩溃证据。"
+          },
+          "refs": [
+            8550
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Projection lineage rebinds across upgrades and model switches",
+            "zh": "投影 lineage 在升级和模型切换时重新绑定"
+          },
+          "body": {
+            "en": "Context projections are preserved when the lineage key changes, avoiding full-price compaction on resume.",
+            "zh": "当 lineage 键变化时保留上下文投影，避免恢复时全价压缩。"
+          },
+          "refs": [
+            8390,
+            8400
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Recovery forks no longer multiply without bound",
+            "zh": "恢复分支不再无限增长"
+          },
+          "body": {
+            "en": "False diverged forks are prevented and depth-cap isolation is bounded to one file per writer.",
+            "zh": "防止误判 diverged 分支，并将深度上限隔离限制为每个写入者一个文件。"
+          },
+          "refs": [
+            8444,
+            8430,
+            8457,
+            7982
+          ]
+        }
+      ],
+      "changes": {
+        "new": [],
+        "improved": [
+          {
+            "title": {
+              "en": "Session catalog now uses a disposable v4 database",
+              "zh": "会话目录现在使用一次性 v4 数据库"
+            },
+            "body": {
+              "en": "Logical projection and recovery roles are rebuilt from authoritative content, preventing cross-version write conflicts.",
+              "zh": "逻辑投影和恢复角色从权威内容重建，防止跨版本写入冲突。"
+            },
+            "refs": [
+              8599,
+              8425
+            ]
+          },
+          {
+            "title": {
+              "en": "Agent state refactored for clarity and safety",
+              "zh": "Agent 状态重构以提高清晰度和安全性"
+            },
+            "body": {
+              "en": "Collaborators, configuration, and runtime lifetimes are separated, with guard tests preventing accidental state changes.",
+              "zh": "协作者、配置和运行时生命周期分离，并通过保护测试防止意外状态更改。"
+            },
+            "refs": [
+              8595,
+              8564,
+              8588,
+              8541,
+              8485,
+              8460,
+              8453,
+              8447,
+              8439
+            ]
+          },
+          {
+            "title": {
+              "en": "Compaction failure records preserved across folds",
+              "zh": "压缩失败记录在多次折叠中保留"
+            },
+            "body": {
+              "en": "Projection re-reads now keep tool execution details, so the model continues to see failure context.",
+              "zh": "投影重读现在保留工具执行细节，模型继续看到失败上下文。"
+            },
+            "refs": [
+              8432
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Recovery copy classification restored",
+              "zh": "恢复副本分类恢复"
+            },
+            "body": {
+              "en": "Covered recovery copies are hidden from the project tree, reducing duplicate-looking sessions.",
+              "zh": "隐藏已覆盖的恢复副本，减少重复会话。"
+            },
+            "refs": [
+              8425
+            ]
+          },
+          {
+            "title": {
+              "en": "Repolint baseline corrected",
+              "zh": "Repolint 基线修正"
+            },
+            "body": {
+              "en": "Generated bindings are excluded from measurement and stale budgets are resynced.",
+              "zh": "生成的绑定从测量中排除，过时的预算重新同步。"
+            },
+            "refs": [
+              8605,
+              8503,
+              8436
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "yingziisme",
+        "esengine",
+        "erphenheimer",
+        "Drummerms"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.24.2",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.24.1...desktop-v1.24.2",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.24.2",
+      "baseVersion": "1.24.2",
+      "status": "reviewed",
+      "previousRelease": "1.24.1",
+      "builds": {
+        "cli": "v1.24.2",
+        "desktop": "v1.24.2",
+        "npm": "1.24.2"
+      }
+    },
+    {
       "version": "1.24.1",
       "date": "2026-08-11",
       "channel": "stable",
