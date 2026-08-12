@@ -45,7 +45,7 @@ func (a *Agent) commitSummaryProjection(commit summaryProjectionCommit) (Compact
 	}
 	a.checkpointState = "applied"
 	if commit.activeTurn != 0 && commit.trigger != CompactionTriggerManual {
-		a.lastCompactionTurn.Store(commit.activeTurn)
+		a.compaction.lastTurn.Store(commit.activeTurn)
 	}
 	receipt := state.LastReceipt
 	a.compactionMu.Unlock()

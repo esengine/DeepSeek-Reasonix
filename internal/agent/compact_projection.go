@@ -383,7 +383,7 @@ func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions s
 	a.compactionRunMu.Lock()
 	defer a.compactionRunMu.Unlock()
 	activeTurn := a.activeTurnCreatedAt.Load()
-	if activeTurn != 0 && a.lastCompactionTurn.Load() == activeTurn && trigger != CompactionTriggerManual {
+	if activeTurn != 0 && a.compaction.lastTurn.Load() == activeTurn && trigger != CompactionTriggerManual {
 		return CompactionNoop, nil
 	}
 	canonical, transcriptVersion := a.session.snapshotMessagesVersion()

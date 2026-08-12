@@ -529,27 +529,23 @@ type Agent struct {
 
 	// Context management keeps the canonical transcript immutable and installs
 	// at most one provider-visible checkpoint each time compactRatio is crossed.
-	contextWindow       int
-	compactRatio        float64
-	recentKeep          int
-	archiveDir          string
-	keepPolicy          KeepPolicy
-	compactStuck        bool
-	consecutiveCompacts int
-	sessionPath         string // bound transcript path for projection sidecars
-	workspaceID         string // stable prompt-cache lineage component
-	cacheState          string // legacy resume telemetry; never provider-visible
-	checkpointState     string // none|restored|applied; runtime-only
-	compactionState     CompactionState
+	contextWindow   int
+	compactRatio    float64
+	recentKeep      int
+	archiveDir      string
+	keepPolicy      KeepPolicy
+	compaction      compactionProgress
+	sessionPath     string // bound transcript path for projection sidecars
+	workspaceID     string // stable prompt-cache lineage component
+	cacheState      string // legacy resume telemetry; never provider-visible
+	checkpointState string // none|restored|applied; runtime-only
+	compactionState CompactionState
 	// compactionMu guards projection snapshots/install and the in-memory sidecar
 	// generation. Network summarization never runs while this lock is held.
 	compactionMu sync.Mutex
 	// compactionRunMu singleflights the expensive summary transaction without
 	// holding the session lock during network I/O.
-	compactionRunMu sync.Mutex
-	// lastCompactionTurn prevents the post-turn observer and pre-send preflight
-	// from paying for two summaries during one active tool loop.
-	lastCompactionTurn     atomic.Int64
+	compactionRunMu        sync.Mutex
 	strictAlternatingRoles bool // coalesce adjacent user turns on provider request copies
 	// activeTurnCreatedAt identifies the real/synthetic user message that began
 	// the currently running turn. Compaction may rewrite older history while a
@@ -831,9 +827,9 @@ func (a *Agent) SetSession(s *Session) {
 	a.compactionState = CompactionState{} // lineage change; disk reloaded on Resume
 	a.cacheState = CacheStateUnknown
 	a.compactionMu.Unlock()
-	a.compactStuck = false
-	a.consecutiveCompacts = 0
-	a.lastCompactionTurn.Store(0)
+	a.compaction.stuck = false
+	a.compaction.consecutive = 0
+	a.compaction.lastTurn.Store(0)
 	if s != nil {
 		a.rebuildTodoState(s.Snapshot())
 	}
