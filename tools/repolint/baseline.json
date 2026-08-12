@@ -4,7 +4,7 @@
     "commented-code": 0,
     "complexity": 2069,
     "essay": 3990,
-    "file-size": 108204,
+    "file-size": 108213,
     "function-size": 8846,
     "layering": 1,
     "marker": 0,
@@ -155,7 +155,7 @@
       "file-size": 158
     },
     "desktop/frontend/src/components/Transcript.tsx": {
-      "file-size": 269
+      "file-size": 278
     },
     "desktop/frontend/src/components/UsageStatsPanel.tsx": {
       "file-size": 276
