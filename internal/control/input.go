@@ -369,7 +369,7 @@ type GoalCommand struct {
 	DeprecatedBudgetFlag bool
 }
 
-const GoalBudgetFlagDeprecatedNotice = "This /goal budget flag is deprecated; Goal now selects its budget automatically."
+const GoalBudgetFlagDeprecatedNotice = "This /goal budget flag is deprecated and no longer changes the execution limit; Goal now runs continuously by default."
 
 func ParseGoalCommand(input string) (GoalCommand, bool) {
 	trimmed := strings.TrimSpace(input)

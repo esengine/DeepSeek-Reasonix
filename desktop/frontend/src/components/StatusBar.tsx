@@ -3,6 +3,7 @@ import { Activity, CircleDollarSign, CircleGauge, Database, FileOutput, Folder, 
 import { AnchoredPopover } from "./AnchoredPopover";
 import { RemoteConnectionErrorDialog } from "./RemoteConnectionErrorDialog";
 import { Tooltip } from "./Tooltip";
+import { contextWindowPercentages } from "../lib/contextWindow";
 import { useI18n, type Translator } from "../lib/i18n";
 import { formatMoneyLocalized } from "../lib/money";
 import { normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
@@ -14,8 +15,7 @@ import { useRemoteStore } from "../store/remote";
 type StatusBarLabelStyle = "icon" | "text";
 
 function formatRate(hit: number, denom: number): string | null {
-  if (denom <= 0) return null;
-  return ((hit / denom) * 100).toFixed(2);
+  return denom > 0 ? ((hit / denom) * 100).toFixed(2) : null;
 }
 
 // nowRate is the SINGLE-TURN prompt cache-hit % (latest turn) — the higher,
@@ -230,7 +230,7 @@ export function StatusBar({
   extensionStatuses?: ExtensionStatusEntry[];
 }) {
   const { locale, t } = useI18n();
-  const pct = context.window ? Math.min(100, Math.round((context.used / context.window) * 100)) : null;
+  const pct = context.window > 0 ? contextWindowPercentages(context.used, context.window).raw : null;
   const compactPct = context.compactRatio ? Math.round(context.compactRatio * 100) : null;
   const compactNear = pct !== null && compactPct !== null && pct >= Math.max(0, compactPct - 10);
   const compactReached = pct !== null && compactPct !== null && pct >= compactPct;
@@ -250,7 +250,23 @@ export function StatusBar({
   const turnLabel = formatTurnCount(sessionTurns, t);
   const tokenLabel = markEstimated(formatTokenCount(sessionTokens), sessionEstimated);
   const turnTokenLabel = markEstimated(formatTokenCount(turnTokens), turnEstimated);
+  const statusQuote = context.sessionCostQuote;
+  const statusBucketed = statusQuote?.displayStatus === "bucketed" || statusQuote?.aggregateMode === "currency_buckets";
+  const statusUnavailable = context.sessionCostComplete === false || statusQuote?.displayStatus === "unavailable" || statusQuote?.costComplete === false;
+  const statusSelectedAmount = statusQuote?.selected?.amount ? Number(statusQuote.selected.amount) : NaN;
+  const statusCostLabel = statusBucketed
+    ? t("context.sessionCostBucketed")
+    : statusUnavailable
+      ? "-"
+      : Number.isFinite(statusSelectedAmount) && statusSelectedAmount > 0
+        ? markEstimated(formatMoneyLocalized(statusSelectedAmount, statusQuote?.selected?.currency || context.sessionCurrency || currency, { locale }), statusQuote?.estimated !== false)
+        : costLabel;
   const balanceLabel = balance?.available && balance.display ? balance.display : "-";
+  const balanceTitle = balance?.available
+    ? (balance.detail
+      ? `${t("status.balanceTitle")}: ${balance.detail}`
+      : t("status.balanceTitle"))
+    : t("status.balanceTitle");
   const tpsLabel = lastRequestTps === undefined
     ? formatTps(lastTurnOutputTokens && lastTurnModelMs ? lastTurnOutputTokens / (lastTurnModelMs / 1_000) : null, lastTurnOutputEstimated)
     : formatTps(lastRequestTps);
@@ -397,12 +413,12 @@ export function StatusBar({
       <Tooltip label={t("status.spendTitle")} className="statusbar__metric statusbar__metric--cost">
         <span className="stat statusbar__cost">
           <MetricLabel style={metricLabelStyle} icon={<CircleDollarSign size={12} />} label={t("status.costLabel")} />
-          <b>{costLabel}</b>
+          <b>{statusCostLabel}</b>
         </span>
       </Tooltip>
     ),
     balance: (
-      <Tooltip label={t("status.balanceTitle")} className="statusbar__metric statusbar__metric--balance">
+      <Tooltip label={balanceTitle} className="statusbar__metric statusbar__metric--balance">
         <span className="stat stat--balance statusbar__balance">
           <MetricLabel style={metricLabelStyle} icon={<Wallet size={12} />} label={t("status.balanceLabel")} />
           <b className={balanceLabel === "-" ? "stat__value--empty" : undefined}>{balanceLabel}</b>

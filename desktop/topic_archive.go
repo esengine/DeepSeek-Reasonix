@@ -151,6 +151,7 @@ func (a *App) commitTopicArchive(topicID string, trace *topicArchiveTrace) (fall
 	for i, target := range targets {
 		destroys := destroyBatches[i]
 		a.closeRemovedSessionRuntimesForSessionAfterDestroyAdmissionHeld(removed, target.dir, target.sessionPath, closedRemoved)
+		a.removeSessionCatalogPath(target.sessionPath, "topic_archived")
 		if timedOutTargets[i] {
 			guard := ownership.take(target.sessionPath)
 			go delayedDesktopTopicTrash(target.dir, target.sessionPath, target.key, guard, destroys)

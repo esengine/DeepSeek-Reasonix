@@ -71,7 +71,7 @@ func New(kind string, cfg Config) (Provider, error)
 
 - `openai` kind 实现 OpenAI-compatible `/chat/completions`。
 - OpenAI-compatible vendor 只是 `kind = "openai"` 的不同配置实例，通过 `base_url`、`model`、`api_key_env` 区分；新增兼容模型通常只需改配置。
-- 一个 provider 表示一个 vendor endpoint，可通过 `models` 暴露多个模型，并以 `default` 指定默认项。`default_model`、`--model` 和桌面端模型选择器都经 `Config.ResolveModel` 解析，可接受 provider 名、裸模型名或 `provider/model`。
+- 一个 provider 表示一个 vendor endpoint，可通过 `models` 暴露多个模型，并以 `default` 指定默认项。设置 `request_url` 时，OpenAI-compatible、Anthropic-compatible 和 Responses provider 都会原样使用该完整请求地址；旧 `chat_url` 只保留 OpenAI 历史兼容语义。`default_model`、`--model` 和桌面端模型选择器都经 `Config.ResolveModel` 解析，可接受 provider 名、裸模型名或 `provider/model`。
 - `context_window` 是 provider 级默认值；`model_overrides.<model>.context_window` 可覆盖单个模型。
 - `max_output_tokens` 是独立的本轮输出上限，不由客户端 reasoning 字节上限换算，也不参与 `compact_ratio`。推荐 `0`（自动：DeepSeek 默认 high 约 64K）；显式 `32768` 控费/普通编码，`65536` 重推理/长工具链，`131072` 仅在反复 `finish_reason=length` 时再考虑。正数为显式上限，负数为在协议允许时省略；混合网关可用 `model_overrides.<model>.max_output_tokens` 覆盖单个模型。Anthropic 因协议要求仍会提供 `max_tokens` 默认值。
 - streaming tool-call delta 在 provider 内按 index 聚合，只向上层发出完整 `ToolCall`。
@@ -156,6 +156,20 @@ transcript，仅在唯一自动阈值被跨越时安装 provider 可见的短 **
   典型落地约占窗口 10%–30%。
   内部构造预算（非用户设置）：
   `recentTailBudget = clamp(window×10%, 32K, 96K)`，摘要输出上限 **16K**。
+- **用户轮次不交给摘要器裁决**：折叠区内的每条 user turn 在预算内原样保留（单条
+  ≤1500 tokens，合计 `min(8192, window×5%)`，从最旧开始）。理由是丢失的不对称
+  性——第 4 轮说的"不许改 public API"只存在于 transcript 里，它约束的代码却能从
+  工作区重新推导。预算是必须的：无上限地保留会把候选撑过验收天花板，使压缩直接
+  失败而非降级。该保护不以最近一次 digest 为界，因此能跨多次压缩存活；超出预算的
+  轮次可用 `[[keep]]` 前缀（keep 策略 `user_marked`，默认开启）强制原样保留。
+  丢弃不是静默的：压缩 telemetry 带 `user_kept` / `user_dropped` 计数，且已提交的
+  checkpoint 若折叠了用户轮次会发出提示 `[[keep]]` 的警告——两种情况下 projection
+  读起来都是完整的，计数是唯一能区分它们的东西。
+- **失败保护必须跨多次折叠成立**：`KeepErrors` 依据宿主的 `ToolExecution` 记录而非
+  文本判定失败（真实 `go test` 日志以 `=== RUN` 开头，前缀匹配看不见它），因此存储的
+  projection 保留该记录，而发往 provider 的请求不带。剥离发生在 provider 边界
+  (`ModelMessages`)，projection 写入用 `ProjectionMessages` 保留——否则下一次折叠
+  将无法分类上一次刚刚保护下来的失败。
 - 用户可用 `reasonix config compact-ratio [--local] [VALUE]` 查看或修改阈值。
   项目配置优先于桌面与新 CLI 会话共用的用户全局配置。UI 始终展示**实际生效**值。
 - `max_output_tokens` 是独立的**本轮**输出上限。
@@ -212,7 +226,7 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
 - 安装 MCP server 即授权其全部工具，不再有 server、raw tool、writer 或 destructive 的第二套审批策略；项目 `reasonix.toml` 与 `.mcp.json` 声明同样默认可信，不需要额外启动确认，显式全局 `deny` 仍然优先。全局安装写入用户 `config.toml`，项目声明保留在原项目文件；同名时项目覆盖全局，项目内部 `reasonix.toml` 高于 `.mcp.json`。编辑写回当前生效来源，删除高优先级声明后露出下一层。`readOnlyHint` 与 `destructiveHint` 仅用于调度、Plan/严格只读边界及缓存到实时安全分类复核，不会新增逐调用审批。严格只读子智能体 registry 仍仅暴露已授权且 `readOnlyHint: true`、无 `destructiveHint` 的 MCP；双模型 Planner 通过固定 `use_capability` 代理（从不暴露直接 `mcp__*` schema）调用已授权、非 destructive 的 MCP，不再要求 `readOnlyHint`，destructive 工具留给 Executor。Balanced 双模型的 Executor 使用独立 frontend 复用同一稳定代理，因此 Planner 发现的 capability ID 可在 handoff 后直接执行，同时保持两侧 ledger/audit 隔离。分发前代理会再次复核当前 controller 的 enable、授权和完整运行时连接身份；共享 Host 中仅 server 同名不构成复用权限。
 - Plan 是协作流程，不等于全工具只读。普通 built-in 与 Bash 仍走 Ask/Auto/YOLO 和 Sandbox；独立双模型 Planner 允许已授权、非 destructive 的 MCP（即使没有 `readOnlyHint`），但在规划阶段持续阻止 destructive 与未授权目标；没有独立 Planner 的单模型 Plan 仍阻止 MCP writer/destructive。
 - Plan 只能由用户显式选择进入，与当前工具审批姿态相互独立；普通聊天不会自动切换到 Plan。Auto/YOLO 不会回答 `ask`，也不会替用户批准 `exit_plan_mode`，获批计划的短期自动执行窗口也不会自动批准后续计划或嵌套/间接 Bash。
-- 桌面端协作模式分为 `normal`、`plan` 和 `goal`。Goal 会持续推进目标，直到完成、阻塞、用户停止或达到执行安全边界，并按目标自动选择简单（10）、写入（20）或研究（40）轮的跨 Run continuation backstop。用户未显式配置 `max_steps` 时，每次 Goal Run 默认 16 个模型轮次并提供一次仅总结响应；未完成时以 `goal_run_budget` 可恢复暂停。跨 turn 无进展只做观测；单次 Run 内相同宿主失败连续 3 次或成功工具轮连续 6 次没有新证据时，以 `goal_stuck` 暂停。Goal 范围的新颖证据允许新的读取/搜索结果推进任务，但拒绝完全相同的工具、参数和结果重复。累计 token 和真实 provider 请求数只做观测。三类预算共用同一个 Goal FSM、宿主 receipt、Delivery readiness 和有界 evaluator，不再存在第二套研究协议或可写 sidecar。普通聊天不会隐式切换协作模式；旧 `.reasonix/autoresearch/.../` 目录只读，显式旧路径可恢复为普通 Goal。
+- 桌面端协作模式分为 `normal`、`plan` 和 `goal`。Goal 默认不设模型轮数、跨 Run turn 数、墙钟时长或数字式无进展边界，会持续推进直到完成、真实用户/外部阻塞、用户停止/暂停、不可恢复外部错误或用户显式预算耗尽。相同宿主失败、零新增证据与 Todo 停滞阈值只触发重新规划，不产生 `goal_run_budget` 或 `goal_stuck` 暂停。Goal 范围的新颖证据允许新的读取/搜索结果推进任务，但拒绝完全相同的工具、参数和结果重复。未配置相应预算时，累计 turn、token、真实 provider 请求数和实际工作时间只做观测。正数 `[agent].goal_token_budget`、`max_steps`、时间或成本预算仍是用户可选的可恢复边界；Goal token 预算默认 `0`（关闭），从 `budget_spend` 恢复会授予新的预算切片且不清零累计统计；`task_time_budget_minutes = 0`（以及兼容的负数）表示关闭时间边界。旧简单/写入/研究参数仅为兼容元数据，所有目标共用同一个 Goal FSM、宿主 receipt、Delivery readiness 和有界 evaluator。普通聊天不会隐式切换协作模式；旧 `.reasonix/autoresearch/.../` 目录只读，显式旧路径可恢复为普通 Goal。
 
 ### 3.8 Slash command
 
@@ -390,6 +404,7 @@ reasoning_language = "auto"
 name           = "deepseek"
 kind           = "anthropic"
 base_url       = "https://api.deepseek.com/anthropic"
+# request_url  = "https://proxy.example.com/anthropic/v1/messages" # 可选：完整请求地址
 models         = ["deepseek-v4-flash", "deepseek-v4-pro"]
 default        = "deepseek-v4-flash"
 api_key_env    = "DEEPSEEK_API_KEY"

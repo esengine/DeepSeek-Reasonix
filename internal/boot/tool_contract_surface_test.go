@@ -34,10 +34,7 @@ model = "x"
 `)
 
 			req, entries := captureTokenProfileSurface(t, tc.tokenMode)
-			wantNames := defaultFullBootToolNames()
-			if tc.tokenMode == TokenModeEconomy {
-				wantNames = economyBootToolNames()
-			}
+			wantNames := unifiedBootToolNames()
 			if got := toolSchemaNames(req.Tools); !reflect.DeepEqual(got, wantNames) {
 				t.Fatalf("%s provider-visible tool surface changed\ngot  %v\nwant %v", tc.name, got, wantNames)
 			}
@@ -67,20 +64,20 @@ model = "x"
 				readOnly[e.Name] = e.ReadOnly
 			}
 			for name, want := range map[string]bool{
-				"bash":                false,
-				"read_file":           true,
-				"connect_tool_source": tc.tokenMode == TokenModeEconomy,
+				"bash":           false,
+				"read_file":      true,
+				"use_capability": true,
 			} {
 				got, ok := readOnly[name]
 				if !ok {
-					if name == "connect_tool_source" && tc.tokenMode != TokenModeEconomy {
-						continue
-					}
 					t.Fatalf("contract missing %s; tools=%v", name, contractEntryNames(entries))
 				}
 				if got != want {
 					t.Fatalf("%s ReadOnly = %v, want %v", name, got, want)
 				}
+			}
+			if _, ok := readOnly["connect_tool_source"]; ok {
+				t.Fatalf("connect_tool_source must not appear on the provider-visible surface")
 			}
 		})
 	}

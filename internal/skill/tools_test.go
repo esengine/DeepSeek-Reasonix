@@ -107,16 +107,30 @@ func TestRunSkillUnknown(t *testing.T) {
 	}
 }
 
-func TestRunSkillEnforcesRuntimeProfile(t *testing.T) {
+func TestRunSkillDoesNotBlockOnDiagnosticProfiles(t *testing.T) {
 	home := t.TempDir()
 	writeSkill(t, home, ".reasonix/skills/delivery-only.md", "---\ndescription: ship it\nprofiles: delivery\n---\nDeliver it.")
 	store := New(Options{HomeDir: home, DisableBuiltins: true})
 	store.ConfigureInvocationPolicy("economy", nil)
 	tl := NewRunSkillTool(store, nil)
 
-	_, err := tl.Execute(context.Background(), json.RawMessage(`{"name":"delivery-only"}`))
-	if err == nil || !errors.Is(err, ErrInvocationUnavailable) || !strings.Contains(err.Error(), "unavailable in the economy profile") {
-		t.Fatalf("profile-restricted run_skill error = %v", err)
+	out, err := tl.Execute(context.Background(), json.RawMessage(`{"name":"delivery-only"}`))
+	if err != nil {
+		t.Fatalf("profiles frontmatter must not block run_skill: %v", err)
+	}
+	if !strings.Contains(out, "Deliver it.") {
+		t.Fatalf("skill body missing:\n%s", out)
+	}
+	// AllowedInProfile remains accurate for doctor diagnostics.
+	sk, ok := store.Read("delivery-only")
+	if !ok {
+		t.Fatal("skill missing from store")
+	}
+	if AllowedInProfile(sk, "economy") {
+		t.Fatal("diagnostic AllowedInProfile(economy) should be false for delivery-only skill")
+	}
+	if !AllowedInProfile(sk, "delivery") {
+		t.Fatal("diagnostic AllowedInProfile(delivery) should be true")
 	}
 }
 

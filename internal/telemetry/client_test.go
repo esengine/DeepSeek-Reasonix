@@ -16,6 +16,11 @@ import (
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
+func TestMain(m *testing.M) {
+	endpoint = "http://127.0.0.1:0/v1"
+	os.Exit(m.Run())
+}
+
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
 
 func telemetryResponse(status int) *http.Response {

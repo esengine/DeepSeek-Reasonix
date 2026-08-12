@@ -1,3 +1,5 @@
+//go:build linux && cgo
+
 // Package main provides the Wails desktop shell around the Reasonix kernel.
 //
 // webkit_compat_linux.go applies WebKit2GTK compatibility workarounds around

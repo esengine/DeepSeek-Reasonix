@@ -172,7 +172,13 @@ func (r *SemanticRouter) callModel(ctx context.Context, input string, candidates
 			return
 		}
 		if (usage.PromptTokens > 0 || usage.CompletionTokens > 0) && r.Audit != nil {
-			r.Audit.RecordRouterUsage(usage.PromptTokens, usage.CompletionTokens, r.Pricing.Cost(usage), time.Since(start).Milliseconds())
+			// Host-side audit only: cost is estimated from the rate card and never
+			// enters the model request. Prefer CostQuote when wiring new audit sinks.
+			cost := 0.0
+			if r.Pricing != nil && usage != nil {
+				cost = r.Pricing.Cost(usage)
+			}
+			r.Audit.RecordRouterUsage(usage.PromptTokens, usage.CompletionTokens, cost, time.Since(start).Milliseconds())
 		}
 		if r.Sink != nil {
 			r.Sink.Emit(event.Event{

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/taskpolicy"
 )
 
 func TestTaskWarrantsPlanner(t *testing.T) {
@@ -79,6 +80,28 @@ func TestTaskWarrantsPlanner(t *testing.T) {
 		if got := TaskWarrantsPlanner(c.input); got != c.want {
 			t.Errorf("TaskWarrantsPlanner(%q) = %v, want %v", c.input, got, c.want)
 		}
+	}
+}
+
+func TestTaskPolicyOwnsAutomaticPlannerRoute(t *testing.T) {
+	cases := []struct {
+		name   string
+		policy taskpolicy.TaskPolicy
+		input  string
+		depth  agent.PlannerDepth
+	}{
+		{"direct", taskpolicy.TaskPolicy{Route: taskpolicy.RouteDirect}, "fix the parser", agent.PlannerDepthNone},
+		{"light", taskpolicy.TaskPolicy{Route: taskpolicy.RouteLightPlan}, "fix parser.go and parser_test.go", agent.PlannerDepthLight},
+		{"full overrides direct request", taskpolicy.TaskPolicy{Route: taskpolicy.RouteFullPlan}, "do it directly: migrate authentication", agent.PlannerDepthFull},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := withPlannerTurnMetadata(context.Background(), plannerTurnMetadata{Policy: tc.policy, PolicySet: true})
+			got := DecidePlannerRoute(ctx, tc.input)
+			if got.Depth != tc.depth || got.Reason != plannerReasonTaskPolicy {
+				t.Fatalf("decision = %+v, want task-policy depth %s", got, tc.depth)
+			}
+		})
 	}
 }
 

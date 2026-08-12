@@ -26,7 +26,12 @@ var TransientUserBlockTags = []string{
 	"hook-context",
 	"capability-route",
 	"interrupted-turn-recovery",
+	"execution-policy",
 }
+
+// reTrailingExecutionPolicy matches the host-appended execution-policy block at
+// the end of a user turn (attributes allowed on the open tag).
+var reTrailingExecutionPolicy = regexp.MustCompile(`(?s)\n*<execution-policy(?:\s+[^>]*)?>.*?</execution-policy>\s*$`)
 
 var reTransientUserBlock = buildTransientUserBlockRE(TransientUserBlockTags)
 
@@ -95,6 +100,7 @@ func StripTransientUserBlocks(content string) string {
 		s = next
 	}
 	s = stripTrailingDeliveryRuntime(s)
+	s = reTrailingExecutionPolicy.ReplaceAllString(s, "")
 	s = stripTrailingMemoryRecall(s)
 	return strings.TrimLeft(s, " \t\r\n")
 }

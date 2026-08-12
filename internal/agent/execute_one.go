@@ -586,14 +586,22 @@ func (a *Agent) applyRecoveryAndPermission(ctx context.Context, plan *toolCallPl
 // PreToolUse hooks and preview checkpoints, and injects call context. All of
 // this happens after permission and before the concrete Execute call.
 func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (toolOutcome, bool) {
+	policyArgs := plan.permArgs
+	if len(plan.resolved.Args) > 0 {
+		policyArgs = plan.resolved.Args
+	}
+	if outcome, blocked := a.taskPolicyToolGate(plan, policyArgs); blocked {
+		return outcome, true
+	}
 	// Acquire after permission is granted but before PreToolUse: hooks are user
 	// shell code and can themselves change the workspace. This keeps readers
 	// concurrent and avoids holding the workspace during an approval prompt while
 	// still covering every write-side action that follows authorization.
-	if a.deliveryProfile && plan.mutates && a.workspaceLease != nil {
+	// Lazy workspace lease on the first real writer for every role setting.
+	if plan.mutates && a.workspaceLease != nil {
 		if err := a.workspaceLease.AcquireWrite(ctx); err != nil {
 			return toolOutcome{
-				output:  fmt.Sprintf("blocked: the workspace did not become available for Delivery writing: %v", err),
+				output:  fmt.Sprintf("blocked: the workspace did not become available for writing: %v", err),
 				blocked: true,
 				errMsg:  "blocked: workspace write lease unavailable",
 			}, true

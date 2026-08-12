@@ -853,19 +853,20 @@ func TestSaveProviderPersistsAuthHeader(t *testing.T) {
 	}
 }
 
-func TestSaveProviderPersistsCustomEndpointURLs(t *testing.T) {
+func TestSaveProviderPersistsAndMirrorsCustomEndpointURLs(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	app := NewApp()
 	if err := app.SaveProvider(ProviderView{
-		Name:      "sub2api",
-		Kind:      "openai",
-		BaseURL:   "https://proxy.example.com/v1",
-		ChatURL:   " https://proxy.example.com/custom/chat/completions ",
-		ModelsURL: " https://proxy.example.com/v1/models ",
-		Models:    []string{"model-a"},
-		Default:   "model-a",
-		APIKeyEnv: "SUB2API_KEY",
+		Name:       "sub2api",
+		Kind:       "openai",
+		BaseURL:    "https://proxy.example.com/v1",
+		ChatURL:    " https://legacy.example.com/chat/completions/ ",
+		RequestURL: " https://proxy.example.com/custom/chat/completions/?token=1 ",
+		ModelsURL:  " https://proxy.example.com/v1/models ",
+		Models:     []string{"model-a"},
+		Default:    "model-a",
+		APIKeyEnv:  "SUB2API_KEY",
 	}); err != nil {
 		t.Fatalf("SaveProvider: %v", err)
 	}
@@ -875,8 +876,11 @@ func TestSaveProviderPersistsCustomEndpointURLs(t *testing.T) {
 	if !ok {
 		t.Fatal("saved provider not found")
 	}
-	if got.ChatURL != "https://proxy.example.com/custom/chat/completions" {
+	if got.ChatURL != "https://proxy.example.com/custom/chat/completions/?token=1" {
 		t.Fatalf("saved chat_url = %q", got.ChatURL)
+	}
+	if got.RequestURL != "https://proxy.example.com/custom/chat/completions/?token=1" {
+		t.Fatalf("saved request_url = %q", got.RequestURL)
 	}
 	if got.ModelsURL != "https://proxy.example.com/v1/models" {
 		t.Fatalf("saved models_url = %q", got.ModelsURL)
@@ -887,8 +891,11 @@ func TestSaveProviderPersistsCustomEndpointURLs(t *testing.T) {
 		if provider.Name != "sub2api" {
 			continue
 		}
-		if provider.ChatURL != "https://proxy.example.com/custom/chat/completions" {
+		if provider.ChatURL != "https://proxy.example.com/custom/chat/completions/?token=1" {
 			t.Fatalf("Settings chatUrl = %q", provider.ChatURL)
+		}
+		if provider.RequestURL != "https://proxy.example.com/custom/chat/completions/?token=1" {
+			t.Fatalf("Settings requestUrl = %q", provider.RequestURL)
 		}
 		if provider.ModelsURL != "https://proxy.example.com/v1/models" {
 			t.Fatalf("Settings modelsUrl = %q", provider.ModelsURL)
@@ -1878,31 +1885,25 @@ func TestOfficialMimoAPITemplateRemoved(t *testing.T) {
 }
 
 func TestOfficialDeepSeekTemplateUsesRegionalPricing(t *testing.T) {
-	for _, tt := range []struct {
-		language    string
-		currency    string
-		flashOutput float64
-		proOutput   float64
-	}{
-		{language: "en", currency: "$", flashOutput: 0.28, proOutput: 0.87},
-		{language: "zh", currency: "¥", flashOutput: 2, proOutput: 6},
-	} {
-		entries, keyEnv, err := officialProviderTemplate("deepseek", tt.language)
+	// Language no longer selects list-price tables; templates freeze the default
+	// USD official rates. Display currency is independent (billing.display_currency).
+	for _, language := range []string{"en", "zh"} {
+		entries, keyEnv, err := officialProviderTemplate("deepseek", language)
 		if err != nil {
-			t.Fatalf("officialProviderTemplate(%s): %v", tt.language, err)
+			t.Fatalf("officialProviderTemplate(%s): %v", language, err)
 		}
 		if keyEnv != "DEEPSEEK_API_KEY" || len(entries) != 1 {
 			t.Fatalf("template = %v/%q, want one DEEPSEEK_API_KEY entry", entries, keyEnv)
 		}
 		got := entries[0]
 		if got.Kind != "anthropic" || got.BaseURL != "https://api.deepseek.com/anthropic" || !config.EffectiveWebSearch(&got) || got.Thinking != "enabled" {
-			t.Fatalf("%s DeepSeek template = kind:%q base_url:%q web_search:%t thinking:%q, want Anthropic-compatible with web search", tt.language, got.Kind, got.BaseURL, config.EffectiveWebSearch(&got), got.Thinking)
+			t.Fatalf("%s DeepSeek template = kind:%q base_url:%q web_search:%t thinking:%q, want Anthropic-compatible with web search", language, got.Kind, got.BaseURL, config.EffectiveWebSearch(&got), got.Thinking)
 		}
-		if price := got.Prices["deepseek-v4-flash"]; price == nil || price.Currency != tt.currency || price.Output != tt.flashOutput {
-			t.Fatalf("%s deepseek-v4-flash price = %+v", tt.language, price)
+		if price := got.Prices["deepseek-v4-flash"]; price == nil || price.Currency != "$" || price.Output != 0.28 {
+			t.Fatalf("%s deepseek-v4-flash price = %+v, want frozen USD table", language, price)
 		}
-		if price := got.Prices["deepseek-v4-pro"]; price == nil || price.Currency != tt.currency || price.Output != tt.proOutput {
-			t.Fatalf("%s deepseek-v4-pro price = %+v", tt.language, price)
+		if price := got.Prices["deepseek-v4-pro"]; price == nil || price.Currency != "$" || price.Output != 0.87 {
+			t.Fatalf("%s deepseek-v4-pro price = %+v, want frozen USD table", language, price)
 		}
 	}
 }
@@ -2047,7 +2048,7 @@ func TestSetDesktopLanguagePersistsResponseLanguageAndUpdatesLiveTabs(t *testing
 	}
 }
 
-func TestSetDesktopCurrencyPersistsRegionalOfficialPricing(t *testing.T) {
+func TestSetDesktopCurrencyPersistsDisplayWithoutRewritingOfficialPricing(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	app := NewApp()
@@ -2060,9 +2061,13 @@ func TestSetDesktopCurrencyPersistsRegionalOfficialPricing(t *testing.T) {
 		t.Fatalf("Settings().DesktopCurrency = %q, want CNY", view.DesktopCurrency)
 	}
 	cfg := config.LoadForEdit(config.UserConfigPath())
+	if got := cfg.DisplayCurrencyPref(); got != "CNY" {
+		t.Fatalf("display pref = %q, want CNY", got)
+	}
 	flash, ok := cfg.Provider("deepseek-flash")
-	if !ok || flash.Price == nil || flash.Price.Output != 2 || flash.Price.Currency != "¥" {
-		t.Fatalf("saved DeepSeek flash price = %+v, want CNY official price", flash)
+	// Display currency must not rewrite frozen list prices (default USD table).
+	if !ok || flash.Price == nil || flash.Price.Output != 0.28 || flash.Price.Currency != "$" {
+		t.Fatalf("saved DeepSeek flash price = %+v, want frozen USD official price", flash)
 	}
 }
 

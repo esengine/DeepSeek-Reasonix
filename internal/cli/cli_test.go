@@ -615,7 +615,7 @@ command = "legacy-bin"
 	if err != nil {
 		t.Fatalf("read migrated user config: %v", err)
 	}
-	for _, want := range []string{`config_version = 5`, `[desktop]`, `name    = "legacy-cli"`} {
+	for _, want := range []string{`config_version = 6`, `[desktop]`, `name    = "legacy-cli"`} {
 		if !strings.Contains(string(body), want) {
 			t.Fatalf("migrated config missing %q:\n%s", want, body)
 		}
@@ -642,7 +642,7 @@ func TestRunAppliesUserConfigUpgradesOnStartup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read upgraded user config: %v", err)
 	}
-	if !strings.Contains(string(body), "config_version = 5") {
+	if !strings.Contains(string(body), "config_version = 6") {
 		t.Fatalf("CLI startup should apply user config upgrades:\n%s", body)
 	}
 }
@@ -933,16 +933,19 @@ func TestConfigCurrencyCommandWritesUserConfig(t *testing.T) {
 			t.Fatalf("config currency rc = %d, want 0", rc)
 		}
 	})
-	if !strings.Contains(out, `currency = "CNY"`) || !strings.Contains(out, "resolved: CNY") {
+	if !strings.Contains(out, `currency = "CNY"`) || !strings.Contains(out, "display: CNY") {
 		t.Fatalf("config currency output = %q", out)
 	}
 	cfg := config.LoadForEdit(config.UserConfigPath())
 	if got := cfg.DesktopCurrency(); got != "CNY" {
 		t.Fatalf("saved currency = %q, want CNY", got)
 	}
+	if got := cfg.DisplayCurrencyPref(); got != "CNY" {
+		t.Fatalf("display pref = %q, want CNY", got)
+	}
 }
 
-func TestConfigCurrencyAutoUsesResolvedCLILocale(t *testing.T) {
+func TestConfigCurrencyAutoRemainsUnresolved(t *testing.T) {
 	isolateCLIConfigHome(t)
 	i18n.DetectLanguage("zh-TW")
 	t.Cleanup(func() { i18n.DetectLanguage("en") })
@@ -952,7 +955,7 @@ func TestConfigCurrencyAutoUsesResolvedCLILocale(t *testing.T) {
 			t.Fatalf("config currency auto rc = %d, want 0", rc)
 		}
 	})
-	if !strings.Contains(out, `currency = "auto"`) || !strings.Contains(out, "resolved: CNY") {
+	if !strings.Contains(out, `currency = "auto"`) || !strings.Contains(out, "display: ,") {
 		t.Fatalf("config currency auto output = %q", out)
 	}
 	cfg := config.LoadForEdit(config.UserConfigPath())
@@ -2048,6 +2051,7 @@ func TestWithBuiltinFamiliesDoesNotAddMissingMimo(t *testing.T) {
 }
 
 func TestWithBuiltinFamiliesForLanguageUsesDeepSeekPricing(t *testing.T) {
+	// Language no longer rewrites list prices; defaults stay on the frozen USD table.
 	providers := withBuiltinFamiliesForLanguage(nil, "zh")
 	var flash *config.ProviderEntry
 	for i := range providers {
@@ -2059,8 +2063,8 @@ func TestWithBuiltinFamiliesForLanguageUsesDeepSeekPricing(t *testing.T) {
 	if flash == nil {
 		t.Fatal("deepseek-flash provider missing")
 	}
-	if flash.Price == nil || flash.Price.Output != 2 || flash.Price.Currency != "¥" {
-		t.Fatalf("flash price = %+v, want CNY preset", flash.Price)
+	if flash.Price == nil || flash.Price.Output != 0.28 || flash.Price.Currency != "$" {
+		t.Fatalf("flash price = %+v, want frozen USD official table", flash.Price)
 	}
 }
 

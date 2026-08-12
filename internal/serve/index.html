@@ -616,6 +616,7 @@ const __T = {
     'loading': 'Loading...',
     'cache': 'Cache',
     'cost': 'Cost',
+    'multi_currency': 'Multiple currencies',
     'balance': 'Balance',
     'ready': 'Ready',
     'thinking': 'Thinking...',
@@ -761,6 +762,7 @@ const __T = {
     'loading': '加载中...',
     'cache': '缓存',
     'cost': '费用',
+    'multi_currency': '多币种',
     'balance': '余额',
     'ready': '就绪',
     'thinking': '思考中...',
@@ -1025,7 +1027,17 @@ function isTextEntry(t) { return !!t&&(t.tagName==='INPUT'||t.tagName==='TEXTARE
 function isPlainKey(e) { return !e.ctrlKey&&!e.metaKey&&!e.altKey&&!isTextEntry(e.target); }
 function fmtTok(n) { return n>=1000?(n/1000).toFixed(1).replace(/\.0$/,'')+'k':String(n);}
 function currencySymbol(c){const v=String(c||'¥').trim();if(/^(cny|rmb|yuan)$/i.test(v))return '¥';if(/^(usd|dollar)$/i.test(v))return '$';return v||'¥';}
-function fmtMoney(n,c){if(typeof n!=='number'||!isFinite(n))return '—';const s=currencySymbol(c);return s+(n<1?n.toFixed(4):n.toFixed(2));}
+function fmtMoney(n,c){if(typeof n!=='number'||!isFinite(n)||n<=0)return '—';const s=currencySymbol(c);return '≈'+s+(n<1?n.toFixed(4):n.toFixed(2));}
+function usageSelectedCost(u){
+  if(!u)return null;
+  if(u.costQuote&&(u.costQuote.displayStatus==='bucketed'||u.costQuote.aggregateMode==='currency_buckets'))return{bucketed:true,complete:false};
+  const sel=u.costQuote&&u.costQuote.selected;
+  if(sel&&sel.amount){const n=Number(sel.amount);if(Number.isFinite(n)&&n>0)return{amount:n,currency:sel.currency||u.currencyCode||u.currency,complete:u.costQuote.displayComplete!==false,displayStatus:u.costQuote.displayStatus};}
+  if(u.costQuote)return null;
+  const n=u.cost??u.costUsd;
+  if(typeof n==='number'&&n>0)return{amount:n,currency:u.currencyCode||u.currency,complete:u.costQuote?u.costQuote.complete!==false:true};
+  return null;
+}
 function fmtElapsed(ms) { const s=Math.floor(ms/1000); return s<60?s+'s':Math.floor(s/60)+'m '+s%60+'s';}
 function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function escAttr(s) { return escHtml(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
@@ -1554,8 +1566,7 @@ es.onmessage=ev=>{setConnState('connected');
     case 'usage':
       if(e.usage){turnTokens=e.usage.completionTokens||0;
         cumulativeTokens+=e.usage.totalTokens||0;
-        const usageCost=e.usage.cost??e.usage.costUsd;
-        if(typeof usageCost==='number')cumulativeCost+=usageCost;
+        const picked=usageSelectedCost(e.usage);
         cumulativeCacheHit+=e.usage.cacheHitTokens||0;
         cumulativeCacheMiss+=e.usage.cacheMissTokens||0;
         const strip=el('div','metric-strip');
@@ -1563,7 +1574,8 @@ es.onmessage=ev=>{setConnState('connected');
           const sp=el('span','item');sp.innerHTML=it.l+' <span class="v '+it.c+'">'+it.v+'</span>';strip.appendChild(sp);
         });
         if(e.usage.cacheHitTokens){const sp=el('span','item');sp.innerHTML=__('cache')+' <span class="v acc">'+Math.round(e.usage.cacheHitTokens/Math.max(1,e.usage.cacheHitTokens+e.usage.cacheMissTokens)*100)+'%</span>';strip.appendChild(sp);}
-        if(typeof usageCost==='number'&&usageCost>0){const sp=el('span','item');sp.innerHTML=__('cost')+' <span class="v">'+fmtMoney(usageCost,e.usage.currency)+'</span>';strip.appendChild(sp);}
+        if(picked&&picked.bucketed){const sp=el('span','item');sp.innerHTML=__('cost')+' <span class="v">'+__('multi_currency')+'</span>';strip.appendChild(sp);}
+        else if(picked&&picked.amount>0){const sp=el('span','item');sp.innerHTML=__('cost')+' <span class="v">'+fmtMoney(picked.amount,picked.currency||e.usage.currency)+'</span>';strip.appendChild(sp);}
         log.appendChild(strip);scrollDown();
       } break;
     case 'notice': log.appendChild(el('div','notice'+(e.level==='warn'?' notice--warn':''),(e.level==='warn'?'! ':'')+(e.text||'')));scrollDown();break;
@@ -1602,11 +1614,12 @@ function fetchStatus(){
     goalText=(s.goal||'').trim();
     goalActive=goalText!==''&&(s.goalStatus||'')==='running';
     updateGoalUI();
+    sessionCostQuote=s.sessionCostQuote||null;
     // sidebar metrics
     const cacheTotal=(s.cacheHit||0)+(s.cacheMiss||0);
     $('#sm-cache').textContent=cacheTotal>0?Math.round((s.cacheHit||0)/cacheTotal*100)+'%':'—';
-    const lastCost=s.lastUsage?.cost??s.lastUsage?.costUsd??s.lastUsage?.totalCost;
-    if(typeof lastCost==='number')$('#sm-cost').textContent=fmtMoney(lastCost,s.lastUsage?.currency);
+    const lastPicked=usageSelectedCost(s.lastUsage);
+    $('#sm-cost').textContent=lastPicked?.bucketed?__('multi_currency'):lastPicked?fmtMoney(lastPicked.amount,lastPicked.currency||s.lastUsage?.currency):'—';
     if(s.balance){$('#sm-balance').textContent=s.balance.display||'--';}
     if(s.balance)balanceInfo.textContent='💰 '+(s.balance.display||'--');
   }).catch(()=>{});
@@ -1972,8 +1985,9 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&sidebar.classList.c
 // Session-scoped counters accumulated while this page is open. They reset on
 // session rotation (/new, /resume) so the stats card labeled "session cost"
 // never quietly turns into an all-sessions running total.
-let cumulativeTokens=0, cumulativeCost=0, cumulativeCacheHit=0, cumulativeCacheMiss=0;
-function resetCumulativeStats(){cumulativeTokens=0;cumulativeCost=0;cumulativeCacheHit=0;cumulativeCacheMiss=0;}
+let cumulativeTokens=0, cumulativeCacheHit=0, cumulativeCacheMiss=0;
+let sessionCostQuote=null;
+function resetCumulativeStats(){cumulativeTokens=0;cumulativeCacheHit=0;cumulativeCacheMiss=0;sessionCostQuote=null;}
 function openStats(){
   const modal=$('#stats-modal');
   if(!modal)return;
@@ -1986,10 +2000,11 @@ function openStats(){
     const hit=cumulativeCacheHit||s.cacheHit||0, miss=cumulativeCacheMiss||s.cacheMiss||0;
     const rate=hit+miss>0?Math.round(hit/(hit+miss)*100)+'%':'0%';
     $('#stats-cache-rate').textContent=rate;
-    // No single-request fallback here: rendering lastUsage.cost (one turn)
-    // under the session-cost label displayed one turn's spend as the session's.
-    const cost=cumulativeCost;
-    $('#stats-total-cost').textContent=cost>0?fmtMoney(cost,s.lastUsage?.currency):'-';
+    const quote=s.sessionCostQuote;
+    if(quote?.displayStatus==='bucketed'||quote?.aggregateMode==='currency_buckets') $('#stats-total-cost').textContent=__('multi_currency');
+    else if(quote?.selected?.amount) $('#stats-total-cost').textContent=fmtMoney(Number(quote.selected.amount),quote.selected.currency);
+    else if(quote?.displayStatus==='unavailable') $('#stats-total-cost').textContent='—';
+    else $('#stats-total-cost').textContent='—';
     $('#stats-balance').textContent=s.balance?.display||'-';
     if(s.window){const pct=Math.min(100,Math.round(s.used/s.window*100));$('#stats-ctx-fill').style.width=pct+'%';$('#stats-ctx-used').textContent=fmtTok(s.used)+' tok';$('#stats-ctx-window').textContent=fmtTok(s.window)+' tok';}
   }).catch(()=>{});

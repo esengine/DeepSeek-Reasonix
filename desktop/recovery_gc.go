@@ -59,13 +59,14 @@ func (a *App) reclaimRecoveryBranchesIn(dirs []string, now time.Time) int {
 		}
 		for _, path := range reclaimable {
 			// Re-check liveness right before disposal: the scan is a snapshot,
-			// and the user may have opened the branch since. DeleteSession then
-			// runs the full removal path (removal guard, runtime unbinding,
-			// trash move), so even a miss here lands in the recoverable trash.
+			// and the user may have opened the branch since.
 			if agent.SessionLeaseHeld(path) || a.sessionOpenInAnyTab(path) {
 				continue
 			}
-			if err := a.DeleteSession(path); err != nil {
+			// DeleteRecoveryCopy re-proves real parent coverage under removal
+			// guards. A concurrent continue-edit, missing parent, or busy lease
+			// skips without moving or permanently deleting anything.
+			if err := a.DeleteRecoveryCopy(path); err != nil {
 				slog.Warn("desktop: trash reclaimed recovery branch", "path", path, "err", err)
 				continue
 			}

@@ -4,12 +4,18 @@ import { createPortal } from "react-dom";
 
 const FLOATING_MENU_MARGIN = 8;
 
-export interface FloatingMenuItem {
-  icon?: ReactNode;
-  label: ReactNode;
-  onSelect: () => void;
-  disabled?: boolean;
-}
+export type FloatingMenuItem =
+  | {
+      separator: true;
+      key?: string;
+    }
+  | {
+      icon?: ReactNode;
+      label: ReactNode;
+      onSelect: () => void;
+      disabled?: boolean;
+      separator?: false;
+    };
 
 function clampFloatingMenuPosition(x: number, y: number, width: number, height: number): { left: number; top: number } {
   if (typeof window === "undefined") return { left: x, top: y };
@@ -61,20 +67,24 @@ export function FloatingMenu({
 export function FloatingMenuItems({ items }: { items: FloatingMenuItem[] }) {
   return (
     <>
-      {items.map((item, index) => (
-        <button
-          key={index}
-          type="button"
-          disabled={item.disabled}
-          onClick={(event: ReactMouseEvent<HTMLButtonElement>) => {
-            event.stopPropagation();
-            if (!item.disabled) item.onSelect();
-          }}
-        >
-          {item.icon}
-          <span>{item.label}</span>
-        </button>
-      ))}
+      {items.map((item, index) =>
+        item.separator ? (
+          <div key={item.key ?? `sep-${index}`} className="floating-menu__separator" role="separator" />
+        ) : (
+          <button
+            key={index}
+            type="button"
+            disabled={item.disabled}
+            onClick={(event: ReactMouseEvent<HTMLButtonElement>) => {
+              event.stopPropagation();
+              if (!item.disabled) item.onSelect();
+            }}
+          >
+            {item.icon}
+            <span>{item.label}</span>
+          </button>
+        ),
+      )}
     </>
   );
 }

@@ -104,23 +104,23 @@ func TestApprovalToolWideEndToEnd(t *testing.T) {
 	}
 }
 
-// TestPlanModeApprovalPostureMatrix proves Plan does not replace the active
-// approval policy. Ordinary writers still ask, auto-approve, bypass explicit
-// asks in YOLO, or stop at deny exactly as they do in Standard mode.
+// TestPlanModeApprovalPostureMatrix proves Plan freezes ForbidMutation on the
+// turn TaskPolicy so ordinary writers are host-blocked even when YOLO would
+// otherwise auto-allow them. Permission may still prompt first in Ask mode;
+// the host floor is enforced after the gate.
 func TestPlanModeApprovalPostureMatrix(t *testing.T) {
 	tests := []struct {
-		name        string
-		mode        string
-		askRules    []string
-		denyRules   []string
-		wantPrompts int
-		wantWrites  int
+		name       string
+		mode       string
+		askRules   []string
+		denyRules  []string
+		wantWrites int
 	}{
-		{name: "Ask prompts for fallback writer", mode: ToolApprovalAsk, wantPrompts: 1, wantWrites: 1},
-		{name: "Auto allows fallback writer", mode: ToolApprovalAuto, wantWrites: 1},
-		{name: "Auto preserves explicit ask", mode: ToolApprovalAuto, askRules: []string{"write_file"}, wantPrompts: 1, wantWrites: 1},
-		{name: "YOLO bypasses explicit ask", mode: ToolApprovalYolo, askRules: []string{"write_file"}, wantWrites: 1},
-		{name: "deny wins in YOLO", mode: ToolApprovalYolo, denyRules: []string{"write_file"}},
+		// YOLO/Auto avoid hanging on interactive approval while still proving
+		// TaskPolicy ForbidMutation blocks the write.
+		{name: "Auto blocks writer under plan TaskPolicy", mode: ToolApprovalAuto, wantWrites: 0},
+		{name: "YOLO blocks writer under plan TaskPolicy", mode: ToolApprovalYolo, askRules: []string{"write_file"}, wantWrites: 0},
+		{name: "deny still blocks in YOLO plan", mode: ToolApprovalYolo, denyRules: []string{"write_file"}, wantWrites: 0},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -133,18 +133,11 @@ func TestPlanModeApprovalPostureMatrix(t *testing.T) {
 			}}
 			ag := agent.New(prov, reg, agent.NewSession(""), agent.Options{}, event.Discard)
 
-			approvalIDs := make(chan string, 1)
-			prompts := 0
 			c := New(Options{
 				Runner:   ag,
 				Executor: ag,
 				Policy:   permission.New("ask", nil, tc.askRules, tc.denyRules),
-				Sink: event.FuncSink(func(e event.Event) {
-					if e.Kind == event.ApprovalRequest {
-						prompts++
-						approvalIDs <- e.Approval.ID
-					}
-				}),
+				Sink:     event.Discard,
 			})
 			defer c.Close()
 			c.EnableInteractiveApproval()
@@ -153,15 +146,9 @@ func TestPlanModeApprovalPostureMatrix(t *testing.T) {
 			if got := c.ToolApprovalMode(); got != tc.mode {
 				t.Fatalf("Plan changed approval mode to %q, want %q", got, tc.mode)
 			}
-			if tc.wantPrompts > 0 {
-				go func() { c.Approve(<-approvalIDs, true, false, false) }()
-			}
 
 			if err := ag.Run(context.Background(), "draft a plan for this change"); err != nil {
 				t.Fatalf("Plan run: %v", err)
-			}
-			if prompts != tc.wantPrompts {
-				t.Fatalf("approval prompts = %d, want %d", prompts, tc.wantPrompts)
 			}
 			writer.mu.Lock()
 			writes := len(writer.paths)

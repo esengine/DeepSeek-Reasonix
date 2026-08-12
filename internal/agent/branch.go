@@ -32,13 +32,17 @@ type BranchMeta struct {
 	TopicTitle       string    `json:"topic_title,omitempty"`
 	CustomTitle      string    `json:"custom_title,omitempty"`
 	Model            string    `json:"model,omitempty"`
-	TokenMode        string    `json:"token_mode,omitempty"`
-	Mode             string    `json:"mode,omitempty"`
-	ToolApprovalMode string    `json:"tool_approval_mode,omitempty"`
-	Goal             string    `json:"goal,omitempty"`
-	Recovered        bool      `json:"recovered,omitempty"`
-	RecoveryReason   string    `json:"recovery_reason,omitempty"`
-	RecoveryDigest   string    `json:"recovery_digest,omitempty"`
+	// TokenMode is the legacy dual-write value (economy|full|delivery). Prefer
+	// AgentPreset (light|balanced|delivery) when both are present.
+	TokenMode string `json:"token_mode,omitempty"`
+	// AgentPreset is the session role setting (角色设定): light|balanced|delivery.
+	AgentPreset      string `json:"agent_preset,omitempty"`
+	Mode             string `json:"mode,omitempty"`
+	ToolApprovalMode string `json:"tool_approval_mode,omitempty"`
+	Goal             string `json:"goal,omitempty"`
+	Recovered        bool   `json:"recovered,omitempty"`
+	RecoveryReason   string `json:"recovery_reason,omitempty"`
+	RecoveryDigest   string `json:"recovery_digest,omitempty"`
 	// RecoveryDepth counts how many recovery forks separate this branch from a
 	// normal session (1 = forked from a normal session). SaveRecoveryBranch
 	// refuses to fork past SessionRecoveryMaxDepth so a conflict loop cannot

@@ -29,7 +29,6 @@
 //
 // Rendering consumes the store through TranscriptProjection (items + paging
 // state); useController dispatches projections into per-tab reducer state.
-
 import { asArray } from "./array";
 import { app } from "./bridge";
 import { noteHistoryPage, registerTranscriptCacheDiagnostics } from "./sessionDiagnostics";
@@ -601,6 +600,7 @@ export class TranscriptStore {
     const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
     const slice = await this.backend.HistorySliceForTab(tabId, req);
     const endedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (slice.error?.trim()) throw new Error(slice.error.trim());
     const entries = asArray<HistoryEntry>(slice.entries);
     let inlineBytes = 0;
     for (const entry of entries) inlineBytes += recordBytes(entry.message);

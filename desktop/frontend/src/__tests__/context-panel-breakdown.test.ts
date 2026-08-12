@@ -1,6 +1,7 @@
 // Run: tsx src/__tests__/context-panel-breakdown.test.ts
 
 import { cacheHitTone, contextBreakdown, contextCostDisplay, contextSessionCache, contextSourceRows, contextUsageRefreshKey, contextWindowStatus, formatCacheHitRate, formatMetricTokens, formatSharePercent, liveTurnUsageBreakdown } from "../components/ContextPanel";
+import { contextWindowPercentages } from "../lib/contextWindow";
 import { currencySymbol, formatMoney, formatMoneyLocalized } from "../lib/money";
 import type { WireUsage } from "../lib/types";
 
@@ -168,10 +169,21 @@ eq(
 
 console.log("\ncontext window status");
 
+eq(
+  contextWindowPercentages(1_400_000, 1_000_000),
+  { raw: 140, display: 100 },
+  "over-limit context preserves the raw percentage while capping the meter fill",
+);
+eq(
+  contextWindowPercentages(1_001, 1_000),
+  { raw: 101, display: 100 },
+  "just-over-limit context remains visibly over 100 percent after integer formatting",
+);
 eq(contextWindowStatus(33, 80), { tone: "good", key: "context.windowStatusHealthy" }, "low usage stays healthy");
 eq(contextWindowStatus(72, 80), { tone: "notice", key: "context.windowStatusWatch" }, "usage near compact threshold warns early");
 eq(contextWindowStatus(80, 80), { tone: "warn", key: "context.windowStatusPastCompact" }, "compact threshold reached takes warning tone");
 eq(contextWindowStatus(91, 80), { tone: "warn", key: "context.windowStatusNearLimit" }, "near hard limit overrides compact status");
+eq(contextWindowStatus(140, 80), { tone: "warn", key: "context.windowStatusOverLimit" }, "over-limit context has a distinct status");
 
 console.log("\ncontext panel cost");
 
@@ -181,7 +193,11 @@ const infoCost = contextCostDisplay({
   sessionCurrency: "¥",
   usage: { cost: 0, costUsd: 0, currency: "¥" },
 });
-eq(infoCost, { amount: 0.1759, currency: "$" }, "panel cost keeps the panel currency instead of state default");
+eq(
+  infoCost,
+  { amount: 0.1759, currency: "$", estimated: true, complete: true, labelKind: "estimated" },
+  "panel cost keeps the panel currency instead of state default",
+);
 const singleRequestOnly = contextCostDisplay({
   info: { sessionCost: 0, sessionCurrency: "", sessionCostUsd: 0 },
   sessionCost: 0,
@@ -190,7 +206,7 @@ const singleRequestOnly = contextCostDisplay({
 });
 eq(
   singleRequestOnly,
-  { amount: 0, currency: "¥" },
+  { amount: 0, currency: "¥", estimated: true, complete: false, labelKind: "unavailable" },
   "a single request's cost never renders under the session-cost label",
 );
 const localAccumulated = contextCostDisplay({
@@ -199,7 +215,32 @@ const localAccumulated = contextCostDisplay({
   sessionCurrency: "¥",
   usage: { cost: 0.42, costUsd: 0.42, currency: "$" },
 });
-eq(localAccumulated, { amount: 1.5, currency: "¥" }, "locally accumulated session cost still renders");
+eq(
+  localAccumulated,
+  { amount: 1.5, currency: "¥", estimated: true, complete: true, labelKind: "estimated" },
+  "locally accumulated session cost still renders",
+);
+const incompleteStructured = contextCostDisplay({
+  info: {
+    sessionCost: 1,
+    sessionCurrency: "USD",
+    sessionCostComplete: false,
+    sessionCostQuote: {
+      original: { amount: "7", currency: "CNY" },
+      selected: { amount: "1", currency: "USD" },
+      estimated: true,
+      complete: false,
+      incompleteReason: "incomplete_valuations",
+    },
+  },
+  sessionCost: 1,
+  sessionCurrency: "USD",
+});
+eq(
+  incompleteStructured,
+  { amount: 0, currency: "USD", estimated: true, complete: false, labelKind: "unavailable" },
+  "an incomplete structured quote never renders a partial selected total",
+);
 
 console.log("\ncontext panel session cache scope");
 

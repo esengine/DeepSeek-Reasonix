@@ -336,7 +336,7 @@ func TestRangeCompressionSharesSummarySingleflight(t *testing.T) {
 	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, ArchiveDir: t.TempDir()}, event.Discard)
 	autoErr := make(chan error, 1)
 	go func() {
-		_, err := a.compactToProjection(context.Background(), CompactionTriggerPressure, "", true)
+		_, err := a.compactToProjection(context.Background(), CompactionTriggerPressure, "", true, false)
 		autoErr <- err
 	}()
 	<-prov.started

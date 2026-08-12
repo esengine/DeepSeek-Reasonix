@@ -29,6 +29,8 @@ const (
 	ClaudeManifest = ".claude-plugin/plugin.json"
 	StateFilename  = "plugin-packages.json"
 
+	PluginStatusDisabledIncompatible = "disabled_incompatible"
+
 	claudeSettingsPath = ".claude/settings.json"
 	claudeInstructions = "CLAUDE.md"
 )
@@ -255,6 +257,8 @@ type InstalledPlugin struct {
 	ManifestKind string `json:"manifestKind,omitempty"`
 	Enabled      bool   `json:"enabled"`
 	Commit       string `json:"commit,omitempty"`
+	Status       string `json:"status,omitempty"`
+	StatusReason string `json:"statusReason,omitempty"`
 }
 
 type InstalledPackage struct {
@@ -367,29 +371,6 @@ func SetEnabled(reasonixHome, name string, enabled bool) error {
 		}
 	}
 	return fmt.Errorf("plugin %q is not installed", name)
-}
-
-func LoadInstalled(reasonixHome string) ([]InstalledPackage, []string) {
-	st, err := LoadState(reasonixHome)
-	if err != nil {
-		return nil, []string{err.Error()}
-	}
-	var out []InstalledPackage
-	var warnings []string
-	for _, installed := range st.Plugins {
-		if !installed.Enabled {
-			continue
-		}
-		root := ResolveRoot(reasonixHome, installed.Root)
-		pkg, pkgWarnings, err := ParseDir(root)
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("%s: %v", installed.Name, err))
-			continue
-		}
-		out = append(out, InstalledPackage{Installed: installed, Package: pkg, Warnings: pkgWarnings})
-	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Installed.Name < out[j].Installed.Name })
-	return out, warnings
 }
 
 func ResolveRoot(reasonixHome, root string) string {

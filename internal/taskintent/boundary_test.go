@@ -20,7 +20,7 @@ var allowedExports = map[string]bool{
 	"Classify": true, "NeedsEvidence": true, "NeedsMutation": true,
 	"NeedsPersistentAction": true, "GoalNeedsWriteBudget": true,
 	"BudgetClassSimple": true, "BudgetClassWrite": true, "BudgetClassResearch": true,
-	"BudgetTurns": true, "ClassifyGoalBudget": true,
+	"ClassifyGoalBudget": true,
 }
 
 // lineBudgets caps the heuristic files: vocabulary growth must displace

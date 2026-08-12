@@ -77,9 +77,39 @@ func TestListSessionsUsesSidecarWithoutDecoding(t *testing.T) {
 	}
 }
 
-// A legacy session whose sidecar has no recorded turn count must be decoded once
-// and then backfilled, so the second listing reads the sidecar.
-func TestListSessionsBackfillsLegacySession(t *testing.T) {
+func TestListSessionsLeavesLegacyCountsUnknownWithoutDecodingOrWriting(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "legacy.jsonl")
+	if err := os.WriteFile(path, []byte("not valid jsonl\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	updated := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	if err := SaveBranchMetaPreserveUpdated(path, BranchMeta{
+		ID: BranchID(path), CreatedAt: updated, UpdatedAt: updated, Scope: "global",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	infos, err := ListSessions(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 1 || infos[0].CountsKnown || infos[0].Turns != 0 || !strings.Contains(infos[0].Preview, "being indexed") {
+		t.Fatalf("legacy listing = %#v", infos)
+	}
+	meta, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta: ok=%v err=%v", ok, err)
+	}
+	if meta.SchemaVersion != 0 || meta.Turns != 0 || !meta.UpdatedAt.Equal(updated) {
+		t.Fatalf("listing mutated legacy sidecar: %+v", meta)
+	}
+}
+
+// A legacy session whose sidecar has no recorded turn count remains visible
+// without a synchronous transcript decode. The catalog repair worker owns the
+// eventual backfill.
+func TestListSessionsLeavesLegacySessionForBackgroundRepair(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "20260101-000000-deepseek-chat.jsonl")
 	writeSessionFile(t, path, []provider.Message{
@@ -99,18 +129,17 @@ func TestListSessionsBackfillsLegacySession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
 	}
-	if len(infos) != 1 || infos[0].Turns != 2 {
-		t.Fatalf("expected 1 session with 2 turns, got %+v", infos)
+	if len(infos) != 1 || infos[0].Turns != 0 || infos[0].CountsKnown {
+		t.Fatalf("expected one unknown-count session, got %+v", infos)
 	}
 
-	// Backfill must have written the counts into the sidecar without bumping
-	// activity time (ordering must stay stable).
+	// Listing must not mutate the sidecar or bump activity time.
 	meta, ok, err := LoadBranchMeta(path)
 	if err != nil || !ok {
 		t.Fatalf("LoadBranchMeta: ok=%v err=%v", ok, err)
 	}
-	if meta.Turns != 2 || meta.Preview != "legacy question" {
-		t.Fatalf("backfill missing: turns=%d preview=%q", meta.Turns, meta.Preview)
+	if meta.Turns != 0 || meta.Preview != "" || meta.SchemaVersion != 0 {
+		t.Fatalf("listing mutated counts: %+v", meta)
 	}
 	if !meta.UpdatedAt.Equal(updated) {
 		t.Fatalf("backfill bumped UpdatedAt: got %v want %v", meta.UpdatedAt, updated)
@@ -142,10 +171,9 @@ func TestListSessionsTrustsRecordedEmptyWithoutDecoding(t *testing.T) {
 	}
 }
 
-// A genuinely-empty legacy session (no counts-aware meta) must be decoded once
-// and then recorded as authoritative-empty, so later listings trust it instead
-// of re-decoding the .jsonl on every refresh (the Turns == 0 overload bug).
-func TestListSessionsRecordsEmptyLegacySessionOnce(t *testing.T) {
+// A legacy artifact that might be empty is shown as unknown until the catalog
+// repair worker validates it; listing cannot know without decoding.
+func TestListSessionsShowsPotentiallyEmptyLegacySessionAsUnknown(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "20260101-000000-deepseek-chat.jsonl")
 	writeSessionFile(t, path, []provider.Message{
@@ -157,20 +185,16 @@ func TestListSessionsRecordsEmptyLegacySessionOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
 	}
-	if len(infos) != 0 {
-		t.Fatalf("empty session must not be listed; got %d", len(infos))
+	if len(infos) != 1 || infos[0].CountsKnown {
+		t.Fatalf("legacy session should be visible as unknown; got %+v", infos)
 	}
 
-	meta, ok, err := LoadBranchMeta(path)
-	if err != nil || !ok {
-		t.Fatalf("empty session should have been stamped: ok=%v err=%v", ok, err)
-	}
-	if meta.SchemaVersion != BranchMetaCountsVersion || meta.Turns != 0 {
-		t.Fatalf("empty session not recorded as authoritative-empty: version=%d turns=%d", meta.SchemaVersion, meta.Turns)
+	if _, ok, err := LoadBranchMeta(path); err != nil || ok {
+		t.Fatalf("listing unexpectedly created metadata: ok=%v err=%v", ok, err)
 	}
 }
 
-func TestListSessionsRepairsPreviouslyCachedZeroWhenReadable(t *testing.T) {
+func TestListSessionsDefersPreviouslyCachedZeroRepair(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "20260101-000000-deepseek-chat.jsonl")
 	writeSessionFile(t, path, []provider.Message{
@@ -189,19 +213,19 @@ func TestListSessionsRepairsPreviouslyCachedZeroWhenReadable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
 	}
-	if len(infos) != 1 || infos[0].Turns != 1 || infos[0].Preview != "recovered question" {
-		t.Fatalf("recovered session was not restored to the listing: %+v", infos)
+	if len(infos) != 1 || infos[0].Turns != 0 || infos[0].CountsKnown || !strings.Contains(infos[0].Preview, "being indexed") {
+		t.Fatalf("legacy zero was not exposed as unknown: %+v", infos)
 	}
 	meta, ok, err := LoadBranchMeta(path)
 	if err != nil || !ok {
 		t.Fatalf("LoadBranchMeta: ok=%v err=%v", ok, err)
 	}
-	if meta.SchemaVersion != BranchMetaCountsVersion || meta.Turns != 1 || meta.Preview != "recovered question" {
-		t.Fatalf("recovered listing metadata was not repaired: %+v", meta)
+	if meta.SchemaVersion != branchMetaCountsInitialVersion || meta.Turns != 0 || meta.Preview != "" {
+		t.Fatalf("listing unexpectedly repaired metadata: %+v", meta)
 	}
 }
 
-func TestListSessionsValidatesOldRecordedEmptyOnce(t *testing.T) {
+func TestListSessionsDefersOldRecordedEmptyValidation(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "20260101-000000-deepseek-chat.jsonl")
 	writeSessionFile(t, path, []provider.Message{
@@ -220,15 +244,15 @@ func TestListSessionsValidatesOldRecordedEmptyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessions (migration): %v", err)
 	}
-	if len(infos) != 0 {
-		t.Fatalf("validated empty session must stay hidden; got %+v", infos)
+	if len(infos) != 1 || infos[0].CountsKnown {
+		t.Fatalf("old zero should remain visible as unknown; got %+v", infos)
 	}
 	meta, ok, err := LoadBranchMeta(path)
 	if err != nil || !ok {
 		t.Fatalf("LoadBranchMeta: ok=%v err=%v", ok, err)
 	}
-	if meta.SchemaVersion != BranchMetaCountsVersion || meta.Turns != 0 {
-		t.Fatalf("empty session was not stamped as validated: %+v", meta)
+	if meta.SchemaVersion != branchMetaCountsInitialVersion || meta.Turns != 0 {
+		t.Fatalf("listing changed old zero metadata: %+v", meta)
 	}
 
 	// Current-version zero counts are authoritative. Making the artifact invalid
@@ -240,8 +264,8 @@ func TestListSessionsValidatesOldRecordedEmptyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessions (steady state): %v", err)
 	}
-	if len(infos) != 0 {
-		t.Fatalf("validated empty session was unexpectedly re-probed: %+v", infos)
+	if len(infos) != 1 || infos[0].CountsKnown {
+		t.Fatalf("unknown session should stay visible without re-probe: %+v", infos)
 	}
 }
 
@@ -276,7 +300,7 @@ func TestListSessionsKeepsUnreadableNonEmptySessionsVisible(t *testing.T) {
 			if len(infos) != 1 {
 				t.Fatalf("unreadable non-empty session must remain visible; got %d entries", len(infos))
 			}
-			if infos[0].Turns != 0 || !strings.Contains(infos[0].Preview, "may be corrupted") {
+			if infos[0].Turns != 0 || infos[0].CountsKnown || !strings.Contains(infos[0].Preview, "being indexed") {
 				t.Fatalf("unexpected corrupt-session listing: %+v", infos[0])
 			}
 

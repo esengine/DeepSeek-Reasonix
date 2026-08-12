@@ -12,6 +12,7 @@
 ## Contents
 
 - [Configuration](#configuration)
+- [Billing and display currency](./BILLING.md)
 - [CLI reference](./CLI.md)
 - [Environment variables](#environment-variables)
 - [Web frontend](#web-frontend)
@@ -660,11 +661,11 @@ Mode and display shortcuts:
 | `Shift+Tab` | Cycles Ask → Auto → Plan → Ask | YOLO remains outside this composer-mode cycle; the footer shows the active mode. |
 | `Ctrl+Y` | Toggles YOLO on/off | Turning YOLO off restores the previous Ask/Auto base when known. Terminals that forward Command/Super may also send `Cmd+Y`, but `Ctrl+Y` is the reliable terminal shortcut. |
 | `--yolo`, `--dangerously-skip-permissions` | Starts chat in YOLO | Same runtime mode as `Ctrl+Y`. |
-| `/work-mode [economy|balanced|delivery]` | Shows or switches the current session's work mode | `/profile` is a compatibility alias. Switching rebuilds the runtime atomically, preserves the conversation and approval posture, and is blocked while work is active. |
+| `/preset [light|balanced|delivery]` | Shows or switches the current session's execution setting (执行设定) | `/work-mode` and `/profile` are compatibility aliases (`economy` → `light`). Switching updates the execution setting in place without rebuilding the controller; blocked while a turn, approval, or background job is active. |
 | `/theme [auto|light|dark|style]` | Shows or switches the CLI theme | Bare `/theme` lists background modes and named accent palettes. The choice is saved to the user config; `REASONIX_THEME` and `REASONIX_THEME_STYLE` can override it for one run. |
 | `Ctrl+O` | Toggles verbose reasoning display | Also available through `/verbose`. |
 | `Ctrl+B` | Expands or collapses long shell output | Long shell-output hint lines can also be clicked in the transcript; text selection is handled in-app while the full-screen TUI has mouse reporting enabled. |
-| `/goal <objective>`, `/goal status`, `/goal pause`, `/goal resume`, `/goal clear` | Starts, checks, pauses, resumes, or clears Goal | Goal automatically selects a simple, write, or research turn budget. |
+| `/goal <objective>`, `/goal status`, `/goal pause`, `/goal resume`, `/goal clear` | Starts, checks, pauses, resumes, or clears Goal | A Goal is unbounded unless `[agent].goal_token_budget` is set. |
 | `/migrate`, `/migrate --from <legacy-dir>` | Retries legacy migration or imports sessions from a chosen v0.x source | Use `--from` for custom Windows v0.52 install/data directories; it imports sessions only. See [Configuration paths](./CONFIG_PATHS.md). |
 
 Picker and approval shortcuts:
@@ -1139,25 +1140,31 @@ until the goal is complete, blocked, paused, or cleared. Ordinary chat never
 changes collaboration mode implicitly; choose Goal in the composer or use
 `/goal` to start a long-running objective.
 
-Goal runs under a per-class **turn** budget: simple goals get 10 turns, write
-goals 20 turns, and research goals 40 turns. This is a cross-Run continuation
-backstop. Each Goal Run also defaults to 16 model rounds when no explicit
-`max_steps` is configured, then gets one summary-only response before a
-resumable `goal_run_budget` pause. Progress is goal-scoped and novelty based:
+Goal has no default model-round, cross-Run turn, wall-clock, or numeric
+no-progress limit. It continues until completion, a genuine user/external
+blocker, manual stop/pause, an unrecoverable external error, or an explicit
+user-selected budget. To place an optional ceiling on an unattended loop, set:
+
+```toml
+[agent]
+goal_token_budget = 20000000
+```
+
+The default is `0` (off). Reaching a positive token budget produces one summary
+and a resumable `budget_spend` pause. `/goal resume` grants a fresh configured
+slice while cumulative Goal statistics remain intact. Explicit positive
+`max_steps`, task time, and task cost budgets remain available as well.
+Progress is goal-scoped and novelty based:
 new read/search results, mutations, verification, todo/signoff changes, and
 reviews advance the goal; an exact tool/argument/result repeat does not.
-Cumulative token and real provider request usage is tracked and shown for
-diagnostics, but there is
-**no token hard limit** and no pre-provider request admission. In Goal mode, a
-bare bug/crash/exception statement defaults to the write turn class unless the
-user asks only for analysis/explanation or forbids changes. A paused goal keeps its todos, Delivery
-checkpoint, and runtime history — use `/goal resume` to continue (turn-budget
-pauses add one more slice of turns of the same class; Run-budget and structural
-stuck pauses start a fresh Run without extending the outer budget), or `/goal pause` to pause
-a running goal manually. `/goal status` shows the full runtime summary (turns
-used/limit, tokens, requests, observational no-progress streak, extensions).
-Within one Run, three repeated identical host failures or six successful
-zero-evidence rounds produce a resumable `goal_stuck` pause. At the end of every goal turn
+Cumulative turns, tokens, real provider requests, and active work time are
+tracked and shown as statistics; a token limit appears only when explicitly
+configured. A paused goal keeps its todos, Delivery
+checkpoint, and runtime history — use `/goal resume` to continue, or `/goal
+pause` to pause a running goal manually. `/goal status` shows turns, requests,
+tokens, and work time. Repeated host failures, zero-evidence rounds, and Todo
+stall thresholds inject a strategy redirect and reset their intervention epoch;
+they do not pause the Goal. At the end of every goal turn
 the model reports its disposition through the structured `update_goal` tool
 (continue/complete/blocked); when no report arrives, an independent bounded
 evaluator judges the turn once, and any evaluator failure pauses the goal
@@ -1170,9 +1177,9 @@ for autonomous work. It keeps going with sensible defaults unless the next step
 requires an irreversible or externally visible operation, a scope change, or
 information only the user can provide.
 
-Research budgets are selected automatically for goals with strong long-horizon
-signals or several distinct phases. There is no separate research mode or
-runtime to configure. Goal state stays in the normal session sidecar, progress
+Legacy simple/write/research classes are still inferred for sidecar and CLI
+compatibility, but they no longer select an execution quota. There is no
+separate research runtime to configure. Goal state stays in the normal session sidecar, progress
 comes only from novel host receipts, canonical todos, `complete_step`, review
 and the Delivery checkpoint, and completion is decided by Delivery readiness
 plus the bounded Goal evaluator. Legacy `.reasonix/autoresearch/<task-id>/` archives are
@@ -1240,9 +1247,10 @@ planner turn is rolled back instead of leaving an unusable continuation tail.
 
 Reasonix manages normal execution automatically: if an active todo produces no
 new completion, unique read, command, or mutation for 8 tool-call rounds, the
-host asks the executor to reassess. After 16 no-progress rounds it pauses with
-saved work that can be resumed in the next user turn. Exact repeats do not count
-as progress; new host-observed work renews the lease. Two-level task lists keep
+host asks the executor to reassess. In Goal mode, the later threshold forces a
+smaller step, different tool/approach, focused delegation, or a real blocker
+report, then execution continues. Exact repeats do not count as progress; new
+host-observed work renews the lease. Two-level task lists keep
 the same single-current contract: the active level-1 sub-step is the one
 `in_progress` item while its level-0 phase stays `pending`; sub-steps are worked
 and signed off in order, and once every sub-step has completed the phase itself
@@ -1252,7 +1260,39 @@ Existing `[agent].max_steps` and `planner_max_steps` keys remain syntactically
 accepted during upgrades, but their values are ignored and removed with a
 one-time notice. This prevents a stale hidden limit from truncating automatic
 progress or inherited subagent work. Use the one-off CLI `--max-steps` flag when
-an explicit run budget is needed; unattended bots retain `[bot].max_steps`.
+an explicit run budget is needed; unattended bots retain `[bot].max_steps`,
+where `0` means continuous execution and a positive value is explicit.
+
+**An ordinary chat task has no limit of any kind by default** — not rounds, not
+tokens, not time, not money. It runs until the model finishes, an adaptive
+guard decides it stopped making progress, or you stop it.
+
+An optional spend gate is available when you want one. It bounds a whole task
+(every "continue" included, until you start unrelated work), and on crossing it
+the task produces one tool-free summary and pauses; the work is saved and the
+next message continues it.
+
+```toml
+[agent]
+task_cost_budget = 5.0            # in the model's pricing currency
+task_time_budget_minutes = 60     # wall clock across the whole task
+```
+
+Both are off unless set. In particular, `task_time_budget_minutes = 0` (and
+legacy negative values) disables the time gate; only a positive value enables
+it. Neither has a default, because a stop is a judgement
+only you can make: no amount of money is portable across models — a budget
+loose enough for a cheap model would land a frontier model within a couple of
+answers — and a long task is as often the job you asked for as it is a runaway.
+
+Cost applies only to a priced model. Without a price table that axis stays
+inactive rather than reading the task as free; use the time axis for a free or
+local model.
+
+Rounds are deliberately not an axis. A turn that reaches a high round count
+without spending much is one whose rounds are individually cheap and fast,
+which is the case least worth interrupting. Use the one-off `--max-steps` flag
+when you specifically want a run bounded by rounds.
 
 Subagent skills inherit the executor model by default. Set `subagent_model` to
 run them on another configured model, or use `subagent_models` to override only
@@ -1274,9 +1314,8 @@ subagents with only read-only research tools plus safe foreground bash, return
 only the final answer, and do not create resumable subagent transcripts.
 Read-only nested delegation may be available until `max_subagent_depth` is
 reached, but writer-capable `task` / `run_skill` remain unavailable inside these
-read-only child registries. In token economy mode, connect this narrow surface
-with `connect_tool_source(source="read_only_skill")` when that isolation is
-required; loading the full `skills` source in Plan is allowed, and subsequent
+read-only child registries. Execution settings share one tool surface: call
+`use_capability` for `read_only_skill` and other optional tools. Subsequent
 writer calls still pass through Permissions/Sandbox.
 
 Every strict read-only child is built through one shared construction
@@ -1344,45 +1383,47 @@ is narrower than the dedicated Planner: the Planner accepts authorized opaque
 non-destructive MCP, while a strict child requires an explicit reader hint and
 never exposes writers at all.
 
-Choose the startup runtime profile with
-`--profile economy|balanced|delivery` (for example, `reasonix run --profile
-delivery "fix and verify this bug"`). Economy starts with nine tools: direct
-read/bash/edit/write, background-shell lifecycle controls, `ask`, and
-`connect_tool_source`. Embedded docs, dedicated search/file/workflow tools,
-session history, memory mutation, slash commands, Skills, MCP, LSP, web access,
-installation, and subagents are connected only when the task needs them.
-Balanced is the default with the complete tool surface; when a distinct Planner is configured, both
-Planner and Executor add the fixed `use_capability` proxy. The proxy schema is
-stable, but the Balanced Executor deliberately retains direct `mcp__*` tools,
-so its overall provider tool prefix may still change when those direct tools
-are installed, connected, or refreshed. Delivery keeps that complete surface,
-adds one stable proxy tool (`use_capability`) for on-demand MCP inspect/call
-without schema churn, and adds a stable contract to establish acceptance
-criteria, fix root causes, verify the result, and review the final diff. The
-host enforces that contract: mutations and verification commands are blocked
-until a concrete `todo_write` acceptance list exists; a changed result cannot
-finalize until it has been reviewed, verified after the latest mutation, and
-signed off with `complete_step`; Skill/MCP `require`/`prefer` routes must be
-invoked or declined with host-proven reasons; and medium/high-risk changes
-require structured review (and security review when high). Meta tools such as
-`task`, `run_skill`, and `review` are not counted as mutations by themselves —
-only real child writes are. Read-only analysis remains available without
-forcing a write.
-Inside an interactive TUI session, use `/work-mode` to inspect the current
-choice or `/work-mode economy|balanced|delivery` to switch it. `/profile` is a
-compatibility alias. The switch atomically rebuilds the controller while
-preserving history, the session path, leases, and the Ask/Auto/YOLO posture; it
-is rejected while a turn, approval/question, background job, or another runtime
-switch is active. A failed build leaves the previous controller usable. This
-command changes only the current session and does not persist a new global
-default. Crossing profiles creates one new provider cache prefix. Within
-Balanced and Delivery the system contract and tool schema then stay stable; in
-Economy each successful `connect_tool_source` call adds the connected schemas
-to the next request, creating one more prefix that stays stable until the tool
-surface changes again.
+Choose the startup execution setting with
+`--preset light|balanced|delivery` (for example, `reasonix run --preset
+delivery "fix and verify this bug"`). Legacy `--profile economy|balanced|delivery`
+still works (`economy` maps to `light`). All three execution settings share the same
+provider-visible core tool surface: direct read/bash/edit/write, background-shell
+lifecycle tools, `ask`/`compress` when registered, and the stable
+`use_capability` proxy for optional tools (search, MCP, skills, subagents, docs,
+web_fetch, and so on). Calling `use_capability` never expands the top-level
+provider schema, so the prompt-cache tool prefix stays stable across execution
+settings.
 
-Desktop tabs expose the same three choices and persist Economy or Delivery;
-legacy empty/`full` values remain Balanced.
+What differs by execution setting is host policy (planning route, verification
+intensity, independent review floor), not the tool list:
+
+- **Light** — direct-first planning, targeted verification, independent review only
+  on high-risk/security class work; optional capabilities stay on-demand.
+- **Balanced** (default) — auto light/full planning by risk, risk-tiered
+  verification, conditional independent review on medium-risk multi-file work.
+- **Delivery** — full acceptance criteria, full verification, forced independent
+  review on medium+ risk, and security review on high-risk work. Mutations and
+  verification commands are blocked until a concrete acceptance list exists; a
+  changed result cannot finalize until it has been reviewed, verified after the
+  latest mutation, and signed off with `complete_step`.
+
+Meta tools such as `task`, `run_skill`, and `review` are not counted as mutations
+by themselves — only real child writes are. Read-only analysis remains available
+without forcing a write.
+
+Inside an interactive TUI session, use `/preset` to inspect the current choice or
+`/preset light|balanced|delivery` to switch it. `/work-mode` and `/profile` are
+compatibility aliases. The switch updates the execution setting in place without
+rebuilding the controller, preserves history, the session path, leases, and the
+Ask/Auto/YOLO posture, and is rejected while a turn, approval/question, background
+job, or another runtime switch is active. This command changes only the current
+session and does not persist a new global default. Because the provider-visible
+tool surface is unified, switching execution settings does not create a new tool-schema
+cache prefix.
+
+Desktop tabs expose the same three choices (shown as Light / Balanced / Delivery)
+and dual-write `agentPreset` with legacy `tokenMode` (`economy`/`full`/`delivery`)
+for one compatibility version.
 
 For interactive frontends, Plan Mode is always an explicit user choice. Select
 Plan in the desktop collaboration-mode control or cycle to Plan with

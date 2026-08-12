@@ -112,6 +112,56 @@ future_provider_field = "untouched"
 	}
 }
 
+func TestAutomaticDeepSeekProtocolMigrationReportsMalformedConfigWithoutRewriting(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	path := filepath.Join(home, "config.toml")
+	raw := `[[providers]]
+name = "deepseek-flash"
+kind = "openai"
+base_url = "https://api.deepseek.com"
+model = "deepseek-v4-flash"
+api_key_env = "DEEPSEEK_API_KEY"
+
+[[plugins]]
+name = "windows-mcp"
+command = "C:\Users\reasonix\mcp.exe"
+`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	changed, err := MigrateLegacyDeepSeekProtocolUserConfig()
+	if err == nil {
+		t.Fatal("automatic migration accepted malformed config")
+	}
+	if !IsDeepSeekProtocolConfigParseError(err) {
+		t.Fatalf("automatic migration error type = %T, want TOML parse error", err)
+	}
+	if changed {
+		t.Fatal("automatic migration reported changing malformed config")
+	}
+	next, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(next) != raw {
+		t.Fatalf("automatic migration rewrote malformed config:\n%s", next)
+	}
+
+	cfg, err := LoadForRootReadOnly(t.TempDir())
+	if err != nil {
+		t.Fatalf("resilient config load: %v", err)
+	}
+	if !cfg.HasLoadWarnings() {
+		t.Fatal("resilient config loader did not expose the malformed config")
+	}
+
+	if _, err := UpgradeDeepSeekProviderProtocol(path, "deepseek"); err == nil {
+		t.Fatal("explicit upgrade accepted malformed config")
+	}
+}
+
 func TestUpgradeDeepSeekProviderProtocolWritesThroughSymlinkAndPreservesMode(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "shared-config.toml")

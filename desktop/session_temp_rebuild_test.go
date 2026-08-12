@@ -8,15 +8,18 @@ import (
 	"reasonix/internal/control"
 )
 
-// TestDesktopHotRebuildPathsKeepSessionTemp covers the three same-session
-// rebuilds that use boot.Build directly (not boot.Rebuild): model, effort,
-// and token-mode switches. Each must pass the old Controller's SessionTemp so
-// temporary files survive (Issue #7575).
+// TestDesktopHotRebuildPathsKeepSessionTemp covers the same-session rebuilds
+// that use boot.Build directly (not boot.Rebuild): model and effort switches.
+// Role setting (token mode) switches in place and is covered separately.
+// Each rebuild must pass the old Controller's SessionTemp so temporary files
+// survive (Issue #7575).
 func TestDesktopHotRebuildPathsKeepSessionTemp(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		prepare func(*App, *WorkspaceTab)
 		rebuild func(*App, *WorkspaceTab) error
+		// inPlace means the switch must keep the same *control.Controller.
+		inPlace bool
 	}{
 		{
 			name:    "model",
@@ -38,6 +41,7 @@ func TestDesktopHotRebuildPathsKeepSessionTemp(t *testing.T) {
 			rebuild: func(app *App, tab *WorkspaceTab) error {
 				return app.SetTokenModeForTab(tab.ID, "delivery")
 			},
+			inPlace: true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -67,11 +71,18 @@ func TestDesktopHotRebuildPathsKeepSessionTemp(t *testing.T) {
 
 			newAPI := app.controllerForTab(tab)
 			newCtrl, ok := newAPI.(*control.Controller)
-			if !ok || newCtrl == nil || newCtrl == oldCtrl {
+			if !ok || newCtrl == nil {
+				t.Fatal("controller missing after switch")
+			}
+			if tc.inPlace {
+				if newCtrl != oldCtrl {
+					t.Fatal("role setting must switch in place without replacing the controller")
+				}
+			} else if newCtrl == oldCtrl {
 				t.Fatal("rebuild did not install a replacement *control.Controller")
 			}
 			if newCtrl.SessionTemp() != oldMgr {
-				t.Fatalf("%s rebuild did not reuse SessionTemp Manager (got %p want %p)",
+				t.Fatalf("%s did not keep SessionTemp Manager (got %p want %p)",
 					tc.name, newCtrl.SessionTemp(), oldMgr)
 			}
 			if oldMgr.Sealed() {

@@ -111,6 +111,11 @@ type Goals interface {
 	ResetPlannerSession()
 	PlanMode() bool
 	SetPlanMode(v bool)
+	// AgentPreset is the session role setting (light|balanced|delivery).
+	AgentPreset() string
+	// SetAgentPreset updates the role setting for subsequent turns without
+	// rebuilding the controller.
+	SetAgentPreset(preset string)
 }
 
 // SessionHistory covers checkpoint/rewind, branch/fork, and the log-restructuring

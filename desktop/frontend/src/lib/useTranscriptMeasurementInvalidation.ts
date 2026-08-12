@@ -1,6 +1,7 @@
-import { useEffect, useRef, type MutableRefObject, type RefObject } from "react";
+import { useCallback, useEffect, useRef, type MutableRefObject, type RefObject } from "react";
 import type { Virtualizer } from "@tanstack/react-virtual";
 import { readTranscriptLayoutSnapshot, type TranscriptLayoutSnapshot } from "./transcriptHeightCache";
+import type { TranscriptViewportAnchor } from "./transcriptScrollController";
 
 /**
  * Invalidates TanStack's in-memory measurements when transcript width or root
@@ -12,21 +13,50 @@ export function useTranscriptMeasurementInvalidation({
   layoutSnapshotRef,
   virtualizer,
   selectionActive,
+  canMeasure,
+  onMeasureIdle,
+  captureViewportAnchor,
+  reconcileViewportAnchor,
 }: {
   scrollRef: RefObject<HTMLDivElement | null>;
   layoutSnapshotRef: MutableRefObject<TranscriptLayoutSnapshot>;
   virtualizer: Virtualizer<HTMLDivElement, HTMLDivElement>;
   selectionActive: boolean;
+  canMeasure: () => boolean;
+  onMeasureIdle: (listener: () => void) => () => void;
+  captureViewportAnchor: () => TranscriptViewportAnchor | null;
+  reconcileViewportAnchor: (snapshot: TranscriptViewportAnchor | null) => boolean;
 }) {
   const activeRef = useRef(selectionActive);
   const pendingRef = useRef(false);
+  const reconcileFrameRef = useRef<number | null>(null);
   activeRef.current = selectionActive;
 
-  useEffect(() => {
-    if (selectionActive || !pendingRef.current) return;
+  const flushPending = useCallback(() => {
+    if (!pendingRef.current || activeRef.current || !canMeasure()) return;
     pendingRef.current = false;
+    const anchor = captureViewportAnchor();
     virtualizer.measure();
-  }, [selectionActive, virtualizer]);
+    if (reconcileFrameRef.current !== null) cancelAnimationFrame(reconcileFrameRef.current);
+    reconcileFrameRef.current = requestAnimationFrame(() => {
+      reconcileFrameRef.current = null;
+      if (activeRef.current || !canMeasure()) {
+        pendingRef.current = true;
+        return;
+      }
+      reconcileViewportAnchor(anchor);
+    });
+  }, [canMeasure, captureViewportAnchor, reconcileViewportAnchor, virtualizer]);
+
+  useEffect(() => {
+    if (!selectionActive) flushPending();
+  }, [flushPending, selectionActive]);
+
+  useEffect(() => onMeasureIdle(flushPending), [flushPending, onMeasureIdle]);
+
+  useEffect(() => () => {
+    if (reconcileFrameRef.current !== null) cancelAnimationFrame(reconcileFrameRef.current);
+  }, []);
 
   useEffect(() => {
     const element = scrollRef.current;
@@ -35,18 +65,15 @@ export function useTranscriptMeasurementInvalidation({
     const initialChanged = initial.signature !== layoutSnapshotRef.current.signature;
     layoutSnapshotRef.current = initial;
     if (initialChanged) {
-      if (activeRef.current) pendingRef.current = true;
-      else virtualizer.measure();
+      pendingRef.current = true;
+      flushPending();
     }
     const invalidateIfChanged = () => {
       const next = readTranscriptLayoutSnapshot(element);
       if (next.signature === layoutSnapshotRef.current.signature) return;
       layoutSnapshotRef.current = next;
-      if (activeRef.current) {
-        pendingRef.current = true;
-        return;
-      }
-      virtualizer.measure();
+      pendingRef.current = true;
+      flushPending();
     };
     const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(invalidateIfChanged);
     resizeObserver?.observe(element);
@@ -59,5 +86,5 @@ export function useTranscriptMeasurementInvalidation({
       mutationObserver?.disconnect();
       window.removeEventListener("resize", invalidateIfChanged);
     };
-  }, [layoutSnapshotRef, scrollRef, virtualizer]);
+  }, [flushPending, layoutSnapshotRef, scrollRef]);
 }

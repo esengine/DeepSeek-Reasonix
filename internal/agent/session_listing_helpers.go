@@ -2,7 +2,7 @@ package agent
 
 import "os"
 
-func sessionInfoFromOrder(session SessionOrderInfo, preview string, turns int) SessionInfo {
+func sessionInfoFromOrder(session SessionOrderInfo, preview string, turns int, countsKnown bool) SessionInfo {
 	return SessionInfo{
 		Path:           session.Path,
 		CreatedAt:      session.CreatedAt,
@@ -10,6 +10,7 @@ func sessionInfoFromOrder(session SessionOrderInfo, preview string, turns int) S
 		ModTime:        session.ModTime,
 		Preview:        preview,
 		Turns:          turns,
+		CountsKnown:    countsKnown,
 		Scope:          session.Scope,
 		WorkspaceRoot:  session.WorkspaceRoot,
 		TopicID:        session.TopicID,
