@@ -68,11 +68,84 @@ eq(
 
 eq(
   heartbeatNextRunAt(
-    { interval: "24h|daily@20:00", lastRunAt: localMs(2026, 6, 18, 20, 0), timeWindowStart: "09:00", timeWindowEnd: "17:00" },
-    localMs(2026, 6, 19, 19, 0),
+    { interval: "24h|daily@09:00", lastRunAt: localMs(2026, 6, 18, 1, 17) },
+    localMs(2026, 6, 18, 2, 0),
   ),
-  localMs(2026, 6, 19, 20, 0),
-  "cycle next run ignores stale interval time windows",
+  localMs(2026, 6, 18, 9, 0),
+  "daily schedule follows its calendar time after a manual run",
+);
+
+eq(
+  heartbeatNextRunAt(
+    { interval: "24h|daily@09:00", lastRunAt: localMs(2026, 6, 18, 10, 0), timeWindowStart: "12:00", timeWindowEnd: "13:00" },
+    localMs(2026, 6, 18, 10, 1),
+  ),
+  localMs(2026, 6, 19, 9, 0),
+  "daily schedule advances to tomorrow and ignores interval time windows",
+);
+
+eq(
+  heartbeatNextRunAt(
+    { interval: "168h|weekly:mon,fri@09:00", lastRunAt: localMs(2026, 6, 19, 10, 0) },
+    localMs(2026, 6, 19, 10, 1),
+  ),
+  localMs(2026, 6, 22, 9, 0),
+  "weekly schedule selects the next configured weekday",
+);
+
+eq(
+  heartbeatNextRunAt(
+    {
+      interval: "336h|biweekly:mon@09:00",
+      createdAt: localMs(2026, 6, 1, 8, 0),
+      lastRunAt: localMs(2026, 6, 1, 9, 0),
+    },
+    localMs(2026, 6, 1, 9, 1),
+  ),
+  localMs(2026, 6, 15, 9, 0),
+  "biweekly schedule preserves the creation-week parity",
+);
+
+if (process.env.TZ === "America/New_York") {
+  eq(
+    heartbeatNextRunAt(
+      {
+        interval: "336h|biweekly:mon@09:00",
+        createdAt: localMs(2026, 3, 2, 8, 0),
+        lastRunAt: localMs(2026, 3, 2, 9, 0),
+      },
+      localMs(2026, 3, 2, 9, 1),
+    ),
+    localMs(2026, 3, 9, 9, 0),
+    "biweekly schedule matches backend week parity across spring DST",
+  );
+}
+
+eq(
+  heartbeatNextRunAt(
+    { interval: "720h|monthly:31@09:00", lastRunAt: localMs(2026, 4, 30, 9, 0) },
+    localMs(2026, 4, 30, 9, 1),
+  ),
+  localMs(2026, 5, 31, 9, 0),
+  "monthly schedule advances after a clamped month-end run",
+);
+
+eq(
+  heartbeatNextRunAt(
+    { interval: "8760h|yearly:2-29@09:00", lastRunAt: localMs(2027, 2, 28, 9, 0) },
+    localMs(2027, 2, 28, 9, 1),
+  ),
+  localMs(2028, 2, 29, 9, 0),
+  "yearly schedule handles leap-day clamping",
+);
+
+eq(
+  heartbeatNextRunAt(
+    { interval: "24h|daily@not-a-time", lastRunAt: localMs(2026, 6, 18, 1, 17) },
+    localMs(2026, 6, 18, 2, 0),
+  ),
+  localMs(2026, 6, 19, 1, 17),
+  "invalid calendar schedule falls back to its base interval",
 );
 
 eq(
