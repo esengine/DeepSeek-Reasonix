@@ -547,6 +547,7 @@ export const zhTW: Record<DictKey, string> = {
 
   // 輸入框
   "composer.placeholder": "給 Reasonix 發訊息…  ( / 命令 · @ 檔案 )",
+  "composer.suggestionAcceptHint": "按 Tab 採納建議",
   "composer.inputActions": "訊息輸入框操作",
   "composer.planMode": "計畫模式",
   "composer.planModeOn": "計畫模式已開",

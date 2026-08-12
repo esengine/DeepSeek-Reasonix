@@ -1109,6 +1109,7 @@ export default function App() {
     syncActiveTab,
     ensureBlankTab,
     ensureBlankSurface,
+    dispatchTo,
   } = useController();
   const { locale, setPref: setLocalePref } = useI18n();
   const t = useT();
@@ -5103,6 +5104,8 @@ export default function App() {
               modelLabel={state.meta?.label ?? t("status.connecting")}
               imageInputEnabled={state.meta?.imageInputEnabled !== false}
               tabId={activeTabId}
+              suggestion={state.suggestion}
+              onSuggestionChange={(text) => activeTabId && dispatchTo(activeTabId, { type: "suggestion", text })}
               effort={state.effort}
               onSend={handleSend}
               onInvocationMetadataChange={handleInvocationMetadataChange}

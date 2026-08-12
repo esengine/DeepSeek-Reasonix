@@ -218,6 +218,7 @@ var ChineseTraditional = Messages{
 	CtrlCQuitHint:                "再按一次 Ctrl+C 退出",
 	CompHintSlash:                "↑/↓ 移動 · Tab/Enter 選中 · Esc 關閉",
 	CompHintFile:                 "↑/↓ 移動 · Tab/Enter 進入資料夾或選中檔案 · Esc 關閉",
+	GhostSuggestionHint:          "按 Tab 採納",
 	MouseCopiedHint:              "已複製到剪貼簿",
 	ClipboardCopyOSC52Hint:       "已透過 OSC 52 請求複製 — 可能需要終端授權",
 	ClipboardCopyFallbackHint:    "系統剪貼簿無法使用 — 已改用 OSC 52",

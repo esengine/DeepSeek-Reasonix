@@ -334,6 +334,8 @@ interface State {
   backgroundJobs: number;
   cancelRequested: boolean;
   cancellable: boolean;
+  /** Predicted next prompt shown after an AI answer; Tab accepts it. Cleared when the user starts typing a new turn. */
+  suggestion?: string;
   /** Host turn phase from turn_phase events (working|checking|verifying|reviewing). */
   turnPhase?: TurnPhaseName;
   /** Latest content-free turn quality summary, shown on demand in the change panel. */
@@ -814,6 +816,7 @@ type Action =
   | { type: "history_older_start" }
   | { type: "history_older_error" }
   | { type: "local_notice"; level: "info" | "warn"; text: string }
+  | { type: "suggestion"; text: string }
   | { type: "clearApproval" }
   | { type: "clearAsk" }
   | { type: "clearExtensionForm" }
@@ -1879,6 +1882,7 @@ export function reducer(s: State, a: Action): State {
         pendingPrompt: false,
         cancelRequested: false,
         cancellable: true,
+        suggestion: undefined,
         ...resetTurnTiming(),
         // New turn epoch: forget the previous prompt anchor so a genuinely new
         // prompt re-anchors freshly instead of inheriting a stale id/time.
@@ -2118,6 +2122,7 @@ export function reducer(s: State, a: Action): State {
       return changed ? { ...s, items: next } : s;
     }
     case "local_notice": return { ...s, running: false, turnActive: false, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `n${s.seq}`, level: a.level, text: a.text }] };
+    case "suggestion": return { ...s, suggestion: a.text || undefined };
     case "clearApproval": {
       const next = { ...s, approval: undefined, pendingPrompt: Boolean(s.ask), resolvedPromptId: s.approval?.id ?? s.resolvedPromptId };
       return endPromptWaitIfIdle(next);
@@ -3408,6 +3413,9 @@ export function useController() {
         void refreshCheckpoints(targetTabId);
         invalidateSharedQuery("MetaForTab", [targetTabId]);
         void refreshMetaForTab(targetTabId);
+        // Predict the user's likely next prompt after the answer so the composer
+        // can offer it as a Tab-accepted ghost text. Degrades silently.
+        app.SuggestionForTab(targetTabId).then((text) => dispatchTo(targetTabId, { type: "suggestion", text })).catch(() => {});
       }
       if (e.kind === "turn_done" || e.kind === "notice") {
         app.JobsForTab(targetTabId).then((jobs) => dispatchTo(targetTabId, { type: "jobs", jobs: asArray(jobs) })).catch(() => {});
@@ -4772,5 +4780,6 @@ export function useController() {
     noteNavigationIntent: beginActiveNavigation,
     isNavigationIntentCurrent,
     syncActiveTab: syncActiveTabFromBackend,
+    dispatchTo,
   };
 }

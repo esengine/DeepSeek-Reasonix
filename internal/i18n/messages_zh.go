@@ -228,6 +228,7 @@ var Chinese = Messages{
 	CtrlCQuitHint:                "再按一次 Ctrl+C 退出",
 	CompHintSlash:                "↑/↓ 移动 · Tab/Enter 选中 · Esc 关闭",
 	CompHintFile:                 "↑/↓ 移动 · Tab/Enter 进入文件夹或选中文件 · Esc 关闭",
+	GhostSuggestionHint:          "按 Tab 采纳",
 	MouseCopiedHint:              "已复制到剪贴板",
 	ClipboardCopyOSC52Hint:       "已通过 OSC 52 请求复制 — 可能需要终端授权",
 	ClipboardCopyFallbackHint:    "系统剪贴板不可用 — 已回退到 OSC 52",

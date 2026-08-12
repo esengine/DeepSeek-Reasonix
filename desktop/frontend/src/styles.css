@@ -6927,6 +6927,19 @@ body > .mermaid-diagram--fullscreen {
   content: attr(data-placeholder);
   pointer-events: none;
 }
+.composer__ghost {
+  color: var(--fg-faint);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  user-select: none;
+  line-height: 1.55;
+  font-size: var(--font-content);
+}
+.composer__ghost-hint {
+  margin-left: 8px;
+  opacity: 0.7;
+}
 .composer-invocation-token {
   display: inline-block;
   max-width: min(100%, 320px);

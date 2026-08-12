@@ -209,6 +209,7 @@ type Messages struct {
 	CtrlCQuitHint                string // shown on first Ctrl+C while idle; second press exits
 	CompHintSlash                string // key hint footer under the slash-command menu
 	CompHintFile                 string // key hint footer under the @ file/resource menu
+	GhostSuggestionHint          string // Tab hint after a predicted next prompt
 	MouseCopiedHint              string // transient status-line hint after a mouse/Ctrl+C selection copy
 	ClipboardCopyOSC52Hint       string // copy was sent through OSC 52 because the session is remote
 	ClipboardCopyFallbackHint    string // native clipboard failed and copy fell back to OSC 52
