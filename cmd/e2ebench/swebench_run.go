@@ -91,7 +91,7 @@ func runSwebenchInstance(o swebenchOpts, inst swebenchInstance) (result, string)
 		return r, ""
 	}
 
-	metricsPath := "/tmp/reasonix-metrics.json"
+	metricsPath := filepath.Join(os.TempDir(), "reasonix-metrics.json")
 	args := swebenchAgentArgs(metricsPath, o.model, o.profile, o.permission, o.arm, o.maxSteps, swebenchPrompt(inst))
 	agentCmd := append([]string{"exec", "-e", "REASONIX_HOME=/opt/rxhome", container},
 		testbedShell("/usr/local/bin/reasonix "+shellQuoteAll(args))...)

@@ -293,7 +293,7 @@ func configEditLockRegistryDir() (string, error) {
 		// The OS-wide temporary root is invariant across process-specific TMPDIR
 		// overrides. The per-user directory is verified and forced to mode 0700
 		// before the advisory lock file is opened.
-		return filepath.Join(string(filepath.Separator), "tmp", fmt.Sprintf("reasonix-config-locks-%x", digest[:8])), nil
+		return filepath.Join(os.TempDir(), fmt.Sprintf("reasonix-config-locks-%x", digest[:8])), nil
 	}
 	home := strings.TrimSpace(current.HomeDir)
 	if home == "" {
