@@ -374,14 +374,19 @@ func recordFromOrder(target DirectoryTarget, info agent.SessionOrderInfo) Sessio
 	metaFingerprint := fileFingerprint(agent.BranchMetaPath(info.Path))
 	createdAt := unixMilli(info.CreatedAt)
 	lastActivityAt := unixMilli(info.LastActivityAt)
-	// File mtime is a hard floor. Migration/meta can temporarily write zero
-	// UpdatedAt; without this, topics sort as inactive and look "missing".
+	// File mtime is only a fallback for missing authoritative timestamps.
+	// It must not act as a floor that raises a valid UpdatedAt: any external
+	// touch (backup, sync, cloud mirror, antivirus, or a projection rebuild
+	// that rewrites sidecars) advances mtime without representing real user
+	// activity, and would otherwise stamp every historical session as "just
+	// now". The meta UpdatedAt (already preferred by ListSessionOrder /
+	// IndexSessionPath) is the source of truth for recency.
 	if st, err := os.Stat(info.Path); err == nil {
 		fileMS := st.ModTime().UnixMilli()
 		if createdAt <= 0 {
 			createdAt = fileMS
 		}
-		if lastActivityAt <= 0 || fileMS > lastActivityAt {
+		if lastActivityAt <= 0 {
 			lastActivityAt = fileMS
 		}
 	}
