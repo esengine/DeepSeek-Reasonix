@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -318,33 +319,7 @@ func TestFeishuInstallStoresFeishuSecretAndSurvivesReload(t *testing.T) {
 
 func TestWeixinInstallStoresSavedAccountAndConnection(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	withRewrittenHTTP(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/ilink/bot/get_bot_qrcode":
-			if r.URL.Query().Get("bot_type") != "3" {
-				http.Error(w, "missing bot type", http.StatusBadRequest)
-				return
-			}
-			writeJSON(t, w, map[string]any{
-				"qrcode":             "qr-weixin",
-				"qrcode_img_content": "data:image/png;base64,abc",
-			})
-		case "/ilink/bot/get_qrcode_status":
-			if r.URL.Query().Get("qrcode") != "qr-weixin" {
-				http.Error(w, "wrong qr", http.StatusBadRequest)
-				return
-			}
-			writeJSON(t, w, map[string]any{
-				"status":        "confirmed",
-				"ilink_bot_id":  "weixin-account",
-				"bot_token":     "token-1",
-				"ilink_user_id": "user-1",
-				"baseurl":       "https://ilinkai.weixin.qq.com",
-			})
-		default:
-			http.NotFound(w, r)
-		}
-	}))
+	serveWeixinInstall(t)
 
 	app := NewApp()
 	start, err := app.StartBotConnectionInstall("weixin", "")
@@ -388,6 +363,105 @@ func TestWeixinInstallStoresSavedAccountAndConnection(t *testing.T) {
 	reloadedConnection := botConnectionView(reloaded.Bot.Connections[0])
 	if reloadedConnection.Credential.AccountID != "weixin-account" || !reloadedConnection.Credential.SecretSet {
 		t.Fatalf("reloaded credential = %+v, want saved weixin account to survive restart", reloadedConnection.Credential)
+	}
+}
+
+func serveWeixinInstall(t *testing.T) {
+	t.Helper()
+	withRewrittenHTTP(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/ilink/bot/get_bot_qrcode":
+			if r.URL.Query().Get("bot_type") != "3" {
+				http.Error(w, "missing bot type", http.StatusBadRequest)
+				return
+			}
+			writeJSON(t, w, map[string]any{
+				"qrcode":             "qr-weixin",
+				"qrcode_img_content": "data:image/png;base64,abc",
+			})
+		case "/ilink/bot/get_qrcode_status":
+			if r.URL.Query().Get("qrcode") != "qr-weixin" {
+				http.Error(w, "wrong qr", http.StatusBadRequest)
+				return
+			}
+			writeJSON(t, w, map[string]any{
+				"status":        "confirmed",
+				"ilink_bot_id":  "weixin-account",
+				"bot_token":     "token-1",
+				"ilink_user_id": "user-1",
+				"baseurl":       "https://ilinkai.weixin.qq.com",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+func writeUserConfig(t *testing.T, body string) {
+	t.Helper()
+	path := config.UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func completeWeixinInstall(t *testing.T, app *App) {
+	t.Helper()
+	start, err := app.StartBotConnectionInstall("weixin", "")
+	if err != nil {
+		t.Fatalf("StartBotConnectionInstall: %v", err)
+	}
+	poll, err := app.PollBotConnectionInstall(start.InstallID)
+	if err != nil {
+		t.Fatalf("PollBotConnectionInstall: %v", err)
+	}
+	if !poll.Done {
+		t.Fatalf("poll result = %+v, want done", poll)
+	}
+}
+
+func TestWeixinInstallKeepsExplicitBotDisabled(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	serveWeixinInstall(t)
+	writeUserConfig(t, `[bot]
+enabled = false
+
+[[bot.connections]]
+id = "weixin-weixin"
+provider = "weixin"
+domain = "weixin"
+label = "微信"
+enabled = true
+status = "connected"
+`)
+
+	completeWeixinInstall(t, NewApp())
+
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	if cfg.Bot.Enabled {
+		t.Fatal("re-scanning an existing connection re-enabled the embedded bot over an explicit enabled = false")
+	}
+	if !cfg.Bot.Weixin.Enabled || cfg.Bot.Weixin.AccountID != "weixin-account" {
+		t.Fatalf("saved weixin config = %+v, want refreshed credentials", cfg.Bot.Weixin)
+	}
+	if len(cfg.Bot.Allowlist.WeixinUsers) != 1 || cfg.Bot.Allowlist.WeixinUsers[0] != "user-1" {
+		t.Fatalf("weixin allowlist = %+v, want installer user id", cfg.Bot.Allowlist.WeixinUsers)
+	}
+}
+
+func TestWeixinFirstInstallEnablesBotDespiteExplicitFalse(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	serveWeixinInstall(t)
+	writeUserConfig(t, "[bot]\nenabled = false\n")
+
+	completeWeixinInstall(t, NewApp())
+
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	if !cfg.Bot.Enabled {
+		t.Fatal("first install left the embedded bot off, so connecting from the desktop does nothing")
 	}
 }
 
