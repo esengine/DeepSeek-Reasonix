@@ -1118,12 +1118,19 @@ func (l *Ledger) HasSuccessfulWorkReceipt() bool {
 // HasSuccessfulVerificationCommand reports whether the turn ran at least one
 // command classified as verification rather than inspection or mutation.
 func (l *Ledger) HasSuccessfulVerificationCommand() bool {
+	return l.HasSuccessfulVerificationCommandAfter(-1)
+}
+
+// HasSuccessfulVerificationCommandAfter reports whether verification succeeded
+// after the named receipt index. Mutations before the boundary do not satisfy a
+// role setting's post-change verification floor.
+func (l *Ledger) HasSuccessfulVerificationCommandAfter(after int) bool {
 	if l == nil {
 		return false
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	for _, r := range l.receipts {
+	for _, r := range l.receipts[max(after+1, 0):] {
 		if r.Success && r.ToolName == "bash" && bashCommandIsVerification(r.Command) {
 			return true
 		}

@@ -63,6 +63,12 @@ type Messages struct {
 	ChatThinking                           string // live reasoning marker label, e.g. "thinking…"
 	ChatThoughtForFmt                      string // collapsed reasoning summary, "%d" = elapsed s
 	ChatStatusThinkingFmt                  string // "%s thinking… (%ds · <cancel hint>)" — %s = spinner, %d = elapsed s
+	TurnPhaseWorking                       string // host turn_phase label: working
+	TurnPhaseChecking                      string // host turn_phase label: checking
+	TurnPhaseVerifying                     string // host turn_phase label: verifying
+	TurnPhaseReviewing                     string // host turn_phase label: reviewing
+	CompletionSummaryBlocked               string // concise non-verbose alert for a blocked turn
+	CompletionSummaryNeedsAttention        string // concise non-verbose alert for verification/review gaps
 	ChatToolWorkingFmt                     string // "%s working · %ds" under a running tool — %s = spinner, %d = elapsed s
 	ChatSubagentPhaseQueued                string // sub-agent progress phase label ("queued")
 	ChatSubagentPhaseRunning               string // ("running")
@@ -319,8 +325,7 @@ type Messages struct {
 	GoalPaused                   string
 	GoalPausedReason             string
 	GoalPausedFmt                string // %s = stop cause
-	GoalBudgetExtended           string
-	GoalRuntimeFmt               string // turns used/limit, tokens, requests, observational no-progress, extensions
+	GoalRuntimeFmt               string // turns, requests, tokens, work duration
 	GoalRuntimeLastReason        string
 	ModelSwitchUnavailable       string
 	ModelSwitchBusy              string
@@ -347,22 +352,25 @@ type Messages struct {
 	WorkModeAlreadyOnFmt         string
 	WorkModeSwitchingFmt         string
 	WorkModeSwitchedFmt          string
-	RewindNone                   string
-	RewindCodeConversation       string
-	RewindConversationOnly       string
-	RewindCodeOnly               string
-	RewindFork                   string
-	RewindSummarizeFrom          string
-	RewindSummarizeUpto          string
-	RewindPickTitle              string
-	RewindPickHint               string
-	RewindRestoreTitleFmt        string
-	RewindApplyHint              string
-	RewindCoverageTitle          string
-	RewindCoverageWarningFmt     string
-	RewindConfirmHint            string
-	RewindUnavailableFmt         string
-	RewindEmpty                  string
+	// WorkModeDeprecatedNotice is shown once when a legacy /work-mode or
+	// /profile command is used. Prefer /preset.
+	WorkModeDeprecatedNotice string
+	RewindNone               string
+	RewindCodeConversation   string
+	RewindConversationOnly   string
+	RewindCodeOnly           string
+	RewindFork               string
+	RewindSummarizeFrom      string
+	RewindSummarizeUpto      string
+	RewindPickTitle          string
+	RewindPickHint           string
+	RewindRestoreTitleFmt    string
+	RewindApplyHint          string
+	RewindCoverageTitle      string
+	RewindCoverageWarningFmt string
+	RewindConfirmHint        string
+	RewindUnavailableFmt     string
+	RewindEmpty              string
 
 	// skill picker overlay (/skills interactive panel in CLI TUI)
 	SkillPickerAvailableFmt      string

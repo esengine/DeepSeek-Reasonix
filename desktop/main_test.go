@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/wailsapp/wails/v2/pkg/options/linux"
@@ -44,6 +45,33 @@ func TestParseDesktopLaunchArgsRemoteWindow(t *testing.T) {
 	}
 }
 
+func TestLifecycleDiagnosticsUsePreWailsOwnershipGate(t *testing.T) {
+	mainSource, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeRun, _, ok := strings.Cut(string(mainSource), "err := wails.Run")
+	if !ok {
+		t.Fatal("main.go no longer contains the Wails run boundary")
+	}
+	if !strings.Contains(beforeRun, "prepareDesktopDiagnostics(app)") {
+		t.Fatal("main process must claim diagnostics ownership before Wails starts")
+	}
+
+	appSource, err := os.ReadFile("app.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, afterStartup, ok := strings.Cut(string(appSource), "func (a *App) startup(ctx context.Context) {")
+	if !ok {
+		t.Fatal("app.go no longer contains App.startup")
+	}
+	startupBody, _, ok := strings.Cut(afterStartup, "\n}")
+	if !ok || !strings.Contains(startupBody, "initializeLifecycleDiagnostics(a)") {
+		t.Fatal("previous lifecycle consumption must remain owned by Wails OnStartup")
+	}
+}
+
 // TestMain isolates user config/state/cache dirs for the whole package. Without
 // this, tests that persist desktop state, sessions, cache, or CLI-style config
 // can leak into the developer's real Reasonix directories.
@@ -59,6 +87,11 @@ func TestMain(m *testing.M) {
 	os.Setenv("REASONIX_STATE_HOME", dir+"/state")
 	os.Setenv("REASONIX_CACHE_HOME", dir+"/cache")
 	os.Setenv("AppData", dir)
+	// Tests fail closed for telemetry. Any test that expects a request must
+	// replace the relevant endpoint with an httptest.Server explicitly.
+	crashEndpoint = "http://127.0.0.1:0/v1/report"
+	pingEndpoint = "http://127.0.0.1:0/v1/ping"
+	metricsEndpoint = "http://127.0.0.1:0/v1/metrics"
 	// Neutralize the Wails runtime-event bridge for the whole test binary:
 	// outside a running Wails app, runtime.EventsEmit log.Fatals on the plain
 	// contexts tests use, killing the process from any emitting code path.
@@ -70,11 +103,24 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+func TestDesktopTestTelemetryEndpointsAreFailClosed(t *testing.T) {
+	for name, endpoint := range map[string]string{
+		"crash":   crashEndpoint,
+		"ping":    pingEndpoint,
+		"metrics": metricsEndpoint,
+	} {
+		if strings.Contains(endpoint, "crash.reasonix.io") {
+			t.Fatalf("%s test endpoint targets production: %s", name, endpoint)
+		}
+	}
+}
+
 func TestWindowsWebview2GPUDisabled(t *testing.T) {
 	oldChannel := channel
 	t.Cleanup(func() {
 		channel = oldChannel
 		os.Unsetenv(disableWebview2GPUEnv)
+		os.Unsetenv(legacyDisableWebview2GPUEnv)
 	})
 
 	tests := []struct {
@@ -104,6 +150,11 @@ func TestWindowsWebview2GPUDisabled(t *testing.T) {
 				t.Fatalf("windowsWebview2GPUDisabled() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+	os.Unsetenv(disableWebview2GPUEnv)
+	os.Setenv(legacyDisableWebview2GPUEnv, "1")
+	if !windowsWebview2GPUDisabled() {
+		t.Fatal("legacy WebView2 GPU override was not accepted")
 	}
 }
 

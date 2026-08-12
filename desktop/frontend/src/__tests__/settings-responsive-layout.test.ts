@@ -42,6 +42,22 @@ eq(declaration(settingsModal, "height"), "min(960px, calc(100vh - 80px))", "wide
 const settingsCenter = ruleBlock(panelStyles, ".settings-center");
 eq(declaration(settingsCenter, "grid-template-columns"), "clamp(220px, 20.5vw, 304px) minmax(0, 1fr)", "settings navigation remains readable without consuming the content pane");
 
+const generalPage = ruleBlock(panelStyles, ".settings-page--general");
+eq(declaration(generalPage, "container"), "settings-general / inline-size", "general settings respond to their available content width");
+
+const generalContainerStart = panelStyles.indexOf("@container settings-general (max-width: 620px)");
+const generalFallbackStart = panelStyles.indexOf("@media (max-width: 980px)", generalContainerStart);
+const generalContainer = panelStyles.slice(generalContainerStart, generalFallbackStart);
+const compactGeneralField = ruleBlock(generalContainer, ".settings-page--general .settings-field");
+eq(declaration(compactGeneralField, "grid-template-columns"), "1fr", "general settings stack before controls overflow their content pane");
+eq(declaration(compactGeneralField, "gap"), "10px", "stacked general settings keep compact vertical spacing");
+const compactGeneralControl = ruleBlock(generalContainer, ".settings-page--general .settings-field__control");
+eq(declaration(compactGeneralControl, "min-width"), "0", "compact general controls may shrink within the content pane");
+
+const fallbackPanel = panelStyles.slice(generalFallbackStart, panelStyles.indexOf("@media (max-width: 760px)", generalFallbackStart));
+const fallbackGeneralField = ruleBlock(fallbackPanel, ".settings-page--general .settings-field");
+eq(declaration(fallbackGeneralField, "grid-template-columns"), "1fr", "980px fallback stacks general settings without container queries");
+
 const generalSectionBoundary = ruleBlock(panelStyles, ".settings-page--general > .settings-section:not(:last-child) .settings-section__body");
 eq(
   declaration(generalSectionBoundary, "border-bottom"),

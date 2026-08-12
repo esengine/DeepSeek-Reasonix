@@ -140,5 +140,7 @@ func (a *App) ClearMCPServerAuthentication(name string) error {
 	if host != nil {
 		host.ClearFailure(name)
 	}
+	// Auth state is authoritative configuration for in-flight controller builds.
+	a.bumpExtensionGeneration()
 	return nil
 }

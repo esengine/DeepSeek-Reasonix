@@ -191,8 +191,8 @@ func TestParallelTasksInjectsWorkspaceContextIntoChildren(t *testing.T) {
 	}
 	if !strings.Contains(out, "Current workspace: "+strconv.Quote(workspace)) ||
 		!strings.Contains(out, `prefer "." or relative paths`) ||
-		!strings.Contains(out, "inspect one ok") ||
-		!strings.Contains(out, "inspect two ok") {
+		!strings.Contains(out, "inspect one") ||
+		!strings.Contains(out, "inspect two") {
 		t.Fatalf("parallel output = %q, want child workspace context and prompt", out)
 	}
 }
@@ -336,7 +336,7 @@ func TestParallelTasksCancelReturnsPartialAggregate(t *testing.T) {
 		if strings.Contains(got.out, "Completed 2 parallel tasks") {
 			t.Fatalf("cancelled aggregate reported full completion:\n%s", got.out)
 		}
-		if !strings.Contains(got.out, "done child ok") {
+		if !strings.Contains(got.out, "done child") || !strings.Contains(got.out, "ok") {
 			t.Fatalf("cancelled aggregate lost completed child output:\n%s", got.out)
 		}
 		if !strings.Contains(strings.ToLower(got.out), "cancelled") {

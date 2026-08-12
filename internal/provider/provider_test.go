@@ -234,6 +234,40 @@ func TestModelMessagesStripsRawContentWithoutChangingLegacyContent(t *testing.T)
 	}
 }
 
+// A stored projection is read twice: as what the model is sent, and as the input
+// the next compaction classifies. Only ToolExecution says a tool call failed, so
+// the strip has to happen at the provider boundary rather than at write time.
+func TestProjectionMessagesKeepsExecutionThatModelMessagesStrips(t *testing.T) {
+	exit := 1
+	stored := []Message{
+		{Role: RoleUser, Content: "task"},
+		{Role: RoleTool, ToolCallID: "c1", Name: "bash", Content: "=== RUN\n--- FAIL: TestX",
+			RawContent: "the whole log", ToolExecution: &ToolExecution{ExitCode: &exit}},
+		{Role: RoleTool, ToolCallID: "local", Name: "x", Content: "display only", LocalOnly: true},
+	}
+
+	proj := ProjectionMessages(stored)
+	if len(proj) != 2 {
+		t.Fatalf("projection kept display-only output: %+v", proj)
+	}
+	if proj[1].ToolExecution == nil {
+		t.Fatal("projection dropped the failure record the next compaction classifies on")
+	}
+	if proj[1].RawContent != "" {
+		t.Fatalf("projection kept unbounded raw content: %+v", proj[1])
+	}
+
+	// The same messages, once they are actually going to a provider.
+	for i, m := range ModelMessages(proj) {
+		if m.ToolExecution != nil {
+			t.Fatalf("local shell metadata reached the wire at index %d: %+v", i, m)
+		}
+	}
+	if stored[1].ToolExecution == nil {
+		t.Fatal("stored message was mutated")
+	}
+}
+
 func TestLocalOnlySentinelIsSafeWhenNewFieldsAreIgnoredByLegacyReader(t *testing.T) {
 	legacyView := []Message{
 		{Role: RoleUser, Content: "task"},

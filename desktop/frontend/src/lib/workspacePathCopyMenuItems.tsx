@@ -2,8 +2,8 @@ import { Copy } from "lucide-react";
 import type { FloatingMenuItem } from "../components/FloatingMenu";
 import { writeClipboardText } from "./clipboard";
 
-export const WORKSPACE_CONTEXT_MENU_FILE_HEIGHT = 204;
-export const WORKSPACE_CONTEXT_MENU_REF_HEIGHT = 160;
+export const WORKSPACE_CONTEXT_MENU_FILE_HEIGHT = 280;
+export const WORKSPACE_CONTEXT_MENU_REF_HEIGHT = 236;
 
 export function workspacePathCopyMenuItems({
   path,

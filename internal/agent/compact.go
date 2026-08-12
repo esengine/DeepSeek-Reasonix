@@ -33,6 +33,9 @@ const (
 	fallbackTokPerChar         = 0.25      // ~4 chars/token, used before any usage is available to calibrate
 	maxPinnedFirstUserTokens   = 1500      // ceiling on pinning the first user turn verbatim
 	pinnedFirstUserWindowFrac  = 0.15      // and never pin a first turn worth more than this fraction of the window
+	maxKeptUserTurnTokens      = 1500      // ceiling on carrying one folded user turn verbatim
+	keptUserTurnsBudgetTokens  = 8192      // and on all of them together within one fold
+	keptUserTurnsWindowFrac    = 0.05      // never spend more than this fraction of the window on them
 	protocolReserveTokens      = 256       // provider framing and control fields not represented by message estimates
 )
 
@@ -292,8 +295,6 @@ func (a *Agent) pinnedPrefixLen(msgs []provider.Message) int {
 	return i
 }
 
-// fixedPinnableUserTurn uses a fixed estimate only: provider usage after
-// projection would make the same turn drift across checkpoints.
 func (a *Agent) fixedPinnableUserTurn(m provider.Message) bool {
 	budget := maxPinnedFirstUserTokens
 	if a.contextWindow > 0 {
@@ -301,10 +302,10 @@ func (a *Agent) fixedPinnableUserTurn(m provider.Message) bool {
 			budget = f
 		}
 	}
-	return int(float64(msgChars(m))*fallbackTokPerChar) <= budget
+	return fixedTokenEstimate(m) <= budget
 }
 
-func keepIndexes(region []provider.Message, policy KeepPolicy) []bool {
+func (a *Agent) keepIndexes(region []provider.Message) ([]bool, userTurnRetention) {
 	keep := make([]bool, len(region))
 	policyStart := 0
 	for i, m := range region {
@@ -315,10 +316,11 @@ func keepIndexes(region []provider.Message, policy KeepPolicy) []bool {
 	// Retention applies only to messages since the latest digest; older kept
 	// messages are allowed to fold on the next pass so they cannot grow forever.
 	for i, m := range region {
-		if i >= policyStart && shouldKeepMessage(m, policy) {
+		if i >= policyStart && shouldKeepMessage(m, a.keepPolicy) {
 			keep[i] = true
 		}
 	}
+	retention := a.keepUserTurns(region, keep)
 	for i, m := range region {
 		if !keep[i] {
 			continue
@@ -332,7 +334,14 @@ func keepIndexes(region []provider.Message, policy KeepPolicy) []bool {
 			keepToolCallGroup(region, keep, i)
 		}
 	}
-	return keep
+	return keep, retention
+}
+
+// fixedTokenEstimate is what every verbatim-retention decision measures with.
+// Calibrated usage must not be used here: a threshold that moves with the last
+// turn's ratio would keep a turn at one checkpoint and fold it at the next.
+func fixedTokenEstimate(m provider.Message) int {
+	return int(float64(msgChars(m)) * fallbackTokPerChar)
 }
 
 func keepToolCallGroup(region []provider.Message, keep []bool, assistantIndex int) {

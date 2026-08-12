@@ -33,6 +33,10 @@ func (c *Controller) RunInboxTurn(ctx context.Context, id string) error {
 		return fmt.Errorf("%w: %s", sessioninbox.ErrInvalidState, block)
 	}
 	return c.runSynchronousTurn(ctx, func() error {
+		c.inbox.admissionMu.Lock()
+		defer c.inbox.admissionMu.Unlock()
+		c.inbox.trackAdmission(id)
+		defer c.inbox.untrackAdmission(id)
 		if err := st.ClaimItem(id); err != nil {
 			return err
 		}

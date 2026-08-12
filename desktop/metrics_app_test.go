@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"reasonix/internal/config"
@@ -245,6 +246,28 @@ func TestPersistMergesAcrossSessions(t *testing.T) {
 	}
 	if n := len(flatten(readCounters(path))); n != 1 {
 		t.Errorf("flatten produced %d counters, want 1", n)
+	}
+}
+
+func TestRecordDroppedWebRuntimeEventsDrainsAtomicCount(t *testing.T) {
+	oldVersion := version
+	version = "v1.23.0"
+	t.Cleanup(func() { version = oldVersion })
+
+	dir := t.TempDir()
+	app := NewApp()
+	app.metrics.Store(newMetricsAggregator(dir))
+	var dropped atomic.Uint64
+	dropped.Store(3)
+
+	recordDroppedWebRuntimeEvents(app, "webview2", &dropped)
+	recordDroppedWebRuntimeEvents(app, "webview2", &dropped)
+
+	if got := dropped.Load(); got != 0 {
+		t.Fatalf("dropped count = %d, want drained", got)
+	}
+	if got := readCounters(filepath.Join(dir, metricsPendingFile))["desktop_web_runtime_dropped"]["webview2"]; got != 3 {
+		t.Fatalf("desktop_web_runtime_dropped/webview2 = %d, want 3", got)
 	}
 }
 

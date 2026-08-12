@@ -80,11 +80,17 @@ type Server struct {
 // New builds a Server. bc must be the controller's event sink.
 // serveCfg controls authentication (none, token, or password).
 func New(ctrl control.SessionAPI, bc *Broadcaster, serveCfg config.ServeConfig) *Server {
+	if bc == nil {
+		bc = NewBroadcaster()
+	}
 	s := &Server{
 		ctrl:   ctrl,
 		bc:     bc,
 		titles: newTitleCache(ctrl.SessionDir()),
 		auth:   newAuthGate(serveCfg),
+	}
+	if cfg, err := config.Load(); err == nil {
+		bc.SetDisplayCurrency(cfg.ExplicitDisplayCurrency())
 	}
 	s.initTitleProvider()
 	return s
@@ -827,6 +833,7 @@ func (s *Server) newSession(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.bc.ResetSession()
 	// Fresh path — the lease follows it; failure is theoretical but not silent.
 	if err := s.rebindSessionLease(s.ctl().SessionPath()); err != nil {
 		http.Error(w, sessionInUseError(err), http.StatusConflict)
@@ -1021,6 +1028,7 @@ func (s *Server) fork(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.bc.ResetSession()
 	// The controller switched to the fork (a fresh path); the lease follows it.
 	if err := s.rebindSessionLease(s.ctl().SessionPath()); err != nil {
 		http.Error(w, sessionInUseError(err), http.StatusConflict)
@@ -1203,6 +1211,7 @@ func (s *Server) resume(w http.ResponseWriter, r *http.Request) {
 		hook()
 	}
 	s.ctl().Resume(loaded, realPath)
+	s.bc.ResetSession()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1380,6 +1389,11 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 		sess["lastUsage"] = u
 	}
 	if b, err := s.ctl().Balance(r.Context()); err == nil && b != nil {
+		if cfg, loadErr := config.Load(); loadErr == nil && cfg.DisplayCurrencyPref() == "" {
+			// Runtime-only hint: a single wallet currency may select an existing
+			// valuation, but is never persisted as configuration or history.
+			s.bc.SetDisplayCurrency(b.PrimaryCurrency())
+		}
 		sess["balance"] = map[string]any{
 			"display":   b.Display(),
 			"available": b.Available,
@@ -1388,6 +1402,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	} else if err != nil {
 		slog.Warn("serve: balance fetch failed", "err", err)
 	}
+	sess["sessionCostQuote"] = s.bc.SessionCostQuote()
 	if j := s.ctl().Jobs(); len(j) > 0 {
 		sess["jobs"] = j
 	}

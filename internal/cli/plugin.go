@@ -204,6 +204,9 @@ func pluginListCommand() int {
 		if p.Enabled {
 			state = "enabled"
 		}
+		if strings.TrimSpace(p.Status) != "" {
+			state = p.Status
+		}
 		version := p.Version
 		if version == "" {
 			version = "-"

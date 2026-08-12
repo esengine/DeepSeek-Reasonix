@@ -370,7 +370,7 @@ func compactionTelemetryFromSummary(trigger, cacheState string, sourceTokens int
 
 // compact writes a context projection; trigger stays "auto"/"manual" for UI cards.
 func (a *Agent) compact(ctx context.Context, trigger, instructions string, force bool) error {
-	_, err := a.compactToProjection(ctx, trigger, instructions, force)
+	_, err := a.compactToProjection(ctx, trigger, instructions, force, false)
 	return err
 }
 
@@ -378,7 +378,8 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 // stable prefix + one structured digest + recent verbatim tail.
 // The canonical transcript is never rewritten. CompactionNoop means nothing
 // was foldable; callers at physical overflow must treat that as hard failure.
-func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions string, force bool) (CompactionOutcome, error) {
+// mustFree marks the fold the caller cannot proceed without.
+func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions string, force, mustFree bool) (CompactionOutcome, error) {
 	a.compactionRunMu.Lock()
 	defer a.compactionRunMu.Unlock()
 	activeTurn := a.activeTurnCreatedAt.Load()
@@ -400,7 +401,7 @@ func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions s
 	if !ok {
 		return CompactionNoop, nil
 	}
-	_, _, kept, fold := a.partitionFoldForProjection(msgs[head:start])
+	kept, fold, retention := a.partitionFoldForProjection(msgs[head:start])
 	if len(fold) == 0 || (!force && !foldEconomics(fold)) {
 		return CompactionNoop, nil
 	}
@@ -430,16 +431,13 @@ func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions s
 	}
 
 	sourceTokens := a.estimatedPromptTokens(msgs)
-	res, err := a.foldToSummary(ctx, fold, instructions)
-	summary := res.Text
-	tele := compactionTelemetryFromSummary(trigger, a.CacheState(), sourceTokens, res)
+	res, tele, err := a.foldOrDegrade(ctx, trigger, mustFree, fold, instructions, sourceTokens)
 	if err != nil {
-		tele.Error = err.Error()
 		a.emitCompactionTelemetry(tele)
 		a.emitCompactionAborted(trigger)
 		return CompactionNoop, err
 	}
-	summary, err = a.interceptCompactionComplete(ctx, summary)
+	summary, err := a.interceptCompactionComplete(ctx, res.Text)
 	if err != nil {
 		tele.Error = err.Error()
 		a.emitCompactionTelemetry(tele)
@@ -451,6 +449,7 @@ func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions s
 	projTokens := a.estimatedPromptTokens(projMsgs)
 	fixedPrefixTokens = a.estimatedPromptTokens(msgs[:head])
 	tele.ProjectionTokens = projTokens
+	tele.UserTurnsKept, tele.UserTurnsDropped = retention.Kept, retention.Dropped
 	a.emitCompactionTelemetry(tele)
 	if err := a.acceptCheckpointCandidate(trigger, force, sourceTokens, projTokens, fixedPrefixTokens); err != nil {
 		a.emitCompactionAborted(trigger)
@@ -471,6 +470,8 @@ func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions s
 	a.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{
 		Trigger: trigger, Messages: len(fold), Summary: summary,
 	}})
+	// Only once the checkpoint is committed: a rejected candidate folded nothing.
+	a.noticeDroppedUserTurns(retention)
 	return CompactionInstalled, nil
 }
 
@@ -490,7 +491,7 @@ func checkpointProjectionMessages(msgs []provider.Message, head, start int, kept
 	projMsgs = append(projMsgs, formatSummaryMessage(summary))
 	projMsgs = append(projMsgs, kept...)
 	projMsgs = append(projMsgs, msgs[start:]...)
-	return provider.ModelMessages(projMsgs)
+	return provider.ProjectionMessages(projMsgs)
 }
 
 // acceptCheckpointCandidate: ≤50% + smaller for auto; force may exceed 50%
@@ -553,8 +554,8 @@ func (a *Agent) planFoldRegion(msgs []provider.Message, force bool) (head, start
 	return head, start, start > head
 }
 
-func (a *Agent) partitionFoldForProjection(region []provider.Message) (early, carried, kept, fold []provider.Message) {
-	policyKeep := keepIndexes(region, a.keepPolicy)
+func (a *Agent) partitionFoldForProjection(region []provider.Message) (kept, fold []provider.Message, retention userTurnRetention) {
+	policyKeep, retention := a.keepIndexes(region)
 	for i, m := range region {
 		switch {
 		case m.LocalOnly: // display-only output never reaches a provider
@@ -567,7 +568,7 @@ func (a *Agent) partitionFoldForProjection(region []provider.Message) (early, ca
 			fold = append(fold, m)
 		}
 	}
-	return nil, nil, kept, fold
+	return kept, fold, retention
 }
 
 // runCompactionSummary uses the single local summarizer path for every provider.

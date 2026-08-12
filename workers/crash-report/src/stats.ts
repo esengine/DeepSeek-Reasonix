@@ -47,11 +47,11 @@ function chartTickLabel(n: number): string {
   return String(Math.round(n));
 }
 
-function i18n(en: string, zh: string): string {
+export function i18n(en: string, zh: string): string {
   return `<span data-i18n="en">${esc(en)}</span><span data-i18n="zh">${esc(zh)}</span>`;
 }
 
-function i18nHTML(en: string, zh: string): string {
+export function i18nHTML(en: string, zh: string): string {
   return `<span data-i18n="en">${en}</span><span data-i18n="zh">${zh}</span>`;
 }
 
@@ -185,6 +185,8 @@ const METRIC_SIGNAL_LABELS: Record<string, { en: string; zh: string }> = {
   desktop_update_transition: { en: "Update transition", zh: "升级阶段" },
   desktop_restore: { en: "Window restore", zh: "窗口恢复" },
   desktop_webview2_failure: { en: "WebView2 failures", zh: "WebView2 故障" },
+  desktop_web_runtime_failure: { en: "Web runtime failures", zh: "Web Runtime 故障" },
+  desktop_web_runtime_outcome: { en: "Web runtime outcomes", zh: "Web Runtime 结果" },
   recovery_failure: { en: "Recovery failures", zh: "恢复失败" },
   recovery_rule_continue: { en: "Rule recovery continues", zh: "规则恢复继续" },
   recovery_review_continue: { en: "Review recovery continues", zh: "复核恢复继续" },
@@ -254,6 +256,8 @@ const AGENT_METRIC_SIGNALS = [
   "desktop_update_transition",
   "desktop_restore",
   "desktop_webview2_failure",
+  "desktop_web_runtime_failure",
+  "desktop_web_runtime_outcome",
   "cli_turn_latency",
   "cli_exit",
   "recovery_failure",
@@ -436,8 +440,8 @@ function agentHealth(rows: MetricRow[], previousRows: MetricRow[]): string {
   const prevDesktopHangs = sumMetric(previousRows, "desktop_hang");
   const abnormalExits = rows.filter((r) => r.signal === "desktop_exit" && r.bucket === "abnormal").reduce((sum, r) => sum + r.total, 0);
   const prevAbnormalExits = previousRows.filter((r) => r.signal === "desktop_exit" && r.bucket === "abnormal").reduce((sum, r) => sum + r.total, 0);
-  const webViewFailures = sumMetric(rows, "desktop_webview2_failure");
-  const prevWebViewFailures = sumMetric(previousRows, "desktop_webview2_failure");
+  const webRuntimeFailures = sumMetric(rows, "desktop_web_runtime_failure") + sumMetric(rows, "desktop_webview2_failure");
+  const prevWebRuntimeFailures = sumMetric(previousRows, "desktop_web_runtime_failure") + sumMetric(previousRows, "desktop_webview2_failure");
   const rateCard = (signal: string, en: string, zh: string) => {
     const value = ratioPer100(rows, signal);
     const prev = ratioPer100(previousRows, signal);
@@ -476,16 +480,16 @@ ${healthCard(
   healthDetailHTML(rows, "desktop_exit_phase"),
 )}
 ${healthCard(
-  { en: "WebView2 process failures", zh: "WebView2 进程故障" },
-  String(webViewFailures),
-  countHealthLevel(webViewFailures),
-  healthDeltaHTML(deltaLabel(webViewFailures, prevWebViewFailures)),
-  healthDetailHTML(rows, "desktop_webview2_failure"),
+  { en: "Web runtime process failures", zh: "Web Runtime 进程故障" },
+  String(webRuntimeFailures),
+  countHealthLevel(webRuntimeFailures),
+  healthDeltaHTML(deltaLabel(webRuntimeFailures, prevWebRuntimeFailures)),
+  healthDetailHTML(rows, sumMetric(rows, "desktop_web_runtime_failure") ? "desktop_web_runtime_failure" : "desktop_webview2_failure"),
 )}
 </div>`;
 }
 
-function statusPill(status: string): string {
+export function statusPill(status: string): string {
   if (status === "resolved") return `<span class="pill resolved">resolved</span>`;
   if (status === "ignored") return `<span class="pill ignored">ignored</span>`;
   return "";
@@ -510,9 +514,15 @@ type CrashRow = {
   last_channel: string;
   regressed_at: string;
   development?: boolean;
+  affected_installs?: number;
+  window_events?: number;
+  identified_events?: number;
+  identity_coverage?: number;
+  dimension_coverage?: number;
+  impact_rate?: number | null;
 };
 
-function clip(s: string, n: number): string {
+export function clip(s: string, n: number): string {
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
 }
 
@@ -564,7 +574,7 @@ function preferencePanel(title: string, body: string, active: boolean): string {
 
 function reportGroups(rows: CrashRow[], compact = false): string {
   if (!rows.length) return `<div class="empty">${i18n("No diagnostic reports yet — that's the good kind of empty", "还没有诊断报告，这是好消息")}</div>`;
-  return `<div class="crash-list${compact ? " compact" : ""}"><div class="crash-head"><span>${i18n("summary", "摘要")}</span><span>${i18n("scope", "范围")}</span><span>${i18n("health", "状态")}</span><span title="${i18n("Groups are filtered by the selected window; occurrence totals are lifetime counts", "分组按所选时间窗口过滤；次数为全生命周期累计")}">${i18n("lifetime count", "累计次数")}</span></div>${rows
+  return `<div class="crash-list${compact ? " compact" : ""}"><div class="crash-head"><span>${i18n("summary", "摘要")}</span><span>${i18n("scope", "范围")}</span><span>${i18n("health", "状态")}</span><span title="${i18n("Window events and affected installs; lifetime count remains visible for historical context", "窗口事件数和受影响安装数；同时保留全生命周期累计次数")}">${i18n("window / lifetime", "窗口 / 累计")}</span></div>${rows
     .map((c) => {
       const platform = [c.last_os, c.last_arch].filter(Boolean).join("/");
       const versions = `${c.first_version || "?"} → ${c.last_version || "?"}`;
@@ -575,7 +585,7 @@ function reportGroups(rows: CrashRow[], compact = false): string {
       }</span>
 <span class="crash-scope"><small>${esc(c.source || "legacy")}</small><small>${esc(versions)}</small><small>${platform ? esc(platform) : "unknown platform"}</small>${c.last_channel && c.last_channel !== "stable" ? `<small>${esc(c.last_channel)}</small>` : ""}</span>
 <span class="crash-health"><span class="pill">${esc(c.severity || "medium")}</span><span class="pill ${c.kind === "crash" ? "crash" : ""}">${esc(c.kind)}</span>${statusPill(c.status)}</span>
-<span class="crash-count">${c.count}</span>
+<span class="crash-count"><b>${Number(c.affected_installs ?? 0)} ${i18n("installs", "安装")}</b><small>${Number(c.window_events ?? 0)} ${i18n("events", "事件")} · ${Number(c.identity_coverage ?? 0) >= 0.9 && Number(c.dimension_coverage ?? 1) >= 0.9 ? `${Math.round(Number(c.identity_coverage) * 100)}% ${i18n("identified", "已关联")}${c.impact_rate !== null && c.impact_rate !== undefined ? ` · ${(c.impact_rate * 100).toFixed(1)}% ${i18n("impact", "影响率")}` : ""}` : i18n("sample incomplete", "样本不完整")}</small><small>${c.count} ${i18n("lifetime", "累计")}</small></span>
 </a>`;
     })
     .join("")}</div>`;
@@ -594,6 +604,24 @@ export function renderStats(
     /** Oldest computed_at in the rollup; empty when the window was queried live. */
     metricUsersComputedAt: string;
     sources: { label: string; users: number }[];
+    diagnosticFacets?: {
+      osBuilds: BarRow[];
+      osRevisions: BarRow[];
+      distros: BarRow[];
+      distroVersions: BarRow[];
+      kernels: BarRow[];
+      sessions: BarRow[];
+      architectures: BarRow[];
+      channels: BarRow[];
+      runtimes: BarRow[];
+      runtimeEngines: BarRow[];
+      failureKinds: BarRow[];
+      failureReasons: BarRow[];
+      exitCodes: BarRow[];
+      recoveries: BarRow[];
+      gpuStates: BarRow[];
+    };
+    installationLinkedSince?: string;
     overview: OverviewCounts;
     latestVersion: string;
     filters: {
@@ -603,6 +631,21 @@ export function renderStats(
       version: string;
       os: string;
       platform: string;
+      osBuild?: string;
+      osRevision?: string;
+      distroId?: string;
+      distroVersion?: string;
+      kernelVersion?: string;
+      sessionType?: string;
+      arch?: string;
+      channel?: string;
+      runtimeVersion?: string;
+      runtimeEngine?: string;
+      failureKind?: string;
+      failureReason?: string;
+      exitCode?: string;
+      recovery?: string;
+      gpu?: string;
       newLatest: boolean;
       regressed: boolean;
       windowDays: 7 | 30;
@@ -615,6 +658,11 @@ export function renderStats(
   const days = lastDays(data.daily, data.filters.windowDays);
   const range = data.filters.windowDays;
   const rangeText = `${range}d`;
+  const diagnosticFacets = data.diagnosticFacets ?? {
+    osBuilds: [], osRevisions: [], distros: [], distroVersions: [], kernels: [], sessions: [],
+    architectures: [], channels: [], runtimes: [], runtimeEngines: [],
+    failureKinds: [], failureReasons: [], exitCodes: [], recoveries: [], gpuStates: [],
+  };
   const totalUsers = days.at(-1)?.users ?? 0;
   const anyPing = days.some((d) => d.opens > 0);
   const agentMetrics = data.metrics.filter((r) => AGENT_METRIC_SIGNALS.includes(r.signal));
@@ -632,7 +680,7 @@ export function renderStats(
   const abnormalExits = agentMetrics
     .filter((r) => r.signal === "desktop_exit" && r.bucket === "abnormal")
     .reduce((sum, r) => sum + r.total, 0);
-  const webViewFailures = sumMetric(agentMetrics, "desktop_webview2_failure");
+  const webViewFailures = sumMetric(agentMetrics, "desktop_web_runtime_failure") + sumMetric(agentMetrics, "desktop_webview2_failure");
   const healthWatchCount =
     [healthLevel("cache", cache), healthLevel("rate", providerRate), healthLevel("rate", toolRate)].filter((v) => v === "warn" || v === "bad").length +
     (desktopHangs > 0 ? 1 : 0) +
@@ -649,6 +697,21 @@ export function renderStats(
     put("version", data.filters.version);
     put("os", data.filters.os);
     put("platform", data.filters.platform);
+    put("osBuild", data.filters.osBuild ?? "");
+    put("osRevision", data.filters.osRevision ?? "");
+    put("distro", data.filters.distroId ?? "");
+    put("distroVersion", data.filters.distroVersion ?? "");
+    put("kernel", data.filters.kernelVersion ?? "");
+    put("session", data.filters.sessionType ?? "");
+    put("arch", data.filters.arch ?? "");
+    put("channel", data.filters.channel ?? "");
+    put("runtime", data.filters.runtimeVersion ?? "");
+    put("engine", data.filters.runtimeEngine ?? "");
+    put("failureKind", data.filters.failureKind ?? "");
+    put("reason", data.filters.failureReason ?? "");
+    put("exitCode", data.filters.exitCode ?? "");
+    put("recovery", data.filters.recovery ?? "");
+    put("gpu", data.filters.gpu ?? "");
     put("surface", data.filters.surface === "cli" ? "cli" : "");
     if (data.filters.newLatest) params.set("new", "latest");
     if (data.filters.regressed) params.set("regressed", "1");
@@ -662,9 +725,9 @@ export function renderStats(
     const path = modulePath(module);
     return qs ? `${path}?${qs}` : path;
   };
-  const clearFiltersHref = filterQS({ status: "", source: "", version: "", os: "", platform: "", new: "", regressed: "" });
+  const clearFiltersHref = filterQS({ status: "", source: "", version: "", os: "", platform: "", osBuild: "", osRevision: "", distro: "", distroVersion: "", kernel: "", session: "", arch: "", channel: "", engine: "", runtime: "", failureKind: "", reason: "", exitCode: "", recovery: "", gpu: "", new: "", regressed: "" });
   const hasFilters = Boolean(
-    data.filters.status || data.filters.source || data.filters.version || data.filters.os || data.filters.platform || data.filters.newLatest || data.filters.regressed,
+    data.filters.status || data.filters.source || data.filters.version || data.filters.os || data.filters.platform || data.filters.osBuild || data.filters.osRevision || data.filters.distroId || data.filters.distroVersion || data.filters.kernelVersion || data.filters.sessionType || data.filters.arch || data.filters.channel || data.filters.runtimeEngine || data.filters.runtimeVersion || data.filters.failureKind || data.filters.failureReason || data.filters.exitCode || data.filters.recovery || data.filters.gpu || data.filters.newLatest || data.filters.regressed,
   );
   const windowControls = `<div class="segmented" aria-label="Time window">
 <a class="${range === 7 ? "active" : ""}"${range === 7 ? ` aria-current="true"` : ""} href="${esc(filterQS({ window: "7d" }))}">7d</a>
@@ -706,7 +769,10 @@ ${navLink(filterQS({}, "diagnostics"), { en: "Diagnostics", zh: "诊断分诊" }
 ${navLink(filterQS({}, "preferences"), { en: "Preferences", zh: "设置偏好" }, activeModule === "preferences")}
 ${navLink(filterQS({}, "health"), { en: "Agent Health", zh: "运行健康" }, activeModule === "health")}
 </nav>`;
-  const filters = `<div class="filter-card"><div class="filter-head"><h2>${i18n("Report filters", "诊断筛选")}</h2><span>${i18nHTML(`latest ${esc(data.latestVersion || "n/a")}`, `最新 ${esc(data.latestVersion || "n/a")}`)}</span></div>
+  const linkedSince = data.installationLinkedSince
+    ? `<p class="muted">${i18n("Installation-linked data available since", "可关联安装数据起始于")} ${esc(data.installationLinkedSince)}</p>`
+    : "";
+  const filters = `<div class="filter-card"><div class="filter-head"><h2>${i18n("Report filters", "诊断筛选")}</h2><span>${i18nHTML(`latest ${esc(data.latestVersion || "n/a")}`, `最新 ${esc(data.latestVersion || "n/a")}`)}</span></div>${linkedSince}
 <div class="filter-tabs">
 ${filterTab("All", "全部", clearFiltersHref, !hasFilters)}
 ${filterTab("Open", "未处理", filterQS({ status: "open" }), data.filters.status === "open")}
@@ -719,6 +785,12 @@ ${filterTab("Regressed", "回归", filterQS({ regressed: data.filters.regressed 
 <section><h3>${i18n("Source", "来源")}</h3><div class="facet-list">${facetChips(data.sources, data.filters.source, (label) => filterQS({ source: label }), 4)}</div></section>
 <section><h3>${i18n("Version", "版本")}</h3><div class="facet-list">${facetChips(data.versions, data.filters.version, (label) => filterQS({ version: label }), 5)}</div></section>
 <section><h3>${i18n("Platform", "平台")}</h3><div class="facet-list">${facetChips(data.platforms, data.filters.platform, (label) => filterQS({ platform: label }), 4)}</div></section>
+<section><h3>${i18n("Windows build / revision", "Windows build / revision")}</h3><div class="facet-list">${facetChips(diagnosticFacets.osBuilds, data.filters.osBuild ?? "", (label) => filterQS({ osBuild: label }), 6)}${facetChips(diagnosticFacets.osRevisions, data.filters.osRevision ?? "", (label) => filterQS({ osRevision: label }), 4)}${data.filters.osBuild !== "17763" ? `<a class="facet-chip" href="${esc(filterQS({ osBuild: "17763" }))}"><span class="facet-label">LTSC 2019 · 17763</span></a>` : ""}</div></section>
+<section><h3>${i18n("Linux distribution / session", "Linux 发行版 / 会话")}</h3><div class="facet-list">${facetChips(diagnosticFacets.distros, data.filters.distroId ?? "", (label) => filterQS({ distro: label }), 5)}${facetChips(diagnosticFacets.distroVersions, data.filters.distroVersion ?? "", (label) => filterQS({ distroVersion: label }), 4)}${facetChips(diagnosticFacets.kernels, data.filters.kernelVersion ?? "", (label) => filterQS({ kernel: label }), 4)}${facetChips(diagnosticFacets.sessions, data.filters.sessionType ?? "", (label) => filterQS({ session: label }), 4)}</div></section>
+<section><h3>${i18n("Architecture / channel", "架构 / 渠道")}</h3><div class="facet-list">${facetChips(diagnosticFacets.architectures, data.filters.arch ?? "", (label) => filterQS({ arch: label }), 4)}${facetChips(diagnosticFacets.channels, data.filters.channel ?? "", (label) => filterQS({ channel: label }), 4)}</div></section>
+<section><h3>Web Runtime</h3><div class="facet-list">${facetChips(diagnosticFacets.runtimeEngines, data.filters.runtimeEngine ?? "", (label) => filterQS({ engine: label }), 3)}${facetChips(diagnosticFacets.runtimes, data.filters.runtimeVersion ?? "", (label) => filterQS({ runtime: label }), 5)}</div></section>
+<section><h3>${i18n("Failure kind / reason / exit", "故障类型 / 原因 / 退出码")}</h3><div class="facet-list">${facetChips(diagnosticFacets.failureKinds, data.filters.failureKind ?? "", (label) => filterQS({ failureKind: label }), 5)}${facetChips(diagnosticFacets.failureReasons, data.filters.failureReason ?? "", (label) => filterQS({ reason: label }), 5)}${facetChips(diagnosticFacets.exitCodes, data.filters.exitCode ?? "", (label) => filterQS({ exitCode: label }), 4)}</div></section>
+<section><h3>${i18n("Recovery / GPU", "恢复 / GPU")}</h3><div class="facet-list">${facetChips(diagnosticFacets.recoveries, data.filters.recovery ?? "", (label) => filterQS({ recovery: label }), 4)}${facetChips(diagnosticFacets.gpuStates, data.filters.gpu ?? "", (label) => filterQS({ gpu: label }), 3)}</div></section>
 </div></div>`;
   const usageModule = `<section id="usage" class="card full module-card"><div class="module-head"><div><span>${i18n("Module", "模块")}</span><h2>${i18n("Usage distribution", "使用分布")}</h2></div></div>
 <div class="module-panel wide"><h3>${i18nHTML(`Daily active installs <b>— ${rangeText}</b> (solid: users, faded: opens)`, `每日活跃 <b>— ${rangeText}</b>（实线：用户，淡色：打开次数）`)}</h3>
@@ -728,6 +800,7 @@ ${anyPing ? dailyChart(days) : `<div class="empty">${i18n("No pings yet — data
 <section class="module-panel"><h3>${i18nHTML(`Platforms <b>— ${rangeText}</b>`, `平台分布 <b>— ${rangeText}</b>`)}</h3>${listBars(data.platforms)}</section>
 </div></section>`;
   const diagnosticsModule = `<section id="diagnostics" class="card full module-card"><div class="module-head"><div><span>${i18n("Module", "模块")}</span><h2>${i18n("Diagnostic triage", "诊断分诊")}</h2></div><a class="module-action" href="#top">${i18n("Back to overview", "回到概览")}</a></div>
+<p class="sub">${i18n("Installation-linked data is available only from the diagnostics-v2 deployment date; historical device counts are not backfilled.", "可关联安装的数据仅从 diagnostics-v2 部署日起提供；历史设备数不回填。")}</p>
 <section class="module-panel"><h3>${i18nHTML("Needs attention <b>— top 10 release crashes and exceptions</b>", "优先处理 <b>— 正式版崩溃与异常 Top 10</b>")}</h3>${reportGroups(releaseCrashes.slice(0, 10), true)}</section>
 ${performanceDiagnostics.length ? `<section class="module-panel"><h3>${i18nHTML("Performance signals <b>— tracked separately from crashes</b>", "性能信号 <b>— 与崩溃分开统计</b>")}</h3>${reportGroups(performanceDiagnostics.slice(0, 5), true)}</section>` : ""}
 ${developmentDiagnostics.length ? `<section class="module-panel"><h3>${i18nHTML("Development diagnostics <b>— excluded from release priority</b>", "开发版诊断 <b>— 不计入正式版优先级</b>")}</h3>${reportGroups(developmentDiagnostics.slice(0, 5), true)}</section>` : ""}
@@ -775,7 +848,7 @@ ${filters}
       ? `<div class="empty">${range === 30
           ? i18nHTML(`The 30-day deduplication is not ready. <a href="${esc(filterQS({ window: "7d" }, "health"))}">Use 7d</a> meanwhile.`, `30 天去重统计尚未就绪。<a href="${esc(filterQS({ window: "7d" }, "health"))}">先看 7 天</a>。`)
           : i18n(`The ${rangeText} deduplication did not finish.`, `${rangeText} 的去重统计没能跑完。`)}</div>`
-      : metricsCards(agentMetricUsers, ["desktop_hang", "desktop_hang_age", "desktop_webview2_failure", "desktop_restore", "desktop_exit"])
+          : metricsCards(agentMetricUsers, ["desktop_hang", "desktop_hang_age", "desktop_web_runtime_failure", "desktop_webview2_failure", "desktop_restore", "desktop_exit"])
   }</section>
 <section class="module-panel"><h3>${i18nHTML(`Signal distributions <b>— ${rangeText}, opt-in aggregate</b>`, `信号分布 <b>— ${rangeText}，opt-in 汇总</b>`)}</h3>${metricsCards(agentMetrics)}</section>
 </section>`;
@@ -798,186 +871,6 @@ ${pageOverview}
 <div class="grid">
 ${activeModuleHTML[activeModule]}
 </div>`,
-    userNav(user),
-  );
-}
-
-function fmtDevice(deviceJSON: string): string {
-  try {
-    const d = JSON.parse(deviceJSON) as { osVersion?: string; cpu?: string; cores?: number; ramGb?: number };
-    return [d.osVersion, d.cpu, d.cores ? `${d.cores} cores` : "", d.ramGb ? `${d.ramGb} GB RAM` : ""]
-      .filter(Boolean)
-      .join(" · ");
-  } catch {
-    return "";
-  }
-}
-
-export type Group = {
-  fingerprint: string;
-  kind: string;
-  count: number;
-  first_seen: string;
-  last_seen: string;
-  first_version: string;
-  last_version: string;
-  status: string;
-  note: string;
-  title: string;
-  source: string;
-  label: string;
-  error_type: string;
-  top_frame: string;
-  severity: string;
-  last_os: string;
-  last_arch: string;
-  last_build_commit: string;
-  last_channel: string;
-  resolved_in: string;
-  resolved_at: string;
-  regressed_at: string;
-};
-
-type ReportSample = {
-  version: string;
-  os: string;
-  arch: string;
-  message: string;
-  device: string;
-  created_at: string;
-  source: string;
-  label: string;
-  error_type: string;
-  error_message: string;
-  top_frame: string;
-  build_commit: string;
-  channel: string;
-  language: string;
-  view: string;
-  breadcrumbs: string;
-  component_stack: string;
-  stack: string;
-  occurred_at: string;
-};
-
-function manageGroup(group: Group): string {
-  const fp = esc(group.fingerprint);
-  const setStatus = (s: string, label: string, zhLabel: string, cls: string) =>
-    group.status === s
-      ? ""
-      : `<form method="post" action="/stats/group/${fp}" class="inline"><input type="hidden" name="action" value="status"><input type="hidden" name="status" value="${s}"><button class="btn ${cls} sm" type="submit">${i18n(label, zhLabel)}</button></form>`;
-  return `<div class="card full manage-card"><div class="manage-head"><h2>${i18nHTML("Manage <b>— admin</b>", "管理 <b>— 管理员</b>")}</h2><div class="manage-actions">${setStatus("resolved", "Mark resolved", "标记已解决", "ghost")}${setStatus("ignored", "Ignore", "忽略", "ghost")}${setStatus("open", "Reopen", "重新打开", "ghost")}
-<form method="post" action="/stats/group/${fp}" class="inline" onsubmit="return confirm('Delete this crash group and all its samples?')"><input type="hidden" name="action" value="delete"><button class="btn danger sm" type="submit">${i18n("Delete group", "删除分组")}</button></form></div></div>
-<div class="manage-grid">
-<form method="post" action="/stats/group/${fp}" class="manage-form"><input type="hidden" name="action" value="resolution"><label>${i18n("Resolved in", "解决版本")}<input type="text" name="resolvedIn" placeholder="v1.10.1" value="${esc(group.resolved_in)}"></label><button class="btn sm" type="submit">${i18n("Save", "保存")}</button></form>
-<form method="post" action="/stats/group/${fp}" class="manage-form"><input type="hidden" name="action" value="severity"><label>${i18n("Severity", "严重级别")}<select name="severity"><option${group.severity === "low" ? " selected" : ""}>low</option><option${group.severity === "medium" ? " selected" : ""}>medium</option><option${group.severity === "high" ? " selected" : ""}>high</option><option${group.severity === "critical" ? " selected" : ""}>critical</option></select></label><button class="btn sm" type="submit">${i18n("Save", "保存")}</button></form>
-<form method="post" action="/stats/group/${fp}" class="manage-form wide"><input type="hidden" name="action" value="note"><label>${i18n("Note", "备注")}<input type="text" name="note" placeholder="${esc("Add investigation note")}" value="${esc(group.note)}"></label><button class="btn sm" type="submit">${i18n("Save", "保存")}</button></form>
-</div></div>`;
-}
-
-function breadcrumbsList(json: string): string {
-  try {
-    const rows = JSON.parse(json) as { cat?: string; msg?: string }[];
-    if (!Array.isArray(rows) || rows.length === 0) return "";
-    return `<details class="sample-nested"><summary>${i18n("breadcrumbs", "面包屑")}</summary><pre>${esc(rows.map((b) => `[${b.cat ?? ""}] ${b.msg ?? ""}`).join("\n"))}</pre></details>`;
-  } catch {
-    return "";
-  }
-}
-
-function sampleReport(r: ReportSample, i: number): string {
-  const dev = fmtDevice(r.device);
-  const platform = [r.os, r.arch].filter(Boolean).join("/");
-  const title = r.error_message || r.message.split("\n").find((line) => line.trim()) || r.error_type || "sample";
-  const structured = [
-    r.source && [i18n("source", "来源"), r.source],
-    r.label && [i18n("label", "标签"), r.label],
-    r.error_type && [i18n("type", "类型"), r.error_type],
-    r.top_frame && [i18n("top", "顶层"), r.top_frame],
-    r.build_commit && [i18n("build", "构建"), r.build_commit],
-    r.channel && [i18n("channel", "渠道"), r.channel],
-    r.view && [i18n("view", "视图"), r.view],
-  ]
-    .filter(Boolean)
-    .map(([label, value]) => `<span><b>${label}</b>${esc(value)}</span>`)
-    .join("");
-  const stack = r.stack || r.component_stack;
-  return `<details class="sample" ${i === 0 ? "open" : ""}><summary>
-<span class="sample-id"><b>${esc(r.version)}</b><small>${esc(platform || "unknown platform")}</small></span>
-<span class="sample-title">${esc(clip(title, 110))}</span>
-<span class="sample-time">${esc((r.occurred_at || r.created_at).slice(0, 19).replace("T", " "))}</span>
-</summary>
-<div class="sample-body">
-<div class="sample-meta">${dev ? `<span><b>${i18n("device", "设备")}</b>${esc(dev)}</span>` : ""}${structured}</div>
-<div class="sample-actions"><button class="btn ghost sm copy-btn" type="button" data-copy="${esc(r.message)}"><span class="copy-label">${i18n("Copy message", "复制消息")}</span></button>${
-    stack
-      ? `<button class="btn ghost sm copy-btn" type="button" data-copy="${esc(stack)}"><span class="copy-label">${i18n("Copy stack", "复制堆栈")}</span></button>`
-      : ""
-  }</div>
-<pre>${esc(r.message)}</pre>
-${stack ? `<details class="sample-nested"><summary>${i18n("stack", "堆栈")}</summary><pre>${esc(stack)}</pre></details>` : ""}
-${breadcrumbsList(r.breadcrumbs)}
-</div></details>`;
-}
-
-function sampleReports(reports: ReportSample[], options: { limit?: number } = {}): string {
-  if (!reports.length) return `<div class="empty">${i18n("No raw samples stored for this group", "这个分组没有保存原始样本")}</div>`;
-  const limit = options.limit ?? 10;
-  const visible = reports.slice(0, limit);
-  const hidden = reports.slice(limit);
-  const visibleSamples = visible.map((r, i) => sampleReport(r, i)).join("");
-  const hiddenSamples = hidden.map((r, i) => sampleReport(r, i + limit)).join("");
-  const history =
-    hidden.length > 0
-      ? `<details class="sample-more"><summary>${i18nHTML(`Historical samples ${hidden.length}`, `历史样本 ${hidden.length}`)}</summary><div class="sample-more-list">${hiddenSamples}</div></details>`
-      : "";
-  return `<div class="sample-list">${visibleSamples}${history}</div>`;
-}
-
-export function renderGroup(
-  group: Group,
-  reports: ReportSample[],
-  user: User,
-): string {
-  const samples = sampleReports(reports);
-  const platform = [group.last_os, group.last_arch].filter(Boolean).join("/");
-  const status = statusPill(group.status) || `<span class="pill open">${i18n("open", "未处理")}</span>`;
-  const tags = [
-    [i18n("source", "来源"), group.source || "legacy"],
-    group.label && [i18n("label", "标签"), group.label],
-    group.error_type && [i18n("type", "类型"), group.error_type],
-    group.top_frame && [i18n("top frame", "顶层帧"), group.top_frame],
-    platform && [i18n("platform", "平台"), platform],
-    group.last_build_commit && [i18n("build", "构建"), group.last_build_commit],
-    group.last_channel && [i18n("channel", "渠道"), group.last_channel],
-  ]
-    .filter(Boolean)
-    .map(([label, value]) => `<span><b>${label}</b>${esc(value)}</span>`)
-    .join("");
-  const metrics = [
-    [i18n("Occurrences", "出现次数"), String(group.count)],
-    [i18n("First seen", "首次出现"), `${group.first_seen.slice(0, 10)} · ${group.first_version || "?"}`],
-    [i18n("Last seen", "最近出现"), `${group.last_seen.slice(0, 10)} · ${group.last_version || "?"}`],
-    [i18n("Version range", "版本范围"), `${group.first_version || "?"} → ${group.last_version || "?"}`],
-    group.resolved_in && [i18n("Resolved in", "解决版本"), group.resolved_in],
-    group.regressed_at && [i18n("Regressed", "回归时间"), group.regressed_at.slice(0, 10)],
-  ]
-    .filter(Boolean)
-    .map(([label, value]) => `<div><span>${label}</span><b>${esc(value)}</b></div>`)
-    .join("");
-
-  return page(
-    `Reasonix · ${group.fingerprint.slice(0, 8)}`,
-    `stats / ${group.fingerprint.slice(0, 8)}`,
-    `<section class="group-hero"><div class="group-nav"><a class="back" href="/stats">${i18n("Back to stats", "返回统计")}</a><button class="btn ghost sm copy-btn" type="button" data-copy="${esc(group.fingerprint)}"><span class="copy-label">${i18n("Copy fingerprint", "复制指纹")}</span></button></div>
-<div class="group-title"><span class="pill ${group.kind === "crash" ? "crash" : ""}">${esc(group.kind)}</span><h1>${esc(group.fingerprint.slice(0, 8))}</h1>${status}</div>
-${group.title ? `<p class="summary group-summary">${esc(group.title)}</p>` : ""}
-<div class="group-tags">${tags}</div>
-<div class="group-metrics">${metrics}</div>
-${group.note ? `<p class="group-note">${i18n("Note", "备注")}: ${esc(group.note)}</p>` : ""}</section>
-<div class="card full sample-card"><h2>${i18nHTML("Samples <b>— newest first, first sample plus latest 5 kept</b>", "样本 <b>— 最新优先，保留首个样本和最近 5 个</b>")}</h2>${samples}</div>
-${user.role === "admin" ? manageGroup(group) : ""}
-<a class="back" href="/stats">${i18n("Back to stats", "返回统计")}</a>`,
     userNav(user),
   );
 }

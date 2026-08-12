@@ -60,16 +60,14 @@ func (l *crashCaptureLogger) Error(message string) {
 }
 
 func (l *crashCaptureLogger) captureWebView2Failure(message string) {
-	if goruntime.GOOS != "windows" {
+	if goruntime.GOOS != "windows" || webView2NativeObserverInstalled() || l.app == nil || !l.app.diagnosticsTelemetry {
 		return
 	}
 	kind, ok := parseWebView2ProcessFailure(message)
 	if !ok {
 		return
 	}
-	if l.app != nil {
-		l.app.recordDiagnosticMetric("desktop_webview2_failure", webView2ProcessKindBucket(kind))
-	}
+	l.app.recordDiagnosticMetric("desktop_web_runtime_failure", "webview2."+webView2ProcessKindBucket(kind)+".unknown")
 	occurrence, shouldReport := l.webView2Failures.observe(kind, time.Now())
 	if !shouldReport {
 		return
@@ -110,18 +108,30 @@ func webView2ProcessKindBucket(kind int) string {
 
 func webView2ProcessFailureReportWithContext(kind, occurrence int, runtimeVersion string) crashReport {
 	bucket := webView2ProcessKindBucket(kind)
-	report := baseCrashReport("crash")
-	report.SchemaVersion = 2
-	report.Source = "webview2.process"
+	reportKind := "performance"
+	if kind == 0 {
+		reportKind = "crash"
+	}
+	report := baseCrashReport(reportKind)
+	report.SchemaVersion = 3
+	report.Source = "web.runtime.fallback"
 	report.Label = "windows.webview2.process_failed"
 	report.ErrorType = "WebView2ProcessFailed"
 	report.ErrorMessage = sanitizeCrashText(fmt.Sprintf("WebView2 process failed: %s.", bucket), maxCrashFieldBytes)
 	report.TopFrame = "webview2.process." + bucket
-	report.FingerprintHint = "windows.webview2." + bucket
+	report.FingerprintHint = "web.runtime.webview2." + bucket + ".unknown.unknown"
 	report.OccurredAt = time.Now().UTC().Format(time.RFC3339)
 	runtimeVersion = sanitizeCrashField(runtimeVersion, 128)
 	if runtimeVersion == "" {
-		runtimeVersion = "unavailable"
+		runtimeVersion = "unknown"
+	}
+	gpuMode := "enabled"
+	if windowsWebview2GPUDisabled() {
+		gpuMode = "disabled"
+	}
+	report.WebRuntime = &webRuntimeDiagnostic{
+		Engine: "webview2", Kind: bucket, Reason: "unknown",
+		RuntimeVersion: runtimeVersion, GPUMode: gpuMode, Recovery: webView2RecoveryNotApplicable,
 	}
 	report.Message = sanitizeCrashText(fmt.Sprintf(`[windows.webview2.process_failed]
 
@@ -132,6 +142,6 @@ kind code: %d
 runtime version: %s
 same-process occurrence: %d
 exit code: unavailable from the current Wails ProcessFailed callback
-GPU/driver: unavailable from the current Wails ProcessFailed callback`, bucket, kind, runtimeVersion, occurrence), maxCrashDetailBytes)
+GPU mode: %s`, bucket, kind, runtimeVersion, occurrence, gpuMode), maxCrashDetailBytes)
 	return report
 }

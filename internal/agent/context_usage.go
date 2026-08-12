@@ -1,14 +1,18 @@
 package agent
 
+import "reasonix/internal/tool"
+
 // contextUsage memoises the projected prompt size. The estimate walks every
 // visible message, and status gauges redraw far more often than the view moves,
-// so it is keyed on the three things that can change the answer: the
-// transcript, the projection, and the calibration.
+// so it is keyed on everything that can change the answer: the transcript,
+// projection, calibration, and provider-visible tool schemas.
 type contextUsage struct {
-	transcriptVersion uint64
-	projectionVersion uint64
-	calibration       *promptTokenCalibration
-	tokens            int
+	transcriptVersion  uint64
+	projectionVersion  uint64
+	calibration        *promptTokenCalibration
+	tools              *tool.Registry
+	toolSchemaRevision uint64
+	tokens             int
 }
 
 // ContextUsedTokens is the number ContextManager compares against its
@@ -27,18 +31,24 @@ func (a *Agent) ContextUsedTokens() int {
 	transcriptVersion := session.TranscriptVersion()
 	projectionVersion := a.currentProjectionVersion()
 	calibration := a.promptCalibration.Load()
+	tools := a.tools
+	toolSchemaRevision := tools.SchemaRevision()
 	if cached := a.contextUsage.Load(); cached != nil &&
 		cached.transcriptVersion == transcriptVersion &&
 		cached.projectionVersion == projectionVersion &&
-		cached.calibration == calibration {
+		cached.calibration == calibration &&
+		cached.tools == tools &&
+		cached.toolSchemaRevision == toolSchemaRevision {
 		return cached.tokens
 	}
-	tokens := a.estimatedPromptTokens(a.modelVisibleMessages())
+	tokens := a.estimatedVisibleRequestTokens(a.modelVisibleMessages())
 	a.contextUsage.Store(&contextUsage{
-		transcriptVersion: transcriptVersion,
-		projectionVersion: projectionVersion,
-		calibration:       calibration,
-		tokens:            tokens,
+		transcriptVersion:  transcriptVersion,
+		projectionVersion:  projectionVersion,
+		calibration:        calibration,
+		tools:              tools,
+		toolSchemaRevision: toolSchemaRevision,
+		tokens:             tokens,
 	})
 	return tokens
 }

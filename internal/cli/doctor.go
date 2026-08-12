@@ -1,17 +1,52 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
 
+	"reasonix/internal/config"
 	"reasonix/internal/doctor"
 	"reasonix/internal/repair"
+	"reasonix/internal/sessioncatalog"
 )
 
+func doctorBillingCommand(args []string) int {
+	fs := flag.NewFlagSet("doctor billing", flag.ContinueOnError)
+	jsonOut := fs.Bool("json", false, "print billing diagnostics as JSON")
+	root := fs.String("root", ".", "project root for config resolution")
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
+	}
+	cfg, err := config.LoadForRoot(*root)
+	if err != nil {
+		// Still report with defaults so doctor stays useful offline.
+		cfg = config.Default()
+	}
+	report := doctor.CollectBilling(cfg)
+	if *jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Print(doctor.RenderBillingText(report))
+	return 0
+}
+
 func doctorCommand(args []string, version string) int {
+	if len(args) > 0 && args[0] == "catalogs" {
+		return doctorCatalogsCommand(args[1:])
+	}
+	if len(args) > 0 && args[0] == "sessions" {
+		return doctorSessionsCommand(args[1:])
+	}
 	if len(args) > 0 && args[0] == "quality" {
 		return doctorQualityCommand(args[1:], version)
 	}
@@ -26,6 +61,9 @@ func doctorCommand(args []string, version string) int {
 	}
 	if len(args) > 0 && args[0] == "runtime" {
 		return doctorRuntimeCommand(args[1:])
+	}
+	if len(args) > 0 && args[0] == "billing" {
+		return doctorBillingCommand(args[1:])
 	}
 	if len(args) > 0 && args[0] == "repair" {
 		return doctorRepairCommand(args[1:])
@@ -47,6 +85,42 @@ func doctorCommand(args []string, version string) int {
 		return 0
 	}
 	fmt.Print(doctor.RenderText(report))
+	return 0
+}
+
+func doctorSessionsCommand(args []string) int {
+	fs := flag.NewFlagSet("doctor sessions", flag.ContinueOnError)
+	jsonOut := fs.Bool("json", false, "print session catalog diagnostics as JSON")
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "usage: reasonix doctor sessions [--json]")
+		return 2
+	}
+	status, err := sessioncatalog.Inspect(context.Background(), sessioncatalog.DefaultPath())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 1
+	}
+	if *jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(status); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Println("Reasonix session catalog")
+	fmt.Printf("  state: %s\n", status.State)
+	fmt.Printf("  mode: %s\n", status.Mode)
+	fmt.Printf("  revision: %d\n", status.Revision)
+	fmt.Printf("  indexed: %d\n", status.Indexed)
+	fmt.Printf("  repair pending: %d\n", status.RepairPending)
+	if status.LastError != "" {
+		fmt.Printf("  note: %s\n", status.LastError)
+	}
 	return 0
 }
 

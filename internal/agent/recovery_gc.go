@@ -207,14 +207,22 @@ func ReclaimableRecoveryBranches(dir string, now time.Time, grace time.Duration)
 	return out, nil
 }
 
-// TrashReclaimableRecoveryBranch moves one redundant recovery branch into the
-// same recoverable .trash layout used by Desktop. It rechecks parent coverage
-// while holding both the parent and branch removal guards, so a concurrent save
-// cannot turn a redundant copy into unique history between verification and
-// relocation. The operation is durable: an interrupted move stays in an
-// invisible staging directory and is completed by ReconcileCleanupPending on
-// startup.
+// TrashCoveredRecoveryBranch moves a redundant recovery branch into the same
+// recoverable .trash layout used by Desktop. This is the explicit/manual cleanup
+// path, so it does not require the background GC idle grace period. Parent
+// coverage is rechecked while both parent and branch removal guards are held.
+func TrashCoveredRecoveryBranch(path, parentDir string) error {
+	return trashCoveredRecoveryBranch(path, parentDir, false)
+}
+
+// TrashReclaimableRecoveryBranch is the background-GC variant. In addition to
+// the same atomic coverage proof, it requires the branch to remain idle for the
+// full grace period.
 func TrashReclaimableRecoveryBranch(path, parentDir string) error {
+	return trashCoveredRecoveryBranch(path, parentDir, true)
+}
+
+func trashCoveredRecoveryBranch(path, parentDir string, requireIdle bool) error {
 	path = filepath.Clean(strings.TrimSpace(path))
 	parentDir = filepath.Clean(strings.TrimSpace(parentDir))
 	if path == "." || parentDir == "." || filepath.Dir(path) != parentDir {
@@ -236,9 +244,11 @@ func TrashReclaimableRecoveryBranch(path, parentDir string) error {
 		return err
 	}
 	defer branchGuard.Release()
-	meta, ok, err := LoadBranchMeta(path)
-	if err != nil || !ok || !recoveryBranchIdle(path, meta, time.Now(), RecoveryGCGracePeriod) {
-		return ErrRecoveryBranchNotIdle
+	if requireIdle {
+		meta, ok, err := LoadBranchMeta(path)
+		if err != nil || !ok || !recoveryBranchIdle(path, meta, time.Now(), RecoveryGCGracePeriod) {
+			return ErrRecoveryBranchNotIdle
+		}
 	}
 	if !RecoveryBranchCoveredByParent(path, parentDir) {
 		return ErrRecoveryBranchNotCovered

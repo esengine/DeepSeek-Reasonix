@@ -2,8 +2,10 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
 
@@ -107,6 +109,48 @@ func (a *Agent) singleCallSummary(ctx context.Context, res foldSummary, fold []p
 	summary, mode, usage, reqID, err := a.runCompactionSummary(ctx, fold, instructions)
 	res.Text, res.Mode, res.Usage, res.RequestID = summary, mode, usage, reqID
 	return res, err
+}
+
+// foldOrDegrade summarizes a fold and, when that fold is the only way out,
+// converts a summarizer failure into a mechanical one. The telemetry it returns
+// always reports the original failure, even when the fold recovered from it.
+func (a *Agent) foldOrDegrade(ctx context.Context, trigger string, mustFree bool, fold []provider.Message, instructions string, sourceTokens int) (foldSummary, CompactionTelemetry, error) {
+	res, err := a.foldToSummary(ctx, fold, instructions)
+	tele := compactionTelemetryFromSummary(trigger, a.CacheState(), sourceTokens, res)
+	if err == nil {
+		return res, tele, nil
+	}
+	cause := err.Error()
+	if res, err = a.degradeFoldSummary(res, mustFree, fold, err); err != nil {
+		tele.Error = cause
+		return res, tele, err
+	}
+	tele = compactionTelemetryFromSummary(trigger, a.CacheState(), sourceTokens, res)
+	tele.Error = cause
+	return res, tele, nil
+}
+
+// mechanicalFoldDigest stands in for a digest the summarizer could not produce.
+// Saying the summary is missing is what stops the model reading the gap as
+// "nothing was there" and inventing what the folded turns contained.
+func mechanicalFoldDigest(n int) string {
+	return fmt.Sprintf("%d earlier message(s) were folded here to free context, but the automatic summary was unavailable. Ask the user if you need details from before this point.", n)
+}
+
+// degradeFoldSummary turns a summarizer failure into a mechanical fold only
+// where that fold is the only way out; below the ceiling the turn still goes
+// out, so the error is kept and a recoverable view is not folded blind.
+// Cancellation is the caller's decision, never a summarizer failure.
+func (a *Agent) degradeFoldSummary(res foldSummary, mustFree bool, fold []provider.Message, cause error) (foldSummary, error) {
+	if !mustFree || errors.Is(cause, context.Canceled) {
+		return res, cause
+	}
+	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
+		Text:   "Context was compacted without a generated summary.",
+		Detail: fmt.Sprintf("compaction summary unavailable (%v); folded mechanically", cause)})
+	res.Text = mechanicalFoldDigest(len(fold))
+	res.Mode = CompactionModeDegraded
+	return res, nil
 }
 
 // shortenFoldForSummary rewrites only summarizer input: long tool bodies become

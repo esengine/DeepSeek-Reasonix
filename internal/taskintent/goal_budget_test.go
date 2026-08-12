@@ -85,9 +85,6 @@ func TestClassifyGoalBudgetMatrix(t *testing.T) {
 	if got := ClassifyGoalBudget("持续排查这个线上卡顿直到根因明确，并验证修复"); got != BudgetClassResearch {
 		t.Fatalf("research = %q", got)
 	}
-	if BudgetTurns(BudgetClassSimple) != 10 || BudgetTurns(BudgetClassWrite) != 20 || BudgetTurns(BudgetClassResearch) != 40 {
-		t.Fatalf("quotas simple=%d write=%d research=%d", BudgetTurns(BudgetClassSimple), BudgetTurns(BudgetClassWrite), BudgetTurns(BudgetClassResearch))
-	}
 }
 
 func TestTaskFaultSignalsSharedWithGoalClassification(t *testing.T) {

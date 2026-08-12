@@ -4,6 +4,7 @@ package eventwire
 import (
 	"encoding/json"
 
+	"reasonix/internal/billing"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
@@ -41,6 +42,23 @@ type Event struct {
 	// session-inbox entry. Empty for legacy text-only guidance.
 	ItemID    string            `json:"itemId,omitempty"`
 	Workspace *WorkspaceChanged `json:"workspace,omitempty"`
+	// Phase is set on turn_phase events: working | checking | verifying | reviewing.
+	Phase string `json:"phase,omitempty"`
+	// Completion is set on completion_summary events (content-free quality summary).
+	Completion *CompletionSummary `json:"completion,omitempty"`
+}
+
+// CompletionSummary is the JSON form of event.CompletionSummaryInfo.
+type CompletionSummary struct {
+	Preset             string   `json:"preset"`
+	Verdict            string   `json:"verdict"`
+	Mutations          int      `json:"mutations"`
+	ChecksPassed       int      `json:"checks_passed"`
+	ChecksFailed       int      `json:"checks_failed"`
+	ChecksSuppressed   int      `json:"checks_suppressed"`
+	Review             string   `json:"review"`
+	GapKinds           []string `json:"gap_kinds,omitempty"`
+	ConstraintDegraded bool     `json:"constraint_degraded"`
 }
 
 type WorkspaceChanged struct {
@@ -124,30 +142,7 @@ func ToWire(e event.Event) Event {
 			Changes:   changes, AllPaths: ws.AllPaths, Source: ws.Source, WatchState: string(ws.WatchState),
 		}
 	case event.Usage:
-		if u := e.Usage; u != nil {
-			w.Usage = &Usage{
-				PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens,
-				TotalTokens: u.TotalTokens, CacheHitTokens: u.CacheHitTokens,
-				CacheMissTokens: u.CacheMissTokens, ReasoningTokens: u.ReasoningTokens,
-				Estimated:               u.Estimated,
-				Source:                  e.UsageSource,
-				ContextPromptTokens:     u.ContextPromptTokens,
-				ContextCompletionTokens: u.ContextCompletionTokens,
-				ContextReasoningTokens:  u.ContextReasoningTokens,
-				ContextCacheHitTokens:   u.ContextCacheHitTokens,
-				ContextCacheMissTokens:  u.ContextCacheMissTokens,
-				SessionCacheHitTokens:   e.SessionHit, SessionCacheMissTokens: e.SessionMiss,
-			}
-			if e.CacheDiagnostics != nil {
-				w.Usage.CacheDiagnostics = ToWireCacheDiagnostics(e.CacheDiagnostics)
-			}
-			if e.Pricing != nil {
-				cost := e.Pricing.Cost(u)
-				w.Usage.Cost = cost
-				w.Usage.Currency = e.Pricing.Symbol()
-				w.Usage.CostUSD = cost
-			}
-		}
+		w.Usage = toWireUsage(e)
 	case event.ApprovalRequest:
 		w.Approval = &Approval{
 			ID: e.Approval.ID, Tool: e.Approval.Tool, Subject: e.Approval.Subject,
@@ -217,8 +212,69 @@ func ToWire(e event.Event) Event {
 			Max:     e.StreamAttempt.Max,
 			Reason:  e.StreamAttempt.Reason,
 		}
+	case event.TurnPhase:
+		w.Phase = string(e.PhaseName)
+		if w.Phase == "" {
+			w.Phase = e.Text
+		}
+	case event.CompletionSummary:
+		if c := e.Completion; c != nil {
+			w.Completion = &CompletionSummary{
+				Preset:             c.Preset,
+				Verdict:            c.Verdict,
+				Mutations:          c.Mutations,
+				ChecksPassed:       c.ChecksPassed,
+				ChecksFailed:       c.ChecksFailed,
+				ChecksSuppressed:   c.ChecksSuppressed,
+				Review:             c.Review,
+				GapKinds:           append([]string(nil), c.GapKinds...),
+				ConstraintDegraded: c.ConstraintDegraded,
+			}
+		}
 	}
 	return w
+}
+
+func toWireUsage(e event.Event) *Usage {
+	u := e.Usage
+	if u == nil {
+		return nil
+	}
+	wire := &Usage{
+		PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens,
+		TotalTokens: u.TotalTokens, CacheHitTokens: u.CacheHitTokens,
+		CacheMissTokens: u.CacheMissTokens, ReasoningTokens: u.ReasoningTokens,
+		Estimated:               u.Estimated,
+		Source:                  e.UsageSource,
+		ContextPromptTokens:     u.ContextPromptTokens,
+		ContextCompletionTokens: u.ContextCompletionTokens,
+		ContextReasoningTokens:  u.ContextReasoningTokens,
+		ContextCacheHitTokens:   u.ContextCacheHitTokens,
+		ContextCacheMissTokens:  u.ContextCacheMissTokens,
+		SessionCacheHitTokens:   e.SessionHit, SessionCacheMissTokens: e.SessionMiss,
+	}
+	if e.CacheDiagnostics != nil {
+		wire.CacheDiagnostics = ToWireCacheDiagnostics(e.CacheDiagnostics)
+	}
+	quote := e.CostQuote
+	if quote == nil && e.Pricing != nil {
+		quote = event.EnsureCostQuote(e, nil)
+	}
+	if quote != nil {
+		wire.CostQuote = quote
+		wire.CostComplete = quote.CostComplete
+		wire.DisplayComplete = quote.DisplayComplete
+		wire.DisplayStatus = quote.DisplayStatus
+		wire.AggregateMode = quote.AggregateMode
+		wire.OriginalTotals = append([]billing.Money(nil), quote.OriginalTotals...)
+		if quote.Selected != nil {
+			wire.Cost = quote.Selected.Float64()
+			wire.Currency = quote.LegacyCurrencySymbol()
+			wire.CostUSD = wire.Cost
+			wire.CurrencyCode = quote.LegacyCurrencyCode()
+		}
+	}
+	return wire
 }
 
 // DecisionReceipt is the JSON form of a provider-excluded user decision.
@@ -389,8 +445,19 @@ type Usage struct {
 	ContextCacheMissTokens  int     `json:"contextCacheMissTokens,omitempty"`
 	Cost                    float64 `json:"cost,omitempty"`
 	Currency                string  `json:"currency,omitempty"`
-	// CostUSD is a compatibility alias for older consumers; it mirrors Cost.
+	// CurrencyCode is the ISO code for Cost (preferred over symbol Currency).
+	CurrencyCode string `json:"currencyCode,omitempty"`
+	// CostUSD is a compatibility alias for older consumers; it mirrors Cost
+	// (selected display valuation) and does not imply USD.
 	CostUSD float64 `json:"costUsd,omitempty"`
+	// CostQuote is the structured host-side quote. New consumers must prefer it
+	// over cost/currency aliases. Never sent to model providers.
+	CostQuote       *billing.CostQuote `json:"costQuote,omitempty"`
+	CostComplete    bool               `json:"costComplete,omitempty"`
+	DisplayComplete bool               `json:"displayComplete,omitempty"`
+	DisplayStatus   string             `json:"displayStatus,omitempty"`
+	AggregateMode   string             `json:"aggregateMode,omitempty"`
+	OriginalTotals  []billing.Money    `json:"originalTotals,omitempty"`
 }
 
 // CacheDiagnostics is the JSON form of cache prefix diagnostics.
@@ -467,10 +534,14 @@ func ToWireGuardian(g event.GuardianResult) *Guardian {
 			Estimated: u.Estimated,
 		}
 		if g.Pricing != nil {
-			cost := g.Pricing.Cost(u)
-			out.Usage.Cost = cost
-			out.Usage.Currency = g.Pricing.Symbol()
-			out.Usage.CostUSD = cost
+			q := event.EnsureCostQuote(event.Event{Kind: event.Usage, Usage: u, Pricing: g.Pricing}, nil)
+			if q != nil {
+				out.Usage.CostQuote = q
+				out.Usage.Cost = q.LegacyCostFloat()
+				out.Usage.Currency = q.LegacyCurrencySymbol()
+				out.Usage.CostUSD = out.Usage.Cost
+				out.Usage.CurrencyCode = q.LegacyCurrencyCode()
+			}
 		}
 	}
 	return out
@@ -549,6 +620,8 @@ var kindNames = map[event.Kind]string{
 	event.StreamAttempt:           "stream_attempt",
 	event.ContextMaintenanceEvent: "context_maintenance",
 	event.WorkspaceChanged:        "workspace_changed",
+	event.TurnPhase:               "turn_phase",
+	event.CompletionSummary:       "completion_summary",
 }
 
 // ContextMaintenance is the JSON form of event.ContextMaintenance.

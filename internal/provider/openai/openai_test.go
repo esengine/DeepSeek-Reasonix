@@ -532,8 +532,8 @@ func TestStreamUsesConfiguredChatURL(t *testing.T) {
 	var sawRequest bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sawRequest = true
-		if r.URL.Path != "/proxy/v1/chat/completions" {
-			t.Errorf("path = %s, want /proxy/v1/chat/completions", r.URL.Path)
+		if r.URL.RequestURI() != "/proxy/v1/chat/completions" {
+			t.Errorf("request URI = %s, want /proxy/v1/chat/completions", r.URL.RequestURI())
 			http.NotFound(w, r)
 			return
 		}
@@ -551,7 +551,7 @@ func TestStreamUsesConfiguredChatURL(t *testing.T) {
 		BaseURL: srv.URL + "/base",
 		Model:   "model-a",
 		APIKey:  "k",
-		Extra:   map[string]any{"chat_url": srv.URL + "/proxy/v1/chat/completions"},
+		Extra:   map[string]any{"chat_url": srv.URL + "/proxy/v1/chat/completions/"},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

@@ -84,7 +84,15 @@ func toolResults(s *Session, name string) []string {
 
 func sessionHasUserMessageContaining(s *Session, needle string) bool {
 	for _, m := range s.Messages {
-		if m.Role == provider.RoleUser && strings.Contains(provider.ModelMessages([]provider.Message{m})[0].Content, needle) {
+		if m.Role != provider.RoleUser {
+			continue
+		}
+		if strings.Contains(m.Content, needle) {
+			return true
+		}
+		// Fallback: provider projection (RawContent stripped, Content kept).
+		projected := provider.ModelMessages([]provider.Message{m})
+		if len(projected) > 0 && strings.Contains(projected[0].Content, needle) {
 			return true
 		}
 	}
@@ -167,8 +175,8 @@ func TestDeliveryProfileEnforcesAcceptanceReviewVerificationAndSignoff(t *testin
 	if got := toolResult(a.session, "write_file"); !strings.Contains(got, "delivery-first mode requires acceptance criteria") {
 		t.Fatalf("first write result = %q, want delivery acceptance gate", got)
 	}
-	if !sessionHasUserMessageContaining(a.session, "<delivery-runtime>") {
-		t.Fatal("delivery runtime marker was not injected into the turn tail")
+	if !sessionHasUserMessageContaining(a.session, "<execution-policy") {
+		t.Fatal("execution-policy marker was not injected into the turn tail")
 	}
 	if got := lastToolResult(a.session, "complete_step"); !strings.Contains(got, "signed off") {
 		t.Fatalf("complete_step result = %q, want successful sign-off", got)

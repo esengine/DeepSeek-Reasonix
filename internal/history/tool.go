@@ -6,16 +6,29 @@ import (
 	"fmt"
 	"strings"
 
+	"reasonix/internal/historycatalog"
 	"reasonix/internal/tool"
 )
 
 type historyTool struct {
-	searcher *Searcher
+	searcher historySearcher
+}
+
+type historySearcher interface {
+	Search(context.Context, SearchRequest) ([]Hit, error)
+	Around(context.Context, AroundRequest) ([]MessageContext, error)
 }
 
 // NewTool returns a read-only history retrieval tool bound to local sessions.
 func NewTool(opts Options) tool.Tool {
 	return historyTool{searcher: NewSearcher(opts)}
+}
+
+// NewIndexedTool is the production history tool. It never performs a
+// synchronous directory scan; while the shared projection is building it
+// returns the already indexed subset and an explicit progress notice.
+func NewIndexedTool(opts Options) tool.Tool {
+	return historyTool{searcher: NewIndexedSearcher(opts)}
 }
 
 func (historyTool) Name() string { return "history" }
@@ -73,7 +86,14 @@ func (t historyTool) Execute(ctx context.Context, args json.RawMessage) (string,
 		if err != nil {
 			return "", err
 		}
-		return formatHits(in.Query, hits), nil
+		formatted := formatHits(in.Query, hits)
+		if statusProvider, ok := t.searcher.(interface{ IndexStatus() historycatalog.Status }); ok {
+			status := statusProvider.IndexStatus()
+			if status.State != "ready" || status.Pending > 0 || (status.Total > 0 && status.Indexed < status.Total) {
+				formatted = fmt.Sprintf("History index is still building (%d/%d); results may be incomplete.\n\n%s", status.Indexed, status.Total, formatted)
+			}
+		}
+		return formatted, nil
 	case "around":
 		if in.MessageIndex == nil {
 			return "", fmt.Errorf("message_index is required for operation=around")

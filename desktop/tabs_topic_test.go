@@ -55,6 +55,63 @@ func waitForTabReady(t *testing.T, app *App, tabID string) *WorkspaceTab {
 	return nil
 }
 
+func waitForTopicDirMarker(t *testing.T, dir, marker string) {
+	t.Helper()
+	markerPath := filepath.Join(dir, marker)
+	deadline := time.Now().Add(5 * time.Second)
+	var last error
+	for {
+		if _, last = os.Stat(markerPath); last == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected %s after migration: %v", marker, last)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func waitForCatalogTopic(t *testing.T, app *App, scope, workspaceRoot, topicID string) []ProjectNode {
+	t.Helper()
+	app.startSessionCatalog(false)
+	t.Cleanup(func() { app.stopSessionCatalog(time.Second) })
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		nodes := app.ListProjectTree()
+		for _, folder := range nodes {
+			if scope == "project" && (!sameProjectRoot(folder.Root, workspaceRoot) || folder.Kind != "project") {
+				continue
+			}
+			if scope != "project" && folder.Kind != "global_folder" {
+				continue
+			}
+			for _, topic := range folder.Children {
+				if topic.TopicID == topicID {
+					return nodes
+				}
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("catalog topic %q did not become visible", topicID)
+	return nil
+}
+
+func waitForCatalogTreeCondition(t *testing.T, app *App, description string, matches func([]ProjectNode) bool) []ProjectNode {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var nodes []ProjectNode
+	for time.Now().Before(deadline) {
+		nodes = app.ListProjectTree()
+		if matches(nodes) {
+			return nodes
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("catalog did not reach %s: %#v", description, nodes)
+	return nil
+}
+
 func writeTopicSession(t *testing.T, dir, name, topicID, topicTitle, workspaceRoot string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
@@ -124,256 +181,6 @@ func writeLegacyEventSession(t *testing.T, dir, name, prompt, reply string, modT
 		t.Fatalf("chtimes legacy event session: %v", err)
 	}
 	return path
-}
-
-func TestSessionListCacheRefillsAfterInvalidate(t *testing.T) {
-	cache := &sessionListCache{byDir: map[string]sessionListCacheEntry{}}
-	dir := t.TempDir()
-	first := []agent.SessionInfo{{Path: filepath.Join(dir, "first.jsonl")}}
-	second := []agent.SessionInfo{{Path: filepath.Join(dir, "second.jsonl")}}
-
-	token := cache.versionToken(dir)
-	cache.put(dir, first, map[string]string{"first.jsonl": "First"}, token)
-	if infos, titles, ok := cache.get(dir); !ok || len(infos) != 1 || filepath.Base(infos[0].Path) != "first.jsonl" || titles["first.jsonl"] != "First" {
-		t.Fatalf("initial cache entry = %+v, %+v, %v", infos, titles, ok)
-	}
-
-	cache.invalidate()
-	if _, _, ok := cache.get(dir); ok {
-		t.Fatalf("cache entry survived invalidate")
-	}
-	cache.put(dir, first, map[string]string{"first.jsonl": "stale"}, token)
-	if _, _, ok := cache.get(dir); ok {
-		t.Fatalf("stale token repopulated cache after invalidate")
-	}
-
-	token = cache.versionToken(dir)
-	cache.put(dir, second, map[string]string{"second.jsonl": "Second"}, token)
-	if infos, titles, ok := cache.get(dir); !ok || len(infos) != 1 || filepath.Base(infos[0].Path) != "second.jsonl" || titles["second.jsonl"] != "Second" {
-		t.Fatalf("refilled cache entry = %+v, %+v, %v", infos, titles, ok)
-	}
-}
-
-func TestSessionListCacheInvalidatesOnlyChangedDirectory(t *testing.T) {
-	cache := &sessionListCache{byDir: map[string]sessionListCacheEntry{}}
-	changedDir := filepath.Join(t.TempDir(), "changed")
-	untouchedDir := filepath.Join(t.TempDir(), "untouched")
-	changedToken := cache.versionToken(changedDir)
-	untouchedToken := cache.versionToken(untouchedDir)
-	cache.put(changedDir, []agent.SessionInfo{{Path: filepath.Join(changedDir, "old.jsonl")}}, nil, changedToken)
-	cache.put(untouchedDir, []agent.SessionInfo{{Path: filepath.Join(untouchedDir, "keep.jsonl")}}, nil, untouchedToken)
-
-	if !cache.invalidateDirs(changedDir) {
-		t.Fatal("invalidateDirs reported no changed directory")
-	}
-	if _, _, ok := cache.get(changedDir); ok {
-		t.Fatal("changed directory survived scoped invalidation")
-	}
-	if infos, _, ok := cache.get(untouchedDir); !ok || len(infos) != 1 || filepath.Base(infos[0].Path) != "keep.jsonl" {
-		t.Fatalf("unrelated directory was invalidated: %+v, %v", infos, ok)
-	}
-
-	cache.put(changedDir, []agent.SessionInfo{{Path: filepath.Join(changedDir, "stale.jsonl")}}, nil, changedToken)
-	if _, _, ok := cache.get(changedDir); ok {
-		t.Fatal("stale directory token repopulated cache after scoped invalidation")
-	}
-
-	equivalentDir := filepath.Join(untouchedDir, ".")
-	if !cache.invalidateDirs(equivalentDir) {
-		t.Fatal("invalidateDirs rejected an equivalent cleaned directory")
-	}
-	if _, _, ok := cache.get(untouchedDir); ok {
-		t.Fatal("equivalent directory spelling did not invalidate the absolute cache key")
-	}
-	if got := sessionListCacheDirForPath(""); got != "" {
-		t.Fatalf("empty session path resolved to cache directory %q", got)
-	}
-}
-
-func TestSessionListCacheExpiresForExternalProcessReconciliation(t *testing.T) {
-	cache := &sessionListCache{byDir: map[string]sessionListCacheEntry{}}
-	dir := t.TempDir()
-	token := cache.versionToken(dir)
-	cache.put(dir, []agent.SessionInfo{{Path: filepath.Join(dir, "old.jsonl")}}, nil, token)
-
-	key := sessionListCacheDirKey(dir)
-	cache.mu.Lock()
-	entry := cache.byDir[key]
-	entry.cachedAt = time.Now().Add(-sessionListCacheTTL)
-	cache.byDir[key] = entry
-	cache.mu.Unlock()
-
-	if _, _, ok := cache.get(dir); ok {
-		t.Fatal("expired directory listing remained cached")
-	}
-	if _, exists := cache.byDir[key]; exists {
-		t.Fatal("expired directory listing was not removed")
-	}
-}
-
-func TestProjectTreeMetadataChangePreservesSessionListings(t *testing.T) {
-	oldProjectCache := projectSessionCache
-	projectSessionCache = &sessionListCache{byDir: map[string]sessionListCacheEntry{}}
-	t.Cleanup(func() {
-		projectSessionCache = oldProjectCache
-	})
-
-	dir := t.TempDir()
-	projectSessionCache.put(dir, []agent.SessionInfo{{Path: filepath.Join(dir, "keep.jsonl")}}, nil, projectSessionCache.versionToken(dir))
-	emitted := 0
-	app := NewApp()
-	app.projectTreeChangedHook = func() { emitted++ }
-	app.emitProjectTreeMetadataChanged()
-
-	if _, _, ok := projectSessionCache.get(dir); !ok {
-		t.Fatal("metadata-only project tree change invalidated session listing")
-	}
-	if emitted != 1 {
-		t.Fatalf("project tree hook calls = %d, want 1", emitted)
-	}
-}
-
-func TestSessionListCacheForgetRejectsInFlightFillAndReadd(t *testing.T) {
-	cache := &sessionListCache{byDir: map[string]sessionListCacheEntry{}}
-	dir := t.TempDir()
-	staleToken := cache.versionToken(dir)
-	cache.put(dir, []agent.SessionInfo{{Path: filepath.Join(dir, "old.jsonl")}}, nil, staleToken)
-
-	if !cache.forgetDirs(dir) {
-		t.Fatal("forgetDirs reported no removed directory")
-	}
-	if _, _, ok := cache.get(dir); ok {
-		t.Fatal("forgotten directory remained cached")
-	}
-	cache.mu.Lock()
-	_, versionRetained := cache.dirVersions[sessionListCacheDirKey(dir)]
-	cache.mu.Unlock()
-	if versionRetained {
-		t.Fatal("forgotten directory retained lifecycle metadata")
-	}
-
-	cache.put(dir, []agent.SessionInfo{{Path: filepath.Join(dir, "stale.jsonl")}}, nil, staleToken)
-	if _, _, ok := cache.get(dir); ok {
-		t.Fatal("in-flight pre-removal fill repopulated forgotten directory")
-	}
-
-	readdToken := cache.versionToken(dir)
-	if readdToken.dirVersion == staleToken.dirVersion {
-		t.Fatal("re-added directory reused its pre-removal token")
-	}
-	cache.put(dir, []agent.SessionInfo{{Path: filepath.Join(dir, "fresh.jsonl")}}, nil, readdToken)
-	infos, _, ok := cache.get(dir)
-	if !ok || len(infos) != 1 || filepath.Base(infos[0].Path) != "fresh.jsonl" {
-		t.Fatalf("re-added directory did not accept fresh listing: %+v, %v", infos, ok)
-	}
-}
-
-func TestRemoveWorkspaceForgetsProjectSessionCache(t *testing.T) {
-	isolateDesktopUserDirs(t)
-	oldProjectCache := projectSessionCache
-	projectSessionCache = &sessionListCache{byDir: map[string]sessionListCacheEntry{}}
-	t.Cleanup(func() { projectSessionCache = oldProjectCache })
-
-	projectRoot := t.TempDir()
-	if err := addProject(projectRoot, "Cached Project"); err != nil {
-		t.Fatalf("add project: %v", err)
-	}
-	dir := desktopSessionDir(projectRoot)
-	staleToken := projectSessionCache.versionToken(dir)
-	projectSessionCache.put(dir, []agent.SessionInfo{{Path: filepath.Join(dir, "old.jsonl")}}, nil, staleToken)
-
-	app := NewApp()
-	if err := app.RemoveWorkspace(projectRoot); err != nil {
-		t.Fatalf("RemoveWorkspace: %v", err)
-	}
-	if _, _, ok := projectSessionCache.get(dir); ok {
-		t.Fatal("removed workspace session listing remained cached")
-	}
-
-	projectSessionCache.put(dir, []agent.SessionInfo{{Path: filepath.Join(dir, "stale.jsonl")}}, nil, staleToken)
-	if _, _, ok := projectSessionCache.get(dir); ok {
-		t.Fatal("removed workspace accepted an in-flight stale cache fill")
-	}
-}
-
-func TestRenameSessionInvalidatesProjectTreeCache(t *testing.T) {
-	isolateDesktopUserDirs(t)
-	oldProjectCache := projectSessionCache
-	projectSessionCache = &sessionListCache{byDir: map[string]sessionListCacheEntry{}}
-	t.Cleanup(func() {
-		projectSessionCache = oldProjectCache
-	})
-
-	dir := t.TempDir()
-	otherDir := t.TempDir()
-	sessionPath := filepath.Join(dir, "rename-me.jsonl")
-	if err := os.WriteFile(sessionPath, []byte(`{"role":"user","content":"hello"}`+"\n"), 0o644); err != nil {
-		t.Fatalf("write session: %v", err)
-	}
-	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: sessionPath, Label: "test"})
-	defer ctrl.Close()
-	app := NewApp()
-	app.setTestCtrl(ctrl, "")
-
-	token := projectSessionCache.versionToken(dir)
-	projectSessionCache.put(dir, []agent.SessionInfo{{Path: sessionPath}}, map[string]string{"rename-me.jsonl": "old"}, token)
-	projectSessionCache.put(otherDir, []agent.SessionInfo{{Path: filepath.Join(otherDir, "keep.jsonl")}}, nil, projectSessionCache.versionToken(otherDir))
-	if _, _, ok := projectSessionCache.get(dir); !ok {
-		t.Fatalf("expected primed project tree cache")
-	}
-	if err := app.RenameSession(sessionPath, "new title"); err != nil {
-		t.Fatalf("RenameSession: %v", err)
-	}
-	if _, _, ok := projectSessionCache.get(dir); ok {
-		t.Fatalf("RenameSession should invalidate project tree cache")
-	}
-	if _, _, ok := projectSessionCache.get(otherDir); !ok {
-		t.Fatalf("RenameSession invalidated an unrelated session directory")
-	}
-}
-
-func TestArchiveAndRestoreSessionInvalidateOnlyOwningDirectory(t *testing.T) {
-	isolateDesktopUserDirs(t)
-	oldProjectCache := projectSessionCache
-	projectSessionCache = &sessionListCache{byDir: map[string]sessionListCacheEntry{}}
-	t.Cleanup(func() {
-		projectSessionCache = oldProjectCache
-	})
-
-	dir := config.SessionDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("mkdir sessions: %v", err)
-	}
-	path := writeLegacySession(t, dir, "scoped-cache.jsonl", "cache scope", time.Now())
-	otherDir := t.TempDir()
-	prime := func(cacheDir, sessionPath string) {
-		projectSessionCache.put(cacheDir, []agent.SessionInfo{{Path: sessionPath}}, nil, projectSessionCache.versionToken(cacheDir))
-	}
-	prime(dir, path)
-	prime(otherDir, filepath.Join(otherDir, "keep.jsonl"))
-
-	app := NewApp()
-	if err := app.DeleteSession(path); err != nil {
-		t.Fatalf("DeleteSession: %v", err)
-	}
-	if _, _, ok := projectSessionCache.get(dir); ok {
-		t.Fatal("DeleteSession kept the owning directory cached")
-	}
-	if _, _, ok := projectSessionCache.get(otherDir); !ok {
-		t.Fatal("DeleteSession invalidated an unrelated directory")
-	}
-
-	trashPath := filepath.Join(dir, sessionTrashDir, "scoped-cache.jsonl", "scoped-cache.jsonl")
-	prime(dir, path)
-	if err := app.RestoreSession(trashPath); err != nil {
-		t.Fatalf("RestoreSession: %v", err)
-	}
-	if _, _, ok := projectSessionCache.get(dir); ok {
-		t.Fatal("RestoreSession kept the owning directory cached")
-	}
-	if _, _, ok := projectSessionCache.get(otherDir); !ok {
-		t.Fatal("RestoreSession invalidated an unrelated directory")
-	}
 }
 
 func TestTopicMetadataUpdatesPreserveExistingEntriesWhenTimedReadSlotsFull(t *testing.T) {
@@ -911,7 +718,8 @@ func TestLegacySessionsMigrateIntoGlobalTopics(t *testing.T) {
 	older := writeLegacySession(t, dir, "older.jsonl", "older imported prompt", time.Now().Add(-2*time.Hour))
 	newer := writeLegacySession(t, dir, "newer.jsonl", "newer imported prompt", time.Now().Add(-time.Hour))
 
-	nodes := NewApp().ListProjectTree()
+	app := NewApp()
+	nodes := waitForCatalogTopic(t, app, "global", "", legacySessionTopicID(newer))
 	if len(nodes) != 1 || nodes[0].Kind != "global_folder" {
 		t.Fatalf("project tree = %#v, want global folder", nodes)
 	}
@@ -933,7 +741,7 @@ func TestLegacySessionsMigrateIntoGlobalTopics(t *testing.T) {
 		t.Fatalf("migrated meta = %+v", meta)
 	}
 
-	nodes = NewApp().ListProjectTree()
+	nodes = app.ListProjectTree()
 	if got := len(nodes[0].Children); got != 2 {
 		t.Fatalf("migration should be idempotent, global topics = %d", got)
 	}
@@ -954,7 +762,8 @@ func TestAmbiguousLegacyRecoverySessionsMigrateIntoTopics(t *testing.T) {
 		t.Fatalf("write v1 migration marker: %v", err)
 	}
 
-	nodes := NewApp().ListProjectTree()
+	app := NewApp()
+	nodes := waitForCatalogTopic(t, app, "global", "", legacySessionTopicID(recovery))
 	if len(nodes) != 1 || nodes[0].Kind != "global_folder" {
 		t.Fatalf("project tree = %#v, want global folder", nodes)
 	}
@@ -985,7 +794,8 @@ func TestUnmodifiedRecoveryCopyDoesNotMigrateIntoTopics(t *testing.T) {
 	parent, recovery, branchMsgs := forkDesktopRecoveryBranch(t, dir, "normal")
 	coverDesktopRecoveryParent(t, parent, branchMsgs)
 
-	nodes := NewApp().ListProjectTree()
+	app := NewApp()
+	nodes := waitForCatalogTopic(t, app, "global", "", legacySessionTopicID(parent))
 	if len(nodes) != 1 || len(nodes[0].Children) != 1 {
 		t.Fatalf("project tree = %#v, want only the covering parent topic", nodes)
 	}
@@ -1007,12 +817,9 @@ func TestCoveredRecoveryCopyBecomesVisibleAfterMigratedParentDeletion(t *testing
 	coverDesktopRecoveryParent(t, parent, branchMsgs)
 	app := NewApp()
 
-	app.ListProjectTree()
-	for _, marker := range []string{topicMigrationMarker, topicIndexRepairMarker} {
-		if _, err := os.Stat(filepath.Join(dir, marker)); err != nil {
-			t.Fatalf("expected %s after migration: %v", marker, err)
-		}
-	}
+	waitForCatalogTopic(t, app, "global", "", legacySessionTopicID(parent))
+	waitForTopicDirMarker(t, dir, topicMigrationMarker)
+	waitForTopicDirMarker(t, dir, topicIndexRepairMarker)
 	if meta, ok, err := agent.LoadBranchMeta(recovery); err != nil || !ok {
 		t.Fatalf("load skipped recovery meta: ok=%v err=%v", ok, err)
 	} else if strings.TrimSpace(meta.TopicID) != "" {
@@ -1028,7 +835,7 @@ func TestCoveredRecoveryCopyBecomesVisibleAfterMigratedParentDeletion(t *testing
 		}
 	}
 
-	nodes := app.ListProjectTree()
+	nodes := waitForCatalogTopic(t, app, "global", "", legacySessionTopicID(recovery))
 	meta, ok, err := agent.LoadBranchMeta(recovery)
 	if err != nil || !ok {
 		t.Fatalf("load recovery meta after parent deletion: ok=%v err=%v", ok, err)
@@ -1058,7 +865,7 @@ func TestHistoryMarksLegacyRecoverySessionsAsRecovered(t *testing.T) {
 	defer ctrl.Close()
 	app := NewApp()
 	app.setTestCtrl(ctrl, "")
-
+	installSessionCatalogForTest(t, app, dir, "global", "")
 	sessions := app.ListSessions()
 	for _, session := range sessions {
 		if filepath.Clean(session.Path) != filepath.Clean(recovery) {
@@ -1127,7 +934,19 @@ func TestProjectTreeKeepsAmbiguousMigratedRecoveryTopicVisible(t *testing.T) {
 		t.Fatalf("write v1 repair marker: %v", err)
 	}
 
-	nodes := NewApp().ListProjectTree()
+	app := NewApp()
+	_ = waitForCatalogTopic(t, app, "global", "", topicID)
+	nodes := waitForCatalogTreeCondition(t, app, "a repaired ambiguous recovery topic", func(nodes []ProjectNode) bool {
+		if len(nodes) == 0 {
+			return false
+		}
+		for _, node := range nodes[0].Children {
+			if node.TopicID == topicID {
+				return node.TurnsState == "valid" && node.Turns == 1
+			}
+		}
+		return false
+	})
 	if len(nodes) == 0 {
 		t.Fatal("project tree is empty")
 	}
@@ -1150,18 +969,33 @@ func TestTopicMigrationMarkerRescansWhenSessionFileChanges(t *testing.T) {
 	}
 	writeLegacySession(t, dir, "first.jsonl", "first legacy prompt", time.Now().Add(-time.Hour))
 
-	// First render migrates the legacy session and, with nothing deferred, stamps
-	// the one-shot marker so later renders can skip the scan.
-	NewApp().ListProjectTree()
-	if _, err := os.Stat(filepath.Join(dir, topicMigrationMarker)); err != nil {
-		t.Fatalf("expected migration marker after a complete pass: %v", err)
+	// Background catalog reconciliation migrates the legacy session and, with
+	// nothing deferred, stamps the one-shot marker. Tree reads never do this I/O.
+	app := NewApp()
+	firstTopicID := legacySessionTopicID(filepath.Join(dir, "first.jsonl"))
+	waitForCatalogTopic(t, app, "global", "", firstTopicID)
+	// Catalog publication and the migration marker are written on the same
+	// background path but not under one fsync barrier. Wait for the marker
+	// explicitly so Windows CI does not observe the topic before the stamp.
+	markerPath := filepath.Join(dir, topicMigrationMarker)
+	deadline := time.Now().Add(5 * time.Second)
+	var lastMarkerErr error
+	for {
+		if _, lastMarkerErr = os.Stat(markerPath); lastMarkerErr == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected migration marker after a complete pass: %v", lastMarkerErr)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	// A CLI-created session added after the marker invalidates the lightweight
 	// gate and gets a fresh migration pass.
 	time.Sleep(10 * time.Millisecond)
 	second := writeLegacySession(t, dir, "second.jsonl", "second legacy prompt", time.Now())
-	NewApp().ListProjectTree()
+	app.requestSessionCatalogReconcile(dir)
+	waitForCatalogTopic(t, app, "global", "", legacySessionTopicID(second))
 	meta, ok, err := agent.LoadBranchMeta(second)
 	if err != nil {
 		t.Fatalf("load second meta: %v", err)
@@ -1574,7 +1408,8 @@ func TestLegacySessionTopicIDsKeepNormalizedNameCollisionsDistinct(t *testing.T)
 		t.Fatalf("normalized legacy topic IDs collided: %q", dottedTopic)
 	}
 
-	nodes := NewApp().ListProjectTree()
+	app := NewApp()
+	nodes := waitForCatalogTopic(t, app, "global", "", dottedTopic)
 	if len(nodes) != 1 || nodes[0].Kind != "global_folder" {
 		t.Fatalf("project tree = %#v, want global folder", nodes)
 	}
@@ -1590,7 +1425,7 @@ func TestLegacySessionTopicIDsKeepNormalizedNameCollisionsDistinct(t *testing.T)
 	}
 }
 
-func TestDefaultGlobalTabGetsMigratedTopicID(t *testing.T) {
+func TestDefaultGlobalTabDoesNotWaitForLegacyMigration(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	dir := config.SessionDir()
@@ -1616,19 +1451,19 @@ func TestDefaultGlobalTabGetsMigratedTopicID(t *testing.T) {
 		defer tab.Ctrl.Close()
 	}
 
-	wantTopicID := legacySessionTopicID(sessionPath)
-	if tab.TopicID != wantTopicID {
-		t.Fatalf("tab topicID = %q, want %q", tab.TopicID, wantTopicID)
+	if tab.TopicID != "" {
+		t.Fatalf("blank tab synchronously adopted legacy topic %q", tab.TopicID)
 	}
 	if tab.Ctrl == nil {
 		t.Fatalf("tab controller was not built")
 	}
-	if tab.Ctrl.SessionPath() != sessionPath {
-		t.Fatalf("tab session path = %q, want %q", tab.Ctrl.SessionPath(), sessionPath)
+	if tab.Ctrl.SessionPath() == sessionPath {
+		t.Fatalf("blank tab synchronously adopted legacy session %q", sessionPath)
 	}
-	f := loadTabsFile()
-	if len(f.Tabs) != 1 || f.Tabs[0].ID != "tab_legacy" || f.Tabs[0].TopicID != wantTopicID {
-		t.Fatalf("desktop tabs file = %+v, want tab id and migrated topic", f)
+	wantTopicID := legacySessionTopicID(sessionPath)
+	nodes := waitForCatalogTopic(t, app, "global", "", wantTopicID)
+	if len(nodes) != 1 || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != wantTopicID {
+		t.Fatalf("legacy history was not eventually indexed: %+v", nodes)
 	}
 }
 
@@ -2937,7 +2772,7 @@ func TestRestoreGlobalTopicSessionReindexesProjectTree(t *testing.T) {
 	topicID := legacySessionTopicID(sessionPath)
 	app := NewApp()
 
-	nodes := app.ListProjectTree()
+	nodes := waitForCatalogTopic(t, app, "global", "", topicID)
 	if len(nodes) != 1 || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != topicID {
 		t.Fatalf("legacy session should start in Global, got %#v", nodes)
 	}
@@ -2958,7 +2793,7 @@ func TestRestoreGlobalTopicSessionReindexesProjectTree(t *testing.T) {
 	if got := app.ListTrashedSessions(); len(got) != 0 {
 		t.Fatalf("trash should be empty after restore, got %#v", got)
 	}
-	nodes = app.ListProjectTree()
+	nodes = waitForCatalogTopic(t, app, "global", "", topicID)
 	if len(nodes) != 1 || nodes[0].Kind != "global_folder" || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != topicID {
 		t.Fatalf("restored global session should reappear in Global, got %#v", nodes)
 	}
@@ -2996,7 +2831,7 @@ func TestRestoreProjectTopicSessionReindexesProjectTree(t *testing.T) {
 	if err := app.RestoreSession(trashPath); err != nil {
 		t.Fatalf("restore project session: %v", err)
 	}
-	nodes := app.ListProjectTree()
+	nodes := waitForCatalogTopic(t, app, "project", projectRoot, topicID)
 	if len(nodes) != 1 || nodes[0].Kind != "project" || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != topicID {
 		t.Fatalf("restored project session should reappear in project tree, got %#v", nodes)
 	}
@@ -3024,7 +2859,7 @@ func TestOpenProjectTabResolvesProjectSessionFromLegacyDir(t *testing.T) {
 	sessionPath := writeTopicSessionWithPrompt(t, dir, "legacy-project.jsonl", topicID, topicTitle, projectRoot, "legacy project prompt", time.Now())
 	app := NewApp()
 
-	nodes := app.ListProjectTree()
+	nodes := waitForCatalogTopic(t, app, "project", projectRoot, topicID)
 	if len(nodes) != 1 || nodes[0].Kind != "project" || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != topicID {
 		t.Fatalf("legacy project session should appear in project tree, got %#v", nodes)
 	}
@@ -3885,7 +3720,8 @@ func TestProjectTreeMigratesCLISessionFromProjectDir(t *testing.T) {
 	sessionPath := writeLegacySession(t, dir, "cli-project.jsonl", "cli project prompt", time.Now())
 	wantTopicID := legacySessionTopicID(sessionPath)
 
-	nodes := NewApp().ListProjectTree()
+	app := NewApp()
+	nodes := waitForCatalogTopic(t, app, "project", projectRoot, wantTopicID)
 	if len(nodes) != 1 || nodes[0].Kind != "project" || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != wantTopicID {
 		t.Fatalf("project CLI session should appear in project tree, got %#v; want topic %q", nodes, wantTopicID)
 	}
@@ -3905,19 +3741,23 @@ func TestProjectTreeMigratesNewCLISessionAfterProjectDirMarker(t *testing.T) {
 	first := writeLegacySession(t, dir, "first-cli-project.jsonl", "first cli project prompt", time.Now().Add(-time.Hour))
 	firstTopicID := legacySessionTopicID(first)
 
-	nodes := NewApp().ListProjectTree()
+	app := NewApp()
+	nodes := waitForCatalogTopic(t, app, "project", projectRoot, firstTopicID)
 	if len(nodes) != 1 || nodes[0].Kind != "project" || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != firstTopicID {
 		t.Fatalf("first project CLI session should appear in project tree, got %#v; want topic %q", nodes, firstTopicID)
 	}
-	if _, err := os.Stat(filepath.Join(dir, topicMigrationMarker)); err != nil {
-		t.Fatalf("expected migration marker after first project pass: %v", err)
-	}
+	waitForTopicDirMarker(t, dir, topicMigrationMarker)
 
 	time.Sleep(10 * time.Millisecond)
 	second := writeLegacySession(t, dir, "second-cli-project.jsonl", "second cli project prompt", time.Now())
 	secondTopicID := legacySessionTopicID(second)
 
-	nodes = NewApp().ListProjectTree()
+	app.requestSessionCatalogReconcile(dir)
+	nodes = waitForCatalogTreeCondition(t, app, "a reconciled newest project CLI session", func(nodes []ProjectNode) bool {
+		return len(nodes) == 1 && nodes[0].Kind == "project" && len(nodes[0].Children) == 2 &&
+			nodes[0].Children[0].TopicID == secondTopicID && nodes[0].Children[0].LastActivityAt > 0 &&
+			nodes[0].Children[1].TopicID == firstTopicID
+	})
 	if len(nodes) != 1 || nodes[0].Kind != "project" || len(nodes[0].Children) != 2 {
 		t.Fatalf("second project CLI session should trigger re-scan, got %#v", nodes)
 	}
@@ -3945,7 +3785,8 @@ func TestProjectTreeMigratesCLISessionFromGlobalWorkspaceDir(t *testing.T) {
 	}
 	wantTopicID := legacySessionTopicID(sessionPath)
 
-	nodes := NewApp().ListProjectTree()
+	app := NewApp()
+	nodes := waitForCatalogTopic(t, app, "global", "", wantTopicID)
 	if len(nodes) != 1 || nodes[0].Kind != "global_folder" || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != wantTopicID {
 		t.Fatalf("global workspace CLI session should appear in Global, got %#v; want topic %q", nodes, wantTopicID)
 	}

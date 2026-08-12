@@ -68,6 +68,7 @@ let listTasksImpl: () => Promise<Task[]> = async () => [];
 let listEventsImpl: () => Promise<Event[]> = async () => [];
 const listTaskTabIDs: string[] = [];
 const listEventCalls: unknown[][] = [];
+const stopCalls: unknown[][] = [];
 const requeueCalls: unknown[][] = [];
 const mockApp = {
   ListTasks: () => listTasksImpl(),
@@ -97,7 +98,10 @@ const mockApp = {
     listEventCalls.push(args);
     return listEventsImpl();
   },
-  StopTaskForTab: async () => ({ schema_version: 1, command: "stop", task_id: "", accepted: true, idempotent: false }),
+  StopTaskForTab: async (...args: unknown[]) => {
+    stopCalls.push(args);
+    return { schema_version: 1, command: "stop", task_id: "", accepted: true, idempotent: false };
+  },
   CancelTaskForTab: async () => ({ schema_version: 1, command: "cancel", task_id: "", accepted: true, idempotent: false }),
   RequeueTaskForTab: async (...args: unknown[]) => {
     requeueCalls.push(args);
@@ -154,6 +158,7 @@ async function cleanup() {
   listEventsImpl = async () => [];
   listTaskTabIDs.length = 0;
   listEventCalls.length = 0;
+  stopCalls.length = 0;
   requeueCalls.length = 0;
 }
 
@@ -174,6 +179,13 @@ function buttonByText(label: string): HTMLButtonElement {
 async function click(button: HTMLButtonElement) {
   await act(async () => {
     button.click();
+    await flush();
+  });
+}
+
+async function keyDown(element: HTMLElement, key: string) {
+  await act(async () => {
+    element.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key, bubbles: true }));
     await flush();
   });
 }
@@ -236,6 +248,62 @@ await check("separates lifecycle state from runtime liveness", async () => {
   await openPanel();
   const text = document.body.textContent ?? "";
   return text.includes("Exited") && text.includes("Runtime unknown");
+});
+
+await check("offers one working stop action for active tasks", async () => {
+  listTasksImpl = async () => [snap()];
+  await renderPanel();
+  await openPanel();
+  await click(buttonByLabel("Task task-000 — Running"));
+  const actionLabels = Array.from(document.querySelectorAll<HTMLButtonElement>(".taskmonitor__actions button"))
+    .map((button) => button.textContent?.trim());
+  const hasMergedActions = actionLabels.filter((label) => label === "Stop").length === 1
+    && !actionLabels.includes("Cancel")
+    && actionLabels.includes("Open session");
+  await click(buttonByText("Stop"));
+  const confirmStop = buttonByText("Stop");
+  const detailValues = Array.from(document.querySelectorAll<HTMLElement>(".taskmonitor__detail dd"))
+    .map((value) => value.textContent?.trim());
+  const hasReplacementConfirmation = document.querySelector(".taskmonitor__actions") === null
+    && document.activeElement === confirmStop
+    && detailValues.includes("Running")
+    && !detailValues.includes("running");
+  await click(confirmStop);
+  return hasMergedActions
+    && hasReplacementConfirmation
+    && JSON.stringify(stopCalls[0]) === JSON.stringify([
+      "tab-a",
+      "task-0001",
+      1,
+      "desktop request",
+      "desktop-stop-task-0001-1",
+    ]);
+});
+
+await check("dismisses stop confirmation with Escape and restores focus", async () => {
+  listTasksImpl = async () => [snap()];
+  await renderPanel();
+  await openPanel();
+  await click(buttonByLabel("Task task-000 — Running"));
+  await click(buttonByText("Stop"));
+  await keyDown(buttonByText("Stop"), "Escape");
+  const restoredStop = buttonByText("Stop");
+  return document.querySelector(".taskmonitor__confirm") === null
+    && document.activeElement === restoredStop
+    && stopCalls.length === 0;
+});
+
+await check("dismisses stop confirmation when polling observes a terminal task", async () => {
+  listTasksImpl = async () => [snap()];
+  await renderPanel();
+  await openPanel();
+  await click(buttonByLabel("Task task-000 — Running"));
+  await click(buttonByText("Stop"));
+  listTasksImpl = async () => [snap({ state: "succeeded", runtime_state: "exited", version: 2 })];
+  await click(buttonByLabel("Refresh"));
+  return document.querySelector(".taskmonitor__confirm") === null
+    && document.body.textContent?.includes("Succeeded") === true
+    && stopCalls.length === 0;
 });
 
 await check("requeues failed exited tasks", async () => {

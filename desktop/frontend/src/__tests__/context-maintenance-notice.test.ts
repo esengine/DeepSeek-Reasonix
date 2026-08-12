@@ -41,16 +41,19 @@ ok(failed === "摘要失败 · 已停重试", `unexpected failed notice: ${faile
 
 const contextPanelSource = readFileSync(new URL("../components/ContextPanel.tsx", import.meta.url), "utf8");
 ok(
-  contextPanelSource.includes("context.maintenanceCanonical"),
-  "ContextPanel must show canonical vs model-visible tokens",
+  !contextPanelSource.includes('className="context-panel__maintenance"'),
+  "ContextPanel must not render the context checkpoint detail block",
 );
 ok(
-  contextPanelSource.includes("triggerTokens") || contextPanelSource.includes("maintenance?.triggerTokens"),
-  "ContextPanel must surface triggerTokens",
+  !contextPanelSource.includes('t("context.maintenanceCanonical")')
+    && !contextPanelSource.includes('t("context.maintenanceCheckpoint")'),
+  "ContextPanel must not expose canonical, model-visible, or checkpoint details",
 );
 ok(
-  contextPanelSource.includes("checkpointState"),
-  "ContextPanel must surface checkpointState",
+  !contextPanelSource.includes("checkpointState")
+    && !contextPanelSource.includes("canonicalTokens")
+    && !contextPanelSource.includes("projectedTokens"),
+  "ContextPanel must not derive hidden checkpoint presentation state",
 );
 ok(
   !contextPanelSource.includes("snipTrigger") && !contextPanelSource.includes("forceTrigger"),

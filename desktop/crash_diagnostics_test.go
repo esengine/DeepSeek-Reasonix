@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -23,10 +24,10 @@ func TestParseWebView2ProcessFailure(t *testing.T) {
 
 func TestWebView2ProcessFailureReportIsStructured(t *testing.T) {
 	report := webView2ProcessFailureReportWithContext(2, 3, "132.0.2957.140")
-	if report.Source != "webview2.process" || report.Label != "windows.webview2.process_failed" {
+	if report.Source != "web.runtime.fallback" || report.Label != "windows.webview2.process_failed" {
 		t.Fatalf("report = %+v", report)
 	}
-	if report.FingerprintHint != "windows.webview2.render_process_unresponsive" {
+	if report.FingerprintHint != "web.runtime.webview2.render_process_unresponsive.unknown.unknown" {
 		t.Fatalf("fingerprint hint = %q", report.FingerprintHint)
 	}
 	for _, want := range []string{"runtime version: 132.0.2957.140", "same-process occurrence: 3", "exit code: unavailable"} {
@@ -53,6 +54,104 @@ func TestWebView2FailureTrackerDeduplicatesSessionBursts(t *testing.T) {
 	}
 }
 
+func TestWebView2NativeFailureClassification(t *testing.T) {
+	tests := []struct {
+		name     string
+		event    webView2NativeEvent
+		kind     string
+		outcome  string
+		recovery string
+	}{
+		{name: "browser fatal", event: webView2NativeEvent{Kind: 0, ReasonAvailable: true, Reason: 3}, kind: "crash", outcome: "fatal_app_exit", recovery: webView2RecoveryNotApplicable},
+		{name: "renderer recovered", event: webView2NativeEvent{Kind: 1, Recovery: webView2RecoverySucceeded}, kind: "performance", outcome: "recovered", recovery: webView2RecoverySucceeded},
+		{name: "renderer recovery failed", event: webView2NativeEvent{Kind: 2, Recovery: webView2RecoveryFailed}, kind: "exception", outcome: "recovery_failed", recovery: webView2RecoveryFailed},
+		{name: "gpu degraded", event: webView2NativeEvent{Kind: 6}, kind: "performance", outcome: "degraded", recovery: webView2RecoveryNotApplicable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			report, outcome := webView2NativeFailureReport(tt.event, "132.0.1", true)
+			if report.Kind != tt.kind || outcome != tt.outcome || report.WebRuntime == nil || report.WebRuntime.Recovery != tt.recovery {
+				t.Fatalf("report=%+v diagnostic=%+v outcome=%q", report, report.WebRuntime, outcome)
+			}
+		})
+	}
+}
+
+func TestWebView2NativeFailureSanitizesModuleAndFingerprint(t *testing.T) {
+	report, _ := webView2NativeFailureReport(webView2NativeEvent{
+		Kind:                2,
+		Reason:              1,
+		ReasonAvailable:     true,
+		ExitCode:            259,
+		ExitCodeAvailable:   true,
+		FailureSourceModule: `C:\Users\alice\Security Suite\inject.dll`,
+		Recovery:            webView2RecoveryFailed,
+	}, "", false)
+	if got := report.WebRuntime.FailureSourceModule; got != "inject.dll" {
+		t.Fatalf("failure source module = %q", got)
+	}
+	if strings.Contains(report.Message, `C:\Users`) || strings.Contains(report.FingerprintHint, "259") {
+		t.Fatalf("report leaked a path or fingerprinted STILL_ACTIVE: %+v", report)
+	}
+	if report.FingerprintHint != "web.runtime.webview2.render_process_unresponsive.unresponsive.unknown" {
+		t.Fatalf("fingerprint = %q", report.FingerprintHint)
+	}
+}
+
+func TestWebKitNativeFailureClassification(t *testing.T) {
+	context := webRuntimeContext{Engine: "webkitgtk", RuntimeVersion: "2.42.5", GPUMode: "on_demand"}
+	recovered, outcome, failure := webKitNativeFailureReport(webKitNativeEvent{reason: 0, recovery: webKitRecoverySucceeded, runtimeContext: context})
+	if recovered.Kind != "performance" || outcome != "recovered" || failure != "webkitgtk.web_process.crashed" {
+		t.Fatalf("recovered report=%+v outcome=%q failure=%q", recovered, outcome, failure)
+	}
+	if recovered.WebRuntime == nil || recovered.WebRuntime.Engine != "webkitgtk" || recovered.WebRuntime.GPUMode != "on_demand" {
+		t.Fatalf("runtime diagnostic=%+v", recovered.WebRuntime)
+	}
+	failed, outcome, _ := webKitNativeFailureReport(webKitNativeEvent{reason: 1, recovery: webKitRecoveryFailed, runtimeContext: context})
+	if failed.Kind != "exception" || outcome != "recovery_failed" || failed.WebRuntime.Reason != "out_of_memory" {
+		t.Fatalf("failed report=%+v outcome=%q", failed, outcome)
+	}
+	degraded, outcome, _ := webKitNativeFailureReport(webKitNativeEvent{reason: 99, recovery: webKitRecoveryNotApplicable, runtimeContext: context})
+	if degraded.Kind != "performance" || outcome != "degraded" || degraded.WebRuntime.Reason != "unknown" {
+		t.Fatalf("degraded report=%+v outcome=%q", degraded, outcome)
+	}
+}
+
+func TestWebKitObserverReloadIsAbnormalPathOnly(t *testing.T) {
+	source, err := os.ReadFile("webkit_diagnostics_linux.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	if strings.Count(text, "webkit_web_view_reload(") != 1 {
+		t.Fatalf("observer must have exactly one native reload call site")
+	}
+	_, recoveryTail, ok := strings.Cut(text, "static gboolean reasonix_reload_after_termination")
+	if !ok {
+		t.Fatal("native reload is not deferred until after termination signal dispatch")
+	}
+	reloadHelper, terminationTail, ok := strings.Cut(recoveryTail, "static void reasonix_web_process_terminated")
+	if !ok || !strings.Contains(reloadHelper, "webkit_web_view_reload(") {
+		t.Fatal("native reload escaped the deferred recovery helper")
+	}
+	terminationBody, _, ok := strings.Cut(terminationTail, "static gboolean reasonix_load_failed")
+	if !ok || !strings.Contains(terminationBody, "reasonix_reload_after_termination") {
+		t.Fatal("web-process termination does not schedule the bounded recovery helper")
+	}
+	if !strings.Contains(text, "if (!reasonix_recovery_pending) return;") ||
+		!strings.Contains(text, "if (reasonix_recovery_load_started && event == WEBKIT_LOAD_FINISHED)") {
+		t.Fatal("ordinary load-finished events are not gated by recovery state")
+	}
+	if !strings.Contains(text, "reasonix_recovery_pending && reasonix_recovery_load_started") {
+		t.Fatal("a stale load failure could be attributed to the recovery navigation")
+	}
+	for _, forbidden := range []string{"fopen(", "open(", "curl_", "send(", "recv("} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("GTK callback source contains blocking I/O primitive %q", forbidden)
+		}
+	}
+}
+
 func TestPreviousRunReportUsesOnlyBoundedLifecycleContext(t *testing.T) {
 	report := previousRunReport(repair.PreviousRunObservation{
 		Abnormal:       true,
@@ -63,11 +162,24 @@ func TestPreviousRunReportUsesOnlyBoundedLifecycleContext(t *testing.T) {
 		UpdateTo:       "v2",
 		UptimeBucket:   "m_2_10",
 	})
-	if report.Source != "native.lifecycle" || report.Label != "desktop.abnormal_exit" {
+	if report.Source != "native.lifecycle.legacy" || report.Label != "desktop.legacy_abnormal_exit" {
 		t.Fatalf("report = %+v", report)
 	}
 	if !strings.Contains(report.Message, "uptime bucket: m_2_10") {
 		t.Fatalf("message missing bounded uptime: %q", report.Message)
+	}
+}
+
+func TestDesktopLifecycleReportUsesCurrentLifecycleNamespace(t *testing.T) {
+	report := desktopLifecycleReport(desktopLifecycleObservation{
+		Version: "v1.23.0", Channel: "stable", Phase: "healthy",
+		StartedAt: "2026-08-10T01:00:00Z", UpdatedAt: "2026-08-10T02:00:00Z",
+	})
+	if report.Source != "native.lifecycle" || report.Label != "desktop.abnormal_exit.v2" {
+		t.Fatalf("report = %+v", report)
+	}
+	if report.FingerprintHint != "desktop.abnormal_exit.v2."+runtime.GOOS+".healthy" {
+		t.Fatalf("fingerprint = %q", report.FingerprintHint)
 	}
 }
 

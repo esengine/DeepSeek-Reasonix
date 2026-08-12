@@ -8,6 +8,7 @@ import (
 	"maps"
 	"strings"
 	"sync"
+	"time"
 
 	"reasonix/internal/event"
 	"reasonix/internal/sessioninbox"
@@ -67,15 +68,41 @@ var _ Inbox = (*Controller)(nil)
 
 // inboxState is controller-owned inbox wiring (disk store + active items).
 type inboxState struct {
-	mu    sync.Mutex
-	store *sessioninbox.Store
+	// admissionMu serializes competing admission state machines. Snapshot
+	// recovery and completion never hold it across Store I/O.
+	admissionMu sync.Mutex
+	mu          sync.Mutex
+	store       *sessioninbox.Store
 	// activeItemIDs includes the running follow-up and every accepted steer.
 	// TurnDone durable-acks the set so multi-steer rounds leave no orphans.
 	activeItemIDs map[string]struct{}
-	dispatching   bool
+	// activeOwnership mirrors activeItemIDs for lock-free recovery checks while
+	// the Store owns its transaction lock. admittingOwnership covers the narrow
+	// durable-claim -> active-registration transition.
+	activeOwnership    sync.Map
+	admittingOwnership sync.Map
+	dispatching        bool
+	dispatchPending    bool
+	// Retry bookkeeping is guarded by mu. Retries are bounded so a persistent
+	// disk or materialization failure cannot create a hot background loop.
+	dispatchRetryAttempts  int
+	dispatchRetryScheduled bool
 	// beforePreparedAdmission is a deterministic test hook for the gap between
 	// durable preparation and Controller admission. Production leaves it nil.
 	beforePreparedAdmission func()
+	// beforeCompletionSnapshot exposes the slow snapshot boundary without
+	// changing production behavior.
+	beforeCompletionSnapshot func()
+	// beforeCompletionAck exposes the ownership-to-ack boundary to race tests.
+	beforeCompletionAck func()
+	// beforeSnapshotRead exposes the final Store snapshot boundary to lock tests.
+	beforeSnapshotRead func()
+	// afterDispatchScan exposes the empty-scan boundary for lost-wakeup tests.
+	afterDispatchScan func(found bool)
+	// beforeDispatchSubmit injects a transient owner-level dispatch failure.
+	beforeDispatchSubmit func(itemID string) error
+	// scheduleDispatchRetry replaces the production timer in deterministic tests.
+	scheduleDispatchRetry func(delay time.Duration, retry func())
 }
 
 func (s *inboxState) trackActive(id string) {
@@ -85,26 +112,30 @@ func (s *inboxState) trackActive(id string) {
 	if s.activeItemIDs == nil {
 		s.activeItemIDs = make(map[string]struct{})
 	}
+	s.activeOwnership.Store(id, struct{}{})
 	s.activeItemIDs[id] = struct{}{}
 }
 
 func (s *inboxState) untrackActive(id string) {
-	if s == nil || s.activeItemIDs == nil || id == "" {
+	if s == nil || id == "" {
 		return
 	}
-	delete(s.activeItemIDs, id)
+	if s.activeItemIDs != nil {
+		delete(s.activeItemIDs, id)
+	}
+	s.activeOwnership.Delete(id)
 }
 
-func (s *inboxState) takeActive() []string {
-	if s == nil || len(s.activeItemIDs) == 0 {
-		return nil
+func (s *inboxState) untrackActiveSet(ids []string) {
+	if s == nil {
+		return
 	}
-	out := make([]string, 0, len(s.activeItemIDs))
-	for id := range s.activeItemIDs {
-		out = append(out, id)
+	for _, id := range ids {
+		if s.activeItemIDs != nil {
+			delete(s.activeItemIDs, id)
+		}
+		s.activeOwnership.Delete(id)
 	}
-	s.activeItemIDs = nil
-	return out
 }
 
 func (s *inboxState) clearActive() {
@@ -112,6 +143,43 @@ func (s *inboxState) clearActive() {
 		return
 	}
 	s.activeItemIDs = nil
+	s.activeOwnership.Clear()
+}
+
+func (s *inboxState) trackAdmission(id string) {
+	if s != nil && id != "" {
+		s.admittingOwnership.Store(id, struct{}{})
+	}
+}
+
+func (s *inboxState) untrackAdmission(id string) {
+	if s != nil && id != "" {
+		s.admittingOwnership.Delete(id)
+	}
+}
+
+// ownsItem is intentionally lock-free: Store recovery calls it while holding
+// its own transaction lock, and no Store -> Controller lock edge is allowed.
+func (s *inboxState) ownsItem(id string) bool {
+	if s == nil || id == "" {
+		return false
+	}
+	if _, ok := s.admittingOwnership.Load(id); ok {
+		return true
+	}
+	_, ok := s.activeOwnership.Load(id)
+	return ok
+}
+
+func (s *inboxState) activeIDs() []string {
+	if s == nil || len(s.activeItemIDs) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(s.activeItemIDs))
+	for id := range s.activeItemIDs {
+		out = append(out, id)
+	}
+	return out
 }
 
 func (c *Controller) ensureInbox() (*sessioninbox.Store, error) {
@@ -260,6 +328,17 @@ func (c *Controller) InboxSnapshot() sessioninbox.InboxSnapshot {
 	st, err := c.ensureInbox()
 	if err != nil {
 		return sessioninbox.InboxSnapshot{}
+	}
+	if recovered, recoverErr := st.RecoverOrphanedInFlightOwnedBy(c.inbox.ownsItem); recoverErr != nil {
+		slog.Warn("controller: recover orphaned inbox items", "err", recoverErr)
+	} else if recovered > 0 {
+		sessioninbox.NoteRecovered(recovered)
+	}
+	c.inbox.mu.Lock()
+	beforeSnapshotRead := c.inbox.beforeSnapshotRead
+	c.inbox.mu.Unlock()
+	if beforeSnapshotRead != nil {
+		beforeSnapshotRead()
 	}
 	return st.Snapshot()
 }
@@ -482,120 +561,10 @@ func (c *Controller) RefreshInboxReferences(id string) error {
 	return err
 }
 
-// TrySteerInboxItem persists intent=steer (if needed) and attempts mid-turn
-// admission. Rejected steers stay queued as follow-up.
-//
-// The agent loader only captures the item ID and re-reads the blob on consume
-// so large steer bodies do not accumulate in the agent heap.
-func (c *Controller) TrySteerInboxItem(id string) (sessioninbox.InboxReceipt, error) {
-	st, err := c.ensureInbox()
-	if err != nil {
-		return sessioninbox.InboxReceipt{}, err
-	}
-	meta, env, err := st.ReadItem(id)
-	if err != nil {
-		return sessioninbox.InboxReceipt{}, err
-	}
-	if meta.State != sessioninbox.StateQueued && meta.State != sessioninbox.StateSteerAccepted {
-		return sessioninbox.InboxReceipt{}, sessioninbox.ErrInvalidState
-	}
-	if meta.State == sessioninbox.StateSteerAccepted {
-		return sessioninbox.InboxReceipt{
-			ItemID:      id,
-			Disposition: sessioninbox.DispositionSteerAccepted,
-			Paused:      st.Snapshot().Paused,
-			Capacity:    st.Snapshot().Capacity,
-			Idempotent:  true,
-		}, nil
-	}
-	snapshot := st.Snapshot()
-	if snapshot.Paused {
-		return sessioninbox.InboxReceipt{}, sessioninbox.ErrPaused
-	}
-	cap := snapshot.Capacity
-	c.mu.Lock()
-	rotating := c.rotating
-	closed := c.closed
-	c.mu.Unlock()
-	if closed {
-		return sessioninbox.InboxReceipt{ItemID: id, Disposition: sessioninbox.DispositionRejectedClosed, Capacity: cap}, nil
-	}
-	if rotating {
-		return sessioninbox.InboxReceipt{ItemID: id, Disposition: sessioninbox.DispositionRejectedRotating, Capacity: cap}, nil
-	}
-	// Capture only the store pointer + item id. Load body from disk at consume.
-	storeRef := st
-	itemID := id
-	loader := func() (string, error) {
-		_, env, err := storeRef.ReadItem(itemID)
-		if err != nil {
-			return "", err
-		}
-		text := strings.TrimSpace(env.SubmitText)
-		if text == "" {
-			text = strings.TrimSpace(env.DisplayText)
-		}
-		if text == "" {
-			return "", fmt.Errorf("inbox item %s has empty body", itemID)
-		}
-		materialized, images, block, materializeErr := applyInboxReferences(env)
-		if materializeErr != nil {
-			return "", materializeErr
-		}
-		if block != "" {
-			return "", fmt.Errorf("frozen reference unavailable: %s", block)
-		}
-		if len(images) > 0 {
-			return "", fmt.Errorf("image guidance requires a follow-up turn")
-		}
-		return firstNonEmptyStr(materialized, text), nil
-	}
-	// Persist the admission boundary before exposing the loader to the agent.
-	// Holding c.mu for the short in-memory enqueue serializes active tracking
-	// with finishGuardedTurn, so TurnDone cannot overtake an accepted steer.
-	if len(env.FrozenImages) == 0 {
-		if err := st.SetState(id, sessioninbox.StateSteerAccepted, ""); err != nil {
-			return sessioninbox.InboxReceipt{}, err
-		}
-	}
-	c.mu.Lock()
-	accepted := !c.closed && !c.rotating && c.running && c.executor != nil && len(env.FrozenImages) == 0 && c.executor.SteerItem(id, loader)
-	if accepted {
-		c.inbox.mu.Lock()
-		c.inbox.trackActive(id)
-		c.inbox.mu.Unlock()
-	}
-	c.mu.Unlock()
-	if accepted {
-		sessioninbox.NoteSteerAccepted()
-		return sessioninbox.InboxReceipt{
-			ItemID:      id,
-			Disposition: sessioninbox.DispositionSteerAccepted,
-			Paused:      st.Snapshot().Paused,
-			Capacity:    cap,
-		}, nil
-	}
-	// Rejected: keep as follow-up.
-	if len(env.FrozenImages) == 0 {
-		if err := st.SetState(id, sessioninbox.StateQueued, ""); err != nil {
-			_ = st.ForcePause(true, 1)
-			return sessioninbox.InboxReceipt{}, err
-		}
-	}
-	if err := st.ConvertIntent(id, sessioninbox.IntentFollowup); err != nil {
-		return sessioninbox.InboxReceipt{}, err
-	}
-	sessioninbox.NoteSteerRejected()
-	return sessioninbox.InboxReceipt{
-		ItemID:      id,
-		Disposition: sessioninbox.DispositionQueuedFollowup,
-		Paused:      st.Snapshot().Paused,
-		Capacity:    cap,
-	}, nil
-}
-
 // TrySubmitInboxItem admits a queued item as a new turn when the session is idle.
 func (c *Controller) TrySubmitInboxItem(id string) (sessioninbox.InboxReceipt, error) {
+	c.inbox.admissionMu.Lock()
+	defer c.inbox.admissionMu.Unlock()
 	st, err := c.ensureInbox()
 	if err != nil {
 		return sessioninbox.InboxReceipt{}, err
@@ -621,6 +590,8 @@ func (c *Controller) TrySubmitInboxItem(id string) (sessioninbox.InboxReceipt, e
 	}
 	// Persist the in-flight state before admission. Active tracking is installed
 	// only after Controller admission is reserved and before the turn can finish.
+	c.inbox.trackAdmission(id)
+	defer c.inbox.untrackAdmission(id)
 	if err := st.ClaimItem(id); err != nil {
 		return sessioninbox.InboxReceipt{}, err
 	}
@@ -664,11 +635,19 @@ func (c *Controller) receiptForAdmissionResult(id string, st *sessioninbox.Store
 // rejected as busy.
 func (c *Controller) onInboxTurnDone() {
 	c.inbox.mu.Lock()
-	ids := c.inbox.takeActive()
+	// Keep these IDs published as live ownership while SnapshotActivity runs.
+	// Inbox recovery can therefore proceed without waiting on extension hooks,
+	// transcript I/O, or the session file lock and will preserve this turn.
+	ids := c.inbox.activeIDs()
 	st := c.inbox.store
+	beforeSnapshot := c.inbox.beforeCompletionSnapshot
+	beforeAck := c.inbox.beforeCompletionAck
 	c.inbox.mu.Unlock()
 	if st == nil || len(ids) == 0 {
 		return
+	}
+	if beforeSnapshot != nil {
+		beforeSnapshot()
 	}
 	// Transcript snapshot is the durable receipt boundary for the whole set.
 	if err := c.SnapshotActivity(); err != nil {
@@ -677,8 +656,17 @@ func (c *Controller) onInboxTurnDone() {
 			_ = st.SetState(id, sessioninbox.StateUncertain, "turn completed but transcript snapshot failed")
 		}
 		_ = st.SetPaused(true)
+		c.inbox.mu.Lock()
+		c.inbox.untrackActiveSet(ids)
+		c.inbox.mu.Unlock()
 		sessioninbox.NoteUncertain()
 		return
+	}
+	// Keep ownership published through every durable acknowledgement. Recovery
+	// can run concurrently, sees these IDs as live without a Controller lock,
+	// and ownership is removed only after dequeue or uncertain state is durable.
+	if beforeAck != nil {
+		beforeAck()
 	}
 	ackFailed := false
 	for _, id := range ids {
@@ -695,6 +683,9 @@ func (c *Controller) onInboxTurnDone() {
 		_ = st.SetPaused(true)
 		sessioninbox.NoteUncertain()
 	}
+	c.inbox.mu.Lock()
+	c.inbox.untrackActiveSet(ids)
+	c.inbox.mu.Unlock()
 }
 
 // onInboxUnappliedSteer keeps accepted-but-unapplied steers for inspection.
@@ -724,42 +715,6 @@ func (c *Controller) onInboxSteerConsumed(itemID string) {
 		return
 	}
 	_ = st.SetState(itemID, sessioninbox.StateSteerConsumed, "")
-}
-
-// maybeDispatchInbox admits the next FIFO item when idle, not paused, and no
-// approval/ask UI is open.
-func (c *Controller) maybeDispatchInbox() {
-	c.inbox.mu.Lock()
-	if c.inbox.dispatching {
-		c.inbox.mu.Unlock()
-		return
-	}
-	c.inbox.dispatching = true
-	c.inbox.mu.Unlock()
-	defer func() {
-		c.inbox.mu.Lock()
-		c.inbox.dispatching = false
-		c.inbox.mu.Unlock()
-	}()
-
-	if c.PendingPrompt() {
-		return
-	}
-	c.mu.Lock()
-	busy := c.running || c.finishing || c.rotating || c.closed
-	c.mu.Unlock()
-	if busy {
-		return
-	}
-	st, err := c.ensureInbox()
-	if err != nil {
-		return
-	}
-	meta, ok := st.NextQueued()
-	if !ok {
-		return
-	}
-	_, _ = c.TrySubmitInboxItem(meta.ID)
 }
 
 // TryEnqueueAndSteer is a convenience for frontends: durable steer then TrySteer.

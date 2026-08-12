@@ -282,39 +282,6 @@ const interruptedToolResult = "[no result: the previous turn was interrupted bef
 // "defensive wire prep" rather than "session mutation".
 func SanitizeToolPairing(msgs []Message) []Message { return NormalizeMessages(msgs) }
 
-// ModelMessages removes durable display-only records before a request is
-// handed to any provider. Healthy sessions without such records keep their
-// original backing slice, preserving the allocation and prompt-cache fast path.
-func ModelMessages(msgs []Message) []Message {
-	needsCopy := false
-	for _, m := range msgs {
-		if m.LocalOnly || m.RawContent != "" || m.ProviderContent != "" || m.DecisionReceipt != nil || len(m.DecisionReceipts) > 0 || m.ToolExecution != nil {
-			needsCopy = true
-			break
-		}
-	}
-	if !needsCopy {
-		return msgs
-	}
-	out := make([]Message, 0, len(msgs))
-	for _, candidate := range msgs {
-		if candidate.LocalOnly {
-			continue
-		}
-		if candidate.ProviderContent != "" {
-			candidate.Content = candidate.ProviderContent
-			candidate.ProviderContent = ""
-		}
-		candidate.RawContent = ""
-		candidate.DecisionReceipt = nil
-		candidate.DecisionReceipts = nil
-		// Local shell metadata must never enter provider request bytes.
-		candidate.ToolExecution = nil
-		out = append(out, candidate)
-	}
-	return out
-}
-
 // NormalizeMessages repairs a conversation history so it satisfies the tool-call
 // contract the OpenAI-compatible and Anthropic APIs enforce: every assistant
 // tool_calls entry must be answered by a following tool message for its id, and a
@@ -754,17 +721,9 @@ type Usage struct {
 	ContextCacheMissTokens  int
 }
 
-// ContextFillTokens returns the latest-attempt context fill (prompt+completion)
-// used by status bars and context panels. Falls back to billable totals when
-// no Context* fields were set (single-attempt / legacy usage events).
+// ContextFillTokens returns the latest prompt occupancy used by context gauges.
 func (u *Usage) ContextFillTokens() int {
-	if u == nil {
-		return 0
-	}
-	if u.ContextPromptTokens > 0 || u.ContextCompletionTokens > 0 {
-		return u.ContextPromptTokens + u.ContextCompletionTokens
-	}
-	return u.PromptTokens + u.CompletionTokens
+	return u.LatestPromptTokens()
 }
 
 // LatestPromptTokens returns the latest-attempt prompt size for context-aware
@@ -788,11 +747,14 @@ type Pricing struct {
 	Currency string  `toml:"currency"`
 }
 
-// Cost estimates the spend for a usage record.
+// Cost estimates the spend for a usage record. Compatibility adapter only —
+// new host code must consume billing.CostQuote instead of aggregating floats.
 func (p *Pricing) Cost(u *Usage) float64 {
 	if p == nil || u == nil {
 		return 0
 	}
+	// Keep the historical float path byte-stable for tests that assert exact
+	// float results without going through the fixed-point quote layer.
 	hit := u.CacheHitTokens
 	miss := u.CacheMissTokens
 	if hit+miss == 0 && u.PromptTokens > 0 {

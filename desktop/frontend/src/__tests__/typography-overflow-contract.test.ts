@@ -338,8 +338,13 @@ ok(
   /@container\s*\(max-width:\s*760px\)[\s\S]*?\.composer-meta__control--model\s*\{[\s\S]*?flex\s*:\s*0 1 auto[\s\S]*?width\s*:\s*fit-content[\s\S]*?max-width\s*:\s*min\(240px,\s*42vw\)[\s\S]*?\.composer-meta__control--profile\s*\{[\s\S]*?max-width\s*:\s*126px[\s\S]*?\.composer-meta__control--intent\s*\{[\s\S]*?max-width\s*:\s*128px[\s\S]*?\.composer-meta__control--effort\s*\{[\s\S]*?display\s*:\s*none[\s\S]*?\.composer-meta__control--more\s*\{[\s\S]*?display\s*:\s*inline-flex/.test(styles),
   "composer compact controls activate at the capped theme width",
 );
-eq(finalDeclaration(".md table", "overflow-x"), "auto", "markdown tables scroll horizontally");
-eq(finalDeclaration(".code", "overflow"), "auto", "code blocks scroll instead of widening the layout");
+eq(finalDeclaration(".md-table-scroll", "overflow-x"), "auto", "markdown table wrapper scrolls horizontally");
+eq(finalDeclaration(".md-table-scroll", "overflow-y"), "hidden", "markdown table wrapper does not nest vertical scroll");
+eq(finalDeclaration(".md table", "overflow"), "visible", "markdown tables stay in document flow for trackpad Y");
+eq(finalDeclaration(".md-table-fold", "display"), "flex", "large tables use a fold stack for preview + expand");
+eq(finalDeclaration(".md-table-fold__toggle", "cursor"), "pointer", "table expand control is clickable");
+eq(finalDeclaration(".code", "overflow-x"), "auto", "code blocks scroll horizontally instead of widening the layout");
+eq(finalDeclaration(".code", "overflow-y"), "hidden", "code blocks do not nest vertical scroll by default");
 ok(
   /@media\s*\(max-width:\s*900px\)[\s\S]*?\.settings-center\s*\{[\s\S]*?grid-template-columns\s*:\s*1fr/.test(styles),
   "settings center stacks navigation before the modal is too narrow",
