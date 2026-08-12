@@ -51,7 +51,7 @@ const HljsCode = memo(function HljsCode({ value, language, maxHeight, sourceSize
   return (
     <div className="code-block__wrap">
       <pre
-        className="code hljs"
+        className={`code hljs${maxHeight != null ? " code--scroll-y" : ""}`}
         data-highlight-mode={highlighted ? "syntax" : "plain"}
         data-lang={language}
         style={maxHeight ? { maxHeight } : undefined}
