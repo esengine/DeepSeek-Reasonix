@@ -2,25 +2,6 @@ package control
 
 import "strings"
 
-// noProgressQuota returns deprecated compatibility metadata for old clients.
-func noProgressQuota(class string) int {
-	switch class {
-	case budgetClassResearch:
-		return 10
-	case budgetClassWrite:
-		return 6
-	default:
-		return defaultNoProgressLimit
-	}
-}
-
-func resolvedNoProgressLimit(persisted int, class string) int {
-	if persisted > 0 && persisted != defaultNoProgressLimit {
-		return persisted
-	}
-	return noProgressQuota(class)
-}
-
 // mergeGoalProgressEvidence updates the bounded Goal-scoped novelty window.
 func mergeGoalProgressEvidence(existing, observed []string) ([]string, bool) {
 	if len(existing) > maxGoalProgressEvidence {

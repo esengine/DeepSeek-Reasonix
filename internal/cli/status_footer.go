@@ -74,7 +74,13 @@ func renderTurnReceipt(u *provider.Usage, p *provider.Pricing, d *event.CacheDia
 		groups = append(groups, "reasoning "+shortTokens(u.ReasoningTokens))
 	}
 	if p != nil {
-		groups = append(groups, fmt.Sprintf("%s%.4f", p.Symbol(), p.Cost(u)))
+		// Host quotes are estimates; never present a bare zero as real spend.
+		cost := p.Cost(u)
+		if cost > 0 {
+			groups = append(groups, fmt.Sprintf("≈%s%.4f", p.Symbol(), cost))
+		} else {
+			groups = append(groups, "cost n/a")
+		}
 	}
 	if u.Estimated {
 		groups = append(groups, "estimated")

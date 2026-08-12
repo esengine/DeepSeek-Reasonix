@@ -802,8 +802,10 @@ func TestResumeRestoresRunningAutoResearchGoalFromSidecar(t *testing.T) {
 	if strings.Contains(strings.ToLower(composed), "autoresearch") {
 		t.Fatalf("Compose after resume exposed removed AutoResearch protocol:\n%s", composed)
 	}
-	if got := c.GoalRuntime().TurnsLimit; got != 40 {
-		t.Fatalf("resumed legacy Goal budget = %d, want 40", got)
+	// The class-derived turn quota is retired: a migrated legacy Goal is
+	// bounded by what the user configures, not by a number derived from its text.
+	if got := c.GoalRuntime().TurnsLimit; got != 0 {
+		t.Fatalf("resumed legacy Goal turn budget = %d, want it retired", got)
 	}
 }
 
@@ -2759,8 +2761,8 @@ func TestTwoModelShortChoiceReplySkipsPlanner(t *testing.T) {
 	if strings.Contains(reqText, "Reasonix executor handoff") {
 		t.Fatalf("short choice reply should not be wrapped as a planner handoff:\n%s", reqText)
 	}
-	if got := lastUserMessage(execProv.requests[0].Messages); got != "1" {
-		t.Fatalf("executor last user = %q, want raw choice reply", got)
+	if got := agent.StripTransientUserBlocks(lastUserMessage(execProv.requests[0].Messages)); got != "1" {
+		t.Fatalf("executor last user = %q, want raw choice reply (execution-policy may append)", lastUserMessage(execProv.requests[0].Messages))
 	}
 }
 

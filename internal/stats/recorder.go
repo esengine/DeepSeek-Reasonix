@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"reasonix/internal/billing"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
 	"reasonix/internal/provider"
@@ -115,6 +116,7 @@ func (d *recordDispatcher) flush(ctx context.Context) error {
 // (desktop/cli/serve/...); an empty source keeps records unlabelled.
 func NewRecorder(inner event.Sink, dir, source string) *Recorder {
 	writer := NewWriter(dir)
+	writer.usage = managerForUsage(writer.dir)
 	return &Recorder{
 		inner: inner, writer: writer, dispatcher: dispatcherFor(writer), source: strings.TrimSpace(source),
 	}
@@ -132,7 +134,7 @@ func (r *Recorder) Emit(e event.Event) {
 	if r != nil && r.writer != nil && e.Kind == event.Usage {
 		r.recordUsage(e)
 	} else if r != nil && r.writer != nil && e.Kind == event.GuardianAssessment && e.Guardian.Usage != nil {
-		r.recordProviderUsage(e.ModelRef, e.Guardian.Usage)
+		r.recordProviderUsage(e.ModelRef, e.Guardian.Usage, nil, "")
 	} else if r != nil && r.writer != nil && e.Kind == event.TurnDone {
 		r.RecordTurnCompletion()
 	}
@@ -154,14 +156,30 @@ func (r *Recorder) Flush(ctx context.Context) error {
 	if r == nil {
 		return nil
 	}
-	return r.dispatcher.flush(ctx)
+	if err := r.dispatcher.flush(ctx); err != nil {
+		return err
+	}
+	if r.writer != nil && r.writer.usage != nil {
+		if catalog := r.writer.usage.catalog.Load(); catalog != nil {
+			return catalog.Flush(ctx)
+		}
+	}
+	return nil
 }
 
 // Flush waits for records already queued for dir. It is primarily useful when
 // a caller must read its own just-recorded statistics deterministically.
 func Flush(ctx context.Context, dir string) error {
-	writer := NewWriter(dir)
-	return existingDispatcher(writer.dir).flush(ctx)
+	dir = strings.TrimSpace(dir)
+	if err := existingDispatcher(dir).flush(ctx); err != nil {
+		return err
+	}
+	if manager := existingUsageManager(dir); manager != nil {
+		if catalog := manager.catalog.Load(); catalog != nil {
+			return catalog.Flush(ctx)
+		}
+	}
+	return nil
 }
 
 // RecordReadinessAudit forwards audit receipts to the wrapped sink.
@@ -204,27 +222,59 @@ func (r *Recorder) RecordDelegationAdmission(a event.DelegationAdmissionAudit) {
 }
 
 func (r *Recorder) recordUsage(e event.Event) {
-	r.recordProviderUsage(e.ModelRef, e.Usage)
+	r.recordProviderUsage(e.ModelRef, e.Usage, e.CostQuote, e.UsageSource)
 }
 
-func (r *Recorder) recordProviderUsage(modelRef string, usage *provider.Usage) {
+func (r *Recorder) recordProviderUsage(modelRef string, usage *provider.Usage, quote *billing.CostQuote, usageSource string) {
 	if usage == nil || (usage.TotalTokens <= 0 && usage.RequestCount <= 0) {
 		return
 	}
 	// Recording is best-effort: a stats file failure (disk full, permissions)
 	// must never interrupt the event stream, matching telemetry's append idiom.
-	r.dispatcher.enqueue(record{
-		Timestamp:  time.Now(),
-		ModelRef:   modelRef,
-		Source:     r.source,
-		Prompt:     usage.PromptTokens,
-		Completion: usage.CompletionTokens,
-		Reasoning:  usage.ReasoningTokens,
-		CacheHit:   usage.CacheHitTokens,
-		CacheMiss:  usage.CacheMissTokens,
-		Total:      usage.TotalTokens,
-		Requests:   usageRequestCount(usage),
-	})
+	rec := record{
+		Timestamp:   time.Now(),
+		ModelRef:    modelRef,
+		Source:      r.source,
+		Prompt:      usage.PromptTokens,
+		Completion:  usage.CompletionTokens,
+		Reasoning:   usage.ReasoningTokens,
+		CacheHit:    usage.CacheHitTokens,
+		CacheMiss:   usage.CacheMissTokens,
+		Total:       usage.TotalTokens,
+		Requests:    usageRequestCount(usage),
+		UsageSource: strings.TrimSpace(usageSource),
+	}
+	if quote != nil {
+		rec.CostAmount = quote.Original.Amount
+		rec.CostCurrency = quote.Original.Currency
+		rec.PricingFingerprint = quote.PricingFingerprint
+		rec.RateDate = quote.RateDate
+		rec.IncompleteReason = quote.IncompleteReason
+		rec.BillingMode = quote.BillingMode
+		rec.CostEstimated = quote.Estimated
+		rec.LegacyEstimate = quote.LegacyEstimate
+		costComplete := quote.CostComplete
+		displayComplete := quote.DisplayComplete
+		rec.CostComplete = &costComplete
+		rec.DisplayComplete = &displayComplete
+		rec.DisplayStatus = quote.DisplayStatus
+		rec.AggregateMode = quote.AggregateMode
+		for _, total := range quote.OriginalTotals {
+			rec.OriginalTotals = append(rec.OriginalTotals, total.Currency+":"+total.Amount)
+		}
+		if quote.Selected != nil {
+			rec.SelectedAmount = quote.Selected.Amount
+			rec.SelectedCurrency = quote.Selected.Currency
+			rec.SelectedCost = quote.Selected.Float64()
+		}
+		if v, ok := quote.Valuations["CNY"]; ok {
+			rec.ValuationCNY = v.Money.Amount
+		}
+		if v, ok := quote.Valuations["USD"]; ok {
+			rec.ValuationUSD = v.Money.Amount
+		}
+	}
+	r.dispatcher.enqueue(rec)
 }
 
 func usageRequestCount(usage *provider.Usage) int {

@@ -2,6 +2,10 @@
 
 import {
   projectTreeFolderDisclosure,
+  mergeProjectTopicPage,
+  projectTreeEventAffectsFolder,
+  projectTreeRevisionIsFresh,
+  projectTreeShouldApplyShellSnapshot,
   defaultExpandedProjectTreeKeys,
   activeSessionAncestorKeys,
   projectTreeTopicOpenRequest,
@@ -146,6 +150,19 @@ eq(
   }, testT),
   "projectTree.previously",
   "topic with no turns and no timestamps renders previous-time fallback meta",
+);
+
+eq(
+  projectTreeTopicMetaLine({
+    key: "global_topic_indexing",
+    kind: "global_topic",
+    label: "Legacy topic",
+    topicId: "indexing",
+    turns: 0,
+    turnsState: "unknown",
+  }, testT),
+  "history.indexing",
+  "unknown legacy turn counts are never presented as zero turns",
 );
 
 eq(
@@ -606,6 +623,48 @@ eq(
     iconStackClassName: "project-tree__icon-stack project-tree__icon-stack--expandable",
   },
   "expanded classic empty folders report the open state for the placeholder",
+);
+
+eq(
+  [projectTreeRevisionIsFresh(12, 11), projectTreeRevisionIsFresh(12, 12), projectTreeRevisionIsFresh(12, 13)],
+  [false, true, true],
+  "project tree ignores stale snapshots and pages while accepting the current revision",
+);
+
+eq(
+  [
+    projectTreeShouldApplyShellSnapshot({ currentRevision: 1, incomingRevision: 0, treeEmpty: true }),
+    projectTreeShouldApplyShellSnapshot({ currentRevision: 1, incomingRevision: 0, treeEmpty: false }),
+    projectTreeShouldApplyShellSnapshot({ currentRevision: 1, incomingRevision: 2, treeEmpty: false }),
+  ],
+  [true, false, true],
+  "empty-tree shell snapshots apply even after a faster catalog revision event",
+);
+
+eq(
+  mergeProjectTopicPage(
+    [
+      { key: "topic-a", kind: "topic", label: "A", topicId: "a" },
+      { key: "topic-b", kind: "topic", label: "Old B", topicId: "b" },
+    ],
+    [
+      { key: "topic-b", kind: "topic", label: "New B", topicId: "b" },
+      { key: "topic-c", kind: "topic", label: "C", topicId: "c" },
+    ],
+    true,
+  ).map((node) => `${node.key}:${node.label}`),
+  ["topic-a:A", "topic-b:New B", "topic-c:C"],
+  "overlapping keyset pages replace duplicates without changing stable order",
+);
+
+eq(
+  [
+    projectTreeEventAffectsFolder({ key: "global", kind: "global_folder", label: "Global" }, [""]),
+    projectTreeEventAffectsFolder({ key: "p", kind: "project", label: "P", root: "/repo" }, ["/other"]),
+    projectTreeEventAffectsFolder({ key: "p", kind: "project", label: "P", root: "/repo" }, []),
+  ],
+  [true, false, true],
+  "revision events refresh only affected expanded roots, with an empty roots list as broadcast",
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);

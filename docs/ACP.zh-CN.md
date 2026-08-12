@@ -12,6 +12,11 @@ Reasonix 实现了 Agent Client Protocol（ACP）v1，通过标准输入输出�
 JSON-RPC 2.0 agent。编辑器和其他 ACP host 负责启动进程、打开一个或多个工作区会话，
 并接收流式消息、工具活动、计划、权限请求和配置更新。
 
+会话状态 usage 可携带结构化 `costQuote`（原币、`originalTotals`、identity/官方区域价表
+估值、`costComplete`、`displayComplete`、`displayStatus`、`billingMode`），同时保留镜像所选
+展示估值的旧字段 `estimatedCost` / `currency`。
+详见 [计费文档](./BILLING.zh-CN.md)。
+
 ## 启动 agent
 
 ACP host 应启动以下命令之一：
@@ -19,11 +24,13 @@ ACP host 应启动以下命令之一：
 ```sh
 reasonix acp
 reasonix acp --model deepseek-pro
-reasonix acp --profile delivery
+reasonix acp --preset delivery
 ```
 
-客户端未覆盖模型时，`--model` 用于选择启动模型；`--profile` 把启动工作模式设为
-`economy`、`balanced` 或 `delivery`。初始化后，两者仍可按会话切换。
+客户端未覆盖模型时，`--model` 用于选择启动模型；`--preset` 用于选择启动执行设定：
+`light`、`balanced` 或 `delivery`（默认 `balanced`）。兼容的
+`--profile economy|balanced|delivery` 仍可用（`economy` → `light`）。初始化后，
+两者仍可按会话切换。
 
 标准输出专用于 ACP 消息，Reasonix 会把诊断写入标准错误，因此 host 不应合并这两个
 流。尚未配置 provider 时先运行 `reasonix setup`；initialize 响应也会声明一个启动
@@ -73,7 +80,7 @@ reasonix acp --profile delivery
 
 ## 会话生命周期
 
-每个 ACP 会话都拥有独立的 Reasonix Controller、工作区根目录、模型、工作模式、协作
+每个 ACP 会话都拥有独立的 Reasonix Controller、工作区根目录、模型、执行设定、协作
 模式、审批模式、MCP 集合和持久化 transcript，会话之间不会泄漏状态。
 
 | 方法 | 行为 |
@@ -101,10 +108,10 @@ Reasonix 把互不相关的选择拆成独立控制轴，而不是混在一个 m
 | 协作模式 | `normal`、`plan`、`goal` | `modes` 和 `session/set_mode` |
 | 模型 | 已配置的 `provider/model` | id 为 `model` 的 `configOptions` |
 | 推理强度 | provider 支持的等级或 `auto` | id 为 `effort` 的 `configOptions` |
-| 工作模式 | `economy`、`balanced`、`delivery` | id 为 `work_mode` 的 `configOptions` |
+| 执行设定 | `light`、`balanced`、`delivery` | id 为 `agent_preset` 的 `configOptions`（兼容 id `work_mode`：`economy` → `light`） |
 | 工具审批 | `ask`、`auto`、`yolo` | id 为 `tool_approval` 的 `configOptions` |
 
-模型、推理强度、工作模式和工具审批统一使用 `session/set_config_option`。它的参数是
+模型、推理强度、执行设定和工具审批统一使用 `session/set_config_option`。它的参数是
 `sessionId`、`configId` 和 `value`，其中 `configId` 取 `configOptions` 中该选项的
 `id`：
 
@@ -124,8 +131,8 @@ Reasonix 把互不相关的选择拆成独立控制轴，而不是混在一个 m
 注意字段名是 `configId`，不是 `optionId`。返回值是刷新后的完整 `configOptions`
 数组；id 未知时返回 `-32602 InvalidParams`。
 
-切换模型、推理强度或工作模式时会重建会话 Controller，同时保留历史和其他控制轴；
-切换工具审批只更新 gate，不重建 Controller。
+切换模型或推理强度时会重建会话 Controller，同时保留历史和其他控制轴；
+执行设定（`agent_preset` / 兼容 `work_mode`）与工具审批只更新 gate，不重建 Controller。
 
 旧客户端仍可使用 `session/set_model`。`session/set_mode` 也继续接受 legacy 值
 `default` 和 `auto`，分别表示“常规 + 询问”和“常规 + Yolo”；新客户端应使用上面的

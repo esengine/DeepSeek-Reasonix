@@ -367,15 +367,41 @@ func (a *approvalManager) resolveTool(id, tool string) (pendingApproval, bool) {
 }
 
 // registerAsk allocates an ask ID, records the pending question batch, and
-// returns the reply channel.
+// returns the reply channel. The ask starts queued: registering before the
+// prompt lock is what makes a question waiting behind another prompt visible
+// at all, instead of existing only inside a blocked goroutine.
 func (a *approvalManager) registerAsk(questions []event.AskQuestion) (string, chan []event.AskAnswer) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.nextID++
 	id := strconv.Itoa(a.nextID)
 	reply := make(chan []event.AskAnswer, 1)
-	a.asks[id] = pendingAsk{questions: questions, reply: reply}
+	a.asks[id] = pendingAsk{questions: questions, reply: reply, queued: true}
 	return id, reply
+}
+
+// markAskEmitted clears the queued flag once the ask has reached a frontend,
+// which is what makes it eligible for replay.
+func (a *approvalManager) markAskEmitted(id string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if p, ok := a.asks[id]; ok {
+		p.queued = false
+		a.asks[id] = p
+	}
+}
+
+// queuedAsks reports asks registered but not yet shown.
+func (a *approvalManager) queuedAsks() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	n := 0
+	for _, p := range a.asks {
+		if p.queued {
+			n++
+		}
+	}
+	return n
 }
 
 // cancelAsk drops a pending ask (timeout/abort path).
@@ -475,6 +501,11 @@ func (a *approvalManager) snapshotPrompts() ([]event.Approval, []event.Ask) {
 	}
 	asks := make([]event.Ask, 0, len(a.asks))
 	for id, p := range a.asks {
+		// A queued ask has never been shown; replaying it would put a question
+		// on screen ahead of the prompt it is waiting behind.
+		if p.queued {
+			continue
+		}
 		asks = append(asks, event.Ask{ID: id, Questions: p.questions})
 	}
 	return approvals, asks

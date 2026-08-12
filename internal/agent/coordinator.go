@@ -645,13 +645,6 @@ func plannerResearchPauseDetail(err error) string {
 			maxPause.key,
 		)
 	}
-	var stallPause *todoStallPause
-	if errors.As(err, &stallPause) {
-		return fmt.Sprintf(
-			"planner did not finalize after %d tool-call rounds without progress",
-			stallPause.rounds,
-		)
-	}
 	return "planner did not finalize after its bounded research and finalization rounds"
 }
 

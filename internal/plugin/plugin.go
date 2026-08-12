@@ -177,6 +177,11 @@ type Host struct {
 	failures  []Failure
 	closed    bool
 
+	// nextInstanceID assigns stable IDs to Client values appended to this Host.
+	// nextScopeID assigns IDs to per-build RegistrationScope tokens.
+	nextInstanceID atomic.Uint64
+	nextScopeID    atomic.Uint64
+
 	// Lazy/background servers may still be handshaking when a session closes.
 	// Close cancels those startup contexts and waits for their goroutines before
 	// taking the client snapshot, so a just-connected stdio child cannot escape
@@ -199,31 +204,6 @@ type Host struct {
 	// Detached stats/schema-cache writers from Start; off the boot path but
 	// drained by Close so cleanup can't race a still-open cache file.
 	bgWrites sync.WaitGroup
-}
-
-// Prompts returns every MCP prompt discovered across connected servers.
-func (h *Host) Prompts() []Prompt {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return append([]Prompt(nil), h.prompts...)
-}
-
-// Resources returns every MCP resource discovered across connected servers.
-func (h *Host) Resources() []Resource {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return append([]Resource(nil), h.resources...)
-}
-
-// ServerNames returns the connected servers' names, in connection order.
-func (h *Host) ServerNames() []string {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	names := make([]string, len(h.clients))
-	for i, c := range h.clients {
-		names[i] = c.name
-	}
-	return names
 }
 
 // ReadResource reads a resource uri from the named server. It is how the chat
@@ -463,7 +443,13 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 			}
 			continue
 		}
-		h.clients = append(h.clients, r.client)
+		if err := h.noteClientLocked(r.client, nil); err != nil {
+			r.client.close()
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
 		tools = append(tools, r.tools...)
 		// prompts/resources are filled in later by StartPhaseB.
 	}
@@ -599,9 +585,16 @@ func (h *Host) fetchResources(ctx context.Context, c *Client, sink event.Sink) {
 // JSON-RPC. The MCP-level methods (initialize, listTools, …) are transport-
 // agnostic — they go through t.
 type Client struct {
-	name string
-	t    transport
-	spec Spec
+	name       string
+	instanceID uint64 // Host-local identity for RemoveIfInstance rollback
+	t          transport
+	spec       Spec
+
+	// registrationClaims and registrationCommitted are guarded by Host.mu.
+	// Claims keep a tentative shared instance alive across overlapping builds;
+	// the first published controller promotes it to ordinary Host ownership.
+	registrationClaims    map[uint64]struct{}
+	registrationCommitted bool
 
 	// Capabilities advertised by the server at initialize. prompts/list and
 	// resources/list are only called when advertised, so we never provoke a
@@ -771,37 +764,6 @@ func (h *Host) Servers() []ServerStatus {
 		}
 		out = append(out, s)
 	}
-	return out
-}
-
-// Failures returns configured MCP servers that failed to connect.
-func (h *Host) Failures() []Failure {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	out := make([]Failure, len(h.failures))
-	copy(out, h.failures)
-	return out
-}
-
-// ConnectingServers returns server names whose startup handshake is currently in
-// flight. It is intentionally status-only: connected clients and failures remain
-// the source of truth for ready/issue states.
-func (h *Host) ConnectingServers() []string {
-	h.spawningMu.Lock()
-	defer h.spawningMu.Unlock()
-	names := make(map[string]struct{}, len(h.spawning))
-	for key, attempt := range h.spawning {
-		name := key
-		if attempt != nil && strings.TrimSpace(attempt.server) != "" {
-			name = attempt.server
-		}
-		names[name] = struct{}{}
-	}
-	out := make([]string, 0, len(names))
-	for name := range names {
-		out = append(out, name)
-	}
-	sort.Strings(out)
 	return out
 }
 
@@ -1019,6 +981,9 @@ func (h *Host) ToolsFor(ctx context.Context, name string) ([]tool.Tool, error) {
 	if c == nil {
 		return nil, fmt.Errorf("client %q not found on shared host", name)
 	}
+	if err := h.claimClientFromContext(ctx, c); err != nil {
+		return nil, err
+	}
 	if tools, ok := c.cachedTools(); ok {
 		return tools, nil
 	}
@@ -1042,6 +1007,9 @@ func (h *Host) ToolsForSpec(ctx context.Context, spec Spec) ([]tool.Tool, error)
 	}
 	if !MCPRuntimeSpecMatches(c.spec, spec) {
 		return nil, fmt.Errorf("connected MCP server %q identity does not match the current runtime configuration", spec.Name)
+	}
+	if err := h.claimClientFromContext(ctx, c); err != nil {
+		return nil, err
 	}
 	if tools, ok := c.cachedTools(); ok {
 		return tools, nil
@@ -1302,7 +1270,14 @@ func (h *Host) addConnectedWithLifecycle(lifeCtx, callCtx context.Context, s Spe
 		c.close()
 		return nil, serverAlreadyConnectedError(s.Name)
 	}
-	h.clients = append(h.clients, c)
+	// Attribute ownership from lifeCtx so LazyToolset background kicks and
+	// boot.Build share the same RegistrationScope token. Sibling hot-adds
+	// without a scope are never journaled to a concurrent build.
+	if err := h.noteClientFromContext(lifeCtx, c); err != nil {
+		h.mu.Unlock()
+		c.close()
+		return nil, err
+	}
 	h.clearFailure(s.Name)
 	h.mu.Unlock()
 	// Prompts and resources stream in on the long lifeCtx the caller passed (Host.Add
@@ -1349,25 +1324,7 @@ func (h *Host) Remove(name string) (toolPrefix string, found bool) {
 		}
 		return ToolPrefix(name), true
 	}
-	removed := h.clients[idx]
-	h.clients = append(h.clients[:idx], h.clients[idx+1:]...)
-
-	keptP := h.prompts[:0]
-	for _, p := range h.prompts {
-		if p.Server != name {
-			keptP = append(keptP, p)
-		}
-	}
-	h.prompts = keptP
-
-	keptR := h.resources[:0]
-	for _, r := range h.resources {
-		if r.Server != name {
-			keptR = append(keptR, r)
-		}
-	}
-	h.resources = keptR
-	h.clearFailure(name)
+	removed := h.removeClientAtLocked(idx)
 	h.mu.Unlock()
 
 	for _, cancel := range cancels {
@@ -1620,8 +1577,6 @@ func formatTimeout(timeout time.Duration) string {
 func (c *Client) notify(ctx context.Context, method string, params any) error {
 	return c.t.notify(ctx, method, params)
 }
-
-func (c *Client) close() { c.t.close() }
 
 func isHTTPSessionExpired(err error) bool {
 	var expired *httpSessionExpiredError

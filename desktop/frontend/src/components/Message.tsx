@@ -788,7 +788,7 @@ export function TurnActions({
             onClick={() => selectRewind("fork")}
           >
             <GitBranch size={13} />
-            <span>{actionLabel("fork")}</span>
+            <span className="turn-actions__label-inline">{actionLabel("fork")}</span>
           </button>
           <div
             className={`turn-actions__group${openMenu === "summary" ? " turn-actions__group--open" : ""}`}
@@ -802,8 +802,10 @@ export function TurnActions({
               onClick={() => toggleMenu("summary")}
             >
               <ScrollText size={13} />
-              <span>{t("turnActions.summary")}</span>
-              <ChevronDown size={12} />
+              <span className="turn-actions__label-inline">
+                <span>{t("turnActions.summary")}</span>
+                <ChevronDown size={12} />
+              </span>
             </button>
             {openMenu === "summary" && (
               <div className="rewind__menu turn-actions__menu" role="menu">
@@ -826,8 +828,10 @@ export function TurnActions({
               onClick={() => toggleMenu("rewind")}
             >
               <RotateCcw size={13} />
-              <span>{t("turnActions.rewind")}</span>
-              <ChevronDown size={12} />
+              <span className="turn-actions__label-inline">
+                <span>{t("turnActions.rewind")}</span>
+                <ChevronDown size={12} />
+              </span>
             </button>
             {openMenu === "rewind" && (
               <div className="rewind__menu turn-actions__menu" role="menu">

@@ -2,7 +2,6 @@ package control
 
 import (
 	"strings"
-	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/provider"
@@ -12,22 +11,24 @@ import (
 // current result must be newer than this boundary; an older visible assistant
 // message is never a substitute for an empty current result.
 type turnFinalBoundary struct {
-	session        *agent.Session
-	startMessages  int
-	rewriteVersion int
-	startedAt      int64
+	session           *agent.Session
+	startMessages     int
+	messageLogVersion uint64
 }
 
 func (c *Controller) captureTurnFinalBoundary() turnFinalBoundary {
-	if c == nil || c.executor == nil || c.executor.Session() == nil {
+	if c == nil || c.executor == nil {
 		return turnFinalBoundary{}
 	}
 	sess := c.executor.Session()
+	if sess == nil {
+		return turnFinalBoundary{}
+	}
+	startMessages, messageLogVersion := sess.MessageLogBoundary()
 	return turnFinalBoundary{
-		session:        sess,
-		startMessages:  sess.Len(),
-		rewriteVersion: sess.RewriteVersion(),
-		startedAt:      time.Now().UnixMilli(),
+		session:           sess,
+		startMessages:     startMessages,
+		messageLogVersion: messageLogVersion,
 	}
 }
 
@@ -52,32 +53,11 @@ func (b turnFinalBoundary) currentTurnMessages(c *Controller) []provider.Message
 	if b.session == nil || c == nil || c.executor == nil || c.executor.Session() != b.session {
 		return nil
 	}
-	if b.session.RewriteVersion() == b.rewriteVersion {
-		end := b.session.Len()
-		if b.startMessages < 0 || b.startMessages >= end {
-			return nil
-		}
-		msgs := b.session.MessageRange(b.startMessages, end)
-		// A rewrite between the version check and range read invalidates the
-		// numeric boundary. Fall through to the rewrite-safe anchor below.
-		if b.session.RewriteVersion() == b.rewriteVersion && c.executor.Session() == b.session {
-			return msgs
-		}
-	}
-
-	// A rewrite can invalidate the numeric boundary. Compaction preserves the
-	// recent user turn, so re-anchor only to a user message created after this
-	// turn began. If that identity cannot be proved, fail closed.
-	msgs := b.session.Snapshot()
-	if c.executor.Session() != b.session {
+	msgs, ok := b.session.MessageRangeSince(b.startMessages, b.messageLogVersion)
+	if !ok || c.executor.Session() != b.session {
 		return nil
 	}
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == provider.RoleUser && msgs[i].CreatedAt >= b.startedAt {
-			return msgs[i+1:]
-		}
-	}
-	return nil
+	return msgs
 }
 
 func terminalVisibleAssistant(msgs []provider.Message) string {

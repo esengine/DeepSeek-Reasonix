@@ -4,22 +4,25 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/billing"
 )
 
 // ContextInfo is the prompt-vs-window gauge payload plus session totals. Used
 // and Window both zero means no context-window data yet.
 type ContextInfo struct {
-	Used            int                         `json:"used"`
-	Window          int                         `json:"window"`
-	SessionTokens   int                         `json:"sessionTokens"`
-	CompactRatio    float64                     `json:"compactRatio,omitempty"`
-	SessionCost     float64                     `json:"sessionCost,omitempty"`
-	SessionCurrency string                      `json:"sessionCurrency,omitempty"`
-	CacheHitTokens  int                         `json:"cacheHitTokens,omitempty"`
-	CacheMissTokens int                         `json:"cacheMissTokens,omitempty"`
-	Estimated       bool                        `json:"estimated,omitempty"`
-	Sources         map[string]usageSourceStats `json:"sources,omitempty"`
-	Maintenance     *ContextMaintenanceInfo     `json:"maintenance,omitempty"`
+	Used                int                         `json:"used"`
+	Window              int                         `json:"window"`
+	SessionTokens       int                         `json:"sessionTokens"`
+	CompactRatio        float64                     `json:"compactRatio,omitempty"`
+	SessionCost         float64                     `json:"sessionCost,omitempty"`
+	SessionCurrency     string                      `json:"sessionCurrency,omitempty"`
+	CacheHitTokens      int                         `json:"cacheHitTokens,omitempty"`
+	CacheMissTokens     int                         `json:"cacheMissTokens,omitempty"`
+	Estimated           bool                        `json:"estimated,omitempty"`
+	SessionCostComplete bool                        `json:"sessionCostComplete,omitempty"`
+	SessionCostQuote    *billing.CostQuote          `json:"sessionCostQuote,omitempty"`
+	Sources             map[string]usageSourceStats `json:"sources,omitempty"`
+	Maintenance         *ContextMaintenanceInfo     `json:"maintenance,omitempty"`
 }
 
 // ContextMaintenanceInfo is the Wails-safe current-view snapshot. Optional

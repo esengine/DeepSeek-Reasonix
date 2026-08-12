@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -171,4 +172,83 @@ func TestRecoveryGCRunsDespiteSafeModeEnv(t *testing.T) {
 	// Branch may or may not be reclaimed depending on age/coverage; the
 	// important contract is that Safe Mode env does not force a no-op panic-free path.
 	_ = branchPath
+}
+
+func TestRecoveryGCSkipsWhenBranchContinuesAfterScan(t *testing.T) {
+	// Scan marks the branch reclaimable, then a concurrent continue-edit must
+	// make DeleteRecoveryCopy refuse so unique content is never trashed.
+	isolateDesktopUserDirs(t)
+	root := globalTabWorkspaceRoot()
+	dir := desktopSessionDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	_, branchPath := forkCoveredRecoveryBranch(t, dir, "race-edit")
+	later := time.Now().Add(48 * time.Hour)
+	reclaimable, err := agent.ReclaimableRecoveryBranches(dir, later, agent.RecoveryGCGracePeriod)
+	if err != nil {
+		t.Fatalf("ReclaimableRecoveryBranches: %v", err)
+	}
+	if len(reclaimable) != 1 || reclaimable[0] != branchPath {
+		t.Fatalf("reclaimable = %v, want only %s", reclaimable, branchPath)
+	}
+	branch, err := agent.LoadSession(branchPath)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	branch.Add(provider.Message{Role: provider.RoleAssistant, Content: "continued after scan"})
+	if err := branch.Save(branchPath); err != nil {
+		t.Fatalf("Save continued branch: %v", err)
+	}
+	app := NewApp()
+	if got := app.reclaimRecoveryBranchesIn([]string{dir}, later); got != 0 {
+		t.Fatalf("reclaimed = %d, want 0 after post-scan continue", got)
+	}
+	if _, err := os.Stat(branchPath); err != nil {
+		t.Fatalf("continued branch must remain: %v", err)
+	}
+}
+
+func TestRecoveryGCSkipsWhenLeaseAcquiredAfterScan(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	root := globalTabWorkspaceRoot()
+	dir := desktopSessionDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	_, branchPath := forkCoveredRecoveryBranch(t, dir, "race-lease")
+	later := time.Now().Add(48 * time.Hour)
+	reclaimable, err := agent.ReclaimableRecoveryBranches(dir, later, agent.RecoveryGCGracePeriod)
+	if err != nil {
+		t.Fatalf("ReclaimableRecoveryBranches: %v", err)
+	}
+	if len(reclaimable) != 1 {
+		t.Fatalf("reclaimable = %v, want one path", reclaimable)
+	}
+	lease, err := agent.TryAcquireSessionLease(branchPath)
+	if err != nil {
+		t.Fatalf("TryAcquireSessionLease: %v", err)
+	}
+	defer lease.Release()
+	app := NewApp()
+	if got := app.reclaimRecoveryBranchesIn([]string{dir}, later); got != 0 {
+		t.Fatalf("reclaimed = %d, want 0 while lease held", got)
+	}
+	if _, err := os.Stat(branchPath); err != nil {
+		t.Fatalf("leased branch must remain: %v", err)
+	}
+}
+
+func TestRecoveryGCUsesDeleteRecoveryCopyNotDeleteSession(t *testing.T) {
+	source, err := os.ReadFile("recovery_gc.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	if !strings.Contains(text, "DeleteRecoveryCopy(path)") {
+		t.Fatal("background recovery GC must call DeleteRecoveryCopy")
+	}
+	if strings.Contains(text, "DeleteSession(path)") {
+		t.Fatal("background recovery GC must not use unguarded DeleteSession")
+	}
 }

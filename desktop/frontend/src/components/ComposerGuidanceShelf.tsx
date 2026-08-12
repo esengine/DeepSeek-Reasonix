@@ -1,4 +1,5 @@
 import { ChevronDown, ChevronUp, CornerDownRight, Trash2 } from "lucide-react";
+import { guidanceNeedsRetry } from "../lib/composerGuidance";
 import { useI18n } from "../lib/i18n";
 import type { StructuredInvocationSubmit } from "../lib/invocationDisplay";
 import { InboxRecoveryBanner } from "./InboxRecoveryBanner";
@@ -11,6 +12,7 @@ export type PendingGuidance = {
   state?: string;
   intent?: string;
   source?: string;
+  paused?: boolean;
   recoveredCount?: number;
   structured?: StructuredInvocationSubmit;
 };
@@ -19,7 +21,12 @@ export type InboxRecoveryNotice = {
   draftKey: string;
   tabId: string;
   count: number;
+  recovered: boolean;
 };
+
+function guidanceIsInFlight(state?: string): boolean {
+  return state === "running" || state === "steer_accepted" || state === "steer_consumed";
+}
 
 export function ComposerGuidanceShelf({
   recovery,
@@ -62,6 +69,7 @@ export function ComposerGuidanceShelf({
         <InboxRecoveryBanner
           key={`${recovery.draftKey}:${recovery.tabId}`}
           count={recovery.count}
+          recovered={recovery.recovered}
           disabled={recoveryDisabled}
           tabId={recovery.tabId}
           onReview={onReview}
@@ -78,35 +86,47 @@ export function ComposerGuidanceShelf({
             </span>
           </div>
           <div className="composer-guidance-list">
-            {visible.map((item) => (
-              <div className="composer-guidance-item" key={item.id}>
-                <CornerDownRight size={14} className="composer-guidance-item__icon" />
-                <span className="composer-guidance-item__text">{item.text}</span>
-                <Tooltip label={t("composer.guidanceSend")}>
-                  <button
-                    className="composer-guidance-item__guide"
-                    type="button"
-                    aria-label={t("composer.guidanceSend")}
-                    disabled={!running || disabled || readOnly || sendingId !== null || Boolean(item.structured)}
-                    onClick={() => onSend(item)}
-                  >
-                    <CornerDownRight size={13} />
-                    <span>{t("composer.guidanceMode")}</span>
-                  </button>
-                </Tooltip>
-                <Tooltip label={t("composer.guidanceDismiss")}>
-                  <button
-                    className="composer-guidance-item__action"
-                    type="button"
-                    aria-label={t("composer.guidanceDismiss")}
-                    disabled={sendingId === item.id}
-                    onClick={() => onDismiss(item)}
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </Tooltip>
-              </div>
-            ))}
+            {visible.map((item, index) => {
+              const inFlight = guidanceIsInFlight(item.state);
+              const needsRetry = guidanceNeedsRetry(item.state);
+              const waitingForEarlier = !running && !inFlight && index > 0;
+              const actionLabel = inFlight
+                ? t("composer.guidanceInFlight")
+                : waitingForEarlier
+                  ? t("composer.guidanceWaiting")
+                  : needsRetry
+                    ? t("composer.guidanceRetry")
+                    : t("composer.guidanceSend");
+              return (
+                <div className="composer-guidance-item" key={item.id}>
+                  <CornerDownRight size={14} className="composer-guidance-item__icon" />
+                  <span className="composer-guidance-item__text">{item.text}</span>
+                  <Tooltip label={actionLabel}>
+                    <button
+                      className="composer-guidance-item__guide"
+                      type="button"
+                      aria-label={actionLabel}
+                      disabled={inFlight || waitingForEarlier || disabled || readOnly || sendingId !== null || (running && !needsRetry && Boolean(item.structured)) || Boolean(item.paused)}
+                      onClick={() => onSend(item)}
+                    >
+                      <CornerDownRight size={13} />
+                      <span>{t(needsRetry ? "composer.guidanceRetryMode" : running ? "composer.guidanceMode" : "composer.guidanceSendMode")}</span>
+                    </button>
+                  </Tooltip>
+                  <Tooltip label={inFlight ? actionLabel : t("composer.guidanceDismiss")}>
+                    <button
+                      className="composer-guidance-item__action"
+                      type="button"
+                      aria-label={inFlight ? actionLabel : t("composer.guidanceDismiss")}
+                      disabled={inFlight || sendingId === item.id}
+                      onClick={() => onDismiss(item)}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </Tooltip>
+                </div>
+              );
+            })}
             {items.length > 2 && (
               <button
                 className="composer-guidance-more"

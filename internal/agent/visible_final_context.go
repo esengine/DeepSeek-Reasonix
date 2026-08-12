@@ -22,3 +22,7 @@ func visibleFinalRequiredFromContext(ctx context.Context) bool {
 	required, _ := ctx.Value(visibleFinalRequiredContextKey{}).(bool)
 	return required
 }
+
+func (a *Agent) visibleFinalRequired(ctx context.Context) bool {
+	return a.requireVisibleFinal || visibleFinalRequiredFromContext(ctx)
+}

@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -187,6 +188,23 @@ func TestWorkspaceChangeHubReleasesRootAfterTabWorkspaceSwitch(t *testing.T) {
 	app.workspaceHub.mu.Unlock()
 	if oldExists || !newExists {
 		t.Fatalf("root lifecycle after switch: oldExists=%v newExists=%v", oldExists, newExists)
+	}
+}
+
+func TestGitMetadataDirsForWorkspaceUsesHardenedGitCommand(t *testing.T) {
+	// Source-level contract: both startup rev-parse probes must go through
+	// gitcmd.Command so Windows gets HideWindow + CREATE_NO_WINDOW without
+	// forking a second unhardened path.
+	source, err := os.ReadFile("workspace_watch.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	if !strings.Contains(text, `gitcmd.Command(ctx, root, "rev-parse", flag)`) {
+		t.Fatal("gitMetadataDirsForWorkspace must call gitcmd.Command for rev-parse probes")
+	}
+	if strings.Contains(text, `exec.CommandContext(ctx, "git"`) || strings.Contains(text, `exec.Command("git"`) {
+		t.Fatal("workspace_watch must not invoke raw git exec for metadata probes")
 	}
 }
 

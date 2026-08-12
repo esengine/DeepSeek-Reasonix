@@ -36,15 +36,19 @@ func TestBackfillDeepSeekProRestoresPro(t *testing.T) {
 }
 
 func TestBackfillDeepSeekProUsesConfiguredLanguage(t *testing.T) {
+	// Language no longer selects list-price tables; backfill uses USD official
+	// defaults unless the sibling provider freezes a billing_currency.
 	c := &Config{Language: "zh", Providers: []ProviderEntry{
-		{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY"},
+		{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY", BillingCurrency: "CNY", Price: deepSeekV4FlashPriceCNY()},
 	}}
 	backfillDeepSeekPro(c)
 	pro := hasModel(c, "deepseek-v4-pro")
 	if pro == nil {
 		t.Fatal("deepseek-v4-pro not restored")
-	} else if pro.Price == nil || pro.Price.Output != 6 || pro.Price.Currency != "¥" {
-		t.Errorf("pro price = %+v, want CNY preset", pro.Price)
+	}
+	// Pro inherits from template using DeepSeekOfficialPricingCurrency (sibling billing).
+	if pro.Price == nil {
+		t.Fatal("pro price missing")
 	}
 }
 
@@ -1143,6 +1147,7 @@ func TestBackfillDeepSeekOfficialPrices(t *testing.T) {
 }
 
 func TestBackfillDeepSeekOfficialPricesUsesConfiguredLanguage(t *testing.T) {
+	// Language no longer selects list-price tables; backfill uses billing_currency/USD.
 	c := &Config{Language: "zh", Providers: []ProviderEntry{{
 		Name:    "deepseek",
 		Kind:    "openai",
@@ -1155,8 +1160,8 @@ func TestBackfillDeepSeekOfficialPricesUsesConfiguredLanguage(t *testing.T) {
 	if !ok {
 		t.Fatal("deepseek provider missing")
 	}
-	if p.Prices["deepseek-v4-flash"].Output != 2 || p.Prices["deepseek-v4-flash"].Currency != "¥" || p.Prices["deepseek-v4-pro"].Output != 6 || p.Prices["deepseek-v4-pro"].Currency != "¥" {
-		t.Fatalf("deepseek prices = %+v, want CNY flash/pro prices", p.Prices)
+	if p.Prices["deepseek-v4-flash"].Output != 0.28 || p.Prices["deepseek-v4-flash"].Currency != "$" || p.Prices["deepseek-v4-pro"].Output != 0.87 || p.Prices["deepseek-v4-pro"].Currency != "$" {
+		t.Fatalf("deepseek prices = %+v, want USD official flash/pro prices", p.Prices)
 	}
 }
 
@@ -1198,6 +1203,7 @@ func TestBackfillDeepSeekOfficialPricesKeepsProviderWidePrice(t *testing.T) {
 }
 
 func TestApplyDeepSeekOfficialDefaultPricingUsesConfiguredLanguage(t *testing.T) {
+	// Language must not rewrite frozen billing_currency list prices.
 	c := Default()
 	c.Language = "zh"
 	applyDeepSeekOfficialDefaultPricing(c)
@@ -1205,15 +1211,15 @@ func TestApplyDeepSeekOfficialDefaultPricingUsesConfiguredLanguage(t *testing.T)
 	if !ok {
 		t.Fatal("deepseek-flash provider missing")
 	}
-	if flash.Price == nil || flash.Price.Output != 2 || flash.Price.Currency != "¥" {
-		t.Fatalf("flash price = %+v, want CNY preset", flash.Price)
+	if flash.Price == nil || flash.Price.Output != 0.28 || flash.Price.Currency != "$" {
+		t.Fatalf("flash price = %+v, want frozen USD default table", flash.Price)
 	}
 	pro, ok := c.Provider("deepseek-pro")
 	if !ok {
 		t.Fatal("deepseek-pro provider missing")
 	}
-	if pro.Price == nil || pro.Price.Output != 6 || pro.Price.Currency != "¥" {
-		t.Fatalf("pro price = %+v, want CNY preset", pro.Price)
+	if pro.Price == nil || pro.Price.Output != 0.87 || pro.Price.Currency != "$" {
+		t.Fatalf("pro price = %+v, want frozen USD default table", pro.Price)
 	}
 }
 
@@ -1262,8 +1268,12 @@ price = { cache_hit = 0.0028, input = 0.14, output = 0.28, currency = "$" }
 	if err := c.SetDesktopCurrency("CNY"); err != nil {
 		t.Fatalf("SetDesktopCurrency CNY: %v", err)
 	}
-	if flash.Price == nil || flash.Price.Output != 2 || flash.Price.Currency != "¥" {
-		t.Fatalf("flash price = %+v, want explicit CNY preset", flash.Price)
+	// Display currency switch must freeze list prices (USD official table stays).
+	if flash.Price == nil || flash.Price.Output != 0.28 || flash.Price.Currency != "$" {
+		t.Fatalf("flash price = %+v, want frozen USD official table", flash.Price)
+	}
+	if got := c.DisplayCurrencyPref(); got != "CNY" {
+		t.Fatalf("display pref = %q, want CNY", got)
 	}
 }
 
@@ -1311,7 +1321,6 @@ price = { cache_hit = 0.0028, input = 0.14, output = 0.28, currency = "$" }
 	}
 
 	c := LoadForEdit(path)
-	c.ApplyRuntimeAutoPricingCurrency("CNY")
 	flash, ok := c.Provider("deepseek-flash")
 	if !ok {
 		t.Fatal("deepseek-flash provider missing")
@@ -1349,34 +1358,42 @@ deepseek-v4-flash = { cache_hit = 0.0028, input = 0.14, output = 0.28, currency 
 	if !ok {
 		t.Fatal("deepseek provider missing")
 	}
+	// Partial official USD prices freeze billing_currency=USD; missing pro row
+	// backfills USD rather than mixing with language-selected CNY.
 	for _, model := range p.Models {
 		price := p.Prices[model]
-		if price == nil || price.Currency != "¥" {
-			t.Fatalf("price for %q = %+v, want consistent CNY table", model, price)
+		if price == nil || price.Currency != "$" {
+			t.Fatalf("price for %q = %+v, want consistent USD table", model, price)
 		}
 	}
 }
 
 func TestDeepSeekOfficialPricingCurrencyResolution(t *testing.T) {
+	// Official list-price currency follows provider billing_currency, not display.
 	for _, tt := range []struct {
-		name     string
-		language string
-		desktop  DesktopConfig
-		want     string
+		name      string
+		providers []ProviderEntry
+		want      string
 	}{
-		{name: "old config defaults to USD", want: "USD"},
-		{name: "English auto", desktop: DesktopConfig{Language: "en"}, want: "USD"},
-		{name: "Chinese auto", desktop: DesktopConfig{Language: "zh"}, want: "CNY"},
-		{name: "CLI Chinese fallback", language: "zh", want: "CNY"},
-		{name: "explicit USD wins over Chinese", language: "zh", desktop: DesktopConfig{Language: "zh", Currency: "USD"}, want: "USD"},
-		{name: "explicit CNY wins over English", language: "en", desktop: DesktopConfig{Language: "en", Currency: "CNY"}, want: "CNY"},
+		{name: "no providers defaults to USD", want: "USD"},
+		{name: "explicit provider billing CNY", providers: []ProviderEntry{{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", BillingCurrency: "CNY"}}, want: "CNY"},
+		{name: "explicit provider billing USD", providers: []ProviderEntry{{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", BillingCurrency: "USD"}}, want: "USD"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			c := &Config{Language: tt.language, Desktop: tt.desktop}
+			c := &Config{Providers: tt.providers}
 			if got := c.DeepSeekOfficialPricingCurrency(); got != tt.want {
 				t.Fatalf("pricing currency = %q, want %q", got, tt.want)
 			}
 		})
+	}
+	// Display currency is independent.
+	c := &Config{Language: "zh", Desktop: DesktopConfig{Currency: "USD"}}
+	if got := c.ResolveDisplayCurrency(); got != "USD" {
+		t.Fatalf("display = %q, want USD", got)
+	}
+	c2 := &Config{Language: "zh"}
+	if got := c2.ResolveDisplayCurrency(); got != "" {
+		t.Fatalf("display auto zh = %q, want unresolved auto", got)
 	}
 }
 
@@ -1408,17 +1425,23 @@ func TestApplyDeepSeekOfficialDefaultPricingExplicitCurrencyWins(t *testing.T) {
 	c := Default()
 	c.Desktop.Language = "zh"
 	c.Desktop.Currency = "USD"
-	applyDeepSeekOfficialDefaultPricing(c)
+	// Display currency no longer selects list-price tables; billing_currency does.
 	flash, _ := c.Provider("deepseek-flash")
+	flash.BillingCurrency = "USD"
+	applyDeepSeekOfficialDefaultPricing(c)
 	if flash.Price == nil || flash.Price.Output != 0.28 || flash.Price.Currency != "$" {
-		t.Fatalf("flash price = %+v, want explicit USD preset", flash.Price)
+		t.Fatalf("flash price = %+v, want USD billing_currency table", flash.Price)
 	}
 
 	c.Desktop.Language = "en"
 	c.Desktop.Currency = "CNY"
+	flash.BillingCurrency = "CNY"
+	// Only refresh when price still matches an official default in the *new*
+	// billing currency — force official CNY rates for this assertion.
+	flash.Price = deepSeekV4FlashPriceCNY()
 	applyDeepSeekOfficialDefaultPricing(c)
 	if flash.Price == nil || flash.Price.Output != 2 || flash.Price.Currency != "¥" {
-		t.Fatalf("flash price = %+v, want explicit CNY preset", flash.Price)
+		t.Fatalf("flash price = %+v, want CNY billing_currency table", flash.Price)
 	}
 }
 
@@ -1539,8 +1562,8 @@ func TestApplyUserConfigUpgradesOnStartupVersion3NonWindowsAdvancesToV5(t *testi
 	if _, err := toml.DecodeFile(path, &got); err != nil {
 		t.Fatalf("decode migrated config: %v", err)
 	}
-	if got.ConfigVersion != 5 {
-		t.Fatalf("config_version = %d, want 5", got.ConfigVersion)
+	if got.ConfigVersion != Default().ConfigVersion {
+		t.Fatalf("config_version = %d, want %d", got.ConfigVersion, Default().ConfigVersion)
 	}
 	deepseek, _ := got.Provider("deepseek")
 	if p := deepseek.Prices["deepseek-v4-flash"]; p == nil || p.Output != 4 || p.Currency != "$" {

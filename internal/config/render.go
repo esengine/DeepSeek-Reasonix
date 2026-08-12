@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"reasonix/internal/billing"
 	"reasonix/internal/provider"
 )
 
@@ -98,10 +99,10 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		} else {
 			b.WriteString("# language = \"zh\"   # desktop UI language; empty/auto = browser/OS auto-detect\n")
 		}
+		// Legacy desktop.currency is still emitted when set so older binaries keep
+		// reading the preference; new writers also own [billing].display_currency.
 		if currency := c.DesktopCurrency(); currency != "" {
-			fmt.Fprintf(&b, "currency = %q   # official pricing currency: CNY|USD; empty/auto follows language\n", currency)
-		} else {
-			b.WriteString("# currency = \"USD\"   # official pricing currency: CNY|USD; empty/auto follows language\n")
+			fmt.Fprintf(&b, "currency = %q   # legacy display currency; prefer [billing].display_currency\n", currency)
 		}
 		fmt.Fprintf(&b, "layout_style = %q   # desktop layout: classic|workbench|creation\n", c.DesktopLayoutStyle())
 		fmt.Fprintf(&b, "theme = %q   # desktop only: auto|dark|light\n", c.DesktopTheme())
@@ -133,6 +134,14 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		fmt.Fprintf(&b, "display_mode = %q   # desktop: standard|compact transcript display mode\n", c.DesktopDisplayMode())
 		if width := c.DesktopConversationWidth(); width == "full" {
 			fmt.Fprintf(&b, "conversation_width = %q   # desktop: standard|full transcript width; empty = standard\n", width)
+		}
+		b.WriteString("\n")
+
+		b.WriteString("[billing]\n")
+		if pref := c.DisplayCurrencyPref(); pref != "" {
+			fmt.Fprintf(&b, "display_currency = %q   # auto|CNY|USD; display only — does not rewrite provider list prices\n", pref)
+		} else {
+			b.WriteString("# display_currency = \"auto\"   # auto|CNY|USD; display only — does not rewrite provider list prices\n")
 		}
 		b.WriteString("\n")
 	} else if c.Desktop.ProviderAccess != nil {
@@ -297,7 +306,10 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			fmt.Fprintf(&b, "kind        = %q\n", p.Kind)
 			fmt.Fprintf(&b, "base_url    = %q\n", p.BaseURL)
 			if p.ChatURL != "" {
-				fmt.Fprintf(&b, "chat_url    = %q   # optional full chat completions URL; disables automatic /chat/completions suffix\n", p.ChatURL)
+				fmt.Fprintf(&b, "chat_url    = %q   # legacy OpenAI chat endpoint override\n", p.ChatURL)
+			}
+			if p.RequestURL != "" {
+				fmt.Fprintf(&b, "request_url = %q   # exact provider request URL; no path completion\n", p.RequestURL)
 			}
 			if len(p.Models) > 0 {
 				fmt.Fprintf(&b, "models      = %s\n", renderStringArray(p.Models))
@@ -351,6 +363,12 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			}
 			if len(p.Prices) > 0 {
 				fmt.Fprintf(&b, "prices      = %s   # per-model prices, per 1M tokens\n", renderPricingMap(p.Prices))
+			}
+			if cur := strings.TrimSpace(p.BillingCurrency); cur != "" {
+				fmt.Fprintf(&b, "billing_currency = %q   # frozen list-price currency; independent of display_currency\n", billing.NormalizeCurrency(cur))
+			}
+			if mode := strings.TrimSpace(p.BillingMode); mode != "" && mode != "payg" {
+				fmt.Fprintf(&b, "billing_mode = %q   # payg|subscription_equivalent\n", mode)
 			}
 			if p.Thinking != "" {
 				fmt.Fprintf(&b, "thinking    = %q\n", p.Thinking)
@@ -988,6 +1006,9 @@ func RenderTOMLProjectDelta(c *Config) string {
 			if p.ChatURL != "" {
 				fmt.Fprintf(&b, "chat_url    = %q\n", p.ChatURL)
 			}
+			if p.RequestURL != "" {
+				fmt.Fprintf(&b, "request_url = %q\n", p.RequestURL)
+			}
 			if len(p.Models) > 0 {
 				fmt.Fprintf(&b, "models      = %s\n", renderStringArray(p.Models))
 				if p.Default != "" {
@@ -1035,6 +1056,12 @@ func RenderTOMLProjectDelta(c *Config) string {
 			}
 			if len(p.Prices) > 0 {
 				fmt.Fprintf(&b, "prices      = %s\n", renderPricingMap(p.Prices))
+			}
+			if cur := strings.TrimSpace(p.BillingCurrency); cur != "" {
+				fmt.Fprintf(&b, "billing_currency = %q\n", billing.NormalizeCurrency(cur))
+			}
+			if mode := strings.TrimSpace(p.BillingMode); mode != "" && mode != "payg" {
+				fmt.Fprintf(&b, "billing_mode = %q\n", mode)
 			}
 			if p.Thinking != "" {
 				fmt.Fprintf(&b, "thinking    = %q\n", p.Thinking)

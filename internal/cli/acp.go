@@ -167,6 +167,7 @@ func (f *acpFactory) sessionBootOptions(p acp.SessionParams) (boot.Options, erro
 	return boot.Options{
 		Model:                    firstNonEmpty(p.Model, f.model),
 		TokenMode:                firstNonEmpty(p.RuntimeProfile, f.profile),
+		AgentPreset:              boot.NormalizeAgentPreset(firstNonEmpty(p.RuntimeProfile, f.profile)),
 		RequireKey:               true,
 		Sink:                     p.Sink,
 		StatsSource:              "cli",
@@ -376,16 +377,32 @@ func (f *acpFactory) SessionConfigState(_ context.Context, p acp.SessionConfigSt
 		cleared := ""
 		effortOverride = &cleared
 	}
+	agentPreset := boot.NormalizeAgentPreset(runtimeProfile)
+	// New option id is agent_preset; work_mode remains for one compatibility version.
+	presetOptions := []acp.SessionConfigSelectOption{
+		{Value: "light", Name: "Light", Description: "Fast and reliable: on-demand capabilities, targeted verification"},
+		{Value: "balanced", Name: "Balanced", Description: "Adaptive planning and risk-tiered verification"},
+		{Value: "delivery", Name: "Delivery", Description: "Evidence closed-loop: full acceptance, verification, independent review"},
+	}
+	options = append(options, acp.SessionConfigOption{
+		ID:           "agent_preset",
+		Name:         "Execution Setting",
+		Category:     "agent_preset",
+		Type:         "select",
+		CurrentValue: agentPreset,
+		Options:      presetOptions,
+	})
+	// Deprecated dual-write option for older ACP clients.
 	options = append(options, acp.SessionConfigOption{
 		ID:           "work_mode",
-		Name:         "Work Mode",
+		Name:         "Work Mode (deprecated)",
 		Category:     "work_mode",
 		Type:         "select",
 		CurrentValue: runtimeProfile,
 		Options: []acp.SessionConfigSelectOption{
-			{Value: "economy", Name: "Economy", Description: "Use a lean initial tool surface to save tokens"},
-			{Value: "balanced", Name: "Balanced", Description: "Use the complete default tool surface"},
-			{Value: "delivery", Name: "Delivery", Description: "Require acceptance criteria, review, and verification evidence"},
+			{Value: "economy", Name: "Economy", Description: "Deprecated alias for light"},
+			{Value: "balanced", Name: "Balanced", Description: "Deprecated alias for balanced"},
+			{Value: "delivery", Name: "Delivery", Description: "Deprecated alias for delivery"},
 		},
 	})
 
@@ -402,10 +419,11 @@ func (f *acpFactory) SessionConfigState(_ context.Context, p acp.SessionConfigSt
 }
 
 func acpRuntimeProfile(value string) string {
-	switch boot.NormalizeTokenMode(value) {
-	case boot.TokenModeEconomy:
+	// Dual-write: return legacy economy|balanced|delivery for RuntimeProfile.
+	switch boot.NormalizeAgentPreset(value) {
+	case boot.AgentPresetLight:
 		return "economy"
-	case boot.TokenModeDelivery:
+	case boot.AgentPresetDelivery:
 		return "delivery"
 	default:
 		return "balanced"

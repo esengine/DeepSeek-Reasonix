@@ -2,24 +2,12 @@ package taskintent
 
 import "strings"
 
-// Goal turn-budget classes. Quotas are fixed; classes never gate permissions.
+// Legacy Goal classes remain for sidecar and deprecated CLI compatibility.
 const (
 	BudgetClassSimple   = "simple"
 	BudgetClassWrite    = "write"
 	BudgetClassResearch = "research"
 )
-
-// BudgetTurns returns the default turn quota for a Goal budget class.
-func BudgetTurns(class string) int {
-	switch class {
-	case BudgetClassResearch:
-		return 40
-	case BudgetClassWrite:
-		return 20
-	default:
-		return 10
-	}
-}
 
 // ClassifyGoalBudget selects simple/write/research from goal text alone.
 // Legacy CLI flags and sidecars apply on/off overrides in the control package.

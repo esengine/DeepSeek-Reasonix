@@ -34,7 +34,7 @@ func TestTurnFinalBoundaryReadsOnlyCurrentTurn(t *testing.T) {
 	if got := boundary.currentVisibleFinal(c); got != "" {
 		t.Fatalf("final before current turn = %q, want empty", got)
 	}
-	sess.Add(provider.Message{Role: provider.RoleUser, Content: "current question", CreatedAt: boundary.startedAt})
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "current question"})
 	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "CURRENT answer"})
 	if got := boundary.currentVisibleFinal(c); got != "CURRENT answer" {
 		t.Fatalf("current final = %q, want CURRENT answer", got)
@@ -58,7 +58,7 @@ func TestTurnFinalBoundaryFailsClosedOnNonTerminalAssistant(t *testing.T) {
 			sess := agent.NewSession("")
 			c, _ := newTurnFinalTestController(sess)
 			boundary := c.captureTurnFinalBoundary()
-			sess.Add(provider.Message{Role: provider.RoleUser, Content: "current", CreatedAt: boundary.startedAt})
+			sess.Add(provider.Message{Role: provider.RoleUser, Content: "current"})
 			for _, msg := range tt.tail {
 				sess.Add(msg)
 			}
@@ -74,7 +74,7 @@ func TestTurnFinalBoundaryKeepsCurrentPartialTextForHooks(t *testing.T) {
 	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "OLD answer"})
 	c, _ := newTurnFinalTestController(sess)
 	boundary := c.captureTurnFinalBoundary()
-	sess.Add(provider.Message{Role: provider.RoleUser, Content: "current", CreatedAt: boundary.startedAt})
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "current"})
 	sess.Add(provider.Message{
 		Role: provider.RoleAssistant, Content: "CURRENT tool preamble", LocalOnly: true,
 		ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "read_file"}},
@@ -89,7 +89,7 @@ func TestTurnFinalBoundaryKeepsCurrentPartialTextForHooks(t *testing.T) {
 	}
 }
 
-func TestTurnFinalBoundaryReanchorsAfterRewrite(t *testing.T) {
+func TestTurnFinalBoundaryRejectsRewriteWithCurrentUser(t *testing.T) {
 	sess := agent.NewSession("")
 	sess.Add(provider.Message{Role: provider.RoleUser, Content: "old question", CreatedAt: 1})
 	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "OLD answer"})
@@ -98,27 +98,79 @@ func TestTurnFinalBoundaryReanchorsAfterRewrite(t *testing.T) {
 
 	sess.Rewrite([]provider.Message{
 		{Role: provider.RoleAssistant, Content: "summary"},
-		{Role: provider.RoleUser, Content: "current question", CreatedAt: boundary.startedAt},
+		{Role: provider.RoleUser, Content: "current question"},
 		{Role: provider.RoleAssistant, Content: "CURRENT after compaction"},
 	}, "test_compaction")
-	if got := boundary.currentVisibleFinal(c); got != "CURRENT after compaction" {
-		t.Fatalf("rewritten current final = %q", got)
+	if got := boundary.currentVisibleFinal(c); got != "" {
+		t.Fatalf("rewritten current final = %q, want fail-closed empty", got)
 	}
 }
 
-func TestTurnFinalBoundaryRejectsRewriteWithoutCurrentUser(t *testing.T) {
+func TestTurnFinalBoundaryRejectsReplace(t *testing.T) {
 	sess := agent.NewSession("")
 	sess.Add(provider.Message{Role: provider.RoleUser, Content: "old question", CreatedAt: 1})
 	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "OLD answer"})
 	c, _ := newTurnFinalTestController(sess)
 	boundary := c.captureTurnFinalBoundary()
 
-	sess.Rewrite([]provider.Message{
-		{Role: provider.RoleUser, Content: "old question", CreatedAt: boundary.startedAt - 1},
-		{Role: provider.RoleAssistant, Content: "OLD rewritten answer"},
-	}, "test_rewrite_without_current_turn")
+	sess.Replace([]provider.Message{
+		{Role: provider.RoleUser, Content: "old question"},
+		{Role: provider.RoleAssistant, Content: "OLD replacement answer"},
+	})
 	if got := boundary.currentVisibleFinal(c); got != "" {
-		t.Fatalf("rewritten stale final = %q, want empty", got)
+		t.Fatalf("replacement stale final = %q, want empty", got)
+	}
+}
+
+func TestTurnFinalBoundaryAllowsLocalMetadataUpdates(t *testing.T) {
+	tests := []struct {
+		name   string
+		update func(*testing.T, *agent.Session)
+	}{
+		{name: "tool resolution", update: func(t *testing.T, sess *agent.Session) {
+			readOnly := true
+			if !sess.UpdateToolCallResolution(provider.ToolCall{
+				ID: "call-1", ResolvedName: "read_file", ResolvedReadOnly: &readOnly,
+			}) {
+				t.Fatal("UpdateToolCallResolution returned false")
+			}
+		}},
+		{name: "tool preview", update: func(t *testing.T, sess *agent.Session) {
+			if !sess.UpdateToolCallPreview(provider.ToolCall{ID: "call-1", Diff: "preview", Added: 1}) {
+				t.Fatal("UpdateToolCallPreview returned false")
+			}
+		}},
+		{name: "decision receipt", update: func(_ *testing.T, sess *agent.Session) {
+			sess.AddDecisionReceipt(&provider.DecisionReceipt{ID: "decision-1", Kind: "approval", Outcome: "allow"})
+		}},
+		{name: "local metadata replacement", update: func(_ *testing.T, sess *agent.Session) {
+			msgs := sess.Snapshot()
+			msgs[0].Edited = true
+			sess.ReplaceLocalMetadata(msgs)
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sess := agent.NewSession("")
+			c, _ := newTurnFinalTestController(sess)
+			boundary := c.captureTurnFinalBoundary()
+			sess.Add(provider.Message{Role: provider.RoleUser, Content: "current"})
+			sess.Add(provider.Message{
+				Role: provider.RoleAssistant,
+				ToolCalls: []provider.ToolCall{{
+					ID:   "call-1",
+					Name: "mcp__proxy",
+				}},
+			})
+			tt.update(t, sess)
+			sess.Add(provider.Message{Role: provider.RoleTool, Content: "result", ToolCallID: "call-1", Name: "mcp__proxy"})
+			sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "CURRENT answer"})
+
+			if got := boundary.currentVisibleFinal(c); got != "CURRENT answer" {
+				t.Fatalf("current final after local metadata update = %q, want CURRENT answer", got)
+			}
+		})
 	}
 }
 
@@ -126,7 +178,7 @@ func TestTurnFinalBoundaryRejectsSessionReplacement(t *testing.T) {
 	sess := agent.NewSession("")
 	c, exec := newTurnFinalTestController(sess)
 	boundary := c.captureTurnFinalBoundary()
-	sess.Add(provider.Message{Role: provider.RoleUser, Content: "current", CreatedAt: boundary.startedAt})
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "current"})
 	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "CURRENT old-session answer"})
 
 	replacement := agent.NewSession("")

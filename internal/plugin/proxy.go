@@ -23,25 +23,33 @@ func newServerProxy(name string) *serverProxy {
 }
 
 func (p *serverProxy) replace(ctx context.Context, next *Client, generation uint64) error {
-	if p == nil {
-		return fmt.Errorf("plugin: nil server proxy")
-	}
-	if p.closed.Load() {
+	prev, err := p.swap(next, generation)
+	if err != nil {
 		if next != nil {
 			next.close()
 		}
-		return fmt.Errorf("plugin: server proxy %q closed", p.name)
+		return err
+	}
+	if prev != nil && prev != next && prev.t != nil {
+		prev.close()
+	}
+	_ = ctx
+	return nil
+}
+
+func (p *serverProxy) swap(next *Client, generation uint64) (*Client, error) {
+	if p == nil {
+		return nil, fmt.Errorf("plugin: nil server proxy")
+	}
+	if p.closed.Load() {
+		return nil, fmt.Errorf("plugin: server proxy %q closed", p.name)
 	}
 	p.mu.Lock()
 	prev := p.active
 	p.active = next
 	p.generation = generation
 	p.mu.Unlock()
-	if prev != nil && prev != next && prev.t != nil {
-		prev.close()
-	}
-	_ = ctx
-	return nil
+	return prev, nil
 }
 
 func (p *serverProxy) client() *Client {
@@ -51,6 +59,21 @@ func (p *serverProxy) client() *Client {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.active
+}
+
+// detachIf clears the active backend only when it is the exact instance being
+// removed. The caller closes the client after releasing Host.mu.
+func (p *serverProxy) detachIf(client *Client) bool {
+	if p == nil || client == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.active != client {
+		return false
+	}
+	p.active = nil
+	return true
 }
 
 func (p *serverProxy) close() {
@@ -121,20 +144,51 @@ func (h *Host) ReplaceServerBackend(ctx context.Context, name string, next *Clie
 		p = newServerProxy(name)
 		h.proxies[name] = p
 	}
-	// Keep clients slice consistent: remove previous, append next.
-	if prev := p.client(); prev != nil {
-		for i, c := range h.clients {
-			if c == prev {
+	// Publish the proxy and clients slice under the same Host lock. Otherwise a
+	// scope rollback can remove next after h.mu is released but before p.replace
+	// publishes it, leaving the proxy pointed at a closed client.
+	prev := p.client()
+	if prev == next {
+		_, err := p.swap(next, generation)
+		h.mu.Unlock()
+		return err
+	}
+	if next != nil {
+		if err := h.noteClientFromContext(ctx, next); err != nil {
+			h.mu.Unlock()
+			next.close()
+			return err
+		}
+	}
+	replaced, err := p.swap(next, generation)
+	if err != nil {
+		if next != nil {
+			for i, client := range h.clients {
+				if client == next {
+					h.clients = append(h.clients[:i], h.clients[i+1:]...)
+					break
+				}
+			}
+		}
+		h.mu.Unlock()
+		if next != nil {
+			next.close()
+		}
+		return err
+	}
+	if prev != nil {
+		for i, client := range h.clients {
+			if client == prev {
 				h.clients = append(h.clients[:i], h.clients[i+1:]...)
 				break
 			}
 		}
 	}
-	if next != nil {
-		h.clients = append(h.clients, next)
-	}
 	h.mu.Unlock()
-	return p.replace(ctx, next, generation)
+	if replaced != nil && replaced != next && replaced.t != nil {
+		replaced.close()
+	}
+	return nil
 }
 
 func (h *Host) lookupClient(name string) *Client {
@@ -143,6 +197,12 @@ func (h *Host) lookupClient(name string) *Client {
 	}
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+	return h.lookupClientLocked(name)
+}
+
+// lookupClientLocked returns the active exact client. Caller holds h.mu for
+// read or write; proxy.client has its own leaf lock.
+func (h *Host) lookupClientLocked(name string) *Client {
 	if h.closed {
 		return nil
 	}

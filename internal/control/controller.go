@@ -94,6 +94,11 @@ type Controller struct {
 	// recoveryGate is the shared Auto Guard state for this controller.
 	// nil when the feature is not wired for this controller.
 	recoveryGate *recovery.Gate
+
+	// taskBudget is the configured spend gate, as passed at construction.
+	taskBudget agent.TaskBudget
+	// goalTokenBudget bounds an unattended Goal loop; 0 leaves it unbounded.
+	goalTokenBudget int
 	// evaluator is the bounded Goal completion evaluator consulted when the
 	// working model submits no update_goal report. nil fails closed: the goal
 	// pauses instead of defaulting to continue.
@@ -336,6 +341,7 @@ type pendingApproval struct {
 type pendingAsk struct {
 	questions []event.AskQuestion
 	reply     chan []event.AskAnswer
+	queued    bool // registered but not yet shown; replay must skip it
 }
 
 type plannerSessionResetter interface {
@@ -416,6 +422,10 @@ type Options struct {
 	// RecoveryHeadless blocks mutations that need confirmation instead of
 	// waiting forever when no human decision channel exists.
 	RecoveryHeadless bool
+	// TaskBudget is the configured spend gate; unset leaves a turn unbounded.
+	TaskBudget agent.TaskBudget
+	// GoalTokenBudget bounds an unattended Goal loop by cumulative tokens.
+	GoalTokenBudget int
 	// GoalEvaluator is the optional bounded Goal completion evaluator consulted
 	// when the working model submits no update_goal report. nil fails closed:
 	// the goal pauses instead of defaulting to continue.
@@ -461,6 +471,10 @@ type Options struct {
 	BalanceClient *http.Client
 	// Jobs is the session-scoped background-job manager (nil disables background jobs).
 	Jobs *jobs.Manager
+	// TaskStore remains a FileStore-compatible authority. Desktop injects one
+	// observed instance so recorder and task-control APIs share post-commit
+	// projection hints; nil preserves the ordinary FileStore.
+	TaskStore taskmonitor.WriteStore
 	// WorkspaceLease is the Delivery writer owner shared with the executor.
 	WorkspaceLease *workspacelease.Owner
 	// Registry is the executor's live tool set, and PluginCtx the session-scoped
@@ -570,6 +584,9 @@ func New(opts Options) *Controller {
 		opts.Hooks.SetSessionID(agent.BranchID(opts.SessionPath))
 	}
 	c := &Controller{
+		taskBudget:                        opts.TaskBudget,
+		goalTokenBudget:                   opts.GoalTokenBudget,
+		goals:                             goalMachine{tokenBudget: opts.GoalTokenBudget},
 		runner:                            opts.Runner,
 		executor:                          opts.Executor,
 		guardianSess:                      opts.Guardian,
@@ -666,8 +683,12 @@ func New(opts Options) *Controller {
 	// must never affect the agent pipeline. The session id is resolved lazily
 	// because the session path is only fixed once the first turn begins.
 	if c.jobs != nil && c.workspaceRoot != "" {
+		taskStore := opts.TaskStore
+		if taskStore == nil {
+			taskStore = taskmonitor.NewFileStore(filepath.Join(".reasonix", "tasks"))
+		}
 		c.jobs.SetTaskRecorder(taskmonitor.NewTaskRecorder(
-			taskmonitor.NewFileStore(filepath.Join(".reasonix", "tasks")),
+			taskStore,
 			c.workspaceRoot,
 			func() string { return c.parentSessionID() },
 		))
@@ -807,6 +828,19 @@ func (c *Controller) ToolContractEntries() []tool.ContractEntry {
 		return nil
 	}
 	return reg.ContractEntries()
+}
+
+// AllToolContractEntries returns every registered tool, including those hidden
+// from the provider-visible schema and only reachable via use_capability.
+func (c *Controller) AllToolContractEntries() []tool.ContractEntry {
+	if c == nil {
+		return nil
+	}
+	reg := c.mcp.registry()
+	if reg == nil {
+		return nil
+	}
+	return reg.AllContractEntries()
 }
 
 // ProviderCatalog returns the session's merged provider catalog: the config
@@ -1575,8 +1609,8 @@ func (c *Controller) applyGoalCommand(input, display string) bool {
 		rt := c.GoalRuntime()
 		c.notice(fmt.Sprintf(i18n.M.GoalCurrentFmt, goal))
 		c.notice(fmt.Sprintf(i18n.M.GoalRuntimeFmt,
-			rt.TurnsUsed, rt.TurnsLimit, rt.TokensUsed, rt.RequestsUsed,
-			rt.NoProgressTurns, rt.BudgetExtensions))
+			rt.TurnsUsed, rt.RequestsUsed, rt.TokensUsed,
+			GoalWorkDurationText(rt.WorkDurationMs)))
 		if rt.LastReason != "" {
 			c.noticeDetail(i18n.M.GoalRuntimeLastReason, rt.LastReason)
 		}
@@ -2041,12 +2075,6 @@ func (c *Controller) beginRotation() error {
 	return nil
 }
 
-func (c *Controller) endRotation() {
-	c.mu.Lock()
-	c.rotating = false
-	c.mu.Unlock()
-}
-
 // CancelRequested reports whether Cancel has been requested for the active turn.
 func (c *Controller) CancelRequested() bool {
 	c.mu.Lock()
@@ -2417,6 +2445,45 @@ func (c *Controller) SteerConsumed() bool {
 	return true
 }
 
+// promptQueueNoticeDelay is how long a prompt may wait behind another before
+// the user is told why nothing has appeared. Short enough to beat "it's stuck",
+// long enough that an approval answered promptly never emits a notice.
+var promptQueueNoticeDelay = 3 * time.Second
+
+// lockPromptFor acquires the prompt lock, emitting one notice if the wait is
+// long enough to look like a hang. It reports false only when ctx ended first;
+// the lock is held on true.
+func (c *Controller) lockPromptFor(ctx context.Context, kind string) bool {
+	acquired := make(chan struct{})
+	go func() {
+		c.approval.promptMu.Lock()
+		close(acquired)
+	}()
+	select {
+	case <-acquired:
+		return true
+	case <-ctx.Done():
+	case <-time.After(promptQueueNoticeDelay):
+	}
+	if ctx.Err() == nil {
+		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodePromptQueued,
+			Text:   "A " + kind + " is waiting for you to answer the prompt ahead of it.",
+			Detail: "the assistant asked something while an earlier approval or question was still open; it appears once that one is answered"})
+	}
+	select {
+	case <-acquired:
+		return true
+	case <-ctx.Done():
+		// The lock may still be handed to the goroutine above; release it so the
+		// next prompt is not blocked by this abandoned wait.
+		go func() {
+			<-acquired
+			c.approval.promptMu.Unlock()
+		}()
+		return false
+	}
+}
+
 // Ask implements agent.Asker: it emits an AskRequest and blocks until
 // AnswerQuestion(ID, …) answers or ctx is cancelled. promptMu serialises it
 // against tool-approval prompts so at most one user prompt is outstanding.
@@ -2424,11 +2491,18 @@ func (c *Controller) SteerConsumed() bool {
 // tool exists to get a genuine user decision, and YOLO only auto-approves
 // tool calls; it must not answer the user's questions for them.
 func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]event.AskAnswer, error) {
-	c.approval.promptMu.Lock()
+	// Registering after the lock left a queued question invisible everywhere:
+	// no event, absent from the snapshot, unreachable by ReplayPendingPrompts.
+	id, reply := c.approval.registerAsk(questions)
+
+	if !c.lockPromptFor(ctx, "question") {
+		c.approval.cancelAsk(id)
+		return nil, ctx.Err()
+	}
 	defer c.approval.promptMu.Unlock()
 
 	c.approval.promptEmitMu.Lock()
-	id, reply := c.approval.registerAsk(questions)
+	c.approval.markAskEmitted(id)
 	c.sink.Emit(event.Event{Kind: event.AskRequest, Ask: event.Ask{ID: id, Questions: questions}})
 	c.approval.promptEmitMu.Unlock()
 
@@ -2577,6 +2651,69 @@ func (c *Controller) SetPlanMode(v bool) {
 	c.applyPlanMode(v)
 }
 
+// SetAgentPreset updates the session role setting for subsequent turns without
+// rebuilding the controller, provider, or tool schemas. Callers must already
+// hold active-work guards (no foreground turn, background jobs, or pending
+// approvals/asks).
+func (c *Controller) SetAgentPreset(preset string) {
+	if c == nil {
+		return
+	}
+	preset = strings.TrimSpace(preset)
+	if preset == "" {
+		preset = "balanced"
+	}
+	// Map legacy economy/full names through the dual-write helper if available.
+	if normalized := strings.ToLower(preset); normalized == "economy" || normalized == "full" {
+		switch normalized {
+		case "economy":
+			preset = "light"
+		case "full":
+			preset = "balanced"
+		}
+	}
+	if setter, ok := c.runner.(interface{ SetAgentPreset(string) }); ok {
+		setter.SetAgentPreset(preset)
+	}
+	if c.executor != nil {
+		c.executor.SetAgentPreset(preset)
+	}
+	// Keep capability runtimeProfile labels coherent for diagnostics.
+	c.mu.Lock()
+	switch strings.ToLower(preset) {
+	case "light", "economy":
+		c.runtimeProfile = capability.ProfileEconomy
+	case "delivery":
+		c.runtimeProfile = capability.ProfileDelivery
+	default:
+		c.runtimeProfile = capability.ProfileBalanced
+	}
+	c.mu.Unlock()
+}
+
+// AgentPreset returns the current session role setting.
+func (c *Controller) AgentPreset() string {
+	if c == nil {
+		return "balanced"
+	}
+	if c.executor != nil {
+		return c.executor.AgentPreset()
+	}
+	if getter, ok := c.runner.(interface{ AgentPreset() string }); ok {
+		return getter.AgentPreset()
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	switch c.runtimeProfile {
+	case capability.ProfileEconomy:
+		return "light"
+	case capability.ProfileDelivery:
+		return "delivery"
+	default:
+		return "balanced"
+	}
+}
+
 func (c *Controller) applyPlanMode(v bool) {
 	c.mu.Lock()
 	c.planMode = v
@@ -2722,28 +2859,28 @@ func (c *Controller) resolveGoalText(goal string, researchMode GoalResearchMode)
 }
 
 // ResumeGoal re-enters a recoverable blocked/stopped Goal without resetting its
-// delivery evidence scope. A budget-paused Goal gets one extra slice of its
-// budget class; accumulated consumption is preserved.
+// delivery evidence scope or accumulated usage statistics.
 func (c *Controller) ResumeGoal() bool {
 	if handled, resumed := c.retryBlockedLegacyGoal(); handled {
 		return resumed
 	}
-	path, data, persist, resumed, extended := c.goals.resume(c.goalTodos())
+	spentBudget := c.goals.runtimeView().StopCause == stopCauseBudgetSpend
+	path, data, persist, resumed := c.goals.resume(c.goalTodos())
 	if !resumed {
 		return false
 	}
 	c.persistGoalState(path, data, persist)
-	if extended {
-		c.notice(i18n.M.GoalBudgetExtended)
-	}
 	if c.executor != nil {
+		if spentBudget {
+			c.executor.ResetTaskBudget()
+		}
 		c.executor.RestoreDeliveryCheckpoint(c.goals.deliveryState())
 	}
 	return true
 }
 
 // PauseGoal suspends a running Goal without losing its todo list, Delivery
-// checkpoint, or budget history; ResumeGoal restores it. Returns false when no
+// checkpoint, or runtime history; ResumeGoal restores it. Returns false when no
 // running Goal exists.
 func (c *Controller) PauseGoal() bool {
 	if !c.goals.active() {
@@ -2755,7 +2892,7 @@ func (c *Controller) PauseGoal() bool {
 	return true
 }
 
-// GoalRuntime returns the active Goal's budget/runtime summary for frontends.
+// GoalRuntime returns the active Goal's usage/runtime summary for frontends.
 func (c *Controller) GoalRuntime() GoalRuntimeView {
 	return c.goals.runtimeView()
 }

@@ -7,8 +7,10 @@ import (
 	"strings"
 
 	"reasonix/internal/capability"
+	"reasonix/internal/event"
 	"reasonix/internal/evidence"
 	"reasonix/internal/skill"
+	"reasonix/internal/taskpolicy"
 	"reasonix/internal/tool"
 )
 
@@ -188,10 +190,14 @@ func (a *Agent) capabilityGateFailure() string {
 }
 
 // deliveryReviewGateFailure enforces risk-adaptive structured review after the
-// latest mutation. Low keeps the existing light review; Medium requires review;
-// High requires review + security_review with structured reports.
+// latest mutation. When TaskPolicy is set, its Review level is authoritative;
+// otherwise Delivery-profile medium/high risk keeps the legacy matrix.
 func (a *Agent) deliveryReviewGateFailure() string {
-	if a == nil || !a.deliveryProfile || a.evidence == nil {
+	if a == nil || a.evidence == nil {
+		return ""
+	}
+	// Without Delivery elevation or a forced TaskPolicy review, skip.
+	if !a.deliveryProfile && !(a.turnPolicySet && a.turnPolicy.RequiresIndependentReview()) {
 		return ""
 	}
 	if a.subagentDepth > 0 {
@@ -208,10 +214,24 @@ func (a *Agent) deliveryReviewGateFailure() string {
 	if !ok {
 		return ""
 	}
+	a.emitTurnPhase(event.TurnPhaseReviewing)
 	risk := a.evidence.MutationRiskAfter(mutation)
+	// TaskPolicy may force higher review than mutation-risk alone.
+	if a.turnPolicySet {
+		switch a.turnPolicy.Review {
+		case taskpolicy.ReviewForcedSecurity:
+			risk = evidence.RiskHigh
+		case taskpolicy.ReviewForced:
+			if risk < evidence.RiskMedium {
+				risk = evidence.RiskMedium
+			}
+		case taskpolicy.ReviewNone:
+			return ""
+		}
+	}
 	paths := productionPaths(a.evidence.PathsSince(mutation))
-	hasReviewTool := a.tools != nil && (toolPresent(a.tools, "review") || toolPresent(a.tools, "run_skill"))
-	hasSecurityTool := a.tools != nil && (toolPresent(a.tools, "security_review") || toolPresent(a.tools, "run_skill"))
+	hasReviewTool := a.tools != nil && (toolPresent(a.tools, "review") || toolPresent(a.tools, "run_skill") || toolPresent(a.tools, "use_capability"))
+	hasSecurityTool := a.tools != nil && (toolPresent(a.tools, "security_review") || toolPresent(a.tools, "run_skill") || toolPresent(a.tools, "use_capability"))
 	switch risk {
 	case evidence.RiskLow:
 		// Existing light review (read/diff) already checked elsewhere.
