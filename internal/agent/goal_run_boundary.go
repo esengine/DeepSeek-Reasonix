@@ -63,7 +63,7 @@ func (a *Agent) stopUnexecutedBoundaryCalls(state *runLoopState, calls []provide
 		return a.gracePause(state), true
 	case state.recoveryGraceRound:
 		if ctrl := a.recoveryEpisodeControl(); ctrl != nil {
-			_, _ = ctrl.ConsumeFinalization(a.recoveryTaskID)
+			_, _ = ctrl.ConsumeFinalization(a.recovery.taskID)
 		}
 		a.pairUnexecutedGraceCalls(calls, "blocked: Auto recovery already paused this turn. Do not call tools; the user will continue in the next message.")
 		a.contextManager().ObserveUsage(usage)

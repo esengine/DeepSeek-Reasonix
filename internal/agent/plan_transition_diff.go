@@ -49,9 +49,9 @@ func planFromTodos(todos []evidence.TodoItem, revision int) (plancontract.Plan, 
 // It lives beside the plan diff because that is the field most likely to grow.
 func (a *Agent) recoveryProposal(plan *toolCallPlan, episodeID, subject, preview string) RecoveryProposal {
 	return RecoveryProposal{
-		AgentID:        a.recoveryAgentID,
-		TaskID:         a.recoveryTaskID,
-		TaskScopeID:    recoveryTaskScopeID(a.deliveryScopeID, a.recoveryRunSeq.Load()),
+		AgentID:        a.recovery.agentID,
+		TaskID:         a.recovery.taskID,
+		TaskScopeID:    recoveryTaskScopeID(a.deliveryScopeID, a.recovery.runSeq.Load()),
 		EpisodeID:      episodeID,
 		TaskSummary:    a.recoveryTaskSummary,
 		Tool:           plan.evidenceName,

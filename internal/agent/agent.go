@@ -322,23 +322,9 @@ type Agent struct {
 	lastPrefixShape     PrefixShape
 	haveLastPrefixShape bool
 
-	// warnedMissingToolCallReasoning marks one active missing-reasoning incident
-	// within this agent. The legacy name is retained because the persisted state
-	// predates silent recovery; it now gates one automatic retry rather than a
-	// user-visible warning. A healthy tool-call turn clears it. Loop-owned;
-	// reset by SetSession.
-	warnedMissingToolCallReasoning bool
-	// missingReasoningWarnStateChecked avoids a file transaction on every
-	// healthy tool-call turn. It resets with the session so a new Agent can
-	// continue or confirm an incident persisted by an earlier process.
-	missingReasoningWarnStateChecked bool
-	// missingReasoningHealthyStreak provides the same three-turn anti-flapping
-	// policy when no cross-process state directory is configured.
-	missingReasoningHealthyStreak int
-	// missingReasoningWarnPendingResolveAt keeps a healthy observation retryable
-	// when its state write fails. The next missing turn retries that watermark
-	// before consulting the persisted incident and otherwise fails visible.
-	missingReasoningWarnPendingResolveAt time.Time
+	// missingReasoning is the live view of one missing-reasoning incident.
+	// Loop-owned; SetSession clears all of it but the resolve watermark.
+	missingReasoning missingReasoningWatch
 
 	// missingReasoningWarnState rate-limits recovery retries across sessions and
 	// processes by an opaque provider-configuration fingerprint (#7059). The
@@ -384,14 +370,8 @@ type Agent struct {
 	// Shared by root and sub-agents for the same controller task. nil disables
 	// recovery checks (Ask/YOLO, headless without wiring, or feature off).
 	recoveryGate RecoveryGate
-	// recoveryAgentID labels this agent on recovery cards (empty = root).
-	recoveryAgentID string
-	// recoveryTaskID isolates recovery state across concurrent top-level tasks.
-	// Empty shares the root task bucket.
-	recoveryTaskID string
-	// recoveryRunSeq gives ordinary (non-goal) runs a collision-free host scope.
-	// Goal runs use their stable delivery scope instead.
-	recoveryRunSeq atomic.Uint64
+	// recovery is who this agent is to the shared gate above.
+	recovery recoveryIdentity
 
 	// planModeReadOnlyTrust is retained for legacy controller wiring. The main
 	// Plan execution path no longer consults it.
@@ -717,8 +697,8 @@ func (a *Agent) SetRecoveryIdentity(agentID, taskID string) {
 	if a == nil {
 		return
 	}
-	a.recoveryAgentID = strings.TrimSpace(agentID)
-	a.recoveryTaskID = strings.TrimSpace(taskID)
+	a.recovery.agentID = strings.TrimSpace(agentID)
+	a.recovery.taskID = strings.TrimSpace(taskID)
 }
 
 // RecoveryGate returns the attached Auto Guard (may be nil).
@@ -839,9 +819,12 @@ func (a *Agent) SetSession(s *Session) {
 	a.sessCacheHit.Store(0)
 	a.sessCacheMiss.Store(0)
 	a.resetOutputBudgetState()
-	a.warnedMissingToolCallReasoning = false
-	a.missingReasoningWarnStateChecked = false
-	a.missingReasoningHealthyStreak = 0
+	// pendingResolveAt is deliberately not cleared: an unwritten resolve
+	// watermark belongs to the provider configuration, not to the conversation
+	// being replaced, and the next missing turn still owes it a retry.
+	a.missingReasoning.active = false
+	a.missingReasoning.stateRecorded = false
+	a.missingReasoning.healthyStreak = 0
 	a.repeatFailureCounts = nil
 	a.repeatFailureScope = ""
 	a.compactionMu.Lock()
@@ -1312,25 +1295,27 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		reasoningByteLimit = defaultReasoningByteLimit
 	}
 	a := &Agent{
-		prov:                      prov,
-		tools:                     tools,
-		session:                   session,
-		taskBudget:                runBudget{limit: normalizeTaskBudget(opts.TaskBudget)},
-		maxSteps:                  opts.MaxSteps,
-		maxStepsKey:               maxStepsKey,
-		reasoningByteLimit:        reasoningByteLimit,
-		maxOutputTokens:           opts.MaxOutputTokens,
-		temperature:               opts.Temperature,
-		pricing:                   opts.Pricing,
-		usageSource:               usageSourceOrDefault(opts.UsageSource, event.UsageSourceExecutor),
-		modelRef:                  strings.TrimSpace(opts.ModelRef),
-		sink:                      sink,
-		requireVisibleFinal:       opts.RequireVisibleFinal,
-		gate:                      gate,
-		extensions:                opts.Extensions,
-		recoveryGate:              opts.RecoveryGate,
-		recoveryAgentID:           strings.TrimSpace(opts.RecoveryAgentID),
-		recoveryTaskID:            strings.TrimSpace(opts.RecoveryTaskID),
+		prov:                prov,
+		tools:               tools,
+		session:             session,
+		taskBudget:          runBudget{limit: normalizeTaskBudget(opts.TaskBudget)},
+		maxSteps:            opts.MaxSteps,
+		maxStepsKey:         maxStepsKey,
+		reasoningByteLimit:  reasoningByteLimit,
+		maxOutputTokens:     opts.MaxOutputTokens,
+		temperature:         opts.Temperature,
+		pricing:             opts.Pricing,
+		usageSource:         usageSourceOrDefault(opts.UsageSource, event.UsageSourceExecutor),
+		modelRef:            strings.TrimSpace(opts.ModelRef),
+		sink:                sink,
+		requireVisibleFinal: opts.RequireVisibleFinal,
+		gate:                gate,
+		extensions:          opts.Extensions,
+		recoveryGate:        opts.RecoveryGate,
+		recovery: recoveryIdentity{
+			agentID: strings.TrimSpace(opts.RecoveryAgentID),
+			taskID:  strings.TrimSpace(opts.RecoveryTaskID),
+		},
 		readOnlyExecution:         opts.ReadOnlyExecution,
 		plannerMCPExecution:       opts.PlannerMCPExecution,
 		planModeReadOnlyTrust:     planModeReadOnlyTrust,
@@ -1475,7 +1460,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 			runMaxStepsKey = limit.key
 		}
 	}
-	a.recoveryRunSeq.Add(1)
+	a.recovery.runSeq.Add(1)
 	// All role settings participate in the workspace lease for the run; the
 	// exclusive write lock is still acquired lazily on the first real writer.
 	if a.workspaceLease != nil {
@@ -1529,94 +1514,6 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	state.runLimitHostOwned = runLimitHostOwned
 	state.workDurationMs = workDurationMs
 	return a.runToolLoop(ctx, state)
-}
-
-// observeMissingToolCallReasoning classifies a thinking-mode tool-call turn and
-// claims the single silent retry allowed for its active compatibility incident.
-// DeepSeek requires provider-issued thinking content to be replayed, so a
-// missing value is retried once before tools execute. Persistent broken rounds
-// use the existing exact-configuration cooldown; a healthy round resolves the
-// incident after three consecutive healthy turns and re-arms a future isolated
-// regression (#6259, #7059).
-func (a *Agent) observeMissingToolCallReasoning(calls []provider.ToolCall, reasoning string) (missing, shouldRetry bool) {
-	if len(calls) == 0 || !provider.WarnOnMissingToolCallReasoning(a.prov) {
-		return false, false
-	}
-	fingerprint := provider.MissingToolCallReasoningWarningFingerprint(a.prov)
-	observedAt := time.Now()
-	if strings.TrimSpace(reasoning) != "" {
-		if a.missingReasoningWarnState == nil {
-			if a.warnedMissingToolCallReasoning {
-				a.missingReasoningHealthyStreak++
-				if a.missingReasoningHealthyStreak >= missingReasoningHealthyResolveStreak {
-					a.warnedMissingToolCallReasoning = false
-					a.missingReasoningHealthyStreak = 0
-				}
-			}
-			return false, false
-		}
-		shouldResolve := !a.missingReasoningWarnStateChecked || a.warnedMissingToolCallReasoning
-		if shouldResolve {
-			result := missingReasoningResolveResult{Recorded: true, Resolved: true}
-			if pending := a.missingReasoningWarnPendingResolveAt; !pending.IsZero() {
-				result = a.missingReasoningWarnState.resolveAt(fingerprint, pending)
-				if result.Recorded {
-					a.missingReasoningWarnPendingResolveAt = time.Time{}
-				}
-			}
-			if result.Recorded {
-				result = a.missingReasoningWarnState.resolveAt(fingerprint, observedAt)
-			}
-			if !result.Recorded {
-				if observedAt.After(a.missingReasoningWarnPendingResolveAt) {
-					a.missingReasoningWarnPendingResolveAt = observedAt
-				}
-				a.warnedMissingToolCallReasoning = true
-				a.missingReasoningWarnStateChecked = false
-			} else if result.Resolved {
-				a.warnedMissingToolCallReasoning = false
-				a.missingReasoningWarnStateChecked = true
-			} else {
-				a.warnedMissingToolCallReasoning = true
-				a.missingReasoningWarnStateChecked = false
-			}
-		}
-		return false, false
-	}
-	a.missingReasoningHealthyStreak = 0
-	if s := a.missingReasoningWarnState; s != nil {
-		stateReady := true
-		alreadyActive := a.warnedMissingToolCallReasoning
-		if pending := a.missingReasoningWarnPendingResolveAt; !pending.IsZero() {
-			result := s.resolveAt(fingerprint, pending)
-			stateReady = result.Recorded
-			if result.Recorded {
-				a.missingReasoningWarnPendingResolveAt = time.Time{}
-				if result.Resolved {
-					alreadyActive = false
-					a.warnedMissingToolCallReasoning = false
-				}
-			}
-		}
-		claimed := stateReady && s.claimAt(fingerprint, observedAt)
-		if !claimed || alreadyActive {
-			// This exact configuration already attempted recovery for the active
-			// incident, so keep the empty-key fallback without doubling requests.
-			a.warnedMissingToolCallReasoning = true
-			a.missingReasoningWarnStateChecked = true
-			return true, false
-		}
-		if !stateReady {
-			a.missingReasoningWarnStateChecked = false
-		}
-	} else if a.warnedMissingToolCallReasoning {
-		return true, false
-	}
-	a.warnedMissingToolCallReasoning = true
-	if a.missingReasoningWarnPendingResolveAt.IsZero() {
-		a.missingReasoningWarnStateChecked = true
-	}
-	return true, true
 }
 
 // ReadinessResult is the host-consumable outcome of the Delivery final-answer

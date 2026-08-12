@@ -3,13 +3,13 @@
     "banner": 15,
     "commented-code": 0,
     "complexity": 2098,
-    "essay": 4090,
-    "file-size": 115222,
+    "essay": 4086,
+    "file-size": 115098,
     "function-size": 8936,
     "layering": 1,
     "marker": 0,
     "narrative": 64,
-    "struct-state": 156,
+    "struct-state": 149,
     "test-file-size": 69380
   },
   "files": {
@@ -465,10 +465,10 @@
     },
     "internal/agent/agent.go": {
       "complexity": 37,
-      "essay": 85,
-      "file-size": 2394,
+      "essay": 81,
+      "file-size": 2291,
       "function-size": 102,
-      "struct-state": 44
+      "struct-state": 37
     },
     "internal/agent/ask.go": {
       "essay": 4
@@ -1034,7 +1034,7 @@
     },
     "internal/config/edit.go": {
       "essay": 15,
-      "file-size": 1719
+      "file-size": 1698
     },
     "internal/config/edit_test.go": {
       "test-file-size": 2539
