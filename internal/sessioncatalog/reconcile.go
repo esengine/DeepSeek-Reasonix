@@ -282,9 +282,7 @@ func (c *Catalog) sessionPathLoop() {
 	}
 }
 
-// IndexSessionPath prioritizes a restored tab's exact session without walking
-// its directory. This keeps cold-start recovery independent from the size of
-// the history store.
+// IndexSessionPath indexes one session without walking its directory.
 func (c *Catalog) IndexSessionPath(ctx context.Context, target DirectoryTarget, path string) error {
 	path = filepath.Clean(strings.TrimSpace(path))
 	if path == "." || path == "" {
@@ -294,9 +292,7 @@ func (c *Catalog) IndexSessionPath(ctx context.Context, target DirectoryTarget, 
 	if target.Path == "." || target.Path == "" {
 		target.Path = filepath.Dir(path)
 	}
-	// Serialize exact indexing with reconciliation so an older scan cannot mark
-	// the new projection missing. Authoritative writes complete before this
-	// projection-only lock is acquired.
+	// Hold the directory lock so a concurrent scan cannot mark this row missing.
 	lock := c.directoryLock(target.Path)
 	lock.Lock()
 	defer lock.Unlock()
@@ -380,6 +376,8 @@ func recordFromOrder(target DirectoryTarget, info agent.SessionOrderInfo) Sessio
 			lastActivityAt = fileMS
 		}
 	}
+	// Real content only; failure/missing parent leaves RecoveryCopy false.
+	recoveryCopy := info.Recovered && agent.RecoveryBranchCoveredByParent(info.Path, target.Path)
 	return normalizeSessionRecord(SessionRecord{
 		Path:               info.Path,
 		Directory:          target.Path,
@@ -397,6 +395,7 @@ func recordFromOrder(target DirectoryTarget, info agent.SessionOrderInfo) Sessio
 		RecoveryReason:     info.RecoveryReason,
 		RecoveryDigest:     info.RecoveryDigest,
 		ParentID:           info.ParentID,
+		RecoveryCopy:       recoveryCopy,
 		ContentFingerprint: contentFingerprint,
 		MetaFingerprint:    metaFingerprint,
 		Health:             HealthOK,
@@ -623,8 +622,7 @@ func (c *Catalog) repairSession(workerCtx context.Context, path string) {
 	}
 	ctx, cancel := context.WithTimeout(workerCtx, 30*time.Second)
 	defer cancel()
-	// LoadSessionDisplayMessages is not yet context-aware; check cancellation
-	// before and after so shutdown can abandon the result without writing.
+	// LoadSessionDisplayMessages is not yet context-aware; check before/after.
 	msgs, _, _, err := agent.LoadSessionDisplayMessages(path)
 	if ctx.Err() != nil || workerCtx.Err() != nil {
 		return
@@ -664,12 +662,14 @@ func (c *Catalog) applyRepairResult(ctx context.Context, path, preview string, t
 		return err
 	}
 	if valid {
+		recoveryCopy := agent.RecoveryBranchCoveredByParent(path, filepath.Dir(path))
 		if _, err := tx.ExecContext(ctx, `UPDATE catalog_sessions SET preview=?,turns=?,turns_state='valid',
-            health='ok',meta_fingerprint=? WHERE path=?`, preview, turns, fileFingerprint(agent.BranchMetaPath(path)), path); err != nil {
+            health='ok',recovery_copy=?,meta_fingerprint=? WHERE path=?`,
+			preview, turns, boolToInt(recoveryCopy), fileFingerprint(agent.BranchMetaPath(path)), path); err != nil {
 			_ = tx.Rollback()
 			return err
 		}
-	} else if _, err := tx.ExecContext(ctx, `UPDATE catalog_sessions SET turns_state='corrupt',health='corrupt' WHERE path=?`, path); err != nil {
+	} else if _, err := tx.ExecContext(ctx, `UPDATE catalog_sessions SET turns_state='corrupt',health='corrupt',recovery_copy=0 WHERE path=?`, path); err != nil {
 		_ = tx.Rollback()
 		return err
 	}

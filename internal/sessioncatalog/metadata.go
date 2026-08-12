@@ -55,11 +55,14 @@ func (c *Catalog) SyncMetadata(ctx context.Context, projects []ProjectRecord, to
             turns,turns_state,created_at,last_activity_at,recovery_state,health,metadata_present
         )
         SELECT ?,?,?,?,?,?,?,
-            COALESCE((SELECT SUM(CASE WHEN turns_state='valid' THEN turns ELSE 0 END) FROM catalog_sessions
-                WHERE scope=? AND workspace_root=? AND topic_id=?),0),
+			COALESCE((SELECT MAX(
+				COALESCE(SUM(CASE WHEN recovery_copy=0 AND recovered=0 AND turns_state='valid' THEN turns ELSE 0 END),0),
+				COALESCE(MAX(CASE WHEN recovery_copy=0 AND recovered=1 AND turns_state='valid' THEN turns ELSE 0 END),0)
+			) FROM catalog_sessions WHERE scope=? AND workspace_root=? AND topic_id=?),0),
             COALESCE((SELECT CASE
-                WHEN SUM(CASE WHEN turns_state='corrupt' THEN 1 ELSE 0 END)>0 THEN 'corrupt'
-                WHEN SUM(CASE WHEN turns_state='unknown' THEN 1 ELSE 0 END)>0 THEN 'unknown'
+                WHEN SUM(CASE WHEN recovery_copy=0 AND turns_state='corrupt' THEN 1 ELSE 0 END)>0 THEN 'corrupt'
+                WHEN SUM(CASE WHEN recovery_copy=0 AND turns_state='unknown' THEN 1 ELSE 0 END)>0 THEN 'unknown'
+                WHEN SUM(CASE WHEN recovery_copy=0 THEN 1 ELSE 0 END)=0 AND COUNT(*)>0 THEN 'valid'
                 WHEN COUNT(*)=0 THEN 'unknown'
                 ELSE 'valid' END
                 FROM catalog_sessions WHERE scope=? AND workspace_root=? AND topic_id=?),'unknown'),
@@ -67,10 +70,13 @@ func (c *Catalog) SyncMetadata(ctx context.Context, projects []ProjectRecord, to
                 WHERE scope=? AND workspace_root=? AND topic_id=?),0),
             COALESCE((SELECT MAX(last_activity_at) FROM catalog_sessions
                 WHERE scope=? AND workspace_root=? AND topic_id=?),0),
-            '',
             COALESCE((SELECT CASE
-                WHEN SUM(CASE WHEN health='corrupt' THEN 1 ELSE 0 END)>0 THEN 'corrupt'
-                WHEN SUM(CASE WHEN health='missing' THEN 1 ELSE 0 END)>0 THEN 'missing'
+                WHEN COUNT(*)>0 AND SUM(CASE WHEN recovery_copy=0 THEN 1 ELSE 0 END)=0 THEN 'recovery_only'
+                ELSE '' END
+                FROM catalog_sessions WHERE scope=? AND workspace_root=? AND topic_id=?),''),
+            COALESCE((SELECT CASE
+                WHEN SUM(CASE WHEN recovery_copy=0 AND health='corrupt' THEN 1 ELSE 0 END)>0 THEN 'corrupt'
+                WHEN SUM(CASE WHEN recovery_copy=0 AND health='missing' THEN 1 ELSE 0 END)>0 THEN 'missing'
                 ELSE 'ok' END
                 FROM catalog_sessions WHERE scope=? AND workspace_root=? AND topic_id=?),'ok'),
             1
@@ -83,12 +89,14 @@ func (c *Catalog) SyncMetadata(ctx context.Context, projects []ProjectRecord, to
                 THEN excluded.last_activity_at ELSE catalog_topics.last_activity_at END,
             turns=CASE WHEN excluded.turns>0 THEN excluded.turns ELSE catalog_topics.turns END,
             turns_state=CASE WHEN excluded.turns_state<>'' AND excluded.turns_state<>'unknown'
-                THEN excluded.turns_state ELSE catalog_topics.turns_state END`,
+                THEN excluded.turns_state ELSE catalog_topics.turns_state END,
+            recovery_state=excluded.recovery_state`,
 			topic.Scope, topic.WorkspaceRoot, topic.TopicID, topic.Title,
 			topic.TitleSource, topic.Pinned, topic.SortOrder,
 			topic.Scope, topic.WorkspaceRoot, topic.TopicID,
 			topic.Scope, topic.WorkspaceRoot, topic.TopicID,
 			topic.CreatedAt, topic.Scope, topic.WorkspaceRoot, topic.TopicID,
+			topic.Scope, topic.WorkspaceRoot, topic.TopicID,
 			topic.Scope, topic.WorkspaceRoot, topic.TopicID,
 			topic.Scope, topic.WorkspaceRoot, topic.TopicID); err != nil {
 			_ = tx.Rollback()

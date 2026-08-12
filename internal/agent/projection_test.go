@@ -541,10 +541,9 @@ func TestCompactKeepsMidSessionUserTurns(t *testing.T) {
 		{Role: provider.RoleUser, Content: "next"},
 		{Role: provider.RoleAssistant, Content: "ok"},
 	}}
-	// Summarizer carries the mid-session fact into the single rolling digest.
-	// No early-user-turn hoist: only the stable prefix (system + first user) is
-	// kept verbatim; mid-session user turns in the fold region merge into the summary.
-	a := New(&fakeProvider{reply: "Standing facts: always use pnpm not npm"}, tool.NewRegistry(), sess,
+	// The summarizer is given a reply that drops the fact entirely: a mid-session
+	// user turn must survive on its own, never on the digest having captured it.
+	a := New(&fakeProvider{reply: "Standing facts: none"}, tool.NewRegistry(), sess,
 		Options{ContextWindow: window, CompactRatio: 0.85, RecentKeep: 2}, event.Discard)
 
 	if err := a.compact(context.Background(), "manual", "", true); err != nil {
@@ -580,11 +579,11 @@ func TestCompactKeepsMidSessionUserTurns(t *testing.T) {
 	if !projFirst {
 		t.Fatalf("fixed early user turn missing from projection: %+v", proj)
 	}
-	if projMidVerbatim {
-		t.Fatalf("mid-session user turn must fold into summary, not stay verbatim: %+v", proj)
+	if !projMidVerbatim {
+		t.Fatalf("mid-session user turn must stay verbatim, not depend on the digest: %+v", proj)
 	}
 	if !strings.Contains(joinContents(proj), "pnpm") {
-		t.Fatalf("mid-session fact missing from rolling summary: %+v", proj)
+		t.Fatalf("mid-session fact lost from projection: %+v", proj)
 	}
 	if strings.Contains(joinContents(proj), big) {
 		t.Errorf("assistant/tool work was not folded out of projection")

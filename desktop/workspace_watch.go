@@ -7,7 +7,6 @@ package main
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -16,6 +15,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"reasonix/internal/event"
 	"reasonix/internal/fileref"
+	"reasonix/internal/gitcmd"
 )
 
 const (
@@ -254,7 +254,10 @@ func gitMetadataDirsForWorkspace(root string) []string {
 	var dirs []string
 	for _, flag := range []string{"--git-dir", "--git-common-dir"} {
 		ctx, cancel := context.WithTimeout(context.Background(), workspaceGitProbeLimit)
-		cmd := exec.CommandContext(ctx, "git", "-C", root, "rev-parse", flag)
+		// gitcmd.Command applies CREATE_NO_WINDOW / HideWindow on Windows so
+		// these startup probes do not flash console windows, and keeps the
+		// credential-filtered env plus maintenance/fsmonitor hardening.
+		cmd := gitcmd.Command(ctx, root, "rev-parse", flag)
 		out, err := cmd.Output()
 		cancel()
 		if err != nil {

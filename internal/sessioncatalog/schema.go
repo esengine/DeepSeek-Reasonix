@@ -101,6 +101,10 @@ CREATE INDEX IF NOT EXISTS idx_catalog_sessions_history
 ON catalog_sessions(scope, workspace_root, last_activity_at DESC, path ASC);
 `
 
+const migrationV4 = `
+ALTER TABLE catalog_sessions ADD COLUMN recovery_copy INTEGER NOT NULL DEFAULT 0;
+`
+
 func sessionMigrations() []projectiondb.Migration {
 	return []projectiondb.Migration{
 		{Version: 1, Apply: func(ctx context.Context, tx *sql.Tx) error {
@@ -113,6 +117,10 @@ func sessionMigrations() []projectiondb.Migration {
 		}},
 		{Version: 3, Apply: func(ctx context.Context, tx *sql.Tx) error {
 			_, err := tx.ExecContext(ctx, migrationV3)
+			return err
+		}},
+		{Version: 4, Apply: func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, migrationV4)
 			return err
 		}},
 	}

@@ -337,9 +337,9 @@ func (c *Catalog) upsertSessions(ctx context.Context, records []SessionRecord, g
 		if _, err := tx.ExecContext(ctx, `INSERT INTO catalog_sessions(
             path,directory,scope,workspace_root,topic_id,topic_title,custom_title,
             created_at,last_activity_at,preview,turns,turns_state,recovered,
-            recovery_reason,recovery_digest,parent_id,content_fingerprint,
+            recovery_reason,recovery_digest,parent_id,recovery_copy,content_fingerprint,
             meta_fingerprint,health,missing_since,seen_generation
-        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(path) DO UPDATE SET
             directory=excluded.directory, scope=excluded.scope,
             workspace_root=excluded.workspace_root, topic_id=excluded.topic_id,
@@ -349,6 +349,7 @@ func (c *Catalog) upsertSessions(ctx context.Context, records []SessionRecord, g
             turns_state=excluded.turns_state, recovered=excluded.recovered,
             recovery_reason=excluded.recovery_reason,
             recovery_digest=excluded.recovery_digest, parent_id=excluded.parent_id,
+            recovery_copy=excluded.recovery_copy,
             content_fingerprint=excluded.content_fingerprint,
             meta_fingerprint=excluded.meta_fingerprint, health=excluded.health,
             missing_since=0, seen_generation=MAX(catalog_sessions.seen_generation, excluded.seen_generation)`,
@@ -356,7 +357,7 @@ func (c *Catalog) upsertSessions(ctx context.Context, records []SessionRecord, g
 			record.TopicID, record.TopicTitle, record.CustomTitle, record.CreatedAt,
 			record.LastActivityAt, record.Preview, record.Turns, record.TurnsState,
 			record.Recovered, record.RecoveryReason, record.RecoveryDigest,
-			record.ParentID, record.ContentFingerprint, record.MetaFingerprint,
+			record.ParentID, boolToInt(record.RecoveryCopy), record.ContentFingerprint, record.MetaFingerprint,
 			record.Health, 0, generation); err != nil {
 			_ = tx.Rollback()
 			return err
@@ -394,21 +395,28 @@ func recomputeTopic(ctx context.Context, tx *sql.Tx, key TopicKey) error {
 		_, err := tx.ExecContext(ctx, `DELETE FROM catalog_topics WHERE scope=? AND workspace_root=? AND topic_id=?`, key.Scope, key.WorkspaceRoot, key.TopicID)
 		return err
 	}
+	// Covered copies skip turn/health totals but still update recency. Adopted
+	// branches are alternate continuations, so preserve the pre-catalog contract:
+	// max(sum(normal turns), max(adopted recovery turns)).
 	_, err := tx.ExecContext(ctx, `INSERT INTO catalog_topics(
         scope,workspace_root,topic_id,title,turns,turns_state,created_at,
         last_activity_at,recovery_state,health
     ) SELECT ?,?,?,
         COALESCE(NULLIF((SELECT COALESCE(NULLIF(custom_title,''), NULLIF(topic_title,''), preview, '')
             FROM catalog_sessions WHERE scope=? AND workspace_root=? AND topic_id=?
-            ORDER BY last_activity_at DESC, path ASC LIMIT 1),''), ?),
-        COALESCE(SUM(CASE WHEN turns_state='valid' THEN turns ELSE 0 END),0),
-        CASE WHEN SUM(CASE WHEN turns_state='corrupt' THEN 1 ELSE 0 END)>0 THEN 'corrupt'
-             WHEN SUM(CASE WHEN turns_state='unknown' THEN 1 ELSE 0 END)>0 THEN 'unknown'
+            ORDER BY recovery_copy ASC, last_activity_at DESC, path ASC LIMIT 1),''), ?),
+		MAX(
+			COALESCE(SUM(CASE WHEN recovery_copy=0 AND recovered=0 AND turns_state='valid' THEN turns ELSE 0 END),0),
+			COALESCE(MAX(CASE WHEN recovery_copy=0 AND recovered=1 AND turns_state='valid' THEN turns ELSE 0 END),0)
+		),
+        CASE WHEN SUM(CASE WHEN recovery_copy=0 AND turns_state='corrupt' THEN 1 ELSE 0 END)>0 THEN 'corrupt'
+             WHEN SUM(CASE WHEN recovery_copy=0 AND turns_state='unknown' THEN 1 ELSE 0 END)>0 THEN 'unknown'
+             WHEN SUM(CASE WHEN recovery_copy=0 THEN 1 ELSE 0 END)=0 THEN 'valid'
              ELSE 'valid' END,
         COALESCE(MIN(NULLIF(created_at,0)),0), COALESCE(MAX(last_activity_at),0),
-        CASE WHEN SUM(CASE WHEN recovered=1 THEN 1 ELSE 0 END)=COUNT(*) THEN 'recovery_only' ELSE '' END,
-        CASE WHEN SUM(CASE WHEN health='corrupt' THEN 1 ELSE 0 END)>0 THEN 'corrupt'
-             WHEN SUM(CASE WHEN health='missing' THEN 1 ELSE 0 END)>0 THEN 'missing'
+        CASE WHEN SUM(CASE WHEN recovery_copy=0 THEN 1 ELSE 0 END)=0 THEN 'recovery_only' ELSE '' END,
+        CASE WHEN SUM(CASE WHEN recovery_copy=0 AND health='corrupt' THEN 1 ELSE 0 END)>0 THEN 'corrupt'
+             WHEN SUM(CASE WHEN recovery_copy=0 AND health='missing' THEN 1 ELSE 0 END)>0 THEN 'missing'
              ELSE 'ok' END
       FROM catalog_sessions WHERE scope=? AND workspace_root=? AND topic_id=?
     ON CONFLICT(scope,workspace_root,topic_id) DO UPDATE SET
@@ -419,6 +427,13 @@ func recomputeTopic(ctx context.Context, tx *sql.Tx, key TopicKey) error {
 		key.Scope, key.WorkspaceRoot, key.TopicID, key.TopicID,
 		key.Scope, key.WorkspaceRoot, key.TopicID)
 	return err
+}
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func bumpRevision(ctx context.Context, tx *sql.Tx) (uint64, error) {
@@ -622,6 +637,13 @@ func (c *Catalog) GetTopic(ctx context.Context, key TopicKey) (TopicRecord, bool
 		return TopicRecord{Sessions: []SessionRecord{}}, false, nil
 	}
 	return item, true, nil
+}
+
+// EncodeTopicCursor builds an exclusive ListTopics keyset cursor after the
+// given topic position. Desktop post-filters recovery-only rows and needs the
+// same cursor shape catalog.ListTopics emits.
+func EncodeTopicCursor(pinned int, lastActivityAt int64, topicID string) string {
+	return encodeCursor(pageCursor{Pinned: pinned, Activity: lastActivityAt, TopicID: topicID})
 }
 
 func encodeCursor(cursor pageCursor) string {

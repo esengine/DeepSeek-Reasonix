@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	SchemaVersion = 3
+	SchemaVersion = 4
 	DefaultLimit  = 50
 	MaxLimit      = 200
 )
@@ -100,26 +100,28 @@ type TopicMetadata struct {
 }
 
 type SessionRecord struct {
-	Path               string     `json:"path"`
-	Directory          string     `json:"directory"`
-	Scope              string     `json:"scope"`
-	WorkspaceRoot      string     `json:"workspaceRoot,omitempty"`
-	TopicID            string     `json:"topicId,omitempty"`
-	TopicTitle         string     `json:"topicTitle,omitempty"`
-	CustomTitle        string     `json:"customTitle,omitempty"`
-	CreatedAt          int64      `json:"createdAt,omitempty"`
-	LastActivityAt     int64      `json:"lastActivityAt,omitempty"`
-	Preview            string     `json:"preview,omitempty"`
-	Turns              int        `json:"turns"`
-	TurnsState         TurnsState `json:"turnsState"`
-	Recovered          bool       `json:"recovered,omitempty"`
-	RecoveryReason     string     `json:"recoveryReason,omitempty"`
-	RecoveryDigest     string     `json:"recoveryDigest,omitempty"`
-	ParentID           string     `json:"parentId,omitempty"`
-	ContentFingerprint string     `json:"contentFingerprint,omitempty"`
-	MetaFingerprint    string     `json:"metaFingerprint,omitempty"`
-	Health             Health     `json:"health"`
-	MissingSince       int64      `json:"missingSince,omitempty"`
+	Path           string     `json:"path"`
+	Directory      string     `json:"directory"`
+	Scope          string     `json:"scope"`
+	WorkspaceRoot  string     `json:"workspaceRoot,omitempty"`
+	TopicID        string     `json:"topicId,omitempty"`
+	TopicTitle     string     `json:"topicTitle,omitempty"`
+	CustomTitle    string     `json:"customTitle,omitempty"`
+	CreatedAt      int64      `json:"createdAt,omitempty"`
+	LastActivityAt int64      `json:"lastActivityAt,omitempty"`
+	Preview        string     `json:"preview,omitempty"`
+	Turns          int        `json:"turns"`
+	TurnsState     TurnsState `json:"turnsState"`
+	Recovered      bool       `json:"recovered,omitempty"`
+	RecoveryReason string     `json:"recoveryReason,omitempty"`
+	RecoveryDigest string     `json:"recoveryDigest,omitempty"`
+	ParentID       string     `json:"parentId,omitempty"`
+	// RecoveryCopy is true only when real content is still covered by the parent.
+	RecoveryCopy       bool   `json:"recoveryCopy,omitempty"`
+	ContentFingerprint string `json:"contentFingerprint,omitempty"`
+	MetaFingerprint    string `json:"metaFingerprint,omitempty"`
+	Health             Health `json:"health"`
+	MissingSince       int64  `json:"missingSince,omitempty"`
 }
 
 type TopicKey struct {
@@ -176,13 +178,12 @@ type SessionPage struct {
 	StaleCursor bool            `json:"staleCursor,omitempty"`
 }
 
-// DefaultPath returns the disposable session catalog path under CacheDir.
-// When the OS cache directory is unavailable it returns "" so callers fall
-// back to an in-memory projection instead of writing into the project tree.
+// DefaultPath is the disposable cache file under CacheDir ("" when unavailable).
+// v2.sqlite is independent of the 1.24.0 v1 cache so processes cannot cross-write.
 func DefaultPath() string {
 	cache := strings.TrimSpace(config.CacheDir())
 	if cache == "" {
 		return ""
 	}
-	return filepath.Join(cache, "session-catalog", "v1.sqlite")
+	return filepath.Join(cache, "session-catalog", "v2.sqlite")
 }

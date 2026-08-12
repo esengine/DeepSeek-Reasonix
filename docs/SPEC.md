@@ -338,13 +338,39 @@ when the sole automatic threshold is crossed.
   detailed implementation contract.
 
 **What survives a fold.** Verbatim, at every compaction: the system prompt, the
-first user turn when it is small enough to be a brief, the first few small user
-turns of the fold region, and the recent tail. The messages the keep policy
-protects also survive, though a failure with a recorded execution keeps only its
-failure-carrying lines. Everything else is **best-effort** — it reaches the summarizer and survives
-only as well as the digest captured it. That includes small user turns beyond the
-hoisted window, so a durable constraint is safest restated in a recent turn
-rather than assumed to hold from turn 4 of a long session.
+first user turn when it is small enough to be a brief, **every user turn in the
+fold region that fits the retention budget**, and the recent tail. The messages
+the keep policy protects also survive, though a failure with a recorded execution
+keeps only its failure-carrying lines. Everything else is **best-effort** — it
+reaches the summarizer and survives only as well as the digest captured it.
+
+That protection has to hold across *repeated* folds, which is why a stored
+projection keeps the host's `ToolExecution` record while a provider request does
+not. `KeepErrors` classifies a failure from that record rather than from text,
+because a real `go test` log opens with `=== RUN` and no prefix match can see
+it; a projection written without the record would leave the *next* fold unable
+to classify what the current one just protected. The strip therefore belongs at
+the provider boundary — `ModelMessages` — and not at projection write time,
+where `ProjectionMessages` preserves it.
+
+User turns are held to a different standard than the work they govern. A
+constraint stated at turn 4 ("do not change the public API") exists nowhere but
+the transcript, while the code it constrains stays re-derivable from the
+workspace — so the asymmetry of loss, not the token count, decides. Retention is
+bounded rather than unconditional, because hoisting user turns without a budget
+is what padded an earlier revision's candidates past the acceptance ceiling,
+failing compaction outright instead of degrading it. One turn may spend up to
+1500 tokens and all of them together `min(8192, window×5%)`, oldest first — the
+recent tail already covers the newest turns, and an old turn has survived more
+folds than a new one. Unlike the keep policy this is not scoped to the latest
+digest, so a constraint keeps its protection across repeated compaction.
+
+A turn past those bounds folds like any other content. Prefix it with `[[keep]]`
+(keep policy `user_marked`, on by default) to hold it verbatim regardless of
+size. That drop is never silent: compaction telemetry carries `user_kept` and
+`user_dropped` counts, and a committed checkpoint that had to fold one of your
+turns emits a warning naming `[[keep]]` — the projection reads as complete
+either way, so the count is the only thing that distinguishes them.
 
 Two properties bound that loss. Each fold re-derives its digest from the
 canonical transcript rather than from the previous digest, so digests do not

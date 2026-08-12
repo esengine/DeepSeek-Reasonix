@@ -40,7 +40,7 @@ non-destructively when `<Reasonix home>/.env` is missing them.
 | Sessions | `<state root>/sessions/` |
 | Archives | `<state root>/archive/` |
 | Memory | `<state root>/memory/` and `<state root>/projects/` |
-| Disposable session catalog | `<cache root>/session-catalog/v1.sqlite` |
+| Disposable session catalog | `<cache root>/session-catalog/v2.sqlite` |
 | Disposable history search catalog | `<cache root>/history-search/v1.sqlite` |
 | Disposable usage catalog | `<cache root>/usage-catalog/v1.sqlite` |
 | Disposable task catalog | `<cache root>/task-catalog/v1.sqlite` |

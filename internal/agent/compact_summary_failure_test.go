@@ -71,7 +71,7 @@ func foldRegionOf(a *Agent) []provider.Message {
 	if !ok {
 		return nil
 	}
-	_, _, _, fold := a.partitionFoldForProjection(msgs[head:start])
+	_, fold, _ := a.partitionFoldForProjection(msgs[head:start])
 	return fold
 }
 

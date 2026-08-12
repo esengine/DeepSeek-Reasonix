@@ -295,7 +295,7 @@ func (a *App) metadataTopicPage(req ProjectTopicPageRequest) ProjectTopicPage {
 	return page
 }
 
-func (a *App) projectNodeFromCatalogTopic(topic sessioncatalog.TopicRecord, topicOverlays, sessionOverlays map[string]catalogRuntimeOverlay) ProjectNode {
+func (a *App) projectNodeFromCatalogTopic(topic sessioncatalog.TopicRecord, topicOverlays, sessionOverlays map[string]catalogRuntimeOverlay) (ProjectNode, bool) {
 	kind := "topic"
 	if topic.Scope == "global" {
 		kind = "global_topic"
@@ -309,10 +309,31 @@ func (a *App) projectNodeFromCatalogTopic(topic sessioncatalog.TopicRecord, topi
 		Pinned: topic.Pinned, Open: overlay.open, Running: overlay.running, Status: overlay.status,
 		Children: []ProjectNode{},
 	}
-	if len(topic.Sessions) <= 1 {
-		return node
-	}
+	visible := make([]sessioncatalog.SessionRecord, 0, len(topic.Sessions))
+	runtimeSessions := make([]runtimeSessionStatus, 0, len(topic.Sessions))
 	for _, session := range topic.Sessions {
+		sessionOverlay := sessionOverlays[sessionRuntimeKey(session.Path)]
+		// Idle covered recovery copies stay out of the ordinary tree. Open or
+		// running copies remain reachable so the user can still inspect them.
+		if session.RecoveryCopy && !sessionOverlay.open && !sessionOverlay.running {
+			continue
+		}
+		visible = append(visible, session)
+		runtimeSessions = append(runtimeSessions, runtimeSessionStatus{
+			open: sessionOverlay.open, running: sessionOverlay.running,
+		})
+	}
+	summary := topicSummaryFromCatalogTopic(topic, visible)
+	if topicHiddenAsRecoveryOnly(summary, topic.Pinned, append(runtimeSessions, runtimeSessionStatus{
+		open: overlay.open, running: overlay.running,
+	})) {
+		return ProjectNode{Children: []ProjectNode{}}, false
+	}
+	// A single effective session collapses to a normal topic row.
+	if len(visible) <= 1 {
+		return node, true
+	}
+	for _, session := range visible {
 		sessionKind := "session"
 		if topic.Scope == "global" {
 			sessionKind = "global_session"
@@ -337,7 +358,36 @@ func (a *App) projectNodeFromCatalogTopic(topic sessioncatalog.TopicRecord, topi
 			Children: []ProjectNode{},
 		})
 	}
-	return node
+	return node, true
+}
+
+func topicSummaryFromCatalogTopic(topic sessioncatalog.TopicRecord, visible []sessioncatalog.SessionRecord) topicSummary {
+	summary := topicSummary{turns: topic.Turns, lastActivityAt: topic.LastActivityAt}
+	if len(visible) == 0 {
+		// Catalog still has only covered recovery copies for this topic.
+		if topic.RecoveryState == "recovery_only" {
+			summary.hasRecoveryOnly = true
+		}
+		return summary
+	}
+	for _, session := range visible {
+		if session.RecoveryCopy {
+			summary.hasRecoveryOnly = true
+			continue
+		}
+		if session.Recovered || strings.TrimSpace(session.RecoveryDigest) != "" {
+			summary.hasAdoptedRecovery = true
+			if session.Turns > summary.adoptedRecoveryTurns {
+				summary.adoptedRecoveryTurns = session.Turns
+			}
+			continue
+		}
+		summary.hasNormalSession = true
+	}
+	if topic.RecoveryState == "recovery_only" && !summary.hasNormalSession && !summary.hasAdoptedRecovery {
+		summary.hasRecoveryOnly = true
+	}
+	return summary
 }
 
 func (a *App) ListProjectTopics(req ProjectTopicPageRequest) (ProjectTopicPage, error) {
@@ -346,20 +396,56 @@ func (a *App) ListProjectTopics(req ProjectTopicPageRequest) (ProjectTopicPage, 
 	if catalog == nil {
 		return a.metadataTopicPage(req), nil
 	}
-	page, err := catalog.ListTopics(a.bootContext(), sessioncatalog.TopicPageRequest{
-		Scope: req.Scope, WorkspaceRoot: req.WorkspaceRoot, Cursor: req.Cursor,
-		Limit: req.Limit, Query: req.Query, TimeFilter: req.TimeFilter,
-	})
-	if err != nil {
-		return out, err
+	limit := req.Limit
+	if limit <= 0 {
+		limit = sessioncatalog.DefaultLimit
+	}
+	if limit > sessioncatalog.MaxLimit {
+		limit = sessioncatalog.MaxLimit
 	}
 	topicOverlays, sessionOverlays := a.catalogRuntimeOverlays()
-	for _, topic := range page.Items {
-		out.Items = append(out.Items, a.projectNodeFromCatalogTopic(topic, topicOverlays, sessionOverlays))
+	cursor := req.Cursor
+	// Keep scanning past pages that are entirely idle recovery copies so the
+	// sidebar never shows an empty "no sessions" state when later pages still
+	// have ordinary topics.
+	for {
+		page, err := catalog.ListTopics(a.bootContext(), sessioncatalog.TopicPageRequest{
+			Scope: req.Scope, WorkspaceRoot: req.WorkspaceRoot, Cursor: cursor,
+			Limit: limit, Query: req.Query, TimeFilter: req.TimeFilter,
+		})
+		if err != nil {
+			return out, err
+		}
+		out.Revision = page.Revision
+		for i, topic := range page.Items {
+			node, ok := a.projectNodeFromCatalogTopic(topic, topicOverlays, sessionOverlays)
+			if !ok {
+				continue
+			}
+			out.Items = append(out.Items, node)
+			if len(out.Items) == limit {
+				if i+1 < len(page.Items) || page.NextCursor != "" {
+					out.NextCursor = encodeProjectTopicCursor(topic)
+				}
+				return out, nil
+			}
+		}
+		if page.NextCursor == "" {
+			out.NextCursor = ""
+			return out, nil
+		}
+		cursor = page.NextCursor
 	}
-	out.NextCursor = page.NextCursor
-	out.Revision = page.Revision
-	return out, nil
+}
+
+func encodeProjectTopicCursor(topic sessioncatalog.TopicRecord) string {
+	// Reuse the catalog's keyset cursor encoding by asking for the next page
+	// after this topic. ListTopics accepts the same opaque cursor it emits.
+	pinned := 0
+	if topic.Pinned {
+		pinned = 1
+	}
+	return sessioncatalog.EncodeTopicCursor(pinned, topic.LastActivityAt, topic.TopicID)
 }
 
 func (a *App) GetTopicSummary(key ProjectTopicKey) (ProjectNode, error) {
@@ -372,7 +458,10 @@ func (a *App) GetTopicSummary(key ProjectTopicKey) (ProjectNode, error) {
 		}
 		if ok {
 			topicOverlays, sessionOverlays := a.catalogRuntimeOverlays()
-			return a.projectNodeFromCatalogTopic(topic, topicOverlays, sessionOverlays), nil
+			if node, visible := a.projectNodeFromCatalogTopic(topic, topicOverlays, sessionOverlays); visible {
+				return node, nil
+			}
+			return ProjectNode{Children: []ProjectNode{}}, nil
 		}
 	}
 	page, err := a.ListProjectTopics(ProjectTopicPageRequest{
@@ -472,6 +561,10 @@ func (a *App) catalogSessionPathForTopic(scope, workspaceRoot, topicID string) s
 		return ""
 	}
 	sort.SliceStable(topic.Sessions, func(i, j int) bool {
+		// Prefer real conversations over idle covered recovery copies.
+		if topic.Sessions[i].RecoveryCopy != topic.Sessions[j].RecoveryCopy {
+			return !topic.Sessions[i].RecoveryCopy
+		}
 		return topic.Sessions[i].LastActivityAt > topic.Sessions[j].LastActivityAt
 	})
 	return topic.Sessions[0].Path

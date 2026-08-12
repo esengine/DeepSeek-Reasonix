@@ -142,6 +142,8 @@ type CompactionTelemetry struct {
 	FoldTokens        int    `json:"fold_tokens"` // summarizer input after any shortening
 	Spans             int    `json:"spans"`       // summarizer calls the fold needed; 1 unless it was split
 	ProjectionTokens  int    `json:"projection_tokens"`
+	UserTurnsKept     int    `json:"user_turns_kept"`
+	UserTurnsDropped  int    `json:"user_turns_dropped"` // past the retention budget, now summary-only
 	InputTokens       int    `json:"input_tokens"`
 	OutputTokens      int    `json:"output_tokens"`
 	CacheHitTokens    int    `json:"cache_hit_tokens"`

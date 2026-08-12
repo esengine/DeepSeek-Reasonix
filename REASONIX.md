@@ -27,6 +27,12 @@ agent. It is the Reasonix analog of Claude Code's CLAUDE.md.
   (`internal/boot/effect_test.go` pattern): assert what actually reaches the
   provider request, frontend sink, or trajectory through the real `boot.Build`
   assembly. Component correctness is not system effectiveness.
+- A mutex- or atomic-guarded struct is ratcheted on its **scalar** field count
+  (`struct-state`), not its total: independent flags multiply into states no
+  type records as legal. Fixing a boundary case by adding one more `bool` is
+  the move this blocks — group by lifetime into a named sub-state instead
+  (`agent.perTurnState` is the pattern), which costs one field and removes the
+  whole product.
 
 ## Comments
 

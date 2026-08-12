@@ -282,39 +282,6 @@ const interruptedToolResult = "[no result: the previous turn was interrupted bef
 // "defensive wire prep" rather than "session mutation".
 func SanitizeToolPairing(msgs []Message) []Message { return NormalizeMessages(msgs) }
 
-// ModelMessages removes durable display-only records before a request is
-// handed to any provider. Healthy sessions without such records keep their
-// original backing slice, preserving the allocation and prompt-cache fast path.
-func ModelMessages(msgs []Message) []Message {
-	needsCopy := false
-	for _, m := range msgs {
-		if m.LocalOnly || m.RawContent != "" || m.ProviderContent != "" || m.DecisionReceipt != nil || len(m.DecisionReceipts) > 0 || m.ToolExecution != nil {
-			needsCopy = true
-			break
-		}
-	}
-	if !needsCopy {
-		return msgs
-	}
-	out := make([]Message, 0, len(msgs))
-	for _, candidate := range msgs {
-		if candidate.LocalOnly {
-			continue
-		}
-		if candidate.ProviderContent != "" {
-			candidate.Content = candidate.ProviderContent
-			candidate.ProviderContent = ""
-		}
-		candidate.RawContent = ""
-		candidate.DecisionReceipt = nil
-		candidate.DecisionReceipts = nil
-		// Local shell metadata must never enter provider request bytes.
-		candidate.ToolExecution = nil
-		out = append(out, candidate)
-	}
-	return out
-}
-
 // NormalizeMessages repairs a conversation history so it satisfies the tool-call
 // contract the OpenAI-compatible and Anthropic APIs enforce: every assistant
 // tool_calls entry must be answered by a following tool message for its id, and a

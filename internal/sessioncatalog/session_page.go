@@ -20,17 +20,19 @@ type sessionPageCursor struct {
 
 const sessionSelectColumns = `path,directory,scope,workspace_root,topic_id,topic_title,
     custom_title,created_at,last_activity_at,preview,turns,turns_state,recovered,
-    recovery_reason,recovery_digest,parent_id,content_fingerprint,meta_fingerprint,
-    health,missing_since`
+    recovery_reason,recovery_digest,parent_id,recovery_copy,content_fingerprint,
+    meta_fingerprint,health,missing_since`
 
 func scanSession(scanner interface{ Scan(...any) error }) (SessionRecord, error) {
 	var record SessionRecord
+	var recoveryCopy int
 	err := scanner.Scan(&record.Path, &record.Directory, &record.Scope, &record.WorkspaceRoot,
 		&record.TopicID, &record.TopicTitle, &record.CustomTitle, &record.CreatedAt,
 		&record.LastActivityAt, &record.Preview, &record.Turns, &record.TurnsState,
 		&record.Recovered, &record.RecoveryReason, &record.RecoveryDigest,
-		&record.ParentID, &record.ContentFingerprint, &record.MetaFingerprint,
+		&record.ParentID, &recoveryCopy, &record.ContentFingerprint, &record.MetaFingerprint,
 		&record.Health, &record.MissingSince)
+	record.RecoveryCopy = recoveryCopy != 0
 	return record, err
 }
 

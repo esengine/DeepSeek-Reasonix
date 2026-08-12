@@ -46,8 +46,8 @@ import (
 )
 
 func TestAgentKeepPolicyFromConfig(t *testing.T) {
-	if got := agentKeepPolicy(nil); got != agent.KeepErrors {
-		t.Fatalf("nil keep policy = %v, want KeepErrors", got)
+	if got := agentKeepPolicy(nil); got != agent.KeepErrors|agent.KeepUserMarked {
+		t.Fatalf("nil keep policy = %v, want KeepErrors|KeepUserMarked", got)
 	}
 	if got := agentKeepPolicy([]string{}); got != 0 {
 		t.Fatalf("empty keep policy = %v, want 0", got)
