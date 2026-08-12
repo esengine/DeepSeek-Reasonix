@@ -7258,6 +7258,16 @@ func (a *App) ContextPanel(tabID string) ContextPanelInfo {
 		}
 		_, window := ctrl.ContextSnapshot()
 		info.WindowTokens = window
+		// ContextSnapshot 在 executor 未就绪（会话未开始/刚重建）时返回 window=0，
+		// 前端进度条分母为 0 会恒显示 0%。兜底：用当前 tab 模型的配置上下文窗口，
+		// 保证进度条始终有有效分母。
+		if window <= 0 {
+			if cfg, err := config.LoadForRoot(tab.WorkspaceRoot); err == nil {
+				if entry, ok := cfg.ResolveModel(tab.model); ok && entry.ContextWindow > 0 {
+					info.WindowTokens = entry.ContextWindow
+				}
+			}
+		}
 		// This panel breaks the last turn down into segments, so its total must
 		// be that turn's usage and not the live-view measurement the status-bar
 		// gauge reports — otherwise the segments stop summing to the total.

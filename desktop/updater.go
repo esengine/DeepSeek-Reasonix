@@ -90,7 +90,9 @@ var (
 // own the repo-wide latest badge and publish latest.json directly, while
 // The unified official Release carries the desktop manifest as a final fallback
 // when both first-party endpoints are unavailable.
-const githubManifestFallback = "https://github.com/esengine/DeepSeek-Reasonix/releases/latest/download/latest.json"
+// var（而非 const）：允许 fork 构建时通过 -ldflags "-X main.githubManifestFallback=..."
+// 覆盖为自己的 GitHub 发布源（默认值不变，官方/上游行为一致）。
+var githubManifestFallback = "https://github.com/esengine/DeepSeek-Reasonix/releases/latest/download/latest.json"
 
 func normalizeUpdateChannel(ch string) string {
 	return config.NormalizeDesktopUpdateChannel(ch)

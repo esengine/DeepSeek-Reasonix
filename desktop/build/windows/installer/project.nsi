@@ -305,6 +305,20 @@ reasonix_show_finish_page:
 FunctionEnd
 
 Function reasonix.waitForExecutableUnlock
+   ; 无条件先结束所有运行中的 Reasonix 进程（不限版本目录：旧版本目录如
+   ; versions\v0.0.0 里的主程序不在下面的文件锁检测范围内，但同样会占用
+   ; 资源、让用户误以为"没装成功"）。taskkill /F 杀全部同名进程，/T 连带
+   ; 子进程；返回值会污染 $0/$1，用 Push/Pop 保护后续检测计数。
+   Push $0
+   Push $1
+   nsExec::ExecToLog 'taskkill /F /IM reasonix-launcher.exe /T'
+   nsExec::ExecToLog 'taskkill /F /IM reasonix-desktop.exe /T'
+   nsExec::ExecToLog 'taskkill /F /IM reasonix-guard.exe /T'
+   nsExec::ExecToLog 'taskkill /F /IM reasonix-cli.exe /T'
+   nsExec::ExecToLog 'taskkill /F /IM Reasonix.exe /T'
+   Pop $1
+   Pop $0
+   Sleep 1500
    StrCpy $0 0
 
 retry:
@@ -354,6 +368,17 @@ check_portable_entry:
 
 locked:
    IntOp $0 $0 + 1
+   ; 首次检测到运行中的 Reasonix：自动结束相关进程（launcher/desktop/guard/cli），
+   ; 避免安装时必须手动关闭。taskkill 的返回值会污染 $0，先压栈保护计数。
+   IntCmp $0 1 0 skip_kill skip_kill
+   Push $0
+   nsExec::ExecToLog 'taskkill /F /IM reasonix-launcher.exe /T'
+   nsExec::ExecToLog 'taskkill /F /IM reasonix-desktop.exe /T'
+   nsExec::ExecToLog 'taskkill /F /IM reasonix-guard.exe /T'
+   nsExec::ExecToLog 'taskkill /F /IM reasonix-cli.exe /T'
+   nsExec::ExecToLog 'taskkill /F /IM Reasonix.exe /T'
+   Pop $0
+skip_kill:
    IntCmp $0 ${REASONIX_UNLOCK_RETRIES} failed 0 0
    Sleep 1000
    Goto retry

@@ -13,6 +13,7 @@ package event
 
 import (
 	"encoding/json"
+	"time"
 
 	"reasonix/internal/billing"
 	"reasonix/internal/evidence"
@@ -574,25 +575,26 @@ type Event struct {
 	// session (Usage events only), so a frontend can show the aggregate hit-rate
 	// — which doesn't crater on a short turn or after compaction — alongside
 	// Usage's single-turn numbers.
-	SessionHit      int                      // Usage: cumulative cache-hit prompt tokens this session
-	SessionMiss     int                      // Usage: cumulative cache-miss prompt tokens this session
-	Level           Level                    // Notice
-	Audience        NoticeAudience           // Notice: empty = ordinary frontend delivery; operator = no end-user chat forwarding
-	Approval        Approval                 // ApprovalRequest
-	Ask             Ask                      // AskRequest
-	Extension       *ExtensionSurfacePayload // ExtensionSurface / ExtensionStatus (nil for every other kind)
-	Err             error                    // TurnDone: non-nil on failure
-	Cancelled       bool                     // TurnDone: Cancel was requested while the turn was active
-	Outcome         string                   // TurnDone: optional machine-readable recoverable outcome
-	Readiness       *FinalReadiness          // TurnDone: structured final-readiness recovery state
-	Receipt         *CompletionReceipt       // TurnDone: what the host verified, and what it could not
-	CheckpointTurn  *int                     // TurnDone: authoritative checkpoint for this turn's visible user message
-	Compaction      Compaction               // Compaction
-	Maintenance     *ContextMaintenance      // ContextMaintenanceEvent
+	SessionHit      int                       // Usage: cumulative cache-hit prompt tokens this session
+	SessionMiss     int                       // Usage: cumulative cache-miss prompt tokens this session
+	Level           Level                     // Notice
+	Audience        NoticeAudience            // Notice: empty = ordinary frontend delivery; operator = no end-user chat forwarding
+	Approval        Approval                  // ApprovalRequest
+	Ask             Ask                       // AskRequest
+	Extension       *ExtensionSurfacePayload  // ExtensionSurface / ExtensionStatus (nil for every other kind)
+	Err             error                     // TurnDone: non-nil on failure; Retrying: error that triggered the retry
+	Cancelled       bool                      // TurnDone: Cancel was requested while the turn was active
+	Outcome         string                    // TurnDone: optional machine-readable recoverable outcome
+	Readiness       *FinalReadiness           // TurnDone: structured final-readiness recovery state
+	Receipt         *CompletionReceipt        // TurnDone: what the host verified, and what it could not
+	CheckpointTurn  *int                      // TurnDone: authoritative checkpoint for this turn's visible user message
+	Compaction      Compaction                // Compaction
+	Maintenance     *ContextMaintenance       // ContextMaintenanceEvent
 	Guardian        GuardianResult
 	DecisionReceipt *provider.DecisionReceipt // Notice: durable user decision receipt
 	RetryAttempt    int                       // Retrying: 1-based attempt about to be made
 	RetryMax        int                       // Retrying: total attempts before giving up
+	RetryDelay      time.Duration             // Retrying: backoff delay before this attempt (0 = unknown)
 	RetryScope      RetryScope                // Retrying: optional "headers" | "stream"; empty for older emitters
 	StreamAttempt   StreamAttemptInfo         // StreamAttempt lifecycle
 	// ItemID correlates Steer / unapplied-steer / TurnDone with a durable

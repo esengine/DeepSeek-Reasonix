@@ -295,12 +295,31 @@ type DesktopConfig struct {
 	// UpdateChannel is a legacy compatibility field. It is accepted on read but
 	// ignored and omitted from future canonical writes.
 	UpdateChannel        string   `toml:"update_channel"`
-	Telemetry            *bool    `toml:"telemetry"`       // anonymous launch ping plus scrubbed next-launch native crash diagnostics; nil keeps the default enabled
-	Metrics              *bool    `toml:"metrics"`         // aggregate desktop metrics (anonymous signal/bucket counts, including lifecycle health; no content); nil keeps the default enabled
-	ProviderAccess       []string `toml:"provider_access"` // desktop-only list of provider entries shown in Settings > Model > Access
-	ExpandThinking       bool     `toml:"expand_thinking"` // deprecated compatibility alias: true maps to auto
+	Telemetry            *bool    `toml:"telemetry"`          // anonymous launch ping plus scrubbed next-launch native crash diagnostics; nil keeps the default enabled
+	Metrics              *bool    `toml:"metrics"`            // aggregate desktop metrics (anonymous signal/bucket counts, including lifecycle health; no content); nil keeps the default enabled
+	ProviderAccess       []string `toml:"provider_access"`    // desktop-only list of provider entries shown in Settings > Model > Access
+	ExpandThinking       bool     `toml:"expand_thinking"`    // deprecated compatibility alias: true maps to auto
 	ReasoningDisplayMode string   `toml:"reasoning_display_mode"`
 	ConversationWidth    string   `toml:"conversation_width"` // standard|full; max transcript width; empty = standard
+	// STTEnabled enables the desktop voice-to-text (Edge Web Speech API bridge)
+	// mic button in the composer. Default false — users opt in from Settings.
+	STTEnabled bool `toml:"stt_enabled"`
+	// STTShowPage controls whether the Edge recognition page is visible while
+	// listening. true = show the page; false = run hidden in the background.
+	STTShowPage bool `toml:"stt_show_page"`
+	// STTAutoStop enables auto-stopping recognition after a silent period
+	// (STTAutoStopSeconds). Mirrors edge-stt-bridge's auto-stop behaviour.
+	STTAutoStop bool `toml:"stt_auto_stop"`
+	// STTAutoStopOnSwitch stops recognition automatically when the user switches
+	// to another conversation window/tab. false = keep listening (transcript
+	// follows the visible window).
+	STTAutoStopOnSwitch bool `toml:"stt_auto_stop_on_switch"`
+	// STTAutoStopSeconds is the silence timeout before auto-stop (3-300s).
+	STTAutoStopSeconds int `toml:"stt_auto_stop_seconds"`
+	// STTHotkeyStart/STTHotkeyStop are optional global hotkeys for voice input
+	// (e.g. "alt+s" / "alt+w"); empty disables the hotkey.
+	STTHotkeyStart string `toml:"stt_hotkey_start"`
+	STTHotkeyStop  string `toml:"stt_hotkey_stop"`
 }
 
 // DesktopExternalOpener returns the selected opener id; unavailable ids fall

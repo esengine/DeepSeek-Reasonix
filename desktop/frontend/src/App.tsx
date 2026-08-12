@@ -203,7 +203,7 @@ import { topicShortcutIndexFromEvent, useTopicShortcuts, type TopicShortcutEntry
 import { composerDraftKeyForTab } from "./lib/composerDraftKey";
 import { continueDelivery } from "./lib/deliveryContinue";
 import { activateGoalAndSubmitOnTab } from "./lib/goalSubmit";
-import logoWordmark from "./assets/logo-wordmark.svg";
+import { BrandLogo } from "./components/BrandLogo";
 // Hold reasoning UI until the authoritative desktop startup settings arrive;
 // this prevents a hidden preference from flashing content during first paint.
 setReasoningDisplayPending();
@@ -4339,7 +4339,7 @@ export default function App() {
             <>
               <div className="sidebar__head" aria-hidden={sidebarCollapsed}>
                 <div className="sidebar__brand sidebar__brand--workbench">
-                  <img src={logoWordmark} alt="Reasonix" className="sidebar__brand-logo sidebar__brand-logo--workbench" draggable={false} />
+                  <BrandLogo className="sidebar__brand-logo sidebar__brand-logo--workbench" />
                 </div>
               </div>
 
@@ -4359,7 +4359,7 @@ export default function App() {
           ) : (
             <>
               <div className="sidebar__brand" aria-hidden={sidebarCollapsed}>
-                <img src={logoWordmark} alt="Reasonix" className="sidebar__brand-logo" draggable={false} />
+                <BrandLogo className="sidebar__brand-logo" />
               </div>
 
               <button

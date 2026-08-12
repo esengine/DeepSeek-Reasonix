@@ -590,8 +590,11 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	if !ok {
 		t.Fatal("opencode-go/glm-5.2 did not resolve")
 	}
-	if cap := EffortCapabilityForEntry(plain); cap.Supported {
-		t.Fatalf("opencode plain model effort capability = %+v, want unsupported without override", cap)
+	// opencode plain models (no per-model override) surface the generic
+	// reasoning_effort depth scale like OpenAI — the gateway always accepts
+	// low/medium/high regardless of the relayed model ID.
+	if cap := EffortCapabilityForEntry(plain); !cap.Supported || cap.Default != "auto" || !containsString(cap.Levels, "low") || !containsString(cap.Levels, "medium") || !containsString(cap.Levels, "high") || containsString(cap.Levels, "disabled") {
+		t.Fatalf("opencode plain model effort capability = %+v, want auto/low/medium/high without disabled", cap)
 	}
 	zen, ok := cfg.Provider("opencode-zen-anthropic")
 	if !ok {

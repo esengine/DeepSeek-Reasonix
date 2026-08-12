@@ -3327,6 +3327,23 @@ a[href] {
   line-height: 1.1;
   color: var(--fg);
 }
+/* 启动画面品牌名：彩虹渐变文字 + 流动动画（与 logo 渐变色一致） */
+.startup-splash__name--rainbow {
+  background: linear-gradient(
+    90deg,
+    #ff2f70, #ff9f1c, #f7f24a, #25f36b,
+    #18d9ff, #7a5cff, #ff4fe3, #ff2f70
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: startup-splash-rainbow-flow 2.8s linear infinite;
+}
+@keyframes startup-splash-rainbow-flow {
+  from { background-position: 0% 50%; }
+  to   { background-position: 200% 50%; }
+}
 .startup-splash__sub {
   margin-top: 9px;
   font-size: 13px;
@@ -3927,15 +3944,18 @@ a[href] {
   object-fit: contain;
 }
 
-:root[data-theme="dark"] .sidebar__brand-logo,
-:root[data-theme="dark"] .welcome__brand-logo {
+/* BrandLogo 现在渲染为内联渐变 SVG（彩虹 + 流动动画），渐变颜色已按深浅
+   主题取足够对比度，不能再全局反色（brightness(0) invert(1) 会把渐变抹成
+   纯色块）。此规则仅保留给仍用 <img> 载入静态 logo 的旧路径。 */
+:root[data-theme="dark"] img.sidebar__brand-logo,
+:root[data-theme="dark"] img.welcome__brand-logo {
   filter: brightness(0) invert(1);
   opacity: 0.94;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) .sidebar__brand-logo,
-  :root:not([data-theme]) .welcome__brand-logo {
+  :root:not([data-theme]) img.sidebar__brand-logo,
+  :root:not([data-theme]) img.welcome__brand-logo {
     filter: brightness(0) invert(1);
     opacity: 0.94;
   }
@@ -6985,6 +7005,126 @@ body > .mermaid-diagram--fullscreen {
   flex-shrink: 0;
   transition: color 0.12s, background 0.12s, box-shadow 0.12s, transform 0.12s;
 }
+.composer__btn--stt {
+  background: transparent;
+  color: var(--text-secondary);
+}
+.composer__btn--stt:not(:disabled):hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+.composer__btn--stt:not(:disabled):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.composer__btn--stt.composer__btn--stt-active {
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-elev-2));
+  color: var(--accent);
+  animation: composer-stt-pulse 1.6s ease-in-out infinite;
+}
+.composer__btn--stt.composer__btn--disabled {
+  opacity: 0.6;
+}
+/* 增强提示词按钮（输入框右侧，麦克风按钮旁） */
+.composer__btn--enhance {
+  background: transparent;
+  color: var(--text-secondary);
+  /* 运行中要容纳进度文本（已等待秒数 / 重试中 n/m），允许内容撑宽；
+     非运行状态保持 32px 图标按钮。 */
+  width: auto;
+  min-width: 32px;
+  padding: 0 6px;
+}
+.composer__btn--enhance:not(:disabled):hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+.composer__btn--enhance:not(:disabled):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.composer__btn--enhance.composer__btn--enhance-active {
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-elev-2));
+  color: var(--accent);
+}
+.composer__btn--enhance.composer__btn--disabled {
+  opacity: 0.6;
+}
+.composer__btn--spinning {
+  animation: composer-stt-spin 0.9s linear infinite;
+}
+@keyframes composer-stt-spin {
+  to { transform: rotate(360deg); }
+}
+/* 增强运行中：默认显示转圈，鼠标悬停时切换为叉叉（提示可取消） */
+.composer__btn--enhance-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.composer__btn--enhance-status .composer__btn--enhance-cancel {
+  display: none;
+}
+.composer__btn--enhance-status .composer__btn--enhance-progress {
+  font-size: 10px;
+  line-height: 1;
+  margin-left: 4px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.composer__btn--enhance:not(:disabled):hover .composer__btn--enhance-status .composer__btn--spinning {
+  display: none;
+}
+.composer__btn--enhance:not(:disabled):hover .composer__btn--enhance-status .composer__btn--enhance-progress {
+  display: none;
+}
+.composer__btn--enhance:not(:disabled):hover .composer__btn--enhance-status .composer__btn--enhance-cancel {
+  display: inline-flex;
+  color: var(--err);
+}
+/* 语音输入按钮悬浮提示：动作 + 已配置的开始/停止快捷键 */
+.composer-stt-tooltip {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.composer-stt-tooltip__action {
+  font-weight: 650;
+  color: var(--text);
+}
+/* 实时识别文字预览（interim）：语音按钮上方显示识别中的文字 */
+.composer-stt-tooltip__interim {
+  color: var(--accent);
+  font-size: 12px;
+  line-height: 1.4;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-left: 2px solid var(--accent);
+  padding-left: 6px;
+}
+.composer-stt-tooltip__hotkeys {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono, monospace);
+}
+.composer-stt-tooltip__hotkeys span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+@keyframes composer-stt-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 35%, transparent); }
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 0%, transparent); }
+}
 .composer__btn--send {
   background: var(--control-primary-bg);
   color: var(--control-primary-fg);
@@ -7576,17 +7716,6 @@ body > .mermaid-diagram--fullscreen {
     gap: 3px;
     padding-inline: 3px;
   }
-
-  .composer-meta__control--effort {
-    display: none;
-  }
-
-  .composer-meta__control--more {
-    display: inline-flex;
-    flex: 0 0 86px;
-    width: 86px;
-    max-width: 86px;
-  }
 }
 
 @container (max-width: 560px) {
@@ -7652,10 +7781,6 @@ body > .mermaid-diagram--fullscreen {
   }
 
   .composer-profile-trigger > svg:last-child {
-    display: none;
-  }
-
-  .composer-meta__control--effort {
     display: none;
   }
 
@@ -11800,6 +11925,26 @@ body > .mermaid-diagram--fullscreen {
   border-color: var(--accent);
   outline: none;
   box-shadow: 0 0 0 2px var(--accent-soft);
+}
+/* 语音输入（STT）设置：静默秒数 */
+.settings-stt-seconds {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--fg);
+  font-size: var(--font-control);
+  padding: 6px 8px;
+  min-width: 0;
+  width: 90px;
+}
+.settings-stt-seconds:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.settings-stt-seconds:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 .mem-input {
   flex: 1;
@@ -17763,6 +17908,11 @@ body > .mermaid-diagram--fullscreen {
   padding: 5px 13px;
   text-transform: capitalize;
   white-space: nowrap;
+  cursor: pointer;
+}
+.set-seg__btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 .set-seg__btn--on {
   background: var(--accent-soft);

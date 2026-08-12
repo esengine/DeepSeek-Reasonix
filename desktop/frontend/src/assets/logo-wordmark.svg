@@ -3,9 +3,26 @@
   <defs>
     <style>
       .cls-1 {
-        fill: #0153e5;
+        fill: url(#rainbowGradient);
+      }
+      /* 无障碍：减少动态时禁用流动动画，保留静态彩虹渐变 */
+      @media (prefers-reduced-motion: reduce) {
+        .rainbow-anim { display: none; }
       }
     </style>
+    <!-- 彩虹渐变（7 色循环，200% 宽度供流动滑动） -->
+    <linearGradient id="rainbowGradient" x1="0" y1="0" x2="3385.32" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ff2f70"/>
+      <stop offset="14.2857%" stop-color="#ff9f1c"/>
+      <stop offset="28.5714%" stop-color="#f7f24a"/>
+      <stop offset="42.8571%" stop-color="#25f36b"/>
+      <stop offset="57.1429%" stop-color="#18d9ff"/>
+      <stop offset="71.4286%" stop-color="#7a5cff"/>
+      <stop offset="85.7143%" stop-color="#ff4fe3"/>
+      <stop offset="100%" stop-color="#ff2f70"/>
+      <animateTransform class="rainbow-anim" attributeName="gradientTransform"
+        type="translate" from="0 0" to="-1692.66 0" dur="2.8s" repeatCount="indefinite"/>
+    </linearGradient>
   </defs>
   <path class="cls-1" d="M767.26,303.68c-12.37,1.71-24.96.46-38.13.63l-1.23-16.27c-12.87,14.9-29.84,21.97-49.07,19.87-24.58-2.69-44.41-19.38-53.2-42.6-7.32-19.32-6.99-40.86.81-60.12,9.5-23.46,30.72-40.21,55.73-42.02,18.41-1.33,34.33,4.84,45.96,18.54l1.13-15.37,37.63-.22.36,137.56ZM729.95,235.53c0-19.82-16.06-35.88-35.88-35.88s-35.88,16.06-35.88,35.88,16.06,35.88,35.88,35.88,35.88-16.06,35.88-35.88Z"/>
   <path class="cls-1" d="M573.23,258.02c11.08,4.99,20.6,11.87,31.28,18.31-14.54,22.26-39.3,32.78-65.14,31.91-42.29-1.42-73.12-35.5-70.7-77.31,2.1-36.29,28.66-64.56,65.17-67.92,26.31-2.42,52.01,8.19,66.02,30.99,9.52,15.5,11.55,33.39,9.76,50.92l-101,.13c1.4,14.77,13.51,25.01,25.92,27.74,14.72,3.24,29.02-.82,38.69-14.77ZM572.56,219.47c-4.12-16.52-17.68-24.4-32.5-24.13-13.74.25-27.5,9.07-30.5,24.11l63,.02Z"/>

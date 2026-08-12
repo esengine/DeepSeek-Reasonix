@@ -314,6 +314,21 @@ type SettingsView struct {
 	Metrics           bool   `json:"metrics"`
 	ExpandThinking    bool   `json:"expandThinking"`
 	ConversationWidth string `json:"conversationWidth,omitempty"`
+	// DesktopSTTEnabled shows whether the desktop voice-to-text (Edge Web Speech
+	// API bridge) mic button is enabled. Mirrors [desktop] stt_enabled.
+	DesktopSTTEnabled bool `json:"desktopSTTEnabled"`
+	// DesktopSTTShowPage mirrors [desktop] stt_show_page (show recognition page).
+	DesktopSTTShowPage bool `json:"desktopSTTShowPage"`
+	// DesktopSTTAutoStop mirrors [desktop] stt_auto_stop (auto-stop on silence).
+	DesktopSTTAutoStop bool `json:"desktopSTTAutoStop"`
+	// DesktopSTTAutoStopOnSwitch mirrors [desktop] stt_auto_stop_on_switch
+	// (auto-stop recognition when switching conversation window).
+	DesktopSTTAutoStopOnSwitch bool `json:"desktopSTTAutoStopOnSwitch"`
+	// DesktopSTTAutoStopSeconds mirrors [desktop] stt_auto_stop_seconds.
+	DesktopSTTAutoStopSeconds int `json:"desktopSTTAutoStopSeconds"`
+	// DesktopSTTHotkeyStart/Stop mirror [desktop] stt_hotkey_start/stop.
+	DesktopSTTHotkeyStart string `json:"desktopSTTHotkeyStart"`
+	DesktopSTTHotkeyStop  string `json:"desktopSTTHotkeyStop"`
 	ConfigPath        string `json:"configPath"`
 	// ShadowedByPath is the workspace reasonix.toml that outranks the file this
 	// panel writes, so an edit here can be overridden with nothing on screen to
@@ -1028,6 +1043,13 @@ func (a *App) Settings() SettingsView {
 		Metrics:                      cfg.DesktopMetrics(),
 		ExpandThinking:               cfg.Desktop.ExpandThinking,
 		ConversationWidth:            cfg.DesktopConversationWidth(),
+		DesktopSTTEnabled:            cfg.Desktop.STTEnabled,
+		DesktopSTTShowPage:           cfg.Desktop.STTShowPage,
+		DesktopSTTAutoStop:           cfg.Desktop.STTAutoStop,
+		DesktopSTTAutoStopOnSwitch:   cfg.Desktop.STTAutoStopOnSwitch,
+		DesktopSTTAutoStopSeconds:    cfg.Desktop.STTAutoStopSeconds,
+		DesktopSTTHotkeyStart:        cfg.Desktop.STTHotkeyStart,
+		DesktopSTTHotkeyStop:         cfg.Desktop.STTHotkeyStop,
 		ConfigPath:                   cfgPath,
 		ShadowedByPath:               shadowingConfigPath(cfgPath, root),
 		ProviderKinds:                nonNil(provider.Kinds()),

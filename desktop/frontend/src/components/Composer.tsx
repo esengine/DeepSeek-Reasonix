@@ -1,17 +1,17 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
-import { ArrowRight, ArrowUp, AtSign, Check, ChevronsUpDown, CornerDownRight, Equal, Eye, FilePlus2, FileText, Flag, Folder, Gauge, Hash, List, MessageSquare, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, X } from "lucide-react";
+import { ArrowRight, ArrowUp, AtSign, Check, ChevronsUpDown, CornerDownRight, Equal, Eye, FilePlus2, FileText, Flag, Folder, Gauge, Hash, List, Loader2, MessageSquare, Mic, MicOff, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, Undo2, Wand2, X } from "lucide-react";
 import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
-import { app, onFilesDropped } from "../lib/bridge";
+import { app, onEnhanceProgress, onFilesDropped, onSTTState, onSTTTranscript } from "../lib/bridge";
 import { enqueueInboxGuidance } from "../lib/inboxSubmit";
 import { formatInboxError } from "../lib/inboxError";
 import { guidanceNeedsRetry, guidanceTextMatches, kickIdleGuidance, markGuidanceQueued } from "../lib/composerGuidance";
 import { canUsePromptHistory, composerEnterAction, composerEscapeAction, composerMenuKeyAction, insertComposerNewline, isFnKeyEvent, isImeKeyEvent, promptHistoryDirectionFromEvent } from "../lib/composerKeyboard";
 import { cacheGeneration, loadOlder } from "../lib/composerHistory";
 import { sessionTurnsLabel } from "../lib/sessionCatalogPresentation";
-import { SPINNER_WORDS, useI18n, type Translator } from "../lib/i18n";
+import { SPINNER_WORDS, useI18n, type DictKey, type Translator } from "../lib/i18n";
 import { detectShortcutPlatform, formatShortcutCombo, isReservedComposerHistoryShortcut, matchesShortcut, useShortcutComboLabel } from "../lib/keyboardShortcuts";
 import { fallbackCopyText } from "../lib/clipboard";
 import {
@@ -714,6 +714,21 @@ export function Composer({
   const [loadingPastChats, setLoadingPastChats] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [inputMenuPoint, setInputMenuPoint] = useState<ContextMenuPoint | null>(null);
+
+  // --- 语音转文字（STT）---
+  const [sttEnabled, setSttEnabled] = useState(false);
+  const [sttListening, setSttListening] = useState(false);
+  const [sttBusy, setSttBusy] = useState(false);
+  // 识别页正在启动（Edge 拉起中/重连中）：按钮显示加载动画，给用户即时
+  // 反馈，避免点击后半天无响应、误以为没功能而重复点击造成多窗口。
+  const [sttStarting, setSttStarting] = useState(false);
+  // 已配置的开始/停止全局快捷键（设置面板保存后刷新），用于麦克风按钮悬浮提示。
+  const [sttHotkeyStart, setSttHotkeyStart] = useState("");
+  const [sttHotkeyStop, setSttHotkeyStop] = useState("");
+  // 切换对话窗口时自动停止语音识别（[desktop] stt_auto_stop_on_switch）。
+  const [sttAutoStopOnSwitch, setSttAutoStopOnSwitch] = useState(false);
+  // 实时识别文字（interim 预览）：识别中显示在麦克风按钮上方，供即时反馈。
+  const [sttInterimText, setSttInterimText] = useState("");
   const [composerPrompt, setComposerPrompt] = useState<string | null>(null);
   // Prompt history navigation (plain ↑/↓)
   // Use refs for values read inside async closures to avoid stale captures
@@ -1267,6 +1282,96 @@ export function Composer({
     && invocations.length === 0
     && slashText.slice(0, activeSlashQuery.from).trim() === "",
   );
+
+  // --- 语音转文字（STT）：读取设置开关并订阅转录事件 ---
+  useEffect(() => {
+    let live = true;
+    const refresh = () => {
+      app.Settings()
+        .then((s) => {
+          if (!live) return;
+          setSttEnabled(Boolean(s.desktopSTTEnabled));
+          setSttHotkeyStart(s.desktopSTTHotkeyStart ?? "");
+          setSttHotkeyStop(s.desktopSTTHotkeyStop ?? "");
+          setSttAutoStopOnSwitch(Boolean(s.desktopSTTAutoStopOnSwitch));
+        })
+        .catch(() => {});
+    };
+    refresh();
+    // 设置面板保存后（如语音输入开关切换）重新读取，保证麦克风按钮即时出现/消失。
+    window.addEventListener("reasonix:desktop-settings-changed", refresh);
+    return () => {
+      live = false;
+      window.removeEventListener("reasonix:desktop-settings-changed", refresh);
+    };
+  }, []);
+
+  useEffect(() => {
+    // 用 ref 持有最新插入函数：onSTTTranscript 订阅回调在首帧闭包中创建，
+    // 直接引用 insertSTTTextAtCaret 会拿到首帧版本（draft/selection 绑定
+    // 陈旧，切换会话后转录可能写入旧 draft、"能识别但不输入"）。经 ref
+    // 中转始终调用最新实现，插入当前可见窗口输入框。
+    const insertRef = { current: insertSTTTextAtCaret };
+    // 即说即输 + 防重复：interim（实时识别）上屏“删旧插新”实时更新；
+    // 停顿 1.2s 无新 interim 时把当前句固定为已提交（不再等引擎 final）；
+    // final 到达时用已提交句去重后插入，避免 interim/final 交替重复。
+    // 这解决了“停止说话几秒才进输入框”——final 要等静音+网络往返，
+    // 停顿时先上屏、final 到了再原子替换。
+    const pendingInterimRef = { current: "" };
+    const committedInterimRef = { current: "" };
+    const COMMIT_INTERIM_MS = 1200;
+    let interimTimer = 0;
+    const unsubscribe = onSTTTranscript((payload) => {
+      if (!payload.text.trim()) return;
+      if (payload.isFinal) {
+        window.clearTimeout(interimTimer);
+        // prev 优先取未提交占位；若已停顿提交，则取已提交句去重：
+        // final 与已上屏文本相同/近似时删旧插新，结果不变（不重复）。
+        const prev = pendingInterimRef.current || committedInterimRef.current;
+        pendingInterimRef.current = "";
+        committedInterimRef.current = "";
+        setSttInterimText(""); // final 提交后清空预览
+        insertRef.current(payload.text, prev);
+      } else {
+        window.clearTimeout(interimTimer);
+        const prev = pendingInterimRef.current || committedInterimRef.current;
+        pendingInterimRef.current = payload.text;
+        committedInterimRef.current = ""; // 新 interim 开始：清除旧的已提交句标记
+        setSttInterimText(payload.text); // 实时预览（按钮上方）
+        insertRef.current(payload.text, prev); // 实时上屏（删旧插新）
+        // 停顿 1.2s 无新 interim：把当前句固定（后续 final 用
+        // committedInterimRef 去重，不会重复上屏）。
+        interimTimer = window.setTimeout(() => {
+          if (pendingInterimRef.current) {
+            committedInterimRef.current = pendingInterimRef.current;
+          }
+          pendingInterimRef.current = "";
+          setSttInterimText("");
+        }, COMMIT_INTERIM_MS);
+      }
+    });
+    // 识别状态实时同步：Edge 页自动停止/出错/恢复时，麦克风按钮随之变化。
+    const unsubscribeState = onSTTState((payload) => {
+      setSttListening(Boolean(payload.listening));
+      // starting 显式携带时同步加载态；未携带（旧 payload）则不动。
+      if (payload.starting !== undefined) setSttStarting(payload.starting);
+      // 兼容不带 starting 的旧事件：确认成功（listening=true）即结束启动态。
+      else if (payload.listening) setSttStarting(false);
+    });
+    return () => {
+      unsubscribe();
+      unsubscribeState();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // 切换对话窗口时自动停止识别（设置开启时）：tabId 变化且正在识别则停止。
+  useEffect(() => {
+    if (!sttAutoStopOnSwitch || !sttListening) return;
+    void app.STTStop()
+      .then(() => setSttListening(false))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabId]);
   const slashCommandDisabled = useCallback(
     (command: CommandInfo) => !commandAvailableAtSlashPosition(command, slashCommandAtStart),
     [slashCommandAtStart],
@@ -1697,6 +1802,173 @@ export function Composer({
       composerEditSnapshot(targetDraftKey, { start: pos, end: pos }),
     );
   };
+
+  // STT 语音转录专用插入：直接在光标处连续追加文本，不加段落空行/双换行
+  // （insertTextAtCaret 是段落粘贴语义，会在前后补 \n\n，不适合逐句语音输入）。
+  // 只在"前一句以标点/空格结尾但下一句紧跟"的场景保持连续，必要时补一个空格
+  // 分隔，避免句号后直接粘连。
+  const insertSTTTextAtCaret = (snippet: string, prevSnippet?: string) => {
+    const selection = getComposerSelection();
+    const targetDraftKey = activeDraftKeyRef.current;
+    const beforeEdit = composerEditSnapshot(targetDraftKey, selection);
+    const start = selection.start;
+    const end = selection.end;
+    const current = textRef.current;
+    const body = snippet.trim();
+    if (!body) return;
+    // interim 替换：先移除上一次未提交的 interim 占位（通常位于输入末尾），
+    // 再插入新文本，实现"实时上屏、删旧插新"而不重复堆积。
+    let base = current;
+    let insertStart = start;
+    const prev = prevSnippet?.trim();
+    if (prev) {
+      const tail = base.slice(insertStart - prev.length, insertStart);
+      if (tail === prev) {
+        base = base.slice(0, insertStart - prev.length) + base.slice(insertStart);
+        insertStart -= prev.length;
+      }
+    }
+    const before = base.slice(0, insertStart);
+    const after = base.slice(end);
+    // 前面已有内容且不以空白结尾时补一个空格，避免粘连；否则直接连续。
+    const needsSpace = before.length > 0 && !/\s$/.test(before);
+    const inserted = (needsSpace ? " " : "") + body;
+    const pos = insertStart + inserted.length;
+    const updated = replaceInvocationTextRange(base, invocationsRef.current, insertStart, end, inserted);
+    textRef.current = updated.text;
+    invocationsRef.current = updated.invocations;
+    setText(updated.text);
+    setInvocations(updated.invocations);
+    setComposerSelection(pos);
+    recordComposerEdit(
+      targetDraftKey,
+      beforeEdit,
+      composerEditSnapshot(targetDraftKey, { start: pos, end: pos }),
+    );
+    void after;
+  };
+
+  // 麦克风按钮：开始/停止语音识别。禁用时按钮隐藏（由 sttEnabled 控制）。
+  const toggleSTT = useCallback(async () => {
+    if (sttBusy || sttStarting || disabled || readOnly) return;
+    setSttBusy(true);
+    try {
+      if (sttListening) {
+        await app.STTStop();
+        setSttListening(false);
+        setSttStarting(false);
+      } else {
+        // 点击瞬间即进入加载态（转圈），不等 Go 事件——首次启动 Edge
+        // 需要几秒，立即反馈避免误以为没反应而重复点击造成多窗口。
+        setSttStarting(true);
+        // 传入发起识别的 tabId：转录事件携带它，前端只插入本窗口输入框
+        // （多窗口独立绑定，不交叉错乱）。
+        await app.STTStart(tabId);
+        // 不在此处点亮录音态：由 stt:state 事件（listening=true +
+        // starting=false）确认后才点亮，确认窗口期内保持"启动中"提示，
+        // 避免 Edge/Web Speech 服务未就绪时按钮误显示为可用/录音中。
+      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), "warn");
+      setSttListening(false);
+      setSttStarting(false);
+    } finally {
+      setSttBusy(false);
+    }
+  }, [sttBusy, sttStarting, sttListening, disabled, readOnly, showToast]);
+  // 服务端/浏览器主动结束识别（如自动停止）时同步按钮状态。
+  useEffect(() => {
+    let live = true;
+    app.STTStatus()
+      .then((s) => {
+        if (live) setSttListening(Boolean(s.listening));
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  // --- 增强提示词（输入框右侧按钮）：调用大模型润色当前输入 ---
+  const [enhancing, setEnhancing] = useState(false);
+  // 增强前的原文（用于退回还原）；null = 当前文本就是原文。
+  const [enhancedOriginal, setEnhancedOriginal] = useState<string | null>(null);
+  // 最近一次增强的结果：用于判断用户是否在增强后又修改了输入（此时可二次增强）。
+  const [enhancedResult, setEnhancedResult] = useState<string | null>(null);
+  // 增强进行中的重试进度（Go 端 enhance:progress 事件）：非 null = provider
+  // 正在限流/网络重试，显示"重试中(n/m)"，避免转圈无反馈被误以为卡死。
+  const [enhanceRetry, setEnhanceRetry] = useState<{ attempt: number; max: number } | null>(null);
+  // 增强已等待秒数：转圈时每秒 +1 显示在按钮内，让"转好久"可见可预期。
+  const [enhanceElapsed, setEnhanceElapsed] = useState(0);
+  const enhancePrompt = useCallback(async () => {
+    const current = textRef.current.trim();
+    if (!current) {
+      showToast(t("composer.enhanceEmpty"), "warn");
+      return;
+    }
+    if (enhancing) return;
+    // 绑定发起增强时的 draft（独立绑定）：await 期间用户可能切到其他窗口，
+    // 结果必须写回发起窗口的输入框，而非"当前激活"的输入框（否则串窗口）。
+    const originDraftKey = activeDraftKeyRef.current;
+    setEnhancing(true);
+    try {
+      // 传入当前 tabId：增强按发起请求的 tab 的模型执行，
+      // 切换窗口后不会用错模型/错位。
+      const enhanced = await app.EnhancePrompt(current, tabId);
+      if (enhanced && enhanced.trim()) {
+        setEnhancedOriginal(current);       // 记住增强前文本（发起时的），供退回
+        setEnhancedResult(enhanced.trim()); // 记录增强结果，供二次增强判断
+        if (activeDraftKeyRef.current === originDraftKey) {
+          replaceComposerText(enhanced.trim());
+        } else {
+          // 用户已切到其他窗口：把增强结果写回发起 tab 的 draft，
+          // 切回该窗口时输入框可见（不污染当前窗口）。
+          const draft = cloneComposerDraft(draftsBySessionRef.current[originDraftKey] ?? emptyComposerDraft());
+          draft.text = enhanced.trim();
+          draftsBySessionRef.current[originDraftKey] = draft;
+        }
+        showToast(t("composer.enhanceDone"), "info");
+      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), "warn");
+    } finally {
+      setEnhancing(false);
+    }
+  }, [enhancing, showToast, t]);
+  const revertEnhancedPrompt = useCallback(() => {
+    if (enhancedOriginal == null) return;
+    replaceComposerText(enhancedOriginal);
+    setEnhancedOriginal(null);
+    setEnhancedResult(null);
+    showToast(t("composer.enhanceReverted"), "info");
+  }, [enhancedOriginal, showToast, t]);
+  // 转圈时点击取消：终止进行中的增强（Go 端 CancelTrySubagentProfile）。
+  const cancelEnhancePrompt = useCallback(() => {
+    setEnhancing(false); // 立即恢复按钮，后台取消由 Go 端 context 处理
+    void app.CancelTrySubagentProfile().catch(() => {});
+    showToast(t("composer.enhanceCancelled"), "info");
+  }, [showToast, t]);
+  // 增强进行中的进度反馈：转圈秒数 + 重试状态（enhance:progress 事件）。
+  // 消除"转好久无反馈"的焦虑：用户能看到已等待秒数与是否在重试。
+  useEffect(() => {
+    if (!enhancing) {
+      setEnhanceElapsed(0);
+      setEnhanceRetry(null);
+      return;
+    }
+    setEnhanceElapsed(0);
+    setEnhanceRetry(null);
+    const timer = window.setInterval(() => {
+      setEnhanceElapsed((s) => s + 1);
+    }, 1000);
+    const unsubscribe = onEnhanceProgress((p) => {
+      setEnhanceRetry({ attempt: p.attempt, max: p.max });
+    });
+    return () => {
+      window.clearInterval(timer);
+      unsubscribe();
+    };
+  }, [enhancing]);
 
   const replaceComposerText = (next: string) => {
     clearComposerEditHistory(activeDraftKeyRef.current);
@@ -2158,6 +2430,11 @@ export function Composer({
       }
       await onSend(displayText, submitText, submitTabId, structured);
       clearSubmittedDraft(submitDraftKey);
+      // 增强后的提示词已发送：完整重置增强状态（原文+结果+运行中），
+      // 按钮恢复为魔法棒（不再显示"还原"/叉叉），后续可再次增强。
+      setEnhancedOriginal(null);
+      setEnhancedResult(null);
+      setEnhancing(false);
     } catch (error) {
       showToast(formatInboxError(error, locale), "warn");
     } finally {
@@ -3674,9 +3951,14 @@ export function Composer({
   });
   const effortLevels = asArray(effort?.levels);
   const currentEffort = effort?.current || "auto";
+  // 思考模式级别按界面语言显示（与 EffortSwitcher 一致）；未定义键回退原始值。
+  const effortLabel = (level: string) => {
+    const localized = t(`effort.${level}` as DictKey);
+    return localized && localized !== `effort.${level}` ? localized : level;
+  };
   const compactEffortTitle = currentEffort === "auto"
     ? t("status.effortAutoTitle", { def: effort?.default || "auto" })
-    : `${t("status.effortTitle")}: ${currentEffort}`;
+    : `${t("status.effortTitle")}: ${effortLabel(currentEffort)}`;
   const hasEffort = Boolean(effort?.supported && effortLevels.length > 0);
   const chooseEffortLevel = (level: string) => {
     closeMoreMenu(() => {
@@ -4159,7 +4441,7 @@ export function Composer({
         />
       )}
       {menuMode === "slasharg" && argRes && (
-        <ArgMenu items={argRes.items} activeIndex={active} onPick={pickArg} onHover={setActive} />
+        <ArgMenu items={argRes.items} commandName={slashText.slice(1).split(/\s/, 1)[0]} activeIndex={active} onPick={pickArg} onHover={setActive} />
       )}
       {(menuMode === "at" || menuMode === "pastChats") && (
         showPastChats ? (
@@ -4624,6 +4906,86 @@ export function Composer({
                 </button>
               </Tooltip>
             )}
+            {sttEnabled && (
+              <Tooltip label={
+                <span className="composer-stt-tooltip">
+                  <span className="composer-stt-tooltip__action">
+                    {sttStarting ? t("composer.sttStarting") : (sttListening ? t("composer.sttStop") : t("composer.sttStart"))}
+                  </span>
+                  {sttInterimText && (
+                    <span className="composer-stt-tooltip__interim">
+                      {sttInterimText}
+                    </span>
+                  )}
+                  {(sttHotkeyStart || sttHotkeyStop) && (
+                    <span className="composer-stt-tooltip__hotkeys">
+                      {sttHotkeyStart && <span>{t("composer.sttHotkeyStartLabel")} {sttHotkeyStart}</span>}
+                      {sttHotkeyStop && <span>{t("composer.sttHotkeyStopLabel")} {sttHotkeyStop}</span>}
+                    </span>
+                  )}
+                </span>
+              }>
+                <button
+                  className={`composer__btn composer__btn--stt${sttListening ? " composer__btn--stt-active" : ""}${sttBusy || sttStarting ? " composer__btn--disabled" : ""}`}
+                  type="button"
+                  onClick={() => void toggleSTT()}
+                  disabled={sttBusy || sttStarting || disabled || readOnly}
+                  aria-label={sttStarting ? t("composer.sttStarting") : (sttListening ? t("composer.sttStop") : t("composer.sttStart"))}
+                  aria-pressed={sttListening}
+                >
+                  {sttStarting ? (
+                    // 启动中：加载动画反馈，避免用户以为没功能而重复点击。
+                    <Loader2 size={15} className="composer__btn--spinning" />
+                  ) : sttListening ? (
+                    <Mic size={15} fill="currentColor" />
+                  ) : (
+                    <MicOff size={15} />
+                  )}
+                </button>
+              </Tooltip>
+            )}
+            <Tooltip label={enhancedOriginal != null ? t("composer.enhanceRevert") : t("composer.enhance")}>
+              <button
+                className={`composer__btn composer__btn--enhance${enhancedOriginal != null ? " composer__btn--enhance-active" : ""}${enhancing ? " composer__btn--disabled" : ""}`}
+                type="button"
+                onClick={() => {
+                  if (enhancing) {
+                    void cancelEnhancePrompt(); // 转圈中点击 = 取消
+                  } else if (enhancedOriginal != null && textRef.current.trim() === (enhancedResult ?? "").trim()) {
+                    void revertEnhancedPrompt(); // 增强后未修改 = 还原原文
+                  } else {
+                    void enhancePrompt(); // 未增强 / 增强后又补充了内容 = （再次）增强
+                  }
+                }}
+                disabled={disabled || readOnly}
+                aria-label={
+                  enhancing
+                    ? t("composer.enhanceCancel")
+                    : (enhancedOriginal != null && textRef.current.trim() === (enhancedResult ?? "").trim())
+                      ? t("composer.enhanceRevert")
+                      : t("composer.enhance")
+                }
+              >
+                {enhancing ? (
+                  // 运行中默认转圈；鼠标悬停（hover）时切换为叉叉，提示可取消。
+                  // 进度文本（已等待秒数 / 重试中 n/m）实时可见，消除"转好久
+                  // 无反馈"的焦虑；hover 时隐藏以免与取消提示抢空间。
+                  <span className="composer__btn--enhance-status">
+                    <Loader2 size={15} className="composer__btn--spinning" />
+                    <X size={15} className="composer__btn--enhance-cancel" />
+                    {(enhanceRetry || enhanceElapsed > 0) && (
+                      <span className="composer__btn--enhance-progress">
+                        {enhanceRetry
+                          ? t("composer.enhanceRetrying", { n: enhanceRetry.attempt, m: enhanceRetry.max })
+                          : `${enhanceElapsed}s`}
+                      </span>
+                    )}
+                  </span>
+                ) : (enhancedOriginal != null && textRef.current.trim() === (enhancedResult ?? "").trim())
+                  ? <Undo2 size={15} />
+                  : <Wand2 size={15} />}
+              </button>
+            </Tooltip>
             <Tooltip label={submitTooltip}>
               <button
                 className={`composer__btn composer__btn--send${running ? " composer__btn--steer" : ""}`}
@@ -4786,12 +5148,12 @@ export function Composer({
               )}
               <ModelSwitcher label={modelLabel} tabId={tabId} onPick={onSwitchModel} />
             </div>
-            {!heroMode && hasEffort && (
+            {hasEffort && (
               <div className="composer-meta__control composer-meta__control--effort">
                 <EffortSwitcher effort={effort} disabled={running} onPick={onSetEffort} />
               </div>
             )}
-            {!heroMode && hasEffort && (
+            {hasEffort && (
               <div className="composer-meta__control composer-meta__control--more">
                 <Tooltip label={compactEffortTitle} disabled={moreMenuOpen || moreMenuClosing}>
                   <button

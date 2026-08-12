@@ -230,6 +230,62 @@ func (c *Config) SetDesktopLanguage(lang string) error {
 	return nil
 }
 
+// SetDesktopSTTEnabled toggles the desktop voice-to-text (Edge Web Speech API
+// bridge) mic button. It only affects the desktop UI; CLI sessions ignore it.
+func (c *Config) SetDesktopSTTEnabled(enabled bool) error {
+	c.Desktop.STTEnabled = enabled
+	return nil
+}
+
+// SetDesktopSTTShowPage controls whether the Edge recognition page is visible
+// while listening (false = hidden background run).
+func (c *Config) SetDesktopSTTShowPage(show bool) error {
+	c.Desktop.STTShowPage = show
+	return nil
+}
+
+// SetDesktopSTTAutoStop toggles auto-stopping recognition after silence.
+func (c *Config) SetDesktopSTTAutoStop(enabled bool) error {
+	c.Desktop.STTAutoStop = enabled
+	return nil
+}
+
+// SetDesktopSTTAutoStopOnSwitch toggles auto-stopping recognition when the
+// user switches to another conversation window/tab.
+func (c *Config) SetDesktopSTTAutoStopOnSwitch(enabled bool) error {
+	c.Desktop.STTAutoStopOnSwitch = enabled
+	return nil
+}
+
+// SetDesktopSTTAutoStopSeconds sets the silence timeout before auto-stop.
+// Clamped to [3, 300]; 0 resets to the default (10s).
+func (c *Config) SetDesktopSTTAutoStopSeconds(seconds int) error {
+	if seconds <= 0 {
+		seconds = 10
+	}
+	if seconds < 3 {
+		seconds = 3
+	}
+	if seconds > 300 {
+		seconds = 300
+	}
+	c.Desktop.STTAutoStopSeconds = seconds
+	return nil
+}
+
+// SetDesktopSTTHotkeyStart sets the global hotkey that starts voice input
+// (e.g. "alt+s"); empty disables it.
+func (c *Config) SetDesktopSTTHotkeyStart(hotkey string) error {
+	c.Desktop.STTHotkeyStart = strings.TrimSpace(hotkey)
+	return nil
+}
+
+// SetDesktopSTTHotkeyStop sets the global hotkey that stops voice input.
+func (c *Config) SetDesktopSTTHotkeyStop(hotkey string) error {
+	c.Desktop.STTHotkeyStop = strings.TrimSpace(hotkey)
+	return nil
+}
+
 // SetDesktopAppearance sets desktop-only theme preferences. It must not affect
 // CLI theme settings or provider-visible request data.
 func (c *Config) SetDesktopAppearance(theme, style string) error {

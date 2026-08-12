@@ -291,20 +291,25 @@ func (a *App) TrySubagentProfile(input SubagentProfileInput, task string) (strin
 	if prompt == "" {
 		return "", fmt.Errorf("system prompt is required")
 	}
+	fmt.Printf("[subagent-try] start: profile=%s model=%s task_len=%d\n", input.Name, input.Model, len(task))
+	start := time.Now()
 
 	// One try run at a time, cancellable from the settings page and aborted
 	// with the app context on shutdown — a runaway model loop must not burn
 	// through all 12 steps with no way to stop it.
+	// 增加硬超时：模型调用慢/卡住时（如网络异常、模型不返回）不能无限等待，
+	// 否则前端"增强提示词"会一直转圈。超时后返回错误，前端可停止并提示。
 	base := a.ctx
 	if base == nil {
 		base = context.Background()
 	}
-	runCtx, cancel := context.WithCancel(base)
+	runCtx, cancel := context.WithTimeout(base, 90*time.Second)
 	a.tryRunMu.Lock()
 	if a.tryRunCancel != nil {
 		a.tryRunMu.Unlock()
 		cancel()
-		return "", fmt.Errorf("another try run is still in progress — cancel it or wait for it to finish")
+		fmt.Printf("[subagent-try] conflict: another try run is still in progress\n")
+		return "", fmt.Errorf("另一个增强/试运行正在进行中，请稍候或先取消")
 	}
 	a.tryRunCancel = cancel
 	a.tryRunMu.Unlock()
@@ -356,6 +361,10 @@ func (a *App) TrySubagentProfile(input SubagentProfileInput, task string) (strin
 	if err != nil {
 		return "", err
 	}
+	// 分段计时：模型解析 + provider 构建完成。若这里耗时大，说明问题在
+	// 配置/凭据解析或代理探测，而非模型生成；多数情况下应 <1s。
+	fmt.Printf("[subagent-try] ready(%.2fs): model=%s effort=%q\n",
+		time.Since(start).Seconds(), modelRef, me.Effort)
 
 	reg := trySubagentToolRegistry(cfg, root, input.AllowedTools)
 
@@ -370,11 +379,126 @@ func (a *App) TrySubagentProfile(input SubagentProfileInput, task string) (strin
 		Pricing:       me.Price,
 		ContextWindow: me.ContextWindow,
 		Gate:          trySubagentPermissionGate(policy),
-	}, event.Discard)
+	}, a.tryRunEventSink())
 	if err != nil {
+		fmt.Printf("[subagent-try] done(%.2fs): err=%v\n", time.Since(start).Seconds(), err)
 		return "", err
 	}
+	fmt.Printf("[subagent-try] done(%.2fs): ok len=%d\n", time.Since(start).Seconds(), len(result))
 	return result, nil
+}
+
+// enhanceProgressEvent 是增强/试运行重试进度事件名，推给前端显示
+// "重试中(n/m)"，避免转圈期间无任何反馈。前端在 lib/bridge.ts 订阅。
+const enhanceProgressEvent = "enhance:progress"
+
+// tryRunEventSink 转发增强/试运行中的 provider 重试事件：打控制台日志，
+// 并经 "enhance:progress" 事件推给前端（按钮旁显示"重试中 n/m"）。
+// 其余事件丢弃（headless 运行无 UI）。此前用 event.Discard，重试被静默
+// 吞掉——前端只看到转圈，无法区分"模型正常生成中"与"API 限流/网络重试中"。
+// dev 控制台据此可确认"转好久"的成因：有 retry 行=重试耗时，无 retry 行=
+// 纯生成耗时（模型慢）。
+func (a *App) tryRunEventSink() event.Sink {
+	var last time.Time
+	return event.FuncSink(func(ev event.Event) {
+		if ev.Kind != event.Retrying {
+			return
+		}
+		now := time.Now()
+		since := 0.0
+		if !last.IsZero() {
+			since = now.Sub(last).Seconds()
+		}
+		last = now
+		delay := ev.RetryDelay.Seconds()
+		if ev.RetryDelay <= 0 {
+			delay = since
+		}
+		reason := ""
+		if ev.Err != nil {
+			reason = " err=" + ev.Err.Error()
+		}
+		fmt.Printf("[subagent-try] retry %d/%d delay=%.1fs (%.1fs since last)%s\n",
+			ev.RetryAttempt, ev.RetryMax, delay, since, reason)
+		a.emitRuntimeEvent(enhanceProgressEvent, map[string]any{
+			"attempt": ev.RetryAttempt,
+			"max":     ev.RetryMax,
+		})
+	})
+}
+
+// EnhancePrompt 用大模型增强用户当前输入（提示词润色/补全），返回增强后的
+// 文本。复用 TrySubagentProfile 的 headless 只读 subagent 机制，不产生会话。
+// 前端输入框右侧"增强提示词"按钮调用它，并保留原文以便退回。
+// 使用发起增强请求的 tab（tabID）选择的模型，而非请求到达时的活动 tab——
+// 用户点增强后切到其他窗口时，不会用错模型（修复"切换窗口增强错位"）。
+func (a *App) EnhancePrompt(text, tabID string) (string, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "", fmt.Errorf("请输入要增强的提示词")
+	}
+	// 按发起请求的 tabID 取模型与最近对话上下文；查不到（tab 已关闭等）
+	// 回退当前活动 tab。
+	a.mu.RLock()
+	model := ""
+	history := []HistoryMessage(nil)
+	if tab := a.tabByIDLocked(tabID); tab != nil {
+		model = tab.model
+	} else if tab := a.activeTabLocked(); tab != nil {
+		model = tab.model
+	}
+	a.mu.RUnlock()
+	// 锁外取会话历史：HistoryForTab 内部会重新拿锁，不能在持锁状态下调用。
+	if model != "" {
+		history = a.HistoryForTab(tabID)
+	}
+	input := SubagentProfileInput{
+		Name:         "prompt-enhancer",
+		Description:  "Enhance the user prompt",
+		SystemPrompt: "You are a prompt engineering expert. Rewrite and enhance the user's prompt to be clearer, more specific, and better structured while preserving the original intent and language. Output only the enhanced prompt, no commentary, no quotes around it.",
+		Model:        model,
+		ReadOnly:     true,
+	}
+	// 携带最近对话作为意图参考：增强模型据此补全省略的主语/目标/约束，
+	// 产出更贴合用户当前上下文的提示词。只取最近的 user/assistant 文本轮，
+	// 跳过工具调用与系统噪声。
+	task := text
+	if ctx := recentConversationContext(history, 6); ctx != "" {
+		task = "参考以下最近的对话背景来理解意图，并增强这条用户输入：\n\n【最近对话】\n" + ctx + "\n\n【用户要增强的输入】\n" + text
+	}
+	return a.TrySubagentProfile(input, task)
+}
+
+// recentConversationContext 把最近 maxRounds 轮 user/assistant 文本对话
+// 折叠成易读的上下文块。工具调用轮（仅 tool 消息）跳过；assistant 的
+// 推理内容不注入（避免把内部思考暴露给增强模型）。
+func recentConversationContext(history []HistoryMessage, maxRounds int) string {
+	if len(history) == 0 || maxRounds <= 0 {
+		return ""
+	}
+	var parts []string
+	rounds := 0
+	for i := len(history) - 1; i >= 0 && rounds < maxRounds; i-- {
+		m := history[i]
+		if m.Role != "user" && m.Role != "assistant" {
+			continue
+		}
+		content := strings.TrimSpace(m.Content)
+		if content == "" {
+			continue
+		}
+		label := "用户"
+		if m.Role == "assistant" {
+			label = "助手"
+		}
+		parts = append(parts, label+"："+content)
+		rounds++
+	}
+	// 倒序收集的，翻转恢复时间顺序。
+	for i, j := 0, len(parts)-1; i < j; i, j = i+1, j-1 {
+		parts[i], parts[j] = parts[j], parts[i]
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 // trySubagentPermissionGate pins the settings-page try runner to an explicit

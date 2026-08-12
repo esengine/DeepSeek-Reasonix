@@ -561,6 +561,25 @@ export interface AppBindings extends SessionCatalogBindings, HistoryCatalogBindi
   SetCompactRatio(ratio: number): Promise<void>;
   SetReasoningLanguage(lang: string): Promise<void>;
   SetTrayLocale(locale: "en" | "zh" | "zh-TW"): Promise<void>;
+  // Voice-to-text (Edge Web Speech API bridge): mic button in the composer.
+  // STTStatus returns {running, listening, connected, lang, port}. Transcripts
+  // arrive via onSTTTranscript. tabID 为发起识别的标签页，转录事件携带它，
+  // 前端据此把转录插入正确的窗口输入框（多窗口独立绑定不错乱）。
+  STTStart(tabID?: string): Promise<void>;
+  STTStop(): Promise<void>;
+  STTStatus(): Promise<Record<string, unknown>>;
+  STTSetLang(lang: string): Promise<void>;
+  // EnhancePrompt 用大模型增强用户当前输入，返回增强后的提示词文本。
+  // tabID 为发起增强的标签页（用于按该 tab 的模型执行，避免切换窗口错位）。
+  EnhancePrompt(text: string, tabID?: string): Promise<string>;
+  SetDesktopSTTEnabled(enabled: boolean): Promise<void>;
+  SetDesktopSTTShowPage(show: boolean): Promise<void>;
+  SetDesktopSTTAutoStop(enabled: boolean): Promise<void>;
+  // 切换对话窗口时自动停止语音识别（默认关）。
+  SetDesktopSTTAutoStopOnSwitch(enabled: boolean): Promise<void>;
+  SetDesktopSTTAutoStopSeconds(seconds: number): Promise<void>;
+  SetDesktopSTTHotkeyStart(hotkey: string): Promise<void>;
+  SetDesktopSTTHotkeyStop(hotkey: string): Promise<void>;
   // SetBypass is the legacy Wails name for YOLO/full-access tool auto-approval
   // (ask questions and plan approvals still wait; deny rules still apply).
   // Runtime-only.
@@ -572,8 +591,6 @@ export interface AppBindings extends SessionCatalogBindings, HistoryCatalogBindi
   /** Discard a stuck previous update transaction so the next install can proceed. */
   AbandonPendingUpdate?(): Promise<void>;
   OpenDownloadPage(): Promise<void>;
-  OpenUserConfigPath?(): Promise<void>;
-  ReloadUserConfig?(): Promise<{ configWarnings?: string[]; configWarningsRevision?: number; configPath?: string } | null>;
   StorageSettings(): Promise<{ defaultWorkspace: string; statePath: string; cachePath: string; extensionsPath: string }>;
   NeedsOnboarding(): Promise<boolean>;
   ConnectKey(apiKey: string): Promise<string>;
@@ -645,6 +662,13 @@ export interface AppBindings extends SessionCatalogBindings, HistoryCatalogBindi
   RemoteLastWorkspace(hostId: string): Promise<string>;
   ScanRemoteLegacyWorkbenchData(): Promise<RemoteLegacyWorkbenchData>;
   CleanRemoteLegacyWorkbenchData(target: "mirrors" | "trust"): Promise<void>;
+  OpenUserConfigPath(): Promise<void>;
+  ReloadUserConfig(): Promise<DesktopStartupSettingsView>;
+  ExternalOpenersForTab(tabID: string): Promise<ExternalOpenersView>;
+  OpenLocalPathInExternalOpener(path: string, id: string): Promise<void>;
+  SaveLocalPathAs(path: string): Promise<string>;
+  SetReasoningDisplayMode(mode: string): Promise<void>;
+  SetColdResumePrune(enabled: boolean): Promise<void>;
 }
 
 // Compile-time drift check. Exclude<A, B> extracts keys in A that are missing
@@ -1121,6 +1145,119 @@ async function withMockTabScope<T>(tabId: string, fn: () => Promise<T>): Promise
 // Updater progress has its own listener set so the browser dev mock can stream a
 // fake download/install flow through onUpdaterProgress.
 const updaterListeners = new Set<(p: UpdateProgress) => void>();
+
+// ---- voice-to-text (STT) ----
+// STTTranscriptPayload is the transcript event payload pushed from the Go bridge
+// (desktop/stt_bridge.go sttTranscriptPayload). isFinal=true means the frontend
+// should insert the text at the composer caret.
+export interface STTTranscriptPayload {
+  text: string;
+  isFinal: boolean;
+  error?: string;
+  // tabID 是发起识别的标签页（Go sttTranscriptPayload.TabID）：前端据此
+  // 只把转录插入发起窗口的输入框，避免多窗口交叉错乱。
+  tabID?: string;
+}
+
+// mockSTT drives the browser-dev STT mock (no Go backend). The real Wails build
+// ignores it and talks to App.STT* directly.
+const mockSTT: { running: boolean; listening: boolean; connected: boolean; lang: string; port: number; tabID: string } = {
+  running: false,
+  listening: false,
+  connected: false,
+  lang: "zh-CN",
+  port: 0,
+  tabID: "",
+};
+
+const sttListeners = new Set<(p: STTTranscriptPayload) => void>();
+
+function emitSTT(p: STTTranscriptPayload) {
+  sttListeners.forEach((l) => l(p));
+}
+
+// onSTTTranscript subscribes to voice-to-text transcript events (a separate
+// channel from the agent stream); returns an unsubscribe. Must match the event
+// name emitted in desktop/stt_bridge.go (stt:transcript).
+export function onSTTTranscript(cb: (p: STTTranscriptPayload) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("stt:transcript", (p) => cb(p as STTTranscriptPayload));
+  }
+  sttListeners.add(cb);
+  return () => {
+    sttListeners.delete(cb);
+  };
+}
+
+// Test seam for the browser-dev STT mock: pushes a fake transcript through
+// onSTTTranscript so the composer mic flow can be exercised without Edge.
+export function __emitMockSTT(p: STTTranscriptPayload): void {
+  emitSTT(p);
+}
+
+// STTStatePayload is the listening-state event pushed from the Go bridge
+// (desktop/stt_bridge.go sttStateEvent "stt:state"). Lets the composer mic
+// button stay in sync with the Edge recognition page (auto-stop, errors…).
+export interface STTStatePayload {
+  listening: boolean;
+  /** 识别正在启动（Edge 页拉起中/重连中）。按钮显示加载动画，防止
+   *  用户误以为没反应而重复点击造成多窗口。true=转圈，false/缺省=取消。 */
+  starting?: boolean;
+}
+
+const sttStateListeners = new Set<(p: STTStatePayload) => void>();
+
+function emitSTTState(p: STTStatePayload) {
+  sttStateListeners.forEach((l) => l(p));
+}
+
+// onSTTState subscribes to voice-to-text listening-state events; returns an
+// unsubscribe. Must match the event name emitted in desktop/stt_bridge.go.
+export function onSTTState(cb: (p: STTStatePayload) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("stt:state", (p) => cb(p as STTStatePayload));
+  }
+  sttStateListeners.add(cb);
+  return () => {
+    sttStateListeners.delete(cb);
+  };
+}
+
+// Test seam for the browser-dev STT mock: pushes a fake state change.
+export function __emitMockSTTState(p: STTStatePayload): void {
+  emitSTTState(p);
+}
+
+// EnhanceProgressPayload 是增强提示词/试运行的 provider 重试进度事件
+// （Go 侧 desktop/subagents_app.go enhanceProgressEvent "enhance:progress"）。
+// 增强按钮转圈期间前端据此显示"重试中(n/m)"，避免无反馈长转。
+export interface EnhanceProgressPayload {
+  attempt: number;
+  max: number;
+}
+
+const enhanceProgressListeners = new Set<(p: EnhanceProgressPayload) => void>();
+
+function emitEnhanceProgress(p: EnhanceProgressPayload) {
+  enhanceProgressListeners.forEach((l) => l(p));
+}
+
+// onEnhanceProgress 订阅增强/试运行重试进度事件；返回取消订阅函数。
+// 事件名必须与 desktop/subagents_app.go 的 enhanceProgressEvent 一致。
+export function onEnhanceProgress(cb: (p: EnhanceProgressPayload) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("enhance:progress", (p) => cb(p as EnhanceProgressPayload));
+  }
+  enhanceProgressListeners.add(cb);
+  return () => {
+    enhanceProgressListeners.delete(cb);
+  };
+}
+
+// Test seam for the browser-dev mock: pushes a fake retry progress event.
+export function __emitMockEnhanceProgress(p: EnhanceProgressPayload): void {
+  emitEnhanceProgress(p);
+}
 
 function emitUpdater(p: UpdateProgress) {
   updaterListeners.forEach((l) => l(p));
@@ -1766,6 +1903,13 @@ function makeMockApp(): AppBindings {
     updateChannel: "stable",
     telemetry: true,
     metrics: true,
+    desktopSTTEnabled: false,
+    desktopSTTShowPage: true,
+    desktopSTTAutoStop: true,
+    desktopSTTAutoStopOnSwitch: false,
+    desktopSTTAutoStopSeconds: 6,
+    desktopSTTHotkeyStart: "",
+    desktopSTTHotkeyStop: "",
     configPath: "~/.reasonix/config.toml",
     shadowedByPath: "~/projects/reasonix/reasonix.toml",
     providerKinds: ["openai", "anthropic"],
@@ -4719,6 +4863,46 @@ function makeMockApp(): AppBindings {
         async SetDesktopLanguage(lang: string) {
           settings.desktopLanguage = lang === "en" || lang === "zh" ? lang : "";
         },
+        async STTStart(tabID?: string) {
+          mockSTT.listening = true;
+          mockSTT.tabID = tabID ?? "";
+          emitSTT({ text: "", isFinal: false, tabID: mockSTT.tabID });
+        },
+        async STTStop() {
+          mockSTT.listening = false;
+        },
+        async STTStatus() {
+          return { ...mockSTT };
+        },
+        async STTSetLang(lang: string) {
+          mockSTT.lang = lang || "zh-CN";
+        },
+        async EnhancePrompt(text: string) {
+          // 浏览器 mock：无 Go 后端，直接返回原文（增强逻辑仅真实 Wails 可用）。
+          return text;
+        },
+        async SetDesktopSTTEnabled(enabled: boolean) {
+          settings.desktopSTTEnabled = enabled;
+          if (!enabled) mockSTT.listening = false;
+        },
+        async SetDesktopSTTShowPage(show: boolean) {
+          settings.desktopSTTShowPage = show;
+        },
+        async SetDesktopSTTAutoStop(enabled: boolean) {
+          settings.desktopSTTAutoStop = enabled;
+        },
+        async SetDesktopSTTAutoStopOnSwitch(enabled: boolean) {
+          settings.desktopSTTAutoStopOnSwitch = enabled;
+        },
+        async SetDesktopSTTAutoStopSeconds(seconds: number) {
+          settings.desktopSTTAutoStopSeconds = seconds;
+        },
+        async SetDesktopSTTHotkeyStart(hotkey: string) {
+          settings.desktopSTTHotkeyStart = hotkey;
+        },
+        async SetDesktopSTTHotkeyStop(hotkey: string) {
+          settings.desktopSTTHotkeyStop = hotkey;
+        },
         async SetDesktopCurrency(currency: string) {
           settings.desktopCurrency = currency === "CNY" || currency === "USD" ? currency : "";
         },
@@ -4969,7 +5153,23 @@ function makeMockApp(): AppBindings {
     },
     async OpenUserConfigPath() {},
     async ReloadUserConfig() {
-      return { configWarnings: [], configWarningsRevision: 0, configPath: "" };
+      const { bot, desktopLanguage, desktopLayoutStyle, desktopTheme, desktopThemeStyle, desktopTerminalTheme, displayMode, statusBarStyle, statusBarItems, checkUpdates, conversationWidth } = settings;
+      return JSON.parse(JSON.stringify({
+        bot,
+        desktopLanguage,
+        desktopLayoutStyle,
+        desktopTheme,
+        desktopThemeStyle,
+        desktopTerminalTheme,
+        displayMode,
+        statusBarStyle,
+        statusBarItems,
+        checkUpdates,
+        conversationWidth,
+        configWarnings: [],
+        configWarningsRevision: 0,
+        configPath: "",
+      })) as DesktopStartupSettingsView;
     },
     // Dev seam: match the backend's provider-agnostic onboarding predicate.
     async NeedsOnboarding() {
@@ -5528,6 +5728,7 @@ function makeMockApp(): AppBindings {
     },
     async SubmitExtensionForm() {},
     async CleanRemoteLegacyWorkbenchData() {},
+    async SetColdResumePrune() {},
   };
 }
 

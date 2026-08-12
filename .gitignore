@@ -36,6 +36,8 @@ mem.prof
 .env
 .env.local
 *.local
+# 本地个人 AI 指令（AGENTS.local.md 不提交；AGENTS.md 提交共享）
+AGENTS.local.md
 /reasonix.toml
 /desktop/.env
 /desktop/reasonix.toml
@@ -69,6 +71,11 @@ benchmarks/context-maintenance-e2e/run/
 
 # Local scratch
 temp/
+# dev 模式运行日志（wails dev / dev.bat 测试时产生，勿提交）
+wails-dev.out.log
+wails-dev.err.log
+dev-run.out.log
+dev-run.err.log
 
 # Official theme art intermediate outputs / caches
 scripts/official-theme-art/out/
