@@ -933,7 +933,7 @@ func TestCapabilityGateRecoveryIsAudited(t *testing.T) {
 	a.SeedCapabilityRoute(capability.RouteDecision{Candidates: []capability.RouteCandidate{
 		{Entry: capability.Entry{ID: "skill:review"}, Policy: capability.AutoUseRequire},
 	}})
-	a.evidence.Record(evidence.ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"a.go"}`), true, true))
+	a.task.ledger.Record(evidence.ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"a.go"}`), true, true))
 	if check := a.finalReadinessCheckFor(); check.reason == "" {
 		t.Fatal("expected a require miss first")
 	}
@@ -1094,7 +1094,7 @@ func TestCapabilityGateAppliesToReadOnlyTasks(t *testing.T) {
 		{Entry: capability.Entry{ID: "skill:review"}, Policy: capability.AutoUseRequire},
 	}})
 	// Only ordinary reads happened — no writer. The require gate must still hold.
-	a.evidence.Record(evidence.ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"a.go"}`), true, true))
+	a.task.ledger.Record(evidence.ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"a.go"}`), true, true))
 	check := a.finalReadinessCheckFor()
 	if !strings.Contains(check.reason, "required capabilities") {
 		t.Fatalf("read-only answer must not skip the require gate; reason = %q", check.reason)

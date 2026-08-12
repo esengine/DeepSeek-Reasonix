@@ -3,13 +3,13 @@
     "banner": 15,
     "commented-code": 0,
     "complexity": 2086,
-    "essay": 4033,
-    "file-size": 108600,
+    "essay": 4028,
+    "file-size": 108575,
     "function-size": 8886,
     "layering": 1,
     "marker": 0,
     "narrative": 64,
-    "struct-state": 132,
+    "struct-state": 130,
     "test-file-size": 69238
   },
   "files": {
@@ -451,10 +451,10 @@
     },
     "internal/agent/agent.go": {
       "complexity": 37,
-      "essay": 81,
-      "file-size": 2276,
+      "essay": 76,
+      "file-size": 2251,
       "function-size": 102,
-      "struct-state": 20
+      "struct-state": 18
     },
     "internal/agent/ask.go": {
       "essay": 4

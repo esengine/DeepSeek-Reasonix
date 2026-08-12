@@ -35,11 +35,11 @@ const forkBundleVersion = 1
 // does the session hold the eligible round's tool results. Arming refuses
 // under live enforcement: a treated state must never become a bundle.
 func (a *Agent) armForkCapture(sample evidence.OutcomeSample) {
-	if forkCapturePolicy() != "ebm" || ebmEnabled || a.ebm.captured || a.ebm.captureArmed {
+	if forkCapturePolicy() != "ebm" || ebmEnabled || a.task.ebm.captured || a.task.ebm.captureArmed {
 		return
 	}
-	a.ebm.captureArmed = true
-	a.ebm.captureRound = sample.Round
+	a.task.ebm.captureArmed = true
+	a.task.ebm.captureRound = sample.Round
 }
 
 // govReasoningThreshold marks a round's thinking as expensive enough that a
@@ -51,14 +51,14 @@ const govReasoningThreshold = 1500
 // so experiments fork exactly the states enforcement would treat. Refuses
 // under live enforcement: a treated state must never become a bundle.
 func (a *Agent) armGovernorCapture(sample evidence.OutcomeSample) {
-	if forkCapturePolicy() != "governor" || governorEnabled || a.ebm.captured || a.ebm.captureArmed {
+	if forkCapturePolicy() != "governor" || governorEnabled || a.task.ebm.captured || a.task.ebm.captureArmed {
 		return
 	}
 	if !governorTrigger(sample, a.lastReasoning) {
 		return
 	}
-	a.ebm.captureArmed = true
-	a.ebm.captureRound = sample.Round
+	a.task.ebm.captureArmed = true
+	a.task.ebm.captureRound = sample.Round
 }
 
 // forkCapturePolicy selects which policy's trigger owns bundle capture;
@@ -92,14 +92,14 @@ func (p *forkCaptureProvider) SharedWindowInputPolicy() provider.SharedWindowInp
 
 func (p *forkCaptureProvider) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	a := p.a
-	if a.ebm.captureArmed && !a.ebm.captured {
-		a.ebm.captured = true
+	if a.task.ebm.captureArmed && !a.task.ebm.captured {
+		a.task.ebm.captured = true
 		messages := a.session.Snapshot()
-		seed := a.outcome.ForkSeed()
+		seed := a.task.outcome.ForkSeed()
 		b := ForkBundle{
 			Version: forkBundleVersion, Policy: forkCapturePolicy(),
 			Input:         forkTurnInput(messages),
-			EligibleRound: a.ebm.captureRound, BlindAtFork: seed.BlindMutations,
+			EligibleRound: a.task.ebm.captureRound, BlindAtFork: seed.BlindMutations,
 			DebtAtFork: seed.DebtAge, MutatedBases: seed.MutatedBases,
 			LocalExecSeen: seed.LocalExecSeen, Messages: messages,
 		}
@@ -215,11 +215,11 @@ func (a *Agent) armForkContinuation(b *ForkBundle, nudge string) {
 			applyForkTreatment(messages, nudge)
 		}
 		a.session.Replace(messages)
-		a.outcome = evidence.RestoreOutcomeTracker(evidence.OutcomeSeed{
+		a.task.outcome = evidence.RestoreOutcomeTracker(evidence.OutcomeSeed{
 			MutatedBases: b.MutatedBases, DebtAge: b.DebtAtFork,
 			BlindMutations: b.BlindAtFork, LocalExecSeen: b.LocalExecSeen,
 		})
-		a.ebm = ebmState{fired: true, captured: true, captureRound: b.EligibleRound}
+		a.task.ebm = ebmState{fired: true, captured: true, captureRound: b.EligibleRound}
 	}
 }
 

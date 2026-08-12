@@ -432,9 +432,11 @@ type Agent struct {
 	// instead of leaving them in a queue no loop will ever consume.
 	steerRunActive bool
 
-	// evidence is a per-user-turn ledger of host-observed tool receipts. It lets
-	// complete_step validate that cited evidence happened before the claim.
-	evidence *evidence.Ledger
+	// task is the state shared by every Run continuing one delivery scope: the
+	// receipt ledger complete_step validates citations against, the spend that
+	// outlives a single Run, and the guards keyed to the task rather than the
+	// turn. See taskstate.go.
+	task taskRuntime
 
 	// todoState is the host's canonical task list: the latest successful
 	// todo_write with completions applied by complete_step. Unlike the per-turn
@@ -455,15 +457,12 @@ type Agent struct {
 	projectChecks []instruction.VerifyCheck
 
 	// deliveryProfile enables the runtime-enforced delivery contract. The stable
-	// profile prompt explains intent; these fields are host state and never enter
-	// the provider-cached prefix. deliveryScopeID and deliveryCheckpoint survive
-	// turns while a stable delivery scope continues; the per-turn expectations
-	// live in perTurnState.
+	// profile prompt explains intent; this is host state and never enters the
+	// provider-cached prefix. The scope ID and checkpoint it works against live
+	// in task; the per-turn expectations live in perTurnState.
 	// When agentPreset is set, deliveryProfile is derived for baseline Delivery
 	// and may be elevated per-turn by TaskPolicy (e.g. Light high-risk).
-	deliveryProfile    bool
-	deliveryScopeID    string
-	deliveryCheckpoint evidence.DeliveryCheckpoint
+	deliveryProfile bool
 
 	// agentPreset is the session role setting. Atomic so SetAgentPreset can
 	// update subsequent turns without rebuilding the agent.
@@ -557,22 +556,6 @@ type Agent struct {
 	// (see progress_guard.go); reset with the evidence ledger each turn.
 	progress progressGuard
 
-	// outcome shadows progress with an outcome-decomposed scorer whose samples
-	// only feed trajectory recording; it never influences guard behavior.
-	outcome *evidence.OutcomeTracker
-
-	// taskBudget accumulates spend across every Run continuing one task and
-	// resets with the evidence ledger: one ledger, one task, one bill. A
-	// per-Run total cannot see the failures worth stopping — those are
-	// measured in hours, and every "continue" starts a fresh Run.
-	taskBudget runBudget
-
-	// ebm is the Evidence-Before-More-Mutation nudge's once-per-turn state.
-	ebm ebmState
-
-	// governor is the reasoning governor's per-turn engagement state.
-	governor governorState
-
 	// forkRestore, when armed, swaps the frozen fork-bundle conversation in
 	// right after beginRunTurn — the counterfactual-continuation seam.
 	forkRestore func(*runLoopState)
@@ -580,16 +563,6 @@ type Agent struct {
 	// lastReasoning is the previous executor round's reasoning-token spend,
 	// read by the governor trigger (live policy and fork capture alike).
 	lastReasoning int
-
-	// repeatFailureCounts tracks semantically identical write-like calls that
-	// keep failing with the same failure class. Unlike stormSig, successful
-	// reads do not blindly clear this state: re-reading a file and then
-	// resending the same stale anchor is still zero progress. Stale-anchor
-	// records also survive target mutations until Preview proves the anchor is
-	// applicable again. Ordinary turns reset the map at Run start; Goal
-	// continuations retain it while their stable delivery scope is unchanged.
-	repeatFailureCounts map[string]repeatFailureRecord
-	repeatFailureScope  string
 }
 
 type repeatFailureRecord struct {
@@ -808,8 +781,8 @@ func (a *Agent) SetSession(s *Session) {
 	a.missingReasoning.active = false
 	a.missingReasoning.stateRecorded = false
 	a.missingReasoning.healthyStreak = 0
-	a.repeatFailureCounts = nil
-	a.repeatFailureScope = ""
+	a.task.repeatFailures = nil
+	a.task.repeatScope = ""
 	a.compactionMu.Lock()
 	a.compactionState = CompactionState{} // lineage change; disk reloaded on Resume
 	a.cacheState = CacheStateUnknown
@@ -1294,10 +1267,13 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 			recentKeep:         opts.RecentKeep,
 			archiveDir:         opts.ArchiveDir,
 		},
-		prov:                prov,
-		tools:               tools,
-		session:             session,
-		taskBudget:          runBudget{limit: normalizeTaskBudget(opts.TaskBudget)},
+		prov:    prov,
+		tools:   tools,
+		session: session,
+		task: taskRuntime{
+			ledger: evidence.NewLedger(),
+			budget: runBudget{limit: normalizeTaskBudget(opts.TaskBudget)},
+		},
 		pricing:             opts.Pricing,
 		sink:                sink,
 		requireVisibleFinal: opts.RequireVisibleFinal,
@@ -1319,7 +1295,6 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		writeScheduler:            opts.WriteScheduler,
 		workspaceLease:            opts.WorkspaceLease,
 		missingReasoningWarnState: missingReasoningWarnStateFor(opts.MissingReasoningWarnStateDir),
-		evidence:                  evidence.NewLedger(),
 		projectChecks:             append([]instruction.VerifyCheck(nil), opts.ProjectChecks...),
 		deliveryProfile:           opts.DeliveryProfile || agentpreset.Normalize(opts.AgentPreset) == agentpreset.Delivery,
 		ablation:                  opts.Ablation,
@@ -1472,10 +1447,10 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	// job's evidence can be permanently drained. A failed or cancelled turn
 	// leaves the lease uncommitted so the next turn re-collects it.
 	defer func() {
-		if runErr != nil || a.evidence == nil || a.jobs == nil {
+		if runErr != nil || a.task.ledger == nil || a.jobs == nil {
 			return
 		}
-		for _, lease := range a.evidence.BackgroundLeases() {
+		for _, lease := range a.task.ledger.BackgroundLeases() {
 			a.jobs.CommitEvidenceForSession(lease.Session, lease.JobID)
 		}
 	}()
@@ -1543,7 +1518,7 @@ func boolInt(v bool) int {
 // DeliveryCheckpoint returns the compact Goal-scoped delivery state. It is safe
 // to persist next to the Goal sidecar because it contains no raw arguments.
 func (a *Agent) DeliveryCheckpoint() evidence.DeliveryCheckpoint {
-	return a.deliveryCheckpoint
+	return a.task.checkpoint
 }
 
 // RestoreDeliveryCheckpoint seeds a rebuilt controller before its next Goal
@@ -1553,8 +1528,8 @@ func (a *Agent) RestoreDeliveryCheckpoint(checkpoint evidence.DeliveryCheckpoint
 	if checkpoint.ScopeID == "" {
 		return
 	}
-	a.deliveryCheckpoint = checkpoint
-	a.deliveryScopeID = checkpoint.ScopeID
+	a.task.checkpoint = checkpoint
+	a.task.scopeID = checkpoint.ScopeID
 }
 
 // PrepareDeliveryRecovery preserves the exhausted turn's evidence for exactly
@@ -1570,18 +1545,18 @@ func (a *Agent) PrepareDeliveryRecovery() bool {
 }
 
 func (a *Agent) updateDeliveryCheckpoint(runErr error) {
-	if !a.deliveryScopeActive || a.deliveryScopeID == "" || a.evidence == nil {
+	if !a.deliveryScopeActive || a.task.scopeID == "" || a.task.ledger == nil {
 		return
 	}
-	cp := a.deliveryCheckpoint
-	if cp.ScopeID != a.deliveryScopeID {
-		cp = evidence.DeliveryCheckpoint{ScopeID: a.deliveryScopeID}
+	cp := a.task.checkpoint
+	if cp.ScopeID != a.task.scopeID {
+		cp = evidence.DeliveryCheckpoint{ScopeID: a.task.scopeID}
 	}
-	cp.CriteriaEstablished = cp.CriteriaEstablished || a.deliveryCriteriaEstablished || a.evidence.HasSuccessfulTodoWrite()
-	cp.WorkObserved = cp.WorkObserved || a.evidence.HasSuccessfulWorkReceipt()
+	cp.CriteriaEstablished = cp.CriteriaEstablished || a.deliveryCriteriaEstablished || a.task.ledger.HasSuccessfulTodoWrite()
+	cp.WorkObserved = cp.WorkObserved || a.task.ledger.HasSuccessfulWorkReceipt()
 	persistentOnlyReady := a.deliveryPersistentExpected && !a.deliveryMutationExpected &&
-		a.evidence.HasSuccessfulToolReceipt("remember") && !a.evidence.HasSuccessfulMutationOtherThan("remember")
-	if _, ok := a.evidence.LatestSuccessfulMutationIndex(); ok && !persistentOnlyReady {
+		a.task.ledger.HasSuccessfulToolReceipt("remember") && !a.task.ledger.HasSuccessfulMutationOtherThan("remember")
+	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok && !persistentOnlyReady {
 		cp.MutationObserved = true
 		cp.PendingMutation = true
 	}
@@ -1591,20 +1566,20 @@ func (a *Agent) updateDeliveryCheckpoint(runErr error) {
 	if runErr == nil && cp.PendingMutation && a.deliveryMutationCheckpointReady() {
 		cp.PendingMutation = false
 	}
-	a.deliveryCheckpoint = cp
+	a.task.checkpoint = cp
 }
 
 func (a *Agent) deliveryMutationCheckpointReady() bool {
-	if a.evidence == nil || !a.deliveryCriteriaEstablished {
+	if a.task.ledger == nil || !a.deliveryCriteriaEstablished {
 		return false
 	}
-	mutation, ok := a.evidence.LatestSuccessfulMutationIndex()
+	mutation, ok := a.task.ledger.LatestSuccessfulMutationIndex()
 	if !ok {
 		mutation = -1
 	}
-	return a.evidence.HasSuccessfulCompleteStepAfter(mutation) &&
-		a.evidence.HasSuccessfulDeliverySignoffAfter(mutation) &&
-		a.evidence.HasSuccessfulReviewAfter(mutation) &&
+	return a.task.ledger.HasSuccessfulCompleteStepAfter(mutation) &&
+		a.task.ledger.HasSuccessfulDeliverySignoffAfter(mutation) &&
+		a.task.ledger.HasSuccessfulReviewAfter(mutation) &&
 		a.deliveryReviewGateFailure() == ""
 }
 
@@ -2723,15 +2698,15 @@ func (a *Agent) repeatedSuccessBlock(call provider.ToolCall, t tool.Tool) (strin
 }
 
 func (a *Agent) staleAnchorEditBlock(call provider.ToolCall) (string, bool) {
-	if a.evidence == nil || !anchorBasedEditTool(call.Name) {
+	if a.task.ledger == nil || !anchorBasedEditTool(call.Name) {
 		return "", false
 	}
 	rec := evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), true, false)
 	if len(rec.Paths) == 0 {
 		return "", false
 	}
-	writeIndex, ok := a.evidence.LatestSuccessfulWriteIndex(rec.Paths)
-	if !ok || a.evidence.HasSuccessfulAnchorRefreshReadAfter(rec.Paths, writeIndex) {
+	writeIndex, ok := a.task.ledger.LatestSuccessfulWriteIndex(rec.Paths)
+	if !ok || a.task.ledger.HasSuccessfulAnchorRefreshReadAfter(rec.Paths, writeIndex) {
 		return "", false
 	}
 	return fmt.Sprintf(

@@ -559,7 +559,7 @@ func TestExecuteOneFailedReceiptDoesNotVerify(t *testing.T) {
 	if out.errMsg == "" {
 		t.Fatal("failing fake tool should return an error outcome")
 	}
-	if a.evidence.HasSuccessfulCommand("go test ./...") {
+	if a.task.ledger.HasSuccessfulCommand("go test ./...") {
 		t.Fatal("failed bash receipt must not verify")
 	}
 }
@@ -571,14 +571,14 @@ func TestRunResetsEvidenceLedger(t *testing.T) {
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
 
 	a.executeOne(context.Background(), provider.ToolCall{Name: "bash", Arguments: `{"command":"go test ./..."}`})
-	if !a.evidence.HasSuccessfulCommand("go test ./...") {
+	if !a.task.ledger.HasSuccessfulCommand("go test ./...") {
 		t.Fatal("setup failed to record evidence")
 	}
 
 	if err := a.Run(context.Background(), "next turn"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if a.evidence.HasSuccessfulCommand("go test ./...") {
+	if a.task.ledger.HasSuccessfulCommand("go test ./...") {
 		t.Fatal("new user turn should not inherit previous receipts")
 	}
 }

@@ -23,7 +23,7 @@ func rejectionAgent(t *testing.T, plan *plancontract.Plan) *Agent {
 func TestUnprovenPlanCriterionBlocksTheFinalAnswer(t *testing.T) {
 	plan := criterionPlan()
 	a := rejectionAgent(t, &plan)
-	a.evidence.Record(evidence.Receipt{ToolName: "edit_file", Mutation: true, Write: true, Success: true, Paths: []string{"pay.go"}})
+	a.task.ledger.Record(evidence.Receipt{ToolName: "edit_file", Mutation: true, Write: true, Success: true, Paths: []string{"pay.go"}})
 
 	outstanding := a.outstandingPlanCriteria()
 	if len(outstanding) == 0 {
@@ -41,7 +41,7 @@ func TestProvenPlanCriteriaLeaveNothingOutstanding(t *testing.T) {
 	plan := criterionPlan()
 	a := rejectionAgent(t, &plan)
 	for _, c := range plan.Steps[0].Acceptance {
-		a.evidence.Record(completeStepReceipt(t, c.ID, "manual", ""))
+		a.task.ledger.Record(completeStepReceipt(t, c.ID, "manual", ""))
 	}
 	if outstanding := a.outstandingPlanCriteria(); len(outstanding) != 0 {
 		t.Fatalf("outstanding = %v, want none once every criterion is proven", outstanding)
@@ -54,13 +54,13 @@ func TestStaleProofBecomesOutstandingAgain(t *testing.T) {
 	plan := criterionPlan()
 	a := rejectionAgent(t, &plan)
 	for _, c := range plan.Steps[0].Acceptance {
-		a.evidence.Record(completeStepReceipt(t, c.ID, "verification", "go test ./..."))
+		a.task.ledger.Record(completeStepReceipt(t, c.ID, "verification", "go test ./..."))
 	}
 	if outstanding := a.outstandingPlanCriteria(); len(outstanding) != 0 {
 		t.Fatalf("outstanding = %v, want none while the proofs are fresh", outstanding)
 	}
 
-	a.evidence.Record(evidence.Receipt{ToolName: "edit_file", Mutation: true, Write: true, Success: true, Paths: []string{"pay.go"}})
+	a.task.ledger.Record(evidence.Receipt{ToolName: "edit_file", Mutation: true, Write: true, Success: true, Paths: []string{"pay.go"}})
 	outstanding := a.outstandingPlanCriteria()
 	if len(outstanding) == 0 {
 		t.Fatal("a mutation after the proofs must reopen them")
@@ -73,7 +73,7 @@ func TestStaleProofBecomesOutstandingAgain(t *testing.T) {
 // An unplanned turn must not inherit a contract it never agreed to.
 func TestUnplannedTurnHasNoOutstandingCriteria(t *testing.T) {
 	a := rejectionAgent(t, nil)
-	a.evidence.Record(evidence.Receipt{ToolName: "edit_file", Mutation: true, Write: true, Success: true, Paths: []string{"pay.go"}})
+	a.task.ledger.Record(evidence.Receipt{ToolName: "edit_file", Mutation: true, Write: true, Success: true, Paths: []string{"pay.go"}})
 	if outstanding := a.outstandingPlanCriteria(); len(outstanding) != 0 {
 		t.Fatalf("outstanding = %v, want none without an approved plan", outstanding)
 	}

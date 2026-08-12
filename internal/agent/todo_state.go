@@ -55,14 +55,14 @@ func (a *Agent) hasIncompleteCanonicalCriteria() bool {
 // completion. It bypasses the todo_write tool, so the completion-transition
 // guard never runs on it.
 func (a *Agent) recordTodoState(todos []evidence.TodoItem) {
-	if a.evidence == nil {
+	if a.task.ledger == nil {
 		return
 	}
 	args, err := json.Marshal(map[string]any{"todos": todos})
 	if err != nil {
 		return
 	}
-	a.evidence.Record(evidence.ReceiptFromToolCall("todo_write", json.RawMessage(args), true, true))
+	a.task.ledger.Record(evidence.ReceiptFromToolCall("todo_write", json.RawMessage(args), true, true))
 }
 
 func canonicalTodoStatus(s string) string {

@@ -147,10 +147,10 @@ func intentName(i taskintent.Intent) string {
 // keeping incremental state because one code path serves the per-round view and
 // the end-of-turn record, so the two can never disagree.
 func (a *Agent) LiveContract() *taskcontract.Contract {
-	if a == nil || a.evidence == nil {
+	if a == nil || a.task.ledger == nil {
 		return nil
 	}
-	return buildShadowContract(a.turnInput, a.evidence.Receipts(), a.planContractSnapshot())
+	return buildShadowContract(a.turnInput, a.task.ledger.Receipts(), a.planContractSnapshot())
 }
 
 // observeContractRound records the contract after one tool round, so a
@@ -168,10 +168,10 @@ func (a *Agent) observeContractRound() {
 // state, and the completion report derived from it. Both observe; neither
 // decides.
 func (a *Agent) emitTurnShadows(input string) {
-	if a.evidence == nil {
+	if a.task.ledger == nil {
 		return
 	}
-	c := buildShadowContract(input, a.evidence.Receipts(), a.planContractSnapshot())
+	c := buildShadowContract(input, a.task.ledger.Receipts(), a.planContractSnapshot())
 	// Prefer the live contract when present so Suppressed/Partial state is not
 	// lost in the pure replay path.
 	if live := a.LiveContract(); live != nil && (live.HasSuppressed() || len(live.Requirements) > 0 || len(live.Checks) > 0) {
@@ -186,7 +186,7 @@ func (a *Agent) emitTurnShadows(input string) {
 		}
 	}
 	event.RecordContractShadow(a.sink, contractShadowAudit(c))
-	rep := completion.Build(c, a.evidence)
+	rep := completion.Build(c, a.task.ledger)
 	a.completion = &rep
 	event.RecordCompletionReport(a.sink, completionReportAudit(rep))
 	a.emitCompletionSummary(c)

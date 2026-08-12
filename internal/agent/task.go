@@ -2011,10 +2011,10 @@ func mergeChildEvidence(ctx context.Context, sub *Agent) {
 
 // EvidenceSummary exports this agent's turn-scoped receipts for parent merge.
 func (a *Agent) EvidenceSummary() evidence.ChildEvidenceSummary {
-	if a == nil || a.evidence == nil {
+	if a == nil || a.task.ledger == nil {
 		return evidence.ChildEvidenceSummary{}
 	}
-	return a.evidence.Summary()
+	return a.task.ledger.Summary()
 }
 
 func isFreshSubagentSession(sess *Session) bool {

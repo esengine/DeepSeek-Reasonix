@@ -132,7 +132,7 @@ func TestDeliveryResolvedReadOnlyBashDoesNotArmMutationReadiness(t *testing.T) {
 	if err := a.Run(context.Background(), "inspect and report the current workspace basename"); err != nil {
 		t.Fatalf("resolved read-only delivery command: %v", err)
 	}
-	if _, ok := a.evidence.LatestSuccessfulMutationIndex(); ok {
+	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok {
 		t.Fatal("resolved read-only bash was recorded as a mutation")
 	}
 	msgs := a.session.Snapshot()
@@ -481,7 +481,7 @@ func TestExplicitDeliveryRecoveryPreservesEvidenceOnce(t *testing.T) {
 	if err := a.Run(context.Background(), "continue the remaining delivery checks"); err != nil {
 		t.Fatalf("recovery Run: %v", err)
 	}
-	if _, ok := a.evidence.LatestSuccessfulMutationIndex(); !ok {
+	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); !ok {
 		t.Fatal("recovery turn lost the prior mutation receipt")
 	}
 }
@@ -502,7 +502,7 @@ func TestOrdinaryFollowUpDoesNotPreserveFailedDeliveryEvidence(t *testing.T) {
 	if err := a.Run(context.Background(), "implement main"); !errors.As(err, &firstErr) {
 		t.Fatalf("first Run error = %v, want FinalReadinessError", err)
 	}
-	if _, ok := a.evidence.LatestSuccessfulMutationIndex(); !ok {
+	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); !ok {
 		t.Fatal("first failed delivery should retain its mutation until the next turn is classified")
 	}
 
@@ -510,7 +510,7 @@ func TestOrdinaryFollowUpDoesNotPreserveFailedDeliveryEvidence(t *testing.T) {
 	if err := a.Run(context.Background(), "fix the unrelated crash in other.go"); !errors.As(err, &followUpErr) {
 		t.Fatalf("ordinary follow-up error = %v, want FinalReadinessError", err)
 	}
-	if _, ok := a.evidence.LatestSuccessfulMutationIndex(); ok {
+	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok {
 		t.Fatal("ordinary follow-up inherited stale mutation evidence without explicit recovery")
 	}
 }

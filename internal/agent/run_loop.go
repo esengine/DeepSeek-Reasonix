@@ -123,12 +123,12 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	// evidence-preserving continuation) and then passes readiness counts as a
 	// recovery in the final audit.
 	a.readinessRecovered = preserveEvidence || a.deliveryRecoveryPending
-	if a.evidence != nil {
+	if a.task.ledger != nil {
 		switch {
 		case preserveEvidence:
-			a.evidence.ResetBackgroundLeases()
-		case scoped && a.deliveryScopeID == scope.ID:
-			a.evidence.ResetBackgroundLeases()
+			a.task.ledger.ResetBackgroundLeases()
+		case scoped && a.task.scopeID == scope.ID:
+			a.task.ledger.ResetBackgroundLeases()
 		default:
 			a.resetTurnEvidence()
 		}
@@ -138,13 +138,13 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 		a.deliveryRecoveryPending = false
 	}
 	if scoped {
-		a.deliveryScopeID = scope.ID
+		a.task.scopeID = scope.ID
 	} else if !preserveEvidence {
-		a.deliveryScopeID = ""
+		a.task.scopeID = ""
 	}
 	a.deliveryScopeActive = scoped
-	if scoped && a.deliveryCheckpoint.ScopeID != scope.ID {
-		a.deliveryCheckpoint = evidence.DeliveryCheckpoint{ScopeID: scope.ID}
+	if scoped && a.task.checkpoint.ScopeID != scope.ID {
+		a.task.checkpoint = evidence.DeliveryCheckpoint{ScopeID: scope.ID}
 	}
 	// Re-lease this session's background-job mutations that no turn has
 	// committed yet. The Reset above just wiped any lease a failed or
@@ -156,22 +156,22 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	// change without the final-readiness gate ever seeing it. Plan turns defer
 	// this lease like collectBackgroundEvidence does so execution evidence is
 	// consumed and audited only after plan approval.
-	if a.evidence != nil && a.jobs != nil && !a.planMode.Load() {
+	if a.task.ledger != nil && a.jobs != nil && !a.planMode.Load() {
 		session := jobs.SessionFromContext(ctx)
 		for _, jobID := range a.jobs.PendingEvidenceJobIDsForSession(session) {
 			summary, ready := a.jobs.TryLeaseEvidenceForSession(session, jobID)
 			if !ready {
 				continue
 			}
-			if !a.evidence.NoteBackgroundLease(session, jobID) {
+			if !a.task.ledger.NoteBackgroundLease(session, jobID) {
 				continue
 			}
-			a.evidence.MergeChild(summary)
+			a.task.ledger.MergeChild(summary)
 		}
 	}
 	a.deliveryCriteriaEstablished = a.hasIncompleteCanonicalCriteria() ||
-		(a.evidence != nil && a.evidence.HasSuccessfulTodoWrite()) ||
-		(scoped && a.deliveryCheckpoint.CriteriaEstablished)
+		(a.task.ledger != nil && a.task.ledger.HasSuccessfulTodoWrite()) ||
+		(scoped && a.task.checkpoint.CriteriaEstablished)
 	// Classify delivery expectations from the task text. Sub-agent spawners
 	// pass the pristine task through Options.ClassifierTaskText (a trusted
 	// host channel) because their Run input carries host framing whose
@@ -220,7 +220,7 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	// transcript tail. Fold its bounded facts into this new user turn exactly
 	// once; the user's raw text remains the classifier source above.
 	providerInput = withInterruptedRecovery(providerInput, a.pendingInterruptedRecovery())
-	a.prepareRepeatFailureScope(scoped, scope.ID)
+	a.task.prepareScope(scoped, scope.ID)
 	a.sink.Emit(event.Event{Kind: event.TurnStarted})
 	a.emitTurnPhase(event.TurnPhaseWorking)
 	input = a.withTurnPreferences(providerInput)
@@ -254,8 +254,8 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 		budget:             runBudget{started: time.Now()},
 	}
 	state.todoProgress, state.trackingTodoProgress = a.canonicalTodoProgress()
-	if a.evidence != nil {
-		for _, sig := range a.evidence.SuccessfulProgressSignaturesSince(0) {
+	if a.task.ledger != nil {
+		for _, sig := range a.task.ledger.SuccessfulProgressSignaturesSince(0) {
 			state.seenTodoProgress[sig] = struct{}{}
 		}
 	}
@@ -631,8 +631,8 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 	}
 
 	receiptMark := 0
-	if a.evidence != nil {
-		receiptMark = a.evidence.Len()
+	if a.task.ledger != nil {
+		receiptMark = a.task.ledger.Len()
 	}
 	batch := a.executeBatch(ctx, calls)
 	results, images := batch.results, batch.images
@@ -691,7 +691,7 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 
 	// Spend is checked before rounds: it is the axis a runaway is actually
 	// reported in, so on the turns both would catch it should be the one named.
-	if axis, detail := a.taskBudget.exceeded(a.taskBudgetLimit(ctx)); axis != "" {
+	if axis, detail := a.task.budget.exceeded(a.taskBudgetLimit(ctx)); axis != "" {
 		a.armFinalizationRound(state, landCause{kind: "task_budget", axis: axis, detail: detail})
 		return true, nil
 	}

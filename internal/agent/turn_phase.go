@@ -22,8 +22,8 @@ func (a *Agent) emitCompletionSummary(c *taskcontract.Contract) {
 		return
 	}
 	mutations := 0
-	if a.evidence != nil {
-		for _, r := range a.evidence.Receipts() {
+	if a.task.ledger != nil {
+		for _, r := range a.task.ledger.Receipts() {
 			if r.Success && (r.Mutation || r.Write) {
 				mutations++
 			}
@@ -53,9 +53,9 @@ func (a *Agent) emitCompletionSummary(c *taskcontract.Contract) {
 		case taskpolicy.ReviewNone:
 			review = "none"
 		default:
-			if a.evidence != nil {
-				if mut, ok := a.evidence.LatestSuccessfulMutationIndex(); ok {
-					if a.evidence.HasSuccessfulReviewAfter(mut) {
+			if a.task.ledger != nil {
+				if mut, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok {
+					if a.task.ledger.HasSuccessfulReviewAfter(mut) {
 						review = "passed"
 					} else if a.turnPolicy.RequiresIndependentReview() {
 						review = "unavailable"

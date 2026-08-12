@@ -221,7 +221,7 @@ func (a *Agent) observeRecoveryResult(ctx context.Context, toolName string, args
 	guidance := a.recoveryGate.ObserveResult(ctx, RecoveryObservation{
 		AgentID:      a.recovery.agentID,
 		TaskID:       a.recovery.taskID,
-		TaskScopeID:  recoveryTaskScopeID(a.deliveryScopeID, a.recovery.runSeq.Load()),
+		TaskScopeID:  recoveryTaskScopeID(a.task.scopeID, a.recovery.runSeq.Load()),
 		EpisodeID:    episodeID,
 		Generation:   generation,
 		Tool:         toolName,

@@ -66,8 +66,8 @@ func TestApplyGovernorEngagesAndExitsWhenEnabled(t *testing.T) {
 	}
 
 	a.resetTurnEvidence()
-	if a.governor.engaged || a.governor.noticed {
-		t.Fatalf("governor = %+v, want reset with the turn", a.governor)
+	if a.task.governor.engaged || a.task.governor.noticed {
+		t.Fatalf("governor = %+v, want reset with the turn", a.task.governor)
 	}
 }
 

@@ -95,7 +95,7 @@ func TestTaskPolicyRequiresPostMutationVerification(t *testing.T) {
 	writer := evidence.Receipt{ToolName: "write_file", Success: true, Write: true, Mutation: true}
 	check := evidence.Receipt{ToolName: "bash", Success: true, Command: "go test ./..."}
 	a := &Agent{
-		evidence:      readinessLedger(check, writer),
+		task:          taskRuntime{ledger: readinessLedger(check, writer)},
 		tools:         reg,
 		turnPolicy:    taskpolicy.TaskPolicy{Verification: taskpolicy.VerifyTargeted},
 		turnPolicySet: true,
@@ -103,7 +103,7 @@ func TestTaskPolicyRequiresPostMutationVerification(t *testing.T) {
 	if got := a.finalReadinessCheckFor(); !strings.Contains(got.reason, "verification command") {
 		t.Fatalf("readiness = %+v, want post-mutation verification", got)
 	}
-	a.evidence.Record(check)
+	a.task.ledger.Record(check)
 	if got := a.finalReadinessCheckFor(); got.reason != "" {
 		t.Fatalf("readiness after verification = %+v, want ready", got)
 	}

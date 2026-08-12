@@ -74,8 +74,8 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 	// for this batch, successes recorded during it (a mixed batch where only one
 	// call was guard-blocked) must already count as progress against the pass.
 	receiptMark := 0
-	if a.evidence != nil {
-		receiptMark = a.evidence.Len()
+	if a.task.ledger != nil {
+		receiptMark = a.task.ledger.Len()
 	}
 	// Full dispatches used the batch's initial file state. After a writer runs
 	// (even a failed one — disk may have mutated), refresh dependent writer
@@ -99,8 +99,8 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 		if calls[i].Name == "complete_step" && completedStepInBatch {
 			output := "blocked: only one successful complete_step is allowed per tool-call round. Continue from the newly promoted in_progress todo in the next round instead of batching sign-offs."
 			outcomes[i] = toolOutcome{output: output, blocked: true, errMsg: "blocked: complete_step sign-offs must be serial"}
-			if a.evidence != nil {
-				a.evidence.Record(evidence.ReceiptFromToolCall(calls[i].Name, json.RawMessage(calls[i].Arguments), false, true))
+			if a.task.ledger != nil {
+				a.task.ledger.Record(evidence.ReceiptFromToolCall(calls[i].Name, json.RawMessage(calls[i].Arguments), false, true))
 			}
 			durations[i] = time.Since(start).Milliseconds()
 			results[i] = output

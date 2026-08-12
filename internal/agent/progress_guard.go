@@ -69,26 +69,22 @@ func (a *Agent) applyBatchGuards(ctx context.Context, cancelled bool, calls []pr
 // task budget resets with them: a fresh ledger is what "a new task" means here,
 // and a continuation keeps both.
 func (a *Agent) resetTurnEvidence() {
-	a.evidence.Reset()
+	a.task.restartLedger()
 	a.progress.reset()
 	a.stormSig, a.stormCount, a.blockedTurnStreak = "", 0, 0
-	a.outcome = evidence.NewOutcomeTracker()
-	a.ebm = ebmState{}
-	a.governor = governorState{}
-	a.taskBudget = runBudget{limit: a.taskBudget.limit}
 }
 
 // observeOutcomeShadow scores the round's receipts through the shadow outcome
 // tracker, lets the EBM policy stamp (and under its arm, act on) the sample,
 // then records it. Unlike the guards it observes every round.
 func (a *Agent) observeOutcomeShadow(receiptMark int, outcomes []toolOutcome) intervention {
-	if a.evidence == nil {
+	if a.task.ledger == nil {
 		return intervention{}
 	}
-	if a.outcome == nil {
-		a.outcome = evidence.NewOutcomeTracker()
+	if a.task.outcome == nil {
+		a.task.outcome = evidence.NewOutcomeTracker()
 	}
-	sample := a.outcome.ScoreRound(a.evidence.ReceiptsSince(receiptMark))
+	sample := a.task.outcome.ScoreRound(a.task.ledger.ReceiptsSince(receiptMark))
 	iv := a.applyEBM(&sample, outcomes)
 	a.applyGovernor(&sample)
 	a.armGovernorCapture(sample)
@@ -102,10 +98,10 @@ func (a *Agent) observeOutcomeShadow(receiptMark int, outcomes []toolOutcome) in
 // readiness stands down and the model can deliver its answer instead of being
 // sent back for more receipts.
 func (a *Agent) applyProgressGuard(outcomes []toolOutcome, receiptMark int, goalScoped bool) intervention {
-	if a.evidence == nil || len(outcomes) == 0 {
+	if a.task.ledger == nil || len(outcomes) == 0 {
 		return intervention{}
 	}
-	receipts := a.evidence.ReceiptsSince(receiptMark)
+	receipts := a.task.ledger.ReceiptsSince(receiptMark)
 	// Rounds where nothing succeeded are the storm breaker's jurisdiction
 	// (same-failure fixation); this guard owns the storm-blind case — rounds
 	// that keep SUCCEEDING without producing anything new.
@@ -192,8 +188,8 @@ func (a *Agent) loopGuardAllowsFinal() bool {
 	if a == nil || !a.loopGuardArmed {
 		return false
 	}
-	if a.evidence == nil {
+	if a.task.ledger == nil {
 		return true
 	}
-	return !a.evidence.HasWriteOrCommandSince(a.loopGuardReceiptMark)
+	return !a.task.ledger.HasWriteOrCommandSince(a.loopGuardReceiptMark)
 }

@@ -175,7 +175,7 @@ func (a *Agent) capabilityGateFailure() string {
 			a.capabilityAudit.RecordGate(true, false, false)
 		}
 		// Do not hard-block forever: once reported, allow final if no mutation pending.
-		if _, ok := a.evidence.LatestSuccessfulMutationIndex(); !ok {
+		if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); !ok {
 			return ""
 		}
 		return gate.Reason
@@ -201,7 +201,7 @@ func (a *Agent) capabilityGateFailure() string {
 // latest mutation. When TaskPolicy is set, its Review level is authoritative;
 // otherwise Delivery-profile medium/high risk keeps the legacy matrix.
 func (a *Agent) deliveryReviewGateFailure() string {
-	if a == nil || a.evidence == nil {
+	if a == nil || a.task.ledger == nil {
 		return ""
 	}
 	// Without Delivery elevation or a forced TaskPolicy review, skip.
@@ -218,12 +218,12 @@ func (a *Agent) deliveryReviewGateFailure() string {
 		// file or run git diff/status) still applies via finalReadinessCheck.
 		return ""
 	}
-	mutation, ok := a.evidence.LatestSuccessfulMutationIndex()
+	mutation, ok := a.task.ledger.LatestSuccessfulMutationIndex()
 	if !ok {
 		return ""
 	}
 	a.emitTurnPhase(event.TurnPhaseReviewing)
-	risk := a.evidence.MutationRiskAfter(mutation)
+	risk := a.task.ledger.MutationRiskAfter(mutation)
 	// TaskPolicy may force higher review than mutation-risk alone.
 	if a.turnPolicySet {
 		switch a.turnPolicy.Review {
@@ -237,7 +237,7 @@ func (a *Agent) deliveryReviewGateFailure() string {
 			return ""
 		}
 	}
-	paths := productionPaths(a.evidence.PathsSince(mutation))
+	paths := productionPaths(a.task.ledger.PathsSince(mutation))
 	hasReviewTool := a.tools != nil && (toolPresent(a.tools, "review") || toolPresent(a.tools, "run_skill") || toolPresent(a.tools, "use_capability"))
 	hasSecurityTool := a.tools != nil && (toolPresent(a.tools, "security_review") || toolPresent(a.tools, "run_skill") || toolPresent(a.tools, "use_capability"))
 	switch risk {
@@ -249,7 +249,7 @@ func (a *Agent) deliveryReviewGateFailure() string {
 			// Test/minimal registries without review keep the light review gate.
 			return ""
 		}
-		ok, blocking, report := a.evidence.HasStructuredReviewAfter(evidence.ReviewKindReview, mutation, paths)
+		ok, blocking, report := a.task.ledger.HasStructuredReviewAfter(evidence.ReviewKindReview, mutation, paths)
 		if blocking {
 			if a.capabilityAudit != nil {
 				a.capabilityAudit.RecordReviewBlock(false)
@@ -257,8 +257,8 @@ func (a *Agent) deliveryReviewGateFailure() string {
 			return "structured review reported blocking findings; fix them and re-run review"
 		}
 		if !ok {
-			hostProof := a.evidence.HasSuccessfulDeliverySignoffAfter(mutation) &&
-				a.evidence.HasHostReviewCoverageAfter(mutation, paths)
+			hostProof := a.task.ledger.HasSuccessfulDeliverySignoffAfter(mutation) &&
+				a.task.ledger.HasHostReviewCoverageAfter(mutation, paths)
 			if !hostProof {
 				return "medium-risk changes require either a successful structured review or host-proven verification plus diff/file inspection after the latest mutation" + reviewCoverageHint(paths)
 			}
@@ -270,7 +270,7 @@ func (a *Agent) deliveryReviewGateFailure() string {
 		if !hasReviewTool && !hasSecurityTool {
 			return "high-risk changes require review and security_review tools after the latest mutation"
 		}
-		okR, blockR, repR := a.evidence.HasStructuredReviewAfter(evidence.ReviewKindReview, mutation, paths)
+		okR, blockR, repR := a.task.ledger.HasStructuredReviewAfter(evidence.ReviewKindReview, mutation, paths)
 		if blockR {
 			if a.capabilityAudit != nil {
 				a.capabilityAudit.RecordReviewBlock(false)
@@ -280,7 +280,7 @@ func (a *Agent) deliveryReviewGateFailure() string {
 		if !okR {
 			return "high-risk changes require review with review_report after the latest mutation" + reviewCoverageHint(paths)
 		}
-		okS, blockS, repS := a.evidence.HasStructuredReviewAfter(evidence.ReviewKindSecurity, mutation, paths)
+		okS, blockS, repS := a.task.ledger.HasStructuredReviewAfter(evidence.ReviewKindSecurity, mutation, paths)
 		if blockS {
 			if a.capabilityAudit != nil {
 				a.capabilityAudit.RecordReviewBlock(true)

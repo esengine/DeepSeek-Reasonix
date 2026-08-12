@@ -294,7 +294,7 @@ func TestDeliveryProfileBlocksMixedVerificationBeforeItBecomesMutation(t *testin
 	if got := toolResult(a.session, "bash"); !strings.Contains(got, "mixes a verification check") {
 		t.Fatalf("mixed command result = %q, want pre-execution split guidance", got)
 	}
-	if _, ok := a.evidence.LatestSuccessfulMutationIndex(); ok {
+	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok {
 		t.Fatal("blocked scratch-file verification must not become a successful mutation")
 	}
 }
@@ -315,7 +315,7 @@ func TestDeliveryProfileExplainsMaskedVerifierExitBeforeExecution(t *testing.T) 
 	if got := toolResultByID(a.session, "masked"); !strings.Contains(got, "masks the verifier's exit status") {
 		t.Fatalf("masked command result = %q, want precise exit-status guidance", got)
 	}
-	if _, ok := a.evidence.LatestSuccessfulMutationIndex(); ok {
+	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok {
 		t.Fatal("blocked masked verifier must not become a successful mutation")
 	}
 }
@@ -336,7 +336,7 @@ func TestDeliveryProfileBlocksOpaqueInlineInterpreterBeforeItBecomesMutation(t *
 	if got := toolResultByID(a.session, "opaque"); !strings.Contains(got, "cannot audit inline interpreter source") {
 		t.Fatalf("opaque command result = %q, want pre-execution audit guidance", got)
 	}
-	if _, ok := a.evidence.LatestSuccessfulMutationIndex(); ok {
+	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok {
 		t.Fatal("blocked inline interpreter must not become a successful mutation")
 	}
 }

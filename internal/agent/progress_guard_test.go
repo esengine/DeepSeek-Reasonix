@@ -119,9 +119,9 @@ func TestProgressGuardResetsOnNewEvidence(t *testing.T) {
 		t.Fatalf("streak = %d, want >= %d before fresh evidence", a.progress.streak, progressNudgeStreak)
 	}
 	// A successful bash command receipt is fresh evidence: streak resets.
-	a.evidence.Record(bashProgressReceipt(t, "go test ./pkg", true))
-	mark := a.evidence.Len() - 1
-	a.progress.observe(a.evidence.ReceiptsSince(mark))
+	a.task.ledger.Record(bashProgressReceipt(t, "go test ./pkg", true))
+	mark := a.task.ledger.Len() - 1
+	a.progress.observe(a.task.ledger.ReceiptsSince(mark))
 	if a.progress.streak != 0 {
 		t.Fatalf("fresh evidence must reset the streak, got %d", a.progress.streak)
 	}

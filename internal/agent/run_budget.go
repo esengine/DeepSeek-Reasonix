@@ -120,14 +120,14 @@ func (a *Agent) taskBudgetLimit(ctx context.Context) TaskBudget {
 	if b, ok := taskBudgetFromContext(ctx); ok {
 		return b
 	}
-	return a.taskBudget.limit
+	return a.task.budget.limit
 }
 
 // ResetTaskBudget starts a fresh user-approved spend slice without touching
 // Delivery evidence or the persisted Goal usage totals. Callers use this only
 // after a resumable explicit-budget pause, while no Agent Run is active.
 func (a *Agent) ResetTaskBudget() {
-	a.taskBudget = runBudget{limit: a.taskBudget.limit}
+	a.task.budget = runBudget{limit: a.task.budget.limit}
 }
 
 // observeRunBudget folds a round into both scopes and reports them.
@@ -136,17 +136,17 @@ func (a *Agent) observeRunBudget(state *runLoopState, usage *provider.Usage) {
 		return
 	}
 	state.budget.observe(usage, a.pricing)
-	if a.taskBudget.started.IsZero() {
-		a.taskBudget.started = state.budget.started
+	if a.task.budget.started.IsZero() {
+		a.task.budget.started = state.budget.started
 	}
-	a.taskBudget.observe(usage, a.pricing)
+	a.task.budget.observe(usage, a.pricing)
 	currency := ""
 	if a.pricing != nil {
 		currency = a.pricing.Symbol()
 	}
 	event.RecordRunBudget(a.sink, event.RunBudgetSample{
 		Turn:     state.budget.totals(),
-		Task:     a.taskBudget.totals(),
+		Task:     a.task.budget.totals(),
 		Currency: currency,
 	})
 }

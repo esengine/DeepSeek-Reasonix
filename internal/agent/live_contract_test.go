@@ -43,7 +43,7 @@ func TestLiveContractReflectsEvidenceAsItLands(t *testing.T) {
 		}
 	}
 
-	a.evidence.Record(evidence.Receipt{
+	a.task.ledger.Record(evidence.Receipt{
 		ToolName: "bash", Command: "go test ./internal/provider/", Success: true,
 	})
 	after := a.LiveContract()
@@ -62,11 +62,11 @@ func TestLiveContractReflectsEvidenceAsItLands(t *testing.T) {
 // never disagree about the same receipts.
 func TestLiveContractMatchesTheEndOfTurnReplay(t *testing.T) {
 	a := liveContractAgent(t, event.Discard)
-	a.evidence.Record(evidence.Receipt{ToolName: "edit_file", Mutation: true, Write: true, Success: true, Paths: []string{"internal/provider/cache.go"}})
-	a.evidence.Record(evidence.Receipt{ToolName: "bash", Command: "go test ./internal/provider/", Success: true})
+	a.task.ledger.Record(evidence.Receipt{ToolName: "edit_file", Mutation: true, Write: true, Success: true, Paths: []string{"internal/provider/cache.go"}})
+	a.task.ledger.Record(evidence.Receipt{ToolName: "bash", Command: "go test ./internal/provider/", Success: true})
 
 	live := contractShadowAudit(a.LiveContract())
-	replay := contractShadowAudit(buildShadowContract(a.turnInput, a.evidence.Receipts(), a.planContractSnapshot()))
+	replay := contractShadowAudit(buildShadowContract(a.turnInput, a.task.ledger.Receipts(), a.planContractSnapshot()))
 	if live != replay {
 		t.Fatalf("live view %+v disagrees with the end-of-turn replay %+v", live, replay)
 	}
@@ -77,7 +77,7 @@ func TestContractRoundObservationRecordsATimeSeries(t *testing.T) {
 	a := liveContractAgent(t, sink)
 
 	a.observeContractRound()
-	a.evidence.Record(evidence.Receipt{ToolName: "bash", Command: "go test ./internal/provider/", Success: true})
+	a.task.ledger.Record(evidence.Receipt{ToolName: "bash", Command: "go test ./internal/provider/", Success: true})
 	a.observeContractRound()
 
 	if len(sink.audits) != 2 {
@@ -103,7 +103,7 @@ func TestContractRoundObservationSkipsAnEmptyContract(t *testing.T) {
 
 func TestLiveContractIsNilWithoutALedger(t *testing.T) {
 	a := New(nil, tool.NewRegistry(), NewSession(""), Options{}, event.Discard)
-	a.evidence = nil
+	a.task.ledger = nil
 	if a.LiveContract() != nil {
 		t.Fatal("no ledger means no contract to answer with")
 	}
