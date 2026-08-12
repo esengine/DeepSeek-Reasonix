@@ -1936,7 +1936,7 @@ func promptCustomProviderManualWith(in *bufio.Scanner, baseURL, keyEnv, apiKey s
 		return providerPromptResult{}, fmt.Errorf("invalid API key variable name %q", keyEnv)
 	}
 	if apiKey == "" {
-		apiKey = ask(in, os.Stdout, i18n.M.CustomPromptAPIKey, "")
+		apiKey = askSecret(in, os.Stdout, i18n.M.CustomPromptAPIKey)
 	}
 	entry := config.ProviderEntry{
 		Name: providerName, Kind: "openai", BaseURL: baseURL,
@@ -1960,7 +1960,7 @@ func promptCustomProviderFromURL() (providerPromptResult, error) {
 	}
 	providerName := providerSlug("custom", baseURL)
 	keyEnv := promptAPIKeyEnvName(in, os.Stdout, i18n.M.CustomPromptKeyEnv, apiKeyEnvFromProviderName(providerName))
-	apiKey := ask(in, os.Stdout, i18n.M.CustomPromptAPIKey, "")
+	apiKey := askSecret(in, os.Stdout, i18n.M.CustomPromptAPIKey)
 
 	fmt.Printf("  %s\n", dim(fmt.Sprintf(i18n.M.FetchingModelsFmt, "custom")))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -2038,7 +2038,7 @@ func promptAnthropicProviderManualWith(in *bufio.Scanner, baseURL, keyEnv, apiKe
 		return providerPromptResult{}, fmt.Errorf("invalid API key variable name %q", keyEnv)
 	}
 	if apiKey == "" {
-		apiKey = ask(in, os.Stdout, i18n.M.AnthropicPromptAPIKey, "")
+		apiKey = askSecret(in, os.Stdout, i18n.M.AnthropicPromptAPIKey)
 	}
 	entry := config.ProviderEntry{
 		Name: providerSlug("anthropic", baseURL), Kind: "anthropic", BaseURL: baseURL,
@@ -2062,7 +2062,7 @@ func promptAnthropicProviderFromURL() (providerPromptResult, error) {
 		return providerPromptResult{}, fmt.Errorf("base URL is required")
 	}
 	keyEnv := promptAPIKeyEnvName(in, os.Stdout, i18n.M.AnthropicPromptKeyEnv, "ANTHROPIC_API_KEY")
-	apiKey := ask(in, os.Stdout, i18n.M.AnthropicPromptAPIKey, "")
+	apiKey := askSecret(in, os.Stdout, i18n.M.AnthropicPromptAPIKey)
 
 	fmt.Printf("  %s\n", dim(fmt.Sprintf(i18n.M.AnthropicFetchingModelsFmt, "anthropic")))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -2203,7 +2203,7 @@ func configureKeys(selected []config.ProviderEntry, r io.Reader, w io.Writer) []
 		if cur := os.Getenv(p.APIKeyEnv); cur != "" {
 			reset := ask(in, w, "  "+fmt.Sprintf(i18n.M.APIKeyResetPromptFmt, p.APIKeyEnv), "y/N")
 			if reset == "y" || reset == "Y" {
-				if key := ask(in, w, "  "+p.APIKeyEnv, ""); key != "" {
+				if key := askSecret(in, w, "  "+p.APIKeyEnv); key != "" {
 					envLines = append(envLines, p.APIKeyEnv+"="+key)
 					continue
 				}
@@ -2213,7 +2213,7 @@ func configureKeys(selected []config.ProviderEntry, r io.Reader, w io.Writer) []
 			continue
 		}
 
-		if key := ask(in, w, "  "+p.APIKeyEnv, ""); key != "" {
+		if key := askSecret(in, w, "  "+p.APIKeyEnv); key != "" {
 			envLines = append(envLines, p.APIKeyEnv+"="+key)
 		}
 	}
