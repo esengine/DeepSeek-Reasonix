@@ -200,6 +200,33 @@ func (s *Store) SetPaused(paused bool) error {
 	return nil
 }
 
+// PauseIfPending pauses dispatch only when the inbox still contains work.
+func (s *Store) PauseIfPending() error {
+	if s == nil {
+		return ErrClosed
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	release, err := s.beginDiskTransactionLocked()
+	if err != nil {
+		return err
+	}
+	defer release()
+	if err := s.mutableLocked(); err != nil {
+		return err
+	}
+	if len(s.man.Items) == 0 || s.man.Paused {
+		return nil
+	}
+	next := s.man.clone()
+	next.Paused = true
+	if err := s.commitManifestLocked(next); err != nil {
+		return err
+	}
+	s.notifyLocked(s.snapshotLocked())
+	return nil
+}
+
 // SetState transitions one item's durable state.
 func (s *Store) SetState(id string, state InboxState, blockReason string) error {
 	if s == nil {

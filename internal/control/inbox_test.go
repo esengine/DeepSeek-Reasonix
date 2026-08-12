@@ -49,6 +49,37 @@ func TestEnqueueInboxDurableAndSnapshot(t *testing.T) {
 	}
 }
 
+func TestSessionRebindOnlyPausesInboxWithPendingWork(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		pending bool
+	}{
+		{name: "empty"},
+		{name: "pending", pending: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			oldPath := filepath.Join(dir, "old.jsonl")
+			c := New(Options{SessionPath: oldPath, SessionDir: dir, Sink: event.Discard})
+			if tc.pending {
+				if _, err := c.EnqueueInbox(InboxRequest{Submit: "work"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			c.SetSessionPath(filepath.Join(dir, "new.jsonl"))
+			oldInbox, err := sessioninbox.Open(oldPath, sessioninbox.Limits{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer oldInbox.Close()
+			if got := oldInbox.Snapshot().Paused; got != tc.pending {
+				t.Fatalf("paused = %v, want %v", got, tc.pending)
+			}
+		})
+	}
+}
+
 func TestTrySteerRejectedBecomesFollowup(t *testing.T) {
 	dir := t.TempDir()
 	session := filepath.Join(dir, "s.jsonl")

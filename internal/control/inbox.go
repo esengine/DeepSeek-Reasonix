@@ -224,8 +224,8 @@ func (c *Controller) rebindInbox() {
 		if path != "" && c.inbox.store.SessionPath() == path {
 			return
 		}
-		// Pause the old session's queue so it is not auto-run if reopened.
-		_ = c.inbox.store.SetPaused(true)
+		// Pending work must remain inspectable if this session is reopened.
+		_ = c.inbox.store.PauseIfPending()
 		c.inbox.store.Close()
 		c.inbox.store = nil
 		c.inbox.clearActive()
@@ -259,7 +259,7 @@ func (c *Controller) pauseInboxOnRotate() {
 	st := c.inbox.store
 	c.inbox.mu.Unlock()
 	if st != nil {
-		_ = st.SetPaused(true)
+		_ = st.PauseIfPending()
 	}
 }
 
