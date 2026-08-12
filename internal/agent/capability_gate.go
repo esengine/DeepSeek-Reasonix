@@ -14,6 +14,16 @@ import (
 	"reasonix/internal/tool"
 )
 
+// capabilityGateState is one user turn's gate memory, scoped to the same turn
+// as the ledger it reads: whether the prefer reminder has already been spent,
+// and which kind of miss was reported, so a later clean gate is audited as a
+// recovery instead of a first pass. Zeroing the struct is the turn reset.
+type capabilityGateState struct {
+	preferReminded  bool
+	requireMissSeen bool
+	preferMissSeen  bool
+}
+
 // SeedCapabilityRoute installs the turn's route decision into the capability ledger.
 func (a *Agent) SeedCapabilityRoute(decision capability.RouteDecision) {
 	if a == nil {
@@ -24,9 +34,7 @@ func (a *Agent) SeedCapabilityRoute(decision capability.RouteDecision) {
 	}
 	a.capabilityLedger.Reset()
 	a.capabilityLedger.SeedCandidates(decision)
-	a.capabilityPreferReminded = false
-	a.capabilityRequireMissSeen = false
-	a.capabilityPreferMissSeen = false
+	a.capabilityGate = capabilityGateState{}
 }
 
 // CapabilityLedger returns the turn-scoped capability ledger (may be nil).
@@ -137,21 +145,21 @@ func (a *Agent) capabilityGateFailure() string {
 	if gate.Reason == "" {
 		// A clean gate after an earlier miss this turn is a recovery — the
 		// model was nudged and then actually invoked the capability.
-		if a.capabilityRequireMissSeen || a.capabilityPreferMissSeen {
+		if a.capabilityGate.requireMissSeen || a.capabilityGate.preferMissSeen {
 			if a.capabilityAudit != nil {
-				a.capabilityAudit.RecordGateRecovery(a.capabilityRequireMissSeen, a.capabilityPreferMissSeen)
+				a.capabilityAudit.RecordGateRecovery(a.capabilityGate.requireMissSeen, a.capabilityGate.preferMissSeen)
 			}
-			a.capabilityRequireMissSeen = false
-			a.capabilityPreferMissSeen = false
+			a.capabilityGate.requireMissSeen = false
+			a.capabilityGate.preferMissSeen = false
 		}
 		return ""
 	}
-	if gate.PreferRemind && !a.capabilityPreferReminded {
+	if gate.PreferRemind && !a.capabilityGate.preferReminded {
 		for _, id := range gate.PreferIDs {
 			a.capabilityLedger.MarkReminded(id)
 		}
-		a.capabilityPreferReminded = true
-		a.capabilityPreferMissSeen = true
+		a.capabilityGate.preferReminded = true
+		a.capabilityGate.preferMissSeen = true
 		if a.capabilityAudit != nil {
 			a.capabilityAudit.RecordGate(false, true, false)
 		}
@@ -173,14 +181,14 @@ func (a *Agent) capabilityGateFailure() string {
 		return gate.Reason
 	}
 	if len(gate.RequireIDs) > 0 {
-		a.capabilityRequireMissSeen = true
+		a.capabilityGate.requireMissSeen = true
 		if a.capabilityAudit != nil {
 			a.capabilityAudit.RecordGate(true, false, false)
 		}
 		return gate.Reason
 	}
 	if len(gate.PreferIDs) > 0 {
-		a.capabilityPreferMissSeen = true
+		a.capabilityGate.preferMissSeen = true
 		if a.capabilityAudit != nil {
 			a.capabilityAudit.RecordGate(false, true, false)
 		}

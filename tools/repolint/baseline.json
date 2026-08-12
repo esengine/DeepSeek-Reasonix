@@ -9,7 +9,7 @@
     "layering": 1,
     "marker": 0,
     "narrative": 64,
-    "struct-state": 159,
+    "struct-state": 156,
     "test-file-size": 69298
   },
   "files": {
@@ -454,7 +454,7 @@
       "essay": 85,
       "file-size": 2404,
       "function-size": 102,
-      "struct-state": 47
+      "struct-state": 44
     },
     "internal/agent/ask.go": {
       "essay": 4
