@@ -607,7 +607,7 @@ func TestCanUpgradeDeepSeekProviderProtocolRejectsProxyButAllowsExplicitUpgradeO
 	}
 }
 
-func TestNormalizeOfficialDeepSeekModelsDoesNotAddProToResponses(t *testing.T) {
+func TestNormalizeOfficialDeepSeekModelsAddsProToResponses(t *testing.T) {
 	c := &Config{Providers: []ProviderEntry{{
 		Name: "deepseek", Kind: "responses", BaseURL: "https://api.deepseek.com",
 		Model: "deepseek-v4-flash",
@@ -618,10 +618,96 @@ func TestNormalizeOfficialDeepSeekModelsDoesNotAddProToResponses(t *testing.T) {
 	if !ok {
 		t.Fatal("DeepSeek provider missing after normalization")
 	}
-	if !p.HasModel("deepseek-v4-flash") {
-		t.Fatal("Responses provider lost its Flash model")
+	if !p.HasModel("deepseek-v4-flash") || !p.HasModel("deepseek-v4-pro") {
+		t.Fatalf("Responses models = %v, want Flash and Pro", p.ModelList())
 	}
-	if p.HasModel("deepseek-v4-pro") {
-		t.Fatalf("Responses normalization added unsupported Pro model: %+v", p.ModelList())
+}
+
+func TestNormalizeOfficialDeepSeekResponsesPresetAddsPro(t *testing.T) {
+	c := &Config{Providers: []ProviderEntry{{
+		Name: "deepseek-responses", Kind: "responses", BaseURL: "https://api.deepseek.com",
+		Models: []string{"deepseek-v4-flash"}, Default: "deepseek-v4-flash",
+	}}}
+
+	normalizeOfficialDeepSeekModels(c)
+	p, ok := c.Provider("deepseek-responses")
+	if !ok {
+		t.Fatal("deepseek-responses provider missing after normalization")
+	}
+	if !p.HasModel("deepseek-v4-flash") || !p.HasModel("deepseek-v4-pro") {
+		t.Fatalf("deepseek-responses models = %v, want Flash and Pro", p.ModelList())
+	}
+	if p.Default != "deepseek-v4-flash" {
+		t.Fatalf("default = %q, want deepseek-v4-flash", p.Default)
+	}
+	flash := p.ModelOverrides["deepseek-v4-flash"]
+	if !containsString(flash.SupportedEfforts, "low") {
+		t.Fatalf("Flash effort override = %+v", flash)
+	}
+	pro := p.ModelOverrides["deepseek-v4-pro"]
+	if containsString(pro.SupportedEfforts, "low") || !containsString(pro.SupportedEfforts, "max") {
+		t.Fatalf("Pro effort override = %+v", pro)
+	}
+}
+
+func TestNormalizeOfficialDeepSeekResponsesDoesNotRestoreUncheckedPro(t *testing.T) {
+	cases := []struct {
+		name      string
+		overrides map[string]ProviderModelOverride
+	}{
+		{
+			name: "settings uncheck keeps flash override",
+			overrides: map[string]ProviderModelOverride{
+				"deepseek-v4-flash": {SupportedEfforts: []string{"disabled", "low", "high", "max"}, DefaultEffort: "high"},
+			},
+		},
+		{
+			name: "leftover pro override is still treated as curated",
+			overrides: map[string]ProviderModelOverride{
+				"deepseek-v4-pro": {SupportedEfforts: []string{"disabled", "high", "max"}, DefaultEffort: "high"},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &Config{Providers: []ProviderEntry{{
+				Name: "deepseek-responses", Kind: "responses", BaseURL: "https://api.deepseek.com",
+				Models: []string{"deepseek-v4-flash"}, Default: "deepseek-v4-flash",
+				ModelOverrides: tc.overrides,
+			}}}
+
+			normalizeOfficialDeepSeekModels(c)
+			p, ok := c.Provider("deepseek-responses")
+			if !ok {
+				t.Fatal("deepseek-responses provider missing after normalization")
+			}
+			if p.HasModel("deepseek-v4-pro") {
+				t.Fatalf("unchecked Pro was restored: %v", p.ModelList())
+			}
+		})
+	}
+}
+
+func TestNormalizeOfficialDeepSeekResponsesAddsProPriceForLegacyFlashPrice(t *testing.T) {
+	flash := deepSeekV4FlashPriceUSD()
+	c := &Config{Providers: []ProviderEntry{{
+		Name: "deepseek-responses", Kind: "responses", BaseURL: "https://api.deepseek.com",
+		Models: []string{"deepseek-v4-flash"}, Default: "deepseek-v4-flash",
+		Price: flash,
+	}}}
+
+	normalizeOfficialDeepSeekModels(c)
+	p, ok := c.Provider("deepseek-responses")
+	if !ok {
+		t.Fatal("deepseek-responses provider missing after normalization")
+	}
+	if !p.HasModel("deepseek-v4-pro") {
+		t.Fatalf("Responses models = %v, want Flash and Pro", p.ModelList())
+	}
+	if got := p.PriceForModel("deepseek-v4-flash"); !samePricing(got, flash) {
+		t.Fatalf("Flash price = %+v, want legacy singular price %+v", got, flash)
+	}
+	if got := p.PriceForModel("deepseek-v4-pro"); !samePricing(got, deepSeekV4ProPriceUSD()) {
+		t.Fatalf("Pro price = %+v, want official Pro list price", got)
 	}
 }

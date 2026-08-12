@@ -26,24 +26,14 @@ func (a *App) resolveCanonicalSessionPath(path string) string {
 	}
 	if rec.TopicID == "" {
 		// Group by recovery group when topic is unset.
-		if rec.RecoveryCanonical && rec.RecoveryRole == sessioncatalog.RecoveryRoleAdopted {
+		if rec.RecoveryCanonical && (rec.RecoveryRole == sessioncatalog.RecoveryRoleAdopted || rec.RecoveryRole == sessioncatalog.RecoveryRolePreferred) {
 			return ""
 		}
 		return ""
 	}
-	page, err := catalog.ListSessions(ctx, sessioncatalog.SessionPageRequest{
-		Scope:         rec.Scope,
-		WorkspaceRoot: rec.WorkspaceRoot,
-		Limit:         sessioncatalog.MaxLimit,
-	})
-	if err != nil {
+	topic, ok, err := catalog.GetTopic(ctx, sessioncatalog.TopicKey{Scope: rec.Scope, WorkspaceRoot: rec.WorkspaceRoot, TopicID: rec.TopicID})
+	if err != nil || !ok {
 		return ""
 	}
-	var sameTopic []sessioncatalog.SessionRecord
-	for _, s := range page.Items {
-		if s.TopicID == rec.TopicID && s.Scope == rec.Scope && s.WorkspaceRoot == rec.WorkspaceRoot {
-			sameTopic = append(sameTopic, s)
-		}
-	}
-	return sessioncatalog.CanonicalSessionPathForTopic(sameTopic, path)
+	return sessioncatalog.CanonicalSessionPathForTopic(topic.Sessions, path)
 }

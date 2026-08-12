@@ -3,7 +3,10 @@
 // not wait 500ms. Covers the fix for native scrollbar drag and middle-button
 // autoscroll suppression during a bottomRequest window.
 
-import { equal } from "node:assert/strict";
+import {
+  isPinnedTranscriptLayoutGrowth,
+  TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX,
+} from "../lib/useTranscriptVirtuosoScroll";
 
 let passed = 0;
 let failed = 0;
@@ -30,7 +33,7 @@ function mockAtBottomStateChange(
   if (!atBottom && bottomRequestActive) {
     if (scrollElement) {
       const distanceFromBottom = scrollElement.scrollHeight - scrollElement.scrollTop - scrollElement.clientHeight;
-      if (distanceFromBottom > 4) {
+      if (distanceFromBottom > TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX) {
         return "manual"; // Released immediately by the fix
       }
     }
@@ -39,9 +42,9 @@ function mockAtBottomStateChange(
   return atBottom ? "tail-follow" : "manual";
 }
 
-// Scenario 1: atBottom=false during bottomRequest, but physically at bottom (≤4px).
+// Scenario 1: atBottom=false during bottomRequest, but physically at bottom.
 // Expected: suppressed (Virtuoso is still converging; keep tail intent).
-const s1 = mockAtBottomStateChange(false, true, { scrollHeight: 10000, scrollTop: 9997, clientHeight: 600 });
+const s1 = mockAtBottomStateChange(false, true, { scrollHeight: 10000, scrollTop: 9397, clientHeight: 600 });
 check(s1 === "suppressed", "physically at bottom during request window: intent preserved");
 
 // Scenario 2: atBottom=false during bottomRequest, physically far from bottom.
@@ -58,6 +61,24 @@ check(s3 === "manual", "upward scroll outside request window: ordinary manual mo
 // Expected: tail-follow (re-engaged).
 const s4 = mockAtBottomStateChange(true, false, null);
 check(s4 === "tail-follow", "scrolled back to physical bottom: tail-follow restored");
+
+const layoutGrowth = isPinnedTranscriptLayoutGrowth({
+  pinned: true,
+  previousScrollHeight: 10000,
+  previousScrollTop: 9400,
+  scrollHeight: 10320,
+  scrollTop: 9714,
+});
+check(layoutGrowth, "pinned row growth preserves tail-follow through callback reordering");
+
+const userScrollDuringGrowth = isPinnedTranscriptLayoutGrowth({
+  pinned: true,
+  previousScrollHeight: 10000,
+  previousScrollTop: 9400,
+  scrollHeight: 10320,
+  scrollTop: 9000,
+});
+check(!userScrollDuringGrowth, "upward user movement is not mistaken for pinned row growth");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

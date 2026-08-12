@@ -2,7 +2,9 @@ package sessioncatalog
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"reasonix/internal/agent"
@@ -68,10 +70,41 @@ func TestPromoteCanonicalLeavesRequiresContentCoverage(t *testing.T) {
 		Path: peer, Recovered: true, ParentID: "root", RecoveryGroupID: "root", RecoveryRole: RecoveryRoleDiverged, Turns: 2, TurnsState: TurnsValid,
 	})
 	out = promoteCanonicalLeaves(recs)
+	canonical := 0
 	for _, record := range out[1:] {
-		if record.RecoveryCanonical {
-			t.Fatalf("ambiguous equal-length leaves must stay diverged: %+v", out)
+		if record.RecoveryRole != RecoveryRoleDiverged {
+			t.Fatalf("ambiguous equal-length leaves must keep diverged role: %+v", out)
 		}
+		if record.RecoveryCanonical {
+			canonical++
+		}
+	}
+	// Ordinary list still needs exactly one stable representative even when
+	// content truly forks; History remains the place to open the other leaf.
+	if canonical != 1 {
+		t.Fatalf("ambiguous group canonical count = %d, want 1 stable representative: %+v", canonical, out)
+	}
+}
+
+func TestPromoteCanonicalLeavesIgnoresUnknownTurnMetadataAndCoversAncestors(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "root.jsonl")
+	ancestor := filepath.Join(dir, "ancestor.jsonl")
+	leaf := filepath.Join(dir, "leaf.jsonl")
+	saveLineageSession(t, root, "q", "a")
+	saveLineageSession(t, ancestor, "q", "a", "next", "one")
+	saveLineageSession(t, leaf, "q", "a", "next", "one", "again", "two")
+	recs := []SessionRecord{
+		{Path: root, RecoveryRole: RecoveryRoleNormal, TurnsState: TurnsUnknown},
+		{Path: ancestor, Recovered: true, ParentID: "root", RecoveryGroupID: "root", RecoveryRole: RecoveryRoleDiverged, TurnsState: TurnsUnknown},
+		{Path: leaf, Recovered: true, ParentID: "ancestor", RecoveryGroupID: "root", RecoveryRole: RecoveryRoleDiverged, TurnsState: TurnsUnknown},
+	}
+	out := promoteCanonicalLeaves(recs)
+	if !out[2].RecoveryCanonical || out[2].RecoveryRole != RecoveryRoleAdopted {
+		t.Fatalf("leaf = %+v, want adopted despite unknown turns", out[2])
+	}
+	if !out[1].RecoveryCopy || out[1].RecoveryRole != RecoveryRoleCoveredCopy {
+		t.Fatalf("ancestor = %+v, want covered copy", out[1])
 	}
 }
 
@@ -85,6 +118,31 @@ func TestCanonicalSessionPathForTopic(t *testing.T) {
 	}
 	if got := CanonicalSessionPathForTopic(sessions, "/s/leaf.jsonl"); got != "" {
 		t.Fatalf("already canonical should not retarget: %q", got)
+	}
+}
+
+func TestExplicitPreferredRecoveryWinsWithoutMakingPeersCovered(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "root.jsonl")
+	left := filepath.Join(dir, "left.jsonl")
+	right := filepath.Join(dir, "right.jsonl")
+	saveLineageSession(t, root, "q", "a")
+	saveLineageSession(t, left, "q", "a", "left", "answer")
+	saveLineageSession(t, right, "q", "a", "right", "answer")
+	records := []SessionRecord{
+		{Path: root, RecoveryRole: RecoveryRoleNormal},
+		{Path: left, Recovered: true, ParentID: "root", RecoveryGroupID: "root", RecoveryRole: RecoveryRoleDiverged, RecoveryPreferred: true},
+		{Path: right, Recovered: true, ParentID: "root", RecoveryGroupID: "root", RecoveryRole: RecoveryRoleDiverged},
+	}
+	out := promoteCanonicalLeaves(records)
+	if !out[1].RecoveryCanonical || out[1].RecoveryRole != RecoveryRolePreferred {
+		t.Fatalf("preferred = %+v", out[1])
+	}
+	if out[2].RecoveryCopy || out[2].RecoveryRole != RecoveryRoleDiverged {
+		t.Fatalf("diverged peer must retain unique content: %+v", out[2])
+	}
+	if got := CanonicalSessionPathForTopic(out, root); got != left {
+		t.Fatalf("canonical path = %q, want %q", got, left)
 	}
 }
 
@@ -116,5 +174,183 @@ func TestReconcilePersistsContentProvenCanonicalLeaf(t *testing.T) {
 	}
 	if record.RecoveryRole != RecoveryRoleAdopted || !record.RecoveryCanonical {
 		t.Fatalf("reconciled recovery = %+v, want adopted canonical", record)
+	}
+}
+
+func TestReconcileReanchorsCrossTopicRecoveryIntoOneLogicalTopic(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	root := filepath.Join(dir, "root.jsonl")
+	copyPath := filepath.Join(dir, "copy.jsonl")
+	leaf := filepath.Join(dir, "leaf.jsonl")
+	saveLineageSession(t, root, "q", "a")
+	saveLineageSession(t, copyPath, "q", "a")
+	saveLineageSession(t, leaf, "q", "a", "next", "done")
+	for path, meta := range map[string]agent.BranchMeta{
+		root:     {ID: "root", Scope: "global", TopicID: "conversation", TopicTitle: "Upgraded"},
+		copyPath: {ID: "copy", Scope: "global", TopicID: "legacy-copy-topic", Recovered: true, ParentID: "root", RecoveryDepth: 1},
+		leaf:     {ID: "leaf", Scope: "global", TopicID: "legacy-leaf-topic", Recovered: true, ParentID: "copy", RecoveryDepth: 2},
+	} {
+		if err := agent.SaveBranchMetaPreserveUpdated(path, meta); err != nil {
+			t.Fatal(err)
+		}
+	}
+	catalog, err := Open(ctx, Options{InMemory: true, DisableRepair: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer catalog.Close(ctx)
+	if err := catalog.ReconcileDirectory(ctx, DirectoryTarget{Path: dir, Scope: "global"}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := catalog.ListTopics(ctx, TopicPageRequest{Scope: "global", Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].TopicID != "conversation" {
+		t.Fatalf("ListTopics = %+v, want one logical topic conversation", page.Items)
+	}
+	leafRec, ok, err := catalog.GetSession(ctx, leaf)
+	if err != nil || !ok {
+		t.Fatalf("GetSession leaf ok=%v err=%v", ok, err)
+	}
+	if leafRec.TopicID != "conversation" || leafRec.LogicalTopicID != "conversation" {
+		t.Fatalf("leaf projection = %+v, want re-anchored to conversation", leafRec)
+	}
+	if leafRec.OrdinaryVisible {
+		t.Fatalf("leaf must not be ordinary-visible while root exists: %+v", leafRec)
+	}
+	rootRec, ok, err := catalog.GetSession(ctx, root)
+	if err != nil || !ok || !rootRec.OrdinaryVisible {
+		t.Fatalf("root ordinary visibility = %+v ok=%v err=%v", rootRec, ok, err)
+	}
+}
+
+func TestRecoveryFilenameParentID(t *testing.T) {
+	parent, ok := agent.RecoveryFilenameParentID("/s/chat-recovery-0123456789abcdef.jsonl")
+	if !ok || parent != "chat" {
+		t.Fatalf("parent = %q ok=%v", parent, ok)
+	}
+	if !agent.LooksLikeRecoveryFilename("/s/chat-recovery-0123456789abcdef.jsonl") {
+		t.Fatal("expected recovery filename")
+	}
+	if agent.LooksLikeRecoveryFilename("/s/chat.jsonl") {
+		t.Fatal("normal session must not look like recovery")
+	}
+}
+
+func TestUpgradeMatrixV4RebuildKeepsSingleLogicalRowAndAuthority(t *testing.T) {
+	// Simulates 1.24.2-style multi-topic recovery storm → new v4 projection →
+	// discard cache → reindex. Ordinary list stays one row; JSONL/meta bytes
+	// are never rewritten (the 1.23.0→new-version reinstall path).
+	ctx := context.Background()
+	dir := t.TempDir()
+	cacheDir := t.TempDir()
+	root := filepath.Join(dir, "root.jsonl")
+	copyPath := filepath.Join(dir, "copy.jsonl")
+	leaf := filepath.Join(dir, "leaf.jsonl")
+	saveLineageSession(t, root, "q", "a")
+	saveLineageSession(t, copyPath, "q", "a")
+	saveLineageSession(t, leaf, "q", "a", "next", "done")
+	for path, meta := range map[string]agent.BranchMeta{
+		root:     {ID: "root", Scope: "global", TopicID: "conversation", TopicTitle: "Upgraded"},
+		copyPath: {ID: "copy", Scope: "global", TopicID: "legacy-copy-topic", Recovered: true, ParentID: "root", RecoveryDepth: 1},
+		leaf:     {ID: "leaf", Scope: "global", TopicID: "legacy-leaf-topic", Recovered: true, ParentID: "copy", RecoveryDepth: 2},
+	} {
+		if err := agent.SaveBranchMetaPreserveUpdated(path, meta); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hash := func(path string) string {
+		t.Helper()
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	before := map[string]string{}
+	for _, path := range []string{root, copyPath, leaf, agent.BranchMetaPath(root), agent.BranchMetaPath(copyPath), agent.BranchMetaPath(leaf)} {
+		before[path] = hash(path)
+	}
+
+	openAndList := func(label string) (topicID, rep string) {
+		t.Helper()
+		catalog, err := Open(ctx, Options{Path: filepath.Join(cacheDir, label+".sqlite"), DisableRepair: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer catalog.Close(ctx)
+		if err := catalog.ReconcileDirectory(ctx, DirectoryTarget{Path: dir, Scope: "global"}); err != nil {
+			t.Fatal(err)
+		}
+		page, err := catalog.ListTopics(ctx, TopicPageRequest{Scope: "global", Limit: 50})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Items) != 1 {
+			t.Fatalf("%s ListTopics = %+v, want one logical row", label, page.Items)
+		}
+		return page.Items[0].TopicID, page.Items[0].RepresentativePath
+	}
+
+	topic1, rep1 := openAndList("pass1")
+	topic2, rep2 := openAndList("pass2")
+	if topic1 != "conversation" || topic2 != "conversation" {
+		t.Fatalf("logical topics = %q/%q, want conversation both rebuilds", topic1, topic2)
+	}
+	if rep1 == "" || rep1 != rep2 {
+		t.Fatalf("representative unstable across rebuilds: %q vs %q", rep1, rep2)
+	}
+	for path, want := range before {
+		if got := hash(path); got != want {
+			t.Fatalf("authority file mutated during catalog rebuild: %s", path)
+		}
+	}
+	// v4 path is independent of older disposable caches.
+	if !strings.HasSuffix(filepath.ToSlash(DefaultPath()), "session-catalog/v4.sqlite") && DefaultPath() != "" {
+		t.Fatalf("DefaultPath = %q, want v4.sqlite", DefaultPath())
+	}
+}
+
+func TestReconcileFoldsFilenameRecoveryIntoRootTopic(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	root := filepath.Join(dir, "normal.jsonl")
+	recovery := filepath.Join(dir, "normal-recovery-0123456789abcdef.jsonl")
+	saveLineageSession(t, root, "normal imported prompt")
+	saveLineageSession(t, recovery, "legacy recovery prompt")
+	if err := agent.SaveBranchMetaPreserveUpdated(root, agent.BranchMeta{
+		ID: "normal", Scope: "global", TopicID: "legacy_normal", TopicTitle: "normal",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := agent.SaveBranchMetaPreserveUpdated(recovery, agent.BranchMeta{
+		ID: "normal-recovery-0123456789abcdef", Scope: "global",
+		TopicID: "legacy_recovery", TopicTitle: "recovery",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := Open(ctx, Options{InMemory: true, DisableRepair: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer catalog.Close(ctx)
+	if err := catalog.ReconcileDirectory(ctx, DirectoryTarget{Path: dir, Scope: "global"}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := catalog.ListTopics(ctx, TopicPageRequest{Scope: "global", Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].TopicID != "legacy_normal" {
+		t.Fatalf("ListTopics = %+v, want one folded legacy_normal topic", page.Items)
+	}
+	rec, ok, err := catalog.GetSession(ctx, recovery)
+	if err != nil || !ok {
+		t.Fatalf("GetSession recovery ok=%v err=%v", ok, err)
+	}
+	if !rec.Recovered || rec.TopicID != "legacy_normal" {
+		t.Fatalf("recovery projection = %+v, want re-anchored recovered row", rec)
 	}
 }

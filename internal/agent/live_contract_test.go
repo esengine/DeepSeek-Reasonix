@@ -22,7 +22,7 @@ func liveContractAgent(t *testing.T, sink event.Sink) *Agent {
 	t.Helper()
 	a := New(nil, tool.NewRegistry(), NewSession(""), Options{}, sink)
 	a.resetTurnEvidence()
-	a.turnInput = "make the cache key model-aware"
+	a.turn.turnInput = "make the cache key model-aware"
 	a.SetPlanContract(ptr(contractPlan()))
 	return a
 }
@@ -66,7 +66,7 @@ func TestLiveContractMatchesTheEndOfTurnReplay(t *testing.T) {
 	a.task.ledger.Record(evidence.Receipt{ToolName: "bash", Command: "go test ./internal/provider/", Success: true})
 
 	live := contractShadowAudit(a.LiveContract())
-	replay := contractShadowAudit(buildShadowContract(a.turnInput, a.task.ledger.Receipts(), a.planContractSnapshot()))
+	replay := contractShadowAudit(buildShadowContract(a.turn.turnInput, a.task.ledger.Receipts(), a.planContractSnapshot()))
 	if live != replay {
 		t.Fatalf("live view %+v disagrees with the end-of-turn replay %+v", live, replay)
 	}
@@ -93,7 +93,7 @@ func TestContractRoundObservationSkipsAnEmptyContract(t *testing.T) {
 	sink := &contractShadowSink{}
 	a := New(nil, tool.NewRegistry(), NewSession(""), Options{}, sink)
 	a.resetTurnEvidence()
-	a.turnInput = "what does this function do?"
+	a.turn.turnInput = "what does this function do?"
 
 	a.observeContractRound()
 	if len(sink.audits) != 0 {

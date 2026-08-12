@@ -13,7 +13,7 @@ func rejectionAgent(t *testing.T, plan *plancontract.Plan) *Agent {
 	t.Helper()
 	a := New(nil, tool.NewRegistry(), NewSession(""), Options{}, nil)
 	a.resetTurnEvidence()
-	a.turnInput = "fix the retry race"
+	a.turn.turnInput = "fix the retry race"
 	a.SetPlanContract(plan)
 	return a
 }

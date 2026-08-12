@@ -30,13 +30,13 @@ type unwrittenResolve struct {
 // once before tools execute; three consecutive healthy rounds then resolve the
 // incident and re-arm a future isolated regression (#6259, #7059).
 func (a *Agent) observeMissingToolCallReasoning(calls []provider.ToolCall, reasoning string) (missing, shouldRetry bool) {
-	if len(calls) == 0 || !provider.WarnOnMissingToolCallReasoning(a.prov) {
+	if len(calls) == 0 || !provider.WarnOnMissingToolCallReasoning(a.svc.prov) {
 		return false, false
 	}
-	fingerprint := provider.MissingToolCallReasoningWarningFingerprint(a.prov)
+	fingerprint := provider.MissingToolCallReasoningWarningFingerprint(a.svc.prov)
 	observedAt := time.Now()
 	if strings.TrimSpace(reasoning) != "" {
-		if a.missingReasoningWarnState == nil {
+		if a.svc.warnState == nil {
 			if a.sess.missingReasoning.active {
 				a.sess.missingReasoning.healthyStreak++
 				if a.sess.missingReasoning.healthyStreak >= missingReasoningHealthyResolveStreak {
@@ -50,13 +50,13 @@ func (a *Agent) observeMissingToolCallReasoning(calls []provider.ToolCall, reaso
 		if shouldResolve {
 			result := missingReasoningResolveResult{Recorded: true, Resolved: true}
 			if pending := a.unwrittenResolve.at; !pending.IsZero() {
-				result = a.missingReasoningWarnState.resolveAt(fingerprint, pending)
+				result = a.svc.warnState.resolveAt(fingerprint, pending)
 				if result.Recorded {
 					a.unwrittenResolve.at = time.Time{}
 				}
 			}
 			if result.Recorded {
-				result = a.missingReasoningWarnState.resolveAt(fingerprint, observedAt)
+				result = a.svc.warnState.resolveAt(fingerprint, observedAt)
 			}
 			if !result.Recorded {
 				if observedAt.After(a.unwrittenResolve.at) {
@@ -75,7 +75,7 @@ func (a *Agent) observeMissingToolCallReasoning(calls []provider.ToolCall, reaso
 		return false, false
 	}
 	a.sess.missingReasoning.healthyStreak = 0
-	if s := a.missingReasoningWarnState; s != nil {
+	if s := a.svc.warnState; s != nil {
 		stateReady := true
 		alreadyActive := a.sess.missingReasoning.active
 		if pending := a.unwrittenResolve.at; !pending.IsZero() {

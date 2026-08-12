@@ -2,7 +2,10 @@ package sessioncatalog
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"reasonix/internal/agent"
@@ -52,14 +55,278 @@ func promoteCanonicalLeaves(records []SessionRecord) []SessionRecord {
 			records[i].RecoveryRole = RecoveryRoleDiverged
 			records[i].RecoveryCanonical = false
 		}
-		rootIndex, ok := groupRoot[groupID]
-		if !ok {
+		rootIndex, hasRoot := groupRoot[groupID]
+		preferred := -1
+		for _, index := range idxs {
+			if records[index].RecoveryPreferred {
+				if preferred >= 0 {
+					preferred = -2 // multiple stale preferences fail closed
+					break
+				}
+				preferred = index
+			}
+		}
+		if preferred >= 0 {
+			records[preferred].RecoveryRole = RecoveryRolePreferred
+			records[preferred].RecoveryCanonical = true
 			continue
 		}
-		candidate, ok := uniqueLongestRecovery(records, idxs)
-		if ok && recoveryCandidateCovers(records, candidate, rootIndex, idxs) {
-			records[candidate].RecoveryRole = RecoveryRoleAdopted
+		contentIdxs := append([]int{}, idxs...)
+		if hasRoot {
+			contentIdxs = append(contentIdxs, rootIndex)
+		}
+		content := loadRecoveryGroupContent(records, contentIdxs)
+		candidate, ok := uniqueLongestRecovery(records, idxs, content)
+		if !ok {
+			// No unique covering leaf: still pick one stable representative so
+			// ordinary visibility never expands into a wall of forks.
+			if len(idxs) > 0 {
+				stable := pickPreferredRecovery(indexesToRecords(records, idxs))
+				for _, i := range idxs {
+					if records[i].Path == stable.Path {
+						records[i].RecoveryCanonical = true
+						break
+					}
+				}
+			}
+			continue
+		}
+		if hasRoot && !recoveryCandidateCovers(candidate, rootIndex, idxs, content) {
 			records[candidate].RecoveryCanonical = true
+			continue
+		}
+		if !hasRoot {
+			// Root missing: the unique covering leaf is still the ordinary
+			// representative, but without a parent it cannot prove adoption.
+			records[candidate].RecoveryCanonical = true
+			for _, i := range idxs {
+				if i == candidate {
+					continue
+				}
+				if member, ok := content[i]; ok {
+					if candidateContent, ok := content[candidate]; ok && candidateContent.Covers(member) {
+						records[i].RecoveryCopy = true
+						records[i].RecoveryRole = RecoveryRoleCoveredCopy
+					}
+				}
+			}
+			continue
+		}
+		records[candidate].RecoveryRole = RecoveryRoleAdopted
+		records[candidate].RecoveryCanonical = true
+		// Once one leaf contains the entire group, every other recovery
+		// member is an ancestor/equivalent copy covered by that canonical.
+		// Marking them covered is what lets History and explicit cleanup
+		// converge an old chain instead of leaving hundreds of non-canonical
+		// "diverged" rows that preserve no unique content.
+		for _, i := range idxs {
+			if i == candidate {
+				continue
+			}
+			records[i].RecoveryCopy = true
+			records[i].RecoveryRole = RecoveryRoleCoveredCopy
+		}
+	}
+	return projectLogicalSessions(records)
+}
+
+func indexesToRecords(records []SessionRecord, idxs []int) []SessionRecord {
+	out := make([]SessionRecord, 0, len(idxs))
+	for _, i := range idxs {
+		out = append(out, records[i])
+	}
+	return out
+}
+
+// projectLogicalSessions re-anchors recovered physical files onto one logical
+// topic and marks the single ordinary-list representative. Catalog projection
+// only — authoritative JSONL/meta topic_id values are never rewritten.
+func projectLogicalSessions(records []SessionRecord) []SessionRecord {
+	byID := make(map[string]int, len(records))
+	for i := range records {
+		byID[agent.BranchID(records[i].Path)] = i
+		if !records[i].Recovered {
+			if records[i].LogicalTopicID == "" {
+				records[i].LogicalTopicID = records[i].TopicID
+			}
+			continue
+		}
+		// Filename fallback when meta ParentID is empty.
+		if strings.TrimSpace(records[i].ParentID) == "" {
+			if parent, ok := agent.RecoveryFilenameParentID(records[i].Path); ok {
+				records[i].ParentID = parent
+				if records[i].RecoveryGroupID == "" {
+					records[i].RecoveryGroupID = parent
+				}
+			}
+		}
+		if records[i].RecoveryGroupID == "" {
+			records[i].RecoveryGroupID = firstNonEmpty(records[i].ParentID, agent.BranchID(records[i].Path))
+		}
+	}
+	// Walk parent chains so intermediate recovery files also share the root id.
+	for i := range records {
+		if !records[i].Recovered {
+			continue
+		}
+		groupID := strings.TrimSpace(records[i].RecoveryGroupID)
+		seen := map[string]struct{}{}
+		parentID := strings.TrimSpace(records[i].ParentID)
+		for parentID != "" {
+			if _, loop := seen[parentID]; loop {
+				break
+			}
+			seen[parentID] = struct{}{}
+			parentIndex, ok := byID[parentID]
+			if !ok {
+				groupID = firstNonEmpty(groupID, parentID)
+				break
+			}
+			parent := records[parentIndex]
+			if !parent.Recovered {
+				groupID = parentID
+				break
+			}
+			parentID = strings.TrimSpace(parent.ParentID)
+			if parent.RecoveryGroupID != "" {
+				groupID = parent.RecoveryGroupID
+			}
+		}
+		if groupID != "" {
+			records[i].RecoveryGroupID = groupID
+		}
+	}
+
+	type groupAnchor struct {
+		topicID    string
+		topicTitle string
+		createdAt  int64
+		rootIndex  int
+	}
+	anchors := map[string]*groupAnchor{}
+	for i, rec := range records {
+		if !rec.Recovered {
+			id := agent.BranchID(rec.Path)
+			anchors[id] = &groupAnchor{
+				topicID: rec.TopicID, topicTitle: rec.TopicTitle,
+				createdAt: rec.CreatedAt, rootIndex: i,
+			}
+		}
+	}
+	// Fill missing logical topics from recovered members (root topic empty or
+	// root missing). Prefer earliest non-empty member topic_id.
+	for _, rec := range records {
+		if !rec.Recovered {
+			continue
+		}
+		groupID := strings.TrimSpace(rec.RecoveryGroupID)
+		if groupID == "" {
+			continue
+		}
+		anchor := anchors[groupID]
+		if anchor == nil {
+			anchor = &groupAnchor{rootIndex: -1, createdAt: rec.CreatedAt}
+			anchors[groupID] = anchor
+		}
+		topic := strings.TrimSpace(rec.TopicID)
+		if topic == "" {
+			continue
+		}
+		if strings.TrimSpace(anchor.topicID) == "" ||
+			(rec.CreatedAt > 0 && (anchor.createdAt == 0 || rec.CreatedAt < anchor.createdAt) &&
+				(anchor.rootIndex < 0 || strings.TrimSpace(records[anchor.rootIndex].TopicID) == "")) {
+			// Keep a non-empty root topic when present; only override empty roots.
+			if anchor.rootIndex >= 0 && strings.TrimSpace(records[anchor.rootIndex].TopicID) != "" {
+				continue
+			}
+			anchor.topicID = topic
+			anchor.topicTitle = rec.TopicTitle
+			if rec.CreatedAt > 0 {
+				anchor.createdAt = rec.CreatedAt
+			}
+		}
+	}
+	for groupID, anchor := range anchors {
+		if strings.TrimSpace(anchor.topicID) == "" {
+			// Stable internal topic so rootless recovery storms still collapse.
+			anchor.topicID = "recovery:" + groupID
+			if anchor.topicTitle == "" {
+				anchor.topicTitle = groupID
+			}
+		}
+	}
+	for i := range records {
+		groupID := ""
+		if records[i].Recovered {
+			groupID = strings.TrimSpace(records[i].RecoveryGroupID)
+		} else {
+			groupID = agent.BranchID(records[i].Path)
+		}
+		anchor := anchors[groupID]
+		if anchor == nil {
+			records[i].LogicalTopicID = firstNonEmpty(records[i].TopicID, "recovery:"+agent.BranchID(records[i].Path))
+			continue
+		}
+		records[i].LogicalTopicID = anchor.topicID
+		// Catalog ListTopics keys off TopicID. Re-anchor recovered physical
+		// rows (and roots that only inherited a member topic) onto one logical
+		// topic so pagination never materializes recovery replica walls.
+		if anchor.topicID != "" && (records[i].Recovered || strings.TrimSpace(records[i].TopicID) == "") {
+			records[i].TopicID = anchor.topicID
+		}
+		if anchor.topicTitle != "" && (records[i].Recovered || strings.TrimSpace(records[i].TopicTitle) == "") {
+			records[i].TopicTitle = anchor.topicTitle
+		}
+	}
+
+	preferred := PreferredOrdinarySessionPaths(records)
+	for i := range records {
+		_, records[i].OrdinaryVisible = preferred[strings.TrimSpace(records[i].Path)]
+		// When a group has a normal root, the root is the ordinary row even if
+		// an adopted leaf is the open target (canonical path).
+		if !records[i].Recovered {
+			records[i].OrdinaryVisible = true
+		}
+	}
+	// Exactly one ordinary-visible recovered leaf when the root is missing.
+	byGroup := map[string][]int{}
+	rootPresent := map[string]bool{}
+	for i, rec := range records {
+		if !rec.Recovered {
+			rootPresent[agent.BranchID(rec.Path)] = true
+			continue
+		}
+		if rec.RecoveryCopy || rec.RecoveryRole == RecoveryRoleCoveredCopy {
+			records[i].OrdinaryVisible = false
+			continue
+		}
+		byGroup[rec.RecoveryGroupID] = append(byGroup[rec.RecoveryGroupID], i)
+	}
+	for groupID, idxs := range byGroup {
+		if rootPresent[groupID] {
+			for _, i := range idxs {
+				records[i].OrdinaryVisible = false
+			}
+			continue
+		}
+		best := -1
+		for _, i := range idxs {
+			if records[i].RecoveryCanonical {
+				best = i
+				break
+			}
+		}
+		if best < 0 {
+			bestIdx := pickPreferredRecovery(indexesToRecords(records, idxs))
+			for _, i := range idxs {
+				if records[i].Path == bestIdx.Path {
+					best = i
+					break
+				}
+			}
+		}
+		for _, i := range idxs {
+			records[i].OrdinaryVisible = i == best
 		}
 	}
 	return records
@@ -110,39 +377,80 @@ func recoveryLineageGroups(records []SessionRecord) (map[string][]int, map[strin
 	return byGroup, groupRoot
 }
 
-func uniqueLongestRecovery(records []SessionRecord, idxs []int) (int, bool) {
+func loadRecoveryGroupContent(records []SessionRecord, idxs []int) map[int]agent.SessionContentSnapshot {
+	content := make(map[int]agent.SessionContentSnapshot, len(idxs))
+	for _, index := range idxs {
+		if _, loaded := content[index]; loaded {
+			continue
+		}
+		if snapshot, ok := agent.LoadSessionContentSnapshot(records[index].Path); ok {
+			content[index] = snapshot
+		}
+	}
+	return content
+}
+
+func uniqueLongestRecovery(records []SessionRecord, idxs []int, content map[int]agent.SessionContentSnapshot) (int, bool) {
 	if len(idxs) == 0 {
 		return 0, false
 	}
-	candidate := idxs[0]
-	if len(idxs) == 1 {
-		return candidate, true
+	// Turns/preview metadata is repaired asynchronously and must not decide
+	// lineage. Doing so made the first scan permanently label every legacy fork
+	// diverged when its sidecar still had turns_state=unknown. Instead, find the
+	// leaves that actually cover every recovered member. Equivalent leaves are
+	// safe to collapse and use a deterministic activity/path tie-breaker.
+	maxLen := -1
+	for _, index := range idxs {
+		if snapshot, ok := content[index]; ok && snapshot.Len() > maxLen {
+			maxLen = snapshot.Len()
+		}
 	}
-	if records[candidate].TurnsState == TurnsUnknown {
+	if maxLen < 0 {
 		return 0, false
 	}
-	for _, i := range idxs[1:] {
-		if records[i].TurnsState == TurnsUnknown {
-			return 0, false
+	candidates := make([]int, 0, 1)
+	for _, candidate := range idxs {
+		candidateContent, ok := content[candidate]
+		if !ok || candidateContent.Len() != maxLen {
+			continue
 		}
-		if records[i].Turns > records[candidate].Turns {
-			candidate = i
+		coversAll := true
+		for _, other := range idxs {
+			otherContent, ok := content[other]
+			if !ok || (candidate != other && !candidateContent.Covers(otherContent)) {
+				coversAll = false
+				break
+			}
+		}
+		if coversAll {
+			candidates = append(candidates, candidate)
 		}
 	}
-	for _, i := range idxs {
-		if i != candidate && records[i].Turns >= records[candidate].Turns {
-			return 0, false
-		}
+	if len(candidates) == 0 {
+		return 0, false
 	}
-	return candidate, true
+	sort.SliceStable(candidates, func(i, j int) bool {
+		a, b := records[candidates[i]], records[candidates[j]]
+		if a.LastActivityAt != b.LastActivityAt {
+			return a.LastActivityAt > b.LastActivityAt
+		}
+		return a.Path < b.Path
+	})
+	return candidates[0], true
 }
 
-func recoveryCandidateCovers(records []SessionRecord, candidate, root int, idxs []int) bool {
-	if !agent.SessionContentCovers(records[candidate].Path, records[root].Path) {
+func recoveryCandidateCovers(candidate, root int, idxs []int, content map[int]agent.SessionContentSnapshot) bool {
+	candidateContent, ok := content[candidate]
+	if !ok {
+		return false
+	}
+	rootContent, ok := content[root]
+	if !ok || !candidateContent.Covers(rootContent) {
 		return false
 	}
 	for _, i := range idxs {
-		if i != candidate && !agent.SessionContentCovers(records[candidate].Path, records[i].Path) {
+		memberContent, ok := content[i]
+		if !ok || (i != candidate && !candidateContent.Covers(memberContent)) {
 			return false
 		}
 	}
@@ -163,11 +471,20 @@ func (c *Catalog) refreshDirectoryRecoveryLineage(ctx context.Context, target Di
 	affected := map[TopicKey]struct{}{}
 	changed := false
 	for _, record := range records {
-		if !record.Recovered {
-			continue
+		// Capture the previously projected topic so re-anchored recovery rows
+		// can delete empty legacy topic shells.
+		var previous TopicKey
+		if err := tx.QueryRowContext(ctx, `SELECT scope,workspace_root,topic_id FROM catalog_sessions WHERE path=?`, record.Path).
+			Scan(&previous.Scope, &previous.WorkspaceRoot, &previous.TopicID); err == nil && previous.TopicID != "" {
+			affected[previous] = struct{}{}
+		} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			_ = tx.Rollback()
+			return err
 		}
-		result, err := tx.ExecContext(ctx, `UPDATE catalog_sessions SET recovery_copy=?,recovery_group_id=?,recovery_role=?,recovery_canonical=? WHERE path=?`,
-			boolToInt(record.RecoveryCopy), record.RecoveryGroupID, record.RecoveryRole, boolToInt(record.RecoveryCanonical), record.Path)
+		result, err := tx.ExecContext(ctx, `UPDATE catalog_sessions SET recovered=?,recovery_copy=?,recovery_group_id=?,recovery_role=?,recovery_canonical=?,topic_id=?,topic_title=?,logical_topic_id=?,ordinary_visible=?,parent_id=? WHERE path=?`,
+			boolToInt(record.Recovered), boolToInt(record.RecoveryCopy), record.RecoveryGroupID, record.RecoveryRole,
+			boolToInt(record.RecoveryCanonical), record.TopicID, record.TopicTitle, record.LogicalTopicID,
+			boolToInt(record.OrdinaryVisible), record.ParentID, record.Path)
 		if err != nil {
 			_ = tx.Rollback()
 			return err
@@ -227,13 +544,24 @@ func firstNonEmpty(values ...string) string {
 // Empty means keep the caller's path.
 func CanonicalSessionPathForTopic(sessions []SessionRecord, current string) string {
 	var canonical string
+	canonicalRole := ""
 	for _, s := range sessions {
-		if s.RecoveryCanonical && s.RecoveryRole == RecoveryRoleAdopted {
+		if s.RecoveryCanonical && (s.RecoveryRole == RecoveryRoleAdopted || s.RecoveryRole == RecoveryRolePreferred) {
 			if canonical != "" && canonical != s.Path {
 				// Ambiguous: do not retarget.
 				return ""
 			}
 			canonical = s.Path
+			canonicalRole = s.RecoveryRole
+		}
+	}
+	if canonicalRole == RecoveryRolePreferred && current != "" {
+		for _, session := range sessions {
+			if session.Path == current && session.Recovered {
+				// An explicit click on another recovery leaf is inspection, not a
+				// request to follow the default choice.
+				return ""
+			}
 		}
 	}
 	if canonical == "" || canonical == current {

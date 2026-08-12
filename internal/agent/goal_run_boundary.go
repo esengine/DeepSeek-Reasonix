@@ -35,11 +35,11 @@ func (a *Agent) HostProgressSignatures() []string {
 }
 
 func (a *Agent) resetStructuralRunGuards() {
-	a.stormSig, a.stormCount, a.blockedTurnStreak = "", 0, 0
-	a.progress.reset()
+	a.turn.stormSig, a.turn.stormCount, a.turn.blockedTurnStreak = "", 0, 0
+	a.turn.progress.reset()
 }
 
-func (a *Agent) stopUnexecutedBoundaryCalls(state *runLoopState, calls []provider.ToolCall, usage *provider.Usage) (error, bool) {
+func (a *Agent) stopUnexecutedBoundaryCalls(state *turnRuntime, calls []provider.ToolCall, usage *provider.Usage) (error, bool) {
 	switch {
 	case state.graceRound:
 		a.pairUnexecutedGraceCalls(calls, "blocked: the tool-call round budget is exhausted; no more tools will run in this turn")
@@ -61,7 +61,7 @@ func (a *Agent) stopUnexecutedBoundaryCalls(state *runLoopState, calls []provide
 // the storm breaker already own that decision on the same receipts, and they
 // reach it far earlier, so a second stop keyed to a todo only added a way for
 // the host to end a turn the user never asked it to end.
-func (a *Agent) trackTodoProgress(ctx context.Context, state *runLoopState, receiptMark int) {
+func (a *Agent) trackTodoProgress(ctx context.Context, state *turnRuntime, receiptMark int) {
 	if a.planMode.Load() {
 		return
 	}
@@ -84,7 +84,7 @@ func (a *Agent) trackTodoProgress(ctx context.Context, state *runLoopState, rece
 	state.todoProgress, state.trackingTodoProgress = nextProgress, nextTracking
 	if state.todoStallRounds == todoProgressNudgeRounds {
 		a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(todoProgressNudgeMessage(state.todoStallRounds))})
-		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeLoopGuard,
+		a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeLoopGuard,
 			Text: loopGuardNoticeText(), Detail: fmt.Sprintf("the current todo has no new completion, unique read, command, or mutation for %d consecutive tool-call rounds; asking the assistant to reassess", state.todoStallRounds)})
 	}
 	if state.todoStallRounds < maxTodoStallRounds {
@@ -95,7 +95,7 @@ func (a *Agent) trackTodoProgress(ctx context.Context, state *runLoopState, rece
 		state.todoStallRounds = 0
 		nudge := fmt.Sprintf("Host progress redirect: the current todo still has no new completion or unique host-observed work after %d tool-call rounds. Re-plan and continue: shrink the active step, switch tools or approach, delegate a focused sub-task, or use update_goal(blocked) only if a user or external condition is the sole blocker. Do not repeat the same calls.", rounds)
 		a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(nudge)})
-		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeLoopGuard,
+		a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeLoopGuard,
 			Text: loopGuardNoticeText(), Detail: fmt.Sprintf("the current Goal todo made no host-observed progress for %d rounds; resetting the intervention epoch and requiring a new plan", rounds)})
 		return
 	}

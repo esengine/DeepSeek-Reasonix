@@ -175,7 +175,7 @@ func (a *Agent) compressVisibleRange(
 	}
 	result := plan.result
 
-	a.sink.Emit(event.Event{Kind: event.CompactionStarted, Compaction: event.Compaction{Trigger: trigger}})
+	a.svc.sink.Emit(event.Event{Kind: event.CompactionStarted, Compaction: event.Compaction{Trigger: trigger}})
 	prepared, reason, err := a.prepareVisibleCompression(ctx, trigger, plan.fold, instructions)
 	if err != nil {
 		a.emitCompactionAborted(trigger)
@@ -234,7 +234,7 @@ func (a *Agent) compressVisibleRange(
 		return tool.CompressResult{}, err
 	}
 	a.emitCompactionTelemetry(tele)
-	a.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{
+	a.svc.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{
 		Trigger: trigger, Messages: len(plan.fold), Summary: summary, Archive: state.LastReceipt.Archive,
 	}})
 	result.Status = "ok"
@@ -312,8 +312,8 @@ func (a *Agent) planVisibleCompression(snap explicitCompressionSnapshot, directi
 }
 
 func (a *Agent) prepareVisibleCompression(ctx context.Context, trigger string, fold []provider.Message, instructions string) (preparedVisibleCompression, string, error) {
-	if a.hooks != nil {
-		if hookInstructions := a.hooks.PreCompact(ctx, trigger); hookInstructions != "" {
+	if a.svc.hooks != nil {
+		if hookInstructions := a.svc.hooks.PreCompact(ctx, trigger); hookInstructions != "" {
 			if instructions != "" {
 				instructions += "\n"
 			}
@@ -410,9 +410,9 @@ func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions s
 		return CompactionNoop, fmt.Errorf("%w: fixed prefix (%d tokens) already exceeds trigger (%d)", errCheckpointRejected, fixedPrefixTokens, a.compactTrigger())
 	}
 
-	a.sink.Emit(event.Event{Kind: event.CompactionStarted, Compaction: event.Compaction{Trigger: trigger}})
-	if a.hooks != nil {
-		if hookInstr := a.hooks.PreCompact(ctx, trigger); hookInstr != "" {
+	a.svc.sink.Emit(event.Event{Kind: event.CompactionStarted, Compaction: event.Compaction{Trigger: trigger}})
+	if a.svc.hooks != nil {
+		if hookInstr := a.svc.hooks.PreCompact(ctx, trigger); hookInstr != "" {
 			if instructions != "" {
 				instructions += "\n"
 			}
@@ -467,7 +467,7 @@ func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions s
 		a.emitCompactionAborted(trigger)
 		return CompactionNoop, err
 	}
-	a.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{
+	a.svc.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{
 		Trigger: trigger, Messages: len(fold), Summary: summary,
 	}})
 	// Only once the checkpoint is committed: a rejected candidate folded nothing.

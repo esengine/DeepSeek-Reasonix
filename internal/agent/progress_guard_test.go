@@ -25,7 +25,7 @@ func bashProgressReceipt(t *testing.T, command string, success bool) evidence.Re
 // runRound executes one read-only batch and returns its result texts.
 func runRound(t *testing.T, a *Agent, path string) []string {
 	t.Helper()
-	batch := a.executeBatch(context.Background(), []provider.ToolCall{
+	batch := a.executeBatch(context.Background(), &a.turn, []provider.ToolCall{
 		{ID: "c", Name: "read_probe", Arguments: `{"path":"` + path + `"}`},
 	})
 	return batch.results
@@ -35,7 +35,7 @@ func TestProgressGuardEscalatesOnZeroGainRounds(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "read_probe", readOnly: true})
 	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
-	a.progress.reset()
+	a.turn.progress.reset()
 
 	if got := runRound(t, a, "same.go"); strings.Contains(got[0], "[progress guard]") {
 		t.Fatalf("round 1 (new read, +1 gain) must not trip the guard: %q", got[0])
@@ -58,7 +58,7 @@ func TestProgressGuardEscalatesOnZeroGainRounds(t *testing.T) {
 	if !strings.Contains(got[0], "produce your final answer now") {
 		t.Fatalf("streak %d must demand the final answer: %q", progressStopStreak, got[0])
 	}
-	if !a.loopGuardArmed {
+	if !a.turn.loopGuardArmed {
 		t.Fatal("stop tier must arm the loop-guard pass so readiness stands down")
 	}
 	// Past the stop tier the loop-guard pass carries the pressure; repeating
@@ -67,7 +67,7 @@ func TestProgressGuardEscalatesOnZeroGainRounds(t *testing.T) {
 	if strings.Contains(got[0], "[progress guard]") {
 		t.Fatalf("thresholds fire once, not every round: %q", got[0])
 	}
-	if !a.loopGuardArmed {
+	if !a.turn.loopGuardArmed {
 		t.Fatal("loop-guard pass must remain armed past the stop tier")
 	}
 }
@@ -110,19 +110,19 @@ func TestProgressGuardResetsOnNewEvidence(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "read_probe", readOnly: true})
 	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
-	a.progress.reset()
+	a.turn.progress.reset()
 
 	runRound(t, a, "a.go")
 	runRound(t, a, "a.go")
 	runRound(t, a, "a.go")
-	if a.progress.streak < progressNudgeStreak {
-		t.Fatalf("streak = %d, want >= %d before fresh evidence", a.progress.streak, progressNudgeStreak)
+	if a.turn.progress.streak < progressNudgeStreak {
+		t.Fatalf("streak = %d, want >= %d before fresh evidence", a.turn.progress.streak, progressNudgeStreak)
 	}
 	// A successful bash command receipt is fresh evidence: streak resets.
 	a.task.ledger.Record(bashProgressReceipt(t, "go test ./pkg", true))
 	mark := a.task.ledger.Len() - 1
-	a.progress.observe(a.task.ledger.ReceiptsSince(mark))
-	if a.progress.streak != 0 {
-		t.Fatalf("fresh evidence must reset the streak, got %d", a.progress.streak)
+	a.turn.progress.observe(a.task.ledger.ReceiptsSince(mark))
+	if a.turn.progress.streak != 0 {
+		t.Fatalf("fresh evidence must reset the streak, got %d", a.turn.progress.streak)
 	}
 }

@@ -113,6 +113,19 @@ CREATE INDEX IF NOT EXISTS idx_catalog_sessions_recovery_group
 ON catalog_sessions(recovery_group_id, recovery_role, last_activity_at DESC);
 `
 
+const migrationV6 = `
+ALTER TABLE catalog_topics ADD COLUMN recovery_branch_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE catalog_topics ADD COLUMN recovery_unresolved_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE catalog_topics ADD COLUMN recovery_cleanup_eligible_count INTEGER NOT NULL DEFAULT 0;
+`
+
+const migrationV7 = `
+ALTER TABLE catalog_sessions ADD COLUMN logical_topic_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE catalog_sessions ADD COLUMN ordinary_visible INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_catalog_sessions_ordinary
+ON catalog_sessions(scope, workspace_root, ordinary_visible, last_activity_at DESC);
+`
+
 func sessionMigrations() []projectiondb.Migration {
 	return []projectiondb.Migration{
 		{Version: 1, Apply: func(ctx context.Context, tx *sql.Tx) error {
@@ -133,6 +146,14 @@ func sessionMigrations() []projectiondb.Migration {
 		}},
 		{Version: 5, Apply: func(ctx context.Context, tx *sql.Tx) error {
 			_, err := tx.ExecContext(ctx, migrationV5)
+			return err
+		}},
+		{Version: 6, Apply: func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, migrationV6)
+			return err
+		}},
+		{Version: 7, Apply: func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, migrationV7)
 			return err
 		}},
 	}

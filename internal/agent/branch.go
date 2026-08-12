@@ -48,10 +48,15 @@ type BranchMeta struct {
 	// refuses to fork past SessionRecoveryMaxDepth so a conflict loop cannot
 	// spawn unbounded nested recovery chains (#5993 reached 8 levels). Legacy
 	// recovery metas without the field are treated as depth 1.
-	RecoveryDepth int    `json:"recovery_depth,omitempty"`
-	Revision      int64  `json:"revision,omitempty"`
-	ContentDigest string `json:"content_digest,omitempty"`
-	WriterID      string `json:"writer_id,omitempty"`
+	RecoveryDepth int `json:"recovery_depth,omitempty"`
+	// RecoveryPreferred is a user's explicit choice among genuinely diverged
+	// recovery leaves. It changes the default open target, but never authorizes
+	// deletion and is cleared automatically if that leaf is no longer valid.
+	RecoveryPreferred       bool   `json:"recovery_preferred,omitempty"`
+	RecoveryPreferredDigest string `json:"recovery_preferred_digest,omitempty"`
+	Revision                int64  `json:"revision,omitempty"`
+	ContentDigest           string `json:"content_digest,omitempty"`
+	WriterID                string `json:"writer_id,omitempty"`
 	// SchemaVersion records the BranchMeta version that last wrote the listing
 	// fields (Turns/Preview) FROM the session's content. It is stamped only by the
 	// writers that actually derive those counts — Controller.snapshot's

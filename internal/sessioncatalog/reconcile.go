@@ -340,6 +340,7 @@ func (c *Catalog) IndexSessionPath(ctx context.Context, target DirectoryTarget, 
 		order.RecoveryReason = meta.RecoveryReason
 		order.RecoveryDigest = meta.RecoveryDigest
 		order.ParentID = meta.ParentID
+		order.RecoveryPreferred = agent.RecoveryPreferenceCurrent(path, meta)
 		order.Turns = meta.Turns
 		order.Preview = meta.Preview
 		order.SchemaVersion = meta.SchemaVersion
@@ -403,6 +404,7 @@ func recordFromOrder(target DirectoryTarget, info agent.SessionOrderInfo) Sessio
 		RecoveryReason:     info.RecoveryReason,
 		RecoveryDigest:     info.RecoveryDigest,
 		ParentID:           info.ParentID,
+		RecoveryPreferred:  info.RecoveryPreferred,
 		RecoveryCopy:       recoveryCopy,
 		ContentFingerprint: contentFingerprint,
 		MetaFingerprint:    metaFingerprint,
@@ -687,6 +689,10 @@ func (c *Catalog) applyRepairResult(ctx context.Context, path, preview string, t
 	}
 	c.publishRevision(revision, []string{key.WorkspaceRoot}, reason)
 	c.refreshCounts(ctx)
+	// Repair changes content-derived listing metadata. Reconcile the directory
+	// immediately so lineage cannot remain stuck in its pre-repair projection.
+	// Requests are coalesced and never block the repair worker.
+	c.RequestReconcile(DirectoryTarget{Path: filepath.Dir(path), Scope: key.Scope, WorkspaceRoot: key.WorkspaceRoot})
 	return nil
 }
 
@@ -793,5 +799,11 @@ func Inspect(ctx context.Context, path string) (Status, error) {
 	_ = db.QueryRowContext(ctx, `SELECT revision FROM catalog_state WHERE id=1`).Scan(&status.Revision)
 	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions`).Scan(&status.Indexed)
 	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE turns_state='unknown'`).Scan(&status.RepairPending)
+	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE missing_since=0`).Scan(&status.PhysicalSessions)
+	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_topics`).Scan(&status.LogicalSessions)
+	_ = db.QueryRowContext(ctx, `SELECT COUNT(DISTINCT recovery_group_id) FROM catalog_sessions WHERE recovered=1 AND recovery_group_id<>'' AND missing_since=0`).Scan(&status.RecoveryGroups)
+	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE recovered=1 AND missing_since=0`).Scan(&status.RecoveryBranches)
+	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE recovered=1 AND recovery_role='diverged' AND missing_since=0`).Scan(&status.RecoveryDiverged)
+	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE recovered=1 AND recovery_role='covered_copy' AND missing_since=0`).Scan(&status.CleanupEligible)
 	return status, nil
 }

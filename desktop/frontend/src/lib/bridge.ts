@@ -84,6 +84,9 @@ import type {
   PluginInstallOptions,
   PluginView,
   ProjectNode,
+  RecoveryLineageView,
+  RecoveryCleanupRequest,
+  RecoveryCleanupResult,
   SessionCatalogBindings,
   PromptHistoryEntry,
   PromptHistoryResult,
@@ -315,6 +318,9 @@ export interface AppBindings extends SessionCatalogBindings, HistoryCatalogBindi
   PreviewSession(path: string): Promise<HistoryMessage[]>;
   DeleteSession(path: string): Promise<void>;
   DeleteRecoveryCopy(path: string): Promise<void>;
+  GetRecoveryLineage(key: { scope: string; workspaceRoot?: string; topicId: string }): Promise<RecoveryLineageView>;
+  ChooseRecoveryBranch(request: import("./types").RecoveryPreferenceRequest): Promise<void>;
+  CleanRecoveryLineage(request: RecoveryCleanupRequest): Promise<RecoveryCleanupResult>;
   RestoreSession(path: string): Promise<void>;
   PurgeTrashedSession(path: string): Promise<void>;
   PurgeRecoveryCopy(path: string): Promise<void>;
@@ -1235,7 +1241,7 @@ const mockVercelModels = ["anthropic/claude-sonnet-4.6", "anthropic/claude-opus-
 const mockOllamaCloudModels = ["glm-5.2", "kimi-k2.7-code", "deepseek-v4-pro", "deepseek-v4-flash", "minimax-m3", "nemotron-3-nano:30b", "qwen3-coder-next"];
 
 const mockProviderPresetTemplates: MockProviderPresetTemplate[] = [
-  mockPreset("deepseek-responses", "DeepSeek Official Responses API", "Official stateless DeepSeek Responses API for Flash with server-side web search.", "DEEPSEEK_API_KEY", mockProviderTemplate({ name: "deepseek-responses", kind: "responses", baseUrl: "https://api.deepseek.com", models: ["deepseek-v4-flash"], default: "deepseek-v4-flash", apiKeyEnv: "DEEPSEEK_API_KEY", balanceUrl: "https://api.deepseek.com/user/balance", webSearch: true, serverWebSearchCapability: true, contextWindow: 1000000, supportedEfforts: ["low", "high", "max"], defaultEffort: "high" })),
+  mockPreset("deepseek-responses", "DeepSeek Official Responses API", "Official stateless DeepSeek Responses API for Flash and Pro with server-side web search.", "DEEPSEEK_API_KEY", mockProviderTemplate({ name: "deepseek-responses", kind: "responses", baseUrl: "https://api.deepseek.com", models: ["deepseek-v4-flash", "deepseek-v4-pro"], default: "deepseek-v4-flash", apiKeyEnv: "DEEPSEEK_API_KEY", balanceUrl: "https://api.deepseek.com/user/balance", webSearch: true, serverWebSearchCapability: true, contextWindow: 1000000, modelOverrides: [{ model: "deepseek-v4-flash", reasoningProtocol: "", supportedEfforts: ["disabled", "low", "high", "max"], defaultEffort: "high" }, { model: "deepseek-v4-pro", reasoningProtocol: "", supportedEfforts: ["disabled", "high", "max"], defaultEffort: "high" }] })),
   mockPreset("longcat-openai", "LongCat OpenAI", "LongCat Platform OpenAI-compatible endpoint for LongCat-2.0.", "LONGCAT_API_KEY", mockProviderTemplate({ name: "longcat-openai", kind: "openai", baseUrl: "https://api.longcat.chat/openai/v1", modelsUrl: "https://api.longcat.chat/openai/v1/models", models: mockLongCatModels, default: "LongCat-2.0", apiKeyEnv: "LONGCAT_API_KEY", contextWindow: 131072, thinking: "enabled", supportedEfforts: ["enabled", "disabled"], defaultEffort: "enabled" })),
   mockPreset("longcat-anthropic", "LongCat Anthropic", "LongCat Platform Anthropic-compatible Messages endpoint for LongCat-2.0.", "LONGCAT_API_KEY", mockProviderTemplate({ name: "longcat-anthropic", kind: "anthropic", baseUrl: "https://api.longcat.chat/anthropic", modelsUrl: "https://api.longcat.chat/anthropic/v1/models", models: mockLongCatModels, default: "LongCat-2.0", apiKeyEnv: "LONGCAT_API_KEY", authHeader: true, contextWindow: 131072, thinking: "enabled", supportedEfforts: ["enabled", "disabled"], defaultEffort: "enabled" })),
   mockPreset("token-rhythm", "Token Rhythm", "Token Rhythm (基元律动) multi-model OpenAI-compatible gateway.", "TOKEN_RHYTHM_API_KEY", mockProviderTemplate({ name: "token-rhythm", kind: "openai", baseUrl: "https://tokenrhythm.studio/v1", modelsUrl: "https://tokenrhythm.studio/v1/models", models: mockTokenRhythmModels, visionModels: ["kimi-k2.5", "kimi-k2.6", "kimi-k2.7-code"], default: "deepseek-v4-flash", apiKeyEnv: "TOKEN_RHYTHM_API_KEY", contextWindow: 1000000, modelOverrides: mockTokenRhythmModelOverrides })),
@@ -3323,6 +3329,24 @@ function makeMockApp(): AppBindings {
     },
     async DeleteRecoveryCopy(path: string) {
       return this.DeleteSession(path);
+    },
+    async GetRecoveryLineage(key) {
+      const topic = findMockTopic(key.topicId);
+      return {
+        groupId: key.topicId,
+        state: topic?.recoveryState ?? "normal",
+        branchCount: topic?.recoveryBranchCount ?? 0,
+        unresolved: topic?.recoveryUnresolvedCount ?? 0,
+        cleanupEligible: topic?.recoveryCleanupEligibleCount ?? 0,
+        members: [],
+      };
+    },
+    async ChooseRecoveryBranch() {},
+    async CleanRecoveryLineage(request) {
+      const topic = findMockTopic(request.topicId);
+      const eligible = topic?.recoveryCleanupEligibleCount ?? 0;
+      if (request.apply && topic) topic.recoveryCleanupEligibleCount = 0;
+      return { eligible, moved: request.apply ? eligible : 0, busy: 0, kept: 0, dryRun: !request.apply, items: [] };
     },
     async RestoreSession(path: string) {
       const i = trashedSessions.findIndex((s) => s.path === path);

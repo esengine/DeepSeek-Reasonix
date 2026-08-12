@@ -14877,6 +14877,62 @@ body > .mermaid-diagram--fullscreen {
   gap: 8px;
   flex-shrink: 0;
 }
+
+.recovery-lineage-dialog {
+  width: min(680px, calc(100vw - 48px));
+  height: auto;
+  max-height: min(720px, calc(100vh - 64px));
+}
+.recovery-lineage-dialog .management-modal__title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.recovery-lineage-dialog__body {
+  min-height: 120px;
+  overflow: auto;
+  padding: 12px 18px;
+}
+.recovery-lineage-dialog__member {
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--border);
+}
+.recovery-lineage-dialog__member-name {
+  color: var(--fg);
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recovery-lineage-dialog__member-meta {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+  color: var(--fg-faint);
+  font-size: var(--text-xs);
+}
+.recovery-lineage-dialog__choose {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+}
+.recovery-lineage-dialog__choose:disabled { opacity: 0.5; cursor: default; }
+.recovery-lineage-dialog__notice {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+  font-size: var(--text-sm);
+}
+.recovery-lineage-dialog__actions {
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+}
 @keyframes modal-in {
   0% {
     transform: translate3d(0, 10px, 0) scale(0.982);

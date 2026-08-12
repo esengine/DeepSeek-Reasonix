@@ -549,7 +549,7 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 	defer func() {
 		usage = provider.UsageWithRequestAttemptCount(ctx, usage)
 		if usage != nil && (usage.TotalTokens > 0 || usage.RequestCount > 0) {
-			a.sink.Emit(event.Event{Kind: event.Usage, ModelRef: a.modelRef, Usage: usage, Pricing: a.pricing, UsageSource: event.UsageSourceCompaction})
+			a.svc.sink.Emit(event.Event{Kind: event.Usage, ModelRef: a.modelRef, Usage: usage, Pricing: a.svc.pricing, UsageSource: event.UsageSourceCompaction})
 		}
 	}()
 	defer trackPublishedHostStream(ctx, cancel)()
@@ -576,10 +576,10 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 	if req.MaxTokens < 256 {
 		return "", usage, fmt.Errorf("summary output budget too small (%d tokens)", req.MaxTokens)
 	}
-	if a.prov == nil {
+	if a.svc.prov == nil {
 		return "", usage, fmt.Errorf("summary unavailable")
 	}
-	ch, err := a.prov.Stream(ctx, req)
+	ch, err := a.svc.prov.Stream(ctx, req)
 	if err != nil {
 		return "", usage, err
 	}

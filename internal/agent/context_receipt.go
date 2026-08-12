@@ -45,10 +45,10 @@ func (a *Agent) contextMaintenanceBlocked(inputHash string) (bool, string) {
 }
 
 func (a *Agent) emitContextMaintenance(r *ContextMaintenanceReceipt) {
-	if a == nil || r == nil || a.sink == nil {
+	if a == nil || r == nil || a.svc.sink == nil {
 		return
 	}
-	a.sink.Emit(event.Event{Kind: event.ContextMaintenanceEvent, Maintenance: &event.ContextMaintenance{
+	a.svc.sink.Emit(event.Event{Kind: event.ContextMaintenanceEvent, Maintenance: &event.ContextMaintenance{
 		Status: r.Status, Action: r.Action, Trigger: r.Trigger, OperationID: r.OperationID,
 		InputTokens: r.InputTokens, ResultTokens: r.ResultTokens, SavedTokens: r.SavedTokens,
 		AffectedToolResults: r.AffectedToolResults, ProjectionVersion: r.ProjectionVersion,
@@ -139,9 +139,9 @@ func (a *Agent) emitCompactionTelemetry(t CompactionTelemetry) {
 		}
 		detail += " err_type=" + t.Error
 	}
-	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "compaction telemetry", Detail: detail})
+	a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "compaction telemetry", Detail: detail})
 }
 
 func (a *Agent) emitCompactionAborted(trigger string) {
-	a.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{Trigger: trigger}})
+	a.svc.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{Trigger: trigger}})
 }

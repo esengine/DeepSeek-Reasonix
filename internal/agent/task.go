@@ -1820,7 +1820,7 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 		nudges := 0
 		for !sub.HasSuccessfulReviewReport(kind) && nudges < maxReviewReportNudges {
 			nudges++
-			sub.preserveEvidenceOnce = true
+			sub.pending.preserveEvidence = true
 			if err := sub.Run(ctx, reviewReportNudgePrompt(kind)); err != nil {
 				mergeChildEvidence(ctx, sub)
 				// A retry that fails still keeps local parent mutations; the

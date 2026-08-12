@@ -65,7 +65,7 @@ func TestDeliveryClassificationUsesTrustedTaskText(t *testing.T) {
 	if err := sub.Run(context.Background(), legacyWorkspaceContext+"\n\n"+pristine); err != nil {
 		t.Fatalf("wrapped review prompt deadlocked despite trusted task text: %v", err)
 	}
-	if sub.deliveryMutationExpected {
+	if sub.turn.deliveryMutationExpected {
 		t.Fatal("host framing armed the mutation expectation past the trusted override")
 	}
 }
@@ -116,7 +116,7 @@ func TestReadOnlyRegistryDisarmsMutationExpectation(t *testing.T) {
 	if err := sub.Run(context.Background(), "fix review: verify the fixes in a.go were applied"); err != nil {
 		t.Fatalf("read-only delivery subagent deadlocked: %v", err)
 	}
-	if sub.deliveryMutationExpected {
+	if sub.turn.deliveryMutationExpected {
 		t.Fatal("mutation expectation armed on a read-only registry")
 	}
 }
@@ -183,7 +183,7 @@ func TestDeliveryDurableMemoryRequiresRememberWithoutCodeCeremony(t *testing.T) 
 	if prov.call != 2 {
 		t.Fatalf("provider calls = %d, want remember plus final answer", prov.call)
 	}
-	if a.deliveryCriteriaEstablished {
+	if a.turn.deliveryCriteriaEstablished {
 		t.Fatal("durable-memory-only workflow should not manufacture code acceptance criteria")
 	}
 
@@ -434,7 +434,7 @@ func TestFinalReadinessFailsImmediatelyWithoutRetries(t *testing.T) {
 	if stalled.call != 1 {
 		t.Fatalf("provider calls = %d, want 1 (no hidden retry messages)", stalled.call)
 	}
-	if !a.deliveryRecoveryPending {
+	if !a.pending.deliveryRecovery {
 		t.Fatal("delivery recovery must be pending for an explicit continuation")
 	}
 

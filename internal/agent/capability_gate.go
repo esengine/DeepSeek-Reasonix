@@ -205,7 +205,7 @@ func (a *Agent) deliveryReviewGateFailure() string {
 		return ""
 	}
 	// Without Delivery elevation or a forced TaskPolicy review, skip.
-	if !a.deliveryProfile && !(a.turnPolicySet && a.turnPolicy.RequiresIndependentReview()) {
+	if !a.deliveryProfile && !(a.turn.policySet && a.turn.policy.RequiresIndependentReview()) {
 		return ""
 	}
 	if a.subagentDepth > 0 {
@@ -225,8 +225,8 @@ func (a *Agent) deliveryReviewGateFailure() string {
 	a.emitTurnPhase(event.TurnPhaseReviewing)
 	risk := a.task.ledger.MutationRiskAfter(mutation)
 	// TaskPolicy may force higher review than mutation-risk alone.
-	if a.turnPolicySet {
-		switch a.turnPolicy.Review {
+	if a.turn.policySet {
+		switch a.turn.policy.Review {
 		case taskpolicy.ReviewForcedSecurity:
 			risk = evidence.RiskHigh
 		case taskpolicy.ReviewForced:
@@ -238,8 +238,8 @@ func (a *Agent) deliveryReviewGateFailure() string {
 		}
 	}
 	paths := productionPaths(a.task.ledger.PathsSince(mutation))
-	hasReviewTool := a.tools != nil && (toolPresent(a.tools, "review") || toolPresent(a.tools, "run_skill") || toolPresent(a.tools, "use_capability"))
-	hasSecurityTool := a.tools != nil && (toolPresent(a.tools, "security_review") || toolPresent(a.tools, "run_skill") || toolPresent(a.tools, "use_capability"))
+	hasReviewTool := a.svc.tools != nil && (toolPresent(a.svc.tools, "review") || toolPresent(a.svc.tools, "run_skill") || toolPresent(a.svc.tools, "use_capability"))
+	hasSecurityTool := a.svc.tools != nil && (toolPresent(a.svc.tools, "security_review") || toolPresent(a.svc.tools, "run_skill") || toolPresent(a.svc.tools, "use_capability"))
 	switch risk {
 	case evidence.RiskLow:
 		// Existing light review (read/diff) already checked elsewhere.
@@ -264,7 +264,7 @@ func (a *Agent) deliveryReviewGateFailure() string {
 			}
 		}
 		if report != nil {
-			a.pendingReviewWarnings = append(a.pendingReviewWarnings, report.WarningSummaries()...)
+			a.turn.reviewWarnings = append(a.turn.reviewWarnings, report.WarningSummaries()...)
 		}
 	case evidence.RiskHigh:
 		if !hasReviewTool && !hasSecurityTool {
@@ -291,10 +291,10 @@ func (a *Agent) deliveryReviewGateFailure() string {
 			return "high-risk changes require security_review with review_report after the latest mutation" + reviewCoverageHint(paths)
 		}
 		if repR != nil {
-			a.pendingReviewWarnings = append(a.pendingReviewWarnings, repR.WarningSummaries()...)
+			a.turn.reviewWarnings = append(a.turn.reviewWarnings, repR.WarningSummaries()...)
 		}
 		if repS != nil {
-			a.pendingReviewWarnings = append(a.pendingReviewWarnings, repS.WarningSummaries()...)
+			a.turn.reviewWarnings = append(a.turn.reviewWarnings, repS.WarningSummaries()...)
 		}
 	}
 	return ""
@@ -339,7 +339,7 @@ func (a *Agent) ReviewWarnings() []string {
 	if a == nil {
 		return nil
 	}
-	return append([]string(nil), a.pendingReviewWarnings...)
+	return append([]string(nil), a.turn.reviewWarnings...)
 }
 
 // FormatReviewWarningsForSummary builds a short appendix for the final answer.

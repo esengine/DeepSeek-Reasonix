@@ -123,7 +123,7 @@ func requestCalibrationShapeOf(req provider.Request) requestCalibrationShape {
 }
 
 func (a *Agent) requestCalibrationShape(req provider.Request) requestCalibrationShape {
-	return requestCalibrationShapeWithPolicy(req, sharedWindowInputPolicyOf(a.prov))
+	return requestCalibrationShapeWithPolicy(req, sharedWindowInputPolicyOf(a.svc.prov))
 }
 
 func requestCalibrationShapeWithPolicy(req provider.Request, policy provider.SharedWindowInputPolicy) requestCalibrationShape {
@@ -239,7 +239,7 @@ func isCJKRune(r rune) bool {
 // effectiveOutputBudget clips completion tokens at send time only; it never
 // moves compact_ratio. Exhausted windows fail locally before HTTP 400.
 func (a *Agent) effectiveOutputBudget(req provider.Request) (int, bool, error) {
-	if a == nil || a.contextWindow <= 0 || !sharesContextWindow(a.prov) {
+	if a == nil || a.contextWindow <= 0 || !sharesContextWindow(a.svc.prov) {
 		return 0, false, nil
 	}
 	budget := a.configuredOutputBudget(req.MaxTokens)

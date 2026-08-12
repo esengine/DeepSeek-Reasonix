@@ -77,8 +77,8 @@ var (
 )
 
 func (a *Agent) snipStrategyFor(name string) snipStrategy {
-	if a.tools != nil {
-		if t, ok := a.tools.Get(name); ok {
+	if a.svc.tools != nil {
+		if t, ok := a.svc.tools.Get(name); ok {
 			if h, ok := t.(tool.SnipHinter); ok {
 				return snipStrategyFromHint(h.SnipHint())
 			}

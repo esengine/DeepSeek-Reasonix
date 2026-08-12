@@ -94,7 +94,7 @@ func compactionsPerTurn(t *testing.T, windowTok int, blob, finalText string, tur
 
 	a, _ := newAgent(t, srv.URL, reg, windowTok, 4)
 	started := 0
-	a.sink = event.FuncSink(func(e event.Event) {
+	a.svc.sink = event.FuncSink(func(e event.Event) {
 		switch e.Kind {
 		case event.CompactionStarted:
 			started++
@@ -154,7 +154,7 @@ func TestCompactionPausesWhenWindowTooSmall(t *testing.T) {
 	a, _ := newAgent(t, srv.URL, reg, 1600, 4)
 	started := 0
 	blocked := 0
-	a.sink = event.FuncSink(func(e event.Event) {
+	a.svc.sink = event.FuncSink(func(e event.Event) {
 		if e.Kind == event.CompactionStarted {
 			started++
 		}
