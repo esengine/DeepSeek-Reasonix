@@ -215,6 +215,12 @@ func cliCompletionRootSpec() cliCompletionSpec {
 			completionSpec("reindex", []cliCompletionFlag{
 				completionFlag("--json", cliCompletionNoValue), completionFlag("--dir", cliCompletionPathValue), help,
 			}),
+			completionSpec("diagnose", []cliCompletionFlag{
+				completionFlag("--json", cliCompletionNoValue), completionFlag("--dir", cliCompletionPathValue), help,
+			}),
+			completionSpec("cleanup", []cliCompletionFlag{
+				completionFlag("--json --apply", cliCompletionNoValue), completionFlag("--dir", cliCompletionPathValue), help,
+			}),
 		),
 		catalogCompletionSpec(help),
 		completionSpec("report", []cliCompletionFlag{help},

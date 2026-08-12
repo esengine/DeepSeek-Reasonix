@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"sort"
@@ -10,6 +11,15 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/sessioncatalog"
 )
+
+// Sidebar reads are bound so a starved connection pool or a slow projection
+// degrades into a stale page the next revision repairs, instead of a Wails call
+// that never returns and a tree that never moves again.
+const sessionCatalogReadTimeout = 10 * time.Second
+
+func (a *App) catalogReadContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(a.bootContext(), sessionCatalogReadTimeout)
+}
 
 type catalogRuntimeSnapshot struct {
 	scope         string
@@ -172,6 +182,15 @@ func (a *App) metadataProjectTopics(scope, workspaceRoot string) []ProjectNode {
 }
 
 func (a *App) runtimeOnlyProjectTopics(scope, workspaceRoot string) []ProjectNode {
+	nodes, _ := a.runtimeOnlyProjectTopicsWithSessions(scope, workspaceRoot)
+	return nodes
+}
+
+// runtimeOnlyProjectTopicsWithSessions also reports each runtime topic's known
+// session paths so callers can resolve the topics those sessions project onto
+// in the catalog (a restored tab may carry a legacy topic ID for a re-anchored
+// recovery lineage).
+func (a *App) runtimeOnlyProjectTopicsWithSessions(scope, workspaceRoot string) ([]ProjectNode, map[string][]string) {
 	a.mu.RLock()
 	snapshots := []catalogRuntimeSnapshot{}
 	collect := func(tab *WorkspaceTab, open bool) {
@@ -199,11 +218,15 @@ func (a *App) runtimeOnlyProjectTopics(scope, workspaceRoot string) []ProjectNod
 	}
 	a.mu.RUnlock()
 	byTopic := map[string][]catalogRuntimeSnapshot{}
+	sessionsByTopic := map[string][]string{}
 	for _, snapshot := range snapshots {
 		if snapshot.sessionPath == "" && snapshot.ctrl != nil {
 			snapshot.sessionPath = snapshot.ctrl.SessionPath()
 		}
 		byTopic[snapshot.topicID] = append(byTopic[snapshot.topicID], snapshot)
+		if path := strings.TrimSpace(snapshot.sessionPath); path != "" {
+			sessionsByTopic[snapshot.topicID] = append(sessionsByTopic[snapshot.topicID], path)
+		}
 	}
 	topicIDs := make([]string, 0, len(byTopic))
 	for topicID := range byTopic {
@@ -256,7 +279,7 @@ func (a *App) runtimeOnlyProjectTopics(scope, workspaceRoot string) []ProjectNod
 		}
 		out = append(out, node)
 	}
-	return out
+	return out, sessionsByTopic
 }
 
 func (a *App) metadataTopicPage(req ProjectTopicPageRequest) ProjectTopicPage {
@@ -295,7 +318,7 @@ func (a *App) metadataTopicPage(req ProjectTopicPageRequest) ProjectTopicPage {
 	return page
 }
 
-func (a *App) projectNodeFromCatalogTopic(topic sessioncatalog.TopicRecord, topicOverlays, sessionOverlays map[string]catalogRuntimeOverlay) (ProjectNode, bool) {
+func (a *App) projectNodeFromCatalogTopic(topic sessioncatalog.TopicRecord, topicOverlays, sessionOverlays map[string]catalogRuntimeOverlay, preferred map[string]struct{}) (ProjectNode, bool) {
 	kind := "topic"
 	if topic.Scope == "global" {
 		kind = "global_topic"
@@ -307,15 +330,35 @@ func (a *App) projectNodeFromCatalogTopic(topic sessioncatalog.TopicRecord, topi
 		TurnsState: string(topic.TurnsState), Health: string(topic.Health),
 		CreatedAt: topic.CreatedAt, LastActivityAt: topic.LastActivityAt,
 		Pinned: topic.Pinned, Open: overlay.open, Running: overlay.running, Status: overlay.status,
+		// Ordinary tree is zero-config: never surface recovery counts, badges,
+		// or forced-handling status. History "other saved versions" owns that.
 		Children: []ProjectNode{},
+	}
+	// Fall back to topic-local preference when the workspace map is unavailable
+	// so multi-fork topics still collapse instead of listing every replica.
+	localPreferred := preferred
+	if localPreferred == nil {
+		localPreferred = sessioncatalog.PreferredOrdinarySessionPaths(topic.Sessions)
 	}
 	visible := make([]sessioncatalog.SessionRecord, 0, len(topic.Sessions))
 	runtimeSessions := make([]runtimeSessionStatus, 0, len(topic.Sessions))
 	for _, session := range topic.Sessions {
 		sessionOverlay := sessionOverlays[sessionRuntimeKey(session.Path)]
-		// Idle covered recovery copies stay out of the ordinary tree. Open or
-		// running copies remain reachable so the user can still inspect them.
-		if session.RecoveryCopy && !sessionOverlay.open && !sessionOverlay.running {
+		// Aggregate open/running state from every physical member onto the
+		// single logical row — never expand recovery runtimes as children.
+		if sessionOverlay.open {
+			node.Open = true
+		}
+		if sessionOverlay.running {
+			node.Running = true
+			if node.Status == "" {
+				node.Status = sessionOverlay.status
+			}
+		}
+		// 1.23 ordinary-list contract: hide idle covered copies and non-
+		// preferred conflict forks. Open/running recovery is still not a
+		// second row — status is already aggregated above.
+		if !sessioncatalog.OrdinaryTreeSession(session, false, false, localPreferred) {
 			continue
 		}
 		visible = append(visible, session)
@@ -325,50 +368,27 @@ func (a *App) projectNodeFromCatalogTopic(topic sessioncatalog.TopicRecord, topi
 	}
 	summary := topicSummaryFromCatalogTopic(topic, visible)
 	if topicHiddenAsRecoveryOnly(summary, topic.Pinned, append(runtimeSessions, runtimeSessionStatus{
-		open: overlay.open, running: overlay.running,
+		open: overlay.open || node.Open, running: overlay.running || node.Running,
 	})) {
 		return ProjectNode{Children: []ProjectNode{}}, false
 	}
-	// A single effective session collapses to a normal topic row.
-	if len(visible) <= 1 {
-		return node, true
+	// After filtering non-preferred recovery forks, a topic may have nothing
+	// left. Keep pinned/open shells; otherwise drop the empty row.
+	if len(visible) == 0 {
+		if topic.Pinned || overlay.open || overlay.running || node.Open || node.Running {
+			return node, true
+		}
+		return ProjectNode{Children: []ProjectNode{}}, false
 	}
-	diverged := 0
-	for _, session := range visible {
-		if session.RecoveryRole == sessioncatalog.RecoveryRoleDiverged ||
-			(session.Recovered && !session.RecoveryCopy && session.RecoveryRole != sessioncatalog.RecoveryRoleAdopted) {
-			diverged++
-		}
-	}
-	if diverged >= 2 {
-		// Non-destructive choice prompt. The frontend renders the label from
-		// this status so it stays translated.
-		node.Status = topicStatusDivergedRecovery
-	}
-	for _, session := range visible {
-		sessionKind := "session"
-		if topic.Scope == "global" {
-			sessionKind = "global_session"
-		}
-		sessionOverlay := sessionOverlays[sessionRuntimeKey(session.Path)]
-		label := strings.TrimSpace(session.CustomTitle)
-		if label == "" {
-			label = strings.TrimSpace(session.Preview)
-		}
-		if label == "" {
-			label = filepath.Base(session.Path)
-		}
-		node.Children = append(node.Children, ProjectNode{
-			Key: projectSessionNodeKey(topic.Scope, session.Path), Kind: sessionKind,
-			Label: label, Root: topic.WorkspaceRoot, TopicID: topic.TopicID,
-			SessionPath: session.Path, Turns: session.Turns,
-			TurnsState: string(session.TurnsState), Health: string(session.Health),
-			CreatedAt: session.CreatedAt, LastActivityAt: session.LastActivityAt,
-			Open: sessionOverlay.open, Running: sessionOverlay.running, Status: sessionOverlay.status,
-			Recovered: session.Recovered, RecoveryReason: session.RecoveryReason,
-			RecoveryDigest: session.RecoveryDigest, RecoveryParentID: session.ParentID,
-			Children: []ProjectNode{},
-		})
+	// Ordinary list is always one logical row. Multiple normal non-recovery
+	// sessions under one topic also collapse: open/running already aggregated.
+	// History "other saved versions" is the only place physical forks appear.
+	if rep := strings.TrimSpace(topic.RepresentativePath); rep != "" {
+		node.SessionPath = rep
+	} else if path := sessioncatalog.CanonicalSessionPathForTopic(visible, ""); path != "" {
+		node.SessionPath = path
+	} else if len(visible) == 1 {
+		node.SessionPath = visible[0].Path
 	}
 	return node, true
 }
@@ -403,11 +423,100 @@ func topicSummaryFromCatalogTopic(topic sessioncatalog.TopicRecord, visible []se
 }
 
 func (a *App) ListProjectTopics(req ProjectTopicPageRequest) (ProjectTopicPage, error) {
-	out := ProjectTopicPage{Items: []ProjectNode{}}
 	catalog := a.sessionCatalog.Load()
 	if catalog == nil {
+		// Catalog unavailable: use project metadata shells only. Never scan
+		// every recovery JSONL into the ordinary tree (1.23 contract).
+		// While opening/rebuilding with a live catalog, ListTopics already
+		// skips non-ordinary recovery shells so empty pages beat a replica wall.
 		return a.metadataTopicPage(req), nil
 	}
+	page, err := a.catalogTopicPage(catalog, req)
+	if err != nil {
+		return page, err
+	}
+	return a.withLiveTopics(catalog, req, page), nil
+}
+
+// withLiveTopics restores topics the catalog does not (yet) carry. A tab is
+// authoritative for its own existence, while the catalog is a projection that
+// can lag a fresh session, fall behind a stalled writer, or run degraded — and
+// the sidebar must never hide a conversation this app is running. Only an
+// uncursored page merges, so keyset pagination past it stays the catalog's.
+func (a *App) withLiveTopics(catalog *sessioncatalog.Catalog, req ProjectTopicPageRequest, page ProjectTopicPage) ProjectTopicPage {
+	if strings.TrimSpace(req.Cursor) != "" {
+		return page
+	}
+	indexed := make(map[string]bool, len(page.Items))
+	for _, item := range page.Items {
+		indexed[item.TopicID] = true
+	}
+	query := strings.ToLower(strings.TrimSpace(req.Query))
+	live := []ProjectNode{}
+	runtimeNodes, sessionsByTopic := a.runtimeOnlyProjectTopicsWithSessions(req.Scope, req.WorkspaceRoot)
+	ctx, cancel := a.catalogReadContext()
+	defer cancel()
+	for _, node := range runtimeNodes {
+		if indexed[node.TopicID] {
+			continue
+		}
+		// A restored tab may still carry a legacy topic ID for a recovery
+		// session the catalog re-anchored onto the root logical topic. That
+		// logical row already represents the conversation, so a second
+		// runtime-only row would break the one-row ordinary-list contract.
+		if liveTopicProjectedOnPage(ctx, catalog, sessionsByTopic[node.TopicID], indexed) {
+			continue
+		}
+		if query != "" && !strings.Contains(strings.ToLower(node.Label), query) {
+			continue
+		}
+		live = append(live, node)
+	}
+	if len(live) == 0 {
+		return page
+	}
+	f := loadProjectsFile()
+	deleted := map[string]bool{}
+	for _, topicID := range f.DeletedTopics {
+		deleted[topicID] = true
+	}
+	created := loadTopicCreatedAts(topicTitleRoot(req.Scope, req.WorkspaceRoot))
+	kept := page.Items[:0:0]
+	for _, node := range live {
+		if deleted[node.TopicID] {
+			continue
+		}
+		node.CreatedAt = topicCreatedAtForTree(created, node.TopicID)
+		node.LastActivityAt = node.CreatedAt
+		kept = append(kept, node)
+	}
+	page.Items = append(kept, page.Items...)
+	return page
+}
+
+// liveTopicProjectedOnPage reports whether every catalog-known session of a
+// runtime-only topic already projects onto a topic on this page. Any session
+// the catalog has not indexed yet keeps the live row (that is the lag case
+// withLiveTopics exists for), and an off-page projection also keeps it so an
+// open conversation never disappears from the first page.
+func liveTopicProjectedOnPage(ctx context.Context, catalog *sessioncatalog.Catalog, paths []string, indexed map[string]bool) bool {
+	if catalog == nil || len(paths) == 0 {
+		return false
+	}
+	for _, path := range paths {
+		record, ok, err := catalog.GetSession(ctx, path)
+		if err != nil || !ok {
+			return false
+		}
+		if !indexed[record.TopicID] {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *App) catalogTopicPage(catalog *sessioncatalog.Catalog, req ProjectTopicPageRequest) (ProjectTopicPage, error) {
+	out := ProjectTopicPage{Items: []ProjectNode{}}
 	limit := req.Limit
 	if limit <= 0 {
 		limit = sessioncatalog.DefaultLimit
@@ -416,12 +525,20 @@ func (a *App) ListProjectTopics(req ProjectTopicPageRequest) (ProjectTopicPage, 
 		limit = sessioncatalog.MaxLimit
 	}
 	topicOverlays, sessionOverlays := a.catalogRuntimeOverlays()
+	ctx, cancel := a.catalogReadContext()
+	defer cancel()
+	// Workspace-wide preference collapses cross-topic recovery replicas that
+	// share a lineage but were indexed as separate topic rows.
+	preferred, prefErr := catalog.PreferredOrdinarySessionPaths(ctx, req.Scope, req.WorkspaceRoot)
+	if prefErr != nil {
+		preferred = nil
+	}
 	cursor := req.Cursor
 	// Keep scanning past pages that are entirely idle recovery copies so the
 	// sidebar never shows an empty "no sessions" state when later pages still
 	// have ordinary topics.
 	for {
-		page, err := catalog.ListTopics(a.bootContext(), sessioncatalog.TopicPageRequest{
+		page, err := catalog.ListTopics(ctx, sessioncatalog.TopicPageRequest{
 			Scope: req.Scope, WorkspaceRoot: req.WorkspaceRoot, Cursor: cursor,
 			Limit: limit, Query: req.Query, TimeFilter: req.TimeFilter,
 		})
@@ -430,7 +547,7 @@ func (a *App) ListProjectTopics(req ProjectTopicPageRequest) (ProjectTopicPage, 
 		}
 		out.Revision = page.Revision
 		for i, topic := range page.Items {
-			node, ok := a.projectNodeFromCatalogTopic(topic, topicOverlays, sessionOverlays)
+			node, ok := a.projectNodeFromCatalogTopic(topic, topicOverlays, sessionOverlays, preferred)
 			if !ok {
 				continue
 			}
@@ -462,7 +579,9 @@ func encodeProjectTopicCursor(topic sessioncatalog.TopicRecord) string {
 
 func (a *App) GetTopicSummary(key ProjectTopicKey) (ProjectNode, error) {
 	if catalog := a.sessionCatalog.Load(); catalog != nil {
-		topic, ok, err := catalog.GetTopic(a.bootContext(), sessioncatalog.TopicKey{
+		ctx, cancel := a.catalogReadContext()
+		defer cancel()
+		topic, ok, err := catalog.GetTopic(ctx, sessioncatalog.TopicKey{
 			Scope: key.Scope, WorkspaceRoot: key.WorkspaceRoot, TopicID: key.TopicID,
 		})
 		if err != nil {
@@ -470,7 +589,8 @@ func (a *App) GetTopicSummary(key ProjectTopicKey) (ProjectNode, error) {
 		}
 		if ok {
 			topicOverlays, sessionOverlays := a.catalogRuntimeOverlays()
-			if node, visible := a.projectNodeFromCatalogTopic(topic, topicOverlays, sessionOverlays); visible {
+			preferred, _ := catalog.PreferredOrdinarySessionPaths(ctx, key.Scope, key.WorkspaceRoot)
+			if node, visible := a.projectNodeFromCatalogTopic(topic, topicOverlays, sessionOverlays, preferred); visible {
 				return node, nil
 			}
 			return ProjectNode{Children: []ProjectNode{}}, nil
@@ -572,8 +692,17 @@ func (a *App) catalogSessionPathForTopic(scope, workspaceRoot, topicID string) s
 	if err != nil || !ok || len(topic.Sessions) == 0 {
 		return ""
 	}
+	if canonical := sessioncatalog.CanonicalSessionPathForTopic(topic.Sessions, ""); canonical != "" {
+		return canonical
+	}
+	preferred := sessioncatalog.PreferredOrdinarySessionPaths(topic.Sessions)
 	sort.SliceStable(topic.Sessions, func(i, j int) bool {
-		// Prefer real conversations over idle covered recovery copies.
+		// Prefer ordinary-tree survivors, then real conversations over copies.
+		iPref := sessioncatalog.OrdinaryTreeSession(topic.Sessions[i], false, false, preferred)
+		jPref := sessioncatalog.OrdinaryTreeSession(topic.Sessions[j], false, false, preferred)
+		if iPref != jPref {
+			return iPref
+		}
 		if topic.Sessions[i].RecoveryCopy != topic.Sessions[j].RecoveryCopy {
 			return !topic.Sessions[i].RecoveryCopy
 		}

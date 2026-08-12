@@ -16,6 +16,8 @@ import (
 	"reasonix/internal/taskcatalog"
 )
 
+const sessionCatalogMetadataSyncTimeout = 30 * time.Second
+
 type SessionCatalogStatus struct {
 	State           string `json:"state"`
 	Mode            string `json:"mode"`
@@ -155,7 +157,7 @@ func (a *App) startSessionCatalog(rebuild bool) {
 			return
 		}
 		a.sessionCatalog.Store(catalog)
-		if err := a.syncSessionCatalogMetadata(ctx, catalog); err != nil && !errors.Is(err, context.Canceled) {
+		if err := a.syncSessionCatalogMetadataBounded(ctx, catalog); err != nil && !errors.Is(err, context.Canceled) {
 			slog.Warn("desktop: sync session catalog metadata", "err", err)
 		}
 		select {
@@ -171,7 +173,7 @@ func (a *App) startSessionCatalog(rebuild bool) {
 			// Legacy assignment is deliberately background-only. It can scan and
 			// repair old metadata, but no project-tree or controller request waits.
 			if migrated := migrateLegacySessionsIntoGlobalTopics(target.Path); len(migrated) > 0 {
-				_ = a.syncSessionCatalogMetadata(ctx, catalog)
+				_ = a.syncSessionCatalogMetadataBounded(ctx, catalog)
 			}
 			if err := catalog.ReconcileDirectory(ctx, target); err != nil && !errors.Is(err, context.Canceled) {
 				slog.Debug("desktop: reconcile session catalog directory", "dir", target.Path, "err", err)
@@ -182,12 +184,12 @@ func (a *App) startSessionCatalog(rebuild bool) {
 		for {
 			select {
 			case <-ticker.C:
-				if err := a.syncSessionCatalogMetadata(ctx, catalog); err != nil && !errors.Is(err, context.Canceled) {
+				if err := a.syncSessionCatalogMetadataBounded(ctx, catalog); err != nil && !errors.Is(err, context.Canceled) {
 					slog.Debug("desktop: refresh session catalog metadata", "err", err)
 				}
 				for _, target := range a.sessionCatalogTargets() {
 					if migrated := migrateLegacySessionsIntoGlobalTopics(target.Path); len(migrated) > 0 {
-						_ = a.syncSessionCatalogMetadata(ctx, catalog)
+						_ = a.syncSessionCatalogMetadataBounded(ctx, catalog)
 					}
 					catalog.RequestReconcile(target)
 				}
@@ -320,6 +322,17 @@ func (a *App) indexRestoredSessionPaths(ctx context.Context, catalog *sessioncat
 		}
 		_ = catalog.IndexSessionPath(ctx, item.target, item.path)
 	}
+}
+
+// syncSessionCatalogMetadataBounded is the only form the long-lived catalog
+// goroutine may use. SyncMetadata runs under the catalog's single-writer mutex,
+// so one transaction that never returns silently wedges every later index,
+// reconcile, and revision bump — and the sidebar then stops updating for the
+// rest of the process lifetime instead of failing loudly.
+func (a *App) syncSessionCatalogMetadataBounded(ctx context.Context, catalog *sessioncatalog.Catalog) error {
+	ctx, cancel := context.WithTimeout(ctx, sessionCatalogMetadataSyncTimeout)
+	defer cancel()
+	return a.syncSessionCatalogMetadata(ctx, catalog)
 }
 
 func (a *App) syncSessionCatalogMetadata(ctx context.Context, catalog *sessioncatalog.Catalog) error {

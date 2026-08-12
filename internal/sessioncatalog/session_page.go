@@ -21,21 +21,25 @@ type sessionPageCursor struct {
 const sessionSelectColumns = `path,directory,scope,workspace_root,topic_id,topic_title,
     custom_title,created_at,last_activity_at,preview,turns,turns_state,recovered,
     recovery_reason,recovery_digest,parent_id,recovery_copy,recovery_group_id,
-    recovery_role,recovery_canonical,content_fingerprint,
+    recovery_role,recovery_canonical,logical_topic_id,ordinary_visible,content_fingerprint,
     meta_fingerprint,health,missing_since`
 
 func scanSession(scanner interface{ Scan(...any) error }) (SessionRecord, error) {
 	var record SessionRecord
-	var recoveryCopy, recoveryCanonical int
+	var recoveryCopy, recoveryCanonical, ordinaryVisible int
 	err := scanner.Scan(&record.Path, &record.Directory, &record.Scope, &record.WorkspaceRoot,
 		&record.TopicID, &record.TopicTitle, &record.CustomTitle, &record.CreatedAt,
 		&record.LastActivityAt, &record.Preview, &record.Turns, &record.TurnsState,
 		&record.Recovered, &record.RecoveryReason, &record.RecoveryDigest,
 		&record.ParentID, &recoveryCopy, &record.RecoveryGroupID, &record.RecoveryRole,
-		&recoveryCanonical, &record.ContentFingerprint, &record.MetaFingerprint,
+		&recoveryCanonical, &record.LogicalTopicID, &ordinaryVisible, &record.ContentFingerprint, &record.MetaFingerprint,
 		&record.Health, &record.MissingSince)
 	record.RecoveryCopy = recoveryCopy != 0
 	record.RecoveryCanonical = recoveryCanonical != 0
+	record.OrdinaryVisible = ordinaryVisible != 0
+	if record.LogicalTopicID == "" {
+		record.LogicalTopicID = record.TopicID
+	}
 	if record.RecoveryRole == "" {
 		if record.RecoveryCopy {
 			record.RecoveryRole = RecoveryRoleCoveredCopy

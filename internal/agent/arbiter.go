@@ -46,7 +46,7 @@ func (a *Agent) applyInterventions(results []string, outcomes []toolOutcome, ivs
 			strongest = iv.verdict
 		}
 		if iv.notice != nil {
-			a.sink.Emit(*iv.notice)
+			a.svc.sink.Emit(*iv.notice)
 		}
 		if iv.guidance != "" {
 			guidance = append(guidance, iv.guidance)

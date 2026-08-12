@@ -47,7 +47,7 @@ import { useTranscriptSelectableRows } from "../lib/useTranscriptSelectableRows"
 import { TranscriptSelectionOverlay } from "./TranscriptSelectionOverlay";
 import { useCreationTranscriptScrollbar } from "../lib/useCreationTranscriptScrollbar";
 import { useTranscriptScrollInteractions } from "../lib/useTranscriptScrollInteractions";
-import { useTranscriptVirtuosoScroll } from "../lib/useTranscriptVirtuosoScroll";
+import { TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX, useTranscriptVirtuosoScroll } from "../lib/useTranscriptVirtuosoScroll";
 import { useTranscriptVirtuosoFirstItemIndex } from "../lib/transcriptVirtuosoIndex";
 type OpenTurnAction = { turn: number; menu: "summary" | "rewind" };
 const QUESTION_NAV_MIN_COUNT = 2;
@@ -109,6 +109,7 @@ const VIRTUAL_OVERSCAN_ROWS = 8;
 type TranscriptVirtuosoContext = {
   tabId?: string;
   scrollElement: HTMLDivElement | null;
+  nativeScrollbarDragging: boolean;
   overlayRevision: string;
   olderHistory: null | {
     loading: boolean;
@@ -118,13 +119,17 @@ type TranscriptVirtuosoContext = {
 };
 
 const TranscriptVirtuosoItem = forwardRef<HTMLDivElement, ItemProps<TranscriptRow> & { context: TranscriptVirtuosoContext }>(
-  function TranscriptVirtuosoItem({ item, context: _context, children, ...props }, ref) {
+  function TranscriptVirtuosoItem({ item, context, children, style, ...props }, ref) {
     const entryId = historyEntryIdForRow(item);
     useEffect(() => {
-      if (entryId) getTranscriptStore().requestEntryFullContent(_context.tabId, entryId);
-    }, [_context.tabId, entryId]);
+      if (entryId) getTranscriptStore().requestEntryFullContent(context.tabId, entryId);
+    }, [context.tabId, entryId]);
+    const knownSize = Number.parseFloat(String(props["data-known-size"] ?? ""));
+    const frozenStyle = context.nativeScrollbarDragging && Number.isFinite(knownSize) && knownSize > 0
+      ? { ...style, boxSizing: "border-box" as const, height: knownSize, overflow: "hidden" as const }
+      : style;
     return (
-      <div {...props} ref={ref} data-row-key={String(item.key)} className="transcript__row">
+      <div {...props} ref={ref} style={frozenStyle} data-row-key={String(item.key)} className="transcript__row">
         {children}
       </div>
     );
@@ -275,6 +280,8 @@ export function Transcript({
   const {
     virtuosoRef,
     scrollRef,
+    itemSize,
+    nativeScrollbarDragging,
     scrollElement,
     pinnedRef: stick,
     onWheelIntent,
@@ -515,6 +522,7 @@ export function Transcript({
   const virtuosoContext = useMemo<TranscriptVirtuosoContext>(() => ({
     tabId,
     scrollElement,
+    nativeScrollbarDragging,
     overlayRevision,
     olderHistory: hasOlderHistory
       ? {
@@ -523,7 +531,7 @@ export function Transcript({
           onLoad: onLoadOlderHistory,
         }
       : null,
-  }), [hasOlderHistory, loadingOlderHistory, olderHistoryCount, onLoadOlderHistory, overlayRevision, scrollElement, t, tabId]);
+  }), [hasOlderHistory, loadingOlderHistory, nativeScrollbarDragging, olderHistoryCount, onLoadOlderHistory, overlayRevision, scrollElement, t, tabId]);
   const handleScrollerRef = useCallback((node: HTMLElement | Window | null) => {
     scrollerRef(node);
     entranceRef.current = node instanceof HTMLElement ? node as HTMLDivElement : null;
@@ -715,9 +723,10 @@ export function Transcript({
             firstItemIndex={firstItemIndex}
             alignToBottom
             followOutput={(atBottom) => atBottom ? "auto" : false}
-            atBottomThreshold={4}
+            atBottomThreshold={TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX}
             atBottomStateChange={atBottomStateChange}
             heightEstimates={heightEstimates}
+            itemSize={itemSize}
             minOverscanItemCount={{ top: VIRTUAL_OVERSCAN_ROWS, bottom: VIRTUAL_OVERSCAN_ROWS }}
             increaseViewportBy={{ top: 480, bottom: 480 }}
             scrollerRef={handleScrollerRef}

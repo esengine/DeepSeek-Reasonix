@@ -133,31 +133,33 @@ func (a *App) resolveCanonicalSession(path string) canonicalSessionResolution {
 	if err != nil || !ok {
 		return canonicalSessionResolution{Path: path}
 	}
-	page, err := catalog.ListSessions(ctx, sessioncatalog.SessionPageRequest{
-		Scope:         rec.Scope,
-		WorkspaceRoot: rec.WorkspaceRoot,
-		Limit:         sessioncatalog.MaxLimit,
-	})
-	if err != nil {
-		return canonicalSessionResolution{Path: path}
-	}
-	var related []sessioncatalog.SessionRecord
 	groupID := strings.TrimSpace(rec.RecoveryGroupID)
 	if groupID == "" {
 		groupID = agent.BranchID(rec.Path)
 	}
-	for _, s := range page.Items {
-		if s.Scope != rec.Scope || s.WorkspaceRoot != rec.WorkspaceRoot {
-			continue
+	related := []sessioncatalog.SessionRecord{}
+	if rec.TopicID != "" {
+		topic, found, topicErr := catalog.GetTopic(ctx, sessioncatalog.TopicKey{
+			Scope: rec.Scope, WorkspaceRoot: rec.WorkspaceRoot, TopicID: rec.TopicID,
+		})
+		if topicErr != nil || !found {
+			return canonicalSessionResolution{Path: path}
 		}
-		if rec.TopicID != "" {
-			if s.TopicID == rec.TopicID {
-				related = append(related, s)
+		for _, member := range topic.Sessions {
+			if member.RecoveryGroupID == groupID || sameDesktopPath(member.Path, rec.Path) {
+				related = append(related, member)
 			}
-			continue
 		}
-		if s.RecoveryGroupID == groupID || sameDesktopPath(s.Path, rec.Path) {
-			related = append(related, s)
+	} else {
+		groups, groupErr := catalog.ListRecoveryGroups(ctx, rec.Directory)
+		if groupErr != nil {
+			return canonicalSessionResolution{Path: path}
+		}
+		for _, group := range groups {
+			if group.ID == groupID {
+				related = append(related, group.Members...)
+				break
+			}
 		}
 	}
 	if canonical := sessioncatalog.CanonicalSessionPathForTopic(related, path); canonical != "" {
@@ -168,7 +170,7 @@ func (a *App) resolveCanonicalSession(path string) canonicalSessionResolution {
 	}
 	var candidates []RecoverySessionCandidate
 	for _, s := range related {
-		if !s.Recovered || s.RecoveryRole == sessioncatalog.RecoveryRoleCoveredCopy || s.RecoveryRole == sessioncatalog.RecoveryRoleNormal {
+		if !s.Recovered || s.RecoveryRole != sessioncatalog.RecoveryRoleDiverged {
 			continue
 		}
 		candidates = append(candidates, RecoverySessionCandidate{

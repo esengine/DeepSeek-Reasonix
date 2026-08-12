@@ -512,8 +512,59 @@ export interface ProjectNode {
   recoveryReason?: string;
   recoveryDigest?: string;
   recoveryParentId?: string;
+  recoveryState?: "normal" | "repairing" | "adopted" | "preferred" | "diverged" | "recovery_only" | string;
+  recoveryBranchCount?: number;
+  recoveryUnresolvedCount?: number;
+  recoveryCleanupEligibleCount?: number;
   isolatedWorktree?: boolean;
   children?: ProjectNode[];
+}
+
+export interface RecoveryLineageMember {
+  path: string;
+  role: "normal" | "covered_copy" | "adopted" | "preferred" | "diverged" | string;
+  canonical: boolean;
+  turns: number;
+  open: boolean;
+  running: boolean;
+}
+
+export interface RecoveryLineageView {
+  groupId: string;
+  state: string;
+  branchCount: number;
+  unresolved: number;
+  cleanupEligible: number;
+  members: RecoveryLineageMember[];
+}
+
+export interface RecoveryCleanupRequest {
+  scope: string;
+  workspaceRoot?: string;
+  topicId: string;
+  apply: boolean;
+}
+
+export interface RecoveryPreferenceRequest {
+  scope: string;
+  workspaceRoot?: string;
+  topicId: string;
+  path: string;
+}
+
+export interface RecoveryCleanupItem {
+  path: string;
+  status: "eligible" | "moved" | "busy" | "kept" | string;
+  error?: string;
+}
+
+export interface RecoveryCleanupResult {
+  eligible: number;
+  moved: number;
+  busy: number;
+  kept: number;
+  dryRun: boolean;
+  items: RecoveryCleanupItem[];
 }
 
 export interface DeliveryWorktreeAvailability {

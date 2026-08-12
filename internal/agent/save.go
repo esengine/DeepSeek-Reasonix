@@ -58,6 +58,11 @@ var (
 	sessionFileLockPollInterval = 25 * time.Millisecond
 	sessionMetaLockWait         = 5 * time.Second
 	ErrSessionSnapshotConflict  = errors.New("session snapshot conflicts with newer transcript")
+	// ErrSessionExternallyRemoved means a live Session still has a verified
+	// baseline for path, but every authoritative transcript artifact disappeared.
+	// Treating it as a first save would silently recreate a file the user or an
+	// external cleanup tool deliberately removed.
+	ErrSessionExternallyRemoved = errors.New("session was removed while still open")
 	ErrSessionRecoveryNotNeeded = errors.New("session recovery not needed")
 	// ErrSessionFileLockHeld reports that another process kept the
 	// compatibility save lock for the full bounded acquisition window. Callers
@@ -516,9 +521,13 @@ func writeSessionMessages(path string, msgs []provider.Message) error {
 // checkSnapshotWrite decides whether this session may write msgs over path, and
 // whether the safe write shape is a no-op, append-only suffix, or full rewrite.
 func (s *Session) checkSnapshotWrite(path string, next []provider.Message, nextDigest [sha256.Size]byte, nextVersion uint64, allowOwnedRewrite bool) (snapshotWriteDecision, error) {
+	baseState := s.persistState(path)
 	current, err := loadSessionUnlocked(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			if baseState.ok {
+				return snapshotWriteDecision{}, ErrSessionExternallyRemoved
+			}
 			return snapshotWriteDecision{}, nil
 		}
 		return snapshotWriteDecision{}, err
@@ -527,7 +536,6 @@ func (s *Session) checkSnapshotWrite(path string, next []provider.Message, nextD
 	if err != nil {
 		return snapshotWriteDecision{}, err
 	}
-	baseState := s.persistState(path)
 	existing := current.Snapshot()
 	existingDigest, err := digestSessionMessages(existing)
 	if err != nil {
@@ -1538,19 +1546,20 @@ type SessionInfo struct {
 // session pickers and prompt-history navigation. It intentionally avoids reading
 // JSONL content; callers that need previews can layer that on afterwards.
 type SessionOrderInfo struct {
-	Path           string
-	CreatedAt      time.Time
-	LastActivityAt time.Time
-	ModTime        time.Time // compatibility alias for LastActivityAt
-	Scope          string
-	WorkspaceRoot  string
-	TopicID        string
-	TopicTitle     string
-	CustomTitle    string
-	Recovered      bool
-	RecoveryReason string
-	RecoveryDigest string
-	ParentID       string
+	Path              string
+	CreatedAt         time.Time
+	LastActivityAt    time.Time
+	ModTime           time.Time // compatibility alias for LastActivityAt
+	Scope             string
+	WorkspaceRoot     string
+	TopicID           string
+	TopicTitle        string
+	CustomTitle       string
+	Recovered         bool
+	RecoveryReason    string
+	RecoveryDigest    string
+	ParentID          string
+	RecoveryPreferred bool
 	// Turns and Preview are the cached listing fields from the sidecar; SchemaVersion
 	// >= agent.BranchMetaCountsVersion means they were recorded from content and can
 	// be trusted (even Turns == 0). ListSessions uses them to skip the whole-file decode.
@@ -2085,6 +2094,7 @@ func ListSessionOrder(dir string) ([]SessionOrderInfo, error) {
 		recoveryReason := ""
 		recoveryDigest := ""
 		parentID := ""
+		recoveryPreferred := false
 		turns := 0
 		preview := ""
 		schemaVersion := 0
@@ -2106,31 +2116,43 @@ func ListSessionOrder(dir string) ([]SessionOrderInfo, error) {
 			recoveryReason = meta.RecoveryReason
 			recoveryDigest = meta.RecoveryDigest
 			parentID = meta.ParentID
+			recoveryPreferred = RecoveryPreferenceCurrent(full, meta)
 			turns = meta.Turns
 			preview = meta.Preview
 			schemaVersion = meta.SchemaVersion
 			revision = meta.Revision
 			contentDigest = meta.ContentDigest
 		}
+		// Old recovery files may lack Recovered meta; filename still proves
+		// automatic recovery lineage for catalog folding.
+		if !recovered && LooksLikeRecoveryFilename(full) {
+			recovered = true
+			if parentID == "" {
+				if parent, ok := RecoveryFilenameParentID(full); ok {
+					parentID = parent
+				}
+			}
+		}
 		out = append(out, SessionOrderInfo{
-			Path:           full,
-			CreatedAt:      createdAt,
-			LastActivityAt: lastActivityAt,
-			ModTime:        lastActivityAt,
-			Scope:          scope,
-			WorkspaceRoot:  workspaceRoot,
-			TopicID:        topicID,
-			TopicTitle:     topicTitle,
-			CustomTitle:    customTitle,
-			Recovered:      recovered,
-			RecoveryReason: recoveryReason,
-			RecoveryDigest: recoveryDigest,
-			ParentID:       parentID,
-			Turns:          turns,
-			Preview:        preview,
-			SchemaVersion:  schemaVersion,
-			Revision:       revision,
-			ContentDigest:  contentDigest,
+			Path:              full,
+			CreatedAt:         createdAt,
+			LastActivityAt:    lastActivityAt,
+			ModTime:           lastActivityAt,
+			Scope:             scope,
+			WorkspaceRoot:     workspaceRoot,
+			TopicID:           topicID,
+			TopicTitle:        topicTitle,
+			CustomTitle:       customTitle,
+			Recovered:         recovered,
+			RecoveryReason:    recoveryReason,
+			RecoveryDigest:    recoveryDigest,
+			ParentID:          parentID,
+			RecoveryPreferred: recoveryPreferred,
+			Turns:             turns,
+			Preview:           preview,
+			SchemaVersion:     schemaVersion,
+			Revision:          revision,
+			ContentDigest:     contentDigest,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {

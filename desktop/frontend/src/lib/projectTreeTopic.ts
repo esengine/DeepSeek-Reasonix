@@ -180,13 +180,12 @@ export function normalizeTopicStatus(status?: string): ProjectTopicStatus | "" {
 }
 
 export function topicStatus(node: ProjectNode): ProjectTopicStatus | "" {
-  // Active runtime states take priority over the informational diverged-recovery
-  // marker so a topic that is simultaneously running and has unresolved branches
-  // surfaces the live state first.
+  // Ordinary list never surfaces recovery-branch status. Active runtime states
+  // only: thinking/streaming/waiting/etc. History owns other saved versions.
   const live = node.running ? "streaming" : "";
   const stored = normalizeTopicStatus(node.status);
   if (stored && stored !== "diverged_recovery") return stored;
-  return live || stored;
+  return live;
 }
 
 export function projectTreeTopicArchiveBlocked(node: ProjectNode): boolean {

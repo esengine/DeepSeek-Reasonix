@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"reasonix/internal/fileutil"
+	"reasonix/internal/provider"
 	"reasonix/internal/store"
 )
 
@@ -88,18 +90,109 @@ func RecoveryBranchCoveredByParent(path, parentDir string) bool {
 // history stored in covered. It is intentionally conservative for catalog
 // canonical promotion: repaired or damaged loads cannot authorize a redirect.
 func SessionContentCovers(coveringPath, coveredPath string) bool {
-	covering, err := LoadSession(coveringPath)
-	if err != nil || covering == nil || covering.normalizedDirty || covering.eventLogDamaged {
+	covering, ok := LoadSessionContentSnapshot(coveringPath)
+	if !ok {
 		return false
 	}
-	covered, err := LoadSession(coveredPath)
-	if err != nil || covered == nil || covered.normalizedDirty || covered.eventLogDamaged {
+	covered, ok := LoadSessionContentSnapshot(coveredPath)
+	return ok && covering.Covers(covered)
+}
+
+// SetRecoveryPreferred records exactly one explicit preferred leaf. It clears
+// old choices first, so interruption can only fall back to an unresolved group;
+// it can never leave two canonical choices.
+func SetRecoveryPreferred(paths []string, chosenPath string) error {
+	chosenPath = canonicalSessionSavePath(chosenPath)
+	if chosenPath == "" {
+		return fmt.Errorf("empty preferred recovery path")
+	}
+	unique := map[string]struct{}{}
+	for _, path := range paths {
+		path = canonicalSessionSavePath(path)
+		if path != "" {
+			unique[path] = struct{}{}
+		}
+	}
+	if _, ok := unique[chosenPath]; !ok {
+		return fmt.Errorf("preferred recovery path is outside the lineage")
+	}
+	ordered := make([]string, 0, len(unique))
+	for path := range unique {
+		meta, ok, err := LoadBranchMeta(path)
+		if err != nil || !ok || !meta.Recovered {
+			return fmt.Errorf("invalid recovery lineage member")
+		}
+		ordered = append(ordered, path)
+	}
+	sort.Strings(ordered)
+	for _, path := range ordered {
+		if err := UpdateBranchMeta(path, false, func(meta *BranchMeta) error {
+			meta.RecoveryPreferred = false
+			meta.RecoveryPreferredDigest = ""
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	chosen, err := LoadSession(chosenPath)
+	if err != nil || chosen == nil || chosen.normalizedDirty || chosen.eventLogDamaged {
+		return fmt.Errorf("could not fingerprint preferred recovery branch")
+	}
+	digest, err := digestSessionMessages(chosen.Snapshot())
+	if err != nil {
+		return err
+	}
+	return UpdateBranchMeta(chosenPath, false, func(meta *BranchMeta) error {
+		if !meta.Recovered {
+			return fmt.Errorf("preferred session is not a recovery branch")
+		}
+		meta.RecoveryPreferred = true
+		meta.RecoveryPreferredDigest = digestString(digest)
+		return nil
+	})
+}
+
+// RecoveryPreferenceCurrent proves that the branch still has the exact content
+// the user selected. Continued or externally edited branches fall back to an
+// unresolved lineage until the user chooses again.
+func RecoveryPreferenceCurrent(path string, meta BranchMeta) bool {
+	if !meta.RecoveryPreferred || strings.TrimSpace(meta.RecoveryPreferredDigest) == "" {
 		return false
 	}
-	coveringMessages := covering.Snapshot()
-	coveredMessages := covered.Snapshot()
-	return messagesHavePrefix(coveringMessages, coveredMessages) ||
-		messagesHavePrefixWithCompatibleSystem(coveringMessages, coveredMessages)
+	session, err := LoadSession(path)
+	if err != nil || session == nil || session.normalizedDirty || session.eventLogDamaged {
+		return false
+	}
+	digest, err := digestSessionMessages(session.Snapshot())
+	return err == nil && digestString(digest) == strings.TrimSpace(meta.RecoveryPreferredDigest)
+}
+
+// SessionContentSnapshot is an immutable, validated transcript projection used
+// by the catalog. Its messages stay private so callers cannot accidentally use
+// a classification read as a mutable Session.
+type SessionContentSnapshot struct {
+	messages []provider.Message
+}
+
+// LoadSessionContentSnapshot loads one transcript once for lineage analysis.
+// Dirty normalization and damaged event logs fail closed: neither may prove a
+// canonical branch or authorize cleanup.
+func LoadSessionContentSnapshot(path string) (SessionContentSnapshot, bool) {
+	session, err := LoadSession(path)
+	if err != nil || session == nil || session.normalizedDirty || session.eventLogDamaged {
+		return SessionContentSnapshot{}, false
+	}
+	return SessionContentSnapshot{messages: session.Snapshot()}, true
+}
+
+// Len is used only to discard candidates that cannot cover the longest member.
+func (s SessionContentSnapshot) Len() int { return len(s.messages) }
+
+// Covers reports whether s contains all content in covered as a compatible
+// prefix. Both snapshots have already passed the conservative load checks.
+func (s SessionContentSnapshot) Covers(covered SessionContentSnapshot) bool {
+	return messagesHavePrefix(s.messages, covered.messages) ||
+		messagesHavePrefixWithCompatibleSystem(s.messages, covered.messages)
 }
 
 // TryAcquireRecoveryParentGuard verifies that a recovery branch is covered by
@@ -236,6 +329,101 @@ func ReclaimableRecoveryBranches(dir string, now time.Time, grace time.Duration)
 // coverage is rechecked while both parent and branch removal guards are held.
 func TrashCoveredRecoveryBranch(path, parentDir string) error {
 	return trashCoveredRecoveryBranch(path, parentDir, false)
+}
+
+// TrashRecoveryBranchCoveredBy moves path to recoverable trash when canonical
+// contains its complete transcript. Unlike TrashCoveredRecoveryBranch this is
+// lineage-aware: legacy recovery storms form chains, so an adopted leaf may
+// cover an ancestor even though that ancestor's immediate parent does not cover
+// it. Both transcripts are held behind removal guards while coverage is proved.
+func TrashRecoveryBranchCoveredBy(path, canonicalPath, parentDir string) error {
+	path = filepath.Clean(strings.TrimSpace(path))
+	canonicalPath = filepath.Clean(strings.TrimSpace(canonicalPath))
+	parentDir = filepath.Clean(strings.TrimSpace(parentDir))
+	if path == "." || canonicalPath == "." || parentDir == "." || path == canonicalPath ||
+		filepath.Dir(path) != parentDir || filepath.Dir(canonicalPath) != parentDir {
+		return ErrRecoveryBranchNotCovered
+	}
+	meta, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok || !meta.Recovered {
+		return ErrRecoveryBranchNotCovered
+	}
+	paths := []string{path, canonicalPath}
+	sort.Strings(paths)
+	guards := make(map[string]*SessionRemovalGuard, len(paths))
+	for _, guardedPath := range paths {
+		guard, guardErr := TryAcquireSessionRemovalGuard(guardedPath)
+		if guardErr != nil {
+			for _, held := range guards {
+				held.Release()
+			}
+			return guardErr
+		}
+		guards[guardedPath] = guard
+	}
+	defer func() {
+		for _, guard := range guards {
+			guard.Release()
+		}
+	}()
+	if !SessionContentCovers(canonicalPath, path) {
+		return ErrRecoveryBranchNotCovered
+	}
+	key := filepath.Base(path)
+	if !validRecoveryTrashKey(key) {
+		return fmt.Errorf("invalid recovery session path")
+	}
+	stageDir, err := reserveRecoveryTrashStage(parentDir)
+	if err != nil {
+		return err
+	}
+	if err := prepareRecoveryTrashStage(path, key, stageDir); err != nil {
+		return err
+	}
+	return finishRecoveryTrashStage(parentDir, path, key, stageDir, guards[path])
+}
+
+// ReparentRecoveryCanonical shortens a proved recovery chain to root ->
+// canonical without rewriting either transcript. This preserves discovery for
+// older versions after covered intermediate branches are moved to trash.
+func ReparentRecoveryCanonical(canonicalPath, rootID, parentDir string) error {
+	canonicalPath = filepath.Clean(strings.TrimSpace(canonicalPath))
+	parentDir = filepath.Clean(strings.TrimSpace(parentDir))
+	rootID = strings.TrimSpace(rootID)
+	rootPath := filepath.Join(parentDir, rootID+".jsonl")
+	if canonicalPath == "." || parentDir == "." || rootID == "" || filepath.Base(rootID) != rootID ||
+		filepath.Dir(canonicalPath) != parentDir || canonicalPath == rootPath {
+		return ErrRecoveryBranchNotCovered
+	}
+	paths := []string{canonicalPath, rootPath}
+	sort.Strings(paths)
+	guards := make([]*SessionRemovalGuard, 0, len(paths))
+	for _, path := range paths {
+		guard, err := TryAcquireSessionRemovalGuard(path)
+		if err != nil {
+			for _, held := range guards {
+				held.Release()
+			}
+			return err
+		}
+		guards = append(guards, guard)
+	}
+	defer func() {
+		for _, guard := range guards {
+			guard.Release()
+		}
+	}()
+	if !SessionContentCovers(canonicalPath, rootPath) {
+		return ErrRecoveryBranchNotCovered
+	}
+	return UpdateBranchMeta(canonicalPath, false, func(meta *BranchMeta) error {
+		if !meta.Recovered {
+			return ErrRecoveryBranchNotCovered
+		}
+		meta.ParentID = rootID
+		meta.RecoveryDepth = 1
+		return nil
+	})
 }
 
 // TrashReclaimableRecoveryBranch is the background-GC variant. In addition to

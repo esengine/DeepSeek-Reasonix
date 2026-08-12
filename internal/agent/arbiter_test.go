@@ -15,7 +15,7 @@ func arbiterRound() ([]string, []toolOutcome) {
 // that fired two of them delivered only the last one's guidance.
 func TestApplyInterventionsKeepsEveryFiredGuidance(t *testing.T) {
 	sink := &ebmSink{}
-	a := &Agent{sink: sink}
+	a := &Agent{svc: agentServices{sink: sink}}
 	results, outcomes := arbiterRound()
 
 	got := a.applyInterventions(results, outcomes,
@@ -40,7 +40,7 @@ func TestApplyInterventionsKeepsEveryFiredGuidance(t *testing.T) {
 
 func TestApplyInterventionsLeavesQuietRoundsUntouched(t *testing.T) {
 	sink := &ebmSink{}
-	a := &Agent{sink: sink}
+	a := &Agent{svc: agentServices{sink: sink}}
 	results, outcomes := arbiterRound()
 
 	if got := a.applyInterventions(results, outcomes, intervention{}, intervention{}); got != verdictContinue {
@@ -53,7 +53,7 @@ func TestApplyInterventionsLeavesQuietRoundsUntouched(t *testing.T) {
 
 // A land must survive being raised beside a lower tier in the same round.
 func TestApplyInterventionsTakesTheStrongestVerdict(t *testing.T) {
-	a := &Agent{sink: &ebmSink{}}
+	a := &Agent{svc: agentServices{sink: &ebmSink{}}}
 	results, outcomes := arbiterRound()
 
 	got := a.applyInterventions(results, outcomes,

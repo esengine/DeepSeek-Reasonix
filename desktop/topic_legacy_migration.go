@@ -365,22 +365,7 @@ func sessionInfoIsUnmodifiedRecoveryCopy(info agent.SessionInfo, parentDir strin
 }
 
 func isAutomaticRecoverySessionPath(path string) bool {
-	id := agent.BranchID(path)
-	idx := strings.LastIndex(id, "-recovery-")
-	if idx <= 0 {
-		return false
-	}
-	suffix := id[idx+len("-recovery-"):]
-	if len(suffix) != 16 {
-		return false
-	}
-	for _, r := range suffix {
-		if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F') {
-			continue
-		}
-		return false
-	}
-	return true
+	return agent.LooksLikeRecoveryFilename(path)
 }
 
 func legacyMigrationTargetForDir(dir string) (scope, workspaceRoot, topicTitleRoot string, ok bool) {

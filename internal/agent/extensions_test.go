@@ -689,7 +689,7 @@ func TestToolBeforeContinue(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(rec)
 	a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
 	if out.errMsg != "" || !strings.Contains(out.output, "read_file ok") {
 		t.Fatalf("outcome = %+v, want the tool to run", out)
 	}
@@ -713,7 +713,7 @@ func TestToolBeforeBlock(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(rec)
 	a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
 	if !out.blocked || out.output != "blocked: tool denied" {
 		t.Fatalf("outcome = %+v, want a blocked tool result with the reason", out)
 	}
@@ -734,7 +734,7 @@ func TestToolBeforeReplaceArgs(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(rec)
 	a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/original"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/original"}`})
 	if out.errMsg != "" {
 		t.Fatalf("outcome = %+v, want success", out)
 	}
@@ -757,7 +757,7 @@ func TestToolBeforeReplaceName(t *testing.T) {
 	reg.Add(orig)
 	reg.Add(substituted)
 	a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
 	if out.errMsg != "" || !strings.Contains(out.output, "grep ok") {
 		t.Fatalf("outcome = %+v, want the substituted tool to run", out)
 	}
@@ -788,7 +788,7 @@ func TestToolBeforeInvalidReplacements(t *testing.T) {
 			reg := tool.NewRegistry()
 			reg.Add(rec)
 			a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-			out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
+			out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
 			if out.errMsg == "" || !strings.Contains(out.output, "violated the intercept contract") || !strings.Contains(out.output, tc.want) {
 				t.Fatalf("outcome = %+v, want a contract-violation error result containing %q", out, tc.want)
 			}
@@ -811,7 +811,7 @@ func TestToolBeforeInvalidReplacements(t *testing.T) {
 		reg := tool.NewRegistry()
 		reg.Add(rec)
 		a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-		out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
+		out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
 		if out.errMsg == "" || !strings.Contains(out.output, "violated the intercept contract") {
 			t.Fatalf("outcome = %+v, want a dispatch violation error result", out)
 		}
@@ -832,7 +832,7 @@ func TestToolBeforeFailurePolicy(t *testing.T) {
 		reg := tool.NewRegistry()
 		reg.Add(rec)
 		a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-		out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
+		out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
 		if out.errMsg == "" || !strings.Contains(out.output, "extension fake failed at tool.before") {
 			t.Fatalf("outcome = %+v, want the required failure as the tool result", out)
 		}
@@ -850,7 +850,7 @@ func TestToolBeforeFailurePolicy(t *testing.T) {
 		reg := tool.NewRegistry()
 		reg.Add(rec)
 		a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-		out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
+		out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
 		if out.errMsg != "" || rec.execs != 1 {
 			t.Fatalf("outcome = %+v execs = %d, want the tool to run", out, rec.execs)
 		}
@@ -884,7 +884,7 @@ func TestPermissionDecisionExtensionAllowOverridesHostDeny(t *testing.T) {
 	var events []event.Event
 	sink := event.FuncSink(func(e event.Event) { events = append(events, e) })
 	a := New(nil, reg, NewSession(""), Options{Gate: gate, Extensions: d}, sink)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
 	if out.errMsg != "" || rec.execs != 1 {
 		t.Fatalf("outcome = %+v execs = %d, want the full-trust override to execute", out, rec.execs)
 	}
@@ -914,7 +914,7 @@ func TestPermissionDecisionExtensionDenyOverridesHostAllow(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(rec)
 	a := New(nil, reg, NewSession(""), Options{Gate: &stubGate{}, Extensions: d}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
 	if !out.blocked || !strings.Contains(out.output, "denied by extension permission policy") {
 		t.Fatalf("outcome = %+v, want an extension denial", out)
 	}
@@ -931,7 +931,7 @@ func TestPermissionDecisionContinueKeepsHostDeny(t *testing.T) {
 	reg.Add(rec)
 	gate := &stubGate{deny: map[string]bool{"edit_file": true}}
 	a := New(nil, reg, NewSession(""), Options{Gate: gate, Extensions: d}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
 	if !out.blocked || !strings.Contains(out.output, "denied by test policy") {
 		t.Fatalf("outcome = %+v, want the host denial to stand", out)
 	}
@@ -953,7 +953,7 @@ func TestPermissionDecisionBlockAndFailure(t *testing.T) {
 		reg := tool.NewRegistry()
 		reg.Add(rec)
 		a := New(nil, reg, NewSession(""), Options{Gate: &stubGate{}, Extensions: d}, event.Discard)
-		out := a.executeOne(context.Background(), provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
+		out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
 		if !out.blocked || !strings.Contains(out.output, "policy says no") {
 			t.Fatalf("outcome = %+v, want the block reason", out)
 		}
@@ -967,7 +967,7 @@ func TestPermissionDecisionBlockAndFailure(t *testing.T) {
 		reg := tool.NewRegistry()
 		reg.Add(rec)
 		a := New(nil, reg, NewSession(""), Options{Gate: &stubGate{}, Extensions: d}, event.Discard)
-		out := a.executeOne(context.Background(), provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
+		out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
 		if !out.blocked || !strings.Contains(out.output, "extension fake failed at permission.decision") {
 			t.Fatalf("outcome = %+v, want the required failure", out)
 		}
@@ -985,7 +985,7 @@ func TestPermissionDecisionBlockAndFailure(t *testing.T) {
 		reg := tool.NewRegistry()
 		reg.Add(rec)
 		a := New(nil, reg, NewSession(""), Options{Gate: &stubGate{}, Extensions: d}, event.Discard)
-		out := a.executeOne(context.Background(), provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
+		out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
 		if out.errMsg != "" || rec.execs != 1 {
 			t.Fatalf("outcome = %+v execs = %d, want the host allow to stand", out, rec.execs)
 		}
@@ -1011,7 +1011,7 @@ func TestToolAfterReplaceResult(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(rec)
 	a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
 	if out.errMsg != "" || !strings.Contains(out.output, "EXTENSION RESULT") {
 		t.Fatalf("outcome = %+v, want the replaced result", out)
 	}
@@ -1040,7 +1040,7 @@ func TestToolAfterReplaceClearsError(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "read_file", readOnly: true, err: errors.New("boom")})
 	a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
 	if out.errMsg != "" || !strings.Contains(out.output, "RECOVERED BY EXTENSION") {
 		t.Fatalf("outcome = %+v, want the failure converted to the replaced success", out)
 	}
@@ -1058,7 +1058,7 @@ func TestToolAfterBlock(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(rec)
 	a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
 	if out.errMsg == "" || !strings.Contains(out.output, "result withheld") {
 		t.Fatalf("outcome = %+v, want an error tool result with the reason", out)
 	}
@@ -1078,7 +1078,7 @@ func TestToolAfterFailurePolicy(t *testing.T) {
 		reg := tool.NewRegistry()
 		reg.Add(rec)
 		a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-		out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
+		out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
 		if out.errMsg == "" || !strings.Contains(out.output, "extension fake failed at tool.after") {
 			t.Fatalf("outcome = %+v, want the required failure as the tool result", out)
 		}
@@ -1093,7 +1093,7 @@ func TestToolAfterFailurePolicy(t *testing.T) {
 		reg := tool.NewRegistry()
 		reg.Add(rec)
 		a := New(nil, reg, NewSession(""), Options{Extensions: d}, event.Discard)
-		out := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
+		out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/x"}`})
 		if out.errMsg != "" || !strings.Contains(out.output, "read_file ok") {
 			t.Fatalf("outcome = %+v, want the original result", out)
 		}
@@ -1580,7 +1580,7 @@ func TestPermissionDecisionSlotOwnerVeto(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(rec)
 	a := New(nil, reg, NewSession(""), Options{Gate: &stubGate{}, Extensions: d}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
 	if !out.blocked || !strings.Contains(out.output, "owner policy says no") {
 		t.Fatalf("outcome = %+v, want the owner's veto", out)
 	}
@@ -1611,7 +1611,7 @@ func TestPermissionDecisionSlotOwnerFinalAfterChainAllow(t *testing.T) {
 	reg.Add(rec)
 	gate := &stubGate{deny: map[string]bool{"edit_file": true}}
 	a := New(nil, reg, NewSession(""), Options{Gate: gate, Extensions: d}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
 	if calls != 2 {
 		t.Fatalf("owner consulted %d times, want 2 (chain, then strategy)", calls)
 	}
@@ -1633,7 +1633,7 @@ func TestPermissionDecisionSlotOwnerFailureIsFatal(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(rec)
 	a := New(nil, reg, NewSession(""), Options{Gate: &stubGate{}, Extensions: d}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/x"}`})
 	if !out.blocked || !strings.Contains(out.output, "extension fake failed at permission.decision") {
 		t.Fatalf("outcome = %+v, want the owner failure", out)
 	}

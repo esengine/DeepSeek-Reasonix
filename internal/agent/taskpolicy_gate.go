@@ -8,24 +8,24 @@ import (
 // taskPolicyToolGate binds natural-language constraints to both direct tools
 // and use_capability-resolved targets before any workspace mutation.
 func (a *Agent) taskPolicyToolGate(plan *toolCallPlan, args json.RawMessage) (toolOutcome, bool) {
-	if !a.turnPolicySet {
+	if !a.turn.policySet {
 		return toolOutcome{}, false
 	}
-	if plan.mutates && !a.turnPolicy.AllowsMutation() {
+	if plan.mutates && !a.turn.policy.AllowsMutation() {
 		return policyBlock("the current task policy forbids workspace modifications (user constraint or plan mode)", "task policy forbids mutation")
 	}
-	if !a.turnPolicy.AllowsExternal() && isExternalActionTool(plan.evidenceName, plan.permName, args) {
+	if !a.turn.policy.AllowsExternal() && isExternalActionTool(plan.evidenceName, plan.permName, args) {
 		return policyBlock("the current task policy forbids push/publish/deploy-style external actions", "task policy forbids external action")
 	}
 	if isVerificationCommandTool(plan.evidenceName, plan.permName, args) {
-		if !a.turnPolicy.AllowsTests() {
+		if !a.turn.policy.AllowsTests() {
 			return policyBlock("the current task policy forbids running tests (user constraint)", "task policy forbids tests")
 		}
-		if !a.turnPolicy.AllowsCommand(bashCommandFromArgs(args)) {
+		if !a.turn.policy.AllowsCommand(bashCommandFromArgs(args)) {
 			return policyBlock("the current task policy allows only the verification commands named by the user", "verification command is outside the user allowlist")
 		}
 	}
-	if !a.turnPolicy.AllowExploreSubagent && isExplorationSubagentTool(plan.evidenceName, plan.permName, args) {
+	if !a.turn.policy.AllowExploreSubagent && isExplorationSubagentTool(plan.evidenceName, plan.permName, args) {
 		return policyBlock("the current task policy does not allow proactive explore/research sub-agents for this turn", "exploration sub-agent is outside the turn policy")
 	}
 	return toolOutcome{}, false

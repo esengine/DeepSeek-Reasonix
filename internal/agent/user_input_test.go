@@ -110,7 +110,7 @@ Policy: prefer means use the skill for the required change
 		!strings.Contains(prov.request.Messages[1].Content, raw) {
 		t.Fatalf("provider lost the capability route: %+v", prov.request.Messages)
 	}
-	if got := a.turnInput; got != raw {
+	if got := a.turn.turnInput; got != raw {
 		t.Fatalf("contract input = %q, want authenticated raw input %q", got, raw)
 	}
 	c := a.LiveContract()

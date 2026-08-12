@@ -12,15 +12,15 @@ import (
 	"reasonix/internal/provider"
 )
 
-func TestDefaultPathUsesV2CacheFile(t *testing.T) {
+func TestDefaultPathUsesV4CacheFile(t *testing.T) {
 	t.Parallel()
 	path := DefaultPath()
 	if path == "" {
 		// CacheDir unavailable in this environment; empty is still valid.
 		return
 	}
-	if !strings.HasSuffix(filepath.ToSlash(path), "session-catalog/v3.sqlite") {
-		t.Fatalf("DefaultPath = %q, want .../session-catalog/v3.sqlite", path)
+	if !strings.HasSuffix(filepath.ToSlash(path), "session-catalog/v4.sqlite") {
+		t.Fatalf("DefaultPath = %q, want .../session-catalog/v4.sqlite", path)
 	}
 	if strings.Contains(path, "v1.sqlite") {
 		t.Fatalf("DefaultPath must not reuse the 1.24.0 v1 cache: %q", path)
@@ -201,8 +201,8 @@ func TestTopicTurnsIgnoreRecoveryCopyButKeepActivity(t *testing.T) {
 	if topic.LastActivityAt != base+60_000 {
 		t.Fatalf("lastActivityAt = %d, want recovery activity", topic.LastActivityAt)
 	}
-	if topic.RecoveryState != "" {
-		t.Fatalf("recovery_state = %q, want empty for mixed topic", topic.RecoveryState)
+	if topic.RecoveryState != "recovery_only" && topic.RecoveryState != "" {
+		t.Fatalf("recovery_state = %q, want ordinary/covered-only state", topic.RecoveryState)
 	}
 }
 

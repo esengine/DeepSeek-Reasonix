@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
+	"reasonix/internal/store"
 	"reasonix/internal/tool"
 )
 
@@ -54,6 +56,40 @@ func TestBranchAndSwitch(t *testing.T) {
 	tree := c.BranchTreeText()
 	if !strings.Contains(tree, shortBranchID(rootID)) || !strings.Contains(tree, "try something") {
 		t.Fatalf("tree missing expected branches:\n%s", tree)
+	}
+}
+
+func TestSnapshotExternalRemovalMovesOnceToStableRecovery(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "root.jsonl")
+	session := agent.NewSession("sys")
+	session.Add(provider.Message{Role: provider.RoleUser, Content: "keep me"})
+	exec := agent.New(nil, nil, session, agent.Options{}, event.Discard)
+	c := New(Options{Executor: exec, SessionDir: dir, SessionPath: path, Label: "test"})
+	if err := c.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+	for _, artifact := range append([]string{path}, store.SessionSidecarFiles(path)...) {
+		if artifact != "" {
+			_ = os.Remove(artifact)
+		}
+	}
+	session.Add(provider.Message{Role: provider.RoleAssistant, Content: "still here"})
+	if err := c.Snapshot(); err != nil {
+		t.Fatalf("snapshot after external removal: %v", err)
+	}
+	recovered := c.SessionPath()
+	if recovered == path || recovered == "" {
+		t.Fatalf("session path = %q, want recovery path", recovered)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("deleted original was recreated: %v", err)
+	}
+	if err := c.Snapshot(); err != nil {
+		t.Fatalf("second recovery snapshot: %v", err)
+	}
+	if got := c.SessionPath(); got != recovered {
+		t.Fatalf("recovery fork storm: %q -> %q", recovered, got)
 	}
 }
 

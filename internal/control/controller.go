@@ -3845,6 +3845,17 @@ func (c *Controller) snapshotWithDurability(markActivity, forceRewrite, shutdown
 		}
 	}
 	if err != nil {
+		if errors.Is(err, agent.ErrSessionExternallyRemoved) {
+			recoveredPath, recoverErr := c.recoverExternallyRemovedSession(path, err)
+			if recoverErr != nil {
+				return false, recoverErr
+			}
+			path = recoveredPath
+			s = c.executor.Session()
+			err = nil
+		}
+	}
+	if err != nil {
 		if !errors.Is(err, agent.ErrSessionSnapshotConflict) {
 			return false, err
 		}
@@ -3896,6 +3907,35 @@ func (c *Controller) snapshotWithDurability(markActivity, forceRewrite, shutdown
 	}
 	c.extensionSessionPayloadEvent(extension.PointSessionSave, savePayload)
 	return transcriptDurable, nil
+}
+
+func (c *Controller) recoverExternallyRemovedSession(path string, saveErr error) (string, error) {
+	if c.executor == nil || strings.TrimSpace(path) == "" {
+		return "", saveErr
+	}
+	const reason = "session removed while open"
+	req := SessionRecoveryRequest{OriginalPath: path, Reason: reason, Mode: "external-removal"}
+	meta := agent.BranchMeta{}
+	if c.sessionRecoveryMeta != nil {
+		meta = c.sessionRecoveryMeta(req)
+	}
+	info, err := c.executor.Session().SaveConflictRecoveryBranch(agent.RecoveryBranchOptions{
+		OriginalPath: path,
+		Reason:       reason,
+		BranchMeta:   meta,
+	})
+	if err != nil {
+		return "", fmt.Errorf("preserve externally removed session: %w", err)
+	}
+	if err := c.commitRecoveredSession(path, reason, info); err != nil {
+		return "", err
+	}
+	appendSnapshotConflictDiagnostic(path, "external-removal", "moved_to_stable_recovery", saveErr, info.Path, info.Existing)
+	slog.Warn("controller: active session was removed externally; moved runtime to stable recovery path",
+		"path", path, "recovery", info.Path, "existing", info.Existing)
+	c.sink.Emit(sessionRecoveryNotice(event.NoticeCodeSessionRecoveryForked,
+		"the open session file was removed outside Reasonix; your active conversation was preserved as one recovery copy"))
+	return info.Path, nil
 }
 
 // snapshotConflictLogAttrs flattens a snapshot-conflict error into slog attrs.

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { Archive, Pencil, Search, Trash2, RotateCcw } from "lucide-react";
+import { Archive, GitBranch, Pencil, Search, Trash2, RotateCcw } from "lucide-react";
 import { app } from "../lib/bridge";
 import { t, useT } from "../lib/i18n";
 import { historySessionDisplayTitle, sessionActivityTime } from "../lib/session";
-import type { HistoryMessage, HistorySearchContextLine, HistorySearchHit, SessionMeta } from "../lib/types";
+import type { HistoryMessage, HistorySearchContextLine, HistorySearchHit, RecoveryLineageView, SessionMeta } from "../lib/types";
 import { historyMessagesToItems, type Item } from "../lib/useController";
 import { useHistoryCatalog } from "../lib/useHistoryCatalog";
 import { Transcript } from "./Transcript";
@@ -12,6 +12,8 @@ import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type Cont
 import { useDeferredClose } from "../lib/useMountTransition";
 import { ModalCloseButton } from "./ModalCloseButton";
 import { HistoryFilterSelect } from "./HistoryFilterSelect";
+import { RecoveryLineageDialog } from "./RecoveryLineageDialog";
+import { useToast } from "../lib/toast";
 
 type HistoryScopeFilter = "all" | "project" | "global";
 type HistoryStatusFilter = "all" | "current" | "open";
@@ -50,9 +52,14 @@ export function HistoryPanel({
   onClose: () => void;
 }) {
   const tr = useT();
+  const { showToast } = useToast();
   const isTrash = kind === "trash";
   // Play the modal exit animation, then let the parent unmount us.
   const { status, requestClose } = useDeferredClose(onClose, 240);
+  const [savedVersions, setSavedVersions] = useState<{
+    topic: { scope: string; workspaceRoot?: string; topicId: string };
+    view: RecoveryLineageView;
+  } | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [query, setQuery] = useState("");
@@ -321,6 +328,16 @@ export function HistoryPanel({
               startRename(target);
             },
           },
+          ...(menuSession.topicId
+            ? [
+                {
+                  key: "other-saved-versions",
+                  icon: <GitBranch size={13} />,
+                  label: tr("recovery.inspectLineage"),
+                  onSelect: () => void inspectOtherSavedVersions(menuSession),
+                } as ContextMenuItem,
+              ]
+            : []),
           ...(menuSession.current
             ? []
             : [
@@ -395,6 +412,21 @@ export function HistoryPanel({
   const openSelected = () => {
     if (!selectedSession || running || isTrash) return;
     onResume(selectedSession);
+  };
+  const inspectOtherSavedVersions = async (session: SessionMeta) => {
+    if (isTrash || !session.topicId) return;
+    closeHistoryMenus();
+    try {
+      const topic = {
+        scope: session.scope || "global",
+        workspaceRoot: session.workspaceRoot || undefined,
+        topicId: session.topicId,
+      };
+      const view = await app.GetRecoveryLineage(topic);
+      setSavedVersions({ topic, view });
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), "error");
+    }
   };
   const renameSelected = () => {
     if (!selectedSession || running || isTrash) return;
@@ -684,6 +716,16 @@ export function HistoryPanel({
                       <button className="btn btn--small" type="button" disabled={!selectedSession || running} onClick={renameSelected}>
                         {tr("history.rename")}
                       </button>
+                      {selectedSession?.topicId && (
+                        <button
+                          className="btn btn--small"
+                          type="button"
+                          disabled={!selectedSession}
+                          onClick={() => void inspectOtherSavedVersions(selectedSession)}
+                        >
+                          <GitBranch size={13} /> {tr("recovery.inspectLineage")}
+                        </button>
+                      )}
                       <button
                         className="btn btn--small btn--danger"
                         type="button"
@@ -727,6 +769,35 @@ export function HistoryPanel({
           ariaLabel={tr("history.trashActions")}
           onClose={closeHistoryMenus}
         />
+        {savedVersions && (
+          <RecoveryLineageDialog
+            topic={savedVersions.topic}
+            initial={savedVersions.view}
+            onClose={() => setSavedVersions(null)}
+            onChanged={async () => {
+              const view = await app.GetRecoveryLineage(savedVersions.topic);
+              setSavedVersions({ topic: savedVersions.topic, view });
+            }}
+            onOpenVersion={async (path) => {
+              const session = sessions.find((item) => item.path === path) ?? {
+                path,
+                preview: "",
+                turns: 0,
+                turnsState: "unknown",
+                createdAt: 0,
+                lastActivityAt: 0,
+                modTime: 0,
+                current: false,
+                open: false,
+                scope: savedVersions.topic.scope,
+                workspaceRoot: savedVersions.topic.workspaceRoot,
+                topicId: savedVersions.topic.topicId,
+                recovered: true,
+              };
+              onResume(session);
+            }}
+          />
+        )}
       </div>
       </section>
     </div>

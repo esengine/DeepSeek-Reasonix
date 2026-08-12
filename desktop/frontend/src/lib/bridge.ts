@@ -84,6 +84,9 @@ import type {
   PluginInstallOptions,
   PluginView,
   ProjectNode,
+  RecoveryLineageView,
+  RecoveryCleanupRequest,
+  RecoveryCleanupResult,
   SessionCatalogBindings,
   PromptHistoryEntry,
   PromptHistoryResult,
@@ -318,6 +321,9 @@ export interface AppBindings extends SessionCatalogBindings, HistoryCatalogBindi
   PreviewSession(path: string): Promise<HistoryMessage[]>;
   DeleteSession(path: string): Promise<void>;
   DeleteRecoveryCopy(path: string): Promise<void>;
+  GetRecoveryLineage(key: { scope: string; workspaceRoot?: string; topicId: string }): Promise<RecoveryLineageView>;
+  ChooseRecoveryBranch(request: import("./types").RecoveryPreferenceRequest): Promise<void>;
+  CleanRecoveryLineage(request: RecoveryCleanupRequest): Promise<RecoveryCleanupResult>;
   RestoreSession(path: string): Promise<void>;
   PurgeTrashedSession(path: string): Promise<void>;
   PurgeRecoveryCopy(path: string): Promise<void>;
@@ -3336,6 +3342,24 @@ function makeMockApp(): AppBindings {
     },
     async DeleteRecoveryCopy(path: string) {
       return this.DeleteSession(path);
+    },
+    async GetRecoveryLineage(key) {
+      const topic = findMockTopic(key.topicId);
+      return {
+        groupId: key.topicId,
+        state: topic?.recoveryState ?? "normal",
+        branchCount: topic?.recoveryBranchCount ?? 0,
+        unresolved: topic?.recoveryUnresolvedCount ?? 0,
+        cleanupEligible: topic?.recoveryCleanupEligibleCount ?? 0,
+        members: [],
+      };
+    },
+    async ChooseRecoveryBranch() {},
+    async CleanRecoveryLineage(request) {
+      const topic = findMockTopic(request.topicId);
+      const eligible = topic?.recoveryCleanupEligibleCount ?? 0;
+      if (request.apply && topic) topic.recoveryCleanupEligibleCount = 0;
+      return { eligible, moved: request.apply ? eligible : 0, busy: 0, kept: 0, dryRun: !request.apply, items: [] };
     },
     async RestoreSession(path: string) {
       const i = trashedSessions.findIndex((s) => s.path === path);

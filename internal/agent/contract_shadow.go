@@ -150,7 +150,7 @@ func (a *Agent) LiveContract() *taskcontract.Contract {
 	if a == nil || a.task.ledger == nil {
 		return nil
 	}
-	return buildShadowContract(a.turnInput, a.task.ledger.Receipts(), a.planContractSnapshot())
+	return buildShadowContract(a.turn.turnInput, a.task.ledger.Receipts(), a.planContractSnapshot())
 }
 
 // observeContractRound records the contract after one tool round, so a
@@ -161,7 +161,7 @@ func (a *Agent) observeContractRound() {
 	if c == nil || (len(c.Requirements) == 0 && len(c.Checks) == 0) {
 		return
 	}
-	event.RecordContractShadow(a.sink, contractShadowAudit(c))
+	event.RecordContractShadow(a.svc.sink, contractShadowAudit(c))
 }
 
 // emitTurnShadows records the end-of-turn shadow observations: the contract's
@@ -185,10 +185,10 @@ func (a *Agent) emitTurnShadows(input string) {
 			}
 		}
 	}
-	event.RecordContractShadow(a.sink, contractShadowAudit(c))
+	event.RecordContractShadow(a.svc.sink, contractShadowAudit(c))
 	rep := completion.Build(c, a.task.ledger)
-	a.completion = &rep
-	event.RecordCompletionReport(a.sink, completionReportAudit(rep))
+	a.turn.completion = &rep
+	event.RecordCompletionReport(a.svc.sink, completionReportAudit(rep))
 	a.emitCompletionSummary(c)
 }
 
@@ -196,8 +196,8 @@ func (a *Agent) emitTurnShadows(input string) {
 // deliver, or nil when the turn had nothing to judge. The host renders it; the
 // agent never writes the user-facing text, which is the whole point.
 func (a *Agent) CompletionReceipt() *event.CompletionReceipt {
-	if a == nil || a.completion == nil {
+	if a == nil || a.turn.completion == nil {
 		return nil
 	}
-	return completionReceipt(*a.completion)
+	return completionReceipt(*a.turn.completion)
 }

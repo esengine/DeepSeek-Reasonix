@@ -205,8 +205,8 @@ func (a *Agent) estimatedVisibleRequestTokens(visible []provider.Message) int {
 		msgs[i].CreatedAt = 0
 	}
 	var tools []provider.ToolSchema
-	if a.tools != nil {
-		tools = a.tools.Schemas()
+	if a.svc.tools != nil {
+		tools = a.svc.tools.Schemas()
 	}
 	return a.estimatedRequestTokens(provider.Request{
 		Messages:    msgs,

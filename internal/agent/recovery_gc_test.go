@@ -277,6 +277,100 @@ func TestTrashReclaimableRecoveryBranchUsesRecoverableDesktopLayout(t *testing.T
 	}
 }
 
+func TestTrashRecoveryBranchCoveredByCanonicalCompactsLegacyChain(t *testing.T) {
+	dir := t.TempDir()
+	rootPath := filepath.Join(dir, "root.jsonl")
+	ancestorPath := filepath.Join(dir, "ancestor.jsonl")
+	canonicalPath := filepath.Join(dir, "canonical.jsonl")
+	root := NewSession("sys")
+	root.Add(provider.Message{Role: provider.RoleUser, Content: "root"})
+	if err := root.Save(rootPath); err != nil {
+		t.Fatal(err)
+	}
+	ancestor := NewSession("")
+	ancestor.Replace(root.Snapshot())
+	ancestor.Add(provider.Message{Role: provider.RoleAssistant, Content: "ancestor"})
+	if err := ancestor.Save(ancestorPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveBranchMetaPreserveUpdated(ancestorPath, BranchMeta{ID: "ancestor", Recovered: true, ParentID: "root", RecoveryDepth: 1}); err != nil {
+		t.Fatal(err)
+	}
+	canonical := NewSession("")
+	canonical.Replace(ancestor.Snapshot())
+	canonical.Add(provider.Message{Role: provider.RoleUser, Content: "continued"})
+	if err := canonical.Save(canonicalPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveBranchMetaPreserveUpdated(canonicalPath, BranchMeta{ID: "canonical", Recovered: true, ParentID: "ancestor", RecoveryDepth: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReparentRecoveryCanonical(canonicalPath, "root", dir); err != nil {
+		t.Fatalf("ReparentRecoveryCanonical: %v", err)
+	}
+	if err := TrashRecoveryBranchCoveredBy(ancestorPath, canonicalPath, dir); err != nil {
+		t.Fatalf("TrashRecoveryBranchCoveredBy: %v", err)
+	}
+	meta, ok, err := LoadBranchMeta(canonicalPath)
+	if err != nil || !ok || meta.ParentID != "root" || meta.RecoveryDepth != 1 {
+		t.Fatalf("canonical meta = %+v ok=%v err=%v", meta, ok, err)
+	}
+	if _, err := os.Stat(rootPath); err != nil {
+		t.Fatalf("root was removed: %v", err)
+	}
+	if _, err := os.Stat(canonicalPath); err != nil {
+		t.Fatalf("canonical was removed: %v", err)
+	}
+	if _, err := os.Stat(ancestorPath); !os.IsNotExist(err) {
+		t.Fatalf("ancestor remained live: %v", err)
+	}
+}
+
+func TestSetRecoveryPreferredKeepsExactlyOneChoice(t *testing.T) {
+	dir := t.TempDir()
+	paths := []string{filepath.Join(dir, "left.jsonl"), filepath.Join(dir, "right.jsonl")}
+	for _, path := range paths {
+		session := NewSession("sys")
+		session.Add(provider.Message{Role: provider.RoleUser, Content: path})
+		if err := session.Save(path); err != nil {
+			t.Fatal(err)
+		}
+		if err := SaveBranchMeta(path, BranchMeta{ID: BranchID(path), Recovered: true, ParentID: "root"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := SetRecoveryPreferred(paths, paths[0]); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetRecoveryPreferred(paths, paths[1]); err != nil {
+		t.Fatal(err)
+	}
+	for index, path := range paths {
+		meta, ok, err := LoadBranchMeta(path)
+		if err != nil || !ok {
+			t.Fatalf("meta %q ok=%v err=%v", path, ok, err)
+		}
+		if meta.RecoveryPreferred != (index == 1) {
+			t.Fatalf("preferred[%d] = %v", index, meta.RecoveryPreferred)
+		}
+		if index == 1 && !RecoveryPreferenceCurrent(path, meta) {
+			t.Fatal("saved preference fingerprint was not current")
+		}
+	}
+	chosen, err := LoadSession(paths[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	chosen.Add(provider.Message{Role: provider.RoleAssistant, Content: "changed"})
+	if err := chosen.SaveSnapshot(paths[1]); err != nil {
+		t.Fatal(err)
+	}
+	meta, _, _ := LoadBranchMeta(paths[1])
+	if RecoveryPreferenceCurrent(paths[1], meta) {
+		t.Fatal("content change must invalidate the explicit preference")
+	}
+}
+
 func TestTrashReclaimableRecoveryBranchEnforcesGraceAtFinalGuard(t *testing.T) {
 	dir := t.TempDir()
 	parentPath, branchPath, branchMsgs := forkRecoveryBranch(t, dir, "trash-fresh")

@@ -270,7 +270,7 @@ func (a *Agent) emitTurnUsage(usage *provider.Usage, cacheDiagnostics *CacheDiag
 	if a.sess.output.lastUsage.Load() == nil && usage.PromptTokens > 0 {
 		a.storeLatestRequestUsage(usage)
 	}
-	a.sink.Emit(event.Event{Kind: event.Usage, ModelRef: a.modelRef, Usage: usage, Pricing: a.pricing,
+	a.svc.sink.Emit(event.Event{Kind: event.Usage, ModelRef: a.modelRef, Usage: usage, Pricing: a.svc.pricing,
 		UsageSource:      a.usageSource,
 		CacheDiagnostics: cacheDiagnostics,
 		SessionHit:       int(a.sess.cacheHit.Load()), SessionMiss: int(a.sess.cacheMiss.Load())})
