@@ -26,6 +26,9 @@ type toolCallPlan struct {
 	call          provider.ToolCall
 	tool          tool.Tool
 	canonicalName string
+	// env is the capability set this call executes against, resolved once in
+	// prepareToolExecution so the run stage cannot reach for a different one.
+	env tool.ExecutionEnv
 
 	permName     string
 	permArgs     json.RawMessage
@@ -668,7 +671,8 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 			}, true
 		}
 	}
-	cctx := tool.WithContextCompressor(withCallContext(ctx, plan.call.ID, a.svc.sink, a.svc.asker, a.planMode.Load()), a)
+	plan.env = tool.ExecutionEnv{Call: tool.CallIdentity{ID: plan.call.ID}, Sink: a.svc.sink, Asker: a.svc.asker, PlanMode: a.planMode.Load()}
+	cctx := tool.WithContextCompressor(installCallEnv(ctx, plan.env), a)
 	cctx = WithSubagentDepth(cctx, a.subagentDepth)
 	if a.task.ledger != nil {
 		cctx = evidence.WithLedger(cctx, a.task.ledger)
@@ -751,7 +755,6 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 
 	var result string
 	var images []string
-	var err error
 	// A call that was authorized under reader classification carries that
 	// basis into dispatch: the MCP execution layer re-verifies it linearizably
 	// against server authorization and live safety metadata, and refuses to
@@ -764,33 +767,7 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	if a.plannerMCPExecution && isMCPExecutionTarget(runTool, permName) && mcpServerAuthorized(runTool) && !mcpDestructiveHint(runTool) {
 		cctx = tool.WithNonDestructiveMCPExecutionIntent(cctx)
 	}
-	var execution *tool.ShellExecution
-	if de, ok := runTool.(tool.DetailedExecutor); ok {
-		var detailed tool.DetailedResult
-		detailed, err = de.ExecuteDetailed(cctx, runArgs)
-		result, images, execution = detailed.Output, detailed.Images, detailed.Execution
-		// Annotate verification outcome when the host classified this call as a verifier.
-		if execution != nil && plan.verification {
-			switch {
-			case err != nil:
-				execution.Verification = tool.ShellVerificationFailed
-			default:
-				execution.Verification = tool.ShellVerificationPassed
-			}
-		} else if execution != nil && execution.Verification == "" {
-			execution.Verification = tool.ShellVerificationNotVerification
-		}
-		// Sole opaque inline interpreters are allowed outside Delivery but cannot
-		// prove mutation completeness.
-		if execution != nil && evidence.BashCommandMayBeOpaqueMutation(runArgs) &&
-			execution.MutationRisk == tool.ShellMutationMayHaveCompleted {
-			execution.MutationRisk = tool.ShellMutationUnknown
-		}
-	} else if it, ok := runTool.(tool.ImageTool); ok {
-		result, images, err = it.ExecuteWithImages(cctx, runArgs)
-	} else {
-		result, err = runTool.Execute(cctx, runArgs)
-	}
+	execution, err := a.dispatchTool(cctx, plan, runTool, runArgs, &result, &images)
 	// tool.after: extensions rule on the executed result (success or error)
 	// before evidence, hooks, and recovery observation, so every downstream
 	// consumer sees the final (possibly replaced) outcome.

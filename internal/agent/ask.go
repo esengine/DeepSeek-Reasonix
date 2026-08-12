@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"reasonix/internal/event"
+	"reasonix/internal/tool"
 )
 
 // AskTool lets the model put a structured multiple-choice question (or a few) to
@@ -68,7 +69,17 @@ func (*AskTool) Schema() json.RawMessage {
 // and stays available in plan mode (clarifying scope while planning is fine).
 func (*AskTool) ReadOnly() bool { return true }
 
-func (*AskTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+// Execute is the legacy entry point: it recovers the asker from the context
+// the agent installed. ExecuteEnv is the one that states the dependency.
+func (t *AskTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	_, _, asker, _ := CallContext(ctx)
+	return t.ExecuteEnv(ctx, tool.ExecutionEnv{Asker: asker}, args)
+}
+
+// ExecuteEnv answers with the user's selections, or says plainly that nobody
+// answered. The asker arrives as a field, so a caller that has no user to ask
+// says so by leaving it nil rather than by omitting a context value.
+func (*AskTool) ExecuteEnv(ctx context.Context, env tool.ExecutionEnv, args json.RawMessage) (string, error) {
 	var p struct {
 		Questions []struct {
 			Header      string `json:"header"`
@@ -115,14 +126,13 @@ func (*AskTool) Execute(ctx context.Context, args json.RawMessage) (string, erro
 		})
 	}
 
-	_, _, asker, ok := CallContext(ctx)
-	if !ok || asker == nil {
+	if env.Asker == nil {
 		// Headless / no interactive user: don't block an autonomous run, but make
 		// the provenance explicit so the model doesn't treat this as a user choice.
 		return "No interactive user answered. This is a model-assumption fallback, not a user answer. Proceed with your best judgment, state the assumption you made, and prefer the safest reversible option when choices differ in risk.", nil
 	}
 
-	answers, err := asker.Ask(ctx, qs)
+	answers, err := env.Asker.Ask(ctx, qs)
 	if err != nil {
 		return "", fmt.Errorf("ask: %w", err)
 	}

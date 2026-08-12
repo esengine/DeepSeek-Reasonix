@@ -83,9 +83,8 @@ type Renderer interface {
 // the agent stays independent of the frontend; a nil asker means no interactive
 // user (headless runs), where `ask` returns a "decide for yourself" result. The
 // interactive frontends wire the controller in as the Asker.
-type Asker interface {
-	Ask(ctx context.Context, questions []event.AskQuestion) ([]event.AskAnswer, error)
-}
+// Asker is tool.Asker: the capability lives at the layer tools can import.
+type Asker = tool.Asker
 
 // callContextKey carries the executing tool call's identity into Execute.
 type callContextKey struct{}
@@ -103,14 +102,10 @@ type callContext struct {
 	planMode bool
 }
 
-// withCallContext stamps ctx with the executing call's ID, the agent's sink, and
-// the asker. executeOne sets this before every Execute; `task` reads it (via
-// CallContext) to nest sub-agent events, and `ask` reads the asker to prompt.
-// The plan-mode flag is mirrored onto the leaf planmode key so tools that must
-// not import this package (for example internal/tool/builtin) can still read it.
+// withCallContext is the positional form of installCallEnv, kept for callers
+// that have the four values loose rather than as an env.
 func withCallContext(ctx context.Context, parentID string, sink event.Sink, asker Asker, planMode bool) context.Context {
-	ctx = planmode.WithActive(ctx, planMode)
-	return context.WithValue(ctx, callContextKey{}, callContext{parentID: parentID, sink: sink, asker: asker, planMode: planMode})
+	return installCallEnv(ctx, tool.ExecutionEnv{Call: tool.CallIdentity{ID: parentID}, Sink: sink, Asker: asker, PlanMode: planMode})
 }
 
 // WithToolCallContext stamps ctx as a host-initiated top-level tool call.
@@ -644,19 +639,11 @@ func midTurnSteerMessage(text string) string {
 	return MidTurnSteerPrefix + "\n" + text
 }
 
-// SteerText checks whether content is a mid-turn steer message and, if so,
-// returns the original user text without the wrapper prefix. The returned
-// text preserves the user's exact input — it only strips the prefix and the
-// "\n" separator that midTurnSteerMessage inserts between the prefix and the
-// user text; it does not trim spaces so the history replay matches the live
-// Steer event rendering character-for-character.
-//
-// Steers are persisted through withTurnPreferences, which can prepend
-// transient language blocks (for Chinese text even in auto mode) and append
-// the delivery-runtime marker. Both are transport framing, not steer text:
-// leading blocks are skipped before matching the prefix and a trailing
-// marker is cut from the returned text, so replay recognizes steers
-// regardless of the session's language and profile settings.
+// SteerText returns the user's text from a mid-turn steer message. Only the
+// prefix and its separator are stripped -- spaces are not trimmed, so history
+// replay matches the live Steer event character-for-character.
+// withTurnPreferences may wrap a steer in transient language blocks and the
+// delivery-runtime marker; both are framing, and both are skipped here.
 func SteerText(content string) (string, bool) {
 	s := content
 	for {
