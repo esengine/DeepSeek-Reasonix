@@ -3179,6 +3179,15 @@ export default function App() {
     }
   }, [activeTabId, addWorkspaceTextToComposer, showToast, t]);
 
+  const addTerminalSelectionToComposer = useCallback((text: string) => {
+    const formatted = formatTerminalOutputForComposer(text);
+    if (!formatted) {
+      showToast(t("terminal.noOutput"), "info");
+      return;
+    }
+    addWorkspaceTextToComposer(formatted);
+  }, [addWorkspaceTextToComposer, showToast, t]);
+
   const addSelectedTextToComposer = useCallback((text: string) => {
     const selected = text.trim();
     if (!activeTabId || !selected) return;
@@ -5303,6 +5312,7 @@ export default function App() {
                     saveTerminalPanelOpen(false);
                   }}
                   onAddOutput={(sessionId) => void addTerminalOutputToComposer(sessionId)}
+                  onAddToChat={addTerminalSelectionToComposer}
                 />
               </Suspense>
             )}

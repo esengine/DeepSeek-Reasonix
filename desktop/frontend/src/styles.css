@@ -37890,6 +37890,9 @@ body > .mermaid-diagram--fullscreen {
   --terminal-faint: var(--fg-faint);
   --terminal-cursor: var(--accent);
   --terminal-selection: color-mix(in srgb, var(--accent) 28%, transparent);
+  /* Auto mode leaves selectionForeground unset: xterm keeps the natural
+     foreground, which stays readable over the selection tint on both light
+     and dark app themes. */
 }
 :root[data-terminal-theme="dark"] {
   --terminal-bg: #111315;
@@ -37900,7 +37903,8 @@ body > .mermaid-diagram--fullscreen {
   --terminal-muted: #a7a19a;
   --terminal-faint: #70777f;
   --terminal-cursor: #e6a15c;
-  --terminal-selection: #344c68;
+  --terminal-selection: #4a6d8c;
+  --terminal-selection-fg: #e8e5df;
 }
 :root[data-terminal-theme="light"] {
   --terminal-bg: #f7f8fa;
@@ -37911,7 +37915,8 @@ body > .mermaid-diagram--fullscreen {
   --terminal-muted: #5f6670;
   --terminal-faint: #8b929b;
   --terminal-cursor: #9a4f00;
-  --terminal-selection: #b9d7ff;
+  --terminal-selection: #6ea8fe;
+  --terminal-selection-fg: #0b0f14;
 }
 :root[data-terminal-theme="dark"] .terminal-panel { color-scheme: dark; }
 :root[data-terminal-theme="light"] .terminal-panel { color-scheme: light; }
