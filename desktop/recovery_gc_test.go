@@ -11,6 +11,20 @@ import (
 	"reasonix/internal/provider"
 )
 
+func TestRecoveryGCStartupWaitIsCancellationAware(t *testing.T) {
+	done := make(chan struct{})
+	elapsed := make(chan time.Time, 1)
+	elapsed <- time.Now()
+	if !waitRecoveryGCStartup(done, elapsed) {
+		t.Fatal("elapsed startup grace should allow the first sweep")
+	}
+	done = make(chan struct{})
+	close(done)
+	if waitRecoveryGCStartup(done, make(chan time.Time)) {
+		t.Fatal("cancelled startup must skip the first sweep")
+	}
+}
+
 // forkCoveredRecoveryBranch builds the reclaimable shape in dir: a conflict
 // fork whose parent went on to contain everything the fork preserved.
 func forkCoveredRecoveryBranch(t *testing.T, dir, name string) (parentPath, branchPath string) {
@@ -53,7 +67,7 @@ func TestRecoveryGCTrashesCoveredForkAndKeepsParent(t *testing.T) {
 	parentPath, branchPath := forkCoveredRecoveryBranch(t, dir, "session")
 
 	app := &App{tabs: map[string]*WorkspaceTab{}, detachedSessions: map[string]*WorkspaceTab{}}
-	if got := app.reclaimRecoveryBranchesIn([]string{dir}, time.Now().Add(48*time.Hour)); got != 1 {
+	if got := app.reclaimRecoveryBranchesIn([]string{dir}, time.Now().Add(48*time.Hour), agent.RecoveryGCGracePeriod); got != 1 {
 		t.Fatalf("reclaimed = %d, want 1", got)
 	}
 
@@ -70,7 +84,7 @@ func TestRecoveryGCTrashesCoveredForkAndKeepsParent(t *testing.T) {
 	}
 
 	// A second sweep is a no-op: nothing left to reclaim.
-	if got := app.reclaimRecoveryBranchesIn([]string{dir}, time.Now().Add(48*time.Hour)); got != 0 {
+	if got := app.reclaimRecoveryBranchesIn([]string{dir}, time.Now().Add(48*time.Hour), agent.RecoveryGCGracePeriod); got != 0 {
 		t.Fatalf("second sweep reclaimed = %d, want 0", got)
 	}
 }
@@ -86,7 +100,7 @@ func TestRecoveryGCSkipsBranchOpenInTab(t *testing.T) {
 
 	tab := &WorkspaceTab{ID: "tab", Scope: "global", SessionPath: branchPath, Ready: true}
 	app := &App{tabs: map[string]*WorkspaceTab{"tab": tab}}
-	if got := app.reclaimRecoveryBranchesIn([]string{dir}, time.Now().Add(48*time.Hour)); got != 0 {
+	if got := app.reclaimRecoveryBranchesIn([]string{dir}, time.Now().Add(48*time.Hour), agent.RecoveryGCGracePeriod); got != 0 {
 		t.Fatalf("reclaimed = %d, want 0 while the branch is open in a tab", got)
 	}
 	if _, err := os.Stat(branchPath); err != nil {
@@ -124,7 +138,7 @@ func TestRecoveryGCFirstSweepWaitsForTabRestore(t *testing.T) {
 			swept <- -1
 			return
 		}
-		swept <- app.reclaimRecoveryBranchesIn([]string{dir}, time.Now().Add(48*time.Hour))
+		swept <- app.reclaimRecoveryBranchesIn([]string{dir}, time.Now().Add(48*time.Hour), agent.RecoveryGCGracePeriod)
 	}()
 
 	// Gate still closed: the sweep must not have run — the branch is intact.
@@ -168,7 +182,7 @@ func TestRecoveryGCRunsDespiteSafeModeEnv(t *testing.T) {
 	_, branchPath := forkCoveredRecoveryBranch(t, dir, "safe")
 
 	app := &App{tabs: map[string]*WorkspaceTab{}, detachedSessions: map[string]*WorkspaceTab{}}
-	_ = app.reclaimRecoveryBranchesIn([]string{dir}, time.Now().Add(48*time.Hour))
+	_ = app.reclaimRecoveryBranchesIn([]string{dir}, time.Now().Add(48*time.Hour), agent.RecoveryGCGracePeriod)
 	// Branch may or may not be reclaimed depending on age/coverage; the
 	// important contract is that Safe Mode env does not force a no-op panic-free path.
 	_ = branchPath
@@ -201,7 +215,7 @@ func TestRecoveryGCSkipsWhenBranchContinuesAfterScan(t *testing.T) {
 		t.Fatalf("Save continued branch: %v", err)
 	}
 	app := NewApp()
-	if got := app.reclaimRecoveryBranchesIn([]string{dir}, later); got != 0 {
+	if got := app.reclaimRecoveryBranchesIn([]string{dir}, later, agent.RecoveryGCGracePeriod); got != 0 {
 		t.Fatalf("reclaimed = %d, want 0 after post-scan continue", got)
 	}
 	if _, err := os.Stat(branchPath); err != nil {
@@ -231,7 +245,7 @@ func TestRecoveryGCSkipsWhenLeaseAcquiredAfterScan(t *testing.T) {
 	}
 	defer lease.Release()
 	app := NewApp()
-	if got := app.reclaimRecoveryBranchesIn([]string{dir}, later); got != 0 {
+	if got := app.reclaimRecoveryBranchesIn([]string{dir}, later, agent.RecoveryGCGracePeriod); got != 0 {
 		t.Fatalf("reclaimed = %d, want 0 while lease held", got)
 	}
 	if _, err := os.Stat(branchPath); err != nil {

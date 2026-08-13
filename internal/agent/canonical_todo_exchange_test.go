@@ -64,11 +64,12 @@ func TestRebuildTodoStateScopesDuplicateIDsToTheirToolTurns(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			a := &Agent{}
 			a.rebuildTodoState(tt.msgs)
-			if len(a.todoState) != tt.wantLen {
-				t.Fatalf("rebuilt todos = %+v, want %d items", a.todoState, tt.wantLen)
+			todos := a.CanonicalTodoState()
+			if len(todos) != tt.wantLen {
+				t.Fatalf("rebuilt todos = %+v, want %d items", todos, tt.wantLen)
 			}
-			if tt.wantLen > 0 && a.todoState[0].Content != tt.want {
-				t.Fatalf("rebuilt todo = %+v, want content %q", a.todoState[0], tt.want)
+			if tt.wantLen > 0 && todos[0].Content != tt.want {
+				t.Fatalf("rebuilt todo = %+v, want content %q", todos[0], tt.want)
 			}
 		})
 	}
@@ -88,8 +89,8 @@ func TestRebuildTodoStateDoesNotBorrowResultForMissingCall(t *testing.T) {
 
 	a := &Agent{}
 	a.rebuildTodoState(msgs)
-	if len(a.todoState) != 0 {
-		t.Fatalf("todo_write without its own result borrowed another turn's success: %+v", a.todoState)
+	if todos := a.CanonicalTodoState(); len(todos) != 0 {
+		t.Fatalf("todo_write without its own result borrowed another turn's success: %+v", todos)
 	}
 }
 
@@ -112,8 +113,8 @@ func TestRebuildTodoStateDoesNotAdvanceFailedDuplicateIDStep(t *testing.T) {
 
 	a := &Agent{}
 	a.rebuildTodoState(msgs)
-	if len(a.todoState) != 1 || a.todoState[0].Status != "in_progress" {
-		t.Fatalf("failed complete_step borrowed another turn's success: %+v", a.todoState)
+	if todos := a.CanonicalTodoState(); len(todos) != 1 || todos[0].Status != "in_progress" {
+		t.Fatalf("failed complete_step borrowed another turn's success: %+v", todos)
 	}
 }
 
@@ -132,8 +133,8 @@ func TestRebuildTodoStateIgnoresNormalizedInterruptedResults(t *testing.T) {
 
 		a := &Agent{}
 		a.rebuildTodoState(normalized)
-		if len(a.todoState) != 0 {
-			t.Fatalf("interrupted todo_write rebuilt canonical state: %+v", a.todoState)
+		if todos := a.CanonicalTodoState(); len(todos) != 0 {
+			t.Fatalf("interrupted todo_write rebuilt canonical state: %+v", todos)
 		}
 	})
 
@@ -155,8 +156,8 @@ func TestRebuildTodoStateIgnoresNormalizedInterruptedResults(t *testing.T) {
 
 		a := &Agent{}
 		a.rebuildTodoState(normalized)
-		if len(a.todoState) != 1 || a.todoState[0].Status != "in_progress" {
-			t.Fatalf("interrupted complete_step advanced canonical state: %+v", a.todoState)
+		if todos := a.CanonicalTodoState(); len(todos) != 1 || todos[0].Status != "in_progress" {
+			t.Fatalf("interrupted complete_step advanced canonical state: %+v", todos)
 		}
 	})
 }
@@ -175,8 +176,8 @@ func TestRebuildTodoStateIgnoresCancelledBeforeExecutionWithEmptyIDs(t *testing.
 
 		a := &Agent{}
 		a.rebuildTodoState(msgs)
-		if len(a.todoState) != 0 {
-			t.Fatalf("cancelled empty-ID todo_write rebuilt canonical state: %+v", a.todoState)
+		if todos := a.CanonicalTodoState(); len(todos) != 0 {
+			t.Fatalf("cancelled empty-ID todo_write rebuilt canonical state: %+v", todos)
 		}
 	})
 
@@ -195,8 +196,8 @@ func TestRebuildTodoStateIgnoresCancelledBeforeExecutionWithEmptyIDs(t *testing.
 
 		a := &Agent{}
 		a.rebuildTodoState(msgs)
-		if len(a.todoState) != 1 || a.todoState[0].Status != "in_progress" {
-			t.Fatalf("cancelled empty-ID complete_step advanced canonical state: %+v", a.todoState)
+		if todos := a.CanonicalTodoState(); len(todos) != 1 || todos[0].Status != "in_progress" {
+			t.Fatalf("cancelled empty-ID complete_step advanced canonical state: %+v", todos)
 		}
 	})
 }
@@ -219,14 +220,14 @@ func TestSetSessionAndRebuildTodoStateScopeDuplicateIDs(t *testing.T) {
 
 	a := &Agent{}
 	a.SetSession(s)
-	if len(a.todoState) != 1 || a.todoState[0].Status != "in_progress" {
-		t.Fatalf("SetSession rebuilt failed duplicate-ID step as successful: %+v", a.todoState)
+	if todos := a.CanonicalTodoState(); len(todos) != 1 || todos[0].Status != "in_progress" {
+		t.Fatalf("SetSession rebuilt failed duplicate-ID step as successful: %+v", todos)
 	}
 
-	a.todoState = nil
+	a.setTodoState(nil)
 	a.RebuildTodoState()
-	if len(a.todoState) != 1 || a.todoState[0].Status != "in_progress" {
-		t.Fatalf("RebuildTodoState rebuilt failed duplicate-ID step as successful: %+v", a.todoState)
+	if todos := a.CanonicalTodoState(); len(todos) != 1 || todos[0].Status != "in_progress" {
+		t.Fatalf("RebuildTodoState rebuilt failed duplicate-ID step as successful: %+v", todos)
 	}
 }
 
@@ -245,8 +246,8 @@ func TestRebuildTodoStatePreservesUniqueIDSemantics(t *testing.T) {
 
 	a := &Agent{}
 	a.rebuildTodoState(msgs)
-	if len(a.todoState) != 2 || a.todoState[0].Status != "completed" || a.todoState[1].Status != "in_progress" {
-		t.Fatalf("unique-ID replay changed: %+v", a.todoState)
+	if todos := a.CanonicalTodoState(); len(todos) != 2 || todos[0].Status != "completed" || todos[1].Status != "in_progress" {
+		t.Fatalf("unique-ID replay changed: %+v", todos)
 	}
 }
 
@@ -262,8 +263,8 @@ func TestRebuildTodoStatePreservesSameBatchReplaySemantics(t *testing.T) {
 
 	a := &Agent{}
 	a.rebuildTodoState(msgs)
-	if len(a.todoState) != 1 || a.todoState[0].Status != "completed" {
-		t.Fatalf("same-batch complete_step replay changed: %+v", a.todoState)
+	if todos := a.CanonicalTodoState(); len(todos) != 1 || todos[0].Status != "completed" {
+		t.Fatalf("same-batch complete_step replay changed: %+v", todos)
 	}
 }
 
@@ -284,10 +285,11 @@ func TestRebuildTodoStateKeepsStepIdentityAcrossDuplicateCallIDs(t *testing.T) {
 
 	a := &Agent{}
 	a.rebuildTodoState(msgs)
-	if len(a.todoState) != 2 || a.todoState[0].Status != "completed" || a.todoState[1].Status != "completed" {
-		t.Fatalf("step identity did not override conflicting position across duplicate call IDs: %+v", a.todoState)
+	todos := a.CanonicalTodoState()
+	if len(todos) != 2 || todos[0].Status != "completed" || todos[1].Status != "completed" {
+		t.Fatalf("step identity did not override conflicting position across duplicate call IDs: %+v", todos)
 	}
-	if a.todoState[0].StepID != "plan_step_01" || a.todoState[1].StepID != "plan_step_02" {
-		t.Fatalf("step identity was not preserved during replay: %+v", a.todoState)
+	if todos[0].StepID != "plan_step_01" || todos[1].StepID != "plan_step_02" {
+		t.Fatalf("step identity was not preserved during replay: %+v", todos)
 	}
 }

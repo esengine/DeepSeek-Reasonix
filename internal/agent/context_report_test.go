@@ -18,7 +18,7 @@ func TestContextReportUsesLatestPromptNotBillableAggregate(t *testing.T) {
 		ContextWindow: 100_000, RecentKeep: 2,
 	}, event.Discard)
 
-	a.lastUsage.Store(&provider.Usage{
+	a.sess.output.lastUsage.Store(&provider.Usage{
 		PromptTokens:        363_000, // three recovery attempts, billed
 		ContextPromptTokens: 122_000, // what the last request actually carried
 		RequestCount:        3,

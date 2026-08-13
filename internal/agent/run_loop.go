@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"strings"
@@ -31,6 +32,7 @@ type streamedTurn struct {
 	reasoningStatus    string
 	calls              []provider.ToolCall
 	responsesItems     []json.RawMessage
+	serverSearch       []provider.ServerSearchCall
 	usage              *provider.Usage
 	interrupted        bool
 	partialToolStarted bool
@@ -109,42 +111,42 @@ func (s *deferredStreamSink) Discard() {
 // evidence re-lease, and the initial user-turn persistence. Callers still own
 // all Run-level defers (workspace lease, evidence commit, delivery checkpoint,
 // steer queue, active-turn timestamp).
-func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string, state *runLoopState) {
+func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string, state *turnRuntime) {
 	rawInput = RawUserInput(ctx, input)
 	providerInput := input
 	// A fresh user turn starts from zeroed per-turn host state; the new turn's
 	// values are computed below. Cross-turn state (checkpoint, scope, failure
-	// budgets) lives directly on Agent and is reconciled field by field.
-	a.perTurnState = perTurnState{}
+	// budgets) lives in taskRuntime and is reconciled there.
+	a.turn = turnRuntime{}
 	a.resetStructuralRunGuards()
 	scope, scoped := DeliveryExecutionScopeFromContext(ctx)
-	preserveEvidence := a.preserveEvidenceOnce
+	preserveEvidence := a.pending.preserveEvidence
 	// A run that starts with a pending readiness recovery (or an explicit
 	// evidence-preserving continuation) and then passes readiness counts as a
 	// recovery in the final audit.
-	a.readinessRecovered = preserveEvidence || a.deliveryRecoveryPending
-	if a.evidence != nil {
+	a.turn.readinessRecovered = preserveEvidence || a.pending.deliveryRecovery
+	if a.task.ledger != nil {
 		switch {
 		case preserveEvidence:
-			a.evidence.ResetBackgroundLeases()
-		case scoped && a.deliveryScopeID == scope.ID:
-			a.evidence.ResetBackgroundLeases()
+			a.task.ledger.ResetBackgroundLeases()
+		case scoped && a.task.scopeID == scope.ID:
+			a.task.ledger.ResetBackgroundLeases()
 		default:
 			a.resetTurnEvidence()
 		}
 	}
-	a.preserveEvidenceOnce = false
+	a.pending.preserveEvidence = false
 	if !preserveEvidence {
-		a.deliveryRecoveryPending = false
+		a.pending.deliveryRecovery = false
 	}
 	if scoped {
-		a.deliveryScopeID = scope.ID
+		a.task.scopeID = scope.ID
 	} else if !preserveEvidence {
-		a.deliveryScopeID = ""
+		a.task.scopeID = ""
 	}
-	a.deliveryScopeActive = scoped
-	if scoped && a.deliveryCheckpoint.ScopeID != scope.ID {
-		a.deliveryCheckpoint = evidence.DeliveryCheckpoint{ScopeID: scope.ID}
+	a.turn.deliveryScopeActive = scoped
+	if scoped && a.task.checkpoint.ScopeID != scope.ID {
+		a.task.checkpoint = evidence.DeliveryCheckpoint{ScopeID: scope.ID}
 	}
 	// Re-lease this session's background-job mutations that no turn has
 	// committed yet. The Reset above just wiped any lease a failed or
@@ -156,22 +158,22 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	// change without the final-readiness gate ever seeing it. Plan turns defer
 	// this lease like collectBackgroundEvidence does so execution evidence is
 	// consumed and audited only after plan approval.
-	if a.evidence != nil && a.jobs != nil && !a.planMode.Load() {
+	if a.task.ledger != nil && a.svc.jobs != nil && !a.planMode.Load() {
 		session := jobs.SessionFromContext(ctx)
-		for _, jobID := range a.jobs.PendingEvidenceJobIDsForSession(session) {
-			summary, ready := a.jobs.TryLeaseEvidenceForSession(session, jobID)
+		for _, jobID := range a.svc.jobs.PendingEvidenceJobIDsForSession(session) {
+			summary, ready := a.svc.jobs.TryLeaseEvidenceForSession(session, jobID)
 			if !ready {
 				continue
 			}
-			if !a.evidence.NoteBackgroundLease(session, jobID) {
+			if !a.task.ledger.NoteBackgroundLease(session, jobID) {
 				continue
 			}
-			a.evidence.MergeChild(summary)
+			a.task.ledger.MergeChild(summary)
 		}
 	}
-	a.deliveryCriteriaEstablished = a.hasIncompleteCanonicalCriteria() ||
-		(a.evidence != nil && a.evidence.HasSuccessfulTodoWrite()) ||
-		(scoped && a.deliveryCheckpoint.CriteriaEstablished)
+	a.turn.deliveryCriteriaEstablished = a.hasIncompleteCanonicalCriteria() ||
+		(a.task.ledger != nil && a.task.ledger.HasSuccessfulTodoWrite()) ||
+		(scoped && a.task.checkpoint.CriteriaEstablished)
 	// Classify delivery expectations from the task text. Sub-agent spawners
 	// pass the pristine task through Options.ClassifierTaskText (a trusted
 	// host channel) because their Run input carries host framing whose
@@ -180,38 +182,38 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	// deadlocked read-only subagents. Without the override the raw input is
 	// classified verbatim: stripping user-controllable markup here would let
 	// input dressed up as host framing disarm the delivery gates.
-	a.turnInput = a.classifierTaskText
+	a.turn.turnInput = a.classifierTaskText
 	if scoped && strings.TrimSpace(scope.TaskText) != "" {
-		a.turnInput = scope.TaskText
-	} else if strings.TrimSpace(a.turnInput) == "" {
-		a.turnInput = rawInput
+		a.turn.turnInput = scope.TaskText
+	} else if strings.TrimSpace(a.turn.turnInput) == "" {
+		a.turn.turnInput = rawInput
 	}
-	intent := taskintent.Classify(a.turnInput)
-	a.deliveryTaskExpected = intent.NeedsEvidence()
-	a.deliveryMutationExpected = intent == taskintent.Mutation && registryHasWriterTools(a.tools)
-	a.deliveryPersistentExpected = taskintent.NeedsPersistentAction(a.turnInput)
-	a.recoveryTaskSummary = boundedRecoveryTaskSummary(a.turnInput)
+	intent := taskintent.Classify(a.turn.turnInput)
+	a.turn.deliveryTaskExpected = intent.NeedsEvidence()
+	a.turn.deliveryMutationExpected = intent == taskintent.Mutation && registryHasWriterTools(a.svc.tools)
+	a.turn.deliveryPersistentExpected = taskintent.NeedsPersistentAction(a.turn.turnInput)
+	a.turn.recoveryTaskSummary = boundedRecoveryTaskSummary(a.turn.turnInput)
 	// Freeze TaskPolicy for this turn from the session role setting. Subsequent
 	// SetAgentPreset calls must not change this turn's route/review floor.
 	if policy, ok := taskpolicy.FromContext(ctx); ok {
-		a.turnPolicy = policy
+		a.turn.policy = policy
 	} else {
-		a.turnPolicy = taskpolicy.Derive(taskpolicy.Input{
-			Raw:         a.turnInput,
-			Instruction: taskpolicy.StripQuotedConstraints(a.turnInput),
+		a.turn.policy = taskpolicy.Derive(taskpolicy.Input{
+			Raw:         a.turn.turnInput,
+			Instruction: taskpolicy.StripQuotedConstraints(a.turn.turnInput),
 			Preset:      agentpreset.AgentPreset(a.AgentPreset()),
 			PlanMode:    a.planMode.Load(),
 		})
 	}
-	a.turnPolicySet = true
+	a.turn.policySet = true
 	// Align legacy delivery gates with the frozen role setting. Delivery always
 	// enables the full readiness contract. Light/Balanced only elevate when the
 	// turn is a mutation that requires forced review or is high-risk.
 	switch {
 	case a.AgentPreset() == string(agentpreset.Delivery):
 		a.deliveryProfile = true
-	case a.turnPolicy.Intent == taskintent.Mutation &&
-		(a.turnPolicy.RequiresIndependentReview() || a.turnPolicy.Risk >= taskpolicy.RiskHigh):
+	case a.turn.policy.Intent == taskintent.Mutation &&
+		(a.turn.policy.RequiresIndependentReview() || a.turn.policy.Risk >= taskpolicy.RiskHigh):
 		a.deliveryProfile = true
 	default:
 		a.deliveryProfile = false
@@ -220,13 +222,13 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	// transcript tail. Fold its bounded facts into this new user turn exactly
 	// once; the user's raw text remains the classifier source above.
 	providerInput = withInterruptedRecovery(providerInput, a.pendingInterruptedRecovery())
-	a.prepareRepeatFailureScope(scoped, scope.ID)
-	a.sink.Emit(event.Event{Kind: event.TurnStarted})
+	a.task.prepareScope(scoped, scope.ID)
+	a.svc.sink.Emit(event.Event{Kind: event.TurnStarted})
 	a.emitTurnPhase(event.TurnPhaseWorking)
 	input = a.withTurnPreferences(providerInput)
 	// Persist the short execution-policy block in provider Content; keep the
 	// original user text in RawContent for history/title/rewind stripping.
-	policyBlock := taskpolicy.ExecutionPolicyBlock(a.turnPolicy)
+	policyBlock := taskpolicy.ExecutionPolicyBlock(a.turn.policy)
 	if !strings.Contains(input, "<execution-policy") {
 		input = strings.TrimSpace(input) + "\n\n" + policyBlock
 	}
@@ -234,28 +236,24 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	a.activeTurnCreatedAt.Store(userCreatedAt)
 	rawContent := rawInput
 	if rawContent == "" {
-		rawContent = a.turnInput
+		rawContent = a.turn.turnInput
 	}
-	a.session.Add(provider.Message{
+	a.sess.conversation.Add(provider.Message{
 		Role: provider.RoleUser, Content: input, RawContent: rawContent,
 		Images: userImages(ctx), CreatedAt: userCreatedAt,
 	})
 
-	state = &runLoopState{
-		emptyFinalBlocks:   0,
-		handoffNudges:      0,
-		usedAnyTool:        false,
-		graceRound:         false,
-		recoveryGraceRound: false,
-		todoStallRounds:    0,
-		seenTodoProgress:   make(map[string]struct{}),
-		executorHandoff:    a.executorHandoffGuard && strings.Contains(input, executorHandoffMarker),
-		input:              input,
-		budget:             runBudget{started: time.Now()},
-	}
+	// The loop fields join the classification computed above rather than
+	// opening a second object: one turn, one turnRuntime. The zero values the
+	// old literal spelled out are already there from the reset at the top.
+	state = &a.turn
+	state.seenTodoProgress = make(map[string]struct{})
+	state.executorHandoff = a.executorHandoffGuard && strings.Contains(input, executorHandoffMarker)
+	state.input = input
+	state.budget = runBudget{started: time.Now()}
 	state.todoProgress, state.trackingTodoProgress = a.canonicalTodoProgress()
-	if a.evidence != nil {
-		for _, sig := range a.evidence.SuccessfulProgressSignaturesSince(0) {
+	if a.task.ledger != nil {
+		for _, sig := range a.task.ledger.SuccessfulProgressSignaturesSince(0) {
 			state.seenTodoProgress[sig] = struct{}{}
 		}
 	}
@@ -264,7 +262,7 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 
 // runToolLoop owns the main tool-round budget and dispatches each streamed
 // assistant turn into final-response or tool-round handling.
-func (a *Agent) runToolLoop(ctx context.Context, state *runLoopState) error {
+func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) error {
 	ctx = a.withAgentContext(ctx)
 	for step := 0; state.runMaxSteps <= 0 || step < state.runMaxSteps || state.graceRound || state.recoveryGraceRound; step++ {
 		// Consume a queued steer and persist it to the session so it
@@ -272,17 +270,17 @@ func (a *Agent) runToolLoop(ctx context.Context, state *runLoopState) error {
 		// guidance (with a prefix), not a new task. One cache miss per
 		// steer is unavoidable — the model must see the new instruction.
 		if text, itemID, ok := a.consumeSteer(); ok {
-			a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(midTurnSteerMessage(text))})
-			a.sink.Emit(event.Event{Kind: event.Steer, Text: text, ItemID: itemID})
+			a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(midTurnSteerMessage(text))})
+			a.svc.sink.Emit(event.Event{Kind: event.Steer, Text: text, ItemID: itemID})
 		} else if itemID != "" {
 			// Loader failed after dequeue: durable entry stays for inspection
 			// (unapplied path marks uncertain + pause via the notice sink).
 			a.RecordUnappliedSteer("(body load failed)", itemID)
 		}
-		schemas := a.tools.Schemas()
+		schemas := a.svc.tools.Schemas()
 		prefixShape := a.capturePrefixShape(schemas)
-		prevPrefixShape := a.lastPrefixShape
-		if !a.haveLastPrefixShape {
+		prevPrefixShape := a.sess.lastPrefixShape
+		if !a.sess.haveLastPrefixShape {
 			prevPrefixShape = prefixShape
 		}
 
@@ -291,20 +289,24 @@ func (a *Agent) runToolLoop(ctx context.Context, state *runLoopState) error {
 		// any prefix change to the operation that actually caused it, instead
 		// of a generic rewrite signal that also fires on local-only metadata
 		// edits.
-		contentReasons := a.session.DrainContentRewriteReasons()
+		contentReasons := a.sess.conversation.DrainContentRewriteReasons()
 
 		// Prefix shape is captured once before sampling and frozen for the
 		// whole attempt lifecycle — stream retries must not rewrite session
 		// history mid-round, so the shape stays stable across body replays.
 		streamed := a.streamWithSamplingRecovery(ctx, step+1)
-		text, reasoning, signature, calls, responsesItems, usage := streamed.text, streamed.reasoning, streamed.signature, streamed.calls, streamed.responsesItems, streamed.usage
+		text, reasoning, signature, calls, responsesItems, serverSearch, usage := streamed.text, streamed.reasoning, streamed.signature, streamed.calls, streamed.responsesItems, streamed.serverSearch, streamed.usage
 		partialCalls, err := streamed.partialCalls, streamed.err
 		cacheDiagnostics := CompareShape(prevPrefixShape, prefixShape, usage, contentReasons)
 		if err != nil {
 			a.emitTurnUsage(usage, &cacheDiagnostics)
 			a.observeRunBudget(state, usage)
-			if msg, ok := finishReasonMessage(usage); ok {
-				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg})
+			// The byte-limit sentinel is already the user-facing turn error.
+			// Emitting the finish-reason notice as well doubles the same warning.
+			if !errors.Is(err, errReasoningByteLimitExceeded) {
+				if msg, ok := finishReasonMessage(usage); ok {
+					a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg})
+				}
 			}
 			// Exhausted stream retries (or a non-retryable error): persist one
 			// bounded LocalOnly recovery record for the next real user message.
@@ -312,12 +314,12 @@ func (a *Agent) runToolLoop(ctx context.Context, state *runLoopState) error {
 			a.recordInterruptedDisplay(text, reasoning, partialCalls, true, state.workDurationMs())
 			return err
 		}
-		a.lastPrefixShape = prefixShape
-		a.haveLastPrefixShape = true
+		a.sess.lastPrefixShape = prefixShape
+		a.sess.haveLastPrefixShape = true
 		a.emitTurnUsage(usage, &cacheDiagnostics)
 		a.observeRunBudget(state, usage)
 		if msg, ok := finishReasonMessage(usage); ok {
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg})
+			a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg})
 		}
 
 		// Commit boundary: only a clean terminal attempt reaches here.
@@ -325,7 +327,7 @@ func (a *Agent) runToolLoop(ctx context.Context, state *runLoopState) error {
 		// archive. Most OpenAI-compatible backends do not replay it; providers
 		// with an explicit round-trip contract retain the raw provider text.
 		calls = a.withPreviewFileDiffs(ctx, calls)
-		a.session.Add(provider.Message{
+		a.sess.conversation.Add(provider.Message{
 			Role:               provider.RoleAssistant,
 			Content:            text,
 			ReasoningContent:   reasoning,
@@ -334,6 +336,7 @@ func (a *Agent) runToolLoop(ctx context.Context, state *runLoopState) error {
 			ReasoningStatus:    streamed.reasoningStatus,
 			ToolCalls:          calls,
 			ResponsesItems:     responsesItems,
+			ServerSearch:       serverSearch,
 			WorkDurationMs:     state.workDurationMs(),
 		})
 
@@ -402,9 +405,9 @@ func (a *Agent) streamWithSamplingRecovery(ctx context.Context, turn int) stream
 		a.emitStreamAttempt(attemptID, event.StreamAttemptBegin, attempt, "", nil)
 
 		var streamSink *deferredStreamSink
-		attemptSink := a.sink
-		if provider.WarnOnMissingToolCallReasoning(a.prov) {
-			streamSink = newReasoningAwareStreamSink(a.sink)
+		attemptSink := a.svc.sink
+		if provider.WarnOnMissingToolCallReasoning(a.svc.prov) {
+			streamSink = newReasoningAwareStreamSink(a.svc.sink)
 			attemptSink = streamSink
 		}
 
@@ -429,10 +432,10 @@ func (a *Agent) streamWithSamplingRecovery(ctx context.Context, turn int) stream
 		// exact replay of the same frozen request (no synthetic prompt).
 		missing, shouldRetry := a.observeMissingToolCallReasoning(result.calls, result.reasoning)
 		if missing {
-			event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningDetected})
+			event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningDetected})
 			if shouldRetry && strings.TrimSpace(result.text) == "" {
-				event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryAttempted})
-				retrySink := newDeferredStreamSink(a.sink)
+				event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryAttempted})
+				retrySink := newDeferredStreamSink(a.svc.sink)
 				retry := runAttempt(attemptID, retrySink)
 				billable = mergeSamplingUsage(billable, retry.usage)
 				if retry.err != nil {
@@ -448,7 +451,7 @@ func (a *Agent) streamWithSamplingRecovery(ctx context.Context, turn int) stream
 					streamSink.Flush()
 					a.storeLatestRequestUsage(result.usage)
 					result.usage = finalizeSamplingUsage(billable, result.usage)
-					event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
+					event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
 					a.emitStreamAttempt(attemptID, event.StreamAttemptCommit, attempt, "", nil)
 					return result
 				}
@@ -458,21 +461,21 @@ func (a *Agent) streamWithSamplingRecovery(ctx context.Context, turn int) stream
 				retry.usage = finalizeSamplingUsage(billable, retry.usage)
 				retryMissing, _ := a.observeMissingToolCallReasoning(retry.calls, retry.reasoning)
 				if retryMissing {
-					event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningDetected})
-					event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
+					event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningDetected})
+					event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
 				} else if len(retry.calls) == 0 {
-					event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryReplaced})
+					event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryReplaced})
 				} else {
-					event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryRecovered})
+					event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryRecovered})
 				}
 				a.emitStreamAttempt(attemptID, event.StreamAttemptCommit, attempt, "", nil)
 				return retry
 			}
 			if !shouldRetry || strings.TrimSpace(result.text) != "" {
-				event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetrySuppressed})
-				event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
+				event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetrySuppressed})
+				event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
 			} else {
-				event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
+				event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
 			}
 		}
 
@@ -488,7 +491,7 @@ func (a *Agent) emitStreamAttempt(id string, action event.StreamAttemptAction, a
 	if reason == "" && err != nil {
 		reason = provider.StreamInterruptReason(err)
 	}
-	a.sink.Emit(event.Event{
+	a.svc.sink.Emit(event.Event{
 		Kind: event.StreamAttempt,
 		StreamAttempt: event.StreamAttemptInfo{
 			ID: id, Action: action, Attempt: attempt, Max: maxSamplingAttempts, Reason: reason,
@@ -526,7 +529,7 @@ func sleepStreamRetryBackoff(ctx context.Context, attempt int) bool {
 // readiness retry, empty final retry, executor handoff nudge, steer drain, and
 // final compaction. cont=true continues the tool loop; cont=false returns err
 // from Run (err may be nil for a clean final answer).
-func (a *Agent) handleFinalResponse(ctx context.Context, state *runLoopState, text, reasoning string, usage *provider.Usage) (cont bool, err error) {
+func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, text, reasoning string, usage *provider.Usage) (cont bool, err error) {
 	// Recovery finalization produced a summary. Keep it in the session,
 	// but still pause so Goal auto-continue cannot open another Run with
 	// a fresh finalization round. turn_done reports recovery_paused.
@@ -534,7 +537,7 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *runLoopState, te
 		a.contextManager().ObserveUsage(usage)
 		reason := ""
 		if ctrl := a.recoveryEpisodeControl(); ctrl != nil {
-			_, _ = ctrl.ConsumeFinalization(a.recoveryTaskID)
+			_, _ = ctrl.ConsumeFinalization(a.recovery.taskID)
 		}
 		return false, &RecoveryPauseError{
 			Message:    "Automatic retries paused. Reasonix stopped repeated attempts and kept completed work. Send \"continue\" to start a fresh attempt, or add instructions to change direction.",
@@ -559,8 +562,8 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *runLoopState, te
 		// what happens next. In Goal mode the FSM auto-continues under budget
 		// with the missing list as the next turn; plain Delivery turns surface
 		// the recovery card for an explicit user continuation.
-		event.RecordReadinessAudit(a.sink, readiness.audit(evidence.ReadinessErrored, false))
-		a.deliveryRecoveryPending = true
+		event.RecordReadinessAudit(a.svc.sink, readiness.audit(evidence.ReadinessErrored, false))
+		a.pending.deliveryRecovery = true
 		return false, &FinalReadinessError{Attempts: 1, Reason: readiness.reason, Missing: readiness.missingIDs()}
 	}
 	if !hasVisibleFinalAnswer(text) {
@@ -572,28 +575,28 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *runLoopState, te
 		// "still thinking after the task is done" symptom), so honour the
 		// stop when reasoning carried the substance of the answer and treat
 		// the turn as a final answer instead of retrying.
-		if a.requireVisibleFinal || !reasoningOnlyFinishHonoured(a.prov, usage, reasoning) {
+		if a.requireVisibleFinal || !reasoningOnlyFinishHonoured(a.svc.prov, usage, reasoning) {
 			state.emptyFinalBlocks++
 			if state.emptyFinalBlocks >= maxEmptyFinalBlocks {
 				return false, fmt.Errorf("model finished without a visible final answer %d times", state.emptyFinalBlocks)
 			}
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeEmptyFinal, Text: emptyFinalNotice(), Detail: emptyFinalNoticeDetail(a.prov.Name(), usage, len(reasoning))})
-			a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(emptyFinalRetryMessage())})
+			a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeEmptyFinal, Text: emptyFinalNotice(), Detail: emptyFinalNoticeDetail(a.svc.prov.Name(), usage, len(reasoning))})
+			a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(emptyFinalRetryMessage())})
 			a.contextManager().ObserveUsage(usage)
 			return true, nil
 		}
 	}
 	if state.executorHandoff && !state.usedAnyTool && state.handoffNudges < maxExecutorHandoffNudges && shouldNudgeExecutorHandoff(state.input, text) {
 		state.handoffNudges++
-		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeExecutorHandoff, Text: executorHandoffNoticeText(), Detail: "executor answered without taking any action; nudging it to use its tools"})
-		a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(executorHandoffRetryMessage())})
+		a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeExecutorHandoff, Text: executorHandoffNoticeText(), Detail: "executor answered without taking any action; nudging it to use its tools"})
+		a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(executorHandoffRetryMessage())})
 		a.contextManager().ObserveUsage(usage)
 		return true, nil
 	}
 	if readiness.applies {
-		event.RecordReadinessAudit(a.sink, readiness.audit(evidence.ReadinessAllowed, a.readinessRecovered))
+		event.RecordReadinessAudit(a.svc.sink, readiness.audit(evidence.ReadinessAllowed, a.turn.readinessRecovered))
 	}
-	a.emitTurnShadows(a.turnInput)
+	a.emitTurnShadows(a.turn.turnInput)
 	if !a.closeSteerIntakeIfIdle() {
 		return true, nil
 	}
@@ -608,14 +611,14 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *runLoopState, te
 // cancellation, todo stall tracking, recovery finalization pause, and the
 // max-steps grace round. cont=true continues the tool loop; cont=false returns
 // err from Run.
-func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step int, text, reasoning string, calls []provider.ToolCall, usage *provider.Usage) (cont bool, err error) {
+func (a *Agent) handleToolRound(ctx context.Context, state *turnRuntime, step int, text, reasoning string, calls []provider.ToolCall, usage *provider.Usage) (cont bool, err error) {
 	state.emptyFinalBlocks = 0
 	state.usedAnyTool = true
 	unavailableContextTools := a.unavailableContextualToolCalls(ctx, calls)
 	if len(unavailableContextTools) > 0 && state.contextToolRepairs > 0 {
 		msg := fmt.Sprintf("blocked: context-unavailable tools were called again after the repair instruction: %s", strings.Join(unavailableContextTools, ", "))
 		for _, call := range calls {
-			a.session.Add(provider.Message{Role: provider.RoleTool, Content: msg, ToolCallID: call.ID, Name: call.Name})
+			a.sess.conversation.Add(provider.Message{Role: provider.RoleTool, Content: msg, ToolCallID: call.ID, Name: call.Name})
 		}
 		if hasVisibleFinalAnswer(text) {
 			return a.handleFinalResponse(ctx, state, text, reasoning, usage)
@@ -631,10 +634,10 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 	}
 
 	receiptMark := 0
-	if a.evidence != nil {
-		receiptMark = a.evidence.Len()
+	if a.task.ledger != nil {
+		receiptMark = a.task.ledger.Len()
 	}
-	batch := a.executeBatch(ctx, calls)
+	batch := a.executeBatch(ctx, state, calls)
 	results, images := batch.results, batch.images
 	for i, call := range calls {
 		msg := provider.Message{
@@ -652,7 +655,7 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 		if i < len(batch.executions) {
 			msg.ToolExecution = toProviderToolExecution(batch.executions[i])
 		}
-		a.session.Add(msg)
+		a.sess.conversation.Add(msg)
 	}
 	// If the context was cancelled during tool execution, return after storing
 	// the batch results so the session keeps paired tool-call history.
@@ -668,7 +671,7 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 		}
 		state.contextToolRepairs++
 		nudge := fmt.Sprintf("The following tools are unavailable in the current workflow phase: %s. Do not call them again. Respond to the user's request with visible answer text now; call a different tool only if it is still needed to complete the request.", strings.Join(unavailableContextTools, ", "))
-		a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(nudge)})
+		a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(nudge)})
 	}
 	a.trackTodoProgress(ctx, state, receiptMark)
 
@@ -682,16 +685,16 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 	if batch.recoveryStopTurn && !state.recoveryGraceRound {
 		state.recoveryGraceRound = true
 		if ctrl := a.recoveryEpisodeControl(); ctrl != nil {
-			ctrl.MarkFinalizationOffered(a.recoveryTaskID)
+			ctrl.MarkFinalizationOffered(a.recovery.taskID)
 		}
 		nudge := "Auto recovery has reached its limit for this turn. Do not call any more tools. Summarize what was completed, what failed, and what the user should do next. The user can continue in the next message."
-		a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(nudge)})
+		a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(nudge)})
 		return true, nil
 	}
 
 	// Spend is checked before rounds: it is the axis a runaway is actually
 	// reported in, so on the turns both would catch it should be the one named.
-	if axis, detail := a.taskBudget.exceeded(a.taskBudgetLimit(ctx)); axis != "" {
+	if axis, detail := a.task.budget.exceeded(a.taskBudgetLimit(ctx)); axis != "" {
 		a.armFinalizationRound(state, landCause{kind: "task_budget", axis: axis, detail: detail})
 		return true, nil
 	}
@@ -704,7 +707,7 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 
 func (a *Agent) pairUnexecutedGraceCalls(calls []provider.ToolCall, msg string) {
 	for _, call := range calls {
-		a.session.Add(provider.Message{Role: provider.RoleTool, Content: msg, ToolCallID: call.ID, Name: call.Name})
+		a.sess.conversation.Add(provider.Message{Role: provider.RoleTool, Content: msg, ToolCallID: call.ID, Name: call.Name})
 	}
 }
 
@@ -712,13 +715,13 @@ func (a *Agent) unavailableContextualToolCalls(ctx context.Context, calls []prov
 	if len(calls) == 0 {
 		return nil
 	}
-	if a == nil || a.tools == nil {
+	if a == nil || a.svc.tools == nil {
 		return nil
 	}
 	names := make([]string, 0, len(calls))
 	seen := make(map[string]struct{}, len(calls))
 	for _, call := range calls {
-		t, canonical, ambiguous := a.tools.ResolveCall(call.Name)
+		t, canonical, ambiguous := a.svc.tools.ResolveCall(call.Name)
 		if t == nil || len(ambiguous) > 0 {
 			continue
 		}

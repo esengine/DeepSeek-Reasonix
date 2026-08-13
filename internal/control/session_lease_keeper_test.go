@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/event"
 	"reasonix/internal/store"
 )
 
@@ -134,6 +135,38 @@ func TestSessionLeaseKeeperReleaseRemovesLeaseInfo(t *testing.T) {
 	if got := k.HeldPath(); got != "" {
 		t.Fatalf("HeldPath after Release = %q, want empty", got)
 	}
+}
+
+func TestSessionLeaseKeeperRecoveryRebindsControllerBeforeReturning(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.jsonl")
+	b := filepath.Join(dir, "b.jsonl")
+	sess := agent.NewSession("sys")
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	ctrl := New(Options{Executor: exec, SessionPath: a, Sink: event.Discard})
+
+	k := NewSessionLeaseKeeper()
+	defer k.Release()
+	if err := k.Rebind(a); err != nil {
+		t.Fatal(err)
+	}
+	if err := k.BindControllerAuthority(ctrl); err != nil {
+		t.Fatal(err)
+	}
+	releaseSave, err := sess.WriteAuthority().BeginSave(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := k.HandleSessionRecovered(SessionRecoveryInfo{RecoveryPath: b}); err != nil {
+		t.Fatalf("HandleSessionRecovered: %v", err)
+	}
+	if got := k.HeldPath(); got != agent.CanonicalSessionPath(b) {
+		t.Fatalf("HeldPath = %q, want %q", got, agent.CanonicalSessionPath(b))
+	}
+	if auth := sess.WriteAuthority(); auth == nil || !auth.Covers(b) {
+		t.Fatal("controller was published without authority for recovery path")
+	}
+	releaseSave()
 }
 
 func TestSessionInUseMessageNamesHolder(t *testing.T) {

@@ -84,6 +84,19 @@ func TestPathsProvenInSessionRejectsNormalizedMissingResult(t *testing.T) {
 	}
 }
 
+func TestPathsProvenInSessionRejectsCancelledBeforeExecution(t *testing.T) {
+	msgs := []provider.Message{
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID: "cancelled", Name: "read_file", Arguments: `{"path":"unread.go"}`,
+		}}},
+		{Role: provider.RoleTool, ToolCallID: "cancelled", Name: "read_file", Content: " cancelled: context cancelled before execution\n"},
+	}
+
+	if PathsProvenInSession(msgs, []string{"unread.go"}, false) {
+		t.Fatal("a call cancelled before execution must not count as successful file evidence")
+	}
+}
+
 func TestPathsProvenInSessionPreservesWithinTurnPairing(t *testing.T) {
 	msgs := []provider.Message{
 		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{
@@ -130,5 +143,37 @@ func TestPathsProvenInSessionRejectsDuplicateIDBatchWithOrphanReplacement(t *tes
 
 	if PathsProvenInSession(msgs, []string{"unread.go"}, false) {
 		t.Fatal("an orphan replacement in an ambiguous duplicate-ID batch must not grant path evidence")
+	}
+}
+
+func TestPathsProvenInSessionKeepsWriterEffectsScopedToTheirTurns(t *testing.T) {
+	msgs := []provider.Message{
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID: "call_0", Name: "write_file", Arguments: `{"path":"written.go"}`,
+		}}},
+		{Role: provider.RoleTool, ToolCallID: "call_0", Name: "write_file", Content: "wrote written.go"},
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID: "call_0", Name: "write_file", Arguments: `{"path":"failed.go"}`,
+		}}},
+		{Role: provider.RoleTool, ToolCallID: "call_0", Name: "write_file", Content: "error: denied"},
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID: "call_0", Name: "bash", Arguments: `{"command":"GOROOT=/sdk go test ./..."}`,
+		}}},
+		{Role: provider.RoleTool, ToolCallID: "call_0", Name: "bash", Content: "PASS"},
+	}
+
+	if !PathsProvenInSession(msgs, []string{"written.go"}, true) {
+		t.Fatal("the successful writer lost its path evidence after later id collisions")
+	}
+	if PathsProvenInSession(msgs, []string{"failed.go"}, true) {
+		t.Fatal("a failed writer borrowed a later colliding verification result")
+	}
+	verification := ReceiptFromToolCall("bash", []byte(`{"command":"GOROOT=/sdk go test ./..."}`), true, false)
+	if verification.Mutation || verification.Write || !IsDeliveryVerificationCommand(verification.Command) {
+		t.Fatalf("env-prefixed verification effects changed: %+v", verification)
+	}
+	writer := ReceiptFromToolCall("write_file", []byte(`{"path":"written.go"}`), true, false)
+	if !writer.Mutation || !writer.Write || len(writer.Paths) != 1 || writer.Paths[0] != "written.go" {
+		t.Fatalf("writer receipt lost mutation/path effects: %+v", writer)
 	}
 }

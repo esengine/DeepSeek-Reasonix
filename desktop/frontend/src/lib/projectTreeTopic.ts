@@ -44,6 +44,25 @@ export function mergeProjectTopicPage(current: ProjectNode[], incoming: ProjectN
   return next;
 }
 
+// After archive, drop that topic immediately so a shell-only refresh cannot
+// resurrect it from the previously loaded children.
+export function projectTreeWithoutTopic(tree: ProjectNode[], topicId: string): ProjectNode[] {
+  const id = topicId.trim();
+  if (!id) return tree;
+  return tree.map((node) => {
+    if (node.kind !== "project" && node.kind !== "global_folder") return node;
+    return { ...node, children: asArray(node.children).filter((child) => child.topicId !== id) };
+  });
+}
+
+export function projectTreeShellChildren(
+  previous: ProjectNode[] | undefined,
+  options: { keepLoadedTopics: boolean },
+): ProjectNode[] {
+  if (options.keepLoadedTopics) return asArray(previous);
+  return [];
+}
+
 export function projectTreeEventAffectsFolder(project: ProjectNode, roots: string[]): boolean {
   if (roots.length === 0) return true;
   const root = project.kind === "global_folder" ? "" : project.root ?? "";
@@ -105,16 +124,21 @@ export function projectTreeFolderDisclosure(hasChildren: boolean, isExpanded: bo
   };
 }
 
+function topicMatchesActiveIdentity(node: ProjectNode, activeScope?: string, activeWorkspaceRoot?: string, activeTopicId?: string): boolean {
+  if (!node.topicId || !activeTopicId) return false;
+  const scope = node.kind === "global_topic" || node.kind === "global_session" ? "global" : "project";
+  if (scope === "global") return activeScope === "global" && activeTopicId === node.topicId;
+  return activeScope === "project" && activeTopicId === node.topicId && activeWorkspaceRoot === node.root;
+}
+
 export function topicIsActive(node: ProjectNode, activeScope?: string, activeWorkspaceRoot?: string, activeTopicId?: string, activeSessionPath?: string): boolean {
-  if (!isTopicNode(node) && !isRuntimeSessionNode(node)) return false;
-  if (node.sessionPath) return Boolean(activeSessionPath && activeSessionPath === node.sessionPath);
+  if (isRuntimeSessionNode(node)) {
+    return Boolean(node.sessionPath && activeSessionPath && activeSessionPath === node.sessionPath);
+  }
+  if (!isTopicNode(node)) return false;
   if (activeSessionPath && asArray(node.children).some(isRuntimeSessionNode)) return false;
-  const scope = node.kind === "global_topic" ? "global" : "project";
-  return (
-    activeTopicId === node.topicId &&
-    activeScope === scope &&
-    (scope === "global" || activeWorkspaceRoot === node.root)
-  );
+  if (topicMatchesActiveIdentity(node, activeScope, activeWorkspaceRoot, activeTopicId)) return true;
+  return Boolean(node.sessionPath && activeSessionPath && activeSessionPath === node.sessionPath);
 }
 
 export function projectTreeTopicMetaLine(node: ProjectNode, t: Translator, compact = false): string {
@@ -167,26 +191,33 @@ const topicStatusLabels: Record<ProjectTopicStatus, DictKey> = {
   waiting_confirmation: "projectTree.status.waitingConfirmation",
   background_job: "projectTree.status.backgroundJob",
   paused: "projectTree.status.paused",
+  awaiting_delivery: "projectTree.status.awaitingDelivery",
   error: "projectTree.status.error",
+  diverged_recovery: "projectTree.status.divergedRecovery",
 };
 
 export function normalizeTopicStatus(status?: string): ProjectTopicStatus | "" {
   if (!status) return "";
-  if (status === "thinking" || status === "streaming" || status === "waiting_confirmation" || status === "background_job" || status === "paused" || status === "error") {
+  if (status === "thinking" || status === "streaming" || status === "waiting_confirmation" || status === "background_job" || status === "paused" || status === "awaiting_delivery" || status === "error" || status === "diverged_recovery") {
     return status;
   }
   return "";
 }
 
 export function topicStatus(node: ProjectNode): ProjectTopicStatus | "" {
-  return normalizeTopicStatus(node.status) || (node.running ? "streaming" : "");
+  // Ordinary list never surfaces recovery-branch status. Active runtime states
+  // only: thinking/streaming/waiting/etc. History owns other saved versions.
+  const live = node.running ? "streaming" : "";
+  const stored = normalizeTopicStatus(node.status);
+  if (stored && stored !== "diverged_recovery") return stored;
+  return live;
 }
 
 export function projectTreeTopicArchiveBlocked(node: ProjectNode): boolean {
   if (asArray(node.children).some(projectTreeTopicArchiveBlocked)) return true;
   const status = normalizeTopicStatus(node.status);
   if (status === "thinking" || status === "streaming" || status === "waiting_confirmation" || status === "background_job") return true;
-  if (status === "paused" || status === "error") return false;
+  if (status === "paused" || status === "awaiting_delivery" || status === "error" || status === "diverged_recovery") return false;
   return Boolean(node.running);
 }
 
@@ -202,12 +233,7 @@ export function topicActivityAt(node: ProjectNode): number {
 export function projectTreeReadActivityKey(node: ProjectNode): string | null {
   const request = projectTreeTopicOpenRequest(node);
   if (!request?.topicId) return null;
-  return [
-    request.scope,
-    request.workspaceRoot,
-    request.topicId,
-    request.sessionPath ?? "",
-  ].join("\u001f");
+  return [request.scope, request.workspaceRoot, request.topicId].join("\u001f");
 }
 
 export type ProjectTreeReadActivity = Record<string, number>;
@@ -219,13 +245,16 @@ export function projectTreeTopicHasUnreadActivity(
   activeWorkspaceRoot?: string,
   activeTopicId?: string,
   activeSessionPath?: string,
+  baselineAt = 0,
 ): boolean {
   if (!isTopicNode(node) && !isRuntimeSessionNode(node)) return false;
   if (topicIsActive(node, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath)) return false;
+  if (topicMatchesActiveIdentity(node, activeScope, activeWorkspaceRoot, activeTopicId)) return false;
   if (topicStatus(node) !== "") return false;
   const key = projectTreeReadActivityKey(node);
   const activityAt = topicActivityAt(node);
-  return Boolean(key && activityAt > 0 && (readActivity[key] ?? 0) < activityAt);
+  if (!key || activityAt <= 0) return false;
+  return Math.max(readActivity[key] ?? 0, baselineAt) < activityAt;
 }
 
 export function projectTreeShouldRenderTopicActions(isSessionNode: boolean, variant: ProjectTreeVariant, unread: boolean): boolean {

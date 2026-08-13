@@ -1395,7 +1395,7 @@ func (c *Controller) submitHTTPWithFormat(input, display, format string) {
 	c.submitCommandOrTurn(trimmed, input, display, true, "", format)
 }
 
-func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedRefsOnly bool, editedOriginal, format string) {
+func (c *Controller) submitCommandOrTurnReady(trimmed, input, display string, scopedRefsOnly bool, editedOriginal, format string) {
 	runRefTurn := func(input, display string) {
 		c.runRefTurnWithFormat(input, display, format)
 	}
@@ -1947,7 +1947,7 @@ func (c *Controller) noticeDetail(text, detail string) {
 // Run executes a turn synchronously, returning the agent's error. Used by the
 // headless `reasonix run` path, where the Sink renders to stdout and the caller
 // just needs the exit status — no TurnDone event, no cancel bookkeeping.
-func (c *Controller) Run(ctx context.Context, input string) (err error) {
+func (c *Controller) runReady(ctx context.Context, input string) (err error) {
 	ctx = extension.ContextWithRuntimeOwner(ctx, c.RuntimeOwner())
 	if c.RuntimePhase() == RuntimePhaseDraining {
 		c.emitDrainingNotice()
@@ -3827,26 +3827,26 @@ func (c *Controller) snapshotWithDurability(markActivity, forceRewrite, shutdown
 	if strategyErr != nil {
 		return false, strategyErr
 	}
-	forceRewrite = forceRewrite || s.NeedsRewriteSave()
-	var err error
-	if forceRewrite {
-		err = s.SaveRewrite(path)
-	} else {
-		err = s.SaveSnapshot(path)
-		if errors.Is(err, agent.ErrSessionSnapshotConflict) {
-			// The no-rewrite decision may already be stale: auto-compaction
-			// can rewrite history between the decision and the write. Re-check
-			// and retry once as an owned rewrite before treating the failure as
-			// a real cross-runtime conflict.
-			if s.NeedsRewriteSave() {
-				forceRewrite = true
-				err = s.SaveRewrite(path)
-			}
-		}
+	err, forceRewrite := persistSessionSnapshot(s, path, forceRewrite)
+	if authoritySaveError(err) {
+		// Missing/stale authority must not enter diverged/recovery. Frontends
+		// rebind the lease or surface the typed error.
+		return false, err
 	}
 	if err != nil {
 		if shutdownRecovery && errors.Is(err, agent.ErrSessionFileLockHeld) {
 			recoveredPath, recoverErr := c.recoverShutdownSnapshot(path, err)
+			if recoverErr != nil {
+				return false, recoverErr
+			}
+			path = recoveredPath
+			s = c.executor.Session()
+			err = nil
+		}
+	}
+	if err != nil {
+		if errors.Is(err, agent.ErrSessionExternallyRemoved) {
+			recoveredPath, recoverErr := c.recoverExternallyRemovedSession(path, err)
 			if recoverErr != nil {
 				return false, recoverErr
 			}
@@ -3909,6 +3909,35 @@ func (c *Controller) snapshotWithDurability(markActivity, forceRewrite, shutdown
 	return transcriptDurable, nil
 }
 
+func (c *Controller) recoverExternallyRemovedSession(path string, saveErr error) (string, error) {
+	if c.executor == nil || strings.TrimSpace(path) == "" {
+		return "", saveErr
+	}
+	const reason = "session removed while open"
+	req := SessionRecoveryRequest{OriginalPath: path, Reason: reason, Mode: "external-removal"}
+	meta := agent.BranchMeta{}
+	if c.sessionRecoveryMeta != nil {
+		meta = c.sessionRecoveryMeta(req)
+	}
+	info, err := c.executor.Session().SaveConflictRecoveryBranch(agent.RecoveryBranchOptions{
+		OriginalPath: path,
+		Reason:       reason,
+		BranchMeta:   meta,
+	})
+	if err != nil {
+		return "", fmt.Errorf("preserve externally removed session: %w", err)
+	}
+	if err := c.commitRecoveredSession(path, reason, info); err != nil {
+		return "", err
+	}
+	appendSnapshotConflictDiagnostic(path, "external-removal", "moved_to_stable_recovery", saveErr, info.Path, info.Existing)
+	slog.Warn("controller: active session was removed externally; moved runtime to stable recovery path",
+		"path", path, "recovery", info.Path, "existing", info.Existing)
+	c.sink.Emit(sessionRecoveryNotice(event.NoticeCodeSessionRecoveryForked,
+		"the open session file was removed outside Reasonix; your active conversation was preserved as one recovery copy"))
+	return info.Path, nil
+}
+
 // snapshotConflictLogAttrs flattens a snapshot-conflict error into slog attrs.
 // Field reports of #6069-class "session changed on disk" spam are only
 // diagnosable when the logs say which trigger fired and what the revision
@@ -3926,59 +3955,6 @@ func snapshotConflictLogAttrs(saveErr error, path, mode string) []any {
 		)
 	}
 	return attrs
-}
-
-type snapshotConflictDiagnostic struct {
-	At               time.Time `json:"at"`
-	BranchID         string    `json:"branch_id"`
-	Mode             string    `json:"mode"`
-	Outcome          string    `json:"outcome"`
-	Kind             string    `json:"kind,omitempty"`
-	DiskMessages     int       `json:"disk_messages,omitempty"`
-	SnapshotMessages int       `json:"snapshot_messages,omitempty"`
-	BaseRevision     int64     `json:"base_revision,omitempty"`
-	DiskRevision     int64     `json:"disk_revision,omitempty"`
-	RecoveryBranchID string    `json:"recovery_branch_id,omitempty"`
-	ExistingRecovery bool      `json:"existing_recovery,omitempty"`
-}
-
-func appendSnapshotConflictDiagnostic(path, mode, outcome string, saveErr error, recoveryPath string, existing bool) {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return
-	}
-	rec := snapshotConflictDiagnostic{
-		At:       time.Now(),
-		BranchID: agent.BranchID(path),
-		Mode:     mode,
-		Outcome:  outcome,
-	}
-	var conflict *agent.SessionSnapshotConflictError
-	if errors.As(saveErr, &conflict) && conflict != nil {
-		rec.Kind = string(conflict.Kind)
-		rec.DiskMessages = conflict.ExistingMessages
-		rec.SnapshotMessages = conflict.SnapshotMessages
-		rec.BaseRevision = conflict.BaseRevision
-		rec.DiskRevision = conflict.DiskRevision
-	}
-	if recoveryPath != "" {
-		rec.RecoveryBranchID = agent.BranchID(recoveryPath)
-		rec.ExistingRecovery = existing
-	}
-	data, err := json.Marshal(rec)
-	if err != nil {
-		return
-	}
-	logPath := store.SessionConflictLog(path)
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
-		return
-	}
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	_, _ = f.Write(append(data, '\n'))
 }
 
 // conflictOutcome is recoverSnapshotConflict's declared result. Callers act
@@ -4154,9 +4130,9 @@ func (c *Controller) commitRecoveredSession(originalPath, reason string, info ag
 	c.sessionPath = info.Path
 	c.guardianPath = guardian.PathFor(info.Path)
 	c.mu.Unlock()
-	// Recovery branch is a new lineage path; do not keep writing the original
-	// session's projection sidecar.
-	c.bindExecutorProjection(info.Path, false)
+	// Recovery branch is a new lineage path. Load an inherited projection
+	// sidecar when present so the model view stays compressed across the fork.
+	c.bindExecutorProjection(info.Path, true)
 	c.setActiveJobSession(info.Path)
 	c.rebindCheckpoints(info.Path)
 	c.transplantInFlightTurnMarker(originalPath, info.Path)
@@ -4923,51 +4899,6 @@ func (c *Controller) Todos() []evidence.TodoItem {
 		return nil
 	}
 	return c.executor.CanonicalTodoState()
-}
-
-// ToolResultData holds the full arguments and output for one tool call, loaded
-// on demand when a frontend expands a collapsed tool card.
-type ToolResultData struct {
-	Args      string                  `json:"args"`
-	Output    string                  `json:"output"`
-	Execution *provider.ToolExecution `json:"execution,omitempty"`
-}
-
-// ToolResult looks up a tool call by its ID in the session history and returns
-// the full arguments + output that were elided from the frontend's items[].
-// Returns nil when the tool ID isn't found (e.g. a sub-agent's tool call that
-// lives in a different session).
-func (c *Controller) ToolResult(toolID string) *ToolResultData {
-	if c.executor == nil {
-		return nil
-	}
-	msgs := c.executor.Session().Snapshot()
-	// Search backwards: tool result first (most recent), then find the args
-	// from the preceding assistant turn.
-	for i, msg := range slices.Backward(msgs) {
-		if msg.Role != provider.RoleTool || msg.ToolCallID != toolID {
-			continue
-		}
-		out := &ToolResultData{
-			Args:      "",
-			Output:    msg.Content,
-			Execution: msg.ToolExecution,
-		}
-		// Walk back to find the assistant turn that issued this call.
-		for j := i; j >= 0; j-- {
-			if msgs[j].Role != provider.RoleAssistant {
-				continue
-			}
-			for _, tc := range msgs[j].ToolCalls {
-				if tc.ID == toolID {
-					out.Args = tc.Arguments
-					return out
-				}
-			}
-		}
-		return out
-	}
-	return nil
 }
 
 // Balance queries the active provider's wallet balance, or (nil, nil) when the

@@ -6,8 +6,10 @@ import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
 import { app, onFilesDropped } from "../lib/bridge";
 import { enqueueInboxGuidance } from "../lib/inboxSubmit";
-import { formatInboxError } from "../lib/inboxError";
-import { guidanceNeedsRetry, guidanceTextMatches, kickIdleGuidance, markGuidanceQueued } from "../lib/composerGuidance";
+import { formatInboxError, isInboxItemMissing } from "../lib/inboxError";
+import { inboxScopeKey } from "../lib/composerInboxQueue";
+import { useComposerInboxRefresh } from "../lib/useComposerInboxRefresh";
+import { guidanceIsInFlight, guidanceNeedsRetry, guidanceTextMatches, kickIdleGuidance, markGuidanceQueued } from "../lib/composerGuidance";
 import { canUsePromptHistory, composerEnterAction, composerEscapeAction, composerMenuKeyAction, insertComposerNewline, isFnKeyEvent, isImeKeyEvent, promptHistoryDirectionFromEvent } from "../lib/composerKeyboard";
 import { cacheGeneration, loadOlder } from "../lib/composerHistory";
 import { sessionTurnsLabel } from "../lib/sessionCatalogPresentation";
@@ -543,6 +545,7 @@ export function Composer({
   pendingAsk = false,
   transientDismissSignal,
   sessionKey,
+  inboxSessionPath,
   workspaceScopeKey,
   fileRefRefreshKey,
   guidanceConsumedKey,
@@ -635,6 +638,7 @@ export function Composer({
   pendingAsk?: boolean;
   transientDismissSignal?: number;
   sessionKey?: string;
+  inboxSessionPath?: string;
   workspaceScopeKey?: string;
   fileRefRefreshKey?: number | string;
   guidanceConsumedKey?: string;
@@ -659,6 +663,7 @@ export function Composer({
   const redoComboLabel = useShortcutComboLabel("composer.redo");
   const yoloComboLabel = useShortcutComboLabel("toolApproval.yolo");
   const draftKey = sessionKey || tabId || DEFAULT_COMPOSER_DRAFT_KEY;
+  const inboxSessionKey = inboxScopeKey(inboxSessionPath, workspaceScopeKey);
   const now = useTick(running);
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -1137,6 +1142,11 @@ export function Composer({
     restoreComposerDraft(draftsBySessionRef.current[draftKey] ?? emptyComposerDraft());
   }, [draftKey]);
 
+  const applyInboxQueue = useCallback((items: PendingGuidance[]) => updatePendingGuidanceForDraft(draftKey, () => items), [draftKey]);
+  const collapseInboxQueue = useCallback(() => setGuidanceExpanded(false), []);
+  const refreshInboxQueue = useCallback(() => setGuidanceRetryNonce((value) => value + 1), []);
+  useComposerInboxRefresh(tabId, draftKey, guidanceDraftKey, inboxSessionKey, guidanceQueuePreviewKey, guidanceRetryNonce, running, applyInboxQueue, collapseInboxQueue, refreshInboxQueue);
+
   useEffect(() => {
     return () => {
       draftsBySessionRef.current[activeDraftKeyRef.current] = snapshotComposerDraft();
@@ -1174,52 +1184,6 @@ export function Composer({
     const next = pendingGuidance[0];
     if (next?.id.startsWith("local-")) void sendQueuedGuidance(next, draftKey);
   }, [draftKey, guidanceDraftKey, guidanceRetryNonce, running, submitDisabled, pendingGuidance, suspendedByDecision]);
-
-  useEffect(() => {
-    if (guidanceDraftKey !== draftKey) return;
-    let live = true;
-    const fallback = guidanceQueuePreviewKey
-      .split("\n")
-      .filter(Boolean)
-      .map((text, i) => ({ id: `local-${i}`, text, submitText: text }));
-    // Older Wails bindings and focused component tests do not expose the new
-    // inbox methods yet. Preserve their local preview contract.
-    if (typeof app.InboxSnapshot !== "function") {
-      updatePendingGuidanceForDraft(draftKey, () => fallback);
-      setGuidanceExpanded(false);
-      return;
-    }
-    // Refresh durable server metadata when running transitions change Controller-owned dispatch/ack.
-    void app.InboxSnapshot(tabId || "").then((snap) => {
-      if (!live) return;
-      const durable = (snap?.items ?? []).map((it: { id: string; preview: string; state?: string; intent?: string; source?: string }) => ({
-        id: it.id,
-        text: it.preview,
-        submitText: "",
-        state: it.state,
-        intent: it.intent,
-        source: it.source,
-        paused: Boolean(snap?.paused),
-        recoveredCount: snap?.paused && snap?.recovered
-          ? (snap.recoveredCount || snap.items.length)
-          : undefined,
-      }));
-      updatePendingGuidanceForDraft(draftKey, () => durable.length > 0 ? durable : fallback);
-      setGuidanceExpanded(false);
-    }).catch(() => {
-      if (!live) return;
-      // Fallback: local preview lines without durable ids (will re-enqueue).
-      updatePendingGuidanceForDraft(
-        draftKey,
-        () =>
-          guidanceQueuePreviewKey
-            .split("\n")
-            .filter(Boolean)
-            .map((text, i) => ({ id: `local-${i}`, text, submitText: text })),
-      );
-    });
-    return () => { live = false; };
-  }, [draftKey, guidanceDraftKey, guidanceQueuePreviewKey, running, tabId, guidanceRetryNonce]);
 
   useEffect(() => {
     if (guidanceExpanded && pendingGuidance.length <= 2) setGuidanceExpanded(false);
@@ -2133,7 +2097,7 @@ export function Composer({
         if (guidanceText) {
           // Durable follow-up: only clear the composer after a durable receipt.
           try {
-            const receipt = await enqueueInboxGuidance(app, submitTabId || "", guidanceText, guidanceSubmitText, structured);
+            const receipt = await enqueueInboxGuidance(app, submitTabId || "", guidanceText, guidanceSubmitText, structured, { steer: true });
             if (receipt?.error) throw new Error(receipt.error);
             updatePendingGuidanceForDraft(submitDraftKey, (items) => [
               ...items.map((item) => receipt.paused ? { ...item, paused: true } : item),
@@ -2249,7 +2213,28 @@ export function Composer({
         (items) => items.filter((queued) => queued.id !== item.id),
       );
     } catch (error) {
+      if (isInboxItemMissing(error)) {
+        updatePendingGuidanceForDraft(
+          activeDraftKeyRef.current,
+          (items) => items.filter((queued) => queued.id !== item.id),
+        );
+        return;
+      }
       showToast(formatInboxError(error, locale), "warn");
+    }
+  };
+
+  const editQueuedGuidance = async (item: PendingGuidance, nextText: string) => {
+    const text = nextText.trim();
+    if (!text || item.id.startsWith("local-")) return;
+    try {
+      await app.UpdateInboxItem(tabId || "", item.id, text, text);
+      updatePendingGuidanceForDraft(activeDraftKeyRef.current, (items) =>
+        items.map((queued) => queued.id === item.id ? { ...queued, text, submitText: text } : queued),
+      );
+    } catch (error) {
+      showToast(formatInboxError(error, locale), "warn");
+      throw error;
     }
   };
 
@@ -4316,7 +4301,7 @@ export function Composer({
       {pendingGuidance.length > 0 && (
         <Suspense fallback={null}>
           <ComposerGuidanceShelf
-            recovery={pendingGuidance[0]?.paused ? {
+            recovery={pendingGuidance[0]?.paused && !pendingGuidance.some((item) => guidanceIsInFlight(item.state)) ? {
               draftKey,
               tabId: tabId || "",
               count: pendingGuidance[0].recoveredCount || pendingGuidance.length,
@@ -4335,6 +4320,7 @@ export function Composer({
             onToggleExpanded={() => setGuidanceExpanded((value) => !value)}
             onSend={(item) => void sendQueuedGuidance(item)}
             onDismiss={(item) => void dismissQueuedGuidance(item)}
+            onEdit={(item, text) => editQueuedGuidance(item, text)}
           />
         </Suspense>
       )}

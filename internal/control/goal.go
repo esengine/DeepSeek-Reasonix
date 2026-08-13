@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	goalContinueTurn   = "Continue pursuing the active goal under its task contract. Do the next useful work, then call update_goal with your disposition: continue (include the next concrete step in next_action), complete (only when fully done and verified), or blocked (when only the user can unblock)."
+	goalContinueTurn   = "Continue pursuing the active goal under its task contract. Do the next useful work, then call update_goal with your disposition: continue (include the next concrete step in next_action), complete (when the request is done and verification was attempted or reported unavailable), or blocked (when only the user can unblock)."
 	goalCompleteNotice = "goal complete"
 	unlimitedGoalTurns = -1
 
@@ -475,12 +475,11 @@ func (g *goalMachine) admitContinuation(res goalAdvanceResult) (goalContinuation
 // the state to persist after every Goal turn.
 //
 // Decision priority (the FSM is the exclusive decision point):
-//  1. complete + readiness ready (report or evaluator) → complete
+//  1. complete + readiness ready, or a repeated complete whose only leftovers
+//     are unavailable checks → complete
 //  2. blocked (report or evaluator) → blocked immediately (no triple confirm)
 //  3. evaluator failed/uncertain → safe pause (fail closed, never default to continue)
-//  4. otherwise continue, carrying the missing requirements (complete rejected
-//     by readiness, or no report with an explicit missing list) or the report's
-//     next_action as the next turn's prompt.
+//  4. otherwise continue, carrying the missing requirements or next_action
 func (g *goalMachine) advance(in goalAdvanceInput) goalAdvanceResult {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -494,7 +493,6 @@ func (g *goalMachine) advance(in goalAdvanceInput) goalAdvanceResult {
 	// A top-level goal turn (the first turn or a synthetic continuation) counts
 	// as an observational statistic; the in-Run model/tool loop is not re-counted.
 	g.turnsUsed++
-	g.observeGoalProgress(in)
 	var notice string
 	var intercept string
 	var interceptNotice string
@@ -503,7 +501,8 @@ func (g *goalMachine) advance(in goalAdvanceInput) goalAdvanceResult {
 	// Terminal dispositions first, then evaluator fail-closed; otherwise continue.
 	reportBlocked := in.report != nil && in.report.status == GoalStatusBlocked
 	reportComplete := in.report != nil && in.report.status == GoalStatusComplete
-	completeOK := (reportComplete || evaluatorComplete) && formatIncompleteTodos(in.todos, in.readiness.Reason) == ""
+	complete := g.completeDecision(in, reportComplete, evaluatorComplete)
+	g.observeGoalProgress(in, complete.accept || reportBlocked || evaluatorBlocked)
 	switch {
 	case reportBlocked:
 		// A single blocked report ends the goal immediately; the host no longer
@@ -527,7 +526,7 @@ func (g *goalMachine) advance(in goalAdvanceInput) goalAdvanceResult {
 		g.stopCause = ""
 		g.lastEvaluatorReason = clipGoalReason(in.evaluator.reason)
 		notice = "goal blocked: " + reason
-	case completeOK:
+	case complete.accept:
 		g.goal = ""
 		g.status = GoalStatusComplete
 		g.block = ""
@@ -563,31 +562,7 @@ func (g *goalMachine) advance(in goalAdvanceInput) goalAdvanceResult {
 		g.block = clipGoalReason(reason)
 		notice = "goal paused: " + reason
 	default:
-		// Continue. A complete claim rejected by readiness, or a turn with no
-		// report but an explicit missing list, carries the missing requirements
-		// into the next turn; a continue report carries its next_action.
-		switch {
-		case reportComplete:
-			intercept = formatIncompleteTodos(in.todos, in.readiness.Reason)
-			interceptNotice = "Goal is not ready to complete yet; continuing the remaining work."
-			g.lastContinuationReason = clipGoalReason("readiness missing: " + in.readiness.Reason)
-		case in.report != nil && in.report.status == GoalStatusRunning:
-			g.lastContinuationReason = clipGoalReason(in.report.reason)
-			if in.report.nextAction != "" {
-				intercept = in.report.nextAction
-			}
-		case len(in.readiness.Missing) > 0:
-			intercept = formatIncompleteTodos(in.todos, in.readiness.Reason)
-			interceptNotice = "Goal is not ready to complete yet; continuing the remaining work."
-			g.lastContinuationReason = clipGoalReason("readiness missing: " + in.readiness.Reason)
-		case evaluatorComplete:
-			intercept = formatIncompleteTodos(in.todos, in.readiness.Reason)
-			interceptNotice = "Goal is not ready to complete yet; continuing the remaining work."
-			g.lastEvaluatorReason = clipGoalReason(in.evaluator.reason)
-			g.lastContinuationReason = clipGoalReason("readiness missing: " + in.readiness.Reason)
-		case in.evaluator != nil && in.evaluator.outcome == goaleval.OutcomeContinue:
-			g.lastEvaluatorReason = clipGoalReason(in.evaluator.reason)
-		}
+		intercept, interceptNotice = g.applyContinue(in, reportComplete, evaluatorComplete, complete)
 	}
 	res := goalAdvanceResult{
 		notice:            notice,
@@ -879,7 +854,7 @@ func formatIncompleteTodos(todos []evidence.TodoItem, readiness string) string {
 		b.WriteString(p)
 		b.WriteString("\n")
 	}
-	b.WriteString("Fix or use todo_write/complete_step to mark done, then report complete again via update_goal.")
+	b.WriteString("Fix remaining work, or if a check cannot be run declare it in update_goal completion.unverified and report complete.")
 	return b.String()
 }
 

@@ -25,7 +25,7 @@ func TestMalformedToolArgsEchoSchema(t *testing.T) {
 	if err := a.Run(context.Background(), "ask me"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	got := toolResult(a.session, "ask")
+	got := toolResult(a.sess.conversation, "ask")
 	if !strings.Contains(got, "not valid JSON") || !strings.Contains(got, `"options"`) {
 		t.Fatalf("malformed-args result should echo the schema, got %q", got)
 	}
@@ -44,7 +44,7 @@ func TestValidArgsErrorOmitsSchema(t *testing.T) {
 	if err := a.Run(context.Background(), "ask me"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	got := toolResult(a.session, "ask")
+	got := toolResult(a.sess.conversation, "ask")
 	if strings.Contains(got, "not valid JSON") {
 		t.Fatalf("a valid-JSON arg error must not get the schema hint, got %q", got)
 	}

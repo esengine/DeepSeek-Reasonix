@@ -409,7 +409,7 @@ func TestRunStreamRetryRequestCountIsLinearNotTriangular(t *testing.T) {
 		t.Fatalf("CompletionTokens = %d, want billable sum 4", u.CompletionTokens)
 	}
 	// ContextSnapshot and compaction use the latest full attempt shape.
-	if last := a.lastUsage.Load(); last == nil || last.PromptTokens != 30 {
+	if last := a.sess.output.lastUsage.Load(); last == nil || last.PromptTokens != 30 {
 		t.Fatalf("lastUsage prompt = %+v, want latest attempt prompt 30", last)
 	}
 }
@@ -1083,7 +1083,7 @@ func TestRunStoresTransformedNonToolReasoningForToolCallOnlyProvider(t *testing.
 	if err := a.Run(context.Background(), "go"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if got := assistantReasoning(a.session.Messages); got != "translated display" {
+	if got := assistantReasoning(a.sess.conversation.Messages); got != "translated display" {
 		t.Fatalf("stored non-tool reasoning = %q, want transformed display text", got)
 	}
 }

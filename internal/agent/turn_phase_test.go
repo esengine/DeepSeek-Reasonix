@@ -72,7 +72,7 @@ func TestExecutionPolicyPresentOnMutationTurn(t *testing.T) {
 	a := New(prov, tool.NewRegistry(), NewSession("sys"), Options{AgentPreset: "delivery"}, event.Discard)
 	_ = a.Run(context.Background(), "explain mutexes")
 	found := false
-	for _, m := range a.session.Messages {
+	for _, m := range a.sess.conversation.Messages {
 		if m.Role == provider.RoleUser && strings.Contains(m.Content, `preset="delivery"`) {
 			found = true
 		}

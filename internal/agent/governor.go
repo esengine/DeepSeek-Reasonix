@@ -43,29 +43,29 @@ func governorExit(sample evidence.OutcomeSample) bool {
 // applyGovernor stamps eligibility on the round's sample and, under the
 // experiment arm, toggles the per-request depth override.
 func (a *Agent) applyGovernor(sample *evidence.OutcomeSample) {
-	sample.GovernorEligible = governorTrigger(*sample, a.lastReasoning)
+	sample.GovernorEligible = governorTrigger(*sample, a.turn.lastReasoning)
 	if !governorEnabled {
 		return
 	}
 	switch {
-	case a.governor.engaged && governorExit(*sample):
-		a.governor.engaged = false
-	case !a.governor.engaged && sample.GovernorEligible:
-		a.governor.engaged = true
-		if !a.governor.noticed {
-			a.governor.noticed = true
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeReasoningGovernor,
+	case a.task.governor.engaged && governorExit(*sample):
+		a.task.governor.engaged = false
+	case !a.task.governor.engaged && sample.GovernorEligible:
+		a.task.governor.engaged = true
+		if !a.task.governor.noticed {
+			a.task.governor.noticed = true
+			a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeReasoningGovernor,
 				Text:   "Exploration phase with expensive thinking; riding reduced reasoning depth until evidence work starts.",
 				Detail: "reasoning governor engaged: no verification debt, no local execution, previous round over the reasoning threshold"})
 		}
 	}
-	sample.GovernorEngaged = a.governor.engaged
+	sample.GovernorEngaged = a.task.governor.engaged
 }
 
 // governorOverride is the request-scoped effort the engaged governor asks
 // for; empty when disengaged so the configured depth stands.
 func (a *Agent) governorOverride() string {
-	if governorEnabled && a.governor.engaged {
+	if governorEnabled && a.task.governor.engaged {
 		return governorEffort
 	}
 	return ""

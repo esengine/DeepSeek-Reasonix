@@ -60,17 +60,17 @@ func TestContextManagerPersistsAndRestoresBlockedFailureFingerprint(t *testing.T
 	if firstProvider.calls != 1 { // single summary attempt; no summarizeOnce second pass
 		t.Fatalf("summary calls = %d, want 1", firstProvider.calls)
 	}
-	if first.compactionState.LastReceipt == nil {
+	if first.sess.compactionState.LastReceipt == nil {
 		t.Fatal("failed summary did not persist a maintenance receipt")
 	}
-	if status := first.compactionState.LastReceipt.Status; status != "blocked" && status != "failed" {
+	if status := first.sess.compactionState.LastReceipt.Status; status != "blocked" && status != "failed" {
 		t.Fatalf("receipt status = %q, want blocked or failed", status)
 	}
-	if first.compactionState.LastReceipt.BlockedInputHash == "" {
+	if first.sess.compactionState.LastReceipt.BlockedInputHash == "" {
 		t.Fatal("failure receipt missing input hash")
 	}
-	if first.compactionState.BlockedInputHash != "" {
-		t.Fatalf("top-level blocked mirror should not be written: %q", first.compactionState.BlockedInputHash)
+	if first.sess.compactionState.BlockedInputHash != "" {
+		t.Fatalf("top-level blocked mirror should not be written: %q", first.sess.compactionState.BlockedInputHash)
 	}
 	if _, err := first.contextManager().Prepare(context.Background(), policy); err != nil {
 		t.Fatal(err)
@@ -81,10 +81,10 @@ func TestContextManagerPersistsAndRestoresBlockedFailureFingerprint(t *testing.T
 
 	resumedProvider := &failingSummaryProvider{}
 	resumed := newAgent(resumedProvider)
-	if resumed.compactionState.LastReceipt == nil {
+	if resumed.sess.compactionState.LastReceipt == nil {
 		t.Fatal("failure receipt was not restored")
 	}
-	if status := resumed.compactionState.LastReceipt.Status; status != "blocked" && status != "failed" {
+	if status := resumed.sess.compactionState.LastReceipt.Status; status != "blocked" && status != "failed" {
 		t.Fatalf("restored receipt status = %q, want blocked or failed", status)
 	}
 	if _, err := resumed.contextManager().Prepare(context.Background(), policy); err != nil {

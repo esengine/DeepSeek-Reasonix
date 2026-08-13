@@ -2,7 +2,7 @@
 
 import { subjectOf } from "../lib/tools";
 import { toolGroupKind } from "../components/ToolGroup";
-import { historyMessagesToItems, isReadOnlyTool } from "../lib/useController";
+import { historyMessagesToItems, isBatchedReadOnlyTool, isReadOnlyTool } from "../lib/useController";
 import type { HistoryMessage } from "../lib/types";
 
 let passed = 0;
@@ -40,6 +40,11 @@ eq(
   "modify",
   "resolved writer MCP stays in the modify group",
 );
+eq(
+  toolGroupKind({ kind: "tool", id: "s1", name: "web_search", args: `{"query":"bitcoin"}`, readOnly: true, status: "done" }),
+  null,
+  "provider web search is not grouped with explore tools",
+);
 
 const history = historyMessagesToItems([{
   role: "assistant",
@@ -73,9 +78,28 @@ eq(history[1]?.kind === "tool" ? history[1].readOnly : false, true, "resolved re
 eq(history[2]?.kind === "tool" ? history[2].readOnly : true, false, "resolved writer history restores writer classification");
 eq(history[2]?.kind === "tool" ? history[2].resolvedName : "", "mcp__db__write", "history keeps resolved MCP target");
 eq(isReadOnlyTool("read_file"), true, "legacy built-in reader remains read-only");
+eq(isReadOnlyTool("web_search"), true, "provider web search cards are read-only");
+eq(isBatchedReadOnlyTool("web_search", true), false, "provider web search stays a standalone card");
+eq(isBatchedReadOnlyTool("read_file", true), true, "ordinary readers still batch");
 eq(isReadOnlyTool("grep"), true, "legacy search reader remains read-only");
 eq(isReadOnlyTool("use_capability"), false, "legacy unresolved proxy remains fail-closed");
 eq(isReadOnlyTool("unknown_tool"), false, "unknown history tool remains fail-closed");
+
+const searchHistory = historyMessagesToItems([{
+  role: "assistant",
+  content: "answer only",
+  serverSearch: [{
+    id: "s1",
+    query: "bitcoin",
+    results: [{ title: "新闻本文", url: "https://example.com/a" }],
+  }],
+}] as HistoryMessage[], "h-").items;
+eq(searchHistory[0]?.kind, "tool", "server search hydrates as a tool card before the answer");
+eq(searchHistory[0]?.kind === "tool" ? searchHistory[0].name : "", "web_search", "server search card uses web_search");
+eq(searchHistory[0]?.kind === "tool" ? subjectOf("web_search", searchHistory[0].args) : "", "bitcoin", "search card subject is the query");
+eq(searchHistory[1]?.kind, "assistant", "model text stays a separate assistant item");
+eq(searchHistory[1]?.kind === "assistant" ? searchHistory[1].text : "", "answer only", "answer text does not include search results");
+eq(searchHistory[1]?.kind === "assistant" ? searchHistory[1].searchSources?.[0]?.title : "", "新闻本文", "answer hydrates search footnotes");
 
 if (failed) {
   process.stdout.write(`\n${failed} failed, ${passed} passed\n`);

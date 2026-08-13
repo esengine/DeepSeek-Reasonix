@@ -137,3 +137,20 @@ func TestAllCommandHintsScopesReusedIDsToTheirTurns(t *testing.T) {
 		t.Fatalf("hint must not list the failed colliding command, got %q", hint)
 	}
 }
+
+func TestCancelledBeforeExecutionCannotVerifyOrHintCommand(t *testing.T) {
+	msgs := []provider.Message{
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID: "cancelled", Name: "bash", Arguments: `{"command":"go test ./unrun/..."}`,
+		}}},
+		{Role: provider.RoleTool, ToolCallID: "cancelled", Name: "bash", Content: " cancelled: context cancelled before execution\n"},
+	}
+	ctx := evidence.WithSessionMessages(context.Background(), func() []provider.Message { return msgs })
+
+	if verifyCommandFromSession(ctx, "go test ./unrun/...") {
+		t.Fatal("a command cancelled before execution must not count as verification")
+	}
+	if hint := allCommandHints(ctx, evidence.NewLedger()); strings.Contains(hint, "go test ./unrun/...") {
+		t.Fatalf("a command cancelled before execution must not be offered as a successful hint, got %q", hint)
+	}
+}

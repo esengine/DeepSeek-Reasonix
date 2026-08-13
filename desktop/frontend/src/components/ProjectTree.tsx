@@ -10,7 +10,7 @@ import { asArray } from "../lib/array";
 import { useToast } from "../lib/toast";
 import { app } from "../lib/bridge";
 import { onProjectTreeChangedV2 } from "../lib/sessionCatalogBridge";
-import { isRuntimeSessionNode, isTopicNode, mergeProjectTopicPage, projectTreeDedupedExactTime, projectTreeEventAffectsFolder, projectTreeFolderDisclosure, projectTreeReadActivityKey, projectTreeRevisionIsFresh, projectTreeShouldApplyShellSnapshot, projectTreeShouldRenderTopicActions, projectTreeShouldSuppressOpenForRename, projectTreeTopicArchiveBlocked, projectTreeTopicHasUnreadActivity, projectTreeTopicHoverCardModel, projectTreeTopicMenuOffersPin, projectTreeTopicMetaLine, projectTreeTopicOpenRequest, topicActivityAt, topicActivityDateLabel, topicActivityLabel, topicIsActive, topicStatus, topicStatusLabel, topicUnknownTimeLabel, type ProjectTreePendingTopicOpen, type ProjectTreeReadActivity, type ProjectTreeTopicHoverCard, type ProjectTreeVariant } from "../lib/projectTreeTopic";
+import { isRuntimeSessionNode, isTopicNode, mergeProjectTopicPage, projectTreeDedupedExactTime, projectTreeEventAffectsFolder, projectTreeFolderDisclosure, projectTreeReadActivityKey, projectTreeRevisionIsFresh, projectTreeShellChildren, projectTreeShouldApplyShellSnapshot, projectTreeShouldRenderTopicActions, projectTreeShouldSuppressOpenForRename, projectTreeTopicArchiveBlocked, projectTreeTopicHasUnreadActivity, projectTreeTopicHoverCardModel, projectTreeTopicMenuOffersPin, projectTreeTopicMetaLine, projectTreeTopicOpenRequest, projectTreeWithoutTopic, topicActivityAt, topicActivityDateLabel, topicActivityLabel, topicIsActive, topicStatus, topicStatusLabel, topicUnknownTimeLabel, type ProjectTreePendingTopicOpen, type ProjectTreeReadActivity, type ProjectTreeTopicHoverCard, type ProjectTreeVariant } from "../lib/projectTreeTopic";
 export * from "../lib/projectTreeTopic";
 import type { ProjectNode, SessionCatalogStatus } from "../lib/types";
 import { topicActivityTime } from "../lib/session";
@@ -77,7 +77,7 @@ const WORKBENCH_ORGANIZE_KEY = "projectTree:workbenchOrganize";
 // Shared by classic and workbench; key string kept for existing saved choices.
 const WORKBENCH_SORT_KEY = "projectTree:workbenchSort";
 const READ_ACTIVITY_KEY = "projectTree:readActivity";
-const READ_ACTIVITY_INIT_KEY = "projectTree:readActivityInitialized";
+const READ_ACTIVITY_BASELINE_KEY = "projectTree:readActivityBaselineAt";
 
 function loadReadActivity(): ProjectTreeReadActivity {
   try {
@@ -99,6 +99,18 @@ function saveReadActivity(readActivity: ProjectTreeReadActivity) {
     localStorage.setItem(READ_ACTIVITY_KEY, JSON.stringify(readActivity));
   } catch {
     /* localStorage unavailable */
+  }
+}
+
+function loadReadActivityBaselineAt(): number {
+  try {
+    const parsed = Number(localStorage.getItem(READ_ACTIVITY_BASELINE_KEY));
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    const now = Date.now();
+    localStorage.setItem(READ_ACTIVITY_BASELINE_KEY, String(now));
+    return now;
+  } catch {
+    return Date.now();
   }
 }
 
@@ -398,6 +410,7 @@ export function ProjectTree({
   const [catalogStatus, setCatalogStatus] = useState<SessionCatalogStatus>({
     state: "opening", revision: 0, indexed: 0, total: 0, repairPending: 0,
   });
+  const [indexingDone, setIndexingDone] = useState(false);
   const [topicPageState, setTopicPageState] = useState<Record<string, { nextCursor?: string; loading: boolean }>>({});
   const topicPageStateRef = useRef(topicPageState);
   const updateTopicPageState = useCallback((key: string, next: { nextCursor?: string; loading: boolean }) => {
@@ -431,6 +444,7 @@ export function ProjectTree({
   const [workbenchOrganizeMode, setWorkbenchOrganizeMode] = useState<WorkbenchOrganizeMode>(loadWorkbenchOrganizeMode);
   const [workbenchSortMode, setWorkbenchSortMode] = useState<WorkbenchSortMode>(loadWorkbenchSortMode);
   const [readActivity, setReadActivity] = useState<ProjectTreeReadActivity>(loadReadActivity);
+  const [readBaselineAt] = useState(loadReadActivityBaselineAt);
   const filterRef = useRef<HTMLDivElement>(null);
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -486,6 +500,7 @@ export function ProjectTree({
   }, []);
 
   const topicLoadSeqRef = useRef<Record<string, number>>({});
+  const loadProjectTopicsRef = useRef<(project: ProjectNode, append?: boolean) => Promise<void>>(async () => {});
 
   const loadProjectTopics = useCallback(async (project: ProjectNode, append = false) => {
     if (project.kind !== "project" && project.kind !== "global_folder") return;
@@ -523,9 +538,10 @@ export function ProjectTree({
       updateTopicPageState(key, { ...topicPageStateRef.current[key], loading: false });
     }
   }, [query, timeFilter, updateTopicPageState]);
+  loadProjectTopicsRef.current = loadProjectTopics;
   // Snapshot is intentionally shells-only. Preserve already loaded pages by
   // project key so a metadata refresh does not collapse or blank the sidebar.
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options?: { reloadTopics?: boolean }) => {
     try {
       const snapshot = await app.GetProjectTreeSnapshot();
       const rev = snapshot.revision ?? 0, empty = treeRef.current.length === 0;
@@ -533,10 +549,17 @@ export function ProjectTree({
       if (projectTreeRevisionIsFresh(latestRevisionRef.current, rev)) latestRevisionRef.current = Math.max(latestRevisionRef.current, rev);
       const projects = asArray(snapshot.projects);
       setCatalogStatus(snapshot.catalog);
+      setIndexingDone(Boolean(snapshot.indexingDone));
+      const keepLoadedTopics = !options?.reloadTopics;
       setTree((current) => projects.map((project) => {
         const previous = current.find((node) => node.key === project.key);
-        return { ...project, children: asArray(previous?.children) };
+        return { ...project, children: projectTreeShellChildren(previous?.children, { keepLoadedTopics }) };
       }));
+      if (options?.reloadTopics) {
+        for (const project of projects) {
+          void loadProjectTopicsRef.current(project);
+        }
+      }
     } catch {
       /* bridge unavailable */
     }
@@ -587,6 +610,17 @@ export function ProjectTree({
     return () => clearTimeout(timer);
   }, [expanded, loadProjectTopics, query, timeFilter, tree]);
 
+  // First catalog scan can finish before the frontend subscribed to v2 events.
+  // Reload expanded folders once indexingDone flips so the metadata fallback
+  // is replaced by the scanned projection without requiring New Chat.
+  useEffect(() => {
+    if (!indexingDone) return;
+    for (const project of treeRef.current) {
+      const key = projectNodeKey(project, 0);
+      if (expanded.has(key)) void loadProjectTopics(project);
+    }
+  }, [indexingDone, expanded, loadProjectTopics]);
+
   // Following the active topic is a view concern over the tree already held.
   useEffect(() => {
     const collapsed = manuallyCollapsedRef.current;
@@ -601,51 +635,13 @@ export function ProjectTree({
     const activityAt = topicActivityAt(node);
     if (!key || activityAt <= 0) return;
     setReadActivity((prev) => {
-      if ((prev[key] ?? 0) >= activityAt) return prev;
-      const next = { ...prev, [key]: activityAt };
+      const readAt = Math.max(activityAt, Date.now());
+      if ((prev[key] ?? 0) >= readAt) return prev;
+      const next = { ...prev, [key]: readAt };
       saveReadActivity(next);
       return next;
     });
   }, []);
-
-  useEffect(() => {
-    if (tree.length === 0) return;
-    try {
-      if (localStorage.getItem(READ_ACTIVITY_INIT_KEY)) return;
-    } catch {
-      return;
-    }
-    const baseline: ProjectTreeReadActivity = {};
-    const collectBaseline = (nodes: ProjectNode[]) => {
-      for (const node of nodes) {
-        if ((isTopicNode(node) || isRuntimeSessionNode(node)) && topicStatus(node) === "") {
-          const key = projectTreeReadActivityKey(node);
-          const activityAt = topicActivityAt(node);
-          if (key && activityAt > 0) baseline[key] = Math.max(baseline[key] ?? 0, activityAt);
-        }
-        collectBaseline(asArray(node.children));
-      }
-    };
-    collectBaseline(tree);
-    try {
-      localStorage.setItem(READ_ACTIVITY_INIT_KEY, "1");
-    } catch {
-      /* localStorage unavailable */
-    }
-    if (Object.keys(baseline).length === 0) return;
-    setReadActivity((prev) => {
-      const next = { ...prev };
-      let changed = false;
-      for (const [key, value] of Object.entries(baseline)) {
-        if ((next[key] ?? 0) >= value) continue;
-        next[key] = value;
-        changed = true;
-      }
-      if (!changed) return prev;
-      saveReadActivity(next);
-      return next;
-    });
-  }, [tree]);
 
   useEffect(() => {
     const markActive = (nodes: ProjectNode[]) => {
@@ -914,14 +910,16 @@ export function ProjectTree({
   const trashTopic = async (topicId: string) => {
     if (!beginTrashingTopic(topicId)) return;
     try {
+      setTree((current) => projectTreeWithoutTopic(current, topicId));
       await app.TrashTopic(topicId);
       setMenuTopic(null);
       setMenuPoint(null);
       setConfirmAction(null);
-      await refresh();
+      await refresh({ reloadTopics: true });
       await onTopicsChanged?.();
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), "error");
+      await refresh({ reloadTopics: true });
     } finally {
       endTrashingTopic(topicId);
     }
@@ -1172,7 +1170,7 @@ export function ProjectTree({
       const accentStyle = projectAccentStyle(node.projectColor, scope === "global" ? "var(--project-tree-global-accent)" : undefined);
       const active = topicIsActive(node, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath);
       const label = (node.label || node.topicId || "Untitled").replace(/^●\s*/, "");
-      const conflictCopyLabel = isSessionNode && node.recovered ? t("recovery.badge") : "";
+      // Ordinary list never advertises recovery copies; History owns that view.
       const activityAt = node.lastActivityAt || node.createdAt || 0;
       // Every variant is a single-line row with the activity time on the right;
       // classic moved there too so turns and the exact date live in the hover
@@ -1191,15 +1189,14 @@ export function ProjectTree({
       const showStatusInSide = status === "thinking" || status === "streaming" || status === "waiting_confirmation" || status === "background_job";
       const showWaitingPill = waitingConfirmation;
       const showSideTime = sideTimeVisible && !showWaitingPill;
-      const unread = projectTreeTopicHasUnreadActivity(node, readActivity, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath);
+      const unread = projectTreeTopicHasUnreadActivity(node, readActivity, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath, readBaselineAt);
       const topicId = node.topicId ?? "";
       const topicTrashing = trashingTopics.has(topicId);
       const imSource = scope === "global" && topicId ? imTopicSources[topicId] : undefined;
       const imSourceLabel = imSource?.label || "";
       const imSourceTitle = imSourceLabel ? t("msg.fromIm", { source: imSourceLabel }) : "";
       const imSourcePlatform = (imSource?.platform || "im").replace(/[^a-z0-9_-]/gi, "").toLowerCase() || "im";
-      const conflictCopyTitle = isSessionNode && node.recovered ? t("recovery.branch") : "";
-      const title = [label, conflictCopyTitle, imSourceTitle, statusLabel, metaFull, projectTreeDedupedExactTime(metaFull, exactTimeLabel)].filter(Boolean).join(" · ");
+      const title = [label, imSourceTitle, statusLabel, metaFull, projectTreeDedupedExactTime(metaFull, exactTimeLabel)].filter(Boolean).join(" · ");
       const topicMenuOpen = !isSessionNode && menuTopic === topicId;
       const pinned = Boolean(node.pinned);
       const pinLabel = t(pinned ? "projectTree.unpinTopic" : "projectTree.pinTopic");
@@ -1323,7 +1320,7 @@ export function ProjectTree({
           >
             <span className="project-tree__topic-copy">
               <span className="project-tree__topic-heading">
-                <span className="project-tree__topic-label">{conflictCopyLabel ? `${label} · ${conflictCopyLabel}` : label}</span>
+                <span className="project-tree__topic-label">{label}</span>
                 {imSource && (
                   <span
                     className={`project-tree__topic-im project-tree__topic-im--${imSourcePlatform}`}
@@ -1334,7 +1331,7 @@ export function ProjectTree({
                     <span>{imSourceLabel}</span>
                   </span>
                 )}
-                {!compactTopics && statusLabel && (!classicTopics || status === "paused" || status === "error") && (
+                {!compactTopics && statusLabel && (!classicTopics || status === "paused" || status === "awaiting_delivery" || status === "error") && (
                   <span className={`project-tree__topic-status project-tree__topic-status--${status}`}>{statusLabel}</span>
                 )}
               </span>

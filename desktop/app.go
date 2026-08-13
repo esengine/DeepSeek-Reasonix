@@ -2338,7 +2338,7 @@ func (a *App) clearActiveSessionRuntime(tab *WorkspaceTab, oldCtrl control.Sessi
 	newCtrl.SetFreshSessionPath(path)
 
 	a.mu.Lock()
-	if current := a.tabs[tab.ID]; current != tab {
+	if err := a.authorizeTabReplacementLocked(tab, newCtrl, "clearing the session", "fresh"); err != nil {
 		a.mu.Unlock()
 		// The old session is already destroyed either way; release what this
 		// clear acquired for the replaced tab (fresh controller and its
@@ -2347,7 +2347,7 @@ func (a *App) clearActiveSessionRuntime(tab *WorkspaceTab, oldCtrl control.Sessi
 		tab.releaseSessionLease()
 		oldCtrl.CloseAfterDestroy()
 		a.emitProjectTreeChangedForSessionDirs(newCtrl.SessionDir())
-		return SessionClearResult{}, fmt.Errorf("tab %q changed while clearing the session", tab.ID)
+		return SessionClearResult{}, err
 	}
 	tab.Ctrl = newCtrl
 	tab.sink = newSink
@@ -2917,35 +2917,6 @@ func (a *App) SummarizeUpToForTab(tabID string, turn int) error {
 		return nil
 	}
 	return ctrl.SummarizeUpTo(a.ctx, turn)
-}
-
-// SessionMeta summarises one saved session for the history panel.
-type SessionMeta struct {
-	Path           string `json:"path"`
-	Preview        string `json:"preview"`         // first user message
-	Title          string `json:"title,omitempty"` // user-chosen name, when set (overrides preview)
-	Turns          int    `json:"turns"`
-	TurnsState     string `json:"turnsState"`
-	CreatedAt      int64  `json:"createdAt"`      // unix milliseconds
-	LastActivityAt int64  `json:"lastActivityAt"` // unix milliseconds
-	ModTime        int64  `json:"modTime"`        // compatibility alias for lastActivityAt
-	DeletedAt      int64  `json:"deletedAt,omitempty"`
-	Current        bool   `json:"current"`
-	Open           bool   `json:"open"`
-	Scope          string `json:"scope,omitempty"`
-	WorkspaceRoot  string `json:"workspaceRoot,omitempty"`
-	TopicID        string `json:"topicId,omitempty"`
-	TopicTitle     string `json:"topicTitle,omitempty"`
-	Kind           string `json:"kind,omitempty"` // "channel" for external IM transcripts
-	Channel        string `json:"channel,omitempty"`
-	ChannelLabel   string `json:"channelLabel,omitempty"`
-	RemoteID       string `json:"remoteId,omitempty"`
-	ChatType       string `json:"chatType,omitempty"`
-	UserID         string `json:"userId,omitempty"`
-	ThreadID       string `json:"threadId,omitempty"`
-	SessionSource  string `json:"sessionSource,omitempty"`
-	Recovered      bool   `json:"recovered,omitempty"`    // created by conflict recovery, including an adopted/continued branch
-	RecoveryCopy   bool   `json:"recoveryCopy,omitempty"` // actual branch content is unchanged and covered by its parent
 }
 
 type channelSessionRoute struct {
@@ -3790,25 +3761,7 @@ func (a *App) ResumeSessionPage(path string, limit int) (HistoryPage, error) {
 }
 
 func (a *App) ResumeSessionPageForTab(tabID, path string, limit int) (HistoryPage, error) {
-	tab, ctrl := a.tabAndCtrlByID(tabID)
-	if tab == nil || ctrl == nil {
-		return HistoryPage{}, fmt.Errorf("tab is not ready")
-	}
-	sessionPath, _, err := validateSessionPath(controllerSessionDir(ctrl), path)
-	if err != nil {
-		return HistoryPage{}, err
-	}
-	loaded, err := loadResumableSession(sessionPath)
-	if err != nil {
-		return HistoryPage{}, err
-	}
-	if sessionRuntimeKey(tab.currentSessionPath()) != sessionRuntimeKey(sessionPath) {
-		if err := a.rebindTabToLoadedSessionPath(tab, sessionPath, loaded); err != nil {
-			return HistoryPage{}, err
-		}
-	}
-	a.setTabReadOnly(tab.ID, false)
-	return a.HistoryPageForTab(tab.ID, 0, limit), nil
+	return a.resumeSessionPageForTab(tabID, path, limit)
 }
 
 // ResumeSessionForTab is the tab-scoped form of ResumeSession. A saved session
@@ -3818,6 +3771,9 @@ func (a *App) ResumeSessionForTab(tabID, path string) ([]HistoryMessage, error) 
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if tab == nil || ctrl == nil {
 		return []HistoryMessage{}, fmt.Errorf("tab is not ready")
+	}
+	if canonical := a.resolveCanonicalSessionPath(path); canonical != "" {
+		path = canonical
 	}
 	sessionPath, _, err := validateSessionPath(controllerSessionDir(ctrl), path)
 	if err != nil {
@@ -4132,13 +4088,9 @@ func (a *App) rebindTabToLoadedSessionPath(tab *WorkspaceTab, sessionPath string
 	// generation, atomically publish the target controller/lease/profile/path,
 	// and advance the epoch in the same App.mu commit.
 	a.mu.Lock()
-	if tab.removed ||
-		a.tabs[tab.ID] != tab ||
-		tab.Ctrl != source.ctrl ||
-		a.runtimeForTabLocked(tab) != transition.runtime ||
-		!a.sessionRuntimePathTransitionValidLocked(transition) {
+	if err := a.validateAndBindSessionRebindLocked(tab, source, transition, candidate, targetLease); err != nil {
 		a.mu.Unlock()
-		return fmt.Errorf("tab runtime changed while switching sessions; retry")
+		return err
 	}
 	var oldLease *agent.SessionLease
 	oldCtrl := tab.Ctrl
@@ -5304,13 +5256,14 @@ type HistoryMessage struct {
 	ToolResultError    string                    `json:"toolResultError,omitempty"`
 	// Execution is local shell metadata restored onto ToolCards after history
 	// reload. Omitted when absent so older frontends ignore it safely.
-	Execution       *provider.ToolExecution   `json:"execution,omitempty"`
-	Pending         bool                      `json:"pending,omitempty"`
-	Trigger         string                    `json:"trigger,omitempty"`
-	Messages        int                       `json:"messages,omitempty"`
-	Summary         string                    `json:"summary,omitempty"`
-	Archive         string                    `json:"archive,omitempty"`
-	DecisionReceipt *provider.DecisionReceipt `json:"decisionReceipt,omitempty"`
+	Execution       *provider.ToolExecution     `json:"execution,omitempty"`
+	Pending         bool                        `json:"pending,omitempty"`
+	Trigger         string                      `json:"trigger,omitempty"`
+	Messages        int                         `json:"messages,omitempty"`
+	Summary         string                      `json:"summary,omitempty"`
+	Archive         string                      `json:"archive,omitempty"`
+	DecisionReceipt *provider.DecisionReceipt   `json:"decisionReceipt,omitempty"`
+	ServerSearch    []provider.ServerSearchCall `json:"serverSearch,omitempty"`
 }
 
 type HistoryToolCall struct {
@@ -5710,13 +5663,8 @@ func (state *historyMessageConvertState) convertHistoryMessage(
 		})
 	}
 	if m.LocalOnly {
-		if steerText, isSteer := agent.SteerText(agent.UserMessageText(m)); isSteer {
-			return append(out, HistoryMessage{
-				Role:    "notice",
-				Content: agent.UnappliedSteerNotice(steerText),
-				Code:    event.NoticeCodeUnappliedSteer,
-				Level:   "warn",
-			})
+		if rows, handled := historySteerRows(agent.UserMessageText(m), true); handled {
+			return append(out, rows...)
 		}
 	}
 	if state.suppressCanonicalTurn {
@@ -5734,8 +5682,8 @@ func (state *historyMessageConvertState) convertHistoryMessage(
 		// regular user bubble or being filtered as synthetic (#4044).
 		// Check against the raw m.Content: resolveUserContent applies
 		// StripComposePrefixes which trims trailing whitespace.
-		if steerText, isSteer := agent.SteerText(agent.UserMessageText(m)); isSteer {
-			return append(out, HistoryMessage{Role: "notice", Content: "↪ " + steerText})
+		if rows, handled := historySteerRows(agent.UserMessageText(m), false); handled {
+			return append(out, rows...)
 		}
 		content = historyUserDisplayContent(m, resolveUserContent)
 		if control.IsSyntheticUserMessage(content) {
@@ -5771,6 +5719,7 @@ func (state *historyMessageConvertState) convertHistoryMessage(
 			hm.SubmitText = replay
 		}
 	}
+	hm.ServerSearch = historyServerSearch(m.ServerSearch)
 	if (m.Role == provider.RoleAssistant || m.LocalOnly) && len(m.ToolCalls) > 0 {
 		hm.ToolCalls = make([]HistoryToolCall, len(m.ToolCalls))
 		for i, tc := range m.ToolCalls {
@@ -6751,6 +6700,8 @@ type Meta struct {
 	GoalRuntime *GoalRuntimeView `json:"goalRuntime,omitempty"`
 	// Nil means no authoritative snapshot; non-nil empty means clear the panel.
 	CanonicalTodos *[]evidence.TodoItem `json:"canonicalTodos,omitempty"`
+	// Closed completed todo fingerprints from this session and its lineage.
+	DismissedTodoBatches []string `json:"dismissedTodoBatches,omitempty"`
 }
 
 type GoalRuntimeView struct {
@@ -6850,30 +6801,31 @@ func (a *App) MetaForTab(tabID string) Meta {
 		sessionDigest = branchMeta.ContentDigest
 	}
 	return Meta{
-		Label:             snap.label,
-		Ready:             runtimeView.Phase == sessionRuntimeReady && snap.ctrl != nil,
-		Runtime:           runtimeView,
-		StartupErr:        snap.startupErr,
-		EventChannel:      eventChannel,
-		SessionPath:       sessionPath,
-		SessionRevision:   sessionRevision,
-		SessionDigest:     sessionDigest,
-		Cwd:               cwd,
-		WorkspaceRoot:     cwd,
-		WorkspaceName:     tabWorkspaceNameForScope(snap.scope, cwd),
-		WorkspacePath:     cwd,
-		GitBranch:         extras.gitBranch,
-		ImageInputEnabled: extras.imageInputEnabled,
-		AutoApproveTools:  autoApproveTools,
-		Bypass:            autoApproveTools,
-		CollaborationMode: collaborationMode,
-		ToolApprovalMode:  toolApprovalMode,
-		AgentPreset:       boot.NormalizeAgentPreset(tokenMode),
-		TokenMode:         tokenMode,
-		Goal:              goal,
-		GoalStatus:        goalStatus,
-		GoalRuntime:       goalRuntimeViewFromController(snap.ctrl),
-		CanonicalTodos:    ctrlTodos(snap.ctrl),
+		Label:                snap.label,
+		Ready:                runtimeView.Phase == sessionRuntimeReady && snap.ctrl != nil,
+		Runtime:              runtimeView,
+		StartupErr:           snap.startupErr,
+		EventChannel:         eventChannel,
+		SessionPath:          sessionPath,
+		SessionRevision:      sessionRevision,
+		SessionDigest:        sessionDigest,
+		Cwd:                  cwd,
+		WorkspaceRoot:        cwd,
+		WorkspaceName:        tabWorkspaceNameForScope(snap.scope, cwd),
+		WorkspacePath:        cwd,
+		GitBranch:            extras.gitBranch,
+		ImageInputEnabled:    extras.imageInputEnabled,
+		AutoApproveTools:     autoApproveTools,
+		Bypass:               autoApproveTools,
+		CollaborationMode:    collaborationMode,
+		ToolApprovalMode:     toolApprovalMode,
+		AgentPreset:          boot.NormalizeAgentPreset(tokenMode),
+		TokenMode:            tokenMode,
+		Goal:                 goal,
+		GoalStatus:           goalStatus,
+		GoalRuntime:          goalRuntimeViewFromController(snap.ctrl),
+		CanonicalTodos:       ctrlTodos(snap.ctrl),
+		DismissedTodoBatches: a.dismissedTodoBatchesForSession(sessionPath),
 	}
 }
 
@@ -10035,14 +9987,14 @@ func (a *App) SetModelForTab(tabID, name string) (retErr error) {
 	timing.LeaseAndResume = time.Since(stageStarted)
 	stageStarted = time.Now()
 	a.mu.Lock()
-	if current := a.tabs[tab.ID]; current != tab {
+	if err := a.authorizeTabReplacementLocked(tab, newCtrl, "switching model", "model-switch"); err != nil {
 		// The tab was closed/replaced while we built the new controller off-lock;
 		// adopting it now would leak the runtime onto an orphaned tab and pin the
 		// session lease forever.
 		a.mu.Unlock()
 		newCtrl.Close()
 		tab.releaseSessionLease()
-		return fmt.Errorf("tab %q changed while switching model; retry", tab.ID)
+		return err
 	}
 	tab.Ctrl = newCtrl
 	tab.model = name
@@ -10218,11 +10170,11 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 		return err
 	}
 	a.mu.Lock()
-	if current := a.tabs[tab.ID]; current != tab {
+	if err := a.authorizeTabReplacementLocked(tab, newCtrl, "switching effort", "effort-switch"); err != nil {
 		a.mu.Unlock()
 		newCtrl.Close()
 		tab.releaseSessionLease()
-		return fmt.Errorf("tab %q changed while switching effort; retry", tab.ID)
+		return err
 	}
 	tab.Ctrl = newCtrl
 	tab.model = modelRef

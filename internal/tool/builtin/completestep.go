@@ -412,7 +412,10 @@ func verifyPathsFromSession(ctx context.Context, paths []string, wantWrite bool)
 }
 
 func sessionToolResultFailed(content string) bool {
-	return strings.HasPrefix(content, "error:") || strings.HasPrefix(content, "blocked:")
+	content = strings.TrimSpace(content)
+	return content == "cancelled: context cancelled before execution" ||
+		strings.HasPrefix(content, "error:") ||
+		strings.HasPrefix(content, "blocked:")
 }
 
 func receiptHint(label string, items []string) string {

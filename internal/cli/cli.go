@@ -725,7 +725,7 @@ func runAgent(args []string, version string) int {
 	}
 	// Fresh sessions take the lease too (defensive: the path is brand new); a
 	// resumed path is already held, making this a no-op.
-	if err := leases.Rebind(ctrl.SessionPath()); err != nil {
+	if err := rebindCLIControllerAuthority(leases, ctrl); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, control.SessionInUseMessage(err)+"; "+control.SessionLeaseCloseHint)
 		return 1
 	}
@@ -963,13 +963,13 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 	ctrl.EnsureSessionPath()
 	// Fresh sessions take the lease too (defensive: the path is brand new); a
 	// resumed path is already held, making this a no-op.
-	if err := leases.Rebind(ctrl.SessionPath()); err != nil {
+	if err := rebindCLIControllerAuthority(leases, ctrl); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, control.SessionInUseMessage(err)+"; "+control.SessionLeaseCloseHint)
 		return 1
 	}
 
 	srv := serve.New(ctrl, bc, serveCfg)
-	srv.SetSessionLeases(leases)
+	_ = srv.SetSessionLeases(leases) // same live keeper was bound above
 	return runServeFrontend(ctrl, srv, serveCfg, serveFrontendOptions{
 		command: opts.command, address: *addr,
 		portFile: *portFile, tokenFile: *tokenFile, pidFile: *pidFile,
@@ -1174,7 +1174,7 @@ func chatREPL(args []string, version string) int {
 	ctrl.EnsureSessionPath()
 	// Fresh sessions take the lease too (defensive: the path is brand new); a
 	// resumed path is already held, making this a no-op.
-	if err := leases.Rebind(ctrl.SessionPath()); err != nil {
+	if err := rebindCLIControllerAuthority(leases, ctrl); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, control.SessionInUseMessage(err)+"; "+control.SessionLeaseCloseHint)
 		return 1
 	}

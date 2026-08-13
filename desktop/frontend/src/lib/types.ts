@@ -1,5 +1,6 @@
 // Wire contract — mirrors desktop/wire.go (itself mirroring internal/serve/wire.go).
 // One event channel carries every kind; `kind` discriminates the payload.
+import type { HistoryServerSearch } from "./searchSources";
 import type { Todo } from "./tools";
 import type { ContextMaintenanceInfo, WireContextMaintenance } from "./contextMaintenanceTypes";
 export type { ContextMaintenanceInfo, ContextMaintenanceReceipt, WireContextMaintenance } from "./contextMaintenanceTypes";
@@ -512,8 +513,59 @@ export interface ProjectNode {
   recoveryReason?: string;
   recoveryDigest?: string;
   recoveryParentId?: string;
+  recoveryState?: "normal" | "repairing" | "adopted" | "preferred" | "diverged" | "recovery_only" | string;
+  recoveryBranchCount?: number;
+  recoveryUnresolvedCount?: number;
+  recoveryCleanupEligibleCount?: number;
   isolatedWorktree?: boolean;
   children?: ProjectNode[];
+}
+
+export interface RecoveryLineageMember {
+  path: string;
+  role: "normal" | "covered_copy" | "adopted" | "preferred" | "diverged" | string;
+  canonical: boolean;
+  turns: number;
+  open: boolean;
+  running: boolean;
+}
+
+export interface RecoveryLineageView {
+  groupId: string;
+  state: string;
+  branchCount: number;
+  unresolved: number;
+  cleanupEligible: number;
+  members: RecoveryLineageMember[];
+}
+
+export interface RecoveryCleanupRequest {
+  scope: string;
+  workspaceRoot?: string;
+  topicId: string;
+  apply: boolean;
+}
+
+export interface RecoveryPreferenceRequest {
+  scope: string;
+  workspaceRoot?: string;
+  topicId: string;
+  path: string;
+}
+
+export interface RecoveryCleanupItem {
+  path: string;
+  status: "eligible" | "moved" | "busy" | "kept" | string;
+  error?: string;
+}
+
+export interface RecoveryCleanupResult {
+  eligible: number;
+  moved: number;
+  busy: number;
+  kept: number;
+  dryRun: boolean;
+  items: RecoveryCleanupItem[];
 }
 
 export interface DeliveryWorktreeAvailability {
@@ -533,7 +585,7 @@ export interface DeliveryWorktreeOpenResult {
   tab: TabMeta;
 }
 
-export type ProjectTopicStatus = "thinking" | "streaming" | "waiting_confirmation" | "background_job" | "paused" | "error";
+export type ProjectTopicStatus = "thinking" | "streaming" | "waiting_confirmation" | "background_job" | "paused" | "awaiting_delivery" | "error" | "diverged_recovery";
 
 export interface TopicMeta {
   id: string;
@@ -646,6 +698,7 @@ export interface HistoryMessage {
   summary?: string;
   archive?: string;
   decisionReceipt?: WireDecisionReceipt;
+  serverSearch?: HistoryServerSearch[];
 }
 
 export interface HistoryToolCall {
@@ -832,34 +885,7 @@ export interface RewindResultView {
   coverage?: string;
 }
 
-// SessionMeta is one saved session for the history panel.
-export interface SessionMeta {
-  path: string;
-  preview: string;
-  title?: string; // user-chosen name; falls back to preview when empty
-  turns: number;
-  turnsState?: "unknown" | "valid" | "corrupt" | string;
-  createdAt: number; // unix milliseconds
-  lastActivityAt: number; // unix milliseconds
-  modTime: number; // compatibility alias for lastActivityAt
-  deletedAt?: number; // unix milliseconds, present for trashed sessions
-  current: boolean;
-  open: boolean;
-  scope?: string;       // "project" | "global"; empty for legacy → treated as "global"
-  workspaceRoot?: string;
-  topicId?: string;
-  topicTitle?: string;
-  kind?: "session" | "channel" | string;
-  channel?: string;
-  channelLabel?: string;
-  remoteId?: string;
-  chatType?: string;
-  userId?: string;
-  threadId?: string;
-  sessionSource?: string;
-  recovered?: boolean; // created by conflict recovery, including a continued branch
-  recoveryCopy?: boolean; // actual branch content is unchanged and covered by its parent
-}
+export type { SessionMeta } from "./sessionMetaTypes";
 
 export type { HistoryIndexStatus, HistorySearchContextLine, HistorySearchContextRequest, HistorySearchHit, HistorySearchPage, HistorySearchRequest, HistorySessionPage, HistorySessionPageRequest } from "./historyCatalogTypes";
 
@@ -911,7 +937,7 @@ export interface Meta {
   goal?: string;
   goalStatus?: GoalStatus;
   goalRuntime?: GoalRuntime;
-  canonicalTodos?: Todo[];
+  canonicalTodos?: Todo[]; dismissedTodoBatches?: string[];
 }
 
 export type CollaborationMode = "normal" | "plan" | "goal";

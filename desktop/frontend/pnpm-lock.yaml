@@ -51,6 +51,9 @@ importers:
       react-markdown:
         specifier: ^10.1.0
         version: 10.1.0(@types/react@19.2.18)(react@19.2.8)
+      react-virtuoso:
+        specifier: ^4.18.11
+        version: 4.18.11(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       rehype-katex:
         specifier: ^7.0.1
         version: 7.0.1
@@ -1770,6 +1773,12 @@ packages:
     peerDependencies:
       '@types/react': '>=18'
       react: '>=18'
+
+  react-virtuoso@4.18.11:
+    resolution: {integrity: sha512-Qeeq9vqa5seCxACvzbQTUeq3s2/Bu+VlwOMF0jfy3E/ZKHLiXWwJpXBhv2rckqYkvm1XRVFLCBMCmqCU8JNEJg==}
+    peerDependencies:
+      react: '>=16 || >=17 || >= 18 || >= 19'
+      react-dom: '>=16 || >=17 || >= 18 || >=19'
 
   react@19.2.8:
     resolution: {integrity: sha512-PWaYA1L/q9u2u7xYQi+Y3L3Yfnie7XyLeaJICV1MGD6LprsBxcAqGjYyr0eY3p+QdsA+x/Irkt4Qif8D63+Sbw==}
@@ -3949,6 +3958,11 @@ snapshots:
       vfile: 6.0.3
     transitivePeerDependencies:
       - supports-color
+
+  react-virtuoso@4.18.11(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
+    dependencies:
+      react: 19.2.8
+      react-dom: 19.2.8(react@19.2.8)
 
   react@19.2.8: {}
 

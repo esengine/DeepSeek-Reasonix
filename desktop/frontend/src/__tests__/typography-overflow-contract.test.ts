@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { JSDOM } from "jsdom";
 import { TEXT_SIZES } from "../lib/textSize";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
@@ -98,6 +99,69 @@ eq(
 );
 eq(finalDeclaration(".transcript--empty", "overflow-y"), "auto", "empty transcript can scroll instead of clipping");
 eq(finalDeclaration(".welcome", "overflow"), "visible", "welcome empty state is not clipped by its own box");
+ok(
+  /\.md\s*>\s*:where\([^)]*p[^)]*ul[^)]*ol[^)]*\)\s*\{[^}]*content-visibility:\s*auto;[^}]*contain-intrinsic-size:\s*auto 72px;/.test(styles),
+  "non-transcript markdown still culls offscreen blocks with a 72px placeholder",
+);
+ok(
+  /\.transcript__row\s+\.md\s*>\s*\*\s*(?:,[^{]*)?\{[^}]*content-visibility:\s*visible;[^}]*contain-intrinsic-size:\s*none;/.test(styles),
+  "virtual transcript rows do not measure markdown through 72px placeholders",
+);
+ok(
+  hasDeclaration(".transcript__row .msg", "content-visibility", "visible") &&
+    hasDeclaration(".transcript__row .turn-collapse", "content-visibility", "visible"),
+  "virtual transcript cards stay measurable after the markdown override",
+);
+
+function paddingSides(value: string) {
+  const parts = value.trim().split(/\s+/);
+  if (parts.length === 1) return { right: parts[0], left: parts[0] };
+  if (parts.length === 2 || parts.length === 3) return { right: parts[1], left: parts[1] };
+  return { right: parts[1], left: parts[3] };
+}
+function isZeroPad(value: string | undefined) {
+  return value === undefined || value === "0" || value === "0px";
+}
+for (const block of matchingBlocks(".transcript")) {
+  const shorthand = /(?:^|;)\s*padding\s*:\s*([^;]+)/.exec(block);
+  if (shorthand) {
+    const sides = paddingSides(shorthand[1]);
+    ok(
+      isZeroPad(sides.left) && isZeroPad(sides.right),
+      `Virtuoso scroller padding stays vertical-only (${shorthand[1].trim()})`,
+    );
+  }
+  const padLeft = /(?:^|;)\s*padding-left\s*:\s*([^;]+)/.exec(block);
+  const padRight = /(?:^|;)\s*padding-right\s*:\s*([^;]+)/.exec(block);
+  ok(isZeroPad(padLeft?.[1].trim()), "Virtuoso scroller does not set padding-left");
+  ok(isZeroPad(padRight?.[1].trim()), "Virtuoso scroller does not set padding-right");
+}
+ok(hasDeclaration(".transcript", "--transcript-inline-pad", "32px"), "default transcript inline inset is 32px");
+ok(hasDeclaration(".transcript", "--transcript-inline-pad", "16px"), "narrow viewports tighten the transcript inline inset");
+eq(finalDeclaration(".transcript__row", "padding-left"), "var(--transcript-inline-pad, 32px)", "virtual rows own the left inset");
+eq(finalDeclaration(".transcript__row", "padding-right"), "var(--transcript-inline-pad, 32px)", "virtual rows own the right inset");
+eq(finalDeclaration(".transcript__header", "padding-left"), "var(--transcript-inline-pad, 32px)", "load-older header uses the same inline inset");
+eq(finalDeclaration(".transcript--empty", "padding"), "16px 32px", "empty transcript keeps its own horizontal inset");
+
+{
+  const stylesheet = readFileSync(resolve(testDir, "../styles.css"), "utf8");
+  const dom = new JSDOM(
+    `<!doctype html><html><head><style>${stylesheet}</style></head><body>
+      <div class="transcript__row"><div class="md"><p id="inside">inside</p></div></div>
+      <div class="md"><p id="outside">outside</p></div>
+    </body></html>`,
+    { pretendToBeVisual: true },
+  );
+  const inside = dom.window.getComputedStyle(dom.window.document.getElementById("inside")!);
+  const outside = dom.window.getComputedStyle(dom.window.document.getElementById("outside")!);
+  // jsdom may not implement content-visibility; treat an empty computed value
+  // as "engine gap" and still require the source contract above.
+  if (inside.contentVisibility || outside.contentVisibility) {
+    eq(inside.contentVisibility, "visible", "computed style keeps transcript markdown measurable");
+    eq(outside.contentVisibility, "auto", "computed style still culls markdown outside the transcript");
+  }
+  dom.window.close();
+}
 ok(
   hasDeclaration(".transcript--empty > .welcome", "margin-block", "auto"),
   "empty-state auto margins apply only to the welcome content",

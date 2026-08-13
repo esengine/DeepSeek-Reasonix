@@ -179,7 +179,7 @@ func TestDeepSeekResponsesPresetMatchesOfficialSupport(t *testing.T) {
 	if entry.Kind != "responses" || entry.BaseURL != "https://api.deepseek.com" || entry.ResponsesMode != "stateless" {
 		t.Fatalf("deepseek responses endpoint = %+v", entry)
 	}
-	if len(entry.Models) != 1 || entry.Models[0] != "deepseek-v4-flash" || entry.Default != "deepseek-v4-flash" {
+	if !entry.HasModel("deepseek-v4-flash") || !entry.HasModel("deepseek-v4-pro") || entry.Default != "deepseek-v4-flash" {
 		t.Fatalf("deepseek responses models = %v default=%q", entry.Models, entry.Default)
 	}
 	if entry.ModelsURL != "" {
@@ -187,6 +187,24 @@ func TestDeepSeekResponsesPresetMatchesOfficialSupport(t *testing.T) {
 	}
 	if !EffectiveWebSearch(&entry) || entry.Vision || entry.VisionModels != nil {
 		t.Fatalf("deepseek responses capabilities = web_search:%t vision:%t vision_models:%v", EffectiveWebSearch(&entry), entry.Vision, entry.VisionModels)
+	}
+	var cfg Config
+	if err := cfg.UpsertProvider(entry); err != nil {
+		t.Fatalf("UpsertProvider: %v", err)
+	}
+	flash, ok := cfg.ResolveModel("deepseek-responses/deepseek-v4-flash")
+	if !ok {
+		t.Fatal("Flash model did not resolve")
+	}
+	pro, ok := cfg.ResolveModel("deepseek-responses/deepseek-v4-pro")
+	if !ok {
+		t.Fatal("Pro model did not resolve")
+	}
+	if cap := EffortCapabilityForEntry(flash); cap.Default != "high" || !containsString(cap.Levels, "disabled") || !containsString(cap.Levels, "low") || !containsString(cap.Levels, "max") {
+		t.Fatalf("Flash effort capability = %+v", cap)
+	}
+	if cap := EffortCapabilityForEntry(pro); cap.Default != "high" || containsString(cap.Levels, "low") || !containsString(cap.Levels, "max") {
+		t.Fatalf("Pro effort capability = %+v", cap)
 	}
 }
 

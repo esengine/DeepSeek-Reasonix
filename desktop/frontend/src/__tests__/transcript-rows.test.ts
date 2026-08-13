@@ -136,6 +136,20 @@ const keys = (rows: TranscriptRow[]) => rows.map((row) => row.key).join(",");
 }
 
 {
+  const models = buildTurnModels([
+    { kind: "user", id: "u-search", text: "search" },
+    { kind: "tool", id: "s1", name: "web_search", args: `{"query":"bitcoin"}`, readOnly: true, status: "done" },
+    { kind: "tool", id: "r1", name: "read_file", args: "{}", readOnly: true, status: "done" },
+    { kind: "assistant", id: "a-search", text: "answer only", reasoning: "", streaming: false },
+  ]);
+  const rows = buildTranscriptRows(models, rowOptions(EMPTY_FOLDS, "expanded"));
+  const searchRow = rows.find((row) => row.kind === "tool" && "item" in row && row.item.id === "s1");
+  const batch = rows.find((row) => row.kind === "tool-batch");
+  ok(Boolean(searchRow), "provider web search stays a standalone tool card");
+  eq(batch && "items" in batch ? batch.items.map((item) => item.name).join(",") : "", "read_file", "ordinary readers still batch beside the search card");
+}
+
+{
   // A fold whose process items are all filtered out (sub-agent subcalls,
   // todo_write) renders no header row at all.
   const models = buildTurnModels([
@@ -158,6 +172,20 @@ const keys = (rows: TranscriptRow[]) => rows.map((row) => row.key).join(",");
   ]);
   const rows = buildTranscriptRows(models, rowOptions(EMPTY_FOLDS));
   eq(kinds(rows), "notice,user,answer,turn-actions", "prelude notices render without a synthetic user row");
+}
+
+{
+  const models = buildTurnModels([
+    { kind: "user", id: "u1", text: "请继续完成 PPT 任务" },
+    { kind: "assistant", id: "a-step", text: "下一步：安装 pptxgenjs 并确认 Pillow。", reasoning: "", streaming: false },
+    { kind: "notice", id: "auto-guard", level: "info", text: "↪ A tool failed. Use read-only diagnosis as needed, continue unrelated work automatically." },
+    { kind: "notice", id: "user-steer", level: "info", text: "↪ 改用 Pillow 10 验证" },
+    { kind: "assistant", id: "a-done", text: "pptxgenjs 已安装成功", reasoning: "", streaming: false },
+  ]);
+  const rows = buildTranscriptRows(models, rowOptions(EMPTY_FOLDS));
+  eq(kinds(rows), "user,answer,notice,answer,turn-actions", "host Auto Guard guidance is not a user-side steer row");
+  const notice = rows.find((row) => row.kind === "notice");
+  eq(notice && "item" in notice ? notice.item.text : "", "↪ 改用 Pillow 10 验证", "real user steers stay visible");
 }
 
 {

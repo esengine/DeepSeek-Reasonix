@@ -60,13 +60,24 @@ func (e *SessionLeaseError) Unwrap() error {
 }
 
 type SessionLease struct {
-	path      string
-	ownerID   uint64
-	mu        sync.Mutex
-	leaseLock *sessionLockFile
-	released  bool
+	path            string
+	ownerID         uint64
+	mu              sync.Mutex
+	leaseLock       *sessionLockFile
+	released        bool
+	writeGeneration uint64
+	// activeSaves counts authority-guarded save cycles still inside path/file
+	// locks. Release waits for this to reach zero so a rebind cannot revoke
+	// mid-write and create an ABA ownership hole.
+	activeSaves int
+	// releaseWait is closed when activeSaves drains to zero while a Release
+	// is waiting. At most one waiter is parked.
+	releaseWait chan struct{}
 	// beforeReleaseLock is a test hook for the registry-before-unlock invariant.
 	beforeReleaseLock func()
+	// beforeReleaseWait is a test hook reached only after Release observes an
+	// in-flight authority-guarded save and before it parks.
+	beforeReleaseWait func()
 }
 
 func TryAcquireSessionLease(path string) (*SessionLease, error) {
@@ -229,10 +240,28 @@ func (l *SessionLease) Release() {
 	if l == nil {
 		return
 	}
-	l.mu.Lock()
-	if l.released {
+	// Wait for authority-guarded saves to finish before revoking ownership.
+	// Without this, a concurrent save that already passed Valid() can finish
+	// after a successor lease is issued for the same path (ABA).
+	for {
+		l.mu.Lock()
+		if l.released {
+			l.mu.Unlock()
+			return
+		}
+		if l.activeSaves == 0 {
+			break
+		}
+		if l.releaseWait == nil {
+			l.releaseWait = make(chan struct{})
+		}
+		wait := l.releaseWait
+		beforeReleaseWait := l.beforeReleaseWait
 		l.mu.Unlock()
-		return
+		if beforeReleaseWait != nil {
+			beforeReleaseWait()
+		}
+		<-wait
 	}
 	l.released = true
 	leaseLock := l.leaseLock

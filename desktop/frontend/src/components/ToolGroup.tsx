@@ -15,7 +15,7 @@ const MODIFY_TOOLS = new Set(["write_file", "edit_file", "multi_edit", "move_fil
 const DELEGATE_TOOLS = new Set(["task", "run_skill", "explore", "research", "review", "security_review"]);
 
 export function toolGroupKind(item: ToolItem): ToolGroupKind | null {
-  if (item.parentId || item.name === "todo_write" || item.name === "exit_plan_mode") return null;
+  if (item.parentId || item.name === "todo_write" || item.name === "exit_plan_mode" || item.name === "web_search") return null;
   if (SHELL_TOOLS.has(item.name)) return "shell";
   if (EXPLORE_TOOLS.has(item.name)) return "explore";
   if (MODIFY_TOOLS.has(item.name)) return "modify";
@@ -92,6 +92,7 @@ function toolDisplayName(name: string): string {
     case "read_file": return "Read";
     case "ls": return "List";
     case "web_fetch": return "Web Fetch";
+    case "web_search": return "Search";
     case "code_index": return "Code Index";
     case "write_file": return "Write";
     case "edit_file": return "Edit";

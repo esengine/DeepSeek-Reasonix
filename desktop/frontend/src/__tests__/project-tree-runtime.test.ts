@@ -3,6 +3,8 @@
 import {
   projectTreeFolderDisclosure,
   mergeProjectTopicPage,
+  projectTreeWithoutTopic,
+  projectTreeShellChildren,
   projectTreeEventAffectsFolder,
   projectTreeRevisionIsFresh,
   projectTreeShouldApplyShellSnapshot,
@@ -12,6 +14,8 @@ import {
   projectTreeShouldSuppressOpenForRename,
   projectTreeReadActivityKey,
   projectTreeTopicHasUnreadActivity,
+  topicIsActive,
+  topicStatusLabel,
   projectTreeTopicArchiveBlocked,
   projectTreeShouldRenderTopicActions,
   projectTreeTopicMetaLine,
@@ -24,6 +28,9 @@ import {
 } from "../components/ProjectTree";
 import { projectTreeTrashingTopics } from "../lib/projectTreeArchive";
 import type { ProjectNode } from "../lib/types";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
 let passed = 0;
 let failed = 0;
@@ -211,6 +218,34 @@ eq(
   "running topic keeps runtime status instead of completed-unread attention",
 );
 
+const relocatedTopic = { ...completedTopic, sessionPath: "/s/b.jsonl" };
+const relocatedKey = projectTreeReadActivityKey({ ...completedTopic, sessionPath: "/s/a.jsonl" }) ?? "";
+eq(
+  projectTreeReadActivityKey(relocatedTopic),
+  relocatedKey,
+  "unread key stays on the logical topic when the representative path changes",
+);
+eq(
+  projectTreeTopicHasUnreadActivity(relocatedTopic, { [relocatedKey]: 2000 }, "project", "/repo", "other-topic"),
+  false,
+  "marking a topic read survives a later representative-path refresh",
+);
+eq(
+  projectTreeTopicHasUnreadActivity(completedTopic, {}, "project", "/repo", "other-topic", undefined, 2000),
+  false,
+  "activity at or before the first-seen baseline is not unread",
+);
+eq(
+  projectTreeTopicHasUnreadActivity(completedTopic, {}, "project", "/repo", "other-topic", undefined, 1999),
+  true,
+  "activity newer than the first-seen baseline is unread",
+);
+eq(
+  topicIsActive({ ...completedTopic, sessionPath: "/s/a.jsonl" }, "project", "/repo", "topic-complete", "/s/other.jsonl"),
+  true,
+  "logical topic stays active when the representative path is not the open file",
+);
+
 for (const status of ["thinking", "streaming", "waiting_confirmation", "background_job"] as const) {
   eq(
     projectTreeTopicArchiveBlocked({ ...completedTopic, status, running: true }),
@@ -219,13 +254,24 @@ for (const status of ["thinking", "streaming", "waiting_confirmation", "backgrou
   );
 }
 
-for (const status of ["paused", "error"] as const) {
+for (const status of ["paused", "error", "awaiting_delivery"] as const) {
   eq(
     projectTreeTopicArchiveBlocked({ ...completedTopic, status, running: true }),
     false,
     `${status} topic remains archivable despite the legacy running flag`,
   );
 }
+
+eq(
+  topicStatusLabel({ ...completedTopic, status: "awaiting_delivery" }, testT),
+  "projectTree.status.awaitingDelivery",
+  "delivery-check pause uses its own sidebar label, not paused",
+);
+eq(
+  topicStatusLabel({ ...completedTopic, status: "paused" }, testT),
+  "projectTree.status.paused",
+  "recovery pause keeps the paused sidebar label",
+);
 
 eq(
   projectTreeTopicArchiveBlocked({ ...completedTopic, running: true }),
@@ -655,6 +701,42 @@ eq(
   ).map((node) => `${node.key}:${node.label}`),
   ["topic-a:A", "topic-b:New B", "topic-c:C"],
   "overlapping keyset pages replace duplicates without changing stable order",
+);
+
+eq(
+  projectTreeWithoutTopic(
+    [
+      {
+        key: "p",
+        kind: "project",
+        label: "P",
+        children: [
+          { key: "topic_archive", kind: "topic", label: "Archive me", topicId: "topic_archive" },
+          { key: "topic_keep", kind: "topic", label: "Keep me", topicId: "topic_keep" },
+        ],
+      },
+    ],
+    "topic_archive",
+  ).map((node) => (node.children ?? []).map((child) => child.topicId)),
+  [["topic_keep"]],
+  "archiving a topic removes it from loaded children before the catalog reloads",
+);
+
+eq(
+  projectTreeShellChildren(
+    [{ key: "topic_archive", kind: "topic", label: "Archive me", topicId: "topic_archive" }],
+    { keepLoadedTopics: false },
+  ),
+  [],
+  "a mutation refresh does not restore stale topic children from the previous page",
+);
+
+const projectTreeSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../components/ProjectTree.tsx"), "utf8");
+eq(projectTreeSource.includes("projectTreeWithoutTopic("), true, "TrashTopic removes the archived row before the shell refresh");
+eq(
+  projectTreeSource.includes("keepLoadedTopics: false") || projectTreeSource.includes("reloadTopics"),
+  true,
+  "archive refresh reloads topic pages instead of preserving stale children",
 );
 
 eq(

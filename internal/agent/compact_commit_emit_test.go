@@ -106,8 +106,8 @@ func TestCommitSurvivesPostPublishDirSyncFailure(t *testing.T) {
 	if disk.Projection.ProjectionVersion != memVer {
 		t.Fatalf("disk/memory fork: disk=%d mem=%d", disk.Projection.ProjectionVersion, memVer)
 	}
-	if disk.Generation != a.compactionState.Generation {
-		t.Fatalf("generation fork: disk=%d mem=%d", disk.Generation, a.compactionState.Generation)
+	if disk.Generation != a.sess.compactionState.Generation {
+		t.Fatalf("generation fork: disk=%d mem=%d", disk.Generation, a.sess.compactionState.Generation)
 	}
 }
 
@@ -143,18 +143,18 @@ func TestBlockedReceiptSurvivesPostPublishDirSyncFailure(t *testing.T) {
 	if prov.calls != 1 {
 		t.Fatalf("summary calls = %d, want 1", prov.calls)
 	}
-	if a.compactionState.LastReceipt == nil {
+	if a.sess.compactionState.LastReceipt == nil {
 		t.Fatal("memory lost blocked/failed receipt after post-publish dir-sync fault")
 	}
-	if status := a.compactionState.LastReceipt.Status; status != "blocked" && status != "failed" {
+	if status := a.sess.compactionState.LastReceipt.Status; status != "blocked" && status != "failed" {
 		t.Fatalf("receipt status = %q", status)
 	}
 	disk, ok, err := LoadCompactionState(path)
 	if err != nil || !ok || disk.LastReceipt == nil {
 		t.Fatalf("disk receipt missing: ok=%v err=%v", ok, err)
 	}
-	if disk.Generation != a.compactionState.Generation {
-		t.Fatalf("blocked generation fork: disk=%d mem=%d", disk.Generation, a.compactionState.Generation)
+	if disk.Generation != a.sess.compactionState.Generation {
+		t.Fatalf("blocked generation fork: disk=%d mem=%d", disk.Generation, a.sess.compactionState.Generation)
 	}
 	if _, err := a.contextManager().Prepare(context.Background(), policy); err != nil {
 		t.Fatal(err)

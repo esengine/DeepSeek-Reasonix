@@ -17,8 +17,8 @@ func (a *Agent) SetPlanContract(plan *plancontract.Plan) {
 	if a == nil {
 		return
 	}
-	a.todoMu.Lock()
-	defer a.todoMu.Unlock()
+	a.sess.todoMu.Lock()
+	defer a.sess.todoMu.Unlock()
 	if plan == nil {
 		a.planContract = nil
 		return
@@ -31,8 +31,8 @@ func (a *Agent) planContractSnapshot() *plancontract.Plan {
 	if a == nil {
 		return nil
 	}
-	a.todoMu.Lock()
-	defer a.todoMu.Unlock()
+	a.sess.todoMu.Lock()
+	defer a.sess.todoMu.Unlock()
 	if a.planContract == nil {
 		return nil
 	}

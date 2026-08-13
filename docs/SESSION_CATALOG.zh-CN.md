@@ -2,9 +2,9 @@
 
 Reasonix 始终以会话 transcript、event log、metadata sidecar 和
 `desktop-projects.json` 作为唯一权威数据。桌面项目树读取位于
-`<缓存根目录>/session-catalog/v2.sqlite` 的一次性 SQLite 查询投影；删除该数据库
-不会删除或修改任何会话。1.24.0 的 `v1.sqlite` 缓存会保留，避免与仍在运行或
-降级后的 1.24.0 进程交叉写同一投影。
+`<缓存根目录>/session-catalog/v3.sqlite` 的一次性 SQLite 查询投影；删除该数据库
+不会删除或修改任何会话。早期的 `v1.sqlite` 与 `v2.sqlite` 缓存会保留，避免与仍在
+运行或降级后的旧版本进程交叉写同一投影。
 
 ## 不变量
 

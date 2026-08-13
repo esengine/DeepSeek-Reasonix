@@ -73,19 +73,17 @@ type Message struct {
 	// Round-tripped alongside ReasoningContent.
 	ReasoningSignature string     `json:"reasoning_signature,omitempty"`
 	ToolCalls          []ToolCall `json:"tool_calls,omitempty"` // set by assistant
-	// ResponsesItems preserves provider-issued Responses API output items that
-	// must be replayed on a stateless follow-up. Today only DeepSeek
-	// web_search_call items use this path; other providers ignore the field.
-	// Keeping the opaque JSON on the assistant turn makes resume/restart safe,
-	// while omitempty keeps old session files byte-compatible when unused.
-	ResponsesItems  []json.RawMessage `json:"responses_items,omitempty"`
-	ToolCallID      string            `json:"tool_call_id,omitempty"`    // links a tool result to its call
-	Name            string            `json:"name,omitempty"`            // tool message: tool name
-	MemoryCitations []MemoryCitation  `json:"memoryCitations,omitempty"` // local UI metadata; provider requests ignore it
-	WorkDurationMs  int64             `json:"workDurationMs,omitempty"`  // local UI metadata; provider requests ignore it
-	CreatedAt       int64             `json:"createdAt,omitempty"`       // local UI metadata; unix milliseconds; stripped before provider requests
-	Edited          bool              `json:"edited,omitempty"`          // local UI metadata; provider requests ignore it
-	Original        string            `json:"original,omitempty"`        // user prompt before inline edit
+	// ResponsesItems preserves provider-issued Responses API output items for
+	// stateless replay. omitempty keeps old session files byte-compatible.
+	ResponsesItems  []json.RawMessage  `json:"responses_items,omitempty"`
+	ServerSearch    []ServerSearchCall `json:"server_search,omitempty"`   // cards + Anthropic replay; omitempty
+	ToolCallID      string             `json:"tool_call_id,omitempty"`    // links a tool result to its call
+	Name            string             `json:"name,omitempty"`            // tool message: tool name
+	MemoryCitations []MemoryCitation   `json:"memoryCitations,omitempty"` // local UI metadata; provider requests ignore it
+	WorkDurationMs  int64              `json:"workDurationMs,omitempty"`  // local UI metadata; provider requests ignore it
+	CreatedAt       int64              `json:"createdAt,omitempty"`       // local UI metadata; unix milliseconds; stripped before provider requests
+	Edited          bool               `json:"edited,omitempty"`          // local UI metadata; provider requests ignore it
+	Original        string             `json:"original,omitempty"`        // user prompt before inline edit
 	// LocalOnly marks durable transcript content that must never be sent to a
 	// model provider. Interrupted streaming output uses it so every frontend can
 	// replay what the user saw without feeding partial reasoning or tool-call
@@ -233,14 +231,22 @@ type ResponseFormat struct {
 }
 
 // Auto ladder for max_output_tokens=0. Bounds completion only; never compact_ratio.
+// Official DeepSeek does not use this ladder: Chat/Responses omit the field
+// (server 384K ceiling) and Anthropic sends DeepSeekMaxOutputTokens.
 const (
-	DefaultOrdinaryOutputTokens      = 16 * 1024  // non-reasoning
-	DefaultReasoningOutputTokens     = 32 * 1024  // ordinary reasoning
-	DefaultHighReasoningOutputTokens = 64 * 1024  // high/max effort
+	DefaultOrdinaryOutputTokens      = 16 * 1024  // non-reasoning / non-DeepSeek
+	DefaultReasoningOutputTokens     = 32 * 1024  // ordinary reasoning / MiMo
+	DefaultHighReasoningOutputTokens = 64 * 1024  // high/max effort on non-DeepSeek
 	DefaultHighOutputTokens          = 128 * 1024 // explicit only; never auto
+	// DeepSeekMaxOutputTokens is the official V4 Flash/Pro completion ceiling.
+	// Pricing page: 输出长度最大 384K. K is decimal thousands, matching the
+	// documented 1M context = 1,000,000 tokens. Anthropic requires max_tokens.
+	DeepSeekMaxOutputTokens = 384_000
 )
 
-// AutoOutputBudget maps max_output_tokens=0 to 16K/32K/64K by reasoning effort.
+// AutoOutputBudget maps max_output_tokens=0 to 16K/32K/64K for non-DeepSeek
+// vendors. Official DeepSeek omits the field (Chat/Responses) or sends
+// DeepSeekMaxOutputTokens (Anthropic).
 func AutoOutputBudget(reasoningEnabled bool, effort string) int {
 	if !reasoningEnabled {
 		return DefaultOrdinaryOutputTokens
@@ -683,6 +689,7 @@ const (
 	ChunkDone                               // completion finished normally
 	ChunkError                              // an error occurred
 	ChunkResponsesItem                      // a complete provider-issued Responses API output item for stateless replay
+	ChunkServerSearch                       // provider-executed web_search; not a client tool call
 )
 
 // Usage reports token accounting for a completion. Cache hit/miss come from
@@ -848,13 +855,14 @@ type Chunk struct {
 	// from the SSE stream, so the Agent can persist them into the session
 	// and the next turn's input reasoning item round-trips them (review
 	// #7234 — OpenAI Responses schema marks Reasoning.id required).
-	ReasoningID     string          // ChunkReasoning: provider-issued reasoning item id
-	ReasoningStatus string          // ChunkReasoning: final reasoning item status ("completed")
-	ToolCall        *ToolCall       // ChunkToolCallStart (ID+Name only), ChunkToolCallArgsDelta (ID+Name), ChunkToolCall (complete)
-	ArgChars        int             // ChunkToolCallArgsDelta: cumulative argument characters received for this call
-	ResponsesItem   json.RawMessage // ChunkResponsesItem: opaque validated Responses API output item
-	Usage           *Usage          // ChunkUsage
-	Err             error           // ChunkError
+	ReasoningID     string            // ChunkReasoning: provider-issued reasoning item id
+	ReasoningStatus string            // ChunkReasoning: final reasoning item status ("completed")
+	ToolCall        *ToolCall         // ChunkToolCallStart (ID+Name only), ChunkToolCallArgsDelta (ID+Name), ChunkToolCall (complete)
+	ArgChars        int               // ChunkToolCallArgsDelta: cumulative argument characters received for this call
+	ResponsesItem   json.RawMessage   // ChunkResponsesItem: opaque validated Responses API output item
+	ServerSearch    *ServerSearchCall // ChunkServerSearch: display card + replay payload
+	Usage           *Usage            // ChunkUsage
+	Err             error             // ChunkError
 }
 
 // Fixed stream-interrupt reasons for observability. Values are a closed enum

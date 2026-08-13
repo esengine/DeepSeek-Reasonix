@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	SchemaVersion = 4
+	SchemaVersion = 7
 	DefaultLimit  = 50
 	MaxLimit      = 200
 )
@@ -52,15 +52,21 @@ const (
 )
 
 type Status struct {
-	State           State  `json:"state"`
-	Mode            Mode   `json:"mode"`
-	Path            string `json:"path,omitempty"`
-	Revision        uint64 `json:"revision"`
-	Indexed         int64  `json:"indexed"`
-	Total           int64  `json:"total"`
-	RepairPending   int64  `json:"repairPending"`
-	LastError       string `json:"lastError,omitempty"`
-	QuarantinedPath string `json:"quarantinedPath,omitempty"`
+	State            State  `json:"state"`
+	Mode             Mode   `json:"mode"`
+	Path             string `json:"path,omitempty"`
+	Revision         uint64 `json:"revision"`
+	Indexed          int64  `json:"indexed"`
+	Total            int64  `json:"total"`
+	RepairPending    int64  `json:"repairPending"`
+	PhysicalSessions int64  `json:"physicalSessions"`
+	LogicalSessions  int64  `json:"logicalSessions"`
+	RecoveryGroups   int64  `json:"recoveryGroups"`
+	RecoveryBranches int64  `json:"recoveryBranches"`
+	RecoveryDiverged int64  `json:"recoveryDiverged"`
+	CleanupEligible  int64  `json:"cleanupEligible"`
+	LastError        string `json:"lastError,omitempty"`
+	QuarantinedPath  string `json:"quarantinedPath,omitempty"`
 }
 
 type Options struct {
@@ -100,29 +106,54 @@ type TopicMetadata struct {
 }
 
 type SessionRecord struct {
-	Path           string     `json:"path"`
-	Directory      string     `json:"directory"`
-	Scope          string     `json:"scope"`
-	WorkspaceRoot  string     `json:"workspaceRoot,omitempty"`
-	TopicID        string     `json:"topicId,omitempty"`
-	TopicTitle     string     `json:"topicTitle,omitempty"`
-	CustomTitle    string     `json:"customTitle,omitempty"`
-	CreatedAt      int64      `json:"createdAt,omitempty"`
-	LastActivityAt int64      `json:"lastActivityAt,omitempty"`
-	Preview        string     `json:"preview,omitempty"`
-	Turns          int        `json:"turns"`
-	TurnsState     TurnsState `json:"turnsState"`
-	Recovered      bool       `json:"recovered,omitempty"`
-	RecoveryReason string     `json:"recoveryReason,omitempty"`
-	RecoveryDigest string     `json:"recoveryDigest,omitempty"`
-	ParentID       string     `json:"parentId,omitempty"`
+	Path              string     `json:"path"`
+	Directory         string     `json:"directory"`
+	Scope             string     `json:"scope"`
+	WorkspaceRoot     string     `json:"workspaceRoot,omitempty"`
+	TopicID           string     `json:"topicId,omitempty"`
+	TopicTitle        string     `json:"topicTitle,omitempty"`
+	CustomTitle       string     `json:"customTitle,omitempty"`
+	CreatedAt         int64      `json:"createdAt,omitempty"`
+	LastActivityAt    int64      `json:"lastActivityAt,omitempty"`
+	Preview           string     `json:"preview,omitempty"`
+	Turns             int        `json:"turns"`
+	TurnsState        TurnsState `json:"turnsState"`
+	Recovered         bool       `json:"recovered,omitempty"`
+	RecoveryReason    string     `json:"recoveryReason,omitempty"`
+	RecoveryDigest    string     `json:"recoveryDigest,omitempty"`
+	ParentID          string     `json:"parentId,omitempty"`
+	RecoveryPreferred bool       `json:"recoveryPreferred,omitempty"`
 	// RecoveryCopy is true only when real content is still covered by the parent.
-	RecoveryCopy       bool   `json:"recoveryCopy,omitempty"`
+	RecoveryCopy bool `json:"recoveryCopy,omitempty"`
+	// RecoveryGroupID clusters a lineage of normal + recovery branches that
+	// share content ancestry. Empty for ordinary non-recovery sessions.
+	RecoveryGroupID string `json:"recoveryGroupId,omitempty"`
+	// RecoveryRole is normal | covered_copy | adopted | preferred | diverged.
+	RecoveryRole string `json:"recoveryRole,omitempty"`
+	// RecoveryCanonical marks the unique leaf that covers the group and should
+	// be opened by default. Never moves or rewrites files.
+	RecoveryCanonical bool `json:"recoveryCanonical,omitempty"`
+	// LogicalTopicID is the ordinary-list topic for this physical file. Recovery
+	// copies are re-anchored onto the root conversation's topic in the catalog
+	// only; authoritative sidecars keep their original topic_id.
+	LogicalTopicID string `json:"logicalTopicId,omitempty"`
+	// OrdinaryVisible is true only for the single logical representative that
+	// may appear in the ordinary project tree.
+	OrdinaryVisible    bool   `json:"ordinaryVisible,omitempty"`
 	ContentFingerprint string `json:"contentFingerprint,omitempty"`
 	MetaFingerprint    string `json:"metaFingerprint,omitempty"`
 	Health             Health `json:"health"`
 	MissingSince       int64  `json:"missingSince,omitempty"`
 }
+
+// Recovery role constants for catalog lineage classification.
+const (
+	RecoveryRoleNormal      = "normal"
+	RecoveryRoleCoveredCopy = "covered_copy"
+	RecoveryRoleAdopted     = "adopted"
+	RecoveryRolePreferred   = "preferred"
+	RecoveryRoleDiverged    = "diverged"
+)
 
 type TopicKey struct {
 	Scope         string `json:"scope"`
@@ -131,19 +162,24 @@ type TopicKey struct {
 }
 
 type TopicRecord struct {
-	Scope          string          `json:"scope"`
-	WorkspaceRoot  string          `json:"workspaceRoot,omitempty"`
-	TopicID        string          `json:"topicId"`
-	Title          string          `json:"title"`
-	Pinned         bool            `json:"pinned,omitempty"`
-	SortOrder      int             `json:"sortOrder,omitempty"`
-	Turns          int             `json:"turns"`
-	TurnsState     TurnsState      `json:"turnsState"`
-	CreatedAt      int64           `json:"createdAt,omitempty"`
-	LastActivityAt int64           `json:"lastActivityAt,omitempty"`
-	RecoveryState  string          `json:"recoveryState,omitempty"`
-	Health         Health          `json:"health"`
-	Sessions       []SessionRecord `json:"sessions"`
+	Scope                        string     `json:"scope"`
+	WorkspaceRoot                string     `json:"workspaceRoot,omitempty"`
+	TopicID                      string     `json:"topicId"`
+	Title                        string     `json:"title"`
+	Pinned                       bool       `json:"pinned,omitempty"`
+	SortOrder                    int        `json:"sortOrder,omitempty"`
+	Turns                        int        `json:"turns"`
+	TurnsState                   TurnsState `json:"turnsState"`
+	CreatedAt                    int64      `json:"createdAt,omitempty"`
+	LastActivityAt               int64      `json:"lastActivityAt,omitempty"`
+	RecoveryState                string     `json:"recoveryState,omitempty"`
+	RecoveryBranchCount          int        `json:"recoveryBranchCount,omitempty"`
+	RecoveryUnresolvedCount      int        `json:"recoveryUnresolvedCount,omitempty"`
+	RecoveryCleanupEligibleCount int        `json:"recoveryCleanupEligibleCount,omitempty"`
+	// RepresentativePath is the automatic open target for this logical topic.
+	RepresentativePath string          `json:"representativePath,omitempty"`
+	Health             Health          `json:"health"`
+	Sessions           []SessionRecord `json:"sessions"`
 }
 
 type TopicPageRequest struct {
@@ -179,11 +215,14 @@ type SessionPage struct {
 }
 
 // DefaultPath is the disposable cache file under CacheDir ("" when unavailable).
-// v2.sqlite is independent of the 1.24.0 v1 cache so processes cannot cross-write.
+// v4.sqlite is independent of the v1-v3 caches so a new build never trusts a
+// polluted lineage projection produced before content-based canonical selection.
+// Session JSONL/WAL/sidecars remain authoritative and older binaries may keep
+// using their own disposable cache without cross-writing this one.
 func DefaultPath() string {
 	cache := strings.TrimSpace(config.CacheDir())
 	if cache == "" {
 		return ""
 	}
-	return filepath.Join(cache, "session-catalog", "v2.sqlite")
+	return filepath.Join(cache, "session-catalog", "v4.sqlite")
 }

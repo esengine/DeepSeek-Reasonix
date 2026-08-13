@@ -87,29 +87,37 @@ func (t *ProgressTracker) scoreReceipt(r Receipt) int {
 	case r.Success && (r.StepProof || r.TodoStep != nil || len(r.Todos) > 0):
 		return gainTaskProgress
 	case r.Success && r.Read && r.OutputBytes > 0 && len(r.Paths) > 0:
-		return t.scoreReads(r.Paths)
+		return t.scoreReads(r)
 	case r.Success:
-		// Unknown tools (MCP, custom): a first (tool, args) call is evidence;
-		// resending the identical call is not.
-		sig := r.ToolName + "\x00" + string(r.Args)
-		if t.actionSigs[sig] {
-			return 0
+		if t.noteQuestion(r) {
+			return gainNewAction
 		}
-		t.actionSigs[sig] = true
-		return gainNewAction
+		return 0
 	default:
 		return 0
 	}
 }
 
-func (t *ProgressTracker) scoreReads(paths []string) int {
+func (t *ProgressTracker) noteQuestion(r Receipt) bool {
+	sig := r.ToolName + "\x00" + string(r.Args)
+	if t.actionSigs[sig] {
+		return false
+	}
+	t.actionSigs[sig] = true
+	return true
+}
+
+func (t *ProgressTracker) scoreReads(r Receipt) int {
 	gain := 0
-	for _, path := range paths {
+	for _, path := range r.Paths {
 		if path == "" || t.readPaths[path] {
 			continue
 		}
 		t.readPaths[path] = true
 		gain += gainNewRead
+	}
+	if newQuestion := t.noteQuestion(r); gain == 0 && newQuestion {
+		return gainNewRead
 	}
 	return gain
 }

@@ -88,7 +88,7 @@ stable system / early prefix
 ## 六、Provider 与输出预算
 
 - 应用层 summary 是默认路径；Responses 等 native compaction 标记 unsupported 时回退 summary
-- `max_output_tokens=0` 表示 auto ladder（普通 16K / reasoning 32K / high·max 64K）；128K 仅显式配置
+- `max_output_tokens=0` 在官方 DeepSeek 上省略该字段（服务端 384K 上限）；MiMo 等仍用 16K/32K 梯子。思考深度只走 effort。
 - auto ladder 与 `compact_ratio` 解耦
 
 ## 七、缓存影响
