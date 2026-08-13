@@ -2,6 +2,295 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.25.1",
+      "date": "2026-08-13",
+      "channel": "stable",
+      "title": {
+        "en": "Desktop stability and provider compatibility fixes",
+        "zh": "桌面端稳定性与提供商兼容性修复"
+      },
+      "summary": {
+        "en": "This patch release fixes several desktop transcript, sidebar, and session recovery issues, improves provider compatibility with DeepSeek and Anthropic gateways, and refines Goal mode verification behavior.",
+        "zh": "此补丁版本修复了多个桌面端对话记录、侧边栏和会话恢复问题，改进了与 DeepSeek 和 Anthropic 网关的提供商兼容性，并优化了 Goal 模式的验证行为。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Goal Enforcement",
+            "zh": "Goal 强制执行"
+          },
+          "body": {
+            "en": "Updated to describe the unverified-check complete path and repeated-complete stop.",
+            "zh": "已更新，描述未验证检查的完成路径和重复完成停止。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/511d7ff7414794d48603876b97785e31a72047c8/docs/GOAL_ENFORCEMENT.zh-CN.md"
+        },
+        {
+          "title": {
+            "en": "Guide",
+            "zh": "指南"
+          },
+          "body": {
+            "en": "Updated to describe the unverified-check complete path and repeated-complete stop.",
+            "zh": "已更新，描述未验证检查的完成路径和重复完成停止。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/511d7ff7414794d48603876b97785e31a72047c8/docs/GUIDE.md"
+        },
+        {
+          "title": {
+            "en": "Guide (Chinese)",
+            "zh": "指南（中文）"
+          },
+          "body": {
+            "en": "Updated to describe the unverified-check complete path and repeated-complete stop.",
+            "zh": "已更新，描述未验证检查的完成路径和重复完成停止。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/511d7ff7414794d48603876b97785e31a72047c8/docs/GUIDE.zh-CN.md"
+        },
+        {
+          "title": {
+            "en": "Specification",
+            "zh": "规范"
+          },
+          "body": {
+            "en": "Updated to describe the official DeepSeek 384K output ceiling behavior.",
+            "zh": "已更新，描述官方 DeepSeek 384K 输出上限行为。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/511d7ff7414794d48603876b97785e31a72047c8/docs/SPEC.md"
+        },
+        {
+          "title": {
+            "en": "Specification (Chinese)",
+            "zh": "规范（中文）"
+          },
+          "body": {
+            "en": "Updated to describe the official DeepSeek 384K output ceiling behavior.",
+            "zh": "已更新，描述官方 DeepSeek 384K 输出上限行为。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/511d7ff7414794d48603876b97785e31a72047c8/docs/SPEC.zh-CN.md"
+        },
+        {
+          "title": {
+            "en": "Tool Contract",
+            "zh": "工具契约"
+          },
+          "body": {
+            "en": "Updated to describe the unverified-check complete path and repeated-complete stop.",
+            "zh": "已更新，描述未验证检查的完成路径和重复完成停止。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/511d7ff7414794d48603876b97785e31a72047c8/docs/TOOL_CONTRACT.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Restored sidebar and transcript behavior after upgrades",
+            "zh": "恢复升级后的侧边栏和对话记录行为"
+          },
+          "body": {
+            "en": "Fixed issues where the sidebar could appear empty after an upgrade, old sessions kept showing unread dots, and opening a recovered conversation showed only the older half. The latest covering leaf is now opened correctly.",
+            "zh": "修复了升级后侧边栏可能为空、旧会话反复显示未读点、打开恢复的对话只显示前半段的问题。现在会正确打开最新的覆盖叶子。"
+          },
+          "refs": [
+            8728,
+            8694
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Improved mid-stream history hydration",
+            "zh": "改进流式输出中的历史记录加载"
+          },
+          "body": {
+            "en": "Opening a session whose turn is already running or streaming now loads the history page in front of the live turn, so earlier turns and tool cards are visible immediately.",
+            "zh": "打开正在运行或流式输出的会话时，现在会在实时回合前加载历史页面，使之前的回合和工具卡片立即可见。"
+          },
+          "refs": [
+            8696,
+            8727
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Provider compatibility with DeepSeek and Anthropic gateways",
+            "zh": "与 DeepSeek 和 Anthropic 网关的提供商兼容性"
+          },
+          "body": {
+            "en": "Official DeepSeek now follows the documented 384K output ceiling instead of a custom auto ladder, and Anthropic-compatible gateways that omit message_stop after stop_reason are no longer treated as interrupted.",
+            "zh": "官方 DeepSeek 现在遵循文档化的 384K 输出上限，而不是自定义自动阶梯；省略 message_stop 但提供 stop_reason 的 Anthropic 兼容网关不再被视为中断。"
+          },
+          "refs": [
+            8779,
+            8756
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Goal mode stops verification loops",
+            "zh": "Goal 模式停止验证循环"
+          },
+          "body": {
+            "en": "After an honest update_goal(complete) with unverified checks, Goal mode no longer loops on the same verification. It accepts a second identical complete when only check gaps remain.",
+            "zh": "在带有未验证检查的诚实 update_goal(complete) 之后，Goal 模式不再重复相同的验证。当仅剩检查缺口时，接受第二次相同的完成。"
+          },
+          "refs": [
+            8693
+          ]
+        }
+      ],
+      "changes": {
+        "new": [],
+        "improved": [
+          {
+            "title": {
+              "en": "Web search results shown as a foldable card with footnotes",
+              "zh": "网络搜索结果以可折叠卡片和脚注显示"
+            },
+            "body": {
+              "en": "Provider-executed web_search no longer dumps a markdown list into the answer. Search becomes a foldable process card, and the confirmed title-and-link list is restored as footnotes under the answer.",
+              "zh": "提供商执行的 web_search 不再将 markdown 列表转储到答案中。搜索变为可折叠的过程卡片，确认的标题和链接列表恢复为答案下方的脚注。"
+            },
+            "refs": [
+              8674
+            ]
+          },
+          {
+            "title": {
+              "en": "Session inbox recovery isolated per session",
+              "zh": "会话收件箱恢复按会话隔离"
+            },
+            "body": {
+              "en": "Queued guidance stays on the session that created it, can be reviewed/edited/deleted, and can take effect mid-turn. Composer inbox snapshots are isolated by session path.",
+              "zh": "排队的指导保留在创建它的会话上，可以查看/编辑/删除，并可在回合中生效。Composer 收件箱快照按会话路径隔离。"
+            },
+            "refs": [
+              8701
+            ]
+          },
+          {
+            "title": {
+              "en": "Completed todo dismissals persist on the session",
+              "zh": "已完成的待办事项关闭状态持久化到会话"
+            },
+            "body": {
+              "en": "Closing a completed todo shelf now follows the session file, so it stays hidden after an upgrade remounts the conversation or the WebView2 profile is reset.",
+              "zh": "关闭已完成的待办事项面板现在会跟随会话文件，因此在升级重新挂载对话或重置 WebView2 配置文件后仍保持隐藏。"
+            },
+            "refs": [
+              8758
+            ]
+          },
+          {
+            "title": {
+              "en": "Transcript stays pinned after todo dismiss",
+              "zh": "关闭待办事项后对话记录保持固定"
+            },
+            "body": {
+              "en": "Dismissing a completed todo shelf no longer jumps the visible chat back to an earlier todo list. Retry and failed-clear hydrates also stop replacing a longer live transcript with a shorter snapshot.",
+              "zh": "关闭已完成的待办事项面板不再使可见聊天跳回之前的待办列表。重试和清除失败的水合也不再使用较短的快照替换较长的实时对话记录。"
+            },
+            "refs": [
+              8731
+            ]
+          },
+          {
+            "title": {
+              "en": "Live topic runtime attached instead of old catalog leaf",
+              "zh": "附着实时主题运行时而非旧目录叶子"
+            },
+            "body": {
+              "en": "Clicking a sidebar topic that is already running or paused now attaches that live runtime instead of opening the catalog representative.",
+              "zh": "点击已在运行或暂停的侧边栏主题时，现在会附着该实时运行时，而不是打开目录代表。"
+            },
+            "refs": [
+              8736
+            ]
+          },
+          {
+            "title": {
+              "en": "Delivery-check pause labeled separately",
+              "zh": "交付检查暂停单独标记"
+            },
+            "body": {
+              "en": "Sidebar sessions that stop on a Goal/delivery-check gate now show '待交付检查' / 'need checks' instead of reusing the recovery-pause badge.",
+              "zh": "在 Goal/交付检查门处停止的侧边栏会话现在显示“待交付检查”/“need checks”，而不是复用恢复暂停徽章。"
+            },
+            "refs": [
+              8730
+            ]
+          },
+          {
+            "title": {
+              "en": "Archive fallback blanks hidden from sidebar",
+              "zh": "归档回退空白从侧边栏隐藏"
+            },
+            "body": {
+              "en": "Clicking Archive removes that conversation and does not add visible '新的会话' rows. Leftover empty or unindexed default-title session files are discarded after archive.",
+              "zh": "点击归档会移除该对话，并且不会添加可见的“新的会话”行。归档后丢弃残留的空或未索引的默认标题会话文件。"
+            },
+            "refs": [
+              8766
+            ]
+          },
+          {
+            "title": {
+              "en": "Encrypted web_search replay excluded from compact estimates",
+              "zh": "加密的 web_search 回放不计入压缩估算"
+            },
+            "body": {
+              "en": "Compact, overflow, and interrupted-usage estimates no longer treat replayed encrypted_content as ordinary prompt text, preventing unnecessary early compaction.",
+              "zh": "压缩、溢出和中断使用估算不再将回放的 encrypted_content 视为普通提示文本，防止不必要的提前压缩。"
+            },
+            "refs": [
+              8718
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "History transcript scrolls to the native bottom",
+              "zh": "历史对话记录滚动到原生底部"
+            },
+            "body": {
+              "en": "History desktop sessions can now reach their last rows with the mouse wheel and the jump-to-bottom control, not only by dragging the native scrollbar.",
+              "zh": "历史桌面会话现在可以通过鼠标滚轮和跳到底部控件到达最后几行，而不仅仅是通过拖动原生滚动条。"
+            },
+            "refs": [
+              8760
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "yingziisme"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.25.1",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.25.0...desktop-v1.25.1",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.25.1",
+      "baseVersion": "1.25.1",
+      "status": "reviewed",
+      "previousRelease": "1.25.0",
+      "builds": {
+        "cli": "v1.25.1",
+        "desktop": "v1.25.1",
+        "npm": "1.25.1"
+      }
+    },
+    {
       "version": "1.25.0",
       "date": "2026-08-13",
       "channel": "stable",
