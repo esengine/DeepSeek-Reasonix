@@ -1,12 +1,62 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	"reasonix/internal/control"
 	"reasonix/internal/sessioninbox"
 )
+
+const inboxWailsErrorPrefix = "reasonix_error:"
+
+type inboxCodedError struct {
+	code  string
+	cause error
+}
+
+func (e *inboxCodedError) Error() string { return inboxWailsErrorPrefix + e.code }
+func (e *inboxCodedError) Unwrap() error { return e.cause }
+
+// inboxWailsError keeps backend errors machine-stable across the Wails boundary.
+// The frontend translates known product states at display time; unknown errors
+// stay untouched so useful diagnostic details are not discarded.
+func inboxWailsError(err error) error {
+	if err == nil {
+		return nil
+	}
+	known := []struct {
+		target error
+		code   string
+	}{
+		{sessioninbox.ErrCapacityItems, "inbox_capacity_items"},
+		{sessioninbox.ErrCapacityBytes, "inbox_capacity_bytes"},
+		{sessioninbox.ErrItemTooLarge, "inbox_item_too_large"},
+		{sessioninbox.ErrNotFound, "inbox_item_not_found"},
+		{sessioninbox.ErrInvalidState, "inbox_invalid_state"},
+		{sessioninbox.ErrSchemaReadonly, "inbox_schema_readonly"},
+		{sessioninbox.ErrClosed, "inbox_closed"},
+		{sessioninbox.ErrEmpty, "inbox_empty"},
+		{sessioninbox.ErrPaused, "inbox_paused"},
+		{sessioninbox.ErrIdempotencyConflict, "inbox_idempotency_conflict"},
+	}
+	for _, item := range known {
+		if errors.Is(err, item.target) {
+			return &inboxCodedError{code: item.code, cause: err}
+		}
+	}
+	switch {
+	case err.Error() == "channel session is read-only":
+		return &inboxCodedError{code: "channel_read_only", cause: err}
+	case err.Error() == "workspace is still starting":
+		return &inboxCodedError{code: "workspace_starting", cause: err}
+	case strings.HasPrefix(err.Error(), "workspace failed to start:"):
+		return &inboxCodedError{code: "workspace_start_failed", cause: err}
+	default:
+		return err
+	}
+}
 
 // InboxItemView is the Wails-facing metadata row (never full body).
 type InboxItemView struct {
@@ -23,15 +73,16 @@ type InboxItemView struct {
 
 // InboxSnapshotView is the Wails-facing queue snapshot.
 type InboxSnapshotView struct {
-	Revision   int64           `json:"revision"`
-	Paused     bool            `json:"paused"`
-	Recovered  bool            `json:"recovered"`
-	RecoveredN int             `json:"recoveredCount,omitempty"`
-	Items      []InboxItemView `json:"items"`
-	ItemsCount int             `json:"itemsCount"`
-	Bytes      int64           `json:"bytes"`
-	MaxItems   int             `json:"maxItems"`
-	MaxBytes   int64           `json:"maxBytes"`
+	Revision    int64           `json:"revision"`
+	Paused      bool            `json:"paused"`
+	Recovered   bool            `json:"recovered"`
+	RecoveredN  int             `json:"recoveredCount,omitempty"`
+	SessionPath string          `json:"sessionPath,omitempty"`
+	Items       []InboxItemView `json:"items"`
+	ItemsCount  int             `json:"itemsCount"`
+	Bytes       int64           `json:"bytes"`
+	MaxItems    int             `json:"maxItems"`
+	MaxBytes    int64           `json:"maxBytes"`
 }
 
 // InboxReceiptView is returned after durable enqueue/steer.
@@ -68,25 +119,26 @@ func inboxSnapshotView(snap sessioninbox.InboxSnapshot) InboxSnapshotView {
 		})
 	}
 	return InboxSnapshotView{
-		Revision:   snap.Revision,
-		Paused:     snap.Paused,
-		Recovered:  snap.Recovered,
-		RecoveredN: snap.RecoveredN,
-		Items:      items,
-		ItemsCount: len(items),
-		Bytes:      snap.Capacity.Bytes,
-		MaxItems:   snap.Capacity.MaxItems,
-		MaxBytes:   snap.Capacity.MaxBytes,
+		Revision:    snap.Revision,
+		Paused:      snap.Paused,
+		Recovered:   snap.Recovered,
+		RecoveredN:  snap.RecoveredN,
+		SessionPath: snap.SessionPath,
+		Items:       items,
+		ItemsCount:  len(items),
+		Bytes:       snap.Capacity.Bytes,
+		MaxItems:    snap.Capacity.MaxItems,
+		MaxBytes:    snap.Capacity.MaxBytes,
 	}
 }
 
 func (a *App) inboxCtrl(tabID string) (control.SessionAPI, error) {
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if a.tabIsReadOnly(tab) {
-		return nil, readOnlyChannelErr()
+		return nil, inboxWailsError(readOnlyChannelErr())
 	}
 	if ctrl == nil {
-		return nil, a.workspaceNotReadyErr(tab)
+		return nil, inboxWailsError(a.workspaceNotReadyErr(tab))
 	}
 	return ctrl, nil
 }
@@ -125,6 +177,7 @@ func (a *App) SteerInboxItem(tabID, itemID string) (InboxReceiptView, error) {
 	}
 	rec, err := ctrl.TrySteerInboxItem(strings.TrimSpace(itemID))
 	if err != nil {
+		err = inboxWailsError(err)
 		return InboxReceiptView{Error: err.Error()}, err
 	}
 	a.emitInboxChanged(tabID)
@@ -145,7 +198,7 @@ func (a *App) CancelTabWithInboxItems(tabID string, itemIDs []string) error {
 		return err
 	}
 	if err := ctrl.CancelWithInboxItems(itemIDs, "desktop"); err != nil {
-		return err
+		return inboxWailsError(err)
 	}
 	a.emitInboxChanged(tabID)
 	return nil
@@ -183,6 +236,7 @@ func (a *App) enqueueInbox(tabID string, intent sessioninbox.InboxIntent, displa
 		rec, err = ctrl.TryEnqueueFollowup(req)
 	}
 	if err != nil {
+		err = inboxWailsError(err)
 		return InboxReceiptView{Error: err.Error()}, err
 	}
 	a.emitInboxChanged(tabID)
@@ -203,7 +257,7 @@ func (a *App) ReadInboxItem(tabID, id string) (InboxEnvelopeView, error) {
 	}
 	meta, env, err := ctrl.ReadInboxItem(id)
 	if err != nil {
-		return InboxEnvelopeView{}, err
+		return InboxEnvelopeView{}, inboxWailsError(err)
 	}
 	return InboxEnvelopeView{
 		ID:          meta.ID,
@@ -220,7 +274,7 @@ func (a *App) UpdateInboxItem(tabID, id, display, submit string) error {
 		return err
 	}
 	if _, err := ctrl.UpdateInboxItem(id, display, submit, submit); err != nil {
-		return err
+		return inboxWailsError(err)
 	}
 	a.emitInboxChanged(tabID)
 	return nil
@@ -233,7 +287,7 @@ func (a *App) DeleteInboxItem(tabID, id string) error {
 		return err
 	}
 	if err := ctrl.DeleteInboxItem(id); err != nil {
-		return err
+		return inboxWailsError(err)
 	}
 	a.emitInboxChanged(tabID)
 	return nil
@@ -246,7 +300,7 @@ func (a *App) MoveInboxItem(tabID, id string, toIndex int) error {
 		return err
 	}
 	if err := ctrl.MoveInboxItem(id, toIndex); err != nil {
-		return err
+		return inboxWailsError(err)
 	}
 	a.emitInboxChanged(tabID)
 	return nil
@@ -259,7 +313,7 @@ func (a *App) SetInboxPaused(tabID string, paused bool) error {
 		return err
 	}
 	if err := ctrl.SetInboxPaused(paused); err != nil {
-		return err
+		return inboxWailsError(err)
 	}
 	a.emitInboxChanged(tabID)
 	return nil
@@ -272,7 +326,7 @@ func (a *App) RetryInboxItem(tabID, id string) error {
 		return err
 	}
 	if err := ctrl.RetryInboxItem(id); err != nil {
-		return err
+		return inboxWailsError(err)
 	}
 	a.emitInboxChanged(tabID)
 	return nil
@@ -285,7 +339,7 @@ func (a *App) RefreshInboxItem(tabID, id string) error {
 		return err
 	}
 	if err := ctrl.RefreshInboxReferences(id); err != nil {
-		return err
+		return inboxWailsError(err)
 	}
 	a.emitInboxChanged(tabID)
 	return nil

@@ -7,10 +7,16 @@ import (
 
 func sharedHostRefsForTest(t *testing.T, app *App, root string) (int, bool) {
 	t.Helper()
+	if app == nil {
+		return 0, false
+	}
 	app.sharedHostsMu.Lock()
 	defer app.sharedHostsMu.Unlock()
+	if app.sharedHosts == nil {
+		return 0, false
+	}
 	entry, ok := app.sharedHosts[root]
-	if !ok {
+	if !ok || entry == nil {
 		return 0, false
 	}
 	return entry.refs, true

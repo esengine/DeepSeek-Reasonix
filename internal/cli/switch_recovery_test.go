@@ -13,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/boot"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
@@ -134,6 +135,9 @@ func TestSessionRecoveryCallbackMovesLeaseBeforeControllerCommit(t *testing.T) {
 	}
 	ctrl := divergedSessionControllerWithRecovery(t, dir, originalPath, cliSessionRecoveredHandler(leases))
 	t.Cleanup(ctrl.Close)
+	if err := leases.BindControllerAuthority(ctrl); err != nil {
+		t.Fatalf("bind controller authority: %v", err)
+	}
 
 	if err := ctrl.Snapshot(); err != nil {
 		t.Fatalf("Snapshot: %v", err)
@@ -145,6 +149,7 @@ func TestSessionRecoveryCallbackMovesLeaseBeforeControllerCommit(t *testing.T) {
 	if got, want := leases.HeldPath(), agent.CanonicalSessionPath(recoveryPath); got != want {
 		t.Fatalf("lease after recovery callback = %q, want %q", got, want)
 	}
+	leases.WaitForRetiredLeases()
 	if probe, err := agent.TryAcquireSessionLease(originalPath); err != nil {
 		t.Fatalf("original lease was not released after recovery: %v", err)
 	} else {
@@ -292,12 +297,13 @@ func TestSkillRefreshCarriesRecoveryPathAfterSnapshotConflict(t *testing.T) {
 	}
 }
 
-func TestWorkModeSwitchCarriesRecoveryPathAndMovesLeaseBeforeRebuild(t *testing.T) {
+func TestWorkModeSwitchUpdatesInPlaceWithoutRebuildOrLeaseMove(t *testing.T) {
 	dir := t.TempDir()
 	originalPath := filepath.Join(dir, "work-mode-conflict.jsonl")
 
 	m := newTestChatTUI()
-	m.ctrl = divergedSessionController(t, dir, originalPath)
+	oldCtrl := divergedSessionController(t, dir, originalPath)
+	m.ctrl = oldCtrl
 	m.modelRef = "deepseek-flash/deepseek-v4-flash"
 	m.runtimeProfile = "full"
 	m.leases = control.NewSessionLeaseKeeper()
@@ -305,24 +311,28 @@ func TestWorkModeSwitchCarriesRecoveryPathAndMovesLeaseBeforeRebuild(t *testing.
 	if err := m.leases.Rebind(originalPath); err != nil {
 		t.Fatalf("seed active lease: %v", err)
 	}
-	var gotResumePath, heldAtBuild string
+	builds := 0
 	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, resumePath string, _ control.SessionAPI) (*control.Controller, error) {
-		gotResumePath = resumePath
-		heldAtBuild = m.leases.HeldPath()
+		builds++
 		return control.New(control.Options{Label: "deepseek-flash"}), nil
 	}
 
-	cmd := m.runWorkModeCommand("/work-mode delivery")
-	if cmd == nil {
-		t.Fatal("work-mode switch did not queue a rebuild")
+	cmd := m.runWorkModeCommand("/preset delivery")
+	if cmd != nil {
+		t.Fatal("role-setting switch must not queue a controller rebuild")
 	}
-	cmd()
-
-	if gotResumePath == "" || gotResumePath == originalPath || !strings.Contains(filepath.Base(gotResumePath), "-recovery-") {
-		t.Fatalf("resume path = %q, want recovery path distinct from %q", gotResumePath, originalPath)
+	if m.ctrl != oldCtrl {
+		t.Fatal("controller instance must stay the same")
 	}
-	if got, want := heldAtBuild, agent.CanonicalSessionPath(gotResumePath); got != want {
-		t.Fatalf("lease at build = %q, want recovery path %q", got, want)
+	if m.runtimeProfile != boot.TokenModeDelivery {
+		t.Fatalf("runtime profile = %q, want delivery", m.runtimeProfile)
+	}
+	if builds != 0 {
+		t.Fatalf("unexpected rebuilds: %d", builds)
+	}
+	// Lease stays on the original session path — no recovery rewrite.
+	if got := m.leases.HeldPath(); got != agent.CanonicalSessionPath(originalPath) {
+		t.Fatalf("lease path = %q, want original %q", got, originalPath)
 	}
 }
 

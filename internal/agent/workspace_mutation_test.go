@@ -4,17 +4,59 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"reasonix/internal/checkpoint"
 	"reasonix/internal/event"
+	"reasonix/internal/evidence"
 	"reasonix/internal/extension"
 	"reasonix/internal/extension/dispatch"
 	"reasonix/internal/extension/protocol"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
+
+func TestObservedFileChangePromotesRepositoryOnlyReceiptToContentMutation(t *testing.T) {
+	root := t.TempDir()
+	path := root + "/tracked.txt"
+	if err := os.WriteFile(path, []byte("before"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := checkpoint.New("", root)
+	store.Begin(1, "commit", 0)
+	observer := checkpoint.NewMutationObserver(checkpoint.ObserverOptions{Store: store})
+	observer.BeforeMutation(path, "bash", checkpoint.CaptureBeforeMutation)
+
+	reg := tool.NewRegistry()
+	bash := fakeTool{name: "bash", readOnly: false}
+	reg.Add(bash)
+	a := New(nil, reg, NewSession(""), Options{MutationObserver: observer}, event.Discard)
+	args := json.RawMessage(`{"command":"git commit -m checkpoint"}`)
+	plan := &toolCallPlan{
+		call:         provider.ToolCall{ID: "commit", Name: "bash", Arguments: string(args)},
+		tool:         bash,
+		evidenceName: "bash",
+		evidenceArgs: args,
+		effects:      evidence.ClassifyToolCall("bash", args, false),
+		mutationPath: path,
+	}
+	if plan.effects.ContentMutation {
+		t.Fatal("pure commit should begin as repository-only")
+	}
+	if err := os.WriteFile(path, []byte("changed by hook"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !a.observeAfterMutation(plan) || !plan.effects.ContentMutation {
+		t.Fatalf("observed effect was not promoted: %+v", plan.effects)
+	}
+	a.recordToolReceipts(plan, "", nil, nil)
+	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); !ok {
+		t.Fatal("promoted receipt was not recorded as a content mutation")
+	}
+}
 
 func TestToolBeforeWorkspaceMutationUsesExecutedReplacement(t *testing.T) {
 	t.Run("reader replaced by writer", func(t *testing.T) {
@@ -29,7 +71,7 @@ func TestToolBeforeWorkspaceMutationUsesExecutedReplacement(t *testing.T) {
 		reg.Add(&recordingTool{name: "write_file", readOnly: false})
 		sink := newWorkspaceSignalSink()
 		a := New(nil, reg, NewSession(""), Options{Extensions: newExtDispatcher(client, true, nil, extension.PointToolBefore)}, sink)
-		a.executeBatch(context.Background(), []provider.ToolCall{{ID: "call", Name: "read_file", Arguments: `{"path":"original.go"}`}})
+		a.executeBatch(context.Background(), &a.turn, []provider.ToolCall{{ID: "call", Name: "read_file", Arguments: `{"path":"original.go"}`}})
 
 		select {
 		case mutation := <-sink.mutations:
@@ -57,7 +99,7 @@ func TestToolBeforeWorkspaceMutationUsesExecutedReplacement(t *testing.T) {
 		reg.Add(&recordingTool{name: "read_file", readOnly: true})
 		sink := newWorkspaceSignalSink()
 		a := New(nil, reg, NewSession(""), Options{Extensions: newExtDispatcher(client, true, nil, extension.PointToolBefore)}, sink)
-		a.executeBatch(context.Background(), []provider.ToolCall{{ID: "call", Name: "write_file", Arguments: `{"path":"original.go","content":"x"}`}})
+		a.executeBatch(context.Background(), &a.turn, []provider.ToolCall{{ID: "call", Name: "write_file", Arguments: `{"path":"original.go","content":"x"}`}})
 
 		select {
 		case mutation := <-sink.mutations:
@@ -96,7 +138,7 @@ func TestToolBeforeWriterReplacementSignalsBeforeParallelPeerCompletes(t *testin
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		a.executeBatch(context.Background(), []provider.ToolCall{
+		a.executeBatch(context.Background(), &a.turn, []provider.ToolCall{
 			{ID: "writer", Name: "read_file", Arguments: `{"path":"original.go"}`},
 			{ID: "reader", Name: "slow_read", Arguments: `{}`},
 		})
@@ -143,7 +185,7 @@ func TestToolBeforeFailedWriterReplacementOpensDependencyBarrier(t *testing.T) {
 	reg.Add(fakeTool{name: "write_one", err: errors.New("partial write")})
 	reg.Add(fakeTool{name: "write_two", calls: &secondCalls})
 	a := New(nil, reg, NewSession(""), Options{Extensions: newExtDispatcher(client, true, nil, extension.PointToolBefore)}, event.Discard)
-	batch := a.executeBatch(context.Background(), []provider.ToolCall{
+	batch := a.executeBatch(context.Background(), &a.turn, []provider.ToolCall{
 		{ID: "first", Name: "read_file", Arguments: `{"path":"original.go"}`},
 		{ID: "second", Name: "write_two", Arguments: `{"path":"second.go"}`},
 	})

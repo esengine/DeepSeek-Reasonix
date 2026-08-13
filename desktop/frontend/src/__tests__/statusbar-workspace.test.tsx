@@ -48,6 +48,15 @@ console.log("\nstatus bar workspace");
 }
 
 {
+  const html = renderStatusBar({
+    items: ["context"],
+    context: { used: 1_001, window: 1_000, sessionTokens: 1_001, compactRatio: 0.8 },
+  });
+  ok(html.includes(">101%</b>"), "context status preserves a just-over-limit percentage");
+  ok(!html.includes(">100%</b>"), "context status does not clamp an over-limit percentage to 100 percent");
+}
+
+{
   const remoteHosts = [
     { id: "demo", label: "demo", host: "192.0.2.10", port: 22, user: "dev", identityFile: "", proxyJump: "", defaultWorkspace: "~/app", serveInstall: "auto", useSSHConfig: false },
   ];

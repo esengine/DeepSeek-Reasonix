@@ -230,6 +230,11 @@ func (a *App) runTopicActivationCompletion(gen uint64, requestID, tabID string) 
 		<-buildDone
 	}
 
+	// A reused/reattached runtime is already usable. Publish ready before
+	// prune: keepOnlyVisibleTab takes runtimeRebuildMu, which an in-flight
+	// MCP rebuild on the previous tab can hold for a long time.
+	emittedReady := a.emitTopicActivationReadyIfCurrent(gen, requestID, tabID)
+
 	// The generation check and the prune serialize against new activations
 	// through singleSurfaceMu: either this completion runs entirely before the
 	// next activation's synchronous phase (its tabs are not there to prune),
@@ -249,14 +254,22 @@ func (a *App) runTopicActivationCompletion(gen uint64, requestID, tabID string) 
 
 	if _, err := a.keepOnlyVisibleTab(tabID); err != nil {
 		a.finishTopicActivation(gen, requestID)
-		a.emitTopicActivation(TopicActivationEvent{
-			RequestID: requestID,
-			TabID:     tabID,
-			Phase:     topicActivationPhaseFailed,
-			// keepOnlyVisibleTab errors can wrap snapshot/path details; the
-			// event stays generic, the slog entry keeps the specifics.
-			Error: "failed to switch the visible session",
-		})
+		if !emittedReady {
+			a.emitTopicActivation(TopicActivationEvent{
+				RequestID: requestID,
+				TabID:     tabID,
+				Phase:     topicActivationPhaseFailed,
+				// keepOnlyVisibleTab errors can wrap snapshot/path details; the
+				// event stays generic, the slog entry keeps the specifics.
+				Error: "failed to switch the visible session",
+			})
+		}
+		return
+	}
+
+	if emittedReady {
+		a.finishTopicActivation(gen, requestID)
+		a.scheduleTabMetaExtrasRefresh(tabID)
 		return
 	}
 
@@ -289,6 +302,21 @@ func (a *App) runTopicActivationCompletion(gen uint64, requestID, tabID string) 
 			Error:     sanitizedTopicActivationError(startupErr, leaseHeld),
 		})
 	}
+}
+
+func (a *App) emitTopicActivationReadyIfCurrent(gen uint64, requestID, tabID string) bool {
+	a.mu.RLock()
+	tab := a.tabs[tabID]
+	ok := a.activationGen == gen &&
+		a.latestActivationRequestID == requestID &&
+		a.pendingActivationTabID == tabID &&
+		tab != nil && tab.Ready && tab.Ctrl != nil
+	a.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	a.emitTopicActivation(TopicActivationEvent{RequestID: requestID, TabID: tabID, Phase: topicActivationPhaseReady})
+	return true
 }
 
 // sanitizedTopicActivationError keeps local paths and lease-holder writer IDs

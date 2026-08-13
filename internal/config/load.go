@@ -132,6 +132,7 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	globalRemote := cfg.Remote.Clone()
 	globalDesktopLanguage := cfg.Desktop.Language
 	globalPricingCurrency := cfg.Desktop.Currency
+	globalBillingDisplayCurrency := cfg.Billing.DisplayCurrency
 	globalTelemetry := cfg.Telemetry
 
 	tomlSources = append(tomlSources, projectTOML)
@@ -164,6 +165,7 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	// A repository must not be able to alter how the user's spend is shown.
 	cfg.Desktop.Language = globalDesktopLanguage
 	cfg.Desktop.Currency = globalPricingCurrency
+	cfg.Billing.DisplayCurrency = globalBillingDisplayCurrency
 	// CLI telemetry is an explicit user-global privacy choice. Project config
 	// cannot opt a user in or out, including when the global value is absent.
 	cfg.Telemetry = globalTelemetry
@@ -227,6 +229,8 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	normalizeLegacyProviderModels(cfg)
 	normalizeDesktopOfficialProviderAccess(cfg)
 	normalizeOfficialDeepSeekModels(cfg)
+	migrateBillingDisplayCurrency(cfg)
+	freezeProviderBillingCurrencies(cfg)
 	applyDeepSeekOfficialDefaultPricing(cfg)
 	backfillDeepSeekOfficialPrices(cfg)
 	normalizeEffortConfig(cfg)
@@ -383,11 +387,16 @@ func backfillDeepSeekPro(c *Config) {
 	for _, bp := range Default().Providers {
 		if bp.Name == "deepseek-pro" {
 			bp.APIKeyEnv = flash.APIKeyEnv
-			currency := c.DeepSeekOfficialPricingCurrency()
-			if c.DesktopCurrency() == "" && flash.persistedOfficialCurrency != "" {
+			// Inherit the flash provider's frozen billing currency for list prices.
+			currency := flash.ProviderBillingCurrency()
+			if currency == "" {
 				currency = flash.persistedOfficialCurrency
-				bp.persistedOfficialCurrency = currency
 			}
+			if currency == "" {
+				currency = "USD"
+			}
+			bp.BillingCurrency = currency
+			bp.persistedOfficialCurrency = currency
 			bp.Price = deepSeekV4PriceForModel(currency, proModel)
 			c.Providers = append(c.Providers, bp)
 			return
@@ -405,9 +414,12 @@ func backfillDeepSeekOfficialPrices(c *Config) {
 			continue
 		}
 		backfillDeepSeekOfficialEndpointDefaults(p)
-		currency := c.DeepSeekOfficialPricingCurrency()
-		if c.DesktopCurrency() == "" && p.persistedOfficialCurrency != "" {
+		currency := p.ProviderBillingCurrency()
+		if currency == "" {
 			currency = p.persistedOfficialCurrency
+		}
+		if currency == "" {
+			currency = "USD"
 		}
 		defaults := DeepSeekV4PricesForCurrency(currency)
 		if p.Price != nil {
@@ -800,6 +812,8 @@ func normalizeConfigForEdit(cfg *Config) bool {
 	normalizeLegacyProviderModels(cfg)
 	normalizeDesktopOfficialProviderAccess(cfg)
 	normalizeOfficialDeepSeekModels(cfg)
+	migrateBillingDisplayCurrency(cfg)
+	freezeProviderBillingCurrencies(cfg)
 	applyDeepSeekOfficialDefaultPricing(cfg)
 	backfillDeepSeekOfficialPrices(cfg)
 	normalizeEffortConfig(cfg)
@@ -1627,17 +1641,17 @@ func normalizeOfficialDeepSeekModels(c *Config) {
 		}
 		switch strings.TrimSpace(p.Name) {
 		case "deepseek":
-			required := []string{"deepseek-v4-flash", "deepseek-v4-pro"}
-			if strings.EqualFold(strings.TrimSpace(p.Kind), "responses") {
-				required = required[:1]
-			}
-			ensureProviderModels(p, required, "deepseek-v4-flash")
+			ensureProviderModels(p, []string{"deepseek-v4-flash", "deepseek-v4-pro"}, "deepseek-v4-flash")
 		case "deepseek-flash":
 			ensureProviderModels(p, []string{"deepseek-v4-flash"}, "deepseek-v4-flash")
 		case "deepseek-pro":
 			ensureProviderModels(p, []string{"deepseek-v4-pro"}, "deepseek-v4-pro")
+		case "deepseek-responses":
+			ensureProviderModels(p, []string{"deepseek-v4-flash", "deepseek-v4-pro"}, "deepseek-v4-flash")
 		}
+		backfillOfficialDeepSeekResponsesModels(p)
 		backfillDeepSeekAnthropicCapabilities(p)
+		backfillOfficialDeepSeekResponsesCapabilities(p)
 	}
 }
 
@@ -1649,37 +1663,7 @@ func backfillDeepSeekAnthropicCapabilities(p *ProviderEntry) {
 	if strings.TrimSpace(p.Thinking) == "" {
 		p.Thinking = "enabled"
 	}
-	capabilities := map[string]ProviderModelOverride{
-		"deepseek-v4-flash": {SupportedEfforts: []string{"disabled", "low", "high", "max"}, DefaultEffort: "high"},
-		"deepseek-v4-pro":   {SupportedEfforts: []string{"disabled", "high", "max"}, DefaultEffort: "high"},
-	}
-	if model := strings.TrimSpace(p.Model); model != "" && len(p.Models) == 0 {
-		defaults, ok := capabilities[model]
-		if !ok || len(p.SupportedEfforts) > 0 {
-			return
-		}
-		p.SupportedEfforts = append([]string(nil), defaults.SupportedEfforts...)
-		if strings.TrimSpace(p.DefaultEffort) == "" {
-			p.DefaultEffort = defaults.DefaultEffort
-		}
-		return
-	}
-	if p.ModelOverrides == nil {
-		p.ModelOverrides = map[string]ProviderModelOverride{}
-	}
-	for model, defaults := range capabilities {
-		if !p.HasModel(model) {
-			continue
-		}
-		override := p.ModelOverrides[model]
-		if len(override.SupportedEfforts) == 0 {
-			override.SupportedEfforts = append([]string(nil), defaults.SupportedEfforts...)
-			if strings.TrimSpace(override.DefaultEffort) == "" {
-				override.DefaultEffort = defaults.DefaultEffort
-			}
-		}
-		p.ModelOverrides[model] = override
-	}
+	backfillOfficialDeepSeekEffortOverrides(p)
 }
 
 func officialProviderHost(baseURL string) string {
@@ -2025,21 +2009,18 @@ func ensureDeepSeekOfficialProvider(c *Config) {
 		return
 	}
 	entry := ProviderEntry{
-		Name:          "deepseek",
-		Kind:          "anthropic",
-		BaseURL:       deepSeekAnthropicBaseURL,
-		Models:        []string{"deepseek-v4-flash", "deepseek-v4-pro"},
-		Default:       "deepseek-v4-flash",
-		APIKeyEnv:     "DEEPSEEK_API_KEY",
-		BalanceURL:    "https://api.deepseek.com/user/balance",
-		Thinking:      "enabled",
-		WebSearch:     boolPointer(true),
-		ContextWindow: 1_000_000,
-		Prices:        deepSeekV4PricesForConfig(c),
-		ModelOverrides: map[string]ProviderModelOverride{
-			"deepseek-v4-flash": {SupportedEfforts: []string{"disabled", "low", "high", "max"}, DefaultEffort: "high"},
-			"deepseek-v4-pro":   {SupportedEfforts: []string{"disabled", "high", "max"}, DefaultEffort: "high"},
-		},
+		Name:           "deepseek",
+		Kind:           "anthropic",
+		BaseURL:        deepSeekAnthropicBaseURL,
+		Models:         []string{"deepseek-v4-flash", "deepseek-v4-pro"},
+		Default:        "deepseek-v4-flash",
+		APIKeyEnv:      "DEEPSEEK_API_KEY",
+		BalanceURL:     "https://api.deepseek.com/user/balance",
+		Thinking:       "enabled",
+		WebSearch:      boolPointer(true),
+		ContextWindow:  1_000_000,
+		Prices:         deepSeekV4PricesForConfig(c),
+		ModelOverrides: deepSeekV4EffortOverrides(),
 	}
 	legacyProviders := officialLegacyDeepSeekProviders(c)
 	if len(legacyProviders) > 0 {
@@ -2187,6 +2168,7 @@ func legacyDeepSeekProviderWideProjection(entry *ProviderEntry) ProviderEntry {
 	out.Kind = strings.ToLower(strings.TrimSpace(out.Kind))
 	out.BaseURL = normalizedBaseURLForMigration(out.BaseURL)
 	out.ChatURL = strings.TrimSpace(out.ChatURL)
+	out.RequestURL = strings.TrimSpace(out.RequestURL)
 	out.ModelsURL = strings.TrimSpace(out.ModelsURL)
 	out.APIKeyEnv = strings.TrimSpace(out.APIKeyEnv)
 	out.BalanceURL = normalizedDeepSeekBalanceURL(out.BalanceURL)

@@ -23,6 +23,7 @@ var frontends = []string{
 // stay importable from anywhere without dragging a dependency graph along.
 var leaves = []string{
 	"internal/ablation",
+	"internal/agentpreset",
 	"internal/billing",
 	"internal/diff",
 	"internal/extension/rpcwire",

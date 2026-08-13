@@ -10,6 +10,8 @@ import (
 )
 
 func TestAddOfficialProviderAccessUsesDesktopLanguagePricing(t *testing.T) {
+	// Desktop language is display-only; newly installed official DeepSeek
+	// templates freeze the default USD list-price table (billing_currency).
 	isolateDesktopUserDirs(t)
 	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
@@ -31,11 +33,14 @@ language = "zh"
 	}
 	flash := p.Prices["deepseek-v4-flash"]
 	pro := p.Prices["deepseek-v4-pro"]
-	if flash == nil || flash.Output != 2 || flash.Currency != "¥" {
-		t.Fatalf("flash price = %+v, want CNY preset", flash)
+	if flash == nil || flash.Output != 0.28 || flash.Currency != "$" {
+		t.Fatalf("flash price = %+v, want frozen USD official table", flash)
 	}
-	if pro == nil || pro.Output != 6 || pro.Currency != "¥" {
-		t.Fatalf("pro price = %+v, want CNY preset", pro)
+	if pro == nil || pro.Output != 0.87 || pro.Currency != "$" {
+		t.Fatalf("pro price = %+v, want frozen USD official table", pro)
+	}
+	if got := cfg.ResolveDisplayCurrency(); got != "" {
+		t.Fatalf("display currency = %q, want unresolved auto", got)
 	}
 }
 

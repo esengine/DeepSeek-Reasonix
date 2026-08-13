@@ -40,7 +40,7 @@ func (p *sharedWindowTestProvider) Stream(_ context.Context, req provider.Reques
 // context window must still be tokens. It used to be characters, which reads
 // 3-4x high and compacted long before the configured ratio.
 func TestEstimatedPromptTokensStayInTokenUnitBeforeCalibration(t *testing.T) {
-	a := &Agent{contextWindow: 1_000_000}
+	a := &Agent{agentConfig: agentConfig{contextWindow: 1_000_000}}
 	cases := []struct {
 		name           string
 		text           string
@@ -66,7 +66,7 @@ func TestEstimatedPromptTokensStayInTokenUnitBeforeCalibration(t *testing.T) {
 // conflict path that adopts the newer disk transcript. Each rebind used to drop
 // the calibration and put the next turn back on the cold estimate.
 func TestSessionSwapKeepsPromptCalibration(t *testing.T) {
-	a := &Agent{contextWindow: 200_000}
+	a := &Agent{agentConfig: agentConfig{contextWindow: 200_000}}
 	msgs := []provider.Message{{Role: provider.RoleUser, Content: strings.Repeat("字", 60_000)}}
 	a.setPromptTokenCalibration(36_000, requestCalibrationShapeOf(provider.Request{Messages: msgs}))
 
@@ -84,12 +84,7 @@ func TestSessionSwapKeepsPromptCalibration(t *testing.T) {
 
 func TestSharedWindowFoldUsesGuardedInputBudget(t *testing.T) {
 	prov := &sharedWindowTestProvider{budget: 128 * 1024, shared: true}
-	a := &Agent{
-		prov:              prov,
-		contextWindow:     100_000,
-		outputBudgetState: outputBudgetState{outputBudget: prov.budget},
-		sink:              event.Discard,
-	}
+	a := &Agent{agentConfig: agentConfig{contextWindow: 100_000}, svc: agentServices{prov: prov, sink: event.Discard}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
 	// Oversized tool bodies are deterministically shortened for the single
 	// summarizer request (no multi-span). The guard must still fit one call.
 	toolBody := strings.Repeat("file line content here. ", 20_000) // ~480K chars
@@ -124,12 +119,7 @@ func TestSharedWindowFoldUsesGuardedInputBudget(t *testing.T) {
 // all deterministic shorteners must fail once (no multi-span split).
 func TestSharedWindowFoldRejectsUnshortenableOverBudgetInput(t *testing.T) {
 	prov := &sharedWindowTestProvider{budget: 128 * 1024, shared: true}
-	a := &Agent{
-		prov:              prov,
-		contextWindow:     100_000,
-		outputBudgetState: outputBudgetState{outputBudget: prov.budget},
-		sink:              event.Discard,
-	}
+	a := &Agent{agentConfig: agentConfig{contextWindow: 100_000}, svc: agentServices{prov: prov, sink: event.Discard}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
 	fold := []provider.Message{{Role: provider.RoleUser, Content: strings.Repeat("字", 200_000)}}
 	_, err := a.foldToSummary(context.Background(), fold, "")
 	if err == nil || !strings.Contains(err.Error(), "exceeds single-request budget") {
@@ -149,12 +139,11 @@ func (p *sharedWindowTestProvider) SharedWindowInputPolicy() provider.SharedWind
 
 func TestEffectiveOutputBudgetClipsSharedWindowRequest(t *testing.T) {
 	prov := &sharedWindowTestProvider{budget: 128 * 1024, shared: true}
-	a := &Agent{prov: prov, contextWindow: 1_048_576,
-		outputBudgetState: outputBudgetState{outputBudget: prov.budget}}
+	a := &Agent{agentConfig: agentConfig{contextWindow: 1_048_576}, svc: agentServices{prov: prov}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
 	msgs := []provider.Message{{Role: provider.RoleUser, Content: strings.Repeat("字", 950_000)}}
 	// Calibrate this session at one token per rune. The 950K prompt fits, but
 	// not beside the provider's full 128K output default.
-	a.lastUsage.Store(&provider.Usage{PromptTokens: 950_000})
+	a.sess.output.lastUsage.Store(&provider.Usage{PromptTokens: 950_000})
 	a.setPromptTokenCalibration(950_000, requestCalibrationShapeOf(provider.Request{Messages: msgs}))
 
 	got, clipped, err := a.effectiveOutputBudget(provider.Request{Messages: msgs})
@@ -174,8 +163,7 @@ func TestEffectiveOutputBudgetClipsSharedWindowRequest(t *testing.T) {
 
 func TestCalibratedOutputBudgetIncludesReplayedReasoning(t *testing.T) {
 	prov := &sharedWindowTestProvider{budget: 128 * 1024, shared: true}
-	a := &Agent{prov: prov, contextWindow: 200_000,
-		outputBudgetState: outputBudgetState{outputBudget: prov.budget}}
+	a := &Agent{agentConfig: agentConfig{contextWindow: 200_000}, svc: agentServices{prov: prov}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
 	previous := []provider.Message{{Role: provider.RoleUser, Content: strings.Repeat("x", 300_000)}}
 	a.setPromptTokenCalibration(75_000, requestCalibrationShapeOf(provider.Request{Messages: previous}))
 	current := append(previous, provider.Message{
@@ -200,8 +188,7 @@ func TestCalibratedOutputBudgetIncludesReplayedReasoning(t *testing.T) {
 
 func TestCalibratedOutputBudgetKeepsCJKConservativeFloor(t *testing.T) {
 	prov := &sharedWindowTestProvider{budget: 128 * 1024, shared: true}
-	a := &Agent{prov: prov, contextWindow: 1_048_576,
-		outputBudgetState: outputBudgetState{outputBudget: prov.budget}}
+	a := &Agent{agentConfig: agentConfig{contextWindow: 1_048_576}, svc: agentServices{prov: prov}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
 	previous := []provider.Message{{Role: provider.RoleUser, Content: strings.Repeat("x", 300_000)}}
 	a.setPromptTokenCalibration(75_000, requestCalibrationShapeOf(provider.Request{Messages: previous}))
 	// Enough unrepresented CJK that the reply no longer fits beside it: at the
@@ -250,8 +237,7 @@ func TestCalibrationIgnoresNonReplayableOrdinaryReasoning(t *testing.T) {
 func TestCalibratedResponsesBudgetIncludesNewOrdinaryReasoning(t *testing.T) {
 	prov := &sharedWindowTestProvider{budget: 128 * 1024, shared: true,
 		policy: provider.SharedWindowInputPolicy{ReplaysOrdinaryReasoning: true}}
-	a := &Agent{prov: prov, contextWindow: 200_000,
-		outputBudgetState: outputBudgetState{outputBudget: prov.budget}}
+	a := &Agent{agentConfig: agentConfig{contextWindow: 200_000}, svc: agentServices{prov: prov}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
 	previous := provider.Request{Messages: []provider.Message{{
 		Role: provider.RoleUser, Content: strings.Repeat("x", 300_000),
 	}}}
@@ -272,8 +258,7 @@ func TestCalibratedResponsesBudgetIncludesNewOrdinaryReasoning(t *testing.T) {
 func TestCalibratedResponsesBudgetIncludesNewReplayItems(t *testing.T) {
 	prov := &sharedWindowTestProvider{budget: 128 * 1024, shared: true,
 		policy: provider.SharedWindowInputPolicy{ReplaysResponsesItems: true}}
-	a := &Agent{prov: prov, contextWindow: 200_000,
-		outputBudgetState: outputBudgetState{outputBudget: prov.budget}}
+	a := &Agent{agentConfig: agentConfig{contextWindow: 200_000}, svc: agentServices{prov: prov}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
 	previous := provider.Request{Messages: []provider.Message{{
 		Role: provider.RoleUser, Content: strings.Repeat("x", 300_000),
 	}}}
@@ -312,15 +297,10 @@ func TestPrepareSamplingRequestClipsSharedWindowOutput(t *testing.T) {
 	msgs := []provider.Message{{Role: provider.RoleUser, Content: strings.Repeat("字", 950_000)}}
 	sess := NewSession("")
 	sess.Replace(msgs)
-	a := &Agent{
-		prov:              prov,
-		tools:             tool.NewRegistry(),
-		session:           sess,
-		contextWindow:     1_048_576,
-		compactRatio:      2, // disable auto maintenance for this output-clip test
-		outputBudgetState: outputBudgetState{outputBudget: prov.budget},
-	}
-	a.lastUsage.Store(&provider.Usage{PromptTokens: 950_000})
+	// compactRatio 2 disables auto maintenance for this output-clip test
+	a := &Agent{agentConfig: agentConfig{contextWindow: 1_048_576, compactRatio: 2}, svc: agentServices{prov: prov, tools: tool.NewRegistry()},
+		sess: sessionRuntime{conversation: sess, output: outputBudgetState{outputBudget: prov.budget}}}
+	a.sess.output.lastUsage.Store(&provider.Usage{PromptTokens: 950_000})
 	a.setPromptTokenCalibration(950_000, requestCalibrationShapeOf(provider.Request{Messages: msgs}))
 
 	prepared, err := a.prepareSamplingRequest(context.Background())
@@ -334,10 +314,9 @@ func TestPrepareSamplingRequestClipsSharedWindowOutput(t *testing.T) {
 
 func TestEffectiveOutputBudgetRejectsExhaustedSharedWindow(t *testing.T) {
 	prov := &sharedWindowTestProvider{budget: 128 * 1024, shared: true}
-	a := &Agent{prov: prov, contextWindow: 1_048_576,
-		outputBudgetState: outputBudgetState{outputBudget: prov.budget}}
+	a := &Agent{agentConfig: agentConfig{contextWindow: 1_048_576}, svc: agentServices{prov: prov}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
 	msgs := []provider.Message{{Role: provider.RoleUser, Content: strings.Repeat("字", 1_045_000)}}
-	a.lastUsage.Store(&provider.Usage{PromptTokens: 1_045_000})
+	a.sess.output.lastUsage.Store(&provider.Usage{PromptTokens: 1_045_000})
 	a.setPromptTokenCalibration(1_045_000, requestCalibrationShapeOf(provider.Request{Messages: msgs}))
 
 	_, _, err := a.effectiveOutputBudget(provider.Request{Messages: msgs})
@@ -348,8 +327,7 @@ func TestEffectiveOutputBudgetRejectsExhaustedSharedWindow(t *testing.T) {
 
 func TestEffectiveOutputBudgetLeavesIndependentProviderUnchanged(t *testing.T) {
 	prov := &sharedWindowTestProvider{budget: 128 * 1024, shared: false}
-	a := &Agent{prov: prov, contextWindow: 1_048_576,
-		outputBudgetState: outputBudgetState{outputBudget: prov.budget}}
+	a := &Agent{agentConfig: agentConfig{contextWindow: 1_048_576}, svc: agentServices{prov: prov}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
 	got, clipped, err := a.effectiveOutputBudget(provider.Request{
 		Messages: []provider.Message{{Role: provider.RoleUser, Content: strings.Repeat("字", 950_000)}},
 	})
@@ -360,8 +338,7 @@ func TestEffectiveOutputBudgetLeavesIndependentProviderUnchanged(t *testing.T) {
 
 func TestEffectiveOutputBudgetHonorsExplicitOmit(t *testing.T) {
 	prov := &sharedWindowTestProvider{budget: 128 * 1024, shared: true}
-	a := &Agent{prov: prov, contextWindow: 1_048_576,
-		outputBudgetState: outputBudgetState{outputBudget: prov.budget}}
+	a := &Agent{agentConfig: agentConfig{contextWindow: 1_048_576}, svc: agentServices{prov: prov}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
 	got, clipped, err := a.effectiveOutputBudget(provider.Request{
 		Messages:  []provider.Message{{Role: provider.RoleUser, Content: strings.Repeat("字", 950_000)}},
 		MaxTokens: -1,
@@ -373,14 +350,9 @@ func TestEffectiveOutputBudgetHonorsExplicitOmit(t *testing.T) {
 
 func TestSummarizeClipsSharedWindowOutputBudget(t *testing.T) {
 	prov := &sharedWindowTestProvider{budget: 128 * 1024, shared: true}
-	a := &Agent{
-		prov:              prov,
-		contextWindow:     100_000,
-		outputBudgetState: outputBudgetState{outputBudget: prov.budget},
-		sink:              event.Discard,
-	}
+	a := &Agent{agentConfig: agentConfig{contextWindow: 100_000}, svc: agentServices{prov: prov, sink: event.Discard}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
 	region := []provider.Message{{Role: provider.RoleUser, Content: strings.Repeat("字", 50_000)}}
-	a.lastUsage.Store(&provider.Usage{PromptTokens: 50_000})
+	a.sess.output.lastUsage.Store(&provider.Usage{PromptTokens: 50_000})
 	a.setPromptTokenCalibration(50_000, requestCalibrationShapeOf(provider.Request{Messages: region}))
 
 	if _, _, err := a.summarize(context.Background(), region, ""); err != nil {
@@ -393,12 +365,7 @@ func TestSummarizeClipsSharedWindowOutputBudget(t *testing.T) {
 
 func TestSummarizeRejectsLengthTruncation(t *testing.T) {
 	prov := &sharedWindowTestProvider{budget: 128 * 1024, shared: true, finish: "length"}
-	a := &Agent{
-		prov:              prov,
-		contextWindow:     1_048_576,
-		outputBudgetState: outputBudgetState{outputBudget: prov.budget},
-		sink:              event.Discard,
-	}
+	a := &Agent{agentConfig: agentConfig{contextWindow: 1_048_576}, svc: agentServices{prov: prov, sink: event.Discard}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
 
 	_, _, err := a.summarizeOnce(context.Background(), []provider.Message{{
 		Role: provider.RoleUser, Content: "retain every durable fact",
@@ -413,19 +380,19 @@ func TestSummarizeRejectsLengthTruncation(t *testing.T) {
 
 func TestSetSessionResetsPerTranscriptUsageState(t *testing.T) {
 	a := &Agent{}
-	a.lastUsage.Store(&provider.Usage{PromptTokens: 200_000})
+	a.sess.output.lastUsage.Store(&provider.Usage{PromptTokens: 200_000})
 	active := requestCalibrationShape{requestChars: 900_000, compactChars: 850_000}
-	a.activeReqShape.Store(&active)
+	a.sess.output.activeReqShape.Store(&active)
 	a.setPromptTokenCalibration(200_000, requestCalibrationShape{requestChars: 1_000_000, compactChars: 950_000})
 	a.SetSession(NewSession("new"))
 
-	if got := a.lastUsage.Load(); got != nil {
+	if got := a.sess.output.lastUsage.Load(); got != nil {
 		t.Fatalf("lastUsage survived session switch: %+v", got)
 	}
-	if got := a.activeReqShape.Load(); got != nil {
+	if got := a.sess.output.activeReqShape.Load(); got != nil {
 		t.Fatalf("activeReqShape survived session switch: %+v", got)
 	}
-	if got := a.promptCalibration.Load(); got == nil {
+	if got := a.sess.output.promptCalibration.Load(); got == nil {
 		t.Fatal("promptCalibration was dropped on session switch; the tokenizer ratio outlives the transcript")
 	}
 }
@@ -433,10 +400,10 @@ func TestSetSessionResetsPerTranscriptUsageState(t *testing.T) {
 func TestLatestUsagePairsWithActiveRequestSize(t *testing.T) {
 	a := &Agent{}
 	active := requestCalibrationShape{requestChars: 222, compactChars: 111, cjkRunes: 22, cjkBytes: 66}
-	a.activeReqShape.Store(&active)
+	a.sess.output.activeReqShape.Store(&active)
 	a.storeLatestRequestUsage(&provider.Usage{PromptTokens: 100})
 
-	if got := a.promptCalibration.Load(); got == nil || got.promptTokens != 100 || got.requestChars != 222 || got.compactChars != 111 || got.cjkRunes != 22 || got.cjkBytes != 66 {
+	if got := a.sess.output.promptCalibration.Load(); got == nil || got.promptTokens != 100 || got.requestChars != 222 || got.compactChars != 111 || got.cjkRunes != 22 || got.cjkBytes != 66 {
 		t.Fatalf("promptCalibration = %+v, want promptTokens=100 requestChars=222 compactChars=111 cjkRunes=22 cjkBytes=66", got)
 	}
 }
@@ -444,7 +411,7 @@ func TestLatestUsagePairsWithActiveRequestSize(t *testing.T) {
 func TestEstimatedUsageDoesNotReplacePromptCalibration(t *testing.T) {
 	a := &Agent{}
 	active := requestCalibrationShape{requestChars: 200_000, compactChars: 100_000}
-	a.activeReqShape.Store(&active)
+	a.sess.output.activeReqShape.Store(&active)
 	a.setPromptTokenCalibration(50_000, requestCalibrationShape{requestChars: 100_000, compactChars: 80_000})
 
 	a.storeLatestRequestUsage(&provider.Usage{
@@ -453,12 +420,48 @@ func TestEstimatedUsageDoesNotReplacePromptCalibration(t *testing.T) {
 		Estimated:    true,
 	})
 
-	got := a.promptCalibration.Load()
+	got := a.sess.output.promptCalibration.Load()
 	if got == nil || got.promptTokens != 50_000 || got.requestChars != 100_000 || got.compactChars != 80_000 {
 		t.Fatalf("estimated usage replaced provider calibration: %+v", got)
 	}
-	if latest := a.lastUsage.Load(); latest == nil || !latest.Estimated {
+	if latest := a.sess.output.lastUsage.Load(); latest == nil || !latest.Estimated {
 		t.Fatalf("estimated usage was not retained for accounting: %+v", latest)
+	}
+}
+
+func TestCalibratedBudgetIgnoresEncryptedSearchRaw(t *testing.T) {
+	prov := &sharedWindowTestProvider{budget: 128 * 1024, shared: true}
+	a := &Agent{agentConfig: agentConfig{contextWindow: 200_000}, svc: agentServices{prov: prov}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
+	previous := provider.Request{Messages: []provider.Message{{
+		Role: provider.RoleUser, Content: strings.Repeat("x", 300_000),
+	}}}
+	a.setPromptTokenCalibration(75_000, a.requestCalibrationShape(previous))
+	visible := provider.ServerSearchCall{
+		ID: "s1", Query: "latest",
+		Results: []provider.ServerSearchHit{{Title: "Change Log", URL: "https://api-docs.deepseek.com/updates/"}},
+	}
+	withRaw := previous
+	withRaw.Messages = append(append([]provider.Message(nil), previous.Messages...), provider.Message{
+		Role: provider.RoleAssistant, Content: "answer",
+		ServerSearch: []provider.ServerSearchCall{{
+			ID: visible.ID, Query: visible.Query, Results: visible.Results,
+			Raw: json.RawMessage(`[{"encrypted_content":"` + strings.Repeat("E", 400_000) + `"}]`),
+		}},
+	})
+	withoutRaw := previous
+	withoutRaw.Messages = append(append([]provider.Message(nil), previous.Messages...), provider.Message{
+		Role:         provider.RoleAssistant,
+		Content:      "answer",
+		ServerSearch: []provider.ServerSearchCall{visible},
+	})
+	if got, want := a.estimatedRequestTokens(withRaw), a.estimatedRequestTokens(withoutRaw); got != want {
+		t.Fatalf("estimate with encrypted raw = %d, without = %d", got, want)
+	}
+	wantBudget, wantClipped, wantErr := a.effectiveOutputBudget(withoutRaw)
+	gotBudget, gotClipped, gotErr := a.effectiveOutputBudget(withRaw)
+	if gotBudget != wantBudget || gotClipped != wantClipped || (gotErr != nil) != (wantErr != nil) {
+		t.Fatalf("encrypted raw changed output budget: got %d clipped=%v err=%v, want %d clipped=%v err=%v",
+			gotBudget, gotClipped, gotErr, wantBudget, wantClipped, wantErr)
 	}
 }
 
@@ -468,13 +471,13 @@ func TestForkCaptureProviderPreservesOutputBudgetCapabilities(t *testing.T) {
 		policy: provider.SharedWindowInputPolicy{ReplaysOrdinaryReasoning: true, ReplaysResponsesItems: true}}
 	a := New(prov, tool.NewRegistry(), NewSession(""), Options{}, event.Discard)
 
-	if !sharesContextWindow(a.prov) {
+	if !sharesContextWindow(a.svc.prov) {
 		t.Fatal("fork capture wrapper erased shared-window output capability")
 	}
-	if got := outputBudgetOf(a.prov); got != prov.budget {
+	if got := outputBudgetOf(a.svc.prov); got != prov.budget {
 		t.Fatalf("wrapped output budget = %d, want %d", got, prov.budget)
 	}
-	if got := sharedWindowInputPolicyOf(a.prov); got != prov.policy {
+	if got := sharedWindowInputPolicyOf(a.svc.prov); got != prov.policy {
 		t.Fatalf("wrapped input policy = %+v, want %+v", got, prov.policy)
 	}
 }

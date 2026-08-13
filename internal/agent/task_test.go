@@ -50,7 +50,7 @@ func TestTaskToolReturnsSubAgentFinalAnswer(t *testing.T) {
 	if sys := sub.lastReq.Messages[0]; sys.Role != provider.RoleSystem || sys.Content != "test-sys-prompt" {
 		t.Errorf("first message = %+v, want system 'test-sys-prompt'", sys)
 	}
-	if got := lastUser(sub.lastReq); !strings.Contains(got, `<subagent-context event="SubagentStart">`) || !strings.Contains(got, "find callers of Foo") || !strings.HasSuffix(got, completeSubtaskContract) {
+	if got := lastUser(sub.lastReq); !strings.Contains(got, `<subagent-context event="SubagentStart">`) || !strings.Contains(got, "find callers of Foo") || !strings.Contains(got, completeSubtaskContract) {
 		t.Errorf("sub-agent user = %q, want SubagentStart context plus prompt", got)
 	}
 }
@@ -85,7 +85,7 @@ func TestTaskToolInjectsWorkspaceContextIntoSubagentPrompt(t *testing.T) {
 	if !strings.Contains(got, `<workspace-context event="SubagentWorkspace">`) ||
 		!strings.Contains(got, "Current workspace: "+strconv.Quote(workspace)) ||
 		!strings.Contains(got, `prefer "." or relative paths`) ||
-		!strings.Contains(got, "inspect project") || !strings.HasSuffix(got, completeSubtaskContract) {
+		!strings.Contains(got, "inspect project") || !strings.Contains(got, completeSubtaskContract) {
 		t.Fatalf("sub-agent user = %q, want workspace context plus prompt", got)
 	}
 }

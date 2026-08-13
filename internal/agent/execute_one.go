@@ -12,59 +12,16 @@ import (
 	"reasonix/internal/instruction"
 	"reasonix/internal/jobs"
 	"reasonix/internal/memory"
-	"reasonix/internal/permission"
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 )
 
-// toolCallPlan holds the resolved, policy-checked state for one tool call.
-// Package-private; not shared across goroutines beyond the single executeOne
-// invocation that owns it.
-type toolCallPlan struct {
-	call          provider.ToolCall
-	tool          tool.Tool
-	canonicalName string
-
-	permName     string
-	permArgs     json.RawMessage
-	execTool     tool.Tool
-	execArgs     json.RawMessage
-	evidenceName string
-	evidenceArgs json.RawMessage
-	readOnly     bool
-
-	resolved     tool.ResolvedCall
-	resolvedMeta *tool.ResolvedCall
-
-	mutates                   bool
-	verification              bool
-	planTransition            bool
-	planBefore                string
-	planAfter                 string
-	planDiff                  string
-	planReplacementAuthorized bool
-	recoveryGen               uint64
-
-	runTool              tool.Tool
-	runArgs              json.RawMessage
-	cctx                 context.Context
-	releaseParentWrite   func()
-	releaseMutationWrite func()
-
-	// mutationPath is set when a Previewer described a concrete workspace path
-	// for AfterMutation fingerprint capture (success or failure).
-	mutationPath      string
-	mutationObserved  bool
-	mutationAfterDone bool
-	executed          bool
-}
-
 // executeOne runs a single tool call. It is pure with respect to the event sink
 // — the caller emits ToolDispatch/ToolResult — so it is safe to invoke from
 // parallel goroutines. Stages: parse → policy → prepare → finish.
-func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) (out toolOutcome) {
+func (a *Agent) executeOne(ctx context.Context, turn *turnRuntime, call provider.ToolCall) (out toolOutcome) {
 	ctx = a.withAgentContext(ctx)
 	plan := &toolCallPlan{call: call}
 	defer func() {
@@ -96,7 +53,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) (out too
 	if blocked, early := a.interceptToolBefore(ctx, plan); early {
 		return blocked
 	}
-	if blocked, early := a.resolveToolPolicy(ctx, plan); early {
+	if blocked, early := a.resolveToolPolicy(ctx, turn, plan); early {
 		return blocked
 	}
 	if blocked, early := a.prepareToolExecution(ctx, plan); early {
@@ -108,7 +65,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) (out too
 // parseToolCall resolves the canonical tool, rejects ambiguity/unknown tools,
 // and applies repeat-success and stale-anchor guards.
 func (a *Agent) parseToolCall(ctx context.Context, plan *toolCallPlan) (toolOutcome, bool) {
-	t, canonicalName, ambiguous := a.tools.ResolveCall(plan.call.Name)
+	t, canonicalName, ambiguous := a.svc.tools.ResolveCall(plan.call.Name)
 	if len(ambiguous) > 0 {
 		msg := fmt.Sprintf("ambiguous MCP tool reference %q; use one of: %s", plan.call.Name, strings.Join(ambiguous, ", "))
 		return toolOutcome{
@@ -117,7 +74,7 @@ func (a *Agent) parseToolCall(ctx context.Context, plan *toolCallPlan) (toolOutc
 		}, true
 	}
 	if t == nil {
-		if server, ok := completedMCPConnect(a.tools, plan.call.Name); ok {
+		if server, ok := completedMCPConnect(a.svc.tools, plan.call.Name); ok {
 			return toolOutcome{
 				output: fmt.Sprintf("MCP server %q is connected; its real tools are now available", server),
 			}, true
@@ -157,27 +114,33 @@ func (a *Agent) parseToolCall(ctx context.Context, plan *toolCallPlan) (toolOutc
 	plan.evidenceName = canonicalName
 	plan.evidenceArgs = json.RawMessage(plan.call.Arguments)
 	plan.readOnly = t.ReadOnly()
-	if canonicalName == "bash" && permission.BashCommandIsReadOnly(plan.execArgs) {
-		// Bash is schema-level writer-capable, but the host can resolve a
-		// concrete invocation to read-only after parsing its arguments. Carry
-		// that fact through permission, mutation accounting, evidence, and the
-		// refreshed local tool receipt without changing the provider schema.
-		plan.readOnly = true
-		plan.resolvedMeta = &tool.ResolvedCall{TargetName: canonicalName, ReadOnly: true}
+	if canonicalName == "bash" {
+		var permissionReader bool
+		plan.effects, permissionReader = evidence.ClassifyBashToolCall(plan.execArgs)
+		if permissionReader {
+			// Bash is schema-level writer-capable, but the host can resolve a
+			// concrete invocation to read-only after parsing its arguments. Carry
+			// that fact through permission, mutation accounting, evidence, and the
+			// refreshed local tool receipt without changing the provider schema.
+			plan.readOnly = true
+			plan.resolvedMeta = &tool.ResolvedCall{TargetName: canonicalName, ReadOnly: true}
+		}
+	} else {
+		plan.effects = evidence.ClassifyToolCall(plan.evidenceName, plan.evidenceArgs, plan.readOnly)
 	}
 	return toolOutcome{}, false
 }
 
 // resolveToolPolicy applies Plan mode, proxy resolution, delivery gates, Auto
 // Guard, and permission checks. Permission must complete before any write lease.
-func (a *Agent) resolveToolPolicy(ctx context.Context, plan *toolCallPlan) (toolOutcome, bool) {
+func (a *Agent) resolveToolPolicy(ctx context.Context, turn *turnRuntime, plan *toolCallPlan) (toolOutcome, bool) {
 	if blocked, early := a.applyPlanModeAndProxy(ctx, plan); early {
 		return blocked, true
 	}
 	if blocked, early := a.applyContextualToolGate(ctx, plan); early {
 		return blocked, true
 	}
-	if blocked, early := a.applyDeliveryPolicyGates(plan); early {
+	if blocked, early := a.applyDeliveryPolicyGates(turn, plan); early {
 		return blocked, true
 	}
 	// After proxy resolution, re-apply the batch mutation barrier using the
@@ -230,18 +193,18 @@ func contextualToolGateOutcome(ctx context.Context, target tool.Tool, name strin
 // read-only diagnosis (resolved ReadOnly with no verification classification)
 // still runs.
 func (a *Agent) applyMutationDependencyBarrier(plan *toolCallPlan) (toolOutcome, bool) {
-	if a == nil || plan == nil || !a.mutationDependencyBarrier.Load() {
+	if a == nil || plan == nil {
+		return toolOutcome{}, false
+	}
+	cause := a.mutationDependencyBarrier.Load()
+	if cause == nil {
 		return toolOutcome{}, false
 	}
 	verification := plan.evidenceName == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(plan.evidenceArgs))
-	// Prefer the post-gate mutates flag; fall back to !readOnly so a resolved
-	// writer proxy cannot claim non-mutation by skipping ToolCallMutates.
-	mutates := plan.mutates || !plan.readOnly
-	if !mutates && !verification {
+	if !plan.effects.StateMutation && !verification {
 		return toolOutcome{}, false
 	}
-	msg := "blocked: skipped because an earlier modification in this tool batch failed or was blocked. " +
-		"Fix or re-run the failed change first; verification was not executed."
+	msg := cause.message()
 	var ex *tool.ShellExecution
 	// Structured shell metadata only for bash cards; other tools keep plain text.
 	if plan.evidenceName == "bash" || plan.call.Name == "bash" {
@@ -315,6 +278,7 @@ func (a *Agent) applyPlanModeAndProxy(ctx context.Context, plan *toolCallPlan) (
 			return outcome, true
 		}
 		plan.readOnly = rc.ReadOnly
+		plan.classifyEffects()
 		if outcome, blocked := a.readOnlyExecutionBlock(t, &rc); blocked {
 			return outcome, true
 		}
@@ -334,11 +298,11 @@ func (a *Agent) applyPlanModeAndProxy(ctx context.Context, plan *toolCallPlan) (
 				a.noteCapabilityInvocation(call.Name, json.RawMessage(call.Arguments), nil)
 			}
 			result := rc.Result
-			if a.evidence != nil {
+			if a.task.ledger != nil {
 				// inspect/decline are not mutations; unavailable call targets are not success.
 				success := !rc.Unavailable
 				rec := evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), success, true)
-				a.evidence.Record(rec)
+				a.task.ledger.Record(rec)
 			}
 			if rc.Unavailable {
 				return toolOutcome{output: result, errMsg: firstLine(rc.UnavailableReason)}, true
@@ -391,7 +355,7 @@ func (a *Agent) applyPlanModeAndProxy(ctx context.Context, plan *toolCallPlan) (
 
 // applyDeliveryPolicyGates enforces global deterministic shell contracts plus
 // delivery-profile-only criteria rules, and classifies mutation/verification.
-func (a *Agent) applyDeliveryPolicyGates(plan *toolCallPlan) (toolOutcome, bool) {
+func (a *Agent) applyDeliveryPolicyGates(turn *turnRuntime, plan *toolCallPlan) (toolOutcome, bool) {
 	// Global deterministic shell contract (ordinary + Delivery). PowerShell 5.1
 	// &&/|| is enforced inside the bash tool itself so descriptor and error text
 	// stay shell-accurate; the agent layers apply command-shape protections.
@@ -453,16 +417,16 @@ func (a *Agent) applyDeliveryPolicyGates(plan *toolCallPlan) (toolOutcome, bool)
 		}, true
 	}
 
-	plan.mutates = evidence.ToolCallMutates(plan.evidenceName, plan.evidenceArgs, plan.readOnly)
-	persistentWorkflowCall := a.deliveryPersistentExpected && !a.deliveryMutationExpected && plan.evidenceName == "remember"
-	if a.deliveryProfile && !persistentWorkflowCall && evidence.ToolCallRequiresDeliveryCriteria(plan.evidenceName, plan.evidenceArgs, plan.readOnly) && !a.deliveryCriteriaEstablished {
+	plan.classifyEffects()
+	persistentWorkflowCall := turn.deliveryPersistentExpected && !turn.deliveryMutationExpected && plan.evidenceName == "remember"
+	if a.deliveryProfile && !persistentWorkflowCall && evidence.ToolCallRequiresDeliveryCriteria(plan.evidenceName, plan.evidenceArgs, plan.readOnly) && !turn.deliveryCriteriaEstablished {
 		return toolOutcome{
 			output:  "blocked: delivery-first mode requires acceptance criteria before state-changing work. Call todo_write with a concrete, verifiable task list, then retry this tool call.",
 			blocked: true,
 			errMsg:  "blocked: delivery acceptance criteria required",
 		}, true
 	}
-	if a.deliveryProfile && !persistentWorkflowCall && plan.mutates && !a.hasActiveCanonicalTodo() {
+	if a.deliveryProfile && !persistentWorkflowCall && plan.effects.ContentMutation && !a.hasActiveCanonicalTodo() {
 		return toolOutcome{
 			output:  "blocked: delivery-first mode requires every state change to belong to the current in_progress todo. Preserve the completed todo prefix, append a concrete new item if more work was discovered, mark that item in_progress with todo_write, then retry this mutation.",
 			blocked: true,
@@ -486,9 +450,9 @@ func (a *Agent) applyRecoveryAndPermission(ctx context.Context, plan *toolCallPl
 	episodeStopped := false
 	if ctrl := a.recoveryEpisodeControl(); ctrl != nil {
 		plan.recoveryGen = ctrl.Generation()
-		episodeStopped = ctrl.EpisodeStopped(a.recoveryTaskID)
+		episodeStopped = ctrl.EpisodeStopped(a.recovery.taskID)
 	}
-	if a.recoveryGate != nil && (plan.mutates || plan.verification || plan.planTransition || episodeStopped) {
+	if a.svc.recoveryGate != nil && (plan.effects.StateMutation || plan.verification || plan.planTransition || episodeStopped) {
 		subject := recoverySubject(plan.evidenceName, plan.evidenceArgs)
 		if plan.planTransition {
 			subject = "Update the active execution plan"
@@ -504,7 +468,7 @@ func (a *Agent) applyRecoveryAndPermission(ctx context.Context, plan *toolCallPl
 		if ctrl := a.recoveryEpisodeControl(); ctrl != nil {
 			episodeID = ctrl.EpisodeID()
 		}
-		dec, rerr := a.recoveryGate.BeforeMutation(ctx, a.recoveryProposal(plan, episodeID, subject, preview))
+		dec, rerr := a.svc.recoveryGate.BeforeMutation(ctx, a.recoveryProposal(plan, episodeID, subject, preview))
 		if dec.Generation != 0 {
 			plan.recoveryGen = dec.Generation
 		}
@@ -549,15 +513,15 @@ func (a *Agent) applyRecoveryAndPermission(ctx context.Context, plan *toolCallPl
 				errMsg:  "blocked: MCP server identity is not authorized",
 			}, true
 		}
-		if denyGate, ok := a.gate.(ExplicitDenyGate); ok && denyGate.ExplicitlyDenies(plan.permName, plan.permArgs) {
+		if denyGate, ok := a.svc.gate.(ExplicitDenyGate); ok && denyGate.ExplicitlyDenies(plan.permName, plan.permArgs) {
 			return toolOutcome{
 				output:  "blocked: denied by permission policy — this tool/command is on the deny list. Do not retry it; choose another approach or stop and explain.",
 				blocked: true,
 				errMsg:  "blocked by permission policy",
 			}, true
 		}
-	} else if a.gate != nil {
-		allow, reason, err := a.gate.Check(ctx, plan.permName, plan.permArgs, plan.readOnly)
+	} else if a.svc.gate != nil {
+		allow, reason, err := a.svc.gate.Check(ctx, plan.permName, plan.permArgs, plan.readOnly)
 		if err != nil {
 			return toolOutcome{
 				output:  fmt.Sprintf("blocked: %s (%v)", reason, err),
@@ -586,14 +550,22 @@ func (a *Agent) applyRecoveryAndPermission(ctx context.Context, plan *toolCallPl
 // PreToolUse hooks and preview checkpoints, and injects call context. All of
 // this happens after permission and before the concrete Execute call.
 func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (toolOutcome, bool) {
+	policyArgs := plan.permArgs
+	if len(plan.resolved.Args) > 0 {
+		policyArgs = plan.resolved.Args
+	}
+	if outcome, blocked := a.taskPolicyToolGate(plan, policyArgs); blocked {
+		return outcome, true
+	}
 	// Acquire after permission is granted but before PreToolUse: hooks are user
 	// shell code and can themselves change the workspace. This keeps readers
 	// concurrent and avoids holding the workspace during an approval prompt while
 	// still covering every write-side action that follows authorization.
-	if a.deliveryProfile && plan.mutates && a.workspaceLease != nil {
-		if err := a.workspaceLease.AcquireWrite(ctx); err != nil {
+	// Lazy workspace lease on the first real writer for every role setting.
+	if plan.effects.WorkspaceMutation && a.svc.workspaceLease != nil {
+		if err := a.svc.workspaceLease.AcquireWrite(ctx); err != nil {
 			return toolOutcome{
-				output:  fmt.Sprintf("blocked: the workspace did not become available for Delivery writing: %v", err),
+				output:  fmt.Sprintf("blocked: the workspace did not become available for writing: %v", err),
 				blocked: true,
 				errMsg:  "blocked: workspace write lease unavailable",
 			}, true
@@ -616,7 +588,7 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	// check-before-write TOCTOU windows. Dynamic Economy/MCP tools are covered
 	// here after registry lookup without schema-changing wrappers.
 	// executeOne defers plan.releaseParentWrite so every return path releases.
-	if releaseParentWrite, perr := a.reserveParentWrite(plan.runTool, plan.runArgs, plan.readOnly); perr != nil {
+	if releaseParentWrite, perr := a.reserveParentWrite(plan.runTool, plan.runArgs, !plan.effects.WorkspaceMutation); perr != nil {
 		return toolOutcome{
 			output:  "blocked: " + perr.Error(),
 			blocked: true,
@@ -628,8 +600,8 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	// Acquire the checkpoint barrier before preimage capture and any hook. It is
 	// held through post hooks and AfterMutation so rewind cannot interleave with
 	// writer-side user code.
-	if !plan.readOnly && a.mutationObserver != nil && a.mutationObserver.Store() != nil {
-		barrier := a.mutationObserver.Store().Barrier()
+	if plan.effects.WorkspaceMutation && a.svc.mutationObserver != nil && a.svc.mutationObserver.Store() != nil {
+		barrier := a.svc.mutationObserver.Store().Barrier()
 		if err := barrier.EnterWrite(); err != nil {
 			return toolOutcome{output: "blocked: " + err.Error(), blocked: true, errMsg: "blocked: mutation barrier unavailable"}, true
 		}
@@ -640,16 +612,16 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	// still finalizes the fingerprint on every return path. Built-in
 	// Previewers get precise paths (complete coverage). Bash / opaque MCP
 	// writers record explicit coverage gaps instead of guessing targets.
-	if !plan.readOnly {
+	if plan.effects.WorkspaceMutation {
 		a.observeBeforeMutation(ctx, plan)
 		plan.mutationObserved = plan.mutationPath != ""
-		if toolHooksMayMutateWorkspace(a.hooks) && a.mutationObserver != nil {
-			a.mutationObserver.RecordGap(checkpoint.CoverageGap{Reason: checkpoint.GapHookWrite, Tool: plan.evidenceName, Detail: "tool hook may write paths that are not declared by the tool"})
+		if toolHooksMayMutateWorkspace(a.svc.hooks) && a.svc.mutationObserver != nil {
+			a.svc.mutationObserver.RecordGap(checkpoint.CoverageGap{Reason: checkpoint.GapHookWrite, Tool: plan.evidenceName, Detail: "tool hook may write paths that are not declared by the tool"})
 		}
 	}
 	// Proxy tools fire hooks against the real MCP target name and arguments.
-	if a.hooks != nil {
-		if block, msg := a.hooks.PreToolUse(ctx, plan.permName, plan.permArgs); block {
+	if a.svc.hooks != nil {
+		if block, msg := a.svc.hooks.PreToolUse(ctx, plan.permName, plan.permArgs); block {
 			if msg == "" {
 				msg = "blocked by a PreToolUse hook"
 			}
@@ -660,11 +632,11 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 			}, true
 		}
 	}
-	cctx := tool.WithContextCompressor(withCallContext(ctx, plan.call.ID, a.sink, a.asker, a.planMode.Load()), a)
+	cctx := tool.WithContextCompressor(withCallContext(ctx, plan.call.ID, a.svc.sink, a.svc.asker, a.planMode.Load()), a)
 	cctx = WithSubagentDepth(cctx, a.subagentDepth)
-	if a.evidence != nil {
-		cctx = evidence.WithLedger(cctx, a.evidence)
-		cctx = evidence.WithSessionMessages(cctx, a.session.Snapshot)
+	if a.task.ledger != nil {
+		cctx = evidence.WithLedger(cctx, a.task.ledger)
+		cctx = evidence.WithSessionMessages(cctx, a.sess.conversation.Snapshot)
 		if a.deliveryProfile {
 			cctx = evidence.WithDeliveryProfile(cctx)
 		}
@@ -678,14 +650,14 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	if len(a.projectChecks) > 0 {
 		cctx = instruction.WithChecks(cctx, a.projectChecks)
 	}
-	if a.jobs != nil {
-		cctx = jobs.WithManager(cctx, a.jobs)
+	if a.svc.jobs != nil {
+		cctx = jobs.WithManager(cctx, a.svc.jobs)
 	}
-	if a.sandboxEscapeApprover != nil {
-		cctx = sandbox.WithEscapeApprover(cctx, a.sandboxEscapeApprover)
+	if a.svc.sandboxEscape != nil {
+		cctx = sandbox.WithEscapeApprover(cctx, a.svc.sandboxEscape)
 	}
-	if a.configWriteApprover != nil {
-		cctx = tool.WithConfigWriteApprover(cctx, a.configWriteApprover)
+	if a.svc.configWrite != nil {
+		cctx = tool.WithConfigWriteApprover(cctx, a.svc.configWrite)
 	}
 	if v := a.responseLanguage.Load(); v != nil {
 		if lang, ok := v.(string); ok {
@@ -697,12 +669,12 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 			cctx = WithReasoningLanguagePreference(cctx, lang)
 		}
 	}
-	if a.memQueue != nil {
-		cctx = memory.WithQueue(cctx, a.memQueue)
+	if a.svc.memQueue != nil {
+		cctx = memory.WithQueue(cctx, a.svc.memQueue)
 	}
 	callID := plan.call.ID
 	cctx = tool.WithProgress(cctx, func(chunk string) {
-		a.sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: callID, Output: chunk}})
+		a.svc.sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: callID, Output: chunk}})
 	})
 	plan.cctx = cctx
 	return toolOutcome{}, false
@@ -738,7 +710,7 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	permArgs := plan.permArgs
 	evidenceName := plan.evidenceName
 	evidenceArgs := plan.evidenceArgs
-	mutates := plan.mutates
+	mutates := plan.effects.StateMutation
 	recoveryGen := plan.recoveryGen
 
 	var result string
@@ -792,25 +764,21 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	if msg, refused := tool.BlockedMessage(err); refused {
 		return a.blockedToolOutcome(plan, msg)
 	}
-	a.recordToolReceipts(plan, result, execution, err)
 	// Track skill/capability outcomes for Delivery gates.
 	a.noteCapabilityInvocation(call.Name, json.RawMessage(call.Arguments), err)
 	// Success and failure hooks observe the result after the tool ran. Use the
 	// real target name for proxied tools.
-	if a.hooks != nil {
+	if a.svc.hooks != nil {
 		if err != nil {
-			a.hooks.PostToolUseFailure(ctx, permName, permArgs, result, err)
+			a.svc.hooks.PostToolUseFailure(ctx, permName, permArgs, result, err)
 		} else {
-			a.hooks.PostToolUse(ctx, permName, permArgs, result)
+			a.svc.hooks.PostToolUse(ctx, permName, permArgs, result)
 		}
 	}
 	// Always re-read after post hooks — partial writes and hook side effects can
 	// change the previewed path even when the concrete tool returned an error.
-	a.observeAfterMutation(plan)
-	plan.mutationAfterDone = true
-	if a.recoveryGate != nil {
-		a.observeRecoveryResult(ctx, evidenceName, evidenceArgs, readOnly, mutates, result, err, false, false, recoveryGen)
-	}
+	a.finalizeObservedToolReceipts(plan, result, execution, err)
+	result = a.withRecoveryObservation(ctx, evidenceName, evidenceArgs, readOnly, mutates, result, err, recoveryGen)
 	if err != nil {
 		detail := result
 		// Malformed-args failures are a transient model JSON glitch (e.g. options
@@ -839,8 +807,8 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	// A foreground `task` sub-agent just finished — its result is the final answer.
 	// (A backgrounded one returns a "Started…" string and stops later in a job, so
 	// it doesn't fire here.) SubagentStop lets a hook react to delegated work.
-	if a.hooks != nil && call.Name == "task" && !isBackgroundTaskCall(call.Arguments) {
-		a.hooks.SubagentStop(ctx, result)
+	if a.svc.hooks != nil && call.Name == "task" && !isBackgroundTaskCall(call.Arguments) {
+		a.svc.hooks.SubagentStop(ctx, result)
 	}
 	body, truncMsg := truncateToolOutputFor(result, call.Name, call.ID)
 	out := toolOutcome{
@@ -863,7 +831,7 @@ func (a *Agent) observeBeforeMutation(ctx context.Context, plan *toolCallPlan) {
 	if toolName == "" {
 		toolName = plan.call.Name
 	}
-	obs := a.mutationObserver
+	obs := a.svc.mutationObserver
 	if obs != nil {
 		if pv, ok := plan.execTool.(tool.Previewer); ok {
 			if change, perr := pv.Preview(ctx, plan.execArgs); perr == nil && change.Path != "" {
@@ -885,10 +853,10 @@ func (a *Agent) observeBeforeMutation(ctx context.Context, plan *toolCallPlan) {
 		return
 	}
 	// Legacy onPreEdit path.
-	if a.onPreEdit != nil {
+	if a.svc.preEdit != nil {
 		if pv, ok := plan.execTool.(tool.Previewer); ok {
 			if change, perr := pv.Preview(ctx, plan.execArgs); perr == nil {
-				a.onPreEdit(change)
+				a.svc.preEdit(change)
 				plan.mutationPath = change.Path
 			}
 		}
@@ -897,13 +865,19 @@ func (a *Agent) observeBeforeMutation(ctx context.Context, plan *toolCallPlan) {
 
 // observeAfterMutation records the after fingerprint when a concrete path was
 // known before execution, regardless of tool success or failure.
-func (a *Agent) observeAfterMutation(plan *toolCallPlan) {
-	if a == nil || plan == nil || plan.mutationPath == "" || a.mutationObserver == nil {
-		return
+func (a *Agent) observeAfterMutation(plan *toolCallPlan) bool {
+	if a == nil || plan == nil || plan.mutationPath == "" || a.svc.mutationObserver == nil {
+		return false
 	}
 	toolName := plan.evidenceName
 	if toolName == "" {
 		toolName = plan.call.Name
 	}
-	a.mutationObserver.AfterMutation(plan.mutationPath, toolName)
+	changed := a.svc.mutationObserver.AfterMutation(plan.mutationPath, toolName)
+	if changed {
+		plan.effects.StateMutation = true
+		plan.effects.WorkspaceMutation = true
+		plan.effects.ContentMutation = true
+	}
+	return changed
 }

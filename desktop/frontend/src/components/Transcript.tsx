@@ -1,5 +1,5 @@
-import { memo, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { forwardRef, memo, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Virtuoso, type Components, type ItemProps, type ListItem, type ListProps } from "react-virtuoso";
 import type { ControllerLiveStore, Item, LiveStream } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
 import type { InvocationMetadataMap } from "../lib/invocationDisplay";
@@ -8,17 +8,14 @@ import { AssistantMessage, InvocationMetadataContext, TurnActions, UserMessage }
 import { ProcessCompactIcon, ProcessPhaseIcon } from "./ProcessCard";
 import { ToolCard } from "./ToolCard";
 import { ExtensionCard } from "./ExtensionCard";
-import { ArrowDown, ChevronRight, CirclePlay, Info, TriangleAlert } from "lucide-react";
+import { ArrowDown, ChevronRight, CirclePlay, FileSearch, Info, TriangleAlert } from "lucide-react";
 import { Welcome } from "./Welcome";
 import { ReadOnlyBatch } from "./ReadOnlyBatch";
 import { ToolGroup } from "./ToolGroup";
 import { getProcessFoldPreference, onProcessFoldPreferenceChange, type ProcessFoldPreference } from "../lib/processFoldPreference";
 import { STEER_NOTICE_PREFIX, isSteerNoticeText } from "../lib/useController";
 import { useTranscriptEntranceAnimation } from "../lib/useEntranceAnimation";
-import { useTranscriptScrollController } from "../lib/useTranscriptScrollController";
 import { useTranscriptSelectionRetention } from "../lib/useTranscriptSelectionRetention";
-import { useTranscriptMeasurementInvalidation } from "../lib/useTranscriptMeasurementInvalidation";
-import { useTranscriptRowMeasurements } from "../lib/useTranscriptRowMeasurements";
 import { compactQuestionText, lastQuestionTurn, questionAnchorId, questionTurnsById, scrollVersion, type QuestionAnchor } from "../lib/transcriptGrouping";
 import {
   buildTranscriptRows,
@@ -28,6 +25,7 @@ import {
   foldSegmentStates,
   historyEntryIdForRow,
   reconcileFoldEntries,
+  estimateTranscriptRowSize,
   userRowKey,
   EMPTY_FOLDS,
   NO_LIVE,
@@ -39,7 +37,6 @@ import {
   type TranscriptLiveFlags,
   type TranscriptRow,
 } from "../lib/transcriptRows";
-import { observeScrollContentSize } from "../lib/scrollContentObserver";
 import { getTranscriptStore } from "../lib/transcriptStore";
 import { acquireMarkdownWorkerClient, releaseMarkdownWorkerClient } from "../lib/markdownWorkerClient";
 import { noteTranscriptRowCounts } from "../lib/sessionDiagnostics";
@@ -48,9 +45,15 @@ import { InlineAssistantReasoning } from "./InlineAssistantReasoning";
 import { LiveStreamContext } from "./LiveStreamContext";
 import { useTranscriptSelectableRows } from "../lib/useTranscriptSelectableRows";
 import { TranscriptSelectionOverlay } from "./TranscriptSelectionOverlay";
+import { useCreationTranscriptScrollbar } from "../lib/useCreationTranscriptScrollbar";
+import { useTranscriptScrollInteractions } from "../lib/useTranscriptScrollInteractions";
+import { TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX, useTranscriptVirtuosoScroll } from "../lib/useTranscriptVirtuosoScroll";
+import { useTranscriptVirtuosoFirstItemIndex } from "../lib/transcriptVirtuosoIndex";
 type OpenTurnAction = { turn: number; menu: "summary" | "rewind" };
 const QUESTION_NAV_MIN_COUNT = 2;
 type AssistantReasoningDisplay = "normal" | "hide";
+const EMPTY_CHECKPOINTS: CheckpointMeta[] = [];
+const EMPTY_INVOCATION_METADATA: InvocationMetadataMap = {};
 
 const LiveAssistantMessage = memo(function LiveAssistantMessage({
   item,
@@ -103,6 +106,77 @@ const LiveAssistantMessage = memo(function LiveAssistantMessage({
 });
 const VIRTUAL_OVERSCAN_ROWS = 8;
 
+type TranscriptVirtuosoContext = {
+  tabId?: string;
+  scrollElement: HTMLDivElement | null;
+  nativeScrollbarDragging: boolean;
+  overlayRevision: string;
+  olderHistory: null | {
+    loading: boolean;
+    label: string;
+    onLoad?: () => void;
+  };
+};
+
+const TranscriptVirtuosoItem = forwardRef<HTMLDivElement, ItemProps<TranscriptRow> & { context: TranscriptVirtuosoContext }>(
+  function TranscriptVirtuosoItem({ item, context, children, style, ...props }, ref) {
+    const entryId = historyEntryIdForRow(item);
+    useEffect(() => {
+      if (entryId) getTranscriptStore().requestEntryFullContent(context.tabId, entryId);
+    }, [context.tabId, entryId]);
+    const knownSize = Number.parseFloat(String(props["data-known-size"] ?? ""));
+    const frozenStyle = context.nativeScrollbarDragging && Number.isFinite(knownSize) && knownSize > 0
+      ? { ...style, boxSizing: "border-box" as const, height: knownSize, overflow: "hidden" as const }
+      : style;
+    return (
+      <div {...props} ref={ref} style={frozenStyle} data-row-key={String(item.key)} className="transcript__row">
+        {children}
+      </div>
+    );
+  },
+);
+
+const TranscriptVirtuosoList = forwardRef<HTMLDivElement, ListProps & { context: TranscriptVirtuosoContext }>(
+  function TranscriptVirtuosoList({ context, children, ...props }, ref) {
+    return (
+      <div {...props} ref={ref} className="transcript__virtual-sizer">
+        <TranscriptSelectionOverlay
+          tabId={context.tabId ?? ""}
+          scrollElement={context.scrollElement}
+          virtualRevision={context.overlayRevision}
+        />
+        {children}
+      </div>
+    );
+  },
+);
+
+function TranscriptVirtuosoHeader({ context }: { context: TranscriptVirtuosoContext }) {
+  if (!context.olderHistory) return null;
+  return (
+    <div className="transcript__header">
+      <button
+        type="button"
+        className="warm-collapse transcript__older"
+        onClick={context.olderHistory.onLoad}
+        disabled={context.olderHistory.loading}
+      >
+        {context.olderHistory.label}
+      </button>
+    </div>
+  );
+}
+
+const TRANSCRIPT_VIRTUOSO_COMPONENTS: Components<TranscriptRow, TranscriptVirtuosoContext> = {
+  Item: TranscriptVirtuosoItem,
+  List: TranscriptVirtuosoList,
+};
+
+const TRANSCRIPT_VIRTUOSO_COMPONENTS_WITH_HEADER: Components<TranscriptRow, TranscriptVirtuosoContext> = {
+  ...TRANSCRIPT_VIRTUOSO_COMPONENTS,
+  Header: TranscriptVirtuosoHeader,
+};
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function useTick(on: boolean): number {
@@ -144,9 +218,10 @@ export function Transcript({
   footerHeight = 0,
   onPrompt,
   onDeliveryContinue,
+  onOpenChanges,
   onEditPrompt,
   onRewind,
-  checkpoints = [],
+  checkpoints = EMPTY_CHECKPOINTS,
   actionPending = false,
   rewindDisabled = false,
   running = false,
@@ -162,7 +237,7 @@ export function Transcript({
   loadingOlderHistory = false,
   onLoadOlderHistory,
   turnStartAt,
-  invocationMetadata = {},
+  invocationMetadata = EMPTY_INVOCATION_METADATA,
 }: {
   items: Item[];
   live?: LiveStream;
@@ -171,6 +246,7 @@ export function Transcript({
   footerHeight?: number;
   onPrompt: (text: string) => void;
   onDeliveryContinue?: () => void;
+  onOpenChanges?: () => void;
   onEditPrompt?: (turn: number, displayText: string, submitText?: string) => boolean | void | Promise<boolean | void>;
   onRewind?: (turn: number, scope: string) => void;
   checkpoints?: CheckpointMeta[];
@@ -202,200 +278,32 @@ export function Transcript({
   );
   const live = useSyncExternalStore(subscribeLive, getLiveSnapshot, getLiveSnapshot);
   const {
+    virtuosoRef,
     scrollRef,
-    stick,
-    onScroll,
+    itemSize,
+    nativeScrollbarDragging,
+    scrollElement,
+    pinnedRef: stick,
     onWheelIntent,
+    onPointerDownIntent,
+    onNestedScrollIntent,
     onTouchStartIntent,
     onTouchMoveIntent,
     onKeyScrollIntent,
     isAtBottom,
-    scrollToBottomAfterLayout,
-    trackQuestions,
-    scheduleRepinIfWasPinned,
-    resizeFrame,
-    lastClientHeight,
-    lastFooterHeight,
+    scrollerRef,
+    atBottomStateChange,
+    scrollToBottom,
+    followGrowingTail,
+    scrollToDataIndex,
+    releaseTailFollow,
     setMode: setScrollMode,
     writeOffset,
-    resetGeneration,
-    canVirtualizerAdjust,
-    captureViewportAnchor,
-    reconcileViewportAnchor,
-  } = useTranscriptScrollController();
+    reset: resetScroll,
+    finishProgrammaticScroll,
+  } = useTranscriptVirtuosoScroll();
   const autoScrollFrame = useRef<number | null>(null);
-  const pendingRevealBottomScroll = useRef(false);
-  // Creation uses a custom scrollbar (native WebView2 thumb size is unreliable).
-  // Thin by default; only thickens when pointer is near the right rail / dragging.
-  const [creationScrollbar, setCreationScrollbar] = useState({
-    visible: false,
-    hot: false,
-    thumbTop: 0,
-    thumbHeight: 0,
-  });
-  const creationScrollbarHotRef = useRef(false);
-  const creationScrollbarDragRef = useRef<{ pointerId: number; startY: number; startScrollTop: number } | null>(null);
-  const SCROLLBAR_HOT_ZONE_PX = 18;
-  const SCROLLBAR_MIN_THUMB_PX = 28;
-
-  const syncCreationScrollbarMetrics = useCallback(() => {
-    if (!creationMode) return;
-    const el = scrollRef.current;
-    if (!el) {
-      setCreationScrollbar((prev) => (prev.visible || prev.hot ? { visible: false, hot: false, thumbTop: 0, thumbHeight: 0 } : prev));
-      return;
-    }
-    const { scrollTop, scrollHeight, clientHeight } = el;
-    const overflow = scrollHeight - clientHeight;
-    if (overflow <= 1 || clientHeight <= 0) {
-      setCreationScrollbar((prev) => (prev.visible || prev.hot ? { visible: false, hot: false, thumbTop: 0, thumbHeight: 0 } : prev));
-      return;
-    }
-    const thumbHeight = Math.max(SCROLLBAR_MIN_THUMB_PX, Math.round((clientHeight / scrollHeight) * clientHeight));
-    const maxThumbTop = Math.max(0, clientHeight - thumbHeight);
-    const thumbTop = Math.round((scrollTop / overflow) * maxThumbTop);
-    setCreationScrollbar((prev) => {
-      if (
-        prev.visible &&
-        prev.thumbTop === thumbTop &&
-        prev.thumbHeight === thumbHeight &&
-        prev.hot === creationScrollbarHotRef.current
-      ) {
-        return prev;
-      }
-      return {
-        visible: true,
-        hot: creationScrollbarHotRef.current,
-        thumbTop,
-        thumbHeight,
-      };
-    });
-  }, [SCROLLBAR_MIN_THUMB_PX, creationMode, scrollRef]);
-
-  const setCreationScrollbarHot = useCallback((next: boolean) => {
-    if (creationScrollbarHotRef.current === next) return;
-    creationScrollbarHotRef.current = next;
-    setCreationScrollbar((prev) => (prev.hot === next ? prev : { ...prev, hot: next }));
-  }, []);
-
-  useEffect(() => {
-    if (!creationMode) {
-      creationScrollbarHotRef.current = false;
-      creationScrollbarDragRef.current = null;
-      setCreationScrollbar({ visible: false, hot: false, thumbTop: 0, thumbHeight: 0 });
-      return;
-    }
-
-    const onPointerMove = (event: PointerEvent) => {
-      const drag = creationScrollbarDragRef.current;
-      const el = scrollRef.current;
-      if (drag && el) {
-        const overflow = el.scrollHeight - el.clientHeight;
-        if (overflow > 0) {
-          const thumbHeight = Math.max(SCROLLBAR_MIN_THUMB_PX, Math.round((el.clientHeight / el.scrollHeight) * el.clientHeight));
-          const maxThumbTop = Math.max(0, el.clientHeight - thumbHeight);
-          const startThumbTop = (drag.startScrollTop / overflow) * maxThumbTop;
-          const nextThumbTop = Math.min(maxThumbTop, Math.max(0, startThumbTop + (event.clientY - drag.startY)));
-          setScrollMode("programmatic", "custom-scrollbar-drag");
-          writeOffset("custom-scrollbar", maxThumbTop > 0 ? (nextThumbTop / maxThumbTop) * overflow : 0);
-          syncCreationScrollbarMetrics();
-        }
-        setCreationScrollbarHot(true);
-        return;
-      }
-
-      if (!el || el.scrollHeight <= el.clientHeight + 1) {
-        setCreationScrollbarHot(false);
-        return;
-      }
-      const rect = el.getBoundingClientRect();
-      const inY = event.clientY >= rect.top && event.clientY <= rect.bottom;
-      const fromRight = rect.right - event.clientX;
-      setCreationScrollbarHot(inY && fromRight >= -2 && fromRight <= SCROLLBAR_HOT_ZONE_PX);
-    };
-
-    const endDrag = (event?: PointerEvent) => {
-      if (!creationScrollbarDragRef.current) return;
-      creationScrollbarDragRef.current = null;
-      const el = scrollRef.current;
-      if (!el || !event) {
-        setCreationScrollbarHot(false);
-        return;
-      }
-      const rect = el.getBoundingClientRect();
-      const inY = event.clientY >= rect.top && event.clientY <= rect.bottom;
-      const fromRight = rect.right - event.clientX;
-      setCreationScrollbarHot(inY && fromRight >= -2 && fromRight <= SCROLLBAR_HOT_ZONE_PX);
-    };
-
-    const onPointerUp = (event: PointerEvent) => endDrag(event);
-    const onBlur = () => endDrag();
-
-    syncCreationScrollbarMetrics();
-    window.addEventListener("pointermove", onPointerMove, { passive: true });
-    window.addEventListener("pointerup", onPointerUp, { passive: true });
-    window.addEventListener("pointercancel", onPointerUp, { passive: true });
-    window.addEventListener("blur", onBlur);
-    window.addEventListener("resize", syncCreationScrollbarMetrics);
-    return () => {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-      window.removeEventListener("pointercancel", onPointerUp);
-      window.removeEventListener("blur", onBlur);
-      window.removeEventListener("resize", syncCreationScrollbarMetrics);
-      creationScrollbarHotRef.current = false;
-      creationScrollbarDragRef.current = null;
-      setCreationScrollbar({ visible: false, hot: false, thumbTop: 0, thumbHeight: 0 });
-    };
-  }, [SCROLLBAR_HOT_ZONE_PX, SCROLLBAR_MIN_THUMB_PX, creationMode, scrollRef, setCreationScrollbarHot, setScrollMode, syncCreationScrollbarMetrics, writeOffset]);
-
-  const handleCreationScroll = useCallback(() => {
-    onScroll();
-    if (creationMode) syncCreationScrollbarMetrics();
-  }, [creationMode, onScroll, syncCreationScrollbarMetrics]);
-
-  useLayoutEffect(() => {
-    if (!creationMode) return;
-    syncCreationScrollbarMetrics();
-  }, [creationMode, items.length, syncCreationScrollbarMetrics]);
-
-  useEffect(() => {
-    if (!creationMode || !scrollRef.current) return;
-    return observeScrollContentSize(scrollRef.current, syncCreationScrollbarMetrics);
-  }, [creationMode, scrollRef, syncCreationScrollbarMetrics]);
-
-  const handleCreationScrollbarThumbPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!creationMode) return;
-    const el = scrollRef.current;
-    if (!el) return;
-    event.preventDefault();
-    event.stopPropagation();
-    creationScrollbarDragRef.current = {
-      pointerId: event.pointerId,
-      startY: event.clientY,
-      startScrollTop: el.scrollTop,
-    };
-    event.currentTarget.setPointerCapture(event.pointerId);
-    setCreationScrollbarHot(true);
-  }, [creationMode, scrollRef, setCreationScrollbarHot]);
-
-  const handleCreationScrollbarRailPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!creationMode) return;
-    if ((event.target as HTMLElement | null)?.closest?.(".transcript__scrollbar-thumb")) return;
-    const el = scrollRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const overflow = el.scrollHeight - el.clientHeight;
-    if (overflow <= 1) return;
-    const thumbHeight = Math.max(SCROLLBAR_MIN_THUMB_PX, Math.round((el.clientHeight / el.scrollHeight) * el.clientHeight));
-    const maxThumbTop = Math.max(0, el.clientHeight - thumbHeight);
-    const y = event.clientY - rect.top - thumbHeight / 2;
-    const nextThumbTop = Math.min(maxThumbTop, Math.max(0, y));
-    setScrollMode("programmatic", "custom-scrollbar-rail");
-    writeOffset("custom-scrollbar", maxThumbTop > 0 ? (nextThumbTop / maxThumbTop) * overflow : 0);
-    syncCreationScrollbarMetrics();
-    setCreationScrollbarHot(true);
-  }, [SCROLLBAR_MIN_THUMB_PX, creationMode, scrollRef, setCreationScrollbarHot, setScrollMode, syncCreationScrollbarMetrics, writeOffset]);
+  const virtuosoReadyRef = useRef(false);
 
   const entranceRef = useTranscriptEntranceAnimation<HTMLDivElement>(tabId, revealSignal, items);
 
@@ -413,17 +321,25 @@ export function Transcript({
     }
   }, []);
 
-  const handleWheelIntent = useCallback((event: React.WheelEvent<HTMLElement>) => {
-    if (onWheelIntent(event)) cancelStreamingAutoScroll();
-  }, [cancelStreamingAutoScroll, onWheelIntent]);
+  const cancelStreamingAndFollow = useCallback(() => {
+    cancelStreamingAutoScroll();
+    releaseTailFollow();
+  }, [cancelStreamingAutoScroll, releaseTailFollow]);
 
-  const handleTouchMoveIntent = useCallback((event: React.TouchEvent<HTMLElement>) => {
-    if (onTouchMoveIntent(event)) cancelStreamingAutoScroll();
-  }, [cancelStreamingAutoScroll, onTouchMoveIntent]);
-
-  const handleKeyScrollIntent = useCallback((event: React.KeyboardEvent<HTMLElement>) => {
-    if (onKeyScrollIntent(event)) cancelStreamingAutoScroll();
-  }, [cancelStreamingAutoScroll, onKeyScrollIntent]);
+  const {
+    state: creationScrollbar,
+    handleScroll: handleCreationScroll,
+    onThumbPointerDown: handleCreationScrollbarThumbPointerDown,
+    onRailPointerDown: handleCreationScrollbarRailPointerDown,
+  } = useCreationTranscriptScrollbar({
+    enabled: creationMode,
+    contentRevision: items.length,
+    scrollRef,
+    onScroll: () => {},
+    setScrollMode,
+    writeOffset,
+    finishProgrammaticScroll,
+  });
 
   const questions = useMemo<QuestionAnchor[]>(() => {
     const anchors: QuestionAnchor[] = [];
@@ -437,54 +353,40 @@ export function Transcript({
   }, [items]);
   const showQuestionNav = questionNavigator && questions.length >= QUESTION_NAV_MIN_COUNT;
 
-  // Track question count and auto-scroll on new messages. A "new question" is
-  // a tail append — prepending an older-history page also grows the question
-  // list but must not yank the reader to the bottom (the virtualizer's anchor
-  // compensation keeps their position instead).
+  // A new local question is an explicit request to reveal the tail. Prepending
+  // older history keeps the same last id and is left entirely to Virtuoso's
+  // firstItemIndex anchor contract.
   const questionTailRef = useRef({ length: 0, lastId: "" });
-  const newQuestionCount = useRef(0);
   useEffect(() => {
     const lastId = questions[questions.length - 1]?.id ?? "";
     const prev = questionTailRef.current;
     questionTailRef.current = { length: questions.length, lastId };
-    if (questions.length > prev.length && lastId !== prev.lastId) {
-      newQuestionCount.current += 1;
-    }
-    trackQuestions(newQuestionCount.current);
-  }, [questions, trackQuestions]);
+    if (prev.length > 0 && questions.length > prev.length && lastId !== prev.lastId) scrollToBottom();
+  }, [questions, scrollToBottom]);
 
   // Reset the auto-scroll pin when switching tabs so the new session always
   // starts at the bottom. Without this, stick.current from the previous tab
   // persists across React re-renders (Transcript is not keyed by tabId) and
   // disables auto-scroll when the user had scrolled up in the old tab (#4584).
   useEffect(() => {
-    resetGeneration(tabId, revealSignal);
-    pendingRevealBottomScroll.current = true;
-  }, [resetGeneration, revealSignal, tabId]);
-
-  useEffect(() => {
-    if (!pendingRevealBottomScroll.current || items.length === 0) return;
-    pendingRevealBottomScroll.current = false;
-    const frame = requestAnimationFrame(() => {
-      scrollToBottomAfterLayout(5);
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [items.length, revealSignal, scrollToBottomAfterLayout, tabId]);
+    resetScroll();
+    virtuosoReadyRef.current = false;
+  }, [resetScroll, revealSignal, tabId]);
 
   // Auto-scroll to bottom during streaming. Coalesce fast token/reasoning
   // updates into one layout read/write per animation frame.
   const contentVersion = useMemo(() => scrollVersion(items), [items]);
   useEffect(() => {
     if (items.length === 0) return;
+    if (!virtuosoReadyRef.current) return;
     if (!stick.current) return;
     if (autoScrollFrame.current !== null) return;
     autoScrollFrame.current = requestAnimationFrame(() => {
       autoScrollFrame.current = null;
       if (!stick.current) return;
-      const el = scrollRef.current;
-      if (el) writeOffset("stream", el.scrollHeight);
+      followGrowingTail();
     });
-  }, [contentVersion, live?.text?.length ?? 0, live?.reasoning?.length ?? 0, writeOffset]);
+  }, [contentVersion, followGrowingTail, live?.text?.length ?? 0, live?.reasoning?.length ?? 0, stick]);
   useEffect(() => {
     return () => {
       if (autoScrollFrame.current !== null) {
@@ -494,37 +396,11 @@ export function Transcript({
     };
   }, []);
 
-  // ResizeObserver for container height changes.
+  // Footer chrome resize only. Item growth stays on followGrowingTail.
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    lastClientHeight.current = el.clientHeight;
-    const observer = new ResizeObserver((entries) => {
-      const height = entries[0]?.contentRect.height ?? el.clientHeight;
-      const previous = lastClientHeight.current ?? height;
-      lastClientHeight.current = height;
-      if (items.length === 0) return;
-      scheduleRepinIfWasPinned(height - previous, "container-resize");
-    });
-    observer.observe(el);
-    return () => {
-      observer.disconnect();
-      if (resizeFrame.current !== null) {
-        cancelAnimationFrame(resizeFrame.current);
-        resizeFrame.current = null;
-      }
-    };
-  }, [items.length, scheduleRepinIfWasPinned]);
-
-  // Footer height changes → frame-batched scroll repin.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const previous = lastFooterHeight.current ?? footerHeight;
-    lastFooterHeight.current = footerHeight;
-    if (items.length === 0) return;
-    scheduleRepinIfWasPinned(previous - footerHeight, "footer-resize");
-  }, [footerHeight, items.length, scheduleRepinIfWasPinned]);
+    if (!virtuosoReadyRef.current || !stick.current) return;
+    scrollToBottom();
+  }, [footerHeight, scrollToBottom, stick]);
 
   // Sub-agent calls carry a parentId; collect them under their parent `task`
   // call so the parent card can render them nested, and skip them at top level.
@@ -602,12 +478,18 @@ export function Transcript({
     () => buildTranscriptRows(turnModels, { folds, foldPreference, hasOlderHistory, creationMode, turnForUser, hasCheckpointForTurn }),
     [turnModels, folds, foldPreference, hasOlderHistory, creationMode, turnForUser, hasCheckpointForTurn],
   );
+  // Keep the load-older affordance in Virtuoso's measured Header slot so an
+  // older page is a true data prepend, rather than an insertion after row 0.
+  const virtualRows = useMemo(
+    () => rows[0]?.kind === "older-history" ? rows.slice(1) : rows,
+    [rows],
+  );
   const rowIndexByKey = useMemo(() => {
     const map = new Map<string, number>();
-    rows.forEach((row, index) => map.set(String(row.key), index));
+    virtualRows.forEach((row, index) => map.set(String(row.key), index));
     return map;
-  }, [rows]);
-  const [selectableRows, liveSelectableRows] = useTranscriptSelectableRows(rows, live);
+  }, [virtualRows]);
+  const [selectableRows, liveSelectableRows] = useTranscriptSelectableRows(virtualRows, live);
   const selectionRetention = useTranscriptSelectionRetention({
     tabId,
     revealSignal,
@@ -617,63 +499,58 @@ export function Transcript({
     scrollRef,
     setScrollMode,
     writeOffset,
-    cancelStreamingScroll: cancelStreamingAutoScroll,
-    captureViewportAnchor,
-    reconcileViewportAnchor,
+    cancelStreamingScroll: cancelStreamingAndFollow,
   });
-  const getRowKey = useCallback((index: number) => `${tabId ?? ""}:${String(rows[index]?.key ?? index)}`, [rows, tabId]);
-  const { estimateSize: estimateRowSize, layoutSnapshotRef, measureElement: measureRowSize } = useTranscriptRowMeasurements(tabId, rows);
-  const virtualizer = useVirtualizer({
-    count: rows.length,
-    getScrollElement: () => scrollRef.current,
-    getItemKey: getRowKey,
-    estimateSize: estimateRowSize,
-    measureElement: measureRowSize,
-    overscan: VIRTUAL_OVERSCAN_ROWS,
-    rangeExtractor: selectionRetention.rangeExtractor,
-    // Key-anchored compensation: prepended history pages, fold toggles and
-    // async row growth restore the scroll position of the anchor row.
-    anchorTo: "end",
-    scrollToFn: (offset, options) => {
-      writeOffset("virtualizer", offset + (options.adjustments ?? 0), options.behavior ?? "auto");
-    },
-    // Measurement callbacks can arrive during React's commit phase. Let the
-    // virtualizer update stable row positions directly instead of dispatching a
-    // reducer update for every ResizeObserver measurement (React #185).
-    directDomUpdates: true,
-    // Batch ResizeObserver measurements into one layout read per frame.
-    useAnimationFrameWithResizeObserver: true,
-    onChange: () => selectionRetention.reconcileLogicalFocus(),
-  });
-  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => canVirtualizerAdjust();
-  useTranscriptMeasurementInvalidation({
+  const scrollInteractions = useTranscriptScrollInteractions({
     scrollRef,
-    layoutSnapshotRef,
-    virtualizer,
-    selectionActive: selectionRetention.active,
+    cancelStreamingScroll: cancelStreamingAutoScroll,
+    onWheelIntent,
+    onTouchMoveIntent,
+    onKeyScrollIntent,
+    onPointerDownIntent,
+    onNestedScrollIntent,
+    onScrollEnd: finishProgrammaticScroll,
+    onSelectionPointerDown: selectionRetention.onPointerDownCapture,
   });
-
-  const sizerRef = useCallback(
-    (el: HTMLDivElement | null) => {
-      virtualizer.containerRef(el);
-      entranceRef.current = el;
-    },
-    [virtualizer, entranceRef],
+  const virtuosoResetKey = `${tabId ?? ""}:${revealSignal}`;
+  const firstItemIndex = useTranscriptVirtuosoFirstItemIndex(virtualRows, virtuosoResetKey);
+  const heightEstimates = useMemo(() => virtualRows.map((row) => estimateTranscriptRowSize(row)), [virtualRows]);
+  const overlayRevision = useMemo(
+    () => virtualRows.map((row) => String(row.key)).join("|"),
+    [virtualRows],
   );
-  const virtualItems = virtualizer.getVirtualItems();
-  const virtualRevision = virtualItems.map((item) => `${item.key}:${item.start}:${item.size}`).join("|");
-  useEffect(() => {
-    noteTranscriptRowCounts(virtualItems.length, rows.length);
-  }, [virtualItems.length, rows.length]);
+  const virtuosoContext = useMemo<TranscriptVirtuosoContext>(() => ({
+    tabId,
+    scrollElement,
+    nativeScrollbarDragging,
+    overlayRevision,
+    olderHistory: hasOlderHistory
+      ? {
+          loading: loadingOlderHistory,
+          label: loadingOlderHistory ? t("common.loading") : t("transcript.showEarlierHistory", { n: olderHistoryCount }),
+          onLoad: onLoadOlderHistory,
+        }
+      : null,
+  }), [hasOlderHistory, loadingOlderHistory, nativeScrollbarDragging, olderHistoryCount, onLoadOlderHistory, overlayRevision, scrollElement, t, tabId]);
+  const handleScrollerRef = useCallback((node: HTMLElement | Window | null) => {
+    scrollerRef(node);
+    entranceRef.current = node instanceof HTMLElement ? node as HTMLDivElement : null;
+  }, [entranceRef, scrollerRef]);
+  const handleItemsRendered = useCallback((rendered: ListItem<TranscriptRow>[]) => {
+    noteTranscriptRowCounts(rendered.length, virtualRows.length);
+    selectionRetention.reconcileLogicalFocus();
+    if (!virtuosoReadyRef.current && rendered.length > 0) {
+      virtuosoReadyRef.current = true;
+      requestAnimationFrame(() => scrollToBottom());
+    }
+  }, [scrollToBottom, selectionRetention.reconcileLogicalFocus, virtualRows.length]);
 
   // ── JumpBar integration ───────────────────────────────────────────────────
   const handleJumpToQuestion = useCallback((question: QuestionAnchor) => {
     const index = rowIndexByKey.get(String(userRowKey(question.id)));
     if (index == null) return;
-    stick.current = false;
-    setScrollMode("programmatic", "jump");
-    virtualizer.scrollToIndex(index, { align: "start", behavior: "smooth" });
-  }, [rowIndexByKey, setScrollMode, stick, virtualizer]);
+    scrollToDataIndex(firstItemIndex, index, "smooth");
+  }, [firstItemIndex, rowIndexByKey, scrollToDataIndex]);
 
   // After a non-fork rewind, scroll to the last user message (the
   // rewound-to point) so the user knows where they are.
@@ -682,26 +559,11 @@ export function Transcript({
     const lastQ = questions[questions.length - 1];
     const index = rowIndexByKey.get(String(userRowKey(lastQ.id)));
     if (index == null) return;
-    stick.current = false;
-    setScrollMode("programmatic", "rewind");
-    virtualizer.scrollToIndex(index, { align: "start" });
+    scrollToDataIndex(firstItemIndex, index);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rewindSignal]);
 
   const empty = items.length === 0;
-
-  useLayoutEffect(() => {
-    if (!empty) return;
-    const el = scrollRef.current;
-    if (!el) return;
-    setScrollMode("programmatic", "empty-transcript");
-    writeOffset("jump-bottom", 0);
-    stick.current = false;
-    const frame = requestAnimationFrame(() => {
-      writeOffset("jump-bottom", 0);
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [empty, scrollRef, setScrollMode, stick, tabId, writeOffset]);
 
   // ── Row rendering ─────────────────────────────────────────────────────────
   const renderRow = (row: TranscriptRow): ReactNode => {
@@ -804,7 +666,11 @@ export function Transcript({
           <NoticeCard
             item={row.item}
             actionDisabled={running}
-            onAction={row.item.action === "continue_delivery" ? (onDeliveryContinue ?? (() => onPrompt(t("notice.deliveryIncompleteContinuePrompt")))) : undefined}
+            onAction={row.item.action === "continue_delivery"
+              ? (onDeliveryContinue ?? (() => onPrompt(t("notice.deliveryIncompleteContinuePrompt"))))
+              : row.item.action === "open_changes"
+                ? onOpenChanges
+                : undefined}
           />
         );
       case "extension":
@@ -836,39 +702,48 @@ export function Transcript({
   return (
     <InvocationMetadataContext.Provider value={invocationMetadata}>
     <div className="transcript-shell">
-      <div
-        className={`transcript${empty ? " transcript--empty" : ""}${creationMode ? " transcript--creation-scrollbar" : ""}${creationMode && creationScrollbar.hot ? " transcript--scrollbar-hot" : ""}`}
-        ref={scrollRef}
-        onScroll={creationMode ? handleCreationScroll : onScroll}
-        onWheelCapture={handleWheelIntent}
-        onTouchStartCapture={onTouchStartIntent}
-        onTouchMoveCapture={handleTouchMoveIntent}
-        onKeyDownCapture={handleKeyScrollIntent}
-        onPointerDownCapture={selectionRetention.onPointerDownCapture}
-      >
-        {empty && !hydrating && <Welcome onPrompt={onPrompt} variant={welcomeVariant} />}
-
+      {empty ? (
+        <div
+          className={`transcript transcript--empty${creationMode ? " transcript--creation-scrollbar" : ""}`}
+          ref={(node) => handleScrollerRef(node)}
+        >
+          {!hydrating && <Welcome onPrompt={onPrompt} variant={welcomeVariant} />}
+        </div>
+      ) : (
         <LiveStreamContext.Provider value={live}>
-          <div ref={sizerRef} className="transcript__virtual-sizer">
-            <TranscriptSelectionOverlay tabId={tabId ?? ""} scrollElement={scrollRef.current} virtualRevision={virtualRevision} />
-            {virtualItems.map((virtualRow) => {
-              const row = rows[virtualRow.index];
-              if (!row) return null;
-              return (
-                <TranscriptRowShell
-                  key={virtualRow.key}
-                  index={virtualRow.index}
-                  row={row}
-                  measureElement={virtualizer.measureElement}
-                  tabId={tabId}
-                >
-                  {renderRow(row)}
-                </TranscriptRowShell>
-              );
-            })}
-          </div>
+          <Virtuoso<TranscriptRow, TranscriptVirtuosoContext>
+            key={virtuosoResetKey}
+            ref={virtuosoRef}
+            className={`transcript${creationMode ? " transcript--creation-scrollbar" : ""}${creationMode && creationScrollbar.hot ? " transcript--scrollbar-hot" : ""}`}
+            data-transcript-row-count={virtualRows.length}
+            data={virtualRows}
+            context={virtuosoContext}
+            components={hasOlderHistory ? TRANSCRIPT_VIRTUOSO_COMPONENTS_WITH_HEADER : TRANSCRIPT_VIRTUOSO_COMPONENTS}
+            computeItemKey={(_index, row) => `${tabId ?? ""}:${String(row.key)}`}
+            firstItemIndex={firstItemIndex}
+            // Do not set alignToBottom: Virtuoso's margin-top:auto plus
+            // firstItemIndex paints a ghost first-user bubble and empty band
+            // in short chats. Tail pin stays followOutput + scrollToBottom.
+            followOutput={(atBottom) => atBottom ? "auto" : false}
+            atBottomThreshold={TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX}
+            atBottomStateChange={atBottomStateChange}
+            heightEstimates={heightEstimates}
+            itemSize={itemSize}
+            minOverscanItemCount={{ top: VIRTUAL_OVERSCAN_ROWS, bottom: VIRTUAL_OVERSCAN_ROWS }}
+            increaseViewportBy={{ top: 480, bottom: 480 }}
+            scrollerRef={handleScrollerRef}
+            itemsRendered={handleItemsRendered}
+            totalListHeightChanged={followGrowingTail}
+            itemContent={(_index, row) => renderRow(row)}
+            onScroll={creationMode ? handleCreationScroll : undefined}
+            onWheelCapture={scrollInteractions.onWheelCapture}
+            onTouchStartCapture={onTouchStartIntent}
+            onTouchMoveCapture={scrollInteractions.onTouchMoveCapture}
+            onKeyDownCapture={scrollInteractions.onKeyDownCapture}
+            onPointerDownCapture={scrollInteractions.onPointerDownCapture}
+          />
         </LiveStreamContext.Provider>
-      </div>
+      )}
 
       {creationMode && creationScrollbar.visible && (
         <div
@@ -892,7 +767,7 @@ export function Transcript({
         <button
           type="button"
           className="transcript__jump-bottom"
-          onClick={() => scrollToBottomAfterLayout(2)}
+          onClick={() => scrollToBottom()}
           aria-label={t("transcript.jumpToBottom")}
           title={t("transcript.jumpToBottom")}
         >
@@ -901,36 +776,6 @@ export function Transcript({
       )}
     </div>
     </InvocationMetadataContext.Provider>
-  );
-}
-
-// ── Virtual row shell ─────────────────────────────────────────────────────────
-// Owns the measured wrapper element. Mounting implies the row is in or near
-// the viewport (overscan), so history-backed rows resolve their lazy
-// full-content refs here — the transcript store patches the item by stable id
-// and the row re-renders in place.
-
-function TranscriptRowShell({
-  index,
-  row,
-  measureElement,
-  tabId,
-  children,
-}: {
-  index: number;
-  row: TranscriptRow;
-  measureElement: (element: HTMLDivElement | null) => void;
-  tabId?: string;
-  children: ReactNode;
-}) {
-  const entryId = historyEntryIdForRow(row);
-  useEffect(() => {
-    if (entryId) getTranscriptStore().requestEntryFullContent(tabId, entryId);
-  }, [entryId, tabId]);
-  return (
-    <div data-index={index} data-row-key={String(row.key)} ref={measureElement} className="transcript__row">
-      {children}
-    </div>
   );
 }
 
@@ -1183,6 +1028,7 @@ function DecisionReceiptLine({ receipt }: { receipt: NonNullable<NoticeItem["dec
 export function NoticeCard({ item, onAction, actionDisabled = false }: { item: NoticeItem; onAction?: () => void; actionDisabled?: boolean }) {
   const t = useT();
   const StatusIcon = item.level === "warn" ? TriangleAlert : Info;
+  const ActionIcon = item.action === "open_changes" ? FileSearch : CirclePlay;
   return (
     <div className={`notice-line notice-line--${item.level}${item.variant ? ` notice-line--${item.variant}` : ""}`} data-entrance={item.id}>
       <StatusIcon className="notice-line__icon" size={14} aria-hidden="true" />
@@ -1198,8 +1044,8 @@ export function NoticeCard({ item, onAction, actionDisabled = false }: { item: N
         {item.action && onAction ? (
           <div className="notice-line__actions">
             <button className="btn btn--small" type="button" onClick={onAction} disabled={actionDisabled}>
-              <CirclePlay size={13} aria-hidden="true" />
-              <span>{t("notice.deliveryIncompleteContinue")}</span>
+              <ActionIcon size={13} aria-hidden="true" />
+              <span>{item.action === "open_changes" ? t("notice.completionViewChanges") : t("notice.deliveryIncompleteContinue")}</span>
             </button>
           </div>
         ) : null}

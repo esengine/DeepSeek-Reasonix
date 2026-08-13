@@ -350,7 +350,7 @@ jobs:
       - name: Install Linux build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc libgtk-3-dev libwebkit2gtk-4.0-dev
+          sudo apt-get install -y gcc libgtk-3-dev libwebkit2gtk-4.0-dev xvfb
 
       - name: Build frontend
         run: |
@@ -365,6 +365,7 @@ jobs:
           pnpm --dir frontend test:task-monitor
           pnpm --dir frontend test:workspace
           pnpm --dir frontend test:motion
+          pnpm --dir frontend test:motion-browser
           pnpm --dir frontend test:transcript
           pnpm --dir frontend test:transcript-browser
 
@@ -387,11 +388,43 @@ jobs:
       - name: test
         run: go test ./...
 
+      - name: WebKitGTK 4.0 native recovery smoke
+        run: xvfb-run -a env WEBKIT_DISABLE_COMPOSITING_MODE=1 go test -tags reasonix_webkit_smoke . -run '^TestWebKitNativeRecoverySmoke$'
+
       # The extension work added new shared-state paths to the desktop
       # runtime (tab/rebuild fences, extension UI). Race-sweep the module so
       # regressions are CI-blocked, not just author-verified locally.
       - name: test -race
         run: go test -race ./...
+
+  # Ubuntu 24.04 ships WebKitGTK 4.1 only. Keep this capability build separate
+  # from the 22.04/4.0 leg so neither runtime becomes a distro whitelist.
+  desktop-linux-webkit41:
+    needs: changes
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false')
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: desktop/go.mod
+          cache: true
+          cache-dependency-path: desktop/go.sum
+
+      - name: Install WebKitGTK 4.1 build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libgtk-3-dev libwebkit2gtk-4.1-dev xvfb
+
+      - name: Build and test WebKitGTK 4.1 observer
+        run: go test -tags webkit2_41 ./...
+
+      - name: WebKitGTK 4.1 native recovery smoke
+        run: xvfb-run -a env WEBKIT_DISABLE_COMPOSITING_MODE=1 go test -tags 'webkit2_41 reasonix_webkit_smoke' . -run '^TestWebKitNativeRecoverySmoke$'
 
   # desktop/ is a separate module, so the root macOS matrix above does not
   # compile or exercise the native PTY implementation.
@@ -472,25 +505,32 @@ jobs:
       - name: Test native motion contracts
         run: pnpm --dir frontend test:motion
 
+      - name: Test WebView2 native smoke state machine
+        shell: pwsh
+        run: ../scripts/test-webview2-native-smoke.ps1 -SelfTest
+
       # Build the real Wails executable on every desktop PR and exercise the
-      # approval interaction in Microsoft's installed WebView2 runtime. The
-      # frontend and bindings were already built above, so this skips only
+      # exact production startup path in Microsoft's installed WebView2 runtime.
+      # The frontend and bindings were already built above, so this skips only
       # duplicate build work, not the native shell.
-      - name: Build Wails executable for WebView2 smoke
+      - name: Build Wails executable for native startup smoke
         timeout-minutes: 10
         run: wails build -clean -s -skipbindings -nopackage -platform windows/amd64 -webview2 embed
 
-      - name: Smoke-test Wails approval in WebView2
+      - name: Smoke-test Wails/WebView2 native startup
         shell: pwsh
         timeout-minutes: 2
         run: |
-          ../scripts/test-webview2-approval-smoke.ps1 `
+          ../scripts/test-webview2-native-smoke.ps1 `
             -ExecutablePath "build/bin/reasonix-desktop.exe" `
-            -TimeoutSeconds 60
+            -TimeoutSeconds 60 `
+            -HealthySeconds 5
 
       - name: test (Windows desktop and update helper)
         timeout-minutes: 15
-        run: go test ./...
+        run: |
+          go test ./...
+          (cd third_party/go-webview2 && go test ./pkg/edge)
 
       # Installer packaging is packaging validation, not a code gate: run it
       # on pushes to main-v2 (the release pipeline builds installers again

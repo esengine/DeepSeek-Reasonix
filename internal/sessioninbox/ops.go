@@ -32,6 +32,7 @@ func (s *Store) DeleteItem(id string) error {
 	keys := next.idempotencyKeysFor(id)
 	next.rememberReceipt(keys, id, Disposition("deleted"), time.Now().UTC())
 	removed, _ := next.removeItem(id)
+	clearPauseIfEmpty(next)
 	if err := s.commitManifestLocked(next); err != nil {
 		return err
 	}
@@ -113,6 +114,7 @@ func (s *Store) DiscardPendingItemsOwned(ids []string, source string) error {
 			delete(next.IdempotencyHashes, key)
 		}
 	}
+	clearPauseIfEmpty(next)
 	if err := s.commitManifestLocked(next); err != nil {
 		return err
 	}
@@ -193,6 +195,33 @@ func (s *Store) SetPaused(paused bool) error {
 		next.Recovered = false
 		next.RecoveredN = 0
 	}
+	if err := s.commitManifestLocked(next); err != nil {
+		return err
+	}
+	s.notifyLocked(s.snapshotLocked())
+	return nil
+}
+
+// PauseIfPending pauses dispatch only when the inbox still contains work.
+func (s *Store) PauseIfPending() error {
+	if s == nil {
+		return ErrClosed
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	release, err := s.beginDiskTransactionLocked()
+	if err != nil {
+		return err
+	}
+	defer release()
+	if err := s.mutableLocked(); err != nil {
+		return err
+	}
+	if len(s.man.Items) == 0 || s.man.Paused {
+		return nil
+	}
+	next := s.man.clone()
+	next.Paused = true
 	if err := s.commitManifestLocked(next); err != nil {
 		return err
 	}
@@ -332,6 +361,7 @@ func (s *Store) AckDequeue(id string) error {
 	default:
 		return ErrInvalidState
 	}
+	clearPauseIfEmpty(next)
 	if err := s.commitManifestLocked(next); err != nil {
 		return err
 	}
@@ -437,6 +467,15 @@ func (s *Store) ForcePause(reasonRecovered bool, n int) error {
 	}
 	s.notifyLocked(s.snapshotLocked())
 	return nil
+}
+
+func clearPauseIfEmpty(m *manifest) {
+	if m == nil || len(m.Items) > 0 {
+		return
+	}
+	m.Paused = false
+	m.Recovered = false
+	m.RecoveredN = 0
 }
 
 func isPendingState(state InboxState) bool {

@@ -197,15 +197,22 @@ func TestSetDesktopTerminalThemeValidatesPreference(t *testing.T) {
 func TestDesktopCurrencyNormalizesAndRefreshesOfficialPricing(t *testing.T) {
 	c := Default()
 	c.Desktop.Language = "zh"
+	flash, _ := c.Provider("deepseek-flash")
+	// Capture frozen list price before display switches.
+	wantOutput := flash.Price.Output
+	wantCurrency := flash.Price.Currency
 	if err := c.SetDesktopCurrency("usd"); err != nil {
 		t.Fatalf("SetDesktopCurrency USD: %v", err)
 	}
 	if got := c.DesktopCurrency(); got != "USD" {
 		t.Fatalf("desktop currency = %q, want USD", got)
 	}
-	flash, _ := c.Provider("deepseek-flash")
-	if flash.Price == nil || flash.Price.Output != 0.28 || flash.Price.Currency != "$" {
-		t.Fatalf("USD flash price = %+v", flash.Price)
+	if got := c.DisplayCurrencyPref(); got != "USD" {
+		t.Fatalf("display currency pref = %q, want USD", got)
+	}
+	// Display currency must not rewrite frozen provider list prices.
+	if flash.Price == nil || flash.Price.Output != wantOutput || flash.Price.Currency != wantCurrency {
+		t.Fatalf("list price mutated by display switch: %+v", flash.Price)
 	}
 	if err := c.SetDesktopCurrency("auto"); err != nil {
 		t.Fatalf("SetDesktopCurrency auto: %v", err)
@@ -213,8 +220,8 @@ func TestDesktopCurrencyNormalizesAndRefreshesOfficialPricing(t *testing.T) {
 	if got := c.DesktopCurrency(); got != "" {
 		t.Fatalf("auto desktop currency = %q, want empty", got)
 	}
-	if flash.Price == nil || flash.Price.Output != 2 || flash.Price.Currency != "¥" {
-		t.Fatalf("auto Chinese flash price = %+v", flash.Price)
+	if flash.Price == nil || flash.Price.Output != wantOutput || flash.Price.Currency != wantCurrency {
+		t.Fatalf("list price mutated after auto: %+v", flash.Price)
 	}
 	if err := c.SetDesktopCurrency("EUR"); err == nil {
 		t.Fatal("SetDesktopCurrency accepted unsupported EUR")

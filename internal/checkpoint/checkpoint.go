@@ -20,7 +20,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -497,68 +496,6 @@ func (s *Store) CaptureBefore(path string, opts CaptureBeforeOpts) {
 	s.cur.SchemaVersion = SchemaV2
 	s.recomputeCoverageLocked(s.cur)
 	s.persistBestEffort(s.cur)
-}
-
-// CaptureAfter records the after fingerprint for a path already in the current
-// (or any) checkpoint that owns it.
-func (s *Store) CaptureAfter(path string, opts CaptureAfterOpts) {
-	if path == "" {
-		return
-	}
-	pathKey := NormalizeRelPath(s.root, path)
-	fp, gap, err := CapturePath(path, CaptureOptions{
-		WorkspaceRoot: s.root,
-		ReadContent:   true,
-	})
-	if gap != nil {
-		s.RecordGap(*gap)
-	}
-	_ = err
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.mutationSeq = opts.Seq
-	if s.cur != nil {
-		s.cur.LastMutationSeq = opts.Seq
-	}
-	// Update after fingerprint on the most recent snap of this path.
-	updated := false
-	if s.cur != nil {
-		for i := range s.cur.Files {
-			if NormalizeRelPath(s.root, s.cur.Files[i].Path) != pathKey {
-				continue
-			}
-			existed := fp.Existed
-			s.cur.Files[i].AfterExisted = &existed
-			s.cur.Files[i].AfterSHA256 = fp.SHA256
-			s.cur.Files[i].AfterMode = fp.Mode
-			updated = true
-		}
-		if updated {
-			s.recomputeCoverageLocked(s.cur)
-			s.persistBestEffort(s.cur)
-			s.lastUndo = nil // mutation invalidates undo
-			return
-		}
-	}
-	// Path might only appear in earlier turns; still record after on earliest?
-	// Ownership after is per-path last write — update the latest checkpoint that
-	// has this path.
-	for _, v := range slices.Backward(s.done) {
-		c := v
-		for j := range c.Files {
-			if NormalizeRelPath(s.root, c.Files[j].Path) != pathKey {
-				continue
-			}
-			existed := fp.Existed
-			c.Files[j].AfterExisted = &existed
-			c.Files[j].AfterSHA256 = fp.SHA256
-			c.Files[j].AfterMode = fp.Mode
-			s.persistBestEffort(c)
-			s.lastUndo = nil
-			return
-		}
-	}
 }
 
 // RecordGap appends a coverage gap to the current checkpoint.

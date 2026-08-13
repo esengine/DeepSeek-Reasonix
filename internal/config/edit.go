@@ -230,27 +230,6 @@ func (c *Config) SetDesktopLanguage(lang string) error {
 	return nil
 }
 
-// SetDesktopCurrency pins the user-global official pricing region independently
-// from language. The name is retained for persisted-schema compatibility.
-// Empty/auto follows the language preference.
-func (c *Config) SetDesktopCurrency(currency string) error {
-	overridePersisted := false
-	switch strings.ToUpper(strings.TrimSpace(currency)) {
-	case "", "AUTO":
-		c.Desktop.Currency = ""
-	case "CNY", "RMB", "CNH":
-		c.Desktop.Currency = "CNY"
-		overridePersisted = true
-	case "USD":
-		c.Desktop.Currency = "USD"
-		overridePersisted = true
-	default:
-		return fmt.Errorf("desktop currency %q: must be auto|CNY|USD", currency)
-	}
-	applyDeepSeekOfficialDefaultPricingWithOverride(c, overridePersisted)
-	return nil
-}
-
 // SetDesktopAppearance sets desktop-only theme preferences. It must not affect
 // CLI theme settings or provider-visible request data.
 func (c *Config) SetDesktopAppearance(theme, style string) error {

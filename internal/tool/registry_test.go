@@ -149,6 +149,36 @@ func TestRegistrySuspendPrefixBlocksLateAddsUntilResume(t *testing.T) {
 	}
 }
 
+func TestRegistrySchemaRevisionTracksVisibleChanges(t *testing.T) {
+	r := NewRegistry()
+	initial := r.SchemaRevision()
+	r.Add(stubTool{name: "mcp__fs__read"})
+	afterAdd := r.SchemaRevision()
+	if afterAdd <= initial {
+		t.Fatalf("revision after add = %d, want greater than %d", afterAdd, initial)
+	}
+	r.Add(stubTool{name: "mcp__fs__read", schema: json.RawMessage(`{"type":"string"}`)})
+	afterReplace := r.SchemaRevision()
+	if afterReplace <= afterAdd {
+		t.Fatalf("revision after replace = %d, want greater than %d", afterReplace, afterAdd)
+	}
+	r.SetProviderVisibleTools([]string{"mcp__fs__read"})
+	afterVisibility := r.SchemaRevision()
+	if afterVisibility <= afterReplace {
+		t.Fatalf("revision after visibility change = %d, want greater than %d", afterVisibility, afterReplace)
+	}
+	r.SetProviderVisibleTools([]string{"mcp__fs__read"})
+	if revision := r.SchemaRevision(); revision != afterVisibility {
+		t.Fatalf("no-op visibility update changed revision: got %d, want %d", revision, afterVisibility)
+	}
+	if removed := r.RemovePrefix("missing"); removed != 0 || r.SchemaRevision() != afterVisibility {
+		t.Fatalf("no-op removal changed revision: removed=%d revision=%d", removed, r.SchemaRevision())
+	}
+	if removed := r.SuspendPrefix("mcp__fs__"); removed != 1 || r.SchemaRevision() <= afterVisibility {
+		t.Fatalf("suspension did not advance revision: removed=%d revision=%d", removed, r.SchemaRevision())
+	}
+}
+
 // TestRegistrySchemasSorted proves Schemas() emits tool definitions in
 // deterministic alphabetical order regardless of insertion order, so a logically
 // identical tool set produces a stable provider-facing request prefix (prompt

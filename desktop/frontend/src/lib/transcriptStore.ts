@@ -29,12 +29,12 @@
 //
 // Rendering consumes the store through TranscriptProjection (items + paging
 // state); useController dispatches projections into per-tab reducer state.
-
 import { asArray } from "./array";
 import { app } from "./bridge";
 import { noteHistoryPage, registerTranscriptCacheDiagnostics } from "./sessionDiagnostics";
 import { TranscriptMarkdownCache, type ParsedMarkdownValue } from "./transcriptMarkdownCache";
 export type { ParsedMarkdownValue } from "./transcriptMarkdownCache";
+import { historySearchAndAnswer } from "./searchTranscript";
 import { fileDiffFromWire, summarizeFileDiff } from "./tools";
 import {
   historyToolError,
@@ -279,19 +279,14 @@ function convertRecord(
   }
 
   if (m.role === "assistant") {
-    const hasText = m.content.trim() !== "" || (m.reasoning ?? "").trim() !== "";
-    if (hasText) {
-      const memoryCitations = asArray<MemoryCitation>(m.memoryCitations);
-      items.push({
-        kind: "assistant",
-        id,
-        text: m.content,
-        reasoning: m.reasoning ?? "",
-        streaming: false,
-        workDurationMs: m.workDurationMs,
-        memoryCitations: memoryCitations.length > 0 ? memoryCitations : undefined,
-      });
-    }
+    const memoryCitations = asArray<MemoryCitation>(m.memoryCitations);
+    items.push(...historySearchAndAnswer(id, {
+      content: m.content,
+      reasoning: m.reasoning,
+      workDurationMs: m.workDurationMs,
+      memoryCitations: memoryCitations.length > 0 ? memoryCitations : undefined,
+      serverSearch: m.serverSearch,
+    }));
     const toolCalls = m.toolCalls ?? [];
     // Positional scan cursor: id-less calls consume the following unconsumed
     // id-less tool rows in order, stopping at the first non-tool record —
@@ -601,6 +596,7 @@ export class TranscriptStore {
     const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
     const slice = await this.backend.HistorySliceForTab(tabId, req);
     const endedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (slice.error?.trim()) throw new Error(slice.error.trim());
     const entries = asArray<HistoryEntry>(slice.entries);
     let inlineBytes = 0;
     for (const entry of entries) inlineBytes += recordBytes(entry.message);

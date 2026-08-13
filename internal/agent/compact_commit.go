@@ -23,32 +23,32 @@ type summaryProjectionCommit struct {
 // that re-enters ContextMaintenanceSnapshot cannot deadlock.
 func (a *Agent) commitSummaryProjection(commit summaryProjectionCommit) (CompactionState, error) {
 	state := a.summaryProjectionState(commit)
-	a.compactionMu.Lock()
-	current, currentVersion := a.session.snapshotMessagesVersion()
+	a.sess.compactionMu.Lock()
+	current, currentVersion := a.sess.conversation.snapshotMessagesVersion()
 	if currentVersion != commit.transcriptVersion ||
 		len(current) != len(commit.canonical) ||
 		coveredPrefixHash(current, len(current)) != coveredPrefixHash(commit.canonical, len(commit.canonical)) ||
-		a.compactionState.Projection.ProjectionVersion != commit.projectionVersion ||
-		a.compactionState.Generation != commit.generation {
-		a.compactionMu.Unlock()
+		a.sess.compactionState.Projection.ProjectionVersion != commit.projectionVersion ||
+		a.sess.compactionState.Generation != commit.generation {
+		a.sess.compactionMu.Unlock()
 		return CompactionState{}, errCompressStaleContext
 	}
-	prev := a.compactionState
-	a.compactionState = state
+	prev := a.sess.compactionState
+	a.sess.compactionState = state
 	if err := a.persistCompactionStateLocked(); err != nil {
-		a.compactionState = prev
-		a.compactionMu.Unlock()
+		a.sess.compactionState = prev
+		a.sess.compactionMu.Unlock()
 		if errors.Is(err, errCompressStaleContext) {
 			return CompactionState{}, err
 		}
 		return CompactionState{}, fmt.Errorf("persist projection: %w", err)
 	}
-	a.checkpointState = "applied"
+	a.sess.checkpointState = "applied"
 	if commit.activeTurn != 0 && commit.trigger != CompactionTriggerManual {
-		a.lastCompactionTurn.Store(commit.activeTurn)
+		a.sess.compaction.lastTurn.Store(commit.activeTurn)
 	}
 	receipt := state.LastReceipt
-	a.compactionMu.Unlock()
+	a.sess.compactionMu.Unlock()
 	a.emitContextMaintenance(receipt)
 	return state, nil
 }

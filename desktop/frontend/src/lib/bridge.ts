@@ -1,15 +1,13 @@
-// bridge is the seam between React and the Go kernel. The Wails shell calls bound
-// App methods and subscribes to runtime events; in a plain browser (`pnpm dev`),
-// a mock streams a canned turn through the same contract so the whole UI can be
-// developed and laid out without rebuilding the Go side.
-
+// Wails and the browser mock share this React-to-Go contract.
 // @ts-ignore `wails generate module` creates this locally; fresh checkouts keep
 // typecheck green by falling back to a disabled drift check below.
 import type * as GeneratedApp from "../../wailsjs/go/main/App";
 import type { InvocationRequest } from "./invocationDisplay";
-
 import { addBreadcrumb } from "./breadcrumbs";
 import { maybeShare } from "./queryCoalesce";
+import { makeMockSessionCatalogBindings } from "./sessionCatalogBridge";
+import { makeMockHistoryCatalogBindings, type HistoryCatalogBindings } from "./historyCatalogBridge";
+import { makeMockTaskCatalogBindings, type TaskCatalogBindings } from "./taskCatalogBridge";
 import { t } from "./i18n";
 import { providerIsConfigured, providerRequiresKey, removeProviderAccessesForMock } from "./providerModels";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems } from "./statusBarItems";
@@ -86,6 +84,10 @@ import type {
   PluginInstallOptions,
   PluginView,
   ProjectNode,
+  RecoveryLineageView,
+  RecoveryCleanupRequest,
+  RecoveryCleanupResult,
+  SessionCatalogBindings,
   PromptHistoryEntry,
   PromptHistoryResult,
   ProviderModelCatalogUpdate,
@@ -119,6 +121,7 @@ import type {
   GitCommitView,
   GitCommitDetailView,
   WorkspaceView,
+  SessionClearResult,
 } from "./types";
 
 const GLOBAL_PROJECT_ORDER_KEY = "__global__";
@@ -163,7 +166,7 @@ interface DesktopWindowState {
 // added or renamed, the generated types shift, and a key present in GeneratedApp
 // but missing from AppBindings causes a type error here. Fix: add the new method
 // to AppBindings, then run `pnpm typecheck` to verify.
-export interface AppBindings {
+export interface AppBindings extends SessionCatalogBindings, HistoryCatalogBindings, TaskCatalogBindings {
   Platform(): Promise<string>;
   MinimiseMainWindow(): Promise<void>;
   ToggleMaximiseMainWindow(): Promise<void>;
@@ -207,7 +210,7 @@ export interface AppBindings {
     revision: number;
     paused: boolean;
     recovered: boolean;
-    recoveredCount?: number;
+    recoveredCount?: number; sessionPath?: string;
     items: Array<{
       id: string;
       intent: string;
@@ -278,8 +281,8 @@ export interface AppBindings {
   CompactForTab(tabID: string): Promise<void>;
   NewSession(): Promise<void>;
   NewSessionForTab(tabID: string): Promise<void>;
-  ClearSession(): Promise<void>;
-  ClearSessionForTab(tabID: string): Promise<void>;
+  ClearSession(): Promise<SessionClearResult>;
+  ClearSessionForTab(tabID: string): Promise<SessionClearResult>;
   History(): Promise<HistoryMessage[]>;
   HistoryForTab(tabID: string): Promise<HistoryMessage[]>;
   HistoryPage(beforeTurn: number, limit: number): Promise<HistoryPage>;
@@ -315,6 +318,9 @@ export interface AppBindings {
   PreviewSession(path: string): Promise<HistoryMessage[]>;
   DeleteSession(path: string): Promise<void>;
   DeleteRecoveryCopy(path: string): Promise<void>;
+  GetRecoveryLineage(key: { scope: string; workspaceRoot?: string; topicId: string }): Promise<RecoveryLineageView>;
+  ChooseRecoveryBranch(request: import("./types").RecoveryPreferenceRequest): Promise<void>;
+  CleanRecoveryLineage(request: RecoveryCleanupRequest): Promise<RecoveryCleanupResult>;
   RestoreSession(path: string): Promise<void>;
   PurgeTrashedSession(path: string): Promise<void>;
   PurgeRecoveryCopy(path: string): Promise<void>;
@@ -357,7 +363,7 @@ export interface AppBindings {
   CloseTabWithPolicy(tabID: string, policy: "keep_running" | "stop_and_close"): Promise<void>;
   ToolResultForTab(tabID: string, toolID: string): Promise<{ args: string; output: string; execution?: import("./types").WireShellExecution } | null>;
   Meta(): Promise<Meta>;
-  MetaForTab(tabID: string): Promise<Meta>;
+  MetaForTab(tabID: string): Promise<Meta>; DismissTodoBatchForTab(tabID: string, batchKey: string): Promise<void>;
   Commands(): Promise<CommandInfo[]>;
   Capabilities(): Promise<CapabilitiesView>;
   MCPServers(): Promise<ServerView[]>;
@@ -449,6 +455,8 @@ export interface AppBindings {
   SetEffortForTab(tabID: string, level: string): Promise<void>;
   SetTokenMode(mode: string): Promise<void>;
   SetTokenModeForTab(tabID: string, mode: string): Promise<void>;
+  SetAgentPreset(preset: string): Promise<void>;
+  SetAgentPresetForTab(tabID: string, preset: string): Promise<void>;
   // ReloadRuntime rebuilds the tab's agent runtime in place (tools, skills,
   // commands, hooks, providers, MCP servers) via boot.Rebuild, keeping the
   // session. Busy tabs queue one reload for when they go idle.
@@ -571,7 +579,7 @@ export interface AppBindings {
   AbandonPendingUpdate?(): Promise<void>;
   OpenDownloadPage(): Promise<void>;
   OpenUserConfigPath?(): Promise<void>;
-  ReloadUserConfig?(): Promise<{ configWarnings?: string[]; configPath?: string } | null>;
+  ReloadUserConfig?(): Promise<{ configWarnings?: string[]; configWarningsRevision?: number; configPath?: string } | null>;
   StorageSettings(): Promise<{ defaultWorkspace: string; statePath: string; cachePath: string; extensionsPath: string }>;
   NeedsOnboarding(): Promise<boolean>;
   ConnectKey(apiKey: string): Promise<string>;
@@ -684,8 +692,8 @@ interface WailsRuntime {
 
 declare global {
   interface Window {
-    runtime?: WailsRuntime; __REASONIX_WEBVIEW2_APPROVAL_SMOKE__?: boolean;
-    go?: { main?: { App?: AppBindings; WebView2ApprovalSmokeBridge?: { Complete(ok: boolean, detail: string): Promise<void> } } };
+    runtime?: WailsRuntime;
+    go?: { main?: { App?: AppBindings } };
   }
 }
 
@@ -702,7 +710,6 @@ const WAILS_IPC_NULL_SEND_RE = /Cannot read properties of null \(reading 'send'\
 // once would pin the browser mock for the whole session (and show fake data — the
 // dev mock's model list leaking into the real app was exactly this bug).
 function realApp(): AppBindings | undefined {
-  if (typeof window !== "undefined" && window.__REASONIX_WEBVIEW2_APPROVAL_SMOKE__ === true) return undefined;
   return typeof window !== "undefined" ? window.go?.main?.App : undefined;
 }
 
@@ -1234,7 +1241,7 @@ const mockVercelModels = ["anthropic/claude-sonnet-4.6", "anthropic/claude-opus-
 const mockOllamaCloudModels = ["glm-5.2", "kimi-k2.7-code", "deepseek-v4-pro", "deepseek-v4-flash", "minimax-m3", "nemotron-3-nano:30b", "qwen3-coder-next"];
 
 const mockProviderPresetTemplates: MockProviderPresetTemplate[] = [
-  mockPreset("deepseek-responses", "DeepSeek Official Responses API", "Official stateless DeepSeek Responses API for Flash with server-side web search.", "DEEPSEEK_API_KEY", mockProviderTemplate({ name: "deepseek-responses", kind: "responses", baseUrl: "https://api.deepseek.com", models: ["deepseek-v4-flash"], default: "deepseek-v4-flash", apiKeyEnv: "DEEPSEEK_API_KEY", balanceUrl: "https://api.deepseek.com/user/balance", webSearch: true, serverWebSearchCapability: true, contextWindow: 1000000, supportedEfforts: ["low", "high", "max"], defaultEffort: "high" })),
+  mockPreset("deepseek-responses", "DeepSeek Official Responses API", "Official stateless DeepSeek Responses API for Flash and Pro with server-side web search.", "DEEPSEEK_API_KEY", mockProviderTemplate({ name: "deepseek-responses", kind: "responses", baseUrl: "https://api.deepseek.com", models: ["deepseek-v4-flash", "deepseek-v4-pro"], default: "deepseek-v4-flash", apiKeyEnv: "DEEPSEEK_API_KEY", balanceUrl: "https://api.deepseek.com/user/balance", webSearch: true, serverWebSearchCapability: true, contextWindow: 1000000, modelOverrides: [{ model: "deepseek-v4-flash", reasoningProtocol: "", supportedEfforts: ["disabled", "low", "high", "max"], defaultEffort: "high" }, { model: "deepseek-v4-pro", reasoningProtocol: "", supportedEfforts: ["disabled", "high", "max"], defaultEffort: "high" }] })),
   mockPreset("longcat-openai", "LongCat OpenAI", "LongCat Platform OpenAI-compatible endpoint for LongCat-2.0.", "LONGCAT_API_KEY", mockProviderTemplate({ name: "longcat-openai", kind: "openai", baseUrl: "https://api.longcat.chat/openai/v1", modelsUrl: "https://api.longcat.chat/openai/v1/models", models: mockLongCatModels, default: "LongCat-2.0", apiKeyEnv: "LONGCAT_API_KEY", contextWindow: 131072, thinking: "enabled", supportedEfforts: ["enabled", "disabled"], defaultEffort: "enabled" })),
   mockPreset("longcat-anthropic", "LongCat Anthropic", "LongCat Platform Anthropic-compatible Messages endpoint for LongCat-2.0.", "LONGCAT_API_KEY", mockProviderTemplate({ name: "longcat-anthropic", kind: "anthropic", baseUrl: "https://api.longcat.chat/anthropic", modelsUrl: "https://api.longcat.chat/anthropic/v1/models", models: mockLongCatModels, default: "LongCat-2.0", apiKeyEnv: "LONGCAT_API_KEY", authHeader: true, contextWindow: 131072, thinking: "enabled", supportedEfforts: ["enabled", "disabled"], defaultEffort: "enabled" })),
   mockPreset("token-rhythm", "Token Rhythm", "Token Rhythm (基元律动) multi-model OpenAI-compatible gateway.", "TOKEN_RHYTHM_API_KEY", mockProviderTemplate({ name: "token-rhythm", kind: "openai", baseUrl: "https://tokenrhythm.studio/v1", modelsUrl: "https://tokenrhythm.studio/v1/models", models: mockTokenRhythmModels, visionModels: ["kimi-k2.5", "kimi-k2.6", "kimi-k2.7-code"], default: "deepseek-v4-flash", apiKeyEnv: "TOKEN_RHYTHM_API_KEY", contextWindow: 1000000, modelOverrides: mockTokenRhythmModelOverrides })),
@@ -1619,7 +1626,7 @@ function makeMockApp(): AppBindings {
       enabled: !freshMock,
       model: "",
       toolApprovalMode: "ask",
-      maxSteps: 25,
+      maxSteps: 0,
       debounceMs: 1500,
       queueMode: "steer",
       queueCap: 20,
@@ -2437,6 +2444,7 @@ function makeMockApp(): AppBindings {
     }
   };
   return {
+    ...makeMockSessionCatalogBindings(cloneProjectTree),
     async MinimiseMainWindow() {
       console.info("mock MinimiseMainWindow");
     },
@@ -2926,7 +2934,7 @@ function makeMockApp(): AppBindings {
           return {
             revision: 0,
             paused: false,
-            recovered: false,
+            recovered: false, sessionPath: "",
             items: [],
             itemsCount: 0,
             bytes: 0,
@@ -3164,8 +3172,8 @@ function makeMockApp(): AppBindings {
         async CompactForTab() {},
         async NewSession() {},
         async NewSessionForTab() {},
-        async ClearSession() {},
-        async ClearSessionForTab() {},
+        async ClearSession() { return { sessionPath: "", sessionGeneration: 0 }; },
+        async ClearSessionForTab() { return { sessionPath: "", sessionGeneration: 0 }; },
     async Checkpoints() {
       return [
         { turn: 0, prompt: "你好呀", files: ["src/App.tsx"], fileCount: 1, turnFileCount: 1, time: Date.now() - 30_000, canCode: true, canConversation: true },
@@ -3262,6 +3270,7 @@ function makeMockApp(): AppBindings {
     async ListSessionsForTab() {
       return sessions.map((s) => ({ ...s }));
     },
+    ...makeMockHistoryCatalogBindings(sessions),
     async ListTrashedSessions() {
       return trashedSessions.map((s) => ({ ...s }));
     },
@@ -3320,6 +3329,24 @@ function makeMockApp(): AppBindings {
     },
     async DeleteRecoveryCopy(path: string) {
       return this.DeleteSession(path);
+    },
+    async GetRecoveryLineage(key) {
+      const topic = findMockTopic(key.topicId);
+      return {
+        groupId: key.topicId,
+        state: topic?.recoveryState ?? "normal",
+        branchCount: topic?.recoveryBranchCount ?? 0,
+        unresolved: topic?.recoveryUnresolvedCount ?? 0,
+        cleanupEligible: topic?.recoveryCleanupEligibleCount ?? 0,
+        members: [],
+      };
+    },
+    async ChooseRecoveryBranch() {},
+    async CleanRecoveryLineage(request) {
+      const topic = findMockTopic(request.topicId);
+      const eligible = topic?.recoveryCleanupEligibleCount ?? 0;
+      if (request.apply && topic) topic.recoveryCleanupEligibleCount = 0;
+      return { eligible, moved: request.apply ? eligible : 0, busy: 0, kept: 0, dryRun: !request.apply, items: [] };
     },
     async RestoreSession(path: string) {
       const i = trashedSessions.findIndex((s) => s.path === path);
@@ -3458,7 +3485,7 @@ function makeMockApp(): AppBindings {
             goal: active?.goal ?? "",
             goalStatus: active?.goalStatus ?? (active?.goal ? "running" : "stopped"),
           };
-        },
+        }, async DismissTodoBatchForTab() {},
         async MetaForTab(tabID) {
           const tab = mockTabs.find((item) => item.id === tabID) ?? mockTabs.find((item) => item.active) ?? mockTabs[0];
           const toolApprovalMode = normalizeToolApprovalMode(tab?.toolApprovalMode, tab ? normalizeMode(tab.mode) : "normal", settings.autoApproveTools);
@@ -4176,11 +4203,17 @@ function makeMockApp(): AppBindings {
           await this.SetEffort(level);
         },
         async SetTokenMode(mode: string) {
-          const active = mockTabs.find((tab) => tab.active);
-          if (active) await this.SetTokenModeForTab(active.id, mode);
+          await this.SetAgentPreset(mode);
         },
         async SetTokenModeForTab(tabID, mode) {
-          const tokenMode = normalizeTokenMode(mode);
+          await this.SetAgentPresetForTab(tabID, mode);
+        },
+        async SetAgentPreset(preset: string) {
+          const active = mockTabs.find((tab) => tab.active);
+          if (active) await this.SetAgentPresetForTab(active.id, preset);
+        },
+        async SetAgentPresetForTab(tabID, preset) {
+          const tokenMode = normalizeTokenMode(preset);
           mockTabs = mockTabs.map((tab) => (tab.id === tabID ? { ...tab, tokenMode } : tab));
         },
         async ReloadRuntime(_tabID) {},
@@ -4903,6 +4936,7 @@ function makeMockApp(): AppBindings {
     async RequeueTask() { return { schema_version: 1, command: "requeue", task_id: "", accepted: false, idempotent: false, error: { code: "mock", message: "not available in browser mock" } }; },
     async OpenTaskSession() { return { schema_version: 1, command: "open_session", task_id: "", accepted: false, idempotent: false, error: { code: "mock", message: "not available in browser mock" } }; },
     async ListTasksForTab() { return []; },
+    ...makeMockTaskCatalogBindings(),
     async ListTaskEventsForTab() { return []; },
     async StopTaskForTab() { return { schema_version: 1, command: "stop", task_id: "", accepted: false, idempotent: false, error: { code: "mock", message: "not available in browser mock" } }; },
     async CancelTaskForTab() { return { schema_version: 1, command: "cancel", task_id: "", accepted: false, idempotent: false, error: { code: "mock", message: "not available in browser mock" } }; },
@@ -4959,7 +4993,7 @@ function makeMockApp(): AppBindings {
     },
     async OpenUserConfigPath() {},
     async ReloadUserConfig() {
-      return { configWarnings: [], configPath: "" };
+      return { configWarnings: [], configWarningsRevision: 0, configPath: "" };
     },
     // Dev seam: match the backend's provider-agnostic onboarding predicate.
     async NeedsOnboarding() {

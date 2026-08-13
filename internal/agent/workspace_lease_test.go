@@ -59,7 +59,7 @@ func deliveryLeaseTestAgent(t *testing.T, owner *workspacelease.Owner, tools ...
 		reg.Add(candidate)
 	}
 	a := New(nil, reg, NewSession(""), Options{DeliveryProfile: true, WorkspaceLease: owner}, event.Discard)
-	a.deliveryCriteriaEstablished = true
+	a.turn.deliveryCriteriaEstablished = true
 	a.setTodoState([]evidence.TodoItem{{Content: "mutate", Status: "in_progress"}})
 	return a
 }
@@ -86,7 +86,7 @@ func TestDeliveryWriterWaitsBeforeToolExecutionButReaderDoesNot(t *testing.T) {
 	second.BeginRun()
 	defer second.EndRun()
 
-	if outcome := a.executeOne(context.Background(), providerToolCall("read", reader.Name())); outcome.errMsg != "" {
+	if outcome := a.executeOne(context.Background(), &a.turn, providerToolCall("read", reader.Name())); outcome.errMsg != "" {
 		t.Fatalf("reader was blocked by another Delivery writer: %+v", outcome)
 	}
 	if got := reader.calls.Load(); got != 1 {
@@ -94,10 +94,10 @@ func TestDeliveryWriterWaitsBeforeToolExecutionButReaderDoesNot(t *testing.T) {
 	}
 
 	hooks := &workspaceLeaseTestHooks{}
-	a.hooks = hooks
+	a.svc.hooks = hooks
 	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
 	defer cancel()
-	outcome := a.executeOne(ctx, providerToolCall("write", writer.Name()))
+	outcome := a.executeOne(ctx, &a.turn, providerToolCall("write", writer.Name()))
 	if !outcome.blocked || outcome.errMsg != "blocked: workspace write lease unavailable" {
 		t.Fatalf("writer outcome = %+v, want lease block", outcome)
 	}
@@ -115,9 +115,9 @@ func TestDeniedDeliveryWriterDoesNotAcquireWorkspaceLease(t *testing.T) {
 	probeOwner, _ := workspacelease.New(root, locks, nil)
 	writer := &workspaceLeaseTestTool{name: "denied_writer"}
 	a := deliveryLeaseTestAgent(t, deniedOwner, writer)
-	a.gate = workspaceLeaseDenyGate{}
+	a.svc.gate = workspaceLeaseDenyGate{}
 	deniedOwner.BeginRun()
-	outcome := a.executeOne(context.Background(), providerToolCall("write", writer.Name()))
+	outcome := a.executeOne(context.Background(), &a.turn, providerToolCall("write", writer.Name()))
 	deniedOwner.EndRun()
 	if !outcome.blocked || outcome.errMsg != "blocked by permission policy" {
 		t.Fatalf("denied outcome = %+v", outcome)

@@ -16,7 +16,7 @@ type samplingRequest struct {
 }
 
 func (a *Agent) streamProviderRequest(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
-	return a.prov.Stream(ctx, req)
+	return a.svc.prov.Stream(ctx, req)
 }
 
 func (a *Agent) handleSamplingError(
@@ -32,7 +32,7 @@ func (a *Agent) handleSamplingError(
 		streamSink.Discard()
 		reason := provider.StreamInterruptReason(result.err)
 		a.emitStreamAttempt(attemptID, event.StreamAttemptDiscard, attempt, reason, result.err)
-		a.sink.Emit(event.Event{
+		a.svc.sink.Emit(event.Event{
 			Kind: event.Retrying, RetryAttempt: attempt, RetryMax: maxStreamRecoveries,
 			RetryScope: event.RetryScopeStream,
 		})
@@ -76,13 +76,13 @@ func (a *Agent) prepareSamplingRequest(ctx context.Context) (samplingRequest, er
 			rebuilt.req.MaxTokens = budget2
 		}
 		shape := a.requestCalibrationShape(rebuilt.req)
-		a.activeReqShape.Store(&shape)
+		a.sess.output.activeReqShape.Store(&shape)
 		return samplingRequest{req: freezeProviderRequest(rebuilt.req)}, nil
 	} else if clipped {
 		frozen.req.MaxTokens = budget
 	}
 	shape := a.requestCalibrationShape(frozen.req)
-	a.activeReqShape.Store(&shape)
+	a.sess.output.activeReqShape.Store(&shape)
 	return samplingRequest{req: freezeProviderRequest(frozen.req)}, nil
 }
 
@@ -108,7 +108,7 @@ func (a *Agent) buildSamplingRequest(ctx context.Context, trigger string) (sampl
 	}
 	req := provider.Request{
 		Messages:       requestMessages,
-		Tools:          a.tools.Schemas(),
+		Tools:          a.svc.tools.Schemas(),
 		MaxTokens:      a.maxOutputTokens,
 		Temperature:    provider.OptionalTemperature(a.temperature),
 		ResponseFormat: responseFormatFromRequest(ctx),
@@ -152,6 +152,9 @@ func freezeProviderRequest(req provider.Request) provider.Request {
 					items[j] = append(json.RawMessage(nil), item...)
 				}
 				out.Messages[i].ResponsesItems = items
+			}
+			if len(out.Messages[i].ServerSearch) > 0 {
+				out.Messages[i].ServerSearch = append([]provider.ServerSearchCall(nil), out.Messages[i].ServerSearch...)
 			}
 		}
 	}

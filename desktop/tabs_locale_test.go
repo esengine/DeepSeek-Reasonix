@@ -108,7 +108,7 @@ func TestForkTopicTitleUsesDesktopLocale(t *testing.T) {
 	}
 }
 
-func TestSetTrayLocaleSchedulesAutoCurrencyRefresh(t *testing.T) {
+func TestSetTrayLocaleDoesNotChangeAutoCurrency(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	cfg := config.Default()
 	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
@@ -132,8 +132,8 @@ func TestSetTrayLocaleSchedulesAutoCurrencyRefresh(t *testing.T) {
 		t.Fatalf("SetTrayLocale: %v", err)
 	}
 	for _, tabID := range []string{"active", "inactive"} {
-		if !app.deferredRebuildPending(tabID) {
-			t.Fatalf("currency refresh for %q was not scheduled", tabID)
+		if app.deferredRebuildPending(tabID) {
+			t.Fatalf("locale change scheduled currency refresh for %q", tabID)
 		}
 	}
 }
@@ -168,21 +168,21 @@ func TestDesktopEffectivePricingCurrencyUsesLocaleOnlyForAuto(t *testing.T) {
 	app.setDesktopLocale("zh-CN")
 
 	cfg := config.Default()
-	if got := app.desktopEffectivePricingCurrency(cfg); got != "CNY" {
-		t.Fatalf("auto pricing currency = %q, want CNY", got)
+	if got := app.desktopEffectivePricingCurrency(cfg); got != "" {
+		t.Fatalf("auto pricing currency = %q, want unresolved auto", got)
 	}
 
 	cfg.Desktop.Language = "en"
 	cfg.ApplyDeepSeekOfficialDefaultPricing()
-	if got := app.desktopEffectivePricingCurrency(cfg); got != "USD" {
-		t.Fatalf("explicit desktop language pricing currency = %q, want USD", got)
+	if got := app.desktopEffectivePricingCurrency(cfg); got != "" {
+		t.Fatalf("desktop language changed pricing currency = %q", got)
 	}
 
 	cfg.Desktop.Language = ""
 	cfg.Language = "en"
 	cfg.ApplyDeepSeekOfficialDefaultPricing()
-	if got := app.desktopEffectivePricingCurrency(cfg); got != "USD" {
-		t.Fatalf("explicit CLI language pricing currency = %q, want USD", got)
+	if got := app.desktopEffectivePricingCurrency(cfg); got != "" {
+		t.Fatalf("CLI language changed pricing currency = %q", got)
 	}
 
 	cfg.Language = ""

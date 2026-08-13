@@ -22,14 +22,14 @@ type ContextMaintenanceSnapshot struct {
 }
 
 func (a *Agent) ContextMaintenanceSnapshot() ContextMaintenanceSnapshot {
-	if a == nil || a.session == nil {
+	if a == nil || a.sess.conversation == nil {
 		return ContextMaintenanceSnapshot{}
 	}
-	canonical, version := a.session.snapshotMessagesVersion()
-	a.compactionMu.Lock()
-	state := a.compactionState
-	checkpointState := a.checkpointState
-	a.compactionMu.Unlock()
+	canonical, version := a.sess.conversation.snapshotMessagesVersion()
+	a.sess.compactionMu.Lock()
+	state := a.sess.compactionState
+	checkpointState := a.sess.checkpointState
+	a.sess.compactionMu.Unlock()
 	visible := canonical
 	valid := projectionValid(state, canonical, version, a.currentPromptCacheKey())
 	if valid {

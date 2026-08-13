@@ -1353,6 +1353,37 @@ func TestIngestEventShowsReasoningInVerboseMode(t *testing.T) {
 	}
 }
 
+func TestCompletionSummaryOutputIsTiered(t *testing.T) {
+	complete := &event.CompletionSummaryInfo{
+		Preset: "balanced", Verdict: "complete", Mutations: 2,
+		ChecksPassed: 4, Review: "passed",
+	}
+	m := newTestChatTUI()
+	m.ingestEvent(event.Event{Kind: event.CompletionSummary, Completion: complete})
+	if len(*m.pendingCommit) != 0 {
+		t.Fatalf("ordinary completion summary should be silent, committed=%v", *m.pendingCommit)
+	}
+
+	partial := &event.CompletionSummaryInfo{
+		Preset: "balanced", Verdict: "partial", Mutations: 2,
+		ChecksPassed: 3, ChecksFailed: 1, Review: "passed", GapKinds: []string{"stale_check"},
+	}
+	m = newTestChatTUI()
+	m.ingestEvent(event.Event{Kind: event.CompletionSummary, Completion: partial})
+	lines := strings.Join(*m.pendingCommit, "\n")
+	if !strings.Contains(lines, "!") || strings.Contains(lines, "balanced") || strings.Contains(lines, "stale_check") {
+		t.Fatalf("non-verbose partial summary should be a localized short warning, committed=%q", lines)
+	}
+
+	m = newTestChatTUI()
+	m.showReasoning = true
+	m.ingestEvent(event.Event{Kind: event.CompletionSummary, Completion: partial})
+	lines = strings.Join(*m.pendingCommit, "\n")
+	if !strings.Contains(lines, "balanced") || !strings.Contains(lines, "stale_check") {
+		t.Fatalf("verbose mode should include raw completion details, committed=%q", lines)
+	}
+}
+
 // TestUserBubbleEchoedImmediately proves the user bubble is committed to scrollback
 // the moment the turn starts, not deferred to the server's first packet. The first
 // real packet only confirms the send (closing the un-send window); a local

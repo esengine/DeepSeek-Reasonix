@@ -54,7 +54,7 @@ func TestTurnOrchestratorAttachesTrustedPlannerMetadata(t *testing.T) {
 	sess := agent.NewSession("sys")
 	sess.Add(provider.Message{Role: provider.RoleUser, Content: "explain the bug"})
 	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "the bug is in parser.go"})
-	exec := agent.New(nil, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
+	exec := agent.New(nil, tool.NewRegistry(), sess, agent.Options{AgentPreset: "delivery"}, event.Discard)
 	runner := &plannerMetadataRunner{}
 	c := New(Options{
 		Runner:         runner,
@@ -333,43 +333,50 @@ type recordingSessionRunner struct {
 }
 
 type deliveryScopeErrorRunner struct {
-	scopes []agent.DeliveryExecutionScope
+	scopes        []agent.DeliveryExecutionScope
+	terminalAfter int
+	// usage stands in for the billable work a real executor would report; the
+	// goal's spend budget is measured in it.
+	usage event.Sink
 }
 
 func (r *deliveryScopeErrorRunner) Run(ctx context.Context, _ string) error {
 	if scope, ok := agent.DeliveryExecutionScopeFromContext(ctx); ok {
 		r.scopes = append(r.scopes, scope)
 	}
+	if r.usage != nil {
+		r.usage.Emit(event.Event{Kind: event.Usage, UsageSource: event.UsageSourceExecutor,
+			Usage: &provider.Usage{PromptTokens: 100, CompletionTokens: 10, TotalTokens: 110, RequestCount: 1}})
+	}
+	if r.terminalAfter > 0 && len(r.scopes) >= r.terminalAfter {
+		return errors.New("external provider stop")
+	}
 	return &agent.FinalReadinessError{Attempts: 1, Reason: "missing verification", Missing: []string{"verification"}}
 }
 
-func TestGoalReadinessFailureContinuesThenPausesOnTurnBudget(t *testing.T) {
-	runner := &deliveryScopeErrorRunner{}
+func TestGoalReadinessFailureContinuesUntilExternalStop(t *testing.T) {
+	runner := &deliveryScopeErrorRunner{terminalAfter: 3}
 	executor := agent.New(nil, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
 	c := New(Options{Runner: runner, Executor: executor})
 	c.SetGoal("ship the integration")
 
 	err := newTurnOrchestrator(c).runGoalLoopWithRawDisplay(context.Background(), "start", "start", "")
-	if err != nil {
-		t.Fatalf("run err = %v, want the loop to absorb FinalReadinessError and pause on the turn budget", err)
+	if err == nil || err.Error() != "external provider stop" {
+		t.Fatalf("run err = %v, want external provider stop after continuations", err)
 	}
-	// The FSM absorbs the readiness failure and continues with the missing
-	// requirements; cross-turn no-progress remains observational and the outer
-	// continuation backstop eventually pauses the goal.
-	if got := c.GoalStatus(); got != GoalStatusBlocked {
-		t.Fatalf("GoalStatus = %q, want blocked (turn-budget pause)", got)
+	// The FSM absorbs readiness failures and keeps the Goal running; only the
+	// external provider error ends this execution attempt.
+	if got := c.GoalStatus(); got != GoalStatusRunning {
+		t.Fatalf("GoalStatus = %q, want running", got)
 	}
-	if rt := c.GoalRuntime(); rt.StopCause != stopCauseBudgetTurns {
-		t.Fatalf("stop cause = %q, want %q", rt.StopCause, stopCauseBudgetTurns)
+	if rt := c.GoalRuntime(); rt.StopCause != "" || rt.TurnsUsed != 2 {
+		t.Fatalf("runtime = %+v, want two completed continuations and no pause", rt)
 	}
 	if len(runner.scopes) < 2 || runner.scopes[0].ID == "" || runner.scopes[0].TaskText != "ship the integration" {
 		t.Fatalf("delivery scopes = %+v, want scoped continuation turns", runner.scopes)
 	}
-	if !c.ResumeGoal() || c.GoalStatus() != GoalStatusRunning {
-		t.Fatal("paused Goal should resume with its existing scope")
-	}
 	if id, task, ok := c.goals.deliveryScope(); !ok || id != runner.scopes[0].ID || task != "ship the integration" {
-		t.Fatalf("resumed scope = (%q, %q, %v), want preserved id/task", id, task, ok)
+		t.Fatalf("preserved scope = (%q, %q, %v), want original id/task", id, task, ok)
 	}
 }
 

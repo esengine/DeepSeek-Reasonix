@@ -103,6 +103,8 @@ globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.windo
 const eventHandlers: Array<(e: WireEvent) => void> = [];
 let backendRunning = false;
 let cancelCalls = 0;
+let cancelInboxCalls = 0;
+let cancelInboxError: Error | null = null;
 let effortCalls = 0;
 let checkpointHistoryCalls = 0;
 let historyLoads = 0;
@@ -161,6 +163,11 @@ window.go = {
       SubmitToTabWithID: async () => {},
       CancelTab: async () => {
         cancelCalls += 1;
+        backendRunning = false;
+      },
+      CancelTabWithInboxItems: async () => {
+        cancelInboxCalls += 1;
+        if (cancelInboxError) throw cancelInboxError;
         backendRunning = false;
       },
     } as Partial<AppBindings> as AppBindings,
@@ -302,6 +309,18 @@ await act(async () => {
 const effortNotice = controller?.state.items.find((item) => item.kind === "notice" && item.text.includes("cannot change yet"));
 eq(effortCalls, 1, "SetEffortForTab is called once");
 ok(Boolean(effortNotice), "busy effort switch surfaces a non-failure warning notice");
+
+cancelInboxError = new Error("reasonix_error:inbox_invalid_state");
+await act(async () => {
+  controller?.cancel(["queued-guidance"]);
+  await flushPromises();
+});
+const inboxCancelNotice = controller?.state.items.find((item) =>
+  item.kind === "notice" && item.text.includes("Cancel failed: This inbox instruction cannot be changed"),
+);
+eq(cancelInboxCalls, 1, "CancelTabWithInboxItems is called for durable guidance");
+ok(Boolean(inboxCancelNotice), "cancel failure formats the stable inbox code for the active locale");
+ok(inboxCancelNotice?.kind === "notice" && !inboxCancelNotice.text.includes("reasonix_error:"), "cancel failure never renders the stable transport code");
 
 await act(async () => {
   root.unmount();
