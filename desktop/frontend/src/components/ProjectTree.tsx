@@ -43,6 +43,7 @@ interface ProjectTreeProps {
   showShortcutBadges?: boolean;
   shortcutPlatform?: ShortcutPlatform;
   onVisibleTopicsChange?: (topics: TopicShortcutEntry[]) => void;
+  onNextUnreadTopicChange?: (entry: TopicShortcutEntry | null) => void;
 }
 
 type ProjectTreeImTopicSource = {
@@ -399,6 +400,7 @@ export function ProjectTree({
   showShortcutBadges = false,
   shortcutPlatform,
   onVisibleTopicsChange,
+  onNextUnreadTopicChange,
 }: ProjectTreeProps) {
   const t = useT();
   const { showToast } = useToast();
@@ -450,6 +452,7 @@ export function ProjectTree({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const topicIndexRef = useRef(0);
   const visibleTopicsCollectorRef = useRef<TopicShortcutEntry[]>([]);
+  const unreadTopicsCollectorRef = useRef<TopicShortcutEntry[]>([]);
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [showAllTopics, setShowAllTopics] = useState<Set<string>>(new Set());
   const [hoverCard, setHoverCard] = useState<{ key: string; card: ProjectTreeTopicHoverCard; left: number; top: number } | null>(null);
@@ -1271,6 +1274,15 @@ export function ProjectTree({
           topicId: openRequest.topicId,
           sessionPath: openRequest.sessionPath,
         });
+        // Also collect unread topics in render order for Cmd+G navigation
+        if (unread) {
+          unreadTopicsCollectorRef.current.push({
+            scope: openRequest.scope,
+            workspaceRoot: openRequest.workspaceRoot,
+            topicId: openRequest.topicId,
+            sessionPath: openRequest.sessionPath,
+          });
+        }
       }
       const row = (
         <div
@@ -2178,11 +2190,13 @@ export function ProjectTree({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     onVisibleTopicsChange?.(visibleTopicsCollectorRef.current);
+    onNextUnreadTopicChange?.(unreadTopicsCollectorRef.current[0] ?? null);
   });
 
   // Reset topic index counter and visible topics collector before each render.
   topicIndexRef.current = 0;
   visibleTopicsCollectorRef.current = [];
+  unreadTopicsCollectorRef.current = [];
 
   return (
     <div className="project-tree">
