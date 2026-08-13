@@ -250,6 +250,14 @@ func hasLegacyProviderWrapper(content string) bool {
 	return HandoffTask(stripped) != stripped
 }
 
+// Auto Guard writes these onto the failed tool result for the model. Older
+// sessions may still have them persisted as mid-turn user steers; display
+// paths must hide those so they never appear as the user's own words.
+const (
+	HostRecoveryGuidanceToolFailedPrefix = "A tool failed. Use read-only diagnosis as needed"
+	HostRecoveryGuidanceTransientPrefix  = "The tool timed out or hit a transient execution limit."
+)
+
 // SyntheticUserPrefixes lists the openings of host-injected user-role messages
 // (readiness retries, stream recovery, goal-loop nudges, compaction folds).
 // They are persisted with role "user" for provider-contract reasons but are not
@@ -273,12 +281,56 @@ var SyntheticUserPrefixes = []string{
 	"The agent signaled goal completion and all tasks are marked done.",
 	"Goal signaled complete but issues remain:",
 	"No tool calls in recent turns.",
+	HostRecoveryGuidanceToolFailedPrefix,
+	HostRecoveryGuidanceTransientPrefix,
+}
+
+// IsHostRecoveryGuidance reports model-facing Auto Guard policy text.
+func IsHostRecoveryGuidance(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return false
+	}
+	if after, ok := strings.CutPrefix(trimmed, "↪ "); ok {
+		trimmed = strings.TrimSpace(after)
+	}
+	return strings.HasPrefix(trimmed, HostRecoveryGuidanceToolFailedPrefix) ||
+		strings.HasPrefix(trimmed, HostRecoveryGuidanceTransientPrefix)
+}
+
+// VisibleSteerText is the user-authored mid-turn steer the transcript may
+// show. Host Auto Guard policy is not user-authored and must stay hidden.
+func VisibleSteerText(content string) (string, bool) {
+	text, handled := ReplaySteerText(content)
+	if !handled || text == "" {
+		return "", false
+	}
+	return text, true
+}
+
+// ReplaySteerText reports a persisted steer for display replay. handled is
+// true for any steer; text is empty when host Auto Guard policy must be omitted.
+func ReplaySteerText(content string) (text string, handled bool) {
+	text, isSteer := SteerText(content)
+	if !isSteer {
+		return "", false
+	}
+	if IsHostRecoveryGuidance(text) {
+		return "", true
+	}
+	return text, true
 }
 
 // IsSyntheticUserText reports whether a persisted user-role message is a
 // host-injected synthetic turn rather than user-authored input.
 func IsSyntheticUserText(content string) bool {
 	trimmed := strings.TrimSpace(StripTransientUserBlocks(content))
+	if IsHostRecoveryGuidance(trimmed) {
+		return true
+	}
+	if text, ok := SteerText(content); ok && IsHostRecoveryGuidance(text) {
+		return true
+	}
 	for _, prefix := range SyntheticUserPrefixes {
 		if strings.HasPrefix(trimmed, prefix) {
 			return true

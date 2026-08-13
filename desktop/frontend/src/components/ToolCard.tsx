@@ -7,7 +7,7 @@ import { diffsFor, languageForToolArgs, subjectOf, summarize, summarizeFileDiff 
 import { useShellExpand } from "../lib/shellExpand";
 import { app } from "../lib/bridge";
 import { useCollapseAnimation } from "../lib/useCollapseAnimation";
-import { isTerminalSubagentPhase, type Item, type SubagentPhase } from "../lib/useController";
+import { isBatchedReadOnlyTool, isTerminalSubagentPhase, type Item, type SubagentPhase } from "../lib/useController";
 import type { Translator } from "../lib/i18n";
 import { ReadOnlyBatch } from "./ReadOnlyBatch";
 import { Markdown } from "./Markdown";
@@ -307,7 +307,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   // completion so they don't clutter the transcript. During execution they still
   // render so the user sees progress.
   const quiet =
-    item.readOnly && !hasNested && item.status !== "error" && item.status !== "stopped";
+    item.readOnly && item.name !== "web_search" && !hasNested && item.status !== "error" && item.status !== "stopped";
 
   const duration = item.status === "running" ? "" : (shellSummary || formatToolDuration(item.durationMs));
   // While the model is still streaming this call's arguments (partial
@@ -446,7 +446,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
                 roBatch.length = 0;
               };
               for (const c of nested) {
-                if (c.readOnly && c.name !== "todo_write") {
+                if (isBatchedReadOnlyTool(c.name, c.readOnly)) {
                   roBatch.push(c);
                   continue;
                 }

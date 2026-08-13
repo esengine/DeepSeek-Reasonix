@@ -33,7 +33,7 @@ func TestContextualToolHostGateRunsBeforePermissionAndExecute(t *testing.T) {
 	gate := &recordingPermissionGate{allow: true}
 	a := New(nil, reg, NewSession("sys"), Options{Gate: gate}, event.Discard)
 
-	out := a.executeOne(context.Background(), provider.ToolCall{ID: "phase", Name: "phase_tool", Arguments: `{}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{ID: "phase", Name: "phase_tool", Arguments: `{}`})
 	if !out.blocked || !strings.Contains(out.output, "unavailable") {
 		t.Fatalf("contextual tool outcome = %+v", out)
 	}

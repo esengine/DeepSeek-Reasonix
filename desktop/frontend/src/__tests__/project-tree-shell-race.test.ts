@@ -23,5 +23,7 @@ assert.doesNotMatch(
   /event\.revision\s*<=\s*latestRevisionRef\.current/,
   "equal-revision tombstone overlays are not discarded",
 );
+assert.match(panel, /setIndexingDone\(Boolean\(snapshot\.indexingDone\)\)/, "shell snapshot records first-scan completion");
+assert.match(panel, /if \(!indexingDone\) return;/, "first completed scan reloads expanded topic pages");
 
 console.log("  PASS  project tree shell race contract");

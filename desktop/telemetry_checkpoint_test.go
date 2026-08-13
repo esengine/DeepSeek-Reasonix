@@ -181,7 +181,7 @@ func TestTabEventSinkTelemetryCheckpointBoundaries(t *testing.T) {
 	sink.recordUsageTelemetry(event.Event{Kind: event.Usage, Usage: &provider.Usage{
 		PromptTokens: 5,
 		TotalTokens:  5,
-	}})
+	}, Pricing: &provider.Pricing{Input: 2, Currency: "USD"}})
 	sink.recordReadTelemetry(event.Event{Kind: event.ToolResult, Tool: event.Tool{
 		Name: "read_file",
 		Args: `{"path":"inside.go"}`,
@@ -202,9 +202,15 @@ func TestTabEventSinkTelemetryCheckpointBoundaries(t *testing.T) {
 	if len(last.snapshot.ReadFiles) != 2 || last.snapshot.Usage.PromptTokens != 5 {
 		t.Fatalf("TurnDone checkpoint = %+v, want both reads and usage", last.snapshot)
 	}
+	if last.snapshot.Version != 3 || last.snapshot.Usage.CostLedger == nil || last.snapshot.Usage.SessionCostQuote == nil {
+		t.Fatalf("TurnDone checkpoint = %+v, want v3 cost ledger and quote", last.snapshot)
+	}
 	persisted := loadTelemetry(sessionPath + ".telemetry.json")
 	if len(persisted.ReadFiles) != 2 || persisted.Usage.PromptTokens != 5 {
 		t.Fatalf("persisted TurnDone checkpoint = %+v, want both reads and usage", persisted)
+	}
+	if persisted.Version != 3 || persisted.Usage.CostLedger == nil || persisted.Usage.SessionCostQuote == nil {
+		t.Fatalf("persisted TurnDone checkpoint = %+v, want v3 cost ledger and quote", persisted)
 	}
 }
 

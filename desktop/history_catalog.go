@@ -148,7 +148,9 @@ func sessionMetaFromCatalog(record sessioncatalog.SessionRecord, current, open b
 		TurnsState: string(record.TurnsState), CreatedAt: record.CreatedAt, LastActivityAt: record.LastActivityAt,
 		ModTime: record.LastActivityAt, Current: current, Open: open, Scope: record.Scope,
 		WorkspaceRoot: record.WorkspaceRoot, TopicID: record.TopicID, TopicTitle: record.TopicTitle,
-		Recovered: recovered, RecoveryCopy: record.RecoveryCopy}
+		Recovered: recovered, RecoveryCopy: record.RecoveryCopy,
+		RecoveryGroupID: record.RecoveryGroupID, RecoveryRole: record.RecoveryRole,
+		RecoveryCanonical: record.RecoveryCanonical}
 }
 
 func (a *App) ListHistorySessions(req HistorySessionPageRequest) HistorySessionPage {

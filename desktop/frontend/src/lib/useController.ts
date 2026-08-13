@@ -6,7 +6,7 @@ import { asArray } from "./array";
 import { addBreadcrumb } from "./breadcrumbs";
 import { app, onEvent, onReady, onRuntimeRebuilt, onTabMeta, onTopicActivation } from "./bridge";
 import { invalidateCache } from "./composerHistory";
-import { formatInboxCancelError, inboxSteerQueuedMessage } from "./inboxError";
+import { formatInboxCancelError } from "./inboxError";
 import { formatContextMaintenanceNotice, isNewMaintenanceOperation, rememberMaintenanceOperation } from "./contextMaintenanceTypes";
 import { formatGuardianAssessmentNotice } from "./guardianEvents";
 import { completionSummaryNeedsAttention, completionSummaryNotice, normalizeCompletionSummary } from "./completionSummary";
@@ -18,8 +18,12 @@ import { getTranscriptStore } from "./transcriptStore";
 import { uiPerfTracker } from "./uiPerf";
 import { getLocale, t, type DictKey } from "./i18n";
 import { applyHydrateErrorState, hydratePlaceholderItems as resolveHydratePlaceholders } from "./hydrateErrorState";
+import { isHostRecoveryGuidance } from "./hostRecoverySteer";
+import { duplicateLiveItemIds, hasCachedLiveTurn, hydratedHistoryApplyMode, sameSessionPlaceholderItems, shouldPreferResidentHistory } from "./hydrateHistoryApply";
 import { hydrateIdentityCurrent } from "./sessionIdentity";
-import { sameTodoList } from "./todoVisibility";
+import { sameStringList, sameTodoList } from "./todoVisibility";
+import type { SearchSource } from "./searchSources";
+import { attachWebSearchOutput, historySearchAndAnswer } from "./searchTranscript";
 import { fileDiffFromWire, summarize, summarizeFileDiff, type ToolFileDiff } from "./tools";
 import { modeHasAutoApproveTools, normalizeMode, normalizeToolApprovalMode } from "./types";
 import type {
@@ -227,7 +231,7 @@ const HISTORY_PAGE_TURNS = 60;
 export type TurnPhaseName = "working" | "checking" | "verifying" | "reviewing" | string;
 export type Item =
   | { kind: "user"; id: string; submissionId?: string; text: string; submitText?: string; failed?: boolean; createdAt?: number; checkpointTurn?: number }
-  | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean; reasoningComplete?: boolean; reasoningDurationMs?: number; workDurationMs?: number; memoryCitations?: MemoryCitation[] }
+  | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean; reasoningComplete?: boolean; reasoningDurationMs?: number; workDurationMs?: number; memoryCitations?: MemoryCitation[]; searchSources?: SearchSource[] }
   | { kind: "phase"; id: string; text: string }
   | { kind: "notice"; id: string; level: "info" | "warn"; text: string; detail?: string; title?: string; variant?: "delivery" | "completion"; action?: "continue_delivery" | "open_changes"; decisionReceipt?: WireDecisionReceipt }
   | {
@@ -358,6 +362,7 @@ interface State {
   backendActivationPending: boolean;
   messageAction?: MessageActionState;
   currentAssistant?: string;
+  pendingSearchSources?: SearchSource[];
   live?: LiveStream;
   pendingUser?: string;
   pendingSubmissionId?: string;
@@ -588,7 +593,7 @@ export function metaFromTab(tab: TabMeta, existing?: Meta): Meta {
     tokenMode: tab.tokenMode ?? existing?.tokenMode ?? "full",
     goal: tab.goal ?? existing?.goal,
     goalStatus: tab.goalStatus ?? existing?.goalStatus,
-    canonicalTodos: existing?.canonicalTodos,
+    canonicalTodos: existing?.canonicalTodos, dismissedTodoBatches: (tab.sessionPath !== undefined ? tab.sessionPath : existing?.sessionPath) === existing?.sessionPath ? existing?.dismissedTodoBatches : undefined,
   };
 }
 function countsTowardCurrentTurn(state: State): boolean {
@@ -628,7 +633,7 @@ export function sameMeta(a?: Meta, b?: Meta): boolean {
     a.tokenMode === b.tokenMode &&
     a.goal === b.goal &&
     a.goalStatus === b.goalStatus &&
-    sameTodoList(a.canonicalTodos, b.canonicalTodos)
+    sameTodoList(a.canonicalTodos, b.canonicalTodos) && sameStringList(a.dismissedTodoBatches, b.dismissedTodoBatches)
   );
 }
 
@@ -672,8 +677,8 @@ export function composerProfileApplicationKey(
 }
 
 function metaWithoutCanonicalTodos(meta?: Meta): Meta | undefined {
-  if (!meta || meta.canonicalTodos === undefined) return meta;
-  return { ...meta, canonicalTodos: undefined };
+  if (!meta || (meta.canonicalTodos === undefined && meta.dismissedTodoBatches === undefined)) return meta;
+  return { ...meta, canonicalTodos: undefined, dismissedTodoBatches: undefined };
 }
 
 const STALE_TURN_RECONCILE_MS = 30_000;
@@ -694,15 +699,6 @@ export function shouldReconcileStaleTurn(
 ): boolean {
   if (!state?.running || !state.turnActive || lastTurnActivityAt <= 0) return false;
   return Math.max(0, now - lastTurnActivityAt) >= timeoutMs;
-}
-
-function hasCachedLiveTurn(state: State | undefined): boolean {
-  if (!state?.running && !state?.turnActive) return false;
-  if (state.live || state.currentAssistant || state.pendingUser !== undefined) return true;
-  return state.items.some((item) =>
-    (item.kind === "assistant" && item.streaming) ||
-    (item.kind === "tool" && item.status === "running")
-  );
 }
 
 function hasReusableCachedTranscript(state: State | undefined, sessionPath?: string, revision?: number, digest?: string): boolean {
@@ -737,6 +733,7 @@ export function isReadOnlyTool(name: string): boolean {
     case "grep":
     case "glob":
     case "web_fetch":
+    case "web_search":
     case "code_index":
     case "bash_output":
     case "waitJob":
@@ -747,6 +744,8 @@ export function isReadOnlyTool(name: string): boolean {
       return false;
   }
 }
+
+export { isBatchedReadOnlyTool } from "./searchTranscript";
 
 const ARCHIVED_TOOL_ARG_LIMIT = 200;
 
@@ -891,18 +890,17 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
       continue;
     }
     if (m.role === "assistant") {
-      const hasText = m.content.trim() !== "" || (m.reasoning ?? "").trim() !== "";
-      if (hasText) {
-        const memoryCitations = asArray<MemoryCitation>(m.memoryCitations);
-        items.push({
-          kind: "assistant",
-          id: `${idPrefix}${seq}`,
-          text: m.content,
-          reasoning: m.reasoning ?? "",
-          streaming: false,
-          workDurationMs: m.workDurationMs,
-          memoryCitations: memoryCitations.length > 0 ? memoryCitations : undefined,
-        });
+      const memoryCitations = asArray<MemoryCitation>(m.memoryCitations);
+      const built = historySearchAndAnswer(`${idPrefix}${seq}`, {
+        content: m.content,
+        reasoning: m.reasoning,
+        workDurationMs: m.workDurationMs,
+        memoryCitations: memoryCitations.length > 0 ? memoryCitations : undefined,
+        serverSearch: m.serverSearch,
+      });
+      for (const item of built) {
+        if (item.kind === "assistant") item.id = `${idPrefix}${seq}`;
+        items.push(item);
         seq++;
       }
       const toolCalls = m.toolCalls ?? [];
@@ -1028,7 +1026,14 @@ function ensureAssistant(s: State): { items: Item[]; id: string; seq: number } {
     if (exists) return { items: s.items, id: s.currentAssistant, seq: s.seq };
   }
   const id = `a${s.seq}`;
-  const item: Item = { kind: "assistant", id, text: "", reasoning: "", streaming: true };
+  const item: Item = {
+    kind: "assistant",
+    id,
+    text: "",
+    reasoning: "",
+    streaming: true,
+    searchSources: s.pendingSearchSources?.length ? s.pendingSearchSources : undefined,
+  };
   return { items: [...s.items, item], id, seq: s.seq + 1 };
 }
 
@@ -1426,9 +1431,10 @@ function applyEvent(s: State, e: WireEvent): State {
       // immediately so the user sees their message + a blinking cursor the
       // instant the backend acknowledges the turn — no dead gap waiting for
       // the first text/reasoning token.
-      const { items, id, seq } = ensureAssistant(s);
+      const fresh = { ...s, pendingSearchSources: undefined };
+      const { items, id, seq } = ensureAssistant(fresh);
       return {
-        ...s,
+        ...fresh,
         items,
         currentAssistant: id,
         seq,
@@ -1482,8 +1488,10 @@ function applyEvent(s: State, e: WireEvent): State {
       const text = e.text ?? s.live?.text ?? existingAssistant?.text ?? "";
       const reasoning = e.reasoning ?? s.live?.reasoning ?? existingAssistant?.reasoning ?? "";
       if (text.trim() === "" && reasoning.trim() === "") {
+        const keepEmpty =
+          Boolean(existingAssistant?.memoryCitations?.length) || Boolean(existingAssistant?.searchSources?.length);
         const items =
-          existingAssistant && existingAssistant.text.trim() === "" && existingAssistant.reasoning.trim() === "" && !existingAssistant.memoryCitations?.length
+          existingAssistant && existingAssistant.text.trim() === "" && existingAssistant.reasoning.trim() === "" && !keepEmpty
             ? s.items.filter((it) => !(it.kind === "assistant" && it.id === existingAssistant.id))
             : s.items;
         return { ...endTurnModelActivity(s, Date.now(), true), items, live: undefined, currentAssistant: undefined, turnOutputCharsAtUsage: 0 };
@@ -1509,6 +1517,7 @@ function applyEvent(s: State, e: WireEvent): State {
                 reasoningDurationMs: reasoningDurationMs ?? it.reasoningDurationMs,
                 workDurationMs: Math.max(it.workDurationMs ?? 0, workDurationMs ?? 0) || undefined,
                 memoryCitations: memoryCitations.length > 0 ? memoryCitations : undefined,
+                searchSources: it.searchSources,
               };
             })()
           : it,
@@ -1637,7 +1646,7 @@ function applyEvent(s: State, e: WireEvent): State {
       }
       // A nested result refreshes its sub-agent parent's recent activity.
       if (t.parentId) touchSubagentParent(next, t.parentId);
-      return { ...s, items: compactArchivedToolItems(next) };
+      return attachWebSearchOutput({ ...s, items: compactArchivedToolItems(next) }, t.name, t.output, t.err);
     }
     case "tool_progress": {
       const t = e.tool;
@@ -1720,6 +1729,7 @@ function applyEvent(s: State, e: WireEvent): State {
       return { ...s, running: s.turnActive ? s.running : false, seq: s.seq + 1, items };
     }
     case "steer":
+      if (isHostRecoveryGuidance(e.text ?? "")) return s;
       return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `s${s.seq}`, level: "info", text: `${STEER_NOTICE_PREFIX}${e.text ?? ""}` }] };
     case "approval_request": {
       if (s.cancelRequested) return s;
@@ -2925,13 +2935,10 @@ export function useController() {
       let projection = skipHistory
         ? undefined
         : await loadTimed("history", () =>
-            // Windowed slice load through the transcript store. A resident
-            // session (LRU hit) projects synchronously with no backend round
-            // trip; reset loads always re-fetch so a rebound session can never
-            // serve the previous session's rows.
+            // Resident LRU only when the caller keeps cache; reset/no-cache re-fetch.
             getTranscriptStore().loadLatest(tabId, sessionPath, {
               turns: HISTORY_PAGE_TURNS,
-              preferResident: !reset,
+              preferResident: shouldPreferResidentHistory(reset, options.preserveCachedHistory),
               expectedRevision: sessionRevision,
               expectedDigest: sessionDigest,
             }),
@@ -2944,17 +2951,23 @@ export function useController() {
         dispatchTo(tabId, { type: "local_notice", level: "warn", text: errText });
         addBreadcrumb("tab.hydrate", `history failed ${tabId} ms=${Date.now() - historyStartedAt}`); return;
       }
-      if (!skipHistory && projection !== undefined && !foregroundTurnActive()) {
-        if (deferResetUntilHistory && stillCurrent()) dispatchTo(tabId, { type: "reset" });
-        dispatchTo(tabId, {
-          type: "history_replace",
+      const applyProj = projection && {
+        items: projection.items, revision: projection.revisionKnown ? projection.revision : undefined, digest: projection.digest || undefined,
+      };
+      const applyMode = hydratedHistoryApplyMode(skipHistory, projection !== undefined, foregroundTurnActive(), statesRef.current.get(tabId), applyProj);
+      if (projection !== undefined && applyMode !== "skip") {
+        if (deferResetUntilHistory && stillCurrent() && !foregroundTurnActive()) dispatchTo(tabId, { type: "reset" });
+        const page = {
           items: projection.items,
           startTurn: projection.startTurn,
           totalTurns: projection.totalTurns,
           hasOlder: projection.hasOlder,
           revision: projection.revisionKnown ? projection.revision : undefined,
           digest: projection.digest || undefined,
-        });
+        };
+        dispatchTo(tabId, applyMode === "prepend"
+          ? { type: "history_prepend", ...page, removeIds: duplicateLiveItemIds(projection.items, statesRef.current.get(tabId)?.items ?? []) }
+          : { type: "history_replace", ...page });
         addBreadcrumb(
           "tab.hydrate",
           `history page ${tabId} items=${projection.items.length} turns=${projection.startTurn}-${projection.endTurn}/${projection.totalTurns} ms=${Date.now() - historyStartedAt}`,
@@ -3716,9 +3729,8 @@ export function useController() {
     // become follow-ups automatically (disposition queued_followup).
     const receipt = await app.EnqueueInboxSteer(tabId, text, text, "");
     if (receipt?.error) throw new Error(receipt.error);
-    if (receipt?.disposition && receipt.disposition !== "steer_accepted") {
-      throw new Error(inboxSteerQueuedMessage(getLocale()));
-    }
+    // queued_followup is success: the instruction is durable and will run at
+    // the next idle/tool-boundary kick. Do not surface it as a send failure.
   }, []);
 
   const steer = useCallback(async (text: string) => {
@@ -4039,7 +4051,7 @@ export function useController() {
     try {
       cleared = tabId ? await app.ClearSessionForTab(tabId) : await app.ClearSession();
     } catch {
-      if (tabId) void loadSessionDataForTab(tabId);
+      if (tabId) void loadSessionDataForTab(tabId, false, "startup", { preserveCachedHistory: true });
       return;
     }
     if (tabId) bumpSessionLoadSeq(tabId);
@@ -4614,9 +4626,10 @@ export function useController() {
       await reassertVisibleTabAfterStaleNavigation("topic.activate", meta.id);
       return meta;
     }
-    // Save previous tab's items so the new tab can use them as a placeholder
-    // during loading, avoiding a blank/Welcome flash before history arrives.
-    const prevItems = activeTabIdRef.current ? statesRef.current.get(activeTabIdRef.current)?.items : undefined;
+    const prevItems = sameSessionPlaceholderItems(
+      meta.sessionPath,
+      activeTabIdRef.current ? statesRef.current.get(activeTabIdRef.current) : undefined,
+    );
     pending.placeholderItems = prevItems;
     for (const id of Array.from(statesRef.current.keys())) {
       if (id !== meta.id) {
@@ -4632,9 +4645,7 @@ export function useController() {
     noteActivationStarted(pending.requestId, meta.id);
     dispatchTo(meta.id, { type: "optimistic_meta", meta: metaFromTab(meta, statesRef.current.get(meta.id)?.meta) });
     dispatchRuntimeStatusForTab(meta.id, meta, snapshotAt);
-    // The hydrate is driven by the activation's terminal "ready" event; until
-    // then keep the loading surface up with the previous tab's items as the
-    // placeholder (same no-flash behavior the immediate hydrate had).
+    // Ready hydrates; only same-session items are a safe placeholder.
     dispatchTo(meta.id, { type: "hydrate_start", reason: "open-topic", placeholderItems: prevItems });
     if (pending.terminal && pendingTopicActivationRef.current === pending) {
       // The terminal event beat the ticket resolution; process it now.

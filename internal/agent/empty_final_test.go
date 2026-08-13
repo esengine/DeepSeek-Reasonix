@@ -29,10 +29,10 @@ func TestRunRetriesReasoningOnlyFinalAnswer(t *testing.T) {
 	if prov.call != 2 {
 		t.Fatalf("provider calls = %d, want retry after reasoning-only answer", prov.call)
 	}
-	if got := lastAssistantContent(a.session); got != "visible reply" {
+	if got := lastAssistantContent(a.sess.conversation); got != "visible reply" {
 		t.Fatalf("last assistant content = %q, want visible reply", got)
 	}
-	if !sessionHasUserMessageContaining(a.session, "visible answer") {
+	if !sessionHasUserMessageContaining(a.sess.conversation, "visible answer") {
 		t.Fatal("missing synthetic visible-answer retry message")
 	}
 }
@@ -125,10 +125,10 @@ func TestRunAcceptsReasoningOnlyFinalWhenModelStopped(t *testing.T) {
 	if prov.call != 1 {
 		t.Fatalf("provider calls = %d, want 1 (model signalled stop; no retry)", prov.call)
 	}
-	if sessionHasUserMessageContaining(a.session, "visible answer") {
+	if sessionHasUserMessageContaining(a.sess.conversation, "visible answer") {
 		t.Fatal("must not inject a synthetic visible-answer retry when the model signalled stop")
 	}
-	if got := lastAssistantContent(a.session); got != "" {
+	if got := lastAssistantContent(a.sess.conversation); got != "" {
 		t.Fatalf("last assistant content = %q, want empty (answer lived in reasoning)", got)
 	}
 }
@@ -159,10 +159,10 @@ func TestRunRetriesReasoningOnlyStopWithoutDeepSeekPolicy(t *testing.T) {
 	if prov.call != 2 {
 		t.Fatalf("provider calls = %d, want 2 (non-DeepSeek providers must keep the retry)", prov.call)
 	}
-	if !sessionHasUserMessageContaining(a.session, "visible answer") {
+	if !sessionHasUserMessageContaining(a.sess.conversation, "visible answer") {
 		t.Fatal("missing synthetic visible-answer retry message for non-DeepSeek provider")
 	}
-	if got := lastAssistantContent(a.session); got != "visible reply" {
+	if got := lastAssistantContent(a.sess.conversation); got != "visible reply" {
 		t.Fatalf("last assistant content = %q, want visible reply", got)
 	}
 }

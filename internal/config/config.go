@@ -1361,12 +1361,11 @@ type ProviderEntry struct {
 	BalanceURL        string `toml:"balance_url"` // optional; a provider-specific wallet-balance endpoint (DeepSeek: https://api.deepseek.com/user/balance). Empty = no balance readout.
 	ContextWindow     int    `toml:"context_window"`
 	// MaxOutputTokens is a protocol-neutral total output budget for one turn.
-	// Zero means automatic (not unlimited): ordinary 16K, reasoning 32K, high/max
-	// 64K — DeepSeek's default effort is high, so auto is typically ~64K.
-	// User guidance: 0 recommended; 32768 ordinary coding/cost control;
-	// 65536 heavy reasoning/long tools; 131072 only after finish_reason=length.
-	// A negative value omits optional wire limits when the protocol allows;
-	// Anthropic still requires max_tokens. Never feeds compact_ratio.
+	// Zero means official DeepSeek omits the field (server 384K ceiling) and
+	// other vendors keep their own defaults. Effort selects thinking depth only.
+	// A positive value is an explicit cost cap. A negative value omits optional
+	// wire limits when the protocol allows; official DeepSeek Anthropic still
+	// sends 384K because max_tokens is mandatory. Never feeds compact_ratio.
 	MaxOutputTokens int                          `toml:"max_output_tokens"`
 	Price           *provider.Pricing            `toml:"price"`  // legacy/provider-wide fallback
 	Prices          map[string]*provider.Pricing `toml:"prices"` // optional per-model prices; keys are model ids

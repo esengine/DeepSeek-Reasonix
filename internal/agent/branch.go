@@ -48,10 +48,15 @@ type BranchMeta struct {
 	// refuses to fork past SessionRecoveryMaxDepth so a conflict loop cannot
 	// spawn unbounded nested recovery chains (#5993 reached 8 levels). Legacy
 	// recovery metas without the field are treated as depth 1.
-	RecoveryDepth int    `json:"recovery_depth,omitempty"`
-	Revision      int64  `json:"revision,omitempty"`
-	ContentDigest string `json:"content_digest,omitempty"`
-	WriterID      string `json:"writer_id,omitempty"`
+	RecoveryDepth int `json:"recovery_depth,omitempty"`
+	// RecoveryPreferred is a user's explicit choice among genuinely diverged
+	// recovery leaves. It changes the default open target, but never authorizes
+	// deletion and is cleared automatically if that leaf is no longer valid.
+	RecoveryPreferred       bool   `json:"recovery_preferred,omitempty"`
+	RecoveryPreferredDigest string `json:"recovery_preferred_digest,omitempty"`
+	Revision                int64  `json:"revision,omitempty"`
+	ContentDigest           string `json:"content_digest,omitempty"`
+	WriterID                string `json:"writer_id,omitempty"`
 	// SchemaVersion records the BranchMeta version that last wrote the listing
 	// fields (Turns/Preview) FROM the session's content. It is stamped only by the
 	// writers that actually derive those counts — Controller.snapshot's
@@ -69,6 +74,8 @@ type BranchMeta struct {
 	Turns        int               `json:"turns,omitempty"`
 	Preview      string            `json:"preview,omitempty"`
 	InFlightTurn *InFlightTurnMeta `json:"in_flight_turn,omitempty"`
+	// Closed completed todo shelves; desktop remounts hide the same fingerprint.
+	DismissedTodoBatches []string `json:"dismissed_todo_batches,omitempty"`
 }
 
 const (
@@ -210,6 +217,18 @@ func SaveBranchMeta(sessionPath string, m BranchMeta) error {
 	})
 }
 
+// saveBranchMetaKeepInFlightTurn keeps any existing in-flight turn on rewrite.
+func saveBranchMetaKeepInFlightTurn(sessionPath string, m BranchMeta) error {
+	return UpdateBranchMeta(sessionPath, true, func(current *BranchMeta) error {
+		if m.InFlightTurn == nil {
+			m.InFlightTurn = current.InFlightTurn
+		}
+		preserveBranchMetaPersistence(&m, *current)
+		*current = m
+		return nil
+	})
+}
+
 func SaveBranchMetaPreserveUpdated(sessionPath string, m BranchMeta) error {
 	return UpdateBranchMeta(sessionPath, false, func(current *BranchMeta) error {
 		preserveBranchMetaPersistence(&m, *current)
@@ -236,8 +255,14 @@ func saveBranchMeta(sessionPath string, m BranchMeta, touchUpdated bool) error {
 	if m.CreatedAt.IsZero() {
 		m.CreatedAt = now
 	}
-	if touchUpdated || m.UpdatedAt.IsZero() {
+	if touchUpdated {
 		m.UpdatedAt = now
+	} else if m.UpdatedAt.IsZero() {
+		if info, err := os.Stat(sessionPath); err == nil {
+			m.UpdatedAt = info.ModTime().UTC()
+		} else {
+			m.UpdatedAt = now
+		}
 	}
 	if existing, ok, err := LoadBranchMeta(sessionPath); err == nil && ok {
 		preserveBranchMetaPersistence(&m, existing)
@@ -275,6 +300,7 @@ func preserveBranchMetaPersistence(next *BranchMeta, existing BranchMeta) {
 	if next == nil {
 		return
 	}
+	next.DismissedTodoBatches = MergeDismissedTodoBatches(existing.DismissedTodoBatches, next.DismissedTodoBatches)
 	if existing.Revision > next.Revision {
 		next.Revision = existing.Revision
 		next.ContentDigest = existing.ContentDigest

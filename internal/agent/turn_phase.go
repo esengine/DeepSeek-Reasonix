@@ -8,22 +8,22 @@ import (
 
 // emitTurnPhase publishes a content-free host phase for the active turn.
 func (a *Agent) emitTurnPhase(phase event.TurnPhaseName) {
-	if a == nil || a.sink == nil || phase == "" {
+	if a == nil || a.svc.sink == nil || phase == "" {
 		return
 	}
-	a.sink.Emit(event.Event{Kind: event.TurnPhase, PhaseName: phase, Text: string(phase)})
+	a.svc.sink.Emit(event.Event{Kind: event.TurnPhase, PhaseName: phase, Text: string(phase)})
 }
 
 // emitCompletionSummary publishes the content-free end-of-turn quality summary
 // when the turn mutated state or finished Partial/Blocked. Pure conversation
 // and ordinary read-only success do not emit a quality card.
 func (a *Agent) emitCompletionSummary(c *taskcontract.Contract) {
-	if a == nil || a.sink == nil || c == nil {
+	if a == nil || a.svc.sink == nil || c == nil {
 		return
 	}
 	mutations := 0
-	if a.evidence != nil {
-		for _, r := range a.evidence.Receipts() {
+	if a.task.ledger != nil {
+		for _, r := range a.task.ledger.Receipts() {
 			if r.Success && (r.Mutation || r.Write) {
 				mutations++
 			}
@@ -48,16 +48,16 @@ func (a *Agent) emitCompletionSummary(c *taskcontract.Contract) {
 		}
 	}
 	review := "none"
-	if a.turnPolicySet {
-		switch a.turnPolicy.Review {
+	if a.turn.policySet {
+		switch a.turn.policy.Review {
 		case taskpolicy.ReviewNone:
 			review = "none"
 		default:
-			if a.evidence != nil {
-				if mut, ok := a.evidence.LatestSuccessfulMutationIndex(); ok {
-					if a.evidence.HasSuccessfulReviewAfter(mut) {
+			if a.task.ledger != nil {
+				if mut, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok {
+					if a.task.ledger.HasSuccessfulReviewAfter(mut) {
 						review = "passed"
-					} else if a.turnPolicy.RequiresIndependentReview() {
+					} else if a.turn.policy.RequiresIndependentReview() {
 						review = "unavailable"
 					}
 				}
@@ -80,7 +80,7 @@ func (a *Agent) emitCompletionSummary(c *taskcontract.Contract) {
 			break
 		}
 	}
-	constraintDegraded := a.turnPolicySet && (a.turnPolicy.Constraints.ForbidTests || len(a.turnPolicy.Constraints.AllowedChecks) > 0)
+	constraintDegraded := a.turn.policySet && (a.turn.policy.Constraints.ForbidTests || len(a.turn.policy.Constraints.AllowedChecks) > 0)
 	summaryVerdict := verdict.String()
 	switch verdict {
 	case taskcontract.VerdictComplete:
@@ -92,7 +92,7 @@ func (a *Agent) emitCompletionSummary(c *taskcontract.Contract) {
 	case taskcontract.VerdictContinue:
 		summaryVerdict = "continue"
 	}
-	a.sink.Emit(event.Event{
+	a.svc.sink.Emit(event.Event{
 		Kind: event.CompletionSummary,
 		Completion: &event.CompletionSummaryInfo{
 			Preset:             a.AgentPreset(),

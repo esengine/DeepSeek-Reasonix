@@ -163,6 +163,7 @@ type InboxSnapshot struct {
 	RecoveredN    int             `json:"recoveredCount,omitempty"`
 	Readonly      bool            `json:"readonly,omitempty"`
 	RunID         string          `json:"runId,omitempty"`
+	SessionPath   string          `json:"sessionPath,omitempty"`
 	Items         []InboxItemMeta `json:"items"`
 	Capacity      Capacity        `json:"capacity"`
 }

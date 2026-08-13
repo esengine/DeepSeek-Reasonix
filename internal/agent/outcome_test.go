@@ -35,17 +35,17 @@ func TestFailedCallsSurfaceError(t *testing.T) {
 	gate := &recordingPermissionGate{allow: true}
 	a := New(nil, reg, NewSession(""), Options{Gate: gate}, event.Discard)
 
-	if o := a.executeOne(context.Background(), provider.ToolCall{Name: "ok_tool"}); o.errMsg != "" {
+	if o := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "ok_tool"}); o.errMsg != "" {
 		t.Errorf("successful call should have empty errMsg, got %q", o.errMsg)
 	}
-	if o := a.executeOne(context.Background(), provider.ToolCall{Name: "find"}); o.errMsg == "" {
+	if o := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "find"}); o.errMsg == "" {
 		t.Errorf("unknown tool should surface an errMsg (renders as failed), got %+v", o)
 	}
 
 	a.SetPlanMode(true)
 	gate.allow = false
 	gate.reason = "denied by permission policy"
-	if o := a.executeOne(context.Background(), provider.ToolCall{Name: "writer"}); o.errMsg == "" {
+	if o := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "writer"}); o.errMsg == "" {
 		t.Errorf("permission-denied writer should surface an errMsg, got %+v", o)
 	}
 }
@@ -60,12 +60,12 @@ func TestCompletedMCPConnectIsNotReportedAsUnknown(t *testing.T) {
 	})
 	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
 
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "mcp__mock__connect", Arguments: `{}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "mcp__mock__connect", Arguments: `{}`})
 	if out.errMsg != "" || !strings.Contains(out.output, `MCP server "mock" is connected`) {
 		t.Fatalf("completed connect was not recovered: %+v", out)
 	}
 	for _, name := range []string{"mcp__missing__connect", "mcp__mock__not_connect"} {
-		if out := a.executeOne(context.Background(), provider.ToolCall{Name: name, Arguments: `{}`}); out.errMsg == "" {
+		if out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: name, Arguments: `{}`}); out.errMsg == "" {
 			t.Fatalf("unadvertised call %q should remain unknown: %+v", name, out)
 		}
 	}
@@ -83,7 +83,7 @@ func TestPortableMCPCallUsesCanonicalSecurityIdentity(t *testing.T) {
 	gate := &recordingPermissionGate{allow: true}
 	a := New(nil, reg, NewSession(""), Options{Gate: gate}, event.Discard)
 
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "get_design_context", Arguments: `{}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "get_design_context", Arguments: `{}`})
 	if out.errMsg != "" {
 		t.Fatalf("portable MCP call failed: %+v", out)
 	}
@@ -98,7 +98,7 @@ func TestAmbiguousPortableMCPCallIsRejected(t *testing.T) {
 	reg.Add(mcpAliasTool{fakeTool: fakeTool{name: "mcp__two__search", readOnly: true}, server: "two", raw: "search", visible: "search"})
 	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
 
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "search", Arguments: `{}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "search", Arguments: `{}`})
 	if out.errMsg == "" || !strings.Contains(out.errMsg, "ambiguous MCP tool reference") {
 		t.Fatalf("ambiguous MCP alias was not rejected: %+v", out)
 	}

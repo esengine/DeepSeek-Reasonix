@@ -224,8 +224,8 @@ func (c *Controller) rebindInbox() {
 		if path != "" && c.inbox.store.SessionPath() == path {
 			return
 		}
-		// Pause the old session's queue so it is not auto-run if reopened.
-		_ = c.inbox.store.SetPaused(true)
+		// Pending work must remain inspectable if this session is reopened.
+		_ = c.inbox.store.PauseIfPending()
 		c.inbox.store.Close()
 		c.inbox.store = nil
 		c.inbox.clearActive()
@@ -259,7 +259,7 @@ func (c *Controller) pauseInboxOnRotate() {
 	st := c.inbox.store
 	c.inbox.mu.Unlock()
 	if st != nil {
-		_ = st.SetPaused(true)
+		_ = st.PauseIfPending()
 	}
 }
 
@@ -449,7 +449,35 @@ func (c *Controller) DeleteInboxItem(id string) error {
 	if err != nil {
 		return err
 	}
-	return st.DeleteItem(id)
+	if _, recoverErr := st.RecoverOrphanedInFlightOwnedBy(c.inbox.ownsItem); recoverErr != nil {
+		slog.Warn("controller: recover inbox item before delete", "err", recoverErr, "id", id)
+	}
+	err = st.DeleteItem(id)
+	if err == nil || errors.Is(err, sessioninbox.ErrNotFound) {
+		return nil
+	}
+	if !errors.Is(err, sessioninbox.ErrInvalidState) {
+		return err
+	}
+	meta, _, readErr := st.ReadItem(id)
+	if readErr != nil {
+		if errors.Is(readErr, sessioninbox.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	// An accepted-but-unconsumed steer is still waiting from the user's point
+	// of view. Roll it back to queued so the same delete path can remove it.
+	if meta.State != sessioninbox.StateSteerAccepted {
+		return err
+	}
+	if setErr := st.SetState(id, sessioninbox.StateQueued, ""); setErr != nil {
+		return err
+	}
+	if delErr := st.DeleteItem(id); delErr != nil && !errors.Is(delErr, sessioninbox.ErrNotFound) {
+		return delErr
+	}
+	return nil
 }
 
 // CancelWithInboxItems stops the active turn and discards only the durable
@@ -724,7 +752,16 @@ func (c *Controller) TryEnqueueAndSteer(req InboxRequest) (sessioninbox.InboxRec
 	if err != nil {
 		return rec, err
 	}
-	return c.TrySteerInboxItem(rec.ItemID)
+	steered, err := c.TrySteerInboxItem(rec.ItemID)
+	if errors.Is(err, sessioninbox.ErrPaused) {
+		rec.Disposition = sessioninbox.DispositionQueuedFollowup
+		rec.Paused = true
+		return rec, nil
+	}
+	if err != nil {
+		return rec, err
+	}
+	return steered, nil
 }
 
 // TryEnqueueFollowup durably queues a follow-up and may dispatch if idle.

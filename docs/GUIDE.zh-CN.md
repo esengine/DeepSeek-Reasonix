@@ -64,9 +64,9 @@ reasoning_language = "auto"      # 可见思考过程语言：auto|zh|en
 # max_subagent_concurrency = 6        # 会话级子代理总并发（task/fleet/skills）
 # max_parallel_writers = 3            # 互不重叠 write_paths 时的并行写入上限
 # compact_ratio 是唯一自动维护阈值（默认 0.85；预设 0.70/0.80/0.85）
-# max_output_tokens = 0            # 推荐：自动（DeepSeek 默认 high → 约 64K；不是无限）
-# max_output_tokens = 32768        # 普通编码 / 控制费用
-# max_output_tokens = 65536        # 重推理、长工具链
+# max_output_tokens = 0            # 推荐：官方 DeepSeek 省略字段（服务端 384K）
+# max_output_tokens = 32768        # 可选控费上限
+# max_output_tokens = 65536        # 可选控费上限
 # max_output_tokens = 131072       # 仅在反复 finish_reason=length 时再考虑
 # max_output_tokens 不参与 compact_ratio；只在发送阶段裁剪本轮最长输出
 
@@ -922,7 +922,7 @@ Output format、Constraints 和 Pause policy。Goal 模式会把这些部分当�
 
 旧的简单/写入/研究参数只作为兼容元数据解析，不再改变执行额度。Goal 状态只保存在普通会话 sidecar；进展只来自宿主工具 receipt、canonical todo、
 `complete_step`、review 与 Delivery checkpoint 中的新证据，最终由 Delivery readiness 和有界 Goal
-evaluator 判定。旧 `.reasonix/autoresearch/<task-id>/` 目录保持只读：显式引用旧路径时可恢复为
+evaluator 判定。Light/Balanced 会接受 `update_goal` 里诚实申报的 `unverified` 检查缺口；同一检查缺口连续两次 `complete` 会结束 Goal，而不是继续验证循环。旧 `.reasonix/autoresearch/<task-id>/` 目录保持只读：显式引用旧路径时可恢复为
 普通 Goal，但新版本不会创建或改写这些目录。旧预算 flags 仅为兼容继续接受，不再出现在帮助和补全中。
 
 ## @ 引用

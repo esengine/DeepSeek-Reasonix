@@ -13,7 +13,10 @@ import (
 const outputBudgetReserve = 8 * 1024
 
 type outputBudgetState struct {
-	outputBudget      int
+	outputBudget int
+	// lastUsage caches the latest provider telemetry for per-turn readouts.
+	// The run loop writes it while a frontend reads it, so it is atomic.
+	lastUsage         atomic.Pointer[provider.Usage]
 	activeReqShape    atomic.Pointer[requestCalibrationShape]
 	promptCalibration atomic.Pointer[promptTokenCalibration]
 	contextUsage      atomic.Pointer[contextUsage] // gauge's memoised prompt size
@@ -43,16 +46,16 @@ type requestCalibrationShape struct {
 // model switch rebuilds the agent, so it outlives the swap: dropping it sent
 // every rebind — resume, tab switch, recovery adopt — back to the cold
 // estimate for a turn.
-func (a *Agent) resetOutputBudgetState() {
-	a.lastUsage.Store(nil)
-	a.activeReqShape.Store(nil)
+func (o *outputBudgetState) reset() {
+	o.lastUsage.Store(nil)
+	o.activeReqShape.Store(nil)
 }
 
 func (a *Agent) setPromptTokenCalibration(promptTokens int, shape requestCalibrationShape) {
 	if a == nil || promptTokens <= 0 || shape.requestChars <= 0 {
 		return
 	}
-	a.promptCalibration.Store(&promptTokenCalibration{
+	a.sess.output.promptCalibration.Store(&promptTokenCalibration{
 		promptTokens: promptTokens,
 		requestChars: shape.requestChars,
 		compactChars: shape.compactChars,
@@ -65,7 +68,7 @@ func (a *Agent) setPromptTokenCalibrationFromActive(promptTokens int) {
 	if a == nil {
 		return
 	}
-	if shape := a.activeReqShape.Load(); shape != nil {
+	if shape := a.sess.output.activeReqShape.Load(); shape != nil {
 		a.setPromptTokenCalibration(promptTokens, *shape)
 	}
 }
@@ -112,7 +115,7 @@ func (a *Agent) configuredOutputBudget(explicit int) int {
 	if explicit != 0 {
 		return explicit
 	}
-	return a.outputBudget
+	return a.sess.output.outputBudget
 }
 
 func requestCalibrationShapeOf(req provider.Request) requestCalibrationShape {
@@ -120,7 +123,7 @@ func requestCalibrationShapeOf(req provider.Request) requestCalibrationShape {
 }
 
 func (a *Agent) requestCalibrationShape(req provider.Request) requestCalibrationShape {
-	return requestCalibrationShapeWithPolicy(req, sharedWindowInputPolicyOf(a.prov))
+	return requestCalibrationShapeWithPolicy(req, sharedWindowInputPolicyOf(a.svc.prov))
 }
 
 func requestCalibrationShapeWithPolicy(req provider.Request, policy provider.SharedWindowInputPolicy) requestCalibrationShape {
@@ -169,6 +172,9 @@ func requestCalibrationTextShape(req provider.Request, policy provider.SharedWin
 				add(string(item))
 			}
 		}
+		for _, search := range msg.ServerSearch {
+			provider.WalkServerSearchEstimate(search, add)
+		}
 	}
 	for _, schema := range req.Tools {
 		chars += 8
@@ -183,7 +189,7 @@ func (a *Agent) calibratedPromptTokens(shape requestCalibrationShape) (int, bool
 	if shape.requestChars <= 0 {
 		return 0, false
 	}
-	if cal := a.promptCalibration.Load(); cal != nil && cal.requestChars > 0 {
+	if cal := a.sess.output.promptCalibration.Load(); cal != nil && cal.requestChars > 0 {
 		ratio := float64(cal.promptTokens) / float64(cal.requestChars)
 		if ratio > 0.05 && ratio < 2 {
 			trustedChars := shape.requestChars
@@ -236,7 +242,7 @@ func isCJKRune(r rune) bool {
 // effectiveOutputBudget clips completion tokens at send time only; it never
 // moves compact_ratio. Exhausted windows fail locally before HTTP 400.
 func (a *Agent) effectiveOutputBudget(req provider.Request) (int, bool, error) {
-	if a == nil || a.contextWindow <= 0 || !sharesContextWindow(a.prov) {
+	if a == nil || a.contextWindow <= 0 || !sharesContextWindow(a.svc.prov) {
 		return 0, false, nil
 	}
 	budget := a.configuredOutputBudget(req.MaxTokens)

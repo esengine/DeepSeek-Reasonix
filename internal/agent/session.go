@@ -58,6 +58,18 @@ type Session struct {
 	// deliberately session-local so multiple runtimes cannot steal each other's
 	// observer registration.
 	persistObserver SessionPersistObserver
+	// writeAuth is the generation-bound write permit for this session's path.
+	// Controllers bind it after acquiring a SessionLease; save/ownership paths
+	// consult it instead of a process-level "I hold a lease" boolean.
+	writeAuth *SessionWriteAuthority
+	// authRequired becomes true once any authority has been bound. From then
+	// on, saves fail closed without a live authority rather than forking
+	// recovery under a stale controller.
+	authRequired bool
+	// recoveryLane is a session-instance identity, allocated lazily on the
+	// first true conflict. It bounds repeated saves by this live controller to
+	// one recovery file without letting a replacement controller overwrite it.
+	recoveryLane string
 }
 
 // NewSession initializes a session with an optional system prompt.

@@ -83,7 +83,7 @@ func TestMaintenanceUsesSummaryNotPruneAtFoldTrigger(t *testing.T) {
 }
 
 func TestSnipStrategyStillAvailableForFirstVisibleAndSummaryInput(t *testing.T) {
-	a := &Agent{tools: tool.NewRegistry()}
+	a := &Agent{svc: agentServices{tools: tool.NewRegistry()}}
 	s := a.snipStrategyFor("read_file")
 	if s.head <= 0 || s.tail <= 0 {
 		t.Fatalf("snip strategy for read_file = %+v", s)

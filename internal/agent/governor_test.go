@@ -11,7 +11,7 @@ import (
 )
 
 func TestApplyGovernorStampsEligibilityWithoutEngagingByDefault(t *testing.T) {
-	a := &Agent{sink: &ebmSink{}, lastReasoning: govReasoningThreshold}
+	a := &Agent{svc: agentServices{sink: &ebmSink{}}, turn: turnRuntime{lastReasoning: govReasoningThreshold}}
 	sample := evidence.OutcomeSample{}
 	a.applyGovernor(&sample)
 	if !sample.GovernorEligible || sample.GovernorEngaged {
@@ -28,16 +28,16 @@ func TestApplyGovernorEngagesAndExitsWhenEnabled(t *testing.T) {
 	defer func() { governorEnabled = old }()
 
 	sink := &ebmSink{}
-	a := &Agent{sink: sink, lastReasoning: govReasoningThreshold}
+	a := &Agent{svc: agentServices{sink: sink}, turn: turnRuntime{lastReasoning: govReasoningThreshold}}
 
 	cheap := evidence.OutcomeSample{}
-	a.lastReasoning = govReasoningThreshold - 1
+	a.turn.lastReasoning = govReasoningThreshold - 1
 	a.applyGovernor(&cheap)
 	if cheap.GovernorEligible || cheap.GovernorEngaged {
 		t.Fatalf("cheap round = %+v, want untouched", cheap)
 	}
 
-	a.lastReasoning = govReasoningThreshold
+	a.turn.lastReasoning = govReasoningThreshold
 	sample := evidence.OutcomeSample{}
 	a.applyGovernor(&sample)
 	if !sample.GovernorEngaged || a.governorOverride() != governorEffort {
@@ -48,7 +48,7 @@ func TestApplyGovernorEngagesAndExitsWhenEnabled(t *testing.T) {
 	}
 
 	// Exploration persists: cheap rounds alone do not disengage.
-	a.lastReasoning = 0
+	a.turn.lastReasoning = 0
 	quiet := evidence.OutcomeSample{}
 	a.applyGovernor(&quiet)
 	if !quiet.GovernorEngaged {
@@ -66,8 +66,8 @@ func TestApplyGovernorEngagesAndExitsWhenEnabled(t *testing.T) {
 	}
 
 	a.resetTurnEvidence()
-	if a.governor.engaged || a.governor.noticed {
-		t.Fatalf("governor = %+v, want reset with the turn", a.governor)
+	if a.task.governor.engaged || a.task.governor.noticed {
+		t.Fatalf("governor = %+v, want reset with the turn", a.task.governor)
 	}
 }
 

@@ -17,6 +17,7 @@ const (
 	turnDroppedRotating
 	turnDroppedClosed
 	turnDroppedDraining // generation no longer published after rebuild
+	turnDroppedWriteAuthority
 )
 
 // runGuarded runs body under a fresh context, guarding concurrent turns.
@@ -41,6 +42,10 @@ func (c *Controller) runGuardedInbox(body func(ctx context.Context) error, onSta
 }
 
 func (c *Controller) admitGuardedTurn(body func(ctx context.Context) error, parkWhileRunning, parkWhileFinishing bool, onStart func()) admissionResult {
+	if err := c.ensureWriteAuthorityReady(); err != nil {
+		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "input was not accepted: this session is no longer writable — reopen it and try again"})
+		return turnDroppedWriteAuthority
+	}
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()

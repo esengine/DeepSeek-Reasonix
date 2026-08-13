@@ -92,16 +92,15 @@ if (!packageJSON.scripts?.["test:motion-browser"]?.includes("approval-animation.
 
 const transcriptScript = packageJSON.scripts?.["test:transcript"] ?? "";
 for (const required of [
-  "transcript-scroll-session.test.ts",
+  "transcript-virtuoso-index.test.ts",
+  "transcript-scroll-release.test.ts",
   "nested-scroll-handoff.test.ts",
   "creation-transcript-scrollbar.test.ts",
-  "transcript-measurement-invalidation.test.tsx",
   "markdown-table-virtual.test.tsx",
   "typography-overflow-contract.test.ts",
-  "transcript-selection-runtime.test.ts",
-  "scroll-manager.test.tsx",
   "transcript-selection-retention.test.tsx",
   "transcript-logical-selection.test.ts",
+  "transcript-selection-overlay.test.tsx",
   "markdown-pipeline.test.tsx",
   "message-selection-copy.test.ts",
   "transcript-selection-menu.test.tsx",
@@ -110,6 +109,13 @@ for (const required of [
 ]) {
   if (!transcriptScript.includes(required)) {
     throw new Error(`motion-ci-contract: test:transcript must include ${required}`);
+  }
+}
+
+const transcriptBrowserScript = packageJSON.scripts?.["test:transcript-browser"] ?? "";
+for (const required of ["transcript-selection.mjs", "transcript-scroll-stability.mjs"]) {
+  if (!transcriptBrowserScript.includes(required)) {
+    throw new Error(`motion-ci-contract: test:transcript-browser must include ${required}`);
   }
 }
 

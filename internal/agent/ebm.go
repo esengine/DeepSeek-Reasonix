@@ -39,11 +39,11 @@ func (a *Agent) applyEBM(sample *evidence.OutcomeSample, outcomes []toolOutcome)
 	}
 	sample.EBMEligible = true
 	a.armForkCapture(*sample)
-	if !ebmEnabled || a.ebm.fired || len(outcomes) == 0 {
+	if !ebmEnabled || a.task.ebm.fired || len(outcomes) == 0 {
 		return intervention{}
 	}
-	a.ebm.fired = true
-	a.ebm.captureArmed = false
+	a.task.ebm.fired = true
+	a.task.ebm.captureArmed = false
 	sample.EBMFired = true
 	return intervention{
 		verdict:  verdictAdvise,

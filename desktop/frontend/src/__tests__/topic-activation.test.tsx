@@ -134,8 +134,9 @@ const checkpoints: CheckpointMeta[] = [];
 const tabA = tabMeta("tab-a", { active: true });
 const tabB = tabMeta("tab-b");
 const tabC = tabMeta("tab-c");
+const tabR = tabMeta("tab-r", { running: true, cancellable: true });
 let backendActiveId = "tab-a";
-const tabsById = new Map([tabA, tabB, tabC].map((tab) => [tab.id, tab]));
+const tabsById = new Map([tabA, tabB, tabC, tabR].map((tab) => [tab.id, tab]));
 const eventHandlers: Array<(e: WireEvent) => void> = [];
 const readyHandlers: Array<(tabId?: string) => void> = [];
 const topicActivationHandlers: Array<(e: TopicActivationEvent) => void> = [];
@@ -151,6 +152,7 @@ function emitActivation(event: TopicActivationEvent): void {
 }
 
 function historyFor(tabID: string): HistoryMessage[] {
+  if (tabID === "tab-r") return [{ role: "user", content: "帮我查询，现在我链接的 deep" }];
   return [{ role: "user", content: `history ${tabID}` }];
 }
 
@@ -296,6 +298,55 @@ await act(async () => {
   await flushPromises();
 });
 eq(controller?.state.meta?.gitBranch, "feature/x", "tab:meta for a different session binding is discarded");
+
+// ── switch away from a thinking session and back: keep its transcript ──────
+await act(async () => {
+  await controller?.activateTopic("project", tabR.workspaceRoot, tabR.topicId ?? "");
+  await flushPromises();
+});
+await act(async () => {
+  emitActivation({ requestId: requestIdByTab.get("tab-r") ?? "", tabId: "tab-r", phase: "ready" });
+  await flushPromises();
+});
+await waitFor("running session hydrates on first open", () =>
+  controller?.activeTabId === "tab-r" &&
+  (controller.state.items.some((item) => item.kind === "user" && item.text === "帮我查询，现在我链接的 deep") ?? false),
+);
+eq(controller?.state.running, true, "reattached thinking session stays marked running");
+eq(controller?.state.hydrating, false, "running-session hydrate settles instead of leaving Welcome");
+
+await act(async () => {
+  await controller?.activateTopic("project", tabB.workspaceRoot, tabB.topicId ?? "");
+  await flushPromises();
+});
+await act(async () => {
+  emitActivation({ requestId: requestIdByTab.get("tab-b") ?? "", tabId: "tab-b", phase: "ready" });
+  await flushPromises();
+});
+await waitFor("idle session replaces the thinking surface", () => hasHistory("tab-b") && controller?.state.hydrating === false);
+
+await act(async () => {
+  await controller?.activateTopic("project", tabR.workspaceRoot, tabR.topicId ?? "");
+  await flushPromises();
+});
+eq(controller?.activeTabId, "tab-r", "switch-back selects the thinking session");
+eq(
+  controller?.state.hydratePlaceholderItems?.some((item) => item.kind === "user" && item.text === "history tab-b") ?? false,
+  false,
+  "switch-back does not present the other session as a hydration placeholder",
+);
+await act(async () => {
+  emitActivation({ requestId: requestIdByTab.get("tab-r") ?? "", tabId: "tab-r", phase: "ready" });
+  await flushPromises();
+});
+await waitFor("switch-back restores the thinking transcript", () =>
+  controller?.activeTabId === "tab-r" &&
+  controller.state.hydrating === false &&
+  (controller.state.items.some((item) => item.kind === "user" && item.text === "帮我查询，现在我链接的 deep") ?? false),
+);
+eq(controller?.state.running, true, "switch-back keeps the composer in the live turn");
+eq(controller?.state.items.some((item) => item.kind === "user" && item.text === "history tab-b") ?? false, false, "switch-back does not keep the other session as the visible transcript");
+eq(controller?.state.hydratePlaceholderItems?.length ?? 0, 0, "switch-back clears the foreign placeholder after live history lands");
 
 await act(async () => {
   root.unmount();

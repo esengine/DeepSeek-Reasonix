@@ -15,19 +15,19 @@ func TestFinalReadinessFallsBackToCanonicalTodos(t *testing.T) {
 
 	// Turn did work (a successful bash) but issued no todo_write this turn, so the
 	// per-turn ledger has no list — the canonical state must still gate.
-	a := &Agent{evidence: readinessLedger(ran), todoState: open}
+	a := &Agent{task: taskRuntime{ledger: readinessLedger(ran)}, sess: sessionRuntime{todoState: open}}
 	if got := a.ReadinessResult(); !strings.Contains(got.Reason, "incomplete") {
 		t.Fatalf("cross-turn gate = %q, want it to report incomplete canonical todos", got.Reason)
 	}
 
 	// A turn that touched nothing (pure Q&A) must never gate on stale canonical state.
-	idle := &Agent{evidence: evidence.NewLedger(), todoState: open}
+	idle := &Agent{task: taskRuntime{ledger: evidence.NewLedger()}, sess: sessionRuntime{todoState: open}}
 	if got := idle.ReadinessResult(); !got.Ready {
 		t.Fatalf("no-work turn gated on canonical todos: %+v", got)
 	}
 
 	// All canonical items completed → no gate even after work.
-	done := &Agent{evidence: readinessLedger(ran), todoState: []evidence.TodoItem{{Content: "push", Status: "completed"}}}
+	done := &Agent{task: taskRuntime{ledger: readinessLedger(ran)}, sess: sessionRuntime{todoState: []evidence.TodoItem{{Content: "push", Status: "completed"}}}}
 	if got := done.ReadinessResult(); !got.Ready {
 		t.Fatalf("completed canonical todos still gated: %+v", got)
 	}
@@ -35,34 +35,34 @@ func TestFinalReadinessFallsBackToCanonicalTodos(t *testing.T) {
 
 func TestAdvanceCanonicalTodoCompletesAndPromotes(t *testing.T) {
 	a := &Agent{
-		sink: event.Discard,
-		todoState: []evidence.TodoItem{
+		svc: agentServices{sink: event.Discard},
+		sess: sessionRuntime{todoState: []evidence.TodoItem{
 			{Content: "sync branch", Status: "in_progress"},
 			{Content: "push to origin", Status: "pending"},
 			{Content: "rebase", Status: "pending"},
-		},
+		}},
 	}
 	a.advanceCanonicalTodo("sync branch")
 
-	if a.todoState[0].Status != "completed" {
-		t.Fatalf("signed-off item not completed: %+v", a.todoState[0])
+	if a.sess.todoState[0].Status != "completed" {
+		t.Fatalf("signed-off item not completed: %+v", a.sess.todoState[0])
 	}
-	if a.todoState[1].Status != "in_progress" {
-		t.Fatalf("next pending item not promoted: %+v", a.todoState[1])
+	if a.sess.todoState[1].Status != "in_progress" {
+		t.Fatalf("next pending item not promoted: %+v", a.sess.todoState[1])
 	}
-	if a.todoState[2].Status != "pending" {
-		t.Fatalf("a later item was promoted out of order: %+v", a.todoState[2])
+	if a.sess.todoState[2].Status != "pending" {
+		t.Fatalf("a later item was promoted out of order: %+v", a.sess.todoState[2])
 	}
 }
 
 func TestAdvanceCanonicalTodoRejectsPendingMatchByNumber(t *testing.T) {
-	a := &Agent{sink: event.Discard, todoState: []evidence.TodoItem{
+	a := &Agent{svc: agentServices{sink: event.Discard}, sess: sessionRuntime{todoState: []evidence.TodoItem{
 		{Content: "first", Status: "in_progress"},
 		{Content: "second", Status: "pending"},
-	}}
+	}}}
 	a.advanceCanonicalTodo("2")
-	if a.todoState[1].Status != "pending" || a.todoState[0].Status != "in_progress" {
-		t.Fatalf("pending numeric step advanced out of order: %+v", a.todoState)
+	if a.sess.todoState[1].Status != "pending" || a.sess.todoState[0].Status != "in_progress" {
+		t.Fatalf("pending numeric step advanced out of order: %+v", a.sess.todoState)
 	}
 }
 
@@ -80,8 +80,8 @@ func TestRebuildTodoStateIgnoresHistoricalPendingSignoff(t *testing.T) {
 	}
 	a := &Agent{}
 	a.rebuildTodoState(msgs)
-	if a.todoState[0].Status != "in_progress" || a.todoState[1].Status != "pending" {
-		t.Fatalf("historical pending signoff restored invalid state: %+v", a.todoState)
+	if a.sess.todoState[0].Status != "in_progress" || a.sess.todoState[1].Status != "pending" {
+		t.Fatalf("historical pending signoff restored invalid state: %+v", a.sess.todoState)
 	}
 }
 
@@ -91,8 +91,8 @@ func TestSetTodoStateNormalizesLegacyOutOfOrderSnapshot(t *testing.T) {
 		{Content: "first", Status: "in_progress"},
 		{Content: "second", Status: "completed"},
 	})
-	if a.todoState[0].Status != "in_progress" || a.todoState[1].Status != "pending" {
-		t.Fatalf("legacy snapshot was not normalized: %+v", a.todoState)
+	if a.sess.todoState[0].Status != "in_progress" || a.sess.todoState[1].Status != "pending" {
+		t.Fatalf("legacy snapshot was not normalized: %+v", a.sess.todoState)
 	}
 }
 
@@ -111,14 +111,14 @@ func TestRebuildTodoStateReplaysCompleteSteps(t *testing.T) {
 	a := &Agent{}
 	a.rebuildTodoState(msgs)
 
-	if len(a.todoState) != 2 {
-		t.Fatalf("rebuilt %d todos, want 2", len(a.todoState))
+	if len(a.sess.todoState) != 2 {
+		t.Fatalf("rebuilt %d todos, want 2", len(a.sess.todoState))
 	}
-	if a.todoState[0].Status != "completed" {
-		t.Fatalf("complete_step not replayed onto canonical state: %+v", a.todoState[0])
+	if a.sess.todoState[0].Status != "completed" {
+		t.Fatalf("complete_step not replayed onto canonical state: %+v", a.sess.todoState[0])
 	}
-	if a.todoState[1].Status != "in_progress" {
-		t.Fatalf("next item not promoted on replay: %+v", a.todoState[1])
+	if a.sess.todoState[1].Status != "in_progress" {
+		t.Fatalf("next item not promoted on replay: %+v", a.sess.todoState[1])
 	}
 }
 
@@ -137,8 +137,8 @@ func TestRebuildTodoStateSkipsFailedCompleteStep(t *testing.T) {
 	a := &Agent{}
 	a.rebuildTodoState(msgs)
 
-	if a.todoState[0].Status == "completed" {
-		t.Fatalf("a failed complete_step must not advance canonical state: %+v", a.todoState[0])
+	if a.sess.todoState[0].Status == "completed" {
+		t.Fatalf("a failed complete_step must not advance canonical state: %+v", a.sess.todoState[0])
 	}
 }
 
@@ -154,8 +154,8 @@ func TestRebuildTodoStateRequiresToolResults(t *testing.T) {
 	}
 	a := &Agent{}
 	a.rebuildTodoState(msgs)
-	if len(a.todoState) != 0 {
-		t.Fatalf("todo_write without tool result rebuilt canonical state: %+v", a.todoState)
+	if len(a.sess.todoState) != 0 {
+		t.Fatalf("todo_write without tool result rebuilt canonical state: %+v", a.sess.todoState)
 	}
 
 	msgs = append(msgs[:1],
@@ -163,10 +163,10 @@ func TestRebuildTodoStateRequiresToolResults(t *testing.T) {
 		msgs[1],
 	)
 	a.rebuildTodoState(msgs)
-	if len(a.todoState) != 1 {
-		t.Fatalf("successful todo_write did not rebuild canonical state: %+v", a.todoState)
+	if len(a.sess.todoState) != 1 {
+		t.Fatalf("successful todo_write did not rebuild canonical state: %+v", a.sess.todoState)
 	}
-	if got := a.todoState[0].Status; got != "in_progress" {
+	if got := a.sess.todoState[0].Status; got != "in_progress" {
 		t.Fatalf("complete_step without tool result changed status to %q", got)
 	}
 }
@@ -188,79 +188,79 @@ func TestRebuildTodoStateHonorsEmptyTodoWriteClear(t *testing.T) {
 	}
 	a := &Agent{}
 	a.rebuildTodoState(msgs)
-	if len(a.todoState) != 0 {
-		t.Fatalf("empty todo_write should clear rebuilt canonical state: %+v", a.todoState)
+	if len(a.sess.todoState) != 0 {
+		t.Fatalf("empty todo_write should clear rebuilt canonical state: %+v", a.sess.todoState)
 	}
 }
 
 func TestSeedTodoState(t *testing.T) {
-	a := &Agent{sink: event.Discard}
+	a := &Agent{svc: agentServices{sink: event.Discard}}
 	todos := []evidence.TodoItem{
 		{Content: "step 1", Status: "in_progress"},
 		{Content: "step 2", Status: "pending"},
 	}
 	a.SeedTodoState(todos)
-	if len(a.todoState) != 2 {
-		t.Fatalf("SeedTodoState: got %d items, want 2", len(a.todoState))
+	if len(a.sess.todoState) != 2 {
+		t.Fatalf("SeedTodoState: got %d items, want 2", len(a.sess.todoState))
 	}
-	if a.todoState[0].Status != "in_progress" {
-		t.Fatalf("SeedTodoState: first item status = %q, want in_progress", a.todoState[0].Status)
+	if a.sess.todoState[0].Status != "in_progress" {
+		t.Fatalf("SeedTodoState: first item status = %q, want in_progress", a.sess.todoState[0].Status)
 	}
 }
 
 func TestSeedTodoStateReplacesExisting(t *testing.T) {
-	a := &Agent{sink: event.Discard, todoState: []evidence.TodoItem{
+	a := &Agent{svc: agentServices{sink: event.Discard}, sess: sessionRuntime{todoState: []evidence.TodoItem{
 		{Content: "existing", Status: "in_progress"},
-	}}
+	}}}
 	a.SeedTodoState([]evidence.TodoItem{
 		{Content: "new", Status: "in_progress"},
 	})
-	if len(a.todoState) != 1 || a.todoState[0].Content != "new" {
-		t.Fatalf("SeedTodoState did not replace existing state: %+v", a.todoState)
+	if len(a.sess.todoState) != 1 || a.sess.todoState[0].Content != "new" {
+		t.Fatalf("SeedTodoState did not replace existing state: %+v", a.sess.todoState)
 	}
 }
 
 func TestSeedTodoStateAllowsAdvanceAfterSeed(t *testing.T) {
-	a := &Agent{sink: event.Discard}
+	a := &Agent{svc: agentServices{sink: event.Discard}}
 	a.SeedTodoState([]evidence.TodoItem{
 		{Content: "step 1", Status: "in_progress"},
 		{Content: "step 2", Status: "pending"},
 	})
 	a.advanceCanonicalTodo("step 1")
-	if a.todoState[0].Status != "completed" {
-		t.Fatalf("advance after seed: item 0 status = %q, want completed", a.todoState[0].Status)
+	if a.sess.todoState[0].Status != "completed" {
+		t.Fatalf("advance after seed: item 0 status = %q, want completed", a.sess.todoState[0].Status)
 	}
-	if a.todoState[1].Status != "in_progress" {
-		t.Fatalf("advance after seed: item 1 status = %q, want in_progress", a.todoState[1].Status)
+	if a.sess.todoState[1].Status != "in_progress" {
+		t.Fatalf("advance after seed: item 1 status = %q, want in_progress", a.sess.todoState[1].Status)
 	}
 }
 
 func TestAdvanceCanonicalTodoWalksPhaseChain(t *testing.T) {
-	a := &Agent{sink: event.Discard, todoState: []evidence.TodoItem{
+	a := &Agent{svc: agentServices{sink: event.Discard}, sess: sessionRuntime{todoState: []evidence.TodoItem{
 		{Content: "Port the parser", Status: "pending"},
 		{Content: "move files", Status: "in_progress", Level: 1},
 		{Content: "fix imports", Status: "pending", Level: 1},
 		{Content: "Ship it", Status: "pending"},
 		{Content: "run tests", Status: "pending", Level: 1},
-	}}
+	}}}
 
 	a.advanceCanonicalTodo("Port the parser")
-	if a.todoState[0].Status != "pending" {
-		t.Fatalf("pending phase advanced ahead of its sub-steps: %+v", a.todoState)
+	if a.sess.todoState[0].Status != "pending" {
+		t.Fatalf("pending phase advanced ahead of its sub-steps: %+v", a.sess.todoState)
 	}
 
 	a.advanceCanonicalTodo("move files")
-	if a.todoState[1].Status != "completed" || a.todoState[2].Status != "in_progress" {
-		t.Fatalf("completing a sub-step should promote its sibling: %+v", a.todoState)
+	if a.sess.todoState[1].Status != "completed" || a.sess.todoState[2].Status != "in_progress" {
+		t.Fatalf("completing a sub-step should promote its sibling: %+v", a.sess.todoState)
 	}
 
 	a.advanceCanonicalTodo("fix imports")
-	if a.todoState[2].Status != "completed" || a.todoState[0].Status != "in_progress" {
-		t.Fatalf("after the last sub-step the phase should become the signable item: %+v", a.todoState)
+	if a.sess.todoState[2].Status != "completed" || a.sess.todoState[0].Status != "in_progress" {
+		t.Fatalf("after the last sub-step the phase should become the signable item: %+v", a.sess.todoState)
 	}
 
 	a.advanceCanonicalTodo("Port the parser")
-	if a.todoState[0].Status != "completed" || a.todoState[3].Status != "pending" || a.todoState[4].Status != "in_progress" {
-		t.Fatalf("phase sign-off should promote the next phase's first sub-step: %+v", a.todoState)
+	if a.sess.todoState[0].Status != "completed" || a.sess.todoState[3].Status != "pending" || a.sess.todoState[4].Status != "in_progress" {
+		t.Fatalf("phase sign-off should promote the next phase's first sub-step: %+v", a.sess.todoState)
 	}
 }

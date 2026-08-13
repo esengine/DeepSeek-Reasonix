@@ -5,9 +5,22 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 
 	"reasonix/internal/provider"
 )
+
+// compactionProgress is how compaction is faring in this session: whether a
+// fold stopped reducing, how many ran back to back, and the turn the last one
+// committed under. All three are cleared together whenever the lineage resets,
+// which is why they travel as one value rather than three fields.
+type compactionProgress struct {
+	stuck       bool // a fold landed above the trigger, so pressure retries are pointless
+	consecutive int  // back-to-back folds since one last helped
+	// lastTurn stops the post-turn observer and the pre-send preflight from
+	// paying for two summaries during one active tool loop.
+	lastTurn atomic.Int64
+}
 
 // ContextManager is the sole owner of provider-visible context maintenance.
 // Canonical session messages are immutable inputs; Prepare evolves only the
@@ -61,7 +74,7 @@ func (m ContextManager) Prepare(ctx context.Context, policy ContextPreparePolicy
 
 func (m ContextManager) prepareOnce(ctx context.Context, policy ContextPreparePolicy) (PreparedContext, error) {
 	a := m.agent
-	if a == nil || a.session == nil {
+	if a == nil || a.sess.conversation == nil {
 		return PreparedContext{}, nil
 	}
 	visible := a.modelVisibleMessages()
@@ -92,10 +105,10 @@ func (m ContextManager) prepareOnce(ctx context.Context, policy ContextPreparePo
 		return prepared, nil
 	}
 	if est < fold {
-		a.consecutiveCompacts = 0
-		a.compactStuck = false
+		a.sess.compaction.consecutive = 0
+		a.sess.compaction.stuck = false
 	}
-	if a.compactStuck && policy.Trigger == CompactionTriggerPressure {
+	if a.sess.compaction.stuck && policy.Trigger == CompactionTriggerPressure {
 		return prepared, nil
 	}
 	// One user trigger. Overflow is a one-shot physical recovery path only.
@@ -139,7 +152,7 @@ func (m ContextManager) foldContext(ctx context.Context, prepared PreparedContex
 		return prepared, nil
 	}
 	if outcome == CompactionNoop {
-		canonical, _ := a.session.snapshotMessagesVersion()
+		canonical, _ := a.sess.conversation.snapshotMessagesVersion()
 		if policy.Trigger == CompactionTriggerPressure && a.activeTurnStart(canonical) >= 0 {
 			return prepared, nil
 		}
@@ -158,8 +171,8 @@ func (m ContextManager) foldContext(ctx context.Context, prepared PreparedContex
 	if result.InputTokens >= fold {
 		reason := fmt.Sprintf("summary result remains above fold trigger (%d >= %d)", result.InputTokens, fold)
 		a.recordContextMaintenanceBlocked(a.contextMaintenanceInputHash(result.Messages), policy.Trigger, "summary", reason)
-		a.compactStuck = true
-		a.consecutiveCompacts++
+		a.sess.compaction.stuck = true
+		a.sess.compaction.consecutive++
 		if policy.Trigger == CompactionTriggerOverflow || result.InputTokens >= hard {
 			return PreparedContext{}, fmt.Errorf("%w: %s", ErrCompactionRequired, reason)
 		}
@@ -192,8 +205,8 @@ func (a *Agent) estimatedVisibleRequestTokens(visible []provider.Message) int {
 		msgs[i].CreatedAt = 0
 	}
 	var tools []provider.ToolSchema
-	if a.tools != nil {
-		tools = a.tools.Schemas()
+	if a.svc.tools != nil {
+		tools = a.svc.tools.Schemas()
 	}
 	return a.estimatedRequestTokens(provider.Request{
 		Messages:    msgs,

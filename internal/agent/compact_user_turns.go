@@ -67,7 +67,7 @@ func (a *Agent) noticeDroppedUserTurns(ret userTurnRetention) {
 	if ret.Dropped == 0 {
 		return
 	}
-	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
+	a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
 		Text: fmt.Sprintf("%s of yours %s too large to keep whole and now survive only through the summary. Prefix a turn with [[keep]] to hold it verbatim.",
 			pluralTurns(ret.Dropped), wereOrWas(ret.Dropped)),
 		Detail: fmt.Sprintf("compaction dropped %d user turn(s) (~%d tokens) past the retention budget of %d",
