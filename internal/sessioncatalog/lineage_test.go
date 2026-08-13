@@ -121,6 +121,29 @@ func TestCanonicalSessionPathForTopic(t *testing.T) {
 	}
 }
 
+func TestOrdinaryContinuePathFollowsParentOnly(t *testing.T) {
+	parent := "/s/old.jsonl"
+	leaf := "/s/leaf.jsonl"
+	fork := "/s/fork.jsonl"
+	sessions := []SessionRecord{
+		{Path: parent, RecoveryRole: RecoveryRoleNormal},
+		{Path: leaf, Recovered: true, RecoveryRole: RecoveryRoleAdopted, RecoveryCanonical: true},
+		{Path: fork, Recovered: true, RecoveryRole: RecoveryRoleDiverged},
+	}
+	if got := OrdinaryContinuePath(sessions, parent); got != leaf {
+		t.Fatalf("parent continue = %q, want leaf", got)
+	}
+	if got := OrdinaryContinuePath(sessions, leaf); got != "" {
+		t.Fatalf("leaf continue = %q, want keep", got)
+	}
+	if got := OrdinaryContinuePath(sessions, fork); got != "" {
+		t.Fatalf("fork continue = %q, want keep inspection path", got)
+	}
+	if got := OrdinaryContinuePath(sessions, "/s/stale-parent.jsonl"); got != leaf {
+		t.Fatalf("stale parent continue = %q, want leaf", got)
+	}
+}
+
 func TestExplicitPreferredRecoveryWinsWithoutMakingPeersCovered(t *testing.T) {
 	dir := t.TempDir()
 	root := filepath.Join(dir, "root.jsonl")

@@ -64,6 +64,35 @@ func TestReconcileMakesUnknownCountsVisibleWithoutReadingTranscript(t *testing.T
 	}
 }
 
+func TestDirectoryScanReadyOnlyAfterFirstReconcile(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "chat.jsonl"), []byte(`{"role":"user","content":"hi"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := Open(ctx, Options{InMemory: true, DisableRepair: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = catalog.Close(context.Background()) })
+	if catalog.DirectoryScanReady(ctx, dir) {
+		t.Fatal("opened catalog must not report the directory ready before the first scan")
+	}
+	if catalog.HasWorkspaceRecords(ctx, "global", "") {
+		t.Fatal("opened catalog must not report workspace records before the first scan")
+	}
+	if err := catalog.ReconcileDirectory(ctx, DirectoryTarget{Path: dir, Scope: "global"}); err != nil {
+		t.Fatal(err)
+	}
+	if !catalog.DirectoryScanReady(ctx, dir) {
+		t.Fatal("directory must be ready after ReconcileDirectory finishes")
+	}
+	if !catalog.HasWorkspaceRecords(ctx, "global", "") {
+		t.Fatal("reconciled directory should report workspace records")
+	}
+}
+
 func TestListTopicsUsesStableKeysetCursor(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

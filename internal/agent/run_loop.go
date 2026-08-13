@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"strings"
@@ -31,6 +32,7 @@ type streamedTurn struct {
 	reasoningStatus    string
 	calls              []provider.ToolCall
 	responsesItems     []json.RawMessage
+	serverSearch       []provider.ServerSearchCall
 	usage              *provider.Usage
 	interrupted        bool
 	partialToolStarted bool
@@ -299,14 +301,18 @@ func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) error {
 		// whole attempt lifecycle — stream retries must not rewrite session
 		// history mid-round, so the shape stays stable across body replays.
 		streamed := a.streamWithSamplingRecovery(ctx, step+1)
-		text, reasoning, signature, calls, responsesItems, usage := streamed.text, streamed.reasoning, streamed.signature, streamed.calls, streamed.responsesItems, streamed.usage
+		text, reasoning, signature, calls, responsesItems, serverSearch, usage := streamed.text, streamed.reasoning, streamed.signature, streamed.calls, streamed.responsesItems, streamed.serverSearch, streamed.usage
 		partialCalls, err := streamed.partialCalls, streamed.err
 		cacheDiagnostics := CompareShape(prevPrefixShape, prefixShape, usage, contentReasons)
 		if err != nil {
 			a.emitTurnUsage(usage, &cacheDiagnostics)
 			a.observeRunBudget(state, usage)
-			if msg, ok := finishReasonMessage(usage); ok {
-				a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg})
+			// The byte-limit sentinel is already the user-facing turn error.
+			// Emitting the finish-reason notice as well doubles the same warning.
+			if !errors.Is(err, errReasoningByteLimitExceeded) {
+				if msg, ok := finishReasonMessage(usage); ok {
+					a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg})
+				}
 			}
 			// Exhausted stream retries (or a non-retryable error): persist one
 			// bounded LocalOnly recovery record for the next real user message.
@@ -341,6 +347,7 @@ func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) error {
 			ReasoningStatus:    streamed.reasoningStatus,
 			ToolCalls:          calls,
 			ResponsesItems:     responsesItems,
+			ServerSearch:       serverSearch,
 			WorkDurationMs:     state.workDurationMs(),
 		})
 

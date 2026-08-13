@@ -153,6 +153,9 @@ func freezeProviderRequest(req provider.Request) provider.Request {
 				}
 				out.Messages[i].ResponsesItems = items
 			}
+			if len(out.Messages[i].ServerSearch) > 0 {
+				out.Messages[i].ServerSearch = append([]provider.ServerSearchCall(nil), out.Messages[i].ServerSearch...)
+			}
 		}
 	}
 	if len(req.Tools) > 0 {

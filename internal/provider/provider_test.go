@@ -697,10 +697,33 @@ func TestMessageResponsesItemsRemainBackwardCompatible(t *testing.T) {
 	}
 }
 
+func TestMessageServerSearchRemainBackwardCompatible(t *testing.T) {
+	legacy := Message{Role: RoleAssistant, Content: "answer"}
+	legacyJSON, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(legacyJSON), "server_search") {
+		t.Fatalf("legacy message gained server_search: %s", legacyJSON)
+	}
+	current := Message{Role: RoleAssistant, Content: "answer", ServerSearch: []ServerSearchCall{{ID: "s1", Query: "q"}}}
+	raw, err := json.Marshal(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var roundTrip Message
+	if err := json.Unmarshal(raw, &roundTrip); err != nil {
+		t.Fatal(err)
+	}
+	if len(roundTrip.ServerSearch) != 1 || roundTrip.ServerSearch[0].ID != "s1" || roundTrip.ServerSearch[0].Query != "q" {
+		t.Fatalf("round-tripped ServerSearch = %#v", roundTrip.ServerSearch)
+	}
+}
+
 // ChunkType constants
 
 func TestChunkTypeConstants(t *testing.T) {
-	types := []ChunkType{ChunkText, ChunkReasoning, ChunkToolCallStart, ChunkToolCallArgsDelta, ChunkToolCall, ChunkUsage, ChunkDone, ChunkError, ChunkResponsesItem}
+	types := []ChunkType{ChunkText, ChunkReasoning, ChunkToolCallStart, ChunkToolCallArgsDelta, ChunkToolCall, ChunkUsage, ChunkDone, ChunkError, ChunkResponsesItem, ChunkServerSearch}
 	for i, ct := range types {
 		if int(ct) != i {
 			t.Errorf("ChunkType %d: got %d", i, int(ct))

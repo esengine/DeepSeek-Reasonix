@@ -232,7 +232,7 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 		return out
 	}
 	out.reason = strings.Join(missing, "; ")
-	return out
+	return a.applyPartialCheckWaiver(out)
 }
 
 func finalReadinessCheckSource(check instruction.VerifyCheck) string {

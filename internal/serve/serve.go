@@ -849,8 +849,10 @@ func historyMessages(msgs []provider.Message) []historyMessage {
 	for _, m := range msgs {
 		// Steer messages are surfaced as a notice, not a user message.
 		if m.Role == provider.RoleUser {
-			if steerText, isSteer := agent.SteerText(m.Content); isSteer {
-				out = append(out, historyMessage{Role: "notice", Content: "↪ " + steerText})
+			if text, handled := agent.ReplaySteerText(m.Content); handled {
+				if text != "" {
+					out = append(out, historyMessage{Role: "notice", Content: "↪ " + text})
+				}
 				continue
 			}
 		}

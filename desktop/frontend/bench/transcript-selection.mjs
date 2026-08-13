@@ -18,6 +18,96 @@ function assert(condition, message) {
   process.stdout.write(`  PASS  ${message}\n`);
 }
 
+async function waitForVisibleSelectionStart(page, { preferHighest, wheelDelta, timeout = 15_000 } = {}) {
+  const box = await page.locator(".transcript").boundingBox();
+  if (box) await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  const delta = wheelDelta ?? (preferHighest ? -400 : 400);
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const points = await page.evaluate((prefer) => {
+      const transcript = document.querySelector(".transcript");
+      if (!transcript) return null;
+      const viewport = transcript.getBoundingClientRect();
+      const candidates = [...transcript.querySelectorAll("[data-transcript-selectable]")]
+        .map((element) => ({
+          element,
+          turn: Number(element.textContent?.match(/\bbench turn (\d+):/)?.[1] ?? -1),
+          rect: element.getBoundingClientRect(),
+        }))
+        .filter(({ turn, rect }) => turn >= 0 && rect.height > 0 && rect.bottom > viewport.top && rect.top < viewport.bottom)
+        .sort((left, right) => (prefer ? right.turn - left.turn : left.turn - right.turn));
+      const candidate = candidates[0];
+      if (!candidate) return null;
+      const walker = document.createTreeWalker(candidate.element, NodeFilter.SHOW_TEXT);
+      const rects = [];
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (!node.textContent?.trim()) continue;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        rects.push(...range.getClientRects());
+      }
+      const start = rects.find((rect) => rect.width > 8 && rect.bottom > viewport.top && rect.top < viewport.bottom) ?? candidate.rect;
+      if (!start) return null;
+      const startX = Math.min(start.right - 4, start.left + Math.max(start.width * 0.45, 60));
+      const y = (Math.max(start.top, viewport.top) + Math.min(start.bottom, viewport.bottom)) / 2;
+      return {
+        start: { x: startX, y },
+        activate: { x: Math.min(start.right - 2, startX + 30), y },
+        edge: { x: startX, y: prefer ? viewport.top + 2 : viewport.bottom - 2 },
+        anchorTurn: candidate.turn,
+      };
+    }, preferHighest);
+    if (points) return points;
+    // Wheel, do not assign scrollTop: a pinned tail-follow snaps programmatic
+    // writes back to the native bottom before Virtuoso can mount a user row.
+    await page.mouse.wheel(0, delta);
+    await page.waitForTimeout(80);
+  }
+  const diag = await page.evaluate(() => {
+    const transcript = document.querySelector(".transcript");
+    const viewport = transcript?.getBoundingClientRect();
+    return {
+      rows: document.querySelectorAll(".transcript__row").length,
+      selectables: document.querySelectorAll("[data-transcript-selectable]").length,
+      turnHits: [...document.querySelectorAll("[data-transcript-selectable]")].filter((el) => /\bbench turn \d+:/.test(el.textContent || "")).length,
+      scrollTop: transcript?.scrollTop ?? null,
+      scrollHeight: transcript?.scrollHeight ?? null,
+      clientHeight: transcript?.clientHeight ?? null,
+      mode: transcript?.dataset.scrollMode ?? null,
+      viewport: viewport ? { top: viewport.top, bottom: viewport.bottom } : null,
+    };
+  });
+  throw new Error(`no visible bench-turn selectable (${JSON.stringify(diag)})`);
+}
+
+async function findVisibleTurnTarget(page, turnPredicate) {
+  return page.evaluate((predicate) => {
+    const transcript = document.querySelector(".transcript");
+    if (!transcript) return null;
+    const viewport = transcript.getBoundingClientRect();
+    const root = [...transcript.querySelectorAll("[data-transcript-selectable]")].find((element) => {
+      const rect = element.getBoundingClientRect();
+      const turn = Number(element.textContent?.match(/\bbench turn (\d+):/)?.[1] ?? -1);
+      return (predicate.min != null ? turn >= predicate.min : turn <= predicate.max)
+        && rect.height > 0 && rect.bottom > viewport.top && rect.top < viewport.bottom;
+    });
+    if (!root) return null;
+    const rect = root.getBoundingClientRect();
+    return {
+      x: Math.min(rect.right - 2, rect.left + Math.max(rect.width * 0.45, 24)),
+      y: (Math.max(rect.top, viewport.top) + Math.min(rect.bottom, viewport.bottom)) / 2,
+    };
+  }, turnPredicate);
+}
+
+async function waitForLogicalSelection(page, timeout = 8_000) {
+  return page.waitForFunction(
+    () => document.querySelector(".transcript")?.dataset.scrollMode === "logical-selecting",
+    undefined,
+    { timeout },
+  ).then(() => true, () => false);
+}
+
 async function waitForServer() {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
@@ -78,62 +168,11 @@ try {
     const transcript = document.querySelector(".transcript");
     return transcript && transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight <= 1;
   }, undefined, { timeout: 30_000 });
-  for (let index = 0; index < 20; index += 1) {
-    const visibleSelectable = await page.evaluate(() => {
-      const transcript = document.querySelector(".transcript");
-      if (!transcript) return false;
-      const viewport = transcript.getBoundingClientRect();
-      const visible = [...transcript.querySelectorAll("[data-transcript-selectable]")].some((element) => {
-        const rect = element.getBoundingClientRect();
-        return rect.height > 0 && rect.bottom > viewport.top && rect.top < viewport.bottom;
-      });
-      if (!visible) transcript.scrollTop -= transcript.clientHeight;
-      return visible;
-    });
-    if (visibleSelectable) break;
-    await page.waitForTimeout(50);
-  }
-
+  // Tool-dense fixtures often land the native tail on non-selectable tool
+  // rows. Wheel off the pinned tail until a mounted "bench turn N" row is
+  // visible, then snapshot the virtual window for the later bound check.
+  const points = await waitForVisibleSelectionStart(page, { preferHighest: true });
   const baselineRows = await page.locator(".transcript__row").count();
-  const points = await page.evaluate(() => {
-    const transcript = document.querySelector(".transcript");
-    if (!transcript) return null;
-    const viewport = transcript.getBoundingClientRect();
-    const candidates = [...transcript.querySelectorAll("[data-transcript-selectable]")]
-      .map((element) => ({
-        element,
-        turn: Number(element.textContent?.match(/\bbench turn (\d+):/)?.[1] ?? -1),
-        rect: element.getBoundingClientRect(),
-      }))
-      .filter(({ turn, rect }) => turn >= 0 && rect.height > 0 && rect.bottom > viewport.top && rect.top < viewport.bottom)
-      .sort((left, right) => right.turn - left.turn);
-    const candidate = candidates[0];
-    const textRects = candidate ? (() => {
-      const walker = document.createTreeWalker(candidate.element, NodeFilter.SHOW_TEXT);
-      const rects = [];
-      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        if (!node.textContent?.trim()) continue;
-        const range = document.createRange();
-        range.selectNodeContents(node);
-        rects.push(...range.getClientRects());
-      }
-      return rects;
-    })() : [];
-    const start = textRects.find((rect) => rect.width > 8 && rect.bottom > viewport.top && rect.top < viewport.bottom) ?? candidate?.rect;
-    if (!start) return null;
-    // Press mid-text rather than at the row's left edge. A left-edge caret
-    // freezes the anchor at offset 0, so an upward drag legitimately copies
-    // nothing from the anchor turn and the 20-turn count would depend only on
-    // how far the focus lands. Mid-text also exercises the frozen anchor's
-    // real character offset instead of the trivial row boundary.
-    const startX = Math.min(start.right - 4, start.left + Math.max(start.width * 0.45, 60));
-    return {
-      start: { x: startX, y: (Math.max(start.top, viewport.top) + Math.min(start.bottom, viewport.bottom)) / 2 },
-      activate: { x: Math.min(start.right - 2, startX + 30), y: (Math.max(start.top, viewport.top) + Math.min(start.bottom, viewport.bottom)) / 2 },
-      edge: { x: startX, y: viewport.top + 2 },
-      anchorTurn: candidate.turn,
-    };
-  });
   assert(points != null, "bench transcript exposes a selectable visible message");
 
   await page.evaluate(() => {
@@ -335,53 +374,28 @@ try {
   assert(after.rows <= Math.ceil(baselineRows * 1.1) + 2, "clearing logical selection preserves the normal virtual DOM window");
   const selectionHeapBaseline = await retainedHeap();
 
-  await page.evaluate(() => {
-    const transcript = document.querySelector(".transcript");
-    if (!transcript) return;
-    transcript.scrollTop = 0;
-    transcript.dispatchEvent(new Event("scroll"));
-  });
-  // Query and scroll advancement are separate steps: advancing scrollTop in
-  // the same evaluate as a missed query lets the scroll position run ahead of
-  // Virtuoso's row mounting under load, skipping every selectable row. Give
-  // each position two settle periods and wrap around at the bottom.
+  await page.waitForFunction(() => document.querySelector(".transcript")?.dataset.scrollMode === "manual", undefined, { timeout: 10_000 });
+  await page.mouse.up();
+  // Same contract as the upward drag: start mid-text on an early mounted
+  // turn, then land on a target at least 21 turns later. Programmatic
+  // scrollTop=0 does not unpin tail-follow or load older virtual pages.
+  const transcriptBox = await page.locator(".transcript").boundingBox();
+  if (transcriptBox) await page.mouse.move(transcriptBox.x + transcriptBox.width / 2, transcriptBox.y + transcriptBox.height / 2);
+  const topDeadline = Date.now() + 15_000;
   let forwardPoints = null;
-  for (let index = 0; index < 120 && !forwardPoints; index += 1) {
-    await page.waitForTimeout(50);
-    forwardPoints = await page.evaluate(() => {
-      const transcript = document.querySelector(".transcript");
-      if (!transcript) return null;
-      const viewport = transcript.getBoundingClientRect();
-      const textRects = [...transcript.querySelectorAll("[data-transcript-selectable]")].flatMap((element) => {
-        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-        const rects = [];
-        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-          if (!node.textContent?.trim()) continue;
-          const range = document.createRange();
-          range.selectNodeContents(node);
-          rects.push(...range.getClientRects());
-        }
-        return rects;
-      }).filter((rect) => rect.width > 8 && rect.bottom > viewport.top + 4 && rect.top < viewport.bottom - 4);
-      const start = textRects[0];
-      if (!start) return null;
-      const y = (Math.max(start.top, viewport.top + 4) + Math.min(start.bottom, viewport.bottom - 4)) / 2;
-      return {
-        start: { x: start.left + 2, y },
-        activate: { x: Math.min(start.right - 2, start.left + 32), y },
-        edge: { x: start.left + 2, y: viewport.bottom - 2 },
-      };
-    });
-    if (!forwardPoints && index % 2 === 1) {
-      await page.evaluate(() => {
-        const transcript = document.querySelector(".transcript");
-        if (!transcript) return;
-        const max = transcript.scrollHeight - transcript.clientHeight;
-        transcript.scrollTop = transcript.scrollTop >= max - 4 ? 0 : transcript.scrollTop + transcript.clientHeight / 2;
-      });
+  while (Date.now() < topDeadline && (!forwardPoints || forwardPoints.anchorTurn > 17)) {
+    const older = page.locator(".transcript__older");
+    if (await older.count()) await older.click();
+    await page.mouse.wheel(0, -700);
+    await page.waitForTimeout(80);
+    try {
+      forwardPoints = await waitForVisibleSelectionStart(page, { preferHighest: false, wheelDelta: -400, timeout: 1_200 });
+    } catch {
+      forwardPoints = null;
     }
   }
   assert(forwardPoints != null, "settled reverse selection leaves a viewport where forward selection can start");
+  assert(forwardPoints.anchorTurn <= 17, `forward drag must start early enough to cover 20 turns (${forwardPoints.anchorTurn})`);
   await page.evaluate(() => {
     window.__transcriptProgrammaticWrites = [];
     window.__logicalClipboardText = null;
@@ -392,38 +406,24 @@ try {
   await page.mouse.move(forwardPoints.start.x, forwardPoints.start.y);
   await page.mouse.down();
   await page.mouse.move(forwardPoints.activate.x, forwardPoints.activate.y, { steps: 6 });
-  for (let index = 0; index < 60; index += 1) {
-    await page.mouse.wheel(0, 500);
-    await page.waitForTimeout(50);
-    const visibleTarget = await page.evaluate(() => {
-      const transcript = document.querySelector(".transcript");
-      if (!transcript) return null;
-      const viewport = transcript.getBoundingClientRect();
-      const element = [...transcript.querySelectorAll("[data-transcript-selectable]")].find((candidate) => {
-        const rect = candidate.getBoundingClientRect();
-        return rect.width > 8 && rect.height > 0 && rect.bottom > viewport.top + 4 && rect.top < viewport.bottom - 4;
-      });
-      if (!element) return null;
-      const rect = element.getBoundingClientRect();
-      return {
-        x: Math.min(rect.right - 2, rect.left + 8),
-        y: (Math.max(rect.top, viewport.top + 4) + Math.min(rect.bottom, viewport.bottom - 4)) / 2,
-      };
-    });
-    if (visibleTarget) {
-      await page.mouse.move(visibleTarget.x, visibleTarget.y, { steps: 4 });
-    } else {
-      await page.mouse.move(
-        forwardPoints.edge.x + (index % 2 === 0 ? 2 : -2),
-        forwardPoints.edge.y - (index % 2),
-        { steps: 4 },
-      );
+  const forwardTargetTurn = forwardPoints.anchorTurn + 21;
+  let forwardFocus = null;
+  for (let index = 0; index < 80 && !forwardFocus; index += 1) {
+    forwardFocus = await findVisibleTurnTarget(page, { min: forwardTargetTurn });
+    if (!forwardFocus) {
+      await page.mouse.wheel(0, 250);
+      await page.mouse.move(forwardPoints.edge.x, forwardPoints.edge.y, { steps: 4 });
+      await page.waitForTimeout(50);
     }
-    const mode = await page.locator(".transcript").getAttribute("data-scroll-mode");
-    if (mode === "logical-selecting") break;
   }
-  await page.mouse.move(forwardPoints.edge.x, forwardPoints.edge.y);
-  await page.waitForTimeout(8_000);
+  assert(forwardFocus != null, "downward logical drag settles over a visible 20+ turn target");
+  let forwardPromoted = false;
+  for (let attempt = 0; attempt < 5 && !forwardPromoted; attempt += 1) {
+    await page.mouse.move(forwardFocus.x + 24, forwardFocus.y, { steps: 4 });
+    await page.mouse.move(forwardFocus.x, forwardFocus.y, { steps: 8 });
+    forwardPromoted = await waitForLogicalSelection(page, 3_000);
+    if (!forwardPromoted) forwardFocus = (await findVisibleTurnTarget(page, { min: forwardTargetTurn })) ?? forwardFocus;
+  }
   const forwardDuring = await page.evaluate(() => ({
     mode: document.querySelector(".transcript")?.dataset.scrollMode,
     rows: document.querySelectorAll(".transcript__row").length,

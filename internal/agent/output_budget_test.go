@@ -429,6 +429,42 @@ func TestEstimatedUsageDoesNotReplacePromptCalibration(t *testing.T) {
 	}
 }
 
+func TestCalibratedBudgetIgnoresEncryptedSearchRaw(t *testing.T) {
+	prov := &sharedWindowTestProvider{budget: 128 * 1024, shared: true}
+	a := &Agent{agentConfig: agentConfig{contextWindow: 200_000}, svc: agentServices{prov: prov}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
+	previous := provider.Request{Messages: []provider.Message{{
+		Role: provider.RoleUser, Content: strings.Repeat("x", 300_000),
+	}}}
+	a.setPromptTokenCalibration(75_000, a.requestCalibrationShape(previous))
+	visible := provider.ServerSearchCall{
+		ID: "s1", Query: "latest",
+		Results: []provider.ServerSearchHit{{Title: "Change Log", URL: "https://api-docs.deepseek.com/updates/"}},
+	}
+	withRaw := previous
+	withRaw.Messages = append(append([]provider.Message(nil), previous.Messages...), provider.Message{
+		Role: provider.RoleAssistant, Content: "answer",
+		ServerSearch: []provider.ServerSearchCall{{
+			ID: visible.ID, Query: visible.Query, Results: visible.Results,
+			Raw: json.RawMessage(`[{"encrypted_content":"` + strings.Repeat("E", 400_000) + `"}]`),
+		}},
+	})
+	withoutRaw := previous
+	withoutRaw.Messages = append(append([]provider.Message(nil), previous.Messages...), provider.Message{
+		Role:         provider.RoleAssistant,
+		Content:      "answer",
+		ServerSearch: []provider.ServerSearchCall{visible},
+	})
+	if got, want := a.estimatedRequestTokens(withRaw), a.estimatedRequestTokens(withoutRaw); got != want {
+		t.Fatalf("estimate with encrypted raw = %d, without = %d", got, want)
+	}
+	wantBudget, wantClipped, wantErr := a.effectiveOutputBudget(withoutRaw)
+	gotBudget, gotClipped, gotErr := a.effectiveOutputBudget(withRaw)
+	if gotBudget != wantBudget || gotClipped != wantClipped || (gotErr != nil) != (wantErr != nil) {
+		t.Fatalf("encrypted raw changed output budget: got %d clipped=%v err=%v, want %d clipped=%v err=%v",
+			gotBudget, gotClipped, gotErr, wantBudget, wantClipped, wantErr)
+	}
+}
+
 func TestForkCaptureProviderPreservesOutputBudgetCapabilities(t *testing.T) {
 	t.Setenv("REASONIX_EXPERIMENT_FORK_CAPTURE_DIR", t.TempDir())
 	prov := &sharedWindowTestProvider{budget: 128 * 1024, shared: true,

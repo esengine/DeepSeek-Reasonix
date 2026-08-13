@@ -74,6 +74,8 @@ type BranchMeta struct {
 	Turns        int               `json:"turns,omitempty"`
 	Preview      string            `json:"preview,omitempty"`
 	InFlightTurn *InFlightTurnMeta `json:"in_flight_turn,omitempty"`
+	// Closed completed todo shelves; desktop remounts hide the same fingerprint.
+	DismissedTodoBatches []string `json:"dismissed_todo_batches,omitempty"`
 }
 
 const (
@@ -253,8 +255,14 @@ func saveBranchMeta(sessionPath string, m BranchMeta, touchUpdated bool) error {
 	if m.CreatedAt.IsZero() {
 		m.CreatedAt = now
 	}
-	if touchUpdated || m.UpdatedAt.IsZero() {
+	if touchUpdated {
 		m.UpdatedAt = now
+	} else if m.UpdatedAt.IsZero() {
+		if info, err := os.Stat(sessionPath); err == nil {
+			m.UpdatedAt = info.ModTime().UTC()
+		} else {
+			m.UpdatedAt = now
+		}
 	}
 	if existing, ok, err := LoadBranchMeta(sessionPath); err == nil && ok {
 		preserveBranchMetaPersistence(&m, existing)
@@ -292,6 +300,7 @@ func preserveBranchMetaPersistence(next *BranchMeta, existing BranchMeta) {
 	if next == nil {
 		return
 	}
+	next.DismissedTodoBatches = MergeDismissedTodoBatches(existing.DismissedTodoBatches, next.DismissedTodoBatches)
 	if existing.Revision > next.Revision {
 		next.Revision = existing.Revision
 		next.ContentDigest = existing.ContentDigest

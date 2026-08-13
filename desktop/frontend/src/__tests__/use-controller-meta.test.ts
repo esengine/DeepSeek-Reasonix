@@ -394,6 +394,16 @@ eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "pl
     true,
     "equivalent empty canonical todo lists keep meta stable",
   );
+  eq(
+    sameMeta(meta({ dismissedTodoBatches: ["a"] }), meta({ dismissedTodoBatches: ["a"] })),
+    true,
+    "identical dismissed todo batches keep meta stable",
+  );
+  eq(
+    sameMeta(meta({ dismissedTodoBatches: ["a"] }), meta({ dismissedTodoBatches: ["b"] })),
+    false,
+    "persisted todo dismissal changes invalidate meta equality",
+  );
 }
 
 {
@@ -403,6 +413,10 @@ eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "pl
   const todos = [{ content: "Keep task state", status: "in_progress" }];
   const withTodos = metaFromTab(tab(), meta({ canonicalTodos: todos }));
   eq(withTodos.canonicalTodos, todos, "optimistic tab metadata preserves canonical todos for the same session");
+  const dismissed = metaFromTab(tab({ sessionPath: "/s/a.jsonl" }), meta({ sessionPath: "/s/a.jsonl", dismissedTodoBatches: ["done"] }));
+  eq(dismissed.dismissedTodoBatches?.[0], "done", "optimistic metadata keeps session-sidecar todo dismissals");
+  const remounted = metaFromTab(tab({ sessionPath: "/s/leaf.jsonl" }), meta({ sessionPath: "/s/a.jsonl", dismissedTodoBatches: ["done"] }));
+  eq(remounted.dismissedTodoBatches, undefined, "a session remount waits for the new sidecar dismissals");
 }
 
 {
@@ -411,8 +425,10 @@ eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "pl
   const updated = reducer({ ...initialState, meta: before }, { type: "meta", meta: completed });
   eq(updated.meta?.canonicalTodos?.[0]?.status, "completed", "meta refresh applies canonical todo progress");
 
-  const reset = reducer(updated, { type: "reset" });
+  const withDismissed = reducer(updated, { type: "meta", meta: meta({ canonicalTodos: completed.canonicalTodos, dismissedTodoBatches: ["done"] }) });
+  const reset = reducer(withDismissed, { type: "reset" });
   eq(reset.meta?.canonicalTodos, undefined, "session reset clears canonical todos from the previous session");
+  eq(reset.meta?.dismissedTodoBatches, undefined, "session reset clears persisted todo dismissals from the previous session");
 
   const cleared = reducer(reset, { type: "meta", meta: meta({ canonicalTodos: [] }) });
   eq(cleared.meta?.canonicalTodos?.length, 0, "authoritative empty canonical todos survive meta refresh");

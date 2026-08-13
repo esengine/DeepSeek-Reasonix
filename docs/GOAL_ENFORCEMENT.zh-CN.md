@@ -7,7 +7,7 @@ Reasonix 的 Goal 模式（`/goal`）将目标推进（Goal）、验收（Delive
 | 功能 | 触发方式 | 效果 |
 |------|----------|------|
 | 结构化完成协议 | `update_goal` 工具 | 每轮目标 turn 结束时模型通过工具报告 continue/complete/blocked（含 reason 与 next_action），取代旧的 `[goal:*]` footer 文本标记 |
-| 完成校验 | 默认 | `complete` 声明必须通过 Delivery readiness（todos、验证、review、签收、能力门禁）才会真正完成；不满足时用缺失项开启下一轮 |
+| 完成校验 | 默认 | `complete` 必须通过 todos 与必做工作（mutation、capability）；Light/Balanced 下已声明 `unverified` 的检查缺口不阻塞；同一检查缺口被连续 `complete` 两次后直接完成，未完成的 todos 仍继续推进 |
 | 完成自述与对账 | `update_goal` 的 `completion` | `complete` 可附带自述：`verified` 命令逐条与本会话真实 receipt 对账，没跑过 / 跑失败 / 早于最后一次改动都记为 unbacked claim；`unverified` 与 `risks` 是宿主推断不出的声明，只增不减，永远不阻塞完成 |
 | 独立评审 | 无报告时 | 模型未调用 `update_goal` 时，宿主调用一次独立 bounded evaluator 判定；评审不可用/出错/不确定时安全暂停，绝不默认继续 |
 | 连续执行 | 默认 | 不设默认 model rounds、Goal turns、墙钟时长或数字式卡死上限；相同宿主失败、零新增证据和 Todo 停滞只触发重新规划，不暂停 Goal |
@@ -40,7 +40,7 @@ Reasonix 的 Goal 模式（`/goal`）将目标推进（Goal）、验收（Delive
 }}
 ```
 
-宿主对这份自述只做一件事——**对账**。`verified` 里的每条命令都会去本会话的真实 receipt 里找：没跑过、跑失败、或者最后一次运行早于最后一次改动，都会被记成一条 unbacked claim。`unverified` 与 `risks` 宿主无从推断，因此原样保留；它们**只增不减**，一份自述永远不能抹掉宿主自己发现的缺口，也永远不会因为诚实申报而阻塞完成。
+宿主对这份自述做两件事。`verified` 里的每条命令都会去本会话的真实 receipt 里找：没跑过、跑失败、或者最后一次运行早于最后一次改动，都会被记成一条 unbacked claim。`unverified` 与 `risks` 宿主无从推断，因此原样保留，也**只增不减**——一份自述永远不能抹掉宿主自己发现的缺口。在 Light/Balanced（以及用户禁止测试）时，诚实申报的检查缺口不再阻塞 `complete`；同一检查缺口连续两次 `complete` 后也会结束 Goal，而不是把模型打回验证循环。未完成的 todos 仍继续推进。
 
 `update_goal` 只在活动 Goal turn 中可用；普通聊天调用会收到结构化错误且不改变任何状态。同值重复调用幂等，`continue` 可升级为 `complete`/`blocked`，终态后冲突调用被拒绝；目标被替换或清除后，迟到的报告/用量一律按 scope+epoch 拒绝。
 
@@ -142,7 +142,7 @@ Prometheus 会逐个问澄清问题：
 5. 应用 readiness 与 evaluator fail-closed 结果；
 6. 由 Goal FSM 独占决定 complete、continue、blocked 或 pause。
 
-`complete` 只有在 readiness 通过时才被接受；`blocked` 立即停止；evaluator 超时、报错、JSON 非法或返回 `uncertain` 一律安全暂停。
+`complete` 在 readiness 通过、或仅剩检查缺口且模型已声明 `unverified`（Light/Balanced）或连续两次同一检查缺口时被接受；`blocked` 立即停止；evaluator 超时、报错、JSON 非法或返回 `uncertain` 一律安全暂停。未完成的 todos 仍继续推进。
 
 ### 证据审计门控（Delivery）
 
@@ -165,8 +165,8 @@ Delivery 不再自行注入隐藏模型消息做 3/6 次 readiness 重试：普�
 todo_write → agent 创建任务列表
 complete_step → agent 标记某一步完成
 advanceGoalAfterTurn → 读取 update_goal 报告 + readiness + evaluator
-  ├─ complete + readiness 通过 → 完成
-  ├─ complete + readiness 缺失 → 拦截并列出缺失项，继续循环
+  ├─ complete + readiness 通过，或仅剩检查缺口的第二次 complete → 完成
+  ├─ complete + readiness 缺失（首次，或仍有未完成 todos） → 拦截并列出缺失项，继续循环
   ├─ blocked → 立即阻塞
   ├─ 无报告 → evaluator 判定一次（失败则安全暂停）
   └─ 数字式无进展/Todo 阈值 → 重新规划并继续（不改变 Goal 状态）

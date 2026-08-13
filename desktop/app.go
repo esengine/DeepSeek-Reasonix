@@ -3761,25 +3761,7 @@ func (a *App) ResumeSessionPage(path string, limit int) (HistoryPage, error) {
 }
 
 func (a *App) ResumeSessionPageForTab(tabID, path string, limit int) (HistoryPage, error) {
-	tab, ctrl := a.tabAndCtrlByID(tabID)
-	if tab == nil || ctrl == nil {
-		return HistoryPage{}, fmt.Errorf("tab is not ready")
-	}
-	sessionPath, _, err := validateSessionPath(controllerSessionDir(ctrl), path)
-	if err != nil {
-		return HistoryPage{}, err
-	}
-	loaded, err := loadResumableSession(sessionPath)
-	if err != nil {
-		return HistoryPage{}, err
-	}
-	if sessionRuntimeKey(tab.currentSessionPath()) != sessionRuntimeKey(sessionPath) {
-		if err := a.rebindTabToLoadedSessionPath(tab, sessionPath, loaded); err != nil {
-			return HistoryPage{}, err
-		}
-	}
-	a.setTabReadOnly(tab.ID, false)
-	return a.HistoryPageForTab(tab.ID, 0, limit), nil
+	return a.resumeSessionPageForTab(tabID, path, limit)
 }
 
 // ResumeSessionForTab is the tab-scoped form of ResumeSession. A saved session
@@ -5274,13 +5256,14 @@ type HistoryMessage struct {
 	ToolResultError    string                    `json:"toolResultError,omitempty"`
 	// Execution is local shell metadata restored onto ToolCards after history
 	// reload. Omitted when absent so older frontends ignore it safely.
-	Execution       *provider.ToolExecution   `json:"execution,omitempty"`
-	Pending         bool                      `json:"pending,omitempty"`
-	Trigger         string                    `json:"trigger,omitempty"`
-	Messages        int                       `json:"messages,omitempty"`
-	Summary         string                    `json:"summary,omitempty"`
-	Archive         string                    `json:"archive,omitempty"`
-	DecisionReceipt *provider.DecisionReceipt `json:"decisionReceipt,omitempty"`
+	Execution       *provider.ToolExecution     `json:"execution,omitempty"`
+	Pending         bool                        `json:"pending,omitempty"`
+	Trigger         string                      `json:"trigger,omitempty"`
+	Messages        int                         `json:"messages,omitempty"`
+	Summary         string                      `json:"summary,omitempty"`
+	Archive         string                      `json:"archive,omitempty"`
+	DecisionReceipt *provider.DecisionReceipt   `json:"decisionReceipt,omitempty"`
+	ServerSearch    []provider.ServerSearchCall `json:"serverSearch,omitempty"`
 }
 
 type HistoryToolCall struct {
@@ -5680,13 +5663,8 @@ func (state *historyMessageConvertState) convertHistoryMessage(
 		})
 	}
 	if m.LocalOnly {
-		if steerText, isSteer := agent.SteerText(agent.UserMessageText(m)); isSteer {
-			return append(out, HistoryMessage{
-				Role:    "notice",
-				Content: agent.UnappliedSteerNotice(steerText),
-				Code:    event.NoticeCodeUnappliedSteer,
-				Level:   "warn",
-			})
+		if rows, handled := historySteerRows(agent.UserMessageText(m), true); handled {
+			return append(out, rows...)
 		}
 	}
 	if state.suppressCanonicalTurn {
@@ -5704,8 +5682,8 @@ func (state *historyMessageConvertState) convertHistoryMessage(
 		// regular user bubble or being filtered as synthetic (#4044).
 		// Check against the raw m.Content: resolveUserContent applies
 		// StripComposePrefixes which trims trailing whitespace.
-		if steerText, isSteer := agent.SteerText(agent.UserMessageText(m)); isSteer {
-			return append(out, HistoryMessage{Role: "notice", Content: "↪ " + steerText})
+		if rows, handled := historySteerRows(agent.UserMessageText(m), false); handled {
+			return append(out, rows...)
 		}
 		content = historyUserDisplayContent(m, resolveUserContent)
 		if control.IsSyntheticUserMessage(content) {
@@ -5741,6 +5719,7 @@ func (state *historyMessageConvertState) convertHistoryMessage(
 			hm.SubmitText = replay
 		}
 	}
+	hm.ServerSearch = historyServerSearch(m.ServerSearch)
 	if (m.Role == provider.RoleAssistant || m.LocalOnly) && len(m.ToolCalls) > 0 {
 		hm.ToolCalls = make([]HistoryToolCall, len(m.ToolCalls))
 		for i, tc := range m.ToolCalls {
@@ -6721,6 +6700,8 @@ type Meta struct {
 	GoalRuntime *GoalRuntimeView `json:"goalRuntime,omitempty"`
 	// Nil means no authoritative snapshot; non-nil empty means clear the panel.
 	CanonicalTodos *[]evidence.TodoItem `json:"canonicalTodos,omitempty"`
+	// Closed completed todo fingerprints from this session and its lineage.
+	DismissedTodoBatches []string `json:"dismissedTodoBatches,omitempty"`
 }
 
 type GoalRuntimeView struct {
@@ -6820,30 +6801,31 @@ func (a *App) MetaForTab(tabID string) Meta {
 		sessionDigest = branchMeta.ContentDigest
 	}
 	return Meta{
-		Label:             snap.label,
-		Ready:             runtimeView.Phase == sessionRuntimeReady && snap.ctrl != nil,
-		Runtime:           runtimeView,
-		StartupErr:        snap.startupErr,
-		EventChannel:      eventChannel,
-		SessionPath:       sessionPath,
-		SessionRevision:   sessionRevision,
-		SessionDigest:     sessionDigest,
-		Cwd:               cwd,
-		WorkspaceRoot:     cwd,
-		WorkspaceName:     tabWorkspaceNameForScope(snap.scope, cwd),
-		WorkspacePath:     cwd,
-		GitBranch:         extras.gitBranch,
-		ImageInputEnabled: extras.imageInputEnabled,
-		AutoApproveTools:  autoApproveTools,
-		Bypass:            autoApproveTools,
-		CollaborationMode: collaborationMode,
-		ToolApprovalMode:  toolApprovalMode,
-		AgentPreset:       boot.NormalizeAgentPreset(tokenMode),
-		TokenMode:         tokenMode,
-		Goal:              goal,
-		GoalStatus:        goalStatus,
-		GoalRuntime:       goalRuntimeViewFromController(snap.ctrl),
-		CanonicalTodos:    ctrlTodos(snap.ctrl),
+		Label:                snap.label,
+		Ready:                runtimeView.Phase == sessionRuntimeReady && snap.ctrl != nil,
+		Runtime:              runtimeView,
+		StartupErr:           snap.startupErr,
+		EventChannel:         eventChannel,
+		SessionPath:          sessionPath,
+		SessionRevision:      sessionRevision,
+		SessionDigest:        sessionDigest,
+		Cwd:                  cwd,
+		WorkspaceRoot:        cwd,
+		WorkspaceName:        tabWorkspaceNameForScope(snap.scope, cwd),
+		WorkspacePath:        cwd,
+		GitBranch:            extras.gitBranch,
+		ImageInputEnabled:    extras.imageInputEnabled,
+		AutoApproveTools:     autoApproveTools,
+		Bypass:               autoApproveTools,
+		CollaborationMode:    collaborationMode,
+		ToolApprovalMode:     toolApprovalMode,
+		AgentPreset:          boot.NormalizeAgentPreset(tokenMode),
+		TokenMode:            tokenMode,
+		Goal:                 goal,
+		GoalStatus:           goalStatus,
+		GoalRuntime:          goalRuntimeViewFromController(snap.ctrl),
+		CanonicalTodos:       ctrlTodos(snap.ctrl),
+		DismissedTodoBatches: a.dismissedTodoBatchesForSession(sessionPath),
 	}
 }
 

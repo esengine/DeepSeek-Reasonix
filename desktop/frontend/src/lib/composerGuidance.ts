@@ -2,6 +2,16 @@ export function guidanceNeedsRetry(state?: string): boolean {
   return state === "uncertain" || state === "blocked";
 }
 
+export function guidanceIsInFlight(state?: string): boolean {
+  return state === "running" || state === "steer_accepted" || state === "steer_consumed";
+}
+
+export function guidanceIsEditable(item: { id?: string; state?: string; source?: string; paused?: boolean }): boolean {
+  if (!item.id || item.id.startsWith("local-")) return false;
+  if (item.paused || guidanceIsInFlight(item.state) || guidanceNeedsRetry(item.state)) return false;
+  return item.state === "queued" || item.state === undefined || item.state === "";
+}
+
 export function markGuidanceQueued<T extends { id: string; state?: string; paused?: boolean }>(items: T[], id: string): T[] {
   return items.map((item) => item.id === id ? { ...item, state: "queued", paused: false } : item);
 }

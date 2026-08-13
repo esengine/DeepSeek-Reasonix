@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/config"
+	"reasonix/internal/control"
 	"reasonix/internal/provider"
 	"reasonix/internal/sessioncatalog"
 )
@@ -323,5 +325,289 @@ func TestSessionCatalogGoroutineOnlySyncsMetadataWithATimeout(t *testing.T) {
 		if !strings.Contains(line, "syncSessionCatalogMetadataBounded(") {
 			t.Fatalf("unbounded metadata sync in startSessionCatalog: %s", strings.TrimSpace(line))
 		}
+	}
+}
+
+func TestListProjectTopicsKeepsMetadataWhileFirstCatalogScanIsPending(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	root := t.TempDir()
+	if err := addProject(root, "Upgraded App"); err != nil {
+		t.Fatal(err)
+	}
+	if err := updateProjectsFile(func(f *desktopProjectFile) (bool, error) {
+		for i := range f.Projects {
+			if sameProjectRoot(f.Projects[i].Root, root) {
+				f.Projects[i].Topics = []string{"topic-keep"}
+				return true, nil
+			}
+		}
+		return false, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveTopicTitles(root, map[string]string{"topic-keep": "Previous chat"}); err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp()
+	catalog, err := sessioncatalog.Open(context.Background(), sessioncatalog.Options{InMemory: true, DisableRepair: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		app.sessionCatalog.CompareAndSwap(catalog, nil)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = catalog.Close(ctx)
+	})
+	app.sessionCatalog.Store(catalog)
+
+	page, err := app.ListProjectTopics(ProjectTopicPageRequest{Scope: "project", WorkspaceRoot: root, Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].TopicID != "topic-keep" || page.Items[0].Label != "Previous chat" {
+		t.Fatalf("topics while v4 catalog is still empty = %#v, want the desktop-projects conversation", page.Items)
+	}
+}
+
+func TestProjectTreeSnapshotIndexingWaitsForFirstDirectoryScan(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	app := NewApp()
+	catalog, err := sessioncatalog.Open(context.Background(), sessioncatalog.Options{InMemory: true, DisableRepair: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		app.sessionCatalog.CompareAndSwap(catalog, nil)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = catalog.Close(ctx)
+	})
+	app.sessionCatalog.Store(catalog)
+	snapshot := app.GetProjectTreeSnapshot()
+	if snapshot.IndexingDone {
+		t.Fatal("indexingDone must stay false until the first directory scan finishes")
+	}
+}
+
+func TestContinuePathForOpenFollowsCoveringLeafFromParent(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := desktopSessionDir(globalWorkspaceRoot())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	q := provider.Message{Role: provider.RoleUser, Content: "question"}
+	a := provider.Message{Role: provider.RoleAssistant, Content: "answer"}
+	next := provider.Message{Role: provider.RoleUser, Content: "next"}
+	done := provider.Message{Role: provider.RoleAssistant, Content: "done"}
+	save := func(path, topic string, messages ...provider.Message) {
+		t.Helper()
+		session := agent.NewSession("sys")
+		for _, message := range messages {
+			session.Add(message)
+		}
+		if err := session.Save(path); err != nil {
+			t.Fatal(err)
+		}
+		if err := agent.SaveBranchMetaPreserveUpdated(path, agent.BranchMeta{
+			ID: agent.BranchID(path), Scope: "global", TopicID: topic, TopicTitle: "Upgraded",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root := filepath.Join(dir, "root.jsonl")
+	leaf := filepath.Join(dir, "leaf.jsonl")
+	save(root, "conversation", q, a)
+	save(leaf, "legacy-leaf-topic", q, a, next, done)
+	if err := agent.SaveBranchMetaPreserveUpdated(leaf, agent.BranchMeta{
+		ID: "leaf", Scope: "global", TopicID: "legacy-leaf-topic",
+		Recovered: true, ParentID: "root", RecoveryDepth: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp()
+	installSessionCatalogForTest(t, app, dir, "global", "")
+	if got := app.continuePathForOpen(root); got != leaf {
+		t.Fatalf("continue parent = %q, want covering leaf %q", got, leaf)
+	}
+	if got := app.continuePathForOpen(leaf); got != "" {
+		t.Fatalf("continue leaf = %q, want keep", got)
+	}
+}
+
+func TestListProjectTopicsWaitsUntilEveryGlobalDirectoryIsScanned(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	legacy := config.SessionDir()
+	global := desktopSessionDir(globalWorkspaceRoot())
+	for _, dir := range []string{legacy, global} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := updateProjectsFile(func(f *desktopProjectFile) (bool, error) {
+		f.GlobalTopics = []string{"topic-keep"}
+		return true, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveTopicTitles("", map[string]string{"topic-keep": "Previous chat"}); err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp()
+	catalog, err := sessioncatalog.Open(context.Background(), sessioncatalog.Options{InMemory: true, DisableRepair: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		app.sessionCatalog.CompareAndSwap(catalog, nil)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = catalog.Close(ctx)
+	})
+	app.sessionCatalog.Store(catalog)
+	if err := catalog.ReconcileDirectory(context.Background(), sessioncatalog.DirectoryTarget{Path: legacy, Scope: "global"}); err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := app.ListProjectTopics(ProjectTopicPageRequest{Scope: "global", Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].TopicID != "topic-keep" || page.Items[0].Label != "Previous chat" {
+		t.Fatalf("topics after only the empty global dir scanned = %#v, want metadata fallback", page.Items)
+	}
+}
+
+type retargetRuntimeController struct {
+	control.SessionAPI
+	status control.RuntimeStatus
+	path   string
+}
+
+func (c *retargetRuntimeController) RuntimeStatus() control.RuntimeStatus { return c.status }
+func (c *retargetRuntimeController) SessionPath() string                  { return c.path }
+func (c *retargetRuntimeController) PlanMode() bool                       { return false }
+func (c *retargetRuntimeController) AutoApproveTools() bool               { return false }
+func (c *retargetRuntimeController) Goal() string                         { return "" }
+func (c *retargetRuntimeController) GoalStatus() string                   { return "" }
+func (c *retargetRuntimeController) ToolApprovalMode() string             { return control.ToolApprovalAsk }
+
+func TestRetargetOpenTabsSkipsRunningSessions(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := desktopSessionDir(globalWorkspaceRoot())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	q := provider.Message{Role: provider.RoleUser, Content: "question"}
+	a := provider.Message{Role: provider.RoleAssistant, Content: "answer"}
+	save := func(path, topic string, messages ...provider.Message) {
+		t.Helper()
+		session := agent.NewSession("sys")
+		for _, message := range messages {
+			session.Add(message)
+		}
+		if err := session.Save(path); err != nil {
+			t.Fatal(err)
+		}
+		if err := agent.SaveBranchMetaPreserveUpdated(path, agent.BranchMeta{
+			ID: agent.BranchID(path), Scope: "global", TopicID: topic, TopicTitle: "Upgraded",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root := filepath.Join(dir, "root.jsonl")
+	leaf := filepath.Join(dir, "leaf.jsonl")
+	save(root, "conversation", q, a)
+	save(leaf, "legacy-leaf-topic", q, a,
+		provider.Message{Role: provider.RoleUser, Content: "next"},
+		provider.Message{Role: provider.RoleAssistant, Content: "done"})
+	if err := agent.SaveBranchMetaPreserveUpdated(leaf, agent.BranchMeta{
+		ID: "leaf", Scope: "global", TopicID: "legacy-leaf-topic",
+		Recovered: true, ParentID: "root", RecoveryDepth: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp()
+	installSessionCatalogForTest(t, app, dir, "global", "")
+	idle := &WorkspaceTab{ID: "idle", Scope: "global", SessionPath: root}
+	running := &WorkspaceTab{
+		ID: "running", Scope: "global", SessionPath: root,
+		Ctrl: &retargetRuntimeController{status: control.RuntimeStatus{Running: true}, path: root},
+	}
+	app.tabs = map[string]*WorkspaceTab{"idle": idle, "running": running}
+
+	app.retargetOpenTabsToCoveringLeaves()
+	if idle.SessionPath != leaf {
+		t.Fatalf("idle tab path = %q, want covering leaf %q", idle.SessionPath, leaf)
+	}
+	if running.SessionPath != root {
+		t.Fatalf("running tab path = %q, want original parent %q", running.SessionPath, root)
+	}
+}
+
+func TestOpenTopicTabKeepsRunningParentInsteadOfCoveringLeaf(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := desktopSessionDir(globalWorkspaceRoot())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	q := provider.Message{Role: provider.RoleUser, Content: "question"}
+	a := provider.Message{Role: provider.RoleAssistant, Content: "answer"}
+	save := func(path, topic string, messages ...provider.Message) {
+		t.Helper()
+		session := agent.NewSession("sys")
+		for _, message := range messages {
+			session.Add(message)
+		}
+		if err := session.Save(path); err != nil {
+			t.Fatal(err)
+		}
+		if err := agent.SaveBranchMetaPreserveUpdated(path, agent.BranchMeta{
+			ID: agent.BranchID(path), Scope: "global", TopicID: topic, TopicTitle: "Upgraded",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root := filepath.Join(dir, "root.jsonl")
+	leaf := filepath.Join(dir, "leaf.jsonl")
+	save(root, "conversation", q, a)
+	save(leaf, "legacy-leaf-topic", q, a,
+		provider.Message{Role: provider.RoleUser, Content: "next"},
+		provider.Message{Role: provider.RoleAssistant, Content: "done"})
+	if err := agent.SaveBranchMetaPreserveUpdated(leaf, agent.BranchMeta{
+		ID: "leaf", Scope: "global", TopicID: "legacy-leaf-topic",
+		Recovered: true, ParentID: "root", RecoveryDepth: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp()
+	installSessionCatalogForTest(t, app, dir, "global", "")
+	running := &WorkspaceTab{
+		ID: "running", Scope: "global", TopicID: "conversation", SessionPath: root,
+		Ctrl: &retargetRuntimeController{status: control.RuntimeStatus{Running: true}, path: root},
+	}
+	app.tabs = map[string]*WorkspaceTab{"running": running}
+
+	_, resolved := app.resolveOpenTopicSessionPath("global", "", root)
+	if resolved != root {
+		t.Fatalf("resolve running open = %q, want parent %q", resolved, root)
+	}
+
+	meta, err := app.openTopicTab("global", "", "conversation", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if running.SessionPath != root {
+		t.Fatalf("running tab path = %q, want parent %q", running.SessionPath, root)
+	}
+	if meta.ID != "running" || meta.SessionPath != root {
+		t.Fatalf("open meta = %+v, want focused running parent", meta)
+	}
+
+	idle := &WorkspaceTab{ID: "idle", Scope: "global", TopicID: "conversation", SessionPath: root}
+	app.tabs = map[string]*WorkspaceTab{"idle": idle}
+	_, idleResolved := app.resolveOpenTopicSessionPath("global", "", root)
+	if idleResolved != leaf {
+		t.Fatalf("resolve idle open = %q, want covering leaf %q", idleResolved, leaf)
 	}
 }

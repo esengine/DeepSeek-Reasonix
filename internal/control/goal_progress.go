@@ -39,10 +39,10 @@ func mergeGoalProgressEvidence(existing, observed []string) ([]string, bool) {
 	return out, progressed
 }
 
-func (g *goalMachine) observeGoalProgress(in goalAdvanceInput) {
+func (g *goalMachine) observeGoalProgress(in goalAdvanceInput, acceptedTerminal bool) {
 	progressed := false
 	g.progressEvidence, progressed = mergeGoalProgressEvidence(g.progressEvidence, in.progressEvidence)
-	if in.report != nil && in.report.status != GoalStatusRunning {
+	if acceptedTerminal {
 		progressed = true
 	}
 	if progressed {

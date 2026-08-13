@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -44,7 +45,7 @@ func catalogRuntimeStatus(activity string, runtimeStatus control.RuntimeStatus) 
 		return topicStatusWaitingConfirmation
 	}
 	if runtimeStatus.Running {
-		if status == "" || status == topicStatusError || status == topicStatusPaused {
+		if status == "" || status == topicStatusError || status == topicStatusPaused || status == topicStatusAwaitingDelivery {
 			return topicStatusThinking
 		}
 		return status
@@ -52,7 +53,7 @@ func catalogRuntimeStatus(activity string, runtimeStatus control.RuntimeStatus) 
 	if runtimeStatus.BackgroundJobs > 0 {
 		return topicStatusBackgroundJob
 	}
-	if status == topicStatusError || status == topicStatusPaused {
+	if status == topicStatusError || status == topicStatusPaused || status == topicStatusAwaitingDelivery {
 		return status
 	}
 	return status
@@ -372,6 +373,9 @@ func (a *App) projectNodeFromCatalogTopic(topic sessioncatalog.TopicRecord, topi
 	})) {
 		return ProjectNode{Children: []ProjectNode{}}, false
 	}
+	if a.ordinaryTreeHidesUnindexedBlank(topic) {
+		return ProjectNode{Children: []ProjectNode{}}, false
+	}
 	// After filtering non-preferred recovery forks, a topic may have nothing
 	// left. Keep pinned/open shells; otherwise drop the empty row.
 	if len(visible) == 0 {
@@ -383,7 +387,9 @@ func (a *App) projectNodeFromCatalogTopic(topic sessioncatalog.TopicRecord, topi
 	// Ordinary list is always one logical row. Multiple normal non-recovery
 	// sessions under one topic also collapse: open/running already aggregated.
 	// History "other saved versions" is the only place physical forks appear.
-	if rep := strings.TrimSpace(topic.RepresentativePath); rep != "" {
+	if live := a.liveSessionPathForTopic(topic.Scope, topic.WorkspaceRoot, topic.TopicID); live != "" {
+		node.SessionPath = live
+	} else if rep := strings.TrimSpace(topic.RepresentativePath); rep != "" {
 		node.SessionPath = rep
 	} else if path := sessioncatalog.CanonicalSessionPathForTopic(visible, ""); path != "" {
 		node.SessionPath = path
@@ -391,6 +397,21 @@ func (a *App) projectNodeFromCatalogTopic(topic sessioncatalog.TopicRecord, topi
 		node.SessionPath = visible[0].Path
 	}
 	return node, true
+}
+
+func (a *App) ordinaryTreeHidesUnindexedBlank(topic sessioncatalog.TopicRecord) bool {
+	if topic.Pinned || topic.Turns > 0 {
+		return false
+	}
+	if !isDefaultTopicTitle(topic.Title) && strings.TrimSpace(topic.Title) != "" {
+		return false
+	}
+	for _, session := range topic.Sessions {
+		if session.Turns > 0 || strings.TrimSpace(session.Preview) != "" {
+			return false
+		}
+	}
+	return !topicIndexedInRegistry(topic.Scope, topic.WorkspaceRoot, topic.TopicID)
 }
 
 func topicSummaryFromCatalogTopic(topic sessioncatalog.TopicRecord, visible []sessioncatalog.SessionRecord) topicSummary {
@@ -424,18 +445,57 @@ func topicSummaryFromCatalogTopic(topic sessioncatalog.TopicRecord, visible []se
 
 func (a *App) ListProjectTopics(req ProjectTopicPageRequest) (ProjectTopicPage, error) {
 	catalog := a.sessionCatalog.Load()
-	if catalog == nil {
-		// Catalog unavailable: use project metadata shells only. Never scan
-		// every recovery JSONL into the ordinary tree (1.23 contract).
-		// While opening/rebuilding with a live catalog, ListTopics already
-		// skips non-ordinary recovery shells so empty pages beat a replica wall.
-		return a.metadataTopicPage(req), nil
+	if catalog == nil || !a.catalogWorkspaceScanReady(catalog, req.Scope, req.WorkspaceRoot) {
+		// A freshly opened v4 cache is live but empty until the first directory
+		// scan. Treat that the same as "catalog unavailable" so upgrade does
+		// not blank the sidebar that desktop-projects.json still knows about.
+		page := a.metadataTopicPage(req)
+		if catalog == nil {
+			return page, nil
+		}
+		return a.withLiveTopics(catalog, req, page), nil
 	}
 	page, err := a.catalogTopicPage(catalog, req)
 	if err != nil {
 		return page, err
 	}
 	return a.withLiveTopics(catalog, req, page), nil
+}
+
+func (a *App) catalogWorkspaceScanReady(catalog *sessioncatalog.Catalog, scope, workspaceRoot string) bool {
+	if a == nil || catalog == nil {
+		return false
+	}
+	ctx, cancel := a.catalogReadContext()
+	defer cancel()
+	scope, workspaceRoot = normalizeDesktopTopicScope(scope, workspaceRoot)
+	matchedExisting := 0
+	for _, target := range a.sessionCatalogTargets() {
+		if target.Scope != scope {
+			continue
+		}
+		if scope == "project" && !sameProjectRoot(target.WorkspaceRoot, workspaceRoot) {
+			continue
+		}
+		if _, err := os.Stat(target.Path); os.IsNotExist(err) {
+			continue
+		}
+		matchedExisting++
+		if !catalog.DirectoryScanReady(ctx, target.Path) {
+			return false
+		}
+	}
+	if matchedExisting > 0 {
+		return true
+	}
+	return catalog.HasWorkspaceRecords(ctx, scope, workspaceRoot)
+}
+
+func normalizeDesktopTopicScope(scope, workspaceRoot string) (string, string) {
+	if strings.TrimSpace(scope) != "project" {
+		return "global", ""
+	}
+	return "project", strings.TrimSpace(workspaceRoot)
 }
 
 // withLiveTopics restores topics the catalog does not (yet) carry. A tab is

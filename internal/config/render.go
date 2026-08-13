@@ -351,12 +351,12 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 				fmt.Fprintf(&b, "context_window = %d   # tokens; compaction triggers near this limit\n", p.ContextWindow)
 			}
 			if p.MaxOutputTokens != 0 {
-				fmt.Fprintf(&b, "max_output_tokens = %d   # per-turn total output; 0 = auto (~64K on DeepSeek high), 32768/65536/131072 explicit; never affects compact_ratio\n", p.MaxOutputTokens)
+				fmt.Fprintf(&b, "max_output_tokens = %d   # per-turn total output; 0 = official DeepSeek 384K / omit field; positive = cost cap; never affects compact_ratio\n", p.MaxOutputTokens)
 			} else {
-				b.WriteString("# max_output_tokens = 0       # recommended: automatic (DeepSeek default high → ~64K; not unlimited)\n")
-				b.WriteString("# max_output_tokens = 32768   # ordinary coding / cost control\n")
-				b.WriteString("# max_output_tokens = 65536   # heavy reasoning / long tool loops\n")
-				b.WriteString("# max_output_tokens = 131072  # only after repeated finish_reason=length\n")
+				b.WriteString("# max_output_tokens = 0       # recommended: official DeepSeek omits the field (server 384K ceiling)\n")
+				b.WriteString("# max_output_tokens = 32768   # optional cost cap\n")
+				b.WriteString("# max_output_tokens = 65536   # optional cost cap\n")
+				b.WriteString("# max_output_tokens = 131072  # optional cost cap\n")
 			}
 			if p.Price != nil {
 				fmt.Fprintf(&b, "price       = %s   # provider-wide fallback, per 1M tokens\n", renderPricingInline(p.Price))

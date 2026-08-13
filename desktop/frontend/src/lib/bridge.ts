@@ -210,7 +210,7 @@ export interface AppBindings extends SessionCatalogBindings, HistoryCatalogBindi
     revision: number;
     paused: boolean;
     recovered: boolean;
-    recoveredCount?: number;
+    recoveredCount?: number; sessionPath?: string;
     items: Array<{
       id: string;
       intent: string;
@@ -363,7 +363,7 @@ export interface AppBindings extends SessionCatalogBindings, HistoryCatalogBindi
   CloseTabWithPolicy(tabID: string, policy: "keep_running" | "stop_and_close"): Promise<void>;
   ToolResultForTab(tabID: string, toolID: string): Promise<{ args: string; output: string; execution?: import("./types").WireShellExecution } | null>;
   Meta(): Promise<Meta>;
-  MetaForTab(tabID: string): Promise<Meta>;
+  MetaForTab(tabID: string): Promise<Meta>; DismissTodoBatchForTab(tabID: string, batchKey: string): Promise<void>;
   Commands(): Promise<CommandInfo[]>;
   Capabilities(): Promise<CapabilitiesView>;
   MCPServers(): Promise<ServerView[]>;
@@ -2934,7 +2934,7 @@ function makeMockApp(): AppBindings {
           return {
             revision: 0,
             paused: false,
-            recovered: false,
+            recovered: false, sessionPath: "",
             items: [],
             itemsCount: 0,
             bytes: 0,
@@ -3485,7 +3485,7 @@ function makeMockApp(): AppBindings {
             goal: active?.goal ?? "",
             goalStatus: active?.goalStatus ?? (active?.goal ? "running" : "stopped"),
           };
-        },
+        }, async DismissTodoBatchForTab() {},
         async MetaForTab(tabID) {
           const tab = mockTabs.find((item) => item.id === tabID) ?? mockTabs.find((item) => item.active) ?? mockTabs[0];
           const toolApprovalMode = normalizeToolApprovalMode(tab?.toolApprovalMode, tab ? normalizeMode(tab.mode) : "normal", settings.autoApproveTools);

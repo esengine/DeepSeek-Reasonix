@@ -4739,6 +4739,16 @@ button.reasoning-summary:focus-visible {
   color: color-mix(in srgb, var(--fg-faint) 88%, transparent);
 }
 
+.msg-search-sources {
+  margin-top: 0.75em;
+}
+.msg-search-sources .md {
+  color: var(--fg);
+}
+.msg-search-sources .md a {
+  color: var(--accent);
+}
+
 .msg-memory-citations {
   display: flex;
   flex-direction: column;
@@ -20942,7 +20952,7 @@ body > .mermaid-diagram--fullscreen {
 .composer-guidance-item {
   min-height: 32px;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) repeat(3, auto);
   align-items: center;
   gap: 8px;
   padding: 5px 6px 5px 8px;
@@ -20969,6 +20979,19 @@ body > .mermaid-diagram--fullscreen {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.composer-guidance-item__editor {
+  min-width: 0;
+  width: 100%;
+  height: 28px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  padding: 0 8px;
 }
 
 .composer-guidance-item__guide {
@@ -24380,6 +24403,12 @@ body > .mermaid-diagram--fullscreen {
 .project-tree__topic-status--paused {
   background: color-mix(in srgb, var(--fg-faint) 11%, transparent);
   color: var(--fg-faint);
+}
+
+.project-tree__topic-status--awaiting_delivery {
+  max-width: 80px;
+  background: color-mix(in srgb, var(--warn) 13%, transparent);
+  color: color-mix(in srgb, var(--warn) 82%, var(--fg));
 }
 
 .project-tree__topic-status--error {
@@ -27813,6 +27842,13 @@ body > .mermaid-diagram--fullscreen {
   background: color-mix(in srgb, var(--fg-faint) 10%, var(--bg-elev));
   color: var(--fg-faint);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg-faint) 18%, transparent);
+}
+
+:root[data-theme-style] .project-tree__topic-status--awaiting_delivery {
+  max-width: 80px;
+  background: color-mix(in srgb, var(--warn) 12%, var(--bg-elev));
+  color: color-mix(in srgb, var(--warn) 82%, var(--fg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 20%, transparent);
 }
 
 :root[data-theme-style] .project-tree__topic-status--error {

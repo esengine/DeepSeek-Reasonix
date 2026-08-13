@@ -778,9 +778,7 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	// Always re-read after post hooks — partial writes and hook side effects can
 	// change the previewed path even when the concrete tool returned an error.
 	a.finalizeObservedToolReceipts(plan, result, execution, err)
-	if a.svc.recoveryGate != nil {
-		a.observeRecoveryResult(ctx, evidenceName, evidenceArgs, readOnly, mutates, result, err, false, false, recoveryGen)
-	}
+	result = a.withRecoveryObservation(ctx, evidenceName, evidenceArgs, readOnly, mutates, result, err, recoveryGen)
 	if err != nil {
 		detail := result
 		// Malformed-args failures are a transient model JSON glitch (e.g. options

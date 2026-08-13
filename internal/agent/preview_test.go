@@ -183,3 +183,28 @@ func mcContract(t *testing.T, sourceEvent string) string {
 	}
 	return "<memory-compiler-execution>\n" + string(body) + "\n</memory-compiler-execution>"
 }
+
+func TestIsHostRecoveryGuidance(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{name: "tool failed", in: HostRecoveryGuidanceToolFailedPrefix + ", continue unrelated work automatically.", want: true},
+		{name: "transient", in: HostRecoveryGuidanceTransientPrefix + " Inspect its current state.", want: true},
+		{name: "steer notice prefix", in: "↪ " + HostRecoveryGuidanceToolFailedPrefix + ", continue.", want: true},
+		{name: "user quoting failure", in: "A tool failed yesterday, please retry the install.", want: false},
+		{name: "user steer", in: "改用 Pillow 10 验证", want: false},
+	}
+	for _, tc := range cases {
+		if got := IsHostRecoveryGuidance(tc.in); got != tc.want {
+			t.Errorf("%s: IsHostRecoveryGuidance(%q) = %v, want %v", tc.name, tc.in, got, tc.want)
+		}
+	}
+	if text, ok := VisibleSteerText(MidTurnSteerPrefix + "\n改用 Pillow 10 验证"); !ok || text != "改用 Pillow 10 验证" {
+		t.Fatalf("VisibleSteerText user steer = %q %v", text, ok)
+	}
+	if text, ok := VisibleSteerText(MidTurnSteerPrefix + "\n" + HostRecoveryGuidanceToolFailedPrefix + ", continue."); ok {
+		t.Fatalf("VisibleSteerText host recovery = %q, want hidden", text)
+	}
+}

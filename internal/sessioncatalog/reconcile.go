@@ -374,14 +374,14 @@ func recordFromOrder(target DirectoryTarget, info agent.SessionOrderInfo) Sessio
 	metaFingerprint := fileFingerprint(agent.BranchMetaPath(info.Path))
 	createdAt := unixMilli(info.CreatedAt)
 	lastActivityAt := unixMilli(info.LastActivityAt)
-	// File mtime is a hard floor. Migration/meta can temporarily write zero
-	// UpdatedAt; without this, topics sort as inactive and look "missing".
+	// File mtime fills a missing clock. Do not raise a known sidecar UpdatedAt:
+	// repair and other metadata writes bump mtime without new user turns.
 	if st, err := os.Stat(info.Path); err == nil {
 		fileMS := st.ModTime().UnixMilli()
 		if createdAt <= 0 {
 			createdAt = fileMS
 		}
-		if lastActivityAt <= 0 || fileMS > lastActivityAt {
+		if lastActivityAt <= 0 {
 			lastActivityAt = fileMS
 		}
 	}

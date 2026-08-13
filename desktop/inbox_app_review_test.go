@@ -74,6 +74,25 @@ func TestSteerInboxItemPausedReturnsStableCode(t *testing.T) {
 	}
 }
 
+func TestEnqueueInboxSteerWhenPausedQueuesFollowup(t *testing.T) {
+	dir := t.TempDir()
+	ctrl := control.New(control.Options{
+		SessionDir: dir, SessionPath: filepath.Join(dir, "session.jsonl"), Sink: event.Discard,
+	})
+	if err := ctrl.SetInboxPaused(true); err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp()
+	app.setTestCtrl(ctrl, "")
+	receipt, err := app.EnqueueInboxSteer("test", "guide later", "guide later", "paused-enqueue-steer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Disposition != string(sessioninbox.DispositionQueuedFollowup) || !receipt.Paused {
+		t.Fatalf("EnqueueInboxSteer receipt = %+v, want queued_followup while paused", receipt)
+	}
+}
+
 func TestDurableInvocationFollowupPreservesEmptyExplicitTask(t *testing.T) {
 	dir := t.TempDir()
 	ctrl := control.New(control.Options{

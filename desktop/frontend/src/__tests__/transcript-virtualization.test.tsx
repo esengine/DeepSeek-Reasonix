@@ -77,6 +77,9 @@ function firstTextNode(root: Node): Text | null {
     await harness.settle();
     const el = harness.scrollElement();
     el.scrollTop = 2000;
+    // Match a reader leaving the tail (wheel-up). A raw scrollTop write leaves
+    // the pin set, and a later LAST/undershoot path would snap back to bottom.
+    el.dispatchEvent(new WheelEvent("wheel", { deltaY: -40, bubbles: true }));
     dispatchScroll(el);
     await harness.flush();
     const before = el.scrollTop;

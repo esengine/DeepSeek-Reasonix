@@ -91,9 +91,8 @@ var vendorTable = map[string]vendorCapabilities{
 		toolCallReasoning:      true,
 		singleSegmentReasoning: false,
 		ignoresTemperature:     false,
-		// Auto ceiling for ordinary reasoning; high/max is applied via
-		// AutoOutputBudget at construction/request time (64K). Never 128K.
-		defaultMaxOutputTokens: provider.DefaultReasoningOutputTokens,
+		// 0 = omit max_output_tokens; official server ceiling is 384K.
+		defaultMaxOutputTokens: 0,
 		// Compaction summaries use a dedicated 16K-class budget, independent of
 		// ordinary answer output.
 		compactionOutputTokens: provider.DefaultOrdinaryOutputTokens,

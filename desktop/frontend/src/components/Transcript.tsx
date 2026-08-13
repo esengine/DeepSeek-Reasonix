@@ -396,11 +396,11 @@ export function Transcript({
     };
   }, []);
 
-  // Virtuoso observes both its viewport and rows. When the composer changes
-  // height, ask its tail policy to settle only if the reader is still pinned.
+  // Footer chrome resize only. Item growth stays on followGrowingTail.
   useEffect(() => {
-    if (items.length > 0 && virtuosoReadyRef.current) followGrowingTail();
-  }, [followGrowingTail, footerHeight, items.length]);
+    if (!virtuosoReadyRef.current || !stick.current) return;
+    scrollToBottom();
+  }, [footerHeight, scrollToBottom, stick]);
 
   // Sub-agent calls carry a parentId; collect them under their parent `task`
   // call so the parent card can render them nested, and skip them at top level.

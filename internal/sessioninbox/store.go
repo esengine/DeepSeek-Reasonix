@@ -266,6 +266,7 @@ func (s *Store) snapshotLocked() InboxSnapshot {
 		RecoveredN:    m.RecoveredN,
 		Readonly:      s.readonly,
 		RunID:         m.RunID,
+		SessionPath:   s.session,
 		Items:         items,
 		Capacity: Capacity{
 			Items:        len(items),

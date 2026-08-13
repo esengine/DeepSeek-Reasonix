@@ -73,15 +73,16 @@ type InboxItemView struct {
 
 // InboxSnapshotView is the Wails-facing queue snapshot.
 type InboxSnapshotView struct {
-	Revision   int64           `json:"revision"`
-	Paused     bool            `json:"paused"`
-	Recovered  bool            `json:"recovered"`
-	RecoveredN int             `json:"recoveredCount,omitempty"`
-	Items      []InboxItemView `json:"items"`
-	ItemsCount int             `json:"itemsCount"`
-	Bytes      int64           `json:"bytes"`
-	MaxItems   int             `json:"maxItems"`
-	MaxBytes   int64           `json:"maxBytes"`
+	Revision    int64           `json:"revision"`
+	Paused      bool            `json:"paused"`
+	Recovered   bool            `json:"recovered"`
+	RecoveredN  int             `json:"recoveredCount,omitempty"`
+	SessionPath string          `json:"sessionPath,omitempty"`
+	Items       []InboxItemView `json:"items"`
+	ItemsCount  int             `json:"itemsCount"`
+	Bytes       int64           `json:"bytes"`
+	MaxItems    int             `json:"maxItems"`
+	MaxBytes    int64           `json:"maxBytes"`
 }
 
 // InboxReceiptView is returned after durable enqueue/steer.
@@ -118,15 +119,16 @@ func inboxSnapshotView(snap sessioninbox.InboxSnapshot) InboxSnapshotView {
 		})
 	}
 	return InboxSnapshotView{
-		Revision:   snap.Revision,
-		Paused:     snap.Paused,
-		Recovered:  snap.Recovered,
-		RecoveredN: snap.RecoveredN,
-		Items:      items,
-		ItemsCount: len(items),
-		Bytes:      snap.Capacity.Bytes,
-		MaxItems:   snap.Capacity.MaxItems,
-		MaxBytes:   snap.Capacity.MaxBytes,
+		Revision:    snap.Revision,
+		Paused:      snap.Paused,
+		Recovered:   snap.Recovered,
+		RecoveredN:  snap.RecoveredN,
+		SessionPath: snap.SessionPath,
+		Items:       items,
+		ItemsCount:  len(items),
+		Bytes:       snap.Capacity.Bytes,
+		MaxItems:    snap.Capacity.MaxItems,
+		MaxBytes:    snap.Capacity.MaxBytes,
 	}
 }
 

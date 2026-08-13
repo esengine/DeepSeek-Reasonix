@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -179,6 +180,7 @@ func (a *App) startSessionCatalog(rebuild bool) {
 				slog.Debug("desktop: reconcile session catalog directory", "dir", target.Path, "err", err)
 			}
 		}
+		a.retargetOpenTabsToCoveringLeaves()
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -508,6 +510,33 @@ func (a *App) GetProjectTreeSnapshot() ProjectTreeSnapshot {
 	return ProjectTreeSnapshot{
 		Revision: status.Revision, Projects: projects, Catalog: status,
 		Indexed: status.Indexed, Total: status.Total,
-		IndexingDone: status.State == string(sessioncatalog.StateReady) && status.RepairPending == 0,
+		IndexingDone: a.catalogIndexingDone(status),
 	}
+}
+
+func (a *App) catalogIndexingDone(status SessionCatalogStatus) bool {
+	if status.State != string(sessioncatalog.StateReady) || status.RepairPending > 0 {
+		return false
+	}
+	catalog := a.sessionCatalog.Load()
+	if catalog == nil {
+		return false
+	}
+	ctx, cancel := a.catalogReadContext()
+	defer cancel()
+	targets := a.sessionCatalogTargets()
+	if len(targets) == 0 {
+		return false
+	}
+	sawExisting := false
+	for _, target := range targets {
+		if _, err := os.Stat(target.Path); os.IsNotExist(err) {
+			continue
+		}
+		sawExisting = true
+		if !catalog.DirectoryScanReady(ctx, target.Path) {
+			return false
+		}
+	}
+	return sawExisting
 }

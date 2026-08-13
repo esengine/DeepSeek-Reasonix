@@ -143,6 +143,7 @@ func TestProjectNodeFromCatalogTopicHidesOrphanForkTopicsWhenPreferredElsewhere(
 }
 
 func TestListProjectTopicsSkipsRecoveryOnlyPages(t *testing.T) {
+	isolateDesktopUserDirs(t)
 	ctx := context.Background()
 	catalog, err := sessioncatalog.Open(ctx, sessioncatalog.Options{
 		Path: filepath.Join(t.TempDir(), "catalog.sqlite"), DisableRepair: true,
