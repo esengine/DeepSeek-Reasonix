@@ -212,6 +212,7 @@ func main() {
 			Theme:                windows.SystemDefault,
 			ZoomFactor:           zoomFactor,
 			WebviewGpuIsDisabled: windowsWebview2GPUDisabled(),
+			WebviewUserDataPath:  webview2UserDataPath(),
 		},
 		Linux: &linux.Options{
 			ProgramName: "Reasonix",
