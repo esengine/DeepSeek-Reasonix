@@ -72,3 +72,57 @@ func TestHistorySliceReportsErrorInsteadOfEmptySuccess(t *testing.T) {
 		t.Fatalf("entries = %d, want 0 on error", len(page.Entries))
 	}
 }
+
+func TestHistorySliceTreatsMissingStartingBlankAsEmpty(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	app := NewApp()
+	workspaceRoot := t.TempDir()
+	sessionDir := desktopSessionDir(workspaceRoot)
+	tab := &WorkspaceTab{
+		ID:              "starting-blank",
+		Scope:           "project",
+		WorkspaceRoot:   workspaceRoot,
+		SessionPath:     filepath.Join(sessionDir, "reserved.jsonl"),
+		Ready:           false,
+		buildGeneration: 1,
+	}
+	app.mu.Lock()
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.activeTabID = tab.ID
+	app.mu.Unlock()
+
+	page := app.HistorySliceForTab(tab.ID, HistorySliceRequest{})
+	if page.Error != "" {
+		t.Fatalf("starting blank history error = %q, want empty success", page.Error)
+	}
+	if len(page.Entries) != 0 {
+		t.Fatalf("starting blank entries = %d, want 0", len(page.Entries))
+	}
+}
+
+func TestHistorySliceDoesNotHideMissingSessionAfterStartupFailure(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	app := NewApp()
+	workspaceRoot := t.TempDir()
+	tab := &WorkspaceTab{
+		ID:              "failed-startup",
+		Scope:           "project",
+		WorkspaceRoot:   workspaceRoot,
+		SessionPath:     filepath.Join(desktopSessionDir(workspaceRoot), "reserved.jsonl"),
+		Ready:           false,
+		StartupErr:      "provider failed to initialize",
+		buildGeneration: 1,
+	}
+	app.mu.Lock()
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.activeTabID = tab.ID
+	app.mu.Unlock()
+
+	page := app.HistorySliceForTab(tab.ID, HistorySliceRequest{})
+	if page.Error == "" {
+		t.Fatal("missing session after startup failure should report Error, not empty success")
+	}
+	if len(page.Entries) != 0 {
+		t.Fatalf("entries = %d, want 0 on error", len(page.Entries))
+	}
+}
