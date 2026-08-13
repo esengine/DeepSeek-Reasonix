@@ -550,7 +550,7 @@ func (t *installSourceTool) configPath(scope string) string {
 			return p
 		}
 	}
-	return filepath.Join(t.root, "reasonix.toml")
+	return config.ProjectConfigPath(t.root)
 }
 
 func (t *installSourceTool) normalizeScope(scope string) (string, bool) {

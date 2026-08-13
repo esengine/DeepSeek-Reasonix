@@ -3243,7 +3243,7 @@ allow = ["Bash(user)"]
 
 	const rule = "Edit(src/app.go)"
 	res := rememberPermissionRule(workspace, rule)
-	if !res.Saved || res.Path != filepath.Join(workspace, "reasonix.toml") {
+	if !res.Saved || res.Path != filepath.Join(workspace, ".reasonix.toml") {
 		t.Fatalf("remember result = %+v, want saved to workspace config", res)
 	}
 
@@ -3251,7 +3251,7 @@ allow = ["Bash(user)"]
 	if hasPermissionRule(userCfg.Permissions.Allow, rule) {
 		t.Fatalf("workspace rule was written to user config: %v", userCfg.Permissions.Allow)
 	}
-	workspaceCfg := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
+	workspaceCfg := config.LoadForEdit(filepath.Join(workspace, ".reasonix.toml"))
 	if !hasPermissionRule(workspaceCfg.Permissions.Allow, rule) {
 		t.Fatalf("workspace rule missing from project config: %v", workspaceCfg.Permissions.Allow)
 	}

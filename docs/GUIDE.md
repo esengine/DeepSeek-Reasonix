@@ -32,12 +32,13 @@
 
 ## Configuration
 
-Resolution order: **flag > `./reasonix.toml` > the user config file >
-built-in defaults**. Starting with **Reasonix v1.8.1**, the user config lives at
+Resolution order: **flag > project `.reasonix.toml` (or legacy `./reasonix.toml`) >
+the user config file > built-in defaults**. Starting with **Reasonix v1.8.1**,
+the user config lives at
 `~/.reasonix/config.toml` on macOS/Linux and
 `%AppData%\reasonix\config.toml` on Windows; see
 [Configuration paths](./CONFIG_PATHS.md) for migration and related data paths.
-Fields marked user/global only are not overridden by `./reasonix.toml`.
+Fields marked user/global only are not overridden by project `.reasonix.toml`.
 Provider entries name secrets with `api_key_env`, while the secret values live in
 Reasonix's global `<Reasonix home>/.env`, shared by CLI and desktop. Project
 `.env`, home `.env`, inherited shell environment variables, legacy credentials,

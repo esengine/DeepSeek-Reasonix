@@ -621,14 +621,52 @@ func SourcePath() string {
 	return SourcePathForRoot(".")
 }
 
+// Project config files. A repository keeps the dotfile (hidden from the repo
+// root); both names load so an existing reasonix.toml keeps working.
+const (
+	projectConfigFile    = "reasonix.toml"
+	projectConfigDotFile = ".reasonix.toml"
+)
+
+// ProjectConfigPath returns the project config file for root. When both
+// reasonix.toml and .reasonix.toml exist reasonix.toml wins and the dotfile is
+// ignored; when neither exists it returns the dotfile, the creation default.
+func ProjectConfigPath(root string) string {
+	root = resolveRoot(root)
+	dot := projectConfigDotFile
+	plain := projectConfigFile
+	if root != "." {
+		dot = filepath.Join(root, projectConfigDotFile)
+		plain = filepath.Join(root, projectConfigFile)
+	}
+	if _, err := os.Lstat(plain); err == nil {
+		return plain
+	}
+	if _, err := os.Lstat(dot); err == nil {
+		return dot
+	}
+	return dot
+}
+
+// bothProjectConfigsExist reports whether root holds both the legacy plain and
+// the dotfile project config, i.e. the case where the plain file wins.
+func bothProjectConfigsExist(root string) bool {
+	root = resolveRoot(root)
+	plain, dot := projectConfigFile, projectConfigDotFile
+	if root != "." {
+		plain = filepath.Join(root, projectConfigFile)
+		dot = filepath.Join(root, projectConfigDotFile)
+	}
+	_, plainErr := os.Lstat(plain)
+	_, dotErr := os.Lstat(dot)
+	return plainErr == nil && dotErr == nil
+}
+
 // SourcePathForRoot returns the highest-priority config file that exists under
 // root, or "" if none. Equivalent to SourcePath() when root is ".".
 func SourcePathForRoot(root string) string {
 	root = resolveRoot(root)
-	projectTOML := "reasonix.toml"
-	if root != "." {
-		projectTOML = filepath.Join(root, "reasonix.toml")
-	}
+	projectTOML := ProjectConfigPath(root)
 	if _, err := os.Stat(projectTOML); err == nil {
 		return projectTOML
 	}

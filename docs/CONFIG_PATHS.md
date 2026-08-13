@@ -57,9 +57,12 @@ The usage rollup projection is documented in [Usage Catalog](./USAGE_CATALOG.md)
 Task snapshots and event logs likewise remain authoritative; the rebuildable
 cross-project projection is documented in [Task Catalog](./TASK_CATALOG.md).
 
-The global user config is named `config.toml`. Project-local config files keep
-the name `reasonix.toml`. If someone says "global reasonix.toml", they usually
-mean `<Reasonix home>/config.toml`.
+The global user config is named `config.toml`. Project-local config files use
+the hidden dotfile `.reasonix.toml` by default. A legacy plain `reasonix.toml`
+still loads, and when both are present the plain `reasonix.toml` takes
+precedence and the dotfile is ignored (a warning is logged). New project
+configs are created as `.reasonix.toml`. If someone says "global
+reasonix.toml", they usually mean `<Reasonix home>/config.toml`.
 
 ## Global `config.toml`
 
@@ -217,7 +220,7 @@ Runtime configuration is resolved in this order:
 
 ```text
 command-line flags
-> project ./reasonix.toml
+> project ./.reasonix.toml (or legacy ./reasonix.toml)
 > global <Reasonix home>/config.toml
 > compatible legacy global config
 > built-in defaults

@@ -772,7 +772,7 @@ func TestConfigReasoningLanguageLocalCreatesMinimalProjectOverride(t *testing.T)
 		t.Fatalf("config reasoning-language --local output = %q", out)
 	}
 
-	body, err := os.ReadFile("reasonix.toml")
+	body, err := os.ReadFile(".reasonix.toml")
 	if err != nil {
 		t.Fatalf("read project config: %v", err)
 	}
@@ -873,7 +873,7 @@ func TestConfigCompactRatioLocalCreatesMinimalProjectOverride(t *testing.T) {
 		t.Fatalf("config compact-ratio --local output = %q", out)
 	}
 
-	body, err := os.ReadFile("reasonix.toml")
+	body, err := os.ReadFile(".reasonix.toml")
 	if err != nil {
 		t.Fatalf("read project config: %v", err)
 	}

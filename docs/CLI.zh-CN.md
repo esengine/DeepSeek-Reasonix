@@ -56,7 +56,7 @@ reasonix upgrade --force          # 重新安装当前正式版
 
 ```sh
 reasonix setup                    # 管理用户全局配置
-reasonix setup --local            # 管理 ./reasonix.toml
+reasonix setup --local            # 管理 ./.reasonix.toml
 reasonix setup /path/to/config.toml
 ```
 
@@ -105,7 +105,7 @@ CLI 使用原币或按 ISO 排序的币种桶。语言和主机 locale 不再选
 ```sh
 reasonix config compact-ratio              # 查看生效值及来源
 reasonix config compact-ratio 75           # 设置用户全局默认值
-reasonix config compact-ratio --local 75   # 写入 ./reasonix.toml 项目覆盖
+reasonix config compact-ratio --local 75   # 写入 ./.reasonix.toml 项目覆盖
 ```
 
 可设置范围为 65–85%，内置默认值为 85%。数值越低越早压缩，可能降低 prompt prefix

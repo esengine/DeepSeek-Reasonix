@@ -991,12 +991,13 @@ type Chunk struct {
 
 ## 5. Configuration (TOML)
 
-Resolution order: **flag > project `./reasonix.toml` > the user config file
-> built-in defaults**. Starting with **Reasonix v1.8.1**, the user config lives
+Resolution order: **flag > project `.reasonix.toml` (or legacy `./reasonix.toml`) >
+the user config file > built-in defaults**. Starting with **Reasonix v1.8.1**,
+the user config lives
 at `~/.reasonix/config.toml` on macOS/Linux and
 `%AppData%\reasonix\config.toml` on Windows. See
 [Configuration paths](./CONFIG_PATHS.md) for migration and related data paths.
-Fields marked user/global only are not overridden by project `reasonix.toml`.
+Fields marked user/global only are not overridden by project `.reasonix.toml`.
 Provider entries name secrets with `api_key_env`; saved key values live in
 Reasonix's global `<Reasonix home>/.env`, shared by CLI and desktop. Project
 `.env`, home `.env`, inherited shell environment variables, legacy credentials,

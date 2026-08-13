@@ -418,7 +418,7 @@ func validateRepairChange(change RepairChange) error {
 			return fmt.Errorf("repair transaction global target is invalid")
 		}
 	case change.Scope == "project":
-		if filepath.Base(target) != "reasonix.toml" {
+		if base := filepath.Base(target); base != "reasonix.toml" && base != ".reasonix.toml" {
 			return fmt.Errorf("repair transaction project target is invalid")
 		}
 	case strings.HasPrefix(change.Scope, "derived:"):
