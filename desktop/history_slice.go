@@ -409,6 +409,9 @@ func (a *App) HistorySliceForTab(tabID string, req HistorySliceRequest) HistoryS
 
 	if ctrl == nil {
 		if strings.TrimSpace(sessionPath) == "" {
+			if a.historySliceTabIsStartingBlank(tab) {
+				return emptyHistorySlice()
+			}
 			return failedHistorySlice("session path unavailable before controller ready")
 		}
 		slice, err := a.coldHistorySlice(sessionDir, sessionPath, req)
@@ -416,11 +419,7 @@ func (a *App) HistorySliceForTab(tabID string, req HistorySliceRequest) HistoryS
 			// Blank tabs reserve their session path before the controller has
 			// published a runtime. The first message creates the transcript; do
 			// not turn that short startup window into a history-load failure.
-			a.mu.RLock()
-			startingBlank := tab != nil && a.tabs[tab.ID] == tab && !tab.removed &&
-				tab.buildGeneration > 0 && !tab.Ready && tab.StartupErr == ""
-			a.mu.RUnlock()
-			if startingBlank && os.IsNotExist(err) {
+			if a.historySliceTabIsStartingBlank(tab) && os.IsNotExist(err) {
 				return emptyHistorySlice()
 			}
 			slog.Debug("desktop: cold history slice failed", "path", sessionPath, "err", err)
@@ -433,6 +432,16 @@ func (a *App) HistorySliceForTab(tabID string, req HistorySliceRequest) HistoryS
 		sessionDir = controllerSessionDir(ctrl)
 	}
 	return a.liveHistorySlice(ctrl, sessionDir, sessionPath, req)
+}
+
+func (a *App) historySliceTabIsStartingBlank(tab *WorkspaceTab) bool {
+	if tab == nil {
+		return false
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.tabs[tab.ID] == tab && !tab.removed &&
+		tab.buildGeneration > 0 && !tab.Ready && strings.TrimSpace(tab.StartupErr) == ""
 }
 
 // liveHistorySlice pages a tab with a running controller. The display index
