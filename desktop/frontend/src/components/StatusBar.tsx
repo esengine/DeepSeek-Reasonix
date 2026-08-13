@@ -1,20 +1,21 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Activity, ChevronsUpDown, CircleDollarSign, CircleGauge, Database, Folder, GitBranch, Layers, Percent, RefreshCw, Server, Settings, Square, Unplug, Wallet, Zap } from "lucide-react";
+import { Activity, CircleDollarSign, CircleGauge, Database, FileOutput, Folder, Gauge, GitBranch, HardDrive, Layers, Percent, Puzzle, RefreshCw, Server, Settings, Square, Unplug, Wallet, Zap } from "lucide-react";
 import { AnchoredPopover } from "./AnchoredPopover";
 import { RemoteConnectionErrorDialog } from "./RemoteConnectionErrorDialog";
 import { Tooltip } from "./Tooltip";
+import { contextWindowPercentages } from "../lib/contextWindow";
 import { useI18n, type Translator } from "../lib/i18n";
 import { formatMoneyLocalized } from "../lib/money";
 import { normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
 import { isRemoteDegradedWarning, isRemoteHostKeyMismatch, isRemoteTerminalFailure, remoteConnectionErrorSummaryKey } from "../lib/remoteErrors";
+import type { ExtensionStatusEntry } from "../lib/useController";
 import { type BackgroundRuntimeView, type BalanceInfo, type ContextInfo, type JobView, type RemoteConnectionStatus, type RemoteHostView, type UsageSourceStats, type WireUsage } from "../lib/types";
 import { useRemoteStore } from "../store/remote";
 
 type StatusBarLabelStyle = "icon" | "text";
 
 function formatRate(hit: number, denom: number): string | null {
-  if (denom <= 0) return null;
-  return ((hit / denom) * 100).toFixed(2);
+  return denom > 0 ? ((hit / denom) * 100).toFixed(2) : null;
 }
 
 // nowRate is the SINGLE-TURN prompt cache-hit % (latest turn) — the higher,
@@ -64,6 +65,12 @@ function formatTokenCount(tokens?: number): string {
 function formatTurnCount(turns: number | undefined, t: Translator): string {
   if (typeof turns !== "number" || turns < 0) return "-";
   return t(turns === 1 ? "history.turnOne" : "history.turnOther", { n: turns });
+}
+function formatTps(tps?: number | null, estimated = false): string | null {
+  if (!tps || tps <= 0) return null;
+  const prefix = estimated ? "≈" : "";
+  if (tps < 1) return `${prefix}<1 t/s`;
+  return `${prefix}${Math.round(tps)} t/s`;
 }
 
 const STATUS_SOURCE_ORDER = ["executor", "planner", "subagent", "compaction", "classifier", "title"];
@@ -160,6 +167,10 @@ export function StatusBar({
   sessionTurns,
   sessionTokens,
   turnTokens,
+  lastTurnOutputTokens,
+  lastTurnModelMs,
+  lastTurnOutputEstimated = false,
+  lastRequestTps,
   turnCost,
   cost,
   currency,
@@ -181,6 +192,7 @@ export function StatusBar({
   backgroundRuntimes = [],
   onCancelRuntimeJob,
   onRevealRuntime,
+  extensionStatuses = [],
 }: {
   context: ContextInfo;
   usage?: WireUsage;
@@ -189,6 +201,10 @@ export function StatusBar({
   sessionTurns?: number;
   sessionTokens?: number;
   turnTokens?: number;
+  lastTurnOutputTokens?: number;
+  lastTurnModelMs?: number;
+  lastTurnOutputEstimated?: boolean;
+  lastRequestTps?: number | null; // Null means the latest request was not measurable.
   turnCost?: number;
   cost?: number;
   currency?: string;
@@ -210,9 +226,11 @@ export function StatusBar({
   backgroundRuntimes?: BackgroundRuntimeView[];
   onCancelRuntimeJob?: (tabID: string, jobID: string) => Promise<boolean>;
   onRevealRuntime?: (tabID: string) => Promise<void>;
+  // Extension-published status surfaces (stage 8b2), one per surface key.
+  extensionStatuses?: ExtensionStatusEntry[];
 }) {
   const { locale, t } = useI18n();
-  const pct = context.window ? Math.min(100, Math.round((context.used / context.window) * 100)) : null;
+  const pct = context.window > 0 ? contextWindowPercentages(context.used, context.window).raw : null;
   const compactPct = context.compactRatio ? Math.round(context.compactRatio * 100) : null;
   const compactNear = pct !== null && compactPct !== null && pct >= Math.max(0, compactPct - 10);
   const compactReached = pct !== null && compactPct !== null && pct >= compactPct;
@@ -232,7 +250,33 @@ export function StatusBar({
   const turnLabel = formatTurnCount(sessionTurns, t);
   const tokenLabel = markEstimated(formatTokenCount(sessionTokens), sessionEstimated);
   const turnTokenLabel = markEstimated(formatTokenCount(turnTokens), turnEstimated);
+  const statusQuote = context.sessionCostQuote;
+  const statusBucketed = statusQuote?.displayStatus === "bucketed" || statusQuote?.aggregateMode === "currency_buckets";
+  const statusUnavailable = context.sessionCostComplete === false || statusQuote?.displayStatus === "unavailable" || statusQuote?.costComplete === false;
+  const statusSelectedAmount = statusQuote?.selected?.amount ? Number(statusQuote.selected.amount) : NaN;
+  const statusCostLabel = statusBucketed
+    ? t("context.sessionCostBucketed")
+    : statusUnavailable
+      ? "-"
+      : Number.isFinite(statusSelectedAmount) && statusSelectedAmount > 0
+        ? markEstimated(formatMoneyLocalized(statusSelectedAmount, statusQuote?.selected?.currency || context.sessionCurrency || currency, { locale }), statusQuote?.estimated !== false)
+        : costLabel;
   const balanceLabel = balance?.available && balance.display ? balance.display : "-";
+  const balanceTitle = balance?.available
+    ? (balance.detail
+      ? `${t("status.balanceTitle")}: ${balance.detail}`
+      : t("status.balanceTitle"))
+    : t("status.balanceTitle");
+  const tpsLabel = lastRequestTps === undefined
+    ? formatTps(lastTurnOutputTokens && lastTurnModelMs ? lastTurnOutputTokens / (lastTurnModelMs / 1_000) : null, lastTurnOutputEstimated)
+    : formatTps(lastRequestTps);
+  const formatUsageToken = (value: number) => `${usage?.estimated ? "≈" : ""}${value.toLocaleString()}`;
+  const outputTokensLabel = usage && typeof usage.completionTokens === "number"
+    ? formatUsageToken(usage.completionTokens)
+    : "-";
+  const cacheHit = usage?.cacheHitTokens;
+  const cacheMiss = usage?.cacheMissTokens;
+  const hasCacheTokens = typeof cacheHit === "number" || typeof cacheMiss === "number";
   const metricLabelStyle = labelStyle === "text" ? "text" : "icon";
   const visibleItems = normalizeStatusBarItems(items);
   const cacheTooltip = sourceCacheTooltip(t, t("status.cacheTitle"), context);
@@ -310,6 +354,38 @@ export function StatusBar({
         </span>
       </Tooltip>
     ),
+    turn_tps: (
+      <Tooltip label={t("status.tpsTitle")} className="statusbar__metric statusbar__metric--tps">
+        <span className="stat statusbar__tps">
+          <MetricLabel style={metricLabelStyle} icon={<Gauge size={12} />} label={t("status.tpsLabel")} />
+          <b className={tpsLabel === null ? "stat__value--empty" : undefined}>{tpsLabel ?? "-"}</b>
+        </span>
+      </Tooltip>
+    ),
+    turn_output_tokens: (
+      <Tooltip label={t("status.outputTokensTitle")} className="statusbar__metric statusbar__metric--output-tokens">
+        <span className="stat statusbar__output-tokens">
+          <MetricLabel style={metricLabelStyle} icon={<FileOutput size={12} />} label={t("status.outputTokensLabel")} />
+          <b className={outputTokensLabel === "-" ? "stat__value--empty" : undefined}>{outputTokensLabel}</b>
+        </span>
+      </Tooltip>
+    ),
+    turn_cache_tokens: (
+      <Tooltip label={t("status.cacheTokensTitle")} className="statusbar__metric statusbar__metric--cache-tokens">
+        <span className="stat statusbar__cache-tokens">
+          <MetricLabel style={metricLabelStyle} icon={<HardDrive size={12} />} label={t("status.cacheTokensLabel")} />
+          {hasCacheTokens ? (
+            <>
+              <span>{t("status.cacheHitShort")} </span><b>{formatUsageToken(typeof cacheHit === "number" && cacheHit > 0 ? cacheHit : 0)}</b>
+              <span className="statusbar__cache-sep">|</span>
+              <span>{t("status.cacheMissShort")} </span><b>{formatUsageToken(typeof cacheMiss === "number" && cacheMiss > 0 ? cacheMiss : 0)}</b>
+            </>
+          ) : (
+            <b className="stat__value--empty">-</b>
+          )}
+        </span>
+      </Tooltip>
+    ),
     context: (
       <Tooltip label={t("status.ctxTitle")} className="statusbar__metric statusbar__metric--ctx">
         <span className="stat statusbar__ctx">
@@ -337,12 +413,12 @@ export function StatusBar({
       <Tooltip label={t("status.spendTitle")} className="statusbar__metric statusbar__metric--cost">
         <span className="stat statusbar__cost">
           <MetricLabel style={metricLabelStyle} icon={<CircleDollarSign size={12} />} label={t("status.costLabel")} />
-          <b>{costLabel}</b>
+          <b>{statusCostLabel}</b>
         </span>
       </Tooltip>
     ),
     balance: (
-      <Tooltip label={t("status.balanceTitle")} className="statusbar__metric statusbar__metric--balance">
+      <Tooltip label={balanceTitle} className="statusbar__metric statusbar__metric--balance">
         <span className="stat stat--balance statusbar__balance">
           <MetricLabel style={metricLabelStyle} icon={<Wallet size={12} />} label={t("status.balanceLabel")} />
           <b className={balanceLabel === "-" ? "stat__value--empty" : undefined}>{balanceLabel}</b>
@@ -353,8 +429,26 @@ export function StatusBar({
   const renderedItems = visibleItems
     .map((id) => ({ id, node: itemRenderers[id] }))
     .filter(({ node }) => node !== null && node !== undefined && node !== false);
+  const statusbarRef = useRef<HTMLDivElement>(null);
+  // React's onWheel is a passive listener, so preventDefault() there would be
+  // a no-op (plus a console warning). Register a native non-passive listener
+  // instead so wheel-panning the status bar also stops page scroll.
+  useEffect(() => {
+    const el = statusbarRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth) return;
+      e.preventDefault();
+      el.scrollLeft += e.deltaY;
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
   return (
-    <div className={`statusbar statusbar--${metricLabelStyle}`}>
+    <div
+      className={`statusbar statusbar--${metricLabelStyle}`}
+      ref={statusbarRef}
+    >
       <div className="statusbar__group statusbar__group--items">
         <RemoteStatusBarChip
           hosts={remoteHosts}
@@ -373,6 +467,7 @@ export function StatusBar({
           onCancelRuntimeJob={onCancelRuntimeJob}
           onRevealRuntime={onRevealRuntime}
         />
+        <ExtensionStatusBarChips statuses={extensionStatuses} />
         {renderedItems.map(({ id, node }) => (
           <span className="statusbar__item" data-statusbar-item={id} key={id}>
             {node}
@@ -380,6 +475,41 @@ export function StatusBar({
         ))}
       </div>
     </div>
+  );
+}
+
+// ExtensionStatusBarChips renders extension-published status surfaces next to
+// the built-in chips. A surface persists until the owning sidecar replaces it
+// (same surface key) or the runtime rebuilds; severity drives the accent color.
+function ExtensionStatusBarChips({ statuses }: { statuses: ExtensionStatusEntry[] }) {
+  const { t } = useI18n();
+  if (statuses.length === 0) return null;
+  return (
+    <>
+      {statuses.map((status) => {
+        const severity = status.severity === "error" ? "error" : status.severity === "warn" ? "warn" : "info";
+        const pct = typeof status.progress === "number" ? Math.round(Math.max(0, Math.min(1, status.progress)) * 100) : undefined;
+        return (
+          <span className="statusbar__item" data-statusbar-item="extension" key={`${status.pluginId}:${status.surfaceId}`}>
+            <Tooltip
+              label={
+                <span className="statusbar__tooltip-stack">
+                  <span>{t("status.extensionTitle")}: {status.pluginId}</span>
+                  {status.detail ? <span>{status.detail}</span> : null}
+                  {pct !== undefined ? <span>{t("ext.card.progress")}: {pct}%</span> : null}
+                </span>
+              }
+            >
+              <span className={`stat statusbar__extension statusbar__extension--${severity}`}>
+                <Puzzle size={12} aria-hidden="true" />
+                <span className="statusbar__extension-label">{status.label}</span>
+                {pct !== undefined ? <b>{pct}%</b> : null}
+              </span>
+            </Tooltip>
+          </span>
+        );
+      })}
+    </>
   );
 }
 
@@ -557,25 +687,24 @@ function RemoteStatusBarChip({
   const worstHost = hosts.find((host) => host.id === worst.hostId) ?? hosts[0];
   const triggerState = isRemoteTerminalFailure(worst) ? "error" : worst.state;
   const triggerStatus = isRemoteTerminalFailure(worst) ? t("remote.status.failed") : t(`remote.status.${worst.state}`);
-  const triggerLabel = worst.state === "stopped" && !worst.error
-    ? t("remote.statusBar.disconnected")
-    : t("remote.statusBar.summary", { host: worstHost.label, status: triggerStatus });
+  const idleDisconnected = worst.state === "stopped" && !worst.error;
+  const triggerLabel = idleDisconnected ? t("remote.statusBar.disconnected") : t("remote.statusBar.summary", { host: worstHost.label, status: triggerStatus });
+  const triggerText = idleDisconnected ? "SSH" : triggerState === "connected" ? worstHost.label : triggerLabel;
 
   return (
     <span className="statusbar__remote-wrap">
       <button
         ref={triggerRef}
         type="button"
-        className={`statusbar__remote remote-chip remote-chip--${triggerState}`}
+        className={`statusbar__remote remote-chip remote-chip--${triggerState}${idleDisconnected ? " statusbar__remote--idle" : ""}`}
         onClick={() => setOpen((value) => !value)}
         aria-label={triggerLabel}
         aria-haspopup="dialog"
         aria-expanded={open}
         title={triggerLabel}
       >
-        <Server size={11} aria-hidden="true" />
-        <span>{triggerLabel}</span>
-        <ChevronsUpDown size={10} aria-hidden="true" />
+        {triggerState === "connected" ? <span className="statusbar__remote-state-dot" aria-hidden="true" /> : <Server size={11} aria-hidden="true" />}
+        <span className="statusbar__remote-label">{triggerText}</span>
       </button>
       <AnchoredPopover
         open={open}

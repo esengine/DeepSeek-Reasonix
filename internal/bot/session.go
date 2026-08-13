@@ -253,6 +253,19 @@ func (sm *SessionManager) TryAcquireWithQueue(key string, msg InboundMessage, op
 	return QueueResult{Acquired: true, Mode: mode}
 }
 
+// TryAcquireIdle acquires an idle session without enqueueing when another
+// goroutine wins the race. Durable inbox items already live on disk, so adding
+// a second in-memory copy on a failed claim would execute them twice.
+func (sm *SessionManager) TryAcquireIdle(key string) bool {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if sm.active[key] {
+		return false
+	}
+	sm.active[key] = true
+	return true
+}
+
 func (sm *SessionManager) ReplacePending(key string, msg InboundMessage) QueueResult {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -319,11 +332,8 @@ func (sm *SessionManager) consumeDroppedPrefixLocked(key, text string) string {
 	fmt.Fprintf(&b, "[Queue note: %d older pending message(s) were dropped because this bot session reached its queue cap.", len(dropped))
 	if len(dropped) > 0 {
 		b.WriteString(" Dropped summaries:")
-		limit := len(dropped)
-		if limit > 3 {
-			limit = 3
-		}
-		for i := 0; i < limit; i++ {
+		limit := min(len(dropped), 3)
+		for i := range limit {
 			fmt.Fprintf(&b, "\n- %s", dropped[i])
 		}
 		if len(dropped) > limit {
@@ -352,6 +362,14 @@ func (sm *SessionManager) IsActive(key string) bool {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	return sm.active[key]
+}
+
+// Debounce returns the collect-mode merge window.
+func (sm *SessionManager) Debounce() time.Duration {
+	if sm == nil {
+		return 1500 * time.Millisecond
+	}
+	return sm.debounce
 }
 
 // runIfIdle holds the per-gateway admission lock while fn switches runtime

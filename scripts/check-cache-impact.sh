@@ -64,15 +64,22 @@ for file in "${changed_files[@]:-}"; do
     internal/agent/ask.go|\
     internal/agent/cache*|\
     internal/agent/compact*|\
+    internal/agent/goal_display.go|\
     internal/agent/parallel_tasks.go|\
+    internal/agent/planner_registry.go|\
     internal/agent/prune*|\
     internal/agent/subagent_registry*|\
+    internal/agent/subagent_identity.go|\
     internal/agent/task.go|\
     internal/boot/*|\
     internal/command/slashtool.go|\
     internal/config/config.go|\
     internal/config/system_prompt*|\
+    internal/control/goal.go|\
+    internal/control/input.go|\
+    internal/control/turn_orchestrator.go|\
     internal/environment/*|\
+    internal/goaleval/*|\
     internal/history/tool.go|\
     internal/installsource/*|\
     internal/lsp/tool.go|\
@@ -81,6 +88,7 @@ for file in "${changed_files[@]:-}"; do
     internal/plugin/*|\
     internal/provider/*|\
     internal/skill/*|\
+    internal/taskintent/*|\
     internal/tool/*|\
     scripts/cache-guard.sh|\
     scripts/check-cache-impact.sh)

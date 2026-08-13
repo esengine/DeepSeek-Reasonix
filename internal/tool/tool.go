@@ -7,9 +7,11 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"reasonix/internal/diff"
 	"reasonix/internal/provider"
@@ -32,20 +34,28 @@ type Tool interface {
 	ReadOnly() bool
 }
 
+// ContextualTool is an execution-time availability contract for tools whose
+// ownership depends on the active workflow context. Provider schemas remain
+// static for cache stability; the host must still consult this contract before
+// permissions, hooks, leases, or Execute so stale transcripts fail closed.
+type ContextualTool interface {
+	ProviderVisible(context.Context) bool
+}
+
 // Previewer is an optional capability a writer Tool may implement: given the
 // same raw JSON args Execute would receive, compute the file change the call
-// *would* make — without touching disk. A front-end uses it to show an approval
-// card or a changed-files panel before the call runs (the permission gate, not
-// Preview, decides whether it may proceed). Type-assert a Tool to Previewer to
-// discover support; the file-writing built-ins implement it, most tools do not.
+// *would* make — without touching disk. ctx must be Execute's, so the preview
+// resolves through the same FileOverlay and a user never approves a diff that
+// differs from what runs. Type-assert to discover support; the file-writing
+// built-ins implement it, most tools do not.
 type Previewer interface {
-	Preview(args json.RawMessage) (diff.Change, error)
+	Preview(ctx context.Context, args json.RawMessage) (diff.Change, error)
 }
 
 // PreviewChange returns the change a writer tool would make for args, or ok=false
 // when there's nothing renderable: t is read-only, doesn't implement Previewer,
 // the preview errored (the edit will likely fail too), or the file is binary.
-func PreviewChange(t Tool, args json.RawMessage) (diff.Change, bool) {
+func PreviewChange(ctx context.Context, t Tool, args json.RawMessage) (diff.Change, bool) {
 	if t == nil || t.ReadOnly() {
 		return diff.Change{}, false
 	}
@@ -53,7 +63,7 @@ func PreviewChange(t Tool, args json.RawMessage) (diff.Change, bool) {
 	if !ok {
 		return diff.Change{}, false
 	}
-	ch, err := pv.Preview(args)
+	ch, err := pv.Preview(ctx, args)
 	if err != nil || ch.Binary {
 		return diff.Change{}, false
 	}
@@ -232,7 +242,7 @@ type SnipHinter interface {
 	SnipHint() SnipHint
 }
 
-// --- process-global built-in set (populated by builtin subpackage init) ---
+// process-global built-in set (populated by builtin subpackage init)
 
 var builtins = map[string]Tool{}
 
@@ -266,7 +276,7 @@ func LookupBuiltin(name string) (Tool, bool) {
 	return t, ok
 }
 
-// --- per-run registry instance ---
+// per-run registry instance
 
 // Registry is a per-run set of tools: enabled built-ins plus plugin tools.
 type Registry struct {
@@ -275,11 +285,76 @@ type Registry struct {
 	order     []string
 	canon     map[string]json.RawMessage
 	suspended map[string]bool
+	// providerVisible, when non-nil, restricts Schemas/ContractEntries to the
+	// listed tool names. Get/Execute still resolve every registered tool so
+	// use_capability can dispatch tool:<name> without changing the provider
+	// schema. Nil means every registered tool is provider-visible (tests and
+	// legacy direct construction).
+	providerVisible map[string]bool
+	schemaRev       atomic.Uint64
 }
 
 // NewRegistry returns an empty registry.
 func NewRegistry() *Registry {
 	return &Registry{tools: map[string]Tool{}, canon: map[string]json.RawMessage{}, suspended: map[string]bool{}}
+}
+
+// SetProviderVisibleTools restricts the provider-visible schema surface to the
+// given names while keeping all registered tools executable via Get. Passing
+// nil clears the restriction. Names are normalized with strings.TrimSpace.
+func (r *Registry) SetProviderVisibleTools(names []string) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if names == nil {
+		if r.providerVisible != nil {
+			r.providerVisible = nil
+			r.schemaRev.Add(1)
+		}
+		return
+	}
+	visible := make(map[string]bool, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			visible[name] = true
+		}
+	}
+	changed := len(visible) != len(r.providerVisible) || r.providerVisible == nil
+	if !changed {
+		for name := range visible {
+			if !r.providerVisible[name] {
+				changed = true
+				break
+			}
+		}
+	}
+	r.providerVisible = visible
+	if changed {
+		r.schemaRev.Add(1)
+	}
+}
+
+// ProviderVisible reports whether name is currently provider-visible.
+func (r *Registry) ProviderVisible(name string) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.providerVisible == nil {
+		return true
+	}
+	return r.providerVisible[strings.TrimSpace(name)]
+}
+
+func (r *Registry) isProviderVisibleLocked(name string) bool {
+	if r.providerVisible == nil {
+		return true
+	}
+	return r.providerVisible[name]
 }
 
 // Add inserts (or replaces) a tool, preserving first-seen order. The schema is
@@ -300,6 +375,7 @@ func (r *Registry) Add(t Tool) {
 	}
 	r.tools[name] = t
 	r.canon[name] = provider.CanonicalizeSchema(t.Schema())
+	r.schemaRev.Add(1)
 }
 
 // MCPNamePrefix is the namespace every MCP tool name carries: the
@@ -340,6 +416,9 @@ func (r *Registry) RemovePrefix(prefix string) int {
 		kept = append(kept, name)
 	}
 	r.order = kept
+	if removed > 0 {
+		r.schemaRev.Add(1)
+	}
 	return removed
 }
 
@@ -364,6 +443,9 @@ func (r *Registry) SuspendPrefix(prefix string) int {
 		kept = append(kept, name)
 	}
 	r.order = kept
+	if removed > 0 {
+		r.schemaRev.Add(1)
+	}
 	return removed
 }
 
@@ -414,11 +496,8 @@ func (r *Registry) ResolveCall(name string) (resolved Tool, canonical string, ca
 		if !ok {
 			continue
 		}
-		for _, alias := range mcpBindingAliases(b) {
-			if name == alias {
-				matches[canonicalName] = t
-				break
-			}
+		if slices.Contains(mcpBindingAliases(b), name) {
+			matches[canonicalName] = t
 		}
 	}
 	if len(matches) == 1 {
@@ -509,6 +588,14 @@ func (r *Registry) Len() int {
 	return len(r.order)
 }
 
+// SchemaRevision changes whenever the provider-visible tool set changes.
+func (r *Registry) SchemaRevision() uint64 {
+	if r == nil {
+		return 0
+	}
+	return r.schemaRev.Load()
+}
+
 // Names returns the registered tool names in insertion order.
 func (r *Registry) Names() []string {
 	r.mu.RLock()
@@ -520,12 +607,17 @@ func (r *Registry) Names() []string {
 }
 
 // Schemas exports tool definitions in stable name order for the provider.
+// When a provider-visible allowlist is set, only those tools appear.
 func (r *Registry) Schemas() []provider.ToolSchema {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	names := make([]string, len(r.order))
-	copy(names, r.order)
+	names := make([]string, 0, len(r.order))
+	for _, name := range r.order {
+		if r.isProviderVisibleLocked(name) {
+			names = append(names, name)
+		}
+	}
 	sort.Strings(names)
 
 	out := make([]provider.ToolSchema, 0, len(names))
@@ -539,6 +631,53 @@ func (r *Registry) Schemas() []provider.ToolSchema {
 			Description: t.Description(),
 			Parameters:  r.canon[name],
 		})
+	}
+	return out
+}
+
+// AllNames returns every registered tool name, including tools hidden from the
+// provider-visible schema. Used by capability catalogs and diagnostics.
+func (r *Registry) AllNames() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]string, len(r.order))
+	copy(out, r.order)
+	return out
+}
+
+// SchemasForContext returns the contextual projection for host metadata and
+// diagnostics. Provider requests intentionally use Schemas so phase changes do
+// not churn the cache-stable tool contract.
+func (r *Registry) SchemasForContext(ctx context.Context) []provider.ToolSchema {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	r.mu.RLock()
+	names := append([]string(nil), r.order...)
+	entries := make(map[string]struct {
+		t    Tool
+		data json.RawMessage
+	}, len(names))
+	for _, name := range names {
+		if t := r.tools[name]; t != nil {
+			entries[name] = struct {
+				t    Tool
+				data json.RawMessage
+			}{t: t, data: r.canon[name]}
+		}
+	}
+	r.mu.RUnlock()
+	sort.Strings(names)
+	out := make([]provider.ToolSchema, 0, len(names))
+	for _, name := range names {
+		entry, ok := entries[name]
+		if !ok || entry.t == nil {
+			continue
+		}
+		if contextual, ok := entry.t.(ContextualTool); ok && !contextual.ProviderVisible(ctx) {
+			continue
+		}
+		out = append(out, provider.ToolSchema{Name: entry.t.Name(), Description: entry.t.Description(), Parameters: entry.data})
 	}
 	return out
 }

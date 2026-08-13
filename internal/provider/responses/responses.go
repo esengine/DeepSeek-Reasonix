@@ -48,10 +48,11 @@ func newFromConfig(cfg provider.Config) (provider.Provider, error) {
 	keyEnv, _ := cfg.Extra["api_key_env"].(string)
 	keySource, _ := cfg.Extra["api_key_source"].(string)
 	maxOutputTokens, _ := cfg.Extra["max_output_tokens"].(int)
+	requestURL, _ := cfg.Extra["request_url"].(string)
 	return New(Config{
 		Name: cfg.Name, APIKey: cfg.APIKey, BaseURL: cfg.BaseURL, Model: cfg.Model,
 		Effort: effort, Mode: mode, Stateful: stateful, WebSearch: webSearch, Proxy: proxy,
-		KeyEnv: keyEnv, KeySource: keySource, MaxOutputTokens: maxOutputTokens,
+		KeyEnv: keyEnv, KeySource: keySource, MaxOutputTokens: maxOutputTokens, RequestURL: requestURL,
 		// Extra 原样透传：vision 等能力开关由调用方（boot/CLI）写入
 		// cfg.Extra，factory 若丢弃则 New() 读不到（评审 #7234 第 3 点）。
 		Extra: cfg.Extra,
@@ -60,17 +61,18 @@ func newFromConfig(cfg provider.Config) (provider.Provider, error) {
 
 // Config holds Responses API provider settings.
 type Config struct {
-	Name      string
-	APIKey    string
-	BaseURL   string
-	Model     string
-	Effort    string
-	Mode      string // stateful | stateless; empty uses vendor detection.
-	Stateful  *bool  // legacy form of Mode; nil preserves vendor detection.
-	WebSearch bool   // expose the provider-executed web_search tool.
-	Proxy     netclient.ProxySpec
-	KeyEnv    string
-	KeySource string
+	Name       string
+	APIKey     string
+	BaseURL    string
+	Model      string
+	Effort     string
+	Mode       string // stateful | stateless; empty uses vendor detection.
+	Stateful   *bool  // legacy form of Mode; nil preserves vendor detection.
+	WebSearch  bool   // expose the provider-executed web_search tool.
+	Proxy      netclient.ProxySpec
+	KeyEnv     string
+	KeySource  string
+	RequestURL string // optional exact Responses request URL; empty derives from BaseURL
 	// MaxOutputTokens is the total provider output budget. Zero enables Reasonix's
 	// 32K reasoning safety default on official DeepSeek and otherwise omits the
 	// field; thinking-disabled DeepSeek requests and negative values omit it.
@@ -104,17 +106,17 @@ func (c Config) mode() string {
 // deepseek (incl. eu.deepseek.com) / mimo via exact-host matching.
 
 type client struct {
-	name, apiKey, keyEnv, keySource string
-	baseURL, model, effort          string
-	vendor, mode                    string
-	caps                            vendorCapabilities
-	sessionCache                    bool
-	webSearch                       bool
-	maxOutputTokens                 int
-	vision                          bool // model accepts image input; embed Images as input_image parts
-	http                            *http.Client
-	idleTimeout                     time.Duration
-	authed                          atomic.Bool
+	name, apiKey, keyEnv, keySource    string
+	baseURL, requestURL, model, effort string
+	vendor, mode                       string
+	caps                               vendorCapabilities
+	sessionCache                       bool
+	webSearch                          bool
+	maxOutputTokens                    int
+	vision                             bool // model accepts image input; embed Images as input_image parts
+	http                               *http.Client
+	idleTimeout                        time.Duration
+	authed                             atomic.Bool
 
 	mu                   sync.Mutex
 	lastResponseID       string
@@ -126,19 +128,25 @@ func New(cfg Config) provider.Provider {
 	vendor := DetectVendor(cfg.BaseURL)
 	cap := capabilitiesFor(vendor)
 	maxOutputTokens := cfg.MaxOutputTokens
-	// 默认输出预算从 vendor 表取（deepseek 32K / mimo 64K）——消除硬编码
-	// 常量分叉（review：responses.go 硬编码与 caps.defaultMaxOutputTokens
-	// 职责重叠）。条件保留：thinking-disabled 的 deepseek 请求不设自动
-	// 预算（与 openai.go 一致——服务端默认即可；测试断言该行为）。
-	if maxOutputTokens == 0 && cap.defaultMaxOutputTokens > 0 &&
-		!(vendor == "deepseek" && responsesReasoningDisabled(cfg.Effort)) {
-		maxOutputTokens = cap.defaultMaxOutputTokens
+	// max_output_tokens=0 is automatic. Known vendors use the 16K/32K/64K ladder;
+	// thinking-disabled DeepSeek still gets the ordinary 16K auto budget.
+	// 128K is never chosen automatically. Compact_ratio is independent.
+	if maxOutputTokens == 0 && cap.defaultMaxOutputTokens > 0 {
+		if vendor == "deepseek" || vendor == "mimo" {
+			maxOutputTokens = responsesAutoOutputBudget(vendor, cfg.Effort)
+		} else {
+			maxOutputTokens = cap.defaultMaxOutputTokens
+		}
 	}
 	sessionCache := cap.sessionCacheHeader
 	if cfg.SessionCache != nil {
 		sessionCache = *cfg.SessionCache
 	}
 	vision, _ := cfg.Extra["vision"].(bool)
+	// DeepSeek's official Responses endpoint is currently text-only. Keep this
+	// provider-boundary guard so stale config or extension metadata cannot emit
+	// unsupported input_image items.
+	vision = vision && vendor != "deepseek"
 	httpClient := &http.Client{Timeout: 300 * time.Second}
 	if built, err := netclient.NewHTTPClient(cfg.Proxy, netclient.TransportOptions{
 		DialTimeout: 30 * time.Second, KeepAlive: 30 * time.Second,
@@ -146,9 +154,14 @@ func New(cfg Config) provider.Provider {
 	}); err == nil {
 		httpClient = built
 	}
+	baseURL := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
+	requestURL := strings.TrimSpace(cfg.RequestURL)
+	if requestURL == "" {
+		requestURL = baseURL + "/responses"
+	}
 	return &client{
 		name: cfg.Name, apiKey: cfg.APIKey, keyEnv: cfg.KeyEnv, keySource: cfg.KeySource,
-		baseURL: strings.TrimRight(cfg.BaseURL, "/"), model: cfg.Model, effort: cfg.Effort,
+		baseURL: baseURL, requestURL: requestURL, model: cfg.Model, effort: cfg.Effort,
 		vendor: vendor, caps: cap, mode: cfg.mode(), sessionCache: sessionCache, webSearch: cfg.WebSearch, maxOutputTokens: maxOutputTokens,
 		vision: vision,
 		http:   httpClient, idleTimeout: defaultStreamIdleTimeout,
@@ -162,6 +175,20 @@ func responsesReasoningDisabled(effort string) bool {
 	default:
 		return false
 	}
+}
+
+// responsesAutoOutputBudget mirrors Chat Completions: DeepSeek defaults empty
+// effort to high (64K), low stays 32K, thinking disabled is ordinary 16K.
+// Never auto-selects 128K.
+func responsesAutoOutputBudget(vendor, effort string) int {
+	if responsesReasoningDisabled(effort) {
+		return provider.AutoOutputBudget(false, effort)
+	}
+	e := strings.ToLower(strings.TrimSpace(effort))
+	if vendor == "deepseek" && (e == "" || e == "auto") {
+		e = "high"
+	}
+	return provider.AutoOutputBudget(true, e)
 }
 
 func (c *client) Name() string { return c.name }
@@ -178,7 +205,7 @@ func (c *client) MissingToolCallReasoningWarningIdentity() string {
 		return ""
 	}
 	return strings.Join([]string{
-		"responses", strings.TrimSpace(c.name), strings.TrimSpace(c.baseURL),
+		"responses", strings.TrimSpace(c.name), strings.TrimSpace(c.requestURL),
 		strings.TrimSpace(c.model), strings.TrimSpace(c.vendor), strings.TrimSpace(c.mode), strings.TrimSpace(c.effort),
 	}, "\x00")
 }
@@ -244,7 +271,7 @@ func (c *client) send(ctx context.Context, body map[string]any) (*http.Response,
 		return nil, fmt.Errorf("responses: marshal request: %w", err)
 	}
 	newRequest := func(ctx context.Context) (*http.Request, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/responses", bytes.NewReader(payload))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.requestURL, bytes.NewReader(payload))
 		if err != nil {
 			return nil, err
 		}
@@ -288,9 +315,9 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool, [
 		maxOutputTokens = c.maxOutputTokens
 	}
 	if maxOutputTokens == 0 && c.caps.defaultMaxOutputTokens > 0 {
-		// 与 New() 构造期默认同条件：thinking-disabled 的 deepseek 请求
-		// 不设自动预算（服务端默认即可——测试断言该行为）。
-		if !(c.vendor == "deepseek" && responsesReasoningDisabled(c.effort)) {
+		if c.vendor == "deepseek" || c.vendor == "mimo" {
+			maxOutputTokens = responsesAutoOutputBudget(c.vendor, c.effort)
+		} else {
 			maxOutputTokens = c.caps.defaultMaxOutputTokens
 		}
 	}
@@ -343,7 +370,7 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool, [
 		return body, true, messages
 	}
 
-	body["input"] = messagesToInput(rest, c.vision, c.vendor == "deepseek", c.caps.summaryRequired)
+	body["input"] = messagesToInput(rest, c.vision, c.webSearch, c.caps.summaryRequired)
 	return body, false, messages
 }
 
@@ -354,7 +381,7 @@ func splitInstructions(messages []provider.Message) (string, []provider.Message)
 	return messages[0].Content, messages[1:]
 }
 
-func messagesToInput(messages []provider.Message, vision, replayDeepSeekItems, summary bool) []map[string]any {
+func messagesToInput(messages []provider.Message, vision, replayWebSearchItems, summary bool) []map[string]any {
 	input := make([]map[string]any, 0, len(messages)*2)
 	for _, message := range messages {
 		switch message.Role {
@@ -404,7 +431,7 @@ func messagesToInput(messages []provider.Message, vision, replayDeepSeekItems, s
 				}
 				input = append(input, item)
 			}
-			if replayDeepSeekItems {
+			if replayWebSearchItems {
 				for _, raw := range message.ResponsesItems {
 					if item, ok := decodeReplayableWebSearchItem(raw); ok {
 						input = append(input, item)
@@ -454,7 +481,7 @@ func (c *client) conversationDigest(messages []provider.Message) string {
 	payload, _ := json.Marshal(struct {
 		Instructions string           `json:"instructions,omitempty"`
 		Input        []map[string]any `json:"input"`
-	}{Instructions: instructions, Input: messagesToInput(rest, c.vision, c.vendor == "deepseek", c.caps.summaryRequired)})
+	}{Instructions: instructions, Input: messagesToInput(rest, c.vision, c.webSearch, c.caps.summaryRequired)})
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
 }
@@ -613,7 +640,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 				}
 			}
 		case "response.output_item.done":
-			if event.Item != nil && event.Item.Type == "web_search_call" && c.vendor == "deepseek" {
+			if event.Item != nil && event.Item.Type == "web_search_call" && c.webSearch {
 				if _, ok := decodeReplayableWebSearchItem(event.Item.Raw); ok {
 					key := event.Item.ID
 					if key == "" {
@@ -623,7 +650,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 						seenSearchItems[key] = struct{}{}
 						raw := append(json.RawMessage(nil), event.Item.Raw...)
 						responsesItems = append(responsesItems, raw)
-						if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkResponsesItem, ResponsesItem: raw}) {
+						if !emitSearchReplay(ctx, out, raw) {
 							return
 						}
 					}
@@ -722,14 +749,21 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		return
 	}
 	if err := scanner.Err(); err != nil {
+		var reason string
 		if stalled.Load() {
 			err = fmt.Errorf("responses: stream idle timeout after %s", idle)
+			reason = provider.StreamInterruptIdleTimeout
+		} else {
+			reason = provider.ClassifyStreamInterrupt(err)
 		}
-		_ = sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: &provider.StreamInterruptedError{Err: err}})
+		_ = sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: provider.StreamInterrupt(err, reason)})
 		return
 	}
+	// Protocol-defined terminal response events are required. Connection close
+	// before a terminal event leaves the attempt uncommitted — including any
+	// complete tool calls already forwarded as speculative output.
 	if !terminal {
-		_ = sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: &provider.StreamInterruptedError{Err: io.ErrUnexpectedEOF}})
+		_ = sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: provider.StreamInterrupt(io.ErrUnexpectedEOF, provider.StreamInterruptPrematureEOF)})
 		return
 	}
 	if completedResponseID != "" {
@@ -767,6 +801,7 @@ func sendChunk(ctx context.Context, out chan<- provider.Chunk, chunk provider.Ch
 		return true
 	default:
 	}
+	notifySendChunkEnterBlocking()
 	select {
 	case out <- chunk:
 		return true
@@ -788,10 +823,7 @@ func usageFromResponse(response *sseResponse) *provider.Usage {
 	if u.OutputTokensDetails != nil {
 		reasoning = u.OutputTokensDetails.ReasoningTokens
 	}
-	miss := u.InputTokens - cached
-	if miss < 0 {
-		miss = 0
-	}
+	miss := max(u.InputTokens-cached, 0)
 	total := u.TotalTokens
 	if total == 0 {
 		total = u.InputTokens + u.OutputTokens

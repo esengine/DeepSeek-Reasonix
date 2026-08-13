@@ -4,6 +4,7 @@ package bot
 
 import (
 	"context"
+	"slices"
 	"strings"
 )
 
@@ -144,10 +145,8 @@ func (r SendResult) DeliveredMessageIDs() []string {
 		if id == "" {
 			return
 		}
-		for _, existing := range ids {
-			if existing == id {
-				return
-			}
+		if slices.Contains(ids, id) {
+			return
 		}
 		ids = append(ids, id)
 	}
@@ -162,13 +161,7 @@ func (r SendResult) DeliveredMessageIDs() []string {
 // last delivered ID for callers using the legacy singular field.
 func (r *SendResult) Merge(delivered SendResult) {
 	for _, id := range delivered.DeliveredMessageIDs() {
-		duplicate := false
-		for _, existing := range r.MessageIDs {
-			if existing == id {
-				duplicate = true
-				break
-			}
-		}
+		duplicate := slices.Contains(r.MessageIDs, id)
 		if !duplicate {
 			r.MessageIDs = append(r.MessageIDs, id)
 		}

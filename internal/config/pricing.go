@@ -64,51 +64,9 @@ func deepSeekV4PriceForModel(currency, model string) *provider.Pricing {
 	return clonePricing(DeepSeekV4PricesForCurrency(currency)[strings.TrimSpace(model)])
 }
 
-// DeepSeekOfficialPricingCurrency resolves the regional pricing table used for
-// official DeepSeek defaults. An explicit desktop currency wins; auto follows
-// desktop language, then CLI language, and finally defaults to USD.
-func (c *Config) DeepSeekOfficialPricingCurrency() string {
-	if c != nil {
-		if currency := c.DesktopCurrency(); currency != "" {
-			return currency
-		}
-		if normalizeDeepSeekPricingLanguage(c.Desktop.Language) == "zh" {
-			return "CNY"
-		}
-		if normalizeDeepSeekPricingLanguage(c.Desktop.Language) == "en" {
-			return "USD"
-		}
-		if normalizeDeepSeekPricingLanguage(c.Language) == "zh" {
-			return "CNY"
-		}
-	}
-	return "USD"
-}
-
-// DesktopPricingFollowsDetectedLocale reports whether the desktop may supply
-// its browser/OS locale as the official pricing region. Explicit currency or
-// language preferences always win.
-func (c *Config) DesktopPricingFollowsDetectedLocale() bool {
-	return c != nil && c.DesktopCurrency() == "" && c.DesktopLanguage() == "" && c.ResponseLanguage() == "auto"
-}
-
-// ApplyRuntimeAutoPricingCurrency applies a frontend-detected pricing region
-// to this in-memory config only. Callers must not persist the resulting copy,
-// because doing so would turn the user's Auto choice into an explicit region.
-func (c *Config) ApplyRuntimeAutoPricingCurrency(currency string) {
-	if !c.DesktopPricingFollowsDetectedLocale() {
-		return
-	}
-	normalized := normalizeDeepSeekPricingCurrency(currency)
-	if normalized == "" {
-		return
-	}
-	c.Desktop.Currency = normalized
-	applyDeepSeekOfficialDefaultPricingWithOverride(c, false)
-}
-
 // DeepSeekOfficialPricingLanguage is retained for older settings/template call
-// sites that still express the pricing region as a language.
+// sites that still express the pricing region as a language. List-price region
+// is frozen per provider (billing_currency), not the global display currency.
 func (c *Config) DeepSeekOfficialPricingLanguage() string {
 	if c.DeepSeekOfficialPricingCurrency() == "CNY" {
 		return "zh"
@@ -139,33 +97,46 @@ func normalizeDeepSeekPricingLanguage(lang string) string {
 }
 
 // ApplyDeepSeekOfficialDefaultPricing refreshes built-in/official DeepSeek
-// prices that still match known official defaults. Custom user prices are left
-// untouched.
+// prices that still match known official defaults for each provider's frozen
+// billing_currency. Custom user prices and display-currency switches never
+// rewrite list prices.
 func (c *Config) ApplyDeepSeekOfficialDefaultPricing() {
 	applyDeepSeekOfficialDefaultPricing(c)
 }
 
 func applyDeepSeekOfficialDefaultPricing(c *Config) {
-	applyDeepSeekOfficialDefaultPricingWithOverride(c, c != nil && c.DesktopCurrency() != "")
+	applyDeepSeekOfficialDefaultPricingWithOverride(c, false)
 }
 
 func applyDeepSeekOfficialDefaultPricingWithOverride(c *Config, overridePersisted bool) {
 	if c == nil {
 		return
 	}
-	currency := c.DeepSeekOfficialPricingCurrency()
 	for i := range c.Providers {
 		p := &c.Providers[i]
 		if officialProviderKind(p) != "deepseek" {
 			continue
 		}
-		if isKnownDeepSeekOfficialPricing(p.Model, p.Price) && (overridePersisted || p.persistedOfficialCurrency == "") {
-			p.Price = deepSeekV4PriceForModel(currency, p.Model)
+		currency := p.ProviderBillingCurrency()
+		if currency == "" {
+			currency = "USD"
+		}
+		// Only refresh when the row still matches a known official default in
+		// the provider's own billing currency. Display currency must not win.
+		if isKnownDeepSeekOfficialPricing(p.Model, p.Price) && (overridePersisted || p.persistedOfficialCurrency == "" || p.persistedOfficialCurrency == currency) {
+			if samePricing(p.Price, deepSeekV4PriceForModel(currency, p.Model)) || overridePersisted {
+				p.Price = deepSeekV4PriceForModel(currency, p.Model)
+			}
 		}
 		for model, price := range p.Prices {
-			if isKnownDeepSeekOfficialPricing(model, price) && (overridePersisted || p.persistedOfficialCurrency == "") {
-				p.Prices[model] = deepSeekV4PriceForModel(currency, model)
+			if isKnownDeepSeekOfficialPricing(model, price) && (overridePersisted || p.persistedOfficialCurrency == "" || p.persistedOfficialCurrency == currency) {
+				if samePricing(price, deepSeekV4PriceForModel(currency, model)) || overridePersisted {
+					p.Prices[model] = deepSeekV4PriceForModel(currency, model)
+				}
 			}
+		}
+		if strings.TrimSpace(p.BillingCurrency) == "" {
+			p.BillingCurrency = currency
 		}
 	}
 }
@@ -274,6 +245,7 @@ const (
 	deepSeekPricingResetConfigVersion      = 3
 	windowsBashSandboxDefaultConfigVersion = 4
 	retiredAutoPlanConfigVersion           = 5
+	billingSplitConfigVersion              = 6
 )
 
 // ApplyUserConfigUpgradesOnStartup applies one-time startup migrations. It
@@ -321,6 +293,11 @@ func ApplyUserConfigUpgradesOnStartup(path string) (bool, error) {
 		// Mark every older config as migrated even when Auto Plan was already off;
 		// the v5 renderer removes both retired keys so older binaries also observe
 		// the manual-only default after a downgrade.
+		changed = true
+	}
+	if header.ConfigVersion < billingSplitConfigVersion {
+		migrateBillingDisplayCurrency(cfg)
+		freezeProviderBillingCurrencies(cfg)
 		changed = true
 	}
 	if !changed {

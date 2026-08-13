@@ -8,7 +8,33 @@ import (
 
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
+	"reasonix/internal/provider"
 )
+
+func TestMetricsSinkForwardsEachEventOnce(t *testing.T) {
+	forwarded := 0
+	s := &metricsSink{inner: event.FuncSink(func(event.Event) { forwarded++ })}
+	s.Emit(event.Event{Kind: event.Text, Text: "x"})
+	if forwarded != 1 {
+		t.Fatalf("inner sink saw %d emissions for one event, want 1", forwarded)
+	}
+}
+
+func TestMetricsSinkUsesProviderCacheWriteCost(t *testing.T) {
+	s := &metricsSink{inner: event.Discard}
+	s.Emit(event.Event{
+		Kind: event.Usage,
+		Usage: &provider.Usage{
+			CacheMissTokens:        500_000,
+			CacheWriteTokens:       100_000,
+			CacheWriteBilledTokens: 200_000,
+		},
+		Pricing: &provider.Pricing{Input: 2},
+	})
+	if got := s.Snapshot().Cost; got != 1.2 {
+		t.Fatalf("metrics cost = %f, want 1.2", got)
+	}
+}
 
 func TestMetricsSinkAccumulatesReadinessAudit(t *testing.T) {
 	s := &metricsSink{inner: event.Discard}

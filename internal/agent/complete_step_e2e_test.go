@@ -103,7 +103,7 @@ func TestE2ESerialPlanHostAdvancesAndAllowsFinalAnswer(t *testing.T) {
 	if runErr != nil {
 		t.Fatalf("final answer blocked despite host-advanced completions: %v", runErr)
 	}
-	for i, td := range a.todoState {
+	for i, td := range a.sess.todoState {
 		if canonicalTodoStatus(td.Status) != "completed" {
 			t.Fatalf("canonical todo %d (%q) = %s, want completed", i+1, td.Content, td.Status)
 		}
@@ -168,7 +168,7 @@ func TestE2ECrossTurnCanonicalGateBlocksThenClears(t *testing.T) {
 	if err := a.Run(context.Background(), "finish up"); err != nil {
 		t.Fatalf("follow-up Run: %v", err)
 	}
-	for i, td := range a.todoState {
+	for i, td := range a.sess.todoState {
 		if canonicalTodoStatus(td.Status) != "completed" {
 			t.Fatalf("canonical todo %d (%q) = %s after sign-off, want completed", i+1, td.Content, td.Status)
 		}
@@ -200,7 +200,7 @@ func TestE2ECrossTurnPendingSignoffIsRejectedUntilCurrentAdvances(t *testing.T) 
 	if !sessionContains(a, "only signs the current in_progress item") {
 		t.Fatal("cross-turn pending signoff was not rejected")
 	}
-	for i, td := range a.todoState {
+	for i, td := range a.sess.todoState {
 		if canonicalTodoStatus(td.Status) != "completed" {
 			t.Fatalf("canonical todo %d (%q) = %s, want completed", i+1, td.Content, td.Status)
 		}
@@ -220,7 +220,7 @@ func TestE2ECrossTurnDiffEvidenceViaSessionFallback(t *testing.T) {
 	)
 	a := New(mp, evidenceRegistry(), NewSession("sys"), Options{}, event.Discard)
 
-	if err := a.Run(context.Background(), "edit x.go"); err != nil {
+	if err := a.Run(context.Background(), "edit x.go without tests"); err != nil {
 		t.Fatalf("turn 1: %v", err)
 	}
 	if err := a.Run(context.Background(), "now sign off that change"); err != nil {

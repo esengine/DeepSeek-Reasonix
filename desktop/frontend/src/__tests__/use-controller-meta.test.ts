@@ -1,6 +1,8 @@
 // Run: tsx src/__tests__/use-controller-meta.test.ts
 
-import { currentTurnWaitMs, effortSwitchNoticeText, foregroundRunningFromRuntimeMeta, historyMessagesToItems, initialState, localizedBackendNoticeText, localizedNoticeText, metaFromTab, modelSwitchNoticeText, reducer, sameMeta, shouldReconcileStaleTurn, tokenModeSwitchNoticeText } from "../lib/useController";
+import { currentTurnWaitMs, effortSwitchNoticeText, foregroundRunningFromRuntimeMeta, historyMessagesToItems, initialState, localizedBackendNoticeText, localizedNoticeText, metaFromTab, modelSwitchNoticeText, reducer, sameMeta, shouldReconcileStaleTurn, tokenModeSwitchNoticeText, type Item } from "../lib/useController";
+import { parseTodos } from "../lib/tools";
+import { resolveTodoPanelTodos } from "../lib/todoVisibility";
 import type { HistoryMessage, Meta, TabMeta, WireUsage } from "../lib/types";
 
 type LooseTabMeta = Omit<TabMeta, "toolApprovalMode"> & { toolApprovalMode?: TabMeta["toolApprovalMode"] | "" };
@@ -95,7 +97,7 @@ console.log("\nuse controller meta");
 {
   eq(
     modelSwitchNoticeText("active work is still running; running=false; pending_prompt=false; background_jobs=2; finish or cancel the current turn, answer pending prompts, and stop background jobs before changing model"),
-    "The model cannot change while 2 background jobs are running. Open Background jobs in the status bar to stop them.",
+    "The model cannot change while background work is active. Active jobs: 2. Open Background jobs in the status bar to stop them.",
     "model busy guard names the background-job blocker",
   );
   eq(
@@ -105,8 +107,8 @@ console.log("\nuse controller meta");
   );
   eq(
     tokenModeSwitchNoticeText("active work is still running; running=true; pending_prompt=true; background_jobs=0; finish or cancel the current turn, answer pending prompts, and stop background jobs before changing token mode"),
-    "Work mode cannot change while a prompt is waiting for your response. Handle it first.",
-    "work mode busy guard prioritizes the pending prompt blocker",
+    "Execution setting cannot change while a prompt is waiting for your response. Handle it first.",
+    "execution-setting busy guard prioritizes the pending prompt blocker",
   );
   eq(
     modelSwitchNoticeText("finish or cancel the current turn, answer pending prompts, and stop background jobs before changing model"),
@@ -171,13 +173,13 @@ console.log("\nuse controller meta");
 {
   eq(
     tokenModeSwitchNoticeText("finish or cancel the current turn, answer pending prompts, and stop background jobs before changing token mode"),
-    "Work mode cannot change yet. Stop the current answer, handle pending prompts, or wait for background jobs to finish.",
-    "work mode busy guard is localized",
+    "Execution setting cannot change yet. Stop the current answer, handle pending prompts, or wait for background jobs to finish.",
+    "execution-setting busy guard is localized",
   );
   eq(
     tokenModeSwitchNoticeText('tab "tab-a" changed while switching token mode; retry'),
-    "The current session changed while switching work mode. Try once more.",
-    "work mode tab race asks the user to retry",
+    "The current session changed while switching execution setting. Try once more.",
+    "execution-setting tab race asks the user to retry",
   );
 }
 
@@ -199,22 +201,22 @@ console.log("\nuse controller meta");
   );
   eq(
     localizedBackendNoticeText("session changed on disk; unsaved local transcript was saved as recovery branch 20260706-152144.863947300-longcat-openai-LongCat-2.0-119b7259f151-recovery-693ce51bcbcbaa9"),
-    "The session changed on disk, so the unsaved local transcript was kept as a conflict copy.",
+    "The session changed on disk, so the unsaved local transcript was kept as another saved version.",
     "legacy recovery branch notice can be normalized without exposing internal branch id",
   );
   eq(
     localizedBackendNoticeText("session changed on disk; unsaved local transcript was saved as a conflict copy"),
-    "The session changed on disk, so the unsaved local transcript was kept as a conflict copy.",
+    "The session changed on disk, so the unsaved local transcript was kept as another saved version.",
     "recovery copy notice can be normalized",
   );
   eq(
     localizedBackendNoticeText("session conflicts kept recurring; kept the transcript on the current recovery branch"),
-    "Repeated save conflicts were detected, so the current conflict copy was saved in place.",
+    "Repeated save conflicts were detected, so the current version was saved separately.",
     "legacy repeated recovery conflict notice can be normalized",
   );
   eq(
     localizedBackendNoticeText("repeated save conflicts were detected; saved the current conflict copy in place"),
-    "Repeated save conflicts were detected, so the current conflict copy was saved in place.",
+    "Repeated save conflicts were detected, so the current version was saved separately.",
     "repeated recovery conflict notice can be normalized",
   );
   eq(
@@ -262,7 +264,7 @@ console.log("\nuse controller meta");
   );
   eq(
     localizedNoticeText("reworded recovery copy", "session_recovery_forked"),
-    "The session changed on disk, so the unsaved local transcript was kept as a conflict copy.",
+    "The session changed on disk, so the unsaved local transcript was kept as another saved version.",
     "session recovery fork localization uses its stable notice code",
   );
   eq(
@@ -272,7 +274,7 @@ console.log("\nuse controller meta");
   );
   eq(
     localizedNoticeText("reworded depth cap", "session_recovery_depth_cap"),
-    "Repeated save conflicts were detected, so the current conflict copy was saved in place.",
+    "Repeated save conflicts were detected, so the current version was saved separately.",
     "session recovery depth-cap localization uses its stable notice code",
   );
   eq(
@@ -373,7 +375,9 @@ console.log("\nuse controller meta");
 
 {
   eq(sameMeta(meta(), meta()), true, "identical meta is unchanged");
-  eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "plan" })), false, "collaboration mode changes invalidate meta equality");
+  eq(sameMeta(meta({ sessionGeneration: 1 }), meta({ sessionGeneration: 1 })), true, "identical sessionGeneration is unchanged");
+eq(sameMeta(meta({ sessionGeneration: 1 }), meta({ sessionGeneration: 2 })), false, "sessionGeneration changes invalidate meta equality");
+eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "plan" })), false, "collaboration mode changes invalidate meta equality");
   eq(sameMeta(meta({ workspacePath: "/repo" }), meta({ workspacePath: "/other" })), false, "workspace path changes invalidate meta equality");
   eq(sameMeta(meta({ gitBranch: "main" }), meta({ gitBranch: "feature" })), false, "git branch changes invalidate meta equality");
   eq(sameMeta(meta({ imageInputEnabled: true }), meta({ imageInputEnabled: false })), false, "image input capability changes invalidate meta equality");
@@ -390,6 +394,16 @@ console.log("\nuse controller meta");
     true,
     "equivalent empty canonical todo lists keep meta stable",
   );
+  eq(
+    sameMeta(meta({ dismissedTodoBatches: ["a"] }), meta({ dismissedTodoBatches: ["a"] })),
+    true,
+    "identical dismissed todo batches keep meta stable",
+  );
+  eq(
+    sameMeta(meta({ dismissedTodoBatches: ["a"] }), meta({ dismissedTodoBatches: ["b"] })),
+    false,
+    "persisted todo dismissal changes invalidate meta equality",
+  );
 }
 
 {
@@ -399,6 +413,10 @@ console.log("\nuse controller meta");
   const todos = [{ content: "Keep task state", status: "in_progress" }];
   const withTodos = metaFromTab(tab(), meta({ canonicalTodos: todos }));
   eq(withTodos.canonicalTodos, todos, "optimistic tab metadata preserves canonical todos for the same session");
+  const dismissed = metaFromTab(tab({ sessionPath: "/s/a.jsonl" }), meta({ sessionPath: "/s/a.jsonl", dismissedTodoBatches: ["done"] }));
+  eq(dismissed.dismissedTodoBatches?.[0], "done", "optimistic metadata keeps session-sidecar todo dismissals");
+  const remounted = metaFromTab(tab({ sessionPath: "/s/leaf.jsonl" }), meta({ sessionPath: "/s/a.jsonl", dismissedTodoBatches: ["done"] }));
+  eq(remounted.dismissedTodoBatches, undefined, "a session remount waits for the new sidecar dismissals");
 }
 
 {
@@ -407,11 +425,61 @@ console.log("\nuse controller meta");
   const updated = reducer({ ...initialState, meta: before }, { type: "meta", meta: completed });
   eq(updated.meta?.canonicalTodos?.[0]?.status, "completed", "meta refresh applies canonical todo progress");
 
-  const reset = reducer(updated, { type: "reset" });
+  const withDismissed = reducer(updated, { type: "meta", meta: meta({ canonicalTodos: completed.canonicalTodos, dismissedTodoBatches: ["done"] }) });
+  const reset = reducer(withDismissed, { type: "reset" });
   eq(reset.meta?.canonicalTodos, undefined, "session reset clears canonical todos from the previous session");
+  eq(reset.meta?.dismissedTodoBatches, undefined, "session reset clears persisted todo dismissals from the previous session");
 
   const cleared = reducer(reset, { type: "meta", meta: meta({ canonicalTodos: [] }) });
   eq(cleared.meta?.canonicalTodos?.length, 0, "authoritative empty canonical todos survive meta refresh");
+}
+
+{
+  const delayedLiveMeta = meta({
+    canonicalTodos: [
+      { content: "Inspect the report", status: "completed" },
+      { content: "Ship the fix", status: "in_progress" },
+    ],
+  });
+  const hydrated = reducer({ ...initialState, meta: delayedLiveMeta }, { type: "meta", meta: delayedLiveMeta });
+  const noLiveTodo = hydrated.items.find(
+    (item): item is Extract<Item, { kind: "tool" }> => item.kind === "tool" && item.name === "todo_write",
+  );
+  eq(
+    resolveTodoPanelTodos(hydrated.meta?.canonicalTodos, noLiveTodo ? parseTodos(noLiveTodo.args) : undefined),
+    delayedLiveMeta.canonicalTodos,
+    "panel uses fresh Meta todos while the live todo_write event is delayed",
+  );
+
+  const staleMeta = meta({
+    canonicalTodos: [
+      { content: "Inspect the report", status: "in_progress" },
+      { content: "Ship the fix", status: "pending" },
+    ],
+  });
+  const liveArgs = JSON.stringify({
+    todos: [
+      { content: "Inspect the report", status: "completed" },
+      { content: "Ship the fix", status: "in_progress" },
+    ],
+  });
+  let liveState = reducer({ ...initialState, meta: staleMeta }, { type: "event", e: { kind: "turn_started" } });
+  liveState = reducer(liveState, {
+    type: "event",
+    e: { kind: "tool_dispatch", tool: { id: "todo-live", name: "todo_write", args: liveArgs, readOnly: true } },
+  });
+  liveState = reducer(liveState, {
+    type: "event",
+    e: { kind: "tool_result", tool: { id: "todo-live", name: "todo_write", readOnly: true, output: "Todos updated" } },
+  });
+  const liveTodo = liveState.items.find(
+    (item): item is Extract<Item, { kind: "tool" }> => item.kind === "tool" && item.name === "todo_write",
+  );
+  eq(
+    JSON.stringify(resolveTodoPanelTodos(liveState.meta?.canonicalTodos, liveTodo ? parseTodos(liveTodo.args) : undefined)),
+    JSON.stringify(JSON.parse(liveArgs).todos),
+    "panel switches to the live todo_write snapshot after it arrives",
+  );
 }
 
 {
@@ -594,18 +662,14 @@ console.log("\nuse controller meta");
 }
 
 {
-  let s = reducer(initialState, { type: "user", text: "first", seq: 0 });
+  let s = reducer(initialState, { type: "user", text: "first", seq: 0, submissionId: "meta-submission" });
   s = reducer(s, { type: "event", e: { kind: "turn_started" } });
   s = reducer(s, { type: "event", e: { kind: "notice", level: "info", text: "runtime notice" } });
-  s = reducer(s, { type: "event", e: { kind: "turn_done" } });
-  const merged = reducer(s, {
-    type: "history_checkpoint_turns",
-    turns: [0],
-  });
-  const user = merged.items.find((item) => item.kind === "user");
-  const notice = merged.items.find((item) => item.kind === "notice" && item.text === "runtime notice");
-  eq(user?.kind === "user" && user.checkpointTurn, 0, "turn_done checkpoint merge stamps user turn zero");
-  eq(Boolean(notice), true, "turn_done checkpoint merge preserves runtime notices");
+  s = reducer(s, { type: "event", e: { kind: "turn_done", checkpointTurn: 0, submissionId: "meta-submission" } });
+  const user = s.items.find((item) => item.kind === "user");
+  const notice = s.items.find((item) => item.kind === "notice" && item.text === "runtime notice");
+  eq(user?.kind === "user" && user.checkpointTurn, 0, "turn_done stamps the exact user with checkpoint turn zero");
+  eq(Boolean(notice), true, "turn_done checkpoint assignment preserves runtime notices");
 }
 
 {
@@ -620,7 +684,7 @@ console.log("\nuse controller meta");
     mode: "replace",
     page: {
       messages: [
-        { role: "user", content: "recent prompt" },
+        { role: "user", content: "recent prompt", checkpointTurn: 1060 },
         { role: "assistant", content: "recent answer" },
       ],
       startTurn: 60,
@@ -632,12 +696,8 @@ console.log("\nuse controller meta");
   eq(s.items.some((item) => item.kind === "user" && item.text === "recent prompt"), true, "history page replace renders the latest window");
   eq(s.historyStartTurn, 60, "history page stores the older cursor");
   eq(s.historyHasOlder, true, "history page records older availability");
-  const checkpointed = reducer(s, {
-    type: "history_checkpoint_turns",
-    turns: Array.from({ length: 61 }, (_, index) => index + 1000),
-  });
-  const recentUser = checkpointed.items.find((item) => item.kind === "user" && item.text === "recent prompt");
-  eq(recentUser?.kind === "user" && recentUser.checkpointTurn, 1060, "paged checkpoint merge uses the window start turn");
+  const recentUser = s.items.find((item) => item.kind === "user" && item.text === "recent prompt");
+  eq(recentUser?.kind === "user" && recentUser.checkpointTurn, 1060, "paged history hydrates its authoritative checkpoint turn");
   s = reducer(s, { type: "history_older_start" });
   eq(s.historyOlderLoading, true, "older history request marks loading");
   s = reducer(s, {

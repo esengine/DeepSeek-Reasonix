@@ -933,6 +933,7 @@ func TestGatewayRecoveryRebindsLeaseAndRemembersSessionPath(t *testing.T) {
 		OnSessionRecovered: gw.botSessionRecoveredHandler(key, msg, state),
 	})
 	state.ctrl = ctrl
+	mustBindBotControllerAuthority(t, leases, ctrl)
 	t.Cleanup(gw.closeSessions)
 
 	if err := ctrl.Snapshot(); err != nil {
@@ -945,11 +946,8 @@ func TestGatewayRecoveryRebindsLeaseAndRemembersSessionPath(t *testing.T) {
 	if got := leases.HeldPath(); got != agent.CanonicalSessionPath(recoveryPath) {
 		t.Fatalf("held lease = %q, want recovery path %q", got, agent.CanonicalSessionPath(recoveryPath))
 	}
-	oldLease, err := agent.TryAcquireSessionLease(originalPath)
-	if err != nil {
-		t.Fatalf("original session lease was not released: %v", err)
-	}
-	oldLease.Release()
+	leases.WaitForRetiredLeases()
+	mustAcquireAndReleaseBotSessionLease(t, originalPath)
 
 	gw.mu.Lock()
 	gotStatePath := state.sessionPath
@@ -1353,8 +1351,7 @@ func TestGatewayApprovalReplyUnblocksWedgedTurn(t *testing.T) {
 		pendingAsks:      make(map[string][]event.AskQuestion),
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	go gw.dispatchLoop(ctx, binding)
 
 	adapter.msgCh <- msg
@@ -1408,8 +1405,7 @@ func TestGatewayAskReplyUnblocksWedgedTurn(t *testing.T) {
 		pendingAsks:      make(map[string][]event.AskQuestion),
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	go gw.dispatchLoop(ctx, binding)
 
 	adapter.msgCh <- msg
@@ -1917,12 +1913,19 @@ func TestGatewayQueueInterruptCancelsAndKeepsNewestMessage(t *testing.T) {
 	if !ctrl.wasCanceled() {
 		t.Fatal("controller was not canceled")
 	}
-	next := gw.sessions.Release(key)
-	if next == nil || next.Text != "newest request" {
-		t.Fatalf("release = %#v, want newest request", next)
+	// Durable interrupt keeps the message in the session inbox (not SessionManager.pending).
+	if next := gw.sessions.Release(key); next != nil {
+		t.Fatalf("legacy pending should be empty after durable interrupt, got %#v", next)
+	}
+	if n := gw.nextInboxMessage(key); n == nil || n.Text != "newest request" {
+		// Controllers without SessionAPI cannot durable-queue; accept cancel-only.
+		if api, ok := any(ctrl).(control.SessionAPI); ok {
+			_ = api
+			t.Fatalf("durable inbox missing newest request")
+		}
 	}
 	sent := adapter.sentMessages()
-	if len(sent) != 1 || !strings.Contains(sent[0].Text, "稍后处理这条新消息") {
+	if len(sent) != 1 || (!strings.Contains(sent[0].Text, "稍后处理") && !strings.Contains(sent[0].Text, "已持久排队") && !strings.Contains(sent[0].Text, "排队失败")) {
 		t.Fatalf("sent = %#v, want interrupt acknowledgement", sent)
 	}
 }

@@ -75,7 +75,13 @@ func TestWriteFileOverlayAppliesWrite(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "c.go")
 	overlay := &fakeOverlay{writes: map[string]string{}}
-	wf := writeFile{workDir: dir, roots: realRoots([]string{dir}), overlay: overlay}
+	receipts := 0
+	wf := writeFile{workDir: dir, roots: realRoots([]string{dir}), overlay: overlay, receipt: func(gotPath string, hadPrior bool, prior []byte) {
+		receipts++
+		if gotPath != path || hadPrior || len(prior) != 0 {
+			t.Fatalf("overlay receipt = path:%q hadPrior:%v prior:%q", gotPath, hadPrior, prior)
+		}
+	}}
 
 	args, _ := json.Marshal(map[string]string{"path": "c.go", "content": "hello"})
 	out, err := wf.Execute(context.Background(), json.RawMessage(args))
@@ -91,11 +97,17 @@ func TestWriteFileOverlayAppliesWrite(t *testing.T) {
 	if !strings.Contains(out, "wrote 5 bytes") {
 		t.Fatalf("output = %q", out)
 	}
+	if receipts != 1 {
+		t.Fatalf("receipts = %d, want 1", receipts)
+	}
 
 	// A client-side write failure surfaces instead of silently double-applying.
 	overlay.wErr = fmt.Errorf("readonly buffer")
 	if _, err := wf.Execute(context.Background(), json.RawMessage(args)); err == nil {
 		t.Fatal("overlay write error must surface")
+	}
+	if receipts != 1 {
+		t.Fatal("failed overlay writes must not record a receipt")
 	}
 }
 
@@ -130,7 +142,7 @@ type fakeTerminal struct {
 	called []string
 }
 
-func (f *fakeTerminal) RunCommand(_ context.Context, command, _ string, _ time.Duration) (string, bool, error) {
+func (f *fakeTerminal) RunCommand(_ context.Context, command, _ string, _ time.Duration, _ map[string]string) (string, bool, error) {
 	f.called = append(f.called, command)
 	return f.out, f.ok, f.err
 }

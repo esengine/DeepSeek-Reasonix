@@ -85,7 +85,34 @@ func TestRunOutputJSONIncludesCurrencyAwareCostFields(t *testing.T) {
 	}
 }
 
+func TestRunOutputJSONTotalsMoreThanAuditLimit(t *testing.T) {
+	var out bytes.Buffer
+	sink := newRunOutputSink(&out, runOutputJSON)
+	for range 65 {
+		sink.Emit(event.Event{
+			Kind:    event.Usage,
+			Usage:   &provider.Usage{PromptTokens: 1_000_000},
+			Pricing: &provider.Pricing{Input: 1, Currency: "USD"},
+		})
+	}
+	if err := sink.Finalize("abc", time.Now(), nil); err != nil {
+		t.Fatal(err)
+	}
+	var result runResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if !result.CostComplete || result.TotalCost != 65 || result.Currency != "USD" {
+		t.Fatalf("65-event total was truncated: %+v", result)
+	}
+	if result.CostQuote == nil || result.CostQuote.Selected == nil || result.CostQuote.Selected.Amount != "65" {
+		t.Fatalf("65-event aggregate quote = %+v", result.CostQuote)
+	}
+}
+
 func TestRunOutputJSONRejectsMixedPricingCurrencies(t *testing.T) {
+	// Mixed originals no longer error: they emit original_costs + cost_complete=false
+	// when a shared display valuation is unavailable (no FX table in unit test).
 	var out bytes.Buffer
 	sink := newRunOutputSink(&out, runOutputJSON)
 	for _, currency := range []string{"$", "¥"} {
@@ -95,12 +122,18 @@ func TestRunOutputJSONRejectsMixedPricingCurrencies(t *testing.T) {
 			Pricing: &provider.Pricing{Input: 1, Currency: currency},
 		})
 	}
-	err := sink.Finalize("abc", time.Now(), nil)
-	if err == nil || !strings.Contains(err.Error(), "mixed pricing currencies") {
-		t.Fatalf("Finalize mixed currencies error = %v", err)
+	if err := sink.Finalize("abc", time.Now(), nil); err != nil {
+		t.Fatalf("Finalize mixed currencies: %v", err)
 	}
-	if out.Len() != 0 {
-		t.Fatalf("mixed-currency JSON should not emit a misleading total: %s", out.String())
+	var result runResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if !result.CostComplete || result.DisplayComplete || result.DisplayStatus != "bucketed" {
+		t.Fatalf("expected complete cost facts but bucketed display, got %+v", result)
+	}
+	if len(result.OriginalCosts) < 2 {
+		t.Fatalf("expected per-currency original_costs, got %+v", result.OriginalCosts)
 	}
 }
 

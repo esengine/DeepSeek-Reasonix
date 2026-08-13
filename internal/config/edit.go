@@ -15,6 +15,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"reasonix/internal/extension/protocol"
 	"reasonix/internal/fileutil"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/mcpdiag"
@@ -46,13 +47,16 @@ const (
 //   - "provider/model"    — that specific model under that provider.
 //
 // Either is rejected when the target does not exist, so a UI can't strand
-// the config on a model that doesn't exist.
+// the config on a model that doesn't exist. Plugin-namespaced refs
+// (plugin/<plugin>/<provider>/<model>) are the exception: they belong to
+// extension sidecars, so the config catalog cannot vouch for them — boot's
+// merged resolver gates them at the next launch instead.
 func (c *Config) SetDefaultModel(name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return fmt.Errorf("set default: empty name")
 	}
-	if _, ok := c.ResolveModel(name); !ok {
+	if _, ok := c.ResolveModel(name); !ok && protocol.PluginRefOwner(name) == "" {
 		return fmt.Errorf("set default: no such model %q (configured: %s)", name, c.providerNames())
 	}
 	c.DefaultModel = name
@@ -230,27 +234,6 @@ func (c *Config) SetDesktopLanguage(lang string) error {
 	return nil
 }
 
-// SetDesktopCurrency pins the user-global official pricing region independently
-// from language. The name is retained for persisted-schema compatibility.
-// Empty/auto follows the language preference.
-func (c *Config) SetDesktopCurrency(currency string) error {
-	overridePersisted := false
-	switch strings.ToUpper(strings.TrimSpace(currency)) {
-	case "", "AUTO":
-		c.Desktop.Currency = ""
-	case "CNY", "RMB", "CNH":
-		c.Desktop.Currency = "CNY"
-		overridePersisted = true
-	case "USD":
-		c.Desktop.Currency = "USD"
-		overridePersisted = true
-	default:
-		return fmt.Errorf("desktop currency %q: must be auto|CNY|USD", currency)
-	}
-	applyDeepSeekOfficialDefaultPricingWithOverride(c, overridePersisted)
-	return nil
-}
-
 // SetDesktopAppearance sets desktop-only theme preferences. It must not affect
 // CLI theme settings or provider-visible request data.
 func (c *Config) SetDesktopAppearance(theme, style string) error {
@@ -421,21 +404,11 @@ func (c *Config) SetColdResumePrune(enabled bool) error {
 	return nil
 }
 
-// SetCompactRatio updates the user-controlled auto-compaction threshold.
-// Keep the editable range inside the default snip/force guard rails so lowering
-// the threshold cannot accidentally turn normal cache growth into constant
-// compaction, while higher values still retain context-exhaustion headroom.
+// SetCompactRatio updates the sole user-controlled automatic compaction
+// threshold. Allowed range is 0.65–0.85; presets are 0.70 / 0.80 / 0.85.
 func (c *Config) SetCompactRatio(ratio float64) error {
 	if math.IsNaN(ratio) || math.IsInf(ratio, 0) || ratio < 0.65 || ratio > 0.85 {
 		return fmt.Errorf("compact ratio %v: must be between 0.65 and 0.85", ratio)
-	}
-	snip := c.Agent.ToolResultSnipRatio
-	force := c.Agent.CompactForceRatio
-	if snip > 0 && ratio <= snip {
-		return fmt.Errorf("compact ratio %.2f: must be greater than tool result snip ratio %.2f", ratio, snip)
-	}
-	if force > 0 && ratio >= force {
-		return fmt.Errorf("compact ratio %.2f: must be less than force ratio %.2f", ratio, force)
 	}
 	c.Agent.CompactRatio = ratio
 	return nil
@@ -486,14 +459,6 @@ func (c *Config) SetDesktopConversationWidth(width string) error {
 // SetUICloseBehavior is kept for callers compiled against the old edit API.
 func (c *Config) SetUICloseBehavior(mode string) error {
 	return c.SetDesktopCloseBehavior(mode)
-}
-
-// SetExpandThinking sets whether the desktop reasoning/thinking section is
-// expanded by default. It is desktop-only and must not affect CLI output or
-// provider-visible request data.
-func (c *Config) SetExpandThinking(on bool) error {
-	c.Desktop.ExpandThinking = on
-	return nil
 }
 
 // SetShowReasoning sets the CLI's default verbose-reasoning preference. When
@@ -676,10 +641,8 @@ func (c *Config) AddPermissionRule(list, rule string) error {
 	if _, ok := permission.ParseRule(rule); !ok {
 		return fmt.Errorf("invalid permission rule %q (want \"ToolName\" or \"ToolName(glob)\")", rule)
 	}
-	for _, existing := range *target {
-		if existing == rule {
-			return nil // already present
-		}
+	if slices.Contains(*target, rule) {
+		return nil // already present
 	}
 	*target = append(*target, rule)
 	return nil
@@ -786,6 +749,25 @@ func (c *Config) ExcludeSkillPath(path string) error {
 	return nil
 }
 
+// SetSkillPathEnabled enables or disables a skill discovery root without
+// deleting its configured path. Disabled roots are recorded in excluded_paths
+// and can be restored without asking the user to browse for the folder again.
+func (c *Config) SetSkillPathEnabled(path string, enabled bool) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("skill path: empty path")
+	}
+	want := CanonicalSkillPath(path)
+	if want == "" {
+		return fmt.Errorf("skill path: empty path")
+	}
+	if enabled {
+		c.removeExcludedSkillPath(want)
+		return nil
+	}
+	return c.ExcludeSkillPath(path)
+}
+
 func (c *Config) removeExcludedSkillPath(want string) {
 	next := c.Skills.ExcludedPaths[:0]
 	for _, existing := range c.Skills.ExcludedPaths {
@@ -826,6 +808,13 @@ func (c *Config) SetSkillEnabled(name string, enabled bool) error {
 	return nil
 }
 
+// SetSkillImplicitInvocation controls whether skills are exposed to the model
+// for automatic discovery and invocation. Explicit /skill commands remain
+// available regardless of this setting.
+func (c *Config) SetSkillImplicitInvocation(enabled bool) {
+	c.Skills.DisableImplicitInvocation = !enabled
+}
+
 // CanonicalSkillPath expands env vars, ~ and relative segments to an absolute
 // cleaned path for comparing skill roots. On Windows it folds case so paths that
 // differ only in casing dedupe. Use only for comparison, never as stored config.
@@ -842,6 +831,12 @@ func CanonicalSkillPath(path string) string {
 	}
 	if abs, err := filepath.Abs(path); err == nil {
 		path = abs
+	}
+	// Resolve existing paths before cleaning so Windows 8.3 short names and
+	// long names compare identically. A missing configured path still falls
+	// back to the absolute lexical form used for persistence and diagnostics.
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
 	}
 	path = filepath.Clean(path)
 	if runtime.GOOS == "windows" {
@@ -1607,11 +1602,12 @@ func (c *Config) saveProjectIncrementalResolved(logicalPath, resolvedPath string
 	}
 	removePlugins := len(tomlPluginsForScope(c.Plugins, RenderScopeProject)) == 0 && tomlBodyHasSection(body, "plugins")
 	removeSandboxBash := shouldRemoveIneffectiveProjectSandboxBash(body, c)
+	removeSkills := projectSkillsKeysToRemove(body, c)
 	_, hasLegacyDesktopAutoGuard := tomlSectionKeyValue(body, "desktop", "default_auto_recovery_checkpoint")
 	_, hasRetiredAgentAutoGuard := tomlSectionKeyValue(body, "agent", "auto_recovery_checkpoint")
 	removeRetiredAutoGuard := hasLegacyDesktopAutoGuard || hasRetiredAgentAutoGuard
 	writeProviderAccess := c.Desktop.ProviderAccess != nil
-	if strings.TrimSpace(delta) == "" && !removePlugins && !removeSandboxBash && !removeRetiredAutoGuard && !writeProviderAccess {
+	if strings.TrimSpace(delta) == "" && !removePlugins && !removeSandboxBash && !removeSkills && !removeRetiredAutoGuard && !writeProviderAccess {
 		return nil // no changes to write
 	}
 
@@ -1625,6 +1621,9 @@ func (c *Config) saveProjectIncrementalResolved(logicalPath, resolvedPath string
 	if removeSandboxBash {
 		body = removeTOMLSectionKey(body, "sandbox", "bash")
 	}
+	if removeSkills {
+		body = cleanupProjectSkillsKeys(body, c)
+	}
 	if removeRetiredAutoGuard {
 		body = removeTOMLSectionKey(body, "desktop", "default_auto_recovery_checkpoint")
 		body = removeTOMLSectionKey(body, "agent", "auto_recovery_checkpoint")
@@ -1633,6 +1632,58 @@ func (c *Config) saveProjectIncrementalResolved(logicalPath, resolvedPath string
 		body = upsertTOMLSectionKey(body, "desktop", "provider_access", "provider_access = "+renderStringArray(c.Desktop.ProviderAccess))
 	}
 	return writeConfigFileResolved(resolvedPath, body, configFilePerm(logicalPath))
+}
+
+// projectSkillsKeysToRemove reports whether an existing project [skills]
+// section contains a field whose current edit value is the built-in default.
+// Project saves are incremental, so an empty RenderTOMLProjectDelta cannot
+// remove a stale override without this explicit cleanup pass.
+func projectSkillsKeysToRemove(body string, c *Config) bool {
+	if c == nil || !tomlBodyHasSection(body, "skills") {
+		return false
+	}
+	for _, key := range projectSkillKeys {
+		if projectSkillKeyIsDefault(c, key) {
+			if _, ok := tomlSectionKeyValue(body, "skills", key); ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+var projectSkillKeys = [...]string{"paths", "excluded_paths", "disabled_skills", "disable_implicit_invocation", "max_depth"}
+
+func projectSkillKeyIsDefault(c *Config, key string) bool {
+	if c != nil && c.keepsProjectSkillKey(key) {
+		return false
+	}
+	switch key {
+	case "paths":
+		return len(c.Skills.Paths) == 0
+	case "excluded_paths":
+		return len(c.Skills.ExcludedPaths) == 0
+	case "disabled_skills":
+		return len(c.Skills.DisabledSkills) == 0
+	case "disable_implicit_invocation":
+		return !c.Skills.DisableImplicitInvocation
+	case "max_depth":
+		return c.Skills.MaxDepth == 0
+	default:
+		return false
+	}
+}
+
+func cleanupProjectSkillsKeys(body string, c *Config) string {
+	if c == nil {
+		return body
+	}
+	for _, key := range projectSkillKeys {
+		if projectSkillKeyIsDefault(c, key) {
+			body = removeTOMLSectionKey(body, "skills", key)
+		}
+	}
+	return body
 }
 
 func shouldRemoveIneffectiveProjectSandboxBash(body string, c *Config) bool {
@@ -1704,7 +1755,7 @@ func mergeTOMLDelta(body, delta string) string {
 }
 
 func mergeTOMLTopLevelFields(body, fields string) string {
-	for _, line := range strings.Split(fields, "\n") {
+	for line := range strings.SplitSeq(fields, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -2173,15 +2224,16 @@ func removeTOMLSectionKey(body, sectionName, key string) string {
 	if sectionIdx < 0 || keyIdx < 0 {
 		return body
 	}
+	keyEndIdx := tomlValueEndSpan(spans, keyIdx)
 	for i := sectionIdx + 1; i < endIdx; i++ {
-		if i == keyIdx {
+		if i >= keyIdx && i <= keyEndIdx {
 			continue
 		}
 		trimmed := strings.TrimSpace(spans[i].text)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		return body[:spans[keyIdx].start] + body[spans[keyIdx].end:]
+		return body[:spans[keyIdx].start] + body[spans[keyEndIdx].end:]
 	}
 	sectionStart := spans[sectionIdx].start
 	sectionEnd := len(body)

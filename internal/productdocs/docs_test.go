@@ -90,6 +90,42 @@ func TestDocsCommandOverviewAndSearchUseEmbeddedCorpus(t *testing.T) {
 	}
 }
 
+func TestExtensionDeveloperGuidesAreEmbeddedAndSearchable(t *testing.T) {
+	c, err := loadCatalog(productcontent.Content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		"EXTENSIONS.md",
+		"EXTENSIONS.zh-CN.md",
+		"EXTENSION_PROTOCOL.md",
+		"EXTENSION_PROTOCOL.zh-CN.md",
+		"PLUGIN_PACKAGES.md",
+		"PLUGIN_PACKAGES.zh-CN.md",
+	} {
+		if _, ok := c.byPath[path]; !ok {
+			t.Fatalf("extension developer guide %q is missing from the embedded catalog", path)
+		}
+	}
+
+	tool := &docsTool{catalog: c}
+	english, err := tool.search(context.Background(), "sidecar Manifest v2 runtime Go SDK", "en", "all", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(english, "path=docs/EXTENSIONS.md") || !strings.Contains(english, "path=docs/PLUGIN_PACKAGES.md") {
+		t.Fatalf("English extension search did not expose the overview and manifest reference:\n%s", english)
+	}
+
+	chinese, err := tool.search(context.Background(), "Sidecar 插件 Manifest v2 扩展开发", "zh-CN", "all", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(chinese, "path=docs/EXTENSIONS.zh-CN.md") || !strings.Contains(chinese, "path=docs/PLUGIN_PACKAGES.zh-CN.md") {
+		t.Fatalf("Chinese extension search did not expose the overview and manifest reference:\n%s", chinese)
+	}
+}
+
 func TestSourceManifestChangesWithMarkdownBytes(t *testing.T) {
 	first, err := SourceManifest(fstest.MapFS{"GUIDE.md": {Data: []byte("# Guide\n\nFirst.\n")}}, nil)
 	if err != nil {
@@ -414,7 +450,7 @@ func TestDocsToolSupportsConcurrentReadOnlyCalls(t *testing.T) {
 	const workers = 12
 	var wg sync.WaitGroup
 	errs := make(chan error, workers)
-	for i := 0; i < workers; i++ {
+	for i := range workers {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()

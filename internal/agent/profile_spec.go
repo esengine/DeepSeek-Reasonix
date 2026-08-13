@@ -1,16 +1,19 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
+	"reasonix/internal/skill"
 	"reasonix/internal/tool"
 )
 
-// ProfileDefinition is the resolved, runtime-facing shape of a runAs=subagent
-// skill used by task/fleet/run_skill. Profile names are resolved at call time
-// from the Skill store and must never be written into tool schemas or the
-// parent system prompt (prompt-cache stability).
+// ProfileDefinition is the delegation-facing narrowing of a stored Skill: what
+// the worker is, never what one call wants of it. A field belongs here only if
+// its value follows from the worker's identity; allowed-tools and read-only are
+// ceilings, not grants. Profile names resolve at call time and must never enter
+// tool schemas or the parent system prompt (prompt-cache stability).
 type ProfileDefinition struct {
 	Name         string
 	Body         string
@@ -31,47 +34,97 @@ type ProfileDefinition struct {
 // from the live Skill store; a nil lookup means profile= is unavailable.
 type ProfileLookup func(name string) (ProfileDefinition, bool)
 
+// ProfileFromSkill narrows a stored Skill to the fields delegation may see.
+// Routing metadata (triggers, auto-use, cost, freshness) stays behind: it
+// decides when a worker is chosen, not how that worker thinks, and admitting it
+// here is the first step from a profile toward a workflow language.
+func ProfileFromSkill(sk skill.Skill) ProfileDefinition {
+	return ProfileDefinition{
+		Name:         sk.Name,
+		Body:         sk.Body,
+		AllowedTools: sk.AllowedTools,
+		Model:        sk.Model,
+		Effort:       sk.Effort,
+		ReadOnly:     sk.ReadOnly,
+		Invocation:   sk.Invocation,
+		NamedBuiltin: NamedBuiltinProfile(sk.Name),
+	}
+}
+
 // ProfileExecSpec is the unified execution specification shared by task,
 // fleet items, and run_skill profile runs. Call sites build a spec, then hand
-// it to TaskTool.RunProfileSpec so runners cannot drift.
+// it to TaskTool.RunProfileSpec so runners cannot drift. Its members are the
+// delegation boundary: place a new field in the member that decides its value,
+// never in whichever one is closest to the call site.
 type ProfileExecSpec struct {
+	Task    TaskSpec
+	Worker  WorkerSpec
+	Grant   CapabilityGrant
+	Context ContextRequest
+	Sched   SchedulerPolicy
+}
+
+// TaskSpec is what one delegated run must accomplish. Every field is decided
+// per call by the delegating parent, never by the worker's identity.
+type TaskSpec struct {
+	// Objective is the task text handed to the child agent.
+	Objective string
+	// Description is an optional short UI label.
+	Description string
+}
+
+// WorkerSpec is who carries the run out: the resolved profile identity and the
+// provider runtime it thinks with. Fields here follow from the worker chosen,
+// not from what this particular call asks for.
+type WorkerSpec struct {
 	// Kind is the transcript kind: "task", "skill", or "fleet".
 	Kind string
 	// Name is the transcript / display name (profile name or "task").
 	Name string
 	// Profile is the optional profile skill name (empty for ordinary task).
 	Profile string
-	// Prompt is the user task text for the child agent.
-	Prompt string
-	// Description is an optional short UI label.
-	Description string
-	// SystemPrompt is the full child system prompt. When UseProfilePrompt is
-	// true this is exactly the profile body (no DefaultTaskSystemPrompt).
+	// SystemPrompt is the full child system prompt.
 	SystemPrompt string
-	// UseProfilePrompt marks custom/named-builtin profile system prompts so
-	// hosts do not append the ordinary concise task default.
+	// UseProfilePrompt marks a profile body used verbatim, with no task default.
 	UseProfilePrompt bool
-	// ReadOnly forces the read-only registry even when the profile can write.
-	ReadOnly bool
-	// AllowNoTools preserves the ordinary parallel research path for children
-	// that can answer directly without host tools. Explicit task/profile calls
-	// keep failing closed on an empty registry.
-	AllowNoTools bool
-	// CallTools is the optional per-call tools whitelist.
-	CallTools []string
-	// ProfileTools is the profile frontmatter allowed-tools list.
-	ProfileTools []string
 	// Model/Effort are the already-resolved effective values for this run
 	// (after config override → call params → frontmatter → global → parent).
 	Model  string
 	Effort string
+}
+
+// CapabilityGrant is what the run may touch. Profile frontmatter supplies a
+// ceiling and call arguments may only narrow it (see IntersectToolLists), so
+// the effective grant is always the intersection of the two.
+type CapabilityGrant struct {
+	// ReadOnly forces the read-only registry even when the profile can write.
+	ReadOnly bool
+	// AllowNoTools lets the parallel-research path run a child with no tools.
+	AllowNoTools bool
+	// CallTools is the optional per-call tools whitelist.
+	CallTools []string
+	// ProfileTools is the profile frontmatter allowed-tools ceiling.
+	ProfileTools []string
 	// WritePaths is the normalized write claim (empty for read-only).
 	WritePaths WritePathSet
-	// MaxSteps is the optional per-call step budget (0 = default).
-	MaxSteps int
+}
+
+// ContextRequest is the context a child starts from, as opposed to the task it
+// is given. Today that is only a prior transcript to resume.
+type ContextRequest struct {
 	// ContinueFrom / ForkFrom are transcript continuation refs (writer path).
 	ContinueFrom string
 	ForkFrom     string
+	// Ephemeral forces a non-persisted transcript for entry points that promise
+	// no durable host side effects, such as read_only_task.
+	Ephemeral bool
+}
+
+// SchedulerPolicy is when and how the run executes. It never changes what the
+// child is asked to do or what it is allowed to touch.
+type SchedulerPolicy struct {
+	// MaxSteps is the optional per-call step budget (0 = default).
+	MaxSteps int
 	// RunInBackground starts a jobs.Manager background job.
 	RunInBackground bool
 	// BackgroundWriter marks work already hosted by a parent background job
@@ -199,4 +252,13 @@ func NamedBuiltinProfile(name string) bool {
 	default:
 		return false
 	}
+}
+
+// parentSession returns the owning session, or empty when the caller asked for
+// an ephemeral run so the store never persists a transcript for it.
+func (c ContextRequest) parentSession(ctx context.Context) string {
+	if c.Ephemeral {
+		return ""
+	}
+	return ParentSession(ctx)
 }

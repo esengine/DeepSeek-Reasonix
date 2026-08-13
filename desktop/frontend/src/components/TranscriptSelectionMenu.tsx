@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { MessageSquare } from "lucide-react";
 import { ContextMenu, type ContextMenuPoint } from "./ContextMenu";
-import { messageSelectionContextText } from "../lib/messageSelectionCopy";
+import { messageSelectionContextText, TRANSCRIPT_COPY_FAILED_EVENT } from "../lib/messageSelectionCopy";
 import { writeClipboardText } from "../lib/clipboard";
 import {
   detectShortcutPlatform,
@@ -12,18 +12,13 @@ import {
   useGlobalShortcut,
 } from "../lib/keyboardShortcuts";
 import { useT } from "../lib/i18n";
+import { transcriptSelectionStore } from "../lib/transcriptSelectionStore";
+import { rowKeyForNode, transcriptSelectionPointClientRect } from "../lib/transcriptSelectionDom";
+import { useToast } from "../lib/toast";
 
-// Inside the Wails shell main.tsx suppresses the webview's default context
-// menu (its Reload/Back/Inspect entries can navigate away from the app), which
-// also removes the native Copy menu for selected transcript text — ⌘C still
-// works, but the right-click path is dead. This mounts one document-level
-// listener that offers an app-drawn Copy menu whenever a suppressed selection
-// menu would have applied, gated exactly like the ⌘C interceptor. It stays
-// inert in a plain browser (no window.runtime), where the native menu opens.
-type SelectionAction = {
-  text: string;
-  point: ContextMenuPoint;
-};
+type SelectionAction =
+  | { kind: "native"; text: string; point: ContextMenuPoint }
+  | { kind: "logical"; snapshotId: number; sourceTabId: string; point: ContextMenuPoint };
 
 const ACTION_EDGE_GAP = 8;
 
@@ -33,29 +28,29 @@ export function TranscriptSelectionMenu({
   onAddToChat,
 }: {
   enabled?: boolean;
-  // Identifies the transcript the selection was made in (the active tab).
-  // The overlay captures only text, while onAddToChat routes to whatever is
-  // active at click time — so any surviving overlay must be discarded when
-  // the source changes or a selection from session A could land in session B.
   resetKey?: string | number;
   onAddToChat?: (text: string) => void;
 }) {
   const t = useT();
-  const [point, setPoint] = useState<ContextMenuPoint | null>(null);
-  const [text, setText] = useState("");
+  const { showToast } = useToast();
+  const logicalSnapshot = useSyncExternalStore(
+    transcriptSelectionStore.subscribe,
+    transcriptSelectionStore.getSnapshot,
+    transcriptSelectionStore.getSnapshot,
+  );
+  const [menu, setMenu] = useState<SelectionAction | null>(null);
   const [action, setAction] = useState<SelectionAction | null>(null);
   const [actionPoint, setActionPoint] = useState<ContextMenuPoint | null>(null);
   const actionRef = useRef<HTMLDivElement>(null);
-  // Escape dismisses the floating action but browsers keep the text selection,
-  // so the trailing keyup would immediately re-show it. Remember the dismissed
-  // selection and stay hidden until it changes or a new pointer gesture lands.
-  const dismissedRef = useRef<string | null>(null);
+  const dismissedRef = useRef<string | number | null>(null);
+  const previousResetKeyRef = useRef(resetKey);
+  const activeResetKeyRef = useRef(resetKey);
+  activeResetKeyRef.current = resetKey;
   const shortcutPlatform = useMemo(() => detectShortcutPlatform(), []);
   const [shortcutRevision, setShortcutRevision] = useState(0);
   useEffect(() => onShortcutsChanged(() => setShortcutRevision((value) => value + 1)), []);
   const addShortcut = useMemo(
     () => formatShortcutCombo(resolvedShortcutCombo("selection.addToChat", shortcutPlatform), shortcutPlatform),
-    // shortcutRevision re-resolves the combo after the user rebinds it in settings.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [shortcutPlatform, shortcutRevision],
   );
@@ -65,33 +60,92 @@ export function TranscriptSelectionMenu({
     setActionPoint(null);
   }, []);
 
-  // Drop every piece of captured selection state when the source transcript
-  // changes: the floating action, the copy menu, and the Escape-dismissal
-  // memory all describe the previous tab's content.
-  const lastResetKeyRef = useRef(resetKey);
+  const reportCopyFailure = useCallback(() => {
+    showToast(t("diag.copyFailed"), "error");
+  }, [showToast, t]);
+
   useEffect(() => {
-    if (lastResetKeyRef.current === resetKey) return;
-    lastResetKeyRef.current = resetKey;
+    const onFailure = () => reportCopyFailure();
+    document.addEventListener(TRANSCRIPT_COPY_FAILED_EVENT, onFailure);
+    return () => document.removeEventListener(TRANSCRIPT_COPY_FAILED_EVENT, onFailure);
+  }, [reportCopyFailure]);
+
+  useEffect(() => {
+    if (previousResetKeyRef.current === resetKey) return;
+    previousResetKeyRef.current = resetKey;
     dismissedRef.current = null;
-    setPoint(null);
-    setText("");
+    setMenu(null);
     closeAction();
+    document.getSelection()?.removeAllRanges();
+    transcriptSelectionStore.clear("tab-switch");
   }, [closeAction, resetKey]);
 
-  const addSelectionToChat = useCallback(() => {
-    if (!action || !onAddToChat) return;
-    const selectedText = action.text;
-    document.getSelection()?.removeAllRanges();
-    closeAction();
-    onAddToChat(selectedText);
-  }, [action, closeAction, onAddToChat]);
+  const resolveLogical = useCallback(async (selection: Extract<SelectionAction, { kind: "logical" }>) => {
+    const text = await transcriptSelectionStore.resolveText(selection.snapshotId);
+    if (
+      !text
+      || !transcriptSelectionStore.isCurrent(selection.snapshotId, selection.sourceTabId)
+      || String(activeResetKeyRef.current ?? "") !== selection.sourceTabId
+    ) return null;
+    return text;
+  }, []);
 
-  // The shortcut is registered in SHORTCUT_DEFINITIONS so settings can rebind
-  // it and conflict-check it against other actions; it only arms while the
-  // floating action is visible.
+  const copySelection = useCallback(async (selection: SelectionAction) => {
+    if (selection.kind === "native") {
+      const native = document.getSelection();
+      const rangeSnapshot = native && !native.isCollapsed ? {
+        anchorNode: native.anchorNode,
+        anchorOffset: native.anchorOffset,
+        focusNode: native.focusNode,
+        focusOffset: native.focusOffset,
+      } : null;
+      const copied = await writeClipboardText(selection.text);
+      const current = document.getSelection();
+      if (!copied) {
+        reportCopyFailure();
+        return;
+      }
+      if (
+        rangeSnapshot
+        && current
+        && !current.isCollapsed
+        && current.anchorNode === rangeSnapshot.anchorNode
+        && current.anchorOffset === rangeSnapshot.anchorOffset
+        && current.focusNode === rangeSnapshot.focusNode
+        && current.focusOffset === rangeSnapshot.focusOffset
+      ) current.removeAllRanges();
+      return;
+    }
+    const text = await resolveLogical(selection);
+    if (!text) return;
+    const copied = await writeClipboardText(text);
+    if (!transcriptSelectionStore.isCurrent(selection.snapshotId, selection.sourceTabId)) return;
+    if (!copied) {
+      reportCopyFailure();
+      return;
+    }
+    transcriptSelectionStore.clear("copy");
+    closeAction();
+  }, [closeAction, reportCopyFailure, resolveLogical]);
+
+  const addSelectionToChat = useCallback(async () => {
+    if (!action || !onAddToChat) return;
+    if (action.kind === "native") {
+      document.getSelection()?.removeAllRanges();
+      closeAction();
+      onAddToChat(action.text);
+      return;
+    }
+    const text = await resolveLogical(action);
+    if (!text) return;
+    transcriptSelectionStore.clear("add-to-chat");
+    closeAction();
+    onAddToChat(text);
+  }, [action, closeAction, onAddToChat, resolveLogical]);
+
   useGlobalShortcut(
     "selection.addToChat",
-    addSelectionToChat,
+    () => { void addSelectionToChat(); },
     [],
     Boolean(action) && enabled && Boolean(onAddToChat),
   );
@@ -119,38 +173,75 @@ export function TranscriptSelectionMenu({
   }, [action]);
 
   useEffect(() => {
+    if (!enabled || !onAddToChat || logicalSnapshot.mode !== "logical-settled") {
+      if (action?.kind === "logical") closeAction();
+      return;
+    }
+    if (logicalSnapshot.tabId !== String(resetKey ?? "") || !logicalSnapshot.focus) return;
+    if (dismissedRef.current === logicalSnapshot.id) return;
+    const rect = transcriptSelectionPointClientRect(logicalSnapshot.focus);
+    setAction({
+      kind: "logical",
+      snapshotId: logicalSnapshot.id,
+      sourceTabId: logicalSnapshot.tabId,
+      point: rect ? { left: rect.right, top: rect.bottom + 8 } : { left: 12, top: 12 },
+    });
+  }, [action?.kind, closeAction, enabled, logicalSnapshot, onAddToChat, resetKey]);
+
+  useEffect(() => {
     const onContextMenu = (event: MouseEvent) => {
-      if (typeof window === "undefined" || !window.runtime) return;
+      if (!enabled || typeof window === "undefined" || !window.runtime) return;
+      const snapshot = transcriptSelectionStore.getSnapshot();
+      const rowKey = rowKeyForNode(event.target instanceof Node ? event.target : null);
+      if (
+        rowKey
+        && (snapshot.mode === "logical-dragging" || snapshot.mode === "logical-settled")
+        && transcriptSelectionStore.isRowSelected(snapshot.id, rowKey)
+      ) {
+        event.preventDefault();
+        setMenu({
+          kind: "logical",
+          snapshotId: snapshot.id,
+          sourceTabId: snapshot.tabId,
+          point: menuPointFromEvent(event),
+        });
+        return;
+      }
       const selected = messageSelectionContextText(document, event.target);
       if (selected == null) return;
       event.preventDefault();
-      setText(selected);
-      setPoint(menuPointFromEvent(event));
+      setMenu({ kind: "native", text: selected, point: menuPointFromEvent(event) });
     };
     document.addEventListener("contextmenu", onContextMenu);
     return () => document.removeEventListener("contextmenu", onContextMenu);
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
-    if (!enabled || !onAddToChat) {
-      closeAction();
-      return;
-    }
+    if (enabled && onAddToChat) return;
+    setMenu(null);
+    closeAction();
+    document.getSelection()?.removeAllRanges();
+    transcriptSelectionStore.clear("selection-actions-disabled");
+  }, [closeAction, enabled, onAddToChat]);
 
+  useEffect(() => {
+    if (!enabled || !onAddToChat) return;
     let frame: number | null = null;
     const showForTarget = (target: EventTarget | null) => {
+      if (transcriptSelectionStore.isLogical()) return;
       const selected = messageSelectionContextText(document, target);
       const selection = document.getSelection();
       const range = selection?.rangeCount ? selection.getRangeAt(selection.rangeCount - 1) : null;
       if (selected == null || !range) {
         dismissedRef.current = null;
-        closeAction();
+        if (action?.kind === "native") closeAction();
         return;
       }
       if (dismissedRef.current === selected) return;
       dismissedRef.current = null;
       const rect = typeof range.getBoundingClientRect === "function" ? range.getBoundingClientRect() : null;
       setAction({
+        kind: "native",
         text: selected,
         point: rect && (rect.width > 0 || rect.height > 0)
           ? { left: rect.right, top: rect.bottom + 8 }
@@ -169,6 +260,19 @@ export function TranscriptSelectionMenu({
       dismissedRef.current = null;
       scheduleShow(event.target);
     };
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest(".transcript-selection-action")) return;
+      const snapshot = transcriptSelectionStore.getSnapshot();
+      if (snapshot.mode === "logical-dragging" || snapshot.mode === "logical-settled") {
+        transcriptSelectionStore.clear("new-pointer");
+      }
+      const selection = document.getSelection();
+      if (selection && !selection.isCollapsed) selection.removeAllRanges();
+      dismissedRef.current = null;
+      closeAction();
+    };
     const onKeyUp = (event: KeyboardEvent) => {
       const selection = document.getSelection();
       const target = selection?.focusNode instanceof Element
@@ -177,57 +281,60 @@ export function TranscriptSelectionMenu({
       scheduleShow(target);
     };
     const onSelectionChange = () => {
+      if (transcriptSelectionStore.isLogical()) return;
       const selection = document.getSelection();
       if (!selection || selection.isCollapsed || selection.toString().trim() === "") {
         dismissedRef.current = null;
-        closeAction();
+        if (action?.kind === "native") closeAction();
       }
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || !action) return;
-      dismissedRef.current = action.text;
+      dismissedRef.current = action.kind === "native" ? action.text : action.snapshotId;
+      if (action.kind === "logical") transcriptSelectionStore.clear("escape");
       closeAction();
     };
-    const close = () => closeAction();
-
+    const closeNative = () => {
+      if (action?.kind === "native") closeAction();
+    };
+    document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("pointerup", onPointerUp);
     document.addEventListener("keyup", onKeyUp);
     document.addEventListener("keydown", onKeyDown);
     document.addEventListener("selectionchange", onSelectionChange);
-    window.addEventListener("resize", close);
-    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", closeNative);
+    window.addEventListener("scroll", closeNative, true);
     return () => {
       if (frame !== null) cancelAnimationFrame(frame);
+      document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("pointerup", onPointerUp);
       document.removeEventListener("keyup", onKeyUp);
       document.removeEventListener("keydown", onKeyDown);
       document.removeEventListener("selectionchange", onSelectionChange);
-      window.removeEventListener("resize", close);
-      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", closeNative);
+      window.removeEventListener("scroll", closeNative, true);
     };
   }, [action, closeAction, enabled, onAddToChat]);
 
   return <>
     <ContextMenu
-      open={point != null}
-      point={point}
+      open={menu != null}
+      point={menu?.point ?? null}
       minWidth={140}
       ariaLabel={t("common.copy")}
-      items={[
-        {
-          key: "copy",
-          label: t("common.copy"),
-          shortcut: formatShortcutCombo(
-            shortcutPlatform === "darwin" ? { key: "c", meta: true } : { key: "c", ctrl: true },
-            shortcutPlatform,
-          ),
-          onSelect: () => {
-            void writeClipboardText(text);
-            setPoint(null);
-          },
+      items={[{
+        key: "copy",
+        label: t("common.copy"),
+        shortcut: formatShortcutCombo(
+          shortcutPlatform === "darwin" ? { key: "c", meta: true } : { key: "c", ctrl: true },
+          shortcutPlatform,
+        ),
+        onSelect: () => {
+          if (menu) void copySelection(menu);
+          setMenu(null);
         },
-      ]}
-      onClose={() => setPoint(null)}
+      }]}
+      onClose={() => setMenu(null)}
     />
     {action && typeof document !== "undefined" && createPortal(
       <div
@@ -242,7 +349,7 @@ export function TranscriptSelectionMenu({
         }}
         onMouseDown={(event) => event.preventDefault()}
       >
-        <button type="button" onClick={addSelectionToChat}>
+        <button type="button" onClick={() => void addSelectionToChat()}>
           <MessageSquare size={14} aria-hidden="true" />
           <span>{t("selection.addToChat")}</span>
           <kbd>{addShortcut}</kbd>
@@ -253,16 +360,10 @@ export function TranscriptSelectionMenu({
   </>;
 }
 
-// The keyboard context-menu key fires contextmenu at (0, 0); anchor the menu
-// to the selection instead so it opens next to the highlighted text.
 function menuPointFromEvent(event: MouseEvent): ContextMenuPoint {
-  if (event.clientX > 0 || event.clientY > 0) {
-    return { left: event.clientX, top: event.clientY };
-  }
+  if (event.clientX > 0 || event.clientY > 0) return { left: event.clientX, top: event.clientY };
   const range = document.getSelection()?.rangeCount ? document.getSelection()?.getRangeAt(0) : null;
   const rect = typeof range?.getBoundingClientRect === "function" ? range.getBoundingClientRect() : null;
-  if (rect && (rect.width > 0 || rect.height > 0)) {
-    return { left: rect.left, top: rect.bottom + 4 };
-  }
+  if (rect && (rect.width > 0 || rect.height > 0)) return { left: rect.left, top: rect.bottom + 4 };
   return { left: 12, top: 12 };
 }

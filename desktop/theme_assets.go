@@ -36,6 +36,13 @@ func (a *App) themeAssetMiddleware() func(http.Handler) http.Handler {
 				return
 			}
 			themeID, digest, filename := parts[0], parts[1], parts[2]
+			// Plugin themes (plugin:<plugin>:<theme>) serve scene images
+			// straight from the installed plugin's ZIP; everything else keeps
+			// the registry/library path below.
+			if pluginName, pluginThemeID, ok := parsePluginThemeID(themeID); ok {
+				servePluginThemeAsset(w, r, pluginName, pluginThemeID, digest, filename)
+				return
+			}
 			if !themePackIDRe.MatchString(themeID) {
 				http.NotFound(w, r)
 				return

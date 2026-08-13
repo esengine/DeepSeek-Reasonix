@@ -25,7 +25,7 @@ Reasonix 桌面端原生主题包。主题是**受控皮肤**：语义颜色令�
 | --- | --- | --- |
 | `themeMode` | 自动 / 浅色 / 深色 | 桌面配置 |
 | `baseStyle` | Graphite…Amber | 桌面配置（`theme_style`） |
-| `activeThemeId` | 仅官方或用户主题 | `desktop-theme-state.json` |
+| `activeThemeId` | 仅官方、用户或插件主题 | `desktop-theme-state.json` |
 | `selectedThemeId` / `previewThemeId` | 画廊选中 / 临时预览 | 仅前端内存 |
 
 - `activeThemeId` **禁止**保存基础配色 id。选择基础配色会清空主题包。
@@ -34,18 +34,20 @@ Reasonix 桌面端原生主题包。主题是**受控皮肤**：语义颜色令�
 
 ## 主题类型
 
-画廊分三组：
+画廊分四组：
 
 | 类型 | 来源 | 可编辑 | 可删除 | 可导出 |
 | --- | --- | --- | --- | --- |
 | **基础风格** | 六种视觉方向（Graphite、Aurora、Slate、Carbon、Nocturne、Amber），无令牌覆盖 | 否（需先复制） | 否 | 否 |
 | **官方主题** | 安装包内嵌的八款只读主题（清单 + 原创背景 + 缩略图，MIT） | 否（需先复制） | 否 | 否 |
 | **我的主题** | 编辑器新建、复制，或导入 `.reasonix-theme` | 是 | 是 | 是 |
+| **插件主题** | 已启用插件贡献的 `.reasonix-theme`（Manifest v2 `contributes.themes`），直接从插件目录读取——从不拷入用户库 | 否 | 否（禁用或卸载插件） | 否 |
 
 - 14 个内置 id（6 基础 + 8 官方）均为**保留名**：保存、导入、覆盖复制与删除都会拒绝冲突。
 - 激活官方主题时，仅把其 id 写入 `desktop-theme-state.json`；资源在运行时从嵌入副本读取。
 - 对基础/官方主题执行「复制」会生成可编辑的用户主题（官方背景会拷入用户库），之后可编辑或导出。
 - v1 若把基础配色 id 存为 `activeThemeId`，加载时会迁移到 `desktop.theme_style` 并清空活动主题。
+- 插件主题的外部 id 形如 `plugin:<plugin>:<theme>`；包内 `id` 仍遵循既有 id 规则。无效的 contributed 文件会被跳过并在主题视图中给出警告，绝不致命。当活动 id 对应的插件缺失、被禁用或被卸载时，界面回退到已配置的基础风格，但该 id **保留**在 `desktop-theme-state.json` 中——重新安装同一插件即可恢复主题。保存/删除/复制/导出都会以只读为由拒绝插件主题 id。
 
 ### 八款官方主题
 

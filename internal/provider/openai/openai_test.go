@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -76,11 +77,14 @@ func TestStreamRetriesThenSucceeds(t *testing.T) {
 }
 
 func TestMergeUsageCountsStreamsNotUsageChunks(t *testing.T) {
-	firstChunk := &provider.Usage{PromptTokens: 2, TotalTokens: 2, RequestCount: 2}
-	secondChunk := &provider.Usage{CompletionTokens: 1, TotalTokens: 1, RequestCount: 2}
+	firstChunk := &provider.Usage{PromptTokens: 2, TotalTokens: 2, RequestCount: 2, CacheWriteTokens: 2, CacheWriteBilledTokens: 2.5}
+	secondChunk := &provider.Usage{CompletionTokens: 1, TotalTokens: 1, RequestCount: 2, CacheWriteTokens: 3, CacheWriteBilledTokens: 6}
 	oneStream := mergeUsage(firstChunk, secondChunk, false)
 	if oneStream.RequestCount != 2 {
 		t.Fatalf("same-stream request count = %d, want 2", oneStream.RequestCount)
+	}
+	if oneStream.CacheWriteTokens != 5 || oneStream.CacheWriteBilledTokens != 8.5 {
+		t.Fatalf("same-stream cache writes = raw %d billed %v, want 5/8.5", oneStream.CacheWriteTokens, oneStream.CacheWriteBilledTokens)
 	}
 	nextStream := &provider.Usage{PromptTokens: 3, TotalTokens: 3, RequestCount: 1}
 	combined := mergeUsage(oneStream, nextStream, true)
@@ -528,8 +532,8 @@ func TestStreamUsesConfiguredChatURL(t *testing.T) {
 	var sawRequest bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sawRequest = true
-		if r.URL.Path != "/proxy/v1/chat/completions" {
-			t.Errorf("path = %s, want /proxy/v1/chat/completions", r.URL.Path)
+		if r.URL.RequestURI() != "/proxy/v1/chat/completions" {
+			t.Errorf("request URI = %s, want /proxy/v1/chat/completions", r.URL.RequestURI())
 			http.NotFound(w, r)
 			return
 		}
@@ -547,7 +551,7 @@ func TestStreamUsesConfiguredChatURL(t *testing.T) {
 		BaseURL: srv.URL + "/base",
 		Model:   "model-a",
 		APIKey:  "k",
-		Extra:   map[string]any{"chat_url": srv.URL + "/proxy/v1/chat/completions"},
+		Extra:   map[string]any{"chat_url": srv.URL + "/proxy/v1/chat/completions/"},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1240,9 +1244,24 @@ func TestBuildRequestUsesProviderSpecificOutputBudget(t *testing.T) {
 		return p.(*client)
 	}
 
+	// Official DeepSeek defaults effort to high when unset, so the automatic
+	// ladder lands on the 64K high-reasoning tier — not 128K.
 	deepseek := newClient(t, "https://api.deepseek.com", "deepseek-v4-flash", 0).buildRequest(provider.Request{})
-	if deepseek.MaxTokens != provider.DefaultReasoningOutputTokens || deepseek.MaxCompletionTokens != 0 {
-		t.Fatalf("DeepSeek output budget = max_tokens %d, max_completion_tokens %d", deepseek.MaxTokens, deepseek.MaxCompletionTokens)
+	if deepseek.MaxTokens != provider.DefaultHighReasoningOutputTokens || deepseek.MaxCompletionTokens != 0 {
+		t.Fatalf("DeepSeek auto budget = max_tokens %d, max_completion_tokens %d, want high-reasoning %d",
+			deepseek.MaxTokens, deepseek.MaxCompletionTokens, provider.DefaultHighReasoningOutputTokens)
+	}
+
+	lowEffort, err := New(provider.Config{
+		Name: "test", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash",
+		Extra: map[string]any{"effort": "low", "max_output_tokens": 0},
+	})
+	if err != nil {
+		t.Fatalf("New low-effort DeepSeek: %v", err)
+	}
+	lowReq := lowEffort.(*client).buildRequest(provider.Request{})
+	if lowReq.MaxTokens != provider.DefaultReasoningOutputTokens {
+		t.Fatalf("low-effort auto budget = %d, want ordinary reasoning %d", lowReq.MaxTokens, provider.DefaultReasoningOutputTokens)
 	}
 
 	thinkingDisabledProvider, err := New(provider.Config{
@@ -1253,8 +1272,8 @@ func TestBuildRequestUsesProviderSpecificOutputBudget(t *testing.T) {
 		t.Fatalf("New thinking-disabled DeepSeek: %v", err)
 	}
 	thinkingDisabled := thinkingDisabledProvider.(*client).buildRequest(provider.Request{})
-	if thinkingDisabled.MaxTokens != 0 || thinkingDisabled.MaxCompletionTokens != 0 {
-		t.Fatalf("thinking-disabled DeepSeek received an automatic output budget: %+v", thinkingDisabled)
+	if thinkingDisabled.MaxTokens != provider.DefaultOrdinaryOutputTokens {
+		t.Fatalf("thinking-disabled DeepSeek auto budget = %d, want ordinary %d", thinkingDisabled.MaxTokens, provider.DefaultOrdinaryOutputTokens)
 	}
 	effortDisabledProvider, err := New(provider.Config{
 		Name: "test", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro",
@@ -1264,8 +1283,8 @@ func TestBuildRequestUsesProviderSpecificOutputBudget(t *testing.T) {
 		t.Fatalf("New effort-disabled DeepSeek: %v", err)
 	}
 	effortDisabled := effortDisabledProvider.(*client).buildRequest(provider.Request{})
-	if effortDisabled.MaxTokens != 0 || effortDisabled.Thinking == nil || effortDisabled.Thinking.Type != "disabled" {
-		t.Fatalf("effort-disabled DeepSeek request = %+v, want thinking disabled without an automatic budget", effortDisabled)
+	if effortDisabled.MaxTokens != provider.DefaultOrdinaryOutputTokens || effortDisabled.Thinking == nil || effortDisabled.Thinking.Type != "disabled" {
+		t.Fatalf("effort-disabled DeepSeek request = %+v, want thinking disabled with ordinary %d budget", effortDisabled, provider.DefaultOrdinaryOutputTokens)
 	}
 
 	explicitDisabledProvider, err := New(provider.Config{
@@ -1674,9 +1693,7 @@ func withEffort(c provider.Config, effort string) provider.Config {
 		extra = map[string]any{}
 	} else {
 		cp := make(map[string]any, len(extra)+1)
-		for k, v := range extra {
-			cp[k] = v
-		}
+		maps.Copy(cp, extra)
 		extra = cp
 	}
 	extra["effort"] = effort

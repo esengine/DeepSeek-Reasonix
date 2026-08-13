@@ -8,12 +8,16 @@ import (
 	"unicode/utf8"
 )
 
-// Tokens lowercases Latin words and splits CJK text into single-rune terms. It
-// is intentionally simple: a local, dependency-free approximation of FTS token
-// matching for saved agent history and memory.
+// Tokens lowercases Latin words and splits CJK runs into overlapping bigrams
+// (a lone CJK rune stays a single term) — the standard CJK indexing unit
+// (Lucene's CJKAnalyzer, SQLite FTS): a bigram only matches a real two-rune
+// subsequence where per-rune unigrams matched scattered common characters.
+// Intentionally a local, dependency-free approximation of FTS matching.
 func Tokens(s string) []string {
 	var out []string
 	var b strings.Builder
+	var prev rune
+	cjkRun := 0
 	flush := func() {
 		if b.Len() == 0 {
 			return
@@ -21,18 +25,31 @@ func Tokens(s string) []string {
 		out = append(out, b.String())
 		b.Reset()
 	}
+	endCJK := func() {
+		if cjkRun == 1 {
+			out = append(out, string(prev))
+		}
+		cjkRun = 0
+	}
 	for _, r := range s {
 		switch {
 		case isCJK(r):
 			flush()
-			out = append(out, string(r))
+			if cjkRun > 0 {
+				out = append(out, string([]rune{prev, r}))
+			}
+			prev = r
+			cjkRun++
 		case unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_':
+			endCJK()
 			b.WriteRune(unicode.ToLower(r))
 		default:
 			flush()
+			endCJK()
 		}
 	}
 	flush()
+	endCJK()
 	return out
 }
 
@@ -178,17 +195,11 @@ func snippetAround(text string, byteIdx, maxRunes int) string {
 	}
 	runes := []rune(text)
 	pos := utf8.RuneCountInString(text[:byteIdx])
-	start := pos - maxRunes/2
-	if start < 0 {
-		start = 0
-	}
+	start := max(pos-maxRunes/2, 0)
 	end := start + maxRunes
 	if end > len(runes) {
 		end = len(runes)
-		start = end - maxRunes
-		if start < 0 {
-			start = 0
-		}
+		start = max(end-maxRunes, 0)
 	}
 	prefix := ""
 	suffix := ""

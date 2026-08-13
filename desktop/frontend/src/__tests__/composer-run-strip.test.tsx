@@ -210,13 +210,13 @@ console.log("\ncomposer run strip");
   const profileTrigger = document.querySelector(".composer-profile-trigger") as HTMLButtonElement | null;
   if (!profileTrigger) throw new Error("work mode trigger did not render");
   eq(profileTrigger.textContent?.trim(), "Balanced", "standalone control shows only the current profile");
-  eq(profileTrigger.getAttribute("aria-label"), "Work mode · Balanced", "work mode trigger keeps its full accessible name");
+  eq(profileTrigger.getAttribute("aria-label"), "Execution setting · Balanced", "execution setting trigger keeps its full accessible name");
   ok(profileTrigger.querySelector(".lucide-equal") !== null, "balanced work mode uses a simple equal icon");
   await act(async () => {
     profileTrigger.focus();
     await flushTimers();
   });
-  eq(document.querySelector('[role="tooltip"]')?.textContent, "Work mode · Balanced: Full tools, model-directed execution", "work mode tooltip combines category, value, and summary");
+  eq(document.querySelector('[role="tooltip"]')?.textContent, "Execution setting · Balanced: Auto planning, risk-tiered verification", "execution setting tooltip combines category, value, and summary");
   await act(async () => {
     profileTrigger.blur();
     await flushTimers();
@@ -508,6 +508,35 @@ console.log("\ncomposer run strip");
   ok(/ 4s| 5s| 6s/.test(ticker), `tab B excludes background user-wait from model clock (got "${ticker}")`);
   ok(!/ 7s| 8s| 9s| 10s| 11s/.test(ticker), "background suspension is not counted as model work");
   ok(!/ 5[5-9]s| 6[0-9]s/.test(ticker), "tab B does not show tab A's ~60s turn age as model time");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+// Streaming TPS combines completed usage with only the current request's live
+// character estimate, and divides by provider-output time rather than turn age.
+{
+  const dom = installDom();
+  const live = { id: "assistant-1", text: "x".repeat(40), reasoning: "", reasoningComplete: false };
+  const { root } = await renderComposer({
+    running: true,
+    tabId: "tab-tps",
+    turnStartAt: Date.now() - 60_000,
+    turnTokens: 8,
+    turnOutputTokens: 10,
+    turnOutputCharsAtUsage: 0,
+    turnModelActiveMs: 2_000,
+    liveStore: {
+      subscribe: () => () => {},
+      getSnapshot: () => live,
+    },
+  });
+
+  const ticker = document.querySelector(".composer-run-strip")?.textContent ?? "";
+  ok(ticker.includes("10 tokens/s"), "streaming TPS uses provider-output time instead of full turn age");
+  ok(ticker.includes("18 tokens"), "streaming token total adds the current request estimate to completed usage");
 
   await act(async () => {
     root.unmount();

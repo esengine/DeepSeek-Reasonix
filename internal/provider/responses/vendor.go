@@ -58,6 +58,11 @@ type vendorCapabilities struct {
 	// answer survives long reasoning.
 	defaultMaxOutputTokens int
 
+	// compactionOutputTokens is the separate budget for native/summary
+	// compaction calls. Zero means "no dedicated compaction budget; fall
+	// back to ordinary summarize without inheriting a large default".
+	compactionOutputTokens int
+
 	// summaryRequired marks vendors whose Responses API requires the
 	// `summary` list on input reasoning items (DashScope; without it the
 	// server rejects with "Invalid 'summary': summary is required..."). The
@@ -77,6 +82,8 @@ var vendorTable = map[string]vendorCapabilities{
 		singleSegmentReasoning: false,
 		ignoresTemperature:     false,
 		summaryRequired:        true,
+		// No native compact endpoint yet; summarize fallback only.
+		compactionOutputTokens: 8192,
 	},
 	"deepseek": {
 		stateless:              true,
@@ -84,7 +91,12 @@ var vendorTable = map[string]vendorCapabilities{
 		toolCallReasoning:      true,
 		singleSegmentReasoning: false,
 		ignoresTemperature:     false,
+		// Auto ceiling for ordinary reasoning; high/max is applied via
+		// AutoOutputBudget at construction/request time (64K). Never 128K.
 		defaultMaxOutputTokens: provider.DefaultReasoningOutputTokens,
+		// Compaction summaries use a dedicated 16K-class budget, independent of
+		// ordinary answer output.
+		compactionOutputTokens: provider.DefaultOrdinaryOutputTokens,
 	},
 	"mimo": {
 		stateless:              true,
@@ -92,9 +104,12 @@ var vendorTable = map[string]vendorCapabilities{
 		toolCallReasoning:      true,
 		singleSegmentReasoning: true,
 		ignoresTemperature:     true,
-		defaultMaxOutputTokens: 65536,
+		// Coding-agent default 32K; users may raise explicitly. Not 128K auto.
+		defaultMaxOutputTokens: provider.DefaultReasoningOutputTokens,
+		compactionOutputTokens: provider.DefaultOrdinaryOutputTokens,
 	},
 	// "" (unknown OpenAI-compatible endpoint) → zero value = default behavior.
+	// Unknown gateways deliberately do NOT inherit a large max-output default.
 }
 
 // capabilitiesFor returns the wire capabilities for a detected vendor name.

@@ -163,6 +163,7 @@ func TestRecoveryInactiveUnderYolo(t *testing.T) {
 	prov := &recordingProvider{streams: [][]provider.Chunk{
 		{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "1", Name: "bash", Arguments: `{"command":"go test ./..."}`}}},
 		{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "2", Name: "write_file", Arguments: `{"path":"a.go","content":"x"}`}}},
+		{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "3", Name: "bash", Arguments: `{"command":"go test ./..."}`}}},
 		{{Type: provider.ChunkText, Text: "done"}},
 	}}
 	sess := agent.NewSession("sys")
@@ -445,7 +446,10 @@ func TestNewSessionWaitsForPendingRecoveryPersistence(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewSession: %v", err)
 		}
-	case <-time.After(time.Second):
+	// The assertion is ordering (the select above proved NewSession blocked
+	// until release), not speed: NewSession does real file IO and one second
+	// flakes on loaded Windows runners.
+	case <-time.After(10 * time.Second):
 		t.Fatal("NewSession did not resume after recovery persistence drained")
 	}
 }

@@ -39,7 +39,7 @@ type ProfileResolver func(sk Skill) *event.Profile
 // refresh UI (e.g. a skills sidebar) without a reload. nil is fine.
 type InstalledHook func(name, path string, scope Scope)
 
-// --- run_skill ---
+// run_skill
 
 type runSkillTool struct {
 	store           *Store
@@ -149,7 +149,7 @@ func (t *runSkillTool) profileForSkill(sk Skill) *event.Profile {
 	return profileForSkill(sk, t.profileResolver)
 }
 
-// --- read_only_skill ---
+// read_only_skill
 
 type readOnlySkillTool struct {
 	store           *Store
@@ -315,7 +315,7 @@ func (t *readSkillTool) Execute(_ context.Context, args json.RawMessage) (string
 	return renderInline(sk, strings.TrimSpace(p.Arguments)), nil
 }
 
-// --- dedicated subagent wrappers (explore / research / review / security_review) ---
+// dedicated subagent wrappers (explore / research / review / security_review)
 
 type subagentSkillTool struct {
 	toolName    string
@@ -420,8 +420,9 @@ func BuiltinSubagentTools(store *Store, runner SubagentRunner, profileResolver .
 	}
 	var out []tool.Tool
 	for _, s := range specs {
-		sk, ok := store.Read(s.skillName)
-		if !ok || store.runtimeProfile != "" && !AllowedInProfile(sk, store.runtimeProfile) {
+		// Skill profiles are diagnostic-only; do not hide builtin subagent
+		// entry points based on the session role setting.
+		if _, ok := store.Read(s.skillName); !ok {
 			continue
 		}
 		out = append(out, &subagentSkillTool{
@@ -437,7 +438,7 @@ func BuiltinSubagentTools(store *Store, runner SubagentRunner, profileResolver .
 	return out
 }
 
-// --- install_skill ---
+// install_skill
 
 type installSkillTool struct {
 	store       *Store
@@ -622,7 +623,7 @@ func RenderSkillFile(opts SkillFileOptions) string {
 	return "---\n" + string(raw) + "---\n\n" + strings.TrimRight(opts.Body, " \t\r\n") + "\n"
 }
 
-// --- shared helpers ---
+// shared helpers
 
 // Render builds a skill's invocation text: a header (name, description, source)
 // followed by the body and any arguments. Used directly when a user invokes a
@@ -659,7 +660,7 @@ func cleanSkillName(raw string) string {
 		return ""
 	}
 	stripped := strings.TrimSpace(bracketTagRe.ReplaceAllString(raw, " "))
-	for _, tok := range strings.Fields(stripped) {
+	for tok := range strings.FieldsSeq(stripped) {
 		if c := tok[0]; (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
 			return tok
 		}

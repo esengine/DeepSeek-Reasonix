@@ -57,6 +57,10 @@ type approvalManager struct {
 	// requestApproval): Sink implementations must not block and must not call
 	// back into Ask or the tool-approval chain, or they deadlock the prompt.
 	promptMu sync.Mutex
+	// promptEmitMu serializes prompt registration and emission with an SSE
+	// attach handoff. It is separate from promptMu because promptMu remains
+	// held while waiting for the user's answer.
+	promptEmitMu sync.Mutex
 }
 
 func newApprovalManager(policy permission.Policy, mode string, timeout time.Duration) approvalManager {
@@ -180,7 +184,7 @@ func (g *freshHumanHeadlessGate) Check(ctx context.Context, toolName string, arg
 	}
 	if strings.EqualFold(toolName, "bash") && permission.BashSubjectRequiresExplicitApproval(permission.Subject(args)) {
 		if g.gate.Policy.Decide(toolName, readOnly, args) != permission.Allow && !g.dynamicBashBypass {
-			return false, "this dynamic shell command requires human approval and cannot run in a non-interactive session. Use an interactive session or YOLO mode.", nil
+			return false, "this dynamic shell command requires human approval and cannot run in a non-interactive session. Inline interpreter code (python -c, node -e) is blocked because the host cannot audit it; write the code to a file with write_file and run that file instead (e.g. `python repro.py`), or use read_file/grep for inspection. The user can also switch to an interactive session or YOLO mode.", nil
 		}
 	}
 	return g.gate.Check(ctx, toolName, args, readOnly)
@@ -262,6 +266,7 @@ func (a *approvalManager) registerDecisionKindWithInput(tool, subject, reason st
 		autoDrain = a.autoApprovalWouldAllowLocked(tool, subject)
 	}
 	a.approvals[id] = pendingApproval{
+		id:   id,
 		tool: tool, subject: subject, reason: reason, rawInput: append(json.RawMessage(nil), rawInput...), fresh: fresh, requireHuman: requireHuman,
 		autoDrain: autoDrain, kind: kind, recovery: rec, reply: reply,
 	}
@@ -347,16 +352,56 @@ func (a *approvalManager) resolve(id string) pendingApproval {
 	return p
 }
 
+// resolveTool removes id only when it belongs to the expected specialized
+// decision surface. A mismatched bridge call must not consume another approval
+// type that happens to share the same short numeric id.
+func (a *approvalManager) resolveTool(id, tool string) (pendingApproval, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	p, ok := a.approvals[id]
+	if !ok || p.tool != tool {
+		return pendingApproval{}, false
+	}
+	delete(a.approvals, id)
+	return p, true
+}
+
 // registerAsk allocates an ask ID, records the pending question batch, and
-// returns the reply channel.
+// returns the reply channel. The ask starts queued: registering before the
+// prompt lock is what makes a question waiting behind another prompt visible
+// at all, instead of existing only inside a blocked goroutine.
 func (a *approvalManager) registerAsk(questions []event.AskQuestion) (string, chan []event.AskAnswer) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.nextID++
 	id := strconv.Itoa(a.nextID)
 	reply := make(chan []event.AskAnswer, 1)
-	a.asks[id] = pendingAsk{questions: questions, reply: reply}
+	a.asks[id] = pendingAsk{questions: questions, reply: reply, queued: true}
 	return id, reply
+}
+
+// markAskEmitted clears the queued flag once the ask has reached a frontend,
+// which is what makes it eligible for replay.
+func (a *approvalManager) markAskEmitted(id string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if p, ok := a.asks[id]; ok {
+		p.queued = false
+		a.asks[id] = p
+	}
+}
+
+// queuedAsks reports asks registered but not yet shown.
+func (a *approvalManager) queuedAsks() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	n := 0
+	for _, p := range a.asks {
+		if p.queued {
+			n++
+		}
+	}
+	return n
 }
 
 // cancelAsk drops a pending ask (timeout/abort path).
@@ -456,6 +501,11 @@ func (a *approvalManager) snapshotPrompts() ([]event.Approval, []event.Ask) {
 	}
 	asks := make([]event.Ask, 0, len(a.asks))
 	for id, p := range a.asks {
+		// A queued ask has never been shown; replaying it would put a question
+		// on screen ahead of the prompt it is waiting behind.
+		if p.queued {
+			continue
+		}
 		asks = append(asks, event.Ask{ID: id, Questions: p.questions})
 	}
 	return approvals, asks
@@ -465,7 +515,7 @@ func normalizePlanModeReadOnlyCommandPrefix(prefix string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(prefix)), " ")
 }
 
-// --- decision helpers (caller holds a.mu) ---
+// decision helpers (caller holds a.mu)
 
 func (a *approvalManager) bypassAllowsLocked(tool, subject string, args json.RawMessage) bool {
 	if requiresFreshApprovalTool(tool) {
@@ -534,7 +584,7 @@ func (a *approvalManager) drainLocked(includeExplicitAsk bool) []drainedApproval
 	return pending
 }
 
-// --- pure approval helpers ---
+// pure approval helpers
 
 func normalizeToolApprovalMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {

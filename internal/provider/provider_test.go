@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// --- SanitizeToolPairing ---
+// SanitizeToolPairing
 
 // toolIDsAnswered reports whether every assistant tool_call id has a following
 // tool message answering it — the contract the OpenAI/DeepSeek API enforces.
@@ -128,6 +128,74 @@ func TestModelMessagesAndSanitizeDropLocalOnlyInterruptedOutput(t *testing.T) {
 	}
 }
 
+func TestDecisionReceiptIsDurableButProviderExcluded(t *testing.T) {
+	receipt := &DecisionReceipt{ID: "approval-1", Kind: "tool", Tool: "write_file", Subject: "src/app.go", Outcome: "allow_once"}
+	in := []Message{
+		{Role: RoleUser, Content: "edit the app"},
+		{Role: RoleAssistant, LocalOnly: true, DecisionReceipt: receipt},
+		{Role: RoleAssistant, Content: "done"},
+	}
+	model := ModelMessages(in)
+	if len(model) != 2 || model[0].Content != "edit the app" || model[1].Content != "done" {
+		t.Fatalf("provider messages leaked decision receipt: %+v", model)
+	}
+	if len(in) != 3 || in[1].DecisionReceipt != receipt || !in[1].LocalOnly {
+		t.Fatalf("stored receipt was not preserved: %+v", in)
+	}
+}
+
+func TestAttachedDecisionReceiptPreservesCurrentAndLegacyToolPairing(t *testing.T) {
+	receipt := &DecisionReceipt{ID: "approval-1", Kind: "tool", Tool: "bash", Outcome: "allow_once"}
+	stored := []Message{
+		{Role: RoleUser, Content: "run it"},
+		{
+			Role:             RoleAssistant,
+			ToolCalls:        []ToolCall{{Name: "bash", Arguments: `{}`}},
+			DecisionReceipts: []*DecisionReceipt{receipt},
+		},
+		{Role: RoleTool, Name: "bash", Content: "ok"},
+	}
+
+	current := SanitizeToolPairing(ModelMessages(stored))
+	if len(current) != 3 || current[2].Content != "ok" {
+		t.Fatalf("current reader changed the valid tool turn: %+v", current)
+	}
+	if len(current[1].DecisionReceipts) != 0 {
+		t.Fatalf("provider-visible message leaked local decision metadata: %+v", current[1])
+	}
+
+	// Older binaries ignore the new metadata field. The remaining legacy view
+	// must still contain the same adjacent assistant/result pair, including the
+	// positional pairing used by providers that omit tool-call IDs.
+	legacy := append([]Message(nil), stored...)
+	legacy[1].DecisionReceipts = nil
+	legacy = SanitizeToolPairing(legacy)
+	if len(legacy) != 3 || legacy[1].Role != RoleAssistant || legacy[2].Role != RoleTool || legacy[2].Content != "ok" {
+		t.Fatalf("legacy reader lost the actual tool result: %+v", legacy)
+	}
+}
+
+func TestNormalizeSessionMessagesMigratesInterleavedDecisionReceipt(t *testing.T) {
+	receipt := &DecisionReceipt{ID: "approval-1", Kind: "tool", Tool: "bash", Outcome: "allow_once"}
+	old := []Message{
+		{Role: RoleUser, Content: "run it"},
+		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "call-1", Name: "bash", Arguments: `{}`}}},
+		{Role: RoleAssistant, LocalOnly: true, DecisionReceipt: receipt},
+		{Role: RoleTool, ToolCallID: "call-1", Name: "bash", Content: "actual result"},
+	}
+
+	got := NormalizeSessionMessages(old)
+	if len(got) != 3 {
+		t.Fatalf("migrated messages = %d, want receipt folded into assistant: %+v", len(got), got)
+	}
+	if len(got[1].DecisionReceipts) != 1 || got[1].DecisionReceipts[0] != receipt {
+		t.Fatalf("migrated assistant receipt = %+v, want original receipt", got[1].DecisionReceipts)
+	}
+	if got[2].Role != RoleTool || got[2].Content != "actual result" || strings.Contains(got[2].Content, "interrupted") {
+		t.Fatalf("migrated tool result = %+v, want the actual result without a placeholder", got[2])
+	}
+}
+
 func TestModelMessagesUsesProviderContentWithoutMutatingStoredMessage(t *testing.T) {
 	stored := []Message{{
 		Role:            RoleUser,
@@ -163,6 +231,40 @@ func TestModelMessagesStripsRawContentWithoutChangingLegacyContent(t *testing.T)
 	}
 	if stored[0].RawContent != "fix the bug" || stored[0].Content != rendered {
 		t.Fatalf("stored message was mutated: %+v", stored[0])
+	}
+}
+
+// A stored projection is read twice: as what the model is sent, and as the input
+// the next compaction classifies. Only ToolExecution says a tool call failed, so
+// the strip has to happen at the provider boundary rather than at write time.
+func TestProjectionMessagesKeepsExecutionThatModelMessagesStrips(t *testing.T) {
+	exit := 1
+	stored := []Message{
+		{Role: RoleUser, Content: "task"},
+		{Role: RoleTool, ToolCallID: "c1", Name: "bash", Content: "=== RUN\n--- FAIL: TestX",
+			RawContent: "the whole log", ToolExecution: &ToolExecution{ExitCode: &exit}},
+		{Role: RoleTool, ToolCallID: "local", Name: "x", Content: "display only", LocalOnly: true},
+	}
+
+	proj := ProjectionMessages(stored)
+	if len(proj) != 2 {
+		t.Fatalf("projection kept display-only output: %+v", proj)
+	}
+	if proj[1].ToolExecution == nil {
+		t.Fatal("projection dropped the failure record the next compaction classifies on")
+	}
+	if proj[1].RawContent != "" {
+		t.Fatalf("projection kept unbounded raw content: %+v", proj[1])
+	}
+
+	// The same messages, once they are actually going to a provider.
+	for i, m := range ModelMessages(proj) {
+		if m.ToolExecution != nil {
+			t.Fatalf("local shell metadata reached the wire at index %d: %+v", i, m)
+		}
+	}
+	if stored[1].ToolExecution == nil {
+		t.Fatal("stored message was mutated")
 	}
 }
 
@@ -323,7 +425,7 @@ func TestSanitizeToolPairingBackfillsMissingToolResultName(t *testing.T) {
 	}
 }
 
-// --- Pricing.Cost ---
+// Pricing.Cost
 
 func TestPricingCostNil(t *testing.T) {
 	var p *Pricing
@@ -365,6 +467,34 @@ func TestPricingCostCalculation(t *testing.T) {
 	}
 }
 
+func TestPricingCostUsesCacheWriteBillingTier(t *testing.T) {
+	p := &Pricing{Input: 2.0}
+	u := &Usage{
+		CacheMissTokens:        500_000,
+		CacheWriteTokens:       100_000,
+		CacheWriteBilledTokens: 200_000, // 1h write at 2x input
+	}
+	// 400K ordinary misses + 100K cache writes billed as 200K input units.
+	if got := p.Cost(u); got != 1.2 {
+		t.Errorf("Cost = %f, want 1.2", got)
+	}
+}
+
+func TestPricingCostCacheWriteFieldsAreBackwardCompatible(t *testing.T) {
+	p := &Pricing{Input: 2.0}
+
+	// Old usage records have neither cache-write field and retain the original
+	// one-input-rate calculation.
+	if got := p.Cost(&Usage{CacheMissTokens: 500_000}); got != 1.0 {
+		t.Errorf("legacy Cost = %f, want 1.0", got)
+	}
+	// A producer that reports raw write tokens without a billing tier also
+	// falls back to the ordinary input rate instead of making writes free.
+	if got := p.Cost(&Usage{CacheMissTokens: 500_000, CacheWriteTokens: 100_000}); got != 1.0 {
+		t.Errorf("unpriced write Cost = %f, want 1.0", got)
+	}
+}
+
 func TestPricingCostFallsBackToPromptTokensAsMiss(t *testing.T) {
 	p := &Pricing{Input: 2.0, Output: 10.0}
 	u := &Usage{PromptTokens: 500_000, CompletionTokens: 100_000}
@@ -381,7 +511,7 @@ func TestPricingCostZeroTokens(t *testing.T) {
 	}
 }
 
-// --- Pricing.Symbol ---
+// Pricing.Symbol
 
 func TestPricingSymbolDefault(t *testing.T) {
 	p := &Pricing{}
@@ -428,7 +558,7 @@ func TestPricingSymbolNormalizesCurrencyCodes(t *testing.T) {
 	}
 }
 
-// --- AuthError ---
+// AuthError
 
 func TestAuthErrorWithKeyEnv(t *testing.T) {
 	e := &AuthError{Provider: "deepseek", KeyEnv: "DEEPSEEK_API_KEY", Status: 401}
@@ -471,7 +601,7 @@ func TestAuthErrorImplementsError(t *testing.T) {
 	}
 }
 
-// --- Registry ---
+// Registry
 
 func TestRegistryKindsSorted(t *testing.T) {
 	// The openai package self-registers via init(); we can't control that here
@@ -519,7 +649,7 @@ func TestNewRejectsTypedNilProvider(t *testing.T) {
 	}
 }
 
-// --- Role constants ---
+// Role constants
 
 func TestRoleConstants(t *testing.T) {
 	if RoleSystem != "system" {
@@ -567,10 +697,33 @@ func TestMessageResponsesItemsRemainBackwardCompatible(t *testing.T) {
 	}
 }
 
-// --- ChunkType constants ---
+func TestMessageServerSearchRemainBackwardCompatible(t *testing.T) {
+	legacy := Message{Role: RoleAssistant, Content: "answer"}
+	legacyJSON, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(legacyJSON), "server_search") {
+		t.Fatalf("legacy message gained server_search: %s", legacyJSON)
+	}
+	current := Message{Role: RoleAssistant, Content: "answer", ServerSearch: []ServerSearchCall{{ID: "s1", Query: "q"}}}
+	raw, err := json.Marshal(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var roundTrip Message
+	if err := json.Unmarshal(raw, &roundTrip); err != nil {
+		t.Fatal(err)
+	}
+	if len(roundTrip.ServerSearch) != 1 || roundTrip.ServerSearch[0].ID != "s1" || roundTrip.ServerSearch[0].Query != "q" {
+		t.Fatalf("round-tripped ServerSearch = %#v", roundTrip.ServerSearch)
+	}
+}
+
+// ChunkType constants
 
 func TestChunkTypeConstants(t *testing.T) {
-	types := []ChunkType{ChunkText, ChunkReasoning, ChunkToolCallStart, ChunkToolCallArgsDelta, ChunkToolCall, ChunkUsage, ChunkDone, ChunkError, ChunkResponsesItem}
+	types := []ChunkType{ChunkText, ChunkReasoning, ChunkToolCallStart, ChunkToolCallArgsDelta, ChunkToolCall, ChunkUsage, ChunkDone, ChunkError, ChunkResponsesItem, ChunkServerSearch}
 	for i, ct := range types {
 		if int(ct) != i {
 			t.Errorf("ChunkType %d: got %d", i, int(ct))
@@ -578,7 +731,7 @@ func TestChunkTypeConstants(t *testing.T) {
 	}
 }
 
-// --- ToolSchema ---
+// ToolSchema
 
 func TestToolSchemaJSON(t *testing.T) {
 	ts := ToolSchema{

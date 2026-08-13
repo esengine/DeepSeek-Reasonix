@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -324,8 +325,11 @@ func TestTmuxAdapterReplacesLegacyMappingWithoutTrustingIt(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	legacy := `{"schema_version":1,"task_id":"t1","project_dir":"` + project + `","session":"legacy","window":"task","pane":"legacy:task.0"}`
-	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+	legacy, err := json.Marshal(TmuxMapping{SchemaVersion: 1, TaskID: "t1", ProjectDir: project, Session: "legacy", Window: "task", Pane: "legacy:task.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, legacy, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	mock := &tmuxMock{}
@@ -349,6 +353,9 @@ func TestTmuxAdapterWritesPrivateMappingFiles(t *testing.T) {
 	a := NewTmuxAdapterWithRunner(s, ".reasonix/tasks", &tmuxMock{})
 	if result := a.Attach(context.Background(), project, "t1", "demo"); result.Error != nil {
 		t.Fatal(result.Error)
+	}
+	if runtime.GOOS == "windows" {
+		return // Windows does not expose POSIX permission bits through os.FileMode.
 	}
 
 	for path, want := range map[string]os.FileMode{

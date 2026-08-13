@@ -40,9 +40,22 @@ non-destructively when `<Reasonix home>/.env` is missing them.
 | Sessions | `<state root>/sessions/` |
 | Archives | `<state root>/archive/` |
 | Memory | `<state root>/memory/` and `<state root>/projects/` |
+| Disposable session catalog | `<cache root>/session-catalog/v3.sqlite` |
+| Disposable history search catalog | `<cache root>/history-search/v1.sqlite` |
+| Disposable usage catalog | `<cache root>/usage-catalog/v1.sqlite` |
+| Disposable task catalog | `<cache root>/task-catalog/v1.sqlite` |
 
 `<state root>` defaults to `<Reasonix home>`. It only differs when
 `REASONIX_STATE_HOME` is set.
+
+The session catalog is a rebuildable query projection, not user data. Session
+JSONL, event logs, metadata sidecars, and `desktop-projects.json` remain
+authoritative. See [Session Catalog and Desktop Startup](./SESSION_CATALOG.md).
+The history projection is documented in
+[History Search Catalog](./HISTORY_SEARCH_CATALOG.md).
+The usage rollup projection is documented in [Usage Catalog](./USAGE_CATALOG.md).
+Task snapshots and event logs likewise remain authoritative; the rebuildable
+cross-project projection is documented in [Task Catalog](./TASK_CATALOG.md).
 
 The global user config is named `config.toml`. Project-local config files keep
 the name `reasonix.toml`. If someone says "global reasonix.toml", they usually
@@ -74,17 +87,19 @@ credentials_store = "auto"   # legacy compatibility; provider keys are in .env
 [ui]
 theme = "auto"
 cursor_shape = "bar"         # CLI/TUI text cursor: underline|block|bar
+show_turn_usage = false       # hide per-request token/cost receipts in the TUI; default true
 
 [desktop]
 provider_access = ["deepseek"]
 
 [[providers]]
 name        = "deepseek"
-kind        = "openai"
-base_url    = "https://api.deepseek.com"
+kind        = "anthropic"
+base_url    = "https://api.deepseek.com/anthropic"
 models      = ["deepseek-v4-flash", "deepseek-v4-pro"]
 default     = "deepseek-v4-flash"
 api_key_env = "DEEPSEEK_API_KEY"
+web_search  = true
 
 [[plugins]]
 name    = "example"
@@ -98,6 +113,10 @@ redaction. Secrets belong in the global `.env` below.
 `[ui].cursor_shape` affects only the CLI/TUI composer. The default `bar` stays
 visible without covering double-width CJK characters; use `block` or
 `underline` if you prefer those cursor shapes.
+
+`[ui].show_turn_usage = false` hides the token and cost receipt appended to the
+TUI transcript after each model request. Accounting and live status updates
+remain active. The default is `true`.
 
 ### Custom provider `api_key_env` names
 
@@ -129,12 +148,16 @@ providers accidentally share `CUSTOM_API_KEY`, edit each provider's
 
 ### Custom provider endpoint URLs
 
-Custom OpenAI-compatible providers normally store an API endpoint in `base_url`.
-Reasonix sends chat requests to `base_url + "/chat/completions"` and probes model
-discovery candidates such as `/models` and `/v1/models`. If a gateway gives you a
-complete chat request URL, set `chat_url`; Reasonix will use it directly and will
-not append `/chat/completions`. If model discovery needs a separate address, set
-`models_url`.
+The desktop custom-provider form treats its **API address** as the exact request
+URL and stores it in `request_url`; Reasonix does not append or rewrite its path.
+Existing TOML entries are not reinterpreted: legacy `chat_url` keeps its former
+OpenAI-only behavior, while Anthropic and Responses continue deriving their path
+from `base_url` until the provider is explicitly saved in the current desktop UI.
+Saving an OpenAI-compatible provider mirrors the exact address into legacy
+`chat_url`, so previous releases continue using the same target. Previous
+releases cannot honor arbitrary Anthropic or Responses request paths.
+If model discovery needs a separate address, set `models_url`; otherwise Reasonix
+probes candidates derived from `base_url`.
 
 If a gateway requires vendor-specific top-level request body fields, set
 `extra_body`, for example `extra_body = { enable_thinking = true }`. These values

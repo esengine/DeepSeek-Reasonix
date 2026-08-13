@@ -12,8 +12,24 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"reasonix/internal/repair"
 )
+
+// duplicateMacHandoffFD gives the in-process helper the same exclusive FD
+// ownership it has in production after exec.ExtraFiles. Passing File.Fd()
+// directly would leave two os.File wrappers owning one descriptor; the stale
+// test wrapper's finalizer could later close an unrelated descriptor that
+// reused the same number, corrupting another test's TempDir cleanup.
+func duplicateMacHandoffFD(t *testing.T, file *os.File) int {
+	t.Helper()
+	fd, err := unix.Dup(int(file.Fd()))
+	if err != nil {
+		t.Fatalf("duplicate handoff fd: %v", err)
+	}
+	return fd
+}
 
 func installMacHandoffTestDeps(
 	t *testing.T,
@@ -1001,6 +1017,44 @@ func TestMacUpdateHandoffParserRequiresCompletePipePair(t *testing.T) {
 	}
 }
 
+func TestMacUpdateHandoffReadinessSurfacesChildStartupFailure(t *testing.T) {
+	readyReader, readyWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer readyReader.Close()
+	defer readyWriter.Close()
+	originalRead := readMacUpdateHandoff
+	originalLogPath := macHandoffLogPath
+	readMacUpdateHandoff = func() (*repair.UpdateTransaction, error) {
+		return nil, fmt.Errorf("pending transaction is unreadable")
+	}
+	macHandoffLogPath = func() string { return filepath.Join(t.TempDir(), "update-helper.log") }
+	t.Cleanup(func() {
+		readMacUpdateHandoff = originalRead
+		macHandoffLogPath = originalLogPath
+	})
+	readyFD := duplicateMacHandoffFD(t, readyWriter)
+	done := make(chan int, 1)
+	go func() {
+		done <- runMacUpdateHandoff(macUpdateHandoffConfig{
+			ToVersion:     "v2",
+			CreatedAt:     "2026-07-28T00:00:00Z",
+			TransactionID: strings.Repeat("a", 64),
+			ReadyFD:       readyFD,
+			ProceedFD:     int(readyWriter.Fd()) + 1,
+		})
+	}()
+	err = waitForMacHandoffReady(readyReader, time.Second)
+	if err == nil || !strings.Contains(err.Error(), "read-pending-transaction") ||
+		!strings.Contains(err.Error(), "pending transaction is unreadable") {
+		t.Fatalf("readiness error = %v", err)
+	}
+	if code := <-done; code == 0 {
+		t.Fatal("helper startup failure returned success")
+	}
+}
+
 func TestMacUpdateHandoffHandshakeWaitsForParentRelease(t *testing.T) {
 	readyReader, readyWriter, err := os.Pipe()
 	if err != nil {
@@ -1011,13 +1065,17 @@ func TestMacUpdateHandoffHandshakeWaitsForParentRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer readyReader.Close()
+	defer readyWriter.Close()
+	defer proceedReader.Close()
 	defer proceedWriter.Close()
 
+	readyFD := duplicateMacHandoffFD(t, readyWriter)
+	proceedFD := duplicateMacHandoffFD(t, proceedReader)
 	done := make(chan error, 1)
 	go func() {
 		done <- completeMacHandoffHandshake(macUpdateHandoffConfig{
-			ReadyFD:   int(readyWriter.Fd()),
-			ProceedFD: int(proceedReader.Fd()),
+			ReadyFD:   readyFD,
+			ProceedFD: proceedFD,
 		})
 	}()
 	if err := waitForMacHandoffReady(readyReader, time.Second); err != nil {
@@ -1054,15 +1112,19 @@ func TestMacUpdateHandoffHandshakeRejectsParentExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer readyReader.Close()
+	defer readyWriter.Close()
+	defer proceedReader.Close()
 	if err := proceedWriter.Close(); err != nil {
 		t.Fatal(err)
 	}
 
+	readyFD := duplicateMacHandoffFD(t, readyWriter)
+	proceedFD := duplicateMacHandoffFD(t, proceedReader)
 	done := make(chan error, 1)
 	go func() {
 		done <- completeMacHandoffHandshake(macUpdateHandoffConfig{
-			ReadyFD:   int(readyWriter.Fd()),
-			ProceedFD: int(proceedReader.Fd()),
+			ReadyFD:   readyFD,
+			ProceedFD: proceedFD,
 		})
 	}()
 	if err := waitForMacHandoffReady(readyReader, time.Second); err != nil {
@@ -1117,12 +1179,14 @@ func TestMacUpdateHandoffParentExitCancelsPreparedTransaction(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer readyReader.Close()
+	defer readyWriter.Close()
+	defer proceedReader.Close()
 	if err := proceedWriter.Close(); err != nil {
 		t.Fatal(err)
 	}
 	cfg := macHandoffConfigFor(tx)
-	cfg.ReadyFD = int(readyWriter.Fd())
-	cfg.ProceedFD = int(proceedReader.Fd())
+	cfg.ReadyFD = duplicateMacHandoffFD(t, readyWriter)
+	cfg.ProceedFD = duplicateMacHandoffFD(t, proceedReader)
 
 	if code := runMacUpdateHandoff(cfg); code == 0 {
 		t.Fatal("handoff accepted a parent that exited before release")

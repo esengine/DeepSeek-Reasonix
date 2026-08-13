@@ -49,6 +49,7 @@ func RedactSessions(opts RedactSessionsOptions) RedactSessionsResult {
 	dirs := redactSessionDirs(opts.Dirs)
 	res := RedactSessionsResult{Dirs: dirs, DryRun: opts.DryRun}
 	for _, dir := range dirs {
+		var candidates []string
 		if err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				res.Errors = append(res.Errors, fmt.Sprintf("%s: %v", path, err))
@@ -60,24 +61,47 @@ func RedactSessions(opts RedactSessionsOptions) RedactSessionsResult {
 			if d.IsDir() || !redactSessionCandidate(path) {
 				return nil
 			}
-			res.FilesScanned++
-			if sessionPath := redactionSessionPath(path); sessionPath != "" && sessionRedactionLeaseHeld(sessionPath) {
-				res.FilesSkipped++
-				return nil
-			}
-			changed, rewritten, err := redactSessionArtifact(path, opts.DryRun)
-			if err != nil {
-				res.Errors = append(res.Errors, fmt.Sprintf("%s: %v", path, err))
-				return nil
-			}
-			res.FilesChanged += changed
-			res.BytesRewritten += rewritten
+			candidates = append(candidates, path)
 			return nil
 		}); err != nil {
 			res.Errors = append(res.Errors, fmt.Sprintf("%s: %v", dir, err))
 		}
+		// A transcript rewrite now refreshes its listing projection. Process an
+		// existing branch-meta sidecar first so a secret-bearing sidecar is
+		// counted and redacted before the transcript replaces its preview.
+		sort.SliceStable(candidates, func(i, j int) bool {
+			left, right := redactionCandidatePriority(candidates[i]), redactionCandidatePriority(candidates[j])
+			if left != right {
+				return left < right
+			}
+			return candidates[i] < candidates[j]
+		})
+		for _, path := range candidates {
+			res.FilesScanned++
+			if sessionPath := redactionSessionPath(path); sessionPath != "" && sessionRedactionLeaseHeld(sessionPath) {
+				res.FilesSkipped++
+				continue
+			}
+			changed, rewritten, err := redactSessionArtifact(path, opts.DryRun)
+			if err != nil {
+				res.Errors = append(res.Errors, fmt.Sprintf("%s: %v", path, err))
+				continue
+			}
+			res.FilesChanged += changed
+			res.BytesRewritten += rewritten
+		}
 	}
 	return res
+}
+
+func redactionCandidatePriority(path string) int {
+	if strings.HasSuffix(filepath.Base(path), ".jsonl.meta") {
+		return 0
+	}
+	if store.IsSessionTranscriptName(filepath.Base(path)) {
+		return 1
+	}
+	return 2
 }
 
 func redactSessionDirs(in []string) []string {
@@ -157,8 +181,8 @@ func sessionRedactionLeaseHeld(sessionPath string) bool {
 	if agent.SessionLeaseHeld(sessionPath) {
 		return true
 	}
-	if strings.HasSuffix(sessionPath, ".guardian.jsonl") {
-		parent := strings.TrimSuffix(sessionPath, ".guardian.jsonl") + ".jsonl"
+	if before, ok := strings.CutSuffix(sessionPath, ".guardian.jsonl"); ok {
+		parent := before + ".jsonl"
 		return agent.SessionLeaseHeld(parent)
 	}
 	return false
@@ -223,7 +247,7 @@ func redactSessionTranscript(path string, dryRun bool) (int64, int64, error) {
 	// The replayed view alone is not enough: a replace event supersedes
 	// earlier records without erasing them, so a raw secret can survive in a
 	// stale event while the current messages are already clean. Scan every
-	// record; Session.Save compacts the whole log into a single clean replace
+	// record; SaveRewriteCompact folds the whole log into one clean replace
 	// event, which erases the stale bytes.
 	if !messagesNeedRedaction(s.Messages) && !(eventLogExists && eventLogNeedsRedaction(eventLog)) {
 		return 0, 0, nil
@@ -232,7 +256,11 @@ func redactSessionTranscript(path string, dryRun bool) (int64, int64, error) {
 		return files, redactedEncodedSize(s.Messages), nil
 	}
 	s.Replace(secrets.RedactMessages(s.Messages))
-	if err := s.Save(path); err != nil {
+	// Redaction is an intentional rewrite, but it must still be CAS-protected:
+	// the loaded transcript may have gone stale while the doctor inspected it.
+	// SaveRewrite preserves the newer external transcript and reports a conflict
+	// instead of force-replacing it with an older pre-redaction snapshot.
+	if err := s.SaveRewriteCompact(path); err != nil {
 		return 0, 0, err
 	}
 	var rewritten int64
@@ -300,7 +328,10 @@ func redactedEncodedSize(msgs []provider.Message) int64 {
 // (preview, titles, goal, recovery reason) through the typed load/save pair so
 // revisions, digests, and timestamps survive untouched.
 func redactBranchMeta(sessionPath string, dryRun bool) (int64, int64, error) {
-	unlock := agent.LockSessionMetaPath(sessionPath)
+	unlock, err := agent.LockSessionMetaPath(sessionPath)
+	if err != nil {
+		return 0, 0, err
+	}
 	defer unlock()
 	meta, ok, err := agent.LoadBranchMeta(sessionPath)
 	if err != nil || !ok {
@@ -319,7 +350,7 @@ func redactBranchMeta(sessionPath string, dryRun bool) (int64, int64, error) {
 	if dryRun {
 		return 1, 0, nil
 	}
-	if err := agent.SaveBranchMetaPreserveUpdated(sessionPath, meta); err != nil {
+	if err := agent.SaveBranchMetaPreserveUpdatedLocked(sessionPath, meta); err != nil {
 		return 0, 0, err
 	}
 	var rewritten int64

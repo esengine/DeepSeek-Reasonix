@@ -106,7 +106,7 @@ func semanticPool(text string, entries []Entry) []Entry {
 		// bounded built-in/high-policy Skill set so English metadata does not make
 		// the semantic router blind to Chinese requests.
 		matched := false
-		for _, tok := range strings.Fields(text) {
+		for tok := range strings.FieldsSeq(text) {
 			if len(tok) < 3 {
 				continue
 			}
@@ -172,7 +172,13 @@ func (r *SemanticRouter) callModel(ctx context.Context, input string, candidates
 			return
 		}
 		if (usage.PromptTokens > 0 || usage.CompletionTokens > 0) && r.Audit != nil {
-			r.Audit.RecordRouterUsage(usage.PromptTokens, usage.CompletionTokens, r.Pricing.Cost(usage), time.Since(start).Milliseconds())
+			// Host-side audit only: cost is estimated from the rate card and never
+			// enters the model request. Prefer CostQuote when wiring new audit sinks.
+			cost := 0.0
+			if r.Pricing != nil && usage != nil {
+				cost = r.Pricing.Cost(usage)
+			}
+			r.Audit.RecordRouterUsage(usage.PromptTokens, usage.CompletionTokens, cost, time.Since(start).Milliseconds())
 		}
 		if r.Sink != nil {
 			r.Sink.Emit(event.Event{
@@ -184,7 +190,7 @@ func (r *SemanticRouter) callModel(ctx context.Context, input string, candidates
 			})
 		}
 	}()
-	ch, err := provider.StreamWithRequestBudget(ctx, r.Provider, req)
+	ch, err := r.Provider.Stream(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -248,7 +254,7 @@ func mergeSemanticIDs(decision RouteDecision, catalog Catalog, ids []string, rea
 			continue
 		}
 		e, ok := catalog.Lookup(id)
-		if !ok {
+		if !ok || e.Status == StatusFailed || e.Status == StatusDisabled {
 			continue
 		}
 		decision.Candidates = append(decision.Candidates, RouteCandidate{

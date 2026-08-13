@@ -16,6 +16,11 @@ import (
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
+func TestMain(m *testing.M) {
+	endpoint = "http://127.0.0.1:0/v1"
+	os.Exit(m.Run())
+}
+
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
 
 func telemetryResponse(status int) *http.Response {
@@ -227,7 +232,7 @@ func TestPendingQueueCountsActiveAndRecoversStaleClaims(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < maxPending; i++ {
+	for i := range maxPending {
 		path := filepath.Join(dir, strings.Repeat("a", 16)+"-"+time.Unix(int64(i), 0).Format("150405")+".json.uploading")
 		if err := os.WriteFile(path, []byte("{}"), 0o600); err != nil {
 			t.Fatal(err)

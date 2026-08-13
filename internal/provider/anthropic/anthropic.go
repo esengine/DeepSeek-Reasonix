@@ -50,10 +50,10 @@ const (
 	// defaultBaseURL is the first-party endpoint; config may override it (e.g. a
 	// gateway). Bedrock/Vertex use a different request shape and are out of scope.
 	defaultBaseURL = "https://api.anthropic.com"
-	// defaultMaxTokens is the output ceiling used when neither the provider config
-	// nor the request supplies one. Anthropic requires max_tokens, so unlike the
-	// optional OpenAI-compatible budget it cannot be omitted.
-	defaultMaxTokens = 32768
+	// defaultMaxTokens is the mandatory Anthropic fallback when neither config
+	// nor request supplies max_tokens. Ordinary turns use 16K; reasoning-capable
+	// paths raise via AutoOutputBudget. 128K is never automatic.
+	defaultMaxTokens = provider.DefaultOrdinaryOutputTokens
 )
 
 func init() {
@@ -73,28 +73,8 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	if baseURL == "" {
 		baseURL = defaultBaseURL
 	}
-	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
-	keySource, _ := cfg.Extra["api_key_source"].(string)
-	thinking, _ := cfg.Extra["thinking"].(string)
-	thinking = strings.ToLower(strings.TrimSpace(thinking))
-	effort, _ := cfg.Extra["effort"].(string)
-	effort = strings.ToLower(strings.TrimSpace(effort))
-	vision, _ := cfg.Extra["vision"].(bool)
-	webSearch, _ := cfg.Extra["web_search"].(bool)
-	headers, _ := cfg.Extra["headers"].(map[string]string)
-	authHeader, _ := cfg.Extra["auth_header"].(bool)
-	maxOutputTokens, _ := cfg.Extra["max_output_tokens"].(int)
-	if maxOutputTokens <= 0 {
-		// Messages requires max_tokens, so an optional-budget disable request
-		// falls back to the provider's stable mandatory default.
-		maxOutputTokens = defaultMaxTokens
-	}
-	httpClient, err := newHTTPClient(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("anthropic: network: %w", err)
-	}
 	// Anthropic's API surface is at {root}/v1/messages, so c.baseURL stores
-	// the *root* — without any trailing /v1. The setup wizard, however, lets
+	// the *root* -- without any trailing /v1. The setup wizard, however, lets
 	// users paste a full OpenAI-compatible URL (e.g.
 	// "https://proxy.example.com/v1") because that's what /models probes
 	// expect. Stripping the trailing /v1 here makes both forms land on the
@@ -102,11 +82,54 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	// root-vs-versioned split. Without this, a user pasting
 	// "https://proxy.example.com/v1" would probe /v1/models successfully
 	// but get the chat client concatenating onto
-	// "https://proxy.example.com/v1/v1/messages" — a 404.
+	// "https://proxy.example.com/v1/v1/messages" -- a 404.
 	root := strings.TrimRight(baseURL, "/")
 	root = strings.TrimSuffix(root, "/v1")
 	if root == "" {
 		root = defaultBaseURL
+	}
+	requestURL, _ := cfg.Extra["request_url"].(string)
+	requestURL = strings.TrimSpace(requestURL)
+	if requestURL == "" {
+		requestURL = root + "/v1/messages"
+	}
+	officialDeepSeek := openai.IsDeepSeek(root)
+	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
+	keySource, _ := cfg.Extra["api_key_source"].(string)
+	thinking, _ := cfg.Extra["thinking"].(string)
+	thinking = strings.ToLower(strings.TrimSpace(thinking))
+	effort, _ := cfg.Extra["effort"].(string)
+	effort = strings.ToLower(strings.TrimSpace(effort))
+	vision, _ := cfg.Extra["vision"].(bool)
+	// DeepSeek's official Anthropic-compatible endpoint is text-only. Enforce
+	// that wire constraint here as defense in depth, independent of config or
+	// extension capability metadata.
+	vision = vision && !officialDeepSeek
+	webSearch, _ := cfg.Extra["web_search"].(bool)
+	headers, _ := cfg.Extra["headers"].(map[string]string)
+	authHeader, _ := cfg.Extra["auth_header"].(bool)
+	maxOutputTokens, _ := cfg.Extra["max_output_tokens"].(int)
+	if maxOutputTokens <= 0 {
+		// Messages requires max_tokens. 0 = automatic; negative also falls back
+		// because the wire field is mandatory.
+		reasoningOn := officialDeepSeek &&
+			!strings.EqualFold(thinking, "disabled") &&
+			!strings.EqualFold(effort, "disabled") &&
+			!strings.EqualFold(effort, "off") &&
+			!strings.EqualFold(effort, "none")
+		if officialDeepSeek {
+			maxOutputTokens = provider.AutoOutputBudget(reasoningOn, effort)
+		} else {
+			// Native Anthropic and unknown gateways: conservative ordinary default.
+			maxOutputTokens = defaultMaxTokens
+			if strings.EqualFold(thinking, "adaptive") || strings.EqualFold(thinking, "enabled") {
+				maxOutputTokens = provider.AutoOutputBudget(true, effort)
+			}
+		}
+	}
+	httpClient, err := newHTTPClient(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("anthropic: network: %w", err)
 	}
 	return &client{
 		name:             name,
@@ -114,8 +137,10 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		keyEnv:           keyEnv,
 		keySource:        keySource,
 		baseURL:          root,
+		requestURL:       requestURL,
 		model:            cfg.Model,
-		deepseek:         openai.IsDeepSeek(root),
+		nativeAnthropic:  strings.EqualFold(root, defaultBaseURL),
+		deepseek:         officialDeepSeek,
 		thinking:         thinking,
 		effort:           effort,
 		vision:           vision,
@@ -140,7 +165,9 @@ type client struct {
 	keyEnv           string // api_key_env name, surfaced in auth errors
 	keySource        string // source of keyEnv, surfaced in auth errors
 	baseURL          string
+	requestURL       string
 	model            string
+	nativeAnthropic  bool   // first-party endpoint: documented default-5m cache-write pricing applies
 	deepseek         bool   // official DeepSeek Anthropic endpoint: unsigned reasoning replay + automatic cache
 	thinking         string // "adaptive" enables extended thinking; "" = off (config-driven)
 	effort           string // output_config.effort: low|medium|high|xhigh|max; "" = provider default
@@ -203,7 +230,7 @@ func (c *client) MissingToolCallReasoningWarningIdentity() string {
 		protocol = "deepseek-anthropic"
 	}
 	return strings.Join([]string{
-		"anthropic", strings.TrimSpace(c.name), strings.TrimSpace(c.baseURL),
+		"anthropic", strings.TrimSpace(c.name), strings.TrimSpace(c.requestURL),
 		strings.TrimSpace(c.model), protocol, strings.TrimSpace(c.thinking), strings.TrimSpace(c.effort),
 	}, "\x00")
 }
@@ -261,7 +288,7 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 	requestCtx := provider.WithRequestAttemptCounter(ctx)
 	buf := bufPool.Get().(*bytes.Buffer)
 	buf.Reset()
-	if err := json.NewEncoder(buf).Encode(c.buildRequest(req)); err != nil {
+	if err := json.NewEncoder(buf).Encode(c.buildRequest(requestCtx, req)); err != nil {
 		bufPool.Put(buf)
 		return nil, fmt.Errorf("%s: marshal request: %w", c.name, err)
 	}
@@ -270,7 +297,7 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 	bufPool.Put(buf)
 
 	newReq := func(ctx context.Context) (*http.Request, error) {
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/messages", bytes.NewReader(body))
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.requestURL, bytes.NewReader(body))
 		if err != nil {
 			return nil, err
 		}
@@ -301,7 +328,7 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 // become `tool_use` blocks; RoleTool results become `tool_result` blocks in a user
 // turn. Consecutive same-role messages are coalesced because the API requires
 // alternating user/assistant turns (tool results are user turns).
-func (c *client) buildRequest(req provider.Request) anthRequest {
+func (c *client) buildRequest(_ context.Context, req provider.Request) anthRequest {
 	var system []textBlock
 	var msgs []anthMessage
 
@@ -359,6 +386,7 @@ func (c *client) buildRequest(req provider.Request) anthRequest {
 			} else if c.thinking == "adaptive" && m.ReasoningContent != "" && m.ReasoningSignature != "" {
 				blocks = append(blocks, contentBlock{Type: "thinking", Thinking: m.ReasoningContent, Signature: m.ReasoningSignature})
 			}
+			blocks = appendServerSearchBlocks(blocks, m.ServerSearch)
 			if m.Content != "" {
 				blocks = append(blocks, contentBlock{Type: "text", Text: m.Content})
 			}
@@ -394,7 +422,10 @@ func (c *client) buildRequest(req provider.Request) anthRequest {
 	// tools → system → messages, so a marker on the last system block caches
 	// tools+system together; with no system, mark the last tool. A marker on the
 	// last block of the last message caches the conversation prefix, accruing hits
-	// incrementally as turns are appended. Max 4 breakpoints; we use ≤2.
+	// incrementally as turns are appended. Max 4 breakpoints; we use ≤2. Keep
+	// Anthropic's default 5m TTL by omitting the ttl field. Besides being cheaper
+	// than the opt-in 1h write, this keeps provider-visible request bytes stable
+	// across turns, retries, and wall-clock timing.
 	if !c.deepseek {
 		if n := len(system); n > 0 {
 			system[n-1].CacheControl = ephemeral()
@@ -514,7 +545,8 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	}
 
 	tools := map[int]*provider.ToolCall{} // tool_use blocks, keyed by content index
-	argBuckets := map[int]int{}           // last emitted 2KB progress bucket per block
+	searches := newSearchStream()
+	argBuckets := map[int]int{} // last emitted 2KB progress bucket per block
 	var inTok, outTok, cacheCreate, cacheRead int
 	var stopReason string
 	haveUsage := false
@@ -565,27 +597,9 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 				mergeUsage(ev.Message.Usage)
 			}
 		case "content_block_start":
-			if ev.ContentBlock != nil {
-				switch ev.ContentBlock.Type {
-				case "tool_use":
-					tc := &provider.ToolCall{ID: ev.ContentBlock.ID, Name: ev.ContentBlock.Name}
-					tools[ev.Index] = tc
-					if !send(provider.Chunk{Type: provider.ChunkToolCallStart, ToolCall: &provider.ToolCall{ID: tc.ID, Name: tc.Name}}) {
-						return
-					}
-				case "web_search_tool_result":
-					// Search results are delivered inline in content_block.content as a
-					// JSON array of result objects (title, url, encrypted_content).
-					// Only the model sees the plain text; we surface titles and URLs.
-					// server_tool_use blocks (the model initiating the search) are
-					// intentionally skipped — the API executes them server-side and
-					// the results appear here.
-					formatted := formatWebSearchResults(ev.ContentBlock.Content)
-					if formatted != "" {
-						if !send(provider.Chunk{Type: provider.ChunkText, Text: formatted}) {
-							return
-						}
-					}
+			if chunk := beginContentBlock(ev.Index, ev.ContentBlock, tools, searches); chunk != nil {
+				if !send(*chunk) {
+					return
 				}
 			}
 		case "content_block_delta":
@@ -623,6 +637,11 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 						}
 					}
 				}
+				if next := searches.argsDelta(ev.Index, ev.Delta.PartialJSON); next != nil {
+					if !send(provider.Chunk{Type: provider.ChunkServerSearch, ServerSearch: next}) {
+						return
+					}
+				}
 			}
 		case "content_block_stop":
 			if tc := tools[ev.Index]; tc != nil {
@@ -637,7 +656,11 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			}
 			mergeUsage(ev.Usage)
 		case "message_stop":
-			// Stream complete; fall through to finalize below.
+			// Anthropic's terminal event. Tool blocks may already have closed;
+			// without this, the attempt stays speculative and is not committed.
+			// Stop reading immediately so a post-terminal connection reset cannot
+			// reclassify a complete response as interrupted.
+			goto finalize
 		case "error":
 			msg := "stream error"
 			if ev.Error != nil && ev.Error.Message != "" {
@@ -651,23 +674,27 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	if ctx.Err() != nil {
 		return
 	}
-	if stalled.Load() {
-		send(provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("%s: stream stalled — no data for %s, connection likely dropped", c.name, idleTimeout)})
+	if err := streamScanEndError(c.name, idleTimeout, stalled.Load(), scanner.Err(), stopReason); err != nil {
+		send(provider.Chunk{Type: provider.ChunkError, Err: err})
 		return
 	}
-	if err := scanner.Err(); err != nil {
-		send(provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("%s: read stream: %w", c.name, err)})
-		return
-	}
+	goto finalize
 
+finalize:
 	if haveUsage {
+		cacheWriteBilledTokens := 0.0
+		if cacheCreate > 0 && c.nativeAnthropic {
+			cacheWriteBilledTokens = float64(cacheCreate) * cacheWrite5MinuteInputMultiplier
+		}
 		usage := &provider.Usage{
-			PromptTokens:     inTok + cacheCreate + cacheRead,
-			CompletionTokens: outTok,
-			TotalTokens:      inTok + cacheCreate + cacheRead + outTok,
-			CacheHitTokens:   cacheRead,
-			CacheMissTokens:  inTok + cacheCreate, // uncached input + cache writes (billed ≥1×)
-			FinishReason:     mapStopReason(stopReason),
+			PromptTokens:           inTok + cacheCreate + cacheRead,
+			CompletionTokens:       outTok,
+			TotalTokens:            inTok + cacheCreate + cacheRead + outTok,
+			CacheHitTokens:         cacheRead,
+			CacheMissTokens:        inTok + cacheCreate,
+			CacheWriteTokens:       cacheCreate,
+			CacheWriteBilledTokens: cacheWriteBilledTokens,
+			FinishReason:           mapStopReason(stopReason),
 		}
 		provider.ApplyRequestAttemptCount(ctx, usage)
 		if !send(provider.Chunk{Type: provider.ChunkUsage, Usage: usage}) {
@@ -706,43 +733,9 @@ func mapStopReason(s string) string {
 	}
 }
 
-// webSearchResult is a single result from a web_search_tool_result block.
-type webSearchResult struct {
-	URL      string `json:"url"`
-	Title    string `json:"title"`
-	Text     string `json:"text"`
-	SiteName string `json:"site_name"`
-}
+// Messages API wire protocol
 
-// formatWebSearchResults parses a web_search_tool_result content array
-// and formats titles and URLs as human-readable text. DeepSeek returns
-// encrypted_content rather than plain text at the transport layer; the
-// model still sees the original content.
-func formatWebSearchResults(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	var results []webSearchResult
-	if err := json.Unmarshal(raw, &results); err != nil {
-		return ""
-	}
-	var b strings.Builder
-	for _, r := range results {
-		if r.Title == "" && r.URL == "" {
-			continue
-		}
-		fmt.Fprintf(&b, "\n- **%s**", r.Title)
-		if r.URL != "" {
-			fmt.Fprintf(&b, "\n  <%s>", r.URL)
-		}
-	}
-	if b.Len() == 0 {
-		return ""
-	}
-	return "\n" + b.String() + "\n"
-}
-
-// --- Messages API wire protocol ---
+const cacheWrite5MinuteInputMultiplier = 1.25
 
 func ephemeral() *cacheControl { return &cacheControl{Type: "ephemeral"} }
 
@@ -837,14 +830,8 @@ type streamEvent struct {
 	Message *struct {
 		Usage *wireUsage `json:"usage"`
 	} `json:"message"`
-	ContentBlock *struct {
-		Type      string          `json:"type"`
-		ID        string          `json:"id"`
-		Name      string          `json:"name"`
-		ToolUseID string          `json:"tool_use_id"` // web_search_tool_result
-		Content   json.RawMessage `json:"content"`     // web_search_tool_result: array of result objects
-	} `json:"content_block"`
-	Delta *struct {
+	ContentBlock *streamContentBlock `json:"content_block"`
+	Delta        *struct {
 		Type             string          `json:"type"`         // text_delta | thinking_delta | signature_delta | input_json_delta | web_search_tool_result_delta
 		Text             string          `json:"text"`         // text_delta
 		Thinking         string          `json:"thinking"`     // thinking_delta

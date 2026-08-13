@@ -217,7 +217,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Agent.RecoveryModel = "mimo-pro"
 	orig.Agent.RecoveryTemperature = 0.15
 	orig.Agent.ReasoningLanguage = "zh"
-	orig.Agent.ToolResultSnipRatio = 0.65
+	orig.Agent.CompactRatio = 0.8
 	orig.Agent.SubagentModel = "mimo-pro"
 	orig.Agent.SubagentModels = map[string]string{"review": "deepseek-pro"}
 	orig.Agent.MaxSubagentDepth = 3
@@ -249,6 +249,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Skills.Paths = []string{"~/my-skills", "../shared/skills"}
 	orig.Skills.ExcludedPaths = []string{"~/.agents/skills"}
 	orig.Skills.DisabledSkills = []string{"review", "explore"}
+	orig.Skills.DisableImplicitInvocation = true
 	orig.Skills.MaxDepth = 2
 	orig.Bot.ToolApprovalMode = "auto"
 	orig.Bot.Control = BotControlConfig{Enabled: true, Addr: "127.0.0.1:39001", TokenEnv: "BOT_CONTROL_TOKEN"}
@@ -307,6 +308,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	mm, _ := orig.Provider("mimo-pro")
 	mm.BaseURL = "http://localhost:8000/v1"
 	mm.ChatURL = "http://localhost:8000/v1/chat/completions"
+	mm.RequestURL = "http://localhost:8000/custom/chat/completions/?token=1"
 	mm.ModelsURL = "http://localhost:8000/v1/models"
 	mm.ReasoningProtocol = "openai"
 	mm.PresetID = "mimo-api"
@@ -324,8 +326,8 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.DefaultModel != "mimo-pro" {
 		t.Errorf("default_model = %q, want mimo-pro", got.DefaultModel)
 	}
-	if got.ConfigVersion != 5 {
-		t.Errorf("config_version = %d, want 5", got.ConfigVersion)
+	if got.ConfigVersion != Default().ConfigVersion {
+		t.Errorf("config_version = %d, want %d", got.ConfigVersion, Default().ConfigVersion)
 	}
 	if got.Language != "zh" {
 		t.Errorf("language = %q, want zh", got.Language)
@@ -341,6 +343,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if got.UICursorShape() != "bar" {
 		t.Errorf("ui.cursor_shape = %q, want bar", got.UICursorShape())
+	}
+	if !got.UI.ShowTurnUsage {
+		t.Error("ui.show_turn_usage = false, want true")
 	}
 	if got.Desktop.Language != "en" {
 		t.Errorf("desktop.language = %q, want en", got.Desktop.Language)
@@ -417,17 +422,13 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.Agent.ReasoningLanguage != "zh" {
 		t.Errorf("reasoning_language = %q, want zh", got.Agent.ReasoningLanguage)
 	}
-	if got.Agent.SoftCompactRatio != orig.Agent.SoftCompactRatio {
-		t.Errorf("soft_compact_ratio = %v, want %v", got.Agent.SoftCompactRatio, orig.Agent.SoftCompactRatio)
-	}
-	if got.Agent.ToolResultSnipRatio != orig.Agent.ToolResultSnipRatio {
-		t.Errorf("tool_result_snip_ratio = %v, want %v", got.Agent.ToolResultSnipRatio, orig.Agent.ToolResultSnipRatio)
-	}
 	if got.Agent.CompactRatio != orig.Agent.CompactRatio {
 		t.Errorf("compact_ratio = %v, want %v", got.Agent.CompactRatio, orig.Agent.CompactRatio)
 	}
-	if got.Agent.CompactForceRatio != orig.Agent.CompactForceRatio {
-		t.Errorf("compact_force_ratio = %v, want %v", got.Agent.CompactForceRatio, orig.Agent.CompactForceRatio)
+	// Deprecated multi-threshold fields must not reappear after render/load.
+	if got.Agent.SoftCompactRatio != 0 || got.Agent.ToolResultSnipRatio != 0 || got.Agent.CompactForceRatio != 0 {
+		t.Errorf("deprecated compact ratios survived round-trip: soft=%v snip=%v force=%v",
+			got.Agent.SoftCompactRatio, got.Agent.ToolResultSnipRatio, got.Agent.CompactForceRatio)
 	}
 	if strings.Join(got.Agent.Keep, ",") != strings.Join(orig.Agent.Keep, ",") {
 		t.Errorf("keep = %v, want %v", got.Agent.Keep, orig.Agent.Keep)
@@ -481,7 +482,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.Tools.Shell.Path != "/usr/local/bin/bash" {
 		t.Errorf("tools.shell.path = %q, want /usr/local/bin/bash", got.Tools.Shell.Path)
 	}
-	if g, _ := got.Provider("mimo-pro"); g == nil || g.BaseURL != "http://localhost:8000/v1" || g.ChatURL != "http://localhost:8000/v1/chat/completions" || g.ModelsURL != "http://localhost:8000/v1/models" || g.ReasoningProtocol != "openai" {
+	if g, _ := got.Provider("mimo-pro"); g == nil || g.BaseURL != "http://localhost:8000/v1" || g.ChatURL != "http://localhost:8000/v1/chat/completions" || g.RequestURL != "http://localhost:8000/custom/chat/completions/?token=1" || g.ModelsURL != "http://localhost:8000/v1/models" || g.ReasoningProtocol != "openai" {
 		t.Errorf("mimo-pro endpoint fields not preserved: %+v", g)
 	}
 	if g, _ := got.Provider("mimo-pro"); g == nil || g.PresetID != "mimo-api" || g.PresetVersion != ProviderPresetVersion {
@@ -513,6 +514,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if len(got.Skills.DisabledSkills) != 2 || got.Skills.DisabledSkills[0] != "review" || got.Skills.DisabledSkills[1] != "explore" {
 		t.Errorf("skills.disabled_skills = %v", got.Skills.DisabledSkills)
+	}
+	if !got.Skills.DisableImplicitInvocation || got.ImplicitSkillInvocationEnabled() {
+		t.Error("skills.disable_implicit_invocation was not preserved")
 	}
 	if got.SkillMaxDepth() != 2 {
 		t.Errorf("skills.max_depth = %d, want 2", got.SkillMaxDepth())
@@ -733,7 +737,7 @@ extensions = [".cc", ".cpp", ".hpp"]
 func BenchmarkRenderTOMLWithLSPServers(b *testing.B) {
 	cfg := Default()
 	cfg.LSP.Servers = make(map[string]LSPServer, 64)
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		lang := "lang" + strconv.Itoa(i)
 		cfg.LSP.Servers[lang] = LSPServer{
 			Command:     "server-" + strconv.Itoa(i),
@@ -746,7 +750,7 @@ func BenchmarkRenderTOMLWithLSPServers(b *testing.B) {
 	}
 
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		rendered := RenderTOML(cfg)
 		if len(rendered) == 0 {
 			b.Fatal("empty render")
@@ -787,7 +791,7 @@ func TestScopedRenderSeparatesUserAndProjectConfig(t *testing.T) {
 	c.Agent.RecoveryTemperature = 0.2
 
 	user := RenderTOMLForScope(c, RenderScopeUser)
-	for _, want := range []string{"config_version = 5", "[desktop]", `currency = "CNY"`, `theme = "dark"`, `terminal_theme = "auto"`, `close_behavior = "background"`, `status_bar_style = "text"`, `default_tool_approval_mode = "auto"`, `check_updates = false`, `recovery_model = "deepseek-pro"`, "[notifications]", "[tools.shell]"} {
+	for _, want := range []string{"config_version = 6", "[desktop]", `currency = "CNY"`, "[billing]", `display_currency = "CNY"`, `theme = "dark"`, `terminal_theme = "auto"`, `close_behavior = "background"`, `status_bar_style = "text"`, `default_tool_approval_mode = "auto"`, `check_updates = false`, `recovery_model = "deepseek-pro"`, "[notifications]", "[tools.shell]"} {
 		if !strings.Contains(user, want) {
 			t.Fatalf("user render missing %q:\n%s", want, user)
 		}
@@ -909,6 +913,7 @@ func TestResponsesProviderModeRoundTripsInUserAndProjectRender(t *testing.T) {
 	cfg := Default()
 	cfg.Providers = append(cfg.Providers, ProviderEntry{
 		Name: "responses-test", Kind: "responses", BaseURL: "https://example.com/v1",
+		ChatURL: "https://legacy.example.com/chat/completions", RequestURL: "https://example.com/v1/custom/responses",
 		Model: "model", APIKeyEnv: "RESPONSES_API_KEY",
 		ResponsesMode: "stateful", ResponsesStateful: &legacyFalse,
 	})
@@ -922,7 +927,7 @@ func TestResponsesProviderModeRoundTripsInUserAndProjectRender(t *testing.T) {
 			t.Fatalf("decode responses config: %v\n%s", err, rendered)
 		}
 		entry, ok := decoded.Provider("responses-test")
-		if !ok || entry.ResponsesMode != "stateful" || entry.ResponsesStateful == nil || *entry.ResponsesStateful {
+		if !ok || entry.ChatURL != "https://legacy.example.com/chat/completions" || entry.RequestURL != "https://example.com/v1/custom/responses" || entry.ResponsesMode != "stateful" || entry.ResponsesStateful == nil || *entry.ResponsesStateful {
 			t.Fatalf("responses settings did not round-trip: %+v, found=%v", entry, ok)
 		}
 	}
@@ -945,6 +950,29 @@ func TestProjectDeltaRendersUICursorShape(t *testing.T) {
 	}
 	if got.UICursorShape() != "block" {
 		t.Fatalf("ui.cursor_shape = %q, want block", got.UICursorShape())
+	}
+}
+
+func TestShowTurnUsageDefaultsOnAndRendersFalseOverride(t *testing.T) {
+	c := Default()
+	if !c.UI.ShowTurnUsage {
+		t.Fatal("ui.show_turn_usage should default to true")
+	}
+
+	c.UI.ShowTurnUsage = false
+	delta := RenderTOMLProjectDelta(c)
+	for _, want := range []string{"[ui]", "show_turn_usage = false"} {
+		if !strings.Contains(delta, want) {
+			t.Fatalf("project delta missing %q:\n%s", want, delta)
+		}
+	}
+
+	got := Default()
+	if _, err := toml.Decode(delta, got); err != nil {
+		t.Fatalf("decode project delta: %v\n%s", err, delta)
+	}
+	if got.UI.ShowTurnUsage {
+		t.Fatal("ui.show_turn_usage false override did not round-trip")
 	}
 }
 
@@ -1278,7 +1306,7 @@ func TestRenderTOMLWindowsSandboxDefaultAndExplicitEnforceDisabled(t *testing.T)
 func extractSectionLines(toml, section string) []string {
 	var lines []string
 	inSection := false
-	for _, line := range strings.Split(toml, "\n") {
+	for line := range strings.SplitSeq(toml, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, section) {
 			inSection = true

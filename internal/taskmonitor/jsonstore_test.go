@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -262,6 +263,9 @@ func TestFileStore_WritablePathsUsePrivateModes(t *testing.T) {
 	}
 	if err := store.AppendAuditEvent(context.Background(), project, TaskEvent{TaskID: "t1", SessionID: "s", EventType: "state_change", State: TaskStateRunning, Timestamp: now}); err != nil {
 		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		return // Windows does not expose POSIX permission bits through os.FileMode.
 	}
 	checks := map[string]os.FileMode{
 		filepath.Join(project, ".reasonix", "tasks"):                        0o700,

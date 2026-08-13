@@ -292,8 +292,8 @@ func sortResults(results []ProbeResult) {
 
 func firstLine(s string) string {
 	s = strings.TrimSpace(s)
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return strings.TrimRight(s[:i], "\r")
+	if before, _, ok := strings.Cut(s, "\n"); ok {
+		return strings.TrimRight(before, "\r")
 	}
 	return s
 }

@@ -17,6 +17,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/permission"
 	"reasonix/internal/skill"
+	"reasonix/internal/tool"
 )
 
 func newTestSubagentApp(t *testing.T) *App {
@@ -424,11 +425,9 @@ func TestTrySubagentRegistryBashEnforcesReadOnlyPolicy(t *testing.T) {
 		t.Fatal("try bash should report ReadOnly=true (restricted read-only wrapper)")
 	}
 	out, err := bash.Execute(context.Background(), json.RawMessage(`{"command":"rm -rf /tmp/x"}`))
-	if err != nil {
-		t.Fatalf("blocked command should return a message, not an error: %v", err)
-	}
-	if !strings.Contains(strings.ToLower(out), "plan mode") && !strings.Contains(strings.ToLower(out), "blocked") && !strings.Contains(strings.ToLower(out), "not allowed") {
-		t.Fatalf("write-capable command should be blocked by the read-only policy, got: %s", out)
+	msg, blocked := tool.BlockedMessage(err)
+	if low := strings.ToLower(msg); !blocked || (!strings.Contains(low, "plan mode") && !strings.Contains(low, "blocked") && !strings.Contains(low, "not allowed")) {
+		t.Fatalf("write-capable command should be refused by the read-only policy, got %q, %v", out, err)
 	}
 }
 

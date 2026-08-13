@@ -1,9 +1,10 @@
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
-import { BrainCircuit, ChevronDown, ChevronRight, FileText, Folder, GitBranch, Image, MessageSquare, Pencil, RotateCcw, ScrollText } from "lucide-react";
+import { BrainCircuit, ChevronDown, FileText, Folder, GitBranch, Image, MessageSquare, Pencil, RotateCcw, ScrollText } from "lucide-react";
+import { MemoryCitations } from "./MemoryCitations";
+import { hasSearchFootnotes, SearchFootnotes } from "./SearchFootnotes";
 import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
-import { ProcessBrainIcon } from "./ProcessCard";
 import { ComposerContextCard } from "./ComposerContextCard";
 import { formatAttachmentRefForDisplay, formatAttachmentRefForSubmit, parseAttachmentRefsForDisplay, sortDisplayAttachments } from "../lib/attachmentDisplay";
 import type { DisplayAttachment } from "../lib/attachmentDisplay";
@@ -12,16 +13,16 @@ import { replaySubmitTextPreservingSelectedContext } from "../lib/editReplay";
 import { useT } from "../lib/i18n";
 import { ImageViewer } from "./ImageViewer";
 import { Tooltip } from "./Tooltip";
-import { useGSAPCollapse } from "../lib/useGSAPCollapse";
-import { displayReasoningText } from "../lib/reasoningDisplay";
+import { useReasoningDisplayMode } from "../lib/reasoningDisplayPreference";
+import { historyEntryIdForItemId } from "../lib/transcriptRows";
 import { stripMemoryCompilerExecution } from "../lib/memoryCompilerDisplay";
-import { visibleTranscriptMemoryCitations } from "../lib/memoryCitationVisibility";
 import { invocationSegmentsFromMessage, type InvocationMetadataMap } from "../lib/invocationDisplay";
 import type { Item, MessageActionScope } from "../lib/useController";
-import type { CheckpointMeta, MemoryCitation } from "../lib/types";
+import type { CheckpointMeta } from "../lib/types";
 import { InvocationBadge } from "./InvocationBadge";
 import { CodeViewer } from "./CodeViewer";
 import { formatSelectionLabels, languageFor, parseSelectedTextContext, stripSelectionLabels } from "../lib/selectedTextContext";
+import { AssistantReasoningPanel } from "./AssistantReasoningPanel";
 
 type AssistantItem = Extract<Item, { kind: "assistant" }>;
 export type TurnActionMenu = "summary" | "rewind";
@@ -144,60 +145,6 @@ export function parseSelectedTextBlocks(text: string, submitText?: string): Sele
     start = block.end + 1;
     return block;
   });
-}
-
-function MemoryCitations({ citations }: { citations?: MemoryCitation[] }) {
-  const t = useT();
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const [open, setOpen] = useState(false);
-  const clean = visibleTranscriptMemoryCitations(citations)
-    .filter((citation) => (citation.source ?? citation.id ?? citation.note ?? "").trim() !== "")
-    .slice(0, 5);
-  useGSAPCollapse(bodyRef, open);
-  if (clean.length === 0) return null;
-  return (
-    <div className="msg-memory-citations">
-      <button
-        type="button"
-        className="msg-memory-citations__toggle"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <ChevronRight className={`msg-memory-citations__chevron${open ? " msg-memory-citations__chevron--open" : ""}`} size={15} />
-        <span>{t("msg.memoryCompilerCitationsCount", { n: clean.length })}</span>
-      </button>
-      {open && (
-        <div ref={bodyRef} className="msg-memory-citations__body">
-          {clean.map((citation, index) => {
-            const lines = memoryCitationLines(citation, t);
-            return (
-              <div key={`${citation.id ?? citation.source}-${index}`} className="msg-memory-citations__item">
-                <div className="msg-memory-citations__source">
-                  <span>{memoryCitationSource(citation)}</span>
-                  {lines && <span className="msg-memory-citations__lines">{lines}</span>}
-                </div>
-                {citation.note && <div className="msg-memory-citations__note">{citation.note}</div>}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function memoryCitationSource(citation: MemoryCitation): string {
-  const source = (citation.source || citation.id || "Memory v5").trim();
-  if (citation.kind === "compiler_reference" && source === "Memory v5") return "Memory v5 compiler";
-  return source;
-}
-
-function memoryCitationLines(citation: MemoryCitation, t: ReturnType<typeof useT>): string {
-  const start = citation.lineStart ?? 0;
-  const end = citation.lineEnd ?? 0;
-  if (start <= 0) return "";
-  if (end > 0 && end !== start) return t("msg.memoryCitationLineRange", { start, end });
-  return t("msg.memoryCitationLine", { line: start });
 }
 
 function messageDate(value?: number): Date {
@@ -436,7 +383,7 @@ export function UserMessage({
       data-history-restore={id && id.startsWith("h") ? "" : undefined}
       data-entrance={id || undefined}
     >
-      <div className={`msg__body${editing ? " msg__body--editing" : ""}`}>
+      <div className={`msg__body${editing ? " msg__body--editing" : ""}`} data-transcript-selectable="message">
         {editing ? (
           <form className="msg-edit" onSubmit={(event) => void submitEdit(event)}>
             {orderedDraftAttachments.length > 0 && (
@@ -486,13 +433,13 @@ export function UserMessage({
           </form>
         ) : imSource ? (
           <div className="im-source-card">
-            <div className="im-source-card__head">
+            <div className="im-source-card__head" data-transcript-selection-ignore>
               <MessageSquare size={14} />
               <span>{t("msg.fromIm", { source: sourceLabel })}</span>
             </div>
             {displayText && <div className="im-source-card__text">{displayText}</div>}
             {(imSource.sender || imSource.chat) && (
-              <div className="im-source-card__meta">
+              <div className="im-source-card__meta" data-transcript-selection-ignore>
                 {imSource.sender && <span>{t("msg.imSender", { id: imSource.sender })}</span>}
                 {imSource.chat && <span>{imSource.chat}</span>}
               </div>
@@ -521,7 +468,7 @@ export function UserMessage({
               return (
                 <div className="msg-pasted" key={seg.key}>
                   <div className="msg-pasted-block">
-                    <div className="msg-pasted-head">
+                    <div className="msg-pasted-head" data-transcript-selection-ignore>
                       {seg.kind === "chat" ? <MessageSquare size={15} /> : <FileText size={15} />}
                       <span className="msg-pasted-label">{seg.block.label}</span>
                       <div className="msg-pasted-actions">
@@ -547,9 +494,9 @@ export function UserMessage({
             })}
           </>
         )}
-        {failed && <div className="msg__send-failed">{t("msg.sendFailed")}</div>}
+        {failed && <div className="msg__send-failed" data-transcript-selection-ignore>{t("msg.sendFailed")}</div>}
         {orderedAttachments.length > 0 && (
-          <div className="msg-attachments" aria-label={t("msg.attachments")}>
+          <div className="msg-attachments" aria-label={t("msg.attachments")} data-transcript-selection-ignore>
             {orderedAttachments.map((attachment, index) => {
               const isImage = attachment.kind === "image";
               const el = (
@@ -779,18 +726,18 @@ export function TurnActions({
   };
   return (
     <div className={`turn-actions${openMenu ? " turn-actions--open" : ""}${hoverMenus ? " turn-actions--hover-menu" : ""}`}>
-      <CopyButton text={text} label={t("msg.copy")} />
+      {text.trim() && <CopyButton text={text} label={t("msg.copy")} />}
       {canAct && (
         <>
           <button
             className={`turn-actions__btn${confirmScope === "fork" ? " turn-actions__btn--confirm" : ""}`}
             type="button"
             disabled={Boolean(forkDisabledReason)}
-            title={forkDisabledReason || undefined}
+            title={forkDisabledReason || t("rewind.forkTooltip")}
             onClick={() => selectRewind("fork")}
           >
             <GitBranch size={13} />
-            <span>{actionLabel("fork")}</span>
+            <span className="turn-actions__label-inline">{actionLabel("fork")}</span>
           </button>
           <div
             className={`turn-actions__group${openMenu === "summary" ? " turn-actions__group--open" : ""}`}
@@ -804,8 +751,10 @@ export function TurnActions({
               onClick={() => toggleMenu("summary")}
             >
               <ScrollText size={13} />
-              <span>{t("turnActions.summary")}</span>
-              <ChevronDown size={12} />
+              <span className="turn-actions__label-inline">
+                <span>{t("turnActions.summary")}</span>
+                <ChevronDown size={12} />
+              </span>
             </button>
             {openMenu === "summary" && (
               <div className="rewind__menu turn-actions__menu" role="menu">
@@ -828,8 +777,10 @@ export function TurnActions({
               onClick={() => toggleMenu("rewind")}
             >
               <RotateCcw size={13} />
-              <span>{t("turnActions.rewind")}</span>
-              <ChevronDown size={12} />
+              <span className="turn-actions__label-inline">
+                <span>{t("turnActions.rewind")}</span>
+                <ChevronDown size={12} />
+              </span>
             </button>
             {openMenu === "rewind" && (
               <div className="rewind__menu turn-actions__menu" role="menu">
@@ -847,105 +798,10 @@ export function TurnActions({
   );
 }
 
-function reasoningDurationLabel(durationMs: number | undefined, t: ReturnType<typeof useT>): string {
-  if (typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs <= 0) {
-    return t("msg.thinkingDone");
-  }
-  const seconds = Math.max(1, Math.round(durationMs / 1000));
-  return t("msg.thinkingDuration", { s: seconds });
-}
-
-function ReasoningPanel({
-  item,
-  defaultExpanded,
-  expandWhileStreaming,
-  truncateStreamingReasoning,
-}: {
-  item: AssistantItem;
-  defaultExpanded: boolean;
-  expandWhileStreaming: boolean;
-  truncateStreamingReasoning: boolean;
-}) {
-  const t = useT();
-  const reasoningBodyRef = useRef<HTMLDivElement>(null);
-  // Thinking streams in before the answer — show it live while the model is still
-  // working, then it stays available behind the toggle once the answer arrives.
-  const [reasoningOpen, setReasoningOpen] = useState((expandWhileStreaming && item.streaming) || defaultExpanded);
-  const userOverridden = useRef(false);
-  const prevStreamingRef = useRef(item.streaming);
-  const prevReasoningCompleteRef = useRef(item.reasoningComplete ?? false);
-  useGSAPCollapse(reasoningBodyRef, reasoningOpen);
-
-  // Follow the current display mode while streaming unless the user manually
-  // toggled this message; auto-close at stream end for untouched messages.
-  useEffect(() => {
-    const wasStreaming = prevStreamingRef.current;
-    const nowStreaming = item.streaming;
-    prevStreamingRef.current = nowStreaming;
-
-    const wasRC = prevReasoningCompleteRef.current;
-    const nowRC = item.reasoningComplete ?? false;
-    prevReasoningCompleteRef.current = nowRC;
-
-    if (nowStreaming) {
-      if (!wasStreaming) userOverridden.current = false;
-      if (defaultExpanded) {
-        setReasoningOpen(true);
-      } else if (!userOverridden.current) {
-        setReasoningOpen(expandWhileStreaming && !nowRC);
-      }
-    } else if (nowRC && !wasRC) {
-      // Reasoning just finished — auto-close while we wait for text.
-      if (!defaultExpanded && !userOverridden.current) {
-        setReasoningOpen(false);
-      }
-    } else if (wasStreaming) {
-      // Stream fully ended — auto-close if user didn't interact.
-      if (!defaultExpanded && !userOverridden.current) {
-        setReasoningOpen(false);
-      }
-    }
-  }, [item.streaming, item.reasoningComplete, defaultExpanded, expandWhileStreaming]);
-
-  const toggleReasoning = () => {
-    userOverridden.current = true;
-    setReasoningOpen((v) => !v);
-  };
-  const isReasoningRunning = item.streaming && !item.reasoningComplete;
-  const visibleReasoning = reasoningOpen
-    ? displayReasoningText(item.reasoning, {
-        streaming: item.streaming,
-        truncateStreaming: truncateStreamingReasoning,
-      })
-    : "";
-  const label = isReasoningRunning ? t("msg.thinkingRunning") : t("msg.thinking");
-  const meta = isReasoningRunning ? "" : reasoningDurationLabel(item.reasoningDurationMs, t);
-
-  return (
-    <div className="reasoning">
-      <button
-        type="button"
-        className="reasoning__head"
-        data-running={isReasoningRunning ? "" : undefined}
-        onClick={toggleReasoning}
-        aria-expanded={reasoningOpen}
-      >
-        <ProcessBrainIcon size={12} />
-        <span data-creation-label={t("creation.reasoningLabel")}>{label}</span>
-        {meta && <span className="reasoning__meta">{meta}</span>}
-        <ChevronRight className={`reasoning__chevron${reasoningOpen ? " reasoning__chevron--open" : ""}`} size={12} />
-      </button>
-      {reasoningOpen && (
-        <div ref={reasoningBodyRef} className="reasoning__body">{visibleReasoning}</div>
-      )}
-    </div>
-  );
-}
-
 export const AssistantMessage = memo(function AssistantMessage({
   item,
   defaultExpanded = false,
-  expandWhileStreaming = true,
+  expandWhileStreaming = false,
   truncateStreamingReasoning = false,
   creationMode = false,
 }: {
@@ -957,22 +813,33 @@ export const AssistantMessage = memo(function AssistantMessage({
   truncateStreamingReasoning?: boolean;
   creationMode?: boolean;
 }) {
+  const reasoningDisplayMode = useReasoningDisplayMode();
   const hasText = item.streaming || item.text.trim() !== "";
-  const processOnly = Boolean(item.reasoning) && !hasText;
-  const processWithText = Boolean(item.reasoning) && hasText;
+  const hasFootnotes = hasSearchFootnotes(item.searchSources);
+  const processOnly = Boolean(item.reasoning) && !hasText && !hasFootnotes;
+  const processWithText = Boolean(item.reasoning) && (hasText || hasFootnotes);
+  if (processOnly && (reasoningDisplayMode === "hidden" || reasoningDisplayMode === "pending")) return null;
   return (
     <div className={`msg msg--assistant${processOnly ? " msg--process-only" : ""}${processWithText ? " msg--process-with-text" : ""}`} data-history-restore={item.id.startsWith("h") ? "" : undefined} data-entrance={item.id}>
       {item.reasoning && (
-        <ReasoningPanel
+        <AssistantReasoningPanel
           item={item}
           defaultExpanded={defaultExpanded}
           expandWhileStreaming={expandWhileStreaming}
           truncateStreamingReasoning={truncateStreamingReasoning}
         />
       )}
-      {hasText && (
-        <div className="msg__body">
-          <Markdown text={item.text} plainStatusBlocks={creationMode} streaming={item.streaming} />
+      {(hasText || hasFootnotes) && (
+        <div className="msg__body" data-transcript-selectable="message">
+          {hasText && (
+            <Markdown
+              text={item.text}
+              plainStatusBlocks={creationMode}
+              streaming={item.streaming}
+              entryId={historyEntryIdForItemId(item.id)}
+            />
+          )}
+          <SearchFootnotes sources={item.searchSources} />
         </div>
       )}
       <MemoryCitations citations={item.memoryCitations} />

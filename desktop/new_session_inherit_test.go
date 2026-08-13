@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 )
@@ -131,6 +135,262 @@ func TestEnsureBlankTabUsesGlobalSessionDefaultsForModelAndToolApproval(t *testi
 	if !strings.Contains(filepath.Base(created.SessionPath), "deepseek-v4-pro") {
 		t.Fatalf("new session path = %q, want filename seeded by global default model", created.SessionPath)
 	}
+}
+
+func TestEnsureBlankTabRetargetsReusedSameNameModelToDefaultProvider(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	model, oldRef, defaultRef := configureSameNameModelProviders(t)
+
+	globalRoot := globalWorkspaceRoot()
+	path, err := createEmptySessionFile(desktopSessionDir(globalRoot), model)
+	if err != nil {
+		t.Fatalf("create empty session: %v", err)
+	}
+	if err := agent.SetBranchModelPreserveUpdated(path, oldRef); err != nil {
+		t.Fatalf("seed old session model: %v", err)
+	}
+
+	app := NewApp()
+	app.ctx = context.Background()
+	tab := testTab("reused", globalRoot)
+	tab.Scope = "global"
+	tab.WorkspaceRoot = globalRoot
+	tab.SessionPath = path
+	tab.model = oldRef
+	tab.Ctrl.SetSessionPath(path)
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+	t.Cleanup(func() {
+		if tab.Ctrl != nil {
+			tab.Ctrl.Close()
+		}
+		tab.releaseSessionLease()
+	})
+
+	meta, err := app.EnsureBlankTab("global", "")
+	if err != nil {
+		t.Fatalf("EnsureBlankTab: %v", err)
+	}
+	if meta.ID != tab.ID {
+		t.Fatalf("reused tab = %q, want %q", meta.ID, tab.ID)
+	}
+	if tab.model != defaultRef || tab.Ctrl.ModelRef() != defaultRef {
+		t.Fatalf("reused runtime model = tab:%q controller:%q, want %q", tab.model, tab.Ctrl.ModelRef(), defaultRef)
+	}
+	if stored, ok := agent.LoadSessionModel(tab.currentSessionPath()); !ok || stored != defaultRef {
+		t.Fatalf("stored session model = %q, %v, want %q", stored, ok, defaultRef)
+	}
+
+	current := ""
+	for _, info := range app.ModelsForTab(tab.ID) {
+		if info.Current {
+			if current != "" {
+				t.Fatalf("multiple current models: %q and %q", current, info.Ref)
+			}
+			current = info.Ref
+		}
+	}
+	if current != defaultRef {
+		t.Fatalf("model switcher current ref = %q, want %q", current, defaultRef)
+	}
+}
+
+func TestEnsureBlankTabRepairsStaleStoredProviderWhenRuntimeAlreadyDefault(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	model, oldRef, defaultRef := configureSameNameModelProviders(t)
+
+	globalRoot := globalWorkspaceRoot()
+	path, err := createEmptySessionFile(desktopSessionDir(globalRoot), model)
+	if err != nil {
+		t.Fatalf("create empty session: %v", err)
+	}
+
+	app := NewApp()
+	app.ctx = context.Background()
+	tab := testTab("stale-meta", globalRoot)
+	tab.Scope = "global"
+	tab.WorkspaceRoot = globalRoot
+	tab.SessionPath = path
+	tab.model = oldRef
+	tab.Ctrl.SetSessionPath(path)
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+	t.Cleanup(func() {
+		if tab.Ctrl != nil {
+			tab.Ctrl.Close()
+		}
+		tab.releaseSessionLease()
+	})
+
+	if err := app.SetModelForTab(tab.ID, defaultRef); err != nil {
+		t.Fatalf("seed default runtime: %v", err)
+	}
+	if err := agent.SetBranchModelPreserveUpdated(path, oldRef); err != nil {
+		t.Fatalf("seed stale stored model: %v", err)
+	}
+
+	if _, err := app.EnsureBlankTab("global", ""); err != nil {
+		t.Fatalf("EnsureBlankTab: %v", err)
+	}
+	if tab.model != defaultRef || tab.Ctrl.ModelRef() != defaultRef {
+		t.Fatalf("runtime model = tab:%q controller:%q, want %q", tab.model, tab.Ctrl.ModelRef(), defaultRef)
+	}
+	if stored, ok := agent.LoadSessionModel(tab.currentSessionPath()); !ok || stored != defaultRef {
+		t.Fatalf("stored session model = %q, %v, want repaired %q", stored, ok, defaultRef)
+	}
+}
+
+func TestEnsureBlankTabConcurrentModelSwitchKeepsLastSelection(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	model, oldRef, defaultRef := configureSameNameModelProviders(t)
+
+	globalRoot := globalWorkspaceRoot()
+	path, err := createEmptySessionFile(desktopSessionDir(globalRoot), model)
+	if err != nil {
+		t.Fatalf("create empty session: %v", err)
+	}
+	if err := agent.SetBranchModelPreserveUpdated(path, oldRef); err != nil {
+		t.Fatalf("seed old session model: %v", err)
+	}
+
+	app := NewApp()
+	app.ctx = context.Background()
+	tab := testTab("last-click", globalRoot)
+	tab.Scope = "global"
+	tab.WorkspaceRoot = globalRoot
+	tab.SessionPath = path
+	tab.model = oldRef
+	tab.Ctrl.SetSessionPath(path)
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+	t.Cleanup(func() {
+		if tab.Ctrl != nil {
+			tab.Ctrl.Close()
+		}
+		tab.releaseSessionLease()
+	})
+
+	firstSwitchReturned := make(chan struct{})
+	releaseFirstSwitch := make(chan struct{})
+	var switchCount atomic.Int32
+	app.modelSwitchTimingHook = func(modelSwitchTiming) {
+		if switchCount.Add(1) == 1 {
+			close(firstSwitchReturned)
+			<-releaseFirstSwitch
+		}
+	}
+
+	ensureDone := make(chan error, 1)
+	go func() {
+		_, err := app.EnsureBlankTab("global", "")
+		ensureDone <- err
+	}()
+
+	select {
+	case <-firstSwitchReturned:
+	case <-time.After(5 * time.Second):
+		close(releaseFirstSwitch)
+		t.Fatal("timed out waiting for default model switch")
+	}
+
+	// Model selection remains available while EnsureBlankTab is completing.
+	// The explicit second switch is the user's last click and must own both the
+	// live runtime and the persisted provider identity.
+	lastSwitchErr := app.SetModelForTab(tab.ID, oldRef)
+	close(releaseFirstSwitch)
+	if lastSwitchErr != nil {
+		t.Fatalf("last model switch: %v", lastSwitchErr)
+	}
+	select {
+	case err := <-ensureDone:
+		if err != nil {
+			t.Fatalf("EnsureBlankTab: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for EnsureBlankTab")
+	}
+
+	if tab.model != oldRef || tab.Ctrl.ModelRef() != oldRef {
+		t.Fatalf("last selected runtime = tab:%q controller:%q, want %q (default was %q)", tab.model, tab.Ctrl.ModelRef(), oldRef, defaultRef)
+	}
+	if stored, ok := agent.LoadSessionModel(tab.currentSessionPath()); !ok || stored != oldRef {
+		t.Fatalf("stored session model = %q, %v, want last selection %q", stored, ok, oldRef)
+	}
+}
+
+func TestEnsureBlankTabRestartsStartingBlankWithDefaultProvider(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	model, oldRef, defaultRef := configureSameNameModelProviders(t)
+
+	globalRoot := globalWorkspaceRoot()
+	path, err := createEmptySessionFile(desktopSessionDir(globalRoot), model)
+	if err != nil {
+		t.Fatalf("create empty session: %v", err)
+	}
+	if err := agent.SetBranchModelPreserveUpdated(path, oldRef); err != nil {
+		t.Fatalf("seed old session model: %v", err)
+	}
+
+	cancelled := false
+	app := NewApp()
+	tab := &WorkspaceTab{
+		ID:            "starting",
+		Scope:         "global",
+		WorkspaceRoot: globalRoot,
+		SessionPath:   path,
+		model:         oldRef,
+		buildCancel:   func() { cancelled = true },
+		disabledMCP:   map[string]ServerView{},
+	}
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+	t.Cleanup(func() {
+		if tab.Ctrl != nil {
+			tab.Ctrl.Close()
+		}
+		tab.releaseSessionLease()
+	})
+
+	meta, err := app.EnsureBlankTab("global", "")
+	if err != nil {
+		t.Fatalf("EnsureBlankTab: %v", err)
+	}
+	if meta.ID != tab.ID || !cancelled {
+		t.Fatalf("starting blank reuse = id:%q cancelled:%v, want %q and cancelled old build", meta.ID, cancelled, tab.ID)
+	}
+	if !tab.Ready || tab.Ctrl == nil || tab.model != defaultRef || tab.Ctrl.ModelRef() != defaultRef {
+		t.Fatalf("restarted blank runtime = ready:%v controller:%v tab:%q, want %q", tab.Ready, tab.Ctrl != nil, tab.model, defaultRef)
+	}
+	if stored, ok := agent.LoadSessionModel(tab.currentSessionPath()); !ok || stored != defaultRef {
+		t.Fatalf("stored session model = %q, %v, want %q", stored, ok, defaultRef)
+	}
+}
+
+func configureSameNameModelProviders(t *testing.T) (model, oldRef, defaultRef string) {
+	t.Helper()
+	seedUserCredentials(t, "DUPLICATE_MODEL_KEY=test-key\n")
+	model = "deepseek-v4-flash-0731"
+	oldRef = "qwen/" + model
+	defaultRef = "token-rhythm/" + model
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	cfg.DefaultModel = defaultRef
+	cfg.Desktop.ProviderAccess = []string{"qwen", "token-rhythm"}
+	cfg.Providers = []config.ProviderEntry{
+		{Name: "qwen", Kind: "openai", BaseURL: "https://qwen.example.invalid/v1", Model: model, APIKeyEnv: "DUPLICATE_MODEL_KEY"},
+		{Name: "token-rhythm", Kind: "openai", BaseURL: "https://token-rhythm.example.invalid/v1", Model: model, APIKeyEnv: "DUPLICATE_MODEL_KEY"},
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	return model, oldRef, defaultRef
 }
 
 func TestDesktopNewSessionDefaultsHonorExplicitAsk(t *testing.T) {

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -96,6 +97,21 @@ func NormalizeWritePaths(workspaceRoot string, raw []string) (WritePathSet, erro
 	return out, nil
 }
 
+type subagentWriteClaimKey struct{}
+
+// WithSubagentWriteClaim carries a child's declared write claim into its run so
+// the host can audit, after the fact, that every mutation it observed fell
+// inside the claim the scheduler parallelized on.
+func WithSubagentWriteClaim(ctx context.Context, claims WritePathSet) context.Context {
+	return context.WithValue(ctx, subagentWriteClaimKey{}, claims)
+}
+
+// SubagentWriteClaim returns the write claim of the running child, if any.
+func SubagentWriteClaim(ctx context.Context) WritePathSet {
+	claims, _ := ctx.Value(subagentWriteClaimKey{}).(WritePathSet)
+	return claims
+}
+
 // WholeWorkspaceWriteClaim claims the entire workspace for a writer that did
 // not declare write_paths. Such tasks may only run serially among writers.
 func WholeWorkspaceWriteClaim(workspaceRoot string) (WritePathSet, error) {
@@ -134,7 +150,7 @@ func (s WritePathSet) Overlaps(other WritePathSet) bool {
 // ValidateNonOverlappingWriteClaims fails if any pair of claims overlaps.
 // Used by fleet preflight so no task starts when path division is invalid.
 func ValidateNonOverlappingWriteClaims(claims []WritePathSet) error {
-	for i := 0; i < len(claims); i++ {
+	for i := range claims {
 		if claims[i].Empty() {
 			continue
 		}

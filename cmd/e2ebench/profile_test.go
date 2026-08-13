@@ -24,9 +24,11 @@ func TestAppendBenchmarkProfileArgsDeliveryUsesRealRuntimeProfile(t *testing.T) 
 }
 
 func TestBuildRunTaskArgsEnablesUnattendedWorkspaceWrites(t *testing.T) {
-	got := buildRunTaskArgs("metrics.json", "e2e", benchmarkProfileDelivery, ablation.Set{}, 12, "fix it")
+	cfg := suiteConfig{model: "e2e", profile: benchmarkProfileDelivery}
+	got := buildRunTaskArgs(cfg, "metrics.json", "run.trajectory.jsonl", 12, "fix it")
 	want := []string{
 		"run", "--auto", "--metrics", "metrics.json",
+		"--trajectory", "run.trajectory.jsonl",
 		"--model", "e2e", "--max-steps", "12",
 		"--profile", "delivery", "fix it",
 	}
@@ -36,10 +38,20 @@ func TestBuildRunTaskArgsEnablesUnattendedWorkspaceWrites(t *testing.T) {
 }
 
 func TestBuildRunTaskArgsPassesTheAblationArmThrough(t *testing.T) {
-	got := buildRunTaskArgs("m.json", "", benchmarkProfileBaseline, ablation.New(ablation.Evidence, ablation.Planner), 0, "fix it")
+	cfg := suiteConfig{profile: benchmarkProfileBaseline, arm: ablation.New(ablation.Evidence, ablation.Planner)}
+	got := buildRunTaskArgs(cfg, "m.json", "", 0, "fix it")
 	want := []string{"run", "--auto", "--metrics", "m.json", "--ablate", "evidence,planner", "fix it"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ablated args = %v, want %v", got, want)
+	}
+}
+
+func TestBuildRunTaskArgsPassesEffortThrough(t *testing.T) {
+	cfg := suiteConfig{profile: benchmarkProfileEconomy, effort: "low"}
+	got := buildRunTaskArgs(cfg, "m.json", "", 0, "fix it")
+	want := []string{"run", "--auto", "--metrics", "m.json", "--profile", "economy", "--effort", "low", "fix it"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("effort args = %v, want %v", got, want)
 	}
 }
 
@@ -58,10 +70,33 @@ func TestNormalizeBenchmarkProfile(t *testing.T) {
 			t.Fatalf("normalize(%q) = %q, %v", input, got, err)
 		}
 	}
-	if got, err := normalizeBenchmarkProfile("delivery"); err != nil || got != benchmarkProfileDelivery {
-		t.Fatalf("normalize(delivery) = %q, %v", got, err)
+	for _, tier := range []string{"economy", "balanced", "delivery"} {
+		if got, err := normalizeBenchmarkProfile(tier); err != nil || got != tier {
+			t.Fatalf("normalize(%q) = %q, %v", tier, got, err)
+		}
 	}
 	if _, err := normalizeBenchmarkProfile("fast"); err == nil {
 		t.Fatal("unknown profile should fail")
+	}
+}
+
+func TestNormalizeCacheArm(t *testing.T) {
+	for input, want := range map[string]string{"": "cold", "cold": "cold", " WARM ": "warm"} {
+		if got, err := normalizeCacheArm(input); err != nil || got != want {
+			t.Fatalf("normalizeCacheArm(%q) = %q, %v", input, got, err)
+		}
+	}
+	if _, err := normalizeCacheArm("hot"); err == nil {
+		t.Fatal("unknown cache arm should fail")
+	}
+}
+
+func TestAppendBenchmarkProfileArgsPassesToolSurfaceTiers(t *testing.T) {
+	for _, tier := range []string{"economy", "balanced"} {
+		got := appendBenchmarkProfileArgs([]string{"run"}, tier)
+		want := []string{"run", "--profile", tier}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s args = %v, want %v", tier, got, want)
+		}
 	}
 }

@@ -3,8 +3,10 @@ package builtin
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
+	"reasonix/internal/fileutil"
 	fileenc "reasonix/internal/fileutil/encoding"
 )
 
@@ -21,8 +23,11 @@ func readFileEncoded(path string) (content string, enc fileenc.Kind, err error) 
 }
 
 // writeFileEncoded encodes content back to the given encoding and writes it.
+// The write is atomic: a truncating write that fails midway (a Windows filter
+// driver holding a transient lock, a full disk) would leave the user's source
+// file empty or half-written.
 func writeFileEncoded(path string, content string, enc fileenc.Kind) error {
-	return os.WriteFile(path, fileenc.Encode(content, enc), 0o644)
+	return fileutil.AtomicOverwriteFile(path, fileenc.Encode(content, enc), 0o644)
 }
 
 // matchLineEndings adapts an edit's old/new text to a CRLF file when the literal
@@ -353,8 +358,8 @@ func stripReadFileLinePrefix(line string) (string, bool) {
 
 func replaceEditRanges(content string, ranges []editRange, replacement string) string {
 	updated := content
-	for i := len(ranges) - 1; i >= 0; i-- {
-		r := ranges[i]
+	for _, v := range slices.Backward(ranges) {
+		r := v
 		updated = updated[:r.start] + replacement + updated[r.end:]
 	}
 	return updated
@@ -433,11 +438,8 @@ func firstNonEmptyLine(s string) string {
 }
 
 func commonPrefixLen(a, b string) int {
-	n := len(a)
-	if len(b) < n {
-		n = len(b)
-	}
-	for i := 0; i < n; i++ {
+	n := min(len(b), len(a))
+	for i := range n {
 		if a[i] != b[i] {
 			return i
 		}

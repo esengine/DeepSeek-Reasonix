@@ -8,6 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"reasonix/internal/pluginpkg"
+	"reasonix/internal/sandbox"
 )
 
 func TestDefaultSpawnerRunsQuotedPluginBatchHook(t *testing.T) {
@@ -80,6 +84,105 @@ func TestSuperpowersV611SessionStartHookEndToEnd(t *testing.T) {
 	}
 }
 
+func TestExtensionlessSessionStartHookUsesAutoResolvedBash(t *testing.T) {
+	shell := sandbox.ResolveShell("auto", "", nil)
+	if shell.Kind != sandbox.ShellBash || strings.TrimSpace(shell.Path) == "" {
+		t.Skip("Git Bash is not available on this Windows test host")
+	}
+
+	home := t.TempDir()
+	reasonixHome := filepath.Join(home, ".reasonix")
+	root := filepath.Join(reasonixHome, "plugins", "superpowers")
+	writeHookTestFile(t, filepath.Join(root, pluginpkg.CodexManifest), `{
+  "name": "superpowers",
+  "version": "6.1.1"
+}`)
+	writeHookTestFile(t, filepath.Join(root, "hooks", "session-start-codex"), `#!/usr/bin/env bash
+input=$(cat)
+printf 'session-start:%s' "$input"
+`)
+	if err := pluginpkg.Upsert(reasonixHome, pluginpkg.InstalledPlugin{
+		Name:         "superpowers",
+		Root:         "plugins/superpowers",
+		Version:      "6.1.1",
+		ManifestKind: "codex",
+		Enabled:      true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	workspace := filepath.Join(home, "workspace")
+	hooks := Load(LoadOptions{HomeDir: home, ProjectRoot: workspace})
+	if len(hooks) != 1 {
+		t.Fatalf("hooks = %+v, want one extensionless SessionStart hook", hooks)
+	}
+	if hooks[0].ExecutionMode != ExecutionShell || hooks[0].Shell != "bash" {
+		t.Fatalf("hook execution contract = mode %q shell %q, want auto-resolved Bash", hooks[0].ExecutionMode, hooks[0].Shell)
+	}
+
+	report := Run(context.Background(), Payload{
+		Event:     SessionStart,
+		SessionID: "auto-bash",
+		Cwd:       workspace,
+	}, hooks, NewDefaultSpawner(RuntimeOptions{BashPath: shell.Path}))
+	if report.Blocked || len(report.Outcomes) != 1 {
+		t.Fatalf("SessionStart report = %+v", report)
+	}
+	outcome := report.Outcomes[0]
+	if outcome.Decision != DecisionPass || outcome.ExitCode != 0 || outcome.Stderr != "" || outcome.TimedOut {
+		t.Fatalf("SessionStart outcome = %+v", outcome)
+	}
+	if !strings.HasPrefix(outcome.Stdout, "session-start:") || !strings.Contains(outcome.Stdout, `"event":"SessionStart"`) {
+		t.Fatalf("SessionStart stdout = %q, want native JSON payload", outcome.Stdout)
+	}
+}
+
+func TestProjectAndGlobalExtensionlessHooksUseAutoResolvedBash(t *testing.T) {
+	shell := sandbox.ResolveShell("auto", "", nil)
+	if shell.Kind != sandbox.ShellBash || strings.TrimSpace(shell.Path) == "" {
+		t.Skip("Git Bash is not available on this Windows test host")
+	}
+
+	home := t.TempDir()
+	workspace := filepath.Join(home, "workspace")
+	projectScript := filepath.Join(workspace, "hooks", "project-start")
+	globalScript := filepath.Join(workspace, "hooks", "global-start")
+	for _, item := range []struct {
+		path   string
+		prefix string
+	}{
+		{path: projectScript, prefix: "project"},
+		{path: globalScript, prefix: "global"},
+	} {
+		writeHookTestFile(t, item.path, "#!/usr/bin/env bash\ninput=$(cat)\nprintf '"+item.prefix+":%s' \"$input\"\n")
+	}
+	writeHookTestFile(t, filepath.Join(workspace, ".reasonix", "settings.json"), `{"hooks":{"SessionStart":[{"command":"hooks/project-start"}]}}`)
+	reasonixHome := filepath.Join(home, ".reasonix")
+	writeHookTestFile(t, filepath.Join(reasonixHome, "settings.json"), `{"hooks":{"SessionStart":[{"command":"hooks/global-start"}]}}`)
+
+	hooks := Load(LoadOptions{HomeDir: home, ProjectRoot: workspace})
+	if len(hooks) != 2 {
+		t.Fatalf("hooks = %+v, want project and global hooks", hooks)
+	}
+	report := Run(context.Background(), Payload{
+		Event:     SessionStart,
+		SessionID: "settings-bash",
+		Cwd:       workspace,
+	}, hooks, NewDefaultSpawner(RuntimeOptions{BashPath: shell.Path}))
+	if report.Blocked || len(report.Outcomes) != 2 {
+		t.Fatalf("SessionStart report = %+v", report)
+	}
+	for i, wantPrefix := range []string{"project:", "global:"} {
+		outcome := report.Outcomes[i]
+		if outcome.Decision != DecisionPass || outcome.ExitCode != 0 || outcome.Stderr != "" || outcome.TimedOut {
+			t.Fatalf("SessionStart outcome[%d] = %+v", i, outcome)
+		}
+		if !strings.HasPrefix(outcome.Stdout, wantPrefix) || !strings.Contains(outcome.Stdout, `"event":"SessionStart"`) {
+			t.Fatalf("SessionStart stdout[%d] = %q, want %q plus native JSON payload", i, outcome.Stdout, wantPrefix)
+		}
+	}
+}
+
 func TestDefaultSpawnerRunsCompoundCmdShellHook(t *testing.T) {
 	pluginRoot := filepath.Join(t.TempDir(), "plugin root")
 	if err := os.MkdirAll(pluginRoot, 0o755); err != nil {
@@ -108,11 +211,15 @@ func TestDefaultSpawnerRunsCompoundCmdShellHook(t *testing.T) {
 }
 
 func TestDefaultSpawnerRunsPowerShellHookWithNestedQuotes(t *testing.T) {
+	// Cold PowerShell start under the Windows full suite (-p 4) can exceed the
+	// default 60s real-spawn budget when the runner is already hot from
+	// agent/boot/control packages. Keep the assertion, give the host longer.
+	timeout := max(realSpawnTimeout, 2*time.Minute)
 	result := DefaultSpawner(context.Background(), SpawnInput{
 		Command: `$items = @("a b", "c'd", 'e"f', "中文", "🧪"); Write-Output ($items -join "|")`,
 		Mode:    ExecutionShell,
 		Shell:   "powershell",
-		Timeout: realSpawnTimeout,
+		Timeout: timeout,
 	})
 	if result.ExitCode != 0 || result.SpawnErr != nil {
 		t.Fatalf("PowerShell hook failed: %+v", result)

@@ -18,12 +18,13 @@ type recordingRecoveryGate struct {
 	observation RecoveryObservation
 	proposals   []RecoveryProposal
 	decision    RecoveryDecision
+	guidance    string
 }
 
 func TestRecoveryPlanTransitionDetectsOnlyStructuralRewriteOfActivePlan(t *testing.T) {
 	a := &Agent{}
 	initial := json.RawMessage(`{"todos":[{"content":"Implement parser","status":"in_progress"}]}`)
-	if changed, _, _ := a.recoveryPlanTransition("todo_write", initial); changed {
+	if changed, _, _, _ := a.recoveryPlanTransition("todo_write", initial); changed {
 		t.Fatal("initial plan must stay on the fast path")
 	}
 
@@ -32,12 +33,12 @@ func TestRecoveryPlanTransitionDetectsOnlyStructuralRewriteOfActivePlan(t *testi
 		{Content: "Run tests", Status: "pending"},
 	})
 	progressOnly := json.RawMessage(`{"todos":[{"content":"Implement parser","status":"completed"},{"content":"Run tests","status":"in_progress"}]}`)
-	if changed, _, _ := a.recoveryPlanTransition("todo_write", progressOnly); changed {
+	if changed, _, _, _ := a.recoveryPlanTransition("todo_write", progressOnly); changed {
 		t.Fatal("progress-only update must not invoke the plan reviewer")
 	}
 
 	replacement := json.RawMessage(`{"todos":[{"content":"Replace parser architecture","status":"in_progress"},{"content":"Run tests","status":"pending"}]}`)
-	changed, before, after := a.recoveryPlanTransition("todo_write", replacement)
+	changed, before, after, _ := a.recoveryPlanTransition("todo_write", replacement)
 	if !changed {
 		t.Fatal("structural rewrite of active plan was not detected")
 	}
@@ -50,14 +51,14 @@ func TestRecoveryPlanTransitionIgnoresCompletedPriorPlan(t *testing.T) {
 	a := &Agent{}
 	a.setTodoState([]evidence.TodoItem{{Content: "Old task", Status: "completed"}})
 	next := json.RawMessage(`{"todos":[{"content":"New user task","status":"in_progress"}]}`)
-	if changed, _, _ := a.recoveryPlanTransition("todo_write", next); changed {
+	if changed, _, _, _ := a.recoveryPlanTransition("todo_write", next); changed {
 		t.Fatal("a new task after a completed plan is not a mid-plan transition")
 	}
 }
 
 func (g *recordingRecoveryGate) ObserveResult(_ context.Context, observation RecoveryObservation) string {
 	g.observation = observation
-	return ""
+	return g.guidance
 }
 
 func (g *recordingRecoveryGate) BeforeMutation(_ context.Context, proposal RecoveryProposal) (RecoveryDecision, error) {
@@ -82,7 +83,7 @@ func TestAuthorizedRecoveryPlanTransitionCanReplaceCurrentTodo(t *testing.T) {
 		{Content: "Run tests", Status: "pending"},
 	})
 
-	out := a.executeOne(context.Background(), provider.ToolCall{
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
 		ID:   "replace-plan",
 		Name: "todo_write",
 		Arguments: `{"todos":[
@@ -110,7 +111,7 @@ func TestPlanTransitionNeedsDedicatedReplacementAuthorization(t *testing.T) {
 	a := New(nil, reg, NewSession(""), Options{RecoveryGate: gate}, event.Discard)
 	a.SeedTodoState([]evidence.TodoItem{{Content: "Implement parser", Status: "in_progress"}})
 
-	out := a.executeOne(context.Background(), provider.ToolCall{
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
 		ID:        "replace-plan-without-authorization",
 		Name:      "todo_write",
 		Arguments: `{"todos":[{"content":"Replace parser architecture","status":"in_progress"}]}`,
@@ -120,9 +121,32 @@ func TestPlanTransitionNeedsDedicatedReplacementAuthorization(t *testing.T) {
 	}
 }
 
+func TestHostRecoveryGuidanceRidesToolResultNotSteer(t *testing.T) {
+	guidance := HostRecoveryGuidanceToolFailedPrefix + ", continue unrelated work automatically."
+	gate := &recordingRecoveryGate{guidance: guidance}
+	sink := &recordSink{}
+	reg := tool.NewRegistry()
+	reg.Add(failTool{name: "fail_tool"})
+	a := New(nil, reg, NewSession(""), Options{RecoveryGate: gate}, sink)
+	a.steerRunActive = true
+
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
+		ID: "fail-1", Name: "fail_tool", Arguments: `{}`,
+	})
+	if !strings.Contains(out.output, guidance) {
+		t.Fatalf("tool output missing host recovery guidance: %q", out.output)
+	}
+	if text, _, ok := a.consumeSteer(); ok {
+		t.Fatalf("host recovery queued a user steer: %q", text)
+	}
+	for _, e := range sink.kinds(event.Steer) {
+		t.Fatalf("host recovery emitted a steer event: %+v", e)
+	}
+}
+
 func TestObserveRecoveryResultMarksCancellation(t *testing.T) {
 	gate := &recordingRecoveryGate{}
-	a := &Agent{recoveryGate: gate}
+	a := &Agent{svc: agentServices{recoveryGate: gate}}
 	a.observeRecoveryResult(
 		context.Background(),
 		"write_file",
@@ -145,7 +169,7 @@ func TestObserveRecoveryResultMarksCancellation(t *testing.T) {
 
 func TestObserveRecoveryResultKeepsToolOwnedDeadlineAsFailure(t *testing.T) {
 	gate := &recordingRecoveryGate{}
-	a := &Agent{recoveryGate: gate}
+	a := &Agent{svc: agentServices{recoveryGate: gate}}
 	a.observeRecoveryResult(
 		context.Background(),
 		"mcp__server__write",
@@ -168,7 +192,7 @@ func TestObserveRecoveryResultKeepsToolOwnedDeadlineAsFailure(t *testing.T) {
 
 func TestObserveRecoveryResultMarksParentDeadlineCancellation(t *testing.T) {
 	gate := &recordingRecoveryGate{}
-	a := &Agent{recoveryGate: gate}
+	a := &Agent{svc: agentServices{recoveryGate: gate}}
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
 	a.observeRecoveryResult(
@@ -196,7 +220,7 @@ func TestRecoveryBlockSurfacesConcreteReason(t *testing.T) {
 		Message: "blocked: Auto stopped repeating this operation after 3 consecutive failures: write a.go. Other operations remain available.",
 	}}
 	a := New(nil, reg, NewSession(""), Options{RecoveryGate: gate}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
 		ID: "blocked-write", Name: "write_file", Arguments: `{"path":"a.go","content":"x"}`,
 	})
 	if !out.blocked || !strings.Contains(out.errMsg, "stopped repeating this operation") || strings.Contains(out.errMsg, "Auto Guard") {

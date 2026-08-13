@@ -26,7 +26,6 @@ import (
 	_ "reasonix/internal/provider/anthropic"
 	_ "reasonix/internal/provider/openai"
 	_ "reasonix/internal/provider/responses"
-	"reasonix/internal/repair"
 	_ "reasonix/internal/tool/builtin"
 )
 
@@ -54,8 +53,9 @@ var channel = "stable"
 var macSelfUpdate = "false"
 
 const (
-	disableWebview2GPUEnv  = "REASONIX_DESKTOP_DISABLE_WEBVIEW2_GPU"
-	linuxDRIRenderNodeGlob = "/dev/dri/renderD*"
+	disableWebview2GPUEnv       = "REASONIX_DISABLE_WEBVIEW2_GPU"
+	legacyDisableWebview2GPUEnv = "REASONIX_DESKTOP_DISABLE_WEBVIEW2_GPU"
+	linuxDRIRenderNodeGlob      = "/dev/dri/renderD*"
 )
 
 func macSelfUpdateAllowed() bool {
@@ -68,12 +68,14 @@ func macSelfUpdateAllowed() bool {
 }
 
 func windowsWebview2GPUDisabled() bool {
-	if raw, ok := os.LookupEnv(disableWebview2GPUEnv); ok {
-		switch strings.ToLower(strings.TrimSpace(raw)) {
-		case "1", "true", "yes", "on":
-			return true
-		case "0", "false", "no", "off", "":
-			return false
+	for _, key := range []string{disableWebview2GPUEnv, legacyDisableWebview2GPUEnv} {
+		if raw, ok := os.LookupEnv(key); ok {
+			switch strings.ToLower(strings.TrimSpace(raw)) {
+			case "1", "true", "yes", "on":
+				return true
+			case "0", "false", "no", "off", "":
+				return false
+			}
 		}
 	}
 	return channel == "preview" || channel == "canary"
@@ -132,21 +134,13 @@ func main() {
 		dragAndDrop = &options.DragAndDrop{DisableWebViewDrop: true}
 		bindings = nil
 	} else {
-		// Observe previous run for crash diagnostics only. Startup tracking must
-		// never force Safe Mode, disable plugins, or select a previous binary.
-		app.previousRun = repair.NewStartupTracker("").ObservePreviousRun()
+		// Claim diagnostics before Wails so second processes cannot create evidence.
+		prepareDesktopDiagnostics(app)
+		defer app.releaseDesktopDiagnosticsOwnership()
+		capturePendingUpdateHealthIdentity(app)
 	}
 
-	// Restore saved window size, or fall back to the default.
-	width, height := 1240, 720
-	if saved, ok := loadWindowState(); ok {
-		if saved.Width > 0 {
-			width = saved.Width
-		}
-		if saved.Height > 0 {
-			height = saved.Height
-		}
-	}
+	width, height := initialDesktopWindowSize()
 
 	// Restore saved desktop zoom factor (WebView2 ZoomFactor), or default to 1.0.
 	zoomFactor := 1.0
@@ -198,7 +192,7 @@ func main() {
 		// against the --wails-drop-target element instead.
 		DragAndDrop: dragAndDrop,
 
-		// --- per-platform adaptation (see desktop/README.md for the rationale) ---
+		// per-platform adaptation (see desktop/README.md for the rationale)
 		Mac: &mac.Options{
 			// Inset traffic-lights over a frameless-feeling header; the frontend
 			// leaves a drag region at the top (CSS --wails-draggable).

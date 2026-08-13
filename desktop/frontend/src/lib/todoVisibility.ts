@@ -12,8 +12,15 @@ export interface TodoPanelScopeInput {
   eventChannel?: string | null;
 }
 
-export function resolveTodoPanelTodos(canonical: Todo[] | null | undefined, fallback: Todo[]): Todo[] {
-  return Array.isArray(canonical) ? canonical : fallback;
+export function resolveTodoPanelTodos(
+  canonical: Todo[] | null | undefined,
+  live?: Todo[] | null,
+): Todo[] {
+  // `live` is set only when the transcript has a completed top-level todo_write.
+  // Prefer it over MetaForTab — meta only refreshes on turn_done / focus change,
+  // so mid-turn status flips otherwise freeze until the user switches tabs (#7642).
+  if (live !== undefined && live !== null) return live;
+  return Array.isArray(canonical) ? canonical : [];
 }
 
 export function sameTodoList(a: Todo[] | null | undefined, b: Todo[] | null | undefined): boolean {
@@ -88,10 +95,21 @@ export function shouldShowTodoPanel(
   todoKey: string | null | undefined,
   dismissedTodoKey: string | null,
   todos: Todo[],
+  persisted?: { batchKey?: string | null; batches?: readonly string[] | null },
 ): boolean {
   if (!todoKey || todos.length === 0) return false;
   if (hasIncompleteTodos(todos)) return true;
-  return todoKey !== dismissedTodoKey;
+  if (todoKey === dismissedTodoKey) return false;
+  const batchKey = String(persisted?.batchKey ?? "").trim();
+  if (batchKey && persisted?.batches?.includes(batchKey)) return false;
+  return true;
+}
+
+export function sameStringList(a?: readonly string[] | null, b?: readonly string[] | null): boolean {
+  if (a === b) return true;
+  const left = Array.isArray(a) ? a : [];
+  const right = Array.isArray(b) ? b : [];
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 export function shouldOpenTodoPanelByDefault(): boolean {

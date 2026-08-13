@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"reasonix/internal/diff"
@@ -29,6 +28,7 @@ type notebookEdit struct {
 	guard   SessionDataGuard
 	managed ManagedConfigPaths
 	workDir string
+	overlay FileOverlay
 }
 
 func (notebookEdit) Name() string { return "notebook_edit" }
@@ -85,11 +85,11 @@ func (n notebookEdit) Execute(ctx context.Context, raw json.RawMessage) (string,
 	if err := confineWrite(ctx, n.roots, n.guard, n.managed, a.Path); err != nil {
 		return "", err
 	}
-	data, err := os.ReadFile(a.Path)
+	src, err := readEditSource(ctx, n.overlay, a.Path)
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", a.Path, err)
 	}
-	nb, err := parseNotebook(data)
+	nb, err := parseNotebook([]byte(src.content))
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", a.Path, err)
 	}
@@ -103,7 +103,7 @@ func (n notebookEdit) Execute(ctx context.Context, raw json.RawMessage) (string,
 	if err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(a.Path, out, 0o644); err != nil {
+	if err := src.write(ctx, n.overlay, a.Path, string(out)); err != nil {
 		return "", fmt.Errorf("write %s: %w", a.Path, err)
 	}
 	return fmt.Sprintf("%s in %s (cell %d; %d cells total)", summary, a.Path, idx, len(nb.cells)), nil
@@ -113,17 +113,17 @@ func (n notebookEdit) Execute(ctx context.Context, raw json.RawMessage) (string,
 // before/after for rewind. It mirrors Execute's transformation exactly but never
 // writes — same arg parsing and targeting rules, so the previewed change equals
 // what Execute would persist.
-func (n notebookEdit) Preview(raw json.RawMessage) (diff.Change, error) {
+func (n notebookEdit) Preview(ctx context.Context, raw json.RawMessage) (diff.Change, error) {
 	a, err := parseNotebookArgs(raw)
 	if err != nil {
 		return diff.Change{}, err
 	}
 	a.Path = resolveIn(n.workDir, a.Path)
-	data, err := os.ReadFile(a.Path)
+	src, err := readEditSource(ctx, n.overlay, a.Path)
 	if err != nil {
 		return diff.Change{}, fmt.Errorf("read %s: %w", a.Path, err)
 	}
-	nb, err := parseNotebook(data)
+	nb, err := parseNotebook([]byte(src.content))
 	if err != nil {
 		return diff.Change{}, fmt.Errorf("%s: %w", a.Path, err)
 	}
@@ -134,7 +134,7 @@ func (n notebookEdit) Preview(raw json.RawMessage) (diff.Change, error) {
 	if err != nil {
 		return diff.Change{}, err
 	}
-	return diff.Build(a.Path, string(data), string(out), diff.Modify), nil
+	return diff.Build(a.Path, src.content, string(out), diff.Modify), nil
 }
 
 func parseNotebookArgs(raw json.RawMessage) (notebookArgs, error) {

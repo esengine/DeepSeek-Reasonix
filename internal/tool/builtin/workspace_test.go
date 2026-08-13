@@ -120,7 +120,7 @@ func TestWorkspacePreviewBinds(t *testing.T) {
 	if !ok {
 		t.Fatal("write_file should be a Previewer")
 	}
-	change, err := p.Preview(argsJSON(t, map[string]any{"path": "new.txt", "content": "a\n"}))
+	change, err := p.Preview(context.Background(), argsJSON(t, map[string]any{"path": "new.txt", "content": "a\n"}))
 	if err != nil {
 		t.Fatalf("preview: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestWorkspaceReadToolsResolveExternalReadRoots(t *testing.T) {
 	assertExternalToolError(t, tools["glob"], map[string]any{"pattern": token + "/missing/**/*.go"}, token+"/missing/**/*.go", external)
 }
 
-// --- helpers ---
+// helpers
 
 func byName(tools []tool.Tool) map[string]tool.Tool {
 	m := make(map[string]tool.Tool, len(tools))

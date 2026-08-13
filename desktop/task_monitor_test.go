@@ -10,6 +10,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/control"
+	"reasonix/internal/taskcatalog"
 	"reasonix/internal/taskmonitor"
 )
 
@@ -43,12 +44,10 @@ func TestTaskControlConcurrentInitializationReturnsOneService(t *testing.T) {
 	const callers = 16
 	services := make(chan *taskmonitor.ControlService, callers)
 	var wg sync.WaitGroup
-	for i := 0; i < callers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range callers {
+		wg.Go(func() {
 			services <- app.taskControl()
-		}()
+		})
 	}
 	wg.Wait()
 	close(services)
@@ -122,6 +121,31 @@ func TestTaskMonitorUsesActiveWorkspaceRoot(t *testing.T) {
 	}
 	if got := app.projectDir(); got != root {
 		t.Fatalf("projectDir = %q, want active workspace %q", got, root)
+	}
+}
+
+func TestTaskActionProjectResolvesAllowlistWithoutCatalog(t *testing.T) {
+	root := t.TempDir()
+	app := &App{
+		ctx: context.Background(),
+		tabs: map[string]*WorkspaceTab{
+			"active": {ID: "active", Scope: "project", WorkspaceRoot: root},
+		},
+		activeTabID: "active",
+	}
+	key := taskcatalog.ProjectKey(root)
+	project, err := app.taskActionProject(key)
+	if err != nil {
+		t.Fatalf("taskActionProject without catalog: %v", err)
+	}
+	if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+	if project.Root != root || project.Key != key {
+		t.Fatalf("project=%#v, want root=%q key=%q", project, root, key)
+	}
+	if _, err := app.taskActionProject("not-a-real-project-key"); err == nil {
+		t.Fatal("expected unknown project key error")
 	}
 }
 
@@ -227,9 +251,10 @@ func TestListSessionsForTabKeepsSourceDirectoryAfterActiveTabSwitch(t *testing.T
 		},
 		activeTabID: "tab-b",
 	}
+	installSessionCatalogForTest(t, app, dirA, "global", "")
 
 	sessions := app.ListSessionsForTab("tab-a")
-	if len(sessions) != 1 || sessions[0].Path != pathA || sessions[0].Preview != "workspace A" {
+	if len(sessions) != 1 || sessions[0].Path != pathA || sessions[0].TurnsState != "unknown" {
 		t.Fatalf("ListSessionsForTab(tab-a) = %+v", sessions)
 	}
 }

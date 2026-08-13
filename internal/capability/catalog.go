@@ -77,7 +77,21 @@ func BuildCatalog(opts CatalogOptions) Catalog {
 		profile = ProfileBalanced
 	}
 	var entries []Entry
-	entries = append(entries, ToolEntries(opts.Tools)...)
+	toolEntries := ToolEntries(opts.Tools)
+	for i := range toolEntries {
+		if toolEntries[i].Kind != KindMCPTool {
+			continue
+		}
+		name := toolEntries[i].Source
+		switch {
+		case opts.Disabled != nil && opts.Disabled[name]:
+			toolEntries[i].Status = StatusDisabled
+		case opts.Failed != nil && opts.Failed[name] != "":
+			toolEntries[i].Status = StatusFailed
+			toolEntries[i].FailureReason = opts.Failed[name]
+		}
+	}
+	entries = append(entries, toolEntries...)
 	entries = append(entries, SkillEntriesFiltered(opts.Skills, opts.Tools, profile)...)
 	entries = append(entries, MCPServerEntries(opts)...)
 
@@ -107,22 +121,20 @@ func BuildCatalog(opts CatalogOptions) Catalog {
 	return Catalog{Entries: out, Fingerprint: catalogFingerprint(out)}
 }
 
-// SkillEntriesFiltered applies profile eligibility and requires metadata.
+// SkillEntriesFiltered keeps every skill in the catalog. Legacy frontmatter
+// profiles: economy|balanced|delivery values are retained for diagnostics but
+// no longer filter availability (shared capability directory for all role
+// settings). profile is accepted for call-site compatibility.
 func SkillEntriesFiltered(skills []skill.Skill, tools []tool.ContractEntry, profile Profile) []Entry {
+	_ = profile
 	out := SkillEntries(skills, tools)
-	filtered := make([]Entry, 0, len(out))
-	for i, e := range out {
-		sk := skills[i]
-		if !skill.AllowedInProfile(sk, string(profile)) {
-			continue
+	for i := range out {
+		if i < len(skills) {
+			out[i].Requires = cleanList(skills[i].Requires)
+			out[i].Profiles = normalizeProfiles(skills[i].Profiles)
 		}
-		e.Requires = cleanList(sk.Requires)
-		e.Profiles = normalizeProfiles(sk.Profiles)
-		// Status stays ready when listed; callers re-check requires against the
-		// live catalog at invoke time so routing can still recommend the skill.
-		filtered = append(filtered, e)
 	}
-	return filtered
+	return out
 }
 
 // MCPServerEntries includes every configured MCP, even when not auto-started.
@@ -175,16 +187,15 @@ func MCPServerEntries(opts CatalogOptions) []Entry {
 		var toolSrc []plugin.CachedTool
 		toolStatus := StatusConfigured
 		switch {
-		case len(opts.ProxyTools[name]) > 0 && !registryHasTools:
+		case status == StatusReady && len(opts.ProxyTools[name]) > 0 && !registryHasTools:
 			toolSrc = opts.ProxyTools[name]
 			toolStatus = StatusReady
 		case status != StatusReady:
 			toolSrc = opts.CachedTools[name]
-			// A schema-cache-key mismatch marked the server stale; its
-			// tools carry the same staleness so routing prompts expose it.
-			if status == StatusStale {
-				toolStatus = StatusStale
-			}
+			// Cached tools share the server lifecycle. A failed or disabled
+			// server cannot make a stale schema actionable, and a cache-key
+			// mismatch keeps the same staleness on every cached tool.
+			toolStatus = status
 		}
 		for _, ct := range toolSrc {
 			raw := strings.TrimSpace(ct.Name)

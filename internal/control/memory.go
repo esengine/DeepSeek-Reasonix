@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"reasonix/internal/event"
 	"reasonix/internal/memory"
 )
 
@@ -83,12 +84,7 @@ func (m *memoryManager) claimAutoRemember(args json.RawMessage) bool {
 }
 
 func (m *memoryManager) recall(query string) memory.RecallResult {
-	mem := m.current()
-	store := memory.Store{}
-	if mem != nil {
-		store = mem.Store
-	}
-	result := memory.AutoRecall(store, query, memory.RecallOptions{})
+	result := m.current().AutoRecall(query, memory.RecallOptions{})
 	m.recordRecall(result)
 	return result
 }
@@ -107,6 +103,26 @@ func (m *memoryManager) lastRecallResult() memory.RecallResult {
 
 func newMemoryManager(set *memory.Set) memoryManager {
 	return memoryManager{set: set}
+}
+
+// memoryRecallAudit strips a recall decision to its content-free fingerprint
+// for the trajectory/telemetry channel.
+func memoryRecallAudit(result memory.RecallResult) event.MemoryRecallAudit {
+	audit := event.MemoryRecallAudit{
+		UsedChars: result.UsedChars, Omitted: result.Omitted, Suppressed: result.Suppressed,
+	}
+	for _, hit := range result.Hits {
+		audit.Hits = append(audit.Hits, event.MemoryRecallHit{
+			ID: hit.Memory.ID, Revision: hit.Memory.Revision,
+			Scope:     string(memory.NormalizeFactScope(string(hit.Memory.Scope))),
+			Type:      string(memory.NormalizeType(string(hit.Memory.Type))),
+			Freshness: hit.Freshness, Score: hit.Score,
+		})
+	}
+	for _, hit := range result.ShadowHits {
+		audit.Shadow = append(audit.Shadow, event.MemoryRecallHit{ID: hit.ID, Score: hit.Score})
+	}
+	return audit
 }
 
 // current returns the loaded snapshot (nil when memory is disabled). The returned

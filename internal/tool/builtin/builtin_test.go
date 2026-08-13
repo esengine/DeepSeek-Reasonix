@@ -43,7 +43,7 @@ func runTool(t *testing.T, tl tool.Tool, m map[string]any) string {
 }
 
 func TestBuiltinsRegistered(t *testing.T) {
-	want := []string{"bash", "code_index", "edit_file", "glob", "grep", "ls", "move_file", "multi_edit", "read_file", "web_fetch", "write_file"}
+	want := []string{"bash", "code_index", "compress", "edit_file", "glob", "grep", "ls", "move_file", "multi_edit", "read_file", "web_fetch", "write_file"}
 	for _, name := range want {
 		if _, ok := tool.LookupBuiltin(name); !ok {
 			t.Errorf("built-in %q not registered", name)
@@ -58,7 +58,7 @@ func TestBuiltinsRegistered(t *testing.T) {
 // many invocations are pure reads — args aren't introspected.
 func TestBuiltinReadOnlyClassification(t *testing.T) {
 	readOnly := map[string]bool{
-		"read_file": true, "ls": true, "glob": true, "grep": true, "code_index": true, "web_fetch": true,
+		"read_file": true, "ls": true, "glob": true, "grep": true, "code_index": true, "compress": true, "web_fetch": true,
 		"write_file": false, "edit_file": false, "multi_edit": false, "move_file": false, "bash": false,
 	}
 	for name, want := range readOnly {
@@ -69,6 +69,74 @@ func TestBuiltinReadOnlyClassification(t *testing.T) {
 		if got := tl.ReadOnly(); got != want {
 			t.Errorf("%s.ReadOnly() = %v, want %v", name, got, want)
 		}
+	}
+}
+
+type compressStub struct {
+	request tool.CompressRequest
+	result  tool.CompressResult
+}
+
+func (s *compressStub) CompressContext(_ context.Context, request tool.CompressRequest) (tool.CompressResult, error) {
+	s.request = request
+	return s.result, nil
+}
+
+func TestCompressToolProtocol(t *testing.T) {
+	stub := &compressStub{result: tool.CompressResult{
+		Status: "ok", Direction: "before", Anchor: "unique", Messages: 4,
+		SourceTokens: 900, ProjectionTokens: 200, Mode: "summarized",
+	}}
+	ctx := tool.WithContextCompressor(context.Background(), stub)
+	out, err := (compressContext{}).Execute(ctx, argsJSON(t, map[string]any{
+		"direction": "before", "anchor": "  unique excerpt  ", "focus": " keep decisions ",
+	}))
+	if err != nil {
+		t.Fatalf("compress Execute: %v", err)
+	}
+	if stub.request.Direction != "before" || stub.request.Anchor != "unique excerpt" || stub.request.Focus != "keep decisions" {
+		t.Fatalf("forwarded request = %+v", stub.request)
+	}
+	var got tool.CompressResult
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if got != stub.result {
+		t.Fatalf("result = %+v, want %+v", got, stub.result)
+	}
+	if !(compressContext{}).ReadOnly() || !(compressContext{}).PlanModeSafe() {
+		t.Fatal("compress must be workspace-read-only and Plan Mode safe")
+	}
+}
+
+func TestCompressToolRejectsInvalidArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{name: "direction", args: map[string]any{"direction": "around", "anchor": "x"}, want: "direction"},
+		{name: "case-sensitive direction", args: map[string]any{"direction": "Before", "anchor": "x"}, want: "direction"},
+		{name: "empty anchor", args: map[string]any{"direction": "before", "anchor": "  "}, want: "empty"},
+		{name: "long anchor", args: map[string]any{"direction": "before", "anchor": strings.Repeat("a", 513)}, want: "512 bytes"},
+		{name: "long focus", args: map[string]any{"direction": "before", "anchor": "x", "focus": strings.Repeat("a", 2001)}, want: "2000 bytes"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := (compressContext{}).Execute(context.Background(), argsJSON(t, tt.args))
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestCompressToolRequiresActiveAgent(t *testing.T) {
+	_, err := (compressContext{}).Execute(context.Background(), argsJSON(t, map[string]any{
+		"direction": "after", "anchor": "unique",
+	}))
+	if err == nil || !strings.Contains(err.Error(), "active agent session") {
+		t.Fatalf("error = %v, want unavailable context compressor", err)
 	}
 }
 
@@ -490,7 +558,7 @@ func TestGlobNoMatches(t *testing.T) {
 	}
 }
 
-// --- GB18030 encoding integration tests (issue #2637) ---
+// GB18030 encoding integration tests (issue #2637)
 
 func TestReadFileGB18030(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "gbk.txt")

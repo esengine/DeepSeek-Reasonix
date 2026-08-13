@@ -33,7 +33,7 @@ func TestDeleteRangeRequiresReadAfterSameTurnWrite(t *testing.T) {
 	if got := atomic.LoadInt32(&deleteCalls); got != 1 {
 		t.Fatalf("delete_range executed %d times, want only the first call", got)
 	}
-	results := toolResults(a.session, "delete_range")
+	results := toolResults(a.sess.conversation, "delete_range")
 	if len(results) != 2 {
 		t.Fatalf("tool results = %d, want 2", len(results))
 	}
@@ -66,7 +66,7 @@ func TestEditFileAllowedAfterSameTurnWriteWithoutFreshRead(t *testing.T) {
 	if got := atomic.LoadInt32(&editCalls); got != 2 {
 		t.Fatalf("edit_file executed %d times, want both optimistic exact-match edits", got)
 	}
-	if last := lastToolResult(a.session, "edit_file"); strings.Contains(last, "[fresh read required]") {
+	if last := lastToolResult(a.sess.conversation, "edit_file"); strings.Contains(last, "[fresh read required]") {
 		t.Fatalf("edit_file should rely on its current-file uniqueness check, got %q", last)
 	}
 }
@@ -98,7 +98,7 @@ func TestDeleteRangeAllowedAfterFreshRead(t *testing.T) {
 	if got := atomic.LoadInt32(&deleteCalls); got != 2 {
 		t.Fatalf("delete_range executed %d times, want 2 after fresh read", got)
 	}
-	if last := lastToolResult(a.session, "delete_range"); strings.Contains(last, "[fresh read required]") {
+	if last := lastToolResult(a.sess.conversation, "delete_range"); strings.Contains(last, "[fresh read required]") {
 		t.Fatalf("fresh read should allow the second edit, got %q", last)
 	}
 }
@@ -130,7 +130,7 @@ func TestDeleteRangeStillRequiresReadAfterWindowedRead(t *testing.T) {
 	if got := atomic.LoadInt32(&deleteCalls); got != 1 {
 		t.Fatalf("delete_range executed %d times, want only the first call", got)
 	}
-	if last := lastToolResult(a.session, "delete_range"); !strings.Contains(last, "[fresh read required]") {
+	if last := lastToolResult(a.sess.conversation, "delete_range"); !strings.Contains(last, "[fresh read required]") {
 		t.Fatalf("windowed read should not allow the second edit, got %q", last)
 	}
 }

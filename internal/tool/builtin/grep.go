@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"reasonix/internal/proc"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/secrets"
+	"reasonix/internal/sessiontemp"
 	"reasonix/internal/tool"
 )
 
@@ -74,6 +76,7 @@ type grepTool struct {
 	rg          string
 	forbidRoots []string
 	sb          sandbox.Spec
+	sessionTemp *sessiontemp.Manager
 }
 
 func (grepTool) Name() string { return "grep" }
@@ -253,7 +256,7 @@ func (g grepTool) runNative(ctx context.Context, pattern, path string, info os.F
 			if ig.skip(path, d.Name(), false) {
 				return nil
 			}
-			if searchFile(path) == io.EOF {
+			if errors.Is(searchFile(path), io.EOF) {
 				return filepath.SkipAll
 			}
 			return nil
@@ -292,13 +295,26 @@ func (g grepTool) runRipgrep(ctx context.Context, pattern, path string, to time.
 		)
 	}
 	args = append(args, "--regexp", pattern, "--", path)
-	argv, wrapped := sandbox.CommandArgs(g.sb, args)
+
+	var lease *sessiontemp.Lease
+	sessionDir := ""
+	if m := g.sessionTempManager(ctx); m != nil {
+		l, err := m.Acquire()
+		if err != nil {
+			return "", false, fmt.Errorf("session temporary directory: %w", err)
+		}
+		lease = l
+		sessionDir = l.Dir()
+		defer lease.Release()
+	}
+	prepared := sandbox.PrepareArgs(g.sb, args, sessionDir)
+	argv, wrapped := prepared.Argv, prepared.Wrapped
 	if len(g.forbidRoots) > 0 && !wrapped {
 		return "", wrapped, nil
 	}
 
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.Env = secrets.ProcessEnv()
+	cmd.Env = applyEnvOverrides(secrets.ProcessEnv(), prepared.EnvOverrides)
 	proc.HideWindow(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -338,6 +354,13 @@ func (g grepTool) runRipgrep(ctx context.Context, pattern, path string, to time.
 		}
 	}
 	return formatGrep(ctx, out, truncated, to), wrapped, nil
+}
+
+func (g grepTool) sessionTempManager(ctx context.Context) *sessiontemp.Manager {
+	if m := sessiontemp.FromContext(ctx); m != nil {
+		return m
+	}
+	return g.sessionTemp
 }
 
 func displayRipgrepLine(line string, rp ResolvedPath) string {
@@ -402,6 +425,8 @@ func ResolveSearch(engine, rgPath string, warn io.Writer) SearchSpec {
 // ConfineSearch returns the grep built-in bound to a resolved search engine,
 // os sandbox spec for the ripgrep subprocess, and forbid-read roots for the
 // native scanner, overriding the native instance registered at init.
+// Session-private temporary directories are bound via BindSessionTemp or
+// Workspace.SessionTemp.
 func ConfineSearch(spec SearchSpec, sb sandbox.Spec, forbidRoots []string) tool.Tool {
 	return grepTool{rg: spec.RgPath, sb: sb, forbidRoots: forbidRoots}
 }

@@ -9,12 +9,60 @@ import (
 	"testing"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/billing"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
 
 type statusFactory struct {
 	*configurableFactory
+}
+
+func TestUsageAccumulatorTotalsMoreThanAuditLimit(t *testing.T) {
+	var accumulator usageAccumulator
+	usage := &provider.Usage{PromptTokens: 1_000_000}
+	pricing := &provider.Pricing{Input: 1, Currency: "USD"}
+	for range 65 {
+		quote := billing.BuildQuote(billing.QuoteInput{
+			Usage:           billing.UsageTokens{PromptTokens: usage.PromptTokens},
+			Rates:           billing.RateCard{Input: pricing.Input, Currency: pricing.Currency},
+			DisplayCurrency: "USD",
+		})
+		accumulator.addQuoted(usage, pricing, &quote, event.UsageSourceExecutor)
+	}
+	wire := accumulator.wire()
+	if wire.EstimatedCost == nil || *wire.EstimatedCost != 65 || wire.Currency == nil || *wire.Currency != "USD" {
+		t.Fatalf("65-event ACP total was truncated: %+v", wire)
+	}
+	if wire.CostQuote == nil || wire.CostQuote.Selected == nil || wire.CostQuote.Selected.Amount != "65" {
+		t.Fatalf("65-event ACP aggregate quote = %+v", wire.CostQuote)
+	}
+	if wire.CostComplete == nil || !*wire.CostComplete {
+		t.Fatalf("65-event ACP quote incomplete: %+v", wire)
+	}
+}
+
+func TestRestoredUsageKeepsFullScalarTotalAfterNewQuote(t *testing.T) {
+	complete := true
+	accumulator := restoreUsage(persistedUsageAccumulator{
+		PromptTokens: 1_000_000, Events: 1, PricedEvents: 1,
+		EstimatedCost: 2, Currency: "USD", CostComplete: &complete,
+	})
+	usage := &provider.Usage{PromptTokens: 1_000_000}
+	pricing := &provider.Pricing{Input: 1, Currency: "USD"}
+	quote := billing.BuildQuote(billing.QuoteInput{
+		Usage:           billing.UsageTokens{PromptTokens: usage.PromptTokens},
+		Rates:           billing.RateCard{Input: pricing.Input, Currency: pricing.Currency},
+		DisplayCurrency: "USD",
+	})
+	accumulator.addQuoted(usage, pricing, &quote, event.UsageSourceExecutor)
+	wire := accumulator.wire()
+	if wire.EstimatedCost == nil || *wire.EstimatedCost != 3 {
+		t.Fatalf("restored scalar history was replaced by the new ledger fragment: %+v", wire)
+	}
+	if wire.CostComplete == nil || !*wire.CostComplete {
+		t.Fatalf("restored complete state was lost: %+v", wire)
+	}
 }
 
 type runtimeTrackingFactory struct {

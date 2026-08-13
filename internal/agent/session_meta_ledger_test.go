@@ -314,9 +314,7 @@ func TestSessionMetaConcurrentWritersKeepRevisionMonotonic(t *testing.T) {
 	metaErrCh := make(chan error, 2)
 	var regressed atomic.Bool
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := 0; ; i++ {
 			select {
 			case <-stop:
@@ -338,10 +336,8 @@ func TestSessionMetaConcurrentWritersKeepRevisionMonotonic(t *testing.T) {
 				return
 			}
 		}
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	})
+	wg.Go(func() {
 		last := int64(0)
 		for {
 			select {
@@ -357,7 +353,7 @@ func TestSessionMetaConcurrentWritersKeepRevisionMonotonic(t *testing.T) {
 				last = meta.Revision
 			}
 		}
-	}()
+	})
 
 	for i := 1; i <= saves; i++ {
 		s.Add(provider.Message{Role: provider.RoleUser, Content: fmt.Sprintf("turn %d", i)})
@@ -445,10 +441,8 @@ func TestConcurrentSnapshotSaversNeverConflict(t *testing.T) {
 	stop := make(chan struct{})
 	errCh := make(chan error, 64)
 	var wg sync.WaitGroup
-	for i := 0; i < 2; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 2 {
+		wg.Go(func() {
 			for {
 				if err := s.SaveSnapshot(path); err != nil {
 					select {
@@ -462,7 +456,7 @@ func TestConcurrentSnapshotSaversNeverConflict(t *testing.T) {
 				default:
 				}
 			}
-		}()
+		})
 	}
 	for i := 1; i <= adds; i++ {
 		s.Add(provider.Message{Role: provider.RoleUser, Content: fmt.Sprintf("turn %d", i)})

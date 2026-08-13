@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"html"
+	"slices"
 	"strings"
 
 	"reasonix/internal/provider"
@@ -20,12 +21,12 @@ const (
 // A later real user turn consumes older handoffs implicitly, so the persisted
 // LocalOnly record never needs an in-place mutation that could churn history.
 func (a *Agent) pendingInterruptedRecovery() *provider.InterruptedTurnRecovery {
-	if a == nil || a.session == nil {
+	if a == nil || a.sess.conversation == nil {
 		return nil
 	}
-	msgs := a.session.Snapshot()
-	for i := len(msgs) - 1; i >= 0; i-- {
-		m := msgs[i]
+	msgs := a.sess.conversation.Snapshot()
+	for _, v := range slices.Backward(msgs) {
+		m := v
 		if m.LocalOnly && m.InterruptedTurn != nil && m.InterruptedTurn.Pending {
 			copy := *m.InterruptedTurn
 			copy.CompletedTools = append([]provider.InterruptedToolSummary(nil), copy.CompletedTools...)

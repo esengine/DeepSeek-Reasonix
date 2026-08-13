@@ -1,3 +1,5 @@
+//go:build windows || cgo
+
 package main
 
 import (

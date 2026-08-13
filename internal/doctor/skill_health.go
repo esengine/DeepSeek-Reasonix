@@ -58,8 +58,8 @@ func CollectSkillHealthWarnings(opts SkillHealthOptions) []string {
 				if dep == "" {
 					continue
 				}
-				if strings.HasPrefix(dep, "mcp-server:") {
-					srv := strings.TrimPrefix(dep, "mcp-server:")
+				if after, ok := strings.CutPrefix(dep, "mcp-server:"); ok {
+					srv := after
 					if !pluginNames[srv] {
 						out = append(out, fmt.Sprintf("skill %q requires %s but that MCP server is not configured", name, dep))
 					} else if reason, ok := opts.FailedServers[srv]; ok && reason != "" {

@@ -101,8 +101,9 @@ input,textarea{font:inherit;color:inherit}
 .card-head .ico{width:18px;height:18px;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;background:var(--panel-2);color:var(--fg-2);flex-shrink:0;font-size:10px}
 .card-main{display:grid;gap:2px;min-width:0}
 .card-title{display:flex;align-items:center;gap:7px;min-width:0}
-.card-head .name{color:var(--fg);font-weight:500;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.card-head .subject{font-family:var(--mono);font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+/* The tool name identifies the call; the argument summary is what may shrink. */
+.card-head .name{color:var(--fg);font-weight:500;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto;max-width:55%}
+.card-head .subject{font-family:var(--mono);font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 0;min-width:0}
 .card-meta{display:flex;align-items:center;gap:8px;min-width:0;font-family:var(--mono);font-size:10.5px;color:var(--muted-2)}
 .card-badge{display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:999px;border:1px solid var(--border);font-size:10.5px;color:var(--muted);white-space:nowrap}
 .card-actions{display:flex;align-items:center;gap:4px}
@@ -119,6 +120,12 @@ input,textarea{font:inherit;color:inherit}
 .card[data-tone="danger"] .card-badge{background:var(--danger-soft);border-color:transparent;color:var(--danger)}
 .card[data-tone="accent"] .card-badge{background:var(--accent-soft);border-color:transparent;color:var(--accent)}
 .card .err-body{padding:6px 12px;color:var(--danger);background:var(--danger-soft);font-family:var(--mono);font-size:12px;white-space:pre-wrap;border-top:1px solid var(--border)}
+.card[data-open="false"] .card-body,.card[data-open="false"] .card-nest{display:none}
+.card-nest{border-top:1px solid var(--border);background:var(--bg-2);padding:4px 10px 8px}
+.card-nest__label{font-family:var(--mono);font-size:10.5px;color:var(--muted-2);padding:4px 2px 2px}
+.card-nest .card{margin:6px 0 0;border-left:2px solid var(--border-strong);border-radius:0 var(--radius-lg) var(--radius-lg) 0;box-shadow:none}
+.card-nest .card-head{padding:5px 10px}
+.card--subagent-orphan{border-left:2px solid var(--border-strong)}
 .spin{animation:spin .9s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
@@ -315,7 +322,12 @@ input,textarea{font:inherit;color:inherit}
   .slash-menu__foot{display:none}
   .card-head{grid-template-columns:auto minmax(0,1fr) auto}
   .card-actions{grid-column:3}
+  /* Narrow screens drop the badge, except when it carries the only signal that
+     the command never ran — a red icon alone reads as "failed". */
   .card-badge{display:none}
+  .card[data-state="blocked"] .card-head{grid-template-columns:auto minmax(0,1fr) auto auto}
+  .card[data-state="blocked"] .card-badge{display:inline-flex}
+  .card[data-state="blocked"] .card-actions{grid-column:4}
 }
 @media(min-width:769px){
   .menu-btn,.sidebar-overlay{display:none}
@@ -604,6 +616,7 @@ const __T = {
     'loading': 'Loading...',
     'cache': 'Cache',
     'cost': 'Cost',
+    'multi_currency': 'Multiple currencies',
     'balance': 'Balance',
     'ready': 'Ready',
     'thinking': 'Thinking...',
@@ -634,6 +647,7 @@ const __T = {
     'cmd_mcp': 'MCP servers',
     'cmd_skill': 'Skills',
     'cmd_hooks': 'Hooks',
+    'cmd_reload': 'Reload extensions',
     'cmd_memory': 'Show memory',
     'cmd_forget': 'Forget memory',
     'cmd_goal': 'Set a goal for the agent to pursue autonomously',
@@ -647,6 +661,9 @@ const __T = {
     'cmd_group_memory': 'Memory',
     'cmd_group_agent': 'Agent',
     'cmd_group_help': 'Help',
+    'extensions_reloading': 'Reloading extensions...',
+    'extensions_reloaded': 'Extensions reloaded',
+    'extensions_reload_failed': 'Could not reload extensions',
     'command_palette': 'Command palette',
     'command_empty': 'No commands match',
     'command_nav': '↑↓ navigate · Enter insert · Esc close',
@@ -660,6 +677,9 @@ const __T = {
     'tool_args': 'Args',
     'tool_output': 'Output',
     'tool_lines': 'lines',
+    'tool_subcalls': 'sub-agent calls',
+    'tool_blocked': 'Blocked',
+    'tool_not_executed': 'not executed',
     'submit': 'Submit',
     'approval_title': 'Approval Required',
     'allow': 'Allow',
@@ -692,6 +712,7 @@ const __T = {
     'delete_session': 'Delete Session',
     'cannot_delete_active': 'Cannot delete the active session',
     'delete_failed': 'Could not delete the session. Check your connection and try again.',
+    'auth_failed': 'Web authentication failed',
     'search_sessions': 'Search sessions',
     'active': 'Active',
     'use_model': 'Use',
@@ -708,8 +729,8 @@ const __T = {
     'scope_conversation': 'Conversation only',
     'scope_code': 'Code only',
     'scope_fork': 'Fork (new branch)',
-    'scope_sumfrom': 'Summarize from here',
-    'scope_sumupto': 'Summarize up to here',
+    'scope_sumfrom': 'Compress model context after here (visible history is kept)',
+    'scope_sumupto': 'Compress model context before here (visible history is kept)',
     'delete_confirm': 'Delete this session?',
     'welcome_tag': 'AI coding agent',
     'hint_commands': '/ commands',
@@ -741,6 +762,7 @@ const __T = {
     'loading': '加载中...',
     'cache': '缓存',
     'cost': '费用',
+    'multi_currency': '多币种',
     'balance': '余额',
     'ready': '就绪',
     'thinking': '思考中...',
@@ -771,6 +793,7 @@ const __T = {
     'cmd_mcp': 'MCP 服务器',
     'cmd_skill': '技能',
     'cmd_hooks': '钩子',
+    'cmd_reload': '重新加载扩展',
     'cmd_memory': '显示记忆',
     'cmd_forget': '忘记记忆',
     'cmd_goal': '设置目标让代理自主执行',
@@ -784,6 +807,9 @@ const __T = {
     'cmd_group_memory': '记忆',
     'cmd_group_agent': '代理',
     'cmd_group_help': '帮助',
+    'extensions_reloading': '正在重新加载扩展…',
+    'extensions_reloaded': '扩展已重新加载',
+    'extensions_reload_failed': '无法重新加载扩展',
     'command_palette': '命令面板',
     'command_empty': '没有匹配的命令',
     'command_nav': '↑↓ 选择 · Enter 插入 · Esc 关闭',
@@ -797,6 +823,9 @@ const __T = {
     'tool_args': '参数',
     'tool_output': '输出',
     'tool_lines': '行',
+    'tool_subcalls': '个子代理调用',
+    'tool_blocked': '已阻止',
+    'tool_not_executed': '未执行',
     'submit': '提交',
     'approval_title': '需要批准',
     'allow': '允许',
@@ -829,6 +858,7 @@ const __T = {
     'delete_session': '删除会话',
     'cannot_delete_active': '无法删除当前会话',
     'delete_failed': '无法删除会话，请检查连接后重试',
+    'auth_failed': 'Web 认证失败',
     'search_sessions': '搜索会话',
     'active': '当前',
     'use_model': '使用',
@@ -845,8 +875,8 @@ const __T = {
     'scope_conversation': '仅对话',
     'scope_code': '仅代码',
     'scope_fork': '分叉（新分支）',
-    'scope_sumfrom': '从此处总结',
-    'scope_sumupto': '总结到此处',
+    'scope_sumfrom': '压缩此处之后的模型上下文（保留可见历史）',
+    'scope_sumupto': '压缩此处之前的模型上下文（保留可见历史）',
     'delete_confirm': '删除此会话？',
     'welcome_tag': 'AI 编码助手',
     'hint_commands': '/ 命令',
@@ -915,6 +945,24 @@ const welcome = $('#welcome');
 const welcomeModel = $('#welcome-model'), welcomeCwd = $('#welcome-cwd');
 const slashAnchor = $('#slash-menu-anchor');
 
+// Token links use a URL fragment so the secret never appears in the initial
+// HTTP request, browser history, referrers, or access logs. Exchange it for an
+// HttpOnly cookie before any API fetch or SSE connection starts.
+const __nativeFetch = window.fetch.bind(window);
+function bootstrapFragmentToken() {
+  const fragment = new URLSearchParams(window.location.hash.slice(1));
+  const token = fragment.get('token');
+  if(!token)return Promise.resolve();
+  fragment.delete('token');
+  const cleanHash=fragment.toString();
+  window.history.replaceState(null,'',window.location.pathname+window.location.search+(cleanHash?'#'+cleanHash:''));
+  return __nativeFetch('/auth/token',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token})}).then(response=>{
+    if(!response.ok)throw new Error(__('auth_failed')+' (HTTP '+response.status+')');
+  });
+}
+const __authReady = bootstrapFragmentToken();
+window.fetch = (...args) => __authReady.then(() => __nativeFetch(...args));
+
 // ── state ──
 let running = false, planMode = false, bypassMode = false, toolApprovalMode = 'ask', yoloRestoreMode = 'ask';
 let goalMode = false, goalActive = false, goalText = '';
@@ -942,6 +990,7 @@ const SLASH_CMDS = [
   {cmd:'mcp',sig:'/mcp',desc:__('cmd_mcp'),group:'system'},
   {cmd:'skill',sig:'/skill',desc:__('cmd_skill'),group:'system'},
   {cmd:'hooks',sig:'/hooks',desc:__('cmd_hooks'),group:'system'},
+  {cmd:'reload',sig:'/reload',desc:__('cmd_reload'),group:'system'},
   {cmd:'memory',sig:'/memory',desc:__('cmd_memory'),group:'memory'},
   {cmd:'forget',sig:'/forget <item>',desc:__('cmd_forget'),group:'memory',danger:true},
   {cmd:'help',sig:'/help',desc:__('cmd_help'),group:'help'},
@@ -978,7 +1027,17 @@ function isTextEntry(t) { return !!t&&(t.tagName==='INPUT'||t.tagName==='TEXTARE
 function isPlainKey(e) { return !e.ctrlKey&&!e.metaKey&&!e.altKey&&!isTextEntry(e.target); }
 function fmtTok(n) { return n>=1000?(n/1000).toFixed(1).replace(/\.0$/,'')+'k':String(n);}
 function currencySymbol(c){const v=String(c||'¥').trim();if(/^(cny|rmb|yuan)$/i.test(v))return '¥';if(/^(usd|dollar)$/i.test(v))return '$';return v||'¥';}
-function fmtMoney(n,c){if(typeof n!=='number'||!isFinite(n))return '—';const s=currencySymbol(c);return s+(n<1?n.toFixed(4):n.toFixed(2));}
+function fmtMoney(n,c){if(typeof n!=='number'||!isFinite(n)||n<=0)return '—';const s=currencySymbol(c);return '≈'+s+(n<1?n.toFixed(4):n.toFixed(2));}
+function usageSelectedCost(u){
+  if(!u)return null;
+  if(u.costQuote&&(u.costQuote.displayStatus==='bucketed'||u.costQuote.aggregateMode==='currency_buckets'))return{bucketed:true,complete:false};
+  const sel=u.costQuote&&u.costQuote.selected;
+  if(sel&&sel.amount){const n=Number(sel.amount);if(Number.isFinite(n)&&n>0)return{amount:n,currency:sel.currency||u.currencyCode||u.currency,complete:u.costQuote.displayComplete!==false,displayStatus:u.costQuote.displayStatus};}
+  if(u.costQuote)return null;
+  const n=u.cost??u.costUsd;
+  if(typeof n==='number'&&n>0)return{amount:n,currency:u.currencyCode||u.currency,complete:u.costQuote?u.costQuote.complete!==false:true};
+  return null;
+}
 function fmtElapsed(ms) { const s=Math.floor(ms/1000); return s<60?s+'s':Math.floor(s/60)+'m '+s%60+'s';}
 function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function escAttr(s) { return escHtml(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
@@ -1092,6 +1151,25 @@ function copyText(text) {
   if(navigator.clipboard?.writeText)return navigator.clipboard.writeText(text).then(()=>true).catch(()=>false);
   return Promise.resolve(false);
 }
+// A sub-agent's calls carry the spawning call's parentId. They render inside
+// that card, so a delegated command is never shown as the session's own work.
+function toolNestHost(tool) {
+  if(!tool.parentId)return null;
+  const parent=toolCards[tool.parentId];
+  if(!parent)return null;
+  let nest=parent.querySelector(':scope > .card-nest');
+  if(!nest){
+    nest=el('div','card-nest');
+    nest.appendChild(el('div','card-nest__label'));
+    parent.appendChild(nest);
+  }
+  if(parent.dataset.userToggled!=='true')parent.dataset.open='true';
+  return nest;
+}
+function updateNestLabel(nest) {
+  const label=nest.querySelector('.card-nest__label');
+  if(label)label.textContent=nest.querySelectorAll(':scope > .card').length+' '+__('tool_subcalls');
+}
 function renderToolDispatch(tool) {
 
   // Partial, full, and post-write preview-refresh dispatches share one ID.
@@ -1113,22 +1191,56 @@ function renderToolDispatch(tool) {
   const head=el('div','card-head');
   const summary=toolArgsSummary(tool.args);
   head.innerHTML='<span class="ico spin">'+toolIcon('accent')+'</span><div class="card-main"><div class="card-title"><span class="name">'+escHtml(tool.name)+'</span>'+(summary?'<span class="subject">'+escHtml(summary)+'</span>':'')+'</div><div class="card-meta">'+escHtml(__('tool_args'))+' '+fmtTok(String(tool.args||'').length)+'</div></div><span class="card-badge">'+escHtml(__('tool_running'))+'</span><div class="card-actions"><button type="button" class="card-action card-copy" title="'+escAttr(__('tool_copy'))+'" aria-label="'+escAttr(__('tool_copy'))+'"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button><span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></span></div>';
-  const body=el('div','card-body'); body.style.display='none';
-  head.onclick=e=>{if(e.target.closest('button'))return;const open=card.dataset.open==='true';card.dataset.open=open?'false':'true';body.style.display=open?'none':'';};
+  const body=el('div','card-body');
+  head.onclick=e=>{if(e.target.closest('button'))return;card.dataset.open=card.dataset.open==='true'?'false':'true';card.dataset.userToggled='true';};
   const copy=head.querySelector('.card-copy');
   if(copy)copy.onclick=async e=>{e.stopPropagation();const ok=await copyText(body.textContent||card.dataset.toolArgs||'');copy.title=ok?__('tool_copied'):__('tool_copy');setTimeout(()=>{copy.title=__('tool_copy');},1200);};
-  card.appendChild(head);card.appendChild(body);log.appendChild(card);toolCards[tool.id]=card;scrollDown();
+  card.appendChild(head);card.appendChild(body);
+  const nest=toolNestHost(tool);
+  if(nest){nest.appendChild(card);updateNestLabel(nest);}
+  else{if(tool.parentId)card.classList.add('card--subagent-orphan');log.appendChild(card);}
+  toolCards[tool.id]=card;scrollDown();
+}
+function shellDisplayName(ex){
+  if(!ex||!ex.shell)return 'bash';
+  if(ex.shell==='git-bash')return 'Git Bash';
+  if(ex.shell==='powershell')return 'Windows PowerShell';
+  if(ex.shell==='pwsh')return 'PowerShell 7+';
+  return ex.shell;
 }
 function renderToolResult(tool) {
   const card=toolCards[tool.id]; if(!card)return;
   const elapsed=Math.max(0,Date.now()-Number(card.dataset.startedAt||Date.now()));
-  setToolStatus(card,tool.err?'danger':'success',tool.err?__('tool_failed'):__('tool_done'));
-  if(tool.err){card.appendChild(el('div','err-body',tool.err));updateToolMeta(card,fmtElapsed(elapsed));}
-  else {
-    const body=card.querySelector('.card-body');
+  const ex=tool.execution||null;
+  if(ex&&tool.name==='bash'){
+    const title=card.querySelector('.card-title .name');
+    if(title)title.textContent=shellDisplayName(ex);
+  }
+  // A host refusal reports not_run shell metadata: the command never started,
+  // so it reads as blocked rather than as a failed or completed command.
+  const refused=Boolean(tool.err)&&ex&&ex.state==='not_run';
+  card.dataset.state=refused?'blocked':(tool.err?'failed':'done');
+  setToolStatus(card,tool.err?'danger':'success',refused?__('tool_blocked'):(tool.err?__('tool_failed'):__('tool_done')));
+  const nest=card.querySelector(':scope > .card-nest');
+  if(nest&&card.dataset.userToggled!=='true')card.dataset.open='false';
+  let meta=fmtElapsed(elapsed);
+  if(ex){
+    const bits=[];
+    if(typeof ex.exitCode==='number')bits.push('exit '+ex.exitCode);
+    if(ex.failurePhase)bits.push(refused?__('tool_not_executed'):ex.failurePhase);
+    if(ex.verification&&ex.verification!=='not_verification')bits.push(ex.verification);
+    if(bits.length)meta=bits.join(' · ')+' · '+meta;
+  }
+  if(tool.err){
+    const err=el('div','err-body',tool.err);
+    if(ex&&ex.outputTail){const pre=el('pre','err-stderr',ex.outputTail.slice(0,16000));err.appendChild(pre);}
+    card.appendChild(err);
+    updateToolMeta(card,meta);
+  } else {
+    const body=card.querySelector(':scope > .card-body');
     const output=String(tool.output||'');
     if(body)body.textContent=output?output.slice(0,2000)+(tool.truncated?'\n...[truncated]':''):__('tool_no_output');
-    updateToolMeta(card,fmtElapsed(elapsed)+' · '+lineCount(output)+' '+__('tool_lines'));
+    updateToolMeta(card,meta+' · '+lineCount(output)+' '+__('tool_lines'));
   }
   scrollDown();
 }
@@ -1137,12 +1249,48 @@ function renderToolProgress(tool) {
   // local-frontend contract; they must never land in ordinary tool output.
   if (tool.name && tool.name.indexOf('reasonix.subagent.') === 0) return;
   const card=toolCards[tool.id]; if(!card)return;
-  const body=card.querySelector('.card-body'); if(!body)return;
-  body.style.display=''; card.dataset.open='true';
+  const body=card.querySelector(':scope > .card-body'); if(!body)return;
+  if(card.dataset.userToggled!=='true')card.dataset.open='true';
   body.textContent+=tool.output||'';
   if(body.textContent.length>4000) body.textContent=body.textContent.slice(-3000);
   updateToolMeta(card,fmtElapsed(Date.now()-Number(card.dataset.startedAt||Date.now()))+' · '+lineCount(body.textContent)+' '+__('tool_lines'));
   scrollDown();
+}
+
+// Serve renders the structured extension contract as safe native text. It
+// never injects extension-provided HTML/Markdown into innerHTML, so a sidecar
+// cannot turn a card, form, status, or notification into executable content.
+function renderExtensionSurface(p) {
+  if(!p)return;
+  const lines=[];
+  const plugin=p.pluginId||'extension';
+  let severity='';
+  if(p.status){
+    severity=p.status.severity||'';
+    lines.push(p.status.label||'');
+    if(p.status.detail)lines.push(p.status.detail);
+    if(typeof p.status.progress==='number')lines.push(Math.round(p.status.progress*100)+'%');
+  } else if(p.card){
+    lines.push(p.card.title||'');
+    lines.push(p.card.text||p.card.markdown||'');
+    (p.card.fields||[]).forEach(f=>lines.push((f.key||'')+': '+(f.value||'')));
+    (p.card.actions||[]).forEach(a=>lines.push('['+(a.label||a.actionId||'action')+']'));
+  } else if(p.form){
+    lines.push(p.form.title||'');
+    lines.push(p.form.message||'');
+    (p.form.fields||[]).forEach(f=>{
+      let detail=(f.label||f.key||'')+(f.required?' *':'');
+      if((f.options||[]).length)detail+=' — '+f.options.join(', ');
+      lines.push(detail);
+    });
+  } else if(p.notification){
+    severity=p.notification.severity||'';
+    lines.push(p.notification.title||'');
+    lines.push(p.notification.body||'');
+  }
+  const text='['+plugin+'] '+lines.filter(Boolean).join('\n');
+  const node=el('div','notice'+((severity==='warn'||severity==='error')?' notice--warn':''),text);
+  log.appendChild(node);scrollDown();
 }
 
 // ── approval ──
@@ -1400,7 +1548,9 @@ function closeSlashMenu(){slashOpen=false;const m=$('#slash-menu');if(m)m.remove
 function acceptSlash(){if(!slashOpen)return;const c=slashFiltered[slashIndex];if(c){input.value='/'+c.cmd+' ';}closeSlashMenu();input.focus();}
 
 // ── SSE ──
-const es=new EventSource('/events');
+let es;
+function connectEvents(){
+es=new EventSource('/events');
 es.onopen=()=>{setConnState('connected');fetchStatus();fetchTodos();};
 es.onmessage=ev=>{setConnState('connected');
   const e=JSON.parse(ev.data);
@@ -1416,8 +1566,7 @@ es.onmessage=ev=>{setConnState('connected');
     case 'usage':
       if(e.usage){turnTokens=e.usage.completionTokens||0;
         cumulativeTokens+=e.usage.totalTokens||0;
-        const usageCost=e.usage.cost??e.usage.costUsd;
-        if(typeof usageCost==='number')cumulativeCost+=usageCost;
+        const picked=usageSelectedCost(e.usage);
         cumulativeCacheHit+=e.usage.cacheHitTokens||0;
         cumulativeCacheMiss+=e.usage.cacheMissTokens||0;
         const strip=el('div','metric-strip');
@@ -1425,13 +1574,16 @@ es.onmessage=ev=>{setConnState('connected');
           const sp=el('span','item');sp.innerHTML=it.l+' <span class="v '+it.c+'">'+it.v+'</span>';strip.appendChild(sp);
         });
         if(e.usage.cacheHitTokens){const sp=el('span','item');sp.innerHTML=__('cache')+' <span class="v acc">'+Math.round(e.usage.cacheHitTokens/Math.max(1,e.usage.cacheHitTokens+e.usage.cacheMissTokens)*100)+'%</span>';strip.appendChild(sp);}
-        if(typeof usageCost==='number'&&usageCost>0){const sp=el('span','item');sp.innerHTML=__('cost')+' <span class="v">'+fmtMoney(usageCost,e.usage.currency)+'</span>';strip.appendChild(sp);}
+        if(picked&&picked.bucketed){const sp=el('span','item');sp.innerHTML=__('cost')+' <span class="v">'+__('multi_currency')+'</span>';strip.appendChild(sp);}
+        else if(picked&&picked.amount>0){const sp=el('span','item');sp.innerHTML=__('cost')+' <span class="v">'+fmtMoney(picked.amount,picked.currency||e.usage.currency)+'</span>';strip.appendChild(sp);}
         log.appendChild(strip);scrollDown();
       } break;
     case 'notice': log.appendChild(el('div','notice'+(e.level==='warn'?' notice--warn':''),(e.level==='warn'?'! ':'')+(e.text||'')));scrollDown();break;
     case 'phase': finalizeMsg(); log.appendChild(el('div','phase',e.text||''));scrollDown();break;
     case 'approval_request': if(e.approval)showApproval(e.approval); break;
     case 'ask_request': if(e.ask)showAsk(e.ask); break;
+    case 'extension_surface': if(e.extension)renderExtensionSurface(e.extension); break;
+    case 'extension_status': if(e.extension)renderExtensionSurface(e.extension); break;
     case 'compaction_started': showCompaction({trigger:e.compaction?.trigger}); break;
     case 'compaction_done': showCompaction(e.compaction||{}); break;
     case 'retrying': setRetrying(e.retryAttempt,e.retryMax); break;
@@ -1442,6 +1594,8 @@ es.onerror=()=>{
   if(es.readyState===EventSource.CONNECTING){setConnState('reconnecting');}
   else{setConnState('disconnected');}
 };
+}
+__authReady.then(connectEvents).catch(error=>{setConnState('disconnected');showNotice(error instanceof Error?error.message:__('auth_failed'),'warn');});
 
 // ── status polling ──
 function fetchStatus(){
@@ -1460,11 +1614,12 @@ function fetchStatus(){
     goalText=(s.goal||'').trim();
     goalActive=goalText!==''&&(s.goalStatus||'')==='running';
     updateGoalUI();
+    sessionCostQuote=s.sessionCostQuote||null;
     // sidebar metrics
     const cacheTotal=(s.cacheHit||0)+(s.cacheMiss||0);
     $('#sm-cache').textContent=cacheTotal>0?Math.round((s.cacheHit||0)/cacheTotal*100)+'%':'—';
-    const lastCost=s.lastUsage?.cost??s.lastUsage?.costUsd??s.lastUsage?.totalCost;
-    if(typeof lastCost==='number')$('#sm-cost').textContent=fmtMoney(lastCost,s.lastUsage?.currency);
+    const lastPicked=usageSelectedCost(s.lastUsage);
+    $('#sm-cost').textContent=lastPicked?.bucketed?__('multi_currency'):lastPicked?fmtMoney(lastPicked.amount,lastPicked.currency||s.lastUsage?.currency):'—';
     if(s.balance){$('#sm-balance').textContent=s.balance.display||'--';}
     if(s.balance)balanceInfo.textContent='💰 '+(s.balance.display||'--');
   }).catch(()=>{});
@@ -1644,6 +1799,14 @@ async function syncModeBeforeSubmit(){
 }
 async function send(){
   const v=input.value.trim(); if(!v)return;
+  if(v==='/reload'){
+    input.value='';input.style.height='';closeSlashMenu();
+    showNotice(__('extensions_reloading'));
+    const response=await post('/extensions/reload',{});
+    if(response.ok){showNotice(__('extensions_reloaded'));fetchStatus();}
+    else{showNotice((await response.text()).trim()||__('extensions_reload_failed'),'warn');}
+    return;
+  }
   await syncModeBeforeSubmit();
   let submitInput=v;
   if(goalMode && !v.startsWith('/goal')){
@@ -1822,8 +1985,9 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&sidebar.classList.c
 // Session-scoped counters accumulated while this page is open. They reset on
 // session rotation (/new, /resume) so the stats card labeled "session cost"
 // never quietly turns into an all-sessions running total.
-let cumulativeTokens=0, cumulativeCost=0, cumulativeCacheHit=0, cumulativeCacheMiss=0;
-function resetCumulativeStats(){cumulativeTokens=0;cumulativeCost=0;cumulativeCacheHit=0;cumulativeCacheMiss=0;}
+let cumulativeTokens=0, cumulativeCacheHit=0, cumulativeCacheMiss=0;
+let sessionCostQuote=null;
+function resetCumulativeStats(){cumulativeTokens=0;cumulativeCacheHit=0;cumulativeCacheMiss=0;sessionCostQuote=null;}
 function openStats(){
   const modal=$('#stats-modal');
   if(!modal)return;
@@ -1836,10 +2000,11 @@ function openStats(){
     const hit=cumulativeCacheHit||s.cacheHit||0, miss=cumulativeCacheMiss||s.cacheMiss||0;
     const rate=hit+miss>0?Math.round(hit/(hit+miss)*100)+'%':'0%';
     $('#stats-cache-rate').textContent=rate;
-    // No single-request fallback here: rendering lastUsage.cost (one turn)
-    // under the session-cost label displayed one turn's spend as the session's.
-    const cost=cumulativeCost;
-    $('#stats-total-cost').textContent=cost>0?fmtMoney(cost,s.lastUsage?.currency):'-';
+    const quote=s.sessionCostQuote;
+    if(quote?.displayStatus==='bucketed'||quote?.aggregateMode==='currency_buckets') $('#stats-total-cost').textContent=__('multi_currency');
+    else if(quote?.selected?.amount) $('#stats-total-cost').textContent=fmtMoney(Number(quote.selected.amount),quote.selected.currency);
+    else if(quote?.displayStatus==='unavailable') $('#stats-total-cost').textContent='—';
+    else $('#stats-total-cost').textContent='—';
     $('#stats-balance').textContent=s.balance?.display||'-';
     if(s.window){const pct=Math.min(100,Math.round(s.used/s.window*100));$('#stats-ctx-fill').style.width=pct+'%';$('#stats-ctx-used').textContent=fmtTok(s.used)+' tok';$('#stats-ctx-window').textContent=fmtTok(s.window)+' tok';}
   }).catch(()=>{});

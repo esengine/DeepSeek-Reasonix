@@ -19,6 +19,7 @@ const moduleUrl = `data:text/javascript;base64,${Buffer.from(transpiled).toStrin
 const {
   dismissedTodoKeyForScope,
   resolveTodoPanelTodos,
+  sameStringList,
   sameTodoList,
   scopedTodoBatchKey,
   scopedTodoDismissalKey,
@@ -39,14 +40,27 @@ const activeTodos = [
 ];
 
 assert.deepEqual(
-  resolveTodoPanelTodos([], activeTodos),
+  resolveTodoPanelTodos([], undefined),
   [],
-  "an authoritative empty canonical list clears the transcript fallback",
+  "an authoritative empty canonical list with no live tool clears the panel",
+);
+assert.deepEqual(
+  resolveTodoPanelTodos(
+    [{ content: "Inspect the report", status: "in_progress" }, { content: "Ship the fix", status: "pending" }],
+    [{ content: "Inspect the report", status: "completed" }, { content: "Ship the fix", status: "in_progress" }],
+  ),
+  [{ content: "Inspect the report", status: "completed" }, { content: "Ship the fix", status: "in_progress" }],
+  "a live todo_write snapshot advances mid-turn status past a stale meta snapshot",
 );
 assert.deepEqual(
   resolveTodoPanelTodos(undefined, activeTodos),
   activeTodos,
   "an unavailable canonical list falls back to the transcript snapshot",
+);
+assert.deepEqual(
+  resolveTodoPanelTodos(activeTodos, undefined),
+  activeTodos,
+  "without a live tool the panel keeps the meta snapshot",
 );
 assert.equal(
   sameTodoList(activeTodos, activeTodos.map((todo) => ({ ...todo }))),
@@ -148,6 +162,19 @@ assert.equal(
   true,
   "an incomplete restored todo list must reappear even after a stale local dismissal",
 );
+assert.equal(
+  shouldShowTodoPanel(activeKey, null, activeTodos, { batchKey: todoBatchKey(activeTodos), batches: [todoBatchKey(activeTodos)] }),
+  true,
+  "a persisted completed-batch dismissal cannot hide unfinished work",
+);
+const completedBatch = todoBatchKey(completedTodos);
+assert.equal(
+  shouldShowTodoPanel(completedKey, null, completedTodos, { batchKey: completedBatch, batches: [completedBatch] }),
+  false,
+  "a session-sidecar batch dismissal hides the completed shelf after upgrade remount",
+);
+assert.equal(sameStringList(["a"], ["a"]), true, "identical dismissed batch lists compare equal");
+assert.equal(sameStringList(["a"], ["b"]), false, "changed dismissed batch lists compare unequal");
 assert.notEqual(
   activeKey,
   todoDismissalKey([{ ...activeTodos[0], status: "completed" }, { ...activeTodos[1], status: "in_progress" }]),

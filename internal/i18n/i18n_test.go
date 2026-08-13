@@ -15,7 +15,7 @@ func TestCatalogsComplete(t *testing.T) {
 	typ := en.Type()
 	catalogs := map[string]reflect.Value{"zh": reflect.ValueOf(Chinese), "zh-TW": reflect.ValueOf(ChineseTraditional)}
 	for tag, cat := range catalogs {
-		for i := 0; i < typ.NumField(); i++ {
+		for i := range typ.NumField() {
 			name := typ.Field(i).Name
 			if strings.TrimSpace(cat.Field(i).String()) == "" {
 				t.Errorf("%s catalogue: field %q is empty", tag, name)
@@ -31,7 +31,7 @@ func TestCatalogsComplete(t *testing.T) {
 func TestCatalogsAgreeOnPlaceholders(t *testing.T) {
 	en := reflect.ValueOf(English)
 	typ := en.Type()
-	for i := 0; i < typ.NumField(); i++ {
+	for i := range typ.NumField() {
 		name := typ.Field(i).Name
 		if !strings.HasSuffix(name, "Fmt") {
 			continue
@@ -61,7 +61,7 @@ func TestPlanApprovalChoicesExposeThreeExplicitActions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.tag, func(t *testing.T) {
 			numbered := 0
-			for _, line := range strings.Split(tt.value, "\n") {
+			for line := range strings.SplitSeq(tt.value, "\n") {
 				line = strings.TrimSpace(line)
 				if len(line) >= 3 && line[0] >= '1' && line[0] <= '9' && line[1] == '.' {
 					numbered++

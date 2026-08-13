@@ -263,7 +263,7 @@ func taskTmuxDetachCmd(a *taskmonitor.TmuxAdapter, args []string) int {
 	return printTmuxResult(a.Detach(context.Background(), dir, fs.Arg(0)), jsonOut)
 }
 
-// --- list ---
+// list
 
 func taskListCmd(store taskmonitor.Store, args []string) int {
 	fs := flag.NewFlagSet("task list", flag.ContinueOnError)
@@ -300,7 +300,7 @@ func taskListCmd(store taskmonitor.Store, args []string) int {
 	return 0
 }
 
-// --- status ---
+// status
 
 func taskStatusCmd(store taskmonitor.Store, args []string) int {
 	fs := flag.NewFlagSet("task status", flag.ContinueOnError)
@@ -342,7 +342,7 @@ func taskStatusCmd(store taskmonitor.Store, args []string) int {
 	return 0
 }
 
-// --- events ---
+// events
 
 func taskEventsCmd(store taskmonitor.Store, args []string) int {
 	fs := flag.NewFlagSet("task events", flag.ContinueOnError)
@@ -430,7 +430,7 @@ func taskEventsCmd(store taskmonitor.Store, args []string) int {
 	return 0
 }
 
-// --- control commands ---
+// control commands
 
 func taskStopCmd(store taskmonitor.Store, args []string) int {
 	fs := flag.NewFlagSet("task stop", flag.ContinueOnError)

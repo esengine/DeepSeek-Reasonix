@@ -5,6 +5,7 @@ import React, { act, useCallback, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { ContextPanel } from "../components/ContextPanel";
 import { StatusBar } from "../components/StatusBar";
+import { historySliceFromMessages } from "./mockHistorySlice";
 import type { AppBindings } from "../lib/bridge";
 import { LocaleProvider } from "../lib/i18n";
 import type { BalanceInfo, ContextInfo, ContextPanelInfo, EffortInfo, Meta, TabMeta, WireEvent } from "../lib/types";
@@ -207,6 +208,7 @@ window.go = {
       CheckpointsForTab: async () => [],
       HistoryForTab: async () => [],
       HistoryPageForTab: async () => ({ messages: [], startTurn: 0, endTurn: 0, totalTurns: 0, hasOlder: false }),
+      HistorySliceForTab: async (tabID, req) => historySliceFromMessages(tabID, [], req),
       HistoryCheckpointTurnsForTab: async () => [],
       ReplayPendingPrompts: async () => {},
     } as Partial<AppBindings> as AppBindings,
@@ -226,8 +228,18 @@ function LiveProbe({ value }: { value: Controller }) {
     () => value.liveStore.getSnapshot(value.activeTabId)?.text ?? "",
     [value.activeTabId, value.liveStore],
   );
+  const getModelActiveAtSnapshot = useCallback(
+    () => value.liveStore.getModelActiveAt(value.activeTabId) ?? 0,
+    [value.activeTabId, value.liveStore],
+  );
   const text = useSyncExternalStore(subscribe, getSnapshot);
-  return <span data-live-text>{text}</span>;
+  const modelActiveAt = useSyncExternalStore(subscribe, getModelActiveAtSnapshot);
+  return (
+    <>
+      <span data-live-text>{text}</span>
+      <span data-live-model-active-at>{modelActiveAt}</span>
+    </>
+  );
 }
 
 function Probe() {
@@ -322,6 +334,10 @@ await act(async () => {
   await flushPromises(20);
 });
 eq(document.querySelector("[data-live-text]")?.textContent, "one two three", "live subscriber receives the coalesced text burst");
+ok(
+  Number(document.querySelector("[data-live-model-active-at]")?.textContent ?? 0) > 0,
+  "live subscriber receives the first provider-output timestamp",
+);
 eq(controllerProbeRenders, rendersBeforeTextBurst, "pure stream deltas do not re-render the controller owner");
 
 backendContext = {

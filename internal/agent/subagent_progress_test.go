@@ -476,7 +476,7 @@ func TestSubagentProgressGroupBudgetBoundsBurstAndServesAll(t *testing.T) {
 	t.Cleanup(merger.Close)
 
 	const n = 64
-	for i := 0; i < n; i++ {
+	for i := range n {
 		child := "child-" + string(rune('0'+i/10)) + string(rune('0'+i%10))
 		// Ordinary phase transitions share the budget with previews: 64
 		// status changes alone must not exceed the 32 events/s contract.
@@ -501,7 +501,7 @@ func TestSubagentProgressGroupBudgetBoundsBurstAndServesAll(t *testing.T) {
 	// Once the budget refills, every child is served exactly once — no child
 	// starves behind a high-activity sibling.
 	var rest []event.Event
-	for i := 0; i < 16; i++ {
+	for range 16 {
 		clock.Advance(time.Second)
 		rest = append(rest, collectFor(t, ch, 50*time.Millisecond)...)
 	}
@@ -614,8 +614,8 @@ func TestRunProfileSpecEmitsSubagentProgress(t *testing.T) {
 	task := newTestTaskTool(t, reasoningTextProvider{}, tool.NewRegistry(), "sys", "", "", nil)
 
 	out, err := task.RunProfileSpec(ctx, ProfileExecSpec{
-		Kind: "task", Name: "task", Prompt: "do the thing",
-		SystemPrompt: "sys", AllowNoTools: true,
+		Task: TaskSpec{Objective: "do the thing"}, Grant: CapabilityGrant{AllowNoTools: true},
+		Worker: WorkerSpec{Kind: "task", Name: "task", SystemPrompt: "sys"},
 	})
 	if err != nil {
 		t.Fatalf("RunProfileSpec: %v", err)
@@ -668,8 +668,8 @@ func TestRunProfileSpecProgressCancelledTerminal(t *testing.T) {
 	task := newTestTaskTool(t, reasoningTextProvider{}, tool.NewRegistry(), "sys", "", "", nil)
 
 	if _, err := task.RunProfileSpec(ctx, ProfileExecSpec{
-		Kind: "task", Name: "task", Prompt: "do the thing",
-		SystemPrompt: "sys", AllowNoTools: true,
+		Task: TaskSpec{Objective: "do the thing"}, Grant: CapabilityGrant{AllowNoTools: true},
+		Worker: WorkerSpec{Kind: "task", Name: "task", SystemPrompt: "sys"},
 	}); err == nil {
 		t.Fatal("cancelled RunProfileSpec must return an error")
 	}
@@ -694,8 +694,8 @@ func TestRunProfileSpecProgressFailedOnProviderError(t *testing.T) {
 	task := newTestTaskTool(t, &streamErrorProvider{err: errors.New("transport cut")}, tool.NewRegistry(), "sys", "", "", nil)
 
 	if _, err := task.RunProfileSpec(ctx, ProfileExecSpec{
-		Kind: "task", Name: "task", Prompt: "do the thing",
-		SystemPrompt: "sys", AllowNoTools: true,
+		Task: TaskSpec{Objective: "do the thing"}, Grant: CapabilityGrant{AllowNoTools: true},
+		Worker: WorkerSpec{Kind: "task", Name: "task", SystemPrompt: "sys"},
 	}); err == nil {
 		t.Fatal("provider error must propagate")
 	}
@@ -726,8 +726,8 @@ func TestRunProfileSpecProgressPanicEmitsFailed(t *testing.T) {
 			}
 		}()
 		task.RunProfileSpec(ctx, ProfileExecSpec{
-			Kind: "task", Name: "task", Prompt: "do the thing",
-			SystemPrompt: "sys", AllowNoTools: true,
+			Task: TaskSpec{Objective: "do the thing"}, Grant: CapabilityGrant{AllowNoTools: true},
+			Worker: WorkerSpec{Kind: "task", Name: "task", SystemPrompt: "sys"},
 		})
 	}()
 	if !panicked {
@@ -896,7 +896,7 @@ func TestParallelTasksGroupLifecycleEvents(t *testing.T) {
 func TestParallelTasksGroupLifecycleCancelled(t *testing.T) {
 	rec := &recordSink{}
 	started := make(chan struct{})
-	task := newTestTaskTool(t, &blockingProvider{started: started}, tool.NewRegistry(), "sys", "", "", nil)
+	task := newTestTaskTool(t, &cancelBlockingProvider{started: started}, tool.NewRegistry(), "sys", "", "", nil)
 	parallel := NewParallelTasksTool(task, tool.NewRegistry())
 	ctx, cancel := context.WithCancel(withCallContext(context.Background(), "parallel-call", rec, nil, false))
 	defer cancel()
@@ -926,6 +926,19 @@ func TestParallelTasksGroupLifecycleCancelled(t *testing.T) {
 	if terminals != 1 {
 		t.Fatalf("group terminals = %d, want exactly one", terminals)
 	}
+}
+
+type cancelBlockingProvider struct {
+	started chan struct{}
+	once    sync.Once
+}
+
+func (p *cancelBlockingProvider) Name() string { return "cancel-blocking" }
+
+func (p *cancelBlockingProvider) Stream(ctx context.Context, _ provider.Request) (<-chan provider.Chunk, error) {
+	p.once.Do(func() { close(p.started) })
+	<-ctx.Done()
+	return nil, ctx.Err()
 }
 
 // TestParallelTasksGroupLifecycleFailedOnValidation proves validation failures

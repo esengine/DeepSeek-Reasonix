@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -67,9 +68,13 @@ func Inspect(opts LoadOptions) Inspection {
 	}
 
 	// Plugin hooks (enabled packages only — same as Load).
-	appendPluginInspect(&out, reasonixHome(opts.HomeDir), opts.ProjectRoot)
+	reasonixHomeDir := reasonixHomeForOptions(opts)
+	appendPluginInspect(&out, reasonixHomeDir, opts.ProjectRoot)
 
-	g := GlobalSettingsPath(opts.HomeDir)
+	g := filepath.Join(reasonixHomeDir, SettingsFilename)
+	if reasonixHomeDir == "" {
+		g = GlobalSettingsPath(opts.HomeDir)
+	}
 	st := inspectSettingsFile(g, ScopeGlobal)
 	if st.Status == "missing" {
 		if legacy := legacyGlobalSettingsPath(opts.HomeDir); legacy != "" {
@@ -158,7 +163,7 @@ func appendInspectEntries(out *Inspection, s *Settings, scope Scope, source stri
 			unknown = append(unknown, event)
 		}
 	}
-	sort.Slice(unknown, func(i, j int) bool { return unknown[i] < unknown[j] })
+	slices.Sort(unknown)
 	for _, event := range unknown {
 		for _, cfg := range s.Hooks[event] {
 			out.Entries = append(out.Entries, Entry{

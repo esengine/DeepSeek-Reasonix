@@ -6,6 +6,9 @@ import { fileURLToPath } from "node:url";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const styles = readFileSync(resolve(testDir, "../styles.css"), "utf8");
+const transcriptSource = readFileSync(resolve(testDir, "../components/Transcript.tsx"), "utf8");
+const transcriptRowsSource = readFileSync(resolve(testDir, "../lib/transcriptRows.ts"), "utf8");
+const messageSource = readFileSync(resolve(testDir, "../components/Message.tsx"), "utf8");
 
 let passed = 0;
 let failed = 0;
@@ -21,6 +24,17 @@ function ok(value: unknown, label: string) {
 }
 
 console.log("\nturn actions rendering");
+
+ok(
+  transcriptRowsSource.includes("model.actionText.trim() || options.hasCheckpointForTurn?.(turn)") &&
+    transcriptSource.includes("hasCheckpointForTurn"),
+  "checkpointed turns keep rewind actions visible even when cancellation produced no assistant text",
+);
+
+ok(
+  messageSource.includes("text.trim() && <CopyButton text={text} label={t(\"msg.copy\")} />"),
+  "empty interrupted turns do not render a misleading empty copy action",
+);
 
 const creationTranscriptRule = styles.match(
   /\.app--creation \.transcript\.transcript--creation-scrollbar,\s*:root\[data-theme-style\] \.app--creation \.transcript\.transcript--creation-scrollbar\s*\{([^}]+)\}/,
@@ -43,6 +57,26 @@ function ruleBody(selector: string): string {
   const bodyEnd = styles.indexOf("\n}", bodyStart);
   return bodyEnd < 0 ? "" : styles.slice(bodyStart, bodyEnd);
 }
+
+const turnActionInlineLabelRule = ruleBody(".turn-actions__label-inline");
+const turnActionInlineLabelCount = messageSource.match(/className="turn-actions__label-inline"/g)?.length ?? 0;
+
+ok(
+  turnActionInlineLabelCount === 3 &&
+    /max-width:\s*0;/.test(turnActionInlineLabelRule) &&
+    /overflow:\s*hidden;/.test(turnActionInlineLabelRule) &&
+    /transition:\s*max-width 0\.12s;/.test(turnActionInlineLabelRule),
+  "fork, compress, and rewind labels share the copy action's collapsed inline-label contract",
+);
+
+ok(
+  styles.includes(".turn-actions__btn:hover .turn-actions__label-inline,") &&
+    styles.includes(".turn-actions__btn:focus-visible .turn-actions__label-inline,") &&
+    styles.includes(".turn-actions__group--open .turn-actions__label-inline,") &&
+    styles.includes(".turn-actions__btn--confirm .turn-actions__label-inline {") &&
+    styles.includes("max-width: 240px;"),
+  "turn action labels expand on hover and keyboard focus and stay visible for open or confirming actions",
+);
 
 const windowsPrimaryTranscriptSelector =
   ':root[data-platform="windows"] .app:not(.app--creation) .chat-pane > .main > .transcript-shell > .transcript';

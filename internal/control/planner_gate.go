@@ -3,12 +3,14 @@ package control
 import (
 	"context"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
 	"reasonix/internal/agent"
-	"reasonix/internal/capability"
+	"reasonix/internal/agentpreset"
+	"reasonix/internal/taskpolicy"
 )
 
 const (
@@ -39,6 +41,7 @@ const (
 	plannerReasonAnchoredWork        = "anchored_work"
 	plannerReasonAmbiguousWork       = "ambiguous_work"
 	plannerReasonWorkRequest         = "work_request"
+	plannerReasonTaskPolicy          = "task_policy"
 	plannerReasonDefault             = "default_executor"
 )
 
@@ -54,8 +57,10 @@ type plannerTurnMetadata struct {
 	Synthetic              bool
 	ExplicitPlanMode       bool
 	GoalActive             bool
-	DeliveryProfile        bool
+	DeliveryProfile        bool // legacy tests/callers without a frozen TaskPolicy
 	HasConversationContext bool
+	Policy                 taskpolicy.TaskPolicy
+	PolicySet              bool
 }
 
 type plannerTurnMetadataKey struct{}
@@ -73,13 +78,30 @@ func plannerTurnMetadataFromContext(ctx context.Context) (plannerTurnMetadata, b
 }
 
 func (c *Controller) withPlannerTurnMetadata(ctx context.Context, userText string, synthetic bool, priorMessages int) context.Context {
+	text := strings.TrimSpace(agent.StripTransientUserBlocks(userText))
+	features := plannerFeaturesFor(text, normalizePlannerText(text))
+	policy := taskpolicy.Derive(taskpolicy.Input{
+		Raw:             text,
+		Instruction:     taskpolicy.StripQuotedConstraints(text),
+		Preset:          agentpreset.Normalize(c.AgentPreset()),
+		PlanMode:        c.PlanMode(),
+		HighRiskHints:   features.highRisk,
+		MediumRiskHints: features.complex,
+		MultiFile:       features.multiFile,
+		CrossSurface:    features.crossSurface,
+		Anchored:        features.anchored,
+		Structured:      features.structured,
+	})
+	ctx = taskpolicy.WithContext(ctx, policy)
 	return withPlannerTurnMetadata(ctx, plannerTurnMetadata{
 		UserText:               userText,
 		Synthetic:              synthetic,
 		ExplicitPlanMode:       c.PlanMode(),
 		GoalActive:             c.goals.active(),
-		DeliveryProfile:        c.runtimeProfile == capability.ProfileDelivery,
+		DeliveryProfile:        policy.Preset == agentpreset.Delivery,
 		HasConversationContext: priorMessages > 1,
+		Policy:                 policy,
+		PolicySet:              true,
 	})
 }
 
@@ -123,7 +145,7 @@ func DecidePlannerRoute(ctx context.Context, input string) agent.PlannerDecision
 	if hasLeadingDirective(lower, planAndExecuteDirectives) || hasLeadingDirective(lower, planFirstDirectives) {
 		return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonUserPlanAndExecute)
 	}
-	if requestsDirectExecution(lower) {
+	if requestsDirectExecution(lower) && (!meta.PolicySet || meta.Policy.Route == taskpolicy.RouteDirect) {
 		return plannerExecutorDecision(plannerReasonUserDirect)
 	}
 	if meta.HasConversationContext && isContextDependentAction(text) {
@@ -134,6 +156,19 @@ func DecidePlannerRoute(ctx context.Context, input string) agent.PlannerDecision
 	}
 
 	features := plannerFeaturesFor(text, lower)
+	if meta.PolicySet {
+		if meta.GoalActive && features.work && !features.atomic {
+			return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonGoalActive)
+		}
+		switch meta.Policy.Route {
+		case taskpolicy.RouteFullPlan:
+			return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonTaskPolicy)
+		case taskpolicy.RouteLightPlan:
+			return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthLight, plannerReasonTaskPolicy)
+		default:
+			return plannerExecutorDecision(plannerReasonTaskPolicy)
+		}
+	}
 	if features.work && features.highRisk {
 		return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonHighRisk)
 	}
@@ -247,8 +282,8 @@ func normalizePlannerText(text string) string {
 func hasLeadingDirective(lower string, directives []string) bool {
 	lower = strings.TrimSpace(lower)
 	for _, polite := range []string{"please ", "please, ", "请", "请先", "麻烦", "麻烦先"} {
-		if strings.HasPrefix(lower, polite) {
-			lower = strings.TrimSpace(strings.TrimPrefix(lower, polite))
+		if after, ok := strings.CutPrefix(lower, polite); ok {
+			lower = strings.TrimSpace(after)
 			break
 		}
 	}
@@ -582,14 +617,9 @@ func containsLexicalTerm(s, term string) bool {
 	if containsNonASCII(term) || strings.ContainsAny(term, " -_/") {
 		return strings.Contains(s, term)
 	}
-	for _, token := range strings.FieldsFunc(s, func(r rune) bool {
+	return slices.Contains(strings.FieldsFunc(s, func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_'
-	}) {
-		if token == term {
-			return true
-		}
-	}
-	return false
+	}), term)
 }
 
 func containsNonASCII(s string) bool {

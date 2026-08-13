@@ -1,0 +1,4 @@
+prompt = "delay_ms violates the retry contract: attempt 1 must wait exactly base, growth doubles per attempt, and no attempt may exceed cap. Today attempt 1 waits double and the cap is ignored."
+class = "ebm-positive"
+max_steps = 18
+timeout_sec = 300

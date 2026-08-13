@@ -12,14 +12,21 @@ theme = "auto"   # auto|dark|light; controls CLI colors only; REASONIX_THEME can
 # theme_style = "graphite"   # graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
 # shortcut_layout = "desktop"   # classic|desktop; compatibility setting; Shift+Tab toggles Plan, Ctrl+Y toggles YOLO
 # cursor_shape = "bar"   # block|underline|bar; text input cursor shape; slim default avoids covering CJK characters
+show_turn_usage = true   # CLI/TUI: show per-request token and cost receipts in transcript scrollback
 
 [desktop]
 # language = "auto"   # auto|en|zh; auto follows the browser/OS locale
-# currency = "auto"   # auto|CNY|USD; explicitly set it independently from language
+# currency = "auto"   # legacy display currency; prefer [billing].display_currency
 layout_style = "classic"   # classic|workbench|creation; desktop layout style
 # theme = "auto"   # desktop only: auto|dark|light
 # terminal_theme = "auto"   # integrated terminal: auto|dark|light; auto follows the desktop app
 # theme_style = "graphite"   # graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
+
+[billing]
+# display_currency = "auto"   # auto|CNY|USD — display only; never rewrites provider list prices
+# Provider list prices use each provider's billing_currency (frozen from the
+# official table or custom price). Switching display currency only re-selects
+# occurrence-time valuations already recorded in the cost ledger.
 
 [notifications]
 enabled = false   # system notifications for CLI and desktop turns; default off
@@ -34,10 +41,7 @@ temperature       = 0.0
 # recovery_model = ""               # optional reviewer for low-risk automatic recovery; falls back to guardian_model then main model
 # reasoning_language = "auto"   # visible reasoning text: auto|zh|en
 # plan_mode_read_only_commands = ["gh issue view"]   # legacy compatibility only; Plan bash uses Permissions
-soft_compact_ratio  = 0.5   # notice only; keeps the cache-first prefix intact
-tool_result_snip_ratio = 0.6   # snip stale tool results before summary compaction
-compact_ratio       = 0.8   # try compacting when prompt reaches this fraction
-compact_force_ratio = 0.9   # force compacting at this high-water mark
+compact_ratio       = 0.85  # sole auto trigger; presets 0.70 (active) / 0.80 (steady) / 0.85 (recommended default)
 # planner_model = "deepseek-pro"   # optional: enable two-model collaboration
 # subagent_model = "deepseek-pro"   # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }   # per-skill overrides
@@ -63,11 +67,18 @@ models      = ["deepseek-v4-flash", "deepseek-v4-pro"]
 default     = "deepseek-v4-flash"   # optional; defaults to the first of `models`
 api_key_env = "DEEPSEEK_API_KEY"
 context_window = 1000000
+# Per-turn total output budget (does not change compact_ratio):
+# max_output_tokens = 0       # recommended: automatic (DeepSeek default high → ~64K)
+# max_output_tokens = 32768   # ordinary coding / cost control
+# max_output_tokens = 65536   # heavy reasoning / long tool loops
+# max_output_tokens = 131072  # only after repeated finish_reason=length
 # Optional per-model context budgets. Omitted models inherit context_window.
 # model_overrides = { "deepseek-v4-flash" = { context_window = 1000000 } }
-# Official DeepSeek providers use CNY or USD regional prices from
-# [desktop].currency; auto follows the selected language and defaults to USD.
-# Set prices explicitly only when you want to pin custom rates.
+# Official list prices are frozen per provider (billing_currency). Display
+# currency ([billing].display_currency) never rewrites these tables.
+# billing_currency = "USD"   # frozen list-price currency: CNY|USD
+# billing_mode = "payg"      # payg | subscription_equivalent (e.g. MiMo Token Plan)
+# Set prices explicitly only when you want to pin custom rates (always protected).
 # prices = { "deepseek-v4-flash" = { cache_hit = 0.02, input = 1, output = 2, currency = "¥" }, "deepseek-v4-pro" = { cache_hit = 0.025, input = 3, output = 6, currency = "¥" } }   # per 1M tokens
 # DeepSeek thinking is always on; effort: high | max. Omit for auto (provider default).
 effort      = "high"
@@ -114,6 +125,7 @@ effort         = "high"
 
 [environment]
 enabled = true   # inject a stable startup summary of OS, shell, and common tools into the prompt
+offline = false  # set true when outbound network access is unavailable; prevents futile retries
 # [environment.tools]
 # go = "/opt/homebrew/bin/go"   # optional trusted executable path; workspace-local paths are not auto-executed
 
@@ -146,6 +158,7 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # [skills]
 # paths = ["~/my-skills", "../shared/skills"]   # extra "custom"-scope skill roots
 # excluded_paths = ["~/.agents/skills"]         # hide convention roots without deleting folders
+# disable_implicit_invocation = true             # keep /skill explicit; hide skill discovery and tools from the model
 # disabled_skills = ["review"]                  # hide from prompt, slash invocation, and skill tools
 
 # Hooks run shell commands around the loop (PreToolUse / PostToolUse /
@@ -184,7 +197,7 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # [bot]
 # enabled    = false
 # model      = ""        # 用于 bot 的模型，空则用 default_model
-# max_steps  = 25
+# max_steps  = 0         # 0 表示自动持续执行；正数为显式轮数上限
 # debounce_ms = 1500      # 消息合并窗口（毫秒）
 # queue_mode = "steer"    # steer|followup|collect|interrupt
 # queue_cap  = 20         # 每个会话最多保留的排队消息数

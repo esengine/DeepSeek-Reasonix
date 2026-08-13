@@ -165,10 +165,7 @@ func quickPickerWindow(total, selected int) (int, int) {
 	if total <= quickPickerMaxVisible {
 		return 0, total
 	}
-	start := selected - quickPickerMaxVisible/2
-	if start < 0 {
-		start = 0
-	}
+	start := max(selected-quickPickerMaxVisible/2, 0)
 	if maxStart := total - quickPickerMaxVisible; start > maxStart {
 		start = maxStart
 	}

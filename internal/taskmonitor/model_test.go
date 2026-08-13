@@ -129,9 +129,7 @@ func TestRuntimeStateEffective_LegacyAndKnownValues(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // TaskSnapshot
-// ---------------------------------------------------------------------------
 
 func TestTaskSnapshotValidate_Valid(t *testing.T) {
 	ts := TaskSnapshot{
@@ -271,9 +269,7 @@ func TestTaskSnapshotJSON_LegacyMissingRuntimeState(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // TaskEvent
-// ---------------------------------------------------------------------------
 
 func TestTaskEventValidate_Valid(t *testing.T) {
 	ev := TaskEvent{
@@ -371,9 +367,7 @@ func TestTaskEventJSON_NoSensitiveFields(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // InMemoryStore
-// ---------------------------------------------------------------------------
 
 func seedTime(i int) time.Time {
 	return time.Date(2025, 1, 1, 0, 0, i, 0, time.UTC)
@@ -538,9 +532,7 @@ func TestInMemoryStore_ListEvents_ProjectIsolation(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Event validation
-// ---------------------------------------------------------------------------
 
 func TestInMemoryStore_AppendEvent_RejectsDuplicateSequence(t *testing.T) {
 	store := NewInMemoryStore()
@@ -685,9 +677,7 @@ func TestStore_DoesNotLeakSensitiveViaInterface(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // helpers
-// ---------------------------------------------------------------------------
 
 func mustUpsert(t *testing.T, store *InMemoryStore, proj string, snap TaskSnapshot) {
 	t.Helper()

@@ -4,18 +4,18 @@ import (
 	"sync"
 
 	"reasonix/internal/event"
-	"reasonix/internal/evidence"
 	"reasonix/internal/provider"
 )
 
 // goalUsageTee wraps the controller's event sink and attributes billable usage
 // events to the active goal turn's recorder, so every model request under the
 // same Goal scope — executor, planner, subagent, compaction, classifier,
-// capability router, recovery reviewer, and goal evaluator — counts against the
-// goal's token budget. Title generation and unrelated background calls are
-// excluded. The tee forwards every event unchanged, so frontends see the same
-// stream they would without accounting.
+// capability router, recovery reviewer, and goal evaluator — accumulates into
+// the goal's observational token total. There is no token hard limit; the
+// total is for display and diagnostics only. Title generation and unrelated
+// background calls are excluded. The tee forwards every event unchanged.
 type goalUsageTee struct {
+	event.AuditForwarder
 	inner event.Sink
 	mu    sync.Mutex
 	// active is the current goal turn's recorder; nil when no goal turn is
@@ -30,7 +30,7 @@ func NewGoalUsageTee(inner event.Sink) event.Sink {
 	if inner == nil {
 		inner = event.Discard
 	}
-	return &goalUsageTee{inner: inner}
+	return &goalUsageTee{AuditForwarder: event.AuditForwarder{Inner: inner}, inner: inner}
 }
 
 // Emit forwards the event and, for billable usage while a goal turn is active,
@@ -39,38 +39,16 @@ func (t *goalUsageTee) Emit(e event.Event) {
 	if t == nil {
 		return
 	}
-	if e.Kind == event.Usage && e.Usage != nil && !e.Usage.BudgetAccounted && e.UsageSource != event.UsageSourceTitle {
+	if e.Kind == event.Usage && e.Usage != nil && e.UsageSource != event.UsageSourceTitle {
 		t.mu.Lock()
 		rec := t.active
 		t.mu.Unlock()
 		if rec != nil {
-			rec.addUsage(usageTotalTokens(e.Usage))
+			rec.addUsageWithRequests(usageTotalTokens(e.Usage), e.Usage.RequestCount)
 		}
 	}
 	if t.inner != nil {
 		t.inner.Emit(e)
-	}
-}
-
-// RecordTurnCompletion forwards the optional completion accounting to the
-// inner sink when it opts in, so wrapping the sink never loses lifecycle
-// bookkeeping.
-func (t *goalUsageTee) RecordTurnCompletion() {
-	if t == nil || t.inner == nil {
-		return
-	}
-	if ts, ok := t.inner.(event.TurnCompletionSink); ok {
-		ts.RecordTurnCompletion()
-	}
-}
-
-// RecordReadinessAudit forwards the optional readiness audit receipts.
-func (t *goalUsageTee) RecordReadinessAudit(a evidence.ReadinessAudit) {
-	if t == nil || t.inner == nil {
-		return
-	}
-	if rs, ok := t.inner.(event.ReadinessAuditSink); ok {
-		rs.RecordReadinessAudit(a)
 	}
 }
 

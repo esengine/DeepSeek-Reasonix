@@ -71,7 +71,7 @@ func (s *InMemoryStore) AppendEvent(projectDir string, ev TaskEvent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// --- sequence validation ---
+	// sequence validation
 	prev, hasPrev := s.lastSeq[ev.TaskID]
 	if hasPrev {
 		if ev.Sequence <= prev {
@@ -80,13 +80,13 @@ func (s *InMemoryStore) AppendEvent(projectDir string, ev TaskEvent) error {
 		}
 	}
 
-	// --- terminal-state guard ---
+	// terminal-state guard
 	if snap, ok := s.tasks[ev.TaskID]; ok && snap.State.Terminal() {
 		return fmt.Errorf("append event: task %s is in terminal state %q",
 			ev.TaskID, snap.State)
 	}
 
-	// --- identity validation ---
+	// identity validation
 	if snap, ok := s.tasks[ev.TaskID]; ok {
 		if ev.SessionID != snap.SessionID {
 			return fmt.Errorf("append event: SessionID mismatch (event=%q, snapshot=%q)",

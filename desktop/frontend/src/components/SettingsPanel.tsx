@@ -1,11 +1,13 @@
-import { lazy, memo, Suspense, startTransition, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode } from "react";
-import { Bot as BotIcon, Check, CheckCircle2, ChevronDown, ChevronUp, Clipboard, ExternalLink, GripVertical, KeyRound, Loader2, MessageCircle, Play, QrCode, RefreshCw, Send } from "lucide-react";
+import { lazy, memo, Suspense, startTransition, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { ArrowRight, Bot as BotIcon, BrainCircuit, Check, CheckCircle2, ChevronDown, ChevronUp, CircleDollarSign, Clipboard, ExternalLink, KeyRound, Languages, ListChecks, Loader2, MessageCircle, Monitor, MoreHorizontal, PanelBottom, Play, Power, QrCode, RefreshCw, Send, ShieldCheck, SlidersHorizontal, Trash2, Volume2 } from "lucide-react";
 import { asArray } from "../lib/array";
 import { useDeferredClose } from "../lib/useMountTransition";
 import { app, openExternal } from "../lib/bridge";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
-import { apiKeyEnvFromProviderName, inferredVisionModels, mergedFetchedProviderModels, mergeProviderModelContextWindows, providerApiKeyEnvForSave, providerDefaultModel, providerIsConfigured, providerModelCandidates, providerModelContextWindowDrafts, providerModelContextWindowIsSmall, providerRequiresKey } from "../lib/providerModels";
+import { apiKeyEnvFromProviderName, createLatestRequestGate, inferredVisionModels, mergedFetchedProviderModels, mergeProviderModelContextWindows, providerApiKeyEnvForSave, providerDefaultModel, providerIsConfigured, providerModelCandidates, providerModelContextWindowDrafts, providerModelContextWindowIsSmall, providerRequiresKey } from "../lib/providerModels";
 import { cachedFetchProviderModels, invalidateProviderCacheByAPIKeyEnv, shouldSkipAutoRefresh } from "../lib/providerModelCache";
+import { providerBaseURLForSave, providerRequestURLFromConfig, trimmedBaseURL } from "../lib/providerEndpoint";
+import { opencodeGoPresetDescriptionKeys } from "../lib/providerPresetDescriptions";
 import { useUpdater } from "../lib/useUpdater";
 import {
   applyTheme,
@@ -45,7 +47,8 @@ import {
 } from "../lib/fontFamily";
 import { getDisplayMode, onDisplayModeChange, setDisplayMode as setLocalDisplayMode } from "../lib/displayMode";
 import { getProcessFoldPreference, onProcessFoldPreferenceChange, setProcessFoldPreference, type ProcessFoldPreference } from "../lib/processFoldPreference";
-import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
+import { applyReasoningDisplayMode, useReasoningDisplayMode, type ReasoningDisplayMode } from "../lib/reasoningDisplayPreference";
+import { normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
 import { normalizeToolApprovalMode } from "../lib/types";
 import {
   comboFromKeyboardEvent,
@@ -71,8 +74,8 @@ import { SoundSelect } from "./SoundSelect";
 import { getSuccessPreference, setSuccessPreference, getAttentionPreference, setAttentionPreference, playSuccessChime, playAttentionChime, type SoundWavPref } from "../lib/sound";
 import { ModalCloseButton } from "./ModalCloseButton";
 import { ShortcutComboDisplay } from "./ShortcutComboDisplay";
-
-const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "remote", "skills", "subagents", "plugins", "memory", "hooks", "diagnostics", "shortcuts", "permissions", "sandbox", "network", "appearance", "updates"];
+import { SettingsNavigation, SETTINGS_NAV_TABS } from "./SettingsNavigation";
+import { StatusBarItemsEditor } from "./StatusBarItemsEditor";
 export type SettingsInitialFocus =
   | { target: "bot-allowlist"; connectionId?: string; requestId?: number }
   | { target: "model-access"; requestId?: number }
@@ -86,12 +89,11 @@ const PluginsSettingsPage = lazy(() => import("./CapabilitiesPanel").then((modul
 const MemorySettingsPage = lazy(() => import("./MemoryPanel").then((module) => ({ default: module.MemorySettingsPage })));
 const SubagentsSettingsPage = lazy(() => import("./SubagentsPanel").then((module) => ({ default: module.SubagentsSettingsPage })));
 const DiagnosticsSettingsPage = lazy(() => import("./DiagnosticsSettingsPage").then((module) => ({ default: module.DiagnosticsSettingsPage })));
+const StorageSettingsPage = lazy(() => import("./StorageSettingsPage").then((module) => ({ default: module.StorageSettingsPage })));
 const UsageStatsPanel = lazy(() => import("./UsageStatsPanel").then((module) => ({ default: module.UsageStatsPanel })));
 const QRCodeSVG = lazy(() => import("qrcode.react").then((module) => ({ default: module.QRCodeSVG })));
 
-// SettingsPanel is the desktop settings centre — a centred modal with left
-// navigation and a right content area. It hosts all settings pages plus MCP,
-// Skills, and Memory management, replacing the old per-feature drawers.
+// SettingsPanel is the desktop settings centre: a modal hosting settings pages and capability management.
 export function SettingsPanel({
   onClose,
   onChanged,
@@ -100,6 +102,7 @@ export function SettingsPanel({
   agentRunning = false,
   desktopPlatform,
   onUseSubagent,
+  activeWorkspaceKey = "",
 }: {
   onClose: () => void;
   onChanged: (settings?: SettingsView | null) => void;
@@ -108,6 +111,7 @@ export function SettingsPanel({
   agentRunning?: boolean;
   desktopPlatform: DesktopPlatform;
   onUseSubagent: (command: string) => void;
+  activeWorkspaceKey?: string;
 }) {
   const t = useT();
   const [s, setS] = useState<SettingsView | null>(null);
@@ -127,6 +131,7 @@ export function SettingsPanel({
   const [customFontName, setCustomFontNameState] = useState<string>(getCustomFontName());
   const [customMonoFontName, setCustomMonoFontNameState] = useState<string>(getCustomMonoFontName());
   const [tab, setTab] = useState<SettingsTab>(initialTab === "providers" ? "models" : initialTab ?? "general");
+  const settingsContentRef = useRef<HTMLElement>(null);
   const pendingSubagentCommandRef = useRef<string | null>(null);
   // Play the modal exit animation, then let the parent unmount us and focus
   // the composer with the selected slash command.
@@ -163,6 +168,12 @@ export function SettingsPanel({
     void reload();
     if (initialTab) setTab(initialTab === "providers" ? "models" : initialTab);
   }, [initialTab, reload]);
+  useEffect(() => {
+    const content = settingsContentRef.current;
+    if (!content) return;
+    content.scrollTop = 0;
+    content.scrollLeft = 0;
+  }, [tab]);
   useEffect(() => {
     if (!s) return;
     const nextTheme = normalizeThemePreference(s.desktopTheme);
@@ -208,6 +219,17 @@ export function SettingsPanel({
       }
       return true;
     } catch (e) {
+      // Settings writes can be two-phase: persistence may succeed before a
+      // runtime refresh reports a real boot error. Re-read the authoritative
+      // state even on failure so the UI never offers an action that already
+      // committed (for example, a DeepSeek protocol upgrade).
+      try {
+        const next = await reload();
+        onChanged(next);
+        window.dispatchEvent(new Event("reasonix:model-catalog-changed"));
+      } catch {
+        // Keep the original mutation error; it is the actionable failure.
+      }
       setErr(formatSettingsError(e, t));
       return false;
     } finally {
@@ -280,12 +302,19 @@ export function SettingsPanel({
     return () => document.removeEventListener("keydown", onKey);
   }, [requestClose]);
 
-  // The settings-reliant pages (general, models, network, permissions,
-  // sandbox, appearance, updates) need SettingsView loaded. MCP, Skills, Plugins,
-  // and Memory
-  // load their own data and render regardless.
+  // These pages need SettingsView; capability pages load their own data.
   const needsSettings = tab === "general" || tab === "models" || tab === "bots" || tab === "subagents" || tab === "network" || tab === "permissions" || tab === "sandbox" || tab === "appearance" || tab === "updates";
   const lazySettingsPageFallback = <div className="empty">{t("settings.loading")}</div>;
+  const settingsNavigationItems = useMemo(() => SETTINGS_NAV_TABS.map((id) => ({
+    id,
+    label: settingsTabLabel(id, t),
+    meta: s ? settingsTabMeta(id, s, t) : "",
+    searchTerms: id === "general" ? [
+      "settings.desktopLayoutStyle", "settings.language", "settings.currency", "settings.displayMode",
+      "settings.reasoningDisplay", "settings.processFold", "settings.closeBehavior",
+      "settings.defaultToolApprovalMode", "settings.sound", "settings.statusBarStyle", "settings.statusBarItems",
+    ].map((key) => t(key as DictKey)).join(" ") : "",
+  })), [s, t]);
 
   return (
     <div className="management-modal-backdrop settings-modal-backdrop" data-state={status} onMouseDown={(e) => { if (e.target === e.currentTarget) requestClose(); }}>
@@ -296,19 +325,8 @@ export function SettingsPanel({
         </header>
 
         <div className="settings-center">
-          <nav className="settings-center__nav" aria-label={t("settings.title")}>
-            {SETTINGS_TABS.map((id) => (
-              <button
-                key={id}
-                className={`settings-center__navitem${tab === id ? " settings-center__navitem--active" : ""}`}
-                onClick={() => setTab(id)}
-              >
-                <span>{settingsTabLabel(id, t)}</span>
-                {s && <small>{settingsTabMeta(id, s, t)}</small>}
-              </button>
-            ))}
-          </nav>
-          <main className="settings-center__content">
+          <SettingsNavigation items={settingsNavigationItems} activeTab={tab} onSelect={setTab} />
+          <main ref={settingsContentRef} className="settings-center__content">
             {needsSettings && settingsLoadFailed && (
               <div className="banner banner--error settings-load-error" role="alert">
                 <span>{t("settings.loadFailed")}</span>
@@ -326,7 +344,7 @@ export function SettingsPanel({
                 {tab === "bots" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><BotsSection s={s} busy={busy} apply={apply} initialFocus={initialFocus} /></SettingsPageShell>}
                 {tab === "mcp" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><MCPServersSettingsPage /></Suspense></SettingsPageShell>}
                 {tab === "remote" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><RemoteHostsPage /></Suspense></SettingsPageShell>}
-                {tab === "skills" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><SkillsSettingsPage /></Suspense></SettingsPageShell>}
+                {tab === "skills" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><SkillsSettingsPage activeWorkspaceKey={activeWorkspaceKey} /></Suspense></SettingsPageShell>}
                 {tab === "subagents" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><Suspense fallback={lazySettingsPageFallback}><SubagentsSettingsPage s={s} onUseInChat={(command) => {
                   pendingSubagentCommandRef.current = command;
                   requestClose();
@@ -397,6 +415,7 @@ export function SettingsPanel({
                     />
                   </SettingsPageShell>
                 )}
+                {tab === "storage" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><StorageSettingsPage /></Suspense></SettingsPageShell>}
                 {tab === "updates" && s && (
                   <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}>
                     <UpdatesSection
@@ -487,25 +506,30 @@ function SettingsSection({
 function SettingsField({
   label,
   hint,
+  icon,
   children,
   className,
   stacked = false,
 }: {
   label: ReactNode;
   hint?: ReactNode;
+  icon?: ReactNode;
   children: ReactNode;
   className?: string;
   stacked?: boolean;
 }) {
   return (
     <div className={`settings-field${stacked ? " settings-field--stacked" : ""}${className ? ` ${className}` : ""}`}>
-      <div className="settings-field__copy">
-        <div className="settings-field__label">{label}</div>
-        {hint && (
-          <div className="settings-field__hint">
-            <SettingsHint hint={hint} />
-          </div>
-        )}
+      <div className={`settings-field__copy${icon ? " settings-field__copy--icon" : ""}`}>
+        {icon && <span className="settings-field__icon" aria-hidden="true">{icon}</span>}
+        <div className="settings-field__copy-body">
+          <div className="settings-field__label">{label}</div>
+          {hint && (
+            <div className="settings-field__hint">
+              <SettingsHint hint={hint} />
+            </div>
+          )}
+        </div>
       </div>
       <div className="settings-field__control">{children}</div>
     </div>
@@ -581,8 +605,8 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
       return t("settings.tab.permissions");
     case "sandbox":
       return t("settings.tab.sandbox");
-    case "appearance":
-      return t("settings.tab.appearance");
+    case "appearance": return t("settings.tab.appearance");
+    case "storage": return t("settings.tab.storage");
     case "updates":
       return t("settings.tab.updates");
   }
@@ -603,7 +627,7 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
     case "remote":
       return t("remote.tabHint");
     case "skills":
-      return t("caps.skillsTab");
+      return t("settings.tabSub.skills");
     case "subagents":
       return t("subagents.tabHint");
     case "plugins":
@@ -622,8 +646,8 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
       return permissionModeLabel(s.permissions.mode, t);
     case "sandbox":
       return sandboxModeLabel(s.sandbox.bash, t);
-    case "appearance":
-      return t("settings.appearanceMeta");
+    case "appearance": return t("settings.appearanceMeta");
+    case "storage": return t("settings.storageMeta");
     case "updates":
       return t("settings.updatesMeta");
   }
@@ -836,7 +860,7 @@ const COMPACT_RATIO_PRESETS = [
   [0.8, "settings.compactRatioPreset.80"],
   [0.85, "settings.compactRatioPreset.85"],
 ] as const;
-const REASONING_PROTOCOLS: readonly string[] = ["", "deepseek", "glm", "openai", "none"];
+const REASONING_PROTOCOLS: readonly string[] = ["", "deepseek", "glm", "kimi-k3", "openai", "none"];
 const THINKING_MODES: readonly string[] = ["", "enabled", "disabled", "adaptive"];
 const PROXY_TYPES = ["http", "https", "socks5", "socks5h"] as const;
 const LANGUAGE_PREFS: LangPref[] = ["", "ru", "zh", "en"];
@@ -876,24 +900,6 @@ export function providerEditorEffectiveKind(isNewCustomProvider: boolean, kind: 
   void isNewCustomProvider;
   const selected = kind.trim();
   return selected || kinds[0] || "openai";
-}
-
-function trimmedURL(value: string): string {
-  return value.trim().replace(/\/+$/, "");
-}
-
-export function providerChatURLPreview(baseUrl: string, chatUrl: string, fullURL: boolean): string {
-  if (fullURL) return trimmedURL(chatUrl);
-  const base = trimmedURL(baseUrl);
-  return base ? `${base}/chat/completions` : "";
-}
-
-export function providerBaseURLFromChatURL(chatUrl: string): string {
-  const full = trimmedURL(chatUrl);
-  for (const suffix of ["/chat/completions", "/responses", "/response"]) {
-    if (full.endsWith(suffix)) return trimmedURL(full.slice(0, -suffix.length));
-  }
-  return full;
 }
 
 function formatProviderHeaders(headers: Record<string, string> | null | undefined): string {
@@ -940,10 +946,21 @@ function formatSettingsError(error: unknown, t: ReturnType<typeof useT>): string
   if (providerNotAdded) return t("settings.errorModelProviderMissing", { model: providerNotAdded[1], provider: providerNotAdded[2] });
   const providerNoKey = /^model (.+) is not available because provider (.+) has no key$/i.exec(msg);
   if (providerNoKey) return t("settings.errorModelProviderNoKey", { model: providerNoKey[1], provider: providerNoKey[2] });
+  if (/^background session is still open; reopen or close it before upgrading the DeepSeek provider protocol$/i.test(msg)) {
+    return t("settings.errorProviderDetached");
+  }
   const removeAccessBusy = /^finish or cancel active work using (.+) before removing the provider access$/i.exec(msg);
   if (removeAccessBusy) return t("settings.errorRemoveAccessBusy", { provider: removeAccessBusy[1] });
+  const removeAccessDetached = /^background session is still using (.+); reopen or close it before removing the provider access$/i.exec(msg);
+  if (removeAccessDetached) return t("settings.errorProviderDetached");
+  const removeAccessNoFallback = /^remove provider access: (.+) is in use and no other configured provider exists$/i.exec(msg);
+  if (removeAccessNoFallback) return t("settings.errorRemoveProviderNoFallback", { provider: removeAccessNoFallback[1] });
+  const deleteProviderNoFallback = /^remove provider: (.+) is in use and no other configured provider exists$/i.exec(msg);
+  if (deleteProviderNoFallback) return t("settings.errorRemoveProviderNoFallback", { provider: deleteProviderNoFallback[1] });
   const deleteProviderBusy = /^finish or cancel active work using (.+) before deleting the provider$/i.exec(msg);
   if (deleteProviderBusy) return t("settings.errorDeleteProviderBusy", { provider: deleteProviderBusy[1] });
+  const deleteProviderDetached = /^background session is still using (.+); reopen or close it before deleting the provider$/i.exec(msg);
+  if (deleteProviderDetached) return t("settings.errorProviderDetached");
   const saveBeforeRemoveAccess = /^save current session before removing provider access: (.+)$/is.exec(msg);
   if (saveBeforeRemoveAccess) return t("settings.errorSaveBeforeRemoveAccess", { err: saveBeforeRemoveAccess[1] });
   const saveBeforeDeleteProvider = /^save current session before deleting provider: (.+)$/is.exec(msg);
@@ -1319,9 +1336,13 @@ export function normalizeProviderView(p: ProviderView): ProviderView {
     builtIn: Boolean(p.builtIn),
     added: Boolean(p.added),
     chatUrl: p.chatUrl ?? "",
+    requestUrl: p.requestUrl ?? "",
     models: asArray(p.models),
     visionModels,
     visionModelsConfigured: Boolean(p.visionModelsConfigured ?? visionModels.length > 0),
+    visionCapability: p.visionCapability === "unsupported" || p.visionCapability === "configurable"
+      ? p.visionCapability
+      : undefined,
     modelsUrl: p.modelsUrl ?? "",
     headers: normalizeStringMap(p.headers),
     extraBody: normalizeExtraBodyMap(p.extraBody),
@@ -1329,8 +1350,12 @@ export function normalizeProviderView(p: ProviderView): ProviderView {
     reasoningProtocol: normalizeReasoningProtocol(p.reasoningProtocol),
     thinking: normalizeThinkingMode(p.thinking),
     webSearch: Boolean(p.webSearch),
+    serverWebSearchCapability: typeof p.serverWebSearchCapability === "boolean"
+      ? p.serverWebSearchCapability
+      : undefined,
     supportedEfforts: asArray(p.supportedEfforts),
     modelOverrides: asArray(p.modelOverrides),
+    recommendedUpgradeAvailable: Boolean(p.recommendedUpgradeAvailable),
     requiresKey,
     configured: providerIsConfigured({ ...p, requiresKey }),
     keySource: p.keySource ?? "",
@@ -1379,12 +1404,12 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     noProxy: "",
     proxy: { type: "socks5", server: "", port: 0, username: "", password: "" },
   };
-  const agent = view.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto", compactRatio: 0.8 };
+  const agent = view.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "", reasoningLanguage: "auto", compactRatio: 0.85 };
   agent.plannerMaxSteps = Number.isFinite(agent.plannerMaxSteps) ? Math.max(0, Math.trunc(agent.plannerMaxSteps)) : 0;
   agent.maxSteps = Number.isFinite(agent.maxSteps) ? Math.max(0, Math.trunc(agent.maxSteps)) : 0;
   agent.maxSubagentDepth = Number.isFinite(agent.maxSubagentDepth) && agent.maxSubagentDepth <= 1 ? 1 : 2;
   agent.reasoningLanguage = normalizeReasoningLanguage(agent.reasoningLanguage);
-  agent.compactRatio = Number.isFinite(agent.compactRatio) && Number(agent.compactRatio) > 0 ? Number(agent.compactRatio) : 0.8;
+  agent.compactRatio = Number.isFinite(agent.compactRatio) && Number(agent.compactRatio) > 0 ? Number(agent.compactRatio) : 0.85;
   agent.effectiveCompactRatio = Number.isFinite(agent.effectiveCompactRatio) && Number(agent.effectiveCompactRatio) > 0
     ? Number(agent.effectiveCompactRatio)
     : agent.compactRatio;
@@ -1465,12 +1490,6 @@ function desktopLayoutStyleLabel(style: DesktopLayoutStyle, t: ReturnType<typeof
 }
 
 type StatusBarStyle = "icon" | "text";
-type StatusBarDropPlacement = "before" | "after";
-type StatusBarDragTarget = {
-  id: StatusBarItemId;
-  placement: StatusBarDropPlacement;
-};
-
 function normalizeStatusBarStyle(style: string | undefined): StatusBarStyle {
   return style === "icon" ? "icon" : "text";
 }
@@ -1491,6 +1510,12 @@ function statusBarItemLabel(id: StatusBarItemId, t: ReturnType<typeof useT>): st
       return t("status.sessionTokensLabel");
     case "turn_tokens":
       return t("status.turnTokensLabel");
+    case "turn_tps":
+      return t("status.tpsLabel");
+    case "turn_output_tokens":
+      return t("status.outputTokensLabel");
+    case "turn_cache_tokens":
+      return t("status.cacheTokensLabel");
     case "turn_cost":
       return t("status.turnCostLabel");
     case "session_turns":
@@ -1544,8 +1569,8 @@ function reasoningProtocolLabel(protocol: string, t: ReturnType<typeof useT>): s
   switch (protocol) {
     case "deepseek":
       return t("settings.reasoningProtocol.deepseek");
-    case "glm":
-      return t("settings.reasoningProtocol.glm");
+    case "glm": return t("settings.reasoningProtocol.glm");
+    case "kimi-k3": return t("settings.reasoningProtocol.kimiK3");
     case "openai":
       return t("settings.reasoningProtocol.openai");
     case "none":
@@ -1573,18 +1598,15 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
   const closeBehavior = normalizeCloseBehavior(s.closeBehavior);
   const [displayMode, setDisplayMode] = useState<DisplayMode>(() => normalizeDisplayMode(getDisplayMode()));
   const [processFold, setProcessFold] = useState<ProcessFoldPreference>(getProcessFoldPreference);
-  const [statusBarItemsExpanded, setStatusBarItemsExpanded] = useState(false);
-  const [draggingStatusBarItem, setDraggingStatusBarItem] = useState<StatusBarItemId | null>(null);
-  const [statusBarDragTarget, setStatusBarDragTargetState] = useState<StatusBarDragTarget | null>(null);
-  const draggingStatusBarItemRef = useRef<StatusBarItemId | null>(null);
-  const statusBarDragTargetRef = useRef<StatusBarDragTarget | null>(null);
-  const mouseDragCleanupRef = useRef<(() => void) | null>(null);
+  const reasoningDisplayMode = useReasoningDisplayMode();
   const soundPanelId = useId();
-  const statusBarItemsPanelId = useId();
   useEffect(() => onDisplayModeChange((mode) => setDisplayMode(mode)), []);
   useEffect(() => onProcessFoldPreferenceChange((pref) => setProcessFold(pref)), []);
-  useEffect(() => () => mouseDragCleanupRef.current?.(), []);
   const defaultToolApprovalMode = normalizeToolApprovalMode(s.defaultToolApprovalMode);
+  const saveReasoningDisplayMode = useCallback(async (mode: ReasoningDisplayMode) => {
+    const ok = await apply(() => app.SetReasoningDisplayMode(mode));
+    if (ok) applyReasoningDisplayMode(mode);
+  }, [apply]);
   const languagePref = normalizeLangPref(s.desktopLanguage);
   const desktopCurrency = normalizeDesktopCurrency(s.desktopCurrency);
   const desktopLayoutStyle = normalizeDesktopLayoutStyle(s.desktopLayoutStyle);
@@ -1595,11 +1617,6 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
   const statusBarStyle = normalizeStatusBarStyle(s.statusBarStyle);
   const statusBarItems = normalizeStatusBarItems(s.statusBarItems);
   const soundStatus = summarizeSoundStatus(genMusicPreset, soundPref, attentionPref);
-  const visibleStatusItems = new Set<StatusBarItemId>(statusBarItems);
-  const orderedStatusItems = [
-    ...statusBarItems,
-    ...DEFAULT_STATUS_BAR_ITEMS.filter((id) => !visibleStatusItems.has(id)),
-  ];
   const applyStatusBarItems = (items: StatusBarItemId[]) => {
     const contentScrollTop = document.querySelector<HTMLElement>(".settings-center__content")?.scrollTop ?? 0;
     const navScrollTop = document.querySelector<HTMLElement>(".settings-center__nav")?.scrollTop ?? 0;
@@ -1616,137 +1633,16 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
       });
     });
   };
-  const toggleStatusBarItem = (id: StatusBarItemId) => {
-    if (visibleStatusItems.has(id)) {
-      if (statusBarItems.length <= 1) return;
-      applyStatusBarItems(statusBarItems.filter((item) => item !== id));
-      return;
-    }
-    applyStatusBarItems([...statusBarItems, id]);
-  };
-  const moveStatusBarItem = (id: StatusBarItemId, direction: -1 | 1) => {
-    const idx = statusBarItems.indexOf(id);
-    const nextIdx = idx + direction;
-    if (idx < 0 || nextIdx < 0 || nextIdx >= statusBarItems.length) return;
-    const next = [...statusBarItems];
-    [next[idx], next[nextIdx]] = [next[nextIdx], next[idx]];
-    applyStatusBarItems(next);
-  };
-  const reorderStatusBarItem = (fromId: StatusBarItemId, toId: StatusBarItemId, placement: StatusBarDropPlacement) => {
-    const fromIdx = statusBarItems.indexOf(fromId);
-    const toIdx = statusBarItems.indexOf(toId);
-    if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return;
-    const next = statusBarItems.filter((item) => item !== fromId);
-    const insertAt = next.indexOf(toId);
-    if (insertAt < 0) return;
-    next.splice(placement === "after" ? insertAt + 1 : insertAt, 0, fromId);
-    if (next.every((item, index) => item === statusBarItems[index])) return;
-    applyStatusBarItems(next);
-  };
-  const statusBarItemFromPoint = (x: number, y: number): StatusBarDragTarget | null => {
-    const row = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-statusbar-setting-item]");
-    const id = row?.dataset.statusbarSettingItem as StatusBarItemId | undefined;
-    if (!row || !id || !statusBarItems.includes(id)) return null;
-    const rect = row.getBoundingClientRect();
-    return { id, placement: y < rect.top + rect.height / 2 ? "before" : "after" };
-  };
-  const setStatusBarDragTarget = (target: StatusBarDragTarget | null) => {
-    const current = statusBarDragTargetRef.current;
-    if (current?.id === target?.id && current?.placement === target?.placement) return;
-    statusBarDragTargetRef.current = target;
-    setStatusBarDragTargetState(target);
-  };
-  const beginStatusBarDrag = (id: StatusBarItemId, visible: boolean): boolean => {
-    if (busy || !visible) return false;
-    mouseDragCleanupRef.current?.();
-    mouseDragCleanupRef.current = null;
-    draggingStatusBarItemRef.current = id;
-    statusBarDragTargetRef.current = null;
-    setDraggingStatusBarItem(id);
-    setStatusBarDragTargetState(null);
-    return true;
-  };
-  const updateStatusBarDrag = (clientX: number, clientY: number) => {
-    const draggingId = draggingStatusBarItemRef.current;
-    if (!draggingId) return;
-    const target = statusBarItemFromPoint(clientX, clientY);
-    setStatusBarDragTarget(target && target.id !== draggingId ? target : null);
-  };
-  const finishStatusBarDrag = (clientX?: number, clientY?: number) => {
-    const draggingId = draggingStatusBarItemRef.current;
-    let target = statusBarDragTargetRef.current;
-    if (draggingId && clientX !== undefined && clientY !== undefined) {
-      const pointerTarget = statusBarItemFromPoint(clientX, clientY);
-      if (pointerTarget && pointerTarget.id !== draggingId) target = pointerTarget;
-    }
-    if (draggingId && target) reorderStatusBarItem(draggingId, target.id, target.placement);
-    draggingStatusBarItemRef.current = null;
-    statusBarDragTargetRef.current = null;
-    setDraggingStatusBarItem(null);
-    setStatusBarDragTargetState(null);
-  };
-  const cancelStatusBarDrag = () => {
-    mouseDragCleanupRef.current?.();
-    mouseDragCleanupRef.current = null;
-    draggingStatusBarItemRef.current = null;
-    statusBarDragTargetRef.current = null;
-    setDraggingStatusBarItem(null);
-    setStatusBarDragTargetState(null);
-  };
-  const startStatusBarPointerDrag = (event: PointerEvent<HTMLElement>, id: StatusBarItemId, visible: boolean) => {
-    if (event.button !== 0 || !beginStatusBarDrag(id, visible)) return;
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-  };
-  const moveStatusBarPointerDrag = (event: PointerEvent<HTMLElement>) => {
-    if (!draggingStatusBarItemRef.current) return;
-    event.preventDefault();
-    updateStatusBarDrag(event.clientX, event.clientY);
-  };
-  const endStatusBarPointerDrag = (event: PointerEvent<HTMLElement>) => {
-    if (!draggingStatusBarItemRef.current) return;
-    event.preventDefault();
-    try {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    } catch {
-      // Pointer capture may already be released by the browser.
-    }
-    finishStatusBarDrag(event.clientX, event.clientY);
-  };
-  const cancelStatusBarPointerDrag = (event: PointerEvent<HTMLElement>) => {
-    event.preventDefault();
-    cancelStatusBarDrag();
-  };
-  const startStatusBarMouseDrag = (event: ReactMouseEvent<HTMLElement>, id: StatusBarItemId, visible: boolean) => {
-    if (event.button !== 0 || !beginStatusBarDrag(id, visible)) return;
-    event.preventDefault();
-    const handleMove = (moveEvent: MouseEvent) => {
-      moveEvent.preventDefault();
-      updateStatusBarDrag(moveEvent.clientX, moveEvent.clientY);
-    };
-    const cleanup = () => {
-      window.removeEventListener("mousemove", handleMove);
-      window.removeEventListener("mouseup", handleUp);
-    };
-    const handleUp = (upEvent: MouseEvent) => {
-      upEvent.preventDefault();
-      cleanup();
-      mouseDragCleanupRef.current = null;
-      finishStatusBarDrag(upEvent.clientX, upEvent.clientY);
-    };
-    window.addEventListener("mousemove", handleMove);
-    window.addEventListener("mouseup", handleUp);
-    mouseDragCleanupRef.current = cleanup;
-  };
   const setLanguage = (next: LangPref) => {
     setPref(next);
     void apply(() => app.SetDesktopLanguage(next));
   };
   return (
-    <SettingsSection>
-      <SettingsField label={t("settings.desktopLayoutStyle")}>
+    <>
+      <SettingsSection title={t("settings.general.sectionAppearance")} description={t("settings.general.sectionAppearanceHint")}>
+      <SettingsField label={t("settings.desktopLayoutStyle")} hint={t("settings.desktopLayoutStyleHint")} icon={<Monitor size={18} />}>
         <div className="set-seg">
-          {(["classic", "workbench", "creation"] as const).map((style) => (
+          {(["workbench", "classic", "creation"] as const).map((style) => (
             <button
               key={style}
               className={`set-seg__btn${desktopLayoutStyle === style ? " set-seg__btn--on" : ""}`}
@@ -1758,7 +1654,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
           ))}
         </div>
       </SettingsField>
-      <SettingsField label={t("settings.language")}>
+      <SettingsField label={t("settings.language")} hint={t("settings.languageHint")} icon={<Languages size={18} />}>
         <div className="set-seg">
           {LANGUAGE_PREFS.map((pref) => (
             <button
@@ -1772,7 +1668,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
           ))}
         </div>
       </SettingsField>
-      <SettingsField label={t("settings.currency")}>
+      <SettingsField label={t("settings.currency")} hint={t("settings.currencyHint")} icon={<CircleDollarSign size={18} />}>
         <div className="set-seg">
           {(["", "CNY", "USD"] as DesktopCurrency[]).map((currency) => (
             <button
@@ -1786,7 +1682,64 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
           ))}
         </div>
       </SettingsField>
-      <SettingsField label={t("settings.closeBehavior")}>
+      </SettingsSection>
+
+      <SettingsSection title={t("settings.general.sectionConversation")} description={t("settings.sessionContentDisplayHint")}>
+        <SettingsField label={t("settings.displayMode")} hint={t("settings.displayModeHint")} icon={<SlidersHorizontal size={18} />}>
+          <div className="set-seg" role="radiogroup" aria-label={t("settings.displayMode")}>
+            {(["standard", "compact"] as const).map((mode) => (
+              <button key={mode} type="button"
+                className={`set-seg__btn${displayMode === mode ? " set-seg__btn--on" : ""}`}
+                aria-pressed={displayMode === mode}
+                disabled={busy}
+                onClick={() => {
+                  setLocalDisplayMode(mode);
+                  void apply(() => app.SetDisplayMode(mode));
+                }}
+              >
+                {t(`settings.displayMode.${mode}`)}
+              </button>
+            ))}
+          </div>
+        </SettingsField>
+        <SettingsField label={t("settings.reasoningDisplay")} hint={t("settings.reasoningDisplayHint")} icon={<BrainCircuit size={18} />}>
+          <div>
+            <div className="set-seg" role="radiogroup" aria-label={t("settings.reasoningDisplay")}>
+              {(["hidden", "summary", "auto"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={`set-seg__btn${reasoningDisplayMode === mode ? " set-seg__btn--on" : ""}`}
+                  aria-pressed={reasoningDisplayMode === mode}
+                  disabled={busy}
+                  onClick={() => void saveReasoningDisplayMode(mode)}
+                >
+                  {t(`settings.reasoningDisplay.${mode}`)}
+                </button>
+              ))}
+            </div>
+            {reasoningDisplayMode === "legacy-collapsed" && <div className="settings-inline-hint" role="status">{t("settings.reasoningDisplay.legacy")}</div>}
+          </div>
+        </SettingsField>
+        <SettingsField label={t("settings.processFold")} hint={t("settings.processFoldHint")} icon={<ListChecks size={18} />}>
+          <div className="set-seg" role="radiogroup" aria-label={t("settings.processFold")}>
+            {(["auto", "expanded"] as const).map((pref) => (
+              <button
+                key={pref}
+                type="button"
+                className={`set-seg__btn${processFold === pref ? " set-seg__btn--on" : ""}`}
+                aria-pressed={processFold === pref}
+                onClick={() => setProcessFoldPreference(pref)}
+              >
+                {t(`settings.processFold.${pref}`)}
+              </button>
+            ))}
+          </div>
+        </SettingsField>
+      </SettingsSection>
+
+      <SettingsSection title={t("settings.general.sectionSystem")} description={t("settings.general.sectionSystemHint")}>
+      <SettingsField label={t("settings.closeBehavior")} hint={t("settings.closeBehaviorHint")} icon={<Power size={18} />}>
         <div className="set-seg">
           {(["background", "quit"] as const).map((mode) => (
             <button
@@ -1800,37 +1753,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
           ))}
         </div>
       </SettingsField>
-      <SettingsField label={t("settings.displayMode")}>
-        <div className="set-seg">
-          {(["standard", "compact"] as const).map((mode) => (
-            <button
-              key={mode}
-              className={`set-seg__btn${displayMode === mode ? " set-seg__btn--on" : ""}`}
-              disabled={busy}
-              onClick={() => {
-                setLocalDisplayMode(mode);
-                void apply(() => app.SetDisplayMode(mode));
-              }}
-            >
-              {t(`settings.displayMode.${mode}`)}
-            </button>
-          ))}
-        </div>
-      </SettingsField>
-      <SettingsField label={t("settings.processFold")} hint={t("settings.processFoldHint")}>
-        <div className="set-seg">
-          {(["auto", "expanded"] as const).map((pref) => (
-            <button
-              key={pref}
-              className={`set-seg__btn${processFold === pref ? " set-seg__btn--on" : ""}`}
-              onClick={() => setProcessFoldPreference(pref)}
-            >
-              {t(`settings.processFold.${pref}`)}
-            </button>
-          ))}
-        </div>
-      </SettingsField>
-      <SettingsField label={t("settings.defaultToolApprovalMode")} hint={t("settings.defaultToolApprovalModeHint")}>
+      <SettingsField label={t("settings.defaultToolApprovalMode")} hint={t("settings.defaultToolApprovalModeHint")} icon={<ShieldCheck size={18} />}>
         <div className="set-seg">
           {TOOL_APPROVAL_MODES.map((mode) => (
             <button
@@ -1844,7 +1767,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
           ))}
         </div>
       </SettingsField>
-      <SettingsField label={t("settings.sound")} hint={t("settings.soundHint")} stacked>
+      <SettingsField label={t("settings.sound")} hint={t("settings.soundHint")} icon={<Volume2 size={18} />} stacked>
         <div className={`settings-sound-editor${soundExpanded ? " settings-sound-editor--expanded" : ""}`}>
           <div className="settings-sound-editor__summary">
             <span className={`settings-sound-editor__status settings-sound-editor__status--${soundStatus}`}>
@@ -1917,7 +1840,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
           )}
         </div>
       </SettingsField>
-      <SettingsField label={t("settings.statusBarStyle")}>
+      <SettingsField label={t("settings.statusBarStyle")} hint={t("settings.statusBarStyleHint")} icon={<PanelBottom size={18} />}>
         <div className="set-seg">
           {(["icon", "text"] as const).map((style) => (
             <button
@@ -1931,109 +1854,16 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
           ))}
         </div>
       </SettingsField>
-      <SettingsField label={t("settings.statusBarItems")} hint={t("settings.statusBarItemsHint")} stacked>
-        <div className={`status-bar-items-editor${statusBarItemsExpanded ? " status-bar-items-editor--expanded" : ""}`}>
-          <div className="status-bar-items-editor__summary">
-            <span className="status-bar-items-editor__summary-text">
-              {t("settings.statusBarItemsSummary", { visible: statusBarItems.length, total: DEFAULT_STATUS_BAR_ITEMS.length })}
-            </span>
-            <Tooltip label={t(statusBarItemsExpanded ? "settings.statusBarItemsCollapse" : "settings.statusBarItemsExpand")}>
-              <button
-                type="button"
-                className="status-bar-items-editor__toggle"
-                aria-expanded={statusBarItemsExpanded}
-                aria-controls={statusBarItemsPanelId}
-                aria-label={t(statusBarItemsExpanded ? "settings.statusBarItemsCollapse" : "settings.statusBarItemsExpand")}
-                onClick={() => setStatusBarItemsExpanded((open) => !open)}
-              >
-                {statusBarItemsExpanded ? <ChevronUp size={15} aria-hidden="true" /> : <ChevronDown size={15} aria-hidden="true" />}
-              </button>
-            </Tooltip>
-          </div>
-          {statusBarItemsExpanded && (
-            <div className="status-bar-items-editor__list" id={statusBarItemsPanelId}>
-              {orderedStatusItems.map((id) => {
-                const label = statusBarItemLabel(id, t);
-                const visible = visibleStatusItems.has(id);
-                const visibleIndex = statusBarItems.indexOf(id);
-                const disableHide = visible && statusBarItems.length <= 1;
-                const dragLabel = t("settings.statusBarItem.drag", { label });
-                const moveUpLabel = t("settings.statusBarItem.moveUp", { label });
-                const moveDownLabel = t("settings.statusBarItem.moveDown", { label });
-                const dropPlacement = statusBarDragTarget?.id === id ? statusBarDragTarget.placement : null;
-                return (
-                  <div
-                    className={[
-                      "status-bar-item-row",
-                      visible ? "" : "status-bar-item-row--hidden",
-                      draggingStatusBarItem === id ? "status-bar-item-row--dragging" : "",
-                      dropPlacement ? "status-bar-item-row--drag-over" : "",
-                      dropPlacement === "before" ? "status-bar-item-row--drop-before" : "",
-                      dropPlacement === "after" ? "status-bar-item-row--drop-after" : "",
-                    ].filter(Boolean).join(" ")}
-                    data-statusbar-setting-item={id}
-                    key={id}
-                  >
-                    <Tooltip label={dragLabel}>
-                      <button
-                        type="button"
-                        className="status-bar-item-row__drag"
-                        disabled={!visible || busy}
-                        aria-label={dragLabel}
-                        title={dragLabel}
-                        onPointerDown={(event) => startStatusBarPointerDrag(event, id, visible)}
-                        onPointerMove={moveStatusBarPointerDrag}
-                        onPointerUp={endStatusBarPointerDrag}
-                        onPointerCancel={cancelStatusBarPointerDrag}
-                        onMouseDown={(event) => startStatusBarMouseDrag(event, id, visible)}
-                      >
-                        <GripVertical size={14} aria-hidden="true" />
-                      </button>
-                    </Tooltip>
-                    <label className="status-bar-item-row__toggle">
-                      <input
-                        type="checkbox"
-                        checked={visible}
-                        disabled={busy || disableHide}
-                        onChange={() => toggleStatusBarItem(id)}
-                      />
-                      <span className="status-bar-item-row__check" aria-hidden="true">
-                        {visible && <Check size={12} />}
-                      </span>
-                      <span className="status-bar-item-row__label">{label}</span>
-                    </label>
-                    <div className="status-bar-item-row__actions">
-                      <Tooltip label={moveUpLabel}>
-                        <button
-                          type="button"
-                          className="status-bar-item-row__order"
-                          disabled={busy || !visible || visibleIndex <= 0}
-                          onClick={() => moveStatusBarItem(id, -1)}
-                          aria-label={moveUpLabel}
-                        >
-                          <ChevronUp size={14} aria-hidden="true" />
-                        </button>
-                      </Tooltip>
-                      <Tooltip label={moveDownLabel}>
-                        <button
-                          type="button"
-                          className="status-bar-item-row__order"
-                          disabled={busy || !visible || visibleIndex < 0 || visibleIndex >= statusBarItems.length - 1}
-                          onClick={() => moveStatusBarItem(id, 1)}
-                          aria-label={moveDownLabel}
-                        >
-                          <ChevronDown size={14} aria-hidden="true" />
-                        </button>
-                      </Tooltip>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+      <SettingsField label={t("settings.statusBarItems")} hint={t("settings.statusBarItemsHint")} icon={<ListChecks size={18} />} className="status-bar-items-setting" stacked>
+        <StatusBarItemsEditor
+          items={statusBarItems}
+          busy={busy}
+          onChange={applyStatusBarItems}
+          itemLabel={(id) => statusBarItemLabel(id, t)}
+        />
       </SettingsField>
     </SettingsSection>
+    </>
   );
 }
 
@@ -4115,8 +3945,8 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
     : !providerIsConfigured(defaultProviderView)
       ? t("settings.modelNeedsKey", { provider: modelProviderLabel(defaultProvider, defaultProviderView, t) })
       : "";
-  const agent = s.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto", compactRatio: 0.8 };
-  const compactRatio = agent.compactRatio ?? 0.8;
+  const agent = s.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "", reasoningLanguage: "auto", compactRatio: 0.85 };
+  const compactRatio = agent.compactRatio ?? 0.85;
   const compactRatioPercent = Math.round(compactRatio * 1000) / 10;
   const [compactRatioDraft, setCompactRatioDraft] = useState(() => String(compactRatioPercent));
   const [compactRatioCustomOpen, setCompactRatioCustomOpen] = useState(false);
@@ -4400,20 +4230,6 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
             {modelIssue && <div className="provider-fetch-banner provider-fetch-banner--warn">{modelIssue}</div>}
           </SettingsSection>
           <SettingsSection title={t("settings.agentRuntime")} description={t("settings.agentRuntimeHint")}>
-            <SettingsField label={t("settings.coldResumePrune")} hint={t("settings.coldResumePruneHint")}>
-              <div className="set-seg">
-                {([true, false] as const).map((on) => (
-                  <button
-                    key={on ? "on" : "off"}
-                    className={`set-seg__btn${agent.coldResumePrune === on ? " set-seg__btn--on" : ""}`}
-                    disabled={busy}
-                    onClick={() => void apply(() => app.SetColdResumePrune(on))}
-                  >
-                    {on ? t("settings.coldResumePrune.on") : t("settings.coldResumePrune.off")}
-                  </button>
-                ))}
-              </div>
-            </SettingsField>
             <SettingsField label={t("settings.reasoningLanguage")} hint={t("settings.reasoningLanguageHint")}>
               <div className="set-seg">
                 {(["auto", "zh", "en"] as const).map((lang) => (
@@ -4769,7 +4585,8 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
   const [editing, setEditing] = useState<string | null>(null);
   const [adding, setAdding] = useState<AddProviderMode>(null);
   const [revealedProvider, setRevealedProvider] = useState<string | null>(null);
-  const [fetchingProvider, setFetchingProvider] = useState<string | null>(null);
+  const [fetchingProviders, setFetchingProviders] = useState<Set<string>>(() => new Set());
+  const fetchGate = useMemo(createLatestRequestGate, []);
   const [fetchResults, setFetchResults] = useState<Record<string, ProviderFetchResult>>({});
   const [modelDrafts, setModelDrafts] = useState<Record<string, ProviderModelDraft>>({});
   const visibleProviders = useMemo(() => s.providers.filter((p) => p.added || p.name === revealedProvider), [s.providers, revealedProvider]);
@@ -4800,10 +4617,45 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
     });
   };
 
+  const beginGroupFetch = (groupID: string): number => {
+    const generation = fetchGate.begin(groupID);
+    setFetchingProviders((current) => {
+      if (current.has(groupID)) return current;
+      const next = new Set(current);
+      next.add(groupID);
+      return next;
+    });
+    return generation;
+  };
+
+  const groupFetchIsCurrent = (groupID: string, generation: number): boolean => (
+    fetchGate.isCurrent(groupID, generation)
+  );
+
+  const finishGroupFetch = (groupID: string, generation: number) => {
+    if (!groupFetchIsCurrent(groupID, generation)) return;
+    setFetchingProviders((current) => {
+      if (!current.has(groupID)) return current;
+      const next = new Set(current);
+      next.delete(groupID);
+      return next;
+    });
+  };
+
+  const cancelGroupFetch = (groupID: string) => {
+    fetchGate.cancel(groupID);
+    setFetchingProviders((current) => {
+      if (!current.has(groupID)) return current;
+      const next = new Set(current);
+      next.delete(groupID);
+      return next;
+    });
+  };
+
   const modelDraftForFetch = (p: ProviderView, fetched: string[]): ProviderModelDraft => {
     const candidates = providerModelCandidates(p.models, fetched);
     const selected = mergedFetchedProviderModels(p.models, fetched, { preserveCurated: true });
-    const visionCapability = providerVisionCapability(p.kind, p.baseUrl);
+    const visionCapability = providerVisionCapabilityForView(p);
     const visionSource = visionCapability === "unsupported"
       ? []
       : (p.visionModelsConfigured ? p.visionModels : inferredVisionModels(candidates));
@@ -4848,7 +4700,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
   };
 
   const refreshModels = async (group: ProviderAccessGroup, p: ProviderView) => {
-    setFetchingProvider(group.id);
+    const generation = beginGroupFetch(group.id);
     setGroupFetchResult(group.id, null);
     setGroupModelDraft(group.id, null);
     try {
@@ -4856,12 +4708,14 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
       try {
         fetched = await cachedFetchProviderModels((provider) => app.FetchProviderModels(provider), p, true);
       } catch (e) {
+        if (!groupFetchIsCurrent(group.id, generation)) return;
         setGroupFetchResult(group.id, {
           kind: "warn",
           text: t("settings.fetchModelsFailedForProvider", { provider: group.label, err: String((e as Error)?.message ?? e) }),
         });
         return;
       }
+      if (!groupFetchIsCurrent(group.id, generation)) return;
       if (fetched.length === 0) {
         setGroupFetchResult(group.id, {
           kind: "warn",
@@ -4878,20 +4732,14 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
         });
       });
     } finally {
-      setFetchingProvider(null);
+      finishGroupFetch(group.id, generation);
     }
-  };
-
-  const refreshGroup = async (group: ProviderAccessGroup) => {
-    const probe = group.providers[0];
-    if (!probe) return;
-    await refreshModels(group, probe);
   };
 
   const saveKeyEnvAndAutoRefresh = async (group: ProviderAccessGroup, apiKeyEnv: string, value: string) => {
     const probe = group.providers[0];
     if (!probe || !apiKeyEnv) return;
-    setFetchingProvider(group.id);
+    const generation = beginGroupFetch(group.id);
     setGroupFetchResult(group.id, null);
     setGroupModelDraft(group.id, null);
     try {
@@ -4900,6 +4748,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
         invalidateProviderCacheByAPIKeyEnv(apiKeyEnv);
         try {
           const fetched = await cachedFetchProviderModels((provider) => app.FetchProviderModels(provider), { ...probe, apiKeyEnv });
+          if (!groupFetchIsCurrent(group.id, generation)) return;
           if (fetched.length > 0) {
             const draft = modelDraftForFetch({ ...probe, apiKeyEnv }, fetched);
             setGroupModelDraft(group.id, draft);
@@ -4914,6 +4763,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
             text: t("settings.fetchModelsEmptyForProvider", { provider: group.label }),
           });
         } catch (e) {
+          if (!groupFetchIsCurrent(group.id, generation)) return;
           setGroupFetchResult(group.id, {
             kind: "warn",
             text: t("settings.fetchModelsAfterKeyFailedForProvider", { provider: group.label, err: String((e as Error)?.message ?? e) }),
@@ -4921,12 +4771,13 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
         }
       });
     } finally {
-      setFetchingProvider(null);
+      finishGroupFetch(group.id, generation);
     }
   };
 
   const saveProviderKey = async (group: ProviderAccessGroup, apiKeyEnv: string, value: string) => {
     if (!apiKeyEnv) return;
+    cancelGroupFetch(group.id);
     setGroupFetchResult(group.id, null);
     setGroupModelDraft(group.id, null);
     await apply(async () => {
@@ -4936,8 +4787,9 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
     });
   };
 
-  const clearProviderKey = async (apiKeyEnv: string) => {
+  const clearProviderKey = async (group: ProviderAccessGroup, apiKeyEnv: string) => {
     if (!apiKeyEnv) return;
+    cancelGroupFetch(group.id);
     await apply(async () => {
       await app.ClearProviderKey(apiKeyEnv);
       invalidateProviderCacheByAPIKeyEnv(apiKeyEnv);
@@ -5007,6 +4859,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
           <AddProviderPanel
             mode={adding}
             kinds={s.providerKinds}
+            officialProviders={s.officialProviders}
             providerPresets={s.providerPresets}
             busy={busy}
             onMode={setAdding}
@@ -5027,7 +4880,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
             key={group.id}
             group={group}
             busy={busy}
-            fetching={fetchingProvider === group.id || group.providers.some((p) => fetchingProvider === p.name)}
+            fetching={fetchingProviders.has(group.id)}
             fetchResult={fetchResults[group.id]}
             modelDraft={modelDrafts[group.id]}
             defaultProvider={defaultProvider}
@@ -5035,11 +4888,14 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
             kinds={s.providerKinds}
             onEdit={setEditing}
             onCancelEdit={() => setEditing(null)}
-            onSave={(pv, key) => apply(() => saveProvider(pv, key ?? "")).then(() => {
-              setEditing(null);
-              setGroupModelDraft(group.id, null);
-            })}
-            onRefresh={() => void refreshGroup(group)}
+            onSave={(pv, key) => {
+              cancelGroupFetch(group.id);
+              return apply(() => saveProvider(pv, key ?? "")).then(() => {
+                setEditing(null);
+                setGroupModelDraft(group.id, null);
+              });
+            }}
+            onRefresh={(provider) => void refreshModels(group, provider)}
             onToggleDraftModel={(model) => updateModelDraftSelection(group.id, (draft) => (
               draft.selected.includes(model)
                 ? draft.selected.filter((candidate) => candidate !== model)
@@ -5048,21 +4904,37 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
             onToggleDraftVision={(model) => toggleModelDraftVision(group.id, model)}
             onSelectAllDraftModels={() => updateModelDraftSelection(group.id, (draft) => draft.candidates)}
             onClearDraftModels={() => updateModelDraftSelection(group.id, () => [])}
-            onCancelDraftModels={() => setGroupModelDraft(group.id, null)}
+            onCancelDraftModels={() => {
+              setGroupModelDraft(group.id, null);
+              setGroupFetchResult(group.id, null);
+            }}
             onSaveDraftModels={() => void saveModelDraft(group)}
             onToggleWebSearch={(enabled) => {
-              const provider = group.providers[0];
-              if (!provider) return;
-              void apply(() => app.SaveProvider({ ...provider, webSearch: enabled }));
+              const providerNames = group.providers.map((provider) => provider.name);
+              if (providerNames.length === 0) return;
+              void apply(() => app.SetProviderWebSearch(providerNames, enabled));
+            }}
+            onUpgradeRecommended={(name) => {
+              cancelGroupFetch(group.id);
+              return apply(() => app.UpgradeDeepSeekProviderAccess(name)).then((upgraded) => {
+                if (upgraded) {
+                  setEditing(null);
+                  setGroupModelDraft(group.id, null);
+                }
+              });
             }}
             onSaveEditorKey={(env, value) => group.builtIn ? saveProviderKey(group, env, value) : saveKeyEnvAndAutoRefresh(group, env, value)}
-            onClearEditorKey={clearProviderKey}
-            onDelete={(p) => apply(() => app.RemoveProviderAccess(p.name)).then(() => {
-              if (revealedProvider === p.name) {
-                setRevealedProvider(null);
-                setEditing(null);
-              }
-            })}
+            onClearEditorKey={(env) => clearProviderKey(group, env)}
+            onDelete={(providers) => {
+              cancelGroupFetch(group.id);
+              const providerNames = providers.map(({ name }) => name);
+              return apply(() => app.RemoveProviderAccesses(providerNames)).then(() => {
+                if (revealedProvider && providerNames.includes(revealedProvider)) {
+                  setRevealedProvider(null);
+                  setEditing(null);
+                }
+              });
+            }}
           />
         ))}
       </div>
@@ -5070,7 +4942,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
   );
 }
 
-type ProviderAccessGroup = {
+export type ProviderAccessGroup = {
   id: string;
   label: string;
   description: string;
@@ -5085,6 +4957,7 @@ type ProviderAccessGroup = {
   baseUrl: string;
   kind: string;
   models: string[];
+  recommendedUpgradeAvailable: boolean;
 };
 
 type ProviderFetchResult = {
@@ -5147,8 +5020,6 @@ function providerPresetDescription(preset: ProviderPresetView, t: ReturnType<typ
   switch (preset.id) {
     case "deepseek-responses":
       return t("settings.addProvider.preset.deepseekResponsesDesc");
-    case "deepseek-anthropic":
-      return t("settings.addProvider.preset.deepseekAnthropicDesc");
     case "longcat-openai":
       return t("settings.addProvider.preset.longcatOpenAIDesc");
     case "longcat-anthropic":
@@ -5197,10 +5068,9 @@ function providerPresetDescription(preset: ProviderPresetView, t: ReturnType<typ
       return t("settings.addProvider.preset.zaiCodingPlanGlobalDesc");
     case "zai-coding-plan-global-anthropic":
       return t("settings.addProvider.preset.zaiCodingPlanGlobalAnthropicDesc");
-    case "opencode-go":
-      return t("settings.addProvider.preset.opencodeGoDesc");
-    case "opencode-go-anthropic":
-      return t("settings.addProvider.preset.opencodeGoAnthropicDesc");
+    case "opencode-go": case "opencode-go-anthropic":
+    case "opencode-go-deepseek-anthropic": case "opencode-go-deepseek-responses":
+      return t(opencodeGoPresetDescriptionKeys[preset.id]);
     case "opencode-zen-anthropic":
       return t("settings.addProvider.preset.opencodeZenAnthropicDesc");
     case "qwen-cn":
@@ -5239,13 +5109,20 @@ function providerPresetDescription(preset: ProviderPresetView, t: ReturnType<typ
 }
 
 function providerPresetLabel(preset: ProviderPresetView, t: ReturnType<typeof useT>): string {
-  if (preset.id === "token-rhythm") return t("settings.addProvider.preset.tokenRhythmLabel");
-  return preset.label;
+  switch (preset.id) {
+    case "deepseek-responses":
+      return t("settings.addProvider.preset.deepseekResponsesLabel");
+    case "token-rhythm":
+      return t("settings.addProvider.preset.tokenRhythmLabel");
+    default:
+      return preset.label;
+  }
 }
 
-function AddProviderPanel({
+export function AddProviderPanel({
   mode,
   kinds,
+  officialProviders,
   providerPresets,
   busy,
   onMode,
@@ -5256,8 +5133,7 @@ function AddProviderPanel({
   onResetPreset,
   onAddCustom,
 }: {
-  mode: AddProviderMode;
-  kinds: string[];
+  mode: AddProviderMode; kinds: string[]; officialProviders: ProviderView[];
   providerPresets: ProviderPresetView[];
   busy: boolean;
   onMode: (mode: AddProviderMode) => void;
@@ -5270,16 +5146,16 @@ function AddProviderPanel({
 }) {
   const t = useT();
   const templateChoices = useMemo<ProviderTemplateChoice[]>(() => [
-    ...OFFICIAL_PROVIDER_CHOICES.map((choice) => ({
-      id: `official:${choice.kind}`,
-      source: "official" as const,
-      kind: choice.kind,
-      label: t(choice.labelKey),
-      description: t(choice.descKey),
-      keyEnv: choice.keyEnv,
-      added: false,
-      keySet: false,
-    })),
+    ...OFFICIAL_PROVIDER_CHOICES.map((choice) => {
+      const state = officialProviders.find((provider) => officialProviderKind(provider) === choice.kind);
+      return {
+        id: `official:${choice.kind}`,
+        source: "official" as const, kind: choice.kind,
+        label: t(choice.labelKey), description: t(choice.descKey),
+        keyEnv: state?.apiKeyEnv || choice.keyEnv,
+        added: Boolean(state?.added), keySet: Boolean(state?.keySet),
+      };
+    }),
     ...providerPresets.map((preset) => ({
       id: `preset:${preset.id}`,
       source: "preset" as const,
@@ -5292,7 +5168,7 @@ function AddProviderPanel({
       statusProviderNames: asArray(preset.statusProviderNames),
       keySet: preset.keySet,
     })),
-  ], [providerPresets, t]);
+  ], [officialProviders, providerPresets, t]);
   const [templateID, setTemplateID] = useState("official:deepseek");
   const [key, setKey] = useState("");
   const firstAvailableTemplateID = templateChoices.find(providerTemplateCanAdd)?.id ?? templateChoices[0]?.id ?? "";
@@ -5448,7 +5324,7 @@ function AddProviderPanel({
   return null;
 }
 
-function ProviderAccessCard({
+export function ProviderAccessCard({
   group,
   busy,
   fetching,
@@ -5468,6 +5344,7 @@ function ProviderAccessCard({
   onCancelDraftModels,
   onSaveDraftModels,
   onToggleWebSearch,
+  onUpgradeRecommended,
   onSaveEditorKey,
   onClearEditorKey,
   onDelete,
@@ -5483,7 +5360,7 @@ function ProviderAccessCard({
   onEdit: (name: string) => void;
   onCancelEdit: () => void;
   onSave: (p: ProviderView, key?: string) => void | Promise<void>;
-  onRefresh: () => void;
+  onRefresh: (p: ProviderView) => void;
   onToggleDraftModel: (model: string) => void;
   onToggleDraftVision: (model: string) => void;
   onSelectAllDraftModels: () => void;
@@ -5491,15 +5368,19 @@ function ProviderAccessCard({
   onCancelDraftModels: () => void;
   onSaveDraftModels: () => void;
   onToggleWebSearch: (enabled: boolean) => void;
+  onUpgradeRecommended: (name: string) => void | Promise<void>;
   onSaveEditorKey: (apiKeyEnv: string, value: string) => Promise<void>;
   onClearEditorKey?: (apiKeyEnv: string) => Promise<void>;
-  onDelete?: (p: ProviderView) => Promise<void>;
+  onDelete?: (providers: ProviderView[]) => Promise<void>;
 }) {
   const t = useT();
   const editableProvider = group.providers[0];
   const isDefault = group.providers.some((p) => p.name === defaultProvider);
   const editingProvider = group.providers.find((p) => editing === p.name);
+  const upgradeProvider = group.providers.find((p) => p.recommendedUpgradeAvailable);
   const primaryProviderExpanded = Boolean(editableProvider && editing === editableProvider.name);
+  const supportsServerWebSearch = group.providers.length > 0 && group.providers.every(providerSupportsServerWebSearchForView);
+  const webSearchEnabled = supportsServerWebSearch && group.providers.every((provider) => Boolean(provider.webSearch));
   const visibleModels = group.models.slice(0, 6);
   const hiddenModelCount = Math.max(0, group.models.length - visibleModels.length);
   return (
@@ -5515,7 +5396,6 @@ function ProviderAccessCard({
               {providerKeyStatusLabel(group, t)}
             </span>
           </div>
-          <div className="provider-access-card__desc">{group.description}</div>
         </div>
         <div className="provider-access-card__actions">
           {editableProvider && (
@@ -5528,64 +5408,66 @@ function ProviderAccessCard({
               {primaryProviderExpanded ? t("common.collapse") : t("settings.configureProvider")}
             </button>
           )}
-          <button
-            className="btn btn--small"
-            disabled={busy || fetching || !group.baseUrl || !group.configured}
-            onClick={onRefresh}
-          >
-            {fetching ? t("settings.fetchingModels") : t("settings.fetchModels")}
-          </button>
+          {editableProvider && group.providers.length === 1 && (
+            <button
+              className="btn btn--small"
+              disabled={busy || fetching || !editableProvider.baseUrl || !group.configured}
+              onClick={() => onRefresh(editableProvider)}
+            >
+              {fetching ? t("settings.fetchingModels") : t("settings.fetchModels")}
+            </button>
+          )}
           {editableProvider && onDelete && (
-            isDefault && !group.builtIn ? (
-              <Tooltip label={t("settings.cantDeleteDefault")}>
-                <button className="btn btn--small" disabled>{t("settings.removeProviderAccess")}</button>
-              </Tooltip>
-            ) : (
-              <InlineConfirmButton
-                label={t("settings.removeProviderAccess")}
-                confirmLabel={group.builtIn ? t("settings.confirmRemoveProviderAccess") : t("settings.confirmDeleteProvider")}
-                cancelLabel={t("common.cancel")}
-                disabled={busy}
-                danger={!group.builtIn}
-                onConfirm={() => onDelete(editableProvider)}
-              />
-            )
+            <ProviderAccessMoreMenu
+              busy={busy}
+              removeDisabled={isDefault && !group.builtIn}
+              builtIn={group.builtIn}
+              onRemove={() => onDelete(group.providers)}
+            />
           )}
         </div>
       </div>
+      {group.description && <div className="provider-access-card__desc">{group.description}</div>}
 
-      <div className="provider-access-meta">
-        <span>{group.kind}</span>
-        <span>{group.baseUrl}</span>
-        <span>{group.apiKeyEnv || t("common.none")}</span>
-        {group.keySource && <span title={group.keySourcePath || undefined}>{t("settings.keySource", { source: group.keySource })}</span>}
-      </div>
-
-      <div className="provider-card-block">
-        <div className="provider-card-block__label">{t(group.configured ? "settings.enabledModels" : "settings.modelList")}</div>
-        <div className="provider-model-chips" aria-label={t(group.configured ? "settings.enabledModels" : "settings.modelList")}>
-          {visibleModels.length > 0 ? visibleModels.map((model) => (
-            <span className="provider-model-chip" key={model}>
-              {model}
-            </span>
-          )) : <span className="provider-model-chip provider-model-chip--empty">{t("settings.noModelsConfigured")}</span>}
-          {hiddenModelCount > 0 && (
-            <span className="provider-model-chip provider-model-chip--more">
-              {t("settings.moreModels", { n: hiddenModelCount })}
-            </span>
-          )}
+      {upgradeProvider && (
+        <div className="provider-protocol-upgrade">
+          <div className="provider-protocol-upgrade__copy">
+            <div className="provider-protocol-upgrade__title">
+              {t("settings.providerProtocol")}: OpenAI Chat Completions
+            </div>
+            <div className="provider-protocol-upgrade__desc">{t("settings.addProvider.official.deepseekDesc")}</div>
+          </div>
+          <div className="provider-protocol-upgrade__actions">
+            <InlineConfirmButton
+              label={<>{t("settings.upgradeRecommendedProtocol")}<ArrowRight size={13} aria-hidden="true" /></>}
+              confirmLabel={t("common.confirm")}
+              cancelLabel={t("common.cancel")}
+              disabled={busy}
+              primary
+              onConfirm={() => onUpgradeRecommended(canonicalOfficialProviderName(upgradeProvider.name))}
+            />
+          </div>
         </div>
-        {!group.configured && group.requiresKey && (
-          <div className="provider-card-status provider-card-status--warn">
-            {t("settings.modelsRequireKey")}
-          </div>
-        )}
-        {fetchResult && (
-          <div className={`provider-card-status provider-card-status--${fetchResult.kind}`}>
-            {fetchResult.text}
-          </div>
-        )}
-      </div>
+      )}
+
+      {!supportsServerWebSearch && (
+        <ProviderModelSummary
+          configured={group.configured}
+          models={visibleModels}
+          hiddenModelCount={hiddenModelCount}
+        />
+      )}
+
+      {!group.configured && group.requiresKey && (
+        <div className="provider-card-status provider-card-status--warn">
+          {t("settings.modelsRequireKey")}
+        </div>
+      )}
+      {fetchResult && (
+        <div className={`provider-card-status provider-card-status--${fetchResult.kind}`}>
+          {fetchResult.text}
+        </div>
+      )}
 
       {modelDraft && (
         <ProviderModelDraftPicker
@@ -5603,14 +5485,18 @@ function ProviderAccessCard({
 
       {editableProvider && (
         <ProviderServiceCapabilities
-          kind={editableProvider.kind}
-          baseUrl={editableProvider.baseUrl}
-          models={editableProvider.models}
-          enabled={Boolean(editableProvider.webSearch)}
+          supported={supportsServerWebSearch}
+          configured={group.configured}
+          models={visibleModels}
+          hiddenModelCount={hiddenModelCount}
+          showModelSummary
+          enabled={webSearchEnabled}
           disabled={busy}
           onChange={onToggleWebSearch}
         />
       )}
+
+      <ProviderTechnicalDetails group={group} />
 
       {group.providers.length > 1 && (
         <div className="provider-profiles">
@@ -5621,7 +5507,14 @@ function ProviderAccessCard({
                 <span>{p.name}</span>
                 <span>{p.models.join(", ") || t("common.none")}</span>
                 <button
-                  className="btn btn--small"
+                  className="btn btn--small provider-profile-row__refresh"
+                  disabled={busy || fetching || !p.baseUrl || !providerIsConfigured(p)}
+                  onClick={() => onRefresh(p)}
+                >
+                  {fetching ? t("settings.fetchingModels") : t("settings.fetchModels")}
+                </button>
+                <button
+                  className="btn btn--small provider-profile-row__configure"
                   disabled={busy}
                   aria-expanded={profileExpanded}
                   onClick={() => profileExpanded ? onCancelEdit() : onEdit(p.name)}
@@ -5636,6 +5529,7 @@ function ProviderAccessCard({
 
       {editingProvider && (
         <ProviderEditor
+          key={editingProvider.name}
           initial={editingProvider}
           kinds={kinds}
           busy={busy}
@@ -5646,6 +5540,146 @@ function ProviderAccessCard({
         />
       )}
     </article>
+  );
+}
+
+function ProviderModelSummary({
+  configured,
+  models,
+  hiddenModelCount,
+  compact = false,
+}: {
+  configured: boolean;
+  models: string[];
+  hiddenModelCount: number;
+  compact?: boolean;
+}) {
+  const t = useT();
+  const label = t(configured ? "settings.enabledModels" : "settings.modelList");
+  return (
+    <div className={`provider-card-block${compact ? " provider-card-block--inline" : ""}`}>
+      <div className="provider-card-block__label">{label}</div>
+      <div className="provider-model-chips" aria-label={label}>
+        {models.length > 0 ? models.map((model) => (
+          <span className="provider-model-chip" key={model}>
+            {model}
+          </span>
+        )) : <span className="provider-model-chip provider-model-chip--empty">{t("settings.noModelsConfigured")}</span>}
+        {hiddenModelCount > 0 && (
+          <span className="provider-model-chip provider-model-chip--more">
+            {t("settings.moreModels", { n: hiddenModelCount })}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ProviderTechnicalDetails({ group }: { group: ProviderAccessGroup }) {
+  const t = useT();
+  const imageInputUnsupported = group.providers.length > 0 && group.providers.every((provider) => providerVisionCapabilityForView(provider) === "unsupported");
+  return (
+    <details className="provider-technical-details">
+      <summary>{t("settings.providerAccess")}</summary>
+      <dl>
+        {group.providers.length === 1 ? (
+          <>
+            <div><dt>{t("settings.providerProtocol")}</dt><dd>{providerProtocolDisplayName(group.kind)}</dd></div>
+            <div><dt>{t("settings.providerBaseUrlLabel")}</dt><dd>{group.baseUrl || t("common.none")}</dd></div>
+          </>
+        ) : group.providers.map((provider) => (
+          <div key={provider.name}><dt>{provider.name}</dt><dd>{providerProtocolDisplayName(provider.kind)} · {provider.baseUrl || t("common.none")}</dd></div>
+        ))}
+        <div>
+          <dt>{t("settings.providerApiKeyEnv")}</dt>
+          <dd>{group.apiKeyEnv || t("common.none")}</dd>
+        </div>
+        {imageInputUnsupported && (
+          <div>
+            <dt>{t("settings.visionModel")}</dt>
+            <dd>{t("settings.imageInputUnsupported")}</dd>
+          </div>
+        )}
+        {group.keySource && (
+          <div>
+            <dt>{t("settings.providerKey")}</dt>
+            <dd title={group.keySourcePath || undefined}>{group.keySource}</dd>
+          </div>
+        )}
+      </dl>
+    </details>
+  );
+}
+
+function providerProtocolDisplayName(kind: string): string {
+  switch (kind.trim().toLowerCase()) {
+    case "anthropic":
+      return "Anthropic Messages";
+    case "responses":
+      return "Responses API";
+    case "openai":
+      return "OpenAI Chat Completions";
+    default:
+      return kind;
+  }
+}
+
+function ProviderAccessMoreMenu({
+  busy,
+  removeDisabled,
+  builtIn,
+  onRemove,
+}: {
+  busy: boolean;
+  removeDisabled: boolean;
+  builtIn: boolean;
+  onRemove: () => void | Promise<void>;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const disabled = busy || removeDisabled;
+  const tooltip = removeDisabled ? t("settings.cantDeleteDefault") : t("settings.themeGallery.moreActions");
+
+  return (
+    <div className="provider-access-more">
+      <Tooltip label={tooltip}>
+        <button
+          ref={triggerRef}
+          type="button"
+          className="btn btn--small provider-access-more__trigger"
+          aria-label={t("settings.themeGallery.moreActions")}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          disabled={disabled}
+          onClick={() => setOpen((current) => !current)}
+        >
+          <MoreHorizontal size={16} aria-hidden="true" />
+        </button>
+      </Tooltip>
+      <AnchoredPopover
+        open={open && !disabled}
+        anchorRef={triggerRef}
+        onClose={() => setOpen(false)}
+        className="provider-access-more__menu"
+        align="end"
+        placement="bottom"
+      >
+        <div className="provider-access-more__items" role="menu" aria-label={t("settings.themeGallery.moreActions")}>
+          <InlineConfirmButton
+            label={<><Trash2 size={14} aria-hidden="true" />{t("settings.removeProviderAccess")}</>}
+            confirmLabel={builtIn ? t("settings.confirmRemoveProviderAccess") : t("settings.confirmDeleteProvider")}
+            cancelLabel={t("common.cancel")}
+            danger={!builtIn}
+            buttonRole="menuitem"
+            onConfirm={async () => {
+              setOpen(false);
+              await onRemove();
+            }}
+          />
+        </div>
+      </AnchoredPopover>
+    </div>
   );
 }
 
@@ -5761,30 +5795,40 @@ function ProviderModelDraftPicker({
 }
 
 function ProviderServiceCapabilities({
-  kind,
-  baseUrl,
+  supported,
+  configured,
   models,
+  hiddenModelCount,
+  showModelSummary = false,
   enabled,
   disabled,
   onChange,
 }: {
-  kind: string;
-  baseUrl: string;
+  supported: boolean;
+  configured?: boolean;
   models: string[];
+  hiddenModelCount?: number;
+  showModelSummary?: boolean;
   enabled: boolean;
   disabled: boolean;
   onChange: (enabled: boolean) => void;
 }) {
   const t = useT();
   const capabilityID = useId();
-  const costID = `${capabilityID}-cost`;
-  if (!providerSupportsServerWebSearch(kind, baseUrl)) return null;
-  const normalizedKind = kind.trim().toLowerCase();
+  if (!supported) return null;
   return (
     <section className="provider-capabilities" aria-labelledby={capabilityID}>
       <div className="provider-card-block__label" id={capabilityID}>
         {t("settings.providerCapabilities")}
       </div>
+      {showModelSummary && (
+        <ProviderModelSummary
+          configured={Boolean(configured)}
+          models={models}
+          hiddenModelCount={hiddenModelCount ?? 0}
+          compact
+        />
+      )}
       <label className="provider-capability-row">
         <span className="provider-capability-row__copy">
           <span className="provider-capability-row__title">
@@ -5799,18 +5843,9 @@ function ProviderServiceCapabilities({
           role="switch"
           checked={enabled}
           disabled={disabled}
-          aria-describedby={costID}
           onChange={(event) => onChange(event.target.checked)}
         />
       </label>
-      <div className="provider-capability-row__cost" id={costID}>
-        {t("settings.serverWebSearchCostHint")}
-      </div>
-      <div className="provider-capability-badges" aria-label={t("settings.providerCompatibility")}>
-        <span>{normalizedKind === "responses" ? t("settings.responsesStateless") : t("settings.anthropicCompatible")}</span>
-        <span>{t("settings.imageInputUnsupported")}</span>
-        {models.length > 0 && <span>{t("settings.serverWebSearchApplies", { models: models.join(", ") })}</span>}
-      </div>
     </section>
   );
 }
@@ -5826,6 +5861,10 @@ function providerAccessGroups(providers: ProviderView[], t: ReturnType<typeof us
       existing.keySet = existing.keySet || p.keySet;
       existing.requiresKey = existing.requiresKey && providerRequiresKey(p);
       existing.configured = existing.configured || providerIsConfigured(p);
+      existing.recommendedUpgradeAvailable = existing.recommendedUpgradeAvailable || Boolean(p.recommendedUpgradeAvailable);
+      if (existing.recommendedUpgradeAvailable && existing.id === "builtin:deepseek") {
+        existing.description = "";
+      }
       if (!existing.keySource && p.keySource) existing.keySource = p.keySource;
       if (!existing.keySourcePath && p.keySourcePath) existing.keySourcePath = p.keySourcePath;
       existing.models = uniqueStrings([...existing.models, ...p.models]);
@@ -5846,6 +5885,7 @@ function providerAccessGroups(providers: ProviderView[], t: ReturnType<typeof us
       baseUrl: p.baseUrl,
       kind: p.kind,
       models: uniqueStrings(p.models),
+      recommendedUpgradeAvailable: Boolean(p.recommendedUpgradeAvailable),
     });
   }
   return Array.from(groups.values());
@@ -5862,7 +5902,7 @@ function providerBaseHost(baseUrl: string): string {
 type ProviderVisionCapability = "configurable" | "unsupported";
 
 function isDeepSeekOfficialEndpoint(baseUrl: string): boolean {
-  return providerBaseHost(baseUrl) === "api.deepseek.com";
+  return providerBaseHost(baseUrl).endsWith(".deepseek.com");
 }
 
 export function providerSupportsServerWebSearch(kind: string, baseUrl: string): boolean {
@@ -5891,6 +5931,15 @@ export function providerSupportsServerWebSearch(kind: string, baseUrl: string): 
   }
 }
 
+export function providerSupportsServerWebSearchForView(
+  provider: Pick<ProviderView, "kind" | "baseUrl" | "serverWebSearchCapability">,
+): boolean {
+  if (typeof provider.serverWebSearchCapability === "boolean") {
+    return provider.serverWebSearchCapability;
+  }
+  return providerSupportsServerWebSearch(provider.kind, provider.baseUrl);
+}
+
 function providerVisionCapability(kind: string, baseUrl: string): ProviderVisionCapability {
   if (!isDeepSeekOfficialEndpoint(baseUrl)) return "configurable";
   switch (kind.trim().toLowerCase()) {
@@ -5901,6 +5950,15 @@ function providerVisionCapability(kind: string, baseUrl: string): ProviderVision
     default:
       return "configurable";
   }
+}
+
+export function providerVisionCapabilityForView(
+  provider: Pick<ProviderView, "kind" | "baseUrl" | "visionCapability">,
+): ProviderVisionCapability {
+  if (provider.visionCapability === "unsupported" || provider.visionCapability === "configurable") {
+    return provider.visionCapability;
+  }
+  return providerVisionCapability(provider.kind, provider.baseUrl);
 }
 
 function canonicalOfficialProviderName(name: string): string {
@@ -5935,8 +5993,10 @@ function providerGroupLabel(p: ProviderView, t?: ReturnType<typeof useT>): strin
 
 function providerGroupDescription(p: ProviderView, t: ReturnType<typeof useT>): string {
   const id = providerGroupID(p);
-  if (id === "builtin:deepseek") return t("settings.providerDesc.deepseek");
-  return p.baseUrl;
+  if (id === "builtin:deepseek") {
+    return p.recommendedUpgradeAvailable ? "" : t("settings.providerDesc.deepseek");
+  }
+  return "";
 }
 
 function uniqueStrings(values: string[]): string[] {
@@ -6139,9 +6199,14 @@ export function ProviderEditor({
   const t = useT();
   const [name, setName] = useState(initial?.name ?? "");
   const [kind, setKind] = useState(initial?.kind ?? "openai");
-  const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? "");
-  const [chatUrl, setChatUrl] = useState(initial?.chatUrl ?? "");
-  const [fullChatUrl, setFullChatUrl] = useState(Boolean((initial?.chatUrl ?? "").trim()));
+  const [requestUrl, setRequestUrl] = useState(() => providerRequestURLFromConfig(
+    initial?.kind ?? "openai",
+    initial?.baseUrl ?? "",
+    initial?.requestUrl ?? "",
+    initial?.chatUrl ?? "",
+  ));
+  const providerUrlInputId = useId();
+  const providerUrlHelpId = useId();
   const [models, setModels] = useState((initial?.models ?? []).join(", "));
   const [modelCandidates, setModelCandidates] = useState<string[]>(initial?.models ?? []);
   const [visionModels, setVisionModels] = useState((initial?.visionModels ?? []).join(", "));
@@ -6177,10 +6242,28 @@ export function ProviderEditor({
     return choices.length > 0 ? choices : ["openai"];
   }, [kind, kinds]);
   const effectiveKind = providerEditorEffectiveKind(isNewCustomProvider, kind, providerKindChoices);
-  const effectiveBaseUrl = fullChatUrl ? providerBaseURLFromChatURL(chatUrl) : baseUrl.trim();
-  const effectiveChatUrl = fullChatUrl ? trimmedURL(chatUrl) : "";
+  const effectiveRequestUrl = requestUrl.trim();
+  const effectiveBaseUrl = providerBaseURLForSave(initial, effectiveKind, effectiveRequestUrl);
+  const effectiveLegacyChatUrl = effectiveKind.toLowerCase() === "openai" ? effectiveRequestUrl : initial?.chatUrl ?? "";
   const effectiveModelsUrl = modelsUrl.trim();
-  const effectiveVisionCapability = providerVisionCapability(effectiveKind, effectiveBaseUrl);
+  const initialEffectiveBaseUrl = initial ? trimmedBaseURL(initial.baseUrl) : "";
+  const retainedVisionCapability = initial &&
+    effectiveKind.trim().toLowerCase() === initial.kind.trim().toLowerCase() &&
+    trimmedBaseURL(effectiveBaseUrl) === initialEffectiveBaseUrl
+    ? initial.visionCapability
+    : undefined;
+  const effectiveVisionCapability = providerVisionCapabilityForView({
+    kind: effectiveKind,
+    baseUrl: effectiveBaseUrl,
+    visionCapability: retainedVisionCapability,
+  });
+  const retainedServerWebSearchCapability = initial &&
+    effectiveKind.trim().toLowerCase() === initial.kind.trim().toLowerCase() &&
+    trimmedBaseURL(effectiveBaseUrl) === initialEffectiveBaseUrl
+    ? initial.serverWebSearchCapability
+    : undefined;
+  const effectiveServerWebSearchCapability = retainedServerWebSearchCapability ??
+    providerSupportsServerWebSearch(effectiveKind, effectiveBaseUrl);
   const effectiveHeaders = parseProviderHeaders(headersDraft);
   const extraBodyParse = useMemo(() => {
     try {
@@ -6191,7 +6274,6 @@ export function ProviderEditor({
   }, [extraBodyDraft, t]);
   const effectiveExtraBody = extraBodyParse.value;
   const extraBodyInvalid = Boolean(extraBodyDraft.trim() && extraBodyParse.error);
-  const previewChatUrl = providerChatURLPreview(baseUrl, chatUrl, fullChatUrl);
   const modelNames = useMemo(
     () => parseProviderListInput(models),
     [models],
@@ -6236,7 +6318,8 @@ export function ProviderEditor({
         added: initial?.added ?? true,
         kind: effectiveKind,
         baseUrl: effectiveBaseUrl,
-        chatUrl: effectiveChatUrl,
+        chatUrl: effectiveLegacyChatUrl,
+        requestUrl: effectiveRequestUrl,
         modelsUrl: effectiveModelsUrl,
         models: [],
         visionModels: [],
@@ -6251,7 +6334,8 @@ export function ProviderEditor({
         contextWindow: Number(ctx) || 0,
         reasoningProtocol,
         thinking,
-        webSearch: providerSupportsServerWebSearch(effectiveKind, effectiveBaseUrl) && webSearch,
+        webSearch: effectiveServerWebSearchCapability && webSearch,
+        serverWebSearchCapability: effectiveServerWebSearchCapability,
         supportedEfforts: cleanedSupportedEfforts,
         defaultEffort: cleanDefaultEffort,
         modelOverrides: mergeProviderModelContextWindows(initial?.modelOverrides, parseProviderListInput(models), modelContextWindows),
@@ -6291,7 +6375,8 @@ export function ProviderEditor({
       added: initial?.added ?? true,
       kind: effectiveKind,
       baseUrl: effectiveBaseUrl,
-      chatUrl: effectiveChatUrl,
+      chatUrl: effectiveLegacyChatUrl,
+      requestUrl: effectiveRequestUrl,
       models: ms,
       visionModels: vms,
       visionModelsConfigured: visionModelsConfigured || vms.length > 0,
@@ -6306,7 +6391,8 @@ export function ProviderEditor({
       contextWindow: Number(ctx) || 0,
       reasoningProtocol,
       thinking,
-      webSearch: providerSupportsServerWebSearch(effectiveKind, effectiveBaseUrl) && webSearch,
+      webSearch: effectiveServerWebSearchCapability && webSearch,
+      serverWebSearchCapability: effectiveServerWebSearchCapability,
       supportedEfforts: cleanedSupportedEfforts,
       // Clear the stored default if no levels are selected; the backend's
       // NormalizeEffort would otherwise silently ignore an unsupported value.
@@ -6516,43 +6602,19 @@ export function ProviderEditor({
         ))}
       </select>
       <div className="mem-hint">{providerKindHint(effectiveKind, t)}</div>
-      <div className="set-row">
-        <label className="set-label set-grow">
-          {t(fullChatUrl ? "settings.providerChatUrlLabel" : "settings.providerBaseUrlLabel")}
-        </label>
-        <label className="set-check">
-          <input
-            type="checkbox"
-            checked={fullChatUrl}
-            onChange={(e) => {
-              const checked = e.target.checked;
-              setFullChatUrl(checked);
-              if (checked && !chatUrl.trim()) {
-                setChatUrl(providerChatURLPreview(baseUrl, "", false));
-              } else if (!checked && !baseUrl.trim()) {
-                setBaseUrl(providerBaseURLFromChatURL(chatUrl));
-              }
-            }}
-          />
-          {t("settings.providerUseFullChatUrl")}
-        </label>
-      </div>
+      <label className="set-label" htmlFor={providerUrlInputId}>
+        {t("settings.providerBaseUrlLabel")}
+      </label>
       <input
-        className="mem-input"
-        placeholder={t(fullChatUrl ? "settings.providerChatUrlPlaceholder" : "settings.providerBaseUrl")}
-        value={fullChatUrl ? chatUrl : baseUrl}
-        onChange={(e) => {
-          const value = e.target.value;
-          if (fullChatUrl) {
-            setChatUrl(value);
-            setBaseUrl(providerBaseURLFromChatURL(value));
-          } else {
-            setBaseUrl(value);
-          }
-        }}
+        id={providerUrlInputId}
+        className="mem-input provider-url-input"
+        aria-describedby={providerUrlHelpId}
+        placeholder={t("settings.providerChatUrlPlaceholder")}
+        value={requestUrl}
+        onChange={(e) => setRequestUrl(e.target.value)}
       />
-      <div className="mem-hint">
-        {previewChatUrl ? t("settings.providerRequestPreview", { url: previewChatUrl }) : t("settings.providerRequestPreviewEmpty")}
+      <div id={providerUrlHelpId} className="mem-hint">
+        {t("settings.providerRequestUrlHint")}
       </div>
       {!initial && (
         <>
@@ -6612,8 +6674,7 @@ export function ProviderEditor({
         onClear={clearEditorModels}
       />
       <ProviderServiceCapabilities
-        kind={effectiveKind}
-        baseUrl={effectiveBaseUrl}
+        supported={effectiveServerWebSearchCapability}
         models={modelNames}
         enabled={webSearch}
         disabled={busy || fetchingModels}
@@ -7189,7 +7250,7 @@ function UpdatesSection({
   applySettings: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useT();
-  const { status, check, apply: applyUpdate, openDownload } = useUpdater();
+  const { status, check, apply: applyUpdate, openDownload, abandonPending } = useUpdater();
   const [version, setVersion] = useState("");
   useEffect(() => {
     app.Version().then(setVersion).catch(() => {});
@@ -7332,6 +7393,16 @@ function UpdatesSection({
             )}
           </div>
           <span className="banner__spacer" />
+          {status.disposition === "recovery" && (
+            <button
+              className="btn btn--small"
+              type="button"
+              disabled={settingsBusy || updaterBusy}
+              onClick={() => void abandonPending()}
+            >
+              {t("updater.discardPrevious")}
+            </button>
+          )}
           {downloadIsPrimary && (
             <button className="btn btn--primary btn--small" type="button" onClick={openDownload}>
               {t("updater.officialDownload")}

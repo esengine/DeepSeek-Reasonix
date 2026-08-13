@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"reasonix/internal/config"
+	"reasonix/internal/provider"
 )
 
 // TestModelRefsFromConfig verifies the /model picker enumerates configured
@@ -119,5 +120,48 @@ func TestPersistModelRejectsUnknownRef(t *testing.T) {
 
 	if _, err := os.Stat(config.UserConfigPath()); !os.IsNotExist(err) {
 		t.Fatalf("unknown ref must not create config file, stat err=%v", err)
+	}
+}
+
+// TestPersistModelAcceptsPluginRef: a plugin-namespaced ref picked in /model
+// persists like any config ref — the config catalog cannot vouch for it, but
+// boot's merged resolver gates it at the next launch.
+func TestPersistModelAcceptsPluginRef(t *testing.T) {
+	isolateUserConfig(t)
+	if _, err := config.SetCredential("DEEPSEEK_API_KEY", "test-key"); err != nil {
+		t.Fatalf("SetCredential: %v", err)
+	}
+
+	m := newTestChatTUI()
+	m.persistModel("plugin/demo/fake/x")
+
+	body, err := os.ReadFile(config.UserConfigPath())
+	if err != nil {
+		t.Fatalf("read saved config: %v", err)
+	}
+	if !strings.Contains(string(body), `default_model = "plugin/demo/fake/x"`) {
+		t.Fatalf("saved config missing plugin default_model ref:\n%s", body)
+	}
+}
+
+// TestMergeExtensionModelRefs pins the /model picker merge: extension
+// descriptors join the config-backed list with their plugin/... refs intact,
+// duplicates collapse, and a nil catalog leaves the base list untouched.
+func TestMergeExtensionModelRefs(t *testing.T) {
+	base := []string{"deepseek/deepseek-v4", "mimo/mimo-v2"}
+	catalog := []provider.Descriptor{
+		{Ref: "plugin/demo/fake/x"},
+		{Ref: "plugin/demo/fake/y"},
+		{Ref: "deepseek/deepseek-v4"},  // claim-replaced duplicate must not repeat
+		{Ref: "hidden/ordinary-model"}, // merged base refs are not extension models
+		{Ref: "  "},                    // blank entries are dropped
+	}
+	got := mergeExtensionModelRefs(base, catalog)
+	want := []string{"deepseek/deepseek-v4", "mimo/mimo-v2", "plugin/demo/fake/x", "plugin/demo/fake/y"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("merge = %v, want %v", got, want)
+	}
+	if out := mergeExtensionModelRefs(base, nil); strings.Join(out, ",") != strings.Join(base, ",") {
+		t.Fatalf("nil catalog changed the base list: %v", out)
 	}
 }

@@ -18,7 +18,7 @@ func launchLockProcessAlive(pid int) bool {
 	if err != nil {
 		// Access denied still proves the process exists. Treating it as stale
 		// would let a less-privileged waiter steal a live writer's lock.
-		return err == windows.ERROR_ACCESS_DENIED
+		return errors.Is(err, windows.ERROR_ACCESS_DENIED)
 	}
 	defer windows.CloseHandle(handle)
 	var code uint32

@@ -222,6 +222,18 @@ func (i *ICoreWebView2) AddNavigationCompleted(eventHandler *ICoreWebView2Naviga
 	return nil
 }
 
+func (i *ICoreWebView2) AddNavigationStarting(eventHandler *ICoreWebView2NavigationStartingEventHandler, token *_EventRegistrationToken) error {
+	hr, _, _ := i.vtbl.AddNavigationStarting.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(eventHandler)),
+		uintptr(unsafe.Pointer(token)),
+	)
+	if windows.Handle(hr) != windows.S_OK {
+		return windows.Errno(hr)
+	}
+	return nil
+}
+
 func (i *ICoreWebView2) AddPermissionRequested(handler *iCoreWebView2PermissionRequestedEventHandler, token *_EventRegistrationToken) error {
 	hr, _, _ := i.vtbl.AddPermissionRequested.Call(
 		uintptr(unsafe.Pointer(i)),
@@ -359,6 +371,15 @@ func (i *ICoreWebView2) Navigate(url string) error {
 		uintptr(unsafe.Pointer(i)),
 		uintptr(unsafe.Pointer(u16url)),
 	)
+	if windows.Handle(hr) != windows.S_OK {
+		return windows.Errno(hr)
+	}
+
+	return nil
+}
+
+func (i *ICoreWebView2) Reload() error {
+	hr, _, _ := i.vtbl.Reload.Call(uintptr(unsafe.Pointer(i)))
 	if windows.Handle(hr) != windows.S_OK {
 		return windows.Errno(hr)
 	}

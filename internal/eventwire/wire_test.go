@@ -14,15 +14,69 @@ import (
 )
 
 func TestToWireRetryingJSON(t *testing.T) {
-	w := ToWire(event.Event{Kind: event.Retrying, RetryAttempt: 3, RetryMax: 10})
+	w := ToWire(event.Event{Kind: event.Retrying, RetryAttempt: 3, RetryMax: 10, RetryScope: event.RetryScopeStream})
 	b, err := json.Marshal(w)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	s := string(b)
-	for _, want := range []string{`"kind":"retrying"`, `"retryAttempt":3`, `"retryMax":10`} {
+	for _, want := range []string{`"kind":"retrying"`, `"retryAttempt":3`, `"retryMax":10`, `"retryScope":"stream"`} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("retrying JSON = %s, want it to contain %s", s, want)
+		}
+	}
+}
+
+func TestToWireStreamAttemptJSON(t *testing.T) {
+	w := ToWire(event.Event{
+		Kind: event.StreamAttempt,
+		StreamAttempt: event.StreamAttemptInfo{
+			ID: "sa-1", Action: event.StreamAttemptDiscard, Attempt: 2, Max: 6, Reason: "connection_reset",
+		},
+	})
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	s := string(b)
+	for _, want := range []string{`"kind":"stream_attempt"`, `"id":"sa-1"`, `"action":"discard"`, `"attempt":2`, `"max":6`, `"reason":"connection_reset"`} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("stream_attempt JSON = %s, want it to contain %s", s, want)
+		}
+	}
+}
+
+func TestToWireWorkspaceChangedKeepsBoundedEmptyArrays(t *testing.T) {
+	w := ToWire(event.Event{Kind: event.WorkspaceChanged, Workspace: &event.WorkspaceChangedPayload{
+		Revisions:  event.WorkspaceRevision{Content: 4, Tree: 2, WorkingTree: 3, GitMeta: 1, Session: 7},
+		WatchState: event.WorkspaceWatchDegraded,
+		Source:     "reconcile",
+	}})
+	if w.Workspace == nil || w.Workspace.Changes == nil {
+		t.Fatalf("workspace payload/changes must be non-nil: %+v", w.Workspace)
+	}
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"kind":"workspace_changed"`, `"changes":[]`, `"watchState":"degraded"`, `"session":7`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("workspace JSON = %s, missing %s", b, want)
+		}
+	}
+}
+
+func TestToWireContextMaintenanceJSON(t *testing.T) {
+	w := ToWire(event.Event{Kind: event.ContextMaintenanceEvent, Maintenance: &event.ContextMaintenance{
+		Status: "applied", Action: "prune", SavedTokens: 4096, ProjectionVersion: 3, CacheBreak: true,
+	}})
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"kind":"context_maintenance"`, `"action":"prune"`, `"savedTokens":4096`, `"projectionVersion":3`, `"cacheBreak":true`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("context maintenance JSON = %s, want %s", b, want)
 		}
 	}
 }
@@ -54,8 +108,30 @@ func TestToWireNoticeCarriesCode(t *testing.T) {
 	}
 }
 
+func TestToWireNoticeCarriesDecisionReceipt(t *testing.T) {
+	w := ToWire(event.Event{
+		Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeDecisionReceipt,
+		Text: "Decision recorded: allow_once",
+		DecisionReceipt: &provider.DecisionReceipt{
+			ID: "approval-1", Kind: "tool", Tool: "write_file", Subject: "src/app.go", Outcome: "allow_once",
+		},
+	})
+	if w.DecisionReceipt == nil || w.DecisionReceipt.ID != "approval-1" || w.DecisionReceipt.Outcome != "allow_once" {
+		t.Fatalf("wire receipt = %+v", w.DecisionReceipt)
+	}
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"code":"decision_receipt"`, `"decisionReceipt"`, `"outcome":"allow_once"`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("receipt JSON = %s, want %s", b, want)
+		}
+	}
+}
+
 func TestKindNamesComplete(t *testing.T) {
-	for k := event.Kind(0); k < event.KindCount; k++ {
+	for k := range event.KindCount {
 		if ToWire(event.Event{Kind: k}).Kind == "" {
 			t.Fatalf("kind %d has no wire name", k)
 		}
@@ -64,7 +140,7 @@ func TestKindNamesComplete(t *testing.T) {
 
 func TestDesktopWireEventKindTypeCoversSharedKinds(t *testing.T) {
 	ts := readDesktopTypes(t)
-	for k := event.Kind(0); k < event.KindCount; k++ {
+	for k := range event.KindCount {
 		kind := ToWire(event.Event{Kind: k}).Kind
 		if !strings.Contains(ts, `"`+kind+`"`) {
 			t.Fatalf("desktop WireEvent EventKind is missing %q", kind)
@@ -77,8 +153,15 @@ func TestDesktopWireEventTypeCoversSharedPayloadFields(t *testing.T) {
 	for _, want := range []string{
 		"detail?: string;",
 		`outcome?: "final_readiness" | "recovery_paused";`,
+		"checkpointTurn?: number;",
 		"retryAttempt?: number;",
 		"retryMax?: number;",
+		"retryScope?:",
+		"streamAttempt?: WireStreamAttempt;",
+		"export interface WireStreamAttempt",
+		"attemptId?: string;",
+		"contextPromptTokens?: number;",
+		"contextCompletionTokens?: number;",
 		"memoryCitations?: MemoryCitation[];",
 		"export interface MemoryCitation",
 		"resolvedName?: string;",
@@ -133,6 +216,21 @@ func TestToWireToolCarriesResolvedCapabilityMetadata(t *testing.T) {
 	}
 }
 
+func TestToWireToolOmitsHostOnlyWorkspaceMutationMetadata(t *testing.T) {
+	privatePath := "/Users/private/secret-project/file.go"
+	w := ToWire(event.Event{Kind: event.ToolResult, Tool: event.Tool{
+		ID: "c1", Name: "write_file", WorkspaceMutation: true,
+		WorkspacePaths: []string{privatePath}, WorkspaceAllPaths: true,
+	}})
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), privatePath) || strings.Contains(string(b), "workspaceMutation") || strings.Contains(string(b), "workspacePaths") {
+		t.Fatalf("host-only workspace metadata leaked into eventwire JSON: %s", b)
+	}
+}
+
 func TestToWireTurnOutcomeIsOptionalAndMachineReadable(t *testing.T) {
 	readiness := ToWire(event.Event{
 		Kind:      event.TurnDone,
@@ -157,6 +255,25 @@ func TestToWireTurnOutcomeIsOptionalAndMachineReadable(t *testing.T) {
 	}
 	if strings.Contains(string(ordinary), `"outcome"`) {
 		t.Fatalf("ordinary error JSON must omit outcome: %s", ordinary)
+	}
+}
+
+func TestToWireTurnDoneCheckpointTurnPreservesZeroAndOmitsNil(t *testing.T) {
+	turn := 0
+	withCheckpoint, err := json.Marshal(ToWire(event.Event{Kind: event.TurnDone, CheckpointTurn: &turn}))
+	if err != nil {
+		t.Fatalf("marshal checkpoint turn: %v", err)
+	}
+	if !strings.Contains(string(withCheckpoint), `"checkpointTurn":0`) {
+		t.Fatalf("checkpoint JSON = %s, want turn zero", withCheckpoint)
+	}
+
+	withoutCheckpoint, err := json.Marshal(ToWire(event.Event{Kind: event.TurnDone}))
+	if err != nil {
+		t.Fatalf("marshal empty TurnDone: %v", err)
+	}
+	if strings.Contains(string(withoutCheckpoint), `"checkpointTurn"`) {
+		t.Fatalf("empty TurnDone JSON must omit checkpointTurn: %s", withoutCheckpoint)
 	}
 }
 
@@ -207,6 +324,7 @@ func TestToWireToolPayloadJSON(t *testing.T) {
 	w := ToWire(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
 		ID: "call-1", Name: "task", Args: `{"prompt":"x"}`, Output: "ignored",
 		Err: "blocked", ReadOnly: true, Truncated: true, DurationMs: 522,
+		StartedAt: 1754500000000, EndedAt: 1754500000522,
 		Partial: true, Refreshed: true, ParentID: "parent-1",
 		FileDiff: event.FileDiff{Diff: "@@ -1 +1 @@\n-old\n+new\n", Added: 1, Removed: 1},
 		Profile:  &event.Profile{Model: "deepseek-pro", Effort: "max"},
@@ -220,6 +338,7 @@ func TestToWireToolPayloadJSON(t *testing.T) {
 		`"kind":"tool_dispatch"`, `"id":"call-1"`, `"name":"task"`,
 		`"args":"{\"prompt\":\"x\"}"`, `"output":"ignored"`, `"err":"blocked"`,
 		`"readOnly":true`, `"truncated":true`, `"durationMs":522`, `"partial":true`, `"refreshed":true`,
+		`"startedAt":1754500000000`, `"endedAt":1754500000522`,
 		`"parentId":"parent-1"`, `"diff":"@@ -1 +1 @@\n-old\n+new\n"`,
 		`"added":1`, `"removed":1`, `"profile":{"model":"deepseek-pro","effort":"max"}`,
 	} {

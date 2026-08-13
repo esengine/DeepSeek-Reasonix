@@ -74,7 +74,13 @@ func renderTurnReceipt(u *provider.Usage, p *provider.Pricing, d *event.CacheDia
 		groups = append(groups, "reasoning "+shortTokens(u.ReasoningTokens))
 	}
 	if p != nil {
-		groups = append(groups, fmt.Sprintf("%s%.4f", p.Symbol(), p.Cost(u)))
+		// Host quotes are estimates; never present a bare zero as real spend.
+		cost := p.Cost(u)
+		if cost > 0 {
+			groups = append(groups, fmt.Sprintf("≈%s%.4f", p.Symbol(), cost))
+		} else {
+			groups = append(groups, "cost n/a")
+		}
 	}
 	if u.Estimated {
 		groups = append(groups, "estimated")
@@ -292,7 +298,7 @@ func (m chatTUI) renderStatusBlock(primary string, width int) string {
 // the optional shortcut help yields space to the composer.
 func hideStatusHintWhenKeyNamesCannotFit(primary string, width int) string {
 	hint := i18n.M.ChatStatusCycleHintCompact
-	for _, group := range strings.Split(hint, " · ") {
+	for group := range strings.SplitSeq(hint, " · ") {
 		if visibleWidth(statusFooterIndent+group) > width {
 			return strings.Replace(primary, " · "+footerHint(hint), "", 1)
 		}

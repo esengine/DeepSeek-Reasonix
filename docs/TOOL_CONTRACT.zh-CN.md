@@ -10,6 +10,7 @@
 | `bash_output` | true | 读取后台 `bash` 或 `task` job 自上次读取后的新增输出和状态。 |
 | `code_index` | true | 轻量内置代码符号索引；优先使用 `lsp_*` 或代码图 MCP，缺失时用它兜底。 |
 | `complete_step` | true | 用证据记录已批准计划中一个步骤的完成情况。 |
+| `compress` | true | 压缩当前模型可见对话中选定的范围，不删除可见历史。仅在用户明确要求压缩上下文时使用；锚点必须是某条真实用户消息中唯一、精确的原文片段。 |
 | `delete_range` | false | 用精确 start/end 文本锚点删除文件中的连续范围。 |
 | `delete_symbol` | false | 用 Go AST 删除 Go 源文件中的命名符号。 |
 | `edit_file` | false | 将文件中的唯一精确字符串替换为另一个字符串。 |
@@ -86,26 +87,22 @@ Executor 刻意保留直接 `mcp__*` 工具，因此安装、连接或刷新这�
 按 UTF-8 字节偏移分页读取某个引用对应的完整最终答案，因此长篇并行调研无需一次性全部
 注入父会话也不会丢失。引用只允许在当前会话 lineage 和工作区内读取。
 
-`use_capability`（`action` = `list` | `inspect` | `call` | `decline`）：Delivery Executor，
-以及 Balanced 双模型会话中的 Planner 和 Executor；Economy 不启用。
+`use_capability`（`action` = `list` | `inspect` | `call` | `decline`）在所有执行设定
+（`light` | `balanced` | `delivery`）下都出现在 provider 可见工具面。可选工具仍在 host
+registry 中供调度，但不会展开到 top-level provider schema；模型通过 `use_capability`
+调用，避免缓存前缀因 schema 变化而失效。
 
 `internal/boot.TestBootToolContractMatchesProviderVisibleSurface` 会校验真实 boot registry 合约和 provider request 一致，包括 read-only 标记和 canonical schema。
 
-## Token Economy Boot Surface
+## 统一启动工具面（所有执行设定）
 
-token economy 模式只带 9 个初始工具：4 个直接编码工具、3 个后台 shell 生命周期工具、
-`ask`，以及按需启用来源的 connector：
+三种执行设定共享同一套精简的 provider 可见核心：直接编码工具、后台 shell 生命周期工具，
+以及稳定的能力代理：
 
-`ask`, `bash`, `bash_output`, `connect_tool_source`, `edit_file`, `kill_shell`,
-`read_file`, `wait`, `write_file`。
+`bash`, `bash_output`, `edit_file`, `kill_shell`, `read_file`, `wait`,
+`write_file`, `compress`（若注册），以及 `use_capability`。
 
-其余能力都显式按需加载。`connect_tool_source` 支持 `docs`（只读内置文档检索工具）、
-`search`（`code_index`、
-`glob`、`grep`、`ls`）、`files`（专用移动、多编辑、删除与 notebook 工具）、
-`workflow`（`todo_write`、`complete_step`）、`sessions`（`history`、
-`list_sessions`、`read_session`）、`memory`（`memory`、`remember`、`forget`）、
-`commands`（`slash_command`）、`skills`、`read_only_skill`、`mcp`、`lsp`、
-`web_fetch`、`install_source`、`task` 和 `read_only_task`。所有来源都可在 Plan 中连接；后续 reader
-与 writer 调用和常规模式一样进入 Permissions/Sandbox。`workflow` 是阶段性例外：规划期间只安装
-`todo_write`，`complete_step` 需在计划批准后重新连接 `workflow` 才会加入。
-需要专用 `search` 来源之前，使用 `bash` 完成目录查看与搜索。
+可选工具（`glob`、`grep`、`ls`、`web_fetch`、MCP、skills、subagents、docs、会话历史、
+记忆写入、workflow 等）仍在 host registry 中可调度；模型通过 `use_capability` 列举、
+检查、调用或拒绝它们，且不会改变 provider 工具列表。执行设定改变的是规划 / 验证 /
+独立复审策略，而不是 provider 可见工具集合。已退役的 `connect_tool_source` 不再注册。
