@@ -70,6 +70,9 @@ benchmarks/context-maintenance-e2e/run/
 # Local scratch
 temp/
 
+# graphify knowledge-graph tool output (rebuilt locally; never committed)
+/graphify-out/
+
 # Official theme art intermediate outputs / caches
 scripts/official-theme-art/out/
 scripts/official-theme-art/__pycache__/

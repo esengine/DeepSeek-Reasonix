@@ -659,6 +659,7 @@ export const en = {
 
   // composer
   "composer.placeholder": "Message Reasonix…  ( / commands · @ files · ! shell )",
+  "composer.suggestionAcceptHint": "Tab to accept",
   "composer.inputActions": "Message input actions",
   "composer.normalMode": "chat mode",
   "composer.normalModeDesc": "Answer or work directly.",

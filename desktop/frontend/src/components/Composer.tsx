@@ -507,6 +507,7 @@ export function Composer({
   modelLabel,
   imageInputEnabled = true,
   tabId,
+  suggestion,
   effort,
   onSend,
   onSteer,
@@ -527,10 +528,10 @@ export function Composer({
   disabled,
   submitDisabled = false,
   readOnly = false,
+  onSuggestionChange,
   decisionPending = false,
   ready,
-  turnStartAt,
-  turnWaitAccumMs = 0,
+  turnStartAt,  turnWaitAccumMs = 0,
   promptWaitStartedAt,
   turnTokens,
   turnOutputTokens,
@@ -574,6 +575,10 @@ export function Composer({
   modelLabel: string;
   imageInputEnabled?: boolean;
   tabId?: string;
+  /** Predicted next prompt after an AI answer; Tab accepts it as ghost text. */
+  suggestion?: string;
+  /** Clears the active suggestion (e.g. after Tab accept). */
+  onSuggestionChange?: (text: string) => void;
   effort?: EffortInfo;
   onSend: (displayText: string, submitText?: string, tabId?: string, structured?: StructuredInvocationSubmit) => void | Promise<void>;
   onInvocationMetadataChange?: (metadata: Record<string, { kind: "skill" | "subagent"; color?: string }>) => void;
@@ -3295,6 +3300,18 @@ export function Composer({
     }
   };
 
+  // A predicted next-prompt ghost text shows only when a suggestion exists, no
+  // completion menu is open, the turn is idle, and the composer is empty. It
+  // hides the moment the user types (input becomes non-empty) or accepts it.
+  const ghostSuggestionActive =
+    !running
+    && menuMode === null
+    && !readOnly
+    && !!suggestion
+    && suggestion.trim() !== ""
+    && text.trim() === "";
+  const clearSuggestion = () => onSuggestionChange?.("");
+
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement | HTMLDivElement>) => {
     const composing = isImeKeyEvent(e.nativeEvent, composingRef.current, lastCompositionEndAt.current);
     const native = e.nativeEvent as globalThis.KeyboardEvent & {
@@ -3327,6 +3344,16 @@ export function Composer({
     if (e.key === "Tab" && e.shiftKey && !composing) {
       e.preventDefault();
       onCycleMode();
+      return;
+    }
+
+    // A plain Tab accepts the predicted next-prompt ghost text when no slash/@
+    // completion menu is open. The user then keeps the accepted text in the
+    // composer (it is not auto-submitted) and can edit or send it as usual.
+    if (e.key === "Tab" && !e.shiftKey && !composing && ghostSuggestionActive) {
+      e.preventDefault();
+      insertTextAtCaret(suggestion);
+      clearSuggestion();
       return;
     }
 
@@ -4591,6 +4618,12 @@ export function Composer({
                   rows={1}
                   disabled={disabled || readOnly}
                 />
+              )}
+              {ghostSuggestionActive && (
+                <span className="composer__ghost" aria-hidden="true">
+                  {suggestion}
+                  <span className="composer__ghost-hint">{t("composer.suggestionAcceptHint")}</span>
+                </span>
               )}
             </div>
             {composerPrompt && (

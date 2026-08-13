@@ -657,6 +657,33 @@ func (c *Config) ColdResumePruneEnabled() bool {
 	return *c.Agent.ColdResumePrune
 }
 
+// SuggestionEnabled reports whether next-prompt Tab-completion suggestions are
+// on. Default true; users opt out by setting suggestion_enabled=false.
+func (c *Config) SuggestionEnabled() bool {
+	if c == nil || c.Agent.SuggestionEnabled == nil {
+		return true
+	}
+	return *c.Agent.SuggestionEnabled
+}
+
+// SuggestionMaxTokens returns the cap on generated suggestion length. Default 60.
+func (c *Config) SuggestionMaxTokens() int {
+	if c == nil || c.Agent.SuggestionMaxTokens <= 0 {
+		return 60
+	}
+	return c.Agent.SuggestionMaxTokens
+}
+
+// SuggestionTimeoutMs returns the per-request timeout for a suggestion call.
+// Default 4000ms: even a reasoning-model first token can exceed a second, and a
+// suggestion is better late than dropped.
+func (c *Config) SuggestionTimeoutMs() int {
+	if c == nil || c.Agent.SuggestionTimeoutMs <= 0 {
+		return 4000
+	}
+	return c.Agent.SuggestionTimeoutMs
+}
+
 // ResponseLanguage normalizes the top-level language preference for final
 // answers. Empty means auto: replies follow the current user turn.
 func (c *Config) ResponseLanguage() string {
@@ -1279,6 +1306,13 @@ type AgentConfig struct {
 	SubagentEffort      string            `toml:"subagent_effort"`
 	SubagentEfforts     map[string]string `toml:"subagent_efforts"`
 	MaxSubagentDepth    int               `toml:"max_subagent_depth"`
+	// Suggestion* configures next-prompt Tab-completion on a cheap Lite model:
+	// SuggestionEnabled (nil = on), SuggestionModel (empty = main model),
+	// SuggestionMaxTokens, SuggestionTimeoutMs.
+	SuggestionEnabled   *bool  `toml:"suggestion_enabled"`
+	SuggestionModel     string `toml:"suggestion_model"`
+	SuggestionMaxTokens int    `toml:"suggestion_max_tokens"`
+	SuggestionTimeoutMs int    `toml:"suggestion_timeout_ms"`
 	// TaskCostBudget lands a task on one summary once it spends this much.
 	TaskCostBudget float64 `toml:"task_cost_budget"`
 	// TaskTimeBudgetMinutes is the same gate on wall clock. Both ship off.

@@ -45,6 +45,10 @@ compact_ratio       = 0.85  # sole auto trigger; presets 0.70 (active) / 0.80 (s
 # planner_model = "deepseek-pro"   # optional: enable two-model collaboration
 # subagent_model = "deepseek-pro"   # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }   # per-skill overrides
+# suggestion_enabled = true   # Tab-complete the likely next prompt after each AI answer (default true)
+# suggestion_model = "deepseek-flash"   # cheap "Lite" model for next-prompt suggestions; empty = main model
+# suggestion_max_tokens = 60   # cap on suggestion length
+# suggestion_timeout_ms = 4000  # per-suggestion request timeout
 # max_subagent_concurrency = 6   # session-wide sub-agent concurrency (task/fleet/skills)
 # max_parallel_writers = 3       # concurrent writers with non-overlapping write_paths
 # output_style = "explanatory"   # persona/tone folded into the prompt: explanatory | learning | concise,

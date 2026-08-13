@@ -40,6 +40,7 @@ import (
 	"reasonix/internal/sandbox"
 	"reasonix/internal/sessioninbox"
 	"reasonix/internal/skill"
+	"reasonix/internal/suggest"
 	"reasonix/internal/tool"
 )
 
@@ -425,6 +426,10 @@ type chatTUI struct {
 	// fileSearchCache memoizes fileref.Search by query so the bounded walk runs
 	// once per @token fragment, not on every keystroke that re-renders the menu.
 	fileSearchCache map[string][]string
+	// ghostSuggestion holds the predicted next prompt shown after an AI answer.
+	// It is dimmed above the composer and accepted on Tab; any typing clears it.
+	// Empty = no suggestion is being shown.
+	ghostSuggestion string
 }
 
 type tuiState int
@@ -498,6 +503,13 @@ type statuslineMsg struct{ out string }
 // gitStatusMsg carries the latest lightweight git readout for the built-in
 // status line. Empty means "not a git worktree" or "git unavailable".
 type gitStatusMsg struct{ status gitStatus }
+
+// suggestionMsg carries the result of an async next-prompt suggestion fetch.
+// Empty text means no suggestion (silently ignored).
+type suggestionMsg struct {
+	text string
+	err  error
+}
 
 // runStatusline runs the user's custom status-line command off the event loop,
 // feeding it a small JSON context on stdin and returning its first stdout line.
@@ -585,6 +597,33 @@ func fetchBalance(ctrl control.Status) tea.Cmd {
 			displayCurrency = cfg.ExplicitDisplayCurrency()
 		}
 		return balanceMsg{text: b.DisplayForCurrency(displayCurrency)}
+	}
+}
+
+// fetchSuggestion asks the cheap "Lite" suggestion model to predict the user's
+// next prompt after an AI answer, off the event loop. It degrades silently: a
+// missing model, timeout, or empty prediction all yield an empty suggestionMsg
+// that the UI ignores. It is only issued when the feature is enabled.
+func (m *chatTUI) fetchSuggestion() tea.Cmd {
+	cfg := m.cfg
+	if cfg == nil || !cfg.SuggestionEnabled() {
+		return nil
+	}
+	modelRef := cfg.Agent.SuggestionModel
+	history := m.ctrl.History()
+	timeout := time.Duration(cfg.SuggestionTimeoutMs()) * time.Millisecond
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		p, err := suggest.Provider(cfg, modelRef, boot.NewProvider)
+		if err != nil {
+			return suggestionMsg{}
+		}
+		text, err := suggest.NextPrompt(ctx, p, history, suggest.Options{MaxTokens: cfg.SuggestionMaxTokens()})
+		if err != nil {
+			return suggestionMsg{}
+		}
+		return suggestionMsg{text: text}
 	}
 }
 
@@ -1460,6 +1499,20 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
+		// A next-prompt ghost suggestion is shown after an AI answer. A plain Tab
+		// accepts it into the input; any other keystroke dismisses it (the user is
+		// starting to type their own follow-up). Shift+Tab is untouched — it still
+		// cycles plan mode via modeToggleKey below.
+		if m.ghostSuggestion != "" {
+			if msg.String() == "tab" {
+				m.input.SetValue(m.input.Value() + m.ghostSuggestion)
+				m.growInputToFit()
+				m.ghostSuggestion = ""
+				m.updateCompletion()
+				return m, nil
+			}
+			m.ghostSuggestion = ""
+		}
 		switch msg.String() {
 		case "up":
 			if m.state == tuiRunning {
@@ -1911,6 +1964,11 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if c := m.runStatusline(); c != nil {
 				cmds = append(cmds, c)
 			}
+			// Offer a next-prompt suggestion once the turn settles and the TUI is
+			// idle, so the user can Tab-accept a predicted follow-up.
+			if c := m.fetchSuggestion(); c != nil {
+				cmds = append(cmds, c)
+			}
 			// Durable inbox dispatch is owned by the controller after TurnDone.
 			// Reset local queue navigation when the snapshot changes.
 			m.resetQueueNavigation()
@@ -1935,6 +1993,14 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case gitStatusMsg:
 		m.gitStatus = msg.status
+
+	case suggestionMsg:
+		// Only surface the suggestion while still idle and the input is empty;
+		// if the user has already started typing a new turn, ignore the result
+		// (the prediction is for the moment right after the answer).
+		if msg.err == nil && m.state == tuiIdle && strings.TrimSpace(m.input.Value()) == "" {
+			m.ghostSuggestion = msg.text
+		}
 
 	case compactDoneMsg:
 		if msg.err != nil {

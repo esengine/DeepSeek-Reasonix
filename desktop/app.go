@@ -57,6 +57,7 @@ import (
 	"reasonix/internal/sessiontemp"
 	"reasonix/internal/skill"
 	"reasonix/internal/store"
+	"reasonix/internal/suggest"
 	"reasonix/internal/taskcatalog"
 	"reasonix/internal/taskmonitor"
 	"reasonix/internal/tool"
@@ -5528,6 +5529,42 @@ func (a *App) HistoryCheckpointTurnsForTab(tabID string) []int {
 		sessionDisplayResolver(controllerSessionDir(ctrl), ctrl.SessionPath()),
 		ctrl.CheckpointTurnsByMessageIndex(),
 	)
+}
+
+// SuggestionForTab predicts the user's likely next prompt after an AI answer for
+// the given tab's conversation, so the frontend can offer a Tab-accepted ghost
+// text. Returns "" when the feature is disabled, the tab has no controller, the
+// suggestion model is unavailable, or the prediction is empty. Errors degrade
+// silently: a failed suggestion should never break the chat.
+func (a *App) SuggestionForTab(tabID string) string {
+	a.mu.RLock()
+	tab := a.tabByIDLocked(tabID)
+	var ctrl control.SessionAPI
+	workspaceRoot := ""
+	if tab != nil {
+		ctrl = tab.Ctrl
+		workspaceRoot = tab.WorkspaceRoot
+	}
+	a.mu.RUnlock()
+	if ctrl == nil {
+		return ""
+	}
+	cfg, err := config.LoadForRootReadOnly(workspaceRoot)
+	if err != nil || cfg == nil || !cfg.SuggestionEnabled() {
+		return ""
+	}
+	p, err := suggest.Provider(cfg, cfg.Agent.SuggestionModel, boot.NewProvider)
+	if err != nil {
+		return ""
+	}
+	timeout := time.Duration(cfg.SuggestionTimeoutMs()) * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	text, err := suggest.NextPrompt(ctx, p, ctrl.History(), suggest.Options{MaxTokens: cfg.SuggestionMaxTokens()})
+	if err != nil {
+		return ""
+	}
+	return text
 }
 
 var pastedTextDisplayLabelPattern = regexp.MustCompile(`^\[(?:已粘贴文本|已貼上文字|Pasted text) #[0-9]+ · [0-9]+ (?:行|lines)\]$`)

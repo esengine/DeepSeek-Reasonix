@@ -464,6 +464,12 @@ func composerRowSelectionSpan(row composerVisualRow, start, end int) (lo, hi int
 }
 
 func (m chatTUI) renderComposerInput() string {
+	// A pending ghost suggestion renders as an inline placeholder (❯ suggestion)
+	// while the composer is empty; the textarea is a value copy here, so the
+	// mutation does not touch the live input state.
+	if m.ghostSuggestion != "" && !m.chooserTyping() && strings.TrimSpace(m.input.Value()) == "" {
+		m.input.Placeholder = m.ghostSuggestion
+	}
 	view := m.input.View()
 	visualStart := m.input.ScrollYOffset()
 	if m.composerScrollDetached {

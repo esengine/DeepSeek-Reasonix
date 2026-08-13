@@ -473,6 +473,7 @@ export interface AppBindings extends SessionCatalogBindings, HistoryCatalogBindi
   MemorySuggestionsForTab(tabID: string): Promise<MemorySuggestionsView>;
   AcceptMemorySuggestionForTab(tabID: string, suggestion: MemorySuggestion): Promise<string>;
   AcceptSkillSuggestionForTab(tabID: string, suggestion: SkillSuggestion): Promise<string>;
+  SuggestionForTab(tabID: string): Promise<string>;
   Remember(scope: string, note: string): Promise<string>;
   RememberForTab(tabID: string, scope: string, note: string): Promise<string>;
   Forget(name: string): Promise<void>;
@@ -4329,6 +4330,9 @@ function makeMockApp(): AppBindings {
     },
     async AcceptSkillSuggestionForTab(_tabID: string, suggestion: SkillSuggestion) {
       return this.AcceptSkillSuggestion(suggestion);
+    },
+    async SuggestionForTab(_tabID: string) {
+      return "";
     },
     async MemoryForTab(_tabID: string) {
       return this.Memory();
