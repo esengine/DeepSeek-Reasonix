@@ -197,10 +197,27 @@ func TestToolListRefreshCoalescesNotificationBurst(t *testing.T) {
 	}
 }
 
-func TestToolListRefreshBoundsSelfNotifyingServer(t *testing.T) {
+func TestToolListRefreshBacksOffAndConvergesAfterRepeatedNotices(t *testing.T) {
 	tr := newControlledToolsTransport()
 	client, _ := newControlledRefreshClient(t, tr)
 	defer client.close()
+	delays := make(chan time.Duration, 4)
+	releaseDelay := make(chan struct{}, 4)
+	client.refresh.mu.Lock()
+	client.refresh.wait = func(ctx context.Context, delay time.Duration) error {
+		select {
+		case delays <- delay:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		select {
+		case <-releaseDelay:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	client.refresh.mu.Unlock()
 	tr.mu.Lock()
 	tr.blockList = true
 	tr.emitOnList = true
@@ -208,20 +225,60 @@ func TestToolListRefreshBoundsSelfNotifyingServer(t *testing.T) {
 
 	tr.emit()
 	done := refreshDone(t, client)
+	if delay := <-delays; delay != toolListRefreshDebounce {
+		t.Fatalf("first refresh delay = %s, want %s", delay, toolListRefreshDebounce)
+	}
+	releaseDelay <- struct{}{}
 	if call := <-tr.listStarted; call != 2 {
 		t.Fatalf("first refresh call = %d, want 2", call)
 	}
 	tr.listRelease <- struct{}{}
+	if delay := <-delays; delay != 2*toolListRefreshDebounce {
+		t.Fatalf("first catch-up delay = %s, want %s", delay, 2*toolListRefreshDebounce)
+	}
+	releaseDelay <- struct{}{}
 	if call := <-tr.listStarted; call != 3 {
 		t.Fatalf("catch-up refresh call = %d, want 3", call)
 	}
 	tr.listRelease <- struct{}{}
-	waitClosed(t, done, "bounded self-notifying refresh")
-	if lists, _ := tr.counts(); lists != 3 {
-		t.Fatalf("tools/list calls = %d, want initial + two bounded attempts", lists)
+	if delay := <-delays; delay != 4*toolListRefreshDebounce {
+		t.Fatalf("second catch-up delay = %s, want %s", delay, 4*toolListRefreshDebounce)
 	}
-	if !client.toolCatalogStale() {
-		t.Fatal("self-notifying server should remain stale after the bounded catch-up")
+	tr.mu.Lock()
+	tr.emitOnList = false
+	tr.mu.Unlock()
+	releaseDelay <- struct{}{}
+	if call := <-tr.listStarted; call != 4 {
+		t.Fatalf("second catch-up refresh call = %d, want 4", call)
+	}
+	tr.listRelease <- struct{}{}
+	waitClosed(t, done, "backed-off refresh convergence")
+	if lists, _ := tr.counts(); lists != 4 {
+		t.Fatalf("tools/list calls = %d, want initial + three converging attempts", lists)
+	}
+	if client.toolCatalogStale() {
+		t.Fatal("catalog remained stale after the self-notification stopped")
+	}
+}
+
+func TestToolListRefreshTimeoutUsesResolvedBudgets(t *testing.T) {
+	tests := []struct {
+		name string
+		spec Spec
+		want time.Duration
+	}{
+		{name: "built-in defaults", spec: Spec{}, want: defaultStartupTimeout},
+		{name: "call timeout is stricter", spec: Spec{StartupTimeout: 45 * time.Second, CallTimeout: 30 * time.Second}, want: 30 * time.Second},
+		{name: "startup timeout is stricter", spec: Spec{StartupTimeout: 10 * time.Second, CallTimeout: 60 * time.Second}, want: 10 * time.Second},
+		{name: "global defaults", spec: Spec{DefaultStartupTimeout: 40 * time.Second, DefaultCallTimeout: 20 * time.Second}, want: 20 * time.Second},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &Client{spec: tc.spec}
+			if got := client.toolListRefreshTimeout(); got != tc.want {
+				t.Fatalf("refresh timeout = %s, want %s", got, tc.want)
+			}
+		})
 	}
 }
 

@@ -67,7 +67,7 @@ func NewMCPCapabilityRuntime(lifeCtx context.Context, host *plugin.Host, specs [
 	}
 	r.ConfigureServers(nil, specs, nil)
 	if host != nil {
-		host.SubscribeToolListChanges(lifeCtx, r.applyToolListChange)
+		host.SubscribeToolListChangesWithReplay(lifeCtx, r.applyToolListChange)
 	}
 	return r
 }

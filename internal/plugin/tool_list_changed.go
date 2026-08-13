@@ -16,7 +16,10 @@ import (
 	"reasonix/internal/tool"
 )
 
-const toolListRefreshDebounce = 300 * time.Millisecond
+const (
+	toolListRefreshDebounce   = 300 * time.Millisecond
+	toolListRefreshMaxBackoff = 5 * time.Second
+)
 
 type toolListRefreshWait func(context.Context, time.Duration) error
 
@@ -58,35 +61,84 @@ type toolCatalogFingerprintEntry struct {
 
 type toolListSubscriptions struct {
 	nextID      atomic.Uint64
-	subscribers map[uint64]toolListSubscriber
+	subscribers map[uint64]*toolListSubscriber
 }
 
 type toolListSubscriber struct {
-	ctx      context.Context
-	callback func(Spec, []tool.Tool)
+	ctx        context.Context
+	callback   func(Spec, []tool.Tool)
+	deliveryMu sync.Mutex
+}
+
+type toolListReplay struct {
+	spec  Spec
+	tools []tool.Tool
 }
 
 // SubscribeToolListChanges receives refreshed live tool sets after a connected
 // server sends notifications/tools/list_changed. The returned function removes
 // the subscription; ctx cancellation does the same automatically.
 func (h *Host) SubscribeToolListChanges(ctx context.Context, callback func(Spec, []tool.Tool)) func() {
+	return h.subscribeToolListChanges(ctx, callback, false)
+}
+
+// SubscribeToolListChangesWithReplay first delivers the complete catalogs of
+// already-connected servers, then every later list_changed publication. Replay
+// and live deliveries are serialized per subscriber so an update cannot
+// overtake the snapshot used to initialize a late session runtime.
+func (h *Host) SubscribeToolListChangesWithReplay(ctx context.Context, callback func(Spec, []tool.Tool)) func() {
+	return h.subscribeToolListChanges(ctx, callback, true)
+}
+
+func (h *Host) subscribeToolListChanges(ctx context.Context, callback func(Spec, []tool.Tool), replay bool) func() {
 	if h == nil || callback == nil {
 		return func() {}
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	subscriber := &toolListSubscriber{ctx: ctx, callback: callback}
+	if replay {
+		// Publications can discover the subscriber as soon as h.mu is released.
+		// Hold its delivery gate until every captured catalog has been replayed so
+		// those later publications cannot apply first and then be overwritten.
+		subscriber.deliveryMu.Lock()
+	}
 	id := h.toolListChanges.nextID.Add(1)
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
+		if replay {
+			subscriber.deliveryMu.Unlock()
+		}
 		return func() {}
 	}
 	if h.toolListChanges.subscribers == nil {
-		h.toolListChanges.subscribers = map[uint64]toolListSubscriber{}
+		h.toolListChanges.subscribers = map[uint64]*toolListSubscriber{}
 	}
-	h.toolListChanges.subscribers[id] = toolListSubscriber{ctx: ctx, callback: callback}
+	h.toolListChanges.subscribers[id] = subscriber
+	var snapshots []toolListReplay
+	if replay {
+		snapshots = make([]toolListReplay, 0, len(h.clients))
+		for _, client := range h.clients {
+			if client == nil {
+				continue
+			}
+			if tools, ok := client.cachedTools(); ok {
+				snapshots = append(snapshots, toolListReplay{spec: client.spec, tools: tools})
+			}
+		}
+	}
 	h.mu.Unlock()
+	if replay {
+		for _, snapshot := range snapshots {
+			if ctx.Err() != nil {
+				break
+			}
+			callback(snapshot.spec, append([]tool.Tool(nil), snapshot.tools...))
+		}
+		subscriber.deliveryMu.Unlock()
+	}
 
 	var once sync.Once
 	unsubscribe := func() {
@@ -136,17 +188,26 @@ func (h *Host) publishToolListChange(c *Client, tools []tool.Tool) {
 		return
 	}
 	spec := c.spec
-	subscribers := make([]toolListSubscriber, 0, len(h.toolListChanges.subscribers))
+	subscribers := make([]*toolListSubscriber, 0, len(h.toolListChanges.subscribers))
 	for _, subscriber := range h.toolListChanges.subscribers {
 		subscribers = append(subscribers, subscriber)
 	}
 	h.mu.RUnlock()
 	for _, subscriber := range subscribers {
-		if subscriber.ctx.Err() != nil {
-			continue
-		}
-		subscriber.callback(spec, append([]tool.Tool(nil), tools...))
+		deliverToolListChange(subscriber, spec, tools)
 	}
+}
+
+func deliverToolListChange(subscriber *toolListSubscriber, spec Spec, tools []tool.Tool) {
+	if subscriber == nil {
+		return
+	}
+	subscriber.deliveryMu.Lock()
+	defer subscriber.deliveryMu.Unlock()
+	if subscriber.ctx.Err() != nil {
+		return
+	}
+	subscriber.callback(spec, append([]tool.Tool(nil), tools...))
 }
 
 func (c *Client) watchToolListChanges() {
@@ -221,11 +282,12 @@ func (c *Client) runToolsRefreshes() {
 		}
 	}()
 
-	// One cycle performs one refresh plus at most one catch-up when a real
-	// notification arrived during the first fetch/callback. A server that emits
-	// list_changed from every tools/list response therefore cannot spin forever.
-	for attempt := 0; attempt < 2; attempt++ {
-		if err := wait(ctx, toolListRefreshDebounce); err != nil {
+	// Keep converging while successful tools/list calls observe newer notices.
+	// Capped exponential delay prevents tight self-notification loops without
+	// abandoning a legitimate update received during an earlier refresh.
+	refreshDelay := toolListRefreshDebounce
+	for {
+		if err := wait(ctx, refreshDelay); err != nil {
 			return
 		}
 		c.refresh.mu.Lock()
@@ -235,7 +297,7 @@ func (c *Client) runToolsRefreshes() {
 			return
 		}
 		targetRevision := c.refresh.noticeRevision.Load()
-		refreshCtx, cancel := context.WithTimeout(ctx, defaultStartTimeout)
+		refreshCtx, cancel := context.WithTimeout(ctx, c.toolListRefreshTimeout())
 		tools, changed, err := c.refreshTools(refreshCtx, targetRevision)
 		cancel()
 		if err != nil {
@@ -261,7 +323,30 @@ func (c *Client) runToolsRefreshes() {
 			return
 		}
 		c.refresh.mu.Unlock()
+		refreshDelay = nextToolListRefreshDelay(refreshDelay)
 	}
+}
+
+func nextToolListRefreshDelay(current time.Duration) time.Duration {
+	if current <= 0 {
+		return toolListRefreshDebounce
+	}
+	if current >= toolListRefreshMaxBackoff/2 {
+		return toolListRefreshMaxBackoff
+	}
+	return current * 2
+}
+
+func (c *Client) toolListRefreshTimeout() time.Duration {
+	startupTimeout := c.spec.ResolvedStartupTimeout()
+	callTimeout := c.callTimeout("tools/list", map[string]any{})
+	if startupTimeout <= 0 {
+		return callTimeout
+	}
+	if callTimeout <= 0 || startupTimeout < callTimeout {
+		return startupTimeout
+	}
+	return callTimeout
 }
 
 func (c *Client) finishToolsRefreshCycle() {

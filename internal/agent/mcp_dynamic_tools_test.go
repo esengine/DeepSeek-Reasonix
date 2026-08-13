@@ -152,6 +152,72 @@ func TestMCPCapabilityRuntimeRefreshesDynamicToolsInSession(t *testing.T) {
 	}
 }
 
+func TestMCPCapabilityRuntimeReplaysCatalogChangedBeforeSubscription(t *testing.T) {
+	t.Setenv("REASONIX_CACHE_HOME", t.TempDir())
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var loaded atomic.Bool
+	var dynamicCalls atomic.Int32
+	server := dynamicToolsMCPServer(t, &loaded, &dynamicCalls)
+	defer server.Close()
+
+	host := plugin.NewHost()
+	defer host.Close()
+	registry := tool.NewRegistry()
+	spec := plugin.Spec{Name: "dynamic", Type: "http", URL: server.URL, Authorized: true}
+	initial, err := host.Add(ctx, spec)
+	if err != nil {
+		t.Fatalf("Host.Add: %v", err)
+	}
+	for _, candidate := range initial {
+		registry.Add(candidate)
+	}
+
+	changed := make(chan []tool.Tool, 1)
+	unsubscribe := host.SubscribeToolListChanges(ctx, func(changedSpec plugin.Spec, tools []tool.Tool) {
+		if plugin.MCPRuntimeSpecMatches(changedSpec, spec) {
+			changed <- tools
+		}
+	})
+	loader := initial[0]
+	if _, err := loader.Execute(ctx, json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("load_toolset before runtime subscription: %v", err)
+	}
+	select {
+	case refreshed := <-changed:
+		if findMCPTool(refreshed, "list_schematic_components", "") == nil {
+			t.Fatalf("refreshed tools missing dynamic tool: %v", refreshed)
+		}
+	case <-ctx.Done():
+		t.Fatalf("wait for pre-subscription refresh: %v", ctx.Err())
+	}
+	unsubscribe()
+
+	runtime := NewMCPCapabilityRuntime(ctx, host, []plugin.Spec{spec}, registry, nil)
+	frontend := runtime.NewFrontend(capability.NewLedger(), nil)
+	registry.Add(frontend)
+	registry.SetProviderVisibleTools([]string{"use_capability"})
+
+	wantName := "mcp__dynamic__list_schematic_components"
+	if _, ok := registry.Get(wantName); !ok {
+		t.Fatal("late runtime subscription did not replay the current dynamic tool catalog")
+	}
+	currentLoader, ok := registry.Get("mcp__dynamic__load_toolset")
+	if !ok || currentLoader == loader {
+		t.Fatal("late runtime subscription retained the stale pre-refresh adapter")
+	}
+	if live := runtime.ConnectedProxyTools()["dynamic"]; len(live) != 2 || !hasCachedTool(live, "list_schematic_components") {
+		t.Fatalf("replayed capability tools = %+v, want the complete current catalog", live)
+	}
+	if _, err := frontend.Execute(ctx, json.RawMessage(`{"action":"call","capability_id":"mcp-tool:dynamic/list_schematic_components","arguments":{}}`)); err != nil {
+		t.Fatalf("dynamic tool call after replay: %v", err)
+	}
+	if got := dynamicCalls.Load(); got != 1 {
+		t.Fatalf("dynamic tools/call count = %d, want 1", got)
+	}
+}
+
 func hasCachedTool(tools []plugin.CachedTool, name string) bool {
 	return slices.ContainsFunc(tools, func(candidate plugin.CachedTool) bool {
 		return candidate.Name == name
