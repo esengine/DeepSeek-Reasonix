@@ -87,6 +87,49 @@ func TestShutdownWaitsForRuntimeLifecycleMutation(t *testing.T) {
 	}
 }
 
+func TestShutdownDoesNotWaitForCancelledControllerBuild(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	app := NewApp()
+	tab := app.createTabEntryWithID("global", "", "", "blocked-build")
+	app.mu.Lock()
+	app.tabs[tab.ID] = tab
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+	app.mu.Unlock()
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	app.tabBuildStartHook = func(string) {
+		close(started)
+		<-release
+	}
+	buildDone := make(chan struct{})
+	go func() {
+		app.startTabControllerBuild(tab)
+		close(buildDone)
+	}()
+	<-started
+
+	shutdownDone := make(chan struct{})
+	go func() {
+		app.shutdown(context.Background())
+		close(shutdownDone)
+	}()
+	select {
+	case <-shutdownDone:
+		close(release)
+	case <-time.After(750 * time.Millisecond):
+		close(release)
+		<-shutdownDone
+		t.Fatal("shutdown waited for a cancelled controller build")
+	}
+	select {
+	case <-buildDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled controller build did not finish")
+	}
+}
+
 // TestShutdownRecordsLKGOnlyAfterReady pins that last-known-good config is only
 // written after the window reached domReady. A quit before paint must not
 // rewrite the LKG snapshot from an incomplete boot.

@@ -21,12 +21,17 @@ import (
 // is added in TM-04.
 type FileStore struct {
 	baseDir string // projectDir → task data root (e.g. ".reasonix/tasks")
+	sink    ProjectionSink
 }
 
 // NewFileStore returns a FileStore rooted at baseDir.  baseDir is typically
 // ".reasonix/tasks" relative to the project root.
 func NewFileStore(baseDir string) *FileStore {
 	return &FileStore{baseDir: baseDir}
+}
+
+func NewObservedFileStore(baseDir string, sink ProjectionSink) *FileStore {
+	return &FileStore{baseDir: baseDir, sink: sink}
 }
 
 // safeID validates a user-supplied identifier for use as a filesystem path
@@ -332,6 +337,12 @@ func (s *FileStore) readEvents(taskDir string) ([]TaskEvent, error) {
 // SaveTask implements WriteStore. It atomically writes the snapshot,
 // failing if a concurrent write has changed the version.
 func (s *FileStore) SaveTask(ctx context.Context, projectDir string, snap TaskSnapshot) (retErr error) {
+	committed := false
+	defer func() {
+		if committed && s.sink != nil {
+			s.sink.SnapshotChanged(projectDir, snap.TaskID)
+		}
+	}()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -413,6 +424,7 @@ func (s *FileStore) SaveTask(ctx context.Context, projectDir string, snap TaskSn
 		return fmt.Errorf("save task: %w", err)
 	}
 	_ = os.Chmod(target, 0o600)
+	committed = true
 	return nil
 }
 
@@ -420,6 +432,12 @@ func (s *FileStore) SaveTask(ctx context.Context, projectDir string, snap TaskSn
 // AppendAuditEvent implements WriteStore. It atomically assigns the next
 // monotonic sequence number and appends the event to the JSONL file.
 func (s *FileStore) AppendAuditEvent(ctx context.Context, projectDir string, ev TaskEvent) (retErr error) {
+	committed := false
+	defer func() {
+		if committed && s.sink != nil {
+			s.sink.EventsChanged(projectDir, ev.TaskID)
+		}
+	}()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -506,6 +524,7 @@ func (s *FileStore) AppendAuditEvent(ctx context.Context, projectDir string, ev 
 	if _, err := f.WriteString(string(data) + "\n"); err != nil {
 		return err
 	}
+	committed = true
 	return nil
 }
 

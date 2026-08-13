@@ -628,7 +628,7 @@ ok(controller?.state.items.some((item) => item.kind === "user" && item.text === 
 const tabCUser = controller?.state.items.find((item) => item.kind === "user" && item.text === "streaming C");
 eq(tabCUser?.kind === "user" && tabCUser.submissionId, tabCSubmissionId, "Wails receives the same opaque correlation stored on the optimistic user");
 ok(Boolean(tabCSubmissionId) && tabCSubmissionId !== tabCUser?.id, "opaque submission correlation is distinct from the render item id");
-ok(!historyCalls.includes("tab-c"), "cached running tab skips history hydration");
+ok(historyCalls.includes("tab-c"), "a running tab with no history page of its own still hydrates one");
 await act(async () => {
   submitTabCGate.resolve();
   await submitTabCGate.promise;

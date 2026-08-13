@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 )
@@ -21,6 +22,45 @@ type Balance struct {
 	Available bool   // the provider reports the account can still serve API calls
 	Infos     []Info // one entry per currency the provider returns
 }
+
+// Currencies returns the distinct ISO currency codes reported by the wallet,
+// in stable order. It never converts or combines balances.
+func (b *Balance) Currencies() []string {
+	if b == nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	for _, info := range b.Infos {
+		cur := strings.ToUpper(strings.TrimSpace(info.Currency))
+		if normalized := normalizeCurrency(cur); normalized != "" {
+			cur = normalized
+		}
+		if cur != "" {
+			seen[cur] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(seen))
+	for cur := range seen {
+		result = append(result, cur)
+	}
+	sort.Strings(result)
+	return result
+}
+
+// PrimaryCurrency returns the sole usable wallet currency, if there is one.
+func (b *Balance) PrimaryCurrency() string {
+	currencies := b.Currencies()
+	if len(currencies) != 1 {
+		return ""
+	}
+	if currencies[0] != "CNY" && currencies[0] != "USD" {
+		return ""
+	}
+	return currencies[0]
+}
+
+// MultiCurrency reports whether more than one wallet currency is present.
+func (b *Balance) MultiCurrency() bool { return len(b.Currencies()) > 1 }
 
 // Info is one currency's balance (DeepSeek returns one per currency).
 type Info struct {
@@ -143,7 +183,10 @@ func (b *Balance) DisplayForCurrency(currency string) string {
 		}
 	}
 	display := symbol(pick.Currency) + strings.TrimSpace(pick.TotalBalance)
-	actual := normalizeCurrency(pick.Currency)
+	actual := strings.ToUpper(strings.TrimSpace(pick.Currency))
+	if normalized := normalizeCurrency(actual); normalized != "" {
+		actual = normalized
+	}
 	if preferred != "" && actual != "" && actual != preferred {
 		return actual + " " + display
 	}

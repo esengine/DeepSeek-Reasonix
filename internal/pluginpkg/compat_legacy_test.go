@@ -53,3 +53,62 @@ func TestV1NativeManifestRejected(t *testing.T) {
 		t.Fatalf("ParseNativeForMigrate v1 = %v, want unsupported apiVersion", err)
 	}
 }
+
+func TestLoadInstalledAutoMigratesManagedLegacyManifest(t *testing.T) {
+	home := t.TempDir()
+	root := InstallRoot(home, "legacy-demo")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"name":"legacy-demo","version":"1.0.0"}`
+	if err := os.WriteFile(filepath.Join(root, NativeManifest), []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Upsert(home, InstalledPlugin{Name: "legacy-demo", Root: RelativeRoot(home, root), Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	installed, warnings := LoadInstalled(home)
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "automatically migrated") {
+		t.Fatalf("warnings = %v", warnings)
+	}
+	if len(installed) != 1 || installed[0].Package.Manifest.APIVersion != ManifestAPIVersionV2 {
+		t.Fatalf("installed = %#v", installed)
+	}
+	backup, err := os.ReadFile(filepath.Join(root, NativeManifest+".bak"))
+	if err != nil || string(backup) != legacy {
+		t.Fatalf("backup = %q, err=%v", backup, err)
+	}
+}
+
+func TestLoadInstalledQuarantinesExternalLegacyManifestWithoutModifyingIt(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	legacy := `{"name":"dev-demo","version":"1.0.0"}`
+	manifestPath := filepath.Join(root, NativeManifest)
+	if err := os.WriteFile(manifestPath, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Upsert(home, InstalledPlugin{Name: "dev-demo", Root: root, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	installed, warnings := LoadInstalled(home)
+	if len(installed) != 0 {
+		t.Fatalf("external incompatible plugin loaded: %#v", installed)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], PluginStatusDisabledIncompatible) || !strings.Contains(warnings[0], "plugin migrate dev-demo --to-v2") {
+		t.Fatalf("warnings = %v", warnings)
+	}
+	after, err := os.ReadFile(manifestPath)
+	if err != nil || string(after) != legacy {
+		t.Fatalf("external manifest changed: %q, err=%v", after, err)
+	}
+	state, err := LoadState(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Plugins) != 1 || state.Plugins[0].Status != PluginStatusDisabledIncompatible {
+		t.Fatalf("plugin state = %#v", state.Plugins)
+	}
+}

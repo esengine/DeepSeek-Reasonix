@@ -163,6 +163,7 @@ func TestRecoveryInactiveUnderYolo(t *testing.T) {
 	prov := &recordingProvider{streams: [][]provider.Chunk{
 		{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "1", Name: "bash", Arguments: `{"command":"go test ./..."}`}}},
 		{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "2", Name: "write_file", Arguments: `{"path":"a.go","content":"x"}`}}},
+		{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "3", Name: "bash", Arguments: `{"command":"go test ./..."}`}}},
 		{{Type: provider.ChunkText, Text: "done"}},
 	}}
 	sess := agent.NewSession("sys")

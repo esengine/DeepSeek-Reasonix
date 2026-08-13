@@ -111,7 +111,7 @@ func TestTabScopedSessionActionsIgnoreFocusedTab(t *testing.T) {
 	}
 	// Restore content so ClearSession exercises its non-blank path too.
 	targetCtrl.history = []provider.Message{{Role: provider.RoleSystem, Content: "system"}, {Role: provider.RoleUser, Content: "clear me"}}
-	if err := app.ClearSessionForTab("target"); err != nil {
+	if _, err := app.ClearSessionForTab("target"); err != nil {
 		t.Fatalf("ClearSessionForTab: %v", err)
 	}
 	if err := app.RewindForTab("target", 1, "conversation"); err != nil {

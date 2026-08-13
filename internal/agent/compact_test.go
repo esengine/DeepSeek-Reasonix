@@ -168,7 +168,7 @@ func TestKeepIndexesKeepsSiblingToolResultsForKeptError(t *testing.T) {
 		{Role: provider.RoleTool, ToolCallID: "ok", Name: "read_file", Content: "package main"},
 	}
 
-	keep := keepIndexes(region, KeepErrors)
+	keep, _ := (&Agent{keepPolicy: KeepErrors}).keepIndexes(region)
 	for i, kept := range keep {
 		if !kept {
 			t.Fatalf("keep[%d] = false, want all sibling tool-call messages kept: %v", i, keep)
@@ -186,7 +186,7 @@ func TestKeepIndexesScopesPolicyAfterLatestSummary(t *testing.T) {
 		{Role: provider.RoleTool, ToolCallID: "new", Name: "bash", Content: "error: new failure"},
 	}
 
-	keep := keepIndexes(region, KeepErrors)
+	keep, _ := (&Agent{keepPolicy: KeepErrors}).keepIndexes(region)
 	want := []bool{false, false, false, true, true}
 	for i := range want {
 		if keep[i] != want[i] {
@@ -195,19 +195,25 @@ func TestKeepIndexesScopesPolicyAfterLatestSummary(t *testing.T) {
 	}
 }
 
+// The marker is what lets a user turn exceed the size budget keepUserTurns
+// applies, so it is asserted directly: at keepIndexes level every small user
+// turn is kept regardless, which would hide a broken marker match.
 func TestKeepUserMarkedRequiresUserPrefixMarker(t *testing.T) {
-	region := []provider.Message{
-		{Role: provider.RoleAssistant, Content: "[keep] assistant output"},
-		{Role: provider.RoleUser, Content: "ordinary prose mentioning [keep] later"},
-		{Role: provider.RoleUser, Content: "  <keep> exact requirement"},
+	cases := []struct {
+		name string
+		msg  provider.Message
+		want bool
+	}{
+		{"assistant marker ignored", provider.Message{Role: provider.RoleAssistant, Content: "[keep] assistant output"}, false},
+		{"marker must lead", provider.Message{Role: provider.RoleUser, Content: "ordinary prose mentioning [keep] later"}, false},
+		{"leading marker after space", provider.Message{Role: provider.RoleUser, Content: "  <keep> exact requirement"}, true},
 	}
-
-	keep := keepIndexes(region, KeepUserMarked)
-	want := []bool{false, false, true}
-	for i := range want {
-		if keep[i] != want[i] {
-			t.Fatalf("keep = %v, want %v", keep, want)
-		}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isUserMarked(tc.msg); got != tc.want {
+				t.Fatalf("isUserMarked = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -509,9 +515,12 @@ func TestInterruptedDisplayStaysOutOfCompactionPromptAndProjection(t *testing.T)
 		InterruptedTurn: &provider.InterruptedTurnRecovery{Pending: true},
 	}
 	a := &Agent{}
-	early, carried, kept, fold := a.partitionFoldForProjection([]provider.Message{local})
-	if len(early) != 0 || len(carried) != 0 || len(kept) != 0 || len(fold) != 0 {
-		t.Fatalf("compaction partition early=%+v carried=%+v kept=%+v fold=%+v, want display-only output in none of them", early, carried, kept, fold)
+	kept, fold, retention := a.partitionFoldForProjection([]provider.Message{local})
+	if len(kept) != 0 || len(fold) != 0 {
+		t.Fatalf("compaction partition kept=%+v fold=%+v, want display-only output in neither", kept, fold)
+	}
+	if retention.Kept != 0 || retention.Dropped != 0 {
+		t.Fatalf("retention = %+v, want display-only output counted as neither kept nor dropped", retention)
 	}
 	if transcript := renderTranscript([]provider.Message{local}); transcript != "" {
 		t.Fatalf("local interrupted output leaked into compaction prompt: %q", transcript)
@@ -614,14 +623,14 @@ func TestMaybeCompactClearsStuckLatchAnywhereBelowTrigger(t *testing.T) {
 			sess := NewSession("sys")
 			sess.Add(provider.Message{Role: provider.RoleUser, Content: "hi"})
 			a := New(&fakeProvider{reply: "- summary"}, tool.NewRegistry(), sess, Options{ContextWindow: 20000}, event.Discard)
-			a.consecutiveCompacts = 1
-			a.compactStuck = true
+			a.sess.compaction.consecutive = 1
+			a.sess.compaction.stuck = true
 
 			prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: tc.prompt})
 
-			if a.consecutiveCompacts != 0 || a.compactStuck {
+			if a.sess.compaction.consecutive != 0 || a.sess.compaction.stuck {
 				t.Fatalf("prompt %d sits under the trigger; want the latch cleared, got consecutiveCompacts=%d compactStuck=%v",
-					tc.prompt, a.consecutiveCompacts, a.compactStuck)
+					tc.prompt, a.sess.compaction.consecutive, a.sess.compaction.stuck)
 			}
 		})
 	}
@@ -635,8 +644,8 @@ func TestMaybeCompactDefersWhenOnlyActiveTurnRemains(t *testing.T) {
 	a := New(&fakeProvider{reply: "- summary"}, tool.NewRegistry(), sess, Options{ContextWindow: 20000}, event.Discard)
 
 	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 17000})
-	if a.compactStuck {
-		t.Fatalf("active turn should be deferred, not durably blocked: consecutiveCompacts=%d", a.consecutiveCompacts)
+	if a.sess.compaction.stuck {
+		t.Fatalf("active turn should be deferred, not durably blocked: consecutiveCompacts=%d", a.sess.compaction.consecutive)
 	}
 	version := a.currentProjectionVersion()
 	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 17000})
@@ -646,11 +655,7 @@ func TestMaybeCompactDefersWhenOnlyActiveTurnRemains(t *testing.T) {
 }
 
 func TestCompactTriggerIgnoresConfiguredOutputBudget(t *testing.T) {
-	a := &Agent{
-		contextWindow:   100_000,
-		maxOutputTokens: 20_000,
-		compactRatio:    0.85,
-	}
+	a := &Agent{agentConfig: agentConfig{contextWindow: 100_000, maxOutputTokens: 20_000, compactRatio: 0.85}}
 	if got := a.compactTrigger(); got != 85_000 {
 		t.Fatalf("trigger = %d, want 85000 (output budget must not change it)", got)
 	}

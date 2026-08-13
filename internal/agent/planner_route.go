@@ -66,11 +66,8 @@ func normalizePlannerDecision(d PlannerDecision) PlannerDecision {
 }
 
 type runStepLimit struct {
-	steps           int
-	key             string
-	defaultOnly     bool
-	inherit         bool
-	pauseAfterFinal bool
+	steps int
+	key   string
 }
 
 type runStepLimitContextKey struct{}
@@ -82,24 +79,6 @@ func withRunStepLimit(ctx context.Context, steps int, key string) context.Contex
 	return context.WithValue(ctx, runStepLimitContextKey{}, runStepLimit{
 		steps: steps,
 		key:   strings.TrimSpace(key),
-	})
-}
-
-// WithDefaultRunStepLimit installs a host-owned zero-configuration Run limit.
-// It applies only when the Agent has no explicit MaxSteps configuration and is
-// inherited by delegated sub-agents as their effective parent budget. Planner
-// limits continue to use withRunStepLimit, which is an unconditional boundary
-// and deliberately does not leak into executor children.
-func WithDefaultRunStepLimit(ctx context.Context, steps int, key string) context.Context {
-	if steps <= 0 {
-		return ctx
-	}
-	return context.WithValue(ctx, runStepLimitContextKey{}, runStepLimit{
-		steps:           steps,
-		key:             strings.TrimSpace(key),
-		defaultOnly:     true,
-		inherit:         true,
-		pauseAfterFinal: true,
 	})
 }
 

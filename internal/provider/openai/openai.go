@@ -84,8 +84,12 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	// A meaningful explicit list is the endpoint's declared effort vocabulary;
 	// auto remains implicit and is therefore ignored here.
 	supportedEfforts, hasExplicitEfforts := reasoningEffortVocabulary(kimiK3, supportedEfforts)
-	chatURL, _ := cfg.Extra["chat_url"].(string)
-	chatURL = normalizeChatURL(cfg.BaseURL, chatURL)
+	legacyChatURL, _ := cfg.Extra["chat_url"].(string)
+	chatURL, _ := cfg.Extra["request_url"].(string)
+	chatURL = strings.TrimSpace(chatURL)
+	if chatURL == "" {
+		chatURL = normalizeChatURL(cfg.BaseURL, legacyChatURL)
+	}
 	prefixChatURL := deepSeekPrefixChatURL(chatURL)
 	headers, _ := cfg.Extra["headers"].(map[string]string)
 	extraBody, _ := cfg.Extra["extra_body"].(map[string]any)
@@ -219,15 +223,9 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		thinkingType: thinkingType, effort: effort, deepseek: deepseek, flash: deepseekV4Flash,
 		minimax: minimax, zhipu: zhipu, longcat: longcat, ollamaCloud: ollamaCloud,
 		explicit: hasExplicitEfforts, supported: supportedEfforts})
-	// max_output_tokens=0 means automatic (not unlimited). DeepSeek reasoning
-	// uses 32K / high-max 64K; thinking-disabled stays ordinary 16K. 128K is
-	// never automatic — users must set it explicitly after length truncations.
-	// This budget never participates in compact_ratio.
-	autoMaxOutput := maxOutputTokens == 0 && officialDeepSeek
-	if autoMaxOutput {
-		reasoningOn := thinkingType != "disabled" && effort != "disabled" && effort != "off" && effort != "none"
-		maxOutputTokens = provider.AutoOutputBudget(reasoningOn, effort)
-	}
+	// max_output_tokens=0 on official DeepSeek omits the wire field so the
+	// server uses its 384K ceiling. Effort only selects thinking depth.
+	// Non-DeepSeek endpoints leave 0 as "unset / omit". Never compact_ratio.
 	httpClient, err := newHTTPClient(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("openai: network: %w", err)
@@ -253,7 +251,6 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		vision:          vision,
 		visionDetail:    visionDetail,
 		maxOutputTokens: maxOutputTokens,
-		autoMaxOutput:   autoMaxOutput,
 		effort:          effort,
 		requestEfforts:  requestEfforts,
 		http:            httpClient,
@@ -293,7 +290,6 @@ type client struct {
 	vision          bool          // model accepts image input — embed attached images as image_url parts
 	visionDetail    string        // image_url detail hint (low|high); "" = auto/omit
 	maxOutputTokens int           // resolved total output budget; <=0 omits the optional field
-	autoMaxOutput   bool          // true when max_output_tokens=0 (automatic ladder)
 	effort          string        // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
 	requestEfforts  []string      // depth levels a per-request EffortOverride may take; empty = overrides ignored
 	idleTimeout     time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
@@ -371,8 +367,8 @@ func normalizeReasoningProtocol(raw string) string {
 }
 
 func normalizeChatURL(baseURL, chatURL string) string {
-	if trimmed := strings.TrimRight(strings.TrimSpace(chatURL), "/"); trimmed != "" {
-		return trimmed
+	if legacy := strings.TrimRight(strings.TrimSpace(chatURL), "/"); legacy != "" {
+		return legacy
 	}
 	return strings.TrimRight(strings.TrimSpace(baseURL), "/") + "/chat/completions"
 }
@@ -777,15 +773,7 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 
 	maxOutputTokens := req.MaxTokens
 	if maxOutputTokens == 0 {
-		if c.autoMaxOutput && c.deepseek {
-			// Re-resolve so per-request EffortOverride (high/max) can raise 32K→64K.
-			effort := c.requestEffort(req)
-			reasoningOn := c.thinkingType != "disabled" &&
-				effort != "disabled" && effort != "off" && effort != "none"
-			maxOutputTokens = provider.AutoOutputBudget(reasoningOn, effort)
-		} else {
-			maxOutputTokens = c.maxOutputTokens
-		}
+		maxOutputTokens = c.maxOutputTokens
 	}
 	if maxOutputTokens < 0 {
 		maxOutputTokens = 0

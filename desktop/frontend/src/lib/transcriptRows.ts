@@ -10,7 +10,8 @@
 // auto-close on completion (unless the user toggled or the preference is
 // "expanded"), and preference switches applying to folds already on screen.
 
-import { isSteerNoticeText, type ExtensionItem, type Item } from "./useController";
+import { isHostRecoveryGuidance } from "./hostRecoverySteer";
+import { isBatchedReadOnlyTool, isSteerNoticeText, type ExtensionItem, type Item } from "./useController";
 import { appendTurnActionCopyText } from "./turnActionCopy";
 import { isCreationGroupableTool, toolGroupKind, type ToolGroupKind } from "../components/ToolGroup";
 import type { ProcessFoldPreference } from "./processFoldPreference";
@@ -79,6 +80,9 @@ export function partitionTurnItems(items: readonly Item[], live: TranscriptLiveF
   for (const item of items) {
     if (item.kind === "user") continue;
     if (item.kind === "notice") {
+      if (isHostRecoveryGuidance(item.text)) {
+        continue;
+      }
       if (isSteerNoticeText(item.text)) {
         current.outsideItems.push(item);
         currentHasConversation = true;
@@ -428,7 +432,7 @@ function processBodyRows(segment: SegmentModel, creationMode: boolean): Transcri
       flushToolBatch();
       flushRO();
     }
-    if (!creationMode && it.kind === "tool" && it.status !== "running" && it.readOnly) {
+    if (!creationMode && it.kind === "tool" && it.status !== "running" && isBatchedReadOnlyTool(it.name, it.readOnly)) {
       roBatch.push(it as ToolItem);
       continue;
     }

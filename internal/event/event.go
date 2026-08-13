@@ -14,6 +14,7 @@ package event
 import (
 	"encoding/json"
 
+	"reasonix/internal/billing"
 	"reasonix/internal/evidence"
 	"reasonix/internal/nilutil"
 	"reasonix/internal/provider"
@@ -113,10 +114,41 @@ const (
 	ContextMaintenanceEvent
 	// WorkspaceChanged reports a debounced host-side workspace mutation.
 	WorkspaceChanged
+	// TurnPhase reports a host-side work phase for the active turn (working |
+	// checking | verifying | reviewing). Content-free; Text holds the phase.
+	TurnPhase
+	// CompletionSummary reports a content-free end-of-turn quality summary for
+	// role-setting strategies (preset, verdict, check counts, review status).
+	CompletionSummary
 	// KindCount is a sentinel one past the last real Kind. New event kinds must
 	// be inserted above it so completeness tests cover them automatically.
 	KindCount
 )
+
+// TurnPhaseName is the machine-readable phase on TurnPhase events.
+type TurnPhaseName string
+
+const (
+	TurnPhaseWorking   TurnPhaseName = "working"
+	TurnPhaseChecking  TurnPhaseName = "checking"
+	TurnPhaseVerifying TurnPhaseName = "verifying"
+	TurnPhaseReviewing TurnPhaseName = "reviewing"
+)
+
+// CompletionSummaryInfo is the content-free quality summary on CompletionSummary
+// events. It never carries user prompts, file contents, command args, or
+// reviewer reasoning.
+type CompletionSummaryInfo struct {
+	Preset             string // light | balanced | delivery
+	Verdict            string // complete | partial | blocked | continue
+	Mutations          int
+	ChecksPassed       int
+	ChecksFailed       int
+	ChecksSuppressed   int
+	Review             string // none | passed | warned | failed | unavailable
+	GapKinds           []string
+	ConstraintDegraded bool
+}
 
 // StreamAttemptAction is the lifecycle phase of a local sampling attempt.
 type StreamAttemptAction string
@@ -507,6 +539,7 @@ const (
 	NoticeCodeEmptyFinal                                        = "empty_final"
 	NoticeCodeExecutorHandoff                                   = "executor_handoff"
 	NoticeCodeToolBudget                                        = "tool_budget"
+	NoticeCodePromptQueued                                      = "prompt_queued"
 	NoticeCodeLoopGuard                                         = "loop_guard"
 	NoticeCodeProgressGuard                                     = "progress_guard"
 	NoticeCodeEvidenceNudge                                     = "evidence_nudge"
@@ -532,7 +565,8 @@ type Event struct {
 	MemoryCitations  []provider.MemoryCitation // Message: local memory references displayed by rich frontends
 	Tool             Tool                      // ToolDispatch / ToolResult
 	Usage            *provider.Usage           // Usage
-	Pricing          *provider.Pricing         // Usage: for cost display (nil = omit cost)
+	Pricing          *provider.Pricing         // Usage: rate card for quote middleware (nil = omit cost)
+	CostQuote        *billing.CostQuote        // Usage: host-side quote; sinks must not reprice
 	Source           string                    // optional display/event source (executor, planner, subagent, ...)
 	UsageSource      string                    // Usage: billable call source; empty means executor for compatibility
 	CacheDiagnostics *CacheDiagnostics         // Usage: cache-churn attribution (nil = N/A)
@@ -565,6 +599,10 @@ type Event struct {
 	// session-inbox entry. Empty for legacy callers that still use text only.
 	ItemID    string
 	Workspace *WorkspaceChangedPayload // WorkspaceChanged (host-local)
+	// PhaseName is set on TurnPhase events (working|checking|verifying|reviewing).
+	PhaseName TurnPhaseName
+	// Completion is set on CompletionSummary events.
+	Completion *CompletionSummaryInfo
 }
 
 type WorkspaceWatchState string

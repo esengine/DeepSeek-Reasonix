@@ -355,12 +355,10 @@ func TestACPRebuildSessionQueuedCrossAxisChangeDoesNotRollbackCompletedAxis(t *t
 		t.Fatal("first rebuild did not start")
 	}
 
-	// Work Mode -> delivery queues while Model -> pro is still rebuilding, so
-	// sess.model still reads "fast" at this instant. Before the fix, the
-	// queued change stored that stale full snapshot; the fix stores only the
-	// work_mode delta and re-resolves the baseline when it actually applies.
-	if _, err := svc.switchSessionRuntimeProfile(context.Background(), sess, "delivery"); err != nil {
-		t.Fatalf("queue work mode switch: %v", err)
+	// Role-setting switch during an in-flight model rebuild must not block or
+	// silently queue; it returns busy so the client retries after idle.
+	if _, err := svc.switchSessionRuntimeProfile(context.Background(), sess, "delivery"); err == nil {
+		t.Fatal("expected busy error while model rebuild holds the state-change lock")
 	}
 
 	close(factory.releaseFirst)
@@ -369,21 +367,29 @@ func TestACPRebuildSessionQueuedCrossAxisChangeDoesNotRollbackCompletedAxis(t *t
 		if result.err != nil {
 			t.Fatalf("model switch: %v", result.err)
 		}
-		if result.state.Model != "pro" || result.state.RuntimeProfile != "delivery" {
-			t.Fatalf("model switch response = model %q, profile %q; want final pro/delivery state after pending drain", result.state.Model, result.state.RuntimeProfile)
+		if result.state.Model != "pro" {
+			t.Fatalf("model switch response model = %q, want pro", result.state.Model)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("model switch did not finish")
 	}
 
-	if got, want := factory.buildCount(), 2; got != want {
+	// Only the model rebuild ran; role setting refused while busy.
+	if got, want := factory.buildCount(), 1; got != want {
 		t.Fatalf("factory builds = %d, want %d", got, want)
 	}
 	if sess.model != "pro" {
-		t.Fatalf("session model = %q, want pro (queued profile switch must not roll back a completed model switch)", sess.model)
+		t.Fatalf("session model = %q, want pro", sess.model)
+	}
+	// Idle switch after rebuild applies in place.
+	if _, err := svc.switchSessionRuntimeProfile(context.Background(), sess, "delivery"); err != nil {
+		t.Fatalf("idle role setting switch: %v", err)
 	}
 	if sess.runtimeProfile != "delivery" {
 		t.Fatalf("session runtime profile = %q, want delivery", sess.runtimeProfile)
+	}
+	if factory.buildCount() != 1 {
+		t.Fatalf("idle role setting must not rebuild")
 	}
 }
 
@@ -615,15 +621,17 @@ func TestACPFinishTurnReconcilesModeDriftBeforeExposingIdle(t *testing.T) {
 		t.Fatal("mode drift check did not run")
 	}
 
-	// A concurrent work-mode switch races in here. Before the fix this landed
-	// while sess.running was already false (finish() ran first), so it read
-	// the stale "plan" modeID and rebuilt with Plan mode re-enabled. The drift
-	// pass now holds stateChangeMu, so the switch runs from a goroutine: it
-	// either queues behind the still-running turn or rebuilds only after the
-	// drift correction landed — never from the stale modeID.
+	// Concurrent role-setting switch must not rebuild from a stale modeID.
+	// While finishTurn holds stateChangeMu it is busy; after finish it applies
+	// in place without resurrecting Plan mode.
 	switchDone := make(chan error, 1)
 	go func() {
 		_, err := svc.switchSessionRuntimeProfile(context.Background(), sess, "delivery")
+		// Retry once after finish if the first attempt was busy.
+		if err != nil {
+			<-finished
+			_, err = svc.switchSessionRuntimeProfile(context.Background(), sess, "delivery")
+		}
 		switchDone <- err
 	}()
 
@@ -647,6 +655,9 @@ func TestACPFinishTurnReconcilesModeDriftBeforeExposingIdle(t *testing.T) {
 	}
 	if got := sess.currentModeID(); got != sessionModeNormal {
 		t.Fatalf("session modeID = %q, want normal", got)
+	}
+	if sess.runtimeProfile != "delivery" {
+		t.Fatalf("runtime profile = %q, want delivery", sess.runtimeProfile)
 	}
 }
 
@@ -676,26 +687,32 @@ func TestACPPendingConfigMergesAxesQueuedDuringActiveTurn(t *testing.T) {
 	if _, err := svc.switchSessionModel(context.Background(), sess, "fast"); err != nil {
 		t.Fatalf("switchSessionModel during turn: %v", err)
 	}
-	if _, err := svc.switchSessionRuntimeProfile(context.Background(), sess, "delivery"); err != nil {
-		t.Fatalf("switchSessionRuntimeProfile during turn: %v", err)
+	// Role settings refuse active turns (no silent queue).
+	if _, err := svc.switchSessionRuntimeProfile(context.Background(), sess, "delivery"); err == nil {
+		t.Fatal("expected busy error for role setting during active turn")
 	}
 	sess.mu.Lock()
 	queued := len(sess.pendingConfig)
 	sess.mu.Unlock()
-	if queued != 2 {
-		t.Fatalf("pending deltas = %d, want one per axis (2)", queued)
+	if queued != 1 {
+		t.Fatalf("pending deltas = %d, want model only (1)", queued)
 	}
 
 	svc.finishTurn(context.Background(), sess)
+
+	// Idle role-setting switch applies in place after the turn.
+	if _, err := svc.switchSessionRuntimeProfile(context.Background(), sess, "delivery"); err != nil {
+		t.Fatalf("idle role setting: %v", err)
+	}
 
 	sess.mu.Lock()
 	model, profile := sess.model, sess.runtimeProfile
 	sess.mu.Unlock()
 	if model != "fast" || profile != "delivery" {
-		t.Fatalf("after drain model = %q, profile = %q; want fast/delivery (an axis queued during the turn was dropped)", model, profile)
+		t.Fatalf("after drain model = %q, profile = %q; want fast/delivery", model, profile)
 	}
 	if got := factory.buildCount(); got != 1 {
-		t.Fatalf("factory builds = %d, want a single merged rebuild", got)
+		t.Fatalf("factory builds = %d, want a single model rebuild (role setting is in-place)", got)
 	}
 }
 

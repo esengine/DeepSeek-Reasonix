@@ -1,15 +1,19 @@
 // Run: tsx src/__tests__/markdown-table-virtual.test.tsx
 //
-// Oversized markdown tables (> MARKDOWN_TABLE_VIRTUAL_MIN_ROWS body rows)
-// render through a row-virtualized table: the header stays intact and the
-// mounted row count stays bounded by the viewport, while small tables render
-// exactly as before. Content fidelity: every row is in the virtual model.
+// Large markdown tables (> MARKDOWN_TABLE_VIRTUAL_MIN_ROWS) default to an
+// in-flow preview + expand control. Expanding mounts a row-virtualized
+// nested scroller. Small tables stay plain document-flow markup.
 
 import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { createComponents } from "../components/markdownComponents";
-import { MarkdownTable, MARKDOWN_TABLE_VIRTUAL_MIN_ROWS, VirtualMarkdownSourceTable } from "../components/MarkdownTable";
+import {
+  MarkdownTable,
+  MARKDOWN_TABLE_PREVIEW_ROWS,
+  MARKDOWN_TABLE_VIRTUAL_MIN_ROWS,
+  VirtualMarkdownSourceTable,
+} from "../components/MarkdownTable";
 import { hastBlockToJsx } from "../lib/hastJsx";
 import { parseMarkdownToBlocks } from "../lib/markdownPipeline";
 
@@ -82,7 +86,7 @@ if (!rootEl) throw new Error("missing root");
 
 console.log("\nmarkdown table virtualization");
 
-// ── oversized table: bounded mounted rows, intact header ─────────────────────
+// ── oversized table: collapsed preview by default ────────────────────────────
 {
   const rowCount = MARKDOWN_TABLE_VIRTUAL_MIN_ROWS * 3; // 150 rows
   const root = createRoot(rootEl);
@@ -101,17 +105,43 @@ console.log("\nmarkdown table virtualization");
     );
   });
   await flush();
+  ok(rootEl.querySelector(".md-table-fold"), "oversized table uses the fold wrapper");
+  ok(!rootEl.querySelector(".md-table-virtual"), "collapsed large tables do not mount a nested scroller");
+  eq(
+    rootEl.querySelectorAll(".md-table-scroll tbody tr").length,
+    MARKDOWN_TABLE_PREVIEW_ROWS,
+    "collapsed preview mounts only the first preview rows",
+  );
+  const toggle = rootEl.querySelector<HTMLButtonElement>(".md-table-fold__toggle");
+  ok(toggle, "expand control is present");
+  ok(toggle?.textContent?.includes(String(rowCount)), "expand control shows total row count");
+
+  await act(async () => {
+    toggle?.click();
+  });
+  await flush();
   const scroller = rootEl.querySelector(".md-table-virtual");
-  ok(scroller, "oversized table renders inside the virtual scroll container");
+  ok(scroller, "expanding mounts the virtual scroll container");
   const headerCells = rootEl.querySelectorAll(".md-table-virtual thead th");
-  eq(headerCells.length, 3, "table header stays intact");
+  eq(headerCells.length, 3, "table header stays intact after expand");
   eq(headerCells[0]?.textContent, "name", "header content is preserved");
   const mountedRows = rootEl.querySelectorAll(".md-table-virtual tbody tr");
-  ok(mountedRows.length > 0, "some body rows mount");
+  ok(mountedRows.length > 0, "some body rows mount after expand");
   ok(mountedRows.length < rowCount, `mounted rows are bounded (${mountedRows.length} < ${rowCount})`);
   ok(mountedRows.length <= 60, "mounted row count tracks the viewport, not the model");
   const firstRow = rootEl.querySelector(".md-table-virtual tbody tr");
   eq(firstRow?.textContent, "row 00note 0", "the first row renders its cells");
+
+  await act(async () => {
+    rootEl.querySelector<HTMLButtonElement>(".md-table-fold__toggle")?.click();
+  });
+  await flush();
+  ok(!rootEl.querySelector(".md-table-virtual"), "collapse removes the nested scroller");
+  eq(
+    rootEl.querySelectorAll(".md-table-scroll tbody tr").length,
+    MARKDOWN_TABLE_PREVIEW_ROWS,
+    "collapse restores the preview row count",
+  );
   await act(async () => root.unmount());
 }
 
@@ -133,6 +163,7 @@ console.log("\nmarkdown table virtualization");
   });
   await flush();
   ok(!rootEl.querySelector(".md-table-virtual"), "small tables render without virtualization");
+  ok(!rootEl.querySelector(".md-table-fold"), "small tables do not show a fold control");
   eq(rootEl.querySelectorAll("tbody tr").length, 2, "small tables mount every row");
   await act(async () => root.unmount());
 }
@@ -155,7 +186,18 @@ console.log("\nmarkdown table virtualization");
     );
   });
   await flush();
-  ok(rootEl.querySelector(".md-table-virtual"), "markdown tables route through the virtual table override");
+  ok(rootEl.querySelector(".md-table-fold"), "markdown source tables start collapsed");
+  ok(!rootEl.querySelector(".md-table-virtual"), "collapsed source tables avoid nested scroll");
+  eq(
+    rootEl.querySelectorAll(".md-table-scroll tbody tr").length,
+    MARKDOWN_TABLE_PREVIEW_ROWS,
+    "source table preview is bounded",
+  );
+  await act(async () => {
+    rootEl.querySelector<HTMLButtonElement>(".md-table-fold__toggle")?.click();
+  });
+  await flush();
+  ok(rootEl.querySelector(".md-table-virtual"), "expanding source tables mounts virtualization");
   const mounted = rootEl.querySelectorAll(".md-table-virtual tbody tr").length;
   ok(mounted > 0 && mounted < 120, `markdown table body is virtualized (${mounted} < 120)`);
   eq(rootEl.querySelector(".md-table-virtual thead th")?.textContent, "name", "markdown table header renders");
@@ -173,6 +215,12 @@ console.log("\nmarkdown table virtualization");
     root.render(<div className="md">{hastBlockToJsx(blocks[0], createComponents(false))}</div>);
   });
   await flush();
+  // Semantic path still goes through MarkdownTable via components map when expanded from hast.
+  ok(
+    rootEl.querySelector("tbody strong")?.textContent === "row 0"
+      || rootEl.querySelector(".md-table-fold") != null,
+    "complex table preserves inline Markdown or fold wrapper",
+  );
   eq(rootEl.querySelector("tbody strong")?.textContent, "row 0", "complex table preserves inline Markdown");
   await act(async () => root.unmount());
 }

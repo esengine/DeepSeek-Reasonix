@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/taskpolicy"
 )
 
 func TestTaskWarrantsPlanner(t *testing.T) {
@@ -71,7 +72,7 @@ func TestTaskWarrantsPlanner(t *testing.T) {
 		{"what's the best way to refactor this module", true},
 		{"explain how to migrate from v1 to v2", true},
 		{goalContinueTurn, false},
-		{"Goal signaled complete but issues remain:\n- the following tasks are still incomplete:\n  - Fix login (in_progress)\nFix or use todo_write/complete_step to mark done, then report complete again via update_goal.", false},
+		{"Goal signaled complete but issues remain:\n- the following tasks are still incomplete:\n  - Fix login (in_progress)\nFix remaining work, or if a check cannot be run declare it in update_goal completion.unverified and report complete.", false},
 		{activeGoalBlock("execute plan: fix the parser") + "\n\n" + goalContinueTurn, false},
 		{activeGoalBlock("implement the new caching layer") + "\n\nimplement the new caching layer across the backend", true},
 	}
@@ -79,6 +80,28 @@ func TestTaskWarrantsPlanner(t *testing.T) {
 		if got := TaskWarrantsPlanner(c.input); got != c.want {
 			t.Errorf("TaskWarrantsPlanner(%q) = %v, want %v", c.input, got, c.want)
 		}
+	}
+}
+
+func TestTaskPolicyOwnsAutomaticPlannerRoute(t *testing.T) {
+	cases := []struct {
+		name   string
+		policy taskpolicy.TaskPolicy
+		input  string
+		depth  agent.PlannerDepth
+	}{
+		{"direct", taskpolicy.TaskPolicy{Route: taskpolicy.RouteDirect}, "fix the parser", agent.PlannerDepthNone},
+		{"light", taskpolicy.TaskPolicy{Route: taskpolicy.RouteLightPlan}, "fix parser.go and parser_test.go", agent.PlannerDepthLight},
+		{"full overrides direct request", taskpolicy.TaskPolicy{Route: taskpolicy.RouteFullPlan}, "do it directly: migrate authentication", agent.PlannerDepthFull},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := withPlannerTurnMetadata(context.Background(), plannerTurnMetadata{Policy: tc.policy, PolicySet: true})
+			got := DecidePlannerRoute(ctx, tc.input)
+			if got.Depth != tc.depth || got.Reason != plannerReasonTaskPolicy {
+				t.Fatalf("decision = %+v, want task-policy depth %s", got, tc.depth)
+			}
+		})
 	}
 }
 

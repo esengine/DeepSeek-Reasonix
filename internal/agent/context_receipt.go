@@ -24,14 +24,14 @@ func (a *Agent) contextMaintenanceBlocked(inputHash string) (bool, string) {
 	if a == nil {
 		return false, ""
 	}
-	a.compactionMu.Lock()
-	defer a.compactionMu.Unlock()
-	r := a.compactionState.LastReceipt
+	a.sess.compactionMu.Lock()
+	defer a.sess.compactionMu.Unlock()
+	r := a.sess.compactionState.LastReceipt
 	if r == nil {
 		// Legacy sidecars may only have BlockedInputHash without a receipt.
-		if a.compactionState.BlockedInputHash != "" &&
-			(inputHash == "" || a.compactionState.BlockedInputHash == inputHash) {
-			return true, a.compactionState.BlockedReason
+		if a.sess.compactionState.BlockedInputHash != "" &&
+			(inputHash == "" || a.sess.compactionState.BlockedInputHash == inputHash) {
+			return true, a.sess.compactionState.BlockedReason
 		}
 		return false, ""
 	}
@@ -41,14 +41,14 @@ func (a *Agent) contextMaintenanceBlocked(inputHash string) (bool, string) {
 	// Generation-scoped: once this generation fails, automatic maintenance
 	// does not pay for another summary until a successful install, manual
 	// compress, or lineage change advances the generation.
-	return true, firstNonEmpty(a.compactionState.BlockedReason, r.Reason)
+	return true, firstNonEmpty(a.sess.compactionState.BlockedReason, r.Reason)
 }
 
 func (a *Agent) emitContextMaintenance(r *ContextMaintenanceReceipt) {
-	if a == nil || r == nil || a.sink == nil {
+	if a == nil || r == nil || a.svc.sink == nil {
 		return
 	}
-	a.sink.Emit(event.Event{Kind: event.ContextMaintenanceEvent, Maintenance: &event.ContextMaintenance{
+	a.svc.sink.Emit(event.Event{Kind: event.ContextMaintenanceEvent, Maintenance: &event.ContextMaintenance{
 		Status: r.Status, Action: r.Action, Trigger: r.Trigger, OperationID: r.OperationID,
 		InputTokens: r.InputTokens, ResultTokens: r.ResultTokens, SavedTokens: r.SavedTokens,
 		AffectedToolResults: r.AffectedToolResults, ProjectionVersion: r.ProjectionVersion,
@@ -65,7 +65,7 @@ func (a *Agent) recordContextMaintenanceBlocked(inputHash, trigger, action, reas
 // generation. Automatic Prepare will not re-enter summary until the generation
 // advances (successful install, manual compress, or lineage change).
 func (a *Agent) recordContextMaintenanceOutcome(inputHash, trigger, action, status, reason string) {
-	if a == nil || a.session == nil {
+	if a == nil || a.sess.conversation == nil {
 		return
 	}
 	if inputHash == "" {
@@ -80,15 +80,15 @@ func (a *Agent) recordContextMaintenanceOutcome(inputHash, trigger, action, stat
 	if status != "failed" {
 		status = "blocked"
 	}
-	_, transcriptVersion := a.session.snapshotMessagesVersion()
+	_, transcriptVersion := a.sess.conversation.snapshotMessagesVersion()
 	promptCacheKey := a.currentPromptCacheKey()
-	a.compactionMu.Lock()
-	state := a.compactionState
+	a.sess.compactionMu.Lock()
+	state := a.sess.compactionState
 	previous := state
 	if state.LastReceipt != nil &&
 		(state.LastReceipt.Status == "blocked" || state.LastReceipt.Status == "failed") &&
 		state.LastReceipt.Action == action {
-		a.compactionMu.Unlock()
+		a.sess.compactionMu.Unlock()
 		return
 	}
 	now := time.Now().UTC()
@@ -112,30 +112,36 @@ func (a *Agent) recordContextMaintenanceOutcome(inputHash, trigger, action, stat
 		BlockedInputHash: inputHash, Reason: reason, CreatedAt: now,
 	}
 	state.UpdatedAt = now
-	a.compactionState = state
+	a.sess.compactionState = state
 	if err := a.persistCompactionStateLocked(); err != nil {
-		a.compactionState = previous
-		a.compactionMu.Unlock()
+		a.sess.compactionState = previous
+		a.sess.compactionMu.Unlock()
 		return
 	}
-	a.compactionMu.Unlock()
+	a.sess.compactionMu.Unlock()
 	a.emitContextMaintenance(state.LastReceipt)
 }
 
 func (a *Agent) emitCompactionTelemetry(t CompactionTelemetry) {
-	detail := fmt.Sprintf("trigger=%s mode=%s cache=%s src=%d fold=%d spans=%d proj=%d in=%d out=%d hit=%d miss=%d write=%d reqs=%d",
+	detail := fmt.Sprintf("trigger=%s mode=%s cache=%s src=%d fold=%d spans=%d proj=%d in=%d out=%d hit=%d miss=%d write=%d reqs=%d user_kept=%d user_dropped=%d",
 		t.Trigger, t.Mode, t.CacheState, t.SourceTokens, t.FoldTokens, t.Spans, t.ProjectionTokens,
-		t.InputTokens, t.OutputTokens, t.CacheHitTokens, t.CacheMissTokens, t.CacheWriteTokens, t.RequestCount)
+		t.InputTokens, t.OutputTokens, t.CacheHitTokens, t.CacheMissTokens, t.CacheWriteTokens, t.RequestCount,
+		t.UserTurnsKept, t.UserTurnsDropped)
 	if t.ProviderRequestID != "" {
 		detail += " provider_request_id=" + t.ProviderRequestID
 	}
 	if t.Error != "" {
-		slog.Warn("agent: compaction failed", "detail", detail+" err_type="+t.Error)
-		return
+		// A degraded fold carries the summarizer's error but still freed the
+		// context, so it is a notice with a cause rather than a failure.
+		if t.Mode != CompactionModeDegraded {
+			slog.Warn("agent: compaction failed", "detail", detail+" err_type="+t.Error)
+			return
+		}
+		detail += " err_type=" + t.Error
 	}
-	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "compaction telemetry", Detail: detail})
+	a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "compaction telemetry", Detail: detail})
 }
 
 func (a *Agent) emitCompactionAborted(trigger string) {
-	a.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{Trigger: trigger}})
+	a.svc.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{Trigger: trigger}})
 }

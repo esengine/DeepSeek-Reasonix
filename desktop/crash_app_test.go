@@ -68,6 +68,10 @@ func TestPostCrashReport(t *testing.T) {
 	if err := postCrashReport(context.Background(), srv.Client(), srv.URL, r); err != nil {
 		t.Fatal(err)
 	}
+	if !installIDPattern.MatchString(got.InstallID) {
+		t.Fatalf("send-time install id = %q", got.InstallID)
+	}
+	got.InstallID = ""
 	if !reflect.DeepEqual(got, r) {
 		t.Errorf("server received %+v, want %+v", got, r)
 	}

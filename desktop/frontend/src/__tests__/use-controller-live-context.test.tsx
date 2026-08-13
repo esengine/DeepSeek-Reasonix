@@ -5,6 +5,7 @@ import React, { act, useCallback, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { ContextPanel } from "../components/ContextPanel";
 import { StatusBar } from "../components/StatusBar";
+import { historySliceFromMessages } from "./mockHistorySlice";
 import type { AppBindings } from "../lib/bridge";
 import { LocaleProvider } from "../lib/i18n";
 import type { BalanceInfo, ContextInfo, ContextPanelInfo, EffortInfo, Meta, TabMeta, WireEvent } from "../lib/types";
@@ -207,6 +208,7 @@ window.go = {
       CheckpointsForTab: async () => [],
       HistoryForTab: async () => [],
       HistoryPageForTab: async () => ({ messages: [], startTurn: 0, endTurn: 0, totalTurns: 0, hasOlder: false }),
+      HistorySliceForTab: async (tabID, req) => historySliceFromMessages(tabID, [], req),
       HistoryCheckpointTurnsForTab: async () => [],
       ReplayPendingPrompts: async () => {},
     } as Partial<AppBindings> as AppBindings,

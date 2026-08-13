@@ -420,8 +420,9 @@ func BuiltinSubagentTools(store *Store, runner SubagentRunner, profileResolver .
 	}
 	var out []tool.Tool
 	for _, s := range specs {
-		sk, ok := store.Read(s.skillName)
-		if !ok || store.runtimeProfile != "" && !AllowedInProfile(sk, store.runtimeProfile) {
+		// Skill profiles are diagnostic-only; do not hide builtin subagent
+		// entry points based on the session role setting.
+		if _, ok := store.Read(s.skillName); !ok {
 			continue
 		}
 		out = append(out, &subagentSkillTool{

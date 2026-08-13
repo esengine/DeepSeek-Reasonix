@@ -33,6 +33,9 @@ const (
 	fallbackTokPerChar         = 0.25      // ~4 chars/token, used before any usage is available to calibrate
 	maxPinnedFirstUserTokens   = 1500      // ceiling on pinning the first user turn verbatim
 	pinnedFirstUserWindowFrac  = 0.15      // and never pin a first turn worth more than this fraction of the window
+	maxKeptUserTurnTokens      = 1500      // ceiling on carrying one folded user turn verbatim
+	keptUserTurnsBudgetTokens  = 8192      // and on all of them together within one fold
+	keptUserTurnsWindowFrac    = 0.05      // never spend more than this fraction of the window on them
 	protocolReserveTokens      = 256       // provider framing and control fields not represented by message estimates
 )
 
@@ -178,6 +181,11 @@ func estimateMessagesTokens(msgs []provider.Message) int {
 		for _, item := range m.ResponsesItems {
 			total += estimateTextTokens(string(item))
 		}
+		for _, search := range m.ServerSearch {
+			provider.WalkServerSearchEstimate(search, func(s string) {
+				total += estimateTextTokens(s)
+			})
+		}
 	}
 	return total
 }
@@ -292,8 +300,6 @@ func (a *Agent) pinnedPrefixLen(msgs []provider.Message) int {
 	return i
 }
 
-// fixedPinnableUserTurn uses a fixed estimate only: provider usage after
-// projection would make the same turn drift across checkpoints.
 func (a *Agent) fixedPinnableUserTurn(m provider.Message) bool {
 	budget := maxPinnedFirstUserTokens
 	if a.contextWindow > 0 {
@@ -301,10 +307,10 @@ func (a *Agent) fixedPinnableUserTurn(m provider.Message) bool {
 			budget = f
 		}
 	}
-	return int(float64(msgChars(m))*fallbackTokPerChar) <= budget
+	return fixedTokenEstimate(m) <= budget
 }
 
-func keepIndexes(region []provider.Message, policy KeepPolicy) []bool {
+func (a *Agent) keepIndexes(region []provider.Message) ([]bool, userTurnRetention) {
 	keep := make([]bool, len(region))
 	policyStart := 0
 	for i, m := range region {
@@ -315,10 +321,11 @@ func keepIndexes(region []provider.Message, policy KeepPolicy) []bool {
 	// Retention applies only to messages since the latest digest; older kept
 	// messages are allowed to fold on the next pass so they cannot grow forever.
 	for i, m := range region {
-		if i >= policyStart && shouldKeepMessage(m, policy) {
+		if i >= policyStart && shouldKeepMessage(m, a.keepPolicy) {
 			keep[i] = true
 		}
 	}
+	retention := a.keepUserTurns(region, keep)
 	for i, m := range region {
 		if !keep[i] {
 			continue
@@ -332,7 +339,14 @@ func keepIndexes(region []provider.Message, policy KeepPolicy) []bool {
 			keepToolCallGroup(region, keep, i)
 		}
 	}
-	return keep
+	return keep, retention
+}
+
+// fixedTokenEstimate is what every verbatim-retention decision measures with.
+// Calibrated usage must not be used here: a threshold that moves with the last
+// turn's ratio would keep a turn at one checkpoint and fold it at the next.
+func fixedTokenEstimate(m provider.Message) int {
+	return int(float64(msgChars(m)) * fallbackTokPerChar)
 }
 
 func keepToolCallGroup(region []provider.Message, keep []bool, assistantIndex int) {
@@ -496,7 +510,7 @@ func tailStart(msgs []provider.Message, head, budgetTokens int, tokPerChar float
 // actually sent (the provider strips it). Falls back to ~4 chars/token before
 // any usage is known, and ignores absurd ratios.
 func (a *Agent) tokPerChar() float64 {
-	if cal := a.promptCalibration.Load(); cal != nil && cal.compactChars > 0 {
+	if cal := a.sess.output.promptCalibration.Load(); cal != nil && cal.compactChars > 0 {
 		if r := float64(cal.promptTokens) / float64(cal.compactChars); r > 0.05 && r < 2 {
 			return r
 		}
@@ -540,7 +554,7 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 	defer func() {
 		usage = provider.UsageWithRequestAttemptCount(ctx, usage)
 		if usage != nil && (usage.TotalTokens > 0 || usage.RequestCount > 0) {
-			a.sink.Emit(event.Event{Kind: event.Usage, ModelRef: a.modelRef, Usage: usage, Pricing: a.pricing, UsageSource: event.UsageSourceCompaction})
+			a.svc.sink.Emit(event.Event{Kind: event.Usage, ModelRef: a.modelRef, Usage: usage, Pricing: a.svc.pricing, UsageSource: event.UsageSourceCompaction})
 		}
 	}()
 	defer trackPublishedHostStream(ctx, cancel)()
@@ -567,10 +581,10 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 	if req.MaxTokens < 256 {
 		return "", usage, fmt.Errorf("summary output budget too small (%d tokens)", req.MaxTokens)
 	}
-	if a.prov == nil {
+	if a.svc.prov == nil {
 		return "", usage, fmt.Errorf("summary unavailable")
 	}
-	ch, err := a.prov.Stream(ctx, req)
+	ch, err := a.svc.prov.Stream(ctx, req)
 	if err != nil {
 		return "", usage, err
 	}

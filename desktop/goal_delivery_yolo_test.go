@@ -112,11 +112,12 @@ func TestGoalDeliveryYoloTokenSwitchPreservesBlockedGoalCheckpoint(t *testing.T)
 		t.Fatalf("SetTokenModeForTab: %v", err)
 	}
 	ctrl := app.controllerForTab(tab)
-	if ctrl == nil || ctrl == oldCtrl {
-		t.Fatal("token-mode switch did not install a replacement controller")
+	// Role setting switches in place; Goal axes must remain on the same controller.
+	if ctrl == nil || ctrl != oldCtrl {
+		t.Fatal("token-mode/role setting switch must keep the same controller")
 	}
 	if ctrl.GoalStatus() != control.GoalStatusBlocked || ctrl.Goal() != "ship the combined mode" {
-		t.Fatalf("rebuilt Goal = (%q, %q), want blocked Goal", ctrl.Goal(), ctrl.GoalStatus())
+		t.Fatalf("Goal after role switch = (%q, %q), want blocked Goal", ctrl.Goal(), ctrl.GoalStatus())
 	}
 	if ctrl.ToolApprovalMode() != control.ToolApprovalYolo {
 		t.Fatalf("tool approval = %q, want yolo", ctrl.ToolApprovalMode())
@@ -178,11 +179,12 @@ func TestPlanYoloDeliveryRebuildUsesLiveControllerAxes(t *testing.T) {
 		t.Fatalf("SetTokenModeForTab: %v", err)
 	}
 	ctrl := app.controllerForTab(tab)
-	if ctrl == nil || ctrl == oldCtrl {
-		t.Fatal("token-mode switch did not install a replacement controller")
+	// Role setting is in-place: live Controller axes are the source of truth.
+	if ctrl == nil || ctrl != oldCtrl {
+		t.Fatal("token-mode/role setting switch must keep the same controller")
 	}
 	if !ctrl.PlanMode() || ctrl.ToolApprovalMode() != control.ToolApprovalYolo {
-		t.Fatalf("rebuilt axes plan=%v approval=%q, want true/yolo", ctrl.PlanMode(), ctrl.ToolApprovalMode())
+		t.Fatalf("axes plan=%v approval=%q, want true/yolo", ctrl.PlanMode(), ctrl.ToolApprovalMode())
 	}
 	if ctrl.GoalStatus() != control.GoalStatusBlocked {
 		t.Fatalf("blocked Goal status = %q, want preserved while Plan is active", ctrl.GoalStatus())
@@ -193,18 +195,24 @@ func TestPlanYoloDeliveryRebuildUsesLiveControllerAxes(t *testing.T) {
 }
 
 func TestPlanWinsRunningGoalConflictDuringDeliveryRebuild(t *testing.T) {
+	// Axis conflict resolution runs on rebuild paths (model/effort/settings).
+	// Role setting no longer rebuilds, so exercise a model rebuild here.
 	app, tab, oldCtrl, path := newGoalDeliveryYoloTestApp(t, control.GoalStatusRunning)
 	oldCtrl.SetPlanMode(true)
 	oldCtrl.SetToolApprovalMode(control.ToolApprovalYolo)
 	app.mu.Lock()
 	tab.mode = "plan-yolo"
 	tab.goal = "ship the combined mode"
+	tab.tokenMode = boot.TokenModeDelivery
 	app.mu.Unlock()
 
-	if err := app.SetTokenModeForTab(tab.ID, boot.TokenModeDelivery); err != nil {
-		t.Fatalf("SetTokenModeForTab: %v", err)
+	if err := app.SetModelForTab(tab.ID, "alt/alt-model"); err != nil {
+		t.Fatalf("SetModelForTab: %v", err)
 	}
 	ctrl := app.controllerForTab(tab)
+	if ctrl == nil || ctrl == oldCtrl {
+		t.Fatal("model rebuild did not install a replacement controller")
+	}
 	if !ctrl.PlanMode() || ctrl.ToolApprovalMode() != control.ToolApprovalYolo {
 		t.Fatalf("rebuilt axes plan=%v approval=%q, want true/yolo", ctrl.PlanMode(), ctrl.ToolApprovalMode())
 	}
@@ -233,8 +241,12 @@ func TestRunningGoalDeliveryYoloRebuildKeepsUnifiedGoalScope(t *testing.T) {
 		t.Fatalf("SetTokenModeForTab: %v", err)
 	}
 	ctrl := app.controllerForTab(tab)
-	if ctrl == nil || ctrl == oldCtrl || ctrl.GoalStatus() != control.GoalStatusRunning {
-		t.Fatalf("running Goal was not restored: ctrl=%T goal=%q status=%q", ctrl, ctrl.Goal(), ctrl.GoalStatus())
+	// In-place role switch: same controller keeps the running Goal identity.
+	if ctrl == nil || ctrl != oldCtrl {
+		t.Fatalf("role switch must keep controller: got %p want %p", ctrl, oldCtrl)
+	}
+	if ctrl.GoalStatus() != control.GoalStatusRunning || ctrl.Goal() != "ship the combined mode" {
+		t.Fatalf("running Goal lost after role switch: goal=%q status=%q", ctrl.Goal(), ctrl.GoalStatus())
 	}
 	if ctrl.ToolApprovalMode() != control.ToolApprovalYolo {
 		t.Fatalf("tool approval = %q, want yolo", ctrl.ToolApprovalMode())
@@ -264,6 +276,8 @@ func TestGoalDeliveryYoloSurvivesEveryControllerRebuildPath(t *testing.T) {
 		name    string
 		prepare func(*App, *WorkspaceTab)
 		rebuild func(*App, *WorkspaceTab) error
+		// inPlace means the switch keeps the same controller (role setting).
+		inPlace bool
 	}{
 		{
 			name: "settings",
@@ -304,6 +318,7 @@ func TestGoalDeliveryYoloSurvivesEveryControllerRebuildPath(t *testing.T) {
 			rebuild: func(app *App, tab *WorkspaceTab) error {
 				return app.SetTokenModeForTab(tab.ID, boot.TokenModeDelivery)
 			},
+			inPlace: true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -314,7 +329,14 @@ func TestGoalDeliveryYoloSurvivesEveryControllerRebuildPath(t *testing.T) {
 			}
 
 			ctrl := app.controllerForTab(tab)
-			if ctrl == nil || ctrl == oldCtrl {
+			if ctrl == nil {
+				t.Fatal("controller missing after switch")
+			}
+			if tc.inPlace {
+				if ctrl != oldCtrl {
+					t.Fatal("role setting must keep the same controller")
+				}
+			} else if ctrl == oldCtrl {
 				t.Fatal("rebuild did not install a replacement controller")
 			}
 			if ctrl.PlanMode() || ctrl.GoalStatus() != control.GoalStatusRunning || ctrl.Goal() != "ship the combined mode" {

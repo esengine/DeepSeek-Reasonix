@@ -84,7 +84,15 @@ func toolResults(s *Session, name string) []string {
 
 func sessionHasUserMessageContaining(s *Session, needle string) bool {
 	for _, m := range s.Messages {
-		if m.Role == provider.RoleUser && strings.Contains(provider.ModelMessages([]provider.Message{m})[0].Content, needle) {
+		if m.Role != provider.RoleUser {
+			continue
+		}
+		if strings.Contains(m.Content, needle) {
+			return true
+		}
+		// Fallback: provider projection (RawContent stripped, Content kept).
+		projected := provider.ModelMessages([]provider.Message{m})
+		if len(projected) > 0 && strings.Contains(projected[0].Content, needle) {
 			return true
 		}
 	}
@@ -131,7 +139,7 @@ func TestEvidenceFlowEndToEnd(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if got := toolResult(a.session, "complete_step"); !strings.Contains(got, "host-verified 1") {
+	if got := toolResult(a.sess.conversation, "complete_step"); !strings.Contains(got, "host-verified 1") {
 		t.Fatalf("complete_step result = %q, want it host-verified from the bash receipt", got)
 	}
 }
@@ -164,13 +172,13 @@ func TestDeliveryProfileEnforcesAcceptanceReviewVerificationAndSignoff(t *testin
 	if err := a.Run(context.Background(), "implement main"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if got := toolResult(a.session, "write_file"); !strings.Contains(got, "delivery-first mode requires acceptance criteria") {
+	if got := toolResult(a.sess.conversation, "write_file"); !strings.Contains(got, "delivery-first mode requires acceptance criteria") {
 		t.Fatalf("first write result = %q, want delivery acceptance gate", got)
 	}
-	if !sessionHasUserMessageContaining(a.session, "<delivery-runtime>") {
-		t.Fatal("delivery runtime marker was not injected into the turn tail")
+	if !sessionHasUserMessageContaining(a.sess.conversation, "<execution-policy") {
+		t.Fatal("execution-policy marker was not injected into the turn tail")
 	}
-	if got := lastToolResult(a.session, "complete_step"); !strings.Contains(got, "signed off") {
+	if got := lastToolResult(a.sess.conversation, "complete_step"); !strings.Contains(got, "signed off") {
 		t.Fatalf("complete_step result = %q, want successful sign-off", got)
 	}
 	firstSystem := systemMessageContent(prov.requests[0])
@@ -262,10 +270,10 @@ func TestDeliveryProfileCommandOnlyActionRequiresCriteriaAndSignoff(t *testing.T
 	if err := a.Run(context.Background(), "run tests"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if got := toolResult(a.session, "bash"); !strings.Contains(got, "delivery-first mode requires acceptance criteria") {
+	if got := toolResult(a.sess.conversation, "bash"); !strings.Contains(got, "delivery-first mode requires acceptance criteria") {
 		t.Fatalf("first bash result = %q, want acceptance gate", got)
 	}
-	if got := lastToolResult(a.session, "complete_step"); !strings.Contains(got, "signed off") {
+	if got := lastToolResult(a.sess.conversation, "complete_step"); !strings.Contains(got, "signed off") {
 		t.Fatalf("complete_step result = %q, want successful command-only sign-off", got)
 	}
 }
@@ -283,10 +291,10 @@ func TestDeliveryProfileBlocksMixedVerificationBeforeItBecomesMutation(t *testin
 	if err := a.Run(context.Background(), "check the snake game"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if got := toolResult(a.session, "bash"); !strings.Contains(got, "mixes a verification check") {
+	if got := toolResult(a.sess.conversation, "bash"); !strings.Contains(got, "mixes a verification check") {
 		t.Fatalf("mixed command result = %q, want pre-execution split guidance", got)
 	}
-	if _, ok := a.evidence.LatestSuccessfulMutationIndex(); ok {
+	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok {
 		t.Fatal("blocked scratch-file verification must not become a successful mutation")
 	}
 }
@@ -304,10 +312,10 @@ func TestDeliveryProfileExplainsMaskedVerifierExitBeforeExecution(t *testing.T) 
 	if err := a.Run(context.Background(), "check the snake game"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if got := toolResultByID(a.session, "masked"); !strings.Contains(got, "masks the verifier's exit status") {
+	if got := toolResultByID(a.sess.conversation, "masked"); !strings.Contains(got, "masks the verifier's exit status") {
 		t.Fatalf("masked command result = %q, want precise exit-status guidance", got)
 	}
-	if _, ok := a.evidence.LatestSuccessfulMutationIndex(); ok {
+	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok {
 		t.Fatal("blocked masked verifier must not become a successful mutation")
 	}
 }
@@ -325,10 +333,10 @@ func TestDeliveryProfileBlocksOpaqueInlineInterpreterBeforeItBecomesMutation(t *
 	if err := a.Run(context.Background(), "check the snake game"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if got := toolResultByID(a.session, "opaque"); !strings.Contains(got, "cannot audit inline interpreter source") {
+	if got := toolResultByID(a.sess.conversation, "opaque"); !strings.Contains(got, "cannot audit inline interpreter source") {
 		t.Fatalf("opaque command result = %q, want pre-execution audit guidance", got)
 	}
-	if _, ok := a.evidence.LatestSuccessfulMutationIndex(); ok {
+	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok {
 		t.Fatal("blocked inline interpreter must not become a successful mutation")
 	}
 }
@@ -354,10 +362,10 @@ func TestDeliveryProfileRequiresActiveTodoForLateMutation(t *testing.T) {
 	if err := a.Run(context.Background(), "implement main and incorporate review fixes"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if got := toolResultByID(a.session, "late-write"); !strings.Contains(got, "current in_progress todo") {
+	if got := toolResultByID(a.sess.conversation, "late-write"); !strings.Contains(got, "current in_progress todo") {
 		t.Fatalf("late mutation result = %q, want active-todo gate", got)
 	}
-	if got := toolResultByID(a.session, "retry-write"); strings.HasPrefix(got, "blocked:") || strings.HasPrefix(got, "error:") {
+	if got := toolResultByID(a.sess.conversation, "retry-write"); strings.HasPrefix(got, "blocked:") || strings.HasPrefix(got, "error:") {
 		t.Fatalf("mutation after appended active todo should run, got %q", got)
 	}
 }
@@ -406,7 +414,7 @@ func TestEvidenceFlowEnforcesProjectChecksAfterWrite(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	got := toolResult(a.session, "complete_step")
+	got := toolResult(a.sess.conversation, "complete_step")
 	if !strings.Contains(got, "project checks 1") {
 		t.Fatalf("complete_step result = %q, want project check verified from same batch", got)
 	}
@@ -520,7 +528,7 @@ func TestFinalReadinessBlocksUntilProjectCheckRunsAfterWriter(t *testing.T) {
 	if err := a.Run(ctx, "finish"); err != nil {
 		t.Fatalf("verified Run: %v", err)
 	}
-	if got := lastToolResult(a.session, "bash"); !strings.Contains(got, "bash done") {
+	if got := lastToolResult(a.sess.conversation, "bash"); !strings.Contains(got, "bash done") {
 		t.Fatalf("bash tool result = %q, want command run after the block", got)
 	}
 }
@@ -643,7 +651,7 @@ func TestFinalReadinessRequiresCompleteStepAfterWriterWhenTodoSeen(t *testing.T)
 	if err := a.Run(ctx, "finish"); err != nil {
 		t.Fatalf("signed-off Run: %v", err)
 	}
-	if got := lastToolResult(a.session, "complete_step"); !strings.Contains(got, "signed off") {
+	if got := lastToolResult(a.sess.conversation, "complete_step"); !strings.Contains(got, "signed off") {
 		t.Fatalf("complete_step result = %q, want successful sign-off", got)
 	}
 }
@@ -711,10 +719,10 @@ func TestFinalReadinessPermissionLoopGuardAllowsBlockedFinal(t *testing.T) {
 	if prov.call != 5 {
 		t.Fatalf("provider calls = %d, want writer turn, three blocked bash calls, then final", prov.call)
 	}
-	if got := lastToolResult(a.session, "bash"); !strings.Contains(got, "[loop guard]") {
+	if got := lastToolResult(a.sess.conversation, "bash"); !strings.Contains(got, "[loop guard]") {
 		t.Fatalf("last bash result = %q, want permission loop guard", got)
 	}
-	if got := toolResults(a.session, "bash"); len(got) != stormBreakThreshold {
+	if got := toolResults(a.sess.conversation, "bash"); len(got) != stormBreakThreshold {
 		t.Fatalf("bash results = %d, want exactly %d blocked attempts", len(got), stormBreakThreshold)
 	}
 	if len(*notices) == 0 {
@@ -769,7 +777,7 @@ func TestFinalReadinessPermissionLoopGuardAllowsBlockedFinalForBatch(t *testing.
 	if prov.call != 5 {
 		t.Fatalf("provider calls = %d, want writer turn, three blocked batches, then final", prov.call)
 	}
-	results := toolResults(a.session, "bash")
+	results := toolResults(a.sess.conversation, "bash")
 	if len(results) != 2*stormBreakThreshold {
 		t.Fatalf("bash results = %d, want %d blocked attempts across three batches", len(results), 2*stormBreakThreshold)
 	}
@@ -803,7 +811,7 @@ func TestTodoWriteOnlyTurnMayEndWithIncompleteTodos(t *testing.T) {
 	if prov.call != 2 {
 		t.Fatalf("provider calls = %d, want 2 without readiness retry", prov.call)
 	}
-	if got := lastToolResult(a.session, "todo_write"); !strings.Contains(got, "Todos updated") {
+	if got := lastToolResult(a.sess.conversation, "todo_write"); !strings.Contains(got, "Todos updated") {
 		t.Fatalf("todo_write result = %q, want successful todo update", got)
 	}
 }
@@ -832,7 +840,7 @@ func TestReadOnlyContextAndTodoTurnMayEndWithIncompleteTodos(t *testing.T) {
 	if prov.call != 2 {
 		t.Fatalf("provider calls = %d, want 2 without readiness retry", prov.call)
 	}
-	if got := lastToolResult(a.session, "todo_write"); !strings.Contains(got, "Todos updated") {
+	if got := lastToolResult(a.sess.conversation, "todo_write"); !strings.Contains(got, "Todos updated") {
 		t.Fatalf("todo_write result = %q, want successful todo update", got)
 	}
 }
@@ -900,7 +908,7 @@ func TestEvidenceFlowRejectsUncitedCommand(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	got := toolResult(a.session, "complete_step")
+	got := toolResult(a.sess.conversation, "complete_step")
 	if !strings.Contains(got, "has no matching successful receipt") {
 		t.Fatalf("complete_step result = %q, want the uncited command rejected", got)
 	}
@@ -946,7 +954,7 @@ func TestEvidenceFlowRejectsStepMissingFromTodoWrite(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	got := toolResult(a.session, "complete_step")
+	got := toolResult(a.sess.conversation, "complete_step")
 	if !strings.Contains(got, "matching todo_write item") {
 		t.Fatalf("complete_step result = %q, want todo-backed rejection", got)
 	}
@@ -984,7 +992,7 @@ func TestEvidenceFlowAcceptsTodoCompletionAfterCompleteStep(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if got := lastToolResult(a.session, "todo_write"); !strings.Contains(got, "Todos updated") {
+	if got := lastToolResult(a.sess.conversation, "todo_write"); !strings.Contains(got, "Todos updated") {
 		t.Fatalf("final todo_write result = %q, want update accepted", got)
 	}
 }
@@ -1022,7 +1030,7 @@ func TestEvidenceFlowRejectsTodoCompletionWithoutCompleteStep(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	results := toolResults(a.session, "todo_write")
+	results := toolResults(a.sess.conversation, "todo_write")
 	if len(results) < 2 {
 		t.Fatalf("todo_write results = %v, want the rejected completion result", results)
 	}
@@ -1066,7 +1074,7 @@ func TestEvidenceFlowRecoversTodoCompletionAfterFailedCompleteStepWithProgress(t
 		t.Fatalf("Run: %v", err)
 	}
 
-	stepResult := lastToolResult(a.session, "complete_step")
+	stepResult := lastToolResult(a.sess.conversation, "complete_step")
 	if !strings.Contains(stepResult, "no matching successful receipt") {
 		t.Fatalf("complete_step result = %q, want the sign-off attempt to fail first", stepResult)
 	}
@@ -1076,7 +1084,7 @@ func TestEvidenceFlowRecoversTodoCompletionAfterFailedCompleteStepWithProgress(t
 	if strings.Contains(stepResult, "todo_write") {
 		t.Fatalf("complete_step result = %q, want command hints without todo tool noise", stepResult)
 	}
-	if got := lastToolResult(a.session, "todo_write"); !strings.Contains(got, "1 completed") {
+	if got := lastToolResult(a.sess.conversation, "todo_write"); !strings.Contains(got, "1 completed") {
 		t.Fatalf("todo_write result = %q, want completion recovery accepted", got)
 	}
 }
@@ -1135,7 +1143,7 @@ func TestEvidenceFlowRecoversAfterBatchTodoCompletionRejection(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	stepResults := toolResults(a.session, "complete_step")
+	stepResults := toolResults(a.sess.conversation, "complete_step")
 	if len(stepResults) < 3 {
 		t.Fatalf("complete_step results = %v, want blocked batch sign-off and a retry", stepResults)
 	}
@@ -1190,7 +1198,7 @@ func TestEvidenceFlowFailedCompleteStepDoesNotAuthorizeTodoCompletion(t *testing
 		t.Fatalf("Run: %v", err)
 	}
 
-	results := toolResults(a.session, "todo_write")
+	results := toolResults(a.sess.conversation, "todo_write")
 	if len(results) < 2 {
 		t.Fatalf("todo_write results = %v, want the rejected completion result", results)
 	}
@@ -1233,7 +1241,7 @@ func TestEvidenceFlowRejectsReplacedTodoAfterNumericCompleteStep(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	results := toolResults(a.session, "todo_write")
+	results := toolResults(a.sess.conversation, "todo_write")
 	if len(results) < 2 {
 		t.Fatalf("todo_write results = %v, want the rejected replacement result", results)
 	}
@@ -1289,7 +1297,7 @@ func TestEvidenceFlowRejectsReorderedTodoAndRecoversSerially(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	results := toolResults(a.session, "todo_write")
+	results := toolResults(a.sess.conversation, "todo_write")
 	if len(results) != 2 || !strings.Contains(results[1], "completed after unfinished") {
 		t.Fatalf("reordered todo_write results = %v, want serial-order rejection", results)
 	}

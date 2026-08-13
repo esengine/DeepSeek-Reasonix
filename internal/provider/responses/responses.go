@@ -48,10 +48,11 @@ func newFromConfig(cfg provider.Config) (provider.Provider, error) {
 	keyEnv, _ := cfg.Extra["api_key_env"].(string)
 	keySource, _ := cfg.Extra["api_key_source"].(string)
 	maxOutputTokens, _ := cfg.Extra["max_output_tokens"].(int)
+	requestURL, _ := cfg.Extra["request_url"].(string)
 	return New(Config{
 		Name: cfg.Name, APIKey: cfg.APIKey, BaseURL: cfg.BaseURL, Model: cfg.Model,
 		Effort: effort, Mode: mode, Stateful: stateful, WebSearch: webSearch, Proxy: proxy,
-		KeyEnv: keyEnv, KeySource: keySource, MaxOutputTokens: maxOutputTokens,
+		KeyEnv: keyEnv, KeySource: keySource, MaxOutputTokens: maxOutputTokens, RequestURL: requestURL,
 		// Extra 原样透传：vision 等能力开关由调用方（boot/CLI）写入
 		// cfg.Extra，factory 若丢弃则 New() 读不到（评审 #7234 第 3 点）。
 		Extra: cfg.Extra,
@@ -60,20 +61,21 @@ func newFromConfig(cfg provider.Config) (provider.Provider, error) {
 
 // Config holds Responses API provider settings.
 type Config struct {
-	Name      string
-	APIKey    string
-	BaseURL   string
-	Model     string
-	Effort    string
-	Mode      string // stateful | stateless; empty uses vendor detection.
-	Stateful  *bool  // legacy form of Mode; nil preserves vendor detection.
-	WebSearch bool   // expose the provider-executed web_search tool.
-	Proxy     netclient.ProxySpec
-	KeyEnv    string
-	KeySource string
-	// MaxOutputTokens is the total provider output budget. Zero enables Reasonix's
-	// 32K reasoning safety default on official DeepSeek and otherwise omits the
-	// field; thinking-disabled DeepSeek requests and negative values omit it.
+	Name       string
+	APIKey     string
+	BaseURL    string
+	Model      string
+	Effort     string
+	Mode       string // stateful | stateless; empty uses vendor detection.
+	Stateful   *bool  // legacy form of Mode; nil preserves vendor detection.
+	WebSearch  bool   // expose the provider-executed web_search tool.
+	Proxy      netclient.ProxySpec
+	KeyEnv     string
+	KeySource  string
+	RequestURL string // optional exact Responses request URL; empty derives from BaseURL
+	// MaxOutputTokens is the total provider output budget. Zero omits the field
+	// on official DeepSeek (server 384K ceiling) and unknown endpoints; MiMo
+	// still applies its 16K/32K ladder. Negative values omit it.
 	MaxOutputTokens int
 	// SessionCache controls DashScope's opt-in header. The header is never sent
 	// to non-DashScope endpoints even when this value is true.
@@ -104,17 +106,17 @@ func (c Config) mode() string {
 // deepseek (incl. eu.deepseek.com) / mimo via exact-host matching.
 
 type client struct {
-	name, apiKey, keyEnv, keySource string
-	baseURL, model, effort          string
-	vendor, mode                    string
-	caps                            vendorCapabilities
-	sessionCache                    bool
-	webSearch                       bool
-	maxOutputTokens                 int
-	vision                          bool // model accepts image input; embed Images as input_image parts
-	http                            *http.Client
-	idleTimeout                     time.Duration
-	authed                          atomic.Bool
+	name, apiKey, keyEnv, keySource    string
+	baseURL, requestURL, model, effort string
+	vendor, mode                       string
+	caps                               vendorCapabilities
+	sessionCache                       bool
+	webSearch                          bool
+	maxOutputTokens                    int
+	vision                             bool // model accepts image input; embed Images as input_image parts
+	http                               *http.Client
+	idleTimeout                        time.Duration
+	authed                             atomic.Bool
 
 	mu                   sync.Mutex
 	lastResponseID       string
@@ -126,15 +128,12 @@ func New(cfg Config) provider.Provider {
 	vendor := DetectVendor(cfg.BaseURL)
 	cap := capabilitiesFor(vendor)
 	maxOutputTokens := cfg.MaxOutputTokens
-	// max_output_tokens=0 is automatic. Known vendors use the 16K/32K/64K ladder;
-	// thinking-disabled DeepSeek still gets the ordinary 16K auto budget.
-	// 128K is never chosen automatically. Compact_ratio is independent.
-	if maxOutputTokens == 0 && cap.defaultMaxOutputTokens > 0 {
-		if vendor == "deepseek" || vendor == "mimo" {
-			maxOutputTokens = responsesAutoOutputBudget(vendor, cfg.Effort)
-		} else {
-			maxOutputTokens = cap.defaultMaxOutputTokens
-		}
+	// Official DeepSeek omits max_output_tokens (server 384K). MiMo still uses
+	// the 16K/32K effort ladder. Compact_ratio is independent.
+	if maxOutputTokens == 0 && vendor == "mimo" {
+		maxOutputTokens = responsesAutoOutputBudget(vendor, cfg.Effort)
+	} else if maxOutputTokens == 0 && vendor != "deepseek" && cap.defaultMaxOutputTokens > 0 {
+		maxOutputTokens = cap.defaultMaxOutputTokens
 	}
 	sessionCache := cap.sessionCacheHeader
 	if cfg.SessionCache != nil {
@@ -152,9 +151,14 @@ func New(cfg Config) provider.Provider {
 	}); err == nil {
 		httpClient = built
 	}
+	baseURL := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
+	requestURL := strings.TrimSpace(cfg.RequestURL)
+	if requestURL == "" {
+		requestURL = baseURL + "/responses"
+	}
 	return &client{
 		name: cfg.Name, apiKey: cfg.APIKey, keyEnv: cfg.KeyEnv, keySource: cfg.KeySource,
-		baseURL: strings.TrimRight(cfg.BaseURL, "/"), model: cfg.Model, effort: cfg.Effort,
+		baseURL: baseURL, requestURL: requestURL, model: cfg.Model, effort: cfg.Effort,
 		vendor: vendor, caps: cap, mode: cfg.mode(), sessionCache: sessionCache, webSearch: cfg.WebSearch, maxOutputTokens: maxOutputTokens,
 		vision: vision,
 		http:   httpClient, idleTimeout: defaultStreamIdleTimeout,
@@ -170,9 +174,8 @@ func responsesReasoningDisabled(effort string) bool {
 	}
 }
 
-// responsesAutoOutputBudget mirrors Chat Completions: DeepSeek defaults empty
-// effort to high (64K), low stays 32K, thinking disabled is ordinary 16K.
-// Never auto-selects 128K.
+// responsesAutoOutputBudget is the MiMo (and similar) 16K/32K ladder.
+// Official DeepSeek must not call this; it omits max_output_tokens instead.
 func responsesAutoOutputBudget(vendor, effort string) int {
 	if responsesReasoningDisabled(effort) {
 		return provider.AutoOutputBudget(false, effort)
@@ -198,7 +201,7 @@ func (c *client) MissingToolCallReasoningWarningIdentity() string {
 		return ""
 	}
 	return strings.Join([]string{
-		"responses", strings.TrimSpace(c.name), strings.TrimSpace(c.baseURL),
+		"responses", strings.TrimSpace(c.name), strings.TrimSpace(c.requestURL),
 		strings.TrimSpace(c.model), strings.TrimSpace(c.vendor), strings.TrimSpace(c.mode), strings.TrimSpace(c.effort),
 	}, "\x00")
 }
@@ -264,7 +267,7 @@ func (c *client) send(ctx context.Context, body map[string]any) (*http.Response,
 		return nil, fmt.Errorf("responses: marshal request: %w", err)
 	}
 	newRequest := func(ctx context.Context) (*http.Request, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/responses", bytes.NewReader(payload))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.requestURL, bytes.NewReader(payload))
 		if err != nil {
 			return nil, err
 		}
@@ -307,12 +310,10 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool, [
 	if maxOutputTokens == 0 {
 		maxOutputTokens = c.maxOutputTokens
 	}
-	if maxOutputTokens == 0 && c.caps.defaultMaxOutputTokens > 0 {
-		if c.vendor == "deepseek" || c.vendor == "mimo" {
-			maxOutputTokens = responsesAutoOutputBudget(c.vendor, c.effort)
-		} else {
-			maxOutputTokens = c.caps.defaultMaxOutputTokens
-		}
+	if maxOutputTokens == 0 && c.vendor == "mimo" {
+		maxOutputTokens = responsesAutoOutputBudget(c.vendor, c.effort)
+	} else if maxOutputTokens == 0 && c.vendor != "deepseek" && c.caps.defaultMaxOutputTokens > 0 {
+		maxOutputTokens = c.caps.defaultMaxOutputTokens
 	}
 	if maxOutputTokens > 0 {
 		body["max_output_tokens"] = maxOutputTokens
@@ -637,7 +638,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 						seenSearchItems[key] = struct{}{}
 						raw := append(json.RawMessage(nil), event.Item.Raw...)
 						responsesItems = append(responsesItems, raw)
-						if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkResponsesItem, ResponsesItem: raw}) {
+						if !emitSearchReplay(ctx, out, raw) {
 							return
 						}
 					}

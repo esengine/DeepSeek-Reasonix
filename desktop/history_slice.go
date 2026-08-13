@@ -144,12 +144,10 @@ type HistorySlice struct {
 	// invalidated after another process advances or rewrites the session.
 	RevisionKnown bool   `json:"revisionKnown,omitempty"`
 	Digest        string `json:"digest,omitempty"`
-	// Source names the read path that produced the page, for diagnostics:
-	// "index" (cold, display-index hit), "scan" (cold, streaming rebuild or
-	// legacy event-format decode), "live-index" (live controller + index), or
-	// "live-fallback" (live controller, full-snapshot classification). Empty
-	// when no session was readable.
+	// Source: index|scan|live-index|live-fallback. Error marks a failed read
+	// (empty Entries alone means a genuinely empty session).
 	Source string `json:"source,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 // HistoryContentChunk is one chunk of a ref-replaced field's full value.
@@ -182,8 +180,10 @@ func (e HistoryEntry) MarshalJSON() ([]byte, error) {
 	return json.Marshal(alias(e))
 }
 
-func emptyHistorySlice() HistorySlice {
-	return HistorySlice{Entries: []HistoryEntry{}}
+func emptyHistorySlice() HistorySlice { return HistorySlice{Entries: []HistoryEntry{}} }
+
+func failedHistorySlice(message string) HistorySlice {
+	return HistorySlice{Entries: []HistoryEntry{}, Error: strings.TrimSpace(message)}
 }
 
 func staleHistorySlice(revision int64, revisionKnown bool, digest string) HistorySlice {
@@ -409,12 +409,12 @@ func (a *App) HistorySliceForTab(tabID string, req HistorySliceRequest) HistoryS
 
 	if ctrl == nil {
 		if strings.TrimSpace(sessionPath) == "" {
-			return emptyHistorySlice()
+			return failedHistorySlice("session path unavailable before controller ready")
 		}
 		slice, err := a.coldHistorySlice(sessionDir, sessionPath, req)
 		if err != nil {
 			slog.Debug("desktop: cold history slice failed", "path", sessionPath, "err", err)
-			return emptyHistorySlice()
+			return failedHistorySlice(err.Error())
 		}
 		return slice
 	}
@@ -441,7 +441,7 @@ func (a *App) liveHistorySlice(ctrl control.SessionAPI, sessionDir, sessionPath 
 	slice, err := a.pageHistorySliceSource(src, req, resolver, sessionPlannerDisplayTurns(sessionDir, sessionPath), ctrl.CheckpointTurnsByMessageIndex(), sessionPath)
 	if err != nil {
 		slog.Debug("desktop: live history slice failed", "path", sessionPath, "err", err)
-		return emptyHistorySlice()
+		return failedHistorySlice(err.Error())
 	}
 	if indexUsed {
 		slice.Source = "live-index"

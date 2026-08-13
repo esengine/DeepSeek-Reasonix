@@ -97,7 +97,7 @@ console.log("\nuse controller meta");
 {
   eq(
     modelSwitchNoticeText("active work is still running; running=false; pending_prompt=false; background_jobs=2; finish or cancel the current turn, answer pending prompts, and stop background jobs before changing model"),
-    "The model cannot change while 2 background jobs are running. Open Background jobs in the status bar to stop them.",
+    "The model cannot change while background work is active. Active jobs: 2. Open Background jobs in the status bar to stop them.",
     "model busy guard names the background-job blocker",
   );
   eq(
@@ -107,8 +107,8 @@ console.log("\nuse controller meta");
   );
   eq(
     tokenModeSwitchNoticeText("active work is still running; running=true; pending_prompt=true; background_jobs=0; finish or cancel the current turn, answer pending prompts, and stop background jobs before changing token mode"),
-    "Work mode cannot change while a prompt is waiting for your response. Handle it first.",
-    "work mode busy guard prioritizes the pending prompt blocker",
+    "Execution setting cannot change while a prompt is waiting for your response. Handle it first.",
+    "execution-setting busy guard prioritizes the pending prompt blocker",
   );
   eq(
     modelSwitchNoticeText("finish or cancel the current turn, answer pending prompts, and stop background jobs before changing model"),
@@ -173,13 +173,13 @@ console.log("\nuse controller meta");
 {
   eq(
     tokenModeSwitchNoticeText("finish or cancel the current turn, answer pending prompts, and stop background jobs before changing token mode"),
-    "Work mode cannot change yet. Stop the current answer, handle pending prompts, or wait for background jobs to finish.",
-    "work mode busy guard is localized",
+    "Execution setting cannot change yet. Stop the current answer, handle pending prompts, or wait for background jobs to finish.",
+    "execution-setting busy guard is localized",
   );
   eq(
     tokenModeSwitchNoticeText('tab "tab-a" changed while switching token mode; retry'),
-    "The current session changed while switching work mode. Try once more.",
-    "work mode tab race asks the user to retry",
+    "The current session changed while switching execution setting. Try once more.",
+    "execution-setting tab race asks the user to retry",
   );
 }
 
@@ -201,22 +201,22 @@ console.log("\nuse controller meta");
   );
   eq(
     localizedBackendNoticeText("session changed on disk; unsaved local transcript was saved as recovery branch 20260706-152144.863947300-longcat-openai-LongCat-2.0-119b7259f151-recovery-693ce51bcbcbaa9"),
-    "The session changed on disk, so the unsaved local transcript was kept as a conflict copy.",
+    "The session changed on disk, so the unsaved local transcript was kept as another saved version.",
     "legacy recovery branch notice can be normalized without exposing internal branch id",
   );
   eq(
     localizedBackendNoticeText("session changed on disk; unsaved local transcript was saved as a conflict copy"),
-    "The session changed on disk, so the unsaved local transcript was kept as a conflict copy.",
+    "The session changed on disk, so the unsaved local transcript was kept as another saved version.",
     "recovery copy notice can be normalized",
   );
   eq(
     localizedBackendNoticeText("session conflicts kept recurring; kept the transcript on the current recovery branch"),
-    "Repeated save conflicts were detected, so the current conflict copy was saved in an isolated recovery branch.",
+    "Repeated save conflicts were detected, so the current version was saved separately.",
     "legacy repeated recovery conflict notice can be normalized",
   );
   eq(
     localizedBackendNoticeText("repeated save conflicts were detected; saved the current conflict copy in place"),
-    "Repeated save conflicts were detected, so the current conflict copy was saved in an isolated recovery branch.",
+    "Repeated save conflicts were detected, so the current version was saved separately.",
     "repeated recovery conflict notice can be normalized",
   );
   eq(
@@ -264,7 +264,7 @@ console.log("\nuse controller meta");
   );
   eq(
     localizedNoticeText("reworded recovery copy", "session_recovery_forked"),
-    "The session changed on disk, so the unsaved local transcript was kept as a conflict copy.",
+    "The session changed on disk, so the unsaved local transcript was kept as another saved version.",
     "session recovery fork localization uses its stable notice code",
   );
   eq(
@@ -274,7 +274,7 @@ console.log("\nuse controller meta");
   );
   eq(
     localizedNoticeText("reworded depth cap", "session_recovery_depth_cap"),
-    "Repeated save conflicts were detected, so the current conflict copy was saved in an isolated recovery branch.",
+    "Repeated save conflicts were detected, so the current version was saved separately.",
     "session recovery depth-cap localization uses its stable notice code",
   );
   eq(
@@ -375,7 +375,9 @@ console.log("\nuse controller meta");
 
 {
   eq(sameMeta(meta(), meta()), true, "identical meta is unchanged");
-  eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "plan" })), false, "collaboration mode changes invalidate meta equality");
+  eq(sameMeta(meta({ sessionGeneration: 1 }), meta({ sessionGeneration: 1 })), true, "identical sessionGeneration is unchanged");
+eq(sameMeta(meta({ sessionGeneration: 1 }), meta({ sessionGeneration: 2 })), false, "sessionGeneration changes invalidate meta equality");
+eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "plan" })), false, "collaboration mode changes invalidate meta equality");
   eq(sameMeta(meta({ workspacePath: "/repo" }), meta({ workspacePath: "/other" })), false, "workspace path changes invalidate meta equality");
   eq(sameMeta(meta({ gitBranch: "main" }), meta({ gitBranch: "feature" })), false, "git branch changes invalidate meta equality");
   eq(sameMeta(meta({ imageInputEnabled: true }), meta({ imageInputEnabled: false })), false, "image input capability changes invalidate meta equality");
@@ -392,6 +394,16 @@ console.log("\nuse controller meta");
     true,
     "equivalent empty canonical todo lists keep meta stable",
   );
+  eq(
+    sameMeta(meta({ dismissedTodoBatches: ["a"] }), meta({ dismissedTodoBatches: ["a"] })),
+    true,
+    "identical dismissed todo batches keep meta stable",
+  );
+  eq(
+    sameMeta(meta({ dismissedTodoBatches: ["a"] }), meta({ dismissedTodoBatches: ["b"] })),
+    false,
+    "persisted todo dismissal changes invalidate meta equality",
+  );
 }
 
 {
@@ -401,6 +413,10 @@ console.log("\nuse controller meta");
   const todos = [{ content: "Keep task state", status: "in_progress" }];
   const withTodos = metaFromTab(tab(), meta({ canonicalTodos: todos }));
   eq(withTodos.canonicalTodos, todos, "optimistic tab metadata preserves canonical todos for the same session");
+  const dismissed = metaFromTab(tab({ sessionPath: "/s/a.jsonl" }), meta({ sessionPath: "/s/a.jsonl", dismissedTodoBatches: ["done"] }));
+  eq(dismissed.dismissedTodoBatches?.[0], "done", "optimistic metadata keeps session-sidecar todo dismissals");
+  const remounted = metaFromTab(tab({ sessionPath: "/s/leaf.jsonl" }), meta({ sessionPath: "/s/a.jsonl", dismissedTodoBatches: ["done"] }));
+  eq(remounted.dismissedTodoBatches, undefined, "a session remount waits for the new sidecar dismissals");
 }
 
 {
@@ -409,8 +425,10 @@ console.log("\nuse controller meta");
   const updated = reducer({ ...initialState, meta: before }, { type: "meta", meta: completed });
   eq(updated.meta?.canonicalTodos?.[0]?.status, "completed", "meta refresh applies canonical todo progress");
 
-  const reset = reducer(updated, { type: "reset" });
+  const withDismissed = reducer(updated, { type: "meta", meta: meta({ canonicalTodos: completed.canonicalTodos, dismissedTodoBatches: ["done"] }) });
+  const reset = reducer(withDismissed, { type: "reset" });
   eq(reset.meta?.canonicalTodos, undefined, "session reset clears canonical todos from the previous session");
+  eq(reset.meta?.dismissedTodoBatches, undefined, "session reset clears persisted todo dismissals from the previous session");
 
   const cleared = reducer(reset, { type: "meta", meta: meta({ canonicalTodos: [] }) });
   eq(cleared.meta?.canonicalTodos?.length, 0, "authoritative empty canonical todos survive meta refresh");

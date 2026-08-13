@@ -19,6 +19,7 @@ const moduleUrl = `data:text/javascript;base64,${Buffer.from(transpiled).toStrin
 const {
   dismissedTodoKeyForScope,
   resolveTodoPanelTodos,
+  sameStringList,
   sameTodoList,
   scopedTodoBatchKey,
   scopedTodoDismissalKey,
@@ -161,6 +162,19 @@ assert.equal(
   true,
   "an incomplete restored todo list must reappear even after a stale local dismissal",
 );
+assert.equal(
+  shouldShowTodoPanel(activeKey, null, activeTodos, { batchKey: todoBatchKey(activeTodos), batches: [todoBatchKey(activeTodos)] }),
+  true,
+  "a persisted completed-batch dismissal cannot hide unfinished work",
+);
+const completedBatch = todoBatchKey(completedTodos);
+assert.equal(
+  shouldShowTodoPanel(completedKey, null, completedTodos, { batchKey: completedBatch, batches: [completedBatch] }),
+  false,
+  "a session-sidecar batch dismissal hides the completed shelf after upgrade remount",
+);
+assert.equal(sameStringList(["a"], ["a"]), true, "identical dismissed batch lists compare equal");
+assert.equal(sameStringList(["a"], ["b"]), false, "changed dismissed batch lists compare unequal");
 assert.notEqual(
   activeKey,
   todoDismissalKey([{ ...activeTodos[0], status: "completed" }, { ...activeTodos[1], status: "in_progress" }]),

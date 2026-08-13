@@ -9,9 +9,12 @@ import { Archive, ArrowDown, Pencil, Plus, Folder, FolderPlus, Search, Briefcase
 import { asArray } from "../lib/array";
 import { useToast } from "../lib/toast";
 import { app } from "../lib/bridge";
-import type { ProjectNode, ProjectTopicStatus } from "../lib/types";
+import { onProjectTreeChangedV2 } from "../lib/sessionCatalogBridge";
+import { isRuntimeSessionNode, isTopicNode, mergeProjectTopicPage, projectTreeDedupedExactTime, projectTreeEventAffectsFolder, projectTreeFolderDisclosure, projectTreeReadActivityKey, projectTreeRevisionIsFresh, projectTreeShellChildren, projectTreeShouldApplyShellSnapshot, projectTreeShouldRenderTopicActions, projectTreeShouldSuppressOpenForRename, projectTreeTopicArchiveBlocked, projectTreeTopicHasUnreadActivity, projectTreeTopicHoverCardModel, projectTreeTopicMenuOffersPin, projectTreeTopicMetaLine, projectTreeTopicOpenRequest, projectTreeWithoutTopic, topicActivityAt, topicActivityDateLabel, topicActivityLabel, topicIsActive, topicStatus, topicStatusLabel, topicUnknownTimeLabel, type ProjectTreePendingTopicOpen, type ProjectTreeReadActivity, type ProjectTreeTopicHoverCard, type ProjectTreeVariant } from "../lib/projectTreeTopic";
+export * from "../lib/projectTreeTopic";
+import type { ProjectNode, SessionCatalogStatus } from "../lib/types";
 import { topicActivityTime } from "../lib/session";
-import { getLocale, useT, type DictKey, type Translator } from "../lib/i18n";
+import { useT, type Translator } from "../lib/i18n";
 import { PROJECT_COLOR_OPTIONS, projectColorValue } from "../lib/projectColors";
 import { useProjectTreeArchiveState } from "../lib/projectTreeArchive";
 import { topicShortcutLabel, type TopicShortcutEntry } from "../lib/topicShortcuts";
@@ -19,9 +22,6 @@ import type { ShortcutPlatform } from "../lib/keyboardShortcuts";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
 import { Tooltip } from "./Tooltip";
 import { WorktreeBadge } from "./WorktreeBadge";
-
-type ProjectTreeVariant = "classic" | "workbench" | "creation";
-
 interface ProjectTreeProps {
   activeScope?: string;
   activeWorkspaceRoot?: string;
@@ -56,249 +56,6 @@ function projectNodeKey(node: ProjectNode, depth: number): string {
   return node.key || `${node.kind}-${node.root ?? ""}-${node.topicId ?? ""}-${depth}`;
 }
 
-function isRuntimeSessionNode(node: ProjectNode): boolean {
-  return node.kind === "session" || node.kind === "global_session";
-}
-
-function isTopicNode(node: ProjectNode): boolean {
-  return node.kind === "topic" || node.kind === "global_topic";
-}
-
-export type ProjectTreeTopicOpenRequest = {
-  scope: "global" | "project";
-  workspaceRoot: string;
-  topicId: string;
-  sessionPath?: string;
-};
-
-export function projectTreeTopicOpenRequest(node: ProjectNode): ProjectTreeTopicOpenRequest | null {
-  if (!isTopicNode(node) && !isRuntimeSessionNode(node)) return null;
-  const scope = node.kind === "global_topic" || node.kind === "global_session" ? "global" : "project";
-  return {
-    scope,
-    workspaceRoot: scope === "global" ? "" : node.root ?? "",
-    topicId: node.topicId ?? "",
-    sessionPath: node.sessionPath,
-  };
-}
-
-type ProjectTreeTopicClickTarget = {
-  rowKey: string;
-  canRename: boolean;
-};
-
-type ProjectTreePendingTopicOpen = ProjectTreeTopicClickTarget & {
-  timer: ReturnType<typeof setTimeout>;
-};
-
-export function projectTreeShouldSuppressOpenForRename(
-  pending: ProjectTreeTopicClickTarget | null,
-  next: ProjectTreeTopicClickTarget,
-): boolean {
-  return Boolean(pending && pending.rowKey === next.rowKey && pending.canRename && next.canRename);
-}
-
-export type ProjectTreeFolderDisclosure = {
-  canExpand: boolean;
-  isOpen: boolean;
-  ariaExpanded?: boolean;
-  iconStackClassName: string;
-};
-
-// allowEmptyExpand lets classic folders open without children so the expanded
-// state can host the "no sessions" placeholder row; other variants keep the
-// original contract where empty folders are inert.
-export function projectTreeFolderDisclosure(hasChildren: boolean, isExpanded: boolean, allowEmptyExpand = false): ProjectTreeFolderDisclosure {
-  const canExpand = hasChildren || allowEmptyExpand;
-  const isOpen = canExpand && isExpanded;
-  return {
-    canExpand,
-    isOpen,
-    ariaExpanded: canExpand ? isExpanded : undefined,
-    iconStackClassName: `project-tree__icon-stack${canExpand ? " project-tree__icon-stack--expandable" : ""}`,
-  };
-}
-
-function topicIsActive(node: ProjectNode, activeScope?: string, activeWorkspaceRoot?: string, activeTopicId?: string, activeSessionPath?: string): boolean {
-  if (!isTopicNode(node) && !isRuntimeSessionNode(node)) return false;
-  if (node.sessionPath) return Boolean(activeSessionPath && activeSessionPath === node.sessionPath);
-  if (activeSessionPath && asArray(node.children).some(isRuntimeSessionNode)) return false;
-  const scope = node.kind === "global_topic" ? "global" : "project";
-  return (
-    activeTopicId === node.topicId &&
-    activeScope === scope &&
-    (scope === "global" || activeWorkspaceRoot === node.root)
-  );
-}
-
-export function projectTreeTopicMetaLine(node: ProjectNode, t: Translator, compact = false): string {
-  const parts: string[] = [];
-  const turns = node.turns ?? 0;
-  if (turns > 0) parts.push(t(turns === 1 ? "history.turnOne" : "history.turnOther", { n: turns }));
-  const activityAt = node.lastActivityAt || node.createdAt || 0;
-  if (activityAt) parts.push(topicActivityLabel(activityAt, t, compact));
-  if (parts.length === 0) parts.push(t("projectTree.previously"));
-  return parts.join(" · ");
-}
-
-// Model for the classic hover preview card: the row keeps a time-only meta
-// line, so the card carries the full title, turns, exact date, and project.
-export type ProjectTreeTopicHoverCard = {
-  title: string;
-  statusLabel: string;
-  metaLine: string;
-  exactTime: string;
-  projectLabel: string;
-};
-
-// Activity labels older than a week are already the calendar date (always the
-// meta line's last part), so callers pairing the two keep a single copy.
-export function projectTreeDedupedExactTime(metaLine: string, exactTime: string): string {
-  return exactTime && metaLine.endsWith(exactTime) ? "" : exactTime;
-}
-
-export function projectTreeTopicHoverCardModel(node: ProjectNode, t: Translator, projectLabel: string): ProjectTreeTopicHoverCard {
-  const activityAt = node.lastActivityAt || node.createdAt || 0;
-  const metaLine = projectTreeTopicMetaLine(node, t);
-  const exactTime = activityAt ? topicActivityDateLabel(activityAt) : "";
-  return {
-    title: (node.label || node.topicId || "Untitled").replace(/^●\s*/, ""),
-    statusLabel: topicStatusLabel(node, t),
-    metaLine,
-    exactTime: projectTreeDedupedExactTime(metaLine, exactTime),
-    projectLabel,
-  };
-}
-
-function topicUnknownTimeLabel(node: ProjectNode, t: Translator): string {
-  return topicActivityAt(node) ? "" : t("projectTree.previously");
-}
-
-const topicStatusLabels: Record<ProjectTopicStatus, DictKey> = {
-  thinking: "projectTree.status.thinking",
-  streaming: "projectTree.status.streaming",
-  waiting_confirmation: "projectTree.status.waitingConfirmation",
-  background_job: "projectTree.status.backgroundJob",
-  paused: "projectTree.status.paused",
-  error: "projectTree.status.error",
-};
-
-function normalizeTopicStatus(status?: string): ProjectTopicStatus | "" {
-  if (!status) return "";
-  if (status === "thinking" || status === "streaming" || status === "waiting_confirmation" || status === "background_job" || status === "paused" || status === "error") {
-    return status;
-  }
-  return "";
-}
-
-function topicStatus(node: ProjectNode): ProjectTopicStatus | "" {
-  return normalizeTopicStatus(node.status) || (node.running ? "streaming" : "");
-}
-
-export function projectTreeTopicArchiveBlocked(node: ProjectNode): boolean {
-  if (asArray(node.children).some(projectTreeTopicArchiveBlocked)) return true;
-  const status = normalizeTopicStatus(node.status);
-  if (status === "thinking" || status === "streaming" || status === "waiting_confirmation" || status === "background_job") return true;
-  if (status === "paused" || status === "error") return false;
-  return Boolean(node.running);
-}
-
-function topicStatusLabel(node: ProjectNode, t: Translator): string {
-  const status = topicStatus(node);
-  return status ? t(topicStatusLabels[status]) : "";
-}
-
-function topicActivityAt(node: ProjectNode): number {
-  return node.lastActivityAt || node.createdAt || 0;
-}
-
-export function projectTreeReadActivityKey(node: ProjectNode): string | null {
-  const request = projectTreeTopicOpenRequest(node);
-  if (!request?.topicId) return null;
-  return [
-    request.scope,
-    request.workspaceRoot,
-    request.topicId,
-    request.sessionPath ?? "",
-  ].join("\u001f");
-}
-
-type ProjectTreeReadActivity = Record<string, number>;
-
-export function projectTreeTopicHasUnreadActivity(
-  node: ProjectNode,
-  readActivity: ProjectTreeReadActivity,
-  activeScope?: string,
-  activeWorkspaceRoot?: string,
-  activeTopicId?: string,
-  activeSessionPath?: string,
-): boolean {
-  if (!isTopicNode(node) && !isRuntimeSessionNode(node)) return false;
-  if (topicIsActive(node, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath)) return false;
-  if (topicStatus(node) !== "") return false;
-  const key = projectTreeReadActivityKey(node);
-  const activityAt = topicActivityAt(node);
-  return Boolean(key && activityAt > 0 && (readActivity[key] ?? 0) < activityAt);
-}
-
-export function projectTreeShouldRenderTopicActions(isSessionNode: boolean, variant: ProjectTreeVariant, unread: boolean): boolean {
-  return !isSessionNode && variant !== "creation" && !unread;
-}
-
-// Pinning reorders the classic/workbench trees shared with creation mode, so
-// the creation context menu keeps its original rename/trash-only entries.
-export function projectTreeTopicMenuOffersPin(variant: ProjectTreeVariant): boolean {
-  return variant !== "creation";
-}
-
-function topicActivityLabel(ms: number, t: Translator, compact = false): string {
-  if (ms <= 0) return "";
-  const delta = Date.now() - ms;
-  const locale = getLocale();
-  const minute = 60_000;
-  const hour = 60 * minute;
-  const day = 24 * hour;
-  const month = 30 * day;
-  const year = 365 * day;
-  if (delta < minute) return t("projectTree.justNow");
-  if (!compact) {
-    const rtfLocale = locale === "zh" ? "zh-CN" : locale === "zh-TW" ? "zh-TW" : "en";
-    const rtf = new Intl.RelativeTimeFormat(rtfLocale, { numeric: "auto" });
-    if (delta < hour) return rtf.format(-Math.max(1, Math.round(delta / minute)), "minute");
-    if (delta < day) return rtf.format(-Math.round(delta / hour), "hour");
-    if (delta < 7 * day) return rtf.format(-Math.round(delta / day), "day");
-    return topicActivityDateLabel(ms);
-  }
-  if (delta < hour) {
-    const value = Math.max(1, Math.round(delta / minute));
-    return locale === "zh" || locale === "zh-TW" ? `${value} 分钟` : `${value}m`;
-  }
-  if (delta < day) {
-    const value = Math.round(delta / hour);
-    return locale === "zh" || locale === "zh-TW" ? `${value} 小时` : `${value}h`;
-  }
-  if (delta < 7 * day) {
-    const value = Math.round(delta / day);
-    return locale === "zh" || locale === "zh-TW" ? `${value} 天` : `${value}d`;
-  }
-  if (delta < month) {
-    const value = Math.round(delta / day);
-    return locale === "zh" || locale === "zh-TW" ? `${value} 天` : `${value}d`;
-  }
-  if (delta < year) {
-    const value = Math.max(1, Math.round(delta / month));
-    return locale === "zh" || locale === "zh-TW" ? `${value} 个月` : `${value}mo`;
-  }
-  const value = Math.max(1, Math.round(delta / year));
-  return locale === "zh" || locale === "zh-TW" ? `${value} 年` : `${value}y`;
-}
-
-function topicActivityDateLabel(ms: number): string {
-  if (ms <= 0) return "";
-  const locale = getLocale();
-  const dateLocale = locale === "zh" ? "zh-CN" : locale === "zh-TW" ? "zh-TW" : "en";
-  return new Date(ms).toLocaleDateString(dateLocale);
-}
 
 type ProjectDropPosition = "before" | "after";
 type WorkbenchHeaderMenu = "more" | "add" | null;
@@ -320,7 +77,7 @@ const WORKBENCH_ORGANIZE_KEY = "projectTree:workbenchOrganize";
 // Shared by classic and workbench; key string kept for existing saved choices.
 const WORKBENCH_SORT_KEY = "projectTree:workbenchSort";
 const READ_ACTIVITY_KEY = "projectTree:readActivity";
-const READ_ACTIVITY_INIT_KEY = "projectTree:readActivityInitialized";
+const READ_ACTIVITY_BASELINE_KEY = "projectTree:readActivityBaselineAt";
 
 function loadReadActivity(): ProjectTreeReadActivity {
   try {
@@ -342,6 +99,18 @@ function saveReadActivity(readActivity: ProjectTreeReadActivity) {
     localStorage.setItem(READ_ACTIVITY_KEY, JSON.stringify(readActivity));
   } catch {
     /* localStorage unavailable */
+  }
+}
+
+function loadReadActivityBaselineAt(): number {
+  try {
+    const parsed = Number(localStorage.getItem(READ_ACTIVITY_BASELINE_KEY));
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    const now = Date.now();
+    localStorage.setItem(READ_ACTIVITY_BASELINE_KEY, String(now));
+    return now;
+  } catch {
+    return Date.now();
   }
 }
 
@@ -409,7 +178,26 @@ export function activeSessionAncestorKeys(
     }
     return null;
   };
-  return walk(nodes, []) ?? [];
+  const found = walk(nodes, []);
+  if (found) return found;
+  // Shell-only snapshots no longer embed topics. Expand the matching project or
+  // Global folder by workspace identity so the first lazy page can load.
+  const scope = (activeScope ?? "").trim();
+  const root = (activeWorkspaceRoot ?? "").trim();
+  for (const node of nodes) {
+    if (!node) continue;
+    if (scope === "global" && node.kind === "global_folder") {
+      return [projectNodeKey(node, 0)];
+    }
+    if (node.kind === "project" && root && (node.root === root || node.root === activeWorkspaceRoot)) {
+      return [projectNodeKey(node, 0)];
+    }
+    if (!scope && !root && activeTopicId && (node.kind === "project" || node.kind === "global_folder")) {
+      // Active topic without resolved scope still needs a folder open path.
+      return [projectNodeKey(node, 0)];
+    }
+  }
+  return [];
 }
 
 export function defaultExpandedProjectTreeKeys(
@@ -617,6 +405,21 @@ export function ProjectTree({
   const compactTopics = variant === "workbench";
   const creationTopics = variant === "creation";
   const [tree, setTree] = useState<ProjectNode[]>([]);
+  const treeRef = useRef<ProjectNode[]>([]);
+  const latestRevisionRef = useRef(0);
+  const [catalogStatus, setCatalogStatus] = useState<SessionCatalogStatus>({
+    state: "opening", revision: 0, indexed: 0, total: 0, repairPending: 0,
+  });
+  const [indexingDone, setIndexingDone] = useState(false);
+  const [topicPageState, setTopicPageState] = useState<Record<string, { nextCursor?: string; loading: boolean }>>({});
+  const topicPageStateRef = useRef(topicPageState);
+  const updateTopicPageState = useCallback((key: string, next: { nextCursor?: string; loading: boolean }) => {
+    setTopicPageState((current) => {
+      const updated = { ...current, [key]: next };
+      topicPageStateRef.current = updated;
+      return updated;
+    });
+  }, []);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [manuallyCollapsed, setManuallyCollapsed] = useState<Set<string>>(new Set());
   const [creatingProject, setCreatingProject] = useState<string | null>(null);
@@ -641,6 +444,7 @@ export function ProjectTree({
   const [workbenchOrganizeMode, setWorkbenchOrganizeMode] = useState<WorkbenchOrganizeMode>(loadWorkbenchOrganizeMode);
   const [workbenchSortMode, setWorkbenchSortMode] = useState<WorkbenchSortMode>(loadWorkbenchSortMode);
   const [readActivity, setReadActivity] = useState<ProjectTreeReadActivity>(loadReadActivity);
+  const [readBaselineAt] = useState(loadReadActivityBaselineAt);
   const filterRef = useRef<HTMLDivElement>(null);
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -695,14 +499,75 @@ export function ProjectTree({
     });
   }, []);
 
-  // Keyed by the data, not the selection: a switch cannot change the tree.
-  const refresh = useCallback(async () => {
+  const topicLoadSeqRef = useRef<Record<string, number>>({});
+  const loadProjectTopicsRef = useRef<(project: ProjectNode, append?: boolean) => Promise<void>>(async () => {});
+
+  const loadProjectTopics = useCallback(async (project: ProjectNode, append = false) => {
+    if (project.kind !== "project" && project.kind !== "global_folder") return;
+    const key = project.key;
+    const pageState = topicPageStateRef.current[key];
+    const cursor = append ? pageState?.nextCursor ?? "" : "";
+    if (append && !cursor) return;
+    // Last-query-wins: never drop a newer search because an older page is still loading.
+    const seq = (topicLoadSeqRef.current[key] ?? 0) + 1;
+    topicLoadSeqRef.current[key] = seq;
+    updateTopicPageState(key, { ...pageState, loading: true });
     try {
-      setTree(asArray(await app.ListProjectTree()));
+      const page = await app.ListProjectTopics({
+        scope: project.kind === "global_folder" ? "global" : "project",
+        workspaceRoot: project.kind === "global_folder" ? "" : project.root ?? "",
+        cursor,
+        limit: timeFilter === "10" ? 10 : timeFilter === "20" ? 20 : 50,
+        query: query.trim(),
+        timeFilter: timeFilter === "10" || timeFilter === "20" || timeFilter === "all" ? "" : timeFilter,
+      });
+      if (topicLoadSeqRef.current[key] !== seq) return;
+      if (!projectTreeRevisionIsFresh(latestRevisionRef.current, page.revision)) {
+        updateTopicPageState(key, { ...topicPageStateRef.current[key], loading: false });
+        return;
+      }
+      latestRevisionRef.current = Math.max(latestRevisionRef.current, page.revision);
+      const items = asArray(page.items);
+      setTree((current) => current.map((node) => {
+        if (node.key !== key) return node;
+        return { ...node, children: mergeProjectTopicPage(asArray(node.children), items, append) };
+      }));
+      updateTopicPageState(key, { nextCursor: page.nextCursor, loading: false });
+    } catch {
+      if (topicLoadSeqRef.current[key] !== seq) return;
+      updateTopicPageState(key, { ...topicPageStateRef.current[key], loading: false });
+    }
+  }, [query, timeFilter, updateTopicPageState]);
+  loadProjectTopicsRef.current = loadProjectTopics;
+  // Snapshot is intentionally shells-only. Preserve already loaded pages by
+  // project key so a metadata refresh does not collapse or blank the sidebar.
+  const refresh = useCallback(async (options?: { reloadTopics?: boolean }) => {
+    try {
+      const snapshot = await app.GetProjectTreeSnapshot();
+      const rev = snapshot.revision ?? 0, empty = treeRef.current.length === 0;
+      if (!projectTreeShouldApplyShellSnapshot({ currentRevision: latestRevisionRef.current, incomingRevision: rev, treeEmpty: empty })) return;
+      if (projectTreeRevisionIsFresh(latestRevisionRef.current, rev)) latestRevisionRef.current = Math.max(latestRevisionRef.current, rev);
+      const projects = asArray(snapshot.projects);
+      setCatalogStatus(snapshot.catalog);
+      setIndexingDone(Boolean(snapshot.indexingDone));
+      const keepLoadedTopics = !options?.reloadTopics;
+      setTree((current) => projects.map((project) => {
+        const previous = current.find((node) => node.key === project.key);
+        return { ...project, children: projectTreeShellChildren(previous?.children, { keepLoadedTopics }) };
+      }));
+      if (options?.reloadTopics) {
+        for (const project of projects) {
+          void loadProjectTopicsRef.current(project);
+        }
+      }
     } catch {
       /* bridge unavailable */
     }
   }, []);
+
+  useEffect(() => {
+    treeRef.current = tree;
+  }, [tree]);
 
   useEffect(() => {
     manuallyCollapsedRef.current = manuallyCollapsed;
@@ -719,6 +584,43 @@ export function ProjectTree({
     void refresh();
   }, [refresh, refreshSignal]);
 
+  useEffect(() => onProjectTreeChangedV2((event) => {
+    if (!projectTreeRevisionIsFresh(latestRevisionRef.current, event.revision)) return;
+    latestRevisionRef.current = Math.max(latestRevisionRef.current, event.revision);
+    void app.GetSessionCatalogStatus().then(setCatalogStatus).catch(() => {});
+    if (treeRef.current.length === 0) { void refresh(); return; } // race: event before shell
+    const affected = asArray(event.roots);
+    for (const project of treeRef.current) {
+      const key = projectNodeKey(project, 0);
+      if (!expanded.has(key)) continue;
+      if (projectTreeEventAffectsFolder(project, affected)) void loadProjectTopics(project);
+    }
+  }), [expanded, loadProjectTopics, refresh]);
+
+  // Debounce query/timeFilter reloads so typing does not stampede the catalog.
+  // Expansion and tree shell arrival still load on the same path after the delay.
+  useEffect(() => {
+    const filtering = query.trim() !== "" || timeFilter !== "all";
+    const timer = setTimeout(() => {
+      for (const project of treeRef.current) {
+        const key = projectNodeKey(project, 0);
+        if (filtering || expanded.has(key)) void loadProjectTopics(project);
+      }
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [expanded, loadProjectTopics, query, timeFilter, tree]);
+
+  // First catalog scan can finish before the frontend subscribed to v2 events.
+  // Reload expanded folders once indexingDone flips so the metadata fallback
+  // is replaced by the scanned projection without requiring New Chat.
+  useEffect(() => {
+    if (!indexingDone) return;
+    for (const project of treeRef.current) {
+      const key = projectNodeKey(project, 0);
+      if (expanded.has(key)) void loadProjectTopics(project);
+    }
+  }, [indexingDone, expanded, loadProjectTopics]);
+
   // Following the active topic is a view concern over the tree already held.
   useEffect(() => {
     const collapsed = manuallyCollapsedRef.current;
@@ -733,51 +635,13 @@ export function ProjectTree({
     const activityAt = topicActivityAt(node);
     if (!key || activityAt <= 0) return;
     setReadActivity((prev) => {
-      if ((prev[key] ?? 0) >= activityAt) return prev;
-      const next = { ...prev, [key]: activityAt };
+      const readAt = Math.max(activityAt, Date.now());
+      if ((prev[key] ?? 0) >= readAt) return prev;
+      const next = { ...prev, [key]: readAt };
       saveReadActivity(next);
       return next;
     });
   }, []);
-
-  useEffect(() => {
-    if (tree.length === 0) return;
-    try {
-      if (localStorage.getItem(READ_ACTIVITY_INIT_KEY)) return;
-    } catch {
-      return;
-    }
-    const baseline: ProjectTreeReadActivity = {};
-    const collectBaseline = (nodes: ProjectNode[]) => {
-      for (const node of nodes) {
-        if ((isTopicNode(node) || isRuntimeSessionNode(node)) && topicStatus(node) === "") {
-          const key = projectTreeReadActivityKey(node);
-          const activityAt = topicActivityAt(node);
-          if (key && activityAt > 0) baseline[key] = Math.max(baseline[key] ?? 0, activityAt);
-        }
-        collectBaseline(asArray(node.children));
-      }
-    };
-    collectBaseline(tree);
-    try {
-      localStorage.setItem(READ_ACTIVITY_INIT_KEY, "1");
-    } catch {
-      /* localStorage unavailable */
-    }
-    if (Object.keys(baseline).length === 0) return;
-    setReadActivity((prev) => {
-      const next = { ...prev };
-      let changed = false;
-      for (const [key, value] of Object.entries(baseline)) {
-        if ((next[key] ?? 0) >= value) continue;
-        next[key] = value;
-        changed = true;
-      }
-      if (!changed) return prev;
-      saveReadActivity(next);
-      return next;
-    });
-  }, [tree]);
 
   useEffect(() => {
     const markActive = (nodes: ProjectNode[]) => {
@@ -852,7 +716,7 @@ export function ProjectTree({
     items[next]?.focus();
   };
 
-  const toggleExpand = (key: string) => {
+  const toggleExpand = (key: string, project?: ProjectNode) => {
     const willCollapse = expanded.has(key);
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -866,6 +730,7 @@ export function ProjectTree({
       else next.delete(key);
       return next;
     });
+    if (!willCollapse && project) void loadProjectTopics(project);
   };
 
   const folderKeys = useMemo(() => collapsibleFolderKeys(tree), [tree]);
@@ -1045,14 +910,16 @@ export function ProjectTree({
   const trashTopic = async (topicId: string) => {
     if (!beginTrashingTopic(topicId)) return;
     try {
+      setTree((current) => projectTreeWithoutTopic(current, topicId));
       await app.TrashTopic(topicId);
       setMenuTopic(null);
       setMenuPoint(null);
       setConfirmAction(null);
-      await refresh();
+      await refresh({ reloadTopics: true });
       await onTopicsChanged?.();
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), "error");
+      await refresh({ reloadTopics: true });
     } finally {
       endTrashingTopic(topicId);
     }
@@ -1291,7 +1158,9 @@ export function ProjectTree({
     const children = asArray(node.children);
     const isExpanded = query.trim() ? true : expanded.has(key);
     const hasChildren = children.length > 0;
-    const folderDisclosure = projectTreeFolderDisclosure(hasChildren, isExpanded, classicTopics);
+    // Snapshot rows are shells with no children until the first page is loaded,
+    // so every project folder must remain expandable while indexing.
+    const folderDisclosure = projectTreeFolderDisclosure(hasChildren, isExpanded, true);
 
     if (isTopicNode(node) || isRuntimeSessionNode(node)) {
       const isSessionNode = isRuntimeSessionNode(node);
@@ -1301,7 +1170,7 @@ export function ProjectTree({
       const accentStyle = projectAccentStyle(node.projectColor, scope === "global" ? "var(--project-tree-global-accent)" : undefined);
       const active = topicIsActive(node, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath);
       const label = (node.label || node.topicId || "Untitled").replace(/^●\s*/, "");
-      const conflictCopyLabel = isSessionNode && node.recovered ? t("recovery.badge") : "";
+      // Ordinary list never advertises recovery copies; History owns that view.
       const activityAt = node.lastActivityAt || node.createdAt || 0;
       // Every variant is a single-line row with the activity time on the right;
       // classic moved there too so turns and the exact date live in the hover
@@ -1320,15 +1189,14 @@ export function ProjectTree({
       const showStatusInSide = status === "thinking" || status === "streaming" || status === "waiting_confirmation" || status === "background_job";
       const showWaitingPill = waitingConfirmation;
       const showSideTime = sideTimeVisible && !showWaitingPill;
-      const unread = projectTreeTopicHasUnreadActivity(node, readActivity, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath);
+      const unread = projectTreeTopicHasUnreadActivity(node, readActivity, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath, readBaselineAt);
       const topicId = node.topicId ?? "";
       const topicTrashing = trashingTopics.has(topicId);
       const imSource = scope === "global" && topicId ? imTopicSources[topicId] : undefined;
       const imSourceLabel = imSource?.label || "";
       const imSourceTitle = imSourceLabel ? t("msg.fromIm", { source: imSourceLabel }) : "";
       const imSourcePlatform = (imSource?.platform || "im").replace(/[^a-z0-9_-]/gi, "").toLowerCase() || "im";
-      const conflictCopyTitle = isSessionNode && node.recovered ? t("recovery.branch") : "";
-      const title = [label, conflictCopyTitle, imSourceTitle, statusLabel, metaFull, projectTreeDedupedExactTime(metaFull, exactTimeLabel)].filter(Boolean).join(" · ");
+      const title = [label, imSourceTitle, statusLabel, metaFull, projectTreeDedupedExactTime(metaFull, exactTimeLabel)].filter(Boolean).join(" · ");
       const topicMenuOpen = !isSessionNode && menuTopic === topicId;
       const pinned = Boolean(node.pinned);
       const pinLabel = t(pinned ? "projectTree.unpinTopic" : "projectTree.pinTopic");
@@ -1452,7 +1320,7 @@ export function ProjectTree({
           >
             <span className="project-tree__topic-copy">
               <span className="project-tree__topic-heading">
-                <span className="project-tree__topic-label">{conflictCopyLabel ? `${label} · ${conflictCopyLabel}` : label}</span>
+                <span className="project-tree__topic-label">{label}</span>
                 {imSource && (
                   <span
                     className={`project-tree__topic-im project-tree__topic-im--${imSourcePlatform}`}
@@ -1463,7 +1331,7 @@ export function ProjectTree({
                     <span>{imSourceLabel}</span>
                   </span>
                 )}
-                {!compactTopics && statusLabel && (!classicTopics || status === "paused" || status === "error") && (
+                {!compactTopics && statusLabel && (!classicTopics || status === "paused" || status === "awaiting_delivery" || status === "error") && (
                   <span className={`project-tree__topic-status project-tree__topic-status--${status}`}>{statusLabel}</span>
                 )}
               </span>
@@ -1784,6 +1652,7 @@ export function ProjectTree({
       ? classicTopicWindow(children, folderShowAll)
       : { visible: children, hiddenCount: 0 };
     const windowToggleVisible = classicTruncationActive && (hiddenCount > 0 || (folderShowAll && children.length > CLASSIC_TOPIC_PREVIEW_LIMIT));
+    const backendPage = topicPageState[key];
     const renderFolderChildren = () => {
       if (!hasChildren) {
         if (!classicTopics) return null;
@@ -1809,6 +1678,17 @@ export function ProjectTree({
                 onClick={() => toggleShowAllTopics(key)}
               >
                 {hiddenCount > 0 ? t("projectTree.showMoreTopics", { n: hiddenCount }) : t("projectTree.showFewerTopics")}
+              </button>
+            )}
+            {backendPage?.nextCursor && (
+              <button
+                type="button"
+                className="project-tree__topic-window-toggle"
+                style={{ paddingLeft: 14 + (depth + 1) * 16 }}
+                disabled={backendPage.loading}
+                onClick={() => void loadProjectTopics(node, true)}
+              >
+                {backendPage.loading ? t("projectTree.indexing") : t("projectTree.loadMore")}
               </button>
             )}
           </div>
@@ -1861,7 +1741,7 @@ export function ProjectTree({
             className="project-tree__folder-main"
             style={{ paddingLeft: 8 + depth * 16 }}
             onClick={() => {
-              if (folderDisclosure.canExpand) toggleExpand(key);
+              if (folderDisclosure.canExpand) toggleExpand(key, node);
             }}
             onKeyDown={(event) => {
               if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
@@ -2316,6 +2196,11 @@ export function ProjectTree({
             placeholder={t("projectTree.searchPlaceholder")}
           />
         </label>
+      )}
+      {(catalogStatus.state === "opening" || catalogStatus.state === "rebuilding" || catalogStatus.repairPending > 0) && (
+        <div className="project-tree__catalog-progress" role="status">
+          {t("projectTree.indexingProgress", { done: catalogStatus.indexed, total: catalogStatus.total || "?" })}
+        </div>
       )}
       {compactTopics ? (
         <>

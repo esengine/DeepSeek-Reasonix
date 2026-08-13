@@ -5,9 +5,20 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync/atomic"
 
 	"reasonix/internal/evidence"
 )
+
+// recoveryIdentity is who this agent is to the shared gate: the labels a
+// recovery card shows, and a run counter that keeps ordinary (non-goal) runs of
+// one task in collision-free scopes. Goal runs use their stable delivery scope
+// instead, so the counter is only ever read through recoveryTaskScopeID.
+type recoveryIdentity struct {
+	agentID string        // empty = root
+	taskID  string        // empty shares the root task bucket
+	runSeq  atomic.Uint64 // bumped per Run; never reset
+}
 
 // RecoveryGate is the host-side Auto Guard consulted by the agent around tool
 // execution. It is independent of the permission Gate and of
@@ -19,9 +30,9 @@ import (
 // mutation classification, and before permission approval and workspace
 // write-lock acquisition, so a waiting decision never holds a write lease.
 type RecoveryGate interface {
-	// ObserveResult records a completed call and returns optional guidance for
-	// the same agent's active turn. The caller, not the gate, owns delivery so a
-	// root or sub-agent failure can never start a concurrent controller turn.
+	// ObserveResult records a completed call and returns optional model-facing
+	// guidance for the same agent's active turn. The caller appends that text
+	// to the tool result. Do not deliver it as a user steer.
 	ObserveResult(ctx context.Context, result RecoveryObservation) string
 	BeforeMutation(ctx context.Context, proposal RecoveryProposal) (RecoveryDecision, error)
 }
@@ -175,9 +186,9 @@ const (
 	RecoveryActionRevise       RecoveryAction = "revise"
 )
 
-func (a *Agent) observeRecoveryResult(ctx context.Context, toolName string, args json.RawMessage, readOnly, mutates bool, result string, err error, blocked, userRejected bool, generation uint64) {
-	if a == nil || a.recoveryGate == nil {
-		return
+func (a *Agent) observeRecoveryResult(ctx context.Context, toolName string, args json.RawMessage, readOnly, mutates bool, result string, err error, blocked, userRejected bool, generation uint64) string {
+	if a == nil || a.svc.recoveryGate == nil {
+		return ""
 	}
 	verification := toolName == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(args))
 	success := err == nil && !blocked
@@ -201,16 +212,16 @@ func (a *Agent) observeRecoveryResult(ctx context.Context, toolName string, args
 		cancelled = true
 	}
 	episodeID := ""
-	if ctrl, ok := a.recoveryGate.(RecoveryEpisodeControl); ok {
+	if ctrl, ok := a.svc.recoveryGate.(RecoveryEpisodeControl); ok {
 		episodeID = ctrl.EpisodeID()
 		if generation == 0 {
 			generation = ctrl.Generation()
 		}
 	}
-	guidance := a.recoveryGate.ObserveResult(ctx, RecoveryObservation{
-		AgentID:      a.recoveryAgentID,
-		TaskID:       a.recoveryTaskID,
-		TaskScopeID:  recoveryTaskScopeID(a.deliveryScopeID, a.recoveryRunSeq.Load()),
+	return strings.TrimSpace(a.svc.recoveryGate.ObserveResult(ctx, RecoveryObservation{
+		AgentID:      a.recovery.agentID,
+		TaskID:       a.recovery.taskID,
+		TaskScopeID:  recoveryTaskScopeID(a.task.scopeID, a.recovery.runSeq.Load()),
 		EpisodeID:    episodeID,
 		Generation:   generation,
 		Tool:         toolName,
@@ -226,21 +237,32 @@ func (a *Agent) observeRecoveryResult(ctx context.Context, toolName string, args
 		EmptySearch:  emptySearch,
 		ErrSummary:   errSummary,
 		Output:       result,
-	})
-	if strings.TrimSpace(guidance) != "" {
-		// Tool execution happens inside Agent.Run, so this targets the exact root
-		// or sub-agent turn that failed. Never fall back to Controller.Steer here:
-		// synchronous headless Run does not participate in controller admission,
-		// and a fallback would start a second Agent.Run concurrently.
-		_ = a.Steer(guidance)
+	}))
+}
+
+func appendHostRecoveryGuidance(result, guidance string) string {
+	guidance = strings.TrimSpace(guidance)
+	if guidance == "" {
+		return result
 	}
+	if strings.TrimSpace(result) == "" {
+		return guidance
+	}
+	return strings.TrimRight(result, "\n") + "\n\n" + guidance
+}
+
+func (a *Agent) withRecoveryObservation(ctx context.Context, toolName string, args json.RawMessage, readOnly, mutates bool, result string, err error, generation uint64) string {
+	if a == nil || a.svc.recoveryGate == nil {
+		return result
+	}
+	return appendHostRecoveryGuidance(result, a.observeRecoveryResult(ctx, toolName, args, readOnly, mutates, result, err, false, false, generation))
 }
 
 func (a *Agent) recoveryEpisodeControl() RecoveryEpisodeControl {
-	if a == nil || a.recoveryGate == nil {
+	if a == nil || a.svc.recoveryGate == nil {
 		return nil
 	}
-	ctrl, _ := a.recoveryGate.(RecoveryEpisodeControl)
+	ctrl, _ := a.svc.recoveryGate.(RecoveryEpisodeControl)
 	return ctrl
 }
 

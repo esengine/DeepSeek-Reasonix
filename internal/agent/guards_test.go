@@ -321,7 +321,7 @@ func TestExecuteBatchParallelReadOnly(t *testing.T) {
 	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
 
 	start := time.Now()
-	batch := a.executeBatch(context.Background(), []provider.ToolCall{{Name: "a"}, {Name: "b"}, {Name: "c"}})
+	batch := a.executeBatch(context.Background(), &a.turn, []provider.ToolCall{{Name: "a"}, {Name: "b"}, {Name: "c"}})
 	results := batch.results
 	elapsed := time.Since(start)
 
@@ -346,7 +346,7 @@ func TestExecuteBatchStampsToolResultTimestamps(t *testing.T) {
 	a := New(nil, reg, NewSession(""), Options{}, sink)
 
 	before := time.Now().UnixMilli()
-	a.executeBatch(context.Background(), []provider.ToolCall{{Name: "a"}})
+	a.executeBatch(context.Background(), &a.turn, []provider.ToolCall{{Name: "a"}})
 	after := time.Now().UnixMilli()
 
 	results := sink.kinds(event.ToolResult)
@@ -371,7 +371,7 @@ func TestExecuteBatchMarksOnlyExecutedWritersForWorkspaceRefresh(t *testing.T) {
 	reg.Add(fakeTool{name: "read_file", readOnly: true})
 	sink := &recordSink{}
 	a := New(nil, reg, NewSession(""), Options{}, sink)
-	a.executeBatch(context.Background(), []provider.ToolCall{
+	a.executeBatch(context.Background(), &a.turn, []provider.ToolCall{
 		{Name: "write_file", Arguments: `{"path":"pkg/main.go","content":"x"}`},
 		{Name: "read_file", Arguments: `{"path":"pkg/main.go"}`},
 	})
@@ -392,7 +392,7 @@ func TestExecuteBatchMarksFailedWriterForWorkspaceRefresh(t *testing.T) {
 	reg.Add(fakeTool{name: "write_file", err: errors.New("partial write")})
 	sink := &recordSink{}
 	a := New(nil, reg, NewSession(""), Options{}, sink)
-	a.executeBatch(context.Background(), []provider.ToolCall{{Name: "write_file", Arguments: `{"path":"partial.go"}`}})
+	a.executeBatch(context.Background(), &a.turn, []provider.ToolCall{{Name: "write_file", Arguments: `{"path":"partial.go"}`}})
 	results := sink.kinds(event.ToolResult)
 	if len(results) != 1 || !results[0].Tool.WorkspaceMutation {
 		t.Fatalf("failed writer did not invalidate workspace: %+v", results)
@@ -410,7 +410,7 @@ func TestExecuteBatchPublishesWorkspaceMutationBeforeLaterToolCompletes(t *testi
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		a.executeBatch(context.Background(), []provider.ToolCall{
+		a.executeBatch(context.Background(), &a.turn, []provider.ToolCall{
 			{Name: "write_file", Arguments: `{"path":"ready.go","content":"x"}`},
 			{Name: "slow_read", Arguments: `{}`},
 		})
@@ -442,12 +442,18 @@ func TestExecuteBatchPublishesWorkspaceMutationBeforeLaterToolCompletes(t *testi
 
 func TestWorkspaceMutationClassifierTreatsGitCommitAsGitMetadata(t *testing.T) {
 	mutation, ok := workspaceMutationForCall("call", "bash", json.RawMessage(`{"command":"git commit -m test"}`), false)
-	if !ok || !mutation.GitMeta || !mutation.WorkingTree || !mutation.AllPaths {
+	if !ok || !mutation.GitMeta || mutation.Content || mutation.WorkingTree || mutation.Tree || !mutation.AllPaths {
 		t.Fatalf("git commit workspace invalidation = %+v, ok=%v", mutation, ok)
 	}
-	mutation, ok = workspaceMutationForCall("call", "bash", json.RawMessage(`{"command":"go test ./..."}`), false)
-	if !ok || mutation.GitMeta {
-		t.Fatalf("ordinary bash workspace invalidation refreshed git metadata: %+v, ok=%v", mutation, ok)
+	mutation, ok = workspaceMutationForCall("call", "bash", json.RawMessage(`{"command":"git commit -am test"}`), false)
+	if !ok || !mutation.GitMeta || !mutation.Content || !mutation.WorkingTree || !mutation.Tree {
+		t.Fatalf("content-writing git commit invalidation = %+v, ok=%v", mutation, ok)
+	}
+	if mutation, ok = workspaceMutationForCall("call", "bash", json.RawMessage(`{"command":"go test ./..."}`), false); ok {
+		t.Fatalf("ordinary verifier invalidated durable workspace state: %+v", mutation)
+	}
+	if mutation, ok = workspaceMutationForCall("call", "bash", json.RawMessage(`{"command":"date --set tomorrow"}`), false); ok {
+		t.Fatalf("host-only state write invalidated the workspace: %+v", mutation)
 	}
 	if mutation, ok = workspaceMutationForCall("call", "remember", json.RawMessage(`{"name":"preference"}`), false); ok {
 		t.Fatalf("host-only memory write invalidated the workspace: %+v", mutation)
@@ -463,7 +469,7 @@ func TestExecuteBatchCancelledCallsCarryNoTimestamps(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	a.executeBatch(ctx, []provider.ToolCall{{Name: "a"}})
+	a.executeBatch(ctx, &a.turn, []provider.ToolCall{{Name: "a"}})
 
 	results := sink.kinds(event.ToolResult)
 	if len(results) != 1 {
@@ -493,7 +499,7 @@ func TestExecuteBatchSegmentsAroundWrites(t *testing.T) {
 	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
 
 	start := time.Now()
-	batch := a.executeBatch(context.Background(), []provider.ToolCall{
+	batch := a.executeBatch(context.Background(), &a.turn, []provider.ToolCall{
 		{Name: "ro1"},
 		{Name: "ro2"},
 		{Name: "rw"},
@@ -532,7 +538,7 @@ func TestExecuteBatchFeedsReceiptsToCompleteStep(t *testing.T) {
 	reg.Add(completeStep)
 	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
 
-	batch := a.executeBatch(context.Background(), []provider.ToolCall{
+	batch := a.executeBatch(context.Background(), &a.turn, []provider.ToolCall{
 		{Name: "bash", Arguments: `{"command":"go test ./internal/..."}`},
 		{Name: "complete_step", Arguments: `{
 			"step":"Run checks",
@@ -555,11 +561,11 @@ func TestExecuteOneFailedReceiptDoesNotVerify(t *testing.T) {
 	reg.Add(fakeTool{name: "bash", readOnly: false, err: errors.New("boom")})
 	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
 
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "bash", Arguments: `{"command":"go test ./..."}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "bash", Arguments: `{"command":"go test ./..."}`})
 	if out.errMsg == "" {
 		t.Fatal("failing fake tool should return an error outcome")
 	}
-	if a.evidence.HasSuccessfulCommand("go test ./...") {
+	if a.task.ledger.HasSuccessfulCommand("go test ./...") {
 		t.Fatal("failed bash receipt must not verify")
 	}
 }
@@ -570,15 +576,15 @@ func TestRunResetsEvidenceLedger(t *testing.T) {
 	prov := &mockProvider{name: "p", chunks: []provider.Chunk{{Type: provider.ChunkText, Text: "done"}}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
 
-	a.executeOne(context.Background(), provider.ToolCall{Name: "bash", Arguments: `{"command":"go test ./..."}`})
-	if !a.evidence.HasSuccessfulCommand("go test ./...") {
+	a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "bash", Arguments: `{"command":"go test ./..."}`})
+	if !a.task.ledger.HasSuccessfulCommand("go test ./...") {
 		t.Fatal("setup failed to record evidence")
 	}
 
 	if err := a.Run(context.Background(), "next turn"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if a.evidence.HasSuccessfulCommand("go test ./...") {
+	if a.task.ledger.HasSuccessfulCommand("go test ./...") {
 		t.Fatal("new user turn should not inherit previous receipts")
 	}
 }

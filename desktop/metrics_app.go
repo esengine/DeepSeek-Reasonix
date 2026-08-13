@@ -64,8 +64,15 @@ func newMetricsAggregator(configDir string) *metricsAggregator {
 }
 
 func (m *metricsAggregator) inc(signal, bucket string) {
+	m.add(signal, bucket, 1)
+}
+
+func (m *metricsAggregator) add(signal, bucket string, n int) {
+	if n <= 0 {
+		return
+	}
 	m.mu.Lock()
-	m.c.add(signal, bucket, 1)
+	m.c.add(signal, bucket, n)
 	m.mu.Unlock()
 }
 
@@ -283,6 +290,13 @@ func (a *App) recordSettingsMetricsSnapshot(c *config.Config) {
 // recordDiagnosticMetric persists one bounded operational signal even when the
 // native event arrives before Wails OnStartup installs the session aggregator.
 func (a *App) recordDiagnosticMetric(signal, bucket string) {
+	a.recordDiagnosticMetricCount(signal, bucket, 1)
+}
+
+func (a *App) recordDiagnosticMetricCount(signal, bucket string, count int) {
+	if count <= 0 {
+		return
+	}
 	if version == "dev" {
 		return
 	}
@@ -294,7 +308,7 @@ func (a *App) recordDiagnosticMetric(signal, bucket string) {
 		}
 		m = newMetricsAggregator(config.MemoryUserDir())
 	}
-	m.inc(signal, metricBucket(bucket))
+	m.add(signal, metricBucket(bucket), count)
 	m.persist()
 }
 
@@ -514,10 +528,21 @@ type metricCounter struct {
 }
 
 type metricsPayload struct {
-	InstallID string          `json:"installId,omitempty"`
-	Version   string          `json:"version"`
-	OS        string          `json:"os"`
-	Counters  []metricCounter `json:"counters"`
+	InstallID      string          `json:"installId,omitempty"`
+	Version        string          `json:"version"`
+	OS             string          `json:"os"`
+	Arch           string          `json:"arch,omitempty"`
+	Channel        string          `json:"channel,omitempty"`
+	OSBuild        int             `json:"osBuild,omitempty"`
+	OSRevision     int             `json:"osRevision,omitempty"`
+	DistroID       string          `json:"distroId,omitempty"`
+	DistroVersion  string          `json:"distroVersion,omitempty"`
+	KernelVersion  string          `json:"kernelVersion,omitempty"`
+	SessionType    string          `json:"sessionType,omitempty"`
+	RuntimeEngine  string          `json:"runtimeEngine,omitempty"`
+	RuntimeVersion string          `json:"runtimeVersion,omitempty"`
+	GPUMode        string          `json:"gpuMode,omitempty"`
+	Counters       []metricCounter `json:"counters"`
 }
 
 func flatten(c counters) []metricCounter {
@@ -552,7 +577,16 @@ func (a *App) flushMetrics() {
 	}
 	metricsPendingMu.Unlock()
 	flat := flatten(readCounters(temp))
-	payload := metricsPayload{Version: version, OS: runtime.GOOS, Counters: flat}
+	device := collectDeviceInfo()
+	runtimeContext := webRuntimeContextForTelemetry(500 * time.Millisecond)
+	payload := metricsPayload{
+		Version: version, OS: runtime.GOOS, Arch: runtime.GOARCH, Channel: channel,
+		OSBuild: device.OSBuild, OSRevision: device.OSRevision,
+		DistroID: device.DistroID, DistroVersion: device.DistroVersion,
+		KernelVersion: device.KernelVersion, SessionType: device.SessionType,
+		RuntimeEngine: runtimeContext.Engine, RuntimeVersion: runtimeContext.RuntimeVersion,
+		GPUMode: runtimeContext.GPUMode, Counters: flat,
+	}
 	if id, err := installID(); err == nil {
 		payload.InstallID = id
 	}

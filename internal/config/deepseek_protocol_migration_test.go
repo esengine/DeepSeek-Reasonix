@@ -112,6 +112,56 @@ future_provider_field = "untouched"
 	}
 }
 
+func TestAutomaticDeepSeekProtocolMigrationReportsMalformedConfigWithoutRewriting(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	path := filepath.Join(home, "config.toml")
+	raw := `[[providers]]
+name = "deepseek-flash"
+kind = "openai"
+base_url = "https://api.deepseek.com"
+model = "deepseek-v4-flash"
+api_key_env = "DEEPSEEK_API_KEY"
+
+[[plugins]]
+name = "windows-mcp"
+command = "C:\Users\reasonix\mcp.exe"
+`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	changed, err := MigrateLegacyDeepSeekProtocolUserConfig()
+	if err == nil {
+		t.Fatal("automatic migration accepted malformed config")
+	}
+	if !IsDeepSeekProtocolConfigParseError(err) {
+		t.Fatalf("automatic migration error type = %T, want TOML parse error", err)
+	}
+	if changed {
+		t.Fatal("automatic migration reported changing malformed config")
+	}
+	next, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(next) != raw {
+		t.Fatalf("automatic migration rewrote malformed config:\n%s", next)
+	}
+
+	cfg, err := LoadForRootReadOnly(t.TempDir())
+	if err != nil {
+		t.Fatalf("resilient config load: %v", err)
+	}
+	if !cfg.HasLoadWarnings() {
+		t.Fatal("resilient config loader did not expose the malformed config")
+	}
+
+	if _, err := UpgradeDeepSeekProviderProtocol(path, "deepseek"); err == nil {
+		t.Fatal("explicit upgrade accepted malformed config")
+	}
+}
+
 func TestUpgradeDeepSeekProviderProtocolWritesThroughSymlinkAndPreservesMode(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "shared-config.toml")
@@ -557,7 +607,7 @@ func TestCanUpgradeDeepSeekProviderProtocolRejectsProxyButAllowsExplicitUpgradeO
 	}
 }
 
-func TestNormalizeOfficialDeepSeekModelsDoesNotAddProToResponses(t *testing.T) {
+func TestNormalizeOfficialDeepSeekModelsAddsProToResponses(t *testing.T) {
 	c := &Config{Providers: []ProviderEntry{{
 		Name: "deepseek", Kind: "responses", BaseURL: "https://api.deepseek.com",
 		Model: "deepseek-v4-flash",
@@ -568,10 +618,96 @@ func TestNormalizeOfficialDeepSeekModelsDoesNotAddProToResponses(t *testing.T) {
 	if !ok {
 		t.Fatal("DeepSeek provider missing after normalization")
 	}
-	if !p.HasModel("deepseek-v4-flash") {
-		t.Fatal("Responses provider lost its Flash model")
+	if !p.HasModel("deepseek-v4-flash") || !p.HasModel("deepseek-v4-pro") {
+		t.Fatalf("Responses models = %v, want Flash and Pro", p.ModelList())
 	}
-	if p.HasModel("deepseek-v4-pro") {
-		t.Fatalf("Responses normalization added unsupported Pro model: %+v", p.ModelList())
+}
+
+func TestNormalizeOfficialDeepSeekResponsesPresetAddsPro(t *testing.T) {
+	c := &Config{Providers: []ProviderEntry{{
+		Name: "deepseek-responses", Kind: "responses", BaseURL: "https://api.deepseek.com",
+		Models: []string{"deepseek-v4-flash"}, Default: "deepseek-v4-flash",
+	}}}
+
+	normalizeOfficialDeepSeekModels(c)
+	p, ok := c.Provider("deepseek-responses")
+	if !ok {
+		t.Fatal("deepseek-responses provider missing after normalization")
+	}
+	if !p.HasModel("deepseek-v4-flash") || !p.HasModel("deepseek-v4-pro") {
+		t.Fatalf("deepseek-responses models = %v, want Flash and Pro", p.ModelList())
+	}
+	if p.Default != "deepseek-v4-flash" {
+		t.Fatalf("default = %q, want deepseek-v4-flash", p.Default)
+	}
+	flash := p.ModelOverrides["deepseek-v4-flash"]
+	if !containsString(flash.SupportedEfforts, "low") {
+		t.Fatalf("Flash effort override = %+v", flash)
+	}
+	pro := p.ModelOverrides["deepseek-v4-pro"]
+	if containsString(pro.SupportedEfforts, "low") || !containsString(pro.SupportedEfforts, "max") {
+		t.Fatalf("Pro effort override = %+v", pro)
+	}
+}
+
+func TestNormalizeOfficialDeepSeekResponsesDoesNotRestoreUncheckedPro(t *testing.T) {
+	cases := []struct {
+		name      string
+		overrides map[string]ProviderModelOverride
+	}{
+		{
+			name: "settings uncheck keeps flash override",
+			overrides: map[string]ProviderModelOverride{
+				"deepseek-v4-flash": {SupportedEfforts: []string{"disabled", "low", "high", "max"}, DefaultEffort: "high"},
+			},
+		},
+		{
+			name: "leftover pro override is still treated as curated",
+			overrides: map[string]ProviderModelOverride{
+				"deepseek-v4-pro": {SupportedEfforts: []string{"disabled", "high", "max"}, DefaultEffort: "high"},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &Config{Providers: []ProviderEntry{{
+				Name: "deepseek-responses", Kind: "responses", BaseURL: "https://api.deepseek.com",
+				Models: []string{"deepseek-v4-flash"}, Default: "deepseek-v4-flash",
+				ModelOverrides: tc.overrides,
+			}}}
+
+			normalizeOfficialDeepSeekModels(c)
+			p, ok := c.Provider("deepseek-responses")
+			if !ok {
+				t.Fatal("deepseek-responses provider missing after normalization")
+			}
+			if p.HasModel("deepseek-v4-pro") {
+				t.Fatalf("unchecked Pro was restored: %v", p.ModelList())
+			}
+		})
+	}
+}
+
+func TestNormalizeOfficialDeepSeekResponsesAddsProPriceForLegacyFlashPrice(t *testing.T) {
+	flash := deepSeekV4FlashPriceUSD()
+	c := &Config{Providers: []ProviderEntry{{
+		Name: "deepseek-responses", Kind: "responses", BaseURL: "https://api.deepseek.com",
+		Models: []string{"deepseek-v4-flash"}, Default: "deepseek-v4-flash",
+		Price: flash,
+	}}}
+
+	normalizeOfficialDeepSeekModels(c)
+	p, ok := c.Provider("deepseek-responses")
+	if !ok {
+		t.Fatal("deepseek-responses provider missing after normalization")
+	}
+	if !p.HasModel("deepseek-v4-pro") {
+		t.Fatalf("Responses models = %v, want Flash and Pro", p.ModelList())
+	}
+	if got := p.PriceForModel("deepseek-v4-flash"); !samePricing(got, flash) {
+		t.Fatalf("Flash price = %+v, want legacy singular price %+v", got, flash)
+	}
+	if got := p.PriceForModel("deepseek-v4-pro"); !samePricing(got, deepSeekV4ProPriceUSD()) {
+		t.Fatalf("Pro price = %+v, want official Pro list price", got)
 	}
 }

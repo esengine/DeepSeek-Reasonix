@@ -1,10 +1,13 @@
 package stats
 
 import (
+	"context"
 	"maps"
 	"sort"
 	"strings"
 	"time"
+
+	"reasonix/internal/usagecatalog"
 )
 
 // DailyTokens is one day's token usage and turn count in a trend series.
@@ -68,6 +71,30 @@ type SourceFilter struct {
 // yield zero entries. When SourceFilter.Source is set, only records whose
 // Source matches are counted.
 func (w *Writer) Query(f SourceFilter) (RangeStats, error) {
+	var manager *usageManager
+	if w != nil {
+		manager = w.usage
+		if manager == nil {
+			manager = existingUsageManager(w.dir)
+		}
+	}
+	if manager != nil {
+		if catalog := manager.catalog.Load(); catalog != nil {
+			days := daysInRange(f.From, f.To)
+			if catalog.Ready(context.Background(), w.dir, days) {
+				rows, err := catalog.Query(context.Background(), f.From.Format(dayLayout), f.To.Format(dayLayout), f.Source)
+				if err == nil {
+					return rangeStatsFromRollups(f, days, rows), nil
+				}
+			}
+			catalog.RequestReconcileDir(w.dir)
+			catalog.NoteFallback()
+		}
+	}
+	return w.queryJSONL(f)
+}
+
+func (w *Writer) queryJSONL(f SourceFilter) (RangeStats, error) {
 	out := RangeStats{
 		From:      f.From.Format(dayLayout),
 		To:        f.To.Format(dayLayout),
@@ -180,6 +207,71 @@ func (w *Writer) Query(f SourceFilter) (RangeStats, error) {
 	}
 	sort.SliceStable(out.Daily, func(i, j int) bool { return out.Daily[i].Day < out.Daily[j].Day })
 	return out, nil
+}
+
+func rangeStatsFromRollups(f SourceFilter, days []string, rows []usagecatalog.Rollup) RangeStats {
+	out := RangeStats{From: f.From.Format(dayLayout), To: f.To.Format(dayLayout), Daily: []DailyTokens{}, Models: []ModelUsage{}, Providers: []ProviderUsage{}}
+	byDay := map[string][]usagecatalog.Rollup{}
+	for _, row := range rows {
+		byDay[row.Day] = append(byDay[row.Day], row)
+	}
+	modelTotals := map[string]int64{}
+	providerTotals := map[string]int64{}
+	active := map[string]bool{}
+	for _, day := range days {
+		dayModels := map[string]int64{}
+		dayProviders := map[string]int64{}
+		dayRequests, dayTurns := int64(0), int64(0)
+		dayCacheHit, dayCacheMiss := int64(0), int64(0)
+		for _, row := range byDay[day] {
+			out.Tokens += row.Total
+			out.Requests += int(row.Requests)
+			out.Turns += int(row.Turns)
+			out.CacheHit += row.CacheHit
+			out.CacheMiss += row.CacheMiss
+			dayRequests += row.Requests
+			dayTurns += row.Turns
+			dayCacheHit += row.CacheHit
+			dayCacheMiss += row.CacheMiss
+			if row.Total > 0 {
+				model := row.ModelRef
+				if model == "" {
+					model = "(unknown)"
+				}
+				provider := row.Provider
+				if provider == "" {
+					provider = providerOf(model)
+				}
+				modelTotals[model] += row.Total
+				providerTotals[provider] += row.Total
+				dayModels[model] += row.Total
+				dayProviders[provider] += row.Total
+			}
+			if row.Total > 0 || row.Requests > 0 {
+				active[day] = true
+			}
+		}
+		out.Daily = append(out.Daily, DailyTokens{Day: day, Total: int(sum(dayModels)), ByModel: dayModels, ByProvider: dayProviders,
+			Requests: int(dayRequests), Turns: int(dayTurns), CacheHit: dayCacheHit, CacheMiss: dayCacheMiss})
+	}
+	out.ActiveDays = len(active)
+	out.Models = modelsSorted(modelTotals)
+	out.Providers = providersSorted(providerTotals)
+	if len(out.Models) > 0 {
+		out.TopModel = out.Models[0].Model
+	}
+	if len(out.Providers) > 0 {
+		out.TopProvider = out.Providers[0].Provider
+	}
+	if out.Tokens > 0 {
+		for i := range out.Models {
+			out.Models[i].Percent = float64(out.Models[i].Tokens) / float64(out.Tokens) * 100
+		}
+		for i := range out.Providers {
+			out.Providers[i].Percent = float64(out.Providers[i].Tokens) / float64(out.Tokens) * 100
+		}
+	}
+	return out
 }
 
 // matchesSource reports whether a record's source label passes the filter.

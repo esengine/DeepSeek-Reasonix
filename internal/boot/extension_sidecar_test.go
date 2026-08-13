@@ -325,6 +325,38 @@ func bootWithFakePlugin(t *testing.T, name string, runtime map[string]any) *Buil
 	return res
 }
 
+func TestBootIsolatesIncompatibleExternalPlugin(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	writeRuntimeFixture(t, dir)
+
+	root := robustTempDir(t)
+	if err := os.WriteFile(filepath.Join(root, pluginpkg.NativeManifest), []byte(`{"name":"irmia-devkit","version":"1.0.0"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	home := config.ReasonixHomeDir()
+	if err := pluginpkg.Upsert(home, pluginpkg.InstalledPlugin{Name: "irmia-devkit", Root: root, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := BuildRuntime(context.Background(), Options{})
+	if err != nil {
+		t.Fatalf("incompatible plugin blocked core controller: %v", err)
+	}
+	t.Cleanup(res.Controller.Close)
+	if res.Controller == nil || res.Extensions != nil {
+		t.Fatalf("build result = %#v, want core controller without extensions", res)
+	}
+	state, err := pluginpkg.LoadState(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Plugins) != 1 || state.Plugins[0].Status != pluginpkg.PluginStatusDisabledIncompatible {
+		t.Fatalf("plugin state = %#v", state.Plugins)
+	}
+}
+
 func TestBootStartsExtensionSidecar(t *testing.T) {
 	res := bootWithFakePlugin(t, "bootplugin", map[string]any{
 		"intercepts": []string{"input.receive"},

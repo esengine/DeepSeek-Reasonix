@@ -141,7 +141,7 @@ func TestStormBreakerEscalatesAlternatingBlockedShapes(t *testing.T) {
 	if !strings.Contains(last, "[loop guard]") {
 		t.Fatalf("after %d all-blocked turns the guard should fire despite alternating tools, got: %q", stormBreakThreshold, last)
 	}
-	if !a.loopGuardArmed {
+	if !a.turn.loopGuardArmed {
 		t.Fatal("streak guard should arm the final-readiness loop-guard pass")
 	}
 	if len(*notices) == 0 {
@@ -173,8 +173,8 @@ func TestStormBreakerBlockedStreakResetBySuccess(t *testing.T) {
 	if strings.Contains(last, "[loop guard]") {
 		t.Fatalf("a successful turn should reset the blocked streak, got: %q", last)
 	}
-	if a.blockedTurnStreak != 1 {
-		t.Fatalf("blockedTurnStreak = %d, want 1 after success reset plus one block", a.blockedTurnStreak)
+	if a.turn.blockedTurnStreak != 1 {
+		t.Fatalf("blockedTurnStreak = %d, want 1 after success reset plus one block", a.turn.blockedTurnStreak)
 	}
 }
 
@@ -270,10 +270,10 @@ func TestStormBreakerResetsOnSuccess(t *testing.T) {
 	good := provider.ToolCall{Name: "read_file", Arguments: `{"path":"x"}`}
 	ctx := context.Background()
 
-	a.executeBatch(ctx, []provider.ToolCall{fail})                    // count 1
-	a.executeBatch(ctx, []provider.ToolCall{fail})                    // count 2
-	a.executeBatch(ctx, []provider.ToolCall{good})                    // success → reset
-	a.executeBatch(ctx, []provider.ToolCall{fail})                    // count 1
+	a.executeBatch(ctx, &a.turn, []provider.ToolCall{fail})           // count 1
+	a.executeBatch(ctx, &a.turn, []provider.ToolCall{fail})           // count 2
+	a.executeBatch(ctx, &a.turn, []provider.ToolCall{good})           // success → reset
+	a.executeBatch(ctx, &a.turn, []provider.ToolCall{fail})           // count 1
 	last := executeBatchOutputs(a, ctx, []provider.ToolCall{fail})[0] // count 2 — still below threshold
 
 	if strings.Contains(last, "[loop guard]") {
@@ -286,7 +286,7 @@ func TestStormBreakerResetsOnSuccess(t *testing.T) {
 
 // executeBatchOutputs runs the batch and returns just the model-facing outputs.
 func executeBatchOutputs(a *Agent, ctx context.Context, calls []provider.ToolCall) []string {
-	batch := a.executeBatch(ctx, calls)
+	batch := a.executeBatch(ctx, &a.turn, calls)
 	outputs := batch.results
 	return outputs
 }

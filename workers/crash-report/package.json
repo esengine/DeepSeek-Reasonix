@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "migrate:diagnostics-v2": "node scripts/apply-diagnostics-v2.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

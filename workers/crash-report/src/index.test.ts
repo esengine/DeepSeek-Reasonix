@@ -6,8 +6,6 @@ import {
   isDevelopmentGroup,
   isKnownNonCrashDiagnostic,
   namespaceReportFingerprint,
-  newestReleaseVersion,
-  diagnosticWindowWhere,
   normalizeForFingerprint,
   Ping,
   Metrics,
@@ -15,8 +13,11 @@ import {
   ensureCLITelemetrySchema,
   refreshMetricUserRollup,
   severityForReport,
+  maxSeverity,
+  nativeWebRuntimeFingerprintBasis,
   telemetryTableNames,
 } from "./index";
+import type { Env } from "./env";
 import { renderStats } from "./stats";
 import clientSurfaceMigrationSQL from "../migrate-client-surface.sql?raw";
 
@@ -129,17 +130,6 @@ describe("metrics compatibility", () => {
   });
 });
 
-describe("stats window and release baseline", () => {
-  it("uses an inclusive calendar window for diagnostic groups", () => {
-    expect(diagnosticWindowWhere(7)).toBe("date(last_seen) >= date('now', '-6 day')");
-    expect(diagnosticWindowWhere(30)).toBe("date(last_seen) >= date('now', '-29 day')");
-  });
-
-  it("does not promote prerelease or synthetic non-semver labels", () => {
-    expect(newestReleaseVersion(["v1.19.4", "v1.20.0-beta.1", "dev", "v9.9.9-test"])).toBe("v1.19.4");
-  });
-});
-
 describe("telemetry deployment order compatibility", () => {
   it("keeps the released Desktop tables unchanged and isolates CLI rows", () => {
     expect(telemetryTableNames("desktop")).toEqual({
@@ -166,12 +156,12 @@ describe("telemetry deployment order compatibility", () => {
     }
   });
 
-  it("keeps the migration and Worker bootstrap schema identical", () => {
-    const normalize = (sql: string) => sql.replace(/\s+/g, " ").trim().replace(/;$/, "");
-    const migration = normalize(clientSurfaceMigrationSQL);
-    for (const statement of CLI_TELEMETRY_SCHEMA_SQL) {
-      expect(migration).toContain(normalize(statement));
-    }
+  it("extends the legacy CLI migration with the diagnostics bootstrap columns", () => {
+    const runtimeSchema = CLI_TELEMETRY_SCHEMA_SQL.join("\n");
+    expect(runtimeSchema).toContain("os_build INTEGER NOT NULL DEFAULT 0");
+    expect(runtimeSchema).toContain("os_revision INTEGER NOT NULL DEFAULT 0");
+    expect(runtimeSchema).toContain("arch TEXT NOT NULL DEFAULT ''");
+    expect(runtimeSchema).toContain("event_count INTEGER NOT NULL DEFAULT 0");
   });
 
   it("uses additive idempotent DDL when the Worker deploys before the migration", async () => {
@@ -298,6 +288,31 @@ describe("metric_user rollup", () => {
 });
 
 describe("diagnostic classification", () => {
+
+  it("keeps native runtime fingerprints independent from recovery outcomes", () => {
+    const failure = { engine: "webview2", kind: "render_process_exited", reason: "crashed", exitCode: 1 };
+    expect(nativeWebRuntimeFingerprintBasis(failure)).toBe(
+      nativeWebRuntimeFingerprintBasis({ ...failure }),
+    );
+    expect(nativeWebRuntimeFingerprintBasis({ ...failure, reason: "out_of_memory" })).not.toBe(
+      nativeWebRuntimeFingerprintBasis(failure),
+    );
+  });
+
+  it("bounds unknown runtime buckets and WebView2 unresponsive exit code", () => {
+    expect(nativeWebRuntimeFingerprintBasis({
+      engine: "webkitgtk", kind: "random_kind_123", reason: "random_reason_456",
+    })).toBe("webkitgtk\nunknown\nunknown\nunknown");
+    expect(nativeWebRuntimeFingerprintBasis({
+      engine: "webview2", kind: "render_process_unresponsive", reason: "unresponsive", exitCode: 259,
+    })).toBe("webview2\nrender_process_unresponsive\nunresponsive\nunknown");
+  });
+
+  it("only upgrades aggregate severity", () => {
+    expect(maxSeverity("high", "low")).toBe("high");
+    expect(maxSeverity("low", "high")).toBe("high");
+    expect(maxSeverity("critical", "high")).toBe("critical");
+  });
   it("keeps development reports out of release crash priority", () => {
     expect(isDevelopmentReport({ ...base, version: "dev-32bit" })).toBe(true);
     expect(isDevelopmentReport({ ...base, version: "v1.40.0", channel: "dev" })).toBe(true);

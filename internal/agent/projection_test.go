@@ -163,13 +163,13 @@ func TestCompactToProjectionLeavesCanonicalIntact(t *testing.T) {
 			t.Fatalf("canonical message %d changed", i)
 		}
 	}
-	if len(a.compactionState.Projection.Messages) == 0 {
+	if len(a.sess.compactionState.Projection.Messages) == 0 {
 		t.Fatal("expected projection messages")
 	}
 	// Projection must be shorter than canonical.
-	if estimateMessagesTokens(a.compactionState.Projection.Messages) >= estimateMessagesTokens(before) {
+	if estimateMessagesTokens(a.sess.compactionState.Projection.Messages) >= estimateMessagesTokens(before) {
 		t.Fatalf("projection did not shrink: proj=%d src=%d",
-			estimateMessagesTokens(a.compactionState.Projection.Messages),
+			estimateMessagesTokens(a.sess.compactionState.Projection.Messages),
 			estimateMessagesTokens(before))
 	}
 	// Sidecar must exist and reload with an applied summary receipt (v3 does not
@@ -217,7 +217,7 @@ func TestCompactFailureDoesNotWriteMechanicalMarker(t *testing.T) {
 			t.Fatalf("mechanical marker written into history: %q", m.Content)
 		}
 	}
-	if len(a.compactionState.Projection.Messages) != 0 {
+	if len(a.sess.compactionState.Projection.Messages) != 0 {
 		t.Fatal("failed compaction installed a projection")
 	}
 }
@@ -241,7 +241,7 @@ func TestFixedEarlyUserTurnsStableAcrossCompactions(t *testing.T) {
 	if err := a.CompactNow(context.Background(), ""); err != nil {
 		t.Fatalf("compact1: %v", err)
 	}
-	firstPrefix := earlyUserPrefix(a.compactionState.Projection.Messages)
+	firstPrefix := earlyUserPrefix(a.sess.compactionState.Projection.Messages)
 	// Grow the session and compact again.
 	for i := range 8 {
 		sess.Add(provider.Message{Role: provider.RoleUser, Content: "later-fact-" + strings.Repeat("z", 30) + string(rune('0'+i))})
@@ -250,7 +250,7 @@ func TestFixedEarlyUserTurnsStableAcrossCompactions(t *testing.T) {
 	// Simulate a projected request reporting a very different calibration from
 	// the pre-projection canonical estimate. This remains useful for tail sizing,
 	// but must not change which early turns define the stable prefix.
-	a.lastUsage.Store(&provider.Usage{PromptTokens: charsOfMessages(sess.Messages)})
+	a.sess.output.lastUsage.Store(&provider.Usage{PromptTokens: charsOfMessages(sess.Messages)})
 	a.setPromptTokenCalibration(charsOfMessages(sess.Messages), requestCalibrationShapeOf(provider.Request{Messages: sess.Messages}))
 	if got := a.tokPerChar(); got < 0.9 || got > 1.1 {
 		t.Fatalf("test did not install the intended dynamic calibration: %f", got)
@@ -259,13 +259,13 @@ func TestFixedEarlyUserTurnsStableAcrossCompactions(t *testing.T) {
 	if err := a.CompactNow(context.Background(), ""); err != nil {
 		t.Fatalf("compact2: %v", err)
 	}
-	secondPrefix := earlyUserPrefix(a.compactionState.Projection.Messages)
+	secondPrefix := earlyUserPrefix(a.sess.compactionState.Projection.Messages)
 	if firstPrefix != secondPrefix {
 		t.Fatalf("early user prefix drifted across compactions:\n1: %q\n2: %q", firstPrefix, secondPrefix)
 	}
 	// Exactly one summary in the projection (A1 rolling merge).
 	summaries := 0
-	for _, m := range a.compactionState.Projection.Messages {
+	for _, m := range a.sess.compactionState.Projection.Messages {
 		if isCompactionSummary(m) {
 			summaries++
 		}
@@ -312,7 +312,7 @@ func TestLocalOnlyExcludedFromCompactionRequest(t *testing.T) {
 			t.Fatal("LocalOnly content reached summarizer")
 		}
 	}
-	for _, m := range a.compactionState.Projection.Messages {
+	for _, m := range a.sess.compactionState.Projection.Messages {
 		if m.LocalOnly || strings.Contains(m.Content, "secret local only") {
 			t.Fatal("LocalOnly content entered projection")
 		}
@@ -343,11 +343,11 @@ func TestArchiveDirIgnoredOnCheckpointInstall(t *testing.T) {
 	if err := a.CompactNow(context.Background(), ""); err != nil {
 		t.Fatalf("CompactNow with unusable ArchiveDir: %v", err)
 	}
-	if len(a.compactionState.Projection.Messages) == 0 {
+	if len(a.sess.compactionState.Projection.Messages) == 0 {
 		t.Fatal("expected projection despite unusable ArchiveDir")
 	}
-	if a.compactionState.LastReceipt != nil && a.compactionState.LastReceipt.Archive != "" {
-		t.Fatalf("checkpoint must not create archives, got %q", a.compactionState.LastReceipt.Archive)
+	if a.sess.compactionState.LastReceipt != nil && a.sess.compactionState.LastReceipt.Archive != "" {
+		t.Fatalf("checkpoint must not create archives, got %q", a.sess.compactionState.LastReceipt.Archive)
 	}
 }
 
@@ -359,11 +359,11 @@ func visibleContext(a *Agent) []provider.Message {
 	if a == nil {
 		return nil
 	}
-	if msgs := a.compactionState.Projection.Messages; len(msgs) > 0 {
+	if msgs := a.sess.compactionState.Projection.Messages; len(msgs) > 0 {
 		return msgs
 	}
-	if a.session != nil {
-		return a.session.Snapshot()
+	if a.sess.conversation != nil {
+		return a.sess.conversation.Snapshot()
 	}
 	return nil
 }
@@ -441,10 +441,10 @@ func TestCompactReplacesHistory(t *testing.T) {
 	}
 }
 
-func TestCompactFallsBackToMechanicalFoldWhenSummaryFails(t *testing.T) {
-	// Projection compaction must not rewrite history or install a mechanical
-	// marker when the summarizer fails. The error is returned so the caller
-	// can retry or report it.
+func TestManualCompactReportsSummarizerFailure(t *testing.T) {
+	// Manual compaction must not rewrite history or degrade to a mechanical
+	// fold when the summarizer fails. The error is returned so the caller,
+	// who is present, can retry or report it.
 	prov := &fakeProvider{streamErr: errors.New("provider down")}
 	sess := &Session{Messages: []provider.Message{
 		{Role: provider.RoleSystem, Content: "sys"},
@@ -471,7 +471,7 @@ func TestCompactFallsBackToMechanicalFoldWhenSummaryFails(t *testing.T) {
 			t.Fatalf("mechanical marker written: %q", m.Content)
 		}
 	}
-	if len(a.compactionState.Projection.Messages) != 0 {
+	if len(a.sess.compactionState.Projection.Messages) != 0 {
 		t.Fatal("failed compact installed a projection")
 	}
 	// CompactionDone with empty summary resolves the UI placeholder.
@@ -541,10 +541,9 @@ func TestCompactKeepsMidSessionUserTurns(t *testing.T) {
 		{Role: provider.RoleUser, Content: "next"},
 		{Role: provider.RoleAssistant, Content: "ok"},
 	}}
-	// Summarizer carries the mid-session fact into the single rolling digest.
-	// No early-user-turn hoist: only the stable prefix (system + first user) is
-	// kept verbatim; mid-session user turns in the fold region merge into the summary.
-	a := New(&fakeProvider{reply: "Standing facts: always use pnpm not npm"}, tool.NewRegistry(), sess,
+	// The summarizer is given a reply that drops the fact entirely: a mid-session
+	// user turn must survive on its own, never on the digest having captured it.
+	a := New(&fakeProvider{reply: "Standing facts: none"}, tool.NewRegistry(), sess,
 		Options{ContextWindow: window, CompactRatio: 0.85, RecentKeep: 2}, event.Discard)
 
 	if err := a.compact(context.Background(), "manual", "", true); err != nil {
@@ -580,11 +579,11 @@ func TestCompactKeepsMidSessionUserTurns(t *testing.T) {
 	if !projFirst {
 		t.Fatalf("fixed early user turn missing from projection: %+v", proj)
 	}
-	if projMidVerbatim {
-		t.Fatalf("mid-session user turn must fold into summary, not stay verbatim: %+v", proj)
+	if !projMidVerbatim {
+		t.Fatalf("mid-session user turn must stay verbatim, not depend on the digest: %+v", proj)
 	}
 	if !strings.Contains(joinContents(proj), "pnpm") {
-		t.Fatalf("mid-session fact missing from rolling summary: %+v", proj)
+		t.Fatalf("mid-session fact lost from projection: %+v", proj)
 	}
 	if strings.Contains(joinContents(proj), big) {
 		t.Errorf("assistant/tool work was not folded out of projection")

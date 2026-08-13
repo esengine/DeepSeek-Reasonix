@@ -3,6 +3,7 @@ import { Check, ChevronDown } from "lucide-react";
 
 import { app } from "../lib/bridge";
 import { asArray } from "../lib/array";
+import { activeWorkBusyNoticeText } from "../lib/capabilityMutations";
 import { useT } from "../lib/i18n";
 import { PROJECT_COLOR_OPTIONS, projectColorValue, type ProjectColorKey } from "../lib/projectColors";
 import type { MCPToolView, SettingsView, SkillView, SubagentProfileInput } from "../lib/types";
@@ -93,7 +94,7 @@ export function SubagentsSettingsPage({ s, onUseInChat }: { s: SettingsView; onU
       await reload();
       return true;
     } catch (e) {
-      setErr(String((e as Error)?.message ?? e));
+      setErr(activeWorkBusyNoticeText(e, t) ?? String((e as Error)?.message ?? e));
       return false;
     } finally {
       setBusy(false);

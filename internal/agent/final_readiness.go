@@ -5,8 +5,10 @@ import (
 	"strings"
 
 	"reasonix/internal/ablation"
+	"reasonix/internal/event"
 	"reasonix/internal/evidence"
 	"reasonix/internal/instruction"
+	"reasonix/internal/taskpolicy"
 )
 
 // Final readiness: whether a turn has earned the right to stop. It reads the
@@ -80,7 +82,7 @@ func (c finalReadinessCheck) audit(result evidence.ReadinessAuditResult, recover
 }
 
 func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
-	if a.evidence == nil || a.ablation.Off(ablation.Evidence) {
+	if a.task.ledger == nil || a.ablation.Off(ablation.Evidence) {
 		return finalReadinessCheck{}
 	}
 	var missing []string
@@ -92,23 +94,23 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 		return out
 	}
 	{
-		incomplete, hasTodos := a.evidence.IncompleteLatestTodos()
-		if !hasTodos && a.evidence.HasAnySuccessfulReceipt() {
+		incomplete, hasTodos := a.task.ledger.IncompleteLatestTodos()
+		if !hasTodos && a.task.ledger.HasAnySuccessfulReceipt() {
 			incomplete, hasTodos = a.incompleteCanonicalTodos()
 		}
-		if hasTodos && len(incomplete) > 0 && a.evidence.HasSuccessfulTodoProgressReceipt() {
+		if hasTodos && len(incomplete) > 0 && a.task.ledger.HasSuccessfulTodoProgressReceipt() {
 			out.applies = true
 			out.incompleteTodos = len(incomplete)
 			missing = append(missing, finalReadinessIncompleteTodos(incomplete))
 		}
 	}
-	writer, hasWriter := a.evidence.LatestSuccessfulWriterIndex()
+	writer, hasWriter := a.task.ledger.LatestSuccessfulWriterIndex()
 	deliveryMutation := false
 	deliveryVerificationOnly := false
-	checkpoint := a.deliveryCheckpoint
-	checkpointApplies := a.deliveryScopeActive && checkpoint.ScopeID == a.deliveryScopeID
+	checkpoint := a.task.checkpoint
+	checkpointApplies := a.turn.deliveryScopeActive && checkpoint.ScopeID == a.task.scopeID
 	if a.deliveryProfile {
-		if mutation, ok := a.evidence.LatestSuccessfulMutationIndex(); ok {
+		if mutation, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok {
 			writer, hasWriter = mutation, true
 			deliveryMutation = true
 		} else if checkpointApplies && checkpoint.PendingMutation {
@@ -120,20 +122,20 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 		} else if checkpointApplies && checkpoint.MutationObserved {
 			deliveryMutation = true
 		}
-		workObserved := a.evidence.HasSuccessfulWorkReceipt() || (checkpointApplies && checkpoint.WorkObserved)
-		if a.deliveryTaskExpected && !a.deliveryPersistentExpected && !workObserved {
+		workObserved := a.task.ledger.HasSuccessfulWorkReceipt() || (checkpointApplies && checkpoint.WorkObserved)
+		if a.turn.deliveryTaskExpected && !a.turn.deliveryPersistentExpected && !workObserved {
 			out.missingActionEvidence++
 			missing = append(missing, "perform host-observable work for this technical task before answering")
 		}
-		if a.deliveryPersistentExpected && !a.evidence.HasSuccessfulToolReceipt("remember") {
+		if a.turn.deliveryPersistentExpected && !a.task.ledger.HasSuccessfulToolReceipt("remember") {
 			out.missingMutation++
 			missing = append(missing, "save the requested durable memory with the remember tool before answering")
 		}
-		if a.deliveryMutationExpected && !deliveryMutation {
+		if a.turn.deliveryMutationExpected && !deliveryMutation {
 			out.missingMutation++
 			missing = append(missing, "the request requires a state change, but no successful mutation was observed")
 		}
-		if !hasWriter && a.evidence.HasSuccessfulVerificationCommand() {
+		if !hasWriter && a.task.ledger.HasSuccessfulVerificationCommand() {
 			writer, hasWriter = -1, true
 			deliveryVerificationOnly = true
 		}
@@ -145,7 +147,7 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 			out.missingCapabilities++
 			missing = append(missing, msg)
 		}
-		if a.deliveryPersistentExpected && !a.deliveryMutationExpected && !a.evidence.HasSuccessfulMutationOtherThan("remember") {
+		if a.turn.deliveryPersistentExpected && !a.turn.deliveryMutationExpected && !a.task.ledger.HasSuccessfulMutationOtherThan("remember") {
 			// A durable-memory-only request has its own concrete receipt contract.
 			// It must not inherit code-delivery todo/test/diff/review ceremonies;
 			// any unrelated mutation falls through to the full contract below.
@@ -165,28 +167,36 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 		}
 		return out
 	}
+	if !a.deliveryProfile && a.turn.policySet && a.turn.policy.Verification >= taskpolicy.VerifyTargeted &&
+		a.turn.policy.AllowsTests() && toolPresent(a.svc.tools, "bash") &&
+		!a.task.ledger.HasSuccessfulVerificationCommandAfter(writer) {
+		out.applies = true
+		out.missingVerification++
+		missing = append(missing, "run a relevant verification command after the latest write for the current role setting")
+	}
 	hasProjectChecks := len(a.projectChecks) > 0
-	hasTodoReceipt := a.evidence.HasSuccessfulTodoWrite()
+	hasTodoReceipt := a.task.ledger.HasSuccessfulTodoWrite()
 	if !a.deliveryProfile && !hasProjectChecks && !hasTodoReceipt && len(missing) == 0 {
 		return finalReadinessCheck{}
 	}
 	out.applies = true
 	if a.deliveryProfile {
-		criteriaEstablished := a.deliveryCriteriaEstablished || (checkpointApplies && checkpoint.CriteriaEstablished)
+		a.emitTurnPhase(event.TurnPhaseVerifying)
+		criteriaEstablished := a.turn.deliveryCriteriaEstablished || (checkpointApplies && checkpoint.CriteriaEstablished)
 		if !criteriaEstablished {
 			out.missingAcceptanceCriteria++
 			missing = append(missing, "establish concrete acceptance criteria with todo_write before changing state")
 		}
-		hasCompleteStep := a.evidence.HasSuccessfulCompleteStepAfter(writer)
+		hasCompleteStep := a.task.ledger.HasSuccessfulCompleteStepAfter(writer)
 		if !hasCompleteStep {
 			out.missingSignoff++
 			missing = append(missing, "call complete_step after the latest mutation")
 		}
-		if !a.evidence.HasSuccessfulDeliverySignoffAfter(writer) {
+		if !a.task.ledger.HasSuccessfulDeliverySignoffAfter(writer) {
 			out.missingVerification++
 			missing = append(missing, "run relevant verification after the latest mutation and cite that successful command in complete_step")
 		}
-		if deliveryMutation && !a.evidence.HasSuccessfulReviewAfter(writer) {
+		if deliveryMutation && !a.task.ledger.HasSuccessfulReviewAfter(writer) {
 			out.missingReview++
 			missing = append(missing, "inspect the changed result after the latest mutation (read the touched file or run git diff/status)")
 		}
@@ -204,7 +214,7 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 		if command == "" {
 			continue
 		}
-		if !a.evidence.HasSuccessfulCommandAfter(command, writer) {
+		if !a.task.ledger.HasSuccessfulCommandAfter(command, writer) {
 			out.missingProjectChecks++
 			missing = append(missing, fmt.Sprintf("run %q from %s after the latest write", command, finalReadinessCheckSource(check)))
 		}
@@ -222,7 +232,7 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 		return out
 	}
 	out.reason = strings.Join(missing, "; ")
-	return out
+	return a.applyPartialCheckWaiver(out)
 }
 
 func finalReadinessCheckSource(check instruction.VerifyCheck) string {

@@ -97,7 +97,6 @@ var (
 
 	minimaxMSeriesModels       = []string{"MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"}
 	minimaxMSeriesVisionModels = []string{"MiniMax-M3"}
-	deepSeekResponsesModels    = []string{"deepseek-v4-flash"}
 
 	glmAPIModels       = []string{"glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-5v-turbo", "glm-4.7", "glm-4.7-flash", "glm-4.7-flashx", "glm-4.6", "glm-4.5", "glm-4.5-air", "glm-4.5-flash"}
 	glmAPIVisionModels = []string{"glm-5v-turbo"}
@@ -194,21 +193,18 @@ var curatedProviderPresets = []ProviderPreset{
 		Description: "Separate official DeepSeek Anthropic-compatible entry for Flash and Pro.",
 		KeyEnv:      "DEEPSEEK_API_KEY",
 		Entries: []ProviderEntry{{
-			Name:          "deepseek-anthropic",
-			Kind:          "anthropic",
-			BaseURL:       deepSeekAnthropicBaseURL,
-			Models:        deepSeekV4Models,
-			Default:       "deepseek-v4-flash",
-			APIKeyEnv:     "DEEPSEEK_API_KEY",
-			BalanceURL:    "https://api.deepseek.com/user/balance",
-			Thinking:      "enabled",
-			WebSearch:     boolPointer(true),
-			ContextWindow: 1_000_000,
-			Prices:        deepSeekV4PricesUSD(),
-			ModelOverrides: map[string]ProviderModelOverride{
-				"deepseek-v4-flash": {SupportedEfforts: []string{"disabled", "low", "high", "max"}, DefaultEffort: "high"},
-				"deepseek-v4-pro":   {SupportedEfforts: []string{"disabled", "high", "max"}, DefaultEffort: "high"},
-			},
+			Name:           "deepseek-anthropic",
+			Kind:           "anthropic",
+			BaseURL:        deepSeekAnthropicBaseURL,
+			Models:         deepSeekV4Models,
+			Default:        "deepseek-v4-flash",
+			APIKeyEnv:      "DEEPSEEK_API_KEY",
+			BalanceURL:     "https://api.deepseek.com/user/balance",
+			Thinking:       "enabled",
+			WebSearch:      boolPointer(true),
+			ContextWindow:  1_000_000,
+			Prices:         deepSeekV4PricesUSD(),
+			ModelOverrides: deepSeekV4EffortOverrides(),
 		}},
 	},
 	{
@@ -545,22 +541,21 @@ var curatedProviderPresets = []ProviderPreset{
 	{
 		ID:          "deepseek-responses",
 		Label:       "DeepSeek Official Responses API",
-		Description: "Official stateless DeepSeek Responses API for Flash with server-side web search.",
+		Description: "Official stateless DeepSeek Responses API for Flash and Pro with server-side web search.",
 		KeyEnv:      "DEEPSEEK_API_KEY",
 		Entries: []ProviderEntry{{
-			Name:             "deepseek-responses",
-			Kind:             "responses",
-			BaseURL:          "https://api.deepseek.com",
-			Models:           deepSeekResponsesModels,
-			Default:          "deepseek-v4-flash",
-			APIKeyEnv:        "DEEPSEEK_API_KEY",
-			BalanceURL:       "https://api.deepseek.com/user/balance",
-			ContextWindow:    1_000_000,
-			Price:            deepSeekV4FlashPriceUSD(),
-			ResponsesMode:    "stateless",
-			WebSearch:        boolPointer(true),
-			SupportedEfforts: []string{"low", "high", "max"},
-			DefaultEffort:    "high",
+			Name:           "deepseek-responses",
+			Kind:           "responses",
+			BaseURL:        "https://api.deepseek.com",
+			Models:         deepSeekV4Models,
+			Default:        "deepseek-v4-flash",
+			APIKeyEnv:      "DEEPSEEK_API_KEY",
+			BalanceURL:     "https://api.deepseek.com/user/balance",
+			ContextWindow:  1_000_000,
+			Prices:         deepSeekV4PricesUSD(),
+			ResponsesMode:  "stateless",
+			WebSearch:      boolPointer(true),
+			ModelOverrides: deepSeekV4EffortOverrides(),
 		}},
 	},
 	{

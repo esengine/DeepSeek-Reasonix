@@ -255,14 +255,14 @@ func waitNoJobs(t *testing.T, ctrl control.SessionAPI) {
 	}
 }
 
-func TestTopicActivityStatusPresentsReadinessAsPaused(t *testing.T) {
+func TestTopicActivityStatusPresentsReadinessSeparatelyFromPause(t *testing.T) {
 	readiness := event.Event{
 		Kind:    event.TurnDone,
 		Err:     &agent.FinalReadinessError{Attempts: 3, Reason: "missing verification"},
 		Outcome: event.TurnOutcomeFinalReadiness,
 	}
-	if status, ok := topicActivityStatusFromEvent(readiness); !ok || status != topicStatusPaused {
-		t.Fatalf("readiness turn end = (%q, %v), want (%q, true)", status, ok, topicStatusPaused)
+	if status, ok := topicActivityStatusFromEvent(readiness); !ok || status != topicStatusAwaitingDelivery {
+		t.Fatalf("readiness turn end = (%q, %v), want (%q, true)", status, ok, topicStatusAwaitingDelivery)
 	}
 	recoveryPause := event.Event{
 		Kind:    event.TurnDone,
@@ -277,5 +277,20 @@ func TestTopicActivityStatusPresentsReadinessAsPaused(t *testing.T) {
 	}
 	if status, ok := topicActivityStatusFromEvent(event.Event{Kind: event.TurnDone}); !ok || status != "" {
 		t.Fatalf("clean turn end = (%q, %v), want cleared status", status, ok)
+	}
+}
+
+func TestCatalogRuntimeStatusPreservesDeliveryCheckWhenIdle(t *testing.T) {
+	got := catalogRuntimeStatus(topicStatusAwaitingDelivery, control.RuntimeStatus{})
+	if got != topicStatusAwaitingDelivery {
+		t.Fatalf("idle delivery check = %q, want %q", got, topicStatusAwaitingDelivery)
+	}
+	got = catalogRuntimeStatus(topicStatusAwaitingDelivery, control.RuntimeStatus{Running: true})
+	if got != topicStatusThinking {
+		t.Fatalf("running delivery check = %q, want %q", got, topicStatusThinking)
+	}
+	got = catalogRuntimeStatus(topicStatusPaused, control.RuntimeStatus{})
+	if got != topicStatusPaused {
+		t.Fatalf("idle recovery pause = %q, want %q", got, topicStatusPaused)
 	}
 }

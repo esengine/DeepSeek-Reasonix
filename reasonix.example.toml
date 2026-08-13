@@ -16,11 +16,17 @@ show_turn_usage = true   # CLI/TUI: show per-request token and cost receipts in 
 
 [desktop]
 # language = "auto"   # auto|en|zh; auto follows the browser/OS locale
-# currency = "auto"   # auto|CNY|USD; explicitly set it independently from language
+# currency = "auto"   # legacy display currency; prefer [billing].display_currency
 layout_style = "classic"   # classic|workbench|creation; desktop layout style
 # theme = "auto"   # desktop only: auto|dark|light
 # terminal_theme = "auto"   # integrated terminal: auto|dark|light; auto follows the desktop app
 # theme_style = "graphite"   # graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
+
+[billing]
+# display_currency = "auto"   # auto|CNY|USD — display only; never rewrites provider list prices
+# Provider list prices use each provider's billing_currency (frozen from the
+# official table or custom price). Switching display currency only re-selects
+# occurrence-time valuations already recorded in the cost ledger.
 
 [notifications]
 enabled = false   # system notifications for CLI and desktop turns; default off
@@ -68,9 +74,11 @@ context_window = 1000000
 # max_output_tokens = 131072  # only after repeated finish_reason=length
 # Optional per-model context budgets. Omitted models inherit context_window.
 # model_overrides = { "deepseek-v4-flash" = { context_window = 1000000 } }
-# Official DeepSeek providers use CNY or USD regional prices from
-# [desktop].currency; auto follows the selected language and defaults to USD.
-# Set prices explicitly only when you want to pin custom rates.
+# Official list prices are frozen per provider (billing_currency). Display
+# currency ([billing].display_currency) never rewrites these tables.
+# billing_currency = "USD"   # frozen list-price currency: CNY|USD
+# billing_mode = "payg"      # payg | subscription_equivalent (e.g. MiMo Token Plan)
+# Set prices explicitly only when you want to pin custom rates (always protected).
 # prices = { "deepseek-v4-flash" = { cache_hit = 0.02, input = 1, output = 2, currency = "¥" }, "deepseek-v4-pro" = { cache_hit = 0.025, input = 3, output = 6, currency = "¥" } }   # per 1M tokens
 # DeepSeek thinking is always on; effort: high | max. Omit for auto (provider default).
 effort      = "high"
@@ -189,7 +197,7 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # [bot]
 # enabled    = false
 # model      = ""        # 用于 bot 的模型，空则用 default_model
-# max_steps  = 25
+# max_steps  = 0         # 0 表示自动持续执行；正数为显式轮数上限
 # debounce_ms = 1500      # 消息合并窗口（毫秒）
 # queue_mode = "steer"    # steer|followup|collect|interrupt
 # queue_cap  = 20         # 每个会话最多保留的排队消息数

@@ -40,6 +40,11 @@ func TestModelsForTabIncludesExtensionProviders(t *testing.T) {
 			{Ref: "plugin/demo/fake/x", Model: "x"},
 			{Ref: "plugin/demo/fake/y", Model: "y"},
 			{Ref: "old/old-model"}, // claim-replaced duplicate must not repeat
+			// ProviderCatalog is merged, so it can also contain unnamespaced
+			// config-backed descriptors. They are not extension models and must
+			// never leak into a synthetic PLUGIN group in the desktop picker.
+			{Ref: "deepseek-responses", DisplayName: "deepseek-responses"},
+			{Ref: "siliconflow-cn", DisplayName: "siliconflow-cn"},
 		}},
 		disabledMCP: map[string]ServerView{},
 	}
@@ -72,6 +77,11 @@ func TestModelsForTabIncludesExtensionProviders(t *testing.T) {
 	}
 	if oldSeen != 1 || oldCount == nil {
 		t.Fatalf("config ref repeated %d times, want exactly one", oldSeen)
+	}
+	for _, info := range models {
+		if info.Ref == "deepseek-responses" || info.Ref == "siliconflow-cn" || info.Provider == "plugin" {
+			t.Fatalf("unnamespaced provider descriptor leaked into plugin models: %+v", info)
+		}
 	}
 
 	// A tab whose controller has no extension catalog (nil → no sidecar

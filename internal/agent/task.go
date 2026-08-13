@@ -1735,7 +1735,9 @@ func GuardSubagentHostDecisionText(answer string) string {
 // review subagent that finished without submitting review_report. Each nudge is
 // one cheap continuation request on the same (cached) subagent session — far
 // cheaper than discarding the run and re-reviewing from scratch.
-const maxReviewReportNudges = 2
+// maxReviewReportNudges is the single in-session retry after the first failed
+// review run (plan: fail once, retry once). A second failure becomes Partial.
+const maxReviewReportNudges = 1
 
 // reviewReportTaskContract is appended to the task prompt of a review subagent
 // whose run must end with a typed report. The skill body describes how to
@@ -1818,16 +1820,24 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 		nudges := 0
 		for !sub.HasSuccessfulReviewReport(kind) && nudges < maxReviewReportNudges {
 			nudges++
-			sub.preserveEvidenceOnce = true
+			sub.pending.preserveEvidence = true
 			if err := sub.Run(ctx, reviewReportNudgePrompt(kind)); err != nil {
 				mergeChildEvidence(ctx, sub)
+				// A retry that fails still keeps local parent mutations; the
+				// parent turns this into Partial/Unverified rather than rolling back.
 				return "", fmt.Errorf("sub-agent: %w", err)
 			}
 		}
 		if !sub.HasSuccessfulReviewReport(kind) {
 			mergeChildEvidence(ctx, sub)
 			dumpRef := dumpFailedSubagentSession(opts.ArchiveDir, string(kind), sess)
-			return "", fmt.Errorf("%s subagent finished without submitting review_report (kind=%s) even after %d host nudges; the report must be submitted by the review subagent itself (the parent has no review_report tool) — re-run the review skill%s", kind, kind, nudges, dumpRef)
+			// Partial path: local changes are retained; the parent readiness
+			// layer treats missing review as Partial/Unverified (not rollback).
+			return "", &ReviewUnavailableError{
+				Kind:   string(kind),
+				Nudges: nudges,
+				Dump:   dumpRef,
+			}
 		}
 	}
 	mergeChildEvidence(ctx, sub)
@@ -2001,10 +2011,10 @@ func mergeChildEvidence(ctx context.Context, sub *Agent) {
 
 // EvidenceSummary exports this agent's turn-scoped receipts for parent merge.
 func (a *Agent) EvidenceSummary() evidence.ChildEvidenceSummary {
-	if a == nil || a.evidence == nil {
+	if a == nil || a.task.ledger == nil {
 		return evidence.ChildEvidenceSummary{}
 	}
-	return a.evidence.Summary()
+	return a.task.ledger.Summary()
 }
 
 func isFreshSubagentSession(sess *Session) bool {

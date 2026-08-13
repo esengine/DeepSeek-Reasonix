@@ -17,13 +17,13 @@ var ErrCompactionRequired = errors.New("context exceeds provider limit and compa
 // projection plus any post-projection appends, otherwise the full canonical
 // transcript. LocalOnly stripping still happens in prepareSamplingRequest.
 func (a *Agent) modelVisibleMessages() []provider.Message {
-	if a == nil || a.session == nil {
+	if a == nil || a.sess.conversation == nil {
 		return nil
 	}
-	msgs, version := a.session.snapshotMessagesVersion()
-	a.compactionMu.Lock()
-	st := a.compactionState
-	a.compactionMu.Unlock()
+	msgs, version := a.sess.conversation.snapshotMessagesVersion()
+	a.sess.compactionMu.Lock()
+	st := a.sess.compactionState
+	a.sess.compactionMu.Unlock()
 	if projectionValid(st, msgs, version, a.currentPromptCacheKey()) {
 		if visible := modelVisibleFromProjection(st.Projection, msgs); len(visible) > 0 {
 			return visible
@@ -36,9 +36,9 @@ func (a *Agent) currentProjectionVersion() uint64 {
 	if a == nil {
 		return 0
 	}
-	a.compactionMu.Lock()
-	defer a.compactionMu.Unlock()
-	return a.compactionState.Projection.ProjectionVersion
+	a.sess.compactionMu.Lock()
+	defer a.sess.compactionMu.Unlock()
+	return a.sess.compactionState.Projection.ProjectionVersion
 }
 
 // currentPromptCacheKey is the lineage key for the bound session + model.
@@ -46,13 +46,13 @@ func (a *Agent) currentPromptCacheKey() string {
 	if a == nil {
 		return ""
 	}
-	a.compactionMu.Lock()
-	defer a.compactionMu.Unlock()
+	a.sess.compactionMu.Lock()
+	defer a.sess.compactionMu.Unlock()
 	return a.currentPromptCacheKeyLocked()
 }
 
 func (a *Agent) currentPromptCacheKeyLocked() string {
-	return promptCacheKey(a.workspaceID, BranchID(a.sessionPath), a.modelRef)
+	return promptCacheKey(a.workspaceID, BranchID(a.sess.path), a.modelRef)
 }
 
 // InvalidateProjection drops the in-memory and on-disk projection after
@@ -61,13 +61,13 @@ func (a *Agent) InvalidateProjection() {
 	if a == nil {
 		return
 	}
-	a.compactionMu.Lock()
-	path := a.sessionPath
-	a.compactionState = CompactionState{}
-	a.compactionMu.Unlock()
-	a.compactStuck = false
-	a.consecutiveCompacts = 0
-	a.lastCompactionTurn.Store(0)
+	a.sess.compactionMu.Lock()
+	path := a.sess.path
+	a.sess.compactionState = CompactionState{}
+	a.sess.compactionMu.Unlock()
+	a.sess.compaction.stuck = false
+	a.sess.compaction.consecutive = 0
+	a.sess.compaction.lastTurn.Store(0)
 	if path != "" {
 		if err := RemoveCompactionState(path); err != nil {
 			slog.Warn("agent: remove context projection", "err", err)
@@ -83,11 +83,11 @@ func (a *Agent) LoadProjectionSidecar(sessionPath string) {
 	if a == nil {
 		return
 	}
-	a.compactionMu.Lock()
-	a.sessionPath = sessionPath
-	a.compactionState = CompactionState{}
-	a.checkpointState = "none"
-	a.compactionMu.Unlock()
+	a.sess.compactionMu.Lock()
+	a.sess.path = sessionPath
+	a.sess.compactionState = CompactionState{}
+	a.sess.checkpointState = "none"
+	a.sess.compactionMu.Unlock()
 	if sessionPath == "" {
 		a.resetCompactionState()
 		return
@@ -103,7 +103,7 @@ func (a *Agent) LoadProjectionSidecar(sessionPath string) {
 		a.resetCompactionState()
 		return
 	}
-	a.compactionMu.Lock()
+	a.sess.compactionMu.Lock()
 	key := a.currentPromptCacheKeyLocked()
 	normalized, keyOK := lineageKeyCompatible(st.PromptCacheKey, key)
 	// Keep receipt-only blocked/failed sidecars (no projection body) and legacy
@@ -112,10 +112,22 @@ func (a *Agent) LoadProjectionSidecar(sessionPath string) {
 		st.BlockedInputHash != "" ||
 		(st.LastReceipt != nil && (st.LastReceipt.Status == "blocked" || st.LastReceipt.Status == "failed" ||
 			st.LastReceipt.Status == "applied"))
+	if key != "" && !keyOK {
+		// Lineage key changed (upgrade, model/workspace switch). Rebind when
+		// the projection body still matches the canonical covered prefix.
+		var msgs []provider.Message
+		var version uint64
+		if a.sess.conversation != nil {
+			msgs, version = a.sess.conversation.snapshotMessagesVersion()
+		}
+		if projectionContentValid(st, msgs, version) {
+			normalized, keyOK = key, true
+		}
+	}
 	if (key != "" && !keyOK) || !hasMaintenanceSignal {
-		a.compactionState = CompactionState{}
-		a.checkpointState = "none"
-		a.compactionMu.Unlock()
+		a.sess.compactionState = CompactionState{}
+		a.sess.checkpointState = "none"
+		a.sess.compactionMu.Unlock()
 		return
 	}
 	// Only rewrite legacy native-editing lineage keys; exact matches stay pure-read.
@@ -127,26 +139,26 @@ func (a *Agent) LoadProjectionSidecar(sessionPath string) {
 	// Only mark restored when the projection still matches the transcript.
 	var msgs []provider.Message
 	var version uint64
-	if a.session != nil {
-		msgs, version = a.session.snapshotMessagesVersion()
+	if a.sess.conversation != nil {
+		msgs, version = a.sess.conversation.snapshotMessagesVersion()
 	}
 	valid := len(st.Projection.Messages) > 0 && projectionValid(st, msgs, version, key)
 	if !valid && len(st.Projection.Messages) > 0 {
 		// Keep blocked receipts / telemetry; drop unusable projection body.
 		st.Projection = ContextProjection{}
 	}
-	a.compactionState = st
+	a.sess.compactionState = st
 	if valid {
-		a.checkpointState = "restored"
+		a.sess.checkpointState = "restored"
 		if needsNormalization {
 			if err := a.persistCompactionStateLocked(); err != nil {
 				slog.Warn("agent: persist normalized projection lineage", "err", err)
 			}
 		}
 	} else {
-		a.checkpointState = "none"
+		a.sess.checkpointState = "none"
 	}
-	a.compactionMu.Unlock()
+	a.sess.compactionMu.Unlock()
 }
 
 // lineageKeyCompatible reports whether a stored PromptCacheKey still belongs to
@@ -175,10 +187,10 @@ func lineageKeyCompatible(stored, current string) (normalized string, ok bool) {
 }
 
 func (a *Agent) resetCompactionState() {
-	a.compactionMu.Lock()
-	a.compactionState = CompactionState{}
-	a.checkpointState = "none"
-	a.compactionMu.Unlock()
+	a.sess.compactionMu.Lock()
+	a.sess.compactionState = CompactionState{}
+	a.sess.checkpointState = "none"
+	a.sess.compactionMu.Unlock()
 }
 
 // BindSessionPath rebinds projection persistence to path. When loadSidecar is
@@ -192,15 +204,15 @@ func (a *Agent) BindSessionPath(path string, loadSidecar bool) {
 		a.LoadProjectionSidecar(path)
 		return
 	}
-	a.compactionMu.Lock()
-	a.sessionPath = path
-	a.compactionState = CompactionState{}
-	a.checkpointState = "none"
-	a.cacheState = CacheStateUnknown
-	a.compactionMu.Unlock()
-	a.compactStuck = false
-	a.consecutiveCompacts = 0
-	a.lastCompactionTurn.Store(0)
+	a.sess.compactionMu.Lock()
+	a.sess.path = path
+	a.sess.compactionState = CompactionState{}
+	a.sess.checkpointState = "none"
+	a.sess.cacheState = CacheStateUnknown
+	a.sess.compactionMu.Unlock()
+	a.sess.compaction.stuck = false
+	a.sess.compaction.consecutive = 0
+	a.sess.compaction.lastTurn.Store(0)
 }
 
 // SetSessionPath binds the transcript path used for projection persistence.
@@ -208,9 +220,9 @@ func (a *Agent) SetSessionPath(path string) {
 	if a == nil {
 		return
 	}
-	a.compactionMu.Lock()
-	a.sessionPath = path
-	a.compactionMu.Unlock()
+	a.sess.compactionMu.Lock()
+	a.sess.path = path
+	a.sess.compactionMu.Unlock()
 }
 
 // SessionPath returns the bound transcript path.
@@ -218,9 +230,9 @@ func (a *Agent) SessionPath() string {
 	if a == nil {
 		return ""
 	}
-	a.compactionMu.Lock()
-	defer a.compactionMu.Unlock()
-	return a.sessionPath
+	a.sess.compactionMu.Lock()
+	defer a.sess.compactionMu.Unlock()
+	return a.sess.path
 }
 
 // SetCacheState records the resume-time cache estimate without rewriting history.
@@ -233,14 +245,14 @@ func (a *Agent) SetCacheState(state string) {
 	default:
 		state = CacheStateUnknown
 	}
-	a.compactionMu.Lock()
-	defer a.compactionMu.Unlock()
-	a.cacheState = state
-	if a.compactionState.SchemaVersion == 0 && len(a.compactionState.Projection.Messages) == 0 {
-		a.compactionState.SchemaVersion = compactionStateSchemaCurrent
+	a.sess.compactionMu.Lock()
+	defer a.sess.compactionMu.Unlock()
+	a.sess.cacheState = state
+	if a.sess.compactionState.SchemaVersion == 0 && len(a.sess.compactionState.Projection.Messages) == 0 {
+		a.sess.compactionState.SchemaVersion = compactionStateSchemaCurrent
 	}
-	a.compactionState.LastCacheState = state
-	a.compactionState.UpdatedAt = time.Now().UTC()
+	a.sess.compactionState.LastCacheState = state
+	a.sess.compactionState.UpdatedAt = time.Now().UTC()
 }
 
 // CacheState returns the last estimated cache warm/cold/unknown label.
@@ -248,19 +260,19 @@ func (a *Agent) CacheState() string {
 	if a == nil {
 		return CacheStateUnknown
 	}
-	a.compactionMu.Lock()
-	defer a.compactionMu.Unlock()
-	if a.cacheState == "" {
+	a.sess.compactionMu.Lock()
+	defer a.sess.compactionMu.Unlock()
+	if a.sess.cacheState == "" {
 		return CacheStateUnknown
 	}
-	return a.cacheState
+	return a.sess.cacheState
 }
 
 func (a *Agent) persistCompactionStateLocked() error {
-	if a.sessionPath == "" {
+	if a.sess.path == "" {
 		return nil
 	}
-	return SaveCompactionState(a.sessionPath, a.compactionState)
+	return SaveCompactionState(a.sess.path, a.sess.compactionState)
 }
 
 // promptCacheKey builds a stable lineage key for session + model identity.

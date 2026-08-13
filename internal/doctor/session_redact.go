@@ -49,6 +49,7 @@ func RedactSessions(opts RedactSessionsOptions) RedactSessionsResult {
 	dirs := redactSessionDirs(opts.Dirs)
 	res := RedactSessionsResult{Dirs: dirs, DryRun: opts.DryRun}
 	for _, dir := range dirs {
+		var candidates []string
 		if err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				res.Errors = append(res.Errors, fmt.Sprintf("%s: %v", path, err))
@@ -60,24 +61,47 @@ func RedactSessions(opts RedactSessionsOptions) RedactSessionsResult {
 			if d.IsDir() || !redactSessionCandidate(path) {
 				return nil
 			}
-			res.FilesScanned++
-			if sessionPath := redactionSessionPath(path); sessionPath != "" && sessionRedactionLeaseHeld(sessionPath) {
-				res.FilesSkipped++
-				return nil
-			}
-			changed, rewritten, err := redactSessionArtifact(path, opts.DryRun)
-			if err != nil {
-				res.Errors = append(res.Errors, fmt.Sprintf("%s: %v", path, err))
-				return nil
-			}
-			res.FilesChanged += changed
-			res.BytesRewritten += rewritten
+			candidates = append(candidates, path)
 			return nil
 		}); err != nil {
 			res.Errors = append(res.Errors, fmt.Sprintf("%s: %v", dir, err))
 		}
+		// A transcript rewrite now refreshes its listing projection. Process an
+		// existing branch-meta sidecar first so a secret-bearing sidecar is
+		// counted and redacted before the transcript replaces its preview.
+		sort.SliceStable(candidates, func(i, j int) bool {
+			left, right := redactionCandidatePriority(candidates[i]), redactionCandidatePriority(candidates[j])
+			if left != right {
+				return left < right
+			}
+			return candidates[i] < candidates[j]
+		})
+		for _, path := range candidates {
+			res.FilesScanned++
+			if sessionPath := redactionSessionPath(path); sessionPath != "" && sessionRedactionLeaseHeld(sessionPath) {
+				res.FilesSkipped++
+				continue
+			}
+			changed, rewritten, err := redactSessionArtifact(path, opts.DryRun)
+			if err != nil {
+				res.Errors = append(res.Errors, fmt.Sprintf("%s: %v", path, err))
+				continue
+			}
+			res.FilesChanged += changed
+			res.BytesRewritten += rewritten
+		}
 	}
 	return res
+}
+
+func redactionCandidatePriority(path string) int {
+	if strings.HasSuffix(filepath.Base(path), ".jsonl.meta") {
+		return 0
+	}
+	if store.IsSessionTranscriptName(filepath.Base(path)) {
+		return 1
+	}
+	return 2
 }
 
 func redactSessionDirs(in []string) []string {

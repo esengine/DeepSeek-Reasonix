@@ -345,7 +345,7 @@ func (c *Coordinator) Run(ctx context.Context, input string) error {
 	}
 	routeDetail := fmt.Sprintf("planner route=%s depth=%s reason=%s", decision.Route, decision.Depth, decision.Reason)
 	if decision.Route == PlannerRouteExecutorOnly {
-		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.prov.Name() + " · executing", Detail: routeDetail, Source: event.UsageSourceExecutor})
+		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.svc.prov.Name() + " · executing", Detail: routeDetail, Source: event.UsageSourceExecutor})
 		return c.executor.Run(ctx, input)
 	}
 	c.sink.Emit(event.Event{Kind: event.Phase, Text: c.planner.Name() + " · planning", Detail: routeDetail, Source: event.UsageSourcePlanner})
@@ -375,7 +375,7 @@ func (c *Coordinator) Run(ctx context.Context, input string) error {
 				Detail: plannerResearchPauseDetail(err),
 				Source: event.UsageSourcePlanner,
 			})
-			c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.prov.Name() + " · executing", Source: event.UsageSourceExecutor})
+			c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.svc.prov.Name() + " · executing", Source: event.UsageSourceExecutor})
 			return c.executor.Run(ctx, input)
 		}
 		// Plan-only explicitly excludes execution, while plan-for-approval
@@ -389,7 +389,7 @@ func (c *Coordinator) Run(ctx context.Context, input string) error {
 		// healthy and owns the full tool set, so degrade to single-model for
 		// this turn.
 		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: plannerFallbackNotice, Detail: "planner failed; running the executor without a plan: " + err.Error(), Source: event.UsageSourcePlanner})
-		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.prov.Name() + " · executing", Source: event.UsageSourceExecutor})
+		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.svc.prov.Name() + " · executing", Source: event.UsageSourceExecutor})
 		return c.executor.Run(ctx, input)
 	}
 	return c.deliverPlan(ctx, input, outcome, decision)
@@ -414,7 +414,7 @@ func (c *Coordinator) deliverPlan(ctx context.Context, input string, outcome pla
 		if outcome.structured {
 			c.executor.SetPlanContract(&outcome.plan)
 		}
-		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.prov.Name() + " · executing", Source: event.UsageSourceExecutor})
+		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.svc.prov.Name() + " · executing", Source: event.UsageSourceExecutor})
 		return c.executor.Run(ctx, formatHandoffWithDecision(input, planText, decision, executorToolHandoffContext(c.executor)))
 	}
 	runWithPlanApproval := func() error {
@@ -487,7 +487,7 @@ func lastNonEmptyLine(s string) string {
 }
 
 func (c *Coordinator) persistExecutorNoOp(ctx context.Context, input, plan string) {
-	if c == nil || c.executor == nil || c.executor.session == nil {
+	if c == nil || c.executor == nil || c.executor.sess.conversation == nil {
 		return
 	}
 	rawInput := RawUserInput(ctx, input)
@@ -496,11 +496,11 @@ func (c *Coordinator) persistExecutorNoOp(ctx context.Context, input, plan strin
 	if providerContent != rawInput {
 		rawContent = rawInput
 	}
-	c.executor.session.Add(provider.Message{
+	c.executor.sess.conversation.Add(provider.Message{
 		Role: provider.RoleUser, Content: providerContent, RawContent: rawContent,
 		Images: userImages(ctx), CreatedAt: time.Now().UnixMilli(),
 	})
-	c.executor.session.Add(provider.Message{Role: provider.RoleAssistant, Content: plan})
+	c.executor.sess.conversation.Add(provider.Message{Role: provider.RoleAssistant, Content: plan})
 }
 
 // plannerOutcome is one planning turn's result. A submitted plan is the
@@ -645,13 +645,6 @@ func plannerResearchPauseDetail(err error) string {
 			maxPause.key,
 		)
 	}
-	var stallPause *todoStallPause
-	if errors.As(err, &stallPause) {
-		return fmt.Sprintf(
-			"planner did not finalize after %d tool-call rounds without progress",
-			stallPause.rounds,
-		)
-	}
 	return "planner did not finalize after its bounded research and finalization rounds"
 }
 
@@ -731,10 +724,10 @@ Carry out the task, adapting the plan as needed.`, executorHandoffMarker, task, 
 // executor carries MCP tools; the built-in tool list would just restate the
 // schema already attached to the request and pay its tokens every planned turn.
 func executorToolHandoffContext(a *Agent) string {
-	if a == nil || a.tools == nil {
+	if a == nil || a.svc.tools == nil {
 		return ""
 	}
-	schemas := a.tools.Schemas()
+	schemas := a.svc.tools.Schemas()
 	if len(schemas) == 0 {
 		return ""
 	}

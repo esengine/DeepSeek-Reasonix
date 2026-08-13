@@ -204,6 +204,25 @@ func TestRecoveryCopyCleanupRevalidatesInBackend(t *testing.T) {
 	}
 }
 
+func TestRecoveryCopyCleanupKeepsOpenBranch(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp()
+	parentPath, branchPath, branchMsgs := forkDesktopRecoveryBranch(t, dir, "open-delete-guard")
+	coverDesktopRecoveryParent(t, parentPath, branchMsgs)
+	app.tabs["open-copy"] = &WorkspaceTab{ID: "open-copy", Scope: "global", SessionPath: branchPath, Ready: true}
+
+	if err := app.DeleteRecoveryCopy(branchPath); !errors.Is(err, errSessionBusyElsewhere) {
+		t.Fatalf("DeleteRecoveryCopy(open) error = %v, want busy", err)
+	}
+	if _, err := os.Stat(branchPath); err != nil {
+		t.Fatalf("open recovery branch must remain visible: %v", err)
+	}
+}
+
 func TestTopicHiddenAsRecoveryOnly(t *testing.T) {
 	recoveryOnly := topicSummary{hasRecoveryOnly: true}
 	cases := []struct {

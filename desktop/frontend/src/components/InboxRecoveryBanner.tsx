@@ -4,13 +4,14 @@ import { app } from "../lib/bridge";
 import { useI18n } from "../lib/i18n";
 
 const COPY = {
-  en: ["Recovered {n} pending instructions", "The inbox is paused. Review queued work before continuing.", "Review queue", "Continue", "Keep paused", "Paused"],
-  zh: ["已恢复 {n} 条待处理指令", "收件箱当前已暂停，请检查队列后再继续。", "查看队列", "继续执行", "保持暂停", "已暂停"],
-  "zh-TW": ["已恢復 {n} 條待處理指令", "收件匣目前已暫停，請檢查佇列後再繼續。", "查看佇列", "繼續執行", "保持暫停", "已暫停"],
+  en: ["Recovered {n} pending instructions", "Inbox is paused", "Review queued work before continuing.", "Review queue", "Continue", "Keep paused", "Paused"],
+  zh: ["已恢复 {n} 条待处理指令", "收件箱已暂停", "请检查队列后再继续。", "查看队列", "继续执行", "保持暂停", "已暂停"],
+  "zh-TW": ["已恢復 {n} 條待處理指令", "收件匣已暫停", "請檢查佇列後再繼續。", "查看佇列", "繼續執行", "保持暫停", "已暫停"],
 } as const;
 
 export function InboxRecoveryBanner({
   count,
+  recovered,
   disabled,
   tabId,
   onReview,
@@ -18,6 +19,7 @@ export function InboxRecoveryBanner({
   onError,
 }: {
   count: number;
+  recovered: boolean;
   disabled: boolean;
   tabId: string;
   onReview: () => void;
@@ -25,12 +27,15 @@ export function InboxRecoveryBanner({
   onError: (error: unknown) => void;
 }) {
   const { locale } = useI18n();
-  const [titleTemplate, body, review, resume, keepPaused, paused] = COPY[locale];
-  const title = titleTemplate.replace("{n}", String(count));
+  const [recoveredTitle, pausedTitle, body, review, resume, keepPaused, paused] = COPY[locale];
+  const title = recovered ? recoveredTitle.replace("{n}", String(count)) : pausedTitle;
   const [busy, setBusy] = useState(false);
   const [keptPaused, setKeptPaused] = useState(false);
   const mountedRef = useRef(true);
-  useEffect(() => () => { mountedRef.current = false; }, []);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const setPaused = async (paused: boolean) => {
     if (busy) return;

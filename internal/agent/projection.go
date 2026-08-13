@@ -142,6 +142,8 @@ type CompactionTelemetry struct {
 	FoldTokens        int    `json:"fold_tokens"` // summarizer input after any shortening
 	Spans             int    `json:"spans"`       // summarizer calls the fold needed; 1 unless it was split
 	ProjectionTokens  int    `json:"projection_tokens"`
+	UserTurnsKept     int    `json:"user_turns_kept"`
+	UserTurnsDropped  int    `json:"user_turns_dropped"` // past the retention budget, now summary-only
 	InputTokens       int    `json:"input_tokens"`
 	OutputTokens      int    `json:"output_tokens"`
 	CacheHitTokens    int    `json:"cache_hit_tokens"`
@@ -262,17 +264,18 @@ func providerVisibleFingerprint(msgs []provider.Message) string {
 		ThoughtSignature string `json:"ts,omitempty"`
 	}
 	type wireMsg struct {
-		Role               string            `json:"r"`
-		Content            string            `json:"c,omitempty"`
-		Images             []string          `json:"img,omitempty"`
-		ReasoningContent   string            `json:"rc,omitempty"`
-		ReasoningID        string            `json:"rid,omitempty"`
-		ReasoningStatus    string            `json:"rst,omitempty"`
-		ReasoningSignature string            `json:"rsig,omitempty"`
-		ToolCallID         string            `json:"tid,omitempty"`
-		Name               string            `json:"n,omitempty"`
-		ToolCalls          []wireCall        `json:"tc,omitempty"`
-		ResponsesItems     []json.RawMessage `json:"ri,omitempty"`
+		Role               string                      `json:"r"`
+		Content            string                      `json:"c,omitempty"`
+		Images             []string                    `json:"img,omitempty"`
+		ReasoningContent   string                      `json:"rc,omitempty"`
+		ReasoningID        string                      `json:"rid,omitempty"`
+		ReasoningStatus    string                      `json:"rst,omitempty"`
+		ReasoningSignature string                      `json:"rsig,omitempty"`
+		ToolCallID         string                      `json:"tid,omitempty"`
+		Name               string                      `json:"n,omitempty"`
+		ToolCalls          []wireCall                  `json:"tc,omitempty"`
+		ResponsesItems     []json.RawMessage           `json:"ri,omitempty"`
+		ServerSearch       []provider.ServerSearchCall `json:"ss,omitempty"`
 	}
 	wire := make([]wireMsg, 0, len(msgs))
 	for _, m := range msgs {
@@ -298,6 +301,9 @@ func providerVisibleFingerprint(msgs []provider.Message) string {
 				wm.ResponsesItems[i] = append(json.RawMessage(nil), item...)
 			}
 		}
+		if len(m.ServerSearch) > 0 {
+			wm.ServerSearch = append([]provider.ServerSearchCall(nil), m.ServerSearch...)
+		}
 		wire = append(wire, wm)
 	}
 	b, err := json.Marshal(wire)
@@ -315,15 +321,25 @@ func projectionValid(st CompactionState, msgs []provider.Message, transcriptVers
 	if len(st.Projection.Messages) == 0 {
 		return false
 	}
-	n := st.Projection.CoveredCount
-	if n <= 0 || n > len(msgs) {
-		return false
-	}
 	// Current lineage known: stored key must match (legacy native suffix ok).
 	if cacheKey != "" {
 		if _, ok := lineageKeyCompatible(st.PromptCacheKey, cacheKey); !ok {
 			return false
 		}
+	}
+	return projectionContentValid(st, msgs, transcriptVersion)
+}
+
+// projectionContentValid reports whether st's projection body still matches the
+// canonical transcript, independent of provider/model lineage. LoadProjectionSidecar
+// uses it to rebind across upgrade/model/workspace key changes.
+func projectionContentValid(st CompactionState, msgs []provider.Message, transcriptVersion uint64) bool {
+	if len(st.Projection.Messages) == 0 {
+		return false
+	}
+	n := st.Projection.CoveredCount
+	if n <= 0 || n > len(msgs) {
+		return false
 	}
 	// Prefix hash is required; legacy sidecars without it are rebuilt.
 	if st.Projection.CoveredPrefixHash == "" {
@@ -367,6 +383,7 @@ func coalesceProjectionUserRuns(msgs []provider.Message) []provider.Message {
 			clone.Images = append([]string(nil), msg.Images...)
 			clone.ToolCalls = append([]provider.ToolCall(nil), msg.ToolCalls...)
 			clone.ResponsesItems = append([]json.RawMessage(nil), msg.ResponsesItems...)
+			clone.ServerSearch = append([]provider.ServerSearchCall(nil), msg.ServerSearch...)
 			out = append(out, clone)
 			continue
 		}
@@ -380,6 +397,7 @@ func coalesceProjectionUserRuns(msgs []provider.Message) []provider.Message {
 		prev.Images = append(prev.Images, msg.Images...)
 		prev.ToolCalls = append(prev.ToolCalls, msg.ToolCalls...)
 		prev.ResponsesItems = append(prev.ResponsesItems, msg.ResponsesItems...)
+		prev.ServerSearch = append(prev.ServerSearch, msg.ServerSearch...)
 	}
 	return out
 }
