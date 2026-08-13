@@ -847,14 +847,3 @@ func (m chatTUI) renderCompletion() string {
 	b.WriteString(padCompletionLine(dim(hint), m.width))
 	return b.String()
 }
-
-// renderGhostSuggestion draws the predicted next prompt as a dimmed line above
-// the composer (aligned under the input prompt), with a Tab hint. Empty when no
-// suggestion is pending.
-func (m chatTUI) renderGhostSuggestion() string {
-	if m.ghostSuggestion == "" {
-		return ""
-	}
-	line := dim(accent("❯ ")) + dim(m.ghostSuggestion) + "  " + dim(i18n.M.GhostSuggestionHint)
-	return padCompletionLine(line, m.width)
-}

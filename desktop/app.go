@@ -5553,7 +5553,7 @@ func (a *App) SuggestionForTab(tabID string) string {
 	if err != nil || cfg == nil || !cfg.SuggestionEnabled() {
 		return ""
 	}
-	p, err := suggest.Provider(cfg, cfg.Agent.SuggestionModel)
+	p, err := suggest.Provider(cfg, cfg.Agent.SuggestionModel, boot.NewProvider)
 	if err != nil {
 		return ""
 	}

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestSuggestionMsgSetsGhostWhenIdle(t *testing.T) {
@@ -68,24 +69,42 @@ func TestTypingClearsGhostSuggestion(t *testing.T) {
 	}
 }
 
-func TestRenderGhostSuggestion(t *testing.T) {
+func TestRenderGhostSuggestionInline(t *testing.T) {
 	m := newTestChatTUI()
+	m.input.SetValue("")
 	m.ghostSuggestion = "继续修复那个 bug"
-	m.width = 80
 
-	rendered := m.renderGhostSuggestion()
-	if !strings.Contains(rendered, "继续修复那个 bug") {
-		t.Fatalf("renderGhostSuggestion missing text: %q", rendered)
+	rendered := m.renderComposerInput()
+	plain := ansi.Strip(rendered)
+	if !strings.Contains(plain, "继续修复那个 bug") {
+		t.Fatalf("inline ghost missing text: %q", plain)
 	}
-	if !strings.Contains(rendered, "Tab to accept") {
-		t.Fatalf("renderGhostSuggestion missing hint: %q", rendered)
+	// Ghost must render inline after the prompt glyph, not on its own row.
+	if strings.Contains(plain, "\n继续修复那个 bug") {
+		t.Fatalf("ghost rendered on its own row instead of inline: %q", plain)
+	}
+}
+
+func TestRenderGhostSuggestionNotWhenInputNotEmpty(t *testing.T) {
+	m := newTestChatTUI()
+	m.input.SetValue("用户已输入")
+	m.ghostSuggestion = "继续修复那个 bug"
+
+	rendered := m.renderComposerInput()
+	plain := ansi.Strip(rendered)
+	if strings.Contains(plain, "继续修复那个 bug") {
+		t.Fatalf("ghost leaked into non-empty input: %q", plain)
 	}
 }
 
 func TestRenderGhostSuggestionEmpty(t *testing.T) {
 	m := newTestChatTUI()
+	m.input.SetValue("")
 	m.ghostSuggestion = ""
-	if got := m.renderGhostSuggestion(); got != "" {
-		t.Fatalf("renderGhostSuggestion = %q, want empty", got)
+
+	rendered := m.renderComposerInput()
+	plain := ansi.Strip(rendered)
+	if strings.Contains(plain, "继续修复那个 bug") {
+		t.Fatalf("unexpected ghost text: %q", plain)
 	}
 }

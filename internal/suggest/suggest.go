@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"strings"
 
-	"reasonix/internal/boot"
 	"reasonix/internal/config"
 	"reasonix/internal/provider"
 )
@@ -65,11 +64,16 @@ type Options struct {
 	Temperature *float64
 }
 
+// ProviderFactory builds a provider.Provider from a resolved provider entry.
+// Callers supply boot.NewProvider (suggest must stay below the boot frontend
+// layer and therefore never imports it).
+type ProviderFactory func(*config.ProviderEntry) (provider.Provider, error)
+
 // Provider resolves a model reference into a provider.Provider suitable for
 // generating a suggestion. An empty modelRef falls back to the config's default
 // model. modelRef may be "provider/model", a provider name, or a bare model
 // name (see config.Config.ResolveModel).
-func Provider(cfg *config.Config, modelRef string) (provider.Provider, error) {
+func Provider(cfg *config.Config, modelRef string, newProvider ProviderFactory) (provider.Provider, error) {
 	ref := strings.TrimSpace(modelRef)
 	if ref == "" {
 		ref = cfg.DefaultModel
@@ -78,10 +82,9 @@ func Provider(cfg *config.Config, modelRef string) (provider.Provider, error) {
 	if !ok {
 		return nil, fmt.Errorf("suggest: unknown model %q", ref)
 	}
-	// Suggestion generation must be fast and cheap: a next-prompt prediction does
-	// not need deep reasoning. Disable thinking/effort so the endpoint returns a
-	// first token promptly instead of spending seconds on a long chain of thought
-	// (the default DeepSeek providers ship with Thinking=enabled, Effort=high).
+	// A next-prompt prediction needs no deep reasoning: disable thinking/effort
+	// so the endpoint returns a first token promptly (the default DeepSeek
+	// providers ship with Thinking=enabled, Effort=high).
 	entry.Thinking = "disabled"
 	if strings.TrimSpace(entry.Effort) == "" || entry.Effort == "auto" {
 		entry.Effort = "disabled"
@@ -90,7 +93,7 @@ func Provider(cfg *config.Config, modelRef string) (provider.Provider, error) {
 			entry.Effort = norm
 		}
 	}
-	p, err := boot.NewProvider(entry)
+	p, err := newProvider(entry)
 	if err != nil {
 		return nil, fmt.Errorf("suggest: build provider for %q: %w", ref, err)
 	}
@@ -101,8 +104,7 @@ func Provider(cfg *config.Config, modelRef string) (provider.Provider, error) {
 // from the recent conversation history. It returns the raw predicted text,
 // trimmed, or "" when the model produced nothing. On error it returns "" and
 // the error so callers can silently degrade (a failed suggestion should never
-// block the UI). The request is bounded by the caller's context (a short
-// timeout).
+// block the UI).
 func NextPrompt(ctx context.Context, p provider.Provider, history []provider.Message, opts Options) (string, error) {
 	if p == nil {
 		return "", nil

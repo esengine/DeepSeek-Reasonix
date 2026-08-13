@@ -2,10 +2,10 @@
   "limits": {
     "banner": 15,
     "commented-code": 0,
-    "complexity": 2103,
+    "complexity": 2108,
     "essay": 3995,
-    "file-size": 108080,
-    "function-size": 8923,
+    "file-size": 108216,
+    "function-size": 8950,
     "layering": 1,
     "marker": 0,
     "narrative": 64,
@@ -29,7 +29,7 @@
     "desktop/app.go": {
       "complexity": 59,
       "essay": 96,
-      "file-size": 11310,
+      "file-size": 11347,
       "function-size": 368,
       "struct-state": 15
     },
@@ -86,7 +86,7 @@
       "essay": 2
     },
     "desktop/frontend/src/App.tsx": {
-      "file-size": 4678
+      "file-size": 4681
     },
     "desktop/frontend/src/__tests__/app-chrome-tabs.test.ts": {
       "test-file-size": 19
@@ -125,7 +125,7 @@
       "file-size": 2653
     },
     "desktop/frontend/src/components/Composer.tsx": {
-      "file-size": 4020
+      "file-size": 4053
     },
     "desktop/frontend/src/components/ContextPanel.tsx": {
       "file-size": 38
@@ -170,7 +170,7 @@
       "file-size": 415
     },
     "desktop/frontend/src/lib/bridge.ts": {
-      "file-size": 4780
+      "file-size": 4784
     },
     "desktop/frontend/src/lib/crash.ts": {
       "file-size": 225
@@ -182,7 +182,7 @@
       "file-size": 1580
     },
     "desktop/frontend/src/lib/useController.ts": {
-      "file-size": 3976
+      "file-size": 3985
     },
     "desktop/heartbeat.go": {
       "essay": 20,
@@ -838,10 +838,10 @@
       "essay": 15
     },
     "internal/cli/chat_tui.go": {
-      "complexity": 333,
-      "essay": 109,
-      "file-size": 4767,
-      "function-size": 1304
+      "complexity": 340,
+      "essay": 110,
+      "file-size": 4833,
+      "function-size": 1331
     },
     "internal/cli/chat_tui_paste.go": {
       "essay": 9
@@ -1010,7 +1010,7 @@
     },
     "internal/config/config.go": {
       "essay": 54,
-      "file-size": 1520,
+      "file-size": 1554,
       "narrative": 2
     },
     "internal/config/credentials.go": {

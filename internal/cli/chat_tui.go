@@ -615,7 +615,7 @@ func (m *chatTUI) fetchSuggestion() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
-		p, err := suggest.Provider(cfg, modelRef)
+		p, err := suggest.Provider(cfg, modelRef, boot.NewProvider)
 		if err != nil {
 			return suggestionMsg{}
 		}
@@ -3594,10 +3594,6 @@ func (m chatTUI) View() tea.View {
 	if card := m.renderCopyPicker(); card != "" {
 		parts = append(parts, card)
 		rowsAboveBox += strings.Count(card, "\n") + 1
-	}
-	if ghost := m.renderGhostSuggestion(); ghost != "" {
-		parts = append(parts, ghost)
-		rowsAboveBox += strings.Count(ghost, "\n") + 1
 	}
 	if menu := m.renderCompletion(); menu != "" {
 		parts = append(parts, menu)

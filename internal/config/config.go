@@ -1306,16 +1306,13 @@ type AgentConfig struct {
 	SubagentEffort      string            `toml:"subagent_effort"`
 	SubagentEfforts     map[string]string `toml:"subagent_efforts"`
 	MaxSubagentDepth    int               `toml:"max_subagent_depth"`
-	// SuggestionEnabled turns on the next-prompt Tab-completion suggestion after
-	// each AI answer. nil = default enabled. SuggestionModel optionally names a
-	// cheap "Lite" provider/model for generating these suggestions; empty falls
-	// back to the main model ref. SuggestionMaxTokens bounds the generated
-	// suggestion length (default 60). SuggestionTimeoutMs bounds the per-request
-	// wait (default 4000).
-	SuggestionEnabled    *bool  `toml:"suggestion_enabled"`
-	SuggestionModel      string `toml:"suggestion_model"`
-	SuggestionMaxTokens  int    `toml:"suggestion_max_tokens"`
-	SuggestionTimeoutMs  int    `toml:"suggestion_timeout_ms"`
+	// Suggestion* configures next-prompt Tab-completion on a cheap Lite model:
+	// SuggestionEnabled (nil = on), SuggestionModel (empty = main model),
+	// SuggestionMaxTokens, SuggestionTimeoutMs.
+	SuggestionEnabled   *bool  `toml:"suggestion_enabled"`
+	SuggestionModel     string `toml:"suggestion_model"`
+	SuggestionMaxTokens int    `toml:"suggestion_max_tokens"`
+	SuggestionTimeoutMs int    `toml:"suggestion_timeout_ms"`
 	// TaskCostBudget lands a task on one summary once it spends this much.
 	TaskCostBudget float64 `toml:"task_cost_budget"`
 	// TaskTimeBudgetMinutes is the same gate on wall clock. Both ship off.

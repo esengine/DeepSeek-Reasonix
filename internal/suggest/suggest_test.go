@@ -189,11 +189,11 @@ func TestShouldFilterSuggestion(t *testing.T) {
 		{"looks good", true},
 		{"let me fix that", true},
 		{"i'll check", true},
-		{"continue", false},            // allowed single word
-		{"/test", false},               // slash command allowed
-		{"yes", false},                 // allowed single word
+		{"continue", false},           // allowed single word
+		{"/test", false},              // slash command allowed
+		{"yes", false},                // allowed single word
 		{"继续", false},                 // allowed single CJK word
-		{"singlewordnotinlist", true},  // unknown single word
+		{"singlewordnotinlist", true}, // unknown single word
 		{"this sentence has more than twelve words in it so it should be filtered as too long for a suggestion here", true},
 		{"push this commit and run tests", false},
 	}
@@ -203,4 +203,3 @@ func TestShouldFilterSuggestion(t *testing.T) {
 		}
 	}
 }
-

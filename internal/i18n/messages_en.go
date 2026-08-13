@@ -227,7 +227,6 @@ var English = Messages{
 	CtrlCQuitHint:                "press Ctrl+C again to quit",
 	CompHintSlash:                "↑/↓ move · Tab/Enter select · Esc close",
 	CompHintFile:                 "↑/↓ move · Tab/Enter open folder or pick file · Esc close",
-	GhostSuggestionHint:          "Tab to accept",
 	MouseCopiedHint:              "copied to clipboard",
 	ClipboardCopyOSC52Hint:       "copy sent via OSC 52 — terminal permission may be required",
 	ClipboardCopyFallbackHint:    "native clipboard unavailable — copy sent via OSC 52",
