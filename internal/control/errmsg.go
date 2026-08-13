@@ -19,6 +19,25 @@ func explainError(err error) error {
 	if err == nil {
 		return nil
 	}
+	var requestErr *provider.RequestError
+	if errors.As(err, &requestErr) {
+		var message string
+		switch requestErr.Kind {
+		case provider.RequestFailureDNS:
+			message = i18n.M.ProviderErrNetworkDNS
+		case provider.RequestFailureTLS:
+			message = i18n.M.ProviderErrNetworkTLS
+		case provider.RequestFailureProxy:
+			message = i18n.M.ProviderErrNetworkProxy
+		case provider.RequestFailureTimeout:
+			message = i18n.M.ProviderErrNetworkTimeout
+		case provider.RequestFailureURL:
+			message = i18n.M.ProviderErrNetworkURL
+		default:
+			message = i18n.M.ProviderErrNetwork
+		}
+		return errors.New(message)
+	}
 	if provider.IsStreamInterrupted(err) {
 		return fmt.Errorf("model stream interrupted after recovery attempts: %s. The partial response was kept; retry or ask Reasonix to continue", err.Error())
 	}

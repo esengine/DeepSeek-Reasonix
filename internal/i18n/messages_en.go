@@ -480,6 +480,12 @@ var English = Messages{
 	ProviderErrRateLimited:         "Rate limit reached (HTTP 429): too many requests (TPM/RPM). Retried with backoff — slow down or try again shortly.",
 	ProviderErrServer:              "Server error (HTTP 500): the provider hit an internal fault. Retried with backoff; if it keeps failing, try again later.",
 	ProviderErrServerBusy:          "Server busy (HTTP 503): the provider is overloaded. Retried with backoff; please try again shortly.",
+	ProviderErrNetwork:             "Network request failed: the provider could not be reached. Check the network, firewall, or provider availability, then retry.",
+	ProviderErrNetworkDNS:          "DNS lookup failed: the provider hostname could not be resolved. Check DNS or the network, then retry.",
+	ProviderErrNetworkTLS:          "TLS connection failed: the provider certificate or secure handshake was rejected. Check the endpoint, system time, and proxy, then retry.",
+	ProviderErrNetworkProxy:        "Proxy connection failed: the configured or system proxy could not connect. Check proxy settings and credentials, then retry.",
+	ProviderErrNetworkTimeout:      "Network request timed out: the provider or proxy did not respond in time. Check the network and retry.",
+	ProviderErrNetworkURL:          "Provider URL is invalid: check the endpoint address and path in the provider settings.",
 
 	SelectOneHint:  "(↑/↓ · Enter · q to cancel; / to search)",
 	SelectManyHint: "(↑/↓ · Space · Enter · q; / to search)",

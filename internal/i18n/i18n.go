@@ -518,6 +518,12 @@ type Messages struct {
 	ProviderErrRateLimited         string // 429
 	ProviderErrServer              string // 500
 	ProviderErrServerBusy          string // 503
+	ProviderErrNetwork             string // generic transport failure
+	ProviderErrNetworkDNS          string // DNS resolution failure
+	ProviderErrNetworkTLS          string // TLS handshake/certificate failure
+	ProviderErrNetworkProxy        string // configured/system proxy failure
+	ProviderErrNetworkTimeout      string // request timeout
+	ProviderErrNetworkURL          string // invalid request URL
 
 	// selection menus
 	SelectOneHint      string // "(↑/↓ · Enter · q to cancel)"

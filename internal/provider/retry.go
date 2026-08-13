@@ -290,6 +290,9 @@ func SendWithRetry(ctx context.Context, httpClient *http.Client, opts SendOption
 			}
 			select {
 			case <-ctx.Done():
+				if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+					return nil, NewRequestError(opts.Provider, RequestFailureTimeout, ctx.Err())
+				}
 				return nil, ctx.Err()
 			case <-time.After(delay):
 			}
@@ -298,15 +301,19 @@ func SendWithRetry(ctx context.Context, httpClient *http.Client, opts SendOption
 
 		req, err := newReq(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("%s: build request: %w", opts.Provider, err)
+			return nil, NewRequestError(opts.Provider, ClassifyRequestFailure(err), err)
 		}
 		recordRequestAttempt(ctx)
 		resp, err := httpClient.Do(req)
 		if err != nil {
-			if !transientErr(err) {
-				return nil, fmt.Errorf("%s: request failed: %w", opts.Provider, err)
+			if errors.Is(err, context.Canceled) {
+				return nil, err
 			}
-			lastErr = fmt.Errorf("%s: request failed: %w", opts.Provider, err)
+			kind := ClassifyRequestFailure(err)
+			if !transientErr(err) || !retryableRequestFailure(kind) {
+				return nil, NewRequestError(opts.Provider, ClassifyRequestFailure(err), err)
+			}
+			lastErr = NewRequestError(opts.Provider, kind, err)
 			continue
 		}
 		if resp.StatusCode == http.StatusOK {
