@@ -298,8 +298,7 @@
       "risks": [],
       "contributors": [
         "SivanCola",
-        "yingziisme",
-        "github-actions[bot]"
+        "yingziisme"
       ],
       "links": {
         "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.25.1",
