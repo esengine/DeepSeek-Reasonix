@@ -351,7 +351,7 @@ OpenCode Zen Anthropic、Qwen/DashScope CN/Global、
 Qwen Coding Plan
 CN/Global 的 OpenAI-compatible 与 Anthropic-compatible 端点、StepFun
 OpenAI-compatible 与 Anthropic-compatible 端点、NovitaAI、GMI Cloud、Vercel AI
-Gateway、HuggingFace Router、NVIDIA NIM、KiloCode 和 Ollama Cloud。Plan 表示
+Gateway、HuggingFace Router、ModelScope、NVIDIA NIM、KiloCode 和 Ollama Cloud。Plan 表示
 访问/付费形态；只有服务商确实提供不同区域端点时，预设名才同时带 CN/Global。
 因此 Kimi Coding Plan 是独立 plan 端点，Kimi 直连 API 才拆成 CN 和 Global。
 预设路径通常只需要填写服务商 API Key：真实 key 会写入 Reasonix home `.env`，

@@ -73,6 +73,7 @@ func TestCuratedProviderPresetsCoverRequestedProviders(t *testing.T) {
 		"gmi",
 		"vercel-ai-gateway",
 		"huggingface",
+		"modelscope",
 		"nvidia",
 		"kilocode",
 		"ollama-cloud",

@@ -5502,6 +5502,8 @@ function providerPresetDescription(preset: ProviderPresetView, t: ReturnType<typ
       return t("settings.addProvider.preset.nvidiaDesc");
     case "kilocode":
       return t("settings.addProvider.preset.kilocodeDesc");
+    case "modelscope":
+      return t("settings.addProvider.preset.modelscopeDesc");
     case "ollama-cloud":
       return t("settings.addProvider.preset.ollamaCloudDesc");
     case "scnet":

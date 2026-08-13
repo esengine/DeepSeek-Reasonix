@@ -1995,6 +1995,7 @@ export const zhTW: Record<DictKey, string> = {
   "settings.addProvider.preset.huggingfaceDesc": "HuggingFace Inference Router，預置 Qwen 與 DeepSeek 模型。",
   "settings.addProvider.preset.nvidiaDesc": "NVIDIA NIM 加速推理端點，預置 Nemotron 模型。",
   "settings.addProvider.preset.kilocodeDesc": "Kilo Code 閘道，預置 kilo/auto 自動路由模型。",
+  "settings.addProvider.preset.modelscopeDesc": "ModelScope 魔搭社群 OpenAI-compatible 端點，預置 Qwen、DeepSeek 等開源模型。",
   "settings.addProvider.preset.ollamaCloudDesc": "Ollama Cloud 託管端點，支援 none 到 max 的 reasoning effort。",
   "settings.addProvider.preset.scnetDesc": "國家超算互聯網 OpenAI 相容的 Token Plan API。",
   "settings.addProvider.preset.scnetAnthropicDesc": "國家超算互聯網 Anthropic 相容的 Token Plan 端點（Bearer 認證）。",
