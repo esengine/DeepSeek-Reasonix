@@ -231,6 +231,7 @@ func isolateDesktopUserDirs(t *testing.T) string {
 		}
 	}
 	t.Setenv("HOME", home)
+	t.Setenv("REASONIX_HOME", home)
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", xdg)
@@ -247,6 +248,17 @@ func isolateDesktopUserDirs(t *testing.T) string {
 		_ = taskcatalog.ShutdownShared(ctx)
 	})
 	return home
+}
+
+func TestIsolateDesktopUserDirsOverridesInheritedReasonixHome(t *testing.T) {
+	inherited := t.TempDir()
+	t.Setenv("REASONIX_HOME", inherited)
+
+	isolationRoot := isolateDesktopUserDirs(t)
+	got := config.ReasonixHomeDir()
+	if filepath.Clean(got) != filepath.Clean(isolationRoot) {
+		t.Fatalf("Reasonix home = %q, want isolated test root %q (inherited %q must not escape)", got, isolationRoot, inherited)
+	}
 }
 
 func primarySessionFiles(paths []string) []string {
@@ -5075,6 +5087,46 @@ func TestConnectKeyRejectsBackgroundJobsBeforeSavingKey(t *testing.T) {
 	if data, readErr := os.ReadFile(config.UserCredentialsPath()); readErr == nil && strings.Contains(string(data), "DEEPSEEK_API_KEY") {
 		t.Fatalf("onboarding key should not be saved after rejected connect:\n%s", data)
 	}
+}
+
+func TestConnectKeyUsesConfiguredNetworkClient(t *testing.T) {
+	t.Setenv("REASONIX_HOME", t.TempDir())
+	isolateDesktopUserDirs(t)
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+
+	cfg := config.Default()
+	cfg.Network.ProxyMode = "off"
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save direct-network config: %v", err)
+	}
+
+	oldFetch := connectKeyBalanceFetch
+	var gotClient *http.Client
+	connectKeyBalanceFetch = func(_ context.Context, client *http.Client, _, _ string) (*billing.Balance, error) {
+		gotClient = client
+		return nil, errors.New("stop after network client capture")
+	}
+	t.Cleanup(func() { connectKeyBalanceFetch = oldFetch })
+
+	app := NewApp()
+	app.ctx = context.Background()
+	if _, err := app.ConnectKey("sk-test"); err == nil || !strings.Contains(err.Error(), "network client capture") {
+		t.Fatalf("ConnectKey error = %v, want capture sentinel", err)
+	}
+	if gotClient == nil {
+		t.Fatal("ConnectKey passed a nil HTTP client and ignored Reasonix network settings")
+	}
+	transport, ok := gotClient.Transport.(*http.Transport)
+	if !ok || transport.Proxy != nil {
+		t.Fatalf("ConnectKey transport = %T proxy=%v, want direct transport for proxy_mode=off", gotClient.Transport, transportProxy(transport))
+	}
+}
+
+func transportProxy(transport *http.Transport) any {
+	if transport == nil {
+		return nil
+	}
+	return transport.Proxy
 }
 
 func TestConnectKeyRestoresDeepSeekProviderAccess(t *testing.T) {

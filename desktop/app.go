@@ -46,6 +46,7 @@ import (
 	"reasonix/internal/mcpdiag"
 	"reasonix/internal/mcpregistry"
 	"reasonix/internal/memory"
+	"reasonix/internal/netclient"
 	"reasonix/internal/notify"
 	"reasonix/internal/plugin"
 	"reasonix/internal/pluginpkg"
@@ -11768,7 +11769,15 @@ func (a *App) ConnectKey(apiKey string) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 8*time.Second)
 	defer cancel()
-	if _, err := connectKeyBalanceFetch(ctx, nil, onboardingBalanceURL, apiKey); err != nil {
+	cfg, err := config.LoadForRootReadOnly(a.activeWorkspaceRoot())
+	if err != nil {
+		return "", fmt.Errorf("validate network config: %w", err)
+	}
+	client, err := netclient.NewHTTPClient(cfg.NetworkProxySpec(), netclient.TransportOptions{})
+	if err != nil {
+		return "", fmt.Errorf("validate network config: %w", err)
+	}
+	if _, err := connectKeyBalanceFetch(ctx, client, onboardingBalanceURL, apiKey); err != nil {
 		return "", fmt.Errorf("validate: %w", err)
 	}
 	warning, err := a.saveProviderCredential(onboardingKeyEnv, apiKey)
