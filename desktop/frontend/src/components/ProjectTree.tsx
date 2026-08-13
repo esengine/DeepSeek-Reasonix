@@ -10,7 +10,7 @@ import { asArray } from "../lib/array";
 import { useToast } from "../lib/toast";
 import { app } from "../lib/bridge";
 import { onProjectTreeChangedV2 } from "../lib/sessionCatalogBridge";
-import { isRuntimeSessionNode, isTopicNode, mergeProjectTopicPage, projectTreeDedupedExactTime, projectTreeEventAffectsFolder, projectTreeFolderDisclosure, projectTreeReadActivityKey, projectTreeRevisionIsFresh, projectTreeShouldApplyShellSnapshot, projectTreeShouldRenderTopicActions, projectTreeShouldSuppressOpenForRename, projectTreeTopicArchiveBlocked, projectTreeTopicHasUnreadActivity, projectTreeTopicHoverCardModel, projectTreeTopicMenuOffersPin, projectTreeTopicMetaLine, projectTreeTopicOpenRequest, topicActivityAt, topicActivityDateLabel, topicActivityLabel, topicIsActive, topicStatus, topicStatusLabel, topicUnknownTimeLabel, type ProjectTreePendingTopicOpen, type ProjectTreeReadActivity, type ProjectTreeTopicHoverCard, type ProjectTreeVariant } from "../lib/projectTreeTopic";
+import { isRuntimeSessionNode, isTopicNode, mergeProjectTopicPage, projectTreeDedupedExactTime, projectTreeEventAffectsFolder, projectTreeFolderDisclosure, projectTreeReadActivityKey, projectTreeRevisionIsFresh, projectTreeShellSignature, projectTreeShouldApplyShellSnapshot, projectTreeShouldRenderTopicActions, projectTreeShouldSuppressOpenForRename, projectTreeTopicArchiveBlocked, projectTreeTopicHasUnreadActivity, projectTreeTopicHoverCardModel, projectTreeTopicMenuOffersPin, projectTreeTopicMetaLine, projectTreeTopicOpenRequest, topicActivityAt, topicActivityDateLabel, topicActivityLabel, topicIsActive, topicStatus, topicStatusLabel, topicUnknownTimeLabel, type ProjectTreePendingTopicOpen, type ProjectTreeReadActivity, type ProjectTreeTopicHoverCard, type ProjectTreeVariant } from "../lib/projectTreeTopic";
 export * from "../lib/projectTreeTopic";
 import type { ProjectNode, SessionCatalogStatus } from "../lib/types";
 import { topicActivityTime } from "../lib/session";
@@ -590,7 +590,9 @@ export function ProjectTree({
   }), [expanded, loadProjectTopics, refresh]);
 
   // Debounce query/timeFilter reloads so typing does not stampede the catalog.
-  // Expansion and tree shell arrival still load on the same path after the delay.
+  // Dependency is the project-shell signature, not tree: topic page loads
+  // rewrite children and would otherwise re-arm this effect in a loop.
+  const projectShellSignature = useMemo(() => projectTreeShellSignature(tree), [tree]);
   useEffect(() => {
     const filtering = query.trim() !== "" || timeFilter !== "all";
     const timer = setTimeout(() => {
@@ -600,7 +602,7 @@ export function ProjectTree({
       }
     }, 200);
     return () => clearTimeout(timer);
-  }, [expanded, loadProjectTopics, query, timeFilter, tree]);
+  }, [expanded, loadProjectTopics, projectShellSignature, query, timeFilter]);
 
   // First catalog scan can finish before the frontend subscribed to v2 events.
   // Reload expanded folders once indexingDone flips so the metadata fallback

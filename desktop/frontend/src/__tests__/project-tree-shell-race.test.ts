@@ -25,5 +25,15 @@ assert.doesNotMatch(
 );
 assert.match(panel, /setIndexingDone\(Boolean\(snapshot\.indexingDone\)\)/, "shell snapshot records first-scan completion");
 assert.match(panel, /if \(!indexingDone\) return;/, "first completed scan reloads expanded topic pages");
+assert.match(
+  panel,
+  /projectTreeShellSignature/,
+  "debounced reload observes project arrivals through a shell signature",
+);
+assert.doesNotMatch(
+  panel,
+  /\[\s*expanded,\s*loadProjectTopics,\s*query,\s*timeFilter,\s*tree\s*\]/,
+  "debounced reload depends on the shell signature, not tree (topic loads would re-arm it forever)",
+);
 
 console.log("  PASS  project tree shell race contract");

@@ -23,6 +23,7 @@ import {
   projectTreeTopicHoverCardModel,
   projectTreeTopicMenuOffersPin,
   projectTreeDedupedExactTime,
+  projectTreeShellSignature,
 } from "../components/ProjectTree";
 import { projectTreeTrashingTopics } from "../lib/projectTreeArchive";
 import type { ProjectNode } from "../lib/types";
@@ -706,6 +707,23 @@ eq(
   ],
   [true, false, true],
   "revision events refresh only affected expanded roots, with an empty roots list as broadcast",
+);
+
+const shellWithTopics = (label: string): ProjectNode => ({
+  key: "p1",
+  kind: "project",
+  label,
+  root: "/repo",
+  children: [{ key: "t1", kind: "topic", label: "T1", topicId: "t1" }],
+});
+eq(
+  [
+    projectTreeShellSignature([{ key: "p1", kind: "project", label: "P" }]),
+    projectTreeShellSignature([shellWithTopics("P")]),
+    projectTreeShellSignature([{ key: "p1", kind: "project", label: "P" }, { key: "p2", kind: "project", label: "P2" }]),
+  ],
+  ["p1", "p1", "p1\u001fp2"],
+  "shell signature tracks project arrivals only, so topic page loads cannot re-arm the reload effect",
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);
