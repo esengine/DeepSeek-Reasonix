@@ -2079,9 +2079,22 @@ console.log("\ncomposer goal toggle");
 
 {
   const dom = installDom();
+  // VirtualMenu sizes its scroll container from offsetWidth/offsetHeight, which
+  // are 0 in JSDOM; give the slash menu a viewport so its rows actually mount.
+  Object.defineProperty(dom.window.HTMLElement.prototype, "offsetHeight", {
+    configurable: true,
+    get() { return 300; },
+  });
+  Object.defineProperty(dom.window.HTMLElement.prototype, "offsetWidth", {
+    configurable: true,
+    get() { return 400; },
+  });
   let savedFiles = 0;
   mockApp({
-    Commands: async () => [{ name: "skill", description: "Manage skills", kind: "builtin" }],
+    Commands: async () => [
+      { name: "skill", description: "Manage skills", kind: "builtin" },
+      { name: "review-code", description: "Review the code", kind: "skill" },
+    ],
     ListDirForTab: async () => [fileEntry("README.md")],
     SearchFileRefsForTab: async () => [],
     ListSessions: async () => [{ path: "/sessions/recent.jsonl", title: "Recent session", current: false }],
@@ -2203,14 +2216,72 @@ console.log("\ncomposer goal toggle");
     contentTrigger.click();
     await flushTimers();
   });
-  const disabledCommandButton = document.querySelectorAll<HTMLButtonElement>(".composer-content-menu__item")[3];
-  if (!disabledCommandButton) throw new Error("command action did not render for non-empty input");
-  ok(disabledCommandButton.disabled, "command action is disabled while the composer has text");
+  const enabledCommandButton = document.querySelectorAll<HTMLButtonElement>(".composer-content-menu__item")[3];
+  if (!enabledCommandButton) throw new Error("command action did not render for non-empty input");
+  ok(!enabledCommandButton.disabled, "command action stays enabled with existing text");
   await act(async () => {
-    disabledCommandButton.click();
+    enabledCommandButton.click();
     await flushTimers();
   });
-  eq(textarea.value, "existing text", "disabled command action does not insert / into existing text");
+  eq(textarea.value, "existing text /", "command action inserts / at the caret without replacing existing text");
+  await waitFor("slash menu opens for non-empty input", () => Boolean(document.querySelector(".slashmenu")));
+  const startOnlyItem = Array.from(document.querySelectorAll<HTMLButtonElement>(".slashmenu__item"))
+    .find((item) => item.textContent?.includes("/skill"));
+  ok(Boolean(startOnlyItem), "builtin command is listed after a mid-message insert");
+  ok(startOnlyItem?.disabled === true, "actions/management command stays disabled away from the message start");
+  ok(
+    startOnlyItem?.textContent?.includes("Only available at the start of a message") === true,
+    "disabled command explains it is only available at the message start",
+  );
+  const inlineSkillItem = Array.from(document.querySelectorAll<HTMLButtonElement>(".slashmenu__item"))
+    .find((item) => item.textContent?.includes("/review-code"));
+  ok(Boolean(inlineSkillItem), "Skill is listed for a mid-message insert");
+  ok(inlineSkillItem?.disabled === false, "Skill stays selectable after a mid-message insert");
+  await act(async () => {
+    textarea.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    await flushTimers();
+  });
+
+  // Inserting "/" in the middle of a word must not swallow the word on the
+  // right: slashQueryAt scans ahead past the caret, so the "/" gets a trailing
+  // separator and picking a Skill replaces only the "/".
+  await replaceComposerDraft(rerender, 3007, "please review this");
+  await act(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await flushTimers();
+  });
+  await act(async () => {
+    textarea.focus();
+    textarea.setSelectionRange("please ".length, "please ".length);
+    textarea.dispatchEvent(new window.Event("select", { bubbles: true }));
+    textarea.dispatchEvent(new window.KeyboardEvent("keyup", { key: "/", bubbles: true }));
+    await flushTimers();
+  });
+  await act(async () => {
+    contentTrigger.click();
+    await flushTimers();
+  });
+  const midWordCommand = document.querySelectorAll<HTMLButtonElement>(".composer-content-menu__item")[3];
+  if (!midWordCommand) throw new Error("command action did not render for the mid-word insert");
+  await act(async () => {
+    midWordCommand.click();
+    await flushTimers();
+  });
+  eq(textarea.value, "please / review this", "inserting / mid-word adds a trailing separator before the word");
+  await waitFor("slash menu after mid-word insert", () => Boolean(document.querySelector(".slashmenu")));
+  const midWordSkill = Array.from(document.querySelectorAll<HTMLButtonElement>(".slashmenu__item"))
+    .find((item) => item.textContent?.includes("/review-code"));
+  if (!midWordSkill) throw new Error("Skill did not render for the mid-word insert");
+  await act(async () => {
+    midWordSkill.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    await flushTimers();
+  });
+  const midWordRichInput = document.querySelector(".composer__rich-input") as HTMLDivElement | null;
+  if (!midWordRichInput) throw new Error("rich input did not render after the mid-word Skill pick");
+  ok(
+    richComposerTaskText(midWordRichInput).includes("review this"),
+    "picking a Skill mid-word keeps the word on the right",
+  );
 
   await rerender({ running: true });
   await waitFor("content menu closes when a run starts", () => !document.querySelector(".composer-content-menu"));

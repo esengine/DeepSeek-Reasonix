@@ -2392,7 +2392,7 @@ export const zhTW: Record<DictKey, string> = {
   "composer.contentReferenceSessionsDesc": "將最近會話加入目前上下文",
   "composer.contentUseCommands": "使用命令或 Skill",
   "composer.contentUseCommandsDesc": "瀏覽可用命令和技能",
-  "composer.contentUseCommandsInline": "在游標處插入命令或技能——隨時可用",
+  "composer.contentUseCommandsInline": "在此插入 Skill 或子代理；整條訊息命令僅可在開頭使用",
   "composer.contentCloseSessions": "關閉歷史會話",
   "composer.pastChatsLoading": "正在載入歷史會話…",
   "composer.pastChatsEmpty": "暫無歷史會話",

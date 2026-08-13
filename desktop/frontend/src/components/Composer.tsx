@@ -3076,7 +3076,13 @@ export function Composer({
     });
     const current = textRef.current;
     const needsSpace = selection.from > 0 && !/\s/.test(current.charAt(selection.from - 1));
-    const value = `${needsSpace ? " " : ""}${trigger}`;
+    // A "/" opened mid-word must not glue the slash query to the word on the
+    // right: slashQueryAt scans ahead past the caret, so without a trailing
+    // separator choosing a Skill/command would swallow the following word
+    // (e.g. "please |review" -> "please /|review" would replace "review").
+    // Insert the separator after the "/" and keep the caret right after it.
+    const followsWordChar = trigger === "/" && /[A-Za-z0-9_.:-]/.test(current.charAt(selection.to));
+    const value = `${needsSpace ? " " : ""}${trigger}${followsWordChar ? " " : ""}`;
     setContentMenuOpen(false);
     setDirectPastChats(false);
     setShowPastChats(false);
@@ -3088,7 +3094,11 @@ export function Composer({
       targetDraftKey,
       selection.afterInvocationId,
     );
-    const caret = selection.from + value.length;
+    // replaceInputRange parks the caret after the full inserted value (which
+    // includes the trailing separator); pull it back to sit right after the
+    // "/" so the slash query does not see a space and close the menu.
+    const caret = selection.from + value.length - (followsWordChar ? 1 : 0);
+    setComposerSelection(caret);
     recordComposerEdit(
       targetDraftKey,
       beforeEdit,
