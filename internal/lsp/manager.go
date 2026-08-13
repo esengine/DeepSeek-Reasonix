@@ -91,7 +91,7 @@ func DefaultSpecs() map[string]ServerSpec {
 		"lua":        {Command: "lua-language-server", LanguageID: "lua", Extensions: []string{".lua"}, InstallHint: "install lua-language-server: brew install lua-language-server / scoop install lua-language-server"},
 		"bash":       {Command: "bash-language-server", Args: []string{"start"}, LanguageID: "shellscript", Extensions: []string{".sh", ".bash"}, InstallHint: "npm i -g bash-language-server"},
 		"zig":        {Command: "zls", LanguageID: "zig", Extensions: []string{".zig"}, InstallHint: "install zls (ziglang/zls) matching your zig version"},
-		"kotlin":     {Command: "kotlin-language-server", LanguageID: "kotlin", Extensions: []string{".kt", ".kts"}, InstallHint: "install kotlin-language-server: brew install kotlin-language-server"},
+		"kotlin":     {Command: "intellij-server", Args: []string{"--stdio"}, LanguageID: "kotlin", Extensions: []string{".kt", ".kts"}, InstallHint: "install intellij-server (JetBrains Kotlin/kotlin-lsp): brew install JetBrains/utils/kotlin-lsp (brew exposes kotlin-lsp; symlink it to intellij-server) / download the standalone zip from Kotlin/kotlin-lsp releases (Windows)"},
 		"swift":      {Command: "sourcekit-lsp", LanguageID: "swift", Extensions: []string{".swift"}, InstallHint: "ships with the Swift toolchain (swift.org/download)"},
 		"haskell":    {Command: "haskell-language-server-wrapper", Args: []string{"--lsp"}, LanguageID: "haskell", Extensions: []string{".hs"}, InstallHint: "install via ghcup: ghcup install hls"},
 	}
