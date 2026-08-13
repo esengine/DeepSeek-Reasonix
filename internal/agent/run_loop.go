@@ -382,6 +382,8 @@ func (a *Agent) streamWithSamplingRecovery(ctx context.Context, turn int) stream
 	if err != nil {
 		return streamedTurn{err: err}
 	}
+	suppressServerToolsForVisibleFinalRepair(&a.turn, &frozen.req)
+	frozen.req = freezeProviderRequest(frozen.req)
 	// One request counter spans every body attempt; each attempt records only
 	// its delta so RequestCount equals real HTTP POSTs (no triangular growth).
 	ctx = provider.WithRequestAttemptCounter(ctx)

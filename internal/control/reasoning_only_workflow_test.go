@@ -11,6 +11,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/event"
+	"reasonix/internal/evidence"
 	"reasonix/internal/goaleval"
 	"reasonix/internal/hook"
 	"reasonix/internal/provider"
@@ -293,6 +294,179 @@ func TestGoalVisibleFinalRepairNeverRepeatsUpdateGoal(t *testing.T) {
 	if !strings.Contains(blocked, "finalization-only") {
 		t.Fatalf("repair update_goal result = %q, want host-side block", blocked)
 	}
+}
+
+func completeGoalCall(id, completion string) provider.Chunk {
+	args := `{"status":"complete"}`
+	if completion != "" {
+		args = `{"status":"complete","completion":` + completion + `}`
+	}
+	return toolCallChunk(id, "update_goal", args)
+}
+
+func TestReasoningOnlyGoalCompleteReportCheckOnlyBoundaries(t *testing.T) {
+	t.Run("hidden first and second complete reports cannot use the check-only escape", func(t *testing.T) {
+		c, _, evaluator := newGoalWorkflowController(t, nil)
+		o := newTurnOrchestrator(c)
+		advanceHiddenComplete := func() goalAdvanceResult {
+			scopeID, _, ok := c.goals.deliveryScope()
+			if !ok {
+				t.Fatal("Goal scope was not allocated")
+			}
+			epoch := c.goals.continuationToken()
+			recorder := c.goals.newTurnRecorder(scopeID, epoch)
+			if _, err := recorder.RecordGoalReport(tool.GoalReport{Status: "complete"}); err != nil {
+				t.Fatalf("record complete: %v", err)
+			}
+			c.goalUsageTee.setActiveRecorder(recorder)
+			return o.advanceGoalAfterTurn(context.Background(), epoch, &agent.FinalReadinessError{
+				Attempts: 1, Reason: "verification unavailable", Missing: []string{"verification"},
+			})
+		}
+		first := advanceHiddenComplete()
+		second := advanceHiddenComplete()
+		if !first.cont || !second.cont || c.GoalStatus() != GoalStatusRunning {
+			t.Fatalf("hidden complete report advanced Goal: first=%+v second=%+v status=%s", first, second, c.GoalStatus())
+		}
+		if evaluator.calls != 0 {
+			t.Fatalf("evaluator calls = %d, want none without visible output", evaluator.calls)
+		}
+	})
+
+	t.Run("visible first then visible second complete keeps check-only escape", func(t *testing.T) {
+		g := &goalMachine{goal: "audit the tree", status: GoalStatusRunning, turnsLimit: unlimitedGoalTurns}
+		in := goalAdvanceInput{
+			report: &goalTurnReport{status: GoalStatusComplete},
+			readiness: agent.ReadinessResult{
+				Ready: false, Missing: []string{"verification"}, Reason: "check unavailable after attempted verification",
+			},
+		}
+		first := g.advance(in)
+		second := g.advance(in)
+		if !first.cont || second.cont || g.status != GoalStatusComplete {
+			t.Fatalf("visible check-only sequence changed: first=%+v second=%+v status=%s", first, second, g.status)
+		}
+	})
+
+	t.Run("completion.unverified stays safe through visible repair", func(t *testing.T) {
+		c, prov, evaluator := newGoalWorkflowController(t, [][]provider.Chunk{
+			{
+				{Type: provider.ChunkReasoning, Text: "the work is complete but one check was unavailable"},
+				completeGoalCall("unverified-report", `{"unverified":["real-engine e2e unavailable"]}`),
+				{Type: provider.ChunkDone},
+			},
+			reasoningOnlyStop("the declared-unverified completion stayed internal"),
+			textTurn("Completed; real-engine e2e was unavailable and remains unverified."),
+		})
+
+		if err := runGoalWorkflow(t, c); err != nil {
+			t.Fatalf("run Goal workflow: %v", err)
+		}
+		if prov.call != 3 {
+			t.Fatalf("provider calls = %d, want report + reasoning-only + visible repair", prov.call)
+		}
+		if evaluator.calls != 0 || c.GoalStatus() != GoalStatusComplete {
+			t.Fatalf("unverified completion lost structured disposition: evaluator=%d status=%s", evaluator.calls, c.GoalStatus())
+		}
+		if got := latestAssistantTextForTest(c.History()); !strings.Contains(got, "remains unverified") {
+			t.Fatalf("visible final = %q, want explicit unverified result", got)
+		}
+	})
+}
+
+func TestReasoningOnlyGoalNoReportNeverEvaluatesOrCompletes(t *testing.T) {
+	c, prov, evaluator := newGoalWorkflowController(t, repeatedReasoningOnlyStops())
+
+	err := runGoalWorkflow(t, c)
+	if err == nil || !strings.Contains(err.Error(), "visible final answer") {
+		t.Fatalf("error = %v, want bounded visible-final failure", err)
+	}
+	if prov.call != 3 {
+		t.Fatalf("provider calls = %d, want original plus two repairs", prov.call)
+	}
+	if evaluator.calls != 0 || len(evaluator.evidence) != 0 {
+		t.Fatalf("evaluator consumed hidden/stale evidence: calls/evidence=%d/%d", evaluator.calls, len(evaluator.evidence))
+	}
+	if got := c.GoalStatus(); got != GoalStatusRunning {
+		t.Fatalf("GoalStatus() = %q, want fail-closed running", got)
+	}
+}
+
+func TestReasoningOnlyGoalReportCannotBypassMutationTodoOrReviewGates(t *testing.T) {
+	missingSets := [][]string{
+		{"mutation"},
+		{"todo"},
+	}
+	for _, missing := range missingSets {
+		name := strings.Join(missing, "+")
+		t.Run(name, func(t *testing.T) {
+			g := &goalMachine{goal: "ship safely", status: GoalStatusRunning, turnsLimit: unlimitedGoalTurns}
+			in := goalAdvanceInput{
+				report: &goalTurnReport{status: GoalStatusComplete},
+				readiness: agent.ReadinessResult{
+					Ready: false, Missing: append([]string(nil), missing...), Reason: "host gate remains unsatisfied",
+				},
+			}
+			first := g.advance(in)
+			second := g.advance(in)
+			if !first.cont || !second.cont || g.status != GoalStatusRunning {
+				t.Fatalf("non-check gates were bypassed: first=%+v second=%+v status=%s", first, second, g.status)
+			}
+		})
+	}
+
+	t.Run("review and signoff remain first-report gates", func(t *testing.T) {
+		g := &goalMachine{goal: "ship safely", status: GoalStatusRunning, turnsLimit: unlimitedGoalTurns}
+		in := goalAdvanceInput{
+			report:    &goalTurnReport{status: GoalStatusComplete},
+			readiness: agent.ReadinessResult{Ready: false, Missing: []string{"review", "signoff"}, Reason: "review and signoff missing"},
+		}
+		first := g.advance(in)
+		if !first.cont || g.status != GoalStatusRunning {
+			t.Fatalf("first review/signoff gate was bypassed: result=%+v status=%s", first, g.status)
+		}
+	})
+
+	t.Run("incomplete todo also defeats check-only repeated completion", func(t *testing.T) {
+		g := &goalMachine{goal: "ship safely", status: GoalStatusRunning, turnsLimit: unlimitedGoalTurns}
+		in := goalAdvanceInput{
+			report:    &goalTurnReport{status: GoalStatusComplete},
+			readiness: agent.ReadinessResult{Ready: false, Missing: []string{"verification"}, Reason: "check unavailable"},
+			todos:     []evidence.TodoItem{{Content: "finish migration", Status: "in_progress"}},
+		}
+		g.advance(in)
+		second := g.advance(in)
+		if !second.cont || g.status != GoalStatusRunning {
+			t.Fatalf("incomplete todo was bypassed: result=%+v status=%s", second, g.status)
+		}
+	})
+}
+
+func TestReasoningOnlyGoalCompletionAndPausePriority(t *testing.T) {
+	t.Run("visible complete report keeps existing completion-over-pause precedence", func(t *testing.T) {
+		g := &goalMachine{goal: "ship safely", status: GoalStatusRunning, turnsLimit: unlimitedGoalTurns}
+		res := g.advance(goalAdvanceInput{
+			report:      &goalTurnReport{status: GoalStatusComplete},
+			readiness:   agent.ReadinessResult{Ready: true},
+			pauseCause:  stopCauseBudgetSpend,
+			pauseReason: "budget crossed while finalizing",
+		})
+		if res.cont || g.status != GoalStatusComplete {
+			t.Fatalf("completion/pause precedence changed: result=%+v status=%s", res, g.status)
+		}
+	})
+
+	t.Run("without a report the pause cannot become completion", func(t *testing.T) {
+		g := &goalMachine{goal: "ship safely", status: GoalStatusRunning, turnsLimit: unlimitedGoalTurns}
+		res := g.advance(goalAdvanceInput{
+			readiness:   agent.ReadinessResult{Ready: true},
+			pauseCause:  stopCauseBudgetSpend,
+			pauseReason: "budget crossed while finalizing",
+		})
+		if res.cont || g.status != GoalStatusBlocked || g.stopCause != stopCauseBudgetSpend {
+			t.Fatalf("reportless pause did not fail closed: result=%+v status=%s cause=%s", res, g.status, g.stopCause)
+		}
+	})
 }
 
 func repeatedReasoningOnlyStops() [][]provider.Chunk {

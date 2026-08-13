@@ -329,11 +329,12 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool, [
 	if req.Temperature != nil && !c.caps.ignoresTemperature {
 		body["temperature"] = *req.Temperature
 	}
-	if c.webSearch || len(req.Tools) > 0 {
+	webSearch := c.webSearch && !req.DisableServerTools
+	if webSearch || len(req.Tools) > 0 {
 		tools := make([]map[string]any, 0, len(req.Tools)+1)
 		// Keep the server tool first and stable across turns. DeepSeek executes
 		// this tool itself; ordinary Reasonix tools remain function entries.
-		if c.webSearch {
+		if webSearch {
 			tools = append(tools, map[string]any{"type": "web_search"})
 		}
 		for _, tool := range req.Tools {
@@ -364,7 +365,7 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool, [
 		return body, true, messages
 	}
 
-	body["input"] = messagesToInput(rest, c.vision, c.webSearch, c.caps.summaryRequired)
+	body["input"] = messagesToInput(rest, c.vision, webSearch, c.caps.summaryRequired)
 	return body, false, messages
 }
 

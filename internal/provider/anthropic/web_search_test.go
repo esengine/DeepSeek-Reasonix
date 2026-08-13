@@ -44,6 +44,25 @@ func TestBuildRequestWebSearchServerTool(t *testing.T) {
 	}
 }
 
+func TestBuildRequestCanSuppressWebSearchServerTool(t *testing.T) {
+	c := &client{name: "deepseek", model: "deepseek-v4-flash", webSearch: true}
+	raw := json.RawMessage(`[{"title":"old result"}]`)
+	r := c.buildRequest(context.Background(), provider.Request{
+		DisableServerTools: true,
+		Messages: []provider.Message{{
+			Role: provider.RoleAssistant, Content: "prior answer",
+			ServerSearch: []provider.ServerSearchCall{{ID: "s1", Query: "old query", Raw: raw}},
+		}},
+		Tools: []provider.ToolSchema{{Name: "read_file", Parameters: json.RawMessage(`{"type":"object"}`)}},
+	})
+	if len(r.Tools) != 1 || r.Tools[0].Name != "read_file" || r.Tools[0].Type != "" {
+		t.Fatalf("tools = %+v, want client function only", r.Tools)
+	}
+	if len(r.Messages) != 1 || len(r.Messages[0].Content) != 1 || r.Messages[0].Content[0].Type != "text" {
+		t.Fatalf("messages = %+v, want prior text without server-tool replay", r.Messages)
+	}
+}
+
 // TestAnthToolWireShape pins the JSON encoding both tool kinds put on the wire:
 // the typed server tool omits input_schema entirely, and the omitempty on
 // input_schema must not leak into named tools (every named tool keeps a schema

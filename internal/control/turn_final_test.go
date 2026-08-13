@@ -24,6 +24,12 @@ func newTurnFinalTestController(sess *agent.Session) (*Controller, *agent.Agent)
 	return New(Options{Runner: exec, Executor: exec, Sink: event.Discard}), exec
 }
 
+func recordTurnFinalForTest(o *turnOrchestrator, sess *agent.Session, content string) {
+	boundary := o.beginTurnFinalBoundary()
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: content})
+	o.captureGoalTurnFinal(true, boundary)
+}
+
 func TestTurnFinalBoundaryReadsOnlyCurrentTurn(t *testing.T) {
 	sess := agent.NewSession("")
 	sess.Add(provider.Message{Role: provider.RoleUser, Content: "old question"})

@@ -381,7 +381,9 @@ func (c *client) buildRequest(_ context.Context, req provider.Request) anthReque
 			} else if c.thinking == "adaptive" && m.ReasoningContent != "" && m.ReasoningSignature != "" {
 				blocks = append(blocks, contentBlock{Type: "thinking", Thinking: m.ReasoningContent, Signature: m.ReasoningSignature})
 			}
-			blocks = appendServerSearchBlocks(blocks, m.ServerSearch)
+			if !req.DisableServerTools {
+				blocks = appendServerSearchBlocks(blocks, m.ServerSearch)
+			}
 			if m.Content != "" {
 				blocks = append(blocks, contentBlock{Type: "text", Text: m.Content})
 			}
@@ -397,7 +399,7 @@ func (c *client) buildRequest(_ context.Context, req provider.Request) anthReque
 	}
 
 	var tools []anthTool
-	if c.webSearch {
+	if c.webSearch && !req.DisableServerTools {
 		tools = append(tools, anthTool{Type: "web_search_20250305", Name: "web_search"})
 	}
 	for _, t := range req.Tools {

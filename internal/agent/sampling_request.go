@@ -19,6 +19,15 @@ func (a *Agent) streamProviderRequest(ctx context.Context, req provider.Request)
 	return a.svc.prov.Stream(ctx, req)
 }
 
+// suppressServerToolsForVisibleFinalRepair runs after provider.request and
+// before freeze, so interceptors cannot re-enable provider-executed work.
+// Function schemas stay present; repair preflight still blocks their calls.
+func suppressServerToolsForVisibleFinalRepair(state *turnRuntime, req *provider.Request) {
+	if state != nil && state.visibleFinal.repairing && req != nil {
+		req.DisableServerTools = true
+	}
+}
+
 func (a *Agent) handleSamplingError(
 	ctx context.Context,
 	attemptID string,

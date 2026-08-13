@@ -137,6 +137,104 @@ func TestRunScopedVisibleFinalRepairExhaustsAfterTwoAdditionalSamples(t *testing
 	}
 }
 
+type serverToolCaptureProvider struct {
+	*scriptedProvider
+	requests []provider.Request
+}
+
+func (*serverToolCaptureProvider) RequiresToolCallReasoning() bool { return true }
+
+func (p *serverToolCaptureProvider) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	p.requests = append(p.requests, freezeProviderRequest(req))
+	return p.scriptedProvider.Stream(ctx, req)
+}
+
+func TestRunScopedVisibleFinalRepairSuppressesProviderServerTools(t *testing.T) {
+	base := &scriptedProvider{name: "deepseek", turns: [][]provider.Chunk{
+		reasoningOnlyStop("work is complete"),
+		{{Type: provider.ChunkText, Text: "visible result"}, {Type: provider.ChunkDone}},
+	}}
+	prov := &serverToolCaptureProvider{scriptedProvider: base}
+	reg := tool.NewRegistry()
+	reg.Add(&visibleFinalSideEffectTool{})
+	a := New(prov, reg, NewSession("sys"), Options{}, event.Discard)
+
+	if err := a.Run(WithRequireVisibleFinal(context.Background()), "finish visibly"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(prov.requests) != 2 {
+		t.Fatalf("provider requests = %d, want original plus repair", len(prov.requests))
+	}
+	if prov.requests[0].DisableServerTools {
+		t.Fatal("ordinary scoped request disabled provider server tools")
+	}
+	if !prov.requests[1].DisableServerTools {
+		t.Fatal("finalization-only repair exposed provider server tools")
+	}
+	if len(prov.requests[1].Tools) != len(prov.requests[0].Tools) {
+		t.Fatalf("function schemas changed during repair: %d -> %d", len(prov.requests[0].Tools), len(prov.requests[1].Tools))
+	}
+}
+
+func TestRunScopedVisibleFinalRepairRejectsProviderServerToolOutput(t *testing.T) {
+	base := &scriptedProvider{name: "deepseek", turns: [][]provider.Chunk{
+		reasoningOnlyStop("work is complete"),
+		{
+			{Type: provider.ChunkResponsesItem, ResponsesItem: json.RawMessage(`{"id":"ws_1","type":"web_search_call","status":"completed"}`)},
+			{Type: provider.ChunkServerSearch, ServerSearch: &provider.ServerSearchCall{ID: "s1", Query: "must not run"}},
+			{Type: provider.ChunkText, Text: "must not be accepted"},
+			{Type: provider.ChunkDone},
+		},
+	}}
+	prov := &serverToolCaptureProvider{scriptedProvider: base}
+	var events []event.Event
+	a := New(prov, tool.NewRegistry(), NewSession("sys"), Options{}, event.FuncSink(func(e event.Event) {
+		events = append(events, e)
+	}))
+
+	err := a.Run(WithRequireVisibleFinal(context.Background()), "finish visibly")
+	if !errors.Is(err, errServerToolDuringFinalization) {
+		t.Fatalf("Run error = %v, want server-tool policy failure", err)
+	}
+	if len(prov.requests) != 2 || !prov.requests[1].DisableServerTools {
+		t.Fatalf("requests = %+v, want disabled repair request", prov.requests)
+	}
+	for _, msg := range a.Session().Snapshot() {
+		if len(msg.ResponsesItems) != 0 {
+			t.Fatalf("disabled Responses search item persisted: %+v", msg.ResponsesItems)
+		}
+		if len(msg.ServerSearch) != 0 {
+			t.Fatalf("disabled server search persisted: %+v", msg.ServerSearch)
+		}
+	}
+	for _, e := range events {
+		if (e.Kind == event.ToolDispatch || e.Kind == event.ToolResult) && e.Tool.Name == "web_search" {
+			t.Fatalf("disabled server search surfaced as a card event: %+v", e)
+		}
+	}
+}
+
+func TestConstructionVisibleFinalRetryKeepsProviderServerTools(t *testing.T) {
+	base := &scriptedProvider{name: "deepseek", turns: [][]provider.Chunk{
+		reasoningOnlyStop("first answer stayed internal"),
+		{{Type: provider.ChunkText, Text: "visible result"}, {Type: provider.ChunkDone}},
+	}}
+	prov := &serverToolCaptureProvider{scriptedProvider: base}
+	a := New(prov, tool.NewRegistry(), NewSession("sys"), Options{RequireVisibleFinal: true}, event.Discard)
+
+	if err := a.Run(context.Background(), "finish visibly"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(prov.requests) != 2 {
+		t.Fatalf("provider requests = %d, want two", len(prov.requests))
+	}
+	for i, req := range prov.requests {
+		if req.DisableServerTools {
+			t.Fatalf("construction-time generic retry request %d disabled provider server tools", i+1)
+		}
+	}
+}
+
 func TestRunScopedVisibleFinalLeavesOrdinaryReasoningOnlyStopUnchanged(t *testing.T) {
 	prov := &scriptedProvider{name: "deepseek", turns: [][]provider.Chunk{
 		reasoningOnlyStop("The ordinary answer lives in reasoning."),

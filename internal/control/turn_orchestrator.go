@@ -588,6 +588,11 @@ func (o *turnOrchestrator) advanceGoalAfterTurn(ctx context.Context, expectedCon
 	if recorder != nil {
 		report = recorder.validReport(expectedContinuationEpoch)
 	}
+	// A hidden complete report cannot replace this turn's visible result. Drop it
+	// before repeated-complete/FSM evaluation; blocked/continue stay authoritative.
+	if report != nil && report.status == GoalStatusComplete && o.lastTurnFinal == "" {
+		report = nil
+	}
 
 	// The bounded evaluator runs once, only when the model gave no report and
 	// readiness has no definite missing list. Failures fail closed in the FSM.

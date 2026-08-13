@@ -375,11 +375,12 @@ type StreamOpenParams struct {
 
 // ProviderRequest is a generated Extension Protocol v2 wire DTO.
 type ProviderRequest struct {
-	Messages       []ProviderMessage       `json:"messages"`
-	Tools          []ProviderToolSchema    `json:"tools"`
-	Temperature    *float64                `json:"temperature,omitempty"`
-	MaxTokens      int                     `json:"maxTokens" validate:"min=0"`
-	ResponseFormat *ProviderResponseFormat `json:"responseFormat,omitempty"`
+	Messages           []ProviderMessage       `json:"messages"`
+	Tools              []ProviderToolSchema    `json:"tools"`
+	DisableServerTools bool                    `json:"disableServerTools,omitempty"`
+	Temperature        *float64                `json:"temperature,omitempty"`
+	MaxTokens          int                     `json:"maxTokens" validate:"min=0"`
+	ResponseFormat     *ProviderResponseFormat `json:"responseFormat,omitempty"`
 }
 
 // ProviderMessage is a generated Extension Protocol v2 wire DTO.

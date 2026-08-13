@@ -1,6 +1,7 @@
 package providerconv
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -26,9 +27,10 @@ func TestRequestRoundTripPreservesProviderVisibleFields(t *testing.T) {
 		Tools: []provider.ToolSchema{{
 			Name: "bash", Description: "run", Parameters: []byte(`{"type":"object"}`),
 		}},
-		Temperature:    &temperature,
-		MaxTokens:      64,
-		ResponseFormat: &provider.ResponseFormat{Type: "json_object"},
+		DisableServerTools: true,
+		Temperature:        &temperature,
+		MaxTokens:          64,
+		ResponseFormat:     &provider.ResponseFormat{Type: "json_object"},
 	}
 
 	back := RequestFromProtocol(RequestToProtocol(req))
@@ -54,8 +56,30 @@ func TestRequestRoundTripPreservesProviderVisibleFields(t *testing.T) {
 	if back.ResponseFormat == nil || back.ResponseFormat.Type != "json_object" {
 		t.Fatalf("response format = %+v", back.ResponseFormat)
 	}
+	if !back.DisableServerTools {
+		t.Fatal("server-tool suppression was dropped across extension protocol")
+	}
 	if RequestFromProtocol(RequestToProtocol(provider.Request{})).ResponseFormat != nil {
 		t.Fatal("nil response format must stay nil")
+	}
+}
+
+func TestServerToolSuppressionOnlyChangesStrictExtensionRequestWire(t *testing.T) {
+	base := provider.Request{Messages: []provider.Message{}, Tools: []provider.ToolSchema{}}
+	ordinary, err := json.Marshal(RequestToProtocol(base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(ordinary), "disableServerTools") {
+		t.Fatalf("ordinary extension request wire changed: %s", ordinary)
+	}
+	base.DisableServerTools = true
+	strict, err := json.Marshal(RequestToProtocol(base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(strict), `"disableServerTools":true`) {
+		t.Fatalf("strict extension request lost server-tool policy: %s", strict)
 	}
 }
 
