@@ -10,7 +10,7 @@ import { asArray } from "../lib/array";
 import { useToast } from "../lib/toast";
 import { app } from "../lib/bridge";
 import { onProjectTreeChangedV2 } from "../lib/sessionCatalogBridge";
-import { isRuntimeSessionNode, isTopicNode, mergeProjectTopicPage, projectTreeDedupedExactTime, projectTreeEventAffectsFolder, projectTreeFolderDisclosure, projectTreeReadActivityKey, projectTreeRevisionIsFresh, projectTreeShellSignature, projectTreeShouldApplyShellSnapshot, projectTreeShouldRenderTopicActions, projectTreeShouldSuppressOpenForRename, projectTreeTopicArchiveBlocked, projectTreeTopicHasUnreadActivity, projectTreeTopicHoverCardModel, projectTreeTopicMenuOffersPin, projectTreeTopicMetaLine, projectTreeTopicOpenRequest, topicActivityAt, topicActivityDateLabel, topicActivityLabel, topicIsActive, topicStatus, topicStatusLabel, topicUnknownTimeLabel, type ProjectTreePendingTopicOpen, type ProjectTreeReadActivity, type ProjectTreeTopicHoverCard, type ProjectTreeVariant } from "../lib/projectTreeTopic";
+import { isRuntimeSessionNode, isTopicNode, mergeProjectTopicPage, projectTreeDedupedExactTime, projectTreeEventAffectsFolder, projectTreeFolderDisclosure, projectTreeReadActivityKey, projectTreeRevisionIsFresh, projectTreeShellChildren, projectTreeShellSignature, projectTreeShouldApplyShellSnapshot, projectTreeShouldRenderTopicActions, projectTreeShouldSuppressOpenForRename, projectTreeTopicArchiveBlocked, projectTreeTopicHasUnreadActivity, projectTreeTopicHoverCardModel, projectTreeTopicMenuOffersPin, projectTreeTopicMetaLine, projectTreeTopicOpenRequest, projectTreeWithoutTopic, topicActivityAt, topicActivityDateLabel, topicActivityLabel, topicIsActive, topicStatus, topicStatusLabel, topicUnknownTimeLabel, type ProjectTreePendingTopicOpen, type ProjectTreeReadActivity, type ProjectTreeTopicHoverCard, type ProjectTreeVariant } from "../lib/projectTreeTopic";
 export * from "../lib/projectTreeTopic";
 import type { ProjectNode, SessionCatalogStatus } from "../lib/types";
 import { topicActivityTime } from "../lib/session";
@@ -500,6 +500,7 @@ export function ProjectTree({
   }, []);
 
   const topicLoadSeqRef = useRef<Record<string, number>>({});
+  const loadProjectTopicsRef = useRef<(project: ProjectNode, append?: boolean) => Promise<void>>(async () => {});
 
   const loadProjectTopics = useCallback(async (project: ProjectNode, append = false) => {
     if (project.kind !== "project" && project.kind !== "global_folder") return;
@@ -537,9 +538,10 @@ export function ProjectTree({
       updateTopicPageState(key, { ...topicPageStateRef.current[key], loading: false });
     }
   }, [query, timeFilter, updateTopicPageState]);
+  loadProjectTopicsRef.current = loadProjectTopics;
   // Snapshot is intentionally shells-only. Preserve already loaded pages by
   // project key so a metadata refresh does not collapse or blank the sidebar.
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options?: { reloadTopics?: boolean }) => {
     try {
       const snapshot = await app.GetProjectTreeSnapshot();
       const rev = snapshot.revision ?? 0, empty = treeRef.current.length === 0;
@@ -548,10 +550,16 @@ export function ProjectTree({
       const projects = asArray(snapshot.projects);
       setCatalogStatus(snapshot.catalog);
       setIndexingDone(Boolean(snapshot.indexingDone));
+      const keepLoadedTopics = !options?.reloadTopics;
       setTree((current) => projects.map((project) => {
         const previous = current.find((node) => node.key === project.key);
-        return { ...project, children: asArray(previous?.children) };
+        return { ...project, children: projectTreeShellChildren(previous?.children, { keepLoadedTopics }) };
       }));
+      if (options?.reloadTopics) {
+        for (const project of projects) {
+          void loadProjectTopicsRef.current(project);
+        }
+      }
     } catch {
       /* bridge unavailable */
     }
@@ -904,14 +912,16 @@ export function ProjectTree({
   const trashTopic = async (topicId: string) => {
     if (!beginTrashingTopic(topicId)) return;
     try {
+      setTree((current) => projectTreeWithoutTopic(current, topicId));
       await app.TrashTopic(topicId);
       setMenuTopic(null);
       setMenuPoint(null);
       setConfirmAction(null);
-      await refresh();
+      await refresh({ reloadTopics: true });
       await onTopicsChanged?.();
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), "error");
+      await refresh({ reloadTopics: true });
     } finally {
       endTrashingTopic(topicId);
     }

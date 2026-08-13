@@ -50,7 +50,9 @@ const maxStreamRecoveries = 5
 const maxSamplingAttempts = maxStreamRecoveries + 1
 const maxExecutorHandoffNudges = 1
 
-const defaultReasoningByteLimit = 128 * 1024
+// defaultReasoningByteLimit caps stored hidden reasoning for one stream.
+// It does not cancel generation; official DeepSeek may emit up to 384K tokens.
+const defaultReasoningByteLimit = 8 << 20
 
 const finishReasonClientReasoningLimit = "client_reasoning_limit"
 
@@ -1898,12 +1900,12 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 			if chunk.Text != "" && !transformReasoning {
 				sink.Emit(event.Event{Kind: event.Reasoning, Text: chunk.Text})
 			}
+			// Bound stored hidden reasoning only. Do not cancel the provider
+			// stream: official DeepSeek bills this output and still needs to
+			// emit the visible answer or tool calls.
 			if a.reasoningByteLimit > 0 && reasoning.Len() > a.reasoningByteLimit {
-				stored, _ := finishReasoning()
-				usage = bestEffortStreamUsage(usage, text.Len(), reasoning.Len(), finishReasonClientReasoningLimit)
-				usage = provider.UsageWithRequestAttemptCount(ctx, usage)
-				a.storeLatestRequestUsage(usage)
-				return collect(stored, errReasoningByteLimitExceeded)
+				reasoning.Reset()
+				reasoning.WriteString(snapToRuneBoundary(chunk.Text, 0, min(len(chunk.Text), a.reasoningByteLimit)))
 			}
 		case provider.ChunkText:
 			text.WriteString(chunk.Text)

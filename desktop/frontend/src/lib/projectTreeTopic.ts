@@ -51,6 +51,25 @@ export function projectTreeShellSignature(tree: ProjectNode[]): string {
   return tree.map((node) => node.key).join("\u001f");
 }
 
+// After archive, drop that topic immediately so a shell-only refresh cannot
+// resurrect it from the previously loaded children.
+export function projectTreeWithoutTopic(tree: ProjectNode[], topicId: string): ProjectNode[] {
+  const id = topicId.trim();
+  if (!id) return tree;
+  return tree.map((node) => {
+    if (node.kind !== "project" && node.kind !== "global_folder") return node;
+    return { ...node, children: asArray(node.children).filter((child) => child.topicId !== id) };
+  });
+}
+
+export function projectTreeShellChildren(
+  previous: ProjectNode[] | undefined,
+  options: { keepLoadedTopics: boolean },
+): ProjectNode[] {
+  if (options.keepLoadedTopics) return asArray(previous);
+  return [];
+}
+
 export function projectTreeEventAffectsFolder(project: ProjectNode, roots: string[]): boolean {
   if (roots.length === 0) return true;
   const root = project.kind === "global_folder" ? "" : project.root ?? "";

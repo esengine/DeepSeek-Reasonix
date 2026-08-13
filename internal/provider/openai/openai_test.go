@@ -1244,12 +1244,12 @@ func TestBuildRequestUsesProviderSpecificOutputBudget(t *testing.T) {
 		return p.(*client)
 	}
 
-	// Official DeepSeek defaults effort to high when unset, so the automatic
-	// ladder lands on the 64K high-reasoning tier — not 128K.
+	// Official DeepSeek auto omits max_tokens so the server uses its 384K ceiling.
+	// Effort only selects thinking depth; it must not invent a 16/32/64K cap.
 	deepseek := newClient(t, "https://api.deepseek.com", "deepseek-v4-flash", 0).buildRequest(provider.Request{})
-	if deepseek.MaxTokens != provider.DefaultHighReasoningOutputTokens || deepseek.MaxCompletionTokens != 0 {
-		t.Fatalf("DeepSeek auto budget = max_tokens %d, max_completion_tokens %d, want high-reasoning %d",
-			deepseek.MaxTokens, deepseek.MaxCompletionTokens, provider.DefaultHighReasoningOutputTokens)
+	if deepseek.MaxTokens != 0 || deepseek.MaxCompletionTokens != 0 {
+		t.Fatalf("DeepSeek auto budget = max_tokens %d, max_completion_tokens %d, want omitted",
+			deepseek.MaxTokens, deepseek.MaxCompletionTokens)
 	}
 
 	lowEffort, err := New(provider.Config{
@@ -1260,8 +1260,8 @@ func TestBuildRequestUsesProviderSpecificOutputBudget(t *testing.T) {
 		t.Fatalf("New low-effort DeepSeek: %v", err)
 	}
 	lowReq := lowEffort.(*client).buildRequest(provider.Request{})
-	if lowReq.MaxTokens != provider.DefaultReasoningOutputTokens {
-		t.Fatalf("low-effort auto budget = %d, want ordinary reasoning %d", lowReq.MaxTokens, provider.DefaultReasoningOutputTokens)
+	if lowReq.MaxTokens != 0 {
+		t.Fatalf("low-effort auto budget = %d, want omitted", lowReq.MaxTokens)
 	}
 
 	thinkingDisabledProvider, err := New(provider.Config{
@@ -1272,8 +1272,8 @@ func TestBuildRequestUsesProviderSpecificOutputBudget(t *testing.T) {
 		t.Fatalf("New thinking-disabled DeepSeek: %v", err)
 	}
 	thinkingDisabled := thinkingDisabledProvider.(*client).buildRequest(provider.Request{})
-	if thinkingDisabled.MaxTokens != provider.DefaultOrdinaryOutputTokens {
-		t.Fatalf("thinking-disabled DeepSeek auto budget = %d, want ordinary %d", thinkingDisabled.MaxTokens, provider.DefaultOrdinaryOutputTokens)
+	if thinkingDisabled.MaxTokens != 0 {
+		t.Fatalf("thinking-disabled DeepSeek auto budget = %d, want omitted", thinkingDisabled.MaxTokens)
 	}
 	effortDisabledProvider, err := New(provider.Config{
 		Name: "test", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro",
@@ -1283,8 +1283,8 @@ func TestBuildRequestUsesProviderSpecificOutputBudget(t *testing.T) {
 		t.Fatalf("New effort-disabled DeepSeek: %v", err)
 	}
 	effortDisabled := effortDisabledProvider.(*client).buildRequest(provider.Request{})
-	if effortDisabled.MaxTokens != provider.DefaultOrdinaryOutputTokens || effortDisabled.Thinking == nil || effortDisabled.Thinking.Type != "disabled" {
-		t.Fatalf("effort-disabled DeepSeek request = %+v, want thinking disabled with ordinary %d budget", effortDisabled, provider.DefaultOrdinaryOutputTokens)
+	if effortDisabled.MaxTokens != 0 || effortDisabled.Thinking == nil || effortDisabled.Thinking.Type != "disabled" {
+		t.Fatalf("effort-disabled DeepSeek request = %+v, want thinking disabled with omitted budget", effortDisabled)
 	}
 
 	explicitDisabledProvider, err := New(provider.Config{

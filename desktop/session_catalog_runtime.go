@@ -373,6 +373,9 @@ func (a *App) projectNodeFromCatalogTopic(topic sessioncatalog.TopicRecord, topi
 	})) {
 		return ProjectNode{Children: []ProjectNode{}}, false
 	}
+	if a.ordinaryTreeHidesUnindexedBlank(topic) {
+		return ProjectNode{Children: []ProjectNode{}}, false
+	}
 	// After filtering non-preferred recovery forks, a topic may have nothing
 	// left. Keep pinned/open shells; otherwise drop the empty row.
 	if len(visible) == 0 {
@@ -394,6 +397,21 @@ func (a *App) projectNodeFromCatalogTopic(topic sessioncatalog.TopicRecord, topi
 		node.SessionPath = visible[0].Path
 	}
 	return node, true
+}
+
+func (a *App) ordinaryTreeHidesUnindexedBlank(topic sessioncatalog.TopicRecord) bool {
+	if topic.Pinned || topic.Turns > 0 {
+		return false
+	}
+	if !isDefaultTopicTitle(topic.Title) && strings.TrimSpace(topic.Title) != "" {
+		return false
+	}
+	for _, session := range topic.Sessions {
+		if session.Turns > 0 || strings.TrimSpace(session.Preview) != "" {
+			return false
+		}
+	}
+	return !topicIndexedInRegistry(topic.Scope, topic.WorkspaceRoot, topic.TopicID)
 }
 
 func topicSummaryFromCatalogTopic(topic sessioncatalog.TopicRecord, visible []sessioncatalog.SessionRecord) topicSummary {

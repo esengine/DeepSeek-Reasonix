@@ -3,6 +3,8 @@
 import {
   projectTreeFolderDisclosure,
   mergeProjectTopicPage,
+  projectTreeWithoutTopic,
+  projectTreeShellChildren,
   projectTreeEventAffectsFolder,
   projectTreeRevisionIsFresh,
   projectTreeShouldApplyShellSnapshot,
@@ -27,6 +29,9 @@ import {
 } from "../components/ProjectTree";
 import { projectTreeTrashingTopics } from "../lib/projectTreeArchive";
 import type { ProjectNode } from "../lib/types";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
 let passed = 0;
 let failed = 0;
@@ -697,6 +702,42 @@ eq(
   ).map((node) => `${node.key}:${node.label}`),
   ["topic-a:A", "topic-b:New B", "topic-c:C"],
   "overlapping keyset pages replace duplicates without changing stable order",
+);
+
+eq(
+  projectTreeWithoutTopic(
+    [
+      {
+        key: "p",
+        kind: "project",
+        label: "P",
+        children: [
+          { key: "topic_archive", kind: "topic", label: "Archive me", topicId: "topic_archive" },
+          { key: "topic_keep", kind: "topic", label: "Keep me", topicId: "topic_keep" },
+        ],
+      },
+    ],
+    "topic_archive",
+  ).map((node) => (node.children ?? []).map((child) => child.topicId)),
+  [["topic_keep"]],
+  "archiving a topic removes it from loaded children before the catalog reloads",
+);
+
+eq(
+  projectTreeShellChildren(
+    [{ key: "topic_archive", kind: "topic", label: "Archive me", topicId: "topic_archive" }],
+    { keepLoadedTopics: false },
+  ),
+  [],
+  "a mutation refresh does not restore stale topic children from the previous page",
+);
+
+const projectTreeSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../components/ProjectTree.tsx"), "utf8");
+eq(projectTreeSource.includes("projectTreeWithoutTopic("), true, "TrashTopic removes the archived row before the shell refresh");
+eq(
+  projectTreeSource.includes("keepLoadedTopics: false") || projectTreeSource.includes("reloadTopics"),
+  true,
+  "archive refresh reloads topic pages instead of preserving stale children",
 );
 
 eq(

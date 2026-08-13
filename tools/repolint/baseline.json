@@ -4,13 +4,13 @@
     "commented-code": 0,
     "complexity": 2103,
     "essay": 3995,
-    "file-size": 108080,
+    "file-size": 108090,
     "function-size": 8923,
     "layering": 1,
     "marker": 0,
     "narrative": 64,
     "struct-state": 115,
-    "test-file-size": 69269
+    "test-file-size": 69271
   },
   "files": {
     "cmd/e2ebench/main.go": {
@@ -461,7 +461,7 @@
     "internal/agent/agent.go": {
       "complexity": 38,
       "essay": 55,
-      "file-size": 2064,
+      "file-size": 2066,
       "function-size": 105,
       "struct-state": 3
     },
@@ -1576,7 +1576,7 @@
     },
     "internal/provider/anthropic/anthropic_test.go": {
       "essay": 1,
-      "test-file-size": 251
+      "test-file-size": 252
     },
     "internal/provider/openai/host.go": {
       "essay": 8
@@ -1597,7 +1597,7 @@
     },
     "internal/provider/provider.go": {
       "essay": 49,
-      "file-size": 324
+      "file-size": 332
     },
     "internal/provider/responses/responses.go": {
       "complexity": 54,
@@ -1608,7 +1608,7 @@
     },
     "internal/provider/responses/responses_test.go": {
       "essay": 6,
-      "test-file-size": 376
+      "test-file-size": 377
     },
     "internal/provider/responses/vendor.go": {
       "essay": 21

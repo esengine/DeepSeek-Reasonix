@@ -51,8 +51,8 @@ const (
 	// gateway). Bedrock/Vertex use a different request shape and are out of scope.
 	defaultBaseURL = "https://api.anthropic.com"
 	// defaultMaxTokens is the mandatory Anthropic fallback when neither config
-	// nor request supplies max_tokens. Ordinary turns use 16K; reasoning-capable
-	// paths raise via AutoOutputBudget. 128K is never automatic.
+	// nor request supplies max_tokens. Native Anthropic stays at 16K; official
+	// DeepSeek sends the documented 384K ceiling because budget_tokens is ignored.
 	defaultMaxTokens = provider.DefaultOrdinaryOutputTokens
 )
 
@@ -112,13 +112,8 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	if maxOutputTokens <= 0 {
 		// Messages requires max_tokens. 0 = automatic; negative also falls back
 		// because the wire field is mandatory.
-		reasoningOn := officialDeepSeek &&
-			!strings.EqualFold(thinking, "disabled") &&
-			!strings.EqualFold(effort, "disabled") &&
-			!strings.EqualFold(effort, "off") &&
-			!strings.EqualFold(effort, "none")
 		if officialDeepSeek {
-			maxOutputTokens = provider.AutoOutputBudget(reasoningOn, effort)
+			maxOutputTokens = provider.DeepSeekMaxOutputTokens
 		} else {
 			// Native Anthropic and unknown gateways: conservative ordinary default.
 			maxOutputTokens = defaultMaxTokens

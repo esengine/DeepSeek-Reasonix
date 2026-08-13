@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"strings"
@@ -300,8 +301,12 @@ func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) error {
 		if err != nil {
 			a.emitTurnUsage(usage, &cacheDiagnostics)
 			a.observeRunBudget(state, usage)
-			if msg, ok := finishReasonMessage(usage); ok {
-				a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg})
+			// The byte-limit sentinel is already the user-facing turn error.
+			// Emitting the finish-reason notice as well doubles the same warning.
+			if !errors.Is(err, errReasoningByteLimitExceeded) {
+				if msg, ok := finishReasonMessage(usage); ok {
+					a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg})
+				}
 			}
 			// Exhausted stream retries (or a non-retryable error): persist one
 			// bounded LocalOnly recovery record for the next real user message.

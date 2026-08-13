@@ -73,7 +73,7 @@ func New(kind string, cfg Config) (Provider, error)
 - OpenAI-compatible vendor 只是 `kind = "openai"` 的不同配置实例，通过 `base_url`、`model`、`api_key_env` 区分；新增兼容模型通常只需改配置。
 - 一个 provider 表示一个 vendor endpoint，可通过 `models` 暴露多个模型，并以 `default` 指定默认项。设置 `request_url` 时，OpenAI-compatible、Anthropic-compatible 和 Responses provider 都会原样使用该完整请求地址；旧 `chat_url` 只保留 OpenAI 历史兼容语义。`default_model`、`--model` 和桌面端模型选择器都经 `Config.ResolveModel` 解析，可接受 provider 名、裸模型名或 `provider/model`。
 - `context_window` 是 provider 级默认值；`model_overrides.<model>.context_window` 可覆盖单个模型。
-- `max_output_tokens` 是独立的本轮输出上限，不由客户端 reasoning 字节上限换算，也不参与 `compact_ratio`。推荐 `0`（自动：DeepSeek 默认 high 约 64K）；显式 `32768` 控费/普通编码，`65536` 重推理/长工具链，`131072` 仅在反复 `finish_reason=length` 时再考虑。正数为显式上限，负数为在协议允许时省略；混合网关可用 `model_overrides.<model>.max_output_tokens` 覆盖单个模型。Anthropic 因协议要求仍会提供 `max_tokens` 默认值。
+- `max_output_tokens` 是独立的本轮输出上限，不由客户端 reasoning 字节上限换算，也不参与 `compact_ratio`。推荐 `0`：官方 DeepSeek 省略该字段，由服务端使用定价页上的 **384K** 输出上限；思考深度只走 `effort`（默认 high）。正数为用户显式控费上限。负数为在协议允许时省略；官方 DeepSeek 的 Anthropic 兼容层因 `max_tokens` 必填，仍发送 384K。`budget_tokens` 在该兼容层会被忽略。混合网关可用 `model_overrides.<model>.max_output_tokens` 覆盖单个模型。
 - streaming tool-call delta 在 provider 内按 index 聚合，只向上层发出完整 `ToolCall`。
 
 ### 3.2 Tool 与 registry（`internal/tool`）
@@ -173,10 +173,9 @@ transcript，仅在唯一自动阈值被跨越时安装 provider 可见的短 **
 - 用户可用 `reasonix config compact-ratio [--local] [VALUE]` 查看或修改阈值。
   项目配置优先于桌面与新 CLI 会话共用的用户全局配置。UI 始终展示**实际生效**值。
 - `max_output_tokens` 是独立的**本轮**输出上限。
-  推荐 `0`（**自动**，不是无限；DeepSeek 默认 high → 约 64K）。
-  用户侧常用值：`32768` 普通编码/控费，`65536` 重推理/长工具链，`131072` 仅在反复
-  `finish_reason=length` 时再考虑。负数为在协议允许时省略。仅在发送阶段按剩余
-  窗口裁剪，**绝不**改变 `triggerTokens` 或维护时机。计费按实际 completion，不按配置上限。
+  推荐 `0`：官方 DeepSeek 省略该字段，由服务端使用定价页 **384K** 上限；思考深度只走 `effort`。
+  正数为用户显式控费上限。负数为在协议允许时省略（官方 Anthropic 兼容层仍发送 384K）。
+  仅在发送阶段按剩余窗口裁剪，**绝不**改变 `triggerTokens` 或维护时机。计费按实际 completion，不按配置上限。
 - 巨型工具结果只在**第一次**进入模型前限长：`Content` 为稳定 ≤32KB 可见版；
   超限时 `RawContent` 保存完整原文。后续维护不得回头改写。`ModelMessages` 会去掉
   `RawContent`，provider 序列化与缓存 hash 永不包含它。
@@ -410,10 +409,10 @@ default        = "deepseek-v4-flash"
 api_key_env    = "DEEPSEEK_API_KEY"
 web_search     = true
 context_window = 1000000
-# max_output_tokens = 0              # 推荐：自动（DeepSeek 默认 high → 约 64K）
-# max_output_tokens = 32768          # 普通编码 / 控制费用
-# max_output_tokens = 65536          # 重推理、长工具链
-# max_output_tokens = 131072         # 仅在反复 finish_reason=length 时再考虑
+# max_output_tokens = 0              # 推荐：官方 DeepSeek 省略字段（服务端 384K）
+# max_output_tokens = 32768          # 可选控费上限
+# max_output_tokens = 65536          # 可选控费上限
+# max_output_tokens = 131072         # 可选控费上限
 
 [tools]
 enabled = []

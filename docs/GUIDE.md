@@ -70,10 +70,10 @@ reasoning_language = "auto"      # visible reasoning text: auto|zh|en
 # max_subagent_concurrency = 6        # session-wide sub-agent concurrency (task/fleet/skills)
 # max_parallel_writers = 3            # concurrent writers with non-overlapping write_paths
 # compact_ratio = 0.85             # sole auto trigger; presets 0.70 / 0.80 / 0.85
-# max_output_tokens = 0            # recommended: automatic (DeepSeek default high → ~64K; not unlimited)
-# max_output_tokens = 32768        # ordinary coding / cost control
-# max_output_tokens = 65536        # heavy reasoning / long tool loops
-# max_output_tokens = 131072       # only after repeated finish_reason=length
+# max_output_tokens = 0            # recommended: official DeepSeek omits the field (server 384K)
+# max_output_tokens = 32768        # optional cost cap
+# max_output_tokens = 65536        # optional cost cap
+# max_output_tokens = 131072       # optional cost cap
 # max_output_tokens never changes compact_ratio; only the final send-time clip does
 
 [[providers]]

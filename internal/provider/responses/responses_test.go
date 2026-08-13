@@ -106,21 +106,21 @@ func TestRequestUsesOnlySafeProviderOutputDefaults(t *testing.T) {
 
 	deepseek := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash"}).(*client)
 	deepseekBody, _, _ := deepseek.buildRequestBody(provider.Request{Messages: message})
-	if got := deepseekBody["max_output_tokens"]; got != provider.DefaultHighReasoningOutputTokens {
-		t.Fatalf("DeepSeek max_output_tokens = %#v, want high-reasoning auto %d", got, provider.DefaultHighReasoningOutputTokens)
+	if _, exists := deepseekBody["max_output_tokens"]; exists {
+		t.Fatalf("DeepSeek max_output_tokens = %#v, want omitted official 384K ceiling", deepseekBody["max_output_tokens"])
 	}
 
 	high := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", Effort: "high"}).(*client)
 	highBody, _, _ := high.buildRequestBody(provider.Request{Messages: message})
-	if got := highBody["max_output_tokens"]; got != provider.DefaultHighReasoningOutputTokens {
-		t.Fatalf("high-effort DeepSeek budget = %#v, want %d", got, provider.DefaultHighReasoningOutputTokens)
+	if _, exists := highBody["max_output_tokens"]; exists {
+		t.Fatalf("high-effort DeepSeek budget = %#v, want omitted", highBody["max_output_tokens"])
 	}
 
 	for _, effort := range []string{"none", "disabled", "off", " NONE "} {
 		thinkingDisabled := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", Effort: effort}).(*client)
 		thinkingDisabledBody, _, _ := thinkingDisabled.buildRequestBody(provider.Request{Messages: message})
-		if got := thinkingDisabledBody["max_output_tokens"]; got != provider.DefaultOrdinaryOutputTokens {
-			t.Fatalf("thinking-disabled DeepSeek effort %q budget = %#v, want ordinary %d", effort, got, provider.DefaultOrdinaryOutputTokens)
+		if _, exists := thinkingDisabledBody["max_output_tokens"]; exists {
+			t.Fatalf("thinking-disabled DeepSeek effort %q budget = %#v, want omitted", effort, thinkingDisabledBody["max_output_tokens"])
 		}
 	}
 
@@ -1154,7 +1154,8 @@ func TestReasoningMetaChunkEndToEnd(t *testing.T) {
 	}
 }
 
-// TestVendorTableMaxOutputTokens: automatic ladder is 16K/32K/64K, never 128K.
+// TestVendorTableMaxOutputTokens: MiMo keeps the 16K/32K ladder; official
+// DeepSeek omits max_output_tokens so the server uses its 384K ceiling.
 func TestVendorTableMaxOutputTokens(t *testing.T) {
 	msg := []provider.Message{{Role: provider.RoleUser, Content: "hi"}}
 
@@ -1170,7 +1171,7 @@ func TestVendorTableMaxOutputTokens(t *testing.T) {
 	}
 	ds := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro"}).(*client)
 	db, _, _ := ds.buildRequestBody(provider.Request{Messages: msg})
-	if got := db["max_output_tokens"]; got != provider.DefaultHighReasoningOutputTokens {
-		t.Fatalf("deepseek auto budget = %#v, want high-reasoning %d", got, provider.DefaultHighReasoningOutputTokens)
+	if _, exists := db["max_output_tokens"]; exists {
+		t.Fatalf("deepseek auto budget = %#v, want omitted official ceiling", db["max_output_tokens"])
 	}
 }

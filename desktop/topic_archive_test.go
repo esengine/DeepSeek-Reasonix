@@ -476,3 +476,139 @@ func TestTopicArchiveOwnershipRollbackRestoresLocalLease(t *testing.T) {
 		t.Fatalf("competing lease after rollback err = %v, want ErrSessionLeaseHeld", err)
 	}
 }
+
+func TestTrashTopicFallbackStaysOffCatalogSidebar(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	if err := addProject(projectRoot, "Archive Sidebar"); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	keepID := "topic_keep"
+	archiveID := "topic_archive"
+	if err := setTopicTitle(projectRoot, keepID, "Keep me"); err != nil {
+		t.Fatalf("set keep title: %v", err)
+	}
+	if err := setTopicTitle(projectRoot, archiveID, "Archive me"); err != nil {
+		t.Fatalf("set archive title: %v", err)
+	}
+	dir := desktopSessionDir(projectRoot)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	keepPath := writeTopicSession(t, dir, "keep.jsonl", keepID, "Keep me", projectRoot)
+	archivePath := writeTopicSession(t, dir, "archive.jsonl", archiveID, "Archive me", projectRoot)
+	leftoverA := filepath.Join(dir, "leftover-a.jsonl")
+	leftoverB := filepath.Join(dir, "leftover-b.jsonl")
+	for _, path := range []string{leftoverA, leftoverB} {
+		writeZeroByteSession(t, path)
+		if err := pinNewEmptySessionBranchMeta(path, "project", projectRoot, "", defaultTopicTitle); err != nil {
+			t.Fatalf("pin leftover %s: %v", path, err)
+		}
+	}
+	ghostID := agent.BranchID(filepath.Join(dir, "ghost-blank.jsonl"))
+	ghostPath := writeEmptyNamedSession(t, dir, "ghost-blank.jsonl", ghostID, defaultTopicTitle, projectRoot)
+	nonzeroPath := filepath.Join(dir, "system-only.jsonl")
+	if err := os.WriteFile(nonzeroPath, []byte(`{"role":"system","content":"identity"}`+"\n"), 0o600); err != nil {
+		t.Fatalf("write non-empty sibling: %v", err)
+	}
+	if err := pinNewEmptySessionBranchMeta(nonzeroPath, "project", projectRoot, "", defaultTopicTitle); err != nil {
+		t.Fatalf("pin non-empty sibling: %v", err)
+	}
+	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: archivePath, Label: "test", WorkspaceRoot: projectRoot})
+	defer ctrl.Close()
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"archive": {
+				ID: "archive", Scope: "project", WorkspaceRoot: projectRoot,
+				TopicID: archiveID, TopicTitle: "Archive me", Ctrl: ctrl, Ready: true,
+				disabledMCP: map[string]ServerView{},
+			},
+		},
+		tabOrder:    []string{"archive"},
+		activeTabID: "archive",
+	}
+	installSessionCatalogForTest(t, app, dir, "project", projectRoot)
+
+	if err := app.TrashTopic(archiveID); err != nil {
+		t.Fatalf("TrashTopic: %v", err)
+	}
+	reconcileSessionCatalogForTest(t, app, dir, "project", projectRoot)
+
+	if _, err := os.Stat(archivePath); !os.IsNotExist(err) {
+		t.Fatalf("archived session should be gone, stat err = %v", err)
+	}
+	if _, err := os.Stat(keepPath); err != nil {
+		t.Fatalf("kept session missing: %v", err)
+	}
+	if _, err := os.Stat(nonzeroPath); err != nil {
+		t.Fatalf("non-empty sibling must not be swept, stat err = %v", err)
+	}
+	for _, path := range []string{leftoverA, leftoverB, ghostPath} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("unused transient blank %s should be discarded, stat err = %v", path, err)
+		}
+	}
+	if len(app.tabs) != 1 {
+		t.Fatalf("fallback should create exactly one visible tab, got %d", len(app.tabs))
+	}
+	var fallbackPath string
+	for id, tab := range app.tabs {
+		if strings.TrimSpace(tab.TopicID) != "" {
+			t.Fatalf("fallback tab %q topic ID = %q, want transient unindexed blank", id, tab.TopicID)
+		}
+		fallbackPath = tab.SessionPath
+		if strings.TrimSpace(fallbackPath) == "" {
+			t.Fatalf("fallback tab %q has no precreated session path", id)
+		}
+	}
+	page, err := app.ListProjectTopics(ProjectTopicPageRequest{Scope: "project", WorkspaceRoot: projectRoot, Limit: 50})
+	if err != nil {
+		t.Fatalf("ListProjectTopics: %v", err)
+	}
+	if len(page.Items) != 1 || page.Items[0].TopicID != keepID {
+		t.Fatalf("sidebar after archive = %#v, want only %q", page.Items, keepID)
+	}
+	if page.Items[0].Label == defaultTopicTitle || page.Items[0].Label == "New session" {
+		t.Fatalf("sidebar listed a default blank title: %#v", page.Items[0])
+	}
+	if fallbackPath != "" {
+		if _, err := os.Stat(fallbackPath); err != nil {
+			t.Fatalf("current fallback blank should remain writable: %v", err)
+		}
+	}
+}
+
+func TestUnusedTransientBlankSessionOnlyMatchesZeroByteFiles(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := t.TempDir()
+	zero := filepath.Join(dir, "zero.jsonl")
+	writeZeroByteSession(t, zero)
+	if !unusedTransientBlankSession(dir, zero) {
+		t.Fatal("zero-byte unindexed session should be an unused transient blank")
+	}
+	nonzero := filepath.Join(dir, "nonzero.jsonl")
+	if err := os.WriteFile(nonzero, []byte(`{"role":"system","content":"identity"}`+"\n"), 0o600); err != nil {
+		t.Fatalf("write non-empty session: %v", err)
+	}
+	if unusedTransientBlankSession(dir, nonzero) {
+		t.Fatal("non-empty session must not be classified as an unused transient blank")
+	}
+}
+
+func writeZeroByteSession(t *testing.T, path string) {
+	t.Helper()
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatalf("write zero-byte session %s: %v", path, err)
+	}
+}
+
+func writeEmptyNamedSession(t *testing.T, dir, name, topicID, topicTitle, workspaceRoot string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	writeZeroByteSession(t, path)
+	if err := pinNewEmptySessionBranchMeta(path, "project", workspaceRoot, topicID, topicTitle); err != nil {
+		t.Fatalf("pin empty session: %v", err)
+	}
+	return path
+}

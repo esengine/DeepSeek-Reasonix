@@ -186,62 +186,85 @@ func (p activeReasoningUntilCancelProvider) Stream(ctx context.Context, _ provid
 	return ch, nil
 }
 
-type reasoningGuardCancelProvider struct {
-	canceled chan struct{}
+type finiteReasoningThenTextProvider struct {
+	canceled        chan struct{}
+	reasoning, text string
+	finished        bool
 }
 
-func (reasoningGuardCancelProvider) Name() string { return "reasoning-guard-cancel" }
+func (finiteReasoningThenTextProvider) Name() string { return "finite-reasoning" }
 
-func (p reasoningGuardCancelProvider) Stream(ctx context.Context, _ provider.Request) (<-chan provider.Chunk, error) {
+func (p *finiteReasoningThenTextProvider) Stream(ctx context.Context, _ provider.Request) (<-chan provider.Chunk, error) {
 	ch := make(chan provider.Chunk)
 	go func() {
 		defer close(ch)
 		defer close(p.canceled)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case ch <- provider.Chunk{Type: provider.ChunkReasoning, Text: "0123456789abcdef"}:
-			}
+		select {
+		case <-ctx.Done():
+			return
+		case ch <- provider.Chunk{Type: provider.ChunkReasoning, Text: p.reasoning}:
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case ch <- provider.Chunk{Type: provider.ChunkText, Text: p.text}:
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case ch <- provider.Chunk{Type: provider.ChunkDone}:
+			p.finished = true
 		}
 	}()
 	return ch, nil
 }
 
-func TestRunawayReasoningStopsAtAgentSideByteGuard(t *testing.T) {
+func TestReasoningByteGuardDoesNotAbortTurn(t *testing.T) {
 	sink := &recordSink{}
-	a := New(activeReasoningUntilCancelProvider{}, tool.NewRegistry(), NewSession(""), Options{ReasoningByteLimit: 64}, sink)
+	reasoning := strings.Repeat("abcd", 64)
+	prov := testutil.NewMock("m", testutil.Turn{Reasoning: reasoning, Text: "svg done"})
+	a := New(prov, tool.NewRegistry(), NewSession(""), Options{ReasoningByteLimit: 32}, sink)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-
-	err := a.Run(ctx, "parse this binary by offset")
-	if !errors.Is(err, errReasoningByteLimitExceeded) {
-		t.Fatalf("Run error = %v, want reasoning limit guard", err)
+	if err := a.Run(context.Background(), "draw the compound bow"); err != nil {
+		t.Fatalf("Run error = %v, byte guard must not fail the turn", err)
 	}
-	if got := len(sink.kinds(event.Reasoning)); got == 0 {
-		t.Fatal("no reasoning chunks emitted; repro did not exercise the active-output path")
+	if got := sink.kinds(event.Text); len(got) == 0 || !strings.Contains(got[0].Text, "svg done") {
+		t.Fatal("visible answer was dropped after the reasoning buffer cap")
 	}
-	usages := sink.kinds(event.Usage)
-	if len(usages) != 1 {
-		t.Fatalf("usage events = %d, want one best-effort usage event", len(usages))
-	}
-	if u := usages[0].Usage; u == nil || u.FinishReason != "client_reasoning_limit" || !u.Estimated || u.TotalTokens <= 0 || u.ReasoningTokens <= 0 {
-		t.Fatalf("usage = %+v, want client reasoning limit with estimated reasoning tokens", u)
+	for _, notice := range sink.kinds(event.Notice) {
+		if strings.Contains(notice.Text, "client reasoning safety limit") {
+			t.Fatalf("unexpected abort notice %q", notice.Text)
+		}
 	}
 }
 
-func TestReasoningByteGuardCancelsProviderStream(t *testing.T) {
-	canceled := make(chan struct{})
-	a := New(reasoningGuardCancelProvider{canceled: canceled}, tool.NewRegistry(), NewSession(""), Options{ReasoningByteLimit: 32}, event.Discard)
+func TestDefaultReasoningGuardAllowsFormer128KiBStream(t *testing.T) {
+	// 128KiB is ~32K estimated tokens — a legitimate DeepSeek V4 Pro think.
+	reasoning := strings.Repeat("abcd", 128*1024/4+1)
+	prov := testutil.NewMock("m", testutil.Turn{Reasoning: reasoning, Text: "svg done"})
+	a := New(prov, tool.NewRegistry(), NewSession(""), Options{}, event.Discard)
+	if err := a.Run(context.Background(), "draw the compound bow"); errors.Is(err, errReasoningByteLimitExceeded) {
+		t.Fatalf("default guard aborted a %d-byte reasoning stream", len(reasoning))
+	} else if err != nil {
+		t.Fatal(err)
+	}
+}
 
-	if err := a.Run(context.Background(), "trigger the reasoning guard"); !errors.Is(err, errReasoningByteLimitExceeded) {
-		t.Fatalf("Run error = %v, want reasoning limit guard", err)
+func TestReasoningByteGuardDoesNotCancelProviderStream(t *testing.T) {
+	canceled := make(chan struct{})
+	prov := &finiteReasoningThenTextProvider{canceled: canceled, reasoning: strings.Repeat("x", 64), text: "done"}
+	a := New(prov, tool.NewRegistry(), NewSession(""), Options{ReasoningByteLimit: 16}, event.Discard)
+
+	if err := a.Run(context.Background(), "keep generating"); err != nil {
+		t.Fatalf("Run error = %v, byte guard must not cancel the provider", err)
 	}
 	select {
 	case <-canceled:
 	case <-time.After(time.Second):
-		t.Fatal("provider context remained live after the reasoning guard returned")
+		t.Fatal("provider stream did not finish after the answer")
+	}
+	if !prov.finished {
+		t.Fatal("provider stream was cut off before the final text")
 	}
 }
 
