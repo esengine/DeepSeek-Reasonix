@@ -3372,13 +3372,18 @@ a[href] {
   }
 }
 .transcript {
+  /* Virtuoso sizes rows from the scroller clientWidth (padding included) but
+     lays them out in the content box. Horizontal padding here therefore makes
+     right-aligned bubbles extend under the workspace dock. Keep only vertical
+     inset on the scroller; rows own --transcript-inline-pad. */
+  --transcript-inline-pad: 32px;
   position: relative;
   height: 100%;
   overflow-y: auto;
   overflow-y: overlay;
   overflow-x: hidden;
   scrollbar-gutter: stable both-edges;
-  padding: 24px 32px 32px;
+  padding: 24px 0 32px;
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
@@ -3395,11 +3400,9 @@ a[href] {
 }
 
 /* ── Virtual transcript rows ─────────────────────────────────────── */
-/* The transcript content is a single flat virtual list: the sizer carries the
-   total height, rows are absolutely positioned by the virtualizer. The row
-   wrapper forms a block formatting context (absolute positioning), so child
-   margins stay inside the measured height; the top margin moves to the row's
-   bottom margin only, preserving the old collapsed-sibling spacing. */
+/* React Virtuoso owns list offsets and row measurement. Rows stay in normal
+   flow; flow-root contains child margins so ResizeObserver sees the complete
+   dynamic height instead of a collapsed margin outside the measured item. */
 .transcript__virtual-sizer {
   position: relative;
   width: 100%;
@@ -3409,11 +3412,30 @@ a[href] {
   margin-left: 0;
   margin-right: 0;
 }
+.transcript > [data-viewport-type="element"] {
+  max-width: none;
+  margin-left: 0;
+  margin-right: 0;
+}
 .transcript__row {
-  position: absolute;
-  top: 0;
-  left: 0;
+  position: relative;
+  display: flow-root;
+  box-sizing: border-box;
   width: 100%;
+  padding-left: var(--transcript-inline-pad, 32px);
+  padding-right: var(--transcript-inline-pad, 32px);
+}
+.transcript__header {
+  display: flow-root;
+  box-sizing: border-box;
+  width: 100%;
+  padding-left: var(--transcript-inline-pad, 32px);
+  padding-right: var(--transcript-inline-pad, 32px);
+}
+.transcript__header > * {
+  max-width: var(--maxw);
+  margin-left: auto;
+  margin-right: auto;
 }
 .transcript-selection-overlay {
   position: absolute;
@@ -3447,7 +3469,8 @@ a[href] {
 .transcript__row .tool,
 .transcript__row .process-card,
 .transcript__row .readonly-batch,
-.transcript__row .tool-group {
+.transcript__row .tool-group,
+.transcript__row .md > * {
   content-visibility: visible;
   contain-intrinsic-size: none;
 }
@@ -14866,6 +14889,62 @@ body > .mermaid-diagram--fullscreen {
   gap: 8px;
   flex-shrink: 0;
 }
+
+.recovery-lineage-dialog {
+  width: min(680px, calc(100vw - 48px));
+  height: auto;
+  max-height: min(720px, calc(100vh - 64px));
+}
+.recovery-lineage-dialog .management-modal__title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.recovery-lineage-dialog__body {
+  min-height: 120px;
+  overflow: auto;
+  padding: 12px 18px;
+}
+.recovery-lineage-dialog__member {
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--border);
+}
+.recovery-lineage-dialog__member-name {
+  color: var(--fg);
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recovery-lineage-dialog__member-meta {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+  color: var(--fg-faint);
+  font-size: var(--text-xs);
+}
+.recovery-lineage-dialog__choose {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+}
+.recovery-lineage-dialog__choose:disabled { opacity: 0.5; cursor: default; }
+.recovery-lineage-dialog__notice {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+  font-size: var(--text-sm);
+}
+.recovery-lineage-dialog__actions {
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+}
 @keyframes modal-in {
   0% {
     transform: translate3d(0, 10px, 0) scale(0.982);
@@ -15062,7 +15141,8 @@ body > .mermaid-diagram--fullscreen {
   font-size: var(--font-control);
 }
 .history-preview__body .transcript {
-  padding: 14px 14px 18px;
+  --transcript-inline-pad: 14px;
+  padding: 14px 0 18px;
 }
 .history-preview__body .transcript > * {
   max-width: none;
@@ -21295,7 +21375,8 @@ body > .mermaid-diagram--fullscreen {
     display: flex;
   }
   .transcript {
-    padding: 18px 16px 28px;
+    --transcript-inline-pad: 16px;
+    padding: 18px 0 28px;
   }
   .jump-bar {
     display: none;
@@ -26652,7 +26733,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .transcript {
-  padding: 24px 32px 28px;
+  padding: 24px 0 28px;
 }
 
 .transcript > * {
@@ -27931,7 +28012,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 :root[data-theme-style] .transcript {
-  padding: 24px 32px 28px;
+  padding: 24px 0 28px;
 }
 
 :root[data-theme-style] .transcript--empty {
@@ -28538,7 +28619,8 @@ body > .mermaid-diagram--fullscreen {
 }
 
 :root[data-theme-style] .history-preview__body .transcript {
-  padding: 14px;
+  --transcript-inline-pad: 14px;
+  padding: 14px 0;
 }
 
 :root[data-theme-style] .settings-center__nav {

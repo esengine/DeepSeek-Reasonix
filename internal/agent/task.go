@@ -1820,7 +1820,7 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 		nudges := 0
 		for !sub.HasSuccessfulReviewReport(kind) && nudges < maxReviewReportNudges {
 			nudges++
-			sub.preserveEvidenceOnce = true
+			sub.pending.preserveEvidence = true
 			if err := sub.Run(ctx, reviewReportNudgePrompt(kind)); err != nil {
 				mergeChildEvidence(ctx, sub)
 				// A retry that fails still keeps local parent mutations; the
@@ -2011,10 +2011,10 @@ func mergeChildEvidence(ctx context.Context, sub *Agent) {
 
 // EvidenceSummary exports this agent's turn-scoped receipts for parent merge.
 func (a *Agent) EvidenceSummary() evidence.ChildEvidenceSummary {
-	if a == nil || a.evidence == nil {
+	if a == nil || a.task.ledger == nil {
 		return evidence.ChildEvidenceSummary{}
 	}
-	return a.evidence.Summary()
+	return a.task.ledger.Summary()
 }
 
 func isFreshSubagentSession(sess *Session) bool {

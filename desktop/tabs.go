@@ -257,6 +257,10 @@ const (
 	topicStatusBackgroundJob       = "background_job"
 	topicStatusPaused              = "paused"
 	topicStatusError               = "error"
+	// topicStatusDivergedRecovery marks a topic holding two or more independent
+	// recovery branches. It is informational: the user picks which to keep, so
+	// it must not gate archiving the way live runtime states do.
+	topicStatusDivergedRecovery = "diverged_recovery"
 )
 
 type readFileRecord struct {
@@ -4097,10 +4101,7 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 	}
 	// Commit the scope while the final tab-generation check is still guarded.
 	// It only takes the plugin Host leaf lock and cannot call back into App.
-	if !registration.commit() {
-		a.mu.Unlock()
-		a.abandonSupersededBuild(tab, ctrl, rootKey, acquiredLeaseKey)
-		a.scheduleDeferredStartupBuild(tab.ID)
+	if !a.commitStartupWriteAuthorityLocked(tab, ctrl, registration, rootKey, acquiredLeaseKey, wailsCtx) {
 		return
 	}
 	tab.Ctrl = ctrl
@@ -6169,21 +6170,8 @@ func (a *App) handleTabSessionRecovered(tab *WorkspaceTab) func(control.SessionR
 		if strings.TrimSpace(info.RecoveryPath) == "" {
 			return nil
 		}
-		if tab != nil && !tab.ReadOnly {
-			if err := a.ensureTabSessionLeaseForRebuild(tab, info.RecoveryPath, ""); err != nil {
-				slog.Warn("desktop: acquire recovery session lease", "path", info.RecoveryPath, "err", err)
-				reason := "lease_unavailable"
-				if errors.Is(err, agent.ErrSessionLeaseHeld) {
-					reason = "lease_held"
-				}
-				a.emitRuntimeEvent("session:recovery-failed", sessionRecoveryFailedEvent{Reason: reason})
-				// This error propagates out through ctrl.Snapshot() into chat
-				// notices and bridge returns (reportTabSnapshotError). The raw
-				// path/holder id stayed in the slog line above; keep it out of
-				// the surfaced message.
-				return fmt.Errorf("acquire recovery session lease: %w",
-					userFacingSessionLeaseError("", err))
-			}
+		if err := a.handoffTabRecoveryLease(tab, info.RecoveryPath); err != nil {
+			return err
 		}
 		meta := info.Meta
 		scope := strings.TrimSpace(meta.Scope)
@@ -6455,33 +6443,37 @@ func loadTelemetry(path string) tabTelemetrySnapshot {
 // ProjectNode is one node in the sidebar project tree (a project folder or a
 // topic leaf).
 type ProjectNode struct {
-	Key              string        `json:"key"`  // stable key for React
-	Kind             string        `json:"kind"` // "project" | "topic" | "session" | "global_folder" | "global_topic" | "global_session"
-	Label            string        `json:"label"`
-	Root             string        `json:"root,omitempty"` // project workspace root
-	TopicID          string        `json:"topicId,omitempty"`
-	SessionPath      string        `json:"sessionPath,omitempty"`
-	ProjectColor     string        `json:"projectColor,omitempty"`
-	Turns            int           `json:"turns,omitempty"`
-	TurnsState       string        `json:"turnsState,omitempty"`
-	Health           string        `json:"health,omitempty"`
-	CreatedAt        int64         `json:"createdAt,omitempty"`
-	LastActivityAt   int64         `json:"lastActivityAt,omitempty"`
-	Open             bool          `json:"open,omitempty"`
-	Running          bool          `json:"running,omitempty"`
-	Status           string        `json:"status,omitempty"`
-	Pinned           bool          `json:"pinned,omitempty"`
-	Recovered        bool          `json:"recovered,omitempty"`
-	RecoveryReason   string        `json:"recoveryReason,omitempty"`
-	RecoveryDigest   string        `json:"recoveryDigest,omitempty"`
-	RecoveryParentID string        `json:"recoveryParentId,omitempty"`
-	IsolatedWorktree bool          `json:"isolatedWorktree,omitempty"`
-	Children         []ProjectNode `json:"children,omitempty"`
+	Key                          string        `json:"key"`  // stable key for React
+	Kind                         string        `json:"kind"` // "project" | "topic" | "session" | "global_folder" | "global_topic" | "global_session"
+	Label                        string        `json:"label"`
+	Root                         string        `json:"root,omitempty"` // project workspace root
+	TopicID                      string        `json:"topicId,omitempty"`
+	SessionPath                  string        `json:"sessionPath,omitempty"`
+	ProjectColor                 string        `json:"projectColor,omitempty"`
+	Turns                        int           `json:"turns,omitempty"`
+	TurnsState                   string        `json:"turnsState,omitempty"`
+	Health                       string        `json:"health,omitempty"`
+	CreatedAt                    int64         `json:"createdAt,omitempty"`
+	LastActivityAt               int64         `json:"lastActivityAt,omitempty"`
+	Open                         bool          `json:"open,omitempty"`
+	Running                      bool          `json:"running,omitempty"`
+	Status                       string        `json:"status,omitempty"`
+	Pinned                       bool          `json:"pinned,omitempty"`
+	Recovered                    bool          `json:"recovered,omitempty"`
+	RecoveryReason               string        `json:"recoveryReason,omitempty"`
+	RecoveryDigest               string        `json:"recoveryDigest,omitempty"`
+	RecoveryParentID             string        `json:"recoveryParentId,omitempty"`
+	RecoveryState                string        `json:"recoveryState,omitempty"`
+	RecoveryBranchCount          int           `json:"recoveryBranchCount,omitempty"`
+	RecoveryUnresolvedCount      int           `json:"recoveryUnresolvedCount,omitempty"`
+	RecoveryCleanupEligibleCount int           `json:"recoveryCleanupEligibleCount,omitempty"`
+	IsolatedWorktree             bool          `json:"isolatedWorktree,omitempty"`
+	Children                     []ProjectNode `json:"children,omitempty"`
 }
 
 func normalizeTopicStatus(status string) string {
 	switch status {
-	case topicStatusThinking, topicStatusStreaming, topicStatusWaitingConfirmation, topicStatusBackgroundJob, topicStatusPaused, topicStatusError:
+	case topicStatusThinking, topicStatusStreaming, topicStatusWaitingConfirmation, topicStatusBackgroundJob, topicStatusPaused, topicStatusError, topicStatusDivergedRecovery:
 		return status
 	default:
 		return ""

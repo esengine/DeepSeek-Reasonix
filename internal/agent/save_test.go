@@ -1895,6 +1895,28 @@ func TestSaveRecoveryBranchPersistsDivergedSnapshot(t *testing.T) {
 	}
 }
 
+func TestSaveSnapshotRefusesToRecreateExternallyRemovedBaseline(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "removed.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "keep me"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatal(err)
+	}
+	for _, artifact := range append([]string{path}, store.SessionSidecarFiles(path)...) {
+		if err := os.RemoveAll(artifact); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "still in memory"})
+	if err := s.SaveSnapshot(path); !errors.Is(err, ErrSessionExternallyRemoved) {
+		t.Fatalf("SaveSnapshot error = %v, want ErrSessionExternallyRemoved", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("removed path was silently recreated: %v", err)
+	}
+}
+
 func TestSaveRecoveryBranchSkipsPureStalePrefix(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	current := NewSession("sys")

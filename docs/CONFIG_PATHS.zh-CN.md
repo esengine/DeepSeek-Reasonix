@@ -33,7 +33,7 @@ Legacy 迁移、OS home 约定目录扫描以及其他 fallback 路径都会跳�
 | 会话 | `<state root>/sessions/` |
 | 归档 | `<state root>/archive/` |
 | 记忆 | `<state root>/memory/` 与 `<state root>/projects/` |
-| 可丢弃的会话 Catalog | `<cache root>/session-catalog/v2.sqlite` |
+| 可丢弃的会话 Catalog | `<cache root>/session-catalog/v3.sqlite` |
 | 可丢弃的 Task Catalog | `<cache root>/task-catalog/v1.sqlite` |
 
 `<state root>` 默认等于 `<Reasonix home>`；只有设置 `REASONIX_STATE_HOME`

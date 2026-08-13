@@ -57,9 +57,12 @@ const localeChunks = readdirSync(resolve(distDir, "assets"))
   .map((name) => resolve(distDir, "assets", name));
 
 console.log("\nbundle budgets");
-// The merged execution-setting controller adds 1.1 KiB gzip (0.27%) over the
-// 400.8 KiB base while keeping the interaction on the existing startup path.
-assertBudget("initial JavaScript gzip", initialJSGzip, 402 * 1024);
+// React Virtuoso replaces the transcript's custom measurement/anchor engine.
+// Its production runtime adds 16.9 KiB gzip (4.2%) over the 402 KiB baseline.
+// This exceptional overrun is locally attributable and trades ~1400 lines of
+// competing state machines for a maintained library. The new gates retain 1%
+// headroom (4.6 KiB gzip / 23.2 KiB raw) to bound incidental feature growth.
+assertBudget("initial JavaScript gzip", initialJSGzip, 423.5 * 1024);
 assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 280 * 1024);
 assertBudget("render-blocking CSS gzip", initialCSSGzip, 4 * 1024);
 // Extension surfaces, Task Monitor, and compact decision receipts share the
@@ -72,21 +75,17 @@ if (localeChunks.length !== 2) {
 for (const path of localeChunks) {
   const name = basename(path);
   // Task Monitor, billing, indexed history, Task Center, Extension UI, and
-  // runtime controls plus execution-setting receipts add localized copy. Keep
-  // both dictionaries bounded.
-  const budget = name.startsWith("zh-TW-") ? 55.5 * 1024 : 54.5 * 1024;
+  // runtime controls plus execution-setting receipts add localized copy. The
+  // recovery "other saved versions" dialog adds ~0.1 KiB gzip to zh (54.6 over
+  // the old 54.5 gate, +0.18%); both on-demand dictionaries stay bounded with
+  // small headroom.
+  const budget = name.startsWith("zh-TW-") ? 55.5 * 1024 : 54.75 * 1024;
   assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }
 
 const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
   .reduce((total, path) => total + statSync(path).size, 0);
-// Native Web Animations and frame-batched scrolling avoid an eager animation
-// runtime. Goal request observability plus transcript scroll arbitration,
-// logical selection state/DOM adapters, native input-session ownership,
-// durable inbox recovery, indexed catalogs, Task Center, structured billing,
-// startup config warnings, hover-revealed turn-action labels, and compact
-// execution-setting receipts add small always-available contracts. Keep the
-// raw allowance ratcheted while gzip startup budgets stay flat.
-// The same contract adds 4.2 KiB raw (0.19%) over the 2,264.0 KiB base.
-assertBudget("initial raw JavaScript and CSS", rawInitialBytes, 2_268.5 * 1024);
+// The maintained Virtuoso engine adds 49.1 KiB raw (2.2%) over the previous
+// 2268.7 KiB gate. Retain 1% headroom to bound hash/minifier drift.
+assertBudget("initial raw JavaScript and CSS", rawInitialBytes, 2_341 * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

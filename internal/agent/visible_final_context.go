@@ -9,8 +9,8 @@ import "context"
 type visibleFinalRequiredContextKey struct{}
 
 // WithRequireVisibleFinal requires the Agent.Run using ctx to finish with
-// visible assistant Content. The requirement is scoped to that Run and composes
-// with the construction-time Options.RequireVisibleFinal contract.
+// visible assistant Content. Unlike the older construction-time option, this
+// scoped contract uses a finalization-only repair that cannot execute tools.
 func WithRequireVisibleFinal(ctx context.Context) context.Context {
 	return context.WithValue(ctx, visibleFinalRequiredContextKey{}, true)
 }
@@ -21,8 +21,4 @@ func visibleFinalRequiredFromContext(ctx context.Context) bool {
 	}
 	required, _ := ctx.Value(visibleFinalRequiredContextKey{}).(bool)
 	return required
-}
-
-func (a *Agent) visibleFinalRequired(ctx context.Context) bool {
-	return a.requireVisibleFinal || visibleFinalRequiredFromContext(ctx)
 }

@@ -5,9 +5,20 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync/atomic"
 
 	"reasonix/internal/evidence"
 )
+
+// recoveryIdentity is who this agent is to the shared gate: the labels a
+// recovery card shows, and a run counter that keeps ordinary (non-goal) runs of
+// one task in collision-free scopes. Goal runs use their stable delivery scope
+// instead, so the counter is only ever read through recoveryTaskScopeID.
+type recoveryIdentity struct {
+	agentID string        // empty = root
+	taskID  string        // empty shares the root task bucket
+	runSeq  atomic.Uint64 // bumped per Run; never reset
+}
 
 // RecoveryGate is the host-side Auto Guard consulted by the agent around tool
 // execution. It is independent of the permission Gate and of
@@ -176,7 +187,7 @@ const (
 )
 
 func (a *Agent) observeRecoveryResult(ctx context.Context, toolName string, args json.RawMessage, readOnly, mutates bool, result string, err error, blocked, userRejected bool, generation uint64) {
-	if a == nil || a.recoveryGate == nil {
+	if a == nil || a.svc.recoveryGate == nil {
 		return
 	}
 	verification := toolName == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(args))
@@ -201,16 +212,16 @@ func (a *Agent) observeRecoveryResult(ctx context.Context, toolName string, args
 		cancelled = true
 	}
 	episodeID := ""
-	if ctrl, ok := a.recoveryGate.(RecoveryEpisodeControl); ok {
+	if ctrl, ok := a.svc.recoveryGate.(RecoveryEpisodeControl); ok {
 		episodeID = ctrl.EpisodeID()
 		if generation == 0 {
 			generation = ctrl.Generation()
 		}
 	}
-	guidance := a.recoveryGate.ObserveResult(ctx, RecoveryObservation{
-		AgentID:      a.recoveryAgentID,
-		TaskID:       a.recoveryTaskID,
-		TaskScopeID:  recoveryTaskScopeID(a.deliveryScopeID, a.recoveryRunSeq.Load()),
+	guidance := a.svc.recoveryGate.ObserveResult(ctx, RecoveryObservation{
+		AgentID:      a.recovery.agentID,
+		TaskID:       a.recovery.taskID,
+		TaskScopeID:  recoveryTaskScopeID(a.task.scopeID, a.recovery.runSeq.Load()),
 		EpisodeID:    episodeID,
 		Generation:   generation,
 		Tool:         toolName,
@@ -237,10 +248,10 @@ func (a *Agent) observeRecoveryResult(ctx context.Context, toolName string, args
 }
 
 func (a *Agent) recoveryEpisodeControl() RecoveryEpisodeControl {
-	if a == nil || a.recoveryGate == nil {
+	if a == nil || a.svc.recoveryGate == nil {
 		return nil
 	}
-	ctrl, _ := a.recoveryGate.(RecoveryEpisodeControl)
+	ctrl, _ := a.svc.recoveryGate.(RecoveryEpisodeControl)
 	return ctrl
 }
 

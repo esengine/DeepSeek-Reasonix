@@ -106,7 +106,7 @@ func TestTurnFinalBoundaryRejectsRewriteWithCurrentUser(t *testing.T) {
 	}
 }
 
-func TestTurnFinalBoundaryRejectsReplace(t *testing.T) {
+func TestTurnFinalBoundaryRejectsForkStyleWholeLogReplace(t *testing.T) {
 	sess := agent.NewSession("")
 	sess.Add(provider.Message{Role: provider.RoleUser, Content: "old question", CreatedAt: 1})
 	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "OLD answer"})

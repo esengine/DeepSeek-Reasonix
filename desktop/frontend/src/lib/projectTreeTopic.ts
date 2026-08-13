@@ -168,25 +168,31 @@ const topicStatusLabels: Record<ProjectTopicStatus, DictKey> = {
   background_job: "projectTree.status.backgroundJob",
   paused: "projectTree.status.paused",
   error: "projectTree.status.error",
+  diverged_recovery: "projectTree.status.divergedRecovery",
 };
 
 export function normalizeTopicStatus(status?: string): ProjectTopicStatus | "" {
   if (!status) return "";
-  if (status === "thinking" || status === "streaming" || status === "waiting_confirmation" || status === "background_job" || status === "paused" || status === "error") {
+  if (status === "thinking" || status === "streaming" || status === "waiting_confirmation" || status === "background_job" || status === "paused" || status === "error" || status === "diverged_recovery") {
     return status;
   }
   return "";
 }
 
 export function topicStatus(node: ProjectNode): ProjectTopicStatus | "" {
-  return normalizeTopicStatus(node.status) || (node.running ? "streaming" : "");
+  // Ordinary list never surfaces recovery-branch status. Active runtime states
+  // only: thinking/streaming/waiting/etc. History owns other saved versions.
+  const live = node.running ? "streaming" : "";
+  const stored = normalizeTopicStatus(node.status);
+  if (stored && stored !== "diverged_recovery") return stored;
+  return live;
 }
 
 export function projectTreeTopicArchiveBlocked(node: ProjectNode): boolean {
   if (asArray(node.children).some(projectTreeTopicArchiveBlocked)) return true;
   const status = normalizeTopicStatus(node.status);
   if (status === "thinking" || status === "streaming" || status === "waiting_confirmation" || status === "background_job") return true;
-  if (status === "paused" || status === "error") return false;
+  if (status === "paused" || status === "error" || status === "diverged_recovery") return false;
   return Boolean(node.running);
 }
 

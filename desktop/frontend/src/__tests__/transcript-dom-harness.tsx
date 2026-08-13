@@ -34,12 +34,6 @@ export interface TranscriptHarness {
   loadModule: <T>(path: string) => Promise<T>;
 }
 
-class NoopResizeObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-
 export async function createTranscriptHarness(options: TranscriptHarnessOptions = {}): Promise<TranscriptHarness> {
   const viewportHeight = options.viewportHeight ?? 100_000;
   const rowHeight = options.rowHeight ?? 10;
@@ -62,8 +56,30 @@ export async function createTranscriptHarness(options: TranscriptHarnessOptions 
   globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
   globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
   globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window) as typeof getComputedStyle;
-  globalThis.ResizeObserver = NoopResizeObserver as unknown as typeof ResizeObserver;
-  dom.window.ResizeObserver = NoopResizeObserver as unknown as typeof ResizeObserver;
+  class TranscriptResizeObserver {
+    constructor(private readonly callback: ResizeObserverCallback) {}
+    observe(target: Element) {
+      const element = target as HTMLElement;
+      const height = element.classList.contains("transcript__row")
+        ? rowHeight
+        : element.dataset.viewportType === "element" || element.classList.contains("transcript")
+          ? viewportHeight
+          : element.classList.contains("transcript__header")
+            ? rowHeight
+            : 0;
+      queueMicrotask(() => this.callback([{
+        target,
+        contentRect: { width: 800, height, top: 0, right: 800, bottom: height, left: 0, x: 0, y: 0, toJSON: () => ({}) },
+        borderBoxSize: [{ inlineSize: 800, blockSize: height }],
+        contentBoxSize: [{ inlineSize: 800, blockSize: height }],
+        devicePixelContentBoxSize: [{ inlineSize: 800, blockSize: height }],
+      } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver));
+    }
+    unobserve() {}
+    disconnect() {}
+  }
+  globalThis.ResizeObserver = TranscriptResizeObserver as unknown as typeof ResizeObserver;
+  dom.window.ResizeObserver = TranscriptResizeObserver as unknown as typeof ResizeObserver;
   Object.defineProperty(dom.window, "matchMedia", {
     configurable: true,
     value: () => ({
@@ -125,10 +141,17 @@ export async function createTranscriptHarness(options: TranscriptHarnessOptions 
     configurable: true,
     get(this: HTMLElement) {
       if (this.classList.contains("transcript")) {
-        // The virtualizer writes the total row height onto the sizer.
-        const sizer = this.querySelector<HTMLElement>(".transcript__virtual-sizer");
-        const height = sizer ? Number.parseFloat(sizer.style.height) : 0;
-        return Number.isFinite(height) ? height : 0;
+        const list = this.querySelector<HTMLElement>("[data-testid='virtuoso-item-list']");
+        if (list) {
+          const paddingTop = Number.parseFloat(list.style.paddingTop || "0");
+          const paddingBottom = Number.parseFloat(list.style.paddingBottom || "0");
+          const rendered = Array.from(list.querySelectorAll<HTMLElement>("[data-known-size]"))
+            .reduce((sum, item) => sum + Number.parseFloat(item.dataset.knownSize || "0"), 0);
+          const total = paddingTop + rendered + paddingBottom;
+          if (Number.isFinite(total) && total > 0) return total;
+        }
+        const count = Number.parseInt(this.dataset.transcriptRowCount ?? "0", 10);
+        return Number.isFinite(count) ? count * rowHeight : 0;
       }
       return 0;
     },
@@ -138,10 +161,22 @@ export async function createTranscriptHarness(options: TranscriptHarnessOptions 
     this: HTMLElement,
     arg?: number | ScrollToOptions,
   ) {
+    const max = Math.max(0, this.scrollHeight - this.clientHeight);
     if (typeof arg === "number") {
-      this.scrollTop = arg;
+      this.scrollTop = Math.max(0, Math.min(max, arg));
     } else if (arg && typeof arg.top === "number") {
-      this.scrollTop = arg.top;
+      this.scrollTop = Math.max(0, Math.min(max, arg.top));
+    }
+  };
+  (proto as unknown as { scrollBy: (arg?: number | ScrollToOptions) => void }).scrollBy = function (
+    this: HTMLElement,
+    arg?: number | ScrollToOptions,
+  ) {
+    const max = Math.max(0, this.scrollHeight - this.clientHeight);
+    if (typeof arg === "number") {
+      this.scrollTop = Math.max(0, Math.min(max, this.scrollTop + arg));
+    } else if (arg && typeof arg.top === "number") {
+      this.scrollTop = Math.max(0, Math.min(max, this.scrollTop + arg.top));
     }
   };
 
@@ -150,9 +185,9 @@ export async function createTranscriptHarness(options: TranscriptHarnessOptions 
     logLevel: "silent",
     server: { middlewareMode: true },
   });
-  const { Transcript } = await server.ssrLoadModule("/src/components/Transcript.tsx");
+  const { TranscriptTestSurface } = await server.ssrLoadModule("/src/__tests__/transcript-test-surface.tsx");
   const { LocaleProvider } = await server.ssrLoadModule("/src/lib/i18n.tsx");
-  const TranscriptComponent = Transcript as React.ComponentType<Record<string, unknown>>;
+  const TranscriptComponent = TranscriptTestSurface as React.ComponentType<Record<string, unknown>>;
   const Locale = LocaleProvider as React.ComponentType<{ children?: React.ReactNode }>;
 
   const container = dom.window.document.getElementById("root")!;
@@ -202,7 +237,14 @@ export async function createTranscriptHarness(options: TranscriptHarnessOptions 
           React.createElement(
             Locale,
             null,
-            React.createElement(TranscriptComponent, { items, onPrompt: () => {}, questionNavigator: false, ...props }),
+            React.createElement(TranscriptComponent, {
+              items,
+              onPrompt: () => {},
+              questionNavigator: false,
+              viewportHeight,
+              rowHeight,
+              ...props,
+            }),
           ),
         );
       });

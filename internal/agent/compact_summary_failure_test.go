@@ -53,9 +53,9 @@ func agentOverForceWindow(t *testing.T, prov provider.Provider, sess *Session, w
 // standing in for the summary. The receipt is the host record that the
 // projection was installed; the digest text is what the model is actually told.
 func degradedFold(a *Agent) bool {
-	r := a.compactionState.LastReceipt
+	r := a.sess.compactionState.LastReceipt
 	return r != nil && r.Status == "applied" &&
-		strings.Contains(latestDigest(a.compactionState.Projection.Messages), "summary was unavailable")
+		strings.Contains(latestDigest(a.sess.compactionState.Projection.Messages), "summary was unavailable")
 }
 
 func prepareContext(ctx context.Context, a *Agent, trigger string) error {
@@ -65,8 +65,8 @@ func prepareContext(ctx context.Context, a *Agent, trigger string) error {
 
 // foldRegionOf is the region the next compaction would hand the summarizer.
 func foldRegionOf(a *Agent) []provider.Message {
-	canonical, version := a.session.snapshotMessagesVersion()
-	msgs := a.visibleInputForFold(a.compactionState, canonical, version)
+	canonical, version := a.sess.conversation.snapshotMessagesVersion()
+	msgs := a.visibleInputForFold(a.sess.compactionState, canonical, version)
 	head, start, ok := a.planFoldRegion(msgs, false)
 	if !ok {
 		return nil
@@ -87,8 +87,8 @@ func latestDigest(msgs []provider.Message) string {
 
 // projectionTokens reports what the model would actually see.
 func projectionTokens(a *Agent) int {
-	msgs, _ := a.session.snapshotMessagesVersion()
-	return estimateMessagesTokens(provider.ModelMessages(modelVisibleFromProjection(a.compactionState.Projection, msgs)))
+	msgs, _ := a.sess.conversation.snapshotMessagesVersion()
+	return estimateMessagesTokens(provider.ModelMessages(modelVisibleFromProjection(a.sess.compactionState.Projection, msgs)))
 }
 
 // The 90s summary bound is deliberately not retried, so a summarizer that never
@@ -112,7 +112,7 @@ func TestSummarizerTimeoutWhereFoldIsTheOnlyWayOutDegrades(t *testing.T) {
 	}
 	if !degradedFold(a) {
 		t.Errorf("no degraded fold committed: receipt=%+v digest=%q",
-			a.compactionState.LastReceipt, latestDigest(a.compactionState.Projection.Messages))
+			a.sess.compactionState.LastReceipt, latestDigest(a.sess.compactionState.Projection.Messages))
 	}
 }
 
@@ -131,7 +131,7 @@ func TestOverflowSummarizerFailureDegradesInsteadOfBlockingTheTurn(t *testing.T)
 		t.Fatalf("degraded fold freed no context: %d -> %d", before, after)
 	}
 	if !degradedFold(a) {
-		t.Errorf("no degraded fold committed: receipt=%+v", a.compactionState.LastReceipt)
+		t.Errorf("no degraded fold committed: receipt=%+v", a.sess.compactionState.LastReceipt)
 	}
 }
 
@@ -149,7 +149,7 @@ func TestSummarizerFailureOnOversizedFoldDegrades(t *testing.T) {
 		t.Fatalf("prepare = %v, want a degraded fold", err)
 	}
 	if !degradedFold(a) {
-		t.Errorf("no degraded fold committed: receipt=%+v", a.compactionState.LastReceipt)
+		t.Errorf("no degraded fold committed: receipt=%+v", a.sess.compactionState.LastReceipt)
 	}
 }
 
@@ -169,7 +169,7 @@ func TestPressureBelowHardCeilingKeepsTheFailure(t *testing.T) {
 	if degradedFold(a) {
 		t.Error("a recoverable view was folded without a summary")
 	}
-	if r := a.compactionState.LastReceipt; r == nil || (r.Status != "blocked" && r.Status != "failed") {
+	if r := a.sess.compactionState.LastReceipt; r == nil || (r.Status != "blocked" && r.Status != "failed") {
 		t.Errorf("receipt = %+v, want the failure recorded so the summary is not paid for twice", r)
 	}
 }

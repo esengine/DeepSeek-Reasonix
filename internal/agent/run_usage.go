@@ -201,7 +201,7 @@ func (a *Agent) storeLatestRequestUsage(attempt *provider.Usage) {
 	}
 	clone := *attempt
 	// Keep the per-attempt RequestCount; context calculations do not use it.
-	a.lastUsage.Store(&clone)
+	a.sess.output.lastUsage.Store(&clone)
 	a.setPromptTokenCalibrationFromUsage(&clone)
 }
 
@@ -267,11 +267,11 @@ func (a *Agent) emitTurnUsage(usage *provider.Usage, cacheDiagnostics *CacheDiag
 	// lastUsage must stay as the latest single-request shape (set during
 	// sampling recovery). Never overwrite it with a multi-attempt billable
 	// aggregate — that would inflate ContextSnapshot and compaction decisions.
-	if a.lastUsage.Load() == nil && usage.PromptTokens > 0 {
+	if a.sess.output.lastUsage.Load() == nil && usage.PromptTokens > 0 {
 		a.storeLatestRequestUsage(usage)
 	}
-	a.sink.Emit(event.Event{Kind: event.Usage, ModelRef: a.modelRef, Usage: usage, Pricing: a.pricing,
+	a.svc.sink.Emit(event.Event{Kind: event.Usage, ModelRef: a.modelRef, Usage: usage, Pricing: a.svc.pricing,
 		UsageSource:      a.usageSource,
 		CacheDiagnostics: cacheDiagnostics,
-		SessionHit:       int(a.sessCacheHit.Load()), SessionMiss: int(a.sessCacheMiss.Load())})
+		SessionHit:       int(a.sess.cacheHit.Load()), SessionMiss: int(a.sess.cacheMiss.Load())})
 }

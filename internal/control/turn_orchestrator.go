@@ -120,8 +120,7 @@ func (o *turnOrchestrator) runSubagentSkillTurnsGoalLoop(ctx context.Context, sk
 // provider-visible parent context while their UI events nest under synthetic
 // top-level run_skill cards.
 func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []skill.Skill, task, raw, display string, runner skill.SubagentRunner, planMode bool, images, imageCandidates []string) (err error) {
-	c := o.c
-	o.lastTurnFinal = ""
+	c := o.startTurn()
 	turnStartedAt := time.Now()
 	c.maybeSessionStart(ctx)
 	parentSession := c.parentSessionID()
@@ -134,7 +133,7 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 
 	input := c.compose(task, raw, true)
 	startMessages := c.messageCount()
-	finalBoundary := c.captureTurnFinalBoundary()
+	finalBoundary := o.beginTurnFinalBoundary()
 	var marker agent.InFlightTurnMeta
 	defer func() { c.finishInFlightTurn(startMessages, marker) }()
 	defer c.recordDisplayForNewUser(startMessages, display)
@@ -203,8 +202,7 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 }
 
 func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchestratedTurn) (err error) {
-	c := o.c
-	o.lastTurnFinal = ""
+	c := o.startTurn()
 	c.maybeSessionStart(ctx)
 	parentSession := c.parentSessionID()
 	ctx = agent.WithParentSession(ctx, parentSession)
@@ -239,7 +237,7 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 		return nil
 	}
 	startMessages := c.messageCount()
-	finalBoundary := c.captureTurnFinalBoundary()
+	finalBoundary := o.beginTurnFinalBoundary()
 	var marker agent.InFlightTurnMeta
 	defer func() { c.finishInFlightTurn(startMessages, marker) }()
 	defer c.recordDisplayForNewUser(startMessages, turn.display)
@@ -337,8 +335,7 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	}
 	proposal := finalBoundary.currentVisibleFinal(c)
 	if proposal == "" {
-		// Without a provable current proposal, leave Plan mode active and keep the gate closed.
-		return nil
+		return nil // Leave Plan mode active without a provable current proposal.
 	}
 	// The plan is already visible as the assistant's answer, so the request
 	// carries no subject — it's purely the gate.

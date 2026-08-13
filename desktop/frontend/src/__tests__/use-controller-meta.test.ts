@@ -201,22 +201,22 @@ console.log("\nuse controller meta");
   );
   eq(
     localizedBackendNoticeText("session changed on disk; unsaved local transcript was saved as recovery branch 20260706-152144.863947300-longcat-openai-LongCat-2.0-119b7259f151-recovery-693ce51bcbcbaa9"),
-    "The session changed on disk, so the unsaved local transcript was kept as a conflict copy.",
+    "The session changed on disk, so the unsaved local transcript was kept as another saved version.",
     "legacy recovery branch notice can be normalized without exposing internal branch id",
   );
   eq(
     localizedBackendNoticeText("session changed on disk; unsaved local transcript was saved as a conflict copy"),
-    "The session changed on disk, so the unsaved local transcript was kept as a conflict copy.",
+    "The session changed on disk, so the unsaved local transcript was kept as another saved version.",
     "recovery copy notice can be normalized",
   );
   eq(
     localizedBackendNoticeText("session conflicts kept recurring; kept the transcript on the current recovery branch"),
-    "Repeated save conflicts were detected, so the current conflict copy was saved in an isolated recovery branch.",
+    "Repeated save conflicts were detected, so the current version was saved separately.",
     "legacy repeated recovery conflict notice can be normalized",
   );
   eq(
     localizedBackendNoticeText("repeated save conflicts were detected; saved the current conflict copy in place"),
-    "Repeated save conflicts were detected, so the current conflict copy was saved in an isolated recovery branch.",
+    "Repeated save conflicts were detected, so the current version was saved separately.",
     "repeated recovery conflict notice can be normalized",
   );
   eq(
@@ -264,7 +264,7 @@ console.log("\nuse controller meta");
   );
   eq(
     localizedNoticeText("reworded recovery copy", "session_recovery_forked"),
-    "The session changed on disk, so the unsaved local transcript was kept as a conflict copy.",
+    "The session changed on disk, so the unsaved local transcript was kept as another saved version.",
     "session recovery fork localization uses its stable notice code",
   );
   eq(
@@ -274,7 +274,7 @@ console.log("\nuse controller meta");
   );
   eq(
     localizedNoticeText("reworded depth cap", "session_recovery_depth_cap"),
-    "Repeated save conflicts were detected, so the current conflict copy was saved in an isolated recovery branch.",
+    "Repeated save conflicts were detected, so the current version was saved separately.",
     "session recovery depth-cap localization uses its stable notice code",
   );
   eq(

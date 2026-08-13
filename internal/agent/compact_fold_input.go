@@ -46,7 +46,7 @@ func summaryInputTokens(msgs []provider.Message) int {
 // estimate.
 func (a *Agent) guardedSummaryInputTokens(msgs []provider.Message) int {
 	raw := summaryInputTokens(msgs)
-	if !sharesContextWindow(a.prov) || a.configuredOutputBudget(a.maxOutputTokens) <= 0 || len(msgs) == 0 {
+	if !sharesContextWindow(a.svc.prov) || a.configuredOutputBudget(a.maxOutputTokens) <= 0 || len(msgs) == 0 {
 		return raw
 	}
 	return a.estimatedPromptTokens([]provider.Message{{
@@ -61,7 +61,7 @@ func (a *Agent) summaryInputBudget(instructions string) int {
 		return 0
 	}
 	reserve := summaryOutputReserve
-	if sharesContextWindow(a.prov) && a.configuredOutputBudget(a.maxOutputTokens) > 0 {
+	if sharesContextWindow(a.svc.prov) && a.configuredOutputBudget(a.maxOutputTokens) > 0 {
 		reserve += outputBudgetReserve
 	}
 	budget := a.contextWindow - reserve - estimateTextTokens(summarySystemPrompt) - estimateTextTokens(instructions) - 256
@@ -145,7 +145,7 @@ func (a *Agent) degradeFoldSummary(res foldSummary, mustFree bool, fold []provid
 	if !mustFree || errors.Is(cause, context.Canceled) {
 		return res, cause
 	}
-	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
+	a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
 		Text:   "Context was compacted without a generated summary.",
 		Detail: fmt.Sprintf("compaction summary unavailable (%v); folded mechanically", cause)})
 	res.Text = mechanicalFoldDigest(len(fold))

@@ -60,7 +60,7 @@ func TestTaskBudgetGateKeepsTheWorkAndAsksForASummary(t *testing.T) {
 	_ = a.Run(context.Background(), "read everything")
 
 	var sawNudge, sawToolResult bool
-	for _, m := range a.session.Messages {
+	for _, m := range a.sess.conversation.Messages {
 		if m.Role == provider.RoleUser && strings.Contains(m.Content, "reached its cost budget") {
 			sawNudge = true
 		}

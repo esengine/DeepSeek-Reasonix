@@ -505,7 +505,7 @@ func tailStart(msgs []provider.Message, head, budgetTokens int, tokPerChar float
 // actually sent (the provider strips it). Falls back to ~4 chars/token before
 // any usage is known, and ignores absurd ratios.
 func (a *Agent) tokPerChar() float64 {
-	if cal := a.promptCalibration.Load(); cal != nil && cal.compactChars > 0 {
+	if cal := a.sess.output.promptCalibration.Load(); cal != nil && cal.compactChars > 0 {
 		if r := float64(cal.promptTokens) / float64(cal.compactChars); r > 0.05 && r < 2 {
 			return r
 		}
@@ -549,7 +549,7 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 	defer func() {
 		usage = provider.UsageWithRequestAttemptCount(ctx, usage)
 		if usage != nil && (usage.TotalTokens > 0 || usage.RequestCount > 0) {
-			a.sink.Emit(event.Event{Kind: event.Usage, ModelRef: a.modelRef, Usage: usage, Pricing: a.pricing, UsageSource: event.UsageSourceCompaction})
+			a.svc.sink.Emit(event.Event{Kind: event.Usage, ModelRef: a.modelRef, Usage: usage, Pricing: a.svc.pricing, UsageSource: event.UsageSourceCompaction})
 		}
 	}()
 	defer trackPublishedHostStream(ctx, cancel)()
@@ -576,10 +576,10 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 	if req.MaxTokens < 256 {
 		return "", usage, fmt.Errorf("summary output budget too small (%d tokens)", req.MaxTokens)
 	}
-	if a.prov == nil {
+	if a.svc.prov == nil {
 		return "", usage, fmt.Errorf("summary unavailable")
 	}
-	ch, err := a.prov.Stream(ctx, req)
+	ch, err := a.svc.prov.Stream(ctx, req)
 	if err != nil {
 		return "", usage, err
 	}

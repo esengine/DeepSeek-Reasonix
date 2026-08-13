@@ -1,5 +1,5 @@
-import { memo, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
+import { forwardRef, memo, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Virtuoso, type Components, type ItemProps, type ListItem, type ListProps } from "react-virtuoso";
 import type { ControllerLiveStore, Item, LiveStream } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
 import type { InvocationMetadataMap } from "../lib/invocationDisplay";
@@ -15,11 +15,7 @@ import { ToolGroup } from "./ToolGroup";
 import { getProcessFoldPreference, onProcessFoldPreferenceChange, type ProcessFoldPreference } from "../lib/processFoldPreference";
 import { STEER_NOTICE_PREFIX, isSteerNoticeText } from "../lib/useController";
 import { useTranscriptEntranceAnimation } from "../lib/useEntranceAnimation";
-import { useTranscriptScrollController } from "../lib/useTranscriptScrollController";
-import { shouldAdjustScrollOnItemSizeChange, shouldRunStreamEndRepin } from "../lib/transcriptScrollController";
 import { useTranscriptSelectionRetention } from "../lib/useTranscriptSelectionRetention";
-import { useTranscriptMeasurementInvalidation } from "../lib/useTranscriptMeasurementInvalidation";
-import { useTranscriptRowMeasurements } from "../lib/useTranscriptRowMeasurements";
 import { compactQuestionText, lastQuestionTurn, questionAnchorId, questionTurnsById, scrollVersion, type QuestionAnchor } from "../lib/transcriptGrouping";
 import {
   buildTranscriptRows,
@@ -29,6 +25,7 @@ import {
   foldSegmentStates,
   historyEntryIdForRow,
   reconcileFoldEntries,
+  estimateTranscriptRowSize,
   userRowKey,
   EMPTY_FOLDS,
   NO_LIVE,
@@ -50,9 +47,13 @@ import { useTranscriptSelectableRows } from "../lib/useTranscriptSelectableRows"
 import { TranscriptSelectionOverlay } from "./TranscriptSelectionOverlay";
 import { useCreationTranscriptScrollbar } from "../lib/useCreationTranscriptScrollbar";
 import { useTranscriptScrollInteractions } from "../lib/useTranscriptScrollInteractions";
+import { TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX, useTranscriptVirtuosoScroll } from "../lib/useTranscriptVirtuosoScroll";
+import { useTranscriptVirtuosoFirstItemIndex } from "../lib/transcriptVirtuosoIndex";
 type OpenTurnAction = { turn: number; menu: "summary" | "rewind" };
 const QUESTION_NAV_MIN_COUNT = 2;
 type AssistantReasoningDisplay = "normal" | "hide";
+const EMPTY_CHECKPOINTS: CheckpointMeta[] = [];
+const EMPTY_INVOCATION_METADATA: InvocationMetadataMap = {};
 
 const LiveAssistantMessage = memo(function LiveAssistantMessage({
   item,
@@ -105,6 +106,77 @@ const LiveAssistantMessage = memo(function LiveAssistantMessage({
 });
 const VIRTUAL_OVERSCAN_ROWS = 8;
 
+type TranscriptVirtuosoContext = {
+  tabId?: string;
+  scrollElement: HTMLDivElement | null;
+  nativeScrollbarDragging: boolean;
+  overlayRevision: string;
+  olderHistory: null | {
+    loading: boolean;
+    label: string;
+    onLoad?: () => void;
+  };
+};
+
+const TranscriptVirtuosoItem = forwardRef<HTMLDivElement, ItemProps<TranscriptRow> & { context: TranscriptVirtuosoContext }>(
+  function TranscriptVirtuosoItem({ item, context, children, style, ...props }, ref) {
+    const entryId = historyEntryIdForRow(item);
+    useEffect(() => {
+      if (entryId) getTranscriptStore().requestEntryFullContent(context.tabId, entryId);
+    }, [context.tabId, entryId]);
+    const knownSize = Number.parseFloat(String(props["data-known-size"] ?? ""));
+    const frozenStyle = context.nativeScrollbarDragging && Number.isFinite(knownSize) && knownSize > 0
+      ? { ...style, boxSizing: "border-box" as const, height: knownSize, overflow: "hidden" as const }
+      : style;
+    return (
+      <div {...props} ref={ref} style={frozenStyle} data-row-key={String(item.key)} className="transcript__row">
+        {children}
+      </div>
+    );
+  },
+);
+
+const TranscriptVirtuosoList = forwardRef<HTMLDivElement, ListProps & { context: TranscriptVirtuosoContext }>(
+  function TranscriptVirtuosoList({ context, children, ...props }, ref) {
+    return (
+      <div {...props} ref={ref} className="transcript__virtual-sizer">
+        <TranscriptSelectionOverlay
+          tabId={context.tabId ?? ""}
+          scrollElement={context.scrollElement}
+          virtualRevision={context.overlayRevision}
+        />
+        {children}
+      </div>
+    );
+  },
+);
+
+function TranscriptVirtuosoHeader({ context }: { context: TranscriptVirtuosoContext }) {
+  if (!context.olderHistory) return null;
+  return (
+    <div className="transcript__header">
+      <button
+        type="button"
+        className="warm-collapse transcript__older"
+        onClick={context.olderHistory.onLoad}
+        disabled={context.olderHistory.loading}
+      >
+        {context.olderHistory.label}
+      </button>
+    </div>
+  );
+}
+
+const TRANSCRIPT_VIRTUOSO_COMPONENTS: Components<TranscriptRow, TranscriptVirtuosoContext> = {
+  Item: TranscriptVirtuosoItem,
+  List: TranscriptVirtuosoList,
+};
+
+const TRANSCRIPT_VIRTUOSO_COMPONENTS_WITH_HEADER: Components<TranscriptRow, TranscriptVirtuosoContext> = {
+  ...TRANSCRIPT_VIRTUOSO_COMPONENTS,
+  Header: TranscriptVirtuosoHeader,
+};
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function useTick(on: boolean): number {
@@ -149,7 +221,7 @@ export function Transcript({
   onOpenChanges,
   onEditPrompt,
   onRewind,
-  checkpoints = [],
+  checkpoints = EMPTY_CHECKPOINTS,
   actionPending = false,
   rewindDisabled = false,
   running = false,
@@ -165,7 +237,7 @@ export function Transcript({
   loadingOlderHistory = false,
   onLoadOlderHistory,
   turnStartAt,
-  invocationMetadata = {},
+  invocationMetadata = EMPTY_INVOCATION_METADATA,
 }: {
   items: Item[];
   live?: LiveStream;
@@ -206,10 +278,12 @@ export function Transcript({
   );
   const live = useSyncExternalStore(subscribeLive, getLiveSnapshot, getLiveSnapshot);
   const {
+    virtuosoRef,
     scrollRef,
-    stick,
-    onScroll,
-    onScrollEnd,
+    itemSize,
+    nativeScrollbarDragging,
+    scrollElement,
+    pinnedRef: stick,
     onWheelIntent,
     onPointerDownIntent,
     onNestedScrollIntent,
@@ -217,24 +291,19 @@ export function Transcript({
     onTouchMoveIntent,
     onKeyScrollIntent,
     isAtBottom,
-    scrollToBottomAfterLayout,
-    trackQuestions,
-    scheduleRepinIfWasPinned,
-    resizeFrame,
-    lastClientHeight,
-    lastFooterHeight,
+    scrollerRef,
+    atBottomStateChange,
+    scrollToBottom,
+    followGrowingTail,
+    scrollToDataIndex,
+    releaseTailFollow,
     setMode: setScrollMode,
-    modeRef: scrollModeRef,
     writeOffset,
-    resetGeneration,
-    canVirtualizerAdjust,
-    captureViewportAnchor,
-    reconcileViewportAnchor,
-    onGestureIdle,
+    reset: resetScroll,
     finishProgrammaticScroll,
-  } = useTranscriptScrollController();
+  } = useTranscriptVirtuosoScroll();
   const autoScrollFrame = useRef<number | null>(null);
-  const pendingRevealBottomScroll = useRef(false);
+  const virtuosoReadyRef = useRef(false);
 
   const entranceRef = useTranscriptEntranceAnimation<HTMLDivElement>(tabId, revealSignal, items);
 
@@ -252,6 +321,11 @@ export function Transcript({
     }
   }, []);
 
+  const cancelStreamingAndFollow = useCallback(() => {
+    cancelStreamingAutoScroll();
+    releaseTailFollow();
+  }, [cancelStreamingAutoScroll, releaseTailFollow]);
+
   const {
     state: creationScrollbar,
     handleScroll: handleCreationScroll,
@@ -261,7 +335,7 @@ export function Transcript({
     enabled: creationMode,
     contentRevision: items.length,
     scrollRef,
-    onScroll,
+    onScroll: () => {},
     setScrollMode,
     writeOffset,
     finishProgrammaticScroll,
@@ -279,54 +353,40 @@ export function Transcript({
   }, [items]);
   const showQuestionNav = questionNavigator && questions.length >= QUESTION_NAV_MIN_COUNT;
 
-  // Track question count and auto-scroll on new messages. A "new question" is
-  // a tail append — prepending an older-history page also grows the question
-  // list but must not yank the reader to the bottom (the virtualizer's anchor
-  // compensation keeps their position instead).
+  // A new local question is an explicit request to reveal the tail. Prepending
+  // older history keeps the same last id and is left entirely to Virtuoso's
+  // firstItemIndex anchor contract.
   const questionTailRef = useRef({ length: 0, lastId: "" });
-  const newQuestionCount = useRef(0);
   useEffect(() => {
     const lastId = questions[questions.length - 1]?.id ?? "";
     const prev = questionTailRef.current;
     questionTailRef.current = { length: questions.length, lastId };
-    if (questions.length > prev.length && lastId !== prev.lastId) {
-      newQuestionCount.current += 1;
-    }
-    trackQuestions(newQuestionCount.current);
-  }, [questions, trackQuestions]);
+    if (prev.length > 0 && questions.length > prev.length && lastId !== prev.lastId) scrollToBottom();
+  }, [questions, scrollToBottom]);
 
   // Reset the auto-scroll pin when switching tabs so the new session always
   // starts at the bottom. Without this, stick.current from the previous tab
   // persists across React re-renders (Transcript is not keyed by tabId) and
   // disables auto-scroll when the user had scrolled up in the old tab (#4584).
   useEffect(() => {
-    resetGeneration(tabId, revealSignal);
-    pendingRevealBottomScroll.current = true;
-  }, [resetGeneration, revealSignal, tabId]);
-
-  useEffect(() => {
-    if (!pendingRevealBottomScroll.current || items.length === 0) return;
-    pendingRevealBottomScroll.current = false;
-    const frame = requestAnimationFrame(() => {
-      scrollToBottomAfterLayout(5);
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [items.length, revealSignal, scrollToBottomAfterLayout, tabId]);
+    resetScroll();
+    virtuosoReadyRef.current = false;
+  }, [resetScroll, revealSignal, tabId]);
 
   // Auto-scroll to bottom during streaming. Coalesce fast token/reasoning
   // updates into one layout read/write per animation frame.
   const contentVersion = useMemo(() => scrollVersion(items), [items]);
   useEffect(() => {
     if (items.length === 0) return;
+    if (!virtuosoReadyRef.current) return;
     if (!stick.current) return;
     if (autoScrollFrame.current !== null) return;
     autoScrollFrame.current = requestAnimationFrame(() => {
       autoScrollFrame.current = null;
       if (!stick.current) return;
-      const el = scrollRef.current;
-      if (el) writeOffset("stream", el.scrollHeight);
+      followGrowingTail();
     });
-  }, [contentVersion, live?.text?.length ?? 0, live?.reasoning?.length ?? 0, writeOffset]);
+  }, [contentVersion, followGrowingTail, live?.text?.length ?? 0, live?.reasoning?.length ?? 0, stick]);
   useEffect(() => {
     return () => {
       if (autoScrollFrame.current !== null) {
@@ -336,52 +396,11 @@ export function Transcript({
     };
   }, []);
 
-  // The settled assistant row can grow after turn_done while markdown swaps
-  // from the live renderer to parsed blocks. Run a passive fallback while the
-  // reader is still pinned; row measurements below cover later async growth.
-  const previousLiveRef = useRef<{ tabId: string | undefined; id: string | undefined }>({ tabId, id: undefined });
+  // Virtuoso observes both its viewport and rows. When the composer changes
+  // height, ask its tail policy to settle only if the reader is still pinned.
   useEffect(() => {
-    const previous = previousLiveRef.current;
-    const sameTab = previous.tabId === tabId;
-    const hadLive = sameTab && previous.id !== undefined;
-    const hasLive = live?.id !== undefined;
-    previousLiveRef.current = { tabId, id: live?.id };
-    if (shouldRunStreamEndRepin(hadLive, hasLive, stick.current)) {
-      scrollToBottomAfterLayout(3, "stream");
-    }
-  }, [live?.id, scrollToBottomAfterLayout, stick, tabId]);
-
-  // ResizeObserver for container height changes.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    lastClientHeight.current = el.clientHeight;
-    const observer = new ResizeObserver((entries) => {
-      const height = entries[0]?.contentRect.height ?? el.clientHeight;
-      const previous = lastClientHeight.current ?? height;
-      lastClientHeight.current = height;
-      if (items.length === 0) return;
-      scheduleRepinIfWasPinned(height - previous, "container-resize");
-    });
-    observer.observe(el);
-    return () => {
-      observer.disconnect();
-      if (resizeFrame.current !== null) {
-        cancelAnimationFrame(resizeFrame.current);
-        resizeFrame.current = null;
-      }
-    };
-  }, [items.length, scheduleRepinIfWasPinned]);
-
-  // Footer height changes → frame-batched scroll repin.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const previous = lastFooterHeight.current ?? footerHeight;
-    lastFooterHeight.current = footerHeight;
-    if (items.length === 0) return;
-    scheduleRepinIfWasPinned(previous - footerHeight, "footer-resize");
-  }, [footerHeight, items.length, scheduleRepinIfWasPinned]);
+    if (items.length > 0 && virtuosoReadyRef.current) followGrowingTail();
+  }, [followGrowingTail, footerHeight, items.length]);
 
   // Sub-agent calls carry a parentId; collect them under their parent `task`
   // call so the parent card can render them nested, and skip them at top level.
@@ -459,12 +478,18 @@ export function Transcript({
     () => buildTranscriptRows(turnModels, { folds, foldPreference, hasOlderHistory, creationMode, turnForUser, hasCheckpointForTurn }),
     [turnModels, folds, foldPreference, hasOlderHistory, creationMode, turnForUser, hasCheckpointForTurn],
   );
+  // Keep the load-older affordance in Virtuoso's measured Header slot so an
+  // older page is a true data prepend, rather than an insertion after row 0.
+  const virtualRows = useMemo(
+    () => rows[0]?.kind === "older-history" ? rows.slice(1) : rows,
+    [rows],
+  );
   const rowIndexByKey = useMemo(() => {
     const map = new Map<string, number>();
-    rows.forEach((row, index) => map.set(String(row.key), index));
+    virtualRows.forEach((row, index) => map.set(String(row.key), index));
     return map;
-  }, [rows]);
-  const [selectableRows, liveSelectableRows] = useTranscriptSelectableRows(rows, live);
+  }, [virtualRows]);
+  const [selectableRows, liveSelectableRows] = useTranscriptSelectableRows(virtualRows, live);
   const selectionRetention = useTranscriptSelectionRetention({
     tabId,
     revealSignal,
@@ -474,9 +499,7 @@ export function Transcript({
     scrollRef,
     setScrollMode,
     writeOffset,
-    cancelStreamingScroll: cancelStreamingAutoScroll,
-    captureViewportAnchor,
-    reconcileViewportAnchor,
+    cancelStreamingScroll: cancelStreamingAndFollow,
   });
   const scrollInteractions = useTranscriptScrollInteractions({
     scrollRef,
@@ -486,77 +509,48 @@ export function Transcript({
     onKeyScrollIntent,
     onPointerDownIntent,
     onNestedScrollIntent,
-    onScrollEnd,
+    onScrollEnd: finishProgrammaticScroll,
     onSelectionPointerDown: selectionRetention.onPointerDownCapture,
   });
-  const getRowKey = useCallback((index: number) => `${tabId ?? ""}:${String(rows[index]?.key ?? index)}`, [rows, tabId]);
-  const { estimateSize: estimateRowSize, layoutSnapshotRef, measureElement: measureRowSize } = useTranscriptRowMeasurements(tabId, rows);
-  const trackRowSizeChange = useCallback(
-    (element: HTMLDivElement, entry: ResizeObserverEntry | undefined, instance: Virtualizer<HTMLDivElement, HTMLDivElement>) => {
-      const height = measureRowSize(element, entry, instance);
-      if (stick.current) scheduleRepinIfWasPinned(0, "row-size");
-      return height;
-    },
-    [measureRowSize, scheduleRepinIfWasPinned, stick],
+  const virtuosoResetKey = `${tabId ?? ""}:${revealSignal}`;
+  const firstItemIndex = useTranscriptVirtuosoFirstItemIndex(virtualRows, virtuosoResetKey);
+  const heightEstimates = useMemo(() => virtualRows.map((row) => estimateTranscriptRowSize(row)), [virtualRows]);
+  const overlayRevision = useMemo(
+    () => virtualRows.map((row) => String(row.key)).join("|"),
+    [virtualRows],
   );
-  const virtualizer = useVirtualizer({
-    count: rows.length,
-    getScrollElement: () => scrollRef.current,
-    getItemKey: getRowKey,
-    estimateSize: estimateRowSize,
-    measureElement: trackRowSizeChange,
-    overscan: VIRTUAL_OVERSCAN_ROWS,
-    rangeExtractor: selectionRetention.rangeExtractor,
-    // Key-anchored compensation: prepended history pages, fold toggles and
-    // async row growth restore the scroll position of the anchor row.
-    anchorTo: "end",
-    scrollToFn: (offset, options) => {
-      writeOffset("virtualizer", offset + (options.adjustments ?? 0), options.behavior ?? "auto");
-    },
-    // Measurement callbacks can arrive during React's commit phase. Let the
-    // virtualizer update stable row positions directly instead of dispatching a
-    // reducer update for every ResizeObserver measurement (React #185).
-    directDomUpdates: true,
-    // Batch ResizeObserver measurements into one layout read per frame.
-    useAnimationFrameWithResizeObserver: true,
-    onChange: () => selectionRetention.reconcileLogicalFocus(),
-  });
-  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => (
-    canVirtualizerAdjust()
-    && shouldAdjustScrollOnItemSizeChange(stick.current, scrollModeRef.current)
-  );
-  useTranscriptMeasurementInvalidation({
-    scrollRef,
-    layoutSnapshotRef,
-    virtualizer,
-    selectionActive: selectionRetention.active,
-    canMeasure: canVirtualizerAdjust,
-    onMeasureIdle: onGestureIdle,
-    captureViewportAnchor,
-    reconcileViewportAnchor,
-  });
-
-  const sizerRef = useCallback(
-    (el: HTMLDivElement | null) => {
-      virtualizer.containerRef(el);
-      entranceRef.current = el;
-    },
-    [virtualizer, entranceRef],
-  );
-  const virtualItems = virtualizer.getVirtualItems();
-  const virtualRevision = virtualItems.map((item) => `${item.key}:${item.start}:${item.size}`).join("|");
-  useEffect(() => {
-    noteTranscriptRowCounts(virtualItems.length, rows.length);
-  }, [virtualItems.length, rows.length]);
+  const virtuosoContext = useMemo<TranscriptVirtuosoContext>(() => ({
+    tabId,
+    scrollElement,
+    nativeScrollbarDragging,
+    overlayRevision,
+    olderHistory: hasOlderHistory
+      ? {
+          loading: loadingOlderHistory,
+          label: loadingOlderHistory ? t("common.loading") : t("transcript.showEarlierHistory", { n: olderHistoryCount }),
+          onLoad: onLoadOlderHistory,
+        }
+      : null,
+  }), [hasOlderHistory, loadingOlderHistory, nativeScrollbarDragging, olderHistoryCount, onLoadOlderHistory, overlayRevision, scrollElement, t, tabId]);
+  const handleScrollerRef = useCallback((node: HTMLElement | Window | null) => {
+    scrollerRef(node);
+    entranceRef.current = node instanceof HTMLElement ? node as HTMLDivElement : null;
+  }, [entranceRef, scrollerRef]);
+  const handleItemsRendered = useCallback((rendered: ListItem<TranscriptRow>[]) => {
+    noteTranscriptRowCounts(rendered.length, virtualRows.length);
+    selectionRetention.reconcileLogicalFocus();
+    if (!virtuosoReadyRef.current && rendered.length > 0) {
+      virtuosoReadyRef.current = true;
+      requestAnimationFrame(() => scrollToBottom());
+    }
+  }, [scrollToBottom, selectionRetention.reconcileLogicalFocus, virtualRows.length]);
 
   // ── JumpBar integration ───────────────────────────────────────────────────
   const handleJumpToQuestion = useCallback((question: QuestionAnchor) => {
     const index = rowIndexByKey.get(String(userRowKey(question.id)));
     if (index == null) return;
-    stick.current = false;
-    setScrollMode("programmatic", "jump");
-    virtualizer.scrollToIndex(index, { align: "start", behavior: "smooth" });
-  }, [rowIndexByKey, setScrollMode, stick, virtualizer]);
+    scrollToDataIndex(firstItemIndex, index, "smooth");
+  }, [firstItemIndex, rowIndexByKey, scrollToDataIndex]);
 
   // After a non-fork rewind, scroll to the last user message (the
   // rewound-to point) so the user knows where they are.
@@ -565,26 +559,11 @@ export function Transcript({
     const lastQ = questions[questions.length - 1];
     const index = rowIndexByKey.get(String(userRowKey(lastQ.id)));
     if (index == null) return;
-    stick.current = false;
-    setScrollMode("programmatic", "rewind");
-    virtualizer.scrollToIndex(index, { align: "start" });
+    scrollToDataIndex(firstItemIndex, index);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rewindSignal]);
 
   const empty = items.length === 0;
-
-  useLayoutEffect(() => {
-    if (!empty) return;
-    const el = scrollRef.current;
-    if (!el) return;
-    setScrollMode("programmatic", "empty-transcript");
-    writeOffset("jump-bottom", 0);
-    stick.current = false;
-    const frame = requestAnimationFrame(() => {
-      writeOffset("jump-bottom", 0);
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [empty, scrollRef, setScrollMode, stick, tabId, writeOffset]);
 
   // ── Row rendering ─────────────────────────────────────────────────────────
   const renderRow = (row: TranscriptRow): ReactNode => {
@@ -723,39 +702,48 @@ export function Transcript({
   return (
     <InvocationMetadataContext.Provider value={invocationMetadata}>
     <div className="transcript-shell">
-      <div
-        className={`transcript${empty ? " transcript--empty" : ""}${creationMode ? " transcript--creation-scrollbar" : ""}${creationMode && creationScrollbar.hot ? " transcript--scrollbar-hot" : ""}`}
-        ref={scrollRef}
-        onScroll={creationMode ? handleCreationScroll : onScroll}
-        onWheelCapture={scrollInteractions.onWheelCapture}
-        onTouchStartCapture={onTouchStartIntent}
-        onTouchMoveCapture={scrollInteractions.onTouchMoveCapture}
-        onKeyDownCapture={scrollInteractions.onKeyDownCapture}
-        onPointerDownCapture={scrollInteractions.onPointerDownCapture}
-      >
-        {empty && !hydrating && <Welcome onPrompt={onPrompt} variant={welcomeVariant} />}
-
+      {empty ? (
+        <div
+          className={`transcript transcript--empty${creationMode ? " transcript--creation-scrollbar" : ""}`}
+          ref={(node) => handleScrollerRef(node)}
+        >
+          {!hydrating && <Welcome onPrompt={onPrompt} variant={welcomeVariant} />}
+        </div>
+      ) : (
         <LiveStreamContext.Provider value={live}>
-          <div ref={sizerRef} className="transcript__virtual-sizer">
-            <TranscriptSelectionOverlay tabId={tabId ?? ""} scrollElement={scrollRef.current} virtualRevision={virtualRevision} />
-            {virtualItems.map((virtualRow) => {
-              const row = rows[virtualRow.index];
-              if (!row) return null;
-              return (
-                <TranscriptRowShell
-                  key={virtualRow.key}
-                  index={virtualRow.index}
-                  row={row}
-                  measureElement={virtualizer.measureElement}
-                  tabId={tabId}
-                >
-                  {renderRow(row)}
-                </TranscriptRowShell>
-              );
-            })}
-          </div>
+          <Virtuoso<TranscriptRow, TranscriptVirtuosoContext>
+            key={virtuosoResetKey}
+            ref={virtuosoRef}
+            className={`transcript${creationMode ? " transcript--creation-scrollbar" : ""}${creationMode && creationScrollbar.hot ? " transcript--scrollbar-hot" : ""}`}
+            data-transcript-row-count={virtualRows.length}
+            data={virtualRows}
+            context={virtuosoContext}
+            components={hasOlderHistory ? TRANSCRIPT_VIRTUOSO_COMPONENTS_WITH_HEADER : TRANSCRIPT_VIRTUOSO_COMPONENTS}
+            computeItemKey={(_index, row) => `${tabId ?? ""}:${String(row.key)}`}
+            firstItemIndex={firstItemIndex}
+            // Do not set alignToBottom: Virtuoso's margin-top:auto plus
+            // firstItemIndex paints a ghost first-user bubble and empty band
+            // in short chats. Tail pin stays followOutput + scrollToBottom.
+            followOutput={(atBottom) => atBottom ? "auto" : false}
+            atBottomThreshold={TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX}
+            atBottomStateChange={atBottomStateChange}
+            heightEstimates={heightEstimates}
+            itemSize={itemSize}
+            minOverscanItemCount={{ top: VIRTUAL_OVERSCAN_ROWS, bottom: VIRTUAL_OVERSCAN_ROWS }}
+            increaseViewportBy={{ top: 480, bottom: 480 }}
+            scrollerRef={handleScrollerRef}
+            itemsRendered={handleItemsRendered}
+            totalListHeightChanged={followGrowingTail}
+            itemContent={(_index, row) => renderRow(row)}
+            onScroll={creationMode ? handleCreationScroll : undefined}
+            onWheelCapture={scrollInteractions.onWheelCapture}
+            onTouchStartCapture={onTouchStartIntent}
+            onTouchMoveCapture={scrollInteractions.onTouchMoveCapture}
+            onKeyDownCapture={scrollInteractions.onKeyDownCapture}
+            onPointerDownCapture={scrollInteractions.onPointerDownCapture}
+          />
         </LiveStreamContext.Provider>
-      </div>
+      )}
 
       {creationMode && creationScrollbar.visible && (
         <div
@@ -779,7 +767,7 @@ export function Transcript({
         <button
           type="button"
           className="transcript__jump-bottom"
-          onClick={() => scrollToBottomAfterLayout(2)}
+          onClick={() => scrollToBottom()}
           aria-label={t("transcript.jumpToBottom")}
           title={t("transcript.jumpToBottom")}
         >
@@ -788,36 +776,6 @@ export function Transcript({
       )}
     </div>
     </InvocationMetadataContext.Provider>
-  );
-}
-
-// ── Virtual row shell ─────────────────────────────────────────────────────────
-// Owns the measured wrapper element. Mounting implies the row is in or near
-// the viewport (overscan), so history-backed rows resolve their lazy
-// full-content refs here — the transcript store patches the item by stable id
-// and the row re-renders in place.
-
-function TranscriptRowShell({
-  index,
-  row,
-  measureElement,
-  tabId,
-  children,
-}: {
-  index: number;
-  row: TranscriptRow;
-  measureElement: (element: HTMLDivElement | null) => void;
-  tabId?: string;
-  children: ReactNode;
-}) {
-  const entryId = historyEntryIdForRow(row);
-  useEffect(() => {
-    if (entryId) getTranscriptStore().requestEntryFullContent(tabId, entryId);
-  }, [entryId, tabId]);
-  return (
-    <div data-index={index} data-row-key={String(row.key)} ref={measureElement} className="transcript__row">
-      {children}
-    </div>
   );
 }
 

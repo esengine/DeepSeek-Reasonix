@@ -173,7 +173,7 @@ func (t *OutcomeTracker) noteMutatedPaths(paths []string) {
 func (t *OutcomeTracker) commandExercisesMutation(command string) bool {
 	// Inspecting a mutated file (cat/grep/head) cannot falsify anything; only
 	// a command that can execute it discriminates.
-	if _, _, readOnly := shellsafe.CommandIsReadOnly(command); readOnly {
+	if !shellsafe.ClassifyBash(command).AnyMutation() {
 		return false
 	}
 	for base := range t.mutatedBases {
@@ -202,20 +202,34 @@ func (t *OutcomeTracker) scoreReceipt(r Receipt, s *OutcomeSample) {
 	case r.Success && (r.StepProof || r.TodoStep != nil || len(r.Todos) > 0):
 		// Bookkeeping moves no outcome dimension.
 	case r.Success && r.Read && r.OutputBytes > 0 && len(r.Paths) > 0:
+		fresh := 0
 		for _, path := range r.Paths {
 			if path == "" || t.readPaths[path] {
 				continue
 			}
 			t.readPaths[path] = true
-			s.Exploration++
+			fresh++
 		}
+		// A path already read can still answer a question never asked: a new
+		// grep pattern over the same package, the next window of a long file.
+		if newQuestion := t.noteQuestion(r); fresh == 0 && newQuestion {
+			fresh = 1
+		}
+		s.Exploration += fresh
 	case r.Success:
-		sig := r.ToolName + "\x00" + string(r.Args)
-		if !t.actions[sig] {
-			t.actions[sig] = true
+		if t.noteQuestion(r) {
 			s.Exploration++
 		}
 	}
+}
+
+func (t *OutcomeTracker) noteQuestion(r Receipt) bool {
+	sig := r.ToolName + "\x00" + string(r.Args)
+	if t.actions[sig] {
+		return false
+	}
+	t.actions[sig] = true
+	return true
 }
 
 func (t *OutcomeTracker) scoreCommand(command string, r Receipt, s *OutcomeSample) {

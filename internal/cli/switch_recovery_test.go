@@ -135,6 +135,9 @@ func TestSessionRecoveryCallbackMovesLeaseBeforeControllerCommit(t *testing.T) {
 	}
 	ctrl := divergedSessionControllerWithRecovery(t, dir, originalPath, cliSessionRecoveredHandler(leases))
 	t.Cleanup(ctrl.Close)
+	if err := leases.BindControllerAuthority(ctrl); err != nil {
+		t.Fatalf("bind controller authority: %v", err)
+	}
 
 	if err := ctrl.Snapshot(); err != nil {
 		t.Fatalf("Snapshot: %v", err)
@@ -146,6 +149,7 @@ func TestSessionRecoveryCallbackMovesLeaseBeforeControllerCommit(t *testing.T) {
 	if got, want := leases.HeldPath(), agent.CanonicalSessionPath(recoveryPath); got != want {
 		t.Fatalf("lease after recovery callback = %q, want %q", got, want)
 	}
+	leases.WaitForRetiredLeases()
 	if probe, err := agent.TryAcquireSessionLease(originalPath); err != nil {
 		t.Fatalf("original lease was not released after recovery: %v", err)
 	} else {

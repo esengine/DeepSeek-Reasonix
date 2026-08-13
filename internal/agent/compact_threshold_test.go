@@ -6,10 +6,9 @@ import "testing"
 // sole compact_ratio trigger. Output is clipped only at send time.
 func TestCompactTriggerIndependentOfOutputBudget(t *testing.T) {
 	a := &Agent{
-		prov:              &sharedWindowTestProvider{budget: 131_072, shared: true},
-		contextWindow:     128_000,
-		outputBudgetState: outputBudgetState{outputBudget: 131_072},
-		compactRatio:      defaultCompactRatio,
+		svc:         agentServices{prov: &sharedWindowTestProvider{budget: 131_072, shared: true}},
+		agentConfig: agentConfig{contextWindow: 128_000, compactRatio: defaultCompactRatio},
+		sess:        sessionRuntime{output: outputBudgetState{outputBudget: 131_072}},
 	}
 	trigger := a.compactTrigger()
 	want := int(float64(128_000) * defaultCompactRatio)
@@ -17,7 +16,7 @@ func TestCompactTriggerIndependentOfOutputBudget(t *testing.T) {
 		t.Fatalf("trigger = %d, want %d (compact_ratio only)", trigger, want)
 	}
 	// Oversized output budget must not lower the trigger.
-	a.outputBudget = 200_000
+	a.sess.output.outputBudget = 200_000
 	if got := a.compactTrigger(); got != want {
 		t.Fatalf("trigger after larger output budget = %d, want %d", got, want)
 	}
@@ -38,7 +37,7 @@ func TestRecentTailBudgetClamp(t *testing.T) {
 		{2_000_000, maxRecentTailTokens}, // still 96K
 	}
 	for _, tc := range cases {
-		a := &Agent{contextWindow: tc.window, compactRatio: defaultCompactRatio}
+		a := &Agent{agentConfig: agentConfig{contextWindow: tc.window, compactRatio: defaultCompactRatio}}
 		if got := a.recentTailBudget(); got != tc.want {
 			t.Fatalf("window %d: recentTailBudget = %d, want %d", tc.window, got, tc.want)
 		}
@@ -46,7 +45,7 @@ func TestRecentTailBudgetClamp(t *testing.T) {
 }
 
 func TestCheckpointCeilingAndExceptionalSavings(t *testing.T) {
-	a := &Agent{contextWindow: 1_000_000, compactRatio: 0.85}
+	a := &Agent{agentConfig: agentConfig{contextWindow: 1_000_000, compactRatio: 0.85}}
 	if got := a.checkpointCeiling(); got != 500_000 {
 		t.Fatalf("checkpointCeiling = %d, want 500000", got)
 	}
@@ -59,7 +58,7 @@ func TestCheckpointCeilingAndExceptionalSavings(t *testing.T) {
 }
 
 func TestAcceptCheckpointCandidateRules(t *testing.T) {
-	a := &Agent{contextWindow: 1_000_000, compactRatio: 0.85}
+	a := &Agent{agentConfig: agentConfig{contextWindow: 1_000_000, compactRatio: 0.85}}
 	// 20% candidate under normal path: accept.
 	if err := a.acceptCheckpointCandidate(CompactionTriggerPressure, false, 850_000, 180_000, 50_000); err != nil {
 		t.Fatalf("20%% candidate: %v", err)

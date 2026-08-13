@@ -19,46 +19,46 @@ func visibleFinalRepairMessage() string {
 
 // handleVisibleFinalContract enforces Content only for scoped/internal callers.
 // Ordinary DeepSeek turns keep accepting a reasoning-only stop in one request.
-func (a *Agent) handleVisibleFinalContract(ctx context.Context, state *runLoopState, text, reasoning string, usage *provider.Usage) (handled, cont bool, err error) {
+func (a *Agent) handleVisibleFinalContract(ctx context.Context, state *turnRuntime, text, reasoning string, usage *provider.Usage) (handled, cont bool, err error) {
 	if hasVisibleFinalAnswer(text) {
-		if state.visibleFinalRepair {
-			state.visibleFinalRepair = false
-			state.visibleFinalRepairRounds = 0
+		if state.visibleFinal.repairing {
+			state.visibleFinal.repairing = false
+			state.visibleFinal.repairRounds = 0
 			state.emptyFinalBlocks = 0
 		}
 		return false, false, nil
 	}
-	if state.visibleFinalRepair {
+	if state.visibleFinal.repairing {
 		state.emptyFinalBlocks++
 		if handled, cont, err = a.visibleFinalRepairBoundary(ctx, state, usage); handled {
 			return handled, cont, err
 		}
-		if state.visibleFinalRepairRounds >= maxVisibleFinalRepairRounds {
+		if state.visibleFinal.repairRounds >= maxVisibleFinalRepairRounds {
 			return true, false, visibleFinalRepairExhaustedError(state)
 		}
 		cont, err = a.requestVisibleFinalRepair(ctx, state, usage, len(reasoning))
 		return true, cont, err
 	}
-	reasoningOnlyStop := reasoningOnlyFinishHonoured(a.prov, usage, reasoning)
-	if state.requireVisibleFinal && reasoningOnlyStop {
+	reasoningOnlyStop := reasoningOnlyFinishHonoured(a.svc.prov, usage, reasoning)
+	if state.visibleFinal.scoped && reasoningOnlyStop {
 		state.emptyFinalBlocks++
-		state.visibleFinalRepair = true
-		state.visibleFinalRepairRounds = 0
+		state.visibleFinal.repairing = true
+		state.visibleFinal.repairRounds = 0
 		if handled, cont, err = a.visibleFinalRepairBoundary(ctx, state, usage); handled {
 			return handled, cont, err
 		}
 		cont, err = a.requestVisibleFinalRepair(ctx, state, usage, len(reasoning))
 		return true, cont, err
 	}
-	if reasoningOnlyStop {
+	if reasoningOnlyStop && !a.requireVisibleFinal {
 		return false, false, nil
 	}
 	state.emptyFinalBlocks++
 	if state.emptyFinalBlocks >= maxEmptyFinalBlocks {
 		return true, false, fmt.Errorf("model finished without a visible final answer %d times", state.emptyFinalBlocks)
 	}
-	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeEmptyFinal, Text: emptyFinalNotice(), Detail: emptyFinalNoticeDetail(a.prov.Name(), usage, len(reasoning))})
-	a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(emptyFinalRetryMessage())})
+	a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeEmptyFinal, Text: emptyFinalNotice(), Detail: emptyFinalNoticeDetail(a.svc.prov.Name(), usage, len(reasoning))})
+	a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(emptyFinalRetryMessage())})
 	a.contextManager().ObserveUsage(usage)
 	return true, true, nil
 }
@@ -68,11 +68,11 @@ func (a *Agent) handleVisibleFinalContract(ctx context.Context, state *runLoopSt
 // A task-spend crossing may use its existing one-shot finalization allowance as
 // the first repair sample, but a repair that itself crosses the budget consumes
 // that allowance and pauses instead of stacking another round.
-func (a *Agent) visibleFinalRepairBoundary(ctx context.Context, state *runLoopState, usage *provider.Usage) (handled, cont bool, err error) {
+func (a *Agent) visibleFinalRepairBoundary(ctx context.Context, state *turnRuntime, usage *provider.Usage) (handled, cont bool, err error) {
 	if state.recoveryGraceRound {
 		a.contextManager().ObserveUsage(usage)
 		if ctrl := a.recoveryEpisodeControl(); ctrl != nil {
-			_, _ = ctrl.ConsumeFinalization(a.recoveryTaskID)
+			_, _ = ctrl.ConsumeFinalization(a.recovery.taskID)
 		}
 		return true, false, &RecoveryPauseError{
 			Message: "Automatic retries paused. Reasonix stopped repeated attempts and kept completed work. Send \"continue\" to start a fresh attempt, or add instructions to change direction.",
@@ -82,7 +82,7 @@ func (a *Agent) visibleFinalRepairBoundary(ctx context.Context, state *runLoopSt
 		a.contextManager().ObserveUsage(usage)
 		return true, false, a.gracePause(state)
 	}
-	axis, detail := a.taskBudget.exceeded(a.taskBudgetLimit(ctx))
+	axis, detail := a.task.budget.exceeded(a.taskBudgetLimit(ctx))
 	maxStepsExhausted := state.runMaxSteps > 0 && state.budget.rounds >= state.runMaxSteps
 	if maxStepsExhausted {
 		// Task spend keeps the main loop's precedence when both boundaries cross,
@@ -98,7 +98,7 @@ func (a *Agent) visibleFinalRepairBoundary(ctx context.Context, state *runLoopSt
 		return false, false, nil
 	}
 	cause := landCause{kind: "task_budget", axis: axis, detail: detail}
-	if state.visibleFinalRepairRounds == 0 {
+	if state.visibleFinal.repairRounds == 0 {
 		// The budget's ordinary finalization prompt already asks for a visible,
 		// tool-free answer, so it doubles as the first repair request.
 		a.armFinalizationRound(state, cause)
@@ -110,7 +110,7 @@ func (a *Agent) visibleFinalRepairBoundary(ctx context.Context, state *runLoopSt
 	// host classification, but do not append another prompt or allow a round.
 	state.graceRound = true
 	state.landCause = cause
-	a.sink.Emit(event.Event{
+	a.svc.sink.Emit(event.Event{
 		Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeToolBudget,
 		Text: cause.noticeText(), Detail: cause.detail,
 	})
@@ -118,32 +118,32 @@ func (a *Agent) visibleFinalRepairBoundary(ctx context.Context, state *runLoopSt
 	return true, false, a.gracePause(state)
 }
 
-func (a *Agent) requestVisibleFinalRepair(ctx context.Context, state *runLoopState, usage *provider.Usage, reasoningLen int) (bool, error) {
-	a.sink.Emit(event.Event{
+func (a *Agent) requestVisibleFinalRepair(ctx context.Context, state *turnRuntime, usage *provider.Usage, reasoningLen int) (bool, error) {
+	a.svc.sink.Emit(event.Event{
 		Kind:   event.Notice,
 		Level:  event.LevelInfo,
 		Code:   event.NoticeCodeEmptyFinal,
 		Text:   emptyFinalNotice(),
-		Detail: emptyFinalNoticeDetail(a.prov.Name(), usage, reasoningLen),
+		Detail: emptyFinalNoticeDetail(a.svc.prov.Name(), usage, reasoningLen),
 	})
-	a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(visibleFinalRepairMessage())})
+	a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(visibleFinalRepairMessage())})
 	a.contextManager().ObserveUsage(usage)
 	return true, nil
 }
 
-func visibleFinalRepairExhaustedError(state *runLoopState) error {
+func visibleFinalRepairExhaustedError(state *turnRuntime) error {
 	return fmt.Errorf(
 		"model finished without a visible final answer after %d finalization-only repair rounds",
-		state.visibleFinalRepairRounds,
+		state.visibleFinal.repairRounds,
 	)
 }
 
-func (a *Agent) handleVisibleFinalRepairToolRound(ctx context.Context, state *runLoopState, calls []provider.ToolCall, usage *provider.Usage, reasoningLen int) (bool, error) {
+func (a *Agent) handleVisibleFinalRepairToolRound(ctx context.Context, state *turnRuntime, calls []provider.ToolCall, usage *provider.Usage, reasoningLen int) (bool, error) {
 	a.blockVisibleFinalRepairTools(calls)
 	if handled, cont, err := a.visibleFinalRepairBoundary(ctx, state, usage); handled {
 		return cont, err
 	}
-	if state.visibleFinalRepairRounds >= maxVisibleFinalRepairRounds {
+	if state.visibleFinal.repairRounds >= maxVisibleFinalRepairRounds {
 		return false, visibleFinalRepairExhaustedError(state)
 	}
 	return a.requestVisibleFinalRepair(ctx, state, usage, reasoningLen)
@@ -155,13 +155,13 @@ func (a *Agent) handleVisibleFinalRepairToolRound(ctx context.Context, state *ru
 func (a *Agent) blockVisibleFinalRepairTools(calls []provider.ToolCall) {
 	const result = "blocked: visible-final repair is finalization-only; do not call tools or repeat work. Return concise visible answer text now."
 	for _, call := range calls {
-		a.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
+		a.svc.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
 			ID: call.ID, Name: call.Name, Args: call.Arguments,
 		}})
-		a.session.Add(provider.Message{
+		a.sess.conversation.Add(provider.Message{
 			Role: provider.RoleTool, Content: result, ToolCallID: call.ID, Name: call.Name,
 		})
-		a.sink.Emit(event.Event{Kind: event.ToolResult, Tool: event.Tool{
+		a.svc.sink.Emit(event.Event{Kind: event.ToolResult, Tool: event.Tool{
 			ID: call.ID, Name: call.Name, Args: call.Arguments, Output: result,
 			Err: result,
 		}})

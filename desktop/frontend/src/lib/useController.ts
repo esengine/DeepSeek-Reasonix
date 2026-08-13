@@ -18,6 +18,7 @@ import { getTranscriptStore } from "./transcriptStore";
 import { uiPerfTracker } from "./uiPerf";
 import { getLocale, t, type DictKey } from "./i18n";
 import { applyHydrateErrorState, hydratePlaceholderItems as resolveHydratePlaceholders } from "./hydrateErrorState";
+import { hasCachedLiveTurn, sameSessionPlaceholderItems, shouldApplyHydratedHistory } from "./hydrateHistoryApply";
 import { hydrateIdentityCurrent } from "./sessionIdentity";
 import { sameTodoList } from "./todoVisibility";
 import { fileDiffFromWire, summarize, summarizeFileDiff, type ToolFileDiff } from "./tools";
@@ -694,15 +695,6 @@ export function shouldReconcileStaleTurn(
 ): boolean {
   if (!state?.running || !state.turnActive || lastTurnActivityAt <= 0) return false;
   return Math.max(0, now - lastTurnActivityAt) >= timeoutMs;
-}
-
-function hasCachedLiveTurn(state: State | undefined): boolean {
-  if (!state?.running && !state?.turnActive) return false;
-  if (state.live || state.currentAssistant || state.pendingUser !== undefined) return true;
-  return state.items.some((item) =>
-    (item.kind === "assistant" && item.streaming) ||
-    (item.kind === "tool" && item.status === "running")
-  );
 }
 
 function hasReusableCachedTranscript(state: State | undefined, sessionPath?: string, revision?: number, digest?: string): boolean {
@@ -2944,8 +2936,8 @@ export function useController() {
         dispatchTo(tabId, { type: "local_notice", level: "warn", text: errText });
         addBreadcrumb("tab.hydrate", `history failed ${tabId} ms=${Date.now() - historyStartedAt}`); return;
       }
-      if (!skipHistory && projection !== undefined && !foregroundTurnActive()) {
-        if (deferResetUntilHistory && stillCurrent()) dispatchTo(tabId, { type: "reset" });
+      if (projection !== undefined && shouldApplyHydratedHistory(skipHistory, true, foregroundTurnActive(), statesRef.current.get(tabId))) {
+        if (deferResetUntilHistory && stillCurrent() && !foregroundTurnActive()) dispatchTo(tabId, { type: "reset" });
         dispatchTo(tabId, {
           type: "history_replace",
           items: projection.items,
@@ -4614,9 +4606,10 @@ export function useController() {
       await reassertVisibleTabAfterStaleNavigation("topic.activate", meta.id);
       return meta;
     }
-    // Save previous tab's items so the new tab can use them as a placeholder
-    // during loading, avoiding a blank/Welcome flash before history arrives.
-    const prevItems = activeTabIdRef.current ? statesRef.current.get(activeTabIdRef.current)?.items : undefined;
+    const prevItems = sameSessionPlaceholderItems(
+      meta.sessionPath,
+      activeTabIdRef.current ? statesRef.current.get(activeTabIdRef.current) : undefined,
+    );
     pending.placeholderItems = prevItems;
     for (const id of Array.from(statesRef.current.keys())) {
       if (id !== meta.id) {
@@ -4632,9 +4625,7 @@ export function useController() {
     noteActivationStarted(pending.requestId, meta.id);
     dispatchTo(meta.id, { type: "optimistic_meta", meta: metaFromTab(meta, statesRef.current.get(meta.id)?.meta) });
     dispatchRuntimeStatusForTab(meta.id, meta, snapshotAt);
-    // The hydrate is driven by the activation's terminal "ready" event; until
-    // then keep the loading surface up with the previous tab's items as the
-    // placeholder (same no-flash behavior the immediate hydrate had).
+    // Ready hydrates; only same-session items are a safe placeholder.
     dispatchTo(meta.id, { type: "hydrate_start", reason: "open-topic", placeholderItems: prevItems });
     if (pending.terminal && pendingTopicActivationRef.current === pending) {
       // The terminal event beat the ticket resolution; process it now.

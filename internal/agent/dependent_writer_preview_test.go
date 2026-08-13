@@ -90,11 +90,11 @@ func TestDependentSameBatchEditRefreshesPreviewBeforeExecution(t *testing.T) {
 	if secondResult < 0 || lastUpdatedDispatch >= secondResult {
 		t.Fatalf("updated dispatch index %d must precede result index %d", lastUpdatedDispatch, secondResult)
 	}
-	if got := lastToolResult(a.session, "edit_file"); !strings.Contains(got, "-ready") || !strings.Contains(got, "+done") {
+	if got := lastToolResult(a.sess.conversation, "edit_file"); !strings.Contains(got, "-ready") || !strings.Contains(got, "+done") {
 		t.Fatalf("second edit result did not ground the actual replacement:\n%s", got)
 	}
 	var archived provider.ToolCall
-	for _, msg := range a.session.Snapshot() {
+	for _, msg := range a.sess.conversation.Snapshot() {
 		for _, call := range msg.ToolCalls {
 			if call.ID == "c2" {
 				archived = call
@@ -104,7 +104,7 @@ func TestDependentSameBatchEditRefreshesPreviewBeforeExecution(t *testing.T) {
 	if !strings.Contains(archived.Diff, `-status="ready"`) || !strings.Contains(archived.Diff, `+status="done"`) {
 		t.Fatalf("session archived stale dependent preview:\n%s", archived.Diff)
 	}
-	if !a.session.NeedsRewriteSave() {
+	if !a.sess.conversation.NeedsRewriteSave() {
 		t.Fatal("refreshing an already-appended assistant call must require a rewrite-safe snapshot")
 	}
 }
@@ -144,7 +144,7 @@ func TestDependentMutationSkippedAfterFailedWriterInBatch(t *testing.T) {
 	if string(data) != "status=\"ready\"\n" {
 		t.Fatalf("final file = %q, want partial first write preserved", data)
 	}
-	if got := toolResultByID(a.session, "c2"); !strings.Contains(got, "earlier modification") {
+	if got := toolResultByID(a.sess.conversation, "c2"); !strings.Contains(got, "earlier modification") {
 		t.Fatalf("second edit result = %q, want dependency skip", got)
 	}
 }

@@ -6,6 +6,15 @@ import (
 	"reasonix/internal/agent"
 )
 
+func (o *turnOrchestrator) beginTurnFinalBoundary() turnFinalBoundary {
+	return o.c.captureTurnFinalBoundary()
+}
+
+func (o *turnOrchestrator) startTurn() *Controller {
+	o.lastTurnFinal = ""
+	return o.c
+}
+
 // bindWorkflowTurnContext installs the per-turn contracts shared by Plan and
 // Goal. Goal's recorder remains active through evaluator commit so all billable
 // usage is attributed to the same observational span.

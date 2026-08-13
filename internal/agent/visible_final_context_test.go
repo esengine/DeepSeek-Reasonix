@@ -41,7 +41,7 @@ func TestRunScopedVisibleFinalDoesNotBypassExplicitMaxSteps(t *testing.T) {
 	if prov.call != 1 {
 		t.Fatalf("provider calls = %d, want the explicit one-round limit", prov.call)
 	}
-	if sessionHasUserMessageContaining(a.session, "finalization-only repair") {
+	if sessionHasUserMessageContaining(a.Session(), "finalization-only repair") {
 		t.Fatal("visible-final repair bypassed explicit max_steps")
 	}
 	if !IsSyntheticUserText(visibleFinalRepairMessage()) {
@@ -65,8 +65,8 @@ func TestRunScopedVisibleFinalPreservesSpendPrecedenceWhenBothLimitsCross(t *tes
 	if prov.call != 1 {
 		t.Fatalf("provider calls = %d, want no finalization sample beyond max_steps", prov.call)
 	}
-	if sessionHasUserMessageContaining(a.session, "reached its token budget") ||
-		sessionHasUserMessageContaining(a.session, "finalization-only repair") {
+	if sessionHasUserMessageContaining(a.Session(), "reached its token budget") ||
+		sessionHasUserMessageContaining(a.Session(), "finalization-only repair") {
 		t.Fatal("simultaneous boundary appended a prompt with no permitted next sample")
 	}
 }
@@ -88,7 +88,7 @@ func TestRunScopedVisibleFinalSharesTaskBudgetFinalization(t *testing.T) {
 		if prov.call != 2 {
 			t.Fatalf("provider calls = %d, want original plus one shared finalization/repair", prov.call)
 		}
-		if got := lastAssistantContent(a.session); got != "Visible budget summary." {
+		if got := lastAssistantContent(a.Session()); got != "Visible budget summary." {
 			t.Fatalf("last assistant content = %q", got)
 		}
 	})
@@ -111,10 +111,10 @@ func TestRunScopedVisibleFinalSharesTaskBudgetFinalization(t *testing.T) {
 		if prov.call != 2 {
 			t.Fatalf("provider calls = %d, want the crossing repair to consume finalization", prov.call)
 		}
-		if !sessionHasUserMessageContaining(a.session, "finalization-only repair") {
+		if !sessionHasUserMessageContaining(a.Session(), "finalization-only repair") {
 			t.Fatal("first in-budget response did not request the scoped repair")
 		}
-		if sessionHasUserMessageContaining(a.session, "reached its token budget") {
+		if sessionHasUserMessageContaining(a.Session(), "reached its token budget") {
 			t.Fatal("crossing repair appended a second finalization prompt")
 		}
 	})
@@ -149,8 +149,33 @@ func TestRunScopedVisibleFinalLeavesOrdinaryReasoningOnlyStopUnchanged(t *testin
 	if prov.call != 1 {
 		t.Fatalf("provider calls = %d, want one ordinary reasoning-only stop", prov.call)
 	}
-	if sessionHasUserMessageContaining(a.session, "Do not call tools or repeat any work") {
+	if sessionHasUserMessageContaining(a.Session(), "Do not call tools or repeat any work") {
 		t.Fatal("ordinary chat inherited the run-scoped visible-final repair")
+	}
+}
+
+func TestConstructionVisibleFinalKeepsGenericRetryToolSemantics(t *testing.T) {
+	prov := &scriptedProvider{name: "deepseek", turns: [][]provider.Chunk{
+		reasoningOnlyStop("The first answer stayed internal."),
+		{{Type: provider.ChunkReasoning, Text: "one more lookup is required"}, toolCallChunk("generic-tool-1", "dangerous_test_tool", `{}`), {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "visible result after the lookup"}, {Type: provider.ChunkDone}},
+	}}
+	called := &visibleFinalSideEffectTool{}
+	reg := tool.NewRegistry()
+	reg.Add(called)
+	a := New(deepseekThinkingProvider{prov}, reg, NewSession("sys"), Options{RequireVisibleFinal: true}, event.Discard)
+
+	if err := a.Run(context.Background(), "finish with a visible answer"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if called.executions != 1 {
+		t.Fatalf("generic retry tool executions = %d, want 1", called.executions)
+	}
+	if called.previews != 1 {
+		t.Fatalf("generic retry tool previews = %d, want 1", called.previews)
+	}
+	if got := toolResultByID(a.Session(), "generic-tool-1"); strings.Contains(got, "finalization-only") {
+		t.Fatalf("construction-time retry was upgraded to scoped tool block: %q", got)
 	}
 }
 
@@ -171,7 +196,7 @@ func TestRunScopedVisibleFinalRequirementDoesNotLeakToNextRun(t *testing.T) {
 	if prov.call != 3 {
 		t.Fatalf("provider calls = %d, want two scoped calls plus one ordinary call", prov.call)
 	}
-	if got := lastAssistantContent(a.session); got != "" {
+	if got := lastAssistantContent(a.Session()); got != "" {
 		t.Fatalf("second run assistant content = %q, want accepted reasoning-only stop", got)
 	}
 }
@@ -194,7 +219,7 @@ func TestRunScopedVisibleFinalPreservesHostFinalizationBoundaries(t *testing.T) 
 		if prov.call != 2 {
 			t.Fatalf("provider calls = %d, want work plus the host-owned summary", prov.call)
 		}
-		if sessionHasUserMessageContaining(a.session, "finalization-only repair") {
+		if sessionHasUserMessageContaining(a.Session(), "finalization-only repair") {
 			t.Fatal("visible-final repair overrode the host-owned run boundary")
 		}
 	})
@@ -204,7 +229,7 @@ func TestRunScopedVisibleFinalPreservesHostFinalizationBoundaries(t *testing.T) 
 			reasoningOnlyStop("The repeated host failure is summarized internally."),
 		}}
 		a := New(deepseekThinkingProvider{prov}, tool.NewRegistry(), NewSession("sys"), Options{}, event.Discard)
-		a.forkRestore = func(state *runLoopState) { state.recoveryGraceRound = true }
+		a.pending.forkRestore = func(state *turnRuntime) { state.recoveryGraceRound = true }
 
 		err := a.Run(WithRequireVisibleFinal(context.Background()), "perform goal work")
 		var pause *RecoveryPauseError
@@ -214,7 +239,7 @@ func TestRunScopedVisibleFinalPreservesHostFinalizationBoundaries(t *testing.T) 
 		if prov.call != 1 {
 			t.Fatalf("provider calls = %d, want the already-armed recovery sample only", prov.call)
 		}
-		if sessionHasUserMessageContaining(a.session, "finalization-only repair") {
+		if sessionHasUserMessageContaining(a.Session(), "finalization-only repair") {
 			t.Fatal("visible-final repair overrode the armed recovery boundary")
 		}
 	})
@@ -266,7 +291,7 @@ func TestVisibleFinalRepairRejectsCoStreamedTextAndPairsToolBeforeCleanAnswer(t 
 	if called.previews != 0 {
 		t.Fatalf("repair tool previews = %d, want zero registry/preview access", called.previews)
 	}
-	if got := toolResultByID(a.session, "repair-tool-1"); !strings.Contains(got, "finalization-only") {
+	if got := toolResultByID(a.Session(), "repair-tool-1"); !strings.Contains(got, "finalization-only") {
 		t.Fatalf("paired repair tool result = %q, want host block", got)
 	}
 	if prov.call != 3 {
@@ -296,11 +321,103 @@ func TestVisibleFinalRepairToolCallsCannotResetRepairCap(t *testing.T) {
 		t.Fatalf("repair tool previews = %d, want zero registry/preview access", called.previews)
 	}
 	for _, id := range []string{"repair-tool-1", "repair-tool-2"} {
-		if got := toolResultByID(a.session, id); !strings.Contains(got, "finalization-only") {
+		if got := toolResultByID(a.Session(), id); !strings.Contains(got, "finalization-only") {
 			t.Fatalf("paired result %s = %q, want host block", id, got)
 		}
 	}
 	if prov.call != 1+maxVisibleFinalRepairRounds {
 		t.Fatalf("provider calls = %d, want cap at %d", prov.call, 1+maxVisibleFinalRepairRounds)
 	}
+}
+
+type steerDuringRepairProvider struct {
+	a                        *Agent
+	call                     int
+	requests                 []provider.Request
+	repairSawSteerInSession  bool
+	repairSawSteerAsConsumed bool
+}
+
+func (*steerDuringRepairProvider) Name() string                    { return "deepseek" }
+func (*steerDuringRepairProvider) RequiresToolCallReasoning() bool { return true }
+func (p *steerDuringRepairProvider) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	p.call++
+	p.requests = append(p.requests, req)
+	if p.call == 1 && !p.a.Steer("please inspect again with a tool") {
+		panic("steer before the repair round was not admitted")
+	}
+	if p.call == 2 {
+		p.repairSawSteerAsConsumed = p.a.SteerConsumed()
+		for _, msg := range p.a.Session().Snapshot() {
+			if text, ok := SteerText(msg.Content); ok && strings.Contains(text, "inspect again") {
+				p.repairSawSteerInSession = true
+			}
+		}
+	}
+	var chunks []provider.Chunk
+	switch p.call {
+	case 1:
+		chunks = reasoningOnlyStop("the original work is complete")
+	case 2:
+		chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "visible result"}, {Type: provider.ChunkDone}}
+	case 3:
+		chunks = []provider.Chunk{{Type: provider.ChunkReasoning, Text: "apply the user's follow-up"}, toolCallChunk("steered-tool", "dangerous_test_tool", `{}`), {Type: provider.ChunkDone}}
+	default:
+		chunks = []provider.Chunk{{Type: provider.ChunkText, Text: "updated visible result"}, {Type: provider.ChunkDone}}
+	}
+	ch := make(chan provider.Chunk, len(chunks))
+	for _, chunk := range chunks {
+		ch <- chunk
+	}
+	close(ch)
+	return ch, nil
+}
+
+func TestVisibleFinalRepairDefersNewSteerUntilNormalWorkResumes(t *testing.T) {
+	prov := &steerDuringRepairProvider{}
+	called := &visibleFinalSideEffectTool{}
+	reg := tool.NewRegistry()
+	reg.Add(called)
+	a := New(prov, reg, NewSession("sys"), Options{}, event.Discard)
+	prov.a = a
+
+	if err := a.Run(WithRequireVisibleFinal(context.Background()), "finish visibly"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if prov.call != 4 {
+		t.Fatalf("provider calls = %d, want original, clean repair, steered tool round, then final", prov.call)
+	}
+	if !a.SteerConsumed() {
+		t.Fatal("steer was not consumed after the repair contract cleared")
+	}
+	if prov.repairSawSteerInSession || prov.repairSawSteerAsConsumed {
+		t.Fatalf("repair observed queued steer as applied: in_session=%v consumed=%v",
+			prov.repairSawSteerInSession, prov.repairSawSteerAsConsumed)
+	}
+	if called.executions != 1 || called.previews != 1 {
+		t.Fatalf("tool effects = executions %d, previews %d; want only the resumed normal round (1/1)", called.executions, called.previews)
+	}
+	if len(prov.requests) != 4 {
+		t.Fatalf("captured requests = %d, want 4", len(prov.requests))
+	}
+	if requestHasSteerText(prov.requests[1], "inspect again") {
+		t.Fatal("queued steer leaked into the finalization-only repair request")
+	}
+	if !requestHasSteerText(prov.requests[2], "inspect again") {
+		t.Fatal("queued steer was not delivered after normal work resumed")
+	}
+	for _, msg := range a.Session().Snapshot() {
+		if text, ok := SteerText(msg.Content); ok && strings.Contains(text, "inspect again") && msg.LocalOnly {
+			t.Fatal("successfully applied steer was also recorded as unapplied")
+		}
+	}
+}
+
+func requestHasSteerText(req provider.Request, needle string) bool {
+	for _, msg := range req.Messages {
+		if text, ok := SteerText(msg.Content); ok && strings.Contains(text, needle) {
+			return true
+		}
+	}
+	return false
 }

@@ -623,14 +623,14 @@ func TestMaybeCompactClearsStuckLatchAnywhereBelowTrigger(t *testing.T) {
 			sess := NewSession("sys")
 			sess.Add(provider.Message{Role: provider.RoleUser, Content: "hi"})
 			a := New(&fakeProvider{reply: "- summary"}, tool.NewRegistry(), sess, Options{ContextWindow: 20000}, event.Discard)
-			a.consecutiveCompacts = 1
-			a.compactStuck = true
+			a.sess.compaction.consecutive = 1
+			a.sess.compaction.stuck = true
 
 			prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: tc.prompt})
 
-			if a.consecutiveCompacts != 0 || a.compactStuck {
+			if a.sess.compaction.consecutive != 0 || a.sess.compaction.stuck {
 				t.Fatalf("prompt %d sits under the trigger; want the latch cleared, got consecutiveCompacts=%d compactStuck=%v",
-					tc.prompt, a.consecutiveCompacts, a.compactStuck)
+					tc.prompt, a.sess.compaction.consecutive, a.sess.compaction.stuck)
 			}
 		})
 	}
@@ -644,8 +644,8 @@ func TestMaybeCompactDefersWhenOnlyActiveTurnRemains(t *testing.T) {
 	a := New(&fakeProvider{reply: "- summary"}, tool.NewRegistry(), sess, Options{ContextWindow: 20000}, event.Discard)
 
 	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 17000})
-	if a.compactStuck {
-		t.Fatalf("active turn should be deferred, not durably blocked: consecutiveCompacts=%d", a.consecutiveCompacts)
+	if a.sess.compaction.stuck {
+		t.Fatalf("active turn should be deferred, not durably blocked: consecutiveCompacts=%d", a.sess.compaction.consecutive)
 	}
 	version := a.currentProjectionVersion()
 	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 17000})
@@ -655,11 +655,7 @@ func TestMaybeCompactDefersWhenOnlyActiveTurnRemains(t *testing.T) {
 }
 
 func TestCompactTriggerIgnoresConfiguredOutputBudget(t *testing.T) {
-	a := &Agent{
-		contextWindow:   100_000,
-		maxOutputTokens: 20_000,
-		compactRatio:    0.85,
-	}
+	a := &Agent{agentConfig: agentConfig{contextWindow: 100_000, maxOutputTokens: 20_000, compactRatio: 0.85}}
 	if got := a.compactTrigger(); got != 85_000 {
 		t.Fatalf("trigger = %d, want 85000 (output budget must not change it)", got)
 	}

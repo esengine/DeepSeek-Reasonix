@@ -4,7 +4,6 @@ import { JSDOM } from "jsdom";
 import React, { useEffect, useLayoutEffect, useRef } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import type { Range as VirtualRange } from "@tanstack/react-virtual";
 import { useTranscriptSelectionRetention } from "../lib/useTranscriptSelectionRetention";
 import type { TranscriptScrollMode } from "../lib/transcriptScrollController";
 import { transcriptSelectionStore, type TranscriptSelectableRow } from "../lib/transcriptSelectionStore";
@@ -101,8 +100,6 @@ function Harness({
     scrollRef,
     setScrollMode: setMode,
     cancelStreamingScroll: () => {},
-    captureViewportAnchor: () => ({ rowKey: "row-a", viewportOffset: 0, generation: 0 }),
-    reconcileViewportAnchor: () => true,
   });
   useLayoutEffect(() => {
     retention.reconcileLogicalFocus();
@@ -145,7 +142,7 @@ await act(async () => {
   root.render(<Harness tabId="tab-a" onReady={onReady} setMode={setMode} />);
 });
 await selectAcrossRows();
-eq(mode, "native-selecting", "cross-row pointer selection owns scrolling while dragging");
+eq(mode, "manual", "settled native selection releases scroll ownership without delayed anchor reconciliation");
 
 await act(async () => {
   root.render(<Harness tabId="tab-b" onReady={onReady} setMode={setMode} />);
@@ -155,14 +152,13 @@ eq(mode, "tail-follow", "tab reset rejects delayed selection settle callbacks");
 
 await selectAcrossRows();
 await drainFrames();
-const virtualRange: VirtualRange = { startIndex: 0, endIndex: 0, overscan: 0, count: 3 };
-eq(api?.rangeExtractor(virtualRange), [0, 1, 2], "settled native selection retains its continuous row interval");
+eq(api?.active, true, "settled native selection remains tracked until copy or dismissal");
 await act(async () => {
   document.dispatchEvent(new window.Event("copy", { bubbles: true }));
 });
 await drainFrames();
 eq(document.getSelection()?.isCollapsed, true, "keyboard copy releases the native browser range after the copy event");
-eq(api?.rangeExtractor(virtualRange), [0], "keyboard copy releases selection-only virtual rows");
+eq(api?.active, false, "keyboard copy releases transcript selection state");
 
 const first = document.querySelector<HTMLElement>("[data-row-key='row-a'] [data-transcript-selectable]")!;
 const last = document.querySelector<HTMLElement>("[data-row-key='row-b'] [data-transcript-selectable]")!;
@@ -216,8 +212,57 @@ await act(async () => {
   document.dispatchEvent(new window.MouseEvent("pointercancel", { bubbles: true, button: -1 }));
 });
 eq(transcriptSelectionStore.getSnapshot().mode, "none", "pointercancel clears selection even when the event has no pressed button");
-eq(api?.rangeExtractor(virtualRange), [0], "pointercancel releases selection-only virtual rows");
+eq(api?.active, false, "pointercancel releases transcript selection state");
 eq(mode, "manual", "pointercancel releases selection scroll ownership");
+
+// Virtuoso recycling the pointer-down row collapses the native Range
+// mid-drag. The frozen anchor plus the live pointer must still promote the
+// gesture to logical selection instead of stranding it in native mode.
+caretDocument.caretPositionFromPoint = (x) => x < 50
+  ? { offsetNode: first.firstChild!, offset: 1 }
+  : { offsetNode: last.firstChild!, offset: 2 };
+const pointDocument = document as Document & { elementFromPoint?: (x: number, y: number) => Element | null };
+pointDocument.elementFromPoint = (x) => (x < 50 ? first : last);
+await act(async () => {
+  first.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, button: 0, clientX: 10, clientY: 10 }));
+});
+eq(transcriptSelectionStore.getSnapshot().mode, "native-dragging", "pointer down begins a native drag with a frozen anchor");
+await act(async () => {
+  document.getSelection()!.removeAllRanges();
+  document.dispatchEvent(new window.Event("selectionchange"));
+  document.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, clientX: 100, clientY: 40 }));
+});
+eq(transcriptSelectionStore.getSnapshot().mode, "logical-dragging", "a dead native range still promotes from the frozen anchor during drag");
+eq(mode, "logical-selecting", "dead-native promotion transfers scroll ownership to logical selection");
+await act(async () => {
+  document.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, button: 0, clientX: 100, clientY: 40 }));
+});
+eq(transcriptSelectionStore.getSnapshot().mode, "logical-settled", "a dead-native promoted gesture settles in logical mode");
+await drainFrames();
+
+// Chromium can also migrate a recycled Range anchor into the node that
+// replaced the row instead of collapsing the selection. The frozen anchor
+// must drive promotion; the migrated anchor node must not gate readiness.
+await act(async () => {
+  first.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, button: 0, clientX: 10, clientY: 10 }));
+});
+await act(async () => {
+  const migrated = document.querySelector("[data-row-key='tool']")!;
+  const range = document.createRange();
+  range.setStart(migrated.firstChild!, 0);
+  range.setEnd(last.firstChild!, 2);
+  const selection = document.getSelection()!;
+  selection.removeAllRanges();
+  selection.addRange(range);
+  document.dispatchEvent(new window.Event("selectionchange"));
+});
+eq(transcriptSelectionStore.getSnapshot().mode, "logical-dragging", "a migrated native anchor still promotes from the frozen anchor");
+eq(transcriptSelectionStore.getSnapshot().anchor?.rowKey, "row-a", "promotion keeps the frozen pointer-down anchor row");
+await act(async () => {
+  document.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, button: 0, clientX: 100, clientY: 40 }));
+});
+eq(transcriptSelectionStore.getSnapshot().mode, "logical-settled", "a migrated-anchor promoted gesture settles in logical mode");
+await drainFrames();
 
 last.setAttribute("data-transcript-selection-source-fallback", "");
 await act(async () => {

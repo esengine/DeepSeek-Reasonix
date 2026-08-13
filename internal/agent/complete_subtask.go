@@ -98,14 +98,14 @@ func AttachCompleteSubtaskTool(reg *tool.Registry) {
 // submitted one. Adjudication re-runs here so the returned status reflects the
 // full run, including receipts recorded after the tool call itself.
 func (a *Agent) CompletionReport() (evidence.CompletionReport, []string, bool) {
-	if a == nil || a.evidence == nil {
+	if a == nil || a.task.ledger == nil {
 		return evidence.CompletionReport{}, nil, false
 	}
-	report, ok := a.evidence.LatestCompletionReport()
+	report, ok := a.task.ledger.LatestCompletionReport()
 	if !ok {
 		return evidence.CompletionReport{}, nil, false
 	}
-	adjudicated, reasons := a.evidence.AdjudicateCompletion(report)
+	adjudicated, reasons := a.task.ledger.AdjudicateCompletion(report)
 	return adjudicated, reasons, true
 }
 
