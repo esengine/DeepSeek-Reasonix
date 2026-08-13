@@ -13,16 +13,18 @@ import (
 )
 
 // ServerSpec declares how to launch one language server. Command resolves on
-// PATH (the binary is never bundled); InstallHint is surfaced when it is missing.
-// Extensions are the file suffixes (".go", ".rs") this server handles — they
-// drive file → language routing, so a config-only entry can add a new language
-// without any code change.
+// PATH (the binary is never bundled); Fallbacks are alternate executable names
+// tried when Command is missing (official installers expose different names per
+// platform); InstallHint is surfaced when none are found. Extensions are the
+// file suffixes (".go", ".rs") this server handles — they drive file → language
+// routing, so a config-only entry can add a new language without any code change.
 type ServerSpec struct {
 	Command     string
 	Args        []string
 	Env         map[string]string
 	LanguageID  string
 	Extensions  []string
+	Fallbacks   []string
 	InstallHint string
 }
 
@@ -91,7 +93,7 @@ func DefaultSpecs() map[string]ServerSpec {
 		"lua":        {Command: "lua-language-server", LanguageID: "lua", Extensions: []string{".lua"}, InstallHint: "install lua-language-server: brew install lua-language-server / scoop install lua-language-server"},
 		"bash":       {Command: "bash-language-server", Args: []string{"start"}, LanguageID: "shellscript", Extensions: []string{".sh", ".bash"}, InstallHint: "npm i -g bash-language-server"},
 		"zig":        {Command: "zls", LanguageID: "zig", Extensions: []string{".zig"}, InstallHint: "install zls (ziglang/zls) matching your zig version"},
-		"kotlin":     {Command: "intellij-server", Args: []string{"--stdio"}, LanguageID: "kotlin", Extensions: []string{".kt", ".kts"}, InstallHint: "install intellij-server (JetBrains Kotlin/kotlin-lsp): brew install JetBrains/utils/kotlin-lsp (brew exposes kotlin-lsp; symlink it to intellij-server) / download the standalone zip from Kotlin/kotlin-lsp releases (Windows)"},
+		"kotlin":     {Command: "kotlin-lsp", Fallbacks: []string{"intellij-server"}, Args: []string{"--stdio"}, LanguageID: "kotlin", Extensions: []string{".kt", ".kts"}, InstallHint: "install kotlin-lsp (JetBrains Kotlin/kotlin-lsp): brew install JetBrains/utils/kotlin-lsp / download the standalone zip from Kotlin/kotlin-lsp releases (Windows)"},
 		"swift":      {Command: "sourcekit-lsp", LanguageID: "swift", Extensions: []string{".swift"}, InstallHint: "ships with the Swift toolchain (swift.org/download)"},
 		"haskell":    {Command: "haskell-language-server-wrapper", Args: []string{"--lsp"}, LanguageID: "haskell", Extensions: []string{".hs"}, InstallHint: "install via ghcup: ghcup install hls"},
 	}
@@ -154,10 +156,25 @@ func (m *Manager) resolve(path string) (*client, error) {
 	return c, err
 }
 
+// resolveCommand returns the first spec executable found on PATH, trying
+// Command then Fallbacks so installers that expose different names (Homebrew's
+// kotlin-lsp vs the Windows zip's intellij-server.exe) both work out of the box.
+func resolveCommand(spec ServerSpec) (string, error) {
+	for _, name := range append([]string{spec.Command}, spec.Fallbacks...) {
+		if name == "" {
+			continue
+		}
+		if bin, err := exec.LookPath(name); err == nil {
+			return bin, nil
+		}
+	}
+	return "", &notInstalledError{command: spec.Command, hint: spec.InstallHint}
+}
+
 func (m *Manager) spawn(_ string, spec ServerSpec) (*client, error) {
-	bin, err := exec.LookPath(spec.Command)
+	bin, err := resolveCommand(spec)
 	if err != nil {
-		return nil, &notInstalledError{command: spec.Command, hint: spec.InstallHint}
+		return nil, err
 	}
 	return startClient(m.root, bin, spec.Args, spec.Env, spec.LanguageID, m.wsRoot)
 }

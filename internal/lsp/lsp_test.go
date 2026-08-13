@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -23,6 +25,11 @@ func TestDefaultSpecsInvariants(t *testing.T) {
 				t.Errorf("extension %q claimed by both %q and %q", ext, prev, lang)
 			}
 			seen[ext] = lang
+		}
+		for _, fb := range s.Fallbacks {
+			if fb == "" || fb == s.Command {
+				t.Errorf("lang %q: bad fallback %q", lang, fb)
+			}
 		}
 	}
 	if seen[".go"] != "go" || seen[".rs"] != "rust" || seen[".cpp"] != "cpp" || seen[".cs"] != "csharp" {
@@ -42,6 +49,59 @@ func TestExtensionRouting(t *testing.T) {
 	_, err := m.resolve("a.go")
 	if err == nil || !strings.Contains(err.Error(), "no language server") {
 		t.Fatalf("unconfigured extension should report no server, got %v", err)
+	}
+}
+
+func TestKotlinDefaultSpec(t *testing.T) {
+	spec, ok := DefaultSpecs()["kotlin"]
+	if !ok {
+		t.Fatal("kotlin default spec missing")
+	}
+	if spec.Command != "kotlin-lsp" {
+		t.Errorf("kotlin Command = %q, want the official PATH name kotlin-lsp", spec.Command)
+	}
+	if len(spec.Args) != 1 || spec.Args[0] != "--stdio" {
+		t.Errorf("kotlin Args = %v, want [--stdio] (client speaks stdio, server defaults to socket)", spec.Args)
+	}
+	hasFallback := false
+	for _, fb := range spec.Fallbacks {
+		if fb == "intellij-server" {
+			hasFallback = true
+		}
+	}
+	if !hasFallback {
+		t.Errorf("kotlin Fallbacks = %v, want intellij-server fallback for the Windows zip layout", spec.Fallbacks)
+	}
+	if spec.InstallHint == "" {
+		t.Error("kotlin InstallHint empty")
+	}
+}
+
+func TestResolveCommandFallback(t *testing.T) {
+	binDir := t.TempDir()
+	name := "intellij-server"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	want := filepath.Join(binDir, name)
+	if err := os.WriteFile(want, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir) // hermetic: the real PATH may already have kotlin-lsp
+
+	spec := ServerSpec{Command: "kotlin-lsp", Fallbacks: []string{"intellij-server"}, InstallHint: "hint"}
+	bin, err := resolveCommand(spec)
+	if err != nil {
+		t.Fatalf("resolveCommand: %v", err)
+	}
+	if bin != want {
+		t.Errorf("resolved %q, want fallback %q", bin, want)
+	}
+
+	// Neither name on PATH surfaces the primary command in the install error.
+	t.Setenv("PATH", t.TempDir())
+	if _, err := resolveCommand(spec); !errors.As(err, new(*notInstalledError)) {
+		t.Fatalf("expected notInstalledError, got %v", err)
 	}
 }
 
