@@ -633,7 +633,7 @@ func (a *Agent) handleToolRound(ctx context.Context, state *turnRuntime, step in
 		// First-visible Content is always the bounded form in results[i].
 		// Full originals ride on RawContent only when truncation applied.
 		if i < len(batch.outcomes) && batch.outcomes[i].rawOutput != "" && batch.outcomes[i].rawOutput != results[i] {
-			msg.RawContent = batch.outcomes[i].rawOutput
+			msg.RawContent = persistedToolOutput(batch.outcomes[i].rawOutput, call.Name, call.ID)
 		}
 		if i < len(batch.executions) {
 			msg.ToolExecution = toProviderToolExecution(batch.executions[i])
