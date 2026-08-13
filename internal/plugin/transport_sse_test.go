@@ -19,6 +19,8 @@ func TestLegacySSETransportSupportsRootsToolsAndProgress(t *testing.T) {
 	workspaceRoot := t.TempDir()
 	events := make(chan string, 16)
 	serverErr := make(chan error, 4)
+	toolListRefreshed := make(chan struct{}, 1)
+	var toolListCalls atomic.Int32
 	var state struct {
 		sync.Mutex
 		initializeID int
@@ -85,6 +87,9 @@ func TestLegacySSETransportSupportsRootsToolsAndProgress(t *testing.T) {
 			emit(map[string]any{"jsonrpc": "2.0", "id": "server-roots", "method": "roots/list"})
 		case "notifications/initialized":
 		case "tools/list":
+			if toolListCalls.Add(1) > 1 {
+				toolListRefreshed <- struct{}{}
+			}
 			var id int
 			_ = json.Unmarshal(message.ID, &id)
 			emit(map[string]any{"jsonrpc": "2.0", "id": id, "result": map[string]any{
@@ -129,7 +134,7 @@ func TestLegacySSETransportSupportsRootsToolsAndProgress(t *testing.T) {
 			emit(map[string]any{"jsonrpc": "2.0", "id": initializeID, "result": map[string]any{
 				"protocolVersion": protocolVersion,
 				"serverInfo":      map[string]any{"name": "legacy", "version": "1"},
-				"capabilities":    map[string]any{"tools": map[string]any{}},
+				"capabilities":    map[string]any{"tools": map[string]any{"listChanged": true}},
 			}})
 		default:
 			serverErr <- fmt.Errorf("unexpected method %q", message.Method)
@@ -178,9 +183,14 @@ func TestLegacySSETransportSupportsRootsToolsAndProgress(t *testing.T) {
 		t.Fatal("legacy SSE progress was not routed")
 	}
 	select {
-	case <-toolsChanged:
+	case <-toolListRefreshed:
 	case <-time.After(time.Second):
 		t.Fatal("legacy SSE tools/list_changed notification was not routed")
+	}
+	select {
+	case <-toolsChanged:
+		t.Fatal("unchanged tool catalog should not publish a registry update")
+	default:
 	}
 	select {
 	case err := <-serverErr:

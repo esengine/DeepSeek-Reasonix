@@ -1,12 +1,12 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -112,7 +112,10 @@ func TestMCPCapabilityRuntimeRefreshesDynamicToolsInSession(t *testing.T) {
 		registry.Add(candidate)
 	}
 	registry.SetProviderVisibleTools([]string{"use_capability"})
-	providerSchemasBefore := registry.Schemas()
+	providerSchemasBefore, err := json.Marshal(registry.Schemas())
+	if err != nil {
+		t.Fatalf("marshal provider schemas before refresh: %v", err)
+	}
 
 	if _, err := frontend.Execute(ctx, json.RawMessage(`{"action":"call","capability_id":"mcp-tool:dynamic/load_toolset","arguments":{}}`)); err != nil {
 		t.Fatalf("load_toolset: %v", err)
@@ -131,8 +134,12 @@ func TestMCPCapabilityRuntimeRefreshesDynamicToolsInSession(t *testing.T) {
 	if _, ok := registry.Get(wantName); !ok {
 		t.Fatal("dynamic MCP tool was not registered for use_capability routing")
 	}
-	if got := registry.Schemas(); !reflect.DeepEqual(got, providerSchemasBefore) {
-		t.Fatalf("provider-visible schemas changed after dynamic MCP refresh: before=%v after=%v", providerSchemasBefore, got)
+	providerSchemasAfter, err := json.Marshal(registry.Schemas())
+	if err != nil {
+		t.Fatalf("marshal provider schemas after refresh: %v", err)
+	}
+	if !bytes.Equal(providerSchemasAfter, providerSchemasBefore) {
+		t.Fatalf("provider-visible schema bytes changed after dynamic MCP refresh: before=%s after=%s", providerSchemasBefore, providerSchemasAfter)
 	}
 	if len(live) != 2 || !hasCachedTool(live, "list_schematic_components") {
 		t.Fatalf("live capability tools = %+v, want refreshed dynamic tool", live)

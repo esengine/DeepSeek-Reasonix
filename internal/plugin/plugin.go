@@ -602,26 +602,32 @@ type Client struct {
 	hasTools     bool
 	hasPrompts   bool
 	hasResources bool
+	// supportsToolListChanged is true only when initialize explicitly advertises
+	// tools.listChanged. Servers that omit the capability are not allowed to
+	// drive background tools/list traffic with unsolicited notifications.
+	supportsToolListChanged bool
 
-	toolCount int    // tools discovered, for /mcp status
 	transport string // declared transport type, for /mcp status ("stdio"/"http")
 
 	// Prompts and resources discovered during StartAll, stored here so the
 	// parallel startup can collect them per-client before merging into Host.
 	prompts   []Prompt
 	resources []Resource
-	toolsMu   sync.RWMutex
-	tools     []ToolInfo
+	// toolListFetchMu serializes tools/list requests. It may span the remote
+	// request; toolsMu never does, so status readers cannot be stalled by MCP I/O.
+	toolListFetchMu sync.Mutex
+	toolsMu         sync.RWMutex
+	toolCatalog     toolCatalogSnapshot
 
-	// toolAdapters caches the model-visible remote tool adapters produced by
-	// the first successful tools/list call. Shared hosts reuse Client instances
-	// across controllers, so subsequent ToolsFor calls must not re-query slow
-	// MCP servers just to rebuild identical schemas.
-	toolsListed  bool
-	toolAdapters []tool.Tool
-	closeOnce    sync.Once
-	refresh      toolListRefreshState
-	progressID   atomic.Uint64
+	// toolDispatchMu linearizes final adapter validation with tools/call and
+	// catalog publication. A notification marks the catalog stale atomically,
+	// so calls that have not entered this gate fail closed while it refreshes.
+	toolDispatchMu    sync.RWMutex
+	catalogGeneration uint64 // guarded by toolDispatchMu
+	closed            atomic.Bool
+	closeOnce         sync.Once
+	refresh           toolListRefreshState
+	progressID        atomic.Uint64
 }
 
 func (c *Client) auxiliaryClient(ctx context.Context) (*Client, context.Context, context.CancelFunc, error) {
@@ -744,16 +750,16 @@ func (h *Host) Servers() []ServerStatus {
 	defer h.mu.RUnlock()
 	out := make([]ServerStatus, 0, len(h.clients))
 	for _, c := range h.clients {
-		c.toolsMu.Lock()
+		c.toolsMu.RLock()
 		s := ServerStatus{
 			Name:         c.name,
 			Transport:    c.transport,
 			ConfigSource: strings.TrimSpace(c.spec.ConfigSource),
-			Tools:        c.toolCount,
+			Tools:        len(c.toolCatalog.adapters),
 			HasTools:     c.hasTools,
 		}
-		s.ToolList = append([]ToolInfo(nil), c.tools...)
-		c.toolsMu.Unlock()
+		s.ToolList = append([]ToolInfo(nil), c.toolCatalog.infos...)
+		c.toolsMu.RUnlock()
 		for _, p := range h.prompts {
 			if p.Server == c.name {
 				s.Prompts++
@@ -1631,7 +1637,19 @@ func (c *Client) initializeSession(ctx context.Context, recordCapabilities bool)
 	if err := json.Unmarshal(res, &ir); err != nil {
 		slog.Warn("plugin: parse initialize capabilities", "server", c.name, "err", err)
 	}
-	_, c.hasTools = ir.Capabilities["tools"]
+	toolsCapability, hasTools := ir.Capabilities["tools"]
+	c.hasTools = hasTools
+	c.supportsToolListChanged = false
+	if hasTools && len(toolsCapability) > 0 {
+		var advertised struct {
+			ListChanged bool `json:"listChanged"`
+		}
+		if err := json.Unmarshal(toolsCapability, &advertised); err != nil {
+			slog.Warn("plugin: parse tools capability", "server", c.name, "err", err)
+		} else {
+			c.supportsToolListChanged = advertised.ListChanged
+		}
+	}
 	_, c.hasPrompts = ir.Capabilities["prompts"]
 	_, c.hasResources = ir.Capabilities["resources"]
 
@@ -1748,6 +1766,7 @@ type remoteTool struct {
 	// destructive is the MCP destructiveHint. It takes precedence over a
 	// conflicting readOnlyHint in Plan and strict read-only execution.
 	destructive bool
+	generation  uint64
 }
 
 func (t *remoteTool) Name() string        { return t.name }
@@ -1812,16 +1831,16 @@ func (t *remoteTool) ExecuteWithImages(ctx context.Context, args json.RawMessage
 	if t.client == nil {
 		return "", nil, errors.New("MCP tool client is unavailable")
 	}
-	t.client.toolsMu.RLock()
-	defer t.client.toolsMu.RUnlock()
-	current := false
-	for _, candidate := range t.client.toolAdapters {
-		if candidate == t {
-			current = true
-			break
-		}
+	t.client.toolDispatchMu.RLock()
+	defer t.client.toolDispatchMu.RUnlock()
+	if t.client.closed.Load() {
+		return "", nil, fmt.Errorf("MCP server %q is closed", t.client.name)
 	}
-	if !current {
+	if t.client.toolCatalogStale() {
+		t.client.ensureToolsRefresh()
+		return "", nil, fmt.Errorf("MCP server %q changed its tool catalog and the refresh is still pending or failed; retry so Reasonix can apply the current schema and safety metadata", t.client.name)
+	}
+	if t.generation == 0 || t.generation != t.client.catalogGeneration {
 		return "", nil, fmt.Errorf("MCP server %q changed tool %q after this call was authorized; retry so Reasonix can apply the current schema and safety metadata", t.client.name, t.rawName)
 	}
 	var argMap map[string]any
@@ -1833,11 +1852,10 @@ func (t *remoteTool) ExecuteWithImages(ctx context.Context, args json.RawMessage
 	readOnly, destructive := t.readOnly, t.destructive
 	if tool.HasReaderExecutionIntent(ctx) {
 		// Final, linearizable check for a reader-authorized call: the snapshot
-		// above and every live security reconciliation serialize on the owning
-		// client's toolsMu. A call approved as a non-destructive reader must never
-		// execute after authorization or safety metadata changed — state drift
-		// here returns an actionable error instead of
-		// dispatching.
+		// above and every catalog publication serialize on toolDispatchMu. A call
+		// approved as a non-destructive reader must never execute after
+		// authorization or safety metadata changed — state drift here returns an
+		// actionable error instead of dispatching.
 		if !t.MCPServerAuthorized() || !readOnly || destructive {
 			return "", nil, fmt.Errorf("MCP server %q changed the authorization or security metadata for tool %q; the call was blocked before dispatch — refresh the server from a parent session before retrying", t.client.name, t.rawName)
 		}

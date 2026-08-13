@@ -5,9 +5,9 @@ func (c *Client) close() {
 		return
 	}
 	c.closeOnce.Do(func() {
+		c.closed.Store(true)
 		c.refresh.mu.Lock()
 		c.refresh.closed = true
-		c.refresh.pending = false
 		c.refresh.onChanged = nil
 		stopNotifications := c.refresh.stopNotifications
 		c.refresh.stopNotifications = nil
