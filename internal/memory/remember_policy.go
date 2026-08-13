@@ -5,7 +5,9 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
+	"reasonix/internal/retrieval"
 	"reasonix/internal/secrets"
 )
 
@@ -96,20 +98,81 @@ func rememberRequestSensitive(in rememberRequest) bool {
 }
 
 func rememberRequestOverlaps(store Store, in rememberRequest, name string) bool {
-	wantTitle := normalizedMemoryPhrase(in.Title)
-	wantDescription := normalizedMemoryPhrase(in.Description)
 	for _, existing := range store.ListAll() {
 		if slug(existing.Name) == name {
 			return true
 		}
-		if wantTitle != "" && normalizedMemoryPhrase(existing.Title) == wantTitle {
+		if in.Title != "" && phraseOverlaps(existing.Title, in.Title) {
 			return true
 		}
-		if wantDescription != "" && normalizedMemoryPhrase(existing.Description) == wantDescription {
+		if in.Description != "" && phraseOverlaps(existing.Description, in.Description) {
 			return true
 		}
 	}
 	return false
+}
+
+// phraseOverlaps reports whether two fact titles/descriptions are
+// near-duplicates: normalized equality or containment wins; otherwise distinct
+// token overlap above a conservative threshold counts as covering, so a single
+// shared generic bigram never suppresses a distinct fact and pure synonymy
+// without lexical overlap is left to the user.
+func phraseOverlaps(a, b string) bool {
+	na, nb := normalizedMemoryPhrase(a), normalizedMemoryPhrase(b)
+	if na == "" || nb == "" {
+		return false
+	}
+	if na == nb {
+		return true
+	}
+	// Containment: a short normalized phrase hiding inside a longer one is
+	// the same claim with extra words. Guard the minimum rune count so a
+	// generic short word ("ok", "x", 2-char CJK) cannot absorb an unrelated
+	// longer description — byte length would let 2-char CJK words through.
+	const minContainedRunes = 4
+	la, lb := utf8.RuneCountInString(na), utf8.RuneCountInString(nb)
+	if la >= minContainedRunes && lb >= minContainedRunes &&
+		(strings.Contains(na, nb) || strings.Contains(nb, na)) {
+		return true
+	}
+	// Length gate: a phrase far longer than the other cannot reach the token
+	// overlap threshold below (containment above already handles the
+	// short-in-long case). Without it, every existing memory pays
+	// tokenization on every auto-write.
+	if la > 6*lb || lb > 6*la {
+		return false
+	}
+	ta, tb := retrieval.Tokens(a), retrieval.Tokens(b)
+	if len(ta) < 2 || len(tb) < 2 {
+		return false
+	}
+	// Overlap counts each shared token once on both sides; counting a
+	// repeated token against a deduped set would let multiplicity inflate
+	// the ratio ("包管理" vs "管理管理").
+	sa := make(map[string]struct{}, len(ta))
+	for _, tok := range ta {
+		sa[tok] = struct{}{}
+	}
+	sb := make(map[string]struct{}, len(tb))
+	for _, tok := range tb {
+		sb[tok] = struct{}{}
+	}
+	common := 0
+	for tok := range sa {
+		if _, ok := sb[tok]; ok {
+			common++
+		}
+	}
+	smaller := len(sa)
+	if len(sb) < smaller {
+		smaller = len(sb)
+	}
+	// Two-thirds of distinct tokens must overlap. Tighter than half, so a
+	// shared CJK domain prefix ("数据库迁移" vs "数据库备份", 4 bigrams
+	// sharing 2) does not suppress a distinct fact — the differing suffix
+	// carries the meaning. Coarse-grained English words still dedupe at the
+	// same ratio ("uses database migrations" vs "uses database backups").
+	return common >= 2 && common*3 >= smaller*2
 }
 
 func normalizedMemoryPhrase(value string) string {
