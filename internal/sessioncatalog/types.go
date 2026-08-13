@@ -166,6 +166,7 @@ type TopicRecord struct {
 	WorkspaceRoot                string     `json:"workspaceRoot,omitempty"`
 	TopicID                      string     `json:"topicId"`
 	Title                        string     `json:"title"`
+	TitleSource                  string     `json:"titleSource,omitempty"`
 	Pinned                       bool       `json:"pinned,omitempty"`
 	SortOrder                    int        `json:"sortOrder,omitempty"`
 	Turns                        int        `json:"turns"`

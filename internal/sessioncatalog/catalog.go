@@ -536,7 +536,7 @@ func (c *Catalog) ListTopics(ctx context.Context, req TopicPageRequest) (TopicPa
 				scanCursor.Pinned, scanCursor.Activity, scanCursor.TopicID)
 		}
 		pageArgs = append(pageArgs, scanLimit)
-		rows, err := c.db.QueryContext(ctx, `SELECT scope,workspace_root,topic_id,title,pinned,sort_order,
+		rows, err := c.db.QueryContext(ctx, `SELECT scope,workspace_root,topic_id,title,title_source,pinned,sort_order,
             turns,turns_state,created_at,last_activity_at,recovery_state,recovery_branch_count,
             recovery_unresolved_count,recovery_cleanup_eligible_count,health
             FROM catalog_topics WHERE `+pageWhere+`
@@ -551,7 +551,7 @@ func (c *Catalog) ListTopics(ctx context.Context, req TopicPageRequest) (TopicPa
 		for rows.Next() {
 			var item TopicRecord
 			if err := rows.Scan(&item.Scope, &item.WorkspaceRoot, &item.TopicID, &item.Title,
-				&item.Pinned, &item.SortOrder, &item.Turns, &item.TurnsState,
+				&item.TitleSource, &item.Pinned, &item.SortOrder, &item.Turns, &item.TurnsState,
 				&item.CreatedAt, &item.LastActivityAt, &item.RecoveryState, &item.RecoveryBranchCount,
 				&item.RecoveryUnresolvedCount, &item.RecoveryCleanupEligibleCount, &item.Health); err != nil {
 				_ = rows.Close()
@@ -673,12 +673,12 @@ func (c *Catalog) GetTopic(ctx context.Context, key TopicKey) (TopicRecord, bool
 	key.Scope, key.WorkspaceRoot = normalizeScope(key.Scope, key.WorkspaceRoot)
 	key.TopicID = strings.TrimSpace(key.TopicID)
 	item := TopicRecord{Sessions: []SessionRecord{}}
-	err := c.db.QueryRowContext(ctx, `SELECT scope,workspace_root,topic_id,title,pinned,sort_order,
+	err := c.db.QueryRowContext(ctx, `SELECT scope,workspace_root,topic_id,title,title_source,pinned,sort_order,
         turns,turns_state,created_at,last_activity_at,recovery_state,recovery_branch_count,
         recovery_unresolved_count,recovery_cleanup_eligible_count,health
         FROM catalog_topics WHERE scope=? AND workspace_root=? AND topic_id=?`,
 		key.Scope, key.WorkspaceRoot, key.TopicID).Scan(
-		&item.Scope, &item.WorkspaceRoot, &item.TopicID, &item.Title,
+		&item.Scope, &item.WorkspaceRoot, &item.TopicID, &item.Title, &item.TitleSource,
 		&item.Pinned, &item.SortOrder, &item.Turns, &item.TurnsState,
 		&item.CreatedAt, &item.LastActivityAt, &item.RecoveryState, &item.RecoveryBranchCount,
 		&item.RecoveryUnresolvedCount, &item.RecoveryCleanupEligibleCount, &item.Health)

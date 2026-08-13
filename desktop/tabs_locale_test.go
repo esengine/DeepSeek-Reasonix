@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"testing"
 
 	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/sessioncatalog"
 )
 
 func TestDefaultTopicTitleLocalizesAtAPIBoundary(t *testing.T) {
@@ -190,5 +192,69 @@ func TestDesktopEffectivePricingCurrencyUsesLocaleOnlyForAuto(t *testing.T) {
 	cfg.ApplyDeepSeekOfficialDefaultPricing()
 	if got := app.desktopEffectivePricingCurrency(cfg); got != "USD" {
 		t.Fatalf("explicit currency pricing currency = %q, want USD", got)
+	}
+}
+
+func installLocaleTestCatalog(t *testing.T, app *App) *sessioncatalog.Catalog {
+	t.Helper()
+	catalog, err := sessioncatalog.Open(context.Background(), sessioncatalog.Options{InMemory: true, DisableRepair: true})
+	if err != nil {
+		t.Fatalf("open catalog: %v", err)
+	}
+	app.sessionCatalog.Store(catalog)
+	t.Cleanup(func() {
+		app.sessionCatalog.CompareAndSwap(catalog, nil)
+		_ = catalog.Close(context.Background())
+	})
+	if err := catalog.ReconcileDirectory(context.Background(), sessioncatalog.DirectoryTarget{Path: desktopSessionDir(globalWorkspaceRoot()), Scope: "global", WorkspaceRoot: ""}); err != nil {
+		t.Fatalf("reconcile catalog: %v", err)
+	}
+	if err := app.syncSessionCatalogMetadataBounded(context.Background(), catalog); err != nil {
+		t.Fatalf("sync catalog metadata: %v", err)
+	}
+	return catalog
+}
+
+func TestCatalogTopicTitleLocalizesAtSidebarBoundary(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	app := NewApp()
+	app.projectTreeChangedHook = func() {}
+	app.setDesktopLocale("en-US")
+
+	if _, err := app.EnsureBlankTab("global", ""); err != nil {
+		t.Fatalf("EnsureBlankTab: %v", err)
+	}
+	catalog := installLocaleTestCatalog(t, app)
+	page, err := app.catalogTopicPage(catalog, ProjectTopicPageRequest{Scope: "global", WorkspaceRoot: "", Limit: 100})
+	if err != nil {
+		t.Fatalf("catalogTopicPage: %v", err)
+	}
+	if len(page.Items) != 1 || page.Items[0].Label != defaultTopicTitleEn {
+		t.Fatalf("catalog sidebar label = %+v, want localized %q", page.Items, defaultTopicTitleEn)
+	}
+}
+
+func TestCatalogManualDefaultTitleIsNotLocalized(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	app := NewApp()
+	app.projectTreeChangedHook = func() {}
+	app.setDesktopLocale("en-US")
+
+	manual, err := app.CreateTopic("global", "", defaultTopicTitle)
+	if err != nil {
+		t.Fatalf("CreateTopic manual: %v", err)
+	}
+	if manual.Title != defaultTopicTitle {
+		t.Fatalf("manual title = %q, want %q", manual.Title, defaultTopicTitle)
+	}
+	catalog := installLocaleTestCatalog(t, app)
+	page, err := app.catalogTopicPage(catalog, ProjectTopicPageRequest{Scope: "global", WorkspaceRoot: "", Limit: 100})
+	if err != nil {
+		t.Fatalf("catalogTopicPage: %v", err)
+	}
+	for _, item := range page.Items {
+		if item.Label != defaultTopicTitle {
+			t.Fatalf("manual topic label = %q, want untouched %q", item.Label, defaultTopicTitle)
+		}
 	}
 }

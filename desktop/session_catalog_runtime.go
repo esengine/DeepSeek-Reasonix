@@ -23,14 +23,15 @@ func (a *App) catalogReadContext() (context.Context, context.CancelFunc) {
 }
 
 type catalogRuntimeSnapshot struct {
-	scope         string
-	workspaceRoot string
-	topicID       string
-	sessionPath   string
-	activity      string
-	topicTitle    string
-	ctrl          control.SessionAPI
-	open          bool
+	scope            string
+	workspaceRoot    string
+	topicID          string
+	sessionPath      string
+	activity         string
+	topicTitle       string
+	topicTitleSource string
+	ctrl             control.SessionAPI
+	open             bool
 }
 
 type catalogRuntimeOverlay struct {
@@ -208,7 +209,7 @@ func (a *App) runtimeOnlyProjectTopicsWithSessions(scope, workspaceRoot string) 
 		snapshots = append(snapshots, catalogRuntimeSnapshot{
 			scope: tab.Scope, workspaceRoot: tab.WorkspaceRoot, topicID: tab.TopicID,
 			sessionPath: tab.SessionPath, activity: tab.ActivityStatus,
-			topicTitle: tab.TopicTitle, ctrl: tab.Ctrl, open: open,
+			topicTitle: tab.TopicTitle, topicTitleSource: tab.topicTitleSource, ctrl: tab.Ctrl, open: open,
 		})
 	}
 	for _, tab := range a.tabs {
@@ -248,7 +249,7 @@ func (a *App) runtimeOnlyProjectTopicsWithSessions(scope, workspaceRoot string) 
 			label = sessions[0].topicTitle
 		}
 		node := ProjectNode{
-			Key: kind + "_" + topicID, Kind: kind, Label: label,
+			Key: kind + "_" + topicID, Kind: kind, Label: a.localizedTopicTitle(label, sessions[0].topicTitleSource),
 			Root: workspaceRoot, TopicID: topicID, TurnsState: string(sessioncatalog.TurnsUnknown),
 			Health: string(sessioncatalog.HealthOK), Children: []ProjectNode{},
 		}
@@ -337,7 +338,7 @@ func (a *App) projectNodeFromCatalogTopic(topic sessioncatalog.TopicRecord, topi
 	}
 	overlay := topicOverlays[topicSummaryKey(topic.Scope, topic.WorkspaceRoot, topic.TopicID)]
 	node := ProjectNode{
-		Key: kind + "_" + topic.TopicID, Kind: kind, Label: a.localizedTopicTitle(topic.Title, ""),
+		Key: kind + "_" + topic.TopicID, Kind: kind, Label: a.localizedTopicTitle(topic.Title, topic.TitleSource),
 		Root: topic.WorkspaceRoot, TopicID: topic.TopicID, Turns: topic.Turns,
 		TurnsState: string(topic.TurnsState), Health: string(topic.Health),
 		CreatedAt: topic.CreatedAt, LastActivityAt: topic.LastActivityAt,
