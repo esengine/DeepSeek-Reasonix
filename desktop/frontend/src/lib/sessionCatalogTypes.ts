@@ -64,4 +64,10 @@ export interface SessionReference {
   turnsState?: "unknown" | "valid" | "corrupt" | string;
   createdAt?: number;
   lastActivityAt?: number;
+  /** Present when the reference points at an open window (tab) instead of a
+   *  history entry: the referenced tab's id, used for relay/run-next. */
+  windowTabId?: string;
+  /** Relay the finished turn's result to the referenced window and trigger it
+   *  to run (window references only). */
+  runNext?: boolean;
 }

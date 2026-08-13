@@ -21290,6 +21290,28 @@ body > .mermaid-diagram--fullscreen {
 .composer-context__item--session .composer-context__label > svg {
   color: var(--accent);
 }
+.composer-context__item--session .tooltip-trigger:not(:last-child) button {
+  --wails-draggable: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, #000 55%, transparent);
+  color: #fff;
+}
+.composer-context__item--session .tooltip-trigger:not(:last-child) button:hover {
+  background: color-mix(in srgb, #000 70%, transparent);
+}
+.composer-context__item--session .composer-context__relay--active {
+  background: var(--accent);
+}
+.composer-context__item--session .composer-context__relay--active:hover {
+  background: color-mix(in srgb, var(--accent) 82%, #000);
+}
 .composer-context__item--selection {
   width: min(240px, 100%);
   border-color: color-mix(in srgb, var(--accent) 28%, var(--border));

@@ -96,6 +96,7 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
     cancel: number;
     clearGoal: number;
     setCollaborationMode: CollaborationMode[];
+    relayed: { tabId: string; prompt: string }[];
   } = {
     send: [],
     submit: [],
@@ -103,6 +104,7 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
     cancel: 0,
     clearGoal: 0,
     setCollaborationMode: [],
+    relayed: [],
   };
   let currentProps: Parameters<typeof Composer>[0] = {
     running: false,
@@ -112,6 +114,7 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
     goal: "",
     cwd: "/repo",
     tabId: "tab-a",
+    sessionKey: "/sessions/window-a.jsonl",
     modelLabel: "DeepSeek-R1",
     onSend: (displayText, submitText, _tabId, structured) => {
       calls.send.push(displayText);
@@ -161,6 +164,9 @@ function mockApp(methods: Partial<AppBindings>) {
         Models: async () => [],
         ModelsForTab: async () => [],
         SlashArgs: async () => ({ items: [], from: 0 }),
+        ListTabs: async () => [],
+        PreviewSession: async () => [],
+        SubmitToTab: async () => {},
         ...methods,
       } as Partial<AppBindings> as AppBindings,
     },
@@ -2135,12 +2141,51 @@ console.log("\ncomposer goal toggle");
     ListDirForTab: async () => [fileEntry("README.md")],
     SearchFileRefsForTab: async () => [],
     ListSessions: async () => [{ path: "/sessions/recent.jsonl", title: "Recent session", current: false }],
+    ListTabs: async () => [
+      {
+        id: "tab-a",
+        tabType: "session",
+        scope: "project",
+        workspaceRoot: "/repo",
+        workspaceName: "repo",
+        topicId: "topic-a",
+        topicTitle: "Draft plan",
+        label: "Draft plan",
+        sessionPath: "/sessions/window-a.jsonl",
+        ready: true,
+        running: false,
+        active: true,
+        cwd: "/repo",
+      },
+      {
+        id: "tab-b",
+        tabType: "session",
+        scope: "project",
+        workspaceRoot: "/repo",
+        workspaceName: "repo",
+        topicId: "topic-b",
+        topicTitle: "Fix build",
+        label: "Fix build",
+        sessionPath: "/sessions/window-b.jsonl",
+        ready: true,
+        running: false,
+        active: false,
+        cwd: "/repo",
+      },
+    ],
+    PreviewSession: async (path: string) => [
+      { role: "user", content: "check the build" },
+      { role: "assistant", content: "the build is green now" },
+    ],
+    SubmitToTab: async (tabId: string, prompt: string) => {
+      calls.relayed.push({ tabId, prompt });
+    },
     SavePastedFile: async () => {
       savedFiles += 1;
       return ".reasonix/attachments/notes.txt";
     },
   });
-  const { root, rerender } = await renderComposer();
+  const { root, calls, rerender } = await renderComposer();
   const textarea = document.querySelector("textarea") as HTMLTextAreaElement | null;
   if (!textarea) throw new Error("composer textarea did not render");
 
@@ -2187,12 +2232,13 @@ console.log("\ncomposer goal toggle");
   });
   ok(Boolean(document.querySelector(".composer-content-menu")), "plus trigger opens the add-content menu");
   const initialContentItems = Array.from(document.querySelectorAll<HTMLButtonElement>(".composer-content-menu__item"));
-  eq(initialContentItems.length, 4, "add-content menu exposes four focused actions");
+  eq(initialContentItems.length, 5, "add-content menu exposes five focused actions");
   const contentItemIcons = initialContentItems.map((item) => item.querySelector("svg")?.getAttribute("class") ?? "");
   ok(contentItemIcons[0]?.includes("lucide-file-plus"), "attachment action uses the file attachment icon");
   ok(contentItemIcons[1]?.includes("lucide-at-sign"), "workspace action uses the mention icon");
   ok(contentItemIcons[2]?.includes("lucide-hash"), "recent-session action uses the history reference icon");
-  eq(initialContentItems[3]?.querySelector(".composer-content-menu__trigger-icon")?.textContent, "/", "command action uses the literal slash trigger icon");
+  ok(contentItemIcons[3]?.includes("lucide-panels-top-left"), "window action uses the window reference icon");
+  eq(initialContentItems[4]?.querySelector(".composer-content-menu__trigger-icon")?.textContent, "/", "command action uses the literal slash trigger icon");
   ok(!document.querySelector(".composer-content-menu__divider"), "add-content actions remain one unified group without a divider");
   ok(initialContentItems.every((item) => !item.querySelector("kbd")), "add-content actions do not duplicate their trigger icons on the right");
 
@@ -2239,7 +2285,7 @@ console.log("\ncomposer goal toggle");
     contentTrigger.click();
     await flushTimers();
   });
-  const commandButton = document.querySelectorAll<HTMLButtonElement>(".composer-content-menu__item")[3];
+  const commandButton = document.querySelectorAll<HTMLButtonElement>(".composer-content-menu__item")[4];
   if (!commandButton) throw new Error("command action did not render");
   await act(async () => {
     commandButton.click();
@@ -2253,7 +2299,7 @@ console.log("\ncomposer goal toggle");
     contentTrigger.click();
     await flushTimers();
   });
-  const disabledCommandButton = document.querySelectorAll<HTMLButtonElement>(".composer-content-menu__item")[3];
+  const disabledCommandButton = document.querySelectorAll<HTMLButtonElement>(".composer-content-menu__item")[4];
   if (!disabledCommandButton) throw new Error("command action did not render for non-empty input");
   ok(disabledCommandButton.disabled, "command action is disabled while the composer has text");
   await act(async () => {
@@ -2283,6 +2329,100 @@ console.log("\ncomposer goal toggle");
   await waitFor("recent-session picker closes when a run starts", () => !document.querySelector(".slashmenu__search"));
   await rerender({ running: false });
   ok(!document.querySelector(".slashmenu__search"), "recent-session picker stays closed after the run ends");
+
+  // --- open-window references: pick a window, relay on completion, expand as text ---
+  await replaceComposerDraft(rerender, 3008, "inspect the build");
+  await act(async () => {
+    contentTrigger.click();
+    await flushTimers();
+  });
+  const windowButton = document.querySelectorAll<HTMLButtonElement>(".composer-content-menu__item")[3];
+  if (!windowButton) throw new Error("window reference action did not render");
+  await act(async () => {
+    windowButton.click();
+    await flushTimers();
+  });
+  await waitFor("window reference picker opens", () => Boolean(document.querySelector(".slashmenu")));
+  const windowRows = Array.from(document.querySelectorAll<HTMLElement>(".slashmenu__item"))
+    .filter((item) => item.textContent?.includes("Draft plan") || item.textContent?.includes("Fix build"));
+  eq(windowRows.length, 2, "window picker lists this window and another open window");
+  ok(
+    windowRows[0]?.textContent?.includes("this window") === true,
+    "the current window is marked in the picker",
+  );
+  const otherWindow = Array.from(document.querySelectorAll<HTMLButtonElement>(".slashmenu__item"))
+    .find((item) => item.textContent?.includes("Fix build"));
+  if (!otherWindow) throw new Error("other window row did not render");
+  await act(async () => {
+    otherWindow.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    await flushTimers();
+  });
+  ok(
+    document.querySelector(".composer-context__item--session")?.textContent?.includes("Fix build") === true,
+    "picking a window adds its reference card",
+  );
+  const relayToggle = document.querySelector<HTMLButtonElement>(".composer-context__relay");
+  if (!relayToggle) throw new Error("relay toggle did not render on the window card");
+  eq(relayToggle.getAttribute("aria-pressed"), "false", "relay starts off");
+  await act(async () => {
+    relayToggle.click();
+    await flushTimers();
+  });
+  eq(
+    document.querySelector<HTMLButtonElement>(".composer-context__relay")?.getAttribute("aria-pressed"),
+    "true",
+    "relay toggle arms run-next",
+  );
+  const windowSendButton = document.querySelector(".composer__btn--send") as HTMLButtonElement | null;
+  if (!windowSendButton) throw new Error("send button did not render for window relay");
+  await act(async () => {
+    windowSendButton.click();
+    await flushTimers();
+  });
+  ok(
+    calls.submit.some((text) => text.includes("the build is green now")),
+    "submitting a window reference attaches the window content as context",
+  );
+  await rerender({ running: true });
+  await rerender({ running: false });
+  await waitFor("relay submits to the referenced window", () => calls.relayed.length > 0);
+  eq(calls.relayed[0]?.tabId, "tab-b", "relay targets the referenced window");
+  ok(
+    calls.relayed[0]?.prompt.includes("the build is green now") === true,
+    "relay prompt carries the finished result",
+  );
+
+  await replaceComposerDraft(rerender, 3009, "please review");
+  await act(async () => {
+    contentTrigger.click();
+    await flushTimers();
+  });
+  const windowExpandAction = document.querySelectorAll<HTMLButtonElement>(".composer-content-menu__item")[3];
+  if (!windowExpandAction) throw new Error("window reference action did not render for expand");
+  await act(async () => {
+    windowExpandAction.click();
+    await flushTimers();
+  });
+  await waitFor("window picker reopens for expand", () => Boolean(document.querySelector(".slashmenu")));
+  const draftPlanRow = Array.from(document.querySelectorAll<HTMLButtonElement>(".slashmenu__item"))
+    .find((item) => item.textContent?.includes("Draft plan"));
+  if (!draftPlanRow) throw new Error("current-window row did not render for expand");
+  await act(async () => {
+    draftPlanRow.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    await flushTimers();
+  });
+  const expandButton = Array.from(document.querySelectorAll<HTMLButtonElement>(".composer-context__item--session button"))
+    .find((b) => b.getAttribute("aria-label") === "Expand as text");
+  if (!expandButton) throw new Error("expand button did not render");
+  await act(async () => {
+    expandButton.click();
+    await flushTimers();
+  });
+  const expandedTextarea = document.querySelector("textarea") as HTMLTextAreaElement | null;
+  ok(
+    expandedTextarea?.value.includes("the build is green now") === true,
+    "expanding a window reference inserts its content as text",
+  );
 
   await act(async () => {
     root.unmount();

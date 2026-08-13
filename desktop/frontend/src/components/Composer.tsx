@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
-import { ArrowRight, ArrowUp, AtSign, Check, ChevronsUpDown, CornerDownRight, Equal, Eye, FilePlus2, FileText, Flag, Folder, Gauge, Hash, List, MessageSquare, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, X } from "lucide-react";
+import { ArrowRight, ArrowUp, AtSign, Check, ChevronsUpDown, CornerDownRight, Equal, Eye, FilePlus2, FileText, Flag, Folder, Gauge, Hash, List, MessageSquare, PanelsTopLeft, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, X } from "lucide-react";
 import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
@@ -33,7 +33,7 @@ import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/
 import { createRafResizeUpdater } from "../lib/resizeDrag";
 import { observeComposerMenuViewport } from "../lib/composerMenuViewport";
 import { useToast } from "../lib/toast";
-import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type ContextInfo, type DirEntry, type EffortInfo, type GoalRuntime, type HistoryMessage, type Mode, type PromptHistoryEntry, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type TokenMode, type ToolApprovalMode, type BalanceInfo } from "../lib/types";
+import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type ContextInfo, type DirEntry, type EffortInfo, type GoalRuntime, type HistoryMessage, type Mode, type PromptHistoryEntry, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type TabMeta, type TokenMode, type ToolApprovalMode, type BalanceInfo } from "../lib/types";
 import {
   formatWorkspaceReference,
   parseWorkspaceReference,
@@ -717,6 +717,10 @@ export function Composer({
   const guidanceExpandedRef = useRef(false);
   const guidanceSendingIdRef = useRef<string | null>(null);
   const [loadingPastChats, setLoadingPastChats] = useState(false);
+  const [showWindowRefs, setShowWindowRefs] = useState(false);
+  const [openWindows, setOpenWindows] = useState<TabMeta[]>([]);
+  const [windowQuery, setWindowQuery] = useState("");
+  const [loadingWindows, setLoadingWindows] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [inputMenuPoint, setInputMenuPoint] = useState<ContextMenuPoint | null>(null);
   const [composerPrompt, setComposerPrompt] = useState<string | null>(null);
@@ -1410,16 +1414,18 @@ export function Composer({
 
   // --- which menu (if any) is open --- (slash command names win; then slash
   // arguments; then @-refs — they're rarely valid at once)
-  const menuMode: "slash" | "slasharg" | "at" | "pastChats" | null =
-    directPastChats
-      ? "pastChats"
-      : slashMatches.length > 0 && !dismissed
-        ? "slash"
-        : argRes && argRes.items.length > 0 && !dismissed
-          ? "slasharg"
-          : atRaw !== null && !dismissed
-            ? "at"
-            : null;
+  const menuMode: "slash" | "slasharg" | "at" | "pastChats" | "windows" | null =
+    showWindowRefs
+      ? "windows"
+      : directPastChats
+        ? "pastChats"
+        : slashMatches.length > 0 && !dismissed
+          ? "slash"
+          : argRes && argRes.items.length > 0 && !dismissed
+            ? "slasharg"
+            : atRaw !== null && !dismissed
+              ? "at"
+              : null;
   const menuOpen = menuMode !== null;
   useLayoutEffect(() => {
     if (!menuOpen) return;
@@ -2075,6 +2081,21 @@ export function Composer({
       const currentSessionRefs = sessionRefsRef.current;
       const currentSelectedTextRefs = selectedTextRefsRef.current;
       const currentPastedBlocks = [...pastedBlocksRef.current];
+      // Re-arm the relay ("run next") targets for this submission: window
+      // references marked runNext receive this window's finished result and
+      // run automatically once the turn completes.
+      const windowRelays = currentSessionRefs.filter((ref) => ref.runNext && ref.windowTabId);
+      if (windowRelays.length > 0) {
+        relayPendingRef.current = windowRelays.map((ref) => ({
+          tabId: ref.windowTabId as string,
+          title: ref.title,
+          sourcePath: sessionKey || "",
+        }));
+        relayConsumedRef.current = false;
+      } else {
+        relayPendingRef.current = [];
+        relayConsumedRef.current = true;
+      }
       const sessionContext = currentSessionRefs.length === 0 ? "" : await buildSessionContext(currentSessionRefs, t);
       const selectedTextContext = formatSelectedTextContext(currentSelectedTextRefs);
       const invocationText = serializeInvocationSubmit(trimmedText, trimmedDraft.invocations);
@@ -3063,6 +3084,7 @@ export function Composer({
   const openPastChats = useCallback(async (initialQuery = "") => {
     const snapshotCwd = cwdRef.current;
     const sourceDraftKey = activeDraftKeyRef.current;
+    setShowWindowRefs(false);
     setShowPastChats(true);
     setActive(0);
     setPastChatQuery(initialQuery);
@@ -3087,6 +3109,139 @@ export function Composer({
       if (cwdRef.current === snapshotCwd && activeDraftKeyRef.current === sourceDraftKey) setLoadingPastChats(false);
     }
   }, []);
+
+  // --- open-window reference (another open window, or this window itself) ---
+  const filteredWindows = useMemo(() => {
+    const q = windowQuery.trim().toLowerCase();
+    const sorted = [...openWindows].sort((a, b) =>
+      (a.active === b.active ? 0 : a.active ? -1 : 1)
+      || a.label.localeCompare(b.label),
+    );
+    if (!q) return sorted;
+    return sorted.filter((tab) =>
+      tab.label.toLowerCase().includes(q)
+      || (tab.topicTitle || "").toLowerCase().includes(q)
+      || (tab.workspaceName || "").toLowerCase().includes(q),
+    );
+  }, [openWindows, windowQuery]);
+
+  const openWindowRefs = useCallback(async () => {
+    const snapshotCwd = cwdRef.current;
+    setContentMenuOpen(false);
+    setShowPastChats(false);
+    setDirectPastChats(false);
+    setShowWindowRefs(true);
+    setActive(0);
+    setWindowQuery("");
+    setLoadingWindows(true);
+    try {
+      const tabs = asArray(await app.ListTabs())
+        .filter((tab) => tab.tabType !== "file" && Boolean(tab.sessionPath));
+      if (cwdRef.current !== snapshotCwd) return;
+      setOpenWindows(tabs);
+    } catch {
+      if (cwdRef.current === snapshotCwd) setOpenWindows([]);
+    } finally {
+      if (cwdRef.current === snapshotCwd) setLoadingWindows(false);
+    }
+  }, []);
+
+  const closeWindowRefs = () => {
+    setShowWindowRefs(false);
+    setWindowQuery("");
+    setActive(0);
+    requestActiveDraftFrame(focusComposerInput);
+  };
+
+  const pickWindow = (tab: TabMeta) => {
+    const path = tab.sessionPath;
+    if (!path) return;
+    setSessionRefs((prev) => {
+      if (prev.some((x) => x.path === path)) return prev;
+      return [...prev, {
+        path,
+        title: tab.label || tab.topicTitle || "Untitled",
+        windowTabId: tab.id,
+      }];
+    });
+    closeWindowRefs();
+    setComposerSelection(textRef.current.length);
+  };
+
+  const toggleWindowRunNext = (ref: SessionReference) => {
+    setSessionRefs((prev) => prev.map((x) =>
+      x.path === ref.path && x.windowTabId ? { ...x, runNext: !x.runNext } : x,
+    ));
+  };
+
+  const expandWindowRefToText = async (ref: SessionReference) => {
+    try {
+      const raw = asArray(await app.PreviewSession(ref.path));
+      const limited = limitSessionMessages(raw);
+      const text = formatSessionContext(ref, limited.messages, limited.truncated, t);
+      const selection = getInputSelection();
+      const beforeEdit = composerEditSnapshot(
+        activeDraftKeyRef.current,
+        { start: selection.from, end: selection.to },
+      );
+      replaceInputRange(
+        `\n${text}\n`,
+        selection.from,
+        selection.to,
+        activeDraftKeyRef.current,
+      );
+      const caret = selection.from + text.length + 2;
+      setComposerSelection(caret);
+      recordComposerEdit(
+        activeDraftKeyRef.current,
+        beforeEdit,
+        composerEditSnapshot(activeDraftKeyRef.current, { start: caret, end: caret }),
+      );
+    } catch (error) {
+      console.error("[window ref] failed to expand", ref.path, error);
+      showToast(t("composer.windowRefExpandFailed"), "warn");
+    }
+  };
+
+  // Relay ("run next"): when a window reference is marked runNext, wait for the
+  // current window's turn to finish, then push the finished result into the
+  // referenced window and trigger it to run. `running` flips false exactly when
+  // the turn completes; the pending list is re-armed on every submit.
+  const relayPendingRef = useRef<{ tabId: string; title: string; sourcePath: string }[]>([]);
+  const relayConsumedRef = useRef(true);
+  const wasRunningRef = useRef(running);
+  useEffect(() => {
+    const prev = wasRunningRef.current;
+    wasRunningRef.current = running;
+    if (!(prev && !running)) return;
+    if (relayPendingRef.current.length === 0 || relayConsumedRef.current) return;
+    relayConsumedRef.current = true;
+    const targets = relayPendingRef.current;
+    relayPendingRef.current = [];
+    void (async () => {
+      let result = "";
+      const sourcePath = targets[0]?.sourcePath;
+      if (sourcePath) {
+        try {
+          const msgs = asArray(await app.PreviewSession(sourcePath));
+          const lastAssistant = [...msgs].reverse().find((m) => m.role === "assistant" && m.content.trim());
+          result = lastAssistant ? lastAssistant.content.trim() : "";
+        } catch {
+          // keep result empty; the relay still runs with the fallback note
+        }
+      }
+      for (const target of targets) {
+        const prompt = result
+          ? `${t("composer.windowRelayPrefix", { title: target.title })}\n\n${result}`
+          : t("composer.windowRelayNoResult", { title: target.title });
+        try {
+          await app.SubmitToTab(target.tabId, prompt);
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : String(error), "warn");
+        }
+      }
+    })();
+  }, [running, t]);
 
   useEffect(() => {
     if (!pastChatToken || directPastChats || dismissed || running || disabled || readOnly) return;
@@ -3175,6 +3330,7 @@ export function Composer({
     if (moreMenuOpen || moreMenuClosing) closeMoreMenu();
     setDirectPastChats(false);
     setShowPastChats(false);
+    setShowWindowRefs(false);
     setDismissed(true);
     setContentMenuOpen(true);
   };
@@ -3206,9 +3362,11 @@ export function Composer({
 
   // Final menu item count: when the past:chats list is open, count the
   // filtered sessions instead of file entries + the "past:chats" row.
-  const count = (menuMode === "at" && showPastChats) || menuMode === "pastChats"
-    ? filteredPastChats.length
-    : countBase;
+  const count = menuMode === "windows"
+    ? filteredWindows.length
+    : (menuMode === "at" && showPastChats) || menuMode === "pastChats"
+      ? filteredPastChats.length
+      : countBase;
 
   // Clamp active index when the menu item count changes (e.g. switching
   // between file list and past:chats list, or filtering sessions).
@@ -3273,6 +3431,11 @@ export function Composer({
       if (item && !slashCommandDisabled(item)) pickCommand(item);
       return;
     }
+    if (menuMode === "windows") {
+      const tab = filteredWindows[active];
+      if (tab) pickWindow(tab);
+      return;
+    }
     if (menuMode === "slasharg" && argRes) {
       const item = argRes.items[active];
       if (item) pickArg(item);
@@ -3287,8 +3450,7 @@ export function Composer({
       if (menuMode === "pastChats") return;
       const item = atMenuItems[active];
       if (!item) return;
-      if (item.kind === "pastChats") {
-        void openPastChats();
+      if (item.kind === "pastChats") {        void openPastChats();
         return;
       }
       pickEntry(item.entry);
@@ -3460,6 +3622,8 @@ export function Composer({
         e.preventDefault();
         if (menuMode === "pastChats") {
           dismissDirectPastChats();
+        } else if (menuMode === "windows") {
+          closeWindowRefs();
         } else if (showPastChats) {
           setPastChatQuery("");
           setShowPastChats(false);
@@ -3574,6 +3738,7 @@ export function Composer({
         pickActive();
       } else if (e.key === "Escape") {
         if (menuMode === "pastChats") dismissDirectPastChats();
+        else if (menuMode === "windows") closeWindowRefs();
         else {
           setPastChatQuery("");
           setShowPastChats(false);
@@ -3927,6 +4092,13 @@ export function Composer({
               <span className="composer-access-menu__desc">{t("composer.contentReferenceSessionsDesc")}</span>
             </span>
           </button>
+          <button type="button" role="menuitem" className="composer-access-menu__item composer-content-menu__item" onClick={() => void openWindowRefs()}>
+            <PanelsTopLeft size={16} aria-hidden="true" />
+            <span className="composer-access-menu__copy">
+              <span className="composer-access-menu__title">{t("composer.contentReferenceWindows")}</span>
+              <span className="composer-access-menu__desc">{t("composer.contentReferenceWindowsDesc")}</span>
+            </span>
+          </button>
           <button
             type="button"
             role="menuitem"
@@ -4146,6 +4318,57 @@ export function Composer({
       {menuMode === "slasharg" && argRes && (
         <ArgMenu items={argRes.items} activeIndex={active} onPick={pickArg} onHover={setActive} />
       )}
+      {menuMode === "windows" && (
+        <div className="slashmenu" role="listbox" aria-label={t("composer.contentReferenceWindows")}>
+          <div className="slashmenu__item slashmenu__item--search" onMouseDown={(ev) => ev.preventDefault()}>
+            <Search size={13} className="filemenu__icon" />
+            <input
+              className="slashmenu__search"
+              type="text"
+              placeholder={t("composer.windowRefSearchPlaceholder")}
+              value={windowQuery}
+              onChange={(ev) => setWindowQuery(ev.target.value)}
+              autoFocus
+            />
+          </div>
+          {loadingWindows ? (
+            <div className="slashmenu__item slashmenu__item--empty">
+              <span className="slashmenu__name">{t("composer.windowRefLoading")}</span>
+            </div>
+          ) : filteredWindows.length === 0 ? (
+            <div className="slashmenu__item slashmenu__item--empty">
+              <span className="slashmenu__name">{t("composer.windowRefEmpty")}</span>
+            </div>
+          ) : (
+            filteredWindows.map((tab, i) => (
+              <button
+                key={tab.id}
+                className={`slashmenu__item ${i === active ? "slashmenu__item--active" : ""}`}
+                onMouseDown={(ev) => {
+                  ev.preventDefault();
+                  pickWindow(tab);
+                }}
+                onMouseMove={() => setActive(i)}
+              >
+                <PanelsTopLeft size={13} className="filemenu__icon" />
+                <span className="slashmenu__name slashmenu__name--file">
+                  {tab.label || tab.topicTitle || "Untitled"}
+                  {tab.active ? ` (${t("composer.windowRefThisWindow")})` : ""}
+                </span>
+              </button>
+            ))
+          )}
+          <button
+            className="slashmenu__item slashmenu__item--back"
+            onMouseDown={(ev) => {
+              ev.preventDefault();
+              closeWindowRefs();
+            }}
+          >
+            <span className="slashmenu__name">{t("composer.contentCloseSessions")}</span>
+          </button>
+        </div>
+      )}
       {(menuMode === "at" || menuMode === "pastChats") && (
         showPastChats ? (
           <div className="slashmenu" role="listbox">
@@ -4361,13 +4584,38 @@ export function Composer({
             >
               <Tooltip label={ref.preview || ref.title}>
                 <span className="composer-context__label">
-                  <MessageSquare size={15} />
+                  {ref.windowTabId ? <PanelsTopLeft size={15} /> : <MessageSquare size={15} />}
                   <span>
                     {ref.title}
+                    {ref.windowTabId ? ` · ${t("composer.windowRefTag")}` : ""}
                     {sessionTurnsLabel(ref, t) ? ` (${sessionTurnsLabel(ref, t)})` : ""}
                   </span>
                 </span>
               </Tooltip>
+              {ref.windowTabId && (
+                <>
+                  <Tooltip label={t(ref.runNext ? "composer.windowRelayOn" : "composer.windowRelayOff")}>
+                    <button
+                      type="button"
+                      aria-pressed={Boolean(ref.runNext)}
+                      aria-label={t("composer.windowRelayToggle")}
+                      className={ref.runNext ? "composer-context__relay composer-context__relay--active" : "composer-context__relay"}
+                      onClick={() => toggleWindowRunNext(ref)}
+                    >
+                      <CornerDownRight size={13} />
+                    </button>
+                  </Tooltip>
+                  <Tooltip label={t("composer.windowRefExpand")}>
+                    <button
+                      type="button"
+                      aria-label={t("composer.windowRefExpand")}
+                      onClick={() => void expandWindowRefToText(ref)}
+                    >
+                      <FileText size={13} />
+                    </button>
+                  </Tooltip>
+                </>
+              )}
               <Tooltip label={t("composer.removeSessionReference")}>
                 <button
                   type="button"
