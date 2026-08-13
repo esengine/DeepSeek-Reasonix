@@ -59,6 +59,7 @@ ok(pre?.parentElement === wrap, "scrollable pre is inside the wrapper");
 ok(copy?.parentElement === wrap, "copy button is a wrapper child");
 notOk(pre?.contains(copy ?? null), "copy button is outside the scrollable pre");
 ok(copy?.previousElementSibling === pre, "copy button follows pre as a sibling");
+ok(pre?.classList.contains("code--scroll-y"), "bounded code blocks opt into vertical scrolling");
 
 const stylesPath = fileURLToPath(new URL("../styles.css", import.meta.url));
 const css = readFileSync(stylesPath, "utf8");
