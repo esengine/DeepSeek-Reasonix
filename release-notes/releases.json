@@ -2,6 +2,238 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.25.0",
+      "date": "2026-08-13",
+      "channel": "stable",
+      "title": {
+        "en": "Desktop 1.25.0",
+        "zh": "桌面版 1.25.0"
+      },
+      "summary": {
+        "en": "Fixes for streaming markdown rendering, transcript layout and session switching, plus improvements to command safety classification and agent progress tracking.",
+        "zh": "修复流式 Markdown 渲染、对话布局和会话切换问题，并改进命令安全分类和智能体进度跟踪。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [],
+      "highlights": [
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Streaming lists render completed items immediately",
+            "zh": "流式列表立即渲染已完成项"
+          },
+          "body": {
+            "en": "Tight markdown lists no longer flash raw source while answers stream; completed items now render as they arrive.",
+            "zh": "紧凑的 Markdown 列表在答案流式传输时不再闪现原始源码；已完成项现在会随到达即时渲染。"
+          },
+          "refs": [
+            8669
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Transcript layout fixes for scrolling and workspace dock",
+            "zh": "修复滚动和工作区停靠栏的对话布局"
+          },
+          "body": {
+            "en": "Fixed overlapping text when scrolling up, cropped user bubbles when the workspace dock is open, and ghost bubbles in short chats.",
+            "zh": "修复了向上滚动时文本重叠、打开工作区停靠栏时用户气泡被裁切以及短对话中的幽灵气泡问题。"
+          },
+          "refs": [
+            8659,
+            8660,
+            8663
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Thinking transcript restored after session switch",
+            "zh": "会话切换后恢复思考中的对话记录"
+          },
+          "body": {
+            "en": "Switching back to a conversation that is still thinking now shows the live transcript instead of the welcome screen.",
+            "zh": "切换回仍在思考的对话时，现在会显示实时对话记录，而不是欢迎屏幕。"
+          },
+          "refs": [
+            8665
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Smarter command safety classification",
+            "zh": "更智能的命令安全分类"
+          },
+          "body": {
+            "en": "Command effects are now classified with argument-aware rules, reducing false positives for read-only commands and correctly blocking mutating ones.",
+            "zh": "命令效果现在使用参数感知规则进行分类，减少只读命令的误报，并正确阻止有变更的命令。"
+          },
+          "refs": [
+            8417,
+            8012
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Agent progress tracking based on actual progress",
+            "zh": "基于实际进度的智能体进度跟踪"
+          },
+          "body": {
+            "en": "The no-progress guard now prices a turn's progress instead of counting rounds, allowing honest investigation to continue longer.",
+            "zh": "无进展防护现在根据回合的实际进展来评估，而不是计算轮数，让诚实的调查可以持续更长时间。"
+          },
+          "refs": [
+            8404,
+            8407
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "DeepSeek Responses preset now includes Pro model",
+            "zh": "DeepSeek Responses 预设现在包含 Pro 模型"
+          },
+          "body": {
+            "en": "The official DeepSeek Responses preset now supports deepseek-v4-pro alongside deepseek-v4-flash, with automatic upgrade for existing configs.",
+            "zh": "官方 DeepSeek Responses 预设现在支持 deepseek-v4-pro 和 deepseek-v4-flash，并自动升级现有配置。"
+          },
+          "refs": [
+            8654
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "DeepSeek Responses preset extended to Pro",
+              "zh": "DeepSeek Responses 预设扩展支持 Pro"
+            },
+            "body": {
+              "en": "The official DeepSeek Responses preset now includes deepseek-v4-pro with per-model pricing and reasoning-effort overrides.",
+              "zh": "官方 DeepSeek Responses 预设现在包含 deepseek-v4-pro，并带有按模型定价和推理力度覆盖。"
+            },
+            "refs": [
+              8654
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Command effect classification unified",
+              "zh": "统一命令效果分类"
+            },
+            "body": {
+              "en": "Replaced coarse read-only boolean with argument-aware CommandEffect model, fixing misclassification of commands like git branch -a and git commit.",
+              "zh": "用参数感知的 CommandEffect 模型替换了粗略的只读布尔值，修复了 git branch -a 和 git commit 等命令的误分类。"
+            },
+            "refs": [
+              8417,
+              8012
+            ]
+          },
+          {
+            "title": {
+              "en": "Agent progress guard now prices progress",
+              "zh": "智能体进度防护现在评估进度"
+            },
+            "body": {
+              "en": "The no-progress guard uses a per-turn account that rewards new observations and landed changes, avoiding premature stops.",
+              "zh": "无进展防护使用按回合账户，奖励新观察和已落地的更改，避免过早停止。"
+            },
+            "refs": [
+              8404,
+              8407
+            ]
+          },
+          {
+            "title": {
+              "en": "Tool calls get explicit execution environment",
+              "zh": "工具调用获得显式执行环境"
+            },
+            "body": {
+              "en": "Introduced tool.ExecutionEnv to pass capabilities explicitly instead of through context, reducing silent degradation.",
+              "zh": "引入 tool.ExecutionEnv 以显式传递能力，而不是通过上下文，减少静默降级。"
+            },
+            "refs": [
+              8614
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Streaming list rendering fixed",
+              "zh": "修复流式列表渲染"
+            },
+            "body": {
+              "en": "Completed list items now render during streaming instead of showing raw markdown source.",
+              "zh": "已完成的列表项现在在流式传输期间渲染，而不是显示原始 Markdown 源码。"
+            },
+            "refs": [
+              8669
+            ]
+          },
+          {
+            "title": {
+              "en": "Transcript layout fixes",
+              "zh": "修复对话布局"
+            },
+            "body": {
+              "en": "Fixed overlapping text when scrolling up, cropped user bubbles with workspace dock open, and ghost bubbles in short chats.",
+              "zh": "修复了向上滚动时文本重叠、打开工作区停靠栏时用户气泡被裁切以及短对话中的幽灵气泡问题。"
+            },
+            "refs": [
+              8659,
+              8660,
+              8663
+            ]
+          },
+          {
+            "title": {
+              "en": "Thinking transcript restored after session switch",
+              "zh": "会话切换后恢复思考中的对话记录"
+            },
+            "body": {
+              "en": "Switching back to a thinking conversation now shows the live transcript instead of the welcome screen.",
+              "zh": "切换回思考中的对话时，现在会显示实时对话记录，而不是欢迎屏幕。"
+            },
+            "refs": [
+              8665
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "innocarpe",
+        "bfxh",
+        "esengine"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.25.0",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.24.2...desktop-v1.25.0",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.25.0",
+      "baseVersion": "1.25.0",
+      "status": "reviewed",
+      "previousRelease": "1.24.2",
+      "builds": {
+        "cli": "v1.25.0",
+        "desktop": "v1.25.0",
+        "npm": "1.25.0"
+      }
+    },
+    {
       "version": "1.24.2",
       "date": "2026-08-12",
       "channel": "stable",
