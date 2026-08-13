@@ -366,15 +366,17 @@ Kimi CN 和 Kimi Global 直连 API 预设也包含 `kimi-k3`，支持图像输�
 自定义模型目录和端点保持不变。添加后仍然可以打开 provider 卡片，继续修改模型、请求头、
 端点或兼容设置。
 
-**API 地址** 填写服务端点。默认模式下，Reasonix 会预览并把聊天请求发送到：
+**API 地址** 可以填写站点根地址、`/v1` 基础地址或完整请求地址。对于
+OpenAI-compatible provider，Reasonix 会预览并把聊天请求发送到：
 
 ```text
-<API 地址>/chat/completions
+站点根地址    -> <站点根地址>/chat/completions
+/v1 基础地址  -> <v1 基础地址>/chat/completions
+完整路径      -> 按填写的路径使用
 ```
 
-如果服务商给的是完整请求 URL，例如 `https://gateway.example.com/v1/chat/completions`，
-开启 **完整 URL**。开启后 Reasonix 会直接使用该地址，不再追加 `/chat/completions`。
-输入框下方的预览就是最终请求地址。
+输入框下方的预览就是最终请求地址。Anthropic-compatible 和 Responses provider
+在填写基础地址时使用各自协议的默认路径；显式填写完整请求地址时按填写内容使用。
 
 模型发现会基于 API 地址尝试 `/models`、`/v1/models` 等候选地址。如果网关要求单独的
 模型列表端点，在 **兼容设置** 中填写 `models_url`，例如
