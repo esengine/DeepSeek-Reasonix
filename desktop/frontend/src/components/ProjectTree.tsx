@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { Archive, ArrowDown, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, Check, ListCollapse, ListRestart, MessageSquare, Clock, Pin, MoreHorizontal, Minimize2, Maximize2, GitBranch } from "lucide-react";
+import { Archive, ArrowDown, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, Check, ListCollapse, ListRestart, MessageSquare, Clock, Pin, MoreHorizontal, Minimize2, Maximize2, GitBranch, Sparkles } from "lucide-react";
 import { asArray } from "../lib/array";
 import { useToast } from "../lib/toast";
 import { app } from "../lib/bridge";
@@ -453,6 +453,7 @@ export function ProjectTree({
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [showAllTopics, setShowAllTopics] = useState<Set<string>>(new Set());
   const [hoverCard, setHoverCard] = useState<{ key: string; card: ProjectTreeTopicHoverCard; left: number; top: number } | null>(null);
+  const [aiRenamingTopic, setAiRenamingTopic] = useState<string | null>(null);
   const hoverCardTimerRef = useRef<number | null>(null);
   const creatingRef = useRef(false);
   const { trashingTopics, beginTrashingTopic, endTrashingTopic } = useProjectTreeArchiveState();
@@ -895,6 +896,20 @@ export function ProjectTree({
     }
   };
 
+  const aiRenameTopic = async (topicId: string) => {
+    setAiRenamingTopic(topicId);
+    try {
+      const title = await app.AiRenameTopic(topicId);
+      await refresh();
+      if (!onRenameTopic) await onTopicsChanged?.();
+      if (title) showToast(t("projectTree.aiRenameDone", { title }));
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), "error");
+    } finally {
+      setAiRenamingTopic(null);
+    }
+  };
+
   const commitRenameProject = async (root: string) => {
     const title = projectDraft.trim();
     setEditingProject(null);
@@ -1196,7 +1211,7 @@ export function ProjectTree({
       const imSourceLabel = imSource?.label || "";
       const imSourceTitle = imSourceLabel ? t("msg.fromIm", { source: imSourceLabel }) : "";
       const imSourcePlatform = (imSource?.platform || "im").replace(/[^a-z0-9_-]/gi, "").toLowerCase() || "im";
-      const title = [label, imSourceTitle, statusLabel, metaFull, projectTreeDedupedExactTime(metaFull, exactTimeLabel)].filter(Boolean).join(" · ");
+      const title = [node.preview || "", label, imSourceTitle, statusLabel, metaFull, projectTreeDedupedExactTime(metaFull, exactTimeLabel)].filter(Boolean).join(" · ");
       const topicMenuOpen = !isSessionNode && menuTopic === topicId;
       const pinned = Boolean(node.pinned);
       const pinLabel = t(pinned ? "projectTree.unpinTopic" : "projectTree.pinTopic");
@@ -1226,6 +1241,13 @@ export function ProjectTree({
           icon: <Pencil size={13} />,
           label: t("projectTree.renameTopic"),
           onSelect: () => startRenameTopic(node, label),
+        },
+        {
+          key: "aiRename",
+          icon: <Sparkles size={13} />,
+          label: aiRenamingTopic === topicId ? t("projectTree.aiRenamingTopic") : t("projectTree.aiRenameTopic"),
+          disabled: aiRenamingTopic !== null,
+          onSelect: () => void aiRenameTopic(topicId),
         },
         {
           key: "trash",

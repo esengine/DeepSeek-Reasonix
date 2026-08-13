@@ -617,6 +617,7 @@ export interface AppBindings extends SessionCatalogBindings, HistoryCatalogBindi
   ReorderProjects(workspaceRoots: string[]): Promise<void>;
   CreateTopic(scope: string, workspaceRoot: string, title: string): Promise<TopicMeta>;
   RenameTopic(topicID: string, title: string): Promise<void>;
+  AiRenameTopic(topicID: string): Promise<string>;
   DeleteTopic(topicID: string): Promise<void>;
   TrashTopic(topicID: string): Promise<void>;
   SetTopicPinned(topicID: string, pinned: boolean): Promise<void>;
@@ -5330,6 +5331,16 @@ function makeMockApp(): AppBindings {
       mockTabs = mockTabs.map((tab) =>
         tab.topicId === topicID ? { ...tab, topicTitle: nextTitle } : tab,
       );
+    },
+    async AiRenameTopic(topicID: string) {
+      const topic = findMockTopic(topicID);
+      if (!topic) return "";
+      const nextTitle = `AI-renamed: ${topic.label || topic.topicId || "session"}`.slice(0, 40);
+      topic.label = nextTitle;
+      mockTabs = mockTabs.map((tab) =>
+        tab.topicId === topicID ? { ...tab, topicTitle: nextTitle } : tab,
+      );
+      return nextTitle;
     },
     async DeleteTopic(topicID: string) {
       deleteMockTopic(topicID);

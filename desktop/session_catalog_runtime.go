@@ -160,6 +160,7 @@ func (a *App) metadataProjectTopics(scope, workspaceRoot string) []ProjectNode {
 			Key: kind + "_" + topicID, Kind: kind,
 			Label: a.localizedTopicTitle(title, sources[topicID]), Root: workspaceRoot,
 			TopicID: topicID, ProjectColor: projectColor,
+			Preview:   a.catalogSessionPreviewForTopic(scope, workspaceRoot, topicID),
 			CreatedAt: topicCreatedAtForTree(created, topicID), Pinned: containsDesktopString(pinnedIDs, topicID),
 			Open: overlay.open, Running: overlay.running, Status: overlay.status,
 			TurnsState: string(sessioncatalog.TurnsUnknown), Health: string(sessioncatalog.HealthOK),
@@ -250,7 +251,8 @@ func (a *App) runtimeOnlyProjectTopicsWithSessions(scope, workspaceRoot string) 
 		node := ProjectNode{
 			Key: kind + "_" + topicID, Kind: kind, Label: label,
 			Root: workspaceRoot, TopicID: topicID, TurnsState: string(sessioncatalog.TurnsUnknown),
-			Health: string(sessioncatalog.HealthOK), Children: []ProjectNode{},
+			Preview: sessionPreviewForPath(sessions[0].sessionPath),
+			Health:  string(sessioncatalog.HealthOK), Children: []ProjectNode{},
 		}
 		for _, session := range sessions {
 			runtimeStatus := control.RuntimeStatus{}
@@ -273,7 +275,8 @@ func (a *App) runtimeOnlyProjectTopicsWithSessions(scope, workspaceRoot string) 
 			node.Children = append(node.Children, ProjectNode{
 				Key: projectSessionNodeKey(scope, path), Kind: sessionKind, Label: sessionLabel,
 				Root: workspaceRoot, TopicID: topicID, SessionPath: path,
-				Open: session.open, Running: running, Status: status,
+				Preview: sessionPreviewForPath(path),
+				Open:    session.open, Running: running, Status: status,
 				TurnsState: string(sessioncatalog.TurnsUnknown), Health: string(sessioncatalog.HealthOK),
 				Children: []ProjectNode{},
 			})
@@ -328,6 +331,7 @@ func (a *App) projectNodeFromCatalogTopic(topic sessioncatalog.TopicRecord, topi
 	node := ProjectNode{
 		Key: kind + "_" + topic.TopicID, Kind: kind, Label: a.localizedTopicTitle(topic.Title, ""),
 		Root: topic.WorkspaceRoot, TopicID: topic.TopicID, Turns: topic.Turns,
+		Preview:    topicSessionPreview(topic.Sessions, topic.RepresentativePath),
 		TurnsState: string(topic.TurnsState), Health: string(topic.Health),
 		CreatedAt: topic.CreatedAt, LastActivityAt: topic.LastActivityAt,
 		Pinned: topic.Pinned, Open: overlay.open, Running: overlay.running, Status: overlay.status,

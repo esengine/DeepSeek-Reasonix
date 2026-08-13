@@ -499,6 +499,7 @@ export interface ProjectNode {
   root?: string;
   topicId?: string;
   sessionPath?: string;
+  preview?: string;
   projectColor?: string;
   turns?: number;
   turnsState?: "unknown" | "valid" | "corrupt" | string;
