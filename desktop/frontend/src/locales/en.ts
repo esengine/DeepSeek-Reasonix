@@ -1727,6 +1727,7 @@ export const en = {
   "settings.reasoningDisplay.hidden": "Hidden",
   "settings.reasoningDisplay.summary": "Summary",
   "settings.reasoningDisplay.auto": "Live follow",
+  "settings.reasoningDisplay.expanded": "Keep expanded",
   "settings.reasoningDisplay.legacy": "Legacy setting: no summary; open thinking from its heading. Choose a new mode to migrate.",
   "settings.statusBarStyle": "Bottom status bar style",
   "settings.statusBarStyleHint": "Choose the compact visual style used for session status.",

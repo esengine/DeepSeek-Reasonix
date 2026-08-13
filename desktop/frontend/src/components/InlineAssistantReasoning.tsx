@@ -15,7 +15,7 @@ export function InlineAssistantReasoning({ item, onManualOpen }: { item: Assista
   const displayMode = useReasoningDisplayMode();
   const shown = live?.id === item.id ? { reasoning: live.reasoning, streaming: true, reasoningComplete: live.reasoningComplete } : item;
   const running = shown.streaming && !shown.reasoningComplete;
-  const [open, setOpen] = useState(displayMode === "auto" && running);
+  const [open, setOpen] = useState(displayMode === "expanded" || (displayMode === "auto" && running));
   const userOverridden = useRef(false);
   const previousRunning = useRef(running);
   const previousMode = useRef(displayMode);
@@ -26,8 +26,8 @@ export function InlineAssistantReasoning({ item, onManualOpen }: { item: Assista
     previousRunning.current = running;
     if (modeChanged) {
       userOverridden.current = false;
-      setOpen(displayMode === "auto" && running);
-    } else if (displayMode === "auto" && running && !wasRunning) {
+      setOpen(displayMode === "expanded" || (displayMode === "auto" && running));
+    } else if (running && !wasRunning && (displayMode === "auto" || displayMode === "expanded")) {
       userOverridden.current = false;
       setOpen(true);
     } else if (displayMode === "auto" && !running && wasRunning && !userOverridden.current) {

@@ -213,7 +213,8 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   // user sees nested calls; they collapse when done. Reasoning (AssistantMessage)
   // also opens while streaming and closes on finish.
   const subagentReasoningRunning = sp?.phase === "reasoning";
-  const defaultOpen = (hasNested && item.status === "running") || (reasoningDisplayMode === "auto" && subagentReasoningRunning);
+  const liveFollow = reasoningDisplayMode === "auto" || reasoningDisplayMode === "expanded";
+  const defaultOpen = (hasNested && item.status === "running") || (liveFollow && subagentReasoningRunning);
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
   const open = userOpen ?? defaultOpen;
   const openRef = useRef(open);
@@ -223,7 +224,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   // The sub-agent reasoning preview opens as a one-line summary; the full
   // Markdown only mounts after the user expands the reasoning section.
   const [subagentReasoningOpen, setSubagentReasoningOpen] = useState(
-    () => reasoningDisplayMode === "auto" && subagentReasoningRunning,
+    () => reasoningDisplayMode === "expanded" || (reasoningDisplayMode === "auto" && subagentReasoningRunning),
   );
   const subagentReasoningUserOverridden = useRef(false);
   const previousSubagentReasoningRunning = useRef(subagentReasoningRunning);
@@ -235,17 +236,16 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
     previousSubagentReasoningRunning.current = subagentReasoningRunning;
     if (modeChanged) {
       subagentReasoningUserOverridden.current = false;
-      setSubagentReasoningOpen(reasoningDisplayMode === "auto" && subagentReasoningRunning);
-      return;
-    }
-    if (reasoningDisplayMode !== "auto") {
-      setSubagentReasoningOpen(false);
+      setSubagentReasoningOpen(reasoningDisplayMode === "expanded" || (reasoningDisplayMode === "auto" && subagentReasoningRunning));
       return;
     }
     if (subagentReasoningRunning && !wasRunning) {
       subagentReasoningUserOverridden.current = false;
-      setSubagentReasoningOpen(true);
-    } else if (!subagentReasoningRunning && wasRunning && !subagentReasoningUserOverridden.current) {
+      if (liveFollow) setSubagentReasoningOpen(true);
+      return;
+    }
+    if (reasoningDisplayMode !== "auto") return;
+    if (!subagentReasoningRunning && wasRunning && !subagentReasoningUserOverridden.current) {
       setSubagentReasoningOpen(false);
     }
   }, [reasoningDisplayMode, subagentReasoningRunning]);

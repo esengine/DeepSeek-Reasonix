@@ -2699,6 +2699,7 @@ export const zhTW: Record<DictKey, string> = {
   "settings.reasoningDisplay.hidden": "隱藏",
   "settings.reasoningDisplay.summary": "摘要",
   "settings.reasoningDisplay.auto": "即時跟隨",
+  "settings.reasoningDisplay.expanded": "持續展開",
   "settings.reasoningDisplay.legacy": "沿用舊設定：無摘要，可點標題查看。選擇新模式遷移。",
   "settings.statusBarStyle": "底部資訊欄樣式",
   "settings.statusBarStyleHint": "選擇會話狀態資訊使用的緊湊顯示樣式。",
