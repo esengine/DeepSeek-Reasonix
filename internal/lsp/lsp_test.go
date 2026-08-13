@@ -79,23 +79,37 @@ func TestKotlinDefaultSpec(t *testing.T) {
 
 func TestResolveCommandFallback(t *testing.T) {
 	binDir := t.TempDir()
-	name := "intellij-server"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
+	fake := func(name string) string {
+		if runtime.GOOS == "windows" {
+			name += ".exe"
+		}
+		path := filepath.Join(binDir, name)
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return path
 	}
-	want := filepath.Join(binDir, name)
-	if err := os.WriteFile(want, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	spec := ServerSpec{Command: "kotlin-lsp", Fallbacks: []string{"intellij-server"}, InstallHint: "hint"}
 	t.Setenv("PATH", binDir) // hermetic: the real PATH may already have kotlin-lsp
 
-	spec := ServerSpec{Command: "kotlin-lsp", Fallbacks: []string{"intellij-server"}, InstallHint: "hint"}
+	// Only the fallback on PATH → it is used.
+	fallback := fake("intellij-server")
 	bin, err := resolveCommand(spec)
 	if err != nil {
 		t.Fatalf("resolveCommand: %v", err)
 	}
-	if bin != want {
-		t.Errorf("resolved %q, want fallback %q", bin, want)
+	if bin != fallback {
+		t.Errorf("resolved %q, want fallback %q", bin, fallback)
+	}
+
+	// Both on PATH → the primary command wins.
+	primary := fake("kotlin-lsp")
+	bin, err = resolveCommand(spec)
+	if err != nil {
+		t.Fatalf("resolveCommand with both: %v", err)
+	}
+	if bin != primary {
+		t.Errorf("resolved %q, want primary %q", bin, primary)
 	}
 
 	// Neither name on PATH surfaces the primary command in the install error.
