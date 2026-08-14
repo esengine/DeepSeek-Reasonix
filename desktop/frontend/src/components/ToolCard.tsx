@@ -214,7 +214,8 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   // also opens while streaming and closes on finish.
   const subagentReasoningRunning = sp?.phase === "reasoning";
   const liveFollow = reasoningDisplayMode === "auto" || reasoningDisplayMode === "expanded";
-  const defaultOpen = (hasNested && item.status === "running") || (liveFollow && subagentReasoningRunning);
+  const keepSubagentReasoningExpanded = reasoningDisplayMode === "expanded" && Boolean(sp?.reasoning);
+  const defaultOpen = (hasNested && item.status === "running") || (liveFollow && subagentReasoningRunning) || keepSubagentReasoningExpanded;
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
   const open = userOpen ?? defaultOpen;
   const openRef = useRef(open);

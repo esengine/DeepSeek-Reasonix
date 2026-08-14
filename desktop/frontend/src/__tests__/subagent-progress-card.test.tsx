@@ -121,6 +121,50 @@ console.log("\nsubagent progress card");
   const rootEl = document.getElementById("root");
   if (!rootEl) throw new Error("missing root");
   const root = createRoot(rootEl);
+  hydrateReasoningDisplayMode("expanded", true);
+  const running = makeItem("reasoning");
+  await act(async () => {
+    root.render(React.createElement(LocaleProvider, null, React.createElement(ToolCard, { item: running })));
+    for (let i = 0; i < 50; i += 1) {
+      await flushTimers();
+      if (document.querySelector(".tool__subagent-preview .md")) break;
+    }
+  });
+  ok(!!document.querySelector(".tool__subagent-preview .md"), "expanded mode opens live sub-agent reasoning");
+
+  const completed = makeItem("completed", { durationMs: 42_000 });
+  completed.id = running.id;
+  await act(async () => {
+    root.render(React.createElement(LocaleProvider, null, React.createElement(ToolCard, { item: completed })));
+    await flushTimers();
+  });
+  ok(!!document.querySelector(".tool__subagent-preview .md"), "expanded mode keeps completed sub-agent reasoning visible");
+
+  await act(async () => {
+    document.querySelector<HTMLButtonElement>(".tool__head")?.click();
+    await flushTimers();
+  });
+  ok(!document.querySelector(".tool__subagent-preview"), "manual card collapse still wins in expanded mode");
+
+  await act(async () => {
+    root.render(React.createElement(LocaleProvider, null, React.createElement(ToolCard, { key: "completed-history", item: completed })));
+    for (let i = 0; i < 50; i += 1) {
+      await flushTimers();
+      if (document.querySelector(".tool__subagent-preview .md")) break;
+    }
+  });
+  ok(!!document.querySelector(".tool__subagent-preview .md"), "expanded mode opens completed sub-agent reasoning restored from history");
+
+  await act(async () => root.unmount());
+  dom.window.close();
+  hydrateReasoningDisplayMode("summary", true);
+}
+
+{
+  const dom = installDom();
+  const rootEl = document.getElementById("root");
+  if (!rootEl) throw new Error("missing root");
+  const root = createRoot(rootEl);
 
   // Running card: chip shows phase, live elapsed and recent activity.
   const running = makeItem("reasoning");
