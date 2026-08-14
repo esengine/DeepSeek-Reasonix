@@ -104,7 +104,41 @@ func RenderText(r Report) string {
 	if len(r.MCP.Servers) == 0 {
 		b.WriteString("  (none)\n")
 	}
+	writePermissions(&b, r.Permissions)
 	return b.String()
+}
+
+func writePermissions(b *strings.Builder, p PermissionsReport) {
+	fmt.Fprintf(b, "Permissions (mode=%s)\n", p.Mode)
+	for _, bucket := range []struct {
+		label string
+		rules []PermissionRuleInfo
+	}{{"allow", p.Allow}, {"ask", p.Ask}, {"deny", p.Deny}} {
+		if len(bucket.rules) == 0 {
+			continue
+		}
+		fmt.Fprintf(b, "  [%s]\n", bucket.label)
+		for _, info := range bucket.rules {
+			if info.Status == "ok" {
+				fmt.Fprintf(b, "    - %s ok\n", info.Rule)
+			} else {
+				fmt.Fprintf(b, "    - %s %s: %s\n", info.Rule, info.Status, info.Message)
+			}
+		}
+	}
+	fmt.Fprintf(b, "  per built-in tool (bare call):\n")
+	for _, t := range p.Tools {
+		fmt.Fprintf(b, "    - %s %s", t.Tool, t.Decision)
+		if t.Matched != "" {
+			fmt.Fprintf(b, " (rule %s)", t.Matched)
+		} else if t.Scope == "fallback" {
+			fmt.Fprintf(b, " (fallback)")
+		}
+		if t.ReadOnly {
+			b.WriteString(" [read-only]")
+		}
+		b.WriteByte('\n')
+	}
 }
 
 func writeAsset(b *strings.Builder, title string, a AssetReport) {

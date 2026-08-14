@@ -5,13 +5,25 @@ import { asArray } from "../lib/array";
 import { useT } from "../lib/i18n";
 import type { CapabilityDiagnosticsReport, CapabilityIssue, RuntimeDoctorReport, SettingsTab } from "../lib/types";
 
+// The permissions section is rendered here only; the payload type stays local
+// so the report contract in lib/types is not forced to grow.
+type DiagnosticsReport = CapabilityDiagnosticsReport & {
+  permissions: {
+    mode: string;
+    allow: Array<{ rule: string; status: string; message?: string }>;
+    ask: Array<{ rule: string; status: string; message?: string }>;
+    deny: Array<{ rule: string; status: string; message?: string }>;
+    tools: Array<{ tool: string; read_only: boolean; decision: string; matched?: string; scope: string }>;
+  };
+};
+
 export function DiagnosticsSettingsPage({
   onNavigate,
 }: {
   onNavigate?: (tab: SettingsTab) => void;
 }) {
   const t = useT();
-  const [report, setReport] = useState<CapabilityDiagnosticsReport | null>(null);
+  const [report, setReport] = useState<DiagnosticsReport | null>(null);
   const [runtimeDoctor, setRuntimeDoctor] = useState<RuntimeDoctorReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -26,6 +38,7 @@ export function DiagnosticsSettingsPage({
     hooks: false,
     plugins: false,
     mcp: false,
+    permissions: false,
   });
 
   const loadSeq = useRef(0);
@@ -86,7 +99,7 @@ export function DiagnosticsSettingsPage({
 
   const goSettings = (tab?: string) => {
     if (!tab || !onNavigate) return;
-    const allowed: SettingsTab[] = ["mcp", "skills", "plugins", "hooks"];
+    const allowed: SettingsTab[] = ["mcp", "skills", "plugins", "hooks", "permissions"];
     if (allowed.includes(tab as SettingsTab)) {
       onNavigate(tab as SettingsTab);
     }
@@ -307,13 +320,52 @@ export function DiagnosticsSettingsPage({
               </div>
             ))}
           </Collapsible>
+
+          <Collapsible
+            title={t("diag.permissions")}
+            count={report.permissions.allow.length + report.permissions.ask.length + report.permissions.deny.length}
+            open={!!open.permissions}
+            onToggle={() => toggle("permissions")}
+          >
+            <div className="diag-row">
+              <span>{t("diag.permissionsMode")}: <code>{report.permissions.mode}</code></span>
+            </div>
+            {(["allow", "ask", "deny"] as const).map((bucket) => (
+              <div key={bucket}>
+                <h4 className="diag-perm-bucket">{bucket}</h4>
+                {report.permissions[bucket].length === 0 && <div className="empty">{t("common.none")}</div>}
+                {report.permissions[bucket].map((rule, idx) => (
+                  <div className="diag-row" key={`${bucket}-${idx}`}>
+                    <code>{rule.rule}</code>
+                    {rule.status !== "ok" ? (
+                      <span className={`diag-perm-status diag-perm-status--${rule.status}`} title={rule.message}>
+                        {rule.status}
+                      </span>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ))}
+            <h4 className="diag-perm-bucket">{t("diag.permissionsEffective")}</h4>
+            {report.permissions.tools.map((ti) => (
+              <div className="diag-row" key={ti.tool}>
+                <span>{ti.tool}</span>
+                <span>
+                  <strong>{ti.decision}</strong>
+                  {ti.matched ? ` · ${ti.matched}` : ` · ${t("diag.permissionsFallback")}`}
+                  {ti.read_only ? ` · ${t("diag.permissionsReadOnly")}` : ""}
+                </span>
+              </div>
+            ))}
+          </Collapsible>
         </>
       )}
     </div>
   );
 }
 
-function normalizeDiagnosticsReport(report: CapabilityDiagnosticsReport): CapabilityDiagnosticsReport {
+function normalizeDiagnosticsReport(report: CapabilityDiagnosticsReport): DiagnosticsReport {
+  const raw = report as CapabilityDiagnosticsReport & { permissions?: DiagnosticsReport["permissions"] };
   return {
     ...report,
     issues: asArray(report.issues),
@@ -335,6 +387,13 @@ function normalizeDiagnosticsReport(report: CapabilityDiagnosticsReport): Capabi
     },
     plugins: { ...report.plugins, packages: asArray(report.plugins?.packages) },
     mcp: { ...report.mcp, servers: asArray(report.mcp?.servers) },
+    permissions: {
+      mode: raw.permissions?.mode ?? "ask",
+      allow: asArray(raw.permissions?.allow),
+      ask: asArray(raw.permissions?.ask),
+      deny: asArray(raw.permissions?.deny),
+      tools: asArray(raw.permissions?.tools),
+    },
   };
 }
 

@@ -70,13 +70,11 @@ func Collect(opts Options) Report {
 	hooksR, hookIssues := collectHooks(root, home, reasonixHome, cfg, disp)
 	pluginsR, pluginIssues := collectPlugins(reasonixHome, disp)
 	mcpR, mcpIssues := collectMCP(cfg, root, home, reasonixHome, disp)
+	permR := collectPermissions(cfg, &issues)
 
-	issues = append(issues, instructionIssues...)
-	issues = append(issues, skillIssues...)
-	issues = append(issues, cmdIssues...)
-	issues = append(issues, hookIssues...)
-	issues = append(issues, pluginIssues...)
-	issues = append(issues, mcpIssues...)
+	for _, group := range [][]Issue{instructionIssues, skillIssues, cmdIssues, hookIssues, pluginIssues, mcpIssues} {
+		issues = append(issues, group...)
+	}
 
 	// Runtime host merge (desktop) or live probe (CLI).
 	if opts.Live {
@@ -97,6 +95,7 @@ func Collect(opts Options) Report {
 		Hooks:         hooksR,
 		Plugins:       pluginsR,
 		MCP:           mcpR,
+		Permissions:   permR,
 		Issues:        issues,
 	}
 	report.Summary = buildSummary(report)

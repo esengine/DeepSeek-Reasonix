@@ -626,16 +626,16 @@ func (c *Config) SetPermissionMode(mode string) error {
 }
 
 // AddPermissionRule appends a rule ("ToolName" or "ToolName(glob)") to the
-// allow / ask / deny list. The rule is validated with the same parser the gate
-// uses, and a duplicate is a no-op so a UI can call it idempotently.
+// allow / ask / deny list. Error-severity findings (unparseable, empty or
+// unbalanced specifier) are rejected; a duplicate is a no-op.
 func (c *Config) AddPermissionRule(list, rule string) error {
 	target, err := c.ruleList(list)
 	if err != nil {
 		return err
 	}
 	rule = strings.TrimSpace(rule)
-	if _, ok := permission.ParseRule(rule); !ok {
-		return fmt.Errorf("invalid permission rule %q (want \"ToolName\" or \"ToolName(glob)\")", rule)
+	if msg, ok := permission.RuleError(rule, nil); ok {
+		return fmt.Errorf("invalid permission rule %q: %s", rule, msg)
 	}
 	if slices.Contains(*target, rule) {
 		return nil // already present
