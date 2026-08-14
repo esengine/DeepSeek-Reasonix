@@ -133,7 +133,7 @@ ok(
     settingsSource.includes('settings.displayMode') &&
     settingsSource.includes('["standard", "compact"]') &&
     settingsSource.includes('settings.reasoningDisplay') &&
-    settingsSource.includes('["hidden", "summary", "auto"]') &&
+    settingsSource.includes('["hidden", "summary", "auto", "expanded"]') &&
     settingsSource.includes('settings.processFold') &&
     settingsSource.includes('["auto", "expanded"]') &&
     settingsSource.includes('setProcessFoldPreference(pref)') &&
