@@ -101,11 +101,11 @@ func TestBackgroundFleetProgressLifecycleUsesStableIDs(t *testing.T) {
 			t.Fatal("timed out waiting for background fleet child")
 		}
 	}
-	close(prov.release)
 	running := manager.RunningForSession("progress-session")
 	if len(running) != 1 {
 		t.Fatalf("running fleet jobs = %+v, want 1", running)
 	}
+	close(prov.release)
 	result := manager.WaitForSession(context.Background(), "progress-session", []string{running[0].ID}, 5)
 	if len(result) != 1 || result[0].Status != jobs.Done {
 		t.Fatalf("background fleet result = %+v, want one completed job", result)
