@@ -103,6 +103,10 @@ func TestE2ESerialPlanHostAdvancesAndAllowsFinalAnswer(t *testing.T) {
 	if runErr != nil {
 		t.Fatalf("final answer blocked despite host-advanced completions: %v", runErr)
 	}
+	finalSignoff := lastToolResult(a.Session(), "complete_step")
+	if !strings.Contains(finalSignoff, "All steps completed") || strings.Contains(finalSignoff, "continue with the next step") {
+		t.Fatalf("final complete_step result = %q, want terminal message without continuation", finalSignoff)
+	}
 	for i, td := range a.sess.todoState {
 		if canonicalTodoStatus(td.Status) != "completed" {
 			t.Fatalf("canonical todo %d (%q) = %s, want completed", i+1, td.Content, td.Status)
