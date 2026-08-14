@@ -974,7 +974,7 @@ convenient.
 ## Slash commands
 
 In an interactive `reasonix` session, built-in commands (`/compact`, `/context`, `/new`, `/clear`, `/rewind`,
-`/tree`, `/branch`, `/switch`, `/todo`, `/model`, `/work-mode`, `/mcp`, `/skills`, `/hooks`,
+`/tree`, `/branch`, `/switch`, `/todo`, `/model`, `/version`, `/work-mode`, `/mcp`, `/skills`, `/hooks`,
 `/memory`, `/goal`, `/output-style`, `/sandbox`, `/language`,
 `/reasoning-language`, `/help`) run
 locally — `/help` lists them all. Built-in **skills** such as `/init`,

@@ -51,6 +51,16 @@ func subagentStatus(id, phase string) event.Event {
 	return event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: id, Name: event.SubagentProgressStatusName, Output: phase}}
 }
 
+func TestVersionCommandShowsInstalledVersion(t *testing.T) {
+	m := newTestChatTUI()
+	m.version = "1.23.0"
+	m.runSlashCommand("/version")
+	out := ansi.Strip(strings.Join(m.transcript, "\n"))
+	if want := "reasonix 1.23.0"; !strings.Contains(out, want) {
+		t.Errorf("/version output missing %q:\n%s", want, out)
+	}
+}
+
 func subagentPreview(id, channel, text string, truncated bool) event.Event {
 	return event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: id, Name: channel, Output: text, Truncated: truncated}}
 }

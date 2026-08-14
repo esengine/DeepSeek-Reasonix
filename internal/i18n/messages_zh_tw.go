@@ -247,6 +247,7 @@ var ChineseTraditional = Messages{
 	CmdResume:           "恢復已儲存的會話",
 	CmdModel:            "切換模型",
 	CmdStatus:           "顯示工作階段狀態",
+	CmdVersion:          "顯示已安裝的 reasonix 版本",
 	CmdWorkMode:         "切換執行設定",
 	CmdDocs:             "搜尋與目前版本匹配的內建文件",
 	CmdMemory:           "檢視指令、記憶與復原狀態",

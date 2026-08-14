@@ -50,6 +50,7 @@ import (
 type chatTUI struct {
 	ctrl    control.SessionAPI
 	label   string
+	version string // build version string, the same `reasonix --version` prints
 	missing string // missing-key warning surfaced once in the banner, "" when ready
 	webHandoffState
 	// diagnostics is the process-owned TUI log/watchdog started before terminal
@@ -3497,47 +3498,24 @@ func (m chatTUI) View() tea.View {
 	// transcriptHeight so the viewport above fills exactly the rest of the screen.
 	var parts []string
 	rowsAboveBox := 0 // terminal rows occupied by panels/working line before the composer
-	if todo := m.renderTodoPanel(); todo != "" {
-		parts = append(parts, todo)
-		rowsAboveBox += strings.Count(todo, "\n") + 1
-	}
-	if banner := m.renderApprovalBanner(); banner != "" {
-		parts = append(parts, banner)
-		rowsAboveBox += strings.Count(banner, "\n") + 1
-	}
-	if card := m.renderChooser(); card != "" {
-		parts = append(parts, card)
-		rowsAboveBox += strings.Count(card, "\n") + 1
-	}
-	if card := m.renderRewind(); card != "" {
-		parts = append(parts, card)
-		rowsAboveBox += strings.Count(card, "\n") + 1
-	}
-	if card := m.renderMCPImport(); card != "" {
-		parts = append(parts, card)
-		rowsAboveBox += strings.Count(card, "\n") + 1
-	}
-	if card := m.renderResumePicker(); card != "" {
-		parts = append(parts, card)
-		rowsAboveBox += strings.Count(card, "\n") + 1
-	}
-	if card := m.renderQuickPicker(); card != "" {
-		parts = append(parts, card)
-		rowsAboveBox += strings.Count(card, "\n") + 1
-	}
-	if card := m.renderCopyPicker(); card != "" {
-		parts = append(parts, card)
-		rowsAboveBox += strings.Count(card, "\n") + 1
-	}
-	if menu := m.renderCompletion(); menu != "" {
-		parts = append(parts, menu)
-		rowsAboveBox += strings.Count(menu, "\n") + 1
-	}
-	if m.nativeScrollback {
-		if card := m.renderMainManager(); card != "" {
-			parts = append(parts, card)
-			rowsAboveBox += strings.Count(card, "\n") + 1
+	appendPanel := func(panel string) {
+		if panel == "" {
+			return
 		}
+		parts = append(parts, panel)
+		rowsAboveBox += strings.Count(panel, "\n") + 1
+	}
+	appendPanel(m.renderTodoPanel())
+	appendPanel(m.renderApprovalBanner())
+	appendPanel(m.renderChooser())
+	appendPanel(m.renderRewind())
+	appendPanel(m.renderMCPImport())
+	appendPanel(m.renderResumePicker())
+	appendPanel(m.renderQuickPicker())
+	appendPanel(m.renderCopyPicker())
+	appendPanel(m.renderCompletion())
+	if m.nativeScrollback {
+		appendPanel(m.renderMainManager())
 	}
 	// Layout: the working spinner (when running), then the composer when visible,
 	// then the persistent status block. Wide terminals keep two information rows
@@ -4799,6 +4777,9 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	case "/status":
 		m.echoLocalCommand(input)
 		m.showStatusDetails()
+	case "/version":
+		m.echoLocalCommand(input)
+		m.commitLine(BuildInfo{Version: m.version}.singleLine())
 	case "/rename":
 		m.runRenameCommand(input)
 	case "/todo":

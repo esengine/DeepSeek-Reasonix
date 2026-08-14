@@ -1102,9 +1102,8 @@ func chatREPL(args []string, version string) int {
 	})
 
 	// Own the active session file for the TUI's lifetime; in-TUI switches
-	// (/resume, /switch, /new, ...) move the lease with the active path.
-	// Refusing a held resume target up front is what keeps a desktop window
-	// and this chat from silently double-writing one transcript.
+	// (/resume, /switch, /new, ...) move the lease with the active path, so
+	// refusing a held target up front stops a double-written transcript.
 	leases := control.NewSessionLeaseKeeper()
 	defer leases.Release()
 	if resumePath != "" {
@@ -1221,6 +1220,7 @@ func chatREPL(args []string, version string) int {
 	}
 
 	m := newChatTUI(ctrl, missing, eventCh, termW)
+	m.version = version
 	m.diagnostics = diagnostics
 	m.updateWatchdogStatusProvider()
 	m.planMode = permissions.plan

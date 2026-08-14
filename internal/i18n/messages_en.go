@@ -258,6 +258,7 @@ var English = Messages{
 	CmdRename:           "rename a session",
 	CmdModel:            "switch model",
 	CmdStatus:           "show session status",
+	CmdVersion:          "show the installed reasonix version",
 	CmdWorkMode:         "switch execution setting",
 	CmdDocs:             "search version-matched embedded documentation",
 	CmdMemory:           "inspect instructions, memory, and recovery",

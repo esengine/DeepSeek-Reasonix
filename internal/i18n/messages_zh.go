@@ -259,6 +259,7 @@ var Chinese = Messages{
 	CmdRename:           "重命名会话",
 	CmdModel:            "切换模型",
 	CmdStatus:           "显示会话状态",
+	CmdVersion:          "显示已安装的 reasonix 版本",
 	CmdWorkMode:         "切换执行设定",
 	CmdDocs:             "搜索与当前版本匹配的内置文档",
 	CmdMemory:           "查看指令、记忆与恢复状态",
