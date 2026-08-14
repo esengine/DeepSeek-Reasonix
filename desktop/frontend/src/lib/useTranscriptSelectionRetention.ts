@@ -174,7 +174,7 @@ export function useTranscriptSelectionRetention({
     if (snapshotId == null) return false;
     tracked.logical = true;
     document.getSelection()?.removeAllRanges();
-    setScrollMode("logical-selecting", "cross-row-selection");
+    setScrollMode("selection", "cross-row-selection");
     try {
       tracked.captureElement.setPointerCapture(tracked.pointerId);
     } catch {
@@ -238,7 +238,7 @@ export function useTranscriptSelectionRetention({
     };
     lastPointerRef.current = { x: event.clientX, y: event.clientY };
     transcriptSelectionStore.beginNative(tabId ?? "");
-    setScrollMode("native-selecting", "pointerdown");
+    setScrollMode("selection", "pointerdown");
     publish();
   }, [cancelStreamingScroll, clear, publish, setScrollMode, tabId]);
 

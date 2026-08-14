@@ -123,7 +123,6 @@ func prepareDesktopDiagnostics(app *App) {
 	if tracker.start() == nil {
 		app.lifecycle.tracker = tracker
 	}
-	installWebView2ProcessObserver(app)
 }
 
 func (a *App) releaseDesktopDiagnosticsOwnership() {

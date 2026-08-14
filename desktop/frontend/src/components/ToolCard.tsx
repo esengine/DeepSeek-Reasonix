@@ -7,12 +7,13 @@ import { diffsFor, languageForToolArgs, subjectOf, summarize, summarizeFileDiff 
 import { useShellExpand } from "../lib/shellExpand";
 import { app } from "../lib/bridge";
 import { useCollapseAnimation } from "../lib/useCollapseAnimation";
-import { isTerminalSubagentPhase, type Item, type SubagentPhase } from "../lib/useController";
+import { isBatchedReadOnlyTool, isTerminalSubagentPhase, type Item, type SubagentPhase } from "../lib/useController";
 import type { Translator } from "../lib/i18n";
 import { ReadOnlyBatch } from "./ReadOnlyBatch";
 import { Markdown } from "./Markdown";
 import { ReasoningSummary } from "./ReasoningSummary";
 import { useReasoningDisplayMode } from "../lib/reasoningDisplayPreference";
+import { useTranscriptUserResizeIntent } from "./TranscriptLayoutIntentContext";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 
@@ -177,6 +178,7 @@ function splitPreview(text: string, n: number): { preview: string; total: number
 // the sub-agent's work is visible as it happens.
 export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayName }: { item: ToolItem; subcalls?: ToolItem[]; tabId?: string; displayName?: string }) {
   const t = useT();
+  const beginUserResize = useTranscriptUserResizeIntent();
   const nested = subcalls ?? [];
   const hasNested = nested.length > 0;
   const isSubagent = SUBAGENT_TOOLS.has(item.name);
@@ -307,7 +309,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   // completion so they don't clutter the transcript. During execution they still
   // render so the user sees progress.
   const quiet =
-    item.readOnly && !hasNested && item.status !== "error" && item.status !== "stopped";
+    item.readOnly && item.name !== "web_search" && !hasNested && item.status !== "error" && item.status !== "stopped";
 
   const duration = item.status === "running" ? "" : (shellSummary || formatToolDuration(item.durationMs));
   // While the model is still streaming this call's arguments (partial
@@ -333,7 +335,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
         type="button"
         className="tool__head"
         data-running={item.status === "running" ? "" : undefined}
-        onClick={() => hasBody && setUserOpen(!open)}
+        onClick={() => { if (hasBody) { beginUserResize(); setUserOpen(!open); } }}
         aria-expanded={hasBody ? open : undefined}
         aria-label={a11yLabel}
       >
@@ -393,6 +395,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
                   type="button"
                   className="tool__subagent-preview-label tool__subagent-preview-label--toggle"
                   onClick={() => {
+                    beginUserResize();
                     subagentReasoningUserOverridden.current = true;
                     const next = !subagentReasoningOpen;
                     if (next) setUserOpen(true);
@@ -411,6 +414,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
                     text={sp.reasoning}
                     streaming={sp.phase === "reasoning"}
                     onOpen={() => {
+                      beginUserResize();
                       subagentReasoningUserOverridden.current = true;
                       setUserOpen(true);
                       setSubagentReasoningOpen(true);
@@ -446,7 +450,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
                 roBatch.length = 0;
               };
               for (const c of nested) {
-                if (c.readOnly && c.name !== "todo_write") {
+                if (isBatchedReadOnlyTool(c.name, c.readOnly)) {
                   roBatch.push(c);
                   continue;
                 }
@@ -469,7 +473,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
           <>
             <CodeViewer value={showAll ? shellOutput! : shellPreview.preview} maxHeight={showAll ? 480 : 260} />
             {shellPreview.hasMore && !showAll && (
-              <button className="tool__showall" onClick={() => setShowAll(true)}>
+              <button className="tool__showall" onClick={() => { beginUserResize(); setShowAll(true); }}>
                 {t("tool.showAllLines", { n: shellPreview.total })}
               </button>
             )}
@@ -504,7 +508,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
                 <button
                   type="button"
                   className="tool__err-toggle"
-                  onClick={() => setShowErrorDetails((value) => !value)}
+                  onClick={() => { beginUserResize(); setShowErrorDetails((value) => !value); }}
                   aria-expanded={showErrorDetails}
                 >
                   <ChevronRight className={`tool__err-toggle-icon${showErrorDetails ? " tool__err-toggle-icon--open" : ""}`} size={12} aria-hidden="true" />

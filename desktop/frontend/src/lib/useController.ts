@@ -6,7 +6,7 @@ import { asArray } from "./array";
 import { addBreadcrumb } from "./breadcrumbs";
 import { app, onEvent, onReady, onRuntimeRebuilt, onTabMeta, onTopicActivation } from "./bridge";
 import { invalidateCache } from "./composerHistory";
-import { formatInboxCancelError, inboxSteerQueuedMessage } from "./inboxError";
+import { formatInboxCancelError } from "./inboxError";
 import { formatContextMaintenanceNotice, isNewMaintenanceOperation, rememberMaintenanceOperation } from "./contextMaintenanceTypes";
 import { formatGuardianAssessmentNotice } from "./guardianEvents";
 import { completionSummaryNeedsAttention, completionSummaryNotice, normalizeCompletionSummary } from "./completionSummary";
@@ -18,9 +18,13 @@ import { getTranscriptStore } from "./transcriptStore";
 import { uiPerfTracker } from "./uiPerf";
 import { getLocale, t, type DictKey } from "./i18n";
 import { applyHydrateErrorState, hydratePlaceholderItems as resolveHydratePlaceholders } from "./hydrateErrorState";
-import { hasCachedLiveTurn, sameSessionPlaceholderItems, shouldApplyHydratedHistory } from "./hydrateHistoryApply";
+import { isHostRecoveryGuidance } from "./hostRecoverySteer";
+import { duplicateLiveItemIds, hasCachedLiveTurn, hydratedHistoryApplyMode, sameSessionPlaceholderItems, shouldPreferResidentHistory } from "./hydrateHistoryApply";
 import { hydrateIdentityCurrent } from "./sessionIdentity";
-import { sameTodoList } from "./todoVisibility";
+import { sameStringList, sameTodoList } from "./todoVisibility";
+import { useStaleTurnWatchdog } from "./useStaleTurnWatchdog";
+import type { SearchSource } from "./searchSources";
+import { attachWebSearchOutput, historySearchAndAnswer } from "./searchTranscript";
 import { fileDiffFromWire, summarize, summarizeFileDiff, type ToolFileDiff } from "./tools";
 import { modeHasAutoApproveTools, normalizeMode, normalizeToolApprovalMode } from "./types";
 import type {
@@ -228,7 +232,7 @@ const HISTORY_PAGE_TURNS = 60;
 export type TurnPhaseName = "working" | "checking" | "verifying" | "reviewing" | string;
 export type Item =
   | { kind: "user"; id: string; submissionId?: string; text: string; submitText?: string; failed?: boolean; createdAt?: number; checkpointTurn?: number }
-  | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean; reasoningComplete?: boolean; reasoningDurationMs?: number; workDurationMs?: number; memoryCitations?: MemoryCitation[] }
+  | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean; reasoningComplete?: boolean; reasoningDurationMs?: number; workDurationMs?: number; memoryCitations?: MemoryCitation[]; searchSources?: SearchSource[] }
   | { kind: "phase"; id: string; text: string }
   | { kind: "notice"; id: string; level: "info" | "warn"; text: string; detail?: string; title?: string; variant?: "delivery" | "completion"; action?: "continue_delivery" | "open_changes"; decisionReceipt?: WireDecisionReceipt }
   | {
@@ -359,6 +363,7 @@ interface State {
   backendActivationPending: boolean;
   messageAction?: MessageActionState;
   currentAssistant?: string;
+  pendingSearchSources?: SearchSource[];
   live?: LiveStream;
   pendingUser?: string;
   pendingSubmissionId?: string;
@@ -589,7 +594,7 @@ export function metaFromTab(tab: TabMeta, existing?: Meta): Meta {
     tokenMode: tab.tokenMode ?? existing?.tokenMode ?? "full",
     goal: tab.goal ?? existing?.goal,
     goalStatus: tab.goalStatus ?? existing?.goalStatus,
-    canonicalTodos: existing?.canonicalTodos,
+    canonicalTodos: existing?.canonicalTodos, dismissedTodoBatches: (tab.sessionPath !== undefined ? tab.sessionPath : existing?.sessionPath) === existing?.sessionPath ? existing?.dismissedTodoBatches : undefined,
   };
 }
 function countsTowardCurrentTurn(state: State): boolean {
@@ -629,7 +634,7 @@ export function sameMeta(a?: Meta, b?: Meta): boolean {
     a.tokenMode === b.tokenMode &&
     a.goal === b.goal &&
     a.goalStatus === b.goalStatus &&
-    sameTodoList(a.canonicalTodos, b.canonicalTodos)
+    sameTodoList(a.canonicalTodos, b.canonicalTodos) && sameStringList(a.dismissedTodoBatches, b.dismissedTodoBatches)
   );
 }
 
@@ -673,11 +678,10 @@ export function composerProfileApplicationKey(
 }
 
 function metaWithoutCanonicalTodos(meta?: Meta): Meta | undefined {
-  if (!meta || meta.canonicalTodos === undefined) return meta;
-  return { ...meta, canonicalTodos: undefined };
+  if (!meta || (meta.canonicalTodos === undefined && meta.dismissedTodoBatches === undefined)) return meta;
+  return { ...meta, canonicalTodos: undefined, dismissedTodoBatches: undefined };
 }
 
-const STALE_TURN_RECONCILE_MS = 30_000;
 const CANCEL_RECONCILE_DELAYS_MS = [0, 100, 300, 1_000] as const;
 // After a stale runtime snapshot is rejected (its fetch predates the live
 // prompt), refetch authoritative backend state once. Short enough to be barely
@@ -686,16 +690,6 @@ const CANCEL_RECONCILE_DELAYS_MS = [0, 100, 300, 1_000] as const;
 const STALE_PROMPT_RECONCILE_MS = 150;
 const STARTUP_READY_META_RECONCILE_MS = 250;
 const STARTUP_READY_META_RECONCILE_ATTEMPTS = 60;
-
-export function shouldReconcileStaleTurn(
-  state: Pick<State, "running" | "turnActive"> | undefined,
-  lastTurnActivityAt: number,
-  now = Date.now(),
-  timeoutMs = STALE_TURN_RECONCILE_MS,
-): boolean {
-  if (!state?.running || !state.turnActive || lastTurnActivityAt <= 0) return false;
-  return Math.max(0, now - lastTurnActivityAt) >= timeoutMs;
-}
 
 function hasReusableCachedTranscript(state: State | undefined, sessionPath?: string, revision?: number, digest?: string): boolean {
   if (!state || state.items.length === 0) return false;
@@ -729,6 +723,7 @@ export function isReadOnlyTool(name: string): boolean {
     case "grep":
     case "glob":
     case "web_fetch":
+    case "web_search":
     case "code_index":
     case "bash_output":
     case "waitJob":
@@ -739,6 +734,8 @@ export function isReadOnlyTool(name: string): boolean {
       return false;
   }
 }
+
+export { isBatchedReadOnlyTool } from "./searchTranscript";
 
 const ARCHIVED_TOOL_ARG_LIMIT = 200;
 
@@ -883,18 +880,17 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
       continue;
     }
     if (m.role === "assistant") {
-      const hasText = m.content.trim() !== "" || (m.reasoning ?? "").trim() !== "";
-      if (hasText) {
-        const memoryCitations = asArray<MemoryCitation>(m.memoryCitations);
-        items.push({
-          kind: "assistant",
-          id: `${idPrefix}${seq}`,
-          text: m.content,
-          reasoning: m.reasoning ?? "",
-          streaming: false,
-          workDurationMs: m.workDurationMs,
-          memoryCitations: memoryCitations.length > 0 ? memoryCitations : undefined,
-        });
+      const memoryCitations = asArray<MemoryCitation>(m.memoryCitations);
+      const built = historySearchAndAnswer(`${idPrefix}${seq}`, {
+        content: m.content,
+        reasoning: m.reasoning,
+        workDurationMs: m.workDurationMs,
+        memoryCitations: memoryCitations.length > 0 ? memoryCitations : undefined,
+        serverSearch: m.serverSearch,
+      });
+      for (const item of built) {
+        if (item.kind === "assistant") item.id = `${idPrefix}${seq}`;
+        items.push(item);
         seq++;
       }
       const toolCalls = m.toolCalls ?? [];
@@ -1020,7 +1016,14 @@ function ensureAssistant(s: State): { items: Item[]; id: string; seq: number } {
     if (exists) return { items: s.items, id: s.currentAssistant, seq: s.seq };
   }
   const id = `a${s.seq}`;
-  const item: Item = { kind: "assistant", id, text: "", reasoning: "", streaming: true };
+  const item: Item = {
+    kind: "assistant",
+    id,
+    text: "",
+    reasoning: "",
+    streaming: true,
+    searchSources: s.pendingSearchSources?.length ? s.pendingSearchSources : undefined,
+  };
   return { items: [...s.items, item], id, seq: s.seq + 1 };
 }
 
@@ -1418,9 +1421,10 @@ function applyEvent(s: State, e: WireEvent): State {
       // immediately so the user sees their message + a blinking cursor the
       // instant the backend acknowledges the turn — no dead gap waiting for
       // the first text/reasoning token.
-      const { items, id, seq } = ensureAssistant(s);
+      const fresh = { ...s, pendingSearchSources: undefined };
+      const { items, id, seq } = ensureAssistant(fresh);
       return {
-        ...s,
+        ...fresh,
         items,
         currentAssistant: id,
         seq,
@@ -1474,8 +1478,10 @@ function applyEvent(s: State, e: WireEvent): State {
       const text = e.text ?? s.live?.text ?? existingAssistant?.text ?? "";
       const reasoning = e.reasoning ?? s.live?.reasoning ?? existingAssistant?.reasoning ?? "";
       if (text.trim() === "" && reasoning.trim() === "") {
+        const keepEmpty =
+          Boolean(existingAssistant?.memoryCitations?.length) || Boolean(existingAssistant?.searchSources?.length);
         const items =
-          existingAssistant && existingAssistant.text.trim() === "" && existingAssistant.reasoning.trim() === "" && !existingAssistant.memoryCitations?.length
+          existingAssistant && existingAssistant.text.trim() === "" && existingAssistant.reasoning.trim() === "" && !keepEmpty
             ? s.items.filter((it) => !(it.kind === "assistant" && it.id === existingAssistant.id))
             : s.items;
         return { ...endTurnModelActivity(s, Date.now(), true), items, live: undefined, currentAssistant: undefined, turnOutputCharsAtUsage: 0 };
@@ -1501,6 +1507,7 @@ function applyEvent(s: State, e: WireEvent): State {
                 reasoningDurationMs: reasoningDurationMs ?? it.reasoningDurationMs,
                 workDurationMs: Math.max(it.workDurationMs ?? 0, workDurationMs ?? 0) || undefined,
                 memoryCitations: memoryCitations.length > 0 ? memoryCitations : undefined,
+                searchSources: it.searchSources,
               };
             })()
           : it,
@@ -1629,7 +1636,7 @@ function applyEvent(s: State, e: WireEvent): State {
       }
       // A nested result refreshes its sub-agent parent's recent activity.
       if (t.parentId) touchSubagentParent(next, t.parentId);
-      return { ...s, items: compactArchivedToolItems(next) };
+      return attachWebSearchOutput({ ...s, items: compactArchivedToolItems(next) }, t.name, t.output, t.err);
     }
     case "tool_progress": {
       const t = e.tool;
@@ -1712,6 +1719,7 @@ function applyEvent(s: State, e: WireEvent): State {
       return { ...s, running: s.turnActive ? s.running : false, seq: s.seq + 1, items };
     }
     case "steer":
+      if (isHostRecoveryGuidance(e.text ?? "")) return s;
       return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `s${s.seq}`, level: "info", text: `${STEER_NOTICE_PREFIX}${e.text ?? ""}` }] };
     case "approval_request": {
       if (s.cancelRequested) return s;
@@ -2644,6 +2652,10 @@ export function useController() {
   const dispatchTo = useCallback((tabId: string, action: Action) => {
     const states = statesRef.current;
     const prev = getOrCreateState(states, tabId);
+    // Activity timestamps belong to one submitted turn. A new optimistic turn
+    // must age from its own turnStartAt if turn_started is lost, not inherit an
+    // old turn's already-stale wire timestamp and probe immediately.
+    if (action.type === "user") lastTurnActivityAtByTab.current.delete(tabId);
     const next = reducer(prev, action);
     if (prev !== next) {
       states.set(tabId, next);
@@ -2917,13 +2929,10 @@ export function useController() {
       let projection = skipHistory
         ? undefined
         : await loadTimed("history", () =>
-            // Windowed slice load through the transcript store. A resident
-            // session (LRU hit) projects synchronously with no backend round
-            // trip; reset loads always re-fetch so a rebound session can never
-            // serve the previous session's rows.
+            // Resident LRU only when the caller keeps cache; reset/no-cache re-fetch.
             getTranscriptStore().loadLatest(tabId, sessionPath, {
               turns: HISTORY_PAGE_TURNS,
-              preferResident: !reset,
+              preferResident: shouldPreferResidentHistory(reset, options.preserveCachedHistory),
               expectedRevision: sessionRevision,
               expectedDigest: sessionDigest,
             }),
@@ -2936,17 +2945,23 @@ export function useController() {
         dispatchTo(tabId, { type: "local_notice", level: "warn", text: errText });
         addBreadcrumb("tab.hydrate", `history failed ${tabId} ms=${Date.now() - historyStartedAt}`); return;
       }
-      if (projection !== undefined && shouldApplyHydratedHistory(skipHistory, true, foregroundTurnActive(), statesRef.current.get(tabId))) {
+      const applyProj = projection && {
+        items: projection.items, revision: projection.revisionKnown ? projection.revision : undefined, digest: projection.digest || undefined,
+      };
+      const applyMode = hydratedHistoryApplyMode(skipHistory, projection !== undefined, foregroundTurnActive(), statesRef.current.get(tabId), applyProj);
+      if (projection !== undefined && applyMode !== "skip") {
         if (deferResetUntilHistory && stillCurrent() && !foregroundTurnActive()) dispatchTo(tabId, { type: "reset" });
-        dispatchTo(tabId, {
-          type: "history_replace",
+        const page = {
           items: projection.items,
           startTurn: projection.startTurn,
           totalTurns: projection.totalTurns,
           hasOlder: projection.hasOlder,
           revision: projection.revisionKnown ? projection.revision : undefined,
           digest: projection.digest || undefined,
-        });
+        };
+        dispatchTo(tabId, applyMode === "prepend"
+          ? { type: "history_prepend", ...page, removeIds: duplicateLiveItemIds(projection.items, statesRef.current.get(tabId)?.items ?? []) }
+          : { type: "history_replace", ...page });
         addBreadcrumb(
           "tab.hydrate",
           `history page ${tabId} items=${projection.items.length} turns=${projection.startTurn}-${projection.endTurn}/${projection.totalTurns} ms=${Date.now() - historyStartedAt}`,
@@ -3231,9 +3246,10 @@ export function useController() {
 
   const reconcileTabRuntime = useCallback(async (
     tabId: string,
-    options: { hydrateSessionData?: boolean } = {},
+    options: { hydrateSessionData?: boolean; refreshAncillary?: boolean } = {},
   ): Promise<TabMeta[] | undefined> => {
     const hydrateSessionData = options.hydrateSessionData ?? true;
+    const refreshAncillary = options.refreshAncillary ?? true;
     const snapshotAt = promptEventClock();
     const tabs = asArray(await app.ListTabs().catch(() => [] as TabMeta[]));
     const tab = tabs.find((candidate) => candidate.id === tabId);
@@ -3251,6 +3267,7 @@ export function useController() {
       });
       return tabs;
     }
+    if (!refreshAncillary) return tabs;
     const [jobs, effort] = await Promise.all([
       app.JobsForTab(tabId).catch(() => undefined),
       app.EffortForTab(tabId).catch(() => undefined),
@@ -3551,30 +3568,19 @@ export function useController() {
     };
   }, [activeTabId, activeState.meta?.ready, activeState.meta?.startupErr, activeState.backendActivationPending, refreshMetaOnlyForTab]);
 
-  // Stale-turn watchdog: if the frontend thinks the agent is running but the
-  // turn stream has gone quiet, reconcile with the backend. This catches cases
-  // where the Wails event channel silently drops turn_done after the final
-  // message or synthetic todo update has already closed the live stream.
-  useEffect(() => {
-    if (!activeTabId) return;
-    const s = statesRef.current.get(activeTabId);
-    const now = Date.now();
-    const lastTurnActivityAt = lastTurnActivityAtByTab.current.get(activeTabId) ?? 0;
-    if (!s?.running || !s.turnActive || lastTurnActivityAt <= 0) return;
-    const since = Math.max(0, now - lastTurnActivityAt);
-    if (shouldReconcileStaleTurn(s, lastTurnActivityAt, now)) {
-      void reconcileTabRuntime(activeTabId);
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      const cur = statesRef.current.get(activeTabId);
-      const lastActivity = lastTurnActivityAtByTab.current.get(activeTabId) ?? 0;
-      if (shouldReconcileStaleTurn(cur, lastActivity)) {
-        void reconcileTabRuntime(activeTabId);
-      }
-    }, STALE_TURN_RECONCILE_MS - since);
-    return () => window.clearTimeout(timer);
-  }, [activeTabId, reconcileTabRuntime, activeState.running, activeState.turnActive]);
+  // Stale-turn watchdog: keep reconciling while the frontend thinks the agent
+  // is running but the event stream is quiet. The optimistic submit timestamp
+  // is evidence too: if Wails drops the entire turn stream (including
+  // turn_started), waiting for a live event would leave the blank assistant
+  // placeholder spinning forever. Re-arm after a still-running snapshot so a
+  // later missed message + turn_done converges without a tab switch.
+  const reconcileStaleTurn = useCallback(async (tabId: string) => {
+    await reconcileTabRuntime(tabId, { refreshAncillary: false });
+  }, [reconcileTabRuntime]);
+  useStaleTurnWatchdog({
+    tabId: activeTabId, visibleState: activeState, activeTabIdRef, statesRef,
+    lastTurnActivityAtByTab, reconcile: reconcileStaleTurn,
+  });
 
   // Replay any pending approval/ask prompts when switching tabs, so a
   // plan-mode session left awaiting confirmation rebuilds its modal (#4275).
@@ -3708,9 +3714,8 @@ export function useController() {
     // become follow-ups automatically (disposition queued_followup).
     const receipt = await app.EnqueueInboxSteer(tabId, text, text, "");
     if (receipt?.error) throw new Error(receipt.error);
-    if (receipt?.disposition && receipt.disposition !== "steer_accepted") {
-      throw new Error(inboxSteerQueuedMessage(getLocale()));
-    }
+    // queued_followup is success: the instruction is durable and will run at
+    // the next idle/tool-boundary kick. Do not surface it as a send failure.
   }, []);
 
   const steer = useCallback(async (text: string) => {
@@ -4031,7 +4036,7 @@ export function useController() {
     try {
       cleared = tabId ? await app.ClearSessionForTab(tabId) : await app.ClearSession();
     } catch {
-      if (tabId) void loadSessionDataForTab(tabId);
+      if (tabId) void loadSessionDataForTab(tabId, false, "startup", { preserveCachedHistory: true });
       return;
     }
     if (tabId) bumpSessionLoadSeq(tabId);
@@ -4145,12 +4150,12 @@ export function useController() {
 
   const pickWorkspace = useCallback(async (): Promise<string> => {
     beginActiveNavigation();
-    const path = await app.PickWorkspace().catch(() => "");
+    const path = await app.PickWorkspace();
     return refreshWorkspaceState(path);
   }, [beginActiveNavigation, refreshWorkspaceState]);
   const switchWorkspace = useCallback(async (path: string): Promise<string> => {
     beginActiveNavigation();
-    const next = await app.SwitchWorkspace(path).catch(() => "");
+    const next = await app.SwitchWorkspace(path);
     return refreshWorkspaceState(next);
   }, [beginActiveNavigation, refreshWorkspaceState]);
 

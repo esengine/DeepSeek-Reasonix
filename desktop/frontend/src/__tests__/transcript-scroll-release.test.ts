@@ -1,12 +1,11 @@
 // Run: node --import tsx src/__tests__/transcript-scroll-release.test.ts
-// Regression: non-wheel upward scroll must release tail-follow immediately,
-// not wait 500ms. Covers the fix for native scrollbar drag and middle-button
-// autoscroll suppression during a bottomRequest window.
 
 import {
-  isPinnedTranscriptLayoutGrowth,
-  TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX,
-} from "../lib/useTranscriptVirtuosoScroll";
+  INITIAL_TRANSCRIPT_SCROLL_STATE,
+  reduceTranscriptScroll,
+  type TranscriptScrollEvent,
+  type TranscriptScrollState,
+} from "../lib/transcriptScrollController";
 
 let passed = 0;
 let failed = 0;
@@ -21,64 +20,86 @@ function check(condition: boolean, label: string) {
   }
 }
 
-console.log("\ntranscript scroll release");
-
-// Mock the hook's atBottomStateChange behavior with the fix applied.
-// The real verification path is the browser bench, but this proves the logic.
-function mockAtBottomStateChange(
-  atBottom: boolean,
-  bottomRequestActive: boolean,
-  scrollElement: { scrollHeight: number; scrollTop: number; clientHeight: number } | null,
-) {
-  if (!atBottom && bottomRequestActive) {
-    if (scrollElement) {
-      const distanceFromBottom = scrollElement.scrollHeight - scrollElement.scrollTop - scrollElement.clientHeight;
-      if (distanceFromBottom > TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX) {
-        return "manual"; // Released immediately by the fix
-      }
-    }
-    return "suppressed"; // Old behavior: early return, no mode change
+function run(events: readonly TranscriptScrollEvent[], initial = INITIAL_TRANSCRIPT_SCROLL_STATE) {
+  let state: TranscriptScrollState = initial;
+  const commands: string[] = [];
+  for (const event of events) {
+    const next = reduceTranscriptScroll(state, event);
+    state = next.state;
+    commands.push(...next.commands.map((command) => command.type));
   }
-  return atBottom ? "tail-follow" : "manual";
+  return { state, commands };
 }
 
-// Scenario 1: atBottom=false during bottomRequest, but physically at bottom.
-// Expected: suppressed (Virtuoso is still converging; keep tail intent).
-const s1 = mockAtBottomStateChange(false, true, { scrollHeight: 10000, scrollTop: 9397, clientHeight: 600 });
-check(s1 === "suppressed", "physically at bottom during request window: intent preserved");
+console.log("\ntranscript scroll controller");
 
-// Scenario 2: atBottom=false during bottomRequest, physically far from bottom.
-// Expected: manual (native scrollbar drag or middle-button autoscroll moved away).
-const s2 = mockAtBottomStateChange(false, true, { scrollHeight: 10000, scrollTop: 8500, clientHeight: 600 });
-check(s2 === "manual", "non-wheel upward scroll during request window: release tail-follow immediately");
+const streaming = run([
+  { type: "AT_BOTTOM_CHANGED", atBottom: true, scrollable: true },
+  { type: "TAIL_CONTENT_CHANGED" },
+  { type: "AT_BOTTOM_CHANGED", atBottom: false, scrollable: true },
+  { type: "LAYOUT_HEIGHT_CHANGED" },
+]);
+check(streaming.state.mode === "tail-follow", "dynamic atBottom=false does not steal tail ownership");
+check(streaming.commands.join(",") === "AUTOSCROLL_TO_BOTTOM,AUTOSCROLL_TO_BOTTOM", "tail growth emits only Virtuoso autoscroll commands");
 
-// Scenario 3: atBottom=false, no active request.
-// Expected: manual (ordinary path).
-const s3 = mockAtBottomStateChange(false, false, { scrollHeight: 10000, scrollTop: 5000, clientHeight: 600 });
-check(s3 === "manual", "upward scroll outside request window: ordinary manual mode");
+const manual = run([
+  { type: "AT_BOTTOM_CHANGED", atBottom: true, scrollable: true },
+  { type: "USER_SCROLL_INTENT" },
+  { type: "AT_BOTTOM_CHANGED", atBottom: false, scrollable: true },
+  { type: "TAIL_CONTENT_CHANGED" },
+  { type: "VIEWPORT_RESIZED" },
+]);
+check(manual.state.mode === "manual", "explicit user intent releases tail-follow");
+check(manual.commands.length === 0, "manual reading never receives tail commands");
 
-// Scenario 4: atBottom=true.
-// Expected: tail-follow (re-engaged).
-const s4 = mockAtBottomStateChange(true, false, null);
-check(s4 === "tail-follow", "scrolled back to physical bottom: tail-follow restored");
+const returned = run([
+  { type: "AT_BOTTOM_CHANGED", atBottom: true, scrollable: true },
+  { type: "USER_SCROLL_INTENT" },
+  { type: "AT_BOTTOM_CHANGED", atBottom: false, scrollable: true },
+  { type: "AT_BOTTOM_CHANGED", atBottom: true, scrollable: true },
+]);
+check(returned.state.mode === "tail-follow", "reaching the real bottom re-engages tail-follow");
 
-const layoutGrowth = isPinnedTranscriptLayoutGrowth({
-  pinned: true,
-  previousScrollHeight: 10000,
-  previousScrollTop: 9400,
-  scrollHeight: 10320,
-  scrollTop: 9714,
-});
-check(layoutGrowth, "pinned row growth preserves tail-follow through callback reordering");
+const shortTranscript = run([
+  { type: "AT_BOTTOM_CHANGED", atBottom: true, scrollable: false },
+  { type: "USER_SCROLL_INTENT" },
+]);
+check(shortTranscript.state.mode === "tail-follow", "non-overflow transcript always stays tail-follow");
 
-const userScrollDuringGrowth = isPinnedTranscriptLayoutGrowth({
-  pinned: true,
-  previousScrollHeight: 10000,
-  previousScrollTop: 9400,
-  scrollHeight: 10320,
-  scrollTop: 9000,
-});
-check(!userScrollDuringGrowth, "upward user movement is not mistaken for pinned row growth");
+const fold = run([
+  { type: "AT_BOTTOM_CHANGED", atBottom: true, scrollable: true },
+  { type: "USER_RESIZE_BEGIN" },
+  { type: "LAYOUT_HEIGHT_CHANGED" },
+  { type: "USER_RESIZE_END" },
+]);
+check(fold.state.mode === "manual", "user fold resize settles in manual mode");
+check(fold.commands.length === 0, "user fold resize cannot tug the viewport to the tail");
+
+const selection = run([
+  { type: "AT_BOTTOM_CHANGED", atBottom: true, scrollable: true },
+  { type: "SELECTION_BEGIN" },
+  { type: "SCROLL_TO_OFFSET", owner: "selection-edge-scroll", top: 120 },
+  { type: "LAYOUT_HEIGHT_CHANGED" },
+  { type: "SELECTION_END" },
+]);
+check(selection.state.mode === "manual", "selection returns to manual reading");
+check(selection.commands.join(",") === "SCROLL_TO_OFFSET", "selection owns only its explicit edge-scroll command");
+
+const jump = run([
+  { type: "AT_BOTTOM_CHANGED", atBottom: false, scrollable: true },
+  { type: "USER_SCROLL_INTENT" },
+  { type: "JUMP_TO_BOTTOM", behavior: "smooth" },
+]);
+check(jump.state.mode === "tail-follow", "jump-bottom explicitly owns the tail");
+check(jump.commands.join(",") === "SCROLL_TO_LAST", "jump-bottom uses Virtuoso scrollToIndex only");
+
+const restore = run([
+  { type: "AT_BOTTOM_CHANGED", atBottom: true, scrollable: true },
+  { type: "JUMP_TO_INDEX", index: 42 },
+  { type: "PROGRAMMATIC_END" },
+]);
+check(restore.state.mode === "manual", "question/rewind navigation settles in manual mode");
+check(restore.commands.join(",") === "SCROLL_TO_INDEX", "navigation emits one indexed Virtuoso command");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

@@ -595,8 +595,8 @@ func TestIncompleteGoalTodos(t *testing.T) {
 	if !strings.Contains(msg, "Add tests") {
 		t.Fatalf("reminder should mention 'Add tests', got: %q", msg)
 	}
-	if !strings.Contains(msg, "todo_write") {
-		t.Fatalf("reminder should suggest updating todos via todo_write, got: %q", msg)
+	if !strings.Contains(msg, "update_goal") {
+		t.Fatalf("reminder should tell the model how to finish, got: %q", msg)
 	}
 
 	// Mark all complete.

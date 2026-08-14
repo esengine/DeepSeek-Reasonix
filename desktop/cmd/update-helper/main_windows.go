@@ -11,7 +11,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -22,6 +21,7 @@ import (
 
 	"reasonix/desktop/internal/winuninstall"
 	"reasonix/internal/installlayout"
+	"reasonix/internal/proc"
 	"reasonix/internal/repair"
 )
 
@@ -522,7 +522,7 @@ func waitForProcessExit(pid uint32, timeout time.Duration) error {
 }
 
 func runInstaller(installer, installDir string) error {
-	cmd := exec.Command(installer)
+	cmd := proc.VisibleCommand(installer)
 	// Keep the helper itself hidden, but let the NSIS update-progress window be
 	// visible. /REASONIXSTAGE makes the signed installer extract only; the helper
 	// performs every live replacement through the claimed transaction.
@@ -574,7 +574,7 @@ func cleanupOwnedWindowsUpdateDirectory(path string, owner os.FileInfo) error {
 }
 
 func startRelaunch(relaunch, installDir string) error {
-	cmd := exec.Command(relaunch)
+	cmd := proc.VisibleCommand(relaunch)
 	cmd.Dir = installDir
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	return cmd.Start()

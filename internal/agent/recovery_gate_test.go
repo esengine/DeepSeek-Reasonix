@@ -18,6 +18,7 @@ type recordingRecoveryGate struct {
 	observation RecoveryObservation
 	proposals   []RecoveryProposal
 	decision    RecoveryDecision
+	guidance    string
 }
 
 func TestRecoveryPlanTransitionDetectsOnlyStructuralRewriteOfActivePlan(t *testing.T) {
@@ -57,7 +58,7 @@ func TestRecoveryPlanTransitionIgnoresCompletedPriorPlan(t *testing.T) {
 
 func (g *recordingRecoveryGate) ObserveResult(_ context.Context, observation RecoveryObservation) string {
 	g.observation = observation
-	return ""
+	return g.guidance
 }
 
 func (g *recordingRecoveryGate) BeforeMutation(_ context.Context, proposal RecoveryProposal) (RecoveryDecision, error) {
@@ -117,6 +118,29 @@ func TestPlanTransitionNeedsDedicatedReplacementAuthorization(t *testing.T) {
 	})
 	if out.errMsg == "" || !strings.Contains(out.output, "cannot be removed or replaced") {
 		t.Fatalf("plain allow unexpectedly replaced current todo: %+v", out)
+	}
+}
+
+func TestHostRecoveryGuidanceRidesToolResultNotSteer(t *testing.T) {
+	guidance := HostRecoveryGuidanceToolFailedPrefix + ", continue unrelated work automatically."
+	gate := &recordingRecoveryGate{guidance: guidance}
+	sink := &recordSink{}
+	reg := tool.NewRegistry()
+	reg.Add(failTool{name: "fail_tool"})
+	a := New(nil, reg, NewSession(""), Options{RecoveryGate: gate}, sink)
+	a.steerRunActive = true
+
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
+		ID: "fail-1", Name: "fail_tool", Arguments: `{}`,
+	})
+	if !strings.Contains(out.output, guidance) {
+		t.Fatalf("tool output missing host recovery guidance: %q", out.output)
+	}
+	if text, _, ok := a.consumeSteer(); ok {
+		t.Fatalf("host recovery queued a user steer: %q", text)
+	}
+	for _, e := range sink.kinds(event.Steer) {
+		t.Fatalf("host recovery emitted a steer event: %+v", e)
 	}
 }
 

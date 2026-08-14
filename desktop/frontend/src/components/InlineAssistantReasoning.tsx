@@ -8,9 +8,11 @@ import { LiveStreamContext } from "./LiveStreamContext";
 import { Markdown } from "./Markdown";
 import { ProcessBrainIcon } from "./ProcessCard";
 import { ReasoningSummary } from "./ReasoningSummary";
+import { useTranscriptUserResizeIntent } from "./TranscriptLayoutIntentContext";
 
 export function InlineAssistantReasoning({ item, onManualOpen }: { item: AssistantItem; onManualOpen?: () => void }) {
   const t = useT();
+  const beginUserResize = useTranscriptUserResizeIntent();
   const live = useContext(LiveStreamContext);
   const displayMode = useReasoningDisplayMode();
   const shown = live?.id === item.id ? { reasoning: live.reasoning, streaming: true, reasoningComplete: live.reasoningComplete } : item;
@@ -35,10 +37,11 @@ export function InlineAssistantReasoning({ item, onManualOpen }: { item: Assista
     }
   }, [displayMode, running]);
   const toggle = useCallback(() => {
+    beginUserResize();
     userOverridden.current = true;
     if (!open) onManualOpen?.();
     setOpen(!open);
-  }, [onManualOpen, open]);
+  }, [beginUserResize, onManualOpen, open]);
   const reasoning = shown.reasoning.trim();
   if (!reasoning) return null;
   const visibleReasoning = open ? displayReasoningText(shown.reasoning, {

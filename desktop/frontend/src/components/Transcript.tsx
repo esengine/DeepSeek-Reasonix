@@ -16,7 +16,7 @@ import { getProcessFoldPreference, onProcessFoldPreferenceChange, type ProcessFo
 import { STEER_NOTICE_PREFIX, isSteerNoticeText } from "../lib/useController";
 import { useTranscriptEntranceAnimation } from "../lib/useEntranceAnimation";
 import { useTranscriptSelectionRetention } from "../lib/useTranscriptSelectionRetention";
-import { compactQuestionText, lastQuestionTurn, questionAnchorId, questionTurnsById, scrollVersion, type QuestionAnchor } from "../lib/transcriptGrouping";
+import { compactQuestionText, lastQuestionTurn, questionAnchorId, questionTurnsById, type QuestionAnchor } from "../lib/transcriptGrouping";
 import {
   buildTranscriptRows,
   buildTurnModels,
@@ -47,8 +47,10 @@ import { useTranscriptSelectableRows } from "../lib/useTranscriptSelectableRows"
 import { TranscriptSelectionOverlay } from "./TranscriptSelectionOverlay";
 import { useCreationTranscriptScrollbar } from "../lib/useCreationTranscriptScrollbar";
 import { useTranscriptScrollInteractions } from "../lib/useTranscriptScrollInteractions";
-import { TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX, useTranscriptVirtuosoScroll } from "../lib/useTranscriptVirtuosoScroll";
+import { hasTranscriptScrollableRange, TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX, useTranscriptVirtuosoScroll } from "../lib/useTranscriptVirtuosoScroll";
 import { useTranscriptVirtuosoFirstItemIndex } from "../lib/transcriptVirtuosoIndex";
+import { TranscriptLayoutIntentProvider, useTranscriptUserResizeIntent } from "./TranscriptLayoutIntentContext";
+import { MarkdownImageTabContext } from "./MarkdownImageContext";
 type OpenTurnAction = { turn: number; menu: "summary" | "rewind" };
 const QUESTION_NAV_MIN_COUNT = 2;
 type AssistantReasoningDisplay = "normal" | "hide";
@@ -295,6 +297,7 @@ export function Transcript({
     atBottomStateChange,
     scrollToBottom,
     followGrowingTail,
+    beginUserResize,
     scrollToDataIndex,
     releaseTailFollow,
     setMode: setScrollMode,
@@ -302,7 +305,6 @@ export function Transcript({
     reset: resetScroll,
     finishProgrammaticScroll,
   } = useTranscriptVirtuosoScroll();
-  const autoScrollFrame = useRef<number | null>(null);
   const virtuosoReadyRef = useRef(false);
 
   const entranceRef = useTranscriptEntranceAnimation<HTMLDivElement>(tabId, revealSignal, items);
@@ -314,12 +316,7 @@ export function Transcript({
     return () => releaseMarkdownWorkerClient();
   }, []);
 
-  const cancelStreamingAutoScroll = useCallback(() => {
-    if (autoScrollFrame.current !== null) {
-      cancelAnimationFrame(autoScrollFrame.current);
-      autoScrollFrame.current = null;
-    }
-  }, []);
+  const cancelStreamingAutoScroll = useCallback(() => {}, []);
 
   const cancelStreamingAndFollow = useCallback(() => {
     cancelStreamingAutoScroll();
@@ -373,34 +370,11 @@ export function Transcript({
     virtuosoReadyRef.current = false;
   }, [resetScroll, revealSignal, tabId]);
 
-  // Auto-scroll to bottom during streaming. Coalesce fast token/reasoning
-  // updates into one layout read/write per animation frame.
-  const contentVersion = useMemo(() => scrollVersion(items), [items]);
+  // Row measurement and footer resize share the same coalesced height path.
   useEffect(() => {
-    if (items.length === 0) return;
-    if (!virtuosoReadyRef.current) return;
-    if (!stick.current) return;
-    if (autoScrollFrame.current !== null) return;
-    autoScrollFrame.current = requestAnimationFrame(() => {
-      autoScrollFrame.current = null;
-      if (!stick.current) return;
-      followGrowingTail();
-    });
-  }, [contentVersion, followGrowingTail, live?.text?.length ?? 0, live?.reasoning?.length ?? 0, stick]);
-  useEffect(() => {
-    return () => {
-      if (autoScrollFrame.current !== null) {
-        cancelAnimationFrame(autoScrollFrame.current);
-        autoScrollFrame.current = null;
-      }
-    };
-  }, []);
-
-  // Virtuoso observes both its viewport and rows. When the composer changes
-  // height, ask its tail policy to settle only if the reader is still pinned.
-  useEffect(() => {
-    if (items.length > 0 && virtuosoReadyRef.current) followGrowingTail();
-  }, [followGrowingTail, footerHeight, items.length]);
+    if (!virtuosoReadyRef.current || !stick.current) return;
+    followGrowingTail();
+  }, [footerHeight, followGrowingTail, stick]);
 
   // Sub-agent calls carry a parentId; collect them under their parent `task`
   // call so the parent card can render them nested, and skip them at top level.
@@ -448,13 +422,15 @@ export function Transcript({
   }, [segmentStates, foldPreference]);
 
   const handleFoldToggle = useCallback((segmentKey: string, currentlyOpen: boolean) => {
+    beginUserResize();
     setFolds((prev) => foldMapWithToggle(prev, segmentKey, currentlyOpen));
-  }, []);
+  }, [beginUserResize]);
 
   const handleReasoningManualOpen = useCallback((segmentKey: string) => {
+    beginUserResize();
     const running = segmentStates.find((segment) => segment.key === segmentKey)?.hasRunningWork ?? false;
     setFolds((prev) => foldMapWithReasoningOpen(prev, segmentKey, running));
-  }, [segmentStates]);
+  }, [beginUserResize, segmentStates]);
 
   // ── The turn action menu ──────────────────────────────────────────────────
   const [openAction, setOpenAction] = useState<OpenTurnAction | null>(null);
@@ -701,6 +677,8 @@ export function Transcript({
   // ── Assemble rendered output ──────────────────────────────────────────────
   return (
     <InvocationMetadataContext.Provider value={invocationMetadata}>
+    <MarkdownImageTabContext.Provider value={tabId ?? ""}>
+    <TranscriptLayoutIntentProvider value={beginUserResize}>
     <div className="transcript-shell">
       {empty ? (
         <div
@@ -723,8 +701,7 @@ export function Transcript({
             firstItemIndex={firstItemIndex}
             // Do not set alignToBottom: Virtuoso's margin-top:auto plus
             // firstItemIndex paints a ghost first-user bubble and empty band
-            // in short chats. Tail pin stays followOutput + scrollToBottom.
-            followOutput={(atBottom) => atBottom ? "auto" : false}
+            // in short chats. The coordinator owns tail following.
             atBottomThreshold={TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX}
             atBottomStateChange={atBottomStateChange}
             heightEstimates={heightEstimates}
@@ -763,7 +740,7 @@ export function Transcript({
         <QuestionJumpBar questions={questions} onJump={handleJumpToQuestion} />
       )}
 
-      {!empty && !isAtBottom && (
+      {!empty && !isAtBottom && scrollElement && hasTranscriptScrollableRange(scrollElement) && (
         <button
           type="button"
           className="transcript__jump-bottom"
@@ -775,6 +752,8 @@ export function Transcript({
         </button>
       )}
     </div>
+    </TranscriptLayoutIntentProvider>
+    </MarkdownImageTabContext.Provider>
     </InvocationMetadataContext.Provider>
   );
 }
@@ -1063,12 +1042,13 @@ export function NoticeCard({ item, onAction, actionDisabled = false }: { item: N
 function CompactionCard({ item }: { item: CompactionItem }) {
   const t = useT();
   const [open, setOpen] = useState(false);
+  const beginUserResize = useTranscriptUserResizeIntent();
   if (item.pending) {
     return <div className="compaction compaction--pending" data-entrance={item.id}><ProcessCompactIcon size={12} /><span>{t("compaction.working")}</span></div>;
   }
   return (
     <div className="compaction" data-entrance={item.id}>
-      <button type="button" className="compaction__head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+      <button type="button" className="compaction__head" onClick={() => { beginUserResize(); setOpen((v) => !v); }} aria-expanded={open}>
         <ProcessCompactIcon size={12} />
         <span>{t("compaction.title")}</span>
         <span className="compaction__meta">{t("compaction.messages", { n: item.messages })}{item.trigger ? ` · ${item.trigger}` : ""}</span>

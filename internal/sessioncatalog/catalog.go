@@ -501,7 +501,6 @@ func mapKeys(values map[string]struct{}) []string {
 	}
 	return out
 }
-
 func (c *Catalog) ListTopics(ctx context.Context, req TopicPageRequest) (TopicPage, error) {
 	out := TopicPage{Items: []TopicRecord{}, Revision: c.revision.Load()}
 	req.Scope, req.WorkspaceRoot = normalizeScope(req.Scope, req.WorkspaceRoot)
@@ -525,13 +524,14 @@ func (c *Catalog) ListTopics(ctx context.Context, req TopicPageRequest) (TopicPa
 		where += ` AND last_activity_at>=?`
 		args = append(args, cutoff)
 	}
+	sortExpression := topicPageSortExpression(req.SortMode)
 	scanCursor := cursor
 	scanLimit := max(req.Limit+1, 64)
 	for len(out.Items) <= req.Limit {
 		pageWhere := where
 		pageArgs := append([]any(nil), args...)
 		if scanCursor != nil {
-			pageWhere += ` AND (pinned<? OR (pinned=? AND last_activity_at<?) OR (pinned=? AND last_activity_at=? AND topic_id>?))`
+			pageWhere += ` AND (pinned<? OR (pinned=? AND ` + sortExpression + `<?) OR (pinned=? AND ` + sortExpression + `=? AND topic_id>?))`
 			pageArgs = append(pageArgs, scanCursor.Pinned, scanCursor.Pinned, scanCursor.Activity,
 				scanCursor.Pinned, scanCursor.Activity, scanCursor.TopicID)
 		}
@@ -540,7 +540,7 @@ func (c *Catalog) ListTopics(ctx context.Context, req TopicPageRequest) (TopicPa
             turns,turns_state,created_at,last_activity_at,recovery_state,recovery_branch_count,
             recovery_unresolved_count,recovery_cleanup_eligible_count,health
             FROM catalog_topics WHERE `+pageWhere+`
-            ORDER BY pinned DESC,last_activity_at DESC,topic_id ASC LIMIT ?`, pageArgs...)
+			ORDER BY pinned DESC,`+sortExpression+` DESC,topic_id ASC LIMIT ?`, pageArgs...)
 		if err != nil {
 			return out, err
 		}
@@ -605,7 +605,7 @@ func (c *Catalog) ListTopics(ctx context.Context, req TopicPageRequest) (TopicPa
 		if lastScanned.Pinned {
 			pinned = 1
 		}
-		scanCursor = &pageCursor{Pinned: pinned, Activity: lastScanned.LastActivityAt, TopicID: lastScanned.TopicID}
+		scanCursor = &pageCursor{Pinned: pinned, Activity: topicPageSortValue(lastScanned, req.SortMode), TopicID: lastScanned.TopicID}
 	}
 	more := len(out.Items) > req.Limit
 	if more {
@@ -617,7 +617,7 @@ func (c *Catalog) ListTopics(ctx context.Context, req TopicPageRequest) (TopicPa
 		if last.Pinned {
 			pinned = 1
 		}
-		out.NextCursor = encodeCursor(pageCursor{Pinned: pinned, Activity: last.LastActivityAt, TopicID: last.TopicID})
+		out.NextCursor = encodeCursor(pageCursor{Pinned: pinned, Activity: topicPageSortValue(last, req.SortMode), TopicID: last.TopicID})
 	}
 	return out, nil
 }

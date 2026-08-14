@@ -528,9 +528,14 @@ jobs:
 
       - name: test (Windows desktop and update helper)
         timeout-minutes: 15
-        run: |
-          go test ./...
-          (cd third_party/go-webview2 && go test ./pkg/edge)
+        run: go test ./...
+
+      # A cold nested-module cache can spend several minutes compiling the
+      # real WebView2 cookie integration test. Keep its budget independent of
+      # the already-complete desktop suite and retain a Go timeout stack dump.
+      - name: test (vendored WebView2 edge)
+        timeout-minutes: 10
+        run: (cd third_party/go-webview2 && go test -timeout=8m ./pkg/edge)
 
       # Installer packaging is packaging validation, not a code gate: run it
       # on pushes to main-v2 (the release pipeline builds installers again

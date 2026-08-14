@@ -274,11 +274,12 @@ when the sole automatic threshold is crossed.
   user-global value used by desktop and new CLI sessions. UI always shows the
   **effective** ratio.
 - `max_output_tokens` is an independent **per-turn** completion ceiling.
-  Recommended: `0` (**automatic**, not unlimited; DeepSeek default high → ~64K).
-  User presets: `32768` ordinary coding / cost control, `65536` heavy reasoning /
-  long tool loops, `131072` only after repeated `finish_reason=length`.
-  Negative omits optional wire limits when the protocol allows. Clipped only at
-  send time against remaining window and **never** changes `triggerTokens` or
+  Recommended: `0` — official DeepSeek omits the field so the server uses the
+  documented **384K** output cap; thinking depth is `effort` only (default high).
+  A positive value is an explicit cost cap. Negative omits optional wire limits
+  when the protocol allows; official DeepSeek Anthropic still sends 384K because
+  `max_tokens` is required (`budget_tokens` is ignored). Clipped only at send
+  time against remaining window and **never** changes `triggerTokens` or
   maintenance timing. Billing follows actual completion tokens, not the ceiling.
 - Giant tool results are bounded **once**, on first entry to the model:
   `Content` is the stable ≤32KB visible form; `RawContent` holds the full original
@@ -1035,10 +1036,10 @@ default        = "deepseek-v4-flash"   # optional; defaults to models[0]
 api_key_env    = "DEEPSEEK_API_KEY"
 web_search     = true
 context_window = 1000000   # tokens; harness compacts older history near this limit (0 disables)
-# max_output_tokens = 0              # recommended: automatic (DeepSeek default high → ~64K)
-# max_output_tokens = 32768          # ordinary coding / cost control
-# max_output_tokens = 65536          # heavy reasoning / long tool loops
-# max_output_tokens = 131072         # only after repeated finish_reason=length
+# max_output_tokens = 0              # recommended: official DeepSeek omits the field (server 384K)
+# max_output_tokens = 32768          # optional cost cap
+# max_output_tokens = 65536          # optional cost cap
+# max_output_tokens = 131072         # optional cost cap
 # max_output_tokens never changes compact_ratio
 # model_overrides = { "deepseek-v4-flash" = { context_window = 1000000, max_output_tokens = 32768 } }
 

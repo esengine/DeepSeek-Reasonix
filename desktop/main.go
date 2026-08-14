@@ -95,6 +95,13 @@ func linuxWebviewGpuPolicy(pattern string) linux.WebviewGpuPolicy {
 	return linux.WebviewGpuPolicyNever
 }
 
+func preparePrimaryDesktopRuntime(app *App) {
+	// Recovery remains active when optional diagnostics telemetry is disabled.
+	installWebView2ProcessObserver(app)
+	prepareDesktopDiagnostics(app)
+	capturePendingUpdateHealthIdentity(app)
+}
+
 func main() {
 	// Detached macOS self-update child: wait for the old PID, hold the shared
 	// repair mutation lock, then swap the .app bundle. Must run before Wails.
@@ -134,10 +141,8 @@ func main() {
 		dragAndDrop = &options.DragAndDrop{DisableWebViewDrop: true}
 		bindings = nil
 	} else {
-		// Claim diagnostics before Wails so second processes cannot create evidence.
-		prepareDesktopDiagnostics(app)
+		preparePrimaryDesktopRuntime(app)
 		defer app.releaseDesktopDiagnosticsOwnership()
-		capturePendingUpdateHealthIdentity(app)
 	}
 
 	width, height := initialDesktopWindowSize()

@@ -125,6 +125,7 @@ func splitLegacyCoalescedSummary(msg provider.Message) (provider.Message, provid
 	summary.Images = nil
 	summary.ToolCalls = nil
 	summary.ResponsesItems = nil
+	summary.ServerSearch = nil
 	summary.CreatedAt = 0
 	user := msg
 	user.Content = msg.Content[i+len(separator):]

@@ -103,30 +103,6 @@ type ReasonixFinalReadiness struct {
 	Risks          []string `json:"risks"`
 }
 
-type ReasonixUsage struct {
-	PromptTokens     int                `json:"promptTokens"`
-	CompletionTokens int                `json:"completionTokens"`
-	ReasoningTokens  int                `json:"reasoningTokens"`
-	CacheHitTokens   int                `json:"cacheHitTokens"`
-	CacheMissTokens  int                `json:"cacheMissTokens"`
-	Estimated        bool               `json:"estimated,omitempty"`
-	CacheHitRatio    *float64           `json:"cacheHitRatio"`
-	EstimatedCost    *float64           `json:"estimatedCost"`
-	Currency         *string            `json:"currency"`
-	CostComplete     *bool              `json:"costComplete,omitempty"`
-	DisplayComplete  *bool              `json:"displayComplete,omitempty"`
-	DisplayStatus    string             `json:"displayStatus,omitempty"`
-	AggregateMode    string             `json:"aggregateMode,omitempty"`
-	OriginalTotals   []billing.Money    `json:"originalTotals,omitempty"`
-	CostQuote        *billing.CostQuote `json:"costQuote,omitempty"`
-	UsageSource      string             `json:"usageSource"`
-}
-
-type ReasonixStatusUsage struct {
-	Turn       ReasonixUsage `json:"turn"`
-	Cumulative ReasonixUsage `json:"cumulative"`
-}
-
 // ReasonixSessionStatus is the stable schemaVersion=1 recovery snapshot.
 // Reasoning text and unbounded terminal output are intentionally absent.
 type ReasonixSessionStatus struct {
@@ -253,6 +229,7 @@ func (a *usageAccumulator) addQuoted(u *provider.Usage, pricing *provider.Pricin
 
 func (a usageAccumulator) wire() ReasonixUsage {
 	usage := ReasonixUsage{
+		TotalTokens:      a.promptTokens + a.completionTokens,
 		PromptTokens:     a.promptTokens,
 		CompletionTokens: a.completionTokens,
 		ReasoningTokens:  a.reasoningTokens,

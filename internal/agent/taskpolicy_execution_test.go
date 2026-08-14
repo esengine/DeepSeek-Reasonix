@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"reasonix/internal/event"
@@ -12,6 +13,53 @@ import (
 	"reasonix/internal/taskpolicy"
 	"reasonix/internal/tool"
 )
+
+func TestTaskPolicyUsesStructuredCommandEffects(t *testing.T) {
+	var calls int32
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "bash", readOnly: false, calls: &calls})
+	a := New(&scriptedProvider{name: "p"}, reg, NewSession("sys"), Options{}, event.Discard)
+	a.turn.policy = taskpolicy.TaskPolicy{Constraints: taskpolicy.Constraints{ForbidMutation: true}}
+	a.turn.policySet = true
+
+	listing := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "bash", Arguments: `{"command":"git branch -a"}`})
+	if listing.blocked || listing.errMsg != "" {
+		t.Fatalf("branch listing outcome = %+v, want execution", listing)
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("branch listing Execute calls = %d, want 1", got)
+	}
+
+	tests := []struct {
+		name       string
+		command    string
+		wantDomain string
+		secret     string
+	}{
+		{name: "tag creation", command: "git tag v1.2.3", wantDomain: "repository metadata", secret: "v1.2.3"},
+		{name: "host clock", command: "date --set tomorrow", wantDomain: "host state", secret: "tomorrow"},
+		{name: "audit fix", command: "npm audit fix", wantDomain: "workspace content", secret: "fix"},
+		{name: "config edit", command: "git config --edit", wantDomain: "repository metadata", secret: "--edit"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args, err := json.Marshal(map[string]string{"command": tt.command})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "bash", Arguments: string(args)})
+			if !got.blocked || !strings.Contains(got.errMsg, tt.wantDomain) {
+				t.Fatalf("command %q outcome = %+v, want %q mutation block", tt.command, got, tt.wantDomain)
+			}
+			if strings.Contains(got.errMsg, tt.secret) && tt.secret != "--edit" {
+				t.Fatalf("policy error leaked command operand %q: %q", tt.secret, got.errMsg)
+			}
+		})
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("blocked writers reached Execute: calls=%d, want 1", got)
+	}
+}
 
 func TestTaskPolicyEnforcesVerificationAllowlist(t *testing.T) {
 	reg := tool.NewRegistry()

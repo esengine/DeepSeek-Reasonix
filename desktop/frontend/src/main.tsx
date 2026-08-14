@@ -120,6 +120,10 @@ async function mountApp() {
       </ErrorBoundary>
     </StrictMode>,
   );
+
+  void import("./lib/desktopWebViewHeartbeat").then(({ installDesktopWebViewHeartbeat }) => {
+    installDesktopWebViewHeartbeat();
+  });
 }
 
 void mountApp();

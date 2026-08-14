@@ -14,6 +14,8 @@ import (
 	"time"
 
 	ssh_config "github.com/kevinburke/ssh_config"
+
+	"reasonix/internal/proc"
 )
 
 // SSHConfigSource discovers aliases from a parsed OpenSSH client config and
@@ -184,7 +186,7 @@ func runOpenSSHEffectiveConfig(ctx context.Context, path, alias string) ([]byte,
 		args = append(args, "-F", path)
 	}
 	args = append(args, "--", alias)
-	cmd := exec.CommandContext(ctx, "ssh", args...)
+	cmd := proc.CommandContext(ctx, "ssh", args...)
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("ssh -G %q: %w", alias, err)

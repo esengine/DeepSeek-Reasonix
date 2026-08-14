@@ -569,3 +569,27 @@ func CanonicalSessionPathForTopic(sessions []SessionRecord, current string) stri
 	}
 	return canonical
 }
+
+// OrdinaryContinuePath returns the unique covering leaf when current is the
+// ordinary parent (or a stale parent path after re-anchoring). An explicit
+// recovery fork stays put so History can inspect it.
+func OrdinaryContinuePath(sessions []SessionRecord, current string) string {
+	canonical := CanonicalSessionPathForTopic(sessions, current)
+	if canonical == "" {
+		return ""
+	}
+	current = strings.TrimSpace(current)
+	if current == "" || current == canonical {
+		return canonical
+	}
+	for _, session := range sessions {
+		if session.Path != current {
+			continue
+		}
+		if session.Recovered {
+			return ""
+		}
+		return canonical
+	}
+	return canonical
+}

@@ -4,12 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/control"
+	"reasonix/internal/store"
 )
 
 var (
@@ -70,6 +72,19 @@ func (a *App) trashTopic(topicID string) (retErr error) {
 			slog.Warn("desktop: open fallback after topic archive failed")
 		}
 	}
+	keepPath := ""
+	a.mu.RLock()
+	if tab := a.tabs[a.activeTabID]; tab != nil {
+		keepPath = tab.SessionPath
+	}
+	if fallback.workspaceRoot != "" {
+		changedDirs = append(changedDirs, desktopSessionDir(fallback.workspaceRoot))
+	} else if fallback.needs {
+		changedDirs = append(changedDirs, desktopSessionDir(globalWorkspaceRoot()))
+	}
+	a.mu.RUnlock()
+	trace.phase = "discard_unused_blanks"
+	a.discardUnusedTransientBlankSessions(changedDirs, keepPath)
 	trace.phase = "notify"
 	if len(changedDirs) > 0 {
 		a.emitProjectTreeChangedForSessionDirs(changedDirs...)
@@ -267,4 +282,96 @@ func (a *App) topicTrashTargets(topicID string) ([]topicTrashTarget, error) {
 		}
 	}
 	return targets, nil
+}
+
+func topicIndexedInRegistry(scope, workspaceRoot, topicID string) bool {
+	topicID = strings.TrimSpace(topicID)
+	if topicID == "" {
+		return false
+	}
+	if strings.TrimSpace(loadTopicTitles(topicTitleRoot(scope, workspaceRoot))[topicID]) != "" {
+		return true
+	}
+	f := loadProjectsFile()
+	if scope != "project" {
+		return containsDesktopString(f.GlobalTopics, topicID)
+	}
+	if i := projectIndexByRoot(f.Projects, workspaceRoot); i >= 0 {
+		return containsDesktopString(f.Projects[i].Topics, topicID)
+	}
+	return false
+}
+
+func (a *App) discardUnusedTransientBlankSessions(dirs []string, keepPath string) {
+	keepPath = canonicalTabSessionPath(strings.TrimSpace(keepPath))
+	kept := map[string]bool{}
+	if keepPath != "" {
+		kept[keepPath] = true
+	}
+	if a != nil {
+		a.mu.RLock()
+		for _, tabs := range []map[string]*WorkspaceTab{a.tabs, a.detachedSessions} {
+			for _, tab := range tabs {
+				if tab == nil {
+					continue
+				}
+				if path := canonicalTabSessionPath(strings.TrimSpace(tab.SessionPath)); path != "" {
+					kept[path] = true
+				}
+			}
+		}
+		a.mu.RUnlock()
+	}
+	seen := map[string]bool{}
+	for _, dir := range dirs {
+		dir = strings.TrimSpace(dir)
+		if dir == "" || seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			name := entry.Name()
+			if entry.IsDir() || !store.IsSessionTranscriptName(name) {
+				continue
+			}
+			path := filepath.Join(dir, name)
+			if kept[canonicalTabSessionPath(path)] {
+				continue
+			}
+			if !unusedTransientBlankSession(dir, path) {
+				continue
+			}
+			discardTransientBlankSessionArtifacts(path)
+			if a != nil {
+				a.removeSessionCatalogPath(path, "transient_blank_discarded")
+			}
+		}
+	}
+}
+
+func unusedTransientBlankSession(dir, path string) bool {
+	resolved, ok := pinnedTabSessionPath(dir, path)
+	if !ok {
+		return false
+	}
+	info, err := os.Stat(resolved)
+	if err != nil || info.IsDir() || info.Size() != 0 {
+		return false
+	}
+	meta, ok, err := agent.LoadBranchMeta(resolved)
+	if err != nil || !ok {
+		return true
+	}
+	topicID := strings.TrimSpace(meta.TopicID)
+	if topicID == "" {
+		return true
+	}
+	if !isDefaultTopicTitle(meta.TopicTitle) && strings.TrimSpace(meta.TopicTitle) != "" {
+		return false
+	}
+	return !topicIndexedInRegistry(meta.DefaultScope(), meta.WorkspaceRoot, topicID)
 }

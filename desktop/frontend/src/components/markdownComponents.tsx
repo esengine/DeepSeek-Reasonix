@@ -13,7 +13,7 @@ import type { Components } from "react-markdown";
 import { CodeViewer } from "./CodeViewer";
 import { RichMarkdownLink } from "./githubLink";
 import { MarkdownTable } from "./MarkdownTable";
-import { markdownImageSource } from "../lib/markdownImage";
+import { MarkdownImage } from "./MarkdownImage";
 
 const MermaidDiagram = lazy(() => import("./MermaidDiagram"));
 
@@ -63,10 +63,10 @@ function PlainMarkdownBlock({ text }: { text: string }) {
   const asList = statusItems.length >= 2;
   return (
     <div className={`md-plain-block${asList ? " md-plain-block--split" : " md-plain-block--pre"}`}>
-      <CodeViewer value={text} maxHeight={360} />
+      <CodeViewer value={text} scrollMode="bounded" maxHeight="min(60vh, 28rem)" />
       {asList && preText && (
         <div className="md-plain-block__diagram">
-          <CodeViewer value={preText} maxHeight={360} />
+          <CodeViewer value={preText} scrollMode="bounded" maxHeight="min(60vh, 28rem)" />
         </div>
       )}
       {asList && (
@@ -99,25 +99,17 @@ export function createComponents(plainStatusBlocks: boolean): Components {
         const value = text.replace(/\n$/, "");
         if (lang === "mermaid") {
           return (
-            <Suspense fallback={<CodeViewer value={value} language="mermaid" maxHeight={360} />}>
+            <Suspense fallback={<CodeViewer value={value} language="mermaid" scrollMode="bounded" maxHeight="min(60vh, 28rem)" />}>
               <MermaidDiagram definition={value} />
             </Suspense>
           );
         }
         if (!match && plainStatusBlocks) return <PlainMarkdownBlock text={text.replace(/\n$/, "")} />;
-        return <CodeViewer value={value} language={lang} maxHeight={360} />;
+        return <CodeViewer value={value} language={lang} scrollMode="bounded" maxHeight="min(60vh, 28rem)" />;
       }
       return <code className="md-code">{children}</code>;
     },
     a: ({ href, children }) => <RichMarkdownLink href={href}>{children}</RichMarkdownLink>,
-    img: ({ src, alt, title }) => (
-      <img
-        src={markdownImageSource(src)}
-        alt={alt ?? ""}
-        title={title}
-        loading="lazy"
-        referrerPolicy="no-referrer"
-      />
-    ),
+    img: ({ src, alt, title }) => <MarkdownImage src={src} alt={alt} title={title} />,
   };
 }

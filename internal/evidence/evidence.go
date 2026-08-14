@@ -1513,11 +1513,15 @@ func failedSessionCallIDs(msgs []provider.Message) map[string]bool {
 }
 
 func ReceiptFromToolCall(toolName string, args json.RawMessage, success bool, readOnly bool) Receipt {
+	effects := ClassifyToolCall(toolName, args, readOnly)
 	r := Receipt{
 		ToolName: toolName,
 		Args:     args,
 		Success:  success,
-		Mutation: ToolCallMutates(toolName, args, readOnly),
+		// Receipt.Mutation is delivery content debt. Repository-only state
+		// transitions such as a pure commit remain guarded writers, but do not
+		// force another content review pass by themselves.
+		Mutation: effects.ContentMutation,
 	}
 
 	var fields map[string]json.RawMessage
@@ -1569,33 +1573,6 @@ func ToolCallPaths(args json.RawMessage) []string {
 		out = append(out, path)
 	}
 	return out
-}
-
-// ToolCallMutates is the delivery profile's conservative state-change
-// classifier. Trusted read-only tools never mutate. Meta tools that only
-// delegate (task, run_skill, review, …) never mutate by themselves — real
-// writes arrive via child evidence merge. Writer-capable tools do mutate,
-// except for bash commands that the host can prove are inspection or
-// verification commands.
-func ToolCallMutates(toolName string, args json.RawMessage, readOnly bool) bool {
-	if readOnly {
-		return false
-	}
-	if IsNonMutationMetaTool(toolName) {
-		return false
-	}
-	switch toolName {
-	case "ask", "todo_write", "complete_step", "bash_output", "wait":
-		return false
-	case "bash":
-		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(args, &fields); err != nil {
-			return true
-		}
-		return bashMayMutate(stringField(fields, "command"))
-	default:
-		return true
-	}
 }
 
 // ToolCallRequiresDeliveryCriteria reports whether a call begins execution
@@ -1813,9 +1790,7 @@ func bashContainsVerificationSegment(command string) bool {
 		return false
 	}
 	for _, segment := range segments {
-		normalized, _ := shellsafe.NormalizeBashSafeRedirectsForMatch(segment)
-		fields, malformed := shellparse.StaticFields(normalized)
-		if malformed == "" && bashSegmentIsVerification(fields) {
+		if fields, ok := bashStaticArgv(segment); ok && bashSegmentIsVerification(fields) {
 			return true
 		}
 	}
@@ -1832,18 +1807,14 @@ func bashMayMutate(command string) bool {
 		return true
 	}
 	for _, segment := range segments {
-		normalized, safeRedirects := shellsafe.NormalizeBashSafeRedirectsForMatch(segment)
-		if !safeRedirects {
-			return true
+		normalized, _ := shellsafe.NormalizeBashSafeRedirectsForMatch(segment)
+		if normalized == "" {
+			normalized = segment
 		}
-		if staticFields, malformed := shellparse.StaticFields(normalized); malformed == "" && len(staticFields) > 0 && bashSegmentIsVerification(staticFields) {
+		if fields, ok := bashStaticArgv(normalized); ok && bashSegmentIsVerification(fields) {
 			continue
 		}
-		base, sub, fields, workspaceNonMutating := shellsafe.ClassifyWorkspaceNonMutatingCommand(normalized)
-		if !workspaceNonMutating {
-			return true
-		}
-		if bashReadOnlyCommandWrites(base, sub, fields) {
+		if shellsafe.ClassifyBash(segment).AnyMutation() {
 			return true
 		}
 	}
@@ -1865,19 +1836,27 @@ func bashCommandIsVerification(command string) bool {
 		if !safeRedirects {
 			return false
 		}
-		fields, malformed := shellparse.StaticFields(normalized)
-		if malformed != "" || len(fields) == 0 {
+		fields, ok := bashStaticArgv(normalized)
+		if !ok {
 			return false
 		}
 		if bashSegmentIsVerification(fields) {
 			found = true
 			continue
 		}
-		if _, _, readOnly := shellsafe.CommandIsReadOnly(normalized); !readOnly {
+		if shellsafe.ClassifyBash(normalized).AnyMutation() {
 			return false
 		}
 	}
 	return found
+}
+
+func bashStaticArgv(command string) ([]string, bool) {
+	if fields, _, ok := shellsafe.CommandArgv(command); ok {
+		return fields, true
+	}
+	fields, malformed := shellparse.StaticFields(command)
+	return fields, malformed == "" && len(fields) > 0
 }
 
 // IsDeliveryVerificationCommand reports whether command is a host-recognized
@@ -2193,34 +2172,6 @@ func nodeTestFlagWritesFile(arg string) bool {
 	default:
 		return false
 	}
-}
-
-func bashReadOnlyCommandWrites(base, sub string, fields []string) bool {
-	args := fields[1:]
-	if sub != "" && len(args) > 0 {
-		args = args[1:]
-	}
-	switch base {
-	case "find":
-		return hasCommandArg(args, "-exec", "-execdir", "-delete", "-ok", "-okdir", "-fls", "-fprint", "-fprint0", "-fprintf")
-	case "sort":
-		for _, arg := range args {
-			if arg == "-o" || arg == "--output" || strings.HasPrefix(arg, "--output=") || strings.HasPrefix(arg, "-o") {
-				return true
-			}
-		}
-	case "git":
-		if sub == "diff" || sub == "show" || sub == "log" {
-			for _, arg := range args {
-				if arg == "--output" || strings.HasPrefix(arg, "--output=") {
-					return true
-				}
-			}
-		}
-	case "go":
-		return sub == "env" && hasCommandArg(args, "-w", "-u")
-	}
-	return false
 }
 
 func hasCommandArg(args []string, candidates ...string) bool {

@@ -72,7 +72,7 @@ func TestTaskWarrantsPlanner(t *testing.T) {
 		{"what's the best way to refactor this module", true},
 		{"explain how to migrate from v1 to v2", true},
 		{goalContinueTurn, false},
-		{"Goal signaled complete but issues remain:\n- the following tasks are still incomplete:\n  - Fix login (in_progress)\nFix or use todo_write/complete_step to mark done, then report complete again via update_goal.", false},
+		{"Goal signaled complete but issues remain:\n- the following tasks are still incomplete:\n  - Fix login (in_progress)\nFix remaining work, or if a check cannot be run declare it in update_goal completion.unverified and report complete.", false},
 		{activeGoalBlock("execute plan: fix the parser") + "\n\n" + goalContinueTurn, false},
 		{activeGoalBlock("implement the new caching layer") + "\n\nimplement the new caching layer across the backend", true},
 	}

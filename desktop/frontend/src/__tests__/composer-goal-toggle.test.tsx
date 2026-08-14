@@ -1180,7 +1180,7 @@ console.log("\ncomposer goal toggle");
   });
   const dismissibleGuidanceItem = document.querySelector(".composer-guidance-item") as HTMLElement | null;
   if (!dismissibleGuidanceItem) throw new Error("dismissible guidance chip did not render");
-  const dismissButton = dismissibleGuidanceItem.querySelector(".composer-guidance-item__action") as HTMLButtonElement | null;
+  const dismissButton = Array.from(dismissibleGuidanceItem.querySelectorAll<HTMLButtonElement>(".composer-guidance-item__action")).at(-1) ?? null;
   if (!dismissButton) throw new Error("running guidance dismiss button did not render");
   await act(async () => {
     dismissButton.click();

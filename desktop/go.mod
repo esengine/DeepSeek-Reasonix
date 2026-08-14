@@ -2,7 +2,7 @@ module reasonix/desktop
 
 go 1.25.0
 
-toolchain go1.26.5
+toolchain go1.26.6
 
 // The desktop shell is a nested module so its CGO/WebKit build never touches the
 // CLI's CGO_ENABLED=0 single-static-binary guarantee. The replace lets it import
@@ -20,7 +20,7 @@ require (
 	github.com/go-ole/go-ole v1.3.0
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/tc-hib/winres v0.3.1
-	github.com/wailsapp/go-webview2 v1.0.23
+	github.com/wailsapp/go-webview2 v1.0.28
 	github.com/wailsapp/wails/v2 v2.13.0
 	golang.org/x/image v0.44.0
 	golang.org/x/mod v0.38.0

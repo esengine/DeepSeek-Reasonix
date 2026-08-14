@@ -16,7 +16,7 @@
     "test:terminal": "tsx src/__tests__/terminal-events.test.ts && tsx src/__tests__/terminal-store.test.ts && tsx src/__tests__/terminal-output.test.ts && tsx src/__tests__/terminal-theme.test.ts && tsx src/__tests__/workspace-layout.test.ts",
     "test:usage-stats": "tsx src/__tests__/usage-stats-format.test.ts && tsx src/__tests__/usage-stats-panel.test.tsx",
     "test:task-monitor": "tsx src/components/TaskMonitorPanel.test.tsx && tsx src/__tests__/task-monitor-navigation.test.ts",
-    "test:workspace": "tsx src/__tests__/workspace-refresh-store.test.ts && tsx src/__tests__/workspace-changes-errors.test.tsx && tsx src/__tests__/workspace-context-menu.test.tsx",
+    "test:workspace": "tsx src/__tests__/keyed-resource.test.ts && tsx src/__tests__/workspace-tree-memory.test.ts && tsx src/__tests__/workspace-refresh-store.test.ts && tsx src/__tests__/workspace-changes-errors.test.tsx && tsx src/__tests__/workspace-context-menu.test.tsx && tsx src/__tests__/workspace-panel-swr-contract.test.ts",
     "test:settings-responsive": "tsx src/__tests__/settings-responsive-layout.test.ts",
     "test:motion": "node scripts/check-motion-ci-contract.mjs && node scripts/check-waapi-contract.mjs --self-test && tsx src/__tests__/native-motion.test.tsx && tsx src/__tests__/approval-animation.test.tsx",
     "test:motion-browser": "PLAYWRIGHT_BROWSERS_PATH=.pw-browsers node bench/approval-animation.mjs",

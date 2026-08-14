@@ -10,18 +10,21 @@ import { asArray } from "../lib/array";
 import { useToast } from "../lib/toast";
 import { app } from "../lib/bridge";
 import { onProjectTreeChangedV2 } from "../lib/sessionCatalogBridge";
-import { isRuntimeSessionNode, isTopicNode, mergeProjectTopicPage, projectTreeDedupedExactTime, projectTreeEventAffectsFolder, projectTreeFolderDisclosure, projectTreeReadActivityKey, projectTreeRevisionIsFresh, projectTreeShouldApplyShellSnapshot, projectTreeShouldRenderTopicActions, projectTreeShouldSuppressOpenForRename, projectTreeTopicArchiveBlocked, projectTreeTopicHasUnreadActivity, projectTreeTopicHoverCardModel, projectTreeTopicMenuOffersPin, projectTreeTopicMetaLine, projectTreeTopicOpenRequest, topicActivityAt, topicActivityDateLabel, topicActivityLabel, topicIsActive, topicStatus, topicStatusLabel, topicUnknownTimeLabel, type ProjectTreePendingTopicOpen, type ProjectTreeReadActivity, type ProjectTreeTopicHoverCard, type ProjectTreeVariant } from "../lib/projectTreeTopic";
+import { isRuntimeSessionNode, isTopicNode, loadWorkbenchOrganizeMode, loadWorkbenchSortMode, mergeProjectTopicPage, projectTreeDedupedExactTime, projectTreeEventAffectsFolder, projectTreeFolderDisclosure, projectTreeReadActivityKey, projectTreeRevisionIsFresh, projectTreeShellChildren, projectTreeShellSignature, projectTreeShouldApplyShellSnapshot, projectTreeShouldRenderTopicActions, projectTreeShouldSuppressOpenForRename, projectTreeTopicArchiveBlocked, projectTreeTopicHasUnreadActivity, projectTreeTopicHoverCardModel, projectTreeTopicMenuOffersPin, projectTreeTopicMetaLine, projectTreeTopicOpenRequest, projectTreeWithoutTopic, topicActivityAt, topicActivityDateLabel, topicActivityLabel, topicIsActive, topicStatus, topicStatusLabel, topicUnknownTimeLabel, WORKBENCH_ORGANIZE_KEY, WORKBENCH_SORT_KEY, type ProjectTreePendingTopicOpen, type ProjectTreeReadActivity, type ProjectTreeTopicHoverCard, type ProjectTreeVariant, type WorkbenchOrganizeMode, type WorkbenchSortMode } from "../lib/projectTreeTopic";
 export * from "../lib/projectTreeTopic";
 import type { ProjectNode, SessionCatalogStatus } from "../lib/types";
 import { topicActivityTime } from "../lib/session";
 import { useT, type Translator } from "../lib/i18n";
 import { PROJECT_COLOR_OPTIONS, projectColorValue } from "../lib/projectColors";
-import { useProjectTreeArchiveState } from "../lib/projectTreeArchive";
+import { projectTreeWithoutTopics, reloadProjectTreeTopics, useProjectTreeArchiveController, type ProjectTreeRefresh, type ProjectTreeRefreshOptions } from "../lib/projectTreeArchive";
 import { topicShortcutLabel, type TopicShortcutEntry } from "../lib/topicShortcuts";
 import type { ShortcutPlatform } from "../lib/keyboardShortcuts";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
 import { Tooltip } from "./Tooltip";
 import { WorktreeBadge } from "./WorktreeBadge";
+import { useProjectCreation } from "./useProjectCreation";
+import { useProjectTreeRuntimeProjection } from "../lib/useProjectTreeRuntimeProjection";
+
 interface ProjectTreeProps {
   activeScope?: string;
   activeWorkspaceRoot?: string;
@@ -30,7 +33,7 @@ interface ProjectTreeProps {
   imTopicSources?: Record<string, ProjectTreeImTopicSource>;
   variant?: ProjectTreeVariant;
   onOpenTopic: (scope: string, workspaceRoot: string, topicId: string, sessionPath?: string) => Promise<void> | void;
-  onAddProject: () => Promise<void>;
+  onAddProject: (path?: string) => Promise<void>;
   onCreateTopic?: (scope: string, workspaceRoot: string) => Promise<void> | void;
   onCreateDeliveryWorktree?: (workspaceRoot: string) => Promise<void> | void;
   onRenameTopic?: (topicId: string, title: string) => Promise<void> | void;
@@ -56,11 +59,8 @@ function projectNodeKey(node: ProjectNode, depth: number): string {
   return node.key || `${node.kind}-${node.root ?? ""}-${node.topicId ?? ""}-${depth}`;
 }
 
-
 type ProjectDropPosition = "before" | "after";
 type WorkbenchHeaderMenu = "more" | "add" | null;
-type WorkbenchOrganizeMode = "project" | "recent" | "time";
-type WorkbenchSortMode = "created" | "updated";
 
 type CollapseSnapshot = {
   expanded: Set<string>;
@@ -73,11 +73,8 @@ type PinnedTreeSections = {
 };
 
 const GLOBAL_PROJECT_ORDER_KEY = "__global__";
-const WORKBENCH_ORGANIZE_KEY = "projectTree:workbenchOrganize";
-// Shared by classic and workbench; key string kept for existing saved choices.
-const WORKBENCH_SORT_KEY = "projectTree:workbenchSort";
 const READ_ACTIVITY_KEY = "projectTree:readActivity";
-const READ_ACTIVITY_INIT_KEY = "projectTree:readActivityInitialized";
+const READ_ACTIVITY_BASELINE_KEY = "projectTree:readActivityBaselineAt";
 
 function loadReadActivity(): ProjectTreeReadActivity {
   try {
@@ -102,24 +99,16 @@ function saveReadActivity(readActivity: ProjectTreeReadActivity) {
   }
 }
 
-function loadWorkbenchOrganizeMode(): WorkbenchOrganizeMode {
+function loadReadActivityBaselineAt(): number {
   try {
-    const value = localStorage.getItem(WORKBENCH_ORGANIZE_KEY);
-    if (value === "recent" || value === "time") return value;
+    const parsed = Number(localStorage.getItem(READ_ACTIVITY_BASELINE_KEY));
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    const now = Date.now();
+    localStorage.setItem(READ_ACTIVITY_BASELINE_KEY, String(now));
+    return now;
   } catch {
-    /* localStorage unavailable */
+    return Date.now();
   }
-  return "project";
-}
-
-function loadWorkbenchSortMode(): WorkbenchSortMode {
-  try {
-    const value = localStorage.getItem(WORKBENCH_SORT_KEY);
-    if (value === "created") return "created";
-  } catch {
-    /* localStorage unavailable */
-  }
-  return "updated";
 }
 
 function projectOrderKey(node: ProjectNode): string {
@@ -418,7 +407,6 @@ export function ProjectTree({
   const [menuPoint, setMenuPoint] = useState<ContextMenuPoint | null>(null);
   const [editingProject, setEditingProject] = useState<{ key: string; root: string } | null>(null);
   const [projectDraft, setProjectDraft] = useState("");
-  const [addingProject, setAddingProject] = useState(false);
   const [isolatingProject, setIsolatingProject] = useState<string | null>(null);
   const [worktreeAvailability, setWorktreeAvailability] = useState<Record<string, { available: boolean; reason?: string }>>({});
   const [confirmAction, setConfirmAction] = useState<{ topicId: string; action: "trash" } | null>(null);
@@ -430,7 +418,9 @@ export function ProjectTree({
   const [workbenchHeaderMenu, setWorkbenchHeaderMenu] = useState<WorkbenchHeaderMenu>(null);
   const [workbenchOrganizeMode, setWorkbenchOrganizeMode] = useState<WorkbenchOrganizeMode>(loadWorkbenchOrganizeMode);
   const [workbenchSortMode, setWorkbenchSortMode] = useState<WorkbenchSortMode>(loadWorkbenchSortMode);
+  const workbenchSortModeRef = useRef(workbenchSortMode);
   const [readActivity, setReadActivity] = useState<ProjectTreeReadActivity>(loadReadActivity);
+  const [readBaselineAt] = useState(loadReadActivityBaselineAt);
   const filterRef = useRef<HTMLDivElement>(null);
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -441,7 +431,22 @@ export function ProjectTree({
   const [hoverCard, setHoverCard] = useState<{ key: string; card: ProjectTreeTopicHoverCard; left: number; top: number } | null>(null);
   const hoverCardTimerRef = useRef<number | null>(null);
   const creatingRef = useRef(false);
-  const { trashingTopics, beginTrashingTopic, endTrashingTopic } = useProjectTreeArchiveState();
+  const closeMenu = useCallback(() => {
+    setMenuTopic(null);
+    setMenuProject(null);
+    setMenuPoint(null);
+    setConfirmAction(null);
+    setConfirmRemoveProject(null);
+    setWorkbenchHeaderMenu(null);
+  }, []);
+  const topicLoadSeqRef = useRef<Record<string, number>>({});
+  const refreshRef = useRef<ProjectTreeRefresh>(async () => {});
+  const { trashingTopics, currentArchiveTombstones, trashTopic } = useProjectTreeArchiveController({
+    treeRef, topicLoadSeqRef, topicPageStateRef, updateTopicPageState, refreshRef,
+    optimisticallyRemoveTopic: (topicId) => setTree((current) => projectTreeWithoutTopic(current, topicId)),
+    closeMenu, onTopicsChanged, showToast,
+  });
+  const applyRuntimeProjection = useProjectTreeRuntimeProjection(setTree, currentArchiveTombstones);
   const clickTimerRef = useRef<ProjectTreePendingTopicOpen | null>(null);
   useEffect(() => {
     return () => {
@@ -468,15 +473,6 @@ export function ProjectTree({
     });
   }, []);
 
-  const closeMenu = useCallback(() => {
-    setMenuTopic(null);
-    setMenuProject(null);
-    setMenuPoint(null);
-    setConfirmAction(null);
-    setConfirmRemoveProject(null);
-    setWorkbenchHeaderMenu(null);
-  }, []);
-
   const updateManuallyCollapsed = useCallback((updater: (prev: Set<string>) => Set<string>) => {
     setManuallyCollapsed((prev) => {
       const next = updater(prev);
@@ -485,7 +481,7 @@ export function ProjectTree({
     });
   }, []);
 
-  const topicLoadSeqRef = useRef<Record<string, number>>({});
+  const loadProjectTopicsRef = useRef<(project: ProjectNode, append?: boolean) => Promise<void>>(async () => {});
 
   const loadProjectTopics = useCallback(async (project: ProjectNode, append = false) => {
     if (project.kind !== "project" && project.kind !== "global_folder") return;
@@ -493,7 +489,8 @@ export function ProjectTree({
     const pageState = topicPageStateRef.current[key];
     const cursor = append ? pageState?.nextCursor ?? "" : "";
     if (append && !cursor) return;
-    // Last-query-wins: never drop a newer search because an older page is still loading.
+    const sortMode = creationTopics ? "updated" : workbenchSortModeRef.current;
+    // Last-query-wins: stale completions cannot overwrite a newer first page.
     const seq = (topicLoadSeqRef.current[key] ?? 0) + 1;
     topicLoadSeqRef.current[key] = seq;
     updateTopicPageState(key, { ...pageState, loading: true });
@@ -505,6 +502,7 @@ export function ProjectTree({
         limit: timeFilter === "10" ? 10 : timeFilter === "20" ? 20 : 50,
         query: query.trim(),
         timeFilter: timeFilter === "10" || timeFilter === "20" || timeFilter === "all" ? "" : timeFilter,
+        sortMode,
       });
       if (topicLoadSeqRef.current[key] !== seq) return;
       if (!projectTreeRevisionIsFresh(latestRevisionRef.current, page.revision)) {
@@ -512,35 +510,77 @@ export function ProjectTree({
         return;
       }
       latestRevisionRef.current = Math.max(latestRevisionRef.current, page.revision);
-      const items = asArray(page.items);
-      setTree((current) => current.map((node) => {
+      const items = projectTreeWithoutTopics(asArray(page.items), currentArchiveTombstones());
+      setTree((current) => applyRuntimeProjection(current.map((node) => {
         if (node.key !== key) return node;
         return { ...node, children: mergeProjectTopicPage(asArray(node.children), items, append) };
-      }));
+      })));
       updateTopicPageState(key, { nextCursor: page.nextCursor, loading: false });
     } catch {
       if (topicLoadSeqRef.current[key] !== seq) return;
       updateTopicPageState(key, { ...topicPageStateRef.current[key], loading: false });
     }
-  }, [query, timeFilter, updateTopicPageState]);
-  // Snapshot is intentionally shells-only. Preserve already loaded pages by
-  // project key so a metadata refresh does not collapse or blank the sidebar.
-  const refresh = useCallback(async () => {
+  }, [applyRuntimeProjection, creationTopics, currentArchiveTombstones, query, timeFilter, updateTopicPageState]);
+  loadProjectTopicsRef.current = loadProjectTopics;
+
+  const selectWorkbenchSortMode = useCallback((sortMode: WorkbenchSortMode) => {
+    if (workbenchSortModeRef.current === sortMode) {
+      closeMenu();
+      setFilterMenuOpen(false);
+      return;
+    }
+    // Invalidate before scheduling React state so an already-resolved older
+    // request cannot write back during the render/effect gap. Its pagination
+    // cursor belongs to the old order and must not be reused by the new query.
+    workbenchSortModeRef.current = sortMode;
+    for (const key in topicLoadSeqRef.current) topicLoadSeqRef.current[key] += 1;
+    topicPageStateRef.current = {};
+    setTopicPageState({});
+    setWorkbenchSortMode(sortMode);
+    closeMenu();
+    setFilterMenuOpen(false);
+
+    const filtering = query.trim() !== "" || timeFilter !== "all";
+    for (const project of treeRef.current) {
+      const key = projectNodeKey(project, 0);
+      if (filtering || expanded.has(key)) void loadProjectTopics(project);
+    }
+  }, [closeMenu, expanded, loadProjectTopics, query, timeFilter]);
+  // Snapshot carries project shells plus lightweight pinned topic shells.
+  // Preserve already loaded pages by project key while reconciling pins, so a
+  // metadata refresh does not collapse or blank the sidebar.
+  const refresh = useCallback(async (options?: ProjectTreeRefreshOptions) => {
+    const reloadRequestedProjects = (projects: ProjectNode[]) => reloadProjectTreeTopics(projects, options, loadProjectTopicsRef.current);
     try {
       const snapshot = await app.GetProjectTreeSnapshot();
       const rev = snapshot.revision ?? 0, empty = treeRef.current.length === 0;
-      if (!projectTreeShouldApplyShellSnapshot({ currentRevision: latestRevisionRef.current, incomingRevision: rev, treeEmpty: empty })) return;
+      if (!projectTreeShouldApplyShellSnapshot({ currentRevision: latestRevisionRef.current, incomingRevision: rev, treeEmpty: empty })) {
+        await reloadRequestedProjects(treeRef.current);
+        return;
+      }
       if (projectTreeRevisionIsFresh(latestRevisionRef.current, rev)) latestRevisionRef.current = Math.max(latestRevisionRef.current, rev);
       const projects = asArray(snapshot.projects);
       setCatalogStatus(snapshot.catalog);
-      setTree((current) => projects.map((project) => {
+      setTree((current) => applyRuntimeProjection(projects.map((project) => {
         const previous = current.find((node) => node.key === project.key);
-        return { ...project, children: asArray(previous?.children) };
-      }));
+        // Topic pages reload asynchronously. Keep the last painted children
+        // until their replacement arrives so a mutation cannot blank every
+        // expanded folder for the duration of a catalog scan.
+        return { ...project, children: projectTreeShellChildren(previous?.children, project.children) };
+      })));
+      await reloadRequestedProjects(projects);
     } catch {
-      /* bridge unavailable */
+      // A shell snapshot is metadata-only. If it fails, the resident folder
+      // identity can still drive the requested canonical topic reload.
+      await reloadRequestedProjects(treeRef.current);
     }
-  }, []);
+  }, [applyRuntimeProjection]);
+  refreshRef.current = refresh;
+  const { addingProject, handleAddProject, openBlankProjectFlow, blankProjectFlow } = useProjectCreation({
+    onAddProject,
+    onRefresh: refresh,
+    showToast,
+  });
 
   useEffect(() => {
     treeRef.current = tree;
@@ -575,7 +615,9 @@ export function ProjectTree({
   }), [expanded, loadProjectTopics, refresh]);
 
   // Debounce query/timeFilter reloads so typing does not stampede the catalog.
-  // Expansion and tree shell arrival still load on the same path after the delay.
+  // Dependency is the project-shell signature, not tree: topic page loads
+  // rewrite children and would otherwise re-arm this effect in a loop.
+  const projectShellSignature = useMemo(() => projectTreeShellSignature(tree), [tree]);
   useEffect(() => {
     const filtering = query.trim() !== "" || timeFilter !== "all";
     const timer = setTimeout(() => {
@@ -585,7 +627,7 @@ export function ProjectTree({
       }
     }, 200);
     return () => clearTimeout(timer);
-  }, [expanded, loadProjectTopics, query, timeFilter, tree]);
+  }, [expanded, loadProjectTopics, projectShellSignature, query, timeFilter]);
 
   // Following the active topic is a view concern over the tree already held.
   useEffect(() => {
@@ -601,51 +643,13 @@ export function ProjectTree({
     const activityAt = topicActivityAt(node);
     if (!key || activityAt <= 0) return;
     setReadActivity((prev) => {
-      if ((prev[key] ?? 0) >= activityAt) return prev;
-      const next = { ...prev, [key]: activityAt };
+      const readAt = Math.max(activityAt, Date.now());
+      if ((prev[key] ?? 0) >= readAt) return prev;
+      const next = { ...prev, [key]: readAt };
       saveReadActivity(next);
       return next;
     });
   }, []);
-
-  useEffect(() => {
-    if (tree.length === 0) return;
-    try {
-      if (localStorage.getItem(READ_ACTIVITY_INIT_KEY)) return;
-    } catch {
-      return;
-    }
-    const baseline: ProjectTreeReadActivity = {};
-    const collectBaseline = (nodes: ProjectNode[]) => {
-      for (const node of nodes) {
-        if ((isTopicNode(node) || isRuntimeSessionNode(node)) && topicStatus(node) === "") {
-          const key = projectTreeReadActivityKey(node);
-          const activityAt = topicActivityAt(node);
-          if (key && activityAt > 0) baseline[key] = Math.max(baseline[key] ?? 0, activityAt);
-        }
-        collectBaseline(asArray(node.children));
-      }
-    };
-    collectBaseline(tree);
-    try {
-      localStorage.setItem(READ_ACTIVITY_INIT_KEY, "1");
-    } catch {
-      /* localStorage unavailable */
-    }
-    if (Object.keys(baseline).length === 0) return;
-    setReadActivity((prev) => {
-      const next = { ...prev };
-      let changed = false;
-      for (const [key, value] of Object.entries(baseline)) {
-        if ((next[key] ?? 0) >= value) continue;
-        next[key] = value;
-        changed = true;
-      }
-      if (!changed) return prev;
-      saveReadActivity(next);
-      return next;
-    });
-  }, [tree]);
 
   useEffect(() => {
     const markActive = (nodes: ProjectNode[]) => {
@@ -792,17 +796,6 @@ export function ProjectTree({
     });
   }, [collapseSnapshot, expanded, folderKeys, hasExpandedFolders, manuallyCollapsed, searchActive, updateManuallyCollapsed]);
 
-  const handleAddProject = async () => {
-    if (addingProject) return;
-    setAddingProject(true);
-    try {
-      await onAddProject();
-      await refresh();
-    } finally {
-      setAddingProject(false);
-    }
-  };
-
   const openWorkbenchHeaderMenu = (
     event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,
     menu: Exclude<WorkbenchHeaderMenu, null>,
@@ -911,21 +904,6 @@ export function ProjectTree({
     }
   };
 
-  const trashTopic = async (topicId: string) => {
-    if (!beginTrashingTopic(topicId)) return;
-    try {
-      await app.TrashTopic(topicId);
-      setMenuTopic(null);
-      setMenuPoint(null);
-      setConfirmAction(null);
-      await refresh();
-      await onTopicsChanged?.();
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : String(err), "error");
-    } finally {
-      endTrashingTopic(topicId);
-    }
-  };
   const setTopicPinned = async (topicId: string, pinned: boolean) => {
     try {
       await app.SetTopicPinned(topicId, pinned);
@@ -1191,7 +1169,7 @@ export function ProjectTree({
       const showStatusInSide = status === "thinking" || status === "streaming" || status === "waiting_confirmation" || status === "background_job";
       const showWaitingPill = waitingConfirmation;
       const showSideTime = sideTimeVisible && !showWaitingPill;
-      const unread = projectTreeTopicHasUnreadActivity(node, readActivity, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath);
+      const unread = projectTreeTopicHasUnreadActivity(node, readActivity, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath, readBaselineAt);
       const topicId = node.topicId ?? "";
       const topicTrashing = trashingTopics.has(topicId);
       const imSource = scope === "global" && topicId ? imTopicSources[topicId] : undefined;
@@ -1333,7 +1311,7 @@ export function ProjectTree({
                     <span>{imSourceLabel}</span>
                   </span>
                 )}
-                {!compactTopics && statusLabel && (!classicTopics || status === "paused" || status === "error") && (
+                {!compactTopics && statusLabel && (!classicTopics || status === "paused" || status === "awaiting_delivery" || status === "error") && (
                   <span className={`project-tree__topic-status project-tree__topic-status--${status}`}>{statusLabel}</span>
                 )}
               </span>
@@ -1872,8 +1850,7 @@ export function ProjectTree({
       icon: <Clock size={13} />,
       label: menuLabelWithCheck(t("projectTree.sortByCreatedAt"), workbenchSortMode === "created"),
       onSelect: () => {
-        setWorkbenchSortMode("created");
-        closeMenu();
+        selectWorkbenchSortMode("created");
       },
     },
     {
@@ -1881,8 +1858,7 @@ export function ProjectTree({
       icon: <Pencil size={13} />,
       label: menuLabelWithCheck(t("projectTree.sortByUpdatedAt"), workbenchSortMode === "updated"),
       onSelect: () => {
-        setWorkbenchSortMode("updated");
-        closeMenu();
+        selectWorkbenchSortMode("updated");
       },
     },
   ];
@@ -1892,8 +1868,8 @@ export function ProjectTree({
       key: "blank-project",
       icon: <FolderPlus size={13} />,
       label: t("projectTree.createBlankProject"),
-      disabled: true,
-      onSelect: () => {},
+      disabled: addingProject,
+      onSelect: () => { closeMenu(); openBlankProjectFlow(); },
     },
     {
       key: "existing-folder",
@@ -2018,7 +1994,7 @@ export function ProjectTree({
                   <button
                     type="button"
                     className={`project-tree__time-filter-opt${workbenchSortMode === "updated" ? " project-tree__time-filter-opt--on" : ""}`}
-                    onClick={() => { setWorkbenchSortMode("updated"); setFilterMenuOpen(false); }}
+                    onClick={() => selectWorkbenchSortMode("updated")}
                     role="menuitem"
                   >
                     {t("projectTree.sortByUpdatedAt")}
@@ -2026,7 +2002,7 @@ export function ProjectTree({
                   <button
                     type="button"
                     className={`project-tree__time-filter-opt${workbenchSortMode === "created" ? " project-tree__time-filter-opt--on" : ""}`}
-                    onClick={() => { setWorkbenchSortMode("created"); setFilterMenuOpen(false); }}
+                    onClick={() => selectWorkbenchSortMode("created")}
                     role="menuitem"
                   >
                     {t("projectTree.sortByCreatedAt")}
@@ -2269,6 +2245,7 @@ export function ProjectTree({
         </div>,
         document.body,
       )}
+      {blankProjectFlow}
     </div>
   );
 }

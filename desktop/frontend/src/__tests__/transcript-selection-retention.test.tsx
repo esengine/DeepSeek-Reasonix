@@ -233,7 +233,7 @@ await act(async () => {
   document.dispatchEvent(new window.MouseEvent("pointermove", { bubbles: true, clientX: 100, clientY: 40 }));
 });
 eq(transcriptSelectionStore.getSnapshot().mode, "logical-dragging", "a dead native range still promotes from the frozen anchor during drag");
-eq(mode, "logical-selecting", "dead-native promotion transfers scroll ownership to logical selection");
+eq(mode, "selection", "dead-native promotion transfers scroll ownership to logical selection");
 await act(async () => {
   document.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, button: 0, clientX: 100, clientY: 40 }));
 });

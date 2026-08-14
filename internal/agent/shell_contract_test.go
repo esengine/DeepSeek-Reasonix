@@ -178,6 +178,61 @@ func TestBatchDependencyBarrierSkipsVerificationAfterFailedMutation(t *testing.T
 	t.Fatal("verify tool result missing")
 }
 
+func TestBatchDependencyBarrierReportsSanitizedRepositoryCause(t *testing.T) {
+	var calls int32
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "bash", readOnly: false, err: fmt.Errorf("synthetic failure"), calls: &calls})
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{
+			toolCallChunk("w1", "bash", `{"command":"git tag private-release-name"}`),
+			toolCallChunk("v1", "bash", `{"command":"go test ./..."}`),
+			{Type: provider.ChunkDone},
+		},
+		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
+	}}
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
+	if err := a.Run(context.Background(), "tag then verify"); err != nil {
+		t.Fatal(err)
+	}
+	got := toolResultByID(a.sess.conversation, "v1")
+	if !strings.Contains(got, "repository metadata") {
+		t.Fatalf("dependency result = %q, want repository metadata cause", got)
+	}
+	if strings.Contains(got, "private-release-name") {
+		t.Fatalf("dependency result leaked command operand: %q", got)
+	}
+	if calls != 1 {
+		t.Fatalf("bash Execute calls = %d, want only the failed writer", calls)
+	}
+}
+
+func TestBatchDependencyBarrierDoesNotOpenForFailedBranchListing(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "x.txt"), []byte("a\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "bash", readOnly: false, err: fmt.Errorf("synthetic reader failure")})
+	for _, tl := range (builtin.Workspace{Dir: dir}).Tools("edit_file") {
+		reg.Add(tl)
+	}
+	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
+	batch := a.executeBatch(context.Background(), &a.turn, []provider.ToolCall{
+		{ID: "r1", Name: "bash", Arguments: `{"command":"git branch -a"}`},
+		{ID: "e1", Name: "edit_file", Arguments: `{"path":"x.txt","old_string":"a","new_string":"b"}`},
+	})
+	if got := batch.results[1]; strings.Contains(got, "earlier") || strings.HasPrefix(strings.TrimSpace(got), "blocked:") {
+		t.Fatalf("edit was dependency-blocked after reader failure: %q", got)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "x.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "b\n" {
+		t.Fatalf("file = %q, want edit to run after failed reader", string(got))
+	}
+}
+
 // TestBatchDependencyBarrierIgnoresFailedNonMutationMetaTool keeps bookkeeping
 // writers out of the barrier. todo_write, complete_step, ask, bash_output and
 // wait all report ReadOnly()==false, but evidence.ToolCallMutates deliberately

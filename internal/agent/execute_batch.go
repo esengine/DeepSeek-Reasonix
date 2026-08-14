@@ -8,10 +8,39 @@ import (
 
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
-	"reasonix/internal/permission"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
+
+// mutationBarrierCause is an immutable, argument-free description of the
+// first durable-state write that failed or was blocked in a tool batch.
+type mutationBarrierCause struct {
+	callID                string
+	toolName              string
+	stateMutation         bool
+	workspaceMutation     bool
+	contentMutation       bool
+	repositoryMutation    bool
+	classificationKnown   bool
+	reason, blockingPhase string
+}
+
+func (c *mutationBarrierCause) message() string {
+	if c == nil {
+		return "blocked: skipped because an earlier modification failed or was blocked in this tool batch. " +
+			"Fix or re-run the failed change first; verification was not executed."
+	}
+	reason := c.reason
+	if reason == "" {
+		reason = "state mutation whose effects cannot be proven read-only"
+	}
+	action := "failed"
+	if c.blockingPhase == "blocked" {
+		action = "was blocked"
+	}
+	return "blocked: skipped because an earlier modification (" + reason + ") " + action + " in this tool batch. " +
+		"Fix or re-run the failed change first; verification was not executed."
+}
 
 // toolOutcome is one tool call's result. output is the first-visible bounded
 // form the model sees; rawOutput is the full original when truncation applied
@@ -176,9 +205,12 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 	// blocked, later mutations/verifications in the batch are skipped; read-only
 	// diagnosis still runs. executeOne re-checks after proxy resolution.
 	mutationBatchStop := false
-	a.mutationDependencyBarrier.Store(false)
-	markDependencySkipped := func(start int) {
-		a.mutationDependencyBarrier.Store(true)
+	a.mutationDependencyBarrier.Store(nil)
+	markDependencySkipped := func(start int, cause *mutationBarrierCause) {
+		if cause != nil {
+			a.mutationDependencyBarrier.CompareAndSwap(nil, cause)
+		}
+		cause = a.mutationDependencyBarrier.Load()
 		for j := start; j < len(calls); j++ {
 			if results[j] != "" {
 				continue
@@ -190,8 +222,7 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 				continue
 			}
 			isVerification := calls[j].Name == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(json.RawMessage(calls[j].Arguments)))
-			msg := "blocked: skipped because an earlier modification in this tool batch failed or was blocked. " +
-				"Fix or re-run the failed change first; verification was not executed."
+			msg := cause.message()
 			var ex *tool.ShellExecution
 			if calls[j].Name == "bash" {
 				ex = &tool.ShellExecution{
@@ -280,16 +311,8 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 				if results[i] != "" {
 					continue
 				}
-				t, _, ambiguous := a.svc.tools.ResolveCall(calls[i].Name)
-				known := t != nil && len(ambiguous) == 0
-				readOnly := known && t.ReadOnly()
-				if calls[i].Name == "bash" && permission.BashCommandIsReadOnly(json.RawMessage(calls[i].Arguments)) {
-					readOnly = true
-				}
-				isVerification := calls[i].Name == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(json.RawMessage(calls[i].Arguments)))
-				mutates := evidence.ToolCallMutates(calls[i].Name, json.RawMessage(calls[i].Arguments), readOnly)
-				if mutates || isVerification {
-					markDependencySkipped(i)
+				if batchCallStaticallySkippable(a, calls[i]) {
+					markDependencySkipped(i, nil)
 					// markDependencySkipped fills this index; move on.
 					if results[i] != "" {
 						continue
@@ -310,9 +333,9 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 				break
 			}
 			// Mutation/verification failure barrier for the rest of this batch.
-			if batchCallIsMutatingFailure(a, calls[i], outcomes[i]) {
+			if cause := batchCallMutationFailureCause(a, calls[i], outcomes[i]); cause != nil {
 				mutationBatchStop = true
-				markDependencySkipped(i + 1)
+				markDependencySkipped(i+1, cause)
 			}
 			// After each tool execution, also check if the context was cancelled.
 			// If so, stop executing remaining tools and return immediately so
@@ -385,12 +408,12 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 	}
 }
 
-// batchCallIsMutatingFailure reports whether a finished call was a mutation
-// (file write / non-readonly bash mutation) that failed or was blocked, so later
-// mutations and verifications in the same batch must not run.
-func batchCallIsMutatingFailure(a *Agent, call provider.ToolCall, o toolOutcome) bool {
+// batchCallMutationFailureCause returns a sanitized effect description when a
+// durable-state mutation failed or was blocked. Verification failures alone do
+// not open the dependency barrier.
+func batchCallMutationFailureCause(a *Agent, call provider.ToolCall, o toolOutcome) *mutationBarrierCause {
 	if o.errMsg == "" && !o.blocked {
-		return false
+		return nil
 	}
 	readOnly := false
 	toolName := call.Name
@@ -411,26 +434,28 @@ func batchCallIsMutatingFailure(a *Agent, call provider.ToolCall, o toolOutcome)
 		toolArgs = o.effective.args
 		readOnly = o.effective.readOnly
 	}
-	if toolName == "bash" && permission.BashCommandIsReadOnly(toolArgs) {
-		readOnly = true
+	effects := evidence.ClassifyToolCall(toolName, toolArgs, readOnly)
+	if toolName == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(toolArgs)) && !effects.StateMutation {
+		return nil
 	}
-	// Verification failures do not open the dependency barrier by themselves —
-	// only a failed modification does.
-	if toolName == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(toolArgs)) {
-		return false
+	if !effects.StateMutation {
+		return nil
 	}
-	// Resolved writers (including MCP targets behind use_capability) count even
-	// when the provider-visible proxy advertised ReadOnly.
-	if o.resolved && !o.resolvedReadOnly {
-		return true
+	phase := "failed"
+	if o.blocked {
+		phase = "blocked"
 	}
-	if evidence.ToolCallMutates(toolName, toolArgs, readOnly) {
-		return true
+	return &mutationBarrierCause{
+		callID:              call.ID,
+		toolName:            toolName,
+		stateMutation:       effects.StateMutation,
+		workspaceMutation:   effects.WorkspaceMutation,
+		contentMutation:     effects.ContentMutation,
+		repositoryMutation:  effects.RepositoryMutation,
+		classificationKnown: effects.Known && known,
+		reason:              effects.Reason,
+		blockingPhase:       phase,
 	}
-	// Fail closed only for a target the host could not classify: a blanket
-	// !readOnly fallback would re-admit the meta tools ToolCallMutates exempts,
-	// letting a failed todo_write block every real edit left in the batch.
-	return !known
 }
 
 // batchCallStaticallySkippable reports whether a remaining call can be marked
@@ -449,14 +474,11 @@ func batchCallStaticallySkippable(a *Agent, call provider.ToolCall) bool {
 		return false
 	}
 	readOnly := t.ReadOnly()
-	if call.Name == "bash" && permission.BashCommandIsReadOnly(json.RawMessage(call.Arguments)) {
-		readOnly = true
-	}
 	isVerification := call.Name == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(json.RawMessage(call.Arguments)))
 	if isVerification {
 		return true
 	}
-	return !readOnly || evidence.ToolCallMutates(call.Name, json.RawMessage(call.Arguments), readOnly)
+	return evidence.ClassifyToolCall(call.Name, json.RawMessage(call.Arguments), readOnly).StateMutation
 }
 
 type toolCallBatch struct {

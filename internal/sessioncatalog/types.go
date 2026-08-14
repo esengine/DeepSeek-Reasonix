@@ -189,6 +189,7 @@ type TopicPageRequest struct {
 	Limit         int    `json:"limit,omitempty"`
 	Query         string `json:"query,omitempty"`
 	TimeFilter    string `json:"timeFilter,omitempty"`
+	SortMode      string `json:"sortMode,omitempty"`
 }
 
 type TopicPage struct {

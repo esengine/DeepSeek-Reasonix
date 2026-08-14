@@ -22,6 +22,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"reasonix/internal/installlayout"
+	"reasonix/internal/proc"
 	"reasonix/internal/repair"
 )
 
@@ -45,7 +46,7 @@ var claimWindowsUpdateHelperExecutionFn = claimVerifiedWindowsUpdateHelperExecut
 // exec.Command would quote a path containing spaces (e.g. C:\Users\Jane Doe\...)
 // and NSIS would then mis-parse the target directory.
 func installerCommand(name, dir string) *exec.Cmd {
-	cmd := exec.Command(name)
+	cmd := proc.VisibleCommand(name)
 	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: installerCommandLine(name, dir)}
 	return cmd
 }
@@ -72,10 +73,9 @@ func startWindowsVersionedUpdateHandoff(installerPath, installerSHA256, installD
 	}
 	defer releaseExecution()
 	err = retryWindowsUpdateHelperStart(func() error {
-		cmd := exec.Command(helperPath, windowsVersionedUpdateHandoffArgs(
+		cmd := proc.Command(helperPath, windowsVersionedUpdateHandoffArgs(
 			os.Getpid(), installerPath, installerSHA256, installDir, relaunchPath, targetVersion,
 		)...)
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 		return cmd.Start()
 	})
 	if err != nil {
@@ -102,7 +102,7 @@ func startWindowsUpdateHelper(installerPath, installerSHA256, installDir, relaun
 	}
 	defer releaseExecution()
 	err = retryWindowsUpdateHelperStart(func() error {
-		cmd := exec.Command(helperPath, windowsUpdateHandoffArgs(
+		cmd := proc.Command(helperPath, windowsUpdateHandoffArgs(
 			os.Getpid(),
 			installerPath,
 			installerSHA256,
@@ -112,7 +112,6 @@ func startWindowsUpdateHelper(installerPath, installerSHA256, installDir, relaun
 			prepared.CreatedAt,
 			repair.UpdateTransactionID(prepared),
 		)...)
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 		return cmd.Start()
 	})
 	if err != nil {

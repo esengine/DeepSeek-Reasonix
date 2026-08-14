@@ -8,12 +8,14 @@ import { maybeShare } from "./queryCoalesce";
 import { makeMockSessionCatalogBindings } from "./sessionCatalogBridge";
 import { makeMockHistoryCatalogBindings, type HistoryCatalogBindings } from "./historyCatalogBridge";
 import { makeMockTaskCatalogBindings, type TaskCatalogBindings } from "./taskCatalogBridge";
+import { makeMockBlankProjectBindings, type BlankProjectBindings } from "./blankProjectBridge";
 import { t } from "./i18n";
 import { providerIsConfigured, providerRequiresKey, removeProviderAccessesForMock } from "./providerModels";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems } from "./statusBarItems";
 import { registerTrustedThemeBackgroundURLs } from "./themePack";
 import { modeHasAutoApproveTools, modeWithAutoApproveTools, modeWithPlan, normalizeCollaborationMode, normalizeMode, normalizeTokenMode, normalizeToolApprovalMode } from "./types";
 import { decisionSurfaceMockFromInput, isLongDecisionOptionsMockInput } from "./decisionSurfaceMock";
+import { mockWorkspaceFile } from "./mockWorkspaceFile";
 import type {
   RemoteHostView,
   RemoteHostInput,
@@ -123,6 +125,7 @@ import type {
   WorkspaceView,
   SessionClearResult,
 } from "./types";
+import type { MarkdownImageView } from "./markdownImage";
 
 const GLOBAL_PROJECT_ORDER_KEY = "__global__";
 
@@ -141,8 +144,7 @@ function stripLegacyGoalBudgetFlags(arg: string): string {
 // Run `wails generate module` after adding/renaming a bound method on App, then
 // `pnpm typecheck` to verify the mock still satisfies the contract.
 //
-// Types for the new native-feel bindings — kept inline since they are
-// bridge-specific and only used in AppBindings / the dev mock.
+// Types for native-feel bindings, used only by AppBindings and the dev mock.
 interface NativeConfirmRequest {
   title: string;
   message: string;
@@ -160,13 +162,12 @@ interface DesktopWindowState {
   maximised: boolean;
 }
 
-// AppBindings is the hand-written contract between the React app and the Go
-// kernel. It uses local types (types.ts) so components don't import generated
-// model classes. _CheckGeneratedBindings catches drift: when a Go method is
+// AppBindings is the hand-written contract between React and Go. Components use
+// local types instead of generated model classes. _CheckGeneratedBindings catches drift: when a Go method is
 // added or renamed, the generated types shift, and a key present in GeneratedApp
 // but missing from AppBindings causes a type error here. Fix: add the new method
 // to AppBindings, then run `pnpm typecheck` to verify.
-export interface AppBindings extends SessionCatalogBindings, HistoryCatalogBindings, TaskCatalogBindings {
+export interface AppBindings extends SessionCatalogBindings, HistoryCatalogBindings, TaskCatalogBindings, BlankProjectBindings {
   Platform(): Promise<string>;
   MinimiseMainWindow(): Promise<void>;
   ToggleMaximiseMainWindow(): Promise<void>;
@@ -210,7 +211,7 @@ export interface AppBindings extends SessionCatalogBindings, HistoryCatalogBindi
     revision: number;
     paused: boolean;
     recovered: boolean;
-    recoveredCount?: number;
+    recoveredCount?: number; sessionPath?: string;
     items: Array<{
       id: string;
       intent: string;
@@ -363,7 +364,7 @@ export interface AppBindings extends SessionCatalogBindings, HistoryCatalogBindi
   CloseTabWithPolicy(tabID: string, policy: "keep_running" | "stop_and_close"): Promise<void>;
   ToolResultForTab(tabID: string, toolID: string): Promise<{ args: string; output: string; execution?: import("./types").WireShellExecution } | null>;
   Meta(): Promise<Meta>;
-  MetaForTab(tabID: string): Promise<Meta>;
+  MetaForTab(tabID: string): Promise<Meta>; DismissTodoBatchForTab(tabID: string, batchKey: string): Promise<void>;
   Commands(): Promise<CommandInfo[]>;
   Capabilities(): Promise<CapabilitiesView>;
   MCPServers(): Promise<ServerView[]>;
@@ -419,6 +420,7 @@ export interface AppBindings extends SessionCatalogBindings, HistoryCatalogBindi
   SearchFileRefsForTab(tabID: string, query: string): Promise<DirEntry[]>;
   ReadFile(rel: string): Promise<FilePreview>;
   ReadFileForTab(tabID: string, rel: string): Promise<FilePreview>;
+  ResolveMarkdownImageForTab(tabID: string, source: string): Promise<MarkdownImageView>;
   WorkspaceRevisionForTab(tabID: string): Promise<{ revisions: WorkspaceRevisions; watchState: "active" | "degraded" | "unavailable" }>;
   WorkspaceChanges(tabID: string): Promise<WorkspaceChangesView>;
   WorkspaceChangeDetail(tabID: string, path: string): Promise<WorkspaceChangeDetailView>;
@@ -556,6 +558,7 @@ export interface AppBindings extends SessionCatalogBindings, HistoryCatalogBindi
   SetDesktopZoomFactor(factor: number): Promise<void>;
   GetDesktopZoomFactor(): Promise<number>;
   RestartApplication(): Promise<void>;
+  ReportDesktopWebViewReady(): Promise<void>;
   SetDesktopCheckUpdates(enabled: boolean): Promise<void>;
   SetDesktopUpdateChannel(channel: string): Promise<void>;
   SetDesktopTelemetry(enabled: boolean): Promise<void>;
@@ -922,7 +925,7 @@ export function onReady(cb: (tabId?: string) => void): () => void {
 
 export function onProjectTreeChanged(cb: () => void): () => void {
   if (realApp() && typeof window !== "undefined" && window.runtime) {
-    return window.runtime.EventsOn("project-tree:changed", () => cb());
+    return window.runtime.EventsOn("project-tree:changed", (payload?: unknown) => (payload as { reason?: unknown } | undefined)?.reason !== "runtime" && cb());
   }
   return () => {};
 }
@@ -1829,9 +1832,9 @@ function makeMockApp(): AppBindings {
       root: "~/projects/joyquant-db",
       projectColor: "blue",
       children: [
-        { key: "topic_dev_standard", kind: "topic", label: `● ${t("mock.topicDevStandard")}`, root: "~/projects/joyquant-db", topicId: "topic_dev_standard", projectColor: "blue", turns: 18, lastActivityAt: mockNow - 8 * 60_000, open: true, running: runningMock },
-        { key: "topic_db_maint", kind: "topic", label: t("mock.topicDbMaint"), root: "~/projects/joyquant-db", topicId: "topic_db_maint", projectColor: "blue", turns: 7, lastActivityAt: mockNow - 2 * 60 * 60_000 },
-        { key: "topic_env", kind: "topic", label: t("mock.topicEnv"), root: "~/projects/joyquant-db", topicId: "topic_env", projectColor: "blue", turns: 3, lastActivityAt: mockNow - 26 * 60 * 60_000 },
+        { key: "topic_dev_standard", kind: "topic", label: `● ${t("mock.topicDevStandard")}`, root: "~/projects/joyquant-db", topicId: "topic_dev_standard", projectColor: "blue", turns: 18, createdAt: mockNow - 3 * 24 * 60 * 60_000, lastActivityAt: mockNow - 8 * 60_000, open: true, running: runningMock },
+        { key: "topic_db_maint", kind: "topic", label: t("mock.topicDbMaint"), root: "~/projects/joyquant-db", topicId: "topic_db_maint", projectColor: "blue", turns: 7, createdAt: mockNow - 2 * 24 * 60 * 60_000, lastActivityAt: mockNow - 2 * 60 * 60_000 },
+        { key: "topic_env", kind: "topic", label: t("mock.topicEnv"), root: "~/projects/joyquant-db", topicId: "topic_env", projectColor: "blue", turns: 3, createdAt: mockNow - 24 * 60 * 60_000, lastActivityAt: mockNow - 26 * 60 * 60_000 },
       ],
     },
     {
@@ -2445,6 +2448,7 @@ function makeMockApp(): AppBindings {
   };
   return {
     ...makeMockSessionCatalogBindings(cloneProjectTree),
+    ...makeMockBlankProjectBindings(),
     async MinimiseMainWindow() {
       console.info("mock MinimiseMainWindow");
     },
@@ -2934,7 +2938,7 @@ function makeMockApp(): AppBindings {
           return {
             revision: 0,
             paused: false,
-            recovered: false,
+            recovered: false, sessionPath: "",
             items: [],
             itemsCount: 0,
             bytes: 0,
@@ -3485,7 +3489,7 @@ function makeMockApp(): AppBindings {
             goal: active?.goal ?? "",
             goalStatus: active?.goalStatus ?? (active?.goal ? "running" : "stopped"),
           };
-        },
+        }, async DismissTodoBatchForTab() {},
         async MetaForTab(tabID) {
           const tab = mockTabs.find((item) => item.id === tabID) ?? mockTabs.find((item) => item.active) ?? mockTabs[0];
           const toolApprovalMode = normalizeToolApprovalMode(tab?.toolApprovalMode, tab ? normalizeMode(tab.mode) : "normal", settings.autoApproveTools);
@@ -4015,22 +4019,13 @@ function makeMockApp(): AppBindings {
       return this.SearchFileRefs(query);
     },
     async ReadFile(rel: string) {
-      const samples: Record<string, string> = {
-        "README.md": "# Reasonix\n\nBrowser-dev workspace preview.\n\n- Chat in the center\n- Browse files on the right\n- Keep sessions on the left\n",
-        "go.mod": "module reasonix\n\ngo 1.23\n",
-        "desktop/file.go": "package desktop\n\nfunc main() {\n\tprintln(\"workspace preview\")\n}\n",
-        "internal/event.go": "package internal\n\n// mock file used by the browser dev seam\n",
-      };
-      return {
-        path: rel,
-        body: samples[rel] ?? `// ${rel}\n\nMock file body from browser dev.`,
-        size: samples[rel]?.length ?? 42,
-        truncated: false,
-        binary: false,
-      };
+      return mockWorkspaceFile(rel);
     },
     async ReadFileForTab(_tabID: string, rel: string) {
       return this.ReadFile(rel);
+    },
+    async ResolveMarkdownImageForTab(_tabID: string, source: string) {
+      return { url: source, openHref: source };
     },
     async WorkspaceRevisionForTab(_tabID: string) {
       return { revisions: { content: 0, tree: 0, workingTree: 0, gitMeta: 0, session: 0 }, watchState: "active" as const };
@@ -4882,6 +4877,9 @@ function makeMockApp(): AppBindings {
           return mockDesktopZoomFactor;
         },
         async RestartApplication() {
+          // no-op in mock
+        },
+        async ReportDesktopWebViewReady() {
           // no-op in mock
         },
         async SetDesktopCheckUpdates(enabled: boolean) {

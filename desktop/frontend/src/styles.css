@@ -116,6 +116,8 @@
   --z-transcript-scene-image: 0;
   --z-transcript-scene-overlay: 1;
   --z-transcript-content: 2;
+  --z-flow: auto;
+  --z-workspace-status: 1;
   --z-theme-bg: 0;
   --z-app-content: 1;
   --z-local-raised: 2;
@@ -2040,13 +2042,13 @@ a[href] {
 .app {
   height: var(--app-viewport-height, 100%);
   min-height: 0;
-  overflow-x: auto;
+  overflow-x: hidden;
   overflow-y: hidden;
 }
 
 .layout {
   --sidebar-width: var(--sidebar-expanded-width, clamp(264px, 18vw, 300px));
-  --chat-min-width: 760px;
+  --chat-min-width: 400px;
   --workspace-width: 420px;
   --workspace-resizer-width: 8px;
   --terminal-height: 280px;
@@ -3382,6 +3384,8 @@ a[href] {
   overflow-y: auto;
   overflow-y: overlay;
   overflow-x: hidden;
+  /* Virtuoso is the sole anchor owner for variable-height transcript rows. */
+  overflow-anchor: none;
   scrollbar-gutter: stable both-edges;
   padding: 24px 0 32px;
   scrollbar-width: thin;
@@ -4737,6 +4741,16 @@ button.reasoning-summary:focus-visible {
 
 .turn-collapse__reasoning-head > svg:first-child {
   color: color-mix(in srgb, var(--fg-faint) 88%, transparent);
+}
+
+.msg-search-sources {
+  margin-top: 0.75em;
+}
+.msg-search-sources .md {
+  color: var(--fg);
+}
+.msg-search-sources .md a {
+  color: var(--accent);
 }
 
 .msg-memory-citations {
@@ -8533,6 +8547,57 @@ body > .mermaid-diagram--fullscreen {
 }
 .reasonix-confirm-dialog__actions .btn { min-width: 84px; }
 .reasonix-confirm-dialog__actions .btn--danger { font-weight: 600; }
+.blank-project-backdrop {
+  --wails-draggable: no-drag;
+  z-index: var(--z-overlay-backdrop);
+}
+.blank-project-dialog {
+  max-width: 460px;
+  color: var(--fg);
+}
+.blank-project-dialog__field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.blank-project-dialog__label {
+  color: var(--fg-dim);
+  font-size: var(--font-caption);
+  font-weight: 600;
+}
+.blank-project-dialog__path {
+  display: block;
+  overflow: hidden;
+  padding: 8px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: var(--bg-soft);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: var(--font-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.blank-project-dialog__input {
+  width: 100%;
+}
+.blank-project-dialog__created,
+.blank-project-dialog__error {
+  margin: 0 0 12px;
+  font-size: var(--font-caption);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.blank-project-dialog__created {
+  color: var(--fg-dim);
+}
+.blank-project-dialog__error {
+  min-height: 1.45em;
+  color: var(--err);
+}
+.blank-project-dialog__actions .btn {
+  min-width: 92px;
+}
 .btn {
   display: inline-flex;
   align-items: center;
@@ -10882,6 +10947,7 @@ body > .mermaid-diagram--fullscreen {
   min-width: 0;
   overflow: auto;
 }
+
 .workspace-current-change__body .diff,
 .workspace-current-change__body .code {
   margin: 0;
@@ -20942,7 +21008,7 @@ body > .mermaid-diagram--fullscreen {
 .composer-guidance-item {
   min-height: 32px;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) repeat(3, auto);
   align-items: center;
   gap: 8px;
   padding: 5px 6px 5px 8px;
@@ -20969,6 +21035,19 @@ body > .mermaid-diagram--fullscreen {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.composer-guidance-item__editor {
+  min-width: 0;
+  width: 100%;
+  height: 28px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  padding: 0 8px;
 }
 
 .composer-guidance-item__guide {
@@ -24382,6 +24461,12 @@ body > .mermaid-diagram--fullscreen {
   color: var(--fg-faint);
 }
 
+.project-tree__topic-status--awaiting_delivery {
+  max-width: 80px;
+  background: color-mix(in srgb, var(--warn) 13%, transparent);
+  color: color-mix(in srgb, var(--warn) 82%, var(--fg));
+}
+
 .project-tree__topic-status--error {
   background: color-mix(in srgb, var(--err) 12%, transparent);
   color: color-mix(in srgb, var(--err) 84%, var(--fg));
@@ -26375,7 +26460,7 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .layout {
-  --chat-min-width: 700px;
+  --chat-min-width: 400px;
   --topicbar-height: 58px;
   --statusbar-height: var(--statusbar-dock-height);
   background:
@@ -27813,6 +27898,13 @@ body > .mermaid-diagram--fullscreen {
   background: color-mix(in srgb, var(--fg-faint) 10%, var(--bg-elev));
   color: var(--fg-faint);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg-faint) 18%, transparent);
+}
+
+:root[data-theme-style] .project-tree__topic-status--awaiting_delivery {
+  max-width: 80px;
+  background: color-mix(in srgb, var(--warn) 12%, var(--bg-elev));
+  color: color-mix(in srgb, var(--warn) 82%, var(--fg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 20%, transparent);
 }
 
 :root[data-theme-style] .project-tree__topic-status--error {
@@ -37604,6 +37696,7 @@ body > .mermaid-diagram--fullscreen {
     display: none;
   }
 }
+
 .remote-switcher {
   z-index: var(--z-local-popover);
   width: min(390px, calc(100vw - 16px));

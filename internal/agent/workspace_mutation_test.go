@@ -4,17 +4,59 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"reasonix/internal/checkpoint"
 	"reasonix/internal/event"
+	"reasonix/internal/evidence"
 	"reasonix/internal/extension"
 	"reasonix/internal/extension/dispatch"
 	"reasonix/internal/extension/protocol"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
+
+func TestObservedFileChangePromotesRepositoryOnlyReceiptToContentMutation(t *testing.T) {
+	root := t.TempDir()
+	path := root + "/tracked.txt"
+	if err := os.WriteFile(path, []byte("before"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := checkpoint.New("", root)
+	store.Begin(1, "commit", 0)
+	observer := checkpoint.NewMutationObserver(checkpoint.ObserverOptions{Store: store})
+	observer.BeforeMutation(path, "bash", checkpoint.CaptureBeforeMutation)
+
+	reg := tool.NewRegistry()
+	bash := fakeTool{name: "bash", readOnly: false}
+	reg.Add(bash)
+	a := New(nil, reg, NewSession(""), Options{MutationObserver: observer}, event.Discard)
+	args := json.RawMessage(`{"command":"git commit -m checkpoint"}`)
+	plan := &toolCallPlan{
+		call:         provider.ToolCall{ID: "commit", Name: "bash", Arguments: string(args)},
+		tool:         bash,
+		evidenceName: "bash",
+		evidenceArgs: args,
+		effects:      evidence.ClassifyToolCall("bash", args, false),
+		mutationPath: path,
+	}
+	if plan.effects.ContentMutation {
+		t.Fatal("pure commit should begin as repository-only")
+	}
+	if err := os.WriteFile(path, []byte("changed by hook"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !a.observeAfterMutation(plan) || !plan.effects.ContentMutation {
+		t.Fatalf("observed effect was not promoted: %+v", plan.effects)
+	}
+	a.recordToolReceipts(plan, "", nil, nil)
+	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); !ok {
+		t.Fatal("promoted receipt was not recorded as a content mutation")
+	}
+}
 
 func TestToolBeforeWorkspaceMutationUsesExecutedReplacement(t *testing.T) {
 	t.Run("reader replaced by writer", func(t *testing.T) {

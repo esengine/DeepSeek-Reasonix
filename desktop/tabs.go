@@ -833,7 +833,7 @@ func applyRuntimeTab(target, source *WorkspaceTab, path string, wailsCtx context
 	}
 }
 
-func (a *App) attachExistingSessionRuntime(tab *WorkspaceTab, path string, wailsCtx context.Context) bool {
+func (a *App) attachExistingSessionRuntimeCore(tab *WorkspaceTab, path string, wailsCtx context.Context) bool {
 	key := sessionRuntimeKey(path)
 	if tab == nil || key == "" {
 		return false
@@ -1575,7 +1575,10 @@ func (s *tabEventSink) Emit(e event.Event) {
 		if status, update := topicActivityStatusFromEvent(e); update {
 			changed := app.setTabActivityStatus(tabID, status)
 			if changed || isBackgroundJobLifecycleNotice(e) {
-				app.emitProjectTreeMetadataChanged()
+				// Runtime status is an in-memory projection, not catalog metadata.
+				// Publish it directly so a turn never fans out into one catalog read
+				// per expanded project folder.
+				app.emitProjectTreeRuntimeChangedWithLegacy()
 			}
 		}
 	}
@@ -1789,11 +1792,8 @@ func topicActivityStatusFromEvent(e event.Event) (string, bool) {
 	case event.ApprovalRequest, event.AskRequest:
 		return topicStatusWaitingConfirmation, true
 	case event.TurnDone:
-		if e.Outcome == event.TurnOutcomeFinalReadiness || e.Outcome == event.TurnOutcomeRecoveryPaused {
-			// The transcript presents this turn end as a recoverable delivery
-			// pause with a continue action, so the sidebar must not flag it
-			// as an error.
-			return topicStatusPaused, true
+		if status, ok := topicStatusFromTurnDone(e.Outcome); ok {
+			return status, true
 		}
 		if e.Err != nil {
 			return topicStatusError, true
@@ -2274,25 +2274,18 @@ func (a *App) ListTabs() []TabMeta {
 	return enrichTabMetas(out)
 }
 
-// syncTabWorkspaceRootSpellings repoints open project tabs at the registry's
-// canonical root spelling after a registry write may have rewritten it
-// (addProject and friends adopt the caller's spelling). Tabs, the project
-// tree, and persisted tab state then agree on a single string form of each
-// root, which the frontend compares exactly. Callers must not hold a.mu.
+// syncTabWorkspaceRootSpellings repoints visible and detached project runtimes
+// at the registry spelling. Registry writes may adopt the caller's spelling,
+// while the frontend compares roots exactly. Callers must not hold a.mu.
 func (a *App) syncTabWorkspaceRootSpellings() {
 	projects := loadProjectsFile().Projects
 	a.mu.Lock()
 	changed := false
 	for _, tab := range a.tabs {
-		if tab == nil || tab.Scope != "project" {
-			continue
-		}
-		i := projectIndexByRoot(projects, tab.WorkspaceRoot)
-		if i < 0 || tab.WorkspaceRoot == projects[i].Root {
-			continue
-		}
-		tab.WorkspaceRoot = projects[i].Root
-		changed = true
+		changed = syncRuntimeWorkspaceRootSpelling(tab, projects) || changed
+	}
+	for _, tab := range a.detachedSessions {
+		changed = syncRuntimeWorkspaceRootSpelling(tab, projects) || changed
 	}
 	if changed {
 		a.saveTabsLocked()
@@ -2328,11 +2321,11 @@ func (a *App) openProjectTab(workspaceRoot, topicID string) (TabMeta, error) {
 	a.registerProjectRoot(workspaceRoot)
 
 	sessionPath, _ := a.findTopicSessionForTarget("project", workspaceRoot, topicID)
-	return a.openTopicTab("project", workspaceRoot, topicID, sessionPath)
+	return a.openTopicTabWithActivation("project", workspaceRoot, topicID, sessionPath, true)
 }
 
 func (a *App) openTopicTab(scope, workspaceRoot, topicID, sessionPath string) (TabMeta, error) {
-	return a.openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionPath, true)
+	return a.openTopicTabPreferLiveActivation(scope, workspaceRoot, topicID, sessionPath, true)
 }
 
 func (a *App) openProjectTabInactive(workspaceRoot, topicID string) (TabMeta, error) {
@@ -2359,10 +2352,7 @@ func (a *App) openGlobalTabInactive(topicID string) (TabMeta, error) {
 }
 
 func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionPath string, activate bool) (TabMeta, error) {
-	actualRoot := workspaceRoot
-	if scope == "global" {
-		actualRoot = globalWorkspaceRoot()
-	}
+	actualRoot, sessionPath := a.resolveOpenTopicSessionPath(scope, workspaceRoot, sessionPath)
 	targetKey := sessionRuntimeKey(sessionPath)
 
 	a.mu.Lock()
@@ -2392,7 +2382,7 @@ func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionP
 			meta := a.tabMeta(tab, tab.ID == a.activeTabID)
 			a.saveTabsLocked()
 			a.mu.Unlock()
-			if sameSession {
+			if sameSession || a.skipCoveringLeafRebind(tab, sessionPath) {
 				return enrichTabMeta(meta), nil
 			}
 			if err := a.rebindTabToSessionPath(tab, sessionPath); err != nil {
@@ -2467,7 +2457,7 @@ func (a *App) openGlobalTab(topicID string) (TabMeta, error) {
 	}
 
 	sessionPath, _ := a.findTopicSessionForTarget("global", "", topicID)
-	return a.openTopicTab("global", "", topicID, sessionPath)
+	return a.openTopicTabWithActivation("global", "", topicID, sessionPath, true)
 }
 
 // OpenTopicSession opens a concrete saved session from the sidebar. Unlike
@@ -3157,7 +3147,7 @@ func (a *App) CloseTab(tabID string) error {
 	return a.closeTab(tabID, true)
 }
 
-func (a *App) closeTab(tabID string, allowDetach bool) error {
+func (a *App) closeTabRuntime(tabID string, allowDetach bool) error {
 	defer a.lockRuntimeMutation("close-tab")()
 	a.sessionRemovalMu.Lock()
 	defer a.sessionRemovalMu.Unlock()
@@ -6468,12 +6458,13 @@ type ProjectNode struct {
 	RecoveryUnresolvedCount      int           `json:"recoveryUnresolvedCount,omitempty"`
 	RecoveryCleanupEligibleCount int           `json:"recoveryCleanupEligibleCount,omitempty"`
 	IsolatedWorktree             bool          `json:"isolatedWorktree,omitempty"`
+	RuntimeOnly                  bool          `json:"runtimeOnly,omitempty"`
 	Children                     []ProjectNode `json:"children,omitempty"`
 }
 
 func normalizeTopicStatus(status string) string {
 	switch status {
-	case topicStatusThinking, topicStatusStreaming, topicStatusWaitingConfirmation, topicStatusBackgroundJob, topicStatusPaused, topicStatusError, topicStatusDivergedRecovery:
+	case topicStatusThinking, topicStatusStreaming, topicStatusWaitingConfirmation, topicStatusBackgroundJob, topicStatusPaused, topicStatusAwaitingDelivery, topicStatusError, topicStatusDivergedRecovery:
 		return status
 	default:
 		return ""
@@ -6990,21 +6981,6 @@ func (a *App) emitProjectTreeChangedForSessionDirs(dirs ...string) {
 func (a *App) emitProjectTreeMetadataChanged() {
 	a.requestSessionCatalogMetadataSync()
 	a.emitProjectTreeChangedEvent()
-}
-
-func (a *App) emitProjectTreeChangedEvent() {
-	if a.projectTreeChangedHook != nil {
-		a.projectTreeChangedHook()
-		return
-	}
-	a.emitRuntimeEvent("project-tree:changed")
-}
-
-func (a *App) emitRuntimeEvent(name string, payload ...any) {
-	if a == nil || a.ctx == nil {
-		return
-	}
-	a.runtimeEvents.Emit(a.ctx, name, payload...)
 }
 
 // DeleteTopic removes a topic and its title metadata.

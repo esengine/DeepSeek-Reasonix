@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
 	"strconv"
@@ -27,6 +26,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"reasonix/internal/config"
+	"reasonix/internal/proc"
 )
 
 const (
@@ -419,7 +419,7 @@ func (a *App) spawnRemoteWindow(hostKey string, launch remoteWindowLaunch) error
 		_ = os.Remove(path)
 		return fmt.Errorf("remote window owner identity is unavailable")
 	}
-	cmd := exec.Command(
+	cmd := proc.VisibleCommand(
 		executable,
 		remoteWindowTicketArgPrefix+ticket,
 		remoteWindowHostArgPrefix+hostKey,

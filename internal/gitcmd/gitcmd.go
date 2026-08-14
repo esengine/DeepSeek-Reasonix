@@ -102,7 +102,7 @@ func CommandWithConfig(ctx context.Context, dir string, extraConfig []string, ar
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	cmd := exec.CommandContext(ctx, "git", Args(dir, extraConfig, args...)...)
+	cmd := proc.CommandContext(ctx, "git", Args(dir, extraConfig, args...)...)
 	cmd.Env = Env()
 	proc.HideWindow(cmd)
 	return cmd

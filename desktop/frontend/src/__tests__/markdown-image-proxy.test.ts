@@ -37,7 +37,7 @@ eq(markdownImageSource("https://cdn.example.com/a.png", false), "https://cdn.exa
 const testDir = dirname(fileURLToPath(import.meta.url));
 const componentsSource = readFileSync(resolve(testDir, "../components/markdownComponents.tsx"), "utf8");
 eq(componentsSource.includes("img: ({ src, alt, title })"), true, "the shared components map owns the image element");
-eq(componentsSource.includes("markdownImageSource(src)"), true, "the shared components map applies backend routing");
+eq(componentsSource.includes("<MarkdownImage src={src}"), true, "both streaming and worker paths use the async image resolver");
 
 if (failed > 0) {
   process.stderr.write(`\n${failed} markdown image proxy assertion(s) failed\n`);

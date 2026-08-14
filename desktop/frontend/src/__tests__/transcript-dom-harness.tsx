@@ -53,6 +53,7 @@ export async function createTranscriptHarness(options: TranscriptHarnessOptions 
   globalThis.CustomEvent = dom.window.CustomEvent;
   globalThis.MouseEvent = dom.window.MouseEvent;
   globalThis.KeyboardEvent = dom.window.KeyboardEvent;
+  globalThis.WheelEvent = dom.window.WheelEvent;
   globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
   globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
   globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window) as typeof getComputedStyle;

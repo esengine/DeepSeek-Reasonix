@@ -89,6 +89,14 @@ export function markdownUrlTransform(value: string): string {
   return isLocalFileHref(value) ? value : defaultMarkdownUrlTransform(value);
 }
 
+// Images use a separate protocol policy because their bytes are resolved and
+// validated by ResolveMarkdownImageForTab before reaching the WebView. Ordinary
+// links intentionally continue to reject data: URLs.
+export function markdownImageUrlTransform(value: string): string {
+  if (/^data:image\/(?:png|jpeg|gif|webp)(?:;base64)?,/i.test(value)) return value;
+  return isLocalFileHref(value) ? value : defaultMarkdownUrlTransform(value);
+}
+
 // The same transform react-markdown applies between the rehype plugins and
 // hast-util-to-jsx-runtime (its internal `post()` visitor): raw HTML nodes
 // become text (skipHtml is false), and every URL attribute passes through
@@ -108,7 +116,9 @@ function applyReactMarkdownTransforms(tree: HastRoot): void {
         const value = element.properties[key];
         const test = urlAttributes[key as keyof typeof urlAttributes];
         if (test === null || (test as readonly string[]).includes(element.tagName)) {
-          element.properties[key] = markdownUrlTransform(String(value || ""));
+          element.properties[key] = element.tagName === "img" && key === "src"
+            ? markdownImageUrlTransform(String(value || ""))
+            : markdownUrlTransform(String(value || ""));
         }
       }
     }

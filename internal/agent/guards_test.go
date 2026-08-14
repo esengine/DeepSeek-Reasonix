@@ -442,12 +442,18 @@ func TestExecuteBatchPublishesWorkspaceMutationBeforeLaterToolCompletes(t *testi
 
 func TestWorkspaceMutationClassifierTreatsGitCommitAsGitMetadata(t *testing.T) {
 	mutation, ok := workspaceMutationForCall("call", "bash", json.RawMessage(`{"command":"git commit -m test"}`), false)
-	if !ok || !mutation.GitMeta || !mutation.WorkingTree || !mutation.AllPaths {
+	if !ok || !mutation.GitMeta || mutation.Content || mutation.WorkingTree || mutation.Tree || !mutation.AllPaths {
 		t.Fatalf("git commit workspace invalidation = %+v, ok=%v", mutation, ok)
 	}
-	mutation, ok = workspaceMutationForCall("call", "bash", json.RawMessage(`{"command":"go test ./..."}`), false)
-	if !ok || mutation.GitMeta {
-		t.Fatalf("ordinary bash workspace invalidation refreshed git metadata: %+v, ok=%v", mutation, ok)
+	mutation, ok = workspaceMutationForCall("call", "bash", json.RawMessage(`{"command":"git commit -am test"}`), false)
+	if !ok || !mutation.GitMeta || !mutation.Content || !mutation.WorkingTree || !mutation.Tree {
+		t.Fatalf("content-writing git commit invalidation = %+v, ok=%v", mutation, ok)
+	}
+	if mutation, ok = workspaceMutationForCall("call", "bash", json.RawMessage(`{"command":"go test ./..."}`), false); ok {
+		t.Fatalf("ordinary verifier invalidated durable workspace state: %+v", mutation)
+	}
+	if mutation, ok = workspaceMutationForCall("call", "bash", json.RawMessage(`{"command":"date --set tomorrow"}`), false); ok {
+		t.Fatalf("host-only state write invalidated the workspace: %+v", mutation)
 	}
 	if mutation, ok = workspaceMutationForCall("call", "remember", json.RawMessage(`{"name":"preference"}`), false); ok {
 		t.Fatalf("host-only memory write invalidated the workspace: %+v", mutation)

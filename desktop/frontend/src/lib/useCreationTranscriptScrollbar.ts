@@ -188,7 +188,7 @@ export function useCreationTranscriptScrollbar({
     event.stopPropagation();
     const startThumbTop = (element.scrollTop / geometry.overflow) * geometry.maxThumbTop;
     dragRef.current = { pointerId: event.pointerId, startY: event.clientY, startThumbTop, ...geometry };
-    setScrollMode("programmatic", "custom-scrollbar-drag");
+    setScrollMode("restoring", "custom-scrollbar-drag");
     event.currentTarget.setPointerCapture(event.pointerId);
     setHot(true);
   }, [enabled, scrollRef, setHot, setScrollMode]);
@@ -200,7 +200,7 @@ export function useCreationTranscriptScrollbar({
     if (!element || !geometry) return;
     const rect = element.getBoundingClientRect();
     const thumbTop = Math.min(geometry.maxThumbTop, Math.max(0, event.clientY - rect.top - geometry.thumbHeight / 2));
-    setScrollMode("programmatic", "custom-scrollbar-rail");
+    setScrollMode("restoring", "custom-scrollbar-rail");
     writeOffset("custom-scrollbar", geometry.maxThumbTop > 0 ? (thumbTop / geometry.maxThumbTop) * geometry.overflow : 0);
     setState({ visible: true, hot: true, thumbTop: Math.round(thumbTop), thumbHeight: geometry.thumbHeight });
     setHot(true);

@@ -116,6 +116,11 @@ export function inboxSteerQueuedMessage(locale: Locale): string {
   return ERROR_COPY[locale][STEER_QUEUED_INDEX];
 }
 
+export function isInboxItemMissing(error: unknown): boolean {
+  const raw = errorText(error);
+  return raw === `${CODE_PREFIX}inbox_item_not_found` || raw === "inbox item not found";
+}
+
 export function formatInboxCancelError(error: unknown, locale: Locale): string {
   return ERROR_COPY[locale][CANCEL_FAILED_INDEX].replace("{error}", formatInboxError(error, locale));
 }

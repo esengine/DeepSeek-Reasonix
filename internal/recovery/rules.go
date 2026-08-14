@@ -199,15 +199,10 @@ func IsDiagnosticSuccess(obs Observation) bool {
 	switch strings.TrimSpace(obs.Tool) {
 	case "bash":
 		cmd := commandFromArgs(obs.Args)
-		base, _, readOnly := shellsafe.CommandIsReadOnly(cmd)
-		if !readOnly {
+		if shellsafe.ClassifyBash(cmd).AnyMutation() {
 			return false
 		}
-		switch strings.ToLower(filepath.Base(base)) {
-		case "ls", "rg", "grep", "find", "cat", "head", "tail", "wc", "file", "stat", "pwd", "which", "type":
-			return true
-		}
-		return true // other host-proven read-only bash diagnostics
+		return true
 	case "read_file", "grep", "glob", "ls", "code_index", "codeindex":
 		return obs.ReadOnly
 	default:
@@ -644,7 +639,7 @@ func commandFieldsKnownSafeMutation(fields []string) bool {
 	// A coarse host mutation bit must not turn a statically proven read-only
 	// diagnostic into a confirmation. Destructive argument forms were rejected
 	// before reaching this point.
-	if _, _, readOnly := shellsafe.CommandIsReadOnly(strings.Join(fields, " ")); readOnly {
+	if !shellsafe.ClassifyBash(strings.Join(fields, " ")).AnyMutation() {
 		return true
 	}
 	return false

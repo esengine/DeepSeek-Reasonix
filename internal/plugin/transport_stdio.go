@@ -98,7 +98,7 @@ func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 	} else {
 		argv = launchArgs
 	}
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd := proc.CommandContext(ctx, argv[0], argv[1:]...)
 	proc.HideWindow(cmd)
 	if s.LowPriority {
 		proc.LowPriority(cmd)
@@ -461,7 +461,7 @@ func stdioShell() string {
 func runShellPATHCommand(parent context.Context, shell string, args []string) []byte {
 	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, shell, args...)
+	cmd := proc.CommandContext(ctx, shell, args...)
 	// Explicit env so the login-shell probe honors [secrets]
 	// filter_subprocess_env instead of inheriting the full environment.
 	cmd.Env = secrets.ProcessEnv()

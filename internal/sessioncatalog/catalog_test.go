@@ -64,6 +64,35 @@ func TestReconcileMakesUnknownCountsVisibleWithoutReadingTranscript(t *testing.T
 	}
 }
 
+func TestDirectoryScanReadyOnlyAfterFirstReconcile(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "chat.jsonl"), []byte(`{"role":"user","content":"hi"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := Open(ctx, Options{InMemory: true, DisableRepair: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = catalog.Close(context.Background()) })
+	if catalog.DirectoryScanReady(ctx, dir) {
+		t.Fatal("opened catalog must not report the directory ready before the first scan")
+	}
+	if catalog.HasWorkspaceRecords(ctx, "global", "") {
+		t.Fatal("opened catalog must not report workspace records before the first scan")
+	}
+	if err := catalog.ReconcileDirectory(ctx, DirectoryTarget{Path: dir, Scope: "global"}); err != nil {
+		t.Fatal(err)
+	}
+	if !catalog.DirectoryScanReady(ctx, dir) {
+		t.Fatal("directory must be ready after ReconcileDirectory finishes")
+	}
+	if !catalog.HasWorkspaceRecords(ctx, "global", "") {
+		t.Fatal("reconciled directory should report workspace records")
+	}
+}
+
 func TestListTopicsUsesStableKeysetCursor(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -105,6 +134,41 @@ func TestListTopicsUsesStableKeysetCursor(t *testing.T) {
 	}
 	if first.Items[0].TopicID != "c" || first.Items[1].TopicID != "b" || second.Items[0].TopicID != "a" {
 		t.Fatalf("keyset order = %q, %q, %q", first.Items[0].TopicID, first.Items[1].TopicID, second.Items[0].TopicID)
+	}
+}
+
+func TestListTopicsSortsByCreationTimeAcrossPages(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	catalog, err := Open(ctx, Options{InMemory: true, DisableRepair: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = catalog.Close(context.Background()) })
+
+	for _, record := range []SessionRecord{
+		{Path: "/sessions/a.jsonl", Directory: "/sessions", Scope: "global", TopicID: "a", TopicTitle: "a", CreatedAt: 300, LastActivityAt: 100, Turns: 1, TurnsState: TurnsValid, Health: HealthOK},
+		{Path: "/sessions/b.jsonl", Directory: "/sessions", Scope: "global", TopicID: "b", TopicTitle: "b", CreatedAt: 200, LastActivityAt: 300, Turns: 1, TurnsState: TurnsValid, Health: HealthOK},
+		{Path: "/sessions/c.jsonl", Directory: "/sessions", Scope: "global", TopicID: "c", TopicTitle: "c", CreatedAt: 100, LastActivityAt: 200, Turns: 1, TurnsState: TurnsValid, Health: HealthOK},
+	} {
+		if err := catalog.UpsertSession(ctx, record); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	first, err := catalog.ListTopics(ctx, TopicPageRequest{Scope: "global", Limit: 2, SortMode: "created"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := catalog.ListTopics(ctx, TopicPageRequest{Scope: "global", Limit: 2, SortMode: "created", Cursor: first.NextCursor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Items) != 2 || first.NextCursor == "" || len(second.Items) != 1 || second.NextCursor != "" {
+		t.Fatalf("created pages = first %#v second %#v", first, second)
+	}
+	if first.Items[0].TopicID != "a" || first.Items[1].TopicID != "b" || second.Items[0].TopicID != "c" {
+		t.Fatalf("created order = %q, %q, %q; want a, b, c", first.Items[0].TopicID, first.Items[1].TopicID, second.Items[0].TopicID)
 	}
 }
 

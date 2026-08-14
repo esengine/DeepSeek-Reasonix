@@ -157,6 +157,7 @@ export default function LineNumberCode({
   language,
   showLineNumbers,
   maxHeight,
+  scrollMode,
   sourceSize,
   searchRequestPending,
   onSearchRequestConsumed,
@@ -333,6 +334,7 @@ export default function LineNumberCode({
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const isVirtual = showLineNumbers !== false && lines.length > VIRTUAL_THRESHOLD;
+  const bounded = scrollMode === "bounded" || (scrollMode !== "expand" && maxHeight != null) || isVirtual;
   const virtualizer = useVirtualizer({
     count: isVirtual ? lines.length : 0,
     getScrollElement: () => scrollRef.current,
@@ -587,13 +589,14 @@ export default function LineNumberCode({
 
       <div
         ref={scrollRef}
-        className="code hljs code--lines"
+        className={`code hljs code--lines${bounded ? " code--scroll-y" : ""}`}
+        data-nested-scroll={bounded ? "" : undefined}
         data-lang={language}
         data-highlight-mode={syntaxHighlight ? "syntax" : "plain"}
         tabIndex={0}
         style={{
           maxHeight: maxHeight ?? undefined,
-          overflow: maxHeight != null || isVirtual ? "auto" : undefined,
+          overflow: bounded ? "auto" : undefined,
         }}
       >
         {isVirtual ? (
