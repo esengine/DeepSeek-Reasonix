@@ -6,22 +6,45 @@
       "date": "2026-08-14",
       "channel": "stable",
       "title": {
-        "en": "Reasonix v1.25.2 — Desktop Stability & Agent Reliability",
-        "zh": "Reasonix v1.25.2 — 桌面端稳定性与智能体可靠性改进"
+        "en": "Desktop stability and agent reliability improvements",
+        "zh": "桌面端稳定性与智能体可靠性改进"
       },
       "summary": {
-        "en": "This release focuses on desktop stability, session management, and agent behavior fixes, including persistent expanded reasoning display, memory approval alignment, adaptive planner research, and numerous UI and performance improvements.",
+        "en": "This release focuses on desktop stability, session management, and agent behavior fixes, including persistent reasoning display, memory approval alignment, adaptive planner research, and numerous UI and performance improvements.",
         "zh": "此版本专注于桌面端稳定性、会话管理和智能体行为修复，包括持续展开的推理显示、记忆审批对齐、自适应规划器调研，以及大量 UI 和性能改进。"
       },
       "surfaces": [
         "desktop"
       ],
-      "guides": [],
+      "guides": [
+        {
+          "title": {
+            "en": "Tool Approval Modes",
+            "zh": "工具审批模式"
+          },
+          "body": {
+            "en": "Learn how Auto and YOLO modes handle memory tool approvals.",
+            "zh": "了解 Auto 和 YOLO 模式如何处理记忆工具审批。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/d6a743a118457f9bb52e698fd18b12400d1d5c68/docs/TOOL_APPROVAL_MODES.md"
+        },
+        {
+          "title": {
+            "en": "Tool Approval Modes (Chinese)",
+            "zh": "工具审批模式（中文）"
+          },
+          "body": {
+            "en": "Chinese guide for tool approval modes.",
+            "zh": "工具审批模式中文指南。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/d6a743a118457f9bb52e698fd18b12400d1d5c68/docs/TOOL_APPROVAL_MODES.zh-CN.md"
+        }
+      ],
       "highlights": [
         {
           "kind": "new",
           "title": {
-            "en": "Persistent expanded reasoning display mode",
+            "en": "Expanded reasoning display mode",
             "zh": "持续展开的推理显示模式"
           },
           "body": {
@@ -33,9 +56,9 @@
           ]
         },
         {
-          "kind": "improved",
+          "kind": "fixed",
           "title": {
-            "en": "Memory approvals now follow Auto and YOLO modes",
+            "en": "Memory approvals now respect Auto and YOLO modes",
             "zh": "记忆审批现在遵循 Auto 和 YOLO 模式"
           },
           "body": {
@@ -54,7 +77,7 @@
             "zh": "自适应规划器调研"
           },
           "body": {
-            "en": "The planner no longer has fixed research round limits; it continues until a valid plan is submitted or a safety boundary is triggered.",
+            "en": "Planner no longer has fixed research round limits; it continues until a valid plan is submitted or safety boundaries are hit.",
             "zh": "规划器不再有固定的调研轮数限制；它会持续进行，直到提交有效计划或触发安全边界。"
           },
           "refs": [
@@ -68,7 +91,7 @@
             "zh": "桌面端会话与 UI 稳定性修复"
           },
           "body": {
-            "en": "Fixed multiple issues including session switch prompts, pinned sessions after restart, project tree loops, and transcript scrolling.",
+            "en": "Fixed multiple issues including session switching prompts, pinned chats after restart, project tree loops, and transcript scrolling.",
             "zh": "修复了多个问题，包括会话切换提示、重启后置顶会话、项目树循环和转录滚动。"
           },
           "refs": [
@@ -84,7 +107,7 @@
         "new": [
           {
             "title": {
-              "en": "Persistent expanded reasoning display mode",
+              "en": "Expanded reasoning display mode",
               "zh": "持续展开的推理显示模式"
             },
             "body": {
@@ -97,7 +120,7 @@
           },
           {
             "title": {
-              "en": "ACP authoritative total token count",
+              "en": "ACP authoritative total tokens",
               "zh": "ACP 权威总令牌数"
             },
             "body": {
@@ -116,7 +139,7 @@
               "zh": "自适应规划器调研"
             },
             "body": {
-              "en": "Removed fixed research round limits; the planner continues until a valid plan is submitted.",
+              "en": "Removed fixed research round limits; planner continues until a valid plan is submitted.",
               "zh": "移除了固定的调研轮数限制；规划器会持续进行，直到提交有效计划。"
             },
             "refs": [
@@ -125,7 +148,7 @@
           },
           {
             "title": {
-              "en": "MCP tool list auto-refresh",
+              "en": "MCP tool refresh after list changes",
               "zh": "MCP 工具列表变更后自动刷新"
             },
             "body": {
@@ -135,72 +158,75 @@
             "refs": [
               8673
             ]
+          },
+          {
+            "title": {
+              "en": "Desktop performance and stability improvements",
+              "zh": "桌面端性能与稳定性改进"
+            },
+            "body": {
+              "en": "Various improvements to rendering, workspace, catalog, and WebView2 stability.",
+              "zh": "对渲染、工作区、目录和 WebView2 稳定性的各种改进。"
+            },
+            "refs": [
+              8827,
+              8841,
+              8832,
+              8856,
+              8806,
+              8814,
+              8812,
+              8808
+            ]
           }
         ],
         "fixed": [
           {
             "title": {
-              "en": "Preserve prompts across session switches",
-              "zh": "修复会话切换时 Ask 与审批卡片丢失"
+              "en": "Memory approvals respect Auto and YOLO modes",
+              "zh": "记忆审批遵循 Auto 和 YOLO 模式"
             },
             "body": {
-              "en": "Preserve backend-confirmed ask and approval cards while a tab activation is in flight.",
-              "zh": "在标签激活进行中保留后端确认的 Ask 与审批卡片。"
+              "en": "Memory tools no longer force approval prompts in Auto and YOLO modes.",
+              "zh": "记忆工具在 Auto 和 YOLO 模式下不再强制弹出审批提示。"
             },
             "refs": [
-              8881
+              8788,
+              5049
             ]
           },
           {
             "title": {
-              "en": "Keep pinned chats visible after restart",
-              "zh": "修复重启后置顶会话不显示"
+              "en": "complete_step terminal message on final todo",
+              "zh": "最后一个待办完成时返回终止消息"
             },
             "body": {
-              "en": "Keep pinned conversations visible immediately after Desktop starts.",
-              "zh": "桌面启动后立即保持置顶会话可见。"
+              "en": "complete_step now returns a terminal message when the final todo is completed, preventing infinite loops.",
+              "zh": "complete_step 现在在最后一个待办完成时返回终止消息，防止无限循环。"
             },
             "refs": [
-              8834
+              8872
             ]
           },
           {
             "title": {
-              "en": "Stop project tree load-more loop",
-              "zh": "修复历史会话多时加载更多与整理历史反复循环"
+              "en": "Desktop session and UI fixes",
+              "zh": "桌面端会话与 UI 修复"
             },
             "body": {
-              "en": "Prevent the project tree from repeatedly toggling between load-more and organizing history.",
-              "zh": "防止项目树在加载更多与整理历史之间反复循环。"
+              "en": "Fixed session switching prompts, pinned chats after restart, project tree loops, transcript scrolling, and more.",
+              "zh": "修复了会话切换提示、重启后置顶会话、项目树循环、转录滚动等问题。"
             },
             "refs": [
-              8772
-            ]
-          },
-          {
-            "title": {
-              "en": "Recover transcript layout after lazy hydration",
-              "zh": "修复历史正文展开后的空白滚动"
-            },
-            "body": {
-              "en": "Invalidate React Virtuoso's cached size tree when lazy history patches change rendered row heights.",
-              "zh": "当懒加载历史补丁改变渲染行高时，使 React Virtuoso 的缓存大小树失效。"
-            },
-            "refs": [
-              8877
-            ]
-          },
-          {
-            "title": {
-              "en": "Fix phantom transcript bottom after interrupted turns",
-              "zh": "修复中断回合的虚假底部按钮"
-            },
-            "body": {
-              "en": "Prevent manual scroll intents from releasing tail-follow when the transcript has no physical native scroll range.",
-              "zh": "当转录没有物理原生滚动范围时，防止手动滚动意图释放尾部跟随。"
-            },
-            "refs": [
-              8813
+              8881,
+              8834,
+              8772,
+              8877,
+              8813,
+              8833,
+              8831,
+              8880,
+              8885
             ]
           }
         ]
@@ -213,8 +239,7 @@
         "myipanta",
         "cyq1017",
         "glyahh",
-        "Chise1",
-        "github-actions[bot]"
+        "Chise1"
       ],
       "links": {
         "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.25.2",
