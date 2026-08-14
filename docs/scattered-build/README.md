@@ -76,3 +76,12 @@ usernames, machine-local absolute paths, or raw private configuration.
 The fork can monitor upstream progress and submit pull requests to `main-v2`,
 but a fork push is not an upstream merge. A report must never describe a pull
 request as merged until the upstream repository shows that state.
+
+## Latest public verification
+
+The 2026-08-15 regression batch adds focused coverage for recovering a
+zero-byte checkpoint from a valid event log, keeping repeated cancellation to
+one terminal turn event, and measuring session-listing allocation alongside
+latency. The tests are source-only and do not require a GUI, a provider key, or
+real cloud traffic. The corresponding public report is
+`updates/2026-08-15-v1.25.2-regression-evidence.md`.
