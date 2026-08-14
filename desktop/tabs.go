@@ -2368,6 +2368,11 @@ func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionP
 				meta := a.tabMeta(tab, tab.ID == a.activeTabID)
 				a.saveTabsLocked()
 				a.mu.Unlock()
+				if activate {
+					// Surface an ask/approval prompt the background tab raised
+					// before it became the active tab (#8810).
+					a.replayPendingPromptsFor(tab)
+				}
 				return enrichTabMeta(meta), nil
 			}
 		}
@@ -2383,6 +2388,11 @@ func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionP
 			a.saveTabsLocked()
 			a.mu.Unlock()
 			if sameSession || a.skipCoveringLeafRebind(tab, sessionPath) {
+				if activate {
+					// Surface an ask/approval prompt the background tab raised
+					// before it became the active tab (#8810).
+					a.replayPendingPromptsFor(tab)
+				}
 				return enrichTabMeta(meta), nil
 			}
 			if err := a.rebindTabToSessionPath(tab, sessionPath); err != nil {
@@ -3107,6 +3117,10 @@ func (a *App) SetActiveTab(tabID string) error {
 	}
 	if next != nil {
 		next.clearRuntimeDisplayCurrency()
+		// A background tab can have an ask/approval prompt that was emitted
+		// while it was not the active tab; replay it so the modal surfaces
+		// instead of leaving the turn stuck (#8810).
+		a.replayPendingPromptsFor(next)
 	}
 	if supersededReq != "" {
 		a.emitTopicActivation(TopicActivationEvent{RequestID: supersededReq, TabID: supersededTab, Phase: topicActivationPhaseCancelled})

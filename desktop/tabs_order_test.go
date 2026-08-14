@@ -1193,3 +1193,63 @@ func TestRestoredTabIDLockedReplacesEmptyAndDuplicateIDs(t *testing.T) {
 		}
 	}
 }
+
+// TestSetActiveTabReplaysBackgroundPendingPrompt covers #8810: an ask/approval
+// prompt raised while a tab was in the background (not the active tab) must be
+// replayed when the user switches to that tab, instead of leaving the turn
+// stuck with only a sidebar badge and no modal.
+func TestSetActiveTabReplaysBackgroundPendingPrompt(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	asks := make(chan event.Ask, 2)
+	done := make(chan event.Event, 1)
+	runner := &desktopAskRuntimeRunner{}
+	ctrl := control.New(control.Options{
+		Runner: runner,
+		Sink: event.FuncSink(func(e event.Event) {
+			switch e.Kind {
+			case event.AskRequest:
+				asks <- e.Ask
+			case event.TurnDone:
+				done <- e
+			}
+		}),
+	})
+	runner.ask = func(ctx context.Context) error {
+		_, err := ctrl.Ask(ctx, []event.AskQuestion{{
+			ID:      "choice",
+			Prompt:  "Pick one",
+			Options: []event.AskOption{{Label: "A"}, {Label: "B"}},
+		}})
+		return err
+	}
+	defer ctrl.Close()
+
+	app := testAppWithOrderedTabs(t, "a", "a", "b")
+	app.tabs["b"].Ctrl = ctrl
+
+	// The ask is raised while tab A is active — B is a background tab, so the
+	// prompt's modal never surfaces to the user.
+	go ctrl.Send("ask user")
+	select {
+	case <-asks:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for background ask request")
+	}
+
+	// Switching to tab B must replay the pending prompt.
+	if err := app.SetActiveTab("b"); err != nil {
+		t.Fatalf("SetActiveTab: %v", err)
+	}
+	select {
+	case <-asks:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for replayed ask request after tab switch")
+	}
+
+	app.CancelTab("b")
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for turn_done")
+	}
+}

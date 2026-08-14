@@ -678,6 +678,11 @@ func (c *retargetRuntimeController) Goal() string                         { retu
 func (c *retargetRuntimeController) GoalStatus() string                   { return "" }
 func (c *retargetRuntimeController) ToolApprovalMode() string             { return control.ToolApprovalAsk }
 
+// ReplayPendingPrompts is a no-op for the retarget stub: tab activation now
+// replays pending prompts on the activated controller, so the stub needs the
+// method on the interface without a real approval store behind it.
+func (c *retargetRuntimeController) ReplayPendingPrompts() {}
+
 func TestRetargetOpenTabsSkipsRunningSessions(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := desktopSessionDir(globalWorkspaceRoot())

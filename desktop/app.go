@@ -1563,6 +1563,22 @@ func (a *App) ReplayPendingPrompts() {
 	}
 }
 
+// replayPendingPromptsFor re-emits any ask/approval prompt a tab's controller
+// is currently blocking on. A prompt emitted while the tab was in the
+// background never surfaced; switching to the tab must replay it or the turn
+// stays stuck with only a sidebar badge and no modal (#8810).
+func (a *App) replayPendingPromptsFor(tab *WorkspaceTab) {
+	if tab == nil {
+		return
+	}
+	a.mu.RLock()
+	ctrl := tab.Ctrl
+	a.mu.RUnlock()
+	if ctrl != nil {
+		ctrl.ReplayPendingPrompts()
+	}
+}
+
 // SetPlanMode toggles the plan-first workflow while preserving the current
 // tool-approval posture and sandbox settings.
 func (a *App) SetPlanMode(on bool) {
