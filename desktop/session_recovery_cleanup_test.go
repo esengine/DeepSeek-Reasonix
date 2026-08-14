@@ -262,6 +262,10 @@ func TestTrashSessionMatchesLiveSeesEventLogDivergence(t *testing.T) {
 		t.Fatal(err)
 	}
 	trashPath := filepath.Join(trashDir, "session.jsonl")
+	checkpoint, err := os.ReadFile(live)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, pair := range [][2]string{
 		{live, trashPath},
 		{store.SessionEventLog(live), store.SessionEventLog(trashPath)},
@@ -290,10 +294,30 @@ func TestTrashSessionMatchesLiveSeesEventLogDivergence(t *testing.T) {
 	if err := s.SaveSnapshot(live); err != nil {
 		t.Fatalf("SaveSnapshot diverge: %v", err)
 	}
-	liveAnchor, _ := os.ReadFile(live)
-	trashAnchor, _ := os.ReadFile(trashPath)
+	if err := os.WriteFile(live, checkpoint, 0o600); err != nil {
+		t.Fatalf("restore stale checkpoint: %v", err)
+	}
+	liveAnchor, err := os.ReadFile(live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trashAnchor, err := os.ReadFile(trashPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if string(liveAnchor) != string(trashAnchor) {
-		t.Skip("checkpoints diverged on disk; byte-compare trap not reproducible here")
+		t.Fatal("test setup did not preserve byte-identical checkpoints")
+	}
+	liveEvents, err := os.ReadFile(store.SessionEventLog(live))
+	if err != nil {
+		t.Fatal(err)
+	}
+	trashEvents, err := os.ReadFile(store.SessionEventLog(trashPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(liveEvents) == string(trashEvents) {
+		t.Fatal("test setup did not create event-log divergence")
 	}
 	same, err = trashSessionMatchesLive(live, trashPath)
 	if err != nil {
