@@ -19,12 +19,14 @@ import (
 const sourceUpdateTimeout = 15 * time.Second
 
 var checkSourceUpdate = sourceupdate.Check
+var fetchSourceUpdate = sourceupdate.Fetch
 
 const sourceUpdateUsage = `用法：
   reasonix source-update --check [--root 路径] [--json]
+  reasonix source-update --fetch [--root 路径] [--json]
 
 只读检查本地源码工作树的 origin/main-v2 基线与官方 main-v2 是否有变化。
-不会执行 git fetch、合并源码、下载二进制或替换任何 Reasonix 文件。
+--fetch 仅在工作树干净时更新本地 origin/main-v2 跟踪引用，不会合并源码、下载二进制或替换任何 Reasonix 文件。
 未提供 --root 时读取 REASONIX_SOURCE_ROOT。
 `
 
@@ -35,6 +37,7 @@ func sourceUpdateCommand(args []string) int {
 	fs.SetOutput(&parseOutput)
 	fs.Usage = func() { _, _ = parseOutput.WriteString(sourceUpdateUsage) }
 	check := fs.Bool("check", false, "执行只读源码更新检查")
+	fetch := fs.Bool("fetch", false, "仅更新本地 origin/main-v2 跟踪引用")
 	jsonOutput := fs.Bool("json", false, "输出机器可读 JSON")
 	root := fs.String("root", "", "源码工作树路径；默认读取 REASONIX_SOURCE_ROOT")
 	if err := fs.Parse(args); err != nil {
@@ -45,8 +48,8 @@ func sourceUpdateCommand(args []string) int {
 		fmt.Fprint(os.Stderr, parseOutput.String())
 		return 2
 	}
-	if !*check {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "source-update requires --check; this command is read-only")
+	if *check == *fetch {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "source-update requires exactly one of --check or --fetch")
 		return 2
 	}
 	if fs.NArg() > 0 {
@@ -60,7 +63,13 @@ func sourceUpdateCommand(args []string) int {
 
 	ctx, cancel := context.WithTimeout(context.Background(), sourceUpdateTimeout)
 	defer cancel()
-	result, err := checkSourceUpdate(ctx, resolvedRoot)
+	var result sourceupdate.Result
+	var err error
+	if *fetch {
+		result, err = fetchSourceUpdate(ctx, resolvedRoot)
+	} else {
+		result, err = checkSourceUpdate(ctx, resolvedRoot)
+	}
 	if *jsonOutput {
 		if encodeErr := json.NewEncoder(os.Stdout).Encode(result); encodeErr != nil {
 			return 1

@@ -83,3 +83,47 @@ func TestSourceUpdateCommandReturnsJSONOnCheckFailure(t *testing.T) {
 		t.Fatalf("status = %q, want %q", result.Status, sourceupdate.StatusCheckFailed)
 	}
 }
+
+func TestSourceUpdateCommandFetchRequiresExplicitFetchAction(t *testing.T) {
+	previous := fetchSourceUpdate
+	t.Cleanup(func() { fetchSourceUpdate = previous })
+	called := false
+	fetchSourceUpdate = func(_ context.Context, root string) (sourceupdate.Result, error) {
+		called = true
+		return sourceupdate.Result{
+			SourceRoot: root,
+			Status:     sourceupdate.StatusUpToDate,
+			Message:    "tracking ref updated",
+		}, nil
+	}
+
+	stdout, stderr := captureCLIOutput(t, func() {
+		if code := sourceUpdateCommand([]string{"--fetch", "--root", "D:/src", "--json"}); code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+	})
+	if !called {
+		t.Fatal("--fetch did not invoke the fetch operation")
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+	var result sourceupdate.Result
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("decode JSON %q: %v", stdout, err)
+	}
+	if result.Status != sourceupdate.StatusUpToDate || result.SourceRoot != "D:/src" {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestSourceUpdateCommandRejectsCombinedActions(t *testing.T) {
+	stderr := captureStderr(t, func() {
+		if code := sourceUpdateCommand([]string{"--check", "--fetch"}); code != 2 {
+			t.Fatalf("exit code = %d, want 2", code)
+		}
+	})
+	if !strings.Contains(stderr, "exactly one") {
+		t.Fatalf("stderr = %q, want exactly-one-action guidance", stderr)
+	}
+}

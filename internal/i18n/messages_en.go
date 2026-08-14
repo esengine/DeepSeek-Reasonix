@@ -575,7 +575,7 @@ Usage:
                                                          inspect or control redacted tasks
   reasonix bot start|doctor|weixin-login                multi-channel IM bot gateway
   reasonix upgrade [--check] [--force]                   update to the latest official release (also: reasonix update)
-  reasonix source-update --check [--root PATH] [--json]  read-only check for upstream main-v2 source changes
+  reasonix source-update --check|--fetch [--root PATH] [--json]  check or fetch the upstream main-v2 tracking ref
   reasonix completion bash|zsh|fish                     print a shell completion script to stdout
   reasonix version [--verbose|--json]                   print version (single line) or build metadata
   reasonix --version | -v                               single-line version (script-safe)

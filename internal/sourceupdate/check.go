@@ -1,5 +1,5 @@
-// Package sourceupdate reports whether the configured upstream source moved
-// beyond the local tracking baseline. It never fetches, merges, or installs.
+// Package sourceupdate reports upstream source movement and provides an
+// explicit, conservative fetch for the local tracking baseline.
 package sourceupdate
 
 import (
@@ -66,6 +66,78 @@ func Check(ctx context.Context, root string) (Result, error) {
 	return CheckWithRunner(ctx, root, execGitRunner{})
 }
 
+// Fetch updates only refs/remotes/origin/main-v2 from the configured upstream.
+// It requires a clean worktree and never checks out, merges, rebases, resets,
+// or replaces a build artifact. The caller must review and integrate the
+// fetched commits separately.
+func Fetch(ctx context.Context, root string) (Result, error) {
+	return FetchWithRunner(ctx, root, execGitRunner{})
+}
+
+func FetchWithRunner(ctx context.Context, root string, git GitRunner) (Result, error) {
+	result := Result{
+		RemoteURL: DefaultRemoteURL,
+		RemoteRef: DefaultRemoteRef,
+		Status:    StatusCheckFailed,
+	}
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return fail(result, "source root is empty", errors.New("source root is required"))
+	}
+	if git == nil {
+		return fail(result, "git runner is nil", errors.New("git runner is required"))
+	}
+
+	top, err := runText(ctx, git, root, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return fail(result, "resolve source root", err)
+	}
+	result.SourceRoot = top
+	if absolute, absErr := filepath.Abs(top); absErr == nil {
+		result.SourceRoot = absolute
+	}
+	branch, err := runText(ctx, git, root, "branch", "--show-current")
+	if err != nil {
+		return fail(result, "read current branch", err)
+	}
+	if branch == "" {
+		branch = "(detached)"
+	}
+	result.Branch = branch
+	result.Head, err = runHash(ctx, git, root, "HEAD")
+	if err != nil {
+		return fail(result, "read HEAD", err)
+	}
+
+	origin, err := runText(ctx, git, root, "remote", "get-url", "origin")
+	if err != nil {
+		return fail(result, "read origin URL", err)
+	}
+	if !sameRemoteURL(origin, DefaultRemoteURL) {
+		return fail(result, "refuse unexpected origin URL", errors.New("origin does not match the configured upstream"))
+	}
+
+	status, err := runAllowEmpty(ctx, git, root, "status", "--porcelain", "--untracked-files=all")
+	if err != nil {
+		return fail(result, "inspect worktree", err)
+	}
+	if strings.TrimSpace(status) != "" {
+		return fail(result, "refuse fetch from dirty worktree", errors.New("worktree is not clean; commit or stash changes first"))
+	}
+
+	if _, err := git.Run(ctx, root, "fetch", "--no-tags", "origin", "refs/heads/main-v2:refs/remotes/origin/main-v2"); err != nil {
+		return fail(result, "fetch origin main-v2", err)
+	}
+	result.LocalBase, err = runHash(ctx, git, root, "refs/remotes/origin/main-v2")
+	if err != nil {
+		return fail(result, "read fetched main-v2 baseline", err)
+	}
+	result.HasLocalPatches = result.Head != result.LocalBase
+	result.Status = StatusUpToDate
+	result.Message = "fetched upstream main-v2 into the local tracking baseline; current branch was not changed"
+	return result, nil
+}
+
 func CheckWithRunner(ctx context.Context, root string, git GitRunner) (Result, error) {
 	result := Result{
 		RemoteURL: DefaultRemoteURL,
@@ -129,15 +201,29 @@ func CheckWithRunner(ctx context.Context, root string, git GitRunner) (Result, e
 }
 
 func runText(ctx context.Context, git GitRunner, root string, args ...string) (string, error) {
-	out, err := git.Run(ctx, root, args...)
+	value, err := runAllowEmpty(ctx, git, root, args...)
 	if err != nil {
 		return "", err
 	}
-	value := strings.TrimSpace(string(out))
+	value = strings.TrimSpace(value)
 	if value == "" {
 		return "", errors.New("git returned empty output")
 	}
 	return value, nil
+}
+
+func runAllowEmpty(ctx context.Context, git GitRunner, root string, args ...string) (string, error) {
+	out, err := git.Run(ctx, root, args...)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+func sameRemoteURL(left, right string) bool {
+	left = strings.TrimRight(strings.TrimSpace(left), "/")
+	right = strings.TrimRight(strings.TrimSpace(right), "/")
+	return strings.EqualFold(left, right)
 }
 
 func runHash(ctx context.Context, git GitRunner, root string, ref string) (string, error) {
