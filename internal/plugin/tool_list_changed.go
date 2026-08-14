@@ -287,7 +287,7 @@ func (c *Client) runToolsRefreshes() {
 	// Exhaustion stays stale and fail-closed; a later notice or user retry starts
 	// a fresh bounded cycle.
 	refreshDelay := toolListRefreshDebounce
-	for attempt := 0; attempt < toolListRefreshMaxAttempts; attempt++ {
+	for range toolListRefreshMaxAttempts {
 		if err := wait(ctx, refreshDelay); err != nil {
 			return
 		}

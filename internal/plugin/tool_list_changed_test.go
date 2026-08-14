@@ -289,7 +289,7 @@ func TestToolListRefreshBoundsPermanentSelfNotificationsAndRecoversOnRetry(t *te
 	tr.emit()
 	done := refreshDone(t, client)
 	wantDelay := toolListRefreshDebounce
-	for attempt := 0; attempt < toolListRefreshMaxAttempts; attempt++ {
+	for attempt := range toolListRefreshMaxAttempts {
 		if delay := <-delays; delay != wantDelay {
 			t.Fatalf("refresh attempt %d delay = %s, want %s", attempt+1, delay, wantDelay)
 		}
