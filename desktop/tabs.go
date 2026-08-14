@@ -3625,15 +3625,6 @@ func (a *App) desktopControllerSink(inner event.Sink, cfg config.NotificationsCo
 	return notify.NewSink(inner, sender, cfg)
 }
 
-func setTabStartupError(tab *WorkspaceTab, err error) bool {
-	if tab == nil {
-		return false
-	}
-	tab.StartupErr = userFacingSessionLeaseError("", err).Error()
-	tab.StartupErrLeaseHeld = errors.Is(err, agent.ErrSessionLeaseHeld)
-	return tab.StartupErrLeaseHeld
-}
-
 func clearTabStartupError(tab *WorkspaceTab) {
 	if tab == nil {
 		return

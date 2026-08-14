@@ -315,6 +315,7 @@ func TestModelFromPath(t *testing.T) {
 		want string
 	}{
 		{"20260618-231556.000000000-gpt-4.jsonl", "gpt-4"},
+		{"20260618-231556.000000000.a1b2c3d4e5f60708-gpt-4.jsonl", "gpt-4"},
 		{"20260618-231556.000000000-claude-sonnet-4-20250514.jsonl", "claude-sonnet-4-20250514"},
 		{"plain.jsonl", "(unknown)"},
 		{"no-dash.jsonl", "dash"},

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -58,6 +59,95 @@ func TestSessionLeaseRejectsConcurrentWriterAndReleases(t *testing.T) {
 		t.Fatalf("third TryAcquireSessionLease after release: %v", err)
 	}
 	third.Release()
+}
+
+func TestSessionMaintenanceLeaseReleaseCanBeAwaited(t *testing.T) {
+	userPath, _ := leaseTestPath(t)
+	holder, err := TryAcquireSessionMaintenanceLease(userPath)
+	if err != nil {
+		t.Fatalf("TryAcquireSessionMaintenanceLease: %v", err)
+	}
+
+	contender, conflict := TryAcquireSessionLease(userPath)
+	if !errors.Is(conflict, ErrSessionLeaseHeld) {
+		holder.Release()
+		if contender != nil {
+			contender.Release()
+		}
+		t.Fatalf("contender err = %v, want ErrSessionLeaseHeld", conflict)
+	}
+	if !IsSessionMaintenanceLeaseConflict(conflict) {
+		holder.Release()
+		t.Fatal("maintenance holder did not publish a waitable conflict")
+	}
+
+	releaseEntered := make(chan struct{})
+	allowUnlock := make(chan struct{})
+	holder.beforeReleaseLock = func() {
+		close(releaseEntered)
+		<-allowUnlock
+	}
+	releaseDone := make(chan struct{})
+	go func() {
+		holder.Release()
+		close(releaseDone)
+	}()
+	<-releaseEntered
+	_, duringRelease := TryAcquireSessionLease(userPath)
+	if !IsSessionMaintenanceLeaseConflict(duringRelease) {
+		close(allowUnlock)
+		<-releaseDone
+		t.Fatalf("release-window conflict = %v, want maintenance generation", duringRelease)
+	}
+
+	shortCtx, shortCancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	if WaitForSessionMaintenanceLeaseRelease(shortCtx, conflict) {
+		shortCancel()
+		close(allowUnlock)
+		<-releaseDone
+		t.Fatal("maintenance release signal fired before the OS lease unlocked")
+	}
+	shortCancel()
+
+	close(allowUnlock)
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), time.Second)
+	defer waitCancel()
+	if !WaitForSessionMaintenanceLeaseRelease(waitCtx, conflict) {
+		t.Fatal("maintenance release signal did not fire after unlock")
+	}
+	<-releaseDone
+
+	next, err := TryAcquireSessionLease(userPath)
+	if err != nil {
+		t.Fatalf("TryAcquireSessionLease after maintenance release: %v", err)
+	}
+	next.Release()
+}
+
+func TestRuntimeSessionLeaseConflictIsNotMaintenanceWaitable(t *testing.T) {
+	userPath, _ := leaseTestPath(t)
+	holder, err := TryAcquireSessionLease(userPath)
+	if err != nil {
+		t.Fatalf("TryAcquireSessionLease holder: %v", err)
+	}
+	defer holder.Release()
+
+	_, conflict := TryAcquireSessionLease(userPath)
+	if !errors.Is(conflict, ErrSessionLeaseHeld) {
+		t.Fatalf("contender err = %v, want ErrSessionLeaseHeld", conflict)
+	}
+	if IsSessionMaintenanceLeaseConflict(conflict) {
+		t.Fatal("runtime holder was misclassified as maintenance")
+	}
+	waitCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	started := time.Now()
+	if WaitForSessionMaintenanceLeaseRelease(waitCtx, conflict) {
+		t.Fatal("runtime holder unexpectedly produced a maintenance release")
+	}
+	if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
+		t.Fatalf("runtime conflict waited %s instead of returning immediately", elapsed)
+	}
 }
 
 func TestSessionLeaseReclaimsCurrentProcessStaleOwner(t *testing.T) {

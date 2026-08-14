@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"reasonix/internal/provider"
@@ -448,6 +449,36 @@ func TestNewSessionPathEmptyModel(t *testing.T) {
 	path := NewSessionPath("/dir", "")
 	if !strings.Contains(path, "session") {
 		t.Errorf("empty model should use 'session' fallback: %s", path)
+	}
+}
+
+func TestNewSessionPathIsUniqueAcrossConcurrentSameModelCalls(t *testing.T) {
+	const workers = 256
+	dir := t.TempDir()
+	start := make(chan struct{})
+	paths := make(chan string, workers)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			paths <- NewSessionPath(dir, "same-model")
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(paths)
+
+	seen := make(map[string]bool, workers)
+	for path := range paths {
+		if seen[path] {
+			t.Fatalf("duplicate concurrent session path %q", path)
+		}
+		seen[path] = true
+	}
+	if len(seen) != workers {
+		t.Fatalf("unique session paths = %d, want %d", len(seen), workers)
 	}
 }
 
