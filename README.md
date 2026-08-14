@@ -9,6 +9,8 @@
   &nbsp;·&nbsp;
   <a href="./docs/GUIDE.md">Guide</a>
   &nbsp;·&nbsp;
+  <a href="./docs/scattered-build/README.md">Scattered build</a>
+  &nbsp;·&nbsp;
   <a href="./docs/ACP.md">ACP</a>
   &nbsp;·&nbsp;
   <a href="./docs/EXTENSIONS.md">Extensions</a>
@@ -53,6 +55,17 @@
 > **Community · 加入社区** — bilingual Discord for setup help (`#help` / `#求助`), workflow showcases, and feature ideas. → **<https://discord.gg/XF78rEME2D>**
 
 <br/>
+
+## Scattered build documentation
+
+This fork also documents a source-built Windows distribution maintained outside
+the upstream release pipeline. It is source-first: binaries, runtime data,
+credentials, sessions, caches, and machine-local paths are never committed.
+
+See the [scattered build README](./docs/scattered-build/README.md) for the
+build, isolation, update-monitoring, and reporting rules. Each public push adds
+one dated report under
+[`docs/scattered-build/updates/`](./docs/scattered-build/updates/).
 
 ## Features
 

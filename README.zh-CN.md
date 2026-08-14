@@ -9,6 +9,8 @@
   &nbsp;·&nbsp;
   <a href="./docs/GUIDE.zh-CN.md">指南</a>
   &nbsp;·&nbsp;
+  <a href="./docs/scattered-build/README.md">散装版构建</a>
+  &nbsp;·&nbsp;
   <a href="./docs/ACP.zh-CN.md">ACP</a>
   &nbsp;·&nbsp;
   <a href="./docs/EXTENSIONS.zh-CN.md">扩展开发</a>
@@ -51,6 +53,15 @@
 
 > [!IMPORTANT]
 > **加入社区 · Community** — 双语 Discord，提供安装答疑（`#help` / `#求助`）、工作流展示与功能想法。→ **<https://discord.gg/XF78rEME2D>**
+
+## 散装版构建文档
+
+这个 fork 同时维护一套独立于上游发布流程、从源码构建的 Windows 散装版。
+它以源码为中心：不提交二进制、运行数据、凭据、会话、缓存或本机路径。
+
+请阅读[散装版 README](./docs/scattered-build/README.md)，了解构建、隔离、
+更新监控和报告规则。每次公开推送都在
+[`docs/scattered-build/updates/`](./docs/scattered-build/updates/) 下新增一份带日期的报告。
 
 ## 特性
 
