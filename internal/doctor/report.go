@@ -13,13 +13,11 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/netclient"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/skill"
-	"reasonix/internal/store"
 )
 
 type Options struct {
@@ -74,10 +72,13 @@ type LSPReport struct {
 }
 
 type SessionsReport struct {
-	Dir   string `json:"dir,omitempty"`
-	Count int    `json:"count"`
-	Bytes int64  `json:"bytes"`
-	Error string `json:"error,omitempty"`
+	Dir                string `json:"dir,omitempty"`
+	Count              int    `json:"count"`
+	Bytes              int64  `json:"bytes"`
+	GlobalCount        int    `json:"global_count"`
+	ProjectCount       int    `json:"project_count"`
+	ProjectDirectories int    `json:"project_directories"`
+	Error              string `json:"error,omitempty"`
 }
 
 type SandboxReport struct {
@@ -169,7 +170,7 @@ func Collect(opts Options) Report {
 			Enabled: cfg.LSP.Enabled,
 			Servers: len(cfg.LSP.Servers),
 		},
-		Sessions: collectSessions(config.SessionDir()),
+		Sessions: collectSessions(cwd),
 		Sandbox: SandboxReport{
 			Bash:              cfg.BashMode(),
 			Network:           cfg.Sandbox.Network,
@@ -273,8 +274,10 @@ func RenderText(r Report) string {
 	fmt.Fprintf(&b, "  servers      %d configured overrides\n", r.LSP.Servers)
 
 	fmt.Fprintf(&b, "\nsessions\n")
-	fmt.Fprintf(&b, "  dir          %s\n", valueOr(r.Sessions.Dir, "unavailable"))
-	fmt.Fprintf(&b, "  saved        %d\n", r.Sessions.Count)
+	fmt.Fprintf(&b, "  global dir   %s\n", valueOr(r.Sessions.Dir, "unavailable"))
+	fmt.Fprintf(&b, "  saved total  %d\n", r.Sessions.Count)
+	fmt.Fprintf(&b, "  global       %d\n", r.Sessions.GlobalCount)
+	fmt.Fprintf(&b, "  project      %d across %d directories\n", r.Sessions.ProjectCount, r.Sessions.ProjectDirectories)
 	fmt.Fprintf(&b, "  bytes        %d\n", r.Sessions.Bytes)
 	if r.Sessions.Error != "" {
 		fmt.Fprintf(&b, "  warning      %s\n", r.Sessions.Error)
@@ -304,38 +307,6 @@ func RenderText(r Report) string {
 	fmt.Fprintf(&b, "  mode         %s\n", valueOr(r.Permission.Mode, "ask"))
 	fmt.Fprintf(&b, "  rules        allow:%d ask:%d deny:%d\n", r.Permission.AllowRules, r.Permission.AskRules, r.Permission.DenyRules)
 	return b.String()
-}
-
-func collectSessions(dir string) SessionsReport {
-	r := SessionsReport{Dir: dir}
-	if dir == "" {
-		return r
-	}
-	sessions, err := agent.ListSessions(dir)
-	if err != nil {
-		r.Error = err.Error()
-	}
-	r.Count = len(sessions)
-	if err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		// Transcript storage spans the .jsonl checkpoint plus the event
-		// log/index; counting only checkpoints would under-report usage.
-		name := filepath.Base(path)
-		if !store.IsSessionTranscriptName(name) &&
-			!strings.HasSuffix(name, ".events.jsonl") &&
-			!strings.HasSuffix(name, ".event-index.json") {
-			return nil
-		}
-		if info, statErr := d.Info(); statErr == nil {
-			r.Bytes += info.Size()
-		}
-		return nil
-	}); err != nil && !os.IsNotExist(err) {
-		r.Error = err.Error()
-	}
-	return r
 }
 
 func pluginTarget(p config.PluginEntry) string {
