@@ -25,6 +25,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -309,7 +310,12 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 	}
 	resp, err := provider.SendWithRetry(requestCtx, c.http, c.sendOpts(), newReq)
 	if err != nil {
-		return nil, provider.AnnotateToolSchemaError(err, req.Tools)
+		err = provider.AnnotateToolSchemaError(err, req.Tools)
+		var requestErr *provider.RequestError
+		if errors.As(err, &requestErr) && requestErr.RequestMayHaveReachedServer {
+			return provider.StreamFailure(requestCtx, err), nil
+		}
+		return nil, err
 	}
 	c.authed.Store(true)
 

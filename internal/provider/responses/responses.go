@@ -253,6 +253,10 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 		resp, err = c.send(requestCtx, body)
 	}
 	if err != nil {
+		var requestErr *provider.RequestError
+		if errors.As(err, &requestErr) && requestErr.RequestMayHaveReachedServer {
+			return provider.StreamFailure(requestCtx, err), nil
+		}
 		return nil, err
 	}
 	c.authed.Store(true)

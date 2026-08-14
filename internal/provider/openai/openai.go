@@ -515,7 +515,12 @@ func (c *client) openStream(ctx context.Context, targetURL string, wireReq chatR
 	}
 	resp, err := provider.SendWithRetry(requestCtx, c.http, c.sendOpts(), newReq)
 	if err != nil {
-		return nil, provider.AnnotateToolSchemaError(err, tools)
+		err = provider.AnnotateToolSchemaError(err, tools)
+		var requestErr *provider.RequestError
+		if errors.As(err, &requestErr) && requestErr.RequestMayHaveReachedServer {
+			return provider.StreamFailure(requestCtx, err), nil
+		}
+		return nil, err
 	}
 	c.authed.Store(true)
 

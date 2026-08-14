@@ -8,8 +8,10 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -41,6 +43,12 @@ var errorBodyReadTimeout = 10 * time.Second
 // usually clears in a couple of attempts, whereas a key that never worked is a
 // real config error and fails fast.
 const maxAuthRetries = 2
+
+// requestTraceDrainWindow covers the small race between net/http returning a
+// transport error and its request/response trace callback finishing. It is
+// deliberately short: connection errors with no trace still follow the normal
+// retry path after this bounded observation window.
+const requestTraceDrainWindow = 50 * time.Millisecond
 
 // SendOptions carries the per-request context SendWithRetry needs to label
 // errors and decide whether a 401 is worth retrying.
@@ -299,17 +307,47 @@ func SendWithRetry(ctx context.Context, httpClient *http.Client, opts SendOption
 		}
 		retryAfter = 0
 
-		req, err := newReq(ctx)
+		var requestMayHaveReachedServer atomic.Bool
+		traceComplete := make(chan struct{})
+		var traceCompleteOnce sync.Once
+		markTraceComplete := func() {
+			traceCompleteOnce.Do(func() { close(traceComplete) })
+		}
+		attemptCtx := httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+			GotFirstResponseByte: func() {
+				requestMayHaveReachedServer.Store(true)
+				markTraceComplete()
+			},
+			WroteRequest: func(info httptrace.WroteRequestInfo) {
+				// A transport error after this callback may still mean the
+				// provider accepted the POST. Retrying would duplicate a
+				// billable or side-effecting model request.
+				if info.Err == nil {
+					requestMayHaveReachedServer.Store(true)
+				}
+				markTraceComplete()
+			},
+		})
+		req, err := newReq(attemptCtx)
 		if err != nil {
 			return nil, NewRequestError(opts.Provider, ClassifyRequestFailure(err), err)
 		}
 		recordRequestAttempt(ctx)
 		resp, err := httpClient.Do(req)
 		if err != nil {
+			select {
+			case <-traceComplete:
+			case <-time.After(requestTraceDrainWindow):
+			}
 			if errors.Is(err, context.Canceled) {
 				return nil, err
 			}
 			kind := ClassifyRequestFailure(err)
+			if requestMayHaveReachedServer.Load() {
+				requestErr := NewRequestError(opts.Provider, kind, err)
+				requestErr.RequestMayHaveReachedServer = true
+				return nil, requestErr
+			}
 			if !transientErr(err) || !retryableRequestFailure(kind) {
 				return nil, NewRequestError(opts.Provider, ClassifyRequestFailure(err), err)
 			}

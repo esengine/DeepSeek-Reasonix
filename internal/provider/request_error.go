@@ -26,9 +26,10 @@ const (
 
 // RequestError classifies a failure before an HTTP response exists.
 type RequestError struct {
-	Provider string
-	Kind     RequestFailureKind
-	Cause    error
+	Provider                    string
+	Kind                        RequestFailureKind
+	Cause                       error
+	RequestMayHaveReachedServer bool
 }
 
 func NewRequestError(provider string, kind RequestFailureKind, cause error) *RequestError {

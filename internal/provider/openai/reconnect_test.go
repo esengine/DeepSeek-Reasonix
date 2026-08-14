@@ -12,8 +12,21 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/netclient"
 	"reasonix/internal/provider"
 )
+
+func directTestProviderConfig(baseURL string) provider.Config {
+	return provider.Config{
+		Name:    "deepseek",
+		BaseURL: baseURL,
+		Model:   "deepseek-v4",
+		APIKey:  "k",
+		Extra: map[string]any{
+			"proxy_spec": netclient.ProxySpec{Mode: netclient.ModeOff},
+		},
+	}
+}
 
 // rstAfter writes a 200 SSE head plus the given prelude, then forces a TCP RST
 // (SetLinger(0) + Close) so the client read fails like a proxy that idle-drops
@@ -48,7 +61,7 @@ func TestStreamSurfacesEarlyConnResetAsInterrupt(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p, err := New(provider.Config{Name: "deepseek", BaseURL: srv.URL, Model: "deepseek-v4", APIKey: "k"})
+	p, err := New(directTestProviderConfig(srv.URL))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -87,7 +100,7 @@ func TestStreamCancelDoesNotReconnect(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p, err := New(provider.Config{Name: "deepseek", BaseURL: srv.URL, Model: "deepseek-v4", APIKey: "k"})
+	p, err := New(directTestProviderConfig(srv.URL))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -133,7 +146,7 @@ func TestStreamTreatsCleanEOFWithoutDoneAsCut(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p, err := New(provider.Config{Name: "deepseek", BaseURL: srv.URL, Model: "deepseek-v4", APIKey: "k"})
+	p, err := New(directTestProviderConfig(srv.URL))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -171,7 +184,7 @@ func TestStreamDropsPartialToolCallOnCleanEOF(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p, err := New(provider.Config{Name: "deepseek", BaseURL: srv.URL, Model: "deepseek-v4", APIKey: "k"})
+	p, err := New(directTestProviderConfig(srv.URL))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -204,7 +217,7 @@ func TestStreamAcceptsFinishReasonWithoutDone(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p, err := New(provider.Config{Name: "deepseek", BaseURL: srv.URL, Model: "deepseek-v4", APIKey: "k"})
+	p, err := New(directTestProviderConfig(srv.URL))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -238,7 +251,7 @@ func TestStreamDoesNotReplayAfterOutput(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p, err := New(provider.Config{Name: "deepseek", BaseURL: srv.URL, Model: "deepseek-v4", APIKey: "k"})
+	p, err := New(directTestProviderConfig(srv.URL))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

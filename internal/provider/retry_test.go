@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"strings"
 	"sync"
@@ -123,6 +124,28 @@ func TestSendWithRetryPreservesCallerCancellation(t *testing.T) {
 	var requestErr *RequestError
 	if errors.As(err, &requestErr) {
 		t.Fatalf("caller cancellation was wrapped as request error: %v", err)
+	}
+}
+
+func TestSendWithRetryDoesNotReplayRequestAfterWrite(t *testing.T) {
+	calls := 0
+	cl := &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		trace := httptrace.ContextClientTrace(r.Context())
+		if trace == nil || trace.WroteRequest == nil {
+			t.Fatal("SendWithRetry did not install a request-write trace")
+		}
+		trace.WroteRequest(httptrace.WroteRequestInfo{})
+		return nil, &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET}
+	})}
+
+	_, err := SendWithRetry(context.Background(), cl, SendOptions{Provider: "relay"}, newDummyReq)
+	if calls != 1 {
+		t.Fatalf("request was replayed %d times after write, want 1", calls)
+	}
+	var requestErr *RequestError
+	if !errors.As(err, &requestErr) || !requestErr.RequestMayHaveReachedServer {
+		t.Fatalf("request error = %T %v, want sent-request marker", err, err)
 	}
 }
 
