@@ -246,7 +246,99 @@ const warningTurn: Item[] = [
   }
 }
 
-// ── Phase 3: summaries disabled ─────────────────────────────────────────────
+// ── Phase 3: expanded reasoning pins its parent process fold ─────────────────
+{
+  const harness = await createTranscriptHarness({ reasoningDisplayMode: "expanded" });
+  const container = harness.container;
+  try {
+    const runningItems: Item[] = [
+      { kind: "user", id: "u-expanded-parent", text: "inspect" },
+      {
+        kind: "assistant",
+        id: "a-expanded-parent",
+        text: "done",
+        reasoning: "completed reasoning should remain visible",
+        streaming: true,
+        reasoningComplete: false,
+        workDurationMs: 1_000,
+      },
+    ];
+    await render(harness, runningItems, { running: true });
+    await harness.waitFor(
+      () => Boolean(
+        container.querySelector(".turn-collapse--open")
+          && container.querySelector(".turn-collapse__reasoning-phase--open .md"),
+      ),
+      "expanded live reasoning",
+    );
+    ok(Boolean(container.querySelector(".turn-collapse--open")), "expanded reasoning starts with its running parent fold open");
+    ok(Boolean(container.querySelector(".turn-collapse__reasoning-phase--open .md")), "expanded running reasoning renders its full body");
+
+    const completedItems: Item[] = runningItems.map((item) => item.kind === "assistant"
+      ? { ...item, streaming: false, reasoningComplete: true }
+      : item);
+    await render(harness, completedItems, { running: false });
+    await harness.waitFor(
+      () => Boolean(
+        container.querySelector(".turn-collapse--open")
+          && container.querySelector(".turn-collapse__reasoning-phase--open .md"),
+      ),
+      "expanded completed reasoning",
+    );
+    ok(Boolean(container.querySelector(".turn-collapse--open")), "expanded reasoning keeps its parent fold open after completion");
+    ok(Boolean(container.querySelector(".turn-collapse__reasoning-phase--open .md")), "expanded completed reasoning remains visible");
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".turn-collapse > .reasoning__head")?.click();
+    });
+    await harness.flush();
+    ok(!container.querySelector(".turn-collapse--open"), "manual parent collapse still wins in expanded reasoning mode");
+    ok(!container.querySelector(".turn-collapse__body"), "manual parent collapse unmounts the expanded reasoning body");
+
+    await render(harness, completedItems, { running: false });
+    ok(!container.querySelector(".turn-collapse--open"), "completed rerenders preserve a manual parent collapse");
+    await harness.settle();
+  } finally {
+    await harness.unmount();
+    await harness.close();
+  }
+}
+
+// A completed reasoning fold restored from history has no live transition to
+// open it, so the expanded-mode default must pin it on first reconciliation.
+{
+  const harness = await createTranscriptHarness({ reasoningDisplayMode: "expanded" });
+  const container = harness.container;
+  try {
+    await render(harness, [
+      { kind: "user", id: "u-expanded-history", text: "inspect" },
+      {
+        kind: "assistant",
+        id: "a-expanded-history",
+        text: "done",
+        reasoning: "restored completed reasoning",
+        streaming: false,
+        reasoningComplete: true,
+        workDurationMs: 1_000,
+      },
+    ]);
+    await harness.waitFor(
+      () => Boolean(
+        container.querySelector(".turn-collapse--open")
+          && container.querySelector(".turn-collapse__reasoning-phase--open .md"),
+      ),
+      "expanded reasoning restored from history",
+    );
+    ok(Boolean(container.querySelector(".turn-collapse--open")), "expanded history restores the parent reasoning fold open");
+    ok(Boolean(container.querySelector(".turn-collapse__reasoning-phase--open .md")), "expanded history restores completed reasoning visible");
+    await harness.settle();
+  } finally {
+    await harness.unmount();
+    await harness.close();
+  }
+}
+
+// ── Phase 4: summaries disabled ─────────────────────────────────────────────
 {
   const harness = await createTranscriptHarness({
     storage: { "reasonix-process-fold": "expanded", "reasonix-reasoning-summary": "0" },

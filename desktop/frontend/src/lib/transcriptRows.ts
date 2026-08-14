@@ -260,6 +260,7 @@ export interface FoldEntry {
   open: boolean;
   userOverridden: boolean;
   running: boolean;
+  keepReasoningExpanded?: boolean;
 }
 
 export type FoldMap = ReadonlyMap<string, FoldEntry>;
@@ -267,24 +268,30 @@ export type FoldMap = ReadonlyMap<string, FoldEntry>;
 export const EMPTY_FOLDS: FoldMap = new Map();
 
 export function defaultFoldOpen(
-  segment: { hasOutsideContent: boolean; hasRunningWork: boolean },
+  segment: { hasOutsideContent: boolean; hasRunningWork: boolean; keepReasoningExpanded?: boolean },
   preference: ProcessFoldPreference,
 ): boolean {
-  return preference === "expanded" || !segment.hasOutsideContent || segment.hasRunningWork;
+  return preference === "expanded" || segment.keepReasoningExpanded === true || !segment.hasOutsideContent || segment.hasRunningWork;
 }
 
 export interface FoldSegmentState {
   key: string;
   hasOutsideContent: boolean;
   hasRunningWork: boolean;
+  keepReasoningExpanded: boolean;
 }
 
-export function foldSegmentStates(models: readonly TurnModel[]): FoldSegmentState[] {
+export function foldSegmentStates(models: readonly TurnModel[], keepReasoningExpanded = false): FoldSegmentState[] {
   const out: FoldSegmentState[] = [];
   for (const model of models) {
     for (const segment of model.segments) {
       if (segment.displayItems.length === 0) continue;
-      out.push({ key: segment.key, hasOutsideContent: segment.hasOutsideContent, hasRunningWork: segment.hasRunningWork });
+      out.push({
+        key: segment.key,
+        hasOutsideContent: segment.hasOutsideContent,
+        hasRunningWork: segment.hasRunningWork,
+        keepReasoningExpanded: keepReasoningExpanded && segment.displayItems.some((item) => item.kind === "assistant"),
+      });
     }
   }
   return out;
@@ -318,17 +325,24 @@ export function reconcileFoldEntries(
         open: defaultFoldOpen(segment, preference),
         userOverridden: false,
         running: segment.hasRunningWork,
+        keepReasoningExpanded: segment.keepReasoningExpanded,
       });
       continue;
     }
-    if (preferenceChanged) {
-      const open = preference === "expanded"
+    const reasoningPinChanged = Boolean(entry.keepReasoningExpanded) !== segment.keepReasoningExpanded;
+    if (preferenceChanged || reasoningPinChanged) {
+      const open = preference === "expanded" || segment.keepReasoningExpanded
         ? true
         : !segment.hasRunningWork && segment.hasOutsideContent
           ? false
           : entry.open;
-      if (open !== entry.open || entry.userOverridden || entry.running !== segment.hasRunningWork) {
-        write(segment.key, { open, userOverridden: false, running: segment.hasRunningWork });
+      if (open !== entry.open || entry.userOverridden || entry.running !== segment.hasRunningWork || reasoningPinChanged) {
+        write(segment.key, {
+          open,
+          userOverridden: false,
+          running: segment.hasRunningWork,
+          keepReasoningExpanded: segment.keepReasoningExpanded,
+        });
       }
       continue;
     }
@@ -338,13 +352,18 @@ export function reconcileFoldEntries(
       const userOverridden = entry.running ? entry.userOverridden : false;
       const open = userOverridden ? entry.open : true;
       if (open !== entry.open || userOverridden !== entry.userOverridden || !entry.running) {
-        write(segment.key, { open, userOverridden, running: true });
+        write(segment.key, { open, userOverridden, running: true, keepReasoningExpanded: segment.keepReasoningExpanded });
       }
       continue;
     }
     if (entry.running) {
-      const open = !entry.userOverridden && segment.hasOutsideContent && preference !== "expanded" ? false : entry.open;
-      write(segment.key, { open, userOverridden: entry.userOverridden, running: false });
+      const open = !entry.userOverridden && segment.hasOutsideContent && preference !== "expanded" && !segment.keepReasoningExpanded ? false : entry.open;
+      write(segment.key, {
+        open,
+        userOverridden: entry.userOverridden,
+        running: false,
+        keepReasoningExpanded: segment.keepReasoningExpanded,
+      });
     }
   }
   for (const key of prev.keys()) {
@@ -360,7 +379,12 @@ export function reconcileFoldEntries(
 export function foldMapWithToggle(prev: FoldMap, key: string, currentlyOpen: boolean): Map<string, FoldEntry> {
   const next = new Map(prev);
   const entry = prev.get(key);
-  next.set(key, { open: !currentlyOpen, userOverridden: true, running: entry?.running ?? false });
+  next.set(key, {
+    open: !currentlyOpen,
+    userOverridden: true,
+    running: entry?.running ?? false,
+    keepReasoningExpanded: entry?.keepReasoningExpanded,
+  });
   return next;
 }
 
@@ -368,7 +392,12 @@ export function foldMapWithToggle(prev: FoldMap, key: string, currentlyOpen: boo
 export function foldMapWithReasoningOpen(prev: FoldMap, key: string, running: boolean): Map<string, FoldEntry> {
   const next = new Map(prev);
   const entry = prev.get(key);
-  next.set(key, { open: true, userOverridden: true, running: entry?.running ?? running });
+  next.set(key, {
+    open: true,
+    userOverridden: true,
+    running: entry?.running ?? running,
+    keepReasoningExpanded: entry?.keepReasoningExpanded,
+  });
   return next;
 }
 

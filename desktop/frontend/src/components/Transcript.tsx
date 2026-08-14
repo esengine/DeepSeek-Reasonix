@@ -432,7 +432,10 @@ export function Transcript({
     [liveId, liveHasAnswerText, liveHasReasoning, liveReasoningComplete],
   );
   const turnModels = useMemo(() => buildTurnModels(items, liveFlags, running, hideReasoning), [items, liveFlags, running, hideReasoning]);
-  const segmentStates = useMemo(() => foldSegmentStates(turnModels), [turnModels]);
+  const segmentStates = useMemo(
+    () => foldSegmentStates(turnModels, reasoningDisplayMode === "expanded"),
+    [reasoningDisplayMode, turnModels],
+  );
 
   const [foldPreference, setFoldPreference] = useState<ProcessFoldPreference>(getProcessFoldPreference);
   useEffect(() => onProcessFoldPreferenceChange(setFoldPreference), []);
