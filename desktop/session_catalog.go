@@ -233,7 +233,7 @@ func (a *App) startSessionCatalog(rebuild bool) {
 				slog.Debug("desktop: reconcile session catalog directory", "dir", target.Path, "err", err)
 			}
 		}
-		a.retargetOpenTabsToCoveringLeaves()
+		a.retargetOpenTabsToContinuations()
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {

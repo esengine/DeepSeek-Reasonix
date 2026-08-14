@@ -53,8 +53,99 @@ try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => !document.querySelector(".startup-splash"), undefined, { timeout: 30_000 });
-  await page.click('.project-tree__topic-main:has-text("bench:tools-38t")');
+  await page.click('.project-tree__topic-main:has-text("bench:small-6t")');
   await page.waitForFunction(() => document.querySelectorAll(".transcript__row").length > 4, undefined, { timeout: 30_000 });
+  await page.waitForFunction(() => document.querySelector(".transcript")?.textContent?.includes("Asynchronously hydrated verification appendix"), undefined, { timeout: 30_000 });
+  await page.evaluate(() => new Promise((resolve) => {
+    let frames = 8;
+    const settle = () => frames-- <= 0 ? resolve() : requestAnimationFrame(settle);
+    requestAnimationFrame(settle);
+  }));
+  const hydrationTranscript = page.locator(".transcript");
+  const hydrationBox = await hydrationTranscript.boundingBox();
+  assert(hydrationBox != null, "async hydration exposes the transcript viewport");
+  const hydrationStart = await hydrationTranscript.evaluate((element) => ({
+    top: element.scrollTop,
+    max: element.scrollHeight - element.clientHeight,
+  }));
+  assert(hydrationStart.max > 0, `async hydration fixture is scrollable (${hydrationStart.max}px)`);
+  await page.mouse.move(hydrationBox.x + hydrationBox.width / 2, hydrationBox.y + hydrationBox.height / 2);
+  await page.mouse.wheel(0, hydrationStart.top < hydrationStart.max / 2 ? 360 : -360);
+  await page.waitForFunction(
+    (startTop) => {
+      const element = document.querySelector(".transcript");
+      return element instanceof HTMLElement
+        && element.dataset.scrollMode === "manual"
+        && Math.abs(element.scrollTop - startTop) > 1;
+    },
+    hydrationStart.top,
+    { timeout: 5_000 },
+  );
+  await page.evaluate(() => {
+    const element = document.querySelector(".transcript");
+    if (!(element instanceof HTMLElement)) return;
+    element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight * 2.5);
+    element.dispatchEvent(new Event("scroll"));
+  });
+  await page.waitForFunction(
+    () => document.querySelector(".transcript")?.dataset.scrollMode === "manual",
+    undefined,
+    { timeout: 5_000 },
+  );
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const hydrationAnchor = await page.evaluate(() => {
+    const element = document.querySelector(".transcript");
+    if (!(element instanceof HTMLElement)) return null;
+    const viewport = element.getBoundingClientRect();
+    const visible = [...element.querySelectorAll(".transcript__row")]
+      .filter((row) => row.getBoundingClientRect().bottom > viewport.top && row.getBoundingClientRect().top < viewport.bottom)
+      .sort((left, right) => left.getBoundingClientRect().top - right.getBoundingClientRect().top);
+    const anchor = visible.find((row) => row.getBoundingClientRect().top >= viewport.top) ?? visible[0];
+    return anchor ? { key: anchor.dataset.rowKey, offset: anchor.getBoundingClientRect().top - viewport.top } : null;
+  });
+  assert(hydrationAnchor?.key, "async hydration starts from a stable manual-reading anchor");
+  await page.waitForFunction(() => document.querySelector(".transcript")?.textContent?.includes("ASYNC LAYOUT EXPANSION COMPLETE"), undefined, { timeout: 30_000 });
+  await page.waitForFunction((anchor) => {
+    const element = document.querySelector(".transcript");
+    if (!(element instanceof HTMLElement)) return false;
+    const row = [...element.querySelectorAll(".transcript__row")].find((candidate) => candidate.dataset.rowKey === anchor.key);
+    return Boolean(row && Math.abs((row.getBoundingClientRect().top - element.getBoundingClientRect().top) - anchor.offset) <= 8);
+  }, hydrationAnchor, { timeout: 5_000 });
+  const hydratedState = await page.evaluate((anchor) => {
+    const element = document.querySelector(".transcript");
+    if (!(element instanceof HTMLElement)) return { occupied: false, anchorOffset: null };
+    const viewport = element.getBoundingClientRect();
+    const rows = [...element.querySelectorAll(".transcript__row")];
+    const anchored = rows.find((row) => row.dataset.rowKey === anchor.key);
+    return { occupied: rows.some((row) => {
+      const rect = row.getBoundingClientRect();
+      return rect.bottom > viewport.top && rect.top < viewport.bottom;
+    }), anchorOffset: anchored ? anchored.getBoundingClientRect().top - viewport.top : null };
+  }, hydrationAnchor);
+  assert(hydratedState.occupied, "async full-content hydration keeps a transcript row in the viewport");
+  assert(
+    hydratedState.anchorOffset != null && Math.abs(hydratedState.anchorOffset - hydrationAnchor.offset) <= 8,
+    `async hydration preserves the manual-reading anchor (${hydrationAnchor.offset} → ${hydratedState.anchorOffset})`,
+  );
+  await page.evaluate(() => new Promise((resolve) => {
+    let frames = 12;
+    const settle = () => frames-- <= 0 ? resolve() : requestAnimationFrame(settle);
+    requestAnimationFrame(settle);
+  }));
+  await page.evaluate(() => {
+    const element = document.querySelector(".transcript");
+    if (!(element instanceof HTMLElement)) return;
+    element.scrollTop = element.scrollHeight;
+    element.dispatchEvent(new Event("scroll"));
+  });
+  await page.waitForFunction(() => {
+    const element = document.querySelector(".transcript");
+    return element instanceof HTMLElement
+      && element.dataset.scrollMode === "tail-follow"
+      && element.scrollHeight - element.scrollTop - element.clientHeight <= 1;
+  });
+  await page.click('.project-tree__topic-main:has-text("bench:tools-38t")');
+  await page.waitForFunction(() => document.querySelector(".project-tree__topic--active .project-tree__topic-label")?.textContent?.includes("bench:tools-38t"));
   await page.waitForFunction(() => document.querySelector(".transcript")?.textContent?.includes("pkg-41/mod.go"), undefined, { timeout: 30_000 });
   const markdownVisibility = await page.evaluate(() => {
     const row = document.querySelector(".transcript__row");

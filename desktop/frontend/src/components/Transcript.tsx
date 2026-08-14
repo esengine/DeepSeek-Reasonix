@@ -48,7 +48,7 @@ import { TranscriptSelectionOverlay } from "./TranscriptSelectionOverlay";
 import { useCreationTranscriptScrollbar } from "../lib/useCreationTranscriptScrollbar";
 import { useTranscriptScrollInteractions } from "../lib/useTranscriptScrollInteractions";
 import { hasTranscriptScrollableRange, TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX, useTranscriptVirtuosoScroll } from "../lib/useTranscriptVirtuosoScroll";
-import { useTranscriptVirtuosoFirstItemIndex } from "../lib/transcriptVirtuosoIndex";
+import { useTranscriptVirtuosoRecovery } from "../lib/useTranscriptVirtuosoRecovery";
 import { TranscriptLayoutIntentProvider, useTranscriptUserResizeIntent } from "./TranscriptLayoutIntentContext";
 import { MarkdownImageTabContext } from "./MarkdownImageContext";
 type OpenTurnAction = { turn: number; menu: "summary" | "rewind" };
@@ -233,6 +233,7 @@ export function Transcript({
   actionHoverMenus = false,
   rewindSignal = 0,
   revealSignal = 0,
+  historyLayoutRevision = 0,
   hydrating = false,
   hasOlderHistory = false,
   olderHistoryCount = 0,
@@ -261,6 +262,7 @@ export function Transcript({
   actionHoverMenus?: boolean;
   rewindSignal?: number;
   revealSignal?: number;
+  historyLayoutRevision?: number;
   hydrating?: boolean;
   hasOlderHistory?: boolean;
   olderHistoryCount?: number;
@@ -306,6 +308,7 @@ export function Transcript({
     finishProgrammaticScroll,
   } = useTranscriptVirtuosoScroll();
   const virtuosoReadyRef = useRef(false);
+  const layoutSurfaceKey = `${tabId ?? ""}:${revealSignal}`;
 
   const entranceRef = useTranscriptEntranceAnimation<HTMLDivElement>(tabId, revealSignal, items);
 
@@ -488,8 +491,23 @@ export function Transcript({
     onScrollEnd: finishProgrammaticScroll,
     onSelectionPointerDown: selectionRetention.onPointerDownCapture,
   });
-  const virtuosoResetKey = `${tabId ?? ""}:${revealSignal}`;
-  const firstItemIndex = useTranscriptVirtuosoFirstItemIndex(virtualRows, virtuosoResetKey);
+  const {
+    resetKey: virtuosoResetKey,
+    firstItemIndex,
+    restoreLocation,
+    handleItemsRendered: handleRecoveryItemsRendered,
+    scheduleBlankViewportCheck,
+  } = useTranscriptVirtuosoRecovery({
+    surfaceKey: layoutSurfaceKey,
+    historyLayoutRevision,
+    rows: virtualRows,
+    rowIndexByKey,
+    scrollRef,
+    pinnedRef: stick,
+    virtuosoRef,
+    readyRef: virtuosoReadyRef,
+    scrollToBottom,
+  });
   const heightEstimates = useMemo(() => virtualRows.map((row) => estimateTranscriptRowSize(row)), [virtualRows]);
   const overlayRevision = useMemo(
     () => virtualRows.map((row) => String(row.key)).join("|"),
@@ -515,12 +533,13 @@ export function Transcript({
   const handleItemsRendered = useCallback((rendered: ListItem<TranscriptRow>[]) => {
     noteTranscriptRowCounts(rendered.length, virtualRows.length);
     selectionRetention.reconcileLogicalFocus();
-    if (!virtuosoReadyRef.current && rendered.length > 0) {
-      virtuosoReadyRef.current = true;
-      requestAnimationFrame(() => scrollToBottom());
-    }
-  }, [scrollToBottom, selectionRetention.reconcileLogicalFocus, virtualRows.length]);
+    handleRecoveryItemsRendered(rendered.length);
+  }, [handleRecoveryItemsRendered, selectionRetention.reconcileLogicalFocus, virtualRows.length]);
 
+  const handleTranscriptScroll = useCallback(() => {
+    if (creationMode) handleCreationScroll();
+    scheduleBlankViewportCheck();
+  }, [creationMode, handleCreationScroll, scheduleBlankViewportCheck]);
   // ── JumpBar integration ───────────────────────────────────────────────────
   const handleJumpToQuestion = useCallback((question: QuestionAnchor) => {
     const index = rowIndexByKey.get(String(userRowKey(question.id)));
@@ -699,6 +718,7 @@ export function Transcript({
             components={hasOlderHistory ? TRANSCRIPT_VIRTUOSO_COMPONENTS_WITH_HEADER : TRANSCRIPT_VIRTUOSO_COMPONENTS}
             computeItemKey={(_index, row) => `${tabId ?? ""}:${String(row.key)}`}
             firstItemIndex={firstItemIndex}
+            initialTopMostItemIndex={restoreLocation}
             // Do not set alignToBottom: Virtuoso's margin-top:auto plus
             // firstItemIndex paints a ghost first-user bubble and empty band
             // in short chats. The coordinator owns tail following.
@@ -712,7 +732,7 @@ export function Transcript({
             itemsRendered={handleItemsRendered}
             totalListHeightChanged={followGrowingTail}
             itemContent={(_index, row) => renderRow(row)}
-            onScroll={creationMode ? handleCreationScroll : undefined}
+            onScroll={handleTranscriptScroll}
             onWheelCapture={scrollInteractions.onWheelCapture}
             onTouchStartCapture={onTouchStartIntent}
             onTouchMoveCapture={scrollInteractions.onTouchMoveCapture}

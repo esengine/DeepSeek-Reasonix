@@ -892,10 +892,10 @@ func (a *App) attachExistingSessionRuntimeCore(tab *WorkspaceTab, path string, w
 			a.saveTabsLocked()
 		}
 		attachedCtrl := tab.Ctrl
+		attachedSink := tab.sink
+		attachedEpoch := a.runtimeEpochForTabLocked(tab)
 		a.mu.Unlock()
-		if attachedCtrl != nil {
-			attachedCtrl.ReplayPendingPrompts()
-		}
+		a.replayPendingPromptsAfterRuntimeAttach(tab.ID, attachedSink, attachedCtrl, attachedEpoch)
 		return true
 	}
 
@@ -931,11 +931,11 @@ func (a *App) attachExistingSessionRuntimeCore(tab *WorkspaceTab, path string, w
 	applyRuntimeTab(tab, source, path, wailsCtx, a)
 	a.saveTabsLocked()
 	attachedCtrl := tab.Ctrl
+	attachedSink := tab.sink
+	attachedEpoch := a.runtimeEpochForTabLocked(tab)
 	a.mu.Unlock()
 
-	if attachedCtrl != nil {
-		attachedCtrl.ReplayPendingPrompts()
-	}
+	a.replayPendingPromptsAfterRuntimeAttach(tab.ID, attachedSink, attachedCtrl, attachedEpoch)
 	return true
 }
 
@@ -1863,6 +1863,25 @@ func (a *App) notifyTabRuntimeRebuiltAtEpoch(tab *WorkspaceTab, epoch string) {
 	a.emitRuntimeEvent("runtime:rebuilt", tabID, epoch)
 }
 
+// replayPendingPromptsAfterRuntimeAttach publishes the runtime generation on
+// the tab sink before asking the same controller to replay. Both events use the
+// sink's FIFO queue, so the frontend cannot reject a valid prompt as belonging
+// to the runtime that was just replaced.
+func (a *App) replayPendingPromptsAfterRuntimeAttach(tabID string, sink *tabEventSink, ctrl control.SessionAPI, epoch string) {
+	if ctrl == nil {
+		return
+	}
+	if sink != nil && sink.context() != nil {
+		// Use the sink captured in the same App.mu commit as ctrl. Re-reading the
+		// tab here would let a concurrent replacement put the fence on a newer
+		// sink while this older controller replays on the transferred one.
+		sink.emitRuntimeEvent("runtime:rebuilt", tabID, epoch)
+	} else {
+		a.emitRuntimeEvent("runtime:rebuilt", tabID, epoch)
+	}
+	ctrl.ReplayPendingPrompts()
+}
+
 func (a *App) emitReady(ctx context.Context, tabID ...string) {
 	a.mu.RLock()
 	hook := a.readyHook
@@ -2382,7 +2401,7 @@ func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionP
 			meta := a.tabMeta(tab, tab.ID == a.activeTabID)
 			a.saveTabsLocked()
 			a.mu.Unlock()
-			if sameSession || a.skipCoveringLeafRebind(tab, sessionPath) {
+			if sameSession || a.skipContinuationRebind(tab, sessionPath) {
 				return enrichTabMeta(meta), nil
 			}
 			if err := a.rebindTabToSessionPath(tab, sessionPath); err != nil {

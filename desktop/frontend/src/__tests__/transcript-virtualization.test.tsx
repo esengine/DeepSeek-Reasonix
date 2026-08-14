@@ -167,6 +167,27 @@ function firstTextNode(root: Node): Text | null {
   }
 }
 
+// ── Lazy content size invalidation rebuilds the Virtuoso size tree ───────────
+{
+  const harness = await createTranscriptHarness({ viewportHeight: 200, rowHeight: 100 });
+  try {
+    const items = turns(20);
+    await harness.render(items, { running: false, tabId: "layout-tab", historyLayoutRevision: 0 });
+    await harness.settle();
+    const before = harness.container.querySelector("[data-testid='virtuoso-item-list']");
+    await harness.render(items, { running: false, tabId: "layout-tab", historyLayoutRevision: 1 });
+    for (let i = 0; i < 5; i += 1) await harness.flush();
+    const after = harness.container.querySelector("[data-testid='virtuoso-item-list']");
+    ok(before != null && after != null && before !== after, "lazy content layout revision rebuilds Virtuoso's cached size tree");
+    const el = harness.scrollElement();
+    const distance = el.scrollHeight - el.clientHeight - el.scrollTop;
+    ok(Math.abs(distance) <= 1, `tail-follow survives the size-tree rebuild (bottom distance ${distance})`);
+  } finally {
+    await harness.unmount();
+    await harness.close();
+  }
+}
+
 // ── Cross-page selection promotes to the logical model ───────────────────────
 {
   const harness = await createTranscriptHarness({ viewportHeight: 200, rowHeight: 100 });

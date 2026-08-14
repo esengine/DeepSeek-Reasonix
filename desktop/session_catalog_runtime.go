@@ -756,6 +756,9 @@ func (a *App) catalogSessionPathForTopic(scope, workspaceRoot, topicID string) s
 	if err != nil || !ok || len(topic.Sessions) == 0 {
 		return ""
 	}
+	if representative := strings.TrimSpace(topic.RepresentativePath); representative != "" {
+		return representative
+	}
 	if canonical := sessioncatalog.CanonicalSessionPathForTopic(topic.Sessions, ""); canonical != "" {
 		return canonical
 	}

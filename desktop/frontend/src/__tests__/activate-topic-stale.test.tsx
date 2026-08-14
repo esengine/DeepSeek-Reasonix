@@ -15,7 +15,7 @@ import type { AppBindings } from "../lib/bridge";
 import { enqueueNavigationRequest, type NavigationCoalescingRefs } from "../lib/openTopicCoalescing";
 import { useController } from "../lib/useController";
 import { historySliceFromMessages } from "./mockHistorySlice";
-import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, HistorySliceRequest, JobView, Meta, TabMeta, TopicActivationEvent, TopicActivationRequest } from "../lib/types";
+import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, HistorySliceRequest, JobView, Meta, TabMeta, TopicActivationEvent, TopicActivationRequest, WireEvent } from "../lib/types";
 
 let passed = 0;
 let failed = 0;
@@ -140,6 +140,8 @@ let backendActiveId = "tab-a";
 const activationHolds = new Map<string, Promise<void>>();
 const tabsById = new Map([tabA, tabX, tabY].map((tab) => [tab.id, tab]));
 const topicActivationHandlers: Array<(e: TopicActivationEvent) => void> = [];
+const eventHandlers: Array<(e: WireEvent) => void> = [];
+const replayTargets: string[] = [];
 // The pending ticketed activation backend-side: a newer StartTopicActivation
 // supersedes it (cancelled), exactly like the real generation protocol.
 let mockPendingActivation: { requestId: string; tabId: string } | undefined;
@@ -154,6 +156,7 @@ function currentTabs(): TabMeta[] {
 
 window.runtime = {
   EventsOn: (name: string, cb: (...data: unknown[]) => void) => {
+    if (name === "agent:event") eventHandlers.push(cb as (e: WireEvent) => void);
     if (name === "topic:activation") topicActivationHandlers.push(cb as (e: TopicActivationEvent) => void);
     return () => {};
   },
@@ -208,9 +211,22 @@ window.go = {
         return { requestId, tabId: target.id, meta: { ...target, active: true } };
       },
       SetActiveTab: async (tabID: string) => {
+        const hold = activationHolds.get(tabID);
+        if (hold) await hold;
         backendActiveId = tabID;
       },
       ReplayPendingPrompts: async () => {},
+      ReplayPendingPromptsForTab: async (tabID: string) => {
+        replayTargets.push(tabID);
+        if (!tabsById.get(tabID)?.pendingPrompt) return;
+        for (const handler of eventHandlers) {
+          handler({
+            kind: "ask_request",
+            tabId: tabID,
+            ask: { id: `pending-${tabID}`, questions: [{ id: "choice", prompt: "Keep me through A-X-A", options: [] }] },
+          });
+        }
+      },
     } as Partial<AppBindings> as AppBindings,
   },
 };
@@ -327,6 +343,50 @@ await act(async () => {
   await flushPromises();
 });
 await waitFor("queued last click applies once it runs", () => controller?.activeTabId === "tab-a");
+
+// A prompt can arrive on A before a slow A→X→A switch completes. The final A
+// activation must preserve its card, and X's stale completion must reassert A
+// without clearing or replaying a sibling tab's prompt.
+const promptBlockedA = { ...tabA, running: true, pendingPrompt: true, cancellable: true };
+tabsById.set(tabA.id, promptBlockedA);
+await act(async () => {
+  for (const handler of eventHandlers) {
+    handler({
+      kind: "ask_request",
+      tabId: tabA.id,
+      ask: { id: "pending-tab-a", questions: [{ id: "choice", prompt: "Keep me through A-X-A", options: [] }] },
+    });
+  }
+  await flushPromises();
+});
+eq(controller?.state.ask?.id, "pending-tab-a", "A starts the rapid switch with a visible ask");
+
+const slowSwitchGate = deferred<void>();
+activationHolds.set(tabX.id, slowSwitchGate.promise);
+let slowSwitch: Promise<TabMeta[] | undefined> | undefined;
+await act(async () => {
+  slowSwitch = controller?.switchTab(tabX.id, tabX);
+  await flushPromises();
+});
+eq(controller?.activeTabId, tabX.id, "A→X renders the slow target optimistically");
+
+await act(async () => {
+  await controller?.switchTab(tabA.id, promptBlockedA);
+  await flushPromises();
+});
+eq(controller?.activeTabId, tabA.id, "A→X→A returns to the prompt owner");
+eq(controller?.state.ask?.id, "pending-tab-a", "returning to A preserves its ask");
+ok(replayTargets.includes(tabA.id), "post-activation replay is scoped to A");
+
+await act(async () => {
+  slowSwitchGate.resolve();
+  activationHolds.delete(tabX.id);
+  await slowSwitch;
+  await flushPromises();
+});
+eq(controller?.activeTabId, tabA.id, "late X activation cannot replace A");
+eq(backendActiveId, tabA.id, "late X activation reasserts A as backend owner");
+eq(controller?.state.ask?.id, "pending-tab-a", "late X completion cannot clear A's ask");
 
 // Wiring lock: App.enqueueNavigation must invalidate in-flight activations at
 // enqueue time — the queue-based scenario above only proves the mechanism.

@@ -133,7 +133,10 @@ const preview = spawn("pnpm", ["exec", "vite", "preview", "--port", String(port)
 let browser;
 try {
   await waitForServer();
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({
+    headless: true,
+    ...(process.env.PLAYWRIGHT_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH } : {}),
+  });
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Performance.enable");

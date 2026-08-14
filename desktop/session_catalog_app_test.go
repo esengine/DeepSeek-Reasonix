@@ -722,7 +722,7 @@ func TestRetargetOpenTabsSkipsRunningSessions(t *testing.T) {
 	}
 	app.tabs = map[string]*WorkspaceTab{"idle": idle, "running": running}
 
-	app.retargetOpenTabsToCoveringLeaves()
+	app.retargetOpenTabsToContinuations()
 	if idle.SessionPath != leaf {
 		t.Fatalf("idle tab path = %q, want covering leaf %q", idle.SessionPath, leaf)
 	}

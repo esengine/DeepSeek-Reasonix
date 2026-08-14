@@ -11,6 +11,7 @@ import { formatContextMaintenanceNotice, isNewMaintenanceOperation, rememberMain
 import { formatGuardianAssessmentNotice } from "./guardianEvents";
 import { completionSummaryNeedsAttention, completionSummaryNotice, normalizeCompletionSummary } from "./completionSummary";
 import { invalidateSharedQuery } from "./queryCoalesce";
+import { replayPendingPromptsForActiveTab } from "./promptReplay";
 import { createRafBatch } from "./rafBatch";
 import { aliasActivationRequest, noteActivationRequested, noteActivationSettled, noteActivationStarted } from "./sessionDiagnostics";
 import { applyLiveSegments, coalesceStreamDeltas, completeLiveReasoning, type StreamDeltaEntry, type StreamSegment } from "./streamDeltaBatch";
@@ -360,6 +361,8 @@ interface State {
   historyOlderLoading: boolean;
   historyRevision?: number;
   historyDigest?: string;
+  /** Bumped when lazy history content can change already-estimated row sizes. */
+  historyLayoutRevision: number;
   backendActivationPending: boolean;
   messageAction?: MessageActionState;
   currentAssistant?: string;
@@ -479,6 +482,7 @@ export const initialState: State = {
   historyTotalTurns: 0,
   historyHasOlder: false,
   historyOlderLoading: false,
+  historyLayoutRevision: 0,
   backendActivationPending: false,
   deliveryRecoveryActive: false,
   promptEpoch: 0,
@@ -790,7 +794,7 @@ type Action =
   | { type: "hydrate_start"; reason: HydrateReason; placeholderItems?: Item[] }
   | { type: "hydrate_done" }
   | { type: "hydrate_error"; reason: HydrateReason; error: string }
-  | { type: "backend_activation_start" }
+  | { type: "backend_activation_start"; backendPendingPrompt?: boolean }
   | { type: "backend_activation_done" }
   | { type: "message_action_start"; action: MessageActionState }
   | { type: "message_action_done" }
@@ -2020,25 +2024,24 @@ export function reducer(s: State, a: Action): State {
       ? { ...s, hydrating: false, hydrateReason: undefined, hydrateError: undefined, hydrateHistoryLoaded: undefined, hydratePlaceholderItems: undefined }
       : s;
     case "hydrate_error": return applyHydrateErrorState(s, a.reason, a.error);
-    case "backend_activation_start": return {
-      ...s,
-      // The target tab may contain a prompt event that was routed there while
-      // frontend selection was ahead of backend activation. Reset that
-      // uncertain lifecycle first; optimistic backend metadata is applied
-      // immediately afterwards and restores a genuinely running target.
-      backendActivationPending: true,
-      pendingPrompt: false,
-      approval: undefined,
-      ask: undefined,
-      // New tab epoch: drop the prompt anchor so the post-activation replay
-      // re-anchors against this activation, keeping the #6429 stale-snapshot
-      // guard armed for the freshly restored prompt.
-      promptArrivedAt: undefined,
-      promptArrivedId: undefined,
-      running: false,
-      turnActive: false,
-      cancellable: false,
-    };
+    case "backend_activation_start": {
+      // Backend metadata makes a cached background prompt safe to preserve.
+      // Otherwise retain the compatibility reset for stale/untagged events.
+      const preservePrompt = Boolean(a.backendPendingPrompt && (s.approval || s.ask));
+      return {
+        ...s,
+        backendActivationPending: true,
+        pendingPrompt: preservePrompt,
+        approval: preservePrompt ? s.approval : undefined,
+        ask: preservePrompt ? s.ask : undefined,
+        // A confirmed cached prompt keeps its original freshness boundary.
+        promptArrivedAt: preservePrompt ? s.promptArrivedAt : undefined,
+        promptArrivedId: preservePrompt ? s.promptArrivedId : undefined,
+        running: preservePrompt,
+        turnActive: preservePrompt,
+        cancellable: preservePrompt,
+      };
+    }
     case "backend_activation_done": return s.backendActivationPending ? { ...s, backendActivationPending: false } : s;
     case "message_action_start": return { ...s, messageAction: a.action };
     case "message_action_done": return { ...s, messageAction: undefined };
@@ -2107,7 +2110,7 @@ export function reducer(s: State, a: Action): State {
         changed = true;
         return patch;
       });
-      return changed ? { ...s, items: next } : s;
+      return changed ? { ...s, items: next, historyLayoutRevision: s.historyLayoutRevision + 1 } : s;
     }
     case "local_notice": return { ...s, running: false, turnActive: false, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `n${s.seq}`, level: a.level, text: a.text }] };
     case "clearApproval": {
@@ -2553,10 +2556,7 @@ function settingSwitchNoticeText(
   return t(keys.failed, { err: msg });
 }
 
-export function replayPendingPromptsForActiveTab(activeTabId: string | undefined, replay: () => Promise<void> = () => app.ReplayPendingPrompts()): void {
-  if (!activeTabId) return;
-  void replay().catch(() => {});
-}
+export { replayPendingPromptsForActiveTab } from "./promptReplay";
 
 export function useController() {
   const statesRef = useRef<TabStates>(new Map());
@@ -4071,6 +4071,19 @@ export function useController() {
     const m = statesRef.current.get(id)?.meta;
     await loadSessionDataForTab(id, false, "startup", { sessionPath: m?.sessionPath, sessionRevision: m?.sessionRevision, sessionDigest: m?.sessionDigest, preserveCachedHistory: false });
   }, [loadSessionDataForTab]);
+  const reconcileSessionNavigationForTab = useCallback(async (
+    tabId: string,
+    navigationSeq: number,
+    sessionSeq: number,
+  ): Promise<boolean> => {
+    // Resample and replay prompts cleared by post-Resume/Open hydration.
+    await refreshMetaOnlyForTab(tabId);
+    if (!isNavigationIntentCurrent(navigationSeq) || !sessionLoadCurrent(tabId, sessionSeq)) return false;
+    await reconcileTabRuntime(tabId, { hydrateSessionData: false, refreshAncillary: false });
+    if (!isNavigationIntentCurrent(navigationSeq) || !sessionLoadCurrent(tabId, sessionSeq)) return false;
+    replayPendingPromptsForActiveTab(tabId);
+    return true;
+  }, [isNavigationIntentCurrent, reconcileTabRuntime, refreshMetaOnlyForTab, sessionLoadCurrent]);
   const resumeSession = useCallback(async (path: string, tabId?: string, navigationIntentSeq?: number) => {
     const targetTabId = tabId || activeTabId;
     if (!targetTabId) return;
@@ -4099,11 +4112,10 @@ export function useController() {
     dispatchTo(targetTabId, { type: "reset" });
     dispatchTo(targetTabId, { type: "history_page", page, mode: "replace" });
     dispatchTo(targetTabId, { type: "hydrate_done" });
-    await refreshMetaOnlyForTab(targetTabId);
-    if (!isNavigationIntentCurrent(navigationSeq) || !sessionLoadCurrent(targetTabId, seq)) return;
+    if (!(await reconcileSessionNavigationForTab(targetTabId, navigationSeq, seq))) return;
     app.ContextUsageForTab(targetTabId).then((context) => dispatchTo(targetTabId, { type: "context", context })).catch(() => {});
     void refreshCheckpoints(targetTabId);
-  }, [activeTabId, beginActiveNavigation, bumpSessionLoadSeq, dispatchTo, isNavigationIntentCurrent, loadSessionDataForTab, navigationCompletionCurrent, refreshCheckpoints, refreshMetaOnlyForTab, sessionLoadCurrent, waitForBackendActiveTab, waitForTabReady]);
+  }, [activeTabId, beginActiveNavigation, bumpSessionLoadSeq, dispatchTo, loadSessionDataForTab, navigationCompletionCurrent, reconcileSessionNavigationForTab, refreshCheckpoints, sessionLoadCurrent, waitForBackendActiveTab, waitForTabReady]);
 
   const openChannelSession = useCallback(async (path: string, tabId: string, navigationIntentSeq?: number) => {
     if (!tabId) return;
@@ -4126,11 +4138,10 @@ export function useController() {
     dispatchTo(tabId, { type: "reset" });
     dispatchTo(tabId, { type: "history_page", page, mode: "replace" });
     dispatchTo(tabId, { type: "hydrate_done" });
-    await refreshMetaOnlyForTab(tabId);
-    if (!isNavigationIntentCurrent(navigationSeq) || !sessionLoadCurrent(tabId, seq)) return;
+    if (!(await reconcileSessionNavigationForTab(tabId, navigationSeq, seq))) return;
     app.ContextUsageForTab(tabId).then((context) => dispatchTo(tabId, { type: "context", context })).catch(() => {});
     void refreshCheckpoints(tabId);
-  }, [beginActiveNavigation, bumpSessionLoadSeq, dispatchTo, isNavigationIntentCurrent, navigationCompletionCurrent, refreshCheckpoints, refreshMetaOnlyForTab, sessionLoadCurrent, waitForTabReady]);
+  }, [beginActiveNavigation, bumpSessionLoadSeq, dispatchTo, isNavigationIntentCurrent, navigationCompletionCurrent, reconcileSessionNavigationForTab, refreshCheckpoints, sessionLoadCurrent, waitForTabReady]);
 
   const previewSession = useCallback(async (path: string): Promise<HistoryMessage[]> => asArray<HistoryMessage>(await app.PreviewSession(path).catch(() => [])), []);
   const deleteSession = useCallback((path: string) => app.DeleteSession(path).finally(() => invalidateCache()), []);
@@ -4421,7 +4432,7 @@ export function useController() {
     addBreadcrumb("tab.switch", `click ${tabId}`);
     setActiveTabId(tabId);
     activeTabIdRef.current = tabId;
-    dispatchTo(tabId, { type: "backend_activation_start" });
+    dispatchTo(tabId, { type: "backend_activation_start", backendPendingPrompt: Boolean(optimisticTab?.pendingPrompt) });
     noteActivationStarted(switchRequestId, tabId);
     if (optimisticTab) {
       dispatchTo(tabId, { type: "optimistic_meta", meta: metaFromTab(optimisticTab, statesRef.current.get(tabId)?.meta) });
@@ -4441,6 +4452,10 @@ export function useController() {
           return false;
         }
         confirmBackendActiveTab(tabId);
+        // Re-run the scoped replay after backend activation. This closes the
+        // window where the runtime is reattached while the optimistic switch
+        // is in flight and the first replay still sees no controller on tabId.
+        replayPendingPromptsForActiveTab(tabId);
         addBreadcrumb("tab.switch", `set-active-done ${tabId} ms=${Date.now() - startedAt}`);
         return true;
       })
