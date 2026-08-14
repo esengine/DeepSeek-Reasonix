@@ -115,21 +115,9 @@ func (t *readSessionTool) Execute(_ context.Context, args json.RawMessage) (stri
 		return "", fmt.Errorf("read_session: 'session' argument is required")
 	}
 
-	sessionPath := params.Session
-	// If it's just a filename (no path separator), resolve relative to sessionDir
-	if !strings.Contains(sessionPath, string(filepath.Separator)) && !strings.Contains(sessionPath, "/") {
-		sessionPath = filepath.Join(t.sessionDir, sessionPath)
-	}
-	// Guard against path traversal
-	sessionPath = filepath.Clean(sessionPath)
-	dir := filepath.Clean(t.sessionDir)
-	if !strings.HasPrefix(sessionPath, dir+string(filepath.Separator)) && sessionPath != dir {
-		return "", fmt.Errorf("read_session: path %q is outside the session directory", params.Session)
-	}
-
-	// Reject cleanup-pending sessions (reuses agent.IsCleanupPending directly).
-	if agent.IsCleanupPending(sessionPath) {
-		return "", fmt.Errorf("read_session: session %q is pending cleanup", filepath.Base(sessionPath))
+	sessionPath, err := resolveSessionPath(t.sessionDir, params.Session)
+	if err != nil {
+		return "", fmt.Errorf("read_session: %w", err)
 	}
 
 	// Reuse agent.LoadSession for JSONL decoding.
@@ -222,4 +210,83 @@ func modelFromPath(path string) string {
 		return rest
 	}
 	return after0
+}
+
+// set_session_title tool
+
+type setSessionTitleTool struct {
+	sessionDir string
+}
+
+// NewSetSessionTitleTool creates a tool that sets the display title of a saved
+// session, letting the agent name sessions from their content (#8838).
+func NewSetSessionTitleTool(sessionDir string) *setSessionTitleTool {
+	return &setSessionTitleTool{sessionDir: sessionDir}
+}
+
+func (t *setSessionTitleTool) Name() string   { return "set_session_title" }
+func (t *setSessionTitleTool) ReadOnly() bool { return false }
+
+func (t *setSessionTitleTool) Description() string {
+	return "Set (or clear) the display title of a saved session. The title overrides the first-user-message preview in the session list and in --resume matching. To clear the title, pass an empty string. Use list_sessions to discover session file names."
+}
+
+func (t *setSessionTitleTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "session": {
+      "type": "string",
+      "description": "Session file name (e.g. \"20260618-231556.000000000-gpt-4.jsonl\") or full path. Use list_sessions to see available sessions."
+    },
+    "title": {
+      "type": "string",
+      "description": "New display title for the session. An empty string clears the title and falls back to the first user message preview."
+    }
+  },
+  "required": ["session", "title"]
+}`)
+}
+
+func (t *setSessionTitleTool) Execute(_ context.Context, args json.RawMessage) (string, error) {
+	var params struct {
+		Session string `json:"session"`
+		Title   string `json:"title"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return "", fmt.Errorf("set_session_title: invalid args: %w", err)
+	}
+	if params.Session == "" {
+		return "", fmt.Errorf("set_session_title: 'session' argument is required")
+	}
+	sessionPath, err := resolveSessionPath(t.sessionDir, params.Session)
+	if err != nil {
+		return "", fmt.Errorf("set_session_title: %w", err)
+	}
+	if err := agent.RenameSession(sessionPath, params.Title); err != nil {
+		return "", fmt.Errorf("set_session_title: %w", err)
+	}
+	return fmt.Sprintf("Session %s title set to %q.", filepath.Base(sessionPath), params.Title), nil
+}
+
+// resolveSessionPath resolves a session file name (or full path) against the
+// session directory, guarding against path traversal, and rejects sessions
+// that are pending cleanup. Used by read_session and set_session_title.
+func resolveSessionPath(sessionDir, session string) (string, error) {
+	sessionPath := session
+	// If it's just a filename (no path separator), resolve relative to sessionDir
+	if !strings.Contains(sessionPath, string(filepath.Separator)) && !strings.Contains(sessionPath, "/") {
+		sessionPath = filepath.Join(sessionDir, sessionPath)
+	}
+	// Guard against path traversal
+	sessionPath = filepath.Clean(sessionPath)
+	dir := filepath.Clean(sessionDir)
+	if !strings.HasPrefix(sessionPath, dir+string(filepath.Separator)) && sessionPath != dir {
+		return "", fmt.Errorf("path %q is outside the session directory", session)
+	}
+	// Reject cleanup-pending sessions (reuses agent.IsCleanupPending directly).
+	if agent.IsCleanupPending(sessionPath) {
+		return "", fmt.Errorf("session %q is pending cleanup", filepath.Base(sessionPath))
+	}
+	return sessionPath, nil
 }
