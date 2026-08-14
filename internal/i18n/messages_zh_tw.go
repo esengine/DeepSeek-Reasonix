@@ -516,6 +516,7 @@ var ChineseTraditional = Messages{
                                                          檢視或控制脫敏 Task
   reasonix bot start|doctor|weixin-login                多管道 IM bot 閘道
   reasonix upgrade [--check] [--force]                   更新到最新正式版（別名：reasonix update）
+  reasonix source-update --check [--root PATH] [--json]  唯讀檢查上游 main-v2 原始碼變化
   reasonix completion bash|zsh|fish                     列印 shell 補全腳本到 stdout
   reasonix version [--verbose|--json]                   列印版本（單行）或建置元資訊
   reasonix --version | -v                               單行版本（腳本安全）

@@ -280,6 +280,9 @@ func cliCompletionRootSpec() cliCompletionSpec {
 		completionSpecWithAliases("upgrade", []string{"update"}, []cliCompletionFlag{
 			completionFlag("--check --force", cliCompletionNoValue), completionFlag("--channel", cliCompletionStaticValue), help,
 		}),
+		completionSpec("source-update", []cliCompletionFlag{
+			completionFlag("--check --json", cliCompletionNoValue), completionFlag("--root", cliCompletionPathValue), help,
+		}),
 		completionSpec("completion", []cliCompletionFlag{help},
 			completionSpec("bash", nil),
 			completionSpec("zsh", nil),

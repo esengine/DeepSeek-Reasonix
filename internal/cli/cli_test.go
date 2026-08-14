@@ -461,6 +461,7 @@ func TestSubcommandHelpReturnsSuccess(t *testing.T) {
 		{name: "chat", args: []string{"chat", "--help"}, want: "Usage of reasonix:"},
 		{name: "serve", args: []string{"serve", "--help"}, want: "Usage of serve:"},
 		{name: "upgrade", args: []string{"upgrade", "--help"}, want: "Usage of upgrade:"},
+		{name: "source-update", args: []string{"source-update", "--help"}, want: "reasonix source-update --check"},
 		{name: "remote connect", args: []string{"remote", "connect", "--help"}, want: "Usage of remote connect:"},
 		{name: "remote add before name", args: []string{"remote", "add", "--help"}, want: remoteAddUsage},
 		{name: "remote add before target", args: []string{"remote", "add", "box", "--help"}, want: remoteAddUsage},
