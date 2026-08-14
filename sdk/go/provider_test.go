@@ -283,6 +283,7 @@ func TestStreamRequestPassedThrough(t *testing.T) {
 	open := openStreamRequest("stream-req")
 	open.Effort = "high"
 	open.Request.MaxTokens = 128
+	open.Request.DisableServerTools = true
 	temp := 0.5
 	open.Request.Temperature = &temp
 	host.request(MethodExtensionProviderStreamOpen, open)
@@ -296,7 +297,7 @@ func TestStreamRequestPassedThrough(t *testing.T) {
 	if req.StreamID != "stream-req" || req.ProviderRef != "plugin/provider-ext/echo" || req.Model != "echo-1" || req.Effort != "high" {
 		t.Fatalf("request = %+v", req)
 	}
-	if req.Request.MaxTokens != 128 || req.Request.Temperature == nil || *req.Request.Temperature != 0.5 {
+	if req.Request.MaxTokens != 128 || req.Request.Temperature == nil || *req.Request.Temperature != 0.5 || !req.Request.DisableServerTools {
 		t.Fatalf("provider request = %+v", req.Request)
 	}
 	if len(req.Request.Messages) != 1 || req.Request.Messages[0].Content != "hi" {

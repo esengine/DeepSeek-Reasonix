@@ -127,6 +127,9 @@ func (m ContextManager) foldContext(ctx context.Context, prepared PreparedContex
 	mustFree := policy.Trigger != CompactionTriggerManual && (policy.Trigger == CompactionTriggerOverflow || est >= hard)
 	outcome, err := a.compactToProjection(ctx, policy.Trigger, policy.Instructions, forceFold, mustFree)
 	if err != nil {
+		if errors.Is(err, errServerToolDuringFinalization) {
+			return PreparedContext{}, err
+		}
 		if errors.Is(err, errCompressStaleContext) && policy.Trigger != CompactionTriggerManual {
 			// Transcript changed during the summary call: discard the candidate
 			// and block this generation so we do not pay for a second summary.

@@ -567,8 +567,9 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 			{Role: provider.RoleSystem, Content: sys},
 			{Role: provider.RoleUser, Content: renderTranscript(region)},
 		},
-		MaxTokens:   maxOut,
-		Temperature: provider.OptionalTemperature(a.temperature),
+		DisableServerTools: a.turn.visibleFinal.repairing,
+		MaxTokens:          maxOut,
+		Temperature:        provider.OptionalTemperature(a.temperature),
 	}
 	if budget, clipped, budgetErr := a.effectiveOutputBudget(req); budgetErr != nil {
 		return "", usage, budgetErr
@@ -606,6 +607,7 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 				}
 				return s, usage, nil
 			}
+			chunk = enforceServerToolPolicy(req, chunk)
 			switch chunk.Type {
 			case provider.ChunkText:
 				b.WriteString(chunk.Text)

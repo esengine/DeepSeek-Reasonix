@@ -15,6 +15,7 @@ type turnRuntime struct {
 	runLimitHostOwned bool
 
 	emptyFinalBlocks   int
+	visibleFinal       visibleFinalRuntime
 	handoffNudges      int
 	usedAnyTool        bool
 	contextToolRepairs int
@@ -97,6 +98,15 @@ type turnRuntime struct {
 	// lastReasoning is the previous executor round's reasoning-token spend,
 	// read by the governor trigger (live policy and fork capture alike).
 	lastReasoning int
+}
+
+// visibleFinalRuntime is the stricter per-Run rendering contract installed by
+// WithRequireVisibleFinal. Construction-time Options.RequireVisibleFinal keeps
+// its older generic empty-final retry semantics and does not arm this state.
+type visibleFinalRuntime struct {
+	scoped       bool
+	repairing    bool
+	repairRounds int
 }
 
 // pendingTurn is what someone outside the Run arms for the next one: a

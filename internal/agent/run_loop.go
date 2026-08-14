@@ -243,14 +243,7 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 		Images: userImages(ctx), CreatedAt: userCreatedAt,
 	})
 
-	// The loop fields join the classification computed above rather than
-	// opening a second object: one turn, one turnRuntime. The zero values the
-	// old literal spelled out are already there from the reset at the top.
-	state = &a.turn
-	state.seenTodoProgress = make(map[string]struct{})
-	state.executorHandoff = a.executorHandoffGuard && strings.Contains(input, executorHandoffMarker)
-	state.input = input
-	state.budget = runBudget{started: time.Now()}
+	state = a.prepareTurnLoop(ctx, input)
 	state.todoProgress, state.trackingTodoProgress = a.canonicalTodoProgress()
 	if a.task.ledger != nil {
 		for _, sig := range a.task.ledger.SuccessfulProgressSignaturesSince(0) {
@@ -260,22 +253,35 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	return rawInput, state
 }
 
+func (a *Agent) prepareTurnLoop(ctx context.Context, input string) *turnRuntime {
+	state := &a.turn
+	state.visibleFinal.scoped = visibleFinalRequiredFromContext(ctx)
+	state.seenTodoProgress = make(map[string]struct{})
+	state.executorHandoff = a.executorHandoffGuard && strings.Contains(input, executorHandoffMarker)
+	state.input = input
+	state.budget = runBudget{started: time.Now()}
+	return state
+}
+
 // runToolLoop owns the main tool-round budget and dispatches each streamed
 // assistant turn into final-response or tool-round handling.
 func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) error {
 	ctx = a.withAgentContext(ctx)
 	for step := 0; state.runMaxSteps <= 0 || step < state.runMaxSteps || state.graceRound || state.recoveryGraceRound; step++ {
-		// Consume a queued steer and persist it to the session so it
-		// survives tab switches and history replay. The model sees it as
-		// guidance (with a prefix), not a new task. One cache miss per
-		// steer is unavoidable — the model must see the new instruction.
-		if text, itemID, ok := a.consumeSteer(); ok {
-			a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(midTurnSteerMessage(text))})
-			a.svc.sink.Emit(event.Event{Kind: event.Steer, Text: text, ItemID: itemID})
-		} else if itemID != "" {
-			// Loader failed after dequeue: durable entry stays for inspection
-			// (unapplied path marks uncertain + pause via the notice sink).
-			a.RecordUnappliedSteer("(body load failed)", itemID)
+		if state.visibleFinal.repairing {
+			state.visibleFinal.repairRounds++
+		}
+		// Keep steers queued during finalization-only repair: consuming fresh work
+		// while tools are forbidden would falsely acknowledge that guidance.
+		if !state.visibleFinal.repairing {
+			if text, itemID, ok := a.consumeSteer(); ok {
+				a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(midTurnSteerMessage(text))})
+				a.svc.sink.Emit(event.Event{Kind: event.Steer, Text: text, ItemID: itemID})
+			} else if itemID != "" {
+				// Loader failed after dequeue: durable entry stays for inspection
+				// (unapplied path marks uncertain + pause via the notice sink).
+				a.RecordUnappliedSteer("(body load failed)", itemID)
+			}
 		}
 		schemas := a.svc.tools.Schemas()
 		prefixShape := a.capturePrefixShape(schemas)
@@ -326,7 +332,12 @@ func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) error {
 		// Keep reasoning_content on the assistant turn for display and session
 		// archive. Most OpenAI-compatible backends do not replay it; providers
 		// with an explicit round-trip contract retain the raw provider text.
-		calls = a.withPreviewFileDiffs(ctx, calls)
+		// A visible-final repair may only render text. Do not even resolve or
+		// preview a tool it tries to call; the repair preflight below pairs the
+		// provider call with a host-blocked result without entering the registry.
+		if !state.visibleFinal.repairing {
+			calls = a.withPreviewFileDiffs(ctx, calls)
+		}
 		a.sess.conversation.Add(provider.Message{
 			Role:               provider.RoleAssistant,
 			Content:            text,
@@ -371,6 +382,8 @@ func (a *Agent) streamWithSamplingRecovery(ctx context.Context, turn int) stream
 	if err != nil {
 		return streamedTurn{err: err}
 	}
+	suppressServerToolsForVisibleFinalRepair(&a.turn, &frozen.req)
+	frozen.req = freezeProviderRequest(frozen.req)
 	// One request counter spans every body attempt; each attempt records only
 	// its delta so RequestCount equals real HTTP POSTs (no triangular growth).
 	ctx = provider.WithRequestAttemptCounter(ctx)
@@ -566,25 +579,8 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 		a.pending.deliveryRecovery = true
 		return false, &FinalReadinessError{Attempts: 1, Reason: readiness.reason, Missing: readiness.missingIDs()}
 	}
-	if !hasVisibleFinalAnswer(text) {
-		// DeepSeek thinking mode can stream a long reasoning_content and
-		// then finish with finish_reason="stop" but an empty content
-		// block: the model has explicitly signalled completion and its
-		// reasoning was already streamed to the user. Retrying here overrides
-		// that stop signal and forces another expensive thinking round (the
-		// "still thinking after the task is done" symptom), so honour the
-		// stop when reasoning carried the substance of the answer and treat
-		// the turn as a final answer instead of retrying.
-		if a.requireVisibleFinal || !reasoningOnlyFinishHonoured(a.svc.prov, usage, reasoning) {
-			state.emptyFinalBlocks++
-			if state.emptyFinalBlocks >= maxEmptyFinalBlocks {
-				return false, fmt.Errorf("model finished without a visible final answer %d times", state.emptyFinalBlocks)
-			}
-			a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeEmptyFinal, Text: emptyFinalNotice(), Detail: emptyFinalNoticeDetail(a.svc.prov.Name(), usage, len(reasoning))})
-			a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(emptyFinalRetryMessage())})
-			a.contextManager().ObserveUsage(usage)
-			return true, nil
-		}
+	if handled, next, finalErr := a.handleVisibleFinalContract(ctx, state, text, reasoning, usage); handled {
+		return next, finalErr
 	}
 	if state.executorHandoff && !state.usedAnyTool && state.handoffNudges < maxExecutorHandoffNudges && shouldNudgeExecutorHandoff(state.input, text) {
 		state.handoffNudges++
@@ -612,25 +608,16 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 // max-steps grace round. cont=true continues the tool loop; cont=false returns
 // err from Run.
 func (a *Agent) handleToolRound(ctx context.Context, state *turnRuntime, step int, text, reasoning string, calls []provider.ToolCall, usage *provider.Usage) (cont bool, err error) {
-	state.emptyFinalBlocks = 0
-	state.usedAnyTool = true
-	unavailableContextTools := a.unavailableContextualToolCalls(ctx, calls)
-	if len(unavailableContextTools) > 0 && state.contextToolRepairs > 0 {
-		msg := fmt.Sprintf("blocked: context-unavailable tools were called again after the repair instruction: %s", strings.Join(unavailableContextTools, ", "))
-		for _, call := range calls {
-			a.sess.conversation.Add(provider.Message{Role: provider.RoleTool, Content: msg, ToolCallID: call.ID, Name: call.Name})
-		}
-		if hasVisibleFinalAnswer(text) {
-			return a.handleFinalResponse(ctx, state, text, reasoning, usage)
-		}
-		if len(unavailableContextTools) == 1 && unavailableContextTools[0] == "update_goal" {
-			return false, fmt.Errorf("model repeatedly called update_goal outside Goal mode without a visible answer")
-		}
-		return false, fmt.Errorf("model repeatedly called context-unavailable tools without a visible answer: %s", strings.Join(unavailableContextTools, ", "))
-	}
-
+	// An already-armed finalization or recovery pause owns this round. Check it
+	// before any workflow or registry lookup so no lower-priority repair can
+	// reopen sampling or inspect a tool that is forbidden to run.
 	if boundaryErr, stop := a.stopUnexecutedBoundaryCalls(state, calls, usage); stop {
 		return false, boundaryErr
+	}
+
+	unavailableContextTools, handled, next, preflightErr := a.preflightToolRound(ctx, state, text, reasoning, calls, usage)
+	if handled {
+		return next, preflightErr
 	}
 
 	receiptMark := 0

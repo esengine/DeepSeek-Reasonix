@@ -20,7 +20,8 @@ import (
 // turnOrchestrator owns foreground turn execution while Controller keeps the
 // public ports, run-state guard, and session-scoped dependencies.
 type turnOrchestrator struct {
-	c *Controller
+	c             *Controller
+	lastTurnFinal string
 }
 
 type orchestratedTurn struct {
@@ -119,7 +120,7 @@ func (o *turnOrchestrator) runSubagentSkillTurnsGoalLoop(ctx context.Context, sk
 // provider-visible parent context while their UI events nest under synthetic
 // top-level run_skill cards.
 func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []skill.Skill, task, raw, display string, runner skill.SubagentRunner, planMode bool, images, imageCandidates []string) (err error) {
-	c := o.c
+	c := o.startTurn()
 	turnStartedAt := time.Now()
 	c.maybeSessionStart(ctx)
 	parentSession := c.parentSessionID()
@@ -132,9 +133,13 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 
 	input := c.compose(task, raw, true)
 	startMessages := c.messageCount()
+	finalBoundary := o.beginTurnFinalBoundary()
 	var marker agent.InFlightTurnMeta
 	defer func() { c.finishInFlightTurn(startMessages, marker) }()
 	defer c.recordDisplayForNewUser(startMessages, display)
+	// Capture before finishInFlightTurn can adopt a conflict-recovery Session
+	// and before display metadata rewrites the transcript.
+	defer o.captureGoalTurnFinal(c.goalUsageTee.activeRecorder() != nil, finalBoundary)
 	// The checkpoint prompt labels the turn in the rewind picker (and is
 	// prefilled into the composer after a conversation rewind), so it must be
 	// the user's own text — never the composed provider input with its
@@ -151,7 +156,7 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 		if block, _ := c.hooks.PromptSubmit(ctx, input, turn); block {
 			return nil
 		}
-		defer func() { c.hooks.StopResult(context.Background(), lastAssistantText(c.History()), turn, err) }()
+		defer func() { c.hooks.StopResult(context.Background(), finalBoundary.currentAssistantText(c), turn, err) }()
 	}
 
 	marker = c.markInFlightTurn(startMessages, true)
@@ -197,7 +202,7 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 }
 
 func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchestratedTurn) (err error) {
-	c := o.c
+	c := o.startTurn()
 	c.maybeSessionStart(ctx)
 	parentSession := c.parentSessionID()
 	ctx = agent.WithParentSession(ctx, parentSession)
@@ -232,6 +237,7 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 		return nil
 	}
 	startMessages := c.messageCount()
+	finalBoundary := o.beginTurnFinalBoundary()
 	var marker agent.InFlightTurnMeta
 	defer func() { c.finishInFlightTurn(startMessages, marker) }()
 	defer c.recordDisplayForNewUser(startMessages, turn.display)
@@ -263,7 +269,7 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 		if block, _ := c.hooks.PromptSubmit(ctx, input, turn); block {
 			return nil // the hook's notify callback already surfaced the reason
 		}
-		defer func() { c.hooks.StopResult(context.Background(), lastAssistantText(c.History()), turn, err) }()
+		defer func() { c.hooks.StopResult(context.Background(), finalBoundary.currentAssistantText(c), turn, err) }()
 	}
 	marker = c.markInFlightTurn(startMessages, !turn.synthetic && !IsSyntheticUserMessage(turn.raw))
 	if continuation != nil {
@@ -274,9 +280,8 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	} else if scopeID, task, ok := c.goals.deliveryScope(); ok {
 		ctx = agent.WithDeliveryExecutionScope(ctx, agent.DeliveryExecutionScope{ID: scopeID, TaskText: task})
 	}
-	// Goal turns bind a scope+epoch recorder for update_goal and observational
-	// usage. It stays active through FSM/evaluator work; error paths clear it.
-	ctx = c.bindTurnScope(ctx, continuation)
+	ctx, goalTurn := o.bindWorkflowTurnContext(ctx, continuation)
+	defer o.captureGoalTurnFinal(goalTurn, finalBoundary)
 	modelInput := input
 	if !turn.synthetic {
 		modelInput = c.withCapabilityRoute(ctx, input, turn.raw)
@@ -328,9 +333,9 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	if !plan {
 		return nil
 	}
-	proposal := lastAssistantText(c.History())
+	proposal := finalBoundary.currentVisibleFinal(c)
 	if proposal == "" {
-		return nil // no substantive proposal to gate
+		return nil // Leave Plan mode active without a provable current proposal.
 	}
 	// The plan is already visible as the assistant's answer, so the request
 	// carries no subject — it's purely the gate.
@@ -583,6 +588,11 @@ func (o *turnOrchestrator) advanceGoalAfterTurn(ctx context.Context, expectedCon
 	if recorder != nil {
 		report = recorder.validReport(expectedContinuationEpoch)
 	}
+	// A hidden complete report cannot replace this turn's visible result. Drop it
+	// before repeated-complete/FSM evaluation; blocked/continue stay authoritative.
+	if report != nil && report.status == GoalStatusComplete && o.lastTurnFinal == "" {
+		report = nil
+	}
 
 	// The bounded evaluator runs once, only when the model gave no report and
 	// readiness has no definite missing list. Failures fail closed in the FSM.
@@ -591,7 +601,9 @@ func (o *turnOrchestrator) advanceGoalAfterTurn(ctx context.Context, expectedCon
 	if !runPaused && report == nil && len(readiness.Missing) == 0 {
 		if c.evaluator == nil {
 			evaluatorFailed = "goal evaluator unavailable"
-		} else if verdict, err := c.evaluator.Evaluate(ctx, c.goalEvaluatorEvidence()); err != nil {
+		} else if o.lastTurnFinal == "" {
+			evaluatorFailed = "current turn finished without a visible final answer"
+		} else if verdict, err := c.evaluator.Evaluate(ctx, c.goalEvaluatorEvidence(o.lastTurnFinal)); err != nil {
 			evaluatorFailed = err.Error()
 		} else {
 			evaluator = &goalEvaluatorVerdict{outcome: verdict.Outcome, reason: verdict.Reason}

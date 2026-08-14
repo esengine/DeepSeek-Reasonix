@@ -210,12 +210,12 @@ type ToolSchema struct {
 	Parameters  json.RawMessage `json:"parameters"`
 }
 
-// Request is a single completion request.
 type Request struct {
-	Messages    []Message
-	Tools       []ToolSchema
-	Temperature *float64 // nil = omit; non-nil = send the value, including 0
-	MaxTokens   int
+	Messages           []Message
+	Tools              []ToolSchema
+	DisableServerTools bool     // suppress provider-executed tools, not function schemas
+	Temperature        *float64 // nil = omit; non-nil = send the value, including 0
+	MaxTokens          int
 	// ResponseFormat, when non-nil, asks the endpoint for structured JSON
 	// output (Responses: text.format.type=json_object). Nil omits the field
 	// entirely — the common path must stay byte-stable for prompt caching.

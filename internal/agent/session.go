@@ -20,6 +20,10 @@ type Session struct {
 	Messages       []provider.Message
 	version        uint64
 	rewriteVersion int // bumped each time the log is rewritten (compact/fold)
+	// messageLogVersion tracks whole-log replacement or explicit invalidation,
+	// but not local metadata backfills. Turn-scoped consumers use it to fail
+	// closed after rewind/restore without rejecting normal tool metadata updates.
+	messageLogVersion uint64
 	// persistedRewriteVersion is the highest rewriteVersion whose transcript
 	// has fully reached disk. It lives on the Session — not on the controller
 	// — so swapping session objects can never orphan or misattribute the
@@ -213,6 +217,7 @@ func (s *Session) Replace(msgs []provider.Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Messages = msgs
+	s.messageLogVersion++
 	s.version++
 }
 
@@ -232,6 +237,7 @@ func (s *Session) Rewrite(msgs []provider.Message, reason string) {
 	defer s.mu.Unlock()
 	s.Messages = msgs
 	s.rewriteVersion++
+	s.messageLogVersion++
 	s.version++
 	if reason != "" {
 		s.pendingContentReasons = append(s.pendingContentReasons, reason)
@@ -311,6 +317,28 @@ func (s *Session) MessageRange(start, end int) []provider.Message {
 	return append([]provider.Message(nil), s.Messages[start:end]...)
 }
 
+// MessageLogBoundary returns the current message count and whole-log
+// replacement version from one lock window. Appends and local-only metadata
+// updates leave the replacement version unchanged.
+func (s *Session) MessageLogBoundary() (length int, replacementVersion uint64) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.Messages), s.messageLogVersion
+}
+
+// MessageRangeSince returns the suffix beginning at start only when the whole
+// message log has not been replaced since replacementVersion was captured.
+// This makes numeric turn boundaries fail closed after rewind/restore while
+// still allowing in-place local metadata updates to existing messages.
+func (s *Session) MessageRangeSince(start int, replacementVersion uint64) ([]provider.Message, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.messageLogVersion != replacementVersion || start < 0 || start >= len(s.Messages) {
+		return nil, false
+	}
+	return append([]provider.Message(nil), s.Messages[start:]...), true
+}
+
 // CloneWithMessages returns a fresh Session carrying msgs while preserving the
 // persistence baseline of the source session. Resume paths use this when they
 // need to adjust loaded history before a rewrite; dropping persisted would make
@@ -333,6 +361,7 @@ func (s *Session) CloneWithMessages(msgs []provider.Message) *Session {
 		Messages:                append([]provider.Message(nil), msgs...),
 		version:                 version,
 		rewriteVersion:          s.rewriteVersion,
+		messageLogVersion:       s.messageLogVersion,
 		persistedRewriteVersion: s.persistedRewriteVersion,
 		persisted:               s.persisted,
 		normalizedDirty:         s.normalizedDirty,
@@ -362,6 +391,7 @@ func (s *Session) CloneWithMessagesIfCompatible(msgs []provider.Message) (*Sessi
 		Messages:                append([]provider.Message(nil), msgs...),
 		version:                 version,
 		rewriteVersion:          s.rewriteVersion,
+		messageLogVersion:       s.messageLogVersion,
 		persistedRewriteVersion: s.persistedRewriteVersion,
 		persisted:               s.persisted,
 		normalizedDirty:         s.normalizedDirty,
@@ -443,6 +473,7 @@ func (s *Session) IncrementRewrite() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.rewriteVersion++
+	s.messageLogVersion++
 	s.version++
 }
 

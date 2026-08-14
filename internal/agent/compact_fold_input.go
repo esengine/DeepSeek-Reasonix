@@ -142,7 +142,7 @@ func mechanicalFoldDigest(n int) string {
 // out, so the error is kept and a recoverable view is not folded blind.
 // Cancellation is the caller's decision, never a summarizer failure.
 func (a *Agent) degradeFoldSummary(res foldSummary, mustFree bool, fold []provider.Message, cause error) (foldSummary, error) {
-	if !mustFree || errors.Is(cause, context.Canceled) {
+	if !mustFree || errors.Is(cause, context.Canceled) || errors.Is(cause, errServerToolDuringFinalization) {
 		return res, cause
 	}
 	a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,

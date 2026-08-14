@@ -197,10 +197,6 @@ func TestGoalTurnOutputCannotAdvanceReplacementGoal(t *testing.T) {
 func TestGoalContinuationNoticeCannotMoveOldInterceptIntoReplacementGoal(t *testing.T) {
 	runner := &fakeTurnRunner{}
 	session := agent.NewSession("")
-	session.Add(provider.Message{
-		Role:    provider.RoleAssistant,
-		Content: "All done.",
-	})
 	executor := agent.New(nil, tool.NewRegistry(), session, agent.Options{}, event.Discard)
 	executor.SeedTodoState([]evidence.TodoItem{{
 		Content: "unfinished work from old goal",
@@ -229,8 +225,10 @@ func TestGoalContinuationNoticeCannotMoveOldInterceptIntoReplacementGoal(t *test
 		t.Fatal(err)
 	}
 	c.goalUsageTee.setActiveRecorder(rec)
+	o := newTurnOrchestrator(c)
+	recordTurnFinalForTest(o, session, "All done.")
 
-	if err := newTurnOrchestrator(c).continueGoal(
+	if err := o.continueGoal(
 		context.Background(),
 		c.goals.continuationToken(),
 		nil,
@@ -250,10 +248,6 @@ func TestGoalContinuationNoticeCannotMoveOldInterceptIntoReplacementGoal(t *test
 
 func TestGoalContinuationOutputCannotAdvanceReplacementGoal(t *testing.T) {
 	session := agent.NewSession("system")
-	session.Add(provider.Message{
-		Role:    provider.RoleAssistant,
-		Content: "All done.",
-	})
 	executor := agent.New(nil, tool.NewRegistry(), session, agent.Options{}, event.Discard)
 	executor.SeedTodoState([]evidence.TodoItem{{
 		Content: "unfinished work from old goal",
@@ -273,8 +267,10 @@ func TestGoalContinuationOutputCannotAdvanceReplacementGoal(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.goalUsageTee.setActiveRecorder(rec)
+	o := newTurnOrchestrator(c)
+	recordTurnFinalForTest(o, session, "All done.")
 
-	if err := newTurnOrchestrator(c).continueGoal(
+	if err := o.continueGoal(
 		context.Background(),
 		c.goals.continuationToken(),
 		nil,

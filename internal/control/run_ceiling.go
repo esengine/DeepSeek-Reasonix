@@ -11,15 +11,15 @@ import (
 // latter active until the FSM commits. Neither chat nor Goal gets a round
 // ceiling: rounds carry no information the spend axes lack. An explicit
 // max_steps still owns either turn.
-func (c *Controller) bindTurnScope(ctx context.Context, continuation *goalContinuationSnapshot) context.Context {
+func (c *Controller) bindTurnScope(ctx context.Context, continuation *goalContinuationSnapshot) (context.Context, bool) {
 	goalScopeID, goalScoped := c.goals.goalScopeIDForTurn(continuation)
 	if !goalScoped {
-		return ctx
+		return ctx, false
 	}
 	ctx = agent.WithTaskBudget(ctx, c.goalTaskBudget())
 	recorder := c.goals.newTurnRecorder(goalScopeID, c.goals.continuationToken())
 	c.goalUsageTee.setActiveRecorder(recorder)
-	return tool.WithGoalTurnRecorder(ctx, recorder)
+	return tool.WithGoalTurnRecorder(ctx, recorder), true
 }
 
 // goalTaskBudget is the spend gate a Goal turn runs under: the shared budget

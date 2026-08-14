@@ -93,11 +93,15 @@ type ProviderResponseFormat struct {
 // extension to stream. Nil Messages/Tools arrays are invalid; empty arrays
 // are the canonical form.
 type ProviderRequest struct {
-	Messages       []ProviderMessage       `json:"messages"`
-	Tools          []ProviderToolSchema    `json:"tools"`
-	Temperature    *float64                `json:"temperature,omitempty"`
-	MaxTokens      int                     `json:"maxTokens" validate:"min=0"`
-	ResponseFormat *ProviderResponseFormat `json:"responseFormat,omitempty"`
+	Messages []ProviderMessage    `json:"messages"`
+	Tools    []ProviderToolSchema `json:"tools"`
+	// DisableServerTools is a host-owned finalization policy. Provider
+	// extensions must not expose or execute provider-side tools for this
+	// request. omitempty keeps every ordinary request wire-compatible.
+	DisableServerTools bool                    `json:"disableServerTools,omitempty"`
+	Temperature        *float64                `json:"temperature,omitempty"`
+	MaxTokens          int                     `json:"maxTokens" validate:"min=0"`
+	ResponseFormat     *ProviderResponseFormat `json:"responseFormat,omitempty"`
 }
 
 // Validate enforces the deterministic wire shape.

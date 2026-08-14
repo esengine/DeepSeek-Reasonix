@@ -1881,7 +1881,7 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 					partialCalls: partialCalls, maxArgChars: maxArgChars,
 				}
 			}
-			chunk = c
+			chunk = enforceServerToolPolicy(req, c)
 		}
 		switch chunk.Type {
 		case provider.ChunkReasoning:
