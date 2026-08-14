@@ -79,9 +79,11 @@ request as merged until the upstream repository shows that state.
 
 ## Latest public verification
 
-The 2026-08-15 regression batch adds focused coverage for recovering a
-zero-byte checkpoint from a valid event log, keeping repeated cancellation to
-one terminal turn event, and measuring session-listing allocation alongside
-latency. The tests are source-only and do not require a GUI, a provider key, or
-real cloud traffic. The corresponding public report is
-`updates/2026-08-15-v1.25.2-regression-evidence.md`.
+The 2026-08-15 source-update adapter fix detects a refused loopback proxy and
+retries the read-only GitHub check once without proxy variables. The fallback
+requires all three signals: a proxy-related error, a loopback address, and an
+explicit connection refusal. DNS, TLS, authentication, remote-proxy, and other
+network failures remain `check-failed` and do not bypass the configured proxy.
+Deterministic branch coverage and a live GitHub check passed. The corresponding
+public report is
+`updates/2026-08-15-v1.25.2-loopback-proxy-fallback.md`.

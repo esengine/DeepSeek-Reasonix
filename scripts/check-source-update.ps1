@@ -13,6 +13,12 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+$proxyFallbackPath = Join-Path $PSScriptRoot 'source-update-proxy-fallback.ps1'
+if (-not (Test-Path -LiteralPath $proxyFallbackPath -PathType Leaf)) {
+    throw "源码更新代理 fallback helper 不存在：$proxyFallbackPath"
+}
+. $proxyFallbackPath
+
 function ConvertTo-WindowsProcessArgument {
     param([Parameter(Mandatory = $true)][string]$Value)
 
@@ -27,7 +33,8 @@ function ConvertTo-WindowsProcessArgument {
 function Invoke-SourceUpdateCli {
     param(
         [Parameter(Mandatory = $true)][string]$Executable,
-        [Parameter(Mandatory = $true)][string]$Root
+        [Parameter(Mandatory = $true)][string]$Root,
+        [switch]$Direct
     )
 
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
@@ -45,6 +52,9 @@ function Invoke-SourceUpdateCli {
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
+    if ($Direct) {
+        Set-SourceUpdateDirectEnvironment -StartInfo $startInfo
+    }
 
     $process = New-Object System.Diagnostics.Process
     $process.StartInfo = $startInfo
@@ -101,26 +111,44 @@ if (-not (Test-Path -LiteralPath $SourceRoot -PathType Container)) {
     exit 2
 }
 
-$invocation = Invoke-SourceUpdateCli -Executable $CliPath -Root $SourceRoot
-$json = $invocation.Stdout.Trim()
-if ($json.Length -eq 0) {
-    Write-Warning "源码更新检查失败：CLI 没有返回 JSON；退出码 $($invocation.ExitCode)"
-    if ($invocation.Stderr.Trim()) {
-        Write-Warning $invocation.Stderr.Trim()
+$direct = $false
+$proxyFallbackAttempted = $false
+while ($true) {
+    $invocation = Invoke-SourceUpdateCli -Executable $CliPath -Root $SourceRoot -Direct:$direct
+    $json = $invocation.Stdout.Trim()
+    if ($json.Length -eq 0) {
+        Write-Warning "源码更新检查失败：CLI 没有返回 JSON；退出码 $($invocation.ExitCode)"
+        if ($invocation.Stderr.Trim()) {
+            Write-Warning $invocation.Stderr.Trim()
+        }
+        exit 2
     }
-    exit 2
+
+    try {
+        $result = $json | ConvertFrom-Json
+    }
+    catch {
+        Write-Warning "源码更新检查失败：CLI 返回的内容不是有效 JSON"
+        exit 2
+    }
+
+    $status = ([string]$result.status).Trim()
+    $message = ([string]$result.message).Trim()
+    if (-not $proxyFallbackAttempted -and (Test-SourceUpdateLoopbackProxyRefusal -Status $status -Message $message)) {
+        Write-Warning "本机回环代理拒绝连接；仅为本次源码更新检查重试 GitHub 直连。"
+        $proxyFallbackAttempted = $true
+        $direct = $true
+        continue
+    }
+    break
 }
 
-try {
-    $result = $json | ConvertFrom-Json
-}
-catch {
-    Write-Warning "源码更新检查失败：CLI 返回的内容不是有效 JSON"
-    exit 2
+if ($proxyFallbackAttempted) {
+    $result | Add-Member -NotePropertyName proxyFallback -NotePropertyValue 'direct-after-loopback-refused' -Force
+    $json = $result | ConvertTo-Json -Compress -Depth 12
 }
 
 Write-SourceUpdateResult -Json $json -Path $ResultPath
-$status = ([string]$result.status).Trim()
 switch ($status) {
     'up-to-date' {
         Write-Output "源码更新检查：当前本地 main-v2 基线无变化。"
@@ -138,7 +166,6 @@ switch ($status) {
         Write-Warning "源码更新检查返回未知状态：$status"
     }
 }
-$message = ([string]$result.message).Trim()
 if ($message) {
     Write-Output ("源码更新说明：{0}" -f $message)
 }
