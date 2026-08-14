@@ -1648,6 +1648,7 @@ func TestReaderIntentRefusesDispatchAfterSafetyDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer host.Close()
+	host.bgWrites.Wait()
 	target := findToolByName(tools, "mcp__reader-revoked__echo")
 	if target == nil {
 		t.Fatalf("tool missing from %v", toolNames(tools))
@@ -1656,7 +1657,6 @@ func TestReaderIntentRefusesDispatchAfterSafetyDrift(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected remoteTool adapter, got %T", target)
 	}
-
 	// The installed server is authorized and currently advertises a reader.
 	rt.client.toolsMu.Lock()
 	rt.readOnly = true
