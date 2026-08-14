@@ -162,9 +162,14 @@ audio are not advertised. During a turn, Reasonix may send:
 - `session/request_permission` requests for permission-gated tools and user
   questions.
 
-Hosts should keep the `session/prompt` request open until Reasonix returns its
-stop reason, while continuing to process requests and notifications in both
-directions.
+Hosts should keep the `session/prompt` request open until Reasonix returns a
+stop reason or JSON-RPC error, while continuing to process requests and
+notifications in both directions.
+
+Normal completion and a controlled automatic-recovery pause return `end_turn`;
+client cancellation returns `cancelled`. Other failures return `-32603
+InternalError` with a redacted, bounded error summary instead of inventing a
+non-standard stop reason.
 
 ## Mid-turn steering extension
 

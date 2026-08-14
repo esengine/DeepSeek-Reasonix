@@ -16,7 +16,6 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
-	"reasonix/internal/secrets"
 )
 
 const (
@@ -386,7 +385,7 @@ func (t *statusTelemetry) finishTurn(runErr error, cancelled bool, goalStatus, s
 				eventName = "pause"
 			case runErr != nil:
 				t.phase = "error"
-				t.turnOutcome = ReasonixTurnOutcome{Kind: "error", Reason: clipStatusText(runErr.Error(), 2_048)}
+				t.turnOutcome = ReasonixTurnOutcome{Kind: "error", Reason: clipStatusError(runErr, 2_048)}
 				t.goalOverride = "failed"
 				eventName = "error"
 			default:
@@ -569,14 +568,6 @@ func normalizeGoalStatus(value string) string {
 	default:
 		return "none"
 	}
-}
-
-func clipStatusText(value string, limit int) string {
-	value = strings.TrimSpace(secrets.Redact(value))
-	if len(value) <= limit {
-		return value
-	}
-	return value[:limit]
 }
 
 func redactStatusTexts(values []string, limit int) []string {

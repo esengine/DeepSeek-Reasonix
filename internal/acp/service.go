@@ -1161,10 +1161,11 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 		cancel()
 	}()
 	runErr := drainACPInbox(runCtx, sess.ctrl, sess.ctrl.RunTurn(runCtx, text))
+	cancelled := runCtx.Err() != nil
 
 	statusEvent := sess.status.finishTurn(
 		runErr,
-		runCtx.Err() != nil,
+		cancelled,
 		sess.currentCtrl().GoalStatus(),
 		finalAssistantSummary(sess.currentCtrl()),
 	)
@@ -1173,13 +1174,10 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 	// the transcript and the same sequence/usage/outcome snapshot.
 	sess.persistAfterTurn(text)
 
-	stop := StopEndTurn
-	if runErr != nil {
-		if runCtx.Err() != nil {
-			stop = StopCancelled
-		} else {
-			stop = StopError
-		}
+	var recoveryPause *agent.RecoveryPauseError
+	stop, promptErr := promptStopReason(runErr, cancelled, errors.As(runErr, &recoveryPause), p.SessionID)
+	if promptErr != nil {
+		return nil, promptErr
 	}
 	res := SessionPromptResult{StopReason: stop}
 	if sess.transcript != "" {
