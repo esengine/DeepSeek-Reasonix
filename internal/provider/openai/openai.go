@@ -88,6 +88,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	prefixChatURL := deepSeekPrefixChatURL(chatURL)
 	headers, _ := cfg.Extra["headers"].(map[string]string)
 	extraBody, _ := cfg.Extra["extra_body"].(map[string]any)
+	userID, _ := cfg.Extra["user_id"].(string)
 	vision, _ := cfg.Extra["vision"].(bool)
 	officialDeepSeek := IsDeepSeek(cfg.BaseURL)
 	// DeepSeek's official chat API accepts string message content only. Keep
@@ -239,6 +240,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		prefixChatURL:   prefixChatURL,
 		headers:         cleanCustomHeaders(headers),
 		extraBody:       cleanExtraBody(extraBody),
+		userID:          userID,
 		model:           normalizeModelID(cfg.BaseURL, cfg.Model),
 		deepseek:        deepseek,
 		minimax:         minimax,
@@ -277,6 +279,7 @@ type client struct {
 	prefixChatURL   string // official DeepSeek Beta endpoint; empty for custom gateways
 	headers         map[string]string
 	extraBody       map[string]any
+	userID          string // workspace user attribution id; sent as the `user` body field
 	model           string
 	http            *http.Client
 	deepseek        bool
@@ -791,6 +794,7 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		Temperature:     req.Temperature,
 		MaxTokens:       maxOutputTokens,
 		ReasoningEffort: kimiK3ReasoningEffort(c.kimiK3, c.requestEffort(req)),
+		User:            c.userID,
 		ExtraBody:       c.extraBody,
 	}
 	switch {
@@ -1169,6 +1173,7 @@ type chatRequest struct {
 	MaxCompletionTokens int            `json:"max_completion_tokens,omitempty"`
 	ReasoningEffort     string         `json:"reasoning_effort,omitempty"`
 	Thinking            *thinkingMode  `json:"thinking,omitempty"`
+	User                string         `json:"user,omitempty"`
 	ExtraBody           map[string]any `json:"-"`
 }
 

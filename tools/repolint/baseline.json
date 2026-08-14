@@ -10,7 +10,7 @@
     "marker": 0,
     "narrative": 64,
     "struct-state": 115,
-    "test-file-size": 69271
+    "test-file-size": 69471
   },
   "files": {
     "cmd/e2ebench/main.go": {
@@ -881,10 +881,10 @@
       "file-size": 604
     },
     "internal/config/render.go": {
-      "complexity": 252,
+      "complexity": 255,
       "essay": 2,
-      "file-size": 1016,
-      "function-size": 967
+      "file-size": 1022,
+      "function-size": 973
     },
     "internal/config/render_test.go": {
       "test-file-size": 759

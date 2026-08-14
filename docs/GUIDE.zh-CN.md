@@ -427,6 +427,20 @@ Thinking 覆盖选项：
 | Disabled（关闭） | 对兼容 provider 发送 `thinking.type = "disabled"`。DeepSeek 风格 provider 下还会避免继续发送推理深度提示。 |
 | Adaptive（自适应） | 仅在服务文档明确支持 adaptive thinking 时使用，例如 MiniMax-M3 风格端点；语义是发送或保留 `thinking.type = "adaptive"`。 |
 
+## 按项目的用户 ID（`cachecontext`）
+
+为了让每个项目单独归属（DeepSeek 的 KV 缓存隔离 / 滥用追踪），请在项目级配置里设置顶层
+`cachecontext`，而不必重复 provider 条目。它会作为 DeepSeek `user_id` 发送（Anthropic 端点下是
+`metadata.user_id`，OpenAI 端点下是 `user`）：
+
+```toml
+# <project>/.reasonix.toml
+cachecontext = "my-project"
+```
+
+该值必须匹配 `^[a-zA-Z0-9_-]+$`（不超过 512 个字符），否则 DeepSeek 会返回 HTTP 400。桌面端可在
+项目标签页的 **项目** 设置区里设置它，全局设置中不提供该字段。
+
 ## 快捷键
 
 这里按使用端来写，因为用户通常是先知道“我现在在桌面端/CLI”，再找对应按键。
