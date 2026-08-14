@@ -8,11 +8,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"reasonix/internal/capability"
+	"reasonix/internal/config"
 	"reasonix/internal/plugin"
 	"reasonix/internal/tool"
 )
@@ -215,6 +218,125 @@ func TestMCPCapabilityRuntimeReplaysCatalogChangedBeforeSubscription(t *testing.
 	}
 	if got := dynamicCalls.Load(); got != 1 {
 		t.Fatalf("dynamic tools/call count = %d, want 1", got)
+	}
+}
+
+func TestConfiguredDisabledSessionDropsSharedHostReplayAndGenericAlias(t *testing.T) {
+	t.Setenv("REASONIX_CACHE_HOME", t.TempDir())
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var toolCalls atomic.Int32
+	server := explicitReaderMCPServer(t, nil, &toolCalls)
+	defer server.Close()
+	spec := plugin.Spec{Name: "shared-disabled", Type: "http", URL: server.URL, Authorized: true}
+	host := plugin.NewHost()
+	defer host.Close()
+	initial, err := host.Add(ctx, spec)
+	if err != nil {
+		t.Fatalf("Host.Add: %v", err)
+	}
+
+	registry := tool.NewRegistry()
+	runtime := NewMCPCapabilityRuntime(ctx, host, []plugin.Spec{spec}, registry, nil)
+	modelName := plugin.ModelToolName(spec.Name, "search")
+	if _, ok := registry.Get(modelName); !ok {
+		t.Fatal("test requires constructor replay to register the shared Host tool")
+	}
+	frontend := runtime.NewFrontend(capability.NewLedger(), nil)
+	generic := json.RawMessage(fmt.Sprintf(`{"action":"call","capability_id":"tool:%s","arguments":{}}`, modelName))
+	resolvedGeneric, err := frontend.ResolveCall(ctx, generic)
+	if err != nil || resolvedGeneric.Target == nil {
+		t.Fatalf("resolve generic replayed adapter = %+v, %v", resolvedGeneric, err)
+	}
+	runtime.ConfigureServers(
+		[]config.PluginEntry{{Name: spec.Name, Type: spec.Type, URL: spec.URL, Source: config.MCPSourceUserConfig}},
+		[]plugin.Spec{spec},
+		map[string]bool{spec.Name: false},
+	)
+	if _, ok := registry.Get(modelName); ok {
+		t.Fatal("disabled session retained the replayed shared Host adapter")
+	}
+	if _, err := resolvedGeneric.Target.Execute(ctx, resolvedGeneric.Args); err == nil || !strings.Contains(strings.ToLower(err.Error()), "disabled") {
+		t.Fatalf("resolved generic adapter after disable error = %v", err)
+	}
+	canonical := json.RawMessage(`{"action":"call","capability_id":"mcp-tool:shared-disabled/search","arguments":{}}`)
+	out, err := frontend.Execute(ctx, canonical)
+	if detail := strings.ToLower(out + " " + fmt.Sprint(err)); !strings.Contains(detail, "disabled") {
+		t.Fatalf("canonical disabled call = %q, %v, want disabled refusal", out, err)
+	}
+
+	// Even if another registry owner retains an adapter, generic tool: routing
+	// must re-check this runtime's current authorization boundary.
+	staleRegistry := tool.NewRegistry()
+	staleRegistry.Add(initial[0])
+	staleFrontend := runtime.NewFrontend(capability.NewLedger(), nil)
+	staleFrontend.registry = staleRegistry
+	out, err = staleFrontend.Execute(ctx, generic)
+	if detail := strings.ToLower(out + " " + fmt.Sprint(err)); !strings.Contains(detail, "disabled") {
+		t.Fatalf("generic disabled call = %q, %v, want disabled refusal", out, err)
+	}
+	if got := toolCalls.Load(); got != 0 {
+		t.Fatalf("disabled session executed tools/call %d times", got)
+	}
+}
+
+func TestMCPResolveReleasesDispatchLockBeforeCatalogCallback(t *testing.T) {
+	t.Setenv("REASONIX_CACHE_HOME", t.TempDir())
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	catalogEntered := make(chan struct{})
+	releaseCatalog := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseCatalog) }) }
+	t.Cleanup(release)
+	spec := plugin.Spec{Name: "catalog-lock", Type: "http", URL: "http://127.0.0.1:1", Authorized: true}
+	host := plugin.NewHost()
+	defer host.Close()
+	runtime := NewMCPCapabilityRuntime(ctx, host, []plugin.Spec{spec}, tool.NewRegistry(), func() capability.Catalog {
+		close(catalogEntered)
+		<-releaseCatalog
+		return capability.Catalog{}
+	})
+	frontend := runtime.NewFrontend(capability.NewLedger(), nil)
+
+	resolveDone := make(chan struct {
+		call tool.ResolvedCall
+		err  error
+	}, 1)
+	go func() {
+		resolved, err := frontend.ResolveCall(ctx, json.RawMessage(`{"action":"call","capability_id":"mcp-tool:catalog-lock/search","arguments":{}}`))
+		resolveDone <- struct {
+			call tool.ResolvedCall
+			err  error
+		}{call: resolved, err: err}
+	}()
+	select {
+	case <-catalogEntered:
+	case <-ctx.Done():
+		t.Fatalf("catalog callback was not entered: %v", ctx.Err())
+	}
+
+	disableDone := make(chan bool, 1)
+	go func() { disableDone <- runtime.SetServerEnabled(spec.Name, false) }()
+	select {
+	case ok := <-disableDone:
+		if !ok {
+			t.Fatal("disable did not find the configured server")
+		}
+	case <-time.After(time.Second):
+		release()
+		<-disableDone
+		t.Fatal("runtime writer blocked behind catalog callback; resolve retained dispatchMu across catalog lookup")
+	}
+	release()
+	resolved := <-resolveDone
+	if resolved.err != nil || resolved.call.Target == nil {
+		t.Fatalf("resolve = %+v, %v", resolved.call, resolved.err)
+	}
+	if _, err := resolved.call.Target.Execute(ctx, resolved.call.Args); err == nil || !strings.Contains(strings.ToLower(err.Error()), "disabled") {
+		t.Fatalf("resolved target after concurrent disable error = %v", err)
 	}
 }
 

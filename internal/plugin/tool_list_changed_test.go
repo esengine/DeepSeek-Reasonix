@@ -261,6 +261,86 @@ func TestToolListRefreshBacksOffAndConvergesAfterRepeatedNotices(t *testing.T) {
 	}
 }
 
+func TestToolListRefreshBoundsPermanentSelfNotificationsAndRecoversOnRetry(t *testing.T) {
+	tr := newControlledToolsTransport()
+	client, adapter := newControlledRefreshClient(t, tr)
+	defer client.close()
+	delays := make(chan time.Duration, toolListRefreshMaxAttempts+2)
+	releaseDelay := make(chan struct{}, toolListRefreshMaxAttempts+2)
+	client.refresh.mu.Lock()
+	client.refresh.wait = func(ctx context.Context, delay time.Duration) error {
+		select {
+		case delays <- delay:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		select {
+		case <-releaseDelay:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	client.refresh.mu.Unlock()
+	tr.mu.Lock()
+	tr.emitOnList = true
+	tr.mu.Unlock()
+
+	tr.emit()
+	done := refreshDone(t, client)
+	wantDelay := toolListRefreshDebounce
+	for attempt := 0; attempt < toolListRefreshMaxAttempts; attempt++ {
+		if delay := <-delays; delay != wantDelay {
+			t.Fatalf("refresh attempt %d delay = %s, want %s", attempt+1, delay, wantDelay)
+		}
+		releaseDelay <- struct{}{}
+		if call := <-tr.listStarted; call != attempt+2 {
+			t.Fatalf("refresh attempt %d tools/list call = %d, want %d", attempt+1, call, attempt+2)
+		}
+		wantDelay = nextToolListRefreshDelay(wantDelay)
+	}
+	waitClosed(t, done, "bounded self-notification refresh")
+	if lists, _ := tr.counts(); lists != 1+toolListRefreshMaxAttempts {
+		t.Fatalf("tools/list calls = %d, want initial + %d bounded attempts", lists, toolListRefreshMaxAttempts)
+	}
+	if !client.toolCatalogStale() {
+		t.Fatal("permanently self-notifying server incorrectly marked its catalog current")
+	}
+	select {
+	case delay := <-delays:
+		t.Fatalf("refresh cycle scheduled an unbounded extra delay %s", delay)
+	default:
+	}
+
+	// A user attempt on the stale adapter fails closed and starts a fresh cycle.
+	// Once the server stops self-notifying, that bounded retry converges and the
+	// unchanged adapter becomes callable again.
+	tr.mu.Lock()
+	tr.emitOnList = false
+	tr.mu.Unlock()
+	if _, err := adapter.Execute(context.Background(), json.RawMessage(`{}`)); err == nil || !strings.Contains(err.Error(), "refresh is still pending or failed") {
+		t.Fatalf("stale adapter error = %v, want fail-closed refresh error", err)
+	}
+	retryDone := refreshDone(t, client)
+	if delay := <-delays; delay != toolListRefreshDebounce {
+		t.Fatalf("retry refresh delay = %s, want %s", delay, toolListRefreshDebounce)
+	}
+	releaseDelay <- struct{}{}
+	if call := <-tr.listStarted; call != 2+toolListRefreshMaxAttempts {
+		t.Fatalf("retry tools/list call = %d, want %d", call, 2+toolListRefreshMaxAttempts)
+	}
+	waitClosed(t, retryDone, "retry convergence")
+	if client.toolCatalogStale() {
+		t.Fatal("catalog remained stale after the server stopped self-notifying")
+	}
+	if _, err := adapter.Execute(context.Background(), json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("adapter after bounded recovery: %v", err)
+	}
+	if _, calls := tr.counts(); calls != 1 {
+		t.Fatalf("tools/call count = %d, want one post-recovery dispatch", calls)
+	}
+}
+
 func TestToolListRefreshTimeoutUsesResolvedBudgets(t *testing.T) {
 	tests := []struct {
 		name string

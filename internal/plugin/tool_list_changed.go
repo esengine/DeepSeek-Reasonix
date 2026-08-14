@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	toolListRefreshDebounce   = 300 * time.Millisecond
-	toolListRefreshMaxBackoff = 5 * time.Second
+	toolListRefreshDebounce    = 300 * time.Millisecond
+	toolListRefreshMaxBackoff  = 5 * time.Second
+	toolListRefreshMaxAttempts = 4
 )
 
 type toolListRefreshWait func(context.Context, time.Duration) error
@@ -246,7 +247,7 @@ func (c *Client) requestToolsRefresh() {
 }
 
 // ensureToolsRefresh lets a user retry recover a dirty catalog after a bounded
-// refresh cycle failed or exhausted its single catch-up attempt. It never
+// refresh cycle failed or exhausted its catch-up attempts. It never
 // invents a new notice revision and therefore cannot create a self-sustaining
 // loop without a real notification or call attempt.
 func (c *Client) ensureToolsRefresh() {
@@ -282,11 +283,11 @@ func (c *Client) runToolsRefreshes() {
 		}
 	}()
 
-	// Keep converging while successful tools/list calls observe newer notices.
-	// Capped exponential delay prevents tight self-notification loops without
-	// abandoning a legitimate update received during an earlier refresh.
+	// Bound catch-up because some servers self-notify on every tools/list.
+	// Exhaustion stays stale and fail-closed; a later notice or user retry starts
+	// a fresh bounded cycle.
 	refreshDelay := toolListRefreshDebounce
-	for {
+	for attempt := 0; attempt < toolListRefreshMaxAttempts; attempt++ {
 		if err := wait(ctx, refreshDelay); err != nil {
 			return
 		}

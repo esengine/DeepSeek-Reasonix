@@ -1,11 +1,40 @@
 package agent
 
 import (
+	"encoding/json"
 	"strings"
 
 	"reasonix/internal/plugin"
 	"reasonix/internal/tool"
 )
+
+func (r *MCPCapabilityRuntime) syncRegistryInventory(previous, next map[string]mcpRuntimeServer) {
+	for name := range previous {
+		if _, ok := next[name]; ok {
+			continue
+		}
+		r.setRegistryServerEnabled(name, false)
+		r.state.clearServer(name)
+	}
+	for name, server := range next {
+		r.setRegistryServerEnabled(name, server.enabled)
+		if !server.enabled {
+			r.state.clearServer(name)
+		}
+	}
+}
+
+func (r *MCPCapabilityRuntime) setRegistryServerEnabled(name string, enabled bool) {
+	if r == nil || r.registry == nil {
+		return
+	}
+	prefix := plugin.ToolPrefix(name)
+	if enabled {
+		r.registry.ResumePrefix(prefix)
+		return
+	}
+	r.registry.SuspendPrefix(prefix)
+}
 
 func (r *MCPCapabilityRuntime) applyToolListChange(spec plugin.Spec, tools []tool.Tool) {
 	if r == nil {
@@ -48,4 +77,28 @@ func snapshotMCPTools(tools []tool.Tool) []plugin.CachedTool {
 		})
 	}
 	return snapshot
+}
+
+func (t *UseCapabilityTool) resolveUnconnectedMCPCall(id string, args json.RawMessage, base tool.ResolvedCall, spec plugin.Spec, server, raw, modelName string) tool.ResolvedCall {
+	destructive := false
+	if t.catalog != nil {
+		if entry, found := t.catalog().Lookup(id); found {
+			destructive = entry.Destructive
+		}
+	}
+	readOnly := false
+	if cached, found := plugin.CachedToolSafetyForSpec(spec, raw); found {
+		destructive = destructive || cached.Destructive
+		readOnly = cached.ReadOnly
+	}
+	lazy := &onDemandMCPTool{proxy: t, spec: spec, server: server, raw: raw, modelName: modelName, destructive: destructive, readOnly: readOnly}
+	base.Target = lazy
+	base.TargetName = modelName
+	base.ReadOnly = lazy.ReadOnly()
+	if len(args) == 0 {
+		base.Args = json.RawMessage(`{}`)
+	} else {
+		base.Args = args
+	}
+	return base
 }
