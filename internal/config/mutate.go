@@ -265,7 +265,7 @@ func configFileEditLockPathResolved(resolved string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	lockKey := filepath.Clean(resolved)
+	lockKey := filepath.Clean(configPathLockKey(resolved))
 	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
 		lockKey = strings.ToLower(filepath.ToSlash(lockKey))
 	}
