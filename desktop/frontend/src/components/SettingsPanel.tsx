@@ -5103,6 +5103,8 @@ function providerPresetDescription(preset: ProviderPresetView, t: ReturnType<typ
       return t("settings.addProvider.preset.kilocodeDesc");
     case "ollama-cloud":
       return t("settings.addProvider.preset.ollamaCloudDesc");
+    case "aionly":
+      return t("settings.addProvider.preset.aionlyDesc");
     default:
       return preset.description;
   }
