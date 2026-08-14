@@ -84,8 +84,9 @@ for (const path of localeChunks) {
   // runtime controls plus execution-setting receipts add localized copy. The
   // recovery "other saved versions" dialog adds ~0.1 KiB gzip to zh (54.6 over
   // the old 54.5 gate, +0.18%); both on-demand dictionaries stay bounded with
-  // small headroom.
-  const budget = name.startsWith("zh-TW-") ? 55.5 * 1024 : 54.75 * 1024;
+  // small headroom. The SCNet token-plan preset descriptions add ~0.05 KiB
+  // gzip to zh and ~0.07 KiB to zh-TW, ratcheting the gates to 55.0 / 55.75.
+  const budget = name.startsWith("zh-TW-") ? 55.75 * 1024 : 55.0 * 1024;
   assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }
 

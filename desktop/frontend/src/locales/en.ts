@@ -2657,6 +2657,8 @@ export const en = {
   "settings.addProvider.preset.nvidiaDesc": "NVIDIA NIM accelerated inference endpoint with Nemotron defaults.",
   "settings.addProvider.preset.kilocodeDesc": "Kilo Code gateway with kilo/auto routing defaults.",
   "settings.addProvider.preset.ollamaCloudDesc": "Hosted Ollama Cloud endpoint with none-to-max reasoning effort.",
+  "settings.addProvider.preset.scnetDesc": "SCNet (National Supercomputing Internet) OpenAI-compatible token-plan API.",
+  "settings.addProvider.preset.scnetAnthropicDesc": "SCNet (National Supercomputing Internet) Anthropic-compatible token-plan endpoint with Bearer auth.",
   "settings.addProvider.addedBadge": "Added",
   "settings.addProvider.modifiedBadge": "Modified",
   "settings.addProvider.nameConflictBadge": "Name taken",

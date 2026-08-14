@@ -1817,6 +1817,8 @@ export const zhTW: Record<DictKey, string> = {
   "settings.addProvider.preset.nvidiaDesc": "NVIDIA NIM 加速推理端點，預置 Nemotron 模型。",
   "settings.addProvider.preset.kilocodeDesc": "Kilo Code 閘道，預置 kilo/auto 自動路由模型。",
   "settings.addProvider.preset.ollamaCloudDesc": "Ollama Cloud 託管端點，支援 none 到 max 的 reasoning effort。",
+  "settings.addProvider.preset.scnetDesc": "國家超算互聯網 OpenAI 相容的 Token Plan API。",
+  "settings.addProvider.preset.scnetAnthropicDesc": "國家超算互聯網 Anthropic 相容的 Token Plan 端點（Bearer 認證）。",
   "settings.addProvider.addedBadge": "已新增",
   "settings.addProvider.modifiedBadge": "已修改",
   "settings.addProvider.nameConflictBadge": "同名占用",

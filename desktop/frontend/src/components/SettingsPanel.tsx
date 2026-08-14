@@ -5103,6 +5103,10 @@ function providerPresetDescription(preset: ProviderPresetView, t: ReturnType<typ
       return t("settings.addProvider.preset.kilocodeDesc");
     case "ollama-cloud":
       return t("settings.addProvider.preset.ollamaCloudDesc");
+    case "scnet":
+      return t("settings.addProvider.preset.scnetDesc");
+    case "scnet-anthropic":
+      return t("settings.addProvider.preset.scnetAnthropicDesc");
     default:
       return preset.description;
   }
