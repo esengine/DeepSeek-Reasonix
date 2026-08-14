@@ -1,0 +1,143 @@
+name: Windows Native Full
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "feature/**"
+  pull_request:
+    branches: [main-v2]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-native-full-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOTOOLCHAIN: local
+  GOFLAGS: -buildvcs=false
+  WINDOWS_SANDBOX_WAIT_MS: "20000"
+  REASONIX_RELEASE_CACHE_GUARD: ""
+
+jobs:
+  native-windows-full:
+    name: Root + SDK + Desktop
+    runs-on: windows-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: pnpm/action-setup@v6.0.9
+        with:
+          version: 10
+          run_install: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
+
+      - name: Verify native Windows toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          go version
+          bash_path="$(cygpath -w "$(command -v bash)")"
+          printf 'bash=%s\n' "$bash_path"
+          case "${bash_path,,}" in
+            *\\git\\*) ;;
+            *) echo "Expected Git for Windows Bash, got: $bash_path" >&2; exit 1 ;;
+          esac
+          case "${bash_path,,}" in
+            *\\windows\\system32\\bash.exe) echo "WSL bash is forbidden" >&2; exit 1 ;;
+          esac
+          mkdir -p artifacts/windows-native-go-tests
+
+      - name: Test Root Reasonix
+        id: root-tests
+        continue-on-error: true
+        timeout-minutes: 25
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -p 4 -count=1 -timeout=8m ./... 2>&1 |
+            tee artifacts/windows-native-go-tests/root.log
+
+      - name: Test Go SDK
+        id: sdk-tests
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 15
+        shell: bash
+        working-directory: sdk/go
+        run: |
+          set -o pipefail
+          go test -count=1 -timeout=8m ./... 2>&1 |
+            tee ../../artifacts/windows-native-go-tests/sdk-go.log
+
+      - name: Prepare Desktop frontend
+        id: desktop-prep
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 20
+        shell: bash
+        working-directory: desktop
+        run: |
+          set -o pipefail
+          {
+            go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+            export PATH="$(go env GOPATH)/bin:$PATH"
+            wails generate module
+            pnpm --dir frontend install --frozen-lockfile
+            pnpm --dir frontend build
+          } 2>&1 | tee ../artifacts/windows-native-go-tests/desktop-prep.log
+
+      - name: Test Desktop
+        id: desktop-tests
+        if: always() && steps.desktop-prep.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 25
+        shell: bash
+        working-directory: desktop
+        run: |
+          set -o pipefail
+          go test -p 1 -count=1 -timeout=12m ./... 2>&1 |
+            tee ../artifacts/windows-native-go-tests/desktop.log
+
+      - name: Upload native Windows test evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-native-go-tests-${{ github.run_id }}
+          path: artifacts/windows-native-go-tests/*.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Enforce aggregate result
+        if: always()
+        shell: pwsh
+        env:
+          ROOT_OUTCOME: ${{ steps.root-tests.outcome }}
+          SDK_OUTCOME: ${{ steps.sdk-tests.outcome }}
+          DESKTOP_PREP_OUTCOME: ${{ steps.desktop-prep.outcome }}
+          DESKTOP_OUTCOME: ${{ steps.desktop-tests.outcome }}
+        run: |
+          $outcomes = [ordered]@{
+            root = $env:ROOT_OUTCOME
+            sdk = $env:SDK_OUTCOME
+            desktopPrep = $env:DESKTOP_PREP_OUTCOME
+            desktop = $env:DESKTOP_OUTCOME
+          }
+          $outcomes | Format-Table -AutoSize
+          $failed = @($outcomes.GetEnumerator() | Where-Object Value -ne "success")
+          if ($failed.Count -gt 0) {
+            throw "Native Windows full test failed or skipped: $($failed.Name -join ', ')"
+          }

@@ -1,0 +1,425 @@
+{
+  "task": {
+    "id": "AGT-312ac4ae-1699-428a-82b7-63f04e713a7c",
+    "workspaceId": "WS-AGENT-E2E",
+    "createdBy": "USR-2CCAAB16D6F37B1C",
+    "createdRole": "owner",
+    "prompt": "分析 IP-REAL-CORE 对版面解析服务的依赖;列出影响路径、证据和人工复核动作。",
+    "templateId": "impact_analysis",
+    "assetIds": [],
+    "state": "complete",
+    "stageLabel": "任务结果已通过证据门禁",
+    "createdAt": "2026-08-10T12:12:05.123Z",
+    "updatedAt": "2026-08-10T12:12:05.133Z",
+    "plan": {
+      "title": "知识抽取引擎影响分析",
+      "intent": "impact_analysis",
+      "outputType": "impact_report",
+      "steps": [
+        {
+          "id": "S1",
+          "title": "搜索授权资产",
+          "tool": "search_assets",
+          "arguments": {
+            "query": "知识抽取",
+            "limit": 10
+          }
+        },
+        {
+          "id": "S2",
+          "title": "检查依赖关系",
+          "tool": "inspect_neighborhood",
+          "arguments": {
+            "assetId": "IP-REAL-CORE",
+            "depth": 2,
+            "includeProposed": false
+          }
+        },
+        {
+          "id": "S3",
+          "title": "核验关键证据",
+          "tool": "read_evidence",
+          "arguments": {
+            "evidenceId": "EV-CORE-1"
+          }
+        }
+      ],
+      "maxToolCalls": 12
+    },
+    "model": "deepseek-chat-e2e",
+    "result": {
+      "status": "complete",
+      "title": "知识抽取引擎影响分析",
+      "summary": "已在当前账号授权范围内完成依赖与证据核查。",
+      "findings": [
+        {
+          "id": "F1",
+          "title": "核心能力依赖版面解析",
+          "detail": "版面解析服务为知识抽取提供章节和表格结构。",
+          "sourceIds": [
+            "IP-REAL-CORE",
+            "IP-REAL-PARSER"
+          ],
+          "confidence": 0.95
+        },
+        {
+          "id": "F2",
+          "title": "结论具备原文证据",
+          "detail": "关键知识结论明确要求绑定可回到原文的证据。",
+          "sourceIds": [
+            "EV-CORE-1"
+          ],
+          "confidence": 0.98
+        }
+      ],
+      "uncertainties": [
+        "需在解析引擎升级时复核兼容性指标。"
+      ],
+      "deliverables": [
+        {
+          "type": "impact_report",
+          "title": "依赖影响清单",
+          "content": "1. 复核版面解析版本;2. 回归章节与表格结构;3. 人工确认 Wiki 是否更新。"
+        }
+      ],
+      "nextActions": [
+        "由资产负责人复核依赖版本。",
+        "由知识编辑者决定是否更新正式 Wiki。"
+      ],
+      "excludedActions": [
+        "未执行代码、命令、文件系统或任意网络操作",
+        "未保存、发布、删除、分享或覆盖任何正式知识",
+        "未修改成员、角色、权限或关系确认状态"
+      ],
+      "quality": {
+        "totalClaims": 2,
+        "groundedClaims": 2,
+        "downgradedClaims": 0,
+        "evidenceCoverage": 1
+      }
+    },
+    "usage": {
+      "planTokens": 37,
+      "resultTokens": 59,
+      "totalTokens": 96
+    },
+    "completedAt": "2026-08-10T12:12:05.133Z",
+    "error": null,
+    "events": [
+      {
+        "id": "AGE-75277db1-6741-46bc-bbb1-f5f0895e238b",
+        "taskId": "AGT-312ac4ae-1699-428a-82b7-63f04e713a7c",
+        "type": "task.created",
+        "stepId": null,
+        "detail": {
+          "templateId": "impact_analysis",
+          "assetCount": 0,
+          "boundary": "document-ip-wiki-readonly"
+        },
+        "createdAt": "2026-08-10T12:12:05.126Z"
+      },
+      {
+        "id": "AGE-87319143-ecc5-4e7c-a169-cfbedf645ba5",
+        "taskId": "AGT-312ac4ae-1699-428a-82b7-63f04e713a7c",
+        "type": "plan.ready",
+        "stepId": null,
+        "detail": {
+          "intent": "impact_analysis",
+          "outputType": "impact_report",
+          "stepCount": 3,
+          "model": "deepseek-chat-e2e"
+        },
+        "createdAt": "2026-08-10T12:12:05.128Z"
+      },
+      {
+        "id": "AGE-4da2d121-5a0d-4592-99dc-f0e4dc8b650d",
+        "taskId": "AGT-312ac4ae-1699-428a-82b7-63f04e713a7c",
+        "type": "step.started",
+        "stepId": "S1",
+        "detail": {
+          "title": "搜索授权资产",
+          "tool": "search_assets"
+        },
+        "createdAt": "2026-08-10T12:12:05.129Z"
+      },
+      {
+        "id": "AGE-9143166f-72a9-42d5-aa21-070107aed023",
+        "taskId": "AGT-312ac4ae-1699-428a-82b7-63f04e713a7c",
+        "type": "step.complete",
+        "stepId": "S1",
+        "detail": {
+          "title": "搜索授权资产",
+          "tool": "search_assets",
+          "resultCount": 2,
+          "sourceIds": [
+            "IP-REAL-CORE",
+            "EV-CORE-1",
+            "IP-REAL-PARSER",
+            "EV-PARSER-1"
+          ]
+        },
+        "createdAt": "2026-08-10T12:12:05.130Z"
+      },
+      {
+        "id": "AGE-b09ecbc4-0aee-4110-9b8c-ce1957df4502",
+        "taskId": "AGT-312ac4ae-1699-428a-82b7-63f04e713a7c",
+        "type": "step.started",
+        "stepId": "S2",
+        "detail": {
+          "title": "检查依赖关系",
+          "tool": "inspect_neighborhood"
+        },
+        "createdAt": "2026-08-10T12:12:05.130Z"
+      },
+      {
+        "id": "AGE-3f48c167-6b5e-4636-806d-31211daa5055",
+        "taskId": "AGT-312ac4ae-1699-428a-82b7-63f04e713a7c",
+        "type": "step.complete",
+        "stepId": "S2",
+        "detail": {
+          "title": "检查依赖关系",
+          "tool": "inspect_neighborhood",
+          "resultCount": 3,
+          "sourceIds": [
+            "IP-REAL-CORE",
+            "IP-REAL-PARSER",
+            "REL-7294F454-0A48-4E23-9637-7BFD064FFCD7"
+          ]
+        },
+        "createdAt": "2026-08-10T12:12:05.131Z"
+      },
+      {
+        "id": "AGE-31cb763e-b84d-4b73-bc04-6d31357f0063",
+        "taskId": "AGT-312ac4ae-1699-428a-82b7-63f04e713a7c",
+        "type": "step.started",
+        "stepId": "S3",
+        "detail": {
+          "title": "核验关键证据",
+          "tool": "read_evidence"
+        },
+        "createdAt": "2026-08-10T12:12:05.131Z"
+      },
+      {
+        "id": "AGE-6c73c0a5-1296-4bcc-a94f-bcda35a920f3",
+        "taskId": "AGT-312ac4ae-1699-428a-82b7-63f04e713a7c",
+        "type": "step.complete",
+        "stepId": "S3",
+        "detail": {
+          "title": "核验关键证据",
+          "tool": "read_evidence",
+          "resultCount": 1,
+          "sourceIds": [
+            "EV-CORE-1",
+            "IP-REAL-CORE"
+          ]
+        },
+        "createdAt": "2026-08-10T12:12:05.131Z"
+      },
+      {
+        "id": "AGE-79b4b43c-1f93-4f20-92f4-2811bd5b0b90",
+        "taskId": "AGT-312ac4ae-1699-428a-82b7-63f04e713a7c",
+        "type": "delivery.complete",
+        "stepId": null,
+        "detail": {
+          "status": "complete",
+          "findingCount": 2,
+          "evidenceCoverage": 1,
+          "usage": {
+            "planTokens": 37,
+            "resultTokens": 59,
+            "totalTokens": 96
+          }
+        },
+        "createdAt": "2026-08-10T12:12:05.133Z"
+      }
+    ]
+  },
+  "wikiDraftTask": {
+    "id": "AGT-2e82613b-50a9-44ea-9ed7-a5ee772bacb4",
+    "workspaceId": "WS-AGENT-E2E",
+    "createdBy": "USR-2CCAAB16D6F37B1C",
+    "createdRole": "owner",
+    "prompt": "为 IP-REAL-CORE 准备 Wiki 更新草案,补充版面解析依赖,但不要保存或发布。",
+    "templateId": "wiki_draft",
+    "assetIds": [],
+    "state": "complete",
+    "stageLabel": "任务结果已通过证据门禁",
+    "createdAt": "2026-08-10T12:12:07.238Z",
+    "updatedAt": "2026-08-10T12:12:07.242Z",
+    "plan": {
+      "title": "知识抽取引擎 Wiki 更新草案",
+      "intent": "wiki_draft",
+      "outputType": "wiki_draft",
+      "steps": [
+        {
+          "id": "S1",
+          "title": "读取当前正式 Wiki",
+          "tool": "read_wiki",
+          "arguments": {
+            "assetId": "IP-REAL-CORE"
+          }
+        },
+        {
+          "id": "S2",
+          "title": "准备只读草案上下文",
+          "tool": "compose_wiki_draft",
+          "arguments": {
+            "assetId": "IP-REAL-CORE",
+            "instructions": "补充版面解析依赖并保留证据标记"
+          }
+        }
+      ],
+      "maxToolCalls": 12
+    },
+    "model": "deepseek-chat-e2e",
+    "result": {
+      "status": "complete",
+      "title": "Wiki 更新建议(草案)",
+      "summary": "已生成证据约束的更新建议,未保存或发布正式 Wiki。",
+      "findings": [
+        {
+          "id": "F1",
+          "title": "现有 Wiki 可补充解析依赖",
+          "detail": "知识抽取引擎依赖结构化版面解析输入。",
+          "sourceIds": [
+            "IP-REAL-CORE"
+          ],
+          "confidence": 0.92
+        }
+      ],
+      "uncertainties": [
+        "正式保存前需由知识负责人确认依赖版本。"
+      ],
+      "deliverables": [
+        {
+          "type": "wiki_draft",
+          "title": "Wiki 更新建议",
+          "content": "建议新增“版面解析依赖”章节,并保留 EV-CORE-1 证据引用。"
+        }
+      ],
+      "nextActions": [
+        "由知识编辑者进入 Wiki 编辑流程人工保存。"
+      ],
+      "excludedActions": [
+        "未执行代码、命令、文件系统或任意网络操作",
+        "未保存、发布、删除、分享或覆盖任何正式知识",
+        "未修改成员、角色、权限或关系确认状态"
+      ],
+      "quality": {
+        "totalClaims": 1,
+        "groundedClaims": 1,
+        "downgradedClaims": 0,
+        "evidenceCoverage": 1
+      }
+    },
+    "usage": {
+      "planTokens": 31,
+      "resultTokens": 43,
+      "totalTokens": 74
+    },
+    "completedAt": "2026-08-10T12:12:07.242Z",
+    "error": null,
+    "events": [
+      {
+        "id": "AGE-4be9eb5a-a9be-47e7-84ac-b3a31a48adb0",
+        "taskId": "AGT-2e82613b-50a9-44ea-9ed7-a5ee772bacb4",
+        "type": "task.created",
+        "stepId": null,
+        "detail": {
+          "templateId": "wiki_draft",
+          "assetCount": 0,
+          "boundary": "document-ip-wiki-readonly"
+        },
+        "createdAt": "2026-08-10T12:12:07.239Z"
+      },
+      {
+        "id": "AGE-b4d6700d-aa94-49c6-87d2-811ff813c2ed",
+        "taskId": "AGT-2e82613b-50a9-44ea-9ed7-a5ee772bacb4",
+        "type": "plan.ready",
+        "stepId": null,
+        "detail": {
+          "intent": "wiki_draft",
+          "outputType": "wiki_draft",
+          "stepCount": 2,
+          "model": "deepseek-chat-e2e"
+        },
+        "createdAt": "2026-08-10T12:12:07.240Z"
+      },
+      {
+        "id": "AGE-f04b3db1-3f6b-4191-b6dd-bd8ba0dc321e",
+        "taskId": "AGT-2e82613b-50a9-44ea-9ed7-a5ee772bacb4",
+        "type": "step.started",
+        "stepId": "S1",
+        "detail": {
+          "title": "读取当前正式 Wiki",
+          "tool": "read_wiki"
+        },
+        "createdAt": "2026-08-10T12:12:07.240Z"
+      },
+      {
+        "id": "AGE-ad5d01b2-aed6-43e5-a0e1-2fb96f26c892",
+        "taskId": "AGT-2e82613b-50a9-44ea-9ed7-a5ee772bacb4",
+        "type": "step.complete",
+        "stepId": "S1",
+        "detail": {
+          "title": "读取当前正式 Wiki",
+          "tool": "read_wiki",
+          "resultCount": 1,
+          "sourceIds": [
+            "IP-REAL-CORE",
+            "EV-CORE-1",
+            "WIKI:IP-REAL-CORE"
+          ]
+        },
+        "createdAt": "2026-08-10T12:12:07.241Z"
+      },
+      {
+        "id": "AGE-796fad51-d080-4b5c-820f-5e4f40293f2f",
+        "taskId": "AGT-2e82613b-50a9-44ea-9ed7-a5ee772bacb4",
+        "type": "step.started",
+        "stepId": "S2",
+        "detail": {
+          "title": "准备只读草案上下文",
+          "tool": "compose_wiki_draft"
+        },
+        "createdAt": "2026-08-10T12:12:07.241Z"
+      },
+      {
+        "id": "AGE-3776d40f-3a12-4dcc-bc6f-f9e842491be1",
+        "taskId": "AGT-2e82613b-50a9-44ea-9ed7-a5ee772bacb4",
+        "type": "step.complete",
+        "stepId": "S2",
+        "detail": {
+          "title": "准备只读草案上下文",
+          "tool": "compose_wiki_draft",
+          "resultCount": 1,
+          "sourceIds": [
+            "IP-REAL-CORE",
+            "EV-CORE-1"
+          ]
+        },
+        "createdAt": "2026-08-10T12:12:07.242Z"
+      },
+      {
+        "id": "AGE-9cba39d1-8a66-4909-9d34-c8970b9beb1e",
+        "taskId": "AGT-2e82613b-50a9-44ea-9ed7-a5ee772bacb4",
+        "type": "delivery.complete",
+        "stepId": null,
+        "detail": {
+          "status": "complete",
+          "findingCount": 1,
+          "evidenceCoverage": 1,
+          "usage": {
+            "planTokens": 31,
+            "resultTokens": 43,
+            "totalTokens": 74
+          }
+        },
+        "createdAt": "2026-08-10T12:12:07.242Z"
+      }
+    ]
+  },
+  "relationshipId": "REL-7294F454-0A48-4E23-9637-7BFD064FFCD7",
+  "plannerCalls": 2,
+  "synthesisCalls": 2
+}

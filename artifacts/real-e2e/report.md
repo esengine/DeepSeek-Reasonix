@@ -1,0 +1,17 @@
+﻿# intelifar MinerU + DeepSeek Real E2E Report
+- Run: 2026-08-10T05:35:37.524Z
+- Result: PASS
+- Duration: 601664 ms
+- Input: intelifar-real-analysis.html
+- MinerU state: complete
+- MinerU model: MinerU-HTML
+- MinerU task: 6b47f0d3-d92e-497f-848c-c9185d2f45f1
+- Parsed Markdown: 1214 characters
+- DeepSeek model: deepseek-v4-flash
+- DeepSeek response: fdc6f278-ba15-4859-824e-4b0b5385ed83
+- DeepSeek tokens: 2923
+- IP assets: 4
+- Source quotations: 8
+- Published assets: 4
+- Published evidence precision: 章节级
+- Credential leakage scan: PASS (runtime values checked in memory; values not written)

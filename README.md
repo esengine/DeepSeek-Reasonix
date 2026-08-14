@@ -1,3 +1,32 @@
+# intelifar IP Intelligence · 灵遐智析
+
+> Enterprise long-document IP analysis and Wiki governance, rebuilt on the open-source Reasonix foundation for intelifar.
+
+The primary web surface in `site/` supports both deterministic offline acceptance and a real server-side MinerU + DeepSeek workflow for document intake, schema extraction, Wiki generation, redaction, provenance, lifecycle governance, immutable audit evidence, a 35%–240% zoomable IP neural panorama, and a bounded natural-language IP task agent. The task agent is limited to authorized document/IP/Wiki analysis, read-only domain tools, evidence-grounded results, and draft-only Wiki suggestions; it is not exposed as a coding agent. API keys remain inside the same-origin Node gateway.
+
+```powershell
+cd site
+npm ci
+npm test
+npm run build
+node .\e2e\platform.e2e.mjs
+npm run test:e2e:smb
+npm run test:e2e:operations
+npm run test:e2e:collaboration
+npm run test:e2e:modules
+npm run test:e2e:agent
+npm run test:e2e:agent:real
+npm run test:e2e:real
+```
+
+The [Chinese user guide](./docs/INTELIFAR-USER-GUIDE.zh-CN.md) is written as a screenshot-led task manual for external small-business customers. See [INTELIFAR-DELIVERY.md](./INTELIFAR-DELIVERY.md) for engineering acceptance evidence and integration boundaries.
+
+---
+
+## Upstream Reasonix
+
+The original Reasonix kernel, license, documentation, and attribution are intentionally preserved below. The Go runtime remains the agent foundation for future production connectors.
+
 <p align="center">
   <img src="docs/logo-ghost-wave-effect.svg" alt="Reasonix" width="360"/>
 </p>

@@ -1,0 +1,17 @@
+---
+import "@fontsource-variable/inter";
+import "@fontsource-variable/jetbrains-mono";
+import "../styles/public-share.css";
+import activationScriptUrl from "../scripts/invite-activation.mjs?url";
+---
+<!doctype html>
+<html lang="zh-CN">
+  <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width" /><meta name="robots" content="noindex,nofollow,noarchive" /><meta name="referrer" content="no-referrer" /><title>激活 intelifar 空间账号</title></head>
+  <body class="activation-page">
+    <main class="activation-shell">
+      <aside><img src="/brand/intelifar-logo-dark.png" alt="intelifar" /><p class="public-kicker">TEAM ONBOARDING</p><h1>加入企业知识空间</h1><p>一次性邀请 · 自主设置密码 · 工作空间隔离</p><div><span>01</span> 验证邀请<br/><span>02</span> 设置强密码<br/><span>03</span> 进入知识空间</div></aside>
+      <section><div class="activation-status" id="activation-status"><span>◇</span><p><strong>正在验证邀请</strong><small>令牌已从地址栏移除</small></p></div><form id="activation-form" hidden><p class="public-kicker">INVITATION VERIFIED</p><h2 id="activation-name">设置你的空间密码</h2><p id="activation-meta"></p><label>登录邮箱<input id="activation-email" readonly /></label><label>新密码<input id="activation-password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required data-testid="activation-password" /><small>12–128 字符；请勿与其他服务共用。</small></label><label>确认密码<input id="activation-confirm" type="password" autocomplete="new-password" minlength="12" maxlength="128" required data-testid="activation-confirm" /></label><p class="activation-error" id="activation-error" role="alert"></p><button type="submit" data-testid="activate-account">激活账号并进入登录 →</button></form><div class="activation-complete" id="activation-complete" hidden><span>✓</span><h2>账号已激活</h2><p>密码仅以 scrypt 哈希保存。现在可以返回工作台登录。</p><a href="/">进入 intelifar 工作台 →</a></div></section>
+    </main>
+    <script type="module" src={activationScriptUrl}></script>
+  </body>
+</html>

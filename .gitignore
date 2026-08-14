@@ -36,6 +36,8 @@ mem.prof
 .env
 .env.local
 *.local
+/apikey.txt
+**/apikey.txt
 /reasonix.toml
 /desktop/.env
 /desktop/reasonix.toml
@@ -77,3 +79,9 @@ site/.generated/
 
 # Committed pointer at REASONIX.md; overrides a global CLAUDE.md ignore rule.
 !/CLAUDE.md
+# intelifar local publication registry (replace with managed storage in production)
+site/.runtime/
+
+# Native Windows Go test runtime logs and firewall broker control files.
+/artifacts/windows-native-go-tests/*.log
+/artifacts/windows-native-go-tests/.control-*/
