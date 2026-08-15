@@ -1294,6 +1294,7 @@ export const en = {
   "projectTree.revealInFinder": "Show in Finder",
   "projectTree.revealInExplorer": "Show in File Explorer",
   "projectTree.revealInFileManager": "Show in file manager",
+  "projectTree.openInGithub": "Open in GitHub",
   "projectTree.topicActions": "Session actions",
   "projectTree.projectActions": "Project actions",
   "projectTree.colorDefault": "Default",
