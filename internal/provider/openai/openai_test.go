@@ -2370,3 +2370,51 @@ func TestNormaliseUsageAnthropicStyleFallback(t *testing.T) {
 		})
 	}
 }
+
+// TestBuildRequestThinkingEnabledGatewayRoundTripsToolCallReasoning pins the
+// #7748/#7520 fix: `thinking=enabled` on a non-auto-detected OpenAI-compatible
+// gateway (opencode.ai zen serving DeepSeek models) must activate the DeepSeek
+// reasoning_content replay contract on assistant tool_calls turns, or the
+// upstream 400s ("The `reasoning_content` in the thinking mode must be passed
+// back to the API"). Plain assistant turns still omit the field.
+func TestBuildRequestThinkingEnabledGatewayRoundTripsToolCallReasoning(t *testing.T) {
+	p, err := New(provider.Config{
+		Name:    "opencode-zen",
+		BaseURL: "https://opencode.ai/zen/v1",
+		Model:   "ds4-flash-free",
+		APIKey:  "k",
+		Extra:   map[string]any{"thinking": "enabled"},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if !provider.RequiresToolCallReasoning(p) {
+		t.Fatal("thinking-enabled gateway must replay reasoning on tool-call turns")
+	}
+	if !provider.WarnOnMissingToolCallReasoning(p) {
+		t.Fatal("thinking-enabled gateway must diagnose missing tool-call reasoning like DeepSeek")
+	}
+
+	req := p.(*client).buildRequest(provider.Request{Messages: []provider.Message{
+		{Role: provider.RoleUser, Content: "inspect"},
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "call_1", Name: "read_file", Arguments: `{"path":"main.go"}`}}},
+		{Role: provider.RoleTool, ToolCallID: "call_1", Name: "read_file", Content: "package main"},
+		{Role: provider.RoleAssistant, ReasoningContent: "read main.go first", ToolCalls: []provider.ToolCall{{ID: "call_2", Name: "read_file", Arguments: `{"path":"go.mod"}`}}},
+		{Role: provider.RoleTool, ToolCallID: "call_2", Name: "read_file", Content: "module demo"},
+		{Role: provider.RoleUser, Content: "continue"},
+		{Role: provider.RoleAssistant, Content: "done", ReasoningContent: "SECRET-CHAIN-OF-THOUGHT"},
+	}})
+	body, err := json.Marshal(req.Messages)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if got := req.Messages[1].ReasoningContent; got == nil || *got != "" {
+		t.Fatalf("tool_calls turn without captured reasoning must serialize the empty key, got %v", got)
+	}
+	if got := req.Messages[3].ReasoningContent; got == nil || *got != "read main.go first" {
+		t.Fatalf("tool_calls turn reasoning_content = %v, want provider-issued reasoning", got)
+	}
+	if strings.Contains(string(body), "SECRET-CHAIN-OF-THOUGHT") {
+		t.Fatalf("plain assistant turn must not replay reasoning: %s", body)
+	}
+}

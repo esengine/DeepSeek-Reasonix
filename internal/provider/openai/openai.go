@@ -299,7 +299,22 @@ type client struct {
 func (c *client) Name() string { return c.name }
 
 func (c *client) RequiresToolCallReasoning() bool {
-	return c != nil && c.deepseek && c.thinkingType != "disabled"
+	if c == nil {
+		return false
+	}
+	if c.thinkingType == "disabled" {
+		return false
+	}
+	if c.deepseek {
+		return true
+	}
+	// A generic OpenAI-compatible gateway the user opted into DeepSeek-style
+	// thinking via the `thinking=enabled` escape hatch (e.g. opencode.ai zen
+	// serving DeepSeek models) inherits the DeepSeek replay contract: the
+	// upstream 400s an assistant tool_calls turn whose reasoning_content key
+	// is absent (#7748, #7520). GLM and Kimi K3 keep their own round-trip
+	// policy (RequiresReasoningRoundTrip) and stay out of DeepSeek recovery.
+	return !c.zhipu && !c.kimiK3 && c.thinkingType == "enabled"
 }
 
 func (c *client) RequiresReasoningRoundTrip() bool {
@@ -716,7 +731,11 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 				// Kimi K3 requires the complete assistant message on multi-turn
 				// and tool-call requests, including provider-issued reasoning.
 				cm.ReasoningContent = &m.ReasoningContent
-			case c.deepseek && len(m.ToolCalls) > 0:
+			case (c.deepseek || c.RequiresToolCallReasoning()) && len(m.ToolCalls) > 0:
+				// DeepSeek and thinking-enabled generic gateways require the
+				// reasoning_content key on assistant tool_calls turns (empty
+				// included — #7748); keep the empty-key emission even when
+				// thinking is off if a value was captured earlier.
 				if c.RequiresToolCallReasoning() || m.ReasoningContent != "" {
 					cm.ReasoningContent = &m.ReasoningContent
 				}
