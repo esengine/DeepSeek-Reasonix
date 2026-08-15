@@ -8,7 +8,7 @@
 
 ## 目标
 
-让用户把会话回退到之前的节点，并恢复**代码**、**会话**或**两者**，且不改动 git 历史。CLI 与桌面端采用同一套机制，并与 Claude Code 的 Esc-Esc / `/rewind` 行为对齐。
+让用户把会话回退到之前的节点，并恢复**代码**、**会话**或**两者**，且不改动 git 历史。对话回溯改为显式分叉，父会话永不截断。详见 [会话所有权](./SESSION_OWNERSHIP.zh-CN.md)。CLI 与桌面端采用同一套机制。
 
 ## 机制：文件快照，而不是 git
 
@@ -47,9 +47,19 @@ type Checkpoint struct {
 
 ## 存储
 
-- **作为会话 sidecar 保存**：位于 `config.SessionDir()` 下的 `<session-id>.ckpt/`，每个 checkpoint 一个 JSON 文件并附带小型索引。这样删除成本低，单个快照损坏也只影响自身。它与消息 JSONL（`agent.Session.Save`）分开，因此无需改动会话格式。
+- **作为会话 sidecar 保存**：位于 `config.SessionDir()` 下的 `<session-id>.ckpt/`。它与消息 JSONL（`agent.Session.Save`）分开，因此无需改动会话格式。
 - **跨进程保留**：恢复会话时会重新加载 checkpoint，重启后仍可 rewind，与 Claude Code 保持一致。
-- **保留策略**：随会话清理，默认约 30 天并可配置，以限制完整内容快照占用的磁盘空间。
+- **Schema v3 布局**：每轮一个目录，包含 `turns/<turn>/meta.json` 和原始字节
+  `files/NNNN.before`。新捕获不再把同一份 pre-image 重复写入内容寻址 blob。
+  升级后仍可读取 v1/v2 JSON 和 blob；事务 / undo 载荷仍可使用 blob。每个 v3
+  回合还会写入一个不含文件载荷的 v2 兼容标记（`turn-<turn>.json`）。降级到旧版
+  Reasonix 后，旧版可以据此保持 turn 编号单调递增，但不能恢复该标记对应的 v3
+  文件快照。该 marker 同时是 v3 回合的存活标记：旧版截断 marker 后，后续升级会
+  忽略遗留目录，而不会把未来回合重新加载出来。
+- **保留策略**：默认保留最近 100 个 v3 回合目录，并对原始 v3 pre-image 使用
+  1 GiB 软上限。当前回合或事务保护中的回合可以暂时超过上限；解除保护后，从最旧
+  的完整回合目录开始清理。旧版 blob 在独立的兼容存储中使用相同的上限值。删除
+  会话时会清理整个 checkpoint sidecar。
 
 ## Controller API：两个前端共用的统一入口
 
@@ -58,13 +68,15 @@ Checkpoint 位于 `control.Controller`，与 `SetPlanMode`、`Compact`、`NewSes
 ```go
 type RewindScope int // Code | Conversation | Both
 
-func (c *Controller) Checkpoints() []CheckpointMeta      // for the picker
-func (c *Controller) Rewind(turn int, scope RewindScope) error
+func (c *Controller) Checkpoints() []CheckpointMeta
+func (c *Controller) PrepareRewind(turn int, scope RewindScope) (RewindPlan, error)
+func (c *Controller) CommitRewind(planID string) (RewindResult, error)
 ```
 
 - **Code**：遍历从 `turn` 到最新的所有 checkpoint，按路径选取最早的 `FileSnap`，把文件恢复到对应内容；若为 `nil` 则删除。也就是撤销 `turn` 及之后的全部编辑。恢复前会再次按当前工作区根目录检查路径逃逸。
-- **Conversation**：把 `Session.Messages` 截断到 `turn` 对应用户消息之前，重新 `Save`，并发送替换后的历史事件供前端重绘。所选回合的提示会回填到输入框，方便修改后重发。
-- **Both**：同时恢复代码与会话。
+- **Conversation**：在该回合边界创建新会话分支。父会话 transcript 永不截断。详见 [会话所有权](./SESSION_OWNERSHIP.zh-CN.md)。
+- **Both**：先创建新会话分支，再恢复代码；如果文件校验冲突，保留分支并返回
+  `partial=true`。
 
 统一的 `Rewound` 事件（或复用 history-replace 事件）让所有前端以相同方式重绘。
 
@@ -77,22 +89,23 @@ func (c *Controller) Rewind(turn int, scope RewindScope) error
 ## 桌面端体验（与 VS Code 扩展对齐）
 
 - Transcript 中每条用户消息悬停时显示 **rewind** 控件，并提供：恢复代码、恢复会话、同时恢复、从此处分叉。
-- 前端通过 Wails binding 调用同一个 `controller.Rewind`；Controller 事件流推送恢复结果，React 负责重绘。前端不包含独立 rewind 逻辑。
+- 前端通过 Wails binding 调用同一个 prepare / commit rewind API；Controller 事件流推送恢复结果，React 负责重绘。前端不包含独立 rewind 逻辑。
 
 ## 非目标与边界情况
 
 - **Bash / 外部副作用**：`rm`、`mv`、数据库写入、部署等不会被跟踪，也无法通过 rewind 撤销，这与 Claude Code 一致。
-- **回合之间的外部编辑**：快照保存的是回合开始时的内容，因此恢复会覆盖期间由 Reasonix 之外产生的改动。
+- **回合之间的外部编辑**：恢复前会比较当前文件的存在性、SHA-256 和 mode 与
+  Reasonix 最后一次 after-image；不匹配时报告冲突，不会覆盖。
 - **删除**：编辑工具执行的删除可以恢复，因为快照保存了原内容；`bash rm` 无法恢复。
-- **大文件**：当前保存完整快照，由保留策略控制磁盘占用；若成为问题，再引入按内容寻址的去重。
+- **大文件**：保存完整快照，但单文件捕获上限为 32 MiB。回合数和软字节上限共同
+  限制历史占用；当前回合或事务保护中的回合可以暂时超过字节上限。
 
 ## 阶段划分
 
-1. **Phase 1**：快照存储、`executeOne` 捕获切入点、`Controller.Rewind`（code / conversation / both）、CLI 选择器（Esc-Esc + `/rewind`）。
+1. **Phase 1**：快照存储、`executeOne` 捕获切入点、Controller prepare / commit（code / conversation / both）、CLI 选择器（Esc-Esc + `/rewind`）。
 2. **Phase 2**：桌面端悬停 rewind、“从此处分叉”、“从此处开始摘要 / 摘要到此处”，以及可选的 git-backed 模式。
 
 ## 待确认问题
 
 - 是否在 `/compact` 和 `NewSession` 边界创建快照？
-- 默认保留窗口应为多久，是否需要在 `[checkpoints]` 配置中公开？
-- 是否从一开始就使用内容寻址去重，而不是每个快照一个文件？
+- 是否需要在 `[checkpoints]` 配置中公开 100 回合与 1 GiB 软字节上限？

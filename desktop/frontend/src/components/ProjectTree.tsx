@@ -35,7 +35,7 @@ interface ProjectTreeProps {
   onOpenTopic: (scope: string, workspaceRoot: string, topicId: string, sessionPath?: string) => Promise<void> | void;
   onAddProject: (path?: string) => Promise<void>;
   onCreateTopic?: (scope: string, workspaceRoot: string) => Promise<void> | void;
-  onCreateDeliveryWorktree?: (workspaceRoot: string) => Promise<void> | void;
+  onCreateIsolatedWorktree?: (workspaceRoot: string) => Promise<void> | void;
   onRenameTopic?: (topicId: string, title: string) => Promise<void> | void;
   onTopicsChanged?: () => Promise<void> | void;
   refreshSignal?: number;
@@ -365,7 +365,7 @@ export function ProjectTree({
   onOpenTopic,
   onAddProject,
   onCreateTopic,
-  onCreateDeliveryWorktree,
+  onCreateIsolatedWorktree,
   onRenameTopic,
   onTopicsChanged,
   refreshSignal,
@@ -848,12 +848,12 @@ export function ProjectTree({
     }
   };
 
-  const handleCreateDeliveryWorktree = async (workspaceRoot: string) => {
+  const handleCreateIsolatedWorktree = async (workspaceRoot: string) => {
     if (!workspaceRoot || isolatingProject) return;
     setIsolatingProject(workspaceRoot);
     closeMenu();
     try {
-      await onCreateDeliveryWorktree?.(workspaceRoot);
+      await onCreateIsolatedWorktree?.(workspaceRoot);
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), "error", { durationMs: 6000 });
     } finally {
@@ -1484,7 +1484,7 @@ export function ProjectTree({
       setMenuProject({ key, root: projectRoot, path: projectPath, scope, label: projectLabel });
       setConfirmRemoveProject(null);
       if (scope === "project" && projectRoot) {
-        void app.DeliveryWorktreeAvailability(projectRoot).then((availability) => {
+        void app.IsolatedWorktreeAvailability(projectRoot).then((availability) => {
           setWorktreeAvailability((current) => ({
             ...current,
             [projectRoot]: { available: availability.available, reason: availability.reason },
@@ -1503,7 +1503,7 @@ export function ProjectTree({
             </span>
           ),
           disabled: isolatingProject !== null || isolationAvailability?.available === false,
-          onSelect: () => { void handleCreateDeliveryWorktree(projectRoot); },
+          onSelect: () => { void handleCreateIsolatedWorktree(projectRoot); },
         }]
       : [];
     const projectMenuItems: ContextMenuItem[] = [

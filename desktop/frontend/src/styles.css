@@ -1968,7 +1968,8 @@ textarea {
 
 /* Independent typography regions. Missing custom properties deliberately fall
    back to the global appearance settings, preserving existing installations. */
-.transcript {
+.transcript,
+.transcript__live-region {
   --font-scale: var(--typography-conversation-scale, var(--global-font-scale));
   --text-base: var(--typography-conversation-size, calc(14px * var(--font-scale)));
   --font-content: var(--text-base);
@@ -2012,6 +2013,7 @@ textarea {
    tokens at each semantic region root to make independent scaling real. */
 body,
 .transcript,
+.transcript__live-region,
 .composer-wrap,
 .code,
 .md-code,
@@ -3396,6 +3398,31 @@ a[href] {
   flex: 1 1 auto;
   min-height: 0;
   height: 100%;
+}
+/* The active turn streams as the virtual list's in-flow Footer: inside the
+   scroller, right after the last history row, but outside Virtuoso's
+   measured size tree — unbounded growth never reaches the list's anchors or
+   recovery machinery (#8657/#8688). */
+.transcript__live-region {
+  position: relative;
+  width: 100%;
+}
+.transcript__live-content {
+  position: relative;
+  width: 100%;
+}
+.transcript__live-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--maxw);
+  margin-left: auto;
+  margin-right: auto;
+  padding: 4px var(--transcript-inline-pad, 32px) 12px;
+  color: var(--fg-dim);
+  font-size: var(--text-sm);
 }
 .transcript > * {
   max-width: var(--maxw);
@@ -5029,6 +5056,15 @@ button.reasoning-summary:focus-visible {
   font-size: inherit;
   line-height: inherit;
   white-space: normal;
+}
+/* Streaming reasoning renders as plain append-only text (#8657/#8688). */
+.reasoning__stream-text {
+  margin: 0;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .reasoning__body > .md p,
 .turn-collapse__inline-reasoning > .md p,
@@ -7186,16 +7222,6 @@ body > .mermaid-diagram--fullscreen {
   max-width: min(168px, 28vw);
 }
 
-.composer-meta__control--profile {
-  flex: 0 0 auto;
-  max-width: min(158px, 24vw);
-}
-
-.composer-meta__control--profile .tooltip-trigger {
-  min-width: 0;
-  max-width: 100%;
-}
-
 .composer-meta__control--approval {
   flex: 0 1 auto;
   min-width: 216px;
@@ -7390,82 +7416,6 @@ body > .mermaid-diagram--fullscreen {
   transform: none;
 }
 
-.composer-profile-trigger {
-  --wails-draggable: no-drag;
-  --composer-profile-accent: var(--fg-dim);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  width: 100%;
-  min-width: 0;
-  height: var(--composer-control-height);
-  padding: 0 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--composer-control-radius);
-  background: var(--surface-2);
-  color: var(--fg-dim);
-  box-shadow: var(--app-graphite-shadow);
-  font: inherit;
-  font-size: var(--composer-control-font-size);
-  font-weight: var(--composer-control-font-weight);
-  transition: border-color 0.14s, background 0.14s, color 0.14s, transform 0.14s var(--ease-out);
-}
-
-.composer-profile-trigger[data-profile="economy"] {
-  --composer-profile-accent: #3b82f6;
-}
-
-.composer-profile-trigger[data-profile="delivery"] {
-  --composer-profile-accent: #f97316;
-}
-
-.composer-profile-trigger > svg:first-child {
-  flex: 0 0 auto;
-  color: var(--composer-profile-accent);
-}
-
-.composer-profile-trigger > svg:last-child {
-  flex: 0 0 auto;
-  color: var(--fg-faint);
-}
-
-.composer-profile-trigger__label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.composer-profile-trigger__value {
-  color: var(--fg);
-  font-weight: var(--composer-control-font-weight);
-}
-
-.composer-profile-trigger:hover:not(:disabled),
-.composer-profile-trigger:focus-visible,
-.composer-profile-trigger--open {
-  outline: none;
-  color: var(--fg);
-  border-color: var(--border-soft);
-  background: var(--bg-soft);
-  transform: none;
-}
-
-.composer-profile-trigger:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-  transform: none;
-}
-
-.composer-profile-trigger:focus-visible {
-  box-shadow: var(--focus-ring);
-  transform: none;
-}
-
 .composer-more-trigger {
   --wails-draggable: no-drag;
   display: inline-flex;
@@ -7601,10 +7551,6 @@ body > .mermaid-diagram--fullscreen {
     max-width: 100%;
   }
 
-  .composer-meta__control--profile {
-    max-width: 126px;
-  }
-
   .composer-meta__control--intent {
     max-width: 128px;
   }
@@ -7658,12 +7604,6 @@ body > .mermaid-diagram--fullscreen {
     max-width: 92px;
   }
 
-  .composer-meta__control--profile {
-    flex-basis: 68px;
-    width: 68px;
-    max-width: 68px;
-  }
-
   .composer-meta__divider {
     display: none;
   }
@@ -7680,15 +7620,6 @@ body > .mermaid-diagram--fullscreen {
   }
 
   .composer-task-mode-trigger > svg:last-child {
-    display: none;
-  }
-
-  .composer-profile-trigger {
-    gap: 4px;
-    padding-inline: 6px;
-  }
-
-  .composer-profile-trigger > svg:last-child {
     display: none;
   }
 
@@ -7857,22 +7788,11 @@ body > .mermaid-diagram--fullscreen {
   overflow-wrap: anywhere;
 }
 
-.composer-intent-menu,
-.composer-profile-menu {
+.composer-intent-menu {
   width: min(284px, calc(100vw - 16px));
 }
 
-.composer-profile-menu .composer-access-menu__desc {
-  color: var(--fg-dim);
-  font-size: 12px;
-  line-height: 18px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.composer-intent-menu__item,
-.composer-profile-menu__item {
+.composer-intent-menu__item {
   height: auto;
   min-height: 58px;
   padding-block: 8px;
@@ -28414,7 +28334,6 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .composer-modebar,
 :root[data-theme-style] .meta-chip,
 :root[data-theme-style] .composer-task-mode-trigger,
-:root[data-theme-style] .composer-profile-trigger,
 :root[data-theme-style] .composer-more-trigger,
 :root[data-theme-style] .composer-meta .modelsw__trigger,
 :root[data-theme-style] .composer-context__item {
@@ -28428,9 +28347,6 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .composer-task-mode-trigger:hover:not(:disabled),
 :root[data-theme-style] .composer-task-mode-trigger:focus-visible,
 :root[data-theme-style] .composer-task-mode-trigger--open,
-:root[data-theme-style] .composer-profile-trigger:hover:not(:disabled),
-:root[data-theme-style] .composer-profile-trigger:focus-visible,
-:root[data-theme-style] .composer-profile-trigger--open,
 :root[data-theme-style] .composer-more-trigger:hover:not(:disabled),
 :root[data-theme-style] .composer-more-trigger:focus-visible,
 :root[data-theme-style] .composer-more-trigger--open,
@@ -28442,7 +28358,6 @@ body > .mermaid-diagram--fullscreen {
 }
 
 :root[data-theme-style] .composer-task-mode-trigger:focus-visible,
-:root[data-theme-style] .composer-profile-trigger:focus-visible,
 :root[data-theme-style] .composer-more-trigger:focus-visible,
 :root[data-theme-style] .composer-meta .modelsw__trigger:focus-visible {
   box-shadow: var(--focus-ring);
@@ -31750,12 +31665,6 @@ body > .mermaid-diagram--fullscreen {
   height: 28px;
 }
 
-.app--creation .composer-meta__control--profile,
-:root[data-theme-style] .app--creation .composer-meta__control--profile {
-  flex: 0 0 auto;
-  max-width: 88px;
-}
-
 .app--creation .composer-meta__control--approval,
 :root[data-theme-style] .app--creation .composer-meta__control--approval {
   flex: 0 0 auto;
@@ -31786,14 +31695,12 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .composer-modebar,
 .app--creation .composer-content-trigger,
 .app--creation .composer-task-mode-trigger,
-.app--creation .composer-profile-trigger,
 .app--creation .composer-more-trigger,
 .app--creation .composer-meta .modelsw__trigger,
 .app--creation .composer-context__item,
 :root[data-theme-style] .app--creation .composer-modebar,
 :root[data-theme-style] .app--creation .composer-content-trigger,
 :root[data-theme-style] .app--creation .composer-task-mode-trigger,
-:root[data-theme-style] .app--creation .composer-profile-trigger,
 :root[data-theme-style] .app--creation .composer-more-trigger,
 :root[data-theme-style] .app--creation .composer-meta .modelsw__trigger,
 :root[data-theme-style] .app--creation .composer-context__item {
@@ -31802,16 +31709,6 @@ body > .mermaid-diagram--fullscreen {
   box-shadow: none;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
-}
-
-.app--creation .composer-profile-trigger,
-:root[data-theme-style] .app--creation .composer-profile-trigger {
-  height: 28px;
-  gap: 0;
-  padding-inline: 9px;
-  box-shadow: none;
-  font-size: calc(11.5px * var(--font-scale));
-  font-weight: 400;
 }
 
 .app--creation .composer-task-mode-trigger,
@@ -31825,16 +31722,12 @@ body > .mermaid-diagram--fullscreen {
 
 /* Creation: text-only pills — drop leading icons + chevrons (match modelsw) */
 .app--creation .composer-task-mode-trigger > svg,
-.app--creation .composer-profile-trigger > svg,
-:root[data-theme-style] .app--creation .composer-task-mode-trigger > svg,
-:root[data-theme-style] .app--creation .composer-profile-trigger > svg {
+:root[data-theme-style] .app--creation .composer-task-mode-trigger > svg {
   display: none;
 }
 
 .app--creation .composer-task-mode-trigger__value,
-.app--creation .composer-profile-trigger__value,
-:root[data-theme-style] .app--creation .composer-task-mode-trigger__value,
-:root[data-theme-style] .app--creation .composer-profile-trigger__value {
+:root[data-theme-style] .app--creation .composer-task-mode-trigger__value {
   color: color-mix(in srgb, var(--fg) 88%, transparent);
   font-weight: 400;
 }
@@ -31842,23 +31735,12 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .composer-task-mode-trigger:hover:not(:disabled),
 .app--creation .composer-task-mode-trigger:focus-visible,
 .app--creation .composer-task-mode-trigger--open,
-.app--creation .composer-profile-trigger:hover:not(:disabled),
-.app--creation .composer-profile-trigger:focus-visible,
-.app--creation .composer-profile-trigger--open,
 :root[data-theme-style] .app--creation .composer-task-mode-trigger:hover:not(:disabled),
 :root[data-theme-style] .app--creation .composer-task-mode-trigger:focus-visible,
-:root[data-theme-style] .app--creation .composer-task-mode-trigger--open,
-:root[data-theme-style] .app--creation .composer-profile-trigger:hover:not(:disabled),
-:root[data-theme-style] .app--creation .composer-profile-trigger:focus-visible,
-:root[data-theme-style] .app--creation .composer-profile-trigger--open {
+:root[data-theme-style] .app--creation .composer-task-mode-trigger--open {
   border-color: color-mix(in srgb, var(--fg-faint) 18%, transparent);
   background: color-mix(in srgb, var(--bg-elev) 14%, transparent);
   color: var(--fg);
-}
-
-.app--creation .composer-meta__control--profile,
-:root[data-theme-style] .app--creation .composer-meta__control--profile {
-  max-width: 64px;
 }
 
 .app--creation .composer-meta__control--intent,

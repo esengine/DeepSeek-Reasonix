@@ -41,23 +41,26 @@ go test ./internal/tool -run TestBuiltinToolContractDocumentation
 
 默认 full-token boot 会发送上面的内置工具，并额外发送 session、memory、skill、subagent、LSP、install 和 slash-command 工具：
 
-单模型均衡（Balanced）Executor 使用这套工具面。配置独立 Planner 的 Balanced 与全部交付优先
-（Delivery）会在保留既有工具的同时增加一个稳定代理 `use_capability`（list/inspect/call/decline），
-用于在不改变 provider 可见 Schema 的前提下发现和调用按需 MCP（含 `auto_start=false`）。Delivery
-还会增加稳定执行合约，并由宿主运行时强制执行：变更和
+每个会话都使用这套 Executor 工具面，并额外提供稳定代理 `use_capability`
+（list/inspect/call/decline），用于在不改变 provider 可见 Schema 的前提下发现和调用按需
+MCP（含 `auto_start=false`）。宿主还会按任务风险强制执行合约：闭环任务的变更和
 验证命令必须先建立验收标准；变更后的工作必须完成复查、验证并通过带证据的 `complete_step` 签收；
 Skill/MCP 的 require/prefer 路由受门禁约束（只读回答同样不能跳过 require 能力）；中/高风险改动
 强制结构化 review/security_review，且 `review_report` 的 `reviewed_paths` 必须有宿主观测到的
 read/diff 证据。
 
+## 统一 Boot 工具面
+
+每个会话都使用同一套 provider 可见核心工具和同一个 `use_capability` 代理。
+
 双模型 Planner 与全部 task/fleet 子 Agent 同样使用 `use_capability`（且从不暴露直接
 `mcp__*` schema）。Planner 与普通可写子 Agent 可调用已安装或项目配置 MCP，不要求
 `readOnlyHint`；Planner 将 `destructiveHint` 留给 Executor，普通子 Agent 走可信 MCP 路径
 （实时授权复核 + 仅显式 deny）。writer/destructive 调用仍会串行并按 mutation 记录，继续受
-证据、工作区租约和 Delivery 门禁约束。严格只读子 Agent 共享同一代理 schema 与 Host 连接，但执行仍要求 `readOnlyHint` 且
-非 destructive。Balanced 双模型会给 Planner 与 Executor 分别挂载独立代理 frontend，确保规划阶段
-发现的 capability 在 handoff 后仍可直接调用；两者 ledger/audit 隔离，但共享 Host 连接。Economy
-仍为单模型，不启用独立 Planner。
+证据、工作区租约和闭环门禁约束。严格只读子 Agent 共享同一代理 schema 与 Host 连接，但执行仍要求 `readOnlyHint` 且
+非 destructive。双模型会给 Planner 与 Executor 分别挂载独立代理 frontend，确保规划阶段
+发现的 capability 在 handoff 后仍可直接调用；两者 ledger/audit 隔离，但共享 Host 连接。
+单模型会话不启用独立 Planner。
 
 `use_capability` 的解析阶段无副作用：`action=list` 返回已配置 MCP 服务器的排序列表且不启动服务器；
 对未连接服务器的 `action=call` 只生成惰性目标；Plan 只会对真实目标重新检查显式阶段 opt-out，服务器进程只在
@@ -72,9 +75,7 @@ read/diff 证据。
 `tools/call` 前，frontend 都会再次复核当前 runtime 的 enable、授权与精确 Host 连接身份；另一个
 项目/tab 在共享 Host 上的同名 client 会在进程、网络或工具分发前被拒绝。
 
-固定代理的 provider 可见 name、description、schema 与顺序不会随 MCP inventory 变化；但 Balanced
-Executor 刻意保留直接 `mcp__*` 工具，因此安装、连接或刷新这些直接工具时，Executor 的整体 provider
-前缀仍可能变化。
+固定代理的 provider 可见 name、description、schema 与顺序不会随 MCP inventory 变化。
 
 `ask`, `docs`, `explore`, `fleet`, `forget`, `history`, `install_skill`, `install_source`,
 `list_sessions`, `lsp_definition`, `lsp_diagnostics`, `lsp_hover`,
@@ -87,16 +88,16 @@ Executor 刻意保留直接 `mcp__*` 工具，因此安装、连接或刷新这�
 按 UTF-8 字节偏移分页读取某个引用对应的完整最终答案，因此长篇并行调研无需一次性全部
 注入父会话也不会丢失。引用只允许在当前会话 lineage 和工作区内读取。
 
-`use_capability`（`action` = `list` | `inspect` | `call` | `decline`）在所有执行设定
-（`light` | `balanced` | `delivery`）下都出现在 provider 可见工具面。可选工具仍在 host
+`use_capability`（`action` = `list` | `inspect` | `call` | `decline`）在 provider
+可见工具面上始终存在（自适应标准执行没有可选档位）。可选工具仍在 host
 registry 中供调度，但不会展开到 top-level provider schema；模型通过 `use_capability`
 调用，避免缓存前缀因 schema 变化而失效。
 
 `internal/boot.TestBootToolContractMatchesProviderVisibleSurface` 会校验真实 boot registry 合约和 provider request 一致，包括 read-only 标记和 canonical schema。
 
-## 统一启动工具面（所有执行设定）
+## 统一启动工具面（所有任务）
 
-三种执行设定共享同一套精简的 provider 可见核心：直接编码工具、后台 shell 生命周期工具，
+每个任务共享同一套精简的 provider 可见核心：直接编码工具、后台 shell 生命周期工具，
 以及稳定的能力代理：
 
 `bash`, `bash_output`, `edit_file`, `kill_shell`, `read_file`, `wait`,
@@ -104,5 +105,5 @@ registry 中供调度，但不会展开到 top-level provider schema；模型通
 
 可选工具（`glob`、`grep`、`ls`、`web_fetch`、MCP、skills、subagents、docs、会话历史、
 记忆写入、workflow 等）仍在 host registry 中可调度；模型通过 `use_capability` 列举、
-检查、调用或拒绝它们，且不会改变 provider 工具列表。执行设定改变的是规划 / 验证 /
+检查、调用或拒绝它们，且不会改变 provider 工具列表。任务风险改变的是规划 / 验证 /
 独立复审策略，而不是 provider 可见工具集合。已退役的 `connect_tool_source` 不再注册。

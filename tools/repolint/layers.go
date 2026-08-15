@@ -45,7 +45,6 @@ var leaves = []string{
 	"internal/sysproxy",
 	"internal/taskintent",
 	"internal/textutil",
-	"internal/workspacelease",
 }
 
 func checkLayering(imports map[string][]importRef) []Finding {

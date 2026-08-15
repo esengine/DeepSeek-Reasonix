@@ -47,7 +47,6 @@ function tab(overrides: Partial<LooseTabMeta> = {}): TabMeta {
     mode: "normal",
     collaborationMode: "normal",
     toolApprovalMode: "ask",
-    tokenMode: "full",
     goal: "",
     goalStatus: "stopped",
     active: true,
@@ -66,7 +65,6 @@ function meta(overrides: Partial<LooseMeta> = {}): Meta {
     bypass: false,
     collaborationMode: "normal",
     toolApprovalMode: "ask",
-    tokenMode: "full",
     goal: "",
     goalStatus: "stopped",
     ...overrides,
@@ -77,15 +75,15 @@ console.log("\ncomposer profile");
 
 {
   let profiles: ComposerProfilesByTab = {};
-  profiles = hydrateComposerProfilesFromTabs(profiles, [tab({ tokenMode: "delivery" })]);
-  eq(profiles["tab-1"].tokenMode, "delivery", "delivery runtime profile hydrates from persisted tabs");
-  profiles = hydrateComposerProfileFromMeta(profiles, "tab-1", meta({ tokenMode: "delivery" }));
-  eq(Boolean(profiles["tab-1"].pending.tokenMode), false, "delivery runtime profile is acknowledged by meta");
+  profiles = hydrateComposerProfilesFromTabs(profiles, [tab({ toolApprovalMode: "auto" })]);
+  eq(profiles["tab-1"].toolApprovalMode, "auto", "auto tool approval hydrates from persisted tabs");
+  profiles = hydrateComposerProfileFromMeta(profiles, "tab-1", meta({ toolApprovalMode: "auto" }));
+  eq(Boolean(profiles["tab-1"].pending.toolApprovalMode), false, "auto tool approval is acknowledged by meta");
 }
 
 {
   let profiles: ComposerProfilesByTab = {};
-  profiles = hydrateComposerProfilesFromTabs(profiles, [tab({ tokenMode: "economy" })]);
+  profiles = hydrateComposerProfilesFromTabs(profiles, [tab()]);
   profiles = patchComposerProfile(
     profiles,
     "tab-1",
@@ -101,14 +99,13 @@ console.log("\ncomposer profile");
     ["collaborationMode", "goal"],
   );
 
-  profiles = hydrateComposerProfilesFromTabs(profiles, [tab({ tokenMode: "economy" })]);
+  profiles = hydrateComposerProfilesFromTabs(profiles, [tab()]);
 
   eq(displayedComposerProfileCollaborationMode(profiles["tab-1"]), "plan", "stale tab hydration keeps locally selected plan mode");
-  eq(profiles["tab-1"].tokenMode, "economy", "token saver remains independent of collaboration mode changes");
   eq(composerProfileMode(profiles["tab-1"]), "plan", "compat mode keeps the plan axis enabled");
   eq(Boolean(profiles["tab-1"].pending.collaborationMode), true, "pending plan stays pending until backend acknowledges it");
 
-  profiles = hydrateComposerProfilesFromTabs(profiles, [tab({ mode: "plan", collaborationMode: "plan", tokenMode: "economy" })]);
+  profiles = hydrateComposerProfilesFromTabs(profiles, [tab({ mode: "plan", collaborationMode: "plan" })]);
 
   eq(displayedComposerProfileCollaborationMode(profiles["tab-1"]), "plan", "acknowledged tab hydration keeps plan visible");
   eq(Boolean(profiles["tab-1"].pending.collaborationMode), false, "backend acknowledgement clears pending plan");
@@ -117,16 +114,22 @@ console.log("\ncomposer profile");
 {
   let profiles: ComposerProfilesByTab = {};
   profiles = hydrateComposerProfilesFromTabs(profiles, [tab()]);
-  profiles = patchComposerProfile(profiles, "tab-1", profiles["tab-1"], { tokenMode: "economy" }, ["tokenMode"]);
-  profiles = hydrateComposerProfileFromMeta(profiles, "tab-1", meta({ tokenMode: "full" }));
+  profiles = patchComposerProfile(
+    profiles,
+    "tab-1",
+    profiles["tab-1"],
+    { collaborationMode: "normal", goalDraftMode: false, goal: "", toolApprovalMode: "auto" },
+    ["toolApprovalMode"],
+  );
+  profiles = hydrateComposerProfileFromMeta(profiles, "tab-1", meta({ toolApprovalMode: "ask" }));
 
-  eq(profiles["tab-1"].tokenMode, "economy", "stale meta cannot erase a pending token saver selection");
-  eq(Boolean(profiles["tab-1"].pending.tokenMode), true, "token saver stays pending while meta is stale");
+  eq(profiles["tab-1"].toolApprovalMode, "auto", "stale meta cannot erase a pending auto approval selection");
+  eq(Boolean(profiles["tab-1"].pending.toolApprovalMode), true, "auto approval stays pending while meta is stale");
 
-  profiles = hydrateComposerProfileFromMeta(profiles, "tab-1", meta({ tokenMode: "economy" }));
+  profiles = hydrateComposerProfileFromMeta(profiles, "tab-1", meta({ toolApprovalMode: "auto" }));
 
-  eq(profiles["tab-1"].tokenMode, "economy", "acknowledged token saver remains enabled");
-  eq(Boolean(profiles["tab-1"].pending.tokenMode), false, "token saver pending clears after matching meta");
+  eq(profiles["tab-1"].toolApprovalMode, "auto", "acknowledged auto approval remains enabled");
+  eq(Boolean(profiles["tab-1"].pending.toolApprovalMode), false, "auto approval pending clears after matching meta");
 }
 
 {
@@ -149,7 +152,7 @@ console.log("\ncomposer profile");
 {
   let profiles: ComposerProfilesByTab = {};
   profiles = hydrateComposerProfilesFromTabs(profiles, [tab(), tab({ id: "tab-2" })]);
-  profiles = patchComposerProfile(profiles, "tab-2", profiles["tab-2"], { tokenMode: "economy" }, ["tokenMode"]);
+  profiles = patchComposerProfile(profiles, "tab-2", profiles["tab-2"], { toolApprovalMode: "auto" }, ["toolApprovalMode"]);
   profiles = hydrateComposerProfilesFromTabs(profiles, [tab()]);
 
   eq(Boolean(profiles["tab-2"]), false, "tab hydration removes profiles for closed tabs");

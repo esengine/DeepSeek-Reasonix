@@ -221,7 +221,7 @@ func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []pro
 			if !batchCallStaticallySkippable(a, calls[j]) {
 				continue
 			}
-			isVerification := calls[j].Name == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(json.RawMessage(calls[j].Arguments)))
+			isVerification := calls[j].Name == "bash" && evidence.IsVerificationCommand(bashCommandFromArgs(json.RawMessage(calls[j].Arguments)))
 			msg := cause.message()
 			var ex *tool.ShellExecution
 			if calls[j].Name == "bash" {
@@ -435,7 +435,7 @@ func batchCallMutationFailureCause(a *Agent, call provider.ToolCall, o toolOutco
 		readOnly = o.effective.readOnly
 	}
 	effects := evidence.ClassifyToolCall(toolName, toolArgs, readOnly)
-	if toolName == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(toolArgs)) && !effects.StateMutation {
+	if toolName == "bash" && evidence.IsVerificationCommand(bashCommandFromArgs(toolArgs)) && !effects.StateMutation {
 		return nil
 	}
 	if !effects.StateMutation {
@@ -474,7 +474,7 @@ func batchCallStaticallySkippable(a *Agent, call provider.ToolCall) bool {
 		return false
 	}
 	readOnly := t.ReadOnly()
-	isVerification := call.Name == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(json.RawMessage(call.Arguments)))
+	isVerification := call.Name == "bash" && evidence.IsVerificationCommand(bashCommandFromArgs(json.RawMessage(call.Arguments)))
 	if isVerification {
 		return true
 	}

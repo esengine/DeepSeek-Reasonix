@@ -9,7 +9,6 @@ import (
 	"unicode/utf8"
 
 	"reasonix/internal/agent"
-	"reasonix/internal/agentpreset"
 	"reasonix/internal/taskpolicy"
 )
 
@@ -52,7 +51,7 @@ type plannerTurnMetadata struct {
 	Synthetic              bool
 	ExplicitPlanMode       bool
 	GoalActive             bool
-	DeliveryProfile        bool // legacy tests/callers without a frozen TaskPolicy
+	ClosedLoop             bool // legacy tests/callers without a frozen TaskPolicy
 	HasConversationContext bool
 	Policy                 taskpolicy.TaskPolicy
 	PolicySet              bool
@@ -75,11 +74,12 @@ func plannerTurnMetadataFromContext(ctx context.Context) (plannerTurnMetadata, b
 func (c *Controller) withPlannerTurnMetadata(ctx context.Context, userText string, synthetic bool, priorMessages int) context.Context {
 	text := strings.TrimSpace(agent.StripTransientUserBlocks(userText))
 	features := plannerFeaturesFor(text, normalizePlannerText(text))
+	goalActive := c.goals.active()
 	policy := taskpolicy.Derive(taskpolicy.Input{
 		Raw:             text,
 		Instruction:     taskpolicy.StripQuotedConstraints(text),
-		Preset:          agentpreset.Normalize(c.AgentPreset()),
 		PlanMode:        c.PlanMode(),
+		GoalActive:      goalActive,
 		HighRiskHints:   features.highRisk,
 		MediumRiskHints: features.complex,
 		MultiFile:       features.multiFile,
@@ -92,8 +92,8 @@ func (c *Controller) withPlannerTurnMetadata(ctx context.Context, userText strin
 		UserText:               userText,
 		Synthetic:              synthetic,
 		ExplicitPlanMode:       c.PlanMode(),
-		GoalActive:             c.goals.active(),
-		DeliveryProfile:        policy.Preset == agentpreset.Delivery,
+		GoalActive:             goalActive,
+		ClosedLoop:             policy.ClosedLoop(),
 		HasConversationContext: priorMessages > 1,
 		Policy:                 policy,
 		PolicySet:              true,
@@ -188,7 +188,7 @@ func DecidePlannerRoute(ctx context.Context, input string) agent.PlannerDecision
 	if meta.GoalActive && features.work {
 		return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonGoalActive)
 	}
-	if meta.DeliveryProfile && features.work {
+	if meta.ClosedLoop && features.work {
 		return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonWorkRequest)
 	}
 	if features.work && features.ambiguous {

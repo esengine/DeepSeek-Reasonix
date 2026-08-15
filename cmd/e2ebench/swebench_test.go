@@ -133,12 +133,12 @@ func TestShellQuoteAllContainsHostileIssueText(t *testing.T) {
 }
 
 func TestSwebenchAgentArgsKeepTheControlArmClean(t *testing.T) {
-	got := swebenchAgentArgs("/tmp/m.json", "e2e", benchmarkProfileBaseline, "auto", ablation.Set{}, 60, "fix it")
+	got := swebenchAgentArgs("/tmp/m.json", "e2e", "auto", ablation.Set{}, 60, "fix it")
 	want := []string{"run", "--permission-mode=auto", "--metrics", "/tmp/m.json", "--model", "e2e", "--max-steps", "60", "fix it"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("control args = %v, want %v", got, want)
 	}
-	ablated := swebenchAgentArgs("/tmp/m.json", "", benchmarkProfileBaseline, "auto", ablation.New(ablation.Evidence), 0, "fix it")
+	ablated := swebenchAgentArgs("/tmp/m.json", "", "auto", ablation.New(ablation.Evidence), 0, "fix it")
 	if !reflect.DeepEqual(ablated, []string{"run", "--permission-mode=auto", "--metrics", "/tmp/m.json", "--ablate", "evidence", "fix it"}) {
 		t.Fatalf("ablated args = %v", ablated)
 	}
@@ -147,8 +147,8 @@ func TestSwebenchAgentArgsKeepTheControlArmClean(t *testing.T) {
 // The two postures must differ in exactly one argument. If anything else moved
 // between arms, the published delta would not isolate the permission gate.
 func TestPermissionPostureIsTheOnlyDifferenceBetweenArms(t *testing.T) {
-	a := swebenchAgentArgs("/m.json", "e2e", benchmarkProfileBaseline, "auto", ablation.Set{}, 60, "fix it")
-	b := swebenchAgentArgs("/m.json", "e2e", benchmarkProfileBaseline, "yolo", ablation.Set{}, 60, "fix it")
+	a := swebenchAgentArgs("/m.json", "e2e", "auto", ablation.Set{}, 60, "fix it")
+	b := swebenchAgentArgs("/m.json", "e2e", "yolo", ablation.Set{}, 60, "fix it")
 	if len(a) != len(b) {
 		t.Fatalf("arms differ in argument count: %v vs %v", a, b)
 	}

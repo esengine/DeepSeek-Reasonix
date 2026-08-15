@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/agentpreset"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/extension/uihub"
@@ -40,17 +41,17 @@ import (
 // Cwd roots the session's file tools and bash (built via builtin.Workspace).
 // Model, EffortOverride, and RuntimeProfile are optional session-local selectors
 // from ACP config options. MCPServers are the MCP servers the client asked the
-// agent to connect for this session. OnSessionRecovered is the service's
-// bookkeeping hook for automatic transcript recovery branches (see
-// sessionRecoveredHandler); factories must wire it into the controller they build.
+// agent to connect for this session. The path hooks keep service bookkeeping
+// aligned; factories must wire both into the controller they build.
 type SessionParams struct {
-	Cwd                string
-	MCPServers         []plugin.Spec
-	Sink               event.Sink
-	Model              string
-	EffortOverride     *string
-	RuntimeProfile     string
-	OnSessionRecovered func(control.SessionRecoveryInfo) error
+	Cwd                 string
+	MCPServers          []plugin.Spec
+	Sink                event.Sink
+	Model               string
+	EffortOverride      *string
+	RuntimeProfile      string
+	OnSessionRecovered  func(control.SessionRecoveryInfo) error
+	OnSessionTransition func(control.SessionTransitionInfo) error
 	// FileOverlay and Terminal are non-nil when the client advertised the
 	// matching capability at initialize: file tools then see unsaved editor
 	// buffers, and foreground bash can run in a client-owned terminal.
@@ -674,14 +675,14 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 	sink.bindCwd(cwd)
 	sink.bindExtensionSurface(s.extensionSurfaceSupported())
 	sessionParams := SessionParams{
-		Cwd:                cwd,
-		MCPServers:         mcpServers,
-		Sink:               sink,
-		Model:              cfgState.Model,
-		EffortOverride:     cloneStringPtr(cfgState.EffortOverride),
-		RuntimeProfile:     cfgState.RuntimeProfile,
-		OnSessionRecovered: s.sessionRecoveredHandler(id),
+		Cwd:            cwd,
+		MCPServers:     mcpServers,
+		Sink:           sink,
+		Model:          cfgState.Model,
+		EffortOverride: cloneStringPtr(cfgState.EffortOverride),
+		RuntimeProfile: cfgState.RuntimeProfile,
 	}
+	s.bindSessionPathHandlers(id, &sessionParams)
 	s.bindClientIO(&sessionParams, id)
 	ctrl, err := s.factory.NewSession(ctx, sessionParams)
 	if err != nil {
@@ -977,14 +978,14 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 	sink.bindCwd(cwd)
 	sink.bindExtensionSurface(s.extensionSurfaceSupported())
 	sessionParams := SessionParams{
-		Cwd:                cwd,
-		MCPServers:         mcpServers,
-		Sink:               sink,
-		Model:              cfgState.Model,
-		EffortOverride:     cloneStringPtr(cfgState.EffortOverride),
-		RuntimeProfile:     cfgState.RuntimeProfile,
-		OnSessionRecovered: s.sessionRecoveredHandler(id),
+		Cwd:            cwd,
+		MCPServers:     mcpServers,
+		Sink:           sink,
+		Model:          cfgState.Model,
+		EffortOverride: cloneStringPtr(cfgState.EffortOverride),
+		RuntimeProfile: cfgState.RuntimeProfile,
 	}
+	s.bindSessionPathHandlers(id, &sessionParams)
 	s.bindClientIO(&sessionParams, id)
 	ctrl, err := s.factory.NewSession(ctx, sessionParams)
 	if err != nil {
@@ -1139,7 +1140,16 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 	if text == "" {
 		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/prompt: empty prompt"}
 	}
-	text = s.resolveSlashPrompt(ctx, sess, text)
+	recovery := p.Action == control.FinalReadinessRecoveryAction
+	if p.Action != "" && !recovery {
+		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/prompt: unsupported action " + p.Action}
+	}
+	if prompt, ok := control.ParseFinalReadinessRecoveryCommand(text); ok {
+		recovery = true
+		text = prompt
+	} else {
+		text = s.resolveSlashPrompt(ctx, sess, text)
+	}
 
 	runCtx, cancel, ok := sess.begin(ctx)
 	if !ok {
@@ -1160,7 +1170,13 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 		s.finishTurn(ctx, sess)
 		cancel()
 	}()
-	runErr := drainACPInbox(runCtx, sess.ctrl, sess.ctrl.RunTurn(runCtx, text))
+	var runErr error
+	if recovery {
+		runErr = sess.ctrl.RunFinalReadinessRecovery(runCtx, text)
+	} else {
+		runErr = sess.ctrl.RunTurn(runCtx, text)
+	}
+	runErr = drainACPInbox(runCtx, sess.ctrl, runErr)
 
 	statusEvent := sess.status.finishTurn(
 		runErr,
@@ -1337,14 +1353,14 @@ func (s *service) reloadSessionExtensionsLocked(ctx context.Context, sess *acpSe
 		return nil, &RPCError{Code: ErrInternal, Message: sessionReloadExtensionsMethod + ": session controller does not support rebuild"}
 	}
 	rebuildParams := SessionParams{
-		Cwd:                cwd,
-		MCPServers:         mcpServers,
-		Sink:               sink,
-		Model:              model,
-		EffortOverride:     effortOverride,
-		RuntimeProfile:     runtimeProfile,
-		OnSessionRecovered: s.sessionRecoveredHandler(sess.id),
+		Cwd:            cwd,
+		MCPServers:     mcpServers,
+		Sink:           sink,
+		Model:          model,
+		EffortOverride: effortOverride,
+		RuntimeProfile: runtimeProfile,
 	}
+	s.bindSessionPathHandlers(sess.id, &rebuildParams)
 	// The rebuilt controller must keep the client-capability wiring (fs
 	// overlay, host terminal) — mirrors rebuildSessionLocked.
 	s.bindClientIO(&rebuildParams, sess.id)
@@ -1450,6 +1466,22 @@ func (s *service) sessionSetConfigOption(ctx context.Context, raw json.RawMessag
 	if sess == nil {
 		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/set_config_option: unknown session " + p.SessionID}
 	}
+	// Deprecated execution-mode options are no longer published, but
+	// one-version-old clients still send them. Accept, switch nothing, rebuild
+	// nothing, and answer success with a deprecation notice.
+	if id := normalizeConfigID(p.ConfigID); id == "work_mode" || id == "agent_preset" {
+		if err := validateDeprecatedModeValue(p.Value); err != nil {
+			return nil, &RPCError{Code: ErrInvalidParams, Message: "session/set_config_option: " + err.Error()}
+		}
+		cfgState, err := s.configStateForSession(ctx, sess)
+		if err != nil {
+			return nil, &RPCError{Code: ErrInternal, Message: "session/set_config_option: " + err.Error()}
+		}
+		return SetSessionConfigOptionResult{
+			ConfigOptions:    cfgState.ConfigOptions,
+			DeprecatedNotice: agentpreset.DeprecatedNotice,
+		}, nil
+	}
 	cfgState, err := s.configStateForSession(ctx, sess)
 	if err != nil {
 		return nil, &RPCError{Code: ErrInternal, Message: "session/set_config_option: " + err.Error()}
@@ -1468,8 +1500,6 @@ func (s *service) sessionSetConfigOption(ctx context.Context, raw json.RawMessag
 		next, err = s.switchSessionModel(ctx, sess, p.Value)
 	case "thought_level":
 		next, err = s.switchSessionEffort(ctx, sess, p.Value)
-	case "work_mode", "agent_preset":
-		next, err = s.switchSessionRuntimeProfile(ctx, sess, p.Value)
 	case "tool_approval":
 		next, err = s.switchSessionToolApproval(ctx, sess, p.Value)
 	default:
@@ -1510,7 +1540,6 @@ type sessionConfigDelta struct {
 	axis           string
 	model          string
 	effortOverride *string
-	runtimeProfile string
 }
 
 func (d sessionConfigDelta) clone() sessionConfigDelta {
@@ -1574,8 +1603,6 @@ func (d sessionConfigDelta) applyTo(p *SessionConfigStateParams) {
 		p.Model = d.model
 	case "thought_level":
 		p.EffortOverride = cloneStringPtr(d.effortOverride)
-	case "work_mode", "agent_preset":
-		p.RuntimeProfile = d.runtimeProfile
 	}
 }
 
@@ -1609,74 +1636,6 @@ func (s *service) switchSessionEffort(ctx context.Context, sess *acpSession, eff
 	return s.switchSessionConfig(ctx, sess, deltas)
 }
 
-func (s *service) switchSessionRuntimeProfile(ctx context.Context, sess *acpSession, profile string) (SessionConfigState, error) {
-	// Role settings switch in place without rebuilding the controller when
-	// the session is idle. Busy sessions return an explicit error (no silent
-	// queue). TryLock so a concurrent model/effort rebuild cannot deadlock us.
-	if !sess.stateChangeMu.TryLock() {
-		return SessionConfigState{}, sessionConfigActiveWorkError("session is busy; retry when idle")
-	}
-	defer sess.stateChangeMu.Unlock()
-	sess.mu.Lock()
-	if sess.deleted {
-		sess.mu.Unlock()
-		return SessionConfigState{}, &RPCError{Code: ErrInvalidRequest, Message: "session/set_config_option: session is deleted"}
-	}
-	status := sess.ctrl.RuntimeStatus()
-	if status.PendingPrompt {
-		sess.mu.Unlock()
-		return SessionConfigState{}, sessionConfigActiveWorkError("answer pending prompts before switching execution setting")
-	}
-	if sess.running || status.Running {
-		sess.mu.Unlock()
-		return SessionConfigState{}, sessionConfigActiveWorkError("finish or cancel the active turn before switching execution setting")
-	}
-	if status.BackgroundJobs > 0 {
-		sess.mu.Unlock()
-		return SessionConfigState{}, sessionConfigActiveWorkError("stop background jobs before switching execution setting")
-	}
-	if sess.maintenanceDone != nil {
-		sess.mu.Unlock()
-		return SessionConfigState{}, sessionConfigActiveWorkError("session is busy; retry when idle")
-	}
-	ctrl := sess.ctrl
-	sess.mu.Unlock()
-	if ctrl != nil {
-		ctrl.SetAgentPreset(profile)
-	}
-	// Dual-write session runtime profile label for config option responses.
-	var normalized string
-	switch strings.ToLower(strings.TrimSpace(profile)) {
-	case "light", "economy", "eco", "lite":
-		normalized = "economy"
-	case "delivery", "deliver", "quality":
-		normalized = "delivery"
-	default:
-		normalized = "balanced"
-	}
-	sess.mu.Lock()
-	sess.runtimeProfile = normalized
-	// Keep status planner mode aligned without a controller rebuild.
-	if isLightRuntimeProfile(normalized) {
-		sess.runtimeState.PlannerMode = "off"
-	} else {
-		sess.runtimeState.PlannerMode = "on"
-	}
-	sess.mu.Unlock()
-	sess.saveMetaIfPresent()
-	cfgState, err := s.configStateForSession(ctx, sess)
-	if err != nil {
-		return SessionConfigState{}, &RPCError{Code: ErrInternal, Message: "session/set_config_option: " + err.Error()}
-	}
-	sess.sink.send(configOptionUpdate{SessionUpdate: "config_option_update", ConfigOptions: cfgState.ConfigOptions})
-	return cfgState, nil
-}
-
-// switchSessionConfig resolves and applies one explicit config request without
-// letting its full config snapshot roll back another axis. Resolution must be
-// repeated after stateChangeMu is acquired: a different-axis rebuild may finish
-// while this request is resolving or waiting for the lock, making the earlier
-// baseline stale even though this request's own delta is still current.
 func (s *service) switchSessionConfig(ctx context.Context, sess *acpSession, deltas []sessionConfigDelta) (SessionConfigState, error) {
 	resolve := func() (SessionConfigState, error) {
 		cfgState, err := s.resolveSessionConfigDeltas(ctx, sess, deltas)
@@ -1856,14 +1815,14 @@ func (s *service) rebuildSessionLocked(ctx context.Context, sess *acpSession, cf
 	}
 
 	rebuildParams := SessionParams{
-		Cwd:                cwd,
-		MCPServers:         mcpServers,
-		Sink:               sink,
-		Model:              cfgState.Model,
-		EffortOverride:     cloneStringPtr(cfgState.EffortOverride),
-		RuntimeProfile:     cfgState.RuntimeProfile,
-		OnSessionRecovered: s.sessionRecoveredHandler(sess.id),
+		Cwd:            cwd,
+		MCPServers:     mcpServers,
+		Sink:           sink,
+		Model:          cfgState.Model,
+		EffortOverride: cloneStringPtr(cfgState.EffortOverride),
+		RuntimeProfile: cfgState.RuntimeProfile,
 	}
+	s.bindSessionPathHandlers(sess.id, &rebuildParams)
 	// The rebuilt controller must keep the client-capability wiring (fs
 	// overlay, host terminal) a model/effort switch would otherwise drop.
 	s.bindClientIO(&rebuildParams, sess.id)
@@ -2346,6 +2305,18 @@ func findConfigOption(options []SessionConfigOption, id string) (SessionConfigOp
 		}
 	}
 	return SessionConfigOption{}, false
+}
+
+// validateDeprecatedModeValue accepts the historical execution-mode vocabulary
+// so one-version-old clients get a precise error for garbage values while
+// well-formed values succeed as no-ops.
+func validateDeprecatedModeValue(value string) error {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "light", "economy", "eco", "lite",
+		"balanced", "full", "delivery", "deliver", "quality":
+		return nil
+	}
+	return fmt.Errorf("invalid value %q for deprecated execution setting (accepted: light, balanced, delivery; legacy: economy, full)", value)
 }
 
 func normalizeConfigID(id string) string {

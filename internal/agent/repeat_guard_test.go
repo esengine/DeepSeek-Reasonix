@@ -95,7 +95,7 @@ func TestRepeatGuardBlocksRepeatedSuccessfulBashFileWrite(t *testing.T) {
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
 
-	if err := a.Run(context.Background(), "update the prompt file"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "update the prompt file"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := atomic.LoadInt32(&calls); got != 2 {
@@ -124,7 +124,7 @@ func TestRepeatGuardAllowsRepeatedNonWritingBashCommand(t *testing.T) {
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
 
-	if err := a.Run(context.Background(), "verify repeatedly"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "verify repeatedly"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := atomic.LoadInt32(&calls); got != 3 {
@@ -232,7 +232,7 @@ func TestRepeatGuardAllowsTwoRepeatedWriterSuccesses(t *testing.T) {
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
 
-	if err := a.Run(context.Background(), "write twice"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "write twice"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := atomic.LoadInt32(&calls); got != 2 {
@@ -263,7 +263,7 @@ func TestRepeatGuardBlocksStaleEditLoopAcrossSuccessfulReads(t *testing.T) {
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
 
-	if err := a.Run(context.Background(), "fix prompt.txt"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "fix prompt.txt"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := atomic.LoadInt32(&editCalls); got != 2 {

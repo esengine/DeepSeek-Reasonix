@@ -439,7 +439,7 @@ auth_mode = "none"
 原生 CLI 更新器始终安装最新的严格 `vX.Y.Z` 正式版。1.x 期间仍解析旧渠道配置与
 参数，但统一指向正式版，并在后续保存配置时省略这些字段。
 
-`[sandbox]` 是权限策略之下的强制执行层。file writer 默认限制在 workspace root、Reasonix 用户配置目录和 `allow_write`；`forbid_read` 可阻止读取敏感路径。macOS 使用 Seatbelt，Linux 使用 bubblewrap；若声明 enforce 但平台 backend 不可用，Bash 应拒绝执行而不是静默降级。Windows 当前没有 OS 级 Bash sandbox，file tool 的路径限制仍然生效。
+`[sandbox]` 是权限策略之下的强制执行层。权限策略和沙箱边界是两层机制。交互会话可以用「扩展写入范围」审批（仅本次 / 本会话 / 写入项目 `reasonix.toml` / 拒绝）按需扩大可写根；文件工具会自动申请目标父目录，Bash 必须声明 `additional_write_dirs` 和 `justification`。无头 `reasonix run` 缺少目录时 fail closed，请使用 `--add-dir` 或 `[sandbox].allow_write`。`${HOME}` 可在强警告后批准；文件系统根和 Reasonix 会话/状态目录不能通过动态流程批准。file writer 默认限制在 workspace root、Reasonix 用户配置目录和 `allow_write`；`forbid_read` 可阻止读取敏感路径。macOS 使用 Seatbelt，Linux 使用 bubblewrap；若声明 enforce 但平台 backend 不可用，Bash 应拒绝执行而不是静默降级。Windows 当前没有 OS 级 Bash sandbox，file tool 的路径限制仍然生效。
 
 `[serve]` 控制 `reasonix serve` 的 browser frontend。默认 `auth_mode = "none"` 仅适合 loopback；暴露到其他机器时必须使用 token 或 password。只有位于可信 reverse proxy 后方时才能启用 `behind_proxy`。
 

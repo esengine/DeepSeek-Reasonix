@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"reasonix/internal/evidence"
+	"reasonix/internal/instruction"
+	"reasonix/internal/taskcontract"
 )
 
 func TestBuildShadowContractReplaysTheTurn(t *testing.T) {
@@ -51,5 +53,23 @@ func TestBuildShadowContractIncompleteTurn(t *testing.T) {
 	}
 	if audit.Verdict != "continue" {
 		t.Fatalf("verdict = %q, want continue", audit.Verdict)
+	}
+}
+
+func TestBuildShadowContractIncludesProjectChecksInCompletionEvidence(t *testing.T) {
+	check := instruction.VerifyCheck{Command: "go test ./...", SourcePath: "AGENTS.md", Line: 3}
+	missing := buildShadowContract("fix the parser", []evidence.Receipt{
+		{ToolName: "edit_file", Mutation: true, Write: true, Success: true, Paths: []string{"parser.go"}},
+	}, nil, check)
+	if len(missing.Checks) != 2 || missing.Checks[1].Status != taskcontract.Pending {
+		t.Fatalf("missing project-check contract = %+v, want pending project check", missing.Checks)
+	}
+
+	passed := buildShadowContract("fix the parser", []evidence.Receipt{
+		{ToolName: "edit_file", Mutation: true, Write: true, Success: true, Paths: []string{"parser.go"}},
+		{ToolName: "bash", Command: "go test ./...", Success: true},
+	}, nil, check)
+	if passed.Checks[1].Status != taskcontract.Satisfied {
+		t.Fatalf("passed project-check contract = %+v, want satisfied project check", passed.Checks)
 	}
 }

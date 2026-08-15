@@ -20,7 +20,7 @@ import (
 )
 
 var setupSubagentCommand = func(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, workspaceRoot string) (*control.Controller, error) {
-	return setupProfile(ctx, modelName, maxStepsOverride, requireKey, sink, "", workspaceRoot)
+	return setupProfile(ctx, modelName, maxStepsOverride, requireKey, sink, workspaceRoot)
 }
 
 const subagentUsageText = `usage:

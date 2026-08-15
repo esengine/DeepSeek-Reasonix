@@ -5,8 +5,10 @@
 //   create no Markdown/ToolCard subtrees),
 // - prepending an older-history page keeps the reading position (key-anchored
 //   compensation),
-// - while pinned, streaming growth re-pins to the tail without remounting
-//   history rows,
+// - the active turn streams in the pinned live region outside the list:
+//   token growth never touches the virtual list, reasoning streams as plain
+//   text, and completion materializes the turn back into the list,
+// - jump-bottom outranks an in-flight recovery anchor restore,
 // - mounted history rows trigger lazy full-content resolution,
 // - the rewind signal scrolls to the rewound-to question's virtual row.
 
@@ -111,7 +113,10 @@ function firstTextNode(root: Node): Text | null {
   }
 }
 
-// ── Tail streaming pin + history row isolation ────────────────────────────────
+// ── Streaming content lives outside the virtual list ─────────────────────────
+// The active turn renders in the pinned live region; the virtual list holds
+// only static rows. Token growth must not touch the list, and completion must
+// materialize the turn back into it.
 {
   const harness = await createTranscriptHarness({ viewportHeight: 200, rowHeight: 100 });
   try {
@@ -120,22 +125,141 @@ function firstTextNode(root: Node): Text | null {
       { kind: "user", id: "u-live", text: "stream" },
       { kind: "assistant", id: "live-1", text: "", reasoning: "", streaming: true },
     ];
-    const live: LiveStream = { id: "live-1", text: "token", reasoning: "", reasoningComplete: true };
+    const live: LiveStream = { id: "live-1", text: "token", reasoning: "chain", reasoningComplete: false };
     await harness.render(items, { running: true, live });
+    await harness.settle();
     const el = harness.scrollElement();
-    const historyRow = Array.from(harness.container.querySelectorAll<HTMLElement>(".transcript__row"))
-      .find((row) => row.dataset.rowKey !== "a:live-1") ?? null;
+    const list = () => harness.container.querySelector('[data-testid="virtuoso-item-list"]');
+    const liveRegion = () => harness.container.querySelector<HTMLElement>(".transcript__live-region");
+    ok(liveRegion() != null, "streaming mounts the live region outside the virtual list");
+    ok(liveRegion()?.textContent?.includes("token") ?? false, "the live answer streams inside the live region");
+    ok(!(list()?.textContent?.includes("token") ?? true), "streaming content stays out of the virtual list");
+    ok(liveRegion()?.querySelector(".reasoning__stream-text")?.textContent?.includes("chain") ?? false, "streaming reasoning renders as append-only plain text");
+    ok(liveRegion()?.querySelector(".reasoning__stream-text")?.querySelector(".md") === null, "streaming reasoning mounts no Markdown subtree");
 
-    const beforeDistance = el.scrollHeight - el.clientHeight - el.scrollTop;
-    ok(Math.abs(beforeDistance) <= 1, "the live transcript starts pinned to the tail");
-    await harness.render(items, { running: true, live: { ...live, text: "token token token token token" } });
+    const historyRow = harness.container.querySelector<HTMLElement>("[data-testid='virtuoso-item-list'] .transcript__row");
+    const historyRowKey = historyRow?.dataset.rowKey;
+    await harness.render(items, { running: true, live: { ...live, text: "token token token token token", reasoning: "chain chain" } });
     await harness.flush();
-    const distance = el.scrollHeight - el.clientHeight - el.scrollTop;
-    ok(Math.abs(distance) <= 1, `streaming update re-pins to the tail (bottom distance ${distance})`);
-    const historyRowAfter = historyRow?.dataset.rowKey
-      ? Array.from(harness.container.querySelectorAll<HTMLElement>(".transcript__row")).find((row) => row.dataset.rowKey === historyRow.dataset.rowKey) ?? null
+    const historyRowAfter = historyRowKey
+      ? harness.container.querySelector(`[data-testid='virtuoso-item-list'] .transcript__row[data-row-key="${historyRowKey}"]`)
       : null;
-    ok(historyRow !== null && historyRow === historyRowAfter, "streaming tokens never remount history rows");
+    ok(historyRow != null && historyRowKey != null && historyRow === historyRowAfter, "streaming tokens never remount history rows");
+    ok(liveRegion()?.textContent?.includes("token token token token token") ?? false, "the live region follows token growth");
+
+    await harness.render(
+      [
+        ...turns(10),
+        { kind: "user", id: "u-live", text: "stream" },
+        { kind: "assistant", id: "live-1", text: "token token token token token", reasoning: "chain chain", streaming: false, reasoningComplete: true },
+      ],
+      { running: false },
+    );
+    await harness.waitFor(
+      () => harness.container.querySelector(".transcript__live-region") === null,
+      "the live region to unmount after completion",
+    );
+    let materialized = false;
+    try {
+      // jsdom fires no scroll events for programmatic scrolls, so nudge the
+      // scroller to let Virtuoso move its mounted window to the settled tail.
+      for (let i = 0; i < 12 && !materialized; i += 1) {
+        dispatchScroll(el);
+        await harness.flush();
+        materialized = list()?.textContent?.includes("token token token token token") ?? false;
+      }
+    } catch {
+      materialized = false;
+    }
+    ok(materialized, "completion materializes the answer into the virtual list");
+    ok(harness.container.querySelector(".reasoning__stream-text") === null, "completed reasoning leaves the plain-text view");
+  } finally {
+    await harness.unmount();
+    await harness.close();
+  }
+}
+
+// ── The live region shows a status row before the first stream item ──────────
+{
+  const harness = await createTranscriptHarness({ viewportHeight: 200, rowHeight: 100 });
+  try {
+    await harness.render([{ kind: "user", id: "u-pending", text: "waiting" }], { running: true });
+    const region = harness.container.querySelector<HTMLElement>(".transcript__live-region");
+    ok(region != null, "a fresh turn mounts the live region before the first item");
+    ok(region?.querySelector(".transcript__live-status") != null, "a fresh turn shows the working status row");
+  } finally {
+    await harness.unmount();
+    await harness.close();
+  }
+}
+
+// ── Expanded reasoning: plain-text stream swaps to formatted Markdown once ───
+{
+  const harness = await createTranscriptHarness({ viewportHeight: 200, rowHeight: 100, reasoningDisplayMode: "expanded" });
+  try {
+    const items: Item[] = [
+      { kind: "user", id: "u-exp", text: "think" },
+      { kind: "assistant", id: "exp-1", text: "", reasoning: "", streaming: true },
+    ];
+    const live: LiveStream = { id: "exp-1", text: "", reasoning: "trace **bold**", reasoningComplete: false };
+    await harness.render(items, { running: true, live });
+    await harness.settle();
+    const streamText = harness.container.querySelector(".reasoning__stream-text");
+    ok(streamText?.textContent?.includes("**bold**") ?? false, "expanded streaming reasoning stays unformatted plain text");
+    await harness.render(
+      [
+        { kind: "user", id: "u-exp", text: "think" },
+        { kind: "assistant", id: "exp-1", text: "", reasoning: "trace **bold**", streaming: false, reasoningComplete: true },
+      ],
+      { running: false },
+    );
+    await harness.waitFor(
+      () => harness.container.querySelector(".reasoning__body .md strong") != null,
+      "completed expanded reasoning to render formatted Markdown",
+    );
+    ok(
+      harness.container.querySelector(".reasoning__body .md strong")?.textContent === "bold",
+      "completed expanded reasoning swaps to formatted Markdown",
+    );
+  } finally {
+    await harness.unmount();
+    await harness.close();
+  }
+}
+
+// ── Jump-bottom wins over an in-flight recovery restore while streaming ──────
+{
+  const harness = await createTranscriptHarness({ viewportHeight: 200, rowHeight: 100 });
+  try {
+    const items: Item[] = [
+      ...turns(20),
+      { kind: "user", id: "u-live", text: "stream" },
+      { kind: "assistant", id: "live-1", text: "", reasoning: "", streaming: true },
+    ];
+    const live: LiveStream = { id: "live-1", text: "token", reasoning: "", reasoningComplete: true };
+    await harness.render(items, { running: true, live, tabId: "jump-tab", historyLayoutRevision: 0 });
+    await harness.settle();
+    const el = harness.scrollElement();
+    el.scrollTop = 0;
+    el.dispatchEvent(new WheelEvent("wheel", { deltaY: -40, bubbles: true }));
+    dispatchScroll(el);
+    await harness.flush();
+
+    // A lazy-content invalidation lands right before the click: the reset and
+    // its anchor restore are still in flight while the user jumps.
+    await harness.render(items, { running: true, live, tabId: "jump-tab", historyLayoutRevision: 1 });
+    const jump = harness.container.querySelector<HTMLButtonElement>(".transcript__jump-bottom");
+    ok(jump != null, "jump-bottom is available while scrolled up during streaming");
+    jump?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await harness.settle();
+    await harness.waitFor(
+      () => el.scrollHeight - el.clientHeight - el.scrollTop <= 1,
+      "the transcript to reach the tail",
+    );
+    ok(el.dataset.scrollMode === "tail-follow", "jump-bottom restores tail-follow ownership");
+    await harness.settle();
+    const distance = el.scrollHeight - el.clientHeight - el.scrollTop;
+    ok(distance <= 1, `the tail holds after the recovery restore settles (distance ${distance})`);
   } finally {
     await harness.unmount();
     await harness.close();

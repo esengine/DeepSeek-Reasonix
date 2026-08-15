@@ -111,6 +111,46 @@ func (k *SessionLeaseKeeper) HandleSessionRecovered(info SessionRecoveryInfo) er
 	return nil
 }
 
+// HandleSessionTransition acquires and binds an intentional path-change target
+// before the controller swaps Sessions. Acquisition is failure-atomic: the old
+// lease remains held unless the target lease and candidate authority are ready.
+func (k *SessionLeaseKeeper) HandleSessionTransition(info SessionTransitionInfo) error {
+	targetPath := strings.TrimSpace(info.TargetPath)
+	if k == nil || targetPath == "" {
+		return nil
+	}
+	k.mu.Lock()
+	canonical := agent.CanonicalSessionPath(targetPath)
+	if k.lease != nil && k.lease.Path() == canonical {
+		err := info.BindWriteAuthority(k.lease)
+		k.mu.Unlock()
+		return err
+	}
+	lease, err := agent.TryAcquireSessionLease(targetPath)
+	if err == nil {
+		err = info.BindWriteAuthority(lease)
+	}
+	if err != nil {
+		if lease != nil {
+			lease.Release()
+		}
+		k.mu.Unlock()
+		if errors.Is(err, agent.ErrSessionLeaseHeld) {
+			return fmt.Errorf("bind target session: %s; %s",
+				SessionInUseMessage(err), SessionLeaseCloseHint)
+		}
+		slog.Error("control: bind target session lease", "reason", info.Reason, "err", err)
+		return fmt.Errorf("bind target session: unable to secure transcript")
+	}
+	old := k.lease
+	k.lease = lease
+	k.mu.Unlock()
+	if old != nil {
+		old.Release()
+	}
+	return nil
+}
+
 // Release drops the held lease, if any. Idempotent; call it on frontend
 // teardown after the controller has finished its final writes.
 func (k *SessionLeaseKeeper) Release() {
@@ -178,6 +218,7 @@ func (k *SessionLeaseKeeper) BindControllerAuthority(c *Controller) error {
 		return err
 	}
 	k.controller = c
+	c.SetOnSessionTransition(k.HandleSessionTransition)
 	return nil
 }
 
@@ -187,6 +228,7 @@ func (k *SessionLeaseKeeper) releaseLocked() {
 		k.lease = nil
 	}
 	if k.controller != nil {
+		k.controller.SetOnSessionTransition(nil)
 		_ = k.controller.BindSessionWriteAuthority(nil)
 		k.controller = nil
 	}

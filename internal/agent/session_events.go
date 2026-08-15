@@ -23,9 +23,8 @@ const (
 	sessionEventTypeReplace   = "replace"
 	sessionEventTypeAppend    = "append"
 	// sessionEventReplayMaxBytes caps decoder input before encoding/json can
-	// allocate an arbitrarily large record. Session logs normally compact far
-	// below this threshold; the generous ceiling still accommodates histories
-	// with embedded images while keeping corrupt logs from exhausting the host.
+	// allocate an arbitrarily large record. The ceiling still accommodates
+	// image-bearing histories while keeping corrupt logs from exhausting RAM.
 	sessionEventReplayMaxBytes = int64(128 << 20)
 	// A byte limit alone is insufficient: a compact JSON array can expand into
 	// a much larger graph of messages and event records after decoding.
@@ -835,6 +834,7 @@ func writeSessionEventIndex(path string, msgs []provider.Message, digest [sha256
 	if indexPath == "" {
 		return nil
 	}
+	fileutil.Crash("event-index", indexPath)
 	logInfo, err := os.Stat(store.SessionEventLog(path))
 	if err != nil {
 		if os.IsNotExist(err) {

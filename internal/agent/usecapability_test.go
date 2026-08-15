@@ -24,6 +24,7 @@ import (
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
 	"reasonix/internal/skill"
+	"reasonix/internal/taskpolicy"
 	"reasonix/internal/tool"
 )
 
@@ -357,7 +358,7 @@ func TestPlannerFirstOnDemandMCPCallPreservesImages(t *testing.T) {
 	if host.HasClient("image") {
 		t.Fatal("test requires the MCP server to start on first tool dispatch")
 	}
-	if err := planner.Run(ctx, "take a screenshot"); err != nil {
+	if err := planner.Run(withNoClosedLoop(ctx), "take a screenshot"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := toolCalls.Load(); got != 1 {
@@ -924,12 +925,12 @@ func TestCompletedProxyCallCountsOnAgentSkipExecutePath(t *testing.T) {
 		t.Fatalf("completed call audit = %d/%d, want 1/0", snap.MCPCall, snap.MCPCallFailures)
 	}
 }
-
 func TestCapabilityGateRecoveryIsAudited(t *testing.T) {
 	reg := tool.NewRegistry()
 	audit := &capability.Audit{}
 	a := New(&scriptedProvider{name: "p"}, reg, NewSession("sys"),
-		Options{DeliveryProfile: true, CapabilityLedger: capability.NewLedger(), CapabilityAudit: audit}, event.Discard)
+		Options{CapabilityLedger: capability.NewLedger(), CapabilityAudit: audit}, event.Discard)
+	a.turn = turnRuntime{policySet: true, policy: closedLoopTurnPolicy(taskpolicy.ReviewForced)}
 	a.SeedCapabilityRoute(capability.RouteDecision{Candidates: []capability.RouteCandidate{
 		{Entry: capability.Entry{ID: "skill:review"}, Policy: capability.AutoUseRequire},
 	}})
@@ -1089,14 +1090,13 @@ func TestPlanModeBlocksAuthorizedDestructiveMCPThroughUseCapability(t *testing.T
 func TestCapabilityGateAppliesToReadOnlyTasks(t *testing.T) {
 	reg := tool.NewRegistry()
 	a := New(&scriptedProvider{name: "p"}, reg, NewSession("sys"),
-		Options{DeliveryProfile: true, CapabilityLedger: capability.NewLedger()}, event.Discard)
+		Options{CapabilityLedger: capability.NewLedger()}, event.Discard)
+	a.turn = turnRuntime{policySet: true, policy: closedLoopTurnPolicy(taskpolicy.ReviewForced)}
 	a.SeedCapabilityRoute(capability.RouteDecision{Candidates: []capability.RouteCandidate{
 		{Entry: capability.Entry{ID: "skill:review"}, Policy: capability.AutoUseRequire},
 	}})
-	// Only ordinary reads happened — no writer. The require gate must still hold.
 	a.task.ledger.Record(evidence.ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"a.go"}`), true, true))
-	check := a.finalReadinessCheckFor()
-	if !strings.Contains(check.reason, "required capabilities") {
+	if check := a.finalReadinessCheckFor(); !strings.Contains(check.reason, "required capabilities") {
 		t.Fatalf("read-only answer must not skip the require gate; reason = %q", check.reason)
 	}
 }

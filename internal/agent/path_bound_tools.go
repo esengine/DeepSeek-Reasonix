@@ -78,6 +78,13 @@ func (w pathBoundWriter) PlanModeSafe() bool {
 	return false
 }
 
+func (w pathBoundWriter) DeclareWriteAccess(args json.RawMessage) (tool.WriteAccessDeclaration, error) {
+	if d, ok := w.inner.(tool.WriteAccessDeclarer); ok {
+		return d.DeclareWriteAccess(args)
+	}
+	return tool.WriteAccessDeclaration{}, nil
+}
+
 func (w pathBoundWriter) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	paths, err := extractWritePathsFromArgs(w.inner.Name(), w.workDir, args)
 	if err != nil {

@@ -68,7 +68,7 @@ func TestCoordinatorHandsPlanToExecutor(t *testing.T) {
 	plannerSess := NewSession("planner-sys")
 	coord := NewCoordinator(planner, plannerSess, nil, nil, Options{}, executor, 0, event.Discard, nil)
 
-	if err := coord.Run(context.Background(), "fix the bug"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "fix the bug"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -113,7 +113,7 @@ func TestCoordinatorBindsPlannerApprovalRequestBeforeExecutor(t *testing.T) {
 	gate := &coordinatorApprovalGate{allow: false}
 	coord.SetPlannerPlanApprover(gate)
 
-	if err := coord.Run(context.Background(), "fix the bug"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "fix the bug"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if gate.calls != 1 {
@@ -139,7 +139,7 @@ func TestCoordinatorBindsStructuredPlannerApprovalMarker(t *testing.T) {
 	gate := &coordinatorApprovalGate{allow: false}
 	coord.SetPlannerPlanApprover(gate)
 
-	if err := coord.Run(context.Background(), "fix the bug"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "fix the bug"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if gate.calls != 1 {
@@ -165,7 +165,7 @@ func TestCoordinatorDoesNotTrustPlannerClaimedUserApproval(t *testing.T) {
 	gate := &coordinatorApprovalGate{allow: false}
 	coord.SetPlannerPlanApprover(gate)
 
-	if err := coord.Run(context.Background(), "fix the bug"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "fix the bug"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if gate.calls != 1 {
@@ -191,7 +191,7 @@ func TestCoordinatorRunsExecutorAfterPlannerApproval(t *testing.T) {
 	gate := &coordinatorApprovalGate{allow: true}
 	coord.SetPlannerPlanApprover(gate)
 
-	if err := coord.Run(context.Background(), "fix the bug"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "fix the bug"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if gate.calls != 1 {
@@ -233,7 +233,7 @@ func TestCoordinatorSkipsPlannerForTrivialTurn(t *testing.T) {
 	plannerSess := NewSession("planner-sys")
 	coord := NewCoordinator(planner, plannerSess, nil, nil, Options{}, executor, 0, event.Discard, func(context.Context, string) bool { return false })
 
-	if err := coord.Run(context.Background(), "what does this function do?"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "what does this function do?"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -275,10 +275,10 @@ func TestCoordinatorStructuredPolicyUsesStableDepthMetadata(t *testing.T) {
 		executor, 0, event.Discard, policy,
 	)
 
-	if err := coord.Run(context.Background(), "light task"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "light task"); err != nil {
 		t.Fatalf("light Run: %v", err)
 	}
-	if err := coord.Run(context.Background(), "full task"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "full task"); err != nil {
 		t.Fatalf("full Run: %v", err)
 	}
 
@@ -333,7 +333,7 @@ func TestCoordinatorPlanForApprovalDoesNotDependOnPlannerMarker(t *testing.T) {
 	approval := &coordinatorApprovalGate{allow: false}
 	coord.SetPlannerPlanApprover(approval)
 
-	if err := coord.Run(context.Background(), "plan auth migration first"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "plan auth migration first"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if approval.calls != 1 {
@@ -366,7 +366,7 @@ func TestCoordinatorPlanForApprovalHandsOffAfterApproval(t *testing.T) {
 
 	// Conversational plan request: avoid mutation/security wording so elevated
 	// delivery readiness does not arm on the planner/approval handoff itself.
-	if err := coord.Run(context.Background(), "outline steps for the feature, then wait for my approval"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "outline steps for the feature, then wait for my approval"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if approval.calls != 1 {
@@ -399,7 +399,7 @@ func TestCoordinatorHeadlessPlanForApprovalPersistsForContinuation(t *testing.T)
 		executor, 0, sink, policy,
 	)
 
-	if err := coord.Run(context.Background(), "plan auth migration first"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "plan auth migration first"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if len(exec.requests) != 0 {
@@ -432,7 +432,7 @@ func TestCoordinatorPlanOnlyDoesNotRunExecutor(t *testing.T) {
 	approval := &coordinatorApprovalGate{allow: true}
 	coord.SetPlannerPlanApprover(approval)
 
-	if err := coord.Run(context.Background(), "只规划认证迁移，不要执行"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "只规划认证迁移，不要执行"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if approval.calls != 0 {
@@ -468,14 +468,14 @@ func TestCoordinatorPlanOnlyContinuesWithExecutorOnNextTurn(t *testing.T) {
 		executor, 0, event.Discard, policy,
 	)
 
-	if err := coord.Run(context.Background(), "只规划认证迁移，不要执行"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "只规划认证迁移，不要执行"); err != nil {
 		t.Fatalf("plan-only Run: %v", err)
 	}
 	if got := len(exec.requests); got != 0 {
 		t.Fatalf("executor requests after plan-only turn = %d, want none", got)
 	}
 
-	if err := coord.Run(context.Background(), "执行"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "执行"); err != nil {
 		t.Fatalf("continuation Run: %v", err)
 	}
 	if got := len(exec.requests); got != 1 {
@@ -540,7 +540,7 @@ func TestCoordinatorPlannerFailurePreservesExecutionBoundary(t *testing.T) {
 				executor, 0, event.Discard, policy,
 			)
 
-			err := coord.Run(context.Background(), tc.input)
+			err := coord.Run(withNoClosedLoop(context.Background()), tc.input)
 			if err == nil || !strings.Contains(err.Error(), "planner:") {
 				t.Fatalf("Run = %v, want planner failure", err)
 			}
@@ -592,7 +592,7 @@ func TestCoordinatorPlannerUsesReadOnlyResearchTools(t *testing.T) {
 	plannerSess := NewSession(PlannerPromptWithContext("Rule: keep changes narrow."))
 	coord := NewCoordinator(planner, plannerSess, nil, PlannerToolRegistry(parentReg), Options{MaxSteps: 4}, executor, 0, event.Discard, nil)
 
-	if err := coord.Run(context.Background(), "fix the bug"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "fix the bug"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -630,7 +630,7 @@ func TestCoordinatorSetReasoningLanguageClearsPlannerAgent(t *testing.T) {
 	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, tool.NewRegistry(), Options{ReasoningLanguage: "zh"}, executor, 0, event.Discard, nil)
 	coord.SetReasoningLanguage("auto")
 
-	if err := coord.Run(context.Background(), "plan a change"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "plan a change"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -662,7 +662,7 @@ func TestCoordinatorPlannerMaxStepsUsesExplicitRuntimeKey(t *testing.T) {
 		MaxStepsKey: "planner max_steps",
 	}, executor, 0, sink, nil)
 
-	err := coord.Run(context.Background(), "plan a change")
+	err := coord.Run(withNoClosedLoop(context.Background()), "plan a change")
 	if err != nil {
 		t.Fatalf("Run should fall back to the executor when the planner cannot finalize: %v", err)
 	}
@@ -716,7 +716,7 @@ func TestCoordinatorPlannerMaxStepsZeroIsUnlimited(t *testing.T) {
 		MaxStepsKey: "planner max_steps",
 	}, executor, 0, event.Discard, nil)
 
-	if err := coord.Run(context.Background(), "plan a change"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "plan a change"); err != nil {
 		t.Fatalf("Run with planner max steps 0 should not pause: %v", err)
 	}
 	if got := len(planner.requests); got != 3 {
@@ -754,7 +754,7 @@ func TestCoordinatorNudgesExecutorThatAnswersWithoutActing(t *testing.T) {
 	executor := New(exec, execReg, NewSession("exec-sys"), Options{}, event.Discard)
 	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, event.Discard, nil)
 
-	if err := coord.Run(context.Background(), "install the skill"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "install the skill"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := len(exec.requests); got != 3 {
@@ -795,7 +795,7 @@ func TestCoordinatorAllowsGuidanceOnlyExecutorHandoff(t *testing.T) {
 	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)
 	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, event.Discard, nil)
 
-	if err := coord.Run(context.Background(), "I just installed EqualizerAPO, now what?"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "I just installed EqualizerAPO, now what?"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := len(exec.requests); got != 1 {
@@ -821,7 +821,7 @@ func TestCoordinatorAllowsGuidanceOnlyPlanWithExecutorToolContext(t *testing.T) 
 	executor := New(exec, execReg, NewSession("exec-sys"), Options{}, event.Discard)
 	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, event.Discard, nil)
 
-	if err := coord.Run(context.Background(), "Please advise on the manual audio check."); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "Please advise on the manual audio check."); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := len(exec.requests); got != 1 {
@@ -854,7 +854,7 @@ func TestCoordinatorNudgesWorkTaskEvenIfPlannerMentionsUserGuidance(t *testing.T
 	executor := New(exec, execReg, NewSession("exec-sys"), Options{}, event.Discard)
 	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, event.Discard, nil)
 
-	if err := coord.Run(context.Background(), "fix the bug"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "fix the bug"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := len(exec.requests); got != 3 {
@@ -890,7 +890,7 @@ func TestCoordinatorNudgesMixedGuidanceAndWorkTask(t *testing.T) {
 	executor := New(exec, execReg, NewSession("exec-sys"), Options{}, event.Discard)
 	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, event.Discard, nil)
 
-	if err := coord.Run(context.Background(), "summarize the current behavior and update the README"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "summarize the current behavior and update the README"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := len(exec.requests); got != 3 {
@@ -914,7 +914,7 @@ func TestCoordinatorSkipsExecutorWhenPlannerConcludesNoChanges(t *testing.T) {
 	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)
 	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, event.Discard, nil)
 
-	if err := coord.Run(context.Background(), "check whether the fix is already present"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "check whether the fix is already present"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := len(exec.requests); got != 0 {
@@ -945,7 +945,7 @@ func TestCoordinatorDoesNotTreatGenericPositivePlanAsNoOp(t *testing.T) {
 	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)
 	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, event.Discard, nil)
 
-	if err := coord.Run(context.Background(), "fix the missing guard"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "fix the missing guard"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := len(exec.requests); got == 0 {
@@ -974,7 +974,7 @@ func TestCoordinatorDoesNotSkipExecutorForPartialNoOpPlanWithActions(t *testing.
 	executor := New(exec, execReg, NewSession("exec-sys"), Options{}, event.Discard)
 	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, event.Discard, nil)
 
-	if err := coord.Run(context.Background(), "check the implementation and test it"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "check the implementation and test it"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := len(exec.requests); got != 2 {
@@ -1007,7 +1007,7 @@ func TestCoordinatorHandoffAffirmsExecutorToolSchemasWhenPlannerClaimsNoMCP(t *t
 	executor := New(exec, execReg, NewSession("exec-sys"), Options{}, event.Discard)
 	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, event.Discard, nil)
 
-	if err := coord.Run(context.Background(), "search GitHub discussions"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "search GitHub discussions"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := len(exec.requests); got != 3 {
@@ -1059,7 +1059,7 @@ func TestCoordinatorDoesNotNudgeExecutorThatActs(t *testing.T) {
 	executor := New(exec, execReg, NewSession("exec-sys"), Options{}, event.Discard)
 	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, event.Discard, nil)
 
-	if err := coord.Run(context.Background(), "install the skill"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "install the skill"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := len(exec.requests); got != 2 {
@@ -1234,7 +1234,7 @@ func TestCoordinatorDoesNotSkipExecutorForAlreadyImplementedPlanWithFollowUp(t *
 	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)
 	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, event.Discard, nil)
 
-	if err := coord.Run(context.Background(), "add refresh token support"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "add refresh token support"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := len(exec.requests); got == 0 {
@@ -1261,7 +1261,7 @@ func TestCoordinatorSkipsExecutorOnExplicitNoChangesMarker(t *testing.T) {
 	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)
 	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, event.Discard, nil)
 
-	if err := coord.Run(context.Background(), "check whether retries are covered"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "check whether retries are covered"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := len(exec.requests); got != 0 {
@@ -1304,7 +1304,7 @@ func TestCoordinatorFallsBackToExecutorWhenPlannerFails(t *testing.T) {
 			plannerSess := NewSession("planner-sys")
 			coord := NewCoordinator(tc.planner, plannerSess, nil, nil, Options{}, executor, 0, sink, nil)
 
-			if err := coord.Run(context.Background(), "fix the bug"); err != nil {
+			if err := coord.Run(withNoClosedLoop(context.Background()), "fix the bug"); err != nil {
 				t.Fatalf("Run should fall back to the executor, got: %v", err)
 			}
 			if got := len(exec.requests); got != 1 {
@@ -1386,7 +1386,7 @@ func TestCoordinatorRollsBackPlannerSessionOnToolPlannerFailure(t *testing.T) {
 			plannerSess := NewSession("planner-sys")
 			coord := NewCoordinator(tc.planner, plannerSess, nil, plannerReg, Options{}, executor, 0, event.Discard, nil)
 
-			if err := coord.Run(context.Background(), "fix the bug"); err != nil {
+			if err := coord.Run(withNoClosedLoop(context.Background()), "fix the bug"); err != nil {
 				t.Fatalf("Run should fall back to the executor, got: %v", err)
 			}
 			if got := len(exec.requests); got != 1 {
@@ -1420,7 +1420,7 @@ func TestCoordinatorPlannerSafetyBoundaryPreservesExecutionBoundaries(t *testing
 				executor, 0, event.Discard, policy,
 			)
 
-			err := coord.Run(context.Background(), "plan the migration")
+			err := coord.Run(withNoClosedLoop(context.Background()), "plan the migration")
 			if err == nil || err.Error() != plannerSafetyBoundaryError {
 				t.Fatalf("Run = %v, want the safe planner boundary error", err)
 			}
@@ -1485,7 +1485,7 @@ func TestCoordinatorRunsExecutorWhenMarkerNotAlone(t *testing.T) {
 	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)
 	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, event.Discard, nil)
 
-	if err := coord.Run(context.Background(), "add the missing tests"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "add the missing tests"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := len(exec.requests); got == 0 {
@@ -1532,7 +1532,7 @@ func TestCoordinatorHandoffSurvivesPlannerCompaction(t *testing.T) {
 	}
 	coord := NewCoordinator(planner, plannerSess, nil, plannerReg, Options{ContextWindow: 2000}, executor, 0, event.Discard, nil)
 
-	if err := coord.Run(context.Background(), "fix the bug"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "fix the bug"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	// Projection compaction no longer rewrites the planner session; handoff
@@ -1564,7 +1564,7 @@ func TestCoordinatorNoOpConclusionAttributedToPlanner(t *testing.T) {
 	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)
 	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, sink, nil)
 
-	if err := coord.Run(context.Background(), "check the parser guard"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "check the parser guard"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	var conclusion *event.Event
@@ -1600,7 +1600,7 @@ func TestCoordinatorHandoffOmitsToolContextWithoutMCPTools(t *testing.T) {
 	executor := New(exec, execReg, NewSession("exec-sys"), Options{}, event.Discard)
 	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, event.Discard, nil)
 
-	if err := coord.Run(context.Background(), "fix the missing guard"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "fix the missing guard"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	got := lastUser(exec.requests[0])
@@ -1678,7 +1678,7 @@ func TestCoordinatorFailedTurnRollbackKeepsCompaction(t *testing.T) {
 	}
 	coord := NewCoordinator(planner, plannerSess, nil, plannerReg, Options{ContextWindow: 2000}, executor, 0, event.Discard, nil)
 
-	if err := coord.Run(context.Background(), "fix the bug"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "fix the bug"); err != nil {
 		t.Fatalf("Run should fall back to the executor, got: %v", err)
 	}
 	if got := len(exec.requests); got != 1 {
@@ -1716,7 +1716,7 @@ func TestCoordinatorPersistsDeniedPlanTurnToExecutorSession(t *testing.T) {
 	gate := &coordinatorApprovalGate{allow: false}
 	coord.SetPlannerPlanApprover(gate)
 
-	if err := coord.Run(context.Background(), "rewrite auth"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "rewrite auth"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if gate.calls != 1 {
@@ -1765,7 +1765,7 @@ func TestCoordinatorSkipsApprovalGateForNegatedApprovalWording(t *testing.T) {
 	gate := &coordinatorApprovalGate{allow: false}
 	coord.SetPlannerPlanApprover(gate)
 
-	if err := coord.Run(context.Background(), "tweak config"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "tweak config"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if gate.calls != 0 {

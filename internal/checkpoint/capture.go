@@ -188,6 +188,14 @@ func CompareIdentity(current Fingerprint, afterSHA string, afterExisted *bool, a
 	return ""
 }
 
+// MatchesRestoreImage reports that current disk already equals the before-image.
+func MatchesRestoreImage(current Fingerprint, restoreSHA string, restoreExisted bool) bool {
+	if !restoreExisted {
+		return !current.Existed
+	}
+	return current.Existed && restoreSHA != "" && current.SHA256 == restoreSHA
+}
+
 // NormalizeRelPath returns a slash-cleaned workspace-relative path when possible.
 func NormalizeRelPath(root, path string) string {
 	if root == "" {

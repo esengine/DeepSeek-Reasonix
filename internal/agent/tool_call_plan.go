@@ -34,6 +34,8 @@ type toolCallPlan struct {
 	releaseParentWrite, releaseMutationWrite      func()
 	mutationPath                                  string
 	mutationObserved, mutationAfterDone, executed bool
+	perCallWriteRoots                             []string
+	skipOrdinaryGate                              bool
 }
 
 func (p *toolCallPlan) classifyEffects() {

@@ -26,13 +26,12 @@ An ACP host should launch one of these commands:
 ```sh
 reasonix acp
 reasonix acp --model deepseek-pro
-reasonix acp --preset delivery
+reasonix acp
 ```
 
 `--model` selects the startup model when the client does not override it.
-`--preset` sets the startup execution setting to `light`, `balanced`, or `delivery`
-(default `balanced`). Legacy `--profile economy|balanced|delivery` still works
-(`economy` → `light`). Both remain session-configurable after initialization.
+Reasonix runs one adaptive standard execution whose planning, verification,
+and review strength follows task risk automatically.
 
 Standard output is reserved for ACP messages. Reasonix sends diagnostics to
 standard error, so hosts must not merge the two streams. Run `reasonix setup`
@@ -88,8 +87,8 @@ tools run locally inside the Reasonix process.
 ## Session lifecycle
 
 Each ACP session owns an independent Reasonix controller, workspace root, model,
-execution setting (agent preset), collaboration mode, approval mode, MCP set, and
-persisted transcript. State does not leak between sessions.
+collaboration mode, approval mode, MCP set, and persisted transcript. State does
+not leak between sessions.
 
 | Method | Behavior |
 | --- | --- |
@@ -117,10 +116,9 @@ one mode selector:
 | Collaboration mode | `normal`, `plan`, `goal` | `modes` and `session/set_mode` |
 | Model | Configured `provider/model` entries | `configOptions` with id `model` |
 | Reasoning effort | Provider-supported levels or `auto` | `configOptions` with id `effort` |
-| Execution setting | `light`, `balanced`, `delivery` | `configOptions` with id `agent_preset` (legacy id `work_mode` still accepted: `economy` → `light`) |
 | Tool approval | `ask`, `auto`, `yolo` | `configOptions` with id `tool_approval` |
 
-Use `session/set_config_option` for model, effort, execution setting, and tool approval.
+Use `session/set_config_option` for model, effort, and tool approval.
 Its parameters are `sessionId`, `configId` and `value`, where `configId` is the
 `id` of the option as advertised in `configOptions`:
 
@@ -141,8 +139,14 @@ Note that the field is `configId`, not `optionId`. The result is the full
 refreshed `configOptions` array. An unknown id returns `-32602 InvalidParams`.
 
 Model and effort changes rebuild the session controller while preserving its
-history and the other axes. Execution-setting (`agent_preset`) and tool-approval
-changes update the gate in place without rebuilding the controller.
+history and the other axes. Tool-approval changes update the gate in place
+without rebuilding the controller.
+
+Execution modes are gone. For one compatibility version, clients that still
+send `session/set_config_option` with `configId` `agent_preset` or `work_mode`
+(including legacy aliases `profile`, `runtime_profile`, `token_mode`) receive a
+successful no-op: nothing switches, nothing rebuilds, and the result carries a
+`deprecatedNotice` explaining the adaptive standard execution.
 
 For older clients, `session/set_model` remains available. The legacy
 `session/set_mode` values `default` and `auto` are also accepted as Normal + Ask
@@ -165,6 +169,13 @@ audio are not advertised. During a turn, Reasonix may send:
 Hosts should keep the `session/prompt` request open until Reasonix returns its
 stop reason, while continuing to process requests and notifications in both
 directions.
+
+When the status phase is `readiness_paused`, resume that exact check with a
+`session/prompt` request whose optional `action` is
+`"final_readiness_recovery"`. Sending `/continue-checks` as the sole text block
+is the compatibility form. Both forms consume a one-shot, persisted host
+checkpoint; ordinary prompt text never inherits it, and a stale action after a
+newer user turn is rejected.
 
 ## Mid-turn steering extension
 

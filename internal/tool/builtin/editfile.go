@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 )
 
@@ -16,6 +17,7 @@ func init() { tool.RegisterBuiltin(editFile{}) }
 // relative path resolves against (see resolveIn).
 type editFile struct {
 	roots   []string
+	rootSet *sandbox.WritableRootSet
 	guard   SessionDataGuard
 	managed ManagedConfigPaths
 	workDir string
@@ -34,6 +36,10 @@ func (editFile) Schema() json.RawMessage {
 
 func (editFile) ReadOnly() bool { return false }
 
+func (e editFile) DeclareWriteAccess(args json.RawMessage) (tool.WriteAccessDeclaration, error) {
+	return declareFilePathWriteAccess(e.workDir, args)
+}
+
 func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		Path      string `json:"path"`
@@ -50,7 +56,7 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		return "", fmt.Errorf("old_string is required")
 	}
 	p.Path = resolveIn(e.workDir, p.Path)
-	if err := confineWrite(ctx, e.roots, e.guard, e.managed, p.Path); err != nil {
+	if err := confineWrite(ctx, effectiveWriteRoots(ctx, e.rootSet, e.roots), e.guard, e.managed, p.Path); err != nil {
 		return "", err
 	}
 

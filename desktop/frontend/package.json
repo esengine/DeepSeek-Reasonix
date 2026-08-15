@@ -29,7 +29,7 @@
     "test:performance": "tsx src/__tests__/history-performance-benchmark.tsx",
     "test:bench": "PLAYWRIGHT_BROWSERS_PATH=.pw-browsers node bench/run.mjs",
     "test:typecheck": "tsc --noEmit -p tsconfig.test.json",
-    "test:delivery-worktree": "tsx src/__tests__/delivery-worktree.test.ts",
+    "test:isolated-worktree": "tsx src/__tests__/isolated-worktree.test.ts",
     "test:updater": "tsx src/__tests__/updater-shared-state.test.tsx",
     "test:window-state": "tsx src/__tests__/window-state-ordering.test.ts",
     "test:all": "pnpm test:typecheck && pnpm test:updater && pnpm test:window-state && pnpm test && pnpm test:remote && pnpm test:performance"

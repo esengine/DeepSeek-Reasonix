@@ -497,11 +497,10 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 命名配色，再用 `/theme <style>` 选择强调色。
 
 响应式底栏左侧保留当前 Ask/Auto/Plan 或 YOLO 姿态和交互状态；终端较宽时，模型、推理
-强度和执行设定作为一组靠右显示，第二行按可用性显示 Git 标识、缓存命中率、上下文占用、
+强度作为一组靠右显示，第二行按可用性显示 Git 标识、缓存命中率、上下文占用、
 压缩余量、后台任务和余额。“就绪”只表示输入框空闲，并不是模型健康检查；选择器、审批、
 图片粘贴、shell 模式等活动会替换这个状态。窄终端会按完整信息组移动、换行或压缩。
-标签和展示用的执行设定值跟随 `/language`，但 `/preset`（及兼容的 `/work-mode`）命令
-参数继续使用稳定的英文标识 `light|balanced|delivery`。
+标签和展示用的语言跟随 `/language`。
 
 聊天与 transcript：
 
@@ -533,7 +532,6 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 | `Shift+Tab` | 按 Ask → Auto → Plan → Ask 循环 | YOLO 不进入这个输入模式循环；底部状态栏会显示当前模式。 |
 | `Ctrl+Y` | 切换 YOLO 开/关 | 关闭 YOLO 时会尽量恢复之前的 Ask/Auto 基底。终端若能转发 Command/Super，也可能识别 `Cmd+Y`，但稳定可用的是 `Ctrl+Y`。 |
 | `--yolo`、`--dangerously-skip-permissions` | 启动时进入 YOLO | 和 `Ctrl+Y` 是同一个运行时模式。 |
-| `/preset [light|balanced|delivery]` | 查看或切换当前会话的执行设定 | `/work-mode` 与 `/profile` 是兼容别名（`economy` → `light`）。切换就地更新执行设定、不重建 Controller；有回合、审批或后台任务时会拒绝。 |
 | `/theme [auto|light|dark|style]` | 查看或切换 CLI 主题 | 不带参数会列出背景模式和命名配色。选择会保存到用户配置；单次运行可用 `REASONIX_THEME` 和 `REASONIX_THEME_STYLE` 覆盖。 |
 | `Ctrl+O` | 切换详细 reasoning 显示 | 也可通过 `/verbose` 使用。 |
 | `Ctrl+B` | 展开或收起较长 shell 输出 | 较长 shell 输出的提示行也可点击；全屏 TUI 开启鼠标接管时，文本选区由应用内处理。 |
@@ -575,10 +573,15 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 Ask 不是只读模式：writer 获得批准后仍会执行。Permissions 决定放行或询问，Sandbox 才是强制能力边界。
 Sandbox 是授权之后的第二层边界，不能替代命令解析，也不能把无法证明静态安全的命令变成可自动授权命令。
 
-权限是**策略**（哪些调用放行/询问），**沙盒**是**强制**：文件写工具
+权限是**策略**（哪些调用放行/询问），**沙盒**是**强制**：这是两层机制。已经放行的调用
+仍然不能写出已批准的根目录。文件写工具
 （`write_file` / `edit_file` / `multi_edit` / `move_file`）拒绝 `[sandbox] workspace_root`
 之外的任何路径（默认当前目录，编辑不出项目），并解析符号链接与 `..`，使链接无法
-打洞越界。`forbid_read` 可选地隐藏敏感文件或目录，使 agent 的读文件、列目录和搜索工具不能读取或列出它们；
+打洞越界。写出工作区时走交互式「扩展写入范围」审批（仅本次 / 本会话 / 写入项目
+`reasonix.toml` / 拒绝），不会退化成无沙箱执行。Bash 必须用 `additional_write_dirs`
+加上 `justification` 声明所需目录；宿主不会从命令文本猜测路径。无头 `reasonix run`
+不会弹审批：请传 `--add-dir` 或配置 `[sandbox].allow_write`。整个用户主目录可以在
+强警告后批准；文件系统根和 Reasonix 会话/状态目录不能通过动态流程批准。`forbid_read` 可选地隐藏敏感文件或目录，使 agent 的读文件、列目录和搜索工具不能读取或列出它们；
 建议使用绝对路径或 `${HOME}` / `${VAR}`，不要写 `~`，因为配置只做环境变量展开。
 `bash` 本身默认进 OS 沙盒（`[sandbox] bash`：macOS 使用 Seatbelt，Linux 使用 bubblewrap）：
 命令只能写这些 root（外加平台按命令提供的临时/缓存 root），
@@ -770,7 +773,7 @@ RPC 调用。两者都可按服务器覆盖。
 
 ## 斜杠命令
 
-交互式 `reasonix` 会话里，内置命令（`/compact`、`/context`、`/new`、`/clear`、`/rewind`、`/tree`、`/branch`、`/switch`、`/todo`、`/model`、`/work-mode`、`/mcp`、`/skills`、`/hooks`、`/memory`、`/goal`、`/output-style`、`/sandbox`、`/language`、`/reasoning-language`、`/help`）在本地执行——`/help` 可列出全部。
+交互式 `reasonix` 会话里，内置命令（`/compact`、`/context`、`/new`、`/clear`、`/rewind`、`/tree`、`/branch`、`/switch`、`/todo`、`/model`、`/mcp`、`/skills`、`/hooks`、`/memory`、`/goal`、`/output-style`、`/sandbox`、`/language`、`/reasoning-language`、`/help`）在本地执行——`/help` 可列出全部。
 内置 **Skill**（如 `/init`、`/explore`、`/test`、`/reasonix-guide`）也会出现在斜杠菜单，
 并可通过 `run_skill` 调用（正文按需加载；只有索引行进入缓存稳定前缀）。配置或能力排障时
 用 `/reasonix-guide`，它会引导运行 `reasonix doctor capabilities`（见
@@ -1064,29 +1067,28 @@ enable、授权与完整连接身份，因此共享 Host 中另一个项目/tab 
 server 无法在这里提升权限。严格只读边界比独立 Planner 更窄：Planner 接受已授权的 opaque
 非 destructive MCP，而严格只读子会话必须有明确 reader hint，且根本不暴露 writer。
 
-启动会话时可以用 `--preset light|balanced|delivery` 选择执行设定，例如
-`reasonix run --preset delivery "修复并验证这个 bug"`。兼容的 `--profile
-economy|balanced|delivery` 仍可用（`economy` → `light`）。三种执行设定共享同一套
-provider 可见核心工具面（直接读/bash/编辑/写入、后台 shell 生命周期工具，以及稳定的
-`use_capability` 代理）。可选工具（搜索、MCP、skills、subagents、docs、web_fetch 等）
-通过 `use_capability` 调度，不会扩展 top-level provider schema，因此执行设定切换不会
-制造新的工具 schema 缓存前缀。
+Reasonix 只有一种自适应**标准执行**：规划深度、验证广度与独立复查随任务风险逐 turn
+自动调整。
 
-执行设定差异在宿主策略，不在工具列表：
+所有任务共享同一套 provider 可见核心工具面（直接读/bash/编辑/写入、后台 shell
+生命周期工具，以及稳定的 `use_capability` 代理）。可选工具（搜索、MCP、skills、
+subagents、docs、web_fetch 等）通过 `use_capability` 调度，不会扩展 top-level
+provider schema，因此任何任务都不会制造新的工具 schema 缓存前缀。
 
-- **Light（轻量）**：优先直接执行，定向验证，仅在高风险/安全类任务上强制独立复审。
-- **Balanced（均衡，默认）**：按风险自动轻/全规划，分档验证，中风险多文件变更可条件触发独立复审。
-- **Delivery（交付）**：完整验收标准、完整验证、中风险及以上强制独立复审；没有具体
-  `todo_write` 验收清单时会阻止变更和验证；变更后须复查、验证并以 `complete_step` 签收。
+随风险自适应的是宿主策略，不是工具列表：
 
-交互式 TUI 会话内可用 `/preset` 查看当前执行设定，或用
-`/preset light|balanced|delivery` 热切换；`/work-mode` 与 `/profile` 是兼容别名。切换就地
-更新执行设定、不重建 Controller，同时保留 history、session 路径、Lease 和 Ask/Auto/Yolo
-审批姿态；当前 turn、审批/询问、后台任务或另一场运行时切换尚未结束时会拒绝切换。该命令只
-修改当前会话，不持久化新的全局默认值。
-
-桌面端标签页提供相同三档（轻量 / 均衡 / 交付），并 dual-write `agentPreset` 与兼容
-`tokenMode`（`economy`/`full`/`delivery`）一版。
+- 对话与咨询类 turn 直接执行，不产生任何辅助模型调用。
+- 普通只读查询要求引用实际读取结果（定向证据）。
+- 单文件、目标明确、低风险的修改直接执行，使用零额外模型调用的 Atomic
+  TaskContract 与定向检查。
+- 同一功能面内的多文件修改获得轻量规划、项目级检查；条件独立复审在证据覆盖
+  不足时升级为强制。
+- 跨模块、公共接口、持久化、安全/权限/迁移/发布与活跃 Goal 任务获得完整规划、
+  完整检查、强制独立复审（安全类附加 security review）与完整证据闭环：变更前
+  建立验收标准，变更后验证、复查并以 `complete_step` 签收；证据不足时只能以
+  Partial、Unverified 或 Blocked 结束，绝不产生 Complete。
+- 风险在 turn 内只升不降：回执发现改动触及高风险面或超出初始判断时，策略实时
+  上调并补齐缺失的验证与复查。
 
 交互式前端中的计划模式始终由用户显式选择：桌面端在“协作方式”中选择计划模式，CLI 用
 `Shift+Tab` 切换到 Plan。Reasonix 先生成计划，待用户批准后工作流才切换到实施；规划期间的
@@ -1096,8 +1098,9 @@ provider 可见核心工具面（直接读/bash/编辑/写入、后台 shell 生
 `reasonix config reasoning-language auto|zh|en`。只有明确想为
 reasoning-language 写项目级覆盖时，才给 shell 命令加 `--local`。
 
-桌面端“协作方式”菜单里的计划模式、目标模式和“轻量 / 均衡 / 交付优先”三档运行模式的使用方法与注意事项，
-见 [`COLLABORATION_MODES.zh-CN.md`](./COLLABORATION_MODES.zh-CN.md)。
+桌面端“协作方式”菜单里的计划模式与目标模式的使用方法与注意事项，
+见 [`COLLABORATION_MODES.zh-CN.md`](./COLLABORATION_MODES.zh-CN.md)。执行模式已移除：
+规划、验证与复查强度随任务风险自动调整。
 
 桌面端“工具权限”里的询问、自动和 Yolo 模式的区别与使用场景，
 见 [`TOOL_APPROVAL_MODES.zh-CN.md`](./TOOL_APPROVAL_MODES.zh-CN.md)。

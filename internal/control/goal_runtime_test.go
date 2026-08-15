@@ -634,9 +634,9 @@ func (f minimalFakeTool) Execute(context.Context, json.RawMessage) (string, erro
 }
 
 // TestGoalDeliveryWorkflowCompletesAfterVerifiedSignoff covers the
-// Goal + Delivery combination: the model works (edit → verify → review →
-// complete_step), reports complete via update_goal, and the goal completes —
-// no user-facing recovery card.
+// Goal + closed-loop evidence combination: the model works (edit → verify →
+// review → complete_step), reports complete via update_goal, and the goal
+// completes — no user-facing recovery card.
 func TestGoalDeliveryWorkflowCompletesAfterVerifiedSignoff(t *testing.T) {
 	todoWrite, _ := tool.LookupBuiltin("todo_write")
 	completeStep, _ := tool.LookupBuiltin("complete_step")
@@ -658,7 +658,8 @@ func TestGoalDeliveryWorkflowCompletesAfterVerifiedSignoff(t *testing.T) {
 			textTurn("Ship main delivered."),
 		},
 	)}
-	ag := agent.New(prov, reg, agent.NewSession(""), agent.Options{DeliveryProfile: true}, event.Discard)
+	// An active Goal derives a closed-loop TaskPolicy; no profile option needed.
+	ag := agent.New(prov, reg, agent.NewSession(""), agent.Options{}, event.Discard)
 	done := make(chan event.Event, 1)
 	var doneReadiness *event.FinalReadiness
 	c := New(Options{
@@ -686,7 +687,7 @@ func TestGoalDeliveryWorkflowCompletesAfterVerifiedSignoff(t *testing.T) {
 }
 
 // TestPlainDeliveryReadinessFailureSurfacesRecoveryCardWithoutRetries covers
-// the plain (non-Goal) Delivery combination: readiness failure ends the run on
+// the plain (non-Goal) closed-loop case: readiness failure ends the run on
 // the first final answer, surfaces the recovery card, and never auto-continues.
 func TestPlainDeliveryReadinessFailureSurfacesRecoveryCardWithoutRetries(t *testing.T) {
 	todoWrite, _ := tool.LookupBuiltin("todo_write")
@@ -699,7 +700,9 @@ func TestPlainDeliveryReadinessFailureSurfacesRecoveryCardWithoutRetries(t *test
 		textTurn("premature final"),
 		textTurn("extra turn that must never run"),
 	}}
-	ag := agent.New(prov, reg, agent.NewSession(""), agent.Options{DeliveryProfile: true}, event.Discard)
+	// "implement main" is an unanchored mutation: the standard policy derives
+	// closed-loop evidence without any selectable delivery profile.
+	ag := agent.New(prov, reg, agent.NewSession(""), agent.Options{}, event.Discard)
 	done := make(chan event.Event, 1)
 	c := New(Options{
 		Runner:   ag,

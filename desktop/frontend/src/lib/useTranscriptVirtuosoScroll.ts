@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
@@ -32,6 +32,10 @@ export const TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX = 4;
 // vertical padding or fractional row measurements. A bounded positive offset
 // is clamped by the browser and keeps the write within Virtuoso's API.
 const TRANSCRIPT_TAIL_CLAMP_OFFSET_PX = 64;
+// Bounded follow budget: re-aim at the last row across a few frames so late
+// row measurements cannot leave the view parked above the real bottom.
+const TAIL_SETTLE_MAX_ATTEMPTS = 6;
+const TAIL_SETTLE_BUDGET_MS = 500;
 
 export function nativeTranscriptDistanceFromBottom(element: {
   scrollHeight: number;
@@ -53,7 +57,13 @@ export function hasTranscriptScrollableRange(
 }
 
 /** One scroll coordinator around React Virtuoso. No native scrollTop writes. */
-export function useTranscriptVirtuosoScroll() {
+export function useTranscriptVirtuosoScroll({
+  liveTailActiveRef,
+}: {
+  /** While the live-region footer is mounted, the true bottom sits below the
+   *  last virtual row; tail writes then aim at the DOM extent instead. */
+  liveTailActiveRef?: RefObject<boolean>;
+} = {}) {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef<TranscriptScrollState>(INITIAL_TRANSCRIPT_SCROLL_STATE);
@@ -68,19 +78,45 @@ export function useTranscriptVirtuosoScroll() {
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null);
 
+  // Re-aim at the tail across a few frames: the first request can still use
+  // Virtuoso's pre-measurement size tree, and late tail-row measurements
+  // would otherwise leave the view parked above the real bottom.
+  // User-ownership events cancel the pending frame through dispatch().
+  const scrollToTail = useCallback((behavior: "auto" | "smooth") => {
+    const element = scrollRef.current;
+    if (liveTailActiveRef?.current && element) {
+      // The live-region footer extends past the last virtual row. Virtuoso's
+      // scrollTo clamps against the scroller's real DOM scrollHeight, footer
+      // included, so this lands on the true bottom.
+      virtuosoRef.current?.scrollTo({ top: element.scrollHeight, behavior });
+      return;
+    }
+    virtuosoRef.current?.scrollToIndex({
+      index: "LAST",
+      align: "end",
+      offset: TRANSCRIPT_TAIL_CLAMP_OFFSET_PX,
+      behavior,
+    });
+  }, [liveTailActiveRef]);
+
   const scheduleTailSettle = useCallback(() => {
     if (tailSettleFrameRef.current !== null) cancelAnimationFrame(tailSettleFrameRef.current);
-    tailSettleFrameRef.current = requestAnimationFrame(() => {
+    const deadline = performance.now() + TAIL_SETTLE_BUDGET_MS;
+    let attempts = 0;
+    const tick = () => {
       tailSettleFrameRef.current = null;
       if (modeRef.current !== "tail-follow") return;
-      virtuosoRef.current?.scrollToIndex({
-        index: "LAST",
-        align: "end",
-        offset: TRANSCRIPT_TAIL_CLAMP_OFFSET_PX,
-        behavior: "auto",
-      });
-    });
-  }, []);
+      scrollToTail("auto");
+      attempts += 1;
+      const element = scrollRef.current;
+      const settled = !element
+        || nativeTranscriptDistanceFromBottom(element) <= TRANSCRIPT_AT_BOTTOM_THRESHOLD_PX;
+      if (!settled && attempts < TAIL_SETTLE_MAX_ATTEMPTS && performance.now() < deadline) {
+        tailSettleFrameRef.current = requestAnimationFrame(tick);
+      }
+    };
+    tailSettleFrameRef.current = requestAnimationFrame(tick);
+  }, [scrollToTail]);
 
   const publishState = useCallback((state: TranscriptScrollState) => {
     stateRef.current = state;
@@ -94,20 +130,16 @@ export function useTranscriptVirtuosoScroll() {
     const handle = virtuosoRef.current;
     switch (command.type) {
       case "AUTOSCROLL_TO_BOTTOM":
-        handle?.autoscrollToBottom();
+        // Virtuoso's autoscrollToBottom() is inert without the followOutput
+        // prop (never passed here), so the rAF settle loop is the real
+        // follow mechanism.
         scheduleTailSettle();
         return;
       case "SCROLL_TO_LAST":
-        handle?.scrollToIndex({
-          index: "LAST",
-          align: "end",
-          offset: TRANSCRIPT_TAIL_CLAMP_OFFSET_PX,
-          behavior: command.behavior,
-        });
-        // The first LAST request can use Virtuoso's pre-measurement size tree.
-        // Retry once on the next frame, after the mounted tail row has been
-        // measured. This stays inside Virtuoso and is cancelled by explicit
-        // user ownership changes below.
+        scrollToTail(command.behavior);
+        // Re-aim across a bounded number of frames: the first LAST request
+        // can use Virtuoso's pre-measurement size tree, and late tail-row
+        // measurements would otherwise park the view above the real bottom.
         scheduleTailSettle();
         return;
       case "SCROLL_TO_INDEX":
@@ -117,7 +149,7 @@ export function useTranscriptVirtuosoScroll() {
         window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__?.(command.owner, command.top);
         handle?.scrollTo({ top: command.top, behavior: command.behavior });
     }
-  }, [scheduleTailSettle]);
+  }, [scheduleTailSettle, scrollToTail]);
 
   const dispatch = useCallback((event: TranscriptScrollEvent) => {
     if (

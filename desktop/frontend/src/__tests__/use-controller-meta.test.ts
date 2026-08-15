@@ -1,6 +1,6 @@
 // Run: tsx src/__tests__/use-controller-meta.test.ts
 
-import { currentTurnWaitMs, effortSwitchNoticeText, foregroundRunningFromRuntimeMeta, historyMessagesToItems, initialState, localizedBackendNoticeText, localizedNoticeText, metaFromTab, modelSwitchNoticeText, reducer, sameMeta, tokenModeSwitchNoticeText, type Item } from "../lib/useController";
+import { currentTurnWaitMs, effortSwitchNoticeText, foregroundRunningFromRuntimeMeta, historyMessagesToItems, initialState, localizedBackendNoticeText, localizedNoticeText, metaFromTab, modelSwitchNoticeText, reducer, sameMeta, type Item } from "../lib/useController";
 import { shouldReconcileStaleTurn } from "../lib/useStaleTurnWatchdog";
 import { parseTodos } from "../lib/tools";
 import { resolveTodoPanelTodos } from "../lib/todoVisibility";
@@ -107,11 +107,6 @@ console.log("\nuse controller meta");
     "effort busy guard names the running-answer blocker",
   );
   eq(
-    tokenModeSwitchNoticeText("active work is still running; running=true; pending_prompt=true; background_jobs=0; finish or cancel the current turn, answer pending prompts, and stop background jobs before changing token mode"),
-    "Execution setting cannot change while a prompt is waiting for your response. Handle it first.",
-    "execution-setting busy guard prioritizes the pending prompt blocker",
-  );
-  eq(
     modelSwitchNoticeText("finish or cancel the current turn, answer pending prompts, and stop background jobs before changing model"),
     "The model cannot change yet. Stop the current answer, handle pending prompts, or wait for background jobs to finish.",
     "model busy guard is localized",
@@ -168,19 +163,6 @@ console.log("\nuse controller meta");
     effortSwitchNoticeText("unknown model \"missing\""),
     "Reasoning effort switch failed: unknown model \"missing\"",
     "effort true failure keeps the underlying error",
-  );
-}
-
-{
-  eq(
-    tokenModeSwitchNoticeText("finish or cancel the current turn, answer pending prompts, and stop background jobs before changing token mode"),
-    "Execution setting cannot change yet. Stop the current answer, handle pending prompts, or wait for background jobs to finish.",
-    "execution-setting busy guard is localized",
-  );
-  eq(
-    tokenModeSwitchNoticeText('tab "tab-a" changed while switching token mode; retry'),
-    "The current session changed while switching execution setting. Try once more.",
-    "execution-setting tab race asks the user to retry",
   );
 }
 
@@ -250,7 +232,7 @@ console.log("\nuse controller meta");
   );
   eq(
     localizedNoticeText("reworded workspace contention copy", "workspace_lease"),
-    "Another Delivery session is writing to this workspace; this session will continue automatically when it is safe.",
+    "Another session is writing to this workspace; this session will continue automatically when it is safe.",
     "workspace lease contention uses its stable localized notice code",
   );
   eq(

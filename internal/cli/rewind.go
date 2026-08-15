@@ -198,11 +198,20 @@ func (m chatTUI) commitPreparedRewind() (tea.Model, tea.Cmd) {
 	if err != nil || !result.OK {
 		return m, nil
 	}
-	// The controller emits a notice marking the rewind point; the committed
-	// transcript stays in terminal scrollback (v2 has no managed viewport), so for a
-	// conversation/both rewind we prefill the composer with that turn's prompt to
-	// re-send or edit — Claude Code's behavior — while the model's context is
-	// truncated underneath.
+	if result.ConversationForked {
+		if strings.TrimSpace(result.Branch) == "" {
+			m.notice("rewind: conversation fork path is unavailable")
+			return m, nil
+		}
+		if _, err := m.ctrl.SwitchBranch(result.Branch); err != nil {
+			m.followSessionLease()
+			return m, nil
+		}
+		m.followSessionLease()
+		m.replayActiveBranch(fmt.Sprintf("rewound to turn %d in a new branch", meta.Turn+1))
+	}
+	// Conversation rewind activates the fork and prefills the selected prompt
+	// for editing. Code-only rewind keeps the current transcript on screen.
 	if scope != control.RewindCode && strings.TrimSpace(meta.Prompt) != "" {
 		m.input.SetValue(meta.Prompt)
 		m.growInputToFit()

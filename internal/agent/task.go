@@ -23,7 +23,9 @@ import (
 	"reasonix/internal/permission"
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandbox"
 	"reasonix/internal/sessiontemp"
+	"reasonix/internal/taskpolicy"
 	"reasonix/internal/tool"
 	"reasonix/internal/workspacelease"
 )
@@ -263,7 +265,6 @@ type TaskTool struct {
 	baseEffort                    string
 	identityProfile               func(modelRef, effort string) (string, string)
 	maxSubagentDepth              int
-	deliveryProfile               bool
 	ablation                      ablation.Set
 	workspaceLease                *workspacelease.Owner
 	// scheduler is the session-scoped concurrency + write-claim controller.
@@ -284,6 +285,7 @@ type TaskTool struct {
 	// recoveryGate is the shared Auto Guard boundary for
 	// this session (root + sub-agents). nil disables recovery in children.
 	recoveryGate RecoveryGate
+	writeRoots   *sandbox.WritableRootSet
 	// capabilityRuntime is the session-shared MCP Host/specs substrate. Each
 	// sub-agent gets its own use_capability frontend so ledger state stays
 	// isolated while connections reuse the parent Host.
@@ -394,14 +396,6 @@ func (t *TaskTool) WithTranscriptIdentityResolver(resolve func(modelRef, effort 
 
 func (t *TaskTool) WithMaxSubagentDepth(depth int) *TaskTool {
 	t.maxSubagentDepth = NormalizeMaxSubagentDepth(depth)
-	return t
-}
-
-// WithDeliveryProfile propagates the parent's runtime delivery contract into
-// writer-capable sub-agents. Read-only sub-agents may receive the flag too, but
-// the mutation gate remains dormant for them.
-func (t *TaskTool) WithDeliveryProfile(enabled bool) *TaskTool {
-	t.deliveryProfile = enabled
 	return t
 }
 
@@ -774,26 +768,9 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 	if err != nil {
 		return "", err
 	}
-	var subReg *tool.Registry
-	if spec.Grant.ReadOnly {
-		subReg = ReadOnlySubagentToolRegistryForDepthWithRuntime(t.parentReg, toolNames, childDepth, t.maxDepth(), t.capabilityRuntime)
-		if subReg.Len() == 0 && !spec.Grant.AllowNoTools {
-			return "", fmt.Errorf("no read-only tools available for this sub-agent")
-		}
-	} else {
-		subReg = t.buildSubReg(toolNames, childDepth)
-		// Explicit paths are an execution boundary and rebind/drop tools that
-		// cannot honor it. A synthesized whole-workspace claim is a scheduling
-		// boundary for omitted write_paths; it preserves the legacy registry and
-		// the parent session's existing sandbox/permission boundaries.
-		if !spec.Grant.WritePaths.Empty() && !spec.Grant.WritePaths.WholeWorkspace {
-			keepBash := t.bashCanEnforceWriteRoots()
-			bound, removed := BindWritePaths(subReg, spec.Grant.WritePaths, t.workspaceRoot, keepBash)
-			subReg = bound
-			if len(removed) > 0 && subReg.Len() == 0 {
-				return "", fmt.Errorf("no path-bound write tools available after dropping unbound writers: %s", strings.Join(removed, ", "))
-			}
-		}
+	subReg, childWriteRoots, err := t.buildSubagentRegistry(spec, toolNames, childDepth)
+	if err != nil {
+		return "", err
 	}
 
 	modelRef, effortRef := spec.Worker.Model, spec.Worker.Effort
@@ -846,7 +823,7 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 		if spec.Grant.ReadOnly {
 			return t.runReadOnlySubSession(runCtx, spec.Task.Objective, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver)
 		}
-		return t.runSubSession(WithSubagentWriteClaim(runCtx, spec.Grant.WritePaths), spec.Task.Objective, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver)
+		return t.runSubSession(WithSubagentWriteClaim(runCtx, spec.Grant.WritePaths), spec.Task.Objective, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, usageModelRef, mutationObserver, childWriteRoots)
 	}
 
 	if spec.Sched.RunInBackground {
@@ -903,7 +880,7 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 			jobCtx = WithParentSession(jobCtx, parentSession)
 			jobCtx = evidence.WithLedger(jobCtx, backgroundEvidence)
 			defer run.Release()
-			defer func() { jobs.PublishEvidence(jobCtx, backgroundEvidence.Summary()) }()
+			defer publishBackgroundEvidence(jobCtx, backgroundEvidence, t.workspaceRoot)
 			defer func() {
 				if r := recover(); r != nil {
 					panicErr := fmt.Errorf("internal error: panic: %v\n%s", r, debug.Stack())
@@ -1582,8 +1559,11 @@ func (t *TaskTool) resolveSubSessionRuntime(modelRef, effort string) (provider.P
 	return prov, pricing, ctxWin, nil
 }
 
-func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session, childDepth int, recoveryTaskID, modelRef string, mutationObserver *checkpoint.MutationObserver) (string, error) {
+func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session, childDepth int, recoveryTaskID, modelRef string, mutationObserver *checkpoint.MutationObserver, writeRoots *sandbox.WritableRootSet) (string, error) {
 	opts := t.subagentOptions(ctx, maxSteps, pricing, ctxWin, childDepth, recoveryTaskID, mutationObserver)
+	if writeRoots != nil {
+		opts.WriteRoots = writeRoots
+	}
 	opts.ModelRef = modelRef
 	// Capture the pristine task before host framing is prepended: delivery
 	// intent classification must judge the task, not the wrapper.
@@ -1612,27 +1592,36 @@ func (t *TaskTool) runReadOnlySubSession(ctx context.Context, prompt string, sub
 // must stay uniform across those paths — add new fields here, not at call sites.
 func (t *TaskTool) subagentOptions(ctx context.Context, maxSteps int, pricing *provider.Pricing, ctxWin, childDepth int, recoveryTaskID string, mutationObserver *checkpoint.MutationObserver) Options {
 	opts := Options{
-		MaxSteps:          maxSteps,
-		Temperature:       t.temperature,
-		Pricing:           pricing,
-		UsageSource:       event.UsageSourceSubagent,
-		Gate:              t.gate,
-		ContextWindow:     ctxWin,
-		RecentKeep:        t.recentKeep,
-		CompactRatio:      t.compactRatio,
-		ArchiveDir:        t.archiveDir,
-		KeepPolicy:        t.keepPolicy,
-		ResponseLanguage:  ResponseLanguageFromContext(ctx),
-		ReasoningLanguage: ReasoningLanguageFromContext(ctx),
-		SubagentDepth:     childDepth,
-		MaxSubagentDepth:  t.maxDepth(),
-		DeliveryProfile:   t.deliveryProfile,
-		Ablation:          t.ablation,
-		WorkspaceLease:    t.workspaceLease,
-		RecoveryGate:      t.recoveryGate,
-		RecoveryAgentID:   "subagent",
-		RecoveryTaskID:    recoveryTaskID,
-		MutationObserver:  mutationObserver,
+		MaxSteps:                 maxSteps,
+		Temperature:              t.temperature,
+		Pricing:                  pricing,
+		UsageSource:              event.UsageSourceSubagent,
+		Gate:                     t.gate,
+		ContextWindow:            ctxWin,
+		RecentKeep:               t.recentKeep,
+		CompactRatio:             t.compactRatio,
+		ArchiveDir:               t.archiveDir,
+		KeepPolicy:               t.keepPolicy,
+		ResponseLanguage:         ResponseLanguageFromContext(ctx),
+		ReasoningLanguage:        ReasoningLanguageFromContext(ctx),
+		SubagentDepth:            childDepth,
+		MaxSubagentDepth:         t.maxDepth(),
+		Ablation:                 t.ablation,
+		WorkspaceLease:           t.workspaceLease,
+		RecoveryGate:             t.recoveryGate,
+		RecoveryAgentID:          "subagent",
+		RecoveryTaskID:           recoveryTaskID,
+		MutationObserver:         mutationObserver,
+		WriteRoots:               t.writeRoots,
+		DisableWriteAccessExpand: true,
+		WriteWorkspaceRoot:       t.workspaceRoot,
+	}
+	// Writer children inherit the parent turn's frozen risk and closure floors.
+	// The parent publishes its policy into the run context; a child that never
+	// received it (direct unit construction) keeps its own derived policy.
+	if parent, ok := taskpolicy.FromContext(ctx); ok {
+		p := parent
+		opts.InheritedTaskPolicy = &p
 	}
 	return opts
 }
@@ -1648,6 +1637,14 @@ func subagentRecoveryTaskID(ctx context.Context, ref string) string {
 }
 
 // WithRecoveryGate shares Auto Guard with spawned sub-agents.
+func (t *TaskTool) WithWriteRoots(set *sandbox.WritableRootSet) *TaskTool {
+	if t == nil {
+		return nil
+	}
+	t.writeRoots = set
+	return t
+}
+
 func (t *TaskTool) WithRecoveryGate(g RecoveryGate) *TaskTool {
 	if t == nil {
 		return nil

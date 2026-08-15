@@ -26,7 +26,7 @@ func TestOrdinaryModeBlocksMixedMutationAndVerification(t *testing.T) {
 		{{Type: provider.ChunkText, Text: "ok"}, {Type: provider.ChunkDone}},
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "test"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "test"); err != nil {
 		t.Fatal(err)
 	}
 	got := toolResultByID(a.sess.conversation, "m1")
@@ -75,7 +75,7 @@ func TestOrdinaryModeRunsShortCircuitBuildAndVerify(t *testing.T) {
 				{{Type: provider.ChunkText, Text: "ok"}, {Type: provider.ChunkDone}},
 			}}
 			a := New(prov, reg, NewSession(""), Options{}, event.Discard)
-			if err := a.Run(context.Background(), "test"); err != nil {
+			if err := a.Run(withNoClosedLoop(context.Background()), "test"); err != nil {
 				t.Fatal(err)
 			}
 			got := toolResultByID(a.sess.conversation, "m1")
@@ -97,7 +97,7 @@ func TestOrdinaryModeBlocksMaskedVerifierExit(t *testing.T) {
 		{{Type: provider.ChunkText, Text: "ok"}, {Type: provider.ChunkDone}},
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "test"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "test"); err != nil {
 		t.Fatal(err)
 	}
 	got := toolResultByID(a.sess.conversation, "m1")
@@ -118,7 +118,7 @@ func TestOrdinaryModeBlocksNonTerminalInlineInterpreter(t *testing.T) {
 		{{Type: provider.ChunkText, Text: "ok"}, {Type: provider.ChunkDone}},
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "test"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "test"); err != nil {
 		t.Fatal(err)
 	}
 	got := toolResultByID(a.sess.conversation, "m1")
@@ -151,7 +151,7 @@ func TestBatchDependencyBarrierSkipsVerificationAfterFailedMutation(t *testing.T
 		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "edit then verify"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "edit then verify"); err != nil {
 		t.Fatal(err)
 	}
 	if got := toolResultByID(a.sess.conversation, "v1"); !strings.Contains(got, "earlier modification") {
@@ -191,7 +191,7 @@ func TestBatchDependencyBarrierReportsSanitizedRepositoryCause(t *testing.T) {
 		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "tag then verify"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "tag then verify"); err != nil {
 		t.Fatal(err)
 	}
 	got := toolResultByID(a.sess.conversation, "v1")
@@ -258,7 +258,7 @@ func TestBatchDependencyBarrierIgnoresFailedNonMutationMetaTool(t *testing.T) {
 		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "track then edit"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "track then edit"); err != nil {
 		t.Fatal(err)
 	}
 	if got := toolResultByID(a.sess.conversation, "e1"); strings.Contains(got, "earlier modification") {
@@ -293,7 +293,7 @@ func TestBatchDependencyBarrierStopsAfterFailedWorkspaceWrite(t *testing.T) {
 		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "two edits"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "two edits"); err != nil {
 		t.Fatal(err)
 	}
 	if got := toolResultByID(a.sess.conversation, "e2"); !strings.Contains(got, "earlier modification") {
@@ -386,7 +386,7 @@ func TestBatchDependencyBarrierBlocksResolvedMCPWriterAfterFailedMutation(t *tes
 		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "fail then mcp write"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "fail then mcp write"); err != nil {
 		t.Fatal(err)
 	}
 	if writerCalls != 0 {
@@ -429,7 +429,7 @@ func TestBatchDependencyBarrierAllowsReadOnlyDiagnosisAfterFailedMutation(t *tes
 		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "fail then diagnose"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "fail then diagnose"); err != nil {
 		t.Fatal(err)
 	}
 	readOut := toolResultByID(a.sess.conversation, "r1")

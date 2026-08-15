@@ -32,39 +32,78 @@ func (s *Session) ownsWritableBaseline(path string, existingDigest, rawDigest [s
 	return s.hasValidWriteAuthority(path)
 }
 
-// fixedWriterRecoverySessionPath is one fixed isolated path per writer identity
-// so depth-cap / shutdown isolation rewrites in place instead of forking a new
-// digest-keyed file on every conflict tick.
+// fixedWriterRecoverySessionPath is the process-wide stable recovery path
+// for originalPath. Nested -recovery- names peel back to the root branch.
 func fixedWriterRecoverySessionPath(originalPath string) string {
-	return recoverySessionPathForLane(originalPath, SessionWriterID())
+	return stableRecoverySessionPath(originalPath, SessionWriterID())
 }
 
-func recoverySessionPathForLane(originalPath, lane string) string {
-	writerDigest := sha256.Sum256([]byte(lane))
-	// Keep the established 16-hex suffix so metadata-less recovery files are
-	// still recognized by older desktop fallback discovery.
-	suffix := fmt.Sprintf("-recovery-%x", writerDigest[:8])
-	id := BranchID(originalPath)
-	if strings.HasSuffix(id, suffix) {
+func recoveryRootID(path string) string {
+	if root, ok := RecoveryFilenameRootID(path); ok {
+		return root
+	}
+	id := strings.TrimSpace(BranchID(path))
+	if id == "" {
+		return "session"
+	}
+	return id
+}
+
+// stableRecoverySessionPath is one recovery file per (root branch, generation).
+// The 16-hex suffix stays so older desktop discovery still recognizes the file.
+func stableRecoverySessionPath(originalPath, generation string) string {
+	root := recoveryRootID(originalPath)
+	if strings.TrimSpace(generation) == "" {
+		generation = SessionWriterID()
+	}
+	sum := sha256.Sum256([]byte(root + "\x00" + generation))
+	suffix := fmt.Sprintf("-recovery-%x", sum[:8])
+	stem := recoveryParentStem(root)
+	if stem+suffix == BranchID(originalPath) {
 		return originalPath
 	}
-	return filepath.Join(filepath.Dir(originalPath),
-		fmt.Sprintf("%s%s.jsonl", recoveryParentStem(id), suffix))
+	return filepath.Join(filepath.Dir(originalPath), stem+suffix+".jsonl")
 }
 
-func (s *Session) isolatedRecoverySessionPath(originalPath string) (string, string) {
+func (s *Session) recoveryGenerationKey() string {
+	if s == nil {
+		return SessionWriterID()
+	}
+	s.mu.Lock()
+	if s.recoveryLane != "" {
+		lane := s.recoveryLane
+		s.mu.Unlock()
+		return lane
+	}
+	s.mu.Unlock()
+	candidate := ""
+	if auth := s.WriteAuthority(); auth != nil && auth.Generation() != 0 {
+		writerID := SessionWriterID()
+		if writer := auth.Writer(); writer != nil && strings.TrimSpace(writer.WriterID()) != "" {
+			writerID = writer.WriterID()
+		}
+		candidate = fmt.Sprintf("%s\x00gen-%d", writerID, auth.Generation())
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.recoveryLane == "" {
-		s.recoveryLane = newSessionWriterID()
+		if candidate == "" {
+			candidate = newSessionWriterID()
+		}
+		s.recoveryLane = candidate
 	}
-	return recoverySessionPathForLane(originalPath, s.recoveryLane), s.recoveryLane
+	return s.recoveryLane
+}
+
+func (s *Session) isolatedRecoverySessionPath(originalPath string) (string, string) {
+	gen := s.recoveryGenerationKey()
+	return stableRecoverySessionPath(originalPath, gen), gen
 }
 
 func (s *Session) rotateRecoveryLane(current string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.recoveryLane == current {
+	if s.recoveryLane == "" || s.recoveryLane == current {
 		s.recoveryLane = newSessionWriterID()
 	}
 }

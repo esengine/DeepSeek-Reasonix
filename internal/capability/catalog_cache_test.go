@@ -51,7 +51,6 @@ func TestBuildCatalogSurfacesCachedToolsForAutoStartFalse(t *testing.T) {
 			{Name: "gh", AutoStart: boolPtr(false)},
 			{Name: "old", AutoStart: boolPtr(false)},
 		},
-		Profile:     ProfileDelivery,
 		CachedTools: cached,
 		CacheKeyOK:  keyOK,
 	})
@@ -112,7 +111,7 @@ func TestDeliveryRouteRenderKeepsCapabilityIDAndProxyInstruction(t *testing.T) {
 		ID: "mcp-tool:gh/search_issues", Kind: KindMCPTool, Name: "gh/search_issues",
 		Status: StatusConfigured, ConnectSource: "mcp", ConnectName: "gh",
 	}
-	d := RouteDecision{Delivery: true, Candidates: []RouteCandidate{{Entry: entry, Policy: AutoUsePrefer, Reason: "matches task"}}}
+	d := RouteDecision{ClosedLoop: true, Candidates: []RouteCandidate{{Entry: entry, Policy: AutoUsePrefer, Reason: "matches task"}}}
 	out := RenderTransientBlock(d)
 	if !strings.Contains(out, "mcp-tool:gh/search_issues") {
 		t.Fatalf("delivery render must keep the concrete capability id:\n%s", out)
@@ -125,12 +124,12 @@ func TestDeliveryRouteRenderKeepsCapabilityIDAndProxyInstruction(t *testing.T) {
 	}
 	// Server entries direct the model to connect-and-list via the same proxy.
 	server := Entry{ID: "mcp-server:gh", Kind: KindMCPServer, Name: "gh", Status: StatusConfigured, ConnectSource: "mcp", ConnectName: "gh"}
-	out = RenderTransientBlock(RouteDecision{Delivery: true, Candidates: []RouteCandidate{{Entry: server, Policy: AutoUseSuggest, Reason: "r"}}})
+	out = RenderTransientBlock(RouteDecision{ClosedLoop: true, Candidates: []RouteCandidate{{Entry: server, Policy: AutoUseSuggest, Reason: "r"}}})
 	if !strings.Contains(out, `use_capability(action="call", capability_id="mcp-server:gh")`) || !strings.Contains(out, "list its tools") {
 		t.Fatalf("server candidate must instruct connect-and-list:\n%s", out)
 	}
 	// Non-delivery keeps the historical connect_tool_source instruction.
-	d.Delivery = false
+	d.ClosedLoop = false
 	out = RenderTransientBlock(d)
 	if !strings.Contains(out, "connect_tool_source") {
 		t.Fatalf("non-delivery render lost connect_tool_source:\n%s", out)
@@ -265,7 +264,7 @@ func TestOrdinaryRouteRenderDeduplicatesCollapsedMCPSourceLines(t *testing.T) {
 	}
 
 	for _, decision := range []RouteDecision{
-		{Delivery: true, Candidates: candidates},
+		{ClosedLoop: true, Candidates: candidates},
 		{CapabilityProxy: true, Candidates: candidates},
 	} {
 		proxyOut := RenderTransientBlock(decision)
@@ -283,7 +282,6 @@ func TestCatalogKeepsProxyToolsAfterConnect(t *testing.T) {
 	}
 	cat := BuildCatalog(CatalogOptions{
 		Plugins:    []config.PluginEntry{{Name: "gh", AutoStart: boolPtr(false)}},
-		Profile:    ProfileDelivery,
 		Connected:  map[string]bool{"gh": true}, // server is ready now
 		ProxyTools: proxy,
 	})
@@ -302,7 +300,6 @@ func TestCatalogKeepsProxyToolsAfterConnect(t *testing.T) {
 	cat = BuildCatalog(CatalogOptions{
 		Tools:      []tool.ContractEntry{{Name: plugin.ModelToolName("gh", "search_issues")}},
 		Plugins:    []config.PluginEntry{{Name: "gh", AutoStart: boolPtr(false)}},
-		Profile:    ProfileDelivery,
 		Connected:  map[string]bool{"gh": true},
 		ProxyTools: proxy,
 	})
@@ -322,7 +319,6 @@ func TestCatalogKeepsProxyToolsAfterConnect(t *testing.T) {
 func TestCatalogDoesNotRouteProxyToolsAfterFailure(t *testing.T) {
 	cat := BuildCatalog(CatalogOptions{
 		Plugins:     []config.PluginEntry{{Name: "gh", AutoStart: boolPtr(false)}},
-		Profile:     ProfileDelivery,
 		Failed:      map[string]string{"gh": "connection reset"},
 		Connected:   map[string]bool{"gh": true},
 		CachedTools: map[string][]plugin.CachedTool{"gh": {{Name: "search_issues"}}},

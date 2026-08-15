@@ -15,7 +15,6 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 
 	"reasonix/internal/ablation"
-	"reasonix/internal/agentpreset"
 	"reasonix/internal/capability"
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/diff"
@@ -360,17 +359,15 @@ type Agent struct {
 	// verify against same-turn bash receipts after a write-backed completion.
 	projectChecks []instruction.VerifyCheck
 
-	// deliveryProfile enables the runtime-enforced delivery contract. The stable
-	// profile prompt explains intent; this is host state and never enters the
-	// provider-cached prefix. The scope ID and checkpoint it works against live
-	// in task; the per-turn expectations live in turn.
-	// When agentPreset is set, deliveryProfile is derived for baseline Delivery
-	// and may be elevated per-turn by TaskPolicy (e.g. Light high-risk).
-	deliveryProfile bool
+	// closedLoop gates come from the frozen per-turn TaskPolicy (see turn.policy
+	// and closedLoopActive). Host state only; never enters the provider-cached
+	// prefix. The scope ID and checkpoint it works against live in task; the
+	// per-turn expectations live in turn.
 
-	// agentPreset is the session role setting. Atomic so SetAgentPreset can
-	// update subsequent turns without rebuilding the agent.
-	agentPreset atomic.Value // string light|balanced|delivery
+	// inheritedPolicy is the writer parent's frozen TaskPolicy. Writer
+	// sub-agents merge its risk and closure floors into their own policy;
+	// read-only sub-agents leave it nil.
+	inheritedPolicy *taskpolicy.TaskPolicy
 
 	// turn is the state of the Run currently executing; beginRunTurn replaces
 	// it wholesale. See turnruntime.go.
@@ -524,16 +521,6 @@ func (a *Agent) SetSandboxEscapeApprover(g sandbox.EscapeApprover) {
 	a.svc.sandboxEscape = g
 }
 
-// SetConfigWriteApprover installs the optional per-write approval path used by
-// the file tools when a target is a Reasonix-managed config file outside the
-// workspace write roots.
-func (a *Agent) SetConfigWriteApprover(g tool.ConfigWriteApprover) {
-	if nilutil.IsNil(g) {
-		g = nil
-	}
-	a.svc.configWrite = g
-}
-
 func (a *Agent) withTurnPreferences(input string) string {
 	if a == nil {
 		return input
@@ -615,6 +602,9 @@ func (a *Agent) SetSession(s *Session) {
 	// answer to beginRunTurn's scope check rather than to this seam.
 	a.task.repeatFailures = nil
 	a.task.repeatScope = ""
+	a.pending.preserveEvidence = false
+	a.pending.finalReadinessRecovery = false
+	a.pending.finalReadinessRecoveryPrepared = false
 	if s != nil {
 		a.rebuildTodoState(s.Snapshot())
 	}
@@ -943,27 +933,29 @@ type Options struct {
 	WriteScheduler *SubagentScheduler
 	// WriteWorkspaceRoot normalizes parent write reservations.
 	WriteWorkspaceRoot string
+	// WriteRoots is the session-scoped writable directory manager.
+	WriteRoots *sandbox.WritableRootSet
+	// WriteAccessGate authorizes extra writable directories. nil is fail-closed
+	// for missing dirs when WriteRoots is set.
+	WriteAccessGate WriteAccessGate
+	// DisableWriteAccessExpand prevents this agent from requesting new write
+	// directories. Sub-agents set this.
+	DisableWriteAccessExpand bool
+	// HomeDir and StateRoot are used to normalize and reject write directories.
+	HomeDir   string
+	StateRoot string
 
-	// WorkspaceLease serializes Delivery mutations across sessions that target
+	// WorkspaceLease serializes writer mutations across sessions that target
 	// the same workspace. nil preserves source compatibility for direct Agent
-	// construction; boot always supplies it for Delivery sessions.
+	// construction; boot always supplies it for writer-capable sessions.
 	WorkspaceLease *workspacelease.Owner
 
 	// ProjectChecks are host-observable structured checks extracted during boot.
 	ProjectChecks []instruction.VerifyCheck
 
-	// DeliveryProfile enforces acceptance criteria before mutations and requires
-	// post-change review, verification, and evidence-backed sign-off before a
-	// final answer. It changes host control flow, not tool schemas.
-	// Deprecated: prefer AgentPreset + turn TaskPolicy. Still honored when
-	// AgentPreset is empty for one compatibility version of direct constructors.
-	DeliveryProfile bool
-
-	// AgentPreset is the session role setting (light|balanced|delivery). Empty
-	// falls back to balanced unless DeliveryProfile is true (then delivery).
-	// Switching the preset mid-session does not rebuild the agent; the value is
-	// frozen at turn admission into TaskPolicy.
-	AgentPreset string
+	// InheritedTaskPolicy is the writer parent's frozen TaskPolicy. Writer
+	// sub-agents merge its risk/closure floors; read-only sub-agents ignore it.
+	InheritedTaskPolicy *taskpolicy.TaskPolicy
 
 	// Ablation switches subsystems off for a benchmark arm. The zero value runs
 	// everything, so ordinary callers leave it unset.
@@ -1113,7 +1105,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		readOnlyExecution:      opts.ReadOnlyExecution,
 		plannerMCPExecution:    opts.PlannerMCPExecution,
 		projectChecks:          append([]instruction.VerifyCheck(nil), opts.ProjectChecks...),
-		deliveryProfile:        opts.DeliveryProfile || agentpreset.Normalize(opts.AgentPreset) == agentpreset.Delivery,
+		inheritedPolicy:        opts.InheritedTaskPolicy,
 		ablation:               opts.Ablation,
 		capabilityLedger:       opts.CapabilityLedger,
 		capabilityAudit:        opts.CapabilityAudit,
@@ -1124,11 +1116,6 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	if a.sess.path != "" {
 		a.LoadProjectionSidecar(a.sess.path)
 	}
-	preset := strings.TrimSpace(opts.AgentPreset)
-	if preset == "" && opts.DeliveryProfile {
-		preset = string(agentpreset.Delivery)
-	}
-	a.SetAgentPreset(preset)
 	a.SetResponseLanguage(opts.ResponseLanguage)
 	a.SetReasoningLanguage(opts.ReasoningLanguage)
 	a.maybeArmForkFromEnv()
@@ -1136,40 +1123,16 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	return a
 }
 
-// SetAgentPreset updates the role setting used by subsequent turns. It does not
-// rebuild providers, tools, or history. The in-flight turn keeps its frozen
-// TaskPolicy.
-func (a *Agent) SetAgentPreset(preset string) {
+// closedLoopActive reports whether the current (or most recent) turn must
+// close the evidence loop. It replaces every historical deliveryProfile gate:
+// acceptance criteria before mutations, todo ownership, opaque-bash limits,
+// capability call preference, post-write verification, review, and sign-off.
+// It is authoritative only for host control flow, never for tool schemas.
+func (a *Agent) closedLoopActive() bool {
 	if a == nil {
-		return
+		return false
 	}
-	p := agentpreset.Normalize(preset)
-	a.agentPreset.Store(string(p))
-	// Keep baseline deliveryProfile aligned with Delivery role setting so
-	// legacy gates that still read the bool stay coherent until fully migrated.
-	switch p {
-	case agentpreset.Delivery:
-		a.deliveryProfile = true
-	case agentpreset.Light, agentpreset.Balanced:
-		// Light may still elevate per-turn; baseline stays non-delivery.
-		a.deliveryProfile = false
-	}
-}
-
-// AgentPreset returns the current session role setting (never empty).
-func (a *Agent) AgentPreset() string {
-	if a == nil {
-		return string(agentpreset.Balanced)
-	}
-	if v := a.agentPreset.Load(); v != nil {
-		if s, ok := v.(string); ok && s != "" {
-			return string(agentpreset.Normalize(s))
-		}
-	}
-	if a.deliveryProfile {
-		return string(agentpreset.Delivery)
-	}
-	return string(agentpreset.Balanced)
+	return a.turn.policySet && a.turn.policy.ClosedLoop()
 }
 
 // TurnPolicy returns the frozen TaskPolicy for the active turn, if any.
@@ -1266,6 +1229,10 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	// agent.before_start: an extension may abort the run before the user turn
 	// is appended. The redacted reason surfaces like a normal run error.
 	if err := a.interceptAgentStart(ctx); err != nil {
+		// Explicit readiness recovery is consumed only once beginRunTurn starts.
+		// If an extension blocks earlier, release the in-memory reservation so
+		// the still-pending durable marker can authorize a later retry.
+		a.pending.finalReadinessRecoveryPrepared = false
 		return err
 	}
 
@@ -1276,6 +1243,11 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	state.runMaxSteps = runMaxSteps
 	state.runMaxStepsKey = runMaxStepsKey
 	state.workDurationMs = workDurationMs
+	// Publish the frozen policy so writer sub-agents spawned this turn inherit
+	// its risk and closure floors instead of re-deriving a weaker contract.
+	if a.turn.policySet {
+		ctx = taskpolicy.WithContext(ctx, a.turn.policy)
+	}
 	return a.runToolLoop(ctx, state)
 }
 
@@ -1333,18 +1305,6 @@ func (a *Agent) RestoreDeliveryCheckpoint(checkpoint evidence.DeliveryCheckpoint
 	}
 	a.task.checkpoint = checkpoint
 	a.task.scopeID = checkpoint.ScopeID
-}
-
-// PrepareDeliveryRecovery preserves the exhausted turn's evidence for exactly
-// one explicit continuation. It returns false when there is no matching
-// readiness failure, so normal follow-up turns cannot inherit stale mutations.
-func (a *Agent) PrepareDeliveryRecovery() bool {
-	if !a.deliveryProfile || !a.pending.deliveryRecovery {
-		return false
-	}
-	a.pending.preserveEvidence = true
-	a.pending.deliveryRecovery = false
-	return true
 }
 
 func (a *Agent) updateDeliveryCheckpoint(runErr error) {

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/agentpreset"
 	"reasonix/internal/billing"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
@@ -296,7 +297,7 @@ func TestRestoreStatusMarksInterruptedTurnPaused(t *testing.T) {
 	}
 }
 
-func TestStatusRecomputesPlannerModeAfterWorkModeSwitch(t *testing.T) {
+func TestStatusWorkModeSetConfigOptionIsDeprecatedNoop(t *testing.T) {
 	factory := &runtimeTrackingFactory{configurableFactory: &configurableFactory{}}
 	client, stop := startServer(t, factory)
 	defer stop()
@@ -305,26 +306,31 @@ func TestStatusRecomputesPlannerModeAfterWorkModeSwitch(t *testing.T) {
 	if status := getStatus(t, client, sessionID); status.WorkMode != "balanced" || status.PlannerMode != "on" {
 		t.Fatalf("initial runtime status = %+v", status)
 	}
+	buildsBefore := factory.buildCount()
 
-	for _, tc := range []struct {
-		profile string
-		planner string
-	}{
-		{profile: "economy", planner: "off"},
-		{profile: "delivery", planner: "on"},
-	} {
+	for _, value := range []string{"economy", "delivery", "light"} {
 		resp := client.call(t, "session/set_config_option", SetSessionConfigOptionParams{
 			SessionID: sessionID,
 			ConfigID:  "work_mode",
-			Value:     tc.profile,
+			Value:     value,
 		})
 		if resp.Error != nil {
-			t.Fatalf("set work mode %q: %+v", tc.profile, resp.Error)
+			t.Fatalf("set work mode %q: %+v", value, resp.Error)
+		}
+		var set SetSessionConfigOptionResult
+		if err := json.Unmarshal(resp.Result, &set); err != nil {
+			t.Fatalf("set work mode %q result: %v", value, err)
+		}
+		if set.DeprecatedNotice != agentpreset.DeprecatedNotice {
+			t.Fatalf("set work mode %q deprecatedNotice = %q", value, set.DeprecatedNotice)
 		}
 		status := getStatus(t, client, sessionID)
-		if status.WorkMode != tc.profile || status.PlannerMode != tc.planner {
-			t.Fatalf("runtime status after %q = %+v", tc.profile, status)
+		if status.WorkMode != "balanced" || status.PlannerMode != "on" {
+			t.Fatalf("runtime status after deprecated work_mode %q = %+v", value, status)
 		}
+	}
+	if got := factory.buildCount(); got != buildsBefore {
+		t.Fatalf("work_mode rebuilt controller: builds=%d, want %d", got, buildsBefore)
 	}
 }
 

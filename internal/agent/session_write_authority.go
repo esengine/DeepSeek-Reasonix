@@ -40,6 +40,10 @@ type SessionWriteAuthority struct {
 	ownerID    uint64
 	generation uint64
 	lease      *SessionLease
+	// writer is the SessionWriter this authority was minted through, if any.
+	// Saves guarded by a writer-bound authority serialize through the
+	// writer's saveMu and update its event-log baseline.
+	writer *SessionWriter
 }
 
 // IssueWriteAuthority mints a path-bound authority for generation. The lease
@@ -115,10 +119,9 @@ func (a *SessionWriteAuthority) Covers(path string) bool {
 	return a.path == canonicalSessionSavePath(path)
 }
 
-// BeginSave marks an in-flight save against the issuing lease so Release waits
-// for the write cycle to finish. The returned release must run exactly once.
-// A missing or stale authority returns a typed error and does not enter the
-// diverged/recovery path.
+// BeginSave registers an in-flight save so Release waits for it. Writer-minted
+// authorities also hold saveMu for the whole cycle. The returned release runs
+// once; missing or stale authorities return a typed error, not recovery.
 func (a *SessionWriteAuthority) BeginSave(path string) (func(), error) {
 	if a == nil {
 		return nil, ErrSessionWriteAuthorityMissing
@@ -126,6 +129,28 @@ func (a *SessionWriteAuthority) BeginSave(path string) (func(), error) {
 	if a.lease == nil || a.generation == 0 {
 		return nil, ErrSessionWriteAuthorityMissing
 	}
+	if a.writer != nil {
+		a.writer.saveMu.Lock()
+	}
+	release, err := a.beginLeaseSave(path)
+	if err != nil {
+		if a.writer != nil {
+			a.writer.saveMu.Unlock()
+		}
+		return nil, err
+	}
+	writer := a.writer
+	return func() {
+		release()
+		if writer != nil {
+			writer.saveMu.Unlock()
+		}
+	}, nil
+}
+
+// beginLeaseSave registers the save against the lease's active-save count and
+// revalidates the authority under the lease lock.
+func (a *SessionWriteAuthority) beginLeaseSave(path string) (func(), error) {
 	a.lease.mu.Lock()
 	defer a.lease.mu.Unlock()
 	if a.path != canonicalSessionSavePath(path) ||

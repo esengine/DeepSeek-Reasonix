@@ -64,7 +64,7 @@ func anchorSkip(cfg suiteConfig, t task) (result, bool) {
 		return result{}, false
 	}
 	return result{
-		task: t, Profile: cfg.profile, Anchor: cfg.anchor, Skipped: true,
+		task: t, Profile: benchmarkProfileStandard, Anchor: cfg.anchor, Skipped: true,
 		Note: "skipped: no seed_" + cfg.anchor + " authored for this task",
 	}, true
 }

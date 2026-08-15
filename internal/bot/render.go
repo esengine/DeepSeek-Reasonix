@@ -128,34 +128,7 @@ func (s *renderSink) Emit(e event.Event) {
 		// still records the complete controller turn for desktop review.
 
 	case event.ApprovalRequest:
-		// 发送审批请求
-		if s.onApproval != nil {
-			s.onApproval(e.Approval)
-		}
-		approvalText := renderApprovalText(e.Approval)
-		msg := OutboundMessage{
-			ConnectionID: s.connID,
-			Domain:       s.domain,
-			ChatID:       s.chatID,
-			ChatType:     s.chatType,
-			Text:         approvalText,
-			ReplyToMsgID: s.replyTo,
-		}
-		switch s.adapter.Platform() {
-		case PlatformQQ:
-			if isRecoveryApproval(e.Approval) {
-				msg.Keyboard = recoveryKeyboard(e.Approval)
-			} else {
-				msg.Keyboard = approvalKeyboard(e.Approval.ID)
-			}
-		case PlatformFeishu:
-			if isRecoveryApproval(e.Approval) {
-				msg.Card = recoveryCard(e.Approval, s.chatType, s.userID)
-			} else {
-				msg.Card = approvalCard(e.Approval, s.chatType, s.userID)
-			}
-		}
-		_ = s.send(msg)
+		s.emitApproval(e.Approval)
 
 	case event.AskRequest:
 		if s.onAsk != nil {
@@ -554,6 +527,9 @@ func isRecoveryPlanChange(a event.Approval) bool {
 func renderApprovalText(a event.Approval) string {
 	if isRecoveryApproval(a) {
 		return renderRecoveryText(a)
+	}
+	if isWriteAccessApproval(a) {
+		return renderWriteAccessText(a)
 	}
 	return fmt.Sprintf("⚠️ 需要批准操作:\n工具: %s\n操作: %s\n\nID: `%s`\n回复 1 批准，回复 2 拒绝；也可用 /approve %s 或 /deny %s。",
 		a.Tool, a.Subject, a.ID, a.ID, a.ID)

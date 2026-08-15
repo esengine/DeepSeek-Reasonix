@@ -33,7 +33,6 @@ func chatTUIWithRunningBackgroundJob(t *testing.T) chatTUI {
 	m := newTestChatTUI()
 	m.ctrl = ctrl
 	m.modelRef = "deepseek-flash/deepseek-v4-flash"
-	m.runtimeProfile = "full"
 	m.buildController = func(controllerBuildSpec, []provider.Message, string, control.SessionAPI) (*control.Controller, error) {
 		t.Fatal("runtime switch built a replacement while a background job was running")
 		return nil, nil
@@ -305,7 +304,6 @@ func TestWorkModeSwitchUpdatesInPlaceWithoutRebuildOrLeaseMove(t *testing.T) {
 	oldCtrl := divergedSessionController(t, dir, originalPath)
 	m.ctrl = oldCtrl
 	m.modelRef = "deepseek-flash/deepseek-v4-flash"
-	m.runtimeProfile = "full"
 	m.leases = control.NewSessionLeaseKeeper()
 	t.Cleanup(m.leases.Release)
 	if err := m.leases.Rebind(originalPath); err != nil {
@@ -319,13 +317,13 @@ func TestWorkModeSwitchUpdatesInPlaceWithoutRebuildOrLeaseMove(t *testing.T) {
 
 	cmd := m.runWorkModeCommand("/preset delivery")
 	if cmd != nil {
-		t.Fatal("role-setting switch must not queue a controller rebuild")
+		t.Fatal("deprecated /preset must not queue a controller rebuild")
 	}
 	if m.ctrl != oldCtrl {
 		t.Fatal("controller instance must stay the same")
 	}
-	if m.runtimeProfile != boot.TokenModeDelivery {
-		t.Fatalf("runtime profile = %q, want delivery", m.runtimeProfile)
+	if m.ctrl.AgentPreset() != boot.AgentPresetBalanced {
+		t.Fatalf("controller preset = %q, want balanced", m.ctrl.AgentPreset())
 	}
 	if builds != 0 {
 		t.Fatalf("unexpected rebuilds: %d", builds)

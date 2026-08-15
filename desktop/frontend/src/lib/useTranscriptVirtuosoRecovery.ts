@@ -10,6 +10,7 @@ import {
 } from "./transcriptVirtuosoRecovery";
 
 const LAYOUT_INVALIDATION_BATCH_MS = 48;
+const BLANK_RECOVERY_COOLDOWN_MS = 2_000;
 
 /** Rebuilds stale Virtuoso size trees while preserving the logical viewport. */
 export function useTranscriptVirtuosoRecovery({
@@ -41,6 +42,7 @@ export function useTranscriptVirtuosoRecovery({
   const pendingAnchorRef = useRef<{ surfaceKey: string; anchor: TranscriptLayoutAnchor } | null>(null);
   const stableManualAnchorRef = useRef<Extract<TranscriptLayoutAnchor, { mode: "manual" }> | null>(null);
   const lastBlankRecoveryRef = useRef("");
+  const lastBlankRecoveryAtRef = useRef(0);
   latestRevisionRef.current = historyLayoutRevision;
 
   useEffect(() => {
@@ -48,6 +50,7 @@ export function useTranscriptVirtuosoRecovery({
     pendingAnchorRef.current = null;
     stableManualAnchorRef.current = null;
     lastBlankRecoveryRef.current = "";
+    lastBlankRecoveryAtRef.current = 0;
     if (resetTimerRef.current !== null) window.clearTimeout(resetTimerRef.current);
     if (blankCheckFrameRef.current !== null) cancelAnimationFrame(blankCheckFrameRef.current);
     resetTimerRef.current = null;
@@ -70,6 +73,14 @@ export function useTranscriptVirtuosoRecovery({
     setResetEpoch((epoch) => epoch + 1);
     return true;
   }, [pinnedRef, readyRef, scrollRef, surfaceKey]);
+
+  // Explicit user scroll intent outranks recovery: drop any pending/cached
+  // anchor so an in-flight restore loop exits at its next frame check and a
+  // later reset re-captures from the user's own position (#8657/#8688).
+  const invalidateAnchors = useCallback(() => {
+    pendingAnchorRef.current = null;
+    stableManualAnchorRef.current = null;
+  }, []);
 
   useEffect(() => {
     if (appliedRevisionRef.current === historyLayoutRevision) return;
@@ -120,9 +131,15 @@ export function useTranscriptVirtuosoRecovery({
         blankCheckFrameRef.current = null;
         const element = scrollRef.current;
         if (!element || !transcriptElementViewportIsBlank(element)) return;
-        const recoveryKey = `${surfaceKey}:${historyLayoutRevision}:${Math.round(element.scrollTop)}`;
+        // Dedup on surface + content revision only. scrollTop drifts
+        // continuously while streaming, so including it disabled the dedup
+        // and allowed back-to-back full-list remounts (#8657/#8688).
+        const recoveryKey = `${surfaceKey}:${historyLayoutRevision}`;
+        const now = Date.now();
         if (lastBlankRecoveryRef.current === recoveryKey) return;
+        if (now - lastBlankRecoveryAtRef.current < BLANK_RECOVERY_COOLDOWN_MS) return;
         lastBlankRecoveryRef.current = recoveryKey;
+        lastBlankRecoveryAtRef.current = now;
         requestReset();
       });
     });
@@ -184,5 +201,6 @@ export function useTranscriptVirtuosoRecovery({
     restoreLocation,
     handleItemsRendered,
     scheduleBlankViewportCheck,
+    invalidateAnchors,
   };
 }

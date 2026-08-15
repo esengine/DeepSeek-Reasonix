@@ -3,6 +3,7 @@
 import type { HistoryServerSearch } from "./searchSources";
 import type { Todo } from "./tools";
 import type { ContextMaintenanceInfo, WireContextMaintenance } from "./contextMaintenanceTypes";
+import type { WireApproval } from "./approvalTypes";
 export type { ContextMaintenanceInfo, ContextMaintenanceReceipt, WireContextMaintenance } from "./contextMaintenanceTypes";
 export type { ProjectRuntimeTopic, ProjectTopicKey, ProjectTopicPage, ProjectTopicPageRequest, ProjectTreeChangedV2, ProjectTreeRuntimeSnapshot, ProjectTreeSnapshot, SessionCatalogBindings, SessionCatalogStatus, SessionReference } from "./sessionCatalogTypes";
 export type EventKind =
@@ -186,15 +187,7 @@ export interface WireRecoveryApproval {
   task_grant_scope?: string;
 }
 
-export interface WireApproval {
-  id: string;
-  tool: string;
-  subject: string;
-  reason?: string;
-  fresh?: boolean;
-  kind?: "tool" | "plan" | "recovery" | string;
-  recovery?: WireRecoveryApproval;
-}
+export type { WireApproval, WireWriteAccessApproval } from "./approvalTypes";
 
 export interface WireGuardian {
   id: string;
@@ -698,6 +691,7 @@ export interface HistoryMessage {
   summary?: string;
   archive?: string;
   decisionReceipt?: WireDecisionReceipt;
+  readiness?: WireFinalReadiness;
   serverSearch?: HistoryServerSearch[];
 }
 
@@ -853,25 +847,7 @@ export interface CheckpointMeta {
   disabledReason?: string;
 }
 
-export interface RewindPlanView {
-  planId?: string;
-  turn?: number;
-  scope?: string;
-  coverage?: string;
-  coverageGaps?: string[];
-  legacy?: boolean;
-  expiredFilePayload?: boolean;
-  canFiles?: boolean;
-  canConversation?: boolean;
-  disabledReason?: string;
-  conflicts?: string[];
-  files?: string[];
-  fileCount?: number;
-  activeWriters?: number;
-  path?: string;
-  ok?: boolean;
-  error?: string;
-}
+export type { RewindPlanView } from "./rewindTypes";
 
 export interface RewindResultView {
   ok?: boolean;
@@ -880,6 +856,12 @@ export interface RewindResultView {
   written?: string[];
   deleted?: string[];
   conversationOk?: boolean;
+  conversationForked?: boolean;
+  operationId?: string;
+  branch?: string;
+  partial?: boolean;
+  tabId?: string;
+  tab?: TabMeta;
   error?: string;
   conflicts?: string[];
   coverage?: string;

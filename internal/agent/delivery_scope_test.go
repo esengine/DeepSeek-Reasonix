@@ -20,8 +20,8 @@ func TestDeliveryExecutionScopeDoesNotChangeProviderRequestBytes(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeReadFileTool{})
 
-	unscoped := New(unscopedProvider, reg, NewSession("stable system"), Options{DeliveryProfile: true}, event.Discard)
-	scoped := New(scopedProvider, reg, NewSession("stable system"), Options{DeliveryProfile: true}, event.Discard)
+	unscoped := New(unscopedProvider, reg, NewSession("stable system"), Options{}, event.Discard)
+	scoped := New(scopedProvider, reg, NewSession("stable system"), Options{}, event.Discard)
 	input := "explain the current implementation"
 	if err := unscoped.Run(context.Background(), input); err != nil {
 		t.Fatalf("unscoped run: %v", err)
@@ -54,8 +54,8 @@ func TestDeliveryGoalFinalAnswerAlwaysGatesMutationExpectation(t *testing.T) {
 		{{Type: provider.ChunkText, Text: "Investigation complete."}, {Type: provider.ChunkDone}},
 		{{Type: provider.ChunkText, Text: "Implemented."}, {Type: provider.ChunkDone}},
 	}}
-	a := New(prov, reg, NewSession(""), Options{DeliveryProfile: true}, event.Discard)
-	ctx := deliveryGoalContext("goal-1", "fix the crash in main.go")
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
+	ctx := withClosedLoopContext(deliveryGoalContext("goal-1", "fix the crash in main.go"))
 	// A read-only final answer is gated on the mutation expectation immediately:
 	// the host no longer defers readiness for marker-carrying turns, the Goal
 	// FSM absorbs the failure and continues with the missing requirements.
@@ -78,7 +78,7 @@ func TestDeliveryGoalScopeCarriesSignedOffMutationAcrossTurns(t *testing.T) {
 		{{Type: provider.ChunkText, Text: "Implementation complete."}, {Type: provider.ChunkDone}},
 		{{Type: provider.ChunkText, Text: "Final summary."}, {Type: provider.ChunkDone}},
 	}}
-	a := New(prov, reg, NewSession(""), Options{DeliveryProfile: true}, event.Discard)
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
 	ctx := deliveryGoalContext("goal-1", "implement main")
 	if err := a.Run(ctx, "implement the first chunk"); err != nil {
 		t.Fatalf("mutation turn: %v", err)
@@ -101,7 +101,7 @@ func TestDeliveryGoalRestoredPendingMutationCompletesWithoutNewWrite(t *testing.
 		{toolCallChunk("signoff", "complete_step", `{"step":"Ship main","result":"implemented","evidence":[{"kind":"verification","summary":"tests pass","command":"go test ./..."}]}`), {Type: provider.ChunkDone}},
 		{{Type: provider.ChunkText, Text: "Recovered and verified."}, {Type: provider.ChunkDone}},
 	}}
-	a := New(prov, reg, NewSession(""), Options{DeliveryProfile: true}, event.Discard)
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
 	a.RestoreDeliveryCheckpoint(evidence.DeliveryCheckpoint{
 		ScopeID:             "goal-1",
 		CriteriaEstablished: true,
@@ -131,7 +131,7 @@ func TestDeliveryGoalNewMutationInvalidatesPriorSignoff(t *testing.T) {
 		{toolCallChunk("write-2", "write_file", `{"path":"main.go"}`), {Type: provider.ChunkDone}},
 		{{Type: provider.ChunkText, Text: "All done."}, {Type: provider.ChunkDone}},
 	}}
-	a := New(prov, reg, NewSession(""), Options{DeliveryProfile: true}, event.Discard)
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
 	ctx := deliveryGoalContext("goal-1", "implement main")
 	if err := a.Run(ctx, "implement the first chunk"); err != nil {
 		t.Fatalf("first turn: %v", err)

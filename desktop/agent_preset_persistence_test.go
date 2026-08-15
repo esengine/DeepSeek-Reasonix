@@ -27,10 +27,28 @@ func TestSaveTabSessionMetaReplacesStaleAgentPreset(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("LoadBranchMeta = %+v, %v, %v", got, ok, err)
 	}
-	if got.AgentPreset != boot.AgentPresetDelivery || got.TokenMode != boot.TokenModeDelivery {
-		t.Fatalf("persisted role = preset:%q tokenMode:%q, want delivery dual-write", got.AgentPreset, got.TokenMode)
+	if got.AgentPreset != boot.AgentPresetBalanced || got.TokenMode != boot.TokenModeFull {
+		t.Fatalf("persisted role = preset:%q tokenMode:%q, want pinned balanced/full", got.AgentPreset, got.TokenMode)
 	}
-	if restored := tabSessionProfileFromMeta(path, got).tokenMode; restored != boot.TokenModeDelivery {
-		t.Fatalf("restored tokenMode = %q, want delivery", restored)
+	if restored := tabSessionProfileFromMeta(path, got).tokenMode; restored != boot.TokenModeFull {
+		t.Fatalf("restored tokenMode = %q, want pinned full", restored)
+	}
+}
+
+func TestTabSessionProfileFromMetaDecodesLegacyDelivery(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.jsonl")
+	meta, err := agent.EnsureBranchMeta(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta.AgentPreset = boot.AgentPresetDelivery
+	meta.TokenMode = boot.TokenModeDelivery
+	if restored := tabSessionProfileFromMeta(path, meta).tokenMode; restored != boot.TokenModeDelivery {
+		t.Fatalf("legacy decode tokenMode = %q, want delivery", restored)
+	}
+	tab := &WorkspaceTab{}
+	applyTabSessionProfile(tab, tabSessionProfileFromMeta(path, meta))
+	if got := currentTabTokenMode(tab); got != boot.TokenModeFull {
+		t.Fatalf("legacy delivery must not change runtime tokenMode: got %q", got)
 	}
 }

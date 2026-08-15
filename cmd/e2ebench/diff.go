@@ -16,9 +16,9 @@ import (
 )
 
 type diffOpts struct {
-	bin, model, repo, base, testCmd, profile string
-	ablate                                   ablation.Set
-	maxSteps, timeoutSec, attempts           int
+	bin, model, repo, base, testCmd string
+	ablate                          ablation.Set
+	maxSteps, timeoutSec, attempts  int
 }
 
 type testRef struct{ name, pkg string }
@@ -39,11 +39,7 @@ type pinResult struct {
 func runDiff(o diffOpts) string {
 	srcFiles := changedGoFiles(o.repo, o.base, false)
 	if len(srcFiles) == 0 {
-		profile := o.profile
-		if profile == "" {
-			profile = benchmarkProfileBaseline
-		}
-		return fmt.Sprintf("## 🤖 Reasonix e2e — diff test-gen (%s)\n\nNo Go source changes in this PR (excluding `_test.go`); nothing to generate tests for.\n", profile)
+		return "## 🤖 Reasonix e2e — diff test-gen\n\nNo Go source changes in this PR (excluding `_test.go`); nothing to generate tests for.\n"
 	}
 	pkgs := packagesOf(srcFiles)
 	prompt := buildDiffPrompt(srcFiles, pkgs, truncate(gitOut(o.repo, "diff", o.base+"...HEAD", "--")))
@@ -83,7 +79,6 @@ func runOnce(o diffOpts, srcFiles, pkgs []string, prompt string) diffReport {
 	if o.model != "" {
 		args = append(args, "--model", o.model)
 	}
-	args = appendBenchmarkProfileArgs(args, o.profile)
 	if !o.ablate.Empty() {
 		args = append(args, "--ablate", o.ablate.String())
 	}
@@ -121,7 +116,7 @@ func runOnce(o diffOpts, srcFiles, pkgs []string, prompt string) diffReport {
 		newTests: refs, sourceTouched: sourceTouched, testsPass: testsPass,
 		pins: pins, mut: mut, covered: covered, coverTotal: coverTotal,
 		buildOK: buildOK, buildOut: buildOut, failing: failingTestNames(testOut),
-		passed: passed, profile: o.profile, m: m, runErr: runErr, testOut: testOut, testDiff: testDiff,
+		passed: passed, m: m, runErr: runErr, testOut: testOut, testDiff: testDiff,
 	}
 }
 
@@ -197,7 +192,6 @@ type diffReport struct {
 	buildOut            string
 	failing             []string
 	passed              bool
-	profile             string
 	attempt, attempts   int
 	m                   runMetrics
 	runErr              error
@@ -211,11 +205,7 @@ func renderDiff(r diffReport) string {
 	if r.passed {
 		result = "✅ pass"
 	}
-	profile := r.profile
-	if profile == "" {
-		profile = benchmarkProfileBaseline
-	}
-	fmt.Fprintf(&b, "## 🤖 Reasonix e2e — diff test-gen (%s)\n\n", profile)
+	fmt.Fprint(&b, "## 🤖 Reasonix e2e — diff test-gen\n\n")
 	fmt.Fprintf(&b, "**Result:** %s · **%d** changed source file(s) across **%d** package(s)\n\n", result, len(r.srcFiles), len(r.pkgs))
 
 	pinned, byAssert := countPins(r.pins), countAssertionPins(r.pins)

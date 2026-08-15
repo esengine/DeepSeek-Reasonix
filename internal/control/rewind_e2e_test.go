@@ -253,17 +253,49 @@ func TestRewindConversationSucceedsWithLiveBoundary(t *testing.T) {
 		t.Fatalf("Rewind with a live boundary: %v", err)
 	}
 	if got := len(ag.Session().Messages); got != boundary {
-		t.Fatalf("session truncated to %d messages, want boundary %d", got, boundary)
+		t.Fatalf("switched session = %d messages, want boundary %d", got, boundary)
 	}
 	ok := false
 	for _, e := range *events {
-		if e.Kind == event.Notice && strings.Contains(e.Text, "rewound conversation") {
+		if e.Kind == event.Notice && strings.Contains(e.Text, "forked conversation") {
 			ok = true
 		}
 	}
 	if !ok {
-		t.Fatal("expected a conversation-rewind success notice")
+		t.Fatal("expected a conversation-fork success notice")
 	}
+}
+
+func TestCompatibilityRewindTransfersLeaseBeforeForkSwitch(t *testing.T) {
+	c, ag, _ := runTwoTurns(t)
+	originalPath := c.SessionPath()
+	keeper := NewSessionLeaseKeeper()
+	defer keeper.Release()
+	if err := keeper.Rebind(originalPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := keeper.BindControllerAuthority(c); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := c.Rewind(1, RewindConversation); err != nil {
+		t.Fatalf("Rewind: %v", err)
+	}
+	targetPath := c.SessionPath()
+	if targetPath == originalPath {
+		t.Fatal("conversation rewind did not switch to its fork")
+	}
+	if got := keeper.HeldPath(); got != agent.CanonicalSessionPath(targetPath) {
+		t.Fatalf("keeper path = %q, want %q", got, agent.CanonicalSessionPath(targetPath))
+	}
+	if auth := ag.Session().WriteAuthority(); auth == nil || !auth.Covers(targetPath) {
+		t.Fatal("fork was published without target write authority")
+	}
+	old, err := agent.TryAcquireSessionLease(originalPath)
+	if err != nil {
+		t.Fatalf("parent lease remained held after switch: %v", err)
+	}
+	old.Release()
 }
 
 func TestPositionalCompressionPreservesCheckpointLineage(t *testing.T) {

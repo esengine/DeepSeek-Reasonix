@@ -105,7 +105,7 @@ func TestCLIProfileBuildOptionsPropagateInteractiveOwners(t *testing.T) {
 		recovered = true
 		return nil
 	}
-	opts := cliProfileBuildOptions("provider/model", 9, false, event.Discard, "delivery", cliBuildOverrides{
+	opts := cliProfileBuildOptions("provider/model", 9, false, event.Discard, cliBuildOverrides{
 		WorkspaceRoot:        "/workspace",
 		HeadlessApprovalMode: control.ToolApprovalAuto,
 		Stderr:               &diagnostic,
@@ -140,7 +140,7 @@ func TestCLIProfileBuildOptionsDoNotResolveLocalePricing(t *testing.T) {
 		{language: "zh-TW", want: ""},
 	} {
 		i18n.DetectLanguage(tt.language)
-		opts := cliProfileBuildOptions("provider/model", 0, false, event.Discard, "balanced", cliBuildOverrides{})
+		opts := cliProfileBuildOptions("provider/model", 0, false, event.Discard, cliBuildOverrides{})
 		_ = opts
 		_ = tt.want
 	}

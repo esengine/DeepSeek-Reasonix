@@ -48,8 +48,9 @@ func TestSlashCompletionFilterAndAccept(t *testing.T) {
 	if !m.completion.active || m.completion.kind != compSlash {
 		t.Fatalf("typing /co should open the slash menu: %+v", m.completion)
 	}
-	// /compact, /context and /copy all start with "/co", in that order.
-	want := []string{"/compact", "/context", "/copy"}
+	// The common commands keep their stable order; explicit readiness recovery
+	// is discoverable after them and fails safely when no card is pending.
+	want := []string{"/compact", "/context", "/copy", "/continue-checks"}
 	if got := labels(m.completion.items); !slices.Equal(got, want) {
 		t.Fatalf("filter = %v, want %v", got, want)
 	}

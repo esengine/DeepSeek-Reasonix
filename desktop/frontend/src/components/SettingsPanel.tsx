@@ -1705,7 +1705,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
         <SettingsField label={t("settings.reasoningDisplay")} hint={t("settings.reasoningDisplayHint")} icon={<BrainCircuit size={18} />}>
           <div>
             <div className="set-seg" role="radiogroup" aria-label={t("settings.reasoningDisplay")}>
-              {(["hidden", "summary", "auto"] as const).map((mode) => (
+              {(["hidden", "summary", "auto", "expanded"] as const).map((mode) => (
                 <button
                   key={mode}
                   type="button"

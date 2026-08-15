@@ -277,11 +277,11 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	// Goal turns bind a scope+epoch recorder for update_goal and observational
 	// usage. It stays active through FSM/evaluator work; error paths clear it.
 	ctx = c.bindTurnScope(ctx, continuation)
+	ctx = c.withPlannerTurnMetadata(ctx, turn.raw, turn.synthetic, startMessages)
 	modelInput := input
 	if !turn.synthetic {
 		modelInput = c.withCapabilityRoute(ctx, input, turn.raw)
 	}
-	ctx = c.withPlannerTurnMetadata(ctx, turn.raw, turn.synthetic, startMessages)
 	// Real user turns open a fresh Recovery Episode. Goal auto-continues and
 	// other synthetic turns inherit the current Episode so budgets accumulate
 	// only within one host-owned execution round.

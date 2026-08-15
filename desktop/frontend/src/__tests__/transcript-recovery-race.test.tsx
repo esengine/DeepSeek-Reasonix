@@ -67,25 +67,27 @@ const scrollRef = { current: scrollElement };
 const pinnedRef = { current: false };
 const readyRef = { current: true };
 let scrollByCalls = 0;
+let scrollToIndexCalls = 0;
+let scrollToBottomCalls = 0;
 const virtuosoRef = {
   current: {
     scrollBy: () => { scrollByCalls += 1; },
-    scrollToIndex: () => undefined,
+    scrollToIndex: () => { scrollToIndexCalls += 1; },
   } as unknown as VirtuosoHandle,
 };
 let recovery: ReturnType<typeof useTranscriptVirtuosoRecovery> | undefined;
 
-function Probe({ surfaceKey }: { surfaceKey: string }) {
+function Probe({ surfaceKey, revision = 0 }: { surfaceKey: string; revision?: number }) {
   recovery = useTranscriptVirtuosoRecovery({
     surfaceKey,
-    historyLayoutRevision: 0,
+    historyLayoutRevision: revision,
     rows,
     rowIndexByKey: new Map([["row-a", 0]]),
     scrollRef,
     pinnedRef,
     virtuosoRef,
     readyRef,
-    scrollToBottom: () => undefined,
+    scrollToBottom: () => { scrollToBottomCalls += 1; },
   });
   return null;
 }
@@ -105,6 +107,35 @@ await act(async () => recovery?.handleItemsRendered(1));
 await act(async () => root.render(<Probe surfaceKey="surface-c" />));
 await flushFrames();
 check(scrollByCalls === 0, "stale anchor correction cannot scroll the newly selected surface");
+
+// ── invalidateAnchors: user intent cancels an in-flight restore (#8657/#8688)
+await act(async () => recovery?.scheduleBlankViewportCheck());
+await flushFrames();
+await flushFrames();
+check(recovery?.resetKey === "surface-c:2", "blank viewport rebuilds the size tree on the current surface");
+scrollByCalls = 0;
+scrollToIndexCalls = 0;
+scrollToBottomCalls = 0;
+await act(async () => recovery?.invalidateAnchors());
+await act(async () => recovery?.handleItemsRendered(1));
+await flushFrames();
+check(scrollByCalls === 0, "invalidated anchor stops the restore correction loop");
+check(scrollToIndexCalls === 0, "invalidated anchor never re-aims at the stale row");
+check(scrollToBottomCalls === 1, "a reset without an anchor settles at the bottom");
+
+// ── Blank-recovery cooldown: revision bump rebuilds, immediate re-blank is blocked
+await act(async () => root.render(<Probe surfaceKey="surface-c" revision={1} />));
+await act(async () => new Promise((resolve) => setTimeout(resolve, 60)));
+await flushFrames();
+check(recovery?.resetKey === "surface-c:3", "layout revision rebuilds the size tree after the batch window");
+await act(async () => recovery?.handleItemsRendered(1));
+for (let i = 0; i < 10; i += 1) await flushFrames();
+scrollByCalls = 0;
+await act(async () => recovery?.scheduleBlankViewportCheck());
+await flushFrames();
+await flushFrames();
+check(recovery?.resetKey === "surface-c:3", "blank recovery within the cooldown window is ignored");
+check(scrollByCalls === 0, "cooldown-blocked blank check performs no correction");
 
 await act(async () => root.unmount());
 dom.window.close();

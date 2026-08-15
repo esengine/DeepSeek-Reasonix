@@ -19,7 +19,7 @@ import {
   selectedTextSnippet,
 } from "../lib/selectedTextContext";
 import { ToastProvider } from "../lib/toast";
-import type { CollaborationMode, TokenMode, ToolApprovalMode } from "../lib/types";
+import type { CollaborationMode, ToolApprovalMode } from "../lib/types";
 
 let passed = 0;
 let failed = 0;
@@ -125,7 +125,7 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
     running: false,
     collaborationMode: "normal",
     toolApprovalMode: "ask" as ToolApprovalMode,
-    tokenMode: "full" as TokenMode,
+
     goal: "",
     cwd: "/repo",
     modelLabel: "DeepSeek-R1",
@@ -141,7 +141,7 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
     onClearGoal: () => {},
     onSwitchModel: () => {},
     onSetEffort: () => {},
-    onSetTokenMode: () => {},
+
     ready: true,
     ...props,
   };

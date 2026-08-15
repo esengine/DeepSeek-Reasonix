@@ -32,10 +32,9 @@ type BranchMeta struct {
 	TopicTitle       string    `json:"topic_title,omitempty"`
 	CustomTitle      string    `json:"custom_title,omitempty"`
 	Model            string    `json:"model,omitempty"`
-	// TokenMode is the legacy dual-write value (economy|full|delivery). Prefer
-	// AgentPreset (light|balanced|delivery) when both are present.
+	// TokenMode is a deprecated dual-write field; new writes pin it to "full".
 	TokenMode string `json:"token_mode,omitempty"`
-	// AgentPreset is the session role setting (角色设定): light|balanced|delivery.
+	// AgentPreset is a deprecated dual-write field; new writes pin it to "balanced".
 	AgentPreset      string `json:"agent_preset,omitempty"`
 	Mode             string `json:"mode,omitempty"`
 	ToolApprovalMode string `json:"tool_approval_mode,omitempty"`
@@ -43,11 +42,8 @@ type BranchMeta struct {
 	Recovered        bool   `json:"recovered,omitempty"`
 	RecoveryReason   string `json:"recovery_reason,omitempty"`
 	RecoveryDigest   string `json:"recovery_digest,omitempty"`
-	// RecoveryDepth counts how many recovery forks separate this branch from a
-	// normal session (1 = forked from a normal session). SaveRecoveryBranch
-	// refuses to fork past SessionRecoveryMaxDepth so a conflict loop cannot
-	// spawn unbounded nested recovery chains (#5993 reached 8 levels). Legacy
-	// recovery metas without the field are treated as depth 1.
+	// RecoveryDepth is 1 for new stable recovery branches. Older nested
+	// files may still carry a larger historical value.
 	RecoveryDepth int `json:"recovery_depth,omitempty"`
 	// RecoveryPreferred is a user's explicit choice among genuinely diverged
 	// recovery leaves. It changes the default open target, but never authorizes
@@ -267,6 +263,7 @@ func saveBranchMeta(sessionPath string, m BranchMeta, touchUpdated bool) error {
 	if existing, ok, err := LoadBranchMeta(sessionPath); err == nil && ok {
 		preserveBranchMetaPersistence(&m, existing)
 	}
+	fileutil.Crash("branch-meta", metaPath)
 	if err := os.MkdirAll(filepath.Dir(metaPath), 0o755); err != nil {
 		return err
 	}

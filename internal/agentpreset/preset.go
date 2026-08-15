@@ -1,33 +1,29 @@
-// Package agentpreset defines the three Agent role settings (角色设定) that
-// control planning depth, verification breadth, and independent review
-// frequency without changing tool schemas or security boundaries.
+// Package agentpreset holds the deprecated execution-mode vocabulary kept for
+// one compatibility version. Reasonix now runs a single adaptive standard
+// execution policy (see internal/taskpolicy); these helpers exist only so old
+// CLI flags, ACP options, persisted sessions, and Desktop tabs can be parsed,
+// answered with a deprecation notice, and dual-written with safe values for
+// older clients. Nothing here may influence runtime behavior.
 package agentpreset
 
 import "strings"
 
-// AgentPreset is a session-scoped role setting. It is independent of
-// sub-agent ProfileDefinition values.
+// AgentPreset is a deprecated session-scoped execution-mode label.
 type AgentPreset string
 
 const (
-	// Light is 轻量 · 快速可靠: direct when simple, targeted verification,
-	// independent review only for high risk.
+	// Light is the deprecated 轻量 mode label.
 	Light AgentPreset = "light"
-	// Balanced is 均衡 · 智能适配: complexity-adaptive planning and review.
-	// It is the zero-configuration default for every new entry point.
+	// Balanced is the deprecated 均衡 mode label. It is also the fixed safe
+	// value written into new persisted compat fields.
 	Balanced AgentPreset = "balanced"
-	// Delivery is 交付 · 证据闭环: full acceptance evidence and forced
-	// independent review on medium/high-risk mutations.
+	// Delivery is the deprecated 交付 mode label.
 	Delivery AgentPreset = "delivery"
 )
 
-// PolicyVersion is the host-visible policy schema version embedded in the
-// transient execution-policy block. Bump when the block shape changes.
-const PolicyVersion = 1
-
-// Normalize maps free-form and legacy values onto a canonical AgentPreset.
-// Empty and unknown values fall back to Balanced. One compatibility version
-// of old token/work-mode names is accepted.
+// Normalize maps free-form and legacy values onto a canonical label. Empty and
+// unknown values fall back to Balanced. Old token/work-mode names are accepted
+// for one compatibility version.
 func Normalize(raw string) AgentPreset {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case string(Light), "economy", "eco", "save", "saving", "low", "lite", "minimal":
@@ -41,7 +37,7 @@ func Normalize(raw string) AgentPreset {
 	}
 }
 
-// IsValid reports whether raw is an exact canonical preset name.
+// IsValid reports whether raw is an exact canonical preset label.
 func IsValid(raw string) bool {
 	switch AgentPreset(strings.ToLower(strings.TrimSpace(raw))) {
 	case Light, Balanced, Delivery:
@@ -51,13 +47,8 @@ func IsValid(raw string) bool {
 	}
 }
 
-// All returns the three canonical presets in stable menu order.
-func All() []AgentPreset {
-	return []AgentPreset{Light, Balanced, Delivery}
-}
-
-// LegacyTokenMode returns the one-version dual-write tokenMode value for
-// older clients. Unknown/empty presets map to "full" (historical balanced).
+// LegacyTokenMode returns the deprecated dual-write tokenMode value older
+// clients expect next to a persisted preset. It is a wire-compat mapping only.
 func LegacyTokenMode(p AgentPreset) string {
 	switch Normalize(string(p)) {
 	case Light:
@@ -69,10 +60,14 @@ func LegacyTokenMode(p AgentPreset) string {
 	}
 }
 
-// FromLegacyTokenMode maps a persisted or CLI tokenMode onto AgentPreset.
+// FromLegacyTokenMode maps a persisted or CLI tokenMode onto a preset label.
 func FromLegacyTokenMode(mode string) AgentPreset {
 	return Normalize(mode)
 }
+
+// DeprecatedNotice is the one-time-per-process notice old entry points print
+// after accepting a mode argument.
+const DeprecatedNotice = "Reasonix now uses one adaptive standard execution: planning, verification, and review strength follow task risk. Execution modes are no longer switchable; this option is accepted for compatibility and ignored."
 
 // String returns the canonical identifier.
 func (p AgentPreset) String() string {

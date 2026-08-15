@@ -242,21 +242,23 @@ func TestStatuslineShowsGitAndEffortInPersistentFooter(t *testing.T) {
 	}
 }
 
-func TestStatuslineShowsWorkModeAndBalanceInPersistentFooter(t *testing.T) {
+func TestStatuslineShowsModelAndBalanceInPersistentFooter(t *testing.T) {
 	i18n.DetectLanguage("en")
 
 	ctrl := control.New(control.Options{})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 120)
 	m.label = "deepseek-v4-flash"
-	m.runtimeProfile = "delivery"
 	m.balance = "¥12.34"
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
 	lines := bottomStatusPlainLines(next.(chatTUI).View().Content)
 	if len(lines) != 3 {
 		t.Fatalf("status block lines = %d, want 3:\n%s", len(lines), strings.Join(lines, "\n"))
 	}
-	if !strings.Contains(lines[0], "MODEL deepseek-v4-flash   WORK delivery") {
-		t.Fatalf("mode row should show model and work mode:\n%s", strings.Join(lines, "\n"))
+	if !strings.Contains(lines[0], "MODEL deepseek-v4-flash") {
+		t.Fatalf("session row should show model:\n%s", strings.Join(lines, "\n"))
+	}
+	if strings.Contains(strings.Join(lines, "\n"), "WORK") {
+		t.Fatalf("status line should not show execution-mode labels:\n%s", strings.Join(lines, "\n"))
 	}
 	if !strings.Contains(lines[2], "BAL ¥12.34") {
 		t.Fatalf("telemetry row should show balance:\n%s", strings.Join(lines, "\n"))

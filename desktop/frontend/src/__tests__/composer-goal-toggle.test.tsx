@@ -11,7 +11,7 @@ import { LocaleProvider } from "../lib/i18n";
 import { ToastProvider } from "../lib/toast";
 import type { AppBindings } from "../lib/bridge";
 import type { ComposerInvocation, StructuredInvocationSubmit } from "../lib/invocationDisplay";
-import type { CollaborationMode, CommandInfo, DirEntry, ToolApprovalMode, TokenMode } from "../lib/types";
+import type { CollaborationMode, CommandInfo, DirEntry, ToolApprovalMode } from "../lib/types";
 
 let passed = 0;
 let failed = 0;
@@ -108,7 +108,7 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
     running: false,
     collaborationMode: "normal",
     toolApprovalMode: "ask" as ToolApprovalMode,
-    tokenMode: "full" as TokenMode,
+
     goal: "",
     cwd: "/repo",
     tabId: "tab-a",
@@ -132,7 +132,7 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
     },
     onSwitchModel: () => {},
     onSetEffort: () => {},
-    onSetTokenMode: () => {},
+
     ready: true,
     ...props,
   };

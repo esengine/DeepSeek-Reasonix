@@ -64,6 +64,10 @@ type Spec struct {
 	// keeps the platform default (ephemeral tmpfs on Linux bwrap, host temp
 	// elsewhere). MCP and other independent sandboxes leave this empty.
 	SessionTemp string
+	// ProtectedWriteRoots are Reasonix session/state paths that stay read-only
+	// even when a broader WriteRoot such as the user's home directory would
+	// otherwise cover them.
+	ProtectedWriteRoots []string
 }
 
 // Enforce reports whether the spec asks for confinement.

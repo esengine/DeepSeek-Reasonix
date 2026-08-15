@@ -1162,6 +1162,14 @@ the connection is ready.
 ```
 
 `[sandbox]` is the *enforcement* layer beneath permissions (which are *policy*).
+They stay two layers: a permitted call still cannot write outside the approved
+roots. Interactive sessions can extend those roots with a write-access approval
+(once / session / project `reasonix.toml` / deny). File tools request the target
+parent directory automatically. Bash must declare `additional_write_dirs` and a
+`justification`; the host does not infer paths from the command text. Headless
+`reasonix run` fails closed unless the directory is already in
+`[sandbox].allow_write` or `--add-dir`. Granting `${HOME}` is allowed with a
+high-risk warning; the filesystem root and Reasonix session/state paths are not.
 Phase 0 confines the file-writing built-ins (`write_file`, `edit_file`,
 `multi_edit`, `move_file`) to `workspace_root` (default cwd), the Reasonix user
 config dir, plus `allow_write`: a write whose target — resolved to an absolute,

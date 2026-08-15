@@ -4,16 +4,17 @@ import (
 	"reasonix/internal/agentpreset"
 )
 
-// Canonical Agent role-setting identifiers re-exported for frontends that
-// already import boot. Prefer agentpreset directly in new code.
+// Deprecated execution-mode vocabulary re-exported for old frontends.
+// Runtime policy lives in internal/taskpolicy; these names only parse compat inputs.
+
+// Deprecated AgentPreset label constants — one compatibility version.
 const (
 	AgentPresetLight    = string(agentpreset.Light)
 	AgentPresetBalanced = string(agentpreset.Balanced)
 	AgentPresetDelivery = string(agentpreset.Delivery)
 )
 
-// Deprecated TokenMode constants — one compatibility version. Prefer
-// AgentPreset* and NormalizeAgentPreset.
+// Deprecated TokenMode constants — one compatibility version.
 const (
 	TokenModeFull     = "full"
 	TokenModeEconomy  = "economy"

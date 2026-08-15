@@ -27,7 +27,7 @@ func TestCoordinatorPlannerDepthDoesNotCapResearchRounds(t *testing.T) {
 	coord := NewCoordinatorWithPlannerPolicy(planner, NewSession("planner-sys"), nil,
 		PlannerToolRegistry(reg), Options{}, executor, 0, event.Discard, policy)
 
-	if err := coord.Run(context.Background(), "make the adaptive change"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "make the adaptive change"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := len(planner.requests); got != 4 {
@@ -66,7 +66,7 @@ func TestCoordinatorEmergencyBoundedPlannerCanSubmitPlanInFinalizationRound(t *t
 			return PlannerDecision{Route: PlannerRoutePlanAndExecute, Depth: PlannerDepthLight, Reason: "emergency_bounded_work"}
 		})
 
-	if err := coord.Run(context.Background(), "fix the planner bug"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "fix the planner bug"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := len(planner.requests); got != 3 {
@@ -118,7 +118,7 @@ func TestCoordinatorTaskBudgetLetsPlannerSubmitTerminalPlan(t *testing.T) {
 			return PlannerDecision{Route: PlannerRoutePlanAndExecute, Depth: PlannerDepthFull, Reason: "budgeted_work"}
 		})
 
-	ctx := WithTaskBudget(context.Background(), TaskBudget{Tokens: 1})
+	ctx := withNoClosedLoop(WithTaskBudget(context.Background(), TaskBudget{Tokens: 1}))
 	if err := coord.Run(ctx, "plan the budgeted change"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}

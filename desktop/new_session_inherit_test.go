@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/boot"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 )
@@ -58,8 +59,8 @@ func TestEnsureBlankTabInheritsActiveTabLocalSettings(t *testing.T) {
 	if created.effort == nil || *created.effort != "max" {
 		t.Fatalf("effort = %v, want inherited \"max\"", created.effort)
 	}
-	if created.tokenMode != "economy" {
-		t.Fatalf("tokenMode = %q, want inherited \"economy\"", created.tokenMode)
+	if created.tokenMode != boot.TokenModeFull {
+		t.Fatalf("tokenMode = %q, want pinned default %q (must not inherit economy)", created.tokenMode, boot.TokenModeFull)
 	}
 	if created.toolApprovalMode != control.ToolApprovalAuto {
 		t.Fatalf("toolApprovalMode = %q, want global default auto", created.toolApprovalMode)

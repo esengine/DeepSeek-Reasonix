@@ -425,7 +425,7 @@ ok(
 );
 
 ok(
-  /const \[rewindStatesByTab, setRewindStatesByTab\] = useState<Record<string, RewindState>>\(\{\}\);/.test(appSource) &&
+  /const \[rewindStatesByTab, setRewindStatesByTab\] = useState<Record<string, RewindUndoState>>\(\{\}\);/.test(appSource) &&
     /setRewindStateForTab\(sourceTabId, null\);/.test(appSource) &&
     /setRewindCommittingForTab\(sourceTabId, true\);/.test(appSource),
   "committing optimistic rewind clears only the source tab before awaiting the backend",

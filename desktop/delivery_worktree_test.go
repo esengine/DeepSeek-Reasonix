@@ -60,7 +60,10 @@ func TestCreateDeliveryWorktreeRegistersAndOpensManagedProject(t *testing.T) {
 	if result.WorkspaceRoot != isolatedRoot || result.Branch != "reasonix/delivery-test" || !result.SourceDirty {
 		t.Fatalf("result = %+v", result)
 	}
-	if result.Tab.WorkspaceRoot != isolatedRoot || !result.Tab.IsolatedWorktree || !result.Tab.Active || result.Tab.TokenMode != "delivery" {
+	if result.Tab.WorkspaceRoot != isolatedRoot || !result.Tab.IsolatedWorktree || !result.Tab.Active {
 		t.Fatalf("opened tab = %+v", result.Tab)
+	}
+	if result.Tab.TokenMode != "full" {
+		t.Fatalf("isolated worktree tokenMode = %q, want pinned full (must not force delivery)", result.Tab.TokenMode)
 	}
 }

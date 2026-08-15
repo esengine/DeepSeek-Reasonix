@@ -14,7 +14,7 @@ import { createRoot } from "react-dom/client";
 import { Composer } from "../components/Composer";
 import { LocaleProvider } from "../lib/i18n";
 import { ToastProvider } from "../lib/toast";
-import type { CollaborationMode, ToolApprovalMode, TokenMode } from "../lib/types";
+import type { CollaborationMode, ToolApprovalMode } from "../lib/types";
 
 let passed = 0;
 let failed = 0;
@@ -91,12 +91,11 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
   const rootEl = document.getElementById("root");
   if (!rootEl) throw new Error("missing root");
   const root = createRoot(rootEl);
-  const calls = { cancel: 0, tokenModes: [] as TokenMode[], approvalModes: [] as ToolApprovalMode[] };
+  const calls = { cancel: 0, approvalModes: [] as ToolApprovalMode[] };
   let currentProps: Parameters<typeof Composer>[0] = {
     running: false,
     collaborationMode: "normal" as CollaborationMode,
     toolApprovalMode: "ask" as ToolApprovalMode,
-    tokenMode: "full" as TokenMode,
     goal: "",
     cwd: "/repo",
     modelLabel: "DeepSeek-R1",
@@ -115,9 +114,6 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
     onClearGoal: () => {},
     onSwitchModel: () => {},
     onSetEffort: () => {},
-    onSetTokenMode: (mode) => {
-      calls.tokenModes.push(mode);
-    },
     ready: true,
     ...props,
   };
@@ -200,45 +196,18 @@ console.log("\ncomposer run strip");
   dom.window.close();
 }
 
-// Work mode is a first-class, always-visible selector. Its three profiles live
-// in their own menu instead of the task-intent menu, and selecting a profile
-// preserves the existing token-mode callback contract.
+// Execution modes are gone. Composer keeps collaboration (direct/plan/goal)
+// and tool-approval controls; it must not render a Light/Balanced/Delivery
+// execution-setting trigger or menu.
 {
   const dom = installDom();
-  const { root, calls } = await renderComposer();
+  const { root } = await renderComposer();
 
-  const profileTrigger = document.querySelector(".composer-profile-trigger") as HTMLButtonElement | null;
-  if (!profileTrigger) throw new Error("work mode trigger did not render");
-  eq(profileTrigger.textContent?.trim(), "Balanced", "standalone control shows only the current profile");
-  eq(profileTrigger.getAttribute("aria-label"), "Execution setting · Balanced", "execution setting trigger keeps its full accessible name");
-  ok(profileTrigger.querySelector(".lucide-equal") !== null, "balanced work mode uses a simple equal icon");
-  await act(async () => {
-    profileTrigger.focus();
-    await flushTimers();
-  });
-  eq(document.querySelector('[role="tooltip"]')?.textContent, "Execution setting · Balanced: Auto planning, risk-tiered verification", "execution setting tooltip combines category, value, and summary");
-  await act(async () => {
-    profileTrigger.blur();
-    await flushTimers();
-  });
-
-  await act(async () => {
-    profileTrigger.click();
-    await flushTimers();
-  });
-  const profileMenu = document.querySelector(".composer-profile-menu");
-  ok(profileMenu !== null, "standalone work mode trigger opens its own menu");
-  eq(profileMenu?.querySelectorAll('[role="menuitemradio"]').length, 3, "work mode menu exposes exactly three profiles");
-
-  const delivery = Array.from(profileMenu?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ?? [])
-    .find((item) => item.textContent?.includes("Delivery"));
-  if (!delivery) throw new Error("delivery work mode option did not render");
-  ok(delivery.querySelector(".lucide-flag") !== null, "delivery work mode uses a simple completion flag");
-  await act(async () => {
-    delivery.click();
-    await flushTimers();
-  });
-  eq(calls.tokenModes.at(-1), "delivery", "selecting delivery keeps the token-mode callback contract");
+  eq(document.querySelector(".composer-profile-trigger"), null, "composer has no execution-setting trigger");
+  eq(document.querySelector(".composer-profile-menu"), null, "composer has no execution-setting menu");
+  const chrome = document.body.textContent ?? "";
+  eq(chrome.includes("Execution setting"), false, "composer chrome does not mention execution setting");
+  eq(chrome.includes("Delivery"), false, "composer chrome does not mention Delivery mode");
 
   const intentTrigger = document.querySelector(".composer-task-mode-trigger") as HTMLButtonElement | null;
   if (!intentTrigger) throw new Error("task intent trigger did not render");
@@ -246,7 +215,7 @@ console.log("\ncomposer run strip");
     intentTrigger.click();
     await flushTimers();
   });
-  eq(document.querySelector(".composer-intent-menu")?.textContent?.includes("Work mode"), false, "task-intent menu no longer owns work mode");
+  eq(document.querySelector(".composer-intent-menu")?.textContent?.includes("Work mode"), false, "task-intent menu does not own a work-mode section");
   eq(document.querySelectorAll('.composer-intent-menu [role="menuitemradio"]').length, 3, "task method menu exposes direct, plan, and goal");
 
   await act(async () => {
@@ -263,7 +232,7 @@ console.log("\ncomposer run strip");
   const timers = installWindowTimerQueue();
   const { root } = await renderComposer({ showContextWindowRing: true });
 
-  for (const selector of [".composer-task-mode-trigger", ".composer-profile-trigger"]) {
+  for (const selector of [".composer-task-mode-trigger"]) {
     const trigger = document.querySelector(selector) as HTMLButtonElement | null;
     if (!trigger) throw new Error(`missing Creation hover trigger: ${selector}`);
 
@@ -276,7 +245,7 @@ console.log("\ncomposer run strip");
 
     ok(!trigger.classList.contains(`${selector.slice(1)}--open`), `${selector} stays visually closed after a short hover`);
     ok(
-      document.querySelector(selector.includes("task") ? ".composer-intent-menu" : ".composer-profile-menu") === null,
+      document.querySelector(".composer-intent-menu") === null,
       `${selector} does not render a closing-only menu`,
     );
   }
@@ -297,16 +266,15 @@ console.log("\ncomposer run strip");
   dom.window.close();
 }
 
-// Runtime controller transitions disable every mode axis and submit together,
-// so rapid Goal + Delivery + approval-mode clicks cannot mutate a half-rebuilt runtime.
+// Runtime controller transitions disable collaboration, approval, and submit
+// together, so rapid Goal + approval-mode clicks cannot mutate a half-rebuilt runtime.
 {
   const dom = installDom();
   const { root } = await renderComposer({ disabled: true, goal: "ship it", collaborationMode: "goal" });
-  const profile = document.querySelector<HTMLButtonElement>(".composer-profile-trigger");
   const task = document.querySelector<HTMLButtonElement>(".composer-task-mode-trigger");
   const approvals = Array.from(document.querySelectorAll<HTMLButtonElement>(".composer-modebar--approval button"));
   const send = document.querySelector<HTMLButtonElement>(".composer__btn--send");
-  ok(Boolean(profile?.disabled), "runtime transition disables Delivery profile changes");
+  eq(document.querySelector(".composer-profile-trigger"), null, "runtime transition has no execution-setting control");
   ok(Boolean(task?.disabled), "runtime transition disables Goal mode changes");
   ok(approvals.length === 3 && approvals.every((button) => button.disabled), "runtime transition disables Ask/Auto/Yolo changes");
   ok(Boolean(send?.disabled), "runtime transition disables submit");

@@ -69,7 +69,7 @@ func TestSubmittedPlanReachesTheExecutorHandoff(t *testing.T) {
 	}}
 	coord, _ := submitPlanCoordinator(t, planner, exec, event.Discard)
 
-	if err := coord.Run(context.Background(), "fix the cache key"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "fix the cache key"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if len(exec.requests) == 0 {
@@ -112,7 +112,7 @@ func TestSubmittedPlanIsRenderedToTheSink(t *testing.T) {
 	}}
 	coord, _ := submitPlanCoordinator(t, planner, exec, sink)
 
-	if err := coord.Run(context.Background(), "fix the cache key"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "fix the cache key"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	joined := strings.Join(texts, "\n")
@@ -135,7 +135,7 @@ func TestSubmittedPlanGatesOnRequiresApprovalField(t *testing.T) {
 	approver := &recordingPlanApprover{allow: true}
 	coord.SetPlannerPlanApprover(approver)
 
-	if err := coord.Run(context.Background(), "drop the old table"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "drop the old table"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if !approver.called {
@@ -159,7 +159,7 @@ func TestSubmittedPlanWithoutApprovalRunsStraightThrough(t *testing.T) {
 	approver := &recordingPlanApprover{allow: true}
 	coord.SetPlannerPlanApprover(approver)
 
-	if err := coord.Run(context.Background(), "fix the cache key"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "fix the cache key"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if approver.called {
@@ -183,7 +183,7 @@ func TestPlannerThatWritesProseStillReachesTheExecutor(t *testing.T) {
 	}}
 	coord, _ := submitPlanCoordinator(t, planner, exec, event.Discard)
 
-	if err := coord.Run(context.Background(), "fix the cache key"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "fix the cache key"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if len(exec.requests) == 0 {
@@ -220,7 +220,7 @@ func TestPlannerAsksWithTheRealToolAndPlansFromTheAnswer(t *testing.T) {
 	asker := &recordingAsker{}
 	coord.SetAsker(asker)
 
-	if err := coord.Run(context.Background(), "add a store"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "add a store"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if len(asker.questions) == 0 {

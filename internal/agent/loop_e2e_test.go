@@ -91,7 +91,7 @@ func TestRunPersistsUserCreatedAtWithoutSendingItToProvider(t *testing.T) {
 	session.Add(provider.Message{Role: provider.RoleUser, Content: "existing", CreatedAt: existingCreatedAt})
 	agent := New(prov, tool.NewRegistry(), session, Options{}, event.Discard)
 
-	if err := agent.Run(context.Background(), "new prompt"); err != nil {
+	if err := agent.Run(withNoClosedLoop(context.Background()), "new prompt"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	request := prov.LastRequest()
@@ -122,7 +122,7 @@ func TestRunPersistsResponsesItemsAcrossSessionReload(t *testing.T) {
 	}})
 	session := NewSession("system")
 	agent := New(prov, tool.NewRegistry(), session, Options{}, event.Discard)
-	if err := agent.Run(context.Background(), "search"); err != nil {
+	if err := agent.Run(withNoClosedLoop(context.Background()), "search"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -160,7 +160,7 @@ func TestRunMultiToolRoundEmptyIDsSurvivePairing(t *testing.T) {
 		testutil.Turn{Text: "done"},
 	)
 	a := New(mp, echoRegistry(), NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -188,7 +188,7 @@ func TestRunPersistsCumulativeAssistantWorkDuration(t *testing.T) {
 		testutil.Turn{Text: "done"},
 	)
 	a := New(mp, echoRegistry(), NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -213,7 +213,7 @@ func TestRunCancelledMidStreamLeavesResumableSession(t *testing.T) {
 	mp := testutil.NewMock("m", testutil.ErrorTurn(context.Canceled))
 	a := New(mp, echoRegistry(), NewSession("sys"), Options{}, event.Discard)
 
-	err := a.Run(context.Background(), "do the thing")
+	err := a.Run(withNoClosedLoop(context.Background()), "do the thing")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run should surface the cancellation, got %v", err)
 	}
@@ -239,7 +239,7 @@ func TestRunRecoversInterruptedStreamAfterPartialText(t *testing.T) {
 	sink := &recordSink{}
 	a := New(mp, echoRegistry(), NewSession(""), Options{}, sink)
 
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run should recover the interrupted stream, got %v", err)
 	}
 	if mp.CallCount() != 2 {
@@ -314,7 +314,7 @@ func TestRunRecoversRepeatedInterruptedStreams(t *testing.T) {
 	sink := &recordSink{}
 	a := New(mp, echoRegistry(), NewSession(""), Options{}, sink)
 
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run should recover repeated interrupted streams, got %v", err)
 	}
 	if mp.CallCount() != 3 {
@@ -354,7 +354,7 @@ func TestRunRecoversInterruptedPartialToolCallWithoutExecutingIt(t *testing.T) {
 	)
 	a := New(mp, echoRegistry(), NewSession(""), Options{}, event.Discard)
 
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run should recover the interrupted tool-call stream, got %v", err)
 	}
 
@@ -381,7 +381,7 @@ func TestRunStreamRetryRequestCountIsLinearNotTriangular(t *testing.T) {
 	)
 	sink := &recordSink{}
 	a := New(mp, echoRegistry(), NewSession(""), Options{}, sink)
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if mp.CallCount() != 3 {
@@ -423,7 +423,7 @@ func TestRunExhaustedStreamRetriesPersistPendingLocalOnly(t *testing.T) {
 	mp := testutil.NewMock("m", turns...)
 	a := New(mp, echoRegistry(), NewSession(""), Options{}, event.Discard)
 
-	err := a.Run(context.Background(), "go")
+	err := a.Run(withNoClosedLoop(context.Background()), "go")
 	if !provider.IsStreamInterrupted(err) {
 		t.Fatalf("Run error = %v, want StreamInterruptedError after exhausting retries", err)
 	}
@@ -464,7 +464,7 @@ func TestRunCompleteUncommittedToolCallNeverExecutes(t *testing.T) {
 		testutil.Turn{Text: "recovered without write"},
 	)
 	a := New(mp, reg, NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "write it"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "write it"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if writer.calls.Load() != 0 {
@@ -540,7 +540,7 @@ func TestRunGenericStreamErrorPersistsLocalDisplayAndInjectsBoundedRecovery(t *t
 	session := NewSession("system")
 	a := New(mp, echoRegistry(), session, Options{}, event.Discard)
 
-	if err := a.Run(context.Background(), "change the file"); !errors.Is(err, apiErr) {
+	if err := a.Run(withNoClosedLoop(context.Background()), "change the file"); !errors.Is(err, apiErr) {
 		t.Fatalf("first Run error = %v, want %v", err, apiErr)
 	}
 	msgs := session.Snapshot()
@@ -552,7 +552,7 @@ func TestRunGenericStreamErrorPersistsLocalDisplayAndInjectsBoundedRecovery(t *t
 		t.Fatalf("local display lost streamed output: %+v", last)
 	}
 
-	if err := a.Run(context.Background(), "continue"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "continue"); err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
 	req := mp.Requests()[1]
@@ -592,7 +592,7 @@ func TestRunRecoveryKeepsCompletedToolPairAndSummarizesChangedFile(t *testing.T)
 	})
 	mp := testutil.NewMock("m", testutil.Turn{Text: "done"})
 	a := New(mp, echoRegistry(), session, Options{}, event.Discard)
-	if err := a.Run(context.Background(), "continue"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "continue"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -623,7 +623,7 @@ func TestRunWellFormedToolLoopRoundTrips(t *testing.T) {
 		testutil.Turn{Text: "all set"},
 	)
 	a := New(mp, echoRegistry(), NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -648,7 +648,7 @@ func TestRunNonDeepSeekMissingToolCallReasoningDoesNotRetry(t *testing.T) {
 	sink := &recordSink{}
 	a := New(mp, echoRegistry(), NewSession(""), Options{}, sink)
 
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := mp.CallCount(); got != 2 {
@@ -684,7 +684,7 @@ func TestRunSilentlyRecoversMissingToolCallReasoning(t *testing.T) {
 	sink := &recordSink{}
 	a := New(toolCallReasoningRequiredProvider{mp}, echoRegistry(), NewSession(""), Options{}, sink)
 
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	var savedToolTurns int
@@ -740,7 +740,7 @@ func TestMissingReasoningRecoveryAdoptsRetryWithoutToolCall(t *testing.T) {
 	sink := &recordSink{}
 	a := New(toolCallReasoningRequiredProvider{mp}, echoRegistry(), NewSession(""), Options{}, sink)
 
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if mp.CallCount() != 2 {
@@ -792,7 +792,7 @@ func TestMissingReasoningRecoveryFailureFallsBackBeforeToolExecution(t *testing.
 	sink := &recordSink{}
 	a := New(toolCallReasoningRequiredProvider{mp}, echoRegistry(), NewSession(""), Options{}, sink)
 
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run should keep the complete first response, got %v", err)
 	}
 	var toolResults int
@@ -855,11 +855,11 @@ func TestSetSessionRearmsInMemoryMissingReasoningRecovery(t *testing.T) {
 	sink := &recordSink{}
 	a := New(toolCallReasoningRequiredProvider{mp}, echoRegistry(), NewSession(""), Options{}, sink)
 
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
 	a.SetSession(NewSession(""))
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
 	if got := sink.recoveryCount(event.ProtocolRecoveryMissingReasoningRetryAttempted); got != 2 {
@@ -879,7 +879,7 @@ func TestMissingReasoningRecoveryRateLimitsAcrossProcesses(t *testing.T) {
 	)
 	sink1 := &recordSink{}
 	a1 := New(toolCallReasoningRequiredProvider{mp}, echoRegistry(), NewSession(""), Options{MissingReasoningWarnStateDir: stateDir}, sink1)
-	if err := a1.Run(context.Background(), "go"); err != nil {
+	if err := a1.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
 	if got := sink1.recoveryCount(event.ProtocolRecoveryMissingReasoningRetryAttempted); got != 1 {
@@ -892,7 +892,7 @@ func TestMissingReasoningRecoveryRateLimitsAcrossProcesses(t *testing.T) {
 	)
 	sink2 := &recordSink{}
 	a2 := New(toolCallReasoningRequiredProvider{mp2}, echoRegistry(), NewSession(""), Options{MissingReasoningWarnStateDir: stateDir}, sink2)
-	if err := a2.Run(context.Background(), "go"); err != nil {
+	if err := a2.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("second process Run: %v", err)
 	}
 	if got := sink2.recoveryCount(event.ProtocolRecoveryMissingReasoningRetryAttempted); got != 0 {
@@ -913,7 +913,7 @@ func TestMissingReasoningRecoverySeparatesProviderConfigurations(t *testing.T) {
 		)
 		sink := &recordSink{}
 		a := New(configuredToolCallReasoningProvider{MockProvider: mp, identity: identity}, echoRegistry(), NewSession(""), Options{MissingReasoningWarnStateDir: stateDir}, sink)
-		if err := a.Run(context.Background(), "go"); err != nil {
+		if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 			t.Fatalf("Run(%q): %v", identity, err)
 		}
 		return sink.recoveryCount(event.ProtocolRecoveryMissingReasoningRetryAttempted)
@@ -938,7 +938,7 @@ func TestThreeHealthyToolCallReasoningTurnsRearmFutureRegression(t *testing.T) {
 		mp := testutil.NewMock("deepseek-proxy", turns...)
 		sink := &recordSink{}
 		a := New(toolCallReasoningRequiredProvider{mp}, echoRegistry(), NewSession(""), Options{MissingReasoningWarnStateDir: stateDir}, sink)
-		if err := a.Run(context.Background(), "go"); err != nil {
+		if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 			t.Fatalf("Run: %v", err)
 		}
 		return sink.recoveryCount(event.ProtocolRecoveryMissingReasoningRetryAttempted)
@@ -1050,7 +1050,7 @@ func TestRunPreservesOriginalRequiredToolCallReasoningAcrossHook(t *testing.T) {
 	h := &stubHooks{hasPostLLM: true, postLLMOut: "translated display"}
 	a := New(toolCallReasoningRequiredProvider{mp}, echoRegistry(), NewSession(""), Options{Hooks: h}, event.Discard)
 
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	reqs := mp.Requests()
@@ -1080,7 +1080,7 @@ func TestRunStoresTransformedNonToolReasoningForToolCallOnlyProvider(t *testing.
 	h := &stubHooks{hasPostLLM: true, postLLMOut: "translated display"}
 	a := New(toolCallReasoningRequiredProvider{mp}, echoRegistry(), NewSession(""), Options{Hooks: h}, event.Discard)
 
-	if err := a.Run(context.Background(), "go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := assistantReasoning(a.sess.conversation.Messages); got != "translated display" {

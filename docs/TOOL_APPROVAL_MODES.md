@@ -4,7 +4,7 @@ The Ask / Auto / Yolo control under the desktop composer sets how Reasonix handl
 
 Tool permission is independent of collaboration mode:
 
-- **Collaboration / runtime mode** decides how Reasonix advances the task (lightweight, balanced, or delivery-first).
+- **Collaboration mode** (Normal / Plan / Goal) decides how Reasonix advances the task. Planning, verification, and review strength follow task risk automatically; there is no selectable execution mode.
 - **Tool permission** decides whether controlled tools wait for approval before running.
 
 ## Quick comparison
@@ -53,6 +53,7 @@ Auto still respects:
   calls proceed without a prompt while explicit `ask` / `deny` rules remain
   effective. Headless memory still keeps the bounded create-only exception and
   otherwise fails closed.
+- Extending writable roots outside the workspace. Auto, Ask, and YOLO never grant a new directory without an explicit write-access card. File tools request the target parent directory automatically; Bash must pass `additional_write_dirs` plus a `justification`. Approving extends the sandbox write roots; it does not rerun the command unconfined.
 - Human approval for nested or indirect Bash execution, even inside an approved-plan execution window. Guardian and allowing hooks cannot replace it; parameter/arithmetic expansions, assignments, redirects, and globs remain on Auto's fast path.
 - MCP destructive calls when the effective policy is `auto`, `prompt`, or `writes`.
 - Ask questions (never auto-answered).
