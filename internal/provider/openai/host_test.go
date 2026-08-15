@@ -111,9 +111,8 @@ func TestUsesGeminiThoughtSignatures(t *testing.T) {
 	}
 }
 
-// TestIsMiniMax pins the host-matching rule for MiniMax. The spelling is
-// `minimaxi`, not `minimax` — the latter is reserved for any future
-// minimax-branded gateway so the two never collide.
+// TestIsMiniMax pins the host-matching rule for MiniMax's China and
+// international API domains.
 func TestIsMiniMax(t *testing.T) {
 	for _, tc := range []struct {
 		baseURL string
@@ -123,16 +122,20 @@ func TestIsMiniMax(t *testing.T) {
 		{"https://api.minimaxi.com", true},
 		{"https://api.minimaxi.com/v1", true},
 		{"https://api.minimaxi.com/anthropic", true},
+		{"https://api.minimax.io/v1", true},
+		{"https://api.minimax.io/anthropic", true},
 		// Regional subdomains under the apex
 		{"https://eu.minimaxi.com/v1", true},
 		{"https://us.minimaxi.com/v1", true},
+		{"https://eu.minimax.io/v1", true},
 		// Apex rejected
 		{"https://minimaxi.com/v1", false},
 		{"https://minimaxi.com", false},
+		{"https://minimax.io/v1", false},
 		// Other vendors must not match
 		{"https://api.deepseek.com", false},
 		{"https://api.openai.com/v1", false},
-		// Wrong spelling — minimax, not minimaxi — must not match
+		// Similar but unrelated domains must not match
 		{"https://api.minimax.com/v1", false},
 		{"https://api.minimax.example.com", false},
 		// Garbage

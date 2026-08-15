@@ -124,6 +124,21 @@ func (e *ProviderEntry) HasVisionModel(model string) bool {
 	return false
 }
 
+// HasVideoModel reports whether model is explicitly advertised as accepting
+// video input by this provider entry.
+func (e *ProviderEntry) HasVideoModel(model string) bool {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return false
+	}
+	for _, candidate := range e.VideoModels {
+		if strings.EqualFold(strings.TrimSpace(candidate), model) {
+			return true
+		}
+	}
+	return false
+}
+
 func isOfficialMimoVisionEntry(e *ProviderEntry) bool {
 	if !isOpenAIProviderKind(e) || !mimoVisionModels[strings.ToLower(strings.TrimSpace(e.Model))] {
 		return false

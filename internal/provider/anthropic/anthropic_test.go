@@ -651,6 +651,37 @@ func TestBuildRequestThinkingEnabledGateway(t *testing.T) {
 	}
 }
 
+func TestBuildRequestMiniMaxThinking(t *testing.T) {
+	for _, effort := range []string{"", "adaptive", "disabled"} {
+		c := &client{model: "MiniMax-M3", minimax: true, thinking: "adaptive", effort: effort}
+		r := c.buildRequest(context.Background(), provider.Request{})
+		want := effort
+		if want == "" {
+			want = "adaptive"
+		}
+		if r.Thinking == nil || r.Thinking.Type != want || r.Thinking.Display != "" {
+			t.Fatalf("effort %q thinking = %+v, want %q without display", effort, r.Thinking, want)
+		}
+		if r.OutputConfig != nil {
+			t.Fatalf("effort %q output_config = %+v, want omitted", effort, r.OutputConfig)
+		}
+	}
+}
+
+func TestNewMiniMaxReasoningProtocolNoneUsesModelDefault(t *testing.T) {
+	p, err := New(provider.Config{
+		Name: "minimax", BaseURL: "https://api.minimax.io/anthropic", Model: "MiniMax-M2.7",
+		Extra: map[string]any{"thinking": "adaptive", "reasoning_protocol": "none"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := p.(*client)
+	if c.minimax || c.thinking != "" {
+		t.Fatalf("M2.7 controls = minimax:%t thinking:%q, want provider-default thinking", c.minimax, c.thinking)
+	}
+}
+
 func TestBuildRequestDeepSeekThinking(t *testing.T) {
 	c := &client{model: "deepseek-v4-flash", deepseek: true, thinking: "enabled", effort: "max"}
 	r := c.buildRequest(context.Background(), provider.Request{

@@ -203,6 +203,17 @@ func mimoV25ProPrice() *provider.Pricing {
 	return &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"}
 }
 
+func minimaxMSeriesPricesUSD() map[string]*provider.Pricing {
+	return map[string]*provider.Pricing{
+		"MiniMax-M3": {
+			CacheHit: 0.12, Input: 0.60, Output: 2.40, Currency: "$",
+		},
+		"MiniMax-M2.7": {
+			CacheHit: 0.06, CacheWrite: 0.375, Input: 0.30, Output: 1.20, Currency: "$",
+		},
+	}
+}
+
 func mimoV25Price() *provider.Pricing {
 	return &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}
 }
