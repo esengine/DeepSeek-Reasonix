@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -12,7 +13,7 @@ import (
 
 func TestServePromptReadinessGateFailureEndsTurnWithWarning(t *testing.T) {
 	factory := &fakeFactory{behavior: func(context.Context, event.Sink, string) error {
-		return &agent.FinalReadinessError{Attempts: 1, Reason: "missing verification", Missing: []string{"verify"}}
+		return fmt.Errorf("turn stopped: %w", &agent.FinalReadinessError{Attempts: 1, Reason: "missing verification", Missing: []string{"verify"}})
 	}}
 	client, stop := startServer(t, factory)
 	defer stop()

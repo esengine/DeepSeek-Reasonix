@@ -154,6 +154,13 @@ Reasonix 把互不相关的选择拆成独立控制轴，而不是混在一个 m
 Host 应让 `session/prompt` 请求保持打开，直到 Reasonix 返回停止原因；期间仍需同时处理
 双向 request 和 notification。
 
+Reasonix 只会返回 ACP v1 规定的停止原因。工作已完成但仍需 final-readiness 检查时，
+agent 会发送带 `[warning]` 的消息 chunk 并返回 `end_turn`；厂商状态仍保持
+`readiness_paused`，便于 host 提供恢复入口。客户端取消始终返回 `cancelled`，即使被中断
+的 runner 没有返回 error。其他 provider、工具或运行时失败会返回 JSON-RPC
+`-32603 InternalError`，消息携带长度受限且已脱敏的原因；不会再用协议外的
+`stopReason` 构造成功结果。
+
 状态 phase 为 `readiness_paused` 时，可发送新的 `session/prompt`，并把可选 `action`
 设为 `"final_readiness_recovery"`，以继续这一次检查。只发送 `/continue-checks` 文本 block
 是兼容写法。两种方式都会消费一次持久化的 host checkpoint；普通 prompt 不会继承该

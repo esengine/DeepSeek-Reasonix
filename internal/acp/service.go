@@ -1177,10 +1177,11 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 		runErr = sess.ctrl.RunTurn(runCtx, text)
 	}
 	runErr = drainACPInbox(runCtx, sess.ctrl, runErr)
+	cancelled := runCtx.Err() != nil
 
 	statusEvent := sess.status.finishTurn(
 		runErr,
-		runCtx.Err() != nil,
+		cancelled,
 		sess.currentCtrl().GoalStatus(),
 		finalAssistantSummary(sess.currentCtrl()),
 	)
@@ -1189,23 +1190,19 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 	// the transcript and the same sequence/usage/outcome snapshot.
 	sess.persistAfterTurn(text)
 
-	stop := StopEndTurn
-	if runErr != nil && runCtx.Err() == nil {
-		var readinessErr *agent.FinalReadinessError
-		if errors.As(runErr, &readinessErr) {
-			// The TUI keeps completed work and shows a recovery card for an
-			// unsatisfied readiness gate; mirror that for ACP instead of
-			// collapsing every delivery gap into stopReason=error.
-			sess.sink.Emit(event.Event{
-				Kind:  event.Notice,
-				Level: event.LevelWarn,
-				Text:  finalReadinessNotice(readinessErr),
-			})
-		} else {
-			stop = StopError
-		}
-	} else if runErr != nil {
-		stop = StopCancelled
+	stop, readinessErr, promptErr := promptStopReason(runErr, cancelled, p.SessionID)
+	if promptErr != nil {
+		return nil, promptErr
+	}
+	if readinessErr != nil {
+		// The TUI keeps completed work and shows a recovery card for an
+		// unsatisfied readiness gate; mirror that for ACP instead of
+		// collapsing every delivery gap into a hard failure.
+		sess.sink.Emit(event.Event{
+			Kind:  event.Notice,
+			Level: event.LevelWarn,
+			Text:  finalReadinessNotice(readinessErr),
+		})
 	}
 	res := SessionPromptResult{StopReason: stop}
 	if sess.transcript != "" {

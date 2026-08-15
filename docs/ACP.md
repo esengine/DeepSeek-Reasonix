@@ -170,6 +170,15 @@ Hosts should keep the `session/prompt` request open until Reasonix returns its
 stop reason, while continuing to process requests and notifications in both
 directions.
 
+Reasonix emits only ACP v1 stop reasons. A completed turn that still needs a
+final-readiness check sends a `[warning]` message chunk and returns `end_turn`;
+its vendor status remains `readiness_paused` so the host can offer recovery.
+Client cancellation returns `cancelled`, even when the interrupted runner exits
+without an error. Other provider, tool, or runtime failures return a JSON-RPC
+`-32603 InternalError` whose message contains a bounded, credential-redacted
+cause; they do not return a successful prompt result with a non-standard
+`stopReason`.
+
 When the status phase is `readiness_paused`, resume that exact check with a
 `session/prompt` request whose optional `action` is
 `"final_readiness_recovery"`. Sending `/continue-checks` as the sole text block

@@ -562,13 +562,13 @@ type SessionReloadExtensionsResult struct {
 // could collide with a future official ACP method and must not be used.
 const sessionReloadExtensionsMethod = "_reasonix.io/session/reloadExtensions"
 
-// StopReason tells the client why a turn ended. Values match main's wire.
+// StopReason tells the client why a turn ended. Reasonix only emits values from
+// the ACP v1 enum; failed turns are returned as JSON-RPC errors instead.
 type StopReason string
 
 const (
 	StopEndTurn   StopReason = "end_turn"
 	StopCancelled StopReason = "cancelled"
-	StopError     StopReason = "error"
 )
 
 // SessionPromptResult ends a session/prompt. TranscriptPath is reserved for a

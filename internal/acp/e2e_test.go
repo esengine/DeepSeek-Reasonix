@@ -558,9 +558,9 @@ func TestE2EApprovalRoundTrip(t *testing.T) {
 	var result SessionPromptResult
 	json.Unmarshal(resp.Result, &result)
 	// Adaptive standard execution may pause the turn for missing readiness
-	// after a write; the approval round-trip is the contract under test.
-	if result.StopReason != StopEndTurn && result.StopReason != StopError {
-		t.Errorf("stopReason = %q, want end_turn or error", result.StopReason)
+	// after a write; controlled readiness pauses use ACP v1 end_turn.
+	if result.StopReason != StopEndTurn {
+		t.Errorf("stopReason = %q, want end_turn", result.StopReason)
 	}
 }
 
