@@ -703,7 +703,7 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 			flushToolImages()
 		}
 		cm := chatMessage{
-			Role:       string(m.Role),
+			Role:       c.wireRole(m.Role),
 			ToolCallID: m.ToolCallID,
 		}
 		if m.Role == provider.RoleTool {
