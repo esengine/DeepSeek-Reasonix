@@ -252,6 +252,7 @@ func (s *service) bindClientIO(p *SessionParams, sessionID string) {
 type acpController interface {
 	control.Lifecycle
 	control.TurnControl
+	RunFinalReadinessRecoveryWithAdmission(ctx context.Context, input string, onAdmitted func()) error
 	TrySteer(text string) bool
 	control.Approvals
 	control.Capabilities
@@ -1155,26 +1156,37 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 	if !ok {
 		return nil, &RPCError{Code: ErrInvalidRequest, Message: "session/prompt: session already has an active prompt"}
 	}
-	if sess.status == nil {
-		sess.status = newStatusTelemetry()
-	}
-	sess.status.beginTurn()
-	s.publishStatus(sess, "phase")
-	sess.sink.setTurnContext(runCtx)
-	if sess.takeGoalDraftMode() {
-		sess.currentCtrl().SetGoal(text)
-		sess.saveMetaIfPresent()
-	}
 	defer func() {
 		sess.sink.clearTurnContext()
 		s.finishTurn(ctx, sess)
 		cancel()
 	}()
+	statusStarted := false
+	beginTurn := func() {
+		if sess.status == nil {
+			sess.status = newStatusTelemetry()
+		}
+		sess.status.beginTurn()
+		s.publishStatus(sess, "phase")
+		sess.sink.setTurnContext(runCtx)
+		if sess.takeGoalDraftMode() {
+			sess.currentCtrl().SetGoal(text)
+			sess.saveMetaIfPresent()
+		}
+		statusStarted = true
+	}
 	var runErr error
 	if recovery {
-		runErr = sess.ctrl.RunFinalReadinessRecovery(runCtx, text)
+		runErr = sess.ctrl.RunFinalReadinessRecoveryWithAdmission(runCtx, text, beginTurn)
 	} else {
+		beginTurn()
 		runErr = sess.ctrl.RunTurn(runCtx, text)
+	}
+	if errors.Is(runErr, control.ErrNoFinalReadinessRecovery) && !statusStarted {
+		return nil, &RPCError{
+			Code:    ErrInvalidRequest,
+			Message: "session/prompt: no pending final-readiness check to continue",
+		}
 	}
 	runErr = drainACPInbox(runCtx, sess.ctrl, runErr)
 	cancelled := runCtx.Err() != nil
@@ -1190,18 +1202,17 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 	// the transcript and the same sequence/usage/outcome snapshot.
 	sess.persistAfterTurn(text)
 
-	stop, readinessErr, promptErr := promptStopReason(runErr, cancelled, p.SessionID)
+	stop, warning, promptErr := promptStopReason(runErr, cancelled, p.SessionID)
 	if promptErr != nil {
 		return nil, promptErr
 	}
-	if readinessErr != nil {
-		// The TUI keeps completed work and shows a recovery card for an
-		// unsatisfied readiness gate; mirror that for ACP instead of
-		// collapsing every delivery gap into a hard failure.
+	if warning != "" {
+		// The TUI keeps completed work for deliberate run boundaries; mirror
+		// that for ACP and tell clients how the successful turn ended.
 		sess.sink.Emit(event.Event{
 			Kind:  event.Notice,
 			Level: event.LevelWarn,
-			Text:  finalReadinessNotice(readinessErr),
+			Text:  warning,
 		})
 	}
 	res := SessionPromptResult{StopReason: stop}

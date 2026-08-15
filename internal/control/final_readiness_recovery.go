@@ -30,9 +30,20 @@ func ParseFinalReadinessRecoveryCommand(input string) (prompt string, ok bool) {
 
 // RunFinalReadinessRecovery is the synchronous transport-neutral recovery path.
 func (c *Controller) RunFinalReadinessRecovery(ctx context.Context, input string) error {
+	return c.RunFinalReadinessRecoveryWithAdmission(ctx, input, nil)
+}
+
+// RunFinalReadinessRecoveryWithAdmission runs the recovery after the controller
+// has admitted the request and consumed a valid one-shot checkpoint. Hosts that
+// publish turn lifecycle state use the callback to avoid announcing a turn for
+// a stale recovery request.
+func (c *Controller) RunFinalReadinessRecoveryWithAdmission(ctx context.Context, input string, onAdmitted func()) error {
 	return c.runSynchronousTurn(ctx, nil, func(runCtx context.Context) error {
 		if c.executor == nil || !c.executor.PrepareFinalReadinessRecovery() {
 			return ErrNoFinalReadinessRecovery
+		}
+		if onAdmitted != nil {
+			onAdmitted()
 		}
 		return c.runTurn(runCtx, input)
 	})

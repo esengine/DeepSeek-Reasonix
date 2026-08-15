@@ -157,14 +157,18 @@ Host 应让 `session/prompt` 请求保持打开，直到 Reasonix 返回停止�
 Reasonix 只会返回 ACP v1 规定的停止原因。工作已完成但仍需 final-readiness 检查时，
 agent 会发送带 `[warning]` 的消息 chunk 并返回 `end_turn`；厂商状态仍保持
 `readiness_paused`，便于 host 提供恢复入口。客户端取消始终返回 `cancelled`，即使被中断
-的 runner 没有返回 error。其他 provider、工具或运行时失败会返回 JSON-RPC
+的 runner 没有返回 error。显式模型轮数上限（`max_steps`）会发送 `[warning]`、返回
+`max_turn_requests`，并记录 paused 厂商状态；host 的任务时间、token 或成本预算也会发送
+`[warning]` 并记录 paused 状态，但因 ACP v1 没有任务预算专用停止原因而返回 `end_turn`。
+其他 provider、工具或运行时失败会返回 JSON-RPC
 `-32603 InternalError`，消息携带长度受限且已脱敏的原因；不会再用协议外的
 `stopReason` 构造成功结果。
 
 状态 phase 为 `readiness_paused` 时，可发送新的 `session/prompt`，并把可选 `action`
 设为 `"final_readiness_recovery"`，以继续这一次检查。只发送 `/continue-checks` 文本 block
 是兼容写法。两种方式都会消费一次持久化的 host checkpoint；普通 prompt 不会继承该
-证据，出现更新的用户消息后再提交旧 action 会被拒绝。
+证据，出现更新的用户消息后再提交旧 action 会以 JSON-RPC `-32600 InvalidRequest` 被拒绝，
+且不会发布或持久化虚假的状态回合。
 
 ## 回合中引导扩展
 

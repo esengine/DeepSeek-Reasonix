@@ -267,6 +267,28 @@ func TestRestoreStatusNormalizesLegacyPresentationPhase(t *testing.T) {
 	}
 }
 
+func TestRestoreStatusStronglyRedactsLegacyTurnOutcome(t *testing.T) {
+	const opaqueSecret = "readinessSecretAbc123"
+	const bearerSecret = "bearerSecretAbc123"
+	restored := restoreStatusTelemetry(&persistedStatusTelemetry{
+		TurnOutcome: ReasonixTurnOutcome{
+			Kind:   "error",
+			Reason: "credential " + opaqueSecret + " Authorization: Bearer " + bearerSecret,
+		},
+	})
+
+	snapshot := restored.snapshot()
+	persisted := restored.persisted()
+	for name, reason := range map[string]string{
+		"public snapshot":  snapshot.turnOutcome.Reason,
+		"repersisted data": persisted.TurnOutcome.Reason,
+	} {
+		if strings.Contains(reason, opaqueSecret) || strings.Contains(reason, bearerSecret) {
+			t.Errorf("%s leaked a legacy credential: %q", name, reason)
+		}
+	}
+}
+
 func TestRestoreStatusMarksInterruptedTurnPaused(t *testing.T) {
 	restored := restoreStatusTelemetry(&persistedStatusTelemetry{
 		Sequence:    7,

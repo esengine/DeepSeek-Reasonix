@@ -566,11 +566,6 @@ const sessionReloadExtensionsMethod = "_reasonix.io/session/reloadExtensions"
 // the ACP v1 enum; failed turns are returned as JSON-RPC errors instead.
 type StopReason string
 
-const (
-	StopEndTurn   StopReason = "end_turn"
-	StopCancelled StopReason = "cancelled"
-)
-
 // SessionPromptResult ends a session/prompt. TranscriptPath is reserved for a
 // future on-disk transcript pointer; omitted (null) for now.
 type SessionPromptResult struct {

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/control"
 	"reasonix/internal/event"
 )
 
@@ -157,5 +158,47 @@ func TestServePromptRecoveryPauseReturnsEndTurn(t *testing.T) {
 	}
 	if result.StopReason != StopEndTurn {
 		t.Errorf("stopReason = %q, want end_turn", result.StopReason)
+	}
+}
+
+func TestServeStaleFinalReadinessRecoveryIsInvalidWithoutStatusTurn(t *testing.T) {
+	factory := &fakeFactory{behavior: func(context.Context, event.Sink, string) error { return nil }}
+	client, stop := startServer(t, factory)
+	defer stop()
+
+	client.call(t, "initialize", InitializeParams{ProtocolVersion: 1})
+	newResp := client.call(t, "session/new", SessionNewParams{})
+	var nr SessionNewResult
+	if err := json.Unmarshal(newResp.Result, &nr); err != nil {
+		t.Fatalf("session/new result: %v", err)
+	}
+	before := getStatus(t, client, nr.SessionID)
+
+	promptCh := client.callAsync("session/prompt", SessionPromptParams{
+		SessionID: nr.SessionID,
+		Action:    control.FinalReadinessRecoveryAction,
+		Prompt:    []ContentBlock{{Type: "text", Text: "continue checks"}},
+	})
+	notifications, resp := drainPrompt(t, client, promptCh)
+	if resp.Error == nil || resp.Error.Code != ErrInvalidRequest {
+		t.Fatalf("stale recovery response = %+v, want %d", resp, ErrInvalidRequest)
+	}
+	for _, notification := range notifications {
+		if notification.Method == sessionStatusUpdateMethod {
+			t.Fatalf("stale recovery published a status turn: %+v", notification)
+		}
+	}
+	after := getStatus(t, client, nr.SessionID)
+	if after.Sequence != before.Sequence || after.Phase != before.Phase || after.TurnOutcome != before.TurnOutcome {
+		t.Fatalf("stale recovery changed status: before=%+v after=%+v", before, after)
+	}
+
+	retryCh := client.callAsync("session/prompt", SessionPromptParams{
+		SessionID: nr.SessionID,
+		Prompt:    []ContentBlock{{Type: "text", Text: "ordinary turn"}},
+	})
+	_, retryResp := drainPrompt(t, client, retryCh)
+	if retryResp.Error != nil {
+		t.Fatalf("ordinary prompt after stale recovery errored: %+v", retryResp.Error)
 	}
 }

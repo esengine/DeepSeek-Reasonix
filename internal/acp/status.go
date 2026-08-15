@@ -373,6 +373,7 @@ func (t *statusTelemetry) finishTurn(runErr error, cancelled bool, goalStatus, s
 		default:
 			var readinessErr *agent.FinalReadinessError
 			var recoveryPause *agent.RecoveryPauseError
+			_, runPause := agent.InspectRunPause(runErr)
 			switch {
 			case errors.As(runErr, &readinessErr):
 				t.phase = "readiness_paused"
@@ -382,6 +383,10 @@ func (t *statusTelemetry) finishTurn(runErr error, cancelled bool, goalStatus, s
 			case errors.As(runErr, &recoveryPause):
 				t.phase = "recovery_paused"
 				t.turnOutcome = ReasonixTurnOutcome{Kind: "paused", Reason: clipStatusText(recoveryPause.Error(), 2_048)}
+				eventName = "pause"
+			case runPause:
+				t.phase = "paused"
+				t.turnOutcome = ReasonixTurnOutcome{Kind: "paused", Reason: clipStatusError(runErr, 2_048)}
 				eventName = "pause"
 			case runErr != nil:
 				t.phase = "error"
@@ -472,7 +477,7 @@ func (t *statusTelemetry) persisted() *persistedStatusTelemetry {
 	defer t.mu.Unlock()
 	return &persistedStatusTelemetry{
 		Sequence: t.sequence, State: t.state, Phase: t.phase,
-		TurnOutcome: t.turnOutcome,
+		TurnOutcome: redactTurnOutcome(t.turnOutcome),
 		FinalReadiness: ReasonixFinalReadiness{
 			ReadyForReview: t.finalReadiness.ReadyForReview,
 			Summary:        clipStatusText(t.finalReadiness.Summary, 16_384),
@@ -495,7 +500,7 @@ func restoreStatusTelemetry(saved *persistedStatusTelemetry) *statusTelemetry {
 	// waiting on work that no longer exists in this runtime.
 	t.state = "idle"
 	t.phase = normalizePersistedStatusPhase(saved.Phase)
-	t.turnOutcome = saved.TurnOutcome
+	t.turnOutcome = redactTurnOutcome(saved.TurnOutcome)
 	if t.turnOutcome.Kind == "" {
 		t.turnOutcome.Kind = "none"
 	}
@@ -524,7 +529,7 @@ func (t *statusTelemetry) snapshot() statusTelemetrySnapshot {
 		state:    t.state,
 		phase:    t.phase,
 		turnOutcome: ReasonixTurnOutcome{
-			Kind: t.turnOutcome.Kind, Reason: clipStatusText(t.turnOutcome.Reason, 2_048),
+			Kind: t.turnOutcome.Kind, Reason: clipStatusCredentialText(t.turnOutcome.Reason, 2_048),
 		},
 		finalReadiness: ReasonixFinalReadiness{
 			ReadyForReview: t.finalReadiness.ReadyForReview,
@@ -535,6 +540,11 @@ func (t *statusTelemetry) snapshot() statusTelemetrySnapshot {
 		cumulative:   t.cumulative.wire(),
 		goalOverride: t.goalOverride,
 	}
+}
+
+func redactTurnOutcome(outcome ReasonixTurnOutcome) ReasonixTurnOutcome {
+	outcome.Reason = clipStatusCredentialText(outcome.Reason, 2_048)
+	return outcome
 }
 
 func defaultSessionRuntimeState(cwd string) SessionRuntimeState {
