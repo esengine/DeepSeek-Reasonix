@@ -1190,18 +1190,41 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 	sess.persistAfterTurn(text)
 
 	stop := StopEndTurn
-	if runErr != nil {
-		if runCtx.Err() != nil {
-			stop = StopCancelled
+	if runErr != nil && runCtx.Err() == nil {
+		var readinessErr *agent.FinalReadinessError
+		if errors.As(runErr, &readinessErr) {
+			// The TUI keeps completed work and shows a recovery card for an
+			// unsatisfied readiness gate; mirror that for ACP instead of
+			// collapsing every delivery gap into stopReason=error.
+			sess.sink.Emit(event.Event{
+				Kind:  event.Notice,
+				Level: event.LevelWarn,
+				Text:  finalReadinessNotice(readinessErr),
+			})
 		} else {
 			stop = StopError
 		}
+	} else if runErr != nil {
+		stop = StopCancelled
 	}
 	res := SessionPromptResult{StopReason: stop}
 	if sess.transcript != "" {
 		res.TranscriptPath = &sess.transcript
 	}
 	return res, nil
+}
+
+// finalReadinessNotice is the warning text ACP clients receive when a completed
+// turn's final-readiness gate stays unsatisfied; the TUI shows the same gaps in
+// its recovery card.
+func finalReadinessNotice(e *agent.FinalReadinessError) string {
+	if e == nil {
+		return "final-answer readiness gate not satisfied"
+	}
+	if reason := strings.TrimSpace(e.Reason); reason != "" {
+		return "final-answer readiness gate not satisfied: " + reason
+	}
+	return e.Error()
 }
 
 // sessionSteer durably persists guidance then attempts mid-turn admission.
