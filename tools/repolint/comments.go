@@ -12,7 +12,7 @@ import (
 const (
 	capDocGoPackage = 40
 	capPackageDoc   = 8
-	capDeclDoc      = 5
+	capDeclDoc      = 15
 	capFieldDoc     = 3
 	capFloating     = 3
 )

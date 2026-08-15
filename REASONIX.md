@@ -40,7 +40,7 @@ Default is none — the code is the truth. Write one only when the **why** is
 non-obvious: a hidden constraint, a workaround anchored to something verifiable,
 an invariant the type system cannot express, or an external-protocol quirk.
 
-- Declaration doc: ≤5 lines. Package comment: ≤8 lines, or ≤40 in a `doc.go`.
+- Declaration doc: ≤15 lines. Package comment: ≤8 lines, or ≤40 in a `doc.go`.
 - Every other comment: ≤3 lines. Struct-field and trailing `//`: 1 line.
 - Never: restatements of the code, phase/stage narrative, incident or
   conversation history, section banners, commented-out code, `@param` lists.
