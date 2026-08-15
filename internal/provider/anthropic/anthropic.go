@@ -374,12 +374,18 @@ func (c *client) buildRequest(_ context.Context, req provider.Request) anthReque
 			// Replay provider reasoning before the tool_use it led to. DeepSeek uses
 			// unsigned thinking blocks and requires the reasoning from a tool-call
 			// turn in every subsequent request, even if the current request no longer
-			// declares tools or has since disabled thinking. Anthropic proper requires
-			// a signature, so reasoning without one cannot be replayed on that endpoint.
-			if c.deepseek && len(m.ToolCalls) > 0 && m.ReasoningContent != "" {
-				blocks = append(blocks, contentBlock{Type: "thinking", Thinking: m.ReasoningContent})
+			// declares tools or has since disabled thinking. The endpoint 400s an
+			// assistant tool_calls turn whose thinking block is absent from the
+			// request JSON ("content[].thinking … must be passed back"), and accepts
+			// an empty thinking block — so, mirroring the OpenAI-compatible wire's
+			// policy for the same 400 family, always emit the block on DeepSeek
+			// tool-call turns (empty included) rather than fail the request when
+			// reasoning was lost upstream. Anthropic proper requires a signature, so
+			// reasoning without one cannot be replayed on that endpoint.
+			if c.deepseek && len(m.ToolCalls) > 0 {
+				blocks = append(blocks, contentBlock{Type: "thinking", Thinking: strPtr(m.ReasoningContent)})
 			} else if c.thinking == "adaptive" && m.ReasoningContent != "" && m.ReasoningSignature != "" {
-				blocks = append(blocks, contentBlock{Type: "thinking", Thinking: m.ReasoningContent, Signature: m.ReasoningSignature})
+				blocks = append(blocks, contentBlock{Type: "thinking", Thinking: strPtr(m.ReasoningContent), Signature: m.ReasoningSignature})
 			}
 			blocks = appendServerSearchBlocks(blocks, m.ServerSearch)
 			if m.Content != "" {
@@ -734,6 +740,10 @@ const cacheWrite5MinuteInputMultiplier = 1.25
 
 func ephemeral() *cacheControl { return &cacheControl{Type: "ephemeral"} }
 
+// strPtr returns a pointer to s so an empty string still serialises as
+// `"thinking": ""` instead of being dropped by omitempty.
+func strPtr(s string) *string { return &s }
+
 type cacheControl struct {
 	Type string `json:"type"`
 }
@@ -776,7 +786,7 @@ type anthMessage struct {
 type contentBlock struct {
 	Type         string          `json:"type"`
 	Text         string          `json:"text,omitempty"`        // text
-	Thinking     string          `json:"thinking,omitempty"`    // thinking
+	Thinking     *string         `json:"thinking,omitempty"`    // thinking; pointer so DeepSeek tool-call replay always serialises the key (empty included — the endpoint 400s a thinking block without the `thinking` field)
 	Signature    string          `json:"signature,omitempty"`   // thinking
 	ID           string          `json:"id,omitempty"`          // tool_use
 	Name         string          `json:"name,omitempty"`        // tool_use

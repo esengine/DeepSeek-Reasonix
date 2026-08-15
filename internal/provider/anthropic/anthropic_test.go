@@ -597,7 +597,7 @@ func TestBuildRequestThinking(t *testing.T) {
 	if asst.Role != "assistant" || len(asst.Content) != 2 {
 		t.Fatalf("assistant msg = %+v", asst)
 	}
-	if asst.Content[0].Type != "thinking" || asst.Content[0].Thinking != "Let me check." || asst.Content[0].Signature != "sig-abc" {
+	if asst.Content[0].Type != "thinking" || asst.Content[0].Thinking == nil || *asst.Content[0].Thinking != "Let me check." || asst.Content[0].Signature != "sig-abc" {
 		t.Fatalf("first block should be the signed thinking block: %+v", asst.Content[0])
 	}
 	if asst.Content[1].Type != "tool_use" {
@@ -674,7 +674,7 @@ func TestBuildRequestDeepSeekThinking(t *testing.T) {
 		t.Fatalf("output_config = %+v, want max", r.OutputConfig)
 	}
 	asst := r.Messages[1]
-	if len(asst.Content) != 2 || asst.Content[0].Type != "thinking" || asst.Content[0].Thinking != "I should call the tool." || asst.Content[0].Signature != "" || asst.Content[1].Type != "tool_use" {
+	if len(asst.Content) != 2 || asst.Content[0].Type != "thinking" || asst.Content[0].Thinking == nil || *asst.Content[0].Thinking != "I should call the tool." || asst.Content[0].Signature != "" || asst.Content[1].Type != "tool_use" {
 		t.Fatalf("DeepSeek assistant blocks = %+v, want unsigned thinking before tool_use", asst.Content)
 	}
 	if r.System[0].CacheControl != nil || r.Tools[0].CacheControl != nil {
@@ -727,7 +727,7 @@ func TestBuildRequestDeepSeekReplaysOnlyToolCallReasoningFromHistory(t *testing.
 				t.Fatalf("messages = %+v, want user/assistant/user", r.Messages)
 			}
 			blocks := r.Messages[1].Content
-			if len(blocks) != 2 || blocks[0].Type != "thinking" || blocks[0].Thinking != "I should call the tool." || blocks[1].Type != "tool_use" {
+			if len(blocks) != 2 || blocks[0].Type != "thinking" || blocks[0].Thinking == nil || *blocks[0].Thinking != "I should call the tool." || blocks[1].Type != "tool_use" {
 				t.Fatalf("assistant blocks = %+v, want historical thinking before tool_use", blocks)
 			}
 		})
@@ -744,6 +744,51 @@ func TestBuildRequestDeepSeekReplaysOnlyToolCallReasoningFromHistory(t *testing.
 		})
 		if len(r.Messages) != 2 || len(r.Messages[1].Content) != 1 || r.Messages[1].Content[0].Type != "text" {
 			t.Fatalf("non-tool assistant blocks = %+v, want visible text only", r.Messages)
+		}
+	})
+
+	t.Run("missing reasoning on a tool-call turn still emits the thinking key", func(t *testing.T) {
+		// DeepSeek thinking mode 400s an assistant tool_calls turn whose thinking
+		// block is absent, and 400s a thinking block that lacks the `thinking`
+		// field; an empty value is accepted. Reasoning can be lost upstream
+		// (filtered/renamed by a gateway, session restore, retry fallback), so
+		// the wire must always emit `"thinking": ""` on such turns instead of
+		// dropping the block or omitting the key.
+		c := &client{model: "deepseek-v4-flash", deepseek: true, thinking: "enabled", effort: "high"}
+		r := c.buildRequest(context.Background(), provider.Request{
+			Messages: []provider.Message{
+				{Role: provider.RoleUser, Content: "run ls"},
+				{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "t1", Name: "bash", Arguments: `{"command":"ls"}`}}},
+				{Role: provider.RoleTool, ToolCallID: "t1", Content: "ok"},
+			},
+			Tools: []provider.ToolSchema{{Name: "bash"}},
+		})
+		blocks := r.Messages[1].Content
+		if len(blocks) != 2 || blocks[0].Type != "thinking" || blocks[0].Thinking == nil || *blocks[0].Thinking != "" || blocks[1].Type != "tool_use" {
+			t.Fatalf("assistant blocks = %+v, want thinking (empty) before tool_use", blocks)
+		}
+		wire, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(wire), `"thinking":""`) {
+			t.Fatalf("wire body must serialise the empty thinking key: %s", wire)
+		}
+	})
+
+	t.Run("native Anthropic tool-call turn without reasoning stays unchanged", func(t *testing.T) {
+		c := &client{name: "anthropic", model: "claude-opus-4-8"}
+		r := c.buildRequest(context.Background(), provider.Request{
+			Messages: []provider.Message{
+				{Role: provider.RoleUser, Content: "run ls"},
+				{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "t1", Name: "bash", Arguments: `{"command":"ls"}`}}},
+				{Role: provider.RoleTool, ToolCallID: "t1", Content: "ok"},
+			},
+			Tools: []provider.ToolSchema{{Name: "bash"}},
+		})
+		blocks := r.Messages[1].Content
+		if len(blocks) != 1 || blocks[0].Type != "tool_use" {
+			t.Fatalf("native assistant blocks = %+v, want tool_use only (no synthetic thinking)", blocks)
 		}
 	})
 }
