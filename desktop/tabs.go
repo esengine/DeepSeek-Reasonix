@@ -1504,6 +1504,107 @@ type tabEventSink struct {
 	botSink       event.Sink // optional: when set, events are also forwarded here
 	botSinkGen    uint64
 	turn          turnSubmissionState // stays reserved through the end of TurnDone fan-out
+	streamMerge   *streamDeltaMerger  // coalesces text/reasoning deltas; lazy init
+	mergeOnce     sync.Once
+}
+
+// streamMergeWindow bounds how long text/reasoning deltas wait before being
+// flushed as one wire event. 30ms keeps streaming latency invisible while
+// collapsing a fast token stream into at most ~33 WebView2 round-trips/sec
+// instead of one ExecJS round-trip per token (the previous behavior, which
+// saturated the Wails event bridge on long complex turns and made the UI
+// progressively slower the longer a session ran).
+const streamMergeWindow = 30 * time.Millisecond
+
+// streamDeltaPart is one coalesced run of consecutive same-kind deltas.
+type streamDeltaPart struct {
+	kind         event.Kind // event.Text or event.Reasoning
+	delta        string
+	submissionID string
+	runtimeEpoch string
+}
+
+// streamDeltaMerger merges consecutive text/reasoning deltas into a single
+// wire event per window. Ordering is preserved: non-stream events flush the
+// pending parts before they are sent, and flush emits parts oldest-first.
+// Empty deltas are retained (an empty text delta still completes live
+// reasoning on the frontend), so merging never changes observable semantics.
+type streamDeltaMerger struct {
+	mu      sync.Mutex
+	pending []streamDeltaPart
+	timer   *time.Timer
+	// send emits one merged wire event; called without the merger lock held.
+	send func(part streamDeltaPart)
+}
+
+// push appends a stream delta, merging it into the trailing part when the
+// kind matches, and schedules a flush if none is pending. The submission and
+// runtime-epoch snapshots are captured per part so a flush that straddles a
+// turn boundary never misattributes deltas to the next submission.
+func (m *streamDeltaMerger) push(kind event.Kind, delta, submissionID, runtimeEpoch string) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	if n := len(m.pending); n > 0 && m.pending[n-1].kind == kind {
+		part := &m.pending[n-1]
+		part.delta += delta
+		if part.submissionID == "" {
+			part.submissionID = submissionID
+		}
+		if part.runtimeEpoch == "" {
+			part.runtimeEpoch = runtimeEpoch
+		}
+	} else {
+		m.pending = append(m.pending, streamDeltaPart{kind: kind, delta: delta, submissionID: submissionID, runtimeEpoch: runtimeEpoch})
+	}
+	if m.timer == nil {
+		m.timer = time.AfterFunc(streamMergeWindow, m.flush)
+	}
+	m.mu.Unlock()
+}
+
+// flush sends all pending deltas immediately as individual wire events,
+// oldest first. Safe to call concurrently; a no-op when idle.
+func (m *streamDeltaMerger) flush() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	parts := m.pending
+	m.pending = nil
+	if m.timer != nil {
+		m.timer.Stop()
+		m.timer = nil
+	}
+	m.mu.Unlock()
+	for _, p := range parts {
+		if m.send != nil {
+			m.send(p)
+		}
+	}
+}
+
+// merger returns the sink's coalescer, initializing it on first use.
+func (s *tabEventSink) merger() *streamDeltaMerger {
+	if s == nil {
+		return nil
+	}
+	s.mergeOnce.Do(func() {
+		s.streamMerge = &streamDeltaMerger{
+			send: func(p streamDeltaPart) {
+				e := event.Event{Kind: p.kind}
+				if p.kind == event.Reasoning {
+					e.Reasoning = p.delta
+				} else {
+					e.Text = p.delta
+				}
+				tabID, _ := s.binding()
+				s.emitRuntimeEvent(eventChannel, toWireTabWithSubmission(e, tabID, p.runtimeEpoch, p.submissionID))
+			},
+		}
+	})
+	return s.streamMerge
 }
 
 type closeableEventSink interface {
@@ -1570,7 +1671,21 @@ func (s *tabEventSink) Emit(e event.Event) {
 			s.flushDisplay(e.Cancelled)
 		}
 	}
-	s.emitRuntimeEvent(eventChannel, toWireTabWithSubmission(e, tabID, s.runtimeEpochSnapshot(), s.submissionIDSnapshot()))
+	// Stream deltas are coalesced into one wire event per window (see
+	// streamDeltaMerger): a fast token stream must not become one WebView2
+	// ExecJS round-trip per token, which saturates the Wails event bridge and
+	// makes long streaming turns progressively laggier. Non-stream events
+	// flush the pending deltas first so causal ordering is preserved.
+	if e.Kind == event.Text || e.Kind == event.Reasoning {
+		delta := e.Text
+		if e.Kind == event.Reasoning {
+			delta = e.Reasoning
+		}
+		s.merger().push(e.Kind, delta, s.submissionIDSnapshot(), s.runtimeEpochSnapshot())
+	} else {
+		s.merger().flush()
+		s.emitRuntimeEvent(eventChannel, toWireTabWithSubmission(e, tabID, s.runtimeEpochSnapshot(), s.submissionIDSnapshot()))
+	}
 	if app != nil {
 		if status, update := topicActivityStatusFromEvent(e); update {
 			changed := app.setTabActivityStatus(tabID, status)
@@ -1726,6 +1841,30 @@ type asyncRuntimeEmitter struct {
 	head                   int
 	running                bool
 	configWarningsRevision atomic.Uint64
+	// droppedStreamEvents counts stream deltas dropped when the webview event
+	// channel is wedged (see asyncEmitterMaxQueue).
+	droppedStreamEvents atomic.Uint64
+}
+
+// asyncEmitterMaxQueue bounds the pending event queue. The webview channel can
+// stall under heavy streaming; without a cap the queue would grow without
+// bound and turn a slow UI into an ever-growing memory and latency problem
+// ("longer sessions get slower"). Stream deltas are recoverable — the full
+// text always arrives later in a message event — so they are the first to
+// drop; structural events (approval/ask/turn_done) are never dropped.
+const asyncEmitterMaxQueue = 4096
+
+// wireEventKindOf extracts the wire event kind from a tab-routed payload so
+// the emitter can classify stream deltas under queue pressure. Unknown shapes
+// yield "" (kept).
+func wireEventKindOf(payload any) string {
+	switch v := payload.(type) {
+	case wireEventTab:
+		return v.Kind
+	case correlatedWireEventTab:
+		return v.Kind
+	}
+	return ""
 }
 
 func (e *asyncRuntimeEmitter) Emit(ctx context.Context, name string, payload ...any) {
@@ -1738,6 +1877,21 @@ func (e *asyncRuntimeEmitter) Emit(ctx context.Context, name string, payload ...
 		payload: append([]any(nil), payload...),
 	}
 	e.mu.Lock()
+	if len(e.queue)-e.head >= asyncEmitterMaxQueue {
+		// The webview event channel is wedged. Drop stream deltas (they are
+		// recoverable: the complete text arrives with the message event) so
+		// the queue stays bounded; structural events are kept at all costs.
+		if len(payload) > 0 {
+			if kind := wireEventKindOf(payload[0]); kind == "text" || kind == "reasoning" {
+				e.droppedStreamEvents.Add(1)
+				e.mu.Unlock()
+				return
+			}
+		}
+		if e.configWarningsRevision.CompareAndSwap(0, 1) {
+			slog.Warn("desktop: webview event queue saturated; keeping structural events", "queued", len(e.queue)-e.head)
+		}
+	}
 	e.queue = append(e.queue, item)
 	if !e.running {
 		e.running = true

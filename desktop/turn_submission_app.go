@@ -34,6 +34,9 @@ func (s *tabEventSink) setRuntimeEpoch(epoch string) {
 }
 
 func (s *tabEventSink) clearContext() {
+	// Flush any coalesced stream deltas while the context is still valid so
+	// a teardown never silently drops the tail of an in-flight answer.
+	s.merger().flush()
 	s.mu.Lock()
 	s.ctx = nil
 	s.turn.submissionID = ""

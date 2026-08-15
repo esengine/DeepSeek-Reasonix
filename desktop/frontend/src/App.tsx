@@ -292,6 +292,30 @@ const CHAT_MIN_WIDTH = 400;
 const CHAT_COMFORT_MIN_WIDTH = 560;
 const WORKSPACE_RESIZER_WIDTH = 8;
 
+// sameBackgroundRuntimes compares two runtime snapshots structurally. The Go
+// side rebuilds the slice on every BackgroundRuntimes call, so reference
+// equality would never hold; comparing fields lets the 1s poll skip re-renders
+// when nothing changed.
+function sameBackgroundRuntimes(a: BackgroundRuntimeView[], b: BackgroundRuntimeView[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (x.tabId !== y.tabId || x.title !== y.title || x.detached !== y.detached || x.running !== y.running || x.pendingPrompt !== y.pendingPrompt) {
+      return false;
+    }
+    if (x.jobs.length !== y.jobs.length) return false;
+    for (let j = 0; j < x.jobs.length; j++) {
+      const xj = x.jobs[j];
+      const yj = y.jobs[j];
+      if (xj.id !== yj.id || xj.kind !== yj.kind || xj.label !== yj.label || xj.status !== yj.status || xj.startedAt !== yj.startedAt) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 function stripLegacyGoalBudgetFlags(arg: string): string {
   const parts = arg.trim().split(/\s+/).filter(Boolean);
   while (parts.length > 0) {
@@ -1303,7 +1327,12 @@ export default function App() {
 
   const refreshBackgroundRuntimes = useCallback(async () => {
     try {
-      setBackgroundRuntimes(await app.BackgroundRuntimes());
+      const next = await app.BackgroundRuntimes();
+      // The Go side builds a fresh slice on every call; setting a new array
+      // reference unconditionally would re-render the whole App once per
+      // second even when nothing changed (the status chips are the only
+      // consumers). Compare structurally and skip unchanged snapshots.
+      setBackgroundRuntimes((prev) => (sameBackgroundRuntimes(prev, next) ? prev : next));
     } catch {
       // The global recovery entry is supplementary; the active-tab job list
       // remains available even when the detached-runtime list is unavailable.
@@ -1339,7 +1368,7 @@ export default function App() {
       }
     };
     void inspect();
-    const timer = window.setInterval(() => void inspect(), 500);
+    const timer = window.setInterval(() => void inspect(), 1500);
     return () => {
       disposed = true;
       window.clearInterval(timer);

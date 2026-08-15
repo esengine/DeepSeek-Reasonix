@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"reasonix/internal/event"
+	"reasonix/internal/eventwire"
 )
 
 type closeTrackingSink struct {
@@ -276,5 +278,77 @@ func TestAsyncRuntimeEmitterDrainsBacklogInOrder(t *testing.T) {
 		case <-time.After(500 * time.Millisecond):
 			t.Fatalf("timed out waiting for delivered event %d", i)
 		}
+	}
+}
+
+// TestAsyncRuntimeEmitterDropsStreamDeltasUnderPressure verifies that when the
+// queue is saturated the emitter drops stream deltas (recoverable via the
+// later message event) but never drops structural events.
+func TestAsyncRuntimeEmitterDropsStreamDeltasUnderPressure(t *testing.T) {
+	emitter := &asyncRuntimeEmitter{}
+	var mu sync.Mutex
+	delivered := []string{}
+
+	ctx := context.Background()
+	// A stalled emit (simulated by blocking the first call) plus a full queue
+	// of stream deltas: the next text/reasoning delta must be dropped, while
+	// structural events are always accepted.
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	emitter.emit = func(_ context.Context, _ string, payload ...any) {
+		once.Do(func() {
+			close(entered)
+			<-release
+		})
+		var kind string
+		if len(payload) > 0 {
+			kind = wireEventKindOf(payload[0])
+		}
+		mu.Lock()
+		delivered = append(delivered, kind)
+		mu.Unlock()
+	}
+
+	for i := 0; i < asyncEmitterMaxQueue+1; i++ {
+		emitter.Emit(ctx, "agent:event", wireEventTab{Event: eventwire.Event{Kind: "text"}, TabID: "t"})
+	}
+	select {
+	case <-entered:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("first emit did not start")
+	}
+
+	// Queue is saturated: a stream delta is dropped.
+	emitter.Emit(ctx, "agent:event", wireEventTab{Event: eventwire.Event{Kind: "text"}, TabID: "t"})
+	if got := emitter.droppedStreamEvents.Load(); got != 1 {
+		t.Fatalf("droppedStreamEvents = %d, want 1", got)
+	}
+
+	// A structural event is kept even under saturation.
+	emitter.Emit(ctx, "agent:event", wireEventTab{Event: eventwire.Event{Kind: "turn_done"}, TabID: "t"})
+
+	close(release)
+	// The queue is drained asynchronously; poll until the structural event
+	// arrives (it sits behind thousands of queued stream deltas).
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		foundDone := false
+		for _, d := range delivered {
+			if d == "turn_done" {
+				foundDone = true
+			}
+		}
+		mu.Unlock()
+		if foundDone {
+			break
+		}
+		if time.Now().After(deadline) {
+			mu.Lock()
+			defer mu.Unlock()
+			t.Fatalf("structural turn_done event was dropped under saturation; delivered=%v", delivered)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
