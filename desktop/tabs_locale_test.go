@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"os"
 	"testing"
+	"time"
 
 	"reasonix/internal/config"
 	"reasonix/internal/control"
@@ -247,14 +249,20 @@ func TestCatalogManualDefaultTitleIsNotLocalized(t *testing.T) {
 	if manual.Title != defaultTopicTitle {
 		t.Fatalf("manual title = %q, want %q", manual.Title, defaultTopicTitle)
 	}
+	sessionDir := desktopSessionDir(globalWorkspaceRoot())
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir global sessions: %v", err)
+	}
+	writeTopicSessionWithPrompt(
+		t, sessionDir, "manual-default.jsonl", manual.ID, defaultTopicTitle, "",
+		"manual default title should remain unchanged", time.Now(),
+	)
 	catalog := installLocaleTestCatalog(t, app)
 	page, err := app.catalogTopicPage(catalog, ProjectTopicPageRequest{Scope: "global", WorkspaceRoot: "", Limit: 100})
 	if err != nil {
 		t.Fatalf("catalogTopicPage: %v", err)
 	}
-	for _, item := range page.Items {
-		if item.Label != defaultTopicTitle {
-			t.Fatalf("manual topic label = %q, want untouched %q", item.Label, defaultTopicTitle)
-		}
+	if len(page.Items) != 1 || page.Items[0].TopicID != manual.ID || page.Items[0].Label != defaultTopicTitle {
+		t.Fatalf("manual catalog topic = %+v, want topic %q with untouched label %q", page.Items, manual.ID, defaultTopicTitle)
 	}
 }
