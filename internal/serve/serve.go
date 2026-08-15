@@ -163,7 +163,7 @@ func titleProviderConfig(entry *config.ProviderEntry) provider.Config {
 		APIKey:  entry.APIKey(),
 		// Title generation needs a short visible answer, not chain-of-thought.
 		// "off" is a retired DeepSeek effort value and now falls back to high.
-		Extra: map[string]any{"effort": "disabled"},
+		Extra: map[string]any{"effort": "disabled", "auth": entry.Auth},
 	}
 }
 

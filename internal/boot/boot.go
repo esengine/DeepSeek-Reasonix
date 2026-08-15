@@ -2524,6 +2524,7 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 		// default_effort when the user has not explicitly selected /effort.
 		Extra: map[string]any{
 			"api_key_env":        e.APIKeyEnv,
+			"auth":               e.Auth,
 			"api_key_source":     e.APIKeySourceLabel(),
 			"thinking":           e.Thinking,
 			"effort":             config.EffectiveEffort(e),

@@ -146,6 +146,29 @@ uses `CUSTOM_API_KEY`, it will keep working with that key. If several old custom
 providers accidentally share `CUSTOM_API_KEY`, edit each provider's
 `api_key_env` to a distinct name and save the corresponding API key again.
 
+### Provider auth via Application Default Credentials
+
+A provider entry can omit `api_key_env` entirely and set `auth = "adc"` instead.
+Reasonix then sends OAuth bearer tokens obtained from Application Default
+Credentials: on GCE the VM's metadata server supplies them automatically, and
+elsewhere the `GOOGLE_APPLICATION_CREDENTIALS` file is honored. Tokens are
+refreshed per request, so no static secret is stored anywhere. The attached
+identity needs access to the target endpoint (for Vertex AI, e.g.
+`roles/aiplatform.user`).
+
+```toml
+[[provider]]
+name = "vertex"
+kind = "openai"
+base_url = "https://aiplatform.googleapis.com/v1/projects/my-project/locations/global/endpoints/openapi"
+model = "google/gemini-3.6-flash"
+auth = "adc"
+```
+
+This targets OpenAI-compatible endpoints that accept OAuth bearers — Vertex
+AI's OpenAI endpoint being the main case. Ordinary API-key providers are
+unaffected: without `auth = "adc"`, `api_key_env` behaves exactly as before.
+
 ### Custom provider endpoint URLs
 
 The desktop custom-provider form treats its **API address** as the exact request
