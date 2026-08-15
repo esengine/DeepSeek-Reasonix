@@ -340,3 +340,37 @@ func TestAcpSessionSetCancelNil(t *testing.T) {
 	sess.finish()
 	sess.abort() // should not panic
 }
+
+func TestUsageFromReasonix(t *testing.T) {
+	if got := usageFromReasonix(ReasonixUsage{}); got != nil {
+		t.Fatalf("zero usage should map to nil, got %+v", got)
+	}
+	u := usageFromReasonix(ReasonixUsage{
+		PromptTokens:     100,
+		CompletionTokens: 5,
+		ReasoningTokens:  2,
+		CacheHitTokens:   80,
+		CacheMissTokens:  20,
+	})
+	if u == nil {
+		t.Fatal("non-zero usage mapped to nil")
+	}
+	if u.InputTokens != 100 || u.OutputTokens != 5 || u.TotalTokens != 105 {
+		t.Errorf("got in=%d out=%d total=%d, want 100/5/105", u.InputTokens, u.OutputTokens, u.TotalTokens)
+	}
+	if u.CachedReadTokens == nil || *u.CachedReadTokens != 80 {
+		t.Errorf("cachedReadTokens = %v, want 80", u.CachedReadTokens)
+	}
+	if u.ThoughtTokens == nil || *u.ThoughtTokens != 2 {
+		t.Errorf("thoughtTokens = %v, want 2", u.ThoughtTokens)
+	}
+	if u.CachedWriteTokens != nil {
+		t.Errorf("cachedWriteTokens = %v, want omitted", *u.CachedWriteTokens)
+	}
+
+	// Breakdowns absent when the turn had none (only plain input/output).
+	u2 := usageFromReasonix(ReasonixUsage{PromptTokens: 10, CompletionTokens: 3})
+	if u2 == nil || u2.CachedReadTokens != nil || u2.ThoughtTokens != nil || u2.CachedWriteTokens != nil {
+		t.Errorf("breakdowns should be omitted, got %+v", u2)
+	}
+}

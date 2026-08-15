@@ -1198,10 +1198,32 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 		}
 	}
 	res := SessionPromptResult{StopReason: stop}
+	res.Usage = usageFromReasonix(sess.status.snapshot().turnUsage)
+	s.publishUsageUpdate(sess, p.SessionID)
 	if sess.transcript != "" {
 		res.TranscriptPath = &sess.transcript
 	}
 	return res, nil
+}
+
+// publishUsageUpdate sends the stable ACP usage_update notification for the
+// just-finished turn: current context usage and window size from the
+// controller's context snapshot, plus cumulative estimated cost from session
+// telemetry when known. Skipped when the controller exposes no context window.
+func (s *service) publishUsageUpdate(sess *acpSession, sessionID string) {
+	snap, ok := sess.currentCtrl().(interface{ ContextSnapshot() (int, int) })
+	if !ok {
+		return
+	}
+	used, size := snap.ContextSnapshot()
+	if size <= 0 {
+		return
+	}
+	update := UsageUpdate{SessionUpdate: "usage_update", Used: used, Size: size}
+	if u := sess.status.snapshot().cumulative; u.EstimatedCost != nil && u.Currency != nil {
+		update.Cost = &ACPCost{Amount: *u.EstimatedCost, Currency: *u.Currency}
+	}
+	_ = s.conn.Notify("session/update", SessionUpdateParams{SessionID: sessionID, Update: update})
 }
 
 // sessionSteer durably persists guidance then attempts mid-turn admission.

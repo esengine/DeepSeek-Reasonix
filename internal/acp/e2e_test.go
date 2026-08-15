@@ -74,10 +74,11 @@ func (t fakeTool) Execute(context.Context, json.RawMessage) (string, error) {
 // e2eFactory builds a real Controller around a real Agent driven by the scripted
 // provider, with the fake tool registered and a transcript dir for persistence.
 type e2eFactory struct {
-	prov       provider.Provider
-	tool       tool.Tool
-	policy     permission.Policy
-	sessionDir string
+	prov          provider.Provider
+	tool          tool.Tool
+	policy        permission.Policy
+	sessionDir    string
+	contextWindow int
 }
 
 func (f *e2eFactory) SessionDir() string { return f.sessionDir }
@@ -86,7 +87,7 @@ func (f *e2eFactory) NewSession(_ context.Context, p SessionParams) (*control.Co
 	reg := tool.NewRegistry()
 	reg.Add(f.tool)
 	executor := agent.New(f.prov, reg, agent.NewSession("you are a test agent"),
-		agent.Options{MaxSteps: 5}, p.Sink)
+		agent.Options{MaxSteps: 5, ContextWindow: f.contextWindow}, p.Sink)
 	return control.New(control.Options{
 		Runner:     executor,
 		Executor:   executor,
@@ -630,5 +631,112 @@ func (t blockingTool) Execute(ctx context.Context, _ json.RawMessage) (string, e
 		return "", ctx.Err()
 	case <-t.release:
 		return "released", nil
+	}
+}
+
+// TestE2EPromptResultCarriesUsage runs a turn whose provider completion reports
+// token usage, and checks the session/prompt result carries the experimental
+// usage field (inputTokens/outputTokens/totalTokens, cached/thought breakdown)
+// that ACP clients like Paseo render as a token counter.
+func TestE2EPromptResultCarriesUsage(t *testing.T) {
+	dir := t.TempDir()
+	prov := &scriptedProvider{name: "fake", responses: [][]provider.Chunk{
+		{
+			{Type: provider.ChunkText, Text: "hi"},
+			{Type: provider.ChunkUsage, Usage: &provider.Usage{
+				PromptTokens:     100,
+				CompletionTokens: 5,
+				TotalTokens:      105,
+				CacheHitTokens:   80,
+				CacheMissTokens:  20,
+				ReasoningTokens:  2,
+			}},
+			{Type: provider.ChunkDone},
+		},
+	}}
+	factory := &e2eFactory{
+		prov:          prov,
+		tool:          fakeTool{name: "peek", ro: true, out: "x"},
+		policy:        permission.New("ask", nil, nil, nil),
+		sessionDir:    dir,
+		contextWindow: 200_000,
+	}
+	client, stop := startServer(t, factory)
+	defer stop()
+
+	sid := openSession(t, client)
+	promptCh := client.callAsync("session/prompt", SessionPromptParams{
+		SessionID: sid,
+		Prompt:    []ContentBlock{{Type: "text", Text: "hi"}},
+	})
+	notifs, resp := drainPrompt(t, client, promptCh)
+
+	// The usage_update notification is emitted immediately before the prompt
+	// response; drain any trailing notifications that raced the response.
+	time.Sleep(100 * time.Millisecond)
+	for {
+		select {
+		case f := <-client.notifs:
+			notifs = append(notifs, f)
+		default:
+			goto drained
+		}
+	}
+drained:
+
+	var pr SessionPromptResult
+	if err := json.Unmarshal(resp.Result, &pr); err != nil {
+		t.Fatalf("prompt result: %v", err)
+	}
+	if pr.StopReason != StopEndTurn {
+		t.Fatalf("stopReason = %q, want end_turn", pr.StopReason)
+	}
+	if pr.Usage == nil {
+		t.Fatal("prompt result has no usage field")
+	}
+	if pr.Usage.InputTokens != 100 || pr.Usage.OutputTokens != 5 || pr.Usage.TotalTokens != 105 {
+		t.Errorf("usage = in %d out %d total %d, want 100/5/105",
+			pr.Usage.InputTokens, pr.Usage.OutputTokens, pr.Usage.TotalTokens)
+	}
+	if pr.Usage.CachedReadTokens == nil || *pr.Usage.CachedReadTokens != 80 {
+		t.Errorf("cachedReadTokens = %v, want 80", pr.Usage.CachedReadTokens)
+	}
+	if pr.Usage.ThoughtTokens == nil || *pr.Usage.ThoughtTokens != 2 {
+		t.Errorf("thoughtTokens = %v, want 2", pr.Usage.ThoughtTokens)
+	}
+	if pr.Usage.CachedWriteTokens != nil {
+		t.Errorf("cachedWriteTokens = %v, want omitted", *pr.Usage.CachedWriteTokens)
+	}
+
+	// The turn also ends with the stable ACP usage_update notification carrying
+	// the context window size and current context usage.
+	var sawUsageUpdate bool
+	for _, n := range notifs {
+		if updateKind(t, n) != "usage_update" {
+			continue
+		}
+		sawUsageUpdate = true
+		var p struct {
+			Update struct {
+				Used int `json:"used"`
+				Size int `json:"size"`
+			} `json:"update"`
+		}
+		if err := json.Unmarshal(n.Params, &p); err != nil {
+			t.Fatalf("usage_update params: %v", err)
+		}
+		if p.Update.Size != 200_000 {
+			t.Errorf("usage_update size = %d, want 200000", p.Update.Size)
+		}
+		if p.Update.Used < 0 {
+			t.Errorf("usage_update used = %d, want >= 0", p.Update.Used)
+		}
+	}
+	if !sawUsageUpdate {
+		var got []string
+		for _, n := range notifs {
+			got = append(got, updateKind(t, n))
+		}
+		t.Errorf("no usage_update notification in session/update stream (got %v)", got)
 	}
 }

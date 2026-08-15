@@ -571,11 +571,49 @@ const (
 	StopError     StopReason = "error"
 )
 
+// SessionPromptUsage is the optional per-turn token usage attached to the
+// session/prompt result. It mirrors the ACP SDK's experimental Usage shape
+// (agentclientprotocol.com) — required inputTokens/outputTokens/totalTokens
+// plus optional cached/thought breakdowns — so ACP clients such as Paseo can
+// render a token counter. Omitted (nil) when the turn consumed no tokens.
+type SessionPromptUsage struct {
+	InputTokens       int  `json:"inputTokens"`
+	OutputTokens      int  `json:"outputTokens"`
+	TotalTokens       int  `json:"totalTokens"`
+	CachedReadTokens  *int `json:"cachedReadTokens,omitempty"`
+	CachedWriteTokens *int `json:"cachedWriteTokens,omitempty"`
+	ThoughtTokens     *int `json:"thoughtTokens,omitempty"`
+}
+
+// usageFromReasonix maps a finished turn's ReasonixUsage to the ACP
+// session/prompt usage field. Returns nil when the turn reported no tokens.
+func usageFromReasonix(u ReasonixUsage) *SessionPromptUsage {
+	if u.PromptTokens == 0 && u.CompletionTokens == 0 {
+		return nil
+	}
+	usage := &SessionPromptUsage{
+		InputTokens:  u.PromptTokens,
+		OutputTokens: u.CompletionTokens,
+		TotalTokens:  u.PromptTokens + u.CompletionTokens,
+	}
+	if u.CacheHitTokens > 0 {
+		cached := u.CacheHitTokens
+		usage.CachedReadTokens = &cached
+	}
+	if u.ReasoningTokens > 0 {
+		thought := u.ReasoningTokens
+		usage.ThoughtTokens = &thought
+	}
+	return usage
+}
+
 // SessionPromptResult ends a session/prompt. TranscriptPath is reserved for a
-// future on-disk transcript pointer; omitted (null) for now.
+// future on-disk transcript pointer; omitted (null) for now. Usage carries the
+// experimental per-turn token accounting (nil when the turn used no tokens).
 type SessionPromptResult struct {
-	StopReason     StopReason `json:"stopReason"`
-	TranscriptPath *string    `json:"transcriptPath,omitempty"`
+	StopReason     StopReason          `json:"stopReason"`
+	TranscriptPath *string             `json:"transcriptPath,omitempty"`
+	Usage          *SessionPromptUsage `json:"usage,omitempty"`
 }
 
 // session/update (agent → client notifications)
@@ -590,6 +628,23 @@ type SessionPromptResult struct {
 type SessionUpdateParams struct {
 	SessionID string `json:"sessionId"`
 	Update    any    `json:"update"`
+}
+
+// UsageUpdate is the stable ACP v1 "Session Context Size and Cost" update
+// (agentclientprotocol.com/protocol/v1/prompt-turn#session-usage-updates):
+// tokens currently in context, the context window size, and optional
+// cumulative session cost. Clients render it as a context/token gauge.
+type UsageUpdate struct {
+	SessionUpdate string   `json:"sessionUpdate"`
+	Used          int      `json:"used"`
+	Size          int      `json:"size"`
+	Cost          *ACPCost `json:"cost,omitempty"`
+}
+
+// ACPCost is the optional cumulative session cost in a UsageUpdate.
+type ACPCost struct {
+	Amount   float64 `json:"amount"`
+	Currency string  `json:"currency"`
 }
 
 // messageChunk is agent_message_chunk / agent_thought_chunk.
