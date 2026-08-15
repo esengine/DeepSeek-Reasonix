@@ -2,6 +2,7 @@ package acp
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"reasonix/internal/secrets"
 )
@@ -20,10 +21,15 @@ func clipStatusValue(value string, limit int) string {
 	if limit <= 0 {
 		return ""
 	}
+	value = strings.ToValidUTF8(value, "\uFFFD")
 	if len(value) <= limit {
 		return value
 	}
-	return value[:limit]
+	end := limit
+	for end > 0 && !utf8.RuneStart(value[end]) {
+		end--
+	}
+	return value[:end]
 }
 
 func clipStatusError(err error, limit int) string {
