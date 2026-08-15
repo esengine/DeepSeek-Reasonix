@@ -20,9 +20,61 @@ type progressTransport interface {
 	registerProgress(token string, sink tool.ProgressFunc) func()
 }
 
+// notificationTransport is implemented by native transports that can receive
+// server notifications. The callback must stay non-blocking because stdio and
+// SSE dispatch it from their read loops, while streamable HTTP dispatches it
+// while the current response owns the transport lock.
+type notificationTransport interface {
+	registerNotification(method string, callback func(json.RawMessage)) func()
+}
+
 type progressRouter struct {
 	mu    sync.Mutex
 	sinks map[string]tool.ProgressFunc
+}
+
+type notificationRouter struct {
+	mu        sync.Mutex
+	nextID    uint64
+	listeners map[string]map[uint64]func(json.RawMessage)
+}
+
+func (r *notificationRouter) registerNotification(method string, callback func(json.RawMessage)) func() {
+	method = strings.TrimSpace(method)
+	if method == "" || callback == nil {
+		return func() {}
+	}
+	r.mu.Lock()
+	if r.listeners == nil {
+		r.listeners = map[string]map[uint64]func(json.RawMessage){}
+	}
+	r.nextID++
+	id := r.nextID
+	if r.listeners[method] == nil {
+		r.listeners[method] = map[uint64]func(json.RawMessage){}
+	}
+	r.listeners[method][id] = callback
+	r.mu.Unlock()
+	return func() {
+		r.mu.Lock()
+		delete(r.listeners[method], id)
+		if len(r.listeners[method]) == 0 {
+			delete(r.listeners, method)
+		}
+		r.mu.Unlock()
+	}
+}
+
+func (r *notificationRouter) dispatchNotification(method string, params json.RawMessage) {
+	r.mu.Lock()
+	listeners := make([]func(json.RawMessage), 0, len(r.listeners[method]))
+	for _, callback := range r.listeners[method] {
+		listeners = append(listeners, callback)
+	}
+	r.mu.Unlock()
+	for _, callback := range listeners {
+		callback(append(json.RawMessage(nil), params...))
+	}
 }
 
 func (r *progressRouter) registerProgress(token string, sink tool.ProgressFunc) func() {

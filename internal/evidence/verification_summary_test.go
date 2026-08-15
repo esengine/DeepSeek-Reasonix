@@ -16,7 +16,7 @@ func TestVerificationCommandSummaryRecommendationsAreRecognized(t *testing.T) {
 			if !strings.Contains(summary, command) {
 				t.Errorf("summary family %q missing concrete example %q: %s", recommendation.label, command, summary)
 			}
-			if !IsDeliveryVerificationCommand(command) {
+			if !IsVerificationCommand(command) {
 				t.Errorf("summary family %q advertises %q, but classifier rejects it", recommendation.label, command)
 			}
 		}
@@ -51,7 +51,7 @@ func TestGoBuildAlwaysCountsAsMutation(t *testing.T) {
 		"go build -future-flag ./...",
 		"go build ./... -o reasonix",
 	} {
-		if IsDeliveryVerificationCommand(command) {
+		if IsVerificationCommand(command) {
 			t.Errorf("%q must not count as non-mutating verification", command)
 		}
 		args, err := json.Marshal(map[string]string{"command": command})
@@ -75,7 +75,7 @@ func TestTSCVerificationRequiresExplicitNoEmit(t *testing.T) {
 		"tsc --noEmit --listFiles",
 		"tsc --noEmit --pretty false",
 	} {
-		if !IsDeliveryVerificationCommand(command) {
+		if !IsVerificationCommand(command) {
 			t.Errorf("%q should be recognized as an explicit no-emit type check", command)
 		}
 		args, err := json.Marshal(map[string]string{"command": command})
@@ -115,7 +115,7 @@ func TestTSCVerificationRequiresExplicitNoEmit(t *testing.T) {
 		"tsc -b --noEmit",
 		"tsc --build --clean --noEmit",
 	} {
-		if IsDeliveryVerificationCommand(command) {
+		if IsVerificationCommand(command) {
 			t.Errorf("%q is not a bounded no-emit type check and must not count as verification", command)
 		}
 		args, err := json.Marshal(map[string]string{"command": command})
@@ -143,7 +143,7 @@ func TestSwiftTestRecognizedAsVerification(t *testing.T) {
 		"swift test --filter SomeTests",
 		"swift test --enable-code-coverage",
 	} {
-		if !IsDeliveryVerificationCommand(command) {
+		if !IsVerificationCommand(command) {
 			t.Errorf("%q should be recognized as a read-only Swift test verifier", command)
 		}
 		args, err := json.Marshal(map[string]string{"command": command})
@@ -175,7 +175,7 @@ func TestSwiftTestRecognizedAsVerification(t *testing.T) {
 		"swift test --help",
 		"swift test --list-tests",
 	} {
-		if IsDeliveryVerificationCommand(command) {
+		if IsVerificationCommand(command) {
 			t.Errorf("%q can build, run, or mutate the package and must not count as verification", command)
 		}
 		args, err := json.Marshal(map[string]string{"command": command})
@@ -198,7 +198,7 @@ func TestPythonCompileallAlwaysCountsAsMutation(t *testing.T) {
 		"python3 -m compileall -q src/",
 		"python -m compileall -b package.py",
 	} {
-		if IsDeliveryVerificationCommand(command) {
+		if IsVerificationCommand(command) {
 			t.Errorf("%q writes bytecode and must not count as verification", command)
 		}
 		args, err := json.Marshal(map[string]string{"command": command})
@@ -228,7 +228,7 @@ func TestNpxVerificationUsesSafeKnownRunners(t *testing.T) {
 		"npx tsc --project tsconfig.json --noEmit",
 		"npx mocha test/ 2>&1 | tail -40",
 	} {
-		if !IsDeliveryVerificationCommand(command) {
+		if !IsVerificationCommand(command) {
 			t.Errorf("%q should be recognized as a known read-only npx verifier", command)
 		}
 		args, err := json.Marshal(map[string]string{"command": command})
@@ -264,7 +264,7 @@ func TestNpxVerificationUsesSafeKnownRunners(t *testing.T) {
 		"npx tsc --noEmit --watch",
 		"npx tsc --build --noEmit",
 	} {
-		if IsDeliveryVerificationCommand(command) {
+		if IsVerificationCommand(command) {
 			t.Errorf("%q can install, execute, or write output and must fail closed", command)
 		}
 		args, err := json.Marshal(map[string]string{"command": command})
@@ -309,7 +309,7 @@ func TestVerificationCommandSummaryAcceptedPipeline(t *testing.T) {
 		"tail -n +1 out.json | node --check -",
 		"cat file.js | node --check -",
 	} {
-		if !IsDeliveryVerificationCommand(cmd) {
+		if !IsVerificationCommand(cmd) {
 			t.Errorf("advertised read-only pipeline %q rejected by classifier", cmd)
 		}
 	}

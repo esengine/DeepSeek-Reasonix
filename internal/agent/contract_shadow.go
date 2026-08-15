@@ -8,6 +8,7 @@ import (
 	"reasonix/internal/completion"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
+	"reasonix/internal/instruction"
 	"reasonix/internal/plancontract"
 	"reasonix/internal/taskcontract"
 	"reasonix/internal/taskintent"
@@ -18,7 +19,7 @@ import (
 // the contract's source of truth when there is one — its acceptance criteria
 // are what the work agreed to, and todo titles are only a restatement of the
 // steps. Without a plan the todo list stands in, as it always did.
-func buildShadowContract(input string, receipts []evidence.Receipt, plan *plancontract.Plan) *taskcontract.Contract {
+func buildShadowContract(input string, receipts []evidence.Receipt, plan *plancontract.Plan, projectChecks ...instruction.VerifyCheck) *taskcontract.Contract {
 	var c *taskcontract.Contract
 	switch {
 	case plan != nil:
@@ -40,6 +41,11 @@ func buildShadowContract(input string, receipts []evidence.Receipt, plan *planco
 	if plan == nil {
 		for i, todo := range todos {
 			c.AddRequirement(fmt.Sprintf("t%d", i+1), todo.Content, true)
+		}
+	}
+	for _, check := range projectChecks {
+		if command := strings.TrimSpace(check.Command); command != "" {
+			c.AddCheck(command)
 		}
 	}
 	for _, r := range receipts {
@@ -150,7 +156,7 @@ func (a *Agent) LiveContract() *taskcontract.Contract {
 	if a == nil || a.task.ledger == nil {
 		return nil
 	}
-	return buildShadowContract(a.turn.turnInput, a.task.ledger.Receipts(), a.planContractSnapshot())
+	return buildShadowContract(a.turn.turnInput, a.task.ledger.Receipts(), a.planContractSnapshot(), a.projectChecks...)
 }
 
 // observeContractRound records the contract after one tool round, so a
@@ -171,7 +177,7 @@ func (a *Agent) emitTurnShadows(input string) {
 	if a.task.ledger == nil {
 		return
 	}
-	c := buildShadowContract(input, a.task.ledger.Receipts(), a.planContractSnapshot())
+	c := buildShadowContract(input, a.task.ledger.Receipts(), a.planContractSnapshot(), a.projectChecks...)
 	// Prefer the live contract when present so Suppressed/Partial state is not
 	// lost in the pure replay path.
 	if live := a.LiveContract(); live != nil && (live.HasSuppressed() || len(live.Requirements) > 0 || len(live.Checks) > 0) {
@@ -189,7 +195,7 @@ func (a *Agent) emitTurnShadows(input string) {
 	rep := completion.Build(c, a.task.ledger)
 	a.turn.completion = &rep
 	event.RecordCompletionReport(a.svc.sink, completionReportAudit(rep))
-	a.emitCompletionSummary(c)
+	a.emitCompletionSummary(c, rep)
 }
 
 // CompletionReceipt returns the turn's completion record for the host to

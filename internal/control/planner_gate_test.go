@@ -376,9 +376,9 @@ func TestDecidePlannerRouteMatrix(t *testing.T) {
 			reason: plannerReasonReadOnlyAction,
 		},
 		{
-			name:   "delivery keeps pure read only command direct",
+			name:   "closed-loop keeps pure read only command direct",
 			input:  "review this PR",
-			meta:   plannerTurnMetadata{DeliveryProfile: true},
+			meta:   plannerTurnMetadata{ClosedLoop: true},
 			route:  agent.PlannerRouteExecutorOnly,
 			depth:  agent.PlannerDepthNone,
 			reason: plannerReasonReadOnlyAction,
@@ -426,17 +426,17 @@ func TestDecidePlannerRouteMatrix(t *testing.T) {
 			reason: plannerReasonGuidance,
 		},
 		{
-			name:   "delivery upgrades non atomic work",
+			name:   "closed-loop upgrades non atomic work",
 			input:  "add a login button",
-			meta:   plannerTurnMetadata{DeliveryProfile: true},
+			meta:   plannerTurnMetadata{ClosedLoop: true},
 			route:  agent.PlannerRoutePlanAndExecute,
 			depth:  agent.PlannerDepthFull,
 			reason: plannerReasonWorkRequest,
 		},
 		{
-			name:   "delivery keeps atomic edit direct",
+			name:   "closed-loop keeps atomic edit direct",
 			input:  "fix typo in README",
-			meta:   plannerTurnMetadata{DeliveryProfile: true},
+			meta:   plannerTurnMetadata{ClosedLoop: true},
 			route:  agent.PlannerRouteExecutorOnly,
 			depth:  agent.PlannerDepthNone,
 			reason: plannerReasonAtomicEdit,
@@ -465,9 +465,6 @@ func TestDecidePlannerRouteMatrix(t *testing.T) {
 			got := DecidePlannerRoute(ctx, tc.input)
 			if got.Route != tc.route || got.Depth != tc.depth || got.Reason != tc.reason {
 				t.Fatalf("decision = %+v, want route=%s depth=%s reason=%s", got, tc.route, tc.depth, tc.reason)
-			}
-			if got.Route != agent.PlannerRouteExecutorOnly && got.MaxResearchRounds <= 0 {
-				t.Fatalf("planned decision has no research budget: %+v", got)
 			}
 		})
 	}

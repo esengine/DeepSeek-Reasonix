@@ -7,6 +7,7 @@ import {
   projectTreeShellChildren,
   projectTreeEventAffectsFolder,
   projectTreeRevisionIsFresh,
+  projectTreeTopicPageIsFresh,
   projectTreeShouldApplyShellSnapshot,
   defaultExpandedProjectTreeKeys,
   activeSessionAncestorKeys,
@@ -28,7 +29,9 @@ import {
   projectTreeShellSignature,
 } from "../components/ProjectTree";
 import { projectTreeTrashingTopics } from "../lib/projectTreeArchive";
+import { normalizeProjectTreeRuntimeSnapshot } from "../lib/projectTreeRuntime";
 import { runProjectTreeSortRuntimeTests } from "./project-tree-sort-runtime.test";
+import { runProjectTreePinnedShellRuntimeTests } from "./project-tree-pinned-shell-runtime.test";
 import type { ProjectNode } from "../lib/types";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -48,6 +51,12 @@ function eq(a: unknown, b: unknown, label: string) {
 }
 
 console.log("\nproject tree runtime sessions");
+
+eq(
+  normalizeProjectTreeRuntimeSnapshot({ revision: 0, topics: null }),
+  { revision: 0, topics: [] },
+  "runtime bridge normalizes a legacy/null Wails topic array",
+);
 
 const noTrashingTopics = new Set<string>();
 const topicATrashing = projectTreeTrashingTopics(noTrashingTopics, "topic-a", true);
@@ -681,6 +690,15 @@ eq(
 
 eq(
   [
+    projectTreeTopicPageIsFresh({ "project-a": 11, "project-b": 9 }, "project-a", 10),
+    projectTreeTopicPageIsFresh({ "project-a": 11, "project-b": 9 }, "project-b", 10),
+  ],
+  [false, true],
+  "a newer revision in one project does not discard another project's slower page",
+);
+
+eq(
+  [
     projectTreeShouldApplyShellSnapshot({ currentRevision: 1, incomingRevision: 0, treeEmpty: true }),
     projectTreeShouldApplyShellSnapshot({ currentRevision: 1, incomingRevision: 0, treeEmpty: false }),
     projectTreeShouldApplyShellSnapshot({ currentRevision: 1, incomingRevision: 2, treeEmpty: false }),
@@ -740,11 +758,7 @@ eq(
   true,
   "archive refresh reloads only the affected topic folder after preserving the painted siblings",
 );
-eq(
-  projectTreeSource.includes("children: projectTreeShellChildren(previous?.children)"),
-  true,
-  "shell refresh never clears loaded folders while asynchronous topic reloads are pending",
-);
+runProjectTreePinnedShellRuntimeTests(eq, projectTreeSource);
 await runProjectTreeSortRuntimeTests(eq, projectTreeSource);
 
 eq(

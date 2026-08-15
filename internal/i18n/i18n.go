@@ -32,14 +32,15 @@ type Messages struct {
 	InitHint string
 
 	// chat REPL
-	ChatTip             string // tip line under the chat banner
-	TurnCancelled       string // shown when Ctrl-C aborts the in-flight turn but the chat keeps running
-	InterruptedRecovery string // replay notice for a durable interrupted turn
-	RecoveryPaused      string // controlled Auto retry pause; user can continue in the next message
-	ReceiptVerified     string // end-of-turn receipt, nothing unproven
-	ReceiptGapsHeader   string // end-of-turn receipt, header above the unproven list
-	ReceiptRisksHeader  string // end-of-turn receipt, header above declared risks
-	ReceiptMore         string // end-of-turn receipt, "and N more" tail
+	ChatTip                string // tip line under the chat banner
+	TurnCancelled          string // shown when Ctrl-C aborts the in-flight turn but the chat keeps running
+	InterruptedRecovery    string // replay notice for a durable interrupted turn
+	FinalReadinessRecovery string // replay hint for a durable final-readiness pause
+	RecoveryPaused         string // controlled Auto retry pause; user can continue in the next message
+	ReceiptVerified        string // end-of-turn receipt, nothing unproven
+	ReceiptGapsHeader      string // end-of-turn receipt, header above the unproven list
+	ReceiptRisksHeader     string // end-of-turn receipt, header above declared risks
+	ReceiptMore            string // end-of-turn receipt, "and N more" tail
 	// ReceiptGapKinds maps a completion gap kind to its short human phrase.
 	ReceiptGapKinds   map[string]string
 	NoSessionToResume string // shown when --continue / --resume finds nothing
@@ -91,7 +92,6 @@ type Messages struct {
 	ChatTurnReceiptLabel                   string // compact per-turn usage receipt attached to the completed assistant response
 	ChatStatusModelLabel                   string
 	ChatStatusEffortLabel                  string
-	ChatStatusWorkLabel                    string
 	ChatStatusCacheLabel                   string
 	ChatStatusContextLabel                 string
 	ChatStatusCompactLabel                 string
@@ -147,6 +147,10 @@ type Messages struct {
 	ConfigWriteReason                      string // reason shown for managed config write approval
 	ConfigWriteDeclined                    string // model-facing denial when the user declines a managed config write
 	ConfigWriteApprovalChoices             string // approval choice list for managed config write prompts
+	WriteAccessApprovalChoices             string // four-choice list for extending writable roots
+	WriteAccessHomeWarning                 string // high-risk warning when granting the whole home directory
+	WriteAccessMergedPermissionHint        string // note that the same choice also grants ordinary tool permission
+	WriteAccessProjectHint                 string // note that project persist edits reasonix.toml
 	PermissionSavedFmt                     string // permission rule saved notice: path, rule
 	PermissionAlreadyAllowedFmt            string // permission rule already covered notice: path, rule
 	PermissionSaveFailedFmt                string // permission rule save failure notice: rule, error
@@ -232,6 +236,7 @@ type Messages struct {
 	CmdClear            string // /clear
 	CmdCls              string // /cls
 	CmdCompact          string // /compact
+	CmdContinueChecks   string // /continue-checks
 	CmdContext          string // /context
 	CmdRewind           string // /rewind
 	CmdTree             string // /tree
@@ -337,21 +342,7 @@ type Messages struct {
 	RuntimeReloadQueued          string // /reload queued behind active work; the idle drain runs it
 	RuntimeReloaded              string // /reload completed (no generation available)
 	RuntimeReloadedGenerationFmt string // /reload completed; %d is the runtime build generation
-	WorkModeStatusFmt            string
-	WorkModeListHeaderFmt        string
-	WorkModeListHint             string
-	WorkModeEconomyLabel         string
-	WorkModeBalancedLabel        string
-	WorkModeDeliveryLabel        string
-	WorkModeEconomyDesc          string
-	WorkModeBalancedDesc         string
-	WorkModeDeliveryDesc         string
 	WorkModeUsage                string
-	WorkModeSwitchUnavailable    string
-	WorkModeSwitchBusy           string
-	WorkModeAlreadyOnFmt         string
-	WorkModeSwitchingFmt         string
-	WorkModeSwitchedFmt          string
 	// WorkModeDeprecatedNotice is shown once when a legacy /work-mode or
 	// /profile command is used. Prefer /preset.
 	WorkModeDeprecatedNotice string

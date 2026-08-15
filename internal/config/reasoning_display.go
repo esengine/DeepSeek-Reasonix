@@ -9,7 +9,7 @@ import (
 func (c *Config) DesktopReasoningDisplayMode() string {
 	raw := strings.ToLower(strings.TrimSpace(c.Desktop.ReasoningDisplayMode))
 	switch raw {
-	case "hidden", "summary", "auto":
+	case "hidden", "summary", "auto", "expanded":
 		return raw
 	}
 	// Missing and unknown values use the classic live-follow behavior. A user
@@ -20,7 +20,7 @@ func (c *Config) DesktopReasoningDisplayMode() string {
 // DesktopReasoningDisplayModeExplicit reports whether a valid new enum was stored.
 func (c *Config) DesktopReasoningDisplayModeExplicit() bool {
 	switch strings.ToLower(strings.TrimSpace(c.Desktop.ReasoningDisplayMode)) {
-	case "hidden", "summary", "auto":
+	case "hidden", "summary", "auto", "expanded":
 		return true
 	default:
 		return false
@@ -33,11 +33,11 @@ func (c *Config) SetDesktopReasoningDisplayMode(mode string) error {
 	case "hidden", "summary":
 		c.Desktop.ReasoningDisplayMode = strings.ToLower(strings.TrimSpace(mode))
 		c.Desktop.ExpandThinking = false
-	case "auto":
-		c.Desktop.ReasoningDisplayMode = "auto"
+	case "auto", "expanded":
+		c.Desktop.ReasoningDisplayMode = strings.ToLower(strings.TrimSpace(mode))
 		c.Desktop.ExpandThinking = true
 	default:
-		return fmt.Errorf("reasoning display mode %q: must be hidden|summary|auto", mode)
+		return fmt.Errorf("reasoning display mode %q: must be hidden|summary|auto|expanded", mode)
 	}
 	return nil
 }
@@ -53,6 +53,6 @@ func (c *Config) SetExpandThinking(on bool) error {
 func renderDesktopReasoningDisplayMode(b *strings.Builder, c *Config) {
 	fmt.Fprintf(b, "expand_thinking = %v   # desktop: legacy reasoning display alias; use reasoning_display_mode\n", c.Desktop.ExpandThinking)
 	if c.DesktopReasoningDisplayModeExplicit() {
-		fmt.Fprintf(b, "reasoning_display_mode = %q   # desktop: hidden|summary|auto reasoning presentation\n", c.DesktopReasoningDisplayMode())
+		fmt.Fprintf(b, "reasoning_display_mode = %q   # desktop: hidden|summary|auto|expanded reasoning presentation\n", c.DesktopReasoningDisplayMode())
 	}
 }

@@ -6,6 +6,24 @@ branch.
 
 ## Unreleased
 
+### Changed
+
+- **Single adaptive standard execution:** Reasonix no longer exposes Light /
+  Balanced / Delivery (or TokenMode) as a selectable execution mode. Planning,
+  verification, and independent review now follow per-turn task risk via
+  `TaskPolicy` v2. Low-risk conversation stays direct with no auxiliary model
+  calls; high-risk, security, persistence, and active-Goal work keep the former
+  Delivery closed-loop contract. Old `--preset`/`--profile`, `/preset`, ACP
+  `agent_preset`/`work_mode`, and Desktop `SetAgentPreset*`/`SetTokenMode*`
+  calls stay accepted for one compatibility version as no-ops. New persisted
+  compat fields pin `agentPreset=balanced` and `tokenMode=full`. Isolated
+  worktrees keep their on-disk directory; the UI no longer forces a Delivery
+  mode. Ordinary targeted tasks now surface missing verification or review as
+  a host-authored non-complete/unverified summary instead of stopping on
+  a recovery card; high-risk, persistent, security, explicit full-verification,
+  and Goal work retain hard evidence closure. Deprecated fields will be removed
+  after that compatibility window.
+
 ### Fixed
 
 - **v1.24.2 session snapshot & recovery root fix:** Keep PR #7982's WAL/CAS/lease

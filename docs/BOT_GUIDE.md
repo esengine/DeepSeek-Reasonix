@@ -423,9 +423,11 @@ flowchart TD
   G --> I
 ```
 
-YOLO boundaries:
+Memory-approval boundaries:
 
-- YOLO skips ordinary tool approval prompts.
+- Auto skips the default `remember`/`forget` fallback prompt, while explicit
+  `ask` and `deny` rules still apply.
+- YOLO skips ordinary tool approval prompts, including `remember`/`forget`.
 - YOLO does not bypass hard `deny` rules.
 - YOLO does not answer model Ask questions for you.
 - YOLO does not approve plan-mode plan approvals for you.
@@ -435,7 +437,7 @@ Recommendations:
 - Use `/yolo` for temporary trusted debugging or fast local iteration.
 - Use `/mode ask` for risky work, production code, or anything uncertain.
 - Use `/mode auto` when you want fewer routine prompts while keeping policy
-  decisions.
+  decisions, including explicit memory rules.
 
 ## Do upgrades require rebinding?
 

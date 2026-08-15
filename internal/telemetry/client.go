@@ -30,7 +30,7 @@ var uploadSignals = map[string]bool{
 	"recovery_review_error": true, "recovery_repeat_prompt": true,
 	"recovery_review_latency": true, "client_surface": true,
 	"client_version": true, "settings_language": true, "cli_mode": true,
-	"cli_profile": true, "cli_permission_mode": true, "cli_session_mode": true,
+	"cli_permission_mode": true, "cli_session_mode": true,
 	"cli_turn_latency": true, "cli_exit": true,
 }
 

@@ -249,7 +249,7 @@ console.log("\nworkspace changes git errors");
   );
   await waitFor("turn verification summary", () => document.body.textContent?.includes("Turn verification") === true);
   const text = document.querySelector(".workspace-completion-summary")?.textContent ?? "";
-  ok(text.includes("Balanced") && text.includes("Partially complete"), "change panel localizes preset and verdict");
+  ok(text.includes("Partially complete"), "change panel localizes the completion verdict");
   ok(text.includes("1 checks failed") && text.includes("2 checks skipped"), "change panel shows detailed check counts on demand");
   ok(text.includes("stale checks") && text.includes("Other"), "change panel uses safe labels for known and unknown gaps");
   ok(text.includes("Turn verification limited"), "change panel explains constrained verification without exposing an internal flag");

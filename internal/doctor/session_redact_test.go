@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -189,6 +190,45 @@ func TestRedactSessionsSkipsLeasedSession(t *testing.T) {
 	}
 	if !strings.Contains(string(data), secret) {
 		t.Fatalf("leased session should not be rewritten:\n%s", data)
+	}
+}
+
+func TestRedactSessionsHoldsLeaseAcrossRewrite(t *testing.T) {
+	dir := t.TempDir()
+	secret := "sk-" + "real-secret-value-123456"
+	path := filepath.Join(dir, "abc.jsonl")
+	if err := os.WriteFile(path, []byte(`{"role":"tool","content":"DEEPSEEK_API_KEY=`+secret+`"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	acquired := make(chan struct{})
+	continueRedaction := make(chan struct{})
+	sessionRedactionLeaseAcquired = func(got string) {
+		if agent.CanonicalSessionPath(got) != agent.CanonicalSessionPath(path) {
+			return
+		}
+		close(acquired)
+		<-continueRedaction
+	}
+	t.Cleanup(func() { sessionRedactionLeaseAcquired = nil })
+
+	done := make(chan RedactSessionsResult, 1)
+	go func() {
+		done <- RedactSessions(RedactSessionsOptions{Dirs: []string{dir}})
+	}()
+	<-acquired
+	competing, err := agent.AcquireSessionWriter(path)
+	if competing != nil {
+		competing.Release()
+	}
+	if !errors.Is(err, agent.ErrSessionLeaseHeld) {
+		close(continueRedaction)
+		t.Fatalf("competing AcquireSessionWriter err = %v, want ErrSessionLeaseHeld", err)
+	}
+	close(continueRedaction)
+	res := <-done
+	if len(res.Errors) > 0 || res.FilesChanged != 1 {
+		t.Fatalf("RedactSessions = %+v, want one successful rewrite", res)
 	}
 }
 

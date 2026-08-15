@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { activeWorkBusyNoticeText } from "../lib/capabilityMutations";
 import { t } from "../lib/i18n";
-import { effortSwitchNoticeText, modelSwitchNoticeText, tokenModeSwitchNoticeText } from "../lib/useController";
+import { effortSwitchNoticeText, modelSwitchNoticeText } from "../lib/useController";
 
 function ok(value: unknown, message: string) {
   if (!value) throw new Error(message);
@@ -33,10 +33,6 @@ ok(
 ok(
   effortSwitchNoticeText(activeWorkError(false, false, 1).message.replace("MCP server", "effort")) === "Reasoning effort cannot change while background work is active. Active jobs: 1. Open Background jobs in the status bar to stop them.",
   "effort switching uses grammatically neutral single-job guidance",
-);
-ok(
-  tokenModeSwitchNoticeText(activeWorkError(false, false, 1).message.replace("MCP server", "token mode")) === "Execution setting cannot change while background work is active. Active jobs: 1. Open Background jobs in the status bar to stop them.",
-  "execution-setting switching uses grammatically neutral single-job guidance",
 );
 ok(
   activeWorkBusyNoticeText(

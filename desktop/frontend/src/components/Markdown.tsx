@@ -1,7 +1,12 @@
 import { lazy, memo, startTransition, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-const MarkdownRenderer = lazy(() => import("./MarkdownRenderer"));
-const MarkdownHistory = lazy(() => import("./MarkdownHistory"));
+async function loadMarkdownView<T>(component: Promise<T>): Promise<T> {
+  await import("./MarkdownImage.css");
+  return component;
+}
+
+const MarkdownRenderer = lazy(() => loadMarkdownView(import("./MarkdownRenderer")));
+const MarkdownHistory = lazy(() => loadMarkdownView(import("./MarkdownHistory")));
 const STREAMING_TAIL_THRESHOLD = 8_000;
 const FINALIZE_SETTLE_MS = 50;
 const FINALIZE_IDLE_TIMEOUT_MS = 1_000;

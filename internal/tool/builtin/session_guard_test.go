@@ -158,8 +158,12 @@ func TestSessionDataGuardDeniesSecurityBoundaryFiles(t *testing.T) {
 	}
 	// An explicit allow_write entry stays the sanctioned escape hatch.
 	allowed := NewSessionDataGuard(root, []string{root})
-	if err := allowed.Check(filepath.Join(root, "settings.json")); err != nil {
-		t.Errorf("allow_write-covered settings.json should pass, got %v", err)
+	if err := allowed.Check(filepath.Join(root, "settings.json")); err == nil {
+		t.Error("allow_write of the state root is an ancestor and must not lift settings.json")
+	}
+	fileAllow := NewSessionDataGuard(root, []string{filepath.Join(root, "settings.json")})
+	if err := fileAllow.Check(filepath.Join(root, "settings.json")); err != nil {
+		t.Errorf("explicit allow_write of settings.json should pass, got %v", err)
 	}
 }
 
@@ -171,6 +175,23 @@ func TestSessionDataGuardSecurityFilesCaseVariantOnFoldingSystems(t *testing.T) 
 	g := NewSessionDataGuard(root, nil)
 	if err := g.Check(filepath.Join(root, "Settings.JSON")); err == nil {
 		t.Fatal("case variant of settings.json reaches the same bytes on this filesystem and must be denied")
+	}
+}
+
+func TestSessionDataGuardHomeAncestorDoesNotLiftSessions(t *testing.T) {
+	root, cliSession, _ := stateRootFor(t)
+	home := filepath.Dir(root)
+	if home == "." || home == string(filepath.Separator) {
+		home = t.TempDir()
+		root = filepath.Join(home, "state")
+		if err := os.MkdirAll(filepath.Join(root, "sessions"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		cliSession = filepath.Join(root, "sessions", "x.json")
+	}
+	g := NewSessionDataGuard(root, []string{home})
+	if err := g.Check(cliSession); err == nil {
+		t.Fatal("allow_write of $HOME must not lift session-store protection")
 	}
 }
 

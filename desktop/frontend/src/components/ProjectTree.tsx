@@ -10,7 +10,7 @@ import { asArray } from "../lib/array";
 import { useToast } from "../lib/toast";
 import { app } from "../lib/bridge";
 import { onProjectTreeChangedV2 } from "../lib/sessionCatalogBridge";
-import { isRuntimeSessionNode, isTopicNode, loadWorkbenchOrganizeMode, loadWorkbenchSortMode, mergeProjectTopicPage, projectTreeDedupedExactTime, projectTreeEventAffectsFolder, projectTreeFolderDisclosure, projectTreeReadActivityKey, projectTreeRevisionIsFresh, projectTreeShellChildren, projectTreeShellSignature, projectTreeShouldApplyShellSnapshot, projectTreeShouldRenderTopicActions, projectTreeShouldSuppressOpenForRename, projectTreeTopicArchiveBlocked, projectTreeTopicHasUnreadActivity, projectTreeTopicHoverCardModel, projectTreeTopicMenuOffersPin, projectTreeTopicMetaLine, projectTreeTopicOpenRequest, projectTreeWithoutTopic, topicActivityAt, topicActivityDateLabel, topicActivityLabel, topicIsActive, topicStatus, topicStatusLabel, topicUnknownTimeLabel, WORKBENCH_ORGANIZE_KEY, WORKBENCH_SORT_KEY, type ProjectTreePendingTopicOpen, type ProjectTreeReadActivity, type ProjectTreeTopicHoverCard, type ProjectTreeVariant, type WorkbenchOrganizeMode, type WorkbenchSortMode } from "../lib/projectTreeTopic";
+import { isRuntimeSessionNode, isTopicNode, loadWorkbenchOrganizeMode, loadWorkbenchSortMode, mergeProjectTopicPage, projectTreeDedupedExactTime, projectTreeEventAffectsFolder, projectTreeFolderDisclosure, projectTreeReadActivityKey, projectTreeRevisionIsFresh, projectTreeShellChildren, projectTreeShellSignature, projectTreeShouldApplyShellSnapshot, projectTreeShouldRenderTopicActions, projectTreeShouldSuppressOpenForRename, projectTreeTopicArchiveBlocked, projectTreeTopicHasUnreadActivity, projectTreeTopicHoverCardModel, projectTreeTopicMenuOffersPin, projectTreeTopicMetaLine, projectTreeTopicOpenRequest, projectTreeTopicPageIsFresh, projectTreeWithoutTopic, topicActivityAt, topicActivityDateLabel, topicActivityLabel, topicIsActive, topicStatus, topicStatusLabel, topicUnknownTimeLabel, WORKBENCH_ORGANIZE_KEY, WORKBENCH_SORT_KEY, type ProjectTreePendingTopicOpen, type ProjectTreeReadActivity, type ProjectTreeTopicHoverCard, type ProjectTreeVariant, type WorkbenchOrganizeMode, type WorkbenchSortMode } from "../lib/projectTreeTopic";
 export * from "../lib/projectTreeTopic";
 import type { ProjectNode, SessionCatalogStatus } from "../lib/types";
 import { topicActivityTime } from "../lib/session";
@@ -23,6 +23,7 @@ import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type Cont
 import { Tooltip } from "./Tooltip";
 import { WorktreeBadge } from "./WorktreeBadge";
 import { useProjectCreation } from "./useProjectCreation";
+import { useProjectTreeRuntimeProjection } from "../lib/useProjectTreeRuntimeProjection";
 
 interface ProjectTreeProps {
   activeScope?: string;
@@ -34,7 +35,7 @@ interface ProjectTreeProps {
   onOpenTopic: (scope: string, workspaceRoot: string, topicId: string, sessionPath?: string) => Promise<void> | void;
   onAddProject: (path?: string) => Promise<void>;
   onCreateTopic?: (scope: string, workspaceRoot: string) => Promise<void> | void;
-  onCreateDeliveryWorktree?: (workspaceRoot: string) => Promise<void> | void;
+  onCreateIsolatedWorktree?: (workspaceRoot: string) => Promise<void> | void;
   onRenameTopic?: (topicId: string, title: string) => Promise<void> | void;
   onTopicsChanged?: () => Promise<void> | void;
   refreshSignal?: number;
@@ -364,7 +365,7 @@ export function ProjectTree({
   onOpenTopic,
   onAddProject,
   onCreateTopic,
-  onCreateDeliveryWorktree,
+  onCreateIsolatedWorktree,
   onRenameTopic,
   onTopicsChanged,
   refreshSignal,
@@ -383,10 +384,10 @@ export function ProjectTree({
   const [tree, setTree] = useState<ProjectNode[]>([]);
   const treeRef = useRef<ProjectNode[]>([]);
   const latestRevisionRef = useRef(0);
+  const topicRevisionRef = useRef<Record<string, number>>({});
   const [catalogStatus, setCatalogStatus] = useState<SessionCatalogStatus>({
     state: "opening", revision: 0, indexed: 0, total: 0, repairPending: 0,
   });
-  const [indexingDone, setIndexingDone] = useState(false);
   const [topicPageState, setTopicPageState] = useState<Record<string, { nextCursor?: string; loading: boolean }>>({});
   const topicPageStateRef = useRef(topicPageState);
   const updateTopicPageState = useCallback((key: string, next: { nextCursor?: string; loading: boolean }) => {
@@ -446,6 +447,7 @@ export function ProjectTree({
     optimisticallyRemoveTopic: (topicId) => setTree((current) => projectTreeWithoutTopic(current, topicId)),
     closeMenu, onTopicsChanged, showToast,
   });
+  const applyRuntimeProjection = useProjectTreeRuntimeProjection(setTree, currentArchiveTombstones);
   const clickTimerRef = useRef<ProjectTreePendingTopicOpen | null>(null);
   useEffect(() => {
     return () => {
@@ -504,22 +506,22 @@ export function ProjectTree({
         sortMode,
       });
       if (topicLoadSeqRef.current[key] !== seq) return;
-      if (!projectTreeRevisionIsFresh(latestRevisionRef.current, page.revision)) {
+      if (!projectTreeTopicPageIsFresh(topicRevisionRef.current, key, page.revision)) {
         updateTopicPageState(key, { ...topicPageStateRef.current[key], loading: false });
         return;
       }
-      latestRevisionRef.current = Math.max(latestRevisionRef.current, page.revision);
+      topicRevisionRef.current[key] = Math.max(topicRevisionRef.current[key] ?? 0, page.revision);
       const items = projectTreeWithoutTopics(asArray(page.items), currentArchiveTombstones());
-      setTree((current) => current.map((node) => {
+      setTree((current) => applyRuntimeProjection(current.map((node) => {
         if (node.key !== key) return node;
         return { ...node, children: mergeProjectTopicPage(asArray(node.children), items, append) };
-      }));
+      })));
       updateTopicPageState(key, { nextCursor: page.nextCursor, loading: false });
     } catch {
       if (topicLoadSeqRef.current[key] !== seq) return;
       updateTopicPageState(key, { ...topicPageStateRef.current[key], loading: false });
     }
-  }, [creationTopics, currentArchiveTombstones, query, timeFilter, updateTopicPageState]);
+  }, [applyRuntimeProjection, creationTopics, currentArchiveTombstones, query, timeFilter, updateTopicPageState]);
   loadProjectTopicsRef.current = loadProjectTopics;
 
   const selectWorkbenchSortMode = useCallback((sortMode: WorkbenchSortMode) => {
@@ -545,8 +547,9 @@ export function ProjectTree({
       if (filtering || expanded.has(key)) void loadProjectTopics(project);
     }
   }, [closeMenu, expanded, loadProjectTopics, query, timeFilter]);
-  // Snapshot is intentionally shells-only. Preserve already loaded pages by
-  // project key so a metadata refresh does not collapse or blank the sidebar.
+  // Snapshot carries project shells plus lightweight pinned topic shells.
+  // Preserve already loaded pages by project key while reconciling pins, so a
+  // metadata refresh does not collapse or blank the sidebar.
   const refresh = useCallback(async (options?: ProjectTreeRefreshOptions) => {
     const reloadRequestedProjects = (projects: ProjectNode[]) => reloadProjectTreeTopics(projects, options, loadProjectTopicsRef.current);
     try {
@@ -559,21 +562,20 @@ export function ProjectTree({
       if (projectTreeRevisionIsFresh(latestRevisionRef.current, rev)) latestRevisionRef.current = Math.max(latestRevisionRef.current, rev);
       const projects = asArray(snapshot.projects);
       setCatalogStatus(snapshot.catalog);
-      setIndexingDone(Boolean(snapshot.indexingDone));
-      setTree((current) => projects.map((project) => {
+      setTree((current) => applyRuntimeProjection(projects.map((project) => {
         const previous = current.find((node) => node.key === project.key);
         // Topic pages reload asynchronously. Keep the last painted children
         // until their replacement arrives so a mutation cannot blank every
         // expanded folder for the duration of a catalog scan.
-        return { ...project, children: projectTreeShellChildren(previous?.children) };
-      }));
+        return { ...project, children: projectTreeShellChildren(previous?.children, project.children) };
+      })));
       await reloadRequestedProjects(projects);
     } catch {
       // A shell snapshot is metadata-only. If it fails, the resident folder
       // identity can still drive the requested canonical topic reload.
       await reloadRequestedProjects(treeRef.current);
     }
-  }, []);
+  }, [applyRuntimeProjection]);
   refreshRef.current = refresh;
   const { addingProject, handleAddProject, openBlankProjectFlow, blankProjectFlow } = useProjectCreation({
     onAddProject,
@@ -627,17 +629,6 @@ export function ProjectTree({
     }, 200);
     return () => clearTimeout(timer);
   }, [expanded, loadProjectTopics, projectShellSignature, query, timeFilter]);
-
-  // First catalog scan can finish before the frontend subscribed to v2 events.
-  // Reload expanded folders once indexingDone flips so the metadata fallback
-  // is replaced by the scanned projection without requiring New Chat.
-  useEffect(() => {
-    if (!indexingDone) return;
-    for (const project of treeRef.current) {
-      const key = projectNodeKey(project, 0);
-      if (expanded.has(key)) void loadProjectTopics(project);
-    }
-  }, [indexingDone, expanded, loadProjectTopics]);
 
   // Following the active topic is a view concern over the tree already held.
   useEffect(() => {
@@ -857,12 +848,12 @@ export function ProjectTree({
     }
   };
 
-  const handleCreateDeliveryWorktree = async (workspaceRoot: string) => {
+  const handleCreateIsolatedWorktree = async (workspaceRoot: string) => {
     if (!workspaceRoot || isolatingProject) return;
     setIsolatingProject(workspaceRoot);
     closeMenu();
     try {
-      await onCreateDeliveryWorktree?.(workspaceRoot);
+      await onCreateIsolatedWorktree?.(workspaceRoot);
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), "error", { durationMs: 6000 });
     } finally {
@@ -1493,7 +1484,7 @@ export function ProjectTree({
       setMenuProject({ key, root: projectRoot, path: projectPath, scope, label: projectLabel });
       setConfirmRemoveProject(null);
       if (scope === "project" && projectRoot) {
-        void app.DeliveryWorktreeAvailability(projectRoot).then((availability) => {
+        void app.IsolatedWorktreeAvailability(projectRoot).then((availability) => {
           setWorktreeAvailability((current) => ({
             ...current,
             [projectRoot]: { available: availability.available, reason: availability.reason },
@@ -1512,7 +1503,7 @@ export function ProjectTree({
             </span>
           ),
           disabled: isolatingProject !== null || isolationAvailability?.available === false,
-          onSelect: () => { void handleCreateDeliveryWorktree(projectRoot); },
+          onSelect: () => { void handleCreateIsolatedWorktree(projectRoot); },
         }]
       : [];
     const projectMenuItems: ContextMenuItem[] = [

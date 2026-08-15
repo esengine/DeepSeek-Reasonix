@@ -98,7 +98,7 @@ func RunForeground(ctx context.Context, req Request) Result {
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(runCtx, req.Argv[0], req.Argv[1:]...)
+	cmd := proc.CommandContext(runCtx, req.Argv[0], req.Argv[1:]...)
 	cmd.Dir = req.Dir
 	cmd.Env = req.Env
 	cmd.WaitDelay = waitDelay

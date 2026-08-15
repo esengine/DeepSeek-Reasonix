@@ -56,7 +56,7 @@ type Entry struct {
 	ConnectSource    string
 	ConnectName      string
 	Requires         []string // capability IDs this skill depends on
-	Profiles         []string // economy|balanced|delivery; empty = all
+	Profiles         []string // deprecated frontmatter labels; diagnostics only
 	AutoStart        bool     // MCP: configured auto_start
 	FailureReason    string   // host-proven failure detail
 }
@@ -69,13 +69,11 @@ type RouteCandidate struct {
 
 type RouteDecision struct {
 	Candidates []RouteCandidate
-	// Delivery marks a Delivery-profile route: the transient block must direct
-	// the model to the stable use_capability proxy — connect_tool_source is not
-	// registered in Delivery, so instructing it would dead-end the route.
-	Delivery bool
+	// ClosedLoop routes through use_capability; connect_tool_source is unregistered.
+	ClosedLoop bool
 	// CapabilityProxy directs unready MCP candidates to use_capability rather
-	// than connect_tool_source. True for Delivery and for dual-model Planner
-	// boots that expose the stable proxy without Economy's connector.
+	// than connect_tool_source. True for closed-loop routes and for dual-model
+	// Planner boots that expose the stable proxy without the connector.
 	CapabilityProxy bool
 }
 
@@ -149,11 +147,11 @@ func Route(input string, entries []Entry) RouteDecision {
 	return RouteDecision{Candidates: limitRouteCandidates(routeCandidates(input, entries))}
 }
 
-// RouteDelivery routes against the full matched set before promoting built-in
-// playbooks, so candidates that become prefer are never discarded by the
-// ordinary suggest budget first.
-func RouteDelivery(input string, entries []Entry) RouteDecision {
-	return PromoteDelivery(RouteDecision{Candidates: routeCandidates(input, entries)})
+// RouteClosedLoop routes against the full matched set before promoting
+// built-in playbooks, so candidates that become prefer are never discarded by
+// the ordinary suggest budget first.
+func RouteClosedLoop(input string, entries []Entry) RouteDecision {
+	return PromoteClosedLoop(RouteDecision{Candidates: routeCandidates(input, entries)})
 }
 
 func routeCandidates(input string, entries []Entry) []RouteCandidate {
@@ -182,16 +180,16 @@ func routeCandidates(input string, entries []Entry) []RouteCandidate {
 	return candidates
 }
 
-// PromoteDelivery strengthens matched built-in playbooks in Delivery. Custom
-// skills keep their authored auto-use policy; only shipped workflows with a
-// concrete trigger match move from suggest to prefer.
-func PromoteDelivery(decision RouteDecision) RouteDecision {
-	decision.Delivery = true
+// PromoteClosedLoop strengthens matched built-in playbooks for closed-loop
+// execution. Custom skills keep their authored auto-use policy; only shipped
+// workflows with a concrete trigger match move from suggest to prefer.
+func PromoteClosedLoop(decision RouteDecision) RouteDecision {
+	decision.ClosedLoop = true
 	for i := range decision.Candidates {
 		candidate := &decision.Candidates[i]
 		if candidate.Policy == AutoUseSuggest && candidate.Entry.Kind == KindSkill && candidate.Entry.Source == string(skill.ScopeBuiltin) {
 			candidate.Policy = AutoUsePrefer
-			candidate.Reason += "; Delivery prefers matched built-in playbooks"
+			candidate.Reason += "; closed-loop execution prefers matched built-in playbooks"
 		}
 	}
 	sort.SliceStable(decision.Candidates, func(i, j int) bool {
@@ -203,7 +201,7 @@ func PromoteDelivery(decision RouteDecision) RouteDecision {
 		}
 		return decision.Candidates[i].Entry.ID < decision.Candidates[j].Entry.ID
 	})
-	return RouteDecision{Candidates: limitRouteCandidates(decision.Candidates), Delivery: true, CapabilityProxy: true}
+	return RouteDecision{Candidates: limitRouteCandidates(decision.Candidates), ClosedLoop: true, CapabilityProxy: true}
 }
 
 func limitRouteCandidates(candidates []RouteCandidate) []RouteCandidate {
@@ -237,7 +235,7 @@ func RenderTransientBlock(d RouteDecision) string {
 		e := c.Entry
 		proxyMCP := d.CapabilityProxy && (e.Kind == KindMCPTool || e.Kind == KindMCPServer)
 		target := e.ID
-		if !d.Delivery && !proxyMCP && e.Status != StatusReady && e.ConnectSource != "" {
+		if !d.ClosedLoop && !proxyMCP && e.Status != StatusReady && e.ConnectSource != "" {
 			target = fmt.Sprintf("source:%s", e.ConnectSource)
 			if e.ConnectName != "" {
 				target += "/" + e.ConnectName
@@ -249,10 +247,10 @@ func RenderTransientBlock(d RouteDecision) string {
 			fmt.Fprintf(&line, " (status=%s)", e.Status)
 		}
 		switch {
-		case d.Delivery || proxyMCP:
-			// Delivery and dual-model Planner have no connect_tool_source for
-			// MCP; the stable proxy both connects and calls on demand, keeping
-			// the concrete capability id.
+		case d.ClosedLoop || proxyMCP:
+			// Closed-loop routes and dual-model Planner have no
+			// connect_tool_source for MCP; the stable proxy both connects and
+			// calls on demand, keeping the concrete capability id.
 			if e.Status != StatusReady {
 				switch e.Kind {
 				case KindMCPTool:

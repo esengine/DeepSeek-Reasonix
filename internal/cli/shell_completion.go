@@ -56,8 +56,6 @@ func catalogCompletionSpec(help cliCompletionFlag) cliCompletionSpec {
 }
 
 func cliCompletionRootSpec() cliCompletionSpec {
-	profile := completionFlag("--profile", cliCompletionStaticValue, "economy", "balanced", "delivery")
-	preset := completionFlag("--preset", cliCompletionStaticValue, "light", "balanced", "delivery")
 	model := completionFlag("--model", cliCompletionModelValue)
 	resume := completionFlag("--resume -r", cliCompletionOptionalValue) // optional QUERY
 	effort := completionFlag("--effort", cliCompletionStaticValue, "auto", "low", "medium", "high", "max")
@@ -66,7 +64,7 @@ func cliCompletionRootSpec() cliCompletionSpec {
 	help := completionFlag("--help -h", cliCompletionNoValue)
 
 	interactiveFlags := []cliCompletionFlag{
-		model, preset, profile,
+		model,
 		completionFlag("--max-steps", cliCompletionStaticValue),
 		completionFlag("--continue -c", cliCompletionNoValue),
 		resume,
@@ -81,7 +79,7 @@ func cliCompletionRootSpec() cliCompletionSpec {
 	// run/serve --resume require a value; only interactive root --resume [QUERY] is optional.
 	runResume := completionFlag("--resume", cliCompletionSessionValue)
 	runFlags := []cliCompletionFlag{
-		model, profile,
+		model,
 		completionFlag("--max-steps", cliCompletionStaticValue),
 		completionFlag("--show-thinking", cliCompletionNoValue),
 		completionFlag("--metrics", cliCompletionPathValue),
@@ -116,7 +114,7 @@ func cliCompletionRootSpec() cliCompletionSpec {
 		completionFlag("--version -v", cliCompletionNoValue),
 	}, help)}
 
-	serveFlags := cliServeCompletionFlags(model, profile, help)
+	serveFlags := cliServeCompletionFlags(model, help)
 
 	root.subcommands = []cliCompletionSpec{
 		completionSpec("run", runFlags),
@@ -133,7 +131,7 @@ func cliCompletionRootSpec() cliCompletionSpec {
 		),
 		completionSpec("init", []cliCompletionFlag{help}),
 		completionSpec("acp", []cliCompletionFlag{
-			model, profile,
+			model,
 			completionFlag("--planner", cliCompletionStaticValue, "auto", "off"),
 			completionFlag("--sandbox-network", cliCompletionStaticValue, "auto", "on", "off"),
 			completionFlag("--sandbox-bash", cliCompletionStaticValue, "auto", "enforce"),
@@ -311,9 +309,9 @@ func doctorCompletionSpec(help cliCompletionFlag) cliCompletionSpec {
 	)
 }
 
-func cliServeCompletionFlags(model, profile, help cliCompletionFlag) []cliCompletionFlag {
+func cliServeCompletionFlags(model, help cliCompletionFlag) []cliCompletionFlag {
 	return []cliCompletionFlag{
-		model, profile,
+		model,
 		completionFlag("--max-steps --addr", cliCompletionStaticValue),
 		// Serve/Web resume accepts file paths, not branch IDs.
 		completionFlag("--resume", cliCompletionPathValue),

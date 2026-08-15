@@ -32,7 +32,7 @@ func TestRunPersistsRawUserInputSeparatelyFromProviderContext(t *testing.T) {
 
 	const raw = "fix the bug"
 	const composed = "<capability-route version=\"1\">\nuse review\n</capability-route>\n\nfix the bug"
-	ctx := WithRawUserInput(context.Background(), raw)
+	ctx := withNoClosedLoop(WithRawUserInput(context.Background(), raw))
 	if err := a.Run(ctx, composed); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -122,7 +122,7 @@ Policy: prefer means use the skill for the required change
 func TestCompletionContractUsesGoalScopeTaskText(t *testing.T) {
 	prov := &userInputCaptureProvider{}
 	a := New(prov, tool.NewRegistry(), NewSession("system"), Options{}, event.Discard)
-	ctx := WithRawUserInput(context.Background(), "Continue working.")
+	ctx := withNoClosedLoop(WithRawUserInput(context.Background(), "Continue working."))
 	ctx = WithDeliveryExecutionScope(ctx, DeliveryExecutionScope{ID: "goal-1", TaskText: "fix the parser"})
 
 	if err := a.Run(ctx, "<goal-context>continue</goal-context>"); err != nil {
@@ -138,7 +138,7 @@ func TestCompletionContractUsesPristineSubagentTaskText(t *testing.T) {
 	}, event.Discard)
 	const wrapped = "<workspace-context>private host framing</workspace-context>\n\nfix the parser"
 
-	if err := a.Run(context.Background(), wrapped); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), wrapped); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	assertAtomicCriterion(t, a, "fix the parser")

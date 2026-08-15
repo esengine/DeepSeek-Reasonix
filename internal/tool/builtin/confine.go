@@ -76,6 +76,7 @@ func RebindBashWriteRoots(tl tool.Tool, roots []string) (tool.Tool, bool) {
 	// confinement — the claim roots are the only allowed write surface.
 	spec.AppContainerWriteRoots = append([]string(nil), rs...)
 	b.sb = spec
+	// rootSet is preserved so later session grants still apply inside the claim.
 	// sessionTemp is preserved: sub-agent write-root rebinding must not drop
 	// the session-private temporary directory manager.
 	return b, true

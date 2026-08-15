@@ -1304,7 +1304,7 @@ func TestSaveSnapshotAllowsExactAppendFromStaleRevisionBaseline(t *testing.T) {
 	}
 
 	s.Add(provider.Message{Role: provider.RoleUser, Content: "two"})
-	s.setPersistedBaseline(path, staleBaseline.digest, staleBaseline.version, staleBaseline.revision, true, true, 0)
+	s.setPersistedBaseline(path, staleBaseline.digest, staleBaseline.version, staleBaseline.revision, true, true, 0, nil)
 	if err := s.SaveSnapshot(path); err != nil {
 		t.Fatalf("SaveSnapshot exact append from stale revision baseline: %v", err)
 	}
@@ -1352,7 +1352,7 @@ func TestSaveSnapshotAllowsCompatibleSystemAppendFromStaleRevisionBaseline(t *te
 	msgs[0] = provider.Message{Role: provider.RoleSystem, Content: "sys v2"}
 	msgs = append(msgs, provider.Message{Role: provider.RoleUser, Content: "two"})
 	s.Replace(msgs)
-	s.setPersistedBaseline(path, staleBaseline.digest, staleBaseline.version, staleBaseline.revision, true, true, 0)
+	s.setPersistedBaseline(path, staleBaseline.digest, staleBaseline.version, staleBaseline.revision, true, true, 0, nil)
 	if err := s.SaveSnapshot(path); err != nil {
 		t.Fatalf("SaveSnapshot compatible-system append from stale baseline: %v", err)
 	}
@@ -1965,56 +1965,6 @@ func stampRecoveryMeta(t *testing.T, path string, depth int) {
 	}
 }
 
-func TestSaveRecoveryBranchStampsAndCapsChainDepth(t *testing.T) {
-	dir := t.TempDir()
-
-	// Forking from a normal session stamps depth 1.
-	path, stale := divergedSessionPair(t, dir, "session.jsonl")
-	info, err := stale.SaveRecoveryBranch(RecoveryBranchOptions{OriginalPath: path})
-	if err != nil {
-		t.Fatalf("SaveRecoveryBranch: %v", err)
-	}
-	if info.Meta.RecoveryDepth != 1 {
-		t.Fatalf("first fork depth = %d, want 1", info.Meta.RecoveryDepth)
-	}
-
-	// Forking from a recovery branch increments the chain depth.
-	deeper, staleDeeper := divergedSessionPair(t, dir, "deeper.jsonl")
-	stampRecoveryMeta(t, deeper, 1)
-	info, err = staleDeeper.SaveRecoveryBranch(RecoveryBranchOptions{OriginalPath: deeper})
-	if err != nil {
-		t.Fatalf("SaveRecoveryBranch from depth 1: %v", err)
-	}
-	if info.Meta.RecoveryDepth != 2 {
-		t.Fatalf("nested fork depth = %d, want 2", info.Meta.RecoveryDepth)
-	}
-
-	// A legacy recovery meta without the depth field counts as depth 1.
-	legacy, staleLegacy := divergedSessionPair(t, dir, "legacy.jsonl")
-	stampRecoveryMeta(t, legacy, 0)
-	info, err = staleLegacy.SaveRecoveryBranch(RecoveryBranchOptions{OriginalPath: legacy})
-	if err != nil {
-		t.Fatalf("SaveRecoveryBranch from legacy recovery: %v", err)
-	}
-	if info.Meta.RecoveryDepth != 2 {
-		t.Fatalf("legacy nested fork depth = %d, want 2", info.Meta.RecoveryDepth)
-	}
-
-	// A parent at the cap refuses to fork deeper.
-	capped, staleCapped := divergedSessionPair(t, dir, "capped.jsonl")
-	stampRecoveryMeta(t, capped, SessionRecoveryMaxDepth)
-	if _, err := staleCapped.SaveRecoveryBranch(RecoveryBranchOptions{OriginalPath: capped}); !errors.Is(err, ErrSessionRecoveryDepthExceeded) {
-		t.Fatalf("SaveRecoveryBranch at cap err = %v, want ErrSessionRecoveryDepthExceeded", err)
-	}
-	forks, err := filepath.Glob(filepath.Join(dir, "capped-recovery-*.jsonl"))
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
-	if len(forks) != 0 {
-		t.Fatalf("capped parent still forked: %v", forks)
-	}
-}
-
 func TestSaveRecoveryBranchDedupesByDigest(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	current := NewSession("sys")
@@ -2226,7 +2176,7 @@ func TestReconcileSessionSidecarsKeepsLiveLocks(t *testing.T) {
 	if err := ReconcileSessionSidecars(dir); err != nil {
 		t.Fatalf("ReconcileSessionSidecars: %v", err)
 	}
-	for _, sidecar := range []string{path + ".lock", path + ".lease.lock", path + ".lease.json"} {
+	for _, sidecar := range []string{path + ".lock", path + ".lease.lock"} {
 		if _, err := os.Stat(sidecar); err != nil {
 			t.Fatalf("%s missing while lock is live: %v", sidecar, err)
 		}

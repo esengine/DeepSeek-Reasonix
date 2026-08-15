@@ -14,6 +14,11 @@ import (
 // the next round rather than a silent misparse downstream.
 type SubmitPlanTool struct{}
 
+// finalizesTurn marks submit_plan as a host-consumed terminal tool. The marker
+// is deliberately package-private: arbitrary plugin tools cannot opt into
+// ending an Agent.Run without an owning host contract.
+func (*SubmitPlanTool) finalizesTurn() {}
+
 func NewSubmitPlanTool() *SubmitPlanTool { return &SubmitPlanTool{} }
 
 func (*SubmitPlanTool) Name() string { return "submit_plan" }

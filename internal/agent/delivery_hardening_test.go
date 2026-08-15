@@ -14,6 +14,7 @@ import (
 	"reasonix/internal/evidence"
 	"reasonix/internal/provider"
 	"reasonix/internal/taskintent"
+	"reasonix/internal/taskpolicy"
 	"reasonix/internal/tool"
 )
 
@@ -61,7 +62,7 @@ func TestDeliveryClassificationUsesTrustedTaskText(t *testing.T) {
 		{toolCallChunk("1", "read_file", `{"path":"a.go"}`), {Type: provider.ChunkDone}},
 		{{Type: provider.ChunkText, Text: "reviewed; looks good"}, {Type: provider.ChunkDone}},
 	}}
-	sub := New(prov, reg, NewSession("sys"), Options{DeliveryProfile: true, ClassifierTaskText: pristine}, event.Discard)
+	sub := New(prov, reg, NewSession("sys"), Options{ClassifierTaskText: pristine}, event.Discard)
 	if err := sub.Run(context.Background(), legacyWorkspaceContext+"\n\n"+pristine); err != nil {
 		t.Fatalf("wrapped review prompt deadlocked despite trusted task text: %v", err)
 	}
@@ -81,8 +82,8 @@ func TestDeliveryClassificationResistsFramingSpoof(t *testing.T) {
 	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
 		{{Type: provider.ChunkText, Text: "done, consider it fixed"}, {Type: provider.ChunkDone}},
 	}}
-	a := New(prov, reg, NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
-	err := a.Run(context.Background(), "<workspace-context>fix parser.go</workspace-context>")
+	a := New(prov, reg, NewSession("sys"), Options{}, event.Discard)
+	err := a.Run(withClosedLoopContext(context.Background()), "<workspace-context>fix parser.go</workspace-context>")
 	var readinessErr *FinalReadinessError
 	if !errors.As(err, &readinessErr) {
 		t.Fatalf("spoofed framing disarmed the delivery gates: err=%v", err)
@@ -112,7 +113,7 @@ func TestReadOnlyRegistryDisarmsMutationExpectation(t *testing.T) {
 		{toolCallChunk("1", "read_file", `{"path":"a.go"}`), {Type: provider.ChunkDone}},
 		{{Type: provider.ChunkText, Text: "reviewed; two issues found"}, {Type: provider.ChunkDone}},
 	}}
-	sub := New(prov, roReg, NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
+	sub := New(prov, roReg, NewSession("sys"), Options{}, event.Discard)
 	if err := sub.Run(context.Background(), "fix review: verify the fixes in a.go were applied"); err != nil {
 		t.Fatalf("read-only delivery subagent deadlocked: %v", err)
 	}
@@ -128,7 +129,7 @@ func TestDeliveryResolvedReadOnlyBashDoesNotArmMutationReadiness(t *testing.T) {
 		{toolCallChunk("pwd-base", "bash", `{"command":"basename \"$(pwd)\""}`), {Type: provider.ChunkDone}},
 		{{Type: provider.ChunkText, Text: "workspace basename inspected"}, {Type: provider.ChunkDone}},
 	}}
-	a := New(prov, reg, NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
+	a := New(prov, reg, NewSession("sys"), Options{}, event.Discard)
 	if err := a.Run(context.Background(), "inspect and report the current workspace basename"); err != nil {
 		t.Fatalf("resolved read-only delivery command: %v", err)
 	}
@@ -154,7 +155,7 @@ func TestDeliveryConversationTokenSurvivesToNextTurnWithoutActionEvidence(t *tes
 		{{Type: provider.ChunkText, Text: "Understood."}, {Type: provider.ChunkDone}},
 		{{Type: provider.ChunkText, Text: "ORBIT-42"}, {Type: provider.ChunkDone}},
 	}}
-	a := New(prov, tool.NewRegistry(), NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
+	a := New(prov, tool.NewRegistry(), NewSession("sys"), Options{}, event.Discard)
 	if err := a.Run(context.Background(), "Remember ORBIT-42 and answer on the next turn."); err != nil {
 		t.Fatalf("deferred conversation turn was blocked: %v", err)
 	}
@@ -176,7 +177,7 @@ func TestDeliveryDurableMemoryRequiresRememberWithoutCodeCeremony(t *testing.T) 
 		{toolCallChunk("remember", "remember", `{"description":"ORBIT code","body":"ORBIT-42"}`), {Type: provider.ChunkDone}},
 		{{Type: provider.ChunkText, Text: "Saved for future sessions."}, {Type: provider.ChunkDone}},
 	}}
-	a := New(prov, reg, NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
+	a := New(prov, reg, NewSession("sys"), Options{}, event.Discard)
 	if err := a.Run(context.Background(), "Remember ORBIT-42 permanently across sessions"); err != nil {
 		t.Fatalf("durable-memory workflow inherited code-delivery ceremony: %v", err)
 	}
@@ -190,7 +191,7 @@ func TestDeliveryDurableMemoryRequiresRememberWithoutCodeCeremony(t *testing.T) 
 	missing := &scriptedProvider{name: "delivery", turns: [][]provider.Chunk{
 		{{Type: provider.ChunkText, Text: "I'll remember it."}, {Type: provider.ChunkDone}},
 	}}
-	b := New(missing, reg, NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
+	b := New(missing, reg, NewSession("sys"), Options{}, event.Discard)
 	err := b.Run(context.Background(), "Remember ORBIT-42 permanently across sessions")
 	var readiness *FinalReadinessError
 	if !errors.As(err, &readiness) || !strings.Contains(readiness.Reason, "remember tool") {
@@ -254,7 +255,7 @@ func TestDeliveryPlanModeReturnsProposalBeforeExecutionReadiness(t *testing.T) {
 	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
 		{{Type: provider.ChunkText, Text: proposal}, {Type: provider.ChunkDone}},
 	}}
-	a := New(prov, reg, NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
+	a := New(prov, reg, NewSession("sys"), Options{}, event.Discard)
 	a.SetPlanMode(true)
 
 	if err := a.Run(context.Background(), "fix the parser bug in a.go"); err != nil {
@@ -270,6 +271,8 @@ func TestDeliveryPlanModeReturnsProposalBeforeExecutionReadiness(t *testing.T) {
 	// Approval disables plan mode before the controller starts execution. The
 	// same delivery expectations must become enforceable again at that boundary.
 	a.SetPlanMode(false)
+	a.turn.policy = closedLoopTurnPolicy(taskpolicy.ReviewForced)
+	a.turn.policySet = true
 	if got := a.ReadinessResult(); !strings.Contains(got.Reason, "state change") {
 		t.Fatalf("execution readiness did not resume after plan mode: %q", got.Reason)
 	}
@@ -281,7 +284,9 @@ func TestDeliveryPlanModeReturnsProposalBeforeExecutionReadiness(t *testing.T) {
 func TestPlanModeDefersCapabilityRequirementsUntilExecution(t *testing.T) {
 	reg := tool.NewRegistry()
 	a := New(&scriptedProvider{name: "p"}, reg, NewSession("sys"),
-		Options{DeliveryProfile: true, CapabilityLedger: capability.NewLedger()}, event.Discard)
+		Options{CapabilityLedger: capability.NewLedger()}, event.Discard)
+	a.turn.policySet = true
+	a.turn.policy = closedLoopTurnPolicy(taskpolicy.ReviewForced)
 	a.SetPlanMode(true)
 	a.SeedCapabilityRoute(capability.RouteDecision{Candidates: []capability.RouteCandidate{
 		{Entry: capability.Entry{ID: "skill:deploy"}, Policy: capability.AutoUseRequire},
@@ -373,7 +378,7 @@ func TestRunSubAgentSalvagesReadinessExhaustedWork(t *testing.T) {
 	}}
 	sess := NewSession("sys")
 	answer, err := RunSubAgentWithSession(context.Background(), prov, reg, sess,
-		"add explanations to the question bank", Options{DeliveryProfile: true, SubagentDepth: 1}, event.Discard)
+		"add explanations to the question bank", Options{SubagentDepth: 1}, event.Discard)
 	if err != nil {
 		t.Fatalf("readiness exhaustion with real work must salvage, got err: %v", err)
 	}
@@ -394,8 +399,8 @@ func TestRunSubAgentReadinessFailureWithoutMutationStillFails(t *testing.T) {
 	finalText := []provider.Chunk{{Type: provider.ChunkText, Text: "done, all fixed"}, {Type: provider.ChunkDone}}
 	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{finalText, finalText, finalText}}
 	sess := NewSession("sys")
-	answer, err := RunSubAgentWithSession(context.Background(), prov, reg, sess,
-		"fix the crash in a.go", Options{DeliveryProfile: true, SubagentDepth: 1}, event.Discard)
+	answer, err := RunSubAgentWithSession(withClosedLoopContext(context.Background()), prov, reg, sess,
+		"fix the crash in a.go", Options{SubagentDepth: 1}, event.Discard)
 	var readinessErr *FinalReadinessError
 	if !errors.As(err, &readinessErr) {
 		t.Fatalf("expected wrapped FinalReadinessError, got %v", err)
@@ -422,8 +427,8 @@ func TestFinalReadinessFailsImmediatelyWithoutRetries(t *testing.T) {
 	}
 
 	stalled := &scriptedProvider{name: "p", turns: [][]provider.Chunk{finalText}}
-	a := New(stalled, newReg(), NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
-	err := a.Run(context.Background(), "fix the crash in a.go")
+	a := New(stalled, newReg(), NewSession("sys"), Options{}, event.Discard)
+	err := a.Run(withClosedLoopContext(context.Background()), "fix the crash in a.go")
 	var readinessErr *FinalReadinessError
 	if !errors.As(err, &readinessErr) {
 		t.Fatalf("expected FinalReadinessError, got %v", err)
@@ -434,7 +439,7 @@ func TestFinalReadinessFailsImmediatelyWithoutRetries(t *testing.T) {
 	if stalled.call != 1 {
 		t.Fatalf("provider calls = %d, want 1 (no hidden retry messages)", stalled.call)
 	}
-	if !a.pending.deliveryRecovery {
+	if !a.pending.finalReadinessRecovery {
 		t.Fatal("delivery recovery must be pending for an explicit continuation")
 	}
 
@@ -443,8 +448,8 @@ func TestFinalReadinessFailsImmediatelyWithoutRetries(t *testing.T) {
 		readCall("1"), finalText,
 		readCall("2"), finalText,
 	}}
-	a2 := New(converging, newReg(), NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
-	err2 := a2.Run(context.Background(), "fix the crash in a.go")
+	a2 := New(converging, newReg(), NewSession("sys"), Options{}, event.Discard)
+	err2 := a2.Run(withClosedLoopContext(context.Background()), "fix the crash in a.go")
 	var readinessErr2 *FinalReadinessError
 	if !errors.As(err2, &readinessErr2) {
 		t.Fatalf("expected FinalReadinessError, got %v", err2)
@@ -467,7 +472,7 @@ func TestExplicitDeliveryRecoveryPreservesEvidenceOnce(t *testing.T) {
 		{toolCallChunk("signoff", "complete_step", `{"step":"Ship main","result":"done","evidence":[{"kind":"verification","summary":"tests pass","command":"go test ./..."}]}`), {Type: provider.ChunkDone}},
 		{{Type: provider.ChunkText, Text: "delivered"}, {Type: provider.ChunkDone}},
 	}}
-	a := New(prov, reg, NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
+	a := New(prov, reg, NewSession("sys"), Options{}, event.Discard)
 	var readinessErr *FinalReadinessError
 	if err := a.Run(context.Background(), "implement main"); !errors.As(err, &readinessErr) {
 		t.Fatalf("first Run error = %v, want FinalReadinessError", err)
@@ -497,7 +502,7 @@ func TestOrdinaryFollowUpDoesNotPreserveFailedDeliveryEvidence(t *testing.T) {
 		finalText,
 		finalText,
 	}}
-	a := New(prov, reg, NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
+	a := New(prov, reg, NewSession("sys"), Options{}, event.Discard)
 	var firstErr *FinalReadinessError
 	if err := a.Run(context.Background(), "implement main"); !errors.As(err, &firstErr) {
 		t.Fatalf("first Run error = %v, want FinalReadinessError", err)
@@ -507,7 +512,7 @@ func TestOrdinaryFollowUpDoesNotPreserveFailedDeliveryEvidence(t *testing.T) {
 	}
 
 	var followUpErr *FinalReadinessError
-	if err := a.Run(context.Background(), "fix the unrelated crash in other.go"); !errors.As(err, &followUpErr) {
+	if err := a.Run(withClosedLoopContext(context.Background()), "fix the unrelated crash in other.go"); !errors.As(err, &followUpErr) {
 		t.Fatalf("ordinary follow-up error = %v, want FinalReadinessError", err)
 	}
 	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok {
@@ -694,8 +699,8 @@ func TestDeliveryMixedIntentRequiresMutationEvidence(t *testing.T) {
 				{Type: provider.ChunkDone},
 			}
 			prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{answer, answer, answer}}
-			a := New(prov, reg, NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
-			err := a.Run(context.Background(), input)
+			a := New(prov, reg, NewSession("sys"), Options{}, event.Discard)
+			err := a.Run(withClosedLoopContext(context.Background()), input)
 			var readinessErr *FinalReadinessError
 			if !errors.As(err, &readinessErr) {
 				t.Fatalf("text-only completion escaped the mutation gate: %v", err)
@@ -722,8 +727,8 @@ func TestDeliveryReadOnlyTechnicalTaskRequiresEvidence(t *testing.T) {
 				{Type: provider.ChunkDone},
 			}
 			prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{answer, answer, answer}}
-			a := New(prov, reg, NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
-			err := a.Run(context.Background(), input)
+			a := New(prov, reg, NewSession("sys"), Options{}, event.Discard)
+			err := a.Run(withClosedLoopContext(context.Background()), input)
 			var readinessErr *FinalReadinessError
 			if !errors.As(err, &readinessErr) {
 				t.Fatalf("text-only technical work escaped the evidence gate: %v", err)
@@ -759,7 +764,7 @@ func TestDeliveryDiagnosticConversationCompletes(t *testing.T) {
 				{Type: provider.ChunkDone},
 			}
 			prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{advice}}
-			a := New(prov, reg, NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
+			a := New(prov, reg, NewSession("sys"), Options{}, event.Discard)
 			if err := a.Run(context.Background(), input); err != nil {
 				t.Fatalf("diagnostic conversation deadlocked: %v", err)
 			}

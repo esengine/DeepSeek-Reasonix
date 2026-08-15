@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -29,6 +28,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/installlayout"
 	"reasonix/internal/netclient"
+	"reasonix/internal/proc"
 	"reasonix/internal/repair"
 )
 
@@ -1409,7 +1409,7 @@ func relaunchThroughLauncher() error {
 	if strings.Contains(strings.ToLower(filepath.Base(launcher)), "guard") {
 		args = []string{"launch", "--detach"}
 	}
-	cmd := exec.Command(launcher, args...)
+	cmd := proc.VisibleCommand(launcher, args...)
 	cmd.Stdout, cmd.Stderr, cmd.Stdin = os.Stdout, os.Stderr, os.Stdin
 	return cmd.Start()
 }

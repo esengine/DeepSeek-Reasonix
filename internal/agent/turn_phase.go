@@ -1,6 +1,10 @@
 package agent
 
 import (
+	"slices"
+
+	"reasonix/internal/agentpreset"
+	"reasonix/internal/completion"
 	"reasonix/internal/event"
 	"reasonix/internal/taskcontract"
 	"reasonix/internal/taskpolicy"
@@ -17,7 +21,7 @@ func (a *Agent) emitTurnPhase(phase event.TurnPhaseName) {
 // emitCompletionSummary publishes the content-free end-of-turn quality summary
 // when the turn mutated state or finished Partial/Blocked. Pure conversation
 // and ordinary read-only success do not emit a quality card.
-func (a *Agent) emitCompletionSummary(c *taskcontract.Contract) {
+func (a *Agent) emitCompletionSummary(c *taskcontract.Contract, report completion.Report) {
 	if a == nil || a.svc.sink == nil || c == nil {
 		return
 	}
@@ -80,6 +84,7 @@ func (a *Agent) emitCompletionSummary(c *taskcontract.Contract) {
 			break
 		}
 	}
+	gaps = completionGapKinds(gaps, report)
 	constraintDegraded := a.turn.policySet && (a.turn.policy.Constraints.ForbidTests || len(a.turn.policy.Constraints.AllowedChecks) > 0)
 	summaryVerdict := verdict.String()
 	switch verdict {
@@ -95,7 +100,10 @@ func (a *Agent) emitCompletionSummary(c *taskcontract.Contract) {
 	a.svc.sink.Emit(event.Event{
 		Kind: event.CompletionSummary,
 		Completion: &event.CompletionSummaryInfo{
-			Preset:             a.AgentPreset(),
+			// Preset is a deprecated wire-compat field: it is pinned to the
+			// historical default so one-version-old clients keep parsing. New
+			// surfaces read the verdict/check/review/gap fields instead.
+			Preset:             string(agentpreset.Balanced),
 			Verdict:            summaryVerdict,
 			Mutations:          mutations,
 			ChecksPassed:       passed,
@@ -106,4 +114,14 @@ func (a *Agent) emitCompletionSummary(c *taskcontract.Contract) {
 			ConstraintDegraded: constraintDegraded,
 		},
 	})
+}
+
+func completionGapKinds(gaps []string, report completion.Report) []string {
+	for _, gap := range report.Gaps {
+		kind := gap.Kind.String()
+		if !slices.Contains(gaps, kind) {
+			gaps = append(gaps, kind)
+		}
+	}
+	return gaps
 }

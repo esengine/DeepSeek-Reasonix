@@ -34,9 +34,13 @@ import (
 // all diagnostics go to stderr. Each session is assembled by acpFactory, rooted
 // at the cwd the client opens.
 func acpCommand(args []string, version string) int {
+	args, deprecatedMode, err := consumeDeprecatedModeFlags(args, "profile")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
+	}
 	fs := flag.NewFlagSet("acp", flag.ContinueOnError)
 	model := fs.String("model", "", "provider name (default: config default_model)")
-	profileFlag := fs.String("profile", "balanced", "runtime profile: economy | balanced | delivery")
 	plannerFlag := fs.String("planner", "auto", "planner policy: auto | off")
 	networkFlag := fs.String("sandbox-network", "auto", "sandbox network policy: auto | on | off")
 	bashFlag := fs.String("sandbox-bash", "auto", "bash sandbox policy: auto | enforce")
@@ -68,8 +72,7 @@ func acpCommand(args []string, version string) int {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "sandbox-bash must be auto or enforce")
 		return 2
 	}
-	profile, err := parseRuntimeProfile(*profileFlag)
-	if err != nil {
+	if err := acceptDeprecatedModeFlag(deprecatedMode); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
 	}
@@ -78,7 +81,7 @@ func acpCommand(args []string, version string) int {
 	defer stop()
 
 	factory := &acpFactory{
-		model: *model, profile: profile, plannerOff: plannerMode == "off",
+		model: *model, plannerOff: plannerMode == "off",
 		networkOverride: networkOverride, workspaceOnly: *workspaceOnly,
 		bashOverride: bashMode, requireSandbox: bashMode == "enforce",
 	}
@@ -96,7 +99,6 @@ func acpCommand(args []string, version string) int {
 // for this session only.
 type acpFactory struct {
 	model            string
-	profile          string
 	plannerOff       bool
 	networkOverride  *bool
 	bashOverride     string
@@ -128,12 +130,7 @@ func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*cont
 	return boot.Build(ctx, opts)
 }
 
-// RebuildSession implements acp.SessionRebuilder: the replacement controller
-// comes from boot.Rebuild with the same boot.Options NewSession would use, so
-// _reasonix.io/session/reloadExtensions refreshes tool/skill/command/hook/
-// MCP/provider discovery while the session state migrates inside the boot
-// layer. ACP sessions hold no SharedHost — each controller owns its plugin
-// host, and the service releases the outgoing one only after the swap.
+// RebuildSession rebuilds the session controller with the same boot.Options.
 func (f *acpFactory) RebuildSession(ctx context.Context, p acp.SessionParams, old *control.Controller) (*control.Controller, error) {
 	opts, err := f.sessionBootOptions(p)
 	if err != nil {
@@ -166,8 +163,6 @@ func (f *acpFactory) sessionBootOptions(p acp.SessionParams) (boot.Options, erro
 	}
 	return boot.Options{
 		Model:                    firstNonEmpty(p.Model, f.model),
-		TokenMode:                firstNonEmpty(p.RuntimeProfile, f.profile),
-		AgentPreset:              boot.NormalizeAgentPreset(firstNonEmpty(p.RuntimeProfile, f.profile)),
 		RequireKey:               true,
 		Sink:                     p.Sink,
 		StatsSource:              "cli",
@@ -177,6 +172,7 @@ func (f *acpFactory) sessionBootOptions(p acp.SessionParams) (boot.Options, erro
 		ExtraPlugins:             p.MCPServers,
 		CleanupPendingReconciler: acp.ReconcileCleanupPending,
 		OnSessionRecovered:       p.OnSessionRecovered,
+		OnSessionTransition:      p.OnSessionTransition,
 		FileOverlay:              p.FileOverlay,
 		TerminalRunner:           p.Terminal,
 		Ablation:                 f.ablationSet(),
@@ -191,7 +187,7 @@ func (f *acpFactory) SessionRuntimeState(_ context.Context, p acp.SessionRuntime
 	if err != nil {
 		return acp.SessionRuntimeState{}, err
 	}
-	plannerMode := effectiveACPPlannerMode(cfg, f.plannerOff, p.Model, p.RuntimeProfile)
+	plannerMode := effectiveACPPlannerMode(cfg, f.plannerOff, p.Model)
 	writeRoots := cfg.WriteRootsForRoot(p.Cwd)
 	if f.workspaceOnly {
 		writeRoots = []string{p.Cwd}
@@ -235,8 +231,8 @@ func (f *acpFactory) isSandboxAvailable() bool {
 	return sandbox.Available()
 }
 
-func effectiveACPPlannerMode(cfg *config.Config, disabled bool, model, profile string) string {
-	if cfg == nil || disabled || acpRuntimeProfile(profile) == "economy" {
+func effectiveACPPlannerMode(cfg *config.Config, disabled bool, model string) string {
+	if cfg == nil || disabled {
 		return "off"
 	}
 	plannerRef := strings.TrimSpace(cfg.Agent.PlannerModel)
@@ -282,12 +278,7 @@ func (f *acpFactory) SessionConfigState(_ context.Context, p acp.SessionConfigSt
 		return acp.SessionConfigState{}, err
 	}
 
-	// explicit wins over the configured default: p.Model is the session
-	// override requested by the ACP client, f.model is the factory-level
-	// override. Either being non-empty is an explicit choice that the
-	// helper treats as strict (no silent fallback). Only when both are
-	// empty do we let resolveModelForCLI apply the keyless-default
-	// fallback to the next configured provider (issue #6996).
+	// Session or factory model overrides are explicit; empty falls back (#6996).
 	explicit := firstNonEmpty(p.Model, f.model)
 	ref, _, err := resolveModelForCLI(explicit, cfg)
 	if err != nil {
@@ -349,7 +340,6 @@ func (f *acpFactory) SessionConfigState(_ context.Context, p acp.SessionConfigSt
 		}
 	}
 
-	runtimeProfile := acpRuntimeProfile(firstNonEmpty(p.RuntimeProfile, f.profile))
 	options := []acp.SessionConfigOption{{
 		ID:           "model",
 		Name:         "Model",
@@ -377,57 +367,17 @@ func (f *acpFactory) SessionConfigState(_ context.Context, p acp.SessionConfigSt
 		cleared := ""
 		effortOverride = &cleared
 	}
-	agentPreset := boot.NormalizeAgentPreset(runtimeProfile)
-	// New option id is agent_preset; work_mode remains for one compatibility version.
-	presetOptions := []acp.SessionConfigSelectOption{
-		{Value: "light", Name: "Light", Description: "Fast and reliable: on-demand capabilities, targeted verification"},
-		{Value: "balanced", Name: "Balanced", Description: "Adaptive planning and risk-tiered verification"},
-		{Value: "delivery", Name: "Delivery", Description: "Evidence closed-loop: full acceptance, verification, independent review"},
-	}
-	options = append(options, acp.SessionConfigOption{
-		ID:           "agent_preset",
-		Name:         "Execution Setting",
-		Category:     "agent_preset",
-		Type:         "select",
-		CurrentValue: agentPreset,
-		Options:      presetOptions,
-	})
-	// Deprecated dual-write option for older ACP clients.
-	options = append(options, acp.SessionConfigOption{
-		ID:           "work_mode",
-		Name:         "Work Mode (deprecated)",
-		Category:     "work_mode",
-		Type:         "select",
-		CurrentValue: runtimeProfile,
-		Options: []acp.SessionConfigSelectOption{
-			{Value: "economy", Name: "Economy", Description: "Deprecated alias for light"},
-			{Value: "balanced", Name: "Balanced", Description: "Deprecated alias for balanced"},
-			{Value: "delivery", Name: "Delivery", Description: "Deprecated alias for delivery"},
-		},
-	})
-
+	// RuntimeProfile stays pinned for old status readers; mode options are unpublished.
 	return acp.SessionConfigState{
 		Model:          currentModel,
 		EffortOverride: effortOverride,
-		RuntimeProfile: runtimeProfile,
+		RuntimeProfile: "balanced",
 		Models: &acp.SessionModelState{
 			AvailableModels: modelInfos,
 			CurrentModelID:  currentModel,
 		},
 		ConfigOptions: options,
 	}, nil
-}
-
-func acpRuntimeProfile(value string) string {
-	// Dual-write: return legacy economy|balanced|delivery for RuntimeProfile.
-	switch boot.NormalizeAgentPreset(value) {
-	case boot.AgentPresetLight:
-		return "economy"
-	case boot.AgentPresetDelivery:
-		return "delivery"
-	default:
-		return "balanced"
-	}
 }
 
 func acpBuiltinTools(cfg *config.Config, cwd string, writeRoots []string) []tool.Tool {

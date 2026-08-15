@@ -2,6 +2,261 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.25.2",
+      "date": "2026-08-14",
+      "channel": "stable",
+      "title": {
+        "en": "Desktop stability and agent reliability improvements",
+        "zh": "桌面端稳定性与智能体可靠性改进"
+      },
+      "summary": {
+        "en": "This release focuses on desktop stability, session management, and agent behavior fixes, including persistent reasoning display, memory approval alignment, adaptive planner research, and numerous UI and performance improvements.",
+        "zh": "此版本专注于桌面端稳定性、会话管理和智能体行为修复，包括持续展开的推理显示、记忆审批对齐、自适应规划器调研，以及大量 UI 和性能改进。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Tool Approval Modes",
+            "zh": "工具审批模式"
+          },
+          "body": {
+            "en": "Learn how Auto and YOLO modes handle memory tool approvals.",
+            "zh": "了解 Auto 和 YOLO 模式如何处理记忆工具审批。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/d6a743a118457f9bb52e698fd18b12400d1d5c68/docs/TOOL_APPROVAL_MODES.md"
+        },
+        {
+          "title": {
+            "en": "Tool Approval Modes (Chinese)",
+            "zh": "工具审批模式（中文）"
+          },
+          "body": {
+            "en": "Chinese guide for tool approval modes.",
+            "zh": "工具审批模式中文指南。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/d6a743a118457f9bb52e698fd18b12400d1d5c68/docs/TOOL_APPROVAL_MODES.zh-CN.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "Expanded reasoning display mode",
+            "zh": "持续展开的推理显示模式"
+          },
+          "body": {
+            "en": "Added an explicit expanded reasoning display mode that keeps completed reasoning open across assistant messages, inline transcripts, and sub-agent previews.",
+            "zh": "新增显式的展开推理显示模式，使已完成的推理在助手消息、内联转录和子代理预览中保持展开。"
+          },
+          "refs": [
+            8732
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Memory approvals now respect Auto and YOLO modes",
+            "zh": "记忆审批现在遵循 Auto 和 YOLO 模式"
+          },
+          "body": {
+            "en": "Memory tools no longer force approval prompts in Auto and YOLO modes; explicit ask and deny rules still apply.",
+            "zh": "记忆工具在 Auto 和 YOLO 模式下不再强制弹出审批提示；显式的 ask 和 deny 规则仍然有效。"
+          },
+          "refs": [
+            8788,
+            5049
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Adaptive planner research",
+            "zh": "自适应规划器调研"
+          },
+          "body": {
+            "en": "Planner no longer has fixed research round limits; it continues until a valid plan is submitted or safety boundaries are hit.",
+            "zh": "规划器不再有固定的调研轮数限制；它会持续进行，直到提交有效计划或触发安全边界。"
+          },
+          "refs": [
+            8830
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Desktop session and UI stability fixes",
+            "zh": "桌面端会话与 UI 稳定性修复"
+          },
+          "body": {
+            "en": "Fixed multiple issues including session switching prompts, pinned chats after restart, project tree loops, and transcript scrolling.",
+            "zh": "修复了多个问题，包括会话切换提示、重启后置顶会话、项目树循环和转录滚动。"
+          },
+          "refs": [
+            8881,
+            8834,
+            8772,
+            8877,
+            8813
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "Expanded reasoning display mode",
+              "zh": "持续展开的推理显示模式"
+            },
+            "body": {
+              "en": "Added an explicit expanded reasoning display mode that keeps completed reasoning open.",
+              "zh": "新增显式的展开推理显示模式，使已完成的推理保持展开。"
+            },
+            "refs": [
+              8732
+            ]
+          },
+          {
+            "title": {
+              "en": "ACP authoritative total tokens",
+              "zh": "ACP 权威总令牌数"
+            },
+            "body": {
+              "en": "ACP session status now exposes totalTokens as the authoritative inclusive total.",
+              "zh": "ACP 会话状态现在暴露 totalTokens 作为权威的包含总数。"
+            },
+            "refs": [
+              8675
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Adaptive planner research",
+              "zh": "自适应规划器调研"
+            },
+            "body": {
+              "en": "Removed fixed research round limits; planner continues until a valid plan is submitted.",
+              "zh": "移除了固定的调研轮数限制；规划器会持续进行，直到提交有效计划。"
+            },
+            "refs": [
+              8830
+            ]
+          },
+          {
+            "title": {
+              "en": "MCP tool refresh after list changes",
+              "zh": "MCP 工具列表变更后自动刷新"
+            },
+            "body": {
+              "en": "Refresh connected MCP tool catalogs after notifications/tools/list_changed.",
+              "zh": "在 notifications/tools/list_changed 后刷新已连接的 MCP 工具目录。"
+            },
+            "refs": [
+              8673
+            ]
+          },
+          {
+            "title": {
+              "en": "Desktop performance and stability improvements",
+              "zh": "桌面端性能与稳定性改进"
+            },
+            "body": {
+              "en": "Various improvements to rendering, workspace, catalog, and WebView2 stability.",
+              "zh": "对渲染、工作区、目录和 WebView2 稳定性的各种改进。"
+            },
+            "refs": [
+              8827,
+              8841,
+              8832,
+              8856,
+              8806,
+              8814,
+              8812,
+              8808
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Memory approvals respect Auto and YOLO modes",
+              "zh": "记忆审批遵循 Auto 和 YOLO 模式"
+            },
+            "body": {
+              "en": "Memory tools no longer force approval prompts in Auto and YOLO modes.",
+              "zh": "记忆工具在 Auto 和 YOLO 模式下不再强制弹出审批提示。"
+            },
+            "refs": [
+              8788,
+              5049
+            ]
+          },
+          {
+            "title": {
+              "en": "complete_step terminal message on final todo",
+              "zh": "最后一个待办完成时返回终止消息"
+            },
+            "body": {
+              "en": "complete_step now returns a terminal message when the final todo is completed, preventing infinite loops.",
+              "zh": "complete_step 现在在最后一个待办完成时返回终止消息，防止无限循环。"
+            },
+            "refs": [
+              8872
+            ]
+          },
+          {
+            "title": {
+              "en": "Desktop session and UI fixes",
+              "zh": "桌面端会话与 UI 修复"
+            },
+            "body": {
+              "en": "Fixed session switching prompts, pinned chats after restart, project tree loops, transcript scrolling, and more.",
+              "zh": "修复了会话切换提示、重启后置顶会话、项目树循环、转录滚动等问题。"
+            },
+            "refs": [
+              8881,
+              8834,
+              8772,
+              8877,
+              8813,
+              8833,
+              8831,
+              8880,
+              8885
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "kaidiren",
+        "SivanCola",
+        "myipanta",
+        "cyq1017",
+        "glyahh",
+        "Chise1"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.25.2",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.25.1...desktop-v1.25.2",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.25.2",
+      "baseVersion": "1.25.2",
+      "status": "reviewed",
+      "previousRelease": "1.25.1",
+      "builds": {
+        "cli": "v1.25.2",
+        "desktop": "v1.25.2",
+        "npm": "1.25.2"
+      }
+    },
+    {
       "version": "1.25.1",
       "date": "2026-08-13",
       "channel": "stable",

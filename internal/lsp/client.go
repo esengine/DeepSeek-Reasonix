@@ -44,7 +44,7 @@ type Diagnostic struct {
 }
 
 func startClient(ctx context.Context, bin string, args []string, env map[string]string, langID, root string) (*client, error) {
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := proc.CommandContext(ctx, bin, args...)
 	proc.HideWindow(cmd)
 	cmd.Dir = root
 	cmd.Env = append(secrets.ProcessEnv(), envSlice(env)...)

@@ -34,6 +34,8 @@ var (
 	User32DispatchMessageW   = user32.NewProc("DispatchMessageW")
 	User32DefWindowProcW     = user32.NewProc("DefWindowProcW")
 	User32GetClientRect      = user32.NewProc("GetClientRect")
+	User32GetWindowRect      = user32.NewProc("GetWindowRect")
+	User32GetDPIForWindow    = user32.NewProc("GetDpiForWindow")
 	User32PostQuitMessage    = user32.NewProc("PostQuitMessage")
 	User32SetWindowTextW     = user32.NewProc("SetWindowTextW")
 	User32PostThreadMessageW = user32.NewProc("PostThreadMessageW")
@@ -176,6 +178,26 @@ func GetClientRect(hwnd uintptr) (Rect, error) {
 	}
 
 	return rect, nil
+}
+
+func GetWindowRect(hwnd uintptr) (Rect, error) {
+	var rect Rect
+	ret, _, err := User32GetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&rect)))
+	if ret == 0 {
+		return Rect{}, err
+	}
+	return rect, nil
+}
+
+func GetDPIForWindow(hwnd uintptr) (uint32, error) {
+	if err := User32GetDPIForWindow.Find(); err != nil {
+		return 0, err
+	}
+	dpi, _, err := User32GetDPIForWindow.Call(hwnd)
+	if dpi == 0 {
+		return 0, err
+	}
+	return uint32(dpi), nil
 }
 
 // DefWindowProc calls the default window procedure to provide default processing for any window messages that an application does not process.

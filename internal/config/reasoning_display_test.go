@@ -21,6 +21,7 @@ func TestDesktopReasoningDisplayModeDefaultsAndLegacy(t *testing.T) {
 		{name: "explicit hidden wins over legacy", mode: "hidden", expand: true, want: "hidden", explicit: true},
 		{name: "explicit summary wins over legacy", mode: "summary", expand: true, want: "summary", explicit: true},
 		{name: "explicit auto", mode: "auto", want: "auto", explicit: true},
+		{name: "explicit expanded", mode: "expanded", expand: true, want: "expanded", explicit: true},
 		{name: "unknown follows the live-follow fallback", mode: "future-mode", want: "auto"},
 		{name: "unknown with legacy expand remains auto", mode: "future-mode", expand: true, want: "auto"},
 	}
@@ -48,6 +49,7 @@ func TestSetDesktopReasoningDisplayMode(t *testing.T) {
 		{mode: "hidden", want: "hidden"},
 		{mode: "summary", want: "summary"},
 		{mode: "auto", want: "auto", expand: true},
+		{mode: "expanded", want: "expanded", expand: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.mode, func(t *testing.T) {

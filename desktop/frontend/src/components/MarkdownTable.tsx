@@ -20,6 +20,7 @@ import {
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { MarkdownTableAlignment, VirtualMarkdownTableData } from "../lib/largeMarkdownTable";
 import { t } from "../lib/i18n";
+import { useTranscriptUserResizeIntent } from "./TranscriptLayoutIntentContext";
 
 export const MARKDOWN_TABLE_VIRTUAL_MIN_ROWS = 50;
 /** How many body rows to show in the default collapsed preview. */
@@ -52,10 +53,11 @@ function TableFoldToggle({
   totalRows: number;
   onToggle: () => void;
 }) {
+  const beginUserResize = useTranscriptUserResizeIntent();
   // Module-level t() so unit tests do not need a LocaleProvider; App still
   // re-renders under LocaleProvider when the locale flips.
   return (
-    <button type="button" className="md-table-fold__toggle" onClick={onToggle}>
+    <button type="button" className="md-table-fold__toggle" onClick={() => { beginUserResize(); onToggle(); }}>
       {expanded
         ? t("markdown.tableCollapse")
         : t("markdown.tableExpandAll", { n: totalRows })}

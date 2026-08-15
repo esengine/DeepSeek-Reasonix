@@ -145,6 +145,19 @@ func (a *App) runtimeForTabLocked(tab *WorkspaceTab) *desktopSessionRuntime {
 	return rt
 }
 
+// runtimeEpochForTabLocked returns the generation already transferred to tab.
+// Callers use it when reattaching an existing runtime: the generation must be
+// announced before that runtime replays any pending prompt.
+func (a *App) runtimeEpochForTabLocked(tab *WorkspaceTab) string {
+	if rt := a.runtimeForTabLocked(tab); rt != nil {
+		return rt.Epoch
+	}
+	if tab != nil && tab.sink != nil {
+		return tab.sink.runtimeEpochSnapshot()
+	}
+	return ""
+}
+
 func (a *App) runtimeOwnerLiveLocked(rt *desktopSessionRuntime) bool {
 	if rt == nil || rt.Owner == nil {
 		return false

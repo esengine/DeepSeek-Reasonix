@@ -264,6 +264,7 @@ export interface FoldEntry {
   open: boolean;
   userOverridden: boolean;
   running: boolean;
+  keepReasoningExpanded?: boolean;
 }
 
 export type FoldMap = ReadonlyMap<string, FoldEntry>;
@@ -271,24 +272,30 @@ export type FoldMap = ReadonlyMap<string, FoldEntry>;
 export const EMPTY_FOLDS: FoldMap = new Map();
 
 export function defaultFoldOpen(
-  segment: { hasOutsideContent: boolean; hasRunningWork: boolean },
+  segment: { hasOutsideContent: boolean; hasRunningWork: boolean; keepReasoningExpanded?: boolean },
   preference: ProcessFoldPreference,
 ): boolean {
-  return preference === "expanded" || !segment.hasOutsideContent || segment.hasRunningWork;
+  return preference === "expanded" || segment.keepReasoningExpanded === true || !segment.hasOutsideContent || segment.hasRunningWork;
 }
 
 export interface FoldSegmentState {
   key: string;
   hasOutsideContent: boolean;
   hasRunningWork: boolean;
+  keepReasoningExpanded: boolean;
 }
 
-export function foldSegmentStates(models: readonly TurnModel[]): FoldSegmentState[] {
+export function foldSegmentStates(models: readonly TurnModel[], keepReasoningExpanded = false): FoldSegmentState[] {
   const out: FoldSegmentState[] = [];
   for (const model of models) {
     for (const segment of model.segments) {
       if (segment.displayItems.length === 0) continue;
-      out.push({ key: segment.key, hasOutsideContent: segment.hasOutsideContent, hasRunningWork: segment.hasRunningWork });
+      out.push({
+        key: segment.key,
+        hasOutsideContent: segment.hasOutsideContent,
+        hasRunningWork: segment.hasRunningWork,
+        keepReasoningExpanded: keepReasoningExpanded && segment.displayItems.some((item) => item.kind === "assistant"),
+      });
     }
   }
   return out;
@@ -322,17 +329,24 @@ export function reconcileFoldEntries(
         open: defaultFoldOpen(segment, preference),
         userOverridden: false,
         running: segment.hasRunningWork,
+        keepReasoningExpanded: segment.keepReasoningExpanded,
       });
       continue;
     }
-    if (preferenceChanged) {
-      const open = preference === "expanded"
+    const reasoningPinChanged = Boolean(entry.keepReasoningExpanded) !== segment.keepReasoningExpanded;
+    if (preferenceChanged || reasoningPinChanged) {
+      const open = preference === "expanded" || segment.keepReasoningExpanded
         ? true
         : !segment.hasRunningWork && segment.hasOutsideContent
           ? false
           : entry.open;
-      if (open !== entry.open || entry.userOverridden || entry.running !== segment.hasRunningWork) {
-        write(segment.key, { open, userOverridden: false, running: segment.hasRunningWork });
+      if (open !== entry.open || entry.userOverridden || entry.running !== segment.hasRunningWork || reasoningPinChanged) {
+        write(segment.key, {
+          open,
+          userOverridden: false,
+          running: segment.hasRunningWork,
+          keepReasoningExpanded: segment.keepReasoningExpanded,
+        });
       }
       continue;
     }
@@ -342,13 +356,18 @@ export function reconcileFoldEntries(
       const userOverridden = entry.running ? entry.userOverridden : false;
       const open = userOverridden ? entry.open : true;
       if (open !== entry.open || userOverridden !== entry.userOverridden || !entry.running) {
-        write(segment.key, { open, userOverridden, running: true });
+        write(segment.key, { open, userOverridden, running: true, keepReasoningExpanded: segment.keepReasoningExpanded });
       }
       continue;
     }
     if (entry.running) {
-      const open = !entry.userOverridden && segment.hasOutsideContent && preference !== "expanded" ? false : entry.open;
-      write(segment.key, { open, userOverridden: entry.userOverridden, running: false });
+      const open = !entry.userOverridden && segment.hasOutsideContent && preference !== "expanded" && !segment.keepReasoningExpanded ? false : entry.open;
+      write(segment.key, {
+        open,
+        userOverridden: entry.userOverridden,
+        running: false,
+        keepReasoningExpanded: segment.keepReasoningExpanded,
+      });
     }
   }
   for (const key of prev.keys()) {
@@ -364,7 +383,12 @@ export function reconcileFoldEntries(
 export function foldMapWithToggle(prev: FoldMap, key: string, currentlyOpen: boolean): Map<string, FoldEntry> {
   const next = new Map(prev);
   const entry = prev.get(key);
-  next.set(key, { open: !currentlyOpen, userOverridden: true, running: entry?.running ?? false });
+  next.set(key, {
+    open: !currentlyOpen,
+    userOverridden: true,
+    running: entry?.running ?? false,
+    keepReasoningExpanded: entry?.keepReasoningExpanded,
+  });
   return next;
 }
 
@@ -372,7 +396,12 @@ export function foldMapWithToggle(prev: FoldMap, key: string, currentlyOpen: boo
 export function foldMapWithReasoningOpen(prev: FoldMap, key: string, running: boolean): Map<string, FoldEntry> {
   const next = new Map(prev);
   const entry = prev.get(key);
-  next.set(key, { open: true, userOverridden: true, running: entry?.running ?? running });
+  next.set(key, {
+    open: true,
+    userOverridden: true,
+    running: entry?.running ?? running,
+    keepReasoningExpanded: entry?.keepReasoningExpanded,
+  });
   return next;
 }
 
@@ -520,20 +549,100 @@ export function buildTranscriptRows(models: readonly TurnModel[], options: Build
   return rows;
 }
 
+// ── Live turn split ───────────────────────────────────────────────────────────
+// The streaming ("live") turn renders as the virtual list's in-flow Footer —
+// inside the scroller but outside the measured size tree — so the list only
+// ever owns static, bounded rows. The active turn is the one owning the live
+// assistant item; while running with no live item yet it is the last turn.
+// Everything from the active turn onward (except its user message, which
+// stays as the history tail) moves to the live region, preserving the visual
+// order for later steers/messages.
+
+export interface TranscriptLiveSplit {
+  historyRows: TranscriptRow[];
+  liveRows: TranscriptRow[];
+  /** True while a turn is active — the live region may render a status row even when liveRows is empty. */
+  liveActive: boolean;
+}
+
+function firstRowKeyForModel(model: TurnModel): string | undefined {
+  for (const segment of model.segments) {
+    if (segment.displayItems.length > 0) return `ph:${segment.key}`;
+    const outside = segment.outsideItems[0];
+    if (!outside) continue;
+    return outside.kind === "extension" ? `x:${outside.id}` : outside.kind === "notice" ? `n:${outside.id}` : `a:${outside.id}`;
+  }
+  return undefined;
+}
+
+export function splitTranscriptLiveRows(
+  models: readonly TurnModel[],
+  rows: readonly TranscriptRow[],
+  liveId: string | undefined,
+  running: boolean,
+): TranscriptLiveSplit {
+  let activeIndex = -1;
+  if (liveId) {
+    activeIndex = models.findIndex((model) => model.turnItems.some((item) => item.id === liveId));
+  }
+  if (activeIndex < 0 && running && models.length > 0) activeIndex = models.length - 1;
+  if (activeIndex < 0) return { historyRows: [...rows], liveRows: [], liveActive: false };
+  const active = models[activeIndex];
+  if (!active.user) {
+    // Prelude turn (no user message): split at the turn's first row. A turn
+    // with no rendered rows yet keeps the whole list as history.
+    const firstKey = firstRowKeyForModel(active);
+    const firstIndex = firstKey ? rows.findIndex((row) => row.key === firstKey) : -1;
+    if (!firstKey || firstIndex < 0) return { historyRows: [...rows], liveRows: [], liveActive: true };
+    return { historyRows: rows.slice(0, firstIndex), liveRows: rows.slice(firstIndex), liveActive: true };
+  }
+  const userIndex = rows.findIndex((row) => row.key === userRowKey(active.user!.id));
+  if (userIndex < 0) return { historyRows: [...rows], liveRows: [], liveActive: false };
+  return {
+    historyRows: rows.slice(0, userIndex + 1),
+    liveRows: rows.slice(userIndex + 1),
+    liveActive: true,
+  };
+}
+
 // ── Measurement / identity helpers ────────────────────────────────────────────
 
-/** Ballpark row heights; measureElement corrects them on mount. */
+const TRANSCRIPT_ESTIMATED_LINE_CHARS = 88;
+const TRANSCRIPT_ESTIMATED_LINE_HEIGHT = 20;
+const TRANSCRIPT_MAX_ESTIMATED_TEXT_HEIGHT = 12_000;
+
+function estimateTranscriptTextSize(text: string | undefined, minimum: number): number {
+  if (!text) return minimum;
+  const wrappedLines = Math.ceil(text.length / TRANSCRIPT_ESTIMATED_LINE_CHARS);
+  const cappedLines = Math.ceil(
+    (TRANSCRIPT_MAX_ESTIMATED_TEXT_HEIGHT - 44) / TRANSCRIPT_ESTIMATED_LINE_HEIGHT,
+  );
+  if (wrappedLines >= cappedLines) return TRANSCRIPT_MAX_ESTIMATED_TEXT_HEIGHT;
+  let explicitLines = 1;
+  for (let index = 0; index < text.length; index += 1) {
+    if (text.charCodeAt(index) !== 10) continue;
+    explicitLines += 1;
+    if (explicitLines >= cappedLines) return TRANSCRIPT_MAX_ESTIMATED_TEXT_HEIGHT;
+  }
+  const lines = Math.max(explicitLines, wrappedLines);
+  return Math.min(
+    TRANSCRIPT_MAX_ESTIMATED_TEXT_HEIGHT,
+    Math.max(minimum, 44 + lines * TRANSCRIPT_ESTIMATED_LINE_HEIGHT),
+  );
+}
+
+/** Ballpark row heights; Virtuoso replaces them with real measurements on mount. */
 export function estimateTranscriptRowSize(row: TranscriptRow | undefined): number {
   if (!row) return 48;
   switch (row.kind) {
     case "older-history":
       return 44;
     case "user":
-      return 88;
+      return estimateTranscriptTextSize(row.item.text, 88);
     case "process-header":
       return 28;
     case "reasoning":
-      return 96;
+      return estimateTranscriptTextSize(row.item.reasoning, 96);
     case "tool":
       return 96;
     case "tool-batch":
@@ -547,7 +656,7 @@ export function estimateTranscriptRowSize(row: TranscriptRow | undefined): numbe
     case "compaction":
       return 36;
     case "answer":
-      return 160;
+      return estimateTranscriptTextSize(row.item.text, 160);
     case "extension":
       return 160;
     case "turn-actions":

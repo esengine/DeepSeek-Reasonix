@@ -207,9 +207,8 @@ func TestModeRebuildAndABANavigationFenceLeaseFailureAndOldEpochEvent(t *testing
 		t.Fatal("A to B rebind did not reach restored candidate")
 	}
 
-	// This call observes A/economy, then waits behind the rebind transaction.
-	// Once B commits it must rebuild B to full, never interleave with the
-	// candidate or publish a half-updated profile.
+	// Concurrent deprecated mode call must not interleave with the rebind
+	// transaction or publish a half-updated profile.
 	modeDone := make(chan error, 1)
 	go func() {
 		modeDone <- app.SetTokenModeForTab(tab.ID, boot.TokenModeFull)
@@ -219,7 +218,7 @@ func TestModeRebuildAndABANavigationFenceLeaseFailureAndOldEpochEvent(t *testing
 		t.Fatalf("A to B rebind: %v", err)
 	}
 	if err := <-modeDone; err != nil {
-		t.Fatalf("mode rebuild after A to B: %v", err)
+		t.Fatalf("SetTokenModeForTab after A to B: %v", err)
 	}
 
 	stale := capturedOldEvent
@@ -232,7 +231,7 @@ func TestModeRebuildAndABANavigationFenceLeaseFailureAndOldEpochEvent(t *testing
 	if app.controllerForTab(tab) == oldCtrl ||
 		sessionRuntimeKey(tab.currentSessionPath()) != sessionRuntimeKey(pathB) ||
 		currentTabTokenMode(tab) != boot.TokenModeFull {
-		t.Fatalf("A to B plus mode rebuild did not converge: ctrl=%p path=%q token=%q",
+		t.Fatalf("A to B plus SetTokenModeForTab did not converge: ctrl=%p path=%q token=%q",
 			app.controllerForTab(tab), tab.currentSessionPath(), currentTabTokenMode(tab))
 	}
 

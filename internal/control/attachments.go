@@ -246,7 +246,7 @@ if ($null -eq $img) { [Console]::Error.WriteLine('clipboard has no image'); exit
 $ms = New-Object System.IO.MemoryStream
 $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
 [Convert]::ToBase64String($ms.ToArray())`
-	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	cmd := proc.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
 	cmd.Env = secrets.ProcessEnv()
 	proc.HideWindow(cmd)
 	out, err := cmd.Output()
@@ -270,7 +270,7 @@ func saveLinuxClipboardImage() (string, error) {
 		{"wl-paste", "--type", "image/png", "--no-newline"},
 		{"xclip", "-selection", "clipboard", "-t", "image/png", "-o"},
 	} {
-		cmd := exec.Command(c[0], c[1:]...)
+		cmd := proc.Command(c[0], c[1:]...)
 		cmd.Env = secrets.ProcessEnv()
 		if out, err := cmd.Output(); err == nil && len(out) > 0 {
 			return SaveImageBytes("", out)
@@ -464,7 +464,7 @@ on error errMsg
 	error errMsg
 end try
 `, abs, class)
-	clip := exec.Command("osascript", "-e", script)
+	clip := proc.Command("osascript", "-e", script)
 	clip.Env = secrets.ProcessEnv()
 	if out, err := clip.CombinedOutput(); err != nil {
 		_ = os.Remove(rel)

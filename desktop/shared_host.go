@@ -4,12 +4,12 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 
 	"reasonix/internal/config"
 	"reasonix/internal/plugin"
+	"reasonix/internal/proc"
 )
 
 // bumpExtensionGeneration records that plugin/MCP configuration changed while
@@ -160,7 +160,7 @@ func (a *App) reapOrphanCodeGraph() {
 	// empty set and continue scanning for orphans rather than skipping the
 	// entire reaping step.
 	ours := map[int]bool{}
-	out, err := exec.Command("pgrep", "-P", strconv.Itoa(myPID)).Output()
+	out, err := proc.Command("pgrep", "-P", strconv.Itoa(myPID)).Output()
 	if err == nil {
 		for f := range strings.FieldsSeq(string(out)) {
 			if pid, err := strconv.Atoi(f); err == nil {
@@ -170,7 +170,7 @@ func (a *App) reapOrphanCodeGraph() {
 	}
 
 	// Find every codegraph MCP process.
-	out, err = exec.Command("pgrep", "-f", "codegraph\\.js serve --mcp").Output()
+	out, err = proc.Command("pgrep", "-f", "codegraph\\.js serve --mcp").Output()
 	if err != nil {
 		return
 	}
@@ -182,7 +182,7 @@ func (a *App) reapOrphanCodeGraph() {
 		// Verify the process is truly orphaned before killing it:
 		// check its parent PID — if the parent is alive and isn't ours,
 		// this codegraph belongs to another active Reasonix session.
-		ppidOut, err := exec.Command("ps", "-o", "ppid=", "-p", strconv.Itoa(pid)).Output()
+		ppidOut, err := proc.Command("ps", "-o", "ppid=", "-p", strconv.Itoa(pid)).Output()
 		if err != nil {
 			continue
 		}

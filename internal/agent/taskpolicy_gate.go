@@ -3,6 +3,8 @@ package agent
 import (
 	"encoding/json"
 	"strings"
+
+	"reasonix/internal/evidence"
 )
 
 // taskPolicyToolGate binds natural-language constraints to both direct tools
@@ -26,7 +28,7 @@ func (a *Agent) taskPolicyToolGate(plan *toolCallPlan, args json.RawMessage) (to
 	}
 	if isVerificationCommandTool(plan.evidenceName, plan.permName, args) {
 		if !a.turn.policy.AllowsTests() {
-			return policyBlock("the current task policy forbids running tests (user constraint)", "task policy forbids tests")
+			return policyBlock("the current task policy forbids running verification commands (user constraint)", "task policy forbids verification commands")
 		}
 		if !a.turn.policy.AllowsCommand(bashCommandFromArgs(args)) {
 			return policyBlock("the current task policy allows only the verification commands named by the user", "verification command is outside the user allowlist")
@@ -50,16 +52,7 @@ func isVerificationCommandTool(evidenceName, permName string, args json.RawMessa
 	if name != "bash" && name != "shell" {
 		return false
 	}
-	cmd := strings.ToLower(bashCommandFromArgs(args))
-	for _, verifier := range []string{
-		"go test", "npm test", "npm run test", "pnpm test", "yarn test",
-		"pytest", "cargo test", "mvn test", "gradle test", "make test", "bun test", "deno test",
-	} {
-		if strings.Contains(cmd, verifier) {
-			return true
-		}
-	}
-	return false
+	return evidence.IsVerificationCommand(bashCommandFromArgs(args))
 }
 
 func isExplorationSubagentTool(evidenceName, permName string, args json.RawMessage) bool {

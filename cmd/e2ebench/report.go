@@ -9,12 +9,8 @@ import (
 )
 
 func render(results []result) string {
-	profile := benchmarkProfileBaseline
 	arm := "full"
 	if len(results) > 0 {
-		if results[0].Profile != "" {
-			profile = results[0].Profile
-		}
 		if results[0].Arm != "" {
 			arm = results[0].Arm
 		}
@@ -23,7 +19,7 @@ func render(results []result) string {
 	if len(results) > 0 && results[0].CacheArm != "" && results[0].CacheArm != benchmarkCacheCold {
 		cache = " · " + results[0].CacheArm + "-cache"
 	}
-	return fmt.Sprintf("## 🤖 Reasonix e2e benchmark (%s · arm `%s`%s)\n\n", profile, arm, cache) + renderBody(results)
+	return fmt.Sprintf("## 🤖 Reasonix e2e benchmark (arm `%s`%s)\n\n", arm, cache) + renderBody(results)
 }
 
 // suiteStats aggregates result entries; ran/pass1 count tasks (first

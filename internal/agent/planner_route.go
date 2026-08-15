@@ -17,8 +17,10 @@ const (
 	PlannerRoutePlanOnly        PlannerRoute = "plan_only"
 )
 
-// PlannerDepth controls the planning contract and research budget. None is only
-// valid for ExecutorOnly.
+// PlannerDepth controls how much evidence and detail the planning contract asks
+// for. It deliberately does not impose a model-round budget: planning lands on
+// submit_plan and the shared adaptive progress, task-budget, and context guards
+// own runaway protection. None is only valid for ExecutorOnly.
 type PlannerDepth string
 
 const (
@@ -29,12 +31,11 @@ const (
 
 // PlannerDecision is the deterministic, host-owned routing result for one turn.
 // Reason is an opaque privacy-safe code for diagnostics; user text never belongs
-// in it. MaxResearchRounds bounds planner tool-call rounds for this turn only.
+// in it.
 type PlannerDecision struct {
-	Route             PlannerRoute
-	Depth             PlannerDepth
-	Reason            string
-	MaxResearchRounds int
+	Route  PlannerRoute
+	Depth  PlannerDepth
+	Reason string
 }
 
 // PlannerPolicy makes one deterministic routing decision from trusted turn
@@ -45,47 +46,17 @@ func normalizePlannerDecision(d PlannerDecision) PlannerDecision {
 	switch d.Route {
 	case PlannerRouteExecutorOnly:
 		d.Depth = PlannerDepthNone
-		d.MaxResearchRounds = 0
 	case PlannerRoutePlanAndExecute, PlannerRoutePlanForApproval, PlannerRoutePlanOnly:
 		if d.Depth != PlannerDepthLight && d.Depth != PlannerDepthFull {
 			d.Depth = PlannerDepthFull
 		}
-		if d.MaxResearchRounds < 0 {
-			d.MaxResearchRounds = 0
-		}
 	default:
 		d.Route = PlannerRoutePlanAndExecute
 		d.Depth = PlannerDepthFull
-		d.MaxResearchRounds = 0
 	}
 	d.Reason = strings.TrimSpace(d.Reason)
 	if d.Reason == "" {
 		d.Reason = "default"
 	}
 	return d
-}
-
-type runStepLimit struct {
-	steps int
-	key   string
-}
-
-type runStepLimitContextKey struct{}
-
-func withRunStepLimit(ctx context.Context, steps int, key string) context.Context {
-	if steps <= 0 {
-		return ctx
-	}
-	return context.WithValue(ctx, runStepLimitContextKey{}, runStepLimit{
-		steps: steps,
-		key:   strings.TrimSpace(key),
-	})
-}
-
-func runStepLimitFromContext(ctx context.Context) (runStepLimit, bool) {
-	if ctx == nil {
-		return runStepLimit{}, false
-	}
-	limit, ok := ctx.Value(runStepLimitContextKey{}).(runStepLimit)
-	return limit, ok && limit.steps > 0
 }

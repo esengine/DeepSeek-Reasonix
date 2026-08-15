@@ -709,7 +709,7 @@ func refFor(epoch uint64, r evidence.Receipt) EvidenceRef {
 	switch {
 	case r.ToolName == "review_report":
 		kind = EvidenceReview
-	case r.Command != "" && evidence.IsDeliveryVerificationCommand(r.Command):
+	case r.Command != "" && evidence.IsVerificationCommand(r.Command):
 		kind = EvidenceVerification
 	case r.Mutation || r.Write:
 		kind = EvidenceMutation
@@ -731,7 +731,7 @@ func (c *Contract) checkMatches(check Check, r evidence.Receipt, ref EvidenceRef
 		return false
 	}
 	if check.Command == "" {
-		return evidence.IsDeliveryVerificationCommand(r.Command)
+		return evidence.IsVerificationCommand(r.Command)
 	}
 	return evidence.CommandMatches(check.Command, r.Command)
 }

@@ -177,7 +177,7 @@ code; unsent counters stay in a bounded local queue for a later invocation.
 The ping contains a dedicated random 128-bit CLI install ID, CLI version, OS,
 architecture, and the `cli` surface marker. Counter batches use that same ID for
 daily active-install deduplication and contain only fixed buckets such as CLI
-mode/profile, permission/session mode, turn latency, finish reason, cache-hit
+surface, permission/session mode, turn latency, finish reason, cache-hit
 range, generic Provider/tool error class, compaction, recovery counters, and
 normalized UI language. This ID is separate from the desktop install ID and is
 not an account, hardware, repository, or session identifier.
@@ -616,13 +616,12 @@ Use `/theme auto|light|dark` to select the background mode, or `/theme <style>`
 to select one of the named accent palettes shown by bare `/theme`.
 
 The responsive footer keeps the active Ask/Auto/Plan or YOLO posture and current
-interaction state on the left. On wider terminals, model, effort, and work mode
+interaction state on the left. On wider terminals, model and effort
 stay together on the right; a second row shows available Git identity, cache hit
 rate, context use, compaction headroom, jobs, and balance. `ready` is the idle
 composer state, not a model-health check. Pickers, approvals, image paste, shell
 mode, and other active interactions replace it. Narrow terminals move, wrap, or
-compact whole groups; labels and displayed work-mode values follow `/language`,
-while `/work-mode` command arguments remain the stable English identifiers.
+compact whole groups; visible labels follow `/language`.
 
 Chat and transcript shortcuts:
 
@@ -661,7 +660,6 @@ Mode and display shortcuts:
 | `Shift+Tab` | Cycles Ask → Auto → Plan → Ask | YOLO remains outside this composer-mode cycle; the footer shows the active mode. |
 | `Ctrl+Y` | Toggles YOLO on/off | Turning YOLO off restores the previous Ask/Auto base when known. Terminals that forward Command/Super may also send `Cmd+Y`, but `Ctrl+Y` is the reliable terminal shortcut. |
 | `--yolo`, `--dangerously-skip-permissions` | Starts chat in YOLO | Same runtime mode as `Ctrl+Y`. |
-| `/preset [light|balanced|delivery]` | Shows or switches the current session's execution setting (执行设定) | `/work-mode` and `/profile` are compatibility aliases (`economy` → `light`). Switching updates the execution setting in place without rebuilding the controller; blocked while a turn, approval, or background job is active. |
 | `/theme [auto|light|dark|style]` | Shows or switches the CLI theme | Bare `/theme` lists background modes and named accent palettes. The choice is saved to the user config; `REASONIX_THEME` and `REASONIX_THEME_STYLE` can override it for one run. |
 | `Ctrl+O` | Toggles verbose reasoning display | Also available through `/verbose`. |
 | `Ctrl+B` | Expands or collapses long shell output | Long shell-output hint lines can also be clicked in the transcript; text selection is handled in-app while the full-screen TUI has mouse reporting enabled. |
@@ -686,8 +684,8 @@ Mode meanings:
 | Mode | Meaning |
 | --- | --- |
 | Ask | Prompts for fallback writer approvals. |
-| Auto | Auto-allows fallback approvals; explicit `ask` / `deny` rules still apply. |
-| YOLO | Skips ordinary tool approval prompts; `deny`, user `ask` questions, and plan approval prompts still wait. |
+| Auto | Auto-allows fallback approvals, including interactive `remember`/`forget`; explicit `ask` / `deny` rules still apply. |
+| YOLO | Skips ordinary tool approval prompts, including `remember`/`forget`; `deny`, user `ask` questions, and plan approval prompts still wait. |
 | Plan | Directs the model to plan first — a plan-first workflow, not an all-tools read-only mode. Built-in writers still follow the active Ask/Auto/YOLO rules and Sandbox; installed MCP writers, destructive targets, and readers from unauthorized servers are hard-blocked for the whole planning phase (approval cannot release them; they return once Plan exits), and explicit phase-only tools such as `complete_step` wait until approval. |
 | Goal | Pursues a saved objective until complete, blocked, or cleared. |
 
@@ -722,10 +720,17 @@ The sandbox remains a second boundary after authorization; confinement cannot
 make ambiguous command parsing safe to authorize automatically.
 
 Permissions are *policy* (which calls to allow / prompt). The **sandbox** is
-*enforcement*: the file-writers (`write_file` / `edit_file` / `multi_edit` / `move_file`)
+*enforcement*: they are two layers. A permitted call still cannot write outside
+the approved roots. The file-writers (`write_file` / `edit_file` / `multi_edit` / `move_file`)
 refuse any path outside `[sandbox] workspace_root` (default: the current dir, so
 edits stay in the project), resolving symlinks and `..` so a link can't tunnel
-out. `forbid_read` optionally hides sensitive files or directories from the agent's
+out. Writing outside the workspace is an interactive *extend write access*
+approval (once / this session / add to project `reasonix.toml` / deny), not a
+sandbox escape. Bash must name those directories with `additional_write_dirs`
+plus a `justification`; the host does not infer paths from the command text.
+Headless `reasonix run` does not prompt: pass `--add-dir` or configure
+`[sandbox].allow_write`. The whole home directory can be approved with a
+high-risk warning; the filesystem root and Reasonix session/state paths cannot. `forbid_read` optionally hides sensitive files or directories from the agent's
 read/list/search tools; use absolute paths or `${HOME}` / `${VAR}` references,
 not `~`, because config expansion is environment-variable based. `bash` is
 itself jailed by default when an OS sandbox is available (`[sandbox] bash`,
@@ -974,7 +979,7 @@ convenient.
 ## Slash commands
 
 In an interactive `reasonix` session, built-in commands (`/compact`, `/context`, `/new`, `/clear`, `/rewind`,
-`/tree`, `/branch`, `/switch`, `/todo`, `/model`, `/work-mode`, `/mcp`, `/skills`, `/hooks`,
+`/tree`, `/branch`, `/switch`, `/todo`, `/model`, `/mcp`, `/skills`, `/hooks`,
 `/memory`, `/goal`, `/output-style`, `/sandbox`, `/language`,
 `/reasoning-language`, `/help`) run
 locally — `/help` lists them all. Built-in **skills** such as `/init`,
@@ -1048,10 +1053,13 @@ schemas. Use `/memory recall` to see the selected IDs, scores, reasons,
 freshness, budget, and suppression decision.
 
 New, bounded, non-sensitive project/reference facts can be created
-automatically with no setup or approval click. Global facts, user preferences,
-feedback, updates, duplicates, sensitive/oversized content, and every `forget`
-still require explicit confirmation. The storage layer makes the automatic
-grant create-only, so it cannot overwrite a fact that appears concurrently.
+automatically with no setup or approval click. In Ask, global facts, user
+preferences, feedback, updates, duplicates, sensitive/oversized content, and
+every `forget` require explicit confirmation. Interactive Auto treats these
+memory tools as normal fallback operations while preserving explicit `ask` and
+`deny` rules; interactive YOLO bypasses memory ask prompts but still honors
+deny. The storage layer makes the automatic create grant create-only, so it
+cannot overwrite a fact that appears concurrently.
 A top-level headless controller may use the same one-shot low-risk create path;
 sub-agents and headless surfaces without the owning scoped controller fail closed.
 
@@ -1107,8 +1115,8 @@ recovery, providers, or maintainer workflows.
 
 No setup, network connection, vector database, or embedding service is needed.
 Search results prefer the query language while retaining explicit `en`,
-`zh-CN`, audience, and catalog filters. Balanced and Delivery profiles expose the
-tool directly; Economy connects the `docs` source on demand. Every result reports
+`zh-CN`, audience, and catalog filters. The docs capability is exposed through
+the unified `use_capability` surface for every task. Every result reports
 the product version, immutable source revision, and corpus SHA-256 digest. Release
 CI compiles the CLI and rejects publication unless that embedded manifest matches
 the candidate's `docs/*.md`, `release-notes/releases.json`, and build identity. A
@@ -1159,7 +1167,7 @@ new read/search results, mutations, verification, todo/signoff changes, and
 reviews advance the goal; an exact tool/argument/result repeat does not.
 Cumulative turns, tokens, real provider requests, and active work time are
 tracked and shown as statistics; a token limit appears only when explicitly
-configured. A paused goal keeps its todos, Delivery
+configured. A paused goal keeps its todos, evidence
 checkpoint, and runtime history — use `/goal resume` to continue, or `/goal
 pause` to pause a running goal manually. `/goal status` shows turns, requests,
 tokens, and work time. Repeated host failures, zero-evidence rounds, and Todo
@@ -1181,9 +1189,9 @@ Legacy simple/write/research classes are still inferred for sidecar and CLI
 compatibility, but they no longer select an execution quota. There is no
 separate research runtime to configure. Goal state stays in the normal session sidecar, progress
 comes only from novel host receipts, canonical todos, `complete_step`, review
-and the Delivery checkpoint, and completion is decided by Delivery readiness
-plus the bounded Goal evaluator. Light/Balanced honor an `update_goal`
-`completion.unverified` account for checks the model could not run; a second
+and the evidence checkpoint, and completion is decided by closed-loop readiness
+plus the bounded Goal evaluator. An `update_goal`
+`completion.unverified` account is honored for checks the model could not run; a second
 identical complete on the same leftover checks finishes the Goal instead of
 looping. Legacy `.reasonix/autoresearch/<task-id>/` archives are
 read-only: an explicit old path can be recovered as an ordinary Goal, but new
@@ -1221,7 +1229,7 @@ Reasonix routes each turn deterministically without another classifier model:
 questions, short follow-ups, clear atomic edits, and bounded read-only actions
 go straight to the executor; bounded implementation work may receive a short
 light plan. Ambiguous, cross-surface, structured, high-risk, active-Goal, or
-Delivery work receives a full plan unless the request is clearly atomic or
+closed-loop work receives a full plan unless the request is clearly atomic or
 read-only. Explicit Plan Mode
 remains a separate host workflow and is never planned twice. An explicit
 `plan first` / `先规划` request forces planning, while `just do it` / `直接改`
@@ -1317,7 +1325,7 @@ subagents with only read-only research tools plus safe foreground bash, return
 only the final answer, and do not create resumable subagent transcripts.
 Read-only nested delegation may be available until `max_subagent_depth` is
 reached, but writer-capable `task` / `run_skill` remain unavailable inside these
-read-only child registries. Execution settings share one tool surface: call
+read-only child registries. Every task shares one tool surface: call
 `use_capability` for `read_only_skill` and other optional tools. Subsequent
 writer calls still pass through Permissions/Sandbox.
 
@@ -1364,7 +1372,7 @@ shared Host and connections, per-agent frontend/ledger) and may call installed
 or project-configured MCP without `readOnlyHint`. Those calls use the trusted
 MCP permission path (live authorization plus explicit deny only); writer and
 destructive calls are still serialized, recorded as mutations, and subject to
-Delivery evidence/lease guards rather than Planner handoff. Strict
+closed-loop evidence/lease guards rather than Planner handoff. Strict
 `read_only_task` / `read_only_skill` / review sub-agents share the stable proxy
 schema and connection reuse but keep the strict execution gate
 (`authorized && readOnlyHint && !destructiveHint`). Profile `allowed-tools`
@@ -1386,47 +1394,38 @@ is narrower than the dedicated Planner: the Planner accepts authorized opaque
 non-destructive MCP, while a strict child requires an explicit reader hint and
 never exposes writers at all.
 
-Choose the startup execution setting with
-`--preset light|balanced|delivery` (for example, `reasonix run --preset
-delivery "fix and verify this bug"`). Legacy `--profile economy|balanced|delivery`
-still works (`economy` maps to `light`). All three execution settings share the same
-provider-visible core tool surface: direct read/bash/edit/write, background-shell
-lifecycle tools, `ask`/`compress` when registered, and the stable
-`use_capability` proxy for optional tools (search, MCP, skills, subagents, docs,
-web_fetch, and so on). Calling `use_capability` never expands the top-level
-provider schema, so the prompt-cache tool prefix stays stable across execution
-settings.
+Reasonix runs a single adaptive **standard execution**: planning depth,
+verification breadth, and independent review follow the task's risk
+automatically, per turn.
 
-What differs by execution setting is host policy (planning route, verification
-intensity, independent review floor), not the tool list:
+Every task shares the same provider-visible core tool surface: direct
+read/bash/edit/write, background-shell lifecycle tools, `ask`/`compress` when
+registered, and the stable `use_capability` proxy for optional tools (search,
+MCP, skills, subagents, docs, web_fetch, and so on). Calling `use_capability`
+never expands the top-level provider schema, so the prompt-cache tool prefix
+stays stable across every task.
 
-- **Light** — direct-first planning, targeted verification, independent review only
-  on high-risk/security class work; optional capabilities stay on-demand.
-- **Balanced** (default) — auto light/full planning by risk, risk-tiered
-  verification, conditional independent review on medium-risk multi-file work.
-- **Delivery** — full acceptance criteria, full verification, forced independent
-  review on medium+ risk, and security review on high-risk work. Mutations and
-  verification commands are blocked until a concrete acceptance list exists; a
-  changed result cannot finalize until it has been reviewed, verified after the
-  latest mutation, and signed off with `complete_step`.
+What adapts is host policy, not the tool list:
+
+- Conversation and advisory turns run direct with no auxiliary model calls.
+- Plain read-only queries cite their actual reads (targeted evidence).
+- Single-file, anchored, low-risk modifications run direct with a
+  zero-extra-model-call Atomic TaskContract and targeted checks.
+- Multi-file same-surface work gets a light plan, project-level checks, and a
+  conditional independent review that escalates to forced when coverage is weak.
+- Cross-module, public-interface, persistence, security/permission/migration/
+  release, and active-Goal work get a full plan, full checks, forced independent
+  review (plus security review for safety classes), and the full evidence
+  closed loop: acceptance criteria before state changes, verification after the
+  latest mutation, review, and sign-off with `complete_step`. Missing evidence
+  ends the turn Partial, Unverified, or Blocked — never Complete.
+- Risk only ratchets upward within a turn: when receipts show the change set
+  touched high-risk surfaces or outgrew the initial judgment, the policy
+  escalates and the missing verification/review is still demanded.
 
 Meta tools such as `task`, `run_skill`, and `review` are not counted as mutations
 by themselves — only real child writes are. Read-only analysis remains available
 without forcing a write.
-
-Inside an interactive TUI session, use `/preset` to inspect the current choice or
-`/preset light|balanced|delivery` to switch it. `/work-mode` and `/profile` are
-compatibility aliases. The switch updates the execution setting in place without
-rebuilding the controller, preserves history, the session path, leases, and the
-Ask/Auto/YOLO posture, and is rejected while a turn, approval/question, background
-job, or another runtime switch is active. This command changes only the current
-session and does not persist a new global default. Because the provider-visible
-tool surface is unified, switching execution settings does not create a new tool-schema
-cache prefix.
-
-Desktop tabs expose the same three choices (shown as Light / Balanced / Delivery)
-and dual-write `agentPreset` with legacy `tokenMode` (`economy`/`full`/`delivery`)
-for one compatibility version.
 
 For interactive frontends, Plan Mode is always an explicit user choice. Select
 Plan in the desktop collaboration-mode control or cycle to Plan with

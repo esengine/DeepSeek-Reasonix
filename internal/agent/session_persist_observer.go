@@ -53,13 +53,18 @@ func (s *Session) notifyPersisted(path string, rewrite bool, appendFrom int) {
 }
 
 // SaveIfAbsent persists a newly imported or copied session without replacing a
-// destination another runtime created after the caller's scan.
+// destination another runtime created after the caller's scan. It runs under
+// an ephemeral session lease: the destination is lease-protected for the
+// duration of the save, so an import or fork never races another runtime's
+// writer even before the artifact-existence check.
 func (s *Session) SaveIfAbsent(path string) error {
-	err := s.withSessionSaveLocks(path, func() error {
-		if sessionArtifactExists(path) {
-			return os.ErrExist
-		}
-		return s.saveLocked(path, sessionSaveSnapshot)
+	err := s.SaveWithEphemeralWriter(path, func(target string) error {
+		return s.withSessionSaveLocks(target, func() error {
+			if sessionArtifactExists(target) {
+				return os.ErrExist
+			}
+			return s.saveLocked(target, sessionSaveSnapshot)
+		})
 	})
 	if err == nil {
 		s.notifyPersisted(path, false, -1)

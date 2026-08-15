@@ -19,6 +19,36 @@ import (
 
 const sessionCatalogMetadataSyncTimeout = 30 * time.Second
 
+const desktopSessionCatalogPersistObserverKey = "desktop-session-catalog"
+
+type desktopSessionCatalogPersistObserver struct{ app *App }
+
+func (observer desktopSessionCatalogPersistObserver) EnqueueSessionPersist(event agent.SessionPersistEvent) bool {
+	a := observer.app
+	if a == nil || a.shuttingDown.Load() || strings.TrimSpace(event.Path) == "" {
+		return false
+	}
+	catalog := a.sessionCatalog.Load()
+	if catalog == nil {
+		return false
+	}
+	path := filepath.Clean(event.Path)
+	if event.Removed {
+		go func() {
+			ctx, cancel := context.WithTimeout(a.bootContext(), 5*time.Second)
+			defer cancel()
+			_ = catalog.RemoveSession(ctx, path, "authoritative_persist_removed")
+		}()
+		return true
+	}
+	// IndexSessionPath loads authoritative branch metadata, correcting this
+	// global fallback to the real project scope. Exact-path requests also make
+	// bot/controller saves visible without waiting for the directory sweep.
+	return catalog.RequestIndexSession(sessioncatalog.DirectoryTarget{
+		Path: filepath.Dir(path), Scope: "global",
+	}, path)
+}
+
 type SessionCatalogStatus struct {
 	State           string `json:"state"`
 	Mode            string `json:"mode"`
@@ -56,15 +86,36 @@ type ProjectTopicKey struct {
 }
 
 type ProjectTopicPage struct {
-	Items      []ProjectNode `json:"items"`
-	NextCursor string        `json:"nextCursor,omitempty"`
-	Revision   uint64        `json:"revision"`
+	Items              []ProjectNode `json:"items"`
+	NextCursor         string        `json:"nextCursor,omitempty"`
+	Revision           uint64        `json:"revision"`
+	Complete           bool          `json:"complete"`
+	ReadyDirectories   int           `json:"readyDirectories"`
+	PendingDirectories int           `json:"pendingDirectories"`
+	FailedDirectories  int           `json:"failedDirectories"`
 }
 
 type ProjectTreeChangedV2 struct {
 	Revision uint64   `json:"revision"`
 	Roots    []string `json:"roots"`
 	Reason   string   `json:"reason"`
+}
+
+// ProjectRuntimeTopic is one process-local runtime projected onto its stable
+// logical topic identity. The catalog remains the authority for persisted
+// history; this projection is the authority for what this process is running.
+type ProjectRuntimeTopic struct {
+	Scope         string      `json:"scope"`
+	WorkspaceRoot string      `json:"workspaceRoot,omitempty"`
+	Node          ProjectNode `json:"node"`
+}
+
+// ProjectTreeRuntimeSnapshot is a replace-all, idempotent runtime projection.
+// Its revision is independent from the session catalog revision so clients can
+// order ownership/status changes without reloading any catalog page.
+type ProjectTreeRuntimeSnapshot struct {
+	Revision uint64                `json:"revision"`
+	Topics   []ProjectRuntimeTopic `json:"topics"`
 }
 
 func flushDesktopDerivedCatalogs(ctx context.Context) error {
@@ -125,6 +176,7 @@ func (a *App) startSessionCatalog(rebuild bool) {
 	a.catalogDone = done
 	a.catalogRebuilding.Store(rebuild)
 	a.catalogLifecycleMu.Unlock()
+	history.RegisterSessionPersistObserver(desktopSessionCatalogPersistObserverKey, desktopSessionCatalogPersistObserver{app: a})
 
 	go func() {
 		defer close(done)
@@ -181,7 +233,7 @@ func (a *App) startSessionCatalog(rebuild bool) {
 				slog.Debug("desktop: reconcile session catalog directory", "dir", target.Path, "err", err)
 			}
 		}
-		a.retargetOpenTabsToCoveringLeaves()
+		a.retargetOpenTabsToContinuations()
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -482,6 +534,10 @@ func (a *App) requestSessionCatalogMetadataSync() {
 
 func (a *App) GetProjectTreeSnapshot() ProjectTreeSnapshot {
 	f := loadProjectsFile()
+	deleted := make(map[string]bool, len(f.DeletedTopics))
+	for _, topicID := range f.DeletedTopics {
+		deleted[topicID] = true
+	}
 	projects := []ProjectNode{}
 	if strings.TrimSpace(f.GlobalTitle) != "" || len(f.GlobalTopics) > 0 || len(f.Projects) == 0 {
 		label := strings.TrimSpace(f.GlobalTitle)
@@ -491,7 +547,7 @@ func (a *App) GetProjectTreeSnapshot() ProjectTreeSnapshot {
 		projects = append(projects, ProjectNode{
 			Key: "global_folder", Kind: "global_folder", Label: label,
 			Root: globalWorkspaceRoot(), ProjectColor: normalizeProjectColor(f.GlobalColor),
-			Children: []ProjectNode{},
+			Children: a.pinnedTopicShells("global", "", f.GlobalTopics, f.GlobalPinnedTopics, f.GlobalColor, deleted),
 		})
 	}
 	for _, project := range f.Projects {
@@ -503,7 +559,7 @@ func (a *App) GetProjectTreeSnapshot() ProjectTreeSnapshot {
 			Key: "project_" + project.Root, Kind: "project", Label: label,
 			Root: project.Root, ProjectColor: project.Color,
 			Pinned:   containsDesktopString(f.PinnedProjects, project.Root),
-			Children: []ProjectNode{},
+			Children: a.pinnedTopicShells("project", project.Root, project.Topics, project.PinnedTopics, project.Color, deleted),
 		})
 	}
 	projects = applyPinnedProjectOrder(applyProjectTreeOrder(projects, f.SidebarOrder), f.PinnedProjects)
@@ -513,6 +569,45 @@ func (a *App) GetProjectTreeSnapshot() ProjectTreeSnapshot {
 		Indexed: status.Indexed, Total: status.Total,
 		IndexingDone: a.catalogIndexingDone(status),
 	}
+}
+
+// pinnedTopicShells keeps pinned conversations available in the metadata-only
+// project snapshot. Ordinary topic pages remain lazy, but a collapsed folder
+// must not hide its pinned conversations until the user expands it.
+func (a *App) pinnedTopicShells(scope, workspaceRoot string, topicIDs, pinnedIDs []string, projectColor string, deleted map[string]bool) []ProjectNode {
+	if len(pinnedIDs) == 0 {
+		return []ProjectNode{}
+	}
+	titles := loadTopicTitles(workspaceRoot)
+	sources := loadTopicTitleSources(workspaceRoot)
+	created := loadTopicCreatedAts(workspaceRoot)
+	available := make(map[string]bool, len(topicIDs)+len(titles))
+	for _, topicID := range orderedTopicIDs(topicIDs, titles) {
+		available[topicID] = true
+	}
+	kind := "topic"
+	if scope != "project" {
+		kind = "global_topic"
+	}
+	out := make([]ProjectNode, 0, len(pinnedIDs))
+	for _, topicID := range uniqueStrings(pinnedIDs) {
+		if !available[topicID] || deleted[topicID] {
+			continue
+		}
+		title := strings.TrimSpace(titles[topicID])
+		if title == "" {
+			title = defaultTopicTitle
+		}
+		out = append(out, ProjectNode{
+			Key: kind + "_" + topicID, Kind: kind,
+			Label: a.localizedTopicTitle(title, sources[topicID]), Root: workspaceRoot,
+			TopicID: topicID, ProjectColor: normalizeProjectColor(projectColor),
+			CreatedAt: topicCreatedAtForTree(created, topicID), Pinned: true,
+			TurnsState: string(sessioncatalog.TurnsUnknown), Health: string(sessioncatalog.HealthOK),
+			Children: []ProjectNode{},
+		})
+	}
+	return out
 }
 
 func (a *App) catalogIndexingDone(status SessionCatalogStatus) bool {

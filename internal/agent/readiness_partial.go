@@ -1,14 +1,13 @@
 package agent
 
 import (
-	"reasonix/internal/agentpreset"
 	"reasonix/internal/completion"
 )
 
 // applyPartialCheckWaiver stands down project-check and post-write verification
-// blockers when the role setting allows a Partial ending and the model either
-// declared those checks unverified or the user forbade tests. Todos, mutations,
-// review, sign-off, and capability gates still block.
+// blockers when the turn's evidence level allows a Partial ending and the model
+// either declared those checks unverified or the user forbade tests. Todos,
+// mutations, review, sign-off, and capability gates still block.
 func (a *Agent) applyPartialCheckWaiver(out finalReadinessCheck) finalReadinessCheck {
 	if out.reason == "" || a == nil || !a.allowsPartialWithoutChecks() || !a.mayWaiveUnavailableChecks() {
 		return out
@@ -27,15 +26,16 @@ func (a *Agent) applyPartialCheckWaiver(out finalReadinessCheck) finalReadinessC
 	return out
 }
 
+// allowsPartialWithoutChecks reports whether the frozen TaskPolicy permits a
+// Partial/Unverified ending without checks. Closed-loop turns never waive
+// checks silently; only a user's explicit no-tests constraint may end Partial,
+// and the summary must still mark the unverified parts.
 func (a *Agent) allowsPartialWithoutChecks() bool {
-	if a.turn.policySet && a.turn.policy.Constraints.ForbidTests {
-		return true
-	}
-	preset := agentpreset.Normalize(a.AgentPreset())
 	if a.turn.policySet {
-		preset = a.turn.policy.Preset
+		return a.turn.policy.AllowsPartialWithoutChecks()
 	}
-	return agentpreset.PolicyOf(preset).VerificationPolicy.AllowPartialWithoutChecks
+	// Direct construction without a frozen policy keeps the historical default.
+	return true
 }
 
 func (a *Agent) mayWaiveUnavailableChecks() bool {

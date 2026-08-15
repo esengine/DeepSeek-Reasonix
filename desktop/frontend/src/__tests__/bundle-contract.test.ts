@@ -49,6 +49,14 @@ ok(
   "App loads secondary drawers on demand",
 );
 ok(
+  !/import\s+\{\s*ProjectTree\s*\}\s+from\s+["']\.\/components\/ProjectTree["']/.test(appSource),
+  "App keeps the project tree out of the first-paint bundle",
+);
+ok(
+  appSource.includes('import("./components/ProjectTree")'),
+  "App loads the project tree when the sidebar mounts",
+);
+ok(
   settingsEntrySource.includes('import "./CompactRatioSettings.css"') &&
     settingsEntrySource.includes('from "./SettingsPanel"') &&
     !settingsSource.includes('import "./CompactRatioSettings.css"'),

@@ -27,7 +27,7 @@ func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func TestRemoteMarkdownImageUsesReasonixProxySpec(t *testing.T) {
-	png := []byte("\x89PNG\r\n\x1a\nproxy-image")
+	png := append([]byte(nil), markdownImageTestPNG...)
 	wantSpec := netclient.ProxySpec{Mode: netclient.ModeCustom, URL: "socks5://127.0.0.1:10808"}
 	var gotSpec netclient.ProxySpec
 	var gotRequest *http.Request
@@ -72,7 +72,7 @@ func TestRemoteMarkdownImageUsesReasonixProxySpec(t *testing.T) {
 }
 
 func TestRemoteMarkdownImageTraversesConfiguredHTTPProxy(t *testing.T) {
-	png := []byte("\x89PNG\r\n\x1a\nproxied")
+	png := append([]byte(nil), markdownImageTestPNG...)
 	var proxyCalled atomic.Bool
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		proxyCalled.Store(true)
@@ -151,7 +151,7 @@ func TestRemoteMarkdownImageHTTPSConnectPinsVettedIP(t *testing.T) {
 }
 
 func TestRemoteMarkdownImageTraversesConfiguredSOCKSProxyWithVettedIP(t *testing.T) {
-	png := []byte("\x89PNG\r\n\x1a\nsocks-proxied")
+	png := append([]byte(nil), markdownImageTestPNG...)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -386,6 +386,7 @@ func TestRemoteMarkdownImageRejectsNonImagesAndOversizedBodies(t *testing.T) {
 	}{
 		{name: "html", body: []byte("<!doctype html><script>alert(1)</script>"), want: http.StatusUnsupportedMediaType},
 		{name: "oversized", body: bytes.Repeat([]byte{'x'}, remoteMarkdownImageMaxBytes+1), want: http.StatusBadGateway},
+		{name: "pixel budget", body: markdownImageTestPNGConfig(10_000, 4_001), want: http.StatusRequestEntityTooLarge},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			factory := func(netclient.ProxySpec) (*http.Client, error) {

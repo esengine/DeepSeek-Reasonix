@@ -271,9 +271,6 @@ func runeOffsetToByte(val string, runeOff int) int {
 // currently /mcp; custom commands and MCP prompts take free-form template args,
 // so they yield nothing.
 func (m *chatTUI) slashArgItems(val string) ([]compItem, int, bool) {
-	if items, from, ok := m.workModeArgItems(val); ok {
-		return items, from, len(items) > 0
-	}
 	if items, from, ok := m.branchArgItems(val); ok {
 		return items, from, len(items) > 0
 	}

@@ -59,7 +59,7 @@ func (m *chatTUI) runWebSlash() tea.Cmd {
 	return shutdownNow
 }
 
-func webHandoffArgs(sessionPath, sessionID, modelRef, profile string) []string {
+func webHandoffArgs(sessionPath, sessionID, modelRef string) []string {
 	args := []string{}
 	if sessionPath != "" {
 		args = append(args, "--resume", sessionPath)
@@ -68,9 +68,6 @@ func webHandoffArgs(sessionPath, sessionID, modelRef, profile string) []string {
 	}
 	if modelRef != "" {
 		args = append(args, "--model", modelRef)
-	}
-	if profile != "" {
-		args = append(args, "--profile", profile)
 	}
 	return args
 }

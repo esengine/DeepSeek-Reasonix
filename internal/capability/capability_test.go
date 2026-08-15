@@ -90,13 +90,13 @@ func TestRouteKeepsAllStrongCandidatesBeforeSuggestBudget(t *testing.T) {
 	}
 }
 
-func TestRouteDeliveryPromotesMatchedBuiltinSkills(t *testing.T) {
+func TestRouteClosedLoopPromotesMatchedBuiltinSkills(t *testing.T) {
 	entries := []Entry{
 		{ID: "skill:explore", Kind: KindSkill, Name: "explore", Source: string(skill.ScopeBuiltin), AutoUse: AutoUseSuggest, Triggers: []string{"调用链"}},
 		{ID: "skill:custom", Kind: KindSkill, Name: "custom", Source: string(skill.ScopeProject), AutoUse: AutoUseSuggest, Triggers: []string{"调用链"}},
 	}
-	decision := RouteDelivery("分析调用链", entries)
-	if !decision.Delivery || len(decision.Candidates) != 2 {
+	decision := RouteClosedLoop("分析调用链", entries)
+	if !decision.ClosedLoop || len(decision.Candidates) != 2 {
 		t.Fatalf("delivery decision = %+v", decision)
 	}
 	if decision.Candidates[0].Entry.ID != "skill:explore" || decision.Candidates[0].Policy != AutoUsePrefer {

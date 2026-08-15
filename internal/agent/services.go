@@ -1,6 +1,9 @@
 package agent
 
 import (
+	"strings"
+	"sync"
+
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/diff"
 	"reasonix/internal/event"
@@ -30,8 +33,10 @@ type agentServices struct {
 	// names preserve the on-disk v2 contract. nil keeps in-memory gating only.
 	warnState *missingReasoningWarnState
 	// gate is the per-call permission gate for both standard and Plan
-	// workflows. nil disables gating entirely.
-	gate Gate
+	// workflows. Runtime approval-mode switches replace it while a turn may be
+	// executing, so every read/write goes through gateSnapshot/setGate.
+	gateMu sync.RWMutex
+	gate   Gate
 	// extensions is the frozen Extension Protocol v2 dispatcher for this
 	// controller generation; nil means every intercept point passes through
 	// byte-identically. See extensions.go.
@@ -48,6 +53,17 @@ type agentServices struct {
 	// configWrite can ask the user whether a file tool may write a
 	// Reasonix-managed config file outside the workspace roots.
 	configWrite tool.ConfigWriteApprover
+	// writeRoots is the session-scoped writable directory manager.
+	writeRoots *sandbox.WritableRootSet
+	// writeAccess authorizes extra writable directories. nil skips expansion
+	// except for a fail-closed missing-dir check when writeRoots is set.
+	writeAccess WriteAccessGate
+	// writeAccessExpandable is false for sub-agents: they inherit roots but
+	// cannot request new directories.
+	writeAccessExpandable bool
+	workspaceRoot         string
+	homeDir               string
+	stateRoot             string
 	// hooks fires PreToolUse / PostToolUse shell hooks around each tool call.
 	hooks ToolHooks
 	// asker lets the `ask` tool put questions to the user; nil in headless runs.
@@ -77,6 +93,18 @@ type agentServices struct {
 	memQueue memory.Queue
 }
 
+func (s *agentServices) gateSnapshot() Gate {
+	s.gateMu.RLock()
+	defer s.gateMu.RUnlock()
+	return s.gate
+}
+
+func (s *agentServices) setGate(g Gate) {
+	s.gateMu.Lock()
+	s.gate = g
+	s.gateMu.Unlock()
+}
+
 // newAgentServices binds the collaborators New resolved. It exists so New stays
 // under the function-size limit and so adding a collaborator touches one place.
 func newAgentServices(
@@ -85,22 +113,28 @@ func newAgentServices(
 	configWrite tool.ConfigWriteApprover, hooks ToolHooks, opts Options,
 ) agentServices {
 	return agentServices{
-		prov:             prov,
-		tools:            tools,
-		pricing:          opts.Pricing,
-		sink:             sink,
-		gate:             gate,
-		extensions:       opts.Extensions,
-		recoveryGate:     opts.RecoveryGate,
-		planTrust:        planTrust,
-		sandboxEscape:    sandboxEscape,
-		configWrite:      configWrite,
-		hooks:            hooks,
-		jobs:             opts.Jobs,
-		memQueue:         opts.MemoryQueue,
-		writeScheduler:   opts.WriteScheduler,
-		workspaceLease:   opts.WorkspaceLease,
-		warnState:        missingReasoningWarnStateFor(opts.MissingReasoningWarnStateDir),
-		mutationObserver: opts.MutationObserver,
+		prov:                  prov,
+		tools:                 tools,
+		pricing:               opts.Pricing,
+		sink:                  sink,
+		gate:                  gate,
+		extensions:            opts.Extensions,
+		recoveryGate:          opts.RecoveryGate,
+		planTrust:             planTrust,
+		sandboxEscape:         sandboxEscape,
+		configWrite:           configWrite,
+		hooks:                 hooks,
+		jobs:                  opts.Jobs,
+		memQueue:              opts.MemoryQueue,
+		writeScheduler:        opts.WriteScheduler,
+		workspaceLease:        opts.WorkspaceLease,
+		warnState:             missingReasoningWarnStateFor(opts.MissingReasoningWarnStateDir),
+		mutationObserver:      opts.MutationObserver,
+		writeRoots:            opts.WriteRoots,
+		writeAccess:           opts.WriteAccessGate,
+		writeAccessExpandable: opts.SubagentDepth == 0 && !opts.DisableWriteAccessExpand,
+		workspaceRoot:         strings.TrimSpace(opts.WriteWorkspaceRoot),
+		homeDir:               strings.TrimSpace(opts.HomeDir),
+		stateRoot:             strings.TrimSpace(opts.StateRoot),
 	}
 }

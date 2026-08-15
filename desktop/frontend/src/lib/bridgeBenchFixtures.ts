@@ -113,7 +113,16 @@ const benchMarkdownHeavyHistory = (): HistoryMessage[] => {
 const benchSmallHistory = (): HistoryMessage[] => {
   // 6 visible turns × 78 messages = 468 provider messages (nominal 473).
   const messages: HistoryMessage[] = [];
-  for (let turn = 1; turn <= 6; turn += 1) messages.push(...benchToolTurn(turn, 38, `Batch ${turn} summary.`));
+  for (let turn = 1; turn <= 6; turn += 1) {
+    const answer = turn === 6
+      ? [
+          "# Asynchronously hydrated verification appendix",
+          ...Array.from({ length: 1_200 }, (_, row) => `- package-${row % 42}: verified row ${row} with stable virtual measurements`),
+          "ASYNC LAYOUT EXPANSION COMPLETE",
+        ].join("\n")
+      : `Batch ${turn} summary.`;
+    messages.push(...benchToolTurn(turn, 38, answer));
+  }
   return messages;
 };
 const benchGiantTurnHistory = (): HistoryMessage[] => {

@@ -56,7 +56,7 @@ func mechanismFacts(r result) map[string]mechanismRow {
 
 // renderToolSurface is the schema-tax line: what every request re-pays for
 // the visible tool surface, and the churn (connects, prefix resets) the
-// economy tier trades that tax against. Fresh-session benchmarks re-pay the
+// adaptive runtime trades that tax against. Fresh-session benchmarks re-pay the
 // miss on every task, so the surface size prices differently than in a
 // long-lived session.
 func renderToolSurface(results []result) string {

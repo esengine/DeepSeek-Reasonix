@@ -133,7 +133,7 @@ ok(
     settingsSource.includes('settings.displayMode') &&
     settingsSource.includes('["standard", "compact"]') &&
     settingsSource.includes('settings.reasoningDisplay') &&
-    settingsSource.includes('["hidden", "summary", "auto"]') &&
+    settingsSource.includes('["hidden", "summary", "auto", "expanded"]') &&
     settingsSource.includes('settings.processFold') &&
     settingsSource.includes('["auto", "expanded"]') &&
     settingsSource.includes('setProcessFoldPreference(pref)') &&
@@ -149,6 +149,7 @@ ok(
     source.includes('"settings.reasoningDisplay.hidden"') &&
     source.includes('"settings.reasoningDisplay.summary"') &&
     source.includes('"settings.reasoningDisplay.auto"') &&
+    source.includes('"settings.reasoningDisplay.expanded"') &&
     source.includes('"settings.processFold"'),
   ),
   "conversation-content display group labels are localized in every supported locale",

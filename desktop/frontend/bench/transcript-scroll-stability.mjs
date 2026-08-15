@@ -12,6 +12,10 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = !process.env.PLAYWRIGHT_BROWSERS_PATH || 
 const { chromium } = await import("playwright");
 const port = Number(process.env.REASONIX_TRANSCRIPT_SCROLL_PORT ?? 4619);
 const url = `http://127.0.0.1:${port}/?mock=bench&bench=1`;
+const maxFrameGapMs = Number(process.env.REASONIX_TRANSCRIPT_MAX_FRAME_GAP_MS ?? 250);
+const p95FrameGapMs = Number(process.env.REASONIX_TRANSCRIPT_P95_FRAME_GAP_MS ?? 80);
+const maxLongTaskMs = Number(process.env.REASONIX_TRANSCRIPT_MAX_LONG_TASK_MS ?? 250);
+const totalLongTaskMs = Number(process.env.REASONIX_TRANSCRIPT_TOTAL_LONG_TASK_MS ?? 750);
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -49,8 +53,99 @@ try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => !document.querySelector(".startup-splash"), undefined, { timeout: 30_000 });
-  await page.click('.project-tree__topic-main:has-text("bench:tools-38t")');
+  await page.click('.project-tree__topic-main:has-text("bench:small-6t")');
   await page.waitForFunction(() => document.querySelectorAll(".transcript__row").length > 4, undefined, { timeout: 30_000 });
+  await page.waitForFunction(() => document.querySelector(".transcript")?.textContent?.includes("Asynchronously hydrated verification appendix"), undefined, { timeout: 30_000 });
+  await page.evaluate(() => new Promise((resolve) => {
+    let frames = 8;
+    const settle = () => frames-- <= 0 ? resolve() : requestAnimationFrame(settle);
+    requestAnimationFrame(settle);
+  }));
+  const hydrationTranscript = page.locator(".transcript");
+  const hydrationBox = await hydrationTranscript.boundingBox();
+  assert(hydrationBox != null, "async hydration exposes the transcript viewport");
+  const hydrationStart = await hydrationTranscript.evaluate((element) => ({
+    top: element.scrollTop,
+    max: element.scrollHeight - element.clientHeight,
+  }));
+  assert(hydrationStart.max > 0, `async hydration fixture is scrollable (${hydrationStart.max}px)`);
+  await page.mouse.move(hydrationBox.x + hydrationBox.width / 2, hydrationBox.y + hydrationBox.height / 2);
+  await page.mouse.wheel(0, hydrationStart.top < hydrationStart.max / 2 ? 360 : -360);
+  await page.waitForFunction(
+    (startTop) => {
+      const element = document.querySelector(".transcript");
+      return element instanceof HTMLElement
+        && element.dataset.scrollMode === "manual"
+        && Math.abs(element.scrollTop - startTop) > 1;
+    },
+    hydrationStart.top,
+    { timeout: 5_000 },
+  );
+  await page.evaluate(() => {
+    const element = document.querySelector(".transcript");
+    if (!(element instanceof HTMLElement)) return;
+    element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight * 2.5);
+    element.dispatchEvent(new Event("scroll"));
+  });
+  await page.waitForFunction(
+    () => document.querySelector(".transcript")?.dataset.scrollMode === "manual",
+    undefined,
+    { timeout: 5_000 },
+  );
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const hydrationAnchor = await page.evaluate(() => {
+    const element = document.querySelector(".transcript");
+    if (!(element instanceof HTMLElement)) return null;
+    const viewport = element.getBoundingClientRect();
+    const visible = [...element.querySelectorAll(".transcript__row")]
+      .filter((row) => row.getBoundingClientRect().bottom > viewport.top && row.getBoundingClientRect().top < viewport.bottom)
+      .sort((left, right) => left.getBoundingClientRect().top - right.getBoundingClientRect().top);
+    const anchor = visible.find((row) => row.getBoundingClientRect().top >= viewport.top) ?? visible[0];
+    return anchor ? { key: anchor.dataset.rowKey, offset: anchor.getBoundingClientRect().top - viewport.top } : null;
+  });
+  assert(hydrationAnchor?.key, "async hydration starts from a stable manual-reading anchor");
+  await page.waitForFunction(() => document.querySelector(".transcript")?.textContent?.includes("ASYNC LAYOUT EXPANSION COMPLETE"), undefined, { timeout: 30_000 });
+  await page.waitForFunction((anchor) => {
+    const element = document.querySelector(".transcript");
+    if (!(element instanceof HTMLElement)) return false;
+    const row = [...element.querySelectorAll(".transcript__row")].find((candidate) => candidate.dataset.rowKey === anchor.key);
+    return Boolean(row && Math.abs((row.getBoundingClientRect().top - element.getBoundingClientRect().top) - anchor.offset) <= 8);
+  }, hydrationAnchor, { timeout: 5_000 });
+  const hydratedState = await page.evaluate((anchor) => {
+    const element = document.querySelector(".transcript");
+    if (!(element instanceof HTMLElement)) return { occupied: false, anchorOffset: null };
+    const viewport = element.getBoundingClientRect();
+    const rows = [...element.querySelectorAll(".transcript__row")];
+    const anchored = rows.find((row) => row.dataset.rowKey === anchor.key);
+    return { occupied: rows.some((row) => {
+      const rect = row.getBoundingClientRect();
+      return rect.bottom > viewport.top && rect.top < viewport.bottom;
+    }), anchorOffset: anchored ? anchored.getBoundingClientRect().top - viewport.top : null };
+  }, hydrationAnchor);
+  assert(hydratedState.occupied, "async full-content hydration keeps a transcript row in the viewport");
+  assert(
+    hydratedState.anchorOffset != null && Math.abs(hydratedState.anchorOffset - hydrationAnchor.offset) <= 8,
+    `async hydration preserves the manual-reading anchor (${hydrationAnchor.offset} → ${hydratedState.anchorOffset})`,
+  );
+  await page.evaluate(() => new Promise((resolve) => {
+    let frames = 12;
+    const settle = () => frames-- <= 0 ? resolve() : requestAnimationFrame(settle);
+    requestAnimationFrame(settle);
+  }));
+  await page.evaluate(() => {
+    const element = document.querySelector(".transcript");
+    if (!(element instanceof HTMLElement)) return;
+    element.scrollTop = element.scrollHeight;
+    element.dispatchEvent(new Event("scroll"));
+  });
+  await page.waitForFunction(() => {
+    const element = document.querySelector(".transcript");
+    return element instanceof HTMLElement
+      && element.dataset.scrollMode === "tail-follow"
+      && element.scrollHeight - element.scrollTop - element.clientHeight <= 1;
+  });
+  await page.click('.project-tree__topic-main:has-text("bench:tools-38t")');
+  await page.waitForFunction(() => document.querySelector(".project-tree__topic--active .project-tree__topic-label")?.textContent?.includes("bench:tools-38t"));
   await page.waitForFunction(() => document.querySelector(".transcript")?.textContent?.includes("pkg-41/mod.go"), undefined, { timeout: 30_000 });
   const markdownVisibility = await page.evaluate(() => {
     const row = document.querySelector(".transcript__row");
@@ -223,11 +318,59 @@ try {
   assert(afterGrowth.samples.every((sample) => sample.occupied), "dynamic measurement never exposes a blank transcript viewport");
 
   // Rapid direction changes are the exact user report. Sample every frame and
-  // require that Virtuoso always maintains mounted coverage.
-  for (const delta of [-700, -700, 480, -600, 520, -460]) {
+  // require that Virtuoso always maintains mounted coverage. Keep a real
+  // Chromium long-task budget around 60 events so accidental synchronous
+  // storage/layout work cannot return unnoticed.
+  await page.evaluate(() => {
+    const probe = {
+      active: true,
+      frameGaps: [],
+      lastFrame: null,
+      longTasks: [],
+      observer: null,
+    };
+    if (PerformanceObserver.supportedEntryTypes?.includes("longtask")) {
+      probe.observer = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) probe.longTasks.push(entry.duration);
+      });
+      probe.observer.observe({ type: "longtask", buffered: false });
+    }
+    const sampleFrame = (now) => {
+      if (!probe.active) return;
+      if (probe.lastFrame != null) probe.frameGaps.push(now - probe.lastFrame);
+      probe.lastFrame = now;
+      requestAnimationFrame(sampleFrame);
+    };
+    window.__reasonixScrollPerfProbe = probe;
+    requestAnimationFrame(sampleFrame);
+  });
+  const rapidDeltas = Array.from({ length: 10 }, () => [-700, -700, 480, -600, 520, -460]).flat();
+  for (const delta of rapidDeltas) {
     await page.mouse.wheel(0, delta);
-    await page.waitForTimeout(24);
+    await page.waitForTimeout(16);
   }
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const perf = await page.evaluate(() => {
+    const probe = window.__reasonixScrollPerfProbe;
+    if (!probe) return null;
+    probe.active = false;
+    probe.observer?.disconnect();
+    const gaps = [...probe.frameGaps].sort((left, right) => left - right);
+    const percentileIndex = Math.max(0, Math.ceil(gaps.length * 0.95) - 1);
+    return {
+      frames: gaps.length,
+      maxFrameGap: gaps.at(-1) ?? 0,
+      p95FrameGap: gaps[percentileIndex] ?? 0,
+      maxLongTask: Math.max(0, ...probe.longTasks),
+      totalLongTask: probe.longTasks.reduce((sum, duration) => sum + duration, 0),
+      longTasks: probe.longTasks.length,
+    };
+  });
+  assert(perf && perf.frames >= 30, `rapid-scroll performance probe samples enough frames (${perf?.frames ?? 0})`);
+  assert(perf.maxFrameGap <= maxFrameGapMs, `rapid-scroll maximum frame gap stays within budget (${perf.maxFrameGap.toFixed(1)}ms <= ${maxFrameGapMs}ms)`);
+  assert(perf.p95FrameGap <= p95FrameGapMs, `rapid-scroll p95 frame gap stays within budget (${perf.p95FrameGap.toFixed(1)}ms <= ${p95FrameGapMs}ms)`);
+  assert(perf.maxLongTask <= maxLongTaskMs, `rapid-scroll longest main-thread task stays within budget (${perf.maxLongTask.toFixed(1)}ms <= ${maxLongTaskMs}ms)`);
+  assert(perf.totalLongTask <= totalLongTaskMs, `rapid-scroll total long-task time stays within budget (${perf.totalLongTask.toFixed(1)}ms <= ${totalLongTaskMs}ms; ${perf.longTasks} tasks)`);
   const rapid = await transcript.evaluate((element) => {
     const rect = element.getBoundingClientRect();
     const visible = [...element.querySelectorAll(".transcript__row")].filter((row) => {
@@ -264,46 +407,53 @@ try {
       scrollHeight: element.scrollHeight,
     };
   });
-  assert(nativeThumbProbe && nativeThumbProbe.gutter > 1, `workbench exposes a native scrollbar gutter (${nativeThumbProbe?.gutter ?? 0}px)`);
-  assert(nativeThumbProbe.knownSize > 0, `native scrollbar probe starts from a measured row (${nativeThumbProbe.knownSize}px)`);
-  await page.mouse.move(nativeThumbProbe.x, nativeThumbProbe.y);
-  await page.mouse.down();
-  await page.waitForFunction(() => document.querySelector(".transcript")?.dataset.nativeScrollbarDrag === "true");
-  await page.waitForFunction(
-    (knownSize) => document.querySelector('[data-native-scrollbar-probe="true"]')?.style.height === `${knownSize}px`,
-    nativeThumbProbe.knownSize,
-  );
-  await transcript.evaluate((element) => {
-    const row = element.querySelector('[data-native-scrollbar-probe="true"]');
-    const content = row?.firstElementChild;
-    if (content instanceof HTMLElement) content.style.paddingBottom = `${Number.parseFloat(content.style.paddingBottom || "0") + 900}px`;
-  });
-  await page.waitForTimeout(100);
-  const duringNativeThumbDrag = await transcript.evaluate((element) => {
-    const row = element.querySelector('[data-native-scrollbar-probe="true"]');
-    return {
-      knownSize: row instanceof HTMLElement ? Number.parseFloat(row.dataset.knownSize || "0") : 0,
-      fixedHeight: row instanceof HTMLElement ? row.style.height : "",
-      rowHeight: row instanceof HTMLElement ? row.getBoundingClientRect().height : 0,
-      listHeight: element.querySelector('[data-testid="virtuoso-item-list"]')?.getBoundingClientRect().height ?? 0,
-      scrollHeight: element.scrollHeight,
-    };
-  });
-  assert(duringNativeThumbDrag.knownSize === nativeThumbProbe.knownSize, `native thumb drag freezes new row measurements (${duringNativeThumbDrag.knownSize}px)`);
-  assert(duringNativeThumbDrag.fixedHeight === `${nativeThumbProbe.knownSize}px`, `native thumb drag fixes mounted row layout (${duringNativeThumbDrag.fixedHeight})`);
-  assert(Math.abs(duringNativeThumbDrag.scrollHeight - nativeThumbProbe.scrollHeight) <= 8, `native thumb drag keeps the physical scroll range stable (${nativeThumbProbe.scrollHeight} → ${duringNativeThumbDrag.scrollHeight}; row ${duringNativeThumbDrag.rowHeight}; list ${duringNativeThumbDrag.listHeight})`);
-  await page.mouse.up();
-  await page.waitForFunction(
-    (knownSize) => {
-      const transcriptElement = document.querySelector(".transcript");
-      const row = document.querySelector('[data-native-scrollbar-probe="true"]');
-      return transcriptElement?.dataset.nativeScrollbarDrag !== "true"
-        && row instanceof HTMLElement
-        && Number.parseFloat(row.dataset.knownSize || "0") > knownSize + 800;
-    },
-    nativeThumbProbe.knownSize,
-  );
-  assert(true, "native thumb release resumes real row measurement");
+  if (process.platform === "darwin" && (!nativeThumbProbe || nativeThumbProbe.gutter <= 1)) {
+    // macOS Chromium inherits system overlay scrollbars, so there is no
+    // pointer-addressable native gutter. Linux/Windows CI still exercises the
+    // complete thumb ownership and measurement-freeze path below.
+    process.stdout.write("  SKIP  native thumb drag (host uses overlay scrollbars)\n");
+  } else {
+    assert(nativeThumbProbe && nativeThumbProbe.gutter > 1, `workbench exposes a native scrollbar gutter (${nativeThumbProbe?.gutter ?? 0}px)`);
+    assert(nativeThumbProbe.knownSize > 0, `native scrollbar probe starts from a measured row (${nativeThumbProbe.knownSize}px)`);
+    await page.mouse.move(nativeThumbProbe.x, nativeThumbProbe.y);
+    await page.mouse.down();
+    await page.waitForFunction(() => document.querySelector(".transcript")?.dataset.nativeScrollbarDrag === "true");
+    await page.waitForFunction(
+      (knownSize) => document.querySelector('[data-native-scrollbar-probe="true"]')?.style.height === `${knownSize}px`,
+      nativeThumbProbe.knownSize,
+    );
+    await transcript.evaluate((element) => {
+      const row = element.querySelector('[data-native-scrollbar-probe="true"]');
+      const content = row?.firstElementChild;
+      if (content instanceof HTMLElement) content.style.paddingBottom = `${Number.parseFloat(content.style.paddingBottom || "0") + 900}px`;
+    });
+    await page.waitForTimeout(100);
+    const duringNativeThumbDrag = await transcript.evaluate((element) => {
+      const row = element.querySelector('[data-native-scrollbar-probe="true"]');
+      return {
+        knownSize: row instanceof HTMLElement ? Number.parseFloat(row.dataset.knownSize || "0") : 0,
+        fixedHeight: row instanceof HTMLElement ? row.style.height : "",
+        rowHeight: row instanceof HTMLElement ? row.getBoundingClientRect().height : 0,
+        listHeight: element.querySelector('[data-testid="virtuoso-item-list"]')?.getBoundingClientRect().height ?? 0,
+        scrollHeight: element.scrollHeight,
+      };
+    });
+    assert(duringNativeThumbDrag.knownSize === nativeThumbProbe.knownSize, `native thumb drag freezes new row measurements (${duringNativeThumbDrag.knownSize}px)`);
+    assert(duringNativeThumbDrag.fixedHeight === `${nativeThumbProbe.knownSize}px`, `native thumb drag fixes mounted row layout (${duringNativeThumbDrag.fixedHeight})`);
+    assert(Math.abs(duringNativeThumbDrag.scrollHeight - nativeThumbProbe.scrollHeight) <= 8, `native thumb drag keeps the physical scroll range stable (${nativeThumbProbe.scrollHeight} → ${duringNativeThumbDrag.scrollHeight}; row ${duringNativeThumbDrag.rowHeight}; list ${duringNativeThumbDrag.listHeight})`);
+    await page.mouse.up();
+    await page.waitForFunction(
+      (knownSize) => {
+        const transcriptElement = document.querySelector(".transcript");
+        const row = document.querySelector('[data-native-scrollbar-probe="true"]');
+        return transcriptElement?.dataset.nativeScrollbarDrag !== "true"
+          && row instanceof HTMLElement
+          && Number.parseFloat(row.dataset.knownSize || "0") > knownSize + 800;
+      },
+      nativeThumbProbe.knownSize,
+    );
+    assert(true, "native thumb release resumes real row measurement");
+  }
 
   // Explicit bottom owns the tail. Subsequent async growth must use Virtuoso's
   // autoscroll API and remain at the physical bottom without Reasonix scrollTop

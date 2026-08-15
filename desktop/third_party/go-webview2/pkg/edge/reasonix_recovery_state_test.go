@@ -119,8 +119,8 @@ func TestRendererFailureRejectedByRecoveryIsStillObserved(t *testing.T) {
 			if reloads != 0 {
 				t.Fatalf("reloads = %d, want 0", reloads)
 			}
-			if len(observed) != 1 || observed[0].Recovery != "not_applicable" {
-				t.Fatalf("observed = %+v, want one not_applicable diagnostic", observed)
+			if len(observed) != 1 || observed[0].Recovery != "reload_suppressed" {
+				t.Fatalf("observed = %+v, want one reload_suppressed diagnostic", observed)
 			}
 		})
 	}

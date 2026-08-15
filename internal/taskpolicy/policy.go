@@ -1,20 +1,23 @@
 // Package taskpolicy builds the host-side TaskPolicy that freezes planning,
-// verification, review, and natural-language constraints for one turn before
-// the first model request. It never calls a classification model.
+// verification, review, evidence closure, and natural-language constraints for
+// one turn before the first model request. It never calls a classification
+// model. Reasonix exposes a single adaptive standard execution: the policy is
+// derived from task intent, complexity, risk, and user constraints — never
+// from a selectable execution mode.
 package taskpolicy
 
 import (
 	"regexp"
 	"strings"
-	"unicode"
 
-	"reasonix/internal/agentpreset"
 	"reasonix/internal/shellparse"
 	"reasonix/internal/taskintent"
 )
 
-// PolicyVersion is the diagnostic version stamped on every TaskPolicy.
-const PolicyVersion = agentpreset.PolicyVersion
+// PolicyVersion is the diagnostic version stamped on every TaskPolicy and the
+// transient execution-policy block. Version 2 removed the preset attribute and
+// added the evidence closed-loop level.
+const PolicyVersion = 2
 
 // Intent is the host's coarse task intent for the turn.
 type Intent = taskintent.Intent
@@ -29,31 +32,61 @@ const (
 )
 
 // Route is the planner route chosen for this turn.
-type Route = agentpreset.PlannerRoute
+type Route uint8
 
 const (
-	RouteDirect    = agentpreset.RouteDirect
-	RouteLightPlan = agentpreset.RouteLightPlan
-	RouteFullPlan  = agentpreset.RouteFullPlan
+	// RouteDirect executes without an independent planner phase.
+	RouteDirect Route = iota
+	// RouteLightPlan uses lightweight internal planning.
+	RouteLightPlan
+	// RouteFullPlan requires a complete plan before execution.
+	RouteFullPlan
 )
 
 // Verification is the verification level for this turn.
-type Verification = agentpreset.VerificationLevel
+type Verification uint8
 
 const (
-	VerifyNone     = agentpreset.VerifyNone
-	VerifyTargeted = agentpreset.VerifyTargeted
-	VerifyFull     = agentpreset.VerifyFull
+	// VerifyNone requires no host verification commands.
+	VerifyNone Verification = iota
+	// VerifyTargeted runs the cheapest relevant checks and diff review.
+	VerifyTargeted
+	// VerifyFull requires every acceptance check for the current epoch.
+	VerifyFull
 )
 
 // Review is the independent review level for this turn.
-type Review = agentpreset.ReviewLevel
+type Review uint8
 
 const (
-	ReviewNone           = agentpreset.ReviewNone
-	ReviewConditional    = agentpreset.ReviewConditional
-	ReviewForced         = agentpreset.ReviewForced
-	ReviewForcedSecurity = agentpreset.ReviewForcedSecurity
+	// ReviewNone never starts an independent reviewer.
+	ReviewNone Review = iota
+	// ReviewConditional starts a reviewer when evidence coverage is incomplete
+	// or the change spans modules.
+	ReviewConditional
+	// ReviewForced always starts an independent reviewer.
+	ReviewForced
+	// ReviewForcedSecurity always starts reviewer plus security-review.
+	ReviewForcedSecurity
+)
+
+// Evidence is the evidence closed-loop level for the turn. It replaces every
+// historical delivery-profile gate: acceptance criteria before mutations,
+// todo/step ownership, opaque-bash restrictions, capability call preferences,
+// post-write verification, review, and final completion.
+type Evidence uint8
+
+const (
+	// EvidenceNone applies to plain conversation: no evidence ledger gates.
+	EvidenceNone Evidence = iota
+	// EvidenceTargeted requires targeted checks or cited read receipts; a
+	// Partial/Unverified ending is allowed when checks are unavailable.
+	EvidenceTargeted
+	// EvidenceClosedLoop requires full acceptance evidence closure: criteria
+	// before state change, verification after the latest mutation, review, and
+	// evidence-backed sign-off. Missing evidence can only end Partial,
+	// Unverified, or Blocked — never Complete.
+	EvidenceClosedLoop
 )
 
 // Constraints are natural-language and host-boundary limits for the turn.
@@ -66,7 +99,7 @@ type Constraints struct {
 	AllowedChecks []string
 	// ForbidExternal blocks push/publish/deploy-style external actions.
 	ForbidExternal bool
-	// RequireFullVerification forces VerifyFull regardless of preset.
+	// RequireFullVerification forces VerifyFull and closed-loop evidence.
 	RequireFullVerification bool
 	// PlanModeReadOnly is the explicit plan-mode read-only boundary.
 	PlanModeReadOnly bool
@@ -84,10 +117,10 @@ type Input struct {
 	// Instruction is user text with quoted/fenced content removed so constraint
 	// phrases inside citations cannot bind the host.
 	Instruction string
-	// Preset is the frozen role setting for this turn.
-	Preset agentpreset.AgentPreset
 	// PlanMode is the collaboration plan-mode flag.
 	PlanMode bool
+	// GoalActive marks a live multi-turn Goal: planning and closure ratchet up.
+	GoalActive bool
 	// HighRiskHints are host signals (permission/auth/release/security class).
 	HighRiskHints bool
 	// MediumRiskHints are host signals (cross-module / migration).
@@ -103,31 +136,35 @@ type Input struct {
 
 // TaskPolicy is the authoritative host policy for one turn.
 type TaskPolicy struct {
-	Preset       agentpreset.AgentPreset
-	Intent       Intent
-	Risk         Risk
-	Route        Route
+	Intent Intent
+	Risk   Risk
+	Route  Route
+	// Evidence is the closed-loop level that replaced deliveryProfile gates.
+	Evidence     Evidence
 	Constraints  Constraints
 	Verification Verification
 	Review       Review
-	// SecurityClass marks auth/permission/release/security work that elevates
-	// Light's review floor.
+	// SecurityClass marks auth/permission/release/security work that forces
+	// security review.
 	SecurityClass bool
 	// PolicyVersion is diagnostic only.
 	PolicyVersion int
-	// RequireAtomicContract forces an Atomic TaskContract on direct runs.
+	// RequireAtomicContract forces a zero-extra-model-call Atomic TaskContract
+	// on direct single-file modifications.
 	RequireAtomicContract bool
-	// AllowExploreSubagent mirrors the preset capability for explore workers.
+	// AllowExploreSubagent permits proactive explore/research sub-agents for
+	// mid/high-risk or Goal-active tasks whose scope deterministic rules cannot
+	// reliably place.
 	AllowExploreSubagent bool
-	// SemanticRouterAllowed mirrors the preset capability for LLM routing.
+	// SemanticRouterAllowed permits the LLM capability router when deterministic
+	// routing cannot place a mid/high-risk request.
 	SemanticRouterAllowed bool
 }
 
-// Derive builds a TaskPolicy from host-trusted input without model calls.
+// Derive builds a TaskPolicy from host-trusted input without model calls. All
+// tasks share one standard matrix; only intent, risk, structure, and user
+// constraints change the outcome.
 func Derive(in Input) TaskPolicy {
-	preset := agentpreset.Normalize(string(in.Preset))
-	policy := agentpreset.PolicyOf(preset)
-
 	instruction := strings.TrimSpace(in.Instruction)
 	if instruction == "" {
 		instruction = StripQuotedConstraints(in.Raw)
@@ -153,76 +190,217 @@ func Derive(in Input) TaskPolicy {
 	if in.HighRiskHints || securityClass || isHighRisk(instruction) {
 		risk = RiskHigh
 	}
-	// Intent-driven floor: mutations start at least low; external/persist medium.
+	// Intent-driven floor: external/persist actions start at least medium.
 	if intent == taskintent.PersistentAction && risk < RiskMedium {
 		risk = RiskMedium
 	}
-	route := chooseRoute(policy, intent, risk, in)
-	verification := policy.VerificationPolicy.Level
-	if constraints.RequireFullVerification || !constraints.ForbidTests && risk >= RiskHigh {
-		if policy.VerificationPolicy.Level < VerifyFull && (constraints.RequireFullVerification || risk >= RiskHigh) {
-			if constraints.RequireFullVerification || securityClass || preset == agentpreset.Delivery {
-				verification = VerifyFull
-			}
-		}
-	}
+
+	route := chooseRoute(intent, risk, in, constraints)
+
 	if constraints.ForbidTests {
-		// Host still records the gap as Partial; verification commands stay blocked.
 		constraints.Notes = append(constraints.Notes, "forbid_tests")
 	}
-	if preset == agentpreset.Light && risk >= RiskHigh {
-		verification = VerifyFull
-	}
-	if preset == agentpreset.Delivery && risk >= RiskMedium {
-		verification = VerifyFull
-	}
-	if intent == taskintent.Conversation || intent == taskintent.Advisory {
-		if !in.MultiFile && risk == RiskLow {
-			verification = VerifyNone
-		}
-	}
+	verification := chooseVerification(intent, risk, in, constraints)
+	review := chooseReview(risk, securityClass, in, constraints)
 
-	review := policy.ReviewForRisk(int(risk), securityClass)
-	if constraints.ForbidMutation {
-		// Read-only turns never need independent review.
-		review = ReviewNone
-	}
+	// Evidence closed-loop level.
+	closedLoopTriggers := risk >= RiskHigh || securityClass || in.CrossSurface ||
+		in.GoalActive || constraints.RequireFullVerification
+	evidence := evidenceFor(intent, risk, closedLoopTriggers, in, constraints)
 
 	return TaskPolicy{
-		Preset:                preset,
 		Intent:                intent,
 		Risk:                  risk,
 		Route:                 route,
+		Evidence:              evidence,
 		Constraints:           constraints,
 		Verification:          verification,
 		Review:                review,
 		SecurityClass:         securityClass,
 		PolicyVersion:         PolicyVersion,
-		RequireAtomicContract: policy.PlannerPolicy.RequireAtomicContract || (preset == agentpreset.Delivery && intent == taskintent.Mutation),
-		AllowExploreSubagent:  policy.PlannerPolicy.AllowExploreSubagent && risk > RiskLow,
-		SemanticRouterAllowed: policy.CapabilityPolicy.SemanticRouterAllowed && (risk >= RiskMedium || securityClass),
+		RequireAtomicContract: intent == taskintent.Mutation && route == RouteDirect && risk == RiskLow && !in.GoalActive,
+		AllowExploreSubagent:  risk >= RiskMedium || in.GoalActive,
+		SemanticRouterAllowed: risk >= RiskMedium || securityClass || in.GoalActive,
 	}
 }
 
-// RaiseRisk ratchets risk upward; never decreases it.
+// evidenceFor assigns the evidence closed-loop level per the standard matrix:
+// conversation needs none; ordinary read-only work and same-surface mutations
+// stay targeted so quality gaps can be reported without interrupting the turn.
+// Persistent actions, cross-surface work, active Goals, and anything high-risk,
+// security-class, or user-required fully verified close the loop.
+func evidenceFor(intent Intent, risk Risk, closedLoopTriggers bool, in Input, constraints Constraints) Evidence {
+	switch {
+	case constraints.ForbidMutation || constraints.PlanModeReadOnly:
+		// Read-only work: cite actual reads; no mutation closure ceremony.
+		return EvidenceTargeted
+	case intent == taskintent.Conversation || intent == taskintent.Advisory:
+		if !closedLoopTriggers && risk == RiskLow && !in.Structured && !in.MultiFile {
+			return EvidenceNone
+		}
+		structural := risk >= RiskHigh || in.MultiFile || in.Structured || in.CrossSurface || in.GoalActive
+		if closedLoopTriggers && structural {
+			return EvidenceClosedLoop
+		}
+		return EvidenceTargeted
+	case intent == taskintent.PersistentAction:
+		return EvidenceClosedLoop
+	case intent == taskintent.Mutation:
+		// Planning complexity and completion enforcement are separate axes.
+		// Same-surface structured work may plan and review more while missing
+		// quality evidence remains visible. High assurance still hard-stops.
+		if closedLoopTriggers {
+			return EvidenceClosedLoop
+		}
+		return EvidenceTargeted
+	default:
+		if closedLoopTriggers {
+			return EvidenceClosedLoop
+		}
+		return EvidenceTargeted
+	}
+}
+
+func chooseVerification(intent Intent, risk Risk, in Input, constraints Constraints) Verification {
+	verification := VerifyTargeted
+	if constraints.RequireFullVerification || risk >= RiskHigh {
+		verification = VerifyFull
+	} else if risk >= RiskMedium && (in.CrossSurface ||
+		(in.MultiFile && (intent == taskintent.Mutation || intent == taskintent.PersistentAction))) {
+		verification = VerifyFull
+	}
+	if (intent == taskintent.Conversation || intent == taskintent.Advisory) &&
+		!in.MultiFile && !in.Structured && risk == RiskLow {
+		return VerifyNone
+	}
+	return verification
+}
+
+func chooseReview(risk Risk, securityClass bool, in Input, constraints Constraints) Review {
+	if constraints.ForbidMutation {
+		return ReviewNone
+	}
+	review := reviewForRisk(risk, securityClass)
+	if constraints.RequireFullVerification && review < ReviewForced {
+		review = ReviewForced
+	}
+	if in.GoalActive && review < ReviewForced {
+		review = ReviewForced
+		if securityClass {
+			review = ReviewForcedSecurity
+		}
+	}
+	return review
+}
+
+// reviewForRisk returns the standard review floor for a risk level.
+func reviewForRisk(risk Risk, securityClass bool) Review {
+	if securityClass {
+		return ReviewForcedSecurity
+	}
+	switch risk {
+	case RiskHigh:
+		return ReviewForced
+	case RiskMedium:
+		return ReviewConditional
+	default:
+		return ReviewNone
+	}
+}
+
+// RaiseRisk ratchets risk upward; never decreases it. Floors for route,
+// verification, review, and evidence re-evaluate so later receipts can only
+// strengthen the contract.
 func (p *TaskPolicy) RaiseRisk(r Risk) {
+	if p == nil || r <= p.Risk {
+		return
+	}
+	p.Risk = r
+	p.reevaluateFloors()
+}
+
+// EscalateConditionalReview promotes a conditional review to forced when the
+// evidence ledger observes weak coverage: changes that touch public API,
+// schema, persistence, auth, or release surfaces; scope that outgrew the
+// initial judgment; weak, ambiguous, or uncovered acceptance criteria; or
+// required verification that failed or could not run. It never lowers review.
+func (p *TaskPolicy) EscalateConditionalReview(reason string) {
 	if p == nil {
 		return
 	}
-	if r > p.Risk {
-		p.Risk = r
-		// Re-evaluate review/verification floors after elevation.
-		policy := agentpreset.PolicyOf(p.Preset)
-		p.Review = policy.ReviewForRisk(int(p.Risk), p.SecurityClass)
-		if p.Preset == agentpreset.Light && p.Risk >= RiskHigh {
+	if reason != "" {
+		p.Constraints.Notes = append(p.Constraints.Notes, "review_escalation:"+reason)
+	}
+	if p.Constraints.ForbidMutation {
+		return
+	}
+	if p.Review < ReviewForced {
+		p.Review = ReviewForced
+	}
+	if p.SecurityClass && p.Review < ReviewForcedSecurity {
+		p.Review = ReviewForcedSecurity
+	}
+	if (p.Risk >= RiskHigh || p.SecurityClass || p.Constraints.RequireFullVerification) &&
+		p.Evidence < EvidenceClosedLoop {
+		p.Evidence = EvidenceClosedLoop
+	}
+}
+
+// InheritFrom merges a writer parent's floors into a child policy so sub-agent
+// execution never runs below the parent task's risk and closure requirements.
+// Read-only children do not inherit; their read-only boundary stays absolute.
+func (p *TaskPolicy) InheritFrom(parent TaskPolicy) {
+	if p == nil {
+		return
+	}
+	if parent.Risk > p.Risk {
+		p.RaiseRisk(parent.Risk)
+	}
+	if parent.Evidence > p.Evidence {
+		p.Evidence = parent.Evidence
+	}
+	if parent.Verification > p.Verification {
+		p.Verification = parent.Verification
+	}
+	if parent.Review > p.Review {
+		p.Review = parent.Review
+	}
+	if parent.SecurityClass {
+		p.SecurityClass = true
+		if p.Review < ReviewForcedSecurity {
+			p.Review = ReviewForcedSecurity
+		}
+	}
+	if parent.RequireAtomicContract {
+		p.RequireAtomicContract = true
+	}
+	if parent.Evidence >= EvidenceClosedLoop && p.Intent == taskintent.Mutation {
+		if p.Verification < VerifyTargeted {
+			p.Verification = VerifyTargeted
+		}
+	}
+}
+
+// reevaluateFloors recomputes the ratchet-up floors after a risk raise.
+func (p *TaskPolicy) reevaluateFloors() {
+	if review := reviewForRisk(p.Risk, p.SecurityClass); review > p.Review && !p.Constraints.ForbidMutation {
+		p.Review = review
+	}
+	if p.Risk >= RiskHigh {
+		if p.Verification < VerifyFull {
 			p.Verification = VerifyFull
+		}
+		if p.Route < RouteFullPlan {
 			p.Route = RouteFullPlan
 		}
-		if p.Preset == agentpreset.Delivery && p.Risk >= RiskMedium {
-			p.Verification = VerifyFull
-			if p.Route < RouteFullPlan {
-				p.Route = RouteFullPlan
-			}
+		if p.Evidence < EvidenceClosedLoop && !p.Constraints.ForbidMutation {
+			p.Evidence = EvidenceClosedLoop
+		}
+		if !p.AllowExploreSubagent {
+			p.AllowExploreSubagent = true
+		}
+		if !p.SemanticRouterAllowed {
+			p.SemanticRouterAllowed = true
 		}
 	}
 }
@@ -297,35 +475,44 @@ func (p TaskPolicy) RequiresSecurityReview() bool {
 	return p.Review == ReviewForcedSecurity
 }
 
-func chooseRoute(policy agentpreset.PresetPolicy, intent Intent, risk Risk, in Input) Route {
+// ClosedLoop reports whether this turn must close the evidence loop.
+func (p TaskPolicy) ClosedLoop() bool {
+	return p.Evidence == EvidenceClosedLoop
+}
+
+// AllowsPartialWithoutChecks reports whether a turn may end Partial or
+// Unverified when checks are user-forbidden or unavailable. Closed-loop turns
+// never waive checks silently.
+func (p TaskPolicy) AllowsPartialWithoutChecks() bool {
+	return p.Constraints.ForbidTests || p.Evidence < EvidenceClosedLoop
+}
+
+// chooseRoute applies the standard planning matrix: direct for conversation,
+// plain queries, and anchored single-file atomic edits; light planning for
+// multi-file same-surface work; full planning for cross-surface, structured,
+// Goal-active, and high-risk tasks.
+func chooseRoute(intent Intent, risk Risk, in Input, constraints Constraints) Route {
 	if intent == taskintent.Conversation || intent == taskintent.Advisory {
 		if !in.MultiFile && !in.Structured && risk == RiskLow {
 			return RouteDirect
 		}
 	}
-	if risk >= RiskHigh && policy.PlannerPolicy.FullPlanOnHighRisk {
+	if risk >= RiskHigh {
 		return RouteFullPlan
 	}
-	if risk >= RiskMedium && policy.PlannerPolicy.FullPlanOnMediumRisk {
+	if constraints.RequireFullVerification && !constraints.ForbidMutation {
+		return RouteFullPlan
+	}
+	if in.GoalActive && (intent == taskintent.Mutation || in.MultiFile || in.Structured) && !in.Anchored {
 		return RouteFullPlan
 	}
 	if in.CrossSurface || (in.Structured && risk >= RiskMedium) {
-		if policy.PlannerPolicy.FullPlanOnMediumRisk || risk >= RiskHigh {
-			return RouteFullPlan
-		}
+		return RouteFullPlan
 	}
 	if in.MultiFile || in.Structured || (!in.Anchored && intent == taskintent.Mutation) {
-		if policy.PlannerPolicy.PreferLightPlan {
-			return RouteLightPlan
-		}
-		if policy.PlannerPolicy.FullPlanOnMediumRisk {
-			return RouteFullPlan
-		}
+		return RouteLightPlan
 	}
-	if policy.PlannerPolicy.DirectOK {
-		return RouteDirect
-	}
-	return RouteLightPlan
+	return RouteDirect
 }
 
 func parseConstraints(instruction string) Constraints {
@@ -357,6 +544,15 @@ func parseConstraints(instruction string) Constraints {
 	}) {
 		c.ForbidTests = true
 		c.Notes = append(c.Notes, "user_forbid_tests")
+	}
+	// Full verification / closed-loop delivery request
+	if matchesAny(lower, []string{
+		"完整验证", "全面验证", "闭环交付", "完整交付", "交付前检查", "验收闭环",
+		"full verification", "complete verification", "verify everything",
+		"closed-loop delivery", "deliver with verification",
+	}) {
+		c.RequireFullVerification = true
+		c.Notes = append(c.Notes, "user_require_full_verification")
 	}
 	// Only run X
 	if cmds := parseAllowedChecks(instruction); len(cmds) > 0 {
@@ -494,121 +690,4 @@ func stripQuoted(s string, open, close rune) string {
 		}
 	}
 	return b.String()
-}
-
-// ExecutionPolicyBlock renders the short provider-visible transient user block
-// that freezes the role setting for this turn. Callers persist it in Message
-// Content and keep the original user text in RawContent.
-func ExecutionPolicyBlock(p TaskPolicy) string {
-	var b strings.Builder
-	b.WriteString(`<execution-policy preset="`)
-	b.WriteString(p.Preset.String())
-	b.WriteString(`" version="`)
-	b.WriteString(itoa(p.PolicyVersion))
-	b.WriteString(`">`)
-	b.WriteByte('\n')
-	b.WriteString("route=")
-	b.WriteString(routeName(p.Route))
-	b.WriteString(" risk=")
-	b.WriteString(riskName(p.Risk))
-	b.WriteString(" verify=")
-	b.WriteString(verifyName(p.Verification))
-	b.WriteString(" review=")
-	b.WriteString(reviewName(p.Review))
-	if p.Constraints.ForbidMutation {
-		b.WriteString("\nconstraint=no-mutation")
-	}
-	if p.Constraints.ForbidTests {
-		b.WriteString("\nconstraint=no-tests")
-	}
-	if p.Constraints.ForbidExternal {
-		b.WriteString("\nconstraint=no-external")
-	}
-	if len(p.Constraints.AllowedChecks) > 0 {
-		b.WriteString("\nconstraint=only-checks:")
-		b.WriteString(strings.Join(p.Constraints.AllowedChecks, ","))
-	}
-	if p.Constraints.PlanModeReadOnly {
-		b.WriteString("\nconstraint=plan-mode-read-only")
-	}
-	b.WriteString("\n</execution-policy>")
-	return b.String()
-}
-
-func routeName(r Route) string {
-	switch r {
-	case RouteLightPlan:
-		return "light-plan"
-	case RouteFullPlan:
-		return "full-plan"
-	default:
-		return "direct"
-	}
-}
-
-func riskName(r Risk) string {
-	switch r {
-	case RiskMedium:
-		return "medium"
-	case RiskHigh:
-		return "high"
-	default:
-		return "low"
-	}
-}
-
-func verifyName(v Verification) string {
-	switch v {
-	case VerifyTargeted:
-		return "targeted"
-	case VerifyFull:
-		return "full"
-	default:
-		return "none"
-	}
-}
-
-func reviewName(r Review) string {
-	switch r {
-	case ReviewConditional:
-		return "conditional"
-	case ReviewForced:
-		return "forced"
-	case ReviewForcedSecurity:
-		return "forced-security"
-	default:
-		return "none"
-	}
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var buf [12]byte
-	i := len(buf)
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	if neg {
-		i--
-		buf[i] = '-'
-	}
-	return string(buf[i:])
-}
-
-// HasInstructionalContent reports whether s has non-space runes.
-func HasInstructionalContent(s string) bool {
-	for _, r := range s {
-		if !unicode.IsSpace(r) {
-			return true
-		}
-	}
-	return false
 }

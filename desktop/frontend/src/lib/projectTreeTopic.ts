@@ -42,6 +42,14 @@ export function projectTreeRevisionIsFresh(currentRevision: number, incomingRevi
   return incomingRevision >= currentRevision;
 }
 
+export function projectTreeTopicPageIsFresh(
+  revisions: Readonly<Record<string, number>>,
+  projectKey: string,
+  incomingRevision: number,
+): boolean {
+  return projectTreeRevisionIsFresh(revisions[projectKey] ?? 0, incomingRevision);
+}
+
 // Project shells come from desktop-projects.json and are valid even when the
 // disposable catalog still reports revision 0. Catalog revision only gates
 // topic pages and non-empty tree refreshes after the first shell is painted.
@@ -55,7 +63,14 @@ export function projectTreeShouldApplyShellSnapshot(options: {
 }
 
 export function mergeProjectTopicPage(current: ProjectNode[], incoming: ProjectNode[], append: boolean): ProjectNode[] {
-  if (!append) return [...incoming];
+  if (!append) {
+    const incomingKeys = new Set(incoming.map((node) => node.key));
+    // Project snapshots carry every pinned topic shell, while a lazy first
+    // page is bounded. Keep off-page pins so expanding a busy project cannot
+    // make its pinned section incomplete again.
+    const offPagePins = current.filter((node) => Boolean(node.pinned) && !incomingKeys.has(node.key));
+    return [...incoming, ...offPagePins];
+  }
   const next = [...current];
   const positions = new Map(next.map((node, index) => [node.key, index]));
   for (const node of incoming) {
@@ -125,8 +140,20 @@ export function invalidateProjectTreeTopicLoads(sequences: Record<string, number
 
 export function projectTreeShellChildren(
   previous: ProjectNode[] | undefined,
+  pinnedShells: ProjectNode[] | undefined = [],
 ): ProjectNode[] {
-  return asArray(previous);
+  const shells = asArray(pinnedShells).filter((node) => isTopicNode(node) && Boolean(node.pinned));
+  if (!previous || previous.length === 0) return shells;
+
+  const shellByKey = new Map(shells.map((node) => [node.key, node]));
+  const next = asArray(previous).map((node) => {
+    if (!isTopicNode(node)) return node;
+    const shell = shellByKey.get(node.key);
+    if (!shell) return node.pinned ? { ...node, pinned: false } : node;
+    shellByKey.delete(node.key);
+    return { ...node, ...shell, children: node.children ?? shell.children };
+  });
+  return [...next, ...shellByKey.values()];
 }
 
 export function projectTreeEventAffectsFolder(project: ProjectNode, roots: string[]): boolean {

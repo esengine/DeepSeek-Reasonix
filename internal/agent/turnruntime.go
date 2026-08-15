@@ -10,9 +10,8 @@ import (
 // State an external caller arms before a Run lives in pendingTurn; state that
 // outlives the Run lives in taskRuntime or sessionRuntime.
 type turnRuntime struct {
-	runMaxSteps       int
-	runMaxStepsKey    string
-	runLimitHostOwned bool
+	runMaxSteps    int
+	runMaxStepsKey string
 
 	emptyFinalBlocks   int
 	handoffNudges      int
@@ -109,10 +108,12 @@ type pendingTurn struct {
 	// of resetting it, so a review_report completion nudge can cite the read
 	// receipts the subagent already earned. Consumed by that Run.
 	preserveEvidence bool
-	// deliveryRecovery is armed only when this agent exhausts final readiness.
-	// An explicit host recovery action can consume it to preserve the failed
-	// turn's receipts once; an ordinary user turn still resets evidence.
-	deliveryRecovery bool
+	// finalReadinessRecovery is armed after final readiness fails. An explicit
+	// host action preserves receipts once; an ordinary turn resets evidence.
+	finalReadinessRecovery bool
+	// finalReadinessRecoveryPrepared prevents the durable marker fallback from
+	// being consumed twice before the prepared Run starts.
+	finalReadinessRecoveryPrepared bool
 	// forkRestore, when armed, swaps the frozen fork-bundle conversation in
 	// right after beginRunTurn — the counterfactual-continuation seam.
 	forkRestore func(*turnRuntime)

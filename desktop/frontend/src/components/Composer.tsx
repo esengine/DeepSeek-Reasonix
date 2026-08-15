@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
-import { ArrowRight, ArrowUp, AtSign, Check, ChevronsUpDown, CornerDownRight, Equal, Eye, FilePlus2, FileText, Flag, Folder, Gauge, Hash, List, MessageSquare, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, X } from "lucide-react";
+import { ArrowRight, ArrowUp, AtSign, Check, ChevronsUpDown, CornerDownRight, Eye, FilePlus2, FileText, Folder, Gauge, Hash, List, MessageSquare, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, X } from "lucide-react";
 import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
@@ -33,7 +33,7 @@ import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/
 import { createRafResizeUpdater } from "../lib/resizeDrag";
 import { observeComposerMenuViewport } from "../lib/composerMenuViewport";
 import { useToast } from "../lib/toast";
-import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type ContextInfo, type DirEntry, type EffortInfo, type GoalRuntime, type HistoryMessage, type Mode, type PromptHistoryEntry, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type TokenMode, type ToolApprovalMode, type BalanceInfo } from "../lib/types";
+import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type ContextInfo, type DirEntry, type EffortInfo, type GoalRuntime, type HistoryMessage, type Mode, type PromptHistoryEntry, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type ToolApprovalMode, type BalanceInfo } from "../lib/types";
 import {
   formatWorkspaceReference,
   parseWorkspaceReference,
@@ -498,7 +498,6 @@ export function Composer({
   running,
   collaborationMode,
   toolApprovalMode,
-  tokenMode,
   turnPhase,
   goal,
   goalStatus,
@@ -521,7 +520,6 @@ export function Composer({
   onResumeGoal,
   onSwitchModel,
   onSetEffort,
-  onSetTokenMode,
   insertRequest,
   selectedTextRequest,
   disabled,
@@ -564,7 +562,6 @@ export function Composer({
   running: boolean;
   collaborationMode: CollaborationMode;
   toolApprovalMode: ToolApprovalMode;
-  tokenMode: TokenMode;
   /** Host turn phase: working | checking | verifying | reviewing */
   turnPhase?: string;
   goal?: string;
@@ -591,7 +588,6 @@ export function Composer({
   onResumeGoal: () => void;
   onSwitchModel: (name: string) => boolean | Promise<boolean>;
   onSetEffort: (level: string) => void;
-  onSetTokenMode: (mode: TokenMode) => void;
   insertRequest?: ComposerInsertRequest | null;
   selectedTextRequest?: SelectedTextInsertRequest | null;
   disabled?: boolean;
@@ -646,7 +642,7 @@ export function Composer({
   guidanceQueuePreviewItems?: readonly string[];
   showContextWindowRing?: boolean;
   // Creation empty-session hero: slim centered composer under the welcome
-  // headline (hides task/profile/approval chrome; keeps model + effort).
+  // headline (hides task/approval chrome; keeps model + effort).
   heroMode?: boolean;
   context?: ContextInfo;
   turnCost?: number;
@@ -697,8 +693,6 @@ export function Composer({
   const [textareaAutoOverflow, setTextareaAutoOverflow] = useState(false);
   const [intentMenuOpen, setIntentMenuOpen] = useState(false);
   const [intentMenuClosing, setIntentMenuClosing] = useState(false);
-  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
-  const [profileMenuClosing, setProfileMenuClosing] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [moreMenuClosing, setMoreMenuClosing] = useState(false);
   const [contentMenuOpen, setContentMenuOpen] = useState(false);
@@ -740,14 +734,11 @@ export function Composer({
   const composerWrapRef = useRef<HTMLDivElement>(null);
   const contentMenuAnchorRef = useRef<HTMLButtonElement>(null);
   const intentMenuAnchorRef = useRef<HTMLButtonElement>(null);
-  const profileMenuAnchorRef = useRef<HTMLButtonElement>(null);
   const moreMenuAnchorRef = useRef<HTMLButtonElement>(null);
   const intentCloseTimerRef = useRef<number | null>(null);
-  const profileCloseTimerRef = useRef<number | null>(null);
   const moreCloseTimerRef = useRef<number | null>(null);
-  // Creation chrome: hover-open task/profile menus (same pattern as ContextWindowRing).
+  // Creation chrome: hover-open task menus (same pattern as ContextWindowRing).
   const intentHoverTimerRef = useRef<number | null>(null);
-  const profileHoverTimerRef = useRef<number | null>(null);
   const creationChrome = showContextWindowRing;
   const wasRunningByDraftRef = useRef<Record<string, boolean>>({ [draftKey]: running });
   const composingRef = useRef(false);
@@ -1848,12 +1839,6 @@ export function Composer({
     intentCloseTimerRef.current = null;
   }, []);
 
-  const clearProfileCloseTimer = useCallback(() => {
-    if (profileCloseTimerRef.current === null) return;
-    window.clearTimeout(profileCloseTimerRef.current);
-    profileCloseTimerRef.current = null;
-  }, []);
-
   // Hover timers only touch refs — no useCallback cross-deps (avoids TDZ on HMR).
   const clearHoverTimer = (timerRef: { current: number | null }) => {
     if (timerRef.current == null) return;
@@ -1864,13 +1849,6 @@ export function Composer({
   const openIntentMenu = useCallback(() => {
     clearIntentCloseTimer();
     clearHoverTimer(intentHoverTimerRef);
-    clearHoverTimer(profileHoverTimerRef);
-    if (profileCloseTimerRef.current != null) {
-      window.clearTimeout(profileCloseTimerRef.current);
-      profileCloseTimerRef.current = null;
-    }
-    setProfileMenuOpen(false);
-    setProfileMenuClosing(false);
     setContentMenuOpen(false);
     setDirectPastChats(false);
     setDismissed(true);
@@ -1891,42 +1869,10 @@ export function Composer({
     }, reduceMotion ? 0 : ANCHORED_POPOVER_CLOSE_MS);
   }, [clearIntentCloseTimer]);
 
-  const openProfileMenu = useCallback(() => {
-    clearProfileCloseTimer();
-    clearHoverTimer(profileHoverTimerRef);
-    clearHoverTimer(intentHoverTimerRef);
-    if (intentCloseTimerRef.current != null) {
-      window.clearTimeout(intentCloseTimerRef.current);
-      intentCloseTimerRef.current = null;
-    }
-    setIntentMenuOpen(false);
-    setIntentMenuClosing(false);
-    setContentMenuOpen(false);
-    setDirectPastChats(false);
-    setDismissed(true);
-    setProfileMenuClosing(false);
-    setProfileMenuOpen(true);
-  }, [clearProfileCloseTimer]);
-
-  const closeProfileMenu = useCallback((afterClose?: () => void) => {
-    clearProfileCloseTimer();
-    clearHoverTimer(profileHoverTimerRef);
-    setProfileMenuClosing(true);
-    window.requestAnimationFrame(() => setProfileMenuOpen(false));
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    profileCloseTimerRef.current = window.setTimeout(() => {
-      profileCloseTimerRef.current = null;
-      setProfileMenuClosing(false);
-      afterClose?.();
-    }, reduceMotion ? 0 : ANCHORED_POPOVER_CLOSE_MS);
-  }, [clearProfileCloseTimer]);
-
   useEffect(() => () => {
     clearIntentCloseTimer();
     clearHoverTimer(intentHoverTimerRef);
-    clearProfileCloseTimer();
-    clearHoverTimer(profileHoverTimerRef);
-  }, [clearIntentCloseTimer, clearProfileCloseTimer]);
+  }, [clearIntentCloseTimer]);
 
   const onIntentHoverEnter = useCallback(() => {
     if (!creationChrome || disabled || running) return;
@@ -1950,30 +1896,6 @@ export function Composer({
   const onIntentPopoverEnter = useCallback(() => {
     if (!creationChrome) return;
     clearHoverTimer(intentHoverTimerRef);
-  }, [creationChrome]);
-
-  const onProfileHoverEnter = useCallback(() => {
-    if (!creationChrome || disabled || running) return;
-    clearHoverTimer(profileHoverTimerRef);
-    profileHoverTimerRef.current = window.setTimeout(() => {
-      profileHoverTimerRef.current = null;
-      openProfileMenu();
-    }, 120);
-  }, [creationChrome, disabled, openProfileMenu, running]);
-
-  const onProfileHoverLeave = useCallback(() => {
-    if (!creationChrome) return;
-    clearHoverTimer(profileHoverTimerRef);
-    if (!profileMenuOpen && !profileMenuClosing) return;
-    profileHoverTimerRef.current = window.setTimeout(() => {
-      profileHoverTimerRef.current = null;
-      closeProfileMenu();
-    }, 140);
-  }, [closeProfileMenu, creationChrome, profileMenuClosing, profileMenuOpen]);
-
-  const onProfilePopoverEnter = useCallback(() => {
-    if (!creationChrome) return;
-    clearHoverTimer(profileHoverTimerRef);
   }, [creationChrome]);
 
   const clearMoreCloseTimer = useCallback(() => {
@@ -3171,7 +3093,6 @@ export function Composer({
 
   const openContentMenu = () => {
     if (intentMenuOpen || intentMenuClosing) closeIntentMenu();
-    if (profileMenuOpen || profileMenuClosing) closeProfileMenu();
     if (moreMenuOpen || moreMenuClosing) closeMoreMenu();
     setDirectPastChats(false);
     setShowPastChats(false);
@@ -3617,29 +3538,6 @@ export function Composer({
       requestActiveDraftFrame(focusComposerInput);
     });
   };
-  const chooseTokenMode = (mode: TokenMode) => {
-    closeProfileMenu(() => {
-      if (mode !== tokenMode) onSetTokenMode(mode);
-      requestActiveDraftFrame(focusComposerInput);
-    });
-  };
-  const runtimeProfileShortKey = tokenMode === "economy"
-    ? "composer.runtimeProfileEconomyShort"
-    : tokenMode === "delivery"
-      ? "composer.runtimeProfileDeliveryShort"
-      : "composer.runtimeProfileBalancedShort";
-  const runtimeProfileTooltipSummaryKey = tokenMode === "economy"
-    ? "composer.runtimeProfileEconomyTooltipSummary"
-    : tokenMode === "delivery"
-      ? "composer.runtimeProfileDeliveryTooltipSummary"
-      : "composer.runtimeProfileBalancedTooltipSummary";
-  const RuntimeProfileIcon = tokenMode === "economy" ? Gauge : tokenMode === "delivery" ? Flag : Equal;
-  const runtimeProfileTriggerLabel = t("composer.runtimeProfileTrigger", { mode: t(runtimeProfileShortKey) });
-  const runtimeProfileTooltipLabel = t("composer.controlTooltip", {
-    category: t("composer.runtimeProfileTitle"),
-    mode: t(runtimeProfileShortKey),
-    summary: t(runtimeProfileTooltipSummaryKey),
-  });
   const taskModeShortKey = collaborationMode === "plan"
     ? "composer.taskModePlanShort"
     : collaborationMode === "goal"
@@ -3723,9 +3621,8 @@ export function Composer({
     setDirectPastChats(false);
     setShowPastChats(false);
     closeIntentMenu();
-    closeProfileMenu();
     closeMoreMenu();
-  }, [suspendedByDecision, closeIntentMenu, closeProfileMenu, closeMoreMenu]);
+  }, [suspendedByDecision, closeIntentMenu, closeMoreMenu]);
   // Live text+reasoning character count for the run-strip TPS fallback. Reads
   // through the live store's own subscription so stream deltas re-render only
   // this component — the controller's bump path stays text-delta-free.
@@ -4059,47 +3956,6 @@ export function Composer({
               </button>
             </div>
           )}
-        </div>
-      </AnchoredPopover>}
-      {!heroMode && <AnchoredPopover
-        open={profileMenuOpen}
-        closing={profileMenuClosing}
-        anchorRef={profileMenuAnchorRef}
-        onClose={() => closeProfileMenu()}
-        className="composer-access-menu composer-profile-menu"
-        align="start"
-      >
-        <div
-          className="composer-access-menu__section"
-          role="menu"
-          aria-label={t("composer.runtimeProfileTitle")}
-          onMouseEnter={creationChrome ? onProfilePopoverEnter : undefined}
-          onMouseLeave={creationChrome ? onProfileHoverLeave : undefined}
-        >
-          <div className="composer-access-menu__label">{t("composer.runtimeProfileTitle")}</div>
-          {([
-            ["economy", Gauge, "composer.runtimeProfileEconomy", "composer.runtimeProfileEconomyDesc"], // light wire dual-write
-            ["full", Equal, "composer.runtimeProfileBalanced", "composer.runtimeProfileBalancedDesc"], // balanced wire dual-write
-            ["delivery", Flag, "composer.runtimeProfileDelivery", "composer.runtimeProfileDeliveryDesc"],
-          ] as const).map(([profile, Icon, titleKey, descKey]) => (
-            <button
-              key={profile}
-              type="button"
-              role="menuitemradio"
-              className={`composer-access-menu__item composer-profile-menu__item${tokenMode === profile ? " composer-access-menu__item--active" : ""}`}
-              onClick={() => chooseTokenMode(profile)}
-              disabled={disabled || running}
-              title={t(descKey)}
-              aria-checked={tokenMode === profile}
-            >
-              <Icon size={16} strokeWidth={1.75} />
-              <span className="composer-access-menu__copy">
-                <span className="composer-access-menu__title">{t(titleKey)}</span>
-                <span className="composer-access-menu__desc">{t(descKey)}</span>
-              </span>
-              {tokenMode === profile && <Check size={15} aria-hidden="true" />}
-            </button>
-          ))}
         </div>
       </AnchoredPopover>}
       <AnchoredPopover
@@ -4669,32 +4525,6 @@ export function Composer({
                   >
                     <TaskModeIcon size={14} aria-hidden="true" />
                     <span className="composer-task-mode-trigger__value">{t(taskModeShortKey)}</span>
-                    <ChevronsUpDown size={11} aria-hidden="true" />
-                  </button>
-                </Tooltip>
-              </div>
-            )}
-            {!heroMode && (
-              <div className="composer-meta__control composer-meta__control--profile">
-                <Tooltip label={runtimeProfileTooltipLabel} disabled={profileMenuOpen || profileMenuClosing || creationChrome}>
-                  <button
-                    ref={profileMenuAnchorRef}
-                    type="button"
-                    data-profile={tokenMode}
-                    className={`composer-profile-trigger${profileMenuOpen || profileMenuClosing ? " composer-profile-trigger--open" : ""}`}
-                    onClick={() => (profileMenuOpen || profileMenuClosing ? closeProfileMenu() : openProfileMenu())}
-                    onMouseEnter={creationChrome ? onProfileHoverEnter : undefined}
-                    onMouseLeave={creationChrome ? onProfileHoverLeave : undefined}
-                    disabled={disabled || running}
-                    aria-haspopup="menu"
-                    aria-expanded={profileMenuOpen && !profileMenuClosing}
-                    aria-label={runtimeProfileTriggerLabel}
-                    title={profileMenuOpen || profileMenuClosing || creationChrome ? undefined : runtimeProfileTriggerLabel}
-                  >
-                    <RuntimeProfileIcon size={14} strokeWidth={1.75} aria-hidden="true" />
-                    <span className="composer-profile-trigger__label">
-                      <span className="composer-profile-trigger__value">{t(runtimeProfileShortKey)}</span>
-                    </span>
                     <ChevronsUpDown size={11} aria-hidden="true" />
                   </button>
                 </Tooltip>

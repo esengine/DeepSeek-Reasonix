@@ -122,6 +122,10 @@ func (c *Controller) PrepareRewind(turn int, scope RewindScope) (checkpoint.Rewi
 	if err != nil {
 		return plan, c.rewindFail(err)
 	}
+	if scope == RewindConversation || scope == RewindBoth {
+		store.MarkPlanConversationFork(plan.PlanID)
+		plan.ConversationAction = "fork"
+	}
 	if scope == RewindBoth && !plan.CanConversation {
 		plan.CanFiles = false
 		if plan.DisabledReason == "" {
@@ -132,6 +136,8 @@ func (c *Controller) PrepareRewind(turn int, scope RewindScope) (checkpoint.Rewi
 }
 
 // CommitRewind executes a prepared plan under rotation gate + mutation barrier.
+// Conversation forks are returned detached so multi-tab frontends can keep the
+// parent controller; single-session frontends must activate result.Branch.
 func (c *Controller) CommitRewind(planID string) (checkpoint.RewindResult, error) {
 	if !c.checkpoints.enabled() || c.executor == nil {
 		return checkpoint.RewindResult{}, c.rewindFail(fmt.Errorf("checkpoints unavailable"))
@@ -158,7 +164,7 @@ func (c *Controller) CommitRewind(planID string) (checkpoint.RewindResult, error
 		return checkpoint.RewindResult{}, c.rewindFail(err)
 	}
 
-	result, err := store.CommitRewindWithForward(planID, forward, conversationApplier{c: c}, nil)
+	result, err := c.commitRewindReady(store, planID, forward, false, false)
 	if err != nil {
 		return result, c.rewindFail(err)
 	}
@@ -167,12 +173,75 @@ func (c *Controller) CommitRewind(planID string) (checkpoint.RewindResult, error
 			c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 				Text: fmt.Sprintf("rewound code — %d file(s) restored, %d removed", len(result.Written), len(result.Deleted))})
 		}
-		if result.ConversationOK {
+		if result.ConversationForked {
 			c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
-				Text: "rewound conversation"})
+				Text: "forked conversation; parent session is unchanged"})
 		}
 		atomic.AddInt64(&c.sessionRevision, 1)
 	}
+	return result, nil
+}
+
+// CommitFileRewind commits only the file half of a prepared plan.
+func (c *Controller) CommitFileRewind(planID string) (checkpoint.RewindResult, error) {
+	if !c.checkpoints.enabled() || c.executor == nil {
+		return checkpoint.RewindResult{}, c.rewindFail(fmt.Errorf("checkpoints unavailable"))
+	}
+	if err := c.beginRotation(); err != nil {
+		if errors.Is(err, errTurnRunningRotation) {
+			return checkpoint.RewindResult{}, c.rewindFail(fmt.Errorf("cannot rewind while a turn is running"))
+		}
+		return checkpoint.RewindResult{}, c.rewindFail(err)
+	}
+	defer c.endRotation()
+	store := c.checkpoints.storeRef()
+	if store == nil {
+		return checkpoint.RewindResult{}, c.rewindFail(fmt.Errorf("checkpoints unavailable"))
+	}
+	return c.commitRewindReady(store, planID, nil, true, false)
+}
+
+func (c *Controller) commitRewindReady(store *checkpoint.Store, planID string, forward []byte, filesOnly, switchToFork bool) (checkpoint.RewindResult, error) {
+	plan, ok := store.PeekPlan(planID)
+	if !ok {
+		return checkpoint.RewindResult{OK: false, Error: "unknown or expired plan"}, fmt.Errorf("unknown or expired plan %q", planID)
+	}
+	result := checkpoint.RewindResult{}
+	wantConv := !filesOnly && (plan.Scope == checkpoint.RewindConversation || plan.Scope == checkpoint.RewindBoth)
+	wantFiles := plan.Scope == checkpoint.RewindCode || plan.Scope == checkpoint.RewindBoth
+	if wantConv {
+		path, err := c.forkNamedReady(plan.Turn, "", switchToFork)
+		if err != nil {
+			return result, err
+		}
+		result.ConversationForked = true
+		result.ConversationOK = true
+		result.Branch = path
+	}
+	if wantFiles {
+		fileResult, err := store.CommitRewindWithForward(planID, forward, conversationApplier{c: c}, nil)
+		if err != nil {
+			if result.ConversationForked {
+				fileResult.Partial = true
+				fileResult.OK = true
+				fileResult.ConversationForked = true
+				fileResult.ConversationOK = true
+				fileResult.Branch = result.Branch
+				fileResult.Error = err.Error()
+				return fileResult, nil
+			}
+			return fileResult, err
+		}
+		fileResult.ConversationForked = result.ConversationForked
+		fileResult.ConversationOK = result.ConversationOK || fileResult.ConversationOK
+		fileResult.Branch = result.Branch
+		if fileResult.OperationID == "" {
+			fileResult.OperationID = fileResult.TransactionID
+		}
+		return fileResult, nil
+	}
+	_ = store.DiscardPlan(planID)
+	result.OK = result.ConversationForked
 	return result, nil
 }
 
@@ -298,6 +367,10 @@ func (c *Controller) Rewind(turn int, scope RewindScope) error {
 	if err != nil {
 		return c.rewindFail(err)
 	}
+	if scope == RewindConversation || scope == RewindBoth {
+		store.MarkPlanConversationFork(plan.PlanID)
+		plan.ConversationAction = "fork"
+	}
 	if (scope == RewindCode || scope == RewindBoth) && !plan.CanFiles {
 		return c.rewindFail(fmt.Errorf("%s", plan.DisabledReason))
 	}
@@ -313,7 +386,7 @@ func (c *Controller) Rewind(turn int, scope RewindScope) error {
 			return c.rewindFail(err)
 		}
 	}
-	result, err := store.CommitRewindWithForward(plan.PlanID, forward, conversationApplier{c: c}, nil)
+	result, err := c.commitRewindReady(store, plan.PlanID, forward, scope == RewindCode, true)
 	if err != nil {
 		return c.rewindFail(err)
 	}
@@ -321,9 +394,13 @@ func (c *Controller) Rewind(turn int, scope RewindScope) error {
 		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 			Text: fmt.Sprintf("rewound code to turn %d — %d file(s) restored, %d removed", turn, len(result.Written), len(result.Deleted))})
 	}
-	if result.ConversationOK {
+	if result.ConversationForked {
 		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
-			Text: fmt.Sprintf("rewound conversation to turn %d", turn)})
+			Text: fmt.Sprintf("forked conversation at turn %d; parent session unchanged (%s)", turn, result.Branch)})
+	}
+	if result.Partial {
+		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
+			Text: "session branch created; code was not fully restored because of a conflict"})
 	}
 	atomic.AddInt64(&c.sessionRevision, 1)
 	return nil

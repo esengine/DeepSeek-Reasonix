@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 
 	fileenc "reasonix/internal/fileutil/encoding"
@@ -15,6 +16,7 @@ type editSource struct {
 	content string
 	enc     fileenc.Kind
 	overlay bool
+	id      fileIdentity
 }
 
 // readEditSource resolves path the way Execute and Preview must both see it:
@@ -23,22 +25,37 @@ type editSource struct {
 // overlay contract is text-only, so routing GBK or UTF-16 through it would
 // rewrite the file as UTF-8.
 func readEditSource(ctx context.Context, overlay FileOverlay, path string) (editSource, error) {
+	id, err := diskIdentity(path)
+	if err != nil {
+		return editSource{}, err
+	}
+	if !id.existed {
+		if overlay != nil && filepath.IsAbs(path) {
+			if buffered, ok := overlay.ReadTextFile(ctx, path); ok {
+				return editSource{content: buffered, enc: fileenc.UTF8, overlay: true, id: overlayIdentity(buffered)}, nil
+			}
+		}
+		return editSource{enc: fileenc.UTF8, id: id}, os.ErrNotExist
+	}
 	content, enc, err := readFileEncoded(path)
 	if err != nil {
 		return editSource{}, err
 	}
 	if overlay != nil && enc == fileenc.UTF8 && filepath.IsAbs(path) {
 		if buffered, ok := overlay.ReadTextFile(ctx, path); ok {
-			return editSource{content: buffered, enc: enc, overlay: true}, nil
+			return editSource{content: buffered, enc: enc, overlay: true, id: overlayIdentity(buffered)}, nil
 		}
 	}
-	return editSource{content: content, enc: enc}, nil
+	return editSource{content: content, enc: enc, id: id}, nil
 }
 
 // write persists content on the same route the source was read from. An overlay
 // that declines the write (ok=false) falls back to disk, which is safe because
 // the content already carries whatever the buffer held.
 func (s editSource) write(ctx context.Context, overlay FileOverlay, path, content string) error {
+	if err := s.assertUnchanged(ctx, overlay, path); err != nil {
+		return err
+	}
 	if s.overlay && overlay != nil {
 		if ok, err := overlay.WriteTextFile(ctx, path, content); ok {
 			return err

@@ -254,7 +254,7 @@ func (f *FleetTool) Execute(ctx context.Context, args json.RawMessage) (result s
 			}
 			jobCtx = WithParentSession(jobCtx, parentSession)
 			jobCtx = evidence.WithLedger(jobCtx, backgroundEvidence)
-			defer func() { jobs.PublishEvidence(jobCtx, backgroundEvidence.Summary()) }()
+			defer publishBackgroundEvidence(jobCtx, backgroundEvidence, f.taskTool.workspaceRoot)
 			// The job shares the Execute-level merger so the group lifecycle
 			// events and the child previews ride the same pacing budget.
 			jobCtx = withSubagentProgressMerger(jobCtx, merger)

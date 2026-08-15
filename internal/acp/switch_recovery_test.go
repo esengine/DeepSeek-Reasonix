@@ -293,6 +293,99 @@ func TestACPLoadAfterRestartFollowsRecoveryTranscript(t *testing.T) {
 	}
 }
 
+// TestACPLoadAfterRestartFollowsIntentionalBranch verifies that the same
+// restart redirect used for conflict recovery is written when an ACP session
+// intentionally changes paths. Without it, the live process owns the branch
+// correctly, but session/load after restart falls back to the stale id-keyed
+// parent transcript.
+func TestACPLoadAfterRestartFollowsIntentionalBranch(t *testing.T) {
+	dir := t.TempDir()
+	id := "sess-branch-restart"
+	originalPath := transcriptPath(dir, id)
+	original := agent.NewSession("sys prompt")
+	original.Add(provider.Message{Role: provider.RoleUser, Content: "parent"})
+	if err := original.Save(originalPath); err != nil {
+		t.Fatalf("save original session: %v", err)
+	}
+	loaded, err := agent.LoadSession(originalPath)
+	if err != nil {
+		t.Fatalf("load original session: %v", err)
+	}
+
+	svc := &service{
+		factory:  &configurableFactory{dir: dir},
+		sessions: map[string]*acpSession{},
+	}
+	sess := &acpSession{
+		id:         id,
+		sink:       newUpdateSink(&fakeNotifier{}, id),
+		cwd:        dir,
+		model:      "fast",
+		transcript: originalPath,
+	}
+	lease, err := agent.TryAcquireSessionLease(originalPath)
+	if err != nil {
+		t.Fatalf("acquire original session lease: %v", err)
+	}
+	sess.lease = lease
+	svc.sessions[id] = sess
+	ctrl := control.New(control.Options{
+		Executor:            agent.New(nil, nil, loaded, agent.Options{}, event.Discard),
+		SessionDir:          dir,
+		SessionPath:         originalPath,
+		Label:               "fast",
+		OnSessionTransition: svc.sessionTransitionHandler(id),
+	})
+	sess.ctrl = ctrl
+	if err := bindACPWriteAuthority(ctrl, lease); err != nil {
+		t.Fatalf("bind original authority: %v", err)
+	}
+
+	branchPath, err := ctrl.Branch("restart target")
+	if err != nil {
+		t.Fatalf("branch session: %v", err)
+	}
+	if branchPath == originalPath {
+		t.Fatalf("branch path = original path %q", originalPath)
+	}
+	sess.mu.Lock()
+	activePath := sess.transcript
+	activeLease := sess.lease
+	sess.mu.Unlock()
+	if activePath != branchPath {
+		t.Fatalf("ACP transcript = %q, want branch %q", activePath, branchPath)
+	}
+	if activeLease == nil || activeLease.Path() != agent.CanonicalSessionPath(branchPath) {
+		t.Fatalf("ACP lease does not cover branch %q", branchPath)
+	}
+
+	sess.releaseSessionLease()
+	ctrl.Close()
+	if got := resolveTranscriptPath(dir, id); got != branchPath {
+		t.Fatalf("restart transcript = %q, want branch %q", got, branchPath)
+	}
+
+	restarted := &service{
+		conn:     NewConn(strings.NewReader(""), io.Discard),
+		factory:  &configurableFactory{dir: dir},
+		sessions: map[string]*acpSession{},
+	}
+	if _, err := restarted.openExistingSession(context.Background(), "session/load", id, dir, nil, false); err != nil {
+		t.Fatalf("open intentional branch after restart: %v", err)
+	}
+	reloaded := restarted.session(id)
+	if reloaded == nil {
+		t.Fatal("session not registered after restart")
+	}
+	t.Cleanup(func() {
+		reloaded.releaseSessionLease()
+		reloaded.ctrl.Close()
+	})
+	if reloaded.transcript != branchPath || reloaded.ctrl.SessionPath() != branchPath {
+		t.Fatalf("reloaded paths = transcript %q, controller %q; want %q", reloaded.transcript, reloaded.ctrl.SessionPath(), branchPath)
+	}
+}
+
 // TestACPDeleteAfterRestartRemovesRecoveryAndIDKeyedFiles: session/delete on a
 // non-live recovered session must remove both the recovery transcript (the
 // session's live file) and the id-keyed original, or the survivor resurfaces
@@ -348,44 +441,40 @@ func TestACPSessionListAfterRecoveryShowsSingleActiveEntry(t *testing.T) {
 	}
 }
 
-// profileSystemPromptFactory builds controllers whose leading system message
-// encodes the requested runtime profile, mirroring how boot.Build appends a
-// profile-specific contract to the system prompt (see boot/token_profile.go).
-// It lets a test check that a controller rebuild refreshes that contract
-// instead of carrying the outgoing profile's prompt forward.
-type profileSystemPromptFactory struct {
+// modelSystemPromptFactory builds controllers whose leading system message
+// encodes the requested model, so a rebuild test can check that AdoptHistory
+// splices in the replacement contract instead of carrying the outgoing one.
+type modelSystemPromptFactory struct {
 	dir string
 }
 
-func (f *profileSystemPromptFactory) NewSession(_ context.Context, p SessionParams) (*control.Controller, error) {
-	prompt := "system prompt for profile " + p.RuntimeProfile
+func (f *modelSystemPromptFactory) NewSession(_ context.Context, p SessionParams) (*control.Controller, error) {
+	prompt := "system prompt for model " + p.Model
 	exec := agent.New(nil, nil, agent.NewSession(prompt), agent.Options{}, event.Discard)
-	return control.New(control.Options{Executor: exec, SessionDir: f.dir, Label: p.RuntimeProfile}), nil
+	return control.New(control.Options{Executor: exec, SessionDir: f.dir, Label: p.Model}), nil
 }
 
-func (f *profileSystemPromptFactory) SessionDir() string { return f.dir }
+func (f *modelSystemPromptFactory) SessionDir() string { return f.dir }
 
-// TestACPRebuildSessionRefreshesLeadingSystemPromptForNewProfile pins the fix
-// for the bug where a work-mode (runtime profile) switch rebuilt the
-// controller with the target profile's own system prompt, only for
-// AdoptHistory to immediately overwrite it with the carried history's
-// leading message — the outgoing profile's contract. The user-visible
-// symptom was that the model kept following the previous profile's
-// instructions after every switch.
-func TestACPRebuildSessionRefreshesLeadingSystemPromptForNewProfile(t *testing.T) {
+// TestACPRebuildSessionRefreshesLeadingSystemPromptForNewModel pins the fix
+// for the bug where a model switch rebuilt the controller with the target
+// model's own system prompt, only for AdoptHistory to immediately overwrite
+// it with the carried history's leading message — the outgoing model's
+// contract.
+func TestACPRebuildSessionRefreshesLeadingSystemPromptForNewModel(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "acp-profile-switch.jsonl")
+	path := filepath.Join(dir, "acp-model-switch.jsonl")
 
-	oldSession := agent.NewSession("system prompt for profile balanced")
+	oldSession := agent.NewSession("system prompt for model fast")
 	oldSession.Add(provider.Message{Role: provider.RoleUser, Content: "hello"})
 	oldSession.Add(provider.Message{Role: provider.RoleAssistant, Content: "hi"})
 	if err := oldSession.Save(path); err != nil {
 		t.Fatalf("save base session: %v", err)
 	}
 
-	sink := newUpdateSink(&fakeNotifier{}, "sess-profile-switch")
+	sink := newUpdateSink(&fakeNotifier{}, "sess-model-switch")
 	sess := &acpSession{
-		id:             "sess-profile-switch",
+		id:             "sess-model-switch",
 		sink:           sink,
 		cwd:            dir,
 		model:          "fast",
@@ -403,15 +492,15 @@ func TestACPRebuildSessionRefreshesLeadingSystemPromptForNewProfile(t *testing.T
 		Executor:    agent.New(nil, nil, oldSession, agent.Options{}, event.Discard),
 		SessionDir:  dir,
 		SessionPath: path,
-		Label:       "balanced",
+		Label:       "fast",
 	})
 	svc := &service{
-		factory:  &profileSystemPromptFactory{dir: dir},
+		factory:  &modelSystemPromptFactory{dir: dir},
 		sessions: map[string]*acpSession{sess.id: sess},
 	}
 
-	deltas := []sessionConfigDelta{{axis: "work_mode", runtimeProfile: "delivery"}}
-	if err := svc.rebuildSession(context.Background(), sess, SessionConfigState{RuntimeProfile: "delivery"}, deltas); err != nil {
+	deltas := []sessionConfigDelta{{axis: "model", model: "pro"}}
+	if err := svc.rebuildSession(context.Background(), sess, SessionConfigState{Model: "pro"}, deltas); err != nil {
 		t.Fatalf("rebuildSession: %v", err)
 	}
 
@@ -419,27 +508,27 @@ func TestACPRebuildSessionRefreshesLeadingSystemPromptForNewProfile(t *testing.T
 	if len(history) == 0 || history[0].Role != provider.RoleSystem {
 		t.Fatalf("history = %+v, want a leading system message", history)
 	}
-	if got, want := history[0].Content, "system prompt for profile delivery"; got != want {
-		t.Fatalf("leading system message = %q, want %q (stale outgoing-profile contract carried forward)", got, want)
+	if got, want := history[0].Content, "system prompt for model pro"; got != want {
+		t.Fatalf("leading system message = %q, want %q (stale outgoing-model contract carried forward)", got, want)
 	}
 	if len(history) != 3 || history[1].Content != "hello" || history[2].Content != "hi" {
-		t.Fatalf("history after profile switch = %+v, want carried user/assistant turns preserved", history)
+		t.Fatalf("history after model switch = %+v, want carried user/assistant turns preserved", history)
 	}
 }
 
-// TestACPWorkModeSwitchPersistsRefreshedSystemPromptAcrossReload pins the disk
-// half of the profile-switch fix: the refreshed leading system prompt must be
+// TestACPModelSwitchPersistsRefreshedSystemPromptAcrossReload pins the disk
+// half of the rebuild-prompt fix: the refreshed leading system prompt must be
 // persisted at switch time, because session/close never snapshots and
 // session/load resumes the transcript exactly as saved. Before the fix the
 // switch refreshed only the new controller's in-memory history, so a
-// switch → close → load sequence revived the outgoing profile's contract even
-// though the session metadata already claimed the new profile.
-func TestACPWorkModeSwitchPersistsRefreshedSystemPromptAcrossReload(t *testing.T) {
+// switch → close → load sequence revived the outgoing model's contract even
+// though the session metadata already claimed the new model.
+func TestACPModelSwitchPersistsRefreshedSystemPromptAcrossReload(t *testing.T) {
 	dir := t.TempDir()
-	id := "sess-profile-persist"
+	id := "sess-model-persist"
 	path := transcriptPath(dir, id)
 
-	oldSession := agent.NewSession("system prompt for profile balanced")
+	oldSession := agent.NewSession("system prompt for model fast")
 	oldSession.Add(provider.Message{Role: provider.RoleUser, Content: "hello"})
 	oldSession.Add(provider.Message{Role: provider.RoleAssistant, Content: "hi"})
 	if err := oldSession.Save(path); err != nil {
@@ -464,16 +553,16 @@ func TestACPWorkModeSwitchPersistsRefreshedSystemPromptAcrossReload(t *testing.T
 		Executor:    agent.New(nil, nil, oldSession, agent.Options{}, event.Discard),
 		SessionDir:  dir,
 		SessionPath: path,
-		Label:       "balanced",
+		Label:       "fast",
 	})
 	svc := &service{
 		conn:     NewConn(strings.NewReader(""), io.Discard),
-		factory:  &profileSystemPromptFactory{dir: dir},
+		factory:  &modelSystemPromptFactory{dir: dir},
 		sessions: map[string]*acpSession{sess.id: sess},
 	}
 
-	deltas := []sessionConfigDelta{{axis: "work_mode", runtimeProfile: "delivery"}}
-	if err := svc.rebuildSession(context.Background(), sess, SessionConfigState{RuntimeProfile: "delivery"}, deltas); err != nil {
+	deltas := []sessionConfigDelta{{axis: "model", model: "pro"}}
+	if err := svc.rebuildSession(context.Background(), sess, SessionConfigState{Model: "pro"}, deltas); err != nil {
 		t.Fatalf("rebuildSession: %v", err)
 	}
 
@@ -482,8 +571,8 @@ func TestACPWorkModeSwitchPersistsRefreshedSystemPromptAcrossReload(t *testing.T
 	if err != nil {
 		t.Fatalf("load transcript after switch: %v", err)
 	}
-	if msgs := onDisk.Snapshot(); len(msgs) == 0 || msgs[0].Content != "system prompt for profile delivery" {
-		t.Fatalf("on-disk leading message after switch = %+v, want the delivery profile contract", msgs)
+	if msgs := onDisk.Snapshot(); len(msgs) == 0 || msgs[0].Content != "system prompt for model pro" {
+		t.Fatalf("on-disk leading message after switch = %+v, want the pro model contract", msgs)
 	}
 
 	raw, err := json.Marshal(SessionCloseParams{SessionID: id})
@@ -510,59 +599,59 @@ func TestACPWorkModeSwitchPersistsRefreshedSystemPromptAcrossReload(t *testing.T
 	if len(history) == 0 || history[0].Role != provider.RoleSystem {
 		t.Fatalf("loaded history = %+v, want a leading system message", history)
 	}
-	if got, want := history[0].Content, "system prompt for profile delivery"; got != want {
-		t.Fatalf("leading system prompt after switch → close → load = %q, want %q (stale outgoing-profile contract revived from disk)", got, want)
+	if got, want := history[0].Content, "system prompt for model pro"; got != want {
+		t.Fatalf("leading system prompt after switch → close → load = %q, want %q (stale outgoing-model contract revived from disk)", got, want)
 	}
 	if len(history) != 3 || history[1].Content != "hello" || history[2].Content != "hi" {
 		t.Fatalf("loaded history = %+v, want carried user/assistant turns preserved", history)
 	}
 }
 
-// TestACPWorkModeSwitchSnapshotFailureKeepsOutgoingController proves failure
+// TestACPModelSwitchSnapshotFailureKeepsOutgoingController proves failure
 // atomicity for the switch-time persistence step. If the refreshed history
 // cannot be written, the service must return an error and leave the outgoing
 // controller/config active instead of publishing an in-memory-only switch.
-func TestACPWorkModeSwitchSnapshotFailureKeepsOutgoingController(t *testing.T) {
+func TestACPModelSwitchSnapshotFailureKeepsOutgoingController(t *testing.T) {
 	dir := t.TempDir()
 	invalidPath := filepath.Join(dir, "transcript-is-a-directory")
 	if err := os.Mkdir(invalidPath, 0o755); err != nil {
 		t.Fatalf("mkdir invalid transcript path: %v", err)
 	}
 
-	oldSession := agent.NewSession("system prompt for profile balanced")
+	oldSession := agent.NewSession("system prompt for model fast")
 	oldSession.Add(provider.Message{Role: provider.RoleUser, Content: "hello"})
 	oldSession.Add(provider.Message{Role: provider.RoleAssistant, Content: "hi"})
 	oldCtrl := &snapshotLockProbeController{Controller: control.New(control.Options{
 		Executor:    agent.New(nil, nil, oldSession, agent.Options{}, event.Discard),
 		SessionDir:  dir,
 		SessionPath: invalidPath,
-		Label:       "balanced",
+		Label:       "fast",
 	})}
 	t.Cleanup(oldCtrl.Close)
 
 	sess := &acpSession{
-		id:             "sess-profile-persist-failure",
+		id:             "sess-model-persist-failure",
 		ctrl:           oldCtrl,
-		sink:           newUpdateSink(&fakeNotifier{}, "sess-profile-persist-failure"),
+		sink:           newUpdateSink(&fakeNotifier{}, "sess-model-persist-failure"),
 		cwd:            dir,
 		model:          "fast",
 		runtimeProfile: "balanced",
 		transcript:     invalidPath,
 	}
 	svc := &service{
-		factory:  &profileSystemPromptFactory{dir: dir},
+		factory:  &modelSystemPromptFactory{dir: dir},
 		sessions: map[string]*acpSession{sess.id: sess},
 	}
 
-	deltas := []sessionConfigDelta{{axis: "work_mode", runtimeProfile: "delivery"}}
-	err := svc.rebuildSession(context.Background(), sess, SessionConfigState{RuntimeProfile: "delivery"}, deltas)
+	deltas := []sessionConfigDelta{{axis: "model", model: "pro"}}
+	err := svc.rebuildSession(context.Background(), sess, SessionConfigState{Model: "pro"}, deltas)
 	if err == nil || !strings.Contains(err.Error(), "snapshot after switch") {
 		t.Fatalf("rebuildSession error = %v, want snapshot after switch failure", err)
 	}
 	if got := sess.currentCtrl(); got != oldCtrl {
 		t.Fatalf("controller changed after persistence failure: got %T %p, want outgoing %p", got, got, oldCtrl)
 	}
-	if got := sess.runtimeProfile; got != "balanced" {
-		t.Fatalf("runtime profile = %q, want outgoing balanced after persistence failure", got)
+	if got := sess.model; got != "fast" {
+		t.Fatalf("model = %q, want outgoing fast after persistence failure", got)
 	}
 }

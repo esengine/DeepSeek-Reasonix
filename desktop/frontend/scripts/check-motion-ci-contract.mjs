@@ -10,6 +10,7 @@ const packageJSON = JSON.parse(readFileSync(resolve(repoRoot, "desktop/frontend/
 const appSource = readFileSync(resolve(repoRoot, "desktop/frontend/src/App.tsx"), "utf8");
 const bridgeSource = readFileSync(resolve(repoRoot, "desktop/frontend/src/lib/bridge.ts"), "utf8");
 const desktopMainSource = readFileSync(resolve(repoRoot, "desktop/main.go"), "utf8");
+const transcriptScrollBenchSource = readFileSync(resolve(repoRoot, "desktop/frontend/bench/transcript-scroll-stability.mjs"), "utf8");
 
 function jobBody(name, nextName) {
   const match = workflow.match(new RegExp(`\\n  ${name}:\\n([\\s\\S]*?)\\n  ${nextName}:`));
@@ -136,6 +137,17 @@ if (!jobBody("desktop", "desktop-macos").includes("PLAYWRIGHT_BROWSERS_PATH=.pw-
 for (const required of ["transcript-selection.mjs", "transcript-scroll-stability.mjs"]) {
   if (!packageJSON.scripts?.["test:transcript-browser"]?.includes(required)) {
     throw new Error(`motion-ci-contract: test:transcript-browser must include ${required}`);
+  }
+}
+for (const required of [
+  "PerformanceObserver",
+  "__reasonixScrollPerfProbe",
+  "REASONIX_TRANSCRIPT_MAX_FRAME_GAP_MS",
+  "REASONIX_TRANSCRIPT_MAX_LONG_TASK_MS",
+  "Array.from({ length: 10 }",
+]) {
+  if (!transcriptScrollBenchSource.includes(required)) {
+    throw new Error(`motion-ci-contract: transcript scroll browser gate must retain performance probe ${required}`);
   }
 }
 

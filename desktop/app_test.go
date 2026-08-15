@@ -2957,10 +2957,10 @@ func TestSetEffortForTabReanchorsDepthCapRecoveryBranch(t *testing.T) {
 
 	lines := readConflictLogLines(t, store.SessionConflictLog(recoveryPath))
 	if len(lines) != 1 {
-		t.Fatalf("conflict log lines = %v, want one depth-cap diagnostic", lines)
+		t.Fatalf("conflict log lines = %v, want one recovery diagnostic", lines)
 	}
-	if !strings.Contains(lines[0], `"outcome":"recovery_depth_cap_isolated"`) {
-		t.Fatalf("conflict diagnostic = %s, want depth-cap outcome", lines[0])
+	if !strings.Contains(lines[0], `"outcome":"forked_recovery_branch"`) {
+		t.Fatalf("conflict diagnostic = %s, want stable recovery fork", lines[0])
 	}
 	if strings.Contains(lines[0], dir) || strings.Contains(lines[0], recoveryPath) {
 		t.Fatalf("conflict diagnostic leaked local path: %s", lines[0])
@@ -5363,8 +5363,68 @@ func TestSetEffortMigratesStaleOfficialDeepSeekTabModel(t *testing.T) {
 	}
 }
 
+func captureTabNotices(app *App, tab *WorkspaceTab) *[]string {
+	var notices []string
+	if tab.sink == nil {
+		tab.sink = &tabEventSink{tabID: tab.ID, app: app, ctx: context.Background()}
+	}
+	tab.sink.SetBotSink(event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Notice && strings.TrimSpace(e.Text) != "" {
+			notices = append(notices, e.Text)
+		}
+	}))
+	return &notices
+}
+
+func assertDeprecatedExecutionModeNoop(t *testing.T, app *App, tab *WorkspaceTab, old control.SessionAPI, notices []string) {
+	t.Helper()
+	if tab == nil {
+		t.Fatal("tab missing")
+	}
+	if tab.Ctrl == nil || tab.Ctrl != old {
+		t.Fatalf("controller identity changed: got %p want %p", tab.Ctrl, old)
+	}
+	if got := old.AgentPreset(); got != boot.AgentPresetBalanced {
+		t.Fatalf("controller AgentPreset = %q, want balanced", got)
+	}
+	if got := currentTabTokenMode(tab); got != boot.TokenModeFull {
+		t.Fatalf("token mode = %q, want pinned full", got)
+	}
+	meta := app.MetaForTab(tab.ID)
+	if meta.TokenMode != boot.TokenModeFull || meta.AgentPreset != boot.AgentPresetBalanced {
+		t.Fatalf("meta token/preset = %q/%q, want full/balanced", meta.TokenMode, meta.AgentPreset)
+	}
+	if len(notices) == 0 || notices[len(notices)-1] != SetAgentPresetDeprecatedNotice {
+		t.Fatalf("deprecation notice = %q, want %q", notices, SetAgentPresetDeprecatedNotice)
+	}
+}
+
+func assertSetTokenModeDidNotPersistLiveModes(t *testing.T) {
+	t.Helper()
+	for _, entry := range loadTabsFile().Tabs {
+		if entry.TokenMode == boot.TokenModeEconomy || entry.TokenMode == boot.TokenModeDelivery {
+			t.Fatalf("SetTokenMode persisted live mode %q", entry.TokenMode)
+		}
+		if entry.AgentPreset == boot.AgentPresetLight || entry.AgentPreset == boot.AgentPresetDelivery {
+			t.Fatalf("SetTokenMode persisted live preset %q", entry.AgentPreset)
+		}
+	}
+}
+
+func assertPinnedCompatPersisted(t *testing.T, app *App, tab *WorkspaceTab) {
+	t.Helper()
+	app.persistTabTokenMode(tab)
+	saved := loadTabsFile()
+	if len(saved.Tabs) != 1 {
+		t.Fatalf("saved tabs = %+v, want 1", saved.Tabs)
+	}
+	if saved.Tabs[0].TokenMode != boot.TokenModeFull || saved.Tabs[0].AgentPreset != boot.AgentPresetBalanced {
+		t.Fatalf("saved compat = token:%q preset:%q, want full/balanced", saved.Tabs[0].TokenMode, saved.Tabs[0].AgentPreset)
+	}
+}
+
 func TestSetTokenModeRebuildsController(t *testing.T) {
-	// Name kept for history; role settings now switch in place without rebuild.
+	// Name kept for history; SetTokenMode is a deprecated no-op wrapper.
 	isolateDesktopUserDirs(t)
 
 	app := NewApp()
@@ -5377,43 +5437,19 @@ func TestSetTokenModeRebuildsController(t *testing.T) {
 			c.Close()
 		}
 	}()
+	tab := app.activeTab()
+	notices := captureTabNotices(app, tab)
 
 	if err := app.SetTokenMode("economy"); err != nil {
 		t.Fatalf("SetTokenMode(economy): %v", err)
 	}
-	if c := app.activeCtrl(); c == nil {
-		t.Fatal("SetTokenMode should keep a live controller")
-	}
-	if c := app.activeCtrl(); c != old {
-		t.Fatal("SetTokenMode/role setting must switch in place without rebuilding the controller")
-	}
-	if got := old.AgentPreset(); got != boot.AgentPresetLight {
-		t.Fatalf("controller AgentPreset = %q, want light", got)
-	}
-	tab := app.activeTab()
-	if tab == nil {
-		t.Fatal("active tab missing")
-	}
-	if got := currentTabTokenMode(tab); got != "economy" {
-		t.Fatalf("token mode = %q, want economy", got)
-	}
-	if got := app.Meta().TokenMode; got != "economy" {
-		t.Fatalf("Meta token mode = %q, want economy", got)
-	}
-	if got := app.Meta().AgentPreset; got != boot.AgentPresetLight {
-		t.Fatalf("Meta agentPreset = %q, want light", got)
-	}
-	saved := loadTabsFile()
-	if len(saved.Tabs) != 1 || saved.Tabs[0].TokenMode != "economy" {
-		t.Fatalf("saved tabs = %+v, want economy token mode", saved.Tabs)
-	}
-	if saved.Tabs[0].AgentPreset != boot.AgentPresetLight {
-		t.Fatalf("saved agentPreset = %q, want light", saved.Tabs[0].AgentPreset)
-	}
+	assertDeprecatedExecutionModeNoop(t, app, tab, old, *notices)
+	assertSetTokenModeDidNotPersistLiveModes(t)
+	assertPinnedCompatPersisted(t, app, tab)
 }
 
 func TestSetTokenModeDeliveryRebuildsAndPersistsProfile(t *testing.T) {
-	// Name kept for history; delivery role setting switches in place and dual-writes.
+	// Name kept for history; SetTokenMode(delivery) is ignored and does not persist delivery.
 	isolateDesktopUserDirs(t)
 
 	app := NewApp()
@@ -5426,52 +5462,20 @@ func TestSetTokenModeDeliveryRebuildsAndPersistsProfile(t *testing.T) {
 			c.Close()
 		}
 	}()
+	tab := app.activeTab()
+	notices := captureTabNotices(app, tab)
 
 	if err := app.SetTokenMode(boot.TokenModeDelivery); err != nil {
 		t.Fatalf("SetTokenMode(delivery): %v", err)
 	}
-	if c := app.activeCtrl(); c == nil || c != old {
-		t.Fatal("delivery role setting should keep the same controller (in-place switch)")
-	}
-	if got := old.AgentPreset(); got != boot.AgentPresetDelivery {
-		t.Fatalf("controller AgentPreset = %q, want delivery", got)
-	}
-	tab := app.activeTab()
-	if got := currentTabTokenMode(tab); got != boot.TokenModeDelivery {
-		t.Fatalf("token mode = %q, want delivery", got)
-	}
-	if got := app.Meta().TokenMode; got != boot.TokenModeDelivery {
-		t.Fatalf("Meta token mode = %q, want delivery", got)
-	}
-	if got := app.Meta().AgentPreset; got != boot.AgentPresetDelivery {
-		t.Fatalf("Meta agentPreset = %q, want delivery", got)
-	}
-	saved := loadTabsFile()
-	if len(saved.Tabs) != 1 || saved.Tabs[0].TokenMode != boot.TokenModeDelivery {
-		t.Fatalf("saved tabs = %+v, want delivery profile", saved.Tabs)
-	}
-	if saved.Tabs[0].AgentPreset != boot.AgentPresetDelivery {
-		t.Fatalf("saved agentPreset = %q, want delivery", saved.Tabs[0].AgentPreset)
-	}
+	assertDeprecatedExecutionModeNoop(t, app, tab, old, *notices)
+	assertSetTokenModeDidNotPersistLiveModes(t)
 
-	// Leaving delivery must clear the persisted tokenMode so a restart does not
-	// re-arm final-readiness gates (#6582).
 	if err := app.SetTokenMode(boot.TokenModeFull); err != nil {
 		t.Fatalf("SetTokenMode(full): %v", err)
 	}
-	if got := currentTabTokenMode(app.activeTab()); got != boot.TokenModeFull {
-		t.Fatalf("token mode after full = %q, want full", got)
-	}
-	if got := app.Meta().TokenMode; got != boot.TokenModeFull {
-		t.Fatalf("Meta token mode after full = %q, want full", got)
-	}
-	saved = loadTabsFile()
-	if len(saved.Tabs) != 1 {
-		t.Fatalf("saved tabs = %+v", saved.Tabs)
-	}
-	if saved.Tabs[0].TokenMode != "" {
-		t.Fatalf("saved tokenMode = %q, want omitted/empty for full", saved.Tabs[0].TokenMode)
-	}
+	assertDeprecatedExecutionModeNoop(t, app, tab, old, *notices)
+	assertPinnedCompatPersisted(t, app, tab)
 }
 
 func TestSetTokenModeReusesCurrentSessionLease(t *testing.T) {
@@ -5522,19 +5526,11 @@ func TestSetTokenModeReusesCurrentSessionLease(t *testing.T) {
 	if err := tab.ensureSessionLease(path); err != nil {
 		t.Fatalf("ensureSessionLease: %v", err)
 	}
+	notices := captureTabNotices(app, tab)
 	if err := app.SetTokenModeForTab(tab.ID, "economy"); err != nil {
 		t.Fatalf("SetTokenModeForTab: %v", err)
 	}
-	// Role setting switches in place: same controller, same lease, same history.
-	if tab.Ctrl == nil || tab.Ctrl != oldCtrl {
-		t.Fatalf("tab controller should be reused in place, got %p want %p", tab.Ctrl, oldCtrl)
-	}
-	if got := oldCtrl.AgentPreset(); got != boot.AgentPresetLight {
-		t.Fatalf("controller AgentPreset = %q, want light", got)
-	}
-	if got := currentTabTokenMode(tab); got != "economy" {
-		t.Fatalf("token mode = %q, want economy", got)
-	}
+	assertDeprecatedExecutionModeNoop(t, app, tab, oldCtrl, *notices)
 	if tab.sessionLease == nil || sessionRuntimeKey(tab.sessionLease.Path()) != sessionRuntimeKey(path) {
 		t.Fatalf("session lease path = %q, want %q", tab.currentSessionPath(), path)
 	}
@@ -5593,23 +5589,16 @@ func TestSetTokenModeLeaseHeldKeepsCurrentController(t *testing.T) {
 	app.tabOrder = []string{tab.ID}
 	app.activeTabID = tab.ID
 
-	// Role setting switches in place and does not re-acquire the session lease,
-	// so an externally held lease does not block the switch.
+	// Deprecated wrapper must not re-acquire the session lease, so an
+	// externally held lease does not block the call or replace the controller.
+	notices := captureTabNotices(app, tab)
 	if err := app.SetTokenModeForTab(tab.ID, "economy"); err != nil {
 		t.Fatalf("SetTokenModeForTab: %v", err)
 	}
-	if tab.Ctrl != oldCtrl {
-		t.Fatalf("tab controller changed after in-place role switch")
-	}
-	if got := currentTabTokenMode(tab); got != "economy" {
-		t.Fatalf("token mode = %q, want economy", got)
-	}
-	if got := oldCtrl.AgentPreset(); got != boot.AgentPresetLight {
-		t.Fatalf("controller AgentPreset = %q, want light", got)
-	}
+	assertDeprecatedExecutionModeNoop(t, app, tab, oldCtrl, *notices)
 	meta := app.MetaForTab(tab.ID)
 	if !meta.Ready || meta.Runtime.Phase != sessionRuntimeReady {
-		t.Fatalf("role switch disabled current runtime: ready=%v phase=%q", meta.Ready, meta.Runtime.Phase)
+		t.Fatalf("deprecated mode call disabled current runtime: ready=%v phase=%q", meta.Ready, meta.Runtime.Phase)
 	}
 }
 
@@ -5642,24 +5631,20 @@ func TestSetTokenModeMigratesStaleOfficialDeepSeekTabModel(t *testing.T) {
 		}
 	}()
 
+	tab := app.activeTab()
+	notices := captureTabNotices(app, tab)
 	if err := app.SetTokenMode("economy"); err != nil {
 		t.Fatalf("SetTokenMode(economy): %v", err)
 	}
-	tab := app.activeTab()
 	if tab == nil {
 		t.Fatal("active tab missing")
 	}
-	// Role setting no longer rebuilds the controller, so stale model aliases
-	// are not migrated on this path (migration still runs on model/effort rebuilds).
+	// SetTokenMode does not rebuild, so stale model aliases stay put
+	// (migration still runs on model/effort rebuilds).
 	if tab.model != "deepseek-flash/deepseek-v4-flash" {
 		t.Fatalf("tab model = %q, want unchanged stale ref without rebuild", tab.model)
 	}
-	if got := currentTabTokenMode(tab); got != "economy" {
-		t.Fatalf("token mode = %q, want economy", got)
-	}
-	if c := app.activeCtrl(); c != old {
-		t.Fatal("role setting must keep the same controller")
-	}
+	assertDeprecatedExecutionModeNoop(t, app, tab, old, *notices)
 }
 
 func TestMetaForTabReportsImageInputCapability(t *testing.T) {
@@ -5752,7 +5737,7 @@ func TestMetaForTabImageInputCapabilityUsesCurrentRef(t *testing.T) {
 }
 
 func TestSetTokenModeKeepsControllerWhenRebuildFails(t *testing.T) {
-	// Role setting no longer rebuilds; an unknown model must not block the switch.
+	// Name kept for history; an unknown model must not block the deprecated no-op.
 	isolateDesktopUserDirs(t)
 	t.Setenv("DEEPSEEK_API_KEY", "")
 	t.Setenv("MIMO_API_KEY", "")
@@ -5767,23 +5752,13 @@ func TestSetTokenModeKeepsControllerWhenRebuildFails(t *testing.T) {
 			c.Close()
 		}
 	}()
+	tab := app.activeTab()
+	notices := captureTabNotices(app, tab)
 
 	if err := app.SetTokenMode("economy"); err != nil {
-		t.Fatalf("SetTokenMode(economy) in-place switch: %v", err)
+		t.Fatalf("SetTokenMode(economy): %v", err)
 	}
-	if c := app.activeCtrl(); c != old {
-		t.Fatalf("SetTokenMode replaced controller: got %p want %p", c, old)
-	}
-	tab := app.activeTab()
-	if tab == nil {
-		t.Fatal("active tab missing")
-	}
-	if got := currentTabTokenMode(tab); got != "economy" {
-		t.Fatalf("token mode after in-place switch = %q, want economy", got)
-	}
-	if got := app.Meta().TokenMode; got != "economy" {
-		t.Fatalf("Meta token mode after in-place switch = %q, want economy", got)
-	}
+	assertDeprecatedExecutionModeNoop(t, app, tab, old, *notices)
 }
 
 func TestSetEffortRejectsRunningTurn(t *testing.T) {
@@ -5805,24 +5780,29 @@ func TestSetEffortRejectsRunningTurn(t *testing.T) {
 }
 
 func TestSetTokenModeRejectsRunningTurn(t *testing.T) {
+	// Name kept for history; the deprecated wrapper does not require an idle tab.
 	isolateDesktopUserDirs(t)
 
 	runner := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
 	app := NewApp()
-	app.setTestCtrl(control.New(control.Options{Runner: runner}), "")
-	app.activeCtrl().Submit("work")
+	old := control.New(control.Options{Runner: runner})
+	app.setTestCtrl(old, "")
+	tab := app.activeTab()
+	notices := captureTabNotices(app, tab)
+	old.Submit("work")
 	<-runner.started
 
-	err := app.SetTokenMode("economy")
-	if err == nil || !strings.Contains(err.Error(), "finish or cancel") {
-		t.Fatalf("SetTokenMode while running error = %v, want finish/cancel guard", err)
+	if err := app.SetTokenMode("economy"); err != nil {
+		t.Fatalf("SetTokenMode while running: %v", err)
 	}
+	assertDeprecatedExecutionModeNoop(t, app, tab, old, *notices)
 
 	close(runner.release)
 	waitNotRunning(t, app.activeCtrl())
 }
 
 func TestSetTokenModeRejectsBackgroundJobs(t *testing.T) {
+	// Name kept for history; background jobs must not block the deprecated wrapper.
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "OLD_MODEL_KEY", "sk-test")
 
@@ -5851,6 +5831,8 @@ func TestSetTokenModeRejectsBackgroundJobs(t *testing.T) {
 			current.Close()
 		}
 	})
+	tab := app.activeTab()
+	notices := captureTabNotices(app, tab)
 
 	release := make(chan struct{})
 	job := jm.StartForSession(agent.BranchID(path), "bash", "long job", func(ctx context.Context, _ io.Writer) (string, error) {
@@ -5863,10 +5845,10 @@ func TestSetTokenModeRejectsBackgroundJobs(t *testing.T) {
 	})
 	t.Cleanup(func() { close(release) })
 
-	err := app.SetTokenMode("economy")
-	if err == nil || !strings.Contains(err.Error(), "background_jobs=1") {
-		t.Fatalf("SetTokenMode with background job error = %v, want exact background-job guard", err)
+	if err := app.SetTokenMode("economy"); err != nil {
+		t.Fatalf("SetTokenMode with background job: %v", err)
 	}
+	assertDeprecatedExecutionModeNoop(t, app, tab, ctrl, *notices)
 	cancelled, err := app.CancelJobForTab("", job.ID)
 	if err != nil || !cancelled {
 		t.Fatalf("CancelJobForTab = %v, %v, want true, nil", cancelled, err)
@@ -5874,8 +5856,18 @@ func TestSetTokenModeRejectsBackgroundJobs(t *testing.T) {
 	if result := jm.WaitForSession(context.Background(), agent.BranchID(path), []string{job.ID}, 5); len(result) != 1 || result[0].Status != jobs.Killed {
 		t.Fatalf("stopped background job = %+v, want one killed result", result)
 	}
-	if err := app.SetTokenMode("economy"); err != nil {
-		t.Fatalf("SetTokenMode after stopping background job: %v", err)
+}
+
+func TestSetTokenModeUnknownTabErrors(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	app := NewApp()
+	err := app.SetTokenModeForTab("missing-tab", "economy")
+	if err == nil || !strings.Contains(err.Error(), `tab "missing-tab" not found`) {
+		t.Fatalf("SetTokenModeForTab(unknown) = %v, want tab not found", err)
+	}
+	err = app.SetAgentPresetForTab("missing-tab", boot.AgentPresetLight)
+	if err == nil || !strings.Contains(err.Error(), `tab "missing-tab" not found`) {
+		t.Fatalf("SetAgentPresetForTab(unknown) = %v, want tab not found", err)
 	}
 }
 

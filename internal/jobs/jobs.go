@@ -636,7 +636,7 @@ func mutationEvidenceForArtifact(summary evidence.ChildEvidenceSummary) *artifac
 		return nil
 	}
 	return &artifactMutationEvidence{
-		Risk:  string(evidence.ClassifyMutationRisk(summary.Receipts, firstMutation)),
+		Risk:  string(evidence.ClassifyMutationRiskWithin(summary.Receipts, firstMutation, summary.WorkspaceRoot)),
 		Paths: summary.MutationPaths(),
 	}
 }
@@ -1954,7 +1954,7 @@ func PublishEvidence(ctx context.Context, summary evidence.ChildEvidenceSummary)
 		return
 	}
 	j.mu.Lock()
-	j.evidence.Receipts = append(j.evidence.Receipts, summary.Receipts...)
+	mergePublishedEvidence(&j.evidence, summary)
 	j.mu.Unlock()
 }
 
@@ -2004,7 +2004,7 @@ func (m *Manager) tryLeaseEvidenceForSession(parentSession, id string) (evidence
 	}
 	out := make([]evidence.Receipt, len(j.evidence.Receipts))
 	copy(out, j.evidence.Receipts)
-	return evidence.ChildEvidenceSummary{Receipts: out}, true
+	return evidence.ChildEvidenceSummary{Receipts: out, WorkspaceRoot: j.evidence.WorkspaceRoot}, true
 }
 
 // PendingEvidenceJobIDsForSession returns the IDs of parentSession's terminal

@@ -1,0 +1,75 @@
+.workspace-resource-status {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: var(--z-workspace-status);
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elev) 92%, transparent);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  pointer-events: none;
+}
+
+.workspace-resource-status--error {
+  color: var(--danger);
+}
+
+.workspace-git-history,
+.workspace-current-change__body {
+  position: relative;
+}
+
+.layout--workspace-overlay .workbench-dock--overlay {
+  position: absolute;
+  z-index: var(--z-workspace-float);
+  top: var(--app-chrome-height);
+  right: 0;
+  bottom: var(--statusbar-height);
+  width: min(var(--workspace-width), calc(100vw - 16px));
+  height: auto;
+  grid-area: auto;
+  border: 1px solid var(--border-soft);
+  border-right: 0;
+  border-radius: 10px 0 0 10px;
+  box-shadow: -12px 0 36px rgba(0, 0, 0, 0.24);
+}
+
+/* Preserve an opened sidebar beside a 400px chat surface at the native
+   shell's 760px minimum; the right dock floats above both surfaces. */
+@media (max-width: 820px) {
+  :is(.app, :root[data-theme-style] .app) .layout:not(.layout--sidebar-collapsed) {
+    grid-template-columns: var(--sidebar-expanded-width) minmax(400px, 1fr) !important;
+  }
+
+  :is(.app, :root[data-theme-style] .app) .layout.layout--sidebar-collapsed {
+    grid-template-columns: minmax(400px, 1fr) !important;
+  }
+
+  :is(.app, :root[data-theme-style] .app) .layout:not(.layout--sidebar-collapsed) .sidebar {
+    position: relative;
+    inset: auto;
+    z-index: var(--z-flow);
+    display: flex !important;
+    grid-column: 1;
+    width: auto;
+    max-width: none;
+    height: auto;
+  }
+
+  :is(.app, :root[data-theme-style] .app) .layout:not(.layout--sidebar-collapsed) .chat-pane {
+    grid-column: 2 !important;
+    min-width: 400px;
+  }
+
+  :is(.app, :root[data-theme-style] .app) .layout.layout--sidebar-collapsed .chat-pane {
+    grid-column: 1 !important;
+    min-width: 400px;
+  }
+
+  :is(.app, :root[data-theme-style] .app) .layout--workspace-overlay .workbench-dock--overlay {
+    display: flex !important;
+  }
+}

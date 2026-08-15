@@ -1,6 +1,7 @@
 package edge
 
 import (
+	"runtime"
 	"testing"
 	"time"
 	"unsafe"
@@ -12,6 +13,12 @@ import (
 )
 
 func TestCookieManager(t *testing.T) {
+	// COM apartment initialization is bound to the current OS thread. Keep the
+	// test goroutine pinned through WebView2 setup and teardown so Go cannot
+	// migrate it after CoInitializeEx.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	// Initialize COM
 	err := windows.CoInitializeEx(0, windows.COINIT_APARTMENTTHREADED)
 	if err != nil {
@@ -81,7 +88,15 @@ func TestCookieManager(t *testing.T) {
 	err = cookieManager.DeleteAllCookies()
 	require.NoError(t, err, "Should delete all cookies without error")
 
-	t.Run("Test Cookie Creation and Properties", func(t *testing.T) {
+	// testing.T.Run executes its body in another goroutine, which can move the
+	// COM calls off the apartment thread that created cookieManager. Keep the
+	// logical sections inline while retaining their names in verbose output.
+	runOnCOMThread := func(name string, test func()) {
+		t.Log(name)
+		test()
+	}
+
+	runOnCOMThread("Test Cookie Creation and Properties", func() {
 		// Create a new cookie
 		cookie, err := cookieManager.CreateCookie("testCookie", "testValue", "example.com", "/test")
 		require.NoError(t, err, "Should create cookie without error")
@@ -145,7 +160,7 @@ func TestCookieManager(t *testing.T) {
 		assert.Equal(t, int32(2), sameSite, "Cookie SameSite should be Lax")
 	})
 
-	t.Run("Test Cookie Management", func(t *testing.T) {
+	runOnCOMThread("Test Cookie Management", func() {
 		// Create and add a cookie
 		cookie, err := cookieManager.CreateCookie("managedCookie", "testValue", "example.com", "/test")
 		require.NoError(t, err, "Should create cookie without error")

@@ -59,7 +59,7 @@ func permissionFlag(mode string) (string, error) {
 	}
 }
 
-func swebenchAgentArgs(metricsPath, model, profile, permission string, arm ablation.Set, maxSteps int, prompt string) []string {
+func swebenchAgentArgs(metricsPath, model, permission string, arm ablation.Set, maxSteps int, prompt string) []string {
 	posture, err := permissionFlag(permission)
 	if err != nil {
 		panic(err) // validated at flag-parse time; reaching here is a wiring bug
@@ -71,7 +71,6 @@ func swebenchAgentArgs(metricsPath, model, profile, permission string, arm ablat
 	if maxSteps > 0 {
 		args = append(args, "--max-steps", fmt.Sprint(maxSteps))
 	}
-	args = appendBenchmarkProfileArgs(args, profile)
 	if !arm.Empty() {
 		args = append(args, "--ablate", arm.String())
 	}

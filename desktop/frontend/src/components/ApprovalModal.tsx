@@ -17,6 +17,7 @@ import {
   pickInlineFileReference,
   useFileReferenceMenu,
 } from "./FileReferenceMenu";
+import { WriteAccessApprovalDetails, writeAccessDecisionActions, type DecisionAction } from "./WriteAccessApproval";
 
 function requiresFreshHumanApproval(tool: string): boolean {
   return tool === "remember" || tool === "forget" || tool === "exit_plan_mode" || tool === "sandbox_escape" || tool === "config_write";
@@ -135,18 +136,6 @@ function localizePlanModeApprovalReason(tool: string, reason: string, t: Transla
   return reason;
 }
 
-type DecisionAction = {
-  key: string;
-  label: string;
-  desc: string;
-  tone?: "default" | "danger";
-  primary?: boolean;
-  // Plan revision and plan guidance open inline editors instead of submitting.
-  // Other recovery actions use direct-click submit (no select-then-confirm).
-  kind: "submit" | "toggle-revision" | "toggle-guidance" | "direct";
-  run?: () => void;
-};
-
 const RECOVERY_FEEDBACK_MAX = 1000;
 
 function recoveryReasonText(
@@ -249,6 +238,7 @@ export function ApprovalModal({
 }) {
   const t = useT();
   const isPlanApproval = approval.tool === "exit_plan_mode";
+  const isWriteAccessApproval = approval.kind === "write_access" || Boolean(approval.write_access);
   const isRecoveryApproval = approval.kind === "recovery" || Boolean(approval.recovery);
   const recovery = approval.recovery;
   const recoveryChangeKind = (recovery?.change_kind ?? "").toLowerCase();
@@ -374,6 +364,8 @@ export function ApprovalModal({
           run: () => resolveRecovery(grantSimilarForTask && recovery?.can_grant_task ? "continue_task" : "continue"),
         },
       ]
+    : isWriteAccessApproval
+    ? writeAccessDecisionActions(t, onAnswer)
     : isPlanApproval
     ? [
         {
@@ -748,6 +740,8 @@ export function ApprovalModal({
         title={
           isPlanApproval
             ? t("approval.planReady")
+            : isWriteAccessApproval
+              ? t("approval.writeAccessPending")
             : isRecoveryPlanChange
               ? t("approval.recoveryPlanChangePending")
               : isRecoveryApproval
@@ -923,7 +917,7 @@ export function ApprovalModal({
       >
         {(approvalModeRelaxed ||
           isRecoveryApproval ||
-          (!isPlanApproval && !isRecoveryApproval && (subject || (reasonOpen && reason))) ||
+          (!isPlanApproval && !isRecoveryApproval && (subject || isWriteAccessApproval || (reasonOpen && reason))) ||
           (isPlanApproval && revisionOpen)) && (
           <>
             {approvalModeRelaxed && !isRecoveryApproval && (
@@ -993,7 +987,10 @@ export function ApprovalModal({
                 )}
               </dl>
             )}
-            {!isPlanApproval && !isRecoveryApproval && subject && (
+            {!isPlanApproval && !isRecoveryApproval && isWriteAccessApproval && (
+              <WriteAccessApprovalDetails approval={approval} subject={subject} reason={reason} reasonOpen={reasonOpen} t={t} />
+            )}
+            {!isPlanApproval && !isRecoveryApproval && !isWriteAccessApproval && subject && (
               <div className="approval-details">
                 <pre className="approval-subject">{subject}</pre>
                 {reasonOpen && reason && <div className="approval-reason">{reason}</div>}

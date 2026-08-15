@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -13,6 +14,7 @@ import (
 type phaseSink struct {
 	phases      []string
 	completions int
+	summaries   []event.CompletionSummaryInfo
 }
 
 func (s *phaseSink) Emit(e event.Event) {
@@ -21,6 +23,9 @@ func (s *phaseSink) Emit(e event.Event) {
 	}
 	if e.Kind == event.CompletionSummary {
 		s.completions++
+		if e.Completion != nil {
+			s.summaries = append(s.summaries, *e.Completion)
+		}
 	}
 }
 
@@ -51,7 +56,7 @@ func TestCompletionSummaryEmittedOnMutationContract(t *testing.T) {
 		{toolCallChunk("w1", "write_file", `{"path":"a.go","content":"package a"}`), {Type: provider.ChunkDone}},
 		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
 	}}
-	a := New(prov, reg, NewSession("sys"), Options{AgentPreset: "balanced"}, sink)
+	a := New(prov, reg, NewSession("sys"), Options{}, sink)
 	// May fail readiness; still expect completion summary when mutations landed.
 	_ = a.Run(context.Background(), "add a.go helper")
 	if sink.completions == 0 {
@@ -62,6 +67,13 @@ func TestCompletionSummaryEmittedOnMutationContract(t *testing.T) {
 		t.Log("no completion summary (readiness may have blocked finalize); phases=", sink.phases)
 		return
 	}
+	if len(sink.summaries) != 1 || !slices.Contains(sink.summaries[0].GapKinds, "unreviewed_change") {
+		t.Fatalf("completion summaries = %+v, want host-reported unreviewed change", sink.summaries)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	return slices.Contains(values, want)
 }
 
 func TestExecutionPolicyPresentOnMutationTurn(t *testing.T) {
@@ -69,15 +81,15 @@ func TestExecutionPolicyPresentOnMutationTurn(t *testing.T) {
 		{Type: provider.ChunkText, Text: "ok"},
 		{Type: provider.ChunkDone},
 	}}
-	a := New(prov, tool.NewRegistry(), NewSession("sys"), Options{AgentPreset: "delivery"}, event.Discard)
+	a := New(prov, tool.NewRegistry(), NewSession("sys"), Options{}, event.Discard)
 	_ = a.Run(context.Background(), "explain mutexes")
 	found := false
 	for _, m := range a.sess.conversation.Messages {
-		if m.Role == provider.RoleUser && strings.Contains(m.Content, `preset="delivery"`) {
+		if m.Role == provider.RoleUser && strings.Contains(m.Content, "<execution-policy") {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatal("delivery execution-policy block missing")
+		t.Fatal("execution-policy block missing")
 	}
 }

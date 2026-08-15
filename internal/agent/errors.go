@@ -31,7 +31,7 @@ func PauseClass(err error) string {
 
 // RunPauseInfo is the stable host-facing description of a deliberate Run
 // boundary. It keeps unexported control-flow error types private while allowing
-// Controller to distinguish a host default from an explicit user max_steps.
+// Controller to distinguish task budgets from an explicit runtime max_steps.
 type RunPauseInfo struct {
 	Kind      string
 	Limit     int
@@ -44,7 +44,7 @@ type RunPauseInfo struct {
 func InspectRunPause(err error) (RunPauseInfo, bool) {
 	var maxSteps *maxStepsPause
 	if errors.As(err, &maxSteps) {
-		return RunPauseInfo{Kind: "max_steps", Limit: maxSteps.steps, Key: maxSteps.key, HostOwned: maxSteps.hostOwned}, true
+		return RunPauseInfo{Kind: "max_steps", Limit: maxSteps.steps, Key: maxSteps.key}, true
 	}
 	var budget *taskBudgetPause
 	if errors.As(err, &budget) {

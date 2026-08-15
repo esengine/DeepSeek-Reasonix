@@ -702,7 +702,7 @@ func (c *Catalog) GetTopic(ctx context.Context, key TopicKey) (TopicRecord, bool
 }
 
 func topicRepresentativePath(sessions []SessionRecord) string {
-	if path := CanonicalSessionPathForTopic(sessions, ""); path != "" {
+	if path := OrdinaryContinuePath(sessions, ""); path != "" {
 		return path
 	}
 	preferred := PreferredOrdinarySessionPaths(sessions)

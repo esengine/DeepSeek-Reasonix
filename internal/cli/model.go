@@ -77,7 +77,6 @@ func (m *chatTUI) runModelSubcommand(input string) {
 	m.pendingModelSwitch = func() tea.Msg {
 		c, err := build(controllerBuildSpec{
 			ModelRef:         ref,
-			RuntimeProfile:   m.runtimeProfile,
 			ToolApprovalMode: oldCtrl.ToolApprovalMode(),
 			PlanMode:         oldCtrl.PlanMode(),
 		}, carried, prevPath, oldCtrl)

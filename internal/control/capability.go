@@ -48,16 +48,12 @@ func (c *Controller) routeCapabilities(ctx context.Context, routeInput string) c
 		ctx = context.Background()
 	}
 	tools := c.ToolContractEntries()
-	profile := capability.ProfileBalanced
-	switch c.AgentPreset() {
-	case "light":
-		profile = capability.ProfileEconomy
-	case "delivery":
-		profile = capability.ProfileDelivery
-	}
-	delivery := profile == capability.ProfileDelivery
-	semanticAllowed := delivery
+	// One shared capability directory: task risk picks the route strength
+	// (closed-loop promotion), never the visible tool set.
+	closedLoop := false
+	semanticAllowed := false
 	if policy, ok := taskpolicy.FromContext(ctx); ok {
+		closedLoop = policy.ClosedLoop()
 		semanticAllowed = policy.SemanticRouterAllowed
 	}
 	var proxyTools map[string][]plugin.CachedTool
@@ -76,9 +72,8 @@ func (c *Controller) routeCapabilities(ctx context.Context, routeInput string) c
 		}
 	}
 	opts := capability.CatalogOptions{
-		Tools:   tools,
-		Skills:  c.Skills(),
-		Profile: profile,
+		Tools:  tools,
+		Skills: c.Skills(),
 	}
 	if c.capabilityRuntime != nil {
 		opts.Plugins, opts.CachedTools, opts.CacheKeyOK, opts.Disabled, proxyTools = c.capabilityRuntime.CapabilityCatalogState()
@@ -103,8 +98,8 @@ func (c *Controller) routeCapabilities(ctx context.Context, routeInput string) c
 	}
 	catalog := capability.BuildCatalog(opts)
 	var decision capability.RouteDecision
-	if delivery {
-		decision = capability.RouteDelivery(routeInput, catalog.Entries)
+	if closedLoop {
+		decision = capability.RouteClosedLoop(routeInput, catalog.Entries)
 	} else {
 		decision = capability.Route(routeInput, catalog.Entries)
 	}
@@ -113,7 +108,7 @@ func (c *Controller) routeCapabilities(ctx context.Context, routeInput string) c
 	}
 
 	// The frozen TaskPolicy decides whether ambiguity warrants the semantic
-	// router; deterministic routing remains first for every role setting.
+	// router; deterministic routing remains first for every task.
 	if semanticAllowed && c.semanticRouter != nil {
 		before := len(decision.Candidates)
 		strong := false
@@ -159,8 +154,8 @@ func (c *Controller) WireCapabilityRouting(plugins []config.PluginEntry, specs [
 }
 
 // SetCapabilityProxyRouting directs unready MCP route candidates to
-// use_capability instead of connect_tool_source. Used by Delivery and by
-// Balanced dual-model Planner boots.
+// use_capability instead of connect_tool_source. Used by closed-loop routes and
+// dual-model Planner boots.
 func (c *Controller) SetCapabilityProxyRouting(v bool) {
 	if c == nil {
 		return

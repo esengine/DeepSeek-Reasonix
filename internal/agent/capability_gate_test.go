@@ -1,15 +1,49 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
 	"reasonix/internal/evidence"
+	"reasonix/internal/taskpolicy"
 	"reasonix/internal/tool"
 )
 
-func TestDeliveryReviewGateExplainsOpaqueMutationRecovery(t *testing.T) {
+func closedLoopTurnPolicy(review taskpolicy.Review) taskpolicy.TaskPolicy {
+	return taskpolicy.TaskPolicy{
+		Evidence: taskpolicy.EvidenceClosedLoop,
+		Review:   review,
+	}
+}
+
+func withClosedLoopContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return taskpolicy.WithContext(ctx, closedLoopTurnPolicy(taskpolicy.ReviewForced))
+}
+
+func noClosedLoopPolicy() taskpolicy.TaskPolicy {
+	return taskpolicy.TaskPolicy{
+		// Pin risk at the ceiling so escalatePolicyFromEvidence cannot
+		// RaiseRisk and reevaluate floors into a closed loop.
+		Risk:         taskpolicy.RiskHigh,
+		Evidence:     taskpolicy.EvidenceNone,
+		Review:       taskpolicy.ReviewNone,
+		Verification: taskpolicy.VerifyNone,
+	}
+}
+
+func withNoClosedLoop(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return taskpolicy.WithContext(ctx, noClosedLoopPolicy())
+}
+
+func TestClosedLoopReviewGateExplainsOpaqueMutationRecovery(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.Receipt{
 		ToolName: "bash",
@@ -21,7 +55,11 @@ func TestDeliveryReviewGateExplainsOpaqueMutationRecovery(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "review", readOnly: true})
 	reg.Add(fakeTool{name: "security_review", readOnly: true})
-	a := &Agent{deliveryProfile: true, task: taskRuntime{ledger: ledger}, svc: agentServices{tools: reg}}
+	a := &Agent{
+		task: taskRuntime{ledger: ledger},
+		svc:  agentServices{tools: reg},
+		turn: turnRuntime{policySet: true, policy: closedLoopTurnPolicy(taskpolicy.ReviewForcedSecurity)},
+	}
 
 	got := a.deliveryReviewGateFailure()
 	for _, want := range []string{"high-risk", "git status --short", "git diff", "mutation did not report file paths"} {
@@ -55,28 +93,32 @@ func TestDeliveryReviewGateExplainsOpaqueMutationRecovery(t *testing.T) {
 	}
 }
 
-func TestNonDeliveryProfileNeverRequiresStructuredReview(t *testing.T) {
+func TestUnsetTaskPolicyNeverRequiresStructuredReview(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/permission/gate.go"}`), true, false))
 
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "review", readOnly: true})
 	reg.Add(fakeTool{name: "security_review", readOnly: true})
-	a := &Agent{deliveryProfile: false, task: taskRuntime{ledger: ledger}, svc: agentServices{tools: reg}}
+	a := &Agent{task: taskRuntime{ledger: ledger}, svc: agentServices{tools: reg}}
 
 	if got := a.deliveryReviewGateFailure(); got != "" {
-		t.Fatalf("non-Delivery review gate = %q, want disabled", got)
+		t.Fatalf("unset TaskPolicy review gate = %q, want disabled", got)
 	}
 }
 
-func TestDeliveryReviewGateHighRiskStillRequiresSecurityReview(t *testing.T) {
+func TestClosedLoopReviewGateHighRiskStillRequiresSecurityReview(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/permission/gate.go"}`), true, false))
 
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "review", readOnly: true})
 	reg.Add(fakeTool{name: "security_review", readOnly: true})
-	a := &Agent{deliveryProfile: true, task: taskRuntime{ledger: ledger}, svc: agentServices{tools: reg}}
+	a := &Agent{
+		task: taskRuntime{ledger: ledger},
+		svc:  agentServices{tools: reg},
+		turn: turnRuntime{policySet: true, policy: closedLoopTurnPolicy(taskpolicy.ReviewForcedSecurity)},
+	}
 
 	if got := a.deliveryReviewGateFailure(); !strings.Contains(got, "high-risk") {
 		t.Fatalf("review gate = %q, want high-risk review demand", got)
@@ -103,7 +145,7 @@ func TestDeliveryReviewGateHighRiskStillRequiresSecurityReview(t *testing.T) {
 	}
 }
 
-func TestDeliveryReviewGateMediumAcceptsHostProvenVerificationAndCoverage(t *testing.T) {
+func TestClosedLoopReviewGateMediumAcceptsHostProvenVerificationAndCoverage(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/agent/parser.go"}`), true, false))
 	ledger.Record(evidence.ReceiptFromToolCall("bash", json.RawMessage(`{"command":"go test ./..."}`), true, true))
@@ -115,7 +157,11 @@ func TestDeliveryReviewGateMediumAcceptsHostProvenVerificationAndCoverage(t *tes
 
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "review", readOnly: true})
-	a := &Agent{deliveryProfile: true, task: taskRuntime{ledger: ledger}, svc: agentServices{tools: reg}}
+	a := &Agent{
+		task: taskRuntime{ledger: ledger},
+		svc:  agentServices{tools: reg},
+		turn: turnRuntime{policySet: true, policy: closedLoopTurnPolicy(taskpolicy.ReviewForced)},
+	}
 	if got := a.deliveryReviewGateFailure(); got != "" {
 		t.Fatalf("medium-risk host proof was rejected: %q", got)
 	}
@@ -129,14 +175,19 @@ func TestDeliveryReviewGateMediumAcceptsHostProvenVerificationAndCoverage(t *tes
 	}
 }
 
-func TestDeliveryReviewGateDefersToParentInSubagents(t *testing.T) {
+func TestClosedLoopReviewGateDefersToParentInSubagents(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/permission/gate.go"}`), true, false))
 
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "review", readOnly: true})
 	reg.Add(fakeTool{name: "security_review", readOnly: true})
-	a := &Agent{agentConfig: agentConfig{subagentDepth: 1}, deliveryProfile: true, task: taskRuntime{ledger: ledger}, svc: agentServices{tools: reg}}
+	a := &Agent{
+		agentConfig: agentConfig{subagentDepth: 1},
+		task:        taskRuntime{ledger: ledger},
+		svc:         agentServices{tools: reg},
+		turn:        turnRuntime{policySet: true, policy: closedLoopTurnPolicy(taskpolicy.ReviewForcedSecurity)},
+	}
 
 	// Inside a sub-agent the structured-review contract belongs to the parent,
 	// which receives the child's mutation receipts via mergeChildEvidence. The

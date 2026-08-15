@@ -66,6 +66,9 @@ func NewMCPCapabilityRuntime(lifeCtx context.Context, host *plugin.Host, specs [
 		state:    &mcpProxySharedState{connected: map[string]bool{}},
 	}
 	r.ConfigureServers(nil, specs, nil)
+	if host != nil {
+		host.SubscribeToolListChangesWithReplay(lifeCtx, r.applyToolListChange)
+	}
 	return r
 }
 
@@ -111,13 +114,10 @@ func (r *MCPCapabilityRuntime) ConfigureServers(entries []config.PluginEntry, sp
 		}
 	}
 	r.mu.Lock()
+	previous := r.servers
 	r.servers = next
 	r.mu.Unlock()
-	for name := range next {
-		if !next[name].enabled {
-			r.state.clearServer(name)
-		}
-	}
+	r.syncRegistryInventory(previous, next)
 }
 
 // UpsertServer makes a hot-added or updated MCP spec authoritative for every
@@ -148,6 +148,7 @@ func (r *MCPCapabilityRuntime) UpsertServer(entry config.PluginEntry, raw plugin
 		cacheKeyOK: keyOK,
 	}
 	r.mu.Unlock()
+	r.setRegistryServerEnabled(name, enabled)
 	// Endpoint/tool metadata may have changed. Never route a stale live snapshot
 	// across an update; a connected client or the next call will repopulate it.
 	r.state.clearServer(name)
@@ -170,8 +171,11 @@ func (r *MCPCapabilityRuntime) SetServerEnabled(name string, enabled bool) bool 
 		r.servers[name] = server
 	}
 	r.mu.Unlock()
-	if ok && !enabled {
-		r.state.clearServer(name)
+	if ok {
+		r.setRegistryServerEnabled(name, enabled)
+		if !enabled {
+			r.state.clearServer(name)
+		}
 	}
 	return ok
 }
@@ -189,6 +193,7 @@ func (r *MCPCapabilityRuntime) RemoveServer(name string) bool {
 	_, ok := r.servers[name]
 	delete(r.servers, name)
 	r.mu.Unlock()
+	r.setRegistryServerEnabled(name, false)
 	r.state.clearServer(name)
 	return ok
 }
@@ -935,20 +940,20 @@ func (t *UseCapabilityTool) resolveCall(ctx context.Context, id string, args jso
 	// Registry-backed tools and skills share the unified proxy. Real writers
 	// still pass permission/plan/sandbox/lease checks via ResolvedCall.Target.
 	if name, ok := strings.CutPrefix(id, "tool:"); ok {
-		return t.resolveRegistryTool(strings.TrimSpace(name), id, args, base)
+		return t.resolveRegistryTool(ctx, strings.TrimSpace(name), id, args, base)
 	}
 	if name, ok := strings.CutPrefix(id, "skill:"); ok {
 		return t.resolveSkillCall(strings.TrimSpace(name), id, args, base)
 	}
 	if name, ok := strings.CutPrefix(id, "task:"); ok {
-		return t.resolveRegistryTool(taskToolName(name), id, args, base)
+		return t.resolveRegistryTool(ctx, taskToolName(name), id, args, base)
 	}
 	if name, ok := strings.CutPrefix(id, "workflow:"); ok {
-		return t.resolveRegistryTool(strings.TrimSpace(name), "tool:"+strings.TrimSpace(name), args, base)
+		return t.resolveRegistryTool(ctx, strings.TrimSpace(name), "tool:"+strings.TrimSpace(name), args, base)
 	}
 	for _, prefix := range []string{"web:", "lsp:", "session:", "memory:"} {
 		if rest, ok := strings.CutPrefix(id, prefix); ok {
-			return t.resolveRegistryTool(strings.TrimSpace(rest), id, args, base)
+			return t.resolveRegistryTool(ctx, strings.TrimSpace(rest), id, args, base)
 		}
 	}
 	// Server-level call is the first-discovery path for servers with no
@@ -965,12 +970,14 @@ func (t *UseCapabilityTool) resolveCall(ctx context.Context, id string, args jso
 		return t.resolveUnavailable(base, id, plugin.ModelToolName(server, raw), fmt.Sprintf("MCP server %q is disabled in this session", server)), nil
 	}
 	var runtimeSpec plugin.Spec
+	releaseRuntime := func() {}
 	if t.runtime != nil {
 		spec, unlock, lockErr := t.lockAuthorizedRuntimeServer(ctx, server)
 		if lockErr != nil {
 			return t.resolveUnavailable(base, id, plugin.ModelToolName(server, raw), lockErr.Error()), nil
 		}
-		defer unlock()
+		releaseRuntime = unlock
+		defer func() { releaseRuntime() }()
 		runtimeSpec = spec
 	}
 	// Prefer already-exposed registry tool (auto-started MCP). The model name
@@ -1035,59 +1042,11 @@ func (t *UseCapabilityTool) resolveCall(ctx context.Context, id string, args jso
 		}
 		spec = plugin.ResolveStoredAuthorization(ctx, spec)
 	}
-	destructive := false
-	if t.catalog != nil {
-		if entry, found := t.catalog().Lookup(id); found {
-			destructive = entry.Destructive
-		}
-	}
-	readOnly := false
-	if cached, found := plugin.CachedToolSafetyForSpec(spec, raw); found {
-		destructive = destructive || cached.Destructive
-		readOnly = cached.ReadOnly
-	}
-	lazy := &onDemandMCPTool{proxy: t, spec: spec, server: server, raw: raw, modelName: modelName, destructive: destructive}
-	lazy.readOnly = readOnly
-	base.Target = lazy
-	base.TargetName = modelName
-	// Cached server hints control ordinary approval. Strict read-only execution
-	// additionally requires server authorization and live read-only metadata.
-	base.ReadOnly = lazy.ReadOnly()
-	if len(args) == 0 {
-		base.Args = json.RawMessage(`{}`)
-	} else {
-		base.Args = args
-	}
-	return base, nil
-}
-
-// resolveRegistryTool binds a registry tool by name for use_capability call.
-// Provider-visible core tools remain callable this way, but the catalog prefers
-// listing only non-visible tools so the model uses the top-level surface first.
-func (t *UseCapabilityTool) resolveRegistryTool(name, id string, args json.RawMessage, base tool.ResolvedCall) (tool.ResolvedCall, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return tool.ResolvedCall{}, fmt.Errorf("capability id %q is missing a tool name", id)
-	}
-	if name == "use_capability" {
-		return tool.ResolvedCall{}, fmt.Errorf("cannot proxy use_capability through itself")
-	}
-	if t.registry == nil {
-		return t.resolveUnavailable(base, id, name, "tool registry is unavailable"), nil
-	}
-	tl, ok := t.registry.Get(name)
-	if !ok {
-		return t.resolveUnavailable(base, id, name, fmt.Sprintf("tool %q is not registered in this session", name)), nil
-	}
-	base.Target = tl
-	base.TargetName = name
-	base.ReadOnly = tl.ReadOnly()
-	if len(args) == 0 {
-		base.Args = json.RawMessage(`{}`)
-	} else {
-		base.Args = args
-	}
-	return base, nil
+	// Execute rechecks the immutable spec snapshot. Release dispatchMu because
+	// Boot's catalog callback takes its own runtime snapshot.
+	releaseRuntime()
+	releaseRuntime = func() {}
+	return t.resolveUnconnectedMCPCall(id, args, base, spec, server, raw, modelName), nil
 }
 
 // resolveSkillCall routes skill:<name> through run_skill / read_only_skill /
@@ -1354,21 +1313,7 @@ func (t *UseCapabilityTool) serverToolsForSpec(ctx context.Context, server strin
 	if err != nil {
 		return nil, err
 	}
-	snap := make([]plugin.CachedTool, 0, len(tools))
-	for _, tl := range tools {
-		m, ok := tl.(tool.MCPMetadata)
-		if !ok || m.MCPRawToolName() == "" {
-			continue
-		}
-		snap = append(snap, plugin.CachedTool{
-			Name:        m.MCPRawToolName(),
-			Description: tl.Description(),
-			Schema:      tl.Schema(),
-			ReadOnly:    tl.ReadOnly(),
-			Destructive: mcpDestructiveHint(tl),
-		})
-	}
-	t.ensureState().setLiveTools(server, snap)
+	t.ensureState().setLiveTools(server, snapshotMCPTools(tools))
 	return tools, nil
 }
 

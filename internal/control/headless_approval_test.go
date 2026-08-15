@@ -205,6 +205,26 @@ func TestApplyHeadlessApprovalModeAllowsOnlyLowRiskProjectMemoryCreate(t *testin
 	}
 }
 
+func TestHeadlessAutoAndYoloKeepFreshMemoryBoundary(t *testing.T) {
+	for _, mode := range []string{ToolApprovalAuto, ToolApprovalYolo} {
+		t.Run(mode, func(t *testing.T) {
+			gate := BuildHeadlessApprovalGate(permission.New("ask", nil, nil, nil), mode)
+			for _, name := range []string{memoryRememberTool, memoryForgetTool} {
+				allow, reason, err := gate.Check(context.Background(), name, json.RawMessage(`{}`), false)
+				if err != nil {
+					t.Fatalf("Check(%s): %v", name, err)
+				}
+				if allow {
+					t.Fatalf("%s under headless %s must require a fresh interactive approval", name, mode)
+				}
+				if !strings.Contains(reason, "fresh human approval") {
+					t.Fatalf("%s under headless %s reason = %q, want fresh-human boundary", name, mode, reason)
+				}
+			}
+		})
+	}
+}
+
 // TestBuildHeadlessApprovalGateMatchesParentExecutorContract pins boot's single
 // construction point for every headless-only sub-agent gate (task,
 // writer-capable skill runners, the planner) to the identical mode contract

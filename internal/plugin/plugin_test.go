@@ -456,14 +456,14 @@ func TestClientListToolsQuarantinesMalformedSchema(t *testing.T) {
 	if got := string(tools[0].Schema()); got != `{"properties":{"msg":{"type":"string"}},"type":"object"}` {
 		t.Fatalf("valid sibling schema changed: %s", got)
 	}
-	if len(c.tools) != 2 {
-		t.Fatalf("tool status count = %d, want both advertised tools", len(c.tools))
+	if len(c.toolCatalog.infos) != 2 {
+		t.Fatalf("tool status count = %d, want both advertised tools", len(c.toolCatalog.infos))
 	}
-	if c.tools[0].Name != "echo" || c.tools[0].SchemaError != "" {
-		t.Fatalf("valid tool status = %+v", c.tools[0])
+	if c.toolCatalog.infos[0].Name != "echo" || c.toolCatalog.infos[0].SchemaError != "" {
+		t.Fatalf("valid tool status = %+v", c.toolCatalog.infos[0])
 	}
-	if c.tools[1].Name != "generate_yso_bytes" || !strings.Contains(c.tools[1].SchemaError, "/properties/options/items/type") {
-		t.Fatalf("quarantined tool status = %+v", c.tools[1])
+	if c.toolCatalog.infos[1].Name != "generate_yso_bytes" || !strings.Contains(c.toolCatalog.infos[1].SchemaError, "/properties/options/items/type") {
+		t.Fatalf("quarantined tool status = %+v", c.toolCatalog.infos[1])
 	}
 }
 
@@ -491,10 +491,10 @@ func TestClientListToolsQuarantinesNonObjectRootSchemas(t *testing.T) {
 	if got := string(tools[1].Schema()); got != `{"properties":{},"type":"object"}` {
 		t.Fatalf("no_args schema = %s, want normalized empty object schema", got)
 	}
-	if len(c.tools) != 4 {
-		t.Fatalf("tool status count = %d, want all advertised tools", len(c.tools))
+	if len(c.toolCatalog.infos) != 4 {
+		t.Fatalf("tool status count = %d, want all advertised tools", len(c.toolCatalog.infos))
 	}
-	for _, info := range c.tools {
+	for _, info := range c.toolCatalog.infos {
 		switch info.Name {
 		case "echo", "no_args":
 			if info.SchemaError != "" {
@@ -551,8 +551,8 @@ func TestClientListToolsPropagatesReadOnlyAndDestructiveHints(t *testing.T) {
 	if !ok || !annotations.MCPDestructiveHint() {
 		t.Fatalf("tool annotations = (%T, %v), want destructive hint", tools[0], ok)
 	}
-	if len(c.tools) != 1 || !c.tools[0].ReadOnlyHint || !c.tools[0].DestructiveHint {
-		t.Fatalf("tool status = %+v, want both MCP hints", c.tools)
+	if len(c.toolCatalog.infos) != 1 || !c.toolCatalog.infos[0].ReadOnlyHint || !c.toolCatalog.infos[0].DestructiveHint {
+		t.Fatalf("tool status = %+v, want both MCP hints", c.toolCatalog.infos)
 	}
 }
 
@@ -1648,6 +1648,7 @@ func TestReaderIntentRefusesDispatchAfterSafetyDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer host.Close()
+	host.bgWrites.Wait()
 	target := findToolByName(tools, "mcp__reader-revoked__echo")
 	if target == nil {
 		t.Fatalf("tool missing from %v", toolNames(tools))
@@ -1656,7 +1657,6 @@ func TestReaderIntentRefusesDispatchAfterSafetyDrift(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected remoteTool adapter, got %T", target)
 	}
-
 	// The installed server is authorized and currently advertises a reader.
 	rt.client.toolsMu.Lock()
 	rt.readOnly = true

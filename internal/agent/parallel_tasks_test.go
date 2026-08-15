@@ -13,6 +13,7 @@ import (
 
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
+	"reasonix/internal/taskpolicy"
 	"reasonix/internal/tool"
 	"reasonix/internal/workspacelease"
 )
@@ -207,8 +208,7 @@ func TestParallelTasksInjectsWorkspaceContextIntoChildren(t *testing.T) {
 func TestParallelTasksDeliveryClassifiesPristinePrompt(t *testing.T) {
 	workspace := t.TempDir()
 	task := NewTaskTool(promptRoutingProvider{}, nil, tool.NewRegistry(), 20, 0, 0, 0, 0, 0, 0, 0.0, "", "sys", nil, 0, "", "", nil).
-		WithTranscripts(NewSubagentStore(t.TempDir()), workspace, "base-model", "base-effort").
-		WithDeliveryProfile(true)
+		WithTranscripts(NewSubagentStore(t.TempDir()), workspace, "base-model", "base-effort")
 	parallel := NewParallelTasksTool(task, tool.NewRegistry())
 	ctx := withCallContext(context.Background(), "parallel-call", event.Discard, nil, false)
 
@@ -490,11 +490,22 @@ func TestChildMaxStepsSharedDefault(t *testing.T) {
 	}
 }
 
-func TestTaskToolPropagatesDeliveryProfileToSubagents(t *testing.T) {
-	task := (&TaskTool{}).WithDeliveryProfile(true)
-	opts := task.subagentOptions(context.Background(), 0, nil, 0, 1, "", nil)
-	if !opts.DeliveryProfile {
-		t.Fatal("sub-agent options did not inherit delivery profile")
+func TestTaskToolPropagatesInheritedTaskPolicyToSubagents(t *testing.T) {
+	parent := taskpolicy.TaskPolicy{
+		Evidence: taskpolicy.EvidenceClosedLoop,
+		Review:   taskpolicy.ReviewForced,
+		Risk:     taskpolicy.RiskHigh,
+	}
+	task := &TaskTool{}
+	opts := task.subagentOptions(taskpolicy.WithContext(context.Background(), parent), 0, nil, 0, 1, "", nil)
+	if opts.InheritedTaskPolicy == nil {
+		t.Fatal("sub-agent options did not inherit parent TaskPolicy")
+	}
+	if !opts.InheritedTaskPolicy.ClosedLoop() {
+		t.Fatal("inherited TaskPolicy lost closed-loop evidence")
+	}
+	if opts.InheritedTaskPolicy.Review != taskpolicy.ReviewForced {
+		t.Fatalf("inherited review = %v, want forced", opts.InheritedTaskPolicy.Review)
 	}
 }
 
@@ -507,6 +518,15 @@ func TestTaskToolSharesWorkspaceLeaseWithSubagents(t *testing.T) {
 	opts := task.subagentOptions(context.Background(), 0, nil, 0, 1, "", nil)
 	if opts.WorkspaceLease != owner {
 		t.Fatal("sub-agent options did not share the parent's workspace lease owner")
+	}
+}
+
+func TestTaskToolPropagatesWorkspaceRootToSubagents(t *testing.T) {
+	root := t.TempDir()
+	task := &TaskTool{workspaceRoot: root}
+	opts := task.subagentOptions(context.Background(), 0, nil, 0, 1, "", nil)
+	if opts.WriteWorkspaceRoot != root {
+		t.Fatalf("sub-agent workspace root = %q, want %q", opts.WriteWorkspaceRoot, root)
 	}
 }
 

@@ -96,6 +96,9 @@ type Message struct {
 	// ModelMessages strips the field before handing requests to providers.
 	DecisionReceipts []*DecisionReceipt       `json:"decision_receipts,omitempty"`
 	InterruptedTurn  *InterruptedTurnRecovery `json:"interrupted_turn,omitempty"`
+	// FinalReadinessRecovery is durable host state on a LocalOnly sentinel.
+	// ModelMessages removes it before provider serialization.
+	FinalReadinessRecovery *FinalReadinessRecovery `json:"final_readiness_recovery,omitempty"`
 	// ToolExecution is local shell UI metadata on tool-result messages. It is
 	// persisted for Desktop/CLI/Serve cards and stripped by ModelMessages before
 	// any provider request so tool schemas and prompt-cache prefixes stay stable.

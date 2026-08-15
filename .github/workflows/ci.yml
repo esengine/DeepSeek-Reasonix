@@ -145,14 +145,15 @@ jobs:
       # internal/agent 82s, 92s, 144s and 180s — a 2.2x spread from runner
       # variance alone, with four heavy packages sharing four vCPUs. At 3m the
       # step failed on slow runners without a code change; a hang still trips
-      # the 15 minute job budget above.
+      # the 15 minute job budget above. internal/control runs in its own
+      # Windows job below so its durable-session I/O does not compete here.
       - name: test (Windows smoke)
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
         timeout-minutes: 15
         env:
           REASONIX_RELEASE_CACHE_GUARD: "1"
           WINDOWS_SANDBOX_WAIT_MS: "20000"
-        run: go test -p 4 -timeout=8m ./internal/agent/... ./internal/appidentity/... ./internal/boot/... ./internal/checkpoint/... ./internal/cli/... ./internal/control/... ./internal/desktoplauncher/... ./internal/filelock/... ./internal/fileutil/... ./internal/hook/... ./internal/instruction/... ./internal/mcplaunch/... ./internal/notify/... ./internal/proc/... ./internal/remote/... ./internal/repair/... ./internal/sandbox/... ./internal/sysproxy/... ./internal/workspacelease/... ./cmd/...
+        run: go test -p 4 -timeout=8m ./internal/agent/... ./internal/appidentity/... ./internal/boot/... ./internal/checkpoint/... ./internal/cli/... ./internal/desktoplauncher/... ./internal/filelock/... ./internal/fileutil/... ./internal/hook/... ./internal/instruction/... ./internal/mcplaunch/... ./internal/notify/... ./internal/proc/... ./internal/remote/... ./internal/repair/... ./internal/sandbox/... ./internal/sysproxy/... ./internal/workspacelease/... ./cmd/...
 
       # The general Windows PR smoke list intentionally omits internal/tool.
       # Keep the session-temp portability contract covered without widening the
@@ -194,6 +195,30 @@ jobs:
         timeout-minutes: 10
         shell: powershell
         run: .\scripts\test-scoop-desktop-launch.ps1
+
+  windows-control:
+    needs: changes
+    if: always()
+    runs-on: windows-latest
+    env:
+      RUN_STEPS: ${{ github.event_name != 'pull_request' || needs.changes.outputs.code != 'false' }}
+    steps:
+      - if: env.RUN_STEPS == 'true'
+        uses: actions/checkout@v7
+
+      - if: env.RUN_STEPS == 'true'
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: test
+        if: env.RUN_STEPS == 'true'
+        timeout-minutes: 10
+        env:
+          REASONIX_RELEASE_CACHE_GUARD: "1"
+          WINDOWS_SANDBOX_WAIT_MS: "20000"
+        run: go test -p 1 -timeout=8m ./internal/control/...
 
   race:
     needs: changes
@@ -528,9 +553,14 @@ jobs:
 
       - name: test (Windows desktop and update helper)
         timeout-minutes: 15
-        run: |
-          go test ./...
-          (cd third_party/go-webview2 && go test ./pkg/edge)
+        run: go test ./...
+
+      # A cold nested-module cache can spend several minutes compiling the
+      # real WebView2 cookie integration test. Keep its budget independent of
+      # the already-complete desktop suite and retain a Go timeout stack dump.
+      - name: test (vendored WebView2 edge)
+        timeout-minutes: 10
+        run: (cd third_party/go-webview2 && go test -timeout=8m ./pkg/edge)
 
       # Installer packaging is packaging validation, not a code gate: run it
       # on pushes to main-v2 (the release pipeline builds installers again

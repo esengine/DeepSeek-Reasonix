@@ -10,9 +10,9 @@ import (
 
 // TestDesktopHotRebuildPathsKeepSessionTemp covers the same-session rebuilds
 // that use boot.Build directly (not boot.Rebuild): model and effort switches.
-// Role setting (token mode) switches in place and is covered separately.
-// Each rebuild must pass the old Controller's SessionTemp so temporary files
-// survive (Issue #7575).
+// SetTokenMode is a deprecated no-op and must keep the same controller and
+// SessionTemp. Each rebuild must pass the old Controller's SessionTemp so
+// temporary files survive (Issue #7575).
 func TestDesktopHotRebuildPathsKeepSessionTemp(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -76,7 +76,7 @@ func TestDesktopHotRebuildPathsKeepSessionTemp(t *testing.T) {
 			}
 			if tc.inPlace {
 				if newCtrl != oldCtrl {
-					t.Fatal("role setting must switch in place without replacing the controller")
+					t.Fatal("SetTokenMode must not replace the controller")
 				}
 			} else if newCtrl == oldCtrl {
 				t.Fatal("rebuild did not install a replacement *control.Controller")

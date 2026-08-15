@@ -23,7 +23,6 @@ type Options struct {
 	Interactive    bool
 	Proxy          netclient.ProxySpec
 	CLIMode        string
-	Profile        string
 	PermissionMode string
 	SessionMode    string
 	Language       string
@@ -55,7 +54,6 @@ func Start(opts Options) *Reporter {
 			{Signal: "client_surface", Bucket: "cli", Count: 1},
 			{Signal: "client_version", Bucket: safeBucket(opts.Version, "other"), Count: 1},
 			{Signal: "cli_mode", Bucket: enumBucket(opts.CLIMode, "run", "tui"), Count: 1},
-			{Signal: "cli_profile", Bucket: enumBucket(opts.Profile, "economy", "balanced", "delivery"), Count: 1},
 			{Signal: "cli_permission_mode", Bucket: permissionBucket(opts.PermissionMode), Count: 1},
 			{Signal: "cli_session_mode", Bucket: enumBucket(opts.SessionMode, "fresh", "resume", "continue", "copy"), Count: 1},
 			{Signal: "settings_language", Bucket: languageBucket(opts.Language), Count: 1},

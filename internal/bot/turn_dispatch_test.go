@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"reasonix/internal/control"
+	"reasonix/internal/sandbox"
 )
 
 // approvalBlockingController is a botController whose RunTurn blocks the way a
@@ -41,6 +42,11 @@ func (c *approvalBlockingController) RunTurn(ctx context.Context, input string) 
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func (c *approvalBlockingController) ResolveApproval(id string, allow bool, scope sandbox.ApprovalScope) error {
+	c.Approve(id, allow, scope != sandbox.ApprovalScopeOnce, scope == sandbox.ApprovalScopeProject)
+	return nil
 }
 
 func (c *approvalBlockingController) Approve(id string, allow, session, persist bool) {

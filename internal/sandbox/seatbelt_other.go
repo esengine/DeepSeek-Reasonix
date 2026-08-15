@@ -118,14 +118,76 @@ func bwrapBaseArgs(spec Spec) []string {
 		args = args[1:] // drop --unshare-net
 	}
 	for _, root := range spec.WriteRoots {
-		args = append(args, "--bind", root, root)
+		args = append(args, bwrapWriteRootMountArgs(root)...)
 	}
 	if !spec.MinimalWrites {
 		for _, root := range linuxWriteDirs() {
 			args = append(args, "--bind", root, root)
 		}
 	}
+	args = append(args, bwrapProtectedWriteArgs(spec, spec.WriteRoots)...)
 	return append(args, bwrapForbidReadArgs(spec.ForbidReadRoots)...)
+}
+
+func bwrapProtectedWriteArgs(spec Spec, writeRoots []string) []string {
+	protected := resolveProtectedWriteRoots(spec.ProtectedWriteRoots)
+	protected = overlappingProtectedWriteRoots(protected, writeRoots)
+	if len(protected) == 0 {
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, root := range protected {
+		if seen[root] {
+			continue
+		}
+		seen[root] = true
+		out = append(out, "--ro-bind", root, root)
+	}
+	stateRoot := singleProtectedStateRoot(protected)
+	for _, abs := range writeRoots {
+		if stateRoot != "" && IsProtectedWritePath(abs, stateRoot) {
+			continue
+		}
+		for _, prot := range protected {
+			if abs != prot && PathWithin(prot, abs) {
+				out = append(out, "--bind", abs, abs)
+				break
+			}
+		}
+	}
+	return out
+}
+
+func overlappingProtectedWriteRoots(protected, writeRoots []string) []string {
+	var out []string
+	for _, prot := range protected {
+		for _, root := range writeRoots {
+			root = filepath.Clean(strings.TrimSpace(root))
+			if root != "" && root != "." && (PathWithin(root, prot) || PathWithin(prot, root)) {
+				out = append(out, prot)
+				break
+			}
+		}
+	}
+	return out
+}
+
+func resolveProtectedWriteRoots(roots []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(roots))
+	for _, root := range roots {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			continue
+		}
+		abs, err := ResolveAbsPath(root)
+		if err == nil && !seen[abs] {
+			seen[abs] = true
+			out = append(out, abs)
+		}
+	}
+	return out
 }
 
 func bwrapTmpMountArgs(spec Spec) []string {
@@ -133,6 +195,18 @@ func bwrapTmpMountArgs(spec Spec) []string {
 		return []string{"--bind", dir, "/tmp"}
 	}
 	return []string{"--tmpfs", "/tmp"}
+}
+
+func bwrapWriteRootMountArgs(root string) []string {
+	root = filepath.Clean(strings.TrimSpace(root))
+	if root == "" || root == "." {
+		return nil
+	}
+	if !filepath.IsAbs(root) || !pathWithin(root, "/tmp") {
+		return []string{"--bind", root, root}
+	}
+	out := bwrapTmpParentDirArgs(root)
+	return append(out, "--bind", root, root)
 }
 
 // bwrapForbidReadArgs returns mounts suitable for both configured directory
@@ -200,6 +274,11 @@ func bwrapExecutableMountArgs(args []string) []string {
 		source = resolved
 	}
 
+	out := bwrapTmpParentDirArgs(destination)
+	return append(out, "--ro-bind", source, destination)
+}
+
+func bwrapTmpParentDirArgs(destination string) []string {
 	parent := filepath.Dir(destination)
 	rel, err := filepath.Rel("/tmp", parent)
 	if err != nil {
@@ -214,7 +293,7 @@ func bwrapExecutableMountArgs(args []string) []string {
 		current = filepath.Join(current, part)
 		out = append(out, "--dir", current)
 	}
-	return append(out, "--ro-bind", source, destination)
+	return out
 }
 
 func pathWithin(path, root string) bool {

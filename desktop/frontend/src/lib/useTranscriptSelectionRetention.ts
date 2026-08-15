@@ -109,6 +109,14 @@ export function useTranscriptSelectionRetention({
     publish();
   }, [cancelFrames, publish, releasePointerCapture, setScrollMode]);
 
+  // A fresh user gesture (e.g. the jump-to-bottom click) while a gesture is
+  // still marked dragging means the original pointerup was lost (released
+  // outside the window, WebView2 pointer quirks). Ending the stale gesture
+  // lets scroll commands leave selection mode instead of no-oping forever.
+  const endStaleGesture = useCallback(() => {
+    if (selectionRef.current?.dragging) clear("stale-selection-gesture");
+  }, [clear]);
+
   const updateLogicalFocus = useCallback((pointer = lastPointerRef.current) => {
     const tracked = selectionRef.current;
     if (!tracked?.logical || !tracked.dragging || !pointer) return;
@@ -174,7 +182,7 @@ export function useTranscriptSelectionRetention({
     if (snapshotId == null) return false;
     tracked.logical = true;
     document.getSelection()?.removeAllRanges();
-    setScrollMode("logical-selecting", "cross-row-selection");
+    setScrollMode("selection", "cross-row-selection");
     try {
       tracked.captureElement.setPointerCapture(tracked.pointerId);
     } catch {
@@ -238,7 +246,7 @@ export function useTranscriptSelectionRetention({
     };
     lastPointerRef.current = { x: event.clientX, y: event.clientY };
     transcriptSelectionStore.beginNative(tabId ?? "");
-    setScrollMode("native-selecting", "pointerdown");
+    setScrollMode("selection", "pointerdown");
     publish();
   }, [cancelStreamingScroll, clear, publish, setScrollMode, tabId]);
 
@@ -435,6 +443,7 @@ export function useTranscriptSelectionRetention({
 
   return {
     clear,
+    endStaleGesture,
     active: selectionRef.current !== null,
     logical: selectionRef.current?.logical ?? false,
     reconcileLogicalFocus: scheduleLogicalFocus,

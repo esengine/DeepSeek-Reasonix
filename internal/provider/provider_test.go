@@ -108,6 +108,9 @@ func TestModelMessagesAndSanitizeDropLocalOnlyInterruptedOutput(t *testing.T) {
 		Content: "partial answer", ReasoningContent: "partial reasoning", LocalOnly: true,
 		ToolCalls:       []ToolCall{{ID: "partial", Name: "write_file"}},
 		InterruptedTurn: &InterruptedTurnRecovery{Pending: true, InterruptedTools: []string{"write_file"}},
+		FinalReadinessRecovery: &FinalReadinessRecovery{
+			Pending: true, Missing: []string{"verification"}, Checkpoint: json.RawMessage(`{"receipts":[]}`),
+		},
 	}
 	in := []Message{
 		{Role: RoleUser, Content: "task"},
@@ -123,7 +126,7 @@ func TestModelMessagesAndSanitizeDropLocalOnlyInterruptedOutput(t *testing.T) {
 		t.Fatalf("SanitizeToolPairing leaked local-only record: %+v", wire)
 	}
 	session := NormalizeSessionMessages(in)
-	if len(session) != len(in) || !session[1].LocalOnly || session[1].Content != local.Content {
+	if len(session) != len(in) || !session[1].LocalOnly || session[1].Content != local.Content || session[1].FinalReadinessRecovery == nil {
 		t.Fatalf("session normalization did not preserve local display: %+v", session)
 	}
 }

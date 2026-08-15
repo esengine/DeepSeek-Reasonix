@@ -11,9 +11,8 @@ import (
 
 // maxStepsPause is a resumable stop after a positive model-round budget.
 type maxStepsPause struct {
-	steps     int
-	key       string
-	hostOwned bool
+	steps int
+	key   string
 }
 
 func (e *maxStepsPause) Error() string {
@@ -39,9 +38,9 @@ func (a *Agent) resetStructuralRunGuards() {
 	a.turn.progress.reset()
 }
 
-func (a *Agent) stopUnexecutedBoundaryCalls(state *turnRuntime, calls []provider.ToolCall, usage *provider.Usage) (error, bool) {
+func (a *Agent) stopUnexecutedBoundaryCalls(ctx context.Context, state *turnRuntime, calls []provider.ToolCall, usage *provider.Usage) (error, bool) {
 	switch {
-	case state.graceRound:
+	case state.graceRound && !a.allowsBoundaryTurnFinalizer(ctx, state, calls):
 		a.pairUnexecutedGraceCalls(calls, "blocked: the tool-call round budget is exhausted; no more tools will run in this turn")
 		return a.gracePause(state), true
 	case state.recoveryGraceRound:

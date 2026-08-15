@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
-	"reasonix/internal/capability"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
 	"reasonix/internal/hook"
@@ -54,12 +53,11 @@ func TestTurnOrchestratorAttachesTrustedPlannerMetadata(t *testing.T) {
 	sess := agent.NewSession("sys")
 	sess.Add(provider.Message{Role: provider.RoleUser, Content: "explain the bug"})
 	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "the bug is in parser.go"})
-	exec := agent.New(nil, tool.NewRegistry(), sess, agent.Options{AgentPreset: "delivery"}, event.Discard)
+	exec := agent.New(nil, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
 	runner := &plannerMetadataRunner{}
 	c := New(Options{
-		Runner:         runner,
-		Executor:       exec,
-		RuntimeProfile: capability.ProfileDelivery,
+		Runner:   runner,
+		Executor: exec,
 	})
 	c.SetGoal("migrate authentication across the backend")
 
@@ -72,7 +70,7 @@ func TestTurnOrchestratorAttachesTrustedPlannerMetadata(t *testing.T) {
 	if runner.meta.UserText != raw {
 		t.Fatalf("planner metadata user text = %q, want pristine %q", runner.meta.UserText, raw)
 	}
-	if runner.meta.ExplicitPlanMode || !runner.meta.GoalActive || !runner.meta.DeliveryProfile {
+	if runner.meta.ExplicitPlanMode || !runner.meta.GoalActive || !runner.meta.ClosedLoop || !runner.meta.PolicySet || !runner.meta.Policy.ClosedLoop() {
 		t.Fatalf("planner metadata missing trusted host state: %+v", runner.meta)
 	}
 	if !runner.meta.HasConversationContext {
@@ -483,11 +481,11 @@ func TestTurnOrchestratorGoalContinuationRunsStopPerUnit(t *testing.T) {
 }
 
 func TestTurnOrchestratorApprovedPlanSharesOneStopHook(t *testing.T) {
-	prov := &scriptedTurns{turns: [][]provider.Chunk{
-		textTurn("Plan:\n1. Make the change\n2. Verify it"),
-		textTurn("Done."),
-	}}
-	ag := agent.New(prov, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
+	prov := &scriptedTurns{turns: planThenExecuteTurns(
+		"Plan:\n1. Make the change\n2. Verify it",
+		"Done.",
+	)}
+	ag := newPlanTestAgent(prov)
 	approvalID := make(chan string, 1)
 	var promptSubmitEvents, stopEvents int
 	hooks := hook.NewRunner([]hook.ResolvedHook{
@@ -532,8 +530,8 @@ func TestTurnOrchestratorApprovedPlanSharesOneStopHook(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if prov.call != 2 {
-		t.Fatalf("provider calls = %d, want plan + approved execution", prov.call)
+	if prov.call != 3 {
+		t.Fatalf("provider calls = %d, want plan + read + answer", prov.call)
 	}
 	if promptSubmitEvents != 1 {
 		t.Fatalf("UserPromptSubmit events = %d, want one for plan + approved execution unit", promptSubmitEvents)
@@ -699,8 +697,8 @@ func TestTurnOrchestratorCheckpointBoundaryPrecedesUserMessage(t *testing.T) {
 	if err := c.Rewind(0, RewindConversation); err != nil {
 		t.Fatal(err)
 	}
-	if len(sess.Messages) != 1 {
-		t.Fatalf("session messages after rewind = %d, want boundary before user message", len(sess.Messages))
+	if live := exec.Session(); len(sess.Messages) != 2 || live == nil || len(live.Messages) != 1 || c.SessionPath() == path {
+		t.Fatalf("parent unchanged / fork switch failed")
 	}
 }
 

@@ -32,13 +32,14 @@ const maxHTTPBody = 16 << 20 // 16 MiB
 // different transports and stay concurrent. Correctness over latency for P1 —
 // it also keeps nextID and the session id race-free.
 type httpTransport struct {
-	name     string
-	url      string
-	headers  map[string]string
-	client   *http.Client
-	roots    []mcpRoot
-	progress progressRouter
-	oauth    *mcpOAuthClient
+	name          string
+	url           string
+	headers       map[string]string
+	client        *http.Client
+	roots         []mcpRoot
+	progress      progressRouter
+	notifications notificationRouter
+	oauth         *mcpOAuthClient
 
 	mu      sync.Mutex
 	nextID  int
@@ -262,6 +263,7 @@ func (t *httpTransport) readSSEResponse(ctx context.Context, body io.Reader, id 
 				if message.Method == "notifications/progress" {
 					t.progress.dispatchProgress(message.Params)
 				}
+				t.notifications.dispatchNotification(message.Method, message.Params)
 				return nil, false, nil
 			}
 			if err := t.replyServerRequest(ctx, message); err != nil {
@@ -305,6 +307,10 @@ func (t *httpTransport) readSSEResponse(ctx context.Context, body io.Reader, id 
 		return res, err
 	}
 	return nil, fmt.Errorf("plugin %q: SSE stream ended without a response to id %d", t.name, id)
+}
+
+func (t *httpTransport) registerNotification(method string, callback func(json.RawMessage)) func() {
+	return t.notifications.registerNotification(method, callback)
 }
 
 // replyServerRequest sends a JSON-RPC response on a separate Streamable HTTP

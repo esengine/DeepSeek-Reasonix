@@ -190,7 +190,7 @@ func (a *Agent) observeRecoveryResult(ctx context.Context, toolName string, args
 	if a == nil || a.svc.recoveryGate == nil {
 		return ""
 	}
-	verification := toolName == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(args))
+	verification := toolName == "bash" && evidence.IsVerificationCommand(bashCommandFromArgs(args))
 	success := err == nil && !blocked
 	emptySearch := false
 	if success && readOnly {

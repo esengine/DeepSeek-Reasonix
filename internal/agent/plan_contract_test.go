@@ -142,7 +142,7 @@ func TestCoordinatorClearsThePlanContractEachTurn(t *testing.T) {
 	}}
 	coord, executor := submitPlanCoordinator(t, planner, exec, event.Discard)
 
-	if err := coord.Run(context.Background(), "fix the cache key"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "fix the cache key"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if executor.planContractSnapshot() == nil {
@@ -152,7 +152,7 @@ func TestCoordinatorClearsThePlanContractEachTurn(t *testing.T) {
 	coord.plannerPolicy = func(context.Context, string) PlannerDecision {
 		return PlannerDecision{Route: PlannerRouteExecutorOnly, Reason: "test"}
 	}
-	if err := coord.Run(context.Background(), "just answer me"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "just answer me"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if executor.planContractSnapshot() != nil {

@@ -43,13 +43,13 @@ The test checks that every registered built-in tool has a documented name, read-
 In a default full-token boot, Reasonix sends the built-in tools above plus the
 session, memory, skill, subagent, LSP, install, and slash-command tools below:
 
-Single-model Balanced uses this exact executor tool surface. Balanced with a
-distinct Planner and every Delivery session additionally expose one stable
+Every session uses this exact executor tool surface plus one stable
 proxy, `use_capability`, so optional MCP servers (including `auto_start=false`)
 can be inspected and called without changing provider-visible schemas
-mid-session. Delivery also
-adds a stable execution contract enforced by the host: state-changing and
-verification commands need acceptance criteria; changed work cannot finalize
+mid-session. The host also
+enforces a risk-adaptive execution contract: state-changing and
+verification commands need acceptance criteria when the turn is closed-loop;
+changed work cannot finalize
 without post-change review, verification, and an evidence-backed
 `complete_step` sign-off; Skill/MCP `require`/`prefer` routes are gated with
 host-proven evidence (including read-only answers — ordinary reads never skip
@@ -57,19 +57,24 @@ a required capability); and medium/high-risk mutations force structured
 `review` / `security_review` results via the review-only `review_report` tool,
 whose `reviewed_paths` must be backed by host-observed read/diff receipts.
 
+## Unified Boot Surface
+
+Every session uses the same provider-visible core tools and the same
+`use_capability` proxy.
+
 The two-model Planner and all task/fleet sub-agents also use `use_capability`
 (and never direct `mcp__*` schemas). Planner and ordinary writer-capable
 sub-agents may call installed or project-configured MCP without
 `readOnlyHint`; Planner leaves `destructiveHint` tools for the Executor, while
 ordinary sub-agents use the trusted MCP path (live authorization plus explicit
 deny only). Writer/destructive calls are still serialized and recorded as
-mutations for evidence, workspace leases, and Delivery guards. Strict read-only sub-agents
+mutations for evidence, workspace leases, and closed-loop guards. Strict read-only sub-agents
 share the same proxy schema and Host connections but still require
-`readOnlyHint` and non-destructive at execution time. Balanced dual-model
+`readOnlyHint` and non-destructive at execution time. Dual-model
 attaches independent proxy frontends to both Planner and Executor so a
 capability discovered during planning remains directly callable after handoff;
-their ledgers/audits are isolated while Host connections are shared. Economy
-remains single-model without an independent Planner.
+their ledgers/audits are isolated while Host connections are shared. A
+single-model session has no independent Planner.
 
 `use_capability` resolution is side-effect free: `action=list` returns sorted
 configured MCP servers without starting them; `action=call` on a
@@ -92,9 +97,7 @@ authorization, and exact Host connection identity; another project/tab's
 same-name shared client is rejected without process, network, or tool dispatch.
 
 The fixed proxy's provider-visible name, description, schema, and ordering do
-not change when MCP inventory changes. Balanced Executor deliberately retains
-its direct `mcp__*` tools, so its overall provider prefix may still change when
-those direct tools are installed, connected, or refreshed.
+not change when MCP inventory changes.
 
 `ask`, `docs`, `explore`, `fleet`, `forget`, `history`, `install_skill`, `install_source`,
 `list_sessions`, `lsp_definition`, `lsp_diagnostics`, `lsp_hover`,
@@ -110,8 +113,8 @@ without injecting every report into the parent context at once. References are
 restricted to the current conversation lineage and workspace.
 
 `use_capability` (`action` = `list` | `inspect` | `call` | `decline`) is on the
-provider-visible surface for every execution setting (`light` | `balanced` |
-`delivery`). Optional tools stay registered for host dispatch but are not
+provider-visible surface for every task. The adaptive standard execution derives
+policy from task risk. Optional tools stay registered for host dispatch but are not
 expanded into the top-level provider schema; the model reaches them through
 `use_capability` without cache-breaking schema churn.
 
@@ -119,9 +122,9 @@ expanded into the top-level provider schema; the model reaches them through
 actual boot registry contract against the provider request, including read-only
 flags and canonical schemas.
 
-## Unified Boot Surface (all execution settings)
+## Unified Boot Surface (every task)
 
-Every execution setting starts with the same lean provider-visible core: direct
+Every task starts with the same lean provider-visible core: direct
 coding tools, background-shell lifecycle tools, and the stable capability proxy:
 
 `bash`, `bash_output`, `edit_file`, `kill_shell`, `read_file`, `wait`,
@@ -130,7 +133,6 @@ coding tools, background-shell lifecycle tools, and the stable capability proxy:
 Optional tools (`glob`, `grep`, `ls`, `web_fetch`, MCP, skills, subagents, docs,
 session history, memory mutation, workflow, and so on) remain in the host
 registry for dispatch. The model lists, inspects, calls, or declines them via
-`use_capability` without changing the provider tool list. Execution settings change
-host planning / verification / review policy, not which tools appear on the
-provider-visible surface. The retired `connect_tool_source` path is no longer
-registered.
+`use_capability` without changing the provider tool list. Task risk changes host
+planning, verification, and review policy, not which tools appear on the
+provider-visible surface. The retired `connect_tool_source` path is no longer registered.

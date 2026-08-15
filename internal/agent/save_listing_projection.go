@@ -8,7 +8,9 @@ import (
 )
 
 func (s *Session) markPersistedWithListing(path string, digest [sha256.Size]byte, version uint64, revision int64, rewriteVersion int, msgs []provider.Message) {
-	s.markPersisted(path, digest, version, revision, rewriteVersion)
+	// Pair the persisted-message view with the baseline: writer-bound saves
+	// use it to classify append shapes without reloading the transcript.
+	s.setPersistedBaseline(path, digest, version, revision, true, true, rewriteVersion, msgs)
 	persistSessionListingProjection(path, msgs)
 }
 

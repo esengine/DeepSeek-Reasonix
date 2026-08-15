@@ -141,21 +141,25 @@ func TestACPSupervisorRuntimeStateDegradesWhenSandboxIsUnavailable(t *testing.T)
 	}
 }
 
-func TestEffectiveACPPlannerModeMatchesSelectedRuntime(t *testing.T) {
+func TestEffectiveACPPlannerModeIsIndependentOfExecutionMode(t *testing.T) {
 	cfg := config.Default()
 	cfg.Agent.PlannerModel = "planner/planner-model"
 	cfg.Providers = []config.ProviderEntry{
 		{Name: "executor", Kind: "openai", Model: "executor-model"},
 		{Name: "planner", Kind: "openai", Model: "planner-model"},
 	}
-	if got := effectiveACPPlannerMode(cfg, false, "executor/executor-model", "balanced"); got != "on" {
-		t.Fatalf("balanced split-model planner mode = %q, want on", got)
+	if got := effectiveACPPlannerMode(cfg, false, "executor/executor-model"); got != "on" {
+		t.Fatalf("split-model planner mode = %q, want on", got)
 	}
-	if got := effectiveACPPlannerMode(cfg, false, "executor/executor-model", "economy"); got != "off" {
-		t.Fatalf("economy planner mode = %q, want off", got)
+	if got := effectiveACPPlannerMode(cfg, true, "executor/executor-model"); got != "off" {
+		t.Fatalf("disabled planner mode = %q, want off", got)
 	}
-	if got := effectiveACPPlannerMode(cfg, false, "planner/planner-model", "balanced"); got != "off" {
+	if got := effectiveACPPlannerMode(cfg, false, "planner/planner-model"); got != "off" {
 		t.Fatalf("same-model planner mode = %q, want off", got)
+	}
+	cfg.Agent.PlannerModel = ""
+	if got := effectiveACPPlannerMode(cfg, false, "executor/executor-model"); got != "off" {
+		t.Fatalf("missing planner model = %q, want off", got)
 	}
 }
 
@@ -259,7 +263,7 @@ effort = "high"
 	}
 }
 
-func TestACPFactoryAdvertisesAndNormalizesRuntimeProfiles(t *testing.T) {
+func TestACPFactoryPinsRuntimeProfileAndOmitsWorkMode(t *testing.T) {
 	isolateCLIConfigHome(t)
 	if _, err := config.SetCredential("REASONIX_TEST_KEY", "test-key"); err != nil {
 		t.Fatalf("SetCredential: %v", err)
@@ -278,25 +282,26 @@ api_key_env = "REASONIX_TEST_KEY"
 		t.Fatal(err)
 	}
 
-	state, err := (&acpFactory{profile: "full"}).SessionConfigState(context.Background(), acp.SessionConfigStateParams{
+	state, err := (&acpFactory{}).SessionConfigState(context.Background(), acp.SessionConfigStateParams{
 		Cwd:            project,
 		RuntimeProfile: "delivery",
 	})
 	if err != nil {
 		t.Fatalf("SessionConfigState: %v", err)
 	}
-	work, ok := findACPConfigOption(state.ConfigOptions, "work_mode")
-	if !ok || work.CurrentValue != "delivery" || state.RuntimeProfile != "delivery" || len(work.Options) != 3 {
-		t.Fatalf("work mode state = %+v / %q, want delivery with 3 options", work, state.RuntimeProfile)
+	if _, ok := findACPConfigOption(state.ConfigOptions, "work_mode"); ok {
+		t.Fatalf("work_mode should not be advertised: %+v", state.ConfigOptions)
+	}
+	if state.RuntimeProfile != "balanced" {
+		t.Fatalf("RuntimeProfile = %q, want pinned balanced", state.RuntimeProfile)
 	}
 
-	state, err = (&acpFactory{profile: "full"}).SessionConfigState(context.Background(), acp.SessionConfigStateParams{Cwd: project})
+	state, err = (&acpFactory{}).SessionConfigState(context.Background(), acp.SessionConfigStateParams{Cwd: project})
 	if err != nil {
 		t.Fatalf("default SessionConfigState: %v", err)
 	}
-	work, _ = findACPConfigOption(state.ConfigOptions, "work_mode")
-	if work.CurrentValue != "balanced" || state.RuntimeProfile != "balanced" {
-		t.Fatalf("legacy full profile = %+v / %q, want balanced", work, state.RuntimeProfile)
+	if state.RuntimeProfile != "balanced" {
+		t.Fatalf("default RuntimeProfile = %q, want balanced", state.RuntimeProfile)
 	}
 }
 
