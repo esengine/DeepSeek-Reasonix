@@ -376,7 +376,7 @@ func (t *statusTelemetry) finishTurn(runErr error, cancelled bool, goalStatus, s
 			switch {
 			case errors.As(runErr, &readinessErr):
 				t.phase = "readiness_paused"
-				t.turnOutcome = ReasonixTurnOutcome{Kind: "paused", Reason: clipStatusText(readinessErr.Error(), 2_048)}
+				t.turnOutcome = ReasonixTurnOutcome{Kind: "paused", Reason: clipStatusError(readinessErr, 2_048)}
 				t.finalReadiness.Risks = redactStatusTexts(readinessErr.Missing, 2_048)
 				eventName = "pause"
 			case errors.As(runErr, &recoveryPause):
