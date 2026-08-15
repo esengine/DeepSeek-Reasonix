@@ -10488,6 +10488,9 @@ var remoteURLCache sync.Map
 // repository, has no remote, or the remote URL cannot be sanitized.
 // Results are cached with a 30-second TTL.
 func (a *App) ProjectRemoteURL(path string) string {
+	if a == nil || a.ctx == nil {
+		return ""
+	}
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return ""
@@ -10527,21 +10530,29 @@ func sanitizeRemoteURL(rawURL string) string {
 	if rawURL == "" {
 		return ""
 	}
-	// Handle SCP-style SSH: git@github.com:org/repo.git
-	if strings.HasPrefix(rawURL, "git@") {
-		parts := strings.SplitN(rawURL, ":", 2)
-		if len(parts) != 2 {
+	// Handle SCP-style SSH: [user@]host:path (e.g. git@github.com:org/repo.git
+	// or deploy@gitlab.com:group/repo.git). The user is dropped and the result
+	// is built through net/url so host/path are properly encoded.
+	if !strings.Contains(rawURL, "://") {
+		userHost, path, ok := strings.Cut(rawURL, ":")
+		if !ok || path == "" {
 			return ""
 		}
-		host := strings.TrimPrefix(parts[0], "git@")
+		if strings.Count(userHost, "@") > 1 {
+			return ""
+		}
+		host := userHost
+		if i := strings.LastIndex(userHost, "@"); i >= 0 {
+			host = userHost[i+1:]
+		}
 		if host == "" || strings.ContainsAny(host, "@/") {
 			return ""
 		}
-		path := strings.TrimSuffix(strings.TrimSuffix(parts[1], "/"), ".git")
+		path = strings.TrimSuffix(strings.TrimSuffix(path, "/"), ".git")
 		if path == "" {
 			return ""
 		}
-		return "https://" + host + "/" + path
+		return (&url.URL{Scheme: "https", Host: host, Path: "/" + path}).String()
 	}
 	// For http/https and ssh:// URLs, use net/url to parse and sanitize
 	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") && !strings.HasPrefix(rawURL, "ssh://") {
@@ -10565,6 +10576,9 @@ func sanitizeRemoteURL(rawURL string) string {
 	}
 	// Strip credentials
 	u.User = nil
+	// Query strings and fragments can carry tokens — drop them entirely.
+	u.RawQuery = ""
+	u.Fragment = ""
 	// Strip trailing slash, then a trailing .git suffix (order matters so
 	// https://host/org/repo.git/ also loses the .git).
 	u.Path = strings.TrimSuffix(u.Path, "/")

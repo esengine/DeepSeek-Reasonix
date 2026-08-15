@@ -1576,7 +1576,7 @@ export function ProjectTree({
         key: "open-in-github",
         icon: <GithubSvg size={13} />,
         label: t("projectTree.openInGithub"),
-        disabled: !projectPath || (projectPath in githubUrls && !githubUrls[projectPath]),
+        disabled: !projectPath || !(projectPath in githubUrls) || !githubUrls[projectPath],
         onSelect: () => {
           const url = githubUrls[projectPath];
           if (url) openExternal(url);
@@ -1647,7 +1647,7 @@ export function ProjectTree({
         key: "open-in-github",
         icon: <GithubSvg size={13} />,
         label: t("projectTree.openInGithub"),
-        disabled: !projectPath || (projectPath in githubUrls && !githubUrls[projectPath]),
+        disabled: !projectPath || !(projectPath in githubUrls) || !githubUrls[projectPath],
         onSelect: () => {
           const url = githubUrls[projectPath];
           if (url) openExternal(url);

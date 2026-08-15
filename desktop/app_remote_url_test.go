@@ -40,6 +40,21 @@ func TestSanitizeRemoteURL(t *testing.T) {
 			want: "https://github.com/org/repo",
 		},
 		{
+			name: "https query dropped",
+			raw:  "https://github.com/org/repo.git?token=abc",
+			want: "https://github.com/org/repo",
+		},
+		{
+			name: "https fragment dropped",
+			raw:  "https://github.com/org/repo.git#readme",
+			want: "https://github.com/org/repo",
+		},
+		{
+			name: "uppercase .GIT preserved",
+			raw:  "https://github.com/org/repo.GIT",
+			want: "https://github.com/org/repo.GIT",
+		},
+		{
 			name: "https host only",
 			raw:  "https://github.com",
 			want: "https://github.com",
@@ -68,6 +83,11 @@ func TestSanitizeRemoteURL(t *testing.T) {
 		{
 			name: "scp-style ssh nested path",
 			raw:  "git@gitlab.com:group/subgroup/project.git",
+			want: "https://gitlab.com/group/subgroup/project",
+		},
+		{
+			name: "scp-style with non-git user",
+			raw:  "deploy@gitlab.com:group/subgroup/project.git",
 			want: "https://gitlab.com/group/subgroup/project",
 		},
 		// ssh:// URL scheme
