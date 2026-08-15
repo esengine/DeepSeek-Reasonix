@@ -12,8 +12,12 @@ import (
 )
 
 func TestServePromptReadinessGateFailureEndsTurnWithWarning(t *testing.T) {
+	const secret = "ghp_abcdefghijklmnopqrstuvwxyz"
+	const opaqueSecret = "readinessSecretAbc123"
+	longReason := "missing verification; Authorization: Bearer " + secret +
+		" credential " + opaqueSecret + "; details=" + strings.Repeat("x", 3_000)
 	factory := &fakeFactory{behavior: func(context.Context, event.Sink, string) error {
-		return fmt.Errorf("turn stopped: %w", &agent.FinalReadinessError{Attempts: 1, Reason: "missing verification", Missing: []string{"verify"}})
+		return fmt.Errorf("turn stopped: %w", &agent.FinalReadinessError{Attempts: 1, Reason: longReason, Missing: []string{"verify"}})
 	}}
 	client, stop := startServer(t, factory)
 	defer stop()
@@ -51,6 +55,12 @@ func TestServePromptReadinessGateFailureEndsTurnWithWarning(t *testing.T) {
 		content, _ := upd["content"].(map[string]any)
 		text, _ := content["text"].(string)
 		if strings.Contains(text, "[warning]") && strings.Contains(text, "missing verification") {
+			if strings.Contains(text, secret) || strings.Contains(text, opaqueSecret) {
+				t.Fatalf("readiness warning leaked credential: %q", text)
+			}
+			if len(text) > len("\n\n[warning] ")+2_048 {
+				t.Fatalf("readiness warning length = %d, want at most %d", len(text), len("\n\n[warning] ")+2_048)
+			}
 			warned = true
 		}
 	}

@@ -1215,13 +1215,15 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 // turn's final-readiness gate stays unsatisfied; the TUI shows the same gaps in
 // its recovery card.
 func finalReadinessNotice(e *agent.FinalReadinessError) string {
+	const maxNoticeBytes = 2_048
+	const fallback = "final-answer readiness gate not satisfied"
 	if e == nil {
-		return "final-answer readiness gate not satisfied"
+		return fallback
 	}
 	if reason := strings.TrimSpace(e.Reason); reason != "" {
-		return "final-answer readiness gate not satisfied: " + reason
+		return clipStatusCredentialText(fallback+": "+reason, maxNoticeBytes)
 	}
-	return e.Error()
+	return clipStatusError(e, maxNoticeBytes)
 }
 
 // sessionSteer durably persists guidance then attempts mid-turn admission.

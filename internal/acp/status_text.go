@@ -8,6 +8,18 @@ import (
 
 func clipStatusText(value string, limit int) string {
 	value = strings.TrimSpace(secrets.Redact(value))
+	return clipStatusValue(value, limit)
+}
+
+func clipStatusCredentialText(value string, limit int) string {
+	value = strings.TrimSpace(secrets.RedactCredentials(value))
+	return clipStatusValue(value, limit)
+}
+
+func clipStatusValue(value string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
 	if len(value) <= limit {
 		return value
 	}
@@ -15,9 +27,8 @@ func clipStatusText(value string, limit int) string {
 }
 
 func clipStatusError(err error, limit int) string {
-	value := strings.TrimSpace(secrets.RedactError(err))
-	if len(value) <= limit {
-		return value
+	if err == nil {
+		return ""
 	}
-	return value[:limit]
+	return clipStatusCredentialText(err.Error(), limit)
 }
