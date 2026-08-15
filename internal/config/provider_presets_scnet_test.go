@@ -6,41 +6,46 @@ import (
 )
 
 func TestCuratedProviderPresetsSCNetUsesOfficialBaseURLs(t *testing.T) {
+	wantModels := []string{
+		"GLM-5.2",
+		"GLM-5",
+		"GLM-5.1",
+		"Kimi-K3",
+		"Kimi-K2.7-Code",
+		"Kimi-K2.6",
+		"Kimi-K2.5",
+		"DeepSeek-V4-Flash",
+		"DeepSeek-V3.2",
+		"MiniMax-M3",
+		"MiniMax-M2.7",
+		"MiniMax-M2.5",
+		"MiMo-V2.5-Pro",
+	}
+	wantVisionModels := []string{"Kimi-K2.6", "Kimi-K2.5"}
 	tests := []struct {
-		id         string
-		kind       string
-		baseURL    string
-		modelsURL  string
-		models     []string
-		authHeader bool
+		id           string
+		kind         string
+		baseURL      string
+		modelsURL    string
+		models       []string
+		visionModels []string
+		authHeader   bool
 	}{
 		{
-			id:        "scnet",
-			kind:      "openai",
-			baseURL:   "https://api.scnet.cn/api/llm/v1",
-			modelsURL: "https://api.scnet.cn/api/llm/v1/models",
-			models: []string{
-				"GLM-5.2",
-				"GLM-5",
-				"GLM-5.1",
-				"Kimi-K3",
-				"Kimi-K2.7-Code",
-				"Kimi-K2.6",
-				"Kimi-K2.5",
-				"DeepSeek-V4-Flash",
-				"DeepSeek-V3.2",
-				"MiniMax-M3",
-				"MiniMax-M2.7",
-				"MiniMax-M2.5",
-				"MiMo-V2.5-Pro",
-			},
+			id:           "scnet",
+			kind:         "openai",
+			baseURL:      "https://api.scnet.cn/api/llm/v1",
+			modelsURL:    "https://api.scnet.cn/api/llm/v1/models",
+			models:       wantModels,
+			visionModels: wantVisionModels,
 		},
 		{
-			id:         "scnet-anthropic",
-			kind:       "anthropic",
-			baseURL:    "https://api.scnet.cn/api/llm/anthropic",
-			models:     []string{"MiniMax-M2.5", "DeepSeek-V4-Flash"},
-			authHeader: true,
+			id:           "scnet-anthropic",
+			kind:         "anthropic",
+			baseURL:      "https://api.scnet.cn/api/llm/anthropic",
+			models:       wantModels,
+			visionModels: wantVisionModels,
+			authHeader:   true,
 		},
 	}
 	for _, tt := range tests {
@@ -71,6 +76,9 @@ func TestCuratedProviderPresetsSCNetUsesOfficialBaseURLs(t *testing.T) {
 			if !reflect.DeepEqual(entry.Models, tt.models) {
 				t.Fatalf("preset %q models = %q, want %q", tt.id, entry.Models, tt.models)
 			}
+			if !reflect.DeepEqual(entry.VisionModels, tt.visionModels) {
+				t.Fatalf("preset %q vision_models = %q, want %q", tt.id, entry.VisionModels, tt.visionModels)
+			}
 			if entry.DefaultModel() != "MiniMax-M2.5" {
 				t.Fatalf("preset %q default = %q, want MiniMax-M2.5", tt.id, entry.DefaultModel())
 			}
@@ -82,5 +90,36 @@ func TestCuratedProviderPresetsSCNetUsesOfficialBaseURLs(t *testing.T) {
 				t.Fatalf("preset %q entry failed validation: %v", tt.id, err)
 			}
 		})
+	}
+}
+
+func TestCuratedProviderPresetSCNetAppliesPerModelCapabilities(t *testing.T) {
+	preset, ok := CuratedProviderPreset("scnet")
+	if !ok || len(preset.Entries) != 1 {
+		t.Fatalf("SCNet preset = %+v", preset)
+	}
+	var cfg Config
+	if err := cfg.UpsertProvider(preset.Entries[0]); err != nil {
+		t.Fatalf("UpsertProvider: %v", err)
+	}
+
+	deepseek, ok := cfg.ResolveModel("scnet/DeepSeek-V4-Flash")
+	if !ok {
+		t.Fatal("ResolveModel(scnet/DeepSeek-V4-Flash) failed")
+	}
+	if got := ReasoningProtocolForEntry(deepseek); got != ReasoningProtocolOpenAI {
+		t.Fatalf("DeepSeek-V4-Flash reasoning protocol = %q, want %q", got, ReasoningProtocolOpenAI)
+	}
+	if !reflect.DeepEqual(deepseek.SupportedEfforts, []string{"high", "max"}) || deepseek.DefaultEffort != "high" {
+		t.Fatalf("DeepSeek-V4-Flash efforts = %v/%q, want [high max]/high", deepseek.SupportedEfforts, deepseek.DefaultEffort)
+	}
+
+	vision, ok := cfg.ResolveModel("scnet/Kimi-K2.5")
+	if !ok || !EffectiveVision(vision) {
+		t.Fatalf("Kimi-K2.5 vision capability = %t, found=%t", EffectiveVision(vision), ok)
+	}
+	textOnly, ok := cfg.ResolveModel("scnet/MiniMax-M2.5")
+	if !ok || EffectiveVision(textOnly) {
+		t.Fatalf("MiniMax-M2.5 vision capability = %t, found=%t", EffectiveVision(textOnly), ok)
 	}
 }

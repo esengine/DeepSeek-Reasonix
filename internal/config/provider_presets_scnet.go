@@ -16,6 +16,21 @@ var scnetOpenAIModels = []string{
 	"MiMo-V2.5-Pro",
 }
 
+var scnetVisionModels = []string{"Kimi-K2.6", "Kimi-K2.5"}
+
+func scnetOpenAIModelOverrides() map[string]ProviderModelOverride {
+	return map[string]ProviderModelOverride{
+		"DeepSeek-V4-Flash": {
+			// SCNet's OpenAI-compatible endpoint uses reasoning_effort and leaves
+			// enable_thinking on by default; it does not use DeepSeek's native
+			// thinking.type request shape.
+			ReasoningProtocol: ReasoningProtocolOpenAI,
+			SupportedEfforts:  []string{"high", "max"},
+			DefaultEffort:     "high",
+		},
+	}
+}
+
 // SCNet (国家超算互联网) exposes a broader catalog through its OpenAI-compatible
 // endpoint. Keep this curated list aligned with the Token Plan documentation;
 // the UI preserves curated models when the dynamic catalog is also available.
@@ -25,19 +40,22 @@ var scnetPreset = ProviderPreset{
 	Description: "SCNet (国家超算互联网) OpenAI-compatible token-plan API.",
 	KeyEnv:      "SCNET_API_KEY",
 	Entries: []ProviderEntry{{
-		Name:      "scnet",
-		Kind:      "openai",
-		BaseURL:   "https://api.scnet.cn/api/llm/v1",
-		ModelsURL: "https://api.scnet.cn/api/llm/v1/models",
-		Models:    scnetOpenAIModels,
-		Default:   "MiniMax-M2.5",
-		APIKeyEnv: "SCNET_API_KEY",
+		Name:           "scnet",
+		Kind:           "openai",
+		BaseURL:        "https://api.scnet.cn/api/llm/v1",
+		ModelsURL:      "https://api.scnet.cn/api/llm/v1/models",
+		Models:         scnetOpenAIModels,
+		VisionModels:   scnetVisionModels,
+		Default:        "MiniMax-M2.5",
+		APIKeyEnv:      "SCNET_API_KEY",
+		ModelOverrides: scnetOpenAIModelOverrides(),
 	}},
 }
 
-// SCNet's Anthropic-compatible endpoint supports a narrower model set than its
-// OpenAI endpoint. Do not attach the unfiltered OpenAI /models catalog here.
-var scnetAnthropicModels = []string{"MiniMax-M2.5", "DeepSeek-V4-Flash"}
+// SCNet documents the same current Token Plan catalog for its OpenAI- and
+// Anthropic-compatible entrypoints. Keep an explicit curated list here because
+// the OpenAI /models endpoint is not an Anthropic model-discovery contract.
+var scnetAnthropicModels = append([]string(nil), scnetOpenAIModels...)
 
 var scnetAnthropicPreset = ProviderPreset{
 	ID:          "scnet-anthropic",
@@ -45,13 +63,14 @@ var scnetAnthropicPreset = ProviderPreset{
 	Description: "SCNet (国家超算互联网) Anthropic-compatible token-plan endpoint with Bearer auth.",
 	KeyEnv:      "SCNET_API_KEY",
 	Entries: []ProviderEntry{{
-		Name:       "scnet-anthropic",
-		Kind:       "anthropic",
-		BaseURL:    "https://api.scnet.cn/api/llm/anthropic",
-		Models:     scnetAnthropicModels,
-		Default:    "MiniMax-M2.5",
-		APIKeyEnv:  "SCNET_API_KEY",
-		AuthHeader: true,
+		Name:         "scnet-anthropic",
+		Kind:         "anthropic",
+		BaseURL:      "https://api.scnet.cn/api/llm/anthropic",
+		Models:       scnetAnthropicModels,
+		VisionModels: scnetVisionModels,
+		Default:      "MiniMax-M2.5",
+		APIKeyEnv:    "SCNET_API_KEY",
+		AuthHeader:   true,
 	}},
 }
 
