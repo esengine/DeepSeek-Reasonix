@@ -210,6 +210,8 @@ type Status interface {
 	ContextMaintenanceSnapshot() agent.ContextMaintenanceSnapshot
 	LastUsage() *provider.Usage
 	Balance(ctx context.Context) (*billing.Balance, error)
+	BalanceURL() string
+	UsageURL() string
 	Jobs() []jobs.View
 	Todos() []evidence.TodoItem
 }

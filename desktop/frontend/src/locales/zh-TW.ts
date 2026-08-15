@@ -669,6 +669,7 @@ export const zhTW: Record<DictKey, string> = {
   "status.tokens": "tokens",
   "status.retrying": "正在重試 ({attempt}/{max})…",
   "status.balanceTitle": "錢包餘額",
+  "status.balanceDoubleClick": "雙擊打開用量頁面",
   "status.spendTitle": "本會話估算計費費用，包含主模型、子代理和輔助呼叫",
 
   // ── Heartbeat ──

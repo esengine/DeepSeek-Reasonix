@@ -163,6 +163,7 @@ type Controller struct {
 	// endpoint (empty when the provider declares none). Captured at build so a
 	// model/key switch — which rebuilds the controller — refreshes them.
 	balanceURL    string
+	usageURL      string
 	balanceKey    string
 	balanceClient *http.Client
 
@@ -473,6 +474,7 @@ type Options struct {
 	// BalanceURL/BalanceKey wire the active provider's optional wallet-balance
 	// endpoint and bearer key; empty when the provider declares no balance_url.
 	BalanceURL    string
+	UsageURL      string // provider's usage/billing web page; empty = no action in UI
 	BalanceKey    string
 	BalanceClient *http.Client
 	// Jobs is the session-scoped background-job manager (nil disables background jobs).
@@ -640,6 +642,7 @@ func New(opts Options) *Controller {
 		onSessionRecovered:                opts.OnSessionRecovered,
 		onSessionTransition:               opts.OnSessionTransition,
 		balanceURL:                        opts.BalanceURL,
+		usageURL:                          opts.UsageURL,
 		balanceKey:                        opts.BalanceKey,
 		balanceClient:                     opts.BalanceClient,
 		jobs:                              opts.Jobs,
@@ -4815,6 +4818,16 @@ func (c *Controller) Todos() []evidence.TodoItem {
 		return nil
 	}
 	return c.executor.CanonicalTodoState()
+}
+
+// UsageURL returns the provider's usage/billing web page URL.
+func (c *Controller) UsageURL() string {
+	return c.usageURL
+}
+
+// BalanceURL returns the provider's wallet-balance endpoint URL.
+func (c *Controller) BalanceURL() string {
+	return c.balanceURL
 }
 
 // Balance queries the active provider's wallet balance, or (nil, nil) when the
