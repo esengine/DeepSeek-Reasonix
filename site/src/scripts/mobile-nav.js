@@ -17,6 +17,8 @@ export function initMobileNav() {
       stateToken += 1;
       clearTimeout(closeTimer);
       toggle.setAttribute("aria-expanded", "false");
+      toggle.setAttribute("aria-label", "Open navigation");
+      if (toggle.hasAttribute("title")) toggle.setAttribute("title", "Open navigation");
       menu.setAttribute("aria-hidden", "true");
       menu.classList.remove("is-open");
       document.body.classList.remove("mobile-nav-open");
@@ -31,6 +33,8 @@ export function initMobileNav() {
       menu.hidden = false;
       menu.setAttribute("aria-hidden", "false");
       toggle.setAttribute("aria-expanded", "true");
+      toggle.setAttribute("aria-label", "Close navigation");
+      if (toggle.hasAttribute("title")) toggle.setAttribute("title", "Close navigation");
       document.body.classList.add("mobile-nav-open");
       requestAnimationFrame(() => {
         if (token === stateToken && !menu.hidden) menu.classList.add("is-open");

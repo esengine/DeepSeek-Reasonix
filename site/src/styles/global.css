@@ -49,6 +49,14 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* Global keyboard-focus ring. :where() keeps specificity at zero so any
+   component-level :focus-visible rule still wins when it wants a custom look;
+   everything else gets one consistent, visible outline. */
+:where(a, button, input, textarea, select, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 [hidden] { display: none !important; }
 
 html { scroll-behavior: smooth; background: var(--bg); }
@@ -178,9 +186,13 @@ body.mobile-nav-open { overflow: hidden; }
 .mobile-nav-github svg { width: 18px; height: 18px; }
 
 @media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
   .mobile-nav, .mobile-nav-panel { transition: none; }
 }
 
+/* Breakpoints are intentionally few and coarse — 1260/1100 (nav density),
+   900 (layout collapse), 700 (hero), 640 (forms/downloads), 400/360 (tiny
+   phones). Keep new rules on an existing breakpoint instead of adding more. */
 @media (max-width: 1260px) {
   .nav-link--secondary { display: none; }
 }

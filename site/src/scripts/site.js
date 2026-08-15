@@ -229,7 +229,7 @@ import { initMobileNav } from "./mobile-nav.js";
       const done = () => {
         btn.classList.add("copied");
         const prev = btn.textContent;
-        btn.textContent = "Copied";
+        btn.textContent = document.body.dataset.lang === "zh" ? "已复制" : "Copied";
         setTimeout(() => { btn.classList.remove("copied"); btn.textContent = prev; }, 1600);
       };
       if (navigator.clipboard && navigator.clipboard.writeText) {
