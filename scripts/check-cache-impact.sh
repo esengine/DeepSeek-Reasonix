@@ -56,9 +56,18 @@ done <<< "$changed_input"
 
 cache_sensitive=()
 system_prompt_sensitive=()
+standing_instruction_changed=()
 
 for file in "${changed_files[@]:-}"; do
   case "$file" in
+    REASONIX.md|AGENTS.md|CLAUDE.md|\
+    REASONIX.local.md|AGENTS.local.md|CLAUDE.local.md|\
+    */REASONIX.md|*/AGENTS.md|*/CLAUDE.md|\
+    */REASONIX.local.md|*/AGENTS.local.md|*/CLAUDE.local.md)
+      standing_instruction_changed+=("$file")
+      cache_sensitive+=("$file")
+      system_prompt_sensitive+=("$file")
+      ;;
     desktop/session_prompt.go|\
     internal/agent/agent.go|\
     internal/agent/ask.go|\
@@ -161,6 +170,14 @@ require_review_field() {
 
 require_field "Cache-impact"
 require_field "Cache-guard"
+
+if [[ "${#standing_instruction_changed[@]}" -gt 0 ]]; then
+  cache_impact="$(field_value "Cache-impact" || true)"
+  cache_impact_lower="$(printf '%s' "$cache_impact" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$cache_impact_lower" =~ ^none($|[[:space:]:-]) ]]; then
+    failures+=("Cache-impact: cannot be none when standing instruction files change")
+  fi
+fi
 
 if [[ "${#system_prompt_sensitive[@]}" -gt 0 ]]; then
   require_review_field "System-prompt-review"
