@@ -40,6 +40,7 @@ ask_request = true   # notify when a question is waiting
 temperature       = 0.0
 # recovery_model = ""               # optional reviewer for low-risk automatic recovery; falls back to guardian_model then main model
 # reasoning_language = "auto"   # visible reasoning text: auto|zh|en
+# reasoning_byte_limit = -1   # per-stream stored hidden reasoning cap; 0 = built-in default, negative = disabled
 # plan_mode_read_only_commands = ["gh issue view"]   # legacy compatibility only; Plan bash uses Permissions
 compact_ratio       = 0.85  # sole auto trigger; presets 0.70 (active) / 0.80 (steady) / 0.85 (recommended default)
 # planner_model = "deepseek-pro"   # optional: enable two-model collaboration

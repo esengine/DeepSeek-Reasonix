@@ -56,6 +56,7 @@ show_turn_usage = false             # 隐藏 TUI 每轮 token/费用回执；默
 
 [agent]
 reasoning_language = "auto"      # 可见思考过程语言：auto|zh|en
+# reasoning_byte_limit = -1   # 单条流存储的隐藏推理字节上限；0 = 内置默认，负数 = 禁用
 # plan_mode_read_only_commands = ["gh issue view"]   # 仅兼容旧配置；Plan bash 现由 Permissions 决定
 # planner_model = "deepseek-pro"      # 可选的低频规划器
 # subagent_model = "deepseek-pro"     # runAs=subagent skill 的默认模型

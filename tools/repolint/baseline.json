@@ -578,8 +578,8 @@
     "internal/boot/boot.go": {
       "complexity": 250,
       "essay": 83,
-      "file-size": 2093,
-      "function-size": 1712,
+      "file-size": 2095,
+      "function-size": 1714,
       "narrative": 3
     },
     "internal/boot/boot_test.go": {
@@ -834,7 +834,7 @@
     },
     "internal/config/config.go": {
       "essay": 25,
-      "file-size": 1520,
+      "file-size": 1522,
       "narrative": 2
     },
     "internal/config/credentials.go": {
@@ -881,13 +881,13 @@
       "file-size": 262
     },
     "internal/config/render.go": {
-      "complexity": 252,
+      "complexity": 254,
       "essay": 2,
-      "file-size": 1016,
-      "function-size": 967
+      "file-size": 1025,
+      "function-size": 976
     },
     "internal/config/render_test.go": {
-      "test-file-size": 759
+      "test-file-size": 783
     },
     "internal/control/approval.go": {
       "essay": 5
