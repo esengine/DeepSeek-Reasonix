@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestCuratedProviderPresetsSCNetUsesOfficialBaseURLs(t *testing.T) {
 	tests := []struct {
@@ -8,6 +11,7 @@ func TestCuratedProviderPresetsSCNetUsesOfficialBaseURLs(t *testing.T) {
 		kind       string
 		baseURL    string
 		modelsURL  string
+		models     []string
 		authHeader bool
 	}{
 		{
@@ -15,12 +19,27 @@ func TestCuratedProviderPresetsSCNetUsesOfficialBaseURLs(t *testing.T) {
 			kind:      "openai",
 			baseURL:   "https://api.scnet.cn/api/llm/v1",
 			modelsURL: "https://api.scnet.cn/api/llm/v1/models",
+			models: []string{
+				"GLM-5.2",
+				"GLM-5",
+				"GLM-5.1",
+				"Kimi-K3",
+				"Kimi-K2.7-Code",
+				"Kimi-K2.6",
+				"Kimi-K2.5",
+				"DeepSeek-V4-Flash",
+				"DeepSeek-V3.2",
+				"MiniMax-M3",
+				"MiniMax-M2.7",
+				"MiniMax-M2.5",
+				"MiMo-V2.5-Pro",
+			},
 		},
 		{
 			id:         "scnet-anthropic",
 			kind:       "anthropic",
 			baseURL:    "https://api.scnet.cn/api/llm/anthropic",
-			modelsURL:  "https://api.scnet.cn/api/llm/v1/models",
+			models:     []string{"MiniMax-M2.5", "DeepSeek-V4-Flash"},
 			authHeader: true,
 		},
 	}
@@ -49,11 +68,14 @@ func TestCuratedProviderPresetsSCNetUsesOfficialBaseURLs(t *testing.T) {
 			if entry.AuthHeader != tt.authHeader {
 				t.Fatalf("preset %q auth_header = %t, want %t", tt.id, entry.AuthHeader, tt.authHeader)
 			}
+			if !reflect.DeepEqual(entry.Models, tt.models) {
+				t.Fatalf("preset %q models = %q, want %q", tt.id, entry.Models, tt.models)
+			}
 			if entry.DefaultModel() != "MiniMax-M2.5" {
 				t.Fatalf("preset %q default = %q, want MiniMax-M2.5", tt.id, entry.DefaultModel())
 			}
-			if tt.kind == "anthropic" && entry.Thinking != "adaptive" {
-				t.Fatalf("preset %q thinking = %q, want adaptive", tt.id, entry.Thinking)
+			if tt.kind == "anthropic" && entry.Thinking != "" {
+				t.Fatalf("preset %q thinking = %q, want omitted", tt.id, entry.Thinking)
 			}
 			var cfg Config
 			if err := cfg.UpsertProvider(entry); err != nil {
