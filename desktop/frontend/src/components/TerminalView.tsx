@@ -5,6 +5,7 @@ import "@xterm/xterm/css/xterm.css";
 
 import { useTerminalStore } from "../store/terminal";
 import { registerTerminalSink, startTerminalEventBridge } from "../lib/terminalEvents";
+import { MONO_FONT_CHANGED_EVENT, monoFontStackForTerminal } from "../lib/fontFamily";
 import { observeTerminalTheme, terminalThemeForElement } from "../lib/terminalTheme";
 import type { TerminalSessionView } from "../lib/types";
 
@@ -20,7 +21,7 @@ export function TerminalView({ tabId, session }: { tabId: string; session: Termi
     const terminal = new Terminal({
       convertEol: true,
       cursorBlink: true,
-      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+      fontFamily: monoFontStackForTerminal(),
       fontSize: 13,
       theme: terminalThemeForElement(host),
     });
@@ -31,6 +32,13 @@ export function TerminalView({ tabId, session }: { tabId: string; session: Termi
       terminal.options.theme = terminalThemeForElement(host);
     };
     const stopObservingTheme = observeTerminalTheme(host, updateTheme);
+    const applyFont = () => {
+      terminal.options.fontFamily = monoFontStackForTerminal();
+      fit.fit();
+      terminal.refresh(0, terminal.rows - 1);
+    };
+    const onMonoFontChanged = () => applyFont();
+    window.addEventListener(MONO_FONT_CHANGED_EVENT, onMonoFontChanged);
     const unregister = registerTerminalSink(session.id, (bytes) => terminal.write(bytes));
     const input = terminal.onData((data) => { void write(tabId, session.id, data).catch(() => {}); });
     const outputResize = terminal.onResize(({ cols, rows }) => { void resize(tabId, session.id, cols, rows).catch(() => {}); });
@@ -45,6 +53,7 @@ export function TerminalView({ tabId, session }: { tabId: string; session: Termi
     return () => {
       observer?.disconnect();
       stopObservingTheme();
+      window.removeEventListener(MONO_FONT_CHANGED_EVENT, onMonoFontChanged);
       input.dispose();
       outputResize.dispose();
       unregister();

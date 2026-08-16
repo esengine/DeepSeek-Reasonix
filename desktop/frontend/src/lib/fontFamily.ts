@@ -12,6 +12,10 @@ const CUSTOM_FONT_KEY = "reasonix-font-family-custom";
 const MONO_FONT_FAMILY_KEY = "reasonix-mono-font-family";
 const CUSTOM_MONO_FONT_KEY = "reasonix-mono-font-family-custom";
 
+/** Fired after the monospace font preference changes, so non-DOM renderers
+ *  (e.g. the xterm.js integrated terminal) can pick up the new font. */
+export const MONO_FONT_CHANGED_EVENT = "reasonix:mono-font-changed";
+
 export function isFontFamily(value: unknown): value is FontFamily {
   return typeof value === "string" && (FONT_FAMILIES as readonly string[]).includes(value);
 }
@@ -100,9 +104,45 @@ export function applyMonoFontFamily(font: MonoFontFamily): void {
   } catch {
     /* private mode / no storage */
   }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(MONO_FONT_CHANGED_EVENT));
+  }
 }
 
 export function initFontFamily(): void {
   applyFontFamily(getFontFamily());
   applyMonoFontFamily(getMonoFontFamily());
+}
+
+/**
+ * Monospace font stacks for the xterm.js integrated terminal, mirroring the
+ * `--font-mono` presets in styles.css. The terminal renders into a canvas, so
+ * CSS variables never reach it — resolve the stack here instead.
+ */
+const TERMINAL_MONO_STACKS: Record<Exclude<MonoFontFamily, "custom">, string> = {
+  system: 'ui-monospace, "Cascadia Code", "JetBrains Mono", "Noto Sans Mono", "Liberation Mono", Consolas, monospace',
+  cascadia: '"Cascadia Code", "Cascadia Mono", Consolas, "Liberation Mono", ui-monospace, monospace',
+  jetbrains: '"JetBrains Mono", "Cascadia Code", "SF Mono", Consolas, ui-monospace, monospace',
+  sfmono: '"SF Mono", SFMono-Regular, ui-monospace, Menlo, Monaco, "Cascadia Code", Consolas, monospace',
+};
+
+const TERMINAL_MONO_CUSTOM_FALLBACK = '"Cascadia Code", "SF Mono", Consolas, ui-monospace, monospace';
+
+function quoteFontNameForStack(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith('"') || trimmed.startsWith("'")) return trimmed;
+  if (/\s/.test(trimmed)) return `"${trimmed}"`;
+  return trimmed;
+}
+
+/** The CSS font stack the integrated terminal should use, honoring the
+ *  user's monospace font preference (including a custom Nerd Font name). */
+export function monoFontStackForTerminal(): string {
+  const font = getMonoFontFamily();
+  if (font === "custom") {
+    const name = quoteFontNameForStack(getCustomMonoFontName());
+    return name ? `${name}, ${TERMINAL_MONO_CUSTOM_FALLBACK}` : TERMINAL_MONO_STACKS.system;
+  }
+  return TERMINAL_MONO_STACKS[font];
 }
