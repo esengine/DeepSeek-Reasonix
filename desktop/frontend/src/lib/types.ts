@@ -446,6 +446,8 @@ export interface TabMeta {
   backgroundJobs?: number;
   cancelRequested?: boolean;
   cancellable?: boolean;
+  /** Unix ms start of the turn currently running on this tab; absent when idle. */
+  turnStartedAtMs?: number;
   mode: Mode;
   collaborationMode?: CollaborationMode;
   toolApprovalMode?: ToolApprovalMode;

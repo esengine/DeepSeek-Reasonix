@@ -374,6 +374,15 @@ interface State {
   discardTurn?: boolean;
   turnStartAt: number;
   turnDoneAt: number;
+  // Backend-reported start (Unix ms) of the turn this tab is currently running,
+  // straight from runtime telemetry. Serves two purposes: the authoritative
+  // fallback when local turnStartAt is rebuilt mid-turn (#7987), and proof that
+  // a turn is still in flight when activation_start has cleared the local
+  // running/turnActive flags. Only backend metadata (activation_start /
+  // backend_status) installs it — never a local turn_started event, so a lost
+  // turn_done cannot leave stale evidence behind. Cleared whenever the backend
+  // reports idle (backend_status running=false) or the turn settles (turn_done).
+  backendTurnStartedAtMs?: number;
   // Completion tokens accumulated across executor usage events within the
   // current turn. ReasoningTokens is a subset of CompletionTokens.
   turnOutputTokens: number;
@@ -528,6 +537,7 @@ type RuntimeMetaSnapshot = {
   backgroundJobs?: number;
   cancelRequested?: boolean;
   cancellable?: boolean;
+  turnStartedAtMs?: number;
 };
 export function foregroundRunningFromRuntimeMeta(meta: RuntimeMetaSnapshot): boolean {
   if (typeof meta.cancellable === "boolean") return meta.cancellable;
@@ -782,7 +792,7 @@ type Action =
   | { type: "unsend" }
   | { type: "send_confirmed"; submissionId: string }
   | { type: "send_failed"; submissionId: string; error: string }
-  | { type: "backend_status"; running: boolean; pendingPrompt?: boolean; backgroundJobs?: number; cancelRequested?: boolean; cancellable?: boolean; snapshotAt?: number }
+  | { type: "backend_status"; running: boolean; pendingPrompt?: boolean; backgroundJobs?: number; cancelRequested?: boolean; cancellable?: boolean; snapshotAt?: number; turnStartedAtMs?: number }
   | { type: "cancel_requested" }
   | { type: "meta"; meta: Meta }
   | { type: "optimistic_meta"; meta: Meta }
@@ -794,7 +804,7 @@ type Action =
   | { type: "hydrate_start"; reason: HydrateReason; placeholderItems?: Item[] }
   | { type: "hydrate_done" }
   | { type: "hydrate_error"; reason: HydrateReason; error: string }
-  | { type: "backend_activation_start"; backendPendingPrompt?: boolean }
+  | { type: "backend_activation_start"; backendPendingPrompt?: boolean; backendTurnStartedAtMs?: number }
   | { type: "backend_activation_done" }
   | { type: "message_action_start"; action: MessageActionState }
   | { type: "message_action_done" }
@@ -828,6 +838,7 @@ function backendStatusFromRuntimeMeta(meta: RuntimeMetaSnapshot): Extract<Action
     backgroundJobs: meta.backgroundJobs ?? 0,
     cancelRequested: Boolean(meta.cancelRequested),
     cancellable: foregroundRunning,
+    turnStartedAtMs: meta.turnStartedAtMs,
   };
 }
 
@@ -1438,8 +1449,9 @@ function applyEvent(s: State, e: WireEvent): State {
     case "turn_started": {
       // Pre-create an empty assistant bubble
       // immediately so the user sees their message + a blinking cursor the
-      // instant the backend acknowledges the turn — no dead gap waiting for
-      // the first text/reasoning token.
+      // instant the backend acknowledges the turn — no dead gap waiting for the
+      // first text/reasoning token.
+      const now = Date.now();
       const fresh = { ...s, pendingSearchSources: undefined };
       const { items, id, seq } = ensureAssistant(fresh);
       return {
@@ -1455,7 +1467,7 @@ function applyEvent(s: State, e: WireEvent): State {
         pendingPrompt: false,
         cancelRequested: false,
         cancellable: true,
-        ...resetTurnTiming(),
+        ...resetTurnTiming(now),
       };
     }
     case "turn_phase": {
@@ -1874,6 +1886,7 @@ function applyEvent(s: State, e: WireEvent): State {
         approval: keepPlanApproval ? s.approval : undefined,
         ask: undefined,
         deliveryRecoveryActive: false,
+        backendTurnStartedAtMs: undefined,
         seq: s.seq + 1,
       };
       // Close user-wait unless the plan approval gate remains open.
@@ -1962,12 +1975,23 @@ export function reducer(s: State, a: Action): State {
       if (!foregroundRunning && runtimeSnapshotPredatesRetry(s, a.snapshotAt)) return s;
       const cancellable = foregroundRunning;
       const clearsRetry = !foregroundRunning && s.retry !== undefined;
+      // Authoritative turn clock (#7987): a surviving local reading first, then
+      // the backend's turn-start telemetry, and only then "now". Local state can
+      // be rebuilt mid-turn by tab-switch hydration, and restarting from
+      // Date.now() resets the run-strip timer to zero.
+      const turnStartAt = foregroundRunning ? (s.turnStartAt || a.turnStartedAtMs || Date.now()) : s.turnStartAt;
+      const backendTurnStartedAtMs = foregroundRunning ? (a.turnStartedAtMs ?? s.backendTurnStartedAtMs) : undefined;
+      // Keep the historical no-op semantics: a flags-identical snapshot stays a
+      // no-op unless it actually fills an empty clock with backend telemetry.
+      const fillsClock = foregroundRunning && s.turnStartAt === 0 && a.turnStartedAtMs !== undefined;
       if (
         foregroundRunning === s.running &&
         pendingPrompt === s.pendingPrompt &&
         backgroundJobs === s.backgroundJobs &&
         cancelRequested === s.cancelRequested &&
         cancellable === s.cancellable &&
+        !fillsClock &&
+        backendTurnStartedAtMs === s.backendTurnStartedAtMs &&
         !clearsRetry
       ) return s;
       if (foregroundRunning) {
@@ -1979,7 +2003,8 @@ export function reducer(s: State, a: Action): State {
           backgroundJobs,
           cancelRequested,
           cancellable,
-          turnStartAt: s.turnStartAt || Date.now(),
+          turnStartAt,
+          backendTurnStartedAtMs,
         };
       }
       const telemetry = snapshotCompletedTurnTelemetry(s);
@@ -2003,6 +2028,7 @@ export function reducer(s: State, a: Action): State {
         approval: undefined,
         ask: undefined,
         retry: undefined,
+        backendTurnStartedAtMs: undefined,
       });
     }
     case "meta": {
@@ -2062,6 +2088,10 @@ export function reducer(s: State, a: Action): State {
         running: preservePrompt,
         turnActive: preservePrompt,
         cancellable: preservePrompt,
+        // Remember the backend's turn evidence even though the local lifecycle
+        // flags are cleared above: deferred hydration must not treat this tab
+        // as idle (and reset its turn clock) while the runtime still runs (#7987).
+        backendTurnStartedAtMs: a.backendTurnStartedAtMs,
       };
     }
     case "backend_activation_done": return s.backendActivationPending ? { ...s, backendActivationPending: false } : s;
@@ -2933,7 +2963,12 @@ export function useController() {
       const stillVisible = () => !requiresVisibleTab || activeTabIdRef.current === tabId;
       const foregroundTurnActive = (): boolean => {
         const state = statesRef.current.get(tabId);
-        return Boolean(state?.running || state?.turnActive || state?.pendingPrompt);
+        if (state?.running || state?.turnActive || state?.pendingPrompt) return true;
+        // backend_activation_start clears the local lifecycle flags above, but
+        // the backend runtime telemetry still reports this turn as running.
+        // Trust that evidence over the just-cleared flags so deferred hydration
+        // cannot reset the tab (and its turn clock) mid-turn (#7987).
+        return Boolean(state?.backendTurnStartedAtMs);
       };
       const noteFailure = (label: string, err: unknown) => {
         addBreadcrumb("tab.hydrate", `${label} failed ${tabId}: ${errorMessage(err)}`);
@@ -3214,6 +3249,7 @@ export function useController() {
       cancelRequested: Boolean(tab.cancelRequested),
       cancellable: foregroundRunning,
       snapshotAt,
+      turnStartedAtMs: tab.turnStartedAtMs,
     });
     // backend_status reconciliation can clear a live prompt from frontend state.
     // If the backend is still blocked, ask it to replay the approval/ask event.
@@ -4446,7 +4482,7 @@ export function useController() {
     addBreadcrumb("tab.switch", `click ${tabId}`);
     setActiveTabId(tabId);
     activeTabIdRef.current = tabId;
-    dispatchTo(tabId, { type: "backend_activation_start", backendPendingPrompt: Boolean(optimisticTab?.pendingPrompt) });
+    dispatchTo(tabId, { type: "backend_activation_start", backendPendingPrompt: Boolean(optimisticTab?.pendingPrompt), backendTurnStartedAtMs: optimisticTab?.turnStartedAtMs });
     noteActivationStarted(switchRequestId, tabId);
     if (optimisticTab) {
       dispatchTo(tabId, { type: "optimistic_meta", meta: metaFromTab(optimisticTab, statesRef.current.get(tabId)?.meta) });
