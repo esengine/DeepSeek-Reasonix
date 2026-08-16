@@ -23,14 +23,7 @@ type Constraints struct {
 func ParseConstraints(instruction string) Constraints {
 	var c Constraints
 	lower := strings.ToLower(instruction)
-	if matchesAny(lower, []string{
-		"只分析", "只读", "不要修改", "别改", "不要改", "仅分析", "只看不改",
-		"analyze only", "analysis only", "don't modify", "do not modify",
-		"don't change", "do not change", "no changes", "read only", "read-only",
-		"without modifying", "without changes", "don't edit", "do not edit",
-		"复现但不修复", "只复现", "不要修复", "reproduce but don't fix",
-		"reproduce only", "don't fix", "do not fix", "no fix",
-	}) {
+	if hasGlobalMutationBan(lower) {
 		c.ForbidMutation = true
 		c.Notes = append(c.Notes, "user_forbid_mutation")
 	}
@@ -63,6 +56,184 @@ func ParseConstraints(instruction string) Constraints {
 		c.Notes = append(c.Notes, "user_forbid_external")
 	}
 	return c
+}
+
+// hasGlobalMutationBan distinguishes a turn-wide read-only instruction from a
+// scoped protection such as "do not change any config". The latter still lets
+// the requested output or an unrelated implementation target be written.
+func hasGlobalMutationBan(instruction string) bool {
+	for _, clause := range mutationConstraintClauses(instruction) {
+		clause = strings.TrimSpace(strings.TrimLeft(clause, "-*•0123456789. )\t"))
+		if clause == "" {
+			continue
+		}
+		if hasExplicitReadOnlyClause(clause) || hasGlobalNegatedMutationClause(clause) {
+			return true
+		}
+	}
+	return false
+}
+
+func mutationConstraintClauses(instruction string) []string {
+	return strings.FieldsFunc(instruction, func(r rune) bool {
+		switch r {
+		case '\n', '\r', '.', '!', '?', ';', '。', '！', '？', '；':
+			return true
+		default:
+			return false
+		}
+	})
+}
+
+func hasExplicitReadOnlyClause(clause string) bool {
+	if hasMutationContinuation(clause) {
+		return false
+	}
+	for _, phrase := range []string{
+		"analyze only", "analysis only", "read-only review", "read only review",
+		"reproduce only", "reproduce but don't fix", "reproduce but do not fix",
+		"只分析", "仅分析", "只看不改", "复现但不修复", "只复现", "仅复现",
+	} {
+		if strings.Contains(clause, phrase) {
+			return true
+		}
+	}
+	trimmed := strings.TrimSpace(clause)
+	return trimmed == "read-only" || strings.HasPrefix(trimmed, "read-only ") ||
+		trimmed == "read only" || strings.HasPrefix(trimmed, "read only ") ||
+		trimmed == "只读" || strings.HasPrefix(trimmed, "只读")
+}
+
+func hasMutationContinuation(clause string) bool {
+	for _, marker := range []string{" then ", " and then ", " but then ", "然后", "再", "接着"} {
+		_, tail, ok := strings.Cut(clause, marker)
+		if !ok {
+			continue
+		}
+		if matchesAny(tail, []string{
+			"fix", "repair", "implement", "write", "edit", "change", "modify", "create", "commit", "push",
+			"修复", "实现", "编写", "写入", "编辑", "修改", "创建", "提交", "推送",
+		}) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasGlobalNegatedMutationClause(clause string) bool {
+	if describesReadOnlyActor(clause) {
+		return false
+	}
+	for _, phrase := range []string{
+		"don't modify", "do not modify", "don't change", "do not change",
+		"don't edit", "do not edit", "without modifying", "without changes",
+	} {
+		if tail, ok := textAfterPhrase(clause, phrase); ok && globalMutationTail(tail) {
+			return true
+		}
+	}
+	for _, phrase := range []string{"don't fix", "do not fix", "no fix"} {
+		if tail, ok := textAfterPhrase(clause, phrase); ok && globalFixTail(tail) {
+			return true
+		}
+	}
+	if tail, ok := textAfterPhrase(clause, "no changes"); ok && globalNoChangesTail(tail) {
+		return true
+	}
+	if tail, ok := textAfterPhrase(clause, "make no changes"); ok && globalNoChangesTail(tail) {
+		return true
+	}
+	for _, phrase := range []string{"不要修改", "不要改动", "不要改", "别修改", "别改", "勿修改"} {
+		if tail, ok := textAfterPhrase(clause, phrase); ok && globalChineseMutationTail(tail) {
+			return true
+		}
+	}
+	for _, phrase := range []string{"不要修复", "不要修", "别修复", "别修"} {
+		if tail, ok := textAfterPhrase(clause, phrase); ok && globalChineseFixTail(tail) {
+			return true
+		}
+	}
+	return false
+}
+
+func describesReadOnlyActor(clause string) bool {
+	return matchesAny(clause, []string{
+		"reviewer", "sub-agent", "subagent", "child agent", "child", "planner",
+		"审查者", "评审者", "子代理", "子 agent", "规划器",
+	}) && matchesAny(clause, []string{"read-only", "read only", "只读"})
+}
+
+func textAfterPhrase(clause, phrase string) (string, bool) {
+	_, tail, ok := strings.Cut(clause, phrase)
+	return strings.TrimSpace(tail), ok
+}
+
+func globalMutationTail(tail string) bool {
+	if tail == "" {
+		return true
+	}
+	if strings.HasPrefix(tail, ":") {
+		return false
+	}
+	return hasBroadTarget(tail)
+}
+
+func globalFixTail(tail string) bool {
+	return tail == "" || startsWithAnyWord(tail, []string{"anything", "anything else", "any issue", "any issues"})
+}
+
+func globalNoChangesTail(tail string) bool {
+	if tail == "" {
+		return true
+	}
+	return startsWithAnyWord(tail, []string{
+		"anywhere", "at all", "to anything", "to the workspace", "to the repository", "to the repo", "to the codebase",
+	})
+}
+
+func hasBroadTarget(tail string) bool {
+	return startsWithAnyWord(tail, []string{
+		"anything", "anything else", "the workspace", "this workspace", "workspace",
+		"the repository", "this repository", "repository", "the repo", "this repo", "repo",
+		"the codebase", "this codebase", "codebase", "any file", "any files", "all files", "the source tree",
+	})
+}
+
+func startsWithAnyWord(value string, prefixes []string) bool {
+	value = strings.TrimSpace(value)
+	for _, prefix := range prefixes {
+		if value == prefix || strings.HasPrefix(value, prefix+" ") || strings.HasPrefix(value, prefix+",") {
+			return true
+		}
+	}
+	return false
+}
+
+func globalChineseMutationTail(tail string) bool {
+	if tail == "" {
+		return true
+	}
+	if strings.HasPrefix(tail, "：") || strings.HasPrefix(tail, ":") {
+		return false
+	}
+	return startsWithAnyChinese(tail, []string{
+		"任何内容", "任何东西", "任何文件", "所有文件", "工作区", "当前工作区",
+		"仓库", "当前仓库", "代码库", "当前代码库", "源码树",
+	})
+}
+
+func globalChineseFixTail(tail string) bool {
+	return tail == "" || startsWithAnyChinese(tail, []string{"任何问题", "任何内容", "其他任何问题"})
+}
+
+func startsWithAnyChinese(value string, prefixes []string) bool {
+	value = strings.TrimSpace(value)
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(value, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // StripQuotedConstraints removes fenced and quoted spans so cited phrases
