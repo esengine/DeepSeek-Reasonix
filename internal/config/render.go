@@ -236,6 +236,11 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	} else {
 		b.WriteString("# reasoning_language = \"zh\"   # visible reasoning language: auto|zh|en\n")
 	}
+	if c.Agent.ReasoningByteLimit != 0 {
+		fmt.Fprintf(&b, "reasoning_byte_limit = %d   # per-stream stored hidden reasoning cap; 0 = built-in default, negative = disabled\n", c.Agent.ReasoningByteLimit)
+	} else {
+		b.WriteString("# reasoning_byte_limit = -1   # per-stream stored hidden reasoning cap; 0 = built-in default, negative = disabled\n")
+	}
 	fmt.Fprintf(&b, "compact_ratio       = %s   # sole auto trigger; presets 0.70/0.80/0.85 (default 0.85)\n", formatFloat(c.Agent.CompactRatio))
 	if c.Agent.Keep != nil {
 		fmt.Fprintf(&b, "keep                = %s   # compaction keep policy: errors, user_marked\n", renderStringArray(c.Agent.Keep))
@@ -943,6 +948,10 @@ func RenderTOMLProjectDelta(c *Config) string {
 			fmt.Fprintf(&agentBuf, "reasoning_language = %q\n", l)
 			anyAgent = true
 		}
+	}
+	if c.Agent.ReasoningByteLimit != d.Agent.ReasoningByteLimit {
+		fmt.Fprintf(&agentBuf, "reasoning_byte_limit = %d\n", c.Agent.ReasoningByteLimit)
+		anyAgent = true
 	}
 	if c.Agent.CompactRatio != d.Agent.CompactRatio {
 		fmt.Fprintf(&agentBuf, "compact_ratio = %s\n", formatFloat(c.Agent.CompactRatio))

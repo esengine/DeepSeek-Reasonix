@@ -401,6 +401,7 @@ default_model = "deepseek"
 [agent]
 temperature = 0.0
 reasoning_language = "auto"
+# reasoning_byte_limit = -1   # 单条流存储的隐藏推理字节上限；0 = 内置默认，负数 = 禁用
 
 [[providers]]
 name           = "deepseek"

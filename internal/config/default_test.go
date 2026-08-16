@@ -14,6 +14,12 @@ func TestDefaultReasoningLanguageAuto(t *testing.T) {
 	}
 }
 
+func TestDefaultReasoningByteLimitUsesBuiltinLimit(t *testing.T) {
+	if got := Default().Agent.ReasoningByteLimit; got != 0 {
+		t.Fatalf("default reasoning_byte_limit = %d, want 0 (built-in limit)", got)
+	}
+}
+
 func TestDefaultBotRunsWithoutStepLimit(t *testing.T) {
 	if got := Default().Bot.MaxSteps; got != 0 {
 		t.Fatalf("default bot max_steps = %d, want continuous 0", got)

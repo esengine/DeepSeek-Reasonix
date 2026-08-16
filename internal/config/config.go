@@ -1307,6 +1307,9 @@ type AgentConfig struct {
 	// text. Empty/auto follows the conversation language. Applied as transient
 	// turn context, not the stable prompt.
 	ReasoningLanguage string `toml:"reasoning_language"`
+	// ReasoningByteLimit caps one stream's stored hidden reasoning. Zero keeps
+	// the built-in default limit; a negative value disables it.
+	ReasoningByteLimit int `toml:"reasoning_byte_limit"`
 	// Deprecated compatibility field paired with AutoPlan. Old TOML remains
 	// readable, but loading clears it and rendering omits it.
 	AutoPlanClassifier string `toml:"auto_plan_classifier"`

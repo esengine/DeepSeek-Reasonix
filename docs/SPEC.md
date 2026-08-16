@@ -1029,6 +1029,7 @@ show_turn_usage = false              # hide per-request token/cost receipts in t
 system_prompt = "You are Reasonix, a coding agent..."  # or system_prompt_file = "..."
 temperature       = 0.0
 reasoning_language = "auto"       # visible reasoning text: auto|zh|en
+# reasoning_byte_limit = -1   # per-stream stored hidden reasoning cap; 0 = built-in default, negative = disabled
 # plan_mode_read_only_commands = ["gh issue view"]   # legacy compatibility only; Plan bash uses Permissions
 # planner_model = "deepseek-pro"   # optional: two-model collaboration (low-frequency planner)
 # subagent_model = "deepseek-pro"   # optional default for runAs=subagent skills

@@ -217,6 +217,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Agent.RecoveryModel = "mimo-pro"
 	orig.Agent.RecoveryTemperature = 0.15
 	orig.Agent.ReasoningLanguage = "zh"
+	orig.Agent.ReasoningByteLimit = 2 << 20
 	orig.Agent.CompactRatio = 0.8
 	orig.Agent.SubagentModel = "mimo-pro"
 	orig.Agent.SubagentModels = map[string]string{"review": "deepseek-pro"}
@@ -421,6 +422,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if got.Agent.ReasoningLanguage != "zh" {
 		t.Errorf("reasoning_language = %q, want zh", got.Agent.ReasoningLanguage)
+	}
+	if got.Agent.ReasoningByteLimit != 2<<20 {
+		t.Errorf("reasoning_byte_limit = %d, want %d", got.Agent.ReasoningByteLimit, 2<<20)
 	}
 	if got.Agent.CompactRatio != orig.Agent.CompactRatio {
 		t.Errorf("compact_ratio = %v, want %v", got.Agent.CompactRatio, orig.Agent.CompactRatio)
@@ -881,6 +885,26 @@ func TestProjectDeltaRendersRecoveryReviewerOverride(t *testing.T) {
 	}
 	if strings.Contains(delta, "recovery_temperature") {
 		t.Fatalf("deprecated recovery_temperature rendered:\n%s", delta)
+	}
+}
+
+func TestProjectDeltaRendersReasoningByteLimit(t *testing.T) {
+	c := Default()
+	c.Agent.ReasoningByteLimit = -1
+
+	delta := RenderTOMLProjectDelta(c)
+	for _, want := range []string{"[agent]", "reasoning_byte_limit = -1"} {
+		if !strings.Contains(delta, want) {
+			t.Fatalf("project delta missing %q:\n%s", want, delta)
+		}
+	}
+
+	got := Default()
+	if _, err := toml.Decode(delta, got); err != nil {
+		t.Fatalf("decode project delta: %v\n%s", err, delta)
+	}
+	if got.Agent.ReasoningByteLimit != -1 {
+		t.Fatalf("reasoning_byte_limit = %d, want -1", got.Agent.ReasoningByteLimit)
 	}
 }
 
