@@ -13,6 +13,7 @@ var Chinese = Messages{
 	TurnCancelled:          "已取消 — 回到提示符",
 	InterruptedRecovery:    "本轮已中断。部分输出会永久保留供查看；只有完整工具调用及结果和有界恢复摘要会进入模型下一轮。继续或回滚前请先检查当前工作区。",
 	FinalReadinessRecovery: "任务收尾检查已暂停。运行 /continue-checks 可保留已完成证据并继续剩余检查。",
+	ReadinessContinuing:    "本轮仍有检查未完成，Reasonix 正在自动补齐。",
 	RecoveryPaused:         "已暂停自动重试。Reasonix 已停止重复尝试，并保留已完成的工作。发送“继续”即可开始新一轮，也可以补充要求来调整方向。",
 	ReceiptVerified:        "没有未经验证的部分",
 	ReceiptGapsHeader:      "未验证:",

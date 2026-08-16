@@ -52,6 +52,10 @@ type RuntimePlan struct {
 	Kind SubgraphKind
 	// Graph is the resolved target graph (may be nil for pure no-op plans).
 	Graph *DependencyGraph
+	// RestartUnchangedSidecars requests fresh native processes even when their
+	// dependency/capability identity is unchanged. It affects activation only,
+	// so IsNoOp and CacheHash remain stable.
+	RestartUnchangedSidecars bool
 }
 
 // IsNoOp reports whether the plan changes no components.
@@ -80,10 +84,10 @@ func (p *RuntimePlan) MayChangePrefix() bool {
 
 // AffectsSidecars reports whether any native runtime package must start/drain.
 func (p *RuntimePlan) AffectsSidecars() bool {
-	if p == nil || p.IsNoOp() {
+	if p == nil {
 		return false
 	}
-	return true
+	return p.RestartUnchangedSidecars || !p.IsNoOp()
 }
 
 // AffectsInterceptors reports whether the interceptor chain must rebuild.

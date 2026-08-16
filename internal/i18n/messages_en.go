@@ -12,6 +12,7 @@ var English = Messages{
 	TurnCancelled:          "cancelled — back to prompt",
 	InterruptedRecovery:    "This turn was interrupted. Partial output is kept for reference; only completed tool pairs and a bounded recovery summary enter the next model turn. Inspect the workspace before continuing or reverting changes.",
 	FinalReadinessRecovery: "Task completion checks are paused. Run /continue-checks to preserve completed evidence and finish the remaining checks.",
+	ReadinessContinuing:    "This turn still owes checks; Reasonix is finishing them automatically.",
 	RecoveryPaused:         "Automatic retries paused. Reasonix stopped repeated attempts and kept completed work. Send “Continue” to start a fresh attempt, or add instructions to change direction.",
 	ReceiptVerified:        "nothing left unverified",
 	ReceiptGapsHeader:      "not verified:",

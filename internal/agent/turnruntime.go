@@ -2,7 +2,7 @@ package agent
 
 import (
 	"reasonix/internal/completion"
-	"reasonix/internal/taskpolicy"
+	"reasonix/internal/runtimepolicy"
 )
 
 // turnRuntime is the host state for exactly one Agent.Run. beginRunTurn builds
@@ -42,18 +42,15 @@ type turnRuntime struct {
 	// completion is the report built as the turn ends; the host reads it while
 	// emitting TurnDone, before the next turn resets this state.
 	completion *completion.Report
-	// Delivery expectations classified from the task text (see taskintent).
 	// deliveryCriteriaEstablished may inherit an unfinished canonical task
 	// list on continuation, but the flag itself is recomputed every turn.
 	deliveryCriteriaEstablished bool
-	deliveryTaskExpected        bool
-	deliveryMutationExpected    bool
-	deliveryPersistentExpected  bool
 	deliveryScopeActive         bool
 	// readinessRecovered marks a run that started with evidence preserved from
 	// (or a pending recovery of) a prior readiness failure, so the final
 	// allowed audit can report Recovered=true.
-	readinessRecovered bool
+	readinessRecovered             bool
+	automaticReadinessContinuation bool
 
 	// recoveryTaskSummary is the bounded task text for this Agent.Run. It lets
 	// a shared recovery gate review sub-agent mutations against the child
@@ -75,10 +72,9 @@ type turnRuntime struct {
 	// succeeding over and over leaves no error for a failure-only breaker.
 	repeatSuccessCounts map[string]int
 
-	// policy is frozen at the start of the Run and never observes a mid-turn
-	// SetAgentPreset change. policySet marks that beginRunTurn derived it.
-	policy    taskpolicy.TaskPolicy
-	policySet bool
+	// constraints and engine are frozen at the start of the Run.
+	constraints runtimepolicy.Constraints
+	engine      *runtimepolicy.Engine
 
 	// reviewWarnings are warn-level findings to surface in the final summary.
 	reviewWarnings []string

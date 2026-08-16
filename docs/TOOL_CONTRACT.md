@@ -113,8 +113,8 @@ without injecting every report into the parent context at once. References are
 restricted to the current conversation lineage and workspace.
 
 `use_capability` (`action` = `list` | `inspect` | `call` | `decline`) is on the
-provider-visible surface for every task. The adaptive standard execution derives
-policy from task risk. Optional tools stay registered for host dispatch but are not
+provider-visible surface for every task. Host verification obligations come
+from real tool actions, not from preclassifying the prompt. Optional tools stay registered for host dispatch but are not
 expanded into the top-level provider schema; the model reaches them through
 `use_capability` without cache-breaking schema churn.
 

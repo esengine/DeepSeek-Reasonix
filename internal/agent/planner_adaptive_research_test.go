@@ -21,7 +21,7 @@ func TestCoordinatorPlannerDepthDoesNotCapResearchRounds(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(coordinatorTestTool{name: "read_file", readOnly: true, output: "ok"})
 	policy := func(context.Context, string) PlannerDecision {
-		return PlannerDecision{Route: PlannerRoutePlanAndExecute, Depth: PlannerDepthLight, Reason: "adaptive_work"}
+		return PlannerDecision{Route: PlannerRoutePlanAndExecute, Reason: "adaptive_work"}
 	}
 	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)
 	coord := NewCoordinatorWithPlannerPolicy(planner, NewSession("planner-sys"), nil,
@@ -63,7 +63,7 @@ func TestCoordinatorEmergencyBoundedPlannerCanSubmitPlanInFinalizationRound(t *t
 	coord := NewCoordinatorWithPlannerPolicy(planner, plannerSess, nil, PlannerToolRegistry(reg),
 		Options{MaxSteps: 2, MaxStepsKey: "planner emergency rounds"}, executor, 0, sink,
 		func(context.Context, string) PlannerDecision {
-			return PlannerDecision{Route: PlannerRoutePlanAndExecute, Depth: PlannerDepthLight, Reason: "emergency_bounded_work"}
+			return PlannerDecision{Route: PlannerRoutePlanAndExecute, Reason: "emergency_bounded_work"}
 		})
 
 	if err := coord.Run(withNoClosedLoop(context.Background()), "fix the planner bug"); err != nil {
@@ -115,7 +115,7 @@ func TestCoordinatorTaskBudgetLetsPlannerSubmitTerminalPlan(t *testing.T) {
 	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)
 	coord := NewCoordinatorWithPlannerPolicy(planner, NewSession("planner-sys"), nil, PlannerToolRegistry(reg),
 		Options{}, executor, 0, sink, func(context.Context, string) PlannerDecision {
-			return PlannerDecision{Route: PlannerRoutePlanAndExecute, Depth: PlannerDepthFull, Reason: "budgeted_work"}
+			return PlannerDecision{Route: PlannerRoutePlanAndExecute, Reason: "budgeted_work"}
 		})
 
 	ctx := withNoClosedLoop(WithTaskBudget(context.Background(), TaskBudget{Tokens: 1}))

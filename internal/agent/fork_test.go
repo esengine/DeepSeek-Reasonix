@@ -17,8 +17,10 @@ import (
 func forkScriptTurns() [][]provider.Chunk {
 	return [][]provider.Chunk{
 		{toolCallChunk("c1", "write_file", `{"path":"a.py","content":"x"}`)},
-		{toolCallChunk("c2", "write_file", `{"path":"b.py","content":"x"}`)},
-		{toolCallChunk("c3", "write_file", `{"path":"c.py","content":"x"}`)},
+		// Keep this fixture single-target: it measures the evidence-blindness
+		// fork, not the cumulative multi-file precondition guard.
+		{toolCallChunk("c2", "write_file", `{"path":"a.py","content":"y"}`)},
+		{toolCallChunk("c3", "write_file", `{"path":"a.py","content":"z"}`)},
 		{{Type: provider.ChunkText, Text: "done"}},
 	}
 }

@@ -119,7 +119,7 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
     tabId: "single-surface-tab",
     sessionKey: "session:project:/repo:topic-a:session-a",
     onSend: () => {},
-    onCancel: () => undefined,
+    onCancel: async () => ({ discardedItemIds: [] }),
     onCycleMode: () => {},
     onSetMode: () => {},
     onSetCollaborationMode: (_mode: CollaborationMode) => {},

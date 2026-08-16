@@ -136,6 +136,15 @@ func (a *App) emitProjectTreeRuntimeChangedWithLegacy() {
 	a.emitRuntimeEvent("project-tree:changed", map[string]string{"reason": "runtime"})
 }
 
+// Runtime ownership changes need an immediate in-memory projection and an
+// asynchronous catalog reconciliation. The tagged compatibility event keeps
+// pre-runtime-projection frontends working without making current frontends
+// invalidate and rebuild the whole resident tree before catalog v2 catches up.
+func (a *App) emitProjectTreeRuntimeChangedWithCatalogRefresh() {
+	a.requestProjectTreeCatalogRefresh()
+	a.emitProjectTreeRuntimeChangedWithLegacy()
+}
+
 func (a *App) emitRuntimeEvent(name string, payload ...any) {
 	if a != nil && a.ctx != nil {
 		a.runtimeEvents.Emit(a.ctx, name, payload...)

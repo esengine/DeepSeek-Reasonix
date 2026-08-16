@@ -1,8 +1,6 @@
 package agent
 
 import (
-	"encoding/json"
-	"fmt"
 	"strings"
 
 	"reasonix/internal/completion"
@@ -11,7 +9,6 @@ import (
 	"reasonix/internal/instruction"
 	"reasonix/internal/plancontract"
 	"reasonix/internal/taskcontract"
-	"reasonix/internal/taskintent"
 )
 
 // buildShadowContract replays a finished turn's receipts into a task
@@ -20,91 +17,48 @@ import (
 // are what the work agreed to, and todo titles are only a restatement of the
 // steps. Without a plan the todo list stands in, as it always did.
 func buildShadowContract(input string, receipts []evidence.Receipt, plan *plancontract.Plan, projectChecks ...instruction.VerifyCheck) *taskcontract.Contract {
-	var c *taskcontract.Contract
-	switch {
-	case plan != nil:
-		c = taskcontract.FromPlan(input, planFacts(*plan))
-	case taskintent.Classify(input) == taskintent.Mutation,
-		taskintent.Classify(input) == taskintent.PersistentAction:
-		c = taskcontract.Atomic(input)
-	default:
-		c = taskcontract.New(input)
-	}
+	return buildShadowContractWithPolicy(input, receipts, plan, false, false, false, "", projectChecks...)
+}
+
+func buildShadowContractWithPolicy(
+	input string,
+	receipts []evidence.Receipt,
+	plan *plancontract.Plan,
+	goalActive bool,
+	testsForbidden bool,
+	requireFullVerification bool,
+	workspaceRoot string,
+	projectChecks ...instruction.VerifyCheck,
+) *taskcontract.Contract {
+	_ = input
 	var todos []evidence.TodoItem
 	for _, r := range receipts {
 		if len(r.Todos) > 0 {
 			todos = r.Todos
 		}
 	}
-	// Todo titles restate the plan's steps, so they only become requirements
-	// when no plan supplied the real acceptance criteria.
-	if plan == nil {
-		for i, todo := range todos {
-			c.AddRequirement(fmt.Sprintf("t%d", i+1), todo.Content, true)
-		}
-	}
+	var checks []string
 	for _, check := range projectChecks {
 		if command := strings.TrimSpace(check.Command); command != "" {
-			c.AddCheck(command)
+			checks = append(checks, command)
 		}
 	}
-	for _, r := range receipts {
-		c.Observe(r)
-		resolveCitedCriteria(c, r)
+	var planPtr *taskcontract.PlanFacts
+	if plan != nil {
+		facts := planFacts(*plan)
+		planPtr = &facts
 	}
-	for i, todo := range todos {
-		if todo.Status == "completed" {
-			c.Resolve(fmt.Sprintf("t%d", i+1), taskcontract.Satisfied)
-		}
-	}
-	return c
-}
-
-// resolveCitedCriteria satisfies the criteria a successful complete_step named.
-// The tool verified each proof against the ledger before succeeding, so what the
-// citation adds is the binding: "the command ran" and "the criterion holds" are
-// different claims, and only the model knows which proof was for which.
-func resolveCitedCriteria(c *taskcontract.Contract, r evidence.Receipt) {
-	if r.ToolName != "complete_step" || !r.Success || len(r.Args) == 0 {
-		return
-	}
-	var payload struct {
-		Evidence []struct {
-			Kind        string `json:"kind"`
-			CriterionID string `json:"criterion_id"`
-		} `json:"evidence"`
-	}
-	if json.Unmarshal(r.Args, &payload) != nil {
-		return
-	}
-	for _, e := range payload.Evidence {
-		id := strings.TrimSpace(e.CriterionID)
-		if id == "" {
-			continue
-		}
-		c.Resolve(id, taskcontract.Satisfied, taskcontract.EvidenceRef{
-			Kind:          criterionEvidenceKind(e.Kind),
-			MutationEpoch: c.Epoch(),
-			Source:        "complete_step",
-			Success:       true,
-		})
-	}
-}
-
-// criterionEvidenceKind mirrors the ledger's own classification so staleness
-// behaves identically: a mutation proves it happened and never stales, while a
-// verification, review, or manual check must be re-proven after later changes.
-func criterionEvidenceKind(kind string) taskcontract.EvidenceKind {
-	switch kind {
-	case "verification":
-		return taskcontract.EvidenceVerification
-	case "review":
-		return taskcontract.EvidenceReview
-	case "diff", "files":
-		return taskcontract.EvidenceMutation
-	default:
-		return taskcontract.EvidenceRead
-	}
+	return taskcontract.Rebuild(taskcontract.RebuildFacts{
+		Plan:                    planPtr,
+		Todos:                   todos,
+		ProjectChecks:           checks,
+		Receipts:                receipts,
+		TestsForbidden:          testsForbidden,
+		RequireFullVerification: requireFullVerification,
+		WorkspaceRoot:           workspaceRoot,
+		HasApprovedPlan:         plan != nil,
+		HasActiveGoal:           goalActive,
+	})
 }
 
 func contractShadowAudit(c *taskcontract.Contract) event.ContractShadowAudit {
@@ -121,7 +75,7 @@ func contractShadowAudit(c *taskcontract.Contract) event.ContractShadowAudit {
 		}
 	}
 	return event.ContractShadowAudit{
-		Intent:                intentName(c.Intent),
+		Intent:                "",
 		Requirements:          len(c.Requirements),
 		RequirementsSatisfied: reqDone,
 		Checks:                len(c.Checks),
@@ -133,21 +87,6 @@ func contractShadowAudit(c *taskcontract.Contract) event.ContractShadowAudit {
 	}
 }
 
-func intentName(i taskintent.Intent) string {
-	switch i {
-	case taskintent.Advisory:
-		return "advisory"
-	case taskintent.ObservableRead:
-		return "observable_read"
-	case taskintent.Mutation:
-		return "mutation"
-	case taskintent.PersistentAction:
-		return "persistent_action"
-	default:
-		return "conversation"
-	}
-}
-
 // LiveContract is the contract as it stands right now: the same pure replay the
 // turn ends with, run against the receipts recorded so far. Rebuilding beats
 // keeping incremental state because one code path serves the per-round view and
@@ -156,7 +95,16 @@ func (a *Agent) LiveContract() *taskcontract.Contract {
 	if a == nil || a.task.ledger == nil {
 		return nil
 	}
-	return buildShadowContract(a.turn.turnInput, a.task.ledger.Receipts(), a.planContractSnapshot(), a.projectChecks...)
+	return buildShadowContractWithPolicy(
+		a.turn.turnInput,
+		a.task.ledger.Receipts(),
+		a.planContractSnapshot(),
+		a.turn.deliveryScopeActive,
+		a.turn.constraints.ForbidTests,
+		a.turn.constraints.RequireFullVerification,
+		a.writeWorkspaceRoot,
+		a.projectChecks...,
+	)
 }
 
 // observeContractRound records the contract after one tool round, so a
@@ -177,7 +125,16 @@ func (a *Agent) emitTurnShadows(input string) {
 	if a.task.ledger == nil {
 		return
 	}
-	c := buildShadowContract(input, a.task.ledger.Receipts(), a.planContractSnapshot(), a.projectChecks...)
+	c := buildShadowContractWithPolicy(
+		input,
+		a.task.ledger.Receipts(),
+		a.planContractSnapshot(),
+		a.turn.deliveryScopeActive,
+		a.turn.constraints.ForbidTests,
+		a.turn.constraints.RequireFullVerification,
+		a.writeWorkspaceRoot,
+		a.projectChecks...,
+	)
 	// Prefer the live contract when present so Suppressed/Partial state is not
 	// lost in the pure replay path.
 	if live := a.LiveContract(); live != nil && (live.HasSuppressed() || len(live.Requirements) > 0 || len(live.Checks) > 0) {

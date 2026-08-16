@@ -2,7 +2,6 @@ package evidence
 
 import (
 	"encoding/json"
-	"strings"
 
 	"reasonix/internal/shellsafe"
 )
@@ -16,45 +15,22 @@ type ToolEffects struct {
 
 // ClassifyToolCall returns durable effects for one concrete invocation.
 func ClassifyToolCall(toolName string, args json.RawMessage, readOnly bool) ToolEffects {
-	name := strings.ToLower(strings.TrimSpace(toolName))
-	if name == "bash" || name == "shell" {
-		effects, _ := ClassifyBashToolCall(args)
-		return effects
-	}
-	if readOnly || IsNonMutationMetaTool(toolName) {
-		return ToolEffects{Known: true}
-	}
-	switch name {
-	case "ask", "todo_write", "complete_step", "bash_output", "wait":
-		return ToolEffects{Known: true}
-	case "set_session_title":
-		return ToolEffects{StateMutation: true, Known: true, Reason: "host session metadata write"}
-	default:
-		return ToolEffects{StateMutation: true, WorkspaceMutation: true, ContentMutation: true, Known: true, Reason: "workspace content write by a writer-capable tool"}
-	}
+	return ClassifyEffect(EffectInput{
+		ToolName:       toolName,
+		Args:           args,
+		StaticReadOnly: readOnly,
+	}).ToolEffects()
 }
 
 // ClassifyBashToolCall parses once and returns effects plus permission trust.
 func ClassifyBashToolCall(args json.RawMessage) (ToolEffects, bool) {
+	profile := ClassifyEffect(EffectInput{ToolName: "bash", Args: args})
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(args, &fields); err != nil {
-		return unknownToolEffects("invalid shell arguments"), false
+		return profile.ToolEffects(), false
 	}
-	command := stringField(fields, "command")
-	effect := shellsafe.ClassifyBash(command)
-	if effect.Certainty == shellsafe.EffectKnown {
-		return ToolEffects{
-			StateMutation: effect.AnyMutation(), WorkspaceMutation: effect.WorkspaceMutation(),
-			ContentMutation: effect.ContentMutation(), RepositoryMutation: effect.RepositoryMutation(),
-			Known: true, Reason: commandEffectReason(effect),
-		}, effect.IsPermissionReader()
-	}
-	// Unknown syntax stays fail-closed unless the host recognized a verifier
-	// such as `go test` that ClassifyBash does not model as a known reader.
-	if bashCommandIsVerification(command) {
-		return ToolEffects{Known: true}, false
-	}
-	return unknownToolEffects(effect.Reason), false
+	effect := shellsafe.ClassifyBash(stringField(fields, "command"))
+	return profile.ToolEffects(), effect.IsPermissionReader()
 }
 
 func commandEffectReason(effect shellsafe.CommandEffect) string {
@@ -76,13 +52,6 @@ func commandEffectReason(effect shellsafe.CommandEffect) string {
 		return domain
 	}
 	return domain + " by " + effect.CommandFamily
-}
-
-func unknownToolEffects(reason string) ToolEffects {
-	if strings.TrimSpace(reason) == "" {
-		reason = "tool effects are not statically known"
-	}
-	return ToolEffects{StateMutation: true, WorkspaceMutation: true, ContentMutation: true, Reason: reason}
 }
 
 // ToolCallMutates is the compatibility projection for durable state changes.

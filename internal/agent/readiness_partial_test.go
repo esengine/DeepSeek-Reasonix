@@ -6,7 +6,7 @@ import (
 
 	"reasonix/internal/evidence"
 	"reasonix/internal/instruction"
-	"reasonix/internal/taskpolicy"
+	"reasonix/internal/runtimepolicy"
 	"reasonix/internal/tool"
 )
 
@@ -20,10 +20,7 @@ func TestPartialWaiverStandsDownUnavailableChecksOnBalanced(t *testing.T) {
 		)},
 		projectChecks: []instruction.VerifyCheck{check},
 		svc:           agentServices{tools: tool.NewRegistry()},
-		turn: turnRuntime{
-			policy:    taskpolicy.TaskPolicy{Evidence: taskpolicy.EvidenceTargeted, Verification: taskpolicy.VerifyTargeted},
-			policySet: true,
-		},
+		turn:          turnRuntime{engine: runtimepolicy.NewEngine(runtimepolicy.Constraints{})},
 	}
 	got := a.ReadinessResult()
 	if !got.Ready {
@@ -38,10 +35,7 @@ func TestPartialWaiverDoesNotClearIncompleteTodos(t *testing.T) {
 		task: taskRuntime{ledger: readinessLedger(writer, todo,
 			evidence.Receipt{ToolName: "update_goal", Success: true, Args: []byte(`{"status":"complete","completion":{"unverified":["e2e"]}}`)},
 		)},
-		turn: turnRuntime{
-			policy:    taskpolicy.TaskPolicy{Evidence: taskpolicy.EvidenceTargeted, Verification: taskpolicy.VerifyTargeted},
-			policySet: true,
-		},
+		turn: turnRuntime{engine: runtimepolicy.NewEngine(runtimepolicy.Constraints{})},
 	}
 	got := a.ReadinessResult()
 	if got.Ready || !strings.Contains(got.Reason, "incomplete") {
@@ -60,10 +54,7 @@ func TestPartialWaiverStaysClosedOnDelivery(t *testing.T) {
 		)},
 		projectChecks: []instruction.VerifyCheck{check},
 		svc:           agentServices{tools: reg},
-		turn: turnRuntime{
-			policy:    taskpolicy.TaskPolicy{Evidence: taskpolicy.EvidenceClosedLoop, Verification: taskpolicy.VerifyFull},
-			policySet: true,
-		},
+		turn:          turnRuntime{deliveryScopeActive: true, engine: runtimepolicy.NewEngine(runtimepolicy.Constraints{})},
 	}
 	got := a.ReadinessResult()
 	if got.Ready {
@@ -87,13 +78,10 @@ func TestForbidTestsWaivesProjectChecksEvenOnDelivery(t *testing.T) {
 		projectChecks: []instruction.VerifyCheck{check},
 		svc:           agentServices{tools: reg},
 		turn: turnRuntime{
-			policy: taskpolicy.TaskPolicy{
-				Evidence:     taskpolicy.EvidenceClosedLoop,
-				Verification: taskpolicy.VerifyFull,
-				Constraints:  taskpolicy.Constraints{ForbidTests: true},
-			},
-			policySet:                   true,
+			constraints:                 runtimepolicy.Constraints{ForbidTests: true},
+			engine:                      runtimepolicy.NewEngine(runtimepolicy.Constraints{ForbidTests: true}),
 			deliveryCriteriaEstablished: true,
+			deliveryScopeActive:         true,
 		},
 	}
 	got := a.ReadinessResult()

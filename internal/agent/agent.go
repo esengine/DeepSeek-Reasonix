@@ -28,9 +28,10 @@ import (
 	"reasonix/internal/plancontract"
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
+	"reasonix/internal/runtimepolicy"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/shellparse"
-	"reasonix/internal/taskpolicy"
+	"reasonix/internal/taskcontract"
 	"reasonix/internal/tool"
 	"reasonix/internal/workspacelease"
 )
@@ -329,9 +330,10 @@ type Agent struct {
 	// Entries keep a durable inbox item ID plus a loader so full bodies are not
 	// retained in the agent heap beyond need. Cache miss for the next API call
 	// is unavoidable but limited to one call — the prefix stays stable otherwise.
-	steerMu       sync.Mutex
-	steerQueue    []steerEntry
-	steerConsumed bool
+	steerMu        sync.Mutex
+	steerQueue     []steerEntry
+	steerConsumed  bool
+	steerUnapplied bool
 	// steerRunActive is true while Run is executing. Steer only queues while
 	// it is set; once the turn's exit flush has drained the queue, later
 	// steers are rejected so the caller can deliver them as a regular turn
@@ -355,15 +357,11 @@ type Agent struct {
 	// verify against same-turn bash receipts after a write-backed completion.
 	projectChecks []instruction.VerifyCheck
 
-	// closedLoop gates come from the frozen per-turn TaskPolicy (see turn.policy
-	// and closedLoopActive). Host state only; never enters the provider-cached
-	// prefix. The scope ID and checkpoint it works against live in task; the
-	// per-turn expectations live in turn.
+	// closedLoop gates come from Goal/Plan scope and strict contract
+	// obligations. Host state only; never enters the provider-cached prefix.
 
-	// inheritedPolicy is the writer parent's frozen TaskPolicy. Writer
-	// sub-agents merge its risk and closure floors into their own policy;
-	// read-only sub-agents leave it nil.
-	inheritedPolicy *taskpolicy.TaskPolicy
+	// inheritedExec is the writer parent's host execution context.
+	inheritedExec *runtimepolicy.InheritedExecutionContext
 
 	// turn is the state of the Run currently executing; beginRunTurn replaces
 	// it wholesale. See turnruntime.go.
@@ -536,8 +534,6 @@ func (a *Agent) withTurnPreferences(input string) string {
 		}
 	}
 	input = WithReasoningLanguage(input, lang)
-	// Role settings no longer inject a stable delivery-runtime system-like
-	// marker. Per-turn <execution-policy> carries the frozen role setting.
 	return input
 }
 
@@ -688,6 +684,11 @@ type steerEntry struct {
 	text string
 }
 
+// ErrSteerWithdrawn tells the agent that a durable steer was intentionally
+// removed by a concurrent user cancellation. It must not be recorded as an
+// unapplied failure in the transcript.
+var ErrSteerWithdrawn = errors.New("steer withdrawn")
+
 // Steer queues a message for mid-turn injection. It reports whether an active
 // turn accepted the text; on false nothing was queued and the caller must
 // deliver it another way (typically as a new turn). Without the active check,
@@ -718,6 +719,15 @@ func (a *Agent) SteerConsumed() bool {
 	return a.steerConsumed
 }
 
+// HasUnappliedSteer reports whether the last Run ended with user guidance that
+// arrived too late to be consumed. Hosts use it to yield before starting an
+// automatic synthetic continuation.
+func (a *Agent) HasUnappliedSteer() bool {
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	return a.steerUnapplied
+}
+
 // SetSink replaces the agent's event sink. Controllers use this to wrap the
 // sink after construction (e.g. durable inbox observation) without rebuilding
 // the agent.
@@ -743,6 +753,9 @@ func (a *Agent) consumeSteer() (text, itemID string, ok bool) {
 	if e.load != nil {
 		t, err := e.load()
 		if err != nil {
+			if errors.Is(err, ErrSteerWithdrawn) {
+				return "", "", false
+			}
 			return "", e.itemID, false
 		}
 		return t, e.itemID, true
@@ -773,20 +786,28 @@ func (a *Agent) flushSteerQueue() {
 	a.steerMu.Lock()
 	pending := a.steerQueue
 	a.steerQueue = nil
+	a.steerUnapplied = false
 	if len(pending) > 0 {
 		a.steerConsumed = true
 	}
 	a.steerRunActive = false
 	a.steerMu.Unlock()
+	unapplied := false
 	for _, e := range pending {
 		text := e.text
 		if e.load != nil {
-			if t, err := e.load(); err == nil {
+			if t, err := e.load(); errors.Is(err, ErrSteerWithdrawn) {
+				continue
+			} else if err == nil {
 				text = t
 			}
 		}
 		a.RecordUnappliedSteer(text, e.itemID)
+		unapplied = true
 	}
+	a.steerMu.Lock()
+	a.steerUnapplied = unapplied
+	a.steerMu.Unlock()
 }
 
 // UnappliedSteerNotice returns the durable warning shown for guidance that was
@@ -949,9 +970,8 @@ type Options struct {
 	// ProjectChecks are host-observable structured checks extracted during boot.
 	ProjectChecks []instruction.VerifyCheck
 
-	// InheritedTaskPolicy is the writer parent's frozen TaskPolicy. Writer
-	// sub-agents merge its risk/closure floors; read-only sub-agents ignore it.
-	InheritedTaskPolicy *taskpolicy.TaskPolicy
+	// InheritedExecution is the writer parent's host execution context.
+	InheritedExecution *runtimepolicy.InheritedExecutionContext
 
 	// Ablation switches subsystems off for a benchmark arm. The zero value runs
 	// everything, so ordinary callers leave it unset.
@@ -1101,7 +1121,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		readOnlyExecution:      opts.ReadOnlyExecution,
 		plannerMCPExecution:    opts.PlannerMCPExecution,
 		projectChecks:          append([]instruction.VerifyCheck(nil), opts.ProjectChecks...),
-		inheritedPolicy:        opts.InheritedTaskPolicy,
+		inheritedExec:          opts.InheritedExecution,
 		ablation:               opts.Ablation,
 		capabilityLedger:       opts.CapabilityLedger,
 		capabilityAudit:        opts.CapabilityAudit,
@@ -1128,15 +1148,21 @@ func (a *Agent) closedLoopActive() bool {
 	if a == nil {
 		return false
 	}
-	return a.turn.policySet && a.turn.policy.ClosedLoop()
-}
-
-// TurnPolicy returns the frozen TaskPolicy for the active turn, if any.
-func (a *Agent) TurnPolicy() (taskpolicy.TaskPolicy, bool) {
-	if a == nil || !a.turn.policySet {
-		return taskpolicy.TaskPolicy{}, false
+	if a.turn.deliveryScopeActive {
+		return true
 	}
-	return a.turn.policy, true
+	if a.planContractSnapshot() != nil {
+		return true
+	}
+	if a.turn.engine == nil {
+		return false
+	}
+	for _, o := range a.turn.engine.Snapshot().Obligations {
+		if o.Enforcement == taskcontract.EnforcementStrict {
+			return true
+		}
+	}
+	return false
 }
 
 func usageSourceOrDefault(source, fallback string) string {
@@ -1200,6 +1226,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	defer a.flushSteerQueue()
 	a.steerMu.Lock()
 	a.steerConsumed = false
+	a.steerUnapplied = false
 	a.steerRunActive = true
 	a.steerMu.Unlock()
 
@@ -1228,7 +1255,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		// Explicit readiness recovery is consumed only once beginRunTurn starts.
 		// If an extension blocks earlier, release the in-memory reservation so
 		// the still-pending durable marker can authorize a later retry.
-		a.pending.finalReadinessRecoveryPrepared = false
+		a.RestoreFinalReadinessRecoveryPreparation()
 		return err
 	}
 
@@ -1239,11 +1266,12 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	state.runMaxSteps = runMaxSteps
 	state.runMaxStepsKey = runMaxStepsKey
 	state.workDurationMs = workDurationMs
-	// Publish the frozen policy so writer sub-agents spawned this turn inherit
-	// its risk and closure floors instead of re-deriving a weaker contract.
-	if a.turn.policySet {
-		ctx = taskpolicy.WithContext(ctx, a.turn.policy)
-	}
+	ctx = runtimepolicy.WithContext(ctx, a.turn.constraints)
+	ctx = runtimepolicy.WithInherited(ctx, runtimepolicy.InheritedExecutionContext{
+		Constraints:  a.turn.constraints,
+		PlanReadOnly: a.planMode.Load() || a.readOnlyExecution,
+		GoalScopeID:  a.task.scopeID,
+	})
 	return a.runToolLoop(ctx, state)
 }
 
@@ -1313,13 +1341,11 @@ func (a *Agent) updateDeliveryCheckpoint(runErr error) {
 	}
 	cp.CriteriaEstablished = cp.CriteriaEstablished || a.turn.deliveryCriteriaEstablished || a.task.ledger.HasSuccessfulTodoWrite()
 	cp.WorkObserved = cp.WorkObserved || a.task.ledger.HasSuccessfulWorkReceipt()
-	persistentOnlyReady := a.turn.deliveryPersistentExpected && !a.turn.deliveryMutationExpected &&
-		a.task.ledger.HasSuccessfulToolReceipt("remember") && !a.task.ledger.HasSuccessfulMutationOtherThan("remember")
-	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok && !persistentOnlyReady {
+	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok {
 		cp.MutationObserved = true
 		cp.PendingMutation = true
 	}
-	if persistentOnlyReady {
+	if a.task.ledger.HasSuccessfulToolReceipt("remember") && !a.task.ledger.HasSuccessfulMutationOtherThan("remember") {
 		cp.MutationObserved = true
 	}
 	if runErr == nil && cp.PendingMutation && a.deliveryMutationCheckpointReady() {

@@ -2762,7 +2762,7 @@ func TestTwoModelShortChoiceReplySkipsPlanner(t *testing.T) {
 		t.Fatalf("short choice reply should not be wrapped as a planner handoff:\n%s", reqText)
 	}
 	if got := agent.StripTransientUserBlocks(lastUserMessage(execProv.requests[0].Messages)); got != "1" {
-		t.Fatalf("executor last user = %q, want raw choice reply (execution-policy may append)", lastUserMessage(execProv.requests[0].Messages))
+		t.Fatalf("executor last user = %q, want raw choice reply", lastUserMessage(execProv.requests[0].Messages))
 	}
 }
 

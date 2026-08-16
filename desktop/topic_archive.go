@@ -63,6 +63,16 @@ func (a *App) trashTopic(topicID string) (retErr error) {
 	if err != nil {
 		return err
 	}
+	if fallback.workspaceRoot != "" {
+		changedDirs = append(changedDirs, desktopSessionDir(fallback.workspaceRoot))
+	} else if fallback.needs {
+		changedDirs = append(changedDirs, desktopSessionDir(globalWorkspaceRoot()))
+	}
+	// Remove abandoned transient blanks before fallback construction registers
+	// the project; otherwise reconciliation can promote a default-titled blank
+	// into the topic registry and make it ineligible for cleanup.
+	trace.phase = "discard_existing_blanks"
+	a.discardUnusedTransientBlankSessions(changedDirs, "")
 	if fallback.needs {
 		trace.phase = "open_fallback"
 		fallback.topicID = ""
@@ -76,11 +86,6 @@ func (a *App) trashTopic(topicID string) (retErr error) {
 	a.mu.RLock()
 	if tab := a.tabs[a.activeTabID]; tab != nil {
 		keepPath = tab.SessionPath
-	}
-	if fallback.workspaceRoot != "" {
-		changedDirs = append(changedDirs, desktopSessionDir(fallback.workspaceRoot))
-	} else if fallback.needs {
-		changedDirs = append(changedDirs, desktopSessionDir(globalWorkspaceRoot()))
 	}
 	a.mu.RUnlock()
 	trace.phase = "discard_unused_blanks"
@@ -303,6 +308,12 @@ func topicIndexedInRegistry(scope, workspaceRoot, topicID string) bool {
 }
 
 func (a *App) discardUnusedTransientBlankSessions(dirs []string, keepPath string) {
+	// Forced legacy repair promotes indexed sidecars under this same lock. Hold
+	// it through classification, deletion, and scoped registry cleanup so a
+	// concurrent reconcile cannot reinsert a zero-byte ghost after we sweep it.
+	legacyMigrationMu.Lock()
+	defer legacyMigrationMu.Unlock()
+
 	keepPath = canonicalTabSessionPath(strings.TrimSpace(keepPath))
 	kept := map[string]bool{}
 	if keepPath != "" {
@@ -321,6 +332,10 @@ func (a *App) discardUnusedTransientBlankSessions(dirs []string, keepPath string
 			}
 		}
 		a.mu.RUnlock()
+	}
+	siblingDirs := append([]string(nil), dirs...)
+	if a != nil {
+		siblingDirs = append(siblingDirs, a.knownSessionDirs()...)
 	}
 	seen := map[string]bool{}
 	for _, dir := range dirs {
@@ -345,7 +360,11 @@ func (a *App) discardUnusedTransientBlankSessions(dirs []string, keepPath string
 			if !unusedTransientBlankSession(dir, path) {
 				continue
 			}
+			meta, hasMeta, _ := agent.LoadBranchMeta(path)
 			discardTransientBlankSessionArtifacts(path)
+			if hasMeta && !transientTopicHasSibling(siblingDirs, path, meta) {
+				cleanupTransientBlankTopicRegistration(meta)
+			}
 			if a != nil {
 				a.removeSessionCatalogPath(path, "transient_blank_discarded")
 			}
@@ -373,5 +392,89 @@ func unusedTransientBlankSession(dir, path string) bool {
 	if !isDefaultTopicTitle(meta.TopicTitle) && strings.TrimSpace(meta.TopicTitle) != "" {
 		return false
 	}
-	return !topicIndexedInRegistry(meta.DefaultScope(), meta.WorkspaceRoot, topicID)
+	// A zero-byte default sidecar stays transient after registry projection.
+	// The caller's keep set protects every visible or detached runtime; registry
+	// presence alone cannot prove user content.
+	return true
+}
+
+func transientTopicHasSibling(dirs []string, excludedPath string, target agent.BranchMeta) bool {
+	seen := make(map[string]bool, len(dirs))
+	for _, dir := range dirs {
+		dir = strings.TrimSpace(dir)
+		key := projectRootKey(dir)
+		if dir == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !store.IsSessionTranscriptName(entry.Name()) {
+				continue
+			}
+			path := filepath.Join(dir, entry.Name())
+			if sameDesktopPath(path, excludedPath) {
+				continue
+			}
+			meta, ok, err := agent.LoadBranchMeta(path)
+			if err != nil || !ok || strings.TrimSpace(meta.TopicID) != strings.TrimSpace(target.TopicID) {
+				continue
+			}
+			sameRoot := meta.DefaultScope() != "project" || sameProjectRoot(meta.WorkspaceRoot, target.WorkspaceRoot)
+			if meta.DefaultScope() == target.DefaultScope() && sameRoot {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func cleanupTransientBlankTopicRegistration(meta agent.BranchMeta) {
+	topicID := strings.TrimSpace(meta.TopicID)
+	if topicID == "" {
+		return
+	}
+	scope, root := meta.DefaultScope(), normalizeProjectRoot(meta.WorkspaceRoot)
+	_ = updateProjectsFile(func(f *desktopProjectFile) (bool, error) {
+		changed := false
+		if scope != "project" {
+			if next := removeString(f.GlobalTopics, topicID); !sameStringList(next, f.GlobalTopics) {
+				f.GlobalTopics, changed = next, true
+			}
+			if next := removeString(f.GlobalPinnedTopics, topicID); !sameStringList(next, f.GlobalPinnedTopics) {
+				f.GlobalPinnedTopics, changed = next, true
+			}
+			if next, removed := groupsWithoutTopic(f.GlobalGroups, topicID); removed {
+				f.GlobalGroups, f.GlobalGroupsRevision, changed = next, f.GlobalGroupsRevision+1, true
+			}
+			return changed, nil
+		}
+		if index := projectIndexByRoot(f.Projects, root); index >= 0 {
+			project := &f.Projects[index]
+			if next := removeString(project.Topics, topicID); !sameStringList(next, project.Topics) {
+				project.Topics, changed = next, true
+			}
+			if next := removeString(project.PinnedTopics, topicID); !sameStringList(next, project.PinnedTopics) {
+				project.PinnedTopics, changed = next, true
+			}
+			if next, removed := groupsWithoutTopic(project.Groups, topicID); removed {
+				project.Groups, project.GroupsRevision, changed = next, project.GroupsRevision+1, true
+			}
+		}
+		return changed, nil
+	})
+	titleRoot := topicTitleRoot(scope, root)
+	if titles, err := loadTopicTitlesForUpdate(titleRoot); err == nil {
+		delete(titles, topicID)
+		_ = saveTopicTitles(titleRoot, titles)
+	}
+	if sources, err := loadTopicTitleSourcesForUpdate(titleRoot); err == nil {
+		delete(sources, topicID)
+		_ = saveTopicTitleSources(titleRoot, sources)
+	}
+	_ = deleteTopicCreatedAt(titleRoot, topicID)
+	_ = deleteTopicAutoTitleMeta(titleRoot, topicID)
 }

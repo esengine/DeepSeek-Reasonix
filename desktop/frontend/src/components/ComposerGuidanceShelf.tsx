@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Check, ChevronDown, ChevronUp, CornerDownRight, Pencil, Trash2, X } from "lucide-react";
-import { guidanceIsEditable, guidanceIsInFlight, guidanceNeedsRetry } from "../lib/composerGuidance";
+import { guidanceHasKnownPendingState, guidanceIsEditable, guidanceIsInFlight, guidanceNeedsRetry } from "../lib/composerGuidance";
 import { useI18n } from "../lib/i18n";
 import type { StructuredInvocationSubmit } from "../lib/invocationDisplay";
 import { InboxRecoveryBanner } from "./InboxRecoveryBanner";
@@ -114,6 +114,7 @@ export function ComposerGuidanceShelf({
           <div className="composer-guidance-list">
             {visible.map((item, index) => {
               const inFlight = guidanceIsInFlight(item.state);
+              const unknownState = !guidanceHasKnownPendingState(item.state);
               const needsRetry = guidanceNeedsRetry(item.state);
               const waitingForEarlier = !running && !inFlight && index > 0;
               const canEdit = Boolean(onEdit) && !readOnly && !disabled && guidanceIsEditable(item) && !waitingForEarlier && sendingId === null;
@@ -193,7 +194,7 @@ export function ComposerGuidanceShelf({
                           className="composer-guidance-item__guide"
                           type="button"
                           aria-label={actionLabel}
-                          disabled={inFlight || waitingForEarlier || disabled || readOnly || sendingId !== null || (running && !needsRetry && Boolean(item.structured)) || Boolean(item.paused)}
+                          disabled={inFlight || unknownState || waitingForEarlier || disabled || readOnly || sendingId !== null || (running && !needsRetry && Boolean(item.structured)) || Boolean(item.paused)}
                           onClick={() => onSend(item)}
                         >
                           <CornerDownRight size={13} />
@@ -205,7 +206,7 @@ export function ComposerGuidanceShelf({
                           className="composer-guidance-item__action"
                           type="button"
                           aria-label={inFlight ? actionLabel : t("composer.guidanceDismiss")}
-                          disabled={inFlight || sendingId === item.id}
+                          disabled={disabled || readOnly || inFlight || unknownState || sendingId === item.id}
                           onClick={() => onDismiss(item)}
                         >
                           <Trash2 size={14} />

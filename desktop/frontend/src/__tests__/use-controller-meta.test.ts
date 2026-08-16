@@ -492,6 +492,38 @@ eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "pl
   let now = 1_000;
   Date.now = () => now;
   try {
+    let s = reducer(initialState, { type: "user", text: "keep timing", seq: 0, submissionId: "timing-submit" });
+    now = 8_000;
+    s = reducer(s, {
+      type: "event",
+      e: { kind: "turn_started", submissionId: "timing-submit", turnStartedAt: 1_200 },
+    });
+    eq(s.turnStartAt, 1_200, "a delayed turn_started event keeps the backend turn start instead of restarting the timer");
+
+    now = 12_000;
+    s = reducer(initialState, {
+      type: "backend_status",
+      running: true,
+      cancellable: true,
+      turnStartedAt: 1_200,
+    });
+    eq(s.turnStartAt, 1_200, "a rehydrated running tab restores the backend turn start instead of restarting the timer");
+
+    now = 13_000;
+    s = reducer(s, { type: "event", e: { kind: "turn_done" } });
+    now = 20_000;
+    s = reducer(s, { type: "event", e: { kind: "turn_started" } });
+    eq(s.turnStartAt, 20_000, "a legacy turn_started event begins a new remote turn instead of reusing completed-turn timing");
+  } finally {
+    Date.now = originalNow;
+  }
+}
+
+{
+  const originalNow = Date.now;
+  let now = 1_000;
+  Date.now = () => now;
+  try {
     let s = reducer(initialState, { type: "event", e: { kind: "turn_started" } });
     now = 1_200;
     s = reducer(s, { type: "event", e: { kind: "reasoning", reasoning: "plan" } });

@@ -30,8 +30,8 @@ reasonix acp
 ```
 
 `--model` selects the startup model when the client does not override it.
-Reasonix runs one adaptive standard execution whose planning, verification,
-and review strength follows task risk automatically.
+Ordinary requests always enter the executor. There is no automatic simple /
+light / full task mode. Verification obligations come from real tool actions.
 
 Standard output is reserved for ACP messages. Reasonix sends diagnostics to
 standard error, so hosts must not merge the two streams. Run `reasonix setup`

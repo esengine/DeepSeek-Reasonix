@@ -134,9 +134,8 @@ type Options struct {
 	// controller but are not persisted to reasonix.toml.
 	ExtraPlugins []plugin.Spec
 	// AgentPreset and TokenMode are deprecated no-op compatibility inputs.
-	// Reasonix derives one adaptive standard execution policy per turn from
-	// task risk (internal/taskpolicy); these fields are accepted so old
-	// frontends keep compiling, and ignored.
+	// Host obligations are fact-driven from real tool actions; these fields are
+	// accepted so old frontends keep compiling, and ignored.
 	AgentPreset string
 	TokenMode   string
 	// SessionDir overrides where persisted chat transcripts are written. When
@@ -593,9 +592,8 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	if workspaceLine := currentWorkspacePromptLine(root); workspaceLine != "" {
 		sysPrompt += "\n\n" + workspaceLine
 	}
-	// Execution modes no longer exist. Planning, verification, review, and
-	// evidence-closure intensity travel in the per-turn transient
-	// <execution-policy> user block so the cache-stable prefix stays shared.
+	// Execution modes no longer exist. Host obligations are fact-driven and
+	// never rewrite the cache-stable system prefix or tool schemas.
 	if cfg.EnvironmentEnabled() {
 		shellLabel := shell.Kind.String()
 		if strings.TrimSpace(cfg.Tools.Shell.Path) != "" {
@@ -1894,7 +1892,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		taskTool.WithCapabilityRuntime(capRuntime)
 	}
 	// Build one role-neutral semantic router so an in-place switch never needs a
-	// controller rebuild. The frozen TaskPolicy decides whether a turn may call
+	// controller rebuild. Host constraints and live capability routing decide whether a turn may call
 	// it; construction alone does not add a provider request.
 	var router *capability.SemanticRouter
 	if modelRef := strings.TrimSpace(cfg.Agent.SubagentModels["capability-router"]); modelRef != "" {
@@ -2031,7 +2029,7 @@ func applyUnifiedProviderToolSurface(reg *tool.Registry) {
 
 // effectivePlannerModel centralizes planner precedence. Every role setting
 // builds the configured planner so later in-place switches retain the same
-// runtime; the per-turn TaskPolicy decides whether it is invoked.
+// runtime; explicit Plan, approval, or Goal start decides whether it is invoked.
 func effectivePlannerModel(cfg *config.Config, opts Options) string {
 	if cfg == nil || opts.Ablation.Off(ablation.Planner) {
 		return ""
@@ -2812,39 +2810,6 @@ func MCPStartupNotice(failures []plugin.Failure) (text, detail string, ok bool) 
 	}
 	return "Some MCP servers failed to start; run /mcp for details.", fmt.Sprintf("%d MCP server(s) failed to start: %s%s\n%s",
 		len(failures), strings.Join(names, ", "), more, strings.Join(details, "\n")), true
-}
-
-// LSPSpecs returns the language → server map: the built-in defaults overlaid with
-// any user overrides. A user entry may set only the fields it wants to change;
-// empty fields keep the default for that language.
-func LSPSpecs(cfg config.LSPConfig) map[string]lsp.ServerSpec {
-	specs := lsp.DefaultSpecs()
-	for lang, s := range cfg.Servers {
-		spec := specs[lang]
-		if s.Command != "" {
-			spec.Command = s.Command
-		}
-		if s.Args != nil {
-			spec.Args = s.Args
-		}
-		if s.Env != nil {
-			spec.Env = s.Env
-		}
-		if s.LanguageID != "" {
-			spec.LanguageID = s.LanguageID
-		}
-		if s.Extensions != nil {
-			spec.Extensions = s.Extensions
-		}
-		if s.InstallHint != "" {
-			spec.InstallHint = s.InstallHint
-		}
-		if spec.LanguageID == "" {
-			spec.LanguageID = lang
-		}
-		specs[lang] = spec
-	}
-	return specs
 }
 
 func providerNames(cfg *config.Config) string {

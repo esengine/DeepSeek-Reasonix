@@ -42,20 +42,24 @@ func (a *Agent) recordToolReceipts(plan *toolCallPlan, result string, execution 
 	case call.Name == "complete_step":
 		rec := evidence.ReceiptFromToolCall(call.Name, args, err == nil, plan.readOnly)
 		a.task.ledger.Record(rec)
+		a.commitToolReceipt(rec)
 		if err == nil {
 			a.advanceCanonicalTodo(rec.Step)
 		}
 	case plan.evidenceName != call.Name:
-		a.task.ledger.Record(evidence.ReceiptFromToolCall(call.Name, args, err == nil, true))
+		proxy := evidence.ReceiptFromToolCall(call.Name, args, err == nil, true)
+		a.task.ledger.Record(proxy)
 		rec := evidence.ReceiptFromToolCall(plan.evidenceName, plan.evidenceArgs, err == nil, plan.readOnly)
 		rec.Mutation = plan.effects.ContentMutation
 		decorateExecutionReceipt(&rec, result, execution)
 		a.task.ledger.Record(rec)
+		a.commitToolReceipt(rec)
 	default:
 		rec := evidence.ReceiptFromToolCall(call.Name, args, err == nil, plan.tool.ReadOnly())
 		rec.Mutation = plan.effects.ContentMutation
 		decorateExecutionReceipt(&rec, result, execution)
 		a.task.ledger.Record(rec)
+		a.commitToolReceipt(rec)
 		if err == nil && call.Name == "todo_write" {
 			a.setTodoState(rec.Todos)
 			if len(rec.Todos) > 0 {

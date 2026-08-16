@@ -7,6 +7,17 @@ import (
 
 // DeleteItem removes metadata first, then the blob (crash may leave orphan).
 func (s *Store) DeleteItem(id string) error {
+	return s.deleteItem(id, false)
+}
+
+// DeletePendingOrAcceptedItem atomically withdraws a queued item or an
+// accepted-but-unconsumed steer. A concurrent consumed transition wins by
+// making the delete fail with ErrInvalidState.
+func (s *Store) DeletePendingOrAcceptedItem(id string) error {
+	return s.deleteItem(id, true)
+}
+
+func (s *Store) deleteItem(id string, allowAcceptedSteer bool) error {
 	if s == nil {
 		return ErrClosed
 	}
@@ -25,7 +36,7 @@ func (s *Store) DeleteItem(id string) error {
 	if !ok {
 		return ErrNotFound
 	}
-	if !isPendingState(meta.State) {
+	if !isPendingState(meta.State) && !(allowAcceptedSteer && meta.State == StateSteerAccepted) {
 		return ErrInvalidState
 	}
 	next := s.man.clone()
@@ -52,8 +63,21 @@ func (s *Store) DiscardPendingItems(ids []string) error {
 // DiscardPendingItemsOwned atomically removes pending IDs belonging to source.
 // Foreign-source IDs are ignored so one frontend cannot cancel another.
 func (s *Store) DiscardPendingItemsOwned(ids []string, source string) error {
+	_, err := s.discardPendingItemsOwnedResult(ids, source, true)
+	return err
+}
+
+// DiscardPendingItemsOwnedResult atomically removes cancellable IDs belonging
+// to source and returns exactly the IDs committed as discarded. Items that
+// already crossed the durable delivery boundary are ignored instead of making
+// a mixed batch fail as a whole.
+func (s *Store) DiscardPendingItemsOwnedResult(ids []string, source string) ([]string, error) {
+	return s.discardPendingItemsOwnedResult(ids, source, false)
+}
+
+func (s *Store) discardPendingItemsOwnedResult(ids []string, source string, strict bool) ([]string, error) {
 	if s == nil {
-		return ErrClosed
+		return nil, ErrClosed
 	}
 	wanted := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
@@ -62,18 +86,18 @@ func (s *Store) DiscardPendingItemsOwned(ids []string, source string) error {
 		}
 	}
 	if len(wanted) == 0 {
-		return nil
+		return []string{}, nil
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	release, err := s.beginDiskTransactionLocked()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer release()
 	if err := s.mutableLocked(); err != nil {
-		return err
+		return nil, err
 	}
 	for _, item := range s.man.Items {
 		if _, ok := wanted[item.ID]; !ok {
@@ -84,8 +108,16 @@ func (s *Store) DiscardPendingItemsOwned(ids []string, source string) error {
 		}
 		switch item.State {
 		case StateQueued, StateBlocked, StateUncertain:
+		case StateSteerAccepted:
+			if strict {
+				return nil, ErrInvalidState
+			}
+		case StateRunning, StateSteerConsumed:
+			if strict {
+				return nil, ErrInvalidState
+			}
 		default:
-			return ErrInvalidState
+			return nil, ErrInvalidState
 		}
 	}
 
@@ -95,14 +127,15 @@ func (s *Store) DiscardPendingItemsOwned(ids []string, source string) error {
 	for _, item := range next.Items {
 		_, selected := wanted[item.ID]
 		owned := source == "" || item.Source == source
-		if selected && owned {
+		cancellable := item.State == StateQueued || item.State == StateBlocked || item.State == StateUncertain || item.State == StateSteerAccepted
+		if selected && owned && cancellable {
 			removed = append(removed, item)
 			continue
 		}
 		kept = append(kept, item)
 	}
 	if len(removed) == 0 {
-		return nil
+		return []string{}, nil
 	}
 	next.Items = kept
 	now := time.Now().UTC()
@@ -116,13 +149,17 @@ func (s *Store) DiscardPendingItemsOwned(ids []string, source string) error {
 	}
 	clearPauseIfEmpty(next)
 	if err := s.commitManifestLocked(next); err != nil {
-		return err
+		return nil, err
 	}
 	for _, item := range removed {
 		s.removeBlobLocked(blobNameFor(item))
 	}
 	s.notifyLocked(s.snapshotLocked())
-	return nil
+	discarded := make([]string, 0, len(removed))
+	for _, item := range removed {
+		discarded = append(discarded, item.ID)
+	}
+	return discarded, nil
 }
 
 // MoveItem reorders the queue. toIndex is 0-based; values past the end append.
@@ -251,6 +288,56 @@ func (s *Store) SetState(id string, state InboxState, blockReason string) error 
 		return ErrNotFound
 	}
 	next.Items[i].State = state
+	next.Items[i].BlockReason = blockReason
+	next.Items[i].UpdatedAt = time.Now().UTC()
+	if err := s.commitManifestLocked(next); err != nil {
+		return err
+	}
+	s.notifyLocked(s.snapshotLocked())
+	return nil
+}
+
+// MarkSteerConsumed is the durable steer delivery boundary. A loader must
+// commit this transition before returning the instruction to the agent. If a
+// concurrent cancellation removed the accepted item first, the loader fails
+// closed and the instruction is not applied.
+func (s *Store) MarkSteerConsumed(id string) error {
+	return s.transitionAcceptedSteer(id, StateSteerConsumed, "", true)
+}
+
+// MarkAcceptedSteerUncertain preserves an accepted steer that left the agent
+// queue without being applied. It refuses to overwrite a consumed item.
+func (s *Store) MarkAcceptedSteerUncertain(id, reason string) error {
+	return s.transitionAcceptedSteer(id, StateUncertain, reason, false)
+}
+
+func (s *Store) transitionAcceptedSteer(id string, target InboxState, blockReason string, consumedIdempotent bool) error {
+	if s == nil {
+		return ErrClosed
+	}
+	id = strings.TrimSpace(id)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	release, err := s.beginDiskTransactionLocked()
+	if err != nil {
+		return err
+	}
+	defer release()
+	if err := s.mutableLocked(); err != nil {
+		return err
+	}
+	next := s.man.clone()
+	i := next.indexOf(id)
+	if i < 0 {
+		return ErrNotFound
+	}
+	if consumedIdempotent && next.Items[i].State == StateSteerConsumed {
+		return nil
+	}
+	if next.Items[i].State != StateSteerAccepted {
+		return ErrInvalidState
+	}
+	next.Items[i].State = target
 	next.Items[i].BlockReason = blockReason
 	next.Items[i].UpdatedAt = time.Now().UTC()
 	if err := s.commitManifestLocked(next); err != nil {

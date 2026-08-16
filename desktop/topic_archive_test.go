@@ -515,6 +515,13 @@ func TestTrashTopicFallbackStaysOffCatalogSidebar(t *testing.T) {
 	if err := pinNewEmptySessionBranchMeta(nonzeroPath, "project", projectRoot, "", defaultTopicTitle); err != nil {
 		t.Fatalf("pin non-empty sibling: %v", err)
 	}
+	// Reproduce the real race deterministically: a registration reconcile has
+	// already promoted the default-titled zero-byte sidecar before archive
+	// cleanup gets a chance to classify it.
+	forceMigrateLegacySessionsIntoGlobalTopicsWithPaths(dir)
+	if !topicIndexedInRegistry("project", projectRoot, ghostID) {
+		t.Fatal("fixture ghost was not promoted into the topic registry")
+	}
 	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: archivePath, Label: "test", WorkspaceRoot: projectRoot})
 	defer ctrl.Close()
 	app := &App{
@@ -593,6 +600,44 @@ func TestUnusedTransientBlankSessionOnlyMatchesZeroByteFiles(t *testing.T) {
 	}
 	if unusedTransientBlankSession(dir, nonzero) {
 		t.Fatal("non-empty session must not be classified as an unused transient blank")
+	}
+}
+
+func TestTransientBlankCleanupPreservesTopicWithSiblingInAnotherGlobalDirectory(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	app := NewApp()
+	ghostDir := desktopSessionDir(globalWorkspaceRoot())
+	legacyDir := config.SessionDir()
+	for _, dir := range []string{ghostDir, legacyDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	topicID := "shared-global-topic"
+	ghost := filepath.Join(ghostDir, "ghost.jsonl")
+	sibling := filepath.Join(legacyDir, "sibling.jsonl")
+	writeZeroByteSession(t, ghost)
+	if err := pinNewEmptySessionBranchMeta(ghost, "global", "", topicID, defaultTopicTitle); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sibling, []byte(`{"role":"user","content":"keep"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := pinNewEmptySessionBranchMeta(sibling, "global", "", topicID, "Keep"); err != nil {
+		t.Fatal(err)
+	}
+	if err := prependTopicsInProjectsFile("", []string{topicID}, false); err != nil {
+		t.Fatal(err)
+	}
+	app.discardUnusedTransientBlankSessions([]string{ghostDir}, "")
+	if _, err := os.Stat(ghost); !os.IsNotExist(err) {
+		t.Fatalf("transient ghost should be removed, stat err = %v", err)
+	}
+	if _, err := os.Stat(sibling); err != nil {
+		t.Fatalf("sibling session should remain: %v", err)
+	}
+	if !topicIndexedInRegistry("global", "", topicID) {
+		t.Fatal("sibling topic registration was removed with a ghost from another directory")
 	}
 }
 

@@ -9,7 +9,7 @@ import (
 	"unicode/utf8"
 
 	"reasonix/internal/agent"
-	"reasonix/internal/taskpolicy"
+	"reasonix/internal/runtimepolicy"
 )
 
 const (
@@ -23,26 +23,13 @@ const (
 	plannerReasonUserPlanApproval    = "user_plan_for_approval"
 	plannerReasonUserPlanAndExecute  = "user_plan_and_execute"
 	plannerReasonContextContinuation = "context_continuation"
-	plannerReasonLowRiskQuestion     = "low_risk_question"
-	plannerReasonHighRisk            = "high_risk"
-	plannerReasonCrossSurface        = "cross_surface"
-	plannerReasonStructuredRequest   = "structured_request"
-	plannerReasonComplexIntent       = "complex_intent"
-	plannerReasonAtomicEdit          = "atomic_edit"
-	plannerReasonReadOnlyAction      = "read_only_action"
-	plannerReasonGuidance            = "complex_guidance"
-	plannerReasonGoalActive          = "goal_active"
-	plannerReasonAnchoredWork        = "anchored_work"
-	plannerReasonAmbiguousWork       = "ambiguous_work"
-	plannerReasonWorkRequest         = "work_request"
-	plannerReasonTaskPolicy          = "task_policy"
+	plannerReasonGoalStart           = "explicit_goal_start"
 	plannerReasonDefault             = "default_executor"
 )
 
 var (
 	directOptionReplyRE   = regexp.MustCompile(`(?i)^\s*(?:\d+|[a-z])\s*[.)、。]?\s*$`)
 	prefixedOptionReplyRE = regexp.MustCompile(`(?i)^\s*(?:选|选择|就|用|按|走|执行|choose|pick|use|option|choice|方案)\s*(?:第\s*)?(?:方案|选项|option|choice)?\s*(?:\d+|[一二三四五六七八九十]|[a-z])\s*(?:个|号|项|种|条|方案|option|choice)?\s*[.)、。!！?？]?\s*$`)
-	plannerListRE         = regexp.MustCompile(`(?m)^\s*(?:[-*]|\d+[.)、])\s+\S`)
 	plannerFileRefRE      = regexp.MustCompile(`(?i)(?:^|[\s@` + "`" + `"'(])(?:[\w.-]+[/\\])*[\w.-]+\.(?:go|ts|tsx|js|jsx|py|rs|java|kt|md|json|ya?ml|toml|sql|sh|css|html)(?:$|[\s,;:!?，；：！？)` + "`" + `"'])`)
 )
 
@@ -50,11 +37,8 @@ type plannerTurnMetadata struct {
 	UserText               string
 	Synthetic              bool
 	ExplicitPlanMode       bool
-	GoalActive             bool
-	ClosedLoop             bool // legacy tests/callers without a frozen TaskPolicy
+	ExplicitGoalStart      bool
 	HasConversationContext bool
-	Policy                 taskpolicy.TaskPolicy
-	PolicySet              bool
 }
 
 type plannerTurnMetadataKey struct{}
@@ -73,30 +57,18 @@ func plannerTurnMetadataFromContext(ctx context.Context) (plannerTurnMetadata, b
 
 func (c *Controller) withPlannerTurnMetadata(ctx context.Context, userText string, synthetic bool, priorMessages int) context.Context {
 	text := strings.TrimSpace(agent.StripTransientUserBlocks(userText))
-	features := plannerFeaturesFor(text, normalizePlannerText(text))
-	goalActive := c.goals.active()
-	policy := taskpolicy.Derive(taskpolicy.Input{
-		Raw:             text,
-		Instruction:     taskpolicy.StripQuotedConstraints(text),
-		PlanMode:        c.PlanMode(),
-		GoalActive:      goalActive,
-		HighRiskHints:   features.highRisk,
-		MediumRiskHints: features.complex,
-		MultiFile:       features.multiFile,
-		CrossSurface:    features.crossSurface,
-		Anchored:        features.anchored,
-		Structured:      features.structured,
-	})
-	ctx = taskpolicy.WithContext(ctx, policy)
+	constraints := runtimepolicy.ParseConstraints(runtimepolicy.StripQuotedConstraints(text))
+	if c.PlanMode() {
+		constraints.PlanModeReadOnly = true
+		constraints.ForbidMutation = true
+	}
+	ctx = runtimepolicy.WithContext(ctx, constraints)
 	return withPlannerTurnMetadata(ctx, plannerTurnMetadata{
 		UserText:               userText,
 		Synthetic:              synthetic,
 		ExplicitPlanMode:       c.PlanMode(),
-		GoalActive:             goalActive,
-		ClosedLoop:             policy.ClosedLoop(),
+		ExplicitGoalStart:      c.consumeExplicitGoalStart(),
 		HasConversationContext: priorMessages > 1,
-		Policy:                 policy,
-		PolicySet:              true,
 	})
 }
 
@@ -132,73 +104,22 @@ func DecidePlannerRoute(ctx context.Context, input string) agent.PlannerDecision
 
 	lower := normalizePlannerText(text)
 	if requestsPlanApproval(lower) {
-		return plannerPlanDecision(agent.PlannerRoutePlanForApproval, agent.PlannerDepthFull, plannerReasonUserPlanApproval)
+		return plannerPlanDecision(agent.PlannerRoutePlanForApproval, plannerReasonUserPlanApproval)
 	}
 	if requestsPlanOnly(lower) {
-		return plannerPlanDecision(agent.PlannerRoutePlanOnly, agent.PlannerDepthFull, plannerReasonUserPlanOnly)
+		return plannerPlanDecision(agent.PlannerRoutePlanOnly, plannerReasonUserPlanOnly)
 	}
 	if hasLeadingDirective(lower, planAndExecuteDirectives) || hasLeadingDirective(lower, planFirstDirectives) {
-		return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonUserPlanAndExecute)
+		return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, plannerReasonUserPlanAndExecute)
 	}
-	if requestsDirectExecution(lower) && (!meta.PolicySet || meta.Policy.Route == taskpolicy.RouteDirect) {
+	if requestsDirectExecution(lower) {
 		return plannerExecutorDecision(plannerReasonUserDirect)
+	}
+	if meta.ExplicitGoalStart {
+		return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, plannerReasonGoalStart)
 	}
 	if meta.HasConversationContext && isContextDependentAction(text) {
 		return plannerExecutorDecision(plannerReasonContextContinuation)
-	}
-	if isLowRiskQuestion(lower) {
-		return plannerExecutorDecision(plannerReasonLowRiskQuestion)
-	}
-
-	features := plannerFeaturesFor(text, lower)
-	if meta.PolicySet {
-		if meta.GoalActive && features.work && !features.atomic {
-			return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonGoalActive)
-		}
-		switch meta.Policy.Route {
-		case taskpolicy.RouteFullPlan:
-			return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonTaskPolicy)
-		case taskpolicy.RouteLightPlan:
-			return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthLight, plannerReasonTaskPolicy)
-		default:
-			return plannerExecutorDecision(plannerReasonTaskPolicy)
-		}
-	}
-	if features.work && features.highRisk {
-		return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonHighRisk)
-	}
-	if features.multiFile || features.crossSurface {
-		return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonCrossSurface)
-	}
-	if features.structured {
-		return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonStructuredRequest)
-	}
-	if features.complex {
-		return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonComplexIntent)
-	}
-	if features.atomic {
-		return plannerExecutorDecision(plannerReasonAtomicEdit)
-	}
-	if features.guidance {
-		return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthLight, plannerReasonGuidance)
-	}
-	if features.readOnly && !features.ambiguous {
-		return plannerExecutorDecision(plannerReasonReadOnlyAction)
-	}
-	if meta.GoalActive && features.work {
-		return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonGoalActive)
-	}
-	if meta.ClosedLoop && features.work {
-		return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonWorkRequest)
-	}
-	if features.work && features.ambiguous {
-		return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonAmbiguousWork)
-	}
-	if features.work && features.anchored {
-		return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthLight, plannerReasonAnchoredWork)
-	}
-	if features.work {
-		return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthLight, plannerReasonWorkRequest)
 	}
 	return plannerExecutorDecision(plannerReasonDefault)
 }
@@ -206,60 +127,14 @@ func DecidePlannerRoute(ctx context.Context, input string) agent.PlannerDecision
 func plannerExecutorDecision(reason string) agent.PlannerDecision {
 	return agent.PlannerDecision{
 		Route:  agent.PlannerRouteExecutorOnly,
-		Depth:  agent.PlannerDepthNone,
 		Reason: reason,
 	}
 }
 
-func plannerPlanDecision(route agent.PlannerRoute, depth agent.PlannerDepth, reason string) agent.PlannerDecision {
+func plannerPlanDecision(route agent.PlannerRoute, reason string) agent.PlannerDecision {
 	return agent.PlannerDecision{
 		Route:  route,
-		Depth:  depth,
 		Reason: reason,
-	}
-}
-
-type plannerFeatures struct {
-	work         bool
-	highRisk     bool
-	multiFile    bool
-	crossSurface bool
-	structured   bool
-	complex      bool
-	atomic       bool
-	readOnly     bool
-	guidance     bool
-	anchored     bool
-	ambiguous    bool
-}
-
-func plannerFeaturesFor(text, lower string) plannerFeatures {
-	fileRefs := plannerFileRefRE.FindAllString(text, -1)
-	anchored := len(fileRefs) > 0 || strings.Contains(text, "@") || containsAnyLexical(lower, plannerNamedTargets)
-	work := containsAnyLexical(lower, plannerWorkTerms)
-	highRisk := containsAnyLexical(lower, plannerHighRiskTerms)
-	multiFile := len(fileRefs) >= 2 || strings.Count(text, "@") >= 2
-	crossSurface := containsAnyLexical(lower, plannerCrossSurfaceTerms)
-	structured := utf8.RuneCountInString(text) >= 240 || plannerListRE.MatchString(text) || strings.Count(text, "\n") >= 2
-	complex := containsAnyLexical(lower, complexIntentTerms)
-	guidance := isComplexGuidanceQuestion(lower)
-	ambiguous := work && containsAnyLexical(lower, plannerAmbiguousScopeTerms)
-	readOnly := work && containsAnyLexical(lower, plannerReadOnlyWorkTerms) &&
-		!containsAnyLexical(lower, plannerMutationWorkTerms)
-	atomic := work && anchored && !highRisk && !multiFile && !crossSurface && !structured && !complex &&
-		utf8.RuneCountInString(text) <= 140 && containsAnyLexical(lower, plannerAtomicTerms)
-	return plannerFeatures{
-		work:         work,
-		highRisk:     highRisk,
-		multiFile:    multiFile,
-		crossSurface: crossSurface,
-		structured:   structured,
-		complex:      complex,
-		atomic:       atomic,
-		readOnly:     readOnly,
-		guidance:     guidance,
-		anchored:     anchored,
-		ambiguous:    ambiguous,
 	}
 }
 
@@ -546,50 +421,6 @@ var shortContextReplyPrefixes = []string{
 	"继续", "执行", "开始", "下一步", "go ahead", "proceed", "continue",
 }
 
-func isLowRiskQuestion(lower string) bool {
-	lower = strings.TrimSpace(lower)
-	normalized := strings.ReplaceAll(lower, "'", "")
-	if strings.HasPrefix(lower, "what ") || strings.HasPrefix(normalized, "whats ") ||
-		strings.HasPrefix(lower, "why ") || strings.HasPrefix(lower, "how ") ||
-		strings.HasPrefix(lower, "who ") || strings.HasPrefix(lower, "where ") ||
-		strings.HasPrefix(lower, "when ") || strings.HasPrefix(lower, "which ") ||
-		strings.HasPrefix(lower, "whose ") || strings.HasPrefix(lower, "whom ") ||
-		strings.HasPrefix(lower, "explain ") || strings.HasPrefix(lower, "describe ") ||
-		strings.HasPrefix(lower, "tell ") || strings.HasPrefix(lower, "show ") ||
-		strings.HasPrefix(lower, "list ") || strings.HasPrefix(lower, "summarize ") ||
-		strings.HasPrefix(lower, "summarise ") || strings.HasPrefix(lower, "compare ") ||
-		strings.HasPrefix(lower, "difference ") || strings.HasPrefix(lower, "is ") ||
-		strings.HasPrefix(lower, "are ") || strings.HasPrefix(lower, "can ") ||
-		strings.HasPrefix(lower, "could ") || strings.HasPrefix(lower, "do ") ||
-		strings.HasPrefix(lower, "does ") || strings.HasPrefix(lower, "did ") ||
-		strings.HasPrefix(lower, "should ") || strings.HasPrefix(lower, "would ") ||
-		strings.HasPrefix(lower, "will ") ||
-		strings.HasPrefix(lower, "what's") || strings.HasPrefix(normalized, "whats") ||
-		strings.HasPrefix(lower, "解释") || strings.HasPrefix(lower, "说明") ||
-		strings.HasPrefix(lower, "怎么看") || strings.HasPrefix(lower, "查一下") ||
-		strings.HasPrefix(lower, "介绍一下") ||
-		strings.HasPrefix(lower, "说一下") || strings.HasPrefix(lower, "帮我看") ||
-		strings.HasPrefix(lower, "帮我查") || strings.HasPrefix(lower, "是什么") ||
-		strings.HasPrefix(lower, "有没有") || strings.HasPrefix(lower, "能不能") ||
-		strings.HasPrefix(lower, "可以吗") || strings.HasPrefix(lower, "对吗") ||
-		strings.HasPrefix(lower, "是不是") || strings.HasPrefix(lower, "请问") {
-		return !containsAnyLexical(lower, plannerQuestionWorkTerms)
-	}
-	return false
-}
-
-func isComplexGuidanceQuestion(lower string) bool {
-	for _, prefix := range []string{
-		"how do i ", "how should i ", "how would you ", "what's the best way ",
-		"what is the best way ", "explain how to ", "怎么实现", "如何实现", "怎么迁移", "如何迁移",
-	} {
-		if strings.HasPrefix(lower, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
 func containsAnyLexical(s string, terms []string) bool {
 	for _, term := range terms {
 		if containsLexicalTerm(s, term) {
@@ -637,59 +468,8 @@ var plannerWorkTerms = []string{
 	"改造", "评审", "审查", "排查", "调试", "测试", "加个", "加一", "补一个", "补个",
 }
 
-var plannerMutationWorkTerms = []string{
-	"fix", "fixing", "update", "updating", "remove", "removing", "delete", "deleting",
-	"edit", "editing", "write", "writing", "create", "creating", "add", "adding", "repair",
-	"patch", "build", "building", "implement", "implementing", "refactor", "refactoring",
-	"migrate", "migrating", "redesign", "修改", "修复", "更新", "删除", "移除", "编辑",
-	"写入", "创建", "新增", "添加", "构建", "实现", "重构", "迁移", "改造", "加个",
-	"加一", "补一个", "补个",
-}
-
-var plannerReadOnlyWorkTerms = []string{
-	"run", "running", "review", "reviewing", "audit", "inspect", "debug",
-	"test", "tests", "testing", "运行", "评审", "审查", "排查", "调试", "测试",
-}
-
-var plannerQuestionWorkTerms = []string{
-	"fix", "fixing", "update", "updating", "remove", "removing", "delete", "deleting",
-	"edit", "editing", "write", "writing", "create", "creating", "add", "adding", "repair",
-	"patch", "implement", "implementing", "refactor", "refactoring", "migrate", "migrating",
-	"redesign", "修改", "修复", "更新", "删除", "移除", "编辑", "写入", "创建", "新增",
-	"添加", "实现", "重构", "迁移", "改造", "加个", "加一", "补一个", "补个",
-}
-
-var plannerHighRiskTerms = []string{
-	"auth", "authentication", "authorization", "permission", "token", "secret",
-	"credential", "payment", "billing", "race", "concurrency", "deadlock", "transaction",
-	"encryption", "signature", "sandbox", "privilege", "权限", "鉴权", "认证", "令牌",
-	"密钥", "支付", "账单", "并发", "竞态", "竟态", "死锁", "事务", "加密", "签名",
-	"沙箱", "提权",
-}
-
-var plannerCrossSurfaceTerms = []string{
-	"multiple files", "several files", "across", "frontend and backend", "backend and frontend",
-	"api and ui", "ui and api", "database and api", "多个文件", "多处", "前后端",
-	"整个模块", "整个项目", "全链路", "跨模块",
-}
-
-var plannerAtomicTerms = []string{
-	"typo", "wording", "copy", "readme", "changelog", "nil check", "null check",
-	"log line", "one line", "rename", "文案", "错别字", "拼写", "空指针检查",
-	"nil 检查", "一行日志", "改名", "重命名",
-}
-
-var plannerNamedTargets = []string{
-	"readme", "changelog", "makefile", "dockerfile",
-}
-
-var plannerAmbiguousScopeTerms = []string{
-	"the bug", "the issue", "the problem", "performance", "everything", "whole module",
-	"这个 bug", "这个bug", "这个问题", "性能", "整个模块", "全部问题",
-}
-
 // TaskWarrantsPlanner is retained as a small compatibility predicate for
-// callers and tests that do not need depth or approval semantics.
+// callers and tests that only need "planner vs executor".
 func TaskWarrantsPlanner(input string) bool {
 	return DecidePlannerRoute(context.Background(), input).Route != agent.PlannerRouteExecutorOnly
 }

@@ -24,7 +24,7 @@ import (
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
 	"reasonix/internal/skill"
-	"reasonix/internal/taskpolicy"
+
 	"reasonix/internal/tool"
 )
 
@@ -930,7 +930,7 @@ func TestCapabilityGateRecoveryIsAudited(t *testing.T) {
 	audit := &capability.Audit{}
 	a := New(&scriptedProvider{name: "p"}, reg, NewSession("sys"),
 		Options{CapabilityLedger: capability.NewLedger(), CapabilityAudit: audit}, event.Discard)
-	a.turn = turnRuntime{policySet: true, policy: closedLoopTurnPolicy(taskpolicy.ReviewForced)}
+	a.turn = turnRuntime{deliveryScopeActive: true}
 	a.SeedCapabilityRoute(capability.RouteDecision{Candidates: []capability.RouteCandidate{
 		{Entry: capability.Entry{ID: "skill:review"}, Policy: capability.AutoUseRequire},
 	}})
@@ -1091,7 +1091,7 @@ func TestCapabilityGateAppliesToReadOnlyTasks(t *testing.T) {
 	reg := tool.NewRegistry()
 	a := New(&scriptedProvider{name: "p"}, reg, NewSession("sys"),
 		Options{CapabilityLedger: capability.NewLedger()}, event.Discard)
-	a.turn = turnRuntime{policySet: true, policy: closedLoopTurnPolicy(taskpolicy.ReviewForced)}
+	a.turn = turnRuntime{deliveryScopeActive: true}
 	a.SeedCapabilityRoute(capability.RouteDecision{Candidates: []capability.RouteCandidate{
 		{Entry: capability.Entry{ID: "skill:review"}, Policy: capability.AutoUseRequire},
 	}})

@@ -24553,7 +24553,7 @@ body > .mermaid-diagram--fullscreen {
 }
 :root[data-theme-style] .project-tree__topic-label {
   color: var(--fg);
-  font-weight: 550;
+  font-weight: 500;
 }
 
 /* Extra spacing after expanded project section */
@@ -24622,7 +24622,7 @@ body > .mermaid-diagram--fullscreen {
 /* Active topic: keep text style unchanged (no color/font-weight change) */
 :root[data-theme-style] .sidebar--workbench .project-tree__topic--active .project-tree__topic-label {
   color: var(--fg);
-  font-weight: 550;
+  font-weight: 500;
 }
 
 /* Topic action icons (pin, archive): clean, no background, no border */
@@ -29983,7 +29983,7 @@ body > .mermaid-diagram--fullscreen {
 
 .sidebar--workbench .project-tree__topic--active .project-tree__topic-label {
   color: var(--fg);
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .sidebar--workbench .project-tree__topic-im {
@@ -30267,6 +30267,90 @@ body > .mermaid-diagram--fullscreen {
 .sidebar--workbench .sidebar__utility-button svg {
   flex: 0 0 auto;
   stroke-width: 1.9;
+}
+
+.project-tree__group {
+  position: relative;
+}
+.project-tree__group-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 6px;
+  border-radius: 6px;
+  color: var(--color-text-muted, inherit);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  background: transparent;
+  border: 1px dashed transparent;
+}
+.project-tree__group-main:hover {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+.project-tree__group-main--drop-target {
+  border-color: color-mix(in srgb, currentColor 18%, transparent);
+}
+.project-tree__group-chevron {
+  flex: 0 0 auto;
+  width: 10px;
+  font-size: 9px;
+  opacity: 0.7;
+}
+.project-tree__group-title {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.project-tree__group-count {
+  flex: 0 0 auto;
+  font-size: 10px;
+  opacity: 0.6;
+  font-weight: 400;
+}
+.project-tree__group-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  background: transparent;
+  color: inherit;
+  outline: none;
+}
+.project-tree__group-children {
+  padding-left: 0;
+}
+.project-tree__folder-active-indicator {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  margin-left: 6px;
+  border: 2px solid color-mix(in srgb, currentColor 26%, transparent);
+  border-top-color: currentColor;
+  border-radius: 999px;
+  animation: project-tree-spin 0.9s linear infinite;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .project-tree__folder-active-indicator {
+    animation: none;
+    border-color: currentColor;
+    opacity: 0.72;
+  }
+}
+.project-tree__topic--drop-before {
+  box-shadow: inset 0 2px 0 currentColor;
+}
+.project-tree__topic--drop-after {
+  box-shadow: inset 0 -2px 0 currentColor;
 }
 
 @keyframes project-tree-spin {

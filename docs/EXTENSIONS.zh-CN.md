@@ -55,7 +55,8 @@ reasonix plugin doctor <name>                                      # 校验
 
 已安装扩展发生变化（安装、更新、启用/禁用、`--link` 内容变化）绝不会
 修改正在运行的回合。所有交互前端都提供失败原子的重载入口——CLI
-`/reload`、Desktop「重载运行时」（命令面板）、Serve `/reload`、ACP
+`/reload`、Desktop `/reload`（输入框斜杠菜单）或「重载运行时」（命令面板）、
+Serve `/reload`、ACP
 vendor method `_reasonix.io/session/reloadExtensions`：
 
 1. 回合或后台任务运行中，CLI/Desktop/ACP 只排队一次；Serve 会拒绝本次

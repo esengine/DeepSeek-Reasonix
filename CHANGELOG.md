@@ -8,21 +8,15 @@ branch.
 
 ### Changed
 
-- **Single adaptive standard execution:** Reasonix no longer exposes Light /
-  Balanced / Delivery (or TokenMode) as a selectable execution mode. Planning,
-  verification, and independent review now follow per-turn task risk via
-  `TaskPolicy` v2. Low-risk conversation stays direct with no auxiliary model
-  calls; high-risk, security, persistence, and active-Goal work keep the former
-  Delivery closed-loop contract. Old `--preset`/`--profile`, `/preset`, ACP
-  `agent_preset`/`work_mode`, and Desktop `SetAgentPreset*`/`SetTokenMode*`
-  calls stay accepted for one compatibility version as no-ops. New persisted
-  compat fields pin `agentPreset=balanced` and `tokenMode=full`. Isolated
-  worktrees keep their on-disk directory; the UI no longer forces a Delivery
-  mode. Ordinary targeted tasks now surface missing verification or review as
-  a host-authored non-complete/unverified summary instead of stopping on
-  a recovery card; high-risk, persistent, security, explicit full-verification,
-  and Goal work retain hard evidence closure. Deprecated fields will be removed
-  after that compatibility window.
+- **Fact-driven execution:** Ordinary requests always enter the executor.
+  There is no automatic simple / light / full task mode and no per-turn
+  `TaskPolicy` classification. The planner runs only for an explicit Plan,
+  an approval boundary, or Goal start. The host builds verification
+  obligations from concrete tool effects and receipts. Plan, Goal,
+  permission, and sandbox stay independent. Tool schemas and the executor
+  system prefix stay byte-stable. Historical `<execution-policy>` tags remain
+  readable on old sessions and are stripped from new provider context.
+  Old `--preset`/`--profile` compatibility no-ops are unchanged.
 
 ### Fixed
 

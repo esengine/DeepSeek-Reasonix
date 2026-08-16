@@ -1,6 +1,6 @@
 // Package agentpreset holds the deprecated execution-mode vocabulary kept for
 // one compatibility version. Reasonix now runs a single adaptive standard
-// execution policy (see internal/taskpolicy); these helpers exist only so old
+// host execution (see internal/runtimepolicy); these helpers exist only so old
 // CLI flags, ACP options, persisted sessions, and Desktop tabs can be parsed,
 // answered with a deprecation notice, and dual-written with safe values for
 // older clients. Nothing here may influence runtime behavior.

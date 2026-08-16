@@ -10,7 +10,7 @@ import (
 )
 
 func TestFinalReadinessFallsBackToCanonicalTodos(t *testing.T) {
-	ran := evidence.Receipt{ToolName: "bash", Success: true, Command: "git push"}
+	ran := evidence.Receipt{ToolName: "bash", Success: true, Write: true, Mutation: true, Command: "git push"}
 	open := []evidence.TodoItem{{Content: "push", Status: "completed"}, {Content: "rebase", Status: "pending"}}
 
 	// Turn did work (a successful bash) but issued no todo_write this turn, so the

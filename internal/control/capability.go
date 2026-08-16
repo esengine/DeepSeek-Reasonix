@@ -8,7 +8,6 @@ import (
 	"reasonix/internal/capability"
 	"reasonix/internal/config"
 	"reasonix/internal/plugin"
-	"reasonix/internal/taskpolicy"
 )
 
 func (c *Controller) withCapabilityRoute(ctx context.Context, composed, routeInput string) string {
@@ -48,14 +47,8 @@ func (c *Controller) routeCapabilities(ctx context.Context, routeInput string) c
 		ctx = context.Background()
 	}
 	tools := c.ToolContractEntries()
-	// One shared capability directory: task risk picks the route strength
-	// (closed-loop promotion), never the visible tool set.
-	closedLoop := false
-	semanticAllowed := false
-	if policy, ok := taskpolicy.FromContext(ctx); ok {
-		closedLoop = policy.ClosedLoop()
-		semanticAllowed = policy.SemanticRouterAllowed
-	}
+	// Deterministic routing is first. The semantic router runs only when that
+	// catalog match is itself ambiguous — never as a per-turn classification.
 	var proxyTools map[string][]plugin.CachedTool
 	if c.proxyToolsFn != nil {
 		proxyTools = c.proxyToolsFn()
@@ -97,38 +90,27 @@ func (c *Controller) routeCapabilities(ctx context.Context, routeInput string) c
 		}
 	}
 	catalog := capability.BuildCatalog(opts)
-	var decision capability.RouteDecision
-	if closedLoop {
-		decision = capability.RouteClosedLoop(routeInput, catalog.Entries)
-	} else {
-		decision = capability.Route(routeInput, catalog.Entries)
-	}
+	decision := capability.Route(routeInput, catalog.Entries)
 	if c.capabilityProxy {
 		decision.CapabilityProxy = true
 	}
 
-	// The frozen TaskPolicy decides whether ambiguity warrants the semantic
-	// router; deterministic routing remains first for every task.
-	if semanticAllowed && c.semanticRouter != nil {
-		before := len(decision.Candidates)
-		strong := false
-		for _, cand := range decision.Candidates {
-			if cand.Policy == capability.AutoUseRequire || cand.Policy == capability.AutoUsePrefer {
-				strong = true
-				break
-			}
+	strong := false
+	for _, cand := range decision.Candidates {
+		if cand.Policy == capability.AutoUseRequire || cand.Policy == capability.AutoUsePrefer {
+			strong = true
+			break
 		}
-		if !strong {
-			decision = c.semanticRouter.RouteSemantic(ctx, routeInput, catalog, decision)
-			if c.capabilityProxy {
-				decision.CapabilityProxy = true
-			}
-			if c.capabilityAudit != nil {
-				fallback := len(decision.Candidates) == before
-				c.capabilityAudit.RecordRoute(true, fallback)
-			}
-		} else if c.capabilityAudit != nil {
-			c.capabilityAudit.RecordRoute(false, false)
+	}
+	ambiguous := !strong && len(decision.Candidates) > 1
+	if ambiguous && c.semanticRouter != nil {
+		before := len(decision.Candidates)
+		decision = c.semanticRouter.RouteSemantic(ctx, routeInput, catalog, decision)
+		if c.capabilityProxy {
+			decision.CapabilityProxy = true
+		}
+		if c.capabilityAudit != nil {
+			c.capabilityAudit.RecordRoute(true, len(decision.Candidates) == before)
 		}
 	} else if c.capabilityAudit != nil {
 		c.capabilityAudit.RecordRoute(false, false)

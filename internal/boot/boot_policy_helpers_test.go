@@ -11,20 +11,6 @@ import (
 	"reasonix/internal/provider"
 )
 
-func userExecutionPolicy(messages []provider.Message) string {
-	for _, message := range messages {
-		if message.Role != provider.RoleUser {
-			continue
-		}
-		start := strings.Index(message.Content, "<execution-policy")
-		end := strings.Index(message.Content, "</execution-policy>")
-		if start >= 0 && end > start {
-			return message.Content[start : end+len("</execution-policy>")]
-		}
-	}
-	return ""
-}
-
 func bootLastUser(req provider.Request) string {
 	for _, v := range slices.Backward(req.Messages) {
 		if v.Role == provider.RoleUser {

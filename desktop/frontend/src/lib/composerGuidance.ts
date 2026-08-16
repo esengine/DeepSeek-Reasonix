@@ -3,7 +3,11 @@ export function guidanceNeedsRetry(state?: string): boolean {
 }
 
 export function guidanceIsInFlight(state?: string): boolean {
-  return state === "running" || state === "steer_accepted" || state === "steer_consumed";
+	return state === "steer_accepted";
+}
+
+export function guidanceHasKnownPendingState(state?: string): boolean {
+	return state === undefined || state === "" || state === "queued" || state === "blocked" || state === "uncertain" || state === "steer_accepted";
 }
 
 export function guidanceIsEditable(item: { id?: string; state?: string; source?: string; paused?: boolean }): boolean {

@@ -191,6 +191,10 @@ type TopicPageRequest struct {
 	Query         string `json:"query,omitempty"`
 	TimeFilter    string `json:"timeFilter,omitempty"`
 	SortMode      string `json:"sortMode,omitempty"`
+	// ManualOrder makes sort_order the primary key within each pinned bucket.
+	// It is intentionally request-scoped: users who have never reordered keep
+	// the activity/created ordering even though metadata rows have a sort value.
+	ManualOrder bool `json:"manualOrder,omitempty"`
 }
 
 type TopicPage struct {

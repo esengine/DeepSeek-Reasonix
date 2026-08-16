@@ -116,7 +116,7 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
     tabId: "tab-a",
     sessionKey: "session-a",
     onSend: () => {},
-    onCancel: () => undefined,
+    onCancel: async () => ({ discardedItemIds: [] }),
     onCycleMode: () => {},
     onSetMode: () => {},
     onSetCollaborationMode: () => {},
@@ -394,10 +394,10 @@ console.log("\ncomposer inbox recovery");
     DeleteInboxItem: async () => { deleteCalls += 1; },
   });
   const { root } = await renderComposer({ running: true });
-
   await waitFor("active steer rendered", () => document.querySelector(".composer-guidance-item__guide") !== null);
   const guide = document.querySelector(".composer-guidance-item__guide") as HTMLButtonElement;
-  const dismiss = document.querySelector(".composer-guidance-item__action") as HTMLButtonElement;
+  const actions = document.querySelectorAll(".composer-guidance-item__action");
+  const dismiss = actions[actions.length - 1] as HTMLButtonElement;
   ok(guide.disabled && dismiss.disabled, "active steer disables send and delete actions");
   ok(guide.getAttribute("aria-label") === "Guidance is already being applied", "active steer explains why actions are disabled");
   await act(async () => { guide.click(); dismiss.click(); await flushTimers(); });
@@ -406,7 +406,47 @@ console.log("\ncomposer inbox recovery");
   await act(async () => { root.unmount(); });
   dom.window.close();
 }
+{
+  const dom = installDom();
+  installBridgeApp({
+    InboxSnapshot: async () => ({
+      revision: 5,
+      paused: false,
+      recovered: false,
+      recoveredCount: 0,
+      items: [
+        {
+          id: "consumed-steer",
+          intent: "steer",
+          state: "steer_consumed",
+          preview: "Already shown in the transcript",
+          byteSize: 64,
+          position: 1,
+        },
+        {
+          id: "still-queued",
+          intent: "followup",
+          state: "queued",
+          preview: "Still waiting to run",
+          byteSize: 64,
+          position: 2,
+        },
+      ],
+      itemsCount: 2,
+      bytes: 128,
+      maxItems: 64,
+      maxBytes: 64 * 1024 * 1024,
+    }),
+  });
+  const { root } = await renderComposer({ running: true });
 
+  await waitFor("pending guidance rendered without consumed steer", () => document.querySelectorAll(".composer-guidance-item").length === 1);
+  ok(document.querySelector(".composer-guidance-item")?.textContent?.includes("Still waiting to run") === true, "consumed steer is excluded from the pending guidance shelf");
+  ok(document.body.textContent?.includes("Already shown in the transcript") === false, "consumed steer cannot reappear after inbox refresh");
+
+  await act(async () => { root.unmount(); });
+  dom.window.close();
+}
 {
   const dom = installDom();
   let retryCalls = 0;
@@ -638,6 +678,117 @@ console.log("\ncomposer inbox recovery");
   ok(document.querySelector(".composer-inbox-recovery") === null, "stale recovered snapshot cannot land on another session");
   ok(document.querySelector(".composer-guidance-item") === null, "stale queued items cannot land on another session");
 
+  await act(async () => { root.unmount(); });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  const longText = "x".repeat(240);
+  let deletedID = "";
+  installBridgeApp({
+    InboxSnapshot: async () => ({
+      revision: 8,
+      paused: false,
+      recovered: false,
+      items: [
+        { id: "same-first", intent: "steer", state: "queued", preview: longText.slice(0, 120), source: "desktop", byteSize: 240, position: 1 },
+        { id: "same-second", intent: "steer", state: "queued", preview: longText.slice(0, 120), source: "desktop", byteSize: 240, position: 2 },
+      ],
+      itemsCount: 2,
+      bytes: 480,
+      maxItems: 64,
+      maxBytes: 64 * 1024 * 1024,
+    }),
+    DeleteInboxItem: async (_tabId: string, id: string) => { deletedID = id; },
+  });
+  const { root, rerender } = await renderComposer({ running: true });
+  await waitFor("duplicate long guidance rendered", () => document.querySelectorAll(".composer-guidance-item").length === 2);
+  await rerender({ guidanceConsumedKey: "steer-event-1", guidanceConsumedItemId: "same-second", guidanceConsumedText: longText });
+  await waitFor("item id removes one duplicate", () => document.querySelectorAll(".composer-guidance-item").length === 1);
+  const duplicateActions = document.querySelectorAll(".composer-guidance-item__action");
+  const dismiss = duplicateActions[duplicateActions.length - 1] as HTMLButtonElement;
+  await act(async () => { dismiss.click(); await flushTimers(); });
+  ok(deletedID === "same-first", "consumed steer uses item ID for long duplicate text");
+  await act(async () => { root.unmount(); });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  installBridgeApp({
+    InboxSnapshot: async () => ({
+      revision: 9,
+      paused: true,
+      recovered: true,
+      recoveredCount: 3,
+      items: [
+        { id: "already-running", intent: "followup", state: "running", preview: "running", byteSize: 32, position: 1 },
+        { id: "already-consumed", intent: "steer", state: "steer_consumed", preview: "consumed", byteSize: 32, position: 2 },
+        { id: "still-pending", intent: "followup", state: "uncertain", preview: "pending", byteSize: 32, position: 3 },
+      ],
+      itemsCount: 3,
+      bytes: 96,
+      maxItems: 64,
+      maxBytes: 64 * 1024 * 1024,
+    }),
+  });
+  const { root } = await renderComposer({ running: false });
+  await waitFor("delivered states filtered", () => document.querySelectorAll(".composer-guidance-item").length === 1);
+  ok(document.body.textContent?.includes("running") === false && document.body.textContent?.includes("consumed") === false, "running and consumed items stay out of the pending queue");
+  ok(document.querySelector(".composer-inbox-recovery")?.textContent?.includes("Recovered 1 pending instruction") === true, "recovery count reflects visible pending items");
+  await act(async () => { root.unmount(); });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  installBridgeApp({
+    InboxSnapshot: async () => ({
+      revision: 10,
+      paused: false,
+      recovered: false,
+      items: [
+        { id: "withdrawn", intent: "followup", state: "queued", preview: "restore me", source: "desktop", byteSize: 32, position: 1 },
+        { id: "delivered", intent: "steer", state: "queued", preview: "do not restore me", source: "desktop", byteSize: 32, position: 2 },
+      ],
+      itemsCount: 2,
+      bytes: 64,
+      maxItems: 64,
+      maxBytes: 64 * 1024 * 1024,
+    }),
+  });
+  const { root } = await renderComposer({
+    running: true,
+    onCancel: async () => ({ discardedItemIds: ["withdrawn"] }),
+  });
+  await waitFor("mixed cancel queue rendered", () => document.querySelectorAll(".composer-guidance-item").length === 2);
+  const stop = document.querySelector(".composer__btn--stop") as HTMLButtonElement;
+  await act(async () => { stop.click(); await flushTimers(); });
+  const textarea = document.querySelector("textarea") as HTMLTextAreaElement;
+  ok(textarea.value.includes("restore me") && !textarea.value.includes("do not restore me"), "stop restores only backend-confirmed withdrawn messages");
+  ok(document.querySelector(".composer-guidance-item")?.textContent?.includes("do not restore me") === true, "non-withdrawn durable message remains backend-owned");
+  await act(async () => { root.unmount(); });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  installBridgeApp({
+    InboxSnapshot: async () => ({
+      revision: 11,
+      paused: false,
+      recovered: false,
+      items: [{ id: "readonly", intent: "followup", state: "queued", preview: "readonly item", source: "desktop", byteSize: 32, position: 1 }],
+      itemsCount: 1,
+      bytes: 32,
+      maxItems: 64,
+      maxBytes: 64 * 1024 * 1024,
+    }),
+  });
+  const { root } = await renderComposer({ running: true, readOnly: true });
+  await waitFor("readonly item rendered", () => document.querySelector(".composer-guidance-item__action") !== null);
+  ok((document.querySelector(".composer-guidance-item__action") as HTMLButtonElement).disabled, "read-only queue disables delete");
   await act(async () => { root.unmount(); });
   dom.window.close();
 }

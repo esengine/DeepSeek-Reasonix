@@ -1,9 +1,11 @@
 package control
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/sessioninbox"
 )
 
@@ -35,6 +37,44 @@ func (c *Controller) unlockInboxSteerAdmission(dispatch *bool) {
 	c.inbox.admissionMu.Unlock()
 	if *dispatch {
 		c.maybeDispatchInbox()
+	}
+}
+
+func inboxSteerLoader(st *sessioninbox.Store, itemID string) func() (string, error) {
+	return func() (string, error) {
+		_, env, err := st.ReadItem(itemID)
+		if err != nil {
+			if errors.Is(err, sessioninbox.ErrNotFound) {
+				return "", agent.ErrSteerWithdrawn
+			}
+			return "", err
+		}
+		text := strings.TrimSpace(env.SubmitText)
+		if text == "" {
+			text = strings.TrimSpace(env.DisplayText)
+		}
+		if text == "" {
+			return "", fmt.Errorf("inbox item %s has empty body", itemID)
+		}
+		materialized, images, block, materializeErr := applyInboxReferences(env)
+		if materializeErr != nil {
+			return "", materializeErr
+		}
+		if block != "" {
+			return "", fmt.Errorf("frozen reference unavailable: %s", block)
+		}
+		if len(images) > 0 {
+			return "", fmt.Errorf("image guidance requires a follow-up turn")
+		}
+		// This compare-and-transition is the durable hand-off boundary and
+		// closes the loader-vs-cancel gap after TrySteerInboxItem returns.
+		if err := st.MarkSteerConsumed(itemID); err != nil {
+			if errors.Is(err, sessioninbox.ErrNotFound) {
+				return "", agent.ErrSteerWithdrawn
+			}
+			return "", err
+		}
+		return firstNonEmptyStr(materialized, text), nil
 	}
 }
 
@@ -92,32 +132,7 @@ func (c *Controller) TrySteerInboxItem(id string) (sessioninbox.InboxReceipt, er
 		return sessioninbox.InboxReceipt{ItemID: id, Disposition: sessioninbox.DispositionRejectedRotating, Capacity: cap}, nil
 	}
 	// Capture only the store pointer + item id. Load body from disk at consume.
-	storeRef := st
-	itemID := id
-	loader := func() (string, error) {
-		_, env, err := storeRef.ReadItem(itemID)
-		if err != nil {
-			return "", err
-		}
-		text := strings.TrimSpace(env.SubmitText)
-		if text == "" {
-			text = strings.TrimSpace(env.DisplayText)
-		}
-		if text == "" {
-			return "", fmt.Errorf("inbox item %s has empty body", itemID)
-		}
-		materialized, images, block, materializeErr := applyInboxReferences(env)
-		if materializeErr != nil {
-			return "", materializeErr
-		}
-		if block != "" {
-			return "", fmt.Errorf("frozen reference unavailable: %s", block)
-		}
-		if len(images) > 0 {
-			return "", fmt.Errorf("image guidance requires a follow-up turn")
-		}
-		return firstNonEmptyStr(materialized, text), nil
-	}
+	loader := inboxSteerLoader(st, id)
 	// Persist the admission boundary before exposing the loader to the agent.
 	// Holding c.mu for the short in-memory enqueue serializes active tracking
 	// with finishGuardedTurn, so TurnDone cannot overtake an accepted steer.

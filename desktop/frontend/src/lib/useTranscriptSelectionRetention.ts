@@ -14,7 +14,7 @@ import {
   type TranscriptSelectionPoint,
 } from "./transcriptSelectionStore";
 import { mergeTranscriptSelectableRows } from "./transcriptSelectionText";
-import type { TranscriptScrollMode, TranscriptScrollOwner } from "./transcriptScrollController";
+import type { TranscriptScrollMode, TranscriptScrollOwner } from "./transcriptScrollArbiter";
 
 const EDGE_SCROLL_ZONE_PX = 48;
 const EDGE_SCROLL_MIN_PX = 4;

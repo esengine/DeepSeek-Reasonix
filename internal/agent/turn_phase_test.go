@@ -76,20 +76,16 @@ func containsString(values []string, want string) bool {
 	return slices.Contains(values, want)
 }
 
-func TestExecutionPolicyPresentOnMutationTurn(t *testing.T) {
+func TestExecutionPolicyAbsentOnNewTurn(t *testing.T) {
 	prov := &mockProvider{name: "p", chunks: []provider.Chunk{
 		{Type: provider.ChunkText, Text: "ok"},
 		{Type: provider.ChunkDone},
 	}}
 	a := New(prov, tool.NewRegistry(), NewSession("sys"), Options{}, event.Discard)
 	_ = a.Run(context.Background(), "explain mutexes")
-	found := false
 	for _, m := range a.sess.conversation.Messages {
 		if m.Role == provider.RoleUser && strings.Contains(m.Content, "<execution-policy") {
-			found = true
+			t.Fatal("new turns must not inject execution-policy")
 		}
-	}
-	if !found {
-		t.Fatal("execution-policy block missing")
 	}
 }

@@ -408,5 +408,11 @@ ok(
   "App navigation results require both queue ownership and the shared navigation intent",
 );
 
+// useController owns periodic runtime metadata refreshes. Unmount explicitly
+// so the suite verifies their cleanup and does not keep the discovery runner
+// alive after all assertions have passed.
+await act(async () => root.unmount());
+dom.window.close();
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

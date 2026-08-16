@@ -2,5 +2,6 @@ allowBuilds:
   esbuild: true
 
 overrides:
+  dompurify: 3.4.13
   mdast-util-gfm-autolink-literal: 2.0.0
   undici: 7.29.0

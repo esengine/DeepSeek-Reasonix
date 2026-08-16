@@ -7,12 +7,14 @@ import { addBreadcrumb } from "./breadcrumbs";
 import { app, onEvent, onReady, onRuntimeRebuilt, onTabMeta, onTopicActivation } from "./bridge";
 import { invalidateCache } from "./composerHistory";
 import { formatInboxCancelError } from "./inboxError";
+import { requestInboxCancel, type CancelOutcome } from "./inboxCancel";
 import { formatContextMaintenanceNotice, isNewMaintenanceOperation, rememberMaintenanceOperation } from "./contextMaintenanceTypes";
 import { formatGuardianAssessmentNotice } from "./guardianEvents";
 import { completionSummaryNeedsAttention, completionSummaryNotice, normalizeCompletionSummary } from "./completionSummary";
 import { invalidateSharedQuery } from "./queryCoalesce";
 import { replayPendingPromptsForActiveTab } from "./promptReplay";
 import { createRafBatch } from "./rafBatch";
+import { foregroundRunningFromRuntimeMeta, type RuntimeMetaSnapshot } from "./runtimeMeta";
 import { aliasActivationRequest, noteActivationRequested, noteActivationSettled, noteActivationStarted } from "./sessionDiagnostics";
 import { applyLiveSegments, coalesceStreamDeltas, completeLiveReasoning, type StreamDeltaEntry, type StreamSegment } from "./streamDeltaBatch";
 import { getTranscriptStore } from "./transcriptStore";
@@ -23,6 +25,7 @@ import { isHostRecoveryGuidance } from "./hostRecoverySteer";
 import { duplicateLiveItemIds, hasCachedLiveTurn, hydratedHistoryApplyMode, sameSessionPlaceholderItems, shouldPreferResidentHistory } from "./hydrateHistoryApply";
 import { hydrateIdentityCurrent } from "./sessionIdentity";
 import { sameStringList, sameTodoList } from "./todoVisibility";
+import { resolveSnapshotTurnStartedAt, resolveTurnStartedAt, snapshotPredatesTurnLifecycle } from "./turnTiming";
 import { useStaleTurnWatchdog } from "./useStaleTurnWatchdog";
 import type { SearchSource } from "./searchSources";
 import { attachWebSearchOutput, historySearchAndAnswer } from "./searchTranscript";
@@ -62,6 +65,7 @@ import type {
   WireUsage,
   WireShellExecution,
 } from "./types";
+export { foregroundRunningFromRuntimeMeta } from "./runtimeMeta";
 export type ToolStatus = "running" | "done" | "error" | "stopped";
 // Reserved ToolProgress channel names for sub-agent progress previews (the Go
 // tracker emits these; ordinary tool progress must never use them).
@@ -235,7 +239,7 @@ export type Item =
   | { kind: "user"; id: string; submissionId?: string; text: string; submitText?: string; failed?: boolean; createdAt?: number; checkpointTurn?: number }
   | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean; reasoningComplete?: boolean; reasoningDurationMs?: number; workDurationMs?: number; memoryCitations?: MemoryCitation[]; searchSources?: SearchSource[] }
   | { kind: "phase"; id: string; text: string }
-  | { kind: "notice"; id: string; level: "info" | "warn"; text: string; detail?: string; title?: string; variant?: "delivery" | "completion"; action?: "continue_delivery" | "open_changes"; decisionReceipt?: WireDecisionReceipt; missing?: string[] }
+  | { kind: "notice"; id: string; level: "info" | "warn"; text: string; detail?: string; title?: string; variant?: "delivery" | "completion"; action?: "continue_delivery" | "open_changes"; decisionReceipt?: WireDecisionReceipt; missing?: string[]; inboxItemId?: string }
   | {
       kind: "compaction";
       id: string;
@@ -280,6 +284,7 @@ export type Item =
       generation?: number;
       card: WireExtensionCard;
     };
+
 type ToolItem = Extract<Item, { kind: "tool" }>;
 export type ExtensionItem = Extract<Item, { kind: "extension" }>;
 // Extension UI surfaces (stage 8b2) — per-tab state fed by extension_surface /
@@ -374,6 +379,7 @@ interface State {
   discardTurn?: boolean;
   turnStartAt: number;
   turnDoneAt: number;
+  turnLifecycleObservedAt?: number;
   // Completion tokens accumulated across executor usage events within the
   // current turn. ReasoningTokens is a subset of CompletionTokens.
   turnOutputTokens: number;
@@ -521,18 +527,6 @@ function usageTotalTokens(usage?: WireUsage): number {
   if (usage.totalTokens > 0) return usage.totalTokens;
   const promptTokens = usage.promptTokens || usage.cacheHitTokens + usage.cacheMissTokens;
   return Math.max(0, promptTokens + usage.completionTokens);
-}
-type RuntimeMetaSnapshot = {
-  running: boolean;
-  pendingPrompt?: boolean;
-  backgroundJobs?: number;
-  cancelRequested?: boolean;
-  cancellable?: boolean;
-};
-export function foregroundRunningFromRuntimeMeta(meta: RuntimeMetaSnapshot): boolean {
-  if (typeof meta.cancellable === "boolean") return meta.cancellable;
-  if ((meta.backgroundJobs ?? 0) > 0 && !meta.pendingPrompt) return false;
-  return Boolean(meta.running);
 }
 // Clock used to order live prompt events against runtime snapshot fetches.
 // Monotonic (immune to wall-clock jumps) with sub-millisecond resolution, so
@@ -782,7 +776,7 @@ type Action =
   | { type: "unsend" }
   | { type: "send_confirmed"; submissionId: string }
   | { type: "send_failed"; submissionId: string; error: string }
-  | { type: "backend_status"; running: boolean; pendingPrompt?: boolean; backgroundJobs?: number; cancelRequested?: boolean; cancellable?: boolean; snapshotAt?: number }
+  | { type: "backend_status"; running: boolean; turnStartedAt?: number; pendingPrompt?: boolean; backgroundJobs?: number; cancelRequested?: boolean; cancellable?: boolean; snapshotAt?: number }
   | { type: "cancel_requested" }
   | { type: "meta"; meta: Meta }
   | { type: "optimistic_meta"; meta: Meta }
@@ -824,6 +818,7 @@ function backendStatusFromRuntimeMeta(meta: RuntimeMetaSnapshot): Extract<Action
   return {
     type: "backend_status",
     running: foregroundRunning,
+    turnStartedAt: meta.turnStartedAt,
     pendingPrompt: Boolean(meta.pendingPrompt),
     backgroundJobs: meta.backgroundJobs ?? 0,
     cancelRequested: Boolean(meta.cancelRequested),
@@ -1392,6 +1387,7 @@ function applyEvent(s: State, e: WireEvent): State {
         pendingPrompt: false,
         cancelRequested: false,
         cancellable: false,
+        turnLifecycleObservedAt: promptEventClock(),
         currentAssistant: undefined,
         live: undefined,
       };
@@ -1410,13 +1406,8 @@ function applyEvent(s: State, e: WireEvent): State {
     return applyExtensionSurfaceEvent(s, e.extension);
   }
   if (e.kind === "retrying") {
-    // Retrying is emitted synchronously from inside the foreground provider
-    // request, immediately before its cancellation-aware backoff. Treat it as
-    // authoritative proof that the turn is still active. An idle ListTabs
-    // snapshot fetched before this event can otherwise clear `running`,
-    // regardless of which one reaches the reducer first, and leave the
-    // composer showing "retrying (n/m)" without its Stop button (or Escape
-    // cancellation) until all retries are exhausted.
+    // Retrying is synchronous proof that the foreground turn is active. Keep
+    // older idle ListTabs completions from hiding Stop/Escape during backoff.
     return {
       ...s,
       retry: {
@@ -1455,7 +1446,8 @@ function applyEvent(s: State, e: WireEvent): State {
         pendingPrompt: false,
         cancelRequested: false,
         cancellable: true,
-        ...resetTurnTiming(),
+        turnLifecycleObservedAt: promptEventClock(),
+        ...resetTurnTiming(resolveTurnStartedAt(fresh.running || fresh.turnActive ? fresh.turnStartAt : 0, e.turnStartedAt)),
       };
     }
     case "turn_phase": {
@@ -1739,7 +1731,7 @@ function applyEvent(s: State, e: WireEvent): State {
     }
     case "steer":
       if (isHostRecoveryGuidance(e.text ?? "")) return s;
-      return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `s${s.seq}`, level: "info", text: `${STEER_NOTICE_PREFIX}${e.text ?? ""}` }] };
+      return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `s${s.seq}`, level: "info", text: `${STEER_NOTICE_PREFIX}${e.text ?? ""}`, inboxItemId: e.itemId }] };
     case "approval_request": {
       if (s.cancelRequested) return s;
       // A delayed re-delivery of a prompt the user already answered locally
@@ -1874,6 +1866,7 @@ function applyEvent(s: State, e: WireEvent): State {
         approval: keepPlanApproval ? s.approval : undefined,
         ask: undefined,
         deliveryRecoveryActive: false,
+        turnLifecycleObservedAt: promptEventClock(),
         seq: s.seq + 1,
       };
       // Close user-wait unless the plan approval gate remains open.
@@ -1898,6 +1891,7 @@ export function reducer(s: State, a: Action): State {
         cancelRequested: false,
         cancellable: true,
         ...resetTurnTiming(),
+        turnLifecycleObservedAt: promptEventClock(),
         // New turn epoch: forget the previous prompt anchor so a genuinely new
         // prompt re-anchors freshly instead of inheriting a stale id/time.
         promptArrivedAt: undefined,
@@ -1923,6 +1917,7 @@ export function reducer(s: State, a: Action): State {
         promptArrivedAt: undefined,
         promptArrivedId: undefined,
         live: undefined,
+        turnLifecycleObservedAt: promptEventClock(),
       });
       return cleared;
     }
@@ -1944,18 +1939,16 @@ export function reducer(s: State, a: Action): State {
       const idx = s.items.findIndex((it) => it.kind === "user" && it.submissionId === a.submissionId);
       const items = idx >= 0 ? s.items.map((it, i) => (i === idx ? { ...it, submissionId: undefined, failed: true } : it)) : s.items;
       const notice: Item = { kind: "notice", id: `n${s.seq}`, level: "warn", text: a.error };
-      return { ...s, pendingUser: undefined, pendingSubmissionId: undefined, deliveryRecoveryActive: false, running: false, turnActive: false, pendingPrompt: false, cancelRequested: false, cancellable: false, live: undefined, seq: s.seq + 1, items: [...items, notice] };
+      return { ...s, pendingUser: undefined, pendingSubmissionId: undefined, deliveryRecoveryActive: false, running: false, turnActive: false, pendingPrompt: false, cancelRequested: false, cancellable: false, live: undefined, turnLifecycleObservedAt: promptEventClock(), seq: s.seq + 1, items: [...items, notice] };
     }
     case "backend_status": {
-      // A snapshot fetched before the live approval/ask event arrived cannot
-      // know about the prompt; everything it reports about the turn lifecycle
-      // is equally stale. Ignore it and let an explicit answer/cancel or a
-      // fresher snapshot settle the state (#6429).
-      if (runtimeSnapshotPredatesPrompt(s, a.snapshotAt)) return s;
+      // Reject snapshots that began before newer prompt or turn lifecycle evidence.
+      if (runtimeSnapshotPredatesPrompt(s, a.snapshotAt) || snapshotPredatesTurnLifecycle(s.turnLifecycleObservedAt, a.snapshotAt)) return s;
       const pendingPrompt = Boolean(a.pendingPrompt);
       const backgroundJobs = Math.max(0, a.backgroundJobs ?? s.backgroundJobs ?? 0);
       const cancelRequested = Boolean(a.cancelRequested);
       const foregroundRunning = foregroundRunningFromRuntimeMeta({ running: a.running, pendingPrompt, backgroundJobs, cancellable: a.cancellable });
+      const turnStartedAt = foregroundRunning ? resolveSnapshotTurnStartedAt(s.running || s.turnActive ? s.turnStartAt : 0, a.turnStartedAt) : s.turnStartAt;
       // A retry event is newer evidence of foreground activity than an idle
       // snapshot whose fetch started earlier. Keep the turn cancellable until
       // a snapshot started after the retry confirms that it is actually idle.
@@ -1968,6 +1961,7 @@ export function reducer(s: State, a: Action): State {
         backgroundJobs === s.backgroundJobs &&
         cancelRequested === s.cancelRequested &&
         cancellable === s.cancellable &&
+        turnStartedAt === s.turnStartAt &&
         !clearsRetry
       ) return s;
       if (foregroundRunning) {
@@ -1979,7 +1973,7 @@ export function reducer(s: State, a: Action): State {
           backgroundJobs,
           cancelRequested,
           cancellable,
-          turnStartAt: s.turnStartAt || Date.now(),
+          turnStartAt: turnStartedAt,
         };
       }
       const telemetry = snapshotCompletedTurnTelemetry(s);
@@ -3209,6 +3203,7 @@ export function useController() {
     dispatchTo(tabId, {
       type: "backend_status",
       running: foregroundRunning,
+      turnStartedAt: tab.turnStartedAt,
       pendingPrompt: Boolean(tab.pendingPrompt),
       backgroundJobs: tab.backgroundJobs ?? 0,
       cancelRequested: Boolean(tab.cancelRequested),
@@ -3769,34 +3764,31 @@ export function useController() {
     dispatchTo(activeTabId, { type: "extension_notifications_drained" });
   }, [activeTabId, dispatchTo]);
 
-  const cancelTab = useCallback((tabId: string, inboxItemIDs: string[] = []) => {
+  const cancelTab = useCallback(async (tabId: string, inboxItemIDs: string[] = []): Promise<Omit<CancelOutcome, "restoredText">> => {
     const cancelHydrateGeneration = bumpCancelHydrateSeq(tabId);
-    const cancelRequest = inboxItemIDs.length > 0
-      ? app.CancelTabWithInboxItems(tabId, inboxItemIDs)
-      : app.CancelTab(tabId);
-    cancelRequest
-      .then(() => scheduleCancelReconcile(tabId, 0, cancelHydrateGeneration))
-      .catch((error) => {
-        dispatchTo(tabId, { type: "local_notice", level: "warn", text: formatInboxCancelError(error, getLocale()) });
-      });
+    try {
+      const result = await requestInboxCancel(app, tabId, inboxItemIDs);
+      scheduleCancelReconcile(tabId, 0, cancelHydrateGeneration);
+      if (result.warning) dispatchTo(tabId, { type: "local_notice", level: "warn", text: result.warning });
+      return result;
+    } catch (error) {
+      dispatchTo(tabId, { type: "local_notice", level: "warn", text: formatInboxCancelError(error, getLocale()) });
+      return { discardedItemIds: [] };
+    }
   }, [bumpCancelHydrateSeq, dispatchTo, scheduleCancelReconcile]);
 
-  const cancel = useCallback((inboxItemIDs: string[] = []): string | undefined => {
-    const cur = stateRef.current;
-    const tabId = activeTabId;
+  const cancel = useCallback(async (inboxItemIDs: string[] = []): Promise<CancelOutcome> => {
+    const cur = stateRef.current, tabId = activeTabId;
+    let restoredText: string | undefined;
     if (cur.running && cur.pendingUser !== undefined) {
-      const text = cur.pendingUser;
-      if (tabId) {
-        dispatchTo(tabId, { type: "unsend" });
-        cancelTab(tabId, inboxItemIDs);
-      }
-      return text;
-    }
-    if (tabId) {
+      restoredText = cur.pendingUser;
+      if (tabId) dispatchTo(tabId, { type: "unsend" });
+    } else if (tabId) {
       dispatchTo(tabId, { type: "cancel_requested" });
-      cancelTab(tabId, inboxItemIDs);
     }
-    return undefined;
+    if (!tabId) return { restoredText, discardedItemIds: [] };
+    const result = await cancelTab(tabId, inboxItemIDs);
+    return { restoredText, ...result };
   }, [activeTabId, cancelTab, dispatchTo]);
 
   const approve = useCallback((id: string, allow: boolean, session: boolean, persist: boolean) => {

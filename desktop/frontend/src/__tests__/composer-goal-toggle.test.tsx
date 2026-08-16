@@ -118,9 +118,9 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
       calls.submit.push(submitText);
       calls.structured.push(structured);
     },
-    onCancel: () => {
+    onCancel: async () => {
       calls.cancel += 1;
-      return undefined;
+      return { discardedItemIds: [] };
     },
     onCycleMode: () => {},
     onSetMode: () => {},
@@ -1410,9 +1410,9 @@ console.log("\ncomposer goal toggle");
   });
   const { root, rerender } = await renderComposer({
     running: true,
-    onCancel: (itemIDs = []) => {
+    onCancel: async (itemIDs = []) => {
       cancelledItemIDs = itemIDs;
-      return undefined;
+      return { discardedItemIds: [...itemIDs] };
     },
   });
 

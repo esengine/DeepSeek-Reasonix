@@ -773,7 +773,7 @@ type DelegationAdmissionAudit struct {
 	Tool    string
 	Verdict string // "allow" | "deny"
 	Reason  string // e.g. "local_fix_no_external_need"
-	Intent  string // taskintent class of the turn
+	Intent  string // compatibility field; no longer classified from prompt text
 }
 
 // DelegationAdmissionSink is an optional sink capability; implementations
