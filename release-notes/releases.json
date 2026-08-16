@@ -2,6 +2,321 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.25.4",
+      "date": "2026-08-16",
+      "channel": "stable",
+      "title": {
+        "en": "Reasonix Desktop 1.25.4",
+        "zh": "Reasonix 桌面版 1.25.4"
+      },
+      "summary": {
+        "en": "This release focuses on reliability and usability improvements for the desktop app, including fixes for long session scrolling, terminal clipboard integration, project tree organization, and provider recovery.",
+        "zh": "此版本专注于桌面应用的可靠性和易用性改进，包括修复长会话滚动、终端剪贴板集成、项目树组织以及供应商恢复。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "User Guide",
+            "zh": "用户指南"
+          },
+          "body": {
+            "en": "Learn how to use Reasonix effectively.",
+            "zh": "了解如何有效使用 Reasonix。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/9f59996e2a201a928ca1ccc14873d4adf32bf631/docs/GUIDE.md"
+        },
+        {
+          "title": {
+            "en": "User Guide (Chinese)",
+            "zh": "用户指南（中文）"
+          },
+          "body": {
+            "en": "Chinese version of the user guide.",
+            "zh": "用户指南的中文版本。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/9f59996e2a201a928ca1ccc14873d4adf32bf631/docs/GUIDE.zh-CN.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Long sessions can now scroll to the bottom",
+            "zh": "长会话现在可以滚动到底部"
+          },
+          "body": {
+            "en": "Rebuilt the transcript scroll system around a single-writer arbiter, fixing the issue where very long sessions could not reach the newest content.",
+            "zh": "围绕单一写入者仲裁器重建了会话滚动系统，修复了超长会话无法到达最新内容的问题。"
+          },
+          "refs": [
+            8960
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Integrated terminal clipboard and selection-to-chat",
+            "zh": "集成终端剪贴板和选中内容添加到聊天"
+          },
+          "body": {
+            "en": "The integrated terminal now supports copy/paste and adding selections to chat with proper lifecycle management.",
+            "zh": "集成终端现在支持复制/粘贴以及将选中内容添加到聊天，并具有适当的生命周期管理。"
+          },
+          "refs": [
+            8784
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Project tree organization: manual reorder and session groups",
+            "zh": "项目树组织：手动排序和会话分组"
+          },
+          "body": {
+            "en": "You can now manually reorder topics by dragging and create foldable session groups within projects.",
+            "zh": "现在可以通过拖拽手动重新排序主题，并在项目内创建可折叠的会话分组。"
+          },
+          "refs": [
+            8608,
+            8699
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Provider reasoning replay recovery",
+            "zh": "供应商推理重放恢复"
+          },
+          "body": {
+            "en": "Sessions with malformed reasoning history now recover automatically without user intervention.",
+            "zh": "具有格式错误的推理历史的会话现在可以自动恢复，无需用户干预。"
+          },
+          "refs": [
+            8952
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "Manual topic drag-to-reorder in project tree",
+              "zh": "项目树中手动拖拽排序主题"
+            },
+            "body": {
+              "en": "Topic rows in the project tree (project + global workspace) are now manually reorderable by drag & drop. Order persists via the new ReorderTopics IPC into the existing ordered Topics/GlobalTopics arrays in projects.json.",
+              "zh": "项目树中的主题行（项目 + 全局工作区）现在可以通过拖放手动重新排序。顺序通过新的 ReorderTopics IPC 持久化到 projects.json 中现有的有序 Topics/GlobalTopics 数组。"
+            },
+            "refs": [
+              8608
+            ]
+          },
+          {
+            "title": {
+              "en": "In-project session groups for folding topics",
+              "zh": "项目内会话分组用于折叠主题"
+            },
+            "body": {
+              "en": "Phase 2 of #8194 — in-project session groups as foldable UI containers (project → group → topic). Groups persist in projects.json (desktopProject.Groups / GlobalGroups), managed via new ListProjectGroups / SaveSessionGroups IPC.",
+              "zh": "#8194 的第二阶段——项目内会话分组作为可折叠的 UI 容器（项目 → 组 → 主题）。组持久化在 projects.json 中（desktopProject.Groups / GlobalGroups），通过新的 ListProjectGroups / SaveSessionGroups IPC 管理。"
+            },
+            "refs": [
+              8699
+            ]
+          },
+          {
+            "title": {
+              "en": "Aggregate active-session indicator on collapsed project folders",
+              "zh": "折叠项目文件夹上的聚合活跃会话指示器"
+            },
+            "body": {
+              "en": "Collapsed project / global-folder rows now show a small spinner when any child session is in-flight (thinking/streaming/waiting_confirmation/background_job).",
+              "zh": "当任何子会话正在进行（思考/流式传输/等待确认/后台作业）时，折叠的项目/全局文件夹行现在会显示一个小旋转指示器。"
+            },
+            "refs": [
+              8598
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Align context compaction with DeepSeek Harness",
+              "zh": "与 DeepSeek Harness 对齐上下文压缩"
+            },
+            "body": {
+              "en": "Automatic context compaction now aligns with DeepSeek Harness semantics: 80% default threshold, fixed 16% recent tail, and at most two successful pressure summaries.",
+              "zh": "自动上下文压缩现在与 DeepSeek Harness 语义对齐：80% 默认阈值、固定 16% 最近尾部，以及最多两次成功的压力摘要。"
+            },
+            "refs": [
+              8964
+            ]
+          },
+          {
+            "title": {
+              "en": "Preserve AI session titles on reasoning models",
+              "zh": "在推理模型上保留 AI 会话标题"
+            },
+            "body": {
+              "en": "The desktop AI rename session action can return a visible title on reasoning models instead of failing after a reasoning-only completion.",
+              "zh": "桌面 AI 重命名会话操作可以在推理模型上返回可见标题，而不是在仅推理完成后失败。"
+            },
+            "refs": [
+              8980
+            ]
+          },
+          {
+            "title": {
+              "en": "Resume ordinary readiness checks automatically",
+              "zh": "自动恢复普通就绪检查"
+            },
+            "body": {
+              "en": "Automatically continue ordinary interactive turns when the host can name a safe remaining verification or review obligation.",
+              "zh": "当主机能够指出安全剩余的验证或审查义务时，自动继续普通交互轮次。"
+            },
+            "refs": [
+              8947
+            ]
+          },
+          {
+            "title": {
+              "en": "Default Kotlin LSP to official kotlin-lsp",
+              "zh": "Kotlin 默认 LSP 切换为官方 kotlin-lsp"
+            },
+            "body": {
+              "en": "The Kotlin default language server now points to the official JetBrains kotlin-lsp instead of the deprecated fwcd/kotlin-language-server.",
+              "zh": "Kotlin 默认语言服务器现在指向官方 JetBrains kotlin-lsp，而不是已弃用的 fwcd/kotlin-language-server。"
+            },
+            "refs": [
+              8773
+            ]
+          },
+          {
+            "title": {
+              "en": "Canonicalize official Token Rhythm API paths",
+              "zh": "规范化官方 Token Rhythm API 路径"
+            },
+            "body": {
+              "en": "Automatically repair known official Token Rhythm API path mistakes before the first request.",
+              "zh": "在首次请求前自动修复已知的官方 Token Rhythm API 路径错误。"
+            },
+            "refs": [
+              8953
+            ]
+          },
+          {
+            "title": {
+              "en": "Desktop runtime reload process replacement",
+              "zh": "桌面运行时重载进程替换"
+            },
+            "body": {
+              "en": "Expose /reload in the desktop slash-command catalog and restart unchanged native v2 plugin sidecars during an explicit full reload.",
+              "zh": "在桌面斜杠命令目录中公开 /reload，并在显式完全重载期间重启未更改的原生 v2 插件 sidecar。"
+            },
+            "refs": [
+              8948
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Stop old sessions flipping back to unread",
+              "zh": "停止旧会话反复变成未读"
+            },
+            "body": {
+              "en": "Old sidebar sessions no longer show unread dots after clicking a row; unread is keyed on logical topic and a one-time read baseline is seeded.",
+              "zh": "点击行后，旧侧边栏会话不再显示未读点；未读基于逻辑主题键控，并播种一次性已读基线。"
+            },
+            "refs": [
+              8694
+            ]
+          },
+          {
+            "title": {
+              "en": "Don't raise last_activity_at from file mtime",
+              "zh": "不要从文件 mtime 提升 last_activity_at"
+            },
+            "body": {
+              "en": "File mtime is now only a fallback when authoritative meta timestamps are missing; it no longer raises a valid UpdatedAt, preventing historical sessions from showing as 'just now'.",
+              "zh": "文件 mtime 现在仅在权威元时间戳缺失时作为后备；它不再提升有效的 UpdatedAt，防止历史会话显示为“刚刚”。"
+            },
+            "refs": [
+              8677
+            ]
+          },
+          {
+            "title": {
+              "en": "Fix durable inbox queue reconciliation",
+              "zh": "修复持久收件箱队列协调"
+            },
+            "body": {
+              "en": "Guidance that had already entered the transcript and started execution no longer remains visible in the Composer queue; cancellation restores only confirmed discarded items.",
+              "zh": "已进入会话并开始执行的指导不再保留在 Composer 队列中；取消仅恢复已确认丢弃的项目。"
+            },
+            "refs": [
+              8954
+            ]
+          },
+          {
+            "title": {
+              "en": "Fix composer timer across tab switches",
+              "zh": "修复切换标签页时 Composer 计时器"
+            },
+            "body": {
+              "en": "The composer timer now continues instead of restarting at zero when switching away and back to a running tab.",
+              "zh": "当切换离开并返回正在运行的标签页时，Composer 计时器现在会继续而不是从零重新开始。"
+            },
+            "refs": [
+              8957
+            ]
+          },
+          {
+            "title": {
+              "en": "Keep viewport steady when auto-fold collapse shrinks transcript",
+              "zh": "自动折叠收缩时保持视口稳定"
+            },
+            "body": {
+              "en": "Auto-fold collapse of the reasoning panel no longer drags the transcript viewport with an imperative tail re-aim.",
+              "zh": "推理面板的自动折叠收缩不再通过命令式尾部重新瞄准来拖动会话视口。"
+            },
+            "refs": [
+              8950
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "HaoyueQin",
+        "XTLine",
+        "Linearl",
+        "swingmonkey",
+        "zcxads666",
+        "sierhaha",
+        "Ray-lyy"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.25.4",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.25.3...desktop-v1.25.4",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.25.4",
+      "baseVersion": "1.25.4",
+      "status": "reviewed",
+      "previousRelease": "1.25.3",
+      "builds": {
+        "cli": "v1.25.4",
+        "desktop": "v1.25.4",
+        "npm": "1.25.4"
+      }
+    },
+    {
       "version": "1.25.3",
       "date": "2026-08-16",
       "channel": "stable",
