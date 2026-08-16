@@ -21,11 +21,11 @@
         {
           "kind": "new",
           "title": {
-            "en": "Unified adaptive execution policy replaces Light, Balanced, and Delivery modes",
+            "en": "Unified adaptive execution replaces Light, Balanced, and Delivery modes",
             "zh": "统一自适应执行策略取代轻量、均衡与交付模式"
           },
           "body": {
-            "en": "Reasonix no longer asks you to choose an execution mode. Each turn derives a policy from intent, risk, structure, and constraints, and uses it for planning, verification, and evidence closure.",
+            "en": "Reasonix no longer asks you to pick an execution mode. Each turn derives a policy from intent, risk, structure, and constraints, then uses it for planning, verification, and evidence closure.",
             "zh": "Reasonix 不再要求选择执行模式。每轮根据意图、风险、结构与约束推导策略，并用于规划、验证与证据闭环。"
           },
           "refs": [
@@ -33,13 +33,13 @@
           ]
         },
         {
-          "kind": "fixed",
+          "kind": "improved",
           "title": {
             "en": "Desktop streaming and scrolling are now stable",
             "zh": "桌面端流式输出与滚动现已稳定"
           },
           "body": {
-            "en": "The active turn renders outside the virtual list, eliminating flicker, snap-backs, and tail loss on Windows and WebView2. The todo panel updates live.",
+            "en": "The active turn renders outside the virtual list, eliminating flicker, snap-back, and tail loss on Windows and WebView2. The todo panel updates live.",
             "zh": "活跃轮次在虚拟列表外渲染，消除了 Windows 与 WebView2 上的闪烁、回跳与尾部丢失。待办面板实时更新。"
           },
           "refs": [
@@ -80,7 +80,7 @@
         {
           "kind": "new",
           "title": {
-            "en": "On-demand write access for sandbox tools",
+            "en": "On-demand write-access grants for sandboxed tools",
             "zh": "沙箱工具按需写入授权"
           },
           "body": {
@@ -109,7 +109,7 @@
           },
           {
             "title": {
-              "en": "On-demand write access",
+              "en": "On-demand write-access grants",
               "zh": "按需写入授权"
             },
             "body": {
@@ -127,7 +127,7 @@
             },
             "body": {
               "en": "Adds an explicit expanded mode that keeps completed reasoning open, applied consistently across assistant messages, inline transcript reasoning, and sub-agent previews.",
-              "zh": "新增显式的展开模式，保持已完成的推理内容展开，并一致应用于助手消息、内联对话推理与子代理预览。"
+              "zh": "新增显式的展开模式，使已完成的推理保持展开，并一致应用于助手消息、内联转录推理和子代理预览。"
             },
             "refs": [
               8732
@@ -140,7 +140,7 @@
             },
             "body": {
               "en": "Adds curated presets for the National Supercomputing Internet (SCNet) Token Plan, including OpenAI-compatible and Anthropic-compatible endpoints.",
-              "zh": "新增国家超算互联网（SCNet）Token Plan 的内置预设，包括 OpenAI 兼容与 Anthropic 兼容端点。"
+              "zh": "新增国家超算互联网（SCNet）Token Plan 的内置预设，包括 OpenAI 兼容和 Anthropic 兼容端点。"
             },
             "refs": [
               8886
@@ -152,8 +152,8 @@
               "zh": "统一 AI 与 Agent 会话命名"
             },
             "body": {
-              "en": "Adds a cache-stable set_session_title capability and a Desktop AI rename action, with consistent title updates across catalog, caches, and notifications.",
-              "zh": "新增缓存稳定的 set_session_title 能力与桌面端 AI 重命名操作，并在目录、缓存与通知中一致更新标题。"
+              "en": "Adds a cache-stable set_session_title capability and a Desktop AI rename action, with consistent title updates across catalog, history, and project tree.",
+              "zh": "新增缓存稳定的 set_session_title 能力和桌面端 AI 重命名操作，并在目录、历史记录和项目树中一致更新标题。"
             },
             "refs": [
               8920
@@ -163,12 +163,54 @@
         "improved": [
           {
             "title": {
-              "en": "Fact-driven execution replaces task-mode routing",
-              "zh": "事实驱动执行替代任务模式路由"
+              "en": "Desktop streaming and scrolling stability",
+              "zh": "桌面端流式输出与滚动稳定性"
             },
             "body": {
-              "en": "Ordinary requests always enter the executor; the planner runs only for explicit Plan, approval boundaries, or Goal start. Verification obligations are built from concrete tool calls.",
-              "zh": "普通请求始终进入执行器；规划器仅在显式 Plan、审批边界或 Goal 启动时运行。验证义务从具体工具调用构建。"
+              "en": "Active turn renders outside the virtual list, eliminating flicker, snap-back, and tail loss; todo panel updates live.",
+              "zh": "活跃轮次在虚拟列表外渲染，消除闪烁、回跳和尾部丢失；待办面板实时更新。"
+            },
+            "refs": [
+              8903,
+              8925
+            ]
+          },
+          {
+            "title": {
+              "en": "Context budgeting and overflow recovery",
+              "zh": "上下文预算与溢出恢复"
+            },
+            "body": {
+              "en": "Provider-aware shared-window budgeting prevents exceeding physical limits, and repeated hard overflows can recover after token-saving checkpoints.",
+              "zh": "提供商感知的共享窗口预算防止超出物理限制，反复出现的硬溢出可在节省令牌的检查点后恢复。"
+            },
+            "refs": [
+              8921,
+              8874
+            ]
+          },
+          {
+            "title": {
+              "en": "Session ownership and recovery",
+              "zh": "会话所有权与恢复"
+            },
+            "body": {
+              "en": "Isolates writers, fork-first rewind, and stable recovery branches across all frontends, with compaction projections preserved across restarts.",
+              "zh": "在所有前端隔离写入者、分叉优先回溯和稳定恢复分支，并在重启后保留压缩投影。"
+            },
+            "refs": [
+              8878,
+              8923
+            ]
+          },
+          {
+            "title": {
+              "en": "Fact-driven execution",
+              "zh": "事实驱动执行"
+            },
+            "body": {
+              "en": "Replaces task-mode routing with fact-driven execution, where the model decides investigation, todos, or sub-agents, and the host builds verification obligations from concrete tool calls.",
+              "zh": "用事实驱动执行替代任务模式路由，模型决定调查、待办或子代理，主机从具体工具调用构建验证义务。"
             },
             "refs": [
               8930
@@ -176,51 +218,12 @@
           },
           {
             "title": {
-              "en": "Provider-aware shared-window context budgeting",
-              "zh": "提供商感知的共享窗口上下文预算"
+              "en": "Ordinary readiness quality gaps softened",
+              "zh": "普通任务质量证据缺口不再中断"
             },
             "body": {
-              "en": "Adds a backward-compatible ContextBudgetPolicy that prevents prompt+completion from exceeding the physical window, with automatic recovery on context-limit errors.",
-              "zh": "新增向后兼容的 ContextBudgetPolicy，防止 prompt+completion 超出物理窗口，并在上下文限制错误时自动恢复。"
-            },
-            "refs": [
-              8921
-            ]
-          },
-          {
-            "title": {
-              "en": "Session writer isolation and fork-first rewind",
-              "zh": "会话写者隔离与分叉优先回溯"
-            },
-            "body": {
-              "en": "Adds a prepare-before-publish transition hook and wires ownership handoff across all frontends, with stable recovery branches and downgrade-safe checkpoints.",
-              "zh": "新增发布前准备过渡钩子，并在所有前端接入所有权交接，提供稳定的恢复分支与降级安全的检查点。"
-            },
-            "refs": [
-              8878
-            ]
-          },
-          {
-            "title": {
-              "en": "Preserve compaction projections across restart",
-              "zh": "重启后保留压缩投影"
-            },
-            "body": {
-              "en": "Restores valid compaction projections after a same-version restart, avoiding resending and rebilling full pre-compaction history.",
-              "zh": "在同版本重启后恢复有效的压缩投影，避免重新发送并计费完整的压缩前历史。"
-            },
-            "refs": [
-              8923
-            ]
-          },
-          {
-            "title": {
-              "en": "Soften ordinary readiness quality gaps",
-              "zh": "放宽普通任务质量证据要求"
-            },
-            "body": {
-              "en": "Ordinary same-surface mutations no longer require closed-loop evidence; missing verification/review evidence is surfaced in the completion summary instead of interrupting.",
-              "zh": "普通同表面变更不再要求闭环证据；缺失的验证/审查证据在完成摘要中呈现，而不是中断。"
+              "en": "Ordinary same-surface mutations proceed on targeted evidence, and missing verification evidence is surfaced in the completion summary instead of blocking.",
+              "zh": "普通同表面变更基于目标证据继续，缺失的验证证据在完成摘要中显示，而不是阻断。"
             },
             "refs": [
               8901
@@ -229,11 +232,11 @@
           {
             "title": {
               "en": "ACP v1-compliant prompt outcomes",
-              "zh": "符合 ACP v1 的 Prompt 结果"
+              "zh": "符合 ACP v1 的提示结果"
             },
             "body": {
-              "en": "Returns proper end_turn outcomes for readiness errors and controlled pauses, and JSON-RPC InternalError for genuine failures, with credential redaction.",
-              "zh": "为就绪错误与受控暂停返回正确的 end_turn 结果，对真实故障返回 JSON-RPC InternalError，并进行凭据脱敏。"
+              "en": "Returns proper end_turn outcomes for readiness errors and JSON-RPC InternalError for genuine failures, with credential redaction.",
+              "zh": "对就绪错误返回正确的 end_turn 结果，对真实故障返回 JSON-RPC InternalError，并进行凭据脱敏。"
             },
             "refs": [
               8916
@@ -241,12 +244,38 @@
           },
           {
             "title": {
-              "en": "Localize new-session sidebar titles",
-              "zh": "本地化侧边栏新会话标题"
+              "en": "Windows workspace watching",
+              "zh": "Windows 工作区监视"
             },
             "body": {
-              "en": "New-session topics now display localized titles in the sidebar, matching the desktop language.",
-              "zh": "侧边栏中的新会话主题现在显示本地化标题，与桌面语言一致。"
+              "en": "Uses one recursive ReadDirectoryChangesW subscription per workspace root, avoiding nested directory locks.",
+              "zh": "每个工作区根目录使用一个递归 ReadDirectoryChangesW 订阅，避免嵌套目录锁定。"
+            },
+            "refs": [
+              8922
+            ]
+          },
+          {
+            "title": {
+              "en": "SSH remote window native frame on Windows",
+              "zh": "Windows 上 SSH 远程窗口原生框架"
+            },
+            "body": {
+              "en": "Remote windows keep the native OS frame, providing titlebar and window controls, and no longer inherit the saved main-window size.",
+              "zh": "远程窗口保留原生操作系统框架，提供标题栏和窗口控件，不再继承保存的主窗口大小。"
+            },
+            "refs": [
+              8913
+            ]
+          },
+          {
+            "title": {
+              "en": "Localized new-session sidebar titles",
+              "zh": "侧边栏新会话标题本地化"
+            },
+            "body": {
+              "en": "Auto-generated default titles now localize to the desktop language in the sidebar catalog.",
+              "zh": "自动生成的默认标题现在在侧边栏目录中根据桌面语言本地化。"
             },
             "refs": [
               8824
@@ -256,39 +285,12 @@
         "fixed": [
           {
             "title": {
-              "en": "Desktop streaming and scrolling stability",
-              "zh": "桌面端流式输出与滚动稳定性"
-            },
-            "body": {
-              "en": "Fixes flicker, snap-backs, tail loss, and delayed todo updates on Windows/WebView2 by rendering the active turn outside the virtual list and deferring layout rebuilds.",
-              "zh": "通过将活跃轮次移出虚拟列表并延迟布局重建，修复 Windows/WebView2 上的闪烁、回跳、尾部丢失与待办更新延迟。"
-            },
-            "refs": [
-              8903,
-              8925
-            ]
-          },
-          {
-            "title": {
-              "en": "Repeated context overflow recovery",
-              "zh": "连续上下文溢出恢复"
-            },
-            "body": {
-              "en": "Allows hard context recovery to bypass stale failed receipts and stuck state, enabling multiple recoveries in a long tool turn after token-saving checkpoints.",
-              "zh": "允许硬上下文恢复绕过过期的失败回执与卡住状态，在节省令牌的检查点后支持长工具轮次中的多次恢复。"
-            },
-            "refs": [
-              8874
-            ]
-          },
-          {
-            "title": {
               "en": "DeepSeek Anthropic reasoning replay",
               "zh": "DeepSeek Anthropic 推理回放"
             },
             "body": {
-              "en": "Replays required thinking blocks on tool-bound turns and retries frozen requests when reasoning is missing, preventing HTTP 400 errors.",
-              "zh": "在工具绑定轮次回放所需思考块，并在推理缺失时重试冻结请求，防止 HTTP 400 错误。"
+              "en": "Fixes HTTP 400 errors on tool-bound assistant turns by replaying required thinking blocks and handling missing reasoning with a bounded retry.",
+              "zh": "通过回放所需的思考块并以有界重试处理缺失推理，修复工具绑定助手轮次的 HTTP 400 错误。"
             },
             "refs": [
               8924,
@@ -297,28 +299,28 @@
           },
           {
             "title": {
-              "en": "Windows SSH remote window native frame",
-              "zh": "Windows SSH 远程窗口原生框架"
+              "en": "Compaction projections preserved across restart",
+              "zh": "重启后保留压缩投影"
             },
             "body": {
-              "en": "Keeps the native OS frame for remote windows on Windows, providing titlebar and window controls, and prevents inheriting oversized main-window dimensions.",
-              "zh": "在 Windows 上为远程窗口保留原生系统框架，提供标题栏与窗口控件，并防止继承过大的主窗口尺寸。"
+              "en": "Long conversations no longer resend and rebill full pre-compaction history after a restart; valid projections are restored.",
+              "zh": "长对话在重启后不再重新发送和计费完整的压缩前历史；有效投影被恢复。"
             },
             "refs": [
-              8913
+              8923
             ]
           },
           {
             "title": {
-              "en": "Avoid locking nested Windows workspaces",
-              "zh": "避免锁定 Windows 嵌套工作区"
+              "en": "Windows and policy blockers cleared",
+              "zh": "清除 Windows 与策略阻断"
             },
             "body": {
-              "en": "Replaces per-directory watches with one recursive subscription per workspace root, fixing nested rename/delete issues.",
-              "zh": "用每个工作区根目录的单个递归订阅替换逐目录监视，修复嵌套重命名/删除问题。"
+              "en": "Fixes invalid TOML fixture for Windows absolute paths and clause-aware mutation constraints that blocked authorized outputs.",
+              "zh": "修复 Windows 绝对路径的无效 TOML 夹具和阻止授权输出的子句感知变更约束。"
             },
             "refs": [
-              8922
+              8934
             ]
           }
         ]
