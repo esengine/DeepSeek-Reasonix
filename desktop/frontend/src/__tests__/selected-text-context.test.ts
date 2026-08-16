@@ -65,6 +65,12 @@ eq(
   JSON.stringify([{ path: "src/lib/a.ts", text: "const x = 1;" }, { text: "plain quote" }, { source: "terminal", text: "Error: boom" }]),
   "terminal source round-trips through the persisted context parser",
 );
+const withFutureSource = withSources.replaceAll('"source":"terminal"', '"source":"future-surface"');
+eq(
+  JSON.stringify(parseSelectedTextContext(withFutureSource)),
+  JSON.stringify([{ path: "src/lib/a.ts", text: "const x = 1;" }, { text: "plain quote" }, { text: "Error: boom" }]),
+  "unknown future selection sources remain readable as generic quoted text",
+);
 eq(
   formatSelectionReference("src/a.ts", "const `x` = ```1```;\r\n"),
   'From "src/a.ts":\n\n````typescript\nconst `x` = ```1```;\n````',

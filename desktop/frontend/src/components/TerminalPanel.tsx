@@ -42,10 +42,14 @@ export function TerminalPanel({
   const [actionPoint, setActionPoint] = useState<{ left: number; top: number } | null>(null);
   const selectionActionRef = useRef<HTMLDivElement>(null);
   const terminalViewRef = useRef<TerminalViewHandle>(null);
-  const workspace = useTerminalStore((state) => state.workspace);
-  const loading = useTerminalStore((state) => state.loading);
-  const error = useTerminalStore((state) => state.error);
-  const activeSessionId = useTerminalStore((state) => state.activeSessionId);
+  // App can render the new tab before this panel's sync effect advances the
+  // process-wide terminal store. Never expose the previous tab's terminal in
+  // that gap: even one painted frame could route input or a stale overlay to
+  // the new tab with the old session id.
+  const workspace = useTerminalStore((state) => state.tabId === tabId ? state.workspace : null);
+  const loading = useTerminalStore((state) => state.tabId === tabId ? state.loading : true);
+  const error = useTerminalStore((state) => state.tabId === tabId ? state.error : null);
+  const activeSessionId = useTerminalStore((state) => state.tabId === tabId ? state.activeSessionId : null);
   const syncWorkspace = useTerminalStore((state) => state.syncWorkspace);
   const ensureReady = useTerminalStore((state) => state.ensureReady);
   const createSession = useTerminalStore((state) => state.createSession);
@@ -150,6 +154,10 @@ export function TerminalPanel({
     : [{ id: "default", label: t("terminal.defaultShell") }];
   const active = sessions.find((session) => session.id === activeSessionId) ?? sessions[0];
   const terminalReadOnly = readOnly || Boolean(workspace?.readOnly);
+
+  useLayoutEffect(() => {
+    setSelectionAction(null);
+  }, [active?.id, tabId]);
 
   return (
     <section className="terminal-panel" aria-label={t("terminal.title")}>

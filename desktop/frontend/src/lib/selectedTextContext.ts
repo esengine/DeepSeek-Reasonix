@@ -108,12 +108,15 @@ function selectedTextContextParts(value: string | undefined): SelectedTextContex
       if (!item || typeof item !== "object") return null;
       const record = item as Record<string, unknown>;
       if (typeof record.text !== "string" || (record.path !== undefined && typeof record.path !== "string")) return null;
-      if (record.source !== undefined && record.source !== "terminal") return null;
+      if (record.source !== undefined && typeof record.source !== "string") return null;
       if (record.path) {
         entries.push({ path: record.path, text: record.text });
       } else if (record.source === "terminal") {
         entries.push({ source: "terminal", text: record.text });
       } else {
+        // Unknown string sources are forward-compatible quoted text. Older
+        // clients already ignore this additive field; current clients should
+        // likewise keep a future source instead of discarding every entry.
         entries.push({ text: record.text });
       }
     }

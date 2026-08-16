@@ -94,7 +94,13 @@ export const TerminalView = forwardRef<TerminalViewHandle, {
     }
     const text = terminal.getSelection();
     const host = hostRef.current;
-    if (!host) return;
+    // A queued pointer-up frame can outlive a rapid tab/session switch. The
+    // detached host must not recreate its selection action after the owner
+    // panel synchronously cleared it.
+    if (!host?.isConnected) {
+      clearSelectionAction();
+      return;
+    }
     const hostRect = host.getBoundingClientRect();
     const fromPaint = terminalSelectionPointFromHost(host);
     const point = clampTerminalSelectionPointToHost(

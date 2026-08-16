@@ -274,6 +274,13 @@ eq(
   "terminal panel refreshes changed capability while reusing an in-flight first-open request",
 );
 eq(
+  /state\.tabId === tabId \? state\.workspace : null/.test(terminalPanelSource)
+    && /state\.tabId === tabId \? state\.activeSessionId : null/.test(terminalPanelSource)
+    && /setSelectionAction\(null\);\s*\}, \[active\?\.id, tabId\]\)/.test(terminalPanelSource),
+  true,
+  "rapid tab switches cannot paint the previous tab's terminal or selection action",
+);
+eq(
   /readOnly=\{Boolean\(activeTab\?\.readOnly\)\}/.test(appSource)
     && /const terminalReadOnly = readOnly \|\| Boolean\(workspace\?\.readOnly\)/.test(terminalPanelSource),
   true,
