@@ -696,17 +696,23 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Input  string `json:"input"`
 		Format string `json:"format"`
+		Action string `json:"action"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Input == "" {
 		http.Error(w, "missing input", http.StatusBadRequest)
 		return
 	}
 	body.Format = strings.TrimSpace(body.Format)
+	body.Action = strings.TrimSpace(body.Action)
 	switch body.Format {
 	case "", "json_object":
 		// Supported: empty = default text output, json_object = structured.
 	default:
 		http.Error(w, `unsupported format (supported: "json_object")`, http.StatusBadRequest)
+		return
+	}
+	if err := validateSubmitAction(body.Format, body.Action); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	trimmed := strings.TrimSpace(body.Input)
@@ -753,7 +759,7 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session is busy; use POST /inbox/items for durable follow-up", http.StatusConflict)
 		return
 	}
-	ctrl.SubmitHTTPFormat(body.Input, body.Format)
+	submitWithAction(ctrl, body.Input, body.Format, body.Action)
 	// After synchronous admission, a successful start sets Running. A silent
 	// drop (rotating/closed) leaves Running false — return 409 instead of 202.
 	// Finishing-window park also leaves Running false briefly; prefer 202 only
@@ -838,6 +844,7 @@ type historyToolCall struct {
 type historyMessage struct {
 	Role       string            `json:"role"`
 	Content    string            `json:"content"`
+	Missing    []string          `json:"missing,omitempty"`
 	Reasoning  string            `json:"reasoning,omitempty"`
 	ToolCalls  []historyToolCall `json:"toolCalls,omitempty"`
 	ToolCallID string            `json:"toolCallId,omitempty"`
@@ -847,6 +854,10 @@ type historyMessage struct {
 func historyMessages(msgs []provider.Message) []historyMessage {
 	out := make([]historyMessage, 0, len(msgs))
 	for _, m := range msgs {
+		if recovered, handled := finalReadinessHistoryMessage(m); handled {
+			out = append(out, recovered...)
+			continue
+		}
 		// Steer messages are surfaced as a notice, not a user message.
 		if m.Role == provider.RoleUser {
 			if text, handled := agent.ReplaySteerText(m.Content); handled {
@@ -971,30 +982,6 @@ func (rw *responseWriter) Flush() {
 	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
-}
-
-// rewind rewinds the session to a checkpoint.
-func (s *Server) rewind(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Turn  int    `json:"turn"`
-		Scope string `json:"scope"` // "code", "conversation", "both"
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Turn < 0 {
-		http.Error(w, "missing turn", http.StatusBadRequest)
-		return
-	}
-	scope := control.RewindBoth
-	switch body.Scope {
-	case "code":
-		scope = control.RewindCode
-	case "conversation":
-		scope = control.RewindConversation
-	}
-	if err := s.ctl().Rewind(body.Turn, scope); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // fork creates a new branch at a checkpoint.

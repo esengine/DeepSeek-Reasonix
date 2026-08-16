@@ -6,6 +6,18 @@ branch.
 
 ## Unreleased
 
+### Changed
+
+- **Fact-driven execution:** Ordinary requests always enter the executor.
+  There is no automatic simple / light / full task mode and no per-turn
+  `TaskPolicy` classification. The planner runs only for an explicit Plan,
+  an approval boundary, or Goal start. The host builds verification
+  obligations from concrete tool effects and receipts. Plan, Goal,
+  permission, and sandbox stay independent. Tool schemas and the executor
+  system prefix stay byte-stable. Historical `<execution-policy>` tags remain
+  readable on old sessions and are stripped from new provider context.
+  Old `--preset`/`--profile` compatibility no-ops are unchanged.
+
 ### Fixed
 
 - **v1.24.2 session snapshot & recovery root fix:** Keep PR #7982's WAL/CAS/lease

@@ -24,6 +24,7 @@ type toolCallPlan struct {
 	resolved                                      tool.ResolvedCall
 	resolvedMeta                                  *tool.ResolvedCall
 	effects                                       evidence.ToolEffects
+	profile                                       evidence.EffectProfile
 	verification, planTransition                  bool
 	planBefore, planAfter, planDiff               string
 	planReplacementAuthorized                     bool
@@ -34,6 +35,8 @@ type toolCallPlan struct {
 	releaseParentWrite, releaseMutationWrite      func()
 	mutationPath                                  string
 	mutationObserved, mutationAfterDone, executed bool
+	perCallWriteRoots                             []string
+	skipOrdinaryGate                              bool
 }
 
 func (p *toolCallPlan) classifyEffects() {

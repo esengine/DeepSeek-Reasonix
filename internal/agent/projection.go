@@ -54,8 +54,8 @@ type ContextProjection struct {
 	Messages          []provider.Message `json:"messages"`
 	TranscriptVersion uint64             `json:"transcript_version"`
 	ProjectionVersion uint64             `json:"projection_version"`
-	// CoveredCount is len(canonical) when the projection was built. Model-visible
-	// context is projection.Messages + canonical[CoveredCount:].
+	// CoveredCount is the canonical prefix represented by the frozen projection
+	// body. Model-visible context is projection.Messages + canonical[CoveredCount:].
 	CoveredCount int `json:"covered_count"`
 	// CoveredPrefixHash fingerprints provider-visible canonical[:CoveredCount]
 	// so append-only growth can be distinguished from prefix edits/rewrites.
@@ -245,14 +245,53 @@ func summaryContentHash(summary string) string {
 }
 
 // coveredPrefixHash fingerprints the provider-visible prefix of msgs[:n].
-// LocalOnly and transport-only fields are stripped via ModelMessages; every
-// remaining provider-visible field is included so edits to images, signed
-// reasoning, Responses items, or thought signatures invalidate the projection.
+// ModelMessages strips local fields and SanitizeToolPairing applies the same
+// deterministic repair used on the wire, keeping hashes stable when LoadSession
+// persists an equivalent repair while still detecting real prefix edits.
 func coveredPrefixHash(msgs []provider.Message, n int) string {
 	if n <= 0 || n > len(msgs) {
 		return ""
 	}
+	visible := provider.ModelMessages(msgs[:n])
+	return providerVisibleFingerprint(provider.SanitizeToolPairing(visible))
+}
+
+// legacyCoveredPrefixHash reproduces the v1.25.2 fingerprint. It is used only
+// to migrate a sidecar whose persisted pre-repair transcript is still available;
+// new checkpoints always use coveredPrefixHash.
+func legacyCoveredPrefixHash(msgs []provider.Message, n int) string {
+	if n <= 0 || n > len(msgs) {
+		return ""
+	}
 	return providerVisibleFingerprint(provider.ModelMessages(msgs[:n]))
+}
+
+// migrateLegacyCoveredPrefixHash upgrades a v1.25.2 sidecar after LoadSession
+// performed a deterministic provider-visible repair. It is deliberately strict:
+// the stored legacy hash must match the exact pre-repair disk prefix, and that
+// prefix's wire-safe form must equal the current prefix. A real history or
+// system-prompt change therefore remains invalid.
+func migrateLegacyCoveredPrefixHash(st *CompactionState, current, preRepair []provider.Message) bool {
+	if st == nil || len(preRepair) == 0 {
+		return false
+	}
+	n := st.Projection.CoveredCount
+	stored := st.Projection.CoveredPrefixHash
+	if stored == "" || legacyCoveredPrefixHash(preRepair, n) != stored {
+		return false
+	}
+	preRepairWireHash := coveredPrefixHash(preRepair, n)
+	currentHash := coveredPrefixHash(current, n)
+	if currentHash == "" || preRepairWireHash != currentHash {
+		return false
+	}
+	st.Projection.CoveredPrefixHash = currentHash
+	if st.LastReceipt != nil && st.LastReceipt.CoveredPrefixHash == stored {
+		receipt := *st.LastReceipt
+		receipt.CoveredPrefixHash = currentHash
+		st.LastReceipt = &receipt
+	}
+	return true
 }
 
 // providerVisibleFingerprint is the stable hash of fields that reach a provider.
@@ -317,7 +356,7 @@ func providerVisibleFingerprint(msgs []provider.Message) string {
 // projectionValid reports whether st can be reused for the current transcript
 // and provider/model lineage. Fail closed: missing CoveredPrefixHash or a blank
 // sidecar PromptCacheKey when the current lineage key is known forces rebuild.
-func projectionValid(st CompactionState, msgs []provider.Message, transcriptVersion uint64, cacheKey string) bool {
+func projectionValid(st CompactionState, msgs []provider.Message, cacheKey string) bool {
 	if len(st.Projection.Messages) == 0 {
 		return false
 	}
@@ -327,13 +366,13 @@ func projectionValid(st CompactionState, msgs []provider.Message, transcriptVers
 			return false
 		}
 	}
-	return projectionContentValid(st, msgs, transcriptVersion)
+	return projectionContentValid(st, msgs)
 }
 
 // projectionContentValid reports whether st's projection body still matches the
 // canonical transcript, independent of provider/model lineage. LoadProjectionSidecar
 // uses it to rebind across upgrade/model/workspace key changes.
-func projectionContentValid(st CompactionState, msgs []provider.Message, transcriptVersion uint64) bool {
+func projectionContentValid(st CompactionState, msgs []provider.Message) bool {
 	if len(st.Projection.Messages) == 0 {
 		return false
 	}
@@ -348,11 +387,10 @@ func projectionContentValid(st CompactionState, msgs []provider.Message, transcr
 	if coveredPrefixHash(msgs, n) != st.Projection.CoveredPrefixHash {
 		return false
 	}
-	if st.TranscriptVersion == transcriptVersion || st.Projection.TranscriptVersion == transcriptVersion {
-		return true
-	}
-	// Append-only growth with a verified covered prefix.
-	return n < len(msgs)
+	// TranscriptVersion is a process-local CAS generation that resets on load.
+	// The covered prefix hash is the durable identity across append-only growth
+	// and exact tail truncation.
+	return true
 }
 
 // modelVisibleFromProjection splices the projection with any messages appended

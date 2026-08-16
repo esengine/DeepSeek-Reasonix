@@ -82,6 +82,22 @@ func TestBuildSessionDisplayIndexRoundTrip(t *testing.T) {
 	}
 }
 
+func TestLoadSessionPreviewFromDisplayIndexReadsFirstAuthoredRange(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	session := NewSession("system prompt")
+	session.Add(provider.Message{Role: provider.RoleUser, Content: "first question"})
+	session.Add(provider.Message{Role: provider.RoleAssistant, Content: strings.Repeat("answer", 10_000)})
+	session.Add(provider.Message{Role: provider.RoleUser, Content: "second question"})
+	if err := session.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot: %v", err)
+	}
+
+	preview, ok, err := LoadSessionPreviewFromDisplayIndex(path)
+	if err != nil || !ok || preview != "first question" {
+		t.Fatalf("preview = %q, ok=%v, err=%v", preview, ok, err)
+	}
+}
+
 func TestSessionDisplayIndexOffsetsMatchTranscript(t *testing.T) {
 	msgs := displayIndexTestMessages()
 	path := filepath.Join(t.TempDir(), "session.jsonl")

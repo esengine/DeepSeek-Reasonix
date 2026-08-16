@@ -8,7 +8,7 @@ import {
   type RefObject,
 } from "react";
 import { observeScrollContentSize } from "./scrollContentObserver";
-import type { TranscriptScrollMode, TranscriptScrollOwner } from "./transcriptScrollController";
+import type { TranscriptScrollMode, TranscriptScrollOwner } from "./transcriptScrollArbiter";
 
 const HOT_ZONE_PX = 18;
 const MIN_THUMB_PX = 28;

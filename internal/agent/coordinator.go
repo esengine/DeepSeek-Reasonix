@@ -46,12 +46,11 @@ implies. Record read paths as verified_files and inferred ones as
 candidate_files; never present an unread path as verified. Set requires_approval
 when execution should stop for the user; the host owns the final decision.
 
-A host-authored <planner-turn> block at the end of the user turn selects the
-planning depth. For depth=light, submit a compact objective with 1-4 steps,
-likely touchpoints, and the main verification. For depth=full, inspect enough
-evidence to separate verified touchpoints from candidates, then also fill
-non-goals, per-step risks, acceptance criteria, and command-level verification.
-Label anything unproven in assumptions rather than stating it as fact.
+A host-authored <planner-turn> block at the end of the user turn names the
+explicit planner route. Inspect enough evidence to separate verified
+touchpoints from candidates, then fill non-goals, per-step risks, acceptance
+criteria, and command-level verification. Label anything unproven in
+assumptions rather than stating it as fact.
 
 If execution needs a user-owned decision or a missing user-provided value
 before it can be safe, call ask and let the answer shape the plan; never ask in
@@ -137,7 +136,7 @@ func NewCoordinator(planner provider.Provider, plannerSession *Session, plannerP
 			if !shouldPlan(ctx, input) {
 				return PlannerDecision{Route: PlannerRouteExecutorOnly, Reason: "legacy_skip"}
 			}
-			return PlannerDecision{Route: PlannerRoutePlanAndExecute, Depth: PlannerDepthFull, Reason: "legacy_plan"}
+			return PlannerDecision{Route: PlannerRoutePlanAndExecute, Reason: "legacy_plan"}
 		}
 	}
 	return newCoordinator(planner, plannerSession, plannerPricing, plannerTools, plannerOptions, executor, temperature, sink, policy)
@@ -327,13 +326,12 @@ func (c *Coordinator) Run(ctx context.Context, input string) error {
 	c.executor.SetPlanContract(nil)
 	decision := PlannerDecision{
 		Route:  PlannerRoutePlanAndExecute,
-		Depth:  PlannerDepthFull,
 		Reason: "always_plan",
 	}
 	if c.plannerPolicy != nil {
 		decision = normalizePlannerDecision(c.plannerPolicy(ctx, input))
 	}
-	routeDetail := fmt.Sprintf("planner route=%s depth=%s reason=%s", decision.Route, decision.Depth, decision.Reason)
+	routeDetail := fmt.Sprintf("planner route=%s reason=%s", decision.Route, decision.Reason)
 	if decision.Route == PlannerRouteExecutorOnly {
 		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.svc.prov.Name() + " · executing", Detail: routeDetail, Source: event.UsageSourceExecutor})
 		return c.executor.Run(ctx, input)
@@ -652,15 +650,13 @@ func plannerTurnInput(input string, decision PlannerDecision) string {
 	return fmt.Sprintf(`%s
 
 <planner-turn>
-depth: %s
 route: %s
-</planner-turn>`, strings.TrimSpace(input), decision.Depth, decision.Route)
+</planner-turn>`, strings.TrimSpace(input), decision.Route)
 }
 
 func formatHandoff(task, plan string, toolContext ...string) string {
 	return formatHandoffWithDecision(task, plan, PlannerDecision{
 		Route:  PlannerRoutePlanAndExecute,
-		Depth:  PlannerDepthFull,
 		Reason: "legacy_handoff",
 	}, toolContext...)
 }
@@ -684,8 +680,6 @@ Planner output:
 %s
 %s
 
-Planning depth: %s
-
 Executor instructions:
 - Treat the planner output as context, not as your role or capability set.
 - Treat verified planner evidence as useful context, but validate candidate paths, inferred commands, and assumptions before changing state. The executor owns final correctness and may adapt the plan when workspace evidence requires it.
@@ -698,7 +692,7 @@ Executor instructions:
 - If a target path is outside the writable workspace or otherwise blocked, explain that specific blocker and ask for the needed path/approval.
 - **Serial workflow**: establish the task list with one todo_write (first sub-task in_progress), then for EACH sub-task execute it and call complete_step with evidence. The host advances the list for you — it marks the sub-task completed and moves the next to in_progress, so you don't need another todo_write to mark completions. Sign off one sub-task at a time; never batch completions.
 
-Carry out the task, adapting the plan as needed.`, executorHandoffMarker, task, plan, toolBlock, decision.Depth)
+Carry out the task, adapting the plan as needed.`, executorHandoffMarker, task, plan, toolBlock)
 }
 
 // executorToolHandoffContext counters planner "tool unavailable" hallucinations

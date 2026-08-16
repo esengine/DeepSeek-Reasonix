@@ -95,6 +95,89 @@ func TestContextManagerPersistsAndRestoresBlockedFailureFingerprint(t *testing.T
 	}
 }
 
+// A failed summary on a new view must refresh the stored receipt hash so the
+// retry backoff follows the current view; otherwise every round on it pays
+// for another summary attempt.
+func TestFailedSummaryReceiptTracksLatestViewHash(t *testing.T) {
+	const window = 10_000
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "system"},
+		{Role: provider.RoleUser, Content: "task"},
+		{Role: provider.RoleAssistant, Content: strings.Repeat("old work ", 500)},
+		{Role: provider.RoleUser, Content: "current"},
+		{Role: provider.RoleAssistant, Content: "tail"},
+	}}
+	prov := &failingSummaryProvider{}
+	a := New(prov, tool.NewRegistry(), sess, Options{
+		ContextWindow: window, CompactRatio: 0.85, RecentKeep: 2,
+	}, event.Discard)
+	policy := ContextPreparePolicy{Trigger: CompactionTriggerPressure, ObservedInputTokens: 8600}
+
+	if _, err := a.contextManager().Prepare(context.Background(), policy); err != nil {
+		t.Fatalf("first failure should pass the turn through: %v", err)
+	}
+	r := a.sess.compactionState.LastReceipt
+	if r == nil || r.BlockedInputHash == "" {
+		t.Fatal("no failure receipt recorded")
+	}
+	firstHash := r.BlockedInputHash
+
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "more work"})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: strings.Repeat("extra ", 100)})
+	if _, err := a.contextManager().Prepare(context.Background(), policy); err != nil {
+		t.Fatalf("second failure should pass the turn through: %v", err)
+	}
+	if prov.calls != 2 {
+		t.Fatalf("summary calls = %d, want one per view", prov.calls)
+	}
+	if a.sess.compactionState.LastReceipt.BlockedInputHash == firstHash {
+		t.Fatal("receipt still carries the first view's hash; retries of the new view will never back off")
+	}
+
+	if _, err := a.contextManager().Prepare(context.Background(), policy); err != nil {
+		t.Fatal(err)
+	}
+	if prov.calls != 2 {
+		t.Fatalf("same-view retry paid another summary: calls=%d, want 2", prov.calls)
+	}
+}
+
+func TestFailedSummaryReceiptBacksOffChangedViewsWithinActiveTurn(t *testing.T) {
+	const window = 10_000
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "system"},
+		{Role: provider.RoleUser, Content: "task"},
+		{Role: provider.RoleAssistant, Content: strings.Repeat("old work ", 500)},
+		{Role: provider.RoleUser, Content: "current"},
+		{Role: provider.RoleAssistant, Content: "tail"},
+	}}
+	prov := &failingSummaryProvider{}
+	a := New(prov, tool.NewRegistry(), sess, Options{
+		ContextWindow: window, CompactRatio: 0.85, RecentKeep: 2,
+	}, event.Discard)
+	policy := ContextPreparePolicy{Trigger: CompactionTriggerPressure, ObservedInputTokens: 8600}
+	a.activeTurnCreatedAt.Store(11)
+
+	if _, err := a.contextManager().Prepare(context.Background(), policy); err != nil {
+		t.Fatal(err)
+	}
+	sess.Add(provider.Message{Role: provider.RoleTool, Content: strings.Repeat("new output ", 100)})
+	if _, err := a.contextManager().Prepare(context.Background(), policy); err != nil {
+		t.Fatal(err)
+	}
+	if prov.calls != 1 {
+		t.Fatalf("same-turn changed view made %d summary calls, want 1", prov.calls)
+	}
+
+	a.activeTurnCreatedAt.Store(12)
+	if _, err := a.contextManager().Prepare(context.Background(), policy); err != nil {
+		t.Fatal(err)
+	}
+	if prov.calls != 2 {
+		t.Fatalf("later turn made %d summary calls, want one fresh retry", prov.calls)
+	}
+}
+
 // TestPrepareThresholdSkipsExtensionInterceptors locks the overflow-only
 // contract: automatic compact_ratio uses the pre-interceptor request shape
 // (messages + tools + role projection). context.prepare / provider.request

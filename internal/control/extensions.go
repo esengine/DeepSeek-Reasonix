@@ -11,6 +11,7 @@ import (
 	"reasonix/internal/evidence"
 	"reasonix/internal/extension"
 	"reasonix/internal/extension/dispatch"
+	"reasonix/internal/sessioninbox"
 )
 
 // Extension dispatch wiring (stage 6b1). Nil dispatcher is a no-op.
@@ -165,6 +166,13 @@ func (s *frontendEventSink) Emit(ev event.Event) {
 	s.d.Event(extension.PointFrontendEvent, payload)
 	ev.Text, ev.Detail = payload.Text, payload.Detail
 	s.inner.Emit(ev)
+}
+
+func (s *frontendEventSink) InboxChanged(snap sessioninbox.InboxSnapshot) {
+	if s == nil {
+		return
+	}
+	notifyInboxChanged(s.inner, snap)
 }
 
 // warnOnce logs msg at most once per key for the life of the sink. Warnings

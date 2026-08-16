@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/control"
 )
 
 // handoffSessionLease acquires path and publishes it on the tab without
@@ -89,4 +90,55 @@ func (a *App) handoffTabRecoveryLease(tab *WorkspaceTab, recoveryPath string) er
 		go oldLease.Release()
 	}
 	return nil
+}
+
+// handleTabSessionTransition moves a tab's lease and binds the unpublished
+// target Session before its controller switches paths. The source controller
+// remains fully usable when any acquisition or bind step fails.
+func (a *App) handleTabSessionTransition(tab *WorkspaceTab) func(control.SessionTransitionInfo) error {
+	return func(info control.SessionTransitionInfo) error {
+		if tab == nil || tab.ReadOnly {
+			return nil
+		}
+		transition, err := a.reserveSessionRuntimePath(tab, info.TargetPath)
+		if err != nil {
+			return fmt.Errorf("acquire target session lease: %w", userFacingSessionLeaseError("", err))
+		}
+		oldLease, err := tab.handoffSessionLease(info.TargetPath)
+		if err != nil {
+			a.rollbackSessionRuntimePath(transition)
+			return fmt.Errorf("acquire target session lease: %w", userFacingSessionLeaseError("", err))
+		}
+		tab.sessionLeaseMu.Lock()
+		lease := tab.sessionLease
+		tab.sessionLeaseMu.Unlock()
+		if err := info.BindWriteAuthority(lease); err != nil {
+			newLease := tab.swapSessionLease(oldLease)
+			a.rollbackSessionRuntimePath(transition)
+			if newLease != nil {
+				newLease.Release()
+			}
+			return fmt.Errorf("bind target session authority: %w", err)
+		}
+		a.mu.Lock()
+		if tab.removed || !a.runtimeOwnerLiveLocked(transition.runtime) || !a.commitSessionRuntimePathLocked(transition) {
+			a.mu.Unlock()
+			newLease := tab.swapSessionLease(oldLease)
+			a.rollbackSessionRuntimePath(transition)
+			if newLease != nil {
+				newLease.Release()
+			}
+			return fmt.Errorf("bind target session: tab runtime changed; retry")
+		}
+		tab.SessionPath = canonicalTabSessionPath(info.TargetPath)
+		if a.tabs[tab.ID] == tab {
+			a.saveTabsLocked()
+		}
+		a.mu.Unlock()
+		if oldLease != nil {
+			go oldLease.Release()
+		}
+		a.emitProjectTreeChangedForSessionDirs(sessionDirectoryForPath(info.TargetPath))
+		return nil
+	}
 }

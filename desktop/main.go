@@ -119,8 +119,9 @@ func main() {
 	appMenu := app.createAppMenu()
 	dragAndDrop := &options.DragAndDrop{EnableFileDrop: true}
 	bindings := []any{app}
+	remoteWindow := launch.RemoteWindowTicket != ""
 
-	if launch.RemoteWindowTicket != "" {
+	if remoteWindow {
 		// A remote web child window: a second Reasonix process that hosts the
 		// SSH Serve page for one remote host. It deliberately skips local
 		// runtimes (tabs, tray, heartbeat, providers) and exposes no Wails
@@ -145,7 +146,7 @@ func main() {
 		defer app.releaseDesktopDiagnosticsOwnership()
 	}
 
-	width, height := initialDesktopWindowSize()
+	width, height := initialDesktopWindowSize(remoteWindow)
 
 	// Restore saved desktop zoom factor (WebView2 ZoomFactor), or default to 1.0.
 	zoomFactor := 1.0
@@ -161,7 +162,7 @@ func main() {
 		Title:     title,
 		Width:     width,
 		Height:    height,
-		Frameless: goruntime.GOOS == "windows",
+		Frameless: desktopWindowFrameless(goruntime.GOOS, remoteWindow),
 		Logger:    newCrashCaptureLogger(app),
 		MinWidth:  760,
 		MinHeight: 480,

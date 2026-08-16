@@ -46,7 +46,7 @@ func summaryInputTokens(msgs []provider.Message) int {
 // estimate.
 func (a *Agent) guardedSummaryInputTokens(msgs []provider.Message) int {
 	raw := summaryInputTokens(msgs)
-	if !sharesContextWindow(a.svc.prov) || a.configuredOutputBudget(a.maxOutputTokens) <= 0 || len(msgs) == 0 {
+	if contextBudgetPolicyOf(a.svc.prov).WindowMode != provider.ContextWindowShared || len(msgs) == 0 {
 		return raw
 	}
 	return a.estimatedPromptTokens([]provider.Message{{
@@ -57,14 +57,18 @@ func (a *Agent) guardedSummaryInputTokens(msgs []provider.Message) int {
 // summaryInputBudget is the transcript ceiling for one summarizer call.
 // Zero means the window cannot host a useful summary request.
 func (a *Agent) summaryInputBudget(instructions string) int {
-	if a.contextWindow <= 0 {
+	if a.effectiveContextWindow() <= 0 && a.contextWindow <= 0 {
 		return 0
 	}
 	reserve := summaryOutputReserve
-	if sharesContextWindow(a.svc.prov) && a.configuredOutputBudget(a.maxOutputTokens) > 0 {
+	if contextBudgetPolicyOf(a.svc.prov).WindowMode == provider.ContextWindowShared {
 		reserve += outputBudgetReserve
 	}
-	budget := a.contextWindow - reserve - estimateTextTokens(summarySystemPrompt) - estimateTextTokens(instructions) - 256
+	window := a.effectiveContextWindow()
+	if window <= 0 {
+		window = a.contextWindow
+	}
+	budget := window - reserve - estimateTextTokens(summarySystemPrompt) - estimateTextTokens(instructions) - 256
 	if budget < minSummarySpanTokens {
 		return 0
 	}

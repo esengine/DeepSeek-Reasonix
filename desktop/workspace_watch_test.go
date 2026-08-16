@@ -231,11 +231,19 @@ func TestWorkspaceChangeHubRecursivelyWatchesGitMetadataOnly(t *testing.T) {
 	gitDir = canonicalWorkspaceRoot(gitDir)
 	app.workspaceHub.mu.Lock()
 	r := app.workspaceHub.roots[key]
+	recursive := r != nil && r.watcher != nil && r.watcher.SupportsRecursive()
+	_, rootWatched := r.watched[key]
 	_, refsWatched := r.watched[filepath.Join(gitDir, "refs", "heads")]
 	_, logsWatched := r.watched[filepath.Join(gitDir, "logs", "refs", "heads")]
 	_, worktreeWatched := r.watched[filepath.Join(gitDir, "worktrees", "linked")]
 	_, objectsWatched := r.watched[filepath.Join(gitDir, "objects")]
 	app.workspaceHub.mu.Unlock()
+	if recursive {
+		if !rootWatched || refsWatched || logsWatched || worktreeWatched || objectsWatched {
+			t.Fatalf("recursive workspace watch root=%v refs=%v logs=%v worktrees=%v objects=%v", rootWatched, refsWatched, logsWatched, worktreeWatched, objectsWatched)
+		}
+		return
+	}
 	if !refsWatched || !logsWatched || !worktreeWatched || objectsWatched {
 		t.Fatalf("git watches refs=%v logs=%v worktrees=%v objects=%v", refsWatched, logsWatched, worktreeWatched, objectsWatched)
 	}

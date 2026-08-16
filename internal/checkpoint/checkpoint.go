@@ -9,8 +9,8 @@
 // targets can't be known in advance), which is why the capture hook only fires for
 // tools that can Preview their change.
 //
-// Schema v2 adds content-addressed blob storage, after-write fingerprints,
-// coverage gaps, and transactional restore with compensation.
+// Schema v2 adds blobs and verified restore; v3 stores new preimages in per-turn
+// directories while retaining legacy blob and transaction compatibility.
 package checkpoint
 
 import (
@@ -48,6 +48,7 @@ type FileSnap struct {
 	AfterMode     uint32        `json:"afterMode,omitempty"`
 	// PayloadExpired marks that the blob was GC'd while metadata remains.
 	PayloadExpired bool `json:"payloadExpired,omitempty"`
+	rawContent     []byte
 }
 
 // FileState is the earliest pre-edit state recorded for a file in this
@@ -180,6 +181,9 @@ func New(dir, root string) *Store {
 		s.blobs = NewBlobStore(filepath.Join(dir, "blobs"))
 		s.load()
 		s.RecoverTransactions()
+		s.mu.Lock()
+		s.gcLocked()
+		s.mu.Unlock()
 	}
 	return s
 }
@@ -261,64 +265,6 @@ func (s *Store) InvalidateUndo() {
 	s.mu.Unlock()
 }
 
-func (s *Store) load() {
-	seen := map[int]bool{}
-	loadDir := func(dir string, expired bool) {
-		ents, err := os.ReadDir(dir)
-		if err != nil {
-			return
-		}
-		for _, e := range ents {
-			if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
-				continue
-			}
-			var turnNum int
-			if _, err := fmt.Sscanf(e.Name(), "turn-%d.json", &turnNum); err != nil || seen[turnNum] {
-				continue
-			}
-			b, err := fileenc.ReadFileUTF8(filepath.Join(dir, e.Name()))
-			if err != nil {
-				continue
-			}
-			var c Checkpoint
-			if json.Unmarshal(b, &c) != nil {
-				continue
-			}
-			if expired {
-				c.ExpiredFilePayload = true
-				for i := range c.Files {
-					c.Files[i].PayloadExpired = true
-					c.Files[i].BlobRef = ""
-					c.Files[i].Content = nil
-				}
-			}
-			// Mark v1 as legacy_unverified.
-			if c.SchemaVersion == 0 || c.SchemaVersion < SchemaV2 {
-				c.SchemaVersion = SchemaV1
-				c.Legacy = true
-				c.Coverage = CoverageLegacy
-				hasLegacyGap := false
-				for _, g := range c.CoverageGaps {
-					if g.Reason == GapLegacyUnverified {
-						hasLegacyGap = true
-						break
-					}
-				}
-				if !hasLegacyGap {
-					c.CoverageGaps = append(c.CoverageGaps, CoverageGap{Reason: GapLegacyUnverified, Detail: "v1 checkpoint cannot verify later manual edits"})
-				}
-			}
-			seen[turnNum] = true
-			s.done = append(s.done, &c)
-		}
-	}
-	// Root turn files remain deliberately readable by previous releases. Expired
-	// metadata lives below a directory those releases never scan.
-	loadDir(s.dir, false)
-	loadDir(s.expiredDir(), true)
-	sort.Slice(s.done, func(i, j int) bool { return s.done[i].Turn < s.done[j].Turn })
-}
-
 // Begin opens a checkpoint for a new user turn, finalizing the previous one. The
 // prompt labels it in the picker; msgIndex is the conversation-rewind boundary.
 func (s *Store) Begin(turn int, prompt string, msgIndex int) {
@@ -329,7 +275,7 @@ func (s *Store) Begin(turn int, prompt string, msgIndex int) {
 		s.done = append(s.done, s.cur)
 	}
 	s.cur = &Checkpoint{
-		SchemaVersion: SchemaV2,
+		SchemaVersion: SchemaV3,
 		Turn:          turn,
 		Time:          time.Now(),
 		Prompt:        prompt,
@@ -381,8 +327,8 @@ func (s *Store) CaptureBeforeFromChange(ch diff.Change, opts CaptureBeforeOpts) 
 	var enc *fileenc.Kind
 	var mode uint32
 	var sha string
-	var blobRef string
 	var content *string
+	var rawContent []byte
 
 	if ch.Kind != diff.Create {
 		old := ch.OldText
@@ -405,17 +351,11 @@ func (s *Store) CaptureBeforeFromChange(ch diff.Change, opts CaptureBeforeOpts) 
 		if abs, aerr := safePath(s.root, ch.Path); aerr == nil {
 			if raw, rerr := secureReadFile(s.root, abs); rerr == nil {
 				sha = Digest(raw)
-				if s.blobs != nil {
-					if ref, perr := s.blobs.Put(raw); perr == nil {
-						blobRef = ref
-						// Keep decoded text content for in-memory FileState/API compat.
-					}
-				}
-				// For non-UTF8, Content stays as decoded OldText; bytes live in blob.
-				if enc == nil {
-					e, _ := fileenc.Detect(raw)
-					enc = &e
-				}
+				rawContent = append([]byte(nil), raw...)
+				e, detected := fileenc.Detect(raw)
+				decoded := string(fileenc.Decode(detected, e))
+				content = &decoded
+				enc = &e
 			}
 		}
 	}
@@ -426,26 +366,24 @@ func (s *Store) CaptureBeforeFromChange(ch diff.Change, opts CaptureBeforeOpts) 
 		return
 	}
 	s.seen[pathKey] = true
-	if s.blobs != nil && content != nil && blobRef == "" {
-		if ref, err := s.blobs.Put([]byte(*content)); err == nil {
-			blobRef = ref
-		}
-	}
 	snap := FileSnap{
 		Path:          ch.Path,
 		Content:       content,
 		Encoding:      enc,
 		Mode:          mode,
 		SHA256:        sha,
-		BlobRef:       blobRef,
 		CaptureSource: opts.Source,
+		rawContent:    rawContent,
 	}
-	// Keep inline content alongside the blob ref so older binaries can still
+	// Keep inline content in memory so FileState and the legacy restore API can
 	// distinguish existing files from the nil-content deletion sentinel.
 	s.cur.Files = append(s.cur.Files, snap)
-	s.cur.SchemaVersion = SchemaV2
+	if s.cur.SchemaVersion < SchemaV3 {
+		s.cur.SchemaVersion = SchemaV3
+	}
 	s.recomputeCoverageLocked(s.cur)
 	s.persistBestEffort(s.cur)
+	s.gcLocked()
 }
 
 // CaptureBefore records a preimage by Lstat+read of path.
@@ -477,11 +415,7 @@ func (s *Store) CaptureBefore(path string, opts CaptureBeforeOpts) {
 	if fp.Existed {
 		snap.Mode = fp.Mode
 		snap.SHA256 = fp.SHA256
-		if s.blobs != nil && len(fp.Content) > 0 {
-			if ref, err := s.blobs.Put(fp.Content); err == nil {
-				snap.BlobRef = ref
-			}
-		}
+		snap.rawContent = append([]byte(nil), fp.Content...)
 		// Decoded text for API compat (FileState / legacy RestoreCode path).
 		enc, raw := fileenc.Detect(fp.Content)
 		text := string(fileenc.Decode(raw, enc))
@@ -493,9 +427,12 @@ func (s *Store) CaptureBefore(path string, opts CaptureBeforeOpts) {
 	}
 	// Content nil + no blob → create (did not exist)
 	s.cur.Files = append(s.cur.Files, snap)
-	s.cur.SchemaVersion = SchemaV2
+	if s.cur.SchemaVersion < SchemaV3 {
+		s.cur.SchemaVersion = SchemaV3
+	}
 	s.recomputeCoverageLocked(s.cur)
 	s.persistBestEffort(s.cur)
+	s.gcLocked()
 }
 
 // RecordGap appends a coverage gap to the current checkpoint.
@@ -574,6 +511,9 @@ func (s *Store) persist(c *Checkpoint) error {
 	if s.dir == "" || c == nil {
 		return nil
 	}
+	if c.SchemaVersion >= SchemaV3 {
+		return s.persistV3(c)
+	}
 	// Keep inline Content even when BlobRef is present. Previous Reasonix builds
 	// ignore BlobRef and interpret nil Content as "the file did not exist";
 	// omitting it would make an older concurrently running binary delete files.
@@ -600,9 +540,11 @@ func (s *Store) persistBestEffort(c *Checkpoint) {
 	}
 }
 
-// gcLocked drops file payloads for old checkpoints beyond retainN / blobQuota.
+// gcLocked removes old v3 turn directories and retains the legacy v1/v2 blob
+// quota policy for checkpoints written by older releases.
 // Caller holds s.mu.
 func (s *Store) gcLocked() {
+	s.pruneV3TurnsLocked()
 	if s.blobs == nil || s.retainN <= 0 {
 		return
 	}
@@ -613,7 +555,7 @@ func (s *Store) gcLocked() {
 	}
 	var withFiles []entry
 	for _, c := range all {
-		if len(c.Files) > 0 {
+		if c.SchemaVersion < SchemaV3 && len(c.Files) > 0 {
 			withFiles = append(withFiles, entry{c: c})
 		}
 	}
@@ -870,18 +812,8 @@ func (s *Store) TruncateFrom(fromTurn int) error {
 	if s.cur != nil && s.cur.Turn >= fromTurn {
 		deleteTurns[s.cur.Turn] = true
 	}
-	if s.dir != "" {
-		for turn := range deleteTurns {
-			paths := []string{
-				filepath.Join(s.dir, fmt.Sprintf("turn-%d.json", turn)),
-				filepath.Join(s.expiredDir(), fmt.Sprintf("turn-%d.json", turn)),
-			}
-			for _, path := range paths {
-				if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-					return fmt.Errorf("remove checkpoint turn %d: %w", turn, err)
-				}
-			}
-		}
+	if err := s.removeTurnArtifacts(deleteTurns); err != nil {
+		return err
 	}
 
 	done := s.done[:0]

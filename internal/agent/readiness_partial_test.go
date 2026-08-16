@@ -4,10 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/agentpreset"
 	"reasonix/internal/evidence"
 	"reasonix/internal/instruction"
-	"reasonix/internal/taskpolicy"
+	"reasonix/internal/runtimepolicy"
 	"reasonix/internal/tool"
 )
 
@@ -21,10 +20,7 @@ func TestPartialWaiverStandsDownUnavailableChecksOnBalanced(t *testing.T) {
 		)},
 		projectChecks: []instruction.VerifyCheck{check},
 		svc:           agentServices{tools: tool.NewRegistry()},
-		turn: turnRuntime{
-			policy:    taskpolicy.TaskPolicy{Preset: agentpreset.Balanced, Verification: taskpolicy.VerifyTargeted},
-			policySet: true,
-		},
+		turn:          turnRuntime{engine: runtimepolicy.NewEngine(runtimepolicy.Constraints{})},
 	}
 	got := a.ReadinessResult()
 	if !got.Ready {
@@ -39,10 +35,7 @@ func TestPartialWaiverDoesNotClearIncompleteTodos(t *testing.T) {
 		task: taskRuntime{ledger: readinessLedger(writer, todo,
 			evidence.Receipt{ToolName: "update_goal", Success: true, Args: []byte(`{"status":"complete","completion":{"unverified":["e2e"]}}`)},
 		)},
-		turn: turnRuntime{
-			policy:    taskpolicy.TaskPolicy{Preset: agentpreset.Balanced, Verification: taskpolicy.VerifyTargeted},
-			policySet: true,
-		},
+		turn: turnRuntime{engine: runtimepolicy.NewEngine(runtimepolicy.Constraints{})},
 	}
 	got := a.ReadinessResult()
 	if got.Ready || !strings.Contains(got.Reason, "incomplete") {
@@ -61,14 +54,11 @@ func TestPartialWaiverStaysClosedOnDelivery(t *testing.T) {
 		)},
 		projectChecks: []instruction.VerifyCheck{check},
 		svc:           agentServices{tools: reg},
-		turn: turnRuntime{
-			policy:    taskpolicy.TaskPolicy{Preset: agentpreset.Delivery, Verification: taskpolicy.VerifyFull},
-			policySet: true,
-		},
+		turn:          turnRuntime{deliveryScopeActive: true, engine: runtimepolicy.NewEngine(runtimepolicy.Constraints{})},
 	}
 	got := a.ReadinessResult()
 	if got.Ready {
-		t.Fatalf("ReadinessResult() = %+v, want Delivery to keep check gaps", got)
+		t.Fatalf("ReadinessResult() = %+v, want closed-loop to keep check gaps", got)
 	}
 }
 
@@ -78,17 +68,20 @@ func TestForbidTestsWaivesProjectChecksEvenOnDelivery(t *testing.T) {
 	reg.Add(fakeTool{name: "bash", readOnly: true})
 	a := &Agent{
 		task: taskRuntime{ledger: readinessLedger(
+			evidence.Receipt{ToolName: "todo_write", Success: true, Todos: []evidence.TodoItem{{Content: "edit", Status: "in_progress"}}},
 			evidence.Receipt{ToolName: "write_file", Success: true, Write: true, Mutation: true, Paths: []string{"a.go"}},
+			evidence.Receipt{ToolName: "read_file", Success: true, Read: true, Paths: []string{"a.go"}},
+			evidence.Receipt{ToolName: "bash", Success: true, Command: "go test ./..."},
+			evidence.Receipt{ToolName: "complete_step", Success: true, Step: "edit", Args: []byte(`{"step":"edit","evidence":[{"kind":"verification","command":"go test ./..."}]}`)},
+			evidence.Receipt{ToolName: "todo_write", Success: true, Todos: []evidence.TodoItem{{Content: "edit", Status: "completed"}}},
 		)},
 		projectChecks: []instruction.VerifyCheck{check},
 		svc:           agentServices{tools: reg},
 		turn: turnRuntime{
-			policy: taskpolicy.TaskPolicy{
-				Preset:       agentpreset.Delivery,
-				Verification: taskpolicy.VerifyFull,
-				Constraints:  taskpolicy.Constraints{ForbidTests: true},
-			},
-			policySet: true,
+			constraints:                 runtimepolicy.Constraints{ForbidTests: true},
+			engine:                      runtimepolicy.NewEngine(runtimepolicy.Constraints{ForbidTests: true}),
+			deliveryCriteriaEstablished: true,
+			deliveryScopeActive:         true,
 		},
 	}
 	got := a.ReadinessResult()

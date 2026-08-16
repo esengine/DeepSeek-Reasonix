@@ -94,6 +94,15 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		requestURL = root + "/v1/messages"
 	}
 	officialDeepSeek := openai.IsDeepSeek(root)
+	reasoningProtocol, _ := cfg.Extra["reasoning_protocol"].(string)
+	reasoningProtocol = strings.ToLower(strings.TrimSpace(reasoningProtocol))
+	deepSeekReplay := officialDeepSeek
+	switch reasoningProtocol {
+	case "deepseek":
+		deepSeekReplay = true
+	case "none":
+		deepSeekReplay = false
+	}
 	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
 	keySource, _ := cfg.Extra["api_key_source"].(string)
 	thinking, _ := cfg.Extra["thinking"].(string)
@@ -135,7 +144,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		requestURL:       requestURL,
 		model:            cfg.Model,
 		nativeAnthropic:  strings.EqualFold(root, defaultBaseURL),
-		deepseek:         officialDeepSeek,
+		deepseek:         deepSeekReplay,
 		thinking:         thinking,
 		effort:           effort,
 		vision:           vision,
@@ -215,6 +224,13 @@ func normalizeDeepSeekAnthropicEffort(model, effort string) string {
 func (c *client) RequiresToolCallReasoning() bool {
 	return c.deepSeekThinkingEnabled()
 }
+
+func (c *client) RequiresAssistantReasoningReplay(m provider.Message) bool {
+	activity := len(m.ToolCalls) > 0 || len(m.ServerSearch) > 0
+	return c != nil && c.deepseek && activity && (c.deepSeekThinkingEnabled() || strings.TrimSpace(m.ReasoningContent) != "")
+}
+
+func (c *client) AllowsEmptyReasoningFallback() bool { return false }
 
 func (c *client) MissingToolCallReasoningWarningIdentity() string {
 	if c == nil {
@@ -376,7 +392,7 @@ func (c *client) buildRequest(_ context.Context, req provider.Request) anthReque
 			// turn in every subsequent request, even if the current request no longer
 			// declares tools or has since disabled thinking. Anthropic proper requires
 			// a signature, so reasoning without one cannot be replayed on that endpoint.
-			if c.deepseek && len(m.ToolCalls) > 0 && m.ReasoningContent != "" {
+			if c.deepseek && (len(m.ToolCalls) > 0 || len(m.ServerSearch) > 0) && m.ReasoningContent != "" {
 				blocks = append(blocks, contentBlock{Type: "thinking", Thinking: m.ReasoningContent})
 			} else if c.thinking == "adaptive" && m.ReasoningContent != "" && m.ReasoningSignature != "" {
 				blocks = append(blocks, contentBlock{Type: "thinking", Thinking: m.ReasoningContent, Signature: m.ReasoningSignature})

@@ -93,11 +93,22 @@
     },
     {
       "name": "bash",
-      "description": "Execute a command in the shell and return combined stdout/stderr. Use for builds, tests, git, package managers, etc. To search/read/list/edit/move files, prefer the dedicated tools (grep, read_file, ls, glob, edit_file, move_file) over shell grep/cat/ls/find/sed/mv/Move-Item — they behave identically on every OS. For symbol search or architecture questions, prefer LSP/read tools and targeted grep before shell commands.",
+      "description": "Execute a command in the shell and return combined stdout/stderr. To write outside the workspace, pass additional_write_dirs with the smallest concrete directories (no globs; absolute, workspace-relative, ~, or ${HOME}) and a justification. The host will not infer write paths from the command text. Use for builds, tests, git, package managers, etc. To search/read/list/edit/move files, prefer the dedicated tools (grep, read_file, ls, glob, edit_file, move_file) over shell grep/cat/ls/find/sed/mv/Move-Item — they behave identically on every OS. For symbol search or architecture questions, prefer LSP/read tools and targeted grep before shell commands.",
       "parameters": {
         "properties": {
+          "additional_write_dirs": {
+            "description": "Directories this command must write outside the workspace. Directories only, no globs. Accepts absolute paths, workspace-relative paths, ~, and ${HOME}. Request the smallest set needed; the host will not infer paths from the command text.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "command": {
             "description": "Shell command to execute",
+            "type": "string"
+          },
+          "justification": {
+            "description": "Required when additional_write_dirs is non-empty. Explain why those directories must be writable.",
             "type": "string"
           },
           "preserve_background_processes": {

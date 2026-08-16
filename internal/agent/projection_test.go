@@ -360,7 +360,8 @@ func visibleContext(a *Agent) []provider.Message {
 		return nil
 	}
 	if msgs := a.sess.compactionState.Projection.Messages; len(msgs) > 0 {
-		return msgs
+		canonical, _ := a.sess.conversation.snapshotMessagesVersion()
+		return modelVisibleFromProjection(a.sess.compactionState.Projection, canonical)
 	}
 	if a.sess.conversation != nil {
 		return a.sess.conversation.Snapshot()

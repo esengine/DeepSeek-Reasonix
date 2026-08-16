@@ -16,7 +16,6 @@ import (
 	"testing"
 
 	"reasonix/internal/agent"
-	"reasonix/internal/boot"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
@@ -2196,11 +2195,12 @@ func TestProvidersWithMissingKeysIncludesPlannerModel(t *testing.T) {
 
 func TestParseRuntimeProfile(t *testing.T) {
 	for input, want := range map[string]string{
-		"":         boot.TokenModeFull,
-		"balanced": boot.TokenModeFull,
-		"full":     boot.TokenModeFull,
-		"economy":  boot.TokenModeEconomy,
-		"delivery": boot.TokenModeDelivery,
+		"":         "balanced",
+		"balanced": "balanced",
+		"full":     "balanced",
+		"economy":  "light",
+		"light":    "light",
+		"delivery": "delivery",
 	} {
 		got, err := parseRuntimeProfile(input)
 		if err != nil || got != want {

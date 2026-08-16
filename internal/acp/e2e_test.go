@@ -78,6 +78,7 @@ type e2eFactory struct {
 	tool       tool.Tool
 	policy     permission.Policy
 	sessionDir string
+	options    *agent.Options
 }
 
 func (f *e2eFactory) SessionDir() string { return f.sessionDir }
@@ -85,8 +86,12 @@ func (f *e2eFactory) SessionDir() string { return f.sessionDir }
 func (f *e2eFactory) NewSession(_ context.Context, p SessionParams) (*control.Controller, error) {
 	reg := tool.NewRegistry()
 	reg.Add(f.tool)
+	opts := agent.Options{MaxSteps: 5}
+	if f.options != nil {
+		opts = *f.options
+	}
 	executor := agent.New(f.prov, reg, agent.NewSession("you are a test agent"),
-		agent.Options{MaxSteps: 5}, p.Sink)
+		opts, p.Sink)
 	return control.New(control.Options{
 		Runner:     executor,
 		Executor:   executor,
@@ -95,6 +100,96 @@ func (f *e2eFactory) NewSession(_ context.Context, p SessionParams) (*control.Co
 		Label:      "fake-model",
 		SessionDir: f.sessionDir,
 	}), nil
+}
+
+func TestE2EExplicitMaxStepsReturnsSuccessfulPause(t *testing.T) {
+	responses := [][]provider.Chunk{
+		{toolCallChunk("c1", "peek", `{}`), {Type: provider.ChunkDone}},
+		{toolCallChunk("c2", "peek", `{}`), {Type: provider.ChunkDone}},
+		{toolCallChunk("c3", "peek", `{}`), {Type: provider.ChunkDone}},
+		{toolCallChunk("c4", "peek", `{}`), {Type: provider.ChunkDone}},
+		{toolCallChunk("c5", "peek", `{}`), {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "Saved progress summary."}, {Type: provider.ChunkDone}},
+	}
+	assertE2ERunPause(t, responses, nil, StopMaxTurnRequests, "paused after 5 tool-call rounds")
+}
+
+func TestE2ETaskBudgetReturnsSuccessfulPause(t *testing.T) {
+	responses := [][]provider.Chunk{
+		{
+			toolCallChunk("c1", "peek", `{}`),
+			{Type: provider.ChunkUsage, Usage: &provider.Usage{PromptTokens: 100, CacheMissTokens: 100}},
+			{Type: provider.ChunkDone},
+		},
+		{{Type: provider.ChunkText, Text: "Saved budget summary."}, {Type: provider.ChunkDone}},
+	}
+	options := &agent.Options{
+		Pricing:    &provider.Pricing{Input: 1, Currency: "USD"},
+		TaskBudget: agent.TaskBudget{Cost: 0.000001},
+	}
+	assertE2ERunPause(t, responses, options, StopEndTurn, "paused after reaching this task's cost budget")
+}
+
+func assertE2ERunPause(t *testing.T, responses [][]provider.Chunk, options *agent.Options, wantStop StopReason, wantWarning string) {
+	t.Helper()
+	factory := &e2eFactory{
+		prov:       &scriptedProvider{name: "fake", responses: responses},
+		tool:       fakeTool{name: "peek", ro: true, out: "ok"},
+		policy:     permission.New("ask", nil, nil, nil),
+		sessionDir: t.TempDir(),
+		options:    options,
+	}
+	client, stop := startServer(t, factory)
+	defer stop()
+
+	sid := openSession(t, client)
+	promptCh := client.callAsync("session/prompt", SessionPromptParams{
+		SessionID: sid,
+		Prompt:    []ContentBlock{{Type: "text", Text: "keep working"}},
+	})
+	notifications, resp := drainPrompt(t, client, promptCh)
+	if resp.Error != nil {
+		t.Fatalf("controlled pause returned JSON-RPC error: %+v", resp.Error)
+	}
+	var result SessionPromptResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("prompt result: %v", err)
+	}
+	if result.StopReason != wantStop {
+		t.Errorf("stopReason = %q, want %q", result.StopReason, wantStop)
+	}
+
+	var warned, paused bool
+	for _, notification := range notifications {
+		if notification.Method == sessionStatusUpdateMethod {
+			var update ReasonixStatusUpdate
+			if err := json.Unmarshal(notification.Params, &update); err != nil {
+				t.Fatalf("status update: %v", err)
+			}
+			if update.Event == "pause" && update.Status.TurnOutcome.Kind == "paused" {
+				paused = true
+			}
+		}
+		var params SessionUpdateParams
+		if err := json.Unmarshal(notification.Params, &params); err != nil {
+			continue
+		}
+		update, ok := params.Update.(map[string]any)
+		if !ok || update["sessionUpdate"] != "agent_message_chunk" {
+			continue
+		}
+		content, _ := update["content"].(map[string]any)
+		text, _ := content["text"].(string)
+		if strings.Contains(text, "[warning]") && strings.Contains(text, wantWarning) {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Fatalf("missing controlled-pause warning containing %q", wantWarning)
+	}
+	if !paused {
+		t.Fatal("missing paused status outcome")
+	}
 }
 
 func toolCallChunk(id, name, args string) provider.Chunk {
@@ -474,7 +569,7 @@ func TestE2EApprovalRoundTrip(t *testing.T) {
 	prov := &scriptedProvider{name: "fake", responses: [][]provider.Chunk{
 		{
 			{Type: provider.ChunkText, Text: "Writing."},
-			toolCallChunk("w1", "writeit", `{"path":"out"}`),
+			toolCallChunk("w1", "writeit", `{"path":"README.md"}`),
 			{Type: provider.ChunkDone},
 		},
 		{
@@ -494,42 +589,40 @@ func TestE2EApprovalRoundTrip(t *testing.T) {
 	sid := openSession(t, client)
 	promptCh := client.callAsync("session/prompt", SessionPromptParams{
 		SessionID: sid,
-		Prompt:    []ContentBlock{{Type: "text", Text: "write out"}},
+		Prompt:    []ContentBlock{{Type: "text", Text: "write README.md"}},
 	})
 
-	// Answer the permission request the write tool raises, capturing it to assert.
-	reqSeen := make(chan PermissionRequestParams, 1)
-	go func() {
-		req := <-client.reqs
-		var pr PermissionRequestParams
-		json.Unmarshal(req.Params, &pr)
-		reqSeen <- pr
-		if _, ok := invalidACPv1PermissionOptionKind(pr.Options); ok {
-			client.replyError(req.ID, ErrInvalidParams, "Invalid params")
-			return
-		}
-		client.reply(req.ID, PermissionRequestResult{
-			Outcome: PermissionOutcome{Outcome: "selected", OptionID: string(OptAllowOnce)},
-		})
-	}()
-
-	notifs, resp := drainPrompt(t, client, promptCh)
-
+	// Answer the permission request while the prompt is still in flight. The
+	// turn cannot finish until this round-trip completes.
+	var req frame
 	select {
-	case pr := <-reqSeen:
-		if pr.SessionID != sid {
-			t.Errorf("permission sessionId = %q, want %q", pr.SessionID, sid)
-		}
-		if pr.ToolCall.Kind != "edit" {
-			t.Errorf("permission kind = %q, want edit", pr.ToolCall.Kind)
-		}
-		if !strings.Contains(pr.ToolCall.Title, "writeit") {
-			t.Errorf("permission title = %q, want it to mention writeit", pr.ToolCall.Title)
-		}
-		assertACPv1PermissionOptionKinds(t, pr.Options)
+	case req = <-client.reqs:
 	case <-time.After(2 * time.Second):
 		t.Fatal("no permission request was raised")
 	}
+	var pr PermissionRequestParams
+	if err := json.Unmarshal(req.Params, &pr); err != nil {
+		t.Fatalf("permission params: %v", err)
+	}
+	if pr.SessionID != sid {
+		t.Errorf("permission sessionId = %q, want %q", pr.SessionID, sid)
+	}
+	if pr.ToolCall.Kind != "edit" {
+		t.Errorf("permission kind = %q, want edit", pr.ToolCall.Kind)
+	}
+	if !strings.Contains(pr.ToolCall.Title, "writeit") {
+		t.Errorf("permission title = %q, want it to mention writeit", pr.ToolCall.Title)
+	}
+	assertACPv1PermissionOptionKinds(t, pr.Options)
+	if _, ok := invalidACPv1PermissionOptionKind(pr.Options); ok {
+		client.replyError(req.ID, ErrInvalidParams, "Invalid params")
+	} else {
+		client.reply(req.ID, PermissionRequestResult{
+			Outcome: PermissionOutcome{Outcome: "selected", OptionID: string(OptAllowOnce)},
+		})
+	}
+
+	notifs, resp := drainPrompt(t, client, promptCh)
 
 	// The allowed tool ran: a completed tool_call_update with its output.
 	var ran bool
@@ -557,10 +650,12 @@ func TestE2EApprovalRoundTrip(t *testing.T) {
 		t.Error("approved tool did not run to completion")
 	}
 
-	var pr SessionPromptResult
-	json.Unmarshal(resp.Result, &pr)
-	if pr.StopReason != StopEndTurn {
-		t.Errorf("stopReason = %q, want end_turn", pr.StopReason)
+	var result SessionPromptResult
+	json.Unmarshal(resp.Result, &result)
+	// Adaptive standard execution may pause the turn for missing readiness
+	// after a write; controlled readiness pauses use ACP v1 end_turn.
+	if result.StopReason != StopEndTurn {
+		t.Errorf("stopReason = %q, want end_turn", result.StopReason)
 	}
 }
 

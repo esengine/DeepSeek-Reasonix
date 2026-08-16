@@ -96,6 +96,9 @@ type Message struct {
 	// ModelMessages strips the field before handing requests to providers.
 	DecisionReceipts []*DecisionReceipt       `json:"decision_receipts,omitempty"`
 	InterruptedTurn  *InterruptedTurnRecovery `json:"interrupted_turn,omitempty"`
+	// FinalReadinessRecovery is durable host state on a LocalOnly sentinel.
+	// ModelMessages removes it before provider serialization.
+	FinalReadinessRecovery *FinalReadinessRecovery `json:"final_readiness_recovery,omitempty"`
 	// ToolExecution is local shell UI metadata on tool-result messages. It is
 	// persisted for Desktop/CLI/Serve cards and stripped by ModelMessages before
 	// any provider request so tool schemas and prompt-cache prefixes stay stable.
@@ -962,10 +965,9 @@ type Provider interface {
 // replays the provider-issued reasoning block on assistant tool_calls turns
 // (DeepSeek thinking mode). The agent uses it to archive the original reasoning
 // text on those turns (a display-translated copy must not round-trip to the
-// API) and to warn when a turn arrives with none — the request still succeeds
-// because the wire layer always emits the reasoning_content key for such turns,
-// but the model loses its chain-of-thought context. Most providers leave this
-// unset; callers must treat it as false.
+// API) and to detect turns that arrive with none. Whether an explicit empty
+// value is a valid final fallback is a separate protocol capability. Most
+// providers leave this unset; callers must treat it as false.
 type ToolCallReasoningPolicy interface {
 	RequiresToolCallReasoning() bool
 }

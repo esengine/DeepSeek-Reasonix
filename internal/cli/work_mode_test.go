@@ -2,8 +2,11 @@ package cli
 
 import (
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/x/ansi"
 
 	"reasonix/internal/boot"
 	"reasonix/internal/control"
@@ -12,104 +15,117 @@ import (
 	"reasonix/internal/provider"
 )
 
-func TestRuntimeProfileDisplayLocalizesLabels(t *testing.T) {
-	defer i18n.DetectLanguage("en")
-	for _, tt := range []struct {
-		lang                        string
-		economy, balanced, delivery string
-	}{
-		{lang: "en", economy: "light", balanced: "balanced", delivery: "delivery"},
-		{lang: "zh", economy: "轻量", balanced: "均衡", delivery: "交付"},
-		{lang: "zh-TW", economy: "輕量", balanced: "均衡", delivery: "交付"},
+func resetPresetDeprecationForTest() {
+	presetDeprecationOnce = sync.Once{}
+}
+
+func committedNotices(m chatTUI) string {
+	if m.pendingCommit == nil {
+		return ""
+	}
+	return ansi.Strip(strings.Join(*m.pendingCommit, "\n"))
+}
+
+func TestParseAgentPresetAcceptsLegacyLabels(t *testing.T) {
+	for input, want := range map[string]string{
+		"economy":  "light",
+		"light":    "light",
+		"eco":      "light",
+		"lite":     "light",
+		"balanced": "balanced",
+		"full":     "balanced",
+		"delivery": "delivery",
 	} {
-		t.Run(tt.lang, func(t *testing.T) {
-			i18n.DetectLanguage(tt.lang)
-			for profile, want := range map[string]string{
-				boot.TokenModeEconomy:  tt.economy,
-				boot.TokenModeFull:     tt.balanced,
-				"balanced":             tt.balanced,
-				boot.TokenModeDelivery: tt.delivery,
-				"light":                tt.economy,
-			} {
-				if got := runtimeProfileDisplay(profile); got != want {
-					t.Errorf("runtimeProfileDisplay(%q) = %q, want %q", profile, got, want)
+		got, ok := parseAgentPreset(input)
+		if !ok || got != want {
+			t.Errorf("parseAgentPreset(%q) = %q, %v; want %q, true", input, got, ok, want)
+		}
+	}
+	if _, ok := parseAgentPreset("unknown"); ok {
+		t.Fatal("unknown preset should be rejected")
+	}
+}
+
+func TestWorkModeCompletionHidesCompatibilityCommands(t *testing.T) {
+	m := newTestChatTUI()
+	for _, command := range []string{"/preset", "/profile", "/work-mode"} {
+		if hasLabel(m.slashItems(), command) {
+			t.Fatalf("compatibility command %q should not appear in slash completion", command)
+		}
+	}
+	for _, input := range []string{"/preset ", "/work-mode ", "/profile "} {
+		if _, _, ok := m.slashArgItems(input); ok {
+			t.Fatalf("%q should not offer execution-mode argument completion", input)
+		}
+	}
+}
+
+func TestConsumeDeprecatedModeFlagsKeepsCompatibilityOutOfPublicFlagSets(t *testing.T) {
+	clean, mode, err := consumeDeprecatedModeFlags([]string{
+		"--model", "deepseek", "--profile=delivery", "fix it", "--preset", "light",
+	}, "profile", "preset")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode != "delivery" {
+		t.Fatalf("mode = %q, want profile precedence delivery", mode)
+	}
+	if got := strings.Join(clean, " "); got != "--model deepseek fix it" {
+		t.Fatalf("clean args = %q", got)
+	}
+
+	clean, mode, err = consumeDeprecatedModeFlags([]string{"run", "--", "--profile", "delivery"}, "profile")
+	if err != nil || mode != "" || strings.Join(clean, " ") != "run -- --profile delivery" {
+		t.Fatalf("post-boundary args: clean=%v mode=%q err=%v", clean, mode, err)
+	}
+	if _, _, err := consumeDeprecatedModeFlags([]string{"--profile"}, "profile"); err == nil {
+		t.Fatal("missing compatibility flag value must fail")
+	}
+}
+
+func TestLegacyModeFlagsAreHiddenFromCommandHelp(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func() int
+	}{
+		{name: "run", run: func() int { return runAgent([]string{"--help"}, "dev") }},
+		{name: "chat", run: func() int { return chatREPL([]string{"--help"}, "dev") }},
+		{name: "web", run: func() int { return runWeb([]string{"--help"}) }},
+		{name: "acp", run: func() int { return acpCommand([]string{"--help"}, "dev") }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := captureStdout(t, func() {
+				if code := tt.run(); code != 0 {
+					t.Fatalf("help exit code = %d, want 0", code)
 				}
+			})
+			if strings.Contains(out, "--profile") || strings.Contains(out, "--preset") {
+				t.Fatalf("legacy mode flag leaked into help:\n%s", out)
 			}
 		})
 	}
 }
 
-func TestRenderWorkModesShowsAllOptionsAndCurrent(t *testing.T) {
-	out := renderWorkModes(100, boot.TokenModeFull)
-	for _, want := range []string{"light", "balanced", "delivery", "current"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("renderWorkModes missing %q:\n%s", want, out)
-		}
-	}
-}
-
-func TestParseWorkModeKeepsBalancedAsFullInternally(t *testing.T) {
-	for input, want := range map[string]string{
-		"economy":  boot.TokenModeEconomy,
-		"light":    boot.TokenModeEconomy,
-		"balanced": boot.TokenModeFull,
-		"full":     boot.TokenModeFull,
-		"delivery": boot.TokenModeDelivery,
-	} {
-		got, ok := parseWorkMode(input)
-		if !ok || got != want {
-			t.Errorf("parseWorkMode(%q) = %q, %v; want %q, true", input, got, ok, want)
-		}
-	}
-}
-
-func TestWorkModeCompletionPublishesPrimaryCommandAndAliasArguments(t *testing.T) {
-	m := newTestChatTUI()
-	m.runtimeProfile = boot.TokenModeFull
-	if !hasLabel(m.slashItems(), "/preset") {
-		t.Fatal("slash completion missing /preset")
-	}
-	if hasLabel(m.slashItems(), "/profile") {
-		t.Fatal("technical /profile alias should not duplicate the primary command in the slash menu")
-	}
-	for _, input := range []string{"/preset ", "/work-mode ", "/profile "} {
-		items, _, ok := m.slashArgItems(input)
-		if !ok {
-			t.Fatalf("%q did not activate preset argument completion", input)
-		}
-		for _, want := range []string{"light", "balanced", "delivery"} {
-			if !hasLabel(items, want) {
-				t.Errorf("%q completion missing %q: %v", input, want, labels(items))
-			}
-		}
-	}
-}
-
-func TestWorkModeHelpAndStatusUseUserFacingName(t *testing.T) {
-	if !hasLabel(builtinHelpItems(), "/preset") {
-		t.Fatal("built-in help missing /preset")
+func TestWorkModeHelpHidesDeprecatedCommand(t *testing.T) {
+	if hasLabel(builtinHelpItems(), "/preset") {
+		t.Fatal("deprecated /preset should not appear in built-in help")
 	}
 	if hasLabel(builtinHelpItems(), "/profile") {
-		t.Fatal("built-in help should not duplicate the technical /profile alias")
+		t.Fatal("built-in help should not list the technical /profile alias")
 	}
-	m := newChatTUI(control.New(control.Options{Label: "model"}), "", make(chan event.Event, 1), 80)
-	m.runtimeProfile = boot.TokenModeDelivery
-	if got := m.workModeTag(); !strings.Contains(got, "delivery") {
-		t.Fatalf("role-setting status tag = %q, want delivery", got)
-	}
-	m.width = 30
-	if got := m.computeStatusLineCount(m.width); got < 2 {
-		t.Fatalf("status-line count with role-setting tag = %d, want at least 2", got)
+	if hasLabel(builtinHelpItems(), "/work-mode") {
+		t.Fatal("built-in help should not list the legacy /work-mode alias")
 	}
 }
 
-func TestWorkModeSwitchUpdatesInPlaceWithoutRebuild(t *testing.T) {
+func TestPresetCommandIsNoOpCompatibility(t *testing.T) {
+	resetPresetDeprecationForTest()
 	oldCtrl := control.New(control.Options{Label: "old"})
 	oldCtrl.SetToolApprovalMode(control.ToolApprovalAuto)
 	oldCtrl.SetPlanMode(true)
 	m := newChatTUI(oldCtrl, "", make(chan event.Event, 1), 100)
 	m.modelRef = "provider/model"
-	m.runtimeProfile = boot.TokenModeFull
 	builds := 0
 	m.buildController = func(controllerBuildSpec, []provider.Message, string, control.SessionAPI) (*control.Controller, error) {
 		builds++
@@ -118,55 +134,86 @@ func TestWorkModeSwitchUpdatesInPlaceWithoutRebuild(t *testing.T) {
 
 	cmd := m.runWorkModeCommand("/preset delivery")
 	if cmd != nil {
-		t.Fatal("in-place preset switch must not schedule a controller rebuild")
+		t.Fatal("deprecated /preset must not schedule a controller rebuild")
 	}
 	if m.ctrl != oldCtrl {
 		t.Fatal("controller must stay the same instance")
 	}
-	if m.runtimeProfile != boot.TokenModeDelivery {
-		t.Fatalf("runtime profile = %q, want delivery", m.runtimeProfile)
-	}
-	if m.ctrl.AgentPreset() != boot.AgentPresetDelivery {
-		t.Fatalf("controller preset = %q, want delivery", m.ctrl.AgentPreset())
+	if m.ctrl.AgentPreset() != boot.AgentPresetBalanced {
+		t.Fatalf("controller preset = %q, want balanced", m.ctrl.AgentPreset())
 	}
 	if builds != 0 {
 		t.Fatalf("unexpected rebuilds: %d", builds)
 	}
+	out := committedNotices(m)
+	if got := strings.Count(out, i18n.M.WorkModeDeprecatedNotice); got != 1 {
+		t.Fatalf("deprecation notices = %d, want 1:\n%s", got, out)
+	}
+
+	if cmd := m.runWorkModeCommand("/preset light"); cmd != nil {
+		t.Fatal("second /preset must stay a no-op")
+	}
+	if m.ctrl.AgentPreset() != boot.AgentPresetBalanced {
+		t.Fatalf("controller preset changed to %q", m.ctrl.AgentPreset())
+	}
+	if got := strings.Count(committedNotices(m), i18n.M.WorkModeDeprecatedNotice); got != 1 {
+		t.Fatalf("deprecation notice should print once, got %d:\n%s", got, committedNotices(m))
+	}
 }
 
-func TestWorkModeSwitchRejectsInvalidSameAndBusyRequests(t *testing.T) {
+func TestPresetCommandRejectsInvalidValue(t *testing.T) {
+	resetPresetDeprecationForTest()
 	m := newTestChatTUI()
 	m.ctrl = control.New(control.Options{Label: "model"})
 	m.modelRef = "provider/model"
-	m.runtimeProfile = boot.TokenModeFull
 	builds := 0
 	m.buildController = func(controllerBuildSpec, []provider.Message, string, control.SessionAPI) (*control.Controller, error) {
 		builds++
 		return control.New(control.Options{Label: "new"}), nil
 	}
 
-	for _, input := range []string{
-		"/preset unknown",
-		"/preset balanced",
-		"/preset economy extra",
-	} {
-		if cmd := m.runWorkModeCommand(input); cmd != nil {
-			t.Fatalf("%q unexpectedly scheduled a rebuild", input)
-		}
+	if cmd := m.runWorkModeCommand("/preset unknown"); cmd != nil {
+		t.Fatal("invalid /preset unexpectedly scheduled a rebuild")
 	}
-	m.pendingApproval = &event.Approval{ID: "approval", Tool: "bash"}
-	if cmd := m.runWorkModeCommand("/preset light"); cmd != nil {
-		t.Fatal("pending approval should block preset switching")
+	out := committedNotices(m)
+	if !strings.Contains(out, i18n.M.WorkModeDeprecatedNotice) {
+		t.Fatalf("invalid /preset missing deprecation notice:\n%s", out)
 	}
-	if m.runtimeProfile != boot.TokenModeFull {
-		t.Fatalf("busy switch changed profile to %q", m.runtimeProfile)
+	if !strings.Contains(out, i18n.M.WorkModeUsage) {
+		t.Fatalf("invalid /preset missing usage:\n%s", out)
+	}
+	if m.ctrl.AgentPreset() != boot.AgentPresetBalanced {
+		t.Fatalf("controller preset = %q, want balanced", m.ctrl.AgentPreset())
 	}
 	if builds != 0 {
-		t.Fatalf("rejected preset requests triggered %d builds", builds)
+		t.Fatalf("rejected preset request triggered %d builds", builds)
 	}
 }
 
-func TestWorkModeSwitchRejectsRunningTurn(t *testing.T) {
+func TestPresetCommandStaysNoOpWhenBusy(t *testing.T) {
+	resetPresetDeprecationForTest()
+	m := newTestChatTUI()
+	m.ctrl = control.New(control.Options{Label: "model"})
+	m.modelRef = "provider/model"
+	m.pendingApproval = &event.Approval{ID: "approval", Tool: "bash"}
+	builds := 0
+	m.buildController = func(controllerBuildSpec, []provider.Message, string, control.SessionAPI) (*control.Controller, error) {
+		builds++
+		return control.New(control.Options{Label: "new"}), nil
+	}
+	if cmd := m.runWorkModeCommand("/preset light"); cmd != nil {
+		t.Fatal("busy /preset must not rebuild")
+	}
+	if m.ctrl.AgentPreset() != boot.AgentPresetBalanced {
+		t.Fatalf("busy /preset changed AgentPreset to %q", m.ctrl.AgentPreset())
+	}
+	if builds != 0 {
+		t.Fatalf("busy /preset triggered %d builds", builds)
+	}
+}
+
+func TestPresetCommandStaysNoOpDuringRunningTurn(t *testing.T) {
+	resetPresetDeprecationForTest()
 	runner := &blockingTurnRunner{started: make(chan struct{})}
 	ctrl := control.New(control.Options{Runner: runner, Sink: event.Discard, SessionDir: t.TempDir(), Label: "model"})
 	ctrl.Send("keep running")
@@ -182,19 +229,21 @@ func TestWorkModeSwitchRejectsRunningTurn(t *testing.T) {
 	m := newTestChatTUI()
 	m.ctrl = ctrl
 	m.modelRef = "provider/model"
-	m.runtimeProfile = boot.TokenModeFull
 	builds := 0
 	m.buildController = func(controllerBuildSpec, []provider.Message, string, control.SessionAPI) (*control.Controller, error) {
 		builds++
 		return control.New(control.Options{}), nil
 	}
 	if cmd := m.runWorkModeCommand("/preset delivery"); cmd != nil {
-		t.Fatal("running turn should block preset switching")
+		t.Fatal("running-turn /preset must not rebuild")
 	}
-	if m.runtimeProfile != boot.TokenModeFull {
-		t.Fatalf("running-turn switch changed profile to %q", m.runtimeProfile)
+	if m.ctrl.AgentPreset() != boot.AgentPresetBalanced {
+		t.Fatalf("running-turn /preset changed AgentPreset to %q", m.ctrl.AgentPreset())
 	}
 	if builds != 0 {
-		t.Fatalf("running-turn guard triggered %d builds", builds)
+		t.Fatalf("running-turn /preset triggered %d builds", builds)
+	}
+	if got := strings.Count(committedNotices(m), i18n.M.WorkModeDeprecatedNotice); got != 1 {
+		t.Fatalf("running-turn /preset notices = %d, want 1:\n%s", got, committedNotices(m))
 	}
 }

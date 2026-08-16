@@ -13,8 +13,8 @@ import (
 // RuntimeReload is previous-generation state for incremental sidecar adoption
 // and subgraph-classified rebuild.
 type RuntimeReload struct {
-	// ForceFullRebuild bypasses extension subgraph reuse when config-owned
-	// skills/providers may have changed without changing the native graph.
+	// ForceFullRebuild bypasses extension subgraph reuse and refreshes existing
+	// native sidecars, including linked binaries whose graph metadata is unchanged.
 	ForceFullRebuild bool
 	Extensions       *sidecar.Manager
 	Graph            *extension.DependencyGraph
@@ -170,7 +170,14 @@ func planForPreflight(opts Options, toGen uint64) *extension.RuntimePlan {
 	if err != nil {
 		return nil
 	}
-	return extension.DiffRuntimePlan(opts.Graph, toGraph, opts.Generation, toGen)
+	plan := extension.DiffRuntimePlan(opts.Graph, toGraph, opts.Generation, toGen)
+	if opts.ForceFullRebuild && opts.Extensions != nil {
+		// Explicit reloads refresh linked binaries even when graph metadata is unchanged.
+		// Preflight replaces them beside the live manager; publishing the new
+		// controller retires the old processes.
+		plan.RestartUnchangedSidecars = true
+	}
+	return plan
 }
 
 // finalizeBuildResult attaches the cold-start RuntimePlan and status, then

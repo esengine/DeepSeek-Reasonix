@@ -67,7 +67,6 @@ import type {
 import { workspaceGitStatusLabel } from "../lib/workspaceChanges";
 import {
   completionGapLabel,
-  completionPresetLabel,
   completionReviewLabel,
   completionVerdictLabel,
 } from "../lib/completionSummaryDisplay";
@@ -1707,7 +1706,6 @@ export function WorkspacePanel({
                 >
                   <div className="workspace-completion-summary__head">
                     <strong>{t("completion.panelTitle")}</strong>
-                    <span>{completionPresetLabel(completionSummary.preset, t)}</span>
                     <span>{completionVerdictLabel(completionSummary.verdict, t)}</span>
                   </div>
                   <div className="workspace-completion-summary__metrics">

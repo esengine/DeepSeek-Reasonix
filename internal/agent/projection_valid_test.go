@@ -33,18 +33,18 @@ func TestProjectionValidRejectsEditedPrefix(t *testing.T) {
 			CoveredPrefixHash: coveredPrefixHash(msgs, 3),
 		},
 	}
-	if !projectionValid(st, msgs, 2, "ws|sess|model") {
+	if !projectionValid(st, msgs, "ws|sess|model") {
 		t.Fatal("expected valid projection for matching prefix")
 	}
 	// Append-only growth still valid.
 	grown := append(append([]provider.Message(nil), msgs...), provider.Message{Role: provider.RoleAssistant, Content: "more"})
-	if !projectionValid(st, grown, 3, "ws|sess|model") {
+	if !projectionValid(st, grown, "ws|sess|model") {
 		t.Fatal("append-only growth should keep projection valid")
 	}
 	// Prefix edit invalidates.
 	edited := append([]provider.Message(nil), msgs...)
 	edited[1].Content = "task-EDITED"
-	if projectionValid(st, edited, 4, "ws|sess|model") {
+	if projectionValid(st, edited, "ws|sess|model") {
 		t.Fatal("edited covered prefix must invalidate projection")
 	}
 }
@@ -65,21 +65,21 @@ func TestProjectionValidRejectsCacheKeyMismatch(t *testing.T) {
 			TranscriptVersion: 1,
 		},
 	}
-	if projectionValid(st, msgs, 1, "ws|sess|model-b") {
+	if projectionValid(st, msgs, "ws|sess|model-b") {
 		t.Fatal("model/lineage key mismatch must invalidate projection")
 	}
-	if !projectionValid(st, msgs, 1, "ws|sess|model-a") {
+	if !projectionValid(st, msgs, "ws|sess|model-a") {
 		t.Fatal("matching key should be valid")
 	}
 	// Fail closed: blank stored key is rejected when current key is known.
 	st.PromptCacheKey = ""
-	if projectionValid(st, msgs, 1, "ws|sess|model-a") {
+	if projectionValid(st, msgs, "ws|sess|model-a") {
 		t.Fatal("missing sidecar cache key must invalidate when lineage is known")
 	}
 	// Missing prefix hash is always rejected.
 	st.PromptCacheKey = "ws|sess|model-a"
 	st.Projection.CoveredPrefixHash = ""
-	if projectionValid(st, msgs, 1, "ws|sess|model-a") {
+	if projectionValid(st, msgs, "ws|sess|model-a") {
 		t.Fatal("missing CoveredPrefixHash must invalidate projection")
 	}
 }
@@ -315,8 +315,8 @@ func TestCompactInstallsCoveredPrefixHash(t *testing.T) {
 	if st.PromptCacheKey != promptCacheKey("ws", BranchID(path), "m") {
 		t.Fatalf("PromptCacheKey = %q", st.PromptCacheKey)
 	}
-	msgs, ver := sess.snapshotMessagesVersion()
-	if !projectionValid(st, msgs, ver, st.PromptCacheKey) {
+	msgs, _ := sess.snapshotMessagesVersion()
+	if !projectionValid(st, msgs, st.PromptCacheKey) {
 		t.Fatal("fresh projection should validate")
 	}
 }

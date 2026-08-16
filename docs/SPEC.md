@@ -213,22 +213,20 @@ prefix cache-stable:
 
 - The **planner** (low-frequency) runs in its own session with the same standing
   memory context plus a filtered read-only research tool set, then produces a
-  concise plan. A deterministic host policy chooses executor-only, light
-  planning, full planning, plan-for-approval, or explicit plan-only from
-  pristine user text plus trusted turn metadata. It does not call a classifier
-  model and does not infer host state from controller-authored prompt blocks.
-  Explicit Plan Mode, synthetic turns, short contextual replies, atomic edits,
-  and bounded read-only actions avoid a second planner; cross-surface,
-  structured, ambiguous, and high-risk work uses the full contract. Active Goal
-  and Delivery turns upgrade non-atomic mutation work, while bounded read-only
-  actions remain executor-only. The privacy-safe
-  route/depth/reason decision is emitted in phase detail.
-- Light plans use a small per-turn research-round budget and return a compact
-  objective, 1-4 ordered steps, likely touchpoints, and primary verification.
-  Full plans use a larger bounded budget and distinguish verified from candidate
-  touchpoints, with risks, acceptance criteria, command-level verification, and
-  rollback when relevant. The depth contract stays in one stable system prompt;
-  only a small host-authored `<planner-turn>` block changes per user turn. If
+  concise plan. A deterministic host policy defaults to executor-only. It
+  invokes the dedicated planner only for an explicit plan-first /
+  plan-then-execute request, an explicit wait-for-approval boundary, an
+  explicit plan-only request, or an explicit Goal start. It does not call a
+  classifier model, does not infer complexity from wording, file count, or
+  keywords, and does not infer host state from controller-authored prompt
+  blocks. Explicit Plan Mode is an executor-driven workflow and never starts a
+  second planner. Synthetic turns, short contextual replies, and ordinary
+  requests stay executor-only. There is no Light/Full planning depth. The
+  privacy-safe route/reason decision is emitted in phase detail.
+- The planner uses one stable system prompt. Only a small host-authored
+  `<planner-turn>` block names the explicit route. The plan distinguishes
+  verified from candidate touchpoints and records non-goals, risks, acceptance
+  criteria, and command-level verification when the evidence supports them. If
   the planner still does not finalize after the bounded research and grace
   round, plan-and-execute falls back to the executor with the pristine task;
   plan-only and plan-for-approval remain fail-closed. The incomplete planner
@@ -273,14 +271,22 @@ when the sole automatic threshold is crossed.
   `reasonix config compact-ratio [--local] [VALUE]`. Project config overrides the
   user-global value used by desktop and new CLI sessions. UI always shows the
   **effective** ratio.
-- `max_output_tokens` is an independent **per-turn** completion ceiling.
-  Recommended: `0` — official DeepSeek omits the field so the server uses the
-  documented **384K** output cap; thinking depth is `effort` only (default high).
-  A positive value is an explicit cost cap. Negative omits optional wire limits
-  when the protocol allows; official DeepSeek Anthropic still sends 384K because
-  `max_tokens` is required (`budget_tokens` is ignored). Clipped only at send
-  time against remaining window and **never** changes `triggerTokens` or
-  maintenance timing. Billing follows actual completion tokens, not the ceiling.
+- `max_output_tokens` is an independent **per-turn** completion ceiling and
+  never changes `triggerTokens` / `compact_ratio`.
+  - `0` is the provider auto value. Local admission uses the provider
+    capability (official DeepSeek 384K, OpenCode Go model table, or a learned
+    completion budget). It is **not** “skip the local output check”.
+  - Official DeepSeek Chat/Responses still omit the field when the remaining
+    shared window can host the 384K auto budget, and inject a clipped value
+    only when the window is tight. Official DeepSeek Anthropic always sends
+    384K or the clipped remainder because `max_tokens` is required.
+  - Official OpenCode Go presets send `min(model max, physical remaining)` on
+    the generic `max_tokens` / `max_output_tokens` field. Third-party
+    compatible APIs do not assume a shared window until a trusted context 400.
+  - A positive value is an explicit cost cap and may still be clipped down to
+    the physical remainder. A negative value force-omits optional wire limits;
+    if the known auto budget no longer fits, Reasonix compacts instead of
+    overriding that choice.
 - Giant tool results are bounded **once**, on first entry to the model:
   `Content` is the stable ≤32KB visible form; `RawContent` holds the full original
   only when they differ. Maintenance never rewrites old tool bodies.
@@ -1042,10 +1048,10 @@ default        = "deepseek-v4-flash"   # optional; defaults to models[0]
 api_key_env    = "DEEPSEEK_API_KEY"
 web_search     = true
 context_window = 1000000   # tokens; harness compacts older history near this limit (0 disables)
-# max_output_tokens = 0              # recommended: official DeepSeek omits the field (server 384K)
-# max_output_tokens = 32768          # optional cost cap
+# max_output_tokens = 0              # auto: provider capability; official DeepSeek omits until the window is tight
+# max_output_tokens = 32768          # optional cost cap; still clipped to physical remaining
 # max_output_tokens = 65536          # optional cost cap
-# max_output_tokens = 131072         # optional cost cap
+# max_output_tokens = -1             # force-omit optional wire limits; compact if the auto budget no longer fits
 # max_output_tokens never changes compact_ratio
 # model_overrides = { "deepseek-v4-flash" = { context_window = 1000000, max_output_tokens = 32768 } }
 
@@ -1162,6 +1168,14 @@ the connection is ready.
 ```
 
 `[sandbox]` is the *enforcement* layer beneath permissions (which are *policy*).
+They stay two layers: a permitted call still cannot write outside the approved
+roots. Interactive sessions can extend those roots with a write-access approval
+(once / session / project `reasonix.toml` / deny). File tools request the target
+parent directory automatically. Bash must declare `additional_write_dirs` and a
+`justification`; the host does not infer paths from the command text. Headless
+`reasonix run` fails closed unless the directory is already in
+`[sandbox].allow_write` or `--add-dir`. Granting `${HOME}` is allowed with a
+high-risk warning; the filesystem root and Reasonix session/state paths are not.
 Phase 0 confines the file-writing built-ins (`write_file`, `edit_file`,
 `multi_edit`, `move_file`) to `workspace_root` (default cwd), the Reasonix user
 config dir, plus `allow_write`: a write whose target — resolved to an absolute,

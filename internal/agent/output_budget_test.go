@@ -384,6 +384,11 @@ func TestSetSessionResetsPerTranscriptUsageState(t *testing.T) {
 	active := requestCalibrationShape{requestChars: 900_000, compactChars: 850_000}
 	a.sess.output.activeReqShape.Store(&active)
 	a.setPromptTokenCalibration(200_000, requestCalibrationShape{requestChars: 1_000_000, compactChars: 950_000})
+	a.learnContextBudget(1_048_576, 384_000, true)
+	a.storeAdmission(contextAdmission{
+		WindowMode: provider.ContextWindowShared.String(), WindowTokens: 1_048_576,
+		PromptTokens: 810_882, LastRecovery: contextRecoveryLearnedRetry,
+	})
 	a.SetSession(NewSession("new"))
 
 	if got := a.sess.output.lastUsage.Load(); got != nil {
@@ -394,6 +399,15 @@ func TestSetSessionResetsPerTranscriptUsageState(t *testing.T) {
 	}
 	if got := a.sess.output.promptCalibration.Load(); got == nil {
 		t.Fatal("promptCalibration was dropped on session switch; the tokenizer ratio outlives the transcript")
+	}
+	if got := a.sess.output.learned.Load(); got == nil || got.windowTokens != 1_048_576 || got.completionBudget != 384_000 {
+		t.Fatalf("learned provider budget was dropped on session switch: %+v", got)
+	}
+	if got := a.sess.output.admission.Load(); got != nil {
+		t.Fatalf("context admission survived session switch: %+v", got)
+	}
+	if got := a.ContextMaintenanceSnapshot().ContextBudget; got != nil {
+		t.Fatalf("new transcript exposed the previous context budget: %+v", got)
 	}
 }
 

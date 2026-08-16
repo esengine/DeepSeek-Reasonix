@@ -7,15 +7,19 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/control"
 	"reasonix/internal/i18n"
+	"reasonix/internal/provider"
 )
 
 type rewindConfirmationController struct {
 	control.SessionAPI
-	plan    checkpoint.RewindPlan
-	commits []string
+	plan     checkpoint.RewindPlan
+	commits  []string
+	result   checkpoint.RewindResult
+	switches []string
 }
 
 func (c *rewindConfirmationController) PrepareRewind(_ int, _ control.RewindScope) (checkpoint.RewindPlan, error) {
@@ -24,8 +28,19 @@ func (c *rewindConfirmationController) PrepareRewind(_ int, _ control.RewindScop
 
 func (c *rewindConfirmationController) CommitRewind(planID string) (checkpoint.RewindResult, error) {
 	c.commits = append(c.commits, planID)
+	if c.result.ConversationForked || c.result.Branch != "" {
+		return c.result, nil
+	}
 	return checkpoint.RewindResult{OK: true}, nil
 }
+
+func (c *rewindConfirmationController) SwitchBranch(ref string) (agent.BranchInfo, error) {
+	c.switches = append(c.switches, ref)
+	return agent.BranchInfo{Path: ref}, nil
+}
+
+func (c *rewindConfirmationController) SetPlanMode(bool)            {}
+func (c *rewindConfirmationController) History() []provider.Message { return nil }
 
 func (c *rewindConfirmationController) SummarizeFrom(context.Context, int) error { return nil }
 func (c *rewindConfirmationController) SummarizeUpTo(context.Context, int) error { return nil }
@@ -142,5 +157,34 @@ func TestApplyRewindDoesNotCommitPartialCoverageBeforeConfirmation(t *testing.T)
 	m = next.(chatTUI)
 	if m.rewind != nil || len(ctrl.commits) != 1 || ctrl.commits[0] != plan.PlanID {
 		t.Fatalf("confirmed rewind should commit once: picker=%+v commits=%v", m.rewind, ctrl.commits)
+	}
+}
+
+func TestConversationRewindActivatesReturnedFork(t *testing.T) {
+	plan := checkpoint.RewindPlan{
+		PlanID: "plan-conversation", Scope: checkpoint.RewindConversation,
+		CanConversation: true,
+	}
+	ctrl := &rewindConfirmationController{
+		plan: plan,
+		result: checkpoint.RewindResult{
+			OK: true, ConversationForked: true, ConversationOK: true,
+			Branch: "/sessions/fork.jsonl",
+		},
+	}
+	m := newTestChatTUI()
+	m.ctrl = ctrl
+	m.rewind = &rewindPicker{
+		metas:       []checkpoint.Meta{{Turn: 0}},
+		pendingPlan: plan,
+	}
+
+	next, _ := m.commitPreparedRewind()
+	m = next.(chatTUI)
+	if len(ctrl.switches) != 1 || ctrl.switches[0] != ctrl.result.Branch {
+		t.Fatalf("rewind fork switches = %v, want %q", ctrl.switches, ctrl.result.Branch)
+	}
+	if !m.sessionSwitch {
+		t.Fatal("conversation rewind did not replay the forked session")
 	}
 }

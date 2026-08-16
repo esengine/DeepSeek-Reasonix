@@ -77,6 +77,17 @@ func TestReplaySectionsRestoreInterruptedLocalOutput(t *testing.T) {
 	}
 }
 
+func TestReplaySectionsRestoreFinalReadinessRecoveryHint(t *testing.T) {
+	sections := replaySectionsFor([]provider.Message{{
+		Role: provider.RoleTool, ToolCallID: provider.LocalOnlyToolID, Name: provider.LocalOnlyToolName, LocalOnly: true,
+		FinalReadinessRecovery: &provider.FinalReadinessRecovery{Pending: true, Missing: []string{"verification"}},
+	}}, 64)
+	plain := ansi.Strip(strings.Join(sections, ""))
+	if !strings.Contains(plain, "/continue-checks") {
+		t.Fatalf("replayed readiness pause lacks recovery command: %q", plain)
+	}
+}
+
 func TestScrollbarThumb(t *testing.T) {
 	if _, size := scrollbarThumb(10, 0, 5); size != 0 {
 		t.Errorf("content within viewport should have no thumb, got size %d", size)

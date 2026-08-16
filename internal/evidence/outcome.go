@@ -237,7 +237,7 @@ func (t *OutcomeTracker) scoreCommand(command string, r Receipt, s *OutcomeSampl
 		s.Churn++
 		t.noteMutatedPaths(r.Paths)
 	}
-	verify := IsDeliveryVerificationCommand(command)
+	verify := IsVerificationCommand(command)
 	if verify || t.commandExercisesMutation(command) {
 		s.Discriminating++
 	}

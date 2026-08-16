@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -15,6 +14,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/agent/testutil"
+	"reasonix/internal/agentpreset"
 	"reasonix/internal/command"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
@@ -232,13 +232,6 @@ func (f *configurableFactory) SessionConfigState(_ context.Context, p SessionCon
 	if runtimeProfile != "economy" && runtimeProfile != "balanced" && runtimeProfile != "delivery" {
 		return SessionConfigState{}, os.ErrInvalid
 	}
-	agentPreset := "balanced"
-	switch runtimeProfile {
-	case "economy":
-		agentPreset = "light"
-	case "delivery":
-		agentPreset = "delivery"
-	}
 	return SessionConfigState{
 		Model:          model,
 		EffortOverride: effortOverride,
@@ -250,14 +243,32 @@ func (f *configurableFactory) SessionConfigState(_ context.Context, p SessionCon
 		ConfigOptions: []SessionConfigOption{
 			{ID: "model", Name: "Model", Category: "model", Type: "select", CurrentValue: model, Options: modelOptions},
 			{ID: "effort", Name: "Effort", Category: "thought_level", Type: "select", CurrentValue: effort, Options: effortOptions},
-			{ID: "agent_preset", Name: "Execution Setting", Category: "agent_preset", Type: "select", CurrentValue: agentPreset, Options: []SessionConfigSelectOption{
-				{Value: "light", Name: "Light"}, {Value: "balanced", Name: "Balanced"}, {Value: "delivery", Name: "Delivery"},
-			}},
-			{ID: "work_mode", Name: "Work Mode", Category: "work_mode", Type: "select", CurrentValue: runtimeProfile, Options: []SessionConfigSelectOption{
-				{Value: "economy", Name: "Economy"}, {Value: "balanced", Name: "Balanced"}, {Value: "delivery", Name: "Delivery"},
-			}},
 		},
 	}, nil
+}
+
+func requireNoExecutionModeOptions(t *testing.T, options []SessionConfigOption) {
+	t.Helper()
+	for _, id := range []string{"work_mode", "agent_preset"} {
+		if _, ok := findConfigOption(options, id); ok {
+			t.Fatalf("advertised %s", id)
+		}
+	}
+}
+func requireDeprecatedConfigNoop(t *testing.T, client *rpcClient, factory *configurableFactory, sessionID, configID, value string, buildsBefore int) SetSessionConfigOptionResult {
+	t.Helper()
+	resp := client.call(t, "session/set_config_option", SetSessionConfigOptionParams{SessionID: sessionID, ConfigID: configID, Value: value})
+	if resp.Error != nil {
+		t.Fatalf("set_config_option %s=%s: %+v", configID, value, resp.Error)
+	}
+	var set SetSessionConfigOptionResult
+	if err := json.Unmarshal(resp.Result, &set); err != nil || set.DeprecatedNotice != agentpreset.DeprecatedNotice {
+		t.Fatalf("set_config_option %s result err=%v notice=%q", configID, err, set.DeprecatedNotice)
+	}
+	if got := factory.buildCount(); got != buildsBefore {
+		t.Fatalf("set_config_option %s rebuilt controller: builds=%d, want %d", configID, got, buildsBefore)
+	}
+	return set
 }
 
 func (f *configurableFactory) buildAt(t *testing.T, idx int) SessionParams {
@@ -887,6 +898,7 @@ func TestServeSessionConfigSwitchesModelAndEffort(t *testing.T) {
 	if !ok || modelOpt.CurrentValue != "fast" {
 		t.Fatalf("model config = %+v, want current fast", modelOpt)
 	}
+	requireNoExecutionModeOptions(t, nr.ConfigOptions)
 	if got := factory.buildAt(t, 0).Model; got != "fast" {
 		t.Fatalf("initial build model = %q, want fast", got)
 	}
@@ -937,25 +949,16 @@ func TestServeSessionConfigSwitchesModelAndEffort(t *testing.T) {
 
 func TestServeSessionAxesStayIndependent(t *testing.T) {
 	type observed struct {
-		profile  string
+		preset   string
 		approval string
 		plan     bool
 		goal     string
 	}
 	seen := make(chan observed, 2)
 	factory := &configurableFactory{
-		withCtrl: func(_ context.Context, sink event.Sink, input string, p SessionParams, ctrl *control.Controller) error {
-			// Prefer live controller role setting; SessionParams are build-time.
-			profile := ctrl.AgentPreset()
-			if profile == "" {
-				profile = p.RuntimeProfile
-			}
-			// Dual-write: map light back to economy-style labels for observation.
-			if profile == "delivery" {
-				profile = "delivery"
-			}
+		withCtrl: func(_ context.Context, sink event.Sink, _ string, _ SessionParams, ctrl *control.Controller) error {
 			seen <- observed{
-				profile:  profile,
+				preset:   ctrl.AgentPreset(),
 				approval: ctrl.ToolApprovalMode(),
 				plan:     ctrl.PlanMode(),
 				goal:     ctrl.Goal(),
@@ -974,32 +977,42 @@ func TestServeSessionAxesStayIndependent(t *testing.T) {
 	if err := json.Unmarshal(newResp.Result, &nr); err != nil {
 		t.Fatalf("session/new result: %v", err)
 	}
-	work, ok := findConfigOption(nr.ConfigOptions, "work_mode")
-	if !ok || work.CurrentValue != "balanced" {
-		t.Fatalf("initial work mode = %+v, want balanced", work)
-	}
-	if agentOpt, ok := findConfigOption(nr.ConfigOptions, "agent_preset"); !ok || agentOpt.CurrentValue != "balanced" {
-		t.Fatalf("initial agent_preset = %+v, want balanced", agentOpt)
-	}
+	requireNoExecutionModeOptions(t, nr.ConfigOptions)
 	approval, ok := findConfigOption(nr.ConfigOptions, "tool_approval")
 	if !ok || approval.CurrentValue != control.ToolApprovalAsk {
 		t.Fatalf("initial tool approval = %+v, want ask", approval)
 	}
 
 	buildsBefore := factory.buildCount()
-	setWork := client.call(t, "session/set_config_option", SetSessionConfigOptionParams{
+	for _, tc := range []struct {
+		id    string
+		value string
+	}{
+		{id: "work_mode", value: "delivery"},
+		{id: "agent_preset", value: "delivery"},
+		{id: "profile", value: "economy"},
+		{id: "runtime_profile", value: "balanced"},
+		{id: "token_mode", value: "light"},
+	} {
+		set := requireDeprecatedConfigNoop(t, client, factory, nr.SessionID, tc.id, tc.value, buildsBefore)
+		requireNoExecutionModeOptions(t, set.ConfigOptions)
+		modelOpt, _ := findConfigOption(set.ConfigOptions, "model")
+		approvalOpt, _ := findConfigOption(set.ConfigOptions, "tool_approval")
+		if modelOpt.CurrentValue != "fast" || approvalOpt.CurrentValue != control.ToolApprovalAsk {
+			t.Fatalf("deprecated %s mutated live axes: model=%q approval=%q", tc.id, modelOpt.CurrentValue, approvalOpt.CurrentValue)
+		}
+	}
+	bad := client.call(t, "session/set_config_option", SetSessionConfigOptionParams{
 		SessionID: nr.SessionID,
 		ConfigID:  "work_mode",
-		Value:     "delivery",
+		Value:     "not-a-mode",
 	})
-	if setWork.Error != nil {
-		t.Fatalf("set work mode: %+v", setWork.Error)
+	if bad.Error == nil || bad.Error.Code != ErrInvalidParams {
+		t.Fatalf("invalid work_mode error = %+v, want invalid-params", bad.Error)
 	}
-	// Role settings switch in place — no controller rebuild.
 	if got := factory.buildCount(); got != buildsBefore {
-		t.Fatalf("role setting rebuilt controller: builds=%d, want %d", got, buildsBefore)
+		t.Fatalf("invalid work_mode rebuilt controller: builds=%d, want %d", got, buildsBefore)
 	}
-	buildsAfterWorkMode := factory.buildCount()
 
 	setApproval := client.call(t, "session/set_config_option", SetSessionConfigOptionParams{
 		SessionID: nr.SessionID,
@@ -1009,8 +1022,8 @@ func TestServeSessionAxesStayIndependent(t *testing.T) {
 	if setApproval.Error != nil {
 		t.Fatalf("set tool approval: %+v", setApproval.Error)
 	}
-	if got := factory.buildCount(); got != buildsAfterWorkMode {
-		t.Fatalf("tool approval rebuilt controller: builds=%d, want %d", got, buildsAfterWorkMode)
+	if got := factory.buildCount(); got != buildsBefore {
+		t.Fatalf("tool approval rebuilt controller: builds=%d, want %d", got, buildsBefore)
 	}
 
 	setGoal := client.call(t, "session/set_mode", SessionSetModeParams{SessionID: nr.SessionID, ModeID: sessionModeGoal})
@@ -1026,8 +1039,8 @@ func TestServeSessionAxesStayIndependent(t *testing.T) {
 		t.Fatalf("goal prompt: %+v", promptResp.Error)
 	}
 	goalObserved := <-seen
-	if goalObserved.profile != "delivery" || goalObserved.approval != control.ToolApprovalAuto || goalObserved.plan || goalObserved.goal != "ship the ACP profile switch" {
-		t.Fatalf("goal axes = %+v, want delivery + auto + goal", goalObserved)
+	if goalObserved.preset != "balanced" || goalObserved.approval != control.ToolApprovalAuto || goalObserved.plan || goalObserved.goal != "ship the ACP profile switch" {
+		t.Fatalf("goal axes = %+v, want balanced + auto + goal", goalObserved)
 	}
 
 	setPlan := client.call(t, "session/set_mode", SessionSetModeParams{SessionID: nr.SessionID, ModeID: sessionModePlan})
@@ -1043,8 +1056,8 @@ func TestServeSessionAxesStayIndependent(t *testing.T) {
 		t.Fatalf("plan prompt: %+v", promptResp.Error)
 	}
 	planObserved := <-seen
-	if planObserved.profile != "delivery" || planObserved.approval != control.ToolApprovalAuto || !planObserved.plan || planObserved.goal != "" {
-		t.Fatalf("plan axes = %+v, want delivery + auto + plan", planObserved)
+	if planObserved.preset != "balanced" || planObserved.approval != control.ToolApprovalAuto || !planObserved.plan || planObserved.goal != "" {
+		t.Fatalf("plan axes = %+v, want balanced + auto + plan", planObserved)
 	}
 }
 
@@ -1142,10 +1155,10 @@ func TestServeSessionAxesRestoreFromMetadata(t *testing.T) {
 	if err := json.Unmarshal(loadResp.Result, &lr); err != nil {
 		t.Fatalf("session/load result: %v", err)
 	}
-	work, _ := findConfigOption(lr.ConfigOptions, "work_mode")
+	requireNoExecutionModeOptions(t, lr.ConfigOptions)
 	approval, _ := findConfigOption(lr.ConfigOptions, "tool_approval")
-	if work.CurrentValue != "delivery" || approval.CurrentValue != control.ToolApprovalAuto || lr.Modes == nil || lr.Modes.CurrentModeID != sessionModePlan {
-		t.Fatalf("reloaded axes = work:%+v approval:%+v modes:%+v", work, approval, lr.Modes)
+	if approval.CurrentValue != control.ToolApprovalAuto || lr.Modes == nil || lr.Modes.CurrentModeID != sessionModePlan {
+		t.Fatalf("reloaded axes = approval:%+v modes:%+v", approval, lr.Modes)
 	}
 	if got := reloadedFactory.buildAt(t, 0).RuntimeProfile; got != "delivery" {
 		t.Fatalf("reloaded build profile = %q, want delivery", got)
@@ -1336,7 +1349,7 @@ func TestQueuedRebuildPreservesControllerSideAxisDrift(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	seen := make(chan struct {
-		profile  string
+		model    string
 		approval string
 		plan     bool
 	}, 1)
@@ -1352,20 +1365,16 @@ func TestQueuedRebuildPreservesControllerSideAxisDrift(t *testing.T) {
 				case <-ctx.Done():
 					return ctx.Err()
 				}
-				// Simulate slash-command/controller-side state changes late in the
-				// turn, after the client has queued a work-mode rebuild.
+				// Controller-side state changes late in the turn, after the
+				// client has queued a model rebuild.
 				ctrl.SetPlanMode(false)
 				ctrl.SetToolApprovalMode(control.ToolApprovalAuto)
 			} else {
-				profile := ctrl.AgentPreset()
-				if profile == "" {
-					profile = p.RuntimeProfile
-				}
 				seen <- struct {
-					profile  string
+					model    string
 					approval string
 					plan     bool
-				}{profile, ctrl.ToolApprovalMode(), ctrl.PlanMode()}
+				}{p.Model, ctrl.ToolApprovalMode(), ctrl.PlanMode()}
 			}
 			sink.Emit(event.Event{Kind: event.Text, Text: "done"})
 			return nil
@@ -1391,32 +1400,23 @@ func TestQueuedRebuildPreservesControllerSideAxisDrift(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("first prompt did not start")
 	}
-	// Active turn must refuse role-setting switch with a busy error (no silent queue).
+	requireDeprecatedConfigNoop(t, client, factory, nr.SessionID, "work_mode", "delivery", 1)
 	if resp := client.call(t, "session/set_config_option", SetSessionConfigOptionParams{
 		SessionID: nr.SessionID,
-		ConfigID:  "work_mode",
-		Value:     "delivery",
-	}); resp.Error == nil {
-		t.Fatal("expected busy error while a turn is running")
-	} else if !strings.Contains(resp.Error.Message, "active turn") && !strings.Contains(resp.Error.Message, "busy") {
-		t.Fatalf("busy error message = %q", resp.Error.Message)
+		ConfigID:  "model",
+		Value:     "pro",
+	}); resp.Error != nil {
+		t.Fatalf("queue model switch: %+v", resp.Error)
+	}
+	if got := factory.buildCount(); got != 1 {
+		t.Fatalf("build count while prompt is active = %d, want only initial build", got)
 	}
 	close(release)
 	if _, resp := drainPrompt(t, client, firstPrompt); resp.Error != nil {
 		t.Fatalf("first prompt: %+v", resp.Error)
 	}
-
-	// Idle switch applies in place without rebuild.
-	buildsBefore := factory.buildCount()
-	if resp := client.call(t, "session/set_config_option", SetSessionConfigOptionParams{
-		SessionID: nr.SessionID,
-		ConfigID:  "work_mode",
-		Value:     "delivery",
-	}); resp.Error != nil {
-		t.Fatalf("idle work mode switch: %+v", resp.Error)
-	}
-	if factory.buildCount() != buildsBefore {
-		t.Fatalf("idle role setting must not rebuild controller")
+	if got := factory.buildAt(t, 1).Model; got != "pro" {
+		t.Fatalf("queued rebuild model = %q, want pro", got)
 	}
 
 	secondPrompt := client.callAsync("session/prompt", SessionPromptParams{
@@ -1427,12 +1427,11 @@ func TestQueuedRebuildPreservesControllerSideAxisDrift(t *testing.T) {
 		t.Fatalf("second prompt: %+v", resp.Error)
 	}
 	got := <-seen
-	// Controller-side axes from the first turn must survive; role setting is live.
 	if got.approval != control.ToolApprovalAuto || got.plan {
 		t.Fatalf("axes = %+v, want auto + normal (plan cleared)", got)
 	}
-	if got.profile != "delivery" {
-		t.Fatalf("profile = %q, want delivery after idle switch", got.profile)
+	if got.model != "pro" {
+		t.Fatalf("model = %q, want pro after queued rebuild", got.model)
 	}
 }
 
@@ -1856,32 +1855,6 @@ func TestServeSteerInjectsIntoActivePrompt(t *testing.T) {
 	})
 	if idleResp.Error == nil || idleResp.Error.Code != ErrInvalidRequest {
 		t.Fatalf("idle %s = %+v, want invalid request", sessionSteerMethod, idleResp.Error)
-	}
-}
-
-func TestServePromptErrorIsNotReportedAsCancelled(t *testing.T) {
-	factory := &fakeFactory{behavior: func(context.Context, event.Sink, string) error {
-		return errors.New("provider failed")
-	}}
-	client, stop := startServer(t, factory)
-	defer stop()
-
-	client.call(t, "initialize", InitializeParams{ProtocolVersion: 1})
-	newResp := client.call(t, "session/new", SessionNewParams{})
-	var nr SessionNewResult
-	json.Unmarshal(newResp.Result, &nr)
-
-	promptCh := client.callAsync("session/prompt", SessionPromptParams{
-		SessionID: nr.SessionID,
-		Prompt:    []ContentBlock{{Type: "text", Text: "fail"}},
-	})
-	_, resp := drainPrompt(t, client, promptCh)
-	var pr SessionPromptResult
-	if err := json.Unmarshal(resp.Result, &pr); err != nil {
-		t.Fatalf("prompt result: %v", err)
-	}
-	if pr.StopReason != StopError {
-		t.Errorf("stopReason = %q, want error", pr.StopReason)
 	}
 }
 

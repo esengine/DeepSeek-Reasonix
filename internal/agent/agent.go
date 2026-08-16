@@ -15,7 +15,6 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 
 	"reasonix/internal/ablation"
-	"reasonix/internal/agentpreset"
 	"reasonix/internal/capability"
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/diff"
@@ -29,9 +28,10 @@ import (
 	"reasonix/internal/plancontract"
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
+	"reasonix/internal/runtimepolicy"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/shellparse"
-	"reasonix/internal/taskpolicy"
+	"reasonix/internal/taskcontract"
 	"reasonix/internal/tool"
 	"reasonix/internal/workspacelease"
 )
@@ -53,10 +53,6 @@ const maxExecutorHandoffNudges = 1
 // defaultReasoningByteLimit caps stored hidden reasoning for one stream.
 // It does not cancel generation; official DeepSeek may emit up to 384K tokens.
 const defaultReasoningByteLimit = 8 << 20
-
-const finishReasonClientReasoningLimit = "client_reasoning_limit"
-
-var errReasoningByteLimitExceeded = errors.New("reasoning output exceeded client byte limit")
 
 // DeliveryRuntimeMarker is the delivery-mode contract block appended to user
 // turns (withTurnPreferences). Exported as the single source of truth for the
@@ -334,9 +330,10 @@ type Agent struct {
 	// Entries keep a durable inbox item ID plus a loader so full bodies are not
 	// retained in the agent heap beyond need. Cache miss for the next API call
 	// is unavoidable but limited to one call — the prefix stays stable otherwise.
-	steerMu       sync.Mutex
-	steerQueue    []steerEntry
-	steerConsumed bool
+	steerMu        sync.Mutex
+	steerQueue     []steerEntry
+	steerConsumed  bool
+	steerUnapplied bool
 	// steerRunActive is true while Run is executing. Steer only queues while
 	// it is set; once the turn's exit flush has drained the queue, later
 	// steers are rejected so the caller can deliver them as a regular turn
@@ -360,17 +357,11 @@ type Agent struct {
 	// verify against same-turn bash receipts after a write-backed completion.
 	projectChecks []instruction.VerifyCheck
 
-	// deliveryProfile enables the runtime-enforced delivery contract. The stable
-	// profile prompt explains intent; this is host state and never enters the
-	// provider-cached prefix. The scope ID and checkpoint it works against live
-	// in task; the per-turn expectations live in turn.
-	// When agentPreset is set, deliveryProfile is derived for baseline Delivery
-	// and may be elevated per-turn by TaskPolicy (e.g. Light high-risk).
-	deliveryProfile bool
+	// closedLoop gates come from Goal/Plan scope and strict contract
+	// obligations. Host state only; never enters the provider-cached prefix.
 
-	// agentPreset is the session role setting. Atomic so SetAgentPreset can
-	// update subsequent turns without rebuilding the agent.
-	agentPreset atomic.Value // string light|balanced|delivery
+	// inheritedExec is the writer parent's host execution context.
+	inheritedExec *runtimepolicy.InheritedExecutionContext
 
 	// turn is the state of the Run currently executing; beginRunTurn replaces
 	// it wholesale. See turnruntime.go.
@@ -524,16 +515,6 @@ func (a *Agent) SetSandboxEscapeApprover(g sandbox.EscapeApprover) {
 	a.svc.sandboxEscape = g
 }
 
-// SetConfigWriteApprover installs the optional per-write approval path used by
-// the file tools when a target is a Reasonix-managed config file outside the
-// workspace write roots.
-func (a *Agent) SetConfigWriteApprover(g tool.ConfigWriteApprover) {
-	if nilutil.IsNil(g) {
-		g = nil
-	}
-	a.svc.configWrite = g
-}
-
 func (a *Agent) withTurnPreferences(input string) string {
 	if a == nil {
 		return input
@@ -553,8 +534,6 @@ func (a *Agent) withTurnPreferences(input string) string {
 		}
 	}
 	input = WithReasoningLanguage(input, lang)
-	// Role settings no longer inject a stable delivery-runtime system-like
-	// marker. Per-turn <execution-policy> carries the frozen role setting.
 	return input
 }
 
@@ -615,6 +594,9 @@ func (a *Agent) SetSession(s *Session) {
 	// answer to beginRunTurn's scope check rather than to this seam.
 	a.task.repeatFailures = nil
 	a.task.repeatScope = ""
+	a.pending.preserveEvidence = false
+	a.pending.finalReadinessRecovery = false
+	a.pending.finalReadinessRecoveryPrepared = false
 	if s != nil {
 		a.rebuildTodoState(s.Snapshot())
 	}
@@ -702,6 +684,11 @@ type steerEntry struct {
 	text string
 }
 
+// ErrSteerWithdrawn tells the agent that a durable steer was intentionally
+// removed by a concurrent user cancellation. It must not be recorded as an
+// unapplied failure in the transcript.
+var ErrSteerWithdrawn = errors.New("steer withdrawn")
+
 // Steer queues a message for mid-turn injection. It reports whether an active
 // turn accepted the text; on false nothing was queued and the caller must
 // deliver it another way (typically as a new turn). Without the active check,
@@ -732,6 +719,15 @@ func (a *Agent) SteerConsumed() bool {
 	return a.steerConsumed
 }
 
+// HasUnappliedSteer reports whether the last Run ended with user guidance that
+// arrived too late to be consumed. Hosts use it to yield before starting an
+// automatic synthetic continuation.
+func (a *Agent) HasUnappliedSteer() bool {
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	return a.steerUnapplied
+}
+
 // SetSink replaces the agent's event sink. Controllers use this to wrap the
 // sink after construction (e.g. durable inbox observation) without rebuilding
 // the agent.
@@ -757,6 +753,9 @@ func (a *Agent) consumeSteer() (text, itemID string, ok bool) {
 	if e.load != nil {
 		t, err := e.load()
 		if err != nil {
+			if errors.Is(err, ErrSteerWithdrawn) {
+				return "", "", false
+			}
 			return "", e.itemID, false
 		}
 		return t, e.itemID, true
@@ -787,20 +786,28 @@ func (a *Agent) flushSteerQueue() {
 	a.steerMu.Lock()
 	pending := a.steerQueue
 	a.steerQueue = nil
+	a.steerUnapplied = false
 	if len(pending) > 0 {
 		a.steerConsumed = true
 	}
 	a.steerRunActive = false
 	a.steerMu.Unlock()
+	unapplied := false
 	for _, e := range pending {
 		text := e.text
 		if e.load != nil {
-			if t, err := e.load(); err == nil {
+			if t, err := e.load(); errors.Is(err, ErrSteerWithdrawn) {
+				continue
+			} else if err == nil {
 				text = t
 			}
 		}
 		a.RecordUnappliedSteer(text, e.itemID)
+		unapplied = true
 	}
+	a.steerMu.Lock()
+	a.steerUnapplied = unapplied
+	a.steerMu.Unlock()
 }
 
 // UnappliedSteerNotice returns the durable warning shown for guidance that was
@@ -943,27 +950,28 @@ type Options struct {
 	WriteScheduler *SubagentScheduler
 	// WriteWorkspaceRoot normalizes parent write reservations.
 	WriteWorkspaceRoot string
+	// WriteRoots is the session-scoped writable directory manager.
+	WriteRoots *sandbox.WritableRootSet
+	// WriteAccessGate authorizes extra writable directories. nil is fail-closed
+	// for missing dirs when WriteRoots is set.
+	WriteAccessGate WriteAccessGate
+	// DisableWriteAccessExpand prevents this agent from requesting new write
+	// directories. Sub-agents set this.
+	DisableWriteAccessExpand bool
+	// HomeDir and StateRoot are used to normalize and reject write directories.
+	HomeDir   string
+	StateRoot string
 
-	// WorkspaceLease serializes Delivery mutations across sessions that target
+	// WorkspaceLease serializes writer mutations across sessions that target
 	// the same workspace. nil preserves source compatibility for direct Agent
-	// construction; boot always supplies it for Delivery sessions.
+	// construction; boot always supplies it for writer-capable sessions.
 	WorkspaceLease *workspacelease.Owner
 
 	// ProjectChecks are host-observable structured checks extracted during boot.
 	ProjectChecks []instruction.VerifyCheck
 
-	// DeliveryProfile enforces acceptance criteria before mutations and requires
-	// post-change review, verification, and evidence-backed sign-off before a
-	// final answer. It changes host control flow, not tool schemas.
-	// Deprecated: prefer AgentPreset + turn TaskPolicy. Still honored when
-	// AgentPreset is empty for one compatibility version of direct constructors.
-	DeliveryProfile bool
-
-	// AgentPreset is the session role setting (light|balanced|delivery). Empty
-	// falls back to balanced unless DeliveryProfile is true (then delivery).
-	// Switching the preset mid-session does not rebuild the agent; the value is
-	// frozen at turn admission into TaskPolicy.
-	AgentPreset string
+	// InheritedExecution is the writer parent's host execution context.
+	InheritedExecution *runtimepolicy.InheritedExecutionContext
 
 	// Ablation switches subsystems off for a benchmark arm. The zero value runs
 	// everything, so ordinary callers leave it unset.
@@ -1113,7 +1121,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		readOnlyExecution:      opts.ReadOnlyExecution,
 		plannerMCPExecution:    opts.PlannerMCPExecution,
 		projectChecks:          append([]instruction.VerifyCheck(nil), opts.ProjectChecks...),
-		deliveryProfile:        opts.DeliveryProfile || agentpreset.Normalize(opts.AgentPreset) == agentpreset.Delivery,
+		inheritedExec:          opts.InheritedExecution,
 		ablation:               opts.Ablation,
 		capabilityLedger:       opts.CapabilityLedger,
 		capabilityAudit:        opts.CapabilityAudit,
@@ -1124,11 +1132,6 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	if a.sess.path != "" {
 		a.LoadProjectionSidecar(a.sess.path)
 	}
-	preset := strings.TrimSpace(opts.AgentPreset)
-	if preset == "" && opts.DeliveryProfile {
-		preset = string(agentpreset.Delivery)
-	}
-	a.SetAgentPreset(preset)
 	a.SetResponseLanguage(opts.ResponseLanguage)
 	a.SetReasoningLanguage(opts.ReasoningLanguage)
 	a.maybeArmForkFromEnv()
@@ -1136,48 +1139,30 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	return a
 }
 
-// SetAgentPreset updates the role setting used by subsequent turns. It does not
-// rebuild providers, tools, or history. The in-flight turn keeps its frozen
-// TaskPolicy.
-func (a *Agent) SetAgentPreset(preset string) {
+// closedLoopActive reports whether the current (or most recent) turn must
+// close the evidence loop. It replaces every historical deliveryProfile gate:
+// acceptance criteria before mutations, todo ownership, opaque-bash limits,
+// capability call preference, post-write verification, review, and sign-off.
+// It is authoritative only for host control flow, never for tool schemas.
+func (a *Agent) closedLoopActive() bool {
 	if a == nil {
-		return
+		return false
 	}
-	p := agentpreset.Normalize(preset)
-	a.agentPreset.Store(string(p))
-	// Keep baseline deliveryProfile aligned with Delivery role setting so
-	// legacy gates that still read the bool stay coherent until fully migrated.
-	switch p {
-	case agentpreset.Delivery:
-		a.deliveryProfile = true
-	case agentpreset.Light, agentpreset.Balanced:
-		// Light may still elevate per-turn; baseline stays non-delivery.
-		a.deliveryProfile = false
+	if a.turn.deliveryScopeActive {
+		return true
 	}
-}
-
-// AgentPreset returns the current session role setting (never empty).
-func (a *Agent) AgentPreset() string {
-	if a == nil {
-		return string(agentpreset.Balanced)
+	if a.planContractSnapshot() != nil {
+		return true
 	}
-	if v := a.agentPreset.Load(); v != nil {
-		if s, ok := v.(string); ok && s != "" {
-			return string(agentpreset.Normalize(s))
+	if a.turn.engine == nil {
+		return false
+	}
+	for _, o := range a.turn.engine.Snapshot().Obligations {
+		if o.Enforcement == taskcontract.EnforcementStrict {
+			return true
 		}
 	}
-	if a.deliveryProfile {
-		return string(agentpreset.Delivery)
-	}
-	return string(agentpreset.Balanced)
-}
-
-// TurnPolicy returns the frozen TaskPolicy for the active turn, if any.
-func (a *Agent) TurnPolicy() (taskpolicy.TaskPolicy, bool) {
-	if a == nil || !a.turn.policySet {
-		return taskpolicy.TaskPolicy{}, false
-	}
-	return a.turn.policy, true
+	return false
 }
 
 func usageSourceOrDefault(source, fallback string) string {
@@ -1241,6 +1226,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	defer a.flushSteerQueue()
 	a.steerMu.Lock()
 	a.steerConsumed = false
+	a.steerUnapplied = false
 	a.steerRunActive = true
 	a.steerMu.Unlock()
 
@@ -1266,6 +1252,10 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	// agent.before_start: an extension may abort the run before the user turn
 	// is appended. The redacted reason surfaces like a normal run error.
 	if err := a.interceptAgentStart(ctx); err != nil {
+		// Explicit readiness recovery is consumed only once beginRunTurn starts.
+		// If an extension blocks earlier, release the in-memory reservation so
+		// the still-pending durable marker can authorize a later retry.
+		a.RestoreFinalReadinessRecoveryPreparation()
 		return err
 	}
 
@@ -1276,6 +1266,12 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	state.runMaxSteps = runMaxSteps
 	state.runMaxStepsKey = runMaxStepsKey
 	state.workDurationMs = workDurationMs
+	ctx = runtimepolicy.WithContext(ctx, a.turn.constraints)
+	ctx = runtimepolicy.WithInherited(ctx, runtimepolicy.InheritedExecutionContext{
+		Constraints:  a.turn.constraints,
+		PlanReadOnly: a.planMode.Load() || a.readOnlyExecution,
+		GoalScopeID:  a.task.scopeID,
+	})
 	return a.runToolLoop(ctx, state)
 }
 
@@ -1335,18 +1331,6 @@ func (a *Agent) RestoreDeliveryCheckpoint(checkpoint evidence.DeliveryCheckpoint
 	a.task.scopeID = checkpoint.ScopeID
 }
 
-// PrepareDeliveryRecovery preserves the exhausted turn's evidence for exactly
-// one explicit continuation. It returns false when there is no matching
-// readiness failure, so normal follow-up turns cannot inherit stale mutations.
-func (a *Agent) PrepareDeliveryRecovery() bool {
-	if !a.deliveryProfile || !a.pending.deliveryRecovery {
-		return false
-	}
-	a.pending.preserveEvidence = true
-	a.pending.deliveryRecovery = false
-	return true
-}
-
 func (a *Agent) updateDeliveryCheckpoint(runErr error) {
 	if !a.turn.deliveryScopeActive || a.task.scopeID == "" || a.task.ledger == nil {
 		return
@@ -1357,13 +1341,11 @@ func (a *Agent) updateDeliveryCheckpoint(runErr error) {
 	}
 	cp.CriteriaEstablished = cp.CriteriaEstablished || a.turn.deliveryCriteriaEstablished || a.task.ledger.HasSuccessfulTodoWrite()
 	cp.WorkObserved = cp.WorkObserved || a.task.ledger.HasSuccessfulWorkReceipt()
-	persistentOnlyReady := a.turn.deliveryPersistentExpected && !a.turn.deliveryMutationExpected &&
-		a.task.ledger.HasSuccessfulToolReceipt("remember") && !a.task.ledger.HasSuccessfulMutationOtherThan("remember")
-	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok && !persistentOnlyReady {
+	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok {
 		cp.MutationObserved = true
 		cp.PendingMutation = true
 	}
-	if persistentOnlyReady {
+	if a.task.ledger.HasSuccessfulToolReceipt("remember") && !a.task.ledger.HasSuccessfulMutationOtherThan("remember") {
 		cp.MutationObserved = true
 	}
 	if runErr == nil && cp.PendingMutation && a.deliveryMutationCheckpointReady() {
@@ -1515,6 +1497,7 @@ func (a *Agent) rebuildTodoState(msgs []provider.Message) {
 		}
 	}
 	a.setTodoState(todos)
+	a.consumeTodoOnlyReadinessMarkerIfResolved()
 }
 
 func successfulToolCallIDs(msgs []provider.Message) map[string]bool {
@@ -1787,6 +1770,7 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 	search := newSearchTurn()
 	var partialCalls []provider.ToolCall
 	var usage *provider.Usage
+	reasoningComplete := true
 	var partialToolStarted bool
 	var maxArgChars int
 	var lastArgProgress time.Time
@@ -1795,7 +1779,7 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 	collect := func(stored string, err error) streamedTurn {
 		return streamedTurn{
 			text: text.String(), reasoning: stored, signature: signature,
-			reasoningID: reasoningID, reasoningStatus: reasoningStatus,
+			reasoningID: reasoningID, reasoningStatus: reasoningStatus, reasoningComplete: reasoningComplete,
 			calls: calls, responsesItems: responsesItems, serverSearch: search.calls, usage: usage,
 			partialToolStarted: partialToolStarted, partialCalls: partialCalls,
 			maxArgChars: maxArgChars, err: err,
@@ -1811,8 +1795,7 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 			}
 		}
 		stored = display
-		providerBound := signature != "" || reasoningID != "" || reasoningStatus != ""
-		if providerBound || provider.RequiresReasoningRoundTrip(a.svc.prov) || (len(calls) > 0 && provider.RequiresToolCallReasoning(a.svc.prov)) {
+		if a.preserveRawReasoning(signature, reasoningID, reasoningStatus, calls, search.calls) {
 			stored = original
 		}
 		return stored, display
@@ -1868,7 +1851,8 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 				return streamedTurn{
 					text: finalText, reasoning: finalReasoning, signature: signature,
 					reasoningID: reasoningID, reasoningStatus: reasoningStatus,
-					calls: calls, responsesItems: responsesItems, serverSearch: search.calls, usage: usage,
+					reasoningComplete: reasoningComplete,
+					calls:             calls, responsesItems: responsesItems, serverSearch: search.calls, usage: usage,
 					partialCalls: partialCalls, maxArgChars: maxArgChars,
 				}
 			}
@@ -1894,10 +1878,7 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 			// Bound stored hidden reasoning only. Do not cancel the provider
 			// stream: official DeepSeek bills this output and still needs to
 			// emit the visible answer or tool calls.
-			if a.reasoningByteLimit > 0 && reasoning.Len() > a.reasoningByteLimit {
-				reasoning.Reset()
-				reasoning.WriteString(snapToRuneBoundary(chunk.Text, 0, min(len(chunk.Text), a.reasoningByteLimit)))
-			}
+			reasoningComplete = boundReasoningReplay(&reasoning, chunk.Text, a.reasoningByteLimit, reasoningComplete)
 		case provider.ChunkText:
 			text.WriteString(chunk.Text)
 			sink.Emit(event.Event{Kind: event.Text, Text: chunk.Text})
@@ -1966,6 +1947,15 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 			return collect(stored, chunk.Err)
 		}
 	}
+}
+
+func boundReasoningReplay(reasoning *strings.Builder, latest string, byteLimit int, complete bool) bool {
+	if byteLimit <= 0 || reasoning.Len() <= byteLimit {
+		return complete
+	}
+	reasoning.Reset()
+	reasoning.WriteString(snapToRuneBoundary(latest, 0, min(len(latest), byteLimit)))
+	return false
 }
 
 func bestEffortStreamUsage(current *provider.Usage, textBytes, reasoningBytes int, finishReason string) *provider.Usage {
@@ -2845,8 +2835,6 @@ func finishReasonMessage(u *provider.Usage) (string, bool) {
 	switch u.FinishReason {
 	case "length":
 		return "response truncated: hit max output tokens", true
-	case finishReasonClientReasoningLimit:
-		return "response stopped: hit the client reasoning safety limit", true
 	case "content_filter":
 		return "response blocked by content filter", true
 	case "repetition_truncation":

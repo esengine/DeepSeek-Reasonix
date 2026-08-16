@@ -588,18 +588,18 @@ eq(
 
 eq(
   projectTreeTopicHoverCardModel(
-    { key: "topic_t", kind: "topic", label: "● Busy topic", root: "/repo", topicId: "t", turns: 3, status: "streaming" },
+    { key: "topic_t", kind: "topic", label: "● Busy topic", preview: "Full first-message preview", root: "/repo", topicId: "t", turns: 3, status: "streaming" },
     testT,
     "my-project",
   ),
   {
-    title: "Busy topic",
+    title: "Full first-message preview",
     statusLabel: "projectTree.status.streaming",
     metaLine: "3 turns",
     exactTime: "",
     projectLabel: "my-project",
   },
-  "hover card model strips the running marker and carries turns, status, and project",
+  "hover card model shows the full preview and carries turns, status, and project",
 );
 
 const day = 24 * 60 * 60 * 1000;

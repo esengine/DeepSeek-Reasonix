@@ -84,12 +84,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	// A meaningful explicit list is the endpoint's declared effort vocabulary;
 	// auto remains implicit and is therefore ignored here.
 	supportedEfforts, hasExplicitEfforts := reasoningEffortVocabulary(kimiK3, supportedEfforts)
-	legacyChatURL, _ := cfg.Extra["chat_url"].(string)
-	chatURL, _ := cfg.Extra["request_url"].(string)
-	chatURL = strings.TrimSpace(chatURL)
-	if chatURL == "" {
-		chatURL = normalizeChatURL(cfg.BaseURL, legacyChatURL)
-	}
+	chatURL := resolveOpenAIChatURL(cfg.BaseURL, cfg.Extra)
 	prefixChatURL := deepSeekPrefixChatURL(chatURL)
 	headers, _ := cfg.Extra["headers"].(map[string]string)
 	extraBody, _ := cfg.Extra["extra_body"].(map[string]any)
@@ -299,7 +294,20 @@ type client struct {
 func (c *client) Name() string { return c.name }
 
 func (c *client) RequiresToolCallReasoning() bool {
-	return c != nil && c.deepseek && c.thinkingType != "disabled"
+	if c == nil || c.thinkingType == "disabled" {
+		return false
+	}
+	if c.deepseek {
+		return true
+	}
+	// Generic OpenAI-compatible gateways can explicitly opt into the
+	// DeepSeek-style replay contract with thinking=enabled (#7763/#7748).
+	// GLM and Kimi K3 keep their broader round-trip policies.
+	return !c.zhipu && !c.kimiK3 && c.thinkingType == "enabled"
+}
+
+func (c *client) AllowsEmptyReasoningFallback() bool {
+	return c.RequiresToolCallReasoning()
 }
 
 func (c *client) RequiresReasoningRoundTrip() bool {
@@ -364,13 +372,6 @@ func normalizeReasoningProtocol(raw string) string {
 	default:
 		return ""
 	}
-}
-
-func normalizeChatURL(baseURL, chatURL string) string {
-	if legacy := strings.TrimRight(strings.TrimSpace(chatURL), "/"); legacy != "" {
-		return legacy
-	}
-	return strings.TrimRight(strings.TrimSpace(baseURL), "/") + "/chat/completions"
 }
 
 func cleanCustomHeaders(in map[string]string) map[string]string {
@@ -716,7 +717,7 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 				// Kimi K3 requires the complete assistant message on multi-turn
 				// and tool-call requests, including provider-issued reasoning.
 				cm.ReasoningContent = &m.ReasoningContent
-			case c.deepseek && len(m.ToolCalls) > 0:
+			case (c.deepseek || c.RequiresToolCallReasoning()) && len(m.ToolCalls) > 0:
 				if c.RequiresToolCallReasoning() || m.ReasoningContent != "" {
 					cm.ReasoningContent = &m.ReasoningContent
 				}

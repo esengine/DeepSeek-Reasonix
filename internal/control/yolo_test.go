@@ -18,11 +18,11 @@ import (
 // TestAutoApproveToolsStillRequiresExplicitPlanApproval proves that YOLO/full
 // tool access does not bypass the separate Plan Mode collaboration gate.
 func TestAutoApproveToolsStillRequiresExplicitPlanApproval(t *testing.T) {
-	prov := &scriptedTurns{turns: [][]provider.Chunk{
-		textTurn("Plan:\n1. Add the config field\n2. Wire it into boot\n3. Add tests"),
-		textTurn("Done — implemented the approved plan."),
-	}}
-	ag := agent.New(prov, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
+	prov := &scriptedTurns{turns: planThenExecuteTurns(
+		"Plan:\n1. Add the config field\n2. Wire it into boot\n3. Add tests",
+		"Done — implemented the approved plan.",
+	)}
+	ag := newPlanTestAgent(prov)
 
 	approvalRequests := make(chan event.Approval, 1)
 	var seeded bool
@@ -82,8 +82,8 @@ func TestAutoApproveToolsStillRequiresExplicitPlanApproval(t *testing.T) {
 	if !seeded {
 		t.Fatal("approved plan should seed the task list")
 	}
-	if prov.call != 2 {
-		t.Fatalf("provider called %d times, want 2 (plan + execution)", prov.call)
+	if prov.call != 3 {
+		t.Fatalf("provider called %d times, want 3 (plan + read + answer)", prov.call)
 	}
 }
 

@@ -14,7 +14,7 @@ import {
   type TranscriptSelectionPoint,
 } from "./transcriptSelectionStore";
 import { mergeTranscriptSelectableRows } from "./transcriptSelectionText";
-import type { TranscriptScrollMode, TranscriptScrollOwner } from "./transcriptScrollController";
+import type { TranscriptScrollMode, TranscriptScrollOwner } from "./transcriptScrollArbiter";
 
 const EDGE_SCROLL_ZONE_PX = 48;
 const EDGE_SCROLL_MIN_PX = 4;
@@ -108,6 +108,14 @@ export function useTranscriptSelectionRetention({
     setScrollMode("manual", reason);
     publish();
   }, [cancelFrames, publish, releasePointerCapture, setScrollMode]);
+
+  // A fresh user gesture (e.g. the jump-to-bottom click) while a gesture is
+  // still marked dragging means the original pointerup was lost (released
+  // outside the window, WebView2 pointer quirks). Ending the stale gesture
+  // lets scroll commands leave selection mode instead of no-oping forever.
+  const endStaleGesture = useCallback(() => {
+    if (selectionRef.current?.dragging) clear("stale-selection-gesture");
+  }, [clear]);
 
   const updateLogicalFocus = useCallback((pointer = lastPointerRef.current) => {
     const tracked = selectionRef.current;
@@ -435,6 +443,7 @@ export function useTranscriptSelectionRetention({
 
   return {
     clear,
+    endStaleGesture,
     active: selectionRef.current !== null,
     logical: selectionRef.current?.logical ?? false,
     reconcileLogicalFocus: scheduleLogicalFocus,

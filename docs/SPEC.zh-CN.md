@@ -73,7 +73,7 @@ func New(kind string, cfg Config) (Provider, error)
 - OpenAI-compatible vendor 只是 `kind = "openai"` 的不同配置实例，通过 `base_url`、`model`、`api_key_env` 区分；新增兼容模型通常只需改配置。
 - 一个 provider 表示一个 vendor endpoint，可通过 `models` 暴露多个模型，并以 `default` 指定默认项。设置 `request_url` 时，OpenAI-compatible、Anthropic-compatible 和 Responses provider 都会原样使用该完整请求地址；旧 `chat_url` 只保留 OpenAI 历史兼容语义。`default_model`、`--model` 和桌面端模型选择器都经 `Config.ResolveModel` 解析，可接受 provider 名、裸模型名或 `provider/model`。
 - `context_window` 是 provider 级默认值；`model_overrides.<model>.context_window` 可覆盖单个模型。
-- `max_output_tokens` 是独立的本轮输出上限，不由客户端 reasoning 字节上限换算，也不参与 `compact_ratio`。推荐 `0`：官方 DeepSeek 省略该字段，由服务端使用定价页上的 **384K** 输出上限；思考深度只走 `effort`（默认 high）。正数为用户显式控费上限。负数为在协议允许时省略；官方 DeepSeek 的 Anthropic 兼容层因 `max_tokens` 必填，仍发送 384K。`budget_tokens` 在该兼容层会被忽略。混合网关可用 `model_overrides.<model>.max_output_tokens` 覆盖单个模型。
+- `max_output_tokens` 是独立的本轮输出上限，不由客户端 reasoning 字节上限换算，也不参与 `compact_ratio`。`0` 是 Provider 自动值（官方 DeepSeek 384K / OpenCode 元数据），不再表示跳过本地检查；空间充足时官方 DeepSeek 仍省略字段，临界时裁剪。正数为用户显式控费上限。负数为明确省略；安全不足时压缩。`budget_tokens` 在官方 Anthropic 兼容层会被忽略。混合网关可用 `model_overrides.<model>.max_output_tokens` 覆盖单个模型。
 - streaming tool-call delta 在 provider 内按 index 聚合，只向上层发出完整 `ToolCall`。
 
 ### 3.2 Tool 与 registry（`internal/tool`）
@@ -121,18 +121,18 @@ type Tool interface {
 
 当 `agent.planner_model` 与 executor 不同时，planner 与 executor 使用独立 session：
 
-- 宿主使用原始用户文本和可信回合元数据做确定性路由，不调用 classifier 模型，也不从
-  controller 注入的 prompt block 猜测宿主状态；路由结果为 executor-only、Light、Full、
-  plan-for-approval 或显式 plan-only，并用不含用户原文的 route/depth/reason 写入阶段详情；
-- 显式 Plan Mode、synthetic turn、上下文短回复、明确单点小改和边界清楚的纯只读动作
-  不再调用第二个 Planner；跨面、结构化、模糊或高风险工作使用 Full；活跃 Goal 与
-  Delivery 中的非原子修改工作同样升级为 Full，纯只读动作仍直达 Executor；
-- Light 使用较小的单轮调研预算，输出紧凑目标、1–4 个有序步骤、候选触点和主要验证；
-  Full 使用较大的有界预算，区分已验证与候选触点，并补充风险、验收标准、命令级验证及
-  必要回滚；深度合约保持在同一个稳定 system prompt 中，单轮只追加很小的
-  `<planner-turn>`；若 Planner 在有界调研和最终总结轮后仍未收敛，普通
-  plan-and-execute 用原始任务降级到 Executor，plan-only 与 plan-for-approval 仍保持
-  fail-closed；不完整的 Planner 回合会被回滚，不暴露成无法继续的手动续跑；
+- 宿主使用原始用户文本和可信回合元数据做确定性路由，默认 executor-only；不调用
+  classifier 模型，不从措辞、文件数量或关键词推断复杂度，也不从 controller 注入的
+  prompt block 猜测宿主状态。独立 Planner 只响应显式先规划 / 规划再执行、显式等待批准、
+  显式只规划，或显式 Goal 启动；没有 Light/Full 规划深度。阶段详情只记录不含用户原文
+  的 route/reason；
+- 显式 Plan Mode 由 executor 驱动，不会再启动第二个 Planner；synthetic turn、上下文
+  短回复和普通请求一律直达 Executor；
+- Planner 使用同一个稳定 system prompt，单轮只追加很小的 `<planner-turn>` 标明显式
+  路由。计划应区分已验证与候选触点，并在证据支持时补充非目标、风险、验收标准和
+  命令级验证；若 Planner 在有界调研和最终总结轮后仍未收敛，普通 plan-and-execute
+  用原始任务降级到 Executor，plan-only 与 plan-for-approval 仍保持 fail-closed；
+  不完整的 Planner 回合会被回滚，不暴露成无法继续的手动续跑；
 - 普通“先规划”在计划完成后直接交接 Executor；plan-for-approval 只用于明确要求等待
   确认的请求，由宿主强制审批边界，批准后交接 Executor；headless 场景会保存计划供后续
   回合继续；明确 plan-only 会保存计划并结束当前回合；上述两种执行边界下 Planner 失败
@@ -172,10 +172,11 @@ transcript，仅在唯一自动阈值被跨越时安装 provider 可见的短 **
   将无法分类上一次刚刚保护下来的失败。
 - 用户可用 `reasonix config compact-ratio [--local] [VALUE]` 查看或修改阈值。
   项目配置优先于桌面与新 CLI 会话共用的用户全局配置。UI 始终展示**实际生效**值。
-- `max_output_tokens` 是独立的**本轮**输出上限。
-  推荐 `0`：官方 DeepSeek 省略该字段，由服务端使用定价页 **384K** 上限；思考深度只走 `effort`。
-  正数为用户显式控费上限。负数为在协议允许时省略（官方 Anthropic 兼容层仍发送 384K）。
-  仅在发送阶段按剩余窗口裁剪，**绝不**改变 `triggerTokens` 或维护时机。计费按实际 completion，不按配置上限。
+- `max_output_tokens` 是独立的**本轮**输出上限，**绝不**改变 `triggerTokens` / `compact_ratio`。
+  - `0` 是 Provider 自动值。本地准入使用 Provider 能力（官方 DeepSeek 384K、OpenCode Go 模型表，或 400 学到的 completion）。它不再表示“跳过本地输出检查”。
+  - 官方 DeepSeek Chat/Responses 在剩余共享窗口还能放下 384K 自动预算时继续省略字段，只在临界时注入裁剪值。官方 Anthropic 兼容层因 `max_tokens` 必填，仍发送 384K 或裁剪值。
+  - 官方 OpenCode Go 预设会主动发送 `min(模型上限, 物理剩余)`，使用通用 `max_tokens` / `max_output_tokens`。第三方兼容 API 在可信上下文 400 之前不假设共享窗口。
+  - 正数是用户显式控费上限，仍可按物理剩余继续下调。负数表示明确省略可选 wire 字段；已知自动预算放不下时压缩，而不是覆盖用户选择。
 - 巨型工具结果只在**第一次**进入模型前限长：`Content` 为稳定 ≤32KB 可见版；
   超限时 `RawContent` 保存完整原文。后续维护不得回头改写。`ModelMessages` 会去掉
   `RawContent`，provider 序列化与缓存 hash 永不包含它。
@@ -439,7 +440,7 @@ auth_mode = "none"
 原生 CLI 更新器始终安装最新的严格 `vX.Y.Z` 正式版。1.x 期间仍解析旧渠道配置与
 参数，但统一指向正式版，并在后续保存配置时省略这些字段。
 
-`[sandbox]` 是权限策略之下的强制执行层。file writer 默认限制在 workspace root、Reasonix 用户配置目录和 `allow_write`；`forbid_read` 可阻止读取敏感路径。macOS 使用 Seatbelt，Linux 使用 bubblewrap；若声明 enforce 但平台 backend 不可用，Bash 应拒绝执行而不是静默降级。Windows 当前没有 OS 级 Bash sandbox，file tool 的路径限制仍然生效。
+`[sandbox]` 是权限策略之下的强制执行层。权限策略和沙箱边界是两层机制。交互会话可以用「扩展写入范围」审批（仅本次 / 本会话 / 写入项目 `reasonix.toml` / 拒绝）按需扩大可写根；文件工具会自动申请目标父目录，Bash 必须声明 `additional_write_dirs` 和 `justification`。无头 `reasonix run` 缺少目录时 fail closed，请使用 `--add-dir` 或 `[sandbox].allow_write`。`${HOME}` 可在强警告后批准；文件系统根和 Reasonix 会话/状态目录不能通过动态流程批准。file writer 默认限制在 workspace root、Reasonix 用户配置目录和 `allow_write`；`forbid_read` 可阻止读取敏感路径。macOS 使用 Seatbelt，Linux 使用 bubblewrap；若声明 enforce 但平台 backend 不可用，Bash 应拒绝执行而不是静默降级。Windows 当前没有 OS 级 Bash sandbox，file tool 的路径限制仍然生效。
 
 `[serve]` 控制 `reasonix serve` 的 browser frontend。默认 `auth_mode = "none"` 仅适合 loopback；暴露到其他机器时必须使用 token 或 password。只有位于可信 reverse proxy 后方时才能启用 `behind_proxy`。
 

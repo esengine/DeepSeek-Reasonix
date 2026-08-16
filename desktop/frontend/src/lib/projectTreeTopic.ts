@@ -266,7 +266,7 @@ export function projectTreeTopicHoverCardModel(node: ProjectNode, t: Translator,
   const metaLine = projectTreeTopicMetaLine(node, t);
   const exactTime = activityAt ? topicActivityDateLabel(activityAt) : "";
   return {
-    title: (node.label || node.topicId || "Untitled").replace(/^●\s*/, ""),
+    title: (node.preview || node.label || node.topicId || "Untitled").replace(/^●\s*/, ""),
     statusLabel: topicStatusLabel(node, t),
     metaLine,
     exactTime: projectTreeDedupedExactTime(metaLine, exactTime),

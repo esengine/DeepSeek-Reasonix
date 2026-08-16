@@ -9,7 +9,7 @@ import { formatMoneyLocalized } from "../lib/money";
 import { formatTokens, formatOptionalTokens } from "../lib/format";
 import type { DictKey } from "../locales/en";
 import type { BalanceInfo, ContextInfo, ContextPanelInfo, UsageSourceStats, WireUsage } from "../lib/types";
-
+import { ContextBudgetCard, resolveContextBudget } from "./ContextBudgetCard";
 interface ContextPanelProps {
   tabId?: string;
   context?: ContextInfo;
@@ -624,7 +624,7 @@ export function ContextPanel({
                   <strong>{compactRemainingLabel}</strong>
                 </span>
               </div>
-            </div>
+            </div><ContextBudgetCard budget={resolveContextBudget(context, info)} t={t} />
           </section>
           <section className="context-panel__section context-panel__session-section">
             <SectionHeading title={t("context.sessionMetrics")} />

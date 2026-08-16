@@ -190,3 +190,54 @@ func TestBuildRequestReplaysServerSearchBlocks(t *testing.T) {
 		t.Fatalf("text = %+v", blocks[2])
 	}
 }
+
+func TestBuildRequestDeepSeekReplaysThinkingBeforeServerSearch(t *testing.T) {
+	c := &client{name: "deepseek", model: "deepseek-v4-flash", deepseek: true, thinking: "enabled", webSearch: true}
+	r := c.buildRequest(context.Background(), provider.Request{Messages: []provider.Message{{
+		Role: provider.RoleAssistant, Content: "answer", ReasoningContent: "search first",
+		ServerSearch: []provider.ServerSearchCall{{
+			ID: "s1", Query: "latest", Raw: json.RawMessage(`[{"title":"Change Log","encrypted_content":"xxx"}]`),
+		}},
+	}}})
+	blocks := r.Messages[0].Content
+	if len(blocks) != 4 {
+		t.Fatalf("blocks = %#v", blocks)
+	}
+	if blocks[0].Type != "thinking" || blocks[0].Thinking != "search first" || blocks[0].Signature != "" {
+		t.Fatalf("thinking = %+v", blocks[0])
+	}
+	if blocks[1].Type != "server_tool_use" || blocks[2].Type != "web_search_tool_result" || blocks[3].Type != "text" {
+		t.Fatalf("block order = %#v", blocks)
+	}
+}
+
+func TestBuildRequestDeepSeekDoesNotFabricateEmptyThinkingForServerSearch(t *testing.T) {
+	c := &client{name: "deepseek", model: "deepseek-v4-flash", deepseek: true, thinking: "enabled", webSearch: true}
+	r := c.buildRequest(context.Background(), provider.Request{Messages: []provider.Message{{
+		Role: provider.RoleAssistant, Content: "answer",
+		ServerSearch: []provider.ServerSearchCall{{ID: "s1", Query: "latest", Raw: json.RawMessage(`[]`)}},
+	}}})
+	blocks := r.Messages[0].Content
+	if len(blocks) != 3 || blocks[0].Type != "server_tool_use" || blocks[1].Type != "web_search_tool_result" || blocks[2].Type != "text" {
+		t.Fatalf("empty thinking was fabricated or block order changed: %#v", blocks)
+	}
+}
+
+func TestBuildRequestDeepSeekOrdersThinkingSearchTextAndClientTool(t *testing.T) {
+	c := &client{name: "deepseek", model: "deepseek-v4-flash", deepseek: true, thinking: "enabled", webSearch: true}
+	r := c.buildRequest(context.Background(), provider.Request{Messages: []provider.Message{{
+		Role: provider.RoleAssistant, Content: "checking", ReasoningContent: "use both",
+		ServerSearch: []provider.ServerSearchCall{{ID: "s1", Query: "latest", Raw: json.RawMessage(`[]`)}},
+		ToolCalls:    []provider.ToolCall{{ID: "t1", Name: "read_file", Arguments: `{"path":"main.go"}`}},
+	}}})
+	blocks := r.Messages[0].Content
+	want := []string{"thinking", "server_tool_use", "web_search_tool_result", "text", "tool_use"}
+	if len(blocks) != len(want) {
+		t.Fatalf("blocks = %#v", blocks)
+	}
+	for i, typ := range want {
+		if blocks[i].Type != typ {
+			t.Fatalf("block[%d].type = %q, want %q; blocks=%#v", i, blocks[i].Type, typ, blocks)
+		}
+	}
+}

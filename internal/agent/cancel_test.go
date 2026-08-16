@@ -243,9 +243,7 @@ func TestDefaultReasoningGuardAllowsFormer128KiBStream(t *testing.T) {
 	reasoning := strings.Repeat("abcd", 128*1024/4+1)
 	prov := testutil.NewMock("m", testutil.Turn{Reasoning: reasoning, Text: "svg done"})
 	a := New(prov, tool.NewRegistry(), NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "draw the compound bow"); errors.Is(err, errReasoningByteLimitExceeded) {
-		t.Fatalf("default guard aborted a %d-byte reasoning stream", len(reasoning))
-	} else if err != nil {
+	if err := a.Run(context.Background(), "draw the compound bow"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -396,7 +394,7 @@ func TestCancelDuringToolExecutionBreaksOutPromptly(t *testing.T) {
 	start := time.Now()
 	done := make(chan error, 1)
 	go func() {
-		done <- a.Run(ctx, "test cancel during tool execution")
+		done <- a.Run(withNoClosedLoop(ctx), "test cancel during tool execution")
 	}()
 
 	// Cancel after a short delay to simulate user pressing Esc mid-execution
@@ -462,7 +460,7 @@ func TestCancelDuringBatchStopsRemainingTools(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- a.Run(ctx, "test batch cancel")
+		done <- a.Run(withNoClosedLoop(ctx), "test batch cancel")
 	}()
 
 	// Cancel while tool2 is still running (after tool1 completes but during tool2)
@@ -549,7 +547,7 @@ func TestCancelBeforeParallelBatchSkipsTheWholeRemainingBatch(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- a.Run(ctx, "test cancel before parallel batch")
+		done <- a.Run(withNoClosedLoop(ctx), "test cancel before parallel batch")
 	}()
 	go func() {
 		time.Sleep(300 * time.Millisecond)

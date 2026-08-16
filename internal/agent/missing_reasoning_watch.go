@@ -30,8 +30,21 @@ type unwrittenResolve struct {
 // once before tools execute; three consecutive healthy rounds then resolve the
 // incident and re-arm a future isolated regression (#6259, #7059).
 func (a *Agent) observeMissingToolCallReasoning(calls []provider.ToolCall, reasoning string) (missing, shouldRetry bool) {
-	if len(calls) == 0 || !provider.WarnOnMissingToolCallReasoning(a.svc.prov) {
+	return a.observeMissingAssistantReasoning(provider.Message{
+		Role: provider.RoleAssistant, ToolCalls: calls, ReasoningContent: reasoning,
+	}, true)
+}
+
+// observeMissingAssistantReasoning extends the legacy tool-call watcher to
+// provider-executed tool activity while preserving its persisted incident and
+// anti-flapping behavior.
+func (a *Agent) observeMissingAssistantReasoning(message provider.Message, complete bool) (missing, shouldRetry bool) {
+	if !provider.RequiresAssistantReasoningReplay(a.svc.prov, message) || !provider.WarnOnMissingToolCallReasoning(a.svc.prov) {
 		return false, false
+	}
+	reasoning := message.ReasoningContent
+	if !complete {
+		reasoning = ""
 	}
 	fingerprint := provider.MissingToolCallReasoningWarningFingerprint(a.svc.prov)
 	observedAt := time.Now()

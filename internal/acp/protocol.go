@@ -350,9 +350,9 @@ type SetSessionConfigOptionParams struct {
 	Value     string `json:"value"`
 }
 
-// SetSessionConfigOptionResult returns the full refreshed config state.
 type SetSessionConfigOptionResult struct {
-	ConfigOptions []SessionConfigOption `json:"configOptions"`
+	ConfigOptions    []SessionConfigOption `json:"configOptions"`
+	DeprecatedNotice string                `json:"deprecatedNotice,omitempty"`
 }
 
 // SessionConfigOption is a single-value ACP session selector.
@@ -475,6 +475,10 @@ func FlattenPrompt(blocks []ContentBlock) string {
 type SessionPromptParams struct {
 	SessionID string         `json:"sessionId"`
 	Prompt    []ContentBlock `json:"prompt"`
+	// Action is an optional Reasonix extension. Empty preserves ACP's standard
+	// prompt behavior; final_readiness_recovery explicitly resumes the newest
+	// paused host check without trusting ordinary prose as authorization.
+	Action string `json:"action,omitempty"`
 }
 
 // SessionSteerParams is the Reasonix ACP v1 extension for injecting user
@@ -558,14 +562,9 @@ type SessionReloadExtensionsResult struct {
 // could collide with a future official ACP method and must not be used.
 const sessionReloadExtensionsMethod = "_reasonix.io/session/reloadExtensions"
 
-// StopReason tells the client why a turn ended. Values match main's wire.
+// StopReason tells the client why a turn ended. Reasonix only emits values from
+// the ACP v1 enum; failed turns are returned as JSON-RPC errors instead.
 type StopReason string
-
-const (
-	StopEndTurn   StopReason = "end_turn"
-	StopCancelled StopReason = "cancelled"
-	StopError     StopReason = "error"
-)
 
 // SessionPromptResult ends a session/prompt. TranscriptPath is reserved for a
 // future on-disk transcript pointer; omitted (null) for now.

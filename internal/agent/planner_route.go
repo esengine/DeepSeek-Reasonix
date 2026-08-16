@@ -17,24 +17,15 @@ const (
 	PlannerRoutePlanOnly        PlannerRoute = "plan_only"
 )
 
-// PlannerDepth controls how much evidence and detail the planning contract asks
-// for. It deliberately does not impose a model-round budget: planning lands on
-// submit_plan and the shared adaptive progress, task-budget, and context guards
-// own runaway protection. None is only valid for ExecutorOnly.
-type PlannerDepth string
-
-const (
-	PlannerDepthNone  PlannerDepth = "none"
-	PlannerDepthLight PlannerDepth = "light"
-	PlannerDepthFull  PlannerDepth = "full"
-)
+// PlannerIntent is the explicit planner request for one turn. Ordinary work is
+// always executor-only; the planner never infers complexity from wording.
+type PlannerIntent = PlannerRoute
 
 // PlannerDecision is the deterministic, host-owned routing result for one turn.
 // Reason is an opaque privacy-safe code for diagnostics; user text never belongs
 // in it.
 type PlannerDecision struct {
 	Route  PlannerRoute
-	Depth  PlannerDepth
 	Reason string
 }
 
@@ -44,15 +35,9 @@ type PlannerPolicy func(context.Context, string) PlannerDecision
 
 func normalizePlannerDecision(d PlannerDecision) PlannerDecision {
 	switch d.Route {
-	case PlannerRouteExecutorOnly:
-		d.Depth = PlannerDepthNone
-	case PlannerRoutePlanAndExecute, PlannerRoutePlanForApproval, PlannerRoutePlanOnly:
-		if d.Depth != PlannerDepthLight && d.Depth != PlannerDepthFull {
-			d.Depth = PlannerDepthFull
-		}
+	case PlannerRouteExecutorOnly, PlannerRoutePlanAndExecute, PlannerRoutePlanForApproval, PlannerRoutePlanOnly:
 	default:
-		d.Route = PlannerRoutePlanAndExecute
-		d.Depth = PlannerDepthFull
+		d.Route = PlannerRouteExecutorOnly
 	}
 	d.Reason = strings.TrimSpace(d.Reason)
 	if d.Reason == "" {

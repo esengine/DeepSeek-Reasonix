@@ -7,7 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/agent/testutil"
+	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
@@ -63,6 +65,10 @@ model = "x"
 		if !reg["grep"] {
 			ctrl.Close()
 			t.Fatalf("%q registry missing grep for use_capability dispatch", mode)
+		}
+		if !reg["set_session_title"] {
+			ctrl.Close()
+			t.Fatalf("%q registry missing set_session_title for use_capability dispatch", mode)
 		}
 		ctrl.Close()
 	}
@@ -125,5 +131,67 @@ model = "x"
 	}
 	if strings.Contains(toolOut.String(), "unavailable") || strings.Contains(toolOut.String(), "not registered") {
 		t.Fatalf("use_capability failed to dispatch grep: %s", toolOut.String())
+	}
+}
+
+func TestUseCapabilitySetsOnlyTheCurrentSessionTitle(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	sessionDir := robustTempDir(t)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+`)
+	registerBootTokenProfileTestProvider()
+	args, _ := json.Marshal(map[string]any{
+		"action":        "call",
+		"capability_id": "tool:set_session_title",
+		"arguments":     map[string]any{"title": "Current integration task"},
+	})
+	prov := testutil.NewMock("ucap-session-title",
+		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "t1", Name: "use_capability", Arguments: string(args)}}},
+		testutil.Turn{Text: "renamed"},
+	)
+	setBootTokenProfileTestProvider(t, prov)
+	var projectedPath string
+	ctrl, err := Build(context.Background(), Options{
+		SessionDir:           sessionDir,
+		Sink:                 event.Discard,
+		HeadlessApprovalMode: control.ToolApprovalYolo,
+		OnSessionTitleChanged: func(gotDir, gotPath, gotTitle string) error {
+			if gotDir != sessionDir || gotTitle != "Current integration task" {
+				t.Fatalf("projection = %q %q %q", gotDir, gotPath, gotTitle)
+			}
+			projectedPath = gotPath
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ctrl.Close()
+	ctrl.EnsureSessionPath()
+	if err := ctrl.Run(context.Background(), "name this session"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if projectedPath == "" || projectedPath != ctrl.SessionPath() {
+		t.Fatalf("projected path = %q, current = %q", projectedPath, ctrl.SessionPath())
+	}
+	meta, ok, err := agent.LoadBranchMeta(projectedPath)
+	if err != nil || !ok || meta.CustomTitle != "Current integration task" {
+		t.Fatalf("meta = %+v, ok=%v, err=%v", meta, ok, err)
+	}
+	for _, req := range prov.Requests() {
+		if requestHasTool(req, "set_session_title") {
+			t.Fatalf("set_session_title leaked into provider-visible schemas: %v", toolSchemaNames(req.Tools))
+		}
 	}
 }

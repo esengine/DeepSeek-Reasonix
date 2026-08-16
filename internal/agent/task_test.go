@@ -894,8 +894,7 @@ func TestTaskToolBackgroundSalvagePublishesEvidenceForCollection(t *testing.T) {
 		finalText,
 	}}
 	task := NewTaskTool(sub, nil, reg, 20, 0, 0, 0, 0, 0, 0, 0.0, "", "sys", nil, 0, "", "", nil).
-		WithTranscripts(NewSubagentStore(t.TempDir()), t.TempDir(), "base-model", "base-effort").
-		WithDeliveryProfile(true)
+		WithTranscripts(NewSubagentStore(t.TempDir()), t.TempDir(), "base-model", "base-effort")
 
 	jm := jobs.NewManager(event.Discard)
 	defer jm.Close()
@@ -969,7 +968,7 @@ func TestBackgroundEvidenceNotCommittedWhenTurnFails(t *testing.T) {
 	// so the next turn can review it instead of shipping it unreviewed.
 	jm := jobs.NewManager(event.Discard)
 	defer jm.Close()
-	jobID := startTerminalBackgroundMutation(t, jm, "parent-session", "qa/bank.md")
+	jobID := startTerminalBackgroundMutation(t, jm, "parent-session", "internal/auth/session.go")
 
 	reg := evidenceRegistry()
 	waitBuiltin(t, reg)
@@ -979,8 +978,8 @@ func TestBackgroundEvidenceNotCommittedWhenTurnFails(t *testing.T) {
 		{{Type: provider.ChunkText, Text: "all set"}, {Type: provider.ChunkDone}},
 		{{Type: provider.ChunkText, Text: "all set"}, {Type: provider.ChunkDone}},
 	}}
-	a := New(prov, reg, NewSession(""), Options{DeliveryProfile: true, Jobs: jm}, event.Discard)
-	ctx := jobs.WithManager(WithParentSession(context.Background(), "parent-session"), jm)
+	a := New(prov, reg, NewSession(""), Options{Jobs: jm}, event.Discard)
+	ctx := withClosedLoopContext(jobs.WithManager(WithParentSession(context.Background(), "parent-session"), jm))
 	ctx = jobs.WithSession(ctx, "parent-session")
 
 	err := a.Run(ctx, "collect and finish the background task")
@@ -1033,7 +1032,7 @@ func TestBackgroundEvidenceCommittedWhenTurnDelivers(t *testing.T) {
 func TestFailedTurnBackgroundMutationForcesReadinessOnNextRunWithoutWait(t *testing.T) {
 	jm := jobs.NewManager(event.Discard)
 	defer jm.Close()
-	jobID := startTerminalBackgroundMutation(t, jm, "parent-session", "qa/bank.md")
+	jobID := startTerminalBackgroundMutation(t, jm, "parent-session", "internal/auth/session.go")
 
 	reg := evidenceRegistry()
 	waitBuiltin(t, reg)
@@ -1047,8 +1046,8 @@ func TestFailedTurnBackgroundMutationForcesReadinessOnNextRunWithoutWait(t *test
 		{{Type: provider.ChunkText, Text: "sure, here you go"}, {Type: provider.ChunkDone}},
 		{{Type: provider.ChunkText, Text: "sure, here you go"}, {Type: provider.ChunkDone}},
 	}}
-	a := New(prov, reg, NewSession(""), Options{DeliveryProfile: true, Jobs: jm}, event.Discard)
-	ctx := jobs.WithManager(WithParentSession(context.Background(), "parent-session"), jm)
+	a := New(prov, reg, NewSession(""), Options{Jobs: jm}, event.Discard)
+	ctx := withClosedLoopContext(jobs.WithManager(WithParentSession(context.Background(), "parent-session"), jm))
 	ctx = jobs.WithSession(ctx, "parent-session")
 
 	var readiness *FinalReadinessError
@@ -1080,7 +1079,7 @@ func TestRestartRecoversPendingBackgroundMutationForcesReadinessWithoutWait(t *t
 	first.SetActiveSessionPath("parent-session", sessionPath)
 	j := first.StartForSession("parent-session", "task", "bg writer", func(ctx context.Context, _ io.Writer) (string, error) {
 		jobs.PublishEvidence(ctx, evidence.ChildEvidenceSummary{Receipts: []evidence.Receipt{{
-			ToolName: "write_file", Success: true, Write: true, Mutation: true, Paths: []string{"qa/bank.md"},
+			ToolName: "write_file", Success: true, Write: true, Mutation: true, Paths: []string{"internal/auth/session.go"},
 		}}})
 		return "background answer", nil
 	})
@@ -1099,8 +1098,8 @@ func TestRestartRecoversPendingBackgroundMutationForcesReadinessWithoutWait(t *t
 		{{Type: provider.ChunkText, Text: "all set"}, {Type: provider.ChunkDone}},
 		{{Type: provider.ChunkText, Text: "all set"}, {Type: provider.ChunkDone}},
 	}}
-	a := New(prov, reg, NewSession(""), Options{DeliveryProfile: true, Jobs: second}, event.Discard)
-	ctx := jobs.WithManager(WithParentSession(context.Background(), "parent-session"), second)
+	a := New(prov, reg, NewSession(""), Options{Jobs: second}, event.Discard)
+	ctx := withClosedLoopContext(jobs.WithManager(WithParentSession(context.Background(), "parent-session"), second))
 	ctx = jobs.WithSession(ctx, "parent-session")
 
 	var readiness *FinalReadinessError

@@ -56,30 +56,24 @@ func (a *Agent) prepareSamplingRequest(ctx context.Context) (samplingRequest, er
 	if err != nil {
 		return samplingRequest{}, err
 	}
-	if budget, clipped, budgetErr := a.effectiveOutputBudget(frozen.req); budgetErr != nil {
+	if err := a.applyAdmissionToRequest(&frozen.req); err != nil {
 		// One-shot physical overflow recovery. Do not loop.
 		if _, perr := a.contextManager().Prepare(ctx, ContextPreparePolicy{
 			Trigger: CompactionTriggerOverflow,
 			Force:   true,
 		}); perr != nil {
-			return samplingRequest{}, budgetErr
+			return samplingRequest{}, err
 		}
 		rebuilt, rerr := a.buildSamplingRequest(ctx, CompactionTriggerPressure)
 		if rerr != nil {
 			return samplingRequest{}, rerr
 		}
-		if _, _, budgetErr2 := a.effectiveOutputBudget(rebuilt.req); budgetErr2 != nil {
-			return samplingRequest{}, budgetErr2
-		}
-		// Re-apply clipping on the recovered view.
-		if budget2, clipped2, err2 := a.effectiveOutputBudget(rebuilt.req); err2 == nil && clipped2 {
-			rebuilt.req.MaxTokens = budget2
+		if aerr := a.applyAdmissionToRequest(&rebuilt.req); aerr != nil {
+			return samplingRequest{}, aerr
 		}
 		shape := a.requestCalibrationShape(rebuilt.req)
 		a.sess.output.activeReqShape.Store(&shape)
 		return samplingRequest{req: freezeProviderRequest(rebuilt.req)}, nil
-	} else if clipped {
-		frozen.req.MaxTokens = budget
 	}
 	shape := a.requestCalibrationShape(frozen.req)
 	a.sess.output.activeReqShape.Store(&shape)
@@ -98,6 +92,9 @@ func (a *Agent) buildSamplingRequest(ctx context.Context, trigger string) (sampl
 	requestMessages = a.providerProjectionMessages(requestMessages)
 	for i := range requestMessages {
 		requestMessages[i].CreatedAt = 0
+		if requestMessages[i].Role == provider.RoleUser {
+			requestMessages[i].Content = reTrailingExecutionPolicy.ReplaceAllString(requestMessages[i].Content, "")
+		}
 	}
 	// context.prepare: extensions may rewrite the message copy feeding THIS
 	// request. The session log is never touched — the replacement is
@@ -127,8 +124,13 @@ func (a *Agent) buildSamplingRequest(ctx context.Context, trigger string) (sampl
 // request copy. Projection sidecars retain logical user-turn boundaries so
 // explicit range compression can continue to resolve anchors across calls.
 func (a *Agent) providerProjectionMessages(msgs []provider.Message) []provider.Message {
-	if a != nil && a.strictAlternatingRoles {
-		return coalesceProjectionUserRuns(msgs)
+	if a != nil {
+		if repaired, changed := repairUnreplayableReasoningHistory(a.svc.prov, msgs); changed {
+			msgs = repaired
+		}
+		if a.strictAlternatingRoles {
+			return coalesceProjectionUserRuns(msgs)
+		}
 	}
 	return msgs
 }
@@ -154,7 +156,17 @@ func freezeProviderRequest(req provider.Request) provider.Request {
 				out.Messages[i].ResponsesItems = items
 			}
 			if len(out.Messages[i].ServerSearch) > 0 {
-				out.Messages[i].ServerSearch = append([]provider.ServerSearchCall(nil), out.Messages[i].ServerSearch...)
+				searches := make([]provider.ServerSearchCall, len(out.Messages[i].ServerSearch))
+				for j, search := range out.Messages[i].ServerSearch {
+					searches[j] = search
+					if len(search.Results) > 0 {
+						searches[j].Results = append([]provider.ServerSearchHit(nil), search.Results...)
+					}
+					if len(search.Raw) > 0 {
+						searches[j].Raw = append(json.RawMessage(nil), search.Raw...)
+					}
+				}
+				out.Messages[i].ServerSearch = searches
 			}
 		}
 	}

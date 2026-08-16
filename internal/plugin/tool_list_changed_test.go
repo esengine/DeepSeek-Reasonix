@@ -497,6 +497,9 @@ func TestToolListRefreshNoOpPreservesAdapterGeneration(t *testing.T) {
 	tr := newControlledToolsTransport()
 	client, adapter := newControlledRefreshClient(t, tr)
 	defer client.close()
+	tr.mu.Lock()
+	tr.blockList = true
+	tr.mu.Unlock()
 	remote := adapter.(*remoteTool)
 	generation := remote.generation
 	changes := make(chan struct{}, 1)
@@ -504,6 +507,8 @@ func TestToolListRefreshNoOpPreservesAdapterGeneration(t *testing.T) {
 
 	tr.emit()
 	done := refreshDone(t, client)
+	<-tr.listStarted
+	tr.listRelease <- struct{}{}
 	waitClosed(t, done, "no-op refresh")
 	if client.toolCatalogStale() {
 		t.Fatal("no-op refresh did not clear the notification revision")

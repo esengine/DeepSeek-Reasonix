@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"reasonix/internal/diff"
+	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 )
 
@@ -25,6 +26,7 @@ func init() { tool.RegisterBuiltin(notebookEdit{}) }
 // resolves against (see resolveIn).
 type notebookEdit struct {
 	roots   []string
+	rootSet *sandbox.WritableRootSet
 	guard   SessionDataGuard
 	managed ManagedConfigPaths
 	workDir string
@@ -34,6 +36,10 @@ type notebookEdit struct {
 func (notebookEdit) Name() string { return "notebook_edit" }
 
 func (notebookEdit) ReadOnly() bool { return false }
+
+func (n notebookEdit) DeclareWriteAccess(args json.RawMessage) (tool.WriteAccessDeclaration, error) {
+	return declareFilePathWriteAccess(n.workDir, args)
+}
 
 func (notebookEdit) Description() string {
 	return "Edit one cell of a Jupyter notebook (.ipynb). Target a cell by 0-based " +
@@ -82,7 +88,7 @@ func (n notebookEdit) Execute(ctx context.Context, raw json.RawMessage) (string,
 		return "", err
 	}
 	a.Path = resolveIn(n.workDir, a.Path)
-	if err := confineWrite(ctx, n.roots, n.guard, n.managed, a.Path); err != nil {
+	if err := confineWrite(ctx, effectiveWriteRoots(ctx, n.rootSet, n.roots), n.guard, n.managed, a.Path); err != nil {
 		return "", err
 	}
 	src, err := readEditSource(ctx, n.overlay, a.Path)

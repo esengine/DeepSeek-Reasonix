@@ -40,9 +40,15 @@ func TestDesktopE2EBlocksRepeatedSuccessfulBashFileWrite(t *testing.T) {
 
 	var calls int32
 	reg := tool.NewRegistry()
+	todoWrite, ok := tool.LookupBuiltin("todo_write")
+	if !ok {
+		t.Fatal("todo_write builtin is not registered")
+	}
+	reg.Add(todoWrite)
 	reg.Add(desktopCountingTool{name: "bash", calls: &calls})
-	args := `{"command":"python -c \"with open('prompt.txt', 'w') as f: f.write('hello')\""}`
+	args := `{"command":"printf 'hello' > prompt.txt"}`
 	prov := agenttest.NewMock("scripted-desktop",
+		agenttest.Turn{ToolCalls: []provider.ToolCall{{ID: "todo-1", Name: "todo_write", Arguments: `{"todos":[{"content":"update the prompt file","status":"in_progress"}]}`}}},
 		agenttest.Turn{ToolCalls: []provider.ToolCall{{ID: "c1", Name: "bash", Arguments: args}}},
 		agenttest.Turn{ToolCalls: []provider.ToolCall{{ID: "c2", Name: "bash", Arguments: args}}},
 		agenttest.Turn{ToolCalls: []provider.ToolCall{{ID: "c3", Name: "bash", Arguments: args}}},
@@ -62,7 +68,7 @@ func TestDesktopE2EBlocksRepeatedSuccessfulBashFileWrite(t *testing.T) {
 	for {
 		select {
 		case e := <-events:
-			if e.Kind == event.ToolResult {
+			if e.Kind == event.ToolResult && e.Tool.Name == "bash" {
 				results = append(results, e)
 			}
 			if e.Kind == event.TurnDone {

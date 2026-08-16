@@ -82,3 +82,48 @@ func TestReconcileFillsZeroActivityFromFileMtime(t *testing.T) {
 		t.Fatalf("lastActivityAt = %d, want file mtime %d", record.LastActivityAt, when.UnixMilli())
 	}
 }
+
+func TestReconcileExternalTouchDoesNotReorderTopics(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dir := t.TempDir()
+	write := func(name, topicID string, activity time.Time) string {
+		path := filepath.Join(dir, name+".jsonl")
+		if err := os.WriteFile(path, []byte(`{"role":"user","content":"hi"}`+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := agent.SaveBranchMetaPreserveUpdated(path, agent.BranchMeta{
+			CreatedAt: activity, UpdatedAt: activity, Scope: "global", TopicID: topicID,
+			TopicTitle: topicID, SchemaVersion: agent.BranchMetaCountsVersion, Turns: 1,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	oldActivity := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	oldPath := write("old", "topic-old", oldActivity)
+	newActivity := oldActivity.Add(24 * time.Hour)
+	write("new", "topic-new", newActivity)
+	if err := os.Chtimes(oldPath, newActivity.Add(24*time.Hour), newActivity.Add(24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	catalog, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "catalog.sqlite"), DisableRepair: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = catalog.Close(context.Background()) })
+	if err := catalog.ReconcileDirectory(ctx, DirectoryTarget{Path: dir, Scope: "global"}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := catalog.ListTopics(ctx, TopicPageRequest{Scope: "global", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 2 || page.Items[0].TopicID != "topic-new" {
+		t.Fatalf("topic order = %#v, want authoritative newer topic first", page.Items)
+	}
+	if page.Items[1].LastActivityAt != oldActivity.UnixMilli() {
+		t.Fatalf("old activity = %d, want %d", page.Items[1].LastActivityAt, oldActivity.UnixMilli())
+	}
+}

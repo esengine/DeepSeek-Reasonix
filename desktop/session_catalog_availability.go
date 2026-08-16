@@ -59,6 +59,7 @@ func (a *App) catalogWorkspaceAvailability(catalog *sessioncatalog.Catalog, scop
 
 func (a *App) mergeMetadataTopics(req ProjectTopicPageRequest, page ProjectTopicPage) ProjectTopicPage {
 	metadata := a.metadataTopicPage(req)
+	manualOrder := manualTopicOrderFor(req.Scope, req.WorkspaceRoot)
 	seen := make(map[string]struct{}, len(page.Items)+len(metadata.Items))
 	for _, item := range page.Items {
 		seen[item.TopicID] = struct{}{}
@@ -71,15 +72,7 @@ func (a *App) mergeMetadataTopics(req ProjectTopicPageRequest, page ProjectTopic
 		page.Items = append(page.Items, item)
 	}
 	sort.SliceStable(page.Items, func(i, j int) bool {
-		if page.Items[i].Pinned != page.Items[j].Pinned {
-			return page.Items[i].Pinned
-		}
-		left := projectTopicSortValue(page.Items[i].CreatedAt, page.Items[i].LastActivityAt, req.SortMode)
-		right := projectTopicSortValue(page.Items[j].CreatedAt, page.Items[j].LastActivityAt, req.SortMode)
-		if left != right {
-			return left > right
-		}
-		return page.Items[i].TopicID < page.Items[j].TopicID
+		return projectTopicLess(page.Items[i], page.Items[j], req.SortMode, manualOrder)
 	})
 	limit := req.Limit
 	if limit <= 0 {
@@ -94,7 +87,7 @@ func (a *App) mergeMetadataTopics(req ProjectTopicPageRequest, page ProjectTopic
 	}
 	page.NextCursor = ""
 	if hasMore && len(page.Items) > 0 {
-		page.NextCursor = encodeProjectNodeCursor(page.Items[len(page.Items)-1], req.SortMode)
+		page.NextCursor = encodeProjectNodeCursor(page.Items[len(page.Items)-1], req.SortMode, manualOrder)
 	}
 	return page
 }

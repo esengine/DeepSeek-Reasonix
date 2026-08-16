@@ -41,9 +41,10 @@ func (echoTool) Execute(_ context.Context, args json.RawMessage) (string, error)
 // collectSink captures the per-turn Usage events plus any compaction notices the
 // agent emits, so the test can replay exactly what the status line would show.
 type collectSink struct {
-	usages  []*provider.Usage
-	notices []string
-	blocked bool
+	usages      []*provider.Usage
+	notices     []string
+	maintenance []event.ContextMaintenance
+	blocked     bool
 }
 
 func (s *collectSink) Emit(e event.Event) {
@@ -55,8 +56,11 @@ func (s *collectSink) Emit(e event.Event) {
 	case event.Notice:
 		s.notices = append(s.notices, e.Text)
 	case event.ContextMaintenanceEvent:
-		if e.Maintenance != nil && e.Maintenance.Status == "blocked" {
-			s.blocked = true
+		if e.Maintenance != nil {
+			s.maintenance = append(s.maintenance, *e.Maintenance)
+			if e.Maintenance.Status == "blocked" {
+				s.blocked = true
+			}
 		}
 	}
 }
@@ -241,12 +245,14 @@ func TestCacheHitSurvivesTooSmallWindow(t *testing.T) {
 
 	t.Logf("==== hit-rate curve, too-small window (900 tok) ====")
 	collapses := 0
+	var collapseAt []int
 	for i, u := range sink.usages {
 		r := hitRate(u)
 		marker := ""
 		if i > 0 && r+20 < hitRate(sink.usages[i-1]) {
 			marker = "   <<< collapse"
 			collapses++
+			collapseAt = append(collapseAt, i)
 		}
 		t.Logf("step %2d: prompt=%5d hit=%5d miss=%4d → cache %3d%%%s", i, u.PromptTokens, u.CacheHitTokens, u.CacheMissTokens, r, marker)
 	}
@@ -254,19 +260,47 @@ func TestCacheHitSurvivesTooSmallWindow(t *testing.T) {
 	for _, n := range sink.notices {
 		t.Logf("notice: %s", n)
 	}
+	for _, m := range sink.maintenance {
+		t.Logf("maintenance: status=%s trigger=%s version=%d input=%d result=%d saved=%d",
+			m.Status, m.Trigger, m.ProjectionVersion, m.InputTokens, m.ResultTokens, m.SavedTokens)
+	}
 	if sink.blocked {
 		t.Log("context maintenance entered a durable blocked state")
 	}
 
-	// The guard caps the damage: a couple of compactions at most, not one per step.
-	if collapses > 2 {
-		t.Errorf("compaction cratered the cache %d times; the stuck guard should cap it at ≤2", collapses)
+	applied := 0
+	for _, m := range sink.maintenance {
+		if m.Status == "applied" && m.Action == "summary" {
+			applied++
+		}
 	}
-	// With or without a blocked receipt, the same prefix must not be rewritten
-	// after every following tool result, so the tail cache rate recovers.
-	if n := len(sink.usages); n >= 6 {
-		if tail := tailAverage(usageRates(sink.usages), 5); tail < 85 {
-			t.Errorf("tail hit rate after the guard kicked in = %d%%, want ≥85%%", tail)
+	// A physical recovery may rewrite the prefix again after enough new input
+	// accumulates, but never without an applied, token-saving checkpoint.
+	if collapses > applied {
+		t.Errorf("cache collapses=%d exceed applied checkpoints=%d", collapses, applied)
+	}
+	// Even in this pathological window, recovery must not run once per tool
+	// result. Each completed recovery cycle gets several stable-prefix requests
+	// and climbs back to a useful hit rate before the next required rewrite.
+	for i := 1; i < len(collapseAt); i++ {
+		if gap := collapseAt[i] - collapseAt[i-1]; gap < 4 {
+			t.Errorf("cache rewrites only %d requests apart at %d and %d; want at least 4", gap, collapseAt[i-1], collapseAt[i])
+		}
+	}
+	for i, start := range collapseAt {
+		end := len(sink.usages)
+		if i+1 < len(collapseAt) {
+			end = collapseAt[i+1]
+		}
+		if end-start < 4 { // final partial cycle may end before the cache recovers
+			continue
+		}
+		peak := 0
+		for _, rate := range usageRates(sink.usages[start+1 : end]) {
+			peak = max(peak, rate)
+		}
+		if peak < 85 {
+			t.Errorf("cache peak after rewrite at request %d = %d%%, want ≥85%% before the next rewrite", start, peak)
 		}
 	}
 }

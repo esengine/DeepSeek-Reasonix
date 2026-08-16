@@ -40,7 +40,9 @@ func (s *Session) writeRecoveryBranchAtPath(
 			return RecoveryBranchInfo{}, false, digestErr
 		}
 		if bytes.Equal(existingDigest[:], digest[:]) {
-			s.inheritParentProjection(opts.OriginalPath, path, msgs, version)
+			if _, err := copyValidContextProjection(opts.OriginalPath, path, msgs); err != nil {
+				slog.Warn("session: recovery branch did not inherit context projection", "path", path, "err", err)
+			}
 			meta, err := s.saveRecoveryBranchMeta(path, opts, preview, turns, digestText, recoveryDepth)
 			if err != nil {
 				return RecoveryBranchInfo{}, false, err
@@ -71,7 +73,9 @@ func (s *Session) writeRecoveryBranchAtPath(
 	if err := writeSessionMessages(path, msgs); err != nil {
 		return RecoveryBranchInfo{}, false, err
 	}
-	s.inheritParentProjection(opts.OriginalPath, path, msgs, version)
+	if _, err := copyValidContextProjection(opts.OriginalPath, path, msgs); err != nil {
+		slog.Warn("session: recovery branch did not inherit context projection", "path", path, "err", err)
+	}
 	meta, err := s.saveRecoveryBranchMeta(path, opts, preview, turns, digestText, recoveryDepth)
 	if err != nil {
 		return RecoveryBranchInfo{}, false, err
@@ -83,26 +87,39 @@ func (s *Session) writeRecoveryBranchAtPath(
 	return RecoveryBranchInfo{Path: path, Digest: digestText, Meta: meta, Preview: preview, Turns: turns}, false, nil
 }
 
-// inheritParentProjection copies a valid context projection from the parent
-// session onto the recovery fork and fails closed on content mismatch.
-func (s *Session) inheritParentProjection(originalPath, recoveryPath string, msgs []provider.Message, version uint64) {
-	if _, ok, err := LoadCompactionState(recoveryPath); err == nil && ok {
-		return
+// CopyValidContextProjection copies a parent's projection to this session's
+// path only when the covered canonical prefix still matches. Forks use it to
+// preserve compacted context without borrowing stale parent history.
+func (s *Session) CopyValidContextProjection(originalPath, targetPath string) (bool, error) {
+	if s == nil {
+		return false, nil
+	}
+	return copyValidContextProjection(originalPath, targetPath, s.Snapshot())
+}
+
+func copyValidContextProjection(originalPath, targetPath string, msgs []provider.Message) (bool, error) {
+	if _, ok, err := LoadCompactionState(targetPath); err != nil {
+		return false, err
+	} else if ok {
+		return false, nil
 	}
 	st, ok, err := LoadCompactionState(originalPath)
-	if err != nil || !ok {
-		return
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, nil
 	}
 	n := st.Projection.CoveredCount
 	if len(st.Projection.Messages) == 0 || n <= 0 || n > len(msgs) ||
 		st.Projection.CoveredPrefixHash == "" ||
 		coveredPrefixHash(msgs, n) != st.Projection.CoveredPrefixHash {
-		return
+		return false, nil
 	}
-	if err := SaveCompactionState(recoveryPath, st); err != nil {
-		slog.Warn("session: recovery branch did not inherit context projection",
-			"path", recoveryPath, "err", err)
+	if err := SaveCompactionState(targetPath, st); err != nil {
+		return false, err
 	}
+	return true, nil
 }
 
 // healEmptyCheckpointFromWAL rebuilds a missing or 0-byte checkpoint from its

@@ -20,6 +20,44 @@ type outputBudgetState struct {
 	activeReqShape    atomic.Pointer[requestCalibrationShape]
 	promptCalibration atomic.Pointer[promptTokenCalibration]
 	contextUsage      atomic.Pointer[contextUsage] // gauge's memoised prompt size
+	learned           atomic.Pointer[learnedContextBudget]
+	admission         atomic.Pointer[contextAdmission]
+}
+
+// learnedContextBudget is an Agent-local observation of the live provider/model
+// window. It is never persisted and dies with the Agent (model/tab rebuild),
+// but survives transcript swaps handled by SetSession.
+type learnedContextBudget struct {
+	windowTokens     int
+	completionBudget int
+}
+
+const (
+	contextRecoveryNone          = "none"
+	contextRecoveryProactiveClip = "proactive_clip"
+	contextRecoveryLearnedRetry  = "learned_retry"
+	contextRecoveryCompacted     = "compacted"
+	contextRecoveryFailed        = "failed"
+)
+
+type contextAdmission struct {
+	WindowMode            string
+	LimitMode             string
+	Source                string
+	WindowTokens          int
+	PromptTokens          int
+	AutoOutputTokens      int
+	MaxOutputTokens       int
+	RequestedOutputTokens int
+	EffectiveOutputTokens int
+	ReserveTokens         int
+	PhysicalRemaining     int
+	Clipped               bool
+	ApplyMaxTokens        bool
+	LastRecovery          string
+	ObservedWindow        int
+	ObservedPrompt        int
+	ObservedCompletion    int
 }
 
 type promptTokenCalibration struct {
@@ -41,14 +79,14 @@ type requestCalibrationShape struct {
 	cjkBytes     int64
 }
 
-// resetOutputBudgetState drops what belongs to the transcript being replaced.
-// The prompt-token calibration is a property of the model's tokenizer, and a
-// model switch rebuilds the agent, so it outlives the swap: dropping it sent
-// every rebind — resume, tab switch, recovery adopt — back to the cold
-// estimate for a turn.
+// reset drops what belongs to the transcript being replaced. Prompt-token
+// calibration and the learned window are properties of the bound model/provider,
+// and a model switch rebuilds the Agent, so they outlive SetSession. Admission
+// describes one transcript's latest request and must never bleed into the next.
 func (o *outputBudgetState) reset() {
 	o.lastUsage.Store(nil)
 	o.activeReqShape.Store(nil)
+	o.admission.Store(nil)
 }
 
 func (a *Agent) setPromptTokenCalibration(promptTokens int, shape requestCalibrationShape) {
@@ -93,11 +131,14 @@ func outputBudgetOf(p provider.Provider) int {
 }
 
 func sharesContextWindow(p provider.Provider) bool {
+	return contextBudgetPolicyOf(p).WindowMode == provider.ContextWindowShared
+}
+
+func contextBudgetPolicyOf(p provider.Provider) provider.ContextBudgetPolicy {
 	if nilutil.IsNil(p) {
-		return false
+		return provider.ContextBudgetPolicy{}
 	}
-	shared, ok := p.(provider.SharedWindowOutputProvider)
-	return ok && shared.SharesContextWindow()
+	return provider.ResolveContextBudgetPolicy(p)
 }
 
 func sharedWindowInputPolicyOf(p provider.Provider) provider.SharedWindowInputPolicy {
@@ -109,13 +150,6 @@ func sharedWindowInputPolicyOf(p provider.Provider) provider.SharedWindowInputPo
 		return provider.SharedWindowInputPolicy{}
 	}
 	return policy.SharedWindowInputPolicy()
-}
-
-func (a *Agent) configuredOutputBudget(explicit int) int {
-	if explicit != 0 {
-		return explicit
-	}
-	return a.sess.output.outputBudget
 }
 
 func requestCalibrationShapeOf(req provider.Request) requestCalibrationShape {
@@ -239,23 +273,253 @@ func isCJKRune(r rune) bool {
 		(r >= 0xAC00 && r <= 0xD7AF)
 }
 
+func (a *Agent) effectiveContextWindow() int {
+	if a == nil {
+		return 0
+	}
+	cfg := a.contextWindow
+	learned := 0
+	if snap := a.sess.output.learned.Load(); snap != nil {
+		learned = snap.windowTokens
+	}
+	switch {
+	case cfg > 0 && learned > 0:
+		return min(cfg, learned)
+	case learned > 0:
+		return learned
+	default:
+		return cfg
+	}
+}
+
+func (a *Agent) learnedCompletionBudget() int {
+	if a == nil {
+		return 0
+	}
+	if snap := a.sess.output.learned.Load(); snap != nil {
+		return snap.completionBudget
+	}
+	return 0
+}
+
+func (a *Agent) learnContextBudget(window, completion int, omittedOutput bool) {
+	if a == nil {
+		return
+	}
+	cur := learnedContextBudget{}
+	if prev := a.sess.output.learned.Load(); prev != nil {
+		cur = *prev
+	}
+	if window > 0 {
+		if cur.windowTokens <= 0 || window < cur.windowTokens {
+			cur.windowTokens = window
+		}
+	}
+	if omittedOutput && completion > 0 {
+		cur.completionBudget = completion
+	}
+	next := cur
+	a.sess.output.learned.Store(&next)
+}
+
+func (a *Agent) storeAdmission(adm contextAdmission) {
+	if a == nil {
+		return
+	}
+	cp := adm
+	a.sess.output.admission.Store(&cp)
+}
+
+func (a *Agent) lastAdmission() contextAdmission {
+	if a == nil {
+		return contextAdmission{LastRecovery: contextRecoveryNone}
+	}
+	if snap := a.sess.output.admission.Load(); snap != nil {
+		return *snap
+	}
+	return contextAdmission{LastRecovery: contextRecoveryNone}
+}
+
+func (a *Agent) setLastRecovery(kind string) {
+	if a == nil {
+		return
+	}
+	adm := a.lastAdmission()
+	adm.LastRecovery = kind
+	a.storeAdmission(adm)
+}
+
+func admissionSource(userMax int, policy provider.ContextBudgetPolicy, learnedWindow bool) string {
+	if learnedWindow {
+		return provider.ContextBudgetSourceLearned
+	}
+	if userMax > 0 {
+		return provider.ContextBudgetSourceExplicit
+	}
+	switch {
+	case policy.AutoOutputTokens == provider.DeepSeekMaxOutputTokens && policy.LimitMode == provider.OutputLimitOmitWhenSafe:
+		return provider.ContextBudgetSourceOfficial
+	case policy.LimitMode == provider.OutputLimitAlways && policy.MaxOutputTokens > 0:
+		return provider.ContextBudgetSourceOpenCode
+	case policy.WindowMode == provider.ContextWindowUnknown || policy.AutoOutputTokens <= 0:
+		return provider.ContextBudgetSourceUnknown
+	default:
+		return provider.ContextBudgetSourceOfficial
+	}
+}
+
 // effectiveOutputBudget clips completion tokens at send time only; it never
-// moves compact_ratio. Exhausted windows fail locally before HTTP 400.
+// moves compact_ratio. Calibrated exhausted windows fail locally; a cold
+// estimate that differs from the provider tokenizer uses bounded 400 recovery.
 func (a *Agent) effectiveOutputBudget(req provider.Request) (int, bool, error) {
-	if a == nil || a.contextWindow <= 0 || !sharesContextWindow(a.svc.prov) {
+	adm, err := a.admitOutputBudget(req)
+	if err != nil {
+		return 0, false, err
+	}
+	if !adm.ApplyMaxTokens || !adm.Clipped {
+		if adm.ApplyMaxTokens && adm.EffectiveOutputTokens > 0 && !adm.Clipped {
+			return adm.EffectiveOutputTokens, false, nil
+		}
 		return 0, false, nil
 	}
-	budget := a.configuredOutputBudget(req.MaxTokens)
-	if budget <= 0 {
-		return 0, false, nil
+	return adm.EffectiveOutputTokens, true, nil
+}
+
+func (a *Agent) admitOutputBudget(req provider.Request) (contextAdmission, error) {
+	adm := contextAdmission{
+		ReserveTokens: outputBudgetReserve,
+		LastRecovery:  a.lastAdmission().LastRecovery,
+		Source:        provider.ContextBudgetSourceUnknown,
+	}
+	if adm.LastRecovery == "" {
+		adm.LastRecovery = contextRecoveryNone
+	}
+	if a == nil {
+		return adm, nil
+	}
+	if learned := a.sess.output.learned.Load(); learned != nil {
+		adm.ObservedWindow = learned.windowTokens
+		adm.ObservedCompletion = learned.completionBudget
+	}
+	policy := contextBudgetPolicyOf(a.svc.prov)
+	if policy.WindowMode == provider.ContextWindowUnknown && adm.ObservedWindow > 0 {
+		policy.WindowMode = provider.ContextWindowShared
+	}
+	if policy.AutoOutputTokens <= 0 && a.learnedCompletionBudget() > 0 {
+		policy.AutoOutputTokens = a.learnedCompletionBudget()
+	}
+	adm.WindowMode = policy.WindowMode.String()
+	adm.LimitMode = policy.LimitMode.String()
+	adm.AutoOutputTokens = policy.AutoOutputTokens
+	adm.MaxOutputTokens = policy.MaxOutputTokens
+	window := a.effectiveContextWindow()
+	adm.WindowTokens = window
+	learnedWindow := window > 0 && (a.contextWindow <= 0 || window < a.contextWindow)
+	adm.Source = admissionSource(req.MaxTokens, policy, learnedWindow)
+	if window <= 0 {
+		a.storeAdmission(adm)
+		return adm, nil
 	}
 	est := a.estimatedRequestTokens(req)
-	available := a.contextWindow - est - outputBudgetReserve
-	if available <= 0 {
-		return 0, false, fmt.Errorf("%w: estimated prompt %d leaves no shared-window output budget", ErrCompactionRequired, est)
+	adm.PromptTokens = est
+	physical := window - est - outputBudgetReserve
+	adm.PhysicalRemaining = physical
+	shared := policy.WindowMode == provider.ContextWindowShared
+	if !shared {
+		a.applyLimitMode(&adm, req.MaxTokens, policy, physical)
+		a.storeAdmission(adm)
+		return adm, nil
 	}
-	if budget <= available {
-		return 0, false, nil
+	if physical <= 0 {
+		a.storeAdmission(adm)
+		return adm, fmt.Errorf("%w: estimated prompt %d leaves no shared-window output budget", ErrCompactionRequired, est)
 	}
-	return available, true, nil
+	requested := 0
+	switch {
+	case req.MaxTokens > 0:
+		requested = req.MaxTokens
+	default:
+		requested = policy.AutoOutputTokens
+	}
+	if policy.MaxOutputTokens > 0 && requested > policy.MaxOutputTokens {
+		requested = policy.MaxOutputTokens
+	}
+	adm.RequestedOutputTokens = requested
+	if req.MaxTokens < 0 {
+		if requested > 0 && requested > physical {
+			a.storeAdmission(adm)
+			return adm, fmt.Errorf("%w: estimated prompt %d leaves no room for omitted auto output %d", ErrCompactionRequired, est, requested)
+		}
+		a.storeAdmission(adm)
+		return adm, nil
+	}
+	if requested <= 0 {
+		a.applyLimitMode(&adm, req.MaxTokens, policy, physical)
+		a.storeAdmission(adm)
+		return adm, nil
+	}
+	effective := requested
+	if effective > physical {
+		effective = physical
+		adm.Clipped = true
+	}
+	adm.EffectiveOutputTokens = effective
+	a.applyLimitMode(&adm, req.MaxTokens, policy, physical)
+	if adm.Clipped {
+		adm.ApplyMaxTokens = req.MaxTokens >= 0 && policy.LimitMode != provider.OutputLimitUnsupported
+		adm.EffectiveOutputTokens = effective
+	}
+	if adm.Clipped && adm.LastRecovery == contextRecoveryNone {
+		adm.LastRecovery = contextRecoveryProactiveClip
+	}
+	a.storeAdmission(adm)
+	return adm, nil
+}
+
+func (a *Agent) applyAdmissionToRequest(req *provider.Request) error {
+	if a == nil || req == nil {
+		return nil
+	}
+	adm, err := a.admitOutputBudget(*req)
+	if err != nil {
+		return err
+	}
+	if adm.ApplyMaxTokens && adm.EffectiveOutputTokens > 0 {
+		req.MaxTokens = adm.EffectiveOutputTokens
+	}
+	return nil
+}
+
+func (a *Agent) applyLimitMode(adm *contextAdmission, userMax int, policy provider.ContextBudgetPolicy, physical int) {
+	if userMax < 0 || policy.LimitMode == provider.OutputLimitUnsupported {
+		adm.ApplyMaxTokens = false
+		return
+	}
+	effective := adm.EffectiveOutputTokens
+	if effective <= 0 {
+		if userMax > 0 {
+			effective = userMax
+		} else {
+			effective = policy.AutoOutputTokens
+		}
+		if policy.MaxOutputTokens > 0 && effective > policy.MaxOutputTokens {
+			effective = policy.MaxOutputTokens
+		}
+		if policy.WindowMode == provider.ContextWindowShared && physical > 0 && effective > physical {
+			effective = physical
+			adm.Clipped = true
+		}
+	}
+	switch policy.LimitMode {
+	case provider.OutputLimitAlways, provider.OutputLimitRequired:
+		if effective > 0 {
+			adm.ApplyMaxTokens = true
+			adm.EffectiveOutputTokens = effective
+		}
+	case provider.OutputLimitOmitWhenSafe:
+		if userMax > 0 || adm.Clipped {
+			adm.ApplyMaxTokens = true
+			adm.EffectiveOutputTokens = effective
+		}
+	}
 }

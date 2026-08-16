@@ -167,7 +167,8 @@ func TestRealDeepSeekAnthropicWebSearch(t *testing.T) {
 		APIKey:  key,
 		Extra: map[string]any{
 			"api_key_env": "DEEPSEEK_API_KEY",
-			"thinking":    "disabled",
+			"thinking":    "enabled",
+			"effort":      "high",
 			"web_search":  true,
 		},
 	})
@@ -185,7 +186,19 @@ func TestRealDeepSeekAnthropicWebSearch(t *testing.T) {
 	if strings.TrimSpace(turn.text) == "" {
 		t.Fatalf("web_search returned no assistant text (reasoning=%d)", len(turn.reasoning))
 	}
-	t.Logf("web_search: text=%d prompt=%d cache_hit=%d", len(turn.text), turn.promptTokens, turn.cacheHitTokens)
+	if strings.TrimSpace(turn.reasoning) == "" || len(turn.searches) == 0 {
+		t.Fatalf("web_search did not return replayable reasoning/search blocks: reasoning=%d searches=%d", len(turn.reasoning), len(turn.searches))
+	}
+	continued := collectLiveDeepSeekTurn(t, p, provider.Request{Messages: []provider.Message{
+		{Role: provider.RoleUser, Content: "Search the web for the latest DeepSeek API documentation update and reply with one source URL."},
+		{Role: provider.RoleAssistant, Content: turn.text, ReasoningContent: turn.reasoning, ServerSearch: turn.searches},
+		{Role: provider.RoleUser, Content: "Without searching again, reply with the hostname of that source."},
+	}, MaxTokens: 256})
+	if strings.TrimSpace(continued.text) == "" {
+		t.Fatalf("web_search continuation returned no assistant text (reasoning=%d searches=%d)", len(continued.reasoning), len(continued.searches))
+	}
+	t.Logf("web_search replay: text=%d reasoning=%d searches=%d prompt=%d cache_hit=%d continuation_text=%d",
+		len(turn.text), len(turn.reasoning), len(turn.searches), turn.promptTokens, turn.cacheHitTokens, len(continued.text))
 }
 
 // TestRealDeepSeekAnthropicIgnoresImages confirms the text-only official
@@ -226,6 +239,7 @@ func TestRealDeepSeekAnthropicIgnoresImages(t *testing.T) {
 type liveDeepSeekTurn struct {
 	text, reasoning, signature   string
 	calls                        []provider.ToolCall
+	searches                     []provider.ServerSearchCall
 	promptTokens, cacheHitTokens int
 }
 
@@ -251,6 +265,10 @@ func collectLiveDeepSeekTurn(t *testing.T, p provider.Provider, req provider.Req
 		case provider.ChunkToolCall:
 			if chunk.ToolCall != nil {
 				out.calls = append(out.calls, *chunk.ToolCall)
+			}
+		case provider.ChunkServerSearch:
+			if chunk.ServerSearch != nil {
+				out.searches = provider.MergeServerSearch(out.searches, *chunk.ServerSearch)
 			}
 		case provider.ChunkUsage:
 			if chunk.Usage != nil {

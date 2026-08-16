@@ -802,15 +802,12 @@ export const AssistantMessage = memo(function AssistantMessage({
   item,
   defaultExpanded = false,
   expandWhileStreaming = false,
-  truncateStreamingReasoning = false,
   creationMode = false,
 }: {
   item: AssistantItem;
   defaultExpanded?: boolean;
   /** false in compact mode: completed steps fold away, so auto-open + fold reads as flicker. */
   expandWhileStreaming?: boolean;
-  /** Opt-in for compact mode to keep live DeepSeek reasoning from growing an unbounded DOM. */
-  truncateStreamingReasoning?: boolean;
   creationMode?: boolean;
 }) {
   const reasoningDisplayMode = useReasoningDisplayMode();
@@ -826,7 +823,6 @@ export const AssistantMessage = memo(function AssistantMessage({
           item={item}
           defaultExpanded={defaultExpanded}
           expandWhileStreaming={expandWhileStreaming}
-          truncateStreamingReasoning={truncateStreamingReasoning}
         />
       )}
       {(hasText || hasFootnotes) && (

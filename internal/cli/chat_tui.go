@@ -33,7 +33,6 @@ import (
 	"reasonix/internal/memory"
 	"reasonix/internal/migration"
 	"reasonix/internal/outputstyle"
-	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
 	"reasonix/internal/recovery"
@@ -353,13 +352,12 @@ type chatTUI struct {
 	// skillPick is the interactive skill picker overlay for /skills. nil when closed.
 	skillPick *skillPicker
 
-	// buildController builds a fresh controller for a model/profile pair, carrying prior
-	// history across and pinning auto-save to resumePath so the continued
+	// buildController builds a fresh controller for a model choice, carrying
+	// prior history across and pinning auto-save to resumePath so the continued
 	// conversation stays in one file (set by chatREPL; it must NOT touch this
 	// model — the swap happens on the running copy). nil disables runtime
 	// rebuild commands. modelRef is the active "provider/model" ref, marked
-	// current in the picker. runtimeProfile stores boot's normalized token mode:
-	// full (displayed as balanced), economy, or delivery. oldCtrl is the
+	// current in the picker. oldCtrl is the
 	// outgoing controller, passed through so the replacement can carry forward
 	// same-session tool grants and Plan-mode read-only command trust that
 	// don't travel through carry/resumePath (see Controller.RestoreSessionAuthorizations).
@@ -374,10 +372,9 @@ type chatTUI struct {
 	lastBuildResult *boot.BuildResult
 	// pendingReload coalesces /reload requests made while a turn or a runtime
 	// switch is in flight; the TurnDone drain runs it once the TUI is idle.
-	pendingReload  bool
-	modelRef       string
-	runtimeProfile string
-	effortLevel    string // "" when the current provider/model has no configurable effort
+	pendingReload bool
+	modelRef      string
+	effortLevel   string // "" when the current provider/model has no configurable effort
 
 	// leases owns the session lease guarding the TUI's active session file (set
 	// by chatREPL; nil in tests and when persistence is disabled). Every in-TUI
@@ -436,7 +433,6 @@ const (
 
 type controllerBuildSpec struct {
 	ModelRef         string
-	RuntimeProfile   string
 	ToolApprovalMode string
 	PlanMode         bool
 	EffortOverride   *string
@@ -557,7 +553,6 @@ func (m chatTUI) refreshGitStatus() tea.Cmd {
 // mode that would occur if Close() were called from the build goroutine.
 type modelSwitchMsg struct {
 	ref           string
-	profile       string
 	ctrl          control.SessionAPI
 	oldCtrl       control.SessionAPI
 	label         string
@@ -1972,9 +1967,6 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.skills = msg.skills
 			m.setHostAndInvalidateSlashCatalog(msg.host)
 			m.modelRef = msg.ref
-			if msg.profile != "" {
-				m.runtimeProfile = msg.profile
-			}
 			m.refreshEffortStatus()
 			// Defer Close to exit; skip when subgraph rebuild reused the pointer.
 			if msg.oldCtrl != nil && msg.oldCtrl != msg.ctrl {
@@ -3179,100 +3171,6 @@ func flushableMarkdownPrefix(buf string) string {
 // [plan] tag in sync when the user starts execution or exits without executing.
 const planApprovalTool = "exit_plan_mode"
 
-type approvalChoice struct {
-	label           string
-	allow           bool
-	allowForSession bool
-	persistToConfig bool
-	exitPlan        bool
-}
-
-func approvalChoices(a *event.Approval) []approvalChoice {
-	if a == nil {
-		return nil
-	}
-	var decisions []approvalChoice
-	fresh := a.Fresh || control.RequiresFreshHumanApprovalTool(a.Tool)
-	switch {
-	case isRecoveryApprovalEvent(a):
-		if a.Recovery != nil && a.Recovery.CanGrantTask {
-			// allowForSession is reused only as a local UI marker. The recovery
-			// handler maps it to a task-scoped semantic grant, never a session rule.
-			decisions = []approvalChoice{{allow: true}, {allow: true, allowForSession: true}, {}}
-		} else {
-			decisions = []approvalChoice{{allow: true}, {}}
-		}
-	case a.Tool == planApprovalTool:
-		decisions = []approvalChoice{{allow: true}, {}, {exitPlan: true}}
-	case fresh && freshApprovalAllowsSession(a.Tool):
-		decisions = []approvalChoice{{allow: true}, {allow: true, allowForSession: true}, {}}
-	case fresh:
-		decisions = []approvalChoice{{allow: true}, {}}
-	default:
-		decisions = []approvalChoice{
-			{allow: true},
-			{allow: true, allowForSession: true},
-			{allow: true, allowForSession: true, persistToConfig: true},
-			{},
-		}
-	}
-	labels := approvalChoiceLabels(a)
-	for i := range decisions {
-		if i < len(labels) {
-			decisions[i].label = labels[i]
-		}
-	}
-	return decisions
-}
-
-func approvalChoiceLabels(a *event.Approval) []string {
-	choices := i18n.M.FreshHumanApprovalChoices
-	fresh := a.Fresh || control.RequiresFreshHumanApprovalTool(a.Tool)
-	if isRecoveryApprovalEvent(a) {
-		if isRecoveryPlanChangeApproval(a) {
-			choices = i18n.M.RecoveryPlanChangeChoices
-		} else {
-			choices = i18n.M.RecoveryApprovalChoices
-		}
-		if !isRecoveryPlanChangeApproval(a) && a.Recovery != nil && a.Recovery.CanGrantTask {
-			choices = i18n.M.RecoveryTaskGrantChoices
-		}
-	} else if a.Tool == planApprovalTool {
-		choices = i18n.M.PlanApprovalChoices
-	} else if !fresh {
-		exactSessionRule := permission.SessionGrantRuleForScope(a.Tool, a.Subject)
-		exactPersistentRule := permission.RememberRuleForScope(a.Tool, a.Subject)
-		choices = fmt.Sprintf(i18n.M.ToolApprovalChoices, exactSessionRule, exactPersistentRule)
-	}
-	if a.Tool == control.SandboxEscapeApprovalTool {
-		choices = i18n.M.SandboxEscapeApprovalChoices
-	}
-	if a.Tool == control.ManagedConfigWriteApprovalTool {
-		choices = i18n.M.ConfigWriteApprovalChoices
-	}
-	if a.Tool == agent.PlanModeReadOnlyCommandApprovalTool {
-		choices = i18n.M.PlanModeReadOnlyCommandChoices
-	}
-	if !fresh && a.Tool == "bash" && permission.BashCommandPrefix(a.Subject) != "" {
-		prefixRule := permission.RememberRuleForScope(a.Tool, a.Subject)
-		choices = fmt.Sprintf(i18n.M.BashPrefixChoices, prefixRule, prefixRule)
-	}
-	var labels []string
-	for line := range strings.SplitSeq(choices, "\n") {
-		line = strings.TrimSpace(line)
-		if len(line) < 3 || line[0] < '1' || line[0] > '9' || line[1] != '.' {
-			continue
-		}
-		labels = append(labels, strings.TrimSpace(line[2:]))
-	}
-	if isRecoveryApprovalEvent(a) && a.Recovery != nil && a.Recovery.CanGrantTask && len(labels) > 1 {
-		if scope := strings.TrimSpace(a.Recovery.TaskGrantScope); scope != "" {
-			labels[1] += " — " + scope
-		}
-	}
-	return labels
-}
-
 // handleApprovalKey resolves a pending approval from a keystroke and re-arms the
 // listener. 1/y/Enter allows once, 2/a allows for the rest of the session,
 // 3/p writes an "always allow" rule to the config file for ordinary tool
@@ -3751,13 +3649,6 @@ func (m chatTUI) jobsTag() string {
 	return dim(fmt.Sprintf("⚙ %d", n))
 }
 
-func (m chatTUI) workModeTag() string {
-	if m.runtimeProfile == "" {
-		return ""
-	}
-	return dim(fmt.Sprintf(i18n.M.WorkModeStatusFmt, runtimeProfileDisplay(m.runtimeProfile)))
-}
-
 func (m chatTUI) effortTag() string {
 	if m.effortLevel == "" {
 		return ""
@@ -3813,12 +3704,12 @@ func formatCompletionSummaryLine(c *event.CompletionSummaryInfo) string {
 	if c == nil {
 		return ""
 	}
-	preset := strings.TrimSpace(c.Preset)
-	if preset == "" {
-		preset = "balanced"
+	verdict := strings.TrimSpace(c.Verdict)
+	if verdict == "" {
+		verdict = "complete"
 	}
-	line := fmt.Sprintf("%s · %s · mut=%d · checks %d✓/%d✗/%d⊘",
-		preset, c.Verdict, c.Mutations, c.ChecksPassed, c.ChecksFailed, c.ChecksSuppressed)
+	line := fmt.Sprintf("%s · mut=%d · checks %d✓/%d✗/%d⊘",
+		verdict, c.Mutations, c.ChecksPassed, c.ChecksFailed, c.ChecksSuppressed)
 	if c.Review != "" && c.Review != "none" {
 		line += " · review=" + c.Review
 	}
@@ -3885,6 +3776,7 @@ func (m chatTUI) renderApprovalBanner() string {
 			planDetails = append(planDetails, body)
 		}
 	}
+	planDetails = append(planDetails, writeAccessBannerDetails(m.pendingApproval)...)
 	if reason := strings.TrimSpace(m.pendingApproval.Reason); reason != "" {
 		text += " · " + truncateSubject(reason, w)
 	}
@@ -4714,6 +4606,8 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		m.clearSubmittedPastes()
 		if e.Outcome == event.TurnOutcomeRecoveryPaused {
 			m.commitLine(wrapForViewport("⏸ "+i18n.M.RecoveryPaused, m.width, activeCLITheme.info))
+		} else if e.Outcome == event.TurnOutcomeFinalReadiness {
+			m.commitLine(wrapForViewport("ⓘ "+i18n.M.FinalReadinessRecovery, m.width, activeCLITheme.info))
 		} else if e.Err != nil && e.Err.Error() != "" && !strings.Contains(e.Err.Error(), "context canceled") {
 			m.commitLine(wrapForViewport(i18n.M.ErrorPrefix+" "+e.Err.Error(), m.width, activeCLITheme.warn))
 		}
@@ -4754,6 +4648,11 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	cmd := canonicalBuiltinSlashCommand(typedCmd)
 
 	switch cmd {
+	case control.ContinueChecksCommand:
+		prompt, _ := control.ParseFinalReadinessRecoveryCommand(input)
+		return m.startControllerTurn(input, input, func() {
+			m.ctrl.SubmitFinalReadinessRecovery(input, prompt)
+		})
 	case "/compact":
 		m.echoLocalCommand(input)
 		// Compaction makes a (network) summarizer call; run it off the Update loop
@@ -5001,9 +4900,6 @@ func (m *chatTUI) showStatusDetails() {
 		if tag := m.contextTag(); tag != "" {
 			lines = append(lines, "  context    "+tag)
 		}
-	}
-	if tag := m.workModeTag(); tag != "" {
-		lines = append(lines, "  profile    "+tag)
 	}
 	if m.effortLevel != "" {
 		// The persistent footer uses an uppercase semantic label. The expanded
@@ -5468,6 +5364,10 @@ func replaySectionsForWithAssistantRenderer(
 	var out []string
 	for _, m := range history {
 		if m.LocalOnly {
+			if m.FinalReadinessRecovery != nil && m.FinalReadinessRecovery.Pending {
+				out = append(out, fmt.Sprintf("  · %s\n\n", i18n.M.FinalReadinessRecovery))
+				continue
+			}
 			if reasoning := strings.TrimSpace(m.ReasoningContent); reasoning != "" {
 				out = append(out, dim("  ▎ "+i18n.M.ChatThinking)+"\n"+reasoningBlock(reasoning, width, 0)+"\n\n")
 			}

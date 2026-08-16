@@ -68,6 +68,17 @@ func TestExplainError(t *testing.T) {
 		t.Errorf("400 should append the provider reason from a JSON body, got %q", jsonBody.Error())
 	}
 
+	limit := explainError(&provider.ContextLimitError{
+		APIError:         &provider.APIError{Provider: "deepseek", Status: 400, Body: `{"error":{"message":"This model's maximum context length is 1048576 tokens. However, you requested 1165351 tokens (810882 in the messages, 354469 in the completion)."}}`},
+		WindowTokens:     1_048_576,
+		RequestedTokens:  1_165_351,
+		PromptTokens:     810_882,
+		CompletionTokens: 354_469,
+	})
+	if !strings.Contains(limit.Error(), "810882") || !strings.Contains(limit.Error(), "1048576") || !strings.Contains(limit.Error(), "Compact") {
+		t.Errorf("context overflow should name numbers and recovery, got %q", limit.Error())
+	}
+
 	toolSchema := explainError(&provider.APIError{
 		Provider:    "mimo",
 		Status:      400,

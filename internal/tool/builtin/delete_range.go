@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"reasonix/internal/diff"
+	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 )
 
@@ -15,6 +16,7 @@ func init() { tool.RegisterBuiltin(deleteRange{}) }
 
 type deleteRange struct {
 	roots   []string
+	rootSet *sandbox.WritableRootSet
 	guard   SessionDataGuard
 	managed ManagedConfigPaths
 	workDir string
@@ -42,6 +44,10 @@ func (deleteRange) Schema() json.RawMessage {
 
 func (deleteRange) ReadOnly() bool { return false }
 
+func (d deleteRange) DeclareWriteAccess(args json.RawMessage) (tool.WriteAccessDeclaration, error) {
+	return declareFilePathWriteAccess(d.workDir, args)
+}
+
 func (d deleteRange) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	change, src, err := d.preview(ctx, args)
 	if err != nil {
@@ -49,7 +55,7 @@ func (d deleteRange) Execute(ctx context.Context, args json.RawMessage) (string,
 	}
 	// preview ran the non-approving boundary check; the actual write needs the
 	// full one, which can gate a Reasonix-managed config target on user approval.
-	if err := confineWrite(ctx, d.roots, d.guard, d.managed, change.Path); err != nil {
+	if err := confineWrite(ctx, effectiveWriteRoots(ctx, d.rootSet, d.roots), d.guard, d.managed, change.Path); err != nil {
 		return "", err
 	}
 	// src carries the route and encoding the read came from, so the rewrite
@@ -91,7 +97,7 @@ func (d deleteRange) preview(ctx context.Context, args json.RawMessage) (diff.Ch
 	}
 
 	p.Path = resolveIn(d.workDir, p.Path)
-	if err := confinePreview(d.roots, d.guard, d.managed, p.Path); err != nil {
+	if err := confinePreview(effectiveWriteRoots(ctx, d.rootSet, d.roots), d.guard, d.managed, p.Path); err != nil {
 		return diff.Change{}, editSource{}, err
 	}
 

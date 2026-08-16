@@ -29,6 +29,7 @@ import (
 
 	"reasonix/internal/ablation"
 	"reasonix/internal/agent"
+	"reasonix/internal/agentpreset"
 	"reasonix/internal/autoresearch"
 	"reasonix/internal/billing"
 	"reasonix/internal/capability"
@@ -65,6 +66,11 @@ import (
 // ErrTurnRunning reports that a caller tried to start a second foreground turn
 // while one is already active in the same Controller.
 var ErrTurnRunning = errors.New("turn already running")
+
+// ErrNoFinalReadinessRecovery means an explicit continuation did not match the
+// immediately preceding paused readiness check (for example, an old card after
+// a newer user turn). It must not silently become an ordinary turn.
+var ErrNoFinalReadinessRecovery = errors.New("no pending final-readiness check to continue")
 
 // ErrRuntimeDraining reports that a caller targeted a controller generation
 // superseded by a successful rebuild.
@@ -148,8 +154,10 @@ type Controller struct {
 	closeOnce                         sync.Once                        // makes close idempotent under racing teardown paths
 	onRemember                        func(rule string) RememberResult // set via Options; invoked when user picks "always allow"
 	onRememberPlanModeReadOnlyCommand func(prefix string) PlanModeReadOnlyCommandTrustResult
+	writeAccess                       controllerWriteAccess
 	sessionRecoveryMeta               func(SessionRecoveryRequest) agent.BranchMeta
 	onSessionRecovered                func(SessionRecoveryInfo) error
+	onSessionTransition               func(SessionTransitionInfo) error
 
 	// balanceURL/balanceKey target the active provider's optional wallet-balance
 	// endpoint (empty when the provider declares none). Captured at build so a
@@ -207,10 +215,9 @@ type Controller struct {
 	// transient route block (Delivery and dual-model Planner).
 	capabilityProxy bool
 	// proxyToolsFn returns live tools observed through use_capability without
-	// entering the provider-visible registry (Balanced dual-model Planner).
-	proxyToolsFn   func() map[string][]plugin.CachedTool
-	runtimeProfile capability.Profile
-	ablation       ablation.Set
+	// entering the provider-visible registry (dual-model Planner).
+	proxyToolsFn func() map[string][]plugin.CachedTool
+	ablation     ablation.Set
 
 	// goals owns the active goal's FSM (status, intercepts, idle/turn counters)
 	// and its persistence, behind its own mutex so a per-turn goal save never
@@ -290,11 +297,6 @@ type Controller struct {
 	// by Bash calls. Retained for this Controller's lifetime; rotated on
 	// /new, /clear, resume of another session, and branch switches.
 	sessionTemp *sessiontemp.Manager
-	// recoveryDepthCapNotices records session paths that already surfaced the
-	// depth-cap recovery warning. Repeated saves on the same conflict copy are
-	// diagnostic noise for the UI; keep logging/diagnostics, but emit the user
-	// notice once per controller/session path.
-	recoveryDepthCapNotices map[string]bool
 	// snapshotMu serializes the whole save/recovery handoff for this controller.
 	// Agent-level path locks protect individual files, but recovery also moves
 	// controller-owned state (sessionPath, guardianPath, checkpoints, rewrite
@@ -317,9 +319,11 @@ type Controller struct {
 }
 
 type approvalReply struct {
-	allow   bool
-	session bool
-	persist bool // true = write "always allow" rule to config
+	allow      bool
+	session    bool
+	persist    bool // true = write "always allow" rule to config
+	onceDirs   []string
+	persistErr error
 }
 
 type pendingApproval struct {
@@ -331,8 +335,9 @@ type pendingApproval struct {
 	fresh        bool
 	requireHuman bool
 	autoDrain    bool
-	kind         string // tool | plan | recovery; empty = tool
+	kind         string // tool | plan | recovery | write_access; empty = tool
 	recovery     *event.RecoveryApproval
+	writeAccess  *event.WriteAccessApproval
 	reply        chan approvalReply
 }
 
@@ -522,20 +527,30 @@ type Options struct {
 	// read-only when the user chooses "always allow" from the plan-mode trust
 	// prompt.
 	OnRememberPlanModeReadOnlyCommand func(prefix string) PlanModeReadOnlyCommandTrustResult
+	// OnPersistWriteAccess writes sandbox.allow_write and an optional permission
+	// rule to the workspace reasonix.toml as one transaction.
+	OnPersistWriteAccess PersistWriteAccessFunc
+	// WriteRoots is the session-scoped writable directory manager shared with
+	// built-in file tools and bash.
+	WriteRoots *sandbox.WritableRootSet
+	// BashSandboxEnforced is true when this session's bash tool actually wraps
+	// commands in an OS sandbox. Windows and bash=off leave this false so
+	// directory prompts are not implied for unisolated shell writes.
+	BashSandboxEnforced bool
 	// SessionRecoveryMeta lets a frontend attach scope/topic/profile metadata to
 	// an automatic recovery branch before it is written.
 	SessionRecoveryMeta func(SessionRecoveryRequest) agent.BranchMeta
 	// OnSessionRecovered is called after a stale runtime's transcript has been
 	// saved as a recovery branch, before the controller commits to that branch.
 	OnSessionRecovered func(SessionRecoveryInfo) error
+	// OnSessionTransition transfers write ownership before an intentional
+	// fork, branch, or switch publishes a different Session.
+	OnSessionTransition func(SessionTransitionInfo) error
 	// ApprovalTimeout bounds how long a tool-approval or ask prompt blocks waiting
 	// for a user decision. Zero (default) waits forever — right for an interactive
 	// terminal. Bot/headless frontends set a positive value so an unanswered
 	// prompt can't wedge the session indefinitely (#4626, #4402).
 	ApprovalTimeout time.Duration
-	// RuntimeProfile selects capability routing/filtering behavior. Empty keeps
-	// the backward-compatible Balanced profile.
-	RuntimeProfile capability.Profile
 	// Extensions is the frozen extension dispatcher for this controller
 	// generation (Extension Protocol v2, stage 6b1). Nil means no v2 runtime
 	// packages are installed: every extension wiring point takes an untouched
@@ -561,6 +576,13 @@ type Options struct {
 // New builds a Controller. A nil Sink becomes event.Discard; unless the caller
 // already provided a goalUsageTee (NewGoalUsageTee), the sink is wrapped in one
 // so billable usage can be accounted to Goal budgets.
+func controllerSessionTemp(existing *sessiontemp.Manager) *sessiontemp.Manager {
+	if existing != nil {
+		return existing
+	}
+	return sessiontemp.New()
+}
+
 func New(opts Options) *Controller {
 	sink := opts.Sink
 	if nilutil.IsNil(sink) {
@@ -577,10 +599,6 @@ func New(opts Options) *Controller {
 	}
 	runtimeOwner := runtimeOwnerOrDefault(opts.RuntimeOwner)
 	pluginCtx = extension.ContextWithRuntimeOwner(pluginCtx, runtimeOwner)
-	runtimeProfile := opts.RuntimeProfile
-	if runtimeProfile == "" {
-		runtimeProfile = capability.ProfileBalanced
-	}
 	if opts.Hooks != nil {
 		opts.Hooks.SetSessionID(agent.BranchID(opts.SessionPath))
 	}
@@ -617,8 +635,10 @@ func New(opts Options) *Controller {
 		shell:                             opts.Shell,
 		onRemember:                        opts.OnRemember,
 		onRememberPlanModeReadOnlyCommand: opts.OnRememberPlanModeReadOnlyCommand,
+		writeAccess:                       newControllerWriteAccess(opts),
 		sessionRecoveryMeta:               opts.SessionRecoveryMeta,
 		onSessionRecovered:                opts.OnSessionRecovered,
+		onSessionTransition:               opts.OnSessionTransition,
 		balanceURL:                        opts.BalanceURL,
 		balanceKey:                        opts.BalanceKey,
 		balanceClient:                     opts.BalanceClient,
@@ -628,7 +648,6 @@ func New(opts Options) *Controller {
 		mcpDefaultCallTimeout:             opts.MCPDefaultCallTimeout,
 		mcpConfigureSpec:                  opts.MCPConfigureSpec,
 		capabilityRuntime:                 opts.CapabilityRuntime,
-		runtimeProfile:                    runtimeProfile,
 		ablation:                          opts.Ablation,
 		workspaceRoot:                     opts.WorkspaceRoot,
 		externalFolderToolRefs:            opts.ExternalFolderToolRefs,
@@ -640,13 +659,8 @@ func New(opts Options) *Controller {
 	// Session-private temporary directory: reuse a shared Manager on hot
 	// rebuild, otherwise create one. Retain so ReleaseResources/Close drop the
 	// owner reference without racing a replacement Controller.
-	if opts.SessionTemp != nil {
-		c.sessionTemp = opts.SessionTemp
-	} else {
-		c.sessionTemp = sessiontemp.New()
-	}
+	c.sessionTemp = controllerSessionTemp(opts.SessionTemp)
 	c.sessionTemp.Retain()
-
 	if strings.TrimSpace(opts.WorkspaceRoot) != "" {
 		c.legacyResearchArchive = legacyResearchArchive{store: autoresearch.NewStore(opts.WorkspaceRoot)}
 	}
@@ -1236,19 +1250,6 @@ func (c *Controller) SubmitDisplay(display, input string) {
 	c.submit(input, display, "")
 }
 
-// SubmitDeliveryRecovery runs the same visible prompt path as SubmitDisplay but
-// first authorizes the executor to retain the immediately preceding exhausted
-// delivery ledger. The agent consumes that authorization once; if the card came
-// from an older/reloaded session this safely degrades to an ordinary turn.
-func (c *Controller) SubmitDeliveryRecovery(display, input string) {
-	c.runGuarded(func(ctx context.Context) error {
-		if c.executor != nil {
-			c.executor.PrepareDeliveryRecovery()
-		}
-		return c.runGoalLoopWithRawDisplay(ctx, input, input, display)
-	})
-}
-
 // SubmitInvocationDisplay executes composer-selected invocation entities
 // independently of slash-command parsing. Plain string submit entry points keep
 // their existing behavior for CLI, HTTP, and backward-compatible clients.
@@ -1426,6 +1427,9 @@ func (c *Controller) submitCommandOrTurnReady(trimmed, input, display string, sc
 		runGoalLoop = func(ctx context.Context, input, raw, display string) error {
 			return c.runEditedGoalLoopWithRawDisplay(ctx, input, raw, display, editedOriginal)
 		}
+	}
+	if c.submitFinalReadinessCommand(trimmed, display) {
+		return
 	}
 	switch {
 	case trimmed == "/compact" || strings.HasPrefix(trimmed, "/compact "):
@@ -2119,53 +2123,6 @@ func (c *Controller) Turn() int {
 	return c.turn
 }
 
-// Approve answers a pending ApprovalRequest by ID: allow runs the call, session
-// also remembers a grant for the rest of the session so the same approval scope
-// is not re-prompted. Unknown/expired IDs are ignored.
-func (c *Controller) Approve(id string, allow, session, persist bool) {
-	// Recovery cards are strict fresh decisions. Prefer ResolveRecovery so a
-	// continue/deny from an old client that only knows Approve still maps onto
-	// the recovery state machine (allow=continue, deny=revise without feedback).
-	// Session/persist grants are intentionally ignored for recovery.
-	//
-	// Lookup must use the live waiter table (HasApproval), not Snapshot: pre-
-	// normal-execution plan prompts park a waiter without an armed taskRuntime, so
-	// they never appear in the persistence snapshot.
-	c.mu.Lock()
-	gate := c.recoveryGate
-	c.mu.Unlock()
-	if gate != nil && gate.HasApproval(id) {
-		action := agent.RecoveryActionRevise
-		if allow {
-			action = agent.RecoveryActionContinue
-		}
-		_ = c.ResolveRecovery(id, action, "")
-		return
-	}
-	pending := c.approval.resolve(id)
-	if pending.reply == nil {
-		return
-	}
-	outcome := "deny"
-	if pending.tool == planApprovalTool {
-		outcome = string(PlanDecisionRevisePlan)
-		if allow {
-			outcome = string(PlanDecisionStartExecution)
-		}
-	} else if allow {
-		switch {
-		case persist:
-			outcome = "allow_persistent"
-		case session:
-			outcome = "allow_session"
-		default:
-			outcome = "allow_once"
-		}
-	}
-	c.recordDecisionReceipt(pending, outcome)
-	pending.reply <- approvalReply{allow: allow, session: session, persist: persist} // buffered, never blocks
-}
-
 // ResolvePlanDecision answers the Plan card without collapsing revise and exit
 // into the generic approval boolean used by older clients.
 func (c *Controller) ResolvePlanDecision(id string, action PlanDecisionAction) error {
@@ -2230,11 +2187,14 @@ func (c *Controller) EnableInteractiveApproval() {
 	trustGate := planModeReadOnlyTrustApprover{c}
 	escapeApprover := sandboxEscapeApprover{c}
 	configApprover := managedConfigWriteApprover{c}
+	c.writeAccess.interactive = true
 	if c.executor != nil {
 		c.executor.SetGate(c.newInteractiveGate())
 		c.executor.SetPlanModeReadOnlyTrustGate(trustGate)
 		c.executor.SetSandboxEscapeApprover(escapeApprover)
 		c.executor.SetConfigWriteApprover(configApprover)
+		c.executor.SetWriteAccessGate(c)
+		c.executor.SetWriteRoots(c.writeAccess.roots)
 		c.executor.SetAsker(c)
 	}
 	if setter, ok := c.runner.(interface {
@@ -2251,6 +2211,16 @@ func (c *Controller) EnableInteractiveApproval() {
 		SetConfigWriteApprover(tool.ConfigWriteApprover)
 	}); ok {
 		setter.SetConfigWriteApprover(configApprover)
+	}
+	if setter, ok := c.runner.(interface {
+		SetWriteAccessGate(agent.WriteAccessGate)
+	}); ok {
+		setter.SetWriteAccessGate(c)
+	}
+	if setter, ok := c.runner.(interface {
+		SetWriteRoots(*sandbox.WritableRootSet)
+	}); ok {
+		setter.SetWriteRoots(c.writeAccess.roots)
 	}
 	if setter, ok := c.runner.(interface {
 		SetPlannerPlanApprover(agent.PlannerPlanApprover)
@@ -2394,8 +2364,11 @@ func (c *Controller) ApplyHeadlessApprovalMode(mode string) {
 	if c.subagentGate != nil {
 		c.subagentGate.Update(mode)
 	}
+	c.writeAccess.interactive = false
 	if c.executor != nil {
 		c.executor.SetGate(c.newHeadlessGate(mode))
+		c.executor.SetWriteAccessGate(c)
+		c.executor.SetWriteRoots(c.writeAccess.roots)
 	}
 }
 
@@ -2657,67 +2630,22 @@ func (c *Controller) SetPlanMode(v bool) {
 	c.applyPlanMode(v)
 }
 
-// SetAgentPreset updates the session role setting for subsequent turns without
-// rebuilding the controller, provider, or tool schemas. Callers must already
-// hold active-work guards (no foreground turn, background jobs, or pending
-// approvals/asks).
+// SetAgentPreset is a deprecated compatibility shim. Reasonix runs one
+// adaptive standard execution; the preset no longer exists at runtime. The
+// call is accepted, validated for diagnostics, and ignored: it never rebuilds
+// the agent, never changes tool schemas, and never alters planning,
+// verification, or review behavior.
 func (c *Controller) SetAgentPreset(preset string) {
 	if c == nil {
 		return
 	}
-	preset = strings.TrimSpace(preset)
-	if preset == "" {
-		preset = "balanced"
-	}
-	// Map legacy economy/full names through the dual-write helper if available.
-	if normalized := strings.ToLower(preset); normalized == "economy" || normalized == "full" {
-		switch normalized {
-		case "economy":
-			preset = "light"
-		case "full":
-			preset = "balanced"
-		}
-	}
-	if setter, ok := c.runner.(interface{ SetAgentPreset(string) }); ok {
-		setter.SetAgentPreset(preset)
-	}
-	if c.executor != nil {
-		c.executor.SetAgentPreset(preset)
-	}
-	// Keep capability runtimeProfile labels coherent for diagnostics.
-	c.mu.Lock()
-	switch strings.ToLower(preset) {
-	case "light", "economy":
-		c.runtimeProfile = capability.ProfileEconomy
-	case "delivery":
-		c.runtimeProfile = capability.ProfileDelivery
-	default:
-		c.runtimeProfile = capability.ProfileBalanced
-	}
-	c.mu.Unlock()
+	_ = agentpreset.Normalize(preset)
 }
 
-// AgentPreset returns the current session role setting.
+// AgentPreset returns the fixed compatibility label. One-version-old clients
+// read it from status snapshots; new code must not branch on it.
 func (c *Controller) AgentPreset() string {
-	if c == nil {
-		return "balanced"
-	}
-	if c.executor != nil {
-		return c.executor.AgentPreset()
-	}
-	if getter, ok := c.runner.(interface{ AgentPreset() string }); ok {
-		return getter.AgentPreset()
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	switch c.runtimeProfile {
-	case capability.ProfileEconomy:
-		return "light"
-	case capability.ProfileDelivery:
-		return "delivery"
-	default:
-		return "balanced"
-	}
+	return string(agentpreset.Balanced)
 }
 
 func (c *Controller) applyPlanMode(v bool) {
@@ -3021,23 +2949,30 @@ func (c *Controller) NewSession() error {
 	}
 	c.hooks.SessionEnd(context.Background(), "clear")
 	c.extensionSessionEvent(extension.PointSessionEnd, dispatch.PhaseEnd, oldPath)
+	freshPath := oldPath
+	if c.sessionDir != "" {
+		freshPath = agent.NewSessionPath(c.sessionDir, c.label)
+	}
+	freshSession := agent.NewSession(c.systemPrompt)
+	if freshPath != oldPath {
+		if err := c.prepareSessionTransition(freshPath, "new", freshSession); err != nil {
+			return fmt.Errorf("bind new session: %w", err)
+		}
+	}
 	// Hold snapshotMu across the swap so an in-flight save cannot pair the old
 	// path with the fresh session (or the fresh path with the old session).
 	c.snapshotMu.Lock()
-	if c.sessionDir != "" {
-		c.mu.Lock()
-		c.sessionPath = agent.NewSessionPath(c.sessionDir, c.label)
-		c.guardianPath = guardian.PathFor(c.sessionPath)
-		c.mu.Unlock()
-	}
+	c.mu.Lock()
+	c.sessionPath = freshPath
+	c.guardianPath = guardian.PathFor(freshPath)
+	c.mu.Unlock()
 	c.setActiveJobSession(c.SessionPath())
-	c.executor.SetSession(agent.NewSession(c.systemPrompt))
+	c.executor.SetSession(freshSession)
 	c.bindExecutorProjection(c.SessionPath(), false)
 	if c.guardianSess != nil {
 		c.guardianSess.Reset()
 	}
 	c.ResetPlannerSession()
-	freshPath := c.SessionPath()
 	c.rebindCheckpoints(freshPath)
 	c.resetRecoveryForNewSession(freshPath)
 	c.rotateSessionTemp()
@@ -3057,6 +2992,7 @@ func (c *Controller) NewSession() error {
 	c.hooks.SetSessionID(c.parentSessionID())
 	c.enqueueHookContexts(c.hooks.SessionStart(context.Background(), "clear"))
 	c.extensionSessionEvent(extension.PointSessionStart, dispatch.PhaseStart, c.SessionPath())
+	c.clearSessionWriteAccess()
 	return nil
 }
 
@@ -3110,22 +3046,33 @@ func (c *Controller) ClearSession() error {
 		}
 		destroy.Finish()
 	}
+	freshPath := oldPath
+	if c.sessionDir != "" {
+		freshPath = agent.NewSessionPath(c.sessionDir, c.label)
+	}
+	freshSession := agent.NewSession(c.systemPrompt)
+	if freshPath != oldPath {
+		if err := c.prepareSessionTransition(freshPath, "clear", freshSession); err != nil {
+			if destroy.Async {
+				destroy.Finish()
+			}
+			c.snapshotMu.Unlock()
+			return fmt.Errorf("bind cleared session: %w", err)
+		}
+	}
 	c.hooks.SessionEnd(context.Background(), "clear")
 	c.extensionSessionEvent(extension.PointSessionEnd, dispatch.PhaseEnd, oldPath)
-	if c.sessionDir != "" {
-		c.mu.Lock()
-		c.sessionPath = agent.NewSessionPath(c.sessionDir, c.label)
-		c.guardianPath = guardian.PathFor(c.sessionPath)
-		c.mu.Unlock()
-	}
+	c.mu.Lock()
+	c.sessionPath = freshPath
+	c.guardianPath = guardian.PathFor(freshPath)
+	c.mu.Unlock()
 	c.setActiveJobSession(c.SessionPath())
-	c.executor.SetSession(agent.NewSession(c.systemPrompt))
+	c.executor.SetSession(freshSession)
 	c.bindExecutorProjection(c.SessionPath(), false)
 	if c.guardianSess != nil {
 		c.guardianSess.Reset()
 	}
 	c.ResetPlannerSession()
-	freshPath := c.SessionPath()
 	c.rebindCheckpoints(freshPath)
 	c.resetRecoveryForNewSession(freshPath)
 	c.rotateSessionTemp()
@@ -3139,6 +3086,7 @@ func (c *Controller) ClearSession() error {
 	c.hooks.SetSessionID(c.parentSessionID())
 	c.enqueueHookContexts(c.hooks.SessionStart(context.Background(), "clear"))
 	c.extensionSessionEvent(extension.PointSessionStart, dispatch.PhaseStart, c.SessionPath())
+	c.clearSessionWriteAccess()
 	if destroy.Async {
 		go func() {
 			result := destroy.Wait()
@@ -3284,15 +3232,6 @@ func (c *Controller) ForkSession(turn int, name string) (string, error) {
 }
 
 func (c *Controller) forkNamed(turn int, name string, switchToFork bool) (string, error) {
-	if c.executor == nil {
-		return "", c.rewindFail(fmt.Errorf("checkpoints unavailable"))
-	}
-	if c.sessionDir == "" {
-		return "", c.rewindFail(fmt.Errorf("fork needs session persistence, which is disabled"))
-	}
-	// Hold the rotation gate from before the pre-fork Snapshot through the
-	// switch below: a bare Running() check released here would let a turn start
-	// during the snapshot and then be switched onto the fork.
 	if err := c.beginRotation(); err != nil {
 		if errors.Is(err, errTurnRunningRotation) {
 			return "", c.rewindFail(fmt.Errorf("cannot fork while a turn is running"))
@@ -3300,6 +3239,16 @@ func (c *Controller) forkNamed(turn int, name string, switchToFork bool) (string
 		return "", c.rewindFail(err)
 	}
 	defer c.endRotation()
+	return c.forkNamedReady(turn, name, switchToFork)
+}
+
+func (c *Controller) forkNamedReady(turn int, name string, switchToFork bool) (string, error) {
+	if c.executor == nil {
+		return "", c.rewindFail(fmt.Errorf("checkpoints unavailable"))
+	}
+	if c.sessionDir == "" {
+		return "", c.rewindFail(fmt.Errorf("fork needs session persistence, which is disabled"))
+	}
 	boundary, hasBound := c.checkpoints.boundary(turn)
 	if !hasBound {
 		return "", c.rewindFail(fmt.Errorf("fork unavailable for turn %d (resumed session)", turn))
@@ -3324,6 +3273,9 @@ func (c *Controller) forkNamed(turn int, name string, switchToFork bool) (string
 	if err := sess.SaveIfAbsent(newPath); err != nil {
 		return "", c.rewindFail(err)
 	}
+	if _, err := sess.CopyValidContextProjection(parentPath, newPath); err != nil {
+		slog.Warn("controller: fork did not inherit context projection", "err", err)
+	}
 	forkPreview, forkTurns := agent.SessionPreviewFromMessages(forked)
 	if err := agent.SaveBranchMeta(newPath, agent.BranchMeta{
 		Name:             strings.TrimSpace(name),
@@ -3337,6 +3289,9 @@ func (c *Controller) forkNamed(turn int, name string, switchToFork bool) (string
 		return "", c.rewindFail(err)
 	}
 	if switchToFork {
+		if err := c.prepareSessionTransition(newPath, "fork", sess); err != nil {
+			return "", c.rewindFail(fmt.Errorf("bind fork session: %w", err))
+		}
 		// See snapshotMu: the swap must not interleave with an in-flight save.
 		c.snapshotMu.Lock()
 		c.executor.SetSession(sess)
@@ -3344,9 +3299,9 @@ func (c *Controller) forkNamed(turn int, name string, switchToFork bool) (string
 		c.sessionPath = newPath
 		c.guardianPath = guardian.PathFor(newPath)
 		c.mu.Unlock()
-		// New lineage: rebind sidecar path and clear any in-memory projection
-		// without deleting the parent session's .context.json.
-		c.bindExecutorProjection(newPath, false)
+		// Load the child sidecar when the covered prefix survived the fork. The
+		// loader rebinds its lineage key without touching the parent's sidecar.
+		c.bindExecutorProjection(newPath, true)
 		c.ResetPlannerSession()
 		c.setActiveJobSession(newPath)
 		c.rebindCheckpoints(newPath)
@@ -3412,6 +3367,9 @@ func (c *Controller) Branch(name string) (string, error) {
 	if err := sess.SaveIfAbsent(newPath); err != nil {
 		return "", c.rewindFail(err)
 	}
+	if _, err := sess.CopyValidContextProjection(parentPath, newPath); err != nil {
+		slog.Warn("controller: branch did not inherit context projection", "err", err)
+	}
 	branchPreview, branchTurns := agent.SessionPreviewFromMessages(branched)
 	if err := agent.SaveBranchMeta(newPath, agent.BranchMeta{
 		Name:             strings.TrimSpace(name),
@@ -3424,6 +3382,9 @@ func (c *Controller) Branch(name string) (string, error) {
 	}); err != nil {
 		return "", c.rewindFail(err)
 	}
+	if err := c.prepareSessionTransition(newPath, "branch", sess); err != nil {
+		return "", c.rewindFail(fmt.Errorf("bind branch session: %w", err))
+	}
 	// See snapshotMu: the swap must not interleave with an in-flight save.
 	c.snapshotMu.Lock()
 	c.executor.SetSession(sess)
@@ -3431,7 +3392,7 @@ func (c *Controller) Branch(name string) (string, error) {
 	c.sessionPath = newPath
 	c.guardianPath = guardian.PathFor(newPath)
 	c.mu.Unlock()
-	c.bindExecutorProjection(newPath, false)
+	c.bindExecutorProjection(newPath, true)
 	c.ResetPlannerSession()
 	c.setActiveJobSession(newPath)
 	c.rebindCheckpoints(newPath)
@@ -3485,6 +3446,9 @@ func (c *Controller) SwitchBranch(ref string) (agent.BranchInfo, error) {
 	loaded, err := agent.LoadSession(match.Path)
 	if err != nil {
 		return agent.BranchInfo{}, c.rewindFail(err)
+	}
+	if err := c.prepareSessionTransition(match.Path, "switch", loaded); err != nil {
+		return agent.BranchInfo{}, c.rewindFail(fmt.Errorf("bind switched session: %w", err))
 	}
 	// See snapshotMu: the swap must not interleave with an in-flight save.
 	c.snapshotMu.Lock()
@@ -3971,8 +3935,6 @@ const (
 	conflictForkedBranch
 )
 
-const recoveryDepthCapNoticeText = "repeated save conflicts were detected; saved the current conflict copy in an isolated recovery branch"
-
 func sessionRecoveryNotice(code, text string) event.Event {
 	return event.Event{
 		Kind:     event.Notice,
@@ -3981,21 +3943,6 @@ func sessionRecoveryNotice(code, text string) event.Event {
 		Code:     code,
 		Text:     text,
 	}
-}
-
-func (c *Controller) emitRecoveryDepthCapNotice(path string) {
-	key := filepath.Clean(strings.TrimSpace(path))
-	c.mu.Lock()
-	if c.recoveryDepthCapNotices == nil {
-		c.recoveryDepthCapNotices = make(map[string]bool)
-	}
-	if c.recoveryDepthCapNotices[key] {
-		c.mu.Unlock()
-		return
-	}
-	c.recoveryDepthCapNotices[key] = true
-	c.mu.Unlock()
-	c.sink.Emit(sessionRecoveryNotice(event.NoticeCodeSessionRecoveryDepthCap, recoveryDepthCapNoticeText))
 }
 
 func (c *Controller) recoverSnapshotConflict(path string, saveErr error, forceRewrite bool) (string, conflictOutcome, error) {
@@ -4031,27 +3978,6 @@ func (c *Controller) recoverSnapshotConflict(path string, saveErr error, forceRe
 		BranchMeta:   meta,
 	})
 	if err != nil {
-		if errors.Is(err, agent.ErrSessionRecoveryDepthExceeded) {
-			// The canonical branch may have advanced since this runtime loaded it.
-			// Never force-write the stale in-memory snapshot back onto that path just
-			// to stop a recovery chain. Preserve it in a writer-specific isolated
-			// branch instead; the depth cap limits lineage fan-out, not data safety.
-			isolated, isolatedErr := c.executor.Session().SaveConflictRecoveryBranch(agent.RecoveryBranchOptions{
-				OriginalPath: path,
-				Reason:       reason,
-				BranchMeta:   meta,
-			})
-			if isolatedErr != nil {
-				return "", conflictDropped, fmt.Errorf("recovery chain depth exceeded; isolated copy failed: %w", isolatedErr)
-			}
-			if err := c.commitRecoveredSession(path, reason, isolated); err != nil {
-				return "", conflictDropped, err
-			}
-			appendSnapshotConflictDiagnostic(path, mode, "recovery_depth_cap_isolated", saveErr, isolated.Path, isolated.Existing)
-			slog.Warn("controller: snapshot conflict; recovery depth cap reached, isolated stale transcript", append(logAttrs, "recovery", isolated.Path)...)
-			c.emitRecoveryDepthCapNotice(path)
-			return isolated.Path, conflictForkedBranch, nil
-		}
 		if errors.Is(err, agent.ErrSessionRecoveryNotNeeded) {
 			if c.adoptDiskSession(path) {
 				appendSnapshotConflictDiagnostic(path, mode, "recovery_not_needed_adopted_disk_transcript", saveErr, "", false)
@@ -4469,7 +4395,7 @@ func (c *Controller) stripCancelledVisibleTurnMessagesAfterWithFallbackAt(idx in
 			i++
 			continue
 		}
-		if end, ok := completeToolTurnEnd(msgs, i); ok {
+		if end, ok := completeToolTurnEnd(msgs, i); ok && c.executor.CanReplayAssistantMessage(m) {
 			next = append(next, msgs[i:end]...)
 			for k, call := range m.ToolCalls {
 				if toolResultWasInterrupted(msgs[i+1+k].Content) {
@@ -5460,7 +5386,14 @@ func (c *Controller) InheritLifecycleFrom(prev *Controller) {
 // for carrying into a replacement controller across a rebuild — see
 // RestoreSessionAuthorizations.
 func (c *Controller) SessionAuthorizations() SessionAuthorizations {
-	return c.approval.snapshotSessionAuthorizations()
+	auth := c.approval.snapshotSessionAuthorizations()
+	if c.writeAccess.roots != nil {
+		auth.WriteRoots = c.writeAccess.roots.SessionRoots()
+		if auth.WriteRoots == nil {
+			auth.WriteRoots = []string{}
+		}
+	}
+	return auth
 }
 
 // RestoreSessionAuthorizations re-applies session authorizations captured
@@ -5469,6 +5402,9 @@ func (c *Controller) SessionAuthorizations() SessionAuthorizations {
 // replacement forgets every grant the user already made this session.
 func (c *Controller) RestoreSessionAuthorizations(auth SessionAuthorizations) {
 	c.approval.restoreSessionAuthorizations(auth)
+	if c.writeAccess.roots != nil && len(auth.WriteRoots) > 0 {
+		c.writeAccess.roots.GrantVerifiedSession(auth.WriteRoots)
+	}
 }
 
 // ReleaseResources stops plugin subprocesses and releases resources without

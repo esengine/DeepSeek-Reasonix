@@ -34,7 +34,8 @@ assert.match(
 assert.match(runtime, /onProjectTreeRuntimeChanged/, "runtime projection has a dedicated Wails subscription");
 assert.match(runtimeHook, /bindProjectTreeRuntime/, "ProjectTree binds the runtime projection after mount");
 assert.match(runtimeHook, /GetProjectTreeRuntimeSnapshot/, "runtime subscription reconciles with a post-subscribe snapshot");
-assert.match(bridge, /\?\.reason !== "runtime"/, "current frontend ignores tagged legacy runtime invalidations");
+assert.match(bridge, /reason !== "runtime"/, "current frontend ignores tagged legacy runtime invalidations");
+assert.match(bridge, /reason !== "catalog-v2"/, "current frontend ignores catalog v2 compatibility invalidations");
 assert.doesNotMatch(
   runtime,
   /ListProjectTopics/,

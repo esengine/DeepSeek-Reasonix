@@ -130,6 +130,51 @@ const benchGiantTurnHistory = (): HistoryMessage[] => {
   return benchToolTurn(1, 1000, "Single-turn sweep complete.");
 };
 
+// Ref-resolution storm fixture (#8657): the newest page of a long session
+// carries many ref-replaced fields, so opening the session fires a paced
+// stream of history_items_patch invalidations — the exact load that used to
+// remount the virtual list on every scroll idle and strand the view at
+// estimate-based restore landings. The marker sits past the 4KiB preview
+// cut, so it only appears in the DOM once the ref has resolved.
+export const BENCH_STORM_MARKER = "BENCH STORM HYDRATION RESOLVED";
+const benchStormAnswer = (turn: number): string => {
+  let body = [
+    `## Storm turn ${turn} verification report`,
+    "",
+    "Inline preview summary: the batch completed and per-package details follow.",
+    "",
+  ].join("\n");
+  let row = 0;
+  while (body.length < 9 * 1024) {
+    row += 1;
+    body += `\n- storm-${turn}-${row}: resolved payload ${"y".repeat(90)}`;
+  }
+  body += `\n- storm-${turn}-FINAL ${BENCH_STORM_MARKER}`;
+  return body;
+};
+const benchStormReasoning = (turn: number): string => {
+  let body = `planning storm turn ${turn}: gather results, then tabulate.\n`;
+  while (body.length < 6 * 1024) body += `reasoning fragment ${turn} ${"z".repeat(90)}\n`;
+  return `${body}${BENCH_STORM_MARKER}`;
+};
+const benchStormHistory = (): HistoryMessage[] => {
+  // 40 visible turns. The newest 12 turns (exactly the page a session opens
+  // with) carry ref-replaced answer+reasoning fields; turns 1-28 are small
+  // and eager. Opening the session resolves ~24 refs at a paced interval.
+  const messages: HistoryMessage[] = [];
+  for (let turn = 1; turn <= 40; turn += 1) {
+    if (turn <= 28) {
+      messages.push(...benchToolTurn(turn, 3, `Batch ${turn} summary.`));
+    } else {
+      messages.push(
+        { role: "user", content: `storm turn ${turn}: produce the verification report.` },
+        { role: "assistant", content: benchStormAnswer(turn), reasoning: benchStormReasoning(turn), workDurationMs: 900 },
+      );
+    }
+  }
+  return messages;
+};
+
 /** The bench session for a mock topic, or undefined for non-bench topics. */
 export function benchTopicHistory(topicId: string): HistoryMessage[] | undefined {
   switch (topicId) {
@@ -141,6 +186,8 @@ export function benchTopicHistory(topicId: string): HistoryMessage[] | undefined
       return benchFixture("small", benchSmallHistory);
     case "topic_bench_giant_turn":
       return benchFixture("giant", benchGiantTurnHistory);
+    case "topic_bench_storm":
+      return benchFixture("storm", benchStormHistory);
     default:
       return undefined;
   }

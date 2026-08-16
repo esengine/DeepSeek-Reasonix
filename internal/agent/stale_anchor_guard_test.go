@@ -27,7 +27,7 @@ func TestDeleteRangeRequiresReadAfterSameTurnWrite(t *testing.T) {
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
 
-	if err := a.Run(context.Background(), "edit the map"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "edit the map"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := atomic.LoadInt32(&deleteCalls); got != 1 {
@@ -60,7 +60,7 @@ func TestEditFileAllowedAfterSameTurnWriteWithoutFreshRead(t *testing.T) {
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
 
-	if err := a.Run(context.Background(), "edit two independent regions"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "edit two independent regions"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := atomic.LoadInt32(&editCalls); got != 2 {
@@ -89,7 +89,7 @@ func TestDeleteRangeAllowedAfterFreshRead(t *testing.T) {
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
 
-	if err := a.Run(context.Background(), "edit the map with a read between edits"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "edit the map with a read between edits"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := atomic.LoadInt32(&readCalls); got != 1 {
@@ -121,7 +121,7 @@ func TestDeleteRangeStillRequiresReadAfterWindowedRead(t *testing.T) {
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
 
-	if err := a.Run(context.Background(), "edit the map with a narrow read between edits"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "edit the map with a narrow read between edits"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := atomic.LoadInt32(&readCalls); got != 1 {
@@ -152,7 +152,7 @@ func TestMultiEditAllowedAfterSameTurnWrite(t *testing.T) {
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
 
-	if err := a.Run(context.Background(), "edit the map atomically"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "edit the map atomically"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := atomic.LoadInt32(&editCalls); got != 1 {

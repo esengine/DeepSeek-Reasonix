@@ -37,7 +37,7 @@ func TestProjectionValidAcceptsLegacyNativeKey(t *testing.T) {
 		},
 		TranscriptVersion: 1,
 	}
-	if !projectionValid(st, msgs, 1, "ws|s|m") {
+	if !projectionValid(st, msgs, "ws|s|m") {
 		t.Fatal("projectionValid rejected legacy native lineage key")
 	}
 }

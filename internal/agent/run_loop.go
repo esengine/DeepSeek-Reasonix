@@ -3,19 +3,15 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math/rand"
 	"strings"
 	"time"
 
-	"reasonix/internal/agentpreset"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
-	"reasonix/internal/jobs"
 	"reasonix/internal/provider"
-	"reasonix/internal/taskintent"
-	"reasonix/internal/taskpolicy"
+	"reasonix/internal/runtimepolicy"
 	"reasonix/internal/tool"
 )
 
@@ -30,6 +26,7 @@ type streamedTurn struct {
 	signature          string
 	reasoningID        string
 	reasoningStatus    string
+	reasoningComplete  bool
 	calls              []provider.ToolCall
 	responsesItems     []json.RawMessage
 	serverSearch       []provider.ServerSearchCall
@@ -39,6 +36,14 @@ type streamedTurn struct {
 	partialCalls       []provider.ToolCall
 	maxArgChars        int // peak streaming tool-arg size for failed-attempt estimates
 	err                error
+}
+
+func (s streamedTurn) assistantMessage() provider.Message {
+	return provider.Message{
+		Role: provider.RoleAssistant, Content: s.text, ReasoningContent: s.reasoning,
+		ReasoningSignature: s.signature, ReasoningID: s.reasoningID, ReasoningStatus: s.reasoningStatus,
+		ToolCalls: s.calls, ResponsesItems: s.responsesItems, ServerSearch: s.serverSearch,
+	}
 }
 
 // deferredStreamSink keeps selected stream events local until the caller
@@ -77,9 +82,15 @@ func (s *deferredStreamSink) Emit(e event.Event) {
 		s.flushBuffered()
 		return
 	}
-	if s.waitingForReasoning && !s.sawReasoning && e.Kind == event.ToolDispatch {
-		s.events = append(s.events, e)
-		return
+	if s.waitingForReasoning && !s.sawReasoning {
+		switch e.Kind {
+		case event.ToolDispatch, event.ToolResult, event.Text, event.Message:
+			// Keep every user-visible speculative event private until reasoning
+			// proves the turn replayable. Healthy DeepSeek responses emit
+			// reasoning first, so their live-streaming fast path is unchanged.
+			s.events = append(s.events, e)
+			return
+		}
 	}
 	s.inner.Emit(e)
 }
@@ -118,13 +129,11 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	// values are computed below. Cross-turn state (checkpoint, scope, failure
 	// budgets) lives in taskRuntime and is reconciled there.
 	a.turn = turnRuntime{}
+	a.turn.automaticReadinessContinuation = automaticReadinessContinuationFromContext(ctx)
 	a.resetStructuralRunGuards()
 	scope, scoped := DeliveryExecutionScopeFromContext(ctx)
-	preserveEvidence := a.pending.preserveEvidence
-	// A run that starts with a pending readiness recovery (or an explicit
-	// evidence-preserving continuation) and then passes readiness counts as a
-	// recovery in the final audit.
-	a.turn.readinessRecovered = preserveEvidence || a.pending.deliveryRecovery
+	preserveEvidence, readinessRecovered := a.beginFinalReadinessRecovery()
+	a.turn.readinessRecovered = readinessRecovered
 	if a.task.ledger != nil {
 		switch {
 		case preserveEvidence:
@@ -135,10 +144,6 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 			a.resetTurnEvidence()
 		}
 	}
-	a.pending.preserveEvidence = false
-	if !preserveEvidence {
-		a.pending.deliveryRecovery = false
-	}
 	if scoped {
 		a.task.scopeID = scope.ID
 	} else if !preserveEvidence {
@@ -148,29 +153,7 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	if scoped && a.task.checkpoint.ScopeID != scope.ID {
 		a.task.checkpoint = evidence.DeliveryCheckpoint{ScopeID: scope.ID}
 	}
-	// Re-lease this session's background-job mutations that no turn has
-	// committed yet. The Reset above just wiped any lease a failed or
-	// cancelled turn held (its ledger is gone), and a process restart starts
-	// from an empty ledger too — in both cases the job manager still marks the
-	// job's evidence uncommitted. Without re-injecting it here, a turn that
-	// never re-issues wait/bash_output (the model has no reason to if it
-	// doesn't know a mutation is still pending) would ship the background
-	// change without the final-readiness gate ever seeing it. Plan turns defer
-	// this lease like collectBackgroundEvidence does so execution evidence is
-	// consumed and audited only after plan approval.
-	if a.task.ledger != nil && a.svc.jobs != nil && !a.planMode.Load() {
-		session := jobs.SessionFromContext(ctx)
-		for _, jobID := range a.svc.jobs.PendingEvidenceJobIDsForSession(session) {
-			summary, ready := a.svc.jobs.TryLeaseEvidenceForSession(session, jobID)
-			if !ready {
-				continue
-			}
-			if !a.task.ledger.NoteBackgroundLease(session, jobID) {
-				continue
-			}
-			a.task.ledger.MergeChild(summary)
-		}
-	}
+	a.leasePendingBackgroundEvidence(ctx)
 	a.turn.deliveryCriteriaEstablished = a.hasIncompleteCanonicalCriteria() ||
 		(a.task.ledger != nil && a.task.ledger.HasSuccessfulTodoWrite()) ||
 		(scoped && a.task.checkpoint.CriteriaEstablished)
@@ -188,50 +171,40 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	} else if strings.TrimSpace(a.turn.turnInput) == "" {
 		a.turn.turnInput = rawInput
 	}
-	intent := taskintent.Classify(a.turn.turnInput)
-	a.turn.deliveryTaskExpected = intent.NeedsEvidence()
-	a.turn.deliveryMutationExpected = intent == taskintent.Mutation && registryHasWriterTools(a.svc.tools)
-	a.turn.deliveryPersistentExpected = taskintent.NeedsPersistentAction(a.turn.turnInput)
 	a.turn.recoveryTaskSummary = boundedRecoveryTaskSummary(a.turn.turnInput)
-	// Freeze TaskPolicy for this turn from the session role setting. Subsequent
-	// SetAgentPreset calls must not change this turn's route/review floor.
-	if policy, ok := taskpolicy.FromContext(ctx); ok {
-		a.turn.policy = policy
+	if constraints, ok := runtimepolicy.FromContext(ctx); ok {
+		a.turn.constraints = constraints
 	} else {
-		a.turn.policy = taskpolicy.Derive(taskpolicy.Input{
-			Raw:         a.turn.turnInput,
-			Instruction: taskpolicy.StripQuotedConstraints(a.turn.turnInput),
-			Preset:      agentpreset.AgentPreset(a.AgentPreset()),
-			PlanMode:    a.planMode.Load(),
-		})
+		a.turn.constraints = runtimepolicy.ParseConstraints(runtimepolicy.StripQuotedConstraints(a.turn.turnInput))
+		if a.planMode.Load() {
+			a.turn.constraints.PlanModeReadOnly = true
+			a.turn.constraints.ForbidMutation = true
+		}
 	}
-	a.turn.policySet = true
-	// Align legacy delivery gates with the frozen role setting. Delivery always
-	// enables the full readiness contract. Light/Balanced only elevate when the
-	// turn is a mutation that requires forced review or is high-risk.
-	switch {
-	case a.AgentPreset() == string(agentpreset.Delivery):
-		a.deliveryProfile = true
-	case a.turn.policy.Intent == taskintent.Mutation &&
-		(a.turn.policy.RequiresIndependentReview() || a.turn.policy.Risk >= taskpolicy.RiskHigh):
-		a.deliveryProfile = true
-	default:
-		a.deliveryProfile = false
+	if inherited, ok := runtimepolicy.InheritedFromContext(ctx); ok && !a.readOnlyExecution {
+		a.turn.constraints = mergeInheritedConstraints(a.turn.constraints, inherited.Constraints)
+		if inherited.PlanReadOnly {
+			a.turn.constraints.PlanModeReadOnly = true
+			a.turn.constraints.ForbidMutation = true
+		}
+	} else if a.inheritedExec != nil && !a.readOnlyExecution {
+		a.turn.constraints = mergeInheritedConstraints(a.turn.constraints, a.inheritedExec.Constraints)
+		if a.inheritedExec.PlanReadOnly {
+			a.turn.constraints.PlanModeReadOnly = true
+			a.turn.constraints.ForbidMutation = true
+		}
 	}
+	a.turn.engine = runtimepolicy.NewEngine(a.turn.constraints)
+	a.rebuildTurnContract()
 	// A cancelled/error turn leaves a provider-excluded recovery record at the
 	// transcript tail. Fold its bounded facts into this new user turn exactly
-	// once; the user's raw text remains the classifier source above.
+	// once; the user's raw text remains the source above.
+	a.ensureUnreplayableHistoryRecovery()
 	providerInput = withInterruptedRecovery(providerInput, a.pendingInterruptedRecovery())
 	a.task.prepareScope(scoped, scope.ID)
 	a.svc.sink.Emit(event.Event{Kind: event.TurnStarted})
 	a.emitTurnPhase(event.TurnPhaseWorking)
 	input = a.withTurnPreferences(providerInput)
-	// Persist the short execution-policy block in provider Content; keep the
-	// original user text in RawContent for history/title/rewind stripping.
-	policyBlock := taskpolicy.ExecutionPolicyBlock(a.turn.policy)
-	if !strings.Contains(input, "<execution-policy") {
-		input = strings.TrimSpace(input) + "\n\n" + policyBlock
-	}
 	userCreatedAt := time.Now().UnixMilli()
 	a.activeTurnCreatedAt.Store(userCreatedAt)
 	rawContent := rawInput
@@ -301,12 +274,8 @@ func (a *Agent) runToolLoop(ctx context.Context, state *turnRuntime) error {
 		if err != nil {
 			a.emitTurnUsage(usage, &cacheDiagnostics)
 			a.observeRunBudget(state, usage)
-			// The byte-limit sentinel is already the user-facing turn error.
-			// Emitting the finish-reason notice as well doubles the same warning.
-			if !errors.Is(err, errReasoningByteLimitExceeded) {
-				if msg, ok := finishReasonMessage(usage); ok {
-					a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg})
-				}
+			if msg, ok := finishReasonMessage(usage); ok {
+				a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg})
 			}
 			// Exhausted stream retries (or a non-retryable error): persist one
 			// bounded LocalOnly recovery record for the next real user message.
@@ -374,66 +343,68 @@ func (a *Agent) streamWithSamplingRecovery(ctx context.Context, turn int) stream
 	// One request counter spans every body attempt; each attempt records only
 	// its delta so RequestCount equals real HTTP POSTs (no triangular growth).
 	ctx = provider.WithRequestAttemptCounter(ctx)
+	var contextRecovery contextRecoveryBudget
 
 	var billable *provider.Usage
 	var last streamedTurn
 
 	runAttempt := func(attemptID string, sink event.Sink) streamedTurn {
-		before := provider.RequestAttemptCount(ctx)
-		result := a.streamWithFrozen(ctx, turn, sink, &frozen, attemptID)
-		after := provider.RequestAttemptCount(ctx)
-		delta := max(after-before, 0)
-		// httpRequests=0 means the provider does not use SendWithRetry
-		// (extension/custom), or it failed before issuing an HTTP request.
-		// Only overwrite RequestCount when the built-in counter observed POSTs;
-		// otherwise keep the provider-reported count (zero still means one via
-		// usageRequestCount compatibility). estimateFailedAttemptUsage returns nil
-		// for zero-output local failures so no invented request appears.
-		result.usage = estimateFailedAttemptUsage(result.usage, frozen, result, delta)
-		if result.usage != nil {
-			if delta > 0 {
-				result.usage.RequestCount = delta
-			}
-		} else if delta > 0 {
-			result.usage = &provider.Usage{RequestCount: delta}
-		}
-		return result
+		return a.runSamplingAttempt(ctx, turn, sink, &frozen, attemptID)
 	}
 
 	for attempt := 1; attempt <= maxSamplingAttempts; attempt++ {
 		attemptID := newStreamAttemptID(attempt)
 		a.emitStreamAttempt(attemptID, event.StreamAttemptBegin, attempt, "", nil)
 
-		var streamSink *deferredStreamSink
-		attemptSink := a.svc.sink
-		if provider.WarnOnMissingToolCallReasoning(a.svc.prov) {
-			streamSink = newReasoningAwareStreamSink(a.svc.sink)
-			attemptSink = streamSink
-		}
+		streamSink, attemptSink := a.samplingAttemptSinks()
 
 		result := runAttempt(attemptID, attemptSink)
-		billable = mergeSamplingUsage(billable, result.usage)
-		// lastUsage is the latest single-request shape (prompt+completion+cache
-		// for that attempt only). Never the multi-attempt billable aggregate —
-		// that would inflate ContextSnapshot and compaction decisions.
-		a.storeLatestRequestUsage(result.usage)
-		last = result
-		last.usage = finalizeSamplingUsage(billable, result.usage)
+		billable, last = a.recordSamplingAttempt(billable, result)
 
 		if result.err != nil {
+			if next, retryContext, _ := a.recoverContextLimit(ctx, frozen, result.err, &contextRecovery); retryContext {
+				if streamSink != nil {
+					streamSink.Discard()
+				}
+				a.emitStreamAttempt(attemptID, event.StreamAttemptDiscard, attempt, "context_limit", result.err)
+				frozen = next
+				attempt = 0
+				continue
+			}
 			retry, terminal := a.handleSamplingError(ctx, attemptID, attempt, streamSink, &frozen, result, last, billable)
 			if retry {
 				continue
 			}
+			if provider.AsContextLimitError(result.err) != nil {
+				a.setLastRecovery(contextRecoveryFailed)
+			}
 			return terminal
 		}
 
-		// Clean terminal. Optionally repair missing reasoning with one extra
-		// exact replay of the same frozen request (no synthetic prompt).
-		missing, shouldRetry := a.observeMissingToolCallReasoning(result.calls, result.reasoning)
+		// Clean terminal. Repair missing replay-required reasoning with one exact
+		// replay of the same frozen request (no synthetic prompt). A visible text
+		// prefix does not make a tool turn replayable.
+		issue := a.reasoningReplayIssue(result)
+		missing, shouldRetry := false, false
+		switch issue {
+		case ReasoningReplayMissing:
+			missing = true
+			_, shouldRetry = a.observeMissingAssistantReasoning(result.assistantMessage(), result.reasoningComplete)
+		case "":
+			// Healthy replay-required turns advance the persisted anti-flapping
+			// streak and eventually re-arm recovery for a future regression.
+			a.observeMissingAssistantReasoning(result.assistantMessage(), result.reasoningComplete)
+		}
+		if issue == ReasoningReplayOverflow {
+			event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryReasoningOverflowDetected})
+			result.usage = finalizeSamplingUsage(billable, result.usage)
+			terminal := a.finishUnreplayableReasoning(result, streamSink, issue)
+			a.emitReasoningReplayAttemptOutcome(attemptID, attempt, terminal.err)
+			return terminal
+		}
 		if missing {
 			event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningDetected})
-			if shouldRetry && strings.TrimSpace(result.text) == "" {
+			if shouldRetry {
 				event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryAttempted})
 				retrySink := newDeferredStreamSink(a.svc.sink)
 				retry := runAttempt(attemptID, retrySink)
@@ -447,35 +418,27 @@ func (a *Agent) streamWithSamplingRecovery(ctx context.Context, turn int) stream
 						// FinishReason=interrupted is preserved for accounting.
 						return streamedTurn{usage: finalizeSamplingUsage(billable, retry.usage), err: retry.err}
 					}
-					// Fall back to the first complete response; no tool ran.
-					streamSink.Flush()
+					// Classify the first complete response without executing an
+					// unreplayable client tool.
 					a.storeLatestRequestUsage(result.usage)
 					result.usage = finalizeSamplingUsage(billable, result.usage)
 					event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
-					a.emitStreamAttempt(attemptID, event.StreamAttemptCommit, attempt, "", nil)
-					return result
+					terminal := a.finishUnreplayableReasoning(result, streamSink, issue)
+					a.emitReasoningReplayAttemptOutcome(attemptID, attempt, terminal.err)
+					return terminal
 				}
 				streamSink.Discard()
-				retrySink.Flush()
-				a.storeLatestRequestUsage(retry.usage)
-				retry.usage = finalizeSamplingUsage(billable, retry.usage)
-				retryMissing, _ := a.observeMissingToolCallReasoning(retry.calls, retry.reasoning)
-				if retryMissing {
-					event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningDetected})
-					event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
-				} else if len(retry.calls) == 0 {
-					event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryReplaced})
-				} else {
-					event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryRecovered})
-				}
-				a.emitStreamAttempt(attemptID, event.StreamAttemptCommit, attempt, "", nil)
+				retry = a.finishReasoningReplayRetry(retry, retrySink, billable)
+				a.emitReasoningReplayAttemptOutcome(attemptID, attempt, retry.err)
 				return retry
 			}
-			if !shouldRetry || strings.TrimSpace(result.text) != "" {
+			if !shouldRetry {
 				event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetrySuppressed})
 				event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
-			} else {
-				event.RecordProtocolRecovery(a.svc.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
+				result.usage = finalizeSamplingUsage(billable, result.usage)
+				terminal := a.finishUnreplayableReasoning(result, streamSink, issue)
+				a.emitReasoningReplayAttemptOutcome(attemptID, attempt, terminal.err)
+				return terminal
 			}
 		}
 
@@ -557,14 +520,23 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 		return false, a.gracePause(state)
 	}
 	if readiness.reason != "" {
-		// Delivery no longer retries readiness with hidden model messages: the
-		// run ends immediately with the missing requirements, and the host owns
-		// what happens next. In Goal mode the FSM auto-continues under budget
-		// with the missing list as the next turn; plain Delivery turns surface
-		// the recovery card for an explicit user continuation.
-		event.RecordReadinessAudit(a.svc.sink, readiness.audit(evidence.ReadinessErrored, false))
-		a.pending.deliveryRecovery = true
-		return false, &FinalReadinessError{Attempts: 1, Reason: readiness.reason, Missing: readiness.missingIDs()}
+		// The host owns the concrete missing requirements. Return them to the
+		// controller when automatic continuation is armed (or for the existing
+		// strict/Goal path). Unarmed ordinary agents retain their Partial
+		// contract and do not unexpectedly change the direct Agent API.
+		if a.turn.automaticReadinessContinuation || a.closedLoopActive() || readiness.incompleteTodos > 0 || readiness.missingSignoff > 0 || readiness.missingActionEvidence > 0 {
+			event.RecordReadinessAudit(a.svc.sink, readiness.audit(evidence.ReadinessErrored, false))
+			a.pending.finalReadinessRecovery = true
+			a.persistFinalReadinessRecovery(readiness.missingIDs())
+			return false, &FinalReadinessError{
+				Attempts:          1,
+				Reason:            readiness.reason,
+				Missing:           readiness.missingIDs(),
+				ContinuationClass: readiness.continuationClass(),
+				ProgressKey:       readiness.progressSignature(),
+			}
+		}
+		event.RecordReadinessAudit(a.svc.sink, readiness.audit(evidence.ReadinessAllowed, a.turn.readinessRecovered))
 	}
 	if !hasVisibleFinalAnswer(text) {
 		// DeepSeek thinking mode can stream a long reasoning_content and
@@ -593,7 +565,7 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 		a.contextManager().ObserveUsage(usage)
 		return true, nil
 	}
-	if readiness.applies {
+	if readiness.applies || a.turn.readinessRecovered {
 		event.RecordReadinessAudit(a.svc.sink, readiness.audit(evidence.ReadinessAllowed, a.turn.readinessRecovered))
 	}
 	a.emitTurnShadows(a.turn.turnInput)

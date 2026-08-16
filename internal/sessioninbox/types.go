@@ -60,6 +60,7 @@ var (
 	ErrInvalidState        = errors.New("inbox item state does not allow this operation")
 	ErrSchemaReadonly      = errors.New("inbox schema is newer and is read-only")
 	ErrClosed              = errors.New("inbox is closed")
+	ErrSnapshotBusy        = errors.New("inbox snapshot is busy")
 	ErrEmpty               = errors.New("inbox item body is empty")
 	ErrPaused              = errors.New("inbox is paused")
 	ErrIdempotencyConflict = errors.New("idempotency key was already used for different input")

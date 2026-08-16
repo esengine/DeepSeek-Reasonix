@@ -106,11 +106,11 @@ import {
   type SessionMeta,
   type SettingsView,
   type TabMeta,
-  type TokenMode,
   type ToolApprovalMode,
   type WorkspaceConflictView,
 } from "./lib/types";
 import type { InvocationMetadataMap, StructuredInvocationSubmit } from "./lib/invocationDisplay";
+import type { RewindUndoState } from "./lib/rewindTypes";
 import { formatSelectionReference, type SelectedTextInsertRequest } from "./lib/selectedTextContext";
 import { resolveTaskMonitorSession } from "./lib/taskMonitorNavigation";
 import {
@@ -210,13 +210,6 @@ const TERMINAL_CLOSE_TRANSITION_MS = 250;
 function noticePreviewMockEnabled(): boolean {
   const value = browserMockScenarioParam();
   return value === "notice" || value === "notices" || value === "notice-preview";
-}
-function runtimeProfileShortKey(mode: TokenMode) {
-  return mode === "economy"
-    ? "composer.runtimeProfileEconomyShort" as const
-    : mode === "delivery"
-      ? "composer.runtimeProfileDeliveryShort" as const
-      : "composer.runtimeProfileBalancedShort" as const;
 }
 function noticePreviewItems(): Item[] {
   const notice = (index: number, level: "info" | "warn", text: string, detail: string, code?: string): Item => ({
@@ -450,7 +443,7 @@ type SidebarImConnection = {
 type DesktopNavigationIntent =
   | { kind: "topic"; scope: string; workspaceRoot: string; topicId: string; sessionPath?: string }
   | { kind: "blank"; scope: string; workspaceRoot: string }
-  | { kind: "delivery-worktree"; workspaceRoot: string }
+  | { kind: "isolated-worktree"; workspaceRoot: string }
   | { kind: "sidebar-im"; connection: SidebarImConnection }
   | { kind: "resume-session"; session: SessionMeta };
 type DesktopNavigationInput = DesktopNavigationIntent & { navigationIntentSeq: number };
@@ -1099,11 +1092,10 @@ export default function App() {
     undoRewindForTab,
     setModel,
     setEffort,
-    setTokenMode,
     cancelJob,
     switchTab,
     openProjectTab,
-    createDeliveryWorktree,
+    createIsolatedWorktree,
     openGlobalTab,
     closeTab,
     reorderTabs,
@@ -1118,8 +1110,6 @@ export default function App() {
   const { locale, setPref: setLocalePref } = useI18n();
   const t = useT();
   const [composerProfilesByTab, setComposerProfilesByTab] = useState<Record<string, ComposerProfile>>({});
-  const runtimeTransitionTabsRef = useRef<Set<string>>(new Set());
-  const [runtimeTransitionsByTab, setRuntimeTransitionsByTab] = useState<Record<string, true>>({});
   const yoloRestoreToolApprovalModesRef = useRef<Record<string, RestorableToolApprovalMode>>({});
   const userPlanModeByTabRef = useRef<UserPlanModeIntents>({});
   const [tabMetas, setTabMetas] = useState<TabMeta[]>([]);
@@ -1294,13 +1284,6 @@ export default function App() {
   const [clearContextPending, setClearContextPending] = useState(false);
   const [backgroundRuntimes, setBackgroundRuntimes] = useState<BackgroundRuntimeView[]>([]);
   const [workspaceConflict, setWorkspaceConflict] = useState<WorkspaceConflictView | null>(null);
-  const [pendingModeSwitch, setPendingModeSwitch] = useState<{
-    tabId: string;
-    target: TokenMode;
-    previous: TokenMode;
-    work: ActiveWorkView;
-    stopping: boolean;
-  } | null>(null);
   const [pendingClose, setPendingClose] = useState<{ tabId: string; work: ActiveWorkView; stopping: boolean } | null>(null);
   const topicRenameSkipCommitRef = useRef(false);
   const prevDecisionSurfaceRef = useRef<DecisionSurfaceKind | null>(null);
@@ -1362,10 +1345,6 @@ export default function App() {
       window.clearInterval(timer);
     };
   }, [activeTabId, state.running]);
-
-  useEffect(() => {
-    if (pendingModeSwitch && pendingModeSwitch.tabId !== activeTabId) setPendingModeSwitch(null);
-  }, [activeTabId, pendingModeSwitch]);
 
   const closeTransientOverlays = useCallback(() => {
     setTransientOverlayDismissSignal((signal) => signal + 1);
@@ -1723,8 +1702,7 @@ export default function App() {
   const goal = composerProfile.goal;
   const collaborationMode = displayedComposerProfileCollaborationMode(composerProfile);
   const toolApprovalMode = composerProfile.toolApprovalMode;
-  const tokenMode: TokenMode = composerProfile.tokenMode;
-  const runtimeTransitioning = Boolean(activeTabId && runtimeTransitionsByTab[activeTabId]);
+  const runtimeTransitioning = false;
   const controllerReady =
     state.meta?.ready === true &&
     (!state.meta.runtime || state.meta.runtime.phase === "ready") &&
@@ -1740,11 +1718,10 @@ export default function App() {
     if (state.ask) return "ask";
     if (state.extensionForm) return "extension_form";
     if (workspaceConflict) return "workspace_conflict";
-    if (pendingModeSwitch) return "mode_jobs";
     if (pendingClose) return "close_active";
     if (clearContextPending) return "clear_context";
     return null;
-  }, [clearContextPending, pendingClose, pendingModeSwitch, state.approval, state.ask, state.extensionForm, workspaceConflict]);
+  }, [clearContextPending, pendingClose, state.approval, state.ask, state.extensionForm, workspaceConflict]);
   decisionSurfaceRef.current = decisionSurface;
   useEffect(() => {
     // Close composer menus/popovers when a decision takes over the footer.
@@ -1843,7 +1820,6 @@ export default function App() {
         mode: composerProfileMode(profile),
         collaborationMode: displayedComposerProfileCollaborationMode(profile),
         toolApprovalMode: profile.toolApprovalMode,
-        tokenMode: profile.tokenMode,
         goal: profile.goal,
         active: tab.id === visibleTabId,
       };
@@ -1971,77 +1947,6 @@ export default function App() {
     },
     [activeTabId, applyGoalForTab],
   );
-  const commitTokenModeSwitch = useCallback(
-    async (tabId: string, m: TokenMode, previous: TokenMode, profile: ComposerProfile): Promise<void> => {
-      if (!tabId || activeTabIdRef.current !== tabId || runtimeTransitionTabsRef.current.has(tabId)) return;
-      runtimeTransitionTabsRef.current.add(tabId);
-      setRuntimeTransitionsByTab((current) => ({ ...current, [tabId]: true }));
-      setComposerProfilesByTab((current) => patchComposerProfile(current, tabId, profile, { tokenMode: m }, ["tokenMode"]));
-      const switched = await setTokenMode(m);
-      if (!switched) {
-        setComposerProfilesByTab((current) => {
-          const currentProfile = current[tabId] ?? profile;
-          const pending = { ...currentProfile.pending };
-          delete pending.tokenMode;
-          return { ...current, [tabId]: { ...currentProfile, tokenMode: previous, pending } };
-        });
-      }
-      runtimeTransitionTabsRef.current.delete(tabId);
-      setRuntimeTransitionsByTab((current) => {
-        if (!current[tabId]) return current;
-        const next = { ...current };
-        delete next[tabId];
-        return next;
-      });
-    },
-    [setTokenMode],
-  );
-  const applyTokenMode = useCallback(
-    async (m: TokenMode): Promise<void> => {
-      const tabId = activeTabId;
-      if (!tabId || runtimeTransitionTabsRef.current.has(tabId) || m === composerProfile.tokenMode) return;
-      const previous = composerProfile.tokenMode;
-      try {
-        const work = await app.ActiveWorkForTab(tabId);
-        if (work.jobs.length > 0) {
-          setPendingModeSwitch({ tabId, target: m, previous, work, stopping: false });
-          return;
-        }
-      } catch {
-        // The atomic backend guard remains authoritative on older runtimes.
-      }
-      await commitTokenModeSwitch(tabId, m, previous, composerProfile);
-    },
-    [activeTabId, commitTokenModeSwitch, composerProfile],
-  );
-  const stopJobsAndSwitchMode = useCallback(async () => {
-    const request = pendingModeSwitch;
-    if (!request || request.stopping) return;
-    setPendingModeSwitch({ ...request, stopping: true });
-    try {
-      await app.CancelJobsForTab(request.tabId, request.work.jobs.map((job) => job.id));
-      const deadline = Date.now() + 15_000;
-      let work = await app.ActiveWorkForTab(request.tabId);
-      while (work.jobs.length > 0 && Date.now() < deadline) {
-        setPendingModeSwitch((current) => current?.tabId === request.tabId ? { ...current, work } : current);
-        await new Promise((resolve) => window.setTimeout(resolve, 150));
-        work = await app.ActiveWorkForTab(request.tabId);
-      }
-      if (work.jobs.length > 0) {
-        setPendingModeSwitch((current) => current?.tabId === request.tabId ? { ...current, work, stopping: false } : current);
-        showToast(t("status.jobStopFailed"), "error");
-        return;
-      }
-      setPendingModeSwitch(null);
-      await refreshBackgroundRuntimes();
-      if (activeTabIdRef.current === request.tabId) {
-        await commitTokenModeSwitch(request.tabId, request.target, request.previous, composerProfile);
-      }
-    } catch (err) {
-      setPendingModeSwitch((current) => current?.tabId === request.tabId ? { ...current, stopping: false } : current);
-      showToast(err instanceof Error ? err.message : String(err), "error");
-    }
-  }, [commitTokenModeSwitch, composerProfile, pendingModeSwitch, refreshBackgroundRuntimes, showToast, t]);
   const cancelRuntimeJob = useCallback(async (tabId: string, jobId: string): Promise<boolean> => {
     try {
       const cancelled = await app.CancelJobForTab(tabId, jobId);
@@ -2312,7 +2217,6 @@ export default function App() {
         if (activeTabIdRef.current !== sourceTabId) return;
         closeTransientOverlays();
         setWorkspaceConflict(null);
-        setPendingModeSwitch(null);
         setPendingClose(null);
         setClearContextPending(false);
         const mockWork: ActiveWorkView = {
@@ -2332,14 +2236,6 @@ export default function App() {
             ownerWork: mockWork,
             canReveal: true,
             canCreateWorktree: true,
-          });
-        } else if (decisionMock === "mode_jobs") {
-          setPendingModeSwitch({
-            tabId: sourceTabId,
-            target: tokenMode === "delivery" ? "full" : "delivery",
-            previous: tokenMode,
-            work: mockWork,
-            stopping: false,
           });
         } else if (decisionMock === "close_active") {
           setPendingClose({ tabId: sourceTabId, work: mockWork, stopping: false });
@@ -2448,7 +2344,7 @@ export default function App() {
       await commitThenSendRef.current(sourceTabId, trimmed, submitText.trim(), structured);
     },
     [activeTabId, applyGoal, closeTransientOverlays, collaborationMode, composerProfile, controllerReady, goal, notice, runShellForTab,
-      patchActivatedGoalForTab, setControllerComposerProfileForTab, switchModel, t, tokenMode, toolApprovalMode, showToast],
+      patchActivatedGoalForTab, setControllerComposerProfileForTab, switchModel, t, toolApprovalMode, showToast],
   );
 
   const handleSteer = useCallback(async (text: string, requestedTabId = activeTabId) => {
@@ -3326,12 +3222,12 @@ export default function App() {
     cancel();
     setWorkspaceConflict(null);
     try {
-      await createDeliveryWorktree(root);
+      await createIsolatedWorktree(root);
       await refreshTabMetas(undefined, { afterMutation: true });
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), "error");
     }
-  }, [cancel, createDeliveryWorktree, refreshTabMetas, showToast, state.meta?.cwd, state.meta?.workspacePath, state.meta?.workspaceRoot]);
+  }, [cancel, createIsolatedWorktree, refreshTabMetas, showToast, state.meta?.cwd, state.meta?.workspacePath, state.meta?.workspaceRoot]);
 
   const handleTabsClose = useCallback(async (ids: string[], nextActiveTabId?: string) => {
     closeTransientOverlays();
@@ -3376,21 +3272,14 @@ export default function App() {
   // On confirm, call Go prepare+commit immediately. Only after success does
   // the UI truncate the transcript, refresh files, and fill the composer.
   // Real backend undo uses UndoRewindForTab when a transaction id is available.
-  type RewindState = {
-    turnDiff: number;      // turns rolled back
-    transactionId?: string;
-    undoAvailable?: boolean;
-    filesRestored?: string[];
-    filesRemoved?: string[];
-  };
-  const [rewindStatesByTab, setRewindStatesByTab] = useState<Record<string, RewindState>>({});
+  const [rewindStatesByTab, setRewindStatesByTab] = useState<Record<string, RewindUndoState>>({});
   const rewindStatesByTabRef = useRef(rewindStatesByTab);
   rewindStatesByTabRef.current = rewindStatesByTab;
   const [rewindCommittingByTab, setRewindCommittingByTab] = useState<Record<string, boolean>>({});
   const rewindState = activeTabId ? rewindStatesByTab[activeTabId] ?? null : null;
   const rewindCommitting = Boolean(activeTabId && rewindCommittingByTab[activeTabId]);
 
-  const setRewindStateForTab = useCallback((tabId: string, nextState: RewindState | null) => {
+  const setRewindStateForTab = useCallback((tabId: string, nextState: RewindUndoState | null) => {
     if (!tabId) return;
     const next = { ...rewindStatesByTabRef.current };
     if (nextState) next[tabId] = nextState;
@@ -3446,7 +3335,7 @@ export default function App() {
     for (let i = state.items.length - 1; i >= 0; i--) {
       const item = state.items[i];
       if (item.kind === "notice" && item.text.startsWith("↪ ")) {
-        return { key: item.id, text: item.text.slice(2) };
+        return { key: item.id, itemId: item.inboxItemId, text: item.text.slice(2) };
       }
     }
     return null;
@@ -3587,17 +3476,19 @@ export default function App() {
         // Keep conversation/files as-is; notices already carry the reason.
         return;
       }
-      setRewindStateForTab(sourceTabId, {
-        turnDiff,
+      const targetTabId = outcome.tabId || sourceTabId;
+      setRewindStateForTab(targetTabId, {
+        turnDiff: outcome.tabId ? 0 : turnDiff,
         transactionId: outcome.transactionId,
         undoAvailable: outcome.undoAvailable,
+        undoTabId: sourceTabId,
         filesRestored: outcome.written ?? [],
         filesRemoved: outcome.deleted ?? [],
       });
       const insertId = Date.now();
       setComposerInsertRequestsByTab((current) => ({
         ...current,
-        [sourceTabId]: { id: insertId, text: prompt, mode: "replace" },
+        [targetTabId]: { id: insertId, text: prompt, mode: "replace" },
       }));
       setRewindSignal((v) => v + 1);
       if (scope === "both" || scope === "code") {
@@ -3625,16 +3516,17 @@ export default function App() {
       }
       userCount++;
     }
-    const ok = await rewindForTab(sourceTabId, turn, "conversation");
-    if (!ok) return false;
+    const outcome = await rewindForTabDetailed(sourceTabId, turn, "conversation");
+    if (!outcome.ok) return false;
     setRewindSignal((v) => v + 1);
+    const targetTabId = outcome.tabId || sourceTabId;
     try {
-      await sendToTab(sourceTabId, next, submit, original);
+      await sendToTab(targetTabId, next, submit, original);
       return true;
     } catch {
       return false;
     }
-  }, [activeTab?.readOnly, activeTabId, clearContextPending, controllerReady, hydratePlaceholderActive, sendToTab, state.approval, state.ask, state.items, state.messageAction, state.running, rewindForTab]);
+  }, [activeTab?.readOnly, activeTabId, clearContextPending, controllerReady, hydratePlaceholderActive, sendToTab, state.approval, state.ask, state.items, state.messageAction, state.running, rewindForTabDetailed]);
 
   const openTrash = useCallback(async () => {
     closeTransientOverlays();
@@ -3703,8 +3595,8 @@ export default function App() {
         return;
       }
 
-      if (request.kind === "delivery-worktree") {
-        const result = await createDeliveryWorktree(request.workspaceRoot, request.navigationIntentSeq);
+      if (request.kind === "isolated-worktree") {
+        const result = await createIsolatedWorktree(request.workspaceRoot, request.navigationIntentSeq);
         if (!latest()) return;
         seedActiveTabMeta(result.tab);
         setProjectRevision((value) => value + 1);
@@ -3781,7 +3673,7 @@ export default function App() {
         void refreshLatestTabMetas();
         return;
       }
-      if (request.kind === "delivery-worktree") {
+      if (request.kind === "isolated-worktree") {
         console.warn("isolated Delivery workspace creation failed", err);
         showToast(err instanceof Error ? err.message : String(err), "error", { durationMs: 6000 });
         return;
@@ -3803,7 +3695,7 @@ export default function App() {
         showToast(err?.message || String(err));
       }
     }
-  }, [activateTopic, createDeliveryWorktree, ensureBlankSurface, ensureBlankTab, isNavigationIntentCurrent, openChannelSession, openGlobalTab, openProjectTab, openTopicSession, refreshHistoryView, resumeSession, seedActiveTabMeta, showToast, singleSurfaceLayout, t]);
+  }, [activateTopic, createIsolatedWorktree, ensureBlankSurface, ensureBlankTab, isNavigationIntentCurrent, openChannelSession, openGlobalTab, openProjectTab, openTopicSession, refreshHistoryView, resumeSession, seedActiveTabMeta, showToast, singleSurfaceLayout, t]);
 
   const enqueueNavigationWithIntent = useCallback((input: DesktopNavigationIntent, navigationIntentSeq: number): Promise<void> => {
     return enqueueNavigationRequest(
@@ -4426,7 +4318,7 @@ export default function App() {
                 imTopicSources={imTopicSources}
                 onOpenTopic={handleOpenTopic}
                 onCreateTopic={(scope, workspaceRoot) => openBlankSession(scope, scope === "project" ? workspaceRoot : "")}
-                onCreateDeliveryWorktree={(workspaceRoot) => enqueueNavigation({ kind: "delivery-worktree", workspaceRoot })}
+                onCreateIsolatedWorktree={(workspaceRoot) => enqueueNavigation({ kind: "isolated-worktree", workspaceRoot })}
                 onTopicsChanged={refreshProjectsAndTabs}
                 onRenameTopic={renameTopic}
                 refreshSignal={projectRevision}
@@ -4870,7 +4762,6 @@ export default function App() {
                   actionHoverMenus={sidebarCreation && !hydratePlaceholderActive}
                   rewindSignal={rewindSignal}
                   revealSignal={transcriptRevealSignal}
-                  historyLayoutRevision={state.historyLayoutRevision}
                   hydrating={transcriptHydrating}
                   hasOlderHistory={state.historyHasOlder && !rewindState}
                   olderHistoryCount={state.historyStartTurn}
@@ -4903,7 +4794,8 @@ export default function App() {
                     const tabId = activeTabId;
                     if (!tabId) return;
                     const tx = rewindState.transactionId;
-                    const undo = tx && rewindState.undoAvailable ? undoRewindForTab(tabId, tx) : Promise.resolve(true);
+                    const undoTabId = rewindState.undoTabId || tabId;
+                    const undo = tx && rewindState.undoAvailable ? undoRewindForTab(undoTabId, tx) : Promise.resolve(true);
                     void undo.then((ok) => {
                       if (!ok) return;
                       setRewindStateForTab(tabId, null);
@@ -5014,30 +4906,6 @@ export default function App() {
                 }}
               />
             )
-            : decisionSurface === "mode_jobs" && pendingModeSwitch ? (
-              <RuntimeDecisionCard
-                id="mode-jobs"
-                title={t("runtime.modeJobsTitle", { mode: t(runtimeProfileShortKey(pendingModeSwitch.target)) })}
-                badge={t("status.jobs", { n: pendingModeSwitch.work.jobs.length })}
-                meta={t("runtime.modeJobsMeta")}
-                note={pendingModeSwitch.work.jobs.map((job) => job.label || job.kind).join(" · ")}
-                onCancel={() => setPendingModeSwitch(null)}
-                actions={[
-                  {
-                    key: "1", label: pendingModeSwitch.stopping
-                      ? t("status.jobStopping")
-                      : t("runtime.stopAndSwitch", { n: pendingModeSwitch.work.jobs.length }),
-                    description: t("runtime.stopAndSwitchDesc", { mode: t(runtimeProfileShortKey(pendingModeSwitch.target)) }),
-                    onClick: () => void stopJobsAndSwitchMode(),
-                    danger: true, disabled: pendingModeSwitch.stopping,
-                  },
-                ]}
-                secondaryAction={{
-                  key: "Esc", label: t("runtime.keepMode"), description: t("runtime.keepModeDesc"),
-                  onClick: () => setPendingModeSwitch(null), disabled: pendingModeSwitch.stopping,
-                }}
-              />
-            )
             : decisionSurface === "close_active" && pendingClose ? (
               <RuntimeDecisionCard
                 id="close-active"
@@ -5089,7 +4957,6 @@ export default function App() {
               running={state.running || rewindCommitting}
               collaborationMode={collaborationMode}
               toolApprovalMode={toolApprovalMode}
-              tokenMode={tokenMode}
               turnPhase={state.turnPhase}
               goal={goal}
               goalStatus={state.meta?.goalStatus}
@@ -5113,7 +4980,6 @@ export default function App() {
               onResumeGoal={resumeGoalFromUi}
               onSwitchModel={switchModelFromUi}
               onSetEffort={setEffort}
-              onSetTokenMode={applyTokenMode}
               insertRequest={composerInsertRequest}
               selectedTextRequest={selectedTextRequest}
               readOnly={Boolean(activeTab?.readOnly)}
@@ -5138,6 +5004,7 @@ export default function App() {
               workspaceScopeKey={workspaceScopeKey}
               fileRefRefreshKey={composerFileRefRefreshKey}
               guidanceConsumedKey={latestGuidanceConsumed?.key}
+              guidanceConsumedItemId={latestGuidanceConsumed?.itemId}
               guidanceConsumedText={latestGuidanceConsumed?.text}
               guidanceQueuePreviewItems={guidanceQueueMockItems}
               showContextWindowRing={sidebarCreation}

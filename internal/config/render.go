@@ -351,7 +351,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 				fmt.Fprintf(&b, "context_window = %d   # tokens; compaction triggers near this limit\n", p.ContextWindow)
 			}
 			if p.MaxOutputTokens != 0 {
-				fmt.Fprintf(&b, "max_output_tokens = %d   # per-turn total output; 0 = official DeepSeek 384K / omit field; positive = cost cap; never affects compact_ratio\n", p.MaxOutputTokens)
+				fmt.Fprintf(&b, "max_output_tokens = %d   # per-turn total output; 0 = provider auto (official DeepSeek 384K, omit when safe); positive = cost cap; negative = force-omit; never affects compact_ratio\n", p.MaxOutputTokens)
 			} else {
 				b.WriteString("# max_output_tokens = 0       # recommended: official DeepSeek omits the field (server 384K ceiling)\n")
 				b.WriteString("# max_output_tokens = 32768   # optional cost cap\n")

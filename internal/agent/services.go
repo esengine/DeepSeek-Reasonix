@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"strings"
 	"sync"
 
 	"reasonix/internal/checkpoint"
@@ -52,6 +53,17 @@ type agentServices struct {
 	// configWrite can ask the user whether a file tool may write a
 	// Reasonix-managed config file outside the workspace roots.
 	configWrite tool.ConfigWriteApprover
+	// writeRoots is the session-scoped writable directory manager.
+	writeRoots *sandbox.WritableRootSet
+	// writeAccess authorizes extra writable directories. nil skips expansion
+	// except for a fail-closed missing-dir check when writeRoots is set.
+	writeAccess WriteAccessGate
+	// writeAccessExpandable is false for sub-agents: they inherit roots but
+	// cannot request new directories.
+	writeAccessExpandable bool
+	workspaceRoot         string
+	homeDir               string
+	stateRoot             string
 	// hooks fires PreToolUse / PostToolUse shell hooks around each tool call.
 	hooks ToolHooks
 	// asker lets the `ask` tool put questions to the user; nil in headless runs.
@@ -101,22 +113,28 @@ func newAgentServices(
 	configWrite tool.ConfigWriteApprover, hooks ToolHooks, opts Options,
 ) agentServices {
 	return agentServices{
-		prov:             prov,
-		tools:            tools,
-		pricing:          opts.Pricing,
-		sink:             sink,
-		gate:             gate,
-		extensions:       opts.Extensions,
-		recoveryGate:     opts.RecoveryGate,
-		planTrust:        planTrust,
-		sandboxEscape:    sandboxEscape,
-		configWrite:      configWrite,
-		hooks:            hooks,
-		jobs:             opts.Jobs,
-		memQueue:         opts.MemoryQueue,
-		writeScheduler:   opts.WriteScheduler,
-		workspaceLease:   opts.WorkspaceLease,
-		warnState:        missingReasoningWarnStateFor(opts.MissingReasoningWarnStateDir),
-		mutationObserver: opts.MutationObserver,
+		prov:                  prov,
+		tools:                 tools,
+		pricing:               opts.Pricing,
+		sink:                  sink,
+		gate:                  gate,
+		extensions:            opts.Extensions,
+		recoveryGate:          opts.RecoveryGate,
+		planTrust:             planTrust,
+		sandboxEscape:         sandboxEscape,
+		configWrite:           configWrite,
+		hooks:                 hooks,
+		jobs:                  opts.Jobs,
+		memQueue:              opts.MemoryQueue,
+		writeScheduler:        opts.WriteScheduler,
+		workspaceLease:        opts.WorkspaceLease,
+		warnState:             missingReasoningWarnStateFor(opts.MissingReasoningWarnStateDir),
+		mutationObserver:      opts.MutationObserver,
+		writeRoots:            opts.WriteRoots,
+		writeAccess:           opts.WriteAccessGate,
+		writeAccessExpandable: opts.SubagentDepth == 0 && !opts.DisableWriteAccessExpand,
+		workspaceRoot:         strings.TrimSpace(opts.WriteWorkspaceRoot),
+		homeDir:               strings.TrimSpace(opts.HomeDir),
+		stateRoot:             strings.TrimSpace(opts.StateRoot),
 	}
 }

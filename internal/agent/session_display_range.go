@@ -5,10 +5,81 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"reasonix/internal/provider"
 	"reasonix/internal/store"
 )
+
+// LoadSessionPreviewFromDisplayIndex reads only the first authored user-message
+// range from a current display index. It never acquires the session save lock or
+// scans the full transcript, so runtime tree snapshots cannot wait behind a
+// long-running save. A missing or stale index fails closed and lets the caller
+// use another preview source.
+func LoadSessionPreviewFromDisplayIndex(path string) (string, bool, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", false, fmt.Errorf("empty session path")
+	}
+	index, err := LoadSessionDisplayIndex(store.SessionDisplayIndex(path))
+	if err != nil {
+		return "", false, err
+	}
+	messageIndex := -1
+	for _, entry := range index.Entries {
+		if entry.StartsTurn {
+			messageIndex = entry.Index
+			break
+		}
+	}
+	if messageIndex < 0 {
+		return "", false, nil
+	}
+	messages, checkedIndex, err := LoadSessionDisplayMessageRange(path, messageIndex, messageIndex+1)
+	if err != nil {
+		return "", false, err
+	}
+	if checkedIndex == nil || messageIndex >= len(checkedIndex.Entries) || !checkedIndex.Entries[messageIndex].StartsTurn {
+		return "", false, fmt.Errorf("session display index changed while reading preview")
+	}
+	if err := validateSessionPreviewDisplayIndex(path, checkedIndex); err != nil {
+		return "", false, err
+	}
+	preview, turns := SessionPreviewFromMessages(messages)
+	if turns == 0 || strings.TrimSpace(preview) == "" {
+		return "", false, nil
+	}
+	return preview, true, nil
+}
+
+func validateSessionPreviewDisplayIndex(path string, index *SessionDisplayIndex) error {
+	transcriptInfo, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	indexInfo, err := os.Stat(store.SessionDisplayIndex(path))
+	if err != nil {
+		return err
+	}
+	// The index is published after the content it describes. Equality is
+	// ambiguous on coarse filesystems, so this latency-sensitive fallback
+	// declines to run a full digest scan to resolve the tie.
+	if !indexInfo.ModTime().After(SessionContentModTime(path)) {
+		return fmt.Errorf("session display index is not newer than session content")
+	}
+	identity, identityKnown, err := SessionContentIdentity(path)
+	if err != nil {
+		return err
+	}
+	if identityKnown {
+		if !ValidateSessionDisplayIndex(index, identity.Revision, identity.RevisionKnown, identity.Digest, transcriptInfo.Size()) {
+			return fmt.Errorf("session display index does not match content identity")
+		}
+	} else if index.RevisionKnown {
+		return fmt.Errorf("session display index has no matching content identity")
+	}
+	return nil
+}
 
 // LoadSessionDisplayMessageRange decodes a bounded range through the display
 // index. Callers must separately compare the index revision and digest with

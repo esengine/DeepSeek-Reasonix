@@ -86,6 +86,10 @@ func (p *forkCaptureProvider) OutputBudget() int { return outputBudgetOf(p.inner
 
 func (p *forkCaptureProvider) SharesContextWindow() bool { return sharesContextWindow(p.inner) }
 
+func (p *forkCaptureProvider) ContextBudgetPolicy() provider.ContextBudgetPolicy {
+	return provider.ResolveContextBudgetPolicy(p.inner)
+}
+
 func (p *forkCaptureProvider) SharedWindowInputPolicy() provider.SharedWindowInputPolicy {
 	return sharedWindowInputPolicyOf(p.inner)
 }
