@@ -519,10 +519,13 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 		return false, a.gracePause(state)
 	}
 	if readiness.reason != "" {
-		// Goal/Plan and fact contradictions (open todos, sign-off, action
-		// receipts) fail the run. Ordinary Recoverable/project/review gaps
-		// become an honest Partial completion instead of a recovery error.
-		if a.closedLoopActive() || readiness.incompleteTodos > 0 || readiness.missingSignoff > 0 || readiness.missingActionEvidence > 0 {
+		// Goal/Plan and fact contradictions (open todos in closed-loop turns,
+		// sign-off, action receipts) fail the run. Ordinary Recoverable/
+		// project/review gaps — and unfinished todos in open (non closed-loop)
+		// turns, where the todo list is a cross-turn work plan rather than a
+		// delivery contract — become an honest Partial completion instead of
+		// a recovery error.
+		if a.closedLoopActive() || readiness.missingSignoff > 0 || readiness.missingActionEvidence > 0 {
 			event.RecordReadinessAudit(a.svc.sink, readiness.audit(evidence.ReadinessErrored, false))
 			a.pending.finalReadinessRecovery = true
 			a.persistFinalReadinessRecovery(readiness.missingIDs())

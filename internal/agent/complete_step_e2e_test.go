@@ -156,6 +156,10 @@ func TestE2ECrossTurnCanonicalGateBlocksThenClears(t *testing.T) {
 	mp := testutil.NewMock("m",
 		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "w1", Name: "write_file", Arguments: `{"path":"alpha.go"}`}}},
 		testutil.Turn{Text: "all done"},
+		// The closed-loop follow-up must also satisfy verification and review
+		// obligations before the todo sign-off clears the gate.
+		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "v1", Name: "bash", Arguments: `{"command":"go test ./..."}`}}},
+		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "r1", Name: "bash", Arguments: `{"command":"git diff alpha.go"}`}}},
 		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c1", Name: "complete_step",
 			Arguments: `{"step":"alpha","result":"done","evidence":[{"kind":"diff","summary":"edited","paths":["alpha.go"]}]}`}}},
 		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c2", Name: "complete_step",
@@ -165,11 +169,11 @@ func TestE2ECrossTurnCanonicalGateBlocksThenClears(t *testing.T) {
 	a := New(mp, evidenceRegistry(), sess, Options{}, event.Discard)
 	a.SetSession(sess) // rebuilds canonical {alpha in_progress, beta pending}
 
-	firstErr := a.Run(withNoClosedLoop(context.Background()), "finish up")
+	firstErr := a.Run(withClosedLoopContext(context.Background()), "finish up")
 	if !readinessBlocked(firstErr) {
 		t.Fatalf("premature 'all done' error = %v, want FinalReadinessError from the cross-turn canonical gate", firstErr)
 	}
-	if err := a.Run(withNoClosedLoop(context.Background()), "finish up"); err != nil {
+	if err := a.Run(withClosedLoopContext(context.Background()), "finish up"); err != nil {
 		t.Fatalf("follow-up Run: %v", err)
 	}
 	for i, td := range a.sess.todoState {

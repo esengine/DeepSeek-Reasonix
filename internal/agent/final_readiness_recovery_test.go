@@ -1,10 +1,8 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 
 	"reasonix/internal/event"
@@ -47,49 +45,30 @@ func TestTargetedVerificationRecoverySurvivesAgentRebuild(t *testing.T) {
 	a := New(first, reg, session, Options{}, event.Discard)
 
 	var readinessErr *FinalReadinessError
-	if err := a.Run(context.Background(), "write docs/verify_v070.md and run the validation script"); !errors.As(err, &readinessErr) {
+	if err := a.Run(withClosedLoopContext(context.Background()), "write docs/verify_v070.md and run the validation script"); !errors.As(err, &readinessErr) {
 		t.Fatalf("first Run error = %v, want final readiness failure", err)
 	}
+	// Closed-loop turns keep the failure in memory only: the durable LocalOnly
+	// marker is reserved for open turns (persistFinalReadinessRecovery skips
+	// delivery-scoped runs), so no transcript copy of the writer payload can
+	// leak into a checkpoint.
 	var marker *provider.FinalReadinessRecovery
 	for _, message := range session.Snapshot() {
 		if message.FinalReadinessRecovery != nil {
 			marker = message.FinalReadinessRecovery
 		}
 	}
-	if marker == nil || bytes.Contains(marker.Checkpoint, []byte("sensitive-payload")) {
-		t.Fatal("recovery checkpoint missing or duplicated writer content")
+	if marker != nil {
+		t.Fatal("closed-loop readiness failure must not persist a recovery marker")
 	}
-	path := filepath.Join(t.TempDir(), "readiness-recovery.jsonl")
-	if err := session.Save(path); err != nil {
-		t.Fatalf("Save: %v", err)
+	if !a.pending.finalReadinessRecovery {
+		t.Fatal("closed-loop readiness failure must keep the in-memory pending recovery flag")
 	}
-	loaded, err := LoadSession(path)
-	if err != nil {
-		t.Fatalf("LoadSession: %v", err)
-	}
-
-	recoveryProvider := &scriptedProvider{name: "standard-reloaded", turns: [][]provider.Chunk{
-		{toolCallChunk("recognized-check", "bash", `{"command":"git diff --check"}`), {Type: provider.ChunkDone}},
-		{toolCallChunk("signoff", "complete_step", `{"step":"Write verification notes","result":"done","evidence":[{"kind":"verification","summary":"diff check passed","command":"git diff --check"}]}`), {Type: provider.ChunkDone}},
-		{toolCallChunk("todo-done", "todo_write", `{"todos":[{"content":"Write verification notes","status":"completed"}]}`), {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "checks complete"}, {Type: provider.ChunkDone}},
-	}}
-	reloaded := New(recoveryProvider, reg, loaded, Options{}, event.Discard)
-	if !reloaded.PrepareFinalReadinessRecovery() || reloaded.PrepareFinalReadinessRecovery() {
-		t.Fatal("rebuilt recovery authorization was not one-shot")
-	}
-	if err := reloaded.Run(context.Background(), "continue the remaining checks"); err != nil {
-		t.Fatalf("reloaded recovery Run: %v", err)
-	}
-	for _, message := range loaded.Snapshot() {
-		if message.FinalReadinessRecovery != nil && message.FinalReadinessRecovery.Pending {
-			t.Fatal("started recovery left its durable action pending")
-		}
-	}
-	writer, ok := reloaded.task.ledger.LatestSuccessfulWriterIndex()
-	if !ok || !reloaded.task.ledger.HasSuccessfulVerificationCommandAfter(writer) {
-		t.Fatal("reloaded recovery did not preserve write-before-verification ordering")
-	}
+	// The open-turn marker persistence and rebuild continuation this test
+	// originally pinned is unreachable by design after #8851: open turns no
+	// longer fail on unfinished todos, so no recovery marker is ever written
+	// for them; closed-loop recovery stays in memory and is driven by the
+	// explicit PrepareDeliveryRecovery path.
 }
 
 func TestFinalReadinessRecoveryRejectsStaleMarkerAfterUserTurn(t *testing.T) {

@@ -367,7 +367,7 @@ func TestRunSubAgentSalvagesReadinessExhaustedWork(t *testing.T) {
 		finalText, // block 3 — budget exhausted
 	}}
 	sess := NewSession("sys")
-	answer, err := RunSubAgentWithSession(context.Background(), prov, reg, sess,
+	answer, err := RunSubAgentWithSession(withClosedLoopContext(context.Background()), prov, reg, sess,
 		"add explanations to the question bank", Options{SubagentDepth: 1}, event.Discard)
 	if err != nil {
 		t.Fatalf("readiness exhaustion with real work must salvage, got err: %v", err)
@@ -466,7 +466,7 @@ func TestExplicitDeliveryRecoveryPreservesEvidenceOnce(t *testing.T) {
 	}}
 	a := New(prov, reg, NewSession("sys"), Options{}, event.Discard)
 	var readinessErr *FinalReadinessError
-	if err := a.Run(context.Background(), "implement main"); !errors.As(err, &readinessErr) {
+	if err := a.Run(withClosedLoopContext(context.Background()), "implement main"); !errors.As(err, &readinessErr) {
 		t.Fatalf("first Run error = %v, want FinalReadinessError", err)
 	}
 	if !a.PrepareDeliveryRecovery() {
@@ -475,7 +475,7 @@ func TestExplicitDeliveryRecoveryPreservesEvidenceOnce(t *testing.T) {
 	if a.PrepareDeliveryRecovery() {
 		t.Fatal("delivery recovery authorization must be one-shot")
 	}
-	if err := a.Run(context.Background(), "continue the remaining delivery checks"); err != nil {
+	if err := a.Run(withClosedLoopContext(context.Background()), "continue the remaining delivery checks"); err != nil {
 		t.Fatalf("recovery Run: %v", err)
 	}
 	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); !ok {
@@ -496,14 +496,14 @@ func TestOrdinaryFollowUpDoesNotPreserveFailedDeliveryEvidence(t *testing.T) {
 	}}
 	a := New(prov, reg, NewSession("sys"), Options{}, event.Discard)
 	var firstErr *FinalReadinessError
-	if err := a.Run(context.Background(), "implement main"); !errors.As(err, &firstErr) {
+	if err := a.Run(withClosedLoopContext(context.Background()), "implement main"); !errors.As(err, &firstErr) {
 		t.Fatalf("first Run error = %v, want FinalReadinessError", err)
 	}
 	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); !ok {
 		t.Fatal("first failed delivery should retain its mutation until the next turn is classified")
 	}
 
-	if err := a.Run(withClosedLoopContext(context.Background()), "fix the unrelated crash in other.go"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "fix the unrelated crash in other.go"); err != nil {
 		t.Fatalf("ordinary follow-up without a writer = %v, want ready", err)
 	}
 	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok {

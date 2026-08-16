@@ -662,7 +662,7 @@ func TestFinalReadinessStopsAfterFirstBlock(t *testing.T) {
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
 
-	err := a.Run(withNoClosedLoop(context.Background()), "edit with todo and never sign off")
+	err := a.Run(withClosedLoopContext(context.Background()), "edit with todo and never sign off")
 	if err == nil {
 		t.Fatal("expected the first readiness block to stop the run")
 	}
@@ -852,7 +852,7 @@ func TestFinalReadinessAuditRecordsTerminalError(t *testing.T) {
 	sink := &readinessAuditSink{}
 	a := New(prov, reg, NewSession(""), Options{}, sink)
 
-	err := a.Run(withNoClosedLoop(context.Background()), "edit with todo and never sign off")
+	err := a.Run(withClosedLoopContext(context.Background()), "edit with todo and never sign off")
 	if err == nil {
 		t.Fatal("expected the first readiness block to stop the run")
 	}
@@ -862,6 +862,43 @@ func TestFinalReadinessAuditRecordsTerminalError(t *testing.T) {
 	last := sink.events[len(sink.events)-1]
 	if last.Result != evidence.ReadinessErrored || last.IncompleteTodos == 0 {
 		t.Fatalf("terminal audit = %+v, want errored with incomplete todos", last)
+	}
+}
+
+// TestOpenTurnMayEndWithIncompleteTodosAfterWrite proves an ordinary (non
+// closed-loop) session can end a turn with a partially completed todo list:
+// the list is a cross-turn work plan there, not a delivery contract, so it
+// must not raise the Goal-flavored FinalReadinessError (#8851).
+func TestOpenTurnMayEndWithIncompleteTodosAfterWrite(t *testing.T) {
+	todoWrite, ok := tool.LookupBuiltin("todo_write")
+	if !ok {
+		t.Fatal("todo_write builtin not registered")
+	}
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "write_file", readOnly: false})
+	reg.Add(todoWrite)
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{
+			toolCallChunk("c1", "write_file", `{"path":"changed.go","content":"package main"}`),
+			toolCallChunk("c2", "todo_write", `{"todos":[{"content":"Edit code","status":"in_progress"}]}`),
+			{Type: provider.ChunkDone},
+		},
+		{{Type: provider.ChunkText, Text: "done, more steps remain for later turns"}, {Type: provider.ChunkDone}},
+	}}
+	sink := &readinessAuditSink{}
+	a := New(prov, reg, NewSession(""), Options{}, sink)
+
+	err := a.Run(withNoClosedLoop(context.Background()), "edit with todo and leave remaining steps for later")
+	if err != nil {
+		t.Fatalf("open turn with incomplete todos must not fail the run, got: %v", err)
+	}
+	if prov.call != 2 {
+		t.Fatalf("provider calls = %d, want 2 (write + one final, no readiness retry)", prov.call)
+	}
+	for _, e := range sink.events {
+		if e.Result == evidence.ReadinessErrored {
+			t.Fatalf("open turn recorded an errored readiness audit: %+v", e)
+		}
 	}
 }
 

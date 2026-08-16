@@ -910,8 +910,12 @@ func TestTaskToolBackgroundSalvagePublishesEvidenceForCollection(t *testing.T) {
 	}
 	jobID := extractJobID(out)
 	res := jm.WaitForSession(context.Background(), "parent-session", []string{jobID}, 5)
-	if len(res) != 1 || res[0].Status != jobs.Done || !strings.Contains(res[0].Output, "[unverified]") {
-		t.Fatalf("background salvage = %+v, want done unverified result", res)
+	// An open (non closed-loop) sub-agent treats an unfinished todo list as a
+	// cross-turn work plan: the run completes normally instead of degrading to
+	// the unverified salvage card (#8851). The evidence publication below is
+	// what this test pins.
+	if len(res) != 1 || res[0].Status != jobs.Done {
+		t.Fatalf("background task = %+v, want done", res)
 	}
 	if parentLedger.Summary().HasMutation() {
 		t.Fatal("background goroutine wrote directly into the parent turn ledger")

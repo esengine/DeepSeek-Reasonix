@@ -106,7 +106,12 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 	if mutation, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok {
 		writer, hasWriter = mutation, true
 	}
-	if hasWriter && hasTodos && len(incomplete) > 0 {
+	// Incomplete todos are a fact contradiction only inside a closed-loop
+	// (Goal/Plan/strict-obligation) turn, where the host guarantees full
+	// delivery. In open turns the todo list is a cross-turn work plan; a
+	// partially completed plan is progress, not a contradiction, and must not
+	// surface the Goal-flavored delivery ceremony (#8851).
+	if a.closedLoopActive() && hasWriter && hasTodos && len(incomplete) > 0 {
 		out.applies = true
 		out.incompleteTodos = len(incomplete)
 		missing = append(missing, finalReadinessIncompleteTodos(incomplete))
