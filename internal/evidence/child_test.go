@@ -3,6 +3,7 @@ package evidence
 import (
 	"encoding/json"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -40,6 +41,36 @@ func TestMergeChildPropagatesRealWrites(t *testing.T) {
 	}
 	if !parent.HasSuccessfulReviewAfter(idx) {
 		t.Fatal("child read of mutated path should satisfy review")
+	}
+}
+
+func TestConcurrentChildMergesKeepDistinctWrites(t *testing.T) {
+	parent := NewLedger()
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		child := NewLedger()
+		child.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/a.go"}`), true, false))
+		parent.MergeChild(child.Summary())
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		child := NewLedger()
+		child.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/b.go"}`), true, false))
+		parent.MergeChild(child.Summary())
+	}()
+	close(start)
+	wg.Wait()
+	if parent.Len() != 2 {
+		t.Fatalf("merged receipts = %d, want 2", parent.Len())
+	}
+	paths := parent.Summary().MutationPaths()
+	if len(paths) != 2 {
+		t.Fatalf("mutation paths = %v, want both child writes", paths)
 	}
 }
 
@@ -126,11 +157,19 @@ func TestAbsoluteMutationRiskIgnoresWorkspaceAndTestHarnessAncestors(t *testing.
 	}
 	deep := ClassifyToolCallMutationRisk(
 		"edit_file",
-		json.RawMessage(`{"path":"/tmp/TestBuildToolSchemas123/001/internal/provider/openai/responses/client.go"}`),
+		json.RawMessage(`{"path":"/tmp/TestBuildToolSchemas123/001/internal/auth/oauth/client.go"}`),
 		false,
 	)
 	if deep != RiskHigh {
 		t.Fatalf("deep absolute sensitive suffix risk = %s, want high", deep)
+	}
+	ordinary := ClassifyToolCallMutationRisk(
+		"edit_file",
+		json.RawMessage(`{"path":"/tmp/TestBuildToolSchemas123/001/internal/provider/openai/responses/client.go"}`),
+		false,
+	)
+	if ordinary != RiskMedium {
+		t.Fatalf("provider path is ordinary production code = %s, want medium", ordinary)
 	}
 }
 
@@ -148,20 +187,20 @@ func TestWorkspaceRelativeMutationRiskPreservesDeepOwnerAndIgnoresCheckoutName(t
 	deep := ClassifyToolCallMutationRiskWithin(
 		root,
 		"edit_file",
-		json.RawMessage(`{"path":"/workspace/toolbox/internal/provider/openai/responses/client.go"}`),
+		json.RawMessage(`{"path":"/workspace/toolbox/internal/auth/session.go"}`),
 		false,
 	)
 	if deep != RiskHigh {
-		t.Fatalf("deep provider path = %s, want high", deep)
+		t.Fatalf("deep auth path = %s, want high", deep)
 	}
 	windows := ClassifyToolCallMutationRiskWithin(
 		`C:\workspace\toolbox`,
 		"edit_file",
-		json.RawMessage(`{"path":"c:\\workspace\\toolbox\\internal\\sandbox\\linux\\seccomp\\policy.go"}`),
+		json.RawMessage(`{"path":"c:\\workspace\\toolbox\\internal\\auth\\session.go"}`),
 		false,
 	)
 	if windows != RiskHigh {
-		t.Fatalf("Windows deep sandbox path = %s, want high", windows)
+		t.Fatalf("Windows deep auth path = %s, want high", windows)
 	}
 }
 
@@ -223,7 +262,7 @@ func TestAbsoluteMutationRiskPreservesSensitiveOwnerBeforeTempShape(t *testing.T
 		Success:  true,
 		Write:    true,
 		Mutation: true,
-		Paths:    []string{"/workspace/provider/TestWorker123/001/internal/client.go"},
+		Paths:    []string{"/workspace/auth/TestWorker123/001/internal/client.go"},
 	}}
 	if got := ClassifyMutationRisk(receipts, 0); got != RiskHigh {
 		t.Fatalf("risk = %q, want %q", got, RiskHigh)
@@ -252,7 +291,7 @@ func TestLedgerMutationRiskWithinPreservesDeepSensitiveOwner(t *testing.T) {
 	ledger := NewLedger()
 	ledger.Record(ReceiptFromToolCall(
 		"edit_file",
-		json.RawMessage(`{"path":"/workspace/toolbox/internal/provider/openai/responses/client.go"}`),
+		json.RawMessage(`{"path":"/workspace/toolbox/internal/auth/session.go"}`),
 		true,
 		false,
 	))

@@ -19,9 +19,9 @@ reasonix --effort high
 reasonix --dir /path/to/project
 ```
 
-Reasonix runs a single adaptive standard execution: planning depth,
-verification breadth, and independent review follow the task's risk
-automatically — there is no execution mode to pick.
+Ordinary requests always enter the executor. There is no automatic simple /
+light / full task mode to pick. The dedicated planner runs only for an
+explicit Plan, an approval boundary, or Goal start.
 
 Running `reasonix` without a subcommand starts the interactive terminal UI. Use
 `reasonix setup` first when no provider is configured.

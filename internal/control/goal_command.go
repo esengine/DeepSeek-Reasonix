@@ -11,6 +11,7 @@ func (c *Controller) startGoalCommandTurn(cmd GoalCommand, display string) {
 	if !c.goals.active() {
 		return
 	}
+	c.goals.markExplicitStart()
 	c.notice(fmt.Sprintf(i18n.M.GoalSetFmt, ShortGoalForNotice(c.Goal())))
 	if c.runner != nil {
 		c.runGuarded(func(ctx context.Context) error {

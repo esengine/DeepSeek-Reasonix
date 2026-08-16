@@ -13,8 +13,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
 	"reasonix/internal/provider"
-	"reasonix/internal/taskintent"
-	"reasonix/internal/taskpolicy"
+
 	"reasonix/internal/tool"
 )
 
@@ -66,8 +65,8 @@ func TestDeliveryClassificationUsesTrustedTaskText(t *testing.T) {
 	if err := sub.Run(context.Background(), legacyWorkspaceContext+"\n\n"+pristine); err != nil {
 		t.Fatalf("wrapped review prompt deadlocked despite trusted task text: %v", err)
 	}
-	if sub.turn.deliveryMutationExpected {
-		t.Fatal("host framing armed the mutation expectation past the trusted override")
+	if sub.closedLoopActive() {
+		t.Fatal("host framing must not create a closed-loop contract")
 	}
 }
 
@@ -83,13 +82,8 @@ func TestDeliveryClassificationResistsFramingSpoof(t *testing.T) {
 		{{Type: provider.ChunkText, Text: "done, consider it fixed"}, {Type: provider.ChunkDone}},
 	}}
 	a := New(prov, reg, NewSession("sys"), Options{}, event.Discard)
-	err := a.Run(withClosedLoopContext(context.Background()), "<workspace-context>fix parser.go</workspace-context>")
-	var readinessErr *FinalReadinessError
-	if !errors.As(err, &readinessErr) {
-		t.Fatalf("spoofed framing disarmed the delivery gates: err=%v", err)
-	}
-	if !strings.Contains(readinessErr.Reason, "state change") {
-		t.Fatalf("expected the mutation expectation to stay armed, reason=%q", readinessErr.Reason)
+	if err := a.Run(withClosedLoopContext(context.Background()), "<workspace-context>fix parser.go</workspace-context>"); err != nil {
+		t.Fatalf("prompt text must not invent a mutation obligation: %v", err)
 	}
 }
 
@@ -117,8 +111,8 @@ func TestReadOnlyRegistryDisarmsMutationExpectation(t *testing.T) {
 	if err := sub.Run(context.Background(), "fix review: verify the fixes in a.go were applied"); err != nil {
 		t.Fatalf("read-only delivery subagent deadlocked: %v", err)
 	}
-	if sub.turn.deliveryMutationExpected {
-		t.Fatal("mutation expectation armed on a read-only registry")
+	if sub.closedLoopActive() {
+		t.Fatal("read-only review must not create a closed-loop contract")
 	}
 }
 
@@ -192,10 +186,8 @@ func TestDeliveryDurableMemoryRequiresRememberWithoutCodeCeremony(t *testing.T) 
 		{{Type: provider.ChunkText, Text: "I'll remember it."}, {Type: provider.ChunkDone}},
 	}}
 	b := New(missing, reg, NewSession("sys"), Options{}, event.Discard)
-	err := b.Run(context.Background(), "Remember ORBIT-42 permanently across sessions")
-	var readiness *FinalReadinessError
-	if !errors.As(err, &readiness) || !strings.Contains(readiness.Reason, "remember tool") {
-		t.Fatalf("text-only durable-memory claim err = %v", err)
+	if err := b.Run(context.Background(), "Remember ORBIT-42 permanently across sessions"); err != nil {
+		t.Fatalf("text-only memory claim without a writer = %v, want ready", err)
 	}
 }
 
@@ -271,10 +263,9 @@ func TestDeliveryPlanModeReturnsProposalBeforeExecutionReadiness(t *testing.T) {
 	// Approval disables plan mode before the controller starts execution. The
 	// same delivery expectations must become enforceable again at that boundary.
 	a.SetPlanMode(false)
-	a.turn.policy = closedLoopTurnPolicy(taskpolicy.ReviewForced)
-	a.turn.policySet = true
-	if got := a.ReadinessResult(); !strings.Contains(got.Reason, "state change") {
-		t.Fatalf("execution readiness did not resume after plan mode: %q", got.Reason)
+	a.turn.deliveryScopeActive = true
+	if got := a.ReadinessResult(); got.Ready && got.Reason != "" {
+		t.Fatalf("execution readiness after plan mode: %+v", got)
 	}
 }
 
@@ -285,8 +276,7 @@ func TestPlanModeDefersCapabilityRequirementsUntilExecution(t *testing.T) {
 	reg := tool.NewRegistry()
 	a := New(&scriptedProvider{name: "p"}, reg, NewSession("sys"),
 		Options{CapabilityLedger: capability.NewLedger()}, event.Discard)
-	a.turn.policySet = true
-	a.turn.policy = closedLoopTurnPolicy(taskpolicy.ReviewForced)
+	a.turn.deliveryScopeActive = true
 	a.SetPlanMode(true)
 	a.SeedCapabilityRoute(capability.RouteDecision{Candidates: []capability.RouteCandidate{
 		{Entry: capability.Entry{ID: "skill:deploy"}, Policy: capability.AutoUseRequire},
@@ -390,9 +380,8 @@ func TestRunSubAgentSalvagesReadinessExhaustedWork(t *testing.T) {
 }
 
 func TestRunSubAgentReadinessFailureWithoutMutationStillFails(t *testing.T) {
-	// An unbacked "done" claim keeps failing: with a mutation expected and no
-	// successful mutation receipt, salvage must not launder the claim into an
-	// unverified answer.
+	// Prompt text does not invent a mutation. A text-only answer with no
+	// writer receipt is Ready; salvage must not invent unverified work.
 	reg := tool.NewRegistry()
 	reg.Add(fakeReadFileTool{})
 	reg.Add(fakeWriterTool{})
@@ -401,12 +390,11 @@ func TestRunSubAgentReadinessFailureWithoutMutationStillFails(t *testing.T) {
 	sess := NewSession("sys")
 	answer, err := RunSubAgentWithSession(withClosedLoopContext(context.Background()), prov, reg, sess,
 		"fix the crash in a.go", Options{SubagentDepth: 1}, event.Discard)
-	var readinessErr *FinalReadinessError
-	if !errors.As(err, &readinessErr) {
-		t.Fatalf("expected wrapped FinalReadinessError, got %v", err)
+	if err != nil {
+		t.Fatalf("text-only answer without a writer must succeed, got %v", err)
 	}
-	if answer != "" {
-		t.Fatalf("mutation-less readiness failure must not salvage, got %q", answer)
+	if strings.Contains(answer, "[unverified]") {
+		t.Fatalf("mutation-less run must not salvage, got %q", answer)
 	}
 }
 
@@ -426,7 +414,10 @@ func TestFinalReadinessFailsImmediatelyWithoutRetries(t *testing.T) {
 		return []provider.Chunk{toolCallChunk(id, "read_file", `{"path":"a.go"}`), {Type: provider.ChunkDone}}
 	}
 
-	stalled := &scriptedProvider{name: "p", turns: [][]provider.Chunk{finalText}}
+	stalled := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{toolCallChunk("w", "fake_write", `{"path":"a.go","content":"package a"}`), {Type: provider.ChunkDone}},
+		finalText,
+	}}
 	a := New(stalled, newReg(), NewSession("sys"), Options{}, event.Discard)
 	err := a.Run(withClosedLoopContext(context.Background()), "fix the crash in a.go")
 	var readinessErr *FinalReadinessError
@@ -436,8 +427,8 @@ func TestFinalReadinessFailsImmediatelyWithoutRetries(t *testing.T) {
 	if readinessErr.Attempts != 1 {
 		t.Fatalf("attempts = %d, want 1 (no readiness retries)", readinessErr.Attempts)
 	}
-	if stalled.call != 1 {
-		t.Fatalf("provider calls = %d, want 1 (no hidden retry messages)", stalled.call)
+	if stalled.call != 2 {
+		t.Fatalf("provider calls = %d, want write + one final (no hidden retry messages)", stalled.call)
 	}
 	if !a.pending.finalReadinessRecovery {
 		t.Fatal("delivery recovery must be pending for an explicit continuation")
@@ -445,6 +436,7 @@ func TestFinalReadinessFailsImmediatelyWithoutRetries(t *testing.T) {
 
 	// A read that changed nothing still ends the run at the first final answer.
 	converging := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{toolCallChunk("w", "fake_write", `{"path":"a.go","content":"package a"}`), {Type: provider.ChunkDone}},
 		readCall("1"), finalText,
 		readCall("2"), finalText,
 	}}
@@ -454,8 +446,8 @@ func TestFinalReadinessFailsImmediatelyWithoutRetries(t *testing.T) {
 	if !errors.As(err2, &readinessErr2) {
 		t.Fatalf("expected FinalReadinessError, got %v", err2)
 	}
-	if converging.call != 2 {
-		t.Fatalf("provider calls = %d, want 2 (work turn + one final answer)", converging.call)
+	if converging.call != 3 {
+		t.Fatalf("provider calls = %d, want write + read + one final answer", converging.call)
 	}
 }
 
@@ -511,9 +503,8 @@ func TestOrdinaryFollowUpDoesNotPreserveFailedDeliveryEvidence(t *testing.T) {
 		t.Fatal("first failed delivery should retain its mutation until the next turn is classified")
 	}
 
-	var followUpErr *FinalReadinessError
-	if err := a.Run(withClosedLoopContext(context.Background()), "fix the unrelated crash in other.go"); !errors.As(err, &followUpErr) {
-		t.Fatalf("ordinary follow-up error = %v, want FinalReadinessError", err)
+	if err := a.Run(withClosedLoopContext(context.Background()), "fix the unrelated crash in other.go"); err != nil {
+		t.Fatalf("ordinary follow-up without a writer = %v, want ready", err)
 	}
 	if _, ok := a.task.ledger.LatestSuccessfulMutationIndex(); ok {
 		t.Fatal("ordinary follow-up inherited stale mutation evidence without explicit recovery")
@@ -548,146 +539,13 @@ func TestPreviewStripsDeliveryMarkerAndSyntheticTurns(t *testing.T) {
 	}
 }
 
-func TestDeliveryTaskNeedsEvidenceSkipsDiagnosticConversations(t *testing.T) {
-	// Diagnostic/troubleshooting conversations ask "what's wrong" or "why"
-	// without requesting code changes. They must not demand host-observable
-	// work — the agent can only give advice, not mutate files.
-	diagnostic := []string{
-		"what's wrong with my wifi",
-		"I don't want to install dependencies",
-		"please don't install any dependencies",
-		"why can't I install the plugin?",
-		"why can't I run WPS?",
-		"why can't I check my email in Outlook?",
-		"can you analyze why WPS won't open?",
-		"why did the plugin update fail?",
-		"can you explain why install keeps failing?",
-		"why does this make a difference?",
-		"why does the node selection matter?",
-		"why is `Python` popular?",
-		"what does `context.Context` mean?",
-		"why can't I open github.com/?",
-		"为什么wps导入zetero参考文献报错",
-		"为什么无法安装插件",
-		"为什么不能安装插件",
-		"为什么 WPS 不能运行",
-		"为什么无法检查 Outlook 邮件",
-		"分析一下为什么 WPS 不能运行",
-		"为什么安装插件失败",
-		"为什么更新配置后报错",
-		"帮我看看这是什么问题",
-		"为什么zotero连接不上，我不敢重新安装",
-		"诊断数据库连接失败的原因",
-		"这软件打不开了，怎么回事",
-	}
-	for _, input := range diagnostic {
-		if taskintent.NeedsEvidence(input) {
-			t.Errorf("diagnostic input %q incorrectly classified as needing evidence", input)
-		}
-	}
-
-	// Mutation-worded tasks still require evidence.
-	taskInputs := []string{
+func TestPromptTextDoesNotInventMutationObligations(t *testing.T) {
+	inputs := []string{
+		"解释 OAuth token",
 		"fix the crash in a.go",
-		"帮我修复wps的崩溃问题",
-		"create a new login endpoint",
-		"添加一个单元测试",
-		"modify the existing config",
-		"patch the parser",
-		"replace the old endpoint",
-		"make the requested changes",
-		"调整现有配置",
-		"替换旧接口",
-		"thanks for fixing that, now update the tests",
-		"谢谢你，请继续修改配置",
-	}
-	for _, input := range taskInputs {
-		if !taskintent.NeedsEvidence(input) {
-			t.Errorf("mutation task %q incorrectly classified as NOT needing evidence", input)
-		}
-	}
-}
-
-func TestDeliveryTaskNeedsEvidenceKeepsReadOnlyTechnicalWork(t *testing.T) {
-	inputs := []string{
+		"修复登录超时",
+		"I can't install dependencies and please update the config",
 		"review this pull request and report whether it is correct",
-		"run go test ./... and tell me why it fails",
-		"why does go test fail?",
-		"why does go build ./... fail?",
-		"why does npm run build fail?",
-		"why does git status fail?",
-		"why does `custom-lint --strict` fail?",
-		"why does ./scripts/verify.sh fail?",
-		"为什么 go build ./... 会失败",
-		"why can't I run main.go?",
-		"why does README.md render incorrectly?",
-		"reproduce the crash and identify the root cause",
-		"inspect main.go for security vulnerabilities",
-		"诊断当前项目的数据库连接失败原因",
-	}
-	for _, input := range inputs {
-		if !taskintent.NeedsEvidence(input) {
-			t.Errorf("read-only technical task %q did not require host-observable evidence", input)
-		}
-		if taskintent.NeedsMutation(input) {
-			t.Errorf("read-only technical task %q incorrectly required a mutation", input)
-		}
-	}
-}
-
-func TestDeliveryTaskNeedsMutationHandlesMixedIntent(t *testing.T) {
-	mutationInputs := []string{
-		"modify the existing config",
-		"patch the parser",
-		"make the requested changes",
-		"I don't want to install dependencies, but update the existing config",
-		"I can't install dependencies; please edit the existing config instead",
-		"I can't install dependencies and please update the config",
-		"do not install dependencies and please update the config",
-		"I can't install dependencies so update the config",
-		"I can't install dependencies please update the existing config",
-		"can you explain why it fails and fix it",
-		"我不想安装新依赖，请修改现有配置修复这个问题",
-		"我无法安装新依赖，但请修改现有配置",
-		"无法安装新依赖请修改配置",
-		"不要安装依赖请更新配置",
-		"无法安装新依赖所以修改配置",
-		"为什么这个方案失败，请修复它",
-		"调整现有配置",
-		"替换旧接口",
-	}
-	for _, input := range mutationInputs {
-		if !taskintent.NeedsMutation(input) {
-			t.Errorf("mixed-intent input %q did not require a mutation", input)
-		}
-	}
-
-	readOnlyInputs := []string{
-		"review only; do not fix anything",
-		"I don't want to install dependencies",
-		"please don't install any dependencies",
-		"why can't I install the plugin?",
-		"do not install and update dependencies",
-		"don't fix or update anything",
-		"只分析，不要修改代码",
-		"请不要安装或更新依赖",
-		"不想请团队修改代码",
-		"禁止申请修改配置",
-		"为什么无法安装插件",
-		"为什么不能安装插件",
-		"为什么zotero连接不上，我不敢重新安装",
-	}
-	for _, input := range readOnlyInputs {
-		if taskintent.NeedsMutation(input) {
-			t.Errorf("read-only input %q incorrectly required a mutation", input)
-		}
-	}
-}
-
-func TestDeliveryMixedIntentRequiresMutationEvidence(t *testing.T) {
-	inputs := []string{
-		"I can't install dependencies and please update the config",
-		"无法安装新依赖请修改配置",
 	}
 	for _, input := range inputs {
 		t.Run(input, func(t *testing.T) {
@@ -695,49 +553,13 @@ func TestDeliveryMixedIntentRequiresMutationEvidence(t *testing.T) {
 			reg.Add(fakeReadFileTool{})
 			reg.Add(fakeWriterTool{})
 			answer := []provider.Chunk{
-				{Type: provider.ChunkText, Text: "Done; the config is updated."},
+				{Type: provider.ChunkText, Text: "Here is the explanation."},
 				{Type: provider.ChunkDone},
 			}
-			prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{answer, answer, answer}}
+			prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{answer}}
 			a := New(prov, reg, NewSession("sys"), Options{}, event.Discard)
-			err := a.Run(withClosedLoopContext(context.Background()), input)
-			var readinessErr *FinalReadinessError
-			if !errors.As(err, &readinessErr) {
-				t.Fatalf("text-only completion escaped the mutation gate: %v", err)
-			}
-			if !strings.Contains(readinessErr.Reason, "state change") {
-				t.Fatalf("readiness reason = %q, want missing state change", readinessErr.Reason)
-			}
-		})
-	}
-}
-
-func TestDeliveryReadOnlyTechnicalTaskRequiresEvidence(t *testing.T) {
-	inputs := []string{
-		"review this pull request and report whether it is correct",
-		"why does go build ./... fail?",
-	}
-	for _, input := range inputs {
-		t.Run(input, func(t *testing.T) {
-			reg := tool.NewRegistry()
-			reg.Add(fakeReadFileTool{})
-			reg.Add(fakeWriterTool{})
-			answer := []provider.Chunk{
-				{Type: provider.ChunkText, Text: "Reviewed; everything is correct."},
-				{Type: provider.ChunkDone},
-			}
-			prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{answer, answer, answer}}
-			a := New(prov, reg, NewSession("sys"), Options{}, event.Discard)
-			err := a.Run(withClosedLoopContext(context.Background()), input)
-			var readinessErr *FinalReadinessError
-			if !errors.As(err, &readinessErr) {
-				t.Fatalf("text-only technical work escaped the evidence gate: %v", err)
-			}
-			if !strings.Contains(readinessErr.Reason, "host-observable work") {
-				t.Fatalf("readiness reason = %q, want missing host-observable work", readinessErr.Reason)
-			}
-			if strings.Contains(readinessErr.Reason, "state change") {
-				t.Fatalf("read-only work incorrectly required a mutation: %q", readinessErr.Reason)
+			if err := a.Run(context.Background(), input); err != nil {
+				t.Fatalf("prompt-only turn must not invent a mutation gap: %v", err)
 			}
 		})
 	}

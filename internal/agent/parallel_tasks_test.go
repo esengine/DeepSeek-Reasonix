@@ -13,7 +13,7 @@ import (
 
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
-	"reasonix/internal/taskpolicy"
+	"reasonix/internal/runtimepolicy"
 	"reasonix/internal/tool"
 	"reasonix/internal/workspacelease"
 )
@@ -490,22 +490,22 @@ func TestChildMaxStepsSharedDefault(t *testing.T) {
 	}
 }
 
-func TestTaskToolPropagatesInheritedTaskPolicyToSubagents(t *testing.T) {
-	parent := taskpolicy.TaskPolicy{
-		Evidence: taskpolicy.EvidenceClosedLoop,
-		Review:   taskpolicy.ReviewForced,
-		Risk:     taskpolicy.RiskHigh,
+func TestTaskToolPropagatesInheritedExecutionToSubagents(t *testing.T) {
+	parent := runtimepolicy.InheritedExecutionContext{
+		Constraints:  runtimepolicy.Constraints{ForbidMutation: true},
+		PlanReadOnly: true,
+		GoalScopeID:  "goal-1",
 	}
 	task := &TaskTool{}
-	opts := task.subagentOptions(taskpolicy.WithContext(context.Background(), parent), 0, nil, 0, 1, "", nil)
-	if opts.InheritedTaskPolicy == nil {
-		t.Fatal("sub-agent options did not inherit parent TaskPolicy")
+	opts := task.subagentOptions(runtimepolicy.WithInherited(context.Background(), parent), 0, nil, 0, 1, "", nil)
+	if opts.InheritedExecution == nil {
+		t.Fatal("sub-agent options did not inherit parent execution context")
 	}
-	if !opts.InheritedTaskPolicy.ClosedLoop() {
-		t.Fatal("inherited TaskPolicy lost closed-loop evidence")
+	if !opts.InheritedExecution.PlanReadOnly || !opts.InheritedExecution.Constraints.ForbidMutation {
+		t.Fatalf("inherited execution = %+v", opts.InheritedExecution)
 	}
-	if opts.InheritedTaskPolicy.Review != taskpolicy.ReviewForced {
-		t.Fatalf("inherited review = %v, want forced", opts.InheritedTaskPolicy.Review)
+	if opts.InheritedExecution.GoalScopeID != "goal-1" {
+		t.Fatalf("inherited goal scope = %q", opts.InheritedExecution.GoalScopeID)
 	}
 }
 

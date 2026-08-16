@@ -1,8 +1,8 @@
-// Package taskintent classifies natural-language task text (English and
+// Goal budget helpers classify natural-language task text (English and
 // Chinese) into delivery-intent categories. The delivery evidence gates and
 // Goal budget selection consume it as a heuristic; it never gates permissions
 // or whether writes are allowed.
-package taskintent
+package control
 
 import (
 	"strings"
@@ -418,7 +418,7 @@ func deliveryTaskStartsWithMutation(input string) bool {
 	}
 	for _, needle := range deliveryMutationNeedles {
 		if containsTaskNeedle(input, needle) {
-			if containsNonASCII(needle) {
+			if goalBudgetContainsNonASCII(needle) {
 				return strings.HasPrefix(input, needle)
 			}
 			tokens := strings.FieldsFunc(input, func(r rune) bool {
@@ -484,7 +484,7 @@ func deliveryMutationClauseNegated(clause string) bool {
 }
 
 func deliveryTaskNeedleIntent(clause, needle string) (affirmative, negated bool) {
-	if containsNonASCII(needle) {
+	if goalBudgetContainsNonASCII(needle) {
 		for offset := 0; offset < len(clause); {
 			relative := strings.Index(clause[offset:], needle)
 			if relative < 0 {

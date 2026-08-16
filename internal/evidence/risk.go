@@ -16,18 +16,6 @@ const (
 	RiskHigh   RiskLevel = "high"
 )
 
-// highRiskPathHints elevate ordinary production edits to High when the path
-// touches auth, crypto, networking, providers, plugins, sandbox, config,
-// migrations, persistence, or concurrency.
-var highRiskPathHints = []string{
-	"auth", "permission", "secret", "credential", "token", "password", "oauth",
-	"crypto", "encrypt", "decrypt", "tls", "ssl", "keyring",
-	"network", "proxy", "http", "websocket", "provider",
-	"plugin", "mcp", "tool", "schema", "sandbox",
-	"config", "migrate", "migration", "persist", "store", "database", "db",
-	"concurrent", "mutex", "race", "lock", "atomic",
-}
-
 // highRiskToolHints elevate opaque or privileged mutation surfaces.
 var highRiskToolHints = []string{
 	"mcp__", "install_source", "install_skill", "plugin",
@@ -193,15 +181,7 @@ func (l *Ledger) PathsSince(after int) []string {
 }
 
 func pathLooksHighRisk(path, workspaceRoot string) bool {
-	relevant := riskRelevantPath(path, workspaceRoot)
-	lower := strings.ToLower(relevant)
-	base := strings.ToLower(pathpkg.Base(relevant))
-	for _, hint := range highRiskPathHints {
-		if strings.Contains(lower, hint) || strings.Contains(base, hint) {
-			return true
-		}
-	}
-	return false
+	return pathLooksSensitive(path, workspaceRoot)
 }
 
 // riskRelevantPath keeps relative paths intact and makes workspace-owned
@@ -277,13 +257,7 @@ func riskPathWithin(workspaceRoot, value string) (string, bool) {
 }
 
 func pathPartsLookHighRisk(parts []string) bool {
-	lower := strings.ToLower(strings.Join(parts, "/"))
-	for _, hint := range highRiskPathHints {
-		if strings.Contains(lower, hint) {
-			return true
-		}
-	}
-	return false
+	return pathLooksSensitive(strings.Join(parts, "/"), "")
 }
 
 func goTestTempComponent(value string) bool {

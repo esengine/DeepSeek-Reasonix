@@ -11,8 +11,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
 	"reasonix/internal/provider"
-	"reasonix/internal/taskintent"
-	"reasonix/internal/taskpolicy"
+	"reasonix/internal/runtimepolicy"
 	"reasonix/internal/tool"
 )
 
@@ -171,40 +170,40 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	} else if strings.TrimSpace(a.turn.turnInput) == "" {
 		a.turn.turnInput = rawInput
 	}
-	intent := taskintent.Classify(a.turn.turnInput)
-	a.turn.deliveryTaskExpected = intent.NeedsEvidence()
-	a.turn.deliveryMutationExpected = intent == taskintent.Mutation && registryHasWriterTools(a.svc.tools)
-	a.turn.deliveryPersistentExpected = taskintent.NeedsPersistentAction(a.turn.turnInput)
 	a.turn.recoveryTaskSummary = boundedRecoveryTaskSummary(a.turn.turnInput)
-	// Planner-gate policy wins; otherwise derive. Writer children inherit floors.
-	if policy, ok := taskpolicy.FromContext(ctx); ok {
-		a.turn.policy = policy
+	if constraints, ok := runtimepolicy.FromContext(ctx); ok {
+		a.turn.constraints = constraints
 	} else {
-		a.turn.policy = taskpolicy.Derive(taskpolicy.Input{
-			Raw:         a.turn.turnInput,
-			Instruction: taskpolicy.StripQuotedConstraints(a.turn.turnInput),
-			PlanMode:    a.planMode.Load(),
-		})
+		a.turn.constraints = runtimepolicy.ParseConstraints(runtimepolicy.StripQuotedConstraints(a.turn.turnInput))
+		if a.planMode.Load() {
+			a.turn.constraints.PlanModeReadOnly = true
+			a.turn.constraints.ForbidMutation = true
+		}
 	}
-	if a.inheritedPolicy != nil && !a.readOnlyExecution {
-		a.turn.policy.InheritFrom(*a.inheritedPolicy)
+	if inherited, ok := runtimepolicy.InheritedFromContext(ctx); ok && !a.readOnlyExecution {
+		a.turn.constraints = mergeInheritedConstraints(a.turn.constraints, inherited.Constraints)
+		if inherited.PlanReadOnly {
+			a.turn.constraints.PlanModeReadOnly = true
+			a.turn.constraints.ForbidMutation = true
+		}
+	} else if a.inheritedExec != nil && !a.readOnlyExecution {
+		a.turn.constraints = mergeInheritedConstraints(a.turn.constraints, a.inheritedExec.Constraints)
+		if a.inheritedExec.PlanReadOnly {
+			a.turn.constraints.PlanModeReadOnly = true
+			a.turn.constraints.ForbidMutation = true
+		}
 	}
-	a.turn.policySet = true
+	a.turn.engine = runtimepolicy.NewEngine(a.turn.constraints)
+	a.rebuildTurnContract()
 	// A cancelled/error turn leaves a provider-excluded recovery record at the
 	// transcript tail. Fold its bounded facts into this new user turn exactly
-	// once; the user's raw text remains the classifier source above.
+	// once; the user's raw text remains the source above.
 	a.ensureUnreplayableHistoryRecovery()
 	providerInput = withInterruptedRecovery(providerInput, a.pendingInterruptedRecovery())
 	a.task.prepareScope(scoped, scope.ID)
 	a.svc.sink.Emit(event.Event{Kind: event.TurnStarted})
 	a.emitTurnPhase(event.TurnPhaseWorking)
 	input = a.withTurnPreferences(providerInput)
-	// Persist the short execution-policy block in provider Content; keep the
-	// original user text in RawContent for history/title/rewind stripping.
-	policyBlock := taskpolicy.ExecutionPolicyBlock(a.turn.policy)
-	if !strings.Contains(input, "<execution-policy") {
-		input = strings.TrimSpace(input) + "\n\n" + policyBlock
-	}
 	userCreatedAt := time.Now().UnixMilli()
 	a.activeTurnCreatedAt.Store(userCreatedAt)
 	rawContent := rawInput
@@ -520,15 +519,16 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 		return false, a.gracePause(state)
 	}
 	if readiness.reason != "" {
-		// Delivery no longer retries readiness with hidden model messages: the
-		// run ends immediately with the missing requirements, and the host owns
-		// what happens next. In Goal mode the FSM auto-continues under budget
-		// with the missing list as the next turn; plain Delivery turns surface
-		// the recovery card for an explicit user continuation.
-		event.RecordReadinessAudit(a.svc.sink, readiness.audit(evidence.ReadinessErrored, false))
-		a.pending.finalReadinessRecovery = true
-		a.persistFinalReadinessRecovery(readiness.missingIDs())
-		return false, &FinalReadinessError{Attempts: 1, Reason: readiness.reason, Missing: readiness.missingIDs()}
+		// Goal/Plan and fact contradictions (open todos, sign-off, action
+		// receipts) fail the run. Ordinary Recoverable/project/review gaps
+		// become an honest Partial completion instead of a recovery error.
+		if a.closedLoopActive() || readiness.incompleteTodos > 0 || readiness.missingSignoff > 0 || readiness.missingActionEvidence > 0 {
+			event.RecordReadinessAudit(a.svc.sink, readiness.audit(evidence.ReadinessErrored, false))
+			a.pending.finalReadinessRecovery = true
+			a.persistFinalReadinessRecovery(readiness.missingIDs())
+			return false, &FinalReadinessError{Attempts: 1, Reason: readiness.reason, Missing: readiness.missingIDs()}
+		}
+		event.RecordReadinessAudit(a.svc.sink, readiness.audit(evidence.ReadinessAllowed, a.turn.readinessRecovered))
 	}
 	if !hasVisibleFinalAnswer(text) {
 		// DeepSeek thinking mode can stream a long reasoning_content and
@@ -557,7 +557,7 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *turnRuntime, tex
 		a.contextManager().ObserveUsage(usage)
 		return true, nil
 	}
-	if readiness.applies {
+	if readiness.applies || a.turn.readinessRecovered {
 		event.RecordReadinessAudit(a.svc.sink, readiness.audit(evidence.ReadinessAllowed, a.turn.readinessRecovered))
 	}
 	a.emitTurnShadows(a.turn.turnInput)

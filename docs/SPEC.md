@@ -213,22 +213,20 @@ prefix cache-stable:
 
 - The **planner** (low-frequency) runs in its own session with the same standing
   memory context plus a filtered read-only research tool set, then produces a
-  concise plan. A deterministic host policy chooses executor-only, light
-  planning, full planning, plan-for-approval, or explicit plan-only from
-  pristine user text plus trusted turn metadata. It does not call a classifier
-  model and does not infer host state from controller-authored prompt blocks.
-  Explicit Plan Mode, synthetic turns, short contextual replies, atomic edits,
-  and bounded read-only actions avoid a second planner; cross-surface,
-  structured, ambiguous, and high-risk work uses the full contract. Active Goal
-  and Delivery turns upgrade non-atomic mutation work, while bounded read-only
-  actions remain executor-only. The privacy-safe
-  route/depth/reason decision is emitted in phase detail.
-- Light plans use a small per-turn research-round budget and return a compact
-  objective, 1-4 ordered steps, likely touchpoints, and primary verification.
-  Full plans use a larger bounded budget and distinguish verified from candidate
-  touchpoints, with risks, acceptance criteria, command-level verification, and
-  rollback when relevant. The depth contract stays in one stable system prompt;
-  only a small host-authored `<planner-turn>` block changes per user turn. If
+  concise plan. A deterministic host policy defaults to executor-only. It
+  invokes the dedicated planner only for an explicit plan-first /
+  plan-then-execute request, an explicit wait-for-approval boundary, an
+  explicit plan-only request, or an explicit Goal start. It does not call a
+  classifier model, does not infer complexity from wording, file count, or
+  keywords, and does not infer host state from controller-authored prompt
+  blocks. Explicit Plan Mode is an executor-driven workflow and never starts a
+  second planner. Synthetic turns, short contextual replies, and ordinary
+  requests stay executor-only. There is no Light/Full planning depth. The
+  privacy-safe route/reason decision is emitted in phase detail.
+- The planner uses one stable system prompt. Only a small host-authored
+  `<planner-turn>` block names the explicit route. The plan distinguishes
+  verified from candidate touchpoints and records non-goals, risks, acceptance
+  criteria, and command-level verification when the evidence supports them. If
   the planner still does not finalize after the bounded research and grace
   round, plan-and-execute falls back to the executor with the pristine task;
   plan-only and plan-for-approval remain fail-closed. The incomplete planner

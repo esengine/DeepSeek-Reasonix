@@ -1225,36 +1225,33 @@ The planner sees loaded `REASONIX.md` / `AGENTS.md` memory and a small read-only
 research tool set, so it can inspect relevant files before handing a plan to the
 executor. Writer and workflow tools remain executor-only.
 
-Reasonix routes each turn deterministically without another classifier model:
-questions, short follow-ups, clear atomic edits, and bounded read-only actions
-go straight to the executor; bounded implementation work may receive a short
-light plan. Ambiguous, cross-surface, structured, high-risk, active-Goal, or
-closed-loop work receives a full plan unless the request is clearly atomic or
-read-only. Explicit Plan Mode
-remains a separate host workflow and is never planned twice. An explicit
-`plan first` / `先规划` request forces planning, while `just do it` / `直接改`
-goes directly to the executor. Execution boundaries are recognized across the
-request, not only at its beginning, while quoted examples are ignored. Bare
-plan-first requests continue from the planner to the executor automatically.
-Requests that explicitly say to wait for confirmation pause at the host
-approval boundary and continue to the executor after approval. Only an
-explicit `plan only` / `不要执行` request ends the
+Reasonix routes each turn deterministically without another classifier model.
+Ordinary requests always stay with the executor. The dedicated planner runs
+only for an explicit `plan first` / `先规划` request, an explicit wait-for-
+approval boundary, an explicit `plan only` / `不要执行` request, or Goal
+start. Wording such as "complex refactor" or "fix login" does not start the
+planner. There is no automatic light / full planning depth. Explicit Plan Mode
+remains a separate host workflow on the executor and is never planned twice.
+`just do it` / `直接改` also stays with the executor. Execution boundaries are
+recognized across the request, not only at its beginning, while quoted
+examples are ignored. Bare plan-first requests continue from the planner to
+the executor automatically. Requests that explicitly say to wait for
+confirmation pause at the host approval boundary and continue to the executor
+after approval. Only an explicit `plan only` / `不要执行` request ends the
 current turn with the plan persisted and no execution; a later user instruction
-can continue in the same session. The phase detail records a privacy-safe route,
-depth, and reason code for diagnosis without logging the user prompt.
+can continue in the same session. The phase detail records a privacy-safe route
+and reason code for diagnosis without logging the user prompt.
 
-Light plans contain a compact objective, at most four ordered steps, likely
-touchpoints, and the main verification. Full plans distinguish verified from
-candidate touchpoints and add relevant non-goals, risks, acceptance criteria,
-command-level verification, and rollback guidance when the operation is hard to
-reverse. These contracts are part of one stable planner system prompt; only the
-small per-turn depth instruction is appended to the user turn, preserving the
-planner's prefix cache after the one-time prompt upgrade. The host also gives
-light and full research different per-turn round budgets. If a planner still
-does not finalize after its bounded research and finalization round, ordinary
-plan-and-execute work continues with the executor using the original task.
-Plan-only and approval-gated requests remain fail-closed, and the incomplete
-planner turn is rolled back instead of leaving an unusable continuation tail.
+The planner uses one stable system prompt. A small host-authored
+`<planner-turn>` block names the explicit route and preserves the planner
+prefix cache after the one-time prompt upgrade. The plan should separate
+verified from candidate touchpoints and include non-goals, risks, acceptance
+criteria, and command-level verification when evidence supports them. If a
+planner still does not finalize after its bounded research and finalization
+round, ordinary plan-and-execute work continues with the executor using the
+original task. Plan-only and approval-gated requests remain fail-closed, and
+the incomplete planner turn is rolled back instead of leaving an unusable
+continuation tail.
 
 Reasonix manages normal execution automatically: if an active todo produces no
 new completion, unique read, command, or mutation for 8 tool-call rounds, the
@@ -1394,34 +1391,31 @@ is narrower than the dedicated Planner: the Planner accepts authorized opaque
 non-destructive MCP, while a strict child requires an explicit reader hint and
 never exposes writers at all.
 
-Reasonix runs a single adaptive **standard execution**: planning depth,
-verification breadth, and independent review follow the task's risk
-automatically, per turn.
+Reasonix uses **fact-driven execution**. Ordinary requests always enter the
+executor. There is no automatic simple / light / full task mode. Planner,
+Goal, permission, sandbox, and the task contract are independent states.
 
 Every task shares the same provider-visible core tool surface: direct
 read/bash/edit/write, background-shell lifecycle tools, `ask`/`compress` when
 registered, and the stable `use_capability` proxy for optional tools (search,
 MCP, skills, subagents, docs, web_fetch, and so on). Calling `use_capability`
 never expands the top-level provider schema, so the prompt-cache tool prefix
-stays stable across every task.
+stays stable across every task. The Harness minimal preset is not a task
+complexity mode.
 
-What adapts is host policy, not the tool list:
+The model decides whether to investigate, write todos, or spawn a sub-agent.
+The host then builds verification obligations from the actual tool call, the
+real target path, and the execution receipt:
 
-- Conversation and advisory turns run direct with no auxiliary model calls.
-- Plain read-only queries cite their actual reads (targeted evidence).
-- Single-file, anchored, low-risk modifications run direct with a
-  zero-extra-model-call Atomic TaskContract and targeted checks.
-- Multi-file same-surface work gets a light plan, project-level checks, and a
-  conditional independent review that escalates to forced when coverage is weak.
-- Cross-module, public-interface, persistence, security/permission/migration/
-  release, and active-Goal work get a full plan, full checks, forced independent
-  review (plus security review for safety classes), and the full evidence
-  closed loop: acceptance criteria before state changes, verification after the
-  latest mutation, review, and sign-off with `complete_step`. Missing evidence
-  ends the turn Partial, Unverified, or Blocked — never Complete.
-- Risk only ratchets upward within a turn: when receipts show the change set
-  touched high-risk surfaces or outgrew the initial judgment, the policy
-  escalates and the missing verification/review is still demanded.
+- A read-only call creates no obligation.
+- A local docs, i18n, fixture, or style edit is advisory targeted verification.
+- A single production-file edit is recoverable targeted verification plus
+  diff review.
+- Multi-file or unclear local writes require a todo and criteria first.
+- Schema, migration, public-interface, auth, or destructive work becomes
+  strict verification, review, and sign-off after the write is observed.
+- Goal items and approved Plan criteria are always strict.
+- Prompt words such as OAuth or token never create action risk by themselves.
 
 Meta tools such as `task`, `run_skill`, and `review` are not counted as mutations
 by themselves — only real child writes are. Read-only analysis remains available

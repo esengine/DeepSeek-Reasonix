@@ -1,4 +1,4 @@
-package taskintent
+package control
 
 import (
 	"slices"
@@ -57,10 +57,8 @@ func heuristicInputIsTask(input string) bool {
 		}
 		return false
 	}
-	// Ambiguous prose stays conversational. Delivery evidence gates require a
-	// concrete host-observable signal rather than using message length as a
-	// proxy; explicit mutations, files, commands, failures, and audit verbs are
-	// still classified below.
+	// Ambiguous prose stays conversational. Length is not a task signal;
+	// mutations, files, commands, failures, and audit verbs are classified below.
 	return heuristicInputHasStrongTaskSignal(normalized)
 }
 
@@ -151,7 +149,7 @@ func containsTaskNeedle(input, needle string) bool {
 	if needle == "" {
 		return false
 	}
-	if containsNonASCII(needle) || strings.Contains(needle, " ") {
+	if goalBudgetContainsNonASCII(needle) || strings.Contains(needle, " ") {
 		return strings.Contains(input, needle)
 	}
 	return slices.Contains(strings.FieldsFunc(input, func(r rune) bool {
@@ -159,7 +157,7 @@ func containsTaskNeedle(input, needle string) bool {
 	}), needle)
 }
 
-func containsNonASCII(s string) bool {
+func goalBudgetContainsNonASCII(s string) bool {
 	for _, r := range s {
 		if r > 127 {
 			return true

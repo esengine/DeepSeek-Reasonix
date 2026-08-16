@@ -82,6 +82,7 @@
     "vite": "^8.2.0"
   },
   "overrides": {
+    "dompurify": "3.4.13",
     "mdast-util-gfm-autolink-literal": "2.0.0"
   },
   "engines": {

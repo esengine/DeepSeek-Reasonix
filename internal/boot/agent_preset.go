@@ -5,7 +5,7 @@ import (
 )
 
 // Deprecated execution-mode vocabulary re-exported for old frontends.
-// Runtime policy lives in internal/taskpolicy; these names only parse compat inputs.
+// Runtime constraints live in internal/runtimepolicy; these names only parse compat inputs.
 
 // Deprecated AgentPreset label constants — one compatibility version.
 const (

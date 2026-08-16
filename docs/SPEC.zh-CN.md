@@ -121,18 +121,18 @@ type Tool interface {
 
 当 `agent.planner_model` 与 executor 不同时，planner 与 executor 使用独立 session：
 
-- 宿主使用原始用户文本和可信回合元数据做确定性路由，不调用 classifier 模型，也不从
-  controller 注入的 prompt block 猜测宿主状态；路由结果为 executor-only、Light、Full、
-  plan-for-approval 或显式 plan-only，并用不含用户原文的 route/depth/reason 写入阶段详情；
-- 显式 Plan Mode、synthetic turn、上下文短回复、明确单点小改和边界清楚的纯只读动作
-  不再调用第二个 Planner；跨面、结构化、模糊或高风险工作使用 Full；活跃 Goal 与
-  Delivery 中的非原子修改工作同样升级为 Full，纯只读动作仍直达 Executor；
-- Light 使用较小的单轮调研预算，输出紧凑目标、1–4 个有序步骤、候选触点和主要验证；
-  Full 使用较大的有界预算，区分已验证与候选触点，并补充风险、验收标准、命令级验证及
-  必要回滚；深度合约保持在同一个稳定 system prompt 中，单轮只追加很小的
-  `<planner-turn>`；若 Planner 在有界调研和最终总结轮后仍未收敛，普通
-  plan-and-execute 用原始任务降级到 Executor，plan-only 与 plan-for-approval 仍保持
-  fail-closed；不完整的 Planner 回合会被回滚，不暴露成无法继续的手动续跑；
+- 宿主使用原始用户文本和可信回合元数据做确定性路由，默认 executor-only；不调用
+  classifier 模型，不从措辞、文件数量或关键词推断复杂度，也不从 controller 注入的
+  prompt block 猜测宿主状态。独立 Planner 只响应显式先规划 / 规划再执行、显式等待批准、
+  显式只规划，或显式 Goal 启动；没有 Light/Full 规划深度。阶段详情只记录不含用户原文
+  的 route/reason；
+- 显式 Plan Mode 由 executor 驱动，不会再启动第二个 Planner；synthetic turn、上下文
+  短回复和普通请求一律直达 Executor；
+- Planner 使用同一个稳定 system prompt，单轮只追加很小的 `<planner-turn>` 标明显式
+  路由。计划应区分已验证与候选触点，并在证据支持时补充非目标、风险、验收标准和
+  命令级验证；若 Planner 在有界调研和最终总结轮后仍未收敛，普通 plan-and-execute
+  用原始任务降级到 Executor，plan-only 与 plan-for-approval 仍保持 fail-closed；
+  不完整的 Planner 回合会被回滚，不暴露成无法继续的手动续跑；
 - 普通“先规划”在计划完成后直接交接 Executor；plan-for-approval 只用于明确要求等待
   确认的请求，由宿主强制审批边界，批准后交接 Executor；headless 场景会保存计划供后续
   回合继续；明确 plan-only 会保存计划并结束当前回合；上述两种执行边界下 Planner 失败

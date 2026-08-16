@@ -24,8 +24,8 @@ func TestTargetedVerificationGapDoesNotArmRecovery(t *testing.T) {
 	if err := a.Run(context.Background(), "write docs/verify_v070.md and run the validation script"); err != nil {
 		t.Fatalf("targeted Run returned a readiness failure: %v", err)
 	}
-	if policy, ok := a.TurnPolicy(); !ok || policy.ClosedLoop() {
-		t.Fatalf("targeted standard turn unexpectedly elevated to closed loop: %+v", policy)
+	if a.closedLoopActive() {
+		t.Fatal("ordinary targeted turn unexpectedly elevated to closed loop")
 	}
 	if a.PrepareDeliveryRecovery() {
 		t.Fatal("a soft targeted-verification gap must not create a recovery card")
@@ -47,7 +47,7 @@ func TestTargetedVerificationRecoverySurvivesAgentRebuild(t *testing.T) {
 	a := New(first, reg, session, Options{}, event.Discard)
 
 	var readinessErr *FinalReadinessError
-	if err := a.Run(withClosedLoopContext(context.Background()), "write docs/verify_v070.md and run the validation script"); !errors.As(err, &readinessErr) {
+	if err := a.Run(context.Background(), "write docs/verify_v070.md and run the validation script"); !errors.As(err, &readinessErr) {
 		t.Fatalf("first Run error = %v, want final readiness failure", err)
 	}
 	var marker *provider.FinalReadinessRecovery
@@ -95,7 +95,7 @@ func TestTargetedVerificationRecoverySurvivesAgentRebuild(t *testing.T) {
 func TestFinalReadinessRecoveryRejectsStaleMarkerAfterUserTurn(t *testing.T) {
 	reg := evidenceRegistry()
 	prov := &scriptedProvider{name: "standard", turns: [][]provider.Chunk{
-		{toolCallChunk("write", "write_file", `{"path":"README.md"}`), {Type: provider.ChunkDone}},
+		{toolCallChunk("write", "write_file", `{"path":"main.go"}`), {Type: provider.ChunkDone}},
 		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
 	}}
 	session := NewSession("sys")

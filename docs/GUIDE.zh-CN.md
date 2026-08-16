@@ -951,25 +951,23 @@ planner_model = "deepseek-pro"   # 作为低频规划器
 Planner 会看到已加载的 `REASONIX.md` / `AGENTS.md` 记忆，并拿到一小组只读研究工具，
 因此可以先检查相关文件再把计划交给执行器。写入类和流程类工具仍只给执行器使用。
 
-Reasonix 会用确定性规则路由每一轮，不再调用额外的 classifier 模型：问答、短回复、
-明确的单点小改和边界清楚的纯只读动作直达 Executor；边界清楚的实现任务可生成简短的
-Light 计划；模糊、跨面、结构化、高风险、活跃 Goal 或 Delivery 的任务生成 Full 计划，
-明确的原子小改或纯只读动作除外。
-显式 Plan Mode 仍是独立的宿主流程，不会发生双重规划。
-明确的 `先规划` / `plan first` 会强制规划，`直接改` / `just do it` 则直达 Executor；
-执行边界可出现在请求中的任意子句，不要求位于句首，同时会忽略引号内的示例；
-普通的“先规划”会在规划完成后自动交接 Executor；明确要求“等我确认”的请求停在宿主
-审批边界，批准后继续交接 Executor。只有明确的 `只规划` / `不要执行` 才以计划结束当前
-回合而不执行，计划会写入同一会话，用户之后仍可继续要求 Executor 落地。阶段详情会记录
-不含用户原文的 route、depth 与 reason code，便于诊断。
+Reasonix 会用确定性规则路由每一轮，不再调用额外的 classifier 模型。普通请求一律
+直达 Executor。独立 Planner 只响应显式 `先规划` / `plan first`、显式等待批准、
+显式 `只规划` / `不要执行`，或 Goal 启动。“复杂重构”“修复登录”这类措辞不会自动
+启动 Planner，也没有 Light/Full 规划深度。显式 Plan Mode 仍是 executor 上的独立
+宿主流程，不会发生双重规划。`直接改` / `just do it` 同样直达 Executor。执行边界
+可出现在请求中的任意子句，不要求位于句首，同时会忽略引号内的示例。普通的“先规划”
+会在规划完成后自动交接 Executor；明确要求“等我确认”的请求停在宿主审批边界，批准后
+继续交接 Executor。只有明确的 `只规划` / `不要执行` 才以计划结束当前回合而不执行，
+计划会写入同一会话，用户之后仍可继续要求 Executor 落地。阶段详情会记录不含用户原文
+的 route 与 reason code，便于诊断。
 
-Light 计划包含紧凑目标、最多四个有序步骤、可能触点和主要验证；Full 计划会区分已验证
-与候选触点，并按需补充非目标、风险、验收标准、命令级验证，以及难回滚操作的回滚方案。
-这些合约位于同一个稳定的 Planner system prompt，单轮只在 user turn 追加很小的深度指令，
-因此除本次 prompt 升级的一次缓存未命中外，不会持续破坏 Planner prefix cache。宿主也会
-为 Light 与 Full 调研设置不同的单轮轮次预算。若 Planner 在有界调研和最终总结轮后仍未
-给出最终计划，普通 plan-and-execute 会用原始任务直接交给 Executor 继续；plan-only 与
-等待批准请求仍保持 fail-closed，并回滚不完整的 Planner 回合，避免留下无法继续的会话尾部。
+Planner 使用同一个稳定的 system prompt，单轮只追加很小的 `<planner-turn>` 标明
+显式路由，因此除本次 prompt 升级的一次缓存未命中外，不会持续破坏 Planner prefix
+cache。计划应区分已验证与候选触点，并在证据支持时补充非目标、风险、验收标准和
+命令级验证。若 Planner 在有界调研和最终总结轮后仍未给出最终计划，普通
+plan-and-execute 会用原始任务直接交给 Executor 继续；plan-only 与等待批准请求仍
+保持 fail-closed，并回滚不完整的 Planner 回合，避免留下无法继续的会话尾部。
 
 Reasonix 会自动管理正常执行：活跃 Todo 连续 8 个工具调用轮次没有新的完成项、唯一读取、
 命令或修改时，宿主会要求执行器重新评估；Goal 到达后续阈值时会强制重新规划并继续，而不会因
@@ -1067,28 +1065,26 @@ enable、授权与完整连接身份，因此共享 Host 中另一个项目/tab 
 server 无法在这里提升权限。严格只读边界比独立 Planner 更窄：Planner 接受已授权的 opaque
 非 destructive MCP，而严格只读子会话必须有明确 reader hint，且根本不暴露 writer。
 
-Reasonix 只有一种自适应**标准执行**：规划深度、验证广度与独立复查随任务风险逐 turn
-自动调整。
+Reasonix 使用**事实驱动执行**。普通请求一律进入 executor，没有自动的简单 /
+轻量 / 完整任务模式。Plan、Goal、permission、sandbox 与任务合同是互相独立的状态。
 
 所有任务共享同一套 provider 可见核心工具面（直接读/bash/编辑/写入、后台 shell
 生命周期工具，以及稳定的 `use_capability` 代理）。可选工具（搜索、MCP、skills、
 subagents、docs、web_fetch 等）通过 `use_capability` 调度，不会扩展 top-level
-provider schema，因此任何任务都不会制造新的工具 schema 缓存前缀。
+provider schema，因此任何任务都不会制造新的工具 schema 缓存前缀。Harness 的
+minimal preset 不是任务复杂度模式。
 
-随风险自适应的是宿主策略，不是工具列表：
+模型按需决定是否调查、写 todo、调用子 Agent。宿主再根据具体 Tool Call、真实
+目标路径和执行回执建立验证义务：
 
-- 对话与咨询类 turn 直接执行，不产生任何辅助模型调用。
-- 普通只读查询要求引用实际读取结果（定向证据）。
-- 单文件、目标明确、低风险的修改直接执行，使用零额外模型调用的 Atomic
-  TaskContract 与定向检查。
-- 同一功能面内的多文件修改获得轻量规划、项目级检查；条件独立复审在证据覆盖
-  不足时升级为强制。
-- 跨模块、公共接口、持久化、安全/权限/迁移/发布与活跃 Goal 任务获得完整规划、
-  完整检查、强制独立复审（安全类附加 security review）与完整证据闭环：变更前
-  建立验收标准，变更后验证、复查并以 `complete_step` 签收；证据不足时只能以
-  Partial、Unverified 或 Blocked 结束，绝不产生 Complete。
-- 风险在 turn 内只升不降：回执发现改动触及高风险面或超出初始判断时，策略实时
-  上调并补齐缺失的验证与复查。
+- 纯只读调用不产生义务。
+- 文档、i18n、fixture、样式的局部修改只需 Advisory 定向验证。
+- 单个生产文件修改是 Recoverable 定向验证加 diff review。
+- 多文件或范围不清的本地写入，先要求 todo 和验收标准。
+- Schema、迁移、公共接口、认证路径或破坏性操作，在实际写入后形成 Strict
+  验证、复查和签收。
+- Goal 项和已批准 Plan 的验收项全部为 Strict。
+- 用户话里出现 OAuth、token 等词本身不会产生动作风险。
 
 交互式前端中的计划模式始终由用户显式选择：桌面端在“协作方式”中选择计划模式，CLI 用
 `Shift+Tab` 切换到 Plan。Reasonix 先生成计划，待用户批准后工作流才切换到实施；规划期间的
@@ -1099,8 +1095,8 @@ provider schema，因此任何任务都不会制造新的工具 schema 缓存前
 reasoning-language 写项目级覆盖时，才给 shell 命令加 `--local`。
 
 桌面端“协作方式”菜单里的计划模式与目标模式的使用方法与注意事项，
-见 [`COLLABORATION_MODES.zh-CN.md`](./COLLABORATION_MODES.zh-CN.md)。执行模式已移除：
-规划、验证与复查强度随任务风险自动调整。
+见 [`COLLABORATION_MODES.zh-CN.md`](./COLLABORATION_MODES.zh-CN.md)。没有自动
+简单 / 轻量 / 完整任务模式；验证义务由宿主根据真实工具动作建立。
 
 桌面端“工具权限”里的询问、自动和 Yolo 模式的区别与使用场景，
 见 [`TOOL_APPROVAL_MODES.zh-CN.md`](./TOOL_APPROVAL_MODES.zh-CN.md)。

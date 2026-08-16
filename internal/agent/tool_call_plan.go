@@ -24,6 +24,7 @@ type toolCallPlan struct {
 	resolved                                      tool.ResolvedCall
 	resolvedMeta                                  *tool.ResolvedCall
 	effects                                       evidence.ToolEffects
+	profile                                       evidence.EffectProfile
 	verification, planTransition                  bool
 	planBefore, planAfter, planDiff               string
 	planReplacementAuthorized                     bool

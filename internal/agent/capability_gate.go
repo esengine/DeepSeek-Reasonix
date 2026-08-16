@@ -10,7 +10,6 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
 	"reasonix/internal/skill"
-	"reasonix/internal/taskpolicy"
 	"reasonix/internal/tool"
 )
 
@@ -198,14 +197,13 @@ func (a *Agent) capabilityGateFailure() string {
 }
 
 // deliveryReviewGateFailure enforces risk-adaptive structured review after the
-// latest mutation. The frozen TaskPolicy's Review level and closed-loop flag
-// are authoritative.
+// latest mutation. Contract review obligations are authoritative.
 func (a *Agent) deliveryReviewGateFailure() string {
 	if a == nil || a.task.ledger == nil {
 		return ""
 	}
-	// Without closed-loop elevation or a forced TaskPolicy review, skip.
-	if !a.closedLoopActive() && !(a.turn.policySet && a.turn.policy.RequiresIndependentReview()) {
+	// Without Goal/Plan closed-loop or a contract review obligation, skip.
+	if !a.closedLoopActive() && !a.requiresIndependentReview() {
 		return ""
 	}
 	if a.subagentDepth > 0 {
@@ -224,18 +222,11 @@ func (a *Agent) deliveryReviewGateFailure() string {
 	}
 	a.emitTurnPhase(event.TurnPhaseReviewing)
 	risk := a.task.ledger.MutationRiskWithin(a.writeWorkspaceRoot)
-	// TaskPolicy may force higher review than mutation-risk alone.
-	if a.turn.policySet {
-		switch a.turn.policy.Review {
-		case taskpolicy.ReviewForcedSecurity:
-			risk = evidence.RiskHigh
-		case taskpolicy.ReviewForced:
-			if risk < evidence.RiskMedium {
-				risk = evidence.RiskMedium
-			}
-		case taskpolicy.ReviewNone:
-			return ""
-		}
+	// Contract review obligations may raise the review floor.
+	if a.requiresSecurityReview() {
+		risk = evidence.RiskHigh
+	} else if a.requiresIndependentReview() && risk < evidence.RiskMedium {
+		risk = evidence.RiskMedium
 	}
 	paths := productionPaths(a.task.ledger.PathsSince(-1))
 	hasReviewTool := a.svc.tools != nil && (toolPresent(a.svc.tools, "review") || toolPresent(a.svc.tools, "run_skill") || toolPresent(a.svc.tools, "use_capability"))

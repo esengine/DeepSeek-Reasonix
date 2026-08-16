@@ -240,8 +240,8 @@ func TestCoordinatorSkipsPlannerForTrivialTurn(t *testing.T) {
 	if planner.lastReq.Messages != nil {
 		t.Error("planner should not be called for a skipped turn")
 	}
-	if got := lastUser(exec.lastReq); !strings.HasPrefix(got, "what does this function do?") || !strings.Contains(got, "<execution-policy") {
-		t.Errorf("executor saw %q, want the raw input with execution-policy and no plan handoff", got)
+	if got := lastUser(exec.lastReq); !strings.HasPrefix(got, "what does this function do?") || strings.Contains(got, "<execution-policy") {
+		t.Errorf("executor saw %q, want the raw input without execution-policy or plan handoff", got)
 	}
 	if n := len(plannerSess.Messages); n != 1 { // just the system message
 		t.Errorf("planner session has %d messages, want 1 (untouched)", n)
@@ -260,12 +260,12 @@ func TestCoordinatorStructuredPolicyUsesStableDepthMetadata(t *testing.T) {
 	policy := func(_ context.Context, input string) PlannerDecision {
 		if strings.Contains(input, "light") {
 			return PlannerDecision{
-				Route: PlannerRoutePlanAndExecute, Depth: PlannerDepthLight,
+				Route:  PlannerRoutePlanAndExecute,
 				Reason: "test_light",
 			}
 		}
 		return PlannerDecision{
-			Route: PlannerRoutePlanAndExecute, Depth: PlannerDepthFull,
+			Route:  PlannerRoutePlanAndExecute,
 			Reason: "test_full",
 		}
 	}
@@ -282,10 +282,10 @@ func TestCoordinatorStructuredPolicyUsesStableDepthMetadata(t *testing.T) {
 		t.Fatalf("full Run: %v", err)
 	}
 
-	if got := lastUser(planner.requests[0]); !strings.Contains(got, "depth: light") || !strings.Contains(got, "route: plan_and_execute") {
+	if got := lastUser(planner.requests[0]); !strings.Contains(got, "route: plan_and_execute") {
 		t.Fatalf("light planner input missing route metadata: %q", got)
 	}
-	if got := lastUser(planner.requests[1]); !strings.Contains(got, "depth: full") || !strings.Contains(got, "route: plan_and_execute") {
+	if got := lastUser(planner.requests[1]); !strings.Contains(got, "route: plan_and_execute") {
 		t.Fatalf("full planner input missing route metadata: %q", got)
 	}
 	for i, req := range planner.requests {
@@ -302,11 +302,8 @@ func TestCoordinatorStructuredPolicyUsesStableDepthMetadata(t *testing.T) {
 	if len(handoffs) != 2 {
 		t.Fatalf("executor handoffs = %d, want one light and one full handoff", len(handoffs))
 	}
-	if !strings.Contains(handoffs[0], "Planning depth: light") {
-		t.Fatalf("light handoff missing depth: %q", handoffs[0])
-	}
-	if !strings.Contains(handoffs[1], "Planning depth: full") {
-		t.Fatalf("full handoff missing depth: %q", handoffs[1])
+	if strings.Contains(handoffs[0], "Planning depth:") || strings.Contains(handoffs[1], "Planning depth:") {
+		t.Fatalf("handoff still mentions planning depth: %q %q", handoffs[0], handoffs[1])
 	}
 }
 
@@ -321,7 +318,7 @@ func TestCoordinatorPlanForApprovalDoesNotDependOnPlannerMarker(t *testing.T) {
 	}}
 	policy := func(context.Context, string) PlannerDecision {
 		return PlannerDecision{
-			Route: PlannerRoutePlanForApproval, Depth: PlannerDepthFull,
+			Route:  PlannerRoutePlanForApproval,
 			Reason: "user_plan_for_approval",
 		}
 	}
@@ -354,7 +351,7 @@ func TestCoordinatorPlanForApprovalHandsOffAfterApproval(t *testing.T) {
 		{Type: provider.ChunkDone},
 	}}
 	policy := func(context.Context, string) PlannerDecision {
-		return PlannerDecision{Route: PlannerRoutePlanForApproval, Depth: PlannerDepthFull, Reason: "user_plan_for_approval"}
+		return PlannerDecision{Route: PlannerRoutePlanForApproval, Reason: "user_plan_for_approval"}
 	}
 	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)
 	coord := NewCoordinatorWithPlannerPolicy(
@@ -390,7 +387,7 @@ func TestCoordinatorHeadlessPlanForApprovalPersistsForContinuation(t *testing.T)
 		{Type: provider.ChunkDone},
 	}}
 	policy := func(context.Context, string) PlannerDecision {
-		return PlannerDecision{Route: PlannerRoutePlanForApproval, Depth: PlannerDepthFull, Reason: "user_plan_for_approval"}
+		return PlannerDecision{Route: PlannerRoutePlanForApproval, Reason: "user_plan_for_approval"}
 	}
 	sink := &recordSink{}
 	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, sink)
@@ -421,7 +418,7 @@ func TestCoordinatorPlanOnlyDoesNotRunExecutor(t *testing.T) {
 		{Type: provider.ChunkDone},
 	}}
 	policy := func(context.Context, string) PlannerDecision {
-		return PlannerDecision{Route: PlannerRoutePlanOnly, Depth: PlannerDepthFull, Reason: "user_plan_only"}
+		return PlannerDecision{Route: PlannerRoutePlanOnly, Reason: "user_plan_only"}
 	}
 	sink := &recordSink{}
 	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, sink)
@@ -458,9 +455,9 @@ func TestCoordinatorPlanOnlyContinuesWithExecutorOnNextTurn(t *testing.T) {
 	}}
 	policy := func(_ context.Context, input string) PlannerDecision {
 		if strings.Contains(input, "只规划") {
-			return PlannerDecision{Route: PlannerRoutePlanOnly, Depth: PlannerDepthFull, Reason: "user_plan_only"}
+			return PlannerDecision{Route: PlannerRoutePlanOnly, Reason: "user_plan_only"}
 		}
-		return PlannerDecision{Route: PlannerRouteExecutorOnly, Depth: PlannerDepthNone, Reason: "short_reply"}
+		return PlannerDecision{Route: PlannerRouteExecutorOnly, Reason: "short_reply"}
 	}
 	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)
 	coord := NewCoordinatorWithPlannerPolicy(
@@ -532,7 +529,7 @@ func TestCoordinatorPlannerFailurePreservesExecutionBoundary(t *testing.T) {
 				{Type: provider.ChunkDone},
 			}}
 			policy := func(context.Context, string) PlannerDecision {
-				return PlannerDecision{Route: tc.route, Depth: PlannerDepthFull, Reason: tc.reason}
+				return PlannerDecision{Route: tc.route, Reason: tc.reason}
 			}
 			executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)
 			coord := NewCoordinatorWithPlannerPolicy(
@@ -1205,8 +1202,6 @@ func TestDefaultPlannerPromptRequestsNoChangesMarker(t *testing.T) {
 
 func TestDefaultPlannerPromptDefinesLightAndFullEvidenceContracts(t *testing.T) {
 	for _, want := range []string{
-		"depth=light",
-		"depth=full",
 		"submit_plan",
 		"command-level verification",
 		"assumptions",
@@ -1410,7 +1405,7 @@ func TestCoordinatorPlannerSafetyBoundaryPreservesExecutionBoundaries(t *testing
 			plannerReg := tool.NewRegistry()
 			plannerReg.Add(coordinatorTestTool{name: "read_file", readOnly: true, output: "package main"})
 			policy := func(context.Context, string) PlannerDecision {
-				return PlannerDecision{Route: route, Depth: PlannerDepthFull, Reason: "explicit_boundary"}
+				return PlannerDecision{Route: route, Reason: "explicit_boundary"}
 			}
 
 			executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)

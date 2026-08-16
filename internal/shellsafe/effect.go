@@ -234,6 +234,7 @@ func classifyStaticFields(fields []string) CommandEffect {
 }
 
 func classifyGit(args []string) CommandEffect {
+	args = skipGitGlobalArgs(args)
 	if len(args) == 0 {
 		return unknownEffect("git", "missing git subcommand")
 	}
@@ -258,6 +259,18 @@ func classifyGit(args []string) CommandEffect {
 		return classifyGitSubmodule(rest)
 	case "commit":
 		return classifyGitCommit(rest)
+	case "push":
+		effect := knownWriter("git push", WriteExternalState, "updates remote refs")
+		effect.UsesNetwork = true
+		return effect
+	case "fetch":
+		effect := knownWriter("git fetch", WriteRepositoryMetadata, "updates remote-tracking refs")
+		effect.UsesNetwork = true
+		return effect
+	case "pull":
+		effect := knownWriter("git pull", WriteWorkspaceContent|WriteRepositoryMetadata, "updates workspace content and refs")
+		effect.UsesNetwork = true
+		return effect
 	case "reflog":
 		if len(rest) > 0 && slices.Contains([]string{"expire", "delete", "drop"}, strings.ToLower(rest[0])) {
 			return knownWriter("git reflog", WriteRepositoryMetadata, "updates reflog metadata")
@@ -286,6 +299,13 @@ func classifyGit(args []string) CommandEffect {
 		return knownReader("git " + sub)
 	}
 	return unknownEffect("git "+sub, "git subcommand effects are not statically known")
+}
+
+func skipGitGlobalArgs(args []string) []string {
+	for len(args) >= 2 && (args[0] == "-C" || args[0] == "--git-dir" || args[0] == "--work-tree") {
+		args = args[2:]
+	}
+	return args
 }
 
 func classifyGitBranch(args []string) CommandEffect {

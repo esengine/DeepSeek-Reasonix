@@ -658,7 +658,7 @@ func TestGoalDeliveryWorkflowCompletesAfterVerifiedSignoff(t *testing.T) {
 			textTurn("Ship main delivered."),
 		},
 	)}
-	// An active Goal derives a closed-loop TaskPolicy; no profile option needed.
+	// An active Goal is a closed-loop delivery scope; no profile option needed.
 	ag := agent.New(prov, reg, agent.NewSession(""), agent.Options{}, event.Discard)
 	done := make(chan event.Event, 1)
 	var doneReadiness *event.FinalReadiness

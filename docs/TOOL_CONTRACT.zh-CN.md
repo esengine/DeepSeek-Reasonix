@@ -43,11 +43,11 @@ go test ./internal/tool -run TestBuiltinToolContractDocumentation
 
 每个会话都使用这套 Executor 工具面，并额外提供稳定代理 `use_capability`
 （list/inspect/call/decline），用于在不改变 provider 可见 Schema 的前提下发现和调用按需
-MCP（含 `auto_start=false`）。宿主还会按任务风险强制执行合约：闭环任务的变更和
-验证命令必须先建立验收标准；变更后的工作必须完成复查、验证并通过带证据的 `complete_step` 签收；
-Skill/MCP 的 require/prefer 路由受门禁约束（只读回答同样不能跳过 require 能力）；中/高风险改动
-强制结构化 review/security_review，且 `review_report` 的 `reviewed_paths` 必须有宿主观测到的
-read/diff 证据。
+MCP（含 `auto_start=false`）。宿主根据真实工具动作建立验证义务：后续相关写入会使旧的
+验证、复查和签收重新变为未满足；Goal 项和已批准 Plan 的验收项为 Strict；`complete_step`
+必须引用最后一次相关写入之后的证据。Skill/MCP 的 require/prefer 路由受门禁约束（只读回答
+同样不能跳过 require 能力）；触及认证、Schema 或破坏性路径后，结构化 review 的
+`reviewed_paths` 必须有宿主观测到的 read/diff 证据。
 
 ## 统一 Boot 工具面
 
@@ -89,7 +89,7 @@ read/diff 证据。
 注入父会话也不会丢失。引用只允许在当前会话 lineage 和工作区内读取。
 
 `use_capability`（`action` = `list` | `inspect` | `call` | `decline`）在 provider
-可见工具面上始终存在（自适应标准执行没有可选档位）。可选工具仍在 host
+可见工具面上始终存在（没有按任务复杂度切换的工具档位）。可选工具仍在 host
 registry 中供调度，但不会展开到 top-level provider schema；模型通过 `use_capability`
 调用，避免缓存前缀因 schema 变化而失效。
 
@@ -105,5 +105,5 @@ registry 中供调度，但不会展开到 top-level provider schema；模型通
 
 可选工具（`glob`、`grep`、`ls`、`web_fetch`、MCP、skills、subagents、docs、会话历史、
 记忆写入、workflow 等）仍在 host registry 中可调度；模型通过 `use_capability` 列举、
-检查、调用或拒绝它们，且不会改变 provider 工具列表。任务风险改变的是规划 / 验证 /
-独立复审策略，而不是 provider 可见工具集合。已退役的 `connect_tool_source` 不再注册。
+检查、调用或拒绝它们，且不会改变 provider 工具列表。改变的是宿主根据真实动作建立的
+验证义务，而不是 provider 可见工具集合。已退役的 `connect_tool_source` 不再注册。

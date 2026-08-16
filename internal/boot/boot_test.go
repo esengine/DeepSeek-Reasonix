@@ -2056,22 +2056,12 @@ model = "x"
 	if requestHasTool(deliveryReq, "connect_tool_source") {
 		t.Fatal("legacy token-mode inputs must not expose a connector")
 	}
-	// Per-turn execution-policy block is version 2: no preset. Legacy TokenMode
-	// inputs are ignored, so both requests share the same derived policy.
-	if !requestMessageContains(fullReq.Messages, provider.RoleUser, `<execution-policy version="2">`) {
-		t.Fatal("standard turn must include execution-policy version 2")
-	}
-	if requestMessageContains(fullReq.Messages, provider.RoleUser, "preset=") ||
-		requestMessageContains(deliveryReq.Messages, provider.RoleUser, "preset=") {
-		t.Fatal("execution-policy must not include a preset attribute")
+	if requestMessageContains(fullReq.Messages, provider.RoleUser, "<execution-policy") ||
+		requestMessageContains(deliveryReq.Messages, provider.RoleUser, "<execution-policy") {
+		t.Fatal("new turns must not inject execution-policy")
 	}
 	if requestMessageContains(deliveryReq.Messages, provider.RoleUser, "<delivery-runtime>") {
-		t.Fatal("delivery-runtime marker is retired; use execution-policy")
-	}
-	fullPolicy := userExecutionPolicy(fullReq.Messages)
-	deliveryPolicy := userExecutionPolicy(deliveryReq.Messages)
-	if fullPolicy == "" || fullPolicy != deliveryPolicy {
-		t.Fatalf("legacy TokenMode must not change the derived policy\nfull=%q\ndelivery=%q", fullPolicy, deliveryPolicy)
+		t.Fatal("delivery-runtime marker is retired")
 	}
 }
 

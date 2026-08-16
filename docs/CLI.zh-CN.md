@@ -401,8 +401,8 @@ SSH 下远端进程无法读取本机剪贴板，请使用终端粘贴快捷键�
 
 切换模型或 effort 会重建运行时，同时保留当前对话、会话级权限覆盖、附加目录
 访问权限和 session ownership。`/reload` 使用同一套失败原子重建语义。
-Reasonix 只有一种自适应标准执行：规划、验证与复查强度随任务风险自动调整，
-不再存在执行模式。
+普通请求一律进入 executor，没有自动简单 / 轻量 / 完整任务模式。
+独立 Planner 只响应显式 Plan、批准边界和 Goal 启动。
 
 用量统计使用独立的可丢弃 rollup 投影：
 reasonix catalogs reindex usage [--json]

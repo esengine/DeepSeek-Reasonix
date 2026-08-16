@@ -105,7 +105,7 @@ func TestApprovalToolWideEndToEnd(t *testing.T) {
 }
 
 // TestPlanModeApprovalPostureMatrix proves Plan freezes ForbidMutation on the
-// turn TaskPolicy so ordinary writers are host-blocked even when YOLO would
+// turn constraints so ordinary writers are host-blocked even when YOLO would
 // otherwise auto-allow them. Permission may still prompt first in Ask mode;
 // the host floor is enforced after the gate.
 func TestPlanModeApprovalPostureMatrix(t *testing.T) {
@@ -117,9 +117,9 @@ func TestPlanModeApprovalPostureMatrix(t *testing.T) {
 		wantWrites int
 	}{
 		// YOLO/Auto avoid hanging on interactive approval while still proving
-		// TaskPolicy ForbidMutation blocks the write.
-		{name: "Auto blocks writer under plan TaskPolicy", mode: ToolApprovalAuto, wantWrites: 0},
-		{name: "YOLO blocks writer under plan TaskPolicy", mode: ToolApprovalYolo, askRules: []string{"write_file"}, wantWrites: 0},
+		// Plan ForbidMutation blocks the write.
+		{name: "Auto blocks writer under plan constraints", mode: ToolApprovalAuto, wantWrites: 0},
+		{name: "YOLO blocks writer under plan constraints", mode: ToolApprovalYolo, askRules: []string{"write_file"}, wantWrites: 0},
 		{name: "deny still blocks in YOLO plan", mode: ToolApprovalYolo, denyRules: []string{"write_file"}, wantWrites: 0},
 	}
 	for _, tc := range tests {

@@ -1,9 +1,6 @@
-// Package taskcontract is the convergence point for the host's task state:
-// one Contract assembled purely from signals the runtime already produced —
-// the taskintent classification, planner-gate features, plan acceptance
-// criteria, and the evidence ledger's receipts. Building or updating a
-// contract never makes a model call; every termination arbiter reads the
-// same record instead of keeping its own.
+// Package taskcontract is the host's fact contract: obligations and acceptance
+// criteria assembled from approved plans, active goals, todos, project checks,
+// and receipts. Building or updating a contract never makes a model call.
 package taskcontract
 
 import (
@@ -12,7 +9,6 @@ import (
 	"strings"
 
 	"reasonix/internal/evidence"
-	"reasonix/internal/taskintent"
 )
 
 // Risk is the highest risk any upstream signal assigned to the task.
@@ -127,19 +123,20 @@ type Signals struct {
 
 // Contract is the unified task record.
 type Contract struct {
-	Intent       taskintent.Intent
 	Risk         Risk
 	Scope        Scope
 	Requirements []Requirement
 	Checks       []Check
+	Obligations  []Obligation
 
 	epoch uint64
 }
 
-// New classifies input with the existing taskintent heuristics and returns
-// an otherwise empty contract; no model call is made.
+// New returns an empty contract. Callers that still pass historical input
+// keep the signature; the text is never classified.
 func New(input string) *Contract {
-	return &Contract{Intent: taskintent.Classify(input)}
+	_ = input
+	return &Contract{}
 }
 
 // Atomic is the zero-overhead contract for a simple ask: the ask itself is
@@ -298,9 +295,9 @@ func (c *Contract) Observe(r evidence.Receipt) {
 			continue
 		}
 		c.Checks[i].Evidence = append(c.Checks[i].Evidence, ref)
-		if r.Success {
+		if ref.Success {
 			c.Checks[i].Status = Satisfied
-		} else if c.Checks[i].Status != Satisfied {
+		} else {
 			c.Checks[i].Status = Failed
 		}
 	}
@@ -714,7 +711,12 @@ func refFor(epoch uint64, r evidence.Receipt) EvidenceRef {
 	case r.Mutation || r.Write:
 		kind = EvidenceMutation
 	}
-	return EvidenceRef{Kind: kind, MutationEpoch: epoch, Source: r.ToolName, Success: r.Success}
+	success := r.Success && !verificationReceiptFailed(r)
+	return EvidenceRef{Kind: kind, MutationEpoch: epoch, Source: r.ToolName, Success: success}
+}
+
+func verificationReceiptFailed(r evidence.Receipt) bool {
+	return r.Verification == evidence.VerificationFailed || r.ExitCode != nil && *r.ExitCode != 0
 }
 
 func (c *Contract) checkMatches(check Check, r evidence.Receipt, ref EvidenceRef) bool {

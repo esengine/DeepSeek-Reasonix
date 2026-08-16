@@ -23,9 +23,9 @@ import (
 	"reasonix/internal/permission"
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
+	"reasonix/internal/runtimepolicy"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/sessiontemp"
-	"reasonix/internal/taskpolicy"
 	"reasonix/internal/tool"
 	"reasonix/internal/workspacelease"
 )
@@ -1620,9 +1620,11 @@ func (t *TaskTool) subagentOptions(ctx context.Context, maxSteps int, pricing *p
 	// Writer children inherit the parent turn's frozen risk and closure floors.
 	// The parent publishes its policy into the run context; a child that never
 	// received it (direct unit construction) keeps its own derived policy.
-	if parent, ok := taskpolicy.FromContext(ctx); ok {
-		p := parent
-		opts.InheritedTaskPolicy = &p
+	if inherited, ok := runtimepolicy.InheritedFromContext(ctx); ok {
+		copy := inherited
+		opts.InheritedExecution = &copy
+	} else if constraints, ok := runtimepolicy.FromContext(ctx); ok {
+		opts.InheritedExecution = &runtimepolicy.InheritedExecutionContext{Constraints: constraints}
 	}
 	return opts
 }

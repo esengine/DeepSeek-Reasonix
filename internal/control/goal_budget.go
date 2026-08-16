@@ -1,4 +1,4 @@
-package taskintent
+package control
 
 import (
 	"strings"

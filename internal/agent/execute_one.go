@@ -140,7 +140,7 @@ func (a *Agent) resolveToolPolicy(ctx context.Context, turn *turnRuntime, plan *
 	if blocked, early := a.applyContextualToolGate(ctx, plan); early {
 		return blocked, true
 	}
-	if blocked, early := a.applyTaskPolicyPreflight(turn, plan); early {
+	if blocked, early := a.applyExecutionPreflight(turn, plan); early {
 		return blocked, true
 	}
 	if blocked, early := a.applyDeliveryPolicyGates(turn, plan); early {
@@ -419,21 +419,6 @@ func (a *Agent) applyDeliveryPolicyGates(turn *turnRuntime, plan *toolCallPlan) 
 		}, true
 	}
 
-	persistentWorkflowCall := turn.deliveryPersistentExpected && !turn.deliveryMutationExpected && plan.evidenceName == "remember"
-	if closedLoop && !persistentWorkflowCall && evidence.ToolCallRequiresAcceptanceCriteria(plan.evidenceName, plan.evidenceArgs, plan.readOnly) && !turn.deliveryCriteriaEstablished {
-		return toolOutcome{
-			output:  "blocked: closed-loop execution requires acceptance criteria before state-changing work. Call todo_write with a concrete, verifiable task list, then retry this tool call.",
-			blocked: true,
-			errMsg:  "blocked: closed-loop acceptance criteria required",
-		}, true
-	}
-	if closedLoop && !persistentWorkflowCall && plan.effects.ContentMutation && !a.hasActiveCanonicalTodo() {
-		return toolOutcome{
-			output:  "blocked: closed-loop execution requires every state change to belong to the current in_progress todo. Preserve the completed todo prefix, append a concrete new item if more work was discovered, mark that item in_progress with todo_write, then retry this mutation.",
-			blocked: true,
-			errMsg:  "blocked: active in-progress todo required",
-		}, true
-	}
 	return toolOutcome{}, false
 }
 

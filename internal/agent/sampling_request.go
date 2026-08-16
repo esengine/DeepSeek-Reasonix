@@ -92,6 +92,9 @@ func (a *Agent) buildSamplingRequest(ctx context.Context, trigger string) (sampl
 	requestMessages = a.providerProjectionMessages(requestMessages)
 	for i := range requestMessages {
 		requestMessages[i].CreatedAt = 0
+		if requestMessages[i].Role == provider.RoleUser {
+			requestMessages[i].Content = reTrailingExecutionPolicy.ReplaceAllString(requestMessages[i].Content, "")
+		}
 	}
 	// context.prepare: extensions may rewrite the message copy feeding THIS
 	// request. The session log is never touched — the replacement is

@@ -22,7 +22,7 @@ func TestTaskMutationEvidenceUsesWorkspaceRelativeRisk(t *testing.T) {
 		t.Fatalf("ordinary workspace mutation evidence = %+v, want medium risk", meta)
 	}
 
-	summary.Receipts[0].Paths = []string{"/workspace/toolbox/internal/provider/openai/responses/client.go"}
+	summary.Receipts[0].Paths = []string{"/workspace/toolbox/internal/auth/session.go"}
 	meta = mutationEvidenceForArtifact(summary)
 	if meta == nil || meta.Risk != string(evidence.RiskHigh) {
 		t.Fatalf("sensitive workspace mutation evidence = %+v, want high risk", meta)

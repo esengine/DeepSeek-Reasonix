@@ -15,7 +15,7 @@ import (
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/goaleval"
 	"reasonix/internal/store"
-	"reasonix/internal/taskintent"
+
 	"reasonix/internal/tool"
 )
 
@@ -32,9 +32,9 @@ const (
 
 // Budget class aliases remain as sidecar/CLI compatibility metadata only.
 const (
-	budgetClassSimple   = taskintent.BudgetClassSimple
-	budgetClassWrite    = taskintent.BudgetClassWrite
-	budgetClassResearch = taskintent.BudgetClassResearch
+	budgetClassSimple   = BudgetClassSimple
+	budgetClassWrite    = BudgetClassWrite
+	budgetClassResearch = BudgetClassResearch
 )
 
 // Stop causes distinguish a safe pause from a genuine block. Removed numeric
@@ -58,12 +58,12 @@ func budgetClassForLegacyMode(goal string, researchMode GoalResearchMode) string
 	case GoalResearchOn:
 		return budgetClassResearch
 	case GoalResearchOff:
-		if taskintent.GoalNeedsWriteBudget(goal) {
+		if GoalNeedsWriteBudget(goal) {
 			return budgetClassWrite
 		}
 		return budgetClassSimple
 	default:
-		return taskintent.ClassifyGoalBudget(goal)
+		return ClassifyGoalBudget(goal)
 	}
 }
 
@@ -97,6 +97,7 @@ type goalMachine struct {
 	noProgressTurns        int
 	noProgressLimit        int
 	lastContinuationReason string
+	launch                 goalLaunchState
 	lastEvaluatorReason    string
 	stopCause              string
 	budgetExtensions       int // deprecated historical sidecar field
@@ -282,7 +283,7 @@ func (g *goalMachine) statusForDisplay() string {
 func (g *goalMachine) set(goal, preferredBudgetClass string, todos []evidence.TodoItem) (string, []byte, bool) {
 	goal = strings.TrimSpace(goal)
 	if goal != "" && preferredBudgetClass == "" {
-		preferredBudgetClass = taskintent.ClassifyGoalBudget(goal)
+		preferredBudgetClass = ClassifyGoalBudget(goal)
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -304,7 +305,7 @@ func (g *goalMachine) setLegacyArchiveBlockedWithTaskID(goal, preferredBudgetCla
 	goal = strings.TrimSpace(goal)
 	taskID = strings.TrimSpace(taskID)
 	if goal != "" && preferredBudgetClass == "" {
-		preferredBudgetClass = taskintent.ClassifyGoalBudget(goal)
+		preferredBudgetClass = ClassifyGoalBudget(goal)
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -561,6 +562,18 @@ func (g *goalMachine) advance(in goalAdvanceInput) goalAdvanceResult {
 		g.stopCause = in.pauseCause
 		g.block = clipGoalReason(reason)
 		notice = "goal paused: " + reason
+	case len(in.readiness.Missing) > 0 && g.noProgressTurns >= 2 && len(g.progressEvidence) > 0 &&
+		g.lastContinuationReason == clipGoalReason("readiness missing: "+in.readiness.Reason) &&
+		repeatedCompleteMayFinish(in.readiness.Missing, in.todos):
+		// After real Goal work, a repeated verification/review-only gap is
+		// Partial. Do not replay the same intercept forever.
+		g.goal = ""
+		g.status = GoalStatusComplete
+		g.block = ""
+		g.stopCause = ""
+		g.progressEvidence = nil
+		g.lastContinuationReason, g.lastEvaluatorReason = "", ""
+		notice = goalCompleteNotice
 	default:
 		intercept, interceptNotice = g.applyContinue(in, reportComplete, evaluatorComplete, complete)
 	}

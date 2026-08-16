@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -172,11 +171,11 @@ func TestClosedLoopEnforcesAcceptanceReviewVerificationAndSignoff(t *testing.T) 
 	if err := a.Run(withClosedLoopContext(context.Background()), "implement main"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if got := toolResult(a.sess.conversation, "write_file"); !strings.Contains(got, "closed-loop execution requires acceptance criteria") {
-		t.Fatalf("first write result = %q, want delivery acceptance gate", got)
+	if got := toolResultByID(a.sess.conversation, "blocked-write"); strings.Contains(got, "acceptance criteria") {
+		t.Fatalf("single-file write must not require a todo precondition: %q", got)
 	}
-	if !sessionHasUserMessageContaining(a.sess.conversation, "<execution-policy") {
-		t.Fatal("execution-policy marker was not injected into the turn tail")
+	if sessionHasUserMessageContaining(a.sess.conversation, "<execution-policy") {
+		t.Fatal("new turns must not inject execution-policy")
 	}
 	if got := lastToolResult(a.sess.conversation, "complete_step"); !strings.Contains(got, "signed off") {
 		t.Fatalf("complete_step result = %q, want successful sign-off", got)
@@ -234,29 +233,6 @@ func TestClosedLoopRequiresReviewBeforeFinalAnswer(t *testing.T) {
 	}
 }
 
-func TestClosedLoopRejectsTextOnlyImplementationClaim(t *testing.T) {
-	reg := evidenceRegistry()
-	reg.Add(fakeTool{name: "read_file", readOnly: true})
-	prov := &scriptedProvider{name: "delivery", turns: [][]provider.Chunk{
-		{{Type: provider.ChunkText, Text: "implemented"}, {Type: provider.ChunkDone}},
-		{toolCallChunk("criteria", "todo_write", `{"todos":[{"content":"Implement main","status":"in_progress"}]}`), {Type: provider.ChunkDone}},
-		{toolCallChunk("write", "write_file", `{"path":"main.go"}`), {Type: provider.ChunkDone}},
-		{toolCallChunk("review", "read_file", `{"path":"main.go"}`), {Type: provider.ChunkDone}},
-		{toolCallChunk("verify", "bash", `{"command":"go test ./..."}`), {Type: provider.ChunkDone}},
-		{toolCallChunk("signoff", "complete_step", `{"step":"Implement main","result":"implemented","evidence":[{"kind":"verification","summary":"tests pass","command":"go test ./..."}]}`), {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "implemented with evidence"}, {Type: provider.ChunkDone}},
-	}}
-	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
-	err := a.Run(withClosedLoopContext(context.Background()), "implement main")
-	var readiness *FinalReadinessError
-	if !errors.As(err, &readiness) || !strings.Contains(readiness.Reason, "no successful mutation was observed") {
-		t.Fatalf("text-only implementation claim err = %v, want mutation readiness failure", err)
-	}
-	if prov.call != 1 {
-		t.Fatalf("provider calls = %d, want 1 (text-only claim rejected immediately, no retries)", prov.call)
-	}
-}
-
 func TestClosedLoopCommandOnlyActionRequiresCriteriaAndSignoff(t *testing.T) {
 	reg := evidenceRegistry()
 	prov := &scriptedProvider{name: "delivery", turns: [][]provider.Chunk{
@@ -270,8 +246,8 @@ func TestClosedLoopCommandOnlyActionRequiresCriteriaAndSignoff(t *testing.T) {
 	if err := a.Run(withClosedLoopContext(context.Background()), "run tests"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if got := toolResult(a.sess.conversation, "bash"); !strings.Contains(got, "closed-loop execution requires acceptance criteria") {
-		t.Fatalf("first bash result = %q, want acceptance gate", got)
+	if got := toolResultByID(a.sess.conversation, "blocked-test"); strings.Contains(got, "acceptance criteria") {
+		t.Fatalf("verification command must not require a todo precondition: %q", got)
 	}
 	if got := lastToolResult(a.sess.conversation, "complete_step"); !strings.Contains(got, "signed off") {
 		t.Fatalf("complete_step result = %q, want successful command-only sign-off", got)
@@ -362,8 +338,8 @@ func TestClosedLoopRequiresActiveTodoForLateMutation(t *testing.T) {
 	if err := a.Run(withClosedLoopContext(context.Background()), "implement main and incorporate review fixes"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if got := toolResultByID(a.sess.conversation, "late-write"); !strings.Contains(got, "current in_progress todo") {
-		t.Fatalf("late mutation result = %q, want active-todo gate", got)
+	if got := toolResultByID(a.sess.conversation, "late-write"); strings.HasPrefix(got, "blocked:") {
+		t.Fatalf("single-file follow-up write must not require a new todo: %q", got)
 	}
 	if got := toolResultByID(a.sess.conversation, "retry-write"); strings.HasPrefix(got, "blocked:") || strings.HasPrefix(got, "error:") {
 		t.Fatalf("mutation after appended active todo should run, got %q", got)
@@ -508,10 +484,12 @@ func TestFinalReadinessBlocksUntilProjectCheckRunsAfterWriter(t *testing.T) {
 		{{Type: provider.ChunkText, Text: "premature"}, {Type: provider.ChunkDone}},
 		{
 			toolCallChunk("c2", "bash", `{"command":"go test ./..."}`),
+			toolCallChunk("c2r", "read_file", `{"path":"changed.go"}`),
 			{Type: provider.ChunkDone},
 		},
 		{{Type: provider.ChunkText, Text: "verified done"}, {Type: provider.ChunkDone}},
 	}}
+	reg.Add(fakeTool{name: "read_file", readOnly: true})
 	a := New(prov, reg, NewSession(""), Options{
 		ProjectChecks: []instruction.VerifyCheck{{Command: "go test ./...", SourcePath: "AGENTS.md", Line: 3}},
 	}, event.Discard)
@@ -537,6 +515,7 @@ func TestFinalReadinessAuditRecordsBlockAndRecovery(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "write_file", readOnly: false})
 	reg.Add(fakeTool{name: "bash", readOnly: false})
+	reg.Add(fakeTool{name: "read_file", readOnly: true})
 	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
 		{
 			toolCallChunk("c1", "write_file", `{"path":"changed.go","content":"package main"}`),
@@ -545,6 +524,7 @@ func TestFinalReadinessAuditRecordsBlockAndRecovery(t *testing.T) {
 		{{Type: provider.ChunkText, Text: "premature"}, {Type: provider.ChunkDone}},
 		{
 			toolCallChunk("c2", "bash", `{"command":"go test ./..."}`),
+			toolCallChunk("c2r", "read_file", `{"path":"changed.go"}`),
 			{Type: provider.ChunkDone},
 		},
 		{{Type: provider.ChunkText, Text: "verified done"}, {Type: provider.ChunkDone}},
@@ -578,6 +558,7 @@ func TestFinalReadinessRejectsProjectCheckBeforeWriter(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "bash", readOnly: false})
 	reg.Add(fakeTool{name: "write_file", readOnly: false})
+	reg.Add(fakeTool{name: "read_file", readOnly: true})
 	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
 		{
 			toolCallChunk("c1", "bash", `{"command":"go test ./..."}`),
@@ -587,6 +568,7 @@ func TestFinalReadinessRejectsProjectCheckBeforeWriter(t *testing.T) {
 		{{Type: provider.ChunkText, Text: "premature"}, {Type: provider.ChunkDone}},
 		{
 			toolCallChunk("c3", "bash", `{"command":"go test ./..."}`),
+			toolCallChunk("c3r", "read_file", `{"path":"changed.go"}`),
 			{Type: provider.ChunkDone},
 		},
 		{{Type: provider.ChunkText, Text: "verified done"}, {Type: provider.ChunkDone}},
@@ -620,6 +602,8 @@ func TestFinalReadinessRequiresCompleteStepAfterWriterWhenTodoSeen(t *testing.T)
 	}
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "write_file", readOnly: false})
+	reg.Add(fakeTool{name: "read_file", readOnly: true})
+	reg.Add(fakeTool{name: "bash", readOnly: false})
 	reg.Add(todoWrite)
 	reg.Add(completeStep)
 	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
@@ -630,6 +614,8 @@ func TestFinalReadinessRequiresCompleteStepAfterWriterWhenTodoSeen(t *testing.T)
 		},
 		{{Type: provider.ChunkText, Text: "premature"}, {Type: provider.ChunkDone}},
 		{
+			toolCallChunk("review", "read_file", `{"path":"changed.go"}`),
+			toolCallChunk("verify", "bash", `{"command":"go test ./..."}`),
 			toolCallChunk("c3", "complete_step", `{
 				"step":"Edit code",
 				"result":"changed.go updated",

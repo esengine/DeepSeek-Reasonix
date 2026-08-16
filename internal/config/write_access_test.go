@@ -40,7 +40,8 @@ func TestPersistProjectWriteAccessDoesNotDuplicateAncestor(t *testing.T) {
 	if err := os.MkdirAll(parent, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte("[sandbox]\nallow_write = [\""+parent+"\"]\n"), 0o644); err != nil {
+	fixture := "[sandbox]\nallow_write = " + renderStringArray([]string{parent}) + "\n"
+	if err := os.WriteFile(path, []byte(fixture), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := PersistProjectWriteAccess(path, []string{filepath.Join(parent, "bin")}, ""); err != nil {
