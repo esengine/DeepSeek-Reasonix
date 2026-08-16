@@ -1,11 +1,12 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { Clipboard, Copy, MessageSquare } from "lucide-react";
 import "@xterm/xterm/css/xterm.css";
 
 import { useTerminalStore } from "../store/terminal";
-import { registerTerminalSink, startTerminalEventBridge } from "../lib/terminalEvents";
+import { startTerminalEventBridge } from "../lib/terminalEvents";
+import { registerTerminalSink, type TerminalSinkSubscription } from "../lib/terminalSink";
 import { writeClipboardText } from "../lib/clipboard";
 import { detectShortcutPlatform, formatShortcutCombo } from "../lib/keyboardShortcuts";
 import { useT } from "../lib/i18n";
@@ -42,6 +43,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, {
   const hostRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const terminalSinkRef = useRef<TerminalSinkSubscription | null>(null);
   const fitEnabledRef = useRef(fitEnabled);
   const openRef = useRef(open);
   const selectionLifecycleRef = useRef(createTerminalSelectionLifecycle<Terminal>());
@@ -163,7 +165,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, {
       terminal.options.theme = terminalThemeForElement(host);
     };
     const stopObservingTheme = observeTerminalTheme(host, updateTheme);
-    const unregister = registerTerminalSink(session.id, (bytes) => terminal.write(bytes));
+    const terminalSink = registerTerminalSink(session.id, (bytes) => terminal.write(bytes), openRef.current);
+    terminalSinkRef.current = terminalSink;
     const input = terminal.onData((data) => { void write(tabId, session.id, data).catch(() => {}); });
     const outputResize = terminal.onResize(({ cols, rows }) => { void resize(tabId, session.id, cols, rows).catch(() => {}); });
     terminal.attachCustomKeyEventHandler((event) => {
@@ -232,7 +235,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, {
       selectionChange.dispose();
       input.dispose();
       outputResize.dispose();
-      unregister();
+      terminalSink.dispose();
+      if (terminalSinkRef.current === terminalSink) terminalSinkRef.current = null;
       selectionLifecycleRef.current.deactivate(terminal);
       if (fitRef.current === fit) fitRef.current = null;
       if (terminalRef.current === terminal) terminalRef.current = null;
@@ -243,6 +247,10 @@ export const TerminalView = forwardRef<TerminalViewHandle, {
       onSelectionActionChangeRef.current?.(null);
     };
   }, [resize, session.id, tabId, write]);
+
+  useLayoutEffect(() => {
+    terminalSinkRef.current?.setActive(open);
+  }, [open]);
 
   useEffect(() => {
     if (!fitEnabled) return;

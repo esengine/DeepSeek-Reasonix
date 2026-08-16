@@ -20,6 +20,7 @@ const testDir = dirname(fileURLToPath(import.meta.url));
 const appSource = readFileSync(resolve(testDir, "../App.tsx"), "utf8");
 const stylesSource = readFileSync(resolve(testDir, "../styles.css"), "utf8");
 const terminalPanelSource = readFileSync(resolve(testDir, "../components/TerminalPanel.tsx"), "utf8");
+const terminalViewSource = readFileSync(resolve(testDir, "../components/TerminalView.tsx"), "utf8");
 const terminalRailSource = readFileSync(resolve(testDir, "../components/TerminalSessionRail.tsx"), "utf8");
 const terminalLifecycleSource = readFileSync(resolve(testDir, "../lib/useWarmTerminalPanel.ts"), "utf8");
 
@@ -324,6 +325,12 @@ eq(
     && !/setMounted\(false\)/.test(terminalLifecycleSource),
   true,
   "the terminal stays mounted after first open to preserve the live xterm",
+);
+eq(
+  /registerTerminalSink\(session\.id, \(bytes\) => terminal\.write\(bytes\), openRef\.current\)/.test(terminalViewSource)
+    && /terminalSinkRef\.current\?\.setActive\(open\)/.test(terminalViewSource),
+  true,
+  "the warm terminal pauses PTY output while collapsed and resumes from its output cursor",
 );
 eq(
   /fitEnabled=\{terminalFitEnabled\}/.test(appSource)
