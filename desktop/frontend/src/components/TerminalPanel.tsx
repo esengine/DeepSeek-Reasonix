@@ -1,7 +1,14 @@
 import { AlertTriangle, MessageSquare, MessageSquarePlus, PanelBottomClose, Plus, RefreshCw, TerminalSquare, X } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import {
+  detectShortcutPlatform,
+  formatShortcutCombo,
+  onShortcutsChanged,
+  resolvedShortcutCombo,
+  useGlobalShortcut,
+} from "../lib/keyboardShortcuts";
 import { useT } from "../lib/i18n";
 import { startTerminalEventBridge } from "../lib/terminalEvents";
 import { useTerminalStore } from "../store/terminal";
@@ -14,6 +21,8 @@ export function TerminalPanel({
   tabId,
   cwd,
   readOnly,
+  open,
+  fitEnabled = true,
   onClose,
   onAddOutput,
   onAddToChat,
@@ -21,6 +30,8 @@ export function TerminalPanel({
   tabId: string;
   cwd?: string;
   readOnly: boolean;
+  open: boolean;
+  fitEnabled?: boolean;
   onClose: () => void;
   onAddOutput: (sessionId: string) => void;
   onAddToChat: (text: string) => void;
@@ -42,6 +53,15 @@ export function TerminalPanel({
   const clearError = useTerminalStore((state) => state.clearError);
   const setActiveSession = useTerminalStore((state) => state.setActiveSession);
   const capabilityRef = useRef({ tabId, readOnly });
+  const shortcutPlatform = useMemo(() => detectShortcutPlatform(), []);
+  const [shortcutRevision, setShortcutRevision] = useState(0);
+  useEffect(() => onShortcutsChanged(() => setShortcutRevision((value) => value + 1)), []);
+  const addShortcut = useMemo(
+    () => formatShortcutCombo(resolvedShortcutCombo("selection.addToChat", shortcutPlatform), shortcutPlatform),
+    // shortcutRevision re-resolves the combo after the user changes it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [shortcutPlatform, shortcutRevision],
+  );
 
   useLayoutEffect(() => {
     if (!selectionAction) {
@@ -88,6 +108,24 @@ export function TerminalPanel({
       window.removeEventListener("scroll", close, true);
     };
   }, [selectionAction]);
+
+  useEffect(() => {
+    if (!open) setSelectionAction(null);
+  }, [open]);
+
+  const addSelectionToChat = useCallback(() => {
+    if (!selectionAction) return;
+    onAddToChat(selectionAction.text);
+    terminalViewRef.current?.clearSelection();
+    setSelectionAction(null);
+  }, [onAddToChat, selectionAction]);
+
+  useGlobalShortcut(
+    "selection.addToChat",
+    addSelectionToChat,
+    [],
+    open && Boolean(selectionAction),
+  );
 
   useEffect(() => {
     startTerminalEventBridge();
@@ -169,13 +207,13 @@ export function TerminalPanel({
             />
           )}
           <div className="terminal-panel__content">
-            {active ? <TerminalView key={active.id} ref={terminalViewRef} tabId={tabId} session={active} onSelectionActionChange={setSelectionAction} onAddToChat={onAddToChat} /> : (
+            {active ? <TerminalView key={active.id} ref={terminalViewRef} tabId={tabId} session={active} open={open} fitEnabled={fitEnabled} onSelectionActionChange={setSelectionAction} onAddToChat={onAddToChat} /> : (
               <div className="terminal-empty terminal-empty--action"><TerminalSquare size={22} /><p>{t("terminal.empty")}</p><button type="button" className="btn btn--secondary btn--small" onClick={newSession}><Plus size={14} />{t("terminal.newSession")}</button></div>
             )}
           </div>
         </div>
       )}
-      {selectionAction && typeof document !== "undefined" && createPortal(
+      {open && selectionAction && typeof document !== "undefined" && createPortal(
         <div
           ref={selectionActionRef}
           className="transcript-selection-action"
@@ -188,13 +226,10 @@ export function TerminalPanel({
           }}
           onMouseDown={(event) => event.preventDefault()}
         >
-          <button type="button" onClick={() => {
-            onAddToChat(selectionAction.text);
-            terminalViewRef.current?.clearSelection();
-            setSelectionAction(null);
-          }}>
+          <button type="button" onClick={addSelectionToChat}>
             <MessageSquare size={14} aria-hidden="true" />
             <span>{t("selection.addToChat")}</span>
+            <kbd>{addShortcut}</kbd>
           </button>
         </div>,
         document.body,

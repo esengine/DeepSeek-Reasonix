@@ -34,11 +34,16 @@ export type TerminalViewHandle = {
 export const TerminalView = forwardRef<TerminalViewHandle, {
   tabId: string;
   session: TerminalSessionView;
+  open?: boolean;
+  fitEnabled?: boolean;
   onSelectionActionChange?: (action: TerminalSelectionAction | null) => void;
   onAddToChat?: (text: string) => void;
-}>(function TerminalView({ tabId, session, onSelectionActionChange, onAddToChat }, ref) {
+}>(function TerminalView({ tabId, session, open = true, fitEnabled = true, onSelectionActionChange, onAddToChat }, ref) {
   const hostRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
+  const fitEnabledRef = useRef(fitEnabled);
+  const openRef = useRef(open);
   const selectionLifecycleRef = useRef(createTerminalSelectionLifecycle<Terminal>());
   const onSelectionActionChangeRef = useRef(onSelectionActionChange);
   const onAddToChatRef = useRef(onAddToChat);
@@ -49,10 +54,13 @@ export const TerminalView = forwardRef<TerminalViewHandle, {
   const resize = useTerminalStore((state) => state.resize);
   const { showToast } = useToast();
   const t = useT();
+  fitEnabledRef.current = fitEnabled;
+  openRef.current = open;
   onSelectionActionChangeRef.current = onSelectionActionChange;
   onAddToChatRef.current = onAddToChat;
 
   const clearSelectionState = (terminal = terminalRef.current) => {
+    selectionLifecycleRef.current.noteSelectionChange();
     terminal?.clearSelection();
     selectionTextRef.current = "";
     setSelectionText("");
@@ -64,6 +72,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, {
   }), []);
 
   const updateSelection = () => {
+    selectionLifecycleRef.current.noteSelectionChange();
     const text = terminalRef.current?.getSelection() ?? "";
     selectionTextRef.current = text;
     setSelectionText(text);
@@ -74,6 +83,10 @@ export const TerminalView = forwardRef<TerminalViewHandle, {
   };
 
   const reportSelection = (fallbackPoint?: TerminalSelectionPoint) => {
+    if (!openRef.current) {
+      clearSelectionAction();
+      return;
+    }
     const terminal = terminalRef.current;
     if (!terminal?.hasSelection()) {
       clearSelectionAction();
@@ -92,11 +105,11 @@ export const TerminalView = forwardRef<TerminalViewHandle, {
   };
 
   const copySelection = async () => {
-    const operation = selectionLifecycleRef.current.capture();
+    const operation = selectionLifecycleRef.current.captureSelection();
     const text = selectionTextRef.current;
     if (!operation || !text) return;
     const copied = await writeClipboardText(text);
-    if (!selectionLifecycleRef.current.isCurrent(operation)) return;
+    if (!selectionLifecycleRef.current.isCurrentSelection(operation)) return;
     if (!copied) {
       showToast(t("diag.copyFailed"), "error");
       return;
@@ -133,10 +146,11 @@ export const TerminalView = forwardRef<TerminalViewHandle, {
       theme: terminalThemeForElement(host),
     });
     terminalRef.current = terminal;
-    const selectionOperation = selectionLifecycleRef.current.activate(terminal);
+    selectionLifecycleRef.current.activate(terminal);
     selectionTextRef.current = "";
     setSelectionText("");
     const fit = new FitAddon();
+    fitRef.current = fit;
     terminal.loadAddon(fit);
     terminal.open(host);
     const updateTheme = () => {
@@ -157,8 +171,10 @@ export const TerminalView = forwardRef<TerminalViewHandle, {
         getSelection: () => terminal.getSelection(),
       });
       if (decision.intercepted) {
+        const selectionOperation = selectionLifecycleRef.current.captureSelection();
+        if (!selectionOperation) return false;
         void writeClipboardText(decision.text).then((copied) => {
-          if (!selectionLifecycleRef.current.isCurrent(selectionOperation)) return;
+          if (!selectionLifecycleRef.current.isCurrentSelection(selectionOperation)) return;
           if (!copied) {
             showToast(t("diag.copyFailed"), "error");
             return;
@@ -192,6 +208,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, {
     host.addEventListener("pointerup", onPointerUp);
     host.addEventListener("contextmenu", onContextMenu);
     const fitTerminal = () => {
+      if (!fitEnabledRef.current) return;
+      if (host.clientHeight < 32 || host.clientWidth < 32) return;
       fit.fit();
       const { cols, rows } = terminal;
       if (cols > 0 && rows > 0) void resize(tabId, session.id, cols, rows).catch(() => {});
@@ -210,6 +228,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, {
       outputResize.dispose();
       unregister();
       selectionLifecycleRef.current.deactivate(terminal);
+      if (fitRef.current === fit) fitRef.current = null;
       if (terminalRef.current === terminal) terminalRef.current = null;
       terminal.dispose();
       // A session switch disposes this terminal while TerminalPanel stays
@@ -218,6 +237,22 @@ export const TerminalView = forwardRef<TerminalViewHandle, {
       onSelectionActionChangeRef.current?.(null);
     };
   }, [resize, session.id, tabId, write]);
+
+  useEffect(() => {
+    if (!fitEnabled) return;
+    const host = hostRef.current;
+    const terminal = terminalRef.current;
+    const fit = fitRef.current;
+    if (!host || !terminal || !fit) return;
+    if (host.clientHeight < 32 || host.clientWidth < 32) return;
+    fit.fit();
+    const { cols, rows } = terminal;
+    if (cols > 0 && rows > 0) void resize(tabId, session.id, cols, rows).catch(() => {});
+  }, [fitEnabled, resize, session.id, tabId]);
+
+  useEffect(() => {
+    if (!open) setMenu(null);
+  }, [open]);
 
   const copyShortcut = formatShortcutCombo(
     shortcutPlatform === "darwin" ? { key: "c", meta: true } : { key: "c", ctrl: true },
@@ -230,7 +265,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, {
 
   return <>
     <ContextMenu
-      open={menu != null}
+      open={open && menu != null}
       point={menu}
       minWidth={180}
       ariaLabel={t("terminal.title")}

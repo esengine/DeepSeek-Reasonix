@@ -2128,7 +2128,10 @@ a[href] {
    the terminal occupies column 2 row 3, statusbar at row 4. */
 .layout--terminal-drawer-open {
   grid-template-rows: var(--app-chrome-height) minmax(0, 1fr) var(--terminal-height, 280px) var(--statusbar-height);
-  transition: grid-template-columns 0.16s ease, min-width 0.16s ease, grid-template-rows 0.25s ease;
+  transition:
+    grid-template-columns 0.16s ease,
+    min-width 0.16s ease,
+    grid-template-rows 0.22s cubic-bezier(0.2, 0.72, 0.2, 1);
 }
 /* Disable the open/close transition during a terminal resize drag. */
 .layout--terminal-resizing.layout--terminal-drawer-open {
@@ -2203,11 +2206,17 @@ a[href] {
 }
 .layout.layout--workbench-chrome-hidden.layout--terminal-drawer-open {
   grid-template-rows: minmax(0, 1fr) var(--terminal-height, 280px) var(--statusbar-height) !important;
-  transition: grid-template-columns 0.16s ease, min-width 0.16s ease, grid-template-rows 0.25s ease !important;
+  transition:
+    grid-template-columns 0.16s ease,
+    min-width 0.16s ease,
+    grid-template-rows 0.22s cubic-bezier(0.2, 0.72, 0.2, 1) !important;
 }
 .app--creation .layout.layout--creation-chrome-hidden.layout--terminal-drawer-open {
   grid-template-rows: minmax(0, 1fr) var(--terminal-height, 280px) !important;
-  transition: grid-template-columns 0.16s ease, min-width 0.16s ease, grid-template-rows 0.25s ease !important;
+  transition:
+    grid-template-columns 0.16s ease,
+    min-width 0.16s ease,
+    grid-template-rows 0.22s cubic-bezier(0.2, 0.72, 0.2, 1) !important;
 }
 /* StatusBar shifts to row 4 when the terminal drawer adds an extra row. */
 .layout--terminal-drawer-open .statusbar {

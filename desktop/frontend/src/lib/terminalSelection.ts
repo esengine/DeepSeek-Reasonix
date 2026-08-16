@@ -5,11 +5,18 @@ export type TerminalSelectionOperation<T> = {
   terminal: T;
 };
 
+export type TerminalSelectionSnapshot<T> = TerminalSelectionOperation<T> & {
+  selectionRevision: number;
+};
+
 export type TerminalSelectionLifecycle<T> = {
   activate: (terminal: T) => TerminalSelectionOperation<T>;
   capture: () => TerminalSelectionOperation<T> | null;
+  captureSelection: () => TerminalSelectionSnapshot<T> | null;
   deactivate: (terminal: T) => void;
   isCurrent: (operation: TerminalSelectionOperation<T>) => boolean;
+  isCurrentSelection: (snapshot: TerminalSelectionSnapshot<T>) => boolean;
+  noteSelectionChange: () => void;
 };
 
 type RectLike = Pick<DOMRect, "left" | "top" | "right" | "bottom" | "width" | "height">;
@@ -71,23 +78,37 @@ export function clampTerminalSelectionPointToHost(
 // never clear or paste into the replacement session.
 export function createTerminalSelectionLifecycle<T>(): TerminalSelectionLifecycle<T> {
   let generation = 0;
+  let selectionRevision = 0;
   let terminal: T | null = null;
   return {
     activate(next) {
       generation += 1;
+      selectionRevision += 1;
       terminal = next;
       return { generation, terminal: next };
     },
     capture() {
       return terminal === null ? null : { generation, terminal };
     },
+    captureSelection() {
+      return terminal === null ? null : { generation, selectionRevision, terminal };
+    },
     deactivate(target) {
       if (terminal !== target) return;
       generation += 1;
+      selectionRevision += 1;
       terminal = null;
     },
     isCurrent(operation) {
       return operation.generation === generation && operation.terminal === terminal;
+    },
+    isCurrentSelection(snapshot) {
+      return snapshot.generation === generation
+        && snapshot.selectionRevision === selectionRevision
+        && snapshot.terminal === terminal;
+    },
+    noteSelectionChange() {
+      if (terminal !== null) selectionRevision += 1;
     },
   };
 }

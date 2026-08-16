@@ -79,6 +79,18 @@ function keyEvent(overrides: Partial<ConstructorParameters<typeof KeyboardEvent>
   const secondOperation = lifecycle.activate(secondTerminal);
   assert.equal(lifecycle.isCurrent(firstOperation), false, "session switch rejects old clipboard completion");
   assert.equal(lifecycle.isCurrent(secondOperation), true, "replacement terminal owns new operations");
+  const firstSelection = lifecycle.captureSelection();
+  assert.ok(firstSelection, "active terminal exposes a selection snapshot");
+  let settleCopy: (() => void) | undefined;
+  const delayedCopy = new Promise<void>((resolve) => { settleCopy = resolve; });
+  const staleCopyCompletion = delayedCopy.then(() => lifecycle.isCurrentSelection(firstSelection));
+  lifecycle.noteSelectionChange();
+  const replacementSelection = lifecycle.captureSelection();
+  assert.ok(replacementSelection, "changed selection exposes a replacement snapshot");
+  settleCopy?.();
+  assert.equal(await staleCopyCompletion, false, "same-terminal selection change rejects delayed copy cleanup");
+  assert.equal(lifecycle.isCurrentSelection(replacementSelection), true, "replacement selection owns new copy cleanup");
+  assert.equal(lifecycle.isCurrent(secondOperation), true, "selection changes do not invalidate terminal-scoped paste");
   lifecycle.deactivate(firstTerminal);
   assert.equal(lifecycle.isCurrent(secondOperation), true, "stale cleanup cannot invalidate the replacement terminal");
   lifecycle.deactivate(secondTerminal);
