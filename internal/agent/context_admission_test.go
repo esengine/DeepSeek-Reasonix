@@ -120,7 +120,7 @@ func TestAdmitOutputBudgetNegativeOmitsInsteadOfInject(t *testing.T) {
 func TestCompactRatioIndependentOfOutputBudgetAndLearnedWindow(t *testing.T) {
 	a := &Agent{
 		svc:         agentServices{prov: &sharedWindowTestProvider{budget: 131_072, shared: true}},
-		agentConfig: agentConfig{contextWindow: 128_000, compactRatio: defaultCompactRatio},
+		agentConfig: agentConfig{contextWindow: 128_000, contextWindowSource: contextWindowSourceDefault, compactRatio: defaultCompactRatio},
 	}
 	want := int(float64(128_000) * defaultCompactRatio)
 	if got := a.compactTrigger(); got != want {
@@ -149,8 +149,8 @@ func TestGuardedSummaryUsesSharedPolicyWhenAutoBudgetIsZero(t *testing.T) {
 }
 
 func TestLearnedWindowIsolatedPerAgent(t *testing.T) {
-	first := &Agent{agentConfig: agentConfig{contextWindow: 1_048_576}}
-	second := &Agent{agentConfig: agentConfig{contextWindow: 1_048_576}}
+	first := &Agent{agentConfig: agentConfig{contextWindow: 1_048_576, contextWindowSource: contextWindowSourceDefault}}
+	second := &Agent{agentConfig: agentConfig{contextWindow: 1_048_576, contextWindowSource: contextWindowSourceDefault}}
 	first.learnContextBudget(200_000, 0, false)
 	if first.effectiveContextWindow() != 200_000 {
 		t.Fatalf("first window = %d", first.effectiveContextWindow())
@@ -165,6 +165,39 @@ func TestZeroConfigWindowUsesLearned(t *testing.T) {
 	a.learnContextBudget(262_144, 0, false)
 	if a.effectiveContextWindow() != 262_144 {
 		t.Fatalf("zero config window = %d", a.effectiveContextWindow())
+	}
+}
+
+func TestExplicitWindowIgnoresLearned(t *testing.T) {
+	a := &Agent{agentConfig: agentConfig{contextWindow: 128_000, contextWindowSource: contextWindowSourceExplicit}}
+	a.learnContextBudget(64_000, 0, false)
+	if got := a.effectiveContextWindow(); got != 128_000 {
+		t.Fatalf("explicit window = %d, want 128000", got)
+	}
+	if a.learnedWindowPersistAllowed() {
+		t.Fatal("explicit window must not persist learned observations")
+	}
+}
+
+func TestLearnedWindowPersistsOnlyDownwardWhenAllowed(t *testing.T) {
+	var persisted []int
+	a := &Agent{
+		agentConfig: agentConfig{
+			contextWindow:       128_000,
+			contextWindowSource: contextWindowSourceDefault,
+			persistLearnedWindow: func(window, completion int) {
+				persisted = append(persisted, window)
+			},
+		},
+	}
+	a.learnContextBudget(100_000, 0, false)
+	a.learnContextBudget(120_000, 0, false)
+	a.learnContextBudget(90_000, 0, false)
+	if got := a.effectiveContextWindow(); got != 90_000 {
+		t.Fatalf("effective window = %d, want 90000", got)
+	}
+	if len(persisted) != 2 || persisted[0] != 100_000 || persisted[1] != 90_000 {
+		t.Fatalf("persisted windows = %v, want [100000 90000]", persisted)
 	}
 }
 

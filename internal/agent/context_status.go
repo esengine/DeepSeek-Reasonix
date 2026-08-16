@@ -5,6 +5,7 @@ import "reasonix/internal/provider"
 // ContextMaintenanceSnapshot is a read-only view of the current provider-bound
 // context. It separates present composition from cumulative summary-call cost.
 type ContextMaintenanceSnapshot struct {
+	WindowSource      string `json:"windowSource,omitempty"`
 	CanonicalTokens   int
 	ProjectedTokens   int
 	SummaryTokens     int
@@ -67,6 +68,7 @@ func (a *Agent) ContextMaintenanceSnapshot() ContextMaintenanceSnapshot {
 		uiCheckpoint = stateCheckpointState(checkpointState, state)
 	}
 	snapshot := ContextMaintenanceSnapshot{
+		WindowSource:      a.contextWindowSourceLabel(),
 		CanonicalTokens:   a.estimatedVisibleRequestTokens(canonical),
 		ProjectedTokens:   a.estimatedVisibleRequestTokens(visible),
 		FoldTrigger:       trigger,

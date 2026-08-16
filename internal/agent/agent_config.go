@@ -29,7 +29,13 @@ type agentConfig struct {
 	// contextWindow and compactRatio decide when at most one provider-visible
 	// checkpoint is installed; recentKeep and archiveDir shape what it keeps.
 	contextWindow int
-	compactRatio  float64
-	recentKeep    int
-	archiveDir    string
+	// contextWindowSource marks explicit vs default so provider-learned
+	// windows only override default placeholders (config.ContextWindowSource*).
+	contextWindowSource string
+	// persistLearnedWindow persists a downward provider observation to the
+	// shared learned-window store (nil disables persistence).
+	persistLearnedWindow func(window, completion int)
+	compactRatio         float64
+	recentKeep           int
+	archiveDir           string
 }

@@ -46,6 +46,7 @@ func renderContextReport(rep agent.ContextReport) (summary, detail string) {
 		hard = fmt.Sprintf("  (usable %s after output reserve)", thousands(rep.HardCeiling))
 	}
 	line("window", thousands(rep.Window)+hard)
+	line("source", rep.WindowSource)
 	line("latest prompt", fmt.Sprintf("%s  (%s of window)", thousands(rep.LatestPrompt), percentOf(rep.LatestPrompt, rep.Window)))
 	line("canonical", thousands(rep.CanonicalTokens))
 	visible := thousands(rep.ProjectionTokens)
