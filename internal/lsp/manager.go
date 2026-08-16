@@ -12,12 +12,11 @@ import (
 	"time"
 )
 
-// ServerSpec declares how to launch one language server. Command resolves on
-// PATH (the binary is never bundled); Fallbacks are alternate executable names
-// tried when Command is missing (official installers expose different names per
-// platform); InstallHint is surfaced when none are found. Extensions are the
-// file suffixes (".go", ".rs") this server handles — they drive file → language
-// routing, so a config-only entry can add a new language without any code change.
+// ServerSpec declares how to launch one language server. Command resolves on PATH
+// (the binary is never bundled); Fallbacks are alternate executable names tried
+// when Command is missing. InstallHint is surfaced when none are found. Extensions
+// are the file suffixes (".go", ".rs") this server handles, so a config-only entry
+// can add a new language without any code change.
 type ServerSpec struct {
 	Command     string
 	Args        []string
@@ -93,7 +92,7 @@ func DefaultSpecs() map[string]ServerSpec {
 		"lua":        {Command: "lua-language-server", LanguageID: "lua", Extensions: []string{".lua"}, InstallHint: "install lua-language-server: brew install lua-language-server / scoop install lua-language-server"},
 		"bash":       {Command: "bash-language-server", Args: []string{"start"}, LanguageID: "shellscript", Extensions: []string{".sh", ".bash"}, InstallHint: "npm i -g bash-language-server"},
 		"zig":        {Command: "zls", LanguageID: "zig", Extensions: []string{".zig"}, InstallHint: "install zls (ziglang/zls) matching your zig version"},
-		"kotlin":     {Command: "kotlin-lsp", Fallbacks: []string{"intellij-server"}, Args: []string{"--stdio"}, LanguageID: "kotlin", Extensions: []string{".kt", ".kts"}, InstallHint: "install kotlin-lsp (JetBrains Kotlin/kotlin-lsp): brew install JetBrains/utils/kotlin-lsp / download the standalone zip from Kotlin/kotlin-lsp releases (Windows)"},
+		"kotlin":     {Command: "kotlin-lsp", Fallbacks: []string{"intellij-server"}, Args: []string{"--stdio"}, LanguageID: "kotlin", Extensions: []string{".kt", ".kts"}, InstallHint: "install JetBrains Kotlin/kotlin-lsp: macOS: brew install JetBrains/utils/kotlin-lsp; Linux: download the standalone zip, chmod +x kotlin-lsp.sh, and symlink it as kotlin-lsp on PATH; Windows: download the standalone zip and add its bin directory containing intellij-server.exe to PATH"},
 		"swift":      {Command: "sourcekit-lsp", LanguageID: "swift", Extensions: []string{".swift"}, InstallHint: "ships with the Swift toolchain (swift.org/download)"},
 		"haskell":    {Command: "haskell-language-server-wrapper", Args: []string{"--lsp"}, LanguageID: "haskell", Extensions: []string{".hs"}, InstallHint: "install via ghcup: ghcup install hls"},
 	}

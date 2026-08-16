@@ -72,8 +72,17 @@ func TestKotlinDefaultSpec(t *testing.T) {
 	if !hasFallback {
 		t.Errorf("kotlin Fallbacks = %v, want intellij-server fallback for the Windows zip layout", spec.Fallbacks)
 	}
-	if spec.InstallHint == "" {
-		t.Error("kotlin InstallHint empty")
+	for _, want := range []string{
+		"macOS",
+		"brew install JetBrains/utils/kotlin-lsp",
+		"Linux",
+		"kotlin-lsp.sh",
+		"Windows",
+		"intellij-server.exe",
+	} {
+		if !strings.Contains(spec.InstallHint, want) {
+			t.Errorf("kotlin InstallHint = %q, want platform guidance containing %q", spec.InstallHint, want)
+		}
 	}
 }
 
