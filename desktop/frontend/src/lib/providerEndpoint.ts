@@ -9,6 +9,26 @@ export function trimmedBaseURL(value: string): string {
   return value.trim().replace(/\/+$/, "");
 }
 
+function normalizeOpenAIRequestURL(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  try {
+    const parsed = new URL(trimmed);
+    const path = parsed.pathname.replace(/\/+$/, "");
+    if (path === "/v1") {
+      parsed.pathname = "/v1/chat/completions";
+      return parsed.toString();
+    }
+    if (path === "") {
+      parsed.pathname = "/chat/completions";
+      return parsed.toString();
+    }
+  } catch {
+    return trimmed;
+  }
+  return trimmed;
+}
+
 export function providerRequestURLFromConfig(
   kind: string,
   baseUrl: string,
@@ -16,10 +36,14 @@ export function providerRequestURLFromConfig(
   legacyChatUrl = "",
 ): string {
   const exactRequestURL = requestUrl.trim();
-  if (exactRequestURL) return exactRequestURL;
+  if (exactRequestURL) {
+    return kind.trim().toLowerCase() === "openai"
+      ? normalizeOpenAIRequestURL(exactRequestURL)
+      : exactRequestURL;
+  }
   if (kind.trim().toLowerCase() === "openai") {
     const legacyOpenAIRequestURL = legacyChatUrl.trim().replace(/\/+$/, "");
-    if (legacyOpenAIRequestURL) return legacyOpenAIRequestURL;
+    if (legacyOpenAIRequestURL) return normalizeOpenAIRequestURL(legacyOpenAIRequestURL);
   }
   const base = trimmedBaseURL(baseUrl);
   if (!base) return "";

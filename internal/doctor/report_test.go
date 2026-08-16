@@ -105,6 +105,40 @@ func TestCollectReportDoesNotRequireAPIKey(t *testing.T) {
 	}
 }
 
+func TestCollectReportCountsKnownDesktopProjectSessions(t *testing.T) {
+	home := t.TempDir()
+	state := t.TempDir()
+	projectRoot := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	t.Setenv("REASONIX_STATE_HOME", state)
+	t.Setenv("REASONIX_CACHE_HOME", t.TempDir())
+
+	projects, err := json.Marshal(map[string]any{
+		"projects": []map[string]string{{"root": projectRoot}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "desktop-projects.json"), projects, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	projectSessions := config.ProjectSessionDir(projectRoot)
+	if err := os.MkdirAll(projectSessions, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectSessions, "desktop-session.jsonl"), []byte(`{"role":"user","content":"desktop session"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	report := Collect(Options{Version: "test", Config: config.Default()})
+	if report.Sessions.Count != 1 {
+		t.Fatalf("session count = %d, want desktop project session included", report.Sessions.Count)
+	}
+	if report.Sessions.ProjectCount != 1 || report.Sessions.GlobalCount != 0 {
+		t.Fatalf("session split = project %d, global %d, want 1 and 0", report.Sessions.ProjectCount, report.Sessions.GlobalCount)
+	}
+}
+
 func TestRenderTextSurfacesWarningsUpTop(t *testing.T) {
 	text := RenderText(Report{Warnings: []string{"config reasonix.toml: parse boom"}})
 	w := strings.Index(text, "parse boom")

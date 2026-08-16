@@ -430,17 +430,18 @@ default model; custom catalogs and endpoints are preserved. After adding a
 preset, open its provider card if you need to change models, headers, endpoint,
 or compatibility settings.
 
-Fill **API address** with the provider endpoint that should receive the standard
-chat path. In this mode Reasonix previews and sends chat requests to:
+Fill **API address** with a site root, a `/v1` base, or a complete request URL.
+For an OpenAI-compatible provider, Reasonix previews and sends chat requests to:
 
 ```text
-<API address>/chat/completions
+site root       -> <site root>/chat/completions
+/v1 base        -> <v1 base>/chat/completions
+complete path   -> the entered path unchanged
 ```
 
-Enable **Full URL** when the service gives you a complete request URL, for
-example `https://gateway.example.com/v1/chat/completions`. Reasonix then sends
-chat requests directly to that URL and does not append `/chat/completions`. The
-preview under the field shows the exact request URL that will be used.
+The preview under the field shows the effective request URL. Anthropic-compatible
+and Responses providers use their protocol-specific default path for a base
+address, while an explicitly entered request URL is used as entered.
 
 Model discovery uses the API address to try likely model-list URLs such as
 `/models` and `/v1/models`. If the gateway requires a separate model-list

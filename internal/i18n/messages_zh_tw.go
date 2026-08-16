@@ -458,6 +458,12 @@ var ChineseTraditional = Messages{
 	ProviderErrRateLimited:         "請求速率達到上限 (HTTP 429)：請求過於頻繁 (TPM/RPM)。已退避重試，請放慢速率或稍後再試。",
 	ProviderErrServer:              "伺服器故障 (HTTP 500)：服務端內部錯誤。已退避重試；若持續失敗請稍後再試。",
 	ProviderErrServerBusy:          "伺服器繁忙 (HTTP 503)：服務端負載過高。已退避重試，請稍後再試。",
+	ProviderErrNetwork:             "網路請求失敗：無法連線服務商。請檢查網路、防火牆或服務商狀態後重試。",
+	ProviderErrNetworkDNS:          "DNS 解析失敗：無法解析服務商網域。請檢查 DNS 或網路後重試。",
+	ProviderErrNetworkTLS:          "TLS 連線失敗：服務商憑證或安全握手被拒絕。請檢查端點、系統時間和代理後重試。",
+	ProviderErrNetworkProxy:        "代理連線失敗：設定的代理或系統代理無法建立連線。請檢查代理設定和憑據後重試。",
+	ProviderErrNetworkTimeout:      "網路請求逾時：服務商或代理未在規定時間內回應。請檢查網路後重試。",
+	ProviderErrNetworkURL:          "服務商 URL 無效：請檢查服務商設定中的端點地址和路徑。",
 
 	SelectOneHint:  "(↑/↓ · Enter · q 取消)",
 	SelectManyHint: "(↑/↓ · Space · Enter · q)",
@@ -515,6 +521,7 @@ var ChineseTraditional = Messages{
                                                          檢視或控制脫敏 Task
   reasonix bot start|doctor|weixin-login                多管道 IM bot 閘道
   reasonix upgrade [--check] [--force]                   更新到最新正式版（別名：reasonix update）
+  reasonix source-update --check|--fetch [--root PATH] [--json]  檢查或僅擷取上游 main-v2 跟蹤引用
   reasonix completion bash|zsh|fish                     列印 shell 補全腳本到 stdout
   reasonix version [--verbose|--json]                   列印版本（單行）或建置元資訊
   reasonix --version | -v                               單行版本（腳本安全）

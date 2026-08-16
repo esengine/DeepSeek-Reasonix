@@ -6246,7 +6246,7 @@ export function ProviderEditor({
     return choices.length > 0 ? choices : ["openai"];
   }, [kind, kinds]);
   const effectiveKind = providerEditorEffectiveKind(isNewCustomProvider, kind, providerKindChoices);
-  const effectiveRequestUrl = requestUrl.trim();
+  const effectiveRequestUrl = providerRequestURLFromConfig(effectiveKind, "", requestUrl);
   const effectiveBaseUrl = providerBaseURLForSave(initial, effectiveKind, effectiveRequestUrl);
   const effectiveLegacyChatUrl = effectiveKind.toLowerCase() === "openai" ? effectiveRequestUrl : initial?.chatUrl ?? "";
   const effectiveModelsUrl = modelsUrl.trim();

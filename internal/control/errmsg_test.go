@@ -167,6 +167,32 @@ func TestExplainError(t *testing.T) {
 	}
 }
 
+func TestExplainRequestError(t *testing.T) {
+	cases := []struct {
+		name string
+		kind provider.RequestFailureKind
+		want string
+	}{
+		{name: "dns", kind: provider.RequestFailureDNS, want: i18n.M.ProviderErrNetworkDNS},
+		{name: "tls", kind: provider.RequestFailureTLS, want: i18n.M.ProviderErrNetworkTLS},
+		{name: "proxy", kind: provider.RequestFailureProxy, want: i18n.M.ProviderErrNetworkProxy},
+		{name: "timeout", kind: provider.RequestFailureTimeout, want: i18n.M.ProviderErrNetworkTimeout},
+		{name: "url", kind: provider.RequestFailureURL, want: i18n.M.ProviderErrNetworkURL},
+		{name: "network", kind: provider.RequestFailureNetwork, want: i18n.M.ProviderErrNetwork},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := explainError(provider.NewRequestError("provider", tc.kind, errors.New("transport detail")))
+			if got == nil || !strings.Contains(got.Error(), tc.want) {
+				t.Fatalf("explainError(%s) = %v, want %q", tc.kind, got, tc.want)
+			}
+			if strings.Contains(got.Error(), "transport detail") {
+				t.Fatalf("localized request error leaked raw transport detail: %q", got.Error())
+			}
+		})
+	}
+}
+
 func TestRedactAuthReason(t *testing.T) {
 	cases := []struct{ name, in, want string }{
 		{"masked tail", "Your api key: ****ae54 is invalid", "Your api key: **** is invalid"},

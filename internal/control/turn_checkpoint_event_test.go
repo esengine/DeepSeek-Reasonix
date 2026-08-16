@@ -137,6 +137,32 @@ func TestCancelBeforeRunnerAddsUserCarriesFallbackCheckpoint(t *testing.T) {
 	}
 }
 
+func TestRepeatedCancelEmitsOneTerminalTurnDone(t *testing.T) {
+	session := agent.NewSession("system")
+	started := make(chan struct{})
+	runner := &checkpointEventRunner{session: session, started: started, wait: true}
+	controller, events := newCheckpointEventController(runner)
+	defer controller.Close()
+
+	controller.Send("cancel once")
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("runner did not start")
+	}
+	controller.Cancel()
+	controller.Cancel()
+	done := receiveCheckpointTurnDone(t, events)
+	if !done.Cancelled || done.Err == nil {
+		t.Fatalf("cancelled TurnDone = %+v, want one cancelled terminal event", done)
+	}
+	select {
+	case extra := <-events:
+		t.Fatalf("repeated cancel emitted an extra TurnDone: %+v", extra)
+	case <-time.After(150 * time.Millisecond):
+	}
+}
+
 func TestTurnDoneOmitsUncommittedOrNonVisibleCheckpoint(t *testing.T) {
 	for _, tc := range []struct {
 		name      string

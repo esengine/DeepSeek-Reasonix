@@ -15,6 +15,10 @@ function eq(actual: unknown, expected: unknown, label: string) {
 console.log("\nprovider endpoint");
 
 eq(providerRequestURLFromConfig("openai", "https://proxy.example.com/v1", ""), "https://proxy.example.com/v1/chat/completions", "legacy OpenAI base URLs expose their effective request URL");
+eq(providerRequestURLFromConfig("openai", "https://proxy.example.com/v1", "https://proxy.example.com/v1"), "https://proxy.example.com/v1/chat/completions", "OpenAI request URLs entered as a /v1 base are completed for chat");
+eq(providerRequestURLFromConfig("openai", "https://proxy.example.com", "https://proxy.example.com/"), "https://proxy.example.com/chat/completions", "OpenAI request URLs entered as a root URL are completed for chat");
+eq(providerRequestURLFromConfig("openai", "", "https://proxy.example.com/v1/?trace=1"), "https://proxy.example.com/v1/chat/completions?trace=1", "OpenAI base URL completion preserves query parameters");
+eq(providerRequestURLFromConfig("openai", "", "https://proxy.example.com/custom/chat/?token=1"), "https://proxy.example.com/custom/chat/?token=1", "OpenAI custom paths remain unchanged");
 eq(providerRequestURLFromConfig("anthropic", "https://proxy.example.com/v1", ""), "https://proxy.example.com/v1/messages", "legacy Anthropic base URLs expose their effective request URL");
 eq(providerRequestURLFromConfig("responses", "https://proxy.example.com/v1", ""), "https://proxy.example.com/v1/responses", "legacy Responses base URLs expose their effective request URL");
 eq(providerRequestURLFromConfig("openai", "https://proxy.example.com/v1", "", "https://legacy.example.com/chat/completions/"), "https://legacy.example.com/chat/completions", "legacy OpenAI chat URLs preserve historical trailing-slash normalization");

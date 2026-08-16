@@ -2668,7 +2668,7 @@ export const zh: Record<DictKey, string> = {
   "settings.providerProtocolAnthropicHint": "适用于 Claude Messages API 风格的服务，例如部分 coding plan 端点。",
   "settings.providerBaseUrlLabel": "API 地址",
   "settings.providerChatUrlPlaceholder": "例如 https://api.openai.com/v1/chat/completions",
-  "settings.providerRequestUrlHint": "填写完整请求地址；系统将原样使用。",
+  "settings.providerRequestUrlHint": "可填写站点根地址、/v1 基础地址或完整请求地址；根地址和 /v1 会自动补全为 /chat/completions，自定义完整地址保持不变。",
   "settings.providerApiKeyEnvHint": "默认会根据供应商名称自动生成，只有需要固定环境变量名时再修改。",
   "settings.providerKey": "密钥",
   "settings.providerKeyOptional": "密钥",

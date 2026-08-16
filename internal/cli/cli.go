@@ -177,6 +177,8 @@ func RunWithBuildInfo(args []string, info BuildInfo) int {
 	case "upgrade", "update":
 		configureCLIThemeFromConfig()
 		return upgradeCommand(rest, version)
+	case "source-update":
+		return sourceUpdateCommand(rest)
 	case "version":
 		// Detailed identity: version --verbose / --json. Top-level --version/-v
 		// stay single-line for script compatibility (Integration D/E).

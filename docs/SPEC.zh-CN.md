@@ -71,7 +71,7 @@ func New(kind string, cfg Config) (Provider, error)
 
 - `openai` kind 实现 OpenAI-compatible `/chat/completions`。
 - OpenAI-compatible vendor 只是 `kind = "openai"` 的不同配置实例，通过 `base_url`、`model`、`api_key_env` 区分；新增兼容模型通常只需改配置。
-- 一个 provider 表示一个 vendor endpoint，可通过 `models` 暴露多个模型，并以 `default` 指定默认项。设置 `request_url` 时，OpenAI-compatible、Anthropic-compatible 和 Responses provider 都会原样使用该完整请求地址；旧 `chat_url` 只保留 OpenAI 历史兼容语义。`default_model`、`--model` 和桌面端模型选择器都经 `Config.ResolveModel` 解析，可接受 provider 名、裸模型名或 `provider/model`。
+- 一个 provider 表示一个 vendor endpoint，可通过 `models` 暴露多个模型，并以 `default` 指定默认项。设置 `request_url` 时，Anthropic-compatible 和 Responses provider 会使用显式地址；OpenAI-compatible provider 的站点根地址和 `/v1` 基础地址会自动补成 `/chat/completions`，自定义路径保持不变。旧 `chat_url` 只保留 OpenAI 历史兼容语义，并遵守同样的补全规则。`default_model`、`--model` 和桌面端模型选择器都经 `Config.ResolveModel` 解析，可接受 provider 名、裸模型名或 `provider/model`。
 - `context_window` 是 provider 级默认值；`model_overrides.<model>.context_window` 可覆盖单个模型。
 - `max_output_tokens` 是独立的本轮输出上限，不由客户端 reasoning 字节上限换算，也不参与 `compact_ratio`。`0` 是 Provider 自动值（官方 DeepSeek 384K / OpenCode 元数据），不再表示跳过本地检查；空间充足时官方 DeepSeek 仍省略字段，临界时裁剪。正数为用户显式控费上限。负数为明确省略；安全不足时压缩。`budget_tokens` 在官方 Anthropic 兼容层会被忽略。混合网关可用 `model_overrides.<model>.max_output_tokens` 覆盖单个模型。
 - streaming tool-call delta 在 provider 内按 index 聚合，只向上层发出完整 `ToolCall`。

@@ -309,7 +309,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 				fmt.Fprintf(&b, "chat_url    = %q   # legacy OpenAI chat endpoint override\n", p.ChatURL)
 			}
 			if p.RequestURL != "" {
-				fmt.Fprintf(&b, "request_url = %q   # exact provider request URL; no path completion\n", p.RequestURL)
+				fmt.Fprintf(&b, "request_url = %q   # effective request URL; OpenAI roots and /v1 are completed\n", p.RequestURL)
 			}
 			if len(p.Models) > 0 {
 				fmt.Fprintf(&b, "models      = %s\n", renderStringArray(p.Models))

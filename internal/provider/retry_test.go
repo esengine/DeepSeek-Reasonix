@@ -7,6 +7,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
+	"net/url"
 	"strings"
 	"sync"
 	"syscall"
@@ -52,6 +54,124 @@ func TestTransientErr(t *testing.T) {
 	}
 	if !transientErr(errors.New("connection reset")) {
 		t.Error("network-ish error should be transient")
+	}
+}
+
+func TestClassifyRequestFailure(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want RequestFailureKind
+	}{
+		{name: "dns", err: &net.DNSError{Err: "no such host", Name: "gateway.example"}, want: RequestFailureDNS},
+		{name: "tls", err: errors.New("tls: failed to verify certificate: x509: certificate signed by unknown authority"), want: RequestFailureTLS},
+		{name: "proxy", err: errors.New("proxyconnect tcp: dial tcp 127.0.0.1:7890: connectex: connection refused"), want: RequestFailureProxy},
+		{name: "timeout", err: context.DeadlineExceeded, want: RequestFailureTimeout},
+		{name: "url", err: &url.Error{Op: "parse", URL: "://bad", Err: errors.New("missing protocol scheme")}, want: RequestFailureURL},
+		{name: "network", err: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}, want: RequestFailureNetwork},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ClassifyRequestFailure(tc.err); got != tc.want {
+				t.Fatalf("ClassifyRequestFailure(%v) = %q, want %q", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRequestErrorDoesNotExposeTransportCredentials(t *testing.T) {
+	err := NewRequestError("relay", RequestFailureProxy,
+		errors.New("proxy https://proxy-user:proxy-password@127.0.0.1:7890 Authorization: Bearer secret-token Cookie=session=secret-cookie"))
+	if err == nil {
+		t.Fatal("NewRequestError returned nil")
+	}
+	message := err.Error()
+	for _, secret := range []string{"proxy-password", "secret-token", "secret-cookie"} {
+		if strings.Contains(message, secret) {
+			t.Fatalf("request error exposed %q: %s", secret, message)
+		}
+	}
+	if !strings.Contains(message, "proxy") {
+		t.Fatalf("request error lost its stable category: %s", message)
+	}
+	if !errors.Is(err, err.Cause) {
+		t.Fatal("request error must unwrap its cause")
+	}
+}
+
+func TestSendWithRetryClassifiesRetryBudgetTimeout(t *testing.T) {
+	cl := &http.Client{Transport: rtFunc(func(*http.Request) (*http.Response, error) {
+		return nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}
+	})}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, err := SendWithRetry(ctx, cl, SendOptions{Provider: "relay"}, newDummyReq)
+	var requestErr *RequestError
+	if !errors.As(err, &requestErr) || requestErr.Kind != RequestFailureTimeout {
+		t.Fatalf("retry budget timeout = %T %v, want timeout RequestError", err, err)
+	}
+}
+
+func TestSendWithRetryPreservesCallerCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := SendWithRetry(ctx, &http.Client{}, SendOptions{Provider: "relay"}, func(ctx context.Context) (*http.Request, error) {
+		return http.NewRequestWithContext(ctx, http.MethodPost, "http://example.invalid", nil)
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled request error = %T %v, want context.Canceled", err, err)
+	}
+	var requestErr *RequestError
+	if errors.As(err, &requestErr) {
+		t.Fatalf("caller cancellation was wrapped as request error: %v", err)
+	}
+}
+
+func TestSendWithRetryDoesNotReplayRequestAfterWrite(t *testing.T) {
+	calls := 0
+	cl := &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		trace := httptrace.ContextClientTrace(r.Context())
+		if trace == nil || trace.WroteRequest == nil {
+			t.Fatal("SendWithRetry did not install a request-write trace")
+		}
+		trace.WroteRequest(httptrace.WroteRequestInfo{})
+		return nil, &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET}
+	})}
+
+	_, err := SendWithRetry(context.Background(), cl, SendOptions{Provider: "relay"}, newDummyReq)
+	if calls != 1 {
+		t.Fatalf("request was replayed %d times after write, want 1", calls)
+	}
+	var requestErr *RequestError
+	if !errors.As(err, &requestErr) || !requestErr.RequestMayHaveReachedServer {
+		t.Fatalf("request error = %T %v, want sent-request marker", err, err)
+	}
+}
+
+func TestSendWithRetryFailsFastOnDNSFailure(t *testing.T) {
+	calls := 0
+	cl := &http.Client{Transport: rtFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, &net.DNSError{Err: "no such host", Name: "gateway.example"}
+	})}
+	_, err := SendWithRetry(context.Background(), cl, SendOptions{Provider: "relay"}, newDummyReq)
+	var requestErr *RequestError
+	if !errors.As(err, &requestErr) || requestErr.Kind != RequestFailureDNS {
+		t.Fatalf("DNS error = %T %v, want DNS RequestError", err, err)
+	}
+	if calls != 1 {
+		t.Fatalf("DNS failure retried %d times, want fail-fast", calls)
+	}
+}
+
+func TestSendWithRetryClassifiesRequestBuildFailure(t *testing.T) {
+	_, err := SendWithRetry(context.Background(), &http.Client{}, SendOptions{Provider: "relay"}, func(context.Context) (*http.Request, error) {
+		return nil, &url.Error{Op: "parse", URL: "://bad", Err: errors.New("missing protocol scheme")}
+	})
+	var requestErr *RequestError
+	if !errors.As(err, &requestErr) || requestErr.Kind != RequestFailureURL {
+		t.Fatalf("request build error = %T %v, want URL RequestError", err, err)
 	}
 }
 

@@ -148,12 +148,13 @@ providers accidentally share `CUSTOM_API_KEY`, edit each provider's
 
 ### Custom provider endpoint URLs
 
-The desktop custom-provider form treats its **API address** as the exact request
-URL and stores it in `request_url`; Reasonix does not append or rewrite its path.
-Existing TOML entries are not reinterpreted: legacy `chat_url` keeps its former
-OpenAI-only behavior, while Anthropic and Responses continue deriving their path
-from `base_url` until the provider is explicitly saved in the current desktop UI.
-Saving an OpenAI-compatible provider mirrors the exact address into legacy
+The desktop custom-provider form stores the effective request address in
+`request_url`. For OpenAI-compatible providers, a site root becomes
+`/chat/completions` and a `/v1` base becomes `/v1/chat/completions`; an existing
+custom path is kept unchanged. Anthropic and Responses request paths are kept
+unchanged when an explicit `request_url` is supplied. Legacy `chat_url` keeps its
+former OpenAI-only behavior, with the same root and `/v1` completion rules.
+Saving an OpenAI-compatible provider mirrors the effective address into legacy
 `chat_url`, so previous releases continue using the same target. Previous
 releases cannot honor arbitrary Anthropic or Responses request paths.
 If model discovery needs a separate address, set `models_url`; otherwise Reasonix

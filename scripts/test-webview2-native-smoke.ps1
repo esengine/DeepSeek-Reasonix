@@ -16,23 +16,53 @@ function Get-DescendantProcesses {
     param([int]$RootProcessId)
 
     $snapshot = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine)
-    $pending = @([uint32]$RootProcessId)
+    $pending = [System.Collections.Generic.Queue[uint32]]::new()
+    $pending.Enqueue([uint32]$RootProcessId)
     $seen = @{}
-    $descendants = @()
+    $descendants = [System.Collections.Generic.List[object]]::new()
     while ($pending.Count -gt 0) {
-        $parentProcessId = [uint32]$pending[0]
-        $pending = if ($pending.Count -gt 1) { @($pending[1..($pending.Count - 1)]) } else { @() }
+        $parentProcessId = $pending.Dequeue()
         foreach ($child in @($snapshot | Where-Object { $_.ParentProcessId -eq $parentProcessId })) {
             $childProcessId = [uint32]$child.ProcessId
             if ($seen.ContainsKey($childProcessId)) {
                 continue
             }
             $seen[$childProcessId] = $true
-            $descendants += $child
-            $pending += $childProcessId
+            $descendants.Add($child)
+            $pending.Enqueue($childProcessId)
         }
     }
-    return @($descendants)
+    return @($descendants.ToArray())
+}
+
+function Stop-NativeSmokeProcessTree {
+    param(
+        [int]$RootProcessId,
+        [int[]]$OwnedProcessIds = @()
+    )
+
+    [int[]]$ids = @($OwnedProcessIds | Where-Object { $_ -gt 0 } | Select-Object -Unique)
+    if ($RootProcessId -gt 0 -and $ids -notcontains $RootProcessId) {
+        $ids += $RootProcessId
+    }
+
+    foreach ($processId in $ids) {
+        $live = Get-Process -Id $processId -ErrorAction SilentlyContinue
+        if ($null -eq $live) {
+            continue
+        }
+        & taskkill.exe /PID $processId /T /F 2>$null | Out-Null
+    }
+
+    # WebView2 releases its profile lock asynchronously after the process tree
+    # exits. Give it a bounded grace period before removing the temp profile.
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        [object[]]$remaining = @($ids | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })
+        if ($remaining.Length -eq 0) {
+            return
+        }
+        Start-Sleep -Milliseconds 250
+    }
 }
 
 function Get-WebViewAutomationState {
@@ -91,8 +121,8 @@ function Get-NativeSmokeState {
     $Process.Refresh()
     $exited = $Process.HasExited
     $windowHandle = if ($exited) { [IntPtr]::Zero } else { $Process.MainWindowHandle }
-    $descendants = @(Get-DescendantProcesses -RootProcessId $Process.Id)
-    $renderer = @($descendants | Where-Object {
+    [object[]]$descendants = @(Get-DescendantProcesses -RootProcessId $Process.Id)
+    [object[]]$renderer = @($descendants | Where-Object {
         $_.Name -ieq "msedgewebview2.exe" -and $_.CommandLine -match "--type=renderer"
     })
     $automation = Get-WebViewAutomationState -WindowHandle $windowHandle
@@ -238,6 +268,7 @@ $oldHome = $env:REASONIX_HOME
 $oldStateHome = $env:REASONIX_STATE_HOME
 $oldCacheHome = $env:REASONIX_CACHE_HOME
 $process = $null
+$ownedProcessIds = @()
 try {
     $env:REASONIX_HOME = $smokeHome
     $env:REASONIX_STATE_HOME = $smokeState
@@ -265,6 +296,8 @@ try {
         throw "Reasonix did not keep its main window, WebView2 renderer, document, and composer healthy for $HealthySeconds consecutive seconds within $TimeoutSeconds seconds; last_state=$(Format-NativeSmokeState -State $lastState)"
     }
 
+    $ownedProcessIds = @($process.Id) + @(Get-DescendantProcesses -RootProcessId $process.Id | Select-Object -ExpandProperty ProcessId)
+
     if (-not $process.CloseMainWindow()) {
         throw "Reasonix main window rejected the graceful close request"
     }
@@ -281,10 +314,24 @@ finally {
     $env:REASONIX_HOME = $oldHome
     $env:REASONIX_STATE_HOME = $oldStateHome
     $env:REASONIX_CACHE_HOME = $oldCacheHome
-    if ($null -ne $process -and -not $process.HasExited) {
-        & taskkill.exe /PID $process.Id /T /F 2>$null | Out-Null
+    if ($null -ne $process) {
+        $process.Refresh()
+        if (-not $process.HasExited) {
+            $ownedProcessIds = @($process.Id) + @(Get-DescendantProcesses -RootProcessId $process.Id | Select-Object -ExpandProperty ProcessId) + @($ownedProcessIds)
+        }
+        Stop-NativeSmokeProcessTree -RootProcessId $process.Id -OwnedProcessIds $ownedProcessIds
     }
     if (Test-Path $smokeRoot) {
-        Remove-Item -LiteralPath $smokeRoot -Recurse -Force
+        for ($attempt = 0; $attempt -lt 20 -and (Test-Path $smokeRoot); $attempt++) {
+            Remove-Item -LiteralPath $smokeRoot -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path $smokeRoot) {
+                Start-Sleep -Milliseconds 250
+            }
+        }
+        if (Test-Path $smokeRoot) {
+            throw "WebView2 smoke temp profile could not be cleaned up: $smokeRoot"
+        }
     }
 }
+
+$global:LASTEXITCODE = 0

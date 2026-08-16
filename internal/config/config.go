@@ -1338,7 +1338,7 @@ type ProviderEntry struct {
 	Kind          string            `toml:"kind"`
 	BaseURL       string            `toml:"base_url"`
 	ChatURL       string            `toml:"chat_url"`    // legacy OpenAI chat endpoint override; retained with its historical semantics
-	RequestURL    string            `toml:"request_url"` // exact provider request URL written by current settings UI
+	RequestURL    string            `toml:"request_url"` // effective provider request URL; OpenAI roots and /v1 are completed
 	Model         string            `toml:"model"`       // a single model (back-compat)
 	Models        []string          `toml:"models"`      // a vendor's model list (one base_url/key, many models)
 	ModelsURL     string            `toml:"models_url"`  // auto-fetch models from this URL on startup

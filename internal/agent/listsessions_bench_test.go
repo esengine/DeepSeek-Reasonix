@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -12,6 +13,27 @@ import (
 
 	"reasonix/internal/provider"
 )
+
+type listMeasurement struct {
+	duration   time.Duration
+	totalAlloc uint64
+}
+
+func measureList(t *testing.T, fn func() (int, error)) (int, listMeasurement) {
+	t.Helper()
+	runtime.GC()
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+	start := time.Now()
+	count, err := fn()
+	duration := time.Since(start)
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return count, listMeasurement{duration: duration, totalAlloc: after.TotalAlloc - before.TotalAlloc}
+}
 
 // TestListSessionsScalingManual reproduces the sidebar "project list loads
 // slowly" report by timing ListSessions against a synthetically large session
@@ -41,38 +63,32 @@ func TestListSessionsScalingManual(t *testing.T) {
 			totalBytes := writeSyntheticSessions(t, dir, s.sessions, s.turns)
 
 			// Metadata-only pass: ReadDir + Stat + LoadBranchMeta sidecar.
-			start := time.Now()
-			order, err := ListSessionOrder(dir)
-			if err != nil {
-				t.Fatalf("ListSessionOrder: %v", err)
-			}
-			orderDur := time.Since(start)
+			orderCount, orderMeasure := measureList(t, func() (int, error) {
+				order, err := ListSessionOrder(dir)
+				return len(order), err
+			})
 
 			// Cold ListSessions: sidecars have no recorded turn count yet, so this
 			// decodes every .jsonl in full (the pre-fix behaviour) and backfills.
-			start = time.Now()
-			cold, err := ListSessions(dir)
-			if err != nil {
-				t.Fatalf("ListSessions (cold): %v", err)
-			}
-			coldDur := time.Since(start)
+			coldCount, coldMeasure := measureList(t, func() (int, error) {
+				cold, err := ListSessions(dir)
+				return len(cold), err
+			})
 
 			// Warm ListSessions: the backfill populated Turns/Preview in the
 			// sidecars, so this reads them and skips the whole-file decode — the
 			// post-fix steady state the sidebar hits on every refresh.
-			start = time.Now()
-			warm, err := ListSessions(dir)
-			if err != nil {
-				t.Fatalf("ListSessions (warm): %v", err)
-			}
-			warmDur := time.Since(start)
+			warmCount, warmMeasure := measureList(t, func() (int, error) {
+				warm, err := ListSessions(dir)
+				return len(warm), err
+			})
 
-			t.Logf("sessions=%d turns=%d onDisk=%.1fMB | order(meta)=%v (%d) | ListSessions cold(decode+backfill)=%v (%d) | ListSessions warm(sidecar)=%v (%d) | speedup=%.0fx",
+			t.Logf("sessions=%d turns=%d onDisk=%.1fMB | order(meta)=%v (%d) alloc=%.1fMB | ListSessions cold(decode+backfill)=%v (%d) alloc=%.1fMB | ListSessions warm(sidecar)=%v (%d) alloc=%.1fMB | speedup=%.0fx",
 				s.sessions, s.turns, float64(totalBytes)/(1<<20),
-				orderDur.Round(time.Millisecond), len(order),
-				coldDur.Round(time.Millisecond), len(cold),
-				warmDur.Round(time.Millisecond), len(warm),
-				float64(coldDur)/float64(warmDur))
+				orderMeasure.duration.Round(time.Millisecond), orderCount, float64(orderMeasure.totalAlloc)/(1<<20),
+				coldMeasure.duration.Round(time.Millisecond), coldCount, float64(coldMeasure.totalAlloc)/(1<<20),
+				warmMeasure.duration.Round(time.Millisecond), warmCount, float64(warmMeasure.totalAlloc)/(1<<20),
+				float64(coldMeasure.duration)/float64(warmMeasure.duration))
 		})
 	}
 }
@@ -153,33 +169,48 @@ func TestColdStartProjectTreeManual(t *testing.T) {
 	}
 
 	// Sequential cold start (sum over dirs).
-	start := time.Now()
-	seqTotal := 0
-	for _, dir := range dirs {
-		infos, err := ListSessions(dir)
-		if err != nil {
-			t.Fatalf("ListSessions: %v", err)
+	seqTotal, seqMeasure := measureList(t, func() (int, error) {
+		total := 0
+		for _, dir := range dirs {
+			infos, err := ListSessions(dir)
+			if err != nil {
+				return 0, err
+			}
+			total += len(infos)
 		}
-		seqTotal += len(infos)
-	}
-	seqDur := time.Since(start)
+		return total, nil
+	})
 
 	// Concurrent fan-out, the way ListProjectTree actually loads dirs.
-	start = time.Now()
-	var wg sync.WaitGroup
-	counts := make([]int, len(dirs))
-	for i, dir := range dirs {
-		wg.Add(1)
-		go func(i int, dir string) {
-			defer wg.Done()
-			infos, _ := ListSessions(dir)
-			counts[i] = len(infos)
-		}(i, dir)
+	concTotal, concMeasure := measureList(t, func() (int, error) {
+		var wg sync.WaitGroup
+		counts := make([]int, len(dirs))
+		errs := make([]error, len(dirs))
+		for i, dir := range dirs {
+			wg.Add(1)
+			go func(i int, dir string) {
+				defer wg.Done()
+				infos, err := ListSessions(dir)
+				counts[i] = len(infos)
+				errs[i] = err
+			}(i, dir)
+		}
+		wg.Wait()
+		total := 0
+		for i, err := range errs {
+			if err != nil {
+				return 0, err
+			}
+			total += counts[i]
+		}
+		return total, nil
+	})
+	if concTotal != seqTotal {
+		t.Fatalf("concurrent session count = %d, want sequential count %d", concTotal, seqTotal)
 	}
-	wg.Wait()
-	concDur := time.Since(start)
 
-	t.Logf("workspaces=%d sessions/dir=%d totalSessions=%d onDisk=%.0fMB | cold start sequential=%v | cold start concurrent(fan-out)=%v",
+	t.Logf("workspaces=%d sessions/dir=%d totalSessions=%d onDisk=%.0fMB | cold start sequential=%v alloc=%.1fMB | cold start concurrent(fan-out)=%v alloc=%.1fMB",
 		workspaces, perDir, seqTotal, float64(onDisk)/(1<<20),
-		seqDur.Round(time.Millisecond), concDur.Round(time.Millisecond))
+		seqMeasure.duration.Round(time.Millisecond), float64(seqMeasure.totalAlloc)/(1<<20),
+		concMeasure.duration.Round(time.Millisecond), float64(concMeasure.totalAlloc)/(1<<20))
 }

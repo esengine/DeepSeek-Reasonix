@@ -30,6 +30,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -86,7 +87,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	supportedEfforts, hasExplicitEfforts := reasoningEffortVocabulary(kimiK3, supportedEfforts)
 	legacyChatURL, _ := cfg.Extra["chat_url"].(string)
 	chatURL, _ := cfg.Extra["request_url"].(string)
-	chatURL = strings.TrimSpace(chatURL)
+	chatURL = normalizeOpenAIRequestURL(chatURL)
 	if chatURL == "" {
 		chatURL = normalizeChatURL(cfg.BaseURL, legacyChatURL)
 	}
@@ -381,9 +382,30 @@ func normalizeReasoningProtocol(raw string) string {
 
 func normalizeChatURL(baseURL, chatURL string) string {
 	if legacy := strings.TrimRight(strings.TrimSpace(chatURL), "/"); legacy != "" {
-		return legacy
+		return normalizeOpenAIRequestURL(legacy)
 	}
 	return strings.TrimRight(strings.TrimSpace(baseURL), "/") + "/chat/completions"
+}
+
+func normalizeOpenAIRequestURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return raw
+	}
+	path := strings.TrimRight(parsed.Path, "/")
+	switch path {
+	case "":
+		parsed.Path = "/chat/completions"
+	case "/v1":
+		parsed.Path = "/v1/chat/completions"
+	default:
+		return raw
+	}
+	return parsed.String()
 }
 
 func cleanCustomHeaders(in map[string]string) map[string]string {
@@ -506,7 +528,12 @@ func (c *client) openStream(ctx context.Context, targetURL string, wireReq chatR
 	}
 	resp, err := provider.SendWithRetry(requestCtx, c.http, c.sendOpts(), newReq)
 	if err != nil {
-		return nil, provider.AnnotateToolSchemaError(err, tools)
+		err = provider.AnnotateToolSchemaError(err, tools)
+		var requestErr *provider.RequestError
+		if errors.As(err, &requestErr) && requestErr.RequestMayHaveReachedServer {
+			return provider.StreamFailure(requestCtx, err), nil
+		}
+		return nil, err
 	}
 	c.authed.Store(true)
 
