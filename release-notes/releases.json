@@ -10,7 +10,7 @@
         "zh": "Reasonix 桌面版 1.25.4"
       },
       "summary": {
-        "en": "This release focuses on reliability and usability improvements for the desktop app, including fixes for long session scrolling, terminal clipboard integration, project tree organization, and provider recovery.",
+        "en": "This release focuses on desktop reliability and usability improvements, including fixes for long-session scrolling, terminal clipboard integration, project tree organization, and provider recovery.",
         "zh": "此版本专注于桌面应用的可靠性和易用性改进，包括修复长会话滚动、终端剪贴板集成、项目树组织以及供应商恢复。"
       },
       "surfaces": [
@@ -26,7 +26,7 @@
             "en": "Learn how to use Reasonix effectively.",
             "zh": "了解如何有效使用 Reasonix。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/9f59996e2a201a928ca1ccc14873d4adf32bf631/docs/GUIDE.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/3fb8642f650df8c729e840fc4c0489ac43c47695/docs/GUIDE.md"
         },
         {
           "title": {
@@ -37,7 +37,7 @@
             "en": "Chinese version of the user guide.",
             "zh": "用户指南的中文版本。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/9f59996e2a201a928ca1ccc14873d4adf32bf631/docs/GUIDE.zh-CN.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/3fb8642f650df8c729e840fc4c0489ac43c47695/docs/GUIDE.zh-CN.md"
         }
       ],
       "highlights": [
@@ -48,7 +48,7 @@
             "zh": "长会话现在可以滚动到底部"
           },
           "body": {
-            "en": "Rebuilt the transcript scroll system around a single-writer arbiter, fixing the issue where very long sessions could not reach the newest content.",
+            "en": "Rebuilt the session scrolling system around a single-writer arbiter, fixing the issue where very long sessions could not reach the latest content.",
             "zh": "围绕单一写入者仲裁器重建了会话滚动系统，修复了超长会话无法到达最新内容的问题。"
           },
           "refs": [
@@ -62,7 +62,7 @@
             "zh": "集成终端剪贴板和选中内容添加到聊天"
           },
           "body": {
-            "en": "The integrated terminal now supports copy/paste and adding selections to chat with proper lifecycle management.",
+            "en": "The integrated terminal now supports copy/paste and adding selections to chat, with proper lifecycle management.",
             "zh": "集成终端现在支持复制/粘贴以及将选中内容添加到聊天，并具有适当的生命周期管理。"
           },
           "refs": [
@@ -72,11 +72,11 @@
         {
           "kind": "new",
           "title": {
-            "en": "Project tree organization: manual reorder and session groups",
+            "en": "Project tree organization: manual ordering and session groups",
             "zh": "项目树组织：手动排序和会话分组"
           },
           "body": {
-            "en": "You can now manually reorder topics by dragging and create foldable session groups within projects.",
+            "en": "Topics can now be manually reordered via drag-and-drop, and collapsible session groups can be created within projects.",
             "zh": "现在可以通过拖拽手动重新排序主题，并在项目内创建可折叠的会话分组。"
           },
           "refs": [
@@ -103,11 +103,11 @@
         "new": [
           {
             "title": {
-              "en": "Manual topic drag-to-reorder in project tree",
+              "en": "Manual drag-to-reorder topics in project tree",
               "zh": "项目树中手动拖拽排序主题"
             },
             "body": {
-              "en": "Topic rows in the project tree (project + global workspace) are now manually reorderable by drag & drop. Order persists via the new ReorderTopics IPC into the existing ordered Topics/GlobalTopics arrays in projects.json.",
+              "en": "Topic rows in the project tree (project + global workspace) can now be manually reordered via drag-and-drop. Order persists through the new ReorderTopics IPC into the existing ordered Topics/GlobalTopics arrays in projects.json.",
               "zh": "项目树中的主题行（项目 + 全局工作区）现在可以通过拖放手动重新排序。顺序通过新的 ReorderTopics IPC 持久化到 projects.json 中现有的有序 Topics/GlobalTopics 数组。"
             },
             "refs": [
@@ -133,7 +133,7 @@
               "zh": "折叠项目文件夹上的聚合活跃会话指示器"
             },
             "body": {
-              "en": "Collapsed project / global-folder rows now show a small spinner when any child session is in-flight (thinking/streaming/waiting_confirmation/background_job).",
+              "en": "Collapsed project/global folder rows now show a small spinner when any child session is in-flight (thinking/streaming/waiting_confirmation/background_job).",
               "zh": "当任何子会话正在进行（思考/流式传输/等待确认/后台作业）时，折叠的项目/全局文件夹行现在会显示一个小旋转指示器。"
             },
             "refs": [
@@ -161,24 +161,11 @@
               "zh": "在推理模型上保留 AI 会话标题"
             },
             "body": {
-              "en": "The desktop AI rename session action can return a visible title on reasoning models instead of failing after a reasoning-only completion.",
-              "zh": "桌面 AI 重命名会话操作可以在推理模型上返回可见标题，而不是在仅推理完成后失败。"
+              "en": "The desktop AI rename session action can now return a visible title on reasoning models instead of failing after a reasoning-only completion.",
+              "zh": "桌面 AI 重命名会话操作现在可以在推理模型上返回可见标题，而不是在仅推理完成后失败。"
             },
             "refs": [
               8980
-            ]
-          },
-          {
-            "title": {
-              "en": "Resume ordinary readiness checks automatically",
-              "zh": "自动恢复普通就绪检查"
-            },
-            "body": {
-              "en": "Automatically continue ordinary interactive turns when the host can name a safe remaining verification or review obligation.",
-              "zh": "当主机能够指出安全剩余的验证或审查义务时，自动继续普通交互轮次。"
-            },
-            "refs": [
-              8947
             ]
           },
           {
@@ -188,7 +175,7 @@
             },
             "body": {
               "en": "The Kotlin default language server now points to the official JetBrains kotlin-lsp instead of the deprecated fwcd/kotlin-language-server.",
-              "zh": "Kotlin 默认语言服务器现在指向官方 JetBrains kotlin-lsp，而不是已弃用的 fwcd/kotlin-language-server。"
+              "zh": "Kotlin 默认语言服务器现在指向 JetBrains 官方 kotlin-lsp，而不是已弃用的 fwcd/kotlin-language-server。"
             },
             "refs": [
               8773
@@ -197,11 +184,11 @@
           {
             "title": {
               "en": "Canonicalize official Token Rhythm API paths",
-              "zh": "规范化官方 Token Rhythm API 路径"
+              "zh": "自动修复基元律动官方 API 路径"
             },
             "body": {
-              "en": "Automatically repair known official Token Rhythm API path mistakes before the first request.",
-              "zh": "在首次请求前自动修复已知的官方 Token Rhythm API 路径错误。"
+              "en": "Automatically repair known official Token Rhythm API path mistakes before the first request, such as missing /v1 or duplicated /v1.",
+              "zh": "在首次请求前自动修复已知的基元律动官方 API 路径错误，例如缺少 /v1 或重复 /v1。"
             },
             "refs": [
               8953
@@ -213,8 +200,8 @@
               "zh": "桌面运行时重载进程替换"
             },
             "body": {
-              "en": "Expose /reload in the desktop slash-command catalog and restart unchanged native v2 plugin sidecars during an explicit full reload.",
-              "zh": "在桌面斜杠命令目录中公开 /reload，并在显式完全重载期间重启未更改的原生 v2 插件 sidecar。"
+              "en": "Desktop now supports /reload from the composer and restarts unchanged native v2 plugin sidecars during an explicit full reload.",
+              "zh": "桌面端现在支持从输入框使用 /reload，并在显式重载时为未改变清单的原生插件启动新进程。"
             },
             "refs": [
               8948
@@ -225,11 +212,11 @@
           {
             "title": {
               "en": "Stop old sessions flipping back to unread",
-              "zh": "停止旧会话反复变成未读"
+              "zh": "修复旧会话反复变成未读"
             },
             "body": {
-              "en": "Old sidebar sessions no longer show unread dots after clicking a row; unread is keyed on logical topic and a one-time read baseline is seeded.",
-              "zh": "点击行后，旧侧边栏会话不再显示未读点；未读基于逻辑主题键控，并播种一次性已读基线。"
+              "en": "Old sidebar sessions no longer show unread dots after being clicked; unread state is now keyed on logical topic and a one-time baseline prevents false unread.",
+              "zh": "旧侧边栏会话在点击后不再显示未读点；未读状态现在基于逻辑主题，并且一次性基线防止错误的未读。"
             },
             "refs": [
               8694
@@ -238,11 +225,11 @@
           {
             "title": {
               "en": "Don't raise last_activity_at from file mtime",
-              "zh": "不要从文件 mtime 提升 last_activity_at"
+              "zh": "不再从文件 mtime 提升 last_activity_at"
             },
             "body": {
-              "en": "File mtime is now only a fallback when authoritative meta timestamps are missing; it no longer raises a valid UpdatedAt, preventing historical sessions from showing as 'just now'.",
-              "zh": "文件 mtime 现在仅在权威元时间戳缺失时作为后备；它不再提升有效的 UpdatedAt，防止历史会话显示为“刚刚”。"
+              "en": "After upgrades or external file touches, historical sessions no longer show as 'just now'; file mtime is only a fallback when authoritative timestamps are missing.",
+              "zh": "升级或外部文件触碰后，历史会话不再显示为“刚刚”；文件 mtime 仅在权威时间戳缺失时作为后备。"
             },
             "refs": [
               8677
@@ -251,11 +238,11 @@
           {
             "title": {
               "en": "Fix durable inbox queue reconciliation",
-              "zh": "修复持久收件箱队列协调"
+              "zh": "修复消息队列已执行内容残留"
             },
             "body": {
-              "en": "Guidance that had already entered the transcript and started execution no longer remains visible in the Composer queue; cancellation restores only confirmed discarded items.",
-              "zh": "已进入会话并开始执行的指导不再保留在 Composer 队列中；取消仅恢复已确认丢弃的项目。"
+              "en": "Guidance that already entered the transcript no longer remains visible in the Composer queue, and stopping a turn no longer restores already-admitted messages.",
+              "zh": "已进入转录的指导不再保留在 Composer 队列中，停止回合不再恢复已接纳的消息。"
             },
             "refs": [
               8954
@@ -263,12 +250,25 @@
           },
           {
             "title": {
-              "en": "Fix composer timer across tab switches",
-              "zh": "修复切换标签页时 Composer 计时器"
+              "en": "Resume ordinary readiness checks automatically",
+              "zh": "自动补齐普通任务的收尾验证"
             },
             "body": {
-              "en": "The composer timer now continues instead of restarting at zero when switching away and back to a running tab.",
-              "zh": "当切换离开并返回正在运行的标签页时，Composer 计时器现在会继续而不是从零重新开始。"
+              "en": "Ordinary interactive turns now automatically continue when the host can name a safe remaining verification or review obligation.",
+              "zh": "当主机能够指出安全剩余的验证或审查义务时，普通交互回合现在会自动继续。"
+            },
+            "refs": [
+              8947
+            ]
+          },
+          {
+            "title": {
+              "en": "Fix composer timer across tab switches",
+              "zh": "修复切换会话后运行计时归零"
+            },
+            "body": {
+              "en": "The composer timer now continues instead of restarting at zero when switching tabs, and stale snapshots cannot rewind or stop a turn.",
+              "zh": "切换标签页时，Composer 计时器现在继续而不是从零重新开始，并且过时的快照无法倒回或停止回合。"
             },
             "refs": [
               8957
@@ -276,12 +276,12 @@
           },
           {
             "title": {
-              "en": "Keep viewport steady when auto-fold collapse shrinks transcript",
-              "zh": "自动折叠收缩时保持视口稳定"
+              "en": "Keep the viewport steady when auto-fold collapse shrinks the transcript",
+              "zh": "思考区自动折叠收缩时不再追底跳动"
             },
             "body": {
               "en": "Auto-fold collapse of the reasoning panel no longer drags the transcript viewport with an imperative tail re-aim.",
-              "zh": "推理面板的自动折叠收缩不再通过命令式尾部重新瞄准来拖动会话视口。"
+              "zh": "推理面板的自动折叠收缩不再通过命令式尾部重新瞄准拖动转录视口。"
             },
             "refs": [
               8950
@@ -293,6 +293,7 @@
       "risks": [],
       "contributors": [
         "SivanCola",
+        "github-actions[bot]",
         "HaoyueQin",
         "XTLine",
         "Linearl",
