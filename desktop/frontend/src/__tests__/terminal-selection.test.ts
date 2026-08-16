@@ -7,8 +7,8 @@ globalThis.window = dom.window as unknown as Window & typeof globalThis;
 
 const {
   clampTerminalSelectionPointToHost,
+  createTerminalSelectionLifecycle,
   handleTerminalCopyKey,
-  normalizeTerminalSelectionText,
   readTerminalClipboardText,
   terminalSelectionPointFromHost,
 } = await import("../lib/terminalSelection");
@@ -29,8 +29,8 @@ function keyEvent(overrides: Partial<ConstructorParameters<typeof KeyboardEvent>
 {
   assert.deepEqual(
     handleTerminalCopyKey({ ...keyEvent({ key: "c", ctrlKey: true }), hasSelection: () => true, getSelection: () => " ls\n" }),
-    { intercepted: true, text: "ls" },
-    "Ctrl+C with selection copies and intercepts",
+    { intercepted: true, text: " ls\n" },
+    "Ctrl+C preserves selection boundaries and intercepts",
   );
   assert.deepEqual(
     handleTerminalCopyKey({ ...keyEvent({ key: "c", ctrlKey: true }), hasSelection: () => false, getSelection: () => "" }),
@@ -59,20 +59,30 @@ function keyEvent(overrides: Partial<ConstructorParameters<typeof KeyboardEvent>
   );
   assert.deepEqual(
     handleTerminalCopyKey({ ...keyEvent({ key: "c", ctrlKey: true }), hasSelection: () => true, getSelection: () => "  " }),
-    { intercepted: false, text: "" },
-    "blank selection text passes through",
+    { intercepted: true, text: "  " },
+    "whitespace-only selection is copied instead of becoming SIGINT",
   );
   assert.deepEqual(
     handleTerminalCopyKey({ ...keyEvent({ key: "c", ctrlKey: true }), hasSelection: () => true, getSelection: () => " \u001b[31merror\u001b[0m " }),
-    { intercepted: true, text: "error" },
-    "Ctrl+C selection text is normalized the same as the context-menu path",
+    { intercepted: true, text: " \u001b[31merror\u001b[0m " },
+    "copy preserves escape-looking selection text exactly",
   );
 }
 
-// normalizeTerminalSelectionText strips ANSI escapes and trims.
+// Async clipboard operations stay bound to the terminal that started them.
 {
-  assert.equal(normalizeTerminalSelectionText("  \u001b[31merror\u001b[0m\r\nfailed  "), "error\nfailed", "strips ANSI and trims");
-  assert.equal(normalizeTerminalSelectionText("\u001b[2J\u001b[H"), "", "control-only selection is empty");
+  const lifecycle = createTerminalSelectionLifecycle<object>();
+  const firstTerminal = {};
+  const secondTerminal = {};
+  const firstOperation = lifecycle.activate(firstTerminal);
+  assert.equal(lifecycle.isCurrent(firstOperation), true, "new operation starts current");
+  const secondOperation = lifecycle.activate(secondTerminal);
+  assert.equal(lifecycle.isCurrent(firstOperation), false, "session switch rejects old clipboard completion");
+  assert.equal(lifecycle.isCurrent(secondOperation), true, "replacement terminal owns new operations");
+  lifecycle.deactivate(firstTerminal);
+  assert.equal(lifecycle.isCurrent(secondOperation), true, "stale cleanup cannot invalidate the replacement terminal");
+  lifecycle.deactivate(secondTerminal);
+  assert.equal(lifecycle.isCurrent(secondOperation), false, "unmount rejects pending clipboard completion");
 }
 
 // terminalSelectionPointFromHost anchors the toolbar to the painted selection.

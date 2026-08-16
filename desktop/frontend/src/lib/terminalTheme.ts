@@ -104,9 +104,9 @@ export function terminalThemeForElement(element: Element): ITheme {
     cursor: cssToken(style, "--terminal-cursor", resolved === "light" ? "#9a4f00" : "#e6a15c"),
     cursorAccent: cssToken(style, "--terminal-bg", resolved === "light" ? "#f7f8fa" : "#111315"),
     selectionBackground: cssToken(style, "--terminal-selection", resolved === "light" ? "#6ea8fe" : "#4a6d8c"),
-    // Explicit light keeps the dark fg for contrast over #6ea8fe; explicit dark
-    // uses the terminal's light fg. Auto mode inherits from the CSS layer.
-    selectionForeground: cssToken(style, "--terminal-selection-fg", resolved === "light" ? "#0b0f14" : "#e8e5df"),
+    // Explicit themes keep at least 4.5:1 contrast over their selection
+    // backgrounds. Auto mode inherits from the CSS layer.
+    selectionForeground: cssToken(style, "--terminal-selection-fg", resolved === "light" ? "#0b0f14" : "#ffffff"),
   };
 }
 

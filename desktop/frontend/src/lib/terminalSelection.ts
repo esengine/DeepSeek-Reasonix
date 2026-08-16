@@ -1,6 +1,16 @@
-import { stripTerminalControlSequences } from "./terminalOutput";
-
 export type TerminalSelectionPoint = { left: number; top: number };
+
+export type TerminalSelectionOperation<T> = {
+  generation: number;
+  terminal: T;
+};
+
+export type TerminalSelectionLifecycle<T> = {
+  activate: (terminal: T) => TerminalSelectionOperation<T>;
+  capture: () => TerminalSelectionOperation<T> | null;
+  deactivate: (terminal: T) => void;
+  isCurrent: (operation: TerminalSelectionOperation<T>) => boolean;
+};
 
 type RectLike = Pick<DOMRect, "left" | "top" | "right" | "bottom" | "width" | "height">;
 
@@ -56,13 +66,37 @@ export function clampTerminalSelectionPointToHost(
   };
 }
 
-export function normalizeTerminalSelectionText(value: string): string {
-  return stripTerminalControlSequences(value).trim();
+// Clipboard reads and writes can settle after the active terminal changes.
+// Keep the terminal identity and generation together so stale completions can
+// never clear or paste into the replacement session.
+export function createTerminalSelectionLifecycle<T>(): TerminalSelectionLifecycle<T> {
+  let generation = 0;
+  let terminal: T | null = null;
+  return {
+    activate(next) {
+      generation += 1;
+      terminal = next;
+      return { generation, terminal: next };
+    },
+    capture() {
+      return terminal === null ? null : { generation, terminal };
+    },
+    deactivate(target) {
+      if (terminal !== target) return;
+      generation += 1;
+      terminal = null;
+    },
+    isCurrent(operation) {
+      return operation.generation === generation && operation.terminal === terminal;
+    },
+  };
 }
 
-// Pure decision for Ctrl+C / Ctrl+Shift+C / Cmd+C: a live non-empty selection
+// Pure decision for Ctrl+C / Ctrl+Shift+C / Cmd+C: a live selection
 // copies and swallows the chord, otherwise the key keeps flowing to the PTY
-// (Ctrl+C then stays SIGINT). Meta+C mirrors the macOS copy convention.
+// (Ctrl+C then stays SIGINT). Preserve xterm's selection byte-for-byte,
+// including whitespace, line endings, and escape-looking text. Meta+C mirrors
+// the macOS copy convention.
 export function handleTerminalCopyKey(input: {
   key: string;
   ctrlKey: boolean;
@@ -77,9 +111,7 @@ export function handleTerminalCopyKey(input: {
   const isMetaC = input.metaKey && !input.altKey;
   if (!isCtrlC && !isMetaC) return { intercepted: false, text: "" };
   if (!input.hasSelection()) return { intercepted: false, text: "" };
-  const text = normalizeTerminalSelectionText(input.getSelection());
-  if (!text) return { intercepted: false, text: "" };
-  return { intercepted: true, text };
+  return { intercepted: true, text: input.getSelection() };
 }
 
 // Async clipboard reads need the webview's Clipboard API permission; the Wails

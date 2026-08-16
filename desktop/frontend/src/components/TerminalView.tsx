@@ -11,8 +11,8 @@ import { detectShortcutPlatform, formatShortcutCombo } from "../lib/keyboardShor
 import { useT } from "../lib/i18n";
 import {
   clampTerminalSelectionPointToHost,
+  createTerminalSelectionLifecycle,
   handleTerminalCopyKey,
-  normalizeTerminalSelectionText,
   readTerminalClipboardText,
   terminalSelectionPointFromHost,
   type TerminalSelectionPoint,
@@ -39,6 +39,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, {
 }>(function TerminalView({ tabId, session, onSelectionActionChange, onAddToChat }, ref) {
   const hostRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
+  const selectionLifecycleRef = useRef(createTerminalSelectionLifecycle<Terminal>());
   const onSelectionActionChangeRef = useRef(onSelectionActionChange);
   const onAddToChatRef = useRef(onAddToChat);
   const [menu, setMenu] = useState<ContextMenuPoint | null>(null);
@@ -51,16 +52,19 @@ export const TerminalView = forwardRef<TerminalViewHandle, {
   onSelectionActionChangeRef.current = onSelectionActionChange;
   onAddToChatRef.current = onAddToChat;
 
+  const clearSelectionState = (terminal = terminalRef.current) => {
+    terminal?.clearSelection();
+    selectionTextRef.current = "";
+    setSelectionText("");
+    onSelectionActionChangeRef.current?.(null);
+  };
+
   useImperativeHandle(ref, () => ({
-    clearSelection: () => {
-      terminalRef.current?.clearSelection();
-      setSelectionText("");
-      onSelectionActionChangeRef.current?.(null);
-    },
+    clearSelection: clearSelectionState,
   }), []);
 
   const updateSelection = () => {
-    const text = normalizeTerminalSelectionText(terminalRef.current?.getSelection() ?? "");
+    const text = terminalRef.current?.getSelection() ?? "";
     selectionTextRef.current = text;
     setSelectionText(text);
   };
@@ -70,11 +74,12 @@ export const TerminalView = forwardRef<TerminalViewHandle, {
   };
 
   const reportSelection = (fallbackPoint?: TerminalSelectionPoint) => {
-    const text = normalizeTerminalSelectionText(terminalRef.current?.getSelection() ?? "");
-    if (!text) {
+    const terminal = terminalRef.current;
+    if (!terminal?.hasSelection()) {
       clearSelectionAction();
       return;
     }
+    const text = terminal.getSelection();
     const host = hostRef.current;
     if (!host) return;
     const hostRect = host.getBoundingClientRect();
@@ -87,31 +92,31 @@ export const TerminalView = forwardRef<TerminalViewHandle, {
   };
 
   const copySelection = async () => {
+    const operation = selectionLifecycleRef.current.capture();
     const text = selectionTextRef.current;
-    if (!text) return;
+    if (!operation || !text) return;
     const copied = await writeClipboardText(text);
+    if (!selectionLifecycleRef.current.isCurrent(operation)) return;
     if (!copied) {
       showToast(t("diag.copyFailed"), "error");
       return;
     }
-    terminalRef.current?.clearSelection();
-    setSelectionText("");
-    clearSelectionAction();
+    clearSelectionState(operation.terminal);
   };
 
   const pasteFromClipboard = async () => {
+    const operation = selectionLifecycleRef.current.capture();
+    if (!operation) return;
     const text = await readTerminalClipboardText();
-    if (!text) return;
-    terminalRef.current?.paste(text);
+    if (!text || !selectionLifecycleRef.current.isCurrent(operation)) return;
+    operation.terminal.paste(text);
   };
 
   const addSelectionToChat = () => {
     const text = selectionTextRef.current;
     if (!text) return;
     onAddToChatRef.current?.(text);
-    terminalRef.current?.clearSelection();
-    setSelectionText("");
-    clearSelectionAction();
+    clearSelectionState();
   };
 
   const shortcutPlatform = useMemo(() => detectShortcutPlatform(), []);
@@ -128,6 +133,9 @@ export const TerminalView = forwardRef<TerminalViewHandle, {
       theme: terminalThemeForElement(host),
     });
     terminalRef.current = terminal;
+    const selectionOperation = selectionLifecycleRef.current.activate(terminal);
+    selectionTextRef.current = "";
+    setSelectionText("");
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(host);
@@ -150,13 +158,12 @@ export const TerminalView = forwardRef<TerminalViewHandle, {
       });
       if (decision.intercepted) {
         void writeClipboardText(decision.text).then((copied) => {
+          if (!selectionLifecycleRef.current.isCurrent(selectionOperation)) return;
           if (!copied) {
             showToast(t("diag.copyFailed"), "error");
             return;
           }
-          terminal.clearSelection();
-          setSelectionText("");
-          clearSelectionAction();
+          clearSelectionState(terminal);
         });
         return false;
       }
@@ -164,7 +171,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, {
     });
     const selectionChange = terminal.onSelectionChange(() => {
       updateSelection();
-      if (!terminal.hasSelection() || normalizeTerminalSelectionText(terminal.getSelection()) === "") {
+      if (!terminal.hasSelection()) {
         clearSelectionAction();
       }
     });
@@ -202,7 +209,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, {
       input.dispose();
       outputResize.dispose();
       unregister();
-      terminalRef.current = null;
+      selectionLifecycleRef.current.deactivate(terminal);
+      if (terminalRef.current === terminal) terminalRef.current = null;
       terminal.dispose();
       // A session switch disposes this terminal while TerminalPanel stays
       // mounted; drop any floating selection action so its stale text can

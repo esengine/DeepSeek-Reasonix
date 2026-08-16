@@ -37904,7 +37904,7 @@ body > .mermaid-diagram--fullscreen {
   --terminal-faint: #70777f;
   --terminal-cursor: #e6a15c;
   --terminal-selection: #4a6d8c;
-  --terminal-selection-fg: #e8e5df;
+  --terminal-selection-fg: #ffffff;
 }
 :root[data-terminal-theme="light"] {
   --terminal-bg: #f7f8fa;
