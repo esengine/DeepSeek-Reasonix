@@ -239,6 +239,19 @@
           },
           {
             "title": {
+              "en": "Fact-driven execution",
+              "zh": "事实驱动执行"
+            },
+            "body": {
+              "en": "Ordinary requests enter the executor directly, while planning is reserved for explicit plans, approval boundaries, and goal starts; verification obligations come from concrete tool calls.",
+              "zh": "普通请求直接进入执行器，规划仅用于显式计划、审批边界和目标启动；验证义务由具体工具调用生成。"
+            },
+            "refs": [
+              8930
+            ]
+          },
+          {
+            "title": {
               "en": "ACP v1 prompt outcomes",
               "zh": "ACP v1 Prompt 结果"
             },
@@ -363,7 +376,6 @@
       "risks": [],
       "contributors": [
         "SivanCola",
-        "github-actions[bot]",
         "XTLine",
         "innocarpe",
         "Doonut",
