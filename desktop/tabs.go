@@ -1179,9 +1179,9 @@ func (t *WorkspaceTab) resetTelemetry(sessionPath string) {
 // session. When the runtime rotated to a different session underneath the tab
 // (typed /new routes through Controller.Submit and never reaches App.NewSession),
 // the previous session's totals must not bleed into the new one: swap in the
-// new session's persisted sidecar, or start from zero when none exists. The
-// sidecar is rewritten on every recorded event, so a reload never loses more
-// than the sub-second in-memory delta of an in-flight record.
+// new session's persisted sidecar, or start from zero when none exists.
+// The sink checkpoints at turn completion and by event count; the age limit is
+// evaluated on the next Usage or read_file mutation, while out-of-turn writes stay immediate.
 func (t *WorkspaceTab) syncTelemetryToSession(sessionPath string) {
 	key := sessionRuntimeKey(sessionPath)
 	if key == "" {
@@ -1504,6 +1504,10 @@ type tabEventSink struct {
 	botSink       event.Sink // optional: when set, events are also forwarded here
 	botSinkGen    uint64
 	turn          turnSubmissionState // stays reserved through the end of TurnDone fan-out
+
+	telemetryCheckpointMu sync.Mutex
+	telemetryCheckpoint   telemetryCheckpointState
+	telemetrySaveHook     func(string, tabTelemetrySnapshot) error // deterministic per-sink test override
 }
 
 type closeableEventSink interface {
@@ -1952,9 +1956,7 @@ func (s *tabEventSink) recordReadTelemetry(e event.Event) {
 		Limit:     limit,
 		Truncated: truncated,
 	})
-	if sp != "" {
-		_ = saveTelemetry(sp+".telemetry.json", tab.telemetrySnapshot())
-	}
+	s.checkpointTelemetry(tab, sp, !s.turnInFlightSnapshot())
 }
 
 func (s *tabEventSink) recordTurnStarted() {
@@ -1966,9 +1968,6 @@ func (s *tabEventSink) recordTurnStarted() {
 		tab.syncTelemetryToSession(sp)
 	}
 	tab.recordTurnStarted(time.Now().UnixMilli())
-	if sp != "" {
-		_ = saveTelemetry(sp+".telemetry.json", tab.telemetrySnapshot())
-	}
 }
 
 func (s *tabEventSink) recordTurnDone() {
@@ -1980,9 +1979,7 @@ func (s *tabEventSink) recordTurnDone() {
 		tab.syncTelemetryToSession(sp)
 	}
 	tab.recordTurnDone(time.Now().UnixMilli())
-	if sp != "" {
-		_ = saveTelemetry(sp+".telemetry.json", tab.telemetrySnapshot())
-	}
+	s.checkpointTelemetry(tab, sp, true)
 }
 
 func (s *tabEventSink) recordUsageTelemetry(e event.Event) {
@@ -1994,9 +1991,7 @@ func (s *tabEventSink) recordUsageTelemetry(e event.Event) {
 		tab.syncTelemetryToSession(sp)
 	}
 	tab.recordUsage(e)
-	if sp != "" {
-		_ = saveTelemetry(sp+".telemetry.json", tab.telemetrySnapshot())
-	}
+	s.checkpointTelemetry(tab, sp, !s.turnInFlightSnapshot())
 }
 
 func (s *tabEventSink) resetDisplayTurn() {

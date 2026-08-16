@@ -85,6 +85,7 @@ func (a *App) shutdownBody() {
 			if err := it.ctrl.SnapshotForShutdown(); err != nil {
 				slog.Warn("desktop: shutdown snapshot failed", "tab", it.tab.ID, "err", err)
 			}
+			it.tab.checkpointTelemetryForShutdown(it.ctrl.SessionPath())
 		}
 		it.ctrl.Close()
 		it.tab.releaseSessionLease()
