@@ -953,6 +953,14 @@ func (t *WorkspaceTab) recordTurnStarted(now int64) {
 	t.telemMu.Unlock()
 }
 
+// activeTurnStartedAtMs reports the wall-clock start (Unix ms) of the turn
+// currently in flight, or 0 when idle.
+func (t *WorkspaceTab) activeTurnStartedAtMs() int64 {
+	t.telemMu.Lock()
+	defer t.telemMu.Unlock()
+	return t.usageTelemetry.activeTurnStartedAt
+}
+
 func (t *WorkspaceTab) recordTurnDone(now int64) {
 	t.telemMu.Lock()
 	if started := t.usageTelemetry.activeTurnStartedAt; started > 0 && now >= started {
@@ -2171,20 +2179,25 @@ type TabMeta struct {
 	BackgroundJobs    int                `json:"backgroundJobs,omitempty"`
 	CancelRequested   bool               `json:"cancelRequested,omitempty"`
 	Cancellable       bool               `json:"cancellable"`
-	Mode              string             `json:"mode"`
-	CollaborationMode string             `json:"collaborationMode"`
-	ToolApprovalMode  string             `json:"toolApprovalMode"`
-	TokenMode         string             `json:"tokenMode"`
-	AgentPreset       string             `json:"agentPreset,omitempty"`
-	Goal              string             `json:"goal,omitempty"`
-	GoalStatus        string             `json:"goalStatus,omitempty"`
-	Recovered         bool               `json:"recovered,omitempty"`
-	RecoveryReason    string             `json:"recoveryReason,omitempty"`
-	RecoveryDigest    string             `json:"recoveryDigest,omitempty"`
-	RecoveryParentID  string             `json:"recoveryParentId,omitempty"`
-	StartupErr        string             `json:"startupErr,omitempty"`
-	Active            bool               `json:"active"`
-	Cwd               string             `json:"cwd"`
+	// TurnStartedAtMs is the wall-clock start (Unix ms) of the turn currently
+	// running on this tab, or 0 when idle. It is the authoritative source for
+	// the frontend run-strip elapsed timer so a tab switch that rebuilds local
+	// state cannot restart the clock mid-turn (#7987).
+	TurnStartedAtMs   int64  `json:"turnStartedAtMs,omitempty"`
+	Mode              string `json:"mode"`
+	CollaborationMode string `json:"collaborationMode"`
+	ToolApprovalMode  string `json:"toolApprovalMode"`
+	TokenMode         string `json:"tokenMode"`
+	AgentPreset       string `json:"agentPreset,omitempty"`
+	Goal              string `json:"goal,omitempty"`
+	GoalStatus        string `json:"goalStatus,omitempty"`
+	Recovered         bool   `json:"recovered,omitempty"`
+	RecoveryReason    string `json:"recoveryReason,omitempty"`
+	RecoveryDigest    string `json:"recoveryDigest,omitempty"`
+	RecoveryParentID  string `json:"recoveryParentId,omitempty"`
+	StartupErr        string `json:"startupErr,omitempty"`
+	Active            bool   `json:"active"`
+	Cwd               string `json:"cwd"`
 }
 
 func enrichTabMeta(meta TabMeta) TabMeta {
@@ -2254,6 +2267,7 @@ func (a *App) tabMeta(tab *WorkspaceTab, active bool) TabMeta {
 		m.BackgroundJobs = status.BackgroundJobs
 		m.CancelRequested = status.CancelRequested
 		m.Cancellable = status.Cancellable
+		m.TurnStartedAtMs = tab.activeTurnStartedAtMs()
 	}
 	if a.botBridge != nil {
 		m.RemoteControlled = a.botBridge.remoteControlledTabs()[tab.ID]
