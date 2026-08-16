@@ -105,6 +105,7 @@ let backendRunning = false;
 let cancelCalls = 0;
 let cancelInboxCalls = 0;
 let cancelInboxError: Error | null = null;
+let cancelDiscardedItemIDs: string[] = [];
 let effortCalls = 0;
 let checkpointHistoryCalls = 0;
 let historyLoads = 0;
@@ -169,6 +170,12 @@ window.go = {
         cancelInboxCalls += 1;
         if (cancelInboxError) throw cancelInboxError;
         backendRunning = false;
+      },
+      CancelTabWithInboxItemsResult: async () => {
+        cancelInboxCalls += 1;
+        if (cancelInboxError) throw cancelInboxError;
+        backendRunning = false;
+        return { discardedItemIds: [...cancelDiscardedItemIDs] };
       },
     } as Partial<AppBindings> as AppBindings,
   },
@@ -310,15 +317,23 @@ const effortNotice = controller?.state.items.find((item) => item.kind === "notic
 eq(effortCalls, 1, "SetEffortForTab is called once");
 ok(Boolean(effortNotice), "busy effort switch surfaces a non-failure warning notice");
 
+cancelDiscardedItemIDs = ["withdrawn-guidance"];
+let cancelOutcome: Awaited<ReturnType<NonNullable<typeof controller>["cancel"]>> | undefined;
+await act(async () => {
+  cancelOutcome = await controller?.cancel(["withdrawn-guidance", "delivered-guidance"]);
+  await flushPromises();
+});
+eq(cancelOutcome?.discardedItemIds.join(","), "withdrawn-guidance", "cancel returns only backend-confirmed withdrawn IDs");
+
 cancelInboxError = new Error("reasonix_error:inbox_invalid_state");
 await act(async () => {
-  controller?.cancel(["queued-guidance"]);
+  await controller?.cancel(["queued-guidance"]);
   await flushPromises();
 });
 const inboxCancelNotice = controller?.state.items.find((item) =>
   item.kind === "notice" && item.text.includes("Cancel failed: This inbox instruction cannot be changed"),
 );
-eq(cancelInboxCalls, 1, "CancelTabWithInboxItems is called for durable guidance");
+eq(cancelInboxCalls, 2, "receipt-capable cancellation is called for durable guidance");
 ok(Boolean(inboxCancelNotice), "cancel failure formats the stable inbox code for the active locale");
 ok(inboxCancelNotice?.kind === "notice" && !inboxCancelNotice.text.includes("reasonix_error:"), "cancel failure never renders the stable transport code");
 

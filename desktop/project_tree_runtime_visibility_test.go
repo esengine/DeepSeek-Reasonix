@@ -136,34 +136,104 @@ func TestKeepOnlyVisibleTabPublishesDetachedRuntimeProjection(t *testing.T) {
 	}
 
 	deadline := time.After(time.Second)
+	foundRuntime := false
+	foundLegacy := false
 	for {
 		select {
 		case emitted := <-events:
-			if emitted.name != "project-tree:runtime-changed" {
+			switch emitted.name {
+			case "project-tree:runtime-changed":
+				if len(emitted.payload) != 1 {
+					t.Fatalf("project-tree:runtime-changed payload count = %d, want 1", len(emitted.payload))
+				}
+				event, ok := emitted.payload[0].(ProjectTreeRuntimeSnapshot)
+				if !ok {
+					t.Fatalf("project-tree:runtime-changed payload type = %T, want ProjectTreeRuntimeSnapshot", emitted.payload[0])
+				}
+				if event.Topics == nil || event.Revision == 0 {
+					t.Fatalf("project-tree:runtime-changed event = %+v, want a versioned runtime snapshot", event)
+				}
+				for _, topic := range event.Topics {
+					if topic.Scope == "project" && sameProjectRoot(topic.WorkspaceRoot, projectA) && topic.Node.TopicID == "topic-a" {
+						foundRuntime = !topic.Node.Open && topic.Node.Running
+					}
+				}
+			case "project-tree:changed":
+				if len(emitted.payload) != 1 {
+					t.Fatalf("legacy runtime invalidation payload = %#v, want one tagged payload", emitted.payload)
+				}
+				reason, ok := emitted.payload[0].(map[string]string)
+				foundLegacy = ok && reason["reason"] == "runtime"
+			}
+			if foundRuntime && foundLegacy {
+				return
+			}
+		case <-deadline:
+			if !foundRuntime {
+				t.Fatal("detaching project A emitted no runtime snapshot; the running conversation stays invisible")
+			}
+			if !foundLegacy {
+				t.Fatal("detaching project A emitted an untagged or missing compatibility invalidation")
+			}
+		}
+	}
+}
+
+func TestProjectTreeCatalogV2CompatibilityEventIsTagged(t *testing.T) {
+	app := NewApp()
+	app.ctx = context.Background()
+	events := make(chan runtimeEventEnvelope, 2)
+	app.runtimeEvents.emit = func(ctx context.Context, name string, payload ...any) {
+		events <- runtimeEventEnvelope{ctx: ctx, name: name, payload: append([]any(nil), payload...)}
+	}
+
+	app.emitProjectTreeChangedV2(7, nil, "metadata")
+	first := <-events
+	second := <-events
+	if first.name != "project-tree:changed-v2" || second.name != "project-tree:changed" {
+		t.Fatalf("catalog events = %#v, %#v, want v2 followed by compatibility event", first, second)
+	}
+	reason, ok := second.payload[0].(map[string]string)
+	if !ok || reason["reason"] != "catalog-v2" {
+		t.Fatalf("catalog compatibility payload = %#v, want reason catalog-v2", second.payload)
+	}
+}
+
+func TestOpenProjectTabPublishesTaggedRuntimeInvalidation(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	app := NewApp()
+	app.ctx = context.Background()
+	t.Cleanup(func() { app.shutdown(context.Background()) })
+	events := make(chan runtimeEventEnvelope, 8)
+	app.runtimeEvents.emit = func(ctx context.Context, name string, payload ...any) {
+		events <- runtimeEventEnvelope{ctx: ctx, name: name, payload: append([]any(nil), payload...)}
+	}
+	projectRoot := t.TempDir()
+	topic, err := app.CreateTopic("project", projectRoot, "Stable row")
+	if err != nil {
+		t.Fatalf("CreateTopic: %v", err)
+	}
+
+	if _, err := app.OpenProjectTab(projectRoot, topic.ID); err != nil {
+		t.Fatalf("OpenProjectTab: %v", err)
+	}
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case event := <-events:
+			if event.name != "project-tree:changed" {
 				continue
 			}
-			if len(emitted.payload) != 1 {
-				t.Fatalf("project-tree:runtime-changed payload count = %d, want 1", len(emitted.payload))
+			if len(event.payload) != 1 {
+				continue
 			}
-			event, ok := emitted.payload[0].(ProjectTreeRuntimeSnapshot)
-			if !ok {
-				t.Fatalf("project-tree:runtime-changed payload type = %T, want ProjectTreeRuntimeSnapshot", emitted.payload[0])
-			}
-			if event.Topics == nil || event.Revision == 0 {
-				t.Fatalf("project-tree:runtime-changed event = %+v, want a versioned runtime snapshot", event)
-			}
-			found := false
-			for _, topic := range event.Topics {
-				if topic.Scope == "project" && sameProjectRoot(topic.WorkspaceRoot, projectA) && topic.Node.TopicID == "topic-a" {
-					found = !topic.Node.Open && topic.Node.Running
-				}
-			}
-			if !found {
-				t.Fatalf("detached runtime topic missing from snapshot: %+v", event.Topics)
+			reason, ok := event.payload[0].(map[string]string)
+			if !ok || reason["reason"] != "runtime" {
+				continue
 			}
 			return
 		case <-deadline:
-			t.Fatal("detaching project A emitted no runtime snapshot; the running conversation stays invisible")
+			t.Fatal("opening a project topic emitted no tagged runtime invalidation")
 		}
 	}
 }

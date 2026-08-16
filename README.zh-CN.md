@@ -106,12 +106,38 @@ Windows 安装器通过 [SignPath.io](https://signpath.io/) 完成代码签名�
 
 ### 路径 D：从源码构建
 
+先克隆仓库：
+
 ```sh
 git clone https://github.com/esengine/DeepSeek-Reasonix.git
 cd DeepSeek-Reasonix
+```
+
+#### CLI
+
+CLI 构建需要 **Go 1.25+**。模块固定了 `toolchain` 指令；
+保持 `GOTOOLCHAIN=auto` 让 Go 自动下载固定的工具链，或自行安装。
+
+```sh
 make build      # -> bin/reasonix(.exe)
 make cross      # -> dist/（darwin|linux|windows × amd64|arm64）
 ```
+
+#### 桌面端
+
+桌面端构建额外需要：
+
+- **Node 24+ 和 pnpm 10**（`npm install -g pnpm@10`）用于前端
+- **Wails CLI**，与共享的 `.wails-version` 固定版本一致
+
+```sh
+make wails-install
+cd desktop
+wails build
+```
+
+平台相关的 WebView 依赖和 Linux 构建标签见
+[桌面端构建指南](desktop/README.md#prerequisites)。
 
 ## 快速开始
 

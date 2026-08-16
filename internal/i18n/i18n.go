@@ -36,6 +36,7 @@ type Messages struct {
 	TurnCancelled          string // shown when Ctrl-C aborts the in-flight turn but the chat keeps running
 	InterruptedRecovery    string // replay notice for a durable interrupted turn
 	FinalReadinessRecovery string // replay hint for a durable final-readiness pause
+	ReadinessContinuing    string // host is automatically finishing known readiness gaps
 	RecoveryPaused         string // controlled Auto retry pause; user can continue in the next message
 	ReceiptVerified        string // end-of-turn receipt, nothing unproven
 	ReceiptGapsHeader      string // end-of-turn receipt, header above the unproven list

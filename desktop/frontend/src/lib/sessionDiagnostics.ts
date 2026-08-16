@@ -57,6 +57,14 @@ export interface MountedRowsDiagnostic {
   total: number;
 }
 
+export interface TranscriptRecoveryDiagnostic {
+  done: number;
+  cancelled: number;
+  expired: number;
+  lastOutcome?: "done" | "cancelled" | "expired";
+  lastReason?: string;
+}
+
 // activationFailureClass maps an activation error onto a closed label set so
 // reports never carry the error text itself (which can echo session state).
 export function activationFailureClass(error: string | undefined): string {
@@ -82,6 +90,9 @@ let historyIndexHits = 0;
 let historyIndexMisses = 0;
 
 let mountedRows: MountedRowsDiagnostic = { mounted: 0, total: 0 };
+
+const transcriptRecovery: TranscriptRecoveryDiagnostic = { done: 0, cancelled: 0, expired: 0 };
+let transcriptRecoverySeen = false;
 
 type MarkdownWorkerProvider = () => MarkdownWorkerDiagnostic;
 type TranscriptCacheProvider = () => TranscriptCacheDiagnostic;
@@ -154,6 +165,15 @@ export function noteTranscriptRowCounts(mounted: number, total: number): void {
   mountedRows = { mounted, total };
 }
 
+/** Terminal state of one transcript layout-recovery request (done /
+ *  cancelled / expired), reported by the scroll arbiter (#8657). */
+export function noteTranscriptRecoveryTerminal(state: { outcome: "done" | "cancelled" | "expired"; reason?: string }): void {
+  transcriptRecovery[state.outcome] += 1;
+  transcriptRecovery.lastOutcome = state.outcome;
+  transcriptRecovery.lastReason = state.reason;
+  transcriptRecoverySeen = true;
+}
+
 /** Registered by the lazy markdown-worker chunk at module load. */
 export function registerMarkdownWorkerDiagnostics(provider: MarkdownWorkerProvider): void {
   markdownWorkerProvider = provider;
@@ -177,6 +197,7 @@ export interface SessionPipelineDiagnostics {
     indexMisses: number;
   };
   mountedRows?: MountedRowsDiagnostic;
+  transcriptRecovery?: TranscriptRecoveryDiagnostic;
   markdownWorker?: MarkdownWorkerDiagnostic;
   transcriptCache?: TranscriptCacheDiagnostic;
 }
@@ -208,6 +229,7 @@ export function sessionPipelineDiagnostics(): SessionPipelineDiagnostics {
     };
   }
   if (mountedRows.mounted > 0 || mountedRows.total > 0) out.mountedRows = { ...mountedRows };
+  if (transcriptRecoverySeen) out.transcriptRecovery = { ...transcriptRecovery };
   if (markdownWorkerProvider) {
     try {
       out.markdownWorker = markdownWorkerProvider();
@@ -246,4 +268,10 @@ export function resetSessionDiagnostics(): void {
   historyIndexHits = 0;
   historyIndexMisses = 0;
   mountedRows = { mounted: 0, total: 0 };
+  transcriptRecovery.done = 0;
+  transcriptRecovery.cancelled = 0;
+  transcriptRecovery.expired = 0;
+  transcriptRecovery.lastOutcome = undefined;
+  transcriptRecovery.lastReason = undefined;
+  transcriptRecoverySeen = false;
 }

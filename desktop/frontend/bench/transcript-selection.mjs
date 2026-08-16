@@ -202,8 +202,8 @@ try {
 
   await page.evaluate(() => {
     window.__transcriptProgrammaticWrites = [];
-    window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (owner, top) => {
-      window.__transcriptProgrammaticWrites.push({ owner, top });
+    window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (write) => {
+      window.__transcriptProgrammaticWrites.push(write);
     };
   });
 
@@ -424,8 +424,8 @@ try {
   await page.evaluate(() => {
     window.__transcriptProgrammaticWrites = [];
     window.__logicalClipboardText = null;
-    window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (owner, top) => {
-      window.__transcriptProgrammaticWrites.push({ owner, top });
+    window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (write) => {
+      window.__transcriptProgrammaticWrites.push(write);
     };
   });
   await page.mouse.move(forwardPoints.start.x, forwardPoints.start.y);

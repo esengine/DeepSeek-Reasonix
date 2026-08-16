@@ -395,6 +395,9 @@ func TestCommandsIncludesDocsAndEffortNotThinking(t *testing.T) {
 	if !hasCommand(cmds, "effort") {
 		t.Fatalf("Commands() should include effort: %+v", cmds)
 	}
+	if !hasCommand(cmds, "reload") {
+		t.Fatalf("Commands() should include reload: %+v", cmds)
+	}
 	if hasCommand(cmds, "thinking") {
 		t.Fatalf("Commands() should not include thinking: %+v", cmds)
 	}

@@ -14,17 +14,77 @@ import (
 // Final readiness: whether the fact contract and ledger allow the turn to stop.
 
 type finalReadinessCheck struct {
-	applies                   bool
-	reason                    string
-	missingProjectChecks      int
-	incompleteTodos           int
-	missingAcceptanceCriteria int
-	missingVerification       int
-	missingReview             int
-	missingSignoff            int
-	missingActionEvidence     int
-	missingMutation           int
-	missingCapabilities       int
+	applies                    bool
+	reason                     string
+	continuationGeneric        bool
+	continuationHighConfidence bool
+	continuationUnsafe         bool
+	missingProjectChecks       int
+	incompleteTodos            int
+	missingAcceptanceCriteria  int
+	missingVerification        int
+	missingReview              int
+	missingSignoff             int
+	missingActionEvidence      int
+	missingMutation            int
+	missingCapabilities        int
+}
+
+func (c finalReadinessCheck) continuationClass() ReadinessContinuationClass {
+	if c.reason == "" || c.continuationUnsafe || c.missingActionEvidence > 0 ||
+		c.missingMutation > 0 || c.missingCapabilities > 0 {
+		return ReadinessContinuationNone
+	}
+	if c.continuationHighConfidence {
+		return ReadinessContinuationHighConfidence
+	}
+	if c.continuationGeneric {
+		return ReadinessContinuationGeneric
+	}
+	return ReadinessContinuationNone
+}
+
+func (c *finalReadinessCheck) observeObligation(o taskcontract.Obligation) {
+	if o.Enforcement != taskcontract.EnforcementAdvisory {
+		switch o.Kind {
+		case taskcontract.ObligationActionReceipt:
+			// Repeating an external/destructive action to manufacture a
+			// receipt is never an automatic readiness operation.
+			c.continuationUnsafe = true
+		case taskcontract.ObligationTodo, taskcontract.ObligationCriteria,
+			taskcontract.ObligationFullVerify, taskcontract.ObligationIndependentReview,
+			taskcontract.ObligationSecurityReview, taskcontract.ObligationSignoff:
+			switch {
+			case o.Kind == taskcontract.ObligationTodo || o.Kind == taskcontract.ObligationCriteria:
+				c.continuationHighConfidence = true
+			case o.Enforcement == taskcontract.EnforcementStrict:
+				c.continuationHighConfidence = true
+			case o.Enforcement == taskcontract.EnforcementRecoverable:
+				c.continuationGeneric = true
+			}
+		case taskcontract.ObligationTargetedVerify, taskcontract.ObligationDiffReview:
+			switch o.Enforcement {
+			case taskcontract.EnforcementStrict:
+				c.continuationHighConfidence = true
+			case taskcontract.EnforcementRecoverable:
+				c.continuationGeneric = true
+			}
+		default:
+			c.continuationUnsafe = true
+		}
+	}
+	switch o.Kind {
+	case taskcontract.ObligationTargetedVerify, taskcontract.ObligationFullVerify:
+		c.missingVerification++
+	case taskcontract.ObligationDiffReview, taskcontract.ObligationIndependentReview, taskcontract.ObligationSecurityReview:
+		c.missingReview++
+	case taskcontract.ObligationSignoff:
+		c.missingSignoff++
+	case taskcontract.ObligationActionReceipt:
+		c.missingActionEvidence++
+	case taskcontract.ObligationCriteria:
+		c.missingAcceptanceCriteria++
+	}
 }
 
 func (c finalReadinessCheck) progressSignature() string {
@@ -89,7 +149,7 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 		a.turn.engine.SyncReceipts(a.task.ledger.Receipts(), a.writeWorkspaceRoot, a.turn.constraints.ForbidTests)
 	}
 	var missing []string
-	out := finalReadinessCheck{}
+	out := finalReadinessCheck{continuationUnsafe: a.turn.constraints.ForbidTests}
 	if a.planMode.Load() {
 		return out
 	}
@@ -99,6 +159,7 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 	}
 	if msg := a.capabilityGateFailure(); msg != "" {
 		out.applies = true
+		out.continuationUnsafe = true
 		out.missingCapabilities++
 		missing = append(missing, msg)
 	}
@@ -108,6 +169,7 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 	}
 	if hasWriter && hasTodos && len(incomplete) > 0 {
 		out.applies = true
+		out.continuationHighConfidence = true
 		out.incompleteTodos = len(incomplete)
 		missing = append(missing, finalReadinessIncompleteTodos(incomplete))
 	}
@@ -120,12 +182,16 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 			continue
 		}
 		if !a.task.ledger.HasSuccessfulCommandAfter(command, writer) {
+			out.continuationHighConfidence = true
 			out.missingProjectChecks++
 			missing = append(missing, fmt.Sprintf("run %q from %s after the latest write", command, finalReadinessCheckSource(check)))
 		}
 	}
 	if hasWriter {
 		outstanding := a.outstandingPlanCriteria()
+		if len(outstanding) > 0 {
+			out.continuationHighConfidence = true
+		}
 		out.missingAcceptanceCriteria += len(outstanding)
 		missing = append(missing, outstanding...)
 	}
@@ -144,18 +210,7 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 		})
 		for _, o := range a.turn.engine.Snapshot().Unsatisfied() {
 			missing = append(missing, obligationGap(o))
-			switch o.Kind {
-			case taskcontract.ObligationTargetedVerify, taskcontract.ObligationFullVerify:
-				out.missingVerification++
-			case taskcontract.ObligationDiffReview, taskcontract.ObligationIndependentReview, taskcontract.ObligationSecurityReview:
-				out.missingReview++
-			case taskcontract.ObligationSignoff:
-				out.missingSignoff++
-			case taskcontract.ObligationActionReceipt:
-				out.missingActionEvidence++
-			case taskcontract.ObligationCriteria:
-				out.missingAcceptanceCriteria++
-			}
+			out.observeObligation(o)
 		}
 	}
 	if a.loopGuardAllowsFinal() {
@@ -181,6 +236,7 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 		out.reason = strings.Join(missing, "; ")
 		return a.applyPartialCheckWaiver(out)
 	case taskcontract.StopBlocked:
+		out.continuationUnsafe = true
 		out.reason = strings.Join(missing, "; ")
 		return out
 	case taskcontract.StopContinue:
@@ -191,7 +247,7 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 			a.turn.engine.NoteRecoveryAttempt()
 		}
 		out.reason = strings.Join(missing, "; ")
-		if !a.closedLoopActive() {
+		if !a.turn.automaticReadinessContinuation && !a.closedLoopActive() {
 			return a.applyPartialCheckWaiver(out)
 		}
 		return out

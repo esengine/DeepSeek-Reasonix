@@ -423,6 +423,7 @@ func (o *turnOrchestrator) runGoalLoopWithFrozenImagesRawDisplay(ctx context.Con
 
 func (o *turnOrchestrator) runGoalLoopWithPreparedTurn(ctx context.Context, turn orchestratedTurn) error {
 	expectedContinuationEpoch := o.c.goals.continuationToken()
+	ctx = agent.WithAutomaticReadinessContinuation(ctx)
 	ctx = agent.WithSubagentImageCandidates(ctx, turn.imageCandidates)
 	err := o.runOrchestratedTurn(ctx, turn)
 	if err != nil {
@@ -431,13 +432,17 @@ func (o *turnOrchestrator) runGoalLoopWithPreparedTurn(ctx context.Context, turn
 			o.c.stopGoal(GoalStatusStopped)
 			return err
 		}
-		if !goalTurnErrorAbsorbable(err) || !o.c.goals.active() {
-			// Terminal provider/host error (or a plain non-Goal Delivery
-			// readiness failure): stop auto-continue. With no active Goal the
-			// error surfaces the recovery card; with a Goal it stays running so
-			// the next ordinary user message keeps the same scope.
+		if !goalTurnErrorAbsorbable(err) {
+			// Terminal provider/host error: stop auto-continue. With a Goal it
+			// stays running so the next ordinary user message keeps the scope.
 			o.c.goalUsageTee.setActiveRecorder(nil)
 			return err
+		}
+		if !o.c.goals.active() {
+			// The host knows exactly what this ordinary turn still owes. Finish
+			// it automatically instead of making the user relay "continue".
+			o.c.goalUsageTee.setActiveRecorder(nil)
+			return o.continueUntilReady(ctx, err)
 		}
 		// FinalReadinessError is absorbed below: the Goal FSM continues with
 		// the missing requirements as the next turn's prompt.
@@ -451,6 +456,7 @@ func (o *turnOrchestrator) runEditedGoalLoopWithRawDisplay(ctx context.Context, 
 
 func (o *turnOrchestrator) runEditedGoalLoopWithImageRefsRawDisplay(ctx context.Context, input, raw, imageRefs, display, original string) error {
 	expectedContinuationEpoch := o.c.goals.continuationToken()
+	ctx = agent.WithAutomaticReadinessContinuation(ctx)
 	turn := o.c.prepareOrchestratedTurnImages(orchestratedTurn{
 		input: input, raw: raw, imageRefs: imageRefs, display: display, editedOriginal: original,
 	})
@@ -462,9 +468,13 @@ func (o *turnOrchestrator) runEditedGoalLoopWithImageRefsRawDisplay(ctx context.
 			o.c.stopGoal(GoalStatusStopped)
 			return err
 		}
-		if !goalTurnErrorAbsorbable(err) || !o.c.goals.active() {
+		if !goalTurnErrorAbsorbable(err) {
 			o.c.goalUsageTee.setActiveRecorder(nil)
 			return err
+		}
+		if !o.c.goals.active() {
+			o.c.goalUsageTee.setActiveRecorder(nil)
+			return o.continueUntilReady(ctx, err)
 		}
 	}
 	return o.continueGoal(ctx, expectedContinuationEpoch, err)
@@ -565,11 +575,15 @@ func (o *turnOrchestrator) advanceGoalAfterTurn(ctx context.Context, expectedCon
 	var readinessErr *agent.FinalReadinessError
 	pauseCause, pauseReason, runPaused := goalPauseFromRunError(turnErr)
 	if errors.As(turnErr, &readinessErr) {
+		progressKey := readinessErr.ProgressKey
+		if progressKey == "" {
+			progressKey = readinessErr.Reason
+		}
 		readiness = agent.ReadinessResult{
 			Ready:       false,
 			Missing:     append([]string(nil), readinessErr.Missing...),
 			Reason:      readinessErr.Reason,
-			ProgressKey: readinessErr.Reason,
+			ProgressKey: progressKey,
 		}
 	} else if turnErr != nil && !runPaused {
 		// Terminal provider/host error: stop auto-continue without an FSM

@@ -100,6 +100,17 @@ func TestWorkspaceTabAggregatesSessionUsageTelemetry(t *testing.T) {
 	}
 }
 
+func TestTabMetaReportsActiveTurnStartedAt(t *testing.T) {
+	const startedAt = int64(1_723_456_789_000)
+	tab := &WorkspaceTab{ID: "tab", WorkspaceRoot: t.TempDir()}
+	tab.recordTurnStarted(startedAt)
+	app := &App{tabs: map[string]*WorkspaceTab{"tab": tab}}
+
+	if got := app.tabMeta(tab, true).TurnStartedAt; got != startedAt {
+		t.Fatalf("turn started at = %d, want %d", got, startedAt)
+	}
+}
+
 func TestWorkspaceTabMarksEstimatedExecutorTurn(t *testing.T) {
 	tab := &WorkspaceTab{}
 	tab.recordUsage(event.Event{

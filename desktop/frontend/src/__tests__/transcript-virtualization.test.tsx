@@ -237,7 +237,7 @@ function firstTextNode(root: Node): Text | null {
       { kind: "assistant", id: "live-1", text: "", reasoning: "", streaming: true },
     ];
     const live: LiveStream = { id: "live-1", text: "token", reasoning: "", reasoningComplete: true };
-    await harness.render(items, { running: true, live, tabId: "jump-tab", historyLayoutRevision: 0 });
+    await harness.render(items, { running: true, live, tabId: "jump-tab" });
     await harness.settle();
     const el = harness.scrollElement();
     el.scrollTop = 0;
@@ -245,9 +245,12 @@ function firstTextNode(root: Node): Text | null {
     dispatchScroll(el);
     await harness.flush();
 
-    // A lazy-content invalidation lands right before the click: the reset and
-    // its anchor restore are still in flight while the user jumps.
-    await harness.render(items, { running: true, live, tabId: "jump-tab", historyLayoutRevision: 1 });
+    // A lazy-content patch lands right before the click: the updated rows
+    // re-render while the user jumps, without any size-tree reset.
+    const patched = items.map((entry) => entry.id === "live-1"
+      ? { ...entry, text: "resolved content that just arrived" }
+      : entry);
+    await harness.render(patched, { running: true, live, tabId: "jump-tab" });
     const jump = harness.container.querySelector<HTMLButtonElement>(".transcript__jump-bottom");
     ok(jump != null, "jump-bottom is available while scrolled up during streaming");
     jump?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -291,21 +294,28 @@ function firstTextNode(root: Node): Text | null {
   }
 }
 
-// ── Lazy content size invalidation rebuilds the Virtuoso size tree ───────────
+// ── Content patches update rows in place; the Virtuoso size tree survives ───
 {
   const harness = await createTranscriptHarness({ viewportHeight: 200, rowHeight: 100 });
   try {
     const items = turns(20);
-    await harness.render(items, { running: false, tabId: "layout-tab", historyLayoutRevision: 0 });
+    await harness.render(items, { running: false, tabId: "layout-tab" });
     await harness.settle();
     const before = harness.container.querySelector("[data-testid='virtuoso-item-list']");
-    await harness.render(items, { running: false, tabId: "layout-tab", historyLayoutRevision: 1 });
+    // A ref-resolution patch: same entry ids, longer resolved content. The
+    // rows re-render and Virtuoso re-measures them — no keyed remount, no
+    // size-tree collapse (#8657: patch storms used to remount the whole list
+    // and strand the view at estimate-based restore landings).
+    const patched = items.map((entry, index) => index === 10 && entry.kind === "assistant"
+      ? { ...entry, text: `resolved ${entry.text} `.repeat(40) }
+      : entry);
+    await harness.render(patched, { running: false, tabId: "layout-tab" });
     for (let i = 0; i < 5; i += 1) await harness.flush();
     const after = harness.container.querySelector("[data-testid='virtuoso-item-list']");
-    ok(before != null && after != null && before !== after, "lazy content layout revision rebuilds Virtuoso's cached size tree");
+    ok(before != null && after != null && before === after, "a content patch never remounts the Virtuoso size tree");
     const el = harness.scrollElement();
     const distance = el.scrollHeight - el.clientHeight - el.scrollTop;
-    ok(Math.abs(distance) <= 1, `tail-follow survives the size-tree rebuild (bottom distance ${distance})`);
+    ok(Math.abs(distance) <= 1, `tail-follow is undisturbed by the patch (bottom distance ${distance})`);
   } finally {
     await harness.unmount();
     await harness.close();

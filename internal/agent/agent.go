@@ -330,9 +330,10 @@ type Agent struct {
 	// Entries keep a durable inbox item ID plus a loader so full bodies are not
 	// retained in the agent heap beyond need. Cache miss for the next API call
 	// is unavoidable but limited to one call — the prefix stays stable otherwise.
-	steerMu       sync.Mutex
-	steerQueue    []steerEntry
-	steerConsumed bool
+	steerMu        sync.Mutex
+	steerQueue     []steerEntry
+	steerConsumed  bool
+	steerUnapplied bool
 	// steerRunActive is true while Run is executing. Steer only queues while
 	// it is set; once the turn's exit flush has drained the queue, later
 	// steers are rejected so the caller can deliver them as a regular turn
@@ -683,6 +684,11 @@ type steerEntry struct {
 	text string
 }
 
+// ErrSteerWithdrawn tells the agent that a durable steer was intentionally
+// removed by a concurrent user cancellation. It must not be recorded as an
+// unapplied failure in the transcript.
+var ErrSteerWithdrawn = errors.New("steer withdrawn")
+
 // Steer queues a message for mid-turn injection. It reports whether an active
 // turn accepted the text; on false nothing was queued and the caller must
 // deliver it another way (typically as a new turn). Without the active check,
@@ -713,6 +719,15 @@ func (a *Agent) SteerConsumed() bool {
 	return a.steerConsumed
 }
 
+// HasUnappliedSteer reports whether the last Run ended with user guidance that
+// arrived too late to be consumed. Hosts use it to yield before starting an
+// automatic synthetic continuation.
+func (a *Agent) HasUnappliedSteer() bool {
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	return a.steerUnapplied
+}
+
 // SetSink replaces the agent's event sink. Controllers use this to wrap the
 // sink after construction (e.g. durable inbox observation) without rebuilding
 // the agent.
@@ -738,6 +753,9 @@ func (a *Agent) consumeSteer() (text, itemID string, ok bool) {
 	if e.load != nil {
 		t, err := e.load()
 		if err != nil {
+			if errors.Is(err, ErrSteerWithdrawn) {
+				return "", "", false
+			}
 			return "", e.itemID, false
 		}
 		return t, e.itemID, true
@@ -768,20 +786,28 @@ func (a *Agent) flushSteerQueue() {
 	a.steerMu.Lock()
 	pending := a.steerQueue
 	a.steerQueue = nil
+	a.steerUnapplied = false
 	if len(pending) > 0 {
 		a.steerConsumed = true
 	}
 	a.steerRunActive = false
 	a.steerMu.Unlock()
+	unapplied := false
 	for _, e := range pending {
 		text := e.text
 		if e.load != nil {
-			if t, err := e.load(); err == nil {
+			if t, err := e.load(); errors.Is(err, ErrSteerWithdrawn) {
+				continue
+			} else if err == nil {
 				text = t
 			}
 		}
 		a.RecordUnappliedSteer(text, e.itemID)
+		unapplied = true
 	}
+	a.steerMu.Lock()
+	a.steerUnapplied = unapplied
+	a.steerMu.Unlock()
 }
 
 // UnappliedSteerNotice returns the durable warning shown for guidance that was
@@ -1200,6 +1226,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	defer a.flushSteerQueue()
 	a.steerMu.Lock()
 	a.steerConsumed = false
+	a.steerUnapplied = false
 	a.steerRunActive = true
 	a.steerMu.Unlock()
 
@@ -1228,7 +1255,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		// Explicit readiness recovery is consumed only once beginRunTurn starts.
 		// If an extension blocks earlier, release the in-memory reservation so
 		// the still-pending durable marker can authorize a later retry.
-		a.pending.finalReadinessRecoveryPrepared = false
+		a.RestoreFinalReadinessRecoveryPreparation()
 		return err
 	}
 

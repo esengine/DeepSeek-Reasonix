@@ -3335,7 +3335,7 @@ export default function App() {
     for (let i = state.items.length - 1; i >= 0; i--) {
       const item = state.items[i];
       if (item.kind === "notice" && item.text.startsWith("↪ ")) {
-        return { key: item.id, text: item.text.slice(2) };
+        return { key: item.id, itemId: item.inboxItemId, text: item.text.slice(2) };
       }
     }
     return null;
@@ -4762,7 +4762,6 @@ export default function App() {
                   actionHoverMenus={sidebarCreation && !hydratePlaceholderActive}
                   rewindSignal={rewindSignal}
                   revealSignal={transcriptRevealSignal}
-                  historyLayoutRevision={state.historyLayoutRevision}
                   hydrating={transcriptHydrating}
                   hasOlderHistory={state.historyHasOlder && !rewindState}
                   olderHistoryCount={state.historyStartTurn}
@@ -5005,6 +5004,7 @@ export default function App() {
               workspaceScopeKey={workspaceScopeKey}
               fileRefRefreshKey={composerFileRefRefreshKey}
               guidanceConsumedKey={latestGuidanceConsumed?.key}
+              guidanceConsumedItemId={latestGuidanceConsumed?.itemId}
               guidanceConsumedText={latestGuidanceConsumed?.text}
               guidanceQueuePreviewItems={guidanceQueueMockItems}
               showContextWindowRing={sidebarCreation}

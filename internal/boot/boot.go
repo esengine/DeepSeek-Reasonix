@@ -2810,39 +2810,6 @@ func MCPStartupNotice(failures []plugin.Failure) (text, detail string, ok bool) 
 		len(failures), strings.Join(names, ", "), more, strings.Join(details, "\n")), true
 }
 
-// LSPSpecs returns the language → server map: the built-in defaults overlaid with
-// any user overrides. A user entry may set only the fields it wants to change;
-// empty fields keep the default for that language.
-func LSPSpecs(cfg config.LSPConfig) map[string]lsp.ServerSpec {
-	specs := lsp.DefaultSpecs()
-	for lang, s := range cfg.Servers {
-		spec := specs[lang]
-		if s.Command != "" {
-			spec.Command = s.Command
-		}
-		if s.Args != nil {
-			spec.Args = s.Args
-		}
-		if s.Env != nil {
-			spec.Env = s.Env
-		}
-		if s.LanguageID != "" {
-			spec.LanguageID = s.LanguageID
-		}
-		if s.Extensions != nil {
-			spec.Extensions = s.Extensions
-		}
-		if s.InstallHint != "" {
-			spec.InstallHint = s.InstallHint
-		}
-		if spec.LanguageID == "" {
-			spec.LanguageID = lang
-		}
-		specs[lang] = spec
-	}
-	return specs
-}
-
 func providerNames(cfg *config.Config) string {
 	names := make([]string, len(cfg.Providers))
 	for i, p := range cfg.Providers {

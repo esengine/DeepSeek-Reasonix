@@ -77,12 +77,31 @@ func InspectRunPause(err error) (RunPauseInfo, bool) {
 	return RunPauseInfo{}, false
 }
 
+// ReadinessContinuationClass tells a host whether an observed readiness gap is
+// safe and concrete enough for a bounded synthetic follow-up turn.
+type ReadinessContinuationClass string
+
+const (
+	// ReadinessContinuationNone is also the zero value so older callers that
+	// construct FinalReadinessError directly never opt into another model turn.
+	ReadinessContinuationNone ReadinessContinuationClass = ""
+	// ReadinessContinuationGeneric covers ordinary post-write verification and
+	// review gaps. Hosts may give it one bounded follow-up turn.
+	ReadinessContinuationGeneric ReadinessContinuationClass = "generic"
+	// ReadinessContinuationHighConfidence covers exact or strict, safely
+	// actionable readiness duties. Hosts may give it a second turn only after
+	// host-observable progress.
+	ReadinessContinuationHighConfidence ReadinessContinuationClass = "high_confidence"
+)
+
 // FinalReadinessError reports that the model exhausted its recovery attempts
 // before satisfying the host-observed delivery checks.
 type FinalReadinessError struct {
-	Attempts int
-	Reason   string
-	Missing  []string
+	Attempts          int
+	Reason            string
+	Missing           []string
+	ContinuationClass ReadinessContinuationClass
+	ProgressKey       string
 }
 
 func (e *FinalReadinessError) Error() string {

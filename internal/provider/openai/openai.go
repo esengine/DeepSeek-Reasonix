@@ -84,12 +84,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	// A meaningful explicit list is the endpoint's declared effort vocabulary;
 	// auto remains implicit and is therefore ignored here.
 	supportedEfforts, hasExplicitEfforts := reasoningEffortVocabulary(kimiK3, supportedEfforts)
-	legacyChatURL, _ := cfg.Extra["chat_url"].(string)
-	chatURL, _ := cfg.Extra["request_url"].(string)
-	chatURL = strings.TrimSpace(chatURL)
-	if chatURL == "" {
-		chatURL = normalizeChatURL(cfg.BaseURL, legacyChatURL)
-	}
+	chatURL := resolveOpenAIChatURL(cfg.BaseURL, cfg.Extra)
 	prefixChatURL := deepSeekPrefixChatURL(chatURL)
 	headers, _ := cfg.Extra["headers"].(map[string]string)
 	extraBody, _ := cfg.Extra["extra_body"].(map[string]any)
@@ -377,13 +372,6 @@ func normalizeReasoningProtocol(raw string) string {
 	default:
 		return ""
 	}
-}
-
-func normalizeChatURL(baseURL, chatURL string) string {
-	if legacy := strings.TrimRight(strings.TrimSpace(chatURL), "/"); legacy != "" {
-		return legacy
-	}
-	return strings.TrimRight(strings.TrimSpace(baseURL), "/") + "/chat/completions"
 }
 
 func cleanCustomHeaders(in map[string]string) map[string]string {

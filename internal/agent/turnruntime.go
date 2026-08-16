@@ -49,7 +49,8 @@ type turnRuntime struct {
 	// readinessRecovered marks a run that started with evidence preserved from
 	// (or a pending recovery of) a prior readiness failure, so the final
 	// allowed audit can report Recovered=true.
-	readinessRecovered bool
+	readinessRecovered             bool
+	automaticReadinessContinuation bool
 
 	// recoveryTaskSummary is the bounded task text for this Agent.Run. It lets
 	// a shared recovery gate review sub-agent mutations against the child

@@ -132,7 +132,7 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
     tabId: "single-surface-tab",
     sessionKey: "session:project:/repo:topic-a:session-a",
     onSend: () => {},
-    onCancel: () => undefined,
+    onCancel: async () => ({ discardedItemIds: [] }),
     onCycleMode: () => {},
     onSetMode: () => {},
     onSetCollaborationMode: (_mode: CollaborationMode) => {},
@@ -388,6 +388,7 @@ console.log("\ncomposer session draft");
   const dom = installDom();
   const sent: Array<{ tab: string; text: string }> = [];
   const inboxByTab = new Map<string, Array<{ id: string; preview: string }>>();
+  let inboxRevision = 0;
   installBridgeApp({
     InboxSnapshot: async (tabId: string) => {
       const items = (inboxByTab.get(tabId) ?? []).map((item, position) => ({
@@ -398,7 +399,7 @@ console.log("\ncomposer session draft");
         position: position + 1,
       }));
       return {
-        revision: items.length,
+        revision: inboxRevision,
         paused: false,
         recovered: false,
         items,
@@ -411,6 +412,7 @@ console.log("\ncomposer session draft");
     EnqueueInboxFollowup: async (tabId: string, display: string) => {
       const item = { id: "durable-tab-a", preview: display };
       inboxByTab.set(tabId, [...(inboxByTab.get(tabId) ?? []), item]);
+      inboxRevision += 1;
       return { itemId: item.id, disposition: "queued_followup", position: 1, paused: false };
     },
   });
@@ -422,14 +424,12 @@ console.log("\ncomposer session draft");
       sent.push({ tab: targetTabId ?? "", text });
     },
   });
-
   await rerender({ insertRequest: { id: 10, text: "follow up in A", mode: "replace" } });
   await act(async () => {
     sendButton().click();
     await flushTimers();
   });
   ok(document.querySelector(".composer-guidance-item") !== null, "session A shows its queued guidance before switching");
-
   await rerender({
     running: false,
     tabId: "tab-b",
@@ -452,13 +452,13 @@ console.log("\ncomposer session draft");
   ok(document.querySelector(".composer-guidance-item") !== null, "session A restores its queued guidance after switching back");
 
   inboxByTab.delete("tab-a"); // Controller dispatched and durably acked it.
+  inboxRevision += 1;
   await rerender({ running: false });
   await act(async () => {
     await flushTimers();
   });
   eq(sent.length, 0, "session A completion does not duplicate the Controller-owned follow-up");
   ok(document.querySelector(".composer-guidance-item") === null, "session A clears the durable item after its backend ack");
-
   await act(async () => {
     root.unmount();
   });

@@ -2,10 +2,11 @@
 
 import {
   INITIAL_TRANSCRIPT_SCROLL_STATE,
+  isTranscriptContentShrink,
   reduceTranscriptScroll,
   type TranscriptScrollEvent,
   type TranscriptScrollState,
-} from "../lib/transcriptScrollController";
+} from "../lib/transcriptScrollArbiter";
 
 let passed = 0;
 let failed = 0;
@@ -100,6 +101,26 @@ const restore = run([
 ]);
 check(restore.state.mode === "manual", "question/rewind navigation settles in manual mode");
 check(restore.commands.join(",") === "SCROLL_TO_INDEX", "navigation emits one indexed Virtuoso command");
+
+const shrink = run([
+  { type: "AT_BOTTOM_CHANGED", atBottom: true, scrollable: true },
+  { type: "CONTENT_SHRANK" },
+]);
+check(shrink.state.mode === "tail-follow", "auto fold collapse keeps tail-follow");
+check(shrink.commands.length === 0, "auto fold collapse does not tug the viewport to the tail");
+
+const shrinkOffBottom = run([
+  { type: "AT_BOTTOM_CHANGED", atBottom: true, scrollable: true },
+  { type: "AT_BOTTOM_CHANGED", atBottom: false, scrollable: true },
+  { type: "CONTENT_SHRANK" },
+  { type: "LAYOUT_HEIGHT_CHANGED" },
+]);
+check(shrinkOffBottom.state.mode === "tail-follow", "a shrink does not steal tail ownership");
+check(shrinkOffBottom.commands.join(",") === "AUTOSCROLL_TO_BOTTOM", "only later growth after a shrink may follow the tail");
+
+check(isTranscriptContentShrink(-48), "a fold-sized height drop is a shrink");
+check(!isTranscriptContentShrink(-8), "measurement jitter is not a shrink");
+check(!isTranscriptContentShrink(80), "content growth is not a shrink");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
