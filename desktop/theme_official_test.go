@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// The release gate: all eight embedded official themes must parse through the
+// The release gate: all embedded official themes must parse through the
 // Theme Pack V1 validator with unique ids/names, valid images and budgets.
 func TestOfficialThemesAllValid(t *testing.T) {
 	resetOfficialRegistryForTest()
@@ -74,9 +74,12 @@ func TestOfficialThemesAllValid(t *testing.T) {
 					t.Fatalf("%s %s: missing token %q", m.ID, mode, key)
 				}
 			}
-			// ok/warn/err stay inherited from the base style.
 			for _, key := range []string{"ok", "warn", "err"} {
-				if _, set := tk[key]; set {
+				_, set := tk[key]
+				if m.ID == "official-semantix" && !set {
+					t.Fatalf("%s %s: missing semantic status token %s", m.ID, mode, key)
+				}
+				if m.ID != "official-semantix" && set {
 					t.Fatalf("%s %s: %s must inherit the base style", m.ID, mode, key)
 				}
 			}

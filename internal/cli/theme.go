@@ -50,7 +50,23 @@ type cliThemeStyle struct {
 	name        string
 	mode        string
 	accent      cliColor
+	semantic    *cliThemeSemanticColors
 	description string
+}
+
+// cliThemeSemanticColors lets a branded style tune status meaning without
+// replacing the terminal background. Empty fields continue to inherit the
+// mode palette, so the existing accent-only themes keep their current output.
+type cliThemeSemanticColors struct {
+	muted        cliColor
+	faint        cliColor
+	success      cliColor
+	warn         cliColor
+	info         cliColor
+	border       cliColor
+	userBubbleBG cliColor
+	diffAddBG    cliColor
+	toolRead     cliColor
 }
 
 var (
@@ -100,6 +116,23 @@ var (
 		{name: "graphite", mode: "dark", accent: cliColor{"#d97757", 173}, description: "warm clay accent"},
 		{name: "ember", mode: "dark", accent: cliColor{"#f06d38", 209}, description: "hot orange accent"},
 		{name: "aurora", mode: "dark", accent: cliColor{"#34c3a6", 79}, description: "cool teal accent"},
+		{
+			name:   "semantix",
+			mode:   "dark",
+			accent: cliColor{"#2f967f", 30},
+			semantic: &cliThemeSemanticColors{
+				muted:        cliColor{"#b5c9c1", 152},
+				faint:        cliColor{"#78968b", 66},
+				success:      cliColor{"#56b88e", 72},
+				warn:         cliColor{"#d5a657", 179},
+				info:         cliColor{"#57ae9a", 73},
+				border:       cliColor{"#29463b", 238},
+				userBubbleBG: cliColor{"#13231e", 234},
+				diffAddBG:    cliColor{"#10372a", 23},
+				toolRead:     cliColor{"#57ae9a", 73},
+			},
+			description: "Semantix semantic green",
+		},
 		{name: "midnight", mode: "dark", accent: cliColor{"#b18cff", 141}, description: "quiet violet accent"},
 		{name: "sandstone", mode: "light", accent: cliColor{"#c2613f", 173}, description: "default warm light accent"},
 		{name: "porcelain", mode: "light", accent: cliColor{"#7d63c8", 104}, description: "soft violet light accent"},
@@ -194,6 +227,17 @@ func applyCLIThemeStyle(base cliPalette, style cliThemeStyle) cliPalette {
 	base.style = style.name
 	base.accent = style.accent
 	base.selection = style.accent
+	if semantic := style.semantic; semantic != nil {
+		base.muted = semantic.muted
+		base.faint = semantic.faint
+		base.success = semantic.success
+		base.warn = semantic.warn
+		base.info = semantic.info
+		base.border = semantic.border
+		base.userBubbleBG = semantic.userBubbleBG
+		base.diffAddBG = semantic.diffAddBG
+		base.toolRead = semantic.toolRead
+	}
 	return base
 }
 

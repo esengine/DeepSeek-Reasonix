@@ -2346,6 +2346,8 @@ export const zh: Record<DictKey, string> = {
   "settings.themeLibrary.groupPlugin": "插件主题",
   "settings.themeLibrary.emptyUser": "还没有自定义主题，可以新建或导入。",
   "settings.themeLibrary.copyFrom": "创建自定义副本",
+  "settings.themes.official.official-semantix.name": "Semantix 语义绿",
+  "settings.themes.official.official-semantix.description": "以炭黑界面和语义绿呈现专注、清晰的检索工作流。",
   "settings.themes.official.official-rose-dawn.name": "玫瑰晨光",
   "settings.themes.official.official-rose-dawn.description": "象牙白晨光与柔粉玫瑰，原创插画女性人物。",
   "settings.themes.official.official-fortune-forge.name": "鸿运工坊",

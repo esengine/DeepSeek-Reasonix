@@ -35,7 +35,7 @@ const (
 	officialMaxBackground    = 2359296  // 2.25 MiB per background
 	officialMaxPreview       = 122880   // 120 KiB per thumbnail
 	officialMaxTotalBytes    = 18 << 20 // 18 MiB across all backgrounds
-	officialExpectedCount    = 8        // release gate: all eight themes
+	officialExpectedCount    = 9        // release gate: all nine themes
 	themeKindBase            = "base"
 	themeKindOfficial        = "official"
 	themeKindUser            = "user"
@@ -43,6 +43,7 @@ const (
 
 // Fixed gallery / list order (not alphabetical).
 var officialThemeOrderFixed = []string{
+	"official-semantix",
 	"official-rose-dawn",
 	"official-fortune-forge",
 	"official-crimson-horizon",

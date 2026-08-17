@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "id": "official-semantix",
+  "name": "Semantix Design",
+  "author": "Reasonix Contributors",
+  "description": "Charcoal surfaces and semantic green for focused retrieval work.",
+  "license": "MIT",
+  "baseStyle": "carbon",
+  "tokens": {
+    "light": {
+      "bg": "#F3F8F6",
+      "bgSoft": "#E8F1ED",
+      "bgElev": "#FAFCFB",
+      "panel": "#FAFCFB",
+      "sidebar": "#E7F0EC",
+      "chat": "#F7FAF9",
+      "workspace": "#FAFCFB",
+      "workspaceFiles": "#EDF4F1",
+      "border": "#A9C5BA",
+      "borderSoft": "#D7E5DF",
+      "fg": "#172A24",
+      "fgDim": "#425F55",
+      "fgFaint": "#657F75",
+      "accent": "#216F5F",
+      "accentFg": "#F7FBF9",
+      "ok": "#277A60",
+      "warn": "#8B5B13",
+      "err": "#B1494B"
+    },
+    "dark": {
+      "bg": "#0B1210",
+      "bgSoft": "#101B17",
+      "bgElev": "#16231E",
+      "panel": "#111D19",
+      "sidebar": "#0E1815",
+      "chat": "#0D1714",
+      "workspace": "#15231E",
+      "workspaceFiles": "#101B17",
+      "border": "#29463B",
+      "borderSoft": "#1E342C",
+      "fg": "#EAF4F0",
+      "fgDim": "#B5C9C1",
+      "fgFaint": "#78968B",
+      "accent": "#2F967F",
+      "accentFg": "#06130F",
+      "ok": "#56B88E",
+      "warn": "#D5A657",
+      "err": "#E0696A"
+    }
+  },
+  "recipes": {
+    "density": "comfortable",
+    "corners": "soft"
+  },
+  "background": {
+    "image": "background.webp",
+    "focusX": 0.76,
+    "focusY": 0.5,
+    "safeArea": "left",
+    "homeOpacity": 0.94,
+    "taskOpacity": 0.18,
+    "overlayStrength": 0.74,
+    "paneOpacity": 0.5
+  }
+}

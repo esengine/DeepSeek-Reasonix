@@ -625,6 +625,7 @@ ok(!overviewSource.includes("theme-card-grid"), "overview no longer renders long
 
 // Localized official names/descriptions in all three locales.
 const OFFICIAL_IDS = [
+  "official-semantix",
   "official-rose-dawn",
   "official-fortune-forge",
   "official-crimson-horizon",
@@ -662,12 +663,12 @@ for (const key of [
   ok(localeEn.includes(`"${key}"`) && localeZh.includes(`"${key}"`) && localeZhTW.includes(`"${key}"`), `gallery key ${key} in all locales`);
 }
 
-// Mock parity: 6 base + 8 official mock packs so browser dev matches the shell.
+// Mock parity: 6 base + 9 official mock packs so browser dev matches the shell.
 ok((bridgeSource.match(/kind: "base"/g) || []).length === 6, "mock has 6 base packs");
-ok((bridgeSource.match(/kind: "official"/g) || []).length === 8, "mock has 8 official packs");
-ok((bridgeSource.match(/previewUrl: new URL\("\.\.\/\.\.\/\.\.\/themes\/official\//g) || []).length === 8, "browser mock has 8 real official previews");
-ok((bridgeSource.match(/backgroundUrl: new URL\("\.\.\/\.\.\/\.\.\/themes\/official\//g) || []).length === 8, "browser mock has 8 real official backgrounds");
-ok((bridgeSource.match(/paneOpacity:\s*0\.50/g) || []).length === 8, "browser mock gives every official theme the product pane opacity");
+ok((bridgeSource.match(/kind: "official"/g) || []).length === 9, "mock has 9 official packs");
+ok((bridgeSource.match(/previewUrl: new URL\("\.\.\/\.\.\/\.\.\/themes\/official\//g) || []).length === 9, "browser mock has 9 real official previews");
+ok((bridgeSource.match(/backgroundUrl: new URL\("\.\.\/\.\.\/\.\.\/themes\/official\//g) || []).length === 9, "browser mock has 9 real official backgrounds");
+ok((bridgeSource.match(/paneOpacity:\s*0\.50/g) || []).length === 9, "browser mock gives every official theme the product pane opacity");
 ok(viteSource.includes('resolve(configDir, "../themes/official")'), "Vite dev server permits only the official theme asset directory");
 ok(stylesSource.includes("container: theme-gallery / inline-size"), "gallery establishes its own responsive container");
 ok(stylesSource.includes("@container theme-gallery (max-width: 760px)"), "gallery collapses from its content width");

@@ -2344,6 +2344,8 @@ export const en = {
   "settings.themeLibrary.groupPlugin": "Plugin themes",
   "settings.themeLibrary.emptyUser": "No custom themes yet — create one or import a pack.",
   "settings.themeLibrary.copyFrom": "Customize a copy",
+  "settings.themes.official.official-semantix.name": "Semantix Design",
+  "settings.themes.official.official-semantix.description": "Charcoal surfaces and semantic green for focused retrieval work.",
   "settings.themes.official.official-rose-dawn.name": "Rose Dawn",
   "settings.themes.official.official-rose-dawn.description": "Ivory dawn light and soft roses around an original illustrated muse.",
   "settings.themes.official.official-fortune-forge.name": "Fortune Forge",

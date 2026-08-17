@@ -57,6 +57,43 @@ func TestConfigureCLIThemeStyleOverride(t *testing.T) {
 	}
 }
 
+func TestSemantixCLIThemeAppliesBrandAndStatusTokens(t *testing.T) {
+	t.Setenv("REASONIX_THEME", "")
+	t.Setenv("REASONIX_THEME_STYLE", "")
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.TrueColor
+
+	configureCLITheme("semantix")
+	if activeCLITheme.name != "dark" || activeCLITheme.style != "semantix" {
+		t.Fatalf("theme = %s/%s, want dark/semantix", activeCLITheme.name, activeCLITheme.style)
+	}
+	for name, got := range map[string]cliColor{
+		"accent":  activeCLITheme.accent,
+		"hit":     activeCLITheme.success,
+		"neutral": activeCLITheme.faint,
+		"miss":    activeCLITheme.warn,
+	} {
+		if got.hex == "" {
+			t.Fatalf("%s token is empty", name)
+		}
+	}
+	if got := activeCLITheme.accent.hex; got != "#2f967f" {
+		t.Fatalf("accent = %q, want #2f967f", got)
+	}
+	if got := accent("x"); !strings.HasPrefix(got, "\033[38;2;47;150;127m") {
+		t.Fatalf("truecolor accent = %q, want 24-bit #2f967f", got)
+	}
+	if got := cacheStatusColor(90); got != activeCLITheme.success {
+		t.Fatalf("high cache rate color = %+v, want success", got)
+	}
+	if got := cacheStatusColor(60); got != activeCLITheme.info {
+		t.Fatalf("medium cache rate color = %+v, want info", got)
+	}
+	if got := cacheStatusColor(20); got != activeCLITheme.warn {
+		t.Fatalf("low cache rate color = %+v, want warn", got)
+	}
+}
+
 func TestConfigureCLIThemeHonorsEnvOverride(t *testing.T) {
 	t.Setenv("REASONIX_THEME", "ember")
 	t.Setenv("REASONIX_THEME_STYLE", "")
@@ -99,7 +136,7 @@ func TestThemeArgCompletion(t *testing.T) {
 	if !ok || len(items) == 0 {
 		t.Fatalf("/theme arg completion should offer themes, ok=%v n=%d", ok, len(items))
 	}
-	if !hasLabel(items, "auto") || !hasLabel(items, "graphite") || !hasLabel(items, "aurora") {
+	if !hasLabel(items, "auto") || !hasLabel(items, "graphite") || !hasLabel(items, "aurora") || !hasLabel(items, "semantix") {
 		t.Fatalf("/theme completion missing expected themes: %v", labels(items))
 	}
 }
