@@ -611,8 +611,8 @@ export function Transcript({
     const index = rowIndexByKey.get(String(userRowKey(question.id)));
     if (index == null) return;
     invalidateAnchors();
-    scrollToDataIndex(firstItemIndex, index, "smooth");
-  }, [firstItemIndex, invalidateAnchors, rowIndexByKey, scrollToDataIndex]);
+    scrollToDataIndex(index, "smooth");
+  }, [invalidateAnchors, rowIndexByKey, scrollToDataIndex]);
 
   // The jump-bottom click is explicit user intent: it outranks any in-flight
   // recovery anchor restore and ends a stale selection gesture whose
@@ -622,7 +622,6 @@ export function Transcript({
     invalidateAnchors();
     scrollToBottom();
   };
-
   // After a non-fork rewind, scroll to the last user message (the
   // rewound-to point) so the user knows where they are.
   useEffect(() => {
@@ -631,7 +630,7 @@ export function Transcript({
     const index = rowIndexByKey.get(String(userRowKey(lastQ.id)));
     if (index == null) return;
     invalidateAnchors();
-    scrollToDataIndex(firstItemIndex, index);
+    scrollToDataIndex(index);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rewindSignal]);
 
