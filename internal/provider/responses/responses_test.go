@@ -1197,3 +1197,75 @@ func TestVendorTableMaxOutputTokens(t *testing.T) {
 		t.Fatalf("deepseek auto budget = %#v, want omitted official ceiling", db["max_output_tokens"])
 	}
 }
+
+// TestStreamHTMLResponseDiagnostic reproduces #8781 on the Responses path: a
+// gateway answers a POST to its root path with 200 + an HTML landing page (no
+// SSE events at all). The stream must surface a diagnostic naming the
+// non-streaming response and the Content-Type, instead of a bare premature
+// EOF that reads like a dropped connection.
+func TestStreamHTMLResponseDiagnostic(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "<!doctype html><html><head><title>Gateway</title></head><body>Welcome</body></html>")
+	}))
+	defer server.Close()
+
+	chunks := collect(t, New(Config{Name: "deepseek-responses", APIKey: "key", BaseURL: server.URL, Model: "m", Mode: "stateless"}), provider.Request{
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+	})
+	var gotErr error
+	for _, chunk := range chunks {
+		if chunk.Type == provider.ChunkError {
+			gotErr = chunk.Err
+		}
+	}
+	if gotErr == nil {
+		t.Fatal("expected a stream error for an HTML response, got none")
+	}
+	msg := gotErr.Error()
+	for _, want := range []string{
+		"non-streaming response",
+		"text/html",
+		"request_url/base_url",
+		"<!doctype html>",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error %q missing %q", msg, want)
+		}
+	}
+	if strings.HasPrefix(msg, "unexpected EOF") {
+		t.Errorf("error %q reads like a bare EOF, want diagnostic first", msg)
+	}
+}
+
+// TestStreamMissingContentTypeStillStreams guards the Responses-path
+// diagnostic: a gateway that streams SSE without setting Content-Type must
+// keep working.
+func TestStreamMissingContentTypeStillStreams(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK) // no Content-Type header at all
+		writeEvents(w,
+			`{"type":"response.output_text.delta","item_id":"msg_1","content_index":0,"delta":"ok"}`,
+			`{"type":"response.output_text.done","item_id":"msg_1","content_index":0,"text":"ok"}`,
+			`{"type":"response.completed","response":{"id":"resp_1","usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}}`,
+		)
+	}))
+	defer server.Close()
+
+	chunks := collect(t, New(Config{Name: "test", APIKey: "key", BaseURL: server.URL, Model: "m", Mode: "stateless"}), provider.Request{
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+	})
+	var text strings.Builder
+	for _, chunk := range chunks {
+		if chunk.Type == provider.ChunkError {
+			t.Fatalf("unexpected stream error: %v", chunk.Err)
+		}
+		if chunk.Type == provider.ChunkText {
+			text.WriteString(chunk.Text)
+		}
+	}
+	if text.String() != "ok" {
+		t.Errorf("streamed text = %q, want %q", text.String(), "ok")
+	}
+}
