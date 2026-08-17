@@ -31,6 +31,18 @@ export function createPublicationRegistry(options = {}) {
   const defaultWorkspaceId = options.defaultWorkspaceId ?? "WS-DEMO";
   let writeQueue = Promise.resolve();
 
+  async function readLegacyStore() {
+    try {
+      const parsed = JSON.parse(await readFile(storeFile, "utf8"));
+      if (!Array.isArray(parsed?.publications)) throw new Error("Legacy publication registry has an invalid schema");
+      return parsed;
+    } catch (error) {
+      if (error?.code === "ENOENT") return emptyStore();
+      if (String(error?.message).startsWith("Legacy publication registry")) throw error;
+      throw new Error("Legacy publication registry could not be read");
+    }
+  }
+
   async function readStore(workspaceId = defaultWorkspaceId) {
     if (platformStore) return { schemaVersion: 1, publications: platformStore.listPublications(workspaceId) };
     try {
@@ -119,6 +131,27 @@ export function createPublicationRegistry(options = {}) {
   }
 
   return {
+    async migrateLegacyPublications(workspaceId = defaultWorkspaceId) {
+      if (!platformStore) return { discovered: 0, imported: 0, skipped: 0 };
+      const legacy = await readLegacyStore();
+      const existingJobs = new Set(platformStore.listPublications(workspaceId).map((item) => String(item.sourceJobId)));
+      let imported = 0;
+      let skipped = 0;
+      for (const publication of legacy.publications) {
+        const sourceJobId = String(publication?.sourceJobId ?? "");
+        if (!sourceJobId || !publication?.publicationId || !Array.isArray(publication?.assets)) {
+          throw new Error("Legacy publication registry contains an invalid publication");
+        }
+        if (existingJobs.has(sourceJobId)) {
+          skipped += 1;
+          continue;
+        }
+        platformStore.savePublication(workspaceId, publication);
+        existingJobs.add(sourceJobId);
+        imported += 1;
+      }
+      return { discovered: legacy.publications.length, imported, skipped };
+    },
     async publish(job, metadata = {}, workspaceId = defaultWorkspaceId) {
       if (platformStore) {
         const existing = platformStore.listPublications(workspaceId).find((item) => item.sourceJobId === job?.id);
@@ -142,6 +175,11 @@ export function createPublicationRegistry(options = {}) {
       return store.publications
         .flatMap((publication) => publication.assets)
         .filter((asset) => canViewAsset(asset, optionsForList.role))
+        .map((asset) => {
+          const current = platformStore?.getWiki(workspaceId, asset.id);
+          if (!current) return asset;
+          return { ...asset, title: current.title || asset.title, version: current.version, updatedAt: current.updatedAt, wiki: { title: current.title, executiveSummary: current.executiveSummary, keyMechanism: current.keyMechanism, metrics: current.metrics, relationships: current.relationships, updatedAt: current.updatedAt } };
+        })
         .sort((a, b) => String(b.publishedAt ?? "").localeCompare(String(a.publishedAt ?? "")));
     },
     async getAsset(first, second, optionsForAsset = {}) {
@@ -195,6 +233,17 @@ export function createPublicationRegistry(options = {}) {
       const assets = await this.search(query, workspaceId, optionsForSearch);
       return { query, results: assets.map((asset) => ({ asset, matchKind: "direct", score: 66, explanation: "资产内容匹配", path: [asset.id] })), meta: { directMatches: assets.length, expandedMatches: 0, depth: 0 } };
     },
+    async updateAssetMetadata(workspaceId, assetId, input, optionsForUpdate = {}) {
+      if (!platformStore) throw Object.assign(new Error("Asset governance requires the transactional platform store"), { code: "STORAGE_UNAVAILABLE" });
+      const updated = platformStore.updateAssetMetadata(workspaceId, assetId, input, optionsForUpdate);
+      if (!updated) return null;
+      return this.getAsset(workspaceId, assetId, optionsForUpdate);
+    },
+    async updateAssetMetadataBatch(workspaceId, assetIds, input, optionsForUpdate = {}) {
+      if (!platformStore) throw Object.assign(new Error("Asset governance requires the transactional platform store"), { code: "STORAGE_UNAVAILABLE" });
+      const updated = platformStore.updateAssetMetadataBatch(workspaceId, assetIds, input, optionsForUpdate);
+      return Promise.all(updated.map((asset) => this.getAsset(workspaceId, asset.id, optionsForUpdate)));
+    },
     async createAssetRelationship(workspaceId, input, optionsForRelationship = {}) {
       if (!platformStore) throw Object.assign(new Error("Relationship editing requires the transactional platform store"), { code: "STORAGE_UNAVAILABLE" });
       return platformStore.createAssetRelationship(workspaceId, input, optionsForRelationship);
@@ -218,6 +267,19 @@ export function createPublicationRegistry(options = {}) {
       if (!platformStore) throw new Error("Wiki editing requires the transactional platform store");
       if (!platformStore.findAsset(workspaceId, assetId)) return null;
       return platformStore.saveWikiVersion(workspaceId, assetId, input);
+    },
+    async submitWikiReview(workspaceId, assetId, input) {
+      if (!platformStore) throw new Error("Wiki review requires the transactional platform store");
+      if (!platformStore.findAsset(workspaceId, assetId)) return null;
+      return platformStore.submitWikiReview(workspaceId, assetId, input);
+    },
+    async listWikiReviews(workspaceId, options = {}) {
+      if (!platformStore) return [];
+      return platformStore.listWikiReviews(workspaceId, options);
+    },
+    async decideWikiReview(workspaceId, reviewId, input) {
+      if (!platformStore) throw new Error("Wiki review requires the transactional platform store");
+      return platformStore.decideWikiReview(workspaceId, reviewId, input);
     },
     async listWikiVersions(workspaceId, assetId, optionsForWiki = {}) {
       if (!platformStore) {

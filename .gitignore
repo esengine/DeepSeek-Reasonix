@@ -45,6 +45,10 @@ node_modules/
 .pnpm-store/
 .npm/
 
+# Python bytecode caches
+__pycache__/
+*.py[cod]
+
 # Project-local Reasonix state; keep the checked-in review command.
 /.reasonix/*
 !/.reasonix/commands/

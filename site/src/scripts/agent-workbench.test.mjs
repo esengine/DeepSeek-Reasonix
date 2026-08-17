@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createStaticAgentTask, isAgentTerminal, taskViewModel } from "./agent-workbench.mjs";
+import { createStaticAgentTask, isAgentTerminal, retryTaskDraft, sourceButtonLabel, taskViewModel } from "./agent-workbench.mjs";
 
 test("maps persisted task receipts to a deterministic UI step state", () => {
   const task = {
@@ -31,4 +31,16 @@ test("static acceptance boundary rejects coding and publishing requests", () => 
     assert.equal(task.events[0].type, "policy.blocked");
     assert.equal(task.plan, undefined);
   }
+});
+
+test("retry draft preserves the failed task intent but never submits it", () => {
+  const draft = retryTaskDraft({ prompt: "盘点专利资产", templateId: "asset_inventory", state: "failed" });
+  assert.deepEqual(draft, { prompt: "盘点专利资产", templateId: "asset_inventory" });
+  assert.equal(retryTaskDraft({ prompt: "仍在运行", state: "running" }), null);
+});
+
+test("source buttons use business labels instead of exposing internal ids", () => {
+  assert.equal(sourceButtonLabel("IP-REAL-A", 0), "查看相关资产 1");
+  assert.equal(sourceButtonLabel("EV-ABC", 1), "查看原文依据 2");
+  assert.equal(sourceButtonLabel("REL-ABC", 2), "查看关联关系 3");
 });

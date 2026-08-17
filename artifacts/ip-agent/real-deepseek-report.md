@@ -1,12 +1,12 @@
 # intelifar 受控 IP 任务助手 · 真实 DeepSeek E2E
 - 结果：PASS
-- 运行时间：2026-08-10T11:06:03.518Z
-- 耗时：14907 ms
+- 运行时间：2026-08-11T02:56:31.263Z
+- 耗时：14174 ms
 - 输入材料：DeepSeek-V3 Technical Report 已入库资产（来自真实互联网材料验证集）
 - DeepSeek 模型：deepseek-v4-flash
 - 任务状态：complete
 - 受控步骤：6
-- Token：5776
+- Token：5598
 - 有依据发现：6
 - 证据覆盖：100%
 - 正式 Wiki 写入：0

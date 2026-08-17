@@ -178,6 +178,15 @@ function normalizeDeliverables(value) {
   })).filter((item) => item.content);
 }
 
+function normalizeVisibleAssetCount(value, visibleAssetCount) {
+  const summary = text(value, 3_000);
+  if (!Number.isInteger(visibleAssetCount) || visibleAssetCount < 0) return summary;
+  return summary.replace(
+    /已核查[^,，。；;]{0,80}(?:[,，]\s*)?共\s*\d+\s*(?:项|个|条)(?:\s*资产)?(?:[,，]\s*)?/g,
+    `已核查本次返回的 ${visibleAssetCount} 项资产，`,
+  );
+}
+
 export function normalizeAgentResult(raw, options = {}) {
   const allowed = options.allowedSourceIds instanceof Set ? options.allowedSourceIds : new Set(options.allowedSourceIds ?? []);
   const findings = [];
@@ -208,7 +217,10 @@ export function normalizeAgentResult(raw, options = {}) {
   return {
     status: requestedStatus === "blocked" ? "blocked" : needsReview ? "needs_review" : requestedStatus,
     title: text(raw?.title, 200, "IP 智能任务结果"),
-    summary: text(raw?.summary, 3_000, findings.length ? "已完成有证据约束的任务分析。" : "当前授权范围内没有足够依据形成确定结论。"),
+    summary: normalizeVisibleAssetCount(
+      raw?.summary ?? (findings.length ? "已完成有证据约束的任务分析。" : "当前授权范围内没有足够依据形成确定结论。"),
+      options.visibleAssetCount,
+    ),
     findings,
     uncertainties: [...listOfText(raw?.uncertainties, 20, 1_000), ...downgraded].slice(0, 20),
     deliverables: normalizeDeliverables(raw?.deliverables),

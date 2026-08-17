@@ -306,14 +306,35 @@ export function createAssetGraphStore(database) {
 
     const workspaceNodes = new Set(statements.nodesForWorkspace.all(workspaceId).map((row) => row.asset_id));
     const aliasLookup = aliasesIndex(workspaceId);
+    const publicationAliases = new Map();
+    const addPublicationAlias = (value, assetId) => {
+      const normalized = normalizeGraphText(value);
+      if (!normalized) return;
+      const ids = publicationAliases.get(normalized) ?? new Set();
+      ids.add(assetId);
+      publicationAliases.set(normalized, ids);
+    };
+    for (const asset of publication.assets ?? []) {
+      const assetId = cleanText(asset?.id, "", 100);
+      if (!assetId) continue;
+      addPublicationAlias(assetId, assetId);
+      addPublicationAlias(asset.title, assetId);
+      addPublicationAlias(asset.wiki?.title, assetId);
+      for (const alias of Array.isArray(asset.aliases) ? asset.aliases : []) addPublicationAlias(alias, assetId);
+    }
+    const resolvePublicationReference = (reference) => {
+      const candidates = publicationAliases.get(normalizeGraphText(reference));
+      return candidates?.size === 1 ? [...candidates][0] : null;
+    };
     let projectedRelationships = 0;
     const processed = new Set();
     for (const asset of publication.assets ?? []) {
       for (const relationship of asset?.wiki?.relationships ?? []) {
         const relationType = mapRelationType(relationship?.relation || relationship?.type || relationship?.relationType);
         if (!relationType) continue;
-        const resolvedSource = resolveAssetReference(relationship?.source || asset.id, workspaceNodes, aliasLookup);
-        const resolvedTarget = resolveAssetReference(relationship?.target, workspaceNodes, aliasLookup);
+        const sourceReference = relationship?.source || asset.id;
+        const resolvedSource = resolvePublicationReference(sourceReference) || resolveAssetReference(sourceReference, workspaceNodes, aliasLookup);
+        const resolvedTarget = resolvePublicationReference(relationship?.target) || resolveAssetReference(relationship?.target, workspaceNodes, aliasLookup);
         if (!resolvedSource || !resolvedTarget || resolvedSource === resolvedTarget) continue;
         const [sourceAssetId, targetAssetId] = canonicalEndpoints(resolvedSource, resolvedTarget, relationType);
         const relationshipId = deterministicRelationshipId(workspaceId, sourceAssetId, relationType, targetAssetId);

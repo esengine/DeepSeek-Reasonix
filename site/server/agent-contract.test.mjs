@@ -105,3 +105,16 @@ test("delivery gate marks an empty evidence result for review and caps output", 
   assert.equal(result.nextActions.length, 12);
   assert.equal(result.quality.evidenceCoverage, 0);
 });
+
+test("delivery gate corrects asset counts to the sources returned in this task", () => {
+  const result = normalizeAgentResult({
+    status: "complete",
+    title: "证据核查",
+    summary: "已核查当前账号可见资产，共 22 项，均有原文依据。",
+    findings: [{ title: "已找到依据", detail: "本次返回的资产均有依据。", sourceIds: ["IP-REAL-A", "IP-REAL-B"], confidence: 0.9 }],
+    uncertainties: ["当前搜索仅返回 20 条资产。"],
+    deliverables: [],
+    nextActions: [],
+  }, { allowedSourceIds: new Set(["IP-REAL-A", "IP-REAL-B"]), visibleAssetCount: 2 });
+  assert.equal(result.summary, "已核查本次返回的 2 项资产，均有原文依据。");
+});

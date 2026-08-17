@@ -1,0 +1,270 @@
+{"kind":"slide","id":"sl/6qq3ot","slide":1,"title":"让每份长文档，","textShapes":5}
+{"kind":"shape","id":"sh/be10r6p0","slide":1,"bbox":[72,158,94,5]}
+{"kind":"textbox","id":"sh/adszy1of","slide":1,"textChars":23,"textLines":2}
+{"kind":"textbox","id":"sh/9czipg7u","slide":1,"textChars":23,"textLines":1}
+{"kind":"textbox","id":"sh/obqhwb69","slide":1,"textChars":17,"textLines":1}
+{"kind":"textbox","id":"sh/nah0n6po","slide":1,"textChars":29,"textLines":1}
+{"kind":"shape","id":"sh/mp8zu1o3","slide":1,"bbox":[1008,96,138,516]}
+{"kind":"textbox","id":"sh/1ozilw7i","slide":1,"textChars":15,"textLines":2}
+{"kind":"image","id":"im/p8fytg32","slide":1,"name":"","geometry":"roundRect","alt":"intelifar 标志","bbox":[72,54,250,60]}
+{"kind":"notes","id":"nt/6qq3ot","slide":1,"text":"开场只讲一个判断：企业文档的价值不在存储数量，而在能否被可信地复用。 |  | [Sources] | - 本演示中的产品能力与截图来自 intelifa..."}
+{"kind":"slide","id":"sl/y3bzyo","slide":2,"title":"THE KNOWLEDGE GAP","textShapes":17}
+{"kind":"textbox","id":"sh/yl0v61gf","slide":2,"textChars":17,"textLines":1}
+{"kind":"textbox","id":"sh/loruhgf6","slide":2,"textChars":17,"textLines":1}
+{"kind":"textbox","id":"sh/knid8byl","slide":2,"textChars":24,"textLines":1}
+{"kind":"textbox","id":"sh/7a9wj6xw","slide":2,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/m90va1gb","slide":2,"textChars":4,"textLines":1}
+{"kind":"textbox","id":"sh/9cbelgf2","slide":2,"textChars":26,"textLines":1}
+{"kind":"shape","id":"sh/8bidcbyh","slide":2,"bbox":[182,317,978,1]}
+{"kind":"textbox","id":"sh/vetwnqx8","slide":2,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/udkvelwn","slide":2,"textChars":4,"textLines":1}
+{"kind":"textbox","id":"sh/4j2dc7mp","slide":2,"textChars":27,"textLines":1}
+{"kind":"shape","id":"sh/5kbe5cnu","slide":2,"bbox":[182,413,978,1]}
+{"kind":"textbox","id":"sh/ihkvax4j","slide":2,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/jitw3254","slide":2,"textChars":5,"textLines":1}
+{"kind":"textbox","id":"sh/snmdg7ml","slide":2,"textChars":26,"textLines":1}
+{"kind":"shape","id":"sh/dove9cn6","slide":2,"bbox":[182,509,978,1]}
+{"kind":"textbox","id":"sh/qlkvex4f","slide":2,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/rmdw7250","slide":2,"textChars":4,"textLines":1}
+{"kind":"textbox","id":"sh/0bmdkrmh","slide":2,"textChars":24,"textLines":1}
+{"kind":"textbox","id":"sh/1cvedwn2","slide":2,"textChars":26,"textLines":1}
+{"kind":"textbox","id":"sh/98bexcf6","slide":2,"textChars":2,"textLines":1}
+{"kind":"notes","id":"nt/y3bzyo","slide":2,"text":"不要把问题说成“缺 AI”。真正缺的是从文档到正式知识的连续责任链。 |  | [Sources] | - 本演示中的产品能力与截图来自 intelifa..."}
+{"kind":"slide","id":"sl/j4g5zn","slide":3,"title":"PRODUCT PROMISE","textShapes":15}
+{"kind":"textbox","id":"sh/c3y1kz6d","slide":3,"textChars":15,"textLines":1}
+{"kind":"textbox","id":"sh/b2pkbu5s","slide":3,"textChars":34,"textLines":1}
+{"kind":"textbox","id":"sh/a1gjipo7","slide":3,"textChars":27,"textLines":1}
+{"kind":"textbox","id":"sh/p0n29knm","slide":3,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/oze1gf61","slide":3,"textChars":3,"textLines":1}
+{"kind":"textbox","id":"sh/ny5k7a5g","slide":3,"textChars":24,"textLines":1}
+{"kind":"shape","id":"sh/2dwje5ov","slide":3,"bbox":[90,335,530,1]}
+{"kind":"textbox","id":"sh/9wr2l4nq","slide":3,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/8vilsj65","slide":3,"textChars":3,"textLines":1}
+{"kind":"textbox","id":"sh/258be10v","slide":3,"textChars":21,"textLines":1}
+{"kind":"shape","id":"sh/n6hcn61g","slide":3,"bbox":[90,437,530,1]}
+{"kind":"textbox","id":"sh/o7qtgbi1","slide":3,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/p8jupgjm","slide":3,"textChars":3,"textLines":1}
+{"kind":"textbox","id":"sh/e18ba10z","slide":3,"textChars":26,"textLines":1}
+{"kind":"shape","id":"sh/f2hcjm1k","slide":3,"bbox":[90,539,530,1]}
+{"kind":"textbox","id":"sh/14zulwja","slide":3,"textChars":18,"textLines":1}
+{"kind":"textbox","id":"sh/yxsbml03","slide":3,"textChars":26,"textLines":1}
+{"kind":"textbox","id":"sh/zy1cvqho","slide":3,"textChars":2,"textLines":1}
+{"kind":"image","id":"im/7yt0b6ho","slide":3,"name":"","geometry":"roundRect","alt":"intelifar 真实工作空间指挥台","bbox":[676,92,532,505]}
+{"kind":"notes","id":"nt/j4g5zn","slide":3,"text":"右侧为当前真实 UI；强调它不是概念设计。 | 来源：artifacts/real-ui-port/01-real-ui-home-4388.png | ..."}
+{"kind":"slide","id":"sl/95zti2","slide":4,"title":"END-TO-END FLOW","textShapes":30}
+{"kind":"textbox","id":"sh/rydcr2t0","slide":4,"textChars":15,"textLines":1}
+{"kind":"textbox","id":"sh/sz6t07u5","slide":4,"textChars":22,"textLines":1}
+{"kind":"textbox","id":"sh/d0futcbq","slide":4,"textChars":30,"textLines":1}
+{"kind":"textbox","id":"sh/e1ob2hcb","slide":4,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/f2xcvmtw","slide":4,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/036t4ruh","slide":4,"textChars":9,"textLines":2}
+{"kind":"shape","id":"sh/14fuxwb2","slide":4,"bbox":[72,449,150,5]}
+{"kind":"textbox","id":"sh/u5kbqdc7","slide":4,"textChars":1,"textLines":1}
+{"kind":"textbox","id":"sh/v6tsjits","slide":4,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/n6lsjq1s","slide":4,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/mlcbal07","slide":4,"textChars":9,"textLines":2}
+{"kind":"shape","id":"sh/98nalgzi","slide":4,"bbox":[262,449,150,5]}
+{"kind":"textbox","id":"sh/o7etcbid","slide":4,"textChars":1,"textLines":1}
+{"kind":"textbox","id":"sh/zilsf61g","slide":4,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/ehcr610v","slide":4,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/1k3ahgjm","slide":4,"textChars":9,"textLines":2}
+{"kind":"shape","id":"sh/0ju98bi1","slide":4,"bbox":[452,449,150,5]}
+{"kind":"textbox","id":"sh/re1sbm1k","slide":4,"textChars":1,"textLines":1}
+{"kind":"textbox","id":"sh/qdsr210z","slide":4,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/u9sbuhkr","slide":4,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/fa1snmlc","slide":4,"textChars":9,"textLines":2}
+{"kind":"shape","id":"sh/gbatwr2x","slide":4,"bbox":[642,449,150,5]}
+{"kind":"textbox","id":"sh/hcjupw3i","slide":4,"textChars":1,"textLines":1}
+{"kind":"textbox","id":"sh/2dsby1k3","slide":4,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/3e1cr6l8","slide":4,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/4fat0b2t","slide":4,"textChars":12,"textLines":2}
+{"kind":"shape","id":"sh/pg3utg3e","slide":4,"bbox":[832,449,150,5]}
+{"kind":"textbox","id":"sh/qhcb21kz","slide":4,"textChars":1,"textLines":1}
+{"kind":"textbox","id":"sh/rilcv6lk","slide":4,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/1cnelknm","slide":4,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/0bedsfm1","slide":4,"textChars":13,"textLines":2}
+{"kind":"shape","id":"sh/za5wja5g","slide":4,"bbox":[1022,449,150,5]}
+{"kind":"shape","id":"sh/e9wvq54b","slide":4,"bbox":[72,524,1136,86]}
+{"kind":"textbox","id":"sh/907epkny","slide":4,"textChars":7,"textLines":1}
+{"kind":"textbox","id":"sh/ozyxwfmd","slide":4,"textChars":35,"textLines":1}
+{"kind":"textbox","id":"sh/ny5wna5s","slide":4,"textChars":26,"textLines":1}
+{"kind":"textbox","id":"sh/mdwvu547","slide":4,"textChars":2,"textLines":1}
+{"kind":"notes","id":"nt/95zti2","slide":4,"text":"闭环中每一步都能找到负责人和状态；模型输出不直接等同于正式知识。 |  | [Sources] | - 本演示中的产品能力与截图来自 intelifar ..."}
+{"kind":"slide","id":"sl/s1g1pp","slide":5,"title":"PROVENANCE-FIRST WIKI","textShapes":10}
+{"kind":"textbox","id":"sh/yp8ni5wv","slide":5,"textChars":21,"textLines":1}
+{"kind":"textbox","id":"sh/lczmt0v6","slide":5,"textChars":17,"textLines":1}
+{"kind":"textbox","id":"sh/0bq5kvel","slide":5,"textChars":37,"textLines":1}
+{"kind":"textbox","id":"sh/bmh4nqd4","slide":5,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/qlonelwj","slide":5,"textChars":23,"textLines":1}
+{"kind":"shape","id":"sh/dozmp0va","slide":5,"bbox":[88,367,470,1]}
+{"kind":"textbox","id":"sh/cnq5gvep","slide":5,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/3ix4j6d8","slide":5,"textChars":22,"textLines":1}
+{"kind":"textbox","id":"sh/2ho3a1wn","slide":5,"textChars":11,"textLines":1}
+{"kind":"textbox","id":"sh/5o3qtk36","slide":5,"textChars":26,"textLines":1}
+{"kind":"textbox","id":"sh/ilc7i54f","slide":5,"textChars":2,"textLines":1}
+{"kind":"image","id":"im/z29gjito","slide":5,"name":"","geometry":"roundRect","alt":"已发布 Wiki 与原文资源并列核对","bbox":[616,214,592,412]}
+{"kind":"notes","id":"nt/s1g1pp","slide":5,"text":"演示时点击“查看原文依据”是最有说服力的动作。 | 来源：artifacts/screenshots/14-real-published-wiki.png..."}
+{"kind":"slide","id":"sl/xl8a8m","slide":6,"title":"IP PANORAMA","textShapes":13}
+{"kind":"textbox","id":"sh/qxgjixkn","slide":6,"textChars":11,"textLines":1}
+{"kind":"textbox","id":"sh/d0r2dcje","slide":6,"textChars":27,"textLines":1}
+{"kind":"textbox","id":"sh/czi1k72t","slide":6,"textChars":28,"textLines":1}
+{"kind":"textbox","id":"sh/e10jmhkz","slide":6,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/14r2hcja","slide":6,"textChars":12,"textLines":1}
+{"kind":"textbox","id":"sh/03i1or25","slide":6,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/f6p0jil0","slide":6,"textChars":13,"textLines":1}
+{"kind":"textbox","id":"sh/u5wjadkv","slide":6,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/4ri14rax","slide":6,"textChars":12,"textLines":1}
+{"kind":"textbox","id":"sh/5sridwri","slide":6,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/i50j2hsr","slide":6,"textChars":13,"textLines":1}
+{"kind":"textbox","id":"sh/j690bm9c","slide":6,"textChars":26,"textLines":1}
+{"kind":"textbox","id":"sh/svi18ra9","slide":6,"textChars":2,"textLines":1}
+{"kind":"image","id":"im/2tkj6pg3","slide":6,"name":"","geometry":"roundRect","alt":"可缩放 IP 资产神经网络全景","bbox":[72,214,812,425]}
+{"kind":"notes","id":"nt/xl8a8m","slide":6,"text":"网络只展示当前账号有权查看的资产；待复核关系不会被自动当作事实。 | 来源：artifacts/ip-asset-graph/06-neural-pano..."}
+{"kind":"slide","id":"sl/lyyah9","slide":7,"title":"BOUNDED IP AGENT","textShapes":9}
+{"kind":"textbox","id":"sh/ovqx0rm1","slide":7,"textChars":16,"textLines":1}
+{"kind":"textbox","id":"sh/3uhgr6lg","slide":7,"textChars":20,"textLines":1}
+{"kind":"textbox","id":"sh/2t8fy14v","slide":7,"textChars":42,"textLines":1}
+{"kind":"textbox","id":"sh/d0jyxg3i","slide":7,"textChars":5,"textLines":1}
+{"kind":"textbox","id":"sh/czqx4bmx","slide":7,"textChars":42,"textLines":5}
+{"kind":"textbox","id":"sh/byhgv6lc","slide":7,"textChars":6,"textLines":1}
+{"kind":"textbox","id":"sh/qx8f214r","slide":7,"textChars":28,"textLines":1}
+{"kind":"textbox","id":"sh/0nax8bmt","slide":7,"textChars":26,"textLines":1}
+{"kind":"textbox","id":"sh/2l4r2xwj","slide":7,"textChars":2,"textLines":1}
+{"kind":"image","id":"im/0ny50zud","slide":7,"name":"","geometry":"roundRect","alt":"受控 IP 任务交付界面","bbox":[500,212,708,427]}
+{"kind":"notes","id":"nt/lyyah9","slide":7,"text":"受控 Agent 的差异是：允许复杂任务，但每一步仍在封闭工具、当前角色和证据门槛之内。 | 来源：artifacts/ip-agent/02-groun..."}
+{"kind":"slide","id":"sl/wg5ow8","slide":8,"title":"GOVERNANCE BY DESIGN","textShapes":13}
+{"kind":"textbox","id":"sh/l4v6d03m","slide":8,"textChars":20,"textLines":1}
+{"kind":"textbox","id":"sh/y14725kv","slide":8,"textChars":22,"textLines":1}
+{"kind":"textbox","id":"sh/z2dobqlg","slide":8,"textChars":30,"textLines":1}
+{"kind":"textbox","id":"sh/9sf6hk3i","slide":8,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/m54765kr","slide":8,"textChars":29,"textLines":1}
+{"kind":"textbox","id":"sh/n6dofalc","slide":8,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/4b2pwb2t","slide":8,"textChars":22,"textLines":1}
+{"kind":"textbox","id":"sh/pwb65g3e","slide":8,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/hgzyh47a","slide":8,"textChars":28,"textLines":1}
+{"kind":"textbox","id":"sh/wvqhozqp","slide":8,"textChars":3,"textLines":1}
+{"kind":"textbox","id":"sh/vuhgfup4","slide":8,"textChars":26,"textLines":1}
+{"kind":"textbox","id":"sh/ut8fmp8j","slide":8,"textChars":26,"textLines":1}
+{"kind":"textbox","id":"sh/5kjylo76","slide":8,"textChars":2,"textLines":1}
+{"kind":"image","id":"im/1kved03m","slide":8,"name":"","geometry":"roundRect","alt":"intelifar 操作记录与完整性状态","bbox":[72,218,690,420]}
+{"kind":"notes","id":"nt/wg5ow8","slide":8,"text":"这里强调“谁能做什么”与“做过什么”都可以被解释。 | 来源：artifacts/user-guide-review/06-operation-recor..."}
+{"kind":"slide","id":"sl/0yljlp","slide":9,"title":"KNOWLEDGE QUALITY","textShapes":11}
+{"kind":"textbox","id":"sh/p0nyx4f2","slide":9,"textChars":17,"textLines":1}
+{"kind":"textbox","id":"sh/2dwfmpwr","slide":9,"textChars":24,"textLines":1}
+{"kind":"textbox","id":"sh/ne5gvuxw","slide":9,"textChars":33,"textLines":1}
+{"kind":"textbox","id":"sh/0bexkfel","slide":9,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/1cnytkf6","slide":9,"textChars":16,"textLines":3}
+{"kind":"textbox","id":"sh/e9cfi5wf","slide":9,"textChars":1,"textLines":1}
+{"kind":"textbox","id":"sh/falgrax0","slide":9,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/s7uxgfe9","slide":9,"textChars":19,"textLines":3}
+{"kind":"shape","id":"sh/d83ypkfu","slide":9,"bbox":[82,488,514,102]}
+{"kind":"textbox","id":"sh/xobytsni","slide":9,"textChars":17,"textLines":1}
+{"kind":"textbox","id":"sh/bm9gr2pc","slide":9,"textChars":26,"textLines":1}
+{"kind":"textbox","id":"sh/al0fixor","slide":9,"textChars":2,"textLines":1}
+{"kind":"image","id":"im/vup07qtk","slide":9,"name":"","geometry":"roundRect","alt":"真实待办中心中的语义资产建议","bbox":[650,210,558,382]}
+{"kind":"notes","id":"nt/0yljlp","slide":9,"text":"Semantica 在本地运行，只接收经过权限和字段限制的资产投影。 | 来源：artifacts/semantica-phase-2/07-real-a..."}
+{"kind":"slide","id":"sl/vbd31s","slide":10,"title":"TECHNOLOGY ARCHITECTURE","textShapes":16}
+{"kind":"textbox","id":"sh/p0vi98jq","slide":10,"textChars":23,"textLines":1}
+{"kind":"textbox","id":"sh/2x4zed0f","slide":10,"textChars":23,"textLines":1}
+{"kind":"textbox","id":"sh/3yd07y10","slide":10,"textChars":28,"textLines":1}
+{"kind":"shape","id":"sh/c36hknih","slide":10,"bbox":[72,222,958,72]}
+{"kind":"textbox","id":"sh/dofidsj2","slide":10,"textChars":7,"textLines":1}
+{"kind":"textbox","id":"sh/q14zid0b","slide":10,"textChars":32,"textLines":1}
+{"kind":"shape","id":"sh/r2x0bi1w","slide":10,"bbox":[72,314,958,72]}
+{"kind":"textbox","id":"sh/0r6honid","slide":10,"textChars":7,"textLines":1}
+{"kind":"textbox","id":"sh/1sfihsjy","slide":10,"textChars":38,"textLines":1}
+{"kind":"shape","id":"sh/5k7adgbq","slide":10,"bbox":[72,406,958,72]}
+{"kind":"textbox","id":"sh/4jyt4bu5","slide":10,"textChars":7,"textLines":1}
+{"kind":"textbox","id":"sh/3ipsbqtk","slide":10,"textChars":50,"textLines":1}
+{"kind":"shape","id":"sh/ihgr2lcz","slide":10,"bbox":[72,498,958,72]}
+{"kind":"textbox","id":"sh/dora10bm","slide":10,"textChars":7,"textLines":1}
+{"kind":"textbox","id":"sh/snit8vuh","slide":10,"textChars":36,"textLines":1}
+{"kind":"shape","id":"sh/rm9sfqtw","slide":10,"bbox":[1060,222,148,348]}
+{"kind":"textbox","id":"sh/qlgb6lcb","slide":10,"textChars":6,"textLines":1}
+{"kind":"textbox","id":"sh/tsna5wbi","slide":10,"textChars":31,"textLines":6}
+{"kind":"textbox","id":"sh/8re9wrux","slide":10,"textChars":20,"textLines":1}
+{"kind":"textbox","id":"sh/kvitcb2t","slide":10,"textChars":26,"textLines":1}
+{"kind":"textbox","id":"sh/lwralwje","slide":10,"textChars":2,"textLines":1}
+{"kind":"notes","id":"nt/vbd31s","slide":10,"text":"外部模型承担计算，本地系统承担权限、持久化、正式知识和责任链。 | 技术实现依据：README.md、site/server、integrations/s..."}
+{"kind":"slide","id":"sl/aabw6l","slide":11,"title":"PRODUCT MOAT","textShapes":18}
+{"kind":"textbox","id":"sh/zi94r2to","slide":11,"textChars":12,"textLines":1}
+{"kind":"textbox","id":"sh/0ji507at","slide":11,"textChars":21,"textLines":1}
+{"kind":"textbox","id":"sh/lkrmtcbe","slide":11,"textChars":32,"textLines":1}
+{"kind":"textbox","id":"sh/qtgnuxsr","slide":11,"textChars":2,"textLines":1}
+{"kind":"shape","id":"sh/bep4n2tc","slide":11,"bbox":[76,295,224,4]}
+{"kind":"textbox","id":"sh/cfy5w7ax","slide":11,"textChars":16,"textLines":1}
+{"kind":"textbox","id":"sh/dg7mpcbi","slide":11,"textChars":16,"textLines":1}
+{"kind":"textbox","id":"sh/2pw3qdsv","slide":11,"textChars":2,"textLines":1}
+{"kind":"shape","id":"sh/3q54jitg","slide":11,"bbox":[362,295,224,4]}
+{"kind":"textbox","id":"sh/n6p8za98","slide":11,"textChars":9,"textLines":1}
+{"kind":"textbox","id":"sh/m5gr6psn","slide":11,"textChars":13,"textLines":1}
+{"kind":"textbox","id":"sh/98rq1kry","slide":11,"textChars":2,"textLines":1}
+{"kind":"shape","id":"sh/o7i98fat","slide":11,"bbox":[648,295,224,4]}
+{"kind":"textbox","id":"sh/ba983u94","slide":11,"textChars":11,"textLines":1}
+{"kind":"textbox","id":"sh/a90rapsj","slide":11,"textChars":14,"textLines":1}
+{"kind":"textbox","id":"sh/xcrq54ra","slide":11,"textChars":2,"textLines":1}
+{"kind":"shape","id":"sh/wbi9czap","slide":11,"bbox":[934,295,224,4]}
+{"kind":"textbox","id":"sh/re58rq90","slide":11,"textChars":11,"textLines":1}
+{"kind":"textbox","id":"sh/qdw7y5sf","slide":11,"textChars":15,"textLines":1}
+{"kind":"shape","id":"sh/ut4b6dc3","slide":11,"bbox":[76,548,1130,78]}
+{"kind":"textbox","id":"sh/vudczyto","slide":11,"textChars":38,"textLines":1}
+{"kind":"textbox","id":"sh/gvmt83ut","slide":11,"textChars":26,"textLines":1}
+{"kind":"textbox","id":"sh/hwvu18be","slide":11,"textChars":2,"textLines":1}
+{"kind":"notes","id":"nt/aabw6l","slide":11,"text":"投资视角：随着文档、关系和治理反馈积累，客户价值来自专属知识网络，而非单次模型调用。 |  | [Sources] | - 本演示中的产品能力与截图来自 ..."}
+{"kind":"slide","id":"sl/il62np","slide":12,"title":"CUSTOMER ADOPTION","textShapes":17}
+{"kind":"textbox","id":"sh/fi14b2t4","slide":12,"textChars":17,"textLines":1}
+{"kind":"textbox","id":"sh/gja5k7up","slide":12,"textChars":22,"textLines":1}
+{"kind":"textbox","id":"sh/hkjmdcba","slide":12,"textChars":27,"textLines":1}
+{"kind":"textbox","id":"sh/2lsnmhcf","slide":12,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/3m14fmt0","slide":12,"textChars":4,"textLines":1}
+{"kind":"textbox","id":"sh/4na5orul","slide":12,"textChars":23,"textLines":1}
+{"kind":"shape","id":"sh/po3mhwb6","slide":12,"bbox":[148,294,524,1]}
+{"kind":"textbox","id":"sh/q9cnqhcr","slide":12,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/ral4jmtc","slide":12,"textChars":4,"textLines":1}
+{"kind":"textbox","id":"sh/zytg7alo","slide":12,"textChars":24,"textLines":1}
+{"kind":"shape","id":"sh/yxkfe5k3","slide":12,"bbox":[148,388,524,1]}
+{"kind":"textbox","id":"sh/l0vy9k3u","slide":12,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/kzmxgf29","slide":12,"textChars":4,"textLines":1}
+{"kind":"textbox","id":"sh/butgjals","slide":12,"textChars":22,"textLines":1}
+{"kind":"shape","id":"sh/atkfa5k7","slide":12,"bbox":[148,482,524,1]}
+{"kind":"textbox","id":"sh/xwby503y","slide":12,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/cv2xcf2d","slide":12,"textChars":4,"textLines":1}
+{"kind":"textbox","id":"sh/vqdgfu1w","slide":12,"textChars":15,"textLines":1}
+{"kind":"textbox","id":"sh/6l8jet4j","slide":12,"textChars":26,"textLines":1}
+{"kind":"textbox","id":"sh/rmh0ny54","slide":12,"textChars":2,"textLines":1}
+{"kind":"image","id":"im/pcz6x0bm","slide":12,"name":"","geometry":"roundRect","alt":"文档接入与业务分类界面","bbox":[726,136,482,476]}
+{"kind":"notes","id":"nt/il62np","slide":12,"text":"客户试点建议以业务验收问题为中心，不以模型分数或演示效果作为唯一标准。 | 来源：artifacts/screenshots/02-document-in..."}
+{"kind":"slide","id":"sl/2dbdq5","slide":13,"title":"VALIDATION EVIDENCE","textShapes":13}
+{"kind":"textbox","id":"sh/cbu5w769","slide":13,"textChars":19,"textLines":1}
+{"kind":"textbox","id":"sh/bal4n2po","slide":13,"textChars":26,"textLines":1}
+{"kind":"textbox","id":"sh/qpsnuxo3","slide":13,"textChars":40,"textLines":1}
+{"kind":"textbox","id":"sh/pojmls7y","slide":13,"textChars":3,"textLines":1}
+{"kind":"textbox","id":"sh/onalsn6d","slide":13,"textChars":7,"textLines":1}
+{"kind":"textbox","id":"sh/3m14j2ps","slide":13,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/2ls3qxo7","slide":13,"textChars":4,"textLines":1}
+{"kind":"textbox","id":"sh/1kjmhs7m","slide":13,"textChars":1,"textLines":1}
+{"kind":"textbox","id":"sh/gjalonq1","slide":13,"textChars":6,"textLines":1}
+{"kind":"shape","id":"sh/mh4v2hcz","slide":13,"bbox":[82,404,734,1]}
+{"kind":"textbox","id":"sh/7idcbmtk","slide":13,"textChars":4,"textLines":1}
+{"kind":"textbox","id":"sh/8jmd4ra5","slide":13,"textChars":68,"textLines":3}
+{"kind":"textbox","id":"sh/ydkbyxc3","slide":13,"textChars":26,"textLines":1}
+{"kind":"textbox","id":"sh/zedc72t8","slide":13,"textChars":2,"textLines":1}
+{"kind":"image","id":"im/a9kja98v","slide":13,"name":"","geometry":"roundRect","alt":"真实系统状态与持久化服务界面","bbox":[858,206,350,392]}
+{"kind":"notes","id":"nt/2dbdq5","slide":13,"text":"验证时间：2026-08-12。 | 来源：npm test、npm run build、npm audit、artifacts/e2e-report.m..."}
+{"kind":"slide","id":"sl/a0607f","slide":14,"title":"带一组真实资料，","textShapes":12}
+{"kind":"textbox","id":"sh/fy18fedc","slide":14,"textChars":26,"textLines":2}
+{"kind":"textbox","id":"sh/uxs769wr","slide":14,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/twjqdov6","slide":14,"textChars":4,"textLines":1}
+{"kind":"textbox","id":"sh/svap4jel","slide":14,"textChars":17,"textLines":1}
+{"kind":"textbox","id":"sh/7u18bed0","slide":14,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/6ts729wf","slide":14,"textChars":5,"textLines":1}
+{"kind":"textbox","id":"sh/dsnqp8va","slide":14,"textChars":15,"textLines":1}
+{"kind":"textbox","id":"sh/cre9g3up","slide":14,"textChars":2,"textLines":1}
+{"kind":"textbox","id":"sh/et4fypw7","slide":14,"textChars":5,"textLines":1}
+{"kind":"textbox","id":"sh/fudwrads","slide":14,"textChars":18,"textLines":1}
+{"kind":"shape","id":"sh/0vmx0fed","slide":14,"bbox":[76,614,1130,4]}
+{"kind":"textbox","id":"sh/1wvetkvy","slide":14,"textChars":17,"textLines":1}
+{"kind":"textbox","id":"sh/q5kfu5wb","slide":14,"textChars":9,"textLines":1}
+{"kind":"image","id":"im/90n694b2","slide":14,"name":"","geometry":"roundRect","alt":"intelifar 标志","bbox":[72,54,250,60]}
+{"kind":"notes","id":"nt/a0607f","slide":14,"text":"收尾不做泛泛感谢，直接邀请对方用一组真实资料验证三项结果。 |  | [Sources] | - 本演示中的产品能力与截图来自 intelifar 本地工..."}
+{"kind":"notice","message":"Truncated: omitted 0 lines. Increase maxChars or narrow target."}

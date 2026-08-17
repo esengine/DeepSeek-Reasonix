@@ -1,16 +1,16 @@
 {
-  "runAt": "2026-08-10T07:19:40.869Z",
+  "runAt": "2026-08-11T02:56:06.312Z",
   "result": "PASS",
-  "durationMs": 25249,
+  "durationMs": 25235,
   "sources": [
     {
       "sourceId": "deepseek-v3",
       "title": "DeepSeek-V3 Technical Report",
       "state": "complete",
-      "durationMs": 25121,
+      "durationMs": 25106,
       "mineru": {
         "model": "vlm",
-        "taskId": "3a9c5d45-396e-4108-9cc1-3e0174039e89",
+        "taskId": "9c4413b1-793a-4899-8f3d-f0e745a7a96e",
         "markdownCharacters": 148572,
         "markdownSha256": "7a9a8d0b5aae03ef7a4836071bd176b1cf57a4716668b8b311849ba60486f051"
       },
@@ -54,15 +54,15 @@
       },
       "deepseek": {
         "model": "deepseek-v4-flash",
-        "responseId": "36e176e4-e7be-4783-9b0b-76266009af95",
-        "totalTokens": 18326
+        "responseId": "f8562e3d-c674-4628-b19c-804c26a2ee3d",
+        "totalTokens": 18314
       },
-      "relationshipCount": 1,
+      "relationshipCount": 0,
       "assets": [
         {
           "title": "Multi-head Latent Attention (MLA)",
           "type": "技术方案",
-          "confidence": 0.98,
+          "confidence": 0.95,
           "evidenceCount": 1
         },
         {
@@ -74,48 +74,48 @@
         {
           "title": "FP8 Mixed Precision Training",
           "type": "技术方案",
-          "confidence": 0.94,
+          "confidence": 0.95,
           "evidenceCount": 1
         },
         {
           "title": "Knowledge Distillation from DeepSeek-R1",
           "type": "技术方案",
-          "confidence": 0.93,
+          "confidence": 0.95,
           "evidenceCount": 1
         },
         {
           "title": "Efficient Cross-Node All-to-All Communication Kernels",
           "type": "技术方案",
-          "confidence": 0.92,
+          "confidence": 0.95,
           "evidenceCount": 1
         },
         {
           "title": "No Token-Dropping Strategy",
           "type": "技术方案",
-          "confidence": 0.9,
+          "confidence": 0.95,
           "evidenceCount": 1
         },
         {
           "title": "Data Construction with FIM Strategy",
           "type": "技术方案",
-          "confidence": 0.89,
+          "confidence": 0.95,
           "evidenceCount": 1
         },
         {
           "title": "Long Context Extension",
           "type": "技术方案",
-          "confidence": 0.88,
+          "confidence": 0.95,
           "evidenceCount": 1
         },
         {
           "title": "Group Relative Policy Optimization (GRPO)",
           "type": "技术方案",
-          "confidence": 0.87,
+          "confidence": 0.95,
           "evidenceCount": 1
         }
       ],
       "publication": {
-        "id": "PUB-A2C1CC759DDF",
+        "id": "PUB-BAD2C36BFAD1",
         "assetCount": 9,
         "evidenceCount": 9
       },
@@ -125,10 +125,10 @@
       "sourceId": "qwen2.5",
       "title": "Qwen2.5 Technical Report",
       "state": "complete",
-      "durationMs": 25115,
+      "durationMs": 25111,
       "mineru": {
         "model": "vlm",
-        "taskId": "d3694603-f7a5-4d6e-8c9e-e18867a07580",
+        "taskId": "6533159a-5d6e-4584-b605-4584b6d340be",
         "markdownCharacters": 114001,
         "markdownSha256": "f1fa060059acf8a1f4d5cfae9cf2a9d2d9e66992579e72257230d1bf0a2b67a1"
       },
@@ -152,82 +152,82 @@
         ]
       },
       "quoteValidation": {
-        "total": 13,
-        "verified": 12,
+        "total": 22,
+        "verified": 21,
         "rejected": 1
       },
       "deepseek": {
         "model": "deepseek-v4-flash",
-        "responseId": "f01eadf6-5640-49a7-92a5-0292d4083746",
-        "totalTokens": 23920
+        "responseId": "cf3a5ee1-6d9e-4f95-83b4-4a395b54ab28",
+        "totalTokens": 23434
       },
       "relationshipCount": 8,
       "assets": [
         {
-          "title": "Qwen2.5 稠密模型架构",
+          "title": "Qwen2.5 模型系列",
           "type": "技术方案",
-          "confidence": 0.95,
-          "evidenceCount": 1
+          "confidence": 0.98,
+          "evidenceCount": 2
         },
         {
-          "title": "Qwen2.5 MoE 模型架构",
+          "title": "Qwen2.5 架构设计",
           "type": "技术方案",
-          "confidence": 0.95,
-          "evidenceCount": 1
+          "confidence": 0.97,
+          "evidenceCount": 2
         },
         {
-          "title": "Qwen2.5 分词器与词汇表扩展",
+          "title": "Qwen2.5 分词器",
           "type": "技术方案",
-          "confidence": 0.95,
-          "evidenceCount": 1
+          "confidence": 0.96,
+          "evidenceCount": 2
         },
         {
-          "title": "预训练数据质量优化方法",
+          "title": "预训练数据优化技术",
           "type": "技术方案",
           "confidence": 0.95,
-          "evidenceCount": 1
+          "evidenceCount": 2
         },
         {
           "title": "在线强化学习框架",
           "type": "技术方案",
-          "confidence": 0.95,
-          "evidenceCount": 1
-        },
-        {
-          "title": "奖励模型标注准则",
-          "type": "技术方案",
-          "confidence": 0.95,
-          "evidenceCount": 1
-        },
-        {
-          "title": "测试数据泄漏防护机制",
-          "type": "技术方案",
-          "confidence": 0.95,
-          "evidenceCount": 1
+          "confidence": 0.94,
+          "evidenceCount": 2
         },
         {
           "title": "多语言评估基准扩展",
           "type": "技术方案",
-          "confidence": 0.95,
-          "evidenceCount": 1
+          "confidence": 0.93,
+          "evidenceCount": 2
         },
         {
           "title": "Qwen2.5-72B-Instruct 模型",
-          "type": "产品",
+          "type": "技术方案",
+          "confidence": 0.97,
+          "evidenceCount": 2
+        },
+        {
+          "title": "Qwen2.5-Turbo 模型",
+          "type": "技术方案",
           "confidence": 0.95,
           "evidenceCount": 1
         },
         {
-          "title": "Qwen2.5-Turbo 模型",
-          "type": "产品",
-          "confidence": 0.95,
-          "evidenceCount": 1
+          "title": "Qwen2.5-Plus 模型",
+          "type": "技术方案",
+          "confidence": 0.94,
+          "evidenceCount": 2
+        },
+        {
+          "title": "Qwen2.5 评估套件",
+          "type": "技术方案",
+          "confidence": 0.92,
+          "evidenceCount": 2
         }
       ],
       "publication": {
-        "id": "PUB-2C0898C95A99",
+        "id": "PUB-896D0E85F3F4",
         "assetCount": 10,
-        "evidenceCount": 10
+        "evidenceCount": 19
       },
       "error": null
     },
@@ -235,10 +235,10 @@
       "sourceId": "cn119129722a",
       "title": "一种基于大语言模型及向量库构建知识图谱的方法",
       "state": "complete",
-      "durationMs": 25113,
+      "durationMs": 25108,
       "mineru": {
         "model": "MinerU-HTML",
-        "taskId": "ac73b88c-2b7e-4457-9d5c-ea8f730f38d8",
+        "taskId": "8795fbbe-147b-44b3-90be-f8e7fed9d145",
         "markdownCharacters": 29253,
         "markdownSha256": "4bfef8a7adc01ebc06f35d5944fbd96ac3aef9c05a3ee79120f25561a813f14f"
       },
@@ -262,8 +262,8 @@
       },
       "deepseek": {
         "model": "deepseek-v4-flash",
-        "responseId": "61eeae3f-66f2-4f60-b7a7-62251bf13eee",
-        "totalTokens": 19667
+        "responseId": "a49c2815-4a1f-4227-b839-0b85409a4fe7",
+        "totalTokens": 19235
       },
       "relationshipCount": 6,
       "assets": [
@@ -280,13 +280,13 @@
           "evidenceCount": 1
         },
         {
-          "title": "知识图谱与结构化数据库的融合方法",
+          "title": "知识图谱与关系数据库的融合方法",
           "type": "技术方案",
           "confidence": 0.95,
           "evidenceCount": 1
         },
         {
-          "title": "基于TransE的知识图谱低维向量表示方法",
+          "title": "基于TransE的知识图谱向量化表示方法",
           "type": "技术方案",
           "confidence": 0.95,
           "evidenceCount": 1
@@ -311,7 +311,7 @@
         }
       ],
       "publication": {
-        "id": "PUB-A4090913ECD6",
+        "id": "PUB-FF54381302B6",
         "assetCount": 7,
         "evidenceCount": 7
       },
@@ -320,40 +320,40 @@
   ],
   "graph": {
     "nodes": 26,
-    "edges": 15,
-    "proposedEdges": 15,
-    "evidenceBackedEdges": 15
+    "edges": 14,
+    "proposedEdges": 14,
+    "evidenceBackedEdges": 14
   },
   "crossSourceSearch": {
     "query": "模型",
     "count": 26,
     "resultAssetIds": [
-      "IP-REAL-438FC5137825",
-      "IP-REAL-CEB379014ACE",
-      "IP-REAL-30B12269C5C5",
-      "IP-REAL-BA1BA888FAB9",
-      "IP-REAL-1595EF096C5A",
-      "IP-REAL-495B9F1E510B",
-      "IP-REAL-3BBC1209B902",
-      "IP-REAL-0504324DFD28",
-      "IP-REAL-4CAEE27D0F77",
-      "IP-REAL-545B65F3D56C",
-      "IP-REAL-E54028DE79D3",
-      "IP-REAL-E388D7C52AE7",
-      "IP-REAL-4D6298A4EB75",
-      "IP-REAL-24B781F64456",
-      "IP-REAL-E20F6CA6DA9A",
-      "IP-REAL-7F2140B7670E",
-      "IP-REAL-B9159A5682BC",
-      "IP-REAL-7F3AC6D3C1B2",
-      "IP-REAL-07D3E01ACC25",
-      "IP-REAL-B47B315D0013",
-      "IP-REAL-67C105B13C2F",
-      "IP-REAL-B25992141D58",
-      "IP-REAL-14263879B6BF",
-      "IP-REAL-F7CB2E2E24C6",
-      "IP-REAL-5E7DE17CC110",
-      "IP-REAL-88BA30BECC94"
+      "IP-REAL-5A3DBD066937",
+      "IP-REAL-3140BAA24D73",
+      "IP-REAL-2E0E1439386C",
+      "IP-REAL-8817D47FFE7E",
+      "IP-REAL-90DD68788AC3",
+      "IP-REAL-419247A26CB8",
+      "IP-REAL-1EA980A059E8",
+      "IP-REAL-752763CC5968",
+      "IP-REAL-BE339F245648",
+      "IP-REAL-DB12BBA37C4D",
+      "IP-REAL-787106E2DDED",
+      "IP-REAL-3E9067774650",
+      "IP-REAL-8282E258A6F5",
+      "IP-REAL-75A3161F5A3C",
+      "IP-REAL-1A48F94AB644",
+      "IP-REAL-BF6F25AB201F",
+      "IP-REAL-DEE73C842679",
+      "IP-REAL-44CFD8019C41",
+      "IP-REAL-0FB72EBB4375",
+      "IP-REAL-170048A811D6",
+      "IP-REAL-209B4BB72AEE",
+      "IP-REAL-377F7A23C89A",
+      "IP-REAL-B5B926DA3E3F",
+      "IP-REAL-D2F37241E2FF",
+      "IP-REAL-544BD4034506",
+      "IP-REAL-6C14E897EDDF"
     ]
   },
   "failure": null

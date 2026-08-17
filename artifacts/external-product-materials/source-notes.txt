@@ -1,0 +1,34 @@
+intelifar 对外材料事实与素材来源
+
+产品定位与能力
+- README.md
+- docs/INTELIFAR-USER-GUIDE.zh-CN.md
+- C:/品味识别/企业级长文档 IP 智能分析与 Wiki 管理平台技术设计报告​.md
+
+验证证据
+- artifacts/e2e-report.md
+- artifacts/semantica-phase-2/report.md
+- site/package.json
+- 2026-08-12 全量测试：170 tests passed
+- 2026-08-12 Astro build：50 pages built
+- 2026-08-12 真实 Semantica E2E：8 assets, 4 duplicate candidates, 0 conflicts
+
+品牌资产
+- site/public/brand/intelifar-logo.png
+- site/public/brand/intelifar-logo-dark.png
+
+真实 UI 素材
+- artifacts/real-ui-port/01-real-ui-home-4388.png
+- artifacts/screenshots/02-document-intake.png
+- artifacts/screenshots/14-real-published-wiki.png
+- artifacts/ip-asset-graph/06-neural-panorama.png
+- artifacts/ip-agent/02-grounded-delivery.png
+- artifacts/semantica-phase-2/07-real-action-center.png
+- artifacts/semantica-phase-2/08-real-review-dialog.png
+- artifacts/user-guide-review/06-operation-records.png
+- artifacts/smb-p0d-review/05-double-credential-share.png
+
+内容限制
+- 不使用虚构客户、合同、收入、市场规模、投资回报或节省比例。
+- 系统建议不等于业务结论；正式知识变化必须人工复核。
+- 大型企业部署所需统一身份、集中审计、外部扫描、异地备份和高可用属于适配责任。

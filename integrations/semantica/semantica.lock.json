@@ -1,0 +1,15 @@
+{
+  "name": "semantica",
+  "repository": "https://github.com/semantica-agi/semantica",
+  "version": "0.6.0",
+  "tag": "v0.6.0",
+  "tagObject": "f2361d148798b590b3c0ac094a3047913b522222",
+  "commit": "9c9ab6a23fe67f1818bd94029f975c9db51247eb",
+  "license": "MIT",
+  "contractVersion": 1,
+  "modules": [
+    "semantica.deduplication",
+    "semantica.conflicts",
+    "semantica.provenance"
+  ]
+}

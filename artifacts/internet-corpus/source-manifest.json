@@ -17,7 +17,7 @@
     "size": 1887366,
     "sha256": "812a3fd645c80725354de9d831a6785503007a60681461407f64e97305fa9330",
     "cached": true,
-    "fetchedAt": "2026-08-10T07:19:15.580Z"
+    "fetchedAt": "2026-08-11T02:55:41.034Z"
   },
   {
     "id": "qwen2.5",
@@ -37,7 +37,7 @@
     "size": 1938604,
     "sha256": "73b3292bead3ac8896679d3ac8be87439756faf356566cbda3ccc8a3dc7d79d3",
     "cached": true,
-    "fetchedAt": "2026-08-10T07:19:15.581Z"
+    "fetchedAt": "2026-08-11T02:55:41.035Z"
   },
   {
     "id": "cn119129722a",
@@ -57,6 +57,6 @@
     "size": 212900,
     "sha256": "71b962568c3943d995c2db073daac6f01512ebdbb20bb44f455740ec379ec7e8",
     "cached": true,
-    "fetchedAt": "2026-08-10T07:19:15.581Z"
+    "fetchedAt": "2026-08-11T02:55:41.035Z"
   }
 ]

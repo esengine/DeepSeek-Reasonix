@@ -25,7 +25,7 @@ test("creates, hashes, lists, and independently verifies an online backup", asyn
     assert.match(backup.id, /^BKP-\d{8}T\d{6}-[a-f0-9]{12}$/);
     assert.equal(backup.integrity, "ok");
     assert.equal(backup.sha256.length, 64);
-    assert.equal(backup.requiredTables, 10);
+    assert.equal(backup.requiredTables, 11);
     assert.ok(backup.size > 0);
     assert.equal(backup.path, undefined);
     assert.deepEqual((await fx.service.listBackups()).map((item) => item.id), [backup.id]);

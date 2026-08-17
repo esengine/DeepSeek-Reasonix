@@ -160,7 +160,9 @@ await check("Wiki 引用精准溯源", async () => {
   await page.locator("[data-testid='nav-wiki']").click();
   await page.locator("[data-testid='wiki-citation']").click();
   await page.locator("#provenance-drawer.is-open").waitFor();
-  assert((await page.locator("#provenance-drawer").textContent()).includes("页 49 · 内容块 01"), "溯源定位精度未展示");
+  const provenanceCopy = await page.locator("#provenance-drawer").textContent();
+  assert(provenanceCopy.includes("演示定位"), "演示溯源边界未展示");
+  assert(provenanceCopy.includes("（演示）"), "演示证据未与真实工作空间隔离");
   await page.waitForTimeout(400);
   await page.screenshot({ path: path.join(screenshots, "05-wiki-provenance.png") });
   await page.locator("#provenance-drawer [data-close-drawer]").first().click();
@@ -220,17 +222,21 @@ await check("审计事件与 CSV 导出", async () => {
   await page.locator("[data-testid='export-audit']").click();
   const download = await downloadPromise;
   await download.saveAs(path.join(artifacts, "intelifar-audit-sample.csv"));
-  assert((await page.locator("#audit-log").textContent()).includes("导出审计日志"), "导出操作未进入审计日志");
+  assert((await page.locator("#audit-log").textContent()).includes("导出操作记录"), "导出操作未进入操作记录");
   await page.waitForTimeout(4500);
   await page.screenshot({ path: path.join(screenshots, "08-audit-ledger.png"), fullPage: true });
 });
 
 await check("真实服务边界与系统状态", async () => {
   await page.locator("[data-testid='nav-system']").click();
+  const technicalDetails = page.locator("details.technical-details");
+  assert(!(await technicalDetails.getAttribute("open")), "管理员技术详情默认不应展开");
+  await technicalDetails.locator("summary").click();
   const systemCopy = await page.locator("#view-system").textContent();
-  assert(systemCopy.includes("外部处理器"), "系统拓扑未披露外部处理器");
-  assert(systemCopy.includes("原始文档发送 MinerU"), "MinerU 数据边界披露缺失");
-  assert(systemCopy.includes("解析文本发送 DeepSeek"), "DeepSeek 数据边界披露缺失");
+  assert(systemCopy.includes("文档读取服务"), "文档读取边界披露缺失");
+  assert(systemCopy.includes("知识提取服务"), "知识提取边界披露缺失");
+  assert(systemCopy.includes("原始文档用于读取"), "原始文档处理范围披露缺失");
+  assert(systemCopy.includes("限定范围的文本用于知识提取"), "知识提取范围披露缺失");
   assert((await page.locator("#system-live-status").textContent()).includes("离线演示"), "静态模式未准确标识离线状态");
   await page.screenshot({ path: path.join(screenshots, "13-system-data-boundary.png"), fullPage: true });
 });

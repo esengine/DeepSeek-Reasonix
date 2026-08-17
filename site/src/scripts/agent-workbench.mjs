@@ -2,7 +2,7 @@ const TERMINAL_STATES = new Set(["complete", "needs_review", "failed", "interrup
 const STATUS_LABELS = {
   planning: "正在规划",
   running: "执行中",
-  synthesizing: "交付门禁",
+  synthesizing: "正在整理结果",
   complete: "已完成",
   needs_review: "需要复核",
   blocked: "已拦截",
@@ -20,7 +20,21 @@ const TOOL_LABELS = {
   compose_wiki_draft: "准备 Wiki 草案",
 };
 
+export function sourceButtonLabel(sourceId, index = 0) {
+  const number = Number(index) + 1;
+  if (String(sourceId).startsWith("EV-")) return `查看原文依据 ${number}`;
+  if (String(sourceId).startsWith("REL-")) return `查看关联关系 ${number}`;
+  return `查看相关资产 ${number}`;
+}
+
 export function isAgentTerminal(state) { return TERMINAL_STATES.has(String(state)); }
+
+export function retryTaskDraft(task) {
+  if (!task || !["failed", "interrupted", "cancelled", "blocked", "needs_review"].includes(String(task.state))) return null;
+  const value = String(task.prompt || "").trim();
+  if (!value) return null;
+  return { prompt: value, templateId: String(task.templateId || "") };
+}
 
 export function taskViewModel(task) {
   const state = String(task?.state || "planning");
@@ -52,7 +66,7 @@ export function createStaticAgentTask(prompt, templateId = "") {
     steps: [
       { id: "S1", title: "搜索当前账号可见资产", tool: "search_assets", arguments: { query: "目标资产", limit: 10 } },
       { id: "S2", title: "读取已确认关系与证据", tool: "inspect_neighborhood", arguments: { assetId: "IP-2026-0841", depth: 1 } },
-      { id: "S3", title: "执行证据交付门禁", tool: "read_evidence", arguments: { evidenceId: "EV-DEMO-048-03" } },
+      { id: "S3", title: "检查结论是否有原文依据", tool: "read_evidence", arguments: { evidenceId: "EV-DEMO-048-03" } },
     ],
   };
   const events = [{ type: "task.created", stepId: null, createdAt }, { type: "plan.ready", stepId: null, createdAt }, ...plan.steps.flatMap((step) => [{ type: "step.started", stepId: step.id, createdAt }, { type: "step.complete", stepId: step.id, createdAt }]), { type: "delivery.complete", stepId: null, createdAt }];
@@ -93,6 +107,7 @@ export function createAgentWorkbench(options = {}) {
   const onSource = options.onSource ?? (() => {});
   const onAuthRequired = options.onAuthRequired ?? (() => {});
   const onToast = options.onToast ?? (() => {});
+  const onTaskSettled = options.onTaskSettled ?? (() => {});
   const form = root.querySelector("#agent-task-form");
   const prompt = root.querySelector("#agent-prompt");
   const templateInput = root.querySelector("#agent-template-id");
@@ -100,6 +115,7 @@ export function createAgentWorkbench(options = {}) {
   let tasks = [];
   let currentTask = null;
   let pollTimer = null;
+  const notifiedTerminalTasks = new Set();
 
   function staticMode() { return ["static-demo", "loopback-demo"].includes(modeProvider()); }
 
@@ -171,16 +187,17 @@ export function createAgentWorkbench(options = {}) {
       const header = element("header");
       header.append(element("strong", "", finding.title), element("span", "", `${Math.round(Number(finding.confidence || 0) * 100)}%`));
       const sources = element("div", "agent-source-list");
-      for (const sourceId of finding.sourceIds ?? []) {
-        const button = element("button", "", sourceId);
+      for (const [sourceIndex, sourceId] of (finding.sourceIds ?? []).entries()) {
+        const button = element("button", "", sourceButtonLabel(sourceId, sourceIndex));
         button.type = "button";
+        button.title = `内部来源编号：${sourceId}`;
         button.addEventListener("click", () => onSource(sourceId, button));
         sources.append(button);
       }
       article.append(header, element("p", "", finding.detail), sources);
       findings.append(article);
     }
-    if (!findings.children.length) findings.append(element("div", "agent-uncertainty", "当前没有通过证据门禁的确定结论。"));
+    if (!findings.children.length) findings.append(element("div", "agent-uncertainty", "当前没有足够原文依据形成可交付条目。"));
     renderStringList(root.querySelector("#agent-uncertainties"), result.uncertainties, "agent-uncertainty", "没有新增待核实项。 ");
     renderStringList(root.querySelector("#agent-next-actions"), result.nextActions, "agent-next", "暂无建议动作。 ");
     const deliverables = root.querySelector("#agent-deliverable-list");
@@ -206,9 +223,14 @@ export function createAgentWorkbench(options = {}) {
     root.querySelector("#agent-task-summary").textContent = task.boundary?.message || task.error || task.result?.summary || task.stageLabel || "任务正在执行。";
     root.querySelector("#agent-task-id").textContent = task.id;
     root.querySelector("#agent-cancel").hidden = view.terminal;
+    root.querySelector("#agent-retry").hidden = !retryTaskDraft(task);
     renderSteps(task);
     renderResult(task.result);
     renderHistory();
+    if (view.terminal && !notifiedTerminalTasks.has(task.id)) {
+      notifiedTerminalTasks.add(task.id);
+      onTaskSettled(task);
+    }
     if (shouldReveal) detail.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -287,6 +309,17 @@ export function createAgentWorkbench(options = {}) {
   prompt.addEventListener("input", () => { root.querySelector("#agent-prompt-count").textContent = `${prompt.value.length.toLocaleString("zh-CN")} / 4,000`; root.querySelector("#agent-form-message").textContent = ""; });
   form.addEventListener("submit", (event) => { event.preventDefault(); submitTask(); });
   root.querySelector("#agent-refresh").addEventListener("click", loadTasks);
+  root.querySelector("#agent-retry").addEventListener("click", () => {
+    const draft = retryTaskDraft(currentTask);
+    if (!draft) return;
+    prompt.value = draft.prompt;
+    templateInput.value = draft.templateId;
+    root.querySelectorAll("[data-agent-template]").forEach((item) => item.classList.toggle("is-selected", item.dataset.agentTemplate === draft.templateId));
+    prompt.dispatchEvent(new Event("input"));
+    root.querySelector("#agent-form-message").textContent = "已保留原任务内容，请调整后再次委托。";
+    form.scrollIntoView({ behavior: "smooth", block: "center" });
+    prompt.focus();
+  });
   root.querySelector("#agent-cancel").addEventListener("click", async () => {
     if (!currentTask || isAgentTerminal(currentTask.state)) return;
     if (staticMode()) {

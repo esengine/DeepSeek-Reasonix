@@ -84,8 +84,8 @@ export function createAgentService(options = {}) {
       if (isCancelled(task)) return;
       planUsage = planned.usage ?? planUsage;
       const plan = validateAgentPlan(planned.value);
-      save(task.workspaceId, task, { state: "running", stageLabel: "正在执行只读领域步骤", plan, model: planned.model ?? null });
-      event(task.workspaceId, task.id, "plan.ready", { intent: plan.intent, outputType: plan.outputType, stepCount: plan.steps.length, model: planned.model ?? null });
+      save(task.workspaceId, task, { state: "running", stageLabel: planned.fallback ? "已采用安全预案，正在执行只读步骤" : "正在执行只读领域步骤", plan, model: planned.model ?? null, planningMode: planned.fallback ? "deterministic_fallback" : "model" });
+      event(task.workspaceId, task.id, "plan.ready", { intent: plan.intent, outputType: plan.outputType, stepCount: plan.steps.length, model: planned.model ?? null, fallback: Boolean(planned.fallback), fallbackReason: planned.fallbackReason ?? null });
 
       for (const step of plan.steps) {
         if (isCancelled(task)) return;
@@ -98,15 +98,18 @@ export function createAgentService(options = {}) {
       }
 
       if (isCancelled(task)) return;
-      save(task.workspaceId, task, { state: "synthesizing", stageLabel: "正在执行证据交付门禁" });
+      save(task.workspaceId, task, { state: "synthesizing", stageLabel: "正在检查结论与原文依据" });
       const synthesized = await modelClient.synthesizeTask({ request, plan, receipts, signal: controller.signal });
       if (isCancelled(task)) return;
       resultUsage = synthesized.usage ?? resultUsage;
-      const result = normalizeAgentResult(synthesized.value, { allowedSourceIds: collectSourceIds(receipts), excludedActions: EXCLUDED_ACTIONS });
+      const allowedSourceIds = collectSourceIds(receipts);
+      const visibleAssetCount = [...allowedSourceIds].filter((id) => /^IP-/.test(id)).length;
+      const result = normalizeAgentResult(synthesized.value, { allowedSourceIds, visibleAssetCount, excludedActions: EXCLUDED_ACTIONS });
       const usage = { planTokens: Number(planUsage.totalTokens ?? 0), resultTokens: Number(resultUsage.totalTokens ?? 0), totalTokens: Number(planUsage.totalTokens ?? 0) + Number(resultUsage.totalTokens ?? 0) };
-      save(task.workspaceId, task, { state: result.status, stageLabel: result.status === "complete" ? "任务结果已通过证据门禁" : "任务结果需要人工复核", result, usage, completedAt: now(), error: null });
-      event(task.workspaceId, task.id, result.status === "complete" ? "delivery.complete" : "delivery.needs_review", { status: result.status, findingCount: result.findings.length, evidenceCoverage: result.quality.evidenceCoverage, usage });
-      audit(task, result.status === "complete" ? "agent.task_complete" : "agent.task_needs_review", { intent: plan.intent, stepCount: plan.steps.length, evidenceCoverage: result.quality.evidenceCoverage, totalTokens: usage.totalTokens });
+      const deliveryMode = synthesized.fallback ? "deterministic_receipt_review" : "model";
+      save(task.workspaceId, task, { state: result.status, stageLabel: synthesized.fallback ? "服务暂不可用：已生成待人工复核的只读清单" : result.status === "complete" ? "任务结果已完成原文依据检查" : "任务结果需要人工复核", result, usage, deliveryMode, completedAt: now(), error: null });
+      event(task.workspaceId, task.id, result.status === "complete" ? "delivery.complete" : "delivery.needs_review", { status: result.status, findingCount: result.findings.length, evidenceCoverage: result.quality.evidenceCoverage, usage, fallback: Boolean(synthesized.fallback), fallbackReason: synthesized.fallbackReason ?? null });
+      audit(task, result.status === "complete" ? "agent.task_complete" : "agent.task_needs_review", { intent: plan.intent, stepCount: plan.steps.length, evidenceCoverage: result.quality.evidenceCoverage, totalTokens: usage.totalTokens, deliveryMode });
     } catch (error) {
       if (isCancelled(task) || controller.signal.aborted && store.getAgentTask(task.workspaceId, task.id, task.createdBy)?.state === "cancelled") return;
       const message = safeFailure(error);

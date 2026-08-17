@@ -23,7 +23,7 @@ function renderMetrics(items) {
     card.append(label, value);
     root.append(card);
   }
-  if (!root.children.length) root.textContent = "本脱敏版本未披露量化指标。";
+  if (!root.children.length) root.textContent = "本次对外版本未披露量化指标。";
 }
 
 function renderRelations(items) {
@@ -40,7 +40,7 @@ function renderRelations(items) {
     row.append(source, relation, target);
     root.append(row);
   }
-  if (!root.children.length) root.textContent = "本脱敏版本未披露关系数据。";
+  if (!root.children.length) root.textContent = "本次对外版本未披露关系数据。";
 }
 
 try {
@@ -48,7 +48,7 @@ try {
   const { share } = await post("/api/public/shares/inspect", { token });
   text("shared-document-title", share.documentTitle);
   text("shared-recipient", share.recipient);
-  text("shared-scope", "脱敏 Wiki（只读）");
+  text("shared-scope", "对外 Wiki（只读）");
   text("shared-expires", formatDate(share.expiresAt));
   byId("share-access-form").hidden = false;
   byId("share-access-code").focus();
@@ -66,7 +66,7 @@ byId("share-access-form").addEventListener("submit", async (event) => {
   try {
     const payload = await post("/api/public/shares/access", { token, accessCode: byId("share-access-code").value });
     text("public-wiki-title", payload.wiki.title);
-    text("public-wiki-meta", `${payload.wiki.version} · 脱敏 Wiki · 到期 ${formatDate(payload.share.expiresAt)}`);
+    text("public-wiki-meta", `${payload.wiki.version} · 对外只读 Wiki · 到期 ${formatDate(payload.share.expiresAt)}`);
     text("public-wiki-summary", payload.wiki.executiveSummary);
     text("public-wiki-mechanism", payload.wiki.keyMechanism);
     renderMetrics(payload.wiki.metrics);
@@ -75,7 +75,7 @@ byId("share-access-form").addEventListener("submit", async (event) => {
     byId("recipient-watermark").hidden = false;
     byId("share-lock").hidden = true;
     byId("shared-wiki").hidden = false;
-    document.title = `${payload.wiki.title} · intelifar 脱敏 Wiki`;
+    document.title = `${payload.wiki.title} · intelifar 安全 Wiki`;
   } catch (error) {
     text("share-access-error", "访问码错误或分享已失效");
     byId("share-access-code").select();

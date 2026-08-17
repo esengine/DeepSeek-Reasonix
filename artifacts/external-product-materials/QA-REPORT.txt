@@ -1,0 +1,13 @@
+intelifar 对外产品材料 QA
+
+PPTX
+- 14 页均由 @oai/artifact-tool 生成并导出 PNG。
+- 已逐页检查标题换行、截图裁切、对象重叠、文字密度和页脚一致性。
+- slides_test.py：PASS，未发现画布溢出。
+- 演示内容不包含虚构客户、收入、市场规模或投资回报数字。
+
+DOCX
+- 使用 bundled Python + python-docx 生成。
+- 结构审计：Letter 纵向、1 英寸页边距、narrative_proposal 字体与段落节奏、固定 9360 DXA 表格、图片替代文本、品牌和元数据均检查通过。
+- 文档包含 7 张真实 UI 截图，所有产品能力来自当前实现与本地验收证据。
+- 当前 Windows 环境未安装 LibreOffice；本机 Word COM 在无界面 PDF 导出时持续挂起，因此无法完成 DOCX 的 PNG 渲染门禁。已终止由 QA 启动的隐藏 Word 进程，并用确定性 OOXML/结构审计作为替代验证；未宣称通过视觉渲染。

@@ -1,0 +1,38 @@
+Semantica 人工复核闭环交付结构
+├─ docs/
+│  ├─ INTELIFAR-USER-GUIDE.zh-CN.md
+│  ├─ architecture/adr/0004-persist-semantic-review-decisions.md
+│  └─ plans/
+│     ├─ 2026-08-12-semantica-review-loop-design.md
+│     └─ 2026-08-12-semantica-review-loop.md
+├─ integrations/semantica/
+│  ├─ README.md
+│  ├─ bridge.py
+│  ├─ semantica.lock.json
+│  └─ test_bridge.py
+├─ site/
+│  ├─ server/
+│  │  ├─ platform-store.mjs
+│  │  ├─ platform-store.test.mjs
+│  │  ├─ real-analysis-server.mjs
+│  │  └─ real-analysis-server.test.mjs
+│  ├─ src/
+│  │  ├─ pages/index.astro
+│  │  ├─ scripts/ip-platform.mjs
+│  │  ├─ scripts/ip-platform-contract.test.mjs
+│  │  ├─ scripts/workspace-experience.mjs
+│  │  ├─ scripts/workspace-experience.test.mjs
+│  │  └─ styles/ip-platform.css
+│  └─ e2e/semantic-review-loop.e2e.mjs
+└─ artifacts/semantica-phase-2/
+   ├─ 01-pending-reviews.png
+   ├─ 02-action-center.png
+   ├─ 03-confirm-dialog.png
+   ├─ 04-decisions-saved.png
+   ├─ 05-mobile-persisted-reviews.png
+   ├─ 06-real-workspace-pending.png
+   ├─ 07-real-action-center.png
+   ├─ 08-real-review-dialog.png
+   ├─ result.json
+   ├─ report.md
+   └─ delivery-structure.txt

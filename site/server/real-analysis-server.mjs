@@ -16,6 +16,7 @@ import { applySecurityHeaders } from "./http-security.mjs";
 import { createMineruClient, MAX_UPLOAD_BYTES, validateDocumentUpload } from "./mineru-client.mjs";
 import { createPlatformStore } from "./platform-store.mjs";
 import { createPublicationRegistry } from "./publication-registry.mjs";
+import { createSemanticaClient } from "./semantica-client.mjs";
 import { createShareService } from "./share-service.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -39,7 +40,7 @@ const MIME = {
 };
 const MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + 512 * 1024;
 const MAX_JSON_BYTES = 64 * 1024;
-const DEMO_SESSION = { user: { id: "USR-DEMO", email: "demo@intelifar.local", name: "林越", role: "owner" }, workspace: { id: "WS-DEMO", name: "澜图科技" }, mode: "demo" };
+const DEMO_SESSION = { user: { id: "USR-DEMO", email: "demo@intelifar.local", name: "林越", role: "owner" }, workspace: { id: "WS-DEMO", name: "澜图科技" } };
 
 function sendJson(response, statusCode, value) {
   applySecurityHeaders(response, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
@@ -111,6 +112,47 @@ function safeWikiInput(input) {
   return value;
 }
 
+function safeWikiReviewDecision(input) {
+  const decision = String(input?.decision ?? "").trim();
+  const reviewNote = String(input?.reviewNote ?? "").trim();
+  if (!["approved", "rejected"].includes(decision)) throw new Error("Wiki review decision must be approved or rejected");
+  if (reviewNote.length > 500) throw new Error("Wiki review note is too long");
+  return { decision, reviewNote };
+}
+
+function safeSemanticReviewDecision(input) {
+  const decision = String(input?.decision ?? "").normalize("NFKC").trim();
+  const reviewNote = String(input?.reviewNote ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
+  if (!["confirmed", "dismissed"].includes(decision)) throw new Error("Semantic review decision must be confirmed or dismissed");
+  if (reviewNote.length > 300) throw new Error("Semantic review note is too long");
+  return { decision, reviewNote };
+}
+
+function semanticReviewKey(kind, item) {
+  const value = item?.payload || item || {};
+  const assetIds = kind === "duplicate"
+    ? (Array.isArray(value.assetIds) ? value.assetIds : [])
+    : (Array.isArray(value.sources) ? value.sources.map((source) => source?.assetId) : value.assetIds || []);
+  const values = kind === "conflict" ? (Array.isArray(value.values) ? value.values : []) : [];
+  const field = kind === "conflict" ? String(value.field || "") : "";
+  return [kind, field, ...assetIds.map(String).sort(), ...values.map(String).sort((left, right) => left.localeCompare(right, "zh-CN"))].join("\n");
+}
+
+function attachSemanticReviews(result, reviews) {
+  const byKey = new Map(reviews.map((review) => [semanticReviewKey(review.kind, { payload: review.payload }), review]));
+  return {
+    ...result,
+    duplicates: (result.duplicates || []).map((candidate) => {
+      const review = byKey.get(semanticReviewKey("duplicate", candidate));
+      return review ? { ...candidate, reviewId: review.id, reviewStatus: review.status } : candidate;
+    }),
+    conflicts: (result.conflicts || []).map((conflict) => {
+      const review = byKey.get(semanticReviewKey("conflict", conflict));
+      return review ? { ...conflict, reviewId: review.id, reviewStatus: review.status } : conflict;
+    }),
+  };
+}
+
 function safeRelationshipInput(input) {
   const value = {
     sourceAssetId: String(input?.sourceAssetId ?? "").trim(),
@@ -134,6 +176,23 @@ function queryList(url, name) {
     .slice(0, 20);
 }
 
+function safeUiAuditInput(input, workspaceId) {
+  const eventType = String(input?.eventType ?? "").trim();
+  const objectId = String(input?.objectId ?? "").trim();
+  if (eventType === "redaction_evidence_view" && objectId === "REDACT-S1-P114-08") {
+    return {
+      action: "evidence.view",
+      objectType: "redaction_evidence",
+      objectId,
+      detail: { documentId: "DOC-0318", page: 114, locator: "P-114-08", sensitivity: "S1", sourceMode: "demo" },
+    };
+  }
+  if (eventType === "audit_export" && (!objectId || objectId === workspaceId)) {
+    return { action: "audit.export", objectType: "audit_ledger", objectId: workspaceId, detail: { format: "csv" } };
+  }
+  throw new Error("Unsupported UI audit event");
+}
+
 export async function createRealAnalysisServer(options = {}) {
   const config = options.config ?? await loadRuntimeConfig({ cwd: options.cwd ?? process.cwd(), keyFile: options.keyFile });
   const mineruClient = options.mineruClient ?? createMineruClient({ apiKey: config.mineruApiKey, archiveProxyUrl: config.httpsProxy, maxWaitMs: options.mineruMaxWaitMs });
@@ -154,7 +213,22 @@ export async function createRealAnalysisServer(options = {}) {
     });
   }
   const defaultWorkspaceId = authRequired ? options.auth.workspaceId ?? "WS-PRIMARY" : "WS-DEMO";
-  if (platformStore && !authRequired) platformStore.ensureWorkspace({ id: defaultWorkspaceId, name: DEMO_SESSION.workspace.name });
+  if (platformStore && !authRequired) {
+    platformStore.ensureWorkspace({ id: defaultWorkspaceId, name: DEMO_SESSION.workspace.name });
+    const existingLoopbackUser = platformStore.getUserById(DEMO_SESSION.user.id);
+    if (!existingLoopbackUser) {
+      platformStore.createUser({
+        id: DEMO_SESSION.user.id,
+        workspaceId: defaultWorkspaceId,
+        email: DEMO_SESSION.user.email,
+        name: DEMO_SESSION.user.name,
+        role: DEMO_SESSION.user.role,
+        passwordHash: "!loopback-authentication-disabled!",
+      });
+    } else if (existingLoopbackUser.workspaceId !== defaultWorkspaceId || existingLoopbackUser.role !== "owner") {
+      throw new Error("Loopback owner identity conflicts with the configured workspace");
+    }
+  }
   const fileSecurityService = options.fileSecurityService ?? createFileSecurityService({
     externalScanner: options.externalScanner,
     clamAvPath: options.clamAvPath,
@@ -162,6 +236,10 @@ export async function createRealAnalysisServer(options = {}) {
   });
   const analysisService = options.analysisService ?? createAnalysisService({ mineruClient, deepseekClient, fileSecurityService, jobStore: platformStore, uploadRoot: options.uploadRoot, defaultWorkspaceId });
   const publicationRegistry = options.publicationRegistry ?? createPublicationRegistry({ rootDir: options.registryRoot, store: platformStore, defaultWorkspaceId });
+  if (platformStore && (options.migrateLegacyPublications === true || options.registryRoot) && typeof publicationRegistry.migrateLegacyPublications === "function") {
+    await publicationRegistry.migrateLegacyPublications(defaultWorkspaceId);
+  }
+  if (platformStore) platformStore.rebuildAssetGraph(defaultWorkspaceId);
   const agentModelClient = options.agentModelClient ?? (platformStore ? createAgentModelClient({ apiKey: config.deepseekApiKey, model: config.deepseekModel, timeoutMs: options.agentModelTimeoutMs }) : null);
   const agentTools = options.agentTools ?? (platformStore ? createAgentTools({ publicationRegistry }) : null);
   const agentService = options.agentService ?? (platformStore ? createAgentService({
@@ -174,12 +252,18 @@ export async function createRealAnalysisServer(options = {}) {
       return user ? { workspaceId: user.workspaceId, userId: user.id, role: user.role, active: !user.disabledAt } : null;
     },
     onAudit: (event) => {
-      if (!authRequired) return;
       platformStore.appendAudit(event.workspaceId, { actorUserId: event.actorUserId, action: event.action, objectType: event.objectType, objectId: event.objectId, detail: event.detail });
     },
   }) : null);
   const shareService = options.shareService ?? (platformStore ? createShareService({ store: platformStore }) : null);
   const backupService = options.backupService ?? (platformStore ? createBackupService({ store: platformStore, backupRoot: options.backupRoot, retention: options.backupRetention }) : null);
+  const semanticaClient = options.semanticaClient ?? createSemanticaClient({
+    enabled: options.semantica?.enabled === true,
+    pythonPath: options.semantica?.pythonPath,
+    sourcePath: options.semantica?.sourcePath,
+    bridgePath: options.semantica?.bridgePath ?? path.resolve(here, "../../integrations/semantica/bridge.py"),
+    timeoutMs: options.semantica?.timeoutMs,
+  });
   const distRoot = path.resolve(options.distRoot ?? DEFAULT_DIST);
   const host = options.host ?? "127.0.0.1";
   const analysisRateLimit = Math.max(1, Number(options.analysisRateLimit ?? 8));
@@ -188,8 +272,11 @@ export async function createRealAnalysisServer(options = {}) {
   const loginRateWindows = new Map();
   const publicRateWindows = new Map();
   const agentRateWindows = new Map();
+  const semanticRateWindows = new Map();
   const publicAccessRateLimit = Math.max(1, Number(options.publicAccessRateLimit ?? 20));
   const agentRateLimit = Math.max(1, Number(options.agentRateLimit ?? 12));
+  const semanticRateLimit = Math.max(1, Number(options.semanticRateLimit ?? 3));
+  const loopbackSession = { ...DEMO_SESSION, mode: platformStore ? "loopback-persistent" : "loopback-demo" };
 
   function allowWindow(windows, identity, limit) {
     const now = Date.now();
@@ -203,11 +290,11 @@ export async function createRealAnalysisServer(options = {}) {
   }
 
   function sessionFor(request) {
-    return authRequired ? authService.getSessionFromRequest(request) : DEMO_SESSION;
+    return authRequired ? authService.getSessionFromRequest(request) : loopbackSession;
   }
 
   function appendAudit(session, action, objectType, objectId, detail = {}) {
-    if (!platformStore || session.mode === "demo") return;
+    if (!platformStore) return;
     platformStore.appendAudit(session.workspace.id, { actorUserId: session.user.id, action, objectType, objectId, detail });
   }
 
@@ -222,16 +309,18 @@ export async function createRealAnalysisServer(options = {}) {
         return;
       }
       if (request.method === "GET" && url.pathname === "/api/health") {
+        const semanticStatus = await semanticaClient.status();
         sendJson(response, 200, {
           status: "ok",
           mode: "real",
-          providers: { mineru: "configured", deepseek: "configured" },
+          providers: { mineru: "configured", deepseek: "configured", semantica: semanticStatus.state },
           model: config.deepseekModel,
-          auth: { required: authRequired, mode: authRequired ? "local-session" : "loopback-demo" },
-          storage: { adapter: platformStore ? "sqlite" : "atomic-json", durableJobs: Boolean(platformStore), wikiVersions: Boolean(platformStore), verifiedBackups: Boolean(backupService), memberLifecycle: Boolean(platformStore), secureShares: Boolean(shareService), agentTasks: Boolean(agentService) },
+          auth: { required: authRequired, mode: authRequired ? "local-session" : platformStore ? "loopback-persistent" : "loopback-demo" },
+          storage: { adapter: platformStore ? "sqlite" : "atomic-json", durableJobs: Boolean(platformStore), wikiVersions: Boolean(platformStore), semanticReviews: Boolean(platformStore), verifiedBackups: Boolean(backupService), memberLifecycle: Boolean(platformStore), secureShares: Boolean(shareService), agentTasks: Boolean(agentService) },
           agent: { available: Boolean(agentService), boundary: "document-ip-wiki-readonly", maxSteps: 6, maxToolCalls: 12, formalKnowledgeMutation: false },
           fileSecurity: fileSecurityService.status(),
-          dataBoundary: { gateway: "local", externalProcessors: ["MinerU", "DeepSeek"], disclosure: "Documents are sent to MinerU for parsing; bounded parsed text is sent to DeepSeek for structured analysis." },
+          semanticEnhancement: semanticStatus,
+          dataBoundary: { gateway: "local", externalProcessors: ["MinerU", "DeepSeek"], localProcessors: semanticStatus.enabled ? ["Semantica"] : [], disclosure: "Documents are sent to MinerU for parsing; bounded parsed text is sent to DeepSeek for structured analysis. Optional semantic governance runs locally on permission-filtered published asset projections." },
         });
         return;
       }
@@ -305,16 +394,102 @@ export async function createRealAnalysisServer(options = {}) {
         return false;
       };
 
+      if (request.method === "GET" && url.pathname === "/api/dashboard") {
+        if (!requireRole("viewer")) return;
+        const [assets, graph] = await Promise.all([
+          publicationRegistry.listAssets(workspaceId, { role: session.user.role }),
+          publicationRegistry.getAssetGraph(workspaceId, { role: session.user.role, includeProposed: session.user.role !== "viewer", limit: 200, edgeLimit: 400 }),
+        ]);
+        const jobs = analysisService.list(workspaceId, 200);
+        const auditIntegrity = platformStore ? platformStore.verifyAuditChain(workspaceId) : { valid: false, count: 0, unavailable: true };
+        const today = new Date().toISOString().slice(0, 10);
+        const thisMonth = today.slice(0, 7);
+        const riskItems = jobs.flatMap((job) => Array.isArray(job.result?.analysis?.risks) ? job.result.analysis.risks : []);
+        const publishedDocumentIds = new Set(assets.map((asset) => asset.sourceJobId || asset.publicationId).filter(Boolean));
+        const documentIds = new Set([...publishedDocumentIds, ...jobs.map((job) => job.id)]);
+        const completedDocumentIds = new Set([...publishedDocumentIds, ...jobs.filter((job) => job.state === "complete").map((job) => job.id)]);
+        const verifiedEvidence = assets.flatMap((asset) => asset.evidence ?? []).filter((evidence) => evidence.verified).length;
+        const totalEvidence = assets.flatMap((asset) => asset.evidence ?? []).length;
+        const auditEvents = platformStore?.listAuditEvents(workspaceId, 500) ?? [];
+        sendJson(response, 200, { dashboard: {
+          assets: { total: assets.length, addedThisMonth: assets.filter((asset) => String(asset.publishedAt ?? "").startsWith(thisMonth)).length },
+          evidence: { verified: verifiedEvidence, total: totalEvidence, coverage: totalEvidence ? Math.round((verifiedEvidence / totalEvidence) * 1_000) / 10 : 0 },
+          documents: { total: documentIds.size, processing: jobs.filter((job) => !["complete", "failed", "interrupted", "cancelled", "blocked"].includes(job.state)).length, complete: completedDocumentIds.size, failed: jobs.filter((job) => ["failed", "interrupted", "blocked"].includes(job.state)).length },
+          risks: { total: riskItems.length, high: riskItems.filter((risk) => ["high", "高", "S1"].includes(String(risk?.level ?? risk?.severity))).length },
+          graph: { nodes: graph.nodes.length, edges: graph.edges.length, proposed: graph.edges.filter((edge) => edge.verificationStatus === "proposed").length },
+          audit: { total: auditIntegrity.count, today: auditEvents.filter((event) => event.createdAt.startsWith(today)).length, integrity: auditIntegrity.valid, blocked: auditEvents.filter((event) => /block|reject|deny|拦截|拒绝/i.test(event.action)).length },
+        } });
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/api/audit") {
+        if (!requireRole("admin")) return;
+        sendJson(response, 200, {
+          events: platformStore?.listAuditEvents(workspaceId, url.searchParams.get("limit")) ?? [],
+          integrity: platformStore ? platformStore.verifyAuditChain(workspaceId) : { valid: false, count: 0, unavailable: true },
+        });
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/audit/events") {
+        if (!requireRole("viewer")) return;
+        if (!platformStore) { sendJson(response, 409, { error: "Audit ledger is unavailable in this storage mode" }); return; }
+        const event = safeUiAuditInput(await readJson(request), workspaceId);
+        if (event.action === "audit.export" && !requireRole("admin")) return;
+        const recorded = platformStore.appendAudit(workspaceId, { actorUserId: session.user.id, ...event });
+        sendJson(response, 201, { event: recorded });
+        return;
+      }
+
       if (request.method === "GET" && url.pathname === "/api/admin/operations") {
         if (!requireRole("admin")) return;
-        const backups = backupService ? await backupService.listBackups() : [];
+        const [backups, semanticEnhancement] = await Promise.all([backupService ? backupService.listBackups() : [], semanticaClient.status()]);
         sendJson(response, 200, {
           scanner: fileSecurityService.status(),
           storage: platformStore ? { adapter: "sqlite", integrity: platformStore.integrityCheck().valid ? "ok" : "failed", backupsEnabled: Boolean(backupService) } : { adapter: "atomic-json", integrity: "not-applicable", backupsEnabled: false },
           audit: platformStore ? platformStore.verifyAuditChain(workspaceId) : { valid: false, count: 0, unavailable: true },
           backups,
           jobs: analysisService.list(workspaceId, 20),
+          semanticEnhancement,
+          semanticReviews: platformStore?.listSemanticReviews(workspaceId, { limit: 100 }) ?? [],
         });
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/api/admin/semantic/reviews") {
+        if (!requireRole("admin")) return;
+        if (!platformStore) { sendJson(response, 409, { error: "Semantic review storage is unavailable in this mode" }); return; }
+        const requestedStatus = String(url.searchParams.get("status") || "").trim();
+        if (requestedStatus && !["pending", "confirmed", "dismissed"].includes(requestedStatus)) throw new Error("Semantic review status is invalid");
+        sendJson(response, 200, { reviews: platformStore.listSemanticReviews(workspaceId, { status: requestedStatus, limit: url.searchParams.get("limit") }) });
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/admin/semantic/enrich") {
+        if (!requireRole("admin")) return;
+        const semanticIdentity = `${workspaceId}:${session.user.id}`;
+        if (!allowWindow(semanticRateWindows, semanticIdentity, semanticRateLimit)) {
+          response.setHeader("retry-after", "60");
+          sendJson(response, 429, { error: "Too many semantic checks; retry in 60 seconds" });
+          return;
+        }
+        const assets = await publicationRegistry.listAssets(workspaceId, { role: session.user.role });
+        const rawResult = await semanticaClient.enrich(assets);
+        const reviews = platformStore ? platformStore.upsertSemanticReviews(workspaceId, rawResult) : [];
+        const result = attachSemanticReviews(rawResult, reviews);
+        appendAudit(session, "semantic.check", "published_asset_set", workspaceId, { checkedAssets: result.checkedAssets, duplicateCandidates: result.duplicates.length, conflicts: result.conflicts.length, engine: result.engine, version: result.version, formalKnowledgeMutation: false });
+        sendJson(response, 200, { result, reviews });
+        return;
+      }
+      const semanticReviewDecisionMatch = request.method === "POST" && url.pathname.match(/^\/api\/admin\/semantic\/reviews\/(SEMREV-[A-F0-9]{24})\/decision$/);
+      if (semanticReviewDecisionMatch) {
+        if (!requireRole("admin")) return;
+        if (!platformStore) { sendJson(response, 409, { error: "Semantic review storage is unavailable in this mode" }); return; }
+        const input = safeSemanticReviewDecision(await readJson(request));
+        const review = platformStore.decideSemanticReview(workspaceId, semanticReviewDecisionMatch[1], { ...input, reviewerUserId: session.user.id }, {
+          audit: {
+            actorUserId: session.user.id,
+            action: input.decision === "confirmed" ? "semantic.review_confirm" : "semantic.review_dismiss",
+            objectType: "semantic_review",
+          },
+        });
+        sendJson(response, 200, { review });
         return;
       }
       if (request.method === "GET" && url.pathname === "/api/admin/members") {
@@ -355,7 +530,7 @@ export async function createRealAnalysisServer(options = {}) {
       if (request.method === "POST" && url.pathname === "/api/admin/backups") {
         if (!requireRole("admin")) return;
         if (!backupService) { sendJson(response, 409, { error: "Verified SQLite backups are not available in this storage mode" }); return; }
-        const backup = await backupService.createBackup({ createdBy: authRequired ? session.user.id : null });
+        const backup = await backupService.createBackup({ createdBy: session.user.id });
         appendAudit(session, "backup.create", "backup", backup.id, { size: backup.size, sha256: backup.sha256, integrity: backup.integrity });
         sendJson(response, 201, { backup });
         return;
@@ -402,7 +577,7 @@ export async function createRealAnalysisServer(options = {}) {
           return;
         }
         const input = await parseMultipart(request);
-        const job = await analysisService.submit(input.file, { expectedCategory: input.expectedCategory, workspaceId, actorUserId: authRequired ? session.user.id : null });
+        const job = await analysisService.submit(input.file, { expectedCategory: input.expectedCategory, workspaceId, actorUserId: session.user.id });
         appendAudit(session, "analysis.submit", "analysis_job", job.id, { documentName: job.document.name, documentSha256: job.document.sha256 });
         sendJson(response, 202, { job });
         return;
@@ -516,7 +691,7 @@ export async function createRealAnalysisServer(options = {}) {
       if (request.method === "POST" && url.pathname === "/api/relationships") {
         if (!requireRole("editor")) return;
         const input = safeRelationshipInput(await readJson(request));
-        const relationship = await publicationRegistry.createAssetRelationship(workspaceId, { ...input, origin: "manual", createdBy: authRequired ? session.user.id : null }, authRequired ? { audit: { actorUserId: session.user.id, action: "relationship.create", objectType: "asset_relationship", detail: { sourceAssetId: input.sourceAssetId, targetAssetId: input.targetAssetId, relationType: input.relationType, evidenceCount: input.evidenceIds.length } } } : {});
+        const relationship = await publicationRegistry.createAssetRelationship(workspaceId, { ...input, origin: "manual", createdBy: session.user.id }, { audit: { actorUserId: session.user.id, action: "relationship.create", objectType: "asset_relationship", detail: { sourceAssetId: input.sourceAssetId, targetAssetId: input.targetAssetId, relationType: input.relationType, evidenceCount: input.evidenceIds.length } } });
         sendJson(response, 201, { relationship });
         return;
       }
@@ -524,7 +699,7 @@ export async function createRealAnalysisServer(options = {}) {
       if (relationshipStatusMatch) {
         if (!requireRole("editor")) return;
         const nextStatus = relationshipStatusMatch[2] === "confirm" ? "confirmed" : "rejected";
-        const relationship = await publicationRegistry.updateAssetRelationshipStatus(workspaceId, relationshipStatusMatch[1], nextStatus, authRequired ? { audit: { actorUserId: session.user.id, action: `relationship.${relationshipStatusMatch[2]}`, objectType: "asset_relationship", detail: { verificationStatus: nextStatus } } } : {});
+        const relationship = await publicationRegistry.updateAssetRelationshipStatus(workspaceId, relationshipStatusMatch[1], nextStatus, { audit: { actorUserId: session.user.id, action: `relationship.${relationshipStatusMatch[2]}`, objectType: "asset_relationship", detail: { verificationStatus: nextStatus } } });
         sendJson(response, 200, { relationship });
         return;
       }
@@ -538,6 +713,33 @@ export async function createRealAnalysisServer(options = {}) {
       if (request.method === "GET" && url.pathname === "/api/assets") {
         if (!requireRole("viewer")) return;
         sendJson(response, 200, { assets: await publicationRegistry.listAssets(workspaceId, { role: session.user.role }) });
+        return;
+      }
+      if (request.method === "PATCH" && url.pathname === "/api/assets/metadata") {
+        if (!requireRole("editor")) return;
+        const input = await readJson(request);
+        const assetIds = [...new Set((Array.isArray(input.assetIds) ? input.assetIds : []).map((assetId) => String(assetId || "").trim()).filter(Boolean))];
+        if (!assetIds.length || assetIds.length > 50 || !assetIds.every((assetId) => /^IP-[A-Za-z0-9-]{3,96}$/.test(assetId))) throw Object.assign(new Error("Between 1 and 50 valid assets are required"), { code: "INVALID_ASSET_BATCH" });
+        const owner = String(input.owner || "").slice(0, 80);
+        const sensitivity = String(input.sensitivity || "").slice(0, 40);
+        const assets = await publicationRegistry.updateAssetMetadataBatch(workspaceId, assetIds, { owner, sensitivity }, {
+          role: session.user.role,
+          audit: { actorUserId: session.user.id, action: "asset.metadata_batch_update", objectType: "ip_asset_batch", objectId: `${assetIds.length}-assets`, detail: { count: assetIds.length, owner, sensitivity } },
+        });
+        sendJson(response, 200, { assets });
+        return;
+      }
+      const assetMetadataMatch = request.method === "PATCH" && url.pathname.match(/^\/api\/assets\/(IP-[A-Za-z0-9-]{3,96})\/metadata$/);
+      if (assetMetadataMatch) {
+        if (!requireRole("editor")) return;
+        const input = await readJson(request);
+        const owner = String(input.owner || "").slice(0, 80);
+        const sensitivity = String(input.sensitivity || "").slice(0, 40);
+        const asset = await publicationRegistry.updateAssetMetadata(workspaceId, assetMetadataMatch[1], { owner, sensitivity }, {
+          role: session.user.role,
+          audit: { actorUserId: session.user.id, action: "asset.metadata_update", objectType: "ip_asset", detail: { owner, sensitivity } },
+        });
+        sendJson(response, asset ? 200 : 404, asset ? { asset } : { error: "Asset not found" });
         return;
       }
       const assetMatch = request.method === "GET" && url.pathname.match(/^\/api\/assets\/(IP-[A-Za-z0-9-]{3,96})$/);
@@ -554,11 +756,36 @@ export async function createRealAnalysisServer(options = {}) {
         sendJson(response, versions.length ? 200 : 404, versions.length ? { versions } : { error: "Wiki not found" });
         return;
       }
-      const wikiEditMatch = request.method === "PATCH" && url.pathname.match(/^\/api\/wiki\/(IP-REAL-[A-F0-9]+)$/);
-      if (wikiEditMatch) {
+      if (request.method === "GET" && url.pathname === "/api/wiki/reviews") {
+        if (!requireRole("editor")) return;
+        const status = url.searchParams.get("status") || "";
+        sendJson(response, 200, { reviews: await publicationRegistry.listWikiReviews(workspaceId, { status }) });
+        return;
+      }
+      const wikiReviewSubmitMatch = request.method === "POST" && url.pathname.match(/^\/api\/wiki\/(IP-REAL-[A-F0-9]+)\/reviews$/);
+      if (wikiReviewSubmitMatch) {
         if (!requireRole("editor")) return;
         const input = safeWikiInput(await readJson(request));
-        const wiki = await publicationRegistry.updateWiki(workspaceId, wikiEditMatch[1], { ...input, editorUserId: authRequired ? session.user.id : null });
+        const review = await publicationRegistry.submitWikiReview(workspaceId, wikiReviewSubmitMatch[1], { ...input, submittedByUserId: session.user.id });
+        if (!review) { sendJson(response, 404, { error: "Wiki not found" }); return; }
+        appendAudit(session, "wiki.review_submit", "wiki_review", review.id, { assetId: review.assetId, baseVersion: review.baseVersion, changeNote: review.changeNote });
+        sendJson(response, 201, { review });
+        return;
+      }
+      const wikiReviewDecisionMatch = request.method === "POST" && url.pathname.match(/^\/api\/wiki\/reviews\/(WREV-[A-Za-z0-9-]+)\/decision$/);
+      if (wikiReviewDecisionMatch) {
+        if (!requireRole("admin")) return;
+        const input = safeWikiReviewDecision(await readJson(request));
+        const result = await publicationRegistry.decideWikiReview(workspaceId, wikiReviewDecisionMatch[1], { ...input, reviewerUserId: session.user.id });
+        appendAudit(session, input.decision === "approved" ? "wiki.review_approve" : "wiki.review_reject", "wiki_review", result.review.id, { assetId: result.review.assetId, baseVersion: result.review.baseVersion, version: result.wiki?.version || null, reviewNote: input.reviewNote });
+        sendJson(response, 200, result);
+        return;
+      }
+      const wikiEditMatch = request.method === "PATCH" && url.pathname.match(/^\/api\/wiki\/(IP-REAL-[A-F0-9]+)$/);
+      if (wikiEditMatch) {
+        if (!requireRole("admin")) return;
+        const input = safeWikiInput(await readJson(request));
+        const wiki = await publicationRegistry.updateWiki(workspaceId, wikiEditMatch[1], { ...input, editorUserId: session.user.id });
         if (!wiki) { sendJson(response, 404, { error: "Wiki not found" }); return; }
         appendAudit(session, "wiki.update", "wiki", wikiEditMatch[1], { version: wiki.version, changeNote: input.changeNote });
         sendJson(response, 200, { wiki });
@@ -590,7 +817,7 @@ export async function createRealAnalysisServer(options = {}) {
       await serveStatic(response, url.pathname, distRoot);
     } catch (error) {
       const safeMessage = String(error?.message || "Gateway request failed").replace(/Bearer\s+[^\s]+/gi, "Bearer [redacted]").replace(/https?:\/\/\S+/gi, "[redacted-url]").slice(0, 220);
-      const status = error?.code === "INVALID_CREDENTIALS" ? 401 : ["VERSION_CONFLICT", "NOT_RETRYABLE", "BACKUP_IN_PROGRESS", "BACKUP_INTEGRITY_FAILED", "INVITATION_CONFLICT", "OWNER_PROTECTED", "DUPLICATE_RELATIONSHIP", "INVALID_RELATION_TRANSITION", "STORAGE_UNAVAILABLE"].includes(error?.code) ? 409 : error?.code === "UPLOAD_UNAVAILABLE" ? 410 : ["ENOENT", "NOT_FOUND", "INVITATION_UNAVAILABLE", "SHARE_UNAVAILABLE"].includes(error?.code) ? 404 : 400;
+      const status = error?.code === "INVALID_CREDENTIALS" ? 401 : ["SEMANTICA_DISABLED", "SEMANTICA_UNAVAILABLE", "SEMANTICA_TIMEOUT", "SEMANTICA_PROCESS_FAILED"].includes(error?.code) ? 503 : ["VERSION_CONFLICT", "NO_CHANGES", "REVIEW_PENDING", "REVIEW_DECIDED", "SEMANTIC_REVIEW_DECIDED", "NOT_RETRYABLE", "BACKUP_IN_PROGRESS", "BACKUP_INTEGRITY_FAILED", "INVITATION_CONFLICT", "OWNER_PROTECTED", "DUPLICATE_RELATIONSHIP", "INVALID_RELATION_TRANSITION", "STORAGE_UNAVAILABLE"].includes(error?.code) ? 409 : error?.code === "UPLOAD_UNAVAILABLE" ? 410 : ["ENOENT", "NOT_FOUND", "INVITATION_UNAVAILABLE", "SHARE_UNAVAILABLE"].includes(error?.code) ? 404 : 400;
       if (request.url?.startsWith("/api/")) sendJson(response, status, { error: safeMessage, ...(error?.currentVersion ? { currentVersion: error.currentVersion } : {}) });
       else {
         applySecurityHeaders(response, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
@@ -607,6 +834,7 @@ export async function createRealAnalysisServer(options = {}) {
     publicationRegistry,
     fileSecurityService,
     backupService,
+    semanticaClient,
     shareService,
     platformStore,
     authService,
@@ -628,7 +856,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   if (production && !bootstrapPassword) throw new Error("Production startup requires INTELIFAR_BOOTSTRAP_PASSWORD");
   const gateway = await createRealAnalysisServer({
     host: process.env.HOST ?? "127.0.0.1",
-    databasePath: bootstrapPassword ? process.env.INTELIFAR_DATABASE_PATH ?? path.resolve(process.cwd(), ".runtime", "intelifar.sqlite") : undefined,
+    databasePath: process.env.INTELIFAR_DATABASE_PATH ?? path.resolve(process.cwd(), ".runtime", "intelifar.sqlite"),
+    migrateLegacyPublications: true,
     auth: bootstrapPassword ? {
       required: true,
       secureCookies: process.env.INTELIFAR_SECURE_COOKIES !== "false",
@@ -638,6 +867,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       password: bootstrapPassword,
       name: process.env.INTELIFAR_BOOTSTRAP_NAME ?? "空间所有者",
     } : { required: false },
+    semantica: {
+      enabled: process.env.INTELIFAR_SEMANTICA_ENABLED === "true",
+      pythonPath: process.env.INTELIFAR_SEMANTICA_PYTHON,
+      sourcePath: process.env.INTELIFAR_SEMANTICA_SOURCE_PATH ?? path.resolve(here, "../.runtime/semantica-src-v0.6.0"),
+      bridgePath: process.env.INTELIFAR_SEMANTICA_BRIDGE_PATH ?? path.resolve(here, "../../integrations/semantica/bridge.py"),
+      timeoutMs: Number(process.env.INTELIFAR_SEMANTICA_TIMEOUT_MS ?? 15_000),
+    },
   });
   const url = await gateway.start(Number(process.env.PORT ?? 4388));
   process.stdout.write(`intelifar real analysis gateway listening on ${url}\n`);

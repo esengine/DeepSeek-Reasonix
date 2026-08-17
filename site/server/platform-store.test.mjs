@@ -142,6 +142,134 @@ test("publishes idempotently per workspace and isolates identical asset ids", as
   }
 });
 
+test("persists idempotent semantic review candidates without mutating formal assets", async () => {
+  const fx = await fixture();
+  try {
+    fx.store.ensureWorkspace({ id: "WS-A", name: "甲公司" });
+    fx.store.ensureWorkspace({ id: "WS-B", name: "乙公司" });
+    const firstPublication = publication("JOB-SEM-A", "IP-REAL-A");
+    firstPublication.assets[0].title = "企业知识中台";
+    firstPublication.assets[0].owner = "产品部";
+    firstPublication.assets[0].sensitivity = "内部";
+    const secondPublication = publication("JOB-SEM-B", "IP-REAL-B");
+    secondPublication.document.sourceName = "second-report.pdf";
+    secondPublication.assets[0].title = "企业知识中台";
+    secondPublication.assets[0].owner = "研发部";
+    secondPublication.assets[0].sensitivity = "内部";
+    fx.store.savePublication("WS-A", firstPublication);
+    fx.store.savePublication("WS-A", secondPublication);
+    const formalBefore = fx.store.listPublications("WS-A");
+    const result = {
+      engine: "Semantica",
+      version: "0.6.0",
+      duplicates: [{ assetIds: ["IP-REAL-B", "IP-REAL-A"], similarity: 0.94, confidence: 0.91, reasons: ["标题完全一致", ...Array.from({ length: 12 }, (_, index) => `原因 ${index}`)] }],
+      conflicts: [{ title: "不可信标题", field: "owner", severity: "high", confidence: 0.92, values: ["研发部", "产品部"], sources: [{ assetId: "IP-REAL-A", document: "secret-a.pdf", value: "产品部" }, { assetId: "IP-REAL-B", document: "secret-b.pdf", value: "研发部" }] }],
+    };
+
+    const created = fx.store.upsertSemanticReviews("WS-A", result, { detectedAt: "2026-08-12T01:00:00.000Z" });
+    assert.equal(created.length, 2);
+    assert.ok(created.every((review) => review.id.startsWith("SEMREV-") && review.status === "pending"));
+    assert.deepEqual(created.find((review) => review.kind === "duplicate").payload.assetIds, ["IP-REAL-A", "IP-REAL-B"]);
+    assert.deepEqual(created.find((review) => review.kind === "duplicate").payload.assets.map((asset) => asset.sourceName), ["report.pdf", "second-report.pdf"]);
+    assert.equal(created.find((review) => review.kind === "duplicate").payload.reasons.length, 8);
+    assert.equal(created.find((review) => review.kind === "conflict").payload.title, "企业知识中台");
+    assert.ok(!JSON.stringify(created).includes("secret-a.pdf"));
+
+    const rerun = fx.store.upsertSemanticReviews("WS-A", { ...result, duplicates: [{ ...result.duplicates[0], confidence: 0.99 }] }, { detectedAt: "2026-08-12T02:00:00.000Z" });
+    assert.deepEqual(rerun.map((review) => review.id).sort(), created.map((review) => review.id).sort());
+    assert.ok(rerun.every((review) => review.lastSeenAt === "2026-08-12T02:00:00.000Z"));
+    assert.equal(fx.store.listSemanticReviews("WS-A").length, 2);
+    assert.equal(fx.store.listSemanticReviews("WS-B").length, 0);
+    assert.deepEqual(fx.store.listPublications("WS-A"), formalBefore);
+  } finally {
+    await fx.close();
+  }
+});
+
+test("commits a terminal semantic review decision and audit event atomically", async () => {
+  const fx = await fixture();
+  try {
+    fx.store.ensureWorkspace({ id: "WS-A", name: "甲公司" });
+    fx.store.createUser({ id: "USR-ADMIN", workspaceId: "WS-A", email: "admin@example.com", name: "管理员", role: "admin", passwordHash: "scrypt" });
+    const first = publication("JOB-SEM-DECIDE-A", "IP-REAL-A");
+    const second = publication("JOB-SEM-DECIDE-B", "IP-REAL-B");
+    second.assets[0].title = first.assets[0].title;
+    fx.store.savePublication("WS-A", first);
+    fx.store.savePublication("WS-A", second);
+    const [review] = fx.store.upsertSemanticReviews("WS-A", { engine: "Semantica", version: "0.6.0", duplicates: [{ assetIds: ["IP-REAL-A", "IP-REAL-B"], confidence: 0.9, reasons: ["标题完全一致"] }], conflicts: [] });
+
+    const decided = fx.store.decideSemanticReview("WS-A", review.id, { decision: "confirmed", reviewNote: "交由知识产权负责人核对", reviewerUserId: "USR-ADMIN" }, { audit: { actorUserId: "USR-ADMIN", action: "semantic.review_confirm", objectType: "semantic_review" } });
+    assert.equal(decided.status, "confirmed");
+    assert.equal(decided.reviewedBy.name, "管理员");
+    assert.equal(decided.reviewNote, "交由知识产权负责人核对");
+    assert.equal(fx.store.listAuditEvents("WS-A", 10)[0].action, "semantic.review_confirm");
+    assert.deepEqual(fx.store.listAuditEvents("WS-A", 10)[0].detail.assetIds, ["IP-REAL-A", "IP-REAL-B"]);
+    assert.equal(fx.store.listAuditEvents("WS-A", 10)[0].detail.formalKnowledgeMutation, false);
+    assert.throws(() => fx.store.decideSemanticReview("WS-A", review.id, { decision: "dismissed", reviewerUserId: "USR-ADMIN" }), (error) => error.code === "SEMANTIC_REVIEW_DECIDED");
+    assert.throws(() => fx.store.decideSemanticReview("WS-B", review.id, { decision: "dismissed", reviewerUserId: "USR-ADMIN" }), (error) => error.code === "NOT_FOUND");
+
+    fx.store.upsertSemanticReviews("WS-A", { engine: "Semantica", version: "0.6.0", duplicates: [{ assetIds: ["IP-REAL-A", "IP-REAL-B"], confidence: 0.99 }], conflicts: [] }, { detectedAt: "2026-08-12T03:00:00.000Z" });
+    assert.equal(fx.store.listSemanticReviews("WS-A", { status: "confirmed" })[0].status, "confirmed");
+
+    const conflictResult = { engine: "Semantica", version: "0.6.0", duplicates: [], conflicts: [{ title: first.assets[0].title, field: "owner", values: ["产品部", "研发部"], sources: [{ assetId: "IP-REAL-A", value: "产品部" }, { assetId: "IP-REAL-B", value: "研发部" }] }] };
+    const [pending] = fx.store.upsertSemanticReviews("WS-A", conflictResult);
+    assert.throws(() => fx.store.decideSemanticReview("WS-A", pending.id, { decision: "dismissed", reviewerUserId: "USR-ADMIN" }, { audit: { actorUserId: "USR-MISSING", action: "semantic.review_dismiss", objectType: "semantic_review" } }));
+    assert.equal(fx.store.listSemanticReviews("WS-A").find((item) => item.id === pending.id).status, "pending");
+  } finally {
+    await fx.close();
+  }
+});
+
+test("updates asset ownership and sensitivity with graph projection and audit", async () => {
+  const fx = await fixture();
+  try {
+    fx.store.ensureWorkspace({ id: "WS-A", name: "甲公司" });
+    fx.store.ensureWorkspace({ id: "WS-B", name: "乙公司" });
+    fx.store.savePublication("WS-A", publication());
+
+    const updated = fx.store.updateAssetMetadata("WS-A", "IP-REAL-A", { owner: "产品平台主管", sensitivity: "内部" }, {
+      audit: { actorUserId: null, action: "asset.metadata_update", objectType: "ip_asset", detail: { owner: "产品平台主管", sensitivity: "内部" } },
+    });
+
+    assert.equal(updated.owner, "产品平台主管");
+    assert.equal(updated.sensitivity, "内部");
+    assert.equal(fx.store.findAsset("WS-A", "IP-REAL-A").owner, "产品平台主管");
+    assert.equal(fx.store.getAssetGraph("WS-A", { role: "owner" }).nodes.find((node) => node.id === "IP-REAL-A").owner, "产品平台主管");
+    assert.equal(fx.store.listAuditEvents("WS-A", 10)[0].action, "asset.metadata_update");
+    assert.equal(fx.store.updateAssetMetadata("WS-B", "IP-REAL-A", { owner: "其他部门", sensitivity: "公开" }), null);
+    assert.throws(() => fx.store.updateAssetMetadata("WS-A", "IP-REAL-A", { owner: "待确权", sensitivity: "绝密" }), (error) => error.code === "INVALID_ASSET_METADATA");
+  } finally {
+    await fx.close();
+  }
+});
+
+test("updates a selected asset batch atomically and records one business event", async () => {
+  const fx = await fixture();
+  try {
+    fx.store.ensureWorkspace({ id: "WS-A", name: "甲公司" });
+    const batch = publication("JOB-BATCH", "IP-REAL-A");
+    batch.assets[0].owner = "待确权";
+    batch.assets[0].sensitivity = "待复核";
+    batch.assets.push({ ...structuredClone(batch.assets[0]), id: "IP-REAL-B", title: "文档检索方法" });
+    fx.store.savePublication("WS-A", batch);
+
+    assert.throws(() => fx.store.updateAssetMetadataBatch("WS-A", ["IP-REAL-A", "IP-REAL-MISSING"], { owner: "产品部", sensitivity: "内部" }), (error) => error.code === "NOT_FOUND");
+    assert.equal(fx.store.findAsset("WS-A", "IP-REAL-A").owner, "待确权");
+
+    const updated = fx.store.updateAssetMetadataBatch("WS-A", ["IP-REAL-A", "IP-REAL-B"], { owner: "产品部", sensitivity: "内部" }, {
+      audit: { actorUserId: null, action: "asset.metadata_batch_update", objectType: "ip_asset_batch", objectId: "2-assets", detail: { count: 2 } },
+    });
+    assert.deepEqual(updated.map((asset) => asset.id), ["IP-REAL-A", "IP-REAL-B"]);
+    assert.ok(updated.every((asset) => asset.owner === "产品部" && asset.sensitivity === "内部"));
+    assert.ok(fx.store.getAssetGraph("WS-A", { role: "owner" }).nodes.filter((node) => updated.some((asset) => asset.id === node.id)).every((node) => node.owner === "产品部"));
+    const events = fx.store.listAuditEvents("WS-A", 10).filter((event) => event.action === "asset.metadata_batch_update");
+    assert.equal(events.length, 1);
+    assert.equal(events[0].detail.count, 2);
+  } finally {
+    await fx.close();
+  }
+});
+
 test("creates append-only Wiki versions and rejects a stale base version", async () => {
   const fx = await fixture();
   try {
@@ -170,6 +298,78 @@ test("creates append-only Wiki versions and rejects a stale base version", async
   }
 });
 
+test("rejects an unchanged Wiki update without creating a new version", async () => {
+  const fx = await fixture();
+  try {
+    fx.store.ensureWorkspace({ id: "WS-A", name: "甲公司" });
+    fx.store.savePublication("WS-A", publication());
+    assert.throws(() => fx.store.saveWikiVersion("WS-A", "IP-REAL-A", {
+      baseVersion: "V1.0",
+      title: "推理路由方法",
+      executiveSummary: "初始摘要",
+      keyMechanism: "初始机制",
+      changeNote: "没有实际变化",
+    }), (error) => error.code === "NO_CHANGES");
+    assert.equal(fx.store.listWikiVersions("WS-A", "IP-REAL-A").length, 1);
+  } finally {
+    await fx.close();
+  }
+});
+
+test("persists Wiki review requests and publishes only after approval", async () => {
+  const fx = await fixture();
+  try {
+    fx.store.ensureWorkspace({ id: "WS-A", name: "甲公司" });
+    fx.store.createUser({ id: "USR-EDITOR", workspaceId: "WS-A", email: "editor@example.com", name: "知识编辑", role: "editor", passwordHash: "hash-editor" });
+    fx.store.createUser({ id: "USR-ADMIN", workspaceId: "WS-A", email: "admin@example.com", name: "空间管理员", role: "admin", passwordHash: "hash-admin" });
+    fx.store.savePublication("WS-A", publication());
+
+    const review = fx.store.submitWikiReview("WS-A", "IP-REAL-A", {
+      baseVersion: "V1.0",
+      title: "推理路由方法（复核版）",
+      executiveSummary: "等待审批的摘要",
+      keyMechanism: "等待审批的机制",
+      changeNote: "补充客户验证结论",
+      submittedByUserId: "USR-EDITOR",
+    });
+    assert.match(review.id, /^WREV-/);
+    assert.equal(review.status, "pending");
+    assert.equal(review.submittedBy.name, "知识编辑");
+    assert.equal(fx.store.getWiki("WS-A", "IP-REAL-A").version, "V1.0");
+    assert.equal(fx.store.listWikiReviews("WS-A", { status: "pending" }).length, 1);
+
+    const decision = fx.store.decideWikiReview("WS-A", review.id, { decision: "approved", reviewerUserId: "USR-ADMIN", reviewNote: "依据充分" });
+    assert.equal(decision.review.status, "approved");
+    assert.equal(decision.review.reviewedBy.name, "空间管理员");
+    assert.equal(decision.wiki.version, "V1.1");
+    assert.equal(decision.wiki.executiveSummary, "等待审批的摘要");
+  } finally {
+    await fx.close();
+  }
+});
+
+test("rejects Wiki review without changing the published version and keeps a stale approval pending", async () => {
+  const fx = await fixture();
+  try {
+    fx.store.ensureWorkspace({ id: "WS-A", name: "甲公司" });
+    fx.store.createUser({ id: "USR-EDITOR", workspaceId: "WS-A", email: "editor@example.com", name: "知识编辑", role: "editor", passwordHash: "hash-editor" });
+    fx.store.createUser({ id: "USR-ADMIN", workspaceId: "WS-A", email: "admin@example.com", name: "空间管理员", role: "admin", passwordHash: "hash-admin" });
+    fx.store.savePublication("WS-A", publication());
+    const rejected = fx.store.submitWikiReview("WS-A", "IP-REAL-A", { baseVersion: "V1.0", title: "退回标题", executiveSummary: "退回摘要", keyMechanism: "退回机制", submittedByUserId: "USR-EDITOR" });
+    const rejectedDecision = fx.store.decideWikiReview("WS-A", rejected.id, { decision: "rejected", reviewerUserId: "USR-ADMIN", reviewNote: "需要补充原文依据" });
+    assert.equal(rejectedDecision.review.status, "rejected");
+    assert.equal(rejectedDecision.wiki, null);
+    assert.equal(fx.store.getWiki("WS-A", "IP-REAL-A").version, "V1.0");
+
+    const stale = fx.store.submitWikiReview("WS-A", "IP-REAL-A", { baseVersion: "V1.0", title: "过期草稿", executiveSummary: "过期摘要", keyMechanism: "过期机制", submittedByUserId: "USR-EDITOR" });
+    fx.store.saveWikiVersion("WS-A", "IP-REAL-A", { baseVersion: "V1.0", title: "管理员更新", executiveSummary: "新摘要", keyMechanism: "新机制", editorUserId: "USR-ADMIN" });
+    assert.throws(() => fx.store.decideWikiReview("WS-A", stale.id, { decision: "approved", reviewerUserId: "USR-ADMIN" }), (error) => error.code === "VERSION_CONFLICT");
+    assert.equal(fx.store.listWikiReviews("WS-A", { status: "pending" })[0].id, stale.id);
+  } finally {
+    await fx.close();
+  }
+});
+
 test("chains audit events per workspace and detects stored tampering", async () => {
   const fx = await fixture();
   try {
@@ -180,6 +380,28 @@ test("chains audit events per workspace and detects stored tampering", async () 
 
     fx.store.unsafeDatabaseForTests.prepare("UPDATE audit_events SET detail_json = ? WHERE sequence = 1").run('{"result":"changed"}');
     assert.equal(fx.store.verifyAuditChain("WS-A").valid, false);
+  } finally {
+    await fx.close();
+  }
+});
+
+test("lists sanitized audit events newest-first within one workspace", async () => {
+  const fx = await fixture();
+  try {
+    fx.store.ensureWorkspace({ id: "WS-A", name: "甲公司" });
+    fx.store.ensureWorkspace({ id: "WS-B", name: "乙公司" });
+    fx.store.createUser({ id: "USR-A", workspaceId: "WS-A", email: "owner-a@example.com", name: "甲方", role: "owner", passwordHash: "hash-a" });
+    fx.store.appendAudit("WS-A", { actorUserId: "USR-A", action: "evidence.view", objectType: "evidence", objectId: "EV-A", detail: { locator: "第一章" }, createdAt: "2026-08-10T08:00:00.000Z" });
+    fx.store.appendAudit("WS-A", { actorUserId: "USR-A", action: "audit.export", objectType: "audit_ledger", objectId: "WS-A", detail: { format: "csv" }, createdAt: "2026-08-10T09:00:00.000Z" });
+    fx.store.appendAudit("WS-B", { actorUserId: null, action: "other", objectType: "test", objectId: "B", detail: {} });
+
+    const events = fx.store.listAuditEvents("WS-A", 10);
+    assert.deepEqual(events.map((event) => event.action), ["audit.export", "evidence.view"]);
+    assert.equal(events[0].actor.name, "甲方");
+    assert.equal(events[0].detail.format, "csv");
+    assert.equal(events[0].workspaceId, undefined);
+    assert.equal(events.some((event) => "passwordHash" in event), false);
+    assert.equal(fx.store.listAuditEvents("WS-B", 10).length, 1);
   } finally {
     await fx.close();
   }
@@ -219,6 +441,11 @@ test("persists one-time invitations and protects owner membership", async () => 
     assert.equal(fx.store.getInvitationByTokenHash("hash-2"), null);
     assert.throws(() => fx.store.acceptInvitation("hash-2", { userId: "USR-SECOND", passwordHash: "x" }), (error) => error.code === "INVITATION_UNAVAILABLE");
     assert.throws(() => fx.store.updateMember("WS-A", "USR-OWNER", { role: "viewer", disabled: true }), (error) => error.code === "OWNER_PROTECTED");
+    fx.store.createSession({ id: "SES-MEMBER-OLD", userId: "USR-MEMBER", tokenHash: "session-member-old", createdAt: "2026-08-10T08:00:00.000Z", expiresAt: "2099-01-01T00:00:00.000Z" });
+    fx.store.createSession({ id: "SES-MEMBER-NEW", userId: "USR-MEMBER", tokenHash: "session-member-new", createdAt: "2026-08-11T09:30:00.000Z", expiresAt: "2099-01-01T00:00:00.000Z" });
+    const members = fx.store.listMembers("WS-A");
+    assert.equal(members.find((member) => member.id === "USR-OWNER").lastLoginAt, null);
+    assert.equal(members.find((member) => member.id === "USR-MEMBER").lastLoginAt, "2026-08-11T09:30:00.000Z");
     const disabled = fx.store.updateMember("WS-A", "USR-MEMBER", { role: "editor", disabled: true });
     assert.equal(disabled.status, "disabled");
     assert.equal(fx.store.listMembers("WS-A").length, 2);
@@ -315,6 +542,28 @@ test("projects publications into an idempotent workspace-scoped asset graph", as
     assert.deepEqual(graphA.edges[0].evidenceIds, ["EV-CORE-1", "EV-PARSER-1"]);
     assert.ok(graphA.edges[0].id.startsWith("REL-"));
     assert.equal(fx.store.getAssetGraph("WS-C", { role: "owner" }).nodes.length, 0);
+  } finally {
+    await fx.close();
+  }
+});
+
+test("resolves relationship titles within each publication when workspace titles repeat", async () => {
+  const fx = await fixture();
+  try {
+    fx.store.ensureWorkspace({ id: "WS-A", name: "甲公司" });
+    fx.store.savePublication("WS-A", graphPublication("JOB-GRAPH-V1"));
+    const second = graphPublication("JOB-GRAPH-V2");
+    second.assets = second.assets.map((asset) => ({
+      ...asset,
+      id: `${asset.id}-V2`,
+      evidence: asset.evidence.map((evidence) => ({ ...evidence, id: `${evidence.id}-V2` })),
+    }));
+    fx.store.savePublication("WS-A", second);
+
+    const graph = fx.store.getAssetGraph("WS-A", { role: "owner", includeProposed: true });
+    assert.equal(graph.nodes.length, 6);
+    assert.equal(graph.edges.length, 2);
+    assert.ok(graph.edges.some((edge) => edge.sourceAssetId === "IP-GRAPH-CORE-V2" && edge.targetAssetId === "IP-GRAPH-PARSER-V2"));
   } finally {
     await fx.close();
   }

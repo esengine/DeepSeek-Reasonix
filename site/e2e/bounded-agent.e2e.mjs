@@ -214,7 +214,9 @@ try {
   assert.match(await page.locator("#agent-excluded-actions").textContent(), /未保存|未发布/);
   await screenshotTaskDetail("02-grounded-delivery.png");
 
-  await page.getByRole("button", { name: "IP-REAL-CORE", exact: true }).first().click();
+  const relatedAssetButton = page.locator(".agent-source-list button[title='内部来源编号：IP-REAL-CORE']").first();
+  assert.match(await relatedAssetButton.textContent(), /查看相关资产/);
+  await relatedAssetButton.click();
   await page.locator("#asset-drawer.is-open").waitFor();
   assert.match(await page.locator("#asset-drawer").textContent(), /企业知识抽取引擎/);
   await page.screenshot({ path: path.join(artifacts, "03-source-backlink.png") });

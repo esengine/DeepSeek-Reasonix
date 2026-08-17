@@ -1,9 +1,9 @@
 {
-  "publicationId": "PUB-DF6F52EBFE57",
-  "sourceJobId": "JOB-REAL-af94b2c3-de46-448a-9d59-26af47650f4e",
+  "publicationId": "PUB-069F76D0E58F",
+  "sourceJobId": "JOB-REAL-7652ca85-6587-4ecc-905e-34a6591706e8",
   "status": "published",
   "version": "V1.0",
-  "publishedAt": "2026-08-10T05:35:34.173Z",
+  "publishedAt": "2026-08-11T02:55:25.742Z",
   "document": {
     "title": "企业级长文档 IP 智能分析与 Wiki 管理平台技术设计报告",
     "category": "技术设计报告",
@@ -13,30 +13,30 @@
     "markdownSha256": "4a4a4c3b4a27bd75b9074d517caee8c2d5f8f3a1f3679653169ba91a105ccbe9",
     "parserProvider": "MinerU",
     "parserModel": "MinerU-HTML",
-    "parserBatchId": "6b47f0d3-d92e-497f-848c-c9185d2f45f1",
+    "parserBatchId": "dd454c04-1cf4-4566-8aee-adf3e30bccfc",
     "llmProvider": "DeepSeek",
     "llmModel": "deepseek-v4-flash"
   },
   "assets": [
     {
-      "id": "IP-REAL-15184BBF4691",
+      "id": "IP-REAL-3B7DE9D3F30F",
       "sourceAssetId": "IP-001",
-      "publicationId": "PUB-DF6F52EBFE57",
-      "sourceJobId": "JOB-REAL-af94b2c3-de46-448a-9d59-26af47650f4e",
+      "publicationId": "PUB-069F76D0E58F",
+      "sourceJobId": "JOB-REAL-7652ca85-6587-4ecc-905e-34a6591706e8",
       "title": "版式与语义双重保真的解析架构",
       "type": "技术方案",
-      "summary": "解析服务同时保存章节树、段落顺序、表格单元格、图片说明、公式和页面坐标。MinerU 输出的 Markdown 是语义主干，版式内容块编号则作为后续证据定位锚点；二者使用同一文档版本哈希关联，避免结构重排造成引用漂移。平台把每一条结构化结论绑定到“文档版本—章节—内容块—原文片段”四级证据坐标，并计算 SHA-256 完整性摘要。",
+      "summary": "解析服务同时保存章节树、段落顺序、表格单元格、图片说明、公式和页面坐标。MinerU 输出的 Markdown 是语义主干，版式内容块编号则作为后续证据定位锚点；二者使用同一文档版本哈希关联，避免结构重排造成引用漂移。",
       "tags": [
         "解析架构",
-        "证据坐标",
-        "SHA-256"
+        "证据定位",
+        "哈希关联"
       ],
       "confidence": 0.95,
       "owner": "待确权",
       "sensitivity": "待复核",
       "status": "已发布",
       "version": "V1.0",
-      "publishedAt": "2026-08-10T05:35:34.173Z",
+      "publishedAt": "2026-08-11T02:55:25.742Z",
       "document": {
         "title": "企业级长文档 IP 智能分析与 Wiki 管理平台技术设计报告",
         "category": "技术设计报告",
@@ -46,33 +46,33 @@
         "markdownSha256": "4a4a4c3b4a27bd75b9074d517caee8c2d5f8f3a1f3679653169ba91a105ccbe9",
         "parserProvider": "MinerU",
         "parserModel": "MinerU-HTML",
-        "parserBatchId": "6b47f0d3-d92e-497f-848c-c9185d2f45f1",
+        "parserBatchId": "dd454c04-1cf4-4566-8aee-adf3e30bccfc",
         "llmProvider": "DeepSeek",
         "llmModel": "deepseek-v4-flash"
       },
       "evidence": [
         {
-          "id": "EV-BFAB3A04F3C0",
-          "assetId": "IP-REAL-15184BBF4691",
-          "quote": "解析服务同时保存章节树、段落顺序、表格单元格、图片说明、公式和页面坐标。MinerU 输出的 Markdown 是语义主干，版式内容块编号则作为后续证据定位锚点；二者使用同一文档版本哈希关联，避免结构重排造成引用漂移。",
+          "id": "EV-84F86A88E0DE",
+          "assetId": "IP-REAL-3B7DE9D3F30F",
+          "quote": "解析服务同时保存章节树、段落顺序、表格单元格、图片说明、公式和页面坐标。",
           "section": "IP 资产一：版式与语义双重保真的解析架构",
-          "quoteHash": "ac2c054be74ebe40393269b76d461df15ba630c4e76276b5b639c31957f99222",
+          "quoteHash": "5c850731da4cfc039a51129449e1f9c66b43ad8196360308d58c3193fa7003c0",
           "documentHash": "4a4a4c3b4a27bd75b9074d517caee8c2d5f8f3a1f3679653169ba91a105ccbe9",
           "documentName": "intelifar-real-analysis.html",
-          "parserBatchId": "6b47f0d3-d92e-497f-848c-c9185d2f45f1",
+          "parserBatchId": "dd454c04-1cf4-4566-8aee-adf3e30bccfc",
           "precision": "章节级",
           "locator": "IP 资产一：版式与语义双重保真的解析架构",
           "verified": true
         },
         {
-          "id": "EV-2D356AEBD109",
-          "assetId": "IP-REAL-15184BBF4691",
+          "id": "EV-5049051B121C",
+          "assetId": "IP-REAL-3B7DE9D3F30F",
           "quote": "平台把每一条结构化结论绑定到“文档版本—章节—内容块—原文片段”四级证据坐标，并计算 SHA-256 完整性摘要。",
           "section": "IP 资产一：版式与语义双重保真的解析架构",
           "quoteHash": "1ae79209bed91bcd4a74eb9713828dc302cdd3860dec6935a94b75731d8db811",
           "documentHash": "4a4a4c3b4a27bd75b9074d517caee8c2d5f8f3a1f3679653169ba91a105ccbe9",
           "documentName": "intelifar-real-analysis.html",
-          "parserBatchId": "6b47f0d3-d92e-497f-848c-c9185d2f45f1",
+          "parserBatchId": "dd454c04-1cf4-4566-8aee-adf3e30bccfc",
           "precision": "章节级",
           "locator": "IP 资产一：版式与语义双重保真的解析架构",
           "verified": true
@@ -81,7 +81,7 @@
       "wiki": {
         "title": "版式与语义双重保真的解析架构",
         "executiveSummary": "平台面向商业报告、专利、法律合同、学术论文、技术白皮书、开源协议等三十余类长文档，围绕“文档语义理解—IP 资产萃取—知识结构化沉淀”形成预设式处理闭环。用户只需上传文档，系统自动完成解析、分类、提取、交叉校验、Wiki 生成和治理登记。",
-        "keyMechanism": "平台采用版式与语义双重保真的解析架构，将结构化结论绑定到四级证据坐标，并通过预设 Schema 路由实现分类提取，最终生成可溯源的一页式 IP Wiki，同时通过脱敏模型保障安全。",
+        "keyMechanism": "解析服务同时保存章节树、段落顺序、表格单元格、图片说明、公式和页面坐标。MinerU 输出的 Markdown 是语义主干，版式内容块编号则作为后续证据定位锚点；二者使用同一文档版本哈希关联，避免结构重排造成引用漂移。",
         "metrics": [
           {
             "label": "文档分类准确率",
@@ -102,42 +102,42 @@
         ],
         "relationships": [
           {
-            "source": "解析架构",
-            "relation": "提供证据坐标给",
-            "target": "IP Wiki"
+            "source": "版式与语义双重保真的解析架构",
+            "relation": "implements",
+            "target": "可溯源的一页式 IP Wiki"
           },
           {
-            "source": "Schema 路由",
-            "relation": "决定提取策略用于",
-            "target": "IP 资产萃取"
+            "source": "面向三十余类文档的预设 Schema 路由",
+            "relation": "implements",
+            "target": "可溯源的一页式 IP Wiki"
           },
           {
-            "source": "安全模型",
-            "relation": "保护",
-            "target": "原始证据坐标"
+            "source": "脱敏不影响溯源的安全模型",
+            "relation": "implements",
+            "target": "可溯源的一页式 IP Wiki"
           }
         ]
       }
     },
     {
-      "id": "IP-REAL-1664A595BF3A",
+      "id": "IP-REAL-171404D4AE55",
       "sourceAssetId": "IP-002",
-      "publicationId": "PUB-DF6F52EBFE57",
-      "sourceJobId": "JOB-REAL-af94b2c3-de46-448a-9d59-26af47650f4e",
+      "publicationId": "PUB-069F76D0E58F",
+      "sourceJobId": "JOB-REAL-7652ca85-6587-4ecc-905e-34a6591706e8",
       "title": "面向三十余类文档的预设 Schema 路由",
       "type": "技术方案",
-      "summary": "系统先识别细分类别，再选择对应业务 Schema。技术白皮书重点提取技术机制、性能指标和可复用边界；专利重点提取创新点、权利要求保护范围与应用场景；合同重点提取权责、期限、金额和使用约束。所有规则由平台预设，不要求用户编写提示词。分类置信度低于 0.85 或关键字段证据冲突时，任务进入人工复核队列，不自动发布 Wiki。",
+      "summary": "系统先识别细分类别，再选择对应业务 Schema。技术白皮书重点提取技术机制、性能指标和可复用边界；专利重点提取创新点、权利要求保护范围与应用场景；合同重点提取权责、期限、金额和使用约束。所有规则由平台预设，不要求用户编写提示词。",
       "tags": [
         "Schema路由",
         "文档分类",
-        "人工复核"
+        "预设规则"
       ],
       "confidence": 0.95,
       "owner": "待确权",
       "sensitivity": "待复核",
       "status": "已发布",
       "version": "V1.0",
-      "publishedAt": "2026-08-10T05:35:34.173Z",
+      "publishedAt": "2026-08-11T02:55:25.742Z",
       "document": {
         "title": "企业级长文档 IP 智能分析与 Wiki 管理平台技术设计报告",
         "category": "技术设计报告",
@@ -147,33 +147,33 @@
         "markdownSha256": "4a4a4c3b4a27bd75b9074d517caee8c2d5f8f3a1f3679653169ba91a105ccbe9",
         "parserProvider": "MinerU",
         "parserModel": "MinerU-HTML",
-        "parserBatchId": "6b47f0d3-d92e-497f-848c-c9185d2f45f1",
+        "parserBatchId": "dd454c04-1cf4-4566-8aee-adf3e30bccfc",
         "llmProvider": "DeepSeek",
         "llmModel": "deepseek-v4-flash"
       },
       "evidence": [
         {
-          "id": "EV-FE2F1838C031",
-          "assetId": "IP-REAL-1664A595BF3A",
-          "quote": "系统先识别细分类别，再选择对应业务 Schema。技术白皮书重点提取技术机制、性能指标和可复用边界；专利重点提取创新点、权利要求保护范围与应用场景；合同重点提取权责、期限、金额和使用约束。所有规则由平台预设，不要求用户编写提示词。",
+          "id": "EV-D72095B68F5F",
+          "assetId": "IP-REAL-171404D4AE55",
+          "quote": "系统先识别细分类别，再选择对应业务 Schema。",
           "section": "IP 资产二：面向三十余类文档的预设 Schema 路由",
-          "quoteHash": "686cc53a87dc401360e2e23624d9b8e113c34e60f945e455271518527a41c75a",
+          "quoteHash": "b59d18a1ba32d37a60519b7f7d49296a3d5a17b5622a1376304507785c0552af",
           "documentHash": "4a4a4c3b4a27bd75b9074d517caee8c2d5f8f3a1f3679653169ba91a105ccbe9",
           "documentName": "intelifar-real-analysis.html",
-          "parserBatchId": "6b47f0d3-d92e-497f-848c-c9185d2f45f1",
+          "parserBatchId": "dd454c04-1cf4-4566-8aee-adf3e30bccfc",
           "precision": "章节级",
           "locator": "IP 资产二：面向三十余类文档的预设 Schema 路由",
           "verified": true
         },
         {
-          "id": "EV-F300E91E0023",
-          "assetId": "IP-REAL-1664A595BF3A",
-          "quote": "分类置信度低于 0.85 或关键字段证据冲突时，任务进入人工复核队列，不自动发布 Wiki。",
+          "id": "EV-EDB014772F6E",
+          "assetId": "IP-REAL-171404D4AE55",
+          "quote": "所有规则由平台预设，不要求用户编写提示词。",
           "section": "IP 资产二：面向三十余类文档的预设 Schema 路由",
-          "quoteHash": "39e3e0d597494e02ed6b374c47977a437dea78a08db7860630b2e771b7834d8e",
+          "quoteHash": "c4fc2251f38bc4fee8dbbba091a15f580d36d2488c54c80046e2177f91f348e4",
           "documentHash": "4a4a4c3b4a27bd75b9074d517caee8c2d5f8f3a1f3679653169ba91a105ccbe9",
           "documentName": "intelifar-real-analysis.html",
-          "parserBatchId": "6b47f0d3-d92e-497f-848c-c9185d2f45f1",
+          "parserBatchId": "dd454c04-1cf4-4566-8aee-adf3e30bccfc",
           "precision": "章节级",
           "locator": "IP 资产二：面向三十余类文档的预设 Schema 路由",
           "verified": true
@@ -182,7 +182,7 @@
       "wiki": {
         "title": "面向三十余类文档的预设 Schema 路由",
         "executiveSummary": "平台面向商业报告、专利、法律合同、学术论文、技术白皮书、开源协议等三十余类长文档，围绕“文档语义理解—IP 资产萃取—知识结构化沉淀”形成预设式处理闭环。用户只需上传文档，系统自动完成解析、分类、提取、交叉校验、Wiki 生成和治理登记。",
-        "keyMechanism": "平台采用版式与语义双重保真的解析架构，将结构化结论绑定到四级证据坐标，并通过预设 Schema 路由实现分类提取，最终生成可溯源的一页式 IP Wiki，同时通过脱敏模型保障安全。",
+        "keyMechanism": "解析服务同时保存章节树、段落顺序、表格单元格、图片说明、公式和页面坐标。MinerU 输出的 Markdown 是语义主干，版式内容块编号则作为后续证据定位锚点；二者使用同一文档版本哈希关联，避免结构重排造成引用漂移。",
         "metrics": [
           {
             "label": "文档分类准确率",
@@ -203,42 +203,42 @@
         ],
         "relationships": [
           {
-            "source": "解析架构",
-            "relation": "提供证据坐标给",
-            "target": "IP Wiki"
+            "source": "版式与语义双重保真的解析架构",
+            "relation": "implements",
+            "target": "可溯源的一页式 IP Wiki"
           },
           {
-            "source": "Schema 路由",
-            "relation": "决定提取策略用于",
-            "target": "IP 资产萃取"
+            "source": "面向三十余类文档的预设 Schema 路由",
+            "relation": "implements",
+            "target": "可溯源的一页式 IP Wiki"
           },
           {
-            "source": "安全模型",
-            "relation": "保护",
-            "target": "原始证据坐标"
+            "source": "脱敏不影响溯源的安全模型",
+            "relation": "implements",
+            "target": "可溯源的一页式 IP Wiki"
           }
         ]
       }
     },
     {
-      "id": "IP-REAL-C8469BB43D72",
+      "id": "IP-REAL-DF55B7D505BC",
       "sourceAssetId": "IP-003",
-      "publicationId": "PUB-DF6F52EBFE57",
-      "sourceJobId": "JOB-REAL-af94b2c3-de46-448a-9d59-26af47650f4e",
+      "publicationId": "PUB-069F76D0E58F",
+      "sourceJobId": "JOB-REAL-7652ca85-6587-4ecc-905e-34a6591706e8",
       "title": "可溯源的一页式 IP Wiki",
       "type": "技术方案",
-      "summary": "Wiki 首页统一呈现文档元数据、核心 IP 资产、价值说明、风险、效果指标和关系双链。每个结论带有引用编号，点击后能够返回 MinerU 解析文本中的原文片段及章节位置；同一资产的不同版本通过稳定资产编号建立演化链。Wiki 中的价值结论必须至少包含一处原文逐字引用；没有证据的模型推断不得进入正式资产库。",
+      "summary": "Wiki 首页统一呈现文档元数据、核心 IP 资产、价值说明、风险、效果指标和关系双链。每个结论带有引用编号，点击后能够返回 MinerU 解析文本中的原文片段及章节位置；同一资产的不同版本通过稳定资产编号建立演化链。",
       "tags": [
         "IP Wiki",
         "溯源",
-        "引用"
+        "版本演化"
       ],
       "confidence": 0.95,
       "owner": "待确权",
       "sensitivity": "待复核",
       "status": "已发布",
       "version": "V1.0",
-      "publishedAt": "2026-08-10T05:35:34.173Z",
+      "publishedAt": "2026-08-11T02:55:25.742Z",
       "document": {
         "title": "企业级长文档 IP 智能分析与 Wiki 管理平台技术设计报告",
         "category": "技术设计报告",
@@ -248,33 +248,33 @@
         "markdownSha256": "4a4a4c3b4a27bd75b9074d517caee8c2d5f8f3a1f3679653169ba91a105ccbe9",
         "parserProvider": "MinerU",
         "parserModel": "MinerU-HTML",
-        "parserBatchId": "6b47f0d3-d92e-497f-848c-c9185d2f45f1",
+        "parserBatchId": "dd454c04-1cf4-4566-8aee-adf3e30bccfc",
         "llmProvider": "DeepSeek",
         "llmModel": "deepseek-v4-flash"
       },
       "evidence": [
         {
-          "id": "EV-AAF6B86B7BB3",
-          "assetId": "IP-REAL-C8469BB43D72",
-          "quote": "Wiki 首页统一呈现文档元数据、核心 IP 资产、价值说明、风险、效果指标和关系双链。每个结论带有引用编号，点击后能够返回 MinerU 解析文本中的原文片段及章节位置；同一资产的不同版本通过稳定资产编号建立演化链。",
+          "id": "EV-2A7D945D39AB",
+          "assetId": "IP-REAL-DF55B7D505BC",
+          "quote": "Wiki 首页统一呈现文档元数据、核心 IP 资产、价值说明、风险、效果指标和关系双链。",
           "section": "IP 资产三：可溯源的一页式 IP Wiki",
-          "quoteHash": "69006d269d8acf844c7f1ff2fe30a46add0e3a7ae335c964ed26a6223b8bdb3a",
+          "quoteHash": "cef5a0538b3b93d02800005d379ac3c2f880ac8b053636026e2ebe129ada64ee",
           "documentHash": "4a4a4c3b4a27bd75b9074d517caee8c2d5f8f3a1f3679653169ba91a105ccbe9",
           "documentName": "intelifar-real-analysis.html",
-          "parserBatchId": "6b47f0d3-d92e-497f-848c-c9185d2f45f1",
+          "parserBatchId": "dd454c04-1cf4-4566-8aee-adf3e30bccfc",
           "precision": "章节级",
           "locator": "IP 资产三：可溯源的一页式 IP Wiki",
           "verified": true
         },
         {
-          "id": "EV-8DF708CE517C",
-          "assetId": "IP-REAL-C8469BB43D72",
-          "quote": "Wiki 中的价值结论必须至少包含一处原文逐字引用；没有证据的模型推断不得进入正式资产库。",
+          "id": "EV-829B30A64A00",
+          "assetId": "IP-REAL-DF55B7D505BC",
+          "quote": "每个结论带有引用编号，点击后能够返回 MinerU 解析文本中的原文片段及章节位置；",
           "section": "IP 资产三：可溯源的一页式 IP Wiki",
-          "quoteHash": "b2b816f5ba40aab3ef9306c8b6a2822f510923607f2089cb0e8894bbdc1b82db",
+          "quoteHash": "66a88c8e87dd88512bfc98c195a4d881c56e2d764c793752411745abaf90ac4c",
           "documentHash": "4a4a4c3b4a27bd75b9074d517caee8c2d5f8f3a1f3679653169ba91a105ccbe9",
           "documentName": "intelifar-real-analysis.html",
-          "parserBatchId": "6b47f0d3-d92e-497f-848c-c9185d2f45f1",
+          "parserBatchId": "dd454c04-1cf4-4566-8aee-adf3e30bccfc",
           "precision": "章节级",
           "locator": "IP 资产三：可溯源的一页式 IP Wiki",
           "verified": true
@@ -283,7 +283,7 @@
       "wiki": {
         "title": "可溯源的一页式 IP Wiki",
         "executiveSummary": "平台面向商业报告、专利、法律合同、学术论文、技术白皮书、开源协议等三十余类长文档，围绕“文档语义理解—IP 资产萃取—知识结构化沉淀”形成预设式处理闭环。用户只需上传文档，系统自动完成解析、分类、提取、交叉校验、Wiki 生成和治理登记。",
-        "keyMechanism": "平台采用版式与语义双重保真的解析架构，将结构化结论绑定到四级证据坐标，并通过预设 Schema 路由实现分类提取，最终生成可溯源的一页式 IP Wiki，同时通过脱敏模型保障安全。",
+        "keyMechanism": "解析服务同时保存章节树、段落顺序、表格单元格、图片说明、公式和页面坐标。MinerU 输出的 Markdown 是语义主干，版式内容块编号则作为后续证据定位锚点；二者使用同一文档版本哈希关联，避免结构重排造成引用漂移。",
         "metrics": [
           {
             "label": "文档分类准确率",
@@ -304,31 +304,31 @@
         ],
         "relationships": [
           {
-            "source": "解析架构",
-            "relation": "提供证据坐标给",
-            "target": "IP Wiki"
+            "source": "版式与语义双重保真的解析架构",
+            "relation": "implements",
+            "target": "可溯源的一页式 IP Wiki"
           },
           {
-            "source": "Schema 路由",
-            "relation": "决定提取策略用于",
-            "target": "IP 资产萃取"
+            "source": "面向三十余类文档的预设 Schema 路由",
+            "relation": "implements",
+            "target": "可溯源的一页式 IP Wiki"
           },
           {
-            "source": "安全模型",
-            "relation": "保护",
-            "target": "原始证据坐标"
+            "source": "脱敏不影响溯源的安全模型",
+            "relation": "implements",
+            "target": "可溯源的一页式 IP Wiki"
           }
         ]
       }
     },
     {
-      "id": "IP-REAL-E43F464854E7",
+      "id": "IP-REAL-06C34E94CC7D",
       "sourceAssetId": "IP-004",
-      "publicationId": "PUB-DF6F52EBFE57",
-      "sourceJobId": "JOB-REAL-af94b2c3-de46-448a-9d59-26af47650f4e",
+      "publicationId": "PUB-069F76D0E58F",
+      "sourceJobId": "JOB-REAL-7652ca85-6587-4ecc-905e-34a6591706e8",
       "title": "脱敏不影响溯源的安全模型",
       "type": "技术方案",
-      "summary": "平台先在受控安全域保存原始证据坐标，再对分享副本执行不可逆涂黑。普通访问者只能看到脱敏 Wiki，高权限审计员在 MFA 与 ABAC 校验通过后才能读取原始片段，所有访问写入哈希链审计日志。任何第三方 API 密钥只能由服务端运行时读取，不得进入浏览器脚本、API 响应、日志、截图或版本仓库。",
+      "summary": "平台先在受控安全域保存原始证据坐标，再对分享副本执行不可逆涂黑。普通访问者只能看到脱敏 Wiki，高权限审计员在 MFA 与 ABAC 校验通过后才能读取原始片段，所有访问写入哈希链审计日志。",
       "tags": [
         "安全模型",
         "脱敏",
@@ -339,7 +339,7 @@
       "sensitivity": "待复核",
       "status": "已发布",
       "version": "V1.0",
-      "publishedAt": "2026-08-10T05:35:34.173Z",
+      "publishedAt": "2026-08-11T02:55:25.742Z",
       "document": {
         "title": "企业级长文档 IP 智能分析与 Wiki 管理平台技术设计报告",
         "category": "技术设计报告",
@@ -349,33 +349,33 @@
         "markdownSha256": "4a4a4c3b4a27bd75b9074d517caee8c2d5f8f3a1f3679653169ba91a105ccbe9",
         "parserProvider": "MinerU",
         "parserModel": "MinerU-HTML",
-        "parserBatchId": "6b47f0d3-d92e-497f-848c-c9185d2f45f1",
+        "parserBatchId": "dd454c04-1cf4-4566-8aee-adf3e30bccfc",
         "llmProvider": "DeepSeek",
         "llmModel": "deepseek-v4-flash"
       },
       "evidence": [
         {
-          "id": "EV-95D459C28A4F",
-          "assetId": "IP-REAL-E43F464854E7",
-          "quote": "平台先在受控安全域保存原始证据坐标，再对分享副本执行不可逆涂黑。普通访问者只能看到脱敏 Wiki，高权限审计员在 MFA 与 ABAC 校验通过后才能读取原始片段，所有访问写入哈希链审计日志。",
+          "id": "EV-385ADADE135B",
+          "assetId": "IP-REAL-06C34E94CC7D",
+          "quote": "平台先在受控安全域保存原始证据坐标，再对分享副本执行不可逆涂黑。",
           "section": "IP 资产四：脱敏不影响溯源的安全模型",
-          "quoteHash": "a7075dd5260f27a18dfdb6fb58d60e760fcc0afcf1b890d2125b3cb32bda47fd",
+          "quoteHash": "6f244e05a9550a13d70cd0861f247743d5adf2541bd1e3cc5014ade99dc61ba0",
           "documentHash": "4a4a4c3b4a27bd75b9074d517caee8c2d5f8f3a1f3679653169ba91a105ccbe9",
           "documentName": "intelifar-real-analysis.html",
-          "parserBatchId": "6b47f0d3-d92e-497f-848c-c9185d2f45f1",
+          "parserBatchId": "dd454c04-1cf4-4566-8aee-adf3e30bccfc",
           "precision": "章节级",
           "locator": "IP 资产四：脱敏不影响溯源的安全模型",
           "verified": true
         },
         {
-          "id": "EV-74DB1AFDD4C0",
-          "assetId": "IP-REAL-E43F464854E7",
-          "quote": "任何第三方 API 密钥只能由服务端运行时读取，不得进入浏览器脚本、API 响应、日志、截图或版本仓库。",
+          "id": "EV-D00FB316C6DC",
+          "assetId": "IP-REAL-06C34E94CC7D",
+          "quote": "普通访问者只能看到脱敏 Wiki，高权限审计员在 MFA 与 ABAC 校验通过后才能读取原始片段，所有访问写入哈希链审计日志。",
           "section": "IP 资产四：脱敏不影响溯源的安全模型",
-          "quoteHash": "4cdf2001848d26ec2b3e07d6f5f24d1aa6b725d1fd704dfb5758727d463259ea",
+          "quoteHash": "fcb778e2f28de9b20436453f98bceb3e849f96920acd20477984273f6e18746f",
           "documentHash": "4a4a4c3b4a27bd75b9074d517caee8c2d5f8f3a1f3679653169ba91a105ccbe9",
           "documentName": "intelifar-real-analysis.html",
-          "parserBatchId": "6b47f0d3-d92e-497f-848c-c9185d2f45f1",
+          "parserBatchId": "dd454c04-1cf4-4566-8aee-adf3e30bccfc",
           "precision": "章节级",
           "locator": "IP 资产四：脱敏不影响溯源的安全模型",
           "verified": true
@@ -384,7 +384,7 @@
       "wiki": {
         "title": "脱敏不影响溯源的安全模型",
         "executiveSummary": "平台面向商业报告、专利、法律合同、学术论文、技术白皮书、开源协议等三十余类长文档，围绕“文档语义理解—IP 资产萃取—知识结构化沉淀”形成预设式处理闭环。用户只需上传文档，系统自动完成解析、分类、提取、交叉校验、Wiki 生成和治理登记。",
-        "keyMechanism": "平台采用版式与语义双重保真的解析架构，将结构化结论绑定到四级证据坐标，并通过预设 Schema 路由实现分类提取，最终生成可溯源的一页式 IP Wiki，同时通过脱敏模型保障安全。",
+        "keyMechanism": "解析服务同时保存章节树、段落顺序、表格单元格、图片说明、公式和页面坐标。MinerU 输出的 Markdown 是语义主干，版式内容块编号则作为后续证据定位锚点；二者使用同一文档版本哈希关联，避免结构重排造成引用漂移。",
         "metrics": [
           {
             "label": "文档分类准确率",
@@ -405,19 +405,19 @@
         ],
         "relationships": [
           {
-            "source": "解析架构",
-            "relation": "提供证据坐标给",
-            "target": "IP Wiki"
+            "source": "版式与语义双重保真的解析架构",
+            "relation": "implements",
+            "target": "可溯源的一页式 IP Wiki"
           },
           {
-            "source": "Schema 路由",
-            "relation": "决定提取策略用于",
-            "target": "IP 资产萃取"
+            "source": "面向三十余类文档的预设 Schema 路由",
+            "relation": "implements",
+            "target": "可溯源的一页式 IP Wiki"
           },
           {
-            "source": "安全模型",
-            "relation": "保护",
-            "target": "原始证据坐标"
+            "source": "脱敏不影响溯源的安全模型",
+            "relation": "implements",
+            "target": "可溯源的一页式 IP Wiki"
           }
         ]
       }

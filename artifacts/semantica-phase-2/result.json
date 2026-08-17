@@ -1,0 +1,16 @@
+{
+  "executedAt": "2026-08-11T23:24:02.529Z",
+  "status": "PASS",
+  "baseURL": "http://127.0.0.1:65446",
+  "createdReviews": 2,
+  "decisions": [
+    "confirmed",
+    "dismissed"
+  ],
+  "persistedAfterReload": true,
+  "formalAssetsUnchanged": true,
+  "auditActions": [
+    "semantic.review_confirm",
+    "semantic.review_dismiss"
+  ]
+}

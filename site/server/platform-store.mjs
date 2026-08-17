@@ -7,6 +7,8 @@ import { createAssetGraphStore } from "./asset-graph-store.mjs";
 const ROLES = new Set(["owner", "admin", "editor", "viewer"]);
 const TERMINAL_JOB_STATES = new Set(["complete", "failed", "interrupted", "cancelled", "blocked"]);
 const TERMINAL_AGENT_TASK_STATES = new Set(["complete", "needs_review", "failed", "interrupted", "cancelled", "blocked"]);
+const SEMANTIC_REVIEW_STATUSES = new Set(["pending", "confirmed", "dismissed"]);
+const SEMANTIC_CONFLICT_FIELDS = new Set(["owner", "sensitivity", "type"]);
 
 function nowIso() {
   return new Date().toISOString();
@@ -22,6 +24,19 @@ function parseJson(value, fallback = null) {
 
 function clone(value) {
   return value == null ? value : structuredClone(value);
+}
+
+function boundedText(value, limit) {
+  return String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim().slice(0, limit);
+}
+
+function boundedScore(value) {
+  const score = Number(value);
+  return Number.isFinite(score) ? Math.max(0, Math.min(1, score)) : 0;
+}
+
+function uniqueBoundedStrings(values, limit, itemLimit) {
+  return [...new Set((Array.isArray(values) ? values : []).map((value) => boundedText(value, itemLimit)).filter(Boolean))].slice(0, limit);
 }
 
 function formatWikiVersion(sequence) {
@@ -58,7 +73,22 @@ function publicSessionRow(row) {
 
 function publicMemberRow(row) {
   const user = rowToPublicUser(row);
-  return user ? { ...user, status: user.disabledAt ? "disabled" : "active" } : null;
+  return user ? { ...user, status: user.disabledAt ? "disabled" : "active", lastLoginAt: row.last_login_at ?? null } : null;
+}
+
+function publicAuditRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    action: row.action,
+    objectType: row.object_type,
+    objectId: row.object_id,
+    detail: parseJson(row.detail_json, {}),
+    previousHash: row.previous_hash,
+    eventHash: row.event_hash,
+    createdAt: row.created_at,
+    actor: row.actor_user_id ? { id: row.actor_user_id, name: row.actor_name || "已停用用户" } : null,
+  };
 }
 
 function rowToPublicUser(row) {
@@ -240,6 +270,41 @@ export function createPlatformStore(options = {}) {
       PRIMARY KEY(workspace_id, asset_id, version_number)
     );
     CREATE INDEX IF NOT EXISTS wiki_versions_asset ON wiki_versions(workspace_id, asset_id, version_number DESC);
+    CREATE TABLE IF NOT EXISTS wiki_review_requests (
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      id TEXT NOT NULL,
+      asset_id TEXT NOT NULL,
+      base_version TEXT NOT NULL,
+      draft_json TEXT NOT NULL,
+      change_note TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL CHECK(status IN ('pending', 'approved', 'rejected')),
+      submitted_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      reviewed_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      review_note TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      reviewed_at TEXT,
+      PRIMARY KEY(workspace_id, id)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS wiki_review_pending_asset ON wiki_review_requests(workspace_id, asset_id) WHERE status = 'pending';
+    CREATE INDEX IF NOT EXISTS wiki_review_workspace_status ON wiki_review_requests(workspace_id, status, created_at DESC);
+    CREATE TABLE IF NOT EXISTS semantic_reviews (
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      id TEXT NOT NULL,
+      fingerprint TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK(kind IN ('duplicate', 'conflict')),
+      payload_json TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('pending', 'confirmed', 'dismissed')),
+      engine TEXT NOT NULL,
+      engine_version TEXT NOT NULL,
+      detected_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL,
+      reviewed_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      review_note TEXT NOT NULL DEFAULT '',
+      reviewed_at TEXT,
+      PRIMARY KEY(workspace_id, id),
+      UNIQUE(workspace_id, fingerprint)
+    );
+    CREATE INDEX IF NOT EXISTS semantic_reviews_workspace_status ON semantic_reviews(workspace_id, status, last_seen_at DESC);
     CREATE TABLE IF NOT EXISTS audit_events (
       sequence INTEGER PRIMARY KEY AUTOINCREMENT,
       id TEXT NOT NULL UNIQUE,
@@ -290,8 +355,9 @@ export function createPlatformStore(options = {}) {
     pruneSessions: database.prepare("DELETE FROM sessions WHERE expires_at <= ?"),
     deleteSessionsByUser: database.prepare("DELETE FROM sessions WHERE user_id = ?"),
     listMembers: database.prepare(`
-      SELECT id, workspace_id, email, name, role, created_at, disabled_at
-      FROM users WHERE workspace_id = ? ORDER BY CASE role WHEN 'owner' THEN 1 WHEN 'admin' THEN 2 WHEN 'editor' THEN 3 ELSE 4 END, created_at ASC
+      SELECT u.id, u.workspace_id, u.email, u.name, u.role, u.created_at, u.disabled_at,
+             (SELECT MAX(s.created_at) FROM sessions s WHERE s.user_id = u.id) AS last_login_at
+      FROM users u WHERE u.workspace_id = ? ORDER BY CASE u.role WHEN 'owner' THEN 1 WHEN 'admin' THEN 2 WHEN 'editor' THEN 3 ELSE 4 END, u.created_at ASC
     `),
     workspaceMember: database.prepare(`
       SELECT id, workspace_id, email, name, role, password_hash, created_at, disabled_at
@@ -355,6 +421,10 @@ export function createPlatformStore(options = {}) {
       INSERT OR IGNORE INTO publications(workspace_id, id, source_job_id, payload_json, created_at)
       VALUES(@workspaceId, @id, @sourceJobId, @payloadJson, @createdAt)
     `),
+    updatePublication: database.prepare(`
+      UPDATE publications SET payload_json = @payloadJson
+      WHERE workspace_id = @workspaceId AND id = @id
+    `),
     publicationByJob: database.prepare("SELECT payload_json FROM publications WHERE workspace_id = ? AND source_job_id = ?"),
     listPublications: database.prepare("SELECT payload_json FROM publications WHERE workspace_id = ? ORDER BY created_at DESC"),
     insertWiki: database.prepare(`
@@ -373,12 +443,72 @@ export function createPlatformStore(options = {}) {
       WHERE v.workspace_id = ? AND v.asset_id = ?
       ORDER BY v.version_number DESC
     `),
+    insertWikiReview: database.prepare(`
+      INSERT INTO wiki_review_requests(workspace_id, id, asset_id, base_version, draft_json, change_note, status, submitted_by_user_id, created_at)
+      VALUES(@workspaceId, @id, @assetId, @baseVersion, @draftJson, @changeNote, 'pending', @submittedByUserId, @createdAt)
+    `),
+    wikiReviewById: database.prepare(`
+      SELECT r.*, submitter.name AS submitted_by_name, reviewer.name AS reviewed_by_name
+      FROM wiki_review_requests r
+      LEFT JOIN users submitter ON submitter.id = r.submitted_by_user_id
+      LEFT JOIN users reviewer ON reviewer.id = r.reviewed_by_user_id
+      WHERE r.workspace_id = ? AND r.id = ?
+    `),
+    listWikiReviews: database.prepare(`
+      SELECT r.*, submitter.name AS submitted_by_name, reviewer.name AS reviewed_by_name
+      FROM wiki_review_requests r
+      LEFT JOIN users submitter ON submitter.id = r.submitted_by_user_id
+      LEFT JOIN users reviewer ON reviewer.id = r.reviewed_by_user_id
+      WHERE r.workspace_id = ? AND (? = '' OR r.status = ?)
+      ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END, r.created_at DESC
+    `),
+    decideWikiReview: database.prepare(`
+      UPDATE wiki_review_requests
+      SET status = @status, reviewed_by_user_id = @reviewerUserId, review_note = @reviewNote, reviewed_at = @reviewedAt
+      WHERE workspace_id = @workspaceId AND id = @id AND status = 'pending'
+    `),
+    upsertSemanticReview: database.prepare(`
+      INSERT INTO semantic_reviews(workspace_id, id, fingerprint, kind, payload_json, status, engine, engine_version, detected_at, last_seen_at)
+      VALUES(@workspaceId, @id, @fingerprint, @kind, @payloadJson, 'pending', @engine, @engineVersion, @detectedAt, @lastSeenAt)
+      ON CONFLICT(workspace_id, fingerprint) DO UPDATE SET
+        payload_json = excluded.payload_json,
+        engine = excluded.engine,
+        engine_version = excluded.engine_version,
+        last_seen_at = excluded.last_seen_at
+    `),
+    semanticReviewById: database.prepare(`
+      SELECT r.*, reviewer.name AS reviewed_by_name
+      FROM semantic_reviews r LEFT JOIN users reviewer ON reviewer.id = r.reviewed_by_user_id
+      WHERE r.workspace_id = ? AND r.id = ?
+    `),
+    semanticReviewByFingerprint: database.prepare(`
+      SELECT r.*, reviewer.name AS reviewed_by_name
+      FROM semantic_reviews r LEFT JOIN users reviewer ON reviewer.id = r.reviewed_by_user_id
+      WHERE r.workspace_id = ? AND r.fingerprint = ?
+    `),
+    listSemanticReviews: database.prepare(`
+      SELECT r.*, reviewer.name AS reviewed_by_name
+      FROM semantic_reviews r LEFT JOIN users reviewer ON reviewer.id = r.reviewed_by_user_id
+      WHERE r.workspace_id = ? AND (? = '' OR r.status = ?)
+      ORDER BY CASE r.status WHEN 'pending' THEN 0 WHEN 'confirmed' THEN 1 ELSE 2 END, r.last_seen_at DESC
+      LIMIT ?
+    `),
+    decideSemanticReview: database.prepare(`
+      UPDATE semantic_reviews
+      SET status = @status, reviewed_by_user_id = @reviewerUserId, review_note = @reviewNote, reviewed_at = @reviewedAt
+      WHERE workspace_id = @workspaceId AND id = @id AND status = 'pending'
+    `),
     lastAudit: database.prepare("SELECT event_hash FROM audit_events WHERE workspace_id = ? ORDER BY sequence DESC LIMIT 1"),
     insertAudit: database.prepare(`
       INSERT INTO audit_events(id, workspace_id, actor_user_id, action, object_type, object_id, detail_json, previous_hash, event_hash, created_at)
       VALUES(@id, @workspaceId, @actorUserId, @action, @objectType, @objectId, @detailJson, @previousHash, @eventHash, @createdAt)
     `),
     listAudit: database.prepare("SELECT * FROM audit_events WHERE workspace_id = ? ORDER BY sequence ASC"),
+    listAuditPublic: database.prepare(`
+      SELECT a.*, u.name AS actor_name
+      FROM audit_events a LEFT JOIN users u ON u.id = a.actor_user_id
+      WHERE a.workspace_id = ? ORDER BY a.sequence DESC LIMIT ?
+    `),
   };
 
   function rowToUser(row) {
@@ -409,6 +539,114 @@ export function createPlatformStore(options = {}) {
     };
   }
 
+  function wikiReviewRow(row) {
+    if (!row) return null;
+    const draft = parseJson(row.draft_json, {});
+    return {
+      id: row.id,
+      assetId: row.asset_id,
+      assetTitle: String(draft.title || row.asset_id),
+      baseVersion: row.base_version,
+      draft,
+      changeNote: row.change_note,
+      status: row.status,
+      submittedBy: row.submitted_by_user_id ? { id: row.submitted_by_user_id, name: row.submitted_by_name || "已停用用户" } : null,
+      reviewedBy: row.reviewed_by_user_id ? { id: row.reviewed_by_user_id, name: row.reviewed_by_name || "已停用用户" } : null,
+      reviewNote: row.review_note,
+      createdAt: row.created_at,
+      reviewedAt: row.reviewed_at,
+    };
+  }
+
+  function semanticReviewRow(row) {
+    if (!row) return null;
+    return {
+      id: row.id,
+      kind: row.kind,
+      payload: parseJson(row.payload_json, {}),
+      status: row.status,
+      engine: row.engine,
+      version: row.engine_version,
+      detectedAt: row.detected_at,
+      lastSeenAt: row.last_seen_at,
+      reviewedBy: row.reviewed_by_user_id ? { id: row.reviewed_by_user_id, name: row.reviewed_by_name || "已停用用户" } : null,
+      reviewNote: row.review_note,
+      reviewedAt: row.reviewed_at,
+    };
+  }
+
+  function workspaceAssetMap(workspaceId) {
+    const assets = new Map();
+    for (const row of statements.listPublications.all(workspaceId)) {
+      const item = parseJson(row.payload_json, {});
+      for (const asset of item.assets || []) {
+        const id = boundedText(asset?.id, 120);
+        if (!id) continue;
+        assets.set(id, {
+          id,
+          title: boundedText(asset?.title || asset?.wiki?.title || id, 240),
+          sourceName: boundedText(asset?.document?.sourceName || item.document?.sourceName || item.document?.title || "已发布记录", 240),
+          publishedAt: boundedText(asset?.publishedAt || item.publishedAt, 40),
+        });
+      }
+    }
+    return assets;
+  }
+
+  function semanticAssetSummary(asset, value = "") {
+    return { id: asset.id, title: asset.title, sourceName: asset.sourceName, publishedAt: asset.publishedAt, ...(value ? { value: boundedText(value, 240) } : {}) };
+  }
+
+  function normalizeSemanticCandidates(workspaceId, result) {
+    const assets = workspaceAssetMap(workspaceId);
+    const candidates = [];
+    for (const candidate of (Array.isArray(result?.duplicates) ? result.duplicates : []).slice(0, 50)) {
+      const assetIds = [...new Set((Array.isArray(candidate?.assetIds) ? candidate.assetIds : []).map((id) => boundedText(id, 120)).filter(Boolean))].sort();
+      if (assetIds.length !== 2 || assetIds.some((id) => !assets.has(id))) throw Object.assign(new Error("Semantic review references an asset outside the current workspace"), { code: "SEMANTIC_REVIEW_INVALID" });
+      const payloadAssets = assetIds.map((id) => semanticAssetSummary(assets.get(id)));
+      candidates.push({
+        kind: "duplicate",
+        fingerprint: createHash("sha256").update(["duplicate", ...assetIds].join("\n")).digest("hex"),
+        payload: {
+          assetIds,
+          assets: payloadAssets,
+          title: payloadAssets[0].title === payloadAssets[1].title ? payloadAssets[0].title : `${payloadAssets[0].title} ↔ ${payloadAssets[1].title}`,
+          similarity: boundedScore(candidate?.similarity),
+          confidence: boundedScore(candidate?.confidence),
+          reasons: uniqueBoundedStrings(candidate?.reasons, 8, 100),
+        },
+      });
+    }
+    for (const conflict of (Array.isArray(result?.conflicts) ? result.conflicts : []).slice(0, 50)) {
+      const field = boundedText(conflict?.field, 60);
+      if (!SEMANTIC_CONFLICT_FIELDS.has(field)) throw Object.assign(new Error("Semantic conflict field is not supported"), { code: "SEMANTIC_REVIEW_INVALID" });
+      const sourceValues = new Map();
+      for (const source of (Array.isArray(conflict?.sources) ? conflict.sources : []).slice(0, 20)) {
+        const id = boundedText(source?.assetId, 120);
+        if (!id || !assets.has(id)) throw Object.assign(new Error("Semantic review references an asset outside the current workspace"), { code: "SEMANTIC_REVIEW_INVALID" });
+        sourceValues.set(id, boundedText(source?.value, 240));
+      }
+      const assetIds = [...sourceValues.keys()].sort();
+      if (assetIds.length < 2) throw Object.assign(new Error("Semantic conflict requires at least two current-workspace assets"), { code: "SEMANTIC_REVIEW_INVALID" });
+      const values = uniqueBoundedStrings(conflict?.values, 10, 240).sort((left, right) => left.localeCompare(right, "zh-CN"));
+      const payloadAssets = assetIds.map((id) => semanticAssetSummary(assets.get(id), sourceValues.get(id)));
+      candidates.push({
+        kind: "conflict",
+        fingerprint: createHash("sha256").update(["conflict", field, ...assetIds, ...values].join("\n")).digest("hex"),
+        payload: {
+          assetIds,
+          assets: payloadAssets,
+          title: payloadAssets[0].title,
+          field,
+          severity: ["low", "medium", "high", "critical"].includes(conflict?.severity) ? conflict.severity : "medium",
+          confidence: boundedScore(conflict?.confidence),
+          values,
+        },
+      });
+    }
+    return candidates.slice(0, 100);
+  }
+
   const seedWikiVersions = database.transaction((workspaceId, publication) => {
     for (const asset of publication.assets ?? []) {
       statements.insertWiki.run({
@@ -437,13 +675,47 @@ export function createPlatformStore(options = {}) {
     return stored;
   });
 
-  const createWikiVersion = database.transaction((workspaceId, assetId, input) => {
-    const current = statements.currentWiki.get(workspaceId, assetId);
-    if (!current) {
-      const missing = new Error("Wiki not found");
-      missing.code = "NOT_FOUND";
-      throw missing;
+  function updateAssetMetadataBatchCore(workspaceId, assetIds, input, options = {}) {
+    const normalizedIds = [...new Set((Array.isArray(assetIds) ? assetIds : []).map((assetId) => String(assetId || "").trim()).filter(Boolean))];
+    const owner = String(input.owner || "").normalize("NFKC").trim().slice(0, 80);
+    const sensitivity = String(input.sensitivity || "").normalize("NFKC").trim();
+    if (!normalizedIds.length || normalizedIds.length > 50) {
+      throw Object.assign(new Error("Between 1 and 50 assets are required"), { code: "INVALID_ASSET_BATCH" });
     }
+    if (!owner || /^(?:待确权|待认领|待复核)$/i.test(owner) || !new Set(["公开", "内部", "机密"]).has(sensitivity)) {
+      throw Object.assign(new Error("A confirmed owner and sensitivity are required"), { code: "INVALID_ASSET_METADATA" });
+    }
+    const requested = new Set(normalizedIds);
+    const found = new Map();
+    const changedPublications = [];
+    for (const row of statements.listPublications.all(workspaceId)) {
+      const publication = parseJson(row.payload_json);
+      let changed = false;
+      for (const asset of publication?.assets || []) {
+        if (!requested.has(asset.id)) continue;
+        asset.owner = owner;
+        asset.sensitivity = sensitivity;
+        asset.updatedAt = options.updatedAt || nowIso();
+        found.set(asset.id, asset);
+        changed = true;
+      }
+      if (changed) changedPublications.push(publication);
+    }
+    if (found.size !== normalizedIds.length) {
+      throw Object.assign(new Error("One or more assets were not found in the current workspace"), { code: "NOT_FOUND" });
+    }
+    for (const publication of changedPublications) {
+      statements.updatePublication.run({ workspaceId, id: publication.publicationId, payloadJson: JSON.stringify(publication) });
+      assetGraphStore.projectPublication(workspaceId, publication);
+    }
+    if (options.audit) appendAuditRecord(workspaceId, { ...options.audit, objectId: options.audit.objectId || (normalizedIds.length === 1 ? normalizedIds[0] : `${normalizedIds.length}-assets`), detail: { ...(options.audit.detail || {}), count: normalizedIds.length, assetIds: normalizedIds, owner, sensitivity } });
+    return normalizedIds.map((assetId) => clone(found.get(assetId)));
+  }
+
+  const updateAssetMetadataRecord = database.transaction((workspaceId, assetId, input, options = {}) => updateAssetMetadataBatchCore(workspaceId, [assetId], input, options)[0]);
+  const updateAssetMetadataBatchRecord = database.transaction(updateAssetMetadataBatchCore);
+
+  function nextWikiContent(current, input) {
     if (String(input.baseVersion || "") !== formatWikiVersion(current.version_number)) {
       const conflict = new Error("Wiki version changed; reload before saving");
       conflict.code = "VERSION_CONFLICT";
@@ -458,6 +730,26 @@ export function createPlatformStore(options = {}) {
       metrics: Array.isArray(input.metrics) ? input.metrics : (currentContent.metrics ?? []),
       relationships: Array.isArray(input.relationships) ? input.relationships : (currentContent.relationships ?? []),
     };
+    const sameEditableContent = ["title", "executiveSummary", "keyMechanism"]
+      .every((key) => String(nextContent[key] ?? "").trim() === String(currentContent[key] ?? "").trim());
+    const sameStructuredContent = JSON.stringify(nextContent.metrics) === JSON.stringify(currentContent.metrics ?? [])
+      && JSON.stringify(nextContent.relationships) === JSON.stringify(currentContent.relationships ?? []);
+    if (sameEditableContent && sameStructuredContent) {
+      const unchanged = new Error("Wiki content has not changed");
+      unchanged.code = "NO_CHANGES";
+      throw unchanged;
+    }
+    return nextContent;
+  }
+
+  function createWikiVersionRecord(workspaceId, assetId, input) {
+    const current = statements.currentWiki.get(workspaceId, assetId);
+    if (!current) {
+      const missing = new Error("Wiki not found");
+      missing.code = "NOT_FOUND";
+      throw missing;
+    }
+    const nextContent = nextWikiContent(current, input);
     statements.insertWiki.run({
       workspaceId,
       assetId,
@@ -468,6 +760,90 @@ export function createPlatformStore(options = {}) {
       createdAt: nowIso(),
     });
     return wikiRow(statements.currentWiki.get(workspaceId, assetId));
+  }
+
+  const createWikiVersion = database.transaction(createWikiVersionRecord);
+
+  const submitWikiReviewRecord = database.transaction((workspaceId, assetId, input) => {
+    const current = statements.currentWiki.get(workspaceId, assetId);
+    if (!current) throw Object.assign(new Error("Wiki not found"), { code: "NOT_FOUND" });
+    const draft = nextWikiContent(current, input);
+    const id = `WREV-${randomUUID()}`;
+    try {
+      statements.insertWikiReview.run({ workspaceId, id, assetId, baseVersion: input.baseVersion, draftJson: JSON.stringify(draft), changeNote: String(input.changeNote || "内容更新"), submittedByUserId: input.submittedByUserId || null, createdAt: nowIso() });
+    } catch (error) {
+      if (/UNIQUE constraint failed/i.test(String(error?.message || ""))) throw Object.assign(new Error("A pending Wiki review already exists"), { code: "REVIEW_PENDING" });
+      throw error;
+    }
+    return wikiReviewRow(statements.wikiReviewById.get(workspaceId, id));
+  });
+
+  const decideWikiReviewRecord = database.transaction((workspaceId, reviewId, input) => {
+    const row = statements.wikiReviewById.get(workspaceId, reviewId);
+    if (!row) throw Object.assign(new Error("Wiki review not found"), { code: "NOT_FOUND" });
+    if (row.status !== "pending") throw Object.assign(new Error("Wiki review already decided"), { code: "REVIEW_DECIDED" });
+    const decision = String(input.decision || "");
+    if (!["approved", "rejected"].includes(decision)) throw Object.assign(new Error("Invalid Wiki review decision"), { code: "INVALID_DECISION" });
+    let wiki = null;
+    if (decision === "approved") {
+      const draft = parseJson(row.draft_json, {});
+      wiki = createWikiVersionRecord(workspaceId, row.asset_id, { ...draft, baseVersion: row.base_version, changeNote: row.change_note, editorUserId: input.reviewerUserId || null });
+    }
+    statements.decideWikiReview.run({ workspaceId, id: reviewId, status: decision, reviewerUserId: input.reviewerUserId || null, reviewNote: String(input.reviewNote || ""), reviewedAt: nowIso() });
+    return { review: wikiReviewRow(statements.wikiReviewById.get(workspaceId, reviewId)), wiki };
+  });
+
+  const upsertSemanticReviewRecords = database.transaction((workspaceId, result, options = {}) => {
+    const seenAt = options.detectedAt || nowIso();
+    const engine = boundedText(result?.engine || "Semantica", 80) || "Semantica";
+    const engineVersion = boundedText(result?.version, 40);
+    const reviews = [];
+    for (const candidate of normalizeSemanticCandidates(workspaceId, result)) {
+      const id = `SEMREV-${createHash("sha256").update(`${workspaceId}\n${candidate.fingerprint}`).digest("hex").slice(0, 24).toUpperCase()}`;
+      statements.upsertSemanticReview.run({
+        workspaceId,
+        id,
+        fingerprint: candidate.fingerprint,
+        kind: candidate.kind,
+        payloadJson: JSON.stringify(candidate.payload),
+        engine,
+        engineVersion,
+        detectedAt: seenAt,
+        lastSeenAt: seenAt,
+      });
+      reviews.push(semanticReviewRow(statements.semanticReviewByFingerprint.get(workspaceId, candidate.fingerprint)));
+    }
+    return reviews;
+  });
+
+  const decideSemanticReviewRecord = database.transaction((workspaceId, reviewId, input, options = {}) => {
+    const row = statements.semanticReviewById.get(workspaceId, reviewId);
+    if (!row) throw Object.assign(new Error("Semantic review not found"), { code: "NOT_FOUND" });
+    if (row.status !== "pending") throw Object.assign(new Error("Semantic review already decided"), { code: "SEMANTIC_REVIEW_DECIDED" });
+    const decision = boundedText(input?.decision, 20);
+    if (!new Set(["confirmed", "dismissed"]).has(decision)) throw Object.assign(new Error("Invalid semantic review decision"), { code: "INVALID_DECISION" });
+    const reviewNote = boundedText(input?.reviewNote, 300);
+    const reviewedAt = input?.reviewedAt || nowIso();
+    const reviewerUserId = input?.reviewerUserId || null;
+    if (reviewerUserId && !statements.workspaceMember.get(workspaceId, reviewerUserId)) throw Object.assign(new Error("Semantic reviewer is outside the current workspace"), { code: "SEMANTIC_REVIEW_INVALID" });
+    statements.decideSemanticReview.run({ workspaceId, id: reviewId, status: decision, reviewerUserId, reviewNote, reviewedAt });
+    const decided = semanticReviewRow(statements.semanticReviewById.get(workspaceId, reviewId));
+    if (options.audit) {
+      appendAuditRecord(workspaceId, {
+        ...options.audit,
+        objectId: decided.id,
+        detail: {
+          ...(options.audit.detail || {}),
+          decision,
+          kind: decided.kind,
+          assetIds: decided.payload.assetIds || [],
+          field: decided.payload.field || null,
+          notePresent: Boolean(reviewNote),
+          formalKnowledgeMutation: false,
+        },
+      });
+    }
+    return decided;
   });
 
   const createInvitationRecord = database.transaction((workspaceId, input) => {
@@ -757,6 +1133,17 @@ export function createPlatformStore(options = {}) {
       }
       return null;
     },
+    updateAssetMetadata(workspaceId, assetId, input, options = {}) {
+      try {
+        return updateAssetMetadataRecord(String(workspaceId), String(assetId), input, options);
+      } catch (error) {
+        if (error?.code === "NOT_FOUND") return null;
+        throw error;
+      }
+    },
+    updateAssetMetadataBatch(workspaceId, assetIds, input, options = {}) {
+      return updateAssetMetadataBatchRecord(String(workspaceId), assetIds, input, options);
+    },
     getAssetGraph(workspaceId, options = {}) {
       return assetGraphStore.getGraph(String(workspaceId), options);
     },
@@ -796,8 +1183,34 @@ export function createPlatformStore(options = {}) {
     saveWikiVersion(workspaceId, assetId, input) {
       return createWikiVersion(String(workspaceId), String(assetId), input);
     },
+    submitWikiReview(workspaceId, assetId, input) {
+      return submitWikiReviewRecord(String(workspaceId), String(assetId), input);
+    },
+    listWikiReviews(workspaceId, options = {}) {
+      const status = ["pending", "approved", "rejected"].includes(String(options.status || "")) ? String(options.status) : "";
+      return statements.listWikiReviews.all(String(workspaceId), status, status).map(wikiReviewRow);
+    },
+    decideWikiReview(workspaceId, reviewId, input) {
+      return decideWikiReviewRecord(String(workspaceId), String(reviewId), input);
+    },
+    upsertSemanticReviews(workspaceId, result, options = {}) {
+      return upsertSemanticReviewRecords(String(workspaceId), result, options);
+    },
+    listSemanticReviews(workspaceId, options = {}) {
+      const status = SEMANTIC_REVIEW_STATUSES.has(String(options.status || "")) ? String(options.status) : "";
+      const limit = Math.max(1, Math.min(200, Number(options.limit) || 100));
+      return statements.listSemanticReviews.all(String(workspaceId), status, status, limit).map(semanticReviewRow);
+    },
+    decideSemanticReview(workspaceId, reviewId, input, options = {}) {
+      return decideSemanticReviewRecord(String(workspaceId), String(reviewId), input, options);
+    },
     appendAudit(workspaceId, input) {
       return appendAuditRecord(String(workspaceId), input);
+    },
+    listAuditEvents(workspaceId, limit = 100) {
+      return statements.listAuditPublic
+        .all(String(workspaceId), Math.max(1, Math.min(500, Number(limit) || 100)))
+        .map(publicAuditRow);
     },
     verifyAuditChain(workspaceId) {
       const rows = statements.listAudit.all(String(workspaceId));

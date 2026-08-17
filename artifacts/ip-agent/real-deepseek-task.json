@@ -1,5 +1,5 @@
 {
-  "id": "AGT-c5426b89-6e95-4915-9547-fbd81386267e",
+  "id": "AGT-53d271ce-3b7d-42dc-a96b-680f6853fd56",
   "workspaceId": "WS-REAL-AGENT",
   "createdBy": "USR-0B1476253F66973D",
   "createdRole": "owner",
@@ -11,12 +11,12 @@
   ],
   "state": "complete",
   "stageLabel": "任务结果已通过证据门禁",
-  "createdAt": "2026-08-10T11:05:48.709Z",
-  "updatedAt": "2026-08-10T11:06:03.506Z",
+  "createdAt": "2026-08-11T02:56:17.190Z",
+  "updatedAt": "2026-08-11T02:56:31.241Z",
   "plan": {
     "title": "IP-REAL-MLA 与 IP-REAL-DUALPIPE 比较与尽调清单",
-    "intent": "document_comparison",
-    "outputType": "due_diligence_pack",
+    "intent": "due_diligence_pack",
+    "outputType": "readonly_due_diligence_checklist",
     "steps": [
       {
         "id": "S1",
@@ -31,7 +31,7 @@
       },
       {
         "id": "S2",
-        "title": "读取 IP-REAL-MLA 详情",
+        "title": "读取 IP-REAL-MLA 资产",
         "tool": "read_asset",
         "arguments": {
           "assetId": "IP-REAL-MLA"
@@ -39,7 +39,7 @@
       },
       {
         "id": "S3",
-        "title": "读取 IP-REAL-DUALPIPE 详情",
+        "title": "读取 IP-REAL-DUALPIPE 资产",
         "tool": "read_asset",
         "arguments": {
           "assetId": "IP-REAL-DUALPIPE"
@@ -47,7 +47,7 @@
       },
       {
         "id": "S4",
-        "title": "检查 IP-REAL-MLA 邻接关系",
+        "title": "检查 IP-REAL-MLA 邻域",
         "tool": "inspect_neighborhood",
         "arguments": {
           "assetId": "IP-REAL-MLA",
@@ -57,7 +57,7 @@
       },
       {
         "id": "S5",
-        "title": "检查 IP-REAL-DUALPIPE 邻接关系",
+        "title": "检查 IP-REAL-DUALPIPE 邻域",
         "tool": "inspect_neighborhood",
         "arguments": {
           "assetId": "IP-REAL-DUALPIPE",
@@ -67,11 +67,11 @@
       },
       {
         "id": "S6",
-        "title": "生成尽调清单草案",
+        "title": "生成只读尽调清单草案",
         "tool": "compose_wiki_draft",
         "arguments": {
           "assetId": "IP-REAL-MLA",
-          "instructions": "基于比较结果,生成只读尽调清单,涵盖机制、适用阶段、证据和治理关注点;缺少依据的内容标记为待核实。"
+          "instructions": "基于比较结果和邻域信息,生成只读尽调清单,涵盖机制、适用阶段、证据和治理关注点;缺少依据的内容标记为待核实。"
         }
       }
     ],
@@ -81,12 +81,12 @@
   "result": {
     "status": "complete",
     "title": "IP-REAL-MLA 与 IP-REAL-DUALPIPE 比较与尽调清单",
-    "summary": "基于知识空间中的已发布资产,IP-REAL-MLA(Multi-head Latent Attention)与 IP-REAL-DUALPIPE(DualPipe Training Framework)均为 DeepSeek-V3 相关技术,分别针对推理阶段 KV Cache 开销和训练阶段流水线效率。两者存在 part_of 关系(MLA 是 DualPipe 的一部分),但证据仅来自 MLA 的文档。本清单涵盖机制、适用阶段、证据和治理关注点,并标注待核实项。",
+    "summary": "基于知识空间中的资产记录,IP-REAL-MLA(Multi-head Latent Attention)与 IP-REAL-DUALPIPE(DualPipe Training Framework)均为 DeepSeek-V3 相关技术方案,分别针对推理阶段的 KV Cache 开销和训练阶段的流水线效率。两者通过 part_of 关系关联,但具体机制细节、适用阶段和治理信息有限,需进一步核实。",
     "findings": [
       {
         "id": "F1",
-        "title": "IP-REAL-MLA 机制:低秩联合压缩降低 KV Cache",
-        "detail": "IP-REAL-MLA 通过低秩联合压缩降低推理期间的 Key-Value cache 开销。证据引用自 deepseek-v3.pdf 第 2.1.1 节。",
+        "title": "IP-REAL-MLA 机制",
+        "detail": "IP-REAL-MLA 通过低秩联合压缩降低推理期间的 KV Cache 开销。",
         "sourceIds": [
           "EV-REAL-MLA-1"
         ],
@@ -94,8 +94,8 @@
       },
       {
         "id": "F2",
-        "title": "IP-REAL-DUALPIPE 机制:双向流水调度与计算通信重叠",
-        "detail": "IP-REAL-DUALPIPE 通过双向流水调度降低流水线气泡,并重叠计算与通信。证据引用自 deepseek-v3.pdf 第 3.2.2 节。",
+        "title": "IP-REAL-DUALPIPE 机制",
+        "detail": "IP-REAL-DUALPIPE 通过双向流水调度降低流水线气泡并重叠计算与通信。",
         "sourceIds": [
           "EV-REAL-DUALPIPE-1"
         ],
@@ -103,62 +103,63 @@
       },
       {
         "id": "F3",
-        "title": "适用阶段:MLA 用于推理,DualPipe 用于训练",
-        "detail": "MLA 的摘要明确指向推理阶段(降低推理期间 KV Cache 开销),DualPipe 的摘要指向训练阶段(提升大规模训练流水线效率)。",
+        "title": "适用阶段",
+        "detail": "IP-REAL-MLA 适用于推理阶段(降低长上下文推理的缓存成本);IP-REAL-DUALPIPE 适用于训练阶段(提升大规模训练流水线效率)。",
         "sourceIds": [
           "IP-REAL-MLA",
           "IP-REAL-DUALPIPE"
         ],
-        "confidence": 0.95
+        "confidence": 0.9
       },
       {
         "id": "F4",
-        "title": "证据状态:两项资产均有已验证证据",
-        "detail": "MLA 的证据 EV-REAL-MLA-1 和 DualPipe 的证据 EV-REAL-DUALPIPE-1 均标记为 verified=true,来源为 deepseek-v3.pdf。",
+        "title": "证据",
+        "detail": "两项资产均引用 deepseek-v3.pdf 中的相关章节作为证据,且已验证。",
         "sourceIds": [
           "EV-REAL-MLA-1",
           "EV-REAL-DUALPIPE-1"
         ],
-        "confidence": 0.98
+        "confidence": 0.95
       },
       {
         "id": "F5",
-        "title": "治理关注点:资产归属不同团队,敏感度为内部",
-        "detail": "MLA 由基础模型组拥有,DualPipe 由训练系统组拥有,两者敏感度均为“内部”,状态为“已发布”。",
+        "title": "治理关注点",
+        "detail": "两项资产均标记为“内部”敏感级别,状态为“已发布”,版本 V1.0。IP-REAL-MLA 由基础模型组拥有,IP-REAL-DUALPIPE 由训练系统组拥有。",
         "sourceIds": [
           "IP-REAL-MLA",
           "IP-REAL-DUALPIPE"
         ],
-        "confidence": 0.95
+        "confidence": 0.9
       },
       {
         "id": "F6",
-        "title": "关系:MLA 是 DualPipe 的一部分(part_of)",
-        "detail": "邻接关系显示 IP-REAL-MLA 与 IP-REAL-DUALPIPE 之间存在 part_of 关系,方向为 MLA -> DualPipe,验证状态为 confirmed,置信度 1。",
+        "title": "资产关系",
+        "detail": "IP-REAL-MLA 与 IP-REAL-DUALPIPE 之间存在 part_of 关系,方向为 IP-REAL-MLA 指向 IP-REAL-DUALPIPE,关系已验证。",
         "sourceIds": [
-          "REL-C3E30CD4-4694-4008-9B88-61155566DC6D"
+          "REL-1A05034D-8982-464B-A3AE-17035D73426A"
         ],
         "confidence": 1
       }
     ],
     "uncertainties": [
-      "MLA 与 DualPipe 的具体集成方式(如 MLA 如何作为 DualPipe 的一部分)缺少详细证据。",
-      "适用阶段的具体细节(如 MLA 是否仅用于推理、DualPipe 是否仅用于训练)未在证据中明确说明,仅从摘要推断。",
-      "治理关注点(如合规、安全、许可)未在知识空间中提供具体信息,需进一步核实。",
-      "证据仅来自 deepseek-v3.pdf,未发现其他独立验证来源。"
+      "IP-REAL-MLA 的具体低秩压缩实现细节(如压缩维度、性能数据)未在知识空间中提供。",
+      "IP-REAL-DUALPIPE 的具体调度算法和重叠策略细节未在知识空间中提供。",
+      "两项资产在 DeepSeek-V3 中的具体集成方式或依赖关系未明确。",
+      "治理方面,未提供审批流程、合规要求或风险控制措施。",
+      "part_of 关系的具体含义(如 MLA 是 DualPipe 的一部分)未在知识空间中解释。"
     ],
     "deliverables": [
       {
         "type": "draft",
-        "title": "IP-REAL-MLA 与 IP-REAL-DUALPIPE 只读尽调清单",
-        "content": "# 尽调清单:IP-REAL-MLA 与 IP-REAL-DUALPIPE ## 1. 机制 - **IP-REAL-MLA**:通过低秩联合压缩降低推理期间的 KV Cache 开销(证据:EV-REAL-MLA-1)。 - **IP-REAL-DUALPIPE**:通过双向流水调度降低流水线气泡,并重叠计算与通信(证据:EV-REAL-DUALPIPE-1)。 ## 2. 适用阶段 - **IP-REAL-MLA**:推理阶段(降低长上下文推理的缓存成本)。 - **IP-REAL-DUALPIPE**:训练阶段(提升大规模训练流水线效率)。 ## 3. 证据 - MLA 证据:EV-REAL-MLA-1(deepseek-v3.pdf 2.1.1 节,已验证)。 - DualPipe 证据:EV-REAL-DUALPIPE-1(deepseek-v3.pdf 3.2.2 节,已验证)。 - 关系证据:REL-C3E30CD4-4694-4008-9B88-61155566DC6D(part_of,confirmed)。 ## 4. 治理关注点 - 资产归属:MLA 归基础模型组,DualPipe 归训练系统组。 - 敏感度:均为“内部”。 - 状态:均为“已发布”。 - 待核实:具体集成方式、合规要求、许可条款等。 ## 5. 待核实项 - MLA 与 DualPipe 的集成细节。 - 适用阶段的详细边界。 - 治理与合规的具体要求。 - 是否有其他独立证据来源。"
+        "title": "只读尽调清单草案",
+        "content": "# 只读尽调清单:IP-REAL-MLA 与 IP-REAL-DUALPIPE ## 1. 机制 - **IP-REAL-MLA**:通过低秩联合压缩降低推理期间的 KV Cache 开销。 - **IP-REAL-DUALPIPE**:通过双向流水调度降低流水线气泡并重叠计算与通信。 ## 2. 适用阶段 - **IP-REAL-MLA**:推理阶段,降低长上下文推理的缓存成本。 - **IP-REAL-DUALPIPE**:训练阶段,提升大规模训练流水线效率。 ## 3. 证据 - 两项资产均引用 deepseek-v3.pdf 中的相关章节作为证据,且已验证。 ## 4. 治理关注点 - 两项资产均为“内部”敏感级别,状态“已发布”,版本 V1.0。 - 所有者:IP-REAL-MLA 归基础模型组,IP-REAL-DUALPIPE 归训练系统组。 - 关系:IP-REAL-MLA 是 IP-REAL-DUALPIPE 的一部分(part_of)。 ## 5. 待核实项 - 具体实现细节、性能指标、集成方式、审批流程等。"
       }
     ],
     "nextActions": [
-      "核实 MLA 与 DualPipe 的集成细节,补充相关证据。",
-      "确认适用阶段的具体边界,必要时查阅原始文档。",
-      "调查治理与合规要求,如许可、安全审查等。",
-      "搜索其他独立证据来源以增强置信度。"
+      "核实 IP-REAL-MLA 的低秩压缩具体实现和性能数据。",
+      "核实 IP-REAL-DUALPIPE 的调度算法和重叠策略细节。",
+      "确认 part_of 关系的具体含义和上下文。",
+      "补充治理相关的审批、合规和风险信息。"
     ],
     "excludedActions": [
       "未执行代码、命令、文件系统或任意网络操作",
@@ -173,16 +174,16 @@
     }
   },
   "usage": {
-    "planTokens": 2064,
-    "resultTokens": 3712,
-    "totalTokens": 5776
+    "planTokens": 2091,
+    "resultTokens": 3507,
+    "totalTokens": 5598
   },
-  "completedAt": "2026-08-10T11:06:03.506Z",
+  "completedAt": "2026-08-11T02:56:31.241Z",
   "error": null,
   "events": [
     {
-      "id": "AGE-48b80df2-2392-4255-b321-af8ce36aa7df",
-      "taskId": "AGT-c5426b89-6e95-4915-9547-fbd81386267e",
+      "id": "AGE-ad0bee6f-89a1-4d58-b1f9-4582276af853",
+      "taskId": "AGT-53d271ce-3b7d-42dc-a96b-680f6853fd56",
       "type": "task.created",
       "stepId": null,
       "detail": {
@@ -190,35 +191,35 @@
         "assetCount": 2,
         "boundary": "document-ip-wiki-readonly"
       },
-      "createdAt": "2026-08-10T11:05:48.711Z"
+      "createdAt": "2026-08-11T02:56:17.193Z"
     },
     {
-      "id": "AGE-98d562c8-cd2a-4e24-8652-2f609bfa3b11",
-      "taskId": "AGT-c5426b89-6e95-4915-9547-fbd81386267e",
+      "id": "AGE-03c4885a-18ec-4507-b682-71cd1508b307",
+      "taskId": "AGT-53d271ce-3b7d-42dc-a96b-680f6853fd56",
       "type": "plan.ready",
       "stepId": null,
       "detail": {
-        "intent": "document_comparison",
-        "outputType": "due_diligence_pack",
+        "intent": "due_diligence_pack",
+        "outputType": "readonly_due_diligence_checklist",
         "stepCount": 6,
         "model": "deepseek-v4-flash"
       },
-      "createdAt": "2026-08-10T11:05:53.833Z"
+      "createdAt": "2026-08-11T02:56:23.075Z"
     },
     {
-      "id": "AGE-aa1e6ad9-6391-4933-a930-d553adf82e40",
-      "taskId": "AGT-c5426b89-6e95-4915-9547-fbd81386267e",
+      "id": "AGE-a8268b68-1bba-4ee6-9009-1cb702acfb54",
+      "taskId": "AGT-53d271ce-3b7d-42dc-a96b-680f6853fd56",
       "type": "step.started",
       "stepId": "S1",
       "detail": {
         "title": "比较两项资产",
         "tool": "compare_assets"
       },
-      "createdAt": "2026-08-10T11:05:53.834Z"
+      "createdAt": "2026-08-11T02:56:23.075Z"
     },
     {
-      "id": "AGE-4c11c5ab-c878-42e3-8063-505a7cac3456",
-      "taskId": "AGT-c5426b89-6e95-4915-9547-fbd81386267e",
+      "id": "AGE-638c012c-0349-4552-a123-c1c7645dea49",
+      "taskId": "AGT-53d271ce-3b7d-42dc-a96b-680f6853fd56",
       "type": "step.complete",
       "stepId": "S1",
       "detail": {
@@ -232,26 +233,26 @@
           "EV-REAL-DUALPIPE-1"
         ]
       },
-      "createdAt": "2026-08-10T11:05:53.835Z"
+      "createdAt": "2026-08-11T02:56:23.076Z"
     },
     {
-      "id": "AGE-a11bbc6e-d20e-419b-8b88-701ee7c0a187",
-      "taskId": "AGT-c5426b89-6e95-4915-9547-fbd81386267e",
+      "id": "AGE-25ce2364-5af2-4698-a4bd-eec48806445b",
+      "taskId": "AGT-53d271ce-3b7d-42dc-a96b-680f6853fd56",
       "type": "step.started",
       "stepId": "S2",
       "detail": {
-        "title": "读取 IP-REAL-MLA 详情",
+        "title": "读取 IP-REAL-MLA 资产",
         "tool": "read_asset"
       },
-      "createdAt": "2026-08-10T11:05:53.835Z"
+      "createdAt": "2026-08-11T02:56:23.076Z"
     },
     {
-      "id": "AGE-f1be6976-578e-4c7d-942b-b94a8d46c65f",
-      "taskId": "AGT-c5426b89-6e95-4915-9547-fbd81386267e",
+      "id": "AGE-eca40a41-d3e6-482d-91f3-02ba59d856e8",
+      "taskId": "AGT-53d271ce-3b7d-42dc-a96b-680f6853fd56",
       "type": "step.complete",
       "stepId": "S2",
       "detail": {
-        "title": "读取 IP-REAL-MLA 详情",
+        "title": "读取 IP-REAL-MLA 资产",
         "tool": "read_asset",
         "resultCount": 1,
         "sourceIds": [
@@ -259,26 +260,26 @@
           "EV-REAL-MLA-1"
         ]
       },
-      "createdAt": "2026-08-10T11:05:53.835Z"
+      "createdAt": "2026-08-11T02:56:23.077Z"
     },
     {
-      "id": "AGE-372a5d73-560e-4012-8141-e53c428c611d",
-      "taskId": "AGT-c5426b89-6e95-4915-9547-fbd81386267e",
+      "id": "AGE-93050e61-4dff-4509-9e7a-2d4f67695822",
+      "taskId": "AGT-53d271ce-3b7d-42dc-a96b-680f6853fd56",
       "type": "step.started",
       "stepId": "S3",
       "detail": {
-        "title": "读取 IP-REAL-DUALPIPE 详情",
+        "title": "读取 IP-REAL-DUALPIPE 资产",
         "tool": "read_asset"
       },
-      "createdAt": "2026-08-10T11:05:53.836Z"
+      "createdAt": "2026-08-11T02:56:23.077Z"
     },
     {
-      "id": "AGE-999aa3bd-e515-454d-85f6-7ec45c802528",
-      "taskId": "AGT-c5426b89-6e95-4915-9547-fbd81386267e",
+      "id": "AGE-a1338a95-0b8f-4f6c-a605-c5a4975edb80",
+      "taskId": "AGT-53d271ce-3b7d-42dc-a96b-680f6853fd56",
       "type": "step.complete",
       "stepId": "S3",
       "detail": {
-        "title": "读取 IP-REAL-DUALPIPE 详情",
+        "title": "读取 IP-REAL-DUALPIPE 资产",
         "tool": "read_asset",
         "resultCount": 1,
         "sourceIds": [
@@ -286,82 +287,82 @@
           "EV-REAL-DUALPIPE-1"
         ]
       },
-      "createdAt": "2026-08-10T11:05:53.836Z"
+      "createdAt": "2026-08-11T02:56:23.077Z"
     },
     {
-      "id": "AGE-c375eeb7-729d-4924-8f4c-50b56a1ce033",
-      "taskId": "AGT-c5426b89-6e95-4915-9547-fbd81386267e",
+      "id": "AGE-3c9753a7-0f38-482e-be43-be6d1af69e92",
+      "taskId": "AGT-53d271ce-3b7d-42dc-a96b-680f6853fd56",
       "type": "step.started",
       "stepId": "S4",
       "detail": {
-        "title": "检查 IP-REAL-MLA 邻接关系",
+        "title": "检查 IP-REAL-MLA 邻域",
         "tool": "inspect_neighborhood"
       },
-      "createdAt": "2026-08-10T11:05:53.837Z"
+      "createdAt": "2026-08-11T02:56:23.077Z"
     },
     {
-      "id": "AGE-e1cfa7b3-d9aa-428d-aaf5-01ffef4bbd81",
-      "taskId": "AGT-c5426b89-6e95-4915-9547-fbd81386267e",
+      "id": "AGE-be4839fe-80e0-4a8e-ad0c-ad2d359cd2ca",
+      "taskId": "AGT-53d271ce-3b7d-42dc-a96b-680f6853fd56",
       "type": "step.complete",
       "stepId": "S4",
       "detail": {
-        "title": "检查 IP-REAL-MLA 邻接关系",
+        "title": "检查 IP-REAL-MLA 邻域",
         "tool": "inspect_neighborhood",
         "resultCount": 3,
         "sourceIds": [
           "IP-REAL-MLA",
           "IP-REAL-DUALPIPE",
-          "REL-C3E30CD4-4694-4008-9B88-61155566DC6D"
+          "REL-1A05034D-8982-464B-A3AE-17035D73426A"
         ]
       },
-      "createdAt": "2026-08-10T11:05:53.839Z"
+      "createdAt": "2026-08-11T02:56:23.078Z"
     },
     {
-      "id": "AGE-9460f869-e4d6-4b40-b1a5-7e08266641e2",
-      "taskId": "AGT-c5426b89-6e95-4915-9547-fbd81386267e",
+      "id": "AGE-e0672c08-c0b7-4aa7-8908-c8e7e3003429",
+      "taskId": "AGT-53d271ce-3b7d-42dc-a96b-680f6853fd56",
       "type": "step.started",
       "stepId": "S5",
       "detail": {
-        "title": "检查 IP-REAL-DUALPIPE 邻接关系",
+        "title": "检查 IP-REAL-DUALPIPE 邻域",
         "tool": "inspect_neighborhood"
       },
-      "createdAt": "2026-08-10T11:05:53.839Z"
+      "createdAt": "2026-08-11T02:56:23.079Z"
     },
     {
-      "id": "AGE-f98dfa01-1efa-480f-83b5-18c7c8d9eb24",
-      "taskId": "AGT-c5426b89-6e95-4915-9547-fbd81386267e",
+      "id": "AGE-49d21c2e-15b7-4c1d-a67e-70afdff2d76d",
+      "taskId": "AGT-53d271ce-3b7d-42dc-a96b-680f6853fd56",
       "type": "step.complete",
       "stepId": "S5",
       "detail": {
-        "title": "检查 IP-REAL-DUALPIPE 邻接关系",
+        "title": "检查 IP-REAL-DUALPIPE 邻域",
         "tool": "inspect_neighborhood",
         "resultCount": 3,
         "sourceIds": [
           "IP-REAL-DUALPIPE",
           "IP-REAL-MLA",
-          "REL-C3E30CD4-4694-4008-9B88-61155566DC6D"
+          "REL-1A05034D-8982-464B-A3AE-17035D73426A"
         ]
       },
-      "createdAt": "2026-08-10T11:05:53.839Z"
+      "createdAt": "2026-08-11T02:56:23.079Z"
     },
     {
-      "id": "AGE-a3dd9ff0-5f9a-4759-a3bd-32d32546039e",
-      "taskId": "AGT-c5426b89-6e95-4915-9547-fbd81386267e",
+      "id": "AGE-7c1f8518-79b2-4ecc-9263-8d8760722ae0",
+      "taskId": "AGT-53d271ce-3b7d-42dc-a96b-680f6853fd56",
       "type": "step.started",
       "stepId": "S6",
       "detail": {
-        "title": "生成尽调清单草案",
+        "title": "生成只读尽调清单草案",
         "tool": "compose_wiki_draft"
       },
-      "createdAt": "2026-08-10T11:05:53.840Z"
+      "createdAt": "2026-08-11T02:56:23.079Z"
     },
     {
-      "id": "AGE-aa81eae3-b611-4507-9f41-99ab13452374",
-      "taskId": "AGT-c5426b89-6e95-4915-9547-fbd81386267e",
+      "id": "AGE-7943b56a-d1c5-4787-a17d-0a285e0f729b",
+      "taskId": "AGT-53d271ce-3b7d-42dc-a96b-680f6853fd56",
       "type": "step.complete",
       "stepId": "S6",
       "detail": {
-        "title": "生成尽调清单草案",
+        "title": "生成只读尽调清单草案",
         "tool": "compose_wiki_draft",
         "resultCount": 1,
         "sourceIds": [
@@ -369,11 +370,11 @@
           "EV-REAL-MLA-1"
         ]
       },
-      "createdAt": "2026-08-10T11:05:53.840Z"
+      "createdAt": "2026-08-11T02:56:23.080Z"
     },
     {
-      "id": "AGE-a281aaf1-e901-4dd5-b2b4-983ec45373f5",
-      "taskId": "AGT-c5426b89-6e95-4915-9547-fbd81386267e",
+      "id": "AGE-a99253fb-df0f-4cb3-b1d4-f40673b2d95d",
+      "taskId": "AGT-53d271ce-3b7d-42dc-a96b-680f6853fd56",
       "type": "delivery.complete",
       "stepId": null,
       "detail": {
@@ -381,12 +382,12 @@
         "findingCount": 6,
         "evidenceCoverage": 1,
         "usage": {
-          "planTokens": 2064,
-          "resultTokens": 3712,
-          "totalTokens": 5776
+          "planTokens": 2091,
+          "resultTokens": 3507,
+          "totalTokens": 5598
         }
       },
-      "createdAt": "2026-08-10T11:06:03.507Z"
+      "createdAt": "2026-08-11T02:56:31.242Z"
     }
   ]
 }

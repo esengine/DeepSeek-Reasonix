@@ -1,15 +1,18 @@
 ﻿# intelifar MinerU + DeepSeek Real E2E Report
-- Run: 2026-08-10T05:35:37.524Z
+- Run: 2026-08-11T02:55:28.990Z
 - Result: PASS
-- Duration: 601664 ms
+- Duration: 20801 ms
 - Input: intelifar-real-analysis.html
 - MinerU state: complete
 - MinerU model: MinerU-HTML
-- MinerU task: 6b47f0d3-d92e-497f-848c-c9185d2f45f1
+- MinerU task: dd454c04-1cf4-4566-8aee-adf3e30bccfc
 - Parsed Markdown: 1214 characters
+- DeepSeek analysis input: 1214 characters (full)
+- Section coverage: 8/8
+- Quote validation: 11 verified / 0 rejected
 - DeepSeek model: deepseek-v4-flash
-- DeepSeek response: fdc6f278-ba15-4859-824e-4b0b5385ed83
-- DeepSeek tokens: 2923
+- DeepSeek response: 90686a2f-c6e1-4902-bda1-ada9ed60dec4
+- DeepSeek tokens: 2766
 - IP assets: 4
 - Source quotations: 8
 - Published assets: 4

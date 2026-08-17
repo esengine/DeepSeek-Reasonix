@@ -5,7 +5,7 @@ import path from "node:path";
 import Database from "better-sqlite3";
 
 const BACKUP_ID = /^BKP-\d{8}T\d{6}-[a-f0-9]{12}$/;
-const REQUIRED_TABLES = ["agent_task_events", "agent_tasks", "analysis_jobs", "audit_events", "invitations", "secure_shares", "sessions", "users", "wiki_versions", "workspaces"];
+const REQUIRED_TABLES = ["agent_task_events", "agent_tasks", "analysis_jobs", "audit_events", "invitations", "secure_shares", "sessions", "users", "wiki_review_requests", "wiki_versions", "workspaces"];
 
 function makeId(now = new Date()) {
   const stamp = now.toISOString().replaceAll(/[-:]/g, "").slice(0, 15);

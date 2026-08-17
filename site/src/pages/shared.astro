@@ -6,22 +6,22 @@ import publicShareScriptUrl from "../scripts/public-share.mjs?url";
 ---
 <!doctype html>
 <html lang="zh-CN">
-  <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width" /><meta name="robots" content="noindex,nofollow,noarchive" /><meta name="referrer" content="no-referrer" /><title>intelifar 安全 Wiki 阅览室</title></head>
+  <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width" /><meta name="robots" content="noindex,nofollow,noarchive" /><meta name="referrer" content="no-referrer" /><title>intelifar 安全 Wiki 阅览室</title><style>.share-help{display:block;margin-top:8px;color:#73778a;font-size:11px;line-height:1.6}</style></head>
   <body class="public-share-page">
-    <header class="public-brand"><a href="/" aria-label="intelifar 首页"><img src="/brand/intelifar-logo-dark.png" alt="intelifar" /></a><span>SECURE WIKI ROOM</span><b>受控阅览</b></header>
+    <header class="public-brand"><a href="/" aria-label="intelifar 首页"><img src="/brand/intelifar-logo-dark.png" alt="intelifar" /></a><span>安全 Wiki 阅览</span><b>只读访问</b></header>
     <main class="share-room">
       <section class="share-lock" id="share-lock">
-        <div class="lock-mark">◇</div><p class="public-kicker">DOUBLE-CREDENTIAL ACCESS</p><h1 id="shared-document-title">正在验证安全分享</h1><p id="shared-lock-copy">此链接需要独立访问码。链接令牌已从地址栏移除，不会写入访问日志或 Referrer。</p>
+        <div class="lock-mark">◇</div><p class="public-kicker">链接与访问码双重验证</p><h1 id="shared-document-title">正在验证安全分享</h1><p id="shared-lock-copy">请输入发送方通过另一渠道提供的访问码。系统不会在地址栏保留分享凭证。</p>
         <dl class="share-inspection"><div><dt>授权对象</dt><dd id="shared-recipient">验证中</dd></div><div><dt>访问范围</dt><dd id="shared-scope">脱敏 Wiki</dd></div><div><dt>到期时间</dt><dd id="shared-expires">验证中</dd></div></dl>
-        <form id="share-access-form" hidden><label for="share-access-code">独立访问码</label><div><input id="share-access-code" name="accessCode" autocomplete="one-time-code" maxlength="128" required data-testid="share-access-code" /><button type="submit" data-testid="unlock-share">解锁脱敏 Wiki →</button></div><p id="share-access-error" role="alert"></p></form>
+        <form id="share-access-form" hidden><label for="share-access-code">独立访问码</label><div><input id="share-access-code" name="accessCode" autocomplete="one-time-code" maxlength="128" required data-testid="share-access-code" /><button type="submit" data-testid="unlock-share">打开只读 Wiki →</button></div><p id="share-access-error" role="alert"></p><small class="share-help">如访问码缺失、过期或无法打开，请联系分享发起方重新确认。</small></form>
       </section>
       <article class="shared-wiki" id="shared-wiki" data-testid="shared-wiki" hidden>
-        <header><div><p class="public-kicker">REDACTED KNOWLEDGE EDITION</p><h1 id="public-wiki-title"></h1><p id="public-wiki-meta"></p></div><span class="verified-seal">✓ 访问已审计</span></header>
+        <header><div><p class="public-kicker">对外只读知识版本</p><h1 id="public-wiki-title"></h1><p id="public-wiki-meta"></p></div><span class="verified-seal">✓ 访问已留痕</span></header>
         <section><h2><span>01</span> 执行摘要</h2><p id="public-wiki-summary"></p></section>
         <section><h2><span>02</span> 关键机制</h2><p id="public-wiki-mechanism"></p></section>
         <section><h2><span>03</span> 脱敏指标</h2><div class="public-metrics" id="public-wiki-metrics"></div></section>
         <section><h2><span>04</span> 关系说明</h2><div class="public-relations" id="public-wiki-relations"></div></section>
-        <footer><span>intelifar · REDACTED WIKI</span><p>此页面不包含原始文档、逐字证据、内部成员或工作空间审计数据。</p></footer>
+        <footer><span>intelifar · 安全 Wiki 阅览</span><p>此页面不包含原始文档、逐字证据、内部成员或工作空间审计数据。如对内容有疑问，请联系分享发起方。</p></footer>
       </article>
     </main>
     <div class="recipient-watermark" id="recipient-watermark" hidden></div>

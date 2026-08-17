@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createPublicationRegistry } from "./publication-registry.mjs";
+import { createPlatformStore } from "./platform-store.mjs";
 
 function completedJob() {
   return {
@@ -69,5 +70,25 @@ test("rejects publication before analysis completion", async () => {
     await assert.rejects(() => registry.publish({ ...completedJob(), state: "deepseek" }), /completed/i);
   } finally {
     await rm(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("migrates legacy atomic publications to SQLite exactly once", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "intelifar-registry-migration-"));
+  const rootDir = path.join(directory, "publications");
+  const store = createPlatformStore({ dbPath: path.join(directory, "platform.sqlite") });
+  try {
+    const legacy = createPublicationRegistry({ rootDir });
+    const publication = await legacy.publish(completedJob(), { owner: "知识平台主管", sensitivity: "内部" });
+    store.ensureWorkspace({ id: "WS-DEMO", name: "澜图科技" });
+    const persistent = createPublicationRegistry({ rootDir, store, defaultWorkspaceId: "WS-DEMO" });
+
+    assert.deepEqual(await persistent.migrateLegacyPublications("WS-DEMO"), { discovered: 1, imported: 1, skipped: 0 });
+    assert.deepEqual(await persistent.migrateLegacyPublications("WS-DEMO"), { discovered: 1, imported: 0, skipped: 1 });
+    assert.equal((await persistent.listAssets("WS-DEMO")).length, publication.assets.length);
+    assert.equal(store.getAssetGraph("WS-DEMO", { role: "owner", includeProposed: true }).nodes.length, publication.assets.length);
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
   }
 });

@@ -1,0 +1,128 @@
+{
+  "executedAt": "2026-08-11T23:24:44.577Z",
+  "baseURL": "http://127.0.0.1:4388",
+  "status": "PASS",
+  "engine": "Semantica",
+  "version": "0.6.0",
+  "publishedAssetsBefore": 8,
+  "checkedAssets": 8,
+  "duplicateCandidates": [
+    {
+      "assetIds": [
+        "IP-REAL-3B7DE9D3F30F",
+        "IP-REAL-15184BBF4691"
+      ],
+      "similarity": 0.835422,
+      "confidence": 1,
+      "reasons": [
+        "标题完全一致",
+        "2 项属性相近",
+        "资产类型一致"
+      ],
+      "reviewId": "SEMREV-883BE5AE586745CA85A29D0C",
+      "reviewStatus": "pending"
+    },
+    {
+      "assetIds": [
+        "IP-REAL-171404D4AE55",
+        "IP-REAL-1664A595BF3A"
+      ],
+      "similarity": 0.89619,
+      "confidence": 1,
+      "reasons": [
+        "标题完全一致",
+        "2 项属性相近",
+        "资产类型一致"
+      ],
+      "reviewId": "SEMREV-6B4EAA26045B74D0CF20AD31",
+      "reviewStatus": "pending"
+    },
+    {
+      "assetIds": [
+        "IP-REAL-DF55B7D505BC",
+        "IP-REAL-C8469BB43D72"
+      ],
+      "similarity": 0.896104,
+      "confidence": 1,
+      "reasons": [
+        "标题完全一致",
+        "2 项属性相近",
+        "资产类型一致"
+      ],
+      "reviewId": "SEMREV-968FF3AD9F4D37DA4079E0FB",
+      "reviewStatus": "pending"
+    },
+    {
+      "assetIds": [
+        "IP-REAL-06C34E94CC7D",
+        "IP-REAL-E43F464854E7"
+      ],
+      "similarity": 0.995315,
+      "confidence": 1,
+      "reasons": [
+        "标题完全一致",
+        "2 项属性相近",
+        "资产类型一致"
+      ],
+      "reviewId": "SEMREV-D6AF4FA931546B0EFF66C2E5",
+      "reviewStatus": "pending"
+    }
+  ],
+  "conflicts": [],
+  "provenance": {
+    "assets": 8,
+    "evidence": 16,
+    "entries": [
+      {
+        "assetId": "IP-REAL-3B7DE9D3F30F",
+        "source": "intelifar-real-analysis.html",
+        "checksum": "c83b5b18c71233542ce0c929d879e1d75a2eb82578b2aa7108e23d17c2e003c4",
+        "evidenceCount": 2
+      },
+      {
+        "assetId": "IP-REAL-171404D4AE55",
+        "source": "intelifar-real-analysis.html",
+        "checksum": "565472b9b14b0e6a7e659cca664b046dff6044d49d4b0f1863e5325ee0a98f0b",
+        "evidenceCount": 2
+      },
+      {
+        "assetId": "IP-REAL-DF55B7D505BC",
+        "source": "intelifar-real-analysis.html",
+        "checksum": "d2b1f29fb8b6731ef2a77a8e6f448d8ea0b6ca124b6d9b2fbdc1963c9af8f58b",
+        "evidenceCount": 2
+      },
+      {
+        "assetId": "IP-REAL-06C34E94CC7D",
+        "source": "intelifar-real-analysis.html",
+        "checksum": "6fe1da2272c8d3ec4c224ee03a6d506f251fe3427430c8da7138caaffe6f0aeb",
+        "evidenceCount": 2
+      },
+      {
+        "assetId": "IP-REAL-15184BBF4691",
+        "source": "intelifar-real-analysis.html",
+        "checksum": "4c582560f02e640bfa96a9e1c754baf156ace9348a82e401cea88125a67214a1",
+        "evidenceCount": 2
+      },
+      {
+        "assetId": "IP-REAL-1664A595BF3A",
+        "source": "intelifar-real-analysis.html",
+        "checksum": "7602360f8ef5287ee21d16978d34a5b87fc7123006f859c53f292adea1ce8502",
+        "evidenceCount": 2
+      },
+      {
+        "assetId": "IP-REAL-C8469BB43D72",
+        "source": "intelifar-real-analysis.html",
+        "checksum": "005eb6ef0f08a6ec5d40001322fb4a0b637758c58d3d9f1646b5a8bdeacdc40f",
+        "evidenceCount": 2
+      },
+      {
+        "assetId": "IP-REAL-E43F464854E7",
+        "source": "intelifar-real-analysis.html",
+        "checksum": "461e5a83d1058aefdee8ae4a8b7a81796e711de59d8b2ed5c069168985327efe",
+        "evidenceCount": 2
+      }
+    ]
+  },
+  "formalAssetsUnchanged": true,
+  "auditRecorded": true
+}

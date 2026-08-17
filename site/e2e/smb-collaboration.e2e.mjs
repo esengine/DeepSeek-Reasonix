@@ -116,7 +116,7 @@ async function login(page, email, password) {
 
 try {
   await login(ownerPage, ownerEmail, ownerPassword);
-  await ownerPage.locator("[data-testid='nav-system']").click();
+  await ownerPage.locator("[data-testid='nav-members']").click();
   await ownerPage.locator("[data-testid='team-access']").waitFor({ state: "visible" });
   await ownerPage.locator("[data-testid='open-invitation']").click();
   await ownerPage.locator("[data-testid='invitation-name']").fill("周岚");
@@ -153,6 +153,7 @@ try {
   editorContext = await browser.newContext({ viewport: { width: 1440, height: 1000 }, locale: "zh-CN" });
   const editorPage = await editorContext.newPage();
   await login(editorPage, memberEmail, memberPassword);
+  assert.equal(await editorPage.locator("[data-testid='nav-members']").isHidden(), true);
   await editorPage.locator("[data-testid='nav-system']").click();
   await editorPage.waitForTimeout(300);
   assert.equal(await editorPage.locator("[data-testid='operations-console']").isHidden(), true);
@@ -214,6 +215,8 @@ try {
   await publicPage.screenshot({ path: path.join(screenshots, "08-mobile-public-wiki.png"), fullPage: true });
 
   await ownerPage.locator("#share-dialog [data-close-dialog]").last().click();
+  await ownerPage.locator("#share-dialog").waitFor({ state: "hidden" });
+  await ownerPage.waitForFunction(() => !document.querySelector("#share-result-link")?.value && !document.querySelector("#share-result-code")?.value);
   assert.equal(await ownerPage.locator("#share-result-link").inputValue(), "");
   assert.equal(await ownerPage.locator("#share-result-code").inputValue(), "");
   await ownerPage.locator("[data-testid='nav-lifecycle']").click();
@@ -228,15 +231,18 @@ try {
   await revokedPage.goto(shareLink, { waitUntil: "domcontentloaded" });
   await revokedPage.getByText("安全分享不可用", { exact: true }).waitFor();
 
-  await ownerPage.locator("[data-testid='nav-system']").click();
+  await ownerPage.locator("[data-testid='nav-members']").click();
   const memberRow = ownerPage.locator("#member-ledger article", { hasText: memberEmail });
   await memberRow.waitFor();
+  await memberRow.locator(".member-status-action").click();
+  await ownerPage.locator("[data-testid='member-change-dialog']").waitFor({ state: "visible" });
+  assert.match(await ownerPage.locator("#member-change-impact").textContent(), /所有现有登录会话立即失效/);
   await Promise.all([
     ownerPage.waitForResponse((response) => response.url().includes("/api/admin/members/USR-") && response.status() === 200),
-    memberRow.locator(".member-status-action").click(),
+    ownerPage.locator("[data-testid='confirm-member-change']").click(),
   ]);
-  await ownerPage.locator("#member-ledger article", { hasText: memberEmail }).getByText(/会话已撤销/).waitFor();
-  assert.match(await memberRow.textContent(), /会话已撤销/);
+  await ownerPage.locator("#member-ledger article", { hasText: memberEmail }).getByText(/已停用/).waitFor();
+  assert.match(await memberRow.textContent(), /已停用/);
   const disabledSessionStatus = await editorPage.evaluate(async () => (await fetch("/api/assets")).status);
   assert.equal(disabledSessionStatus, 401);
   await editorPage.reload({ waitUntil: "domcontentloaded" });
