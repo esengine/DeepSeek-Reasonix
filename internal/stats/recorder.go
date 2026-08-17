@@ -25,6 +25,8 @@ type Recorder struct {
 	source     string
 }
 
+var _ event.OptionalSinkCapabilities = (*Recorder)(nil)
+
 const recorderQueueSize = 2048
 
 type dispatchItem struct {
@@ -136,13 +138,20 @@ func (r *Recorder) Emit(e event.Event) {
 	} else if r != nil && r.writer != nil && e.Kind == event.GuardianAssessment && e.Guardian.Usage != nil {
 		r.recordProviderUsage(e.ModelRef, e.Guardian.Usage, nil, "")
 	} else if r != nil && r.writer != nil && e.Kind == event.TurnDone {
-		r.RecordTurnCompletion()
+		r.recordTurnCompletion()
 	}
 }
 
 // RecordTurnCompletion records synchronous controller runs that deliberately do
 // not emit TurnDone into the UI event stream.
 func (r *Recorder) RecordTurnCompletion() {
+	r.recordTurnCompletion()
+	if r != nil {
+		event.RecordTurnCompletion(r.inner)
+	}
+}
+
+func (r *Recorder) recordTurnCompletion() {
 	if r == nil || r.dispatcher == nil {
 		return
 	}
@@ -219,6 +228,14 @@ func (r *Recorder) RecordMemoryRecall(a event.MemoryRecallAudit) {
 // RecordDelegationAdmission preserves the wrapped sink's audit capability.
 func (r *Recorder) RecordDelegationAdmission(a event.DelegationAdmissionAudit) {
 	event.RecordDelegationAdmission(r.inner, a)
+}
+
+func (r *Recorder) RecordWorkspaceMutation(m event.WorkspaceMutation) {
+	event.RecordWorkspaceMutation(r.inner, m)
+}
+
+func (r *Recorder) RecordRunBudget(sample event.RunBudgetSample) {
+	event.RecordRunBudget(r.inner, sample)
 }
 
 func (r *Recorder) recordUsage(e event.Event) {

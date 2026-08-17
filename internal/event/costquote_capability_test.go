@@ -43,6 +43,7 @@ func (c *capabilityRecorder) RecordDelegationAudit(evidence.DelegationAudit) {
 func (c *capabilityRecorder) RecordWorkspaceMutation(WorkspaceMutation) {
 	c.mark("workspace_mutation")
 }
+func (c *capabilityRecorder) RecordRunBudget(RunBudgetSample) { c.mark("run_budget") }
 
 // A wrapper that drops an optional capability silently truncates every recorder
 // below it: the trajectory and stats recorders sit under the quoting sink, so
@@ -67,12 +68,13 @@ func TestCostQuoteSinkPreservesEveryAuditCapability(t *testing.T) {
 	RecordProtocolRecovery(s, ProtocolRecoveryAudit{})
 	RecordDelegationAudit(s, evidence.DelegationAudit{})
 	RecordWorkspaceMutation(s, WorkspaceMutation{})
+	RecordRunBudget(s, RunBudgetSample{})
 
 	for _, want := range []string{
 		"emit", "turn_completion", "readiness_audit", "contract_shadow",
 		"completion_report", "memory_recall", "delegation_admission",
 		"outcome_progress", "protocol_recovery", "delegation_audit",
-		"workspace_mutation",
+		"workspace_mutation", "run_budget",
 	} {
 		if !inner.got[want] {
 			t.Errorf("quoting sink swallowed %s; everything recorded below it loses that channel", want)

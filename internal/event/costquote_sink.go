@@ -94,9 +94,10 @@ func (c *QuoteContext) billingMode(modelRef string) string {
 // among them — silently receives nothing.
 type CostQuoteSink struct {
 	AuditForwarder
-	Inner Sink
-	Ctx   *QuoteContext
+	Ctx *QuoteContext
 }
+
+var _ OptionalSinkCapabilities = (*CostQuoteSink)(nil)
 
 // NewCostQuoteSink wraps inner with quoting. A nil ctx still quotes the
 // original price-book currency.
@@ -104,7 +105,7 @@ func NewCostQuoteSink(inner Sink, ctx *QuoteContext) *CostQuoteSink {
 	if ctx == nil {
 		ctx = &QuoteContext{}
 	}
-	return &CostQuoteSink{AuditForwarder: AuditForwarder{Inner: inner}, Inner: inner, Ctx: ctx}
+	return &CostQuoteSink{AuditForwarder: AuditForwarder{Inner: inner}, Ctx: ctx}
 }
 
 func (s *CostQuoteSink) Emit(e Event) {

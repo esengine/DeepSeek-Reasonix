@@ -18,6 +18,8 @@ type capabilitySink struct {
 	recoveries []event.ProtocolRecoveryAudit
 	outcomes   []evidence.OutcomeSample
 	reports    []event.CompletionReportAudit
+	workspace  []event.WorkspaceMutation
+	runBudgets []event.RunBudgetSample
 	turns      int
 }
 
@@ -34,6 +36,12 @@ func (s *capabilitySink) RecordOutcomeProgress(sample evidence.OutcomeSample) {
 }
 func (s *capabilitySink) RecordCompletionReport(a event.CompletionReportAudit) {
 	s.reports = append(s.reports, a)
+}
+func (s *capabilitySink) RecordWorkspaceMutation(m event.WorkspaceMutation) {
+	s.workspace = append(s.workspace, m)
+}
+func (s *capabilitySink) RecordRunBudget(sample event.RunBudgetSample) {
+	s.runBudgets = append(s.runBudgets, sample)
 }
 
 func readRecords(t *testing.T, path string) []Record {
@@ -118,6 +126,8 @@ func TestRecorderRecordsAndForwardsOptionalCapabilities(t *testing.T) {
 	r.RecordCompletionReport(event.CompletionReportAudit{
 		Verdict: "partial", Changes: 2, ChangesUnreviewed: 1, Gaps: 1, GapKinds: []string{"unreviewed_change"},
 	})
+	r.RecordWorkspaceMutation(event.WorkspaceMutation{ToolName: "write_file"})
+	r.RecordRunBudget(event.RunBudgetSample{Currency: "USD"})
 	if err := r.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -143,6 +153,9 @@ func TestRecorderRecordsAndForwardsOptionalCapabilities(t *testing.T) {
 	}
 	if rec := recs[5].CompletionReport; rec == nil || rec.Verdict != "partial" || rec.ChangesUnreviewed != 1 || len(rec.GapKinds) != 1 {
 		t.Errorf("completion report record = %+v", recs[5].CompletionReport)
+	}
+	if len(inner.workspace) != 1 || len(inner.runBudgets) != 1 {
+		t.Errorf("host capabilities not forwarded: workspace=%d run_budget=%d", len(inner.workspace), len(inner.runBudgets))
 	}
 	if len(inner.readiness) != 1 || len(inner.recoveries) != 1 || inner.turns != 1 || len(inner.outcomes) != 1 || len(inner.reports) != 1 {
 		t.Errorf("inner capabilities = %d/%d/%d/%d/%d, want 1/1/1/1/1", len(inner.readiness), len(inner.recoveries), inner.turns, len(inner.outcomes), len(inner.reports))

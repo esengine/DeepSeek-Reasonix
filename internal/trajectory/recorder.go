@@ -145,6 +145,8 @@ type Recorder struct {
 	closed bool
 }
 
+var _ event.OptionalSinkCapabilities = (*Recorder)(nil)
+
 // New opens (or truncates) path and returns a Recorder forwarding to inner.
 // A nil clock means time.Now.
 func New(inner event.Sink, path string, clock func() time.Time) (*Recorder, error) {
@@ -294,6 +296,14 @@ func (r *Recorder) RecordProtocolRecovery(a event.ProtocolRecoveryAudit) {
 func (r *Recorder) RecordTurnCompletion() {
 	r.append(Record{TurnCompletion: true})
 	event.RecordTurnCompletion(r.inner)
+}
+
+func (r *Recorder) RecordWorkspaceMutation(m event.WorkspaceMutation) {
+	event.RecordWorkspaceMutation(r.inner, m)
+}
+
+func (r *Recorder) RecordRunBudget(sample event.RunBudgetSample) {
+	event.RecordRunBudget(r.inner, sample)
 }
 
 // Close flushes and closes the file, returning the first error seen. Events

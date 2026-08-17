@@ -117,6 +117,8 @@ type frontendEventSink struct {
 	warned map[string]bool
 }
 
+var _ event.OptionalSinkCapabilities = (*frontendEventSink)(nil)
+
 func newFrontendEventSink(inner event.Sink, d *dispatch.Dispatcher) *frontendEventSink {
 	return &frontendEventSink{inner: inner, d: d, warned: map[string]bool{}}
 }
@@ -233,4 +235,12 @@ func (s *frontendEventSink) RecordProtocolRecovery(a event.ProtocolRecoveryAudit
 
 func (s *frontendEventSink) RecordTurnCompletion() {
 	event.RecordTurnCompletion(s.inner)
+}
+
+func (s *frontendEventSink) RecordWorkspaceMutation(m event.WorkspaceMutation) {
+	event.RecordWorkspaceMutation(s.inner, m)
+}
+
+func (s *frontendEventSink) RecordRunBudget(sample event.RunBudgetSample) {
+	event.RecordRunBudget(s.inner, sample)
 }
