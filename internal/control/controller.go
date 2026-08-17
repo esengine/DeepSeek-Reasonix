@@ -2484,6 +2484,9 @@ func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]
 	c.approval.markAskEmitted(id)
 	c.sink.Emit(event.Event{Kind: event.AskRequest, Ask: event.Ask{ID: id, Questions: questions}})
 	c.approval.promptEmitMu.Unlock()
+	// A question blocks the run on the user exactly like an approval prompt, so
+	// it gets the same external-attention ping (see requestApprovalDecisionWithOptions).
+	go c.hooks.Notification(ctx, askNotificationText(questions), "question_prompt")
 
 	waitCtx, cancelWait := c.approval.waitContext(ctx)
 	defer cancelWait()
