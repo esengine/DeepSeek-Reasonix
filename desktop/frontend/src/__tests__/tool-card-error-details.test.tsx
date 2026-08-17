@@ -46,6 +46,10 @@ function installDom() {
   globalThis.HTMLElement = dom.window.HTMLElement;
   globalThis.Event = dom.window.Event;
   globalThis.MouseEvent = dom.window.MouseEvent;
+  // Node >= 25 exposes a built-in localStorage whose methods are absent
+  // without --localstorage-file, so `typeof localStorage` alone stops being a
+  // usable guard: the jsdom one has to win.
+  globalThis.localStorage = dom.window.localStorage;
   globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
   globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
   dom.window.matchMedia = () => ({

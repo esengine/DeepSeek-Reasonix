@@ -67,6 +67,14 @@ for (const [name, owner] of OWNED_ELSEWHERE) {
 const suites = files.filter((name) => !OWNED_ELSEWHERE.has(name));
 console.log(`run-tests: ${suites.length} discovered suites (${OWNED_ELSEWHERE.size} owned by dedicated scripts)`);
 
+// Node >= 25 enables Web Storage by default, so `localStorage` is a global
+// whose methods are absent unless --localstorage-file names a real file — every
+// `typeof localStorage !== "undefined"` guard in the app then throws. CI pins
+// Node 24; opt out so a suite cannot pass there and crash on a newer local Node.
+const nodeArgs = process.allowedNodeEnvironmentFlags.has("--no-experimental-webstorage")
+  ? ["--no-experimental-webstorage"]
+  : [];
+
 const failures = [];
 for (const name of suites) {
   const path = join(TESTS_DIR, name);
@@ -75,7 +83,7 @@ for (const name of suites) {
   // Node's built-in navigator.language follows the machine's ICU locale, and
   // suites assert English UI strings.
   const env = { ...process.env, LANG: "en_US.UTF-8", LC_ALL: "en_US.UTF-8" };
-  const result = spawnSync(process.execPath, [tsxCli, path], { stdio: "inherit", env });
+  const result = spawnSync(process.execPath, [...nodeArgs, tsxCli, path], { stdio: "inherit", env });
   if (result.error) console.error(`run-tests: spawn failed for ${path}: ${result.error.message}`);
   if (result.status !== 0) {
     if (!keepGoing) {
