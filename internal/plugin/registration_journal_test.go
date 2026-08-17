@@ -154,7 +154,7 @@ func TestRegistrationScopeCommitPreservesClientReusedByNewerBuild(t *testing.T) 
 	host := NewHost()
 	older := host.BeginRegistrationScope()
 	olderCtx := ContextWithRegistrationScope(context.Background(), older)
-	client := &Client{name: "shared", toolsListed: true}
+	client := &Client{name: "shared", toolCatalog: toolCatalogSnapshot{listed: true}}
 	if err := host.ReplaceServerBackend(olderCtx, "shared", client, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestRegistrationScopeActiveClaimDefersCreatorRollback(t *testing.T) {
 	host := NewHost()
 	creator := host.BeginRegistrationScope()
 	creatorCtx := ContextWithRegistrationScope(context.Background(), creator)
-	client := &Client{name: "shared", toolsListed: true}
+	client := &Client{name: "shared", toolCatalog: toolCatalogSnapshot{listed: true}}
 	if err := host.ReplaceServerBackend(creatorCtx, "shared", client, 1); err != nil {
 		t.Fatal(err)
 	}

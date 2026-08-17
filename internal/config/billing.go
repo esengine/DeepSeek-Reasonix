@@ -137,6 +137,51 @@ func (e *ProviderEntry) RateCardForModel(model string) billing.RateCard {
 	}
 }
 
+// PricingContextForModel returns host-trusted catalog metadata for quote
+// construction. Dynamic schedules are enabled only for an exact official
+// endpoint whose configured rates still match the current peak anchor.
+func (e *ProviderEntry) PricingContextForModel(model string) billing.PricingContext {
+	if e == nil {
+		return billing.PricingContext{}
+	}
+	model = strings.TrimSpace(model)
+	kind := officialProviderKind(e)
+	protocolKind := strings.ToLower(strings.TrimSpace(e.Kind))
+	scheduledProtocol := protocolKind == "openai" || protocolKind == "responses" || protocolKind == "anthropic"
+	ctx := billing.PricingContext{
+		ProviderKind: kind,
+		ModelID:      model,
+		BillingMode:  e.ProviderBillingMode(),
+	}
+	card := e.RateCardForModel(model)
+	if entry, ok := billing.MatchesCatalog(kind, model, card); ok {
+		ctx.CatalogSource = entry.DocURL
+	}
+	if kind == "deepseek" && scheduledProtocol && isOfficialDeepSeekBillingEndpoint(e) && ctx.BillingMode == billing.BillingModePAYG &&
+		billing.MatchesScheduleAnchor(kind, model, billing.ScheduleDeepSeekV4August2026, card) {
+		ctx.ScheduleID = billing.ScheduleDeepSeekV4August2026
+		ctx.CatalogSource = billing.DocDeepSeekPricing
+	}
+	return ctx
+}
+
+// isOfficialDeepSeekBillingEndpoint is deliberately protocol- and path-aware.
+// Hostname-only matching would let a custom route on api.deepseek.com opt into
+// vendor pricing and migrations that it may not actually use.
+func isOfficialDeepSeekBillingEndpoint(e *ProviderEntry) bool {
+	if e == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(e.Kind)) {
+	case "openai":
+		return isOfficialDeepSeekOpenAIEndpoint(e.BaseURL)
+	case "responses", "anthropic":
+		return IsOfficialDeepSeekWebSearchEndpoint(e)
+	default:
+		return false
+	}
+}
+
 // freezeProviderBillingCurrencies sets BillingCurrency from current official
 // prices when missing. Custom prices keep their currency. Never overwrites an
 // explicit BillingCurrency.

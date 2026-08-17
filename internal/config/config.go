@@ -1317,9 +1317,8 @@ type AgentConfig struct {
 	CompactForceRatio   float64 `toml:"compact_force_ratio"`
 	// ContextEditing is retired; native tool clearing is no longer an auto path.
 	ContextEditing string `toml:"context_editing"`
-	// Keep controls which compactable messages stay verbatim beyond the current
-	// user-fact/digest floor and recent tail. Empty uses the conservative default
-	// of keeping error tool results.
+	// Keep and RecentKeep are deprecated compatibility fields. They remain
+	// readable and writable but Harness-style compaction ignores them.
 	Keep       []string `toml:"keep"`
 	RecentKeep int      `toml:"recent_keep"`
 	// ColdResumePrune elides stale tool results when a session reopens past the
@@ -1361,12 +1360,11 @@ type ProviderEntry struct {
 	BalanceURL        string `toml:"balance_url"` // optional; a provider-specific wallet-balance endpoint (DeepSeek: https://api.deepseek.com/user/balance). Empty = no balance readout.
 	ContextWindow     int    `toml:"context_window"`
 	// MaxOutputTokens is a protocol-neutral total output budget for one turn.
-	// Zero means automatic (not unlimited): ordinary 16K, reasoning 32K, high/max
-	// 64K — DeepSeek's default effort is high, so auto is typically ~64K.
-	// User guidance: 0 recommended; 32768 ordinary coding/cost control;
-	// 65536 heavy reasoning/long tools; 131072 only after finish_reason=length.
-	// A negative value omits optional wire limits when the protocol allows;
-	// Anthropic still requires max_tokens. Never feeds compact_ratio.
+	// Zero means official DeepSeek omits the field (server 384K ceiling) and
+	// other vendors keep their own defaults. Effort selects thinking depth only.
+	// A positive value is an explicit cost cap. A negative value omits optional
+	// wire limits when the protocol allows; official DeepSeek Anthropic still
+	// sends 384K because max_tokens is mandatory. Never feeds compact_ratio.
 	MaxOutputTokens int                          `toml:"max_output_tokens"`
 	Price           *provider.Pricing            `toml:"price"`  // legacy/provider-wide fallback
 	Prices          map[string]*provider.Pricing `toml:"prices"` // optional per-model prices; keys are model ids
@@ -1828,7 +1826,7 @@ const LanguagePolicy = `Reply in the same language the user is using in their mo
 // Default returns the built-in default configuration.
 func Default() *Config {
 	return &Config{
-		ConfigVersion:    6,
+		ConfigVersion:    7,
 		DefaultModel:     "deepseek-flash",
 		CredentialsStore: CredentialsStoreAuto,
 		UI:               UIConfig{Theme: "auto", ShowTurnUsage: true},
@@ -1850,7 +1848,7 @@ func Default() *Config {
 			// Soft/snip/force are load-only compatibility; CompactRatio alone drives maintenance.
 			SoftCompactRatio:       0,
 			ToolResultSnipRatio:    0,
-			CompactRatio:           0.85,
+			CompactRatio:           0.80,
 			CompactForceRatio:      0,
 			ContextEditing:         "",
 			MaxSubagentDepth:       2,
@@ -1872,7 +1870,7 @@ func Default() *Config {
 		Network: NetworkConfig{ProxyMode: netclient.ModeAuto},
 		Bot: BotConfig{
 			ToolApprovalMode:   "ask",
-			MaxSteps:           25,
+			MaxSteps:           0,
 			DebounceMs:         1500,
 			QueueMode:          "steer",
 			QueueCap:           20,
@@ -1902,7 +1900,7 @@ func Default() *Config {
 				Name: "deepseek-pro", Kind: "anthropic", BaseURL: deepSeekAnthropicBaseURL,
 				Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY",
 				BalanceURL: "https://api.deepseek.com/user/balance", Thinking: "enabled",
-				WebSearch: boolPointer(true), SupportedEfforts: []string{"disabled", "high", "max"}, DefaultEffort: "high",
+				WebSearch: boolPointer(true), SupportedEfforts: []string{"disabled", "low", "high", "max"}, DefaultEffort: "high",
 				ContextWindow: 1_000_000, Price: deepSeekV4ProPriceUSD(),
 				BillingCurrency: "USD", BillingMode: "payg",
 			},

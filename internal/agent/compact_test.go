@@ -143,8 +143,8 @@ func TestPinnedPrefixLen(t *testing.T) {
 		msgs []provider.Message
 		want int
 	}{
-		{"pins-system-and-small-task", 0, []provider.Message{sys, small, as, as}, 2},
-		{"summaries-are-not-pinned-A1-merge", 0, []provider.Message{sys, small, sum, sum, as}, 2},
+		{"pins-only-system-before-small-task", 0, []provider.Message{sys, small, as, as}, 1},
+		{"summaries-are-not-pinned-A1-merge", 0, []provider.Message{sys, small, sum, sum, as}, 1},
 		{"large-first-turn-stays-foldable", 0, []provider.Message{sys, big, as, as}, 1},
 		{"tiny-window-wont-pin", 10, []provider.Message{sys, small, as, as}, 1},
 		{"summary-is-not-the-task-turn", 0, []provider.Message{sys, sum, as}, 1},
@@ -158,62 +158,6 @@ func TestPinnedPrefixLen(t *testing.T) {
 	}
 }
 
-func TestKeepIndexesKeepsSiblingToolResultsForKeptError(t *testing.T) {
-	region := []provider.Message{
-		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{
-			{ID: "err", Name: "bash", Arguments: `{"cmd":"bad"}`},
-			{ID: "ok", Name: "read_file", Arguments: `{"path":"main.go"}`},
-		}},
-		{Role: provider.RoleTool, ToolCallID: "err", Name: "bash", Content: "error: command failed"},
-		{Role: provider.RoleTool, ToolCallID: "ok", Name: "read_file", Content: "package main"},
-	}
-
-	keep := keepIndexes(region, KeepErrors)
-	for i, kept := range keep {
-		if !kept {
-			t.Fatalf("keep[%d] = false, want all sibling tool-call messages kept: %v", i, keep)
-		}
-	}
-}
-
-func TestKeepIndexesScopesPolicyAfterLatestSummary(t *testing.T) {
-	priorSummary := provider.Message{Role: provider.RoleUser, Content: summaryTagOpen + "\nprior digest\n" + summaryTagClose}
-	region := []provider.Message{
-		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "old", Name: "bash", Arguments: `{}`}}},
-		{Role: provider.RoleTool, ToolCallID: "old", Name: "bash", Content: "error: old failure"},
-		priorSummary,
-		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "new", Name: "bash", Arguments: `{}`}}},
-		{Role: provider.RoleTool, ToolCallID: "new", Name: "bash", Content: "error: new failure"},
-	}
-
-	keep := keepIndexes(region, KeepErrors)
-	want := []bool{false, false, false, true, true}
-	for i := range want {
-		if keep[i] != want[i] {
-			t.Fatalf("keep = %v, want %v", keep, want)
-		}
-	}
-}
-
-func TestKeepUserMarkedRequiresUserPrefixMarker(t *testing.T) {
-	region := []provider.Message{
-		{Role: provider.RoleAssistant, Content: "[keep] assistant output"},
-		{Role: provider.RoleUser, Content: "ordinary prose mentioning [keep] later"},
-		{Role: provider.RoleUser, Content: "  <keep> exact requirement"},
-	}
-
-	keep := keepIndexes(region, KeepUserMarked)
-	want := []bool{false, false, true}
-	for i := range want {
-		if keep[i] != want[i] {
-			t.Fatalf("keep = %v, want %v", keep, want)
-		}
-	}
-}
-
-// TestCompactFallsBackToMechanicalFoldWhenSummaryFails: when the summarizer is
-// unreachable, /compact must still free context (fold mechanically) and surface a
-// card, not hang or abort leaving a full window.
 // TestSummarizeRespectsContextCancel: a stalled stream (open but never closing)
 // must unblock on context cancellation instead of pinning compaction forever.
 func TestSummarizeRespectsContextCancel(t *testing.T) {
@@ -299,12 +243,12 @@ func TestCompactInjectsFocusAndPreCompactHook(t *testing.T) {
 	if len(prov.got) == 0 || prov.got[0].Role != provider.RoleSystem {
 		t.Fatalf("summarizer wasn't asked with a system prompt: %+v", prov.got)
 	}
-	sys := prov.got[0].Content
-	if !strings.Contains(sys, "focus on the auth refactor") {
-		t.Errorf("summary system prompt missing the /compact focus text: %q", sys)
+	instruction := prov.got[len(prov.got)-1].Content
+	if !strings.Contains(instruction, "focus on the auth refactor") {
+		t.Errorf("final summary instruction missing the /compact focus text: %q", instruction)
 	}
-	if !strings.Contains(sys, "KEEP-THE-MIGRATION-PLAN") {
-		t.Errorf("summary system prompt missing the PreCompact hook output: %q", sys)
+	if !strings.Contains(instruction, "KEEP-THE-MIGRATION-PLAN") {
+		t.Errorf("final summary instruction missing the PreCompact hook output: %q", instruction)
 	}
 }
 
@@ -509,9 +453,12 @@ func TestInterruptedDisplayStaysOutOfCompactionPromptAndProjection(t *testing.T)
 		InterruptedTurn: &provider.InterruptedTurnRecovery{Pending: true},
 	}
 	a := &Agent{}
-	early, carried, kept, fold := a.partitionFoldForProjection([]provider.Message{local})
-	if len(early) != 0 || len(carried) != 0 || len(kept) != 0 || len(fold) != 0 {
-		t.Fatalf("compaction partition early=%+v carried=%+v kept=%+v fold=%+v, want display-only output in none of them", early, carried, kept, fold)
+	kept, fold, retention := a.partitionFoldForProjection([]provider.Message{local})
+	if len(kept) != 0 || len(fold) != 0 {
+		t.Fatalf("compaction partition kept=%+v fold=%+v, want display-only output in neither", kept, fold)
+	}
+	if retention.Kept != 0 || retention.Dropped != 0 {
+		t.Fatalf("retention = %+v, want display-only output counted as neither kept nor dropped", retention)
 	}
 	if transcript := renderTranscript([]provider.Message{local}); transcript != "" {
 		t.Fatalf("local interrupted output leaked into compaction prompt: %q", transcript)
@@ -614,14 +561,14 @@ func TestMaybeCompactClearsStuckLatchAnywhereBelowTrigger(t *testing.T) {
 			sess := NewSession("sys")
 			sess.Add(provider.Message{Role: provider.RoleUser, Content: "hi"})
 			a := New(&fakeProvider{reply: "- summary"}, tool.NewRegistry(), sess, Options{ContextWindow: 20000}, event.Discard)
-			a.consecutiveCompacts = 1
-			a.compactStuck = true
+			a.sess.compaction.consecutive = 1
+			a.sess.compaction.stuck = true
 
 			prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: tc.prompt})
 
-			if a.consecutiveCompacts != 0 || a.compactStuck {
+			if a.sess.compaction.consecutive != 0 || a.sess.compaction.stuck {
 				t.Fatalf("prompt %d sits under the trigger; want the latch cleared, got consecutiveCompacts=%d compactStuck=%v",
-					tc.prompt, a.consecutiveCompacts, a.compactStuck)
+					tc.prompt, a.sess.compaction.consecutive, a.sess.compaction.stuck)
 			}
 		})
 	}
@@ -635,8 +582,8 @@ func TestMaybeCompactDefersWhenOnlyActiveTurnRemains(t *testing.T) {
 	a := New(&fakeProvider{reply: "- summary"}, tool.NewRegistry(), sess, Options{ContextWindow: 20000}, event.Discard)
 
 	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 17000})
-	if a.compactStuck {
-		t.Fatalf("active turn should be deferred, not durably blocked: consecutiveCompacts=%d", a.consecutiveCompacts)
+	if a.sess.compaction.stuck {
+		t.Fatalf("active turn should be deferred, not durably blocked: consecutiveCompacts=%d", a.sess.compaction.consecutive)
 	}
 	version := a.currentProjectionVersion()
 	prepareForObservedUsage(a, context.Background(), &provider.Usage{PromptTokens: 17000})
@@ -646,19 +593,12 @@ func TestMaybeCompactDefersWhenOnlyActiveTurnRemains(t *testing.T) {
 }
 
 func TestCompactTriggerIgnoresConfiguredOutputBudget(t *testing.T) {
-	a := &Agent{
-		contextWindow:   100_000,
-		maxOutputTokens: 20_000,
-		compactRatio:    0.85,
-	}
+	a := &Agent{agentConfig: agentConfig{contextWindow: 100_000, maxOutputTokens: 20_000, compactRatio: 0.85}}
 	if got := a.compactTrigger(); got != 85_000 {
 		t.Fatalf("trigger = %d, want 85000 (output budget must not change it)", got)
 	}
 	if got := a.hardInputCeiling(); got != 100_000-protocolReserveTokens {
 		t.Fatalf("hard ceiling = %d, want window minus protocol reserve only", got)
-	}
-	if got := a.checkpointCeiling(); got != 50_000 {
-		t.Fatalf("checkpoint ceiling = %d, want 50000", got)
 	}
 }
 

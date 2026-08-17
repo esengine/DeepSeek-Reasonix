@@ -33,18 +33,18 @@ func TestProjectionValidRejectsEditedPrefix(t *testing.T) {
 			CoveredPrefixHash: coveredPrefixHash(msgs, 3),
 		},
 	}
-	if !projectionValid(st, msgs, 2, "ws|sess|model") {
+	if !projectionValid(st, msgs, "ws|sess|model") {
 		t.Fatal("expected valid projection for matching prefix")
 	}
 	// Append-only growth still valid.
 	grown := append(append([]provider.Message(nil), msgs...), provider.Message{Role: provider.RoleAssistant, Content: "more"})
-	if !projectionValid(st, grown, 3, "ws|sess|model") {
+	if !projectionValid(st, grown, "ws|sess|model") {
 		t.Fatal("append-only growth should keep projection valid")
 	}
 	// Prefix edit invalidates.
 	edited := append([]provider.Message(nil), msgs...)
 	edited[1].Content = "task-EDITED"
-	if projectionValid(st, edited, 4, "ws|sess|model") {
+	if projectionValid(st, edited, "ws|sess|model") {
 		t.Fatal("edited covered prefix must invalidate projection")
 	}
 }
@@ -65,21 +65,21 @@ func TestProjectionValidRejectsCacheKeyMismatch(t *testing.T) {
 			TranscriptVersion: 1,
 		},
 	}
-	if projectionValid(st, msgs, 1, "ws|sess|model-b") {
+	if projectionValid(st, msgs, "ws|sess|model-b") {
 		t.Fatal("model/lineage key mismatch must invalidate projection")
 	}
-	if !projectionValid(st, msgs, 1, "ws|sess|model-a") {
+	if !projectionValid(st, msgs, "ws|sess|model-a") {
 		t.Fatal("matching key should be valid")
 	}
 	// Fail closed: blank stored key is rejected when current key is known.
 	st.PromptCacheKey = ""
-	if projectionValid(st, msgs, 1, "ws|sess|model-a") {
+	if projectionValid(st, msgs, "ws|sess|model-a") {
 		t.Fatal("missing sidecar cache key must invalidate when lineage is known")
 	}
 	// Missing prefix hash is always rejected.
 	st.PromptCacheKey = "ws|sess|model-a"
 	st.Projection.CoveredPrefixHash = ""
-	if projectionValid(st, msgs, 1, "ws|sess|model-a") {
+	if projectionValid(st, msgs, "ws|sess|model-a") {
 		t.Fatal("missing CoveredPrefixHash must invalidate projection")
 	}
 }
@@ -130,17 +130,70 @@ func TestCoveredPrefixHashIncludesProviderVisibleFields(t *testing.T) {
 	}
 }
 
+func TestLoadProjectionSidecarRebindsMatchingContentAcrossLineage(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.jsonl")
+	msgs := []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "task"},
+	}
+	hash := coveredPrefixHash(msgs, 2)
+	if err := SaveCompactionState(path, CompactionState{
+		SchemaVersion:     compactionStateSchemaV1,
+		PromptCacheKey:    "ws|s|other-model",
+		TranscriptVersion: 1,
+		Projection: ContextProjection{
+			Messages:          []provider.Message{{Role: provider.RoleSystem, Content: "sys summary"}},
+			CoveredCount:      2,
+			CoveredPrefixHash: hash,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sess := NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "task"})
+	a := New(nil, nil, sess, Options{
+		SessionPath: path,
+		WorkspaceID: "ws",
+		ModelRef:    "this-model",
+	}, event.Discard)
+	// New() already called LoadProjectionSidecar; the projection body matches
+	// the canonical covered prefix, so it must be rebound to the current key
+	// instead of being dropped (upgrade / model-switch path).
+	if len(a.sess.compactionState.Projection.Messages) == 0 {
+		t.Fatal("matching projection body was dropped on lineage change")
+	}
+	wantKey := promptCacheKey("ws", BranchID(path), "this-model")
+	if a.sess.compactionState.PromptCacheKey != wantKey {
+		t.Fatalf("PromptCacheKey = %q, want %q", a.sess.compactionState.PromptCacheKey, wantKey)
+	}
+	if a.sess.checkpointState != "restored" {
+		t.Fatalf("checkpointState = %q, want restored", a.sess.checkpointState)
+	}
+	// The rebind must be persisted so the next launch does not re-downgrade.
+	disk, ok, err := LoadCompactionState(path)
+	if err != nil || !ok {
+		t.Fatalf("sidecar should remain on disk: ok=%v err=%v", ok, err)
+	}
+	if disk.PromptCacheKey != wantKey {
+		t.Fatalf("persisted PromptCacheKey = %q, want %q", disk.PromptCacheKey, wantKey)
+	}
+}
+
 func TestLoadProjectionSidecarDropsForeignCacheKey(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "s.jsonl")
 	msgs := []provider.Message{{Role: provider.RoleSystem, Content: "sys"}}
+	// Content validation must fail despite a model-only key change: lineage
+	// rebinding cannot resurrect a projection whose canonical prefix differs.
+	foreign := []provider.Message{{Role: provider.RoleSystem, Content: "sys-old"}}
 	if err := SaveCompactionState(path, CompactionState{
 		SchemaVersion:  compactionStateSchemaV1,
 		PromptCacheKey: "ws|s|other-model",
 		Projection: ContextProjection{
 			Messages:          msgs,
 			CoveredCount:      1,
-			CoveredPrefixHash: coveredPrefixHash(msgs, 1),
+			CoveredPrefixHash: coveredPrefixHash(foreign, 1),
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -150,11 +203,11 @@ func TestLoadProjectionSidecarDropsForeignCacheKey(t *testing.T) {
 		WorkspaceID: "ws",
 		ModelRef:    "this-model",
 	}, event.Discard)
-	// New() already called LoadProjectionSidecar; foreign key must be dropped.
-	if len(a.compactionState.Projection.Messages) != 0 {
-		t.Fatalf("foreign projection loaded: %+v", a.compactionState.Projection)
+	// New() already called LoadProjectionSidecar; mismatched content must drop
+	// the projection body and keep the sidecar file for the other model.
+	if len(a.sess.compactionState.Projection.Messages) != 0 {
+		t.Fatalf("foreign projection loaded: %+v", a.sess.compactionState.Projection)
 	}
-	// Sidecar file remains for the other model.
 	if _, ok, err := LoadCompactionState(path); err != nil || !ok {
 		t.Fatalf("sidecar should remain on disk: ok=%v err=%v", ok, err)
 	}
@@ -255,15 +308,15 @@ func TestCompactInstallsCoveredPrefixHash(t *testing.T) {
 	if err := a.CompactNow(context.Background(), ""); err != nil {
 		t.Fatal(err)
 	}
-	st := a.compactionState
+	st := a.sess.compactionState
 	if st.Projection.CoveredPrefixHash == "" {
 		t.Fatal("CoveredPrefixHash not set")
 	}
 	if st.PromptCacheKey != promptCacheKey("ws", BranchID(path), "m") {
 		t.Fatalf("PromptCacheKey = %q", st.PromptCacheKey)
 	}
-	msgs, ver := sess.snapshotMessagesVersion()
-	if !projectionValid(st, msgs, ver, st.PromptCacheKey) {
+	msgs, _ := sess.snapshotMessagesVersion()
+	if !projectionValid(st, msgs, st.PromptCacheKey) {
 		t.Fatal("fresh projection should validate")
 	}
 }

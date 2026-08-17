@@ -22,22 +22,23 @@ type Finding struct {
 }
 
 const (
-	ruleEssay      = "essay"
-	ruleBanner     = "banner"
-	ruleMarker     = "marker"
-	ruleDeadCode   = "commented-code"
-	ruleNarrative  = "narrative"
-	ruleFileSize   = "file-size"
-	ruleTestSize   = "test-file-size"
-	ruleLayering   = "layering"
-	ruleFuncSize   = "function-size"
-	ruleComplexity = "complexity"
+	ruleEssay       = "essay"
+	ruleBanner      = "banner"
+	ruleMarker      = "marker"
+	ruleDeadCode    = "commented-code"
+	ruleNarrative   = "narrative"
+	ruleFileSize    = "file-size"
+	ruleTestSize    = "test-file-size"
+	ruleLayering    = "layering"
+	ruleFuncSize    = "function-size"
+	ruleComplexity  = "complexity"
+	ruleStructState = "struct-state"
 )
 
 var allRules = []string{
 	ruleEssay, ruleBanner, ruleMarker, ruleDeadCode,
 	ruleNarrative, ruleFileSize, ruleTestSize, ruleLayering,
-	ruleFuncSize, ruleComplexity,
+	ruleFuncSize, ruleComplexity, ruleStructState,
 }
 
 func main() {
@@ -123,6 +124,7 @@ func run(root string) ([]Finding, error) {
 		}
 		findings = append(findings, checkComments(src)...)
 		findings = append(findings, checkComplexity(src)...)
+		findings = append(findings, checkStructState(src)...)
 		imports[rel] = src.importRefs()
 	}
 	return append(findings, checkLayering(imports)...), nil

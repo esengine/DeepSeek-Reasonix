@@ -27,7 +27,7 @@ type SessionRemovalGuard struct {
 }
 
 func tryTakeSessionLeaseLock(path string) (*sessionLockFile, error) {
-	lock, err := tryTakeSessionLockFile(store.SessionLeaseLock(path))
+	lock, err := tryTakeSessionLeaseLockFile(store.SessionLeaseLock(path))
 	if errors.Is(err, ErrSessionFileLockHeld) {
 		return nil, ErrSessionLeaseHeld
 	}

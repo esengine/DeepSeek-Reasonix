@@ -526,11 +526,9 @@ func mcpNormalizedServerName(name string) string {
 }
 
 // enabledMCPSpecs returns the deduplicated set of MCP server specs a build
-// enabled: the configured eager/background tiers plus host-session extras, or
-// the on-demand connect set under the Economy profile (whose servers enter
-// the registry only through connect_tool_source). Names are deduplicated so
-// the kernel catalog holds one entry per server.
-func enabledMCPSpecs(configSpecs, extraSpecs []plugin.Spec, onDemandNames []string, onDemandSpecs map[string]plugin.Spec, tokenEconomy bool) []plugin.Spec {
+// enabled: the configured eager/background tiers plus host-session extras.
+// Names are deduplicated so the kernel catalog holds one entry per server.
+func enabledMCPSpecs(configSpecs, extraSpecs []plugin.Spec) []plugin.Spec {
 	var out []plugin.Spec
 	seen := map[string]bool{}
 	add := func(spec plugin.Spec) {
@@ -540,12 +538,6 @@ func enabledMCPSpecs(configSpecs, extraSpecs []plugin.Spec, onDemandNames []stri
 		}
 		seen[name] = true
 		out = append(out, spec)
-	}
-	if tokenEconomy {
-		for _, name := range onDemandNames {
-			add(onDemandSpecs[name])
-		}
-		return out
 	}
 	for _, spec := range configSpecs {
 		add(spec)

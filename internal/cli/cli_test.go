@@ -16,7 +16,6 @@ import (
 	"testing"
 
 	"reasonix/internal/agent"
-	"reasonix/internal/boot"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
@@ -615,7 +614,7 @@ command = "legacy-bin"
 	if err != nil {
 		t.Fatalf("read migrated user config: %v", err)
 	}
-	for _, want := range []string{`config_version = 6`, `[desktop]`, `name    = "legacy-cli"`} {
+	for _, want := range []string{`config_version = 7`, `[desktop]`, `name    = "legacy-cli"`} {
 		if !strings.Contains(string(body), want) {
 			t.Fatalf("migrated config missing %q:\n%s", want, body)
 		}
@@ -642,7 +641,7 @@ func TestRunAppliesUserConfigUpgradesOnStartup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read upgraded user config: %v", err)
 	}
-	if !strings.Contains(string(body), "config_version = 6") {
+	if !strings.Contains(string(body), "config_version = 7") {
 		t.Fatalf("CLI startup should apply user config upgrades:\n%s", body)
 	}
 }
@@ -850,7 +849,7 @@ func TestConfigCompactRatioQueryReportsBuiltInDefault(t *testing.T) {
 			t.Fatalf("config compact-ratio query rc = %d, want 0", rc)
 		}
 	})
-	if out != "compact_ratio = 85% (built-in default)\n" {
+	if out != "compact_ratio = 80% (built-in default)\n" {
 		t.Fatalf("config compact-ratio query output = %q", out)
 	}
 }
@@ -2063,7 +2062,7 @@ func TestWithBuiltinFamiliesForLanguageUsesDeepSeekPricing(t *testing.T) {
 	if flash == nil {
 		t.Fatal("deepseek-flash provider missing")
 	}
-	if flash.Price == nil || flash.Price.Output != 0.28 || flash.Price.Currency != "$" {
+	if flash.Price == nil || flash.Price.Output != 1.32 || flash.Price.Currency != "$" {
 		t.Fatalf("flash price = %+v, want frozen USD official table", flash.Price)
 	}
 }
@@ -2196,11 +2195,12 @@ func TestProvidersWithMissingKeysIncludesPlannerModel(t *testing.T) {
 
 func TestParseRuntimeProfile(t *testing.T) {
 	for input, want := range map[string]string{
-		"":         boot.TokenModeFull,
-		"balanced": boot.TokenModeFull,
-		"full":     boot.TokenModeFull,
-		"economy":  boot.TokenModeEconomy,
-		"delivery": boot.TokenModeDelivery,
+		"":         "balanced",
+		"balanced": "balanced",
+		"full":     "balanced",
+		"economy":  "light",
+		"light":    "light",
+		"delivery": "delivery",
 	} {
 		got, err := parseRuntimeProfile(input)
 		if err != nil || got != want {

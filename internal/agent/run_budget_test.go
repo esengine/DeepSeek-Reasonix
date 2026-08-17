@@ -6,10 +6,24 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"reasonix/internal/billing"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
+
+func TestRunBudgetUsesTheCanonicalOccurrenceTimeQuote(t *testing.T) {
+	usage := &provider.Usage{CompletionTokens: 1_000_000, TotalTokens: 1_000_000, RequestCount: 1}
+	quote := func(amount, band string) *billing.CostQuote {
+		return &billing.CostQuote{Original: billing.Money{Amount: amount, Currency: "CNY"}, CostComplete: true, RateBand: band}
+	}
+	var peak, off runBudget
+	peak.observeQuote(usage, quote("27", billing.RateBandPeak))
+	off.observeQuote(usage, quote("13.5", billing.RateBandOffPeak))
+	if peak.cost != 27 || off.cost != 13.5 || peak.cost != 2*off.cost {
+		t.Fatalf("peak=%v off_peak=%v", peak.cost, off.cost)
+	}
+}
 
 // budgetSink opts into the shadow axis; an ordinary sink would receive nothing.
 type budgetSink struct {
@@ -114,7 +128,7 @@ func TestTaskBudgetSurvivesAContinuation(t *testing.T) {
 	afterFirst := sink.samples[len(sink.samples)-1]
 
 	// What the host does for a continuation: keep the evidence ledger.
-	a.preserveEvidenceOnce = true
+	a.pending.preserveEvidence = true
 	if err := a.Run(context.Background(), "continue"); err != nil {
 		t.Fatalf("continuation Run: %v", err)
 	}
@@ -186,8 +200,8 @@ func TestRunBudgetCountsRoundsWithoutUsage(t *testing.T) {
 
 func TestRunBudgetIgnoresSinksThatDoNotOptIn(t *testing.T) {
 	plain := event.FuncSink(func(event.Event) {})
-	a := &Agent{sink: plain}
-	state := &runLoopState{}
+	a := &Agent{svc: agentServices{sink: plain}}
+	state := &turnRuntime{}
 	a.observeRunBudget(state, &provider.Usage{PromptTokens: 5, RequestCount: 1})
 	if state.budget.rounds != 1 || state.budget.promptTokens != 5 {
 		t.Fatalf("budget = %+v, want the round still accumulated locally", state.budget)

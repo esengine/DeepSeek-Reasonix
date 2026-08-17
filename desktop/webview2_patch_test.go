@@ -28,6 +28,12 @@ func TestWebView2PatchWiring(t *testing.T) {
 		t.Fatal(err)
 	}
 	replaced := false
+	versioned := false
+	for _, directive := range mod.Require {
+		if directive.Mod.Path == webview2ModulePath && directive.Mod.Version == "v1.0.28" {
+			versioned = true
+		}
+	}
 	for _, directive := range mod.Replace {
 		if directive.Old.Path == webview2ModulePath && directive.New.Path == webview2PatchPath {
 			replaced = true
@@ -37,6 +43,9 @@ func TestWebView2PatchWiring(t *testing.T) {
 	if !replaced {
 		t.Fatalf("%s must be replaced by %s", webview2ModulePath, webview2PatchPath)
 	}
+	if !versioned {
+		t.Fatal("vendored WebView2 compatibility module must be pinned to upstream v1.0.28")
+	}
 
 	patchFile := filepath.Join("third_party", "go-webview2", "pkg", "edge", "chromium.go")
 	parsed, err := parser.ParseFile(token.NewFileSet(), patchFile, nil, 0)
@@ -44,17 +53,12 @@ func TestWebView2PatchWiring(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	policyEnabled := false
-	policyApplied := false
+	hostScaleWrite := false
 	proxyIsolationArgDefined := false
 	proxyIsolationArgApplied := false
 	ast.Inspect(parsed, func(node ast.Node) bool {
 		switch value := node.(type) {
 		case *ast.ValueSpec:
-			if len(value.Names) == 1 && value.Names[0].Name == "shouldDetectMonitorScaleChanges" && len(value.Values) == 1 {
-				ident, ok := value.Values[0].(*ast.Ident)
-				policyEnabled = ok && ident.Name == "true"
-			}
 			if len(value.Names) == 1 && value.Names[0].Name == "reasonixNoProxyServerBrowserArg" && len(value.Values) == 1 {
 				literal, ok := value.Values[0].(*ast.BasicLit)
 				if ok {
@@ -64,11 +68,12 @@ func TestWebView2PatchWiring(t *testing.T) {
 			}
 		case *ast.CallExpr:
 			selector, ok := value.Fun.(*ast.SelectorExpr)
-			if !ok || selector.Sel.Name != "PutShouldDetectMonitorScaleChanges" || len(value.Args) != 1 {
+			if !ok {
 				break
 			}
-			ident, ok := value.Args[0].(*ast.Ident)
-			policyApplied = ok && ident.Name == "shouldDetectMonitorScaleChanges"
+			if selector.Sel.Name == "PutShouldDetectMonitorScaleChanges" || selector.Sel.Name == "PutRasterizationScale" {
+				hostScaleWrite = true
+			}
 		case *ast.CompositeLit:
 			ident, ok := value.Type.(*ast.Ident)
 			if !ok || ident.Name != "Chromium" {
@@ -93,8 +98,8 @@ func TestWebView2PatchWiring(t *testing.T) {
 		}
 		return true
 	})
-	if !policyEnabled || !policyApplied {
-		t.Fatal("patched WebView2 must enable and apply automatic monitor-scale detection")
+	if hostScaleWrite {
+		t.Fatal("WebView2 v1.0.28 must remain the sole rasterization-scale owner")
 	}
 	if !proxyIsolationArgDefined || !proxyIsolationArgApplied {
 		t.Fatal("patched WebView2 must pass --no-proxy-server to the browser process")
@@ -179,6 +184,30 @@ func TestWebView2PatchWiring(t *testing.T) {
 	}
 	if !diagnosticCollected || !diagnosticObserved {
 		t.Fatal("patched WebView2 must collect and synchronously publish native process diagnostics")
+	}
+
+	windowSyncOrder := []string{"GetClientRect", "ResizeWithBounds", "NotifyParentWindowPositionChanged"}
+	windowSyncPosition := -1
+	for _, declaration := range parsed.Decls {
+		fn, ok := declaration.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "syncWindowState" || fn.Body == nil {
+			continue
+		}
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || windowSyncPosition+1 >= len(windowSyncOrder) || selector.Sel.Name != windowSyncOrder[windowSyncPosition+1] {
+				return true
+			}
+			windowSyncPosition++
+			return true
+		})
+	}
+	if windowSyncPosition != len(windowSyncOrder)-1 {
+		t.Fatal("window synchronization must read client rect, set bounds, then notify parent position")
 	}
 
 	argsFile := filepath.Join("third_party", "go-webview2", "pkg", "edge", "ICoreWebView2ProcessFailedEventArgs.go")

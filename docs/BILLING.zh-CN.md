@@ -39,10 +39,23 @@ billing_mode = "payg"       # payg | subscription_equivalent
 | `complete` | 兼容别名，始终镜像 `displayComplete` |
 | `displayStatus` | `matched`、`fallback_original`、`bucketed`、`unavailable` |
 | `aggregateMode` | `single_currency`、`common_valuation`、`currency_buckets` |
+| `rateBand` | DeepSeek 发生时刻档位：`peak`、`off_peak`，聚合时可为 `mixed` |
+| `ratedAt` | 用于选择时间费率的请求完成时刻（UTC） |
 
 目标币种缺失但所有原币相同时，使用 `fallback_original` 展示原币；混币输出
 `originalTotals`，不写伪造的 0。只有缺少 usage/价格时才是 `unavailable` 并显示 `—`。
 旧标量别名（`cost`、`costUsd`、`total_cost`）仅在存在 `selected` 时双写。
+
+## DeepSeek 峰谷计价
+
+从北京时间 2026-08-17 00:00 起，DeepSeek 官方 OpenAI、Responses 与
+Anthropic 端点上的 V4 Flash/Pro 按请求发生时刻计价。北京时间
+09:00–12:00、14:00–18:00 为高峰，区间左闭右开，其余为低峰。由于供应商
+不提供逐 token 计费时刻，Reasonix 使用取得 usage 的请求完成时刻，并继续把报价标记为估算。
+
+配置中保存的价格仍是高峰基准价。只有 PAYG 且完整价格精确匹配官方高峰基准价时才启用
+动态档位；自定义端点、自定义价格和未知模型仍使用静态费率。已经写入 session、ledger、
+stats 的历史报价不会回填或重算。
 
 ## 钱包与诊断
 

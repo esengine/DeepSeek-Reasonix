@@ -16,6 +16,9 @@ func (c *Controller) runSynchronousTurn(
 	onAdmitted func() error,
 	run func(context.Context) error,
 ) error {
+	if err := c.ensureWriteAuthorityReady(); err != nil {
+		return err
+	}
 	ctx, cancel := context.WithCancel(extension.ContextWithRuntimeOwner(ctx, c.RuntimeOwner()))
 	c.mu.Lock()
 	// Finishing is part of the gate: TurnDone is still fanning out. Closed

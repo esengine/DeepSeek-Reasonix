@@ -26,6 +26,9 @@ const (
 	// todoProgressNudgeRounds is the first adaptive checkpoint. The host asks
 	// the model to reassess, but keeps the turn alive so it can recover.
 	todoProgressNudgeRounds = 8
+	// maxTodoStallRounds is the second Goal-only adaptive checkpoint. It resets
+	// the intervention epoch and asks for a new plan without ending the run.
+	maxTodoStallRounds = 16
 )
 
 func todoProgressNudgeMessage(rounds int) string {
@@ -62,9 +65,9 @@ func (a *Agent) applyStormBreaker(calls []provider.ToolCall, outcomes []toolOutc
 		}
 	}
 	if allBlocked {
-		a.blockedTurnStreak++
+		a.turn.blockedTurnStreak++
 	} else {
-		a.blockedTurnStreak = 0
+		a.turn.blockedTurnStreak = 0
 	}
 	for _, outcome := range outcomes {
 		if outcome.blocked && outcome.errMsg == loopGuardBlockErrMsg {
@@ -76,14 +79,14 @@ func (a *Agent) applyStormBreaker(calls []provider.ToolCall, outcomes []toolOutc
 	sig, ok := batchStormSignature(calls, outcomes)
 	switch {
 	case !ok:
-		a.stormSig, a.stormCount = "", 0
-	case sig != a.stormSig:
-		a.stormSig, a.stormCount = sig, 1
+		a.turn.stormSig, a.turn.stormCount = "", 0
+	case sig != a.turn.stormSig:
+		a.turn.stormSig, a.turn.stormCount = sig, 1
 	default:
-		a.stormCount++
+		a.turn.stormCount++
 	}
-	stormHit := ok && a.stormCount >= stormBreakThreshold
-	streakHit := allBlocked && a.blockedTurnStreak >= stormBreakThreshold
+	stormHit := ok && a.turn.stormCount >= stormBreakThreshold
+	streakHit := allBlocked && a.turn.blockedTurnStreak >= stormBreakThreshold
 	if !stormHit && !streakHit {
 		return intervention{}
 	}
@@ -112,24 +115,23 @@ func (a *Agent) applyStormBreaker(calls []provider.ToolCall, outcomes []toolOutc
 		}
 		guard = fmt.Sprintf(
 			"[loop guard] %s has now %s %d times in a row with the same host response. Re-sending it — even with the wording changed — will not help: the calls keep hitting the same outcome. %s",
-			subject, action, a.stormCount, advice)
+			subject, action, a.turn.stormCount, advice)
 		detail = fmt.Sprintf(
 			"loop guard: %s hit the same host response %d× — nudging the model to change approach",
-			short, a.stormCount)
+			short, a.turn.stormCount)
 	} else {
 		guard = fmt.Sprintf(
 			"[loop guard] every tool call in the last %d turns has been blocked by the host (permission, plan mode, hook, or loop guard). Switching tools, reordering calls, or rewording arguments will not help while the blockers stand. %s",
-			a.blockedTurnStreak, blockedAdvice)
+			a.turn.blockedTurnStreak, blockedAdvice)
 		detail = fmt.Sprintf(
 			"loop guard: every tool call blocked %d turns in a row — nudging the model to change approach",
-			a.blockedTurnStreak)
+			a.turn.blockedTurnStreak)
 	}
 	a.armLoopGuardPass(receiptMark)
 	return intervention{
-		verdict:     verdictRedirect,
-		guidance:    guard,
-		notice:      noticeFor(event.NoticeCodeLoopGuard, event.LevelInfo, loopGuardNoticeText(), detail),
-		stuckReason: detail,
+		verdict:  verdictRedirect,
+		guidance: guard,
+		notice:   noticeFor(event.NoticeCodeLoopGuard, event.LevelInfo, loopGuardNoticeText(), detail),
 	}
 }
 

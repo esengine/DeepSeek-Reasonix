@@ -24,8 +24,8 @@ func (c *Controller) bindTurnScope(ctx context.Context, continuation *goalContin
 
 // goalTaskBudget is the spend gate a Goal turn runs under: the shared budget
 // plus the Goal-only token axis. Nothing here has a default — a Goal runs
-// until it finishes, hits a blocker, stops making progress, or the user stops
-// it. Anyone who wants a ceiling on an unattended loop sets one.
+// until it finishes, reaches a genuine blocker, or the user stops it. Anyone
+// who wants a ceiling on an unattended loop sets one.
 func (c *Controller) goalTaskBudget() agent.TaskBudget {
 	b := c.taskBudget
 	b.Tokens = c.goalTokenBudget

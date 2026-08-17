@@ -1906,11 +1906,11 @@ func (a *App) rebuildSettingTurnLockedWithModel(setting string, tab *WorkspaceTa
 		return err
 	}
 	a.mu.Lock()
-	if current := a.tabs[tab.ID]; current != tab {
+	if err := a.authorizeTabReplacementLocked(tab, ctrl, "rebuilding settings", "rebuilt"); err != nil {
 		a.mu.Unlock()
 		ctrl.Close()
 		tab.releaseSessionLease()
-		return fmt.Errorf("tab %q changed while rebuilding settings; retry", tab.ID)
+		return err
 	}
 	tab.Ctrl = ctrl
 	tab.model = model
@@ -1934,8 +1934,7 @@ func (a *App) rebuildSettingTurnLockedWithModel(setting string, tab *WorkspaceTa
 	return nil
 }
 
-// buildSettingReplacementController builds the replacement controller for
-// rebuildSettingTurnLocked and migrates the session onto it, returning the
+// buildSettingReplacementController builds and migrates the replacement for rebuildSettingTurnLocked, returning the
 // controller, the runtime posture actually restored, and the session path it
 // bound. reload=false is the legacy settings path (boot.Build plus the
 // desktop's manual migration); reload=true is the stage-3b runtime reload,
@@ -1954,12 +1953,13 @@ func (a *App) buildSettingReplacementController(tab *WorkspaceTab, snap tabRunti
 		WorkspaceRoot:            snap.workspaceRoot,
 		SessionDir:               sessionDirForSnapshot(snap),
 		EffortOverride:           cloneStringPtr(snap.effort),
-		TokenMode:                runtime.tokenMode,
 		SharedHost:               a.lookupSharedHost(snap.sharedHostKey),
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
 		SubagentParentLive:       a.subagentParentProbeForBuild(tab),
 		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
 		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
+		OnSessionTransition:      a.handleTabSessionTransition(tab),
+		OnSessionTitleChanged:    a.onSessionTitleChanged,
 	}
 	if reload && oldCtrl != nil {
 		old, ok := oldCtrl.(*control.Controller)
@@ -2338,7 +2338,7 @@ func officialProviderTemplate(kind, pricingLanguage string) ([]config.ProviderEn
 			Prices:          config.DeepSeekV4PricesForCurrency("USD"),
 			ModelOverrides: map[string]config.ProviderModelOverride{
 				"deepseek-v4-flash": {SupportedEfforts: []string{"disabled", "low", "high", "max"}, DefaultEffort: "high"},
-				"deepseek-v4-pro":   {SupportedEfforts: []string{"disabled", "high", "max"}, DefaultEffort: "high"},
+				"deepseek-v4-pro":   {SupportedEfforts: []string{"disabled", "low", "high", "max"}, DefaultEffort: "high"},
 			},
 		}}, "DEEPSEEK_API_KEY", nil
 	default:

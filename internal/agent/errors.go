@@ -6,6 +6,30 @@ import (
 	"strings"
 )
 
+// ReasoningReplayFailure classifies why an assistant turn could not safely be
+// committed to provider-visible history.
+type ReasoningReplayFailure string
+
+const (
+	ReasoningReplayMissing      ReasoningReplayFailure = "missing_required_reasoning"
+	ReasoningReplayOverflow     ReasoningReplayFailure = "reasoning_overflow"
+	ReasoningReplayUnreplayable ReasoningReplayFailure = "unreplayable_history"
+)
+
+// ReasoningReplayError stops client tools before execution when their provider
+// reasoning cannot be replayed. Completed work is retained as LocalOnly by the
+// ordinary interrupted-turn recovery path.
+type ReasoningReplayError struct {
+	Kind ReasoningReplayFailure
+}
+
+func (e *ReasoningReplayError) Error() string {
+	if e != nil && e.Kind == ReasoningReplayOverflow {
+		return "The provider reasoning exceeded the client safety limit, so Reasonix did not run the requested tools. Existing work was kept; retry to continue safely."
+	}
+	return "The provider repeatedly omitted reasoning required to replay this tool turn. Reasonix exhausted its safe automatic recovery and did not run the requested tools. Existing work was kept; switch provider or protocol if this continues."
+}
+
 // PauseClass names the guard that deliberately ended a run, so a host can
 // classify an outcome without reaching into the unexported pause types.
 // Empty for ordinary provider/tool failures.
@@ -17,10 +41,6 @@ func PauseClass(err error) string {
 	var maxSteps *maxStepsPause
 	if errors.As(err, &maxSteps) {
 		return "max_steps"
-	}
-	var stuck *goalStuckPause
-	if errors.As(err, &stuck) {
-		return "goal_stuck"
 	}
 	var readiness *FinalReadinessError
 	if errors.As(err, &readiness) {
@@ -35,7 +55,7 @@ func PauseClass(err error) string {
 
 // RunPauseInfo is the stable host-facing description of a deliberate Run
 // boundary. It keeps unexported control-flow error types private while allowing
-// Controller to distinguish a host default from an explicit user max_steps.
+// Controller to distinguish task budgets from an explicit runtime max_steps.
 type RunPauseInfo struct {
 	Kind      string
 	Limit     int
@@ -44,15 +64,11 @@ type RunPauseInfo struct {
 	Reason    string
 }
 
-// InspectRunPause unwraps a deliberate max-round or Goal-stuck pause.
+// InspectRunPause unwraps a deliberate explicit run boundary.
 func InspectRunPause(err error) (RunPauseInfo, bool) {
 	var maxSteps *maxStepsPause
 	if errors.As(err, &maxSteps) {
-		return RunPauseInfo{Kind: "max_steps", Limit: maxSteps.steps, Key: maxSteps.key, HostOwned: maxSteps.hostOwned}, true
-	}
-	var stuck *goalStuckPause
-	if errors.As(err, &stuck) {
-		return RunPauseInfo{Kind: "goal_stuck", Limit: stuck.limit, Key: stuck.key, HostOwned: true, Reason: stuck.reason}, true
+		return RunPauseInfo{Kind: "max_steps", Limit: maxSteps.steps, Key: maxSteps.key}, true
 	}
 	var budget *taskBudgetPause
 	if errors.As(err, &budget) {
@@ -61,12 +77,31 @@ func InspectRunPause(err error) (RunPauseInfo, bool) {
 	return RunPauseInfo{}, false
 }
 
+// ReadinessContinuationClass tells a host whether an observed readiness gap is
+// safe and concrete enough for a bounded synthetic follow-up turn.
+type ReadinessContinuationClass string
+
+const (
+	// ReadinessContinuationNone is also the zero value so older callers that
+	// construct FinalReadinessError directly never opt into another model turn.
+	ReadinessContinuationNone ReadinessContinuationClass = ""
+	// ReadinessContinuationGeneric covers ordinary post-write verification and
+	// review gaps. Hosts may give it one bounded follow-up turn.
+	ReadinessContinuationGeneric ReadinessContinuationClass = "generic"
+	// ReadinessContinuationHighConfidence covers exact or strict, safely
+	// actionable readiness duties. Hosts may give it a second turn only after
+	// host-observable progress.
+	ReadinessContinuationHighConfidence ReadinessContinuationClass = "high_confidence"
+)
+
 // FinalReadinessError reports that the model exhausted its recovery attempts
 // before satisfying the host-observed delivery checks.
 type FinalReadinessError struct {
-	Attempts int
-	Reason   string
-	Missing  []string
+	Attempts          int
+	Reason            string
+	Missing           []string
+	ContinuationClass ReadinessContinuationClass
+	ProgressKey       string
 }
 
 func (e *FinalReadinessError) Error() string {

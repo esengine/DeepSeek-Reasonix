@@ -315,10 +315,6 @@ func (s *metricsSink) record(e event.Event) {
 			if len(s.m.CostQuotes) < 64 {
 				s.m.CostQuotes = append(s.m.CostQuotes, *q)
 			}
-		} else if p := e.Pricing; p != nil {
-			stepCost = p.Cost(u)
-			s.m.Cost += stepCost
-			s.m.Currency = billing.NormalizeCurrency(p.Currency)
 		}
 		s.recordSource(e.UsageSource, u.PromptTokens, u.CompletionTokens, stepCost, q)
 		if e.UsageSource == event.UsageSourceCapabilityRouter {

@@ -3,12 +3,15 @@ package agent
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
@@ -20,6 +23,19 @@ type recordSink struct {
 	mu       sync.Mutex
 	evs      []event.Event
 	recovery []event.ProtocolRecoveryAudit
+}
+
+type textSignalSink struct {
+	*recordSink
+	textSeen chan struct{}
+	once     sync.Once
+}
+
+func (s *textSignalSink) Emit(e event.Event) {
+	s.recordSink.Emit(e)
+	if e.Kind == event.Text {
+		s.once.Do(func() { close(s.textSeen) })
+	}
 }
 
 func (s *recordSink) Emit(e event.Event) {
@@ -176,5 +192,133 @@ func TestDeepSeekFlashMissingReasoningRecoveryWithRealSSE(t *testing.T) {
 		if strings.Contains(notice.Text, "reasoning_content") || strings.Contains(notice.Detail, "reasoning_content") {
 			t.Fatalf("protocol warning leaked to UI: %+v", notice)
 		}
+	}
+}
+
+func TestGLMToolTurnWithoutReasoningContinuesWithoutRecovery(t *testing.T) {
+	var mu sync.Mutex
+	var bodies [][]byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, append([]byte(nil), body...))
+		requestNo := len(bodies)
+		mu.Unlock()
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		if requestNo == 1 {
+			_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"echo","arguments":"{\"text\":\"hi\"}"}}]},"finish_reason":"tool_calls"}]}`+"\n\n")
+		} else {
+			_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}`+"\n\n")
+		}
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	prov, err := openai.New(provider.Config{
+		Name: "glm", BaseURL: srv.URL, Model: "glm-5.2", APIKey: "k",
+		Extra: map[string]any{"reasoning_protocol": "glm"},
+	})
+	if err != nil {
+		t.Fatalf("New provider: %v", err)
+	}
+	sink := &recordSink{}
+	a := New(prov, echoRegistry(), NewSession(""), Options{}, sink)
+	if err := a.Run(context.Background(), "go"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	mu.Lock()
+	requestBodies := append([][]byte(nil), bodies...)
+	mu.Unlock()
+	if len(requestBodies) != 2 {
+		t.Fatalf("HTTP requests = %d, want tool turn and final turn without recovery", len(requestBodies))
+	}
+	if !bytes.Contains(requestBodies[1], []byte(`"reasoning_content":""`)) {
+		t.Fatal("GLM replay did not preserve the empty reasoning_content field required for tool history")
+	}
+	if got := sink.recoveryCount(event.ProtocolRecoveryMissingReasoningRetryAttempted); got != 0 {
+		t.Fatalf("missing-reasoning retries = %d, want 0", got)
+	}
+	if got := len(sink.kinds(event.ToolResult)); got != 1 {
+		t.Fatalf("tool results = %d, want 1", got)
+	}
+}
+
+func TestGLMTextWithoutReasoningStreamsBeforeResponseCompletes(t *testing.T) {
+	responseStarted := make(chan struct{})
+	releaseResponse := make(chan struct{})
+	var releaseOnce sync.Once
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"content":"streamed"}}]}`+"\n\n")
+		w.(http.Flusher).Flush()
+		close(responseStarted)
+		<-releaseResponse
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { releaseOnce.Do(func() { close(releaseResponse) }) })
+
+	prov, err := openai.New(provider.Config{
+		Name: "glm", BaseURL: srv.URL, Model: "glm-5.2", APIKey: "k",
+		Extra: map[string]any{"reasoning_protocol": "glm"},
+	})
+	if err != nil {
+		t.Fatalf("New provider: %v", err)
+	}
+	sink := &textSignalSink{recordSink: &recordSink{}, textSeen: make(chan struct{})}
+	a := New(prov, tool.NewRegistry(), NewSession(""), Options{}, sink)
+	done := make(chan error, 1)
+	go func() { done <- a.Run(withNoClosedLoop(context.Background()), "reply with streamed") }()
+
+	<-responseStarted
+	select {
+	case <-sink.textSeen:
+	case err := <-done:
+		t.Fatalf("Run completed before the held response was released: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("GLM text stayed buffered until the response completed")
+	}
+	releaseOnce.Do(func() { close(releaseResponse) })
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+}
+
+func TestGLMReasoningOverflowFailsBeforeToolExecution(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requestNo := requests.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		if requestNo == 1 {
+			_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"reasoning_content":"`+strings.Repeat("reason", 16)+`"}}]}`+"\n\n")
+			_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"echo","arguments":"{\"text\":\"must not run\"}"}}]},"finish_reason":"tool_calls"}]}`+"\n\n")
+		} else {
+			_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"content":"unexpected continuation"},"finish_reason":"stop"}]}`+"\n\n")
+		}
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	prov, err := openai.New(provider.Config{
+		Name: "glm", BaseURL: srv.URL, Model: "glm-5.2", APIKey: "k",
+		Extra: map[string]any{"reasoning_protocol": "glm"},
+	})
+	if err != nil {
+		t.Fatalf("New provider: %v", err)
+	}
+	sink := &recordSink{}
+	a := New(prov, echoRegistry(), NewSession(""), Options{ReasoningByteLimit: 16}, sink)
+	var replayErr *ReasoningReplayError
+	if err := a.Run(withNoClosedLoop(context.Background()), "go"); !errors.As(err, &replayErr) || replayErr.Kind != ReasoningReplayOverflow {
+		t.Fatalf("Run error = %v, want ReasoningReplayOverflow", err)
+	}
+	if got := len(sink.kinds(event.ToolResult)); got != 0 {
+		t.Fatalf("tool results = %d, want 0 after incomplete GLM reasoning", got)
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("HTTP requests = %d, want no continuation after incomplete GLM reasoning", got)
 	}
 }

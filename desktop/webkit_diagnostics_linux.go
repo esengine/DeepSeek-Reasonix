@@ -27,17 +27,20 @@ var webKitObserverState = struct {
 var observeWebKitNativeEvent = func(webKitNativeEvent) {}
 
 func installWebKitProcessObserver(app *App, enabled bool) {
-	if app == nil || !enabled || !app.diagnosticsOwner {
+	if app == nil {
 		return
 	}
 	webKitObserverState.Do(func() {
 		go func() {
 			for event := range webKitObserverState.events {
-				report, outcome, failureBucket := webKitNativeFailureReport(event)
-				_ = writePendingReport(report, true)
-				app.recordDiagnosticMetric("desktop_web_runtime_failure", failureBucket)
-				app.recordDiagnosticMetric("desktop_web_runtime_outcome", outcome)
-				recordDroppedWebRuntimeEvents(app, "webkitgtk", &webKitObserverState.dropped)
+				if app.desktopShell.linuxRecovery != nil {
+					app.desktopShell.linuxRecovery.nativeEvent(event, enabled)
+				} else if enabled {
+					app.recordWebKitNativeDiagnostic(event)
+				}
+				if enabled {
+					recordDroppedWebRuntimeEvents(app, "webkitgtk", &webKitObserverState.dropped)
+				}
 			}
 		}()
 		C.reasonix_install_webkit_observer()

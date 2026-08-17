@@ -311,9 +311,13 @@ type activationStubController struct {
 	control.SessionAPI
 	sessionPath string
 	closed      atomic.Bool
+	status      *control.RuntimeStatus
 }
 
 func (c *activationStubController) RuntimeStatus() control.RuntimeStatus {
+	if c.status != nil {
+		return *c.status
+	}
 	return control.RuntimeStatus{Running: true}
 }
 func (c *activationStubController) SessionPath() string      { return c.sessionPath }

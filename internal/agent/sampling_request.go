@@ -15,8 +15,40 @@ type samplingRequest struct {
 	req provider.Request
 }
 
+// modelInputMessages derives provider-visible messages from durable storage.
+// Tool RawContent is the canonical full result while Content remains bounded
+// for readers from older Reasonix versions. Only the transport copy promotes
+// that full tool body; other RawContent fields keep their existing semantics.
+func modelInputMessages(msgs []provider.Message) []provider.Message {
+	return provider.ModelMessages(promoteToolRawContent(msgs))
+}
+
+func promoteToolRawContent(msgs []provider.Message) []provider.Message {
+	prepared := append([]provider.Message(nil), msgs...)
+	for i := range prepared {
+		if prepared[i].Role == provider.RoleTool && prepared[i].RawContent != "" {
+			prepared[i].Content = prepared[i].RawContent
+		}
+	}
+	return prepared
+}
+
+// normalizeModelRequestMessages is shared by ordinary sampling and compaction
+// replay so their cacheable prefix has the same role projection and metadata
+// cleanup. Interceptors deliberately remain outside this helper.
+func (a *Agent) normalizeModelRequestMessages(msgs []provider.Message) []provider.Message {
+	requestMessages := a.providerProjectionMessages(modelInputMessages(msgs))
+	for i := range requestMessages {
+		requestMessages[i].CreatedAt = 0
+		if requestMessages[i].Role == provider.RoleUser {
+			requestMessages[i].Content = reTrailingExecutionPolicy.ReplaceAllString(requestMessages[i].Content, "")
+		}
+	}
+	return requestMessages
+}
+
 func (a *Agent) streamProviderRequest(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
-	return a.prov.Stream(ctx, req)
+	return a.svc.prov.Stream(ctx, req)
 }
 
 func (a *Agent) handleSamplingError(
@@ -32,7 +64,7 @@ func (a *Agent) handleSamplingError(
 		streamSink.Discard()
 		reason := provider.StreamInterruptReason(result.err)
 		a.emitStreamAttempt(attemptID, event.StreamAttemptDiscard, attempt, reason, result.err)
-		a.sink.Emit(event.Event{
+		a.svc.sink.Emit(event.Event{
 			Kind: event.Retrying, RetryAttempt: attempt, RetryMax: maxStreamRecoveries,
 			RetryScope: event.RetryScopeStream,
 		})
@@ -56,33 +88,31 @@ func (a *Agent) prepareSamplingRequest(ctx context.Context) (samplingRequest, er
 	if err != nil {
 		return samplingRequest{}, err
 	}
-	if budget, clipped, budgetErr := a.effectiveOutputBudget(frozen.req); budgetErr != nil {
+	if err := a.applyAdmissionToRequest(&frozen.req); err != nil {
 		// One-shot physical overflow recovery. Do not loop.
+		startProjectionVersion := a.currentProjectionVersion()
 		if _, perr := a.contextManager().Prepare(ctx, ContextPreparePolicy{
 			Trigger: CompactionTriggerOverflow,
 			Force:   true,
 		}); perr != nil {
-			return samplingRequest{}, budgetErr
+			return samplingRequest{}, err
+		}
+		if a.currentProjectionVersion() <= startProjectionVersion {
+			return samplingRequest{}, err
 		}
 		rebuilt, rerr := a.buildSamplingRequest(ctx, CompactionTriggerPressure)
 		if rerr != nil {
 			return samplingRequest{}, rerr
 		}
-		if _, _, budgetErr2 := a.effectiveOutputBudget(rebuilt.req); budgetErr2 != nil {
-			return samplingRequest{}, budgetErr2
-		}
-		// Re-apply clipping on the recovered view.
-		if budget2, clipped2, err2 := a.effectiveOutputBudget(rebuilt.req); err2 == nil && clipped2 {
-			rebuilt.req.MaxTokens = budget2
+		if aerr := a.applyAdmissionToRequest(&rebuilt.req); aerr != nil {
+			return samplingRequest{}, aerr
 		}
 		shape := a.requestCalibrationShape(rebuilt.req)
-		a.activeReqShape.Store(&shape)
+		a.sess.output.activeReqShape.Store(&shape)
 		return samplingRequest{req: freezeProviderRequest(rebuilt.req)}, nil
-	} else if clipped {
-		frozen.req.MaxTokens = budget
 	}
 	shape := a.requestCalibrationShape(frozen.req)
-	a.activeReqShape.Store(&shape)
+	a.sess.output.activeReqShape.Store(&shape)
 	return samplingRequest{req: freezeProviderRequest(frozen.req)}, nil
 }
 
@@ -94,11 +124,7 @@ func (a *Agent) buildSamplingRequest(ctx context.Context, trigger string) (sampl
 	if err != nil {
 		return samplingRequest{}, err
 	}
-	requestMessages := append([]provider.Message(nil), provider.ModelMessages(prepared.Messages)...)
-	requestMessages = a.providerProjectionMessages(requestMessages)
-	for i := range requestMessages {
-		requestMessages[i].CreatedAt = 0
-	}
+	requestMessages := a.normalizeModelRequestMessages(prepared.Messages)
 	// context.prepare: extensions may rewrite the message copy feeding THIS
 	// request. The session log is never touched — the replacement is
 	// ephemeral, so the next request starts from the unmodified history.
@@ -108,7 +134,7 @@ func (a *Agent) buildSamplingRequest(ctx context.Context, trigger string) (sampl
 	}
 	req := provider.Request{
 		Messages:       requestMessages,
-		Tools:          a.tools.Schemas(),
+		Tools:          a.svc.tools.Schemas(),
 		MaxTokens:      a.maxOutputTokens,
 		Temperature:    provider.OptionalTemperature(a.temperature),
 		ResponseFormat: responseFormatFromRequest(ctx),
@@ -127,8 +153,17 @@ func (a *Agent) buildSamplingRequest(ctx context.Context, trigger string) (sampl
 // request copy. Projection sidecars retain logical user-turn boundaries so
 // explicit range compression can continue to resolve anchors across calls.
 func (a *Agent) providerProjectionMessages(msgs []provider.Message) []provider.Message {
-	if a != nil && a.strictAlternatingRoles {
-		return coalesceProjectionUserRuns(msgs)
+	if a != nil {
+		// The provider-declared fallback owns this tool loop. Strict projection
+		// here would erase its completed tool round before adapter serialization.
+		if !a.sess.missingReasoning.fallbackActive || !provider.SupportsMissingReasoningFallback(a.svc.prov) {
+			if repaired, changed := provider.ProjectReplaySafeMessages(a.svc.prov, msgs); changed {
+				msgs = repaired
+			}
+		}
+		if a.strictAlternatingRoles {
+			return coalesceProjectionUserRuns(msgs)
+		}
 	}
 	return msgs
 }
@@ -152,6 +187,19 @@ func freezeProviderRequest(req provider.Request) provider.Request {
 					items[j] = append(json.RawMessage(nil), item...)
 				}
 				out.Messages[i].ResponsesItems = items
+			}
+			if len(out.Messages[i].ServerSearch) > 0 {
+				searches := make([]provider.ServerSearchCall, len(out.Messages[i].ServerSearch))
+				for j, search := range out.Messages[i].ServerSearch {
+					searches[j] = search
+					if len(search.Results) > 0 {
+						searches[j].Results = append([]provider.ServerSearchHit(nil), search.Results...)
+					}
+					if len(search.Raw) > 0 {
+						searches[j].Raw = append(json.RawMessage(nil), search.Raw...)
+					}
+				}
+				out.Messages[i].ServerSearch = searches
 			}
 		}
 	}

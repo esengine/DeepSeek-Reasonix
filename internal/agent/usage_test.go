@@ -16,7 +16,9 @@ func renderUsage(u *provider.Usage, p *provider.Pricing, d ...*event.CacheDiagno
 	if len(d) > 0 {
 		diag = d[0]
 	}
-	NewTextSink(&b, nil, 80).Emit(event.Event{Kind: event.Usage, Usage: u, Pricing: p, CacheDiagnostics: diag})
+	e := event.Event{Kind: event.Usage, Usage: u, Pricing: p, CacheDiagnostics: diag}
+	e.CostQuote = event.EnsureCostQuote(e, nil)
+	NewTextSink(&b, nil, 80).Emit(e)
 	return b.String()
 }
 

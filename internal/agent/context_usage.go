@@ -30,10 +30,10 @@ func (a *Agent) ContextUsedTokens() int {
 	}
 	transcriptVersion := session.TranscriptVersion()
 	projectionVersion := a.currentProjectionVersion()
-	calibration := a.promptCalibration.Load()
-	tools := a.tools
+	calibration := a.sess.output.promptCalibration.Load()
+	tools := a.svc.tools
 	toolSchemaRevision := tools.SchemaRevision()
-	if cached := a.contextUsage.Load(); cached != nil &&
+	if cached := a.sess.output.contextUsage.Load(); cached != nil &&
 		cached.transcriptVersion == transcriptVersion &&
 		cached.projectionVersion == projectionVersion &&
 		cached.calibration == calibration &&
@@ -42,7 +42,7 @@ func (a *Agent) ContextUsedTokens() int {
 		return cached.tokens
 	}
 	tokens := a.estimatedVisibleRequestTokens(a.modelVisibleMessages())
-	a.contextUsage.Store(&contextUsage{
+	a.sess.output.contextUsage.Store(&contextUsage{
 		transcriptVersion:  transcriptVersion,
 		projectionVersion:  projectionVersion,
 		calibration:        calibration,

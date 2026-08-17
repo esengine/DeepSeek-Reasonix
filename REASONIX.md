@@ -27,6 +27,12 @@ agent. It is the Reasonix analog of Claude Code's CLAUDE.md.
   (`internal/boot/effect_test.go` pattern): assert what actually reaches the
   provider request, frontend sink, or trajectory through the real `boot.Build`
   assembly. Component correctness is not system effectiveness.
+- A mutex- or atomic-guarded struct is ratcheted on its **scalar** field count
+  (`struct-state`), not its total: independent flags multiply into states no
+  type records as legal. Fixing a boundary case by adding one more `bool` is
+  the move this blocks — group by lifetime into a named sub-state instead
+  (`agent.perTurnState` is the pattern), which costs one field and removes the
+  whole product.
 
 ## Comments
 
@@ -34,7 +40,7 @@ Default is none — the code is the truth. Write one only when the **why** is
 non-obvious: a hidden constraint, a workaround anchored to something verifiable,
 an invariant the type system cannot express, or an external-protocol quirk.
 
-- Declaration doc: ≤5 lines. Package comment: ≤8 lines, or ≤40 in a `doc.go`.
+- Declaration doc: ≤15 lines. Package comment: ≤8 lines, or ≤40 in a `doc.go`.
 - Every other comment: ≤3 lines. Struct-field and trailing `//`: 1 line.
 - Never: restatements of the code, phase/stage narrative, incident or
   conversation history, section banners, commented-out code, `@param` lists.

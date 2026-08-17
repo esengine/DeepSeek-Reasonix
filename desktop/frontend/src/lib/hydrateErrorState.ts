@@ -29,8 +29,6 @@ export function applyHydrateErrorState<
 
 export function hydratePlaceholderItems<TItem>(
   optionsItems: TItem[] | undefined,
-  existing: TItem[] | undefined,
 ): TItem[] | undefined {
-  if (optionsItems?.length) return optionsItems;
-  return existing?.length ? existing : undefined;
+  return optionsItems?.length ? optionsItems : undefined;
 }

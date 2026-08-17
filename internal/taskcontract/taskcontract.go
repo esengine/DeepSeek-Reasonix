@@ -1,9 +1,6 @@
-// Package taskcontract is the convergence point for the host's task state:
-// one Contract assembled purely from signals the runtime already produced —
-// the taskintent classification, planner-gate features, plan acceptance
-// criteria, and the evidence ledger's receipts. Building or updating a
-// contract never makes a model call; every termination arbiter reads the
-// same record instead of keeping its own.
+// Package taskcontract is the host's fact contract: obligations and acceptance
+// criteria assembled from approved plans, active goals, todos, project checks,
+// and receipts. Building or updating a contract never makes a model call.
 package taskcontract
 
 import (
@@ -12,7 +9,6 @@ import (
 	"strings"
 
 	"reasonix/internal/evidence"
-	"reasonix/internal/taskintent"
 )
 
 // Risk is the highest risk any upstream signal assigned to the task.
@@ -34,6 +30,20 @@ const (
 	// Stale marks a satisfaction whose proof predates the latest mutation:
 	// it was true once, and must be re-proven against the current code.
 	Stale
+	// Suppressed marks a check that cannot run for a structured host reason
+	// (user forbid, permission deny, dependency unavailable, reviewer unavailable).
+	// Suppressed is never treated as Satisfied.
+	Suppressed
+)
+
+// SuppressReason classifies why a check or requirement was suppressed.
+type SuppressReason string
+
+const (
+	SuppressUserForbidden         SuppressReason = "user_forbidden"
+	SuppressPermissionDenied      SuppressReason = "permission_denied"
+	SuppressDependencyUnavailable SuppressReason = "dependency_unavailable"
+	SuppressReviewerUnavailable   SuppressReason = "reviewer_unavailable"
 )
 
 // EvidenceKind classifies what a receipt proved.
@@ -67,6 +77,8 @@ type Requirement struct {
 	Evidence []EvidenceRef
 	Auto     bool
 	AutoKind EvidenceKind
+	// SuppressReason is set when Status is Suppressed.
+	SuppressReason SuppressReason
 }
 
 // CheckKind selects what proves a check: a verification command, or any
@@ -85,6 +97,8 @@ type Check struct {
 	Command  string
 	Status   Status
 	Evidence []EvidenceRef
+	// SuppressReason is set when Status is Suppressed.
+	SuppressReason SuppressReason
 }
 
 // Scope is where the task is expected to act, from prompt-shape signals.
@@ -109,19 +123,20 @@ type Signals struct {
 
 // Contract is the unified task record.
 type Contract struct {
-	Intent       taskintent.Intent
 	Risk         Risk
 	Scope        Scope
 	Requirements []Requirement
 	Checks       []Check
+	Obligations  []Obligation
 
 	epoch uint64
 }
 
-// New classifies input with the existing taskintent heuristics and returns
-// an otherwise empty contract; no model call is made.
+// New returns an empty contract. Callers that still pass historical input
+// keep the signature; the text is never classified.
 func New(input string) *Contract {
-	return &Contract{Intent: taskintent.Classify(input)}
+	_ = input
+	return &Contract{}
 }
 
 // Atomic is the zero-overhead contract for a simple ask: the ask itself is
@@ -280,9 +295,9 @@ func (c *Contract) Observe(r evidence.Receipt) {
 			continue
 		}
 		c.Checks[i].Evidence = append(c.Checks[i].Evidence, ref)
-		if r.Success {
+		if ref.Success {
 			c.Checks[i].Status = Satisfied
-		} else if c.Checks[i].Status != Satisfied {
+		} else {
 			c.Checks[i].Status = Failed
 		}
 	}
@@ -396,6 +411,9 @@ const (
 	VerdictContinue
 	VerdictBlocked
 	VerdictComplete
+	// VerdictPartial means mutations may be kept but verification or review
+	// was forbidden or unavailable. Goals must not auto-complete on Partial.
+	VerdictPartial
 )
 
 func (v Verdict) String() string {
@@ -406,6 +424,8 @@ func (v Verdict) String() string {
 		return "blocked"
 	case VerdictComplete:
 		return "complete"
+	case VerdictPartial:
+		return "partial"
 	default:
 		return "uncertain"
 	}
@@ -415,12 +435,13 @@ func (v Verdict) String() string {
 // Missing or stale evidence means Continue (the next action is knowable);
 // a requirement explicitly resolved Failed — an arbiter's judgment that it
 // cannot be met — means Blocked; everything fresh-satisfied means Complete.
+// Suppressed required evidence yields Partial (never Complete).
 // Only a contract with nothing to prove returns Uncertain.
 func (c *Contract) GoalVerdict() Verdict {
 	if len(c.Requirements) == 0 && len(c.Checks) == 0 {
 		return VerdictUncertain
 	}
-	missing, blocked := false, false
+	missing, blocked, partial := false, false, false
 	for _, req := range c.Requirements {
 		if !req.Required {
 			continue
@@ -428,12 +449,19 @@ func (c *Contract) GoalVerdict() Verdict {
 		switch req.Status {
 		case Failed:
 			blocked = true
+		case Suppressed:
+			partial = true
 		case Pending, Stale:
 			missing = true
 		}
 	}
 	for _, check := range c.Checks {
-		if check.Status != Satisfied {
+		switch check.Status {
+		case Satisfied:
+			// ok
+		case Suppressed:
+			partial = true
+		default:
 			// A failed check run is actionable — fix it and re-run — so it
 			// keeps the goal in Continue, never Blocked.
 			missing = true
@@ -444,10 +472,72 @@ func (c *Contract) GoalVerdict() Verdict {
 		return VerdictContinue
 	case blocked:
 		return VerdictBlocked
+	case partial:
+		return VerdictPartial
 	case c.Complete():
 		return VerdictComplete
 	}
 	return VerdictUncertain
+}
+
+// SuppressCheck marks the first matching check (by command; empty matches any
+// unsatisfied command check) as Suppressed with a structured reason.
+func (c *Contract) SuppressCheck(command string, reason SuppressReason) bool {
+	if c == nil {
+		return false
+	}
+	for i := range c.Checks {
+		if command != "" && c.Checks[i].Command != command {
+			continue
+		}
+		if c.Checks[i].Status == Satisfied {
+			continue
+		}
+		c.Checks[i].Status = Suppressed
+		c.Checks[i].SuppressReason = reason
+		return true
+	}
+	return false
+}
+
+// SuppressRequirement marks a requirement as Suppressed with a structured reason.
+func (c *Contract) SuppressRequirement(id string, reason SuppressReason) bool {
+	if c == nil {
+		return false
+	}
+	for i := range c.Requirements {
+		if c.Requirements[i].ID != id {
+			continue
+		}
+		c.Requirements[i].Status = Suppressed
+		c.Requirements[i].SuppressReason = reason
+		return true
+	}
+	return false
+}
+
+// HasSuppressed reports whether any required requirement or check is Suppressed.
+func (c *Contract) HasSuppressed() bool {
+	if c == nil {
+		return false
+	}
+	for _, req := range c.Requirements {
+		if req.Required && req.Status == Suppressed {
+			return true
+		}
+	}
+	for _, check := range c.Checks {
+		if check.Status == Suppressed {
+			return true
+		}
+	}
+	return false
+}
+
+// Complete reports whether every required requirement and every check is
+// satisfied — Suppressed never counts as complete.
+func (c *Contract) CompleteStrict() bool {
+	return c.Complete() && !c.HasSuppressed()
 }
 
 // GateMutation is the mutation-after-green guard: while anything is
@@ -510,6 +600,8 @@ func directiveFor(status Status, verb string) string {
 		return "evidence predates the latest mutation — re-" + verb + " it"
 	case Failed:
 		return "last evidence shows failure — fix it, then re-" + verb
+	case Suppressed:
+		return "suppressed by host constraint — not counted as passed"
 	default:
 		return "no fresh evidence — " + verb + " it"
 	}
@@ -614,12 +706,17 @@ func refFor(epoch uint64, r evidence.Receipt) EvidenceRef {
 	switch {
 	case r.ToolName == "review_report":
 		kind = EvidenceReview
-	case r.Command != "" && evidence.IsDeliveryVerificationCommand(r.Command):
+	case r.Command != "" && evidence.IsVerificationCommand(r.Command):
 		kind = EvidenceVerification
 	case r.Mutation || r.Write:
 		kind = EvidenceMutation
 	}
-	return EvidenceRef{Kind: kind, MutationEpoch: epoch, Source: r.ToolName, Success: r.Success}
+	success := r.Success && !verificationReceiptFailed(r)
+	return EvidenceRef{Kind: kind, MutationEpoch: epoch, Source: r.ToolName, Success: success}
+}
+
+func verificationReceiptFailed(r evidence.Receipt) bool {
+	return r.Verification == evidence.VerificationFailed || r.ExitCode != nil && *r.ExitCode != 0
 }
 
 func (c *Contract) checkMatches(check Check, r evidence.Receipt, ref EvidenceRef) bool {
@@ -636,7 +733,7 @@ func (c *Contract) checkMatches(check Check, r evidence.Receipt, ref EvidenceRef
 		return false
 	}
 	if check.Command == "" {
-		return evidence.IsDeliveryVerificationCommand(r.Command)
+		return evidence.IsVerificationCommand(r.Command)
 	}
 	return evidence.CommandMatches(check.Command, r.Command)
 }

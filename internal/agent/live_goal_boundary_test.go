@@ -52,7 +52,7 @@ func TestLiveGoalBoundaryMatrix(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 				defer cancel()
 				started := time.Now()
-				if err := a.Run(WithDefaultRunStepLimit(ctx, 16, "goal model rounds"), "Return one short final sentence now without calling tools."); err != nil {
+				if err := a.Run(ctx, "Return one short final sentence now without calling tools."); err != nil {
 					t.Fatalf("normal completion: %v", err)
 				}
 				if metrics.requests.Load() < 1 {
@@ -62,27 +62,31 @@ func TestLiveGoalBoundaryMatrix(t *testing.T) {
 			})
 
 			t.Run("deterministic-stuck", func(t *testing.T) {
-				metrics := &liveGoalMetrics{}
-				var executions atomic.Int32
-				reg := tool.NewRegistry()
-				reg.Add(liveGoalFailureTool{executions: &executions})
-				a := newLiveGoalAgent(prov, reg, metrics)
-				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-				defer cancel()
-				ctx = WithDeliveryExecutionScope(ctx, DeliveryExecutionScope{ID: "live-goal-stuck", TaskText: "validate deterministic Goal stuck detection"})
-				started := time.Now()
-				err := a.Run(WithDefaultRunStepLimit(ctx, 16, "goal model rounds"), "This is a deterministic host-failure conformance probe requiring three failed tool rounds. Call live_goal_failure exactly once now. After each failure, call it exactly once again in the next assistant response. A prose response before the third failure is invalid. Do not switch tools, change arguments, or batch calls; only summarize when the host explicitly requests finalization.")
-				info, ok := InspectRunPause(err)
-				if !ok || info.Kind != "goal_stuck" || !info.HostOwned || info.Limit != 3 {
-					t.Fatalf("stuck result = %+v ok=%v err=%v executions=%d requests=%d", info, ok, err, executions.Load(), metrics.requests.Load())
+				const maxConformanceAttempts = 2
+				for attempt := 1; attempt <= maxConformanceAttempts; attempt++ {
+					metrics := &liveGoalMetrics{}
+					var executions atomic.Int32
+					reg := tool.NewRegistry()
+					reg.Add(liveGoalFailureTool{executions: &executions})
+					a := newLiveGoalAgent(prov, reg, metrics)
+					ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+					ctx = WithDeliveryExecutionScope(ctx, DeliveryExecutionScope{ID: "live-goal-stuck", TaskText: "validate deterministic Goal stuck detection"})
+					started := time.Now()
+					err := a.Run(ctx, "This is a deterministic host-failure conformance probe requiring three failed tool rounds. Call live_goal_failure exactly once now. After each of the first two failures, call it exactly once again in the next assistant response. After the third failure, return a short summary. Do not switch tools, change arguments, or batch calls.")
+					cancel()
+					if err != nil {
+						t.Fatalf("stuck guard paused Goal: attempt=%d err=%v executions=%d requests=%d", attempt, err, executions.Load(), metrics.requests.Load())
+					}
+					if executions.Load() == 3 {
+						logLiveGoalMetrics(t, tc.model, "deterministic-stuck", 3, metrics, "redirect->complete", time.Since(started))
+						return
+					}
+					t.Logf("provider conformance deviation: attempt=%d failure_executions=%d want=3", attempt, executions.Load())
 				}
-				if executions.Load() != 3 {
-					t.Fatalf("failure executions = %d, want 3", executions.Load())
-				}
-				logLiveGoalMetrics(t, tc.model, "deterministic-stuck", 3, metrics, "goal_stuck", time.Since(started))
+				t.Fatalf("provider failed three-round stuck conformance after %d attempts", maxConformanceAttempts)
 			})
 
-			t.Run("sixteen-round-budget-and-resume", func(t *testing.T) {
+			t.Run("beyond-sixteen-rounds", func(t *testing.T) {
 				metrics := &liveGoalMetrics{}
 				var executions atomic.Int32
 				reg := tool.NewRegistry()
@@ -90,23 +94,19 @@ func TestLiveGoalBoundaryMatrix(t *testing.T) {
 				a := newLiveGoalAgent(prov, reg, metrics)
 				ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 				defer cancel()
-				ctx = WithDeliveryExecutionScope(ctx, DeliveryExecutionScope{ID: "live-goal-budget", TaskText: "validate the 16-round Goal Run boundary"})
+				ctx = WithDeliveryExecutionScope(ctx, DeliveryExecutionScope{ID: "live-goal-continuous", TaskText: "validate continuous Goal execution"})
 				started := time.Now()
-				err := a.Run(WithDefaultRunStepLimit(ctx, 16, "goal model rounds"), "This is a 16-round tool conformance probe. Call live_goal_marker exactly once with index 1 now. After every accepted result, call it exactly once with the next integer index in your next assistant response. Never batch calls and never answer with prose; after index 16 the host will request a summary.")
-				info, ok := InspectRunPause(err)
-				if !ok || info.Kind != "max_steps" || !info.HostOwned || info.Limit != 16 {
-					t.Fatalf("budget result = %+v ok=%v err=%v executions=%d requests=%d", info, ok, err, executions.Load(), metrics.requests.Load())
+				err := a.Run(ctx, "This is a 17-round tool conformance probe. Call live_goal_marker exactly once with index 1 now. After every accepted result, call it exactly once with the next integer index in your next assistant response. Never batch calls. After index 17 is accepted, return one short final sentence.")
+				if err != nil {
+					t.Fatalf("continuous Goal result: err=%v executions=%d requests=%d", err, executions.Load(), metrics.requests.Load())
 				}
-				if executions.Load() < 16 {
-					t.Fatalf("tool executions = %d, want at least 16 bounded rounds", executions.Load())
-				}
-				if err := a.Run(WithDefaultRunStepLimit(ctx, 16, "goal model rounds"), "The 16-round boundary probe is complete. Return one short final sentence now without calling tools."); err != nil {
-					t.Fatalf("fresh continuation: %v", err)
+				if executions.Load() < 17 {
+					t.Fatalf("tool executions = %d, want at least 17 continuous rounds", executions.Load())
 				}
 				if metrics.requests.Load() < 18 {
-					t.Fatalf("provider requests = %d, want at least 16 work rounds, summary, and continuation", metrics.requests.Load())
+					t.Fatalf("provider requests = %d, want at least 17 work rounds and a final", metrics.requests.Load())
 				}
-				logLiveGoalMetrics(t, tc.model, "sixteen-round-budget-and-resume", 16, metrics, "goal_run_budget->complete", time.Since(started))
+				logLiveGoalMetrics(t, tc.model, "beyond-sixteen-rounds", 17, metrics, "complete", time.Since(started))
 			})
 		})
 	}
@@ -153,10 +153,10 @@ func (t liveGoalMarkerTool) Schema() json.RawMessage {
 func (t liveGoalMarkerTool) ReadOnly() bool { return true }
 func (t liveGoalMarkerTool) Execute(context.Context, json.RawMessage) (string, error) {
 	n := t.executions.Add(1)
-	if n < 16 {
+	if n < 17 {
 		return "accepted live round " + strconv.Itoa(int(n)) + "; in the next assistant response call live_goal_marker exactly once with index " + strconv.Itoa(int(n+1)) + "; do not write prose", nil
 	}
-	return "accepted live round 16; wait for the host finalization instruction and do not call more tools", nil
+	return "accepted live round 17; return one short final sentence now and do not call more tools", nil
 }
 
 type liveGoalFailureTool struct{ executions *atomic.Int32 }
@@ -170,6 +170,9 @@ func (t liveGoalFailureTool) Schema() json.RawMessage {
 }
 func (t liveGoalFailureTool) ReadOnly() bool { return true }
 func (t liveGoalFailureTool) Execute(context.Context, json.RawMessage) (string, error) {
-	t.executions.Add(1)
-	return "", errors.New("deterministic live host failure; the conformance probe is not complete, so call live_goal_failure exactly once again in the next assistant response and do not write prose")
+	n := t.executions.Add(1)
+	if n < 3 {
+		return "", errors.New("deterministic live host failure; call live_goal_failure exactly once again in the next assistant response and do not write prose")
+	}
+	return "", errors.New("deterministic live host failure number three reached; return one short summary now and do not call more tools")
 }

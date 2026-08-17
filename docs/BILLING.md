@@ -42,12 +42,27 @@ language, browser locale, or host region never changes a rate card.
 | `complete` | Compatibility alias mirroring `displayComplete` |
 | `displayStatus` | `matched`, `fallback_original`, `bucketed`, or `unavailable` |
 | `aggregateMode` | `single_currency`, `common_valuation`, or `currency_buckets` |
+| `rateBand` | DeepSeek occurrence-time band: `peak`, `off_peak`, or aggregate `mixed` |
+| `ratedAt` | UTC request-completion time used to select a scheduled rate |
 
 If a requested currency is unavailable but every original is the same, the
 original amount is shown with `fallback_original`. Mixed originals produce
 `originalTotals` and no scalar zero. `—` is reserved for missing usage or
 pricing (`unavailable`). Legacy scalar aliases (`cost`, `costUsd`,
 `total_cost`) are written only when `selected` exists.
+
+## DeepSeek scheduled rates
+
+For official DeepSeek OpenAI, Responses, and Anthropic endpoints, V4 Flash and
+V4 Pro use occurrence-time pricing from 2026-08-17 00:00 Beijing time. Peak
+windows are 09:00–12:00 and 14:00–18:00 Beijing time; boundaries are
+left-closed/right-open and all other times are off-peak. The request-completion
+timestamp is used because the provider does not report per-token billing time.
+
+The stored provider price remains the peak anchor. Dynamic resolution is
+enabled only for PAYG configurations whose complete rate card exactly matches
+that official anchor. Custom endpoints, edited prices, and unrecognized models
+remain static. Persisted session, ledger, and stats quotes are never repriced.
 
 ## Wallets and diagnostics
 

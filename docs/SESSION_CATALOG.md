@@ -3,8 +3,10 @@
 Reasonix keeps session transcripts, event logs, metadata sidecars, and
 `desktop-projects.json` as the only authoritative session data. The desktop
 project tree reads a disposable SQLite projection from
-`<cache root>/session-catalog/v1.sqlite`; deleting that database never deletes
-or changes a conversation.
+`<cache root>/session-catalog/v3.sqlite`; deleting that database never deletes
+or changes a conversation. The earlier `v1.sqlite` and `v2.sqlite` caches are
+left in place so a concurrent or downgraded process cannot cross-write the
+projection.
 
 ## Invariants
 

@@ -1153,10 +1153,10 @@ func (g *Gate) recoveryGuidanceLocked(st *taskRuntime) string {
 	}
 	st.guidanceSent = true
 	if st.lastFailure != nil && st.lastFailure.evidence.Class == FailureClassTransient {
-		return "The tool timed out or hit a transient execution limit. Inspect its current state and output before retrying so partial effects are not duplicated. " +
+		return agent.HostRecoveryGuidanceTransientPrefix + " Inspect its current state and output before retrying so partial effects are not duplicated. " +
 			"Read-only diagnosis and unrelated work remain available without asking the user; retry the exact operation only after ruling out partial effects."
 	}
-	return "A tool failed. Use read-only diagnosis as needed, continue unrelated work automatically, and do not ask the user unless a genuine product or plan choice is required. " +
+	return agent.HostRecoveryGuidanceToolFailedPrefix + ", continue unrelated work automatically, and do not ask the user unless a genuine product or plan choice is required. " +
 		"Repeated retries of the exact failed operation remain bounded."
 }
 

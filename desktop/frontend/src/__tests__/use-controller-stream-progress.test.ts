@@ -32,6 +32,56 @@ function ev(s: typeof initialState, e: WireEvent) {
   return reducer(s, { type: "event", e });
 }
 
+// Desktop keeps ordinary completion receipts off the transcript, but retains
+// details for the change panel and surfaces actionable gaps as a short notice.
+{
+  const before = {
+    ...initialState,
+    seq: 2,
+    items: [{ kind: "user" as const, id: "u1", text: "update it" }],
+  };
+  const complete = ev(before, {
+    kind: "completion_summary",
+    completion: {
+      preset: "balanced",
+      verdict: "complete",
+      mutations: 3,
+      checks_passed: 12,
+      checks_failed: 0,
+      checks_suppressed: 0,
+      review: "passed",
+      gap_kinds: [],
+      constraint_degraded: false,
+    },
+  });
+  eq(complete.items, before.items, "ordinary completion summary stays off the transcript");
+  eq(complete.completionSummary?.preset, "balanced", "ordinary completion summary remains available to the change panel");
+
+  const after = ev(complete, {
+    kind: "completion_summary",
+    completion: {
+      preset: "balanced",
+      verdict: "partial",
+      mutations: 3,
+      checks_passed: 12,
+      checks_failed: 1,
+      checks_suppressed: 2,
+      review: "passed",
+      gap_kinds: ["stale_check"],
+      constraint_degraded: true,
+    },
+  });
+  eq(after.items.length, before.items.length + 1, "actionable completion summary adds one compact transcript notice");
+  const notice = after.items[after.items.length - 1];
+  eq(notice?.kind === "notice" ? notice.variant : "", "completion", "quality gap uses the completion notice variant");
+  eq(notice?.kind === "notice" ? notice.action : "", "open_changes", "quality gap links to the change panel");
+  eq(notice?.kind === "notice" ? notice.text.includes("balanced") : true, false, "compact notice does not expose internal preset values");
+  eq(after.completionSummary?.checks_failed, 1, "actionable completion summary is retained for details");
+
+  const restarted = ev(after, { kind: "turn_started" });
+  eq(restarted.completionSummary, undefined, "a new turn clears the previous turn's quality details");
+}
+
 // --- 1. partial dispatch upserts a running card with argChars ---
 {
   let s = { ...initialState, running: true, turnActive: true };
@@ -196,6 +246,11 @@ function ev(s: typeof initialState, e: WireEvent) {
   const completed = ev(repaired, { kind: "turn_done" } as WireEvent);
   eq(completed.running, false, "turn_done still ends the repaired turn");
   eq(completed.retry, undefined, "turn_done clears the retry indicator");
+
+  const failed = ev(repaired, { kind: "turn_done", err: "shared window overflow" } as WireEvent);
+  eq(failed.running, false, "terminal context error clears running");
+  eq(failed.pendingPrompt, false, "terminal context error clears pending prompt");
+  eq(failed.messageAction, undefined, "terminal context error restores message actions");
 
   const staleSnapshotAt = promptEventClock();
   s = ev(repaired, { kind: "retrying", retryAttempt: 4, retryMax: 10 } as WireEvent);

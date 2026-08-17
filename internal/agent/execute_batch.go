@@ -8,10 +8,39 @@ import (
 
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
-	"reasonix/internal/permission"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
+
+// mutationBarrierCause is an immutable, argument-free description of the
+// first durable-state write that failed or was blocked in a tool batch.
+type mutationBarrierCause struct {
+	callID                string
+	toolName              string
+	stateMutation         bool
+	workspaceMutation     bool
+	contentMutation       bool
+	repositoryMutation    bool
+	classificationKnown   bool
+	reason, blockingPhase string
+}
+
+func (c *mutationBarrierCause) message() string {
+	if c == nil {
+		return "blocked: skipped because an earlier modification failed or was blocked in this tool batch. " +
+			"Fix or re-run the failed change first; verification was not executed."
+	}
+	reason := c.reason
+	if reason == "" {
+		reason = "state mutation whose effects cannot be proven read-only"
+	}
+	action := "failed"
+	if c.blockingPhase == "blocked" {
+		action = "was blocked"
+	}
+	return "blocked: skipped because an earlier modification (" + reason + ") " + action + " in this tool batch. " +
+		"Fix or re-run the failed change first; verification was not executed."
+}
 
 // toolOutcome is one tool call's result. output is the first-visible bounded
 // form the model sees; rawOutput is the full original when truncation applied
@@ -49,7 +78,6 @@ type batchExecution struct {
 	executions         []*tool.ShellExecution
 	recoveryStopTurn   bool
 	recoveryStopReason string
-	goalStuck          goalStuckSignal
 }
 
 // executeBatch dispatches one model turn's tool calls. ToolDispatch events are
@@ -57,7 +85,7 @@ type batchExecution struct {
 // across goroutines while unknown and writer calls run serially so write/read
 // ordering stays provider-ordered. ToolResult events are emitted after the
 // batch in call order. Images are aligned by index with results.
-func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) batchExecution {
+func (a *Agent) executeBatch(ctx context.Context, turn *turnRuntime, calls []provider.ToolCall) batchExecution {
 	// The assistant message already stored this slice in Session. Keep execution
 	// state separate so refreshing a dependent preview never mutates shared
 	// session memory outside Session's lock.
@@ -75,8 +103,8 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 	// for this batch, successes recorded during it (a mixed batch where only one
 	// call was guard-blocked) must already count as progress against the pass.
 	receiptMark := 0
-	if a.evidence != nil {
-		receiptMark = a.evidence.Len()
+	if a.task.ledger != nil {
+		receiptMark = a.task.ledger.Len()
 	}
 	// Full dispatches used the batch's initial file state. After a writer runs
 	// (even a failed one — disk may have mutated), refresh dependent writer
@@ -84,14 +112,14 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 	earlierWriterRan := false
 	surfaceWriters := make([]bool, len(calls))
 	run := func(i int) {
-		t, _, ambiguous := a.tools.ResolveCall(calls[i].Name)
+		t, _, ambiguous := a.svc.tools.ResolveCall(calls[i].Name)
 		known := t != nil && len(ambiguous) == 0
 		writer := known && !t.ReadOnly()
 		surfaceWriters[i] = writer
 		if earlierWriterRan && writer {
 			if refreshed, changed := refreshCurrentFileDiff(ctx, t, calls[i]); changed {
 				calls[i] = refreshed
-				a.session.UpdateToolCallPreview(refreshed)
+				a.sess.conversation.UpdateToolCallPreview(refreshed)
 				a.emitFullToolDispatch(ctx, refreshed, true)
 			}
 		}
@@ -100,15 +128,15 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 		if calls[i].Name == "complete_step" && completedStepInBatch {
 			output := "blocked: only one successful complete_step is allowed per tool-call round. Continue from the newly promoted in_progress todo in the next round instead of batching sign-offs."
 			outcomes[i] = toolOutcome{output: output, blocked: true, errMsg: "blocked: complete_step sign-offs must be serial"}
-			if a.evidence != nil {
-				a.evidence.Record(evidence.ReceiptFromToolCall(calls[i].Name, json.RawMessage(calls[i].Arguments), false, true))
+			if a.task.ledger != nil {
+				a.task.ledger.Record(evidence.ReceiptFromToolCall(calls[i].Name, json.RawMessage(calls[i].Arguments), false, true))
 			}
 			durations[i] = time.Since(start).Milliseconds()
 			results[i] = output
 			return
 		}
-		outcomes[i] = a.executeOne(ctx, calls[i])
-		recordWorkspaceMutation(a.sink, outcomes[i].workspaceMutation)
+		outcomes[i] = a.executeOne(ctx, turn, calls[i])
+		recordWorkspaceMutation(a.svc.sink, outcomes[i].workspaceMutation)
 		if outcomes[i].executed {
 			surfaceWriters[i] = outcomes[i].workspaceMutation != nil
 		}
@@ -127,7 +155,7 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 	}
 	finalize := func(i int) {
 		if calls[i].ResolvedReadOnly != nil {
-			a.session.UpdateToolCallResolution(calls[i])
+			a.sess.conversation.UpdateToolCallResolution(calls[i])
 			a.emitResolvedToolDispatch(calls[i])
 		}
 		if surfaceWriters[i] || (outcomes[i].resolved && !outcomes[i].resolvedReadOnly) {
@@ -177,9 +205,12 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 	// blocked, later mutations/verifications in the batch are skipped; read-only
 	// diagnosis still runs. executeOne re-checks after proxy resolution.
 	mutationBatchStop := false
-	a.mutationDependencyBarrier.Store(false)
-	markDependencySkipped := func(start int) {
-		a.mutationDependencyBarrier.Store(true)
+	a.mutationDependencyBarrier.Store(nil)
+	markDependencySkipped := func(start int, cause *mutationBarrierCause) {
+		if cause != nil {
+			a.mutationDependencyBarrier.CompareAndSwap(nil, cause)
+		}
+		cause = a.mutationDependencyBarrier.Load()
 		for j := start; j < len(calls); j++ {
 			if results[j] != "" {
 				continue
@@ -190,9 +221,8 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 			if !batchCallStaticallySkippable(a, calls[j]) {
 				continue
 			}
-			isVerification := calls[j].Name == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(json.RawMessage(calls[j].Arguments)))
-			msg := "blocked: skipped because an earlier modification in this tool batch failed or was blocked. " +
-				"Fix or re-run the failed change first; verification was not executed."
+			isVerification := calls[j].Name == "bash" && evidence.IsVerificationCommand(bashCommandFromArgs(json.RawMessage(calls[j].Arguments)))
+			msg := cause.message()
 			var ex *tool.ShellExecution
 			if calls[j].Name == "bash" {
 				ex = &tool.ShellExecution{
@@ -205,7 +235,7 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 				if isVerification {
 					ex.Verification = tool.ShellVerificationNotRun
 				}
-				if t, _, amb := a.tools.ResolveCall(calls[j].Name); t != nil && len(amb) == 0 {
+				if t, _, amb := a.svc.tools.ResolveCall(calls[j].Name); t != nil && len(amb) == 0 {
 					if bt, ok := t.(tool.DetailedExecutor); ok {
 						if desc := bt.ExecutionDescriptor(json.RawMessage(calls[j].Arguments)); desc != nil {
 							ex.Shell = desc.Shell
@@ -228,7 +258,7 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 		mutationBatchStop = true
 	}
 
-	for _, batch := range partitionToolCalls(a.tools, calls) {
+	for _, batch := range partitionToolCalls(a.svc.tools, calls) {
 		if ctx.Err() != nil {
 			markCancelled(batch.start)
 			break
@@ -281,16 +311,8 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 				if results[i] != "" {
 					continue
 				}
-				t, _, ambiguous := a.tools.ResolveCall(calls[i].Name)
-				known := t != nil && len(ambiguous) == 0
-				readOnly := known && t.ReadOnly()
-				if calls[i].Name == "bash" && permission.BashCommandIsReadOnly(json.RawMessage(calls[i].Arguments)) {
-					readOnly = true
-				}
-				isVerification := calls[i].Name == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(json.RawMessage(calls[i].Arguments)))
-				mutates := evidence.ToolCallMutates(calls[i].Name, json.RawMessage(calls[i].Arguments), readOnly)
-				if mutates || isVerification {
-					markDependencySkipped(i)
+				if batchCallStaticallySkippable(a, calls[i]) {
+					markDependencySkipped(i, nil)
 					// markDependencySkipped fills this index; move on.
 					if results[i] != "" {
 						continue
@@ -311,9 +333,9 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 				break
 			}
 			// Mutation/verification failure barrier for the rest of this batch.
-			if batchCallIsMutatingFailure(a, calls[i], outcomes[i]) {
+			if cause := batchCallMutationFailureCause(a, calls[i], outcomes[i]); cause != nil {
 				mutationBatchStop = true
-				markDependencySkipped(i + 1)
+				markDependencySkipped(i+1, cause)
 			}
 			// After each tool execution, also check if the context was cancelled.
 			// If so, stop executing remaining tools and return immediately so
@@ -330,7 +352,7 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 
 	for i, c := range calls {
 		o := outcomes[i]
-		t, _, ambiguous := a.tools.ResolveCall(c.Name)
+		t, _, ambiguous := a.svc.tools.ResolveCall(c.Name)
 		ok := t != nil && len(ambiguous) == 0
 		readOnly := ok && t.ReadOnly()
 		if c.ResolvedReadOnly != nil {
@@ -358,12 +380,12 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 				tr.WorkspaceAllPaths = mutation.AllPaths
 			}
 		}
-		a.sink.Emit(event.Event{Kind: event.ToolResult, Tool: tr})
+		a.svc.sink.Emit(event.Event{Kind: event.ToolResult, Tool: tr})
 		if o.truncated && o.truncMsg != "" {
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: o.truncMsg})
+			a.svc.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: o.truncMsg})
 		}
 	}
-	goalStuck := a.applyBatchGuards(ctx, cancelled, calls, outcomes, results, receiptMark)
+	a.applyBatchGuards(ctx, cancelled, calls, outcomes, results, receiptMark)
 	images := make([][]string, len(calls))
 	executions := make([]*tool.ShellExecution, len(calls))
 	for i := range outcomes {
@@ -383,21 +405,20 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 		executions:         executions,
 		recoveryStopTurn:   recoveryBatchStop,
 		recoveryStopReason: recoveryStopReason,
-		goalStuck:          goalStuck,
 	}
 }
 
-// batchCallIsMutatingFailure reports whether a finished call was a mutation
-// (file write / non-readonly bash mutation) that failed or was blocked, so later
-// mutations and verifications in the same batch must not run.
-func batchCallIsMutatingFailure(a *Agent, call provider.ToolCall, o toolOutcome) bool {
+// batchCallMutationFailureCause returns a sanitized effect description when a
+// durable-state mutation failed or was blocked. Verification failures alone do
+// not open the dependency barrier.
+func batchCallMutationFailureCause(a *Agent, call provider.ToolCall, o toolOutcome) *mutationBarrierCause {
 	if o.errMsg == "" && !o.blocked {
-		return false
+		return nil
 	}
 	readOnly := false
 	toolName := call.Name
 	toolArgs := json.RawMessage(call.Arguments)
-	t, _, ambiguous := a.tools.ResolveCall(call.Name)
+	t, _, ambiguous := a.svc.tools.ResolveCall(call.Name)
 	known := t != nil && len(ambiguous) == 0
 	if known {
 		readOnly = t.ReadOnly()
@@ -413,33 +434,35 @@ func batchCallIsMutatingFailure(a *Agent, call provider.ToolCall, o toolOutcome)
 		toolArgs = o.effective.args
 		readOnly = o.effective.readOnly
 	}
-	if toolName == "bash" && permission.BashCommandIsReadOnly(toolArgs) {
-		readOnly = true
+	effects := evidence.ClassifyToolCall(toolName, toolArgs, readOnly)
+	if toolName == "bash" && evidence.IsVerificationCommand(bashCommandFromArgs(toolArgs)) && !effects.StateMutation {
+		return nil
 	}
-	// Verification failures do not open the dependency barrier by themselves —
-	// only a failed modification does.
-	if toolName == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(toolArgs)) {
-		return false
+	if !effects.StateMutation {
+		return nil
 	}
-	// Resolved writers (including MCP targets behind use_capability) count even
-	// when the provider-visible proxy advertised ReadOnly.
-	if o.resolved && !o.resolvedReadOnly {
-		return true
+	phase := "failed"
+	if o.blocked {
+		phase = "blocked"
 	}
-	if evidence.ToolCallMutates(toolName, toolArgs, readOnly) {
-		return true
+	return &mutationBarrierCause{
+		callID:              call.ID,
+		toolName:            toolName,
+		stateMutation:       effects.StateMutation,
+		workspaceMutation:   effects.WorkspaceMutation,
+		contentMutation:     effects.ContentMutation,
+		repositoryMutation:  effects.RepositoryMutation,
+		classificationKnown: effects.Known && known,
+		reason:              effects.Reason,
+		blockingPhase:       phase,
 	}
-	// Fail closed only for a target the host could not classify: a blanket
-	// !readOnly fallback would re-admit the meta tools ToolCallMutates exempts,
-	// letting a failed todo_write block every real edit left in the batch.
-	return !known
 }
 
 // batchCallStaticallySkippable reports whether a remaining call can be marked
 // not_run/dependency without resolving a proxy. Proxies and unknown tools
 // return false so executeOne can resolve the real target first.
 func batchCallStaticallySkippable(a *Agent, call provider.ToolCall) bool {
-	t, _, ambiguous := a.tools.ResolveCall(call.Name)
+	t, _, ambiguous := a.svc.tools.ResolveCall(call.Name)
 	if t == nil || len(ambiguous) > 0 {
 		// Unknown / ambiguous: fail closed via executeOne path.
 		return false
@@ -451,14 +474,11 @@ func batchCallStaticallySkippable(a *Agent, call provider.ToolCall) bool {
 		return false
 	}
 	readOnly := t.ReadOnly()
-	if call.Name == "bash" && permission.BashCommandIsReadOnly(json.RawMessage(call.Arguments)) {
-		readOnly = true
-	}
-	isVerification := call.Name == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(json.RawMessage(call.Arguments)))
+	isVerification := call.Name == "bash" && evidence.IsVerificationCommand(bashCommandFromArgs(json.RawMessage(call.Arguments)))
 	if isVerification {
 		return true
 	}
-	return !readOnly || evidence.ToolCallMutates(call.Name, json.RawMessage(call.Arguments), readOnly)
+	return evidence.ClassifyToolCall(call.Name, json.RawMessage(call.Arguments), readOnly).StateMutation
 }
 
 type toolCallBatch struct {

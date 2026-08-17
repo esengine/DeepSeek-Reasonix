@@ -52,6 +52,7 @@ type Inbox interface {
 	AppendInboxItem(id, text, idempotency string, extra map[string]string) (sessioninbox.InboxItemMeta, error)
 	DeleteInboxItem(id string) error
 	CancelWithInboxItems(ids []string, source string) error
+	CancelWithInboxItemsResult(ids []string, source string) (InboxCancelResult, error)
 	MoveInboxItem(id string, toIndex int) error
 	SetInboxPaused(paused bool) error
 	RetryInboxItem(id string) error
@@ -182,6 +183,15 @@ func (s *inboxState) activeIDs() []string {
 	return out
 }
 
+func (c *Controller) bindInboxStoreNotifications(st *sessioninbox.Store) {
+	if c == nil || st == nil {
+		return
+	}
+	st.OnChange(func(snap sessioninbox.InboxSnapshot) {
+		notifyInboxChanged(c.sink, snap)
+	})
+}
+
 func (c *Controller) ensureInbox() (*sessioninbox.Store, error) {
 	path := c.SessionPath()
 	if path == "" {
@@ -200,6 +210,7 @@ func (c *Controller) ensureInbox() (*sessioninbox.Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	c.bindInboxStoreNotifications(st)
 	c.inbox.store = st
 	snap := st.Snapshot()
 	if snap.Recovered && snap.RecoveredN > 0 {
@@ -224,8 +235,8 @@ func (c *Controller) rebindInbox() {
 		if path != "" && c.inbox.store.SessionPath() == path {
 			return
 		}
-		// Pause the old session's queue so it is not auto-run if reopened.
-		_ = c.inbox.store.SetPaused(true)
+		// Pending work must remain inspectable if this session is reopened.
+		_ = c.inbox.store.PauseIfPending()
 		c.inbox.store.Close()
 		c.inbox.store = nil
 		c.inbox.clearActive()
@@ -238,6 +249,7 @@ func (c *Controller) rebindInbox() {
 		slog.Warn("controller: open session inbox", "err", err, "path", path)
 		return
 	}
+	c.bindInboxStoreNotifications(st)
 	c.inbox.store = st
 	snap := st.Snapshot()
 	if snap.Recovered && snap.RecoveredN > 0 {
@@ -259,7 +271,7 @@ func (c *Controller) pauseInboxOnRotate() {
 	st := c.inbox.store
 	c.inbox.mu.Unlock()
 	if st != nil {
-		_ = st.SetPaused(true)
+		_ = st.PauseIfPending()
 	}
 }
 
@@ -445,41 +457,20 @@ func (c *Controller) AppendInboxItem(id, text, idempotency string, extra map[str
 }
 
 func (c *Controller) DeleteInboxItem(id string) error {
+	c.inbox.admissionMu.Lock()
+	defer c.inbox.admissionMu.Unlock()
 	st, err := c.ensureInbox()
 	if err != nil {
 		return err
 	}
-	return st.DeleteItem(id)
-}
-
-// CancelWithInboxItems stops the active turn and discards only the durable
-// pending items explicitly owned by the cancelling frontend. Admission is
-// paused around the batch deletion so TurnDone cannot race a cancelled item
-// into a new provider turn. Unrelated inbox items remain intact.
-func (c *Controller) CancelWithInboxItems(ids []string, source string) error {
-	st, err := c.ensureInbox()
-	if err != nil {
-		c.Cancel()
-		return err
+	if _, recoverErr := st.RecoverOrphanedInFlightOwnedBy(c.inbox.ownsItem); recoverErr != nil {
+		slog.Warn("controller: recover inbox item before delete", "err", recoverErr, "id", id)
 	}
-	wasPaused := st.Snapshot().Paused
-	if err := st.SetPaused(true); err != nil {
-		c.Cancel()
-		return err
+	err = st.DeletePendingOrAcceptedItem(id)
+	if err == nil || errors.Is(err, sessioninbox.ErrNotFound) {
+		return nil
 	}
-	if err := st.DiscardPendingItemsOwned(ids, strings.TrimSpace(source)); err != nil {
-		// Keep the inbox paused for inspection if an item already crossed the
-		// admission boundary. Cancellation still stops that in-flight turn.
-		c.Cancel()
-		return err
-	}
-	c.Cancel()
-	if !wasPaused {
-		if err := st.SetPaused(false); err != nil {
-			return err
-		}
-	}
-	return nil
+	return err
 }
 
 func (c *Controller) MoveInboxItem(id string, toIndex int) error {
@@ -697,24 +688,19 @@ func (c *Controller) onInboxUnappliedSteer(itemID string) {
 	if err != nil {
 		return
 	}
-	_ = st.SetState(itemID, sessioninbox.StateUncertain, "steer accepted but unapplied before turn exit")
+	if err := st.MarkAcceptedSteerUncertain(itemID, "steer accepted but unapplied before turn exit"); err != nil {
+		if errors.Is(err, sessioninbox.ErrNotFound) {
+			c.inbox.mu.Lock()
+			c.inbox.untrackActive(itemID)
+			c.inbox.mu.Unlock()
+		}
+		return
+	}
 	_ = st.SetPaused(true)
 	c.inbox.mu.Lock()
 	c.inbox.untrackActive(itemID)
 	c.inbox.mu.Unlock()
 	sessioninbox.NoteUncertain()
-}
-
-// onInboxSteerConsumed marks steer_accepted → steer_consumed.
-func (c *Controller) onInboxSteerConsumed(itemID string) {
-	if itemID == "" {
-		return
-	}
-	st, err := c.ensureInbox()
-	if err != nil {
-		return
-	}
-	_ = st.SetState(itemID, sessioninbox.StateSteerConsumed, "")
 }
 
 // TryEnqueueAndSteer is a convenience for frontends: durable steer then TrySteer.
@@ -724,7 +710,16 @@ func (c *Controller) TryEnqueueAndSteer(req InboxRequest) (sessioninbox.InboxRec
 	if err != nil {
 		return rec, err
 	}
-	return c.TrySteerInboxItem(rec.ItemID)
+	steered, err := c.TrySteerInboxItem(rec.ItemID)
+	if errors.Is(err, sessioninbox.ErrPaused) {
+		rec.Disposition = sessioninbox.DispositionQueuedFollowup
+		rec.Paused = true
+		return rec, nil
+	}
+	if err != nil {
+		return rec, err
+	}
+	return steered, nil
 }
 
 // TryEnqueueFollowup durably queues a follow-up and may dispatch if idle.

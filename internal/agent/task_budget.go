@@ -17,12 +17,6 @@ func childMaxStepsForParent(parent, requested int) int {
 	return max(parent/2, 5)
 }
 
-func (t *TaskTool) childMaxStepsForContext(ctx context.Context, requested int) int {
-	if requested > 0 || t.maxSteps > 0 {
-		return t.childMaxSteps(requested)
-	}
-	if limit, ok := runStepLimitFromContext(ctx); ok && limit.inherit {
-		return childMaxStepsForParent(limit.steps, requested)
-	}
-	return 0
+func (t *TaskTool) childMaxStepsForContext(_ context.Context, requested int) int {
+	return t.childMaxSteps(requested)
 }

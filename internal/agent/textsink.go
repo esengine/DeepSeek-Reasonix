@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	"reasonix/internal/billing"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
@@ -139,7 +140,7 @@ func (s *TextSink) Emit(e event.Event) {
 			fmt.Fprintln(s.out)
 			s.textWritten = false
 		}
-		s.usageLine(e.Usage, e.Pricing, e.CacheDiagnostics)
+		s.usageLine(e.Usage, e.CostQuote, e.CacheDiagnostics)
 
 	case event.Notice:
 		glyph := "·"
@@ -225,8 +226,8 @@ func (s *TextSink) closeTextStream(text, reasoning string) {
 }
 
 // usageLine writes the one-line token/cache summary; no-op when usage is unset.
-func (s *TextSink) usageLine(u *provider.Usage, p *provider.Pricing, d *event.CacheDiagnostics) {
-	if line := FormatUsageLine(u, p, d); line != "" {
+func (s *TextSink) usageLine(u *provider.Usage, q *billing.CostQuote, d *event.CacheDiagnostics) {
+	if line := FormatQuotedUsageLine(u, q, d); line != "" {
 		fmt.Fprintln(s.out, line)
 		s.wroteAnything = true
 	}
@@ -241,6 +242,15 @@ func (s *TextSink) usageLine(u *provider.Usage, p *provider.Pricing, d *event.Ca
 // chain-of-thought cost. Shared by TextSink and the chat TUI so both frontends
 // render the line identically.
 func FormatUsageLine(u *provider.Usage, p *provider.Pricing, d *event.CacheDiagnostics) string {
+	var quote *billing.CostQuote
+	if u != nil && p != nil {
+		quote = event.EnsureCostQuote(event.Event{Kind: event.Usage, Usage: u, Pricing: p}, nil)
+	}
+	return FormatQuotedUsageLine(u, quote, d)
+}
+
+// FormatQuotedUsageLine renders usage from the canonical occurrence-time quote.
+func FormatQuotedUsageLine(u *provider.Usage, q *billing.CostQuote, d *event.CacheDiagnostics) string {
 	if u == nil || u.TotalTokens == 0 {
 		return ""
 	}
@@ -260,8 +270,20 @@ func FormatUsageLine(u *provider.Usage, p *provider.Pricing, d *event.CacheDiagn
 		reasoning = fmt.Sprintf(" (%d reasoning)", u.ReasoningTokens)
 	}
 	cost := ""
-	if p != nil {
-		cost = fmt.Sprintf(" · %s%.4f", p.Symbol(), p.Cost(u))
+	if q != nil && q.CostComplete {
+		money := q.Original
+		if q.Selected != nil {
+			money = *q.Selected
+		}
+		cost = fmt.Sprintf(" · %s%.4f", billing.CurrencySymbol(money.Currency), money.Float64())
+		switch q.RateBand {
+		case billing.RateBandPeak:
+			cost += " · peak"
+		case billing.RateBandOffPeak:
+			cost += " · off-peak"
+		case billing.RateBandMixed:
+			cost += " · mixed rates"
+		}
 	}
 	churn := ""
 	if d != nil && d.PrefixChanged {

@@ -213,22 +213,20 @@ prefix cache-stable:
 
 - The **planner** (low-frequency) runs in its own session with the same standing
   memory context plus a filtered read-only research tool set, then produces a
-  concise plan. A deterministic host policy chooses executor-only, light
-  planning, full planning, plan-for-approval, or explicit plan-only from
-  pristine user text plus trusted turn metadata. It does not call a classifier
-  model and does not infer host state from controller-authored prompt blocks.
-  Explicit Plan Mode, synthetic turns, short contextual replies, atomic edits,
-  and bounded read-only actions avoid a second planner; cross-surface,
-  structured, ambiguous, and high-risk work uses the full contract. Active Goal
-  and Delivery turns upgrade non-atomic mutation work, while bounded read-only
-  actions remain executor-only. The privacy-safe
-  route/depth/reason decision is emitted in phase detail.
-- Light plans use a small per-turn research-round budget and return a compact
-  objective, 1-4 ordered steps, likely touchpoints, and primary verification.
-  Full plans use a larger bounded budget and distinguish verified from candidate
-  touchpoints, with risks, acceptance criteria, command-level verification, and
-  rollback when relevant. The depth contract stays in one stable system prompt;
-  only a small host-authored `<planner-turn>` block changes per user turn. If
+  concise plan. A deterministic host policy defaults to executor-only. It
+  invokes the dedicated planner only for an explicit plan-first /
+  plan-then-execute request, an explicit wait-for-approval boundary, an
+  explicit plan-only request, or an explicit Goal start. It does not call a
+  classifier model, does not infer complexity from wording, file count, or
+  keywords, and does not infer host state from controller-authored prompt
+  blocks. Explicit Plan Mode is an executor-driven workflow and never starts a
+  second planner. Synthetic turns, short contextual replies, and ordinary
+  requests stay executor-only. There is no Light/Full planning depth. The
+  privacy-safe route/reason decision is emitted in phase detail.
+- The planner uses one stable system prompt. Only a small host-authored
+  `<planner-turn>` block names the explicit route. The plan distinguishes
+  verified from candidate touchpoints and records non-goals, risks, acceptance
+  criteria, and command-level verification when the evidence supports them. If
   the planner still does not finalize after the bounded research and grace
   round, plan-and-execute falls back to the executor with the pristine task;
   plan-only and plan-for-approval remain fail-closed. The incomplete planner
@@ -256,35 +254,52 @@ canonical transcript and installs a short **provider-visible checkpoint** only
 when the sole automatic threshold is crossed.
 
 - Each provider declares `context_window` (tokens). The only automatic trigger is
-  `agent.compact_ratio` (default **0.85**; presets 0.70 / 0.80 / 0.85; range
+  `agent.compact_ratio` (default **0.80**; presets 0.70 / 0.80 / 0.85; range
   0.65–0.85).
   `triggerTokens = floor(context_window × compact_ratio)`.
-- **Below the trigger** history is never rewritten: no summary, no prune/snip
-  projection, no sidecar write, no projection-version bump, no maintenance event.
-  Any rewrite would invalidate the prompt cache from that point on.
-- **At the trigger** Reasonix runs **one** summary transaction:
-  `stable prefix + one structured digest + recent verbatim tail`.
-  Acceptance (normal path): candidate ≤ 50% of the window, strictly smaller than
-  the source, and below `triggerTokens`. Candidates are **not** padded toward 50%.
-  Typical landings are about 10%–30% of the window.
-  Internal construction budgets (not user settings):
-  `recentTailBudget = clamp(window×10%, 32K, 96K)`, summary output max **16K**.
+- **Below the trigger** the model receives complete tool `RawContent` from a
+  temporary request projection; no sidecar is written. Durable `Content` remains
+  bounded for older Reasonix readers.
+- **At the trigger** one singleflight maintenance transaction first persistently
+  prunes every tool result over 8192 Unicode code points to `4096 head +
+  "[... tool result middle pruned ...]" + 1024 tail`. If this clears pressure,
+  no summary request is made. Otherwise Reasonix summarizes the old contiguous
+  prefix and retains the newest **16%** of the context window verbatim, aligned so
+  assistant tool calls and tool results are never split.
+- The summary request replays the original system message, the selected message
+  prefix, and the ordinary request's tool schemas, then appends one final user
+  compaction instruction. This shape can reuse provider KV cache. Output is capped
+  at **8192 tokens**. A pressure run may make one additional convergence summary
+  (at most two successful summaries total); overflow makes at most one summary and
+  retries the original request at most once after projection-version progress.
+- A checkpoint must be strictly smaller than the replaced full request. Summary
+  timeout/error/empty/max-token results never produce a mechanical digest. Below
+  the hard ceiling the latest durable projection continues; at overflow or the
+  hard ceiling an insufficient prune returns `ErrCompactionRequired`.
 - Users inspect or change the threshold with
   `reasonix config compact-ratio [--local] [VALUE]`. Project config overrides the
   user-global value used by desktop and new CLI sessions. UI always shows the
   **effective** ratio.
-- `max_output_tokens` is an independent **per-turn** completion ceiling.
-  Recommended: `0` (**automatic**, not unlimited; DeepSeek default high → ~64K).
-  User presets: `32768` ordinary coding / cost control, `65536` heavy reasoning /
-  long tool loops, `131072` only after repeated `finish_reason=length`.
-  Negative omits optional wire limits when the protocol allows. Clipped only at
-  send time against remaining window and **never** changes `triggerTokens` or
-  maintenance timing. Billing follows actual completion tokens, not the ceiling.
-- Giant tool results are bounded **once**, on first entry to the model:
-  `Content` is the stable ≤32KB visible form; `RawContent` holds the full original
-  only when they differ. Maintenance never rewrites old tool bodies.
-  `ModelMessages` strips `RawContent` so provider serialization and cache hashes
-  never include it.
+- `max_output_tokens` is an independent **per-turn** completion ceiling and
+  never changes `triggerTokens` / `compact_ratio`.
+  - `0` is the provider auto value. Local admission uses the provider
+    capability (official DeepSeek 384K, OpenCode Go model table, or a learned
+    completion budget). It is **not** “skip the local output check”.
+  - Official DeepSeek Chat/Responses still omit the field when the remaining
+    shared window can host the 384K auto budget, and inject a clipped value
+    only when the window is tight. Official DeepSeek Anthropic always sends
+    384K or the clipped remainder because `max_tokens` is required.
+  - Official OpenCode Go presets send `min(model max, physical remaining)` on
+    the generic `max_tokens` / `max_output_tokens` field. Third-party
+    compatible APIs do not assume a shared window until a trusted context 400.
+  - A positive value is an explicit cost cap and may still be clipped down to
+    the physical remainder. A negative value force-omits optional wire limits;
+    if the known auto budget no longer fits, Reasonix compacts instead of
+    overriding that choice.
+- Canonical tool storage remains backward compatible: `Content` is a stable
+  ≤32KB form and `RawContent` holds the full original. New request projections
+  promote tool `RawContent` below pressure; prune projections never rewrite either
+  canonical field. Older supported readers therefore remain bounded.
 - Automatic maintenance is planned once in `ContextManager.Prepare` from the
   current projection plus the append-only canonical tail. The canonical
   transcript is never rewritten. Subsequent thresholds merge
@@ -296,9 +311,10 @@ when the sole automatic threshold is crossed.
   `compact_force_ratio`, `cold_resume_prune`, `context_editing`) are removed on
   ordinary start and ignored at runtime. Native provider tool clearing is not
   used; every provider uses the local summary checkpoint path.
-- Keep policy (`keep` / `recent_keep`) and the active tool turn remain protected
-  content. Restart restores an existing checkpoint without re-summarizing or
-  replaying timeline cards.
+- `keep` / `recent_keep` remain readable and round-trip for compatibility but are
+  deprecated and ignored by compaction. Old user turns, failed tool results, and
+  `[[keep]]` messages enter the summary prefix. Restart restores an existing
+  checkpoint without re-summarizing or replaying timeline cards.
 - Full history remains in the session transcript. The read-only `history` tool
   provides BM25 retrieval over sessions; new summary checkpoints do not create
   prune archives.
@@ -324,11 +340,15 @@ when the sole automatic threshold is crossed.
   budgets. This never mutates the stable system prompt or tool schemas.
 - The owning controller may auto-allow only a bounded, non-sensitive,
   create-only project/reference `remember`, including in a top-level headless
-  run. Global facts, preferences, feedback,
-  updates, duplicates, sensitive/oversized content, and every `forget` require a
-  fresh human approval even under Auto or YOLO. Guardian/safety review cannot
-  answer these prompts on the user's behalf. Sub-agents and headless surfaces
-  without the owning scoped controller fail closed. The approval request includes a compact preview, while
+  run. In Ask, global facts, preferences, feedback, updates, duplicates,
+  sensitive/oversized content, and every `forget` require a fresh human
+  approval. Interactive Auto treats `remember` and `forget` as normal policy
+  fallback while preserving explicit `ask` and `deny` rules. Interactive YOLO
+  bypasses memory ask prompts unless an explicit deny rule matches.
+  Guardian/safety review cannot answer these prompts on the user's
+  behalf. Sub-agents and headless surfaces without the owning scoped
+  controller fail closed, including headless YOLO except for the create-only
+  path above. The approval request includes a compact preview, while
   external notification hooks only receive the tool name.
 - Facts carry immutable IDs, monotonic revisions, timestamps, type, and scope.
   Updates snapshot the previous revision; restore and archive recovery create a
@@ -337,26 +357,19 @@ when the sole automatic threshold is crossed.
   See [`SESSION_MEMORY_RETRIEVAL.md`](SESSION_MEMORY_RETRIEVAL.md) for the
   detailed implementation contract.
 
-**What survives a fold.** Verbatim, at every compaction: the system prompt, the
-first user turn when it is small enough to be a brief, the first few small user
-turns of the fold region, and the recent tail. The messages the keep policy
-protects also survive, though a failure with a recorded execution keeps only its
-failure-carrying lines. Everything else is **best-effort** — it reaches the summarizer and survives
-only as well as the digest captured it. That includes small user turns beyond the
-hoisted window, so a durable constraint is safest restated in a recent turn
-rather than assumed to hold from turn 4 of a long session.
+**What survives a fold.** The system prompt and newest 16% tail survive verbatim.
+Every older model-visible message forms one contiguous summary prefix, including
+user turns, failed tool results, prior digests, and `[[keep]]` messages. Exact
+older wording remains available in the canonical transcript and through the
+read-only `history` tool. `keep` and `recent_keep` are compatibility-only fields.
 
-Two properties bound that loss. Each fold re-derives its digest from the
-canonical transcript rather than from the previous digest, so digests do not
-chain and repeated compaction does not compound summarizer drift. And compaction
-only ever writes a projection: the canonical transcript keeps every original, so
-a folded detail stays recoverable through the `history` tool and the archive
-(`reasonix/archive/<timestamp>.jsonl`) even when the digest missed it.
+Subsequent folds merge the current digest with newer old history into one digest.
+Compaction only writes a projection: canonical storage keeps every original, so
+a missed detail stays recoverable through `history`.
 
-This is the **only** point where the prompt prefix changes — a deliberate, rare
-"cache-reset point". Between compactions the session grows prepend-only and
-stays cache-friendly, so cache hit rate (the key observability signal) stays
-high. `context_window = 0` disables compaction for an instance.
+Prune and summary commits are deliberate cache-reset points. Between maintenance
+runs the session remains append-only and cache-friendly. `context_window = 0`
+disables automatic compaction for an instance.
 
 ### 3.7 Permissions (`internal/permission`) — per-call gating
 
@@ -470,9 +483,11 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
 - **User decisions are separate from tool approvals.** Runtime tool approval has
   three user-facing postures: `ask` ("需要批准"), `auto` ("自动批准"), and
   `yolo` ("Yolo批准"). `auto` lets the permission policy auto-approve the writer
-  fallback while preserving explicit ask/deny rules; `yolo` skips ordinary tool
-  permission prompts for approval-gated tools such as writers and Bash. Explicit
-  deny rules and forced fresh reviews still apply. Nested or indirect Bash
+  and interactive memory fallback while preserving explicit ask/deny rules;
+  `yolo` skips ordinary tool permission prompts for approval-gated tools such
+  as writers, Bash, and explicit interactive `remember`/`forget` ask prompts.
+  Explicit deny rules and forced fresh reviews
+  for plans, sandbox escapes, and managed config writes still apply. Nested or indirect Bash
   commands require a human in interactive Ask/Auto even during the approved-plan
   window; ordinary expansions, assignments, redirects, and globs continue under
   Auto fallback but cannot inherit reusable Bash rules. YOLO is the sole mode
@@ -506,20 +521,23 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   assumption. Completion requires the concrete request, output format,
   constraints, and relevant verification expectations to be satisfied or
   explicitly reported as unverified.
-  Goal automatically selects a simple (10), write (20), or research (40) turn
-  continuation backstop from the objective. A Goal Run defaults to 16 model
-  rounds when the user did not explicitly configure `max_steps`, followed by
-  one summary-only response and a resumable pause. Goal-scoped novelty accepts new read/search results and state changes
+  Goal has no default model-round, cross-Run turn, wall-clock, or numeric
+  no-progress boundary. Goal-scoped novelty accepts new read/search results and state changes
   but rejects exact tool/argument/result repeats. All classes use the same Goal
   FSM, host receipts, Delivery readiness, and bounded evaluator; there is no second research
   protocol or writable sidecar runtime. Legacy `.reasonix/autoresearch/...`
   archives remain read-only and explicit old paths recover as ordinary Goals.
   Outside goal mode, ordinary prompts never change collaboration mode; the user
   must choose Goal or use `/goal` explicitly.
-  Cross-turn no-progress streaks are observational. Within one Run, three
-  repeated host failures or six successful zero-evidence rounds trigger a
-  resumable structural-stuck pause. Token and provider-request totals remain
-  observational and are not request-admission limits.
+  Repeated host failures, zero-evidence rounds, and Todo stalls trigger bounded
+  strategy redirects and intervention-epoch resets, never a Goal pause. Turns,
+  tokens, provider requests, and active work duration remain observational when
+  the corresponding budget is not configured. Positive user-selected
+  `[agent].goal_token_budget`, `max_steps`, time, and cost budgets remain
+  explicit resumable boundaries. The Goal token budget defaults to `0` (off);
+  resuming a `budget_spend` pause grants a fresh slice without clearing
+  cumulative Goal statistics. `task_time_budget_minutes = 0` (and legacy
+  negative values) disables the time boundary.
   `/goal clear` removes the active goal. Switching into plan/normal mode clears
   the active goal in the desktop UI so the collaboration mode remains one of
   the three choices, while the underlying tool approval posture is preserved.
@@ -527,8 +545,8 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
 | Tool approval posture | Tool approvals | Plan approval | `ask` questions |
 | --- | --- | --- | --- |
 | Need approval / `ask` | Follow permission policy (`Ask` prompts interactively) | Waits for user | Waits for user |
-| Auto approve / `auto` | Writer fallback auto-allowed; explicit ask/deny rules still apply | Waits for user | Waits for user |
-| YOLO approval / `yolo` | Ordinary prompts auto-allowed; deny rules and fresh reviews remain | Waits for user | Waits for user |
+| Auto approve / `auto` | Writer fallback and interactive `remember`/`forget` fallback auto-allowed; explicit ask/deny rules still apply | Waits for user | Waits for user |
+| YOLO approval / `yolo` | Ordinary prompts auto-allowed, including `remember`/`forget`; deny rules and plan/sandbox/config reviews remain | Waits for user | Waits for user |
 | Approved-plan execution window | Approved plan's writer fallback is auto-allowed; explicit `ask` / `deny` rules remain | Future plans still wait | Waits for user |
 
 Out of the box (`mode = "ask"`, no rules), interactive `reasonix` prompts before
@@ -1006,10 +1024,10 @@ default        = "deepseek-v4-flash"   # optional; defaults to models[0]
 api_key_env    = "DEEPSEEK_API_KEY"
 web_search     = true
 context_window = 1000000   # tokens; harness compacts older history near this limit (0 disables)
-# max_output_tokens = 0              # recommended: automatic (DeepSeek default high → ~64K)
-# max_output_tokens = 32768          # ordinary coding / cost control
-# max_output_tokens = 65536          # heavy reasoning / long tool loops
-# max_output_tokens = 131072         # only after repeated finish_reason=length
+# max_output_tokens = 0              # auto: provider capability; official DeepSeek omits until the window is tight
+# max_output_tokens = 32768          # optional cost cap; still clipped to physical remaining
+# max_output_tokens = 65536          # optional cost cap
+# max_output_tokens = -1             # force-omit optional wire limits; compact if the auto budget no longer fits
 # max_output_tokens never changes compact_ratio
 # model_overrides = { "deepseek-v4-flash" = { context_window = 1000000, max_output_tokens = 32768 } }
 
@@ -1078,8 +1096,8 @@ release. Legacy channel configuration and arguments remain parseable during
 The executor tracks an adaptive progress lease while a todo is active. A new
 completion, unique successful read, command, or mutation renews the lease;
 exact repeats do not. After 8 no-progress tool-call rounds the host appends a
-one-shot reassessment nudge. After 16 it pauses and preserves work for a later
-user turn. The serial contract is level-aware while preserving the
+one-shot reassessment nudge. In Goal mode, the later threshold forces a re-plan
+and continues; outside Goal it may end the current attempt. The serial contract is level-aware while preserving the
 single-in_progress rule: in a two-level list the active level-1 sub-step is
 the only `in_progress` item and its level-0 phase stays `pending`; sub-steps
 complete in order, and the phase becomes `in_progress` — and signs off — only
@@ -1087,7 +1105,7 @@ after all of its sub-steps have completed. A level-1 item with no phase above
 it is rejected. Retired `[agent].max_steps` and `planner_max_steps` keys remain
 parseable for upgrade compatibility, but are ignored and removed by a one-time
 migration. The CLI `--max-steps` flag and `[bot].max_steps` remain separate,
-explicit controls for one-off and unattended execution.
+explicit controls for one-off and unattended execution; bot `0` means continuous.
 
 `reasonix setup` writes this default config so the CLI is usable out of the box.
 
@@ -1126,6 +1144,14 @@ the connection is ready.
 ```
 
 `[sandbox]` is the *enforcement* layer beneath permissions (which are *policy*).
+They stay two layers: a permitted call still cannot write outside the approved
+roots. Interactive sessions can extend those roots with a write-access approval
+(once / session / project `reasonix.toml` / deny). File tools request the target
+parent directory automatically. Bash must declare `additional_write_dirs` and a
+`justification`; the host does not infer paths from the command text. Headless
+`reasonix run` fails closed unless the directory is already in
+`[sandbox].allow_write` or `--add-dir`. Granting `${HOME}` is allowed with a
+high-risk warning; the filesystem root and Reasonix session/state paths are not.
 Phase 0 confines the file-writing built-ins (`write_file`, `edit_file`,
 `multi_edit`, `move_file`) to `workspace_root` (default cwd), the Reasonix user
 config dir, plus `allow_write`: a write whose target — resolved to an absolute,

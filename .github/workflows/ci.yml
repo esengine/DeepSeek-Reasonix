@@ -145,14 +145,15 @@ jobs:
       # internal/agent 82s, 92s, 144s and 180s — a 2.2x spread from runner
       # variance alone, with four heavy packages sharing four vCPUs. At 3m the
       # step failed on slow runners without a code change; a hang still trips
-      # the 15 minute job budget above.
+      # the 15 minute job budget above. internal/control runs in its own
+      # Windows job below so its durable-session I/O does not compete here.
       - name: test (Windows smoke)
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
         timeout-minutes: 15
         env:
           REASONIX_RELEASE_CACHE_GUARD: "1"
           WINDOWS_SANDBOX_WAIT_MS: "20000"
-        run: go test -p 4 -timeout=8m ./internal/agent/... ./internal/appidentity/... ./internal/boot/... ./internal/checkpoint/... ./internal/cli/... ./internal/control/... ./internal/desktoplauncher/... ./internal/filelock/... ./internal/fileutil/... ./internal/hook/... ./internal/instruction/... ./internal/mcplaunch/... ./internal/notify/... ./internal/proc/... ./internal/remote/... ./internal/repair/... ./internal/sandbox/... ./internal/sysproxy/... ./internal/workspacelease/... ./cmd/...
+        run: go test -p 4 -timeout=8m ./internal/agent/... ./internal/appidentity/... ./internal/boot/... ./internal/checkpoint/... ./internal/cli/... ./internal/desktoplauncher/... ./internal/filelock/... ./internal/fileutil/... ./internal/hook/... ./internal/instruction/... ./internal/mcplaunch/... ./internal/notify/... ./internal/proc/... ./internal/remote/... ./internal/repair/... ./internal/sandbox/... ./internal/sysproxy/... ./internal/workspacelease/... ./cmd/...
 
       # The general Windows PR smoke list intentionally omits internal/tool.
       # Keep the session-temp portability contract covered without widening the
@@ -194,6 +195,30 @@ jobs:
         timeout-minutes: 10
         shell: powershell
         run: .\scripts\test-scoop-desktop-launch.ps1
+
+  windows-control:
+    needs: changes
+    if: always()
+    runs-on: windows-latest
+    env:
+      RUN_STEPS: ${{ github.event_name != 'pull_request' || needs.changes.outputs.code != 'false' }}
+    steps:
+      - if: env.RUN_STEPS == 'true'
+        uses: actions/checkout@v7
+
+      - if: env.RUN_STEPS == 'true'
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: test
+        if: env.RUN_STEPS == 'true'
+        timeout-minutes: 10
+        env:
+          REASONIX_RELEASE_CACHE_GUARD: "1"
+          WINDOWS_SANDBOX_WAIT_MS: "20000"
+        run: go test -p 1 -timeout=8m ./internal/control/...
 
   race:
     needs: changes
@@ -350,7 +375,7 @@ jobs:
       - name: Install Linux build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc libgtk-3-dev libwebkit2gtk-4.0-dev xvfb
+          sudo apt-get install -y dbus-daemon gcc libgtk-3-dev libwebkit2gtk-4.0-dev xvfb
 
       - name: Build frontend
         run: |
@@ -418,7 +443,7 @@ jobs:
       - name: Install WebKitGTK 4.1 build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc libgtk-3-dev libwebkit2gtk-4.1-dev xvfb
+          sudo apt-get install -y dbus-daemon gcc libgtk-3-dev libwebkit2gtk-4.1-dev xvfb
 
       - name: Build and test WebKitGTK 4.1 observer
         run: go test -tags webkit2_41 ./...
@@ -427,7 +452,7 @@ jobs:
         run: xvfb-run -a env WEBKIT_DISABLE_COMPOSITING_MODE=1 go test -tags 'webkit2_41 reasonix_webkit_smoke' . -run '^TestWebKitNativeRecoverySmoke$'
 
   # desktop/ is a separate module, so the root macOS matrix above does not
-  # compile or exercise the native PTY implementation.
+  # compile or exercise the native PTY and FSEvents implementations.
   desktop-macos:
     needs: changes
     if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false')
@@ -444,8 +469,16 @@ jobs:
           cache: true
           cache-dependency-path: desktop/go.sum
 
-      - name: Test integrated terminal and PTY lifecycle
-        run: go test -race -run 'Test(ResolveTerminal|Terminal|EmptyTerminal|UnixTerminalProcess)' .
+      - name: Test integrated terminal, PTY, and FSEvents lifecycle
+        run: go test -race -run 'Test(DarwinWorkspaceWatcher|WorkspaceChangeHub|ResolveTerminal|Terminal|EmptyTerminal|UnixTerminalProcess)' .
+
+      # The production Wails build uses CGO. Keep the explicit unavailable
+      # backend buildable as a fail-closed portability contract instead of
+      # silently falling back to kqueue's per-file descriptor usage.
+      - name: Test macOS build without CGO
+        env:
+          CGO_ENABLED: "0"
+        run: go test -run '^TestDarwinWorkspaceWatcherWithoutCGOIsUnavailable$' .
 
       # desktop/*_darwin.go is the one build-tag set the lint job cannot reach:
       # the main-thread watchdog is cgo, so it only type-checks with a real
@@ -528,9 +561,14 @@ jobs:
 
       - name: test (Windows desktop and update helper)
         timeout-minutes: 15
-        run: |
-          go test ./...
-          (cd third_party/go-webview2 && go test ./pkg/edge)
+        run: go test ./...
+
+      # A cold nested-module cache can spend several minutes compiling the
+      # real WebView2 cookie integration test. Keep its budget independent of
+      # the already-complete desktop suite and retain a Go timeout stack dump.
+      - name: test (vendored WebView2 edge)
+        timeout-minutes: 10
+        run: (cd third_party/go-webview2 && go test -timeout=8m ./pkg/edge)
 
       # Installer packaging is packaging validation, not a code gate: run it
       # on pushes to main-v2 (the release pipeline builds installers again

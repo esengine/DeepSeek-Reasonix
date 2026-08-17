@@ -19,10 +19,10 @@ const repeatFailureBreakThreshold = 2
 
 func (a *Agent) repeatedFailureBlock(ctx context.Context, call provider.ToolCall, t tool.Tool) (string, bool) {
 	sig, _, ok := a.repeatFailureSignature(call, t)
-	if !ok || a.repeatFailureCounts == nil {
+	if !ok || a.task.repeatFailures == nil {
 		return "", false
 	}
-	record, ok := a.repeatFailureCounts[sig]
+	record, ok := a.task.repeatFailures[sig]
 	if !ok || record.count < repeatFailureBreakThreshold {
 		return "", false
 	}
@@ -30,7 +30,7 @@ func (a *Agent) repeatedFailureBlock(ctx context.Context, call provider.ToolCall
 		if previewer, ok := t.(tool.Previewer); ok {
 			_, err := previewer.Preview(ctx, json.RawMessage(call.Arguments))
 			if err == nil || repeatFailureErrorClass(call.Name, err) != record.errClass {
-				delete(a.repeatFailureCounts, sig)
+				delete(a.task.repeatFailures, sig)
 				return "", false
 			}
 		}
@@ -50,11 +50,11 @@ func (a *Agent) recordRepeatFailure(call provider.ToolCall, t tool.Tool, execErr
 	if !ok {
 		return
 	}
-	if a.repeatFailureCounts == nil {
-		a.repeatFailureCounts = make(map[string]repeatFailureRecord)
+	if a.task.repeatFailures == nil {
+		a.task.repeatFailures = make(map[string]repeatFailureRecord)
 	}
 	errClass := repeatFailureErrorClass(call.Name, execErr)
-	record := a.repeatFailureCounts[sig]
+	record := a.task.repeatFailures[sig]
 	if record.errClass != errClass {
 		record = repeatFailureRecord{
 			errClass:     errClass,
@@ -63,7 +63,7 @@ func (a *Agent) recordRepeatFailure(call provider.ToolCall, t tool.Tool, execErr
 		}
 	}
 	record.count++
-	a.repeatFailureCounts[sig] = record
+	a.task.repeatFailures[sig] = record
 }
 
 func (a *Agent) repeatFailureSignature(call provider.ToolCall, t tool.Tool) (string, []string, bool) {
@@ -147,26 +147,26 @@ func repeatFailurePreviewRechecksState(name, errClass string) bool {
 }
 
 func (a *Agent) clearRepeatFailuresAfterMutation(toolName string, args json.RawMessage, readOnly bool) {
-	if len(a.repeatFailureCounts) == 0 {
+	if len(a.task.repeatFailures) == 0 {
 		return
 	}
 	rec := evidence.ReceiptFromToolCall(toolName, args, true, readOnly)
 	mutatedPaths := a.normalizeRepeatFailurePaths(rec.Paths)
 	if len(mutatedPaths) == 0 {
-		for sig, failure := range a.repeatFailureCounts {
+		for sig, failure := range a.task.repeatFailures {
 			// Anchor errors have an exact, side-effect-free state check. Keep
 			// their history until Preview shows that the old anchor works again.
 			if !failure.stateRecheck {
-				delete(a.repeatFailureCounts, sig)
+				delete(a.task.repeatFailures, sig)
 			}
 		}
 		return
 	}
-	for sig, failure := range a.repeatFailureCounts {
+	for sig, failure := range a.task.repeatFailures {
 		// A different edit to the same file does not make this old anchor valid.
 		// repeatedFailureBlock rechecks the actual call through Preview.
 		if !failure.stateRecheck && repeatFailurePathsOverlap(failure.paths, mutatedPaths) {
-			delete(a.repeatFailureCounts, sig)
+			delete(a.task.repeatFailures, sig)
 		}
 	}
 }

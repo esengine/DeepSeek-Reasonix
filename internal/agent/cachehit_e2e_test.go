@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -41,9 +42,10 @@ func (echoTool) Execute(_ context.Context, args json.RawMessage) (string, error)
 // collectSink captures the per-turn Usage events plus any compaction notices the
 // agent emits, so the test can replay exactly what the status line would show.
 type collectSink struct {
-	usages  []*provider.Usage
-	notices []string
-	blocked bool
+	usages      []*provider.Usage
+	notices     []string
+	maintenance []event.ContextMaintenance
+	blocked     bool
 }
 
 func (s *collectSink) Emit(e event.Event) {
@@ -55,8 +57,11 @@ func (s *collectSink) Emit(e event.Event) {
 	case event.Notice:
 		s.notices = append(s.notices, e.Text)
 	case event.ContextMaintenanceEvent:
-		if e.Maintenance != nil && e.Maintenance.Status == "blocked" {
-			s.blocked = true
+		if e.Maintenance != nil {
+			s.maintenance = append(s.maintenance, *e.Maintenance)
+			if e.Maintenance.Status == "blocked" {
+				s.blocked = true
+			}
 		}
 	}
 }
@@ -77,10 +82,15 @@ type mockDeepSeek struct {
 func (m *mockDeepSeek) handler(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 
-	// Compaction issues a tool-less summarize request whose system prompt is the
-	// summarizer prompt — answer it with a short summary and DON'T let it pollute
-	// the conversation-prefix bookkeeping.
+	// Compaction appends one final instruction to the ordinary cached prefix.
+	// Answer it with a short summary and do not let it replace conversation
+	// bookkeeping; the replayed prefix itself must match the prior request.
 	if isSummarizeRequest(body) {
+		msgs := decodeMessages(body)
+		replayed := msgs[:len(msgs)-1]
+		if len(m.prevMessages) > 0 && commonPrefixMsgs(m.prevMessages, replayed) != len(replayed) {
+			m.t.Errorf("summary request did not replay a byte-identical cached conversation prefix")
+		}
 		writeSSE(w, m.t,
 			streamChunk(deltaText("- goal: keep going\n- decisions: none\n- pending: continue")),
 			finishChunk("stop"),
@@ -225,50 +235,19 @@ func TestCacheHitClimbsWithoutCompaction(t *testing.T) {
 	}
 }
 
-// TestCacheHitSurvivesTooSmallWindow covers a window too small to summarize one
-// turn. Maintenance must stop rewriting the same prefix and let cache hits
-// recover instead of collapsing after every tool result.
-func TestCacheHitSurvivesTooSmallWindow(t *testing.T) {
+// A window too small to hold even the system and active tail cannot be repaired
+// by fabricating a mechanical digest.
+func TestTooSmallWindowReturnsCompactionRequired(t *testing.T) {
 	mock := &mockDeepSeek{t: t, withTools: true, reasoning: longReasoning, toolRounds: 30}
 	srv := httptest.NewServer(http.HandlerFunc(mock.handler))
 	defer srv.Close()
 
 	a, sink := newAgent(t, srv.URL, mock.tools(), 900 /*window tok*/, 4 /*recentKeep*/)
 
-	if err := a.Run(context.Background(), strings.Repeat("please consider this requirement. ", 6)); err != nil {
-		t.Fatalf("Run: %v", err)
+	if err := a.Run(context.Background(), strings.Repeat("please consider this requirement. ", 6)); !errors.Is(err, ErrCompactionRequired) {
+		t.Fatalf("Run = %v, want ErrCompactionRequired", err)
 	}
-
-	t.Logf("==== hit-rate curve, too-small window (900 tok) ====")
-	collapses := 0
-	for i, u := range sink.usages {
-		r := hitRate(u)
-		marker := ""
-		if i > 0 && r+20 < hitRate(sink.usages[i-1]) {
-			marker = "   <<< collapse"
-			collapses++
-		}
-		t.Logf("step %2d: prompt=%5d hit=%5d miss=%4d → cache %3d%%%s", i, u.PromptTokens, u.CacheHitTokens, u.CacheMissTokens, r, marker)
-	}
-
-	for _, n := range sink.notices {
-		t.Logf("notice: %s", n)
-	}
-	if sink.blocked {
-		t.Log("context maintenance entered a durable blocked state")
-	}
-
-	// The guard caps the damage: a couple of compactions at most, not one per step.
-	if collapses > 2 {
-		t.Errorf("compaction cratered the cache %d times; the stuck guard should cap it at ≤2", collapses)
-	}
-	// With or without a blocked receipt, the same prefix must not be rewritten
-	// after every following tool result, so the tail cache rate recovers.
-	if n := len(sink.usages); n >= 6 {
-		if tail := tailAverage(usageRates(sink.usages), 5); tail < 85 {
-			t.Errorf("tail hit rate after the guard kicked in = %d%%, want ≥85%%", tail)
-		}
-	}
+	_ = sink
 }
 
 // TestReasoningRoundTripCost contrasts the hit-rate curve WITH vs WITHOUT the
@@ -585,8 +564,8 @@ func isSummarizeRequest(body []byte) bool {
 		Role    string `json:"role"`
 		Content string `json:"content"`
 	}
-	_ = json.Unmarshal(msgs[0], &m)
-	return m.Role == "system" && strings.Contains(m.Content, "compacting the earlier part")
+	_ = json.Unmarshal(msgs[len(msgs)-1], &m)
+	return m.Role == "user" && strings.Contains(m.Content, "Compact the preceding conversation prefix")
 }
 
 func commonPrefixMsgs(a, b []json.RawMessage) int {

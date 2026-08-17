@@ -73,15 +73,16 @@ type InboxItemView struct {
 
 // InboxSnapshotView is the Wails-facing queue snapshot.
 type InboxSnapshotView struct {
-	Revision   int64           `json:"revision"`
-	Paused     bool            `json:"paused"`
-	Recovered  bool            `json:"recovered"`
-	RecoveredN int             `json:"recoveredCount,omitempty"`
-	Items      []InboxItemView `json:"items"`
-	ItemsCount int             `json:"itemsCount"`
-	Bytes      int64           `json:"bytes"`
-	MaxItems   int             `json:"maxItems"`
-	MaxBytes   int64           `json:"maxBytes"`
+	Revision    int64           `json:"revision"`
+	Paused      bool            `json:"paused"`
+	Recovered   bool            `json:"recovered"`
+	RecoveredN  int             `json:"recoveredCount,omitempty"`
+	SessionPath string          `json:"sessionPath,omitempty"`
+	Items       []InboxItemView `json:"items"`
+	ItemsCount  int             `json:"itemsCount"`
+	Bytes       int64           `json:"bytes"`
+	MaxItems    int             `json:"maxItems"`
+	MaxBytes    int64           `json:"maxBytes"`
 }
 
 // InboxReceiptView is returned after durable enqueue/steer.
@@ -92,6 +93,19 @@ type InboxReceiptView struct {
 	Paused      bool   `json:"paused"`
 	Idempotent  bool   `json:"idempotent,omitempty"`
 	Error       string `json:"error,omitempty"`
+}
+
+// InboxCancelResultView is the backend-confirmed withdrawal receipt. The
+// frontend must restore only these durable item IDs into the draft.
+type InboxCancelResultView struct {
+	DiscardedItemIDs []string `json:"discardedItemIds"`
+	Warning          string   `json:"warning,omitempty"`
+}
+
+type inboxChangedView struct {
+	TabID       string `json:"tabId"`
+	SessionPath string `json:"sessionPath,omitempty"`
+	Revision    int64  `json:"revision,omitempty"`
 }
 
 // InboxEnvelopeView is the full body for the editor (fetched by id only).
@@ -118,15 +132,16 @@ func inboxSnapshotView(snap sessioninbox.InboxSnapshot) InboxSnapshotView {
 		})
 	}
 	return InboxSnapshotView{
-		Revision:   snap.Revision,
-		Paused:     snap.Paused,
-		Recovered:  snap.Recovered,
-		RecoveredN: snap.RecoveredN,
-		Items:      items,
-		ItemsCount: len(items),
-		Bytes:      snap.Capacity.Bytes,
-		MaxItems:   snap.Capacity.MaxItems,
-		MaxBytes:   snap.Capacity.MaxBytes,
+		Revision:    snap.Revision,
+		Paused:      snap.Paused,
+		Recovered:   snap.Recovered,
+		RecoveredN:  snap.RecoveredN,
+		SessionPath: snap.SessionPath,
+		Items:       items,
+		ItemsCount:  len(items),
+		Bytes:       snap.Capacity.Bytes,
+		MaxItems:    snap.Capacity.MaxItems,
+		MaxBytes:    snap.Capacity.MaxBytes,
 	}
 }
 
@@ -200,6 +215,24 @@ func (a *App) CancelTabWithInboxItems(tabID string, itemIDs []string) error {
 	}
 	a.emitInboxChanged(tabID)
 	return nil
+}
+
+// CancelTabWithInboxItemsResult is the receipt-capable cancellation API. It is
+// additive so older desktop frontends can continue using the legacy method.
+func (a *App) CancelTabWithInboxItemsResult(tabID string, itemIDs []string) (InboxCancelResultView, error) {
+	view := InboxCancelResultView{DiscardedItemIDs: []string{}}
+	ctrl, err := a.inboxCtrl(tabID)
+	if err != nil {
+		return view, err
+	}
+	result, err := ctrl.CancelWithInboxItemsResult(itemIDs, "desktop")
+	if err != nil {
+		return view, inboxWailsError(err)
+	}
+	view.DiscardedItemIDs = append(view.DiscardedItemIDs, result.DiscardedItemIDs...)
+	view.Warning = result.Warning
+	a.emitInboxChanged(tabID)
+	return view, nil
 }
 
 func (a *App) enqueueInbox(tabID string, intent sessioninbox.InboxIntent, display, submit string, invocations []InvocationRequest, idempotency string, trySteer bool) (InboxReceiptView, error) {

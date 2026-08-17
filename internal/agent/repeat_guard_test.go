@@ -95,13 +95,13 @@ func TestRepeatGuardBlocksRepeatedSuccessfulBashFileWrite(t *testing.T) {
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
 
-	if err := a.Run(context.Background(), "update the prompt file"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "update the prompt file"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := atomic.LoadInt32(&calls); got != 2 {
 		t.Fatalf("bash executed %d times, want 2 before the repeat guard blocks", got)
 	}
-	results := toolResults(a.session, "bash")
+	results := toolResults(a.sess.conversation, "bash")
 	if len(results) != 3 {
 		t.Fatalf("tool results = %d, want 3", len(results))
 	}
@@ -124,13 +124,13 @@ func TestRepeatGuardAllowsRepeatedNonWritingBashCommand(t *testing.T) {
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
 
-	if err := a.Run(context.Background(), "verify repeatedly"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "verify repeatedly"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := atomic.LoadInt32(&calls); got != 3 {
 		t.Fatalf("bash executed %d times, want 3 for non-writing commands", got)
 	}
-	if last := lastToolResult(a.session, "bash"); strings.Contains(last, "[loop guard]") {
+	if last := lastToolResult(a.sess.conversation, "bash"); strings.Contains(last, "[loop guard]") {
 		t.Fatalf("non-writing bash should not trip the repeat guard, got %q", last)
 	}
 }
@@ -232,13 +232,13 @@ func TestRepeatGuardAllowsTwoRepeatedWriterSuccesses(t *testing.T) {
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
 
-	if err := a.Run(context.Background(), "write twice"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "write twice"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := atomic.LoadInt32(&calls); got != 2 {
 		t.Fatalf("writer executed %d times, want 2 before the guard threshold", got)
 	}
-	if last := lastToolResult(a.session, "write_file"); strings.Contains(last, "[loop guard]") {
+	if last := lastToolResult(a.sess.conversation, "write_file"); strings.Contains(last, "[loop guard]") {
 		t.Fatalf("second repeated writer call should still be allowed, got %q", last)
 	}
 }
@@ -263,7 +263,7 @@ func TestRepeatGuardBlocksStaleEditLoopAcrossSuccessfulReads(t *testing.T) {
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
 
-	if err := a.Run(context.Background(), "fix prompt.txt"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "fix prompt.txt"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := atomic.LoadInt32(&editCalls); got != 2 {
@@ -272,7 +272,7 @@ func TestRepeatGuardBlocksStaleEditLoopAcrossSuccessfulReads(t *testing.T) {
 	if got := atomic.LoadInt32(&readCalls); got != 2 {
 		t.Fatalf("read_file executed %d times, want 2", got)
 	}
-	last := lastToolResult(a.session, "edit_file")
+	last := lastToolResult(a.sess.conversation, "edit_file")
 	for _, want := range []string{"[loop guard]", "already failed 2 times", "Re-reading alone"} {
 		if !strings.Contains(last, want) {
 			t.Fatalf("blocked stale edit result should mention %q, got %q", want, last)
@@ -311,7 +311,7 @@ func TestRepeatGuardRetainsStaleEditFailuresAcrossGoalScope(t *testing.T) {
 	if got := atomic.LoadInt32(&editCalls); got != 2 {
 		t.Fatalf("edit_file executed %d times across one goal scope, want 2", got)
 	}
-	if last := lastToolResult(a.session, "edit_file"); !strings.Contains(last, "[loop guard]") {
+	if last := lastToolResult(a.sess.conversation, "edit_file"); !strings.Contains(last, "[loop guard]") {
 		t.Fatalf("third goal-scope edit should be blocked, got %q", last)
 	}
 }

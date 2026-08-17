@@ -124,7 +124,6 @@ globalThis.MouseEvent = dom.window.MouseEvent;
 globalThis.localStorage = dom.window.localStorage;
 globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
-
 const context: ContextInfo = { used: 12, window: 100, sessionTokens: 12 };
 const effort: EffortInfo = { supported: true, current: "auto", default: "auto", levels: ["auto"] };
 const balance: BalanceInfo = { available: false, display: "" };
@@ -134,7 +133,7 @@ const tabA = tabMeta("tab-a", { active: true });
 const tabB = tabMeta("tab-b");
 const tabC = tabMeta("tab-c");
 const tabD = tabMeta("tab-d");
-const tabE = tabMeta("tab-e");
+const tabE = tabMeta("tab-e", { turnStartedAt: Date.now() - 45_000 });
 const tabF = tabMeta("tab-f");
 const tabG = tabMeta("tab-g");
 const tabH = tabMeta("tab-h");
@@ -515,6 +514,7 @@ await act(async () => {
 });
 eq(controller?.activeTabId, "tab-e", "switching to a backend-running tab updates the active tab immediately");
 eq(controller?.state.running, true, "backend-running tab restores the stop state before backend activation settles");
+eq(controller?.state.turnStartAt, tabE.turnStartedAt, "backend-running tab restores the original turn timer before activation settles");
 eq(controller?.state.cancellable, true, "backend-running tab remains cancellable before backend activation settles");
 await act(async () => {
   controller?.cancel();
@@ -628,7 +628,7 @@ ok(controller?.state.items.some((item) => item.kind === "user" && item.text === 
 const tabCUser = controller?.state.items.find((item) => item.kind === "user" && item.text === "streaming C");
 eq(tabCUser?.kind === "user" && tabCUser.submissionId, tabCSubmissionId, "Wails receives the same opaque correlation stored on the optimistic user");
 ok(Boolean(tabCSubmissionId) && tabCSubmissionId !== tabCUser?.id, "opaque submission correlation is distinct from the render item id");
-ok(!historyCalls.includes("tab-c"), "cached running tab skips history hydration");
+ok(historyCalls.includes("tab-c"), "a running tab with no history page of its own still hydrates one");
 await act(async () => {
   submitTabCGate.resolve();
   await submitTabCGate.promise;
@@ -642,7 +642,7 @@ await act(async () => {
 });
 eq(controller?.activeTabId, "tab-d", "openProjectTab activates the opened tab");
 eq(controller?.state.items.length, 0, "open topic keeps the new tab transcript empty while hydrating");
-ok(controller?.state.hydratePlaceholderItems?.some((item) => item.kind === "user" && item.text === "streaming C") ?? false, "open topic stores previous transcript only as a hydration placeholder");
+eq(controller?.state.hydratePlaceholderItems?.length ?? 0, 0, "cross-session open never reuses the source transcript as a placeholder");
 
 await act(async () => {
   historyD.resolve([userMessage("history D")]);
@@ -792,10 +792,9 @@ await act(async () => {
   await controller?.openProjectTab(tabH.workspaceRoot, tabH.topicId || "");
   await flushPromises();
 });
-await waitFor("reopened tab-h treats stale late meta as discarded", () =>
-  controller?.activeTabId === "tab-h" &&
-  controller.state.hydrating === true &&
-  (controller.state.hydratePlaceholderItems?.some((item) => item.kind === "user" && item.text === "history G") ?? false)
+await waitFor("reopened tab-h isolates the prior surface while loading", () =>
+  controller?.activeTabId === "tab-h" && controller.state.hydrating === true && controller.state.items.length === 0 &&
+  (controller.state.hydratePlaceholderItems?.length ?? 0) === 0
 );
 await act(async () => {
   historyH.resolve([userMessage("history H after stale meta")]);

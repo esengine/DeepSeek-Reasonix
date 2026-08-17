@@ -47,9 +47,9 @@ func TestToolResultImagesBypassTruncation(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	var msg *provider.Message
-	for i := range a.session.Messages {
-		if a.session.Messages[i].Role == provider.RoleTool && a.session.Messages[i].Name == "shot" {
-			msg = &a.session.Messages[i]
+	for i := range a.sess.conversation.Messages {
+		if a.sess.conversation.Messages[i].Role == provider.RoleTool && a.sess.conversation.Messages[i].Name == "shot" {
+			msg = &a.sess.conversation.Messages[i]
 			break
 		}
 	}

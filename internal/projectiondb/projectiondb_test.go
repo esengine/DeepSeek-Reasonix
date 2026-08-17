@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +32,10 @@ func TestOpenAppliesLedgerAndPrivatePermissions(t *testing.T) {
 	var version int
 	if err := handle.DB.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 1 {
 		t.Fatalf("version=%d err=%v", version, err)
+	}
+	if runtime.GOOS == "windows" {
+		// os.Chmod cannot express POSIX 0600 on Windows (read-only bit only).
+		return
 	}
 	if info, err := os.Stat(path); err != nil || info.Mode().Perm()&0o077 != 0 {
 		t.Fatalf("database permissions=%v err=%v", info.Mode().Perm(), err)

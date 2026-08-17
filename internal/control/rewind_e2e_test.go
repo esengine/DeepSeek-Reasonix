@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -253,17 +254,49 @@ func TestRewindConversationSucceedsWithLiveBoundary(t *testing.T) {
 		t.Fatalf("Rewind with a live boundary: %v", err)
 	}
 	if got := len(ag.Session().Messages); got != boundary {
-		t.Fatalf("session truncated to %d messages, want boundary %d", got, boundary)
+		t.Fatalf("switched session = %d messages, want boundary %d", got, boundary)
 	}
 	ok := false
 	for _, e := range *events {
-		if e.Kind == event.Notice && strings.Contains(e.Text, "rewound conversation") {
+		if e.Kind == event.Notice && strings.Contains(e.Text, "forked conversation") {
 			ok = true
 		}
 	}
 	if !ok {
-		t.Fatal("expected a conversation-rewind success notice")
+		t.Fatal("expected a conversation-fork success notice")
 	}
+}
+
+func TestCompatibilityRewindTransfersLeaseBeforeForkSwitch(t *testing.T) {
+	c, ag, _ := runTwoTurns(t)
+	originalPath := c.SessionPath()
+	keeper := NewSessionLeaseKeeper()
+	defer keeper.Release()
+	if err := keeper.Rebind(originalPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := keeper.BindControllerAuthority(c); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := c.Rewind(1, RewindConversation); err != nil {
+		t.Fatalf("Rewind: %v", err)
+	}
+	targetPath := c.SessionPath()
+	if targetPath == originalPath {
+		t.Fatal("conversation rewind did not switch to its fork")
+	}
+	if got := keeper.HeldPath(); got != agent.CanonicalSessionPath(targetPath) {
+		t.Fatalf("keeper path = %q, want %q", got, agent.CanonicalSessionPath(targetPath))
+	}
+	if auth := ag.Session().WriteAuthority(); auth == nil || !auth.Covers(targetPath) {
+		t.Fatal("fork was published without target write authority")
+	}
+	old, err := agent.TryAcquireSessionLease(originalPath)
+	if err != nil {
+		t.Fatalf("parent lease remained held after switch: %v", err)
+	}
+	old.Release()
 }
 
 func TestPositionalCompressionPreservesCheckpointLineage(t *testing.T) {
@@ -316,6 +349,68 @@ func TestPositionalCompressionPreservesCheckpointLineage(t *testing.T) {
 	}
 }
 
+// TestTailRewindKeepsCompactionProjection covers the desktop edit flow at its
+// final boundary: edit = conversation rewind + resubmit. A rewind whose
+// boundary lands in the live tail (past the fold start) must keep the
+// compaction projection instead of ballooning the context back to the
+// pre-compaction transcript and re-paying a full summary.
+func TestTailRewindKeepsCompactionProjection(t *testing.T) {
+	dir := t.TempDir()
+	prov := &scriptedTurns{turns: [][]provider.Chunk{
+		textTurn("first answer"),
+		textTurn("second answer"),
+	}}
+	ag := agent.New(prov, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{
+		ContextWindow: 10_000, CompactRatio: 0.80, RecentKeep: 2,
+	}, event.Discard)
+	c := New(Options{
+		Runner:     ag,
+		Executor:   ag,
+		SessionDir: dir,
+		Label:      "test",
+		Sink:       event.Discard,
+	})
+	c.SetSessionPath(agent.NewSessionPath(dir, "test"))
+	ctx := context.Background()
+	if err := c.runTurnWithRaw(ctx, "first prompt", "first prompt"); err != nil {
+		t.Fatalf("turn 1: %v", err)
+	}
+	big := strings.Repeat("line\n", 200)
+	sess := ag.Session()
+	for i := range 40 {
+		id := fmt.Sprintf("bulk-%d", i)
+		sess.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: id, Name: "read_file", Arguments: "{}"}}})
+		sess.Add(provider.Message{Role: provider.RoleTool, ToolCallID: id, Name: "read_file", Content: big})
+	}
+	if err := c.runTurnWithRaw(ctx, "second prompt", "second prompt"); err != nil {
+		t.Fatalf("turn 2: %v", err)
+	}
+	if err := ag.CompactNow(ctx, ""); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	before := ag.ContextMaintenanceSnapshot()
+	if before.ProjectionVersion == 0 || before.ProjectedTokens >= before.FoldTrigger {
+		t.Fatalf("pre-rewind snapshot = %+v, want an installed projection under the fold trigger", before)
+	}
+
+	c.checkpoints.mu.Lock()
+	lastTurn := c.checkpoints.turn - 1
+	c.checkpoints.mu.Unlock()
+	if err := c.Rewind(lastTurn, RewindConversation); err != nil {
+		t.Fatalf("tail rewind: %v", err)
+	}
+
+	after := ag.ContextMaintenanceSnapshot()
+	if after.ProjectionVersion != before.ProjectionVersion {
+		t.Fatalf("projection version %d -> %d, want the fold kept across a tail-only rewind",
+			before.ProjectionVersion, after.ProjectionVersion)
+	}
+	if after.ProjectedTokens >= after.FoldTrigger {
+		t.Fatalf("post-rewind view %d tokens at or above fold %d, want the compacted size kept",
+			after.ProjectedTokens, after.FoldTrigger)
+	}
+}
+
 func TestEditPromptPersistsOriginalPrompt(t *testing.T) {
 	c, ag, _ := runTwoTurns(t)
 
@@ -334,7 +429,7 @@ func TestEditPromptPersistsOriginalPrompt(t *testing.T) {
 			msgs := loaded.Snapshot()
 			if len(msgs) >= 2 {
 				last := msgs[len(msgs)-2]
-				if last.Role == provider.RoleUser && last.Content == "edited prompt" {
+				if last.Role == provider.RoleUser && agent.StripTransientUserBlocks(last.Content) == "edited prompt" {
 					break
 				}
 			}
@@ -346,7 +441,7 @@ func TestEditPromptPersistsOriginalPrompt(t *testing.T) {
 	}
 	msgs := loaded.Snapshot()
 	last := msgs[len(msgs)-2]
-	if last.Role != provider.RoleUser || last.Content != "edited prompt" {
+	if last.Role != provider.RoleUser || agent.StripTransientUserBlocks(last.Content) != "edited prompt" {
 		t.Fatalf("last user message = %+v, want edited prompt", last)
 	}
 	if !last.Edited || last.Original != "second prompt" {

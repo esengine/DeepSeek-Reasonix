@@ -56,7 +56,7 @@ func TestContextUsedTokensMatchesTheTriggerInput(t *testing.T) {
 	a := usageFixture(t, 12)
 	// A stale, tiny reading from the previous turn — exactly what a fold leaves
 	// behind, and what the gauge used to display.
-	a.lastUsage.Store(&provider.Usage{PromptTokens: 900, CompletionTokens: 100})
+	a.sess.output.lastUsage.Store(&provider.Usage{PromptTokens: 900, CompletionTokens: 100})
 
 	used := a.ContextUsedTokens()
 	if got := a.ContextMaintenanceSnapshot().ProjectedTokens; used != got {
@@ -147,7 +147,7 @@ func TestContextUsedTokensFollowsTheTranscript(t *testing.T) {
 		t.Fatal("repeated reads of an unchanged view disagreed")
 	}
 
-	a.session.Add(provider.Message{Role: provider.RoleUser, Content: strings.Repeat("more context\n", 500)})
+	a.sess.conversation.Add(provider.Message{Role: provider.RoleUser, Content: strings.Repeat("more context\n", 500)})
 	after := a.ContextUsedTokens()
 	if after <= before {
 		t.Fatalf("gauge %d -> %d, want the appended turn counted", before, after)

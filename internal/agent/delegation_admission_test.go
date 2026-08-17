@@ -12,13 +12,13 @@ func TestDelegationAdmissionVerdicts(t *testing.T) {
 		name, input, args, verdict, reason string
 	}{
 		{"local fix, plain query", "fix the config serializer bug in parser.go",
-			`{"prompt":"how does the serializer format keys"}`, "deny", "local_fix_no_external_need"},
+			`{"prompt":"how does the serializer format keys"}`, "allow", "model_decides"},
 		{"user asked for research", "research the best TOML library and fix the loader",
-			`{"prompt":"compare toml libraries"}`, "allow", "user_requested"},
+			`{"prompt":"compare toml libraries"}`, "allow", "model_decides"},
 		{"external source cited", "fix the retry logic to match the upstream spec",
-			`{"prompt":"read https://example.com/spec and summarize backoff rules"}`, "allow", "external_source_cited"},
+			`{"prompt":"read https://example.com/spec and summarize backoff rules"}`, "allow", "model_decides"},
 		{"advisory turn", "how does our retry budget compare to industry practice?",
-			`{"prompt":"survey retry budget conventions"}`, "allow", "non_local_intent"},
+			`{"prompt":"survey retry budget conventions"}`, "allow", "model_decides"},
 	}
 	for _, c := range cases {
 		verdict, reason, _ := delegationAdmission(c.input, c.args)
@@ -39,8 +39,8 @@ func (s *admissionSink) RecordDelegationAdmission(a event.DelegationAdmissionAud
 
 func TestObserveDelegationAdmissionRecordsOnlyGatedTools(t *testing.T) {
 	sink := &admissionSink{}
-	a := &Agent{sink: sink}
-	a.recoveryTaskSummary = "fix the failing date parser"
+	a := &Agent{svc: agentServices{sink: sink}}
+	a.turn.recoveryTaskSummary = "fix the failing date parser"
 	a.observeDelegationAdmission([]provider.ToolCall{
 		{Name: "read_file", Arguments: `{"path":"a.go"}`},
 		{Name: "research", Arguments: `{"prompt":"date formats"}`},
@@ -56,8 +56,8 @@ func TestObserveDelegationAdmissionRecordsOnlyGatedTools(t *testing.T) {
 		if got.Tool == "read_file" {
 			t.Fatalf("a non-delegation tool was audited: %+v", got)
 		}
-		if got.Verdict != "deny" || got.Reason != "local_fix_no_external_need" || got.Intent != "mutation" {
-			t.Fatalf("audit = %+v, want deny/local_fix_no_external_need on mutation intent", got)
+		if got.Verdict != "allow" || got.Reason != "model_decides" {
+			t.Fatalf("audit = %+v, want allow/model_decides", got)
 		}
 	}
 }

@@ -47,7 +47,7 @@ import (
 // live streams emit tokens/keepalives far more often. Stored per-client
 // (client.idleTimeout) so a test can shorten it without a shared global that
 // would race other streams' watchdogs.
-const defaultStreamIdleTimeout = 120 * time.Second
+const defaultStreamIdleTimeout = 300 * time.Second
 
 // maxPrefixContinuations keeps automatic recovery bounded. A second length
 // finish is surfaced through the existing truncation notice instead of opening
@@ -84,12 +84,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	// A meaningful explicit list is the endpoint's declared effort vocabulary;
 	// auto remains implicit and is therefore ignored here.
 	supportedEfforts, hasExplicitEfforts := reasoningEffortVocabulary(kimiK3, supportedEfforts)
-	legacyChatURL, _ := cfg.Extra["chat_url"].(string)
-	chatURL, _ := cfg.Extra["request_url"].(string)
-	chatURL = strings.TrimSpace(chatURL)
-	if chatURL == "" {
-		chatURL = normalizeChatURL(cfg.BaseURL, legacyChatURL)
-	}
+	chatURL := resolveOpenAIChatURL(cfg.BaseURL, cfg.Extra)
 	prefixChatURL := deepSeekPrefixChatURL(chatURL)
 	headers, _ := cfg.Extra["headers"].(map[string]string)
 	extraBody, _ := cfg.Extra["extra_body"].(map[string]any)
@@ -108,7 +103,8 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	}
 	deepseek := protocol == "deepseek" || (protocol == "" && officialDeepSeek)
 	maxOutputTokens, _ := cfg.Extra["max_output_tokens"].(int)
-	deepseekV4Flash := strings.EqualFold(strings.TrimSpace(cfg.Model), "deepseek-v4-flash")
+	deepseekV4Model := strings.EqualFold(strings.TrimSpace(cfg.Model), "deepseek-v4-flash") ||
+		strings.EqualFold(strings.TrimSpace(cfg.Model), "deepseek-v4-pro")
 	minimax := protocol == "" && IsMiniMax(cfg.BaseURL)
 	zhipu := protocol == "glm" || (protocol == "" && IsZhipu(cfg.BaseURL))
 	longcat := protocol == "" && IsLongCat(cfg.BaseURL)
@@ -121,6 +117,9 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		if thinkingType == "disabled" {
 			effort = ""
 			break
+		}
+		if deepseekV4Model && !hasExplicitEfforts && (effort == "medium" || effort == "xhigh") {
+			effort = "high"
 		}
 		switch effort {
 		case "", "off": // "off" is a retired level (disabled thinking); fall back to the default depth
@@ -145,8 +144,8 @@ func New(cfg provider.Config) (provider.Provider, error) {
 			}
 			switch effort {
 			case "low":
-				if !deepseekV4Flash {
-					return nil, fmt.Errorf("openai: provider %q uses DeepSeek thinking; effort low requires deepseek-v4-flash or explicit supported_efforts", name)
+				if !deepseekV4Model {
+					return nil, fmt.Errorf("openai: provider %q uses DeepSeek thinking; effort low requires deepseek-v4-flash, deepseek-v4-pro, or explicit supported_efforts", name)
 				}
 			case "high", "max":
 			default:
@@ -220,18 +219,12 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		}
 	}
 	requestEfforts := requestEffortVocabulary(effortEndpoint{protocol: protocol,
-		thinkingType: thinkingType, effort: effort, deepseek: deepseek, flash: deepseekV4Flash,
+		thinkingType: thinkingType, effort: effort, deepseek: deepseek, v4Low: deepseekV4Model,
 		minimax: minimax, zhipu: zhipu, longcat: longcat, ollamaCloud: ollamaCloud,
 		explicit: hasExplicitEfforts, supported: supportedEfforts})
-	// max_output_tokens=0 means automatic (not unlimited). DeepSeek reasoning
-	// uses 32K / high-max 64K; thinking-disabled stays ordinary 16K. 128K is
-	// never automatic — users must set it explicitly after length truncations.
-	// This budget never participates in compact_ratio.
-	autoMaxOutput := maxOutputTokens == 0 && officialDeepSeek
-	if autoMaxOutput {
-		reasoningOn := thinkingType != "disabled" && effort != "disabled" && effort != "off" && effort != "none"
-		maxOutputTokens = provider.AutoOutputBudget(reasoningOn, effort)
-	}
+	// max_output_tokens=0 on official DeepSeek omits the wire field so the
+	// server uses its 384K ceiling. Effort only selects thinking depth.
+	// Non-DeepSeek endpoints leave 0 as "unset / omit". Never compact_ratio.
 	httpClient, err := newHTTPClient(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("openai: network: %w", err)
@@ -257,7 +250,6 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		vision:          vision,
 		visionDetail:    visionDetail,
 		maxOutputTokens: maxOutputTokens,
-		autoMaxOutput:   autoMaxOutput,
 		effort:          effort,
 		requestEfforts:  requestEfforts,
 		http:            httpClient,
@@ -271,7 +263,7 @@ func newHTTPClient(cfg provider.Config) (*http.Client, error) {
 		DialTimeout:           30 * time.Second,
 		KeepAlive:             30 * time.Second,
 		TLSHandshakeTimeout:   15 * time.Second,
-		ResponseHeaderTimeout: 120 * time.Second, // models can think for a while before the first token
+		ResponseHeaderTimeout: 300 * time.Second, // unified provider response-header idle guard
 	})
 }
 
@@ -297,7 +289,6 @@ type client struct {
 	vision          bool          // model accepts image input — embed attached images as image_url parts
 	visionDetail    string        // image_url detail hint (low|high); "" = auto/omit
 	maxOutputTokens int           // resolved total output budget; <=0 omits the optional field
-	autoMaxOutput   bool          // true when max_output_tokens=0 (automatic ladder)
 	effort          string        // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
 	requestEfforts  []string      // depth levels a per-request EffortOverride may take; empty = overrides ignored
 	idleTimeout     time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
@@ -307,7 +298,20 @@ type client struct {
 func (c *client) Name() string { return c.name }
 
 func (c *client) RequiresToolCallReasoning() bool {
-	return c != nil && c.deepseek && c.thinkingType != "disabled"
+	if c == nil || c.thinkingType == "disabled" {
+		return false
+	}
+	if c.deepseek {
+		return true
+	}
+	// Generic OpenAI-compatible gateways can explicitly opt into the
+	// DeepSeek-style replay contract with thinking=enabled (#7763/#7748).
+	// GLM and Kimi K3 keep their broader round-trip policies.
+	return !c.zhipu && !c.kimiK3 && c.thinkingType == "enabled"
+}
+
+func (c *client) AllowsEmptyReasoningFallback() bool {
+	return c != nil && (c.RequiresToolCallReasoning() || c.glmThinkingEnabled())
 }
 
 func (c *client) RequiresReasoningRoundTrip() bool {
@@ -372,13 +376,6 @@ func normalizeReasoningProtocol(raw string) string {
 	default:
 		return ""
 	}
-}
-
-func normalizeChatURL(baseURL, chatURL string) string {
-	if legacy := strings.TrimRight(strings.TrimSpace(chatURL), "/"); legacy != "" {
-		return legacy
-	}
-	return strings.TrimRight(strings.TrimSpace(baseURL), "/") + "/chat/completions"
 }
 
 func cleanCustomHeaders(in map[string]string) map[string]string {
@@ -724,15 +721,14 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 				// Kimi K3 requires the complete assistant message on multi-turn
 				// and tool-call requests, including provider-issued reasoning.
 				cm.ReasoningContent = &m.ReasoningContent
-			case c.deepseek && len(m.ToolCalls) > 0:
+			case (c.deepseek || c.RequiresToolCallReasoning()) && len(m.ToolCalls) > 0:
 				if c.RequiresToolCallReasoning() || m.ReasoningContent != "" {
 					cm.ReasoningContent = &m.ReasoningContent
 				}
-			case c.zhipu && m.ReasoningContent != "":
+			case c.zhipu && (m.ReasoningContent != "" || (c.glmThinkingEnabled() && len(m.ToolCalls) > 0)):
 				// GLM interleaved and preserved thinking require provider-issued
-				// reasoning content to be returned unchanged in later history. Keep
-				// an existing value even after thinking is turned off so an
-				// enabled→disabled session retains its valid history bytes.
+				// reasoning unchanged. Coding Plan includes the field on tool turns
+				// even when empty; preserve non-empty history after disabling too.
 				cm.ReasoningContent = &m.ReasoningContent
 			}
 		}
@@ -781,15 +777,7 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 
 	maxOutputTokens := req.MaxTokens
 	if maxOutputTokens == 0 {
-		if c.autoMaxOutput && c.deepseek {
-			// Re-resolve so per-request EffortOverride (high/max) can raise 32K→64K.
-			effort := c.requestEffort(req)
-			reasoningOn := c.thinkingType != "disabled" &&
-				effort != "disabled" && effort != "off" && effort != "none"
-			maxOutputTokens = provider.AutoOutputBudget(reasoningOn, effort)
-		} else {
-			maxOutputTokens = c.maxOutputTokens
-		}
+		maxOutputTokens = c.maxOutputTokens
 	}
 	if maxOutputTokens < 0 {
 		maxOutputTokens = 0

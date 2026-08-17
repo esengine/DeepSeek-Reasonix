@@ -1,11 +1,15 @@
 package control
 
 import (
+	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
+	"reasonix/internal/tool"
 )
 
 func TestNewSessionRebindsProjectionSidecarPath(t *testing.T) {
@@ -112,15 +116,30 @@ func TestBranchRebindsProjectionSidecarPath(t *testing.T) {
 	sess := agent.NewSession("sys")
 	sess.Add(provider.Message{Role: provider.RoleUser, Content: "task"})
 	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "ok"})
+	for i := range 30 {
+		id := fmt.Sprintf("bulk-%d", i)
+		sess.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: id, Name: "read_file", Arguments: "{}"}}})
+		sess.Add(provider.Message{Role: provider.RoleTool, ToolCallID: id, Name: "read_file", Content: strings.Repeat("line\n", 200)})
+	}
 	if err := sess.Save(path); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := agent.EnsureBranchMeta(path); err != nil {
 		t.Fatal(err)
 	}
-	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{SessionPath: path, ContextWindow: 1000}, event.Discard)
+	prov := &scriptedTurns{turns: [][]provider.Chunk{textTurn("summary")}}
+	exec := agent.New(prov, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{
+		SessionPath: path, ContextWindow: 10_000, CompactRatio: 0.8, RecentKeep: 2,
+	}, event.Discard)
 	c := New(Options{Executor: exec, SessionDir: dir, Label: "test", DisableColdResumePrune: true})
 	c.Resume(sess, path)
+	if err := exec.CompactNow(context.Background(), ""); err != nil {
+		t.Fatalf("CompactNow: %v", err)
+	}
+	before := exec.ContextMaintenanceSnapshot()
+	if before.ProjectionVersion == 0 {
+		t.Fatal("branch fixture installed no projection")
+	}
 
 	newPath, err := c.Branch("side")
 	if err != nil {
@@ -134,5 +153,12 @@ func TestBranchRebindsProjectionSidecarPath(t *testing.T) {
 	}
 	if got := c.SessionPath(); got != newPath {
 		t.Fatalf("controller SessionPath after Branch = %q, want %q", got, newPath)
+	}
+	after := exec.ContextMaintenanceSnapshot()
+	if after.ProjectionVersion != before.ProjectionVersion {
+		t.Fatalf("branch projection version %d -> %d", before.ProjectionVersion, after.ProjectionVersion)
+	}
+	if _, ok, err := agent.LoadCompactionState(newPath); err != nil || !ok {
+		t.Fatalf("branch projection sidecar: ok=%v err=%v", ok, err)
 	}
 }

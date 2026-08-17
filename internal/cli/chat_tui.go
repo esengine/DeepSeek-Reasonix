@@ -23,6 +23,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/billing"
 	"reasonix/internal/boot"
 	"reasonix/internal/command"
 	"reasonix/internal/config"
@@ -33,7 +34,6 @@ import (
 	"reasonix/internal/memory"
 	"reasonix/internal/migration"
 	"reasonix/internal/outputstyle"
-	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
 	"reasonix/internal/recovery"
@@ -97,12 +97,18 @@ type chatTUI struct {
 	// the provider re-attempts the connection; cleared by the next stream event.
 	retryAttempt int
 	retryMax     int
+	// turnPhase is the host turn phase from turn_phase events
+	// (working|checking|verifying|reviewing). Cleared on TurnDone.
+	turnPhase string
 	// turnTokens accumulates this turn's output tokens (summed from per-step Usage
 	// events) for the live "↓N" readout in the running status line.
 	turnTokens int
 	// showTurnUsage controls whether completed per-request token/cost receipts are
 	// retained in transcript scrollback. Usage accounting remains active either way.
 	showTurnUsage bool
+	// sessionCostQuote is the incrementally aggregated canonical quote seen on
+	// Usage events. It powers the persistent footer without re-running pricing.
+	sessionCostQuote *billing.CostQuote
 
 	// balance is the last-fetched wallet-balance readout (e.g. "¥110.00"), "" when
 	// the provider declares no balance_url or a fetch failed. Refreshed async on
@@ -113,7 +119,8 @@ type chatTUI struct {
 	// todoArgs is the latest todo_write call's raw args; it drives the task list
 	// pinned just above the input (see renderTodoPanel). "" when there's no list.
 	// Persists across turns until the work completes or a new session starts.
-	todoArgs string
+	todoArgs      string
+	searchSources []provider.ServerSearchHit // post-answer footnotes; cleared when the turn settles
 
 	// marker rides in outgoing user messages so the cache-stable prompt prefix is
 	// left untouched.
@@ -349,13 +356,12 @@ type chatTUI struct {
 	// skillPick is the interactive skill picker overlay for /skills. nil when closed.
 	skillPick *skillPicker
 
-	// buildController builds a fresh controller for a model/profile pair, carrying prior
-	// history across and pinning auto-save to resumePath so the continued
+	// buildController builds a fresh controller for a model choice, carrying
+	// prior history across and pinning auto-save to resumePath so the continued
 	// conversation stays in one file (set by chatREPL; it must NOT touch this
 	// model — the swap happens on the running copy). nil disables runtime
 	// rebuild commands. modelRef is the active "provider/model" ref, marked
-	// current in the picker. runtimeProfile stores boot's normalized token mode:
-	// full (displayed as balanced), economy, or delivery. oldCtrl is the
+	// current in the picker. oldCtrl is the
 	// outgoing controller, passed through so the replacement can carry forward
 	// same-session tool grants and Plan-mode read-only command trust that
 	// don't travel through carry/resumePath (see Controller.RestoreSessionAuthorizations).
@@ -370,10 +376,9 @@ type chatTUI struct {
 	lastBuildResult *boot.BuildResult
 	// pendingReload coalesces /reload requests made while a turn or a runtime
 	// switch is in flight; the TurnDone drain runs it once the TUI is idle.
-	pendingReload  bool
-	modelRef       string
-	runtimeProfile string
-	effortLevel    string // "" when the current provider/model has no configurable effort
+	pendingReload bool
+	modelRef      string
+	effortLevel   string // "" when the current provider/model has no configurable effort
 
 	// leases owns the session lease guarding the TUI's active session file (set
 	// by chatREPL; nil in tests and when persistence is disabled). Every in-TUI
@@ -432,7 +437,6 @@ const (
 
 type controllerBuildSpec struct {
 	ModelRef         string
-	RuntimeProfile   string
 	ToolApprovalMode string
 	PlanMode         bool
 	EffortOverride   *string
@@ -553,7 +557,6 @@ func (m chatTUI) refreshGitStatus() tea.Cmd {
 // mode that would occur if Close() were called from the build goroutine.
 type modelSwitchMsg struct {
 	ref           string
-	profile       string
 	ctrl          control.SessionAPI
 	oldCtrl       control.SessionAPI
 	label         string
@@ -1968,9 +1971,6 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.skills = msg.skills
 			m.setHostAndInvalidateSlashCatalog(msg.host)
 			m.modelRef = msg.ref
-			if msg.profile != "" {
-				m.runtimeProfile = msg.profile
-			}
 			m.refreshEffortStatus()
 			// Defer Close to exit; skip when subgraph rebuild reused the pointer.
 			if msg.oldCtrl != nil && msg.oldCtrl != msg.ctrl {
@@ -3175,100 +3175,6 @@ func flushableMarkdownPrefix(buf string) string {
 // [plan] tag in sync when the user starts execution or exits without executing.
 const planApprovalTool = "exit_plan_mode"
 
-type approvalChoice struct {
-	label           string
-	allow           bool
-	allowForSession bool
-	persistToConfig bool
-	exitPlan        bool
-}
-
-func approvalChoices(a *event.Approval) []approvalChoice {
-	if a == nil {
-		return nil
-	}
-	var decisions []approvalChoice
-	fresh := a.Fresh || control.RequiresFreshHumanApprovalTool(a.Tool)
-	switch {
-	case isRecoveryApprovalEvent(a):
-		if a.Recovery != nil && a.Recovery.CanGrantTask {
-			// allowForSession is reused only as a local UI marker. The recovery
-			// handler maps it to a task-scoped semantic grant, never a session rule.
-			decisions = []approvalChoice{{allow: true}, {allow: true, allowForSession: true}, {}}
-		} else {
-			decisions = []approvalChoice{{allow: true}, {}}
-		}
-	case a.Tool == planApprovalTool:
-		decisions = []approvalChoice{{allow: true}, {}, {exitPlan: true}}
-	case fresh && freshApprovalAllowsSession(a.Tool):
-		decisions = []approvalChoice{{allow: true}, {allow: true, allowForSession: true}, {}}
-	case fresh:
-		decisions = []approvalChoice{{allow: true}, {}}
-	default:
-		decisions = []approvalChoice{
-			{allow: true},
-			{allow: true, allowForSession: true},
-			{allow: true, allowForSession: true, persistToConfig: true},
-			{},
-		}
-	}
-	labels := approvalChoiceLabels(a)
-	for i := range decisions {
-		if i < len(labels) {
-			decisions[i].label = labels[i]
-		}
-	}
-	return decisions
-}
-
-func approvalChoiceLabels(a *event.Approval) []string {
-	choices := i18n.M.FreshHumanApprovalChoices
-	fresh := a.Fresh || control.RequiresFreshHumanApprovalTool(a.Tool)
-	if isRecoveryApprovalEvent(a) {
-		if isRecoveryPlanChangeApproval(a) {
-			choices = i18n.M.RecoveryPlanChangeChoices
-		} else {
-			choices = i18n.M.RecoveryApprovalChoices
-		}
-		if !isRecoveryPlanChangeApproval(a) && a.Recovery != nil && a.Recovery.CanGrantTask {
-			choices = i18n.M.RecoveryTaskGrantChoices
-		}
-	} else if a.Tool == planApprovalTool {
-		choices = i18n.M.PlanApprovalChoices
-	} else if !fresh {
-		exactSessionRule := permission.SessionGrantRuleForScope(a.Tool, a.Subject)
-		exactPersistentRule := permission.RememberRuleForScope(a.Tool, a.Subject)
-		choices = fmt.Sprintf(i18n.M.ToolApprovalChoices, exactSessionRule, exactPersistentRule)
-	}
-	if a.Tool == control.SandboxEscapeApprovalTool {
-		choices = i18n.M.SandboxEscapeApprovalChoices
-	}
-	if a.Tool == control.ManagedConfigWriteApprovalTool {
-		choices = i18n.M.ConfigWriteApprovalChoices
-	}
-	if a.Tool == agent.PlanModeReadOnlyCommandApprovalTool {
-		choices = i18n.M.PlanModeReadOnlyCommandChoices
-	}
-	if !fresh && a.Tool == "bash" && permission.BashCommandPrefix(a.Subject) != "" {
-		prefixRule := permission.RememberRuleForScope(a.Tool, a.Subject)
-		choices = fmt.Sprintf(i18n.M.BashPrefixChoices, prefixRule, prefixRule)
-	}
-	var labels []string
-	for line := range strings.SplitSeq(choices, "\n") {
-		line = strings.TrimSpace(line)
-		if len(line) < 3 || line[0] < '1' || line[0] > '9' || line[1] != '.' {
-			continue
-		}
-		labels = append(labels, strings.TrimSpace(line[2:]))
-	}
-	if isRecoveryApprovalEvent(a) && a.Recovery != nil && a.Recovery.CanGrantTask && len(labels) > 1 {
-		if scope := strings.TrimSpace(a.Recovery.TaskGrantScope); scope != "" {
-			labels[1] += " — " + scope
-		}
-	}
-	return labels
-}
-
 // handleApprovalKey resolves a pending approval from a keystroke and re-arms the
 // listener. 1/y/Enter allows once, 2/a allows for the rest of the session,
 // 3/p writes an "always allow" rule to the config file for ordinary tool
@@ -3411,7 +3317,12 @@ func (m chatTUI) runningWorkingLine(cancelRequested, styled bool) string {
 	if cancelRequested {
 		working = fmt.Sprintf("  "+i18n.M.ChatStatusCancellingFmt, m.spinner.View(), m.elapsed)
 	} else {
-		working = fmt.Sprintf("  "+i18n.M.ChatStatusThinkingFmt, m.spinner.View(), m.elapsed)
+		phaseLabel := turnPhaseStatusLabel(m.turnPhase)
+		if phaseLabel != "" {
+			working = fmt.Sprintf("  %s %s · %ds", m.spinner.View(), phaseLabel, m.elapsed)
+		} else {
+			working = fmt.Sprintf("  "+i18n.M.ChatStatusThinkingFmt, m.spinner.View(), m.elapsed)
+		}
 	}
 	if m.turnTokens > 0 {
 		working += " · ↓" + shortTokens(m.turnTokens)
@@ -3742,13 +3653,6 @@ func (m chatTUI) jobsTag() string {
 	return dim(fmt.Sprintf("⚙ %d", n))
 }
 
-func (m chatTUI) workModeTag() string {
-	if m.runtimeProfile == "" {
-		return ""
-	}
-	return dim(fmt.Sprintf(i18n.M.WorkModeStatusFmt, runtimeProfileDisplay(m.runtimeProfile)))
-}
-
 func (m chatTUI) effortTag() string {
 	if m.effortLevel == "" {
 		return ""
@@ -3780,6 +3684,65 @@ func shortTokens(n int) string {
 	default:
 		return fmt.Sprintf("%d", n)
 	}
+}
+
+// turnPhaseStatusLabel maps host turn_phase values to a short status label.
+// Empty when the phase is unknown so callers fall back to the default thinking line.
+func turnPhaseStatusLabel(phase string) string {
+	switch strings.ToLower(strings.TrimSpace(phase)) {
+	case "working":
+		return i18n.M.TurnPhaseWorking
+	case "checking":
+		return i18n.M.TurnPhaseChecking
+	case "verifying":
+		return i18n.M.TurnPhaseVerifying
+	case "reviewing":
+		return i18n.M.TurnPhaseReviewing
+	default:
+		return ""
+	}
+}
+
+// formatCompletionSummaryLine renders a content-free quality summary for TUI scrollback.
+func formatCompletionSummaryLine(c *event.CompletionSummaryInfo) string {
+	if c == nil {
+		return ""
+	}
+	verdict := strings.TrimSpace(c.Verdict)
+	if verdict == "" {
+		verdict = "complete"
+	}
+	line := fmt.Sprintf("%s · mut=%d · checks %d✓/%d✗/%d⊘",
+		verdict, c.Mutations, c.ChecksPassed, c.ChecksFailed, c.ChecksSuppressed)
+	if c.Review != "" && c.Review != "none" {
+		line += " · review=" + c.Review
+	}
+	if len(c.GapKinds) > 0 {
+		line += " · gaps=" + strings.Join(c.GapKinds, ",")
+	}
+	if c.ConstraintDegraded {
+		line += " · constraints"
+	}
+	return line
+}
+
+func completionSummaryNeedsAttention(c *event.CompletionSummaryInfo) bool {
+	if c == nil {
+		return false
+	}
+	verdict := strings.ToLower(strings.TrimSpace(c.Verdict))
+	review := strings.ToLower(strings.TrimSpace(c.Review))
+	return verdict == "partial" || verdict == "blocked" ||
+		c.ChecksFailed > 0 || c.ChecksSuppressed > 0 ||
+		review == "warned" || review == "failed" || review == "unavailable" ||
+		len(c.GapKinds) > 0 || c.ConstraintDegraded
+}
+
+func completionSummaryWarning(c *event.CompletionSummaryInfo) string {
+	if c != nil && strings.EqualFold(strings.TrimSpace(c.Verdict), "blocked") {
+		return i18n.M.CompletionSummaryBlocked
+	}
+	return i18n.M.CompletionSummaryNeedsAttention
 }
 
 // renderApprovalBanner is the slim notice shown above the input while a tool
@@ -3817,6 +3780,7 @@ func (m chatTUI) renderApprovalBanner() string {
 			planDetails = append(planDetails, body)
 		}
 	}
+	planDetails = append(planDetails, writeAccessBannerDetails(m.pendingApproval)...)
 	if reason := strings.TrimSpace(m.pendingApproval.Reason); reason != "" {
 		text += " · " + truncateSubject(reason, w)
 	}
@@ -4430,6 +4394,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 			m.pending.Reset()
 			m.pending.WriteString(e.Text)
 		}
+		m.writeSearchFootnotes()
 		m.commitReasoning()
 		m.commitPending()
 
@@ -4484,6 +4449,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		if e.Tool.Name == "todo_write" && e.Tool.Err == "" {
 			m.todoArgs = e.Tool.Args
 		}
+		m.rememberSearchResult(e.Tool)
 		if e.Tool.Err != "" {
 			m.finalizeStreamed()
 			label := shellToolDisplayName(e.Tool.Name, e.Tool.Execution)
@@ -4499,11 +4465,32 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		if e.Usage != nil {
 			m.turnTokens += e.Usage.CompletionTokens
 		}
+		m.addSessionCostQuote(e.CostQuote)
 		if m.showTurnUsage {
-			if line := renderTurnReceipt(e.Usage, e.Pricing, e.CacheDiagnostics); line != "" {
+			if line := renderQuotedTurnReceipt(e.Usage, e.CostQuote, e.CacheDiagnostics); line != "" {
 				m.finalizeStreamed()
 				m.commitSpacer()
 				m.commitTranscriptSource(transcriptSource{kind: transcriptSourceTurnReceipt, raw: line})
+			}
+		}
+
+	case event.TurnPhase:
+		// Content-free host phase for the live status line only.
+		if phase := strings.TrimSpace(string(e.PhaseName)); phase != "" {
+			m.turnPhase = phase
+		} else if phase := strings.TrimSpace(e.Text); phase != "" {
+			m.turnPhase = phase
+		}
+
+	case event.CompletionSummary:
+		if e.Completion != nil {
+			if completionSummaryNeedsAttention(e.Completion) {
+				m.finalizeStreamed()
+				m.commitLine(fmt.Sprintf("  ! %s", completionSummaryWarning(e.Completion)))
+			}
+			if m.showReasoning {
+				m.finalizeStreamed()
+				m.commitLine(dim("  · " + formatCompletionSummaryLine(e.Completion)))
 			}
 		}
 
@@ -4610,6 +4597,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		// and gate a plan-mode proposal on the user's approval. Autosave already
 		// happened in Controller so every frontend shares the same activity-time
 		// semantics.
+		m.writeSearchFootnotes()
 		m.commitReasoning()
 		m.commitPending()
 		// The bubble was echoed on Enter and an un-sent turn is swallowed above
@@ -4617,11 +4605,14 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		// just clear the un-sendable flag.
 		m.confirmBubbleSent()
 		m.state = tuiIdle
+		m.turnPhase = ""
 		m.noteWatchdogIdle()
 		m.queueEditCursor, m.queueEditDraft = -1, ""
 		m.clearSubmittedPastes()
 		if e.Outcome == event.TurnOutcomeRecoveryPaused {
 			m.commitLine(wrapForViewport("⏸ "+i18n.M.RecoveryPaused, m.width, activeCLITheme.info))
+		} else if e.Outcome == event.TurnOutcomeFinalReadiness {
+			m.commitLine(wrapForViewport("ⓘ "+i18n.M.FinalReadinessRecovery, m.width, activeCLITheme.info))
 		} else if e.Err != nil && e.Err.Error() != "" && !strings.Contains(e.Err.Error(), "context canceled") {
 			m.commitLine(wrapForViewport(i18n.M.ErrorPrefix+" "+e.Err.Error(), m.width, activeCLITheme.warn))
 		}
@@ -4662,6 +4653,11 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	cmd := canonicalBuiltinSlashCommand(typedCmd)
 
 	switch cmd {
+	case control.ContinueChecksCommand:
+		prompt, _ := control.ParseFinalReadinessRecoveryCommand(input)
+		return m.startControllerTurn(input, input, func() {
+			m.ctrl.SubmitFinalReadinessRecovery(input, prompt)
+		})
 	case "/compact":
 		m.echoLocalCommand(input)
 		// Compaction makes a (network) summarizer call; run it off the Update loop
@@ -4716,9 +4712,9 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		m.showSandboxStatus()
 	case "/effort":
 		return m.runEffortCommand(input)
-	case "/work-mode", "/profile":
+	case "/preset", "/work-mode", "/profile":
 		m.echoLocalCommand(input)
-		return m.runWorkModeCommand(input)
+		return m.runPresetCommand(input)
 	case "/reasoning-language":
 		m.echoLocalCommand(input)
 		m.runReasoningLanguageCommand(input)
@@ -4910,9 +4906,6 @@ func (m *chatTUI) showStatusDetails() {
 			lines = append(lines, "  context    "+tag)
 		}
 	}
-	if tag := m.workModeTag(); tag != "" {
-		lines = append(lines, "  profile    "+tag)
-	}
 	if m.effortLevel != "" {
 		// The persistent footer uses an uppercase semantic label. The expanded
 		// diagnostic view keeps its sentence-like wording for readability.
@@ -4990,8 +4983,8 @@ func (m *chatTUI) runGoalSubcommand(input string) tea.Cmd {
 		m.notice(fmt.Sprintf(i18n.M.GoalCurrentFmt, goal))
 		rt := m.ctrl.GoalRuntime()
 		m.notice(fmt.Sprintf(i18n.M.GoalRuntimeFmt,
-			rt.TurnsUsed, rt.TurnsLimit, rt.TokensUsed, rt.RequestsUsed,
-			rt.NoProgressTurns, rt.BudgetExtensions))
+			rt.TurnsUsed, rt.RequestsUsed, rt.TokensUsed,
+			control.GoalWorkDurationText(rt.WorkDurationMs)))
 		if rt.LastReason != "" {
 			m.notice(fmt.Sprintf("%s: %s", i18n.M.GoalRuntimeLastReason, rt.LastReason))
 		}
@@ -5376,6 +5369,10 @@ func replaySectionsForWithAssistantRenderer(
 	var out []string
 	for _, m := range history {
 		if m.LocalOnly {
+			if m.FinalReadinessRecovery != nil && m.FinalReadinessRecovery.Pending {
+				out = append(out, fmt.Sprintf("  · %s\n\n", i18n.M.FinalReadinessRecovery))
+				continue
+			}
 			if reasoning := strings.TrimSpace(m.ReasoningContent); reasoning != "" {
 				out = append(out, dim("  ▎ "+i18n.M.ChatThinking)+"\n"+reasoningBlock(reasoning, width, 0)+"\n\n")
 			}
@@ -5393,8 +5390,10 @@ func replaySectionsForWithAssistantRenderer(
 		switch m.Role {
 		case provider.RoleUser:
 			// Steer messages are surfaced as a notice line, not a user bubble.
-			if steerText, isSteer := agent.SteerText(m.Content); isSteer {
-				out = append(out, fmt.Sprintf("  ↪ %s\n\n", steerText))
+			if text, handled := agent.ReplaySteerText(m.Content); handled {
+				if text != "" {
+					out = append(out, fmt.Sprintf("  ↪ %s\n\n", text))
+				}
 				continue
 			}
 			content := control.StripComposePrefixes(m.Content)

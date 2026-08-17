@@ -236,16 +236,16 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	} else {
 		b.WriteString("# reasoning_language = \"zh\"   # visible reasoning language: auto|zh|en\n")
 	}
-	fmt.Fprintf(&b, "compact_ratio       = %s   # sole auto trigger; presets 0.70/0.80/0.85 (default 0.85)\n", formatFloat(c.Agent.CompactRatio))
+	fmt.Fprintf(&b, "compact_ratio       = %s   # sole auto trigger; presets 0.70/0.80/0.85 (default 0.80)\n", formatFloat(c.Agent.CompactRatio))
 	if c.Agent.Keep != nil {
-		fmt.Fprintf(&b, "keep                = %s   # compaction keep policy: errors, user_marked\n", renderStringArray(c.Agent.Keep))
+		fmt.Fprintf(&b, "keep                = %s   # deprecated compatibility field; ignored at runtime\n", renderStringArray(c.Agent.Keep))
 	} else {
-		b.WriteString("# keep                = [\"errors\"]   # compaction keep policy: errors, user_marked\n")
+		b.WriteString("# keep                = [\"errors\"]   # deprecated compatibility field; ignored at runtime\n")
 	}
 	if c.Agent.RecentKeep > 0 {
-		fmt.Fprintf(&b, "recent_keep         = %d   # minimum recent messages kept verbatim\n", c.Agent.RecentKeep)
+		fmt.Fprintf(&b, "recent_keep         = %d   # deprecated compatibility field; ignored at runtime\n", c.Agent.RecentKeep)
 	} else {
-		b.WriteString("# recent_keep         = 2   # minimum recent messages kept verbatim\n")
+		b.WriteString("# recent_keep         = 2   # deprecated compatibility field; ignored at runtime\n")
 	}
 	if len(c.Agent.PlanModeReadOnlyCommands) > 0 {
 		fmt.Fprintf(&b, "plan_mode_read_only_commands = %s   # legacy compatibility only; Plan bash uses Permissions\n", renderStringArray(c.Agent.PlanModeReadOnlyCommands))
@@ -351,12 +351,12 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 				fmt.Fprintf(&b, "context_window = %d   # tokens; compaction triggers near this limit\n", p.ContextWindow)
 			}
 			if p.MaxOutputTokens != 0 {
-				fmt.Fprintf(&b, "max_output_tokens = %d   # per-turn total output; 0 = auto (~64K on DeepSeek high), 32768/65536/131072 explicit; never affects compact_ratio\n", p.MaxOutputTokens)
+				fmt.Fprintf(&b, "max_output_tokens = %d   # per-turn total output; 0 = provider auto (official DeepSeek 384K, omit when safe); positive = cost cap; negative = force-omit; never affects compact_ratio\n", p.MaxOutputTokens)
 			} else {
-				b.WriteString("# max_output_tokens = 0       # recommended: automatic (DeepSeek default high → ~64K; not unlimited)\n")
-				b.WriteString("# max_output_tokens = 32768   # ordinary coding / cost control\n")
-				b.WriteString("# max_output_tokens = 65536   # heavy reasoning / long tool loops\n")
-				b.WriteString("# max_output_tokens = 131072  # only after repeated finish_reason=length\n")
+				b.WriteString("# max_output_tokens = 0       # recommended: official DeepSeek omits the field (server 384K ceiling)\n")
+				b.WriteString("# max_output_tokens = 32768   # optional cost cap\n")
+				b.WriteString("# max_output_tokens = 65536   # optional cost cap\n")
+				b.WriteString("# max_output_tokens = 131072  # optional cost cap\n")
 			}
 			if p.Price != nil {
 				fmt.Fprintf(&b, "price       = %s   # provider-wide fallback, per 1M tokens\n", renderPricingInline(p.Price))

@@ -50,8 +50,19 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       return null;
     }
     if (!force && inFlight?.tabId === normalizedTabId) return inFlight.promise;
-    const generation = get().generation + 1;
-    set({ tabId: normalizedTabId, generation, loading: true, workspace: null, activeSessionId: null, error: null });
+    const previous = get();
+    // A background refresh for the same tab should not tear down a painted
+    // xterm. Keep its workspace until the replacement response is ready.
+    const keepWorkspace = !force && previous.tabId === normalizedTabId && previous.workspace != null;
+    const generation = previous.generation + 1;
+    set({
+      tabId: normalizedTabId,
+      generation,
+      loading: true,
+      workspace: keepWorkspace ? previous.workspace : null,
+      activeSessionId: keepWorkspace ? previous.activeSessionId : null,
+      error: null,
+    });
     const request = app.TerminalWorkspaceForTab(normalizedTabId)
       .then((value) => {
         const workspace = normalizedWorkspace(value);

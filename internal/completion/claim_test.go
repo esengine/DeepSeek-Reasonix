@@ -133,6 +133,25 @@ func TestFailedUpdateGoalClaimsNothing(t *testing.T) {
 	}
 }
 
+func TestLatestCompleteClaimIgnoresContinueAndFailedCalls(t *testing.T) {
+	led := ledgerOf(
+		wrote("parser.go"),
+		claimed("continue", `{"unverified":["nothing run yet"]}`),
+		claimed("complete", `{"unverified":["real-engine e2e"]}`),
+	)
+	got, ok := LatestCompleteClaim(led)
+	if !ok || len(got.Unverified) != 1 || got.Unverified[0] != "real-engine e2e" {
+		t.Fatalf("LatestCompleteClaim = (%+v, %v)", got, ok)
+	}
+	rejected := evidence.Receipt{
+		ToolName: "update_goal", Success: false,
+		Args: []byte(`{"status":"complete","completion":{"unverified":["should not count"]}}`),
+	}
+	if _, ok := LatestCompleteClaim(ledgerOf(rejected)); ok {
+		t.Fatal("a failed update_goal must not yield a complete claim")
+	}
+}
+
 func TestLatestClaimWins(t *testing.T) {
 	rep := Build(nil, ledgerOf(
 		wrote("parser.go"),

@@ -19,8 +19,10 @@ import (
 //
 // The zero value is not ready for use; construct with NewSessionLeaseKeeper.
 type SessionLeaseKeeper struct {
-	mu    sync.Mutex
-	lease *agent.SessionLease
+	mu         sync.Mutex
+	lease      *agent.SessionLease
+	controller *Controller
+	retired    []<-chan struct{}
 }
 
 func NewSessionLeaseKeeper() *SessionLeaseKeeper {
@@ -66,7 +68,20 @@ func (k *SessionLeaseKeeper) HandleSessionRecovered(info SessionRecoveryInfo) er
 	if k == nil || recoveryPath == "" {
 		return nil
 	}
-	if err := k.Rebind(recoveryPath); err != nil {
+	k.mu.Lock()
+	if k.lease != nil && k.lease.Path() == agent.CanonicalSessionPath(recoveryPath) {
+		k.mu.Unlock()
+		return nil
+	}
+	lease, err := agent.TryAcquireSessionLease(recoveryPath)
+	if err == nil && k.controller != nil {
+		err = k.controller.BindSessionWriteAuthority(lease)
+	}
+	if err != nil {
+		if lease != nil {
+			lease.Release()
+		}
+		k.mu.Unlock()
 		if errors.Is(err, agent.ErrSessionLeaseHeld) {
 			return fmt.Errorf("bind recovery session: %s; %s",
 				SessionInUseMessage(err), SessionLeaseCloseHint)
@@ -75,6 +90,63 @@ func (k *SessionLeaseKeeper) HandleSessionRecovered(info SessionRecoveryInfo) er
 		// diagnostics and return path-free text to every frontend.
 		slog.Error("control: bind recovery session lease", "err", err)
 		return fmt.Errorf("bind recovery session: unable to secure recovered transcript")
+	}
+	old := k.lease
+	k.lease = lease
+	var retired chan struct{}
+	if old != nil {
+		retired = make(chan struct{})
+		k.retired = append(k.retired, retired)
+	}
+	k.mu.Unlock()
+	// Recovery callbacks run inside the authority-guarded save that still owns
+	// old. Releasing synchronously here would wait on that same save forever.
+	// Retirement is bounded to one goroutine per committed path handoff.
+	if old != nil {
+		go func() {
+			old.Release()
+			close(retired)
+		}()
+	}
+	return nil
+}
+
+// HandleSessionTransition acquires and binds an intentional path-change target
+// before the controller swaps Sessions. Acquisition is failure-atomic: the old
+// lease remains held unless the target lease and candidate authority are ready.
+func (k *SessionLeaseKeeper) HandleSessionTransition(info SessionTransitionInfo) error {
+	targetPath := strings.TrimSpace(info.TargetPath)
+	if k == nil || targetPath == "" {
+		return nil
+	}
+	k.mu.Lock()
+	canonical := agent.CanonicalSessionPath(targetPath)
+	if k.lease != nil && k.lease.Path() == canonical {
+		err := info.BindWriteAuthority(k.lease)
+		k.mu.Unlock()
+		return err
+	}
+	lease, err := agent.TryAcquireSessionLease(targetPath)
+	if err == nil {
+		err = info.BindWriteAuthority(lease)
+	}
+	if err != nil {
+		if lease != nil {
+			lease.Release()
+		}
+		k.mu.Unlock()
+		if errors.Is(err, agent.ErrSessionLeaseHeld) {
+			return fmt.Errorf("bind target session: %s; %s",
+				SessionInUseMessage(err), SessionLeaseCloseHint)
+		}
+		slog.Error("control: bind target session lease", "reason", info.Reason, "err", err)
+		return fmt.Errorf("bind target session: unable to secure transcript")
+	}
+	old := k.lease
+	k.lease = lease
+	k.mu.Unlock()
+	if old != nil {
+		old.Release()
 	}
 	return nil
 }
@@ -86,8 +158,27 @@ func (k *SessionLeaseKeeper) Release() {
 		return
 	}
 	k.mu.Lock()
-	defer k.mu.Unlock()
 	k.releaseLocked()
+	retired := append([]<-chan struct{}(nil), k.retired...)
+	k.mu.Unlock()
+	for _, done := range retired {
+		<-done
+	}
+}
+
+// WaitForRetiredLeases waits until the most recent recovery handoff has
+// released its outgoing lease. Runtime paths do not need to call it; tests and
+// shutdown use it when they require deterministic cleanup observation.
+func (k *SessionLeaseKeeper) WaitForRetiredLeases() {
+	if k == nil {
+		return
+	}
+	k.mu.Lock()
+	retired := append([]<-chan struct{}(nil), k.retired...)
+	k.mu.Unlock()
+	for _, done := range retired {
+		<-done
+	}
 }
 
 // HeldPath reports the canonical session path the keeper currently guards,
@@ -104,10 +195,42 @@ func (k *SessionLeaseKeeper) HeldPath() string {
 	return k.lease.Path()
 }
 
+// Lease returns the held lease for authority issuance. Callers must not
+// Release it; use Release/Rebind on the keeper instead.
+func (k *SessionLeaseKeeper) Lease() *agent.SessionLease {
+	if k == nil {
+		return nil
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.lease
+}
+
+// BindControllerAuthority issues a fresh write authority from the held lease
+// onto c. Safe no-op when the keeper holds nothing.
+func (k *SessionLeaseKeeper) BindControllerAuthority(c *Controller) error {
+	if k == nil || c == nil {
+		return nil
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if err := c.BindSessionWriteAuthority(k.lease); err != nil {
+		return err
+	}
+	k.controller = c
+	c.SetOnSessionTransition(k.HandleSessionTransition)
+	return nil
+}
+
 func (k *SessionLeaseKeeper) releaseLocked() {
 	if k.lease != nil {
 		k.lease.Release()
 		k.lease = nil
+	}
+	if k.controller != nil {
+		k.controller.SetOnSessionTransition(nil)
+		_ = k.controller.BindSessionWriteAuthority(nil)
+		k.controller = nil
 	}
 }
 

@@ -12,8 +12,6 @@
 package event
 
 import (
-	"encoding/json"
-
 	"reasonix/internal/billing"
 	"reasonix/internal/evidence"
 	"reasonix/internal/nilutil"
@@ -114,10 +112,46 @@ const (
 	ContextMaintenanceEvent
 	// WorkspaceChanged reports a debounced host-side workspace mutation.
 	WorkspaceChanged
+	// TurnPhase reports a host-side work phase for the active turn (working |
+	// checking | verifying | reviewing). Content-free; Text holds the phase.
+	TurnPhase
+	// CompletionSummary reports a content-free end-of-turn quality summary for
+	// role-setting strategies (preset, verdict, check counts, review status).
+	CompletionSummary
+	// ToolResultPreview reports that a tool has finished locally before its
+	// provider-ordered ToolResult can be emitted. Upsert-capable frontends may
+	// render the successful state early; append-only consumers should ignore it.
+	// The later ToolResult remains the call's only terminal event.
+	ToolResultPreview
 	// KindCount is a sentinel one past the last real Kind. New event kinds must
 	// be inserted above it so completeness tests cover them automatically.
 	KindCount
 )
+
+// TurnPhaseName is the machine-readable phase on TurnPhase events.
+type TurnPhaseName string
+
+const (
+	TurnPhaseWorking   TurnPhaseName = "working"
+	TurnPhaseChecking  TurnPhaseName = "checking"
+	TurnPhaseVerifying TurnPhaseName = "verifying"
+	TurnPhaseReviewing TurnPhaseName = "reviewing"
+)
+
+// CompletionSummaryInfo is the content-free quality summary on CompletionSummary
+// events. It never carries user prompts, file contents, command args, or
+// reviewer reasoning.
+type CompletionSummaryInfo struct {
+	Preset             string // deprecated wire-compat label; pinned to "balanced"
+	Verdict            string // complete | partial | blocked | continue
+	Mutations          int
+	ChecksPassed       int
+	ChecksFailed       int
+	ChecksSuppressed   int
+	Review             string // none | passed | warned | failed | unavailable
+	GapKinds           []string
+	ConstraintDegraded bool
+}
 
 // StreamAttemptAction is the lifecycle phase of a local sampling attempt.
 type StreamAttemptAction string
@@ -128,13 +162,15 @@ const (
 	StreamAttemptCommit  StreamAttemptAction = "commit"
 )
 
-// RetryScope distinguishes connection+header retries from body-phase stream
-// retries. Older clients ignore the empty/unknown value.
+// RetryScope distinguishes connection+header retries, body-phase stream
+// retries, and host-classified protocol recovery. Older clients ignore an
+// unknown value and still render the generic retry state.
 type RetryScope string
 
 const (
-	RetryScopeHeaders RetryScope = "headers"
-	RetryScopeStream  RetryScope = "stream"
+	RetryScopeHeaders  RetryScope = "headers"
+	RetryScopeStream   RetryScope = "stream"
+	RetryScopeProtocol RetryScope = "protocol"
 )
 
 // StreamAttemptInfo carries host-local bookkeeping for one sampling attempt.
@@ -260,44 +296,6 @@ type FileDiff struct {
 	Diff    string
 	Added   int
 	Removed int
-}
-
-// Approval identifies a pending tool-call approval for an ApprovalRequest
-// event. ID correlates the request with the controller's Approve(ID, …) reply.
-type Approval struct {
-	ID      string
-	Tool    string
-	Subject string
-	Reason  string // optional annotation explaining why approval is needed
-	// RawInput is the exact structured tool input. ACP permission clients use it
-	// together with locations/reason instead of parsing a human title.
-	RawInput json.RawMessage
-	Fresh    bool // current human decision required; do not offer remembered grants
-	// Kind classifies the approval surface: "tool" (default), "plan", or
-	// "recovery". Empty means ordinary tool permission for backward compat.
-	Kind string
-	// Recovery carries Auto Guard card fields when Kind is "recovery".
-	// Old frontends ignore it and still render a one-shot fresh approval.
-	Recovery *RecoveryApproval
-}
-
-// RecoveryApproval is the backward-compatible structured payload for Auto
-// Guard decisions. All fields are plain strings/bools so wire JSON stays simple
-// and old clients can ignore unknown nested objects safely.
-type RecoveryApproval struct {
-	SourceAgent     string // agent that proposed the next mutation
-	FailedTool      string // tool that failed; empty for pre-action boundaries
-	FailedSummary   string // short failure/error summary; optional
-	Diagnosis       string // agent/host diagnosis when failure recovery is active
-	NextTool        string // tool about to run
-	NextAction      string // concrete next command/file change/MCP action
-	ChangeKind      string // same_strategy | strategy | scope | risk | uncertain
-	ChangeRationale string // what changed vs the original approach
-	ReviewRationale string // why the host/reviewer needs confirmation
-	PlanBefore      string // active structured plan before a material transition
-	PlanAfter       string // proposed structured plan after a material transition
-	CanGrantTask    bool   // offer a semantic grant scoped to the current task
-	TaskGrantScope  string // concise host-classified operation + exact target
 }
 
 // AskOption is one choice the user can pick for an AskQuestion.
@@ -480,8 +478,8 @@ type CacheDiagnostics struct {
 // Missing values are stable category ids; user-facing detail stays localized in
 // the frontend instead of scraping the diagnostic error string.
 type FinalReadiness struct {
-	Attempts int
-	Missing  []string
+	Attempts int      `json:"attempts,omitempty"`
+	Missing  []string `json:"missing,omitempty"`
 }
 
 const (
@@ -568,6 +566,10 @@ type Event struct {
 	// session-inbox entry. Empty for legacy callers that still use text only.
 	ItemID    string
 	Workspace *WorkspaceChangedPayload // WorkspaceChanged (host-local)
+	// PhaseName is set on TurnPhase events (working|checking|verifying|reviewing).
+	PhaseName TurnPhaseName
+	// Completion is set on CompletionSummary events.
+	Completion *CompletionSummaryInfo
 }
 
 type WorkspaceWatchState string
@@ -648,6 +650,10 @@ const (
 	ProtocolRecoveryMissingReasoningRetryReplaced   ProtocolRecoveryKind = "missing_reasoning_retry_replaced_response"
 	ProtocolRecoveryMissingReasoningRetrySuppressed ProtocolRecoveryKind = "missing_reasoning_retry_suppressed"
 	ProtocolRecoveryMissingReasoningFallback        ProtocolRecoveryKind = "missing_reasoning_fallback_used"
+	ProtocolRecoveryReasoningOverflowDetected       ProtocolRecoveryKind = "reasoning_overflow_detected"
+	ProtocolRecoveryClientToolRejected              ProtocolRecoveryKind = "client_tool_rejected_unreplayable_reasoning"
+	ProtocolRecoveryServerSearchSalvaged            ProtocolRecoveryKind = "server_search_history_salvaged"
+	ProtocolRecoveryHistoryRepaired                 ProtocolRecoveryKind = "unreplayable_history_repaired"
 )
 
 type ProtocolRecoveryAudit struct {
@@ -769,7 +775,7 @@ type DelegationAdmissionAudit struct {
 	Tool    string
 	Verdict string // "allow" | "deny"
 	Reason  string // e.g. "local_fix_no_external_need"
-	Intent  string // taskintent class of the turn
+	Intent  string // compatibility field; no longer classified from prompt text
 }
 
 // DelegationAdmissionSink is an optional sink capability; implementations

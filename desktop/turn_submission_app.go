@@ -7,6 +7,24 @@ type turnSubmissionState struct {
 	submissionID string
 }
 
+func (t *WorkspaceTab) recordTurnStarted(now int64) int64 {
+	t.telemMu.Lock()
+	defer t.telemMu.Unlock()
+	if t.usageTelemetry.activeTurnStartedAt == 0 {
+		t.usageTelemetry.activeTurnStartedAt = now
+	}
+	return t.usageTelemetry.activeTurnStartedAt
+}
+
+func (t *WorkspaceTab) turnStartedAt() int64 {
+	if t == nil {
+		return 0
+	}
+	t.telemMu.Lock()
+	defer t.telemMu.Unlock()
+	return t.usageTelemetry.activeTurnStartedAt
+}
+
 // setBinding reroutes the sink while invalidating correlations that were
 // created for a different frontend tab.
 func (s *tabEventSink) setBinding(tabID string, app *App) {
@@ -62,8 +80,11 @@ type correlatedWireEventTab struct {
 	SubmissionID string `json:"submissionId,omitempty"`
 }
 
-func toWireTabWithSubmission(e event.Event, tabID, runtimeEpoch, submissionID string) any {
+func toWireTabWithSubmission(e event.Event, tabID, runtimeEpoch, submissionID string, turnStartedAt int64) any {
 	wire := toWireTab(e, tabID, runtimeEpoch)
+	if e.Kind == event.TurnStarted {
+		wire.TurnStartedAt = turnStartedAt
+	}
 	if submissionID == "" {
 		return wire
 	}

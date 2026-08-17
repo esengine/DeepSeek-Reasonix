@@ -79,7 +79,7 @@ func (c *Catalog) ReconcileDirectory(ctx context.Context, target DirectoryTarget
 			records = append(records, record)
 			generations[record.Path] = generation
 		}
-		if err := c.upsertSessions(ctx, records, generations, "reconcile"); err != nil {
+		if err := c.upsertSessionsWithoutNotification(ctx, records, generations, "reconcile"); err != nil {
 			c.failDirectoryScan(context.Background(), target.Path, err)
 			return err
 		}
@@ -100,6 +100,14 @@ func (c *Catalog) ReconcileDirectory(ctx context.Context, target DirectoryTarget
 		}
 		runtime.Gosched()
 	}
+	lineageRecords := make([]SessionRecord, 0, len(ordered))
+	for _, info := range ordered {
+		lineageRecords = append(lineageRecords, recordFromOrder(target, info))
+	}
+	if err := c.refreshDirectoryRecoveryLineage(ctx, target, lineageRecords); err != nil {
+		c.failDirectoryScan(context.Background(), target.Path, err)
+		return err
+	}
 	if err := c.finishDirectoryScan(ctx, target, signature, generation, now, len(ordered)); err != nil {
 		return err
 	}
@@ -108,11 +116,20 @@ func (c *Catalog) ReconcileDirectory(ctx context.Context, target DirectoryTarget
 }
 
 func directorySignature(dir string) (string, error) {
-	entries, err := os.ReadDir(dir)
+	// os.ReadDir of a plain file returns the file itself on Windows but
+	// ENOTDIR on POSIX; stat first so both platforms reject non-directories.
+	info, err := os.Stat(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "missing", nil
 		}
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("not a directory: %s", dir)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
 		return "", err
 	}
 	hash := sha256.New()
@@ -273,9 +290,7 @@ func (c *Catalog) sessionPathLoop() {
 	}
 }
 
-// IndexSessionPath prioritizes a restored tab's exact session without walking
-// its directory. This keeps cold-start recovery independent from the size of
-// the history store.
+// IndexSessionPath indexes one session without walking its directory.
 func (c *Catalog) IndexSessionPath(ctx context.Context, target DirectoryTarget, path string) error {
 	path = filepath.Clean(strings.TrimSpace(path))
 	if path == "." || path == "" {
@@ -285,9 +300,7 @@ func (c *Catalog) IndexSessionPath(ctx context.Context, target DirectoryTarget, 
 	if target.Path == "." || target.Path == "" {
 		target.Path = filepath.Dir(path)
 	}
-	// Serialize exact indexing with reconciliation so an older scan cannot mark
-	// the new projection missing. Authoritative writes complete before this
-	// projection-only lock is acquired.
+	// Hold the directory lock so a concurrent scan cannot mark this row missing.
 	lock := c.directoryLock(target.Path)
 	lock.Lock()
 	defer lock.Unlock()
@@ -327,6 +340,7 @@ func (c *Catalog) IndexSessionPath(ctx context.Context, target DirectoryTarget, 
 		order.RecoveryReason = meta.RecoveryReason
 		order.RecoveryDigest = meta.RecoveryDigest
 		order.ParentID = meta.ParentID
+		order.RecoveryPreferred = agent.RecoveryPreferenceCurrent(path, meta)
 		order.Turns = meta.Turns
 		order.Preview = meta.Preview
 		order.SchemaVersion = meta.SchemaVersion
@@ -360,17 +374,19 @@ func recordFromOrder(target DirectoryTarget, info agent.SessionOrderInfo) Sessio
 	metaFingerprint := fileFingerprint(agent.BranchMetaPath(info.Path))
 	createdAt := unixMilli(info.CreatedAt)
 	lastActivityAt := unixMilli(info.LastActivityAt)
-	// File mtime is a hard floor. Migration/meta can temporarily write zero
-	// UpdatedAt; without this, topics sort as inactive and look "missing".
+	// File mtime fills a missing clock. Do not raise a known sidecar UpdatedAt:
+	// repair and other metadata writes bump mtime without new user turns.
 	if st, err := os.Stat(info.Path); err == nil {
 		fileMS := st.ModTime().UnixMilli()
 		if createdAt <= 0 {
 			createdAt = fileMS
 		}
-		if lastActivityAt <= 0 || fileMS > lastActivityAt {
+		if lastActivityAt <= 0 {
 			lastActivityAt = fileMS
 		}
 	}
+	// Real content only; failure/missing parent leaves RecoveryCopy false.
+	recoveryCopy := info.Recovered && agent.RecoveryBranchCoveredByParent(info.Path, target.Path)
 	return normalizeSessionRecord(SessionRecord{
 		Path:               info.Path,
 		Directory:          target.Path,
@@ -388,6 +404,8 @@ func recordFromOrder(target DirectoryTarget, info agent.SessionOrderInfo) Sessio
 		RecoveryReason:     info.RecoveryReason,
 		RecoveryDigest:     info.RecoveryDigest,
 		ParentID:           info.ParentID,
+		RecoveryPreferred:  info.RecoveryPreferred,
+		RecoveryCopy:       recoveryCopy,
 		ContentFingerprint: contentFingerprint,
 		MetaFingerprint:    metaFingerprint,
 		Health:             HealthOK,
@@ -533,16 +551,6 @@ func (c *Catalog) finishDirectoryScan(ctx context.Context, target DirectoryTarge
 	return nil
 }
 
-func (c *Catalog) failDirectoryScan(ctx context.Context, path string, scanErr error) {
-	c.mutationMu.Lock()
-	_, _ = c.db.ExecContext(ctx, `UPDATE catalog_directories SET state='degraded',error=? WHERE path=?`, scanErr.Error(), path)
-	c.mutationMu.Unlock()
-	c.statusMu.Lock()
-	c.status.State = StateDegraded
-	c.status.LastError = scanErr.Error()
-	c.statusMu.Unlock()
-}
-
 func (c *Catalog) enqueueRepair(path string) {
 	if c == nil || c.opts.DisableRepair || strings.TrimSpace(path) == "" {
 		return
@@ -614,8 +622,7 @@ func (c *Catalog) repairSession(workerCtx context.Context, path string) {
 	}
 	ctx, cancel := context.WithTimeout(workerCtx, 30*time.Second)
 	defer cancel()
-	// LoadSessionDisplayMessages is not yet context-aware; check cancellation
-	// before and after so shutdown can abandon the result without writing.
+	// LoadSessionDisplayMessages is not yet context-aware; check before/after.
 	msgs, _, _, err := agent.LoadSessionDisplayMessages(path)
 	if ctx.Err() != nil || workerCtx.Err() != nil {
 		return
@@ -655,12 +662,14 @@ func (c *Catalog) applyRepairResult(ctx context.Context, path, preview string, t
 		return err
 	}
 	if valid {
+		recoveryCopy := agent.RecoveryBranchCoveredByParent(path, filepath.Dir(path))
 		if _, err := tx.ExecContext(ctx, `UPDATE catalog_sessions SET preview=?,turns=?,turns_state='valid',
-            health='ok',meta_fingerprint=? WHERE path=?`, preview, turns, fileFingerprint(agent.BranchMetaPath(path)), path); err != nil {
+            health='ok',recovery_copy=?,meta_fingerprint=? WHERE path=?`,
+			preview, turns, boolToInt(recoveryCopy), fileFingerprint(agent.BranchMetaPath(path)), path); err != nil {
 			_ = tx.Rollback()
 			return err
 		}
-	} else if _, err := tx.ExecContext(ctx, `UPDATE catalog_sessions SET turns_state='corrupt',health='corrupt' WHERE path=?`, path); err != nil {
+	} else if _, err := tx.ExecContext(ctx, `UPDATE catalog_sessions SET turns_state='corrupt',health='corrupt',recovery_copy=0 WHERE path=?`, path); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -680,6 +689,10 @@ func (c *Catalog) applyRepairResult(ctx context.Context, path, preview string, t
 	}
 	c.publishRevision(revision, []string{key.WorkspaceRoot}, reason)
 	c.refreshCounts(ctx)
+	// Repair changes content-derived listing metadata. Reconcile the directory
+	// immediately so lineage cannot remain stuck in its pre-repair projection.
+	// Requests are coalesced and never block the repair worker.
+	c.RequestReconcile(DirectoryTarget{Path: filepath.Dir(path), Scope: key.Scope, WorkspaceRoot: key.WorkspaceRoot})
 	return nil
 }
 
@@ -786,5 +799,11 @@ func Inspect(ctx context.Context, path string) (Status, error) {
 	_ = db.QueryRowContext(ctx, `SELECT revision FROM catalog_state WHERE id=1`).Scan(&status.Revision)
 	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions`).Scan(&status.Indexed)
 	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE turns_state='unknown'`).Scan(&status.RepairPending)
+	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE missing_since=0`).Scan(&status.PhysicalSessions)
+	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_topics`).Scan(&status.LogicalSessions)
+	_ = db.QueryRowContext(ctx, `SELECT COUNT(DISTINCT recovery_group_id) FROM catalog_sessions WHERE recovered=1 AND recovery_group_id<>'' AND missing_since=0`).Scan(&status.RecoveryGroups)
+	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE recovered=1 AND missing_since=0`).Scan(&status.RecoveryBranches)
+	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE recovered=1 AND recovery_role='diverged' AND missing_since=0`).Scan(&status.RecoveryDiverged)
+	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE recovered=1 AND recovery_role='covered_copy' AND missing_since=0`).Scan(&status.CleanupEligible)
 	return status, nil
 }

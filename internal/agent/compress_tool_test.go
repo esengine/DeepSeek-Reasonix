@@ -59,7 +59,7 @@ func TestCompressContextBeforePreservesCanonicalAndTail(t *testing.T) {
 	if len(prov.got) < 2 || strings.Contains(prov.got[1].Content, local.Content) {
 		t.Fatalf("LocalOnly content reached summarizer: %+v", prov.got)
 	}
-	state := a.compactionState
+	state := a.sess.compactionState
 	if state.Generation != 1 || state.Projection.ViewInputHash == "" || state.Projection.ViewOutputHash == "" {
 		t.Fatalf("range compression did not install complete v3 lineage: %+v", state)
 	}
@@ -86,7 +86,13 @@ func TestCompressContextAfterExcludesActiveTurnAndAppendsToolResult(t *testing.T
 		currentCall,
 	}}
 	before := sess.Snapshot()
-	a := New(&fakeProvider{reply: "completed turns summarized"}, tool.NewRegistry(), sess, Options{}, event.Discard)
+	telemetry := ""
+	sink := event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Notice && e.Text == "compaction telemetry" {
+			telemetry = e.Detail
+		}
+	})
+	a := New(&fakeProvider{reply: "completed turns summarized"}, tool.NewRegistry(), sess, Options{}, sink)
 	a.activeTurnCreatedAt.Store(activeCreatedAt)
 
 	got, err := a.CompressContext(context.Background(), tool.CompressRequest{Direction: "after", Anchor: "folding at alpha"})
@@ -95,6 +101,9 @@ func TestCompressContextAfterExcludesActiveTurnAndAppendsToolResult(t *testing.T
 	}
 	if got.Status != "ok" || got.Messages != 4 {
 		t.Fatalf("result = %+v", got)
+	}
+	if !strings.Contains(telemetry, "summary_input="+SummaryInputNonPrefix) {
+		t.Fatalf("telemetry = %q, want non-prefix summary input", telemetry)
 	}
 	if !reflect.DeepEqual(sess.Snapshot(), before) {
 		t.Fatal("compress changed the active canonical turn")
@@ -134,7 +143,7 @@ func TestCompressContextAnchorErrorsDoNotChangeState(t *testing.T) {
 			t.Fatalf("anchor %q error = %v, want %q", tc.anchor, err, tc.want)
 		}
 	}
-	if !reflect.DeepEqual(sess.Snapshot(), before) || len(a.compactionState.Projection.Messages) != 0 {
+	if !reflect.DeepEqual(sess.Snapshot(), before) || len(a.sess.compactionState.Projection.Messages) != 0 {
 		t.Fatal("failed anchor lookup changed state")
 	}
 }
@@ -217,7 +226,7 @@ func TestCompressContextNoSavingsIsNoop(t *testing.T) {
 	if got.Status != "noop" || !strings.Contains(got.Reason, "not be smaller") {
 		t.Fatalf("result = %+v", got)
 	}
-	if len(a.compactionState.Projection.Messages) != 0 {
+	if len(a.sess.compactionState.Projection.Messages) != 0 {
 		t.Fatal("noop installed a projection")
 	}
 	if reasons := sess.DrainContentRewriteReasons(); len(reasons) != 0 {
@@ -245,8 +254,8 @@ func TestCompressContextFailureDoesNotArchiveUncommittedRange(t *testing.T) {
 	if len(entries) != 0 {
 		t.Fatalf("failed range compression left %d archive files", len(entries))
 	}
-	if a.compactionState.Generation != 0 || a.compactionState.LastReceipt != nil {
-		t.Fatalf("failed range compression changed sidecar state: %+v", a.compactionState)
+	if a.sess.compactionState.Generation != 0 || a.sess.compactionState.LastReceipt != nil {
+		t.Fatalf("failed range compression changed sidecar state: %+v", a.sess.compactionState)
 	}
 }
 
@@ -316,7 +325,7 @@ func TestCompressContextRejectsStaleTranscript(t *testing.T) {
 	if err := <-errCh; !errors.Is(err, errCompressStaleContext) {
 		t.Fatalf("error = %v, want stale context", err)
 	}
-	if len(a.compactionState.Projection.Messages) != 0 {
+	if len(a.sess.compactionState.Projection.Messages) != 0 {
 		t.Fatal("stale compression installed a projection")
 	}
 	if reasons := sess.DrainContentRewriteReasons(); len(reasons) != 0 {

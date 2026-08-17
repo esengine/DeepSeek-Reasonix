@@ -48,6 +48,9 @@ type Config struct {
 	Timeout time.Duration
 	// MaxTokens caps the completion. Zero uses DefaultMaxTokens.
 	MaxTokens int
+	// EffortOverride optionally requests a lower or higher reasoning depth for
+	// this independent call. Provider adapters ignore unsupported values.
+	EffortOverride string
 	// MaxOutputBytes aborts the stream once exceeded. Zero uses DefaultMaxOutputBytes.
 	MaxOutputBytes int
 	// MaxSystemBytes is the hard cap on the fixed system policy. Zero uses DefaultMaxSystemBytes.
@@ -107,8 +110,9 @@ func Call(ctx context.Context, cfg Config, system, evidence string) (string, err
 			{Role: provider.RoleUser, Content: evidence},
 		},
 		// No tools.
-		Temperature: provider.TemperaturePtr(0),
-		MaxTokens:   maxTokens,
+		Temperature:    provider.TemperaturePtr(0),
+		MaxTokens:      maxTokens,
+		EffortOverride: cfg.EffortOverride,
 	}
 
 	var usage *provider.Usage

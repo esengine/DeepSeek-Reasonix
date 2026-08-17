@@ -64,6 +64,35 @@ func TestReconcileMakesUnknownCountsVisibleWithoutReadingTranscript(t *testing.T
 	}
 }
 
+func TestDirectoryScanReadyOnlyAfterFirstReconcile(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "chat.jsonl"), []byte(`{"role":"user","content":"hi"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := Open(ctx, Options{InMemory: true, DisableRepair: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = catalog.Close(context.Background()) })
+	if catalog.DirectoryScanReady(ctx, dir) {
+		t.Fatal("opened catalog must not report the directory ready before the first scan")
+	}
+	if catalog.HasWorkspaceRecords(ctx, "global", "") {
+		t.Fatal("opened catalog must not report workspace records before the first scan")
+	}
+	if err := catalog.ReconcileDirectory(ctx, DirectoryTarget{Path: dir, Scope: "global"}); err != nil {
+		t.Fatal(err)
+	}
+	if !catalog.DirectoryScanReady(ctx, dir) {
+		t.Fatal("directory must be ready after ReconcileDirectory finishes")
+	}
+	if !catalog.HasWorkspaceRecords(ctx, "global", "") {
+		t.Fatal("reconciled directory should report workspace records")
+	}
+}
+
 func TestListTopicsUsesStableKeysetCursor(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -105,6 +134,41 @@ func TestListTopicsUsesStableKeysetCursor(t *testing.T) {
 	}
 	if first.Items[0].TopicID != "c" || first.Items[1].TopicID != "b" || second.Items[0].TopicID != "a" {
 		t.Fatalf("keyset order = %q, %q, %q", first.Items[0].TopicID, first.Items[1].TopicID, second.Items[0].TopicID)
+	}
+}
+
+func TestListTopicsSortsByCreationTimeAcrossPages(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	catalog, err := Open(ctx, Options{InMemory: true, DisableRepair: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = catalog.Close(context.Background()) })
+
+	for _, record := range []SessionRecord{
+		{Path: "/sessions/a.jsonl", Directory: "/sessions", Scope: "global", TopicID: "a", TopicTitle: "a", CreatedAt: 300, LastActivityAt: 100, Turns: 1, TurnsState: TurnsValid, Health: HealthOK},
+		{Path: "/sessions/b.jsonl", Directory: "/sessions", Scope: "global", TopicID: "b", TopicTitle: "b", CreatedAt: 200, LastActivityAt: 300, Turns: 1, TurnsState: TurnsValid, Health: HealthOK},
+		{Path: "/sessions/c.jsonl", Directory: "/sessions", Scope: "global", TopicID: "c", TopicTitle: "c", CreatedAt: 100, LastActivityAt: 200, Turns: 1, TurnsState: TurnsValid, Health: HealthOK},
+	} {
+		if err := catalog.UpsertSession(ctx, record); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	first, err := catalog.ListTopics(ctx, TopicPageRequest{Scope: "global", Limit: 2, SortMode: "created"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := catalog.ListTopics(ctx, TopicPageRequest{Scope: "global", Limit: 2, SortMode: "created", Cursor: first.NextCursor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Items) != 2 || first.NextCursor == "" || len(second.Items) != 1 || second.NextCursor != "" {
+		t.Fatalf("created pages = first %#v second %#v", first, second)
+	}
+	if first.Items[0].TopicID != "a" || first.Items[1].TopicID != "b" || second.Items[0].TopicID != "c" {
+		t.Fatalf("created order = %q, %q, %q; want a, b, c", first.Items[0].TopicID, first.Items[1].TopicID, second.Items[0].TopicID)
 	}
 }
 
@@ -200,6 +264,51 @@ func TestSyncMetadataRemovesOnlyMetadataOnlyTopics(t *testing.T) {
 	}
 }
 
+func TestSyncMetadataPreservesRepresentativeSessionCustomTitle(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	catalog, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "catalog.sqlite"), DisableRepair: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = catalog.Close(context.Background()) })
+	record := SessionRecord{
+		Path: "/sessions/titled.jsonl", Directory: "/sessions", Scope: "global",
+		TopicID: "titled", TopicTitle: "Original topic", CustomTitle: "Explicit session title",
+		LastActivityAt: 2, Turns: 1, TurnsState: TurnsValid, Health: HealthOK,
+	}
+	if err := catalog.UpsertSession(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.SyncMetadata(ctx, nil, []TopicMetadata{{
+		Scope: "global", TopicID: "titled", Title: "Changed topic", TitleSource: "auto",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	topic, ok, err := catalog.GetTopic(ctx, TopicKey{Scope: "global", TopicID: "titled"})
+	if err != nil || !ok || topic.Title != "Explicit session title" || topic.TitleSource != "manual" {
+		t.Fatalf("custom title after metadata sync = %+v, ok=%v, err=%v", topic, ok, err)
+	}
+	page, err := catalog.ListTopics(ctx, TopicPageRequest{Scope: "global", Limit: 10})
+	if err != nil || len(page.Items) != 1 || page.Items[0].TitleSource != "manual" {
+		t.Fatalf("listed custom title source = %+v, err=%v", page.Items, err)
+	}
+	record.CustomTitle = ""
+	record.TopicTitle = "Changed topic"
+	if err := catalog.UpsertSession(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.SyncMetadata(ctx, nil, []TopicMetadata{{
+		Scope: "global", TopicID: "titled", Title: "Changed topic", TitleSource: "auto",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	topic, ok, err = catalog.GetTopic(ctx, TopicKey{Scope: "global", TopicID: "titled"})
+	if err != nil || !ok || topic.Title != "Changed topic" || topic.TitleSource != "auto" {
+		t.Fatalf("cleared custom title after metadata sync = %+v, ok=%v, err=%v", topic, ok, err)
+	}
+}
+
 func TestSchemaMigrationLedgerRecordsEveryVersion(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -221,7 +330,7 @@ func TestSchemaMigrationLedgerRecordsEveryVersion(t *testing.T) {
 		}
 		versions = append(versions, version)
 	}
-	if fmt.Sprint(versions) != "[1 2 3]" {
+	if fmt.Sprint(versions) != "[1 2 3 4 5 6 7]" {
 		t.Fatalf("schema migration ledger = %v", versions)
 	}
 }

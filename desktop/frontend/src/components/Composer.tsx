@@ -1,13 +1,15 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
-import { ArrowRight, ArrowUp, AtSign, Check, ChevronsUpDown, CornerDownRight, Equal, Eye, FilePlus2, FileText, Flag, Folder, Gauge, Hash, List, MessageSquare, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, X } from "lucide-react";
+import { ArrowRight, ArrowUp, AtSign, Check, ChevronsUpDown, CornerDownRight, Eye, FilePlus2, FileText, Folder, Gauge, Hash, List, MessageSquare, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, X } from "lucide-react";
 import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
 import { app, onFilesDropped } from "../lib/bridge";
 import { enqueueInboxGuidance } from "../lib/inboxSubmit";
-import { formatInboxError } from "../lib/inboxError";
-import { guidanceNeedsRetry, guidanceTextMatches, kickIdleGuidance, markGuidanceQueued } from "../lib/composerGuidance";
+import { formatInboxError, isInboxItemMissing } from "../lib/inboxError";
+import { inboxScopeKey } from "../lib/composerInboxQueue";
+import { useComposerInboxRefresh } from "../lib/useComposerInboxRefresh";
+import { guidanceIsInFlight, guidanceNeedsRetry, guidanceTextMatches, kickIdleGuidance, markGuidanceQueued } from "../lib/composerGuidance";
 import { canUsePromptHistory, composerEnterAction, composerEscapeAction, composerMenuKeyAction, insertComposerNewline, isFnKeyEvent, isImeKeyEvent, promptHistoryDirectionFromEvent } from "../lib/composerKeyboard";
 import { cacheGeneration, loadOlder } from "../lib/composerHistory";
 import { sessionTurnsLabel } from "../lib/sessionCatalogPresentation";
@@ -26,12 +28,13 @@ import {
   type StructuredInvocationSubmit,
 } from "../lib/invocationDisplay";
 import { formatTokens } from "../lib/format";
+import type { CancelOutcome } from "../lib/inboxCancel";
 import type { ControllerLiveStore } from "../lib/useController";
 import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
 import { createRafResizeUpdater } from "../lib/resizeDrag";
 import { observeComposerMenuViewport } from "../lib/composerMenuViewport";
 import { useToast } from "../lib/toast";
-import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type ContextInfo, type DirEntry, type EffortInfo, type GoalRuntime, type HistoryMessage, type Mode, type PromptHistoryEntry, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type TokenMode, type ToolApprovalMode, type BalanceInfo } from "../lib/types";
+import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type ContextInfo, type DirEntry, type EffortInfo, type GoalRuntime, type HistoryMessage, type Mode, type PromptHistoryEntry, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type ToolApprovalMode, type BalanceInfo } from "../lib/types";
 import {
   formatWorkspaceReference,
   parseWorkspaceReference,
@@ -71,6 +74,8 @@ import {
   type SelectedTextInsertRequest,
   type SelectedTextReference,
 } from "../lib/selectedTextContext";
+import { formatGoalWorkTime } from "../lib/goalRuntime";
+
 interface Attachment {
   path: string;
   previewUrl?: string;
@@ -158,8 +163,43 @@ type WebkitFileEntry = {
   isDirectory?: boolean;
 };
 
+type GuidanceReceiptTracker = {
+  start(draftKey: string): void;
+  recordConsumed(draftKey: string, itemId: string): void;
+  takeConsumed(draftKey: string, itemId: string): boolean;
+  finish(draftKey: string): void;
+};
+
 const DEFAULT_COMPOSER_DRAFT_KEY = "__default_composer_draft__";
 const MAX_COMPOSER_EDIT_HISTORY = 50;
+
+function createGuidanceReceiptTracker(): GuidanceReceiptTracker {
+  const inFlight = new Map<string, number>();
+  const consumedBeforeReceipt = new Map<string, Set<string>>();
+  return {
+    start(draftKey) {
+      inFlight.set(draftKey, (inFlight.get(draftKey) ?? 0) + 1);
+    },
+    recordConsumed(draftKey, itemId) {
+      if ((inFlight.get(draftKey) ?? 0) === 0) return;
+      const consumed = consumedBeforeReceipt.get(draftKey) ?? new Set<string>();
+      consumed.add(itemId);
+      consumedBeforeReceipt.set(draftKey, consumed);
+    },
+    takeConsumed(draftKey, itemId) {
+      return consumedBeforeReceipt.get(draftKey)?.delete(itemId) ?? false;
+    },
+    finish(draftKey) {
+      const remaining = (inFlight.get(draftKey) ?? 1) - 1;
+      if (remaining > 0) {
+        inFlight.set(draftKey, remaining);
+        return;
+      }
+      inFlight.delete(draftKey);
+      consumedBeforeReceipt.delete(draftKey);
+    },
+  };
+}
 
 function lineCount(s: string): number {
   if (s === "") return 0;
@@ -494,7 +534,7 @@ export function Composer({
   running,
   collaborationMode,
   toolApprovalMode,
-  tokenMode,
+  turnPhase,
   goal,
   goalStatus,
   goalRuntime,
@@ -516,7 +556,6 @@ export function Composer({
   onResumeGoal,
   onSwitchModel,
   onSetEffort,
-  onSetTokenMode,
   insertRequest,
   selectedTextRequest,
   disabled,
@@ -540,15 +579,18 @@ export function Composer({
   pendingAsk = false,
   transientDismissSignal,
   sessionKey,
+  inboxSessionPath,
   workspaceScopeKey,
   fileRefRefreshKey,
   guidanceConsumedKey,
+  guidanceConsumedItemId,
   guidanceConsumedText,
   guidanceQueuePreviewItems,
   showContextWindowRing = false,
   heroMode = false,
   context,
   turnCost,
+  turnRateBand,
   currency,
   cacheHitTokens,
   cacheMissTokens,
@@ -558,7 +600,8 @@ export function Composer({
   running: boolean;
   collaborationMode: CollaborationMode;
   toolApprovalMode: ToolApprovalMode;
-  tokenMode: TokenMode;
+  /** Host turn phase: working | checking | verifying | reviewing */
+  turnPhase?: string;
   goal?: string;
   goalStatus?: string;
   goalRuntime?: GoalRuntime;
@@ -570,9 +613,9 @@ export function Composer({
   onSend: (displayText: string, submitText?: string, tabId?: string, structured?: StructuredInvocationSubmit) => void | Promise<void>;
   onInvocationMetadataChange?: (metadata: Record<string, { kind: "skill" | "subagent"; color?: string }>) => void;
   onSteer?: (submitText: string, tabId?: string) => void | Promise<void>;
-  // Returns the un-sent text when cancelling before the server replied (so it can
-  // be restored to the input); undefined for a normal cancel.
-  onCancel: (queuedItemIDs?: string[]) => string | undefined;
+  // Returns the un-sent text plus the exact durable queue IDs the backend
+  // confirmed were withdrawn and are therefore safe to restore.
+  onCancel: (queuedItemIDs?: string[]) => Promise<CancelOutcome>;
   onCycleMode: () => void;
   onSetMode: (mode: Mode) => void;
   onSetCollaborationMode: (mode: CollaborationMode) => void;
@@ -583,7 +626,6 @@ export function Composer({
   onResumeGoal: () => void;
   onSwitchModel: (name: string) => boolean | Promise<boolean>;
   onSetEffort: (level: string) => void;
-  onSetTokenMode: (mode: TokenMode) => void;
   insertRequest?: ComposerInsertRequest | null;
   selectedTextRequest?: SelectedTextInsertRequest | null;
   disabled?: boolean;
@@ -630,17 +672,20 @@ export function Composer({
   pendingAsk?: boolean;
   transientDismissSignal?: number;
   sessionKey?: string;
+  inboxSessionPath?: string;
   workspaceScopeKey?: string;
   fileRefRefreshKey?: number | string;
   guidanceConsumedKey?: string;
+  guidanceConsumedItemId?: string;
   guidanceConsumedText?: string;
   guidanceQueuePreviewItems?: readonly string[];
   showContextWindowRing?: boolean;
   // Creation empty-session hero: slim centered composer under the welcome
-  // headline (hides task/profile/approval chrome; keeps model + effort).
+  // headline (hides task/approval chrome; keeps model + effort).
   heroMode?: boolean;
   context?: ContextInfo;
   turnCost?: number;
+  turnRateBand?: string;
   currency?: string;
   cacheHitTokens?: number;
   cacheMissTokens?: number;
@@ -654,6 +699,7 @@ export function Composer({
   const redoComboLabel = useShortcutComboLabel("composer.redo");
   const yoloComboLabel = useShortcutComboLabel("toolApproval.yolo");
   const draftKey = sessionKey || tabId || DEFAULT_COMPOSER_DRAFT_KEY;
+  const inboxSessionKey = inboxScopeKey(inboxSessionPath, workspaceScopeKey);
   const now = useTick(running);
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -687,8 +733,6 @@ export function Composer({
   const [textareaAutoOverflow, setTextareaAutoOverflow] = useState(false);
   const [intentMenuOpen, setIntentMenuOpen] = useState(false);
   const [intentMenuClosing, setIntentMenuClosing] = useState(false);
-  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
-  const [profileMenuClosing, setProfileMenuClosing] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [moreMenuClosing, setMoreMenuClosing] = useState(false);
   const [contentMenuOpen, setContentMenuOpen] = useState(false);
@@ -708,6 +752,8 @@ export function Composer({
   const guidanceSendingIdRef = useRef<string | null>(null);
   const [loadingPastChats, setLoadingPastChats] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const cancelSettlingDraftsRef = useRef(new Set<string>());
+  const [, setCancelSettlingRevision] = useState(0);
   const [inputMenuPoint, setInputMenuPoint] = useState<ContextMenuPoint | null>(null);
   const [composerPrompt, setComposerPrompt] = useState<string | null>(null);
   // Prompt history navigation (plain ↑/↓)
@@ -730,14 +776,11 @@ export function Composer({
   const composerWrapRef = useRef<HTMLDivElement>(null);
   const contentMenuAnchorRef = useRef<HTMLButtonElement>(null);
   const intentMenuAnchorRef = useRef<HTMLButtonElement>(null);
-  const profileMenuAnchorRef = useRef<HTMLButtonElement>(null);
   const moreMenuAnchorRef = useRef<HTMLButtonElement>(null);
   const intentCloseTimerRef = useRef<number | null>(null);
-  const profileCloseTimerRef = useRef<number | null>(null);
   const moreCloseTimerRef = useRef<number | null>(null);
-  // Creation chrome: hover-open task/profile menus (same pattern as ContextWindowRing).
+  // Creation chrome: hover-open task menus (same pattern as ContextWindowRing).
   const intentHoverTimerRef = useRef<number | null>(null);
-  const profileHoverTimerRef = useRef<number | null>(null);
   const creationChrome = showContextWindowRing;
   const wasRunningByDraftRef = useRef<Record<string, boolean>>({ [draftKey]: running });
   const composingRef = useRef(false);
@@ -751,6 +794,8 @@ export function Composer({
   const lastGuidanceConsumedKeyByDraftRef = useRef<Record<string, string | undefined>>(
     guidanceConsumedKey ? { [draftKey]: guidanceConsumedKey } : {},
   );
+  const guidanceReceiptTrackerRef = useRef<GuidanceReceiptTracker | null>(null);
+  guidanceReceiptTrackerRef.current ??= createGuidanceReceiptTracker();
   const selfDispatchedGuidanceByDraftRef = useRef<Record<string, string[]>>({});
   const submittingRef = useRef(false);
   const nativeClipboardPasteTimerRef = useRef<number | null>(null);
@@ -1132,6 +1177,11 @@ export function Composer({
     restoreComposerDraft(draftsBySessionRef.current[draftKey] ?? emptyComposerDraft());
   }, [draftKey]);
 
+  const applyInboxQueue = useCallback((items: PendingGuidance[]) => updatePendingGuidanceForDraft(draftKey, () => items), [draftKey]);
+  const collapseInboxQueue = useCallback(() => setGuidanceExpanded(false), []);
+  const refreshInboxQueue = useCallback(() => setGuidanceRetryNonce((value) => value + 1), []);
+  useComposerInboxRefresh(tabId, draftKey, guidanceDraftKey, inboxSessionKey, guidanceQueuePreviewKey, guidanceRetryNonce, running, applyInboxQueue, collapseInboxQueue, refreshInboxQueue);
+
   useEffect(() => {
     return () => {
       draftsBySessionRef.current[activeDraftKeyRef.current] = snapshotComposerDraft();
@@ -1169,52 +1219,6 @@ export function Composer({
     const next = pendingGuidance[0];
     if (next?.id.startsWith("local-")) void sendQueuedGuidance(next, draftKey);
   }, [draftKey, guidanceDraftKey, guidanceRetryNonce, running, submitDisabled, pendingGuidance, suspendedByDecision]);
-
-  useEffect(() => {
-    if (guidanceDraftKey !== draftKey) return;
-    let live = true;
-    const fallback = guidanceQueuePreviewKey
-      .split("\n")
-      .filter(Boolean)
-      .map((text, i) => ({ id: `local-${i}`, text, submitText: text }));
-    // Older Wails bindings and focused component tests do not expose the new
-    // inbox methods yet. Preserve their local preview contract.
-    if (typeof app.InboxSnapshot !== "function") {
-      updatePendingGuidanceForDraft(draftKey, () => fallback);
-      setGuidanceExpanded(false);
-      return;
-    }
-    // Refresh durable server metadata when running transitions change Controller-owned dispatch/ack.
-    void app.InboxSnapshot(tabId || "").then((snap) => {
-      if (!live) return;
-      const durable = (snap?.items ?? []).map((it: { id: string; preview: string; state?: string; intent?: string; source?: string }) => ({
-        id: it.id,
-        text: it.preview,
-        submitText: "",
-        state: it.state,
-        intent: it.intent,
-        source: it.source,
-        paused: Boolean(snap?.paused),
-        recoveredCount: snap?.paused && snap?.recovered
-          ? (snap.recoveredCount || snap.items.length)
-          : undefined,
-      }));
-      updatePendingGuidanceForDraft(draftKey, () => durable.length > 0 ? durable : fallback);
-      setGuidanceExpanded(false);
-    }).catch(() => {
-      if (!live) return;
-      // Fallback: local preview lines without durable ids (will re-enqueue).
-      updatePendingGuidanceForDraft(
-        draftKey,
-        () =>
-          guidanceQueuePreviewKey
-            .split("\n")
-            .filter(Boolean)
-            .map((text, i) => ({ id: `local-${i}`, text, submitText: text })),
-      );
-    });
-    return () => { live = false; };
-  }, [draftKey, guidanceDraftKey, guidanceQueuePreviewKey, running, tabId, guidanceRetryNonce]);
 
   useEffect(() => {
     if (guidanceExpanded && pendingGuidance.length <= 2) setGuidanceExpanded(false);
@@ -1495,10 +1499,16 @@ export function Composer({
     if (guidanceConsumedKey === lastGuidanceConsumedKeyByDraftRef.current[draftKey]) return;
     lastGuidanceConsumedKeyByDraftRef.current[draftKey] = guidanceConsumedKey;
     const consumed = (guidanceConsumedText ?? "").trim();
-    if (consumed && takeSelfDispatchedGuidance(consumed, draftKey)) return;
+    if (guidanceConsumedItemId) {
+      guidanceReceiptTrackerRef.current?.recordConsumed(draftKey, guidanceConsumedItemId);
+    }
+    if (!guidanceConsumedItemId && consumed && takeSelfDispatchedGuidance(consumed, draftKey)) return;
     updatePendingGuidanceForDraft(draftKey, (items) => {
       if (items.length === 0) return items;
-      const idx = consumed
+      const byID = guidanceConsumedItemId
+        ? items.findIndex((item) => item.id === guidanceConsumedItemId)
+        : -1;
+      const idx = guidanceConsumedItemId ? byID : consumed
         ? items.findIndex((item) => guidanceTextMatches(item.submitText, consumed) || guidanceTextMatches(item.text, consumed))
         : -1;
       // Only remove on a real match. Steer notices also fire for guidance this
@@ -1508,7 +1518,7 @@ export function Composer({
       if (idx < 0) return items;
       return items.filter((_, index) => index !== idx);
     });
-  }, [draftKey, guidanceDraftKey, guidanceConsumedKey, guidanceConsumedText, takeSelfDispatchedGuidance]);
+  }, [draftKey, guidanceDraftKey, guidanceConsumedKey, guidanceConsumedItemId, guidanceConsumedText, takeSelfDispatchedGuidance]);
 
   // When the @ trigger disappears (user deleted the @), close the past:chats
   // sub-menu and reset related state. Without this, showPastChats can outlive
@@ -1635,6 +1645,16 @@ export function Composer({
     }
   };
 
+  const setTextForDraft = (targetDraftKey: string, next: string) => {
+    if (targetDraftKey === activeDraftKeyRef.current) {
+      setTextCaretEnd(next);
+      return;
+    }
+    const draft = cloneComposerDraft(draftsBySessionRef.current[targetDraftKey] ?? emptyComposerDraft());
+    draft.text = next;
+    draftsBySessionRef.current[targetDraftKey] = draft;
+  };
+
   const rememberCaret = () => {
     if (invocationsRef.current.length > 0) {
       const selection = richInputRef.current?.getSelection();
@@ -1745,16 +1765,20 @@ export function Composer({
     if (!normalized.text) return;
     if (normalized.truncated) showToast(t("composer.selectedTextTruncated"), "warn");
     const path = selectedTextRequest.path;
+    const source = selectedTextRequest.source;
     const duplicate = selectedTextRefsRef.current.some(
-      (reference) => reference.text === normalized.text && (reference.path ?? "") === (path ?? ""),
+      (reference) => reference.text === normalized.text
+        && (reference.path ?? "") === (path ?? "")
+        && (reference.source ?? "") === (source ?? ""),
     );
     if (!duplicate) {
       const next = [
         ...selectedTextRefsRef.current,
         {
-          id: `${path ? "code" : "chat"}-selection-${selectedTextRequest.id}`,
+          id: `${path ? "code" : source === "terminal" ? "terminal" : "chat"}-selection-${selectedTextRequest.id}`,
           text: normalized.text,
           ...(path ? { path } : {}),
+          ...(source ? { source } : {}),
         },
       ];
       selectedTextRefsRef.current = next;
@@ -1879,12 +1903,6 @@ export function Composer({
     intentCloseTimerRef.current = null;
   }, []);
 
-  const clearProfileCloseTimer = useCallback(() => {
-    if (profileCloseTimerRef.current === null) return;
-    window.clearTimeout(profileCloseTimerRef.current);
-    profileCloseTimerRef.current = null;
-  }, []);
-
   // Hover timers only touch refs — no useCallback cross-deps (avoids TDZ on HMR).
   const clearHoverTimer = (timerRef: { current: number | null }) => {
     if (timerRef.current == null) return;
@@ -1895,13 +1913,6 @@ export function Composer({
   const openIntentMenu = useCallback(() => {
     clearIntentCloseTimer();
     clearHoverTimer(intentHoverTimerRef);
-    clearHoverTimer(profileHoverTimerRef);
-    if (profileCloseTimerRef.current != null) {
-      window.clearTimeout(profileCloseTimerRef.current);
-      profileCloseTimerRef.current = null;
-    }
-    setProfileMenuOpen(false);
-    setProfileMenuClosing(false);
     setContentMenuOpen(false);
     setDirectPastChats(false);
     setDismissed(true);
@@ -1922,42 +1933,10 @@ export function Composer({
     }, reduceMotion ? 0 : ANCHORED_POPOVER_CLOSE_MS);
   }, [clearIntentCloseTimer]);
 
-  const openProfileMenu = useCallback(() => {
-    clearProfileCloseTimer();
-    clearHoverTimer(profileHoverTimerRef);
-    clearHoverTimer(intentHoverTimerRef);
-    if (intentCloseTimerRef.current != null) {
-      window.clearTimeout(intentCloseTimerRef.current);
-      intentCloseTimerRef.current = null;
-    }
-    setIntentMenuOpen(false);
-    setIntentMenuClosing(false);
-    setContentMenuOpen(false);
-    setDirectPastChats(false);
-    setDismissed(true);
-    setProfileMenuClosing(false);
-    setProfileMenuOpen(true);
-  }, [clearProfileCloseTimer]);
-
-  const closeProfileMenu = useCallback((afterClose?: () => void) => {
-    clearProfileCloseTimer();
-    clearHoverTimer(profileHoverTimerRef);
-    setProfileMenuClosing(true);
-    window.requestAnimationFrame(() => setProfileMenuOpen(false));
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    profileCloseTimerRef.current = window.setTimeout(() => {
-      profileCloseTimerRef.current = null;
-      setProfileMenuClosing(false);
-      afterClose?.();
-    }, reduceMotion ? 0 : ANCHORED_POPOVER_CLOSE_MS);
-  }, [clearProfileCloseTimer]);
-
   useEffect(() => () => {
     clearIntentCloseTimer();
     clearHoverTimer(intentHoverTimerRef);
-    clearProfileCloseTimer();
-    clearHoverTimer(profileHoverTimerRef);
-  }, [clearIntentCloseTimer, clearProfileCloseTimer]);
+  }, [clearIntentCloseTimer]);
 
   const onIntentHoverEnter = useCallback(() => {
     if (!creationChrome || disabled || running) return;
@@ -1981,30 +1960,6 @@ export function Composer({
   const onIntentPopoverEnter = useCallback(() => {
     if (!creationChrome) return;
     clearHoverTimer(intentHoverTimerRef);
-  }, [creationChrome]);
-
-  const onProfileHoverEnter = useCallback(() => {
-    if (!creationChrome || disabled || running) return;
-    clearHoverTimer(profileHoverTimerRef);
-    profileHoverTimerRef.current = window.setTimeout(() => {
-      profileHoverTimerRef.current = null;
-      openProfileMenu();
-    }, 120);
-  }, [creationChrome, disabled, openProfileMenu, running]);
-
-  const onProfileHoverLeave = useCallback(() => {
-    if (!creationChrome) return;
-    clearHoverTimer(profileHoverTimerRef);
-    if (!profileMenuOpen && !profileMenuClosing) return;
-    profileHoverTimerRef.current = window.setTimeout(() => {
-      profileHoverTimerRef.current = null;
-      closeProfileMenu();
-    }, 140);
-  }, [closeProfileMenu, creationChrome, profileMenuClosing, profileMenuOpen]);
-
-  const onProfilePopoverEnter = useCallback(() => {
-    if (!creationChrome) return;
-    clearHoverTimer(profileHoverTimerRef);
   }, [creationChrome]);
 
   const clearMoreCloseTimer = useCallback(() => {
@@ -2127,26 +2082,34 @@ export function Composer({
         const guidanceSubmitText = submitText.trim();
         if (guidanceText) {
           // Durable follow-up: only clear the composer after a durable receipt.
+          const receiptTracker = guidanceReceiptTrackerRef.current;
+          receiptTracker?.start(submitDraftKey);
           try {
-            const receipt = await enqueueInboxGuidance(app, submitTabId || "", guidanceText, guidanceSubmitText, structured);
+            const receipt = await enqueueInboxGuidance(app, submitTabId || "", guidanceText, guidanceSubmitText, structured, { steer: true });
             if (receipt?.error) throw new Error(receipt.error);
-            updatePendingGuidanceForDraft(submitDraftKey, (items) => [
-              ...items.map((item) => receipt.paused ? { ...item, paused: true } : item),
-              {
-                id: receipt.itemId,
-                text: guidanceText.slice(0, 120),
-                submitText: "",
-                intent: "followup",
-                state: "queued",
-                source: "desktop",
-                paused: Boolean(receipt.paused),
-                structured,
-              },
-            ]);
+            const consumedBeforeReceipt = receiptTracker?.takeConsumed(submitDraftKey, receipt.itemId) ?? false;
+            if (!consumedBeforeReceipt) {
+              updatePendingGuidanceForDraft(submitDraftKey, (items) => {
+                const next = items.map((item) => receipt.paused ? { ...item, paused: true } : item);
+                if (next.some((item) => item.id === receipt.itemId)) return next;
+                return [...next, {
+                  id: receipt.itemId,
+                  text: guidanceText.slice(0, 120),
+                  submitText: "",
+                  intent: "followup",
+                  state: "queued",
+                  source: "desktop",
+                  paused: Boolean(receipt.paused),
+                  structured,
+                }];
+              });
+            }
             clearSubmittedDraft(submitDraftKey);
           } catch (error) {
             showToast(formatInboxError(error, locale), "warn");
             // Keep draft on durable failure.
+          } finally {
+            receiptTracker?.finish(submitDraftKey);
           }
         }
         return;
@@ -2235,16 +2198,41 @@ export function Composer({
   };
 
   const dismissQueuedGuidance = async (item: PendingGuidance) => {
+    const targetDraftKey = activeDraftKeyRef.current;
+    const targetTabId = tabId || "";
     try {
       if (!item.id.startsWith("local-")) {
-        await app.DeleteInboxItem(tabId || "", item.id);
+        await app.DeleteInboxItem(targetTabId, item.id);
       }
       updatePendingGuidanceForDraft(
-        activeDraftKeyRef.current,
+        targetDraftKey,
         (items) => items.filter((queued) => queued.id !== item.id),
       );
     } catch (error) {
+      if (isInboxItemMissing(error)) {
+        updatePendingGuidanceForDraft(
+          targetDraftKey,
+          (items) => items.filter((queued) => queued.id !== item.id),
+        );
+        return;
+      }
       showToast(formatInboxError(error, locale), "warn");
+    }
+  };
+
+  const editQueuedGuidance = async (item: PendingGuidance, nextText: string) => {
+    const text = nextText.trim();
+    if (!text || item.id.startsWith("local-")) return;
+    const targetDraftKey = activeDraftKeyRef.current;
+    const targetTabId = tabId || "";
+    try {
+      await app.UpdateInboxItem(targetTabId, item.id, text, text);
+      updatePendingGuidanceForDraft(targetDraftKey, (items) =>
+        items.map((queued) => queued.id === item.id ? { ...queued, text, submitText: text } : queued),
+      );
+    } catch (error) {
+      showToast(formatInboxError(error, locale), "warn");
+      throw error;
     }
   };
 
@@ -2748,31 +2736,40 @@ export function Composer({
 
   // handleCancel stops the in-flight turn; if it was cancelled before the server
   // replied, the just-sent text is handed back so we drop it back into the input.
-  const handleCancel = () => {
-    const ownedGuidance = pendingGuidance.filter((item) => item.id.startsWith("local-") || item.source === "desktop");
+  const handleCancel = async () => {
+    const targetDraftKey = activeDraftKeyRef.current;
+    if (cancelSettlingDraftsRef.current.has(targetDraftKey)) return;
+    cancelSettlingDraftsRef.current.add(targetDraftKey);
+    setCancelSettlingRevision((value) => value + 1);
+    const ownedGuidance = pendingGuidanceRef.current.filter((item) => item.id.startsWith("local-") || item.source === "desktop");
     const durableItemIDs = ownedGuidance
       .map((item) => item.id)
       .filter((id) => !id.startsWith("local-"));
-    const restored = onCancel(durableItemIDs);
     if (goalModeOn && activeGoal) onClearGoal();
-    // A user-requested cancel must not let the natural-completion effect submit
-    // the queued follow-up. Fold it back into the draft: cancelling means "stop
-    // acting", not "discard what I typed" — the same contract onCancel already
-    // honors for un-sent text. Structured items fold back as their slash form
-    // (structured.display is valid /name syntax) so the invocation survives the
-    // round trip instead of degrading to its bare task text.
-    const queued = ownedGuidance
-      .map((item) => item.structured?.display ?? item.text)
-      .filter((part) => part.trim() !== "");
-    if (queued.length === 0) {
-      if (typeof restored === "string") setTextCaretEnd(restored);
-      return;
+    try {
+      const outcome = (await onCancel(durableItemIDs)) ?? { discardedItemIds: [] };
+      const discarded = new Set(outcome.discardedItemIds);
+      const restorable = ownedGuidance.filter((item) => item.id.startsWith("local-") || discarded.has(item.id));
+      const queued = restorable
+        .map((item) => item.structured?.display ?? item.text)
+        .filter((part) => part.trim() !== "");
+      const restoredIDs = new Set(restorable.map((item) => item.id));
+      if (restoredIDs.size > 0) {
+        updatePendingGuidanceForDraft(targetDraftKey, (items) => items.filter((item) => !restoredIDs.has(item.id)));
+      }
+      const draftText = targetDraftKey === activeDraftKeyRef.current
+        ? textRef.current
+        : (draftsBySessionRef.current[targetDraftKey]?.text ?? "");
+      const currentDraft = outcome.restoredText?.trim() === draftText.trim() ? "" : draftText;
+      const nextText = [outcome.restoredText, currentDraft, ...queued]
+        .filter((part): part is string => Boolean(part?.trim()))
+        .join("\n");
+      if (nextText) setTextForDraft(targetDraftKey, nextText);
+      if (targetDraftKey === activeDraftKeyRef.current && restorable.length > 0) setGuidanceExpanded(false);
+    } finally {
+      cancelSettlingDraftsRef.current.delete(targetDraftKey);
+      setCancelSettlingRevision((value) => value + 1);
     }
-    const ownedIDs = new Set(ownedGuidance.map((item) => item.id));
-    updatePendingGuidanceForDraft(activeDraftKeyRef.current, (items) => items.filter((item) => !ownedIDs.has(item.id)));
-    setGuidanceExpanded(false);
-    const base = typeof restored === "string" ? restored : text;
-    setTextCaretEnd([base, ...queued].filter((part) => part.trim() !== "").join("\n"));
   };
 
   const pickCommand = (c: CommandInfo) => {
@@ -3181,7 +3178,6 @@ export function Composer({
 
   const openContentMenu = () => {
     if (intentMenuOpen || intentMenuClosing) closeIntentMenu();
-    if (profileMenuOpen || profileMenuClosing) closeProfileMenu();
     if (moreMenuOpen || moreMenuClosing) closeMoreMenu();
     setDirectPastChats(false);
     setShowPastChats(false);
@@ -3507,7 +3503,7 @@ export function Composer({
     // restores the text if the server hadn't replied yet.
     if (composerEscapeAction(e.nativeEvent, running, composing) === "cancel") {
       e.preventDefault();
-      handleCancel();
+      void handleCancel();
     }
 
     // Browser undo owns ordinary DOM edits, while programmatic composer edits
@@ -3627,29 +3623,6 @@ export function Composer({
       requestActiveDraftFrame(focusComposerInput);
     });
   };
-  const chooseTokenMode = (mode: TokenMode) => {
-    closeProfileMenu(() => {
-      if (mode !== tokenMode) onSetTokenMode(mode);
-      requestActiveDraftFrame(focusComposerInput);
-    });
-  };
-  const runtimeProfileShortKey = tokenMode === "economy"
-    ? "composer.runtimeProfileEconomyShort"
-    : tokenMode === "delivery"
-      ? "composer.runtimeProfileDeliveryShort"
-      : "composer.runtimeProfileBalancedShort";
-  const runtimeProfileTooltipSummaryKey = tokenMode === "economy"
-    ? "composer.runtimeProfileEconomyTooltipSummary"
-    : tokenMode === "delivery"
-      ? "composer.runtimeProfileDeliveryTooltipSummary"
-      : "composer.runtimeProfileBalancedTooltipSummary";
-  const RuntimeProfileIcon = tokenMode === "economy" ? Gauge : tokenMode === "delivery" ? Flag : Equal;
-  const runtimeProfileTriggerLabel = t("composer.runtimeProfileTrigger", { mode: t(runtimeProfileShortKey) });
-  const runtimeProfileTooltipLabel = t("composer.controlTooltip", {
-    category: t("composer.runtimeProfileTitle"),
-    mode: t(runtimeProfileShortKey),
-    summary: t(runtimeProfileTooltipSummaryKey),
-  });
   const taskModeShortKey = collaborationMode === "plan"
     ? "composer.taskModePlanShort"
     : collaborationMode === "goal"
@@ -3733,9 +3706,8 @@ export function Composer({
     setDirectPastChats(false);
     setShowPastChats(false);
     closeIntentMenu();
-    closeProfileMenu();
     closeMoreMenu();
-  }, [suspendedByDecision, closeIntentMenu, closeProfileMenu, closeMoreMenu]);
+  }, [suspendedByDecision, closeIntentMenu, closeMoreMenu]);
   // Live text+reasoning character count for the run-strip TPS fallback. Reads
   // through the live store's own subscription so stream deltas re-render only
   // this component — the controller's bump path stays text-delta-free.
@@ -3754,6 +3726,20 @@ export function Composer({
     subscribeLiveText,
     () => liveStore?.getModelActiveAt?.(tabId),
   );
+  const turnPhaseLabel = (() => {
+    switch ((turnPhase ?? "").trim()) {
+      case "checking":
+        return t("composer.turnPhaseChecking");
+      case "verifying":
+        return t("composer.turnPhaseVerifying");
+      case "reviewing":
+        return t("composer.turnPhaseReviewing");
+      case "working":
+        return t("composer.turnPhaseWorking");
+      default:
+        return t("composer.runAnnounceRunning");
+    }
+  })();
   const runStateText = retry
     ? t("status.retrying", { attempt: retry.attempt, max: retry.max })
     : waitingPrompt === "approval"
@@ -3761,7 +3747,7 @@ export function Composer({
       : waitingPrompt === "ask"
         ? t("composer.runWaitingAsk")
         : running && !suspendedByDecision
-          ? t("composer.runAnnounceRunning")
+          ? turnPhaseLabel
           : null;
   const runTicker = !retry && !pauseWorkClock && running && turnStartAt
     ? (() => {
@@ -4008,11 +3994,9 @@ export function Composer({
                   <span className="composer-intent-menu__goal-runtime-line">
                     {t("composer.goalRuntimeLine", {
                       turnsUsed: goalRuntime.turnsUsed,
-                      turnsLimit: goalRuntime.turnsLimit,
                       tokensUsed: formatTokens(goalRuntime.tokensUsed),
                       requestsUsed: goalRuntime.requestsUsed ?? 0,
-                      noProgressTurns: goalRuntime.noProgressTurns,
-                      extensions: goalRuntime.budgetExtensions,
+                      workTime: formatGoalWorkTime(goalRuntime.workDurationMs),
                     })}
                   </span>
                 )}
@@ -4057,47 +4041,6 @@ export function Composer({
               </button>
             </div>
           )}
-        </div>
-      </AnchoredPopover>}
-      {!heroMode && <AnchoredPopover
-        open={profileMenuOpen}
-        closing={profileMenuClosing}
-        anchorRef={profileMenuAnchorRef}
-        onClose={() => closeProfileMenu()}
-        className="composer-access-menu composer-profile-menu"
-        align="start"
-      >
-        <div
-          className="composer-access-menu__section"
-          role="menu"
-          aria-label={t("composer.runtimeProfileTitle")}
-          onMouseEnter={creationChrome ? onProfilePopoverEnter : undefined}
-          onMouseLeave={creationChrome ? onProfileHoverLeave : undefined}
-        >
-          <div className="composer-access-menu__label">{t("composer.runtimeProfileTitle")}</div>
-          {([
-            ["economy", Gauge, "composer.runtimeProfileEconomy", "composer.runtimeProfileEconomyDesc"],
-            ["full", Equal, "composer.runtimeProfileBalanced", "composer.runtimeProfileBalancedDesc"],
-            ["delivery", Flag, "composer.runtimeProfileDelivery", "composer.runtimeProfileDeliveryDesc"],
-          ] as const).map(([profile, Icon, titleKey, descKey]) => (
-            <button
-              key={profile}
-              type="button"
-              role="menuitemradio"
-              className={`composer-access-menu__item composer-profile-menu__item${tokenMode === profile ? " composer-access-menu__item--active" : ""}`}
-              onClick={() => chooseTokenMode(profile)}
-              disabled={disabled || running}
-              title={t(descKey)}
-              aria-checked={tokenMode === profile}
-            >
-              <Icon size={16} strokeWidth={1.75} />
-              <span className="composer-access-menu__copy">
-                <span className="composer-access-menu__title">{t(titleKey)}</span>
-                <span className="composer-access-menu__desc">{t(descKey)}</span>
-              </span>
-              {tokenMode === profile && <Check size={15} aria-hidden="true" />}
-            </button>
-          ))}
         </div>
       </AnchoredPopover>}
       <AnchoredPopover
@@ -4299,7 +4242,7 @@ export function Composer({
       {pendingGuidance.length > 0 && (
         <Suspense fallback={null}>
           <ComposerGuidanceShelf
-            recovery={pendingGuidance[0]?.paused ? {
+            recovery={pendingGuidance[0]?.paused && !pendingGuidance.some((item) => guidanceIsInFlight(item.state)) ? {
               draftKey,
               tabId: tabId || "",
               count: pendingGuidance[0].recoveredCount || pendingGuidance.length,
@@ -4318,6 +4261,7 @@ export function Composer({
             onToggleExpanded={() => setGuidanceExpanded((value) => !value)}
             onSend={(item) => void sendQueuedGuidance(item)}
             onDismiss={(item) => void dismissQueuedGuidance(item)}
+            onEdit={(item, text) => editQueuedGuidance(item, text)}
           />
         </Suspense>
       )}
@@ -4381,7 +4325,9 @@ export function Composer({
               variant="selection"
               tooltipLabel={reference.path
                 ? <CodeViewer value={reference.text} language={languageFor(reference.path)} maxHeight={240} />
-                : <Markdown text={reference.text} />}
+                : reference.source === "terminal"
+                  ? <CodeViewer value={reference.text} language="console" maxHeight={240} />
+                  : <Markdown text={reference.text} />}
               removeLabel={t("composer.removeSelectedText")}
               onRemove={() => {
                 const next = selectedTextRefsRef.current.filter((item) => item.id !== reference.id);
@@ -4390,8 +4336,14 @@ export function Composer({
                 requestActiveDraftFrame(focusComposerInput);
               }}
               name={reference.path ? reference.path.split("/").filter(Boolean).pop() ?? reference.path : selectedTextSnippet(reference.text)}
-              meta={reference.path ? t("composer.selectedCode") : t("composer.selectedText")}
-              icon={reference.path ? <FileText size={20} /> : <MessageSquare size={20} />}
+              meta={reference.path
+                ? t("composer.selectedCode")
+                : reference.source === "terminal"
+                  ? t("composer.selectedTerminal")
+                  : t("composer.selectedText")}
+              icon={reference.path
+                ? <FileText size={20} />
+                : <MessageSquare size={20} />}
             />
           ))}
         </div>
@@ -4600,7 +4552,8 @@ export function Composer({
                 <button
                   className="composer__btn composer__btn--stop"
                   type="button"
-                  onClick={handleCancel}
+                  onClick={() => void handleCancel()}
+                  disabled={cancelSettlingDraftsRef.current.has(draftKey)}
                   aria-label={t("composer.stop")}
                 >
                   <Square size={12} fill="currentColor" />
@@ -4672,32 +4625,6 @@ export function Composer({
               </div>
             )}
             {!heroMode && (
-              <div className="composer-meta__control composer-meta__control--profile">
-                <Tooltip label={runtimeProfileTooltipLabel} disabled={profileMenuOpen || profileMenuClosing || creationChrome}>
-                  <button
-                    ref={profileMenuAnchorRef}
-                    type="button"
-                    data-profile={tokenMode}
-                    className={`composer-profile-trigger${profileMenuOpen || profileMenuClosing ? " composer-profile-trigger--open" : ""}`}
-                    onClick={() => (profileMenuOpen || profileMenuClosing ? closeProfileMenu() : openProfileMenu())}
-                    onMouseEnter={creationChrome ? onProfileHoverEnter : undefined}
-                    onMouseLeave={creationChrome ? onProfileHoverLeave : undefined}
-                    disabled={disabled || running}
-                    aria-haspopup="menu"
-                    aria-expanded={profileMenuOpen && !profileMenuClosing}
-                    aria-label={runtimeProfileTriggerLabel}
-                    title={profileMenuOpen || profileMenuClosing || creationChrome ? undefined : runtimeProfileTriggerLabel}
-                  >
-                    <RuntimeProfileIcon size={14} strokeWidth={1.75} aria-hidden="true" />
-                    <span className="composer-profile-trigger__label">
-                      <span className="composer-profile-trigger__value">{t(runtimeProfileShortKey)}</span>
-                    </span>
-                    <ChevronsUpDown size={11} aria-hidden="true" />
-                  </button>
-                </Tooltip>
-              </div>
-            )}
-            {!heroMode && (
               <div className="composer-meta__control composer-meta__control--approval">
                 {/* A pending tool approval disables the composer, but the approval
                     bar stays usable so mode changes remain possible mid-prompt;
@@ -4761,6 +4688,7 @@ export function Composer({
                   context={context}
                   tabId={tabId}
                   turnCost={turnCost}
+                  turnRateBand={turnRateBand}
                   currency={currency}
                   cacheHitTokens={cacheHitTokens}
                   cacheMissTokens={cacheMissTokens}

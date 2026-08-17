@@ -162,10 +162,19 @@ func TestRegistrySchemaRevisionTracksVisibleChanges(t *testing.T) {
 	if afterReplace <= afterAdd {
 		t.Fatalf("revision after replace = %d, want greater than %d", afterReplace, afterAdd)
 	}
-	if removed := r.RemovePrefix("missing"); removed != 0 || r.SchemaRevision() != afterReplace {
+	r.SetProviderVisibleTools([]string{"mcp__fs__read"})
+	afterVisibility := r.SchemaRevision()
+	if afterVisibility <= afterReplace {
+		t.Fatalf("revision after visibility change = %d, want greater than %d", afterVisibility, afterReplace)
+	}
+	r.SetProviderVisibleTools([]string{"mcp__fs__read"})
+	if revision := r.SchemaRevision(); revision != afterVisibility {
+		t.Fatalf("no-op visibility update changed revision: got %d, want %d", revision, afterVisibility)
+	}
+	if removed := r.RemovePrefix("missing"); removed != 0 || r.SchemaRevision() != afterVisibility {
 		t.Fatalf("no-op removal changed revision: removed=%d revision=%d", removed, r.SchemaRevision())
 	}
-	if removed := r.SuspendPrefix("mcp__fs__"); removed != 1 || r.SchemaRevision() <= afterReplace {
+	if removed := r.SuspendPrefix("mcp__fs__"); removed != 1 || r.SchemaRevision() <= afterVisibility {
 		t.Fatalf("suspension did not advance revision: removed=%d revision=%d", removed, r.SchemaRevision())
 	}
 }

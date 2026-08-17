@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -112,17 +111,18 @@ func TestGoalDeliveryYoloTokenSwitchPreservesBlockedGoalCheckpoint(t *testing.T)
 		t.Fatalf("SetTokenModeForTab: %v", err)
 	}
 	ctrl := app.controllerForTab(tab)
-	if ctrl == nil || ctrl == oldCtrl {
-		t.Fatal("token-mode switch did not install a replacement controller")
+	// Role setting switches in place; Goal axes must remain on the same controller.
+	if ctrl == nil || ctrl != oldCtrl {
+		t.Fatal("token-mode/role setting switch must keep the same controller")
 	}
 	if ctrl.GoalStatus() != control.GoalStatusBlocked || ctrl.Goal() != "ship the combined mode" {
-		t.Fatalf("rebuilt Goal = (%q, %q), want blocked Goal", ctrl.Goal(), ctrl.GoalStatus())
+		t.Fatalf("Goal after role switch = (%q, %q), want blocked Goal", ctrl.Goal(), ctrl.GoalStatus())
 	}
 	if ctrl.ToolApprovalMode() != control.ToolApprovalYolo {
 		t.Fatalf("tool approval = %q, want yolo", ctrl.ToolApprovalMode())
 	}
-	if currentTabTokenMode(tab) != boot.TokenModeDelivery {
-		t.Fatalf("token mode = %q, want delivery", currentTabTokenMode(tab))
+	if currentTabTokenMode(tab) != boot.TokenModeFull {
+		t.Fatalf("token mode = %q, want pinned full", currentTabTokenMode(tab))
 	}
 	app.mu.RLock()
 	runtimeForPath := app.runtimeBySessionKey[sessionRuntimeKey(path)]
@@ -178,33 +178,40 @@ func TestPlanYoloDeliveryRebuildUsesLiveControllerAxes(t *testing.T) {
 		t.Fatalf("SetTokenModeForTab: %v", err)
 	}
 	ctrl := app.controllerForTab(tab)
-	if ctrl == nil || ctrl == oldCtrl {
-		t.Fatal("token-mode switch did not install a replacement controller")
+	// Role setting is in-place: live Controller axes are the source of truth.
+	if ctrl == nil || ctrl != oldCtrl {
+		t.Fatal("token-mode/role setting switch must keep the same controller")
 	}
 	if !ctrl.PlanMode() || ctrl.ToolApprovalMode() != control.ToolApprovalYolo {
-		t.Fatalf("rebuilt axes plan=%v approval=%q, want true/yolo", ctrl.PlanMode(), ctrl.ToolApprovalMode())
+		t.Fatalf("axes plan=%v approval=%q, want true/yolo", ctrl.PlanMode(), ctrl.ToolApprovalMode())
 	}
 	if ctrl.GoalStatus() != control.GoalStatusBlocked {
 		t.Fatalf("blocked Goal status = %q, want preserved while Plan is active", ctrl.GoalStatus())
 	}
-	if currentTabTokenMode(tab) != boot.TokenModeDelivery {
-		t.Fatalf("token mode = %q, want delivery", currentTabTokenMode(tab))
+	if currentTabTokenMode(tab) != boot.TokenModeFull {
+		t.Fatalf("token mode = %q, want pinned full", currentTabTokenMode(tab))
 	}
 }
 
 func TestPlanWinsRunningGoalConflictDuringDeliveryRebuild(t *testing.T) {
+	// Axis conflict resolution runs on rebuild paths (model/effort/settings).
+	// Role setting no longer rebuilds, so exercise a model rebuild here.
 	app, tab, oldCtrl, path := newGoalDeliveryYoloTestApp(t, control.GoalStatusRunning)
 	oldCtrl.SetPlanMode(true)
 	oldCtrl.SetToolApprovalMode(control.ToolApprovalYolo)
 	app.mu.Lock()
 	tab.mode = "plan-yolo"
 	tab.goal = "ship the combined mode"
+	tab.tokenMode = boot.TokenModeDelivery
 	app.mu.Unlock()
 
-	if err := app.SetTokenModeForTab(tab.ID, boot.TokenModeDelivery); err != nil {
-		t.Fatalf("SetTokenModeForTab: %v", err)
+	if err := app.SetModelForTab(tab.ID, "alt/alt-model"); err != nil {
+		t.Fatalf("SetModelForTab: %v", err)
 	}
 	ctrl := app.controllerForTab(tab)
+	if ctrl == nil || ctrl == oldCtrl {
+		t.Fatal("model rebuild did not install a replacement controller")
+	}
 	if !ctrl.PlanMode() || ctrl.ToolApprovalMode() != control.ToolApprovalYolo {
 		t.Fatalf("rebuilt axes plan=%v approval=%q, want true/yolo", ctrl.PlanMode(), ctrl.ToolApprovalMode())
 	}
@@ -233,8 +240,12 @@ func TestRunningGoalDeliveryYoloRebuildKeepsUnifiedGoalScope(t *testing.T) {
 		t.Fatalf("SetTokenModeForTab: %v", err)
 	}
 	ctrl := app.controllerForTab(tab)
-	if ctrl == nil || ctrl == oldCtrl || ctrl.GoalStatus() != control.GoalStatusRunning {
-		t.Fatalf("running Goal was not restored: ctrl=%T goal=%q status=%q", ctrl, ctrl.Goal(), ctrl.GoalStatus())
+	// In-place role switch: same controller keeps the running Goal identity.
+	if ctrl == nil || ctrl != oldCtrl {
+		t.Fatalf("role switch must keep controller: got %p want %p", ctrl, oldCtrl)
+	}
+	if ctrl.GoalStatus() != control.GoalStatusRunning || ctrl.Goal() != "ship the combined mode" {
+		t.Fatalf("running Goal lost after role switch: goal=%q status=%q", ctrl.Goal(), ctrl.GoalStatus())
 	}
 	if ctrl.ToolApprovalMode() != control.ToolApprovalYolo {
 		t.Fatalf("tool approval = %q, want yolo", ctrl.ToolApprovalMode())
@@ -264,6 +275,8 @@ func TestGoalDeliveryYoloSurvivesEveryControllerRebuildPath(t *testing.T) {
 		name    string
 		prepare func(*App, *WorkspaceTab)
 		rebuild func(*App, *WorkspaceTab) error
+		// inPlace means the switch keeps the same controller (role setting).
+		inPlace bool
 	}{
 		{
 			name: "settings",
@@ -304,6 +317,7 @@ func TestGoalDeliveryYoloSurvivesEveryControllerRebuildPath(t *testing.T) {
 			rebuild: func(app *App, tab *WorkspaceTab) error {
 				return app.SetTokenModeForTab(tab.ID, boot.TokenModeDelivery)
 			},
+			inPlace: true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -314,14 +328,21 @@ func TestGoalDeliveryYoloSurvivesEveryControllerRebuildPath(t *testing.T) {
 			}
 
 			ctrl := app.controllerForTab(tab)
-			if ctrl == nil || ctrl == oldCtrl {
+			if ctrl == nil {
+				t.Fatal("controller missing after switch")
+			}
+			if tc.inPlace {
+				if ctrl != oldCtrl {
+					t.Fatal("role setting must keep the same controller")
+				}
+			} else if ctrl == oldCtrl {
 				t.Fatal("rebuild did not install a replacement controller")
 			}
 			if ctrl.PlanMode() || ctrl.GoalStatus() != control.GoalStatusRunning || ctrl.Goal() != "ship the combined mode" {
 				t.Fatalf("collaboration state plan=%v goal=%q status=%q, want running Goal", ctrl.PlanMode(), ctrl.Goal(), ctrl.GoalStatus())
 			}
-			if ctrl.ToolApprovalMode() != control.ToolApprovalYolo || currentTabTokenMode(tab) != boot.TokenModeDelivery {
-				t.Fatalf("runtime axes approval=%q token=%q, want yolo/delivery", ctrl.ToolApprovalMode(), currentTabTokenMode(tab))
+			if ctrl.ToolApprovalMode() != control.ToolApprovalYolo || currentTabTokenMode(tab) != boot.TokenModeFull {
+				t.Fatalf("runtime axes approval=%q token=%q, want yolo/full", ctrl.ToolApprovalMode(), currentTabTokenMode(tab))
 			}
 
 			var persisted struct {
@@ -378,7 +399,7 @@ func TestPlanYoloDeliveryOrderConverges(t *testing.T) {
 				t.Fatal(err)
 			}
 			ctrl := app.controllerForTab(tab)
-			if !ctrl.PlanMode() || ctrl.ToolApprovalMode() != control.ToolApprovalYolo || currentTabTokenMode(tab) != boot.TokenModeDelivery {
+			if !ctrl.PlanMode() || ctrl.ToolApprovalMode() != control.ToolApprovalYolo || currentTabTokenMode(tab) != boot.TokenModeFull {
 				t.Fatalf("final axes plan=%v approval=%q token=%q", ctrl.PlanMode(), ctrl.ToolApprovalMode(), currentTabTokenMode(tab))
 			}
 		})
@@ -387,76 +408,76 @@ func TestPlanYoloDeliveryOrderConverges(t *testing.T) {
 
 func TestEveryCollaborationAndTokenModeCombinationConvergesInBothOrders(t *testing.T) {
 	collaborationModes := []string{"normal", "plan", "goal"}
-	tokenModes := []string{boot.TokenModeEconomy, boot.TokenModeFull, boot.TokenModeDelivery}
 	orders := []string{"collaboration-first", "token-first"}
 
 	for _, collaborationMode := range collaborationModes {
-		for _, tokenMode := range tokenModes {
-			for _, order := range orders {
-				t.Run(collaborationMode+"/"+tokenMode+"/"+order, func(t *testing.T) {
-					app, tab, _, path := newGoalDeliveryYoloTestApp(t, control.GoalStatusRunning)
-					app.SetToolApprovalModeForTab(tab.ID, control.ToolApprovalAsk)
+		for _, order := range orders {
+			t.Run(collaborationMode+"/"+order, func(t *testing.T) {
+				app, tab, _, path := newGoalDeliveryYoloTestApp(t, control.GoalStatusRunning)
+				app.SetToolApprovalModeForTab(tab.ID, control.ToolApprovalAsk)
 
-					setCollaboration := func() {
-						switch collaborationMode {
-						case "goal":
-							app.SetGoalForTab(tab.ID, "exercise all runtime axes")
-							app.SetCollaborationModeForTab(tab.ID, "goal")
-						case "plan":
-							app.SetCollaborationModeForTab(tab.ID, "plan")
-						default:
-							app.SetGoalForTab(tab.ID, "")
-							app.SetCollaborationModeForTab(tab.ID, "normal")
-						}
-					}
-					setToken := func() {
-						if err := app.SetTokenModeForTab(tab.ID, tokenMode); err != nil {
-							t.Fatalf("SetTokenModeForTab(%q): %v", tokenMode, err)
-						}
-					}
-					if order == "collaboration-first" {
-						setCollaboration()
-						setToken()
-					} else {
-						setToken()
-						setCollaboration()
-					}
-
-					ctrl := app.controllerForTab(tab)
-					if ctrl == nil {
-						t.Fatal("final controller is nil")
-					}
-					if got := currentTabTokenMode(tab); got != tokenMode {
-						t.Fatalf("token mode = %q, want %q", got, tokenMode)
-					}
+				setCollaboration := func() {
 					switch collaborationMode {
 					case "goal":
-						if ctrl.PlanMode() || ctrl.GoalStatus() != control.GoalStatusRunning ||
-							ctrl.Goal() != "exercise all runtime axes" {
-							t.Fatalf("Goal axes plan=%v goal=%q status=%q", ctrl.PlanMode(), ctrl.Goal(), ctrl.GoalStatus())
-						}
+						app.SetGoalForTab(tab.ID, "exercise all runtime axes")
+						app.SetCollaborationModeForTab(tab.ID, "goal")
 					case "plan":
-						if !ctrl.PlanMode() || ctrl.GoalStatus() == control.GoalStatusRunning {
-							t.Fatalf("Plan axes plan=%v goal=%q status=%q", ctrl.PlanMode(), ctrl.Goal(), ctrl.GoalStatus())
-						}
+						app.SetCollaborationModeForTab(tab.ID, "plan")
 					default:
-						if ctrl.PlanMode() || ctrl.GoalStatus() == control.GoalStatusRunning {
-							t.Fatalf("Normal axes plan=%v goal=%q status=%q", ctrl.PlanMode(), ctrl.Goal(), ctrl.GoalStatus())
-						}
+						app.SetGoalForTab(tab.ID, "")
+						app.SetCollaborationModeForTab(tab.ID, "normal")
 					}
-					app.mu.RLock()
-					runtimeForPath := app.runtimeBySessionKey[sessionRuntimeKey(path)]
-					runtimeCount := len(app.runtimeBySessionKey)
-					view := app.sessionRuntimeViewLocked(tab)
-					app.mu.RUnlock()
-					if runtimeForPath == nil || runtimeForPath.Owner != tab || runtimeCount != 1 {
-						t.Fatalf("runtime registry owner=%#v count=%d, want one runtime for tab", runtimeForPath, runtimeCount)
+				}
+				setToken := func() {
+					if err := app.SetTokenModeForTab(tab.ID, boot.TokenModeDelivery); err != nil {
+						t.Fatalf("SetTokenModeForTab: %v", err)
 					}
-					if view.Phase != sessionRuntimeReady || tab.sessionLeaseRuntimeKey() != sessionRuntimeKey(path) {
-						t.Fatalf("runtime phase=%q lease=%q, want ready/%q", view.Phase, tab.sessionLeaseRuntimeKey(), sessionRuntimeKey(path))
+				}
+				if order == "collaboration-first" {
+					setCollaboration()
+					setToken()
+				} else {
+					setToken()
+					setCollaboration()
+				}
+
+				ctrl := app.controllerForTab(tab)
+				if ctrl == nil {
+					t.Fatal("final controller is nil")
+				}
+				if got := currentTabTokenMode(tab); got != boot.TokenModeFull {
+					t.Fatalf("token mode = %q, want pinned full", got)
+				}
+				if got := ctrl.AgentPreset(); got != boot.AgentPresetBalanced {
+					t.Fatalf("controller AgentPreset = %q, want balanced", got)
+				}
+				switch collaborationMode {
+				case "goal":
+					if ctrl.PlanMode() || ctrl.GoalStatus() != control.GoalStatusRunning ||
+						ctrl.Goal() != "exercise all runtime axes" {
+						t.Fatalf("Goal axes plan=%v goal=%q status=%q", ctrl.PlanMode(), ctrl.Goal(), ctrl.GoalStatus())
 					}
-				})
-			}
+				case "plan":
+					if !ctrl.PlanMode() || ctrl.GoalStatus() == control.GoalStatusRunning {
+						t.Fatalf("Plan axes plan=%v goal=%q status=%q", ctrl.PlanMode(), ctrl.Goal(), ctrl.GoalStatus())
+					}
+				default:
+					if ctrl.PlanMode() || ctrl.GoalStatus() == control.GoalStatusRunning {
+						t.Fatalf("Normal axes plan=%v goal=%q status=%q", ctrl.PlanMode(), ctrl.Goal(), ctrl.GoalStatus())
+					}
+				}
+				app.mu.RLock()
+				runtimeForPath := app.runtimeBySessionKey[sessionRuntimeKey(path)]
+				runtimeCount := len(app.runtimeBySessionKey)
+				view := app.sessionRuntimeViewLocked(tab)
+				app.mu.RUnlock()
+				if runtimeForPath == nil || runtimeForPath.Owner != tab || runtimeCount != 1 {
+					t.Fatalf("runtime registry owner=%#v count=%d, want one runtime for tab", runtimeForPath, runtimeCount)
+				}
+				if view.Phase != sessionRuntimeReady || tab.sessionLeaseRuntimeKey() != sessionRuntimeKey(path) {
+					t.Fatalf("runtime phase=%q lease=%q, want ready/%q", view.Phase, tab.sessionLeaseRuntimeKey(), sessionRuntimeKey(path))
+				}
+			})
 		}
 	}
 }
@@ -483,36 +504,26 @@ func TestGoalAndCollaborationResyncBeforeSendPreserveRunningDeliveryScope(t *tes
 }
 
 func TestTokenModeSwitchWaitsForForegroundTurnAdmission(t *testing.T) {
-	app, tab, _, _ := newGoalDeliveryYoloTestApp(t, control.GoalStatusBlocked)
+	// Name kept for history; the deprecated wrapper must not wait on turn admission.
+	app, tab, oldCtrl, _ := newGoalDeliveryYoloTestApp(t, control.GoalStatusBlocked)
 	tab.turnStartMu.Lock()
+	defer tab.turnStartMu.Unlock()
 	done := make(chan error, 1)
-	started := make(chan struct{})
 	go func() {
-		close(started)
 		done <- app.SetTokenModeForTab(tab.ID, boot.TokenModeDelivery)
 	}()
-	<-started
-	for app.runtimeRebuildMu.TryLock() {
-		app.runtimeRebuildMu.Unlock()
-		select {
-		case err := <-done:
-			t.Fatalf("token-mode switch returned before reaching the admission gate: %v", err)
-		default:
-			runtime.Gosched()
-		}
-	}
-	select {
-	case err := <-done:
-		t.Fatalf("token-mode switch crossed the turn-admission gate: %v", err)
-	default:
-	}
-	tab.turnStartMu.Unlock()
 	select {
 	case err := <-done:
 		if err != nil {
-			t.Fatalf("SetTokenModeForTab after admission release: %v", err)
+			t.Fatalf("SetTokenModeForTab: %v", err)
 		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("token-mode switch did not finish after turn admission released")
+	case <-time.After(2 * time.Second):
+		t.Fatal("SetTokenModeForTab blocked on turn admission; deprecated wrapper must not wait")
+	}
+	if app.controllerForTab(tab) != oldCtrl {
+		t.Fatal("SetTokenModeForTab rebuilt the controller")
+	}
+	if got := currentTabTokenMode(tab); got != boot.TokenModeFull {
+		t.Fatalf("token mode = %q, want pinned full", got)
 	}
 }

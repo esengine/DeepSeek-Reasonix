@@ -58,9 +58,11 @@ type sessionPathRequest struct {
 }
 
 type pageCursor struct {
-	Pinned   int    `json:"p"`
-	Activity int64  `json:"a"`
-	TopicID  string `json:"t"`
+	Pinned      int    `json:"p"`
+	ManualOrder bool   `json:"m,omitempty"`
+	SortOrder   int64  `json:"o,omitempty"`
+	Activity    int64  `json:"a"`
+	TopicID     string `json:"t"`
 }
 
 func Open(ctx context.Context, opts Options) (*Catalog, error) {
@@ -170,14 +172,26 @@ func (c *Catalog) refreshCounts(ctx context.Context) {
 	if c == nil || c.db == nil {
 		return
 	}
-	var indexed, pending, total int64
+	var indexed, pending, total, physical, logical, groups, branches, diverged, cleanup int64
 	_ = c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions`).Scan(&indexed)
 	_ = c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE turns_state='unknown'`).Scan(&pending)
 	_ = c.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(total), 0) FROM catalog_directories`).Scan(&total)
+	_ = c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE missing_since=0`).Scan(&physical)
+	_ = c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_topics`).Scan(&logical)
+	_ = c.db.QueryRowContext(ctx, `SELECT COUNT(DISTINCT recovery_group_id) FROM catalog_sessions WHERE recovered=1 AND recovery_group_id<>'' AND missing_since=0`).Scan(&groups)
+	_ = c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE recovered=1 AND missing_since=0`).Scan(&branches)
+	_ = c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE recovered=1 AND recovery_role='diverged' AND missing_since=0`).Scan(&diverged)
+	_ = c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM catalog_sessions WHERE recovered=1 AND recovery_role='covered_copy' AND missing_since=0`).Scan(&cleanup)
 	c.statusMu.Lock()
 	c.status.Indexed = indexed
 	c.status.Total = total
 	c.status.RepairPending = pending
+	c.status.PhysicalSessions = physical
+	c.status.LogicalSessions = logical
+	c.status.RecoveryGroups = groups
+	c.status.RecoveryBranches = branches
+	c.status.RecoveryDiverged = diverged
+	c.status.CleanupEligible = cleanup
 	c.status.Revision = c.revision.Load()
 	c.statusMu.Unlock()
 }
@@ -293,6 +307,14 @@ func (c *Catalog) UpsertSession(ctx context.Context, record SessionRecord) error
 }
 
 func (c *Catalog) upsertSessions(ctx context.Context, records []SessionRecord, generations map[string]int64, reason string) error {
+	return c.upsertSessionsWithNotification(ctx, records, generations, reason, true)
+}
+
+func (c *Catalog) upsertSessionsWithoutNotification(ctx context.Context, records []SessionRecord, generations map[string]int64, reason string) error {
+	return c.upsertSessionsWithNotification(ctx, records, generations, reason, false)
+}
+
+func (c *Catalog) upsertSessionsWithNotification(ctx context.Context, records []SessionRecord, generations map[string]int64, reason string, notify bool) error {
 	if len(records) == 0 {
 		return nil
 	}
@@ -334,12 +356,17 @@ func (c *Catalog) upsertSessions(ctx context.Context, records []SessionRecord, g
 			_ = tx.QueryRowContext(ctx, `SELECT scan_generation FROM catalog_directories WHERE path=?`, record.Directory).Scan(&generation)
 			directoryGenerations[record.Directory] = generation
 		}
+		record = classifyRecoveryLineage(record)
+		if record.LogicalTopicID == "" {
+			record.LogicalTopicID = record.TopicID
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO catalog_sessions(
             path,directory,scope,workspace_root,topic_id,topic_title,custom_title,
             created_at,last_activity_at,preview,turns,turns_state,recovered,
-            recovery_reason,recovery_digest,parent_id,content_fingerprint,
+            recovery_reason,recovery_digest,parent_id,recovery_copy,recovery_group_id,
+            recovery_role,recovery_canonical,logical_topic_id,ordinary_visible,content_fingerprint,
             meta_fingerprint,health,missing_since,seen_generation
-        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(path) DO UPDATE SET
             directory=excluded.directory, scope=excluded.scope,
             workspace_root=excluded.workspace_root, topic_id=excluded.topic_id,
@@ -349,6 +376,12 @@ func (c *Catalog) upsertSessions(ctx context.Context, records []SessionRecord, g
             turns_state=excluded.turns_state, recovered=excluded.recovered,
             recovery_reason=excluded.recovery_reason,
             recovery_digest=excluded.recovery_digest, parent_id=excluded.parent_id,
+            recovery_copy=excluded.recovery_copy,
+            recovery_group_id=excluded.recovery_group_id,
+            recovery_role=excluded.recovery_role,
+            recovery_canonical=excluded.recovery_canonical,
+            logical_topic_id=excluded.logical_topic_id,
+            ordinary_visible=excluded.ordinary_visible,
             content_fingerprint=excluded.content_fingerprint,
             meta_fingerprint=excluded.meta_fingerprint, health=excluded.health,
             missing_since=0, seen_generation=MAX(catalog_sessions.seen_generation, excluded.seen_generation)`,
@@ -356,7 +389,10 @@ func (c *Catalog) upsertSessions(ctx context.Context, records []SessionRecord, g
 			record.TopicID, record.TopicTitle, record.CustomTitle, record.CreatedAt,
 			record.LastActivityAt, record.Preview, record.Turns, record.TurnsState,
 			record.Recovered, record.RecoveryReason, record.RecoveryDigest,
-			record.ParentID, record.ContentFingerprint, record.MetaFingerprint,
+			record.ParentID, boolToInt(record.RecoveryCopy), record.RecoveryGroupID,
+			record.RecoveryRole, boolToInt(record.RecoveryCanonical),
+			record.LogicalTopicID, boolToInt(record.OrdinaryVisible),
+			record.ContentFingerprint, record.MetaFingerprint,
 			record.Health, 0, generation); err != nil {
 			_ = tx.Rollback()
 			return err
@@ -380,7 +416,11 @@ func (c *Catalog) upsertSessions(ctx context.Context, records []SessionRecord, g
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	c.publishRevision(revision, mapKeys(roots), reason)
+	if notify {
+		c.publishRevision(revision, mapKeys(roots), reason)
+	} else {
+		c.rememberRevision(revision)
+	}
 	c.refreshCounts(ctx)
 	return nil
 }
@@ -394,31 +434,57 @@ func recomputeTopic(ctx context.Context, tx *sql.Tx, key TopicKey) error {
 		_, err := tx.ExecContext(ctx, `DELETE FROM catalog_topics WHERE scope=? AND workspace_root=? AND topic_id=?`, key.Scope, key.WorkspaceRoot, key.TopicID)
 		return err
 	}
+	// Covered copies skip turn/health totals but still update recency. Adopted
+	// branches are alternate continuations, so preserve the pre-catalog contract:
+	// max(sum(normal turns), max(adopted recovery turns)).
 	_, err := tx.ExecContext(ctx, `INSERT INTO catalog_topics(
         scope,workspace_root,topic_id,title,turns,turns_state,created_at,
-        last_activity_at,recovery_state,health
+        last_activity_at,recovery_state,recovery_branch_count,
+        recovery_unresolved_count,recovery_cleanup_eligible_count,health
     ) SELECT ?,?,?,
         COALESCE(NULLIF((SELECT COALESCE(NULLIF(custom_title,''), NULLIF(topic_title,''), preview, '')
             FROM catalog_sessions WHERE scope=? AND workspace_root=? AND topic_id=?
-            ORDER BY last_activity_at DESC, path ASC LIMIT 1),''), ?),
-        COALESCE(SUM(CASE WHEN turns_state='valid' THEN turns ELSE 0 END),0),
-        CASE WHEN SUM(CASE WHEN turns_state='corrupt' THEN 1 ELSE 0 END)>0 THEN 'corrupt'
-             WHEN SUM(CASE WHEN turns_state='unknown' THEN 1 ELSE 0 END)>0 THEN 'unknown'
+            ORDER BY recovery_copy ASC, last_activity_at DESC, path ASC LIMIT 1),''), ?),
+		MAX(
+			COALESCE(SUM(CASE WHEN recovery_copy=0 AND recovered=0 AND turns_state='valid' THEN turns ELSE 0 END),0),
+			COALESCE(MAX(CASE WHEN recovery_copy=0 AND recovered=1 AND turns_state='valid' THEN turns ELSE 0 END),0)
+		),
+        CASE WHEN SUM(CASE WHEN recovery_copy=0 AND turns_state='corrupt' THEN 1 ELSE 0 END)>0 THEN 'corrupt'
+             WHEN SUM(CASE WHEN recovery_copy=0 AND turns_state='unknown' THEN 1 ELSE 0 END)>0 THEN 'unknown'
+             WHEN SUM(CASE WHEN recovery_copy=0 THEN 1 ELSE 0 END)=0 THEN 'valid'
              ELSE 'valid' END,
         COALESCE(MIN(NULLIF(created_at,0)),0), COALESCE(MAX(last_activity_at),0),
-        CASE WHEN SUM(CASE WHEN recovered=1 THEN 1 ELSE 0 END)=COUNT(*) THEN 'recovery_only' ELSE '' END,
-        CASE WHEN SUM(CASE WHEN health='corrupt' THEN 1 ELSE 0 END)>0 THEN 'corrupt'
-             WHEN SUM(CASE WHEN health='missing' THEN 1 ELSE 0 END)>0 THEN 'missing'
+        CASE WHEN SUM(CASE WHEN recovered=1 AND recovery_role='preferred' THEN 1 ELSE 0 END)>0 THEN 'preferred'
+             WHEN SUM(CASE WHEN recovered=1 AND recovery_role='diverged' THEN 1 ELSE 0 END)>0 THEN 'diverged'
+             WHEN SUM(CASE WHEN recovered=1 AND recovery_role='adopted' THEN 1 ELSE 0 END)>0 THEN 'adopted'
+             WHEN SUM(CASE WHEN recovery_copy=0 THEN 1 ELSE 0 END)=0 THEN 'recovery_only' ELSE '' END,
+        SUM(CASE WHEN recovered=1 THEN 1 ELSE 0 END),
+        CASE WHEN SUM(CASE WHEN recovered=1 AND recovery_role='preferred' THEN 1 ELSE 0 END)>0 THEN 0
+             ELSE SUM(CASE WHEN recovered=1 AND recovery_role='diverged' THEN 1 ELSE 0 END) END,
+        SUM(CASE WHEN recovered=1 AND recovery_role='covered_copy' THEN 1 ELSE 0 END),
+        CASE WHEN SUM(CASE WHEN recovery_copy=0 AND health='corrupt' THEN 1 ELSE 0 END)>0 THEN 'corrupt'
+             WHEN SUM(CASE WHEN recovery_copy=0 AND health='missing' THEN 1 ELSE 0 END)>0 THEN 'missing'
              ELSE 'ok' END
       FROM catalog_sessions WHERE scope=? AND workspace_root=? AND topic_id=?
     ON CONFLICT(scope,workspace_root,topic_id) DO UPDATE SET
         title=excluded.title, turns=excluded.turns, turns_state=excluded.turns_state,
         created_at=excluded.created_at, last_activity_at=excluded.last_activity_at,
-        recovery_state=excluded.recovery_state, health=excluded.health`,
+        recovery_state=excluded.recovery_state,
+        recovery_branch_count=excluded.recovery_branch_count,
+        recovery_unresolved_count=excluded.recovery_unresolved_count,
+        recovery_cleanup_eligible_count=excluded.recovery_cleanup_eligible_count,
+        health=excluded.health`,
 		key.Scope, key.WorkspaceRoot, key.TopicID,
 		key.Scope, key.WorkspaceRoot, key.TopicID, key.TopicID,
 		key.Scope, key.WorkspaceRoot, key.TopicID)
 	return err
+}
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func bumpRevision(ctx context.Context, tx *sql.Tx) (uint64, error) {
@@ -433,13 +499,17 @@ func bumpRevision(ctx context.Context, tx *sql.Tx) (uint64, error) {
 }
 
 func (c *Catalog) publishRevision(revision uint64, roots []string, reason string) {
+	c.rememberRevision(revision)
+	if c.opts.OnRevision != nil {
+		c.opts.OnRevision(revision, roots, reason)
+	}
+}
+
+func (c *Catalog) rememberRevision(revision uint64) {
 	c.revision.Store(revision)
 	c.statusMu.Lock()
 	c.status.Revision = revision
 	c.statusMu.Unlock()
-	if c.opts.OnRevision != nil {
-		c.opts.OnRevision(revision, roots, reason)
-	}
 }
 
 func mapKeys(values map[string]struct{}) []string {
@@ -449,105 +519,6 @@ func mapKeys(values map[string]struct{}) []string {
 	}
 	return out
 }
-
-func (c *Catalog) ListTopics(ctx context.Context, req TopicPageRequest) (TopicPage, error) {
-	out := TopicPage{Items: []TopicRecord{}, Revision: c.revision.Load()}
-	req.Scope, req.WorkspaceRoot = normalizeScope(req.Scope, req.WorkspaceRoot)
-	if req.Limit <= 0 {
-		req.Limit = DefaultLimit
-	}
-	if req.Limit > MaxLimit {
-		req.Limit = MaxLimit
-	}
-	cursor, err := decodeCursor(req.Cursor)
-	if err != nil {
-		return out, err
-	}
-	args := []any{req.Scope, req.WorkspaceRoot}
-	where := `scope=? AND workspace_root=?`
-	if query := strings.TrimSpace(req.Query); query != "" {
-		where += ` AND lower(title) LIKE ?`
-		args = append(args, "%"+strings.ToLower(query)+"%")
-	}
-	if cutoff := timeFilterCutoff(req.TimeFilter, c.opts.Now()); cutoff > 0 {
-		where += ` AND last_activity_at>=?`
-		args = append(args, cutoff)
-	}
-	scanCursor := cursor
-	scanLimit := max(req.Limit+1, 64)
-	for len(out.Items) <= req.Limit {
-		pageWhere := where
-		pageArgs := append([]any(nil), args...)
-		if scanCursor != nil {
-			pageWhere += ` AND (pinned<? OR (pinned=? AND last_activity_at<?) OR (pinned=? AND last_activity_at=? AND topic_id>?))`
-			pageArgs = append(pageArgs, scanCursor.Pinned, scanCursor.Pinned, scanCursor.Activity,
-				scanCursor.Pinned, scanCursor.Activity, scanCursor.TopicID)
-		}
-		pageArgs = append(pageArgs, scanLimit)
-		rows, err := c.db.QueryContext(ctx, `SELECT scope,workspace_root,topic_id,title,pinned,sort_order,
-            turns,turns_state,created_at,last_activity_at,recovery_state,health
-            FROM catalog_topics WHERE `+pageWhere+`
-            ORDER BY pinned DESC,last_activity_at DESC,topic_id ASC LIMIT ?`, pageArgs...)
-		if err != nil {
-			return out, err
-		}
-		rawCount := 0
-		var lastScanned TopicRecord
-		for rows.Next() {
-			var item TopicRecord
-			if err := rows.Scan(&item.Scope, &item.WorkspaceRoot, &item.TopicID, &item.Title,
-				&item.Pinned, &item.SortOrder, &item.Turns, &item.TurnsState,
-				&item.CreatedAt, &item.LastActivityAt, &item.RecoveryState, &item.Health); err != nil {
-				_ = rows.Close()
-				return out, err
-			}
-			rawCount++
-			lastScanned = item
-			sessions, err := c.listTopicSessions(ctx, TopicKey{
-				Scope: item.Scope, WorkspaceRoot: item.WorkspaceRoot, TopicID: item.TopicID,
-			})
-			if err != nil {
-				_ = rows.Close()
-				return TopicPage{Items: []TopicRecord{}, Revision: out.Revision}, err
-			}
-			if len(sessions) == 0 {
-				continue
-			}
-			item.Sessions = sessions
-			out.Items = append(out.Items, item)
-			if len(out.Items) > req.Limit {
-				break
-			}
-		}
-		rowsErr := rows.Err()
-		_ = rows.Close()
-		if rowsErr != nil {
-			return out, rowsErr
-		}
-		if len(out.Items) > req.Limit || rawCount < scanLimit || rawCount == 0 {
-			break
-		}
-		pinned := 0
-		if lastScanned.Pinned {
-			pinned = 1
-		}
-		scanCursor = &pageCursor{Pinned: pinned, Activity: lastScanned.LastActivityAt, TopicID: lastScanned.TopicID}
-	}
-	more := len(out.Items) > req.Limit
-	if more {
-		out.Items = out.Items[:req.Limit]
-	}
-	if more && len(out.Items) > 0 {
-		last := out.Items[len(out.Items)-1]
-		pinned := 0
-		if last.Pinned {
-			pinned = 1
-		}
-		out.NextCursor = encodeCursor(pageCursor{Pinned: pinned, Activity: last.LastActivityAt, TopicID: last.TopicID})
-	}
-	return out, nil
-}
-
 func (c *Catalog) listTopicSessions(ctx context.Context, key TopicKey) ([]SessionRecord, error) {
 	out := []SessionRecord{}
 	var cursor *sessionPageCursor
@@ -599,13 +570,16 @@ func (c *Catalog) GetTopic(ctx context.Context, key TopicKey) (TopicRecord, bool
 	key.Scope, key.WorkspaceRoot = normalizeScope(key.Scope, key.WorkspaceRoot)
 	key.TopicID = strings.TrimSpace(key.TopicID)
 	item := TopicRecord{Sessions: []SessionRecord{}}
-	err := c.db.QueryRowContext(ctx, `SELECT scope,workspace_root,topic_id,title,pinned,sort_order,
-        turns,turns_state,created_at,last_activity_at,recovery_state,health
+	err := c.db.QueryRowContext(ctx, `SELECT scope,workspace_root,topic_id,title,title_source,pinned,
+		CASE WHEN metadata_present=1 THEN sort_order ELSE -1 END,
+        turns,turns_state,created_at,last_activity_at,recovery_state,recovery_branch_count,
+        recovery_unresolved_count,recovery_cleanup_eligible_count,health
         FROM catalog_topics WHERE scope=? AND workspace_root=? AND topic_id=?`,
 		key.Scope, key.WorkspaceRoot, key.TopicID).Scan(
-		&item.Scope, &item.WorkspaceRoot, &item.TopicID, &item.Title,
+		&item.Scope, &item.WorkspaceRoot, &item.TopicID, &item.Title, &item.TitleSource,
 		&item.Pinned, &item.SortOrder, &item.Turns, &item.TurnsState,
-		&item.CreatedAt, &item.LastActivityAt, &item.RecoveryState, &item.Health)
+		&item.CreatedAt, &item.LastActivityAt, &item.RecoveryState, &item.RecoveryBranchCount,
+		&item.RecoveryUnresolvedCount, &item.RecoveryCleanupEligibleCount, &item.Health)
 	if errors.Is(err, sql.ErrNoRows) {
 		return item, false, nil
 	}
@@ -621,7 +595,57 @@ func (c *Catalog) GetTopic(ctx context.Context, key TopicKey) (TopicRecord, bool
 	if len(item.Sessions) == 0 {
 		return TopicRecord{Sessions: []SessionRecord{}}, false, nil
 	}
+	hydrateTopicDisplay(&item)
 	return item, true, nil
+}
+
+func topicRepresentativePath(sessions []SessionRecord) string {
+	if path := OrdinaryContinuePath(sessions, ""); path != "" {
+		return path
+	}
+	preferred := PreferredOrdinarySessionPaths(sessions)
+	best := SessionRecord{}
+	found := false
+	for _, session := range sessions {
+		path := strings.TrimSpace(session.Path)
+		_, isPreferred := preferred[path]
+		if !session.OrdinaryVisible && !isPreferred && (session.Recovered || session.RecoveryCopy) {
+			continue
+		}
+		if !found || recoveryRank(session) > recoveryRank(best) ||
+			(recoveryRank(session) == recoveryRank(best) && session.LastActivityAt > best.LastActivityAt) {
+			best = session
+			found = true
+		}
+	}
+	if found {
+		return best.Path
+	}
+	if len(sessions) > 0 {
+		return sessions[0].Path
+	}
+	return ""
+}
+
+// EncodeTopicCursor builds an exclusive ListTopics keyset cursor after the
+// given topic position. Desktop post-filters recovery-only rows and needs the
+// same cursor shape catalog.ListTopics emits.
+func EncodeTopicCursor(pinned int, lastActivityAt int64, topicID string) string {
+	return encodeCursor(pageCursor{Pinned: pinned, Activity: lastActivityAt, TopicID: topicID})
+}
+
+// EncodeOrderedTopicCursor builds a cursor for a workspace with explicit
+// manual topic ordering. A negative sortOrder places metadata-free/runtime
+// topics after every explicitly ranked topic in the same pinned bucket.
+func EncodeOrderedTopicCursor(pinned, sortOrder int, lastActivityAt int64, topicID string) string {
+	manualSortOrder := int64(sortOrder)
+	if sortOrder < 0 {
+		manualSortOrder = unrankedTopicSortOrder
+	}
+	return encodeCursor(pageCursor{
+		Pinned: pinned, ManualOrder: true, SortOrder: manualSortOrder,
+		Activity: lastActivityAt, TopicID: topicID,
+	})
 }
 
 func encodeCursor(cursor pageCursor) string {

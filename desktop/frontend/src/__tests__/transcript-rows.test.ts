@@ -136,6 +136,20 @@ const keys = (rows: TranscriptRow[]) => rows.map((row) => row.key).join(",");
 }
 
 {
+  const models = buildTurnModels([
+    { kind: "user", id: "u-search", text: "search" },
+    { kind: "tool", id: "s1", name: "web_search", args: `{"query":"bitcoin"}`, readOnly: true, status: "done" },
+    { kind: "tool", id: "r1", name: "read_file", args: "{}", readOnly: true, status: "done" },
+    { kind: "assistant", id: "a-search", text: "answer only", reasoning: "", streaming: false },
+  ]);
+  const rows = buildTranscriptRows(models, rowOptions(EMPTY_FOLDS, "expanded"));
+  const searchRow = rows.find((row) => row.kind === "tool" && "item" in row && row.item.id === "s1");
+  const batch = rows.find((row) => row.kind === "tool-batch");
+  ok(Boolean(searchRow), "provider web search stays a standalone tool card");
+  eq(batch && "items" in batch ? batch.items.map((item) => item.name).join(",") : "", "read_file", "ordinary readers still batch beside the search card");
+}
+
+{
   // A fold whose process items are all filtered out (sub-agent subcalls,
   // todo_write) renders no header row at all.
   const models = buildTurnModels([
@@ -158,6 +172,20 @@ const keys = (rows: TranscriptRow[]) => rows.map((row) => row.key).join(",");
   ]);
   const rows = buildTranscriptRows(models, rowOptions(EMPTY_FOLDS));
   eq(kinds(rows), "notice,user,answer,turn-actions", "prelude notices render without a synthetic user row");
+}
+
+{
+  const models = buildTurnModels([
+    { kind: "user", id: "u1", text: "请继续完成 PPT 任务" },
+    { kind: "assistant", id: "a-step", text: "下一步：安装 pptxgenjs 并确认 Pillow。", reasoning: "", streaming: false },
+    { kind: "notice", id: "auto-guard", level: "info", text: "↪ A tool failed. Use read-only diagnosis as needed, continue unrelated work automatically." },
+    { kind: "notice", id: "user-steer", level: "info", text: "↪ 改用 Pillow 10 验证" },
+    { kind: "assistant", id: "a-done", text: "pptxgenjs 已安装成功", reasoning: "", streaming: false },
+  ]);
+  const rows = buildTranscriptRows(models, rowOptions(EMPTY_FOLDS));
+  eq(kinds(rows), "user,answer,notice,answer,turn-actions", "host Auto Guard guidance is not a user-side steer row");
+  const notice = rows.find((row) => row.kind === "notice");
+  eq(notice && "item" in notice ? notice.item.text : "", "↪ 改用 Pillow 10 验证", "real user steers stay visible");
 }
 
 {
@@ -192,6 +220,7 @@ const keys = (rows: TranscriptRow[]) => rows.map((row) => row.key).join(",");
   ], undefined, false, true);
   const mixedStates = foldSegmentStates(mixed);
   eq(mixedStates.length, 1, "hidden reasoning keeps a mixed tool process fold");
+  eq(foldSegmentStates(mixed, true)[0]?.keepReasoningExpanded, false, "expanded reasoning mode does not pin tool-only folds");
   eq(mixed[0]?.segments[0]?.displayItems.filter((item) => item.kind === "assistant").length ?? -1, 0, "hidden reasoning is excluded from fold body items");
   eq(mixed[0]?.segments[0]?.displayItems.filter((item) => item.kind === "tool").length ?? -1, 1, "hidden reasoning does not hide tools");
 }
@@ -213,6 +242,27 @@ const keys = (rows: TranscriptRow[]) => rows.map((row) => row.key).join(",");
   const closed = reconcileFoldEntries(seeded ?? EMPTY_FOLDS, settledStates, "auto", false);
   ok(closed?.get("a1")?.open === false, "completion auto-closes an untouched fold");
   eq(reconcileFoldEntries(closed ?? EMPTY_FOLDS, settledStates, "auto", false), null, "steady state reconciles to no change");
+}
+
+{
+  // Expanded reasoning pins only reasoning-bearing folds across completion.
+  const running = buildTurnModels(fixture.slice(0, 7), { id: "a2", hasAnswerText: true, hasReasoning: false, reasoningComplete: true }, true);
+  const runningStates = foldSegmentStates(running, true);
+  eq(runningStates[0]?.keepReasoningExpanded, true, "expanded mode marks a reasoning-bearing fold as pinned");
+  const seeded = reconcileFoldEntries(EMPTY_FOLDS, runningStates, "auto", false) ?? EMPTY_FOLDS;
+
+  const settledModels = buildTurnModels(fixture.slice(0, 7), undefined, false);
+  const settledPinnedStates = foldSegmentStates(settledModels, true);
+  const completed = reconcileFoldEntries(seeded, settledPinnedStates, "auto", false);
+  ok(completed?.get("a1")?.open === true, "expanded reasoning keeps its parent fold open after completion");
+
+  const manuallyCollapsed = foldMapWithToggle(seeded, "a1", true);
+  const completedCollapsed = reconcileFoldEntries(manuallyCollapsed, settledPinnedStates, "auto", false);
+  ok(completedCollapsed?.get("a1")?.open === false, "manual parent collapse still wins when expanded reasoning completes");
+
+  const settledAutoStates = foldSegmentStates(settledModels, false);
+  const backToAuto = reconcileFoldEntries(completed ?? EMPTY_FOLDS, settledAutoStates, "auto", false);
+  ok(backToAuto?.get("a1")?.open === false, "leaving expanded reasoning re-applies the automatic parent fold policy");
 }
 
 {

@@ -23,6 +23,7 @@ type goalMachineSnapshot struct {
 	turnsLimit             int
 	tokensUsed             int
 	requestsUsed           int
+	workDurationMs         int64
 	tokensLimit            int
 	noProgressTurns        int
 	noProgressLimit        int
@@ -37,14 +38,19 @@ type goalMachineSnapshot struct {
 func (g *goalMachine) capture() goalMachineSnapshot {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	return g.captureLocked()
+}
+
+func (g *goalMachine) captureLocked() goalMachineSnapshot {
 	return goalMachineSnapshot{
 		goal: g.goal, status: g.status,
 		scopeID: g.scopeID, deliveryCheckpoint: g.deliveryCheckpoint,
 		block: g.block, strict: g.strict,
 		budgetClass: g.budgetClass, turnsUsed: g.turnsUsed,
 		turnsLimit: g.turnsLimit, tokensUsed: g.tokensUsed,
-		requestsUsed: g.requestsUsed,
-		tokensLimit:  g.tokensLimit, noProgressTurns: g.noProgressTurns,
+		requestsUsed:   g.requestsUsed,
+		workDurationMs: g.workDurationMs,
+		tokensLimit:    g.tokensLimit, noProgressTurns: g.noProgressTurns,
 		noProgressLimit:        g.noProgressLimit,
 		lastContinuationReason: g.lastContinuationReason,
 		lastEvaluatorReason:    g.lastEvaluatorReason,
@@ -64,6 +70,7 @@ func (g *goalMachine) restore(snapshot goalMachineSnapshot) {
 	g.turnsUsed, g.turnsLimit = snapshot.turnsUsed, snapshot.turnsLimit
 	g.tokensUsed, g.tokensLimit = snapshot.tokensUsed, snapshot.tokensLimit
 	g.requestsUsed = snapshot.requestsUsed
+	g.workDurationMs = snapshot.workDurationMs
 	g.noProgressTurns, g.noProgressLimit = snapshot.noProgressTurns, snapshot.noProgressLimit
 	g.lastContinuationReason = snapshot.lastContinuationReason
 	g.lastEvaluatorReason = snapshot.lastEvaluatorReason

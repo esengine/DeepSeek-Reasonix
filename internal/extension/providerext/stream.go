@@ -36,6 +36,7 @@ type extensionStream struct {
 	delivery              []provider.Chunk
 	deliveryWake          chan struct{}
 	deliveryFinal         bool
+	activity              chan struct{}
 	unregisterDrainCancel func()
 }
 
@@ -71,6 +72,7 @@ func (r *Resolver) RouteStreamChunk(p protocol.StreamChunkParams) {
 		slog.Debug("providerext: dropping chunk for unknown stream", "stream", p.StreamID, "seq", p.Seq)
 		return
 	}
+	signalStreamActivity(stream)
 	if p.Seq < stream.nextSeq {
 		return // duplicate or already delivered
 	}
@@ -101,6 +103,7 @@ func (r *Resolver) RouteStreamEnd(p protocol.StreamEndParams) {
 		slog.Debug("providerext: dropping stream end for unknown stream", "stream", p.StreamID)
 		return
 	}
+	signalStreamActivity(stream)
 	if stream.ended {
 		if stream.endSeq != p.LastSeq || stream.endError != p.Error || stream.interrupted != p.Interrupted {
 			r.finishLocked(p.StreamID, stream, provider.Chunk{Type: provider.ChunkError, Err: &provider.StreamInterruptedError{
@@ -132,6 +135,16 @@ func (r *Resolver) RouteStreamEnd(p protocol.StreamEndParams) {
 		go r.expireGap(p.StreamID, stream)
 	}
 	r.mu.Unlock()
+}
+
+func signalStreamActivity(stream *extensionStream) {
+	if stream == nil || stream.activity == nil {
+		return
+	}
+	select {
+	case stream.activity <- struct{}{}:
+	default:
+	}
 }
 
 // flushLocked delivers every contiguous pending chunk, then completes the

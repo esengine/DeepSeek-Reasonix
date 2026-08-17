@@ -42,10 +42,121 @@ func TestEnqueueInboxDurableAndSnapshot(t *testing.T) {
 	if len(snap.Items) != 1 || snap.Items[0].Preview == "" {
 		t.Fatalf("snapshot = %+v", snap)
 	}
-	// Body only via ReadInboxItem.
+	if snap.SessionPath != session {
+		t.Fatalf("snapshot session path = %q, want %q", snap.SessionPath, session)
+	}
 	_, env, err := c.ReadInboxItem(rec.ItemID)
 	if err != nil || env.SubmitText != "hello durable" {
 		t.Fatalf("read = %+v err=%v", env, err)
+	}
+}
+
+func TestSessionRebindOnlyPausesInboxWithPendingWork(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		pending bool
+	}{
+		{name: "empty"},
+		{name: "pending", pending: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			oldPath := filepath.Join(dir, "old.jsonl")
+			c := New(Options{SessionPath: oldPath, SessionDir: dir, Sink: event.Discard})
+			if tc.pending {
+				if _, err := c.EnqueueInbox(InboxRequest{Submit: "work"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			c.SetSessionPath(filepath.Join(dir, "new.jsonl"))
+			oldInbox, err := sessioninbox.Open(oldPath, sessioninbox.Limits{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer oldInbox.Close()
+			if got := oldInbox.Snapshot().Paused; got != tc.pending {
+				t.Fatalf("paused = %v, want %v", got, tc.pending)
+			}
+		})
+	}
+}
+
+func TestTryEnqueueAndSteerWhenPausedKeepsQueuedFollowup(t *testing.T) {
+	dir := t.TempDir()
+	session := filepath.Join(dir, "s.jsonl")
+	c := New(Options{SessionPath: session, SessionDir: dir, Sink: event.Discard})
+	if err := c.SetInboxPaused(true); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.TryEnqueueAndSteer(InboxRequest{Submit: "later"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Disposition != sessioninbox.DispositionQueuedFollowup || !got.Paused || got.ItemID == "" {
+		t.Fatalf("receipt = %+v", got)
+	}
+	meta, _, err := c.ReadInboxItem(got.ItemID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.State != sessioninbox.StateQueued {
+		t.Fatalf("meta = %+v", meta)
+	}
+}
+
+func TestDeleteInboxItemRecoversOrphanThenRemoves(t *testing.T) {
+	dir := t.TempDir()
+	session := filepath.Join(dir, "s.jsonl")
+	c := New(Options{SessionPath: session, SessionDir: dir, Sink: event.Discard})
+	rec, err := c.EnqueueInbox(InboxRequest{Submit: "stuck"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := c.ensureInbox()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ClaimItem(rec.ItemID); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.DeleteInboxItem(rec.ItemID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := c.ReadInboxItem(rec.ItemID); !errors.Is(err, sessioninbox.ErrNotFound) {
+		t.Fatalf("item still present: %v", err)
+	}
+	if snap := c.InboxSnapshot(); snap.Paused || snap.Recovered || len(snap.Items) != 0 {
+		t.Fatalf("empty inbox stayed paused after deleting last orphan: %+v", snap)
+	}
+}
+
+func TestDeleteInboxItemWithdrawsUnconsumedSteer(t *testing.T) {
+	dir := t.TempDir()
+	session := filepath.Join(dir, "s.jsonl")
+	c := New(Options{SessionPath: session, SessionDir: dir, Sink: event.Discard})
+	rec, err := c.EnqueueInbox(InboxRequest{Intent: sessioninbox.IntentSteer, Submit: "withdraw me"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := c.ensureInbox()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetState(rec.ItemID, sessioninbox.StateSteerAccepted, ""); err != nil {
+		t.Fatal(err)
+	}
+	c.inbox.mu.Lock()
+	c.inbox.trackActive(rec.ItemID)
+	c.inbox.mu.Unlock()
+	if err := c.DeleteInboxItem(rec.ItemID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := c.ReadInboxItem(rec.ItemID); !errors.Is(err, sessioninbox.ErrNotFound) {
+		t.Fatalf("accepted steer still present: %v", err)
+	}
+	if snap := c.InboxSnapshot(); snap.Paused || len(snap.Items) != 0 {
+		t.Fatalf("withdrawing last steer left a paused empty inbox: %+v", snap)
 	}
 }
 

@@ -39,6 +39,33 @@ func TestDocCommentCodeBlockIsNotDeadCode(t *testing.T) {
 	}
 }
 
+func TestDeclarationDocsAllowDetailedContractsButRemainBounded(t *testing.T) {
+	var doc strings.Builder
+	doc.WriteString("// Run explains a non-obvious contract.\n")
+	for range capDeclDoc - 1 {
+		doc.WriteString("// Additional contract detail.\n")
+	}
+	clean := "package p\n\n" + doc.String() + "func Run() {}\n"
+	if got := rules(t, "t.go", clean); len(got) != 0 {
+		t.Fatalf("%d-line declaration doc flagged: %v", capDeclDoc, got)
+	}
+
+	doc.WriteString("// One line beyond the declaration-doc limit.\n")
+	tooLong := "package p\n\n" + doc.String() + "func Run() {}\n"
+	found := checkComments(parseBytes("t.go", []byte(tooLong)))
+	if len(found) != 1 || found[0].Rule != ruleEssay || found[0].Weight != 1 {
+		t.Fatalf("want one 1-line %s excess, got %+v", ruleEssay, found)
+	}
+}
+
+func TestFloatingCommentsKeepTheShortLimit(t *testing.T) {
+	src := "package p\n\nfunc Run() {\n\t// one\n\t// two\n\t// three\n\t// four\n\t_ = 0\n}\n"
+	found := checkComments(parseBytes("t.go", []byte(src)))
+	if len(found) != 1 || found[0].Rule != ruleEssay || found[0].Weight != 1 {
+		t.Fatalf("want one 1-line %s excess, got %+v", ruleEssay, found)
+	}
+}
+
 func TestCommentedOutCodeInBodyIsFlagged(t *testing.T) {
 	src := "package p\n\nfunc Run() {\n\t// old := compute(1)\n\t_ = 0\n}\n"
 	if got := rules(t, "t.go", src); len(got) != 1 || got[0] != ruleDeadCode {

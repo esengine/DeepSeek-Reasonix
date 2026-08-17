@@ -36,7 +36,7 @@ func TestGateBlocksDeniedCall(t *testing.T) {
 	g := &stubGate{deny: map[string]bool{"bash": true}}
 	a := New(nil, reg, NewSession(""), Options{Gate: g}, event.Discard)
 
-	blocked := a.executeOne(context.Background(), provider.ToolCall{Name: "bash", Arguments: `{"command":"rm -rf /"}`})
+	blocked := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "bash", Arguments: `{"command":"rm -rf /"}`})
 	if !strings.HasPrefix(blocked.output, "blocked:") {
 		t.Errorf("denied call result = %q, want a 'blocked:' result", blocked.output)
 	}
@@ -44,7 +44,7 @@ func TestGateBlocksDeniedCall(t *testing.T) {
 		t.Errorf("denied call should surface a user-facing block notice, got %+v", blocked)
 	}
 
-	ok := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/a"}`})
+	ok := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "read_file", Arguments: `{"path":"/a"}`})
 	if !strings.Contains(ok.output, "done") {
 		t.Errorf("allowed call should run, got %q", ok.output)
 	}
@@ -61,7 +61,7 @@ func TestNilGateRunsEverything(t *testing.T) {
 	reg.Add(fakeTool{name: "write_file", readOnly: false})
 
 	a := New(nil, reg, NewSession(""), Options{}, event.Discard) // no Gate
-	out := a.executeOne(context.Background(), provider.ToolCall{Name: "write_file", Arguments: `{"path":"/a"}`})
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "write_file", Arguments: `{"path":"/a"}`})
 	if strings.HasPrefix(out.output, "blocked:") {
 		t.Errorf("nil gate should not block: %q", out.output)
 	}

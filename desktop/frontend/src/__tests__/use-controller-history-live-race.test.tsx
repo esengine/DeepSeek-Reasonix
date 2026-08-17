@@ -161,7 +161,11 @@ await waitFor("hydration completion", () => controller?.state.hydrating === fals
 
 ok(controller?.state.running ?? false, "late history keeps the live turn running");
 ok(controller?.state.items.some((item) => item.kind === "assistant" && item.streaming) ?? false, "late history keeps the live assistant stream");
-ok(!(controller?.state.items.some((item) => item.kind === "user" && item.text === "stale durable history") ?? false), "late history cannot replace the live transcript");
+// The page read before the turn started is this session's history, not a
+// competing version of it: it goes in front of the live turn instead of
+// replacing it, so the turn never streams over a blank transcript.
+ok(controller?.state.items[0]?.kind === "user", "late history lands in front of the live turn");
+ok(controller?.state.items.at(-1)?.kind === "assistant", "late history leaves the live turn at the tail");
 
 await act(async () => { root.unmount(); });
 dom.window.close();

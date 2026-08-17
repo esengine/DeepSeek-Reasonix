@@ -8,6 +8,9 @@ import "sort"
 // treating the meta tool call itself as a mutation.
 type ChildEvidenceSummary struct {
 	Receipts []Receipt
+	// WorkspaceRoot is host-only context for classifying background evidence.
+	// Durable artifacts store only the resulting risk and mutation paths.
+	WorkspaceRoot string `json:"-"`
 }
 
 // HasMutation reports whether any successful receipt is a real state change.

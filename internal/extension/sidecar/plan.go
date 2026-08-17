@@ -41,7 +41,7 @@ func StartPackagesWithPlan(ctx context.Context, home string, sessionCtx protocol
 		warnings = append(warnings, runtimeWarnings...)
 		return m, warnings, err
 	}
-	if plan.IsNoOp() && previous != nil {
+	if plan.IsNoOp() && previous != nil && !plan.RestartUnchangedSidecars {
 		// No component change: adopt every live client from previous.
 		return adoptAll(previous), warnings, nil
 	}
@@ -60,7 +60,11 @@ func StartPackagesWithPlan(ctx context.Context, home string, sessionCtx protocol
 	unchanged := map[string]bool{}
 	for _, id := range plan.Unchanged {
 		if name := PluginNameFromComponentID(id); name != "" {
-			unchanged[name] = true
+			if plan.RestartUnchangedSidecars {
+				activate[name] = true
+			} else {
+				unchanged[name] = true
+			}
 		}
 	}
 

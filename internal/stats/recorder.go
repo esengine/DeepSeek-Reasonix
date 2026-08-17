@@ -266,6 +266,8 @@ func (r *Recorder) recordProviderUsage(modelRef string, usage *provider.Usage, q
 		rec.CostCurrency = quote.Original.Currency
 		rec.PricingFingerprint = quote.PricingFingerprint
 		rec.RateDate = quote.RateDate
+		rec.RateBand = quote.RateBand
+		rec.RatedAt = quote.RatedAt
 		rec.IncompleteReason = quote.IncompleteReason
 		rec.BillingMode = quote.BillingMode
 		rec.CostEstimated = quote.Estimated

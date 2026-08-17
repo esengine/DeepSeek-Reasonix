@@ -28,10 +28,11 @@ func TestRealOpenCodeGoDeepSeekAnthropicWebSearch(t *testing.T) {
 		Model:   "deepseek-v4-flash",
 		APIKey:  key,
 		Extra: map[string]any{
-			"api_key_env": "OPENCODE_GO_API_KEY",
-			"thinking":    "adaptive",
-			"effort":      "high",
-			"web_search":  true,
+			"api_key_env":        "OPENCODE_GO_API_KEY",
+			"reasoning_protocol": "deepseek",
+			"thinking":           "adaptive",
+			"effort":             "high",
+			"web_search":         true,
 		},
 	})
 	if err != nil {
@@ -56,7 +57,10 @@ func TestRealOpenCodeGoDeepSeekAnthropicToolLoop(t *testing.T) {
 	}
 	p, err := New(provider.Config{
 		Name: "opencode-go-deepseek-anthropic", BaseURL: "https://opencode.ai/zen/go", Model: "deepseek-v4-flash", APIKey: key,
-		Extra: map[string]any{"api_key_env": "OPENCODE_GO_API_KEY", "thinking": "adaptive", "effort": "high"},
+		Extra: map[string]any{
+			"api_key_env": "OPENCODE_GO_API_KEY", "reasoning_protocol": "deepseek",
+			"thinking": "adaptive", "effort": "high",
+		},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -150,6 +154,94 @@ func TestRealDeepSeekAnthropicToolLoop(t *testing.T) {
 		len(second.text), len(second.reasoning), second.promptTokens, second.cacheHitTokens)
 }
 
+// TestRealDeepSeekAnthropicMissingReasoningFallbackToolLoop verifies the exact
+// adaptive recovery mode used by the agent: a provider configured for thinking
+// can regenerate one tool loop with thinking.type=disabled, then replay that
+// no-reasoning tool turn without the HTTP 400 that motivated #8952.
+func TestRealDeepSeekAnthropicMissingReasoningFallbackToolLoop(t *testing.T) {
+	key := os.Getenv("DEEPSEEK_API_KEY")
+	if key == "" {
+		t.Skip("DEEPSEEK_API_KEY not set — skipping live probe")
+	}
+	p, err := New(provider.Config{
+		Name: "deepseek-anthropic", BaseURL: "https://api.deepseek.com/anthropic", Model: "deepseek-v4-flash", APIKey: key,
+		Extra: map[string]any{"api_key_env": "DEEPSEEK_API_KEY", "thinking": "enabled", "effort": "high"},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if !provider.SupportsMissingReasoningFallback(p) {
+		t.Fatal("official DeepSeek Anthropic provider did not declare fallback support")
+	}
+	tools := []provider.ToolSchema{{
+		Name: "get_marker", Description: "Return a fixed integration-test marker. Always call this tool when asked.",
+		Parameters: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+	}}
+	messages := []provider.Message{
+		{Role: provider.RoleSystem, Content: "Call the requested tool before answering."},
+		{Role: provider.RoleUser, Content: "Call get_marker, then report its result."},
+	}
+	ctx := provider.WithMissingReasoningFallback(context.Background())
+	first := collectLiveDeepSeekTurnContext(t, ctx, p, provider.Request{Messages: messages, Tools: tools, MaxTokens: 512})
+	if len(first.calls) == 0 {
+		t.Fatalf("disabled-thinking fallback returned no tool call; text=%q reasoning_len=%d", first.text, len(first.reasoning))
+	}
+	messages = append(messages,
+		provider.Message{Role: provider.RoleAssistant, Content: first.text, ToolCalls: first.calls},
+		provider.Message{Role: provider.RoleTool, ToolCallID: first.calls[0].ID, Name: first.calls[0].Name, Content: "protocol-fallback-ok"},
+	)
+	second := collectLiveDeepSeekTurnContext(t, ctx, p, provider.Request{Messages: messages, Tools: tools, MaxTokens: 512})
+	if strings.TrimSpace(second.text) == "" {
+		t.Fatalf("fallback continuation returned no text; reasoning_len=%d calls=%d", len(second.reasoning), len(second.calls))
+	}
+	t.Logf("missing-reasoning fallback: calls=%d reasoning=%d second_text=%d prompt=%d cache_hit=%d",
+		len(first.calls), len(first.reasoning), len(second.text), second.promptTokens, second.cacheHitTokens)
+}
+
+// TestRealDeepSeekAnthropicProjectsMissingThinkingHistory reproduces the
+// malformed persisted-history shape behind DeepSeek's
+// "content[].thinking must be passed back" HTTP 400. The provider boundary
+// must project the unreplayable tool activity away before sending the request,
+// while retaining the surrounding visible conversation.
+func TestRealDeepSeekAnthropicProjectsMissingThinkingHistory(t *testing.T) {
+	key := os.Getenv("DEEPSEEK_API_KEY")
+	if key == "" {
+		t.Skip("DEEPSEEK_API_KEY not set — skipping live probe")
+	}
+
+	p, err := New(provider.Config{
+		Name:    "deepseek-anthropic",
+		BaseURL: "https://api.deepseek.com/anthropic",
+		Model:   "deepseek-v4-flash",
+		APIKey:  key,
+		Extra: map[string]any{
+			"api_key_env": "DEEPSEEK_API_KEY",
+			"thinking":    "enabled",
+			"effort":      "high",
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	turn := collectLiveDeepSeekTurn(t, p, provider.Request{
+		Messages: []provider.Message{
+			{Role: provider.RoleUser, Content: "Inspect the marker using the tool."},
+			{
+				Role: provider.RoleAssistant, Content: "I inspected the marker.",
+				ToolCalls: []provider.ToolCall{{ID: "legacy-call", Name: "get_marker", Arguments: `{}`}},
+			},
+			{Role: provider.RoleTool, ToolCallID: "legacy-call", Name: "get_marker", Content: "legacy-result"},
+			{Role: provider.RoleUser, Content: "Reply with the single word: recovered."},
+		},
+		MaxTokens: 256,
+	})
+	if strings.TrimSpace(turn.text) == "" {
+		t.Fatalf("projected missing-thinking history returned no assistant text")
+	}
+	t.Logf("missing-thinking projection: text=%d reasoning=%d prompt=%d", len(turn.text), len(turn.reasoning), turn.promptTokens)
+}
+
 // TestRealDeepSeekAnthropicWebSearch verifies that the official Anthropic
 // compatibility endpoint accepts the server-side web_search tool and returns a
 // normal assistant completion. It is intentionally separate from the tool-loop
@@ -167,7 +259,8 @@ func TestRealDeepSeekAnthropicWebSearch(t *testing.T) {
 		APIKey:  key,
 		Extra: map[string]any{
 			"api_key_env": "DEEPSEEK_API_KEY",
-			"thinking":    "disabled",
+			"thinking":    "enabled",
+			"effort":      "high",
 			"web_search":  true,
 		},
 	})
@@ -185,7 +278,19 @@ func TestRealDeepSeekAnthropicWebSearch(t *testing.T) {
 	if strings.TrimSpace(turn.text) == "" {
 		t.Fatalf("web_search returned no assistant text (reasoning=%d)", len(turn.reasoning))
 	}
-	t.Logf("web_search: text=%d prompt=%d cache_hit=%d", len(turn.text), turn.promptTokens, turn.cacheHitTokens)
+	if strings.TrimSpace(turn.reasoning) == "" || len(turn.searches) == 0 {
+		t.Fatalf("web_search did not return replayable reasoning/search blocks: reasoning=%d searches=%d", len(turn.reasoning), len(turn.searches))
+	}
+	continued := collectLiveDeepSeekTurn(t, p, provider.Request{Messages: []provider.Message{
+		{Role: provider.RoleUser, Content: "Search the web for the latest DeepSeek API documentation update and reply with one source URL."},
+		{Role: provider.RoleAssistant, Content: turn.text, ReasoningContent: turn.reasoning, ServerSearch: turn.searches},
+		{Role: provider.RoleUser, Content: "Without searching again, reply with the hostname of that source."},
+	}, MaxTokens: 256})
+	if strings.TrimSpace(continued.text) == "" {
+		t.Fatalf("web_search continuation returned no assistant text (reasoning=%d searches=%d)", len(continued.reasoning), len(continued.searches))
+	}
+	t.Logf("web_search replay: text=%d reasoning=%d searches=%d prompt=%d cache_hit=%d continuation_text=%d",
+		len(turn.text), len(turn.reasoning), len(turn.searches), turn.promptTokens, turn.cacheHitTokens, len(continued.text))
 }
 
 // TestRealDeepSeekAnthropicIgnoresImages confirms the text-only official
@@ -226,12 +331,17 @@ func TestRealDeepSeekAnthropicIgnoresImages(t *testing.T) {
 type liveDeepSeekTurn struct {
 	text, reasoning, signature   string
 	calls                        []provider.ToolCall
+	searches                     []provider.ServerSearchCall
 	promptTokens, cacheHitTokens int
 }
 
 func collectLiveDeepSeekTurn(t *testing.T, p provider.Provider, req provider.Request) liveDeepSeekTurn {
+	return collectLiveDeepSeekTurnContext(t, context.Background(), p, req)
+}
+
+func collectLiveDeepSeekTurnContext(t *testing.T, parent context.Context, p provider.Provider, req provider.Request) liveDeepSeekTurn {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 60*time.Second)
 	defer cancel()
 	ch, err := p.Stream(ctx, req)
 	if err != nil {
@@ -251,6 +361,10 @@ func collectLiveDeepSeekTurn(t *testing.T, p provider.Provider, req provider.Req
 		case provider.ChunkToolCall:
 			if chunk.ToolCall != nil {
 				out.calls = append(out.calls, *chunk.ToolCall)
+			}
+		case provider.ChunkServerSearch:
+			if chunk.ServerSearch != nil {
+				out.searches = provider.MergeServerSearch(out.searches, *chunk.ServerSearch)
 			}
 		case provider.ChunkUsage:
 			if chunk.Usage != nil {

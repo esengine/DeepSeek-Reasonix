@@ -8,7 +8,8 @@ import (
 )
 
 // taskBudgetFromConfig maps the configured spend gate onto the agent budget.
-// A negative value disables that axis; zero leaves the default in place.
+// Zero and negative values disable the time axis; only a positive value is an
+// explicit wall-clock budget.
 func taskBudgetFromConfig(cfg *config.Config) agent.TaskBudget {
 	b := agent.TaskBudget{Cost: cfg.Agent.TaskCostBudget}
 	switch minutes := cfg.Agent.TaskTimeBudgetMinutes; {

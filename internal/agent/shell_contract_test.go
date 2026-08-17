@@ -26,17 +26,17 @@ func TestOrdinaryModeBlocksMixedMutationAndVerification(t *testing.T) {
 		{{Type: provider.ChunkText, Text: "ok"}, {Type: provider.ChunkDone}},
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "test"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "test"); err != nil {
 		t.Fatal(err)
 	}
-	got := toolResultByID(a.session, "m1")
+	got := toolResultByID(a.sess.conversation, "m1")
 	if strings.Contains(got, "bash done") {
 		t.Fatal("mixed command was executed")
 	}
 	if !strings.Contains(got, "state-changing segment") {
 		t.Fatalf("result = %q, want ordinary-mode mixed block", got)
 	}
-	for _, msg := range a.session.Snapshot() {
+	for _, msg := range a.sess.conversation.Snapshot() {
 		if msg.ToolCallID != "m1" {
 			continue
 		}
@@ -75,10 +75,10 @@ func TestOrdinaryModeRunsShortCircuitBuildAndVerify(t *testing.T) {
 				{{Type: provider.ChunkText, Text: "ok"}, {Type: provider.ChunkDone}},
 			}}
 			a := New(prov, reg, NewSession(""), Options{}, event.Discard)
-			if err := a.Run(context.Background(), "test"); err != nil {
+			if err := a.Run(withNoClosedLoop(context.Background()), "test"); err != nil {
 				t.Fatal(err)
 			}
-			got := toolResultByID(a.session, "m1")
+			got := toolResultByID(a.sess.conversation, "m1")
 			if strings.Contains(got, "blocked:") {
 				t.Fatalf("ordinary mode blocked %q: %s", command, got)
 			}
@@ -97,10 +97,10 @@ func TestOrdinaryModeBlocksMaskedVerifierExit(t *testing.T) {
 		{{Type: provider.ChunkText, Text: "ok"}, {Type: provider.ChunkDone}},
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "test"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "test"); err != nil {
 		t.Fatal(err)
 	}
-	got := toolResultByID(a.session, "m1")
+	got := toolResultByID(a.sess.conversation, "m1")
 	if strings.Contains(got, "bash done") {
 		t.Fatal("masked exit command was executed")
 	}
@@ -118,10 +118,10 @@ func TestOrdinaryModeBlocksNonTerminalInlineInterpreter(t *testing.T) {
 		{{Type: provider.ChunkText, Text: "ok"}, {Type: provider.ChunkDone}},
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "test"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "test"); err != nil {
 		t.Fatal(err)
 	}
-	got := toolResultByID(a.session, "m1")
+	got := toolResultByID(a.sess.conversation, "m1")
 	if strings.Contains(got, "bash done") {
 		t.Fatal("non-terminal inline interpreter was executed")
 	}
@@ -151,16 +151,16 @@ func TestBatchDependencyBarrierSkipsVerificationAfterFailedMutation(t *testing.T
 		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "edit then verify"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "edit then verify"); err != nil {
 		t.Fatal(err)
 	}
-	if got := toolResultByID(a.session, "v1"); !strings.Contains(got, "earlier modification") {
+	if got := toolResultByID(a.sess.conversation, "v1"); !strings.Contains(got, "earlier modification") {
 		t.Fatalf("verify result = %q, want dependency skip", got)
 	}
-	if strings.Contains(toolResultByID(a.session, "v1"), "bash done") {
+	if strings.Contains(toolResultByID(a.sess.conversation, "v1"), "bash done") {
 		t.Fatal("verification process should not have started")
 	}
-	for _, msg := range a.session.Snapshot() {
+	for _, msg := range a.sess.conversation.Snapshot() {
 		if msg.ToolCallID != "v1" {
 			continue
 		}
@@ -176,6 +176,61 @@ func TestBatchDependencyBarrierSkipsVerificationAfterFailedMutation(t *testing.T
 		return
 	}
 	t.Fatal("verify tool result missing")
+}
+
+func TestBatchDependencyBarrierReportsSanitizedRepositoryCause(t *testing.T) {
+	var calls int32
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "bash", readOnly: false, err: fmt.Errorf("synthetic failure"), calls: &calls})
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{
+			toolCallChunk("w1", "bash", `{"command":"git tag private-release-name"}`),
+			toolCallChunk("v1", "bash", `{"command":"go test ./..."}`),
+			{Type: provider.ChunkDone},
+		},
+		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
+	}}
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
+	if err := a.Run(withNoClosedLoop(context.Background()), "tag then verify"); err != nil {
+		t.Fatal(err)
+	}
+	got := toolResultByID(a.sess.conversation, "v1")
+	if !strings.Contains(got, "repository metadata") {
+		t.Fatalf("dependency result = %q, want repository metadata cause", got)
+	}
+	if strings.Contains(got, "private-release-name") {
+		t.Fatalf("dependency result leaked command operand: %q", got)
+	}
+	if calls != 1 {
+		t.Fatalf("bash Execute calls = %d, want only the failed writer", calls)
+	}
+}
+
+func TestBatchDependencyBarrierDoesNotOpenForFailedBranchListing(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "x.txt"), []byte("a\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "bash", readOnly: false, err: fmt.Errorf("synthetic reader failure")})
+	for _, tl := range (builtin.Workspace{Dir: dir}).Tools("edit_file") {
+		reg.Add(tl)
+	}
+	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
+	batch := a.executeBatch(context.Background(), &a.turn, []provider.ToolCall{
+		{ID: "r1", Name: "bash", Arguments: `{"command":"git branch -a"}`},
+		{ID: "e1", Name: "edit_file", Arguments: `{"path":"x.txt","old_string":"a","new_string":"b"}`},
+	})
+	if got := batch.results[1]; strings.Contains(got, "earlier") || strings.HasPrefix(strings.TrimSpace(got), "blocked:") {
+		t.Fatalf("edit was dependency-blocked after reader failure: %q", got)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "x.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "b\n" {
+		t.Fatalf("file = %q, want edit to run after failed reader", string(got))
+	}
 }
 
 // TestBatchDependencyBarrierIgnoresFailedNonMutationMetaTool keeps bookkeeping
@@ -203,10 +258,10 @@ func TestBatchDependencyBarrierIgnoresFailedNonMutationMetaTool(t *testing.T) {
 		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "track then edit"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "track then edit"); err != nil {
 		t.Fatal(err)
 	}
-	if got := toolResultByID(a.session, "e1"); strings.Contains(got, "earlier modification") {
+	if got := toolResultByID(a.sess.conversation, "e1"); strings.Contains(got, "earlier modification") {
 		t.Fatalf("edit was blocked by a failed todo_write: %s", got)
 	}
 	got, err := os.ReadFile(path)
@@ -238,10 +293,10 @@ func TestBatchDependencyBarrierStopsAfterFailedWorkspaceWrite(t *testing.T) {
 		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "two edits"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "two edits"); err != nil {
 		t.Fatal(err)
 	}
-	if got := toolResultByID(a.session, "e2"); !strings.Contains(got, "earlier modification") {
+	if got := toolResultByID(a.sess.conversation, "e2"); !strings.Contains(got, "earlier modification") {
 		t.Fatalf("second edit result = %q, want dependency skip", got)
 	}
 	got, err := os.ReadFile(filepath.Join(dir, "x.txt"))
@@ -331,7 +386,7 @@ func TestBatchDependencyBarrierBlocksResolvedMCPWriterAfterFailedMutation(t *tes
 		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "fail then mcp write"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "fail then mcp write"); err != nil {
 		t.Fatal(err)
 	}
 	if writerCalls != 0 {
@@ -343,7 +398,7 @@ func TestBatchDependencyBarrierBlocksResolvedMCPWriterAfterFailedMutation(t *tes
 	if _, err := os.Stat(proxyWrote); err == nil {
 		t.Fatal("proxy writer mutated disk after failed edit")
 	}
-	got := toolResultByID(a.session, "m1")
+	got := toolResultByID(a.sess.conversation, "m1")
 	if !strings.Contains(got, "earlier modification") {
 		t.Fatalf("proxy result = %q, want dependency skip", got)
 	}
@@ -374,10 +429,10 @@ func TestBatchDependencyBarrierAllowsReadOnlyDiagnosisAfterFailedMutation(t *tes
 		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
 	}}
 	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "fail then diagnose"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "fail then diagnose"); err != nil {
 		t.Fatal(err)
 	}
-	readOut := toolResultByID(a.session, "r1")
+	readOut := toolResultByID(a.sess.conversation, "r1")
 	if strings.Contains(readOut, "earlier modification") {
 		t.Fatalf("read_file was incorrectly dependency-skipped: %q", readOut)
 	}
@@ -388,10 +443,10 @@ func TestBatchDependencyBarrierAllowsReadOnlyDiagnosisAfterFailedMutation(t *tes
 	if !strings.Contains(readOut, "a") {
 		t.Fatalf("read_file body missing original file content: %q", readOut)
 	}
-	if got := toolResultByID(a.session, "v1"); !strings.Contains(got, "earlier modification") {
+	if got := toolResultByID(a.sess.conversation, "v1"); !strings.Contains(got, "earlier modification") {
 		t.Fatalf("verification should be dependency-skipped, got %q", got)
 	}
-	if strings.Contains(toolResultByID(a.session, "v1"), "bash done") {
+	if strings.Contains(toolResultByID(a.sess.conversation, "v1"), "bash done") {
 		t.Fatal("verification process must not start after failed mutation")
 	}
 }

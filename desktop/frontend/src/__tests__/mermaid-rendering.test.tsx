@@ -205,6 +205,71 @@ console.log("\nmermaid rendering");
   eq(streamingCommitTarget("t\n\n$$\nx\n$$\nafter"), "t\n\n$$\nx\n$$\n", "closed display math promotes immediately");
   eq(streamingCommitTarget("para\n## Next sec"), "para\n", "a partial heading line completes the paragraph before it");
   eq(streamingCommitTarget("para\n## Done\ntail"), "para\n## Done\n", "a terminated heading promotes itself as a complete block");
+
+  const searchItem = (title: string, url: string) => `- **${title}**\n  <${url}>`;
+  const searchDump = [
+    searchItem("新闻本文", "https://example.com/a"),
+    searchItem("Bitcoin (BTC) Price", "https://example.com/b?utm_source=x"),
+    searchItem("KuCoin", "https://example.com/c"),
+  ].join("\n");
+  eq(
+    streamingCommitTarget(searchDump),
+    `${searchItem("新闻本文", "https://example.com/a")}\n${searchItem("Bitcoin (BTC) Price", "https://example.com/b?utm_source=x")}\n`,
+    "a later list marker commits prior tight list items, including indented URL continuations",
+  );
+  eq(
+    streamingCommitTarget(`${searchItem("新闻本文", "https://example.com/a")}\n- **Bit`),
+    `${searchItem("新闻本文", "https://example.com/a")}\n`,
+    "an in-progress list marker still commits the previous completed item",
+  );
+  eq(
+    streamingCommitTarget(searchItem("新闻本文", "https://example.com/a")),
+    "",
+    "a single list item stays in the tail until the next item or a blank line",
+  );
+  eq(
+    streamingCommitTarget("1. alpha\n2. beta\n3. gamma"),
+    "1. alpha\n2. beta\n",
+    "ordered list markers complete prior items the same way",
+  );
+  eq(
+    streamingCommitTarget("- [ ] one\n- [x] two\n- [ ] three"),
+    "- [ ] one\n- [x] two\n",
+    "task-list markers complete prior items the same way",
+  );
+  eq(
+    streamingCommitTarget("intro paragraph\n- first item\n  continued"),
+    "intro paragraph\n",
+    "a list marker completes the paragraph before it without taking the new item",
+  );
+  eq(
+    streamingCommitTarget("- parent\n  - child still typing"),
+    "- parent\n",
+    "a nested list marker completes the parent item and leaves the child in the tail",
+  );
+  eq(
+    streamingCommitTarget("not a heading\n---\nstill setext"),
+    "",
+    "a setext underline is not treated as a list marker",
+  );
+  eq(
+    streamingCommitTarget("*not-a-list*\nstill paragraph"),
+    "",
+    "emphasis without a marker space is not a list item",
+  );
+  eq(
+    streamingCommitTarget("t\n\n```\n- not a list\n- also not\n"),
+    "t\n\n```\n- not a list\n- also not\n",
+    "list markers inside an open fence do not create commit boundaries",
+  );
+  eq(
+    streamingCommitTarget("- one\n- two\n\n"),
+    "- one\n- two\n\n",
+    "a blank line after a list still commits the whole list",
+  );
+  const searchHtml = renderToStaticMarkup(<ReactMarkdown remarkPlugins={[]}>{searchDump}</ReactMarkdown>);
+  ok(searchHtml.includes("<ul>") && searchHtml.includes("<li>") && searchHtml.includes("新闻本文"),
+    "the search-list source still renders as a list in the final Markdown tree");
 }
 
 {
@@ -268,6 +333,25 @@ console.log("\nmermaid rendering");
     root.render(<MarkdownTextProbe text="complete" streaming={false} />);
   });
   eq(rootEl.textContent, "complete", "short stream finalization still commits immediately");
+
+  pendingFrame = undefined;
+  const firstSearch = "- **新闻本文**\n  <https://example.com/a>\n";
+  const secondSearch = `${firstSearch}- **Bitcoin**\n  <https://example.com/b>`;
+  await act(async () => {
+    root.render(<MarkdownTextProbe text={firstSearch} streaming />);
+    await flushTimers();
+  });
+  eq(rootEl.textContent, "", "a single tight list item stays off the parsed prefix");
+  await act(async () => {
+    root.render(<MarkdownTextProbe text={secondSearch} streaming />);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+  });
+  const listFrame = pendingFrame;
+  await act(async () => {
+    listFrame?.(performance.now());
+    await flushTimers();
+  });
+  eq(rootEl.textContent, firstSearch, "a later list item commits the previous tight item into the parsed prefix");
 
   await act(async () => root.unmount());
   dom.window.close();

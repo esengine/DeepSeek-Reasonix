@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { JSDOM } from "jsdom";
 import { TEXT_SIZES } from "../lib/textSize";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
@@ -99,6 +100,69 @@ eq(
 eq(finalDeclaration(".transcript--empty", "overflow-y"), "auto", "empty transcript can scroll instead of clipping");
 eq(finalDeclaration(".welcome", "overflow"), "visible", "welcome empty state is not clipped by its own box");
 ok(
+  /\.md\s*>\s*:where\([^)]*p[^)]*ul[^)]*ol[^)]*\)\s*\{[^}]*content-visibility:\s*auto;[^}]*contain-intrinsic-size:\s*auto 72px;/.test(styles),
+  "non-transcript markdown still culls offscreen blocks with a 72px placeholder",
+);
+ok(
+  /\.transcript__row\s+\.md\s*>\s*\*\s*(?:,[^{]*)?\{[^}]*content-visibility:\s*visible;[^}]*contain-intrinsic-size:\s*none;/.test(styles),
+  "virtual transcript rows do not measure markdown through 72px placeholders",
+);
+ok(
+  hasDeclaration(".transcript__row .msg", "content-visibility", "visible") &&
+    hasDeclaration(".transcript__row .turn-collapse", "content-visibility", "visible"),
+  "virtual transcript cards stay measurable after the markdown override",
+);
+
+function paddingSides(value: string) {
+  const parts = value.trim().split(/\s+/);
+  if (parts.length === 1) return { right: parts[0], left: parts[0] };
+  if (parts.length === 2 || parts.length === 3) return { right: parts[1], left: parts[1] };
+  return { right: parts[1], left: parts[3] };
+}
+function isZeroPad(value: string | undefined) {
+  return value === undefined || value === "0" || value === "0px";
+}
+for (const block of matchingBlocks(".transcript")) {
+  const shorthand = /(?:^|;)\s*padding\s*:\s*([^;]+)/.exec(block);
+  if (shorthand) {
+    const sides = paddingSides(shorthand[1]);
+    ok(
+      isZeroPad(sides.left) && isZeroPad(sides.right),
+      `Virtuoso scroller padding stays vertical-only (${shorthand[1].trim()})`,
+    );
+  }
+  const padLeft = /(?:^|;)\s*padding-left\s*:\s*([^;]+)/.exec(block);
+  const padRight = /(?:^|;)\s*padding-right\s*:\s*([^;]+)/.exec(block);
+  ok(isZeroPad(padLeft?.[1].trim()), "Virtuoso scroller does not set padding-left");
+  ok(isZeroPad(padRight?.[1].trim()), "Virtuoso scroller does not set padding-right");
+}
+ok(hasDeclaration(".transcript", "--transcript-inline-pad", "32px"), "default transcript inline inset is 32px");
+ok(hasDeclaration(".transcript", "--transcript-inline-pad", "16px"), "narrow viewports tighten the transcript inline inset");
+eq(finalDeclaration(".transcript__row", "padding-left"), "var(--transcript-inline-pad, 32px)", "virtual rows own the left inset");
+eq(finalDeclaration(".transcript__row", "padding-right"), "var(--transcript-inline-pad, 32px)", "virtual rows own the right inset");
+eq(finalDeclaration(".transcript__header", "padding-left"), "var(--transcript-inline-pad, 32px)", "load-older header uses the same inline inset");
+eq(finalDeclaration(".transcript--empty", "padding"), "16px 32px", "empty transcript keeps its own horizontal inset");
+
+{
+  const stylesheet = readFileSync(resolve(testDir, "../styles.css"), "utf8");
+  const dom = new JSDOM(
+    `<!doctype html><html><head><style>${stylesheet}</style></head><body>
+      <div class="transcript__row"><div class="md"><p id="inside">inside</p></div></div>
+      <div class="md"><p id="outside">outside</p></div>
+    </body></html>`,
+    { pretendToBeVisual: true },
+  );
+  const inside = dom.window.getComputedStyle(dom.window.document.getElementById("inside")!);
+  const outside = dom.window.getComputedStyle(dom.window.document.getElementById("outside")!);
+  // jsdom may not implement content-visibility; treat an empty computed value
+  // as "engine gap" and still require the source contract above.
+  if (inside.contentVisibility || outside.contentVisibility) {
+    eq(inside.contentVisibility, "visible", "computed style keeps transcript markdown measurable");
+    eq(outside.contentVisibility, "auto", "computed style still culls markdown outside the transcript");
+  }
+  dom.window.close();
+}
+ok(
   hasDeclaration(".transcript--empty > .welcome", "margin-block", "auto"),
   "empty-state auto margins apply only to the welcome content",
 );
@@ -142,7 +206,7 @@ for (const selector of [
   ".context-panel__section-head span",
   ".context-panel__metric span",
   ".context-panel__metric strong",
-  ".app--creation .context-panel__mini-stat span",
+  ".app--creation .context-panel__mini-stat-label",
   ".app--creation .context-panel__mini-stat strong",
   ".topbar__model",
   ".composer-modebar__item span",
@@ -173,12 +237,11 @@ ok(
   finalDeclaration(".app--creation .context-panel__mini-stat strong", "max-width") !== "14ch",
   "creation overview values are not capped to a fixed 14ch width",
 );
+eq(finalDeclaration(".context-panel__mini-stat-head", "display"), "flex", "session metric labels and rate badges share a compact header row");
+eq(finalDeclaration(".context-panel__rate-band", "flex"), "0 0 auto", "rate badges remain visible without truncating the amount row");
+eq(finalDeclaration(".context-panel__rate-band", "white-space"), "nowrap", "rate badge labels stay intact");
 
 eq(finalDeclaration(".composer-modebar", "overflow"), "hidden", "chat mode switcher contains enlarged labels");
-eq(finalDeclaration(".composer-meta__control--profile", "flex"), "0 0 auto", "work mode selector sizes to its localized label");
-eq(finalDeclaration(".composer-meta__control--profile", "max-width"), "68px", "work mode selector keeps a compact narrow-width bound");
-eq(finalDeclaration(".composer-profile-trigger__label", "overflow"), "hidden", "work mode selector clips only when space is constrained");
-eq(finalDeclaration(".composer-profile-trigger__label", "text-overflow"), "ellipsis", "work mode selector shows an ellipsis when constrained");
 eq(finalDeclaration(".composer-meta__control--intent", "max-width"), "72px", "task method selector keeps its current state visible at narrow widths");
 eq(finalDeclaration(".composer-task-mode-trigger__value", "text-overflow"), "ellipsis", "task method selector truncates its value only when constrained");
 eq(finalDeclaration(".composer-meta .modelsw__trigger", "font-weight"), "var(--composer-control-font-weight)", "model selector uses the shared control weight");
@@ -195,14 +258,9 @@ eq(finalDeclaration(".composer-modebar--approval", "--composer-modebar-active-bg
 eq(finalDeclaration('.composer-modebar--approval[data-mode="auto"]', "--composer-modebar-active-fg"), "#fff", "auto approval keeps high-contrast text on its solid fill");
 eq(finalDeclaration('.composer-modebar--approval[data-mode="yolo"]', "--composer-modebar-active-bg"), "var(--mode-yolo-bg)", "yolo approval restores the solid warning fill");
 eq(finalDeclaration(".composer-intent-menu", "width"), "min(284px, calc(100vw - 16px))", "task method menu uses the shared menu width");
-eq(finalDeclaration(".composer-profile-menu", "width"), "min(284px, calc(100vw - 16px))", "work mode menu uses the shared menu width");
 eq(finalDeclaration(".composer-access-menu__desc", "white-space"), "normal", "menu descriptions can wrap onto a second line");
 eq(finalDeclaration(".composer-access-menu__desc", "text-overflow"), "clip", "menu descriptions no longer use single-line ellipsis");
-eq(finalDeclaration(".composer-profile-menu .composer-access-menu__desc", "font-size"), "12px", "work mode summaries use the shared control text size");
-eq(finalDeclaration(".composer-profile-menu .composer-access-menu__desc", "color"), "var(--fg-dim)", "work mode summaries remain readable as secondary text");
-eq(finalDeclaration(".composer-profile-menu .composer-access-menu__desc", "white-space"), "nowrap", "work mode summaries stay on one scannable line");
 eq(finalDeclaration(".composer-task-mode-trigger:focus-visible", "box-shadow"), "var(--focus-ring)", "task method selector uses the shared keyboard focus ring");
-eq(finalDeclaration(".composer-profile-trigger:focus-visible", "box-shadow"), "var(--focus-ring)", "work mode selector uses the shared keyboard focus ring");
 eq(finalDeclaration(".composer-meta .modelsw__trigger:focus-visible", "box-shadow"), "var(--focus-ring)", "model and effort selectors use the shared keyboard focus ring");
 eq(finalDeclaration(":root[data-theme-style] .composer-modebar__item--active:focus-visible", "box-shadow"), "var(--focus-ring)", "active permission options retain keyboard focus feedback");
 eq(
@@ -335,7 +393,7 @@ eq(
   "collapsed creation tool bodies do not paint hidden tool text",
 );
 ok(
-  /@container\s*\(max-width:\s*760px\)[\s\S]*?\.composer-meta__control--model\s*\{[\s\S]*?flex\s*:\s*0 1 auto[\s\S]*?width\s*:\s*fit-content[\s\S]*?max-width\s*:\s*min\(240px,\s*42vw\)[\s\S]*?\.composer-meta__control--profile\s*\{[\s\S]*?max-width\s*:\s*126px[\s\S]*?\.composer-meta__control--intent\s*\{[\s\S]*?max-width\s*:\s*128px[\s\S]*?\.composer-meta__control--effort\s*\{[\s\S]*?display\s*:\s*none[\s\S]*?\.composer-meta__control--more\s*\{[\s\S]*?display\s*:\s*inline-flex/.test(styles),
+  /@container\s*\(max-width:\s*760px\)[\s\S]*?\.composer-meta__control--model\s*\{[\s\S]*?flex\s*:\s*0 1 auto[\s\S]*?width\s*:\s*fit-content[\s\S]*?max-width\s*:\s*min\(240px,\s*42vw\)[\s\S]*?\.composer-meta__control--intent\s*\{[\s\S]*?max-width\s*:\s*128px[\s\S]*?\.composer-meta__control--effort\s*\{[\s\S]*?display\s*:\s*none[\s\S]*?\.composer-meta__control--more\s*\{[\s\S]*?display\s*:\s*inline-flex/.test(styles),
   "composer compact controls activate at the capped theme width",
 );
 eq(finalDeclaration(".md-table-scroll", "overflow-x"), "auto", "markdown table wrapper scrolls horizontally");

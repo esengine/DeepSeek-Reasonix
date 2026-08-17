@@ -1118,12 +1118,19 @@ func (l *Ledger) HasSuccessfulWorkReceipt() bool {
 // HasSuccessfulVerificationCommand reports whether the turn ran at least one
 // command classified as verification rather than inspection or mutation.
 func (l *Ledger) HasSuccessfulVerificationCommand() bool {
+	return l.HasSuccessfulVerificationCommandAfter(-1)
+}
+
+// HasSuccessfulVerificationCommandAfter reports whether verification succeeded
+// after the named receipt index. Mutations before the boundary do not satisfy a
+// role setting's post-change verification floor.
+func (l *Ledger) HasSuccessfulVerificationCommandAfter(after int) bool {
 	if l == nil {
 		return false
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	for _, r := range l.receipts {
+	for _, r := range l.receipts[max(after+1, 0):] {
 		if r.Success && r.ToolName == "bash" && bashCommandIsVerification(r.Command) {
 			return true
 		}
@@ -1396,7 +1403,7 @@ func (l *Ledger) hasSuccessfulPaths(paths []string, accept func(Receipt) bool) b
 
 type contextKey struct{}
 type sessionMessagesKey struct{}
-type deliveryProfileKey struct{}
+type closedLoopKey struct{}
 type todoStateKey struct{}
 
 func WithLedger(ctx context.Context, ledger *Ledger) context.Context {
@@ -1411,17 +1418,14 @@ func FromContext(ctx context.Context) (*Ledger, bool) {
 	return ledger, ok && ledger != nil
 }
 
-// WithDeliveryProfile marks tool execution as subject to the delivery-first
-// final-readiness contract. Tools use this only for stricter evidence validation;
-// it is ephemeral host state and is never serialized into sessions or prompts.
-func WithDeliveryProfile(ctx context.Context) context.Context {
-	return context.WithValue(ctx, deliveryProfileKey{}, true)
+// WithClosedLoopExecution marks a tool call for closed-loop evidence checks.
+func WithClosedLoopExecution(ctx context.Context) context.Context {
+	return context.WithValue(ctx, closedLoopKey{}, true)
 }
 
-// DeliveryProfileFromContext reports whether the current tool call must produce
-// evidence that the delivery final-readiness gate can accept.
-func DeliveryProfileFromContext(ctx context.Context) bool {
-	enabled, _ := ctx.Value(deliveryProfileKey{}).(bool)
+// ClosedLoopExecutionFromContext reports whether closed-loop evidence is required.
+func ClosedLoopExecutionFromContext(ctx context.Context) bool {
+	enabled, _ := ctx.Value(closedLoopKey{}).(bool)
 	return enabled
 }
 
@@ -1506,11 +1510,15 @@ func failedSessionCallIDs(msgs []provider.Message) map[string]bool {
 }
 
 func ReceiptFromToolCall(toolName string, args json.RawMessage, success bool, readOnly bool) Receipt {
+	effects := ClassifyToolCall(toolName, args, readOnly)
 	r := Receipt{
 		ToolName: toolName,
 		Args:     args,
 		Success:  success,
-		Mutation: ToolCallMutates(toolName, args, readOnly),
+		// Receipt.Mutation is delivery content debt. Repository-only state
+		// transitions such as a pure commit remain guarded writers, but do not
+		// force another content review pass by themselves.
+		Mutation: effects.ContentMutation,
 	}
 
 	var fields map[string]json.RawMessage
@@ -1564,37 +1572,8 @@ func ToolCallPaths(args json.RawMessage) []string {
 	return out
 }
 
-// ToolCallMutates is the delivery profile's conservative state-change
-// classifier. Trusted read-only tools never mutate. Meta tools that only
-// delegate (task, run_skill, review, …) never mutate by themselves — real
-// writes arrive via child evidence merge. Writer-capable tools do mutate,
-// except for bash commands that the host can prove are inspection or
-// verification commands.
-func ToolCallMutates(toolName string, args json.RawMessage, readOnly bool) bool {
-	if readOnly {
-		return false
-	}
-	if IsNonMutationMetaTool(toolName) {
-		return false
-	}
-	switch toolName {
-	case "ask", "todo_write", "complete_step", "bash_output", "wait":
-		return false
-	case "bash":
-		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(args, &fields); err != nil {
-			return true
-		}
-		return bashMayMutate(stringField(fields, "command"))
-	default:
-		return true
-	}
-}
-
-// ToolCallRequiresDeliveryCriteria reports whether a call begins execution
-// work that needs an acceptance contract. Mutations always qualify; verification
-// commands also qualify even though they are intentionally not mutations.
-func ToolCallRequiresDeliveryCriteria(toolName string, args json.RawMessage, readOnly bool) bool {
+// ToolCallRequiresAcceptanceCriteria reports mutations and verification commands.
+func ToolCallRequiresAcceptanceCriteria(toolName string, args json.RawMessage, readOnly bool) bool {
 	if ToolCallMutates(toolName, args, readOnly) {
 		return true
 	}
@@ -1806,9 +1785,7 @@ func bashContainsVerificationSegment(command string) bool {
 		return false
 	}
 	for _, segment := range segments {
-		normalized, _ := shellsafe.NormalizeBashSafeRedirectsForMatch(segment)
-		fields, malformed := shellparse.StaticFields(normalized)
-		if malformed == "" && bashSegmentIsVerification(fields) {
+		if fields, ok := bashStaticArgv(segment); ok && bashSegmentIsVerification(fields) {
 			return true
 		}
 	}
@@ -1825,18 +1802,14 @@ func bashMayMutate(command string) bool {
 		return true
 	}
 	for _, segment := range segments {
-		normalized, safeRedirects := shellsafe.NormalizeBashSafeRedirectsForMatch(segment)
-		if !safeRedirects {
-			return true
+		normalized, _ := shellsafe.NormalizeBashSafeRedirectsForMatch(segment)
+		if normalized == "" {
+			normalized = segment
 		}
-		if staticFields, malformed := shellparse.StaticFields(normalized); malformed == "" && len(staticFields) > 0 && bashSegmentIsVerification(staticFields) {
+		if fields, ok := bashStaticArgv(normalized); ok && bashSegmentIsVerification(fields) {
 			continue
 		}
-		base, sub, fields, workspaceNonMutating := shellsafe.ClassifyWorkspaceNonMutatingCommand(normalized)
-		if !workspaceNonMutating {
-			return true
-		}
-		if bashReadOnlyCommandWrites(base, sub, fields) {
+		if shellsafe.ClassifyBash(segment).AnyMutation() {
 			return true
 		}
 	}
@@ -1858,26 +1831,31 @@ func bashCommandIsVerification(command string) bool {
 		if !safeRedirects {
 			return false
 		}
-		fields, malformed := shellparse.StaticFields(normalized)
-		if malformed != "" || len(fields) == 0 {
+		fields, ok := bashStaticArgv(normalized)
+		if !ok {
 			return false
 		}
 		if bashSegmentIsVerification(fields) {
 			found = true
 			continue
 		}
-		if _, _, readOnly := shellsafe.CommandIsReadOnly(normalized); !readOnly {
+		if shellsafe.ClassifyBash(normalized).AnyMutation() {
 			return false
 		}
 	}
 	return found
 }
 
-// IsDeliveryVerificationCommand reports whether command is a host-recognized
-// verification command for delivery finalization. Keep complete_step and the
-// final-readiness gate on this single classifier so a sign-off cannot claim a
-// command that the final gate will immediately reject.
-func IsDeliveryVerificationCommand(command string) bool {
+func bashStaticArgv(command string) ([]string, bool) {
+	if fields, _, ok := shellsafe.CommandArgv(command); ok {
+		return fields, true
+	}
+	fields, malformed := shellparse.StaticFields(command)
+	return fields, malformed == "" && len(fields) > 0
+}
+
+// IsVerificationCommand reports whether command is a recognized verifier.
+func IsVerificationCommand(command string) bool {
 	return bashCommandIsVerification(command)
 }
 
@@ -2186,34 +2164,6 @@ func nodeTestFlagWritesFile(arg string) bool {
 	default:
 		return false
 	}
-}
-
-func bashReadOnlyCommandWrites(base, sub string, fields []string) bool {
-	args := fields[1:]
-	if sub != "" && len(args) > 0 {
-		args = args[1:]
-	}
-	switch base {
-	case "find":
-		return hasCommandArg(args, "-exec", "-execdir", "-delete", "-ok", "-okdir", "-fls", "-fprint", "-fprint0", "-fprintf")
-	case "sort":
-		for _, arg := range args {
-			if arg == "-o" || arg == "--output" || strings.HasPrefix(arg, "--output=") || strings.HasPrefix(arg, "-o") {
-				return true
-			}
-		}
-	case "git":
-		if sub == "diff" || sub == "show" || sub == "log" {
-			for _, arg := range args {
-				if arg == "--output" || strings.HasPrefix(arg, "--output=") {
-					return true
-				}
-			}
-		}
-	case "go":
-		return sub == "env" && hasCommandArg(args, "-w", "-u")
-	}
-	return false
 }
 
 func hasCommandArg(args []string, candidates ...string) bool {

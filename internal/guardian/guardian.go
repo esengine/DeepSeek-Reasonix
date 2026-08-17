@@ -96,7 +96,7 @@ func NewSession(prov provider.Provider, readOnlyReg *tool.Registry, policyPrompt
 		// Use the shared context window so the guardian session can compact
 		// itself when it grows too large across many reviews.
 		ContextWindow:          100_000,
-		CompactRatio:           0.85,
+		CompactRatio:           0.80,
 		StrictAlternatingRoles: true,
 		// Guardian's own sink drops everything — the audit line (emitTo) is the
 		// only user-visible output. Usage events are captured internally for

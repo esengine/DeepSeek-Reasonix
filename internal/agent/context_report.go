@@ -42,11 +42,11 @@ func (a *Agent) ContextReport() ContextReport {
 		OutputBudget: a.maxOutputTokens,
 		CacheState:   a.CacheState(),
 	}
-	if u := a.lastUsage.Load(); u != nil {
+	if u := a.sess.output.lastUsage.Load(); u != nil {
 		rep.LatestPrompt = u.LatestPromptTokens()
 	}
-	if a.session != nil {
-		canonical, _ := a.session.snapshotMessagesVersion()
+	if a.sess.conversation != nil {
+		canonical, _ := a.sess.conversation.snapshotMessagesVersion()
 		rep.CanonicalTokens = a.estimatedPromptTokens(provider.ModelMessages(canonical))
 	}
 	visible := a.modelVisibleMessages()
@@ -60,9 +60,9 @@ func (a *Agent) ContextReport() ContextReport {
 		}
 	}
 
-	a.compactionMu.Lock()
-	st := a.compactionState
-	a.compactionMu.Unlock()
+	a.sess.compactionMu.Lock()
+	st := a.sess.compactionState
+	a.sess.compactionMu.Unlock()
 	// Prefer LastReceipt; fall back to legacy top-level mirrors from older sidecars.
 	if r := st.LastReceipt; r != nil && r.Status == "applied" {
 		rep.LastTrigger = r.Trigger

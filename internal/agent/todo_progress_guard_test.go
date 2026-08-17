@@ -78,6 +78,34 @@ func TestTodoProgressGuardNeverPausesARun(t *testing.T) {
 	}
 }
 
+func TestGoalTodoProgressGuardReplansWithoutPausing(t *testing.T) {
+	turns := []testutil.Turn{{ToolCalls: []provider.ToolCall{{
+		ID: "todo", Name: "todo_write",
+		Arguments: `{"todos":[{"content":"finish the task","status":"in_progress"}]}`,
+	}}}}
+	// The first unique read renews the lease; maxTodoStallRounds exact repeats
+	// after it reach the Goal redirect threshold.
+	for i := range maxTodoStallRounds + 1 {
+		turns = append(turns, testutil.Turn{ToolCalls: []provider.ToolCall{{
+			ID: fmt.Sprintf("read-%d", i), Name: "inspect", Arguments: `{"path":"same"}`,
+		}}})
+	}
+	turns = append(turns, testutil.Turn{Text: "Replanned; a real blocker would be reported through update_goal."})
+
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "inspect", readOnly: true})
+	reg.Add(mustBuiltinTool(t, "todo_write"))
+	mp := testutil.NewMock("m", turns...)
+	a := New(mp, reg, NewSession(""), Options{}, event.Discard)
+	ctx := WithDeliveryExecutionScope(context.Background(), DeliveryExecutionScope{ID: "goal-1", TaskText: "finish the task"})
+	if err := a.Run(ctx, "work until the todo is complete"); err != nil {
+		t.Fatalf("Goal todo stall must redirect, not pause: %v", err)
+	}
+	if !sessionContains(a, "Host progress redirect") {
+		t.Fatal("Goal todo stall did not inject a re-plan redirect")
+	}
+}
+
 func TestTodoProgressGuardRenewsOnUniqueHostWork(t *testing.T) {
 	turns := []testutil.Turn{{ToolCalls: []provider.ToolCall{{
 		ID: "todo", Name: "todo_write",
@@ -119,10 +147,10 @@ func TestTodoProgressGuardRenewsOnUniqueHostWork(t *testing.T) {
 }
 
 func TestCanonicalTodoProgressIgnoresTitleAndPendingListChurn(t *testing.T) {
-	a := &Agent{todoState: []evidence.TodoItem{
+	a := &Agent{sess: sessionRuntime{todoState: []evidence.TodoItem{
 		{Content: "finish the task", Status: "in_progress"},
 		{Content: "write tests", Status: "pending"},
-	}}
+	}}}
 	before, tracking := a.canonicalTodoProgress()
 	if !tracking {
 		t.Fatal("incomplete todo list should be tracked")
@@ -149,7 +177,7 @@ func TestMaxStepsGraceSummaryBypassesIncompleteTodoReadiness(t *testing.T) {
 		}},
 		testutil.Turn{Text: "Progress saved; the todo remains unfinished."},
 	)
-	a := New(mp, reg, NewSession(""), Options{MaxSteps: 1, DeliveryProfile: true}, event.Discard)
+	a := New(mp, reg, NewSession(""), Options{MaxSteps: 1}, event.Discard)
 
 	err := a.Run(context.Background(), "start a long task")
 	var pause *maxStepsPause

@@ -26,12 +26,12 @@ An ACP host should launch one of these commands:
 ```sh
 reasonix acp
 reasonix acp --model deepseek-pro
-reasonix acp --profile delivery
+reasonix acp
 ```
 
 `--model` selects the startup model when the client does not override it.
-`--profile` sets the startup work mode to `economy`, `balanced`, or `delivery`.
-Both remain session-configurable after initialization.
+Ordinary requests always enter the executor. There is no automatic simple /
+light / full task mode. Verification obligations come from real tool actions.
 
 Standard output is reserved for ACP messages. Reasonix sends diagnostics to
 standard error, so hosts must not merge the two streams. Run `reasonix setup`
@@ -87,8 +87,8 @@ tools run locally inside the Reasonix process.
 ## Session lifecycle
 
 Each ACP session owns an independent Reasonix controller, workspace root, model,
-work mode, collaboration mode, approval mode, MCP set, and persisted transcript.
-State does not leak between sessions.
+collaboration mode, approval mode, MCP set, and persisted transcript. State does
+not leak between sessions.
 
 | Method | Behavior |
 | --- | --- |
@@ -116,10 +116,9 @@ one mode selector:
 | Collaboration mode | `normal`, `plan`, `goal` | `modes` and `session/set_mode` |
 | Model | Configured `provider/model` entries | `configOptions` with id `model` |
 | Reasoning effort | Provider-supported levels or `auto` | `configOptions` with id `effort` |
-| Work mode | `economy`, `balanced`, `delivery` | `configOptions` with id `work_mode` |
 | Tool approval | `ask`, `auto`, `yolo` | `configOptions` with id `tool_approval` |
 
-Use `session/set_config_option` for model, effort, work mode, and tool approval.
+Use `session/set_config_option` for model, effort, and tool approval.
 Its parameters are `sessionId`, `configId` and `value`, where `configId` is the
 `id` of the option as advertised in `configOptions`:
 
@@ -139,9 +138,15 @@ Its parameters are `sessionId`, `configId` and `value`, where `configId` is the
 Note that the field is `configId`, not `optionId`. The result is the full
 refreshed `configOptions` array. An unknown id returns `-32602 InvalidParams`.
 
-Model, effort, and work-mode changes rebuild the session controller while
-preserving its history and the other axes. Tool-approval changes update the
-gate without rebuilding the controller.
+Model and effort changes rebuild the session controller while preserving its
+history and the other axes. Tool-approval changes update the gate in place
+without rebuilding the controller.
+
+Execution modes are gone. For one compatibility version, clients that still
+send `session/set_config_option` with `configId` `agent_preset` or `work_mode`
+(including legacy aliases `profile`, `runtime_profile`, `token_mode`) receive a
+successful no-op: nothing switches, nothing rebuilds, and the result carries a
+`deprecatedNotice` explaining the adaptive standard execution.
 
 For older clients, `session/set_model` remains available. The legacy
 `session/set_mode` values `default` and `auto` are also accepted as Normal + Ask
@@ -164,6 +169,27 @@ audio are not advertised. During a turn, Reasonix may send:
 Hosts should keep the `session/prompt` request open until Reasonix returns its
 stop reason, while continuing to process requests and notifications in both
 directions.
+
+Reasonix emits only ACP v1 stop reasons. A completed turn that still needs a
+final-readiness check sends a `[warning]` message chunk and returns `end_turn`;
+its vendor status remains `readiness_paused` so the host can offer recovery.
+An explicit model-round limit (`max_steps`) sends a `[warning]`, returns
+`max_turn_requests`, and records a paused vendor outcome. A host task-time,
+token, or cost budget also sends a `[warning]` and records a paused outcome,
+but returns `end_turn` because ACP v1 has no task-budget-specific stop reason.
+Client cancellation returns `cancelled`, even when the interrupted runner exits
+without an error. Other provider, tool, or runtime failures return a JSON-RPC
+`-32603 InternalError` whose message contains a bounded, credential-redacted
+cause; they do not return a successful prompt result with a non-standard
+`stopReason`.
+
+When the status phase is `readiness_paused`, resume that exact check with a
+`session/prompt` request whose optional `action` is
+`"final_readiness_recovery"`. Sending `/continue-checks` as the sole text block
+is the compatibility form. Both forms consume a one-shot, persisted host
+checkpoint; ordinary prompt text never inherits it, and a stale action after a
+newer user turn is rejected as JSON-RPC `-32600 InvalidRequest` without
+publishing or persisting a synthetic status turn.
 
 ## Mid-turn steering extension
 

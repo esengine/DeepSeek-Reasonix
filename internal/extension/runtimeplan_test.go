@@ -27,6 +27,19 @@ func TestRuntimePlanNoOp(t *testing.T) {
 	}
 }
 
+func TestRuntimePlanRestartUnchangedSidecarsAffectsOnlySidecars(t *testing.T) {
+	plan := &RuntimePlan{RestartUnchangedSidecars: true}
+	if !plan.IsNoOp() {
+		t.Fatal("sidecar process replacement must remain a semantic graph no-op")
+	}
+	if !plan.AffectsSidecars() {
+		t.Fatal("sidecar process replacement must report its lifecycle work")
+	}
+	if plan.MayChangePrefix() || plan.AffectsInterceptors() || plan.AffectsUI() || plan.AffectsProviders() {
+		t.Fatalf("sidecar process replacement affected unrelated subgraphs: %+v", plan)
+	}
+}
+
 func TestRuntimePlanProviderOnlyChange(t *testing.T) {
 	from, err := BuildDependencyGraph([]ComponentDescriptor{
 		{ID: "host", Provides: []extensioncontract.Capability{cap("reasonix", "provider", "p", "1.0.0", "sha256:a")}},

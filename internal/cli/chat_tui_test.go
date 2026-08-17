@@ -1225,11 +1225,10 @@ func TestStatusCommandShowsRuntimeDetails(t *testing.T) {
 	m := newTestChatTUI()
 	m.modelRef = "provider/model"
 	m.effortLevel = "max"
-	m.runtimeProfile = "delivery"
 	m.balance = "$10.00"
 	m.runSlashCommand("/status")
 	out := ansi.Strip(strings.Join(m.transcript, "\n"))
-	for _, want := range []string{"Session status", "provider/model", "delivery", "effort max", "$10.00"} {
+	for _, want := range []string{"Session status", "provider/model", "effort max", "$10.00"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("/status output missing %q:\n%s", want, out)
 		}
@@ -1350,6 +1349,37 @@ func TestIngestEventShowsReasoningInVerboseMode(t *testing.T) {
 	m.ingestEvent(event.Event{Kind: event.Reasoning, Text: "weighing options"})
 	if !strings.Contains(m.reasoning.String(), "weighing options") {
 		t.Errorf("verbose reasoning should buffer the text, got %q", m.reasoning.String())
+	}
+}
+
+func TestCompletionSummaryOutputIsTiered(t *testing.T) {
+	complete := &event.CompletionSummaryInfo{
+		Preset: "balanced", Verdict: "complete", Mutations: 2,
+		ChecksPassed: 4, Review: "passed",
+	}
+	m := newTestChatTUI()
+	m.ingestEvent(event.Event{Kind: event.CompletionSummary, Completion: complete})
+	if len(*m.pendingCommit) != 0 {
+		t.Fatalf("ordinary completion summary should be silent, committed=%v", *m.pendingCommit)
+	}
+
+	partial := &event.CompletionSummaryInfo{
+		Preset: "balanced", Verdict: "partial", Mutations: 2,
+		ChecksPassed: 3, ChecksFailed: 1, Review: "passed", GapKinds: []string{"stale_check"},
+	}
+	m = newTestChatTUI()
+	m.ingestEvent(event.Event{Kind: event.CompletionSummary, Completion: partial})
+	lines := strings.Join(*m.pendingCommit, "\n")
+	if !strings.Contains(lines, "!") || strings.Contains(lines, "balanced") || strings.Contains(lines, "stale_check") {
+		t.Fatalf("non-verbose partial summary should be a localized short warning, committed=%q", lines)
+	}
+
+	m = newTestChatTUI()
+	m.showReasoning = true
+	m.ingestEvent(event.Event{Kind: event.CompletionSummary, Completion: partial})
+	lines = strings.Join(*m.pendingCommit, "\n")
+	if !strings.Contains(lines, "stale_check") || !strings.Contains(lines, "partial") || strings.Contains(lines, "balanced") {
+		t.Fatalf("verbose mode should include raw completion details without a mode label, committed=%q", lines)
 	}
 }
 
@@ -2492,7 +2522,6 @@ func TestLanguageCommandRefreshesCurrentController(t *testing.T) {
 	m := newTestChatTUI()
 	m.ctrl = oldCtrl
 	m.modelRef = "deepseek-flash/deepseek-v4-flash"
-	m.runtimeProfile = "full"
 	var gotSpec controllerBuildSpec
 	m.buildController = func(spec controllerBuildSpec, _ []provider.Message, _ string, _ control.SessionAPI) (*control.Controller, error) {
 		gotSpec = spec
@@ -2509,7 +2538,7 @@ func TestLanguageCommandRefreshesCurrentController(t *testing.T) {
 	if m.ctrl == oldCtrl {
 		t.Fatal("/language kept the stale controller after a successful refresh")
 	}
-	if gotSpec.ModelRef != m.modelRef || gotSpec.RuntimeProfile != "full" {
+	if gotSpec.ModelRef != m.modelRef {
 		t.Fatalf("language refresh spec = %+v", gotSpec)
 	}
 }
@@ -2524,7 +2553,6 @@ func TestCurrencyCommandPersistsAndRefreshesCurrentController(t *testing.T) {
 	m := newTestChatTUI()
 	m.ctrl = oldCtrl
 	m.modelRef = "deepseek-flash/deepseek-v4-flash"
-	m.runtimeProfile = "full"
 	var gotSpec controllerBuildSpec
 	m.buildController = func(spec controllerBuildSpec, _ []provider.Message, _ string, _ control.SessionAPI) (*control.Controller, error) {
 		gotSpec = spec
@@ -2545,7 +2573,7 @@ func TestCurrencyCommandPersistsAndRefreshesCurrentController(t *testing.T) {
 	if m.ctrl == oldCtrl {
 		t.Fatal("/currency kept the stale controller after a successful refresh")
 	}
-	if gotSpec.ModelRef != m.modelRef || gotSpec.RuntimeProfile != "full" {
+	if gotSpec.ModelRef != m.modelRef {
 		t.Fatalf("currency refresh spec = %+v", gotSpec)
 	}
 }
@@ -2557,7 +2585,6 @@ func TestCurrencyRefreshFailureKeepsCurrentController(t *testing.T) {
 	m := newTestChatTUI()
 	m.ctrl = oldCtrl
 	m.modelRef = "deepseek-flash/deepseek-v4-flash"
-	m.runtimeProfile = "full"
 	m.buildController = func(controllerBuildSpec, []provider.Message, string, control.SessionAPI) (*control.Controller, error) {
 		return nil, errors.New("build failed")
 	}

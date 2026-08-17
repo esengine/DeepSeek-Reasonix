@@ -201,6 +201,8 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 }
 
 func TestSaveTabsPersistsNonBalancedTokenModes(t *testing.T) {
+	// New writes pin the deprecated dual-write compat labels; economy/delivery
+	// must not be persisted as live modes.
 	isolateDesktopUserDirs(t)
 
 	app := NewApp()
@@ -210,36 +212,36 @@ func TestSaveTabsPersistsNonBalancedTokenModes(t *testing.T) {
 	app.tabOrder = []string{tab.ID}
 	app.activeTabID = tab.ID
 
-	app.mu.Lock()
-	app.saveTabsLocked()
-	app.mu.Unlock()
+	for _, inMemory := range []string{"economy", "delivery", "full"} {
+		tab.tokenMode = inMemory
+		app.mu.Lock()
+		app.saveTabsLocked()
+		app.mu.Unlock()
 
+		got := loadTabsFile()
+		if len(got.Tabs) != 1 {
+			t.Fatalf("tabs len = %d, want 1", len(got.Tabs))
+		}
+		if got.Tabs[0].TokenMode != boot.TokenModeFull || got.Tabs[0].AgentPreset != boot.AgentPresetBalanced {
+			t.Fatalf("saved compat after in-memory %q = token:%q preset:%q, want full/balanced",
+				inMemory, got.Tabs[0].TokenMode, got.Tabs[0].AgentPreset)
+		}
+	}
+}
+
+func TestLoadTabsFileDecodesLegacyTokenModes(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := desktopConfigDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"tabs":[{"id":"old","scope":"global","tokenMode":"economy","agentPreset":"light"}],"activeTab":"old"}`
+	if err := os.WriteFile(filepath.Join(dir, tabsFileName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	got := loadTabsFile()
-	if len(got.Tabs) != 1 {
-		t.Fatalf("tabs len = %d, want 1", len(got.Tabs))
-	}
-	if got.Tabs[0].TokenMode != "economy" {
-		t.Fatalf("saved token mode = %q, want economy", got.Tabs[0].TokenMode)
-	}
-
-	tab.tokenMode = "delivery"
-	app.mu.Lock()
-	app.saveTabsLocked()
-	app.mu.Unlock()
-
-	got = loadTabsFile()
-	if got.Tabs[0].TokenMode != "delivery" {
-		t.Fatalf("saved token mode = %q, want delivery", got.Tabs[0].TokenMode)
-	}
-
-	tab.tokenMode = "full"
-	app.mu.Lock()
-	app.saveTabsLocked()
-	app.mu.Unlock()
-
-	got = loadTabsFile()
-	if got.Tabs[0].TokenMode != "" {
-		t.Fatalf("balanced/full token mode should be omitted from persistence, got %q", got.Tabs[0].TokenMode)
+	if len(got.Tabs) != 1 || got.Tabs[0].TokenMode != boot.TokenModeEconomy || got.Tabs[0].AgentPreset != boot.AgentPresetLight {
+		t.Fatalf("legacy tabs decode = %+v", got.Tabs)
 	}
 }
 
@@ -485,8 +487,8 @@ func TestMetaReportsGoalStatus(t *testing.T) {
 	app.SetCollaborationModeForTab(tab.ID, "plan")
 	tab.tokenMode = boot.TokenModeEconomy
 	meta = app.MetaForTab(tab.ID)
-	if meta.CollaborationMode != "plan" || meta.TokenMode != boot.TokenModeEconomy {
-		t.Fatalf("profile meta = %+v, want plan + economy", meta)
+	if meta.CollaborationMode != "plan" || meta.TokenMode != boot.TokenModeFull || meta.AgentPreset != boot.AgentPresetBalanced {
+		t.Fatalf("profile meta = %+v, want plan + pinned full/balanced", meta)
 	}
 }
 

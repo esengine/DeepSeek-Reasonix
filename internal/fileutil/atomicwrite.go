@@ -218,6 +218,15 @@ func ReplaceFile(tmp, dest string) error {
 	return replaceFile(tmp, dest, true)
 }
 
+// ClaimRename renames src to dst for callers that use the rename itself as a
+// claim: it retries the same transient locks ReplaceFile does, but never falls
+// back to a copy, because a copy would let two claimants both succeed. A src
+// that has disappeared ends the retries at once — that is the loser of a race,
+// not a fault.
+func ClaimRename(src, dst string) error {
+	return replaceFile(src, dst, false)
+}
+
 func replaceFile(tmp, dest string, allowCrossDeviceCopy bool) error {
 	var err error
 	for attempt := 0; ; attempt++ {

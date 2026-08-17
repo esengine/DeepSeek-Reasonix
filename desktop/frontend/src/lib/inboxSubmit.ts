@@ -1,7 +1,7 @@
 import type { AppBindings } from "./bridge";
 import type { StructuredInvocationSubmit } from "./invocationDisplay";
 
-type InboxEnqueueBindings = Pick<AppBindings, "EnqueueInboxFollowup" | "EnqueueInboxFollowupWithInvocations">;
+type InboxEnqueueBindings = Pick<AppBindings, "EnqueueInboxFollowup" | "EnqueueInboxFollowupWithInvocations" | "EnqueueInboxSteer">;
 
 export function enqueueInboxGuidance(
   binding: InboxEnqueueBindings,
@@ -9,6 +9,7 @@ export function enqueueInboxGuidance(
   display: string,
   submit: string,
   structured?: StructuredInvocationSubmit,
+  opts?: { steer?: boolean },
 ) {
   if (structured) {
     return binding.EnqueueInboxFollowupWithInvocations(
@@ -18,6 +19,9 @@ export function enqueueInboxGuidance(
       structured.invocations,
       "",
     );
+  }
+  if (opts?.steer && typeof binding.EnqueueInboxSteer === "function") {
+    return binding.EnqueueInboxSteer(tabId, display, submit || display, "");
   }
   return binding.EnqueueInboxFollowup(tabId, display, submit || display, "");
 }

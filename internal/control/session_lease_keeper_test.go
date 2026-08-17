@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/event"
 	"reasonix/internal/store"
 )
 
@@ -27,7 +28,7 @@ func TestSessionLeaseKeeperRebindMovesLease(t *testing.T) {
 	if got, want := k.HeldPath(), agent.CanonicalSessionPath(a); got != want {
 		t.Fatalf("HeldPath = %q, want %q", got, want)
 	}
-	if _, err := os.Stat(store.SessionLeaseInfo(agent.CanonicalSessionPath(a))); err != nil {
+	if info, err := agent.LoadSessionLeaseInfo(agent.CanonicalSessionPath(a)); err != nil || info == nil {
 		t.Fatalf("lease info for a missing: %v", err)
 	}
 	// a is held: an outside acquire must fail.
@@ -41,9 +42,10 @@ func TestSessionLeaseKeeperRebindMovesLease(t *testing.T) {
 	if got, want := k.HeldPath(), agent.CanonicalSessionPath(b); got != want {
 		t.Fatalf("HeldPath after rebind = %q, want %q", got, want)
 	}
-	// The old lease is released: a is acquirable again and its info is gone.
-	if _, err := os.Stat(store.SessionLeaseInfo(agent.CanonicalSessionPath(a))); !os.IsNotExist(err) {
-		t.Fatalf("lease info for a after rebind stat err = %v, want not exist", err)
+	// The old lease is released: a is acquirable again and its owner info
+	// (published inside .lease.lock) is gone with the lock file.
+	if _, err := agent.LoadSessionLeaseInfo(agent.CanonicalSessionPath(a)); !os.IsNotExist(err) {
+		t.Fatalf("lease info for a after rebind err = %v, want not exist", err)
 	}
 	lease, err := agent.TryAcquireSessionLease(a)
 	if err != nil {
@@ -128,11 +130,109 @@ func TestSessionLeaseKeeperReleaseRemovesLeaseInfo(t *testing.T) {
 	}
 	k.Release()
 	k.Release() // idempotent
+	// Owner info lives inside .lease.lock and dies with the lock file on
+	// release; no legacy .lease.json sidecar is left behind either.
+	if _, err := agent.LoadSessionLeaseInfo(agent.CanonicalSessionPath(a)); !os.IsNotExist(err) {
+		t.Fatalf("lease info after Release err = %v, want not exist", err)
+	}
 	if _, err := os.Stat(store.SessionLeaseInfo(agent.CanonicalSessionPath(a))); !os.IsNotExist(err) {
-		t.Fatalf("lease info after Release stat err = %v, want not exist", err)
+		t.Fatalf("legacy lease sidecar after Release stat err = %v, want not exist", err)
 	}
 	if got := k.HeldPath(); got != "" {
 		t.Fatalf("HeldPath after Release = %q, want empty", got)
+	}
+}
+
+func TestSessionLeaseKeeperRecoveryRebindsControllerBeforeReturning(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.jsonl")
+	b := filepath.Join(dir, "b.jsonl")
+	sess := agent.NewSession("sys")
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	ctrl := New(Options{Executor: exec, SessionPath: a, Sink: event.Discard})
+
+	k := NewSessionLeaseKeeper()
+	defer k.Release()
+	if err := k.Rebind(a); err != nil {
+		t.Fatal(err)
+	}
+	if err := k.BindControllerAuthority(ctrl); err != nil {
+		t.Fatal(err)
+	}
+	releaseSave, err := sess.WriteAuthority().BeginSave(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := k.HandleSessionRecovered(SessionRecoveryInfo{RecoveryPath: b}); err != nil {
+		t.Fatalf("HandleSessionRecovered: %v", err)
+	}
+	if got := k.HeldPath(); got != agent.CanonicalSessionPath(b) {
+		t.Fatalf("HeldPath = %q, want %q", got, agent.CanonicalSessionPath(b))
+	}
+	if auth := sess.WriteAuthority(); auth == nil || !auth.Covers(b) {
+		t.Fatal("controller was published without authority for recovery path")
+	}
+	releaseSave()
+}
+
+func TestSessionLeaseKeeperTransitionBindsCandidateBeforeMove(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.jsonl")
+	b := filepath.Join(dir, "b.jsonl")
+	current := agent.NewSession("sys")
+	exec := agent.New(nil, nil, current, agent.Options{}, event.Discard)
+	ctrl := New(Options{Executor: exec, SessionPath: a, Sink: event.Discard})
+	k := NewSessionLeaseKeeper()
+	defer k.Release()
+	if err := k.Rebind(a); err != nil {
+		t.Fatal(err)
+	}
+	if err := k.BindControllerAuthority(ctrl); err != nil {
+		t.Fatal(err)
+	}
+
+	candidate := agent.NewSession("sys")
+	info := SessionTransitionInfo{OriginalPath: a, TargetPath: b, Reason: "fork", session: candidate}
+	if err := k.HandleSessionTransition(info); err != nil {
+		t.Fatalf("HandleSessionTransition: %v", err)
+	}
+	if got := k.HeldPath(); got != agent.CanonicalSessionPath(b) {
+		t.Fatalf("HeldPath = %q, want %q", got, agent.CanonicalSessionPath(b))
+	}
+	if auth := candidate.WriteAuthority(); auth == nil || !auth.Covers(b) {
+		t.Fatal("candidate was not bound before transition returned")
+	}
+	old, err := agent.TryAcquireSessionLease(a)
+	if err != nil {
+		t.Fatalf("old path remained held: %v", err)
+	}
+	old.Release()
+}
+
+func TestSessionLeaseKeeperTransitionFailureKeepsCurrentOwner(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.jsonl")
+	b := filepath.Join(dir, "b.jsonl")
+	holder, err := agent.TryAcquireSessionLease(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Release()
+	k := NewSessionLeaseKeeper()
+	defer k.Release()
+	if err := k.Rebind(a); err != nil {
+		t.Fatal(err)
+	}
+	candidate := agent.NewSession("sys")
+	err = k.HandleSessionTransition(SessionTransitionInfo{TargetPath: b, Reason: "switch", session: candidate})
+	if !errors.Is(err, agent.ErrSessionLeaseHeld) && !strings.Contains(err.Error(), "in use") {
+		t.Fatalf("HandleSessionTransition error = %v, want held", err)
+	}
+	if got := k.HeldPath(); got != agent.CanonicalSessionPath(a) {
+		t.Fatalf("failed transition moved keeper to %q", got)
+	}
+	if candidate.WriteAuthority() != nil {
+		t.Fatal("failed transition bound candidate authority")
 	}
 }
 

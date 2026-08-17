@@ -81,7 +81,7 @@ func TestCoordinatorPlannerCannotReportExecutorGoalDisposition(t *testing.T) {
 	customPlannerReg.Add(goalTool)
 	coord := NewCoordinator(planner, plannerSess, nil, customPlannerReg, Options{}, executor, 0, event.Discard, nil)
 	recorder := &coordinatorGoalRecorder{}
-	ctx := tool.WithGoalTurnRecorder(context.Background(), recorder)
+	ctx := withNoClosedLoop(tool.WithGoalTurnRecorder(context.Background(), recorder))
 	if err := coord.Run(ctx, "fix the goal bug"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}

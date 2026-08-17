@@ -21,8 +21,10 @@ func builtToolNames(t *testing.T, set ablation.Set) map[string]bool {
 		t.Fatalf("Build(%s): %v", set.Arm(), err)
 	}
 	defer ctrl.Close()
+	// Ablation is judged against the full registry (including use_capability
+	// dispatch targets), not only the lean provider-visible surface.
 	names := map[string]bool{}
-	for _, e := range ctrl.ToolContractEntries() {
+	for _, e := range ctrl.AllToolContractEntries() {
 		names[e.Name] = true
 	}
 	return names
@@ -33,10 +35,13 @@ func TestAblationRemovesOnlyTheTargetedToolSurfaces(t *testing.T) {
 	t.Chdir(robustTempDir(t))
 
 	full := builtToolNames(t, ablation.Set{})
-	for _, name := range []string{"task", "read_only_task", "history", "memory", "remember", "list_sessions"} {
+	for _, name := range []string{"task", "read_only_task", "history", "memory", "remember", "list_sessions", "set_session_title"} {
 		if !full[name] {
 			t.Fatalf("control arm is missing %s; the ablation assertions below would be vacuous", name)
 		}
+	}
+	if !full["use_capability"] {
+		t.Fatal("control arm must register use_capability")
 	}
 
 	noSubagent := builtToolNames(t, ablation.New(ablation.Subagent))

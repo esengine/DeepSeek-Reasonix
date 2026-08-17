@@ -12,11 +12,11 @@ import (
 	"reasonix/internal/shellparse"
 )
 
-// ReadOnlyCommands holds single-word commands whose base name alone implies a
+// readOnlyCommands holds single-word commands whose base name alone implies a
 // read-only operation. The first word of a command (lowercased) is looked up
 // here. Commands that are read-only only for certain subcommands (e.g. git) are
-// in ReadOnlyPrefixes.
-var ReadOnlyCommands = map[string]bool{
+// in readOnlyPrefixes.
+var readOnlyCommands = map[string]bool{
 	"cat": true, "head": true, "tail": true, "less": true, "more": true,
 	"ls": true, "find": true, "locate": true, "which": true, "whereis": true, "type": true,
 	"grep": true, "egrep": true, "fgrep": true, "rg": true,
@@ -42,18 +42,18 @@ var ReadOnlyCommands = map[string]bool{
 
 // workspaceNonMutatingCommands holds commands that do not write workspace
 // state but are not safe to auto-allow as permission-layer readers. Keep this
-// separate from ReadOnlyCommands: Test-NetConnection performs network I/O and
+// separate from readOnlyCommands: Test-NetConnection performs network I/O and
 // must still pass through the user's permission policy even though Delivery
 // does not need to serialize it behind the workspace writer.
 var workspaceNonMutatingCommands = map[string]bool{
 	"test-netconnection": true,
 }
 
-// ReadOnlyPrefixes maps a base command to the set of subcommands (the second
+// readOnlyPrefixes maps a base command to the set of subcommands (the second
 // word) that are read-only. A subcommand not listed here is treated as not
 // read-only (fail-closed): write-capable subcommands (git branch/remote/config,
 // go build/test, npm install, …) are deliberately absent.
-var ReadOnlyPrefixes = map[string]map[string]bool{
+var readOnlyPrefixes = map[string]map[string]bool{
 	"git": {
 		"log": true, "status": true, "diff": true, "show": true,
 		"tag":   true,
@@ -94,11 +94,8 @@ func ContainsShellSyntax(cmd string) bool {
 	return shellparse.ContainsShellSyntax(cmd)
 }
 
-// CommandIsReadOnly reports whether the command's base/subcommand is in the
-// read-only tables, ignoring argument rigor (which each consumer applies). It
-// returns the base and subcommand so callers can run their own arg checks.
-// ok is false when the command contains shell syntax or the base/subcommand is
-// not a known read-only operation.
+// CommandIsReadOnly is the legacy coarse read-only adapter.
+// Deprecated: production policy must use ClassifyBash and project its axis.
 func CommandIsReadOnly(command string) (base, sub string, ok bool) {
 	base, sub, _, ok = ClassifyReadOnlyCommand(command)
 	return base, sub, ok
@@ -107,6 +104,7 @@ func CommandIsReadOnly(command string) (base, sub string, ok bool) {
 // ClassifyReadOnlyCommand returns the resolved argument fields as well as the
 // command classification. Dynamic fields are opaque placeholders and are
 // returned only for the narrowly verified substitution shape above.
+// Deprecated: retained for compatibility and narrow substitution validation.
 func ClassifyReadOnlyCommand(command string) (base, sub string, fields []string, ok bool) {
 	fields, malformed := shellparse.StaticFields(command)
 	if malformed != "" {
@@ -120,14 +118,14 @@ func ClassifyReadOnlyCommand(command string) (base, sub string, fields []string,
 		return "", "", nil, false
 	}
 	base = strings.ToLower(fields[0])
-	if ReadOnlyCommands[base] {
+	if readOnlyCommands[base] {
 		if hasResolvedSubstitution(fields) && !substitutionSafeCommands[base] {
 			return "", "", nil, false
 		}
 		return base, "", fields, true
 	}
 	if len(fields) > 1 {
-		if subs, prefixed := ReadOnlyPrefixes[base]; prefixed {
+		if subs, prefixed := readOnlyPrefixes[base]; prefixed {
 			sub = strings.ToLower(fields[1])
 			if subs[sub] {
 				return base, sub, fields, true
@@ -254,12 +252,12 @@ func readOnlyFields(fields []string) (base, sub string, ok bool) {
 		return "", "", false
 	}
 	base = strings.ToLower(fields[0])
-	if ReadOnlyCommands[base] {
+	if readOnlyCommands[base] {
 		return base, "", true
 	}
 	if len(fields) > 1 {
 		sub = strings.ToLower(fields[1])
-		if ReadOnlyPrefixes[base][sub] {
+		if readOnlyPrefixes[base][sub] {
 			return base, sub, true
 		}
 	}
@@ -292,6 +290,7 @@ func nestedReadOnlyArgsSafe(base, sub string, fields []string) bool {
 // without acquiring the workspace writer. Permission-safe readers are a
 // subset; network probes live only in workspaceNonMutatingCommands so this
 // classification cannot silently widen approval or read-only subagent access.
+// Deprecated: production policy consumers must use ClassifyBash.
 func CommandIsWorkspaceNonMutating(command string) (base, sub string, ok bool) {
 	base, sub, _, ok = ClassifyWorkspaceNonMutatingCommand(command)
 	return base, sub, ok
@@ -299,6 +298,7 @@ func CommandIsWorkspaceNonMutating(command string) (base, sub string, ok bool) {
 
 // ClassifyWorkspaceNonMutatingCommand is the field-carrying form used by
 // Delivery mutation accounting.
+// Deprecated: retained as a compatibility adapter.
 func ClassifyWorkspaceNonMutatingCommand(command string) (base, sub string, fields []string, ok bool) {
 	if base, sub, fields, ok = ClassifyReadOnlyCommand(command); ok {
 		return base, sub, fields, true

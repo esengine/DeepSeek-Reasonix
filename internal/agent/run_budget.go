@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"reasonix/internal/billing"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
@@ -57,6 +58,14 @@ type runBudget struct {
 // A round whose usage never arrived still counts as a round, so the axis never
 // reads cheaper than the turn actually was.
 func (b *runBudget) observe(usage *provider.Usage, pricing *provider.Pricing) {
+	var quote *billing.CostQuote
+	if usage != nil && pricing != nil {
+		quote = event.EnsureCostQuote(event.Event{Kind: event.Usage, Usage: usage, Pricing: pricing}, nil)
+	}
+	b.observeQuote(usage, quote)
+}
+
+func (b *runBudget) observeQuote(usage *provider.Usage, quote *billing.CostQuote) {
 	b.rounds++
 	if usage == nil {
 		return
@@ -64,11 +73,11 @@ func (b *runBudget) observe(usage *provider.Usage, pricing *provider.Pricing) {
 	b.requests += usageRequestCount(usage)
 	b.promptTokens += usage.PromptTokens
 	b.outputTokens += usage.CompletionTokens
-	if pricing == nil {
+	if quote == nil || !quote.CostComplete || quote.Original.Currency == "" {
 		b.unpricedTurns = true
 		return
 	}
-	b.cost += pricing.Cost(usage)
+	b.cost += quote.Original.Float64()
 	b.pricedRounds++
 }
 
@@ -120,26 +129,40 @@ func (a *Agent) taskBudgetLimit(ctx context.Context) TaskBudget {
 	if b, ok := taskBudgetFromContext(ctx); ok {
 		return b
 	}
-	return a.taskBudget.limit
+	return a.task.budget.limit
+}
+
+// ResetTaskBudget starts a fresh user-approved spend slice without touching
+// Delivery evidence or the persisted Goal usage totals. Callers use this only
+// after a resumable explicit-budget pause, while no Agent Run is active.
+func (a *Agent) ResetTaskBudget() {
+	a.task.budget = runBudget{limit: a.task.budget.limit}
 }
 
 // observeRunBudget folds a round into both scopes and reports them.
-func (a *Agent) observeRunBudget(state *runLoopState, usage *provider.Usage) {
+func (a *Agent) observeRunBudget(state *turnRuntime, usage *provider.Usage, quotes ...*billing.CostQuote) {
 	if state == nil {
 		return
 	}
-	state.budget.observe(usage, a.pricing)
-	if a.taskBudget.started.IsZero() {
-		a.taskBudget.started = state.budget.started
+	var quote *billing.CostQuote
+	if len(quotes) > 0 {
+		quote = quotes[0]
+	} else if usage != nil && a.svc.pricing != nil {
+		e := event.Event{Kind: event.Usage, ModelRef: a.modelRef, Usage: usage, Pricing: a.svc.pricing, UsageSource: a.usageSource}
+		quote = event.EnsureCostQuote(e, a.svc.quoteContext)
 	}
-	a.taskBudget.observe(usage, a.pricing)
+	state.budget.observeQuote(usage, quote)
+	if a.task.budget.started.IsZero() {
+		a.task.budget.started = state.budget.started
+	}
+	a.task.budget.observeQuote(usage, quote)
 	currency := ""
-	if a.pricing != nil {
-		currency = a.pricing.Symbol()
+	if quote != nil {
+		currency = billing.CurrencySymbol(quote.Original.Currency)
 	}
-	event.RecordRunBudget(a.sink, event.RunBudgetSample{
+	event.RecordRunBudget(a.svc.sink, event.RunBudgetSample{
 		Turn:     state.budget.totals(),
-		Task:     a.taskBudget.totals(),
+		Task:     a.task.budget.totals(),
 		Currency: currency,
 	})
 }

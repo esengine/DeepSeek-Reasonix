@@ -4,6 +4,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -87,6 +89,7 @@ func TestWorkspaceChangeHubDoesNotDropFilesystemWriteAfterAgentMutation(t *testi
 	app.workspaceHub = newWorkspaceChangeHub(app)
 	t.Cleanup(func() { app.workspaceHub.close() })
 
+	waitForWorkspaceHubStartupToSettle(t, app, "a")
 	before := app.WorkspaceRevisionForTab("a").Revisions.Content
 	app.workspaceHub.observeAgentMutation("a", contentWorkspaceMutation([]string{"file.txt"}, false))
 	key := canonicalWorkspaceRoot(root)
@@ -120,6 +123,7 @@ func TestWorkspaceChangeHubAdvancesOnlyDeclaredAgentResources(t *testing.T) {
 	app := &App{tabs: map[string]*WorkspaceTab{"a": {ID: "a", WorkspaceRoot: root}}}
 	app.workspaceHub = newWorkspaceChangeHub(app)
 	t.Cleanup(func() { app.workspaceHub.close() })
+	waitForWorkspaceHubStartupToSettle(t, app, "a")
 	before := app.WorkspaceRevisionForTab("a").Revisions
 
 	app.workspaceHub.observeAgentMutation("a", event.WorkspaceMutation{WorkingTree: true, GitMeta: true})
@@ -130,6 +134,29 @@ func TestWorkspaceChangeHubAdvancesOnlyDeclaredAgentResources(t *testing.T) {
 	if after.WorkingTree != before.WorkingTree+1 || after.GitMeta != before.GitMeta+1 || after.Session != before.Session+1 {
 		t.Fatalf("git-only revisions not advanced independently: before=%+v after=%+v", before, after)
 	}
+}
+
+func waitForWorkspaceHubStartupToSettle(t *testing.T, app *App, tabID string) {
+	t.Helper()
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	last := app.WorkspaceRevisionForTab(tabID).Revisions
+	stableSince := time.Now()
+	deadline := stableSince.Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+		current := app.WorkspaceRevisionForTab(tabID).Revisions
+		if current != last {
+			last = current
+			stableSince = time.Now()
+			continue
+		}
+		if time.Since(stableSince) >= 250*time.Millisecond {
+			return
+		}
+	}
+	t.Fatal("workspace watcher startup events did not settle")
 }
 
 func TestTabEventSinkForwardsImmediateWorkspaceMutation(t *testing.T) {
@@ -190,6 +217,23 @@ func TestWorkspaceChangeHubReleasesRootAfterTabWorkspaceSwitch(t *testing.T) {
 	}
 }
 
+func TestGitMetadataDirsForWorkspaceUsesHardenedGitCommand(t *testing.T) {
+	// Source-level contract: both startup rev-parse probes must go through
+	// gitcmd.Command so Windows gets HideWindow + CREATE_NO_WINDOW without
+	// forking a second unhardened path.
+	source, err := os.ReadFile("workspace_watch.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	if !strings.Contains(text, `gitcmd.Command(ctx, root, "rev-parse", flag)`) {
+		t.Fatal("gitMetadataDirsForWorkspace must call gitcmd.Command for rev-parse probes")
+	}
+	if strings.Contains(text, `exec.CommandContext(ctx, "git"`) || strings.Contains(text, `exec.Command("git"`) {
+		t.Fatal("workspace_watch must not invoke raw git exec for metadata probes")
+	}
+}
+
 func TestWorkspaceChangeHubRecursivelyWatchesGitMetadataOnly(t *testing.T) {
 	root := t.TempDir()
 	if out, err := exec.Command("git", "-C", root, "init").CombinedOutput(); err != nil {
@@ -213,11 +257,19 @@ func TestWorkspaceChangeHubRecursivelyWatchesGitMetadataOnly(t *testing.T) {
 	gitDir = canonicalWorkspaceRoot(gitDir)
 	app.workspaceHub.mu.Lock()
 	r := app.workspaceHub.roots[key]
+	recursive := r != nil && r.watcher != nil && r.watcher.SupportsRecursive()
+	_, rootWatched := r.watched[key]
 	_, refsWatched := r.watched[filepath.Join(gitDir, "refs", "heads")]
 	_, logsWatched := r.watched[filepath.Join(gitDir, "logs", "refs", "heads")]
 	_, worktreeWatched := r.watched[filepath.Join(gitDir, "worktrees", "linked")]
 	_, objectsWatched := r.watched[filepath.Join(gitDir, "objects")]
 	app.workspaceHub.mu.Unlock()
+	if recursive {
+		if !rootWatched || refsWatched || logsWatched || worktreeWatched || objectsWatched {
+			t.Fatalf("recursive workspace watch root=%v refs=%v logs=%v worktrees=%v objects=%v", rootWatched, refsWatched, logsWatched, worktreeWatched, objectsWatched)
+		}
+		return
+	}
 	if !refsWatched || !logsWatched || !worktreeWatched || objectsWatched {
 		t.Fatalf("git watches refs=%v logs=%v worktrees=%v objects=%v", refsWatched, logsWatched, worktreeWatched, objectsWatched)
 	}

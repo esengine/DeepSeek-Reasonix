@@ -178,6 +178,51 @@ func TestCommandUnwrappedWhenOff(t *testing.T) {
 	}
 }
 
+func TestProfileDeniesProtectedWriteRoots(t *testing.T) {
+	home := t.TempDir()
+	state := canonicalDir(filepath.Join(home, ".reasonix"))
+	sessions := filepath.Join(state, "sessions")
+	if err := os.MkdirAll(sessions, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	profile := seatbeltProfile(Spec{
+		Mode:                "enforce",
+		WriteRoots:          []string{home},
+		ProtectedWriteRoots: ProtectedWriteRoots(state),
+	})
+	if !strings.Contains(profile, `(deny file-write* (subpath "`+state+`")`) &&
+		!strings.Contains(profile, "deny file-write*") {
+		t.Fatalf("protected write deny missing:\n%s", profile)
+	}
+	if !strings.Contains(profile, "deny file-write*") || !strings.Contains(profile, state) {
+		t.Fatalf("expected deny of state boundary in profile:\n%s", profile)
+	}
+}
+
+func TestProfileReallowsOnlySafeStateChild(t *testing.T) {
+	state := canonicalDir(t.TempDir())
+	skills := filepath.Join(state, "skills")
+	projects := filepath.Join(state, "projects", "slug")
+	if err := os.MkdirAll(skills, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(projects, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	profile := seatbeltProfile(Spec{
+		Mode:                "enforce",
+		WriteRoots:          []string{skills, projects},
+		ProtectedWriteRoots: ProtectedWriteRoots(state),
+		MinimalWrites:       true,
+	})
+	if !strings.Contains(profile, `(allow file-write* (subpath "`+skills+`"))`) {
+		t.Fatalf("safe state child should be explicitly reopened:\n%s", profile)
+	}
+	if strings.Contains(profile, `(allow file-write* (subpath "`+projects+`"))`) {
+		t.Fatalf("project runtime state must remain denied:\n%s", profile)
+	}
+}
+
 func TestProfileNetworkAndRoots(t *testing.T) {
 	with := seatbeltProfile(Spec{Mode: "enforce", WriteRoots: []string{"/work/proj"}, ForbidReadRoots: []string{"/etc/ssh", "/home/user/.ssh"}, Network: true})
 	if strings.Contains(with, "(deny network*)") {

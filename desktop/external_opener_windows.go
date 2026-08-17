@@ -11,6 +11,8 @@ import (
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
+
+	"reasonix/internal/proc"
 )
 
 const (
@@ -374,11 +376,11 @@ func launchPlatformExternalOpener(spec externalOpenerSpec, path string, isDir bo
 	case "shell-open":
 		return openWorkspacePathWithType(path, isDir)
 	case "path":
-		cmd = exec.Command(spec.Target, path)
+		cmd = proc.VisibleCommand(spec.Target, path)
 	case "windows-terminal":
 		// exec.Command uses CreateProcess argument escaping, not cmd.exe, so
 		// workspace paths with shell metacharacters stay a single -d argument.
-		cmd = exec.Command(spec.Target, "-d", launchPath)
+		cmd = proc.VisibleCommand(spec.Target, "-d", launchPath)
 	case "console":
 		// Never route console openers through cmd.exe / start: working-directory
 		// text would be re-parsed as shell syntax (& | ^ etc.). ShellExecute
@@ -389,7 +391,7 @@ func launchPlatformExternalOpener(spec externalOpenerSpec, path string, isDir bo
 		}
 		return shellExecuteOpenFile(plan.File, "", plan.Dir)
 	default:
-		cmd = exec.Command(spec.Target, path)
+		cmd = proc.VisibleCommand(spec.Target, path)
 	}
 	return startDetachedExternalOpener(cmd)
 }

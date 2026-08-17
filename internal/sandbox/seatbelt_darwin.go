@@ -106,7 +106,38 @@ func seatbeltProfile(spec Spec) string {
 	if !spec.Network {
 		b.WriteString("(deny network*)\n")
 	}
+	for _, p := range forbidWriteDirs(spec.ProtectedWriteRoots) {
+		fmt.Fprintf(&b, "(deny file-write* (subpath %s))\n", sbplString(p))
+	}
+	for _, p := range explicitProtectedAllowDirs(spec) {
+		fmt.Fprintf(&b, "(allow file-write* (subpath %s))\n", sbplString(p))
+	}
 	return b.String()
+}
+
+func forbidWriteDirs(roots []string) []string {
+	return forbidReadDirs(roots)
+}
+
+func explicitProtectedAllowDirs(spec Spec) []string {
+	protected := forbidWriteDirs(spec.ProtectedWriteRoots)
+	if len(protected) == 0 {
+		return nil
+	}
+	stateRoot := singleProtectedStateRoot(protected)
+	var out []string
+	for _, root := range writeAllowDirsForSpec(spec) {
+		if stateRoot != "" && IsProtectedWritePath(root, stateRoot) {
+			continue
+		}
+		for _, prot := range protected {
+			if root != prot && PathWithin(prot, root) {
+				out = append(out, root)
+				break
+			}
+		}
+	}
+	return out
 }
 
 // writeAllowDirs is the deduplicated, symlink-resolved set of directories the

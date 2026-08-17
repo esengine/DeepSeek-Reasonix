@@ -4,18 +4,16 @@ import {
   modeHasPlan,
   normalizeCollaborationMode,
   normalizeMode,
-  normalizeTokenMode,
   normalizeToolApprovalMode,
   type CollaborationMode,
   type GoalStatus,
   type Meta,
   type Mode,
   type TabMeta,
-  type TokenMode,
   type ToolApprovalMode,
 } from "./types";
 
-export type ComposerProfileField = "collaborationMode" | "toolApprovalMode" | "tokenMode" | "goal";
+export type ComposerProfileField = "collaborationMode" | "toolApprovalMode" | "goal";
 
 export type ComposerProfilePending = Partial<Record<ComposerProfileField, true>>;
 
@@ -23,7 +21,6 @@ export interface ComposerProfile {
   collaborationMode: CollaborationMode;
   goalDraftMode: boolean;
   toolApprovalMode: ToolApprovalMode;
-  tokenMode: TokenMode;
   goal: string;
   pending: ComposerProfilePending;
 }
@@ -31,13 +28,12 @@ export interface ComposerProfile {
 export type ComposerProfilesByTab = Record<string, ComposerProfile>;
 export type UserPlanModeIntents = Record<string, true>;
 
-const profileFields: ComposerProfileField[] = ["collaborationMode", "toolApprovalMode", "tokenMode", "goal"];
+const profileFields: ComposerProfileField[] = ["collaborationMode", "toolApprovalMode", "goal"];
 
 export const defaultComposerProfile: ComposerProfile = Object.freeze({
   collaborationMode: "normal",
   goalDraftMode: false,
   toolApprovalMode: "ask",
-  tokenMode: "full",
   goal: "",
   pending: {},
 });
@@ -71,7 +67,6 @@ export function composerProfileFromTab(tab?: TabMeta | null, fallback?: ToolAppr
       tab.toolApprovalMode === "yolo",
       fallbackToolApprovalMode(tab.toolApprovalMode, fallback),
     ),
-    tokenMode: normalizeTokenMode(tab.tokenMode),
     goal,
   });
 }
@@ -90,7 +85,6 @@ export function composerProfileFromMeta(meta?: Meta | null, legacyMode?: Mode, f
     collaborationMode: normalizeCollaborationMode(meta.collaborationMode, goal, fallbackMode),
     goalDraftMode: false,
     toolApprovalMode,
-    tokenMode: normalizeTokenMode(meta.tokenMode),
     goal,
   });
 }
@@ -107,9 +101,6 @@ function assignField(profile: ComposerProfile, field: ComposerProfileField, valu
     case "toolApprovalMode":
       profile.toolApprovalMode = value as ToolApprovalMode;
       return;
-    case "tokenMode":
-      profile.tokenMode = value as TokenMode;
-      return;
     case "goal":
       profile.goal = value;
       return;
@@ -121,7 +112,6 @@ function profilesEqual(a: ComposerProfile | undefined, b: ComposerProfile | unde
   return a.collaborationMode === b.collaborationMode
     && a.goalDraftMode === b.goalDraftMode
     && a.toolApprovalMode === b.toolApprovalMode
-    && a.tokenMode === b.tokenMode
     && a.goal === b.goal
     && profileFields.every((field) => Boolean(a.pending[field]) === Boolean(b.pending[field]));
 }

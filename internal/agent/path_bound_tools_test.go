@@ -70,7 +70,7 @@ func TestBindWritePathsKeepsCapabilitySchemaButBlocksResolvedWriter(t *testing.T
 		t.Fatal("path-bound wrapper changed provider-visible use_capability contract")
 	}
 	a := New(nil, bound, NewSession("sys"), Options{}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
 		ID: "writer", Name: "use_capability",
 		Arguments: `{"action":"call","capability_id":"mcp-tool:fs/write","arguments":{}}`,
 	})
@@ -100,7 +100,7 @@ func TestBindWritePathsAllowsResolvedReadOnlyCapability(t *testing.T) {
 	}})
 	bound, _ := BindWritePaths(reg, claim, root, false)
 	a := New(nil, bound, NewSession("sys"), Options{}, event.Discard)
-	out := a.executeOne(context.Background(), provider.ToolCall{
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
 		ID: "reader", Name: "use_capability",
 		Arguments: `{"action":"call","capability_id":"mcp-tool:search/query","arguments":{}}`,
 	})
@@ -247,7 +247,7 @@ func TestAgentReservesParentWriteBeforePreToolUse(t *testing.T) {
 		WriteWorkspaceRoot: root,
 	}, event.Discard)
 
-	out := a.executeOne(context.Background(), provider.ToolCall{
+	out := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
 		ID:        "write-1",
 		Name:      "write_file",
 		Arguments: string(mustJSON(t, map[string]string{"path": "hook-race.md", "content": "parent"})),
@@ -287,11 +287,7 @@ func TestParentWriteReservationBashClaimsWholeWorkspace(t *testing.T) {
 func TestAgentReserveParentWriteSkipsSubagentDepth(t *testing.T) {
 	root := t.TempDir()
 	sched := NewSubagentScheduler(4, 2)
-	a := &Agent{
-		writeScheduler:     sched,
-		writeWorkspaceRoot: root,
-		subagentDepth:      1,
-	}
+	a := &Agent{agentConfig: agentConfig{writeWorkspaceRoot: root, subagentDepth: 1}, svc: agentServices{writeScheduler: sched}}
 	inner := &recordingWriter{name: "write_file"}
 	release, err := a.reserveParentWrite(inner, mustJSON(t, map[string]string{
 		"path": filepath.Join(root, "a.md"), "content": "x",
@@ -309,11 +305,7 @@ func TestAgentReserveParentWriteSkipsSubagentDepth(t *testing.T) {
 func TestAgentReserveParentWriteHoldsClaim(t *testing.T) {
 	root := t.TempDir()
 	sched := NewSubagentScheduler(4, 2)
-	a := &Agent{
-		writeScheduler:     sched,
-		writeWorkspaceRoot: root,
-		subagentDepth:      0,
-	}
+	a := &Agent{agentConfig: agentConfig{writeWorkspaceRoot: root, subagentDepth: 0}, svc: agentServices{writeScheduler: sched}}
 	inner := &recordingWriter{name: "write_file"}
 	release, err := a.reserveParentWrite(inner, mustJSON(t, map[string]string{
 		"path": filepath.Join(root, "a.md"), "content": "x",

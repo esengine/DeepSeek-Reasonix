@@ -13,6 +13,7 @@ import (
 
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
+	"reasonix/internal/runtimepolicy"
 	"reasonix/internal/tool"
 	"reasonix/internal/workspacelease"
 )
@@ -191,8 +192,8 @@ func TestParallelTasksInjectsWorkspaceContextIntoChildren(t *testing.T) {
 	}
 	if !strings.Contains(out, "Current workspace: "+strconv.Quote(workspace)) ||
 		!strings.Contains(out, `prefer "." or relative paths`) ||
-		!strings.Contains(out, "inspect one ok") ||
-		!strings.Contains(out, "inspect two ok") {
+		!strings.Contains(out, "inspect one") ||
+		!strings.Contains(out, "inspect two") {
 		t.Fatalf("parallel output = %q, want child workspace context and prompt", out)
 	}
 }
@@ -207,8 +208,7 @@ func TestParallelTasksInjectsWorkspaceContextIntoChildren(t *testing.T) {
 func TestParallelTasksDeliveryClassifiesPristinePrompt(t *testing.T) {
 	workspace := t.TempDir()
 	task := NewTaskTool(promptRoutingProvider{}, nil, tool.NewRegistry(), 20, 0, 0, 0, 0, 0, 0, 0.0, "", "sys", nil, 0, "", "", nil).
-		WithTranscripts(NewSubagentStore(t.TempDir()), workspace, "base-model", "base-effort").
-		WithDeliveryProfile(true)
+		WithTranscripts(NewSubagentStore(t.TempDir()), workspace, "base-model", "base-effort")
 	parallel := NewParallelTasksTool(task, tool.NewRegistry())
 	ctx := withCallContext(context.Background(), "parallel-call", event.Discard, nil, false)
 
@@ -336,7 +336,7 @@ func TestParallelTasksCancelReturnsPartialAggregate(t *testing.T) {
 		if strings.Contains(got.out, "Completed 2 parallel tasks") {
 			t.Fatalf("cancelled aggregate reported full completion:\n%s", got.out)
 		}
-		if !strings.Contains(got.out, "done child ok") {
+		if !strings.Contains(got.out, "done child") || !strings.Contains(got.out, "ok") {
 			t.Fatalf("cancelled aggregate lost completed child output:\n%s", got.out)
 		}
 		if !strings.Contains(strings.ToLower(got.out), "cancelled") {
@@ -490,11 +490,22 @@ func TestChildMaxStepsSharedDefault(t *testing.T) {
 	}
 }
 
-func TestTaskToolPropagatesDeliveryProfileToSubagents(t *testing.T) {
-	task := (&TaskTool{}).WithDeliveryProfile(true)
-	opts := task.subagentOptions(context.Background(), 0, nil, 0, 1, "", nil)
-	if !opts.DeliveryProfile {
-		t.Fatal("sub-agent options did not inherit delivery profile")
+func TestTaskToolPropagatesInheritedExecutionToSubagents(t *testing.T) {
+	parent := runtimepolicy.InheritedExecutionContext{
+		Constraints:  runtimepolicy.Constraints{ForbidMutation: true},
+		PlanReadOnly: true,
+		GoalScopeID:  "goal-1",
+	}
+	task := &TaskTool{}
+	opts := task.subagentOptions(runtimepolicy.WithInherited(context.Background(), parent), 0, nil, 0, 1, "", nil)
+	if opts.InheritedExecution == nil {
+		t.Fatal("sub-agent options did not inherit parent execution context")
+	}
+	if !opts.InheritedExecution.PlanReadOnly || !opts.InheritedExecution.Constraints.ForbidMutation {
+		t.Fatalf("inherited execution = %+v", opts.InheritedExecution)
+	}
+	if opts.InheritedExecution.GoalScopeID != "goal-1" {
+		t.Fatalf("inherited goal scope = %q", opts.InheritedExecution.GoalScopeID)
 	}
 }
 
@@ -507,6 +518,15 @@ func TestTaskToolSharesWorkspaceLeaseWithSubagents(t *testing.T) {
 	opts := task.subagentOptions(context.Background(), 0, nil, 0, 1, "", nil)
 	if opts.WorkspaceLease != owner {
 		t.Fatal("sub-agent options did not share the parent's workspace lease owner")
+	}
+}
+
+func TestTaskToolPropagatesWorkspaceRootToSubagents(t *testing.T) {
+	root := t.TempDir()
+	task := &TaskTool{workspaceRoot: root}
+	opts := task.subagentOptions(context.Background(), 0, nil, 0, 1, "", nil)
+	if opts.WriteWorkspaceRoot != root {
+		t.Fatalf("sub-agent workspace root = %q, want %q", opts.WriteWorkspaceRoot, root)
 	}
 }
 

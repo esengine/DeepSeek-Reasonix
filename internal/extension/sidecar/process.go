@@ -194,7 +194,7 @@ func startProcess(pkg pluginpkg.Package, installed pluginpkg.InstalledPlugin) (*
 	if err != nil {
 		return nil, newStartupFailure("resolve", started, "", err)
 	}
-	cmd := exec.Command(command, rt.Args...)
+	cmd := proc.Command(command, rt.Args...)
 	cmd.Env = runtimeEnv(rt, pkg, installed)
 	proc.HideWindow(cmd)
 

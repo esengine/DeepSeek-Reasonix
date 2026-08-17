@@ -25,9 +25,6 @@ type intervention struct {
 	verdict  verdict
 	guidance string
 	notice   *event.Event
-	// stuckReason is what this signal contributes to a Goal structural-stuck
-	// pause. Ordinary turns carry it and ignore it.
-	stuckReason string
 }
 
 func (i intervention) fired() bool {
@@ -49,7 +46,7 @@ func (a *Agent) applyInterventions(results []string, outcomes []toolOutcome, ivs
 			strongest = iv.verdict
 		}
 		if iv.notice != nil {
-			a.sink.Emit(*iv.notice)
+			a.svc.sink.Emit(*iv.notice)
 		}
 		if iv.guidance != "" {
 			guidance = append(guidance, iv.guidance)

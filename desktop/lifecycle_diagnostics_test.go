@@ -232,6 +232,14 @@ func TestDesktopLifecycleAsyncWriterKeepsLatestPhase(t *testing.T) {
 	tracker.markAsync("ready")
 	tracker.markAsync("healthy")
 	tracker.stopWriter()
+	// stopWriter leaves after 250ms so quitting never blocks on diagnostic I/O.
+	// That budget is not a flush guarantee — one atomic replace on a loaded
+	// Windows runner has taken 500ms — so wait for the drain before reading.
+	select {
+	case <-tracker.writerDone:
+	case <-time.After(30 * time.Second):
+		t.Fatal("lifecycle writer never drained")
+	}
 
 	state, err := readDesktopLifecycleState(tracker.path)
 	if err != nil || state.Phase != "healthy" {

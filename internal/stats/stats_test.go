@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/billing"
 	"reasonix/internal/event"
 	"reasonix/internal/filelock"
 	"reasonix/internal/provider"
@@ -56,6 +57,32 @@ func TestRecorderWritesDailyFile(t *testing.T) {
 	// Forwarding must be untouched.
 	if len(inner.events) != 3 {
 		t.Fatalf("want 3 forwarded events, got %d", len(inner.events))
+	}
+}
+
+func TestRecorderPersistsRateBandAndRatedAt(t *testing.T) {
+	dir := t.TempDir()
+	r := NewRecorder(&spySink{}, dir, "desktop")
+	e := usageEvent("deepseek/deepseek-v4-pro", 100, 50, 0, 100, 0, 150)
+	e.CostQuote = &billing.CostQuote{
+		Original:  billing.Money{Amount: "0.00135", Currency: "CNY"},
+		Estimated: true, CostComplete: true, DisplayComplete: true, Complete: true,
+		RateBand: billing.RateBandPeak, RatedAt: "2026-08-17T01:00:00Z",
+	}
+	r.Emit(e)
+	flushRecorder(t, r)
+
+	files := dailyJSONLFiles(t, dir)
+	data, err := os.ReadFile(filepath.Join(dir, files[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["rate_band"] != billing.RateBandPeak || got["rated_at"] != "2026-08-17T01:00:00Z" {
+		t.Fatalf("scheduled stats fields missing: %s", data)
 	}
 }
 

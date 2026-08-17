@@ -48,3 +48,27 @@ func TestTryTakeSessionLockFileTreatsOpenHandleAsHeld(t *testing.T) {
 		t.Fatalf("tryTakeSessionLockFile with plain open handle = %v, want ErrSessionFileLockHeld", err)
 	}
 }
+
+func TestWriteOwnerInfoReplacesLockContents(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "session.lease.lock")
+	lock, err := tryTakeSessionLockFile(lockPath)
+	if err != nil {
+		t.Fatalf("tryTakeSessionLockFile: %v", err)
+	}
+	defer lock.Unlock()
+	if err := lock.writeOwnerInfo([]byte(`{"writer_id":"long-previous-holder"}`)); err != nil {
+		t.Fatalf("writeOwnerInfo first: %v", err)
+	}
+	want := []byte(`{"writer_id":"b"}`)
+	if err := lock.writeOwnerInfo(want); err != nil {
+		t.Fatalf("writeOwnerInfo second: %v", err)
+	}
+	got, err := readSessionLeaseLockFile(lockPath)
+	if err != nil {
+		t.Fatalf("readSessionLeaseLockFile: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("lock contents = %q, want %q", got, want)
+	}
+}

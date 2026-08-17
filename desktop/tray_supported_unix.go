@@ -5,13 +5,10 @@ package main
 import "github.com/godbus/dbus/v5"
 
 func traySupported() bool {
-	conn, err := dbus.SessionBus()
+	conn, err := dbus.SessionBusPrivateNoAutoStartup()
 	if err != nil {
 		return false
 	}
-	// SessionBus returns a shared singleton connection. Do not close it here:
-	// other desktop integrations in this process may still be using it.
-	obj := conn.Object("org.freedesktop.DBus", "/org/freedesktop/DBus")
-	var owner string
-	return obj.Call("org.freedesktop.DBus.GetNameOwner", 0, "org.kde.StatusNotifierWatcher").Store(&owner) == nil && owner != ""
+	defer conn.Close()
+	return conn.Auth(nil) == nil && conn.Hello() == nil
 }

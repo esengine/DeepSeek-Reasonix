@@ -36,12 +36,29 @@ type Event struct {
 	CheckpointTurn  *int                `json:"checkpointTurn,omitempty"`
 	RetryAttempt    int                 `json:"retryAttempt,omitempty"`
 	RetryMax        int                 `json:"retryMax,omitempty"`
-	RetryScope      string              `json:"retryScope,omitempty"` // "headers" | "stream"; omit for older clients
+	RetryScope      string              `json:"retryScope,omitempty"` // "headers" | "stream" | "protocol"; omit for older clients
 	StreamAttempt   *StreamAttempt      `json:"streamAttempt,omitempty"`
 	// ItemID correlates Steer / TurnDone / unapplied-steer with a durable
 	// session-inbox entry. Empty for legacy text-only guidance.
 	ItemID    string            `json:"itemId,omitempty"`
 	Workspace *WorkspaceChanged `json:"workspace,omitempty"`
+	// Phase is set on turn_phase events: working | checking | verifying | reviewing.
+	Phase string `json:"phase,omitempty"`
+	// Completion is set on completion_summary events (content-free quality summary).
+	Completion *CompletionSummary `json:"completion,omitempty"`
+}
+
+// CompletionSummary is the JSON form of event.CompletionSummaryInfo.
+type CompletionSummary struct {
+	Preset             string   `json:"preset"` // deprecated; pinned compat value
+	Verdict            string   `json:"verdict"`
+	Mutations          int      `json:"mutations"`
+	ChecksPassed       int      `json:"checks_passed"`
+	ChecksFailed       int      `json:"checks_failed"`
+	ChecksSuppressed   int      `json:"checks_suppressed"`
+	Review             string   `json:"review"`
+	GapKinds           []string `json:"gap_kinds,omitempty"`
+	ConstraintDegraded bool     `json:"constraint_degraded"`
 }
 
 type WorkspaceChanged struct {
@@ -92,7 +109,7 @@ func ToWire(e event.Event) Event {
 		} else {
 			w.Level = "info"
 		}
-	case event.ToolDispatch, event.ToolResult, event.ToolProgress:
+	case event.ToolDispatch, event.ToolResult, event.ToolProgress, event.ToolResultPreview:
 		wt := &Tool{
 			ID: e.Tool.ID, Name: e.Tool.Name, Args: e.Tool.Args,
 			ResolvedName: e.Tool.ResolvedName, CapabilityID: e.Tool.CapabilityID,
@@ -127,28 +144,7 @@ func ToWire(e event.Event) Event {
 	case event.Usage:
 		w.Usage = toWireUsage(e)
 	case event.ApprovalRequest:
-		w.Approval = &Approval{
-			ID: e.Approval.ID, Tool: e.Approval.Tool, Subject: e.Approval.Subject,
-			Reason: e.Approval.Reason, Fresh: e.Approval.Fresh, Kind: e.Approval.Kind,
-		}
-		if e.Approval.Recovery != nil {
-			r := e.Approval.Recovery
-			w.Approval.Recovery = &RecoveryApproval{
-				SourceAgent:     r.SourceAgent,
-				FailedTool:      r.FailedTool,
-				FailedSummary:   r.FailedSummary,
-				Diagnosis:       r.Diagnosis,
-				NextTool:        r.NextTool,
-				NextAction:      r.NextAction,
-				ChangeKind:      r.ChangeKind,
-				ChangeRationale: r.ChangeRationale,
-				ReviewRationale: r.ReviewRationale,
-				PlanBefore:      r.PlanBefore,
-				PlanAfter:       r.PlanAfter,
-				CanGrantTask:    r.CanGrantTask,
-				TaskGrantScope:  r.TaskGrantScope,
-			}
-		}
+		w.Approval = toWireApproval(e.Approval)
 	case event.AskRequest:
 		w.Ask = ToWireAsk(e.Ask)
 	case event.CompactionStarted, event.CompactionDone:
@@ -194,6 +190,25 @@ func ToWire(e event.Event) Event {
 			Attempt: e.StreamAttempt.Attempt,
 			Max:     e.StreamAttempt.Max,
 			Reason:  e.StreamAttempt.Reason,
+		}
+	case event.TurnPhase:
+		w.Phase = string(e.PhaseName)
+		if w.Phase == "" {
+			w.Phase = e.Text
+		}
+	case event.CompletionSummary:
+		if c := e.Completion; c != nil {
+			w.Completion = &CompletionSummary{
+				Preset:             c.Preset,
+				Verdict:            c.Verdict,
+				Mutations:          c.Mutations,
+				ChecksPassed:       c.ChecksPassed,
+				ChecksFailed:       c.ChecksFailed,
+				ChecksSuppressed:   c.ChecksSuppressed,
+				Review:             c.Review,
+				GapKinds:           append([]string(nil), c.GapKinds...),
+				ConstraintDegraded: c.ConstraintDegraded,
+			}
 		}
 	}
 	return w
@@ -437,34 +452,6 @@ type CacheDiagnostics struct {
 	CacheHitTokens      int      `json:"cacheHitTokens"`
 }
 
-// Approval is the JSON form of an event.Approval.
-type Approval struct {
-	ID       string            `json:"id"`
-	Tool     string            `json:"tool"`
-	Subject  string            `json:"subject" externalizable:"true"`
-	Reason   string            `json:"reason,omitempty" externalizable:"true"`
-	Fresh    bool              `json:"fresh,omitempty"`
-	Kind     string            `json:"kind,omitempty"` // tool | plan | recovery
-	Recovery *RecoveryApproval `json:"recovery,omitempty"`
-}
-
-// RecoveryApproval is the JSON form of an event.RecoveryApproval.
-type RecoveryApproval struct {
-	SourceAgent     string `json:"source_agent,omitempty"`
-	FailedTool      string `json:"failed_tool,omitempty"`
-	FailedSummary   string `json:"failed_summary,omitempty"`
-	Diagnosis       string `json:"diagnosis,omitempty"`
-	NextTool        string `json:"next_tool,omitempty"`
-	NextAction      string `json:"next_action,omitempty"`
-	ChangeKind      string `json:"change_kind,omitempty"`
-	ChangeRationale string `json:"change_rationale,omitempty"`
-	ReviewRationale string `json:"review_rationale,omitempty"`
-	PlanBefore      string `json:"plan_before,omitempty"`
-	PlanAfter       string `json:"plan_after,omitempty"`
-	CanGrantTask    bool   `json:"can_grant_task,omitempty"`
-	TaskGrantScope  string `json:"task_grant_scope,omitempty"`
-}
-
 // Guardian is the JSON form of an event.GuardianResult.
 type Guardian struct {
 	ID                string `json:"id"`
@@ -584,6 +571,9 @@ var kindNames = map[event.Kind]string{
 	event.StreamAttempt:           "stream_attempt",
 	event.ContextMaintenanceEvent: "context_maintenance",
 	event.WorkspaceChanged:        "workspace_changed",
+	event.TurnPhase:               "turn_phase",
+	event.CompletionSummary:       "completion_summary",
+	event.ToolResultPreview:       "tool_result_preview",
 }
 
 // ContextMaintenance is the JSON form of event.ContextMaintenance.

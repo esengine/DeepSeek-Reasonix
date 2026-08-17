@@ -290,6 +290,37 @@ func TestSessionInFlightTurnMetaRoundTrip(t *testing.T) {
 	}
 }
 
+func TestUpdateBranchMetaWithoutTouchUsesFileMtimeForZeroUpdatedAt(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	when := time.Date(2026, 2, 3, 4, 5, 6, 0, time.UTC)
+	if err := os.WriteFile(path, []byte(`{"role":"user","content":"hi"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, when, when); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(BranchMetaPath(path), []byte(`{"id":"session","created_at":"2026-02-03T04:05:06Z","updated_at":"0001-01-01T00:00:00Z"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateBranchMeta(path, false, func(meta *BranchMeta) error {
+		meta.TopicID = "topic"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta ok=%v err=%v", ok, err)
+	}
+	if !got.UpdatedAt.Equal(when.UTC()) {
+		t.Fatalf("UpdatedAt = %v, want file mtime %v (listing writes must not mint wall-clock activity)", got.UpdatedAt, when.UTC())
+	}
+	if got.TopicID != "topic" {
+		t.Fatalf("TopicID = %q, want topic", got.TopicID)
+	}
+}
+
 func TestSessionModelRoundTripPreservesActivity(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")

@@ -121,7 +121,7 @@ func TestSubAgentAnswerLeadsWithAdjudicatedStatus(t *testing.T) {
 		{{Type: provider.ChunkText, Text: "all good"}, {Type: provider.ChunkDone}},
 	}}
 
-	answer, err := RunSubAgentWithSession(context.Background(), prov, reg, NewSession("sys"),
+	answer, err := RunSubAgentWithSession(withNoClosedLoop(context.Background()), prov, reg, NewSession("sys"),
 		"fix the parser", Options{}, event.Discard)
 	if err != nil {
 		t.Fatalf("RunSubAgentWithSession: %v", err)

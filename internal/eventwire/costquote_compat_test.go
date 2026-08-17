@@ -3,6 +3,7 @@ package eventwire
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"reasonix/internal/billing"
 	"reasonix/internal/event"
@@ -15,14 +16,16 @@ func TestToWireUsageDualWritesCostQuoteAndLegacyAliases(t *testing.T) {
 		Kind:     event.Usage,
 		ModelRef: "deepseek-flash/deepseek-v4-flash",
 		Usage:    &provider.Usage{PromptTokens: 1_000_000, CompletionTokens: 1_000_000, TotalTokens: 2_000_000},
-		Pricing:  &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"},
+		Pricing:  &provider.Pricing{CacheHit: 0.10, Input: 3, Output: 9, Currency: "¥"},
 		CostQuote: func() *billing.CostQuote {
 			q := billing.BuildQuote(billing.QuoteInput{
 				Usage:           billing.UsageTokens{PromptTokens: 1_000_000, CompletionTokens: 1_000_000},
-				Rates:           billing.RateCard{CacheHit: 0.02, Input: 1, Output: 2, Currency: "CNY"},
+				Rates:           billing.RateCard{CacheHit: 0.10, Input: 3, Output: 9, Currency: "CNY"},
+				OccurredAt:      time.Date(2026, 8, 17, 0, 30, 0, 0, time.UTC),
 				DisplayCurrency: "USD",
 				ProviderKind:    "deepseek",
 				ModelID:         "deepseek-v4-flash",
+				ScheduleID:      billing.ScheduleDeepSeekV4August2026,
 			})
 			return &q
 		}(),
@@ -54,5 +57,19 @@ func TestToWireUsageDualWritesCostQuoteAndLegacyAliases(t *testing.T) {
 	}
 	if _, ok := m["cost"]; !ok {
 		t.Fatalf("legacy cost missing: %s", raw)
+	}
+	quoteJSON, _ := m["costQuote"].(map[string]any)
+	if quoteJSON["rateBand"] != billing.RateBandOffPeak || quoteJSON["ratedAt"] != "2026-08-17T00:30:00Z" {
+		t.Fatalf("scheduled quote metadata missing: %s", raw)
+	}
+}
+
+func TestLegacyCostQuoteWithoutScheduleFieldsStillDecodes(t *testing.T) {
+	var quote billing.CostQuote
+	if err := json.Unmarshal([]byte(`{"original":{"amount":"1.25","currency":"CNY"},"estimated":true,"complete":true}`), &quote); err != nil {
+		t.Fatal(err)
+	}
+	if quote.Original.Amount != "1.25" || quote.RateBand != "" || quote.RatedAt != "" {
+		t.Fatalf("legacy quote changed during decode: %+v", quote)
 	}
 }

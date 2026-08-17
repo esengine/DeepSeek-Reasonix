@@ -212,10 +212,6 @@ func (s *runOutputSink) Emit(e event.Event) {
 				CacheWriteBilledTokens: e.Usage.CacheWriteBilledTokens,
 				Estimated:              e.Usage.Estimated,
 			}, time.Now().UTC())
-		} else if e.Pricing != nil {
-			s.cost += e.Pricing.Cost(e.Usage)
-			s.currency = pricingCurrencyCode(e.Pricing.Currency)
-			s.costComplete = true
 		}
 	}
 	if e.Kind == event.TurnDone {
@@ -311,21 +307,6 @@ func (s *runOutputSink) Finalize(sessionID string, started time.Time, runErr err
 		CostQuote:       aggQuote,
 		Usage:           s.usage,
 	})
-}
-
-func pricingCurrencyCode(value string) string {
-	value = strings.TrimSpace(value)
-	switch strings.ToUpper(value) {
-	case "", "CNY", "RMB", "CNH", "¥", "￥":
-		return "CNY"
-	case "USD", "$", "US$":
-		return "USD"
-	default:
-		if len(value) == 3 {
-			return strings.ToUpper(value)
-		}
-		return value
-	}
 }
 
 func (s *runOutputSink) machineEventRecordFor(e event.Event, sequence uint64) machineEventRecord {

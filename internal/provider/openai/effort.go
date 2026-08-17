@@ -28,7 +28,7 @@ type effortEndpoint struct {
 	thinkingType string
 	effort       string
 	deepseek     bool
-	flash        bool // deepseek-v4-flash — the only official DeepSeek model with effort=low
+	v4Low        bool // official DeepSeek V4 Flash/Pro models with effort=low
 	minimax      bool
 	zhipu        bool
 	longcat      bool
@@ -50,7 +50,7 @@ func requestEffortVocabulary(e effortEndpoint) []string {
 		levels = e.supported
 	case e.deepseek:
 		levels = []string{"high", "max"}
-		if e.flash {
+		if e.v4Low {
 			levels = append(levels, "low")
 		}
 	case e.ollamaCloud:

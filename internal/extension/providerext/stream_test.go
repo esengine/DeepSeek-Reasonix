@@ -13,6 +13,12 @@ import (
 	"reasonix/internal/provider"
 )
 
+func TestDefaultStreamIdleTimeoutIsFiveMinutes(t *testing.T) {
+	if defaultStreamIdleTimeout != 300*time.Second {
+		t.Fatalf("default stream idle timeout = %s, want 5m", defaultStreamIdleTimeout)
+	}
+}
+
 // openTestStream resolves the demo ref and opens a stream, returning the
 // chunk channel and the stream ID the sidecar would address.
 func openTestStream(t *testing.T, r *Resolver, fc *fakeClient, effort *string) (<-chan provider.Chunk, string) {
@@ -114,6 +120,35 @@ func TestStreamCleanEndClosesChannel(t *testing.T) {
 	chunks := collectChunks(t, out)
 	if len(chunks) != 0 {
 		t.Fatalf("chunks = %v, want none", chunks)
+	}
+}
+
+func TestStreamIdleWatchdogRefreshesOnProviderChunk(t *testing.T) {
+	fc := newFakeClient("demo", demoDescriptor())
+	r := testResolver(t, baseCatalog(), nil, fc)
+	r.idleTimeout = 80 * time.Millisecond
+	out, id := openTestStream(t, r, fc, nil)
+
+	time.Sleep(50 * time.Millisecond)
+	r.RouteStreamChunk(protocol.StreamChunkParams{StreamID: id, Seq: 1, Chunk: textChunk("progress")})
+	time.Sleep(50 * time.Millisecond)
+	r.RouteStreamEnd(protocol.StreamEndParams{StreamID: id, LastSeq: 1})
+
+	chunks := collectChunks(t, out)
+	if got := texts(chunks); fmt.Sprint(got) != "[progress]" {
+		t.Fatalf("chunks = %v, want progress without idle cancellation", got)
+	}
+}
+
+func TestStreamIdleWatchdogCancelsSilentExtension(t *testing.T) {
+	fc := newFakeClient("demo", demoDescriptor())
+	r := testResolver(t, baseCatalog(), nil, fc)
+	r.idleTimeout = 30 * time.Millisecond
+	out, _ := openTestStream(t, r, fc, nil)
+
+	chunks := collectChunks(t, out)
+	if len(chunks) != 1 || chunks[0].Type != provider.ChunkError || chunks[0].Err == nil || !strings.Contains(chunks[0].Err.Error(), "stalled") {
+		t.Fatalf("silent stream chunks = %+v, want stalled interruption", chunks)
 	}
 }
 

@@ -18,7 +18,7 @@ import (
 func TestAuditForwarderCoversEveryCapability(t *testing.T) {
 	fwd := reflect.TypeFor[event.AuditForwarder]()
 	required := reflect.TypeFor[event.OptionalSinkCapabilities]()
-	for i := 0; i < required.NumMethod(); i++ {
+	for i := range required.NumMethod() {
 		method := required.Method(i)
 		if _, ok := fwd.MethodByName(method.Name); !ok {
 			t.Errorf("event.AuditForwarder does not forward %s; every embedder loses it", method.Name)
@@ -42,7 +42,7 @@ func TestAuditCapabilitiesAreForwardedByEveryWrapper(t *testing.T) {
 	}
 	for _, w := range wrappers {
 		wt := reflect.TypeOf(w)
-		for i := 0; i < required.NumMethod(); i++ {
+		for i := range required.NumMethod() {
 			method := required.Method(i)
 			if _, ok := wt.MethodByName(method.Name); !ok {
 				t.Errorf("%s does not forward %s: the host signal dies at this wrapper", wt, method.Name)

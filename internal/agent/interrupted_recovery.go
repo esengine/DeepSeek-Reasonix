@@ -21,10 +21,10 @@ const (
 // A later real user turn consumes older handoffs implicitly, so the persisted
 // LocalOnly record never needs an in-place mutation that could churn history.
 func (a *Agent) pendingInterruptedRecovery() *provider.InterruptedTurnRecovery {
-	if a == nil || a.session == nil {
+	if a == nil || a.sess.conversation == nil {
 		return nil
 	}
-	msgs := a.session.Snapshot()
+	msgs := a.sess.conversation.Snapshot()
 	for _, v := range slices.Backward(msgs) {
 		m := v
 		if m.LocalOnly && m.InterruptedTurn != nil && m.InterruptedTurn.Pending {

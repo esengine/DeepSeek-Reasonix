@@ -49,6 +49,39 @@ func TestBuildModelFetchURLs(t *testing.T) {
 			override: "https://api.deepseek.com/custom/models",
 			want:     []string{"https://api.deepseek.com/custom/models"},
 		},
+		{
+			name:     "third-party override keeps exact query and slash",
+			base:     "https://api.deepseek.com",
+			override: "https://api.deepseek.com/custom/models/?token=1",
+			want:     []string{"https://api.deepseek.com/custom/models/?token=1"},
+		},
+		{
+			name: "tokenrhythm missing v1 base is unique canonical models",
+			base: "https://tokenrhythm.studio",
+			want: []string{"https://tokenrhythm.studio/v1/models"},
+		},
+		{
+			name: "tokenrhythm correct base is unique canonical models",
+			base: "https://tokenrhythm.studio/v1",
+			want: []string{"https://tokenrhythm.studio/v1/models"},
+		},
+		{
+			name: "tokenrhythm chat url as base is unique canonical models",
+			base: "https://tokenrhythm.studio/v1/chat/completions",
+			want: []string{"https://tokenrhythm.studio/v1/models"},
+		},
+		{
+			name:     "tokenrhythm wrong models override is unique canonical models",
+			base:     "https://example.invalid/v1",
+			override: "https://tokenrhythm.studio/v1/v1/models/",
+			want:     []string{"https://tokenrhythm.studio/v1/models"},
+		},
+		{
+			name:     "tokenrhythm unknown override stays exact",
+			base:     "https://tokenrhythm.studio/v1",
+			override: "https://tokenrhythm.studio/openai/models",
+			want:     []string{"https://tokenrhythm.studio/openai/models"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

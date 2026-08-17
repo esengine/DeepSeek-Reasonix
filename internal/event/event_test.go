@@ -11,7 +11,8 @@ import (
 // Kind constants
 
 func TestKindConstants(t *testing.T) {
-	// Verify the iota sequence is stable and sequential.
+	// Verify the iota sequence is stable and sequential for the original
+	// core kinds. New kinds are appended before KindCount.
 	kinds := []Kind{
 		TurnStarted, Reasoning, Text, Message, ToolDispatch, ToolResult,
 		Usage, Notice, Phase, ApprovalRequest, AskRequest, TurnDone,
@@ -20,6 +21,12 @@ func TestKindConstants(t *testing.T) {
 		if int(k) != i {
 			t.Errorf("Kind %d: got %d", i, int(k))
 		}
+	}
+	if TurnPhase >= KindCount || CompletionSummary >= KindCount {
+		t.Fatal("new kinds must sit before KindCount")
+	}
+	if TurnPhaseName(TurnPhaseWorking) != "working" || TurnPhaseName(TurnPhaseReviewing) != "reviewing" {
+		t.Fatal("turn phase names drifted")
 	}
 }
 

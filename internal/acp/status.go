@@ -16,7 +16,6 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
-	"reasonix/internal/secrets"
 )
 
 const (
@@ -73,22 +72,23 @@ type SessionRuntimeStateProvider interface {
 type ReasonixStatusGoal struct {
 	Status    string `json:"status"`
 	Objective string `json:"objective,omitempty"`
-	// Runtime is the optional Goal budget/runtime summary; absent for old
+	// Runtime is the optional Goal usage/runtime summary; absent for old
 	// hosts or when no goal is active.
 	Runtime *ReasonixGoalRuntime `json:"runtime,omitempty"`
 }
 
 type ReasonixGoalRuntime struct {
 	TurnsUsed        int    `json:"turnsUsed"`
-	TurnsLimit       int    `json:"turnsLimit"`
+	TurnsLimit       int    `json:"turnsLimit"` // Deprecated: always 0.
 	TokensUsed       int    `json:"tokensUsed"`
 	RequestsUsed     int    `json:"requestsUsed,omitempty"`
+	WorkDurationMs   int64  `json:"workDurationMs,omitempty"`
 	TokensLimit      int    `json:"tokensLimit"` // Deprecated: always 0; retained for protocol compatibility.
 	NoProgressTurns  int    `json:"noProgressTurns"`
-	NoProgressLimit  int    `json:"noProgressLimit"`
+	NoProgressLimit  int    `json:"noProgressLimit"` // Deprecated: always 0.
 	LastReason       string `json:"lastReason,omitempty"`
 	StopCause        string `json:"stopCause,omitempty"`
-	BudgetExtensions int    `json:"budgetExtensions"`
+	BudgetExtensions int    `json:"budgetExtensions"` // Deprecated: always 0.
 }
 
 type ReasonixTurnOutcome struct {
@@ -100,30 +100,6 @@ type ReasonixFinalReadiness struct {
 	ReadyForReview bool     `json:"readyForReview"`
 	Summary        string   `json:"summary"`
 	Risks          []string `json:"risks"`
-}
-
-type ReasonixUsage struct {
-	PromptTokens     int                `json:"promptTokens"`
-	CompletionTokens int                `json:"completionTokens"`
-	ReasoningTokens  int                `json:"reasoningTokens"`
-	CacheHitTokens   int                `json:"cacheHitTokens"`
-	CacheMissTokens  int                `json:"cacheMissTokens"`
-	Estimated        bool               `json:"estimated,omitempty"`
-	CacheHitRatio    *float64           `json:"cacheHitRatio"`
-	EstimatedCost    *float64           `json:"estimatedCost"`
-	Currency         *string            `json:"currency"`
-	CostComplete     *bool              `json:"costComplete,omitempty"`
-	DisplayComplete  *bool              `json:"displayComplete,omitempty"`
-	DisplayStatus    string             `json:"displayStatus,omitempty"`
-	AggregateMode    string             `json:"aggregateMode,omitempty"`
-	OriginalTotals   []billing.Money    `json:"originalTotals,omitempty"`
-	CostQuote        *billing.CostQuote `json:"costQuote,omitempty"`
-	UsageSource      string             `json:"usageSource"`
-}
-
-type ReasonixStatusUsage struct {
-	Turn       ReasonixUsage `json:"turn"`
-	Cumulative ReasonixUsage `json:"cumulative"`
 }
 
 // ReasonixSessionStatus is the stable schemaVersion=1 recovery snapshot.
@@ -233,25 +209,11 @@ func (a *usageAccumulator) addQuoted(u *provider.Usage, pricing *provider.Pricin
 		}
 		return
 	}
-	if pricing != nil {
-		currency := billing.NormalizeCurrency(pricing.Currency)
-		if currency == "" {
-			currency = pricing.Symbol()
-		}
-		if a.pricedEvents == 0 {
-			a.currency = currency
-			a.costComplete = true
-		} else if a.currency != currency {
-			a.currency = ""
-			a.costComplete = false
-		}
-		a.estimatedCost += pricing.Cost(u)
-		a.pricedEvents++
-	}
 }
 
 func (a usageAccumulator) wire() ReasonixUsage {
 	usage := ReasonixUsage{
+		TotalTokens:      a.promptTokens + a.completionTokens,
 		PromptTokens:     a.promptTokens,
 		CompletionTokens: a.completionTokens,
 		ReasoningTokens:  a.reasoningTokens,
@@ -396,19 +358,24 @@ func (t *statusTelemetry) finishTurn(runErr error, cancelled bool, goalStatus, s
 		default:
 			var readinessErr *agent.FinalReadinessError
 			var recoveryPause *agent.RecoveryPauseError
+			_, runPause := agent.InspectRunPause(runErr)
 			switch {
 			case errors.As(runErr, &readinessErr):
 				t.phase = "readiness_paused"
-				t.turnOutcome = ReasonixTurnOutcome{Kind: "paused", Reason: clipStatusText(readinessErr.Error(), 2_048)}
+				t.turnOutcome = ReasonixTurnOutcome{Kind: "paused", Reason: clipStatusError(readinessErr, 2_048)}
 				t.finalReadiness.Risks = redactStatusTexts(readinessErr.Missing, 2_048)
 				eventName = "pause"
 			case errors.As(runErr, &recoveryPause):
 				t.phase = "recovery_paused"
 				t.turnOutcome = ReasonixTurnOutcome{Kind: "paused", Reason: clipStatusText(recoveryPause.Error(), 2_048)}
 				eventName = "pause"
+			case runPause:
+				t.phase = "paused"
+				t.turnOutcome = ReasonixTurnOutcome{Kind: "paused", Reason: clipStatusError(runErr, 2_048)}
+				eventName = "pause"
 			case runErr != nil:
 				t.phase = "error"
-				t.turnOutcome = ReasonixTurnOutcome{Kind: "error", Reason: clipStatusText(runErr.Error(), 2_048)}
+				t.turnOutcome = ReasonixTurnOutcome{Kind: "error", Reason: clipStatusError(runErr, 2_048)}
 				t.goalOverride = "failed"
 				eventName = "error"
 			default:
@@ -495,7 +462,7 @@ func (t *statusTelemetry) persisted() *persistedStatusTelemetry {
 	defer t.mu.Unlock()
 	return &persistedStatusTelemetry{
 		Sequence: t.sequence, State: t.state, Phase: t.phase,
-		TurnOutcome: t.turnOutcome,
+		TurnOutcome: redactTurnOutcome(t.turnOutcome),
 		FinalReadiness: ReasonixFinalReadiness{
 			ReadyForReview: t.finalReadiness.ReadyForReview,
 			Summary:        clipStatusText(t.finalReadiness.Summary, 16_384),
@@ -518,7 +485,7 @@ func restoreStatusTelemetry(saved *persistedStatusTelemetry) *statusTelemetry {
 	// waiting on work that no longer exists in this runtime.
 	t.state = "idle"
 	t.phase = normalizePersistedStatusPhase(saved.Phase)
-	t.turnOutcome = saved.TurnOutcome
+	t.turnOutcome = redactTurnOutcome(saved.TurnOutcome)
 	if t.turnOutcome.Kind == "" {
 		t.turnOutcome.Kind = "none"
 	}
@@ -547,7 +514,7 @@ func (t *statusTelemetry) snapshot() statusTelemetrySnapshot {
 		state:    t.state,
 		phase:    t.phase,
 		turnOutcome: ReasonixTurnOutcome{
-			Kind: t.turnOutcome.Kind, Reason: clipStatusText(t.turnOutcome.Reason, 2_048),
+			Kind: t.turnOutcome.Kind, Reason: clipStatusCredentialText(t.turnOutcome.Reason, 2_048),
 		},
 		finalReadiness: ReasonixFinalReadiness{
 			ReadyForReview: t.finalReadiness.ReadyForReview,
@@ -558,6 +525,11 @@ func (t *statusTelemetry) snapshot() statusTelemetrySnapshot {
 		cumulative:   t.cumulative.wire(),
 		goalOverride: t.goalOverride,
 	}
+}
+
+func redactTurnOutcome(outcome ReasonixTurnOutcome) ReasonixTurnOutcome {
+	outcome.Reason = clipStatusCredentialText(outcome.Reason, 2_048)
+	return outcome
 }
 
 func defaultSessionRuntimeState(cwd string) SessionRuntimeState {
@@ -591,14 +563,6 @@ func normalizeGoalStatus(value string) string {
 	default:
 		return "none"
 	}
-}
-
-func clipStatusText(value string, limit int) string {
-	value = strings.TrimSpace(secrets.Redact(value))
-	if len(value) <= limit {
-		return value
-	}
-	return value[:limit]
 }
 
 func redactStatusTexts(values []string, limit int) []string {
@@ -646,9 +610,6 @@ func (s *service) sessionRuntimeState(ctx context.Context, p SessionRuntimeState
 		if err != nil {
 			return SessionRuntimeState{}, err
 		}
-		if strings.EqualFold(strings.TrimSpace(p.RuntimeProfile), "economy") {
-			state.PlannerMode = "off"
-		}
 		if strings.TrimSpace(state.PlannerMode) == "" {
 			state.PlannerMode = "on"
 		}
@@ -657,11 +618,7 @@ func (s *service) sessionRuntimeState(ctx context.Context, p SessionRuntimeState
 		}
 		return state, nil
 	}
-	state := defaultSessionRuntimeState(p.Cwd)
-	if strings.EqualFold(strings.TrimSpace(p.RuntimeProfile), "economy") {
-		state.PlannerMode = "off"
-	}
-	return state, nil
+	return defaultSessionRuntimeState(p.Cwd), nil
 }
 
 func (s *service) bindStatusEvents(sess *acpSession) {
@@ -711,7 +668,6 @@ func (s *acpSession) statusSnapshot() ReasonixSessionStatus {
 	ctrl := s.ctrl
 	model := s.model
 	effort := cloneStringPtr(s.effortOverride)
-	workMode := s.runtimeProfile
 	mode := s.modeID
 	runtimeState := s.runtimeState
 	telemetry := s.status
@@ -734,6 +690,7 @@ func (s *acpSession) statusSnapshot() ReasonixSessionStatus {
 				TurnsLimit:       rt.TurnsLimit,
 				TokensUsed:       rt.TokensUsed,
 				RequestsUsed:     rt.RequestsUsed,
+				WorkDurationMs:   rt.WorkDurationMs,
 				TokensLimit:      rt.TokensLimit,
 				NoProgressTurns:  rt.NoProgressTurns,
 				NoProgressLimit:  rt.NoProgressLimit,
@@ -747,12 +704,9 @@ func (s *acpSession) statusSnapshot() ReasonixSessionStatus {
 		goalStatus = t.goalOverride
 	}
 	mode = normalizeACPCollaborationMode(mode)
-	workMode = strings.ToLower(strings.TrimSpace(workMode))
-	switch workMode {
-	case "economy", "delivery":
-	default:
-		workMode = "balanced"
-	}
+	// WorkMode is a deprecated wire-compat field pinned to the historical
+	// default; execution modes no longer exist at runtime.
+	workMode := "balanced"
 	if runtimeState.PlannerMode != "off" {
 		runtimeState.PlannerMode = "on"
 	}

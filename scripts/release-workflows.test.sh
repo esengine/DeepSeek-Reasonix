@@ -1606,6 +1606,7 @@ node --test "$repo_root/npm/publish.test.mjs"
 node --test "$repo_root/scripts/finalize-npm-official-release.test.mjs"
 node "$repo_root/scripts/check-desktop-build-contract.mjs"
 bash "$repo_root/scripts/release-stable.test.sh"
+bash "$repo_root/scripts/check-cache-impact.test.sh"
 bash "$repo_root/scripts/check-docs-impact.test.sh"
 
 # Every current publisher must gate on the same compiled docs identity, and

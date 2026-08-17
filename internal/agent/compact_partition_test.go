@@ -11,9 +11,15 @@ import (
 // every provider-visible message in the region lands in exactly one group.
 func partitionCoversRegion(t *testing.T, a *Agent, region []provider.Message) (kept, fold []provider.Message) {
 	t.Helper()
-	early, carried, kept, fold := a.partitionFoldForProjection(region)
-	if len(early) != 0 || len(carried) != 0 {
-		t.Fatalf("early=%d carried=%d, want both empty under content-driven summary", len(early), len(carried))
+	kept, fold, retention := a.partitionFoldForProjection(region)
+	userTurns := 0
+	for _, m := range region {
+		if m.Role == provider.RoleUser && !m.LocalOnly && !isCompactionSummary(m) {
+			userTurns++
+		}
+	}
+	if got := retention.Kept + retention.Dropped; got != userTurns {
+		t.Errorf("retention accounts for %d user turns, region has %d", got, userTurns)
 	}
 	seen := map[string]int{}
 	for _, group := range [][]provider.Message{kept, fold} {
@@ -39,9 +45,7 @@ func partitionCoversRegion(t *testing.T, a *Agent, region []provider.Message) (k
 	return kept, fold
 }
 
-func TestPartitionFoldsAllUserTurnsByDefault(t *testing.T) {
-	// Content-driven summary no longer hoists early user turns to pad the
-	// checkpoint; only keep-policy content and the recent tail stay verbatim.
+func TestPartitionFoldsSmallUserTurns(t *testing.T) {
 	a := &Agent{}
 	region := []provider.Message{
 		{Role: provider.RoleUser, Content: "small turn 0"},
@@ -52,6 +56,44 @@ func TestPartitionFoldsAllUserTurnsByDefault(t *testing.T) {
 	kept, fold := partitionCoversRegion(t, a, region)
 	if len(kept) != 0 || len(fold) != 4 {
 		t.Fatalf("kept=%d fold=%d, want 0/4", len(kept), len(fold))
+	}
+	if got := renderTranscript(fold); !strings.Contains(got, "small turn") {
+		t.Fatalf("old user turns must reach the summarizer: %s", got)
+	}
+}
+
+func TestPartitionFoldsLargeUserTurns(t *testing.T) {
+	a := &Agent{}
+	oversize := provider.Message{
+		Role:    provider.RoleUser,
+		Content: strings.Repeat("y", 12_000),
+	}
+	region := []provider.Message{
+		{Role: provider.RoleUser, Content: "small and kept"},
+		oversize,
+	}
+	kept, fold := partitionCoversRegion(t, a, region)
+	if len(kept) != 0 || len(fold) != 2 {
+		t.Fatalf("kept=%d fold=%d, want both turns folded", len(kept), len(fold))
+	}
+	if !strings.Contains(renderTranscript(fold), "small and kept") {
+		t.Fatal("the small turn should be summarized with the oversize one")
+	}
+}
+
+func TestPartitionMergesUserTurnsAcrossPriorDigest(t *testing.T) {
+	a := &Agent{}
+	region := []provider.Message{
+		{Role: provider.RoleUser, Content: "constraint from before the digest"},
+		{Role: provider.RoleUser, Content: summaryTagOpen + "\nprior digest\n" + summaryTagClose},
+		{Role: provider.RoleAssistant, Content: "work"},
+	}
+	kept, fold := partitionCoversRegion(t, a, region)
+	if len(kept) != 0 || !strings.Contains(renderTranscript(fold), "constraint from before") {
+		t.Fatalf("pre-digest user turn must enter the merged summary; fold=%v", renderTranscript(fold))
+	}
+	if !strings.Contains(renderTranscript(fold), "prior digest") {
+		t.Fatal("the digest itself must still fold into the next one")
 	}
 }
 
@@ -70,18 +112,18 @@ func TestPartitionFoldsPriorDigests(t *testing.T) {
 	}
 }
 
-func TestPartitionKeepPolicyOutranksFold(t *testing.T) {
+func TestPartitionIgnoresDeprecatedKeepPolicy(t *testing.T) {
 	a := &Agent{keepPolicy: KeepErrors}
 	region := []provider.Message{
-		{Role: provider.RoleUser, Content: "small"},
+		{Role: provider.RoleAssistant, Content: "unrelated prose"},
 		{Role: provider.RoleAssistant, Content: "call", ToolCalls: []provider.ToolCall{{ID: "t1", Name: "bash"}}},
 		{Role: provider.RoleTool, ToolCallID: "t1", Name: "bash", Content: "error: boom"},
 	}
 	kept, fold := partitionCoversRegion(t, a, region)
-	if len(kept) != 2 || len(fold) != 1 {
-		t.Fatalf("kept=%d fold=%d, want error tool-call group kept and user folded", len(kept), len(fold))
+	if len(kept) != 0 || len(fold) != 3 {
+		t.Fatalf("kept=%d fold=%d, want every old message folded", len(kept), len(fold))
 	}
-	if got := renderTranscript(fold); !strings.Contains(got, "small") {
-		t.Fatalf("user turn should fold: %s", got)
+	if got := renderTranscript(fold); !strings.Contains(got, "error: boom") || !strings.Contains(got, "call") {
+		t.Fatalf("the failing call and its result must enter the summary together: %s", got)
 	}
 }

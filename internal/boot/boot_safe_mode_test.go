@@ -32,13 +32,13 @@ func TestBuildIgnoresSafeModeEnvForTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	names := map[string]bool{}
-	for _, e := range ctrl.ToolContractEntries() {
+	for _, e := range ctrl.AllToolContractEntries() {
 		names[e.Name] = true
 	}
 	ctrl.Close()
-	for _, name := range []string{"install_source", "run_skill", "read_skill"} {
+	for _, name := range []string{"install_source", "run_skill", "read_skill", "use_capability"} {
 		if !names[name] {
-			t.Fatalf("REASONIX_SAFE_MODE must not strip %s", name)
+			t.Fatalf("REASONIX_SAFE_MODE must not strip %s from the capability registry", name)
 		}
 	}
 }
@@ -92,18 +92,26 @@ func TestBuildNormalModeKeepsSourceConnectorAndSkillTools(t *testing.T) {
 			t.Fatalf("Build(%q): %v", tokenMode, err)
 		}
 		names := map[string]bool{}
-		for _, e := range ctrl.ToolContractEntries() {
+		for _, e := range ctrl.AllToolContractEntries() {
 			names[e.Name] = true
 		}
-		ctrl.Close()
-		want := []string{"connect_tool_source"}
-		if tokenMode == TokenModeFull {
-			want = []string{"install_source", "run_skill", "read_skill", "read_only_skill", "slash_command"}
+		visible := map[string]bool{}
+		for _, e := range ctrl.ToolContractEntries() {
+			visible[e.Name] = true
 		}
-		for _, name := range want {
+		ctrl.Close()
+		// Full registry always has skill/install tools + use_capability.
+		for _, name := range []string{"install_source", "run_skill", "read_skill", "use_capability"} {
 			if !names[name] {
-				t.Fatalf("normal mode (%q) must register %s", tokenMode, name)
+				t.Fatalf("normal mode (%q) must register %s in the capability registry", tokenMode, name)
 			}
+		}
+		// Provider-visible surface is the unified core for every role setting.
+		if !visible["use_capability"] {
+			t.Fatalf("normal mode (%q) must expose use_capability", tokenMode)
+		}
+		if visible["connect_tool_source"] {
+			t.Fatalf("normal mode (%q) must not expose connect_tool_source", tokenMode)
 		}
 	}
 }

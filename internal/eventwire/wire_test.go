@@ -108,6 +108,21 @@ func TestToWireNoticeCarriesCode(t *testing.T) {
 	}
 }
 
+func TestToWireWriteAccessApprovalKeepsNonNilArrays(t *testing.T) {
+	w := ToWire(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{
+		ID: "a3", Tool: "bash", Subject: "install", Kind: event.ApprovalKindWriteAccess,
+		WriteAccess: event.NormalizeWriteAccessApproval(&event.WriteAccessApproval{}),
+	}})
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(b)
+	if !strings.Contains(body, `"write_access"`) || !strings.Contains(body, `"directories":[]`) {
+		t.Fatalf("write_access arrays must be [] not null: %s", body)
+	}
+}
+
 func TestToWireNoticeCarriesDecisionReceipt(t *testing.T) {
 	w := ToWire(event.Event{
 		Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeDecisionReceipt,

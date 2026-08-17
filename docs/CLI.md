@@ -15,9 +15,13 @@ configuration, plugins, and sandbox policy, see the [Guide](./GUIDE.md).
 ```sh
 reasonix
 reasonix --model deepseek-pro
-reasonix --profile delivery --effort high
+reasonix --effort high
 reasonix --dir /path/to/project
 ```
+
+Ordinary requests always enter the executor. There is no automatic simple /
+light / full task mode to pick. The dedicated planner runs only for an
+explicit Plan, an approval boundary, or Goal start.
 
 Running `reasonix` without a subcommand starts the interactive terminal UI. Use
 `reasonix setup` first when no provider is configured.
@@ -25,7 +29,6 @@ Running `reasonix` without a subcommand starts the interactive terminal UI. Use
 | Flag | Purpose |
 | --- | --- |
 | `--model NAME` | Select a configured provider or `provider/model` reference. |
-| `--profile economy\|balanced\|delivery` | Select the runtime work profile. |
 | `--effort LEVEL` | Override reasoning effort for this session. |
 | `--max-steps N` | Set a one-off maximum tool-call round budget; `0` uses automatic execution. |
 | `--dir PATH` | Change the workspace root before loading config and tools. |
@@ -117,9 +120,11 @@ reasonix config compact-ratio 75           # set the user-global default
 reasonix config compact-ratio --local 75   # override in ./reasonix.toml
 ```
 
-The editable range is 65–85%, with 85% as the built-in default. Lower values
+The editable range is 65–85%, with 80% as the built-in default. Lower values
 compact earlier and may reduce prompt-prefix cache reuse; higher values retain
-more context before compaction. Project `reasonix.toml` takes precedence over
+more context before compaction. Below the threshold, complete tool results may
+increase ordinary request cost; at pressure they are durably pruned before the
+cache-aligned summary runs. Project `reasonix.toml` takes precedence over
 the user config. Changes apply to new CLI sessions; an already-running session
 keeps the threshold it loaded at startup.
 
@@ -136,10 +141,10 @@ echo "explain this code" | reasonix run
 ```
 
 `reasonix run` keeps the normal streamed terminal presentation unless `-p` or a
-structured output format is selected. It also accepts `--model`, `--profile`,
-`--max-steps`, `--effort`, `--dir`, `--add-dir`, `--continue`, `--resume QUERY`,
-`--copy`, `--allowed-tools`, `--permission-mode`, and `--auto` / `-y` (an alias
-for `--permission-mode auto`).
+structured output format is selected. It also accepts `--model`,
+`--max-steps`, `--effort`, `--dir`, `--add-dir`,
+`--continue`, `--resume QUERY`, `--copy`, `--allowed-tools`, `--permission-mode`,
+and `--auto` / `-y` (an alias for `--permission-mode auto`).
 
 ### Benchmark arms
 
@@ -331,7 +336,7 @@ reasonix --allowed-tools "Bash(go test ./...)" --allowed-tools read_file
 | Mode | Behavior |
 | --- | --- |
 | `manual`, `ask` | Ask for ordinary approval decisions. |
-| `auto` | Automatically approve normal fallback operations while preserving explicit ask and deny rules. |
+| `auto` | Automatically approve normal fallback operations, including interactive `remember`/`forget`, while preserving explicit ask and deny rules. |
 | `acceptEdits` | Allow file-editing tools; this is not full Auto mode. |
 | `dontAsk` | Deny unapproved requests without opening an approval prompt. |
 | `plan` | Start the plan-first workflow; tool calls still use the active permissions and sandbox. |
@@ -359,10 +364,13 @@ an explicit ask rule; select it with `--permission-mode auto`, `--auto`, or
 `-y`. `dontAsk` denies unapproved writers.
 `bypassPermissions` runs ordinary calls despite ask rules and writer fallback,
 but configured deny rules, the sandbox, and tools that require fresh human
-approval (memory, plan, sandbox escape, managed config write) still apply. In
-every mode, the owning top-level controller may still create a bounded,
-non-sensitive, create-only project or reference memory; all other memory
-mutations remain denied without a human.
+approval (plan, sandbox escape, managed config write) still apply. Interactive
+Auto auto-allows the default `remember`/`forget` fallback while preserving
+explicit ask and deny rules; interactive YOLO bypasses memory ask prompts but
+still honors deny. In every headless mode, the owning
+top-level controller may still create a bounded, non-sensitive, create-only
+project or reference memory; all other memory mutations remain denied without a
+human.
 
 ## Additional directories
 
@@ -396,13 +404,12 @@ single-key shortcuts.
 | `Ctrl+Y` | Toggle YOLO independently of the composer-mode cycle. |
 
 The responsive footer keeps interaction state on the left and, when space
-allows, places model, effort, and work mode on the right. Its second row shows
+allows, places model and effort on the right. Its second row shows
 available repository and session telemetry such as cache hit rate, context use,
 compaction headroom, background jobs, and balance. `ready` means the composer is
 idle; that slot changes when a picker, approval, image paste, shell mode, or
 other interaction needs attention. Narrow terminals move or compact complete
-groups instead of cutting labels in half. Visible labels and work-mode values
-follow `/language`.
+groups instead of cutting labels in half. Visible labels follow `/language`.
 
 Use `/theme auto|light|dark` to select the terminal background mode, or choose a
 named accent from `/theme`. Both composer borders, the insertion cursor,
@@ -431,11 +438,11 @@ the displayed list matches the commands the TUI accepts.
 
 | Command | Purpose |
 | --- | --- |
+| `/continue-checks [guidance]` | Resume the immediately preceding paused task-completion check while preserving its verified tool evidence. The command is one-shot and refuses stale cards after another user turn. |
 | `/model` | Search configured models and switch the active model. |
 | `/provider` | Choose a provider, then choose one of its configured models. |
 | `/resume` | Search recent sessions and switch to one. |
-| `/status` | Show model, effort, cache, Git, background jobs, and profile or balance details. |
-| `/work-mode [economy\|balanced\|delivery]` | View or change the runtime profile; `/profile` is an alias. |
+| `/status` | Show model, effort, cache, Git, background jobs, and balance details. |
 | `/theme [auto\|light\|dark\|style]` | View or change the CLI background mode and accent palette. |
 | `/currency [auto\|CNY\|USD]` | View or change the user-global fee display currency and refresh the runtime. |
 | `/paste-image` | Read a clipboard image and insert an editable attachment token. |
@@ -444,10 +451,10 @@ the displayed list matches the commands the TUI accepts.
 | `/output-style` | Select an answer style. |
 | `/verbose` | Toggle expanded reasoning display. |
 | `/sandbox` | Inspect sandbox status. |
-| `/goal [objective]` | Start a long-running goal, or inspect the current goal and its budget runtime. |
-| `/goal status` | Show the active goal plus outer turns, observational tokens/requests/no-progress, extensions, and the last continuation/evaluator reason. |
-| `/goal pause` | Pause the running goal (keeps todos, Delivery checkpoint, and budget). |
-| `/goal resume` | Resume a paused or blocked goal (budget pauses add one more budget slice). |
+| `/goal [objective]` | Start a continuous goal, or inspect its runtime statistics. |
+| `/goal status` | Show the active goal plus turns, requests, tokens, work time, and the last continuation/evaluator reason. |
+| `/goal pause` | Pause the running goal (keeps todos, Delivery checkpoint, and runtime history). |
+| `/goal resume` | Resume a manually paused or genuinely blocked goal without changing a numeric quota. |
 | `/goal clear` | End goal mode permanently. |
 | `/docs [question]` | Show the embedded corpus identity, or search it locally and ask the configured AI to answer from version-matched evidence. |
 | `/reasonix:docs [question]` | Preferred built-in fallback when an existing custom command or compatible plugin/skill alias owns `/docs`; if this spelling is also owned, the menu selects the next free `reasonix:`-qualified name without displacing it. |
@@ -458,9 +465,11 @@ the displayed list matches the commands the TUI accepts.
 | `/tree`, `/branch`, `/switch` | Inspect or navigate conversation branches. |
 | `/reload` | Reload the agent runtime (extensions, tools, skills, commands, hooks, providers) while keeping the session. Queued once while a turn runs, then fail-atomic: a failed rebuild keeps the current runtime. |
 
-Switching model, effort, or work mode rebuilds the runtime while preserving the
+Switching model or effort rebuilds the runtime while preserving the
 active conversation, session-scoped permission overrides, additional directory
 access, and session ownership. `/reload` uses the same fail-atomic rebuild.
+Execution modes no longer exist: planning, verification, and review strength
+follow task risk per turn.
 
 ## Session catalog diagnostics
 

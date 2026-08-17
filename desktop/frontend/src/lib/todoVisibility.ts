@@ -95,10 +95,21 @@ export function shouldShowTodoPanel(
   todoKey: string | null | undefined,
   dismissedTodoKey: string | null,
   todos: Todo[],
+  persisted?: { batchKey?: string | null; batches?: readonly string[] | null },
 ): boolean {
   if (!todoKey || todos.length === 0) return false;
   if (hasIncompleteTodos(todos)) return true;
-  return todoKey !== dismissedTodoKey;
+  if (todoKey === dismissedTodoKey) return false;
+  const batchKey = String(persisted?.batchKey ?? "").trim();
+  if (batchKey && persisted?.batches?.includes(batchKey)) return false;
+  return true;
+}
+
+export function sameStringList(a?: readonly string[] | null, b?: readonly string[] | null): boolean {
+  if (a === b) return true;
+  const left = Array.isArray(a) ? a : [];
+  const right = Array.isArray(b) ? b : [];
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 export function shouldOpenTodoPanelByDefault(): boolean {

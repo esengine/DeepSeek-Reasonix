@@ -22,6 +22,8 @@ const (
 	desktopLifecycleSchemaVersion = 2
 	desktopLifecycleRetention     = 30 * 24 * time.Hour
 	maxDesktopLifecycleRecords    = 20
+	desktopLifecycleReadRetries   = 12
+	desktopLifecycleReadBackoff   = 20 * time.Millisecond
 )
 
 type desktopLifecycleState struct {
@@ -121,7 +123,6 @@ func prepareDesktopDiagnostics(app *App) {
 	if tracker.start() == nil {
 		app.lifecycle.tracker = tracker
 	}
-	installWebView2ProcessObserver(app)
 }
 
 func (a *App) releaseDesktopDiagnosticsOwnership() {
@@ -136,7 +137,14 @@ func (a *App) releaseDesktopDiagnosticsOwnership() {
 }
 
 func initializeLifecycleDiagnostics(app *App) {
-	if app == nil || app.remoteWindowTicket != "" || !app.diagnosticsOwner {
+	if app == nil || app.remoteWindowTicket != "" {
+		return
+	}
+	// Native WebKit recovery is a reliability mechanism, not telemetry. Always
+	// install it; the flag only controls whether sanitized diagnostics upload.
+	telemetry := app.diagnosticsOwner && app.diagnosticsConfigLoaded && version != "dev" && app.diagnosticsTelemetry
+	installWebKitProcessObserver(app, telemetry)
+	if !app.diagnosticsOwner {
 		return
 	}
 	if !app.diagnosticsConfigLoaded || version == "dev" {
@@ -152,7 +160,6 @@ func initializeLifecycleDiagnostics(app *App) {
 		app.lifecycle.previousRun = legacy
 	}
 	app.lifecycle.previousRuns = tracker.consumePrevious(enabled)
-	installWebKitProcessObserver(app, enabled)
 	if enabled {
 		refreshWebRuntimeContext()
 	}
@@ -326,10 +333,13 @@ func (t *desktopLifecycleTracker) consumePrevious(emit bool) []desktopLifecycleO
 			continue
 		}
 		claimed := path + ".claimed-" + t.state.RunID
-		if err := os.Rename(path, claimed); err != nil {
+		// Windows fails a bare rename with a sharing violation while any other
+		// instance still holds the record open, so without the retry every
+		// claimant can lose the same race and the evidence is dropped by all.
+		if err := fileutil.ClaimRename(path, claimed); err != nil {
 			continue
 		}
-		state, readErr = readDesktopLifecycleState(claimed)
+		state, readErr = readClaimedLifecycleState(claimed)
 		if readErr != nil || state.SchemaVersion != desktopLifecycleSchemaVersion {
 			// The file changed between inspection and claim. Put it back when
 			// possible instead of deleting data that may belong to another schema.
@@ -347,6 +357,28 @@ func (t *desktopLifecycleTracker) consumePrevious(emit bool) []desktopLifecycleO
 	}
 	t.pruneRecords()
 	return observations
+}
+
+// readClaimedLifecycleState re-reads a just-claimed record. Winning the rename
+// does not make the file readable yet: an instance that was inspecting it still
+// holds a handle, and Windows answers with a sharing violation until it drops.
+// Only the open is retried — content this build cannot parse is a definite
+// answer about the record, not a lock waiting to clear.
+func readClaimedLifecycleState(path string) (desktopLifecycleState, error) {
+	var body []byte
+	var err error
+	for attempt := range desktopLifecycleReadRetries {
+		if body, err = os.ReadFile(path); err == nil || os.IsNotExist(err) {
+			break
+		}
+		time.Sleep(time.Duration(attempt+1) * desktopLifecycleReadBackoff)
+	}
+	if err != nil {
+		return desktopLifecycleState{}, err
+	}
+	var state desktopLifecycleState
+	err = json.Unmarshal(body, &state)
+	return state, err
 }
 
 func readDesktopLifecycleState(path string) (desktopLifecycleState, error) {

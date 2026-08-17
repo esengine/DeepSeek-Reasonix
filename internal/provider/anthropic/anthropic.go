@@ -26,7 +26,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -43,7 +42,7 @@ import (
 // mid-stream) sends no RST, so scanner.Scan() would block forever. Generous on
 // purpose; live streams emit far more often. Stored per-client (client.idleTimeout)
 // so a test can shorten it without a shared global that races other watchdogs.
-const defaultStreamIdleTimeout = 120 * time.Second
+const defaultStreamIdleTimeout = 300 * time.Second
 
 const (
 	// anthropicVersion is the required API version header value.
@@ -52,8 +51,8 @@ const (
 	// gateway). Bedrock/Vertex use a different request shape and are out of scope.
 	defaultBaseURL = "https://api.anthropic.com"
 	// defaultMaxTokens is the mandatory Anthropic fallback when neither config
-	// nor request supplies max_tokens. Ordinary turns use 16K; reasoning-capable
-	// paths raise via AutoOutputBudget. 128K is never automatic.
+	// nor request supplies max_tokens. Native Anthropic stays at 16K; official
+	// DeepSeek sends the documented 384K ceiling because budget_tokens is ignored.
 	defaultMaxTokens = provider.DefaultOrdinaryOutputTokens
 )
 
@@ -95,6 +94,15 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		requestURL = root + "/v1/messages"
 	}
 	officialDeepSeek := openai.IsDeepSeek(root)
+	reasoningProtocol, _ := cfg.Extra["reasoning_protocol"].(string)
+	reasoningProtocol = strings.ToLower(strings.TrimSpace(reasoningProtocol))
+	deepSeekReplay := officialDeepSeek
+	switch reasoningProtocol {
+	case "deepseek":
+		deepSeekReplay = true
+	case "none":
+		deepSeekReplay = false
+	}
 	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
 	keySource, _ := cfg.Extra["api_key_source"].(string)
 	thinking, _ := cfg.Extra["thinking"].(string)
@@ -113,13 +121,8 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	if maxOutputTokens <= 0 {
 		// Messages requires max_tokens. 0 = automatic; negative also falls back
 		// because the wire field is mandatory.
-		reasoningOn := officialDeepSeek &&
-			!strings.EqualFold(thinking, "disabled") &&
-			!strings.EqualFold(effort, "disabled") &&
-			!strings.EqualFold(effort, "off") &&
-			!strings.EqualFold(effort, "none")
 		if officialDeepSeek {
-			maxOutputTokens = provider.AutoOutputBudget(reasoningOn, effort)
+			maxOutputTokens = provider.DeepSeekMaxOutputTokens
 		} else {
 			// Native Anthropic and unknown gateways: conservative ordinary default.
 			maxOutputTokens = defaultMaxTokens
@@ -141,7 +144,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		requestURL:       requestURL,
 		model:            cfg.Model,
 		nativeAnthropic:  strings.EqualFold(root, defaultBaseURL),
-		deepseek:         officialDeepSeek,
+		deepseek:         deepSeekReplay,
 		thinking:         thinking,
 		effort:           effort,
 		vision:           vision,
@@ -157,7 +160,12 @@ func New(cfg provider.Config) (provider.Provider, error) {
 
 func newHTTPClient(cfg provider.Config) (*http.Client, error) {
 	spec, _ := cfg.Extra["proxy_spec"].(netclient.ProxySpec)
-	return netclient.NewHTTPClient(spec, netclient.TransportOptions{})
+	return netclient.NewHTTPClient(spec, netclient.TransportOptions{
+		DialTimeout:           30 * time.Second,
+		KeepAlive:             30 * time.Second,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ResponseHeaderTimeout: 300 * time.Second,
+	})
 }
 
 type client struct {
@@ -189,27 +197,12 @@ func (c *client) deepSeekThinkingEnabled() bool {
 	return c != nil && c.deepseek && c.thinking != "disabled" && c.effort != "disabled"
 }
 
-// deepSeekAnthropicUsesProEffortMapping mirrors DeepSeek's model routing for the
-// Anthropic endpoint. Opus aliases route to V4 Pro; Sonnet/Haiku aliases and
-// unsupported model names route to V4 Flash.
-func deepSeekAnthropicUsesProEffortMapping(model string) bool {
-	model = strings.ToLower(strings.TrimSpace(model))
-	return model == "deepseek-v4-pro" || strings.HasPrefix(model, "claude-opus")
-}
-
 func normalizeDeepSeekAnthropicEffort(model, effort string) string {
+	_ = model
 	switch effort {
 	case "low":
-		if deepSeekAnthropicUsesProEffortMapping(model) {
-			return "high"
-		}
 		return "low"
-	case "medium":
-		return "high"
-	case "xhigh":
-		if deepSeekAnthropicUsesProEffortMapping(model) {
-			return "max"
-		}
+	case "medium", "xhigh":
 		return "high"
 	case "high", "max":
 		return effort
@@ -221,6 +214,13 @@ func normalizeDeepSeekAnthropicEffort(model, effort string) string {
 func (c *client) RequiresToolCallReasoning() bool {
 	return c.deepSeekThinkingEnabled()
 }
+
+func (c *client) RequiresAssistantReasoningReplay(m provider.Message) bool {
+	activity := len(m.ToolCalls) > 0 || len(m.ServerSearch) > 0
+	return c != nil && c.deepseek && activity && (c.deepSeekThinkingEnabled() || strings.TrimSpace(m.ReasoningContent) != "")
+}
+
+func (c *client) AllowsEmptyReasoningFallback() bool { return false }
 
 func (c *client) MissingToolCallReasoningWarningIdentity() string {
 	if c == nil {
@@ -329,9 +329,10 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 // become `tool_use` blocks; RoleTool results become `tool_result` blocks in a user
 // turn. Consecutive same-role messages are coalesced because the API requires
 // alternating user/assistant turns (tool results are user turns).
-func (c *client) buildRequest(_ context.Context, req provider.Request) anthRequest {
+func (c *client) buildRequest(ctx context.Context, req provider.Request) anthRequest {
 	var system []textBlock
 	var msgs []anthMessage
+	recoveryWithoutThinking := c.missingReasoningFallback(ctx)
 
 	// appendBlocks adds blocks under role, merging into the previous message when
 	// it shares the role (keeps user/assistant strictly alternating).
@@ -346,7 +347,8 @@ func (c *client) buildRequest(_ context.Context, req provider.Request) anthReque
 		msgs = append(msgs, anthMessage{Role: role, Content: blocks})
 	}
 
-	for _, m := range provider.SanitizeToolPairing(req.Messages) {
+	messages := c.replayMessages(req.Messages, recoveryWithoutThinking)
+	for _, m := range provider.SanitizeToolPairing(messages) {
 		switch m.Role {
 		case provider.RoleSystem:
 			if m.Content != "" {
@@ -382,11 +384,10 @@ func (c *client) buildRequest(_ context.Context, req provider.Request) anthReque
 			// turn in every subsequent request, even if the current request no longer
 			// declares tools or has since disabled thinking. Anthropic proper requires
 			// a signature, so reasoning without one cannot be replayed on that endpoint.
-			if c.deepseek && len(m.ToolCalls) > 0 && m.ReasoningContent != "" {
-				blocks = append(blocks, contentBlock{Type: "thinking", Thinking: m.ReasoningContent})
-			} else if c.thinking == "adaptive" && m.ReasoningContent != "" && m.ReasoningSignature != "" {
-				blocks = append(blocks, contentBlock{Type: "thinking", Thinking: m.ReasoningContent, Signature: m.ReasoningSignature})
+			if block, ok := c.replayReasoningBlock(m, recoveryWithoutThinking); ok {
+				blocks = append(blocks, block)
 			}
+			blocks = appendServerSearchBlocks(blocks, m.ServerSearch)
 			if m.Content != "" {
 				blocks = append(blocks, contentBlock{Type: "text", Text: m.Content})
 			}
@@ -459,22 +460,7 @@ func (c *client) buildRequest(_ context.Context, req provider.Request) anthReque
 	// uses type=adaptive plus display/output_config. LongCat-style compatible
 	// gateways use the simpler enabled|disabled knob and reject output_config.
 	if c.deepseek {
-		r.Temperature = req.Temperature
-		t := c.thinking
-		if t != "disabled" {
-			t = "enabled"
-		}
-		if c.effort == "disabled" {
-			t = "disabled"
-		}
-		r.Thinking = &thinkingConfig{Type: t}
-		if t != "disabled" {
-			effort := normalizeDeepSeekAnthropicEffort(c.model, c.effort)
-			switch effort {
-			case "low", "high", "max":
-				r.OutputConfig = &outputConfig{Effort: effort}
-			}
-		}
+		c.applyDeepSeekThinking(&r, req, recoveryWithoutThinking)
 	} else {
 		switch c.thinking {
 		case "adaptive":
@@ -545,7 +531,8 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	}
 
 	tools := map[int]*provider.ToolCall{} // tool_use blocks, keyed by content index
-	argBuckets := map[int]int{}           // last emitted 2KB progress bucket per block
+	searches := newSearchStream()
+	argBuckets := map[int]int{} // last emitted 2KB progress bucket per block
 	var inTok, outTok, cacheCreate, cacheRead int
 	var stopReason string
 	haveUsage := false
@@ -596,27 +583,9 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 				mergeUsage(ev.Message.Usage)
 			}
 		case "content_block_start":
-			if ev.ContentBlock != nil {
-				switch ev.ContentBlock.Type {
-				case "tool_use":
-					tc := &provider.ToolCall{ID: ev.ContentBlock.ID, Name: ev.ContentBlock.Name}
-					tools[ev.Index] = tc
-					if !send(provider.Chunk{Type: provider.ChunkToolCallStart, ToolCall: &provider.ToolCall{ID: tc.ID, Name: tc.Name}}) {
-						return
-					}
-				case "web_search_tool_result":
-					// Search results are delivered inline in content_block.content as a
-					// JSON array of result objects (title, url, encrypted_content).
-					// Only the model sees the plain text; we surface titles and URLs.
-					// server_tool_use blocks (the model initiating the search) are
-					// intentionally skipped — the API executes them server-side and
-					// the results appear here.
-					formatted := formatWebSearchResults(ev.ContentBlock.Content)
-					if formatted != "" {
-						if !send(provider.Chunk{Type: provider.ChunkText, Text: formatted}) {
-							return
-						}
-					}
+			if chunk := beginContentBlock(ev.Index, ev.ContentBlock, tools, searches); chunk != nil {
+				if !send(*chunk) {
+					return
 				}
 			}
 		case "content_block_delta":
@@ -654,6 +623,11 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 						}
 					}
 				}
+				if next := searches.argsDelta(ev.Index, ev.Delta.PartialJSON); next != nil {
+					if !send(provider.Chunk{Type: provider.ChunkServerSearch, ServerSearch: next}) {
+						return
+					}
+				}
 			}
 		case "content_block_stop":
 			if tc := tools[ev.Index]; tc != nil {
@@ -686,27 +660,11 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	if ctx.Err() != nil {
 		return
 	}
-	if stalled.Load() {
-		err := fmt.Errorf("%s: stream stalled — no data for %s, connection likely dropped", c.name, idleTimeout)
-		send(provider.Chunk{Type: provider.ChunkError, Err: provider.StreamInterrupt(err, provider.StreamInterruptIdleTimeout)})
+	if err := streamScanEndError(c.name, idleTimeout, stalled.Load(), scanner.Err(), stopReason); err != nil {
+		send(provider.Chunk{Type: provider.ChunkError, Err: err})
 		return
 	}
-	if err := scanner.Err(); err != nil {
-		wrapped := fmt.Errorf("%s: read stream: %w", c.name, err)
-		if provider.IsConnReset(err) {
-			send(provider.Chunk{Type: provider.ChunkError, Err: provider.StreamInterrupt(wrapped, provider.ClassifyStreamInterrupt(err))})
-			return
-		}
-		send(provider.Chunk{Type: provider.ChunkError, Err: wrapped})
-		return
-	}
-	// EOF / clean close before message_stop is an uncommitted attempt. Complete
-	// ChunkToolCall blocks that arrived earlier remain speculative.
-	send(provider.Chunk{Type: provider.ChunkError, Err: provider.StreamInterrupt(
-		fmt.Errorf("%s: stream ended before message_stop: %w", c.name, io.ErrUnexpectedEOF),
-		provider.StreamInterruptPrematureEOF,
-	)})
-	return
+	goto finalize
 
 finalize:
 	if haveUsage {
@@ -759,42 +717,6 @@ func mapStopReason(s string) string {
 	default:
 		return s // "refusal", "pause_turn", "" — pass through
 	}
-}
-
-// webSearchResult is a single result from a web_search_tool_result block.
-type webSearchResult struct {
-	URL      string `json:"url"`
-	Title    string `json:"title"`
-	Text     string `json:"text"`
-	SiteName string `json:"site_name"`
-}
-
-// formatWebSearchResults parses a web_search_tool_result content array
-// and formats titles and URLs as human-readable text. DeepSeek returns
-// encrypted_content rather than plain text at the transport layer; the
-// model still sees the original content.
-func formatWebSearchResults(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	var results []webSearchResult
-	if err := json.Unmarshal(raw, &results); err != nil {
-		return ""
-	}
-	var b strings.Builder
-	for _, r := range results {
-		if r.Title == "" && r.URL == "" {
-			continue
-		}
-		fmt.Fprintf(&b, "\n- **%s**", r.Title)
-		if r.URL != "" {
-			fmt.Fprintf(&b, "\n  <%s>", r.URL)
-		}
-	}
-	if b.Len() == 0 {
-		return ""
-	}
-	return "\n" + b.String() + "\n"
 }
 
 // Messages API wire protocol
@@ -894,14 +816,8 @@ type streamEvent struct {
 	Message *struct {
 		Usage *wireUsage `json:"usage"`
 	} `json:"message"`
-	ContentBlock *struct {
-		Type      string          `json:"type"`
-		ID        string          `json:"id"`
-		Name      string          `json:"name"`
-		ToolUseID string          `json:"tool_use_id"` // web_search_tool_result
-		Content   json.RawMessage `json:"content"`     // web_search_tool_result: array of result objects
-	} `json:"content_block"`
-	Delta *struct {
+	ContentBlock *streamContentBlock `json:"content_block"`
+	Delta        *struct {
 		Type             string          `json:"type"`         // text_delta | thinking_delta | signature_delta | input_json_delta | web_search_tool_result_delta
 		Text             string          `json:"text"`         // text_delta
 		Thinking         string          `json:"thinking"`     // thinking_delta

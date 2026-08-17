@@ -22,6 +22,12 @@ func completeDesktopShutdown(tracker *desktopLifecycleTracker, body func()) {
 }
 
 func (a *App) shutdownBody() {
+	if a.desktopShell.linuxRecovery != nil {
+		a.desktopShell.linuxRecovery.stop()
+	}
+	if a.desktopShell.coordinator != nil {
+		a.desktopShell.coordinator.stop()
+	}
 	if a.workspaceHub != nil {
 		a.workspaceHub.close()
 	}
@@ -93,8 +99,8 @@ func (a *App) shutdownBody() {
 		a.mu.Unlock()
 	}
 	if a.startupReady.Load() {
-		// A visible UI is sufficient health evidence even if the user closes the
-		// window before the delayed post-DOM task runs.
+		// A stable React + Wails heartbeat is sufficient health evidence even if
+		// the user closes before the delayed commit task runs.
 		if err := a.commitPendingUpdateHealth(); err != nil {
 			slog.Warn("desktop: commit healthy update during shutdown", "err", err)
 		}

@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-export type ReasoningDisplayMode = "hidden" | "summary" | "auto";
+export type ReasoningDisplayMode = "hidden" | "summary" | "auto" | "expanded";
 export type ResolvedReasoningDisplayMode = ReasoningDisplayMode | "legacy-collapsed" | "pending";
 
 const LEGACY_SUMMARY_KEY = "reasonix-reasoning-summary";
@@ -16,7 +16,7 @@ function emit(): void {
 }
 
 function normalizeMode(value: unknown): ReasoningDisplayMode | undefined {
-  return value === "hidden" || value === "summary" || value === "auto" ? value : undefined;
+  return value === "hidden" || value === "summary" || value === "auto" || value === "expanded" ? value : undefined;
 }
 
 function legacySummaryValue(): "on" | "off" | undefined {

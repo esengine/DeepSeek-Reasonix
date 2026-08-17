@@ -19,7 +19,7 @@ type nestedSink struct {
 
 func (s nestedSink) Emit(e event.Event) {
 	switch e.Kind {
-	case event.ToolDispatch, event.ToolResult, event.ToolProgress:
+	case event.ToolDispatch, event.ToolResult, event.ToolProgress, event.ToolResultPreview:
 		e.Tool.ParentID = s.parentID
 		e.Tool.ID = s.parentID + "/" + e.Tool.ID
 		s.parent.Emit(e)

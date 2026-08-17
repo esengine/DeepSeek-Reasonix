@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -78,11 +79,23 @@ func RedactSessions(opts RedactSessionsOptions) RedactSessionsResult {
 		})
 		for _, path := range candidates {
 			res.FilesScanned++
-			if sessionPath := redactionSessionPath(path); sessionPath != "" && sessionRedactionLeaseHeld(sessionPath) {
-				res.FilesSkipped++
+			sessionPath := redactionSessionPath(path)
+			writers, err := acquireSessionRedactionWriters(sessionPath)
+			if err != nil {
+				if errors.Is(err, agent.ErrSessionLeaseHeld) {
+					res.FilesSkipped++
+				} else {
+					res.Errors = append(res.Errors, fmt.Sprintf("%s: acquire session lease: %v", path, err))
+				}
 				continue
 			}
-			changed, rewritten, err := redactSessionArtifact(path, opts.DryRun)
+			changed, rewritten, err := func() (int64, int64, error) {
+				defer releaseSessionRedactionWriters(writers)
+				if sessionRedactionLeaseAcquired != nil {
+					sessionRedactionLeaseAcquired(sessionPath)
+				}
+				return redactSessionArtifact(path, opts.DryRun)
+			}()
 			if err != nil {
 				res.Errors = append(res.Errors, fmt.Sprintf("%s: %v", path, err))
 				continue
@@ -177,15 +190,36 @@ func redactionSessionPath(path string) string {
 	}
 }
 
-func sessionRedactionLeaseHeld(sessionPath string) bool {
-	if agent.SessionLeaseHeld(sessionPath) {
-		return true
+var sessionRedactionLeaseAcquired func(string)
+
+func acquireSessionRedactionWriters(sessionPath string) ([]*agent.SessionWriter, error) {
+	if strings.TrimSpace(sessionPath) == "" {
+		return nil, nil
 	}
+	paths := []string{agent.CanonicalSessionPath(sessionPath)}
 	if before, ok := strings.CutSuffix(sessionPath, ".guardian.jsonl"); ok {
-		parent := before + ".jsonl"
-		return agent.SessionLeaseHeld(parent)
+		paths = append(paths, agent.CanonicalSessionPath(before+".jsonl"))
 	}
-	return false
+	sort.Strings(paths)
+	writers := make([]*agent.SessionWriter, 0, len(paths))
+	for i, path := range paths {
+		if i > 0 && path == paths[i-1] {
+			continue
+		}
+		writer, err := agent.AcquireSessionWriter(path)
+		if err != nil {
+			releaseSessionRedactionWriters(writers)
+			return nil, err
+		}
+		writers = append(writers, writer)
+	}
+	return writers, nil
+}
+
+func releaseSessionRedactionWriters(writers []*agent.SessionWriter) {
+	for _, writer := range slices.Backward(writers) {
+		writer.Release()
+	}
 }
 
 // redactSessionArtifact dispatches one candidate file to a format-aware

@@ -1,10 +1,14 @@
 package control
 
 import (
+	"context"
 	"testing"
 
+	"reasonix/internal/agent"
+	"reasonix/internal/event"
 	"reasonix/internal/goaleval"
 	"reasonix/internal/provider"
+	"reasonix/internal/tool"
 )
 
 func billedGoalTurn() []provider.Chunk {
@@ -51,7 +55,35 @@ func TestGoalTokenBudgetPausesAndResumes(t *testing.T) {
 	if !c.ResumeGoal() || c.GoalStatus() != GoalStatusRunning {
 		t.Fatalf("spend pause did not resume: status = %q", c.GoalStatus())
 	}
-	if rt := c.GoalRuntime(); rt.TokensUsed != 0 || rt.TokensLimit != 150 {
-		t.Fatalf("resumed runtime = %+v, want a fresh budget", rt)
+	resumed := c.GoalRuntime()
+	if resumed.TokensUsed != rt.TokensUsed || resumed.RequestsUsed != rt.RequestsUsed || resumed.TurnsUsed != rt.TurnsUsed || resumed.TokensLimit != rt.TokensUsed+150 {
+		t.Fatalf("resumed runtime = %+v, want cumulative statistics plus one fresh budget slice after %+v", resumed, rt)
+	}
+
+	// The Agent's spend accumulator is reset with the slice: continuing can do
+	// another full slice of work instead of immediately re-pausing on old spend.
+	c.Submit("continue")
+	waitGoalTurnDone(t, events)
+	again := c.GoalRuntime()
+	if c.GoalStatus() != GoalStatusBlocked || again.StopCause != stopCauseBudgetSpend || again.TokensUsed <= resumed.TokensUsed {
+		t.Fatalf("second spend slice = status:%q runtime:%+v", c.GoalStatus(), again)
+	}
+}
+
+func TestGoalReadinessFailurePausesOnExplicitSpendBudget(t *testing.T) {
+	runner := &deliveryScopeErrorRunner{}
+	executor := agent.New(nil, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
+	c := New(Options{Runner: runner, Executor: executor, GoalTokenBudget: 200})
+	runner.usage = c.goalUsageTee
+	c.SetGoal("ship the integration")
+
+	if err := newTurnOrchestrator(c).runGoalLoopWithRawDisplay(context.Background(), "start", "start", ""); err != nil {
+		t.Fatalf("run err = %v, want the explicit budget pause absorbed by the Goal FSM", err)
+	}
+	if got := c.GoalStatus(); got != GoalStatusBlocked {
+		t.Fatalf("GoalStatus = %q, want blocked (spend-budget pause)", got)
+	}
+	if rt := c.GoalRuntime(); rt.StopCause != stopCauseBudgetSpend {
+		t.Fatalf("runtime = %+v, want %q", rt, stopCauseBudgetSpend)
 	}
 }

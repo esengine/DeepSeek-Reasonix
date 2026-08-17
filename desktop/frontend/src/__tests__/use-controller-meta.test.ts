@@ -1,6 +1,7 @@
 // Run: tsx src/__tests__/use-controller-meta.test.ts
 
-import { currentTurnWaitMs, effortSwitchNoticeText, foregroundRunningFromRuntimeMeta, historyMessagesToItems, initialState, localizedBackendNoticeText, localizedNoticeText, metaFromTab, modelSwitchNoticeText, reducer, sameMeta, shouldReconcileStaleTurn, tokenModeSwitchNoticeText, type Item } from "../lib/useController";
+import { currentTurnWaitMs, effortSwitchNoticeText, foregroundRunningFromRuntimeMeta, historyMessagesToItems, initialState, localizedBackendNoticeText, localizedNoticeText, metaFromTab, modelSwitchNoticeText, reducer, sameMeta, type Item } from "../lib/useController";
+import { shouldReconcileStaleTurn } from "../lib/useStaleTurnWatchdog";
 import { parseTodos } from "../lib/tools";
 import { resolveTodoPanelTodos } from "../lib/todoVisibility";
 import type { HistoryMessage, Meta, TabMeta, WireUsage } from "../lib/types";
@@ -106,11 +107,6 @@ console.log("\nuse controller meta");
     "effort busy guard names the running-answer blocker",
   );
   eq(
-    tokenModeSwitchNoticeText("active work is still running; running=true; pending_prompt=true; background_jobs=0; finish or cancel the current turn, answer pending prompts, and stop background jobs before changing token mode"),
-    "Work mode cannot change while a prompt is waiting for your response. Handle it first.",
-    "work mode busy guard prioritizes the pending prompt blocker",
-  );
-  eq(
     modelSwitchNoticeText("finish or cancel the current turn, answer pending prompts, and stop background jobs before changing model"),
     "The model cannot change yet. Stop the current answer, handle pending prompts, or wait for background jobs to finish.",
     "model busy guard is localized",
@@ -172,19 +168,6 @@ console.log("\nuse controller meta");
 
 {
   eq(
-    tokenModeSwitchNoticeText("finish or cancel the current turn, answer pending prompts, and stop background jobs before changing token mode"),
-    "Work mode cannot change yet. Stop the current answer, handle pending prompts, or wait for background jobs to finish.",
-    "work mode busy guard is localized",
-  );
-  eq(
-    tokenModeSwitchNoticeText('tab "tab-a" changed while switching token mode; retry'),
-    "The current session changed while switching work mode. Try once more.",
-    "work mode tab race asks the user to retry",
-  );
-}
-
-{
-  eq(
     localizedBackendNoticeText("Session autosave failed: disk full"),
     "Session autosave failed: disk full",
     "backend autosave notice is localized through the active dictionary",
@@ -201,22 +184,22 @@ console.log("\nuse controller meta");
   );
   eq(
     localizedBackendNoticeText("session changed on disk; unsaved local transcript was saved as recovery branch 20260706-152144.863947300-longcat-openai-LongCat-2.0-119b7259f151-recovery-693ce51bcbcbaa9"),
-    "The session changed on disk, so the unsaved local transcript was kept as a conflict copy.",
+    "The session changed on disk, so the unsaved local transcript was kept as another saved version.",
     "legacy recovery branch notice can be normalized without exposing internal branch id",
   );
   eq(
     localizedBackendNoticeText("session changed on disk; unsaved local transcript was saved as a conflict copy"),
-    "The session changed on disk, so the unsaved local transcript was kept as a conflict copy.",
+    "The session changed on disk, so the unsaved local transcript was kept as another saved version.",
     "recovery copy notice can be normalized",
   );
   eq(
     localizedBackendNoticeText("session conflicts kept recurring; kept the transcript on the current recovery branch"),
-    "Repeated save conflicts were detected, so the current conflict copy was saved in an isolated recovery branch.",
+    "Repeated save conflicts were detected, so the current version was saved separately.",
     "legacy repeated recovery conflict notice can be normalized",
   );
   eq(
     localizedBackendNoticeText("repeated save conflicts were detected; saved the current conflict copy in place"),
-    "Repeated save conflicts were detected, so the current conflict copy was saved in an isolated recovery branch.",
+    "Repeated save conflicts were detected, so the current version was saved separately.",
     "repeated recovery conflict notice can be normalized",
   );
   eq(
@@ -249,7 +232,7 @@ console.log("\nuse controller meta");
   );
   eq(
     localizedNoticeText("reworded workspace contention copy", "workspace_lease"),
-    "Another Delivery session is writing to this workspace; this session will continue automatically when it is safe.",
+    "Another session is writing to this workspace; this session will continue automatically when it is safe.",
     "workspace lease contention uses its stable localized notice code",
   );
   eq(
@@ -264,7 +247,7 @@ console.log("\nuse controller meta");
   );
   eq(
     localizedNoticeText("reworded recovery copy", "session_recovery_forked"),
-    "The session changed on disk, so the unsaved local transcript was kept as a conflict copy.",
+    "The session changed on disk, so the unsaved local transcript was kept as another saved version.",
     "session recovery fork localization uses its stable notice code",
   );
   eq(
@@ -274,7 +257,7 @@ console.log("\nuse controller meta");
   );
   eq(
     localizedNoticeText("reworded depth cap", "session_recovery_depth_cap"),
-    "Repeated save conflicts were detected, so the current conflict copy was saved in an isolated recovery branch.",
+    "Repeated save conflicts were detected, so the current version was saved separately.",
     "session recovery depth-cap localization uses its stable notice code",
   );
   eq(
@@ -394,6 +377,16 @@ eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "pl
     true,
     "equivalent empty canonical todo lists keep meta stable",
   );
+  eq(
+    sameMeta(meta({ dismissedTodoBatches: ["a"] }), meta({ dismissedTodoBatches: ["a"] })),
+    true,
+    "identical dismissed todo batches keep meta stable",
+  );
+  eq(
+    sameMeta(meta({ dismissedTodoBatches: ["a"] }), meta({ dismissedTodoBatches: ["b"] })),
+    false,
+    "persisted todo dismissal changes invalidate meta equality",
+  );
 }
 
 {
@@ -403,6 +396,10 @@ eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "pl
   const todos = [{ content: "Keep task state", status: "in_progress" }];
   const withTodos = metaFromTab(tab(), meta({ canonicalTodos: todos }));
   eq(withTodos.canonicalTodos, todos, "optimistic tab metadata preserves canonical todos for the same session");
+  const dismissed = metaFromTab(tab({ sessionPath: "/s/a.jsonl" }), meta({ sessionPath: "/s/a.jsonl", dismissedTodoBatches: ["done"] }));
+  eq(dismissed.dismissedTodoBatches?.[0], "done", "optimistic metadata keeps session-sidecar todo dismissals");
+  const remounted = metaFromTab(tab({ sessionPath: "/s/leaf.jsonl" }), meta({ sessionPath: "/s/a.jsonl", dismissedTodoBatches: ["done"] }));
+  eq(remounted.dismissedTodoBatches, undefined, "a session remount waits for the new sidecar dismissals");
 }
 
 {
@@ -411,8 +408,10 @@ eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "pl
   const updated = reducer({ ...initialState, meta: before }, { type: "meta", meta: completed });
   eq(updated.meta?.canonicalTodos?.[0]?.status, "completed", "meta refresh applies canonical todo progress");
 
-  const reset = reducer(updated, { type: "reset" });
+  const withDismissed = reducer(updated, { type: "meta", meta: meta({ canonicalTodos: completed.canonicalTodos, dismissedTodoBatches: ["done"] }) });
+  const reset = reducer(withDismissed, { type: "reset" });
   eq(reset.meta?.canonicalTodos, undefined, "session reset clears canonical todos from the previous session");
+  eq(reset.meta?.dismissedTodoBatches, undefined, "session reset clears persisted todo dismissals from the previous session");
 
   const cleared = reducer(reset, { type: "meta", meta: meta({ canonicalTodos: [] }) });
   eq(cleared.meta?.canonicalTodos?.length, 0, "authoritative empty canonical todos survive meta refresh");
@@ -454,7 +453,7 @@ eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "pl
   });
   liveState = reducer(liveState, {
     type: "event",
-    e: { kind: "tool_result", tool: { id: "todo-live", name: "todo_write", readOnly: true, output: "Todos updated" } },
+    e: { kind: "tool_result_preview", tool: { id: "todo-live", name: "todo_write", readOnly: true, output: "Todos updated" } },
   });
   const liveTodo = liveState.items.find(
     (item): item is Extract<Item, { kind: "tool" }> => item.kind === "tool" && item.name === "todo_write",
@@ -462,7 +461,16 @@ eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "pl
   eq(
     JSON.stringify(resolveTodoPanelTodos(liveState.meta?.canonicalTodos, liveTodo ? parseTodos(liveTodo.args) : undefined)),
     JSON.stringify(JSON.parse(liveArgs).todos),
-    "panel switches to the live todo_write snapshot after it arrives",
+    "panel switches to the live todo_write snapshot when its result preview arrives",
+  );
+  liveState = reducer(liveState, {
+    type: "event",
+    e: { kind: "tool_result", tool: { id: "todo-live", name: "todo_write", readOnly: true, output: "Todos updated", durationMs: 4 } },
+  });
+  eq(
+    liveState.items.filter((item) => item.kind === "tool" && item.id === "todo-live").length,
+    1,
+    "provider-ordered terminal result upserts the preview instead of duplicating the card",
   );
 }
 
@@ -474,7 +482,41 @@ eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "pl
   eq(rendered.live, undefined, "final message closes the live stream before turn_done");
   eq(shouldReconcileStaleTurn(rendered, 1_000, 31_000), true, "stale completed stream still reconciles missed turn_done");
   eq(shouldReconcileStaleTurn(rendered, 1_000, 20_000), false, "fresh completed stream waits before reconciling");
-  eq(shouldReconcileStaleTurn({ ...rendered, turnActive: false }, 1_000, 31_000), false, "local pending send before turn_started does not reconcile");
+  const optimistic = reducer(initialState, { type: "user", text: "hello", seq: 0, submissionId: "watchdog-submit" });
+  eq(optimistic.turnActive, false, "optimistic send starts before turn_started arrives");
+  eq(shouldReconcileStaleTurn(optimistic, 0, optimistic.turnStartAt + 30_000), true, "optimistic send reconciles even when turn_started is missed");
+}
+
+{
+  const originalNow = Date.now;
+  let now = 1_000;
+  Date.now = () => now;
+  try {
+    let s = reducer(initialState, { type: "user", text: "keep timing", seq: 0, submissionId: "timing-submit" });
+    now = 8_000;
+    s = reducer(s, {
+      type: "event",
+      e: { kind: "turn_started", submissionId: "timing-submit", turnStartedAt: 1_200 },
+    });
+    eq(s.turnStartAt, 1_200, "a delayed turn_started event keeps the backend turn start instead of restarting the timer");
+
+    now = 12_000;
+    s = reducer(initialState, {
+      type: "backend_status",
+      running: true,
+      cancellable: true,
+      turnStartedAt: 1_200,
+    });
+    eq(s.turnStartAt, 1_200, "a rehydrated running tab restores the backend turn start instead of restarting the timer");
+
+    now = 13_000;
+    s = reducer(s, { type: "event", e: { kind: "turn_done" } });
+    now = 20_000;
+    s = reducer(s, { type: "event", e: { kind: "turn_started" } });
+    eq(s.turnStartAt, 20_000, "a legacy turn_started event begins a new remote turn instead of reusing completed-turn timing");
+  } finally {
+    Date.now = originalNow;
+  }
 }
 
 {
@@ -703,6 +745,33 @@ eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "pl
   eq(users[1]?.kind === "user" && users[1].text, "recent prompt", "older history keeps the current window");
   eq(s.historyHasOlder, false, "older history clears hasOlder when all pages are loaded");
   eq(s.historyOlderLoading, false, "older history clears loading");
+}
+
+// ── Todo-only readiness cards retract once the list shows all complete ──────
+{
+  const args = JSON.stringify({ todos: [{ content: "Write verification notes", status: "completed" }] });
+  let s = reducer(initialState, { type: "event", e: { kind: "turn_done", outcome: "final_readiness", readiness: { missing: ["todo"], attempts: 1 } } });
+  ok(s.items.some((item) => item.kind === "notice" && item.variant === "delivery"), "todo-only readiness card shows at the gated turn");
+  s = reducer(s, { type: "event", e: { kind: "tool_dispatch", tool: { id: "tw1", name: "todo_write", args, readOnly: true } } });
+  s = reducer(s, { type: "event", e: { kind: "tool_result", tool: { id: "tw1", name: "todo_write", args, readOnly: true, output: "task list updated" } } });
+  s = reducer(s, { type: "event", e: { kind: "turn_done" } });
+  ok(!s.items.some((item) => item.kind === "notice" && item.variant === "delivery"), "an all-complete todo list retracts the stale todo-only card");
+}
+{
+  const args = JSON.stringify({ todos: [{ content: "Write verification notes", status: "completed" }] });
+  let s = reducer(initialState, { type: "event", e: { kind: "turn_done", outcome: "final_readiness", readiness: { missing: ["todo", "verification"], attempts: 1 } } });
+  s = reducer(s, { type: "event", e: { kind: "tool_dispatch", tool: { id: "tw2", name: "todo_write", args, readOnly: true } } });
+  s = reducer(s, { type: "event", e: { kind: "tool_result", tool: { id: "tw2", name: "todo_write", args, readOnly: true, output: "task list updated" } } });
+  s = reducer(s, { type: "event", e: { kind: "turn_done" } });
+  ok(s.items.some((item) => item.kind === "notice" && item.variant === "delivery"), "a card listing non-todo gaps survives todo completion");
+}
+{
+  const args = JSON.stringify({ todos: [{ content: "Write verification notes", status: "in_progress" }] });
+  let s = reducer(initialState, { type: "event", e: { kind: "turn_done", outcome: "final_readiness", readiness: { missing: ["todo"], attempts: 1 } } });
+  s = reducer(s, { type: "event", e: { kind: "tool_dispatch", tool: { id: "tw3", name: "todo_write", args, readOnly: true } } });
+  s = reducer(s, { type: "event", e: { kind: "tool_result", tool: { id: "tw3", name: "todo_write", args, readOnly: true, output: "task list updated" } } });
+  s = reducer(s, { type: "event", e: { kind: "turn_done" } });
+  ok(s.items.some((item) => item.kind === "notice" && item.variant === "delivery"), "an incomplete todo list keeps the todo-only card");
 }
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);

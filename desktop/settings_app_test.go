@@ -1899,10 +1899,10 @@ func TestOfficialDeepSeekTemplateUsesRegionalPricing(t *testing.T) {
 		if got.Kind != "anthropic" || got.BaseURL != "https://api.deepseek.com/anthropic" || !config.EffectiveWebSearch(&got) || got.Thinking != "enabled" {
 			t.Fatalf("%s DeepSeek template = kind:%q base_url:%q web_search:%t thinking:%q, want Anthropic-compatible with web search", language, got.Kind, got.BaseURL, config.EffectiveWebSearch(&got), got.Thinking)
 		}
-		if price := got.Prices["deepseek-v4-flash"]; price == nil || price.Currency != "$" || price.Output != 0.28 {
+		if price := got.Prices["deepseek-v4-flash"]; price == nil || price.Currency != "$" || price.Output != 1.32 {
 			t.Fatalf("%s deepseek-v4-flash price = %+v, want frozen USD table", language, price)
 		}
-		if price := got.Prices["deepseek-v4-pro"]; price == nil || price.Currency != "$" || price.Output != 0.87 {
+		if price := got.Prices["deepseek-v4-pro"]; price == nil || price.Currency != "$" || price.Output != 3.96 {
 			t.Fatalf("%s deepseek-v4-pro price = %+v, want frozen USD table", language, price)
 		}
 	}
@@ -1957,8 +1957,8 @@ func TestSetCompactRatioPersistsToUserConfig(t *testing.T) {
 
 	app := NewApp()
 	defaultView := app.Settings()
-	if defaultView.Agent.CompactRatio != 0.85 || defaultView.Agent.EffectiveCompactRatio != 0.85 {
-		t.Fatalf("default compact ratios = %v/%v, want 0.85/0.85", defaultView.Agent.CompactRatio, defaultView.Agent.EffectiveCompactRatio)
+	if defaultView.Agent.CompactRatio != 0.80 || defaultView.Agent.EffectiveCompactRatio != 0.80 {
+		t.Fatalf("default compact ratios = %v/%v, want 0.80/0.80", defaultView.Agent.CompactRatio, defaultView.Agent.EffectiveCompactRatio)
 	}
 	if err := app.SetCompactRatio(0.7); err != nil {
 		t.Fatalf("SetCompactRatio: %v", err)
@@ -1996,7 +1996,7 @@ func TestSetCompactRatioRejectsActiveWorkBeforeSaving(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "stop background jobs") {
 		t.Fatalf("SetCompactRatio with background job error = %v, want active-work guard", err)
 	}
-	if got := config.LoadForEdit(config.UserConfigPath()).Agent.CompactRatio; got != 0.85 {
+	if got := config.LoadForEdit(config.UserConfigPath()).Agent.CompactRatio; got != 0.80 {
 		t.Fatalf("compact ratio changed after rejected update: %v", got)
 	}
 }
@@ -2066,7 +2066,7 @@ func TestSetDesktopCurrencyPersistsDisplayWithoutRewritingOfficialPricing(t *tes
 	}
 	flash, ok := cfg.Provider("deepseek-flash")
 	// Display currency must not rewrite frozen list prices (default USD table).
-	if !ok || flash.Price == nil || flash.Price.Output != 0.28 || flash.Price.Currency != "$" {
+	if !ok || flash.Price == nil || flash.Price.Output != 1.32 || flash.Price.Currency != "$" {
 		t.Fatalf("saved DeepSeek flash price = %+v, want frozen USD official price", flash)
 	}
 }

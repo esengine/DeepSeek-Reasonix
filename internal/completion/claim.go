@@ -23,6 +23,42 @@ func (c Claim) Empty() bool {
 	return len(c.Verified) == 0 && len(c.Unverified) == 0 && len(c.Risks) == 0
 }
 
+// LatestCompleteClaim returns the latest successful update_goal(complete)
+// account. continue/blocked reports and failed calls claim nothing.
+func LatestCompleteClaim(ledger *evidence.Ledger) (Claim, bool) {
+	if ledger == nil {
+		return Claim{}, false
+	}
+	var out Claim
+	found := false
+	for _, r := range ledger.Receipts() {
+		if !r.Success || r.ToolName != "update_goal" || len(r.Args) == 0 {
+			continue
+		}
+		var payload struct {
+			Status     string `json:"status"`
+			Completion struct {
+				Verified   []string `json:"verified"`
+				Unverified []string `json:"unverified"`
+				Risks      []string `json:"risks"`
+			} `json:"completion"`
+		}
+		if json.Unmarshal(r.Args, &payload) != nil {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(payload.Status)) != "complete" {
+			continue
+		}
+		out = Claim{
+			Verified:   trimAll(payload.Completion.Verified),
+			Unverified: trimAll(payload.Completion.Unverified),
+			Risks:      trimAll(payload.Completion.Risks),
+		}
+		found = true
+	}
+	return out, found
+}
+
 // claimOf extracts the latest successful update_goal completion claim. A
 // failed call claims nothing: outside an active goal turn the tool fails
 // closed, and a rejected claim must not reach the report.

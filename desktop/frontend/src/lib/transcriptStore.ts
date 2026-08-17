@@ -34,6 +34,7 @@ import { app } from "./bridge";
 import { noteHistoryPage, registerTranscriptCacheDiagnostics } from "./sessionDiagnostics";
 import { TranscriptMarkdownCache, type ParsedMarkdownValue } from "./transcriptMarkdownCache";
 export type { ParsedMarkdownValue } from "./transcriptMarkdownCache";
+import { historySearchAndAnswer } from "./searchTranscript";
 import { fileDiffFromWire, summarizeFileDiff } from "./tools";
 import {
   historyToolError,
@@ -278,19 +279,14 @@ function convertRecord(
   }
 
   if (m.role === "assistant") {
-    const hasText = m.content.trim() !== "" || (m.reasoning ?? "").trim() !== "";
-    if (hasText) {
-      const memoryCitations = asArray<MemoryCitation>(m.memoryCitations);
-      items.push({
-        kind: "assistant",
-        id,
-        text: m.content,
-        reasoning: m.reasoning ?? "",
-        streaming: false,
-        workDurationMs: m.workDurationMs,
-        memoryCitations: memoryCitations.length > 0 ? memoryCitations : undefined,
-      });
-    }
+    const memoryCitations = asArray<MemoryCitation>(m.memoryCitations);
+    items.push(...historySearchAndAnswer(id, {
+      content: m.content,
+      reasoning: m.reasoning,
+      workDurationMs: m.workDurationMs,
+      memoryCitations: memoryCitations.length > 0 ? memoryCitations : undefined,
+      serverSearch: m.serverSearch,
+    }));
     const toolCalls = m.toolCalls ?? [];
     // Positional scan cursor: id-less calls consume the following unconsumed
     // id-less tool rows in order, stopping at the first non-tool record —

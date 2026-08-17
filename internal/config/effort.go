@@ -37,9 +37,14 @@ var modelReasoningCapabilities = map[string]modelReasoningCapability{
 		Protocol: ReasoningProtocolDeepSeek,
 		Levels:   []string{"disabled", "low", "high", "max"},
 		Default:  "high",
-		Aliases:  map[string]string{"xhigh": "high"},
+		Aliases:  map[string]string{"medium": "high", "xhigh": "high"},
 	},
-	"deepseek-v4-pro": {Protocol: ReasoningProtocolDeepSeek, Levels: []string{"disabled", "high", "max"}, Default: "high"},
+	"deepseek-v4-pro": {
+		Protocol: ReasoningProtocolDeepSeek,
+		Levels:   []string{"disabled", "low", "high", "max"},
+		Default:  "high",
+		Aliases:  map[string]string{"medium": "high", "xhigh": "high"},
+	},
 }
 
 // EffortCapabilityForEntry returns the user-facing /effort levels for a resolved
@@ -148,14 +153,15 @@ func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {
 		return normalizeKimiK3ReasoningEffort(level)
 	}
 	supported := normalizedSupportedEfforts(e)
+	level = normalizeBuiltInModelEffortAlias(e, supported, level)
 	if len(supported) > 0 {
 		if containsString(supported, level) {
 			return level, nil
 		}
 		return "", fmt.Errorf("usage: /effort auto|%s", strings.Join(supported, "|"))
 	}
-	// V4 Flash 0731 added a real low depth. Keep this model-scoped: Pro and
-	// generic DeepSeek-compatible endpoints still normalize low to high unless
+	// V4 Flash and Pro expose a real low depth. Keep this model-scoped: generic
+	// DeepSeek-compatible endpoints still normalize low to high unless
 	// they explicitly advertise a different supported_efforts list.
 	if cap, ok := resolvedModelReasoningCapability(e); ok {
 		explicit := explicitReasoningProtocol(e)
@@ -443,8 +449,27 @@ func resolvedModelReasoningCapability(e *ProviderEntry) (modelReasoningCapabilit
 	if e == nil || e.Kind != "openai" {
 		return modelReasoningCapability{}, false
 	}
+	return modelReasoningCapabilityForEntry(e)
+}
+
+func modelReasoningCapabilityForEntry(e *ProviderEntry) (modelReasoningCapability, bool) {
+	if e == nil {
+		return modelReasoningCapability{}, false
+	}
 	cap, ok := modelReasoningCapabilities[strings.ToLower(strings.TrimSpace(e.Model))]
 	return cap, ok
+}
+
+func normalizeBuiltInModelEffortAlias(e *ProviderEntry, supported []string, level string) string {
+	cap, ok := modelReasoningCapabilityForEntry(e)
+	if !ok || !slices.Equal(supported, normalizedEffortLevels(cap.Levels)) {
+		return level
+	}
+	normalized, ok := cap.Aliases[level]
+	if !ok || !containsString(supported, normalized) {
+		return level
+	}
+	return normalized
 }
 
 func effortCapabilityFromModel(cap modelReasoningCapability) EffortCapability {

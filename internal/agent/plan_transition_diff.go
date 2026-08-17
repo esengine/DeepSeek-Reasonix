@@ -49,23 +49,23 @@ func planFromTodos(todos []evidence.TodoItem, revision int) (plancontract.Plan, 
 // It lives beside the plan diff because that is the field most likely to grow.
 func (a *Agent) recoveryProposal(plan *toolCallPlan, episodeID, subject, preview string) RecoveryProposal {
 	return RecoveryProposal{
-		AgentID:        a.recoveryAgentID,
-		TaskID:         a.recoveryTaskID,
-		TaskScopeID:    recoveryTaskScopeID(a.deliveryScopeID, a.recoveryRunSeq.Load()),
+		AgentID:        a.recovery.agentID,
+		TaskID:         a.recovery.taskID,
+		TaskScopeID:    recoveryTaskScopeID(a.task.scopeID, a.recovery.runSeq.Load()),
 		EpisodeID:      episodeID,
-		TaskSummary:    a.recoveryTaskSummary,
+		TaskSummary:    a.turn.recoveryTaskSummary,
 		Tool:           plan.evidenceName,
 		Args:           plan.evidenceArgs,
 		Subject:        subject,
 		Preview:        preview,
 		ReadOnly:       plan.readOnly,
-		Mutates:        plan.mutates,
+		Mutates:        plan.effects.StateMutation,
 		Verification:   plan.verification,
 		PlanTransition: plan.planTransition,
 		// The existing rule asks whether a retry drifts from the call that
 		// failed. This asks the question the user actually approved an answer
 		// to: is this write outside the plan they agreed on.
-		ExpandedScope: plan.mutates && a.mutationEscapesPlan(plan.evidenceName, plan.evidenceArgs),
+		ExpandedScope: plan.effects.StateMutation && a.mutationEscapesPlan(plan.evidenceName, plan.evidenceArgs),
 		PlanBefore:    plan.planBefore,
 		PlanAfter:     plan.planAfter,
 		PlanDiff:      plan.planDiff,

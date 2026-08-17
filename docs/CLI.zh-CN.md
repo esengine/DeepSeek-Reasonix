@@ -14,7 +14,7 @@
 ```sh
 reasonix
 reasonix --model deepseek-pro
-reasonix --profile delivery --effort high
+reasonix --effort high
 reasonix --dir /path/to/project
 ```
 
@@ -24,7 +24,6 @@ reasonix --dir /path/to/project
 | 参数 | 用途 |
 | --- | --- |
 | `--model NAME` | 选择已配置的 provider 或 `provider/model` 引用。 |
-| `--profile economy\|balanced\|delivery` | 选择运行时工作模式。 |
 | `--effort LEVEL` | 覆盖当前会话的 reasoning effort。 |
 | `--max-steps N` | 为本次运行设置工具调用轮数上限；`0` 使用自动执行。 |
 | `--dir PATH` | 加载配置和工具前切换 workspace 根目录。 |
@@ -107,8 +106,9 @@ reasonix config compact-ratio 75           # 设置用户全局默认值
 reasonix config compact-ratio --local 75   # 写入 ./reasonix.toml 项目覆盖
 ```
 
-可设置范围为 65–85%，内置默认值为 85%。数值越低越早压缩，可能降低 prompt prefix
-缓存复用率；数值越高则会在压缩前保留更多上下文。项目 `reasonix.toml` 的优先级高于
+可设置范围为 65–85%，内置默认值为 80%。数值越低越早压缩，可能降低 prompt prefix
+缓存复用率；数值越高则会在压缩前保留更多上下文。阈值以下完整工具结果可能增加普通请求成本；
+达到压力后会先持久剪枝，再运行 cache-aligned 摘要。项目 `reasonix.toml` 的优先级高于
 用户全局配置。修改会应用于新启动的 CLI 会话；已经运行的会话继续使用启动时加载的阈值。
 
 ## 一次性运行与自动化
@@ -124,8 +124,8 @@ echo "解释这段代码" | reasonix run
 ```
 
 未使用 `-p` 或结构化输出格式时，`reasonix run` 保持正常的终端流式展示。它也接受
-`--model`、`--profile`、`--max-steps`、`--effort`、`--dir`、`--add-dir`、
-`--continue`、`--resume QUERY`、`--copy`、`--allowed-tools` 和
+`--model`、`--max-steps`、`--effort`、`--dir`、
+`--add-dir`、`--continue`、`--resume QUERY`、`--copy`、`--allowed-tools` 和
 `--permission-mode`，以及作为 `--permission-mode auto` 别名的 `--auto` / `-y`。
 
 ### 基准对照组
@@ -300,7 +300,7 @@ reasonix --allowed-tools "Bash(go test ./...)" --allowed-tools read_file
 | 模式 | 行为 |
 | --- | --- |
 | `manual`、`ask` | 普通权限决策会弹出审批。 |
-| `auto` | 自动批准普通 fallback 操作，同时保留显式 ask 和 deny 规则。 |
+| `auto` | 自动批准普通 fallback 操作，包括交互式 `remember`/`forget`，同时保留显式 ask 和 deny 规则。 |
 | `acceptEdits` | 允许文件编辑工具；不等同于完整 Auto 模式。 |
 | `dontAsk` | 未预先允许的请求直接拒绝，不弹出审批。 |
 | `plan` | 以只读 Plan 模式启动交互式会话。 |
@@ -317,9 +317,11 @@ reasonix --allowed-tools "Bash(go test ./...)" --allowed-tools read_file
 `acceptEdits` 放行其列出的文件编辑工具，其他 Ask 决策失败关闭；`auto` 放行普通 writer
 fallback，但仍拒绝显式 ask 规则；`dontAsk` 拒绝未批准的 writer；`bypassPermissions`
 可越过普通 ask 与 writer fallback，但配置的 deny、Sandbox，以及始终需要人工新鲜批准的
-工具（记忆、plan、沙箱逃逸、受管配置写入）仍然生效。在所有模式下，拥有当前项目 store
-的顶层 controller 仍可创建有界、非敏感、create-only 的 project/reference 记忆；其他
-记忆变更在无人确认时仍会被拒绝。
+工具（plan、沙箱逃逸、受管配置写入）仍然生效。交互式 Auto 会放行
+`remember`/`forget` 的默认 fallback，但保留显式 ask 和 deny；交互式 YOLO 会绕过记忆 ask
+审批，但仍遵守 deny。
+在所有无头模式下，拥有当前项目 store 的顶层 controller 仍可创建有界、非敏感、
+create-only 的 project/reference 记忆；其他记忆变更在无人确认时仍会被拒绝。
 
 ## 附加目录
 
@@ -350,11 +352,11 @@ reasonix -p "同时更新两个项目" \
 | `Shift+Tab` | 按 `Ask → Auto → Plan → Ask` 循环。 |
 | `Ctrl+Y` | 独立切换 YOLO，不进入安全模式循环。 |
 
-响应式底栏左侧显示当前交互状态；空间足够时，右侧显示模型、推理强度和工作模式。第二行按
+响应式底栏左侧显示当前交互状态；空间足够时，右侧显示模型和推理强度。第二行按
 可用性显示仓库与会话遥测，例如缓存命中率、上下文占用、压缩余量、后台任务和余额。
 “就绪”表示输入框当前空闲；进入选择器、审批、图片粘贴、shell 模式等需要用户关注的状态
-时，这个位置会切换。窄终端会移动或压缩完整信息组，不会从中间截断标签。可见标签和工作
-模式值会跟随 `/language`。
+时，这个位置会切换。窄终端会移动或压缩完整信息组，不会从中间截断标签。可见标签和执行
+设定值会跟随 `/language`。
 
 使用 `/theme auto|light|dark` 选择终端背景模式，也可以从 `/theme` 列出的命名配色中选择
 强调色。输入框上下边线、插入光标、选区、滚动条和底栏都会使用当前 CLI 主题。Transcript
@@ -375,11 +377,11 @@ SSH 下远端进程无法读取本机剪贴板，请使用终端粘贴快捷键�
 
 | 命令 | 用途 |
 | --- | --- |
+| `/continue-checks [补充要求]` | 继续紧邻上一轮、已暂停的任务收尾检查，并保留其工具证据。该操作仅可消费一次；出现新的用户消息后，旧卡片会被拒绝。 |
 | `/model` | 搜索已配置模型并切换当前模型。 |
 | `/provider` | 选择 provider，再选择该 provider 下的模型。 |
 | `/resume` | 搜索最近会话并切换。 |
-| `/status` | 显示模型、effort、cache、Git、后台任务，以及工作模式或余额信息。 |
-| `/work-mode [economy\|balanced\|delivery]` | 查看或切换运行时工作模式；`/profile` 是别名。 |
+| `/status` | 显示模型、effort、cache、Git、后台任务和余额信息。 |
 | `/theme [auto\|light\|dark\|style]` | 查看或切换 CLI 背景模式和强调色。 |
 | `/currency [auto\|CNY\|USD]` | 查看或切换用户全局费用展示币种，并刷新当前运行时。 |
 | `/paste-image` | 读取剪贴板图片并插入可编辑的附件标记。 |
@@ -398,31 +400,11 @@ SSH 下远端进程无法读取本机剪贴板，请使用终端粘贴快捷键�
 | `/tree`、`/branch`、`/switch` | 查看或切换会话分支。 |
 | `/reload` | 重载 agent 运行时（扩展、工具、skills、commands、hooks、providers），保留当前会话。回合运行中只排队一次；失败原子——重建失败时当前运行时不受影响。 |
 
-切换模型、effort 或工作模式会重建运行时，同时保留当前对话、会话级权限覆盖、附加目录
+切换模型或 effort 会重建运行时，同时保留当前对话、会话级权限覆盖、附加目录
 访问权限和 session ownership。`/reload` 使用同一套失败原子重建语义。
+普通请求一律进入 executor，没有自动简单 / 轻量 / 完整任务模式。
+独立 Planner 只响应显式 Plan、批准边界和 Goal 启动。
 
-## 会话目录索引诊断
-
-桌面会话目录索引是可丢弃、可重建的 SQLite 查询投影；JSONL transcript 和 sidecar
-始终是权威数据。可只读检查，或仅替换投影：
-
-```sh
-reasonix doctor sessions [--json]
-reasonix sessions reindex [--json]
-reasonix sessions reindex --dir /path/to/sessions --dir /another/path
-```
-
-不传 `--dir` 时，reindex 会覆盖全局会话和桌面保存的全部项目。迁移、失败降级和数据安全
-契约见 [Session Catalog and Desktop Startup](./SESSION_CATALOG.md)。
-
-历史搜索使用独立的可丢弃投影：
-
-```sh
-reasonix doctor catalogs [--json]
-reasonix catalogs reindex history [--dir PATH ...] [--json]
-```
-
-详见 [历史搜索 Catalog](./HISTORY_SEARCH_CATALOG.zh-CN.md)。
 用量统计使用独立的可丢弃 rollup 投影：
 reasonix catalogs reindex usage [--json]
 详见 [用量 Catalog](./USAGE_CATALOG.zh-CN.md)。

@@ -34,6 +34,11 @@ const (
 	missingReasoningWarnStateLockFilename = "tool-call-reasoning-warning.lock"
 	missingReasoningWarnStateVersion      = 2
 	missingReasoningWarnStateCooldown     = 24 * time.Hour
+	// Fallback incidents start with a short quiet period, then admit one
+	// thinking-mode probe at a time. Repeated probe failures back off to the
+	// existing 24-hour ceiling without making background/billable requests.
+	missingReasoningFallbackProbeLease    = 5 * time.Minute
+	missingReasoningFallbackRetention     = 48 * time.Hour
 	missingReasoningWarnStateMaxIncidents = 256
 	missingReasoningHealthyResolveStreak  = 3
 	// Recovery bookkeeping must never make a turn wait indefinitely behind
@@ -41,6 +46,14 @@ const (
 	// the bounded retry rather than silently losing self-healing.
 	missingReasoningWarnStateLockTimeout = 200 * time.Millisecond
 )
+
+var missingReasoningFallbackBackoffs = [...]time.Duration{
+	10 * time.Minute,
+	30 * time.Minute,
+	2 * time.Hour,
+	6 * time.Hour,
+	24 * time.Hour,
+}
 
 type missingReasoningIncident struct {
 	Fingerprint            string `json:"fingerprint"`
@@ -53,6 +66,26 @@ type missingReasoningIncident struct {
 	// both generations continue to share the same active-incident boundary.
 	ResolveStreak         int   `json:"resolveStreak,omitempty"`
 	LastHealthyAtUnixNano int64 `json:"lastHealthyAtUnixNano,omitempty"`
+	// FallbackAtUnixNano is set only after a second missing-reasoning response.
+	// Older builds keep their fixed circuit; if they drop the new optional fields,
+	// current builds safely restart at the shortest adaptive backoff.
+	FallbackAtUnixNano     int64 `json:"fallbackAtUnixNano,omitempty"`
+	FallbackLevel          int   `json:"fallbackLevel,omitempty"`
+	NextProbeAtUnixNano    int64 `json:"nextProbeAtUnixNano,omitempty"`
+	ProbeClaimedAtUnixNano int64 `json:"probeClaimedAtUnixNano,omitempty"`
+}
+
+type missingReasoningRecoveryMode uint8
+
+const (
+	missingReasoningRecoveryNormal missingReasoningRecoveryMode = iota
+	missingReasoningRecoveryFallback
+	missingReasoningRecoveryProbe
+)
+
+type missingReasoningRecoveryDecision struct {
+	Mode           missingReasoningRecoveryMode
+	ProbeClaimedAt time.Time
 }
 
 type missingReasoningWarnDocument struct {
@@ -147,62 +180,129 @@ func missingReasoningUnixNanoFromMillis(unixMs int64) (int64, bool) {
 	return unixMs * int64(time.Millisecond), true
 }
 
+func validMissingReasoningIncidentFields(incident missingReasoningIncident) bool {
+	return incident.LastMissingUnixNano >= 0 && incident.LastResolvedAtUnixNano >= 0 &&
+		incident.LastHealthyAtUnixNano >= 0 && incident.FallbackAtUnixNano >= 0 &&
+		incident.NextProbeAtUnixNano >= 0 && incident.ProbeClaimedAtUnixNano >= 0 &&
+		incident.FallbackLevel >= 0 && incident.FallbackLevel <= len(missingReasoningFallbackBackoffs) &&
+		incident.ResolveStreak >= 0 && incident.ResolveStreak < missingReasoningHealthyResolveStreak
+}
+
+func missingReasoningFallbackBackoff(level int) time.Duration {
+	if level < 1 {
+		level = 1
+	}
+	if level > len(missingReasoningFallbackBackoffs) {
+		level = len(missingReasoningFallbackBackoffs)
+	}
+	return missingReasoningFallbackBackoffs[level-1]
+}
+
+func normalizeMissingReasoningFallbackFields(incident missingReasoningIncident) (missingReasoningIncident, bool) {
+	if incident.FallbackAtUnixNano == 0 {
+		if incident.FallbackLevel != 0 || incident.NextProbeAtUnixNano != 0 || incident.ProbeClaimedAtUnixNano != 0 {
+			return missingReasoningIncident{}, false
+		}
+		return incident, true
+	}
+	if incident.FallbackLevel == 0 {
+		// FallbackAtUnixNano predates adaptive recovery. Treat it as the first
+		// strike so an upgrade heals after ten minutes instead of inheriting the
+		// old fixed 24-hour downgrade.
+		incident.FallbackLevel = 1
+	}
+	if incident.NextProbeAtUnixNano == 0 {
+		incident.NextProbeAtUnixNano = time.Unix(0, incident.FallbackAtUnixNano).
+			Add(missingReasoningFallbackBackoff(incident.FallbackLevel)).UnixNano()
+	}
+	if incident.NextProbeAtUnixNano < incident.FallbackAtUnixNano ||
+		(incident.ProbeClaimedAtUnixNano != 0 && incident.ProbeClaimedAtUnixNano < incident.FallbackAtUnixNano) {
+		return missingReasoningIncident{}, false
+	}
+	return incident, true
+}
+
 func normalizeMissingReasoningIncident(incident missingReasoningIncident, now time.Time) (missingReasoningIncident, bool) {
 	incident.Fingerprint = strings.TrimSpace(incident.Fingerprint)
 	if !validMissingReasoningFingerprint(incident.Fingerprint) ||
-		incident.LastMissingUnixNano < 0 || incident.LastResolvedAtUnixNano < 0 ||
-		incident.LastHealthyAtUnixNano < 0 || incident.ResolveStreak < 0 ||
-		incident.ResolveStreak >= missingReasoningHealthyResolveStreak {
+		!validMissingReasoningIncidentFields(incident) {
+		return missingReasoningIncident{}, false
+	}
+	var ok bool
+	incident, ok = normalizeMissingReasoningFallbackFields(incident)
+	if !ok {
 		return missingReasoningIncident{}, false
 	}
 
+	incident, warnedAtUnixNano, ok := normalizeMissingReasoningTimestamps(incident)
+	if !ok {
+		return missingReasoningIncident{}, false
+	}
+	nowUnixNano := now.UnixNano()
+	if warnedAtUnixNano > nowUnixNano || incident.LastMissingUnixNano > nowUnixNano ||
+		incident.LastResolvedAtUnixNano > nowUnixNano || incident.LastHealthyAtUnixNano > nowUnixNano ||
+		incident.FallbackAtUnixNano > nowUnixNano || incident.ProbeClaimedAtUnixNano > nowUnixNano {
+		return missingReasoningIncident{}, false
+	}
+	if incident.LastMissingUnixNano > incident.LastResolvedAtUnixNano {
+		return normalizeActiveMissingReasoningIncident(incident, warnedAtUnixNano, now)
+	}
+	return normalizeResolvedMissingReasoningIncident(incident, now)
+}
+
+func normalizeMissingReasoningTimestamps(incident missingReasoningIncident) (missingReasoningIncident, int64, bool) {
 	warnedAtUnixNano := int64(0)
 	if incident.WarnedAtUnixMs != 0 {
 		var ok bool
 		warnedAtUnixNano, ok = missingReasoningUnixNanoFromMillis(incident.WarnedAtUnixMs)
 		if !ok {
-			return missingReasoningIncident{}, false
+			return missingReasoningIncident{}, 0, false
 		}
 	}
-	if incident.LastMissingUnixMs != 0 {
-		lastMissingFromMillis, ok := missingReasoningUnixNanoFromMillis(incident.LastMissingUnixMs)
-		if !ok {
-			return missingReasoningIncident{}, false
-		}
-		if incident.LastMissingUnixNano == 0 {
-			incident.LastMissingUnixNano = lastMissingFromMillis
-		} else if incident.LastMissingUnixNano/int64(time.Millisecond) != incident.LastMissingUnixMs {
-			return missingReasoningIncident{}, false
-		}
-	} else if incident.LastMissingUnixNano != 0 {
-		return missingReasoningIncident{}, false
+	if incident.LastMissingUnixMs == 0 {
+		return incident, warnedAtUnixNano, incident.LastMissingUnixNano == 0
 	}
+	lastMissingFromMillis, ok := missingReasoningUnixNanoFromMillis(incident.LastMissingUnixMs)
+	if !ok {
+		return missingReasoningIncident{}, 0, false
+	}
+	if incident.LastMissingUnixNano == 0 {
+		incident.LastMissingUnixNano = lastMissingFromMillis
+	} else if incident.LastMissingUnixNano/int64(time.Millisecond) != incident.LastMissingUnixMs {
+		return missingReasoningIncident{}, 0, false
+	}
+	return incident, warnedAtUnixNano, true
+}
 
-	nowUnixNano := now.UnixNano()
-	if warnedAtUnixNano > nowUnixNano || incident.LastMissingUnixNano > nowUnixNano ||
-		incident.LastResolvedAtUnixNano > nowUnixNano || incident.LastHealthyAtUnixNano > nowUnixNano {
+func normalizeActiveMissingReasoningIncident(incident missingReasoningIncident, warnedAtUnixNano int64, now time.Time) (missingReasoningIncident, bool) {
+	if warnedAtUnixNano == 0 || incident.LastMissingUnixNano < warnedAtUnixNano {
 		return missingReasoningIncident{}, false
 	}
-	if incident.LastMissingUnixNano > incident.LastResolvedAtUnixNano {
-		if warnedAtUnixNano == 0 || incident.LastMissingUnixNano < warnedAtUnixNano {
-			return missingReasoningIncident{}, false
-		}
-		age := now.Sub(time.UnixMilli(incident.WarnedAtUnixMs))
-		if age < 0 || age >= missingReasoningWarnStateCooldown {
-			return missingReasoningIncident{}, false
-		}
-		if incident.ResolveStreak > 0 {
-			if incident.LastHealthyAtUnixNano <= incident.LastMissingUnixNano ||
-				incident.LastHealthyAtUnixNano <= incident.LastResolvedAtUnixNano {
-				return missingReasoningIncident{}, false
-			}
-		} else if incident.LastHealthyAtUnixNano != 0 {
-			return missingReasoningIncident{}, false
-		}
-		return incident, true
+	ageOrigin := time.UnixMilli(incident.WarnedAtUnixMs)
+	maxAge := missingReasoningWarnStateCooldown
+	if incident.FallbackAtUnixNano != 0 {
+		ageOrigin = time.Unix(0, incident.lastEventUnixNano())
+		maxAge = missingReasoningFallbackRetention
 	}
+	age := now.Sub(ageOrigin)
+	if age < 0 || age >= maxAge {
+		return missingReasoningIncident{}, false
+	}
+	if incident.ResolveStreak > 0 {
+		if incident.LastHealthyAtUnixNano <= incident.LastMissingUnixNano ||
+			incident.LastHealthyAtUnixNano <= incident.LastResolvedAtUnixNano {
+			return missingReasoningIncident{}, false
+		}
+	} else if incident.LastHealthyAtUnixNano != 0 {
+		return missingReasoningIncident{}, false
+	}
+	return incident, true
+}
+
+func normalizeResolvedMissingReasoningIncident(incident missingReasoningIncident, now time.Time) (missingReasoningIncident, bool) {
 	if incident.LastResolvedAtUnixNano <= 0 || incident.ResolveStreak != 0 ||
-		incident.LastHealthyAtUnixNano > incident.LastResolvedAtUnixNano {
+		incident.LastHealthyAtUnixNano > incident.LastResolvedAtUnixNano || incident.FallbackAtUnixNano != 0 ||
+		incident.FallbackLevel != 0 || incident.NextProbeAtUnixNano != 0 || incident.ProbeClaimedAtUnixNano != 0 {
 		return missingReasoningIncident{}, false
 	}
 	resolvedAt := time.Unix(0, incident.LastResolvedAtUnixNano)
@@ -214,8 +314,13 @@ func normalizeMissingReasoningIncident(incident missingReasoningIncident, now ti
 }
 
 func (incident missingReasoningIncident) lastEventUnixNano() int64 {
-	lastEvent := max(incident.LastHealthyAtUnixNano, max(incident.LastResolvedAtUnixNano, incident.LastMissingUnixNano))
+	lastEvent := max(incident.ProbeClaimedAtUnixNano, incident.lastObservedUnixNano())
 	return lastEvent
+}
+
+func (incident missingReasoningIncident) lastObservedUnixNano() int64 {
+	return max(incident.FallbackAtUnixNano,
+		max(incident.LastHealthyAtUnixNano, max(incident.LastResolvedAtUnixNano, incident.LastMissingUnixNano)))
 }
 
 // load returns only current v2 incidents and resolution watermarks. Missing,
@@ -326,6 +431,12 @@ func (s *missingReasoningWarnState) persistClaimAt(fingerprint string, observedA
 		observedAtUnixNano <= incident.LastHealthyAtUnixNano) {
 		return false
 	}
+	// Once fallback is open, intentional disabled-thinking turns are not new
+	// incidents. Only the single half-open owner may advance or reopen the
+	// circuit through the token-checked probe transactions below.
+	if exists && incident.FallbackAtUnixNano != 0 {
+		return false
+	}
 	activeIncident := exists && incident.LastMissingUnixNano > incident.LastResolvedAtUnixNano
 	shouldRetry := !activeIncident
 	if shouldRetry {
@@ -400,9 +511,102 @@ func (s *missingReasoningWarnState) claim(fingerprint string) bool {
 	return s.claimAt(fingerprint, time.Now())
 }
 
+// activeAt reports whether the provider/configuration circuit is open. It is a
+// read-only transaction: failures return false so bookkeeping can never force
+// an unverified fallback mode.
+func (s *missingReasoningWarnState) activeAt(fingerprint string, observedAt time.Time) bool {
+	incident, exists := s.incidentAt(fingerprint, observedAt)
+	return exists && incident.LastMissingUnixNano > incident.LastResolvedAtUnixNano
+}
+
+func (s *missingReasoningWarnState) incidentAt(fingerprint string, observedAt time.Time) (missingReasoningIncident, bool) {
+	fingerprint = strings.TrimSpace(fingerprint)
+	if s == nil || s.dir == "" || !validMissingReasoningFingerprint(fingerprint) {
+		return missingReasoningIncident{}, false
+	}
+	observedAt = normalizeMissingReasoningObservedAt(observedAt)
+	processLock := s.processLock()
+	processLock.Lock()
+	defer processLock.Unlock()
+
+	release, err := s.acquire()
+	if err != nil {
+		return missingReasoningIncident{}, false
+	}
+	defer release()
+	incidents, err := s.load(missingReasoningTransactionNow(observedAt))
+	if err != nil {
+		return missingReasoningIncident{}, false
+	}
+	incident, exists := incidents[fingerprint]
+	return incident, exists
+}
+
+// fallbackActiveAt reports whether repeated omissions opened the adaptive
+// fallback circuit. A first omission only consumes the exact-replay budget and
+// must not disable thinking when that replay recovered successfully.
+func (s *missingReasoningWarnState) fallbackActiveAt(fingerprint string, observedAt time.Time) bool {
+	incident, exists := s.incidentAt(fingerprint, observedAt)
+	return exists && incident.LastMissingUnixNano > incident.LastResolvedAtUnixNano && incident.FallbackAtUnixNano != 0
+}
+
+// openFallbackAt records the second missing response that exhausted exact
+// replay. Persistence failure is non-fatal: the current conversation may still
+// use the verified fallback, but a future process will conservatively probe.
+func (s *missingReasoningWarnState) openFallbackAt(fingerprint string, observedAt time.Time) bool {
+	fingerprint = strings.TrimSpace(fingerprint)
+	if s == nil || s.dir == "" || !validMissingReasoningFingerprint(fingerprint) {
+		return false
+	}
+	observedAt = normalizeMissingReasoningObservedAt(observedAt)
+	processLock := s.processLock()
+	processLock.Lock()
+	defer processLock.Unlock()
+
+	release, err := s.acquire()
+	if err != nil {
+		return false
+	}
+	defer release()
+	incidents, err := s.load(missingReasoningTransactionNow(observedAt))
+	if err != nil {
+		return false
+	}
+	incident, exists := incidents[fingerprint]
+	observedAtUnixNano := observedAt.UnixNano()
+	if exists && (observedAtUnixNano <= incident.LastResolvedAtUnixNano ||
+		observedAtUnixNano <= incident.LastHealthyAtUnixNano) {
+		return false
+	}
+	if !exists || incident.LastMissingUnixNano <= incident.LastResolvedAtUnixNano {
+		incident = missingReasoningIncident{
+			Fingerprint:            fingerprint,
+			WarnedAtUnixMs:         observedAt.UnixMilli(),
+			LastResolvedAtUnixNano: incident.LastResolvedAtUnixNano,
+		}
+	}
+	if incident.FallbackLevel == 0 {
+		incident.FallbackLevel = 1
+	}
+	if observedAtUnixNano > incident.LastMissingUnixNano {
+		incident.LastMissingUnixMs = observedAt.UnixMilli()
+		incident.LastMissingUnixNano = observedAtUnixNano
+	}
+	incident.ResolveStreak = 0
+	incident.LastHealthyAtUnixNano = 0
+	if observedAtUnixNano > incident.FallbackAtUnixNano {
+		incident.FallbackAtUnixNano = observedAtUnixNano
+	}
+	incident.NextProbeAtUnixNano = observedAt.Add(missingReasoningFallbackBackoff(incident.FallbackLevel)).UnixNano()
+	incident.ProbeClaimedAtUnixNano = 0
+	incidents[fingerprint] = incident
+	return s.save(incidents) == nil
+}
+
 type missingReasoningResolveResult struct {
-	Recorded bool
-	Resolved bool
+	Recorded       bool
+	Resolved       bool
+	ProbeClaimedAt time.Time
 }
 
 // resolveAt records one healthy tool-call turn. Three consecutive healthy
@@ -434,6 +638,11 @@ func (s *missingReasoningWarnState) resolveAt(fingerprint string, observedAt tim
 	if !exists || incident.LastMissingUnixNano <= incident.LastResolvedAtUnixNano {
 		return missingReasoningResolveResult{Recorded: true, Resolved: true}
 	}
+	if incident.FallbackAtUnixNano != 0 {
+		// Fallback circuits are resolved only by their half-open owner. This
+		// rejects delayed healthy completions from a pre-fallback request.
+		return missingReasoningResolveResult{Recorded: true}
+	}
 	if incident.LastMissingUnixNano >= observedAtUnixNano || incident.LastHealthyAtUnixNano >= observedAtUnixNano {
 		return missingReasoningResolveResult{Recorded: true}
 	}
@@ -443,6 +652,10 @@ func (s *missingReasoningWarnState) resolveAt(fingerprint string, observedAt tim
 	if resolved {
 		incident.ResolveStreak = 0
 		incident.LastResolvedAtUnixNano = observedAtUnixNano
+		incident.FallbackAtUnixNano = 0
+		incident.FallbackLevel = 0
+		incident.NextProbeAtUnixNano = 0
+		incident.ProbeClaimedAtUnixNano = 0
 	}
 	incidents[fingerprint] = incident
 	if s.save(incidents) != nil {

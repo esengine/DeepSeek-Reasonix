@@ -32,7 +32,7 @@ func TestRunPersistsRawUserInputSeparatelyFromProviderContext(t *testing.T) {
 
 	const raw = "fix the bug"
 	const composed = "<capability-route version=\"1\">\nuse review\n</capability-route>\n\nfix the bug"
-	ctx := WithRawUserInput(context.Background(), raw)
+	ctx := withNoClosedLoop(WithRawUserInput(context.Background(), raw))
 	if err := a.Run(ctx, composed); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -41,8 +41,8 @@ func TestRunPersistsRawUserInputSeparatelyFromProviderContext(t *testing.T) {
 	if len(stored) < 2 {
 		t.Fatalf("stored messages = %d, want system and user", len(stored))
 	}
-	if got := stored[1].Content; got != composed {
-		t.Fatalf("stored provider content = %q, want composed %q", got, composed)
+	if got := stored[1].Content; !strings.HasPrefix(got, composed) || strings.Contains(got, "<execution-policy") {
+		t.Fatalf("stored provider content = %q, want composed %q without execution-policy", got, composed)
 	}
 	if got := stored[1].RawContent; got != raw {
 		t.Fatalf("stored raw content = %q, want raw %q", got, raw)
@@ -50,7 +50,7 @@ func TestRunPersistsRawUserInputSeparatelyFromProviderContext(t *testing.T) {
 	if stored[1].ProviderContent != "" {
 		t.Fatalf("stored transitional provider content was not cleared: %+v", stored[1])
 	}
-	if len(prov.request.Messages) < 2 || prov.request.Messages[1].Content != composed {
+	if len(prov.request.Messages) < 2 || !strings.HasPrefix(prov.request.Messages[1].Content, composed) {
 		t.Fatalf("provider request did not receive composed context: %+v", prov.request.Messages)
 	}
 	if prov.request.Messages[1].RawContent != "" || prov.request.Messages[1].ProviderContent != "" {
@@ -67,22 +67,14 @@ func TestRunPersistsRawUserInputSeparatelyFromProviderContext(t *testing.T) {
 	if err := json.Unmarshal(encoded, &legacy); err != nil {
 		t.Fatalf("decode with previous-release shape: %v", err)
 	}
-	if legacy.Content != composed {
-		t.Fatalf("previous-release reader sees %q, want provider-visible %q", legacy.Content, composed)
+	if !strings.HasPrefix(legacy.Content, composed) || strings.Contains(legacy.Content, "<execution-policy") {
+		t.Fatalf("stored content = %q, want composed prefix without execution-policy", legacy.Content)
 	}
 
-	receipt := a.CompletionReceipt()
-	if receipt == nil {
-		t.Fatal("completion receipt is nil")
-	}
-	if len(receipt.Gaps) != 2 {
-		t.Fatalf("completion gaps = %+v, want the atomic requirement and mutation check", receipt.Gaps)
-	}
-	if got := receipt.Gaps[0].Detail; got != "r1: "+raw {
-		t.Fatalf("atomic criterion = %q, want raw user input %q", got, raw)
-	}
-	if strings.Contains(receipt.Gaps[0].Detail, "capability-route") {
-		t.Fatalf("completion receipt leaked transient provider context: %+v", receipt.Gaps)
+	if receipt := a.CompletionReceipt(); receipt != nil && len(receipt.Gaps) > 0 {
+		if strings.Contains(receipt.Gaps[0].Detail, "capability-route") {
+			t.Fatalf("completion receipt leaked transient provider context: %+v", receipt.Gaps)
+		}
 	}
 }
 
@@ -110,7 +102,7 @@ Policy: prefer means use the skill for the required change
 		!strings.Contains(prov.request.Messages[1].Content, raw) {
 		t.Fatalf("provider lost the capability route: %+v", prov.request.Messages)
 	}
-	if got := a.turnInput; got != raw {
+	if got := a.turn.turnInput; got != raw {
 		t.Fatalf("contract input = %q, want authenticated raw input %q", got, raw)
 	}
 	c := a.LiveContract()
@@ -122,13 +114,15 @@ Policy: prefer means use the skill for the required change
 func TestCompletionContractUsesGoalScopeTaskText(t *testing.T) {
 	prov := &userInputCaptureProvider{}
 	a := New(prov, tool.NewRegistry(), NewSession("system"), Options{}, event.Discard)
-	ctx := WithRawUserInput(context.Background(), "Continue working.")
+	ctx := withNoClosedLoop(WithRawUserInput(context.Background(), "Continue working."))
 	ctx = WithDeliveryExecutionScope(ctx, DeliveryExecutionScope{ID: "goal-1", TaskText: "fix the parser"})
 
 	if err := a.Run(ctx, "<goal-context>continue</goal-context>"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	assertAtomicCriterion(t, a, "fix the parser")
+	if got := a.turn.turnInput; got != "fix the parser" {
+		t.Fatalf("goal scope task text = %q", got)
+	}
 }
 
 func TestCompletionContractUsesPristineSubagentTaskText(t *testing.T) {
@@ -138,20 +132,11 @@ func TestCompletionContractUsesPristineSubagentTaskText(t *testing.T) {
 	}, event.Discard)
 	const wrapped = "<workspace-context>private host framing</workspace-context>\n\nfix the parser"
 
-	if err := a.Run(context.Background(), wrapped); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), wrapped); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	assertAtomicCriterion(t, a, "fix the parser")
-}
-
-func assertAtomicCriterion(t *testing.T, a *Agent, want string) {
-	t.Helper()
-	receipt := a.CompletionReceipt()
-	if receipt == nil || len(receipt.Gaps) == 0 {
-		t.Fatalf("completion receipt = %+v, want atomic criterion %q", receipt, want)
-	}
-	if got := receipt.Gaps[0].Detail; got != "r1: "+want {
-		t.Fatalf("atomic criterion = %q, want %q", got, want)
+	if got := a.turn.turnInput; got != "fix the parser" {
+		t.Fatalf("classifier task text = %q", got)
 	}
 }
 

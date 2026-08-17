@@ -162,8 +162,9 @@ func TestNewSelectsMaxOutputTokenDefaultByEndpoint(t *testing.T) {
 	}{
 		{name: "native anthropic", want: provider.DefaultOrdinaryOutputTokens},
 		{name: "unknown compatible gateway", baseURL: "https://proxy.example.com/anthropic", want: provider.DefaultOrdinaryOutputTokens},
-		{name: "official deepseek", baseURL: "https://api.deepseek.com/anthropic", want: provider.DefaultReasoningOutputTokens},
-		{name: "official deepseek high", baseURL: "https://api.deepseek.com/anthropic", extra: map[string]any{"effort": "high"}, want: provider.DefaultHighReasoningOutputTokens},
+		{name: "official deepseek", baseURL: "https://api.deepseek.com/anthropic", want: provider.DeepSeekMaxOutputTokens},
+		{name: "official deepseek high", baseURL: "https://api.deepseek.com/anthropic", extra: map[string]any{"effort": "high"}, want: provider.DeepSeekMaxOutputTokens},
+		{name: "official deepseek thinking off", baseURL: "https://api.deepseek.com/anthropic", extra: map[string]any{"effort": "none"}, want: provider.DeepSeekMaxOutputTokens},
 		{name: "explicit override", baseURL: "https://api.deepseek.com/anthropic", extra: map[string]any{"max_output_tokens": 8192}, want: 8192},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -436,8 +437,8 @@ data: {"type":"message_stop"}
 }
 
 // TestReadStreamRequiresMessageStop: EOF after a complete tool block but before
-// message_stop must surface StreamInterruptedError so the attempt stays
-// uncommitted (tool calls remain speculative).
+// message_stop or message_delta.stop_reason must surface StreamInterruptedError
+// so the attempt stays uncommitted (tool calls remain speculative).
 func TestReadStreamRequiresMessageStop(t *testing.T) {
 	sse := `event: message_start
 data: {"type":"message_start","message":{"id":"msg_1","usage":{"input_tokens":10}}}
@@ -754,11 +755,11 @@ func TestBuildRequestDeepSeekThinkingModes(t *testing.T) {
 		{name: "Flash low", model: "deepseek-v4-flash", input: "low", want: "low"},
 		{name: "Flash legacy medium", model: "deepseek-v4-flash", input: "medium", want: "high"},
 		{name: "Flash legacy xhigh", model: "deepseek-v4-flash", input: "xhigh", want: "high"},
-		{name: "Pro low", model: "deepseek-v4-pro", input: "low", want: "high"},
+		{name: "Pro low", model: "deepseek-v4-pro", input: "low", want: "low"},
 		{name: "Pro legacy medium", model: "deepseek-v4-pro", input: "medium", want: "high"},
-		{name: "Pro legacy xhigh", model: "deepseek-v4-pro", input: "xhigh", want: "max"},
+		{name: "Pro legacy xhigh", model: "deepseek-v4-pro", input: "xhigh", want: "high"},
 		{name: "Sonnet alias uses Flash", model: "claude-sonnet-4-6", input: "low", want: "low"},
-		{name: "Opus alias uses Pro", model: "claude-opus-4-8", input: "xhigh", want: "max"},
+		{name: "Opus alias legacy xhigh", model: "claude-opus-4-8", input: "xhigh", want: "high"},
 		{name: "unknown model falls back to Flash", model: "unknown-model", input: "xhigh", want: "high"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

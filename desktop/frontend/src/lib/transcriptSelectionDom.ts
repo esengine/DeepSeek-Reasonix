@@ -217,6 +217,11 @@ function nearestSelectableRoot(doc: Document, x: number, y: number): HTMLElement
   return nearest;
 }
 
+/** Projection readiness for the selectable root at a client coordinate. */
+export function transcriptSelectionProjectionReadyAtPoint(doc: Document, x: number, y: number): boolean {
+  return transcriptSelectionProjectionReadyForNode(nearestSelectableRoot(doc, x, y));
+}
+
 export function transcriptSelectionPointFromClient(doc: Document, x: number, y: number): TranscriptSelectionPoint | null {
   const caretDoc = doc as CaretDocument;
   const root = nearestSelectableRoot(doc, x, y);

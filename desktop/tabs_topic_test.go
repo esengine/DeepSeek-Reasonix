@@ -763,24 +763,35 @@ func TestAmbiguousLegacyRecoverySessionsMigrateIntoTopics(t *testing.T) {
 	}
 
 	app := NewApp()
-	nodes := waitForCatalogTopic(t, app, "global", "", legacySessionTopicID(recovery))
+	// Filename recovery folds into the root ordinary row; History keeps the
+	// physical recovery file reachable as another saved version.
+	app.startSessionCatalog(false)
+	t.Cleanup(func() { app.stopSessionCatalog(time.Second) })
+	nodes := waitForCatalogTreeCondition(t, app, "filename recovery folded into one ordinary row", func(nodes []ProjectNode) bool {
+		for _, folder := range nodes {
+			if folder.Kind != "global_folder" {
+				continue
+			}
+			if len(folder.Children) != 1 {
+				return false
+			}
+			return folder.Children[0].TopicID == legacySessionTopicID(normal)
+		}
+		return false
+	})
 	if len(nodes) != 1 || nodes[0].Kind != "global_folder" {
 		t.Fatalf("project tree = %#v, want global folder", nodes)
 	}
-	if got := len(nodes[0].Children); got != 2 {
-		t.Fatalf("global migrated topics = %d, want both sessions preserved: %#v", got, nodes[0].Children)
+	if got := len(nodes[0].Children); got != 1 {
+		t.Fatalf("global ordinary topics = %d, want 1 folded conversation: %#v", got, nodes[0].Children)
 	}
-	wantTopics := map[string]bool{legacySessionTopicID(normal): true, legacySessionTopicID(recovery): true}
-	for _, node := range nodes[0].Children {
-		delete(wantTopics, node.TopicID)
+	if _, err := os.Stat(recovery); err != nil {
+		t.Fatalf("physical recovery file must remain on disk: %v", err)
 	}
-	if len(wantTopics) != 0 {
-		t.Fatalf("migrated topics missing %v: %#v", wantTopics, nodes[0].Children)
-	}
-	if meta, ok, err := agent.LoadBranchMeta(recovery); err != nil || !ok {
+	if meta, ok, err := agent.LoadBranchMeta(recovery); err != nil {
 		t.Fatalf("load recovery meta: %v", err)
-	} else if strings.TrimSpace(meta.TopicID) == "" {
-		t.Fatal("ambiguous legacy recovery branch was not migrated into a visible topic")
+	} else if ok && strings.TrimSpace(meta.TopicID) == "" && !agent.LooksLikeRecoveryFilename(recovery) {
+		t.Fatal("legacy recovery branch lost both meta topic and filename lineage")
 	}
 }
 
@@ -2140,11 +2151,11 @@ func TestCreateTopicAppearsFirstInProjectTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create first topic: %v", err)
 	}
+	waitForLaterTopicTimestamp(first.CreatedAt)
 	second, err := app.CreateTopic("project", projectRoot, "")
 	if err != nil {
 		t.Fatalf("create second topic: %v", err)
 	}
-
 	nodes := app.ListProjectTree()
 	if len(nodes) != 1 || len(nodes[0].Children) != 2 {
 		t.Fatalf("project tree = %#v, want one project with two topics", nodes)
@@ -2165,11 +2176,11 @@ func TestCreateGlobalTopicAppearsFirstInProjectTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create first global topic: %v", err)
 	}
+	waitForLaterTopicTimestamp(first.CreatedAt)
 	second, err := app.CreateTopic("global", "", "")
 	if err != nil {
 		t.Fatalf("create second global topic: %v", err)
 	}
-
 	nodes := app.ListProjectTree()
 	if len(nodes) != 1 || nodes[0].Kind != "global_folder" || len(nodes[0].Children) != 2 {
 		t.Fatalf("project tree = %#v, want Global with two topics", nodes)

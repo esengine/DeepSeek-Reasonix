@@ -117,7 +117,11 @@ func doctorSessionsCommand(args []string) int {
 	fmt.Printf("  mode: %s\n", status.Mode)
 	fmt.Printf("  revision: %d\n", status.Revision)
 	fmt.Printf("  indexed: %d\n", status.Indexed)
+	fmt.Printf("  physical sessions: %d\n", status.PhysicalSessions)
+	fmt.Printf("  logical sessions: %d\n", status.LogicalSessions)
 	fmt.Printf("  repair pending: %d\n", status.RepairPending)
+	fmt.Printf("  recovery: %d groups, %d branches, %d diverged, %d safe cleanup\n",
+		status.RecoveryGroups, status.RecoveryBranches, status.RecoveryDiverged, status.CleanupEligible)
 	if status.LastError != "" {
 		fmt.Printf("  note: %s\n", status.LastError)
 	}

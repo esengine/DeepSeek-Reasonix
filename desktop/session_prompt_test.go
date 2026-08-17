@@ -149,7 +149,7 @@ func TestMigratedSessionWithoutSystemPromptPersistsThroughDesktopSwitch(t *testi
 	if got[0].Role != provider.RoleSystem || got[0].Content != freshSystem {
 		t.Fatalf("reloaded system prompt = %+v, want %q", got[0], freshSystem)
 	}
-	if got[3].Role != provider.RoleUser || got[3].Content != "new desktop turn" {
+	if got[3].Role != provider.RoleUser || agent.StripTransientUserBlocks(got[3].Content) != "new desktop turn" {
 		t.Fatalf("reloaded new user turn = %+v", got[3])
 	}
 	if got[4].Role != provider.RoleAssistant || got[4].Content != "ok" {
@@ -268,7 +268,7 @@ func TestParallelDesktopTabsPersistCompleteTranscriptsAcrossReload(t *testing.T)
 			user := msgs[1+turn*2]
 			assistant := msgs[2+turn*2]
 			wantUser := fmt.Sprintf("tab-%02d-turn-%02d", tabIndex, turn)
-			if user.Role != provider.RoleUser || user.Content != wantUser {
+			if user.Role != provider.RoleUser || agent.StripTransientUserBlocks(user.Content) != wantUser {
 				t.Fatalf("%s turn %d user = %+v, want %q", id, turn, user, wantUser)
 			}
 			if assistant.Role != provider.RoleAssistant || assistant.Content != "ok" {

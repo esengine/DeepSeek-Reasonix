@@ -54,7 +54,9 @@ class FakeWorker implements MarkdownWorkerLike {
     this.onmessage?.({ data: { id, error } } as MessageEvent<MarkdownParseResponse>);
   }
   crash(): void {
-    this.onerror?.(new ErrorEvent("error"));
+    // Node 24 does not expose the browser ErrorEvent constructor. The client
+    // intentionally treats worker.onerror as a signal and does not inspect it.
+    this.onerror?.({ type: "error" } as ErrorEvent);
   }
   terminate(): void {
     this.terminated += 1;

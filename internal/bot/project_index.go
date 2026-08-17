@@ -616,7 +616,7 @@ func searchBotProjectsWithRG(ctx context.Context, rg string, projects []botProje
 		query,
 	}
 	args = append(args, roots...)
-	cmd := exec.CommandContext(ctx, rg, args...)
+	cmd := proc.CommandContext(ctx, rg, args...)
 	cmd.Env = secrets.ProcessEnv()
 	// The desktop app hosts bot bridges in the GUI process; without this an
 	// rg search flashes a console window on Windows.
