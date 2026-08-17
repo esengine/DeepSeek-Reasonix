@@ -2,6 +2,217 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.26.0",
+      "date": "2026-08-17",
+      "channel": "stable",
+      "title": {
+        "en": "DeepSeek V4 scheduled pricing and Pro low reasoning effort",
+        "zh": "DeepSeek V4 峰谷价格与 Pro low 推理强度"
+      },
+      "summary": {
+        "en": "Introduces effective-dated peak and off-peak pricing for DeepSeek V4 Flash and Pro, a unified cost quote across all surfaces, and support for low reasoning effort on DeepSeek V4 Pro.",
+        "zh": "引入 DeepSeek V4 Flash 和 Pro 的峰谷价格，统一各端成本报价，并支持 DeepSeek V4 Pro 的 low 推理强度。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Billing",
+            "zh": "计费"
+          },
+          "body": {
+            "en": "Learn how DeepSeek V4 peak and off-peak pricing is applied and how to configure custom endpoints.",
+            "zh": "了解 DeepSeek V4 峰谷价格如何应用以及如何配置自定义端点。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/baad6232136fa757b94dbd9c446f67c3572e7188/docs/BILLING.md"
+        },
+        {
+          "title": {
+            "en": "Billing (Chinese)",
+            "zh": "计费（中文）"
+          },
+          "body": {
+            "en": "Chinese documentation for DeepSeek V4 billing and pricing.",
+            "zh": "DeepSeek V4 计费与价格的中文文档。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/baad6232136fa757b94dbd9c446f67c3572e7188/docs/BILLING.zh-CN.md"
+        },
+        {
+          "title": {
+            "en": "Reasoning Providers",
+            "zh": "推理提供商"
+          },
+          "body": {
+            "en": "Details on supported reasoning providers and reasoning effort levels.",
+            "zh": "支持的推理提供商和推理强度级别的详细信息。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/baad6232136fa757b94dbd9c446f67c3572e7188/docs/REASONING_PROVIDERS.md"
+        },
+        {
+          "title": {
+            "en": "Reasoning Providers (Chinese)",
+            "zh": "推理提供商（中文）"
+          },
+          "body": {
+            "en": "Chinese documentation for reasoning providers and effort levels.",
+            "zh": "推理提供商和推理强度级别的中文文档。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/baad6232136fa757b94dbd9c446f67c3572e7188/docs/REASONING_PROVIDERS.zh-CN.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "DeepSeek V4 peak and off-peak pricing",
+            "zh": "DeepSeek V4 峰谷价格"
+          },
+          "body": {
+            "en": "Effective-dated peak and off-peak pricing for DeepSeek V4 Flash and Pro is now applied automatically for official endpoints with default pricing. Peak windows are 01:00–04:00 and 06:00–10:00 UTC.",
+            "zh": "DeepSeek V4 Flash 和 Pro 的峰谷价格现已自动应用于使用默认价格的官方端点。峰时窗口为 UTC 01:00–04:00 和 06:00–10:00。"
+          },
+          "refs": [
+            8988
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Low reasoning effort for DeepSeek V4 Pro",
+            "zh": "DeepSeek V4 Pro 的 low 推理强度"
+          },
+          "body": {
+            "en": "You can now select low reasoning effort for DeepSeek V4 Pro across OpenAI Chat, Responses, and Anthropic protocols.",
+            "zh": "现在可以在 OpenAI Chat、Responses 和 Anthropic 协议中为 DeepSeek V4 Pro 选择 low 推理强度。"
+          },
+          "refs": [
+            8988
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Unified cost quotes across all surfaces",
+            "zh": "统一各端成本报价"
+          },
+          "body": {
+            "en": "A single occurrence-time cost quote is now reused across budget enforcement, events, stats, CLI, ACP, and desktop surfaces, ensuring consistent pricing display.",
+            "zh": "现在在预算执行、事件、统计、CLI、ACP 和桌面端统一使用单次发生时的成本报价，确保价格显示一致。"
+          },
+          "refs": [
+            8988
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Peak, off-peak, and mixed-rate labels",
+            "zh": "峰时、谷时和混合费率标签"
+          },
+          "body": {
+            "en": "CLI and desktop UI now show peak, off-peak, and mixed-rate labels, with an accessible mixed-rate badge in the context panel.",
+            "zh": "CLI 和桌面 UI 现在显示峰时、谷时和混合费率标签，并在上下文面板中提供可访问的混合费率徽章。"
+          },
+          "refs": [
+            8988
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "DeepSeek V4 scheduled pricing",
+              "zh": "DeepSeek V4 峰谷价格"
+            },
+            "body": {
+              "en": "Added effective-dated peak and off-peak pricing catalogs for DeepSeek V4 Flash and Pro in CNY and USD.",
+              "zh": "为 DeepSeek V4 Flash 和 Pro 添加了人民币和美元的有效期峰谷价格目录。"
+            },
+            "refs": [
+              8988
+            ]
+          },
+          {
+            "title": {
+              "en": "Low reasoning effort support",
+              "zh": "支持 low 推理强度"
+            },
+            "body": {
+              "en": "Added support for low reasoning effort on DeepSeek V4 Pro across OpenAI Chat, Responses, and Anthropic protocols.",
+              "zh": "在 OpenAI Chat、Responses 和 Anthropic 协议中为 DeepSeek V4 Pro 添加了 low 推理强度支持。"
+            },
+            "refs": [
+              8988
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Unified cost quote calculation",
+              "zh": "统一成本报价计算"
+            },
+            "body": {
+              "en": "Calculates one occurrence-time cost quote and reuses it across budget enforcement, events, stats, CLI, ACP, and desktop surfaces.",
+              "zh": "计算单次发生时的成本报价，并在预算执行、事件、统计、CLI、ACP 和桌面端复用。"
+            },
+            "refs": [
+              8988
+            ]
+          },
+          {
+            "title": {
+              "en": "Pricing labels in UI",
+              "zh": "UI 中的价格标签"
+            },
+            "body": {
+              "en": "Shows peak, off-peak, and mixed-rate labels in CLI and desktop UI, with an accessible mixed-rate badge in the context panel.",
+              "zh": "在 CLI 和桌面 UI 中显示峰时、谷时和混合费率标签，并在上下文面板中提供可访问的混合费率徽章。"
+            },
+            "refs": [
+              8988
+            ]
+          },
+          {
+            "title": {
+              "en": "Config v7 migration",
+              "zh": "配置 v7 迁移"
+            },
+            "body": {
+              "en": "Migrates exact official default pricing to config v7 without overwriting custom endpoints, custom prices, or historical charges.",
+              "zh": "将精确的官方默认价格迁移到配置 v7，不会覆盖自定义端点、自定义价格或历史费用。"
+            },
+            "refs": [
+              8988
+            ]
+          }
+        ],
+        "fixed": []
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.26.0",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.25.4...desktop-v1.26.0",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.26.0",
+      "baseVersion": "1.26.0",
+      "status": "reviewed",
+      "previousRelease": "1.25.4",
+      "builds": {
+        "cli": "v1.26.0",
+        "desktop": "v1.26.0",
+        "npm": "1.26.0"
+      }
+    },
+    {
       "version": "1.25.4",
       "date": "2026-08-16",
       "channel": "stable",
