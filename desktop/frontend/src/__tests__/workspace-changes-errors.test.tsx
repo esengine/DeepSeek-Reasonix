@@ -116,6 +116,26 @@ console.log("\nworkspace changes git errors");
 }
 
 {
+  const { dom, root } = await renderFilesWorkspace({}, {
+    changeListRequest: {
+      id: 1,
+      changes: [
+        { key: "a", path: "src/components/App.tsx", meta: "M", time: "", detail: "" },
+        { key: "b", path: "src/components/panels/Changes.tsx", meta: "A", time: "", detail: "" },
+      ],
+    },
+  });
+
+  await waitFor("scoped hierarchical changed files", () => document.querySelector('[data-workspace-change-folder="src/"]') !== null);
+  ok(document.querySelector('[data-workspace-change-folder="src/components/"]') !== null, "scoped changed files reuse the folder hierarchy");
+  ok(document.querySelectorAll(".workspace-change").length === 2, "scoped changed files keep each file action row");
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
   const { dom, root } = await renderWorkspace(
     {
       files: [
@@ -141,6 +161,37 @@ console.log("\nworkspace changes git errors");
   });
   await waitFor("expanded creation commit history", () => document.body.textContent?.includes("older commit") === true);
   ok(document.body.textContent?.includes("older commit") === true, "Creation commit history expands on demand");
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const { dom, root } = await renderWorkspace({
+    files: [
+      { path: "src/main.ts", sources: ["session"], gitStatus: "M" },
+      { path: "src/components/App.tsx", sources: ["session"], gitStatus: "M" },
+      { path: "src/components/panels/Changes.tsx", sources: ["session"], gitStatus: "A" },
+      { path: "README.md", sources: ["session"], gitStatus: "M" },
+    ],
+    gitAvailable: true,
+  });
+
+  await waitFor("hierarchical changed files", () => document.querySelector('[data-workspace-change-folder="src/"]') !== null);
+  ok(document.querySelector('[data-workspace-change-folder="src/"]') !== null, "changed files render a top-level folder node");
+  ok(document.querySelector('[data-workspace-change-folder="src/components/"]') !== null, "changed files render nested folder nodes");
+  ok(document.body.textContent?.includes("main.ts") === true && document.body.textContent?.includes("README.md") === true, "expanded folders and root files are visible together");
+
+  const srcFolder = document.querySelector<HTMLButtonElement>('[data-workspace-change-folder="src/"]');
+  await act(async () => {
+    srcFolder?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await flushPromises();
+  });
+  await waitFor("collapsed changed folder", () => document.querySelector('[data-workspace-change-folder="src/components/"]') === null);
+  ok(document.querySelector('[data-workspace-change-folder="src/components/"]') === null, "collapsing a changed folder hides its descendants");
+  ok(document.body.textContent?.includes("README.md") === true, "collapsing a changed folder keeps root files visible");
+
   await act(async () => {
     root.unmount();
   });
