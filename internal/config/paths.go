@@ -14,23 +14,24 @@ import (
 )
 
 var (
-	runtimeGOOS     = runtime.GOOS
-	osUserHomeDir   = os.UserHomeDir
-	osUserConfigDir = func() string {
-		dir, err := os.UserConfigDir()
-		if err != nil {
-			return ""
-		}
-		return dir
-	}
-	osUserCacheDir = func() string {
-		dir, err := os.UserCacheDir()
-		if err != nil {
-			return ""
-		}
-		return dir
-	}
+	runtimeGOOS   = runtime.GOOS
+	osUserHomeDir = os.UserHomeDir
+	getWorkDir    = os.Getwd
 )
+
+// workDirBase returns the base directory for all Reasonix data.
+// It always uses ./reasonix in the current working directory.
+func workDirBase() string {
+	if dir := cleanEnvDir("REASONIX_HOME"); dir != "" {
+		return dir
+	}
+	// Use ./reasonix in current working directory
+	cwd, err := getWorkDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(cwd, "reasonix")
+}
 
 func userConfigPath() string {
 	dir := userConfigDir()
@@ -41,29 +42,11 @@ func userConfigPath() string {
 }
 
 func userConfigDir() string {
-	return reasonixHomeDir()
+	return workDirBase()
 }
 
 func reasonixHomeDir() string {
-	if dir := cleanEnvDir("REASONIX_HOME"); dir != "" {
-		return dir
-	}
-	if runtimeGOOS == "windows" {
-		if dir := osUserConfigDir(); dir != "" {
-			return filepath.Join(dir, "reasonix")
-		}
-		if home, err := osUserHomeDir(); err == nil && home != "" {
-			return filepath.Join(home, "AppData", "Roaming", "reasonix")
-		}
-		return ""
-	}
-	if home, err := osUserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, ".reasonix")
-	}
-	if dir := osUserConfigDir(); dir != "" {
-		return filepath.Join(dir, "reasonix")
-	}
-	return ""
+	return workDirBase()
 }
 
 func userConfigLoadPath() string {
@@ -144,39 +127,19 @@ func legacyXDGConfigPaths() []string {
 }
 
 func userSupportDir() string {
-	if dir := cleanEnvDir("REASONIX_STATE_HOME"); dir != "" {
-		return dir
-	}
-	return reasonixHomeDir()
+	return workDirBase()
 }
 
 func legacyOSSupportDir() string {
-	if IsolatedHomeDir() != "" {
-		return ""
-	}
-	dir := osUserConfigDir()
-	if dir == "" {
-		return ""
-	}
-	path := filepath.Join(dir, "reasonix")
-	if current := reasonixHomeDir(); current != "" && samePath(path, current) {
-		return ""
-	}
-	return path
+	return ""
 }
 
 func userCacheDir() string {
-	if dir := cleanEnvDir("REASONIX_CACHE_HOME"); dir != "" {
-		return dir
-	}
-	if dir := cleanEnvDir("REASONIX_HOME"); dir != "" {
-		return filepath.Join(dir, "cache")
-	}
-	dir := osUserCacheDir()
-	if dir == "" {
+	base := workDirBase()
+	if base == "" {
 		return ""
 	}
-	return filepath.Join(dir, "reasonix")
+	return filepath.Join(base, "cache")
 }
 
 func cleanEnvDir(name string) string {
@@ -351,25 +314,22 @@ func MissingReasoningWarnStateDir() string {
 // workspaces. It intentionally follows the cache root rather than project or
 // session state: taking a lease must never dirty the repository it protects.
 func WorkspaceLeaseDir() string {
-	// Deliberately ignore REASONIX_HOME/REASONIX_CACHE_HOME here. Two app
-	// instances with different state profiles can still open the same user
-	// workspace, so their safety lock must converge on one OS-user cache root.
-	dir := osUserCacheDir()
-	if strings.TrimSpace(dir) == "" {
+	base := workDirBase()
+	if base == "" {
 		return ""
 	}
-	return filepath.Join(dir, "reasonix", "workspace-leases")
+	return filepath.Join(base, "cache", "workspace-leases")
 }
 
 // RepairMutationLockDir stores target-path repair locks in the OS-user cache.
 // It deliberately ignores Reasonix home/cache overrides: isolated instances
 // can still repair the same project reasonix.toml, so their locks must converge.
 func RepairMutationLockDir() string {
-	dir := osUserCacheDir()
-	if strings.TrimSpace(dir) == "" {
+	base := workDirBase()
+	if base == "" {
 		return ""
 	}
-	return filepath.Join(dir, "reasonix", "repair-mutation-locks")
+	return filepath.Join(base, "cache", "repair-mutation-locks")
 }
 
 // DeliveryWorktreeDir is durable storage for user-visible isolated Delivery
@@ -377,26 +337,11 @@ func RepairMutationLockDir() string {
 // LocalAppData by default so large Git worktrees do not roam with the user's
 // profile; other platforms keep using Reasonix state storage.
 func DeliveryWorktreeDir() string {
-	if dir := cleanEnvDir("REASONIX_STATE_HOME"); dir != "" {
-		return filepath.Join(dir, "worktrees")
-	}
-	if dir := cleanEnvDir("REASONIX_HOME"); dir != "" {
-		return filepath.Join(dir, "worktrees")
-	}
-	if runtimeGOOS == "windows" {
-		if dir := osUserCacheDir(); dir != "" {
-			return filepath.Join(dir, "reasonix", "worktrees")
-		}
-		if home, err := osUserHomeDir(); err == nil && home != "" {
-			return filepath.Join(home, "AppData", "Local", "reasonix", "worktrees")
-		}
+	base := workDirBase()
+	if base == "" {
 		return ""
 	}
-	dir := userSupportDir()
-	if dir == "" {
-		return ""
-	}
-	return filepath.Join(dir, "worktrees")
+	return filepath.Join(base, "worktrees")
 }
 
 // UserCredentialsPath is the reasonix-owned global .env file under Reasonix

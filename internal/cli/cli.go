@@ -69,6 +69,12 @@ func RunWithBuildInfo(args []string, info BuildInfo) int {
 	// Drain accepted records and fence the projection worker before returning.
 	// An embedded Run may outlive one invocation and remove its CacheDir.
 	defer closeCLIUsageCatalogs()
+	
+	// Ensure local config directory and files exist in ./reasonix/
+	if err := config.EnsureLocalConfigExists(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to ensure local config exists: %v\n", err)
+	}
+	
 	// Pick the UI language up front so even pre-config paths (the first-run
 	// welcome banner) come through localized. Env-only first; if a config
 	// exists and pins a language, that wins.
