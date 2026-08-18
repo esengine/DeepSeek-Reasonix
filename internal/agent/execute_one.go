@@ -245,6 +245,14 @@ func (a *Agent) applyPlanModeAndProxy(ctx context.Context, plan *toolCallPlan) (
 				safety = planmode.PlanSafetyUnsafe
 			}
 		}
+		// todo_write requires one canonical in-progress item, while advancing that
+		// item requires a successful complete_step receipt. If a stale Plan flag
+		// survives into execution, blocking the receipt makes the host-owned todo
+		// state impossible to recover. Allow only this existing-item sign-off;
+		// complete_step still validates the item identity and its evidence.
+		if plan.canonicalName == "complete_step" && t.ReadOnly() && a.hasActiveCanonicalTodo() {
+			safety = planmode.PlanSafetySafe
+		}
 		if decision := a.planModeDecision(plan.canonicalName, t.ReadOnly(), safety, json.RawMessage(call.Arguments)); decision.Blocked {
 			return toolOutcome{
 				output:  decision.Message,

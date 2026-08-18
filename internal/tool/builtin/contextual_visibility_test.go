@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"reasonix/internal/jobs"
-	"reasonix/internal/planmode"
 	"reasonix/internal/tool"
 )
 
@@ -15,7 +14,6 @@ func (visibilityRecorder) RecordGoalReport(tool.GoalReport) (string, error) { re
 
 func TestContextualBuiltinVisibilityFollowsOwningContext(t *testing.T) {
 	goal, _ := tool.LookupBuiltin("update_goal")
-	step, _ := tool.LookupBuiltin("complete_step")
 	jobNames := []string{"bash_output", "wait", "kill_shell"}
 
 	if goal.(tool.ContextualTool).ProviderVisible(context.Background()) {
@@ -23,12 +21,6 @@ func TestContextualBuiltinVisibilityFollowsOwningContext(t *testing.T) {
 	}
 	if !goal.(tool.ContextualTool).ProviderVisible(tool.WithGoalTurnRecorder(context.Background(), visibilityRecorder{})) {
 		t.Fatal("update_goal hidden during an active Goal turn")
-	}
-	if !step.(tool.ContextualTool).ProviderVisible(context.Background()) {
-		t.Fatal("complete_step hidden outside Plan mode")
-	}
-	if step.(tool.ContextualTool).ProviderVisible(planmode.WithActive(context.Background(), true)) {
-		t.Fatal("complete_step visible during Plan mode")
 	}
 	for _, name := range jobNames {
 		t.Run(name, func(t *testing.T) {

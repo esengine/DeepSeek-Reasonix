@@ -180,6 +180,58 @@ func TestPlanModeUnsafePhaseToolStopsBeforePermission(t *testing.T) {
 	}
 }
 
+func TestPlanModeAllowsCompleteStepToRecoverCurrentTodo(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(mustBuiltinTool(t, "todo_write"))
+	reg.Add(mustBuiltinTool(t, "complete_step"))
+	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
+	a.SetPlanMode(true)
+
+	todoOut := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
+		ID:   "todo",
+		Name: "todo_write",
+		Arguments: `{"todos":[
+			{"content":"finish the cleanup","status":"in_progress","step_id":"cleanup_step_01"}
+		]}`,
+	})
+	if todoOut.blocked || todoOut.errMsg != "" {
+		t.Fatalf("seed Plan todo outcome = %+v", todoOut)
+	}
+
+	invalidOut := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
+		ID:   "invalid-complete",
+		Name: "complete_step",
+		Arguments: `{
+			"step_id":"cleanup_step_01",
+			"result":"cleanup finished",
+			"evidence":[]
+		}`,
+	})
+	if invalidOut.blocked || invalidOut.errMsg == "" {
+		t.Fatalf("Plan todo recovery bypassed evidence validation: %+v", invalidOut)
+	}
+	if got := a.CanonicalTodoState(); len(got) != 1 || got[0].Status != "in_progress" {
+		t.Fatalf("invalid recovery advanced todo state = %+v", got)
+	}
+
+	stepOut := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
+		ID:   "complete",
+		Name: "complete_step",
+		Arguments: `{
+			"step_id":"cleanup_step_01",
+			"result":"cleanup finished",
+			"evidence":[{"kind":"manual","summary":"confirmed the cleanup output"}]
+		}`,
+	})
+	if stepOut.blocked || stepOut.errMsg != "" {
+		t.Fatalf("Plan todo recovery outcome = %+v", stepOut)
+	}
+	got := a.CanonicalTodoState()
+	if len(got) != 1 || got[0].Status != "completed" {
+		t.Fatalf("Plan todo recovery state = %+v, want completed", got)
+	}
+}
+
 func TestPlanModeSafeWriterStillUsesWriterPermission(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(planSafeTool{fakeTool: fakeTool{name: "phase_safe_writer"}, planSafe: true})

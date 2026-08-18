@@ -10,7 +10,6 @@ import (
 
 	"reasonix/internal/evidence"
 	"reasonix/internal/instruction"
-	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
@@ -85,16 +84,10 @@ func (completeStep) Schema() json.RawMessage {
 // effect), so it never needs approval and stays available alongside todo_write.
 func (completeStep) ReadOnly() bool { return true }
 
-// complete_step signs off execution work and is unavailable during planning.
-// The host Plan gate remains authoritative for stale or hallucinated calls.
-func (completeStep) ProviderVisible(ctx context.Context) bool {
-	return !planmode.Active(ctx)
-}
-
 // PlanModeSafe reports false: although complete_step is read-only, it signs off a
-// completed execution step, which is meaningful only after plan approval — not
-// during planning. This explicit phase opt-out is the Plan gate's enforced
-// exception to the ordinary Permissions/Sandbox path.
+// completed execution step, which is ordinarily meaningful only after plan
+// approval. The Agent has one narrow recovery exception for an existing
+// canonical in-progress todo whose state otherwise cannot advance.
 func (completeStep) PlanModeSafe() bool { return false }
 
 func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, error) {
