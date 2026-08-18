@@ -16,6 +16,10 @@ build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/reasonix$(GOEXE) ./cmd/reasonix
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/reasonix-plugin-example$(GOEXE) ./cmd/reasonix-plugin-example
 
+# Termux ARM64 build - zero dependency, optimized for Android/Termux
+build-termux-arm64:
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "$(LDFLAGS) -s -w" -o dist/reasonix-termux-arm64 ./cmd/reasonix
+
 vet:
 	go vet ./...
 
@@ -85,6 +89,13 @@ cross:
 		echo "build $$os/$$arch"; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -ldflags "$(LDFLAGS)" -o dist/reasonix-$$os-$$arch$$ext ./cmd/reasonix; \
 	done
+
+# Termux ARM64 build - zero dependency, optimized for Android/Termux
+termux-arm64:
+	@mkdir -p dist
+	@echo "building Termux ARM64 (zero dependency)..."
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "$(LDFLAGS) -s -w" -o dist/reasonix-termux-arm64 ./cmd/reasonix
+	@echo "built: dist/reasonix-termux-arm64"
 
 clean:
 	rm -rf bin dist
