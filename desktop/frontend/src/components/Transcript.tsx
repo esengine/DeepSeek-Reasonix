@@ -624,8 +624,8 @@ export function Transcript({
     document.getSelection()?.removeAllRanges();
     clearTranscriptSelection("question-navigation");
     invalidateAnchors();
-    scrollToDataIndex(firstItemIndex, index, "smooth");
-  }, [clearTranscriptSelection, firstItemIndex, invalidateAnchors, rowIndexByKey, scrollToDataIndex]);
+    scrollToDataIndex(index, "smooth");
+  }, [clearTranscriptSelection, invalidateAnchors, rowIndexByKey, scrollToDataIndex]);
 
   // The jump-bottom click is explicit user intent: it outranks any in-flight
   // recovery anchor restore and ends a stale selection gesture whose
@@ -644,7 +644,7 @@ export function Transcript({
     const index = rowIndexByKey.get(String(userRowKey(lastQ.id)));
     if (index == null) return;
     invalidateAnchors();
-    scrollToDataIndex(firstItemIndex, index);
+    scrollToDataIndex(index);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rewindSignal]);
 

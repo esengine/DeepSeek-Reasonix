@@ -593,9 +593,9 @@ export function useTranscriptScrollArbiter({
     return true;
   }, [dispatch]);
 
-  const scrollToDataIndex = useCallback((firstItemIndex: number, dataIndex: number, behavior: "auto" | "smooth" = "auto") => {
+  const scrollToDataIndex = useCallback((dataIndex: number, behavior: "auto" | "smooth" = "auto") => {
     if (isTranscriptSelectionMode(modeRef.current)) return;
-    dispatch({ type: "JUMP_TO_INDEX", index: firstItemIndex + dataIndex, behavior });
+    dispatch({ type: "JUMP_TO_INDEX", index: dataIndex, behavior });
   }, [dispatch]);
 
   const finishProgrammaticScroll = useCallback(() => {
