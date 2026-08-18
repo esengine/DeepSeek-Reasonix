@@ -64,6 +64,7 @@ func TestCuratedProviderPresetsCoverRequestedProviders(t *testing.T) {
 		"qwen-coding-plan-global-anthropic",
 		"stepfun",
 		"stepfun-anthropic",
+		"siliconflow",
 		"novita",
 		"gmi",
 		"vercel-ai-gateway",
@@ -367,6 +368,29 @@ func TestCuratedProviderPresetsStepFunUsesOfficialBaseURLs(t *testing.T) {
 				t.Fatalf("preset %q base_url = %q, want %q", tt.id, entry.BaseURL, tt.baseURL)
 			}
 		})
+	}
+}
+
+func TestSiliconFlowPresetUsesBaseURLAndExactRequestEndpoints(t *testing.T) {
+	preset, ok := CuratedProviderPreset("siliconflow")
+	if !ok || len(preset.Entries) != 1 {
+		t.Fatalf("SiliconFlow preset = %+v, found=%v", preset, ok)
+	}
+	if preset.KeyEnv != "SILICONFLOW_API_KEY" {
+		t.Fatalf("SiliconFlow key env = %q", preset.KeyEnv)
+	}
+	entry := preset.Entries[0]
+	if entry.Kind != "openai" || entry.BaseURL != "https://api.siliconflow.cn/v1" {
+		t.Fatalf("SiliconFlow base endpoint = %+v", entry)
+	}
+	if entry.RequestURL != "https://api.siliconflow.cn/v1/chat/completions" || entry.ChatURL != entry.RequestURL {
+		t.Fatalf("SiliconFlow chat endpoints = request:%q legacy:%q", entry.RequestURL, entry.ChatURL)
+	}
+	if entry.ModelsURL != "https://api.siliconflow.cn/v1/models" {
+		t.Fatalf("SiliconFlow models URL = %q", entry.ModelsURL)
+	}
+	if entry.DefaultModel() != "deepseek-ai/DeepSeek-V4-Flash" || !entry.HasModel("deepseek-ai/DeepSeek-V4-Pro") || entry.ContextWindow != 1_000_000 {
+		t.Fatalf("SiliconFlow model defaults = models:%v default:%q context:%d", entry.ModelList(), entry.DefaultModel(), entry.ContextWindow)
 	}
 }
 

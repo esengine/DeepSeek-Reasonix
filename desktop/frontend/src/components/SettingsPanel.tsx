@@ -6,7 +6,7 @@ import { app, openExternal } from "../lib/bridge";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
 import { apiKeyEnvFromProviderName, createLatestRequestGate, inferredVisionModels, mergedFetchedProviderModels, mergeProviderModelContextWindows, providerApiKeyEnvForSave, providerDefaultModel, providerIsConfigured, providerModelCandidates, providerModelContextWindowDrafts, providerModelContextWindowIsSmall, providerRequiresKey } from "../lib/providerModels";
 import { cachedFetchProviderModels, invalidateProviderCacheByAPIKeyEnv, shouldSkipAutoRefresh } from "../lib/providerModelCache";
-import { providerBaseURLForSave, providerRequestURLFromConfig, trimmedBaseURL } from "../lib/providerEndpoint";
+import { providerBaseURLForSave, providerInputURLFromConfig, providerRequestURLForSave, trimmedBaseURL } from "../lib/providerEndpoint";
 import { opencodeGoPresetDescriptionKeys } from "../lib/providerPresetDescriptions";
 import { useUpdater } from "../lib/useUpdater";
 import {
@@ -5089,6 +5089,8 @@ function providerPresetDescription(preset: ProviderPresetView, t: ReturnType<typ
       return t("settings.addProvider.preset.stepfunDesc");
     case "stepfun-anthropic":
       return t("settings.addProvider.preset.stepfunAnthropicDesc");
+    case "siliconflow":
+      return t("settings.addProvider.preset.siliconFlowDesc");
     case "novita":
       return t("settings.addProvider.preset.novitaDesc");
     case "gmi":
@@ -6203,7 +6205,7 @@ export function ProviderEditor({
   const t = useT();
   const [name, setName] = useState(initial?.name ?? "");
   const [kind, setKind] = useState(initial?.kind ?? "openai");
-  const [requestUrl, setRequestUrl] = useState(() => providerRequestURLFromConfig(
+  const [requestUrl, setRequestUrl] = useState(() => providerInputURLFromConfig(
     initial?.kind ?? "openai",
     initial?.baseUrl ?? "",
     initial?.requestUrl ?? "",
@@ -6246,7 +6248,7 @@ export function ProviderEditor({
     return choices.length > 0 ? choices : ["openai"];
   }, [kind, kinds]);
   const effectiveKind = providerEditorEffectiveKind(isNewCustomProvider, kind, providerKindChoices);
-  const effectiveRequestUrl = requestUrl.trim();
+  const effectiveRequestUrl = providerRequestURLForSave(effectiveKind, requestUrl);
   const effectiveBaseUrl = providerBaseURLForSave(initial, effectiveKind, effectiveRequestUrl);
   const effectiveLegacyChatUrl = effectiveKind.toLowerCase() === "openai" ? effectiveRequestUrl : initial?.chatUrl ?? "";
   const effectiveModelsUrl = modelsUrl.trim();

@@ -1,6 +1,8 @@
 import {
   providerBaseURLForSave,
   providerBaseURLFromRequestURL,
+  providerInputURLFromConfig,
+  providerRequestURLForSave,
   providerRequestURLFromConfig,
 } from "../lib/providerEndpoint";
 let failed = 0;
@@ -21,6 +23,14 @@ eq(providerRequestURLFromConfig("openai", "https://proxy.example.com/v1", "", "h
 eq(providerRequestURLFromConfig("anthropic", "https://proxy.example.com/v1", "", "https://stale.example.com/chat/completions"), "https://proxy.example.com/v1/messages", "legacy Anthropic chat URLs remain ignored");
 eq(providerRequestURLFromConfig("openai", "", "https://proxy.example.com/custom/chat/?token=1", "https://legacy.example.com/chat/completions"), "https://proxy.example.com/custom/chat/?token=1", "explicit request URLs remain unchanged and take priority");
 eq(providerBaseURLFromRequestURL("openai", "https://proxy.example.com/v1/chat/completions?token=1"), "https://proxy.example.com/v1", "request URLs derive a query-free base URL for model discovery");
+
+eq(providerRequestURLForSave("openai", "https://api.siliconflow.cn/v1"), "https://api.siliconflow.cn/v1/chat/completions", "SiliconFlow's official base URL expands to its chat completions endpoint");
+eq(providerRequestURLForSave("openai", "https://api.siliconflow.cn/v1/"), "https://api.siliconflow.cn/v1/chat/completions", "SiliconFlow's trailing-slash base URL expands without a duplicate slash");
+eq(providerRequestURLForSave("anthropic", "https://api.siliconflow.cn/v1"), "https://api.siliconflow.cn/v1", "non-OpenAI protocols do not rewrite SiliconFlow URLs");
+eq(providerRequestURLForSave("openai", "https://api.siliconflow.cn/v1/custom"), "https://api.siliconflow.cn/v1/custom", "custom SiliconFlow request paths remain exact");
+eq(providerRequestURLForSave("openai", "https://api.siliconflow.cn.example.com/v1"), "https://api.siliconflow.cn.example.com/v1", "lookalike SiliconFlow hosts remain exact");
+eq(providerInputURLFromConfig("openai", "https://api.siliconflow.cn/v1", "https://api.siliconflow.cn/v1/chat/completions"), "https://api.siliconflow.cn/v1", "SiliconFlow's canonical request endpoint displays as its base URL");
+eq(providerInputURLFromConfig("openai", "https://api.siliconflow.cn/v1", "https://api.siliconflow.cn/v1/chat/completions?route=custom"), "https://api.siliconflow.cn/v1/chat/completions?route=custom", "custom SiliconFlow request URLs remain visible in full");
 
 eq(providerBaseURLForSave({ kind: "openai", baseUrl: "https://api.deepseek.com/v1", chatUrl: "https://gateway.example/custom/chat/completions" }, "openai", "https://gateway.example/custom/chat/completions"), "https://api.deepseek.com/v1", "unchanged legacy providers preserve their independent base URL");
 eq(providerBaseURLForSave({ kind: "anthropic", baseUrl: "https://models.example/v1/", requestUrl: "https://gateway.example/custom/messages?token=1" }, "anthropic", "https://gateway.example/custom/messages?token=1"), "https://models.example/v1/", "unchanged explicit request URLs preserve their independent base URL exactly");

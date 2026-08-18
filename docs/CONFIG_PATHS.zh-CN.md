@@ -123,7 +123,12 @@ provider-name 规则。例如 `https://token.sensenova.cn/v1` 会生成 provider
 ### 自定义 provider 的端点 URL
 
 桌面端自定义 provider 表单会把「API 地址」作为完整请求地址写入 `request_url`，
-Reasonix 不会追加或改写路径。已有 TOML 配置不会被重新解释：旧 `chat_url` 继续
+Reasonix 不会追加或改写路径。
+唯一的精选简写是硅基流动官方 OpenAI-compatible 基础地址
+`https://api.siliconflow.cn/v1`：表单会继续显示该基础地址供模型发现使用，并将
+`https://api.siliconflow.cn/v1/chat/completions` 保存为完整聊天请求地址。硅基流动
+也已加入推荐 provider 列表，可用相同端点一键添加。硅基流动的其他路径和自定义网关仍
+保持原样。已有 TOML 配置不会被重新解释：旧 `chat_url` 继续
 保持原来的 OpenAI 专用行为，Anthropic 和 Responses 仍会根据 `base_url` 推导请求
 路径；只有用户在新版桌面端明确保存该 provider 后，才会写入并启用 `request_url`。
 保存 OpenAI-compatible provider 时还会把完整地址同步到旧 `chat_url`，使旧版本

@@ -109,6 +109,7 @@ var (
 	qwenPlanVisionModels = []string{"qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus", "kimi-k2.5"}
 
 	stepfunPlanModels = []string{"step-3.7-flash", "step-3.5-flash", "step-3.5-flash-2603"}
+	siliconFlowModels = []string{"deepseek-ai/DeepSeek-V4-Flash", "deepseek-ai/DeepSeek-V4-Pro"}
 
 	legacyOpenCodeGoModels           = []string{"glm-5.2", "glm-5.1", "kimi-k2.7-code", "kimi-k2.6", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5-pro", "mimo-v2.5"}
 	opencodeGoModels                 = []string{"glm-5.2", "glm-5.1", "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5-pro", "mimo-v2.5"}
@@ -856,6 +857,24 @@ var curatedProviderPresets = []ProviderPreset{
 			Thinking:         "adaptive",
 			SupportedEfforts: []string{"low", "medium", "high"},
 			DefaultEffort:    "medium",
+		}},
+	},
+	{
+		ID:          "siliconflow",
+		Label:       "SiliconFlow",
+		Description: "SiliconFlow OpenAI-compatible multi-model API with DeepSeek V4 defaults.",
+		KeyEnv:      "SILICONFLOW_API_KEY",
+		Entries: []ProviderEntry{{
+			Name:          "siliconflow",
+			Kind:          "openai",
+			BaseURL:       "https://api.siliconflow.cn/v1",
+			ChatURL:       "https://api.siliconflow.cn/v1/chat/completions",
+			RequestURL:    "https://api.siliconflow.cn/v1/chat/completions",
+			ModelsURL:     "https://api.siliconflow.cn/v1/models",
+			Models:        siliconFlowModels,
+			Default:       "deepseek-ai/DeepSeek-V4-Flash",
+			APIKeyEnv:     "SILICONFLOW_API_KEY",
+			ContextWindow: 1_000_000,
 		}},
 	},
 	{

@@ -31,6 +31,15 @@ function flushPromises(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+function setInputValue(input: HTMLInputElement, value: string): void {
+  const reactPropsKey = Object.keys(input).find((key) => key.startsWith("__reactProps$"));
+  const reactProps = reactPropsKey
+    ? (input as unknown as Record<string, { onChange?: (event: { target: { value: string } }) => void }>)[reactPropsKey]
+    : undefined;
+  if (!reactProps?.onChange) throw new Error("missing React input change handler");
+  reactProps.onChange({ target: { value } });
+}
+
 const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
   pretendToBeVisual: true,
   url: "http://localhost/",
@@ -216,6 +225,16 @@ const legacyChatURLProvider: ProviderView = {
   chatUrl: "https://legacy.example.com/chat/completions/",
 };
 
+const siliconFlowProvider: ProviderView = {
+  ...backendUnsupportedCustomProvider,
+  name: "siliconflow",
+  baseUrl: "https://api.siliconflow.cn/v1",
+  chatUrl: "https://api.siliconflow.cn/v1",
+  requestUrl: "https://api.siliconflow.cn/v1",
+  models: ["deepseek-ai/DeepSeek-V3"],
+  default: "deepseek-ai/DeepSeek-V3",
+};
+
 function renderProviderEditor(initial?: ProviderView, onSave: (provider: ProviderView) => void | Promise<void> = () => undefined) {
   return (
     <LocaleProvider>
@@ -257,6 +276,35 @@ const providerUrlLabel = Array.from(rootEl.querySelectorAll<HTMLLabelElement>("l
 );
 ok(Boolean(providerUrlLabel) && providerUrlInput?.getAttribute("aria-describedby") !== null, "provider URL input has a programmatic label and description");
 ok(rootEl.textContent?.includes("Reasonix uses it unchanged.") === true, "provider URL helper explains exact request behavior");
+
+let newSiliconFlowProvider: ProviderView | undefined;
+await act(async () => {
+  root.render(renderProviderEditor(undefined, (provider) => {
+    newSiliconFlowProvider = provider;
+  }));
+  await flushPromises();
+});
+const newProviderNameInput = rootEl.querySelector<HTMLInputElement>('input[placeholder="e.g. my-proxy"]');
+const newProviderUrlInput = rootEl.querySelector<HTMLInputElement>(".provider-url-input");
+const newProviderModelsInput = rootEl.querySelector<HTMLInputElement>('input[placeholder="models (comma-separated)"]');
+await act(async () => {
+  if (newProviderNameInput) setInputValue(newProviderNameInput, "siliconflow");
+  if (newProviderUrlInput) setInputValue(newProviderUrlInput, "https://api.siliconflow.cn/v1");
+  if (newProviderModelsInput) setInputValue(newProviderModelsInput, "deepseek-ai/DeepSeek-V3");
+  await flushPromises();
+});
+const newSiliconFlowSaveButton = Array.from(rootEl.querySelectorAll<HTMLButtonElement>("button")).find(
+  (button) => button.textContent?.trim() === "Save",
+);
+await act(async () => {
+  newSiliconFlowSaveButton?.click();
+  await flushPromises();
+});
+ok(
+  newSiliconFlowProvider?.baseUrl === "https://api.siliconflow.cn/v1" &&
+    newSiliconFlowProvider?.requestUrl === "https://api.siliconflow.cn/v1/chat/completions",
+  "new SiliconFlow providers accept the official base URL and save the complete chat endpoint",
+);
 
 await act(async () => {
   root.render(<div />);
@@ -308,6 +356,28 @@ await act(async () => {
 });
 ok(migratedProvider?.requestUrl === "https://legacy.example.com/chat/completions" && migratedProvider?.baseUrl === legacyChatURLProvider.baseUrl, "saving migrates the legacy effective address without rewriting its baseUrl");
 ok(migratedProvider?.chatUrl === migratedProvider?.requestUrl, "saving mirrors the normalized legacy OpenAI endpoint for previous releases");
+
+let savedSiliconFlowProvider: ProviderView | undefined;
+await act(async () => {
+  root.render(renderProviderEditor(siliconFlowProvider, (provider) => {
+    savedSiliconFlowProvider = provider;
+  }));
+  await flushPromises();
+});
+const siliconFlowUrlInput = rootEl.querySelector<HTMLInputElement>(".provider-url-input");
+ok(siliconFlowUrlInput?.value === "https://api.siliconflow.cn/v1", "the malformed v1.24.1 SiliconFlow endpoint remains visible as its official base URL");
+const siliconFlowSaveButton = Array.from(rootEl.querySelectorAll<HTMLButtonElement>("button")).find(
+  (button) => button.textContent?.trim() === "Save",
+);
+await act(async () => {
+  siliconFlowSaveButton?.click();
+  await flushPromises();
+});
+ok(
+  savedSiliconFlowProvider?.baseUrl === "https://api.siliconflow.cn/v1" &&
+    savedSiliconFlowProvider?.requestUrl === "https://api.siliconflow.cn/v1/chat/completions",
+  "saving migrates the malformed SiliconFlow endpoint while keeping its base URL for discovery",
+);
 
 let exactProvider: ProviderView | undefined;
 await act(async () => {
