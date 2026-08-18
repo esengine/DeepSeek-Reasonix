@@ -19,19 +19,41 @@ type ContextMaintenanceSnapshot struct {
 	ProjectionVersion uint64
 	Blocked           bool
 	LastReceipt       *ContextMaintenanceReceipt
+	ContextBudget     *ContextBudgetSnapshot
+}
+
+// ContextBudgetSnapshot is the optional send-time admission view for the
+// desktop Context Panel. All fields are optional for older frontends.
+type ContextBudgetSnapshot struct {
+	WindowMode            string
+	LimitMode             string
+	Source                string
+	WindowTokens          int
+	PromptTokens          int
+	AutoOutputTokens      int
+	MaxOutputTokens       int
+	RequestedOutputTokens int
+	EffectiveOutputTokens int
+	ReserveTokens         int
+	PhysicalRemaining     int
+	Clipped               bool
+	LastRecovery          string
+	ObservedWindow        int
+	ObservedPrompt        int
+	ObservedCompletion    int
 }
 
 func (a *Agent) ContextMaintenanceSnapshot() ContextMaintenanceSnapshot {
 	if a == nil || a.sess.conversation == nil {
 		return ContextMaintenanceSnapshot{}
 	}
-	canonical, version := a.sess.conversation.snapshotMessagesVersion()
+	canonical, _ := a.sess.conversation.snapshotMessagesVersion()
 	a.sess.compactionMu.Lock()
 	state := a.sess.compactionState
 	checkpointState := a.sess.checkpointState
 	a.sess.compactionMu.Unlock()
 	visible := canonical
-	valid := projectionValid(state, canonical, version, a.currentPromptCacheKey())
+	valid := projectionValid(state, canonical, a.currentPromptCacheKey())
 	if valid {
 		if projected := modelVisibleFromProjection(state.Projection, canonical); len(projected) > 0 {
 			visible = projected
@@ -74,6 +96,18 @@ func (a *Agent) ContextMaintenanceSnapshot() ContextMaintenanceSnapshot {
 	// Legacy sidecars may only have top-level BlockedInputHash.
 	if !snapshot.Blocked && state.BlockedInputHash != "" && state.BlockedInputHash == currentHash {
 		snapshot.Blocked = true
+	}
+	if budget := a.lastAdmission(); budget.WindowTokens > 0 || budget.PromptTokens > 0 || budget.LastRecovery != "" && budget.LastRecovery != contextRecoveryNone {
+		snapshot.ContextBudget = &ContextBudgetSnapshot{
+			WindowMode: budget.WindowMode, LimitMode: budget.LimitMode, Source: budget.Source,
+			WindowTokens: budget.WindowTokens, PromptTokens: budget.PromptTokens,
+			AutoOutputTokens: budget.AutoOutputTokens, MaxOutputTokens: budget.MaxOutputTokens,
+			RequestedOutputTokens: budget.RequestedOutputTokens, EffectiveOutputTokens: budget.EffectiveOutputTokens,
+			ReserveTokens: budget.ReserveTokens, PhysicalRemaining: budget.PhysicalRemaining,
+			Clipped: budget.Clipped, LastRecovery: budget.LastRecovery,
+			ObservedWindow: budget.ObservedWindow, ObservedPrompt: budget.ObservedPrompt,
+			ObservedCompletion: budget.ObservedCompletion,
+		}
 	}
 	return snapshot
 }

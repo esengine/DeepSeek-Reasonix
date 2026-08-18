@@ -511,6 +511,112 @@ func TestRebuildRetiresOldSidecars(t *testing.T) {
 	waitForCond(t, "new sidecar exit", 10*time.Second, newClient.Exited)
 }
 
+// TestExplicitReloadReplacesUnchangedSidecar pins the linked-development
+// contract: a user-requested reload must start a fresh process even when the
+// manifest graph is unchanged. The provider-visible prefix stays stable when
+// the replacement contributes identical bytes.
+func TestExplicitReloadReplacesUnchangedSidecar(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	writeRuntimeFixture(t, dir)
+	pidFile := filepath.Join(dir, "linked-sidecar.pid")
+	installBootFakePlugin(t, config.ReasonixHomeDir(), "linkedplugin", map[string]any{
+		"env": map[string]string{bootFakeEnvPIDFile: pidFile},
+	})
+
+	oldRes, err := BuildRuntime(context.Background(), Options{})
+	if err != nil {
+		t.Fatalf("BuildRuntime: %v", err)
+	}
+	oldPID := readFakePID(t, pidFile)
+	if err := os.Remove(pidFile); err != nil {
+		oldRes.Controller.Close()
+		t.Fatalf("remove first-generation PID file: %v", err)
+	}
+	newRes, err := RebuildFrom(context.Background(), oldRes, Options{
+		RuntimeReload: RuntimeReload{ForceFullRebuild: true},
+	})
+	if err != nil {
+		oldRes.Controller.Close()
+		t.Fatalf("RebuildFrom: %v", err)
+	}
+	t.Cleanup(newRes.Controller.Close)
+
+	oldClient := oldRes.Extensions.Client("linkedplugin")
+	newClient := newRes.Extensions.Client("linkedplugin")
+	if oldClient == nil || newClient == nil {
+		t.Fatal("both generations must have a sidecar client")
+	}
+	if oldClient == newClient {
+		t.Fatal("explicit reload adopted the outgoing sidecar instead of starting a replacement")
+	}
+	newPID := readFakePID(t, pidFile)
+	if newPID == oldPID {
+		t.Fatalf("explicit reload kept sidecar PID %d", oldPID)
+	}
+	if oldClient.Exited() {
+		t.Fatal("outgoing sidecar exited before the replacement controller published")
+	}
+	if oldRes.Snapshot.CacheHash() != newRes.Snapshot.CacheHash() {
+		t.Fatalf("unchanged extension bytes changed cache hash: old=%s new=%s", oldRes.Snapshot.CacheHash(), newRes.Snapshot.CacheHash())
+	}
+
+	oldRes.Controller.Close()
+	waitForCond(t, "outgoing sidecar exit", 10*time.Second, oldClient.Exited)
+	if newClient.Exited() {
+		t.Fatal("replacement sidecar exited with the outgoing controller")
+	}
+}
+
+// TestExplicitReloadSidecarFailureKeepsOldProcess proves that forcing a fresh
+// linked process does not weaken reload failure atomicity. The replacement can
+// fail before publish while the previous process keeps answering requests.
+func TestExplicitReloadSidecarFailureKeepsOldProcess(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	writeRuntimeFixture(t, dir)
+	installBootFakePlugin(t, config.ReasonixHomeDir(), "stable-linked", map[string]any{
+		"required": true,
+	})
+
+	oldRes, err := BuildRuntime(context.Background(), Options{})
+	if err != nil {
+		t.Fatalf("BuildRuntime: %v", err)
+	}
+	t.Cleanup(oldRes.Controller.Close)
+	oldClient := oldRes.Extensions.Client("stable-linked")
+	if oldClient == nil {
+		t.Fatal("first build has no sidecar client")
+	}
+
+	// Keep the declared graph identical while making the linked program fail on
+	// its next launch. Without the explicit-restart instruction, RebuildFrom
+	// would adopt oldClient and incorrectly report success.
+	installBootFakePlugin(t, config.ReasonixHomeDir(), "stable-linked", map[string]any{
+		"required": true,
+		"env":      map[string]string{bootFakeEnvExitImmediately: "1"},
+	})
+	_, err = RebuildFrom(context.Background(), oldRes, Options{
+		RuntimeReload: RuntimeReload{ForceFullRebuild: true},
+	})
+	if err == nil {
+		t.Fatal("explicit reload succeeded after the replacement sidecar failed")
+	}
+	var requiredErr *sidecar.RequiredStartError
+	if !errors.As(err, &requiredErr) {
+		t.Fatalf("reload error %v is not a RequiredStartError", err)
+	}
+	if oldClient.Exited() || oldRes.Runtime.Closed() {
+		t.Fatal("failed explicit reload retired the outgoing runtime")
+	}
+	result, interceptErr := oldClient.Intercept(context.Background(), protocol.EventSessionStart, json.RawMessage(`{}`), 5*time.Second)
+	if interceptErr != nil || result.Decision != protocol.DecisionContinue {
+		t.Fatalf("outgoing sidecar after failed reload = %+v, %v", result, interceptErr)
+	}
+}
+
 func waitForCond(t *testing.T, what string, timeout time.Duration, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)

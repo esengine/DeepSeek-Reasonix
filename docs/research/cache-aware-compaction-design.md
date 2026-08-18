@@ -20,19 +20,19 @@
 canonical transcript (Session.Messages，普通维护永不改写)
     |
     +-- model-visible context projection / checkpoint
-    |       stable prefix + one structured summary + recent tail
+    |       system + one structured summary + recent 16% tail
     |
-    +-- first-visible tool bound (创建时 32KB Content/RawContent)
+    +-- stable provider tool view (≤32KB Content) + local full RawContent
     |
     +-- cache state (warm/cold/unknown，仅成本与观测)
 ```
 
 ## 二、唯一自动触发
 
-- 配置键：`agent.compact_ratio`（默认 `0.85`）
+- 配置键：`agent.compact_ratio`（默认 `0.80`）
 - 入口：`Prepare` / preflight 是唯一自动维护入口；`ObserveUsage` 只更新统计
-- 不再存在自动 soft compact、tool_result snip/prune 投影、native multi-threshold 路径
-- 兼容：旧配置键与 sidecar 字段可读；加载时清零/忽略/迁移删除，不新建 prune 投影
+- 不再存在自动 soft compact 或 native multi-threshold 路径；达到压力后先提交 tool-result prune 投影
+- 兼容：旧配置键与 v3 sidecar 字段可读；prune 不提升 schema
 
 ## 三、Checkpoint 形态
 
@@ -40,13 +40,13 @@ canonical transcript (Session.Messages，普通维护永不改写)
 
 ```text
 stable system / early prefix
--> 一条结构化 summary（单次摘要请求，上限约 16K）
--> recent tail（约 10% 窗口，夹在 32K–96K）
+-> 一条结构化 summary（单次摘要请求，上限 8192）
+-> recent tail（固定约 16% 窗口）
 ```
 
 验收要点：
 
-- 默认接受天花板约 50% 窗口；强制路径可放宽但不用不同 estimator 绕过
+- 候选必须严格小于被替换的完整请求，并通过同一 estimator/准入路径
 - 摘要失败不写 mechanical marker，不安装半成品，不改 canonical
 - provider-visible 始终最多一条 summary；旧 summary 可进入下一次 fold 被滚动吸收
 - 首次安装会预期 cache miss；安装后前缀应保持稳定以利后续 hit
@@ -78,12 +78,12 @@ stable system / early prefix
 
 1. 估计 projected tokens
 2. 低于 `compact_ratio`：发送 append-only / 现有有效 projection
-3. 达到阈值：至多一次 summary，CAS 安装 checkpoint
-4. tool loop 中优先 notice，避免打断 tool 配对
+3. 达到阈值：先持久 prune；不足时至多两次 summary，逐次 CAS 安装 checkpoint
+4. overflow：至多一次 prune、一次 summary、一次原请求重试
 
-### First-visible tool bound
+### Tool-result compatibility storage
 
-工具结果创建时把模型可见 `Content` 限制在约 32KB，完整原文进 `RawContent` / archive。这是写入时策略，不是阈值触发的历史 snip 投影。
+工具结果创建时把 provider 可见字段 `Content` 固定限制在 32KB 内，完整原文进本地 `RawContent`。普通 sampling、stream retry、summary 与 projection replay 始终使用同一份有界 `Content`，不再因完整结果大小改变旧请求前缀。模型需要全文时，显式通过稳定 `use_capability` 代理调用 `session:tool_result`，以 UTF-8 字节 offset 分页读取；页面本身保持在单工具输出上限内。只有达到压力阈值或 overflow 时，维护 projection 才可进一步安装 4096/marker/1024 prune，并产生已有的缓存变更诊断。manual `/compact` 不自动 prune。
 
 ## 六、Provider 与输出预算
 
@@ -96,13 +96,15 @@ stable system / early prefix
 | 场景 | 预期 |
 | --- | --- |
 | warm resume 低于阈值 | 复用 append-only 前缀，无摘要 |
-| 首次跨过 compact_ratio | 前缀变为 prefix+summary+tail，一次预期 miss |
+| 首次跨过 compact_ratio | 先 prune；必要时前缀变为 system+summary+tail，一次预期 miss |
 | checkpoint 安装后继续对话 | 稳定 prefix 利于 hit；generation 作用域避免重复摘要 |
 | cold resume | 只记 cache 状态，不因 TTL 重写历史 |
+| 大工具结果（低于阈值） | 首次只发送 ≤32KB `Content`；后续旧消息逐字节不变，`RawContent` 大小不线性增加 miss |
+| 显式回读完整结果 | 只将请求的 16–24KiB 页面追加给模型，不自动改写历史前缀 |
 
 ## 八、验证与烟雾
 
-- 确定性：`internal/agent` compact / projection / prune no-op / restart 测试
+- 确定性：`internal/agent` compact / projection / pressure-prune / restart 测试
 - 离线 e2e：`benchmarks/context-maintenance-e2e` 的 `seed` + `resume`（`-offline`）
 - 在线 e2e：同目录 `continue`（`DEEPSEEK_API_KEY`，`-max-usd` 费用上限，至多一次摘要）
 
@@ -113,7 +115,8 @@ stable system / early prefix
 1. 配置结构体仍可读旧 soft/snip/force 键，加载时清零并迁移删除
 2. sidecar 仍可解码旧 prune/native 字段后忽略
 3. `PruneStaleToolResults` / `SnipStaleToolResults` 保留为 no-op API，避免旧调用点 panic
-4. snip 几何 helpers 仍服务 first-visible 与 summary fold 输入，不再用于自动投影安装
+4. `Content + RawContent` 双字段继续保证新旧版本都能安全读取同一 session；旧版本可能重新提升 `RawContent`，但不会损坏数据
+5. 旧 promoted-RawContent sidecar 只有在哈希精确匹配历史形式时才反向归一化为当前 bounded hash；无法证明时只丢弃 projection body，canonical 与维护 receipt 保留
 
 ## 十、明确未做
 

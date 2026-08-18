@@ -391,6 +391,26 @@ func TestSessionMetaConcurrentWritersKeepRevisionMonotonic(t *testing.T) {
 	assertNoRecoveryBranches(t, path)
 }
 
+func TestRenameSessionIfTitleUnchangedPreservesNewerTitle(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := RenameSession(path, "original"); err != nil {
+		t.Fatal(err)
+	}
+	if err := RenameSessionIfTitleUnchanged(path, "original", "first AI title"); err != nil {
+		t.Fatalf("compare-and-rename: %v", err)
+	}
+	if err := RenameSession(path, "newer manual title"); err != nil {
+		t.Fatal(err)
+	}
+	if err := RenameSessionIfTitleUnchanged(path, "first AI title", "stale AI title"); !errors.Is(err, ErrSessionTitleChanged) {
+		t.Fatalf("stale compare-and-rename error = %v", err)
+	}
+	meta, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok || meta.CustomTitle != "newer manual title" {
+		t.Fatalf("meta = %+v, ok=%v, err=%v", meta, ok, err)
+	}
+}
+
 // A saver that blocks on the save lock must persist whatever the session
 // holds when it finally enters the critical section, not a stale capture from
 // when it was scheduled — the out-of-order landing that used to surface as
@@ -579,7 +599,7 @@ func TestSameContentRetryHealsLedgerForSurvivingSaver(t *testing.T) {
 	if err := os.WriteFile(metaPath, staleMeta, 0o644); err != nil {
 		t.Fatalf("rewind meta: %v", err)
 	}
-	s.setPersistedBaseline(path, baseline.digest, baseline.version, baseline.revision, true, true, 0)
+	s.setPersistedBaseline(path, baseline.digest, baseline.version, baseline.revision, true, true, 0, nil)
 
 	if err := s.SaveSnapshot(path); err != nil {
 		t.Fatalf("autosave retry: %v", err)

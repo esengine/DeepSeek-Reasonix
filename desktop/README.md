@@ -227,9 +227,17 @@ handled here, and what to reach for if a target misbehaves:
 - **Linux / WebKitGTK** is the one real pain point — rendering varies by distro &
   GPU driver. `main.go` keeps `WebviewGpuPolicy: OnDemand` when a DRI render node
   is usable, and falls back to `Never` for xrdp/headless/software-rendered sessions
-  that cannot access `/dev/dri`. If artifacts persist, launch with
-  `WEBKIT_DISABLE_COMPOSITING_MODE=1`. Test on at least one GTK target before release;
+  that cannot access `/dev/dri`. If the React + Wails heartbeat does not arrive,
+  Reasonix automatically restarts once with GPU acceleration and WebKit compositing
+  disabled; a per-version five-minute journal prevents restart loops. The manual
+  `WEBKIT_DISABLE_COMPOSITING_MODE=1` fallback remains supported. Test on at least
+  one GTK target before release;
   the CSS deliberately avoids `backdrop-filter`/blur (slow & inconsistent there).
+  Linux close-to-background is enabled only after a private DBus health probe
+  confirms a live StatusNotifierWatcher, a registered visual host, and this
+  process's registered StatusNotifierItem. If any of them disappears while the
+  main window is hidden, Reasonix presents the window again and later closes
+  normally until the tray recovers.
   - **Wayland + NVIDIA**: On KDE Plasma Wayland with NVIDIA GPUs, WebKitGTK can
     crash at startup (`Error 71: Protocol error`) due to an upstream WebKit
     explicit-sync bug (WebKit #280210, #317089, NVIDIA/egl-wayland #179).

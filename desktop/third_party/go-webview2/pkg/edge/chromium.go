@@ -23,14 +23,10 @@ import (
 
 type Rect = w32.Rect
 
-// WebView2 must remain the sole owner of its rasterization scale. Disabling
-// monitor-scale detection leaves frameless windows with stale bounds after a
-// minimise/restore cycle on mixed-DPI displays (Reasonix #5862, Wails #5544).
 const (
-	shouldDetectMonitorScaleChanges = true
 	reasonixNoProxyServerBrowserArg = "--no-proxy-server"
 	reasonixProcessRecoveryCooldown = 30 * time.Second
-	reasonixProcessRecoveryTimeout  = 30 * time.Second
+	reasonixProcessRecoveryTimeout  = 10 * time.Second
 )
 
 func globalErrorHandler(err error) {
@@ -38,13 +34,13 @@ func globalErrorHandler(err error) {
 		return
 	}
 
-	fmt.Printf("[WebView2 Error] %v\n", err)
+	log.Printf("[WebView2 Error] %v\n", err)
 
 	stackBuf := make([]uintptr, 64)
 	stackSize := runtime.Callers(2, stackBuf)
 	frames := runtime.CallersFrames(stackBuf[:stackSize])
 
-	fmt.Println("\nStack trace:")
+	log.Printf("\nStack trace:")
 	stackIndex := 1
 	for {
 		frame, more := frames.Next()
@@ -110,12 +106,15 @@ type Chromium struct {
 	// Resize debouncing
 	lastBounds  *w32.Rect
 	resizeTimer *time.Timer
+
+	windowSyncing atomic.Bool
+	windowPending atomic.Bool
 }
 
 func NewChromium() *Chromium {
-	// Reasonix's WebView only loads embedded assets and loopback remote-workspace
-	// pages. Keep that native UI independent from a stale Windows system proxy;
-	// provider, updater, MCP, and SSH traffic use Reasonix's separate Go client.
+	// Reasonix's native UI loads embedded assets and loopback workspace pages.
+	// Provider, updater, MCP and SSH traffic use separate Go clients, so a stale
+	// system proxy must not make the WebView itself unavailable.
 	e := &Chromium{AdditionalBrowserArgs: []string{reasonixNoProxyServerBrowserArg}}
 	/*
 	 All these handlers are passed to native code through syscalls with 'uintptr(unsafe.Pointer(handler))' and we know
@@ -250,50 +249,91 @@ func (e *Chromium) SetPadding(padding Rect) {
 }
 
 func (e *Chromium) ResizeWithBounds(bounds *Rect) {
-	if e.hwnd == 0 {
+	if e.hwnd == 0 || bounds == nil {
 		return
 	}
 
-	bounds.Top += e.padding.Top
-	bounds.Bottom -= e.padding.Bottom
-	bounds.Left += e.padding.Left
-	bounds.Right -= e.padding.Right
+	padded := *bounds
+	padded.Top += e.padding.Top
+	padded.Bottom -= e.padding.Bottom
+	padded.Left += e.padding.Left
+	padded.Right -= e.padding.Right
 
-	e.SetSize(*bounds)
+	e.SetSize(padded)
 }
 
 func (e *Chromium) Resize() {
-	if e.hwnd == 0 {
-		return
+	if err := e.syncWindowState(); err != nil {
+		log.Printf("[WebView2] window synchronization failed: %v", err)
+	}
+}
+
+// syncWindowState is the only path that reconciles native window geometry.
+// Re-entrant Win32 move/size/DPI messages are collapsed, and each pass reads
+// the actual client rect before setting controller bounds and notifying
+// WebView2 about the parent position. Rasterization scale is never written.
+func (e *Chromium) syncWindowState() error {
+	if e.hwnd == 0 || e.controller == nil {
+		return nil
+	}
+	if !e.windowSyncing.CompareAndSwap(false, true) {
+		e.windowPending.Store(true)
+		return nil
 	}
 
-	bounds, err := w32.GetClientRect(e.hwnd)
-	if err != nil {
-		e.errorCallback(err)
-		return
-	}
+	var firstErr error
+	for {
+		e.windowPending.Store(false)
+		clientRect, err := w32.GetClientRect(e.hwnd)
+		if err != nil {
+			firstErr = err
+		} else {
+			e.ResizeWithBounds(&clientRect)
+			if err := e.controller.NotifyParentWindowPositionChanged(); err != nil && firstErr == nil {
+				firstErr = err
+			}
 
-	e.ResizeWithBounds(&bounds)
+			windowRect, _ := w32.GetWindowRect(e.hwnd)
+			dpi, _ := w32.GetDPIForWindow(e.hwnd)
+			scale := 0.0
+			if dpi > 0 {
+				scale = float64(dpi) / 96.0
+			}
+			notifyWindowStateObserver(WindowStateDiagnostic{
+				ClientRect: clientRect,
+				WindowRect: windowRect,
+				DPI:        dpi,
+				Scale:      scale,
+			})
+		}
+
+		e.windowSyncing.Store(false)
+		if !e.windowPending.Load() || !e.windowSyncing.CompareAndSwap(false, true) {
+			return firstErr
+		}
+	}
 }
 
 func (e *Chromium) Navigate(url string) {
 	err := e.webview.Navigate(url)
 	if err != nil {
-		e.errorCallback(err)
+		// A failed navigation is recoverable (the previous content stays
+		// visible); killing the process is not.
+		log.Printf("[WebView2] Navigate failed: %v", err)
 	}
 }
 
 func (e *Chromium) NavigateToString(content string) {
 	err := e.webview.NavigateToString(content)
 	if err != nil {
-		e.errorCallback(err)
+		log.Printf("[WebView2] NavigateToString failed: %v", err)
 	}
 }
 
 func (e *Chromium) Init(script string) {
 	err := e.webview.AddScriptToExecuteOnDocumentCreated(script, nil)
 	if err != nil {
-		e.errorCallback(err)
+		log.Printf("[WebView2] Init script registration failed: %v", err)
 	}
 }
 
@@ -304,7 +344,13 @@ func (e *Chromium) Eval(script string) {
 
 	err := e.webview.ExecuteScript(script, nil)
 	if err != nil && !errors.Is(err, windows.ERROR_IO_PENDING) {
-		e.errorCallback(err)
+		// ExecuteScript fails transiently while the browser process is busy
+		// reconfiguring — e.g. RESOURCE_NOT_IN_CORRECT_STATE during a DPI
+		// transition when the window is dragged between mixed-DPI monitors
+		// (wailsapp/wails#5544). Script execution is fire-and-forget; a
+		// dropped script during a transition is recoverable, killing the
+		// process (errorCallback) is not.
+		log.Printf("[WebView2] Eval failed: %v", err)
 	}
 }
 
@@ -367,12 +413,17 @@ func (e *Chromium) CreateCoreWebView2ControllerCompleted(res uintptr, controller
 			e.errorCallback(err)
 		}
 
-		// Raw-pixel bounds and automatic monitor-scale detection are orthogonal.
-		// Keep detection enabled so WebView2 updates its scale atomically when a
-		// minimised window is temporarily associated with another monitor.
-		if err := controller3.PutShouldDetectMonitorScaleChanges(shouldDetectMonitorScaleChanges); err != nil {
-			e.errorCallback(err)
-		}
+		// ShouldDetectMonitorScaleChanges is deliberately left at its default
+		// (enabled): WebView2 tracks monitor DPI changes and updates its own
+		// rasterization scale. This module previously disabled it and left the
+		// scale to the host's WM_DPICHANGED handling, but an externally
+		// written scale races the browser process's internal display
+		// bookkeeping during a mixed-DPI monitor cross — the browser can land
+		// on a degenerate scale(0,0) compositor transform, which kills the
+		// GPU process on every frame until the browser process itself exits
+		// (wailsapp/wails#5732). Detection stays on so the scale has exactly
+		// one writer, on the code path every mainstream embedder exercises;
+		// bounds remain raw pixels, which is orthogonal.
 	}
 	var token _EventRegistrationToken
 	e.webview, err = e.controller.GetCoreWebView2()
@@ -430,13 +481,20 @@ func (e *Chromium) ContainsFullScreenElementChanged(sender *ICoreWebView2, args 
 func (e *Chromium) MessageReceived(sender *ICoreWebView2, args *ICoreWebView2WebMessageReceivedEventArgs) uintptr {
 	message, err := args.TryGetWebMessageAsString()
 	if err != nil {
-		e.errorCallback(err)
+		// The web message originates from (potentially untrusted) page
+		// content. A malformed message must never be able to take the whole
+		// process down — drop it and keep running.
+		log.Printf("[WebView2] dropping malformed web message: %v", err)
+		return 0
 	}
 
 	if HasCapability(e.webview2RuntimeVersion, GetAdditionalObjects) {
 		obj, err := args.GetAdditionalObjects()
 		if err != nil {
-			e.errorCallback(err)
+			// Fall back to delivering the plain string message below rather
+			// than killing the process.
+			log.Printf("[WebView2] failed to read additional objects, delivering message without them: %v", err)
+			obj = nil
 		}
 
 		if obj != nil && e.MessageWithAdditionalObjectsCallback != nil {
@@ -451,7 +509,7 @@ func (e *Chromium) MessageReceived(sender *ICoreWebView2, args *ICoreWebView2Web
 
 	err = sender.PostWebMessageAsString(message)
 	if err != nil && !errors.Is(err, windows.ERROR_IO_PENDING) {
-		e.errorCallback(err)
+		log.Printf("[WebView2] PostWebMessageAsString failed: %v", err)
 	}
 	return 0
 }
@@ -568,6 +626,16 @@ func (e *Chromium) GetController() *ICoreWebView2Controller {
 	return e.controller
 }
 
+// IsReady reports whether the WebView2 controller has been fully initialised.
+// e.controller is assigned partway through CreateCoreWebView2ControllerCompleted,
+// before the controller's COM setup has finished, so a non-nil controller is
+// not sufficient to safely call into it: COM calls made in that window fail
+// with E_INVALIDARG ("The parameter is incorrect"). The inited flag is set
+// only after setup completes. Safe to call from any goroutine.
+func (e *Chromium) IsReady() bool {
+	return atomic.LoadUintptr(&e.inited) != 0
+}
+
 func boolToInt(input bool) int {
 	if input {
 		return 1
@@ -594,9 +662,8 @@ func (e *Chromium) NavigationStarting(_ *ICoreWebView2, args *ICoreWebView2Navig
 		e.nonFatalErrorCallback(fmt.Errorf("read WebView2 reload navigation ID: %w", err))
 		return 0
 	}
-	// Renderer recovery is armed immediately before Reload on WebView2's STA.
-	// Bind the first subsequent top-level navigation and accept only its exact
-	// completion ID; programmatic Reload is not reported as user initiated.
+	// Recovery is armed immediately before Reload on WebView2's STA. Bind the
+	// first following top-level navigation and accept only its completion ID.
 	e.processRecovery.bindNavigation(navigationID)
 	return 0
 }
@@ -604,25 +671,21 @@ func (e *Chromium) NavigationStarting(_ *ICoreWebView2, args *ICoreWebView2Navig
 func (e *Chromium) ProcessFailed(sender *ICoreWebView2, args *ICoreWebView2ProcessFailedEventArgs) uintptr {
 	diagnostic := collectProcessFailedDiagnostic(args)
 	if diagnostic.Kind == COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED {
-		// Wails calls os.Exit(-1) for this kind. Persist the native details before
-		// control reaches the public callback so the fatal event is not lost.
+		// Wails exits in its public callback for this kind. Persist the details
+		// first so the controlled desktop restart can make the recovery decision.
 		notifyProcessFailedObserver(diagnostic)
 	}
 	if e.ProcessFailedCallback != nil {
 		e.ProcessFailedCallback(sender, args)
 	}
 
-	// WebView2 creates a replacement renderer after a main-frame renderer exit,
-	// but leaves it on an error page. A renderer reported as unresponsive also
-	// needs a native COM reload because JavaScript in that process may no longer
-	// run. Reload returning S_OK only means the navigation was accepted, so wait
-	// for NavigationCompleted before publishing the recovery outcome. Repeated
-	// renderer events are suppressed during the recovery cooldown.
 	kind := diagnostic.Kind
 	if kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED ||
 		kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE {
 		e.handleFailedRendererRecovery(diagnostic, time.Now(), sender.Reload)
 	} else if kind != COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED {
+		// Frame/GPU/utility failures are diagnostic-only here. The desktop
+		// coordinator escalates them only when a renderer heartbeat is also lost.
 		notifyProcessFailedObserver(diagnostic)
 	}
 	return 0
@@ -630,10 +693,7 @@ func (e *Chromium) ProcessFailed(sender *ICoreWebView2, args *ICoreWebView2Proce
 
 func (e *Chromium) handleFailedRendererRecovery(diagnostic ProcessFailedDiagnostic, now time.Time, reload func() error) {
 	if !e.beginFailedRendererRecovery(diagnostic, now) {
-		// Cooldown suppresses another native reload, not the diagnostic event.
-		// Recording it as not_applicable preserves every renderer failure while
-		// keeping recovery bounded to one attempt.
-		diagnostic.Recovery = "not_applicable"
+		diagnostic.Recovery = "reload_suppressed"
 		notifyProcessFailedObserver(diagnostic)
 		return
 	}
@@ -669,10 +729,10 @@ func (e *Chromium) completeFailedRendererRecovery(args *ICoreWebView2NavigationC
 		return ProcessFailedDiagnostic{}, false
 	}
 	recovery := "reload_failed"
-	if succeeded, err := args.GetIsSuccess(); err == nil && succeeded {
-		recovery = "reload_succeeded"
-	} else if err != nil {
-		e.nonFatalErrorCallback(fmt.Errorf("read WebView2 renderer reload outcome: %w", err))
+	if succeeded, resultErr := args.GetIsSuccess(); resultErr == nil && succeeded {
+		recovery = "reload_navigation_succeeded"
+	} else if resultErr != nil {
+		e.nonFatalErrorCallback(fmt.Errorf("read WebView2 renderer reload outcome: %w", resultErr))
 	}
 	diagnostic.Recovery = recovery
 	return diagnostic, true
@@ -688,32 +748,41 @@ func (e *Chromium) finishFailedRendererRecovery(recovery string) (ProcessFailedD
 }
 
 func (e *Chromium) NotifyParentWindowPositionChanged() error {
-	//It looks like the wndproc function is called before the controller initialization is complete.
-	//Because of this the controller is nil
-	if e.controller == nil {
-		return nil
-	}
-	return e.controller.NotifyParentWindowPositionChanged()
+	return e.syncWindowState()
 }
 
 func (e *Chromium) Focus() {
+	// The WndProc can dispatch WM_SETFOCUS re-entrantly while the controller
+	// is still being configured in CreateCoreWebView2ControllerCompleted
+	// (issue #5446). Callers' GetController() != nil checks cannot exclude
+	// that window, so guard here: dropping a focus request during startup is
+	// harmless, calling MoveFocus on a partially-initialised controller is
+	// fatal (errorCallback exits the process).
+	if !e.IsReady() {
+		return
+	}
 	err := e.controller.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC)
 	if err != nil {
-		e.errorCallback(err)
+		// MoveFocus can legitimately fail after initialisation too — e.g.
+		// E_INVALIDARG when the window is hidden or minimised to the tray
+		// (wailsapp/wails#4158 reproduces this on tray-click restore). A
+		// failed focus request is never worth killing the process, which is
+		// what errorCallback does; log it instead.
+		log.Printf("[WebView2] Focus failed: %v", err)
 	}
 }
 
 func (e *Chromium) PutZoomFactor(zoomFactor float64) {
 	err := e.controller.PutZoomFactor(zoomFactor)
 	if err != nil {
-		e.errorCallback(err)
+		log.Printf("[WebView2] PutZoomFactor failed: %v", err)
 	}
 }
 
 func (e *Chromium) OpenDevToolsWindow() {
 	err := e.webview.OpenDevToolsWindow()
 	if err != nil {
-		e.errorCallback(err)
+		log.Printf("[WebView2] OpenDevToolsWindow failed: %v", err)
 	}
 }
 

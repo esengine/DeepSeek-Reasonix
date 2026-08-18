@@ -58,7 +58,7 @@ func deliveryLeaseTestAgent(t *testing.T, owner *workspacelease.Owner, tools ...
 	for _, candidate := range tools {
 		reg.Add(candidate)
 	}
-	a := New(nil, reg, NewSession(""), Options{DeliveryProfile: true, WorkspaceLease: owner}, event.Discard)
+	a := New(nil, reg, NewSession(""), Options{WorkspaceLease: owner}, event.Discard)
 	a.turn.deliveryCriteriaEstablished = true
 	a.setTodoState([]evidence.TodoItem{{Content: "mutate", Status: "in_progress"}})
 	return a
@@ -115,7 +115,7 @@ func TestDeniedDeliveryWriterDoesNotAcquireWorkspaceLease(t *testing.T) {
 	probeOwner, _ := workspacelease.New(root, locks, nil)
 	writer := &workspaceLeaseTestTool{name: "denied_writer"}
 	a := deliveryLeaseTestAgent(t, deniedOwner, writer)
-	a.svc.gate = workspaceLeaseDenyGate{}
+	a.svc.setGate(workspaceLeaseDenyGate{})
 	deniedOwner.BeginRun()
 	outcome := a.executeOne(context.Background(), &a.turn, providerToolCall("write", writer.Name()))
 	deniedOwner.EndRun()

@@ -20,7 +20,9 @@ const testDir = dirname(fileURLToPath(import.meta.url));
 const appSource = readFileSync(resolve(testDir, "../App.tsx"), "utf8");
 const stylesSource = readFileSync(resolve(testDir, "../styles.css"), "utf8");
 const terminalPanelSource = readFileSync(resolve(testDir, "../components/TerminalPanel.tsx"), "utf8");
+const terminalViewSource = readFileSync(resolve(testDir, "../components/TerminalView.tsx"), "utf8");
 const terminalRailSource = readFileSync(resolve(testDir, "../components/TerminalSessionRail.tsx"), "utf8");
+const terminalLifecycleSource = readFileSync(resolve(testDir, "../lib/useWarmTerminalPanel.ts"), "utf8");
 
 function eq(a: unknown, b: unknown, label: string) {
   if (a === b) {
@@ -163,6 +165,18 @@ eq(
   "closing the dock clears the transient render width, hides the panel, and persists the collapsed preference",
 );
 eq(
+  /\.workspace-panel-resizer \{[\s\S]*?grid-column: 3;[\s\S]*?justify-self: start;[\s\S]*?width: 1px;/.test(stylesSource)
+    && /\.workspace-panel-resizer::before \{[\s\S]*?left: 0;[\s\S]*?right: -7px;/.test(stylesSource),
+  true,
+  "workspace resize hit area starts at the dock boundary and never overlaps the chat scrollbar gutter",
+);
+eq(
+  /createPointerResizeLifecycle\(\{[\s\S]*?separator,[\s\S]*?pointerId,[\s\S]*?onMove,[\s\S]*?onFinish: \(\) => \{[\s\S]*?liveResize\.flush\(\);/.test(appSource)
+    && /workspacePanelResizeFinishRef\.current = lifecycle\.finish/.test(appSource),
+  true,
+  "workspace resize has one guarded finish path for capture loss, blur, cancellation, and unmount",
+);
+eq(
   /setWorkspacePanelOpen\(true\);[\s\S]*?saveWorkspacePanelOpen\(true\);/.test(appSource),
   true,
   "opening the dock persists the expanded preference for the next launch",
@@ -176,6 +190,13 @@ eq(
   /const addTerminalOutputToComposer = useCallback\(async \(sessionId: string\) => \{[\s\S]*?app\.TerminalOutputForTab\(activeTabId, sessionId\)[\s\S]*?addWorkspaceTextToComposer\(/.test(appSource),
   true,
   "terminal output reaches chat only through the explicit add-output action",
+);
+eq(
+  /const addSelectedTextToComposer = useCallback\(\(text: string, source\?: SelectedTextInsertRequest\["source"\]\)/.test(appSource)
+    && /addSelectedTextToComposer\(text, "terminal"\)/.test(appSource)
+    && /onAddToChat=\{addTerminalSelectionToComposer\}/.test(appSource),
+  true,
+  "terminal selections enter the composer as typed quoted context",
 );
 eq(
   /@media \(max-width: 820px\) \{[\s\S]*?\.layout--terminal-drawer-open \.terminal-drawer[\s\S]*?display: flex !important/.test(stylesSource),
@@ -245,8 +266,7 @@ eq(
 eq(
   /\.composer-meta__control--approval \{[\s\S]*?margin-inline-start: 2px;/.test(stylesSource)
     && /\.composer-modebar__item:hover:not\(:disabled\) \{[\s\S]*?transform: none;/.test(stylesSource)
-    && /\.composer-task-mode-trigger:hover:not\(:disabled\),[\s\S]*?\.composer-task-mode-trigger--open \{[\s\S]*?transform: none;/.test(stylesSource)
-    && /\.composer-profile-trigger:hover:not\(:disabled\),[\s\S]*?\.composer-profile-trigger--open \{[\s\S]*?transform: none;/.test(stylesSource),
+    && /\.composer-task-mode-trigger:hover:not\(:disabled\),[\s\S]*?\.composer-task-mode-trigger--open \{[\s\S]*?transform: none;/.test(stylesSource),
   true,
   "composer mode controls keep spacing and icon baselines stable on hover",
 );
@@ -264,6 +284,13 @@ eq(
   /const syncWorkspace = useTerminalStore[\s\S]*?const capabilityChanged = previous\.tabId === tabId && previous\.readOnly !== readOnly[\s\S]*?void syncWorkspace\(tabId, capabilityChanged\)/.test(terminalPanelSource),
   true,
   "terminal panel refreshes changed capability while reusing an in-flight first-open request",
+);
+eq(
+  /state\.tabId === tabId \? state\.workspace : null/.test(terminalPanelSource)
+    && /state\.tabId === tabId \? state\.activeSessionId : null/.test(terminalPanelSource)
+    && /setSelectionAction\(null\);\s*\}, \[active\?\.id, tabId\]\)/.test(terminalPanelSource),
+  true,
+  "rapid tab switches cannot paint the previous tab's terminal or selection action",
 );
 eq(
   /readOnly=\{Boolean\(activeTab\?\.readOnly\)\}/.test(appSource)
@@ -294,7 +321,53 @@ eq(
 eq(
   /const TerminalPanel = lazy\(\(\) => import\("\.\/components\/TerminalPanel"\)/.test(appSource),
   true,
-  "terminal and xterm load only when the terminal drawer opens",
+  "terminal and xterm remain in a lazy chunk",
+);
+eq(
+  /onPointerEnter=\{prefetchTerminalPanel\}/.test(appSource)
+    && /onFocus=\{prefetchTerminalPanel\}/.test(appSource)
+    && /void import\("\.\.\/components\/TerminalPanel"\)/.test(terminalLifecycleSource),
+  true,
+  "pointer and keyboard intent prefetch the terminal chunk before opening",
+);
+eq(
+  /useWarmTerminalPanel\(terminalPanelOpen, terminalResizing\)/.test(appSource)
+    && /if \(open\) setMounted\(true\)/.test(terminalLifecycleSource)
+    && !/setMounted\(false\)/.test(terminalLifecycleSource),
+  true,
+  "the terminal stays mounted after first open to preserve the live xterm",
+);
+eq(
+  /registerTerminalSink\(session\.id, \(bytes\) => terminal\.write\(bytes\), openRef\.current\)/.test(terminalViewSource)
+    && /terminalSinkRef\.current\?\.setActive\(open\)/.test(terminalViewSource),
+  true,
+  "the warm terminal pauses PTY output while collapsed and resumes from its output cursor",
+);
+eq(
+  /fitEnabled=\{terminalFitEnabled\}/.test(appSource)
+    && /setFitEnabled\(false\)/.test(terminalLifecycleSource)
+    && /TERMINAL_TRANSITION_MS/.test(terminalLifecycleSource)
+    && /fitEnabled=\{fitEnabled\}/.test(terminalPanelSource),
+  true,
+  "drawer transitions pause xterm fit and perform one fit after opening",
+);
+eq(
+  /useGlobalShortcut\(\s*"selection\.addToChat"/.test(terminalPanelSource)
+    && /<kbd>\{addShortcut\}<\/kbd>/.test(terminalPanelSource),
+  true,
+  "terminal selection-to-chat exposes the shared configurable shortcut",
+);
+eq(
+  /className="terminal-drawer"[\s\S]*?aria-hidden=\{!terminalPanelOpen\}[\s\S]*?inert=\{!terminalPanelOpen \? true : undefined\}/.test(appSource),
+  true,
+  "the warm collapsed terminal is hidden from accessibility and focus navigation",
+);
+eq(
+  /open=\{terminalPanelOpen\}/.test(appSource)
+    && /open && selectionAction &&/.test(terminalPanelSource)
+    && /if \(!open\) setSelectionAction\(null\)/.test(terminalPanelSource),
+  true,
+  "closing a warm terminal removes portaled selection controls",
 );
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);

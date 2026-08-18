@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 
+	"reasonix/internal/billing"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
@@ -265,9 +266,9 @@ func usageRequestCount(usage *provider.Usage) int {
 	return 1
 }
 
-func (a *Agent) emitTurnUsage(usage *provider.Usage, cacheDiagnostics *CacheDiagnostics) {
+func (a *Agent) emitTurnUsage(usage *provider.Usage, cacheDiagnostics *CacheDiagnostics) *billing.CostQuote {
 	if usage == nil || (usage.TotalTokens <= 0 && usage.RequestCount <= 0) {
-		return
+		return nil
 	}
 	// lastUsage must stay as the latest single-request shape (set during
 	// sampling recovery). Never overwrite it with a multi-attempt billable
@@ -275,8 +276,11 @@ func (a *Agent) emitTurnUsage(usage *provider.Usage, cacheDiagnostics *CacheDiag
 	if a.sess.output.lastUsage.Load() == nil && usage.PromptTokens > 0 {
 		a.storeLatestRequestUsage(usage)
 	}
-	a.svc.sink.Emit(event.Event{Kind: event.Usage, ModelRef: a.modelRef, Usage: usage, Pricing: a.svc.pricing,
+	e := event.Event{Kind: event.Usage, ModelRef: a.modelRef, Usage: usage, Pricing: a.svc.pricing,
 		UsageSource:      a.usageSource,
 		CacheDiagnostics: cacheDiagnostics,
-		SessionHit:       int(a.sess.cacheHit.Load()), SessionMiss: int(a.sess.cacheMiss.Load())})
+		SessionHit:       int(a.sess.cacheHit.Load()), SessionMiss: int(a.sess.cacheMiss.Load())}
+	e.CostQuote = event.EnsureCostQuote(e, a.svc.quoteContext)
+	a.svc.sink.Emit(e)
+	return e.CostQuote
 }

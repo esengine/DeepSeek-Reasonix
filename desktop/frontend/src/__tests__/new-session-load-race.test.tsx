@@ -146,6 +146,12 @@ let backendCanonicalTodos = [{ content: "Old task", status: "in_progress" }];
 let holdNextMeta = false;
 let staleMetaStarted = false;
 const eventHandlers: Array<(event: WireEvent) => void> = [];
+const rebuiltHandlers: Array<(tabId?: string, runtimeEpoch?: string) => void> = [];
+let backendRuntimeEpoch = "runtime-old";
+let backendPendingPrompt = false;
+let promptReplayCalls = 0;
+const resumeRPCGate = deferred<void>();
+const channelRPCGate = deferred<void>();
 const context: ContextInfo = { used: 12, window: 100, sessionTokens: 12 };
 const effort: EffortInfo = { supported: true, current: "auto", default: "auto", levels: ["auto"] };
 const balance: BalanceInfo = { available: false, display: "" };
@@ -155,6 +161,7 @@ const checkpoints: CheckpointMeta[] = [];
 window.runtime = {
   EventsOn: (name: string, cb: (...data: unknown[]) => void) => {
     if (name === "agent:event") eventHandlers.push(cb as (event: WireEvent) => void);
+    if (name === "runtime:rebuilt") rebuiltHandlers.push(cb as (tabId?: string, runtimeEpoch?: string) => void);
     return () => {};
   },
   BrowserOpenURL: () => {},
@@ -162,14 +169,21 @@ window.runtime = {
 window.go = {
   main: {
     App: {
-      ListTabs: async () => [tabMeta()],
+      ListTabs: async () => {
+        return [tabMeta({
+          runtime: { phase: "ready", epoch: backendRuntimeEpoch },
+          running: backendPendingPrompt,
+          pendingPrompt: backendPendingPrompt,
+          cancellable: backendPendingPrompt,
+        })];
+      },
       MetaForTab: async () => {
         if (holdNextMeta) {
           holdNextMeta = false;
           staleMetaStarted = true;
           return staleSessionMeta.promise;
         }
-        return meta({ canonicalTodos: backendCanonicalTodos });
+        return meta({ canonicalTodos: backendCanonicalTodos, runtime: { phase: "ready", epoch: backendRuntimeEpoch } });
       },
       ContextUsageForTab: async () => context,
       EffortForTab: async () => effort,
@@ -185,6 +199,18 @@ window.go = {
         historySliceFromMessages(tabID, await staleHistory.promise, req),
       HistoryCheckpointTurnsForTab: async () => [],
       ReplayPendingPrompts: async () => {},
+      ReplayPendingPromptsForTab: async (tabID: string) => {
+        promptReplayCalls += 1;
+        if (tabID !== "tab-a" || !backendPendingPrompt) return;
+        for (const handler of eventHandlers) {
+          handler({
+            kind: "ask_request",
+            tabId: tabID,
+            runtimeEpoch: backendRuntimeEpoch,
+            ask: { id: `replayed-${backendRuntimeEpoch}`, questions: [{ id: "choice", prompt: "Recovered after hydration", options: [] }] },
+          });
+        }
+      },
       NewSession: async () => {
         newSessionCalls += 1;
         backendCanonicalTodos = [];
@@ -196,8 +222,55 @@ window.go = {
       },
       ResumeSessionPageForTab: async () => {
         backendCanonicalTodos = [{ content: "Restored task", status: "completed" }];
+        const oldEpoch = backendRuntimeEpoch;
+        backendRuntimeEpoch = "runtime-resumed";
+        backendPendingPrompt = true;
+        for (const handler of rebuiltHandlers) handler("tab-a", backendRuntimeEpoch);
+        for (const handler of eventHandlers) {
+          handler({
+            kind: "ask_request",
+            tabId: "tab-a",
+            runtimeEpoch: oldEpoch,
+            ask: { id: "stale-old-epoch", questions: [{ id: "choice", prompt: "Stale", options: [] }] },
+          });
+          handler({
+            kind: "ask_request",
+            tabId: "tab-a",
+            runtimeEpoch: backendRuntimeEpoch,
+            ask: { id: "pre-response-resume", questions: [{ id: "choice", prompt: "Before Resume RPC returns", options: [] }] },
+          });
+        }
+        await resumeRPCGate.promise;
         return {
           messages: [{ role: "user", content: "restore" }, { role: "assistant", content: "done" }],
+          startTurn: 0,
+          endTurn: 1,
+          totalTurns: 1,
+          hasOlder: false,
+        };
+      },
+      OpenChannelSessionPageForTab: async () => {
+        const oldEpoch = backendRuntimeEpoch;
+        backendRuntimeEpoch = "runtime-channel";
+        backendPendingPrompt = true;
+        for (const handler of rebuiltHandlers) handler("tab-a", backendRuntimeEpoch);
+        for (const handler of eventHandlers) {
+          handler({
+            kind: "ask_request",
+            tabId: "tab-a",
+            runtimeEpoch: oldEpoch,
+            ask: { id: "stale-channel-old-epoch", questions: [{ id: "choice", prompt: "Stale channel", options: [] }] },
+          });
+          handler({
+            kind: "ask_request",
+            tabId: "tab-a",
+            runtimeEpoch: backendRuntimeEpoch,
+            ask: { id: "pre-response-channel", questions: [{ id: "choice", prompt: "Before channel RPC returns", options: [] }] },
+          });
+        }
+        await channelRPCGate.promise;
+        return {
+          messages: [{ role: "user", content: "channel" }, { role: "assistant", content: "waiting" }],
           startTurn: 0,
           endTurn: 1,
           totalTurns: 1,
@@ -262,11 +335,40 @@ await act(async () => {
 
 eq(controller?.state.items.length, 0, "stale history load cannot repopulate a new blank session");
 
+let resumePromise: Promise<void> | undefined;
 await act(async () => {
-  await controller?.resumeSession("/sessions/restored.jsonl", "tab-a");
+  resumePromise = controller?.resumeSession("/sessions/restored.jsonl", "tab-a");
+  await flushPromises();
+});
+eq(controller?.state.ask?.id, "pre-response-resume", "Resume accepts the new-epoch ask and rejects the interleaved old-epoch ask before returning");
+await act(async () => {
+  resumeRPCGate.resolve();
+  await resumePromise;
   await flushPromises();
 });
 eq(controller?.state.meta?.canonicalTodos?.[0]?.status, "completed", "resuming a session refreshes its authoritative canonical todo state");
+eq(controller?.state.ask?.id, "replayed-runtime-resumed", "Resume RPC ask emitted before return is restored after reset/history hydration");
+ok(promptReplayCalls > 0, "Resume completion performs a tab-scoped pending-prompt replay");
+
+backendPendingPrompt = false;
+await act(async () => {
+  for (const handler of eventHandlers) handler({ kind: "turn_done", tabId: "tab-a", runtimeEpoch: backendRuntimeEpoch });
+  await flushPromises();
+});
+const replayCallsBeforeChannelOpen = promptReplayCalls;
+let channelPromise: Promise<void> | undefined;
+await act(async () => {
+  channelPromise = controller?.openChannelSession("/sessions/channel.jsonl", "tab-a");
+  await flushPromises();
+});
+eq(controller?.state.ask?.id, "pre-response-channel", "channel-open accepts the new-epoch ask and rejects the interleaved old-epoch ask before returning");
+await act(async () => {
+  channelRPCGate.resolve();
+  await channelPromise;
+  await flushPromises();
+});
+eq(controller?.state.ask?.id, "replayed-runtime-channel", "channel-open ask emitted before return is restored after reset/history hydration");
+ok(promptReplayCalls > replayCallsBeforeChannelOpen, "channel-open completion performs a tab-scoped pending-prompt replay");
 
 await act(async () => {
   root.unmount();

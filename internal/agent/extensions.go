@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -403,6 +405,10 @@ func (a *Agent) interceptCompactionPrepare(ctx context.Context, fold []provider.
 		Messages: providerconv.MessagesToProtocol(fold),
 		Guidance: guidance,
 	}
+	originalMessages, err := json.Marshal(payload.Messages)
+	if err != nil {
+		return nil, "", err
+	}
 	result, err := d.Intercept(ctx, extension.PointCompactionPrepare, &payload)
 	if err != nil {
 		return nil, "", err
@@ -419,6 +425,13 @@ func (a *Agent) interceptCompactionPrepare(ctx context.Context, fold []provider.
 	}
 	d.Event(extension.PointCompactionPrepare, payload)
 	if len(result.Applied) > 0 || replaced {
+		preparedMessages, marshalErr := json.Marshal(payload.Messages)
+		if marshalErr != nil {
+			return nil, "", marshalErr
+		}
+		if bytes.Equal(preparedMessages, originalMessages) {
+			return fold, payload.Guidance, nil
+		}
 		return providerconv.MessagesFromProtocol(payload.Messages), payload.Guidance, nil
 	}
 	return fold, guidance, nil

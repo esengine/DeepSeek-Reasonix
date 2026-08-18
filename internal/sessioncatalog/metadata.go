@@ -81,7 +81,11 @@ func (c *Catalog) SyncMetadata(ctx context.Context, projects []ProjectRecord, to
                 FROM catalog_sessions WHERE scope=? AND workspace_root=? AND topic_id=?),'ok'),
             1
         ON CONFLICT(scope,workspace_root,topic_id) DO UPDATE SET
-            title=CASE WHEN excluded.title<>'' THEN excluded.title ELSE catalog_topics.title END,
+            title=COALESCE(NULLIF((SELECT s.custom_title FROM catalog_sessions s
+                    WHERE s.scope=excluded.scope AND s.workspace_root=excluded.workspace_root
+                    AND s.topic_id=excluded.topic_id
+                    ORDER BY s.recovery_copy ASC,s.last_activity_at DESC,s.path ASC LIMIT 1),''),
+                NULLIF(excluded.title,''),catalog_topics.title),
             title_source=excluded.title_source,pinned=excluded.pinned,
             sort_order=excluded.sort_order,metadata_present=1,
             created_at=CASE WHEN excluded.created_at>0 THEN excluded.created_at ELSE catalog_topics.created_at END,

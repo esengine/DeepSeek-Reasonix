@@ -3,6 +3,7 @@ import { app } from "../lib/bridge";
 import { contextWindowPercentages } from "../lib/contextWindow";
 import { useI18n } from "../lib/i18n";
 import { formatMoneyLocalized } from "../lib/money";
+import { appendRateBand, rateBandLabel } from "../lib/costRateBand";
 import type { BalanceInfo, ContextInfo, ContextPanelInfo } from "../lib/types";
 import { AnchoredPopover } from "./AnchoredPopover";
 import {
@@ -15,6 +16,7 @@ interface ContextWindowRingProps {
   context?: ContextInfo;
   tabId?: string;
   turnCost?: number;
+  turnRateBand?: string;
   currency?: string;
   cacheHitTokens?: number;
   cacheMissTokens?: number;
@@ -41,7 +43,7 @@ function fmtDuration(ms: number, t: ReturnType<typeof useI18n>['t']): string {
   return t("context.durationMinutesSeconds", { minutes, seconds });
 }
 
-export function ContextWindowRing({ enabled = true, context, tabId, turnCost, currency, cacheHitTokens, cacheMissTokens, balance }: ContextWindowRingProps) {
+export function ContextWindowRing({ enabled = true, context, tabId, turnCost, turnRateBand, currency, cacheHitTokens, cacheMissTokens, balance }: ContextWindowRingProps) {
   const { locale, t } = useI18n();
   const [open, setOpen] = useState(false);
   const [info, setInfo] = useState<ContextPanelInfo | null>(null);
@@ -56,7 +58,7 @@ export function ContextWindowRing({ enabled = true, context, tabId, turnCost, cu
   const usagePercentages = contextWindowPercentages(used, windowTokens);
   const rawUsagePct = usagePercentages.raw;
   const usagePct = usagePercentages.display;
-  const compactRatio = context?.compactRatio && context.compactRatio > 0 ? context.compactRatio : 0.85;
+  const compactRatio = context?.compactRatio && context.compactRatio > 0 ? context.compactRatio : 0.80;
   const compactPct = Math.round(compactRatio * 100);
   const status = contextWindowStatus(rawUsagePct, compactPct);
 
@@ -136,7 +138,10 @@ export function ContextWindowRing({ enabled = true, context, tabId, turnCost, cu
         : sessionCost
           ? "estimated"
         : undefined;
-  const turnCostLabel = formatMoneyLocalized(turnCost, info?.sessionCurrency || currency, { locale, empty: "dash" });
+  const turnCostLabel = appendRateBand(formatMoneyLocalized(turnCost, info?.sessionCurrency || currency, { locale, empty: "dash" }), turnRateBand, t);
+  const sessionCostLabel = sessionCost ? appendRateBand(sessionCost, info?.sessionCostQuote?.rateBand, t) : undefined;
+  const turnRateBandTitle = rateBandLabel(turnRateBand, t) ? t("billing.rateBand.tooltip") : undefined;
+  const sessionRateBandTitle = rateBandLabel(info?.sessionCostQuote?.rateBand, t) ? t("billing.rateBand.tooltip") : undefined;
 
   return (
     <>
@@ -207,10 +212,10 @@ export function ContextWindowRing({ enabled = true, context, tabId, turnCost, cu
             {turnCost != null && turnCost > 0 && (
               <div className="context-ring-popover__row">
                 <span className="context-ring-popover__label">{t("status.turnCostLabel")}</span>
-                <span className="context-ring-popover__value">{turnCostLabel}</span>
+                <span className="context-ring-popover__value" title={turnRateBandTitle}>{turnCostLabel}</span>
               </div>
             )}
-            {sessionCost && (
+            {sessionCostLabel && (
               <div className="context-ring-popover__row">
                 <span className="context-ring-popover__label">
                   {sessionCostHint === "payg_equivalent"
@@ -219,7 +224,7 @@ export function ContextWindowRing({ enabled = true, context, tabId, turnCost, cu
                       ? t("context.sessionCostFallback")
                     : t("context.sessionCostEstimated")}
                 </span>
-                <span className="context-ring-popover__value">{sessionCost}</span>
+                <span className="context-ring-popover__value" title={sessionRateBandTitle}>{sessionCostLabel}</span>
               </div>
             )}
             {!sessionCost && sessionCostBucketed && (

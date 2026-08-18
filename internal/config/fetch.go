@@ -70,10 +70,17 @@ func modelFetchAuthMode(e *ProviderEntry) openai.ModelFetchAuthMode {
 
 // BuildModelFetchURLs derives likely OpenAI-compatible model-list endpoints.
 // It keeps Reasonix's historical {base}/models path first, then tries the common
-// {base}/v1/models shape used by many aggregators.
+// {base}/v1/models shape used by many aggregators. Known official Token Rhythm
+// URLs collapse to a single /v1/models candidate because that /v1 route is complete.
 func BuildModelFetchURLs(baseURL, override string) ([]string, error) {
 	if trimmed := strings.TrimSpace(override); trimmed != "" {
+		if canonical, ok := openai.CanonicalTokenRhythmModelsURL(trimmed); ok {
+			return []string{canonical}, nil
+		}
 		return []string{trimmed}, nil
+	}
+	if canonical, ok := openai.CanonicalTokenRhythmModelsURL(baseURL); ok {
+		return []string{canonical}, nil
 	}
 	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if base == "" {

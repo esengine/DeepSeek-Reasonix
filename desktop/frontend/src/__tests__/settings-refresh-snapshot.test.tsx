@@ -265,11 +265,11 @@ await act(async () => {
 });
 ok(compactRootEl.textContent?.includes("Advanced context management") === false, "compaction preference has no redundant advanced disclosure");
 ok(compactRootEl.textContent?.includes("Automatic compaction threshold") === true, "compaction preference is visible without expanding a disclosure");
-ok(compactRootEl.textContent?.includes("85,000 tokens") === true, "compact ratio shows the default model token threshold");
-ok(compactRootEl.textContent?.includes("Current threshold: 85% · Recommended") === true, "compact ratio summarizes the saved preset separately");
+ok(compactRootEl.textContent?.includes("80,000 tokens") === true, "compact ratio shows the default model token threshold");
+ok(compactRootEl.textContent?.includes("Current threshold: 80% · Recommended") === true, "compact ratio summarizes the saved preset separately");
 ok(compactRootEl.textContent?.includes("effective threshold is 75%") === true, "project override shows the active effective threshold");
 ok(compactRootEl.querySelector('input[aria-label="Custom compaction threshold percentage"]') === null, "custom compact ratio editor stays hidden on the default path");
-const recommendedCompactButton = compactRootEl.querySelector('button[aria-label="85% · Recommended"]') as HTMLButtonElement | null;
+const recommendedCompactButton = compactRootEl.querySelector('button[aria-label="80% · Recommended"]') as HTMLButtonElement | null;
 if (!recommendedCompactButton) throw new Error("recommended compaction preset did not render");
 ok(recommendedCompactButton.getAttribute("aria-pressed") === "true", "saved compact ratio starts selected");
 const customCompactButton = Array.from(compactRootEl.querySelectorAll("button")).find((button) => button.textContent?.includes("Custom threshold…")) as HTMLButtonElement | undefined;
@@ -282,7 +282,7 @@ await act(async () => {
 });
 let customCompactInput = compactRootEl.querySelector('input[aria-label="Custom compaction threshold percentage"]') as HTMLInputElement | null;
 if (!customCompactInput) throw new Error("custom compaction threshold input did not open");
-eq(customCompactInput.value, "85", "custom compaction threshold defaults older backends to 85 percent");
+eq(customCompactInput.value, "80", "custom compaction threshold defaults older backends to 80 percent");
 ok(compactRootEl.textContent?.includes("65%") === true, "custom compact ratio explains the lower guard rail");
 ok(compactRootEl.textContent?.includes("85%") === true, "custom compact ratio explains the upper guard rail");
 ok(document.activeElement === customCompactInput, "opening the custom compact ratio moves focus to its input");

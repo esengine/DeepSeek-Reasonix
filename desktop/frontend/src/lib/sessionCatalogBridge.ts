@@ -29,17 +29,34 @@ export function makeMockSessionCatalogBindings(cloneProjectTree: () => ProjectNo
       ? cloneProjectTree().find((item) => item.kind === "global_folder")
       : cloneProjectTree().find((item) => item.kind === "project" && item.root === req.workspaceRoot);
     const query = (req.query ?? "").trim().toLocaleLowerCase();
-    const all = asArray(folder?.children).filter((item) => !query || item.label.toLocaleLowerCase().includes(query));
+    const created = req.sortMode === "created";
+    const all = asArray(folder?.children)
+      .filter((item) => !query || item.label.toLocaleLowerCase().includes(query))
+      .sort((left, right) => Number(Boolean(right.pinned)) - Number(Boolean(left.pinned))
+        || (created ? right.createdAt || right.lastActivityAt || 0 : right.lastActivityAt || right.createdAt || 0)
+          - (created ? left.createdAt || left.lastActivityAt || 0 : left.lastActivityAt || left.createdAt || 0)
+        || (left.topicId ?? "").localeCompare(right.topicId ?? ""));
     const start = Math.max(0, Number.parseInt(req.cursor ?? "0", 10) || 0);
     const limit = Math.min(200, Math.max(1, req.limit ?? 50));
     const items = all.slice(start, start + limit);
-    return { items, nextCursor: start + items.length < all.length ? String(start + items.length) : undefined, revision: 1 };
+    return {
+      items,
+      nextCursor: start + items.length < all.length ? String(start + items.length) : undefined,
+      revision: 1,
+      complete: true,
+      readyDirectories: 1,
+      pendingDirectories: 0,
+      failedDirectories: 0,
+    };
   };
   return {
     async GetProjectTreeSnapshot() {
       return {
         revision: 1,
-        projects: cloneProjectTree().map((project) => ({ ...project, children: [] })),
+        projects: cloneProjectTree().map((project) => ({
+          ...project,
+          children: asArray(project.children).filter((topic) => Boolean(topic.pinned)),
+        })),
         catalog: { state: "ready", mode: "memory", revision: 1, indexed: 4, total: 4, repairPending: 0 },
         indexed: 4,
         total: 4,

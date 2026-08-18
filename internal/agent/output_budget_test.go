@@ -82,11 +82,11 @@ func TestSessionSwapKeepsPromptCalibration(t *testing.T) {
 	}
 }
 
-func TestSharedWindowFoldUsesGuardedInputBudget(t *testing.T) {
+func TestSharedWindowFoldDoesNotPrivatelyShortenOversizedInput(t *testing.T) {
 	prov := &sharedWindowTestProvider{budget: 128 * 1024, shared: true}
 	a := &Agent{agentConfig: agentConfig{contextWindow: 100_000}, svc: agentServices{prov: prov, sink: event.Discard}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
-	// Oversized tool bodies are deterministically shortened for the single
-	// summarizer request (no multi-span). The guard must still fit one call.
+	// Manual summary input is not privately shortened. An unfittable request is
+	// rejected before the provider call.
 	toolBody := strings.Repeat("file line content here. ", 20_000) // ~480K chars
 	fold := []provider.Message{
 		{Role: provider.RoleUser, Content: "read large files"},
@@ -96,22 +96,11 @@ func TestSharedWindowFoldUsesGuardedInputBudget(t *testing.T) {
 		{Role: provider.RoleTool, ToolCallID: "2", Name: "read_file", Content: toolBody},
 	}
 
-	if _, err := a.foldToSummary(context.Background(), fold, ""); err != nil {
-		t.Fatalf("foldToSummary: %v", err)
+	if _, err := a.foldToSummary(context.Background(), fold, ""); !errors.Is(err, ErrCompactionRequired) {
+		t.Fatalf("foldToSummary = %v, want admission failure", err)
 	}
-	if prov.calls == 0 || len(prov.last.Messages) < 2 {
-		t.Fatalf("guarded fold produced no summarizer request: calls=%d request=%+v", prov.calls, prov.last)
-	}
-	got := prov.last.Messages[1].Content
-	if len(got) >= len(renderTranscript(fold)) {
-		t.Fatalf("oversized tool fold was not shortened before summarize: len=%d original=%d", len(got), len(renderTranscript(fold)))
-	}
-	// Snip / omit markers prove the temporary request was bounded for the guard.
-	if !strings.Contains(got, "omitted") && !strings.Contains(got, "retained") && !strings.Contains(got, "snip") {
-		t.Fatalf("shortened fold missing a truncation marker:\n%.200q", got)
-	}
-	if got := prov.last.MaxTokens; got < summaryOutputReserve {
-		t.Fatalf("summarizer MaxTokens = %d, below summaryOutputReserve %d", got, summaryOutputReserve)
+	if prov.calls != 0 {
+		t.Fatalf("unfittable fold called provider %d times", prov.calls)
 	}
 }
 
@@ -122,8 +111,8 @@ func TestSharedWindowFoldRejectsUnshortenableOverBudgetInput(t *testing.T) {
 	a := &Agent{agentConfig: agentConfig{contextWindow: 100_000}, svc: agentServices{prov: prov, sink: event.Discard}, sess: sessionRuntime{output: outputBudgetState{outputBudget: prov.budget}}}
 	fold := []provider.Message{{Role: provider.RoleUser, Content: strings.Repeat("字", 200_000)}}
 	_, err := a.foldToSummary(context.Background(), fold, "")
-	if err == nil || !strings.Contains(err.Error(), "exceeds single-request budget") {
-		t.Fatalf("foldToSummary err = %v, want single-request budget failure", err)
+	if !errors.Is(err, ErrCompactionRequired) {
+		t.Fatalf("foldToSummary err = %v, want context admission failure", err)
 	}
 	if prov.calls != 0 {
 		t.Fatalf("over-budget unshortenable fold still called summarizer %d times", prov.calls)
@@ -384,6 +373,11 @@ func TestSetSessionResetsPerTranscriptUsageState(t *testing.T) {
 	active := requestCalibrationShape{requestChars: 900_000, compactChars: 850_000}
 	a.sess.output.activeReqShape.Store(&active)
 	a.setPromptTokenCalibration(200_000, requestCalibrationShape{requestChars: 1_000_000, compactChars: 950_000})
+	a.learnContextBudget(1_048_576, 384_000, true)
+	a.storeAdmission(contextAdmission{
+		WindowMode: provider.ContextWindowShared.String(), WindowTokens: 1_048_576,
+		PromptTokens: 810_882, LastRecovery: contextRecoveryLearnedRetry,
+	})
 	a.SetSession(NewSession("new"))
 
 	if got := a.sess.output.lastUsage.Load(); got != nil {
@@ -394,6 +388,15 @@ func TestSetSessionResetsPerTranscriptUsageState(t *testing.T) {
 	}
 	if got := a.sess.output.promptCalibration.Load(); got == nil {
 		t.Fatal("promptCalibration was dropped on session switch; the tokenizer ratio outlives the transcript")
+	}
+	if got := a.sess.output.learned.Load(); got == nil || got.windowTokens != 1_048_576 || got.completionBudget != 384_000 {
+		t.Fatalf("learned provider budget was dropped on session switch: %+v", got)
+	}
+	if got := a.sess.output.admission.Load(); got != nil {
+		t.Fatalf("context admission survived session switch: %+v", got)
+	}
+	if got := a.ContextMaintenanceSnapshot().ContextBudget; got != nil {
+		t.Fatalf("new transcript exposed the previous context budget: %+v", got)
 	}
 }
 

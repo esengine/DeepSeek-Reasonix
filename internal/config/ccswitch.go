@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	fileencoding "reasonix/internal/fileutil/encoding"
+	"reasonix/internal/proc"
 	"reasonix/internal/secrets"
 )
 
@@ -151,7 +152,7 @@ func loadCCSwitchMCPDB(path string) ([]PluginEntry, error) {
 	if hasReasonix {
 		query = `SELECT id, name, server_config FROM mcp_servers WHERE enabled_reasonix = 1 ORDER BY name, id`
 	}
-	cmd := exec.Command(sqlite, "-readonly", "-json", path, query)
+	cmd := proc.Command(sqlite, "-readonly", "-json", path, query)
 	cmd.Env = secrets.ProcessEnv()
 	out, err := cmd.Output()
 	if err != nil {
@@ -169,7 +170,7 @@ func loadCCSwitchMCPDB(path string) ([]PluginEntry, error) {
 
 func ccSwitchDBHasReasonixColumn(sqlite, path string) (bool, error) {
 	const query = `SELECT COUNT(*) FROM pragma_table_info('mcp_servers') WHERE name = 'enabled_reasonix'`
-	cmd := exec.Command(sqlite, "-readonly", path, query)
+	cmd := proc.Command(sqlite, "-readonly", path, query)
 	cmd.Env = secrets.ProcessEnv()
 	out, err := cmd.Output()
 	if err != nil {

@@ -51,15 +51,32 @@ func textTurn(text string) []provider.Chunk {
 	return []provider.Chunk{{Type: provider.ChunkText, Text: text}, {Type: provider.ChunkDone}}
 }
 
+func readFileTurn() []provider.Chunk {
+	return []provider.Chunk{
+		{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "r1", Name: "read_file", Arguments: `{"path":"README.md"}`}},
+		{Type: provider.ChunkDone},
+	}
+}
+
+func planThenExecuteTurns(plan, answer string) [][]provider.Chunk {
+	return [][]provider.Chunk{textTurn(plan), readFileTurn(), textTurn(answer)}
+}
+
+func newPlanTestAgent(prov provider.Provider) *agent.Agent {
+	reg := tool.NewRegistry()
+	reg.Add(fakeControlTool{name: "read_file"})
+	return agent.New(prov, reg, agent.NewSession(""), agent.Options{}, event.Discard)
+}
+
 // TestPlanGateEndToEnd drives explicit Plan Mode through a real agent: the plan
 // marker reaches the model, the controller asks for approval, and approval exits
 // Plan Mode, seeds the task list, and runs the execution turn.
 func TestPlanGateEndToEnd(t *testing.T) {
-	prov := &scriptedTurns{turns: [][]provider.Chunk{
-		textTurn("Plan:\n1. Add the config field\n2. Wire it into boot\n3. Add tests"),
-		textTurn("Done — implemented the plan."),
-	}}
-	ag := agent.New(prov, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
+	prov := &scriptedTurns{turns: planThenExecuteTurns(
+		"Plan:\n1. Add the config field\n2. Wire it into boot\n3. Add tests",
+		"Done — implemented the plan.",
+	)}
+	ag := newPlanTestAgent(prov)
 
 	approvalID := make(chan string, 1)
 	var seeded bool
@@ -99,17 +116,17 @@ func TestPlanGateEndToEnd(t *testing.T) {
 	if got := lastAssistantText(msgs); got != "Done — implemented the plan." {
 		t.Fatalf("last assistant text = %q, want the execution turn's answer", got)
 	}
-	if prov.call != 2 {
-		t.Fatalf("provider called %d times, want 2 (plan + execution)", prov.call)
+	if prov.call != 3 {
+		t.Fatalf("provider called %d times, want 3 (plan + read + answer)", prov.call)
 	}
 }
 
 func TestApprovedPlanSeedClearsAfterExecutionWithoutModelTodoWrite(t *testing.T) {
-	prov := &scriptedTurns{turns: [][]provider.Chunk{
-		textTurn("Plan:\n1. Add the config field\n2. Wire it into boot"),
-		textTurn("Done."),
-	}}
-	ag := agent.New(prov, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
+	prov := &scriptedTurns{turns: planThenExecuteTurns(
+		"Plan:\n1. Add the config field\n2. Wire it into boot",
+		"Done.",
+	)}
+	ag := newPlanTestAgent(prov)
 
 	approvalID := make(chan string, 1)
 	var planSeedResults []string

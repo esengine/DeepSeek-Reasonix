@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"reasonix/internal/diff"
+	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 )
 
@@ -18,6 +19,7 @@ func init() { tool.RegisterBuiltin(deleteSymbol{}) }
 
 type deleteSymbol struct {
 	roots   []string
+	rootSet *sandbox.WritableRootSet
 	guard   SessionDataGuard
 	managed ManagedConfigPaths
 	workDir string
@@ -56,6 +58,10 @@ func (deleteSymbol) Schema() json.RawMessage {
 
 func (deleteSymbol) ReadOnly() bool { return false }
 
+func (d deleteSymbol) DeclareWriteAccess(args json.RawMessage) (tool.WriteAccessDeclaration, error) {
+	return declareFilePathWriteAccess(d.workDir, args)
+}
+
 func (d deleteSymbol) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		Path   string `json:"path"`
@@ -73,7 +79,7 @@ func (d deleteSymbol) Execute(ctx context.Context, args json.RawMessage) (string
 		return "", fmt.Errorf("name is required")
 	}
 	p.Path = resolveIn(d.workDir, p.Path)
-	if err := confineWrite(ctx, d.roots, d.guard, d.managed, p.Path); err != nil {
+	if err := confineWrite(ctx, effectiveWriteRoots(ctx, d.rootSet, d.roots), d.guard, d.managed, p.Path); err != nil {
 		return "", err
 	}
 
@@ -119,7 +125,7 @@ func (d deleteSymbol) Preview(ctx context.Context, args json.RawMessage) (diff.C
 		return diff.Change{}, fmt.Errorf("name is required")
 	}
 	p.Path = resolveIn(d.workDir, p.Path)
-	if err := confinePreview(d.roots, d.guard, d.managed, p.Path); err != nil {
+	if err := confinePreview(effectiveWriteRoots(ctx, d.rootSet, d.roots), d.guard, d.managed, p.Path); err != nil {
 		return diff.Change{}, err
 	}
 

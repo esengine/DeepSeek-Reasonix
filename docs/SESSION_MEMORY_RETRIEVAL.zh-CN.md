@@ -172,7 +172,7 @@ omitted 数量和 suppressed 原因。
 
 授权是一次性的，存储层还会强制 create-only，因此评估后并发出现的事实也不会被覆盖。
 
-其余情况仍需显式确认：
+在 Ask 下，其余情况仍需显式确认：
 
 - 全局事实；
 - `user` 偏好和 `feedback`；
@@ -181,9 +181,11 @@ omitted 数量和 suppressed 原因。
 - 敏感或超长内容；
 - 所有 `forget` 操作。
 
-Auto 和 Yolo 不会绕过这些确认。Guardian 和 permission hook 不能替用户批准。顶层
-headless controller 只能使用上述同一个一次性低风险创建路径；子智能体以及不拥有该作用域
-controller 的 headless surface 会 fail closed，其他记忆变更仍必须有交互式确认界面。
+Ask 保留这些确认。交互式 Auto 把 `remember`/`forget` 作为普通策略 fallback：默认调用直接
+执行，显式 `ask` / `deny` 仍生效。交互式 YOLO 会绕过记忆 ask 审批，除非命中显式 deny。
+Guardian 和 permission hook 不能替用户批准。顶层
+headless controller（包括无头 YOLO）只能使用上述同一个一次性低风险创建路径；子智能体以及不拥有该作用域
+controller 的 headless surface 会 fail closed，其他无头记忆变更仍必须有交互式确认界面。
 
 用户直接在 Context Center、`/remember`、restore 或 recover 命令中发起的操作，本身就是
 显式用户动作，不会再增加一次审批。

@@ -95,6 +95,19 @@ type InboxReceiptView struct {
 	Error       string `json:"error,omitempty"`
 }
 
+// InboxCancelResultView is the backend-confirmed withdrawal receipt. The
+// frontend must restore only these durable item IDs into the draft.
+type InboxCancelResultView struct {
+	DiscardedItemIDs []string `json:"discardedItemIds"`
+	Warning          string   `json:"warning,omitempty"`
+}
+
+type inboxChangedView struct {
+	TabID       string `json:"tabId"`
+	SessionPath string `json:"sessionPath,omitempty"`
+	Revision    int64  `json:"revision,omitempty"`
+}
+
 // InboxEnvelopeView is the full body for the editor (fetched by id only).
 type InboxEnvelopeView struct {
 	ID          string `json:"id"`
@@ -202,6 +215,24 @@ func (a *App) CancelTabWithInboxItems(tabID string, itemIDs []string) error {
 	}
 	a.emitInboxChanged(tabID)
 	return nil
+}
+
+// CancelTabWithInboxItemsResult is the receipt-capable cancellation API. It is
+// additive so older desktop frontends can continue using the legacy method.
+func (a *App) CancelTabWithInboxItemsResult(tabID string, itemIDs []string) (InboxCancelResultView, error) {
+	view := InboxCancelResultView{DiscardedItemIDs: []string{}}
+	ctrl, err := a.inboxCtrl(tabID)
+	if err != nil {
+		return view, err
+	}
+	result, err := ctrl.CancelWithInboxItemsResult(itemIDs, "desktop")
+	if err != nil {
+		return view, inboxWailsError(err)
+	}
+	view.DiscardedItemIDs = append(view.DiscardedItemIDs, result.DiscardedItemIDs...)
+	view.Warning = result.Warning
+	a.emitInboxChanged(tabID)
+	return view, nil
 }
 
 func (a *App) enqueueInbox(tabID string, intent sessioninbox.InboxIntent, display, submit string, invocations []InvocationRequest, idempotency string, trySteer bool) (InboxReceiptView, error) {

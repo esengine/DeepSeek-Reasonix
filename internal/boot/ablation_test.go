@@ -35,7 +35,7 @@ func TestAblationRemovesOnlyTheTargetedToolSurfaces(t *testing.T) {
 	t.Chdir(robustTempDir(t))
 
 	full := builtToolNames(t, ablation.Set{})
-	for _, name := range []string{"task", "read_only_task", "history", "memory", "remember", "list_sessions"} {
+	for _, name := range []string{"task", "read_only_task", "history", "memory", "remember", "list_sessions", "set_session_title"} {
 		if !full[name] {
 			t.Fatalf("control arm is missing %s; the ablation assertions below would be vacuous", name)
 		}

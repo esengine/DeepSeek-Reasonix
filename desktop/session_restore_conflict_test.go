@@ -5,8 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/config"
 	"reasonix/internal/sessioninbox"
 	"reasonix/internal/store"
 )
@@ -109,6 +111,50 @@ func TestRestoreTrashedSessionFilePreservesStubOnSubagentConflict(t *testing.T) 
 	}
 	if _, err := os.Stat(trashPath); err != nil {
 		t.Fatalf("trash transcript should remain after rejected restore: %v", err)
+	}
+}
+
+func TestRestoreSessionFinishesCommittedPartialTrashMove(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	sessionPath := filepath.Join(dir, "partial-restore.jsonl")
+	itemDir := filepath.Join(sessionTrashPath(dir), filepath.Base(sessionPath))
+	if err := os.MkdirAll(itemDir, 0o755); err != nil {
+		t.Fatalf("mkdir trash item: %v", err)
+	}
+	trashPath := filepath.Join(itemDir, filepath.Base(sessionPath))
+	const transcript = `{"role":"user","content":"trashed transcript"}` + "\n"
+	if err := os.WriteFile(trashPath, []byte(transcript), 0o600); err != nil {
+		t.Fatalf("write trashed transcript: %v", err)
+	}
+	metaPath := store.SessionMeta(sessionPath)
+	if err := os.WriteFile(metaPath, []byte(`{"scope":"global","topic_id":"topic_partial","topic_title":"Partial"}`), 0o600); err != nil {
+		t.Fatalf("write leftover live metadata: %v", err)
+	}
+	if err := agent.MarkCleanupPending(sessionPath, "delete"); err != nil {
+		t.Fatalf("mark cleanup pending: %v", err)
+	}
+
+	app := NewApp()
+	t.Cleanup(func() { app.stopSessionCatalog(time.Second) })
+	if err := app.RestoreSession(trashPath); err != nil {
+		t.Fatalf("restore partial trash move: %v", err)
+	}
+	if got, err := os.ReadFile(sessionPath); err != nil || string(got) != transcript {
+		t.Fatalf("restored transcript = %q, %v", got, err)
+	}
+	if meta, ok, err := agent.LoadBranchMeta(sessionPath); err != nil || !ok || meta.TopicID != "topic_partial" {
+		t.Fatalf("restored metadata = %+v, %v, %v", meta, ok, err)
+	}
+	if agent.IsCleanupPending(sessionPath) {
+		t.Fatal("restore retained cleanup-pending marker")
+	}
+	if _, err := os.Stat(itemDir); !os.IsNotExist(err) {
+		t.Fatalf("trash item survived restore: %v", err)
 	}
 }
 

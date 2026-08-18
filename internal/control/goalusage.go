@@ -5,6 +5,7 @@ import (
 
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
+	"reasonix/internal/sessioninbox"
 )
 
 // goalUsageTee wraps the controller's event sink and attributes billable usage
@@ -50,6 +51,13 @@ func (t *goalUsageTee) Emit(e event.Event) {
 	if t.inner != nil {
 		t.inner.Emit(e)
 	}
+}
+
+func (t *goalUsageTee) InboxChanged(snap sessioninbox.InboxSnapshot) {
+	if t == nil {
+		return
+	}
+	notifyInboxChanged(t.inner, snap)
 }
 
 // setActiveRecorder binds the current goal turn's recorder (nil clears it).

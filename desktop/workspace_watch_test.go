@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -88,6 +89,7 @@ func TestWorkspaceChangeHubDoesNotDropFilesystemWriteAfterAgentMutation(t *testi
 	app.workspaceHub = newWorkspaceChangeHub(app)
 	t.Cleanup(func() { app.workspaceHub.close() })
 
+	waitForWorkspaceHubStartupToSettle(t, app, "a")
 	before := app.WorkspaceRevisionForTab("a").Revisions.Content
 	app.workspaceHub.observeAgentMutation("a", contentWorkspaceMutation([]string{"file.txt"}, false))
 	key := canonicalWorkspaceRoot(root)
@@ -121,6 +123,7 @@ func TestWorkspaceChangeHubAdvancesOnlyDeclaredAgentResources(t *testing.T) {
 	app := &App{tabs: map[string]*WorkspaceTab{"a": {ID: "a", WorkspaceRoot: root}}}
 	app.workspaceHub = newWorkspaceChangeHub(app)
 	t.Cleanup(func() { app.workspaceHub.close() })
+	waitForWorkspaceHubStartupToSettle(t, app, "a")
 	before := app.WorkspaceRevisionForTab("a").Revisions
 
 	app.workspaceHub.observeAgentMutation("a", event.WorkspaceMutation{WorkingTree: true, GitMeta: true})
@@ -131,6 +134,29 @@ func TestWorkspaceChangeHubAdvancesOnlyDeclaredAgentResources(t *testing.T) {
 	if after.WorkingTree != before.WorkingTree+1 || after.GitMeta != before.GitMeta+1 || after.Session != before.Session+1 {
 		t.Fatalf("git-only revisions not advanced independently: before=%+v after=%+v", before, after)
 	}
+}
+
+func waitForWorkspaceHubStartupToSettle(t *testing.T, app *App, tabID string) {
+	t.Helper()
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	last := app.WorkspaceRevisionForTab(tabID).Revisions
+	stableSince := time.Now()
+	deadline := stableSince.Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+		current := app.WorkspaceRevisionForTab(tabID).Revisions
+		if current != last {
+			last = current
+			stableSince = time.Now()
+			continue
+		}
+		if time.Since(stableSince) >= 250*time.Millisecond {
+			return
+		}
+	}
+	t.Fatal("workspace watcher startup events did not settle")
 }
 
 func TestTabEventSinkForwardsImmediateWorkspaceMutation(t *testing.T) {
@@ -231,11 +257,19 @@ func TestWorkspaceChangeHubRecursivelyWatchesGitMetadataOnly(t *testing.T) {
 	gitDir = canonicalWorkspaceRoot(gitDir)
 	app.workspaceHub.mu.Lock()
 	r := app.workspaceHub.roots[key]
+	recursive := r != nil && r.watcher != nil && r.watcher.SupportsRecursive()
+	_, rootWatched := r.watched[key]
 	_, refsWatched := r.watched[filepath.Join(gitDir, "refs", "heads")]
 	_, logsWatched := r.watched[filepath.Join(gitDir, "logs", "refs", "heads")]
 	_, worktreeWatched := r.watched[filepath.Join(gitDir, "worktrees", "linked")]
 	_, objectsWatched := r.watched[filepath.Join(gitDir, "objects")]
 	app.workspaceHub.mu.Unlock()
+	if recursive {
+		if !rootWatched || refsWatched || logsWatched || worktreeWatched || objectsWatched {
+			t.Fatalf("recursive workspace watch root=%v refs=%v logs=%v worktrees=%v objects=%v", rootWatched, refsWatched, logsWatched, worktreeWatched, objectsWatched)
+		}
+		return
+	}
 	if !refsWatched || !logsWatched || !worktreeWatched || objectsWatched {
 		t.Fatalf("git watches refs=%v logs=%v worktrees=%v objects=%v", refsWatched, logsWatched, worktreeWatched, objectsWatched)
 	}

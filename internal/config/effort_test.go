@@ -38,16 +38,41 @@ func TestDeepSeekV4FlashEffortCapabilityIncludesLow(t *testing.T) {
 	}
 
 	pro := &ProviderEntry{Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro"}
-	if got, err := NormalizeEffort(pro, "low"); err != nil || got != "high" {
-		t.Fatalf("Pro low = %q/%v, want existing high mapping", got, err)
+	if got, err := NormalizeEffort(pro, "low"); err != nil || got != "low" {
+		t.Fatalf("Pro low = %q/%v, want low/nil", got, err)
 	}
-	if got, err := NormalizeEffort(pro, "xhigh"); err != nil || got != "max" {
-		t.Fatalf("Pro xhigh = %q/%v, want max/nil", got, err)
+	if got, err := NormalizeEffort(pro, "xhigh"); err != nil || got != "high" {
+		t.Fatalf("Pro xhigh = %q/%v, want high/nil", got, err)
 	}
-	for _, level := range EffortCapabilityForEntry(pro).Levels {
-		if level == "low" {
-			t.Fatalf("Pro capability unexpectedly exposes low: %+v", EffortCapabilityForEntry(pro))
+	if cap := EffortCapabilityForEntry(pro); !containsString(cap.Levels, "low") {
+		t.Fatalf("Pro capability = %+v, want low", cap)
+	}
+}
+
+func TestDefaultDeepSeekV4EntriesAcceptCompatibilityAliases(t *testing.T) {
+	cfg := Default()
+	for _, ref := range []string{"deepseek-flash", "deepseek-pro"} {
+		entry, ok := cfg.ResolveModel(ref)
+		if !ok {
+			t.Fatalf("default model %q did not resolve", ref)
 		}
+		for _, alias := range []string{"medium", "xhigh"} {
+			got, err := NormalizeEffort(entry, alias)
+			if err != nil || got != "high" {
+				t.Errorf("%s %s = %q/%v, want high/nil", ref, alias, got, err)
+			}
+		}
+	}
+}
+
+func TestDeepSeekV4CustomEffortVocabularyRemainsAuthoritative(t *testing.T) {
+	entry := &ProviderEntry{
+		Kind:             "anthropic",
+		Model:            "deepseek-v4-pro",
+		SupportedEfforts: []string{"disabled", "high", "max"},
+	}
+	if _, err := NormalizeEffort(entry, "medium"); err == nil {
+		t.Fatal("custom supported_efforts should reject an undeclared compatibility alias")
 	}
 }
 

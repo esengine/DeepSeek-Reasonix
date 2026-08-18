@@ -1078,7 +1078,7 @@ func TestNewDeepSeekV4FlashForwardsLowEffort(t *testing.T) {
 		t.Fatalf("Flash reasoning_effort = %q, want low", got)
 	}
 
-	_, err = New(provider.Config{
+	pro, err := New(provider.Config{
 		Name:    "deepseek",
 		BaseURL: "https://api.deepseek.com",
 		Model:   "deepseek-v4-pro",
@@ -1088,8 +1088,11 @@ func TestNewDeepSeekV4FlashForwardsLowEffort(t *testing.T) {
 			"reasoning_protocol": "deepseek",
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "requires deepseek-v4-flash") {
-		t.Fatalf("New Pro low error = %v, want model-scoped rejection", err)
+	if err != nil {
+		t.Fatalf("New Pro low: %v", err)
+	}
+	if got := pro.(*client).buildRequest(provider.Request{}).ReasoningEffort; got != "low" {
+		t.Fatalf("Pro reasoning_effort = %q, want low", got)
 	}
 
 	custom, err := New(provider.Config{
@@ -1108,6 +1111,22 @@ func TestNewDeepSeekV4FlashForwardsLowEffort(t *testing.T) {
 	}
 	if got := custom.(*client).buildRequest(provider.Request{}).ReasoningEffort; got != "low" {
 		t.Fatalf("custom reasoning_effort = %q, want explicit low", got)
+	}
+}
+
+func TestDeepSeekV4EffortAliasesSerializeAsHigh(t *testing.T) {
+	for _, model := range []string{"deepseek-v4-flash", "deepseek-v4-pro"} {
+		for _, alias := range []string{"medium", "xhigh"} {
+			p, err := New(provider.Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: model, APIKey: "test", Extra: map[string]any{
+				"effort": alias, "reasoning_protocol": "deepseek",
+			}})
+			if err != nil {
+				t.Fatalf("%s/%s: %v", model, alias, err)
+			}
+			if got := p.(*client).buildRequest(provider.Request{}).ReasoningEffort; got != "high" {
+				t.Fatalf("%s/%s reasoning_effort = %q", model, alias, got)
+			}
+		}
 	}
 }
 

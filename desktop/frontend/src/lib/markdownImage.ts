@@ -1,7 +1,21 @@
 export const REMOTE_MARKDOWN_IMAGE_PATH = "/__reasonix_remote_markdown_image";
 
+export interface MarkdownImageView {
+  url: string;
+  filename?: string;
+  mime?: string;
+  size?: number;
+  openHref?: string;
+  errorCode?: string;
+}
+
 function runningInWailsShell(): boolean {
   return typeof window !== "undefined" && window.runtime != null;
+}
+
+export function hasMarkdownImageResolver(): boolean {
+  return typeof window !== "undefined"
+    && typeof window.go?.main?.App?.ResolveMarkdownImageForTab === "function";
 }
 
 // WebView2 runs without the Windows system proxy. Route only absolute remote

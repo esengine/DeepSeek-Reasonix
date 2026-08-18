@@ -48,15 +48,28 @@ type outcomeSummary struct {
 	GovernorEligibleRounds int `json:"governor_eligible_rounds,omitempty"`
 	GovernorEngagedRounds  int `json:"governor_engaged_rounds,omitempty"`
 	GovernorFirstRound     int `json:"governor_first_round,omitempty"`
+
+	// Runway shadow fields are absent for trajectories recorded before the
+	// experiment. FirstSpentRound is the counterfactual intervention point.
+	RunwaySamples         int `json:"runway_samples,omitempty"`
+	RunwayMin             int `json:"runway_min,omitempty"`
+	RunwayFinal           int `json:"runway_final,omitempty"`
+	RunwayDryMax          int `json:"runway_dry_max,omitempty"`
+	RunwayIdleMax         int `json:"runway_idle_max,omitempty"`
+	RunwayFirstSpentRound int `json:"runway_first_spent_round,omitempty"`
 }
 
 // outcomePoint is one recorded shadow sample plus its observation time.
 type outcomePoint struct {
 	ts                                                      int64
+	round                                                   int
 	exploration, verification, objective, regression, churn int
 	legacyGain, discriminating, debtAge, blindMutations     int
 	ebmEligible, ebmFired                                   bool
 	governorEligible, governorEngaged                       bool
+	runway                                                  *int
+	runwayDry, runwayIdle                                   int
+	runwaySpent                                             bool
 }
 
 // verifyPoint is one backfilled verification-transition observation.
@@ -108,7 +121,7 @@ func summarizeOutcomePoints(points []outcomePoint, firstTS, lastTS int64) *outco
 	verifying, solution, stall := false, false, 0
 	score, best := 0, 0
 	var bestTS int64
-	for _, p := range points {
+	for i, p := range points {
 		if p.verification > 0 {
 			verifying = true
 		}
@@ -120,6 +133,22 @@ func summarizeOutcomePoints(points []outcomePoint, firstTS, lastTS int64) *outco
 		o.Regression += p.regression
 		if p.legacyGain > 0 {
 			o.ProgressRounds++
+		}
+		if p.runway != nil {
+			if o.RunwaySamples == 0 {
+				o.RunwayMin = *p.runway
+			}
+			o.RunwaySamples++
+			o.RunwayMin = min(o.RunwayMin, *p.runway)
+			o.RunwayFinal = *p.runway
+			o.RunwayDryMax = max(o.RunwayDryMax, p.runwayDry)
+			o.RunwayIdleMax = max(o.RunwayIdleMax, p.runwayIdle)
+			if o.RunwayFirstSpentRound == 0 && p.runwaySpent {
+				o.RunwayFirstSpentRound = p.round
+				if o.RunwayFirstSpentRound == 0 {
+					o.RunwayFirstSpentRound = i + 1
+				}
+			}
 		}
 		// The solution stall clock only starts once the run enters its solution
 		// phase (a verification attempt or a mutation); pure research runs with
@@ -354,6 +383,7 @@ func renderOutcomeProgress(results []result) string {
 		}
 	}
 	line += governorShadowLine(results)
+	line += runwayShadowLine(results)
 	if progress > 0 {
 		line += fmt.Sprintf(" · **false progress** %d/%d (%s)", falseProgress, progress, pct(falseProgress, progress))
 	}
@@ -367,4 +397,30 @@ func renderOutcomeProgress(results []result) string {
 		line += fmt.Sprintf(" · backfilled %d", backfilled)
 	}
 	return line + "\n\n"
+}
+
+func runwayShadowLine(results []result) string {
+	measured, spent, dryMax, idleMax := 0, 0, 0, 0
+	var spentRounds []int64
+	for _, r := range results {
+		if r.Trajectory == nil || r.Trajectory.Outcome == nil || r.Trajectory.Outcome.RunwaySamples == 0 {
+			continue
+		}
+		o := r.Trajectory.Outcome
+		measured++
+		dryMax = max(dryMax, o.RunwayDryMax)
+		idleMax = max(idleMax, o.RunwayIdleMax)
+		if o.RunwayFirstSpentRound > 0 {
+			spent++
+			spentRounds = append(spentRounds, int64(o.RunwayFirstSpentRound))
+		}
+	}
+	if measured == 0 {
+		return ""
+	}
+	line := fmt.Sprintf(" · **runway shadow** would spend in %d/%d runs (%s)", spent, measured, pct(spent, measured))
+	if spent > 0 {
+		line += fmt.Sprintf(" at median round %d", median(spentRounds))
+	}
+	return fmt.Sprintf("%s · max dry/idle %d/%d", line, dryMax, idleMax)
 }

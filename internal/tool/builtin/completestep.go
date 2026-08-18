@@ -164,11 +164,45 @@ func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, 
 		projectStatus = fmt.Sprintf(" Project checks: project checks %d.", projectVerified)
 	}
 	advanceStatus := " The host advanced the task list; continue with the next step."
-	if hasTodo && todoMatch.Status == "completed" {
-		advanceStatus = " The matched todo was already completed; the task list is unchanged."
+	if hasTodo {
+		switch {
+		case todoMatch.Status == "completed":
+			// Renewal sign-off of an already-completed item: nothing advances.
+			advanceStatus = " The matched todo was already completed; the task list is unchanged."
+		case remainingTodoStepsAfterSignoff(ctx) <= 1:
+			// The item being signed off is the only unfinished todo (serial
+			// lists keep at most one in_progress plus pending successors), so
+			// this sign-off completes the task list. Tell the model to wrap up
+			// instead of waiting for a next step, which otherwise loops the
+			// orchestration forever (#8816).
+			advanceStatus = " All steps completed — the task list has no remaining steps; deliver a final summary and end the turn."
+		}
 	}
 	return fmt.Sprintf("Step %q signed off with %d evidence item(s) [%s].%s%s",
 		step, len(p.Evidence), strings.Join(kinds, ", "), hostStatus+todoStatus+projectStatus, advanceStatus), nil
+}
+
+// remainingTodoStepsAfterSignoff counts the todos that will still need work
+// once the current in_progress item is signed off: every item that is not yet
+// completed (the item being signed off plus any pending successors). The
+// caller compares against 1 — only the item being signed off is unfinished —
+// to detect that the sign-off completes the task list.
+func remainingTodoStepsAfterSignoff(ctx context.Context) int {
+	ledger, ok := evidence.FromContext(ctx)
+	var todos []evidence.TodoItem
+	if ok {
+		todos, _ = ledger.LatestTodos()
+	}
+	if len(todos) == 0 {
+		todos, _ = evidence.TodoStateFromContext(ctx)
+	}
+	remaining := 0
+	for _, todo := range todos {
+		if strings.TrimSpace(todo.Status) != "completed" {
+			remaining++
+		}
+	}
+	return remaining
 }
 
 // completeStepIdentity picks the citation to resolve against the task list,
@@ -203,9 +237,9 @@ func verifyStepEvidence(ctx context.Context, items []stepEvidence) (hostVerified
 				hint := allCommandHints(ctx, ledger)
 				return 0, 0, fmt.Errorf("evidence %d: verification command %q has no matching successful receipt — cite the command exactly as it ran in the session%s", i+1, command, hint)
 			}
-			_, deliveryHasMutation := ledger.LatestSuccessfulMutationIndex()
-			if evidence.DeliveryProfileFromContext(ctx) && deliveryHasMutation && !evidence.IsDeliveryVerificationCommand(command) {
-				return 0, 0, fmt.Errorf("evidence %d: command %q ran successfully but is not a recognized delivery verification; do not cite an opaque command as verification. Use a project test/check/lint command, or for JavaScript syntax use node --check <file> (a read-only extraction pipeline ending in node --check also works). If this was only a visible/manual inspection, cite kind manual or files without a command, then rerun and cite a recognized verifier after any opaque mutation", i+1, command)
+			_, closedLoopHasMutation := ledger.LatestSuccessfulMutationIndex()
+			if evidence.ClosedLoopExecutionFromContext(ctx) && closedLoopHasMutation && !evidence.IsVerificationCommand(command) {
+				return 0, 0, fmt.Errorf("evidence %d: command %q ran successfully but is not a recognized closed-loop verification; do not cite an opaque command as verification. Use a project test/check/lint command, or for JavaScript syntax use node --check <file> (a read-only extraction pipeline ending in node --check also works). If this was only a visible/manual inspection, cite kind manual or files without a command, then rerun and cite a recognized verifier after any opaque mutation", i+1, command)
 			}
 			hostVerified++
 		case "review":

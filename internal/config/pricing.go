@@ -8,11 +8,11 @@ import (
 )
 
 func deepSeekV4FlashPriceCNY() *provider.Pricing {
-	return &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}
+	return &provider.Pricing{CacheHit: 0.10, Input: 3, Output: 9, Currency: "¥"}
 }
 
 func deepSeekV4ProPriceCNY() *provider.Pricing {
-	return &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"}
+	return &provider.Pricing{CacheHit: 0.30, Input: 9, Output: 27, Currency: "¥"}
 }
 
 func deepSeekV4PricesCNY() map[string]*provider.Pricing {
@@ -23,11 +23,11 @@ func deepSeekV4PricesCNY() map[string]*provider.Pricing {
 }
 
 func deepSeekV4FlashPriceUSD() *provider.Pricing {
-	return &provider.Pricing{CacheHit: 0.0028, Input: 0.14, Output: 0.28, Currency: "$"}
+	return &provider.Pricing{CacheHit: 0.014, Input: 0.44, Output: 1.32, Currency: "$"}
 }
 
 func deepSeekV4ProPriceUSD() *provider.Pricing {
-	return &provider.Pricing{CacheHit: 0.003625, Input: 0.435, Output: 0.87, Currency: "$"}
+	return &provider.Pricing{CacheHit: 0.044, Input: 1.32, Output: 3.96, Currency: "$"}
 }
 
 func deepSeekV4PricesUSD() map[string]*provider.Pricing {
@@ -114,7 +114,7 @@ func applyDeepSeekOfficialDefaultPricingWithOverride(c *Config, overridePersiste
 	}
 	for i := range c.Providers {
 		p := &c.Providers[i]
-		if officialProviderKind(p) != "deepseek" {
+		if officialProviderKind(p) != "deepseek" || !isOfficialDeepSeekBillingEndpoint(p) {
 			continue
 		}
 		currency := p.ProviderBillingCurrency()
@@ -150,7 +150,7 @@ func markPersistedDeepSeekOfficialPricing(c *Config) {
 	}
 	for i := range c.Providers {
 		p := &c.Providers[i]
-		if officialProviderKind(p) != "deepseek" {
+		if officialProviderKind(p) != "deepseek" || !isOfficialDeepSeekBillingEndpoint(p) {
 			continue
 		}
 		p.persistedOfficialCurrency = completeDeepSeekOfficialPricingCurrency(p)
@@ -246,6 +246,7 @@ const (
 	windowsBashSandboxDefaultConfigVersion = 4
 	retiredAutoPlanConfigVersion           = 5
 	billingSplitConfigVersion              = 6
+	deepSeekScheduledPricingConfigVersion  = 7
 )
 
 // ApplyUserConfigUpgradesOnStartup applies one-time startup migrations. It
@@ -298,6 +299,12 @@ func ApplyUserConfigUpgradesOnStartup(path string) (bool, error) {
 	if header.ConfigVersion < billingSplitConfigVersion {
 		migrateBillingDisplayCurrency(cfg)
 		freezeProviderBillingCurrencies(cfg)
+		changed = true
+	}
+	if header.ConfigVersion < deepSeekScheduledPricingConfigVersion {
+		migrateDeepSeekScheduledPricingDefaults(cfg)
+		// Mark every older config, including custom-price configs, so their values
+		// remain user-owned on later startups instead of being reconsidered.
 		changed = true
 	}
 	if !changed {
@@ -364,13 +371,81 @@ func resetDeepSeekOfficialPricing(p *ProviderEntry, defaults map[string]*provide
 	}
 }
 
+func legacyDeepSeekV4PricesCNY() map[string]*provider.Pricing {
+	return map[string]*provider.Pricing{
+		"deepseek-v4-flash": {CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"},
+		"deepseek-v4-pro":   {CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"},
+	}
+}
+
+func legacyDeepSeekV4PricesUSD() map[string]*provider.Pricing {
+	return map[string]*provider.Pricing{
+		"deepseek-v4-flash": {CacheHit: 0.0028, Input: 0.14, Output: 0.28, Currency: "$"},
+		"deepseek-v4-pro":   {CacheHit: 0.003625, Input: 0.435, Output: 0.87, Currency: "$"},
+	}
+}
+
+// migrateDeepSeekScheduledPricingDefaults replaces only the exact pre-August
+// official defaults. Custom endpoints and any edited numeric rate remain intact.
+func migrateDeepSeekScheduledPricingDefaults(c *Config) {
+	if c == nil {
+		return
+	}
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		if officialProviderKind(p) != "deepseek" || !isOfficialDeepSeekBillingEndpoint(p) {
+			continue
+		}
+		currency := p.ProviderBillingCurrency()
+		if currency == "" {
+			currency = "USD"
+		}
+		legacy := legacyDeepSeekV4PricesUSD()
+		if normalizeDeepSeekPricingCurrency(currency) == "CNY" {
+			legacy = legacyDeepSeekV4PricesCNY()
+		}
+		migrate := func(model string, price *provider.Pricing) *provider.Pricing {
+			old := legacy[strings.TrimSpace(model)]
+			if !samePricingNormalizedCurrency(price, old) {
+				return price
+			}
+			return deepSeekV4PriceForModel(currency, model)
+		}
+		if p.Price != nil {
+			p.Price = migrate(p.Model, p.Price)
+		}
+		// Treat a multi-model official table atomically. A mixture of an old
+		// default row and a user-edited row is custom as a whole; partially
+		// rewriting it would leave an incoherent price book.
+		canMigrateTable := false
+		for model, price := range p.Prices {
+			old, known := legacy[strings.TrimSpace(model)]
+			if !known {
+				continue
+			}
+			canMigrateTable = true
+			if !samePricingNormalizedCurrency(price, old) {
+				canMigrateTable = false
+				break
+			}
+		}
+		if canMigrateTable {
+			for model, price := range p.Prices {
+				p.Prices[model] = migrate(model, price)
+			}
+		}
+	}
+}
+
 func isKnownDeepSeekOfficialPricing(model string, price *provider.Pricing) bool {
 	model = strings.TrimSpace(model)
 	if model == "" || price == nil {
 		return false
 	}
-	for _, prices := range []map[string]*provider.Pricing{deepSeekV4PricesCNY(), deepSeekV4PricesUSD()} {
-		if samePricing(price, prices[model]) {
+	for _, prices := range []map[string]*provider.Pricing{
+		deepSeekV4PricesCNY(), deepSeekV4PricesUSD(), legacyDeepSeekV4PricesCNY(), legacyDeepSeekV4PricesUSD(),
+	} {
+		if samePricingNormalizedCurrency(price, prices[model]) {
 			return true
 		}
 	}
@@ -395,4 +470,12 @@ func samePricing(a, b *provider.Pricing) bool {
 		return false
 	}
 	return a.CacheHit == b.CacheHit && a.Input == b.Input && a.Output == b.Output && a.Currency == b.Currency
+}
+
+func samePricingNormalizedCurrency(a, b *provider.Pricing) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return a.CacheHit == b.CacheHit && a.Input == b.Input && a.Output == b.Output &&
+		normalizeDeepSeekPricingCurrency(a.Currency) == normalizeDeepSeekPricingCurrency(b.Currency)
 }

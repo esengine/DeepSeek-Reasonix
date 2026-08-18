@@ -217,7 +217,7 @@ func verificationsOf(receipts []evidence.Receipt) []Verification {
 	at := map[string]int{}
 	for i, r := range receipts {
 		command := strings.TrimSpace(r.Command)
-		if command == "" || !evidence.IsDeliveryVerificationCommand(command) {
+		if command == "" || !evidence.IsVerificationCommand(command) {
 			continue
 		}
 		if _, seen := at[command]; !seen {

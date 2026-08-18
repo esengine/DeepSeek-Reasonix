@@ -43,6 +43,13 @@ func TestEffortOverrideDeepSeekNonFlashRejectsLow(t *testing.T) {
 	}
 }
 
+func TestEffortOverrideDeepSeekProSupportsLow(t *testing.T) {
+	c := newTestClient(t, "deepseek-v4-pro", map[string]any{"reasoning_protocol": "deepseek"})
+	if got := c.buildRequest(provider.Request{EffortOverride: "low"}).ReasoningEffort; got != "low" {
+		t.Fatalf("Pro low reasoning_effort = %q, want low", got)
+	}
+}
+
 func TestEffortOverrideHonorsSupportedEfforts(t *testing.T) {
 	c := newTestClient(t, "deepseek-v4", map[string]any{
 		"reasoning_protocol": "deepseek",

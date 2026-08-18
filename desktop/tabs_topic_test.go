@@ -2151,11 +2151,11 @@ func TestCreateTopicAppearsFirstInProjectTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create first topic: %v", err)
 	}
+	waitForLaterTopicTimestamp(first.CreatedAt)
 	second, err := app.CreateTopic("project", projectRoot, "")
 	if err != nil {
 		t.Fatalf("create second topic: %v", err)
 	}
-
 	nodes := app.ListProjectTree()
 	if len(nodes) != 1 || len(nodes[0].Children) != 2 {
 		t.Fatalf("project tree = %#v, want one project with two topics", nodes)
@@ -2176,11 +2176,11 @@ func TestCreateGlobalTopicAppearsFirstInProjectTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create first global topic: %v", err)
 	}
+	waitForLaterTopicTimestamp(first.CreatedAt)
 	second, err := app.CreateTopic("global", "", "")
 	if err != nil {
 		t.Fatalf("create second global topic: %v", err)
 	}
-
 	nodes := app.ListProjectTree()
 	if len(nodes) != 1 || nodes[0].Kind != "global_folder" || len(nodes[0].Children) != 2 {
 		t.Fatalf("project tree = %#v, want Global with two topics", nodes)

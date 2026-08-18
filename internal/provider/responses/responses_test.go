@@ -90,6 +90,28 @@ func TestDeepSeekEffortUsesResponsesReasoningShape(t *testing.T) {
 	}
 }
 
+func TestDeepSeekProLowUsesResponsesReasoningShape(t *testing.T) {
+	client := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", Effort: "low"}).(*client)
+	body, _, _ := client.buildRequestBody(provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
+	reasoning, _ := body["reasoning"].(map[string]any)
+	if got, _ := reasoning["effort"].(string); got != "low" {
+		t.Fatalf("Pro low effort = %q, want low", got)
+	}
+}
+
+func TestDeepSeekV4ResponsesEffortAliasesNormalizeToHigh(t *testing.T) {
+	for _, model := range []string{"deepseek-v4-flash", "deepseek-v4-pro"} {
+		for _, alias := range []string{"medium", "xhigh"} {
+			client := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: model, Effort: alias}).(*client)
+			body, _, _ := client.buildRequestBody(provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
+			reasoning, _ := body["reasoning"].(map[string]any)
+			if got, _ := reasoning["effort"].(string); got != "high" {
+				t.Fatalf("%s/%s effort = %q", model, alias, got)
+			}
+		}
+	}
+}
+
 func TestRequestSerializesExplicitMaxOutputTokens(t *testing.T) {
 	client := New(Config{Name: "responses", BaseURL: "https://example.com", Model: "model"}).(*client)
 	body, _, _ := client.buildRequestBody(provider.Request{

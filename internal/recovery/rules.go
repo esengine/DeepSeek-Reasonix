@@ -74,7 +74,7 @@ func transientFailureText(text string) bool {
 func IsVerificationCall(tool string, args json.RawMessage, readOnly bool) bool {
 	tool = strings.TrimSpace(tool)
 	if tool == "bash" {
-		return evidence.IsDeliveryVerificationCommand(commandFromArgs(args))
+		return evidence.IsVerificationCommand(commandFromArgs(args))
 	}
 	// Project-check style tools are verification even when not bash.
 	switch tool {

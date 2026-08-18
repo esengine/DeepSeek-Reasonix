@@ -1079,17 +1079,17 @@ func TestRunnerWriteOutputFlagsCannotMasqueradeAsVerification(t *testing.T) {
 	}
 }
 
-func TestToolCallRequiresDeliveryCriteriaForExecutionCommands(t *testing.T) {
-	if !ToolCallRequiresDeliveryCriteria("bash", json.RawMessage(`{"command":"go test ./..."}`), false) {
+func TestToolCallRequiresAcceptanceCriteriaForExecutionCommands(t *testing.T) {
+	if !ToolCallRequiresAcceptanceCriteria("bash", json.RawMessage(`{"command":"go test ./..."}`), false) {
 		t.Fatal("verification command should require delivery acceptance criteria")
 	}
-	if !ToolCallRequiresDeliveryCriteria("bash", json.RawMessage(`{"command":"npm run test"}`), false) {
+	if !ToolCallRequiresAcceptanceCriteria("bash", json.RawMessage(`{"command":"npm run test"}`), false) {
 		t.Fatal("npm run test should require delivery acceptance criteria")
 	}
-	if !ToolCallRequiresDeliveryCriteria("bash", json.RawMessage(`{"command":"git diff --check"}`), false) {
+	if !ToolCallRequiresAcceptanceCriteria("bash", json.RawMessage(`{"command":"git diff --check"}`), false) {
 		t.Fatal("git diff --check is a verification command and should require acceptance criteria")
 	}
-	if !ToolCallRequiresDeliveryCriteria("bash", json.RawMessage(`{"command":"node --check app.js"}`), false) {
+	if !ToolCallRequiresAcceptanceCriteria("bash", json.RawMessage(`{"command":"node --check app.js"}`), false) {
 		t.Fatal("node --check is a verification command and should require acceptance criteria")
 	}
 }
@@ -1189,7 +1189,7 @@ func TestLedgerDeliverySignoffAcceptsNodeSyntaxCheckAfterMutation(t *testing.T) 
 		"evidence":[{"kind":"verification","summary":"syntax valid","command":"node --check app.js"}]
 	}`), true, true))
 
-	if !IsDeliveryVerificationCommand(command) {
+	if !IsVerificationCommand(command) {
 		t.Fatal("node --check should be recognized as a delivery verification")
 	}
 	if latest, ok := ledger.LatestSuccessfulMutationIndex(); !ok || latest != mutation {
@@ -1205,7 +1205,7 @@ func TestLedgerDeliverySignoffAcceptsNodeSyntaxCheckAfterMutation(t *testing.T) 
 
 func TestNodeEvalCannotMasqueradeAsDeliveryVerification(t *testing.T) {
 	command := `node -e 'require("fs").readFileSync("app.js")'`
-	if IsDeliveryVerificationCommand(command) {
+	if IsVerificationCommand(command) {
 		t.Fatal("arbitrary node eval must not be recognized as delivery verification")
 	}
 	if !ToolCallMutates("bash", json.RawMessage(`{"command":"node -e 'require(\"fs\").readFileSync(\"app.js\")'"}`), false) {
@@ -1217,7 +1217,7 @@ func TestNodeConditionsFlagCannotMasqueradeAsDeliveryVerification(t *testing.T) 
 	// Node CLI flags are case-sensitive: -C is --conditions and executes the
 	// target script, unlike the syntax-only -c/--check.
 	command := "node -C production server.js"
-	if IsDeliveryVerificationCommand(command) {
+	if IsVerificationCommand(command) {
 		t.Fatal("node -C (--conditions) executes the script and must not be recognized as delivery verification")
 	}
 	if !ToolCallMutates("bash", json.RawMessage(`{"command":"node -C production server.js"}`), false) {
@@ -1226,7 +1226,7 @@ func TestNodeConditionsFlagCannotMasqueradeAsDeliveryVerification(t *testing.T) 
 }
 
 func TestNodeTestRunnerWriteFlagsCannotMasqueradeAsDeliveryVerification(t *testing.T) {
-	if !IsDeliveryVerificationCommand("node --test") {
+	if !IsVerificationCommand("node --test") {
 		t.Fatal("plain node --test should be recognized as a delivery verification")
 	}
 	// Test-runner state/report flags and Node runtime profiling/tracing flags
@@ -1254,7 +1254,7 @@ func TestNodeTestRunnerWriteFlagsCannotMasqueradeAsDeliveryVerification(t *testi
 		"node --test --tls-keylog=tls.log",
 		"node --test --trace-events-enabled",
 	} {
-		if IsDeliveryVerificationCommand(command) {
+		if IsVerificationCommand(command) {
 			t.Fatalf("%q writes files and must not be recognized as delivery verification", command)
 		}
 	}

@@ -15,6 +15,7 @@ import (
 	"reasonix/internal/memory"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandbox"
 	"reasonix/internal/skill"
 )
 
@@ -49,6 +50,7 @@ type Lifecycle interface {
 type TurnControl interface {
 	Submit(input string)
 	SubmitDisplay(display, input string)
+	SubmitFinalReadinessRecovery(display, input string)
 	SubmitDeliveryRecovery(display, input string)
 	SubmitInvocationDisplay(display, input string, invocations []InvocationRequest)
 	SubmitEditedDisplay(display, input, original string)
@@ -59,6 +61,7 @@ type TurnControl interface {
 	SendWithRaw(input, raw string)
 	Run(ctx context.Context, input string) error
 	RunTurn(ctx context.Context, input string) error
+	RunFinalReadinessRecovery(ctx context.Context, input string) error
 	RunShell(command string)
 	Cancel()
 	Steer(text string)
@@ -75,6 +78,7 @@ type TurnControl interface {
 // posture (ask/auto/yolo). It mirrors the approvalManager surface.
 type Approvals interface {
 	Approve(id string, allow, session, persist bool)
+	ResolveApproval(id string, allow bool, scope sandbox.ApprovalScope) error
 	ResolvePlanDecision(id string, action PlanDecisionAction) error
 	// ResolveRecovery answers an Auto Guard card: continue|continue_task|revise. Revise
 	// refuses the mutation and steers feedback.

@@ -4,6 +4,7 @@ import { useT } from "../lib/i18n";
 import { useCollapseAnimation } from "../lib/useCollapseAnimation";
 import type { Item } from "../lib/useController";
 import { ToolCard } from "./ToolCard";
+import { useTranscriptUserResizeIntent } from "./TranscriptLayoutIntentContext";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 
@@ -120,6 +121,7 @@ export const ToolGroup = memo(function ToolGroup({
   tabId?: string;
 }) {
   const t = useT();
+  const beginUserResize = useTranscriptUserResizeIntent();
   const [open, setOpen] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   useCollapseAnimation(bodyRef, open);
@@ -128,7 +130,7 @@ export const ToolGroup = memo(function ToolGroup({
 
   return (
     <div className={`tool-group tool-group--${kind}${open ? " tool-group--open" : ""}`} data-kind={kind} data-entrance={items[0]?.id}>
-      <button type="button" className="tool-group__head" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+      <button type="button" className="tool-group__head" onClick={() => { beginUserResize(); setOpen((value) => !value); }} aria-expanded={open}>
         <span className="tool-group__title">{titleFor(kind, t)}</span>
         <span className="tool-group__summary">{groupSummary(kind, items, t)}</span>
         <ChevronRight className={`tool-group__chevron${open ? " tool-group__chevron--open" : ""}`} size={12} />

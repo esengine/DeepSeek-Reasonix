@@ -53,6 +53,9 @@ ok(getReasoningDisplayMode() === "hidden", "explicit new mode wins over every le
 hydrateReasoningDisplayMode("summary", true);
 ok(getReasoningDisplayMode() === "summary", "an explicit summary selection remains persisted");
 
+hydrateReasoningDisplayMode("expanded", true);
+ok(getReasoningDisplayMode() === "expanded", "an explicit expanded selection remains persisted");
+
 storage.set("reasonix-reasoning-summary", "0");
 ok(resolveReasoningDisplayMode("auto", false) === "legacy-collapsed", "resolver applies legacy precedence without hydration");
 hydrateReasoningDisplayMode("auto", false);

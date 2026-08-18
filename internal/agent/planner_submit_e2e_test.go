@@ -24,8 +24,8 @@ func (r *recordingPlanApprover) RunWithPlannerApproval(ctx context.Context, plan
 	return run(ctx)
 }
 
-// submitPlanCall is one planner round that hands the host a structured plan and
-// then says something unhelpful, which is what a real model does.
+// submitPlanCall includes an unhelpful acknowledgement round to prove the host
+// stops as soon as the structured plan lands and never pays for that round.
 func submitPlanCall(args string) [][]provider.Chunk {
 	return [][]provider.Chunk{
 		{
@@ -69,11 +69,14 @@ func TestSubmittedPlanReachesTheExecutorHandoff(t *testing.T) {
 	}}
 	coord, _ := submitPlanCoordinator(t, planner, exec, event.Discard)
 
-	if err := coord.Run(context.Background(), "fix the cache key"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "fix the cache key"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if len(exec.requests) == 0 {
 		t.Fatal("executor never ran")
+	}
+	if got := len(planner.requests); got != 1 {
+		t.Fatalf("planner requests = %d, want submit_plan to end the planner turn immediately", got)
 	}
 	handoff := lastUser(exec.requests[0])
 	for _, want := range []string{
@@ -109,7 +112,7 @@ func TestSubmittedPlanIsRenderedToTheSink(t *testing.T) {
 	}}
 	coord, _ := submitPlanCoordinator(t, planner, exec, sink)
 
-	if err := coord.Run(context.Background(), "fix the cache key"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "fix the cache key"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	joined := strings.Join(texts, "\n")
@@ -132,7 +135,7 @@ func TestSubmittedPlanGatesOnRequiresApprovalField(t *testing.T) {
 	approver := &recordingPlanApprover{allow: true}
 	coord.SetPlannerPlanApprover(approver)
 
-	if err := coord.Run(context.Background(), "drop the old table"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "drop the old table"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if !approver.called {
@@ -156,7 +159,7 @@ func TestSubmittedPlanWithoutApprovalRunsStraightThrough(t *testing.T) {
 	approver := &recordingPlanApprover{allow: true}
 	coord.SetPlannerPlanApprover(approver)
 
-	if err := coord.Run(context.Background(), "fix the cache key"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "fix the cache key"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if approver.called {
@@ -180,7 +183,7 @@ func TestPlannerThatWritesProseStillReachesTheExecutor(t *testing.T) {
 	}}
 	coord, _ := submitPlanCoordinator(t, planner, exec, event.Discard)
 
-	if err := coord.Run(context.Background(), "fix the cache key"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "fix the cache key"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if len(exec.requests) == 0 {
@@ -217,7 +220,7 @@ func TestPlannerAsksWithTheRealToolAndPlansFromTheAnswer(t *testing.T) {
 	asker := &recordingAsker{}
 	coord.SetAsker(asker)
 
-	if err := coord.Run(context.Background(), "add a store"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "add a store"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if len(asker.questions) == 0 {

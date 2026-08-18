@@ -104,6 +104,10 @@ func TestClassifyBashCommandEffects(t *testing.T) {
 		{name: "submodule status", command: "git submodule status", certainty: EffectKnown, permission: true, family: "git submodule"},
 		{name: "submodule update", command: "git submodule update --init", certainty: EffectKnown, writes: WriteWorkspaceContent | WriteRepositoryMetadata, family: "git submodule"},
 
+		{name: "push", command: "git push origin main", certainty: EffectKnown, writes: WriteExternalState, network: true, family: "git push"},
+		{name: "fetch", command: "git fetch origin", certainty: EffectKnown, writes: WriteRepositoryMetadata, network: true, family: "git fetch"},
+		{name: "pull", command: "git pull --ff-only", certainty: EffectKnown, writes: WriteWorkspaceContent | WriteRepositoryMetadata, network: true, family: "git pull"},
+
 		{name: "pure commit", command: "git commit -q -m 'checkpoint'", certainty: EffectKnown, writes: WriteRepositoryMetadata, family: "git commit"},
 		{name: "commit all", command: "git commit -am 'checkpoint'", certainty: EffectKnown, writes: WriteWorkspaceContent | WriteRepositoryMetadata, family: "git commit"},
 		{name: "commit amend", command: "git commit --amend -m 'checkpoint'", certainty: EffectKnown, writes: WriteWorkspaceContent | WriteRepositoryMetadata, family: "git commit"},

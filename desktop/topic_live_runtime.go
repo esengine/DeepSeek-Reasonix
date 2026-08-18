@@ -125,6 +125,7 @@ func (a *App) openTopicTabPreferLiveActivation(scope, workspaceRoot, topicID, se
 		meta := a.tabMeta(promoted, promoted.ID == a.activeTabID)
 		a.saveTabsLocked()
 		a.mu.Unlock()
+		a.emitProjectTreeRuntimeChangedWithLegacy()
 		return enrichTabMeta(meta), nil
 	}
 	a.mu.Unlock()

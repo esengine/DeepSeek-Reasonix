@@ -64,6 +64,8 @@ type record struct {
 	LegacyEstimate     bool     `json:"legacy_estimate,omitempty"`
 	PricingFingerprint string   `json:"pricing_fingerprint,omitempty"`
 	RateDate           string   `json:"rate_date,omitempty"`
+	RateBand           string   `json:"rate_band,omitempty"`
+	RatedAt            string   `json:"rated_at,omitempty"`
 	IncompleteReason   string   `json:"incomplete_reason,omitempty"`
 	BillingMode        string   `json:"billing_mode,omitempty"`
 	// ValuationCNY/USD amounts when present (occurrence-time).

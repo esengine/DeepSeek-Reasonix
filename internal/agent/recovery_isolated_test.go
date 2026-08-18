@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -15,24 +14,23 @@ func TestSaveConflictRecoveryBranchAtCapStaysBounded(t *testing.T) {
 	path, stale := divergedSessionPair(t, dir, "session.jsonl")
 	stampRecoveryMeta(t, path, SessionRecoveryMaxDepth)
 
-	// Depth-cap path once per autosave tick with a growing transcript (#8342).
 	current := path
+	var firstPath string
 	for i := range 6 {
 		stale.Add(provider.Message{Role: provider.RoleUser, Content: fmt.Sprintf("tick %d", i)})
-		if _, err := stale.SaveRecoveryBranch(RecoveryBranchOptions{OriginalPath: current}); !errors.Is(err, ErrSessionRecoveryDepthExceeded) {
-			t.Fatalf("tick %d: SaveRecoveryBranch err = %v, want ErrSessionRecoveryDepthExceeded", i, err)
-		}
-		info, err := stale.SaveConflictRecoveryBranch(RecoveryBranchOptions{OriginalPath: current})
+		info, err := stale.SaveRecoveryBranch(RecoveryBranchOptions{OriginalPath: current})
 		if err != nil {
-			t.Fatalf("tick %d: SaveConflictRecoveryBranch: %v", i, err)
+			t.Fatalf("tick %d: SaveRecoveryBranch: %v", i, err)
 		}
-		current = info.Path
-		if i == 0 {
-			// In-place rewrites must preserve markers the controller does not re-transplant.
-			if err := SetSessionInFlightTurn(current, InFlightTurnMeta{StartMessageIndex: 2}); err != nil {
+		if firstPath == "" {
+			firstPath = info.Path
+			if err := SetSessionInFlightTurn(firstPath, InFlightTurnMeta{StartMessageIndex: 2}); err != nil {
 				t.Fatalf("SetSessionInFlightTurn: %v", err)
 			}
+		} else if info.Path != firstPath {
+			t.Fatalf("tick %d rotated recovery path %q -> %q", i, firstPath, info.Path)
 		}
+		current = info.Path
 	}
 
 	meta, ok, err := LoadBranchMeta(current)
@@ -58,13 +56,12 @@ func TestSaveConflictRecoveryBranchAtCapStaysBounded(t *testing.T) {
 	}
 }
 
-// Sibling lineages get distinct isolated copies; a copy is a fixed point.
-func TestFixedWriterRecoverySessionPathSeparatesSiblingLineages(t *testing.T) {
+func TestFixedWriterRecoverySessionPathUsesRootStem(t *testing.T) {
 	dir := t.TempDir()
 	root := fixedWriterRecoverySessionPath(filepath.Join(dir, "session.jsonl"))
 	fork := fixedWriterRecoverySessionPath(filepath.Join(dir, "session-recovery-abcd1234abcd1234.jsonl"))
-	if root == fork {
-		t.Fatalf("session and its fork share an isolated copy: %s", root)
+	if root != fork {
+		t.Fatalf("nested recovery name mapped to %q, want root path %q", fork, root)
 	}
 	if again := fixedWriterRecoverySessionPath(root); again != root {
 		t.Fatalf("isolated copy is not a fixed point: %s -> %s", root, again)

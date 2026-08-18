@@ -93,6 +93,7 @@ type Resolver struct {
 	streams      map[string]*extensionStream
 	catalogCache map[string][]provider.Descriptor
 	catalogCalls map[string]*catalogCall
+	idleTimeout  time.Duration
 }
 
 // catalogCall is one in-flight catalog fetch shared by every concurrent
@@ -115,6 +116,7 @@ var (
 // catalogFetchTimeout bounds one sidecar's extension/provider/catalog call,
 // mirroring the broker host's catalog budget.
 const catalogFetchTimeout = 10 * time.Second
+const defaultStreamIdleTimeout = 300 * time.Second
 
 // New builds the merged resolver. clients supplies the live sidecar
 // connections (typically the sidecar Manager's client list); claims is the
@@ -142,6 +144,7 @@ func New(base provider.Resolver, clients func() []ProviderClient, claims map[ext
 		streams:      make(map[string]*extensionStream),
 		catalogCache: make(map[string][]provider.Descriptor),
 		catalogCalls: make(map[string]*catalogCall),
+		idleTimeout:  defaultStreamIdleTimeout,
 	}
 	baseRefs := map[string]bool{}
 	for _, d := range base.Catalog() {

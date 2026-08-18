@@ -79,7 +79,7 @@ func (c *Catalog) ReconcileDirectory(ctx context.Context, target DirectoryTarget
 			records = append(records, record)
 			generations[record.Path] = generation
 		}
-		if err := c.upsertSessions(ctx, records, generations, "reconcile"); err != nil {
+		if err := c.upsertSessionsWithoutNotification(ctx, records, generations, "reconcile"); err != nil {
 			c.failDirectoryScan(context.Background(), target.Path, err)
 			return err
 		}

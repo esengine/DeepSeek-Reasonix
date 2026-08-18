@@ -73,7 +73,7 @@ runtime: turns 57 · requests 143 · tokens 2800000 · work time 42m
 新 API 将其解释为 `0`。新的 `budget_spend`（用户显式预算）不会被自动迁移；manual pause、evaluator
 failure、legacy archive block 和真实 blocker 同样不自动解锁。
 
-上下文压缩继续使用全局既有策略：仅由 `compact_ratio`（默认 85%）触发一次内容驱动摘要 checkpoint，不另设 soft/snip/force 多阈值。Goal 开启本身不额外触发 summarizer，也不改变工具 Schema 或稳定 prompt 前缀。
+上下文压缩继续使用全局既有策略：仅由 `compact_ratio`（默认 80%）触发 Harness 风格的 prune/摘要维护，不另设 soft/snip/force 多阈值。Goal 开启本身不额外触发 summarizer，也不改变工具 Schema 或稳定 prompt 前缀。
 
 ### 任务合约
 
@@ -149,11 +149,11 @@ Prometheus 会逐个问澄清问题：
 Delivery 收敛为纯 readiness 服务，宿主可消费的结构化结果为
 `ReadinessResult{Ready, Missing, Reason, ProgressKey}`：
 
-- Canonical todos（当前 todo 列表）
+- Canonical todos（当前 todo 列表；未完成项只在 Goal、已批准 Plan 或 strict obligation 等闭环回合中阻塞，普通开环回合将其保留为跨轮工作状态）
 - Project checks（来自 AGENTS.md 的 verify 指令）
 - Delivery 专属验收项（mutation、verification、review、complete_step 签收、capability 门禁）
 
-Delivery 不再自行注入隐藏模型消息做 3/6 次 readiness 重试：普通 Delivery 回合在第一次未满足的最终回答后立即结束并显示恢复卡；Goal + Delivery 回合由 Goal FSM 自动续轮，不显示需要用户点击的重复卡片。
+Delivery 不再自行注入隐藏模型消息做 3/6 次 readiness 重试：普通 Delivery 回合可由宿主针对已确认的缺失项做 1 次通用或最多 2 次高置信有界续跑；遇到新用户输入、取消或无新增进展时立即让路，仍未满足才显示恢复卡。普通开环回合中的未完成 todos 本身不会触发续跑或恢复卡；Goal + Delivery 回合仍由 Goal FSM 自动续轮，不显示需要用户点击的重复卡片。
 
 ### 进展签名
 

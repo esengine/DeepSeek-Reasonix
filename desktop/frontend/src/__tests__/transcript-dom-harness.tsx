@@ -9,6 +9,7 @@ import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createServer, type ViteDevServer } from "vite";
+import type { ReasoningDisplayMode } from "../lib/reasoningDisplayPreference";
 import type { Item } from "../lib/useController";
 
 export interface TranscriptHarnessOptions {
@@ -18,6 +19,8 @@ export interface TranscriptHarnessOptions {
   rowHeight?: number;
   /** Extra localStorage seed values (display mode, fold preference, …). */
   storage?: Record<string, string>;
+  /** Authoritative reasoning mode to hydrate before Transcript is imported. */
+  reasoningDisplayMode?: ReasoningDisplayMode;
 }
 
 export interface TranscriptHarness {
@@ -186,6 +189,12 @@ export async function createTranscriptHarness(options: TranscriptHarnessOptions 
     logLevel: "silent",
     server: { middlewareMode: true },
   });
+  if (options.reasoningDisplayMode) {
+    const preference = await server.ssrLoadModule("/src/lib/reasoningDisplayPreference.ts") as {
+      hydrateReasoningDisplayMode: (mode: unknown, explicit: boolean) => void;
+    };
+    preference.hydrateReasoningDisplayMode(options.reasoningDisplayMode, true);
+  }
   const { TranscriptTestSurface } = await server.ssrLoadModule("/src/__tests__/transcript-test-surface.tsx");
   const { LocaleProvider } = await server.ssrLoadModule("/src/lib/i18n.tsx");
   const TranscriptComponent = TranscriptTestSurface as React.ComponentType<Record<string, unknown>>;

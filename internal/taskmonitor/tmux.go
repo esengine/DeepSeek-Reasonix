@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"reasonix/internal/proc"
 )
 
 // TmuxRunner is the narrow command surface used by Adapter. Implementations
@@ -24,7 +26,7 @@ type TmuxRunner interface {
 type execTmuxRunner struct{ binary string }
 
 func (r execTmuxRunner) Run(ctx context.Context, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, r.binary, args...)
+	cmd := proc.CommandContext(ctx, r.binary, args...)
 	return cmd.Output()
 }
 

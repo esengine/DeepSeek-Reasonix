@@ -14,17 +14,18 @@ import (
 )
 
 type indexedCatalogManager struct {
-	lifecycleMu sync.Mutex
-	mu          sync.RWMutex
-	catalog     *historycatalog.Catalog
-	roots       map[string]historycatalog.Root
-	observers   []func(historycatalog.Status, []string, string)
-	generation  uint64
-	opening     map[uint64]chan struct{}
-	openCancel  map[uint64]context.CancelFunc
-	closing     bool
-	open        func(context.Context, historycatalog.Options) (*historycatalog.Catalog, error)
-	rebuild     func(context.Context, historycatalog.Options, []historycatalog.Root) (historycatalog.Status, error)
+	lifecycleMu      sync.Mutex
+	mu               sync.RWMutex
+	catalog          *historycatalog.Catalog
+	roots            map[string]historycatalog.Root
+	observers        []func(historycatalog.Status, []string, string)
+	persistObservers map[string]agent.SessionPersistObserver
+	generation       uint64
+	opening          map[uint64]chan struct{}
+	openCancel       map[uint64]context.CancelFunc
+	closing          bool
+	open             func(context.Context, historycatalog.Options) (*historycatalog.Catalog, error)
+	rebuild          func(context.Context, historycatalog.Options, []historycatalog.Root) (historycatalog.Status, error)
 }
 
 var processHistoryCatalog indexedCatalogManager
@@ -41,6 +42,26 @@ func RegisterCatalogObserver(observer func(historycatalog.Status, []string, stri
 	}
 	processHistoryCatalog.mu.Lock()
 	processHistoryCatalog.observers = append(processHistoryCatalog.observers, observer)
+	processHistoryCatalog.mu.Unlock()
+}
+
+// RegisterSessionPersistObserver fans authoritative agent save events into an
+// additional derived catalog. Registration is keyed so desktop rebuilds replace
+// their sink without accumulating closures. Observers must remain non-blocking.
+func RegisterSessionPersistObserver(key string, observer agent.SessionPersistObserver) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return
+	}
+	processHistoryCatalog.mu.Lock()
+	if processHistoryCatalog.persistObservers == nil {
+		processHistoryCatalog.persistObservers = map[string]agent.SessionPersistObserver{}
+	}
+	if observer == nil {
+		delete(processHistoryCatalog.persistObservers, key)
+	} else {
+		processHistoryCatalog.persistObservers[key] = observer
+	}
 	processHistoryCatalog.mu.Unlock()
 }
 
@@ -204,11 +225,7 @@ type historyPersistObserver struct{}
 
 func (historyPersistObserver) EnqueueSessionPersist(event agent.SessionPersistEvent) bool {
 	catalog := processHistoryCatalog.get()
-	if catalog == nil {
-		return false
-	}
 	processHistoryCatalog.mu.RLock()
-	defer processHistoryCatalog.mu.RUnlock()
 	bestLength := -1
 	var selected historycatalog.Root
 	for _, root := range processHistoryCatalog.roots {
@@ -217,14 +234,25 @@ func (historyPersistObserver) EnqueueSessionPersist(event agent.SessionPersistEv
 			bestLength = len(root.Path)
 		}
 	}
-	if bestLength < 0 {
-		return false
+	additional := make([]agent.SessionPersistObserver, 0, len(processHistoryCatalog.persistObservers))
+	for _, observer := range processHistoryCatalog.persistObservers {
+		additional = append(additional, observer)
 	}
-	if event.Removed {
-		go func() { _ = catalog.Purge(context.Background(), event.Path) }()
-		return true
+	processHistoryCatalog.mu.RUnlock()
+
+	accepted := false
+	if catalog != nil && bestLength >= 0 {
+		if event.Removed {
+			go func() { _ = catalog.Purge(context.Background(), event.Path) }()
+			accepted = true
+		} else {
+			accepted = catalog.EnqueuePersist(selected, event)
+		}
 	}
-	return catalog.EnqueuePersist(selected, event)
+	for _, observer := range additional {
+		accepted = observer.EnqueueSessionPersist(event) || accepted
+	}
+	return accepted
 }
 
 type IndexedSearcher struct {

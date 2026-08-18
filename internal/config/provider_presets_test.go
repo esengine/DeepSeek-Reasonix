@@ -3,6 +3,8 @@ package config
 import (
 	"strings"
 	"testing"
+
+	"reasonix/internal/provider"
 )
 
 func TestCurrentBuiltInAnthropicCompatibleProvidersRemainLocalByCapability(t *testing.T) {
@@ -69,6 +71,8 @@ func TestCuratedProviderPresetsCoverRequestedProviders(t *testing.T) {
 		"nvidia",
 		"kilocode",
 		"ollama-cloud",
+		"scnet",
+		"scnet-anthropic",
 	}
 	got := map[string]ProviderPreset{}
 	for _, preset := range CuratedProviderPresets() {
@@ -96,6 +100,39 @@ func TestCuratedProviderPresetsCoverRequestedProviders(t *testing.T) {
 		if _, ok := got[id]; !ok {
 			t.Fatalf("missing preset %q", id)
 		}
+	}
+}
+
+func TestOpenCodeGoContextWindowPresetsMatchModelsDev(t *testing.T) {
+	preset, ok := CuratedProviderPreset("opencode-go")
+	if !ok || len(preset.Entries) != 1 {
+		t.Fatal("missing opencode-go preset")
+	}
+	entry := preset.Entries[0]
+	if entry.ContextWindow != 128000 {
+		t.Fatalf("provider fallback window = %d, want 128000", entry.ContextWindow)
+	}
+	for id, lim := range provider.OpenCodeGoChatModels() {
+		if got := entry.ModelOverrides[id].ContextWindow; got != lim.Context {
+			t.Fatalf("%s context = %d, want %d", id, got, lim.Context)
+		}
+	}
+	anth, ok := CuratedProviderPreset("opencode-go-anthropic")
+	if !ok {
+		t.Fatal("missing opencode-go-anthropic")
+	}
+	for id, lim := range provider.OpenCodeGoAnthropicModels() {
+		if got := anth.Entries[0].ModelOverrides[id].ContextWindow; got != lim.Context {
+			t.Fatalf("anthropic %s context = %d, want %d", id, got, lim.Context)
+		}
+	}
+	dsAnth, _ := CuratedProviderPreset("opencode-go-deepseek-anthropic")
+	if dsAnth.Entries[0].ContextWindow != 1_000_000 {
+		t.Fatalf("deepseek anthropic window = %d", dsAnth.Entries[0].ContextWindow)
+	}
+	dsResp, _ := CuratedProviderPreset("opencode-go-deepseek-responses")
+	if dsResp.Entries[0].ContextWindow != 1_000_000 {
+		t.Fatalf("deepseek responses window = %d", dsResp.Entries[0].ContextWindow)
 	}
 }
 
@@ -165,7 +202,7 @@ func TestDeepSeekAnthropicPresetIsOptionalAndModelScoped(t *testing.T) {
 	if got, err := NormalizeEffort(flash, "low"); err != nil || got != "low" {
 		t.Fatalf("Flash low effort = %q/%v, want low/nil", got, err)
 	}
-	if cap := EffortCapabilityForEntry(pro); cap.Default != "high" || containsString(cap.Levels, "low") || !containsString(cap.Levels, "max") {
+	if cap := EffortCapabilityForEntry(pro); cap.Default != "high" || !containsString(cap.Levels, "low") || !containsString(cap.Levels, "max") {
 		t.Fatalf("Pro effort capability = %+v", cap)
 	}
 }
@@ -203,7 +240,7 @@ func TestDeepSeekResponsesPresetMatchesOfficialSupport(t *testing.T) {
 	if cap := EffortCapabilityForEntry(flash); cap.Default != "high" || !containsString(cap.Levels, "disabled") || !containsString(cap.Levels, "low") || !containsString(cap.Levels, "max") {
 		t.Fatalf("Flash effort capability = %+v", cap)
 	}
-	if cap := EffortCapabilityForEntry(pro); cap.Default != "high" || containsString(cap.Levels, "low") || !containsString(cap.Levels, "max") {
+	if cap := EffortCapabilityForEntry(pro); cap.Default != "high" || !containsString(cap.Levels, "low") || !containsString(cap.Levels, "max") {
 		t.Fatalf("Pro effort capability = %+v", cap)
 	}
 }

@@ -247,6 +247,11 @@ function ev(s: typeof initialState, e: WireEvent) {
   eq(completed.running, false, "turn_done still ends the repaired turn");
   eq(completed.retry, undefined, "turn_done clears the retry indicator");
 
+  const failed = ev(repaired, { kind: "turn_done", err: "shared window overflow" } as WireEvent);
+  eq(failed.running, false, "terminal context error clears running");
+  eq(failed.pendingPrompt, false, "terminal context error clears pending prompt");
+  eq(failed.messageAction, undefined, "terminal context error restores message actions");
+
   const staleSnapshotAt = promptEventClock();
   s = ev(repaired, { kind: "retrying", retryAttempt: 4, retryMax: 10 } as WireEvent);
   s = reducer(s, {

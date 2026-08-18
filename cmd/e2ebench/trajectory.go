@@ -117,6 +117,10 @@ type trajectorySummary struct {
 	// or a verification-receipt backfill for recordings that predate it.
 	Outcome *outcomeSummary `json:"outcome,omitempty"`
 
+	// Anchor-safety shadow: content-free interval-fingerprint decisions. The
+	// trajectory never contains paths, anchors, source text, or line hashes.
+	AnchorSafety *anchorSafetySummary `json:"anchor_safety,omitempty"`
+
 	// Cognition: executor reasoning/completion joined per model round, plus a
 	// census of slow rounds — gaps that bought unusually large thinking.
 	ReasoningTokensTotal     int64         `json:"reasoning_tokens_total,omitempty"`
@@ -140,81 +144,6 @@ func (s *trajectorySummary) toolWall() int64 {
 		return s.ToolWallMs
 	}
 	return s.ToolMs
-}
-
-// trajectoryRecord is the subset of trajectory.Record the summary needs.
-type trajectoryRecord struct {
-	TS               int64  `json:"ts"`
-	ProtocolRecovery string `json:"protocol_recovery"`
-	ContractShadow   *struct {
-		Intent   string `json:"intent"`
-		Verdict  string `json:"verdict"`
-		Complete bool   `json:"complete"`
-	} `json:"contract_shadow"`
-	CompletionReport *struct {
-		Verdict        string   `json:"verdict"`
-		Gaps           int      `json:"gaps"`
-		GapKinds       []string `json:"gap_kinds"`
-		ClaimsVerified int      `json:"claims_verified"`
-		ClaimsUnbacked int      `json:"claims_unbacked"`
-	} `json:"completion_report"`
-	OutcomeProgress *struct {
-		Exploration      int  `json:"exploration"`
-		Verification     int  `json:"verification"`
-		Objective        int  `json:"objective"`
-		Regression       int  `json:"regression"`
-		Churn            int  `json:"churn"`
-		LegacyGain       int  `json:"legacy_gain"`
-		Discriminating   int  `json:"discriminating"`
-		DebtAge          int  `json:"debt_age"`
-		BlindMutations   int  `json:"blind_mutations"`
-		EBMEligible      bool `json:"ebm_eligible"`
-		EBMFired         bool `json:"ebm_fired"`
-		LocalExecSeen    bool `json:"local_exec_seen"`
-		GovernorEligible bool `json:"governor_eligible"`
-		GovernorEngaged  bool `json:"governor_engaged"`
-	} `json:"outcome_progress"`
-	DelegationAdmission *struct {
-		Tool    string `json:"tool"`
-		Verdict string `json:"verdict"`
-		Reason  string `json:"reason"`
-	} `json:"delegation_admission"`
-	Event *struct {
-		Kind          string `json:"kind"`
-		Code          string `json:"code"`
-		RetryScope    string `json:"retryScope"`
-		StreamAttempt *struct {
-			ID     string `json:"id"`
-			Action string `json:"action"`
-		} `json:"streamAttempt"`
-		Usage *struct {
-			Source           string `json:"source"`
-			PromptTokens     int64  `json:"promptTokens"`
-			CompletionTokens int64  `json:"completionTokens"`
-			ReasoningTokens  int64  `json:"reasoningTokens"`
-			CacheHitTokens   int64  `json:"cacheHitTokens"`
-			CacheMissTokens  int64  `json:"cacheMissTokens"`
-			CacheDiagnostics *struct {
-				ToolSchemaTokens int64 `json:"toolSchemaTokens"`
-				PrefixChanged    bool  `json:"prefixChanged"`
-			} `json:"cacheDiagnostics"`
-		} `json:"usage"`
-		Tool *struct {
-			ID         string `json:"id"`
-			Name       string `json:"name"`
-			Args       string `json:"args"`
-			Err        string `json:"err"`
-			DurationMs int64  `json:"durationMs"`
-			ParentID   string `json:"parentId"`
-			ReadOnly   bool   `json:"readOnly"`
-			Refreshed  bool   `json:"refreshed"`
-			StartedAt  int64  `json:"startedAt"`
-			EndedAt    int64  `json:"endedAt"`
-			Execution  *struct {
-				Verification string `json:"verification"`
-			} `json:"execution"`
-		} `json:"tool"`
-	} `json:"event"`
 }
 
 // roundCall is one call's outcome-relevant facts for round classification.
@@ -380,12 +309,16 @@ func (t *trajScan) record(rec trajectoryRecord) {
 	}
 	if op := rec.OutcomeProgress; op != nil {
 		t.outcomePoints = append(t.outcomePoints, outcomePoint{
-			ts: rec.TS, exploration: op.Exploration, verification: op.Verification,
+			ts: rec.TS, round: op.Round, exploration: op.Exploration, verification: op.Verification,
 			objective: op.Objective, regression: op.Regression, churn: op.Churn,
 			legacyGain: op.LegacyGain, discriminating: op.Discriminating, debtAge: op.DebtAge,
 			blindMutations: op.BlindMutations, ebmEligible: op.EBMEligible, ebmFired: op.EBMFired,
 			governorEligible: op.GovernorEligible, governorEngaged: op.GovernorEngaged,
+			runway: op.Runway, runwayDry: op.RunwayDry, runwayIdle: op.RunwayIdle, runwaySpent: op.RunwaySpent,
 		})
+	}
+	if aa := rec.AnchorSafetyAudit; aa != nil {
+		t.recordAnchorSafetyAudit(*aa)
 	}
 	if da := rec.DelegationAdmission; da != nil {
 		t.s.DelegationCalls++

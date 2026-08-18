@@ -27,12 +27,17 @@ export interface ProjectTopicPageRequest {
   limit?: number;
   query?: string;
   timeFilter?: string;
+  sortMode?: "created" | "updated" | string;
 }
 
 export interface ProjectTopicPage {
   items: ProjectNode[];
   nextCursor?: string;
   revision: number;
+  complete?: boolean;
+  readyDirectories?: number;
+  pendingDirectories?: number;
+  failedDirectories?: number;
 }
 
 export interface ProjectTopicKey {
@@ -47,12 +52,49 @@ export interface ProjectTreeChangedV2 {
   reason: string;
 }
 
+export interface ProjectRuntimeTopic {
+  scope: "global" | "project" | string;
+  workspaceRoot?: string;
+  node: ProjectNode;
+}
+
+export interface ProjectTreeRuntimeSnapshot {
+  revision: number;
+  topics: ProjectRuntimeTopic[];
+}
+
+export interface SessionGroup {
+  id: string;
+  title: string;
+  topicIds?: string[];
+}
+
+export interface ProjectGroupsSnapshot {
+  groups: SessionGroup[];
+  revision: number;
+  applied: boolean;
+}
+
 export interface SessionCatalogBindings {
   GetProjectTreeSnapshot(): Promise<ProjectTreeSnapshot>;
+  GetProjectTreeRuntimeSnapshot?(): Promise<ProjectTreeRuntimeSnapshot>;
   ListProjectTopics(req: ProjectTopicPageRequest): Promise<ProjectTopicPage>;
   GetTopicSummary(key: ProjectTopicKey): Promise<ProjectNode>;
   GetSessionCatalogStatus(): Promise<SessionCatalogStatus>;
   RebuildSessionCatalog(): Promise<void>;
+}
+
+export interface ProjectTreeOrganizationBindings {
+  ReorderTopics(scope: string, workspaceRoot: string, orderedTopicIDs: string[]): Promise<void>;
+  ListProjectGroups(scope: string, workspaceRoot: string): Promise<SessionGroup[]>;
+  SaveSessionGroups(scope: string, workspaceRoot: string, groups: SessionGroup[]): Promise<void>;
+  GetProjectGroups?(scope: string, workspaceRoot: string): Promise<ProjectGroupsSnapshot>;
+  SaveSessionGroupsVersioned?(
+    scope: string,
+    workspaceRoot: string,
+    expectedRevision: number,
+    groups: SessionGroup[],
+  ): Promise<ProjectGroupsSnapshot>;
 }
 
 // SessionReference is a session selected via @ past:chats for context injection.

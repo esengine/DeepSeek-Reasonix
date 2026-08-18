@@ -10,6 +10,7 @@ import (
 // Receipt is the host-runtime record of one tool call. It stays in memory for
 // the current agent turn and is not serialized into prompts or session state.
 type Receipt struct {
+	Sequence  uint64          `json:"-"`
 	ToolName  string          `json:"tool_name"`
 	Args      json.RawMessage `json:"args,omitempty"`
 	Profile   string          `json:"profile,omitempty"`

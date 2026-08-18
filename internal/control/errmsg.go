@@ -25,6 +25,13 @@ func explainError(err error) error {
 	if provider.IsConnReset(err) {
 		return fmt.Errorf("model stream disconnected before completion after retry attempts: %s. Check the provider/proxy connection, then retry or ask Reasonix to continue", err.Error())
 	}
+	if limit := provider.AsContextLimitError(err); limit != nil {
+		msg := fmt.Sprintf(i18n.M.ProviderErrContextOverflowFmt, limit.PromptTokens, limit.CompletionTokens, limit.RequestedTokens, limit.WindowTokens)
+		if reason := apiErrorReason(limit.APIError); reason != "" {
+			return fmt.Errorf("%s\n%s", msg, reason)
+		}
+		return errors.New(msg)
+	}
 	var apiErr *provider.APIError
 	if errors.As(err, &apiErr) {
 		if msg := providerContentSafetyMessage(apiErr); msg != "" {

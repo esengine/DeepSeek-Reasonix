@@ -1,9 +1,11 @@
 import type { PendingGuidance } from "../components/ComposerGuidanceShelf";
+import { asArray } from "./array";
 
 export type InboxSnapshotLike = {
   paused?: boolean;
   recovered?: boolean;
   recoveredCount?: number;
+  revision?: number;
   sessionPath?: string;
   items?: Array<{
     id: string;
@@ -33,7 +35,8 @@ export function localGuidanceFallback(previewKey: string): PendingGuidance[] {
 }
 
 export function guidanceFromInboxSnapshot(snap: InboxSnapshotLike | null | undefined): PendingGuidance[] {
-  return (snap?.items ?? []).map((it) => ({
+  const visible = asArray(snap?.items).filter((it) => it.state !== "steer_consumed" && it.state !== "running");
+  return visible.map((it) => ({
     id: it.id,
     text: it.preview || "",
     submitText: "",
@@ -42,7 +45,7 @@ export function guidanceFromInboxSnapshot(snap: InboxSnapshotLike | null | undef
     source: it.source,
     paused: Boolean(snap?.paused),
     recoveredCount: snap?.paused && snap?.recovered
-      ? (snap.recoveredCount || snap.items?.length || 0)
+      ? visible.length
       : undefined,
   }));
 }

@@ -252,11 +252,67 @@ func (s *Store) Snapshot() InboxSnapshot {
 	return s.snapshotLocked()
 }
 
+// CachedSnapshot returns the Store's current in-memory metadata without taking
+// the cross-process disk lock. It is for owner-local admission decisions that
+// must not add disk-lock latency; Snapshot remains the authoritative refresh.
+func (s *Store) CachedSnapshot() InboxSnapshot {
+	if s == nil {
+		return InboxSnapshot{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.snapshotLocked()
+}
+
+// TryFreshSnapshot reads current metadata from disk without waiting for either
+// the Store mutex or the cross-process transaction lock. It does not perform
+// recovery, migration, cleanup, or any other durable mutation. Callers making
+// latency-sensitive admission decisions should treat any error conservatively.
+func (s *Store) TryFreshSnapshot() (InboxSnapshot, error) {
+	if s == nil {
+		return InboxSnapshot{}, ErrClosed
+	}
+	if !s.mu.TryLock() {
+		return InboxSnapshot{}, ErrSnapshotBusy
+	}
+	defer s.mu.Unlock()
+	if s.closed {
+		return InboxSnapshot{}, ErrClosed
+	}
+	if err := validatePrivateDir(s.dir); err != nil {
+		return InboxSnapshot{}, fmt.Errorf("sessioninbox: validate inbox directory: %w", err)
+	}
+	release, err := filelock.TryAcquire(filepath.Join(s.dir, diskLockName))
+	if err != nil {
+		if errors.Is(err, filelock.ErrHeld) {
+			return InboxSnapshot{}, ErrSnapshotBusy
+		}
+		return InboxSnapshot{}, fmt.Errorf("sessioninbox: acquire disk lock: %w", err)
+	}
+	defer release()
+	data, err := readRegularFile(filepath.Join(s.dir, manifestName), maxManifestBytes)
+	if errors.Is(err, os.ErrNotExist) {
+		return s.snapshotLocked(), nil
+	}
+	if err != nil {
+		return InboxSnapshot{}, fmt.Errorf("sessioninbox: read manifest: %w", err)
+	}
+	man, err := decodeManifest(data)
+	if err != nil {
+		return InboxSnapshot{}, fmt.Errorf("sessioninbox: decode manifest: %w", err)
+	}
+	return s.snapshotFromManifestLocked(man, man.SchemaVersion > SchemaVersion), nil
+}
+
 func (s *Store) snapshotLocked() InboxSnapshot {
 	m := s.man
 	if m == nil {
 		m = emptyManifest(s.runID)
 	}
+	return s.snapshotFromManifestLocked(m, s.readonly)
+}
+
+func (s *Store) snapshotFromManifestLocked(m *manifest, readonly bool) InboxSnapshot {
 	items := append([]InboxItemMeta(nil), m.Items...)
 	return InboxSnapshot{
 		SchemaVersion: m.SchemaVersion,
@@ -264,7 +320,7 @@ func (s *Store) snapshotLocked() InboxSnapshot {
 		Paused:        m.Paused,
 		Recovered:     m.Recovered,
 		RecoveredN:    m.RecoveredN,
-		Readonly:      s.readonly,
+		Readonly:      readonly,
 		RunID:         m.RunID,
 		SessionPath:   s.session,
 		Items:         items,

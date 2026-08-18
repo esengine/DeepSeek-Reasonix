@@ -12,6 +12,12 @@ import (
 	"reasonix/internal/provider"
 )
 
+func TestDefaultStreamIdleTimeoutIsFiveMinutes(t *testing.T) {
+	if defaultStreamIdleTimeout != 300*time.Second {
+		t.Fatalf("default stream idle timeout = %s, want 5m", defaultStreamIdleTimeout)
+	}
+}
+
 // TestStreamStallTimesOut covers issue #3374: a half-open connection (a proxy
 // switched mid-stream) sends the SSE head then goes silent without an RST, so
 // scanner.Scan() would block forever and Ctrl+C-less sessions hang until kill -9.

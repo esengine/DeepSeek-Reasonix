@@ -86,6 +86,9 @@ func (l *Ledger) Add(q CostQuote, tokens UsageTokens, occurred time.Time) {
 		// Fresh quote valuations are kept; we re-aggregate Original via sums.
 		ent.Quote.Valuations = cloneValuations(q.Valuations)
 	} else {
+		// A bucket with more than one occurrence no longer has a single rating
+		// instant even though its fingerprint keeps the rate band homogeneous.
+		ent.Quote.RatedAt = ""
 		// Sum original when same currency; otherwise retain deterministic
 		// per-currency buckets. Once a bucketed entry exists, keep adding into
 		// those buckets so later same-currency calls are not lost.

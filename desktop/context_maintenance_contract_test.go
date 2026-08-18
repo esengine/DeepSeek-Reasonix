@@ -13,6 +13,7 @@ func TestContextMaintenanceInfoUsesOptionalCamelCaseWailsFields(t *testing.T) {
 		LastReceipt: &ContextMaintenanceReceiptInfo{
 			OperationID: "op", Action: "summary", SavedTokens: 4096,
 		},
+		ContextBudget: &ContextBudgetInfo{WindowMode: "shared", Source: "official", WindowTokens: 1_048_576},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -22,6 +23,7 @@ func TestContextMaintenanceInfoUsesOptionalCamelCaseWailsFields(t *testing.T) {
 		`"maintenance"`, `"projectedTokens":160000`, `"canonicalTokens":800000`,
 		`"triggerTokens":850000`, `"checkpointState":"applied"`,
 		`"lastReceipt"`, `"operationId":"op"`, `"savedTokens":4096`, `"action":"summary"`,
+		`"contextBudget"`, `"windowMode":"shared"`, `"source":"official"`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("ContextInfo JSON missing %s: %s", want, got)

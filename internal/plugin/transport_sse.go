@@ -23,14 +23,15 @@ import (
 // `event: endpoint` frame, and all JSON-RPC messages travel to that endpoint
 // while responses and server messages return on the GET stream.
 type sseTransport struct {
-	name         string
-	getURL       *url.URL
-	headers      map[string]string
-	client       *http.Client
-	roots        []mcpRoot
-	progress     progressRouter
-	replies      chan inboundMessage
-	replyTimeout time.Duration
+	name          string
+	getURL        *url.URL
+	headers       map[string]string
+	client        *http.Client
+	roots         []mcpRoot
+	progress      progressRouter
+	notifications notificationRouter
+	replies       chan inboundMessage
+	replyTimeout  time.Duration
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -94,6 +95,10 @@ func newSSETransport(ctx context.Context, s Spec) (*sseTransport, error) {
 
 func (t *sseTransport) registerProgress(token string, sink tool.ProgressFunc) func() {
 	return t.progress.registerProgress(token, sink)
+}
+
+func (t *sseTransport) registerNotification(method string, callback func(json.RawMessage)) func() {
+	return t.notifications.registerNotification(method, callback)
 }
 
 func (t *sseTransport) readLoop() {
@@ -207,6 +212,7 @@ func (t *sseTransport) handleMessage(payload []byte) {
 			if message.Method == "notifications/progress" {
 				t.progress.dispatchProgress(message.Params)
 			}
+			t.notifications.dispatchNotification(message.Method, message.Params)
 			return
 		}
 		select {

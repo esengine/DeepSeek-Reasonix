@@ -47,7 +47,7 @@ import (
 // live streams emit tokens/keepalives far more often. Stored per-client
 // (client.idleTimeout) so a test can shorten it without a shared global that
 // would race other streams' watchdogs.
-const defaultStreamIdleTimeout = 120 * time.Second
+const defaultStreamIdleTimeout = 300 * time.Second
 
 // maxPrefixContinuations keeps automatic recovery bounded. A second length
 // finish is surfaced through the existing truncation notice instead of opening
@@ -84,12 +84,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	// A meaningful explicit list is the endpoint's declared effort vocabulary;
 	// auto remains implicit and is therefore ignored here.
 	supportedEfforts, hasExplicitEfforts := reasoningEffortVocabulary(kimiK3, supportedEfforts)
-	legacyChatURL, _ := cfg.Extra["chat_url"].(string)
-	chatURL, _ := cfg.Extra["request_url"].(string)
-	chatURL = strings.TrimSpace(chatURL)
-	if chatURL == "" {
-		chatURL = normalizeChatURL(cfg.BaseURL, legacyChatURL)
-	}
+	chatURL := resolveOpenAIChatURL(cfg.BaseURL, cfg.Extra)
 	prefixChatURL := deepSeekPrefixChatURL(chatURL)
 	headers, _ := cfg.Extra["headers"].(map[string]string)
 	extraBody, _ := cfg.Extra["extra_body"].(map[string]any)
@@ -108,7 +103,8 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	}
 	deepseek := protocol == "deepseek" || (protocol == "" && officialDeepSeek)
 	maxOutputTokens, _ := cfg.Extra["max_output_tokens"].(int)
-	deepseekV4Flash := strings.EqualFold(strings.TrimSpace(cfg.Model), "deepseek-v4-flash")
+	deepseekV4Model := strings.EqualFold(strings.TrimSpace(cfg.Model), "deepseek-v4-flash") ||
+		strings.EqualFold(strings.TrimSpace(cfg.Model), "deepseek-v4-pro")
 	minimax := protocol == "" && IsMiniMax(cfg.BaseURL)
 	zhipu := protocol == "glm" || (protocol == "" && IsZhipu(cfg.BaseURL))
 	longcat := protocol == "" && IsLongCat(cfg.BaseURL)
@@ -121,6 +117,9 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		if thinkingType == "disabled" {
 			effort = ""
 			break
+		}
+		if deepseekV4Model && !hasExplicitEfforts && (effort == "medium" || effort == "xhigh") {
+			effort = "high"
 		}
 		switch effort {
 		case "", "off": // "off" is a retired level (disabled thinking); fall back to the default depth
@@ -145,8 +144,8 @@ func New(cfg provider.Config) (provider.Provider, error) {
 			}
 			switch effort {
 			case "low":
-				if !deepseekV4Flash {
-					return nil, fmt.Errorf("openai: provider %q uses DeepSeek thinking; effort low requires deepseek-v4-flash or explicit supported_efforts", name)
+				if !deepseekV4Model {
+					return nil, fmt.Errorf("openai: provider %q uses DeepSeek thinking; effort low requires deepseek-v4-flash, deepseek-v4-pro, or explicit supported_efforts", name)
 				}
 			case "high", "max":
 			default:
@@ -220,7 +219,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		}
 	}
 	requestEfforts := requestEffortVocabulary(effortEndpoint{protocol: protocol,
-		thinkingType: thinkingType, effort: effort, deepseek: deepseek, flash: deepseekV4Flash,
+		thinkingType: thinkingType, effort: effort, deepseek: deepseek, v4Low: deepseekV4Model,
 		minimax: minimax, zhipu: zhipu, longcat: longcat, ollamaCloud: ollamaCloud,
 		explicit: hasExplicitEfforts, supported: supportedEfforts})
 	// max_output_tokens=0 on official DeepSeek omits the wire field so the
@@ -264,7 +263,7 @@ func newHTTPClient(cfg provider.Config) (*http.Client, error) {
 		DialTimeout:           30 * time.Second,
 		KeepAlive:             30 * time.Second,
 		TLSHandshakeTimeout:   15 * time.Second,
-		ResponseHeaderTimeout: 120 * time.Second, // models can think for a while before the first token
+		ResponseHeaderTimeout: 300 * time.Second, // unified provider response-header idle guard
 	})
 }
 
@@ -299,7 +298,20 @@ type client struct {
 func (c *client) Name() string { return c.name }
 
 func (c *client) RequiresToolCallReasoning() bool {
-	return c != nil && c.deepseek && c.thinkingType != "disabled"
+	if c == nil || c.thinkingType == "disabled" {
+		return false
+	}
+	if c.deepseek {
+		return true
+	}
+	// Generic OpenAI-compatible gateways can explicitly opt into the
+	// DeepSeek-style replay contract with thinking=enabled (#7763/#7748).
+	// GLM and Kimi K3 keep their broader round-trip policies.
+	return !c.zhipu && !c.kimiK3 && c.thinkingType == "enabled"
+}
+
+func (c *client) AllowsEmptyReasoningFallback() bool {
+	return c != nil && (c.RequiresToolCallReasoning() || c.glmThinkingEnabled())
 }
 
 func (c *client) RequiresReasoningRoundTrip() bool {
@@ -364,13 +376,6 @@ func normalizeReasoningProtocol(raw string) string {
 	default:
 		return ""
 	}
-}
-
-func normalizeChatURL(baseURL, chatURL string) string {
-	if legacy := strings.TrimRight(strings.TrimSpace(chatURL), "/"); legacy != "" {
-		return legacy
-	}
-	return strings.TrimRight(strings.TrimSpace(baseURL), "/") + "/chat/completions"
 }
 
 func cleanCustomHeaders(in map[string]string) map[string]string {
@@ -716,15 +721,14 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 				// Kimi K3 requires the complete assistant message on multi-turn
 				// and tool-call requests, including provider-issued reasoning.
 				cm.ReasoningContent = &m.ReasoningContent
-			case c.deepseek && len(m.ToolCalls) > 0:
+			case (c.deepseek || c.RequiresToolCallReasoning()) && len(m.ToolCalls) > 0:
 				if c.RequiresToolCallReasoning() || m.ReasoningContent != "" {
 					cm.ReasoningContent = &m.ReasoningContent
 				}
-			case c.zhipu && m.ReasoningContent != "":
+			case c.zhipu && (m.ReasoningContent != "" || (c.glmThinkingEnabled() && len(m.ToolCalls) > 0)):
 				// GLM interleaved and preserved thinking require provider-issued
-				// reasoning content to be returned unchanged in later history. Keep
-				// an existing value even after thinking is turned off so an
-				// enabled→disabled session retains its valid history bytes.
+				// reasoning unchanged. Coding Plan includes the field on tool turns
+				// even when empty; preserve non-empty history after disabling too.
 				cm.ReasoningContent = &m.ReasoningContent
 			}
 		}

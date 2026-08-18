@@ -9,7 +9,7 @@ import (
 func deepSeekV4EffortOverrides() map[string]ProviderModelOverride {
 	return map[string]ProviderModelOverride{
 		"deepseek-v4-flash": {SupportedEfforts: []string{"disabled", "low", "high", "max"}, DefaultEffort: "high"},
-		"deepseek-v4-pro":   {SupportedEfforts: []string{"disabled", "high", "max"}, DefaultEffort: "high"},
+		"deepseek-v4-pro":   {SupportedEfforts: []string{"disabled", "low", "high", "max"}, DefaultEffort: "high"},
 	}
 }
 
@@ -57,10 +57,16 @@ func backfillOfficialDeepSeekEffortOverrides(p *ProviderEntry) {
 	if p == nil {
 		return
 	}
+	// A provider-level vocabulary is user-owned and remains the fallback for
+	// every model without an explicit per-model override. Do not shadow it with
+	// generated model defaults on multi-model providers.
+	if len(p.SupportedEfforts) > 0 {
+		return
+	}
 	capabilities := deepSeekV4EffortOverrides()
 	if model := strings.TrimSpace(p.Model); model != "" && len(p.Models) == 0 {
 		defaults, ok := capabilities[model]
-		if !ok || len(p.SupportedEfforts) > 0 {
+		if !ok {
 			return
 		}
 		p.SupportedEfforts = append([]string(nil), defaults.SupportedEfforts...)

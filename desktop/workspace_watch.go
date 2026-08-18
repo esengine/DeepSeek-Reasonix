@@ -34,7 +34,7 @@ type workspaceWatchRoot struct {
 	key        string
 	root       string
 	gitDirs    []string
-	watcher    *fsnotify.Watcher
+	watcher    workspaceWatcher
 	watched    map[string]struct{}
 	dirs       int
 	state      event.WorkspaceWatchState
@@ -97,7 +97,7 @@ func (h *workspaceChangeHub) ensureRoot(root string) string {
 }
 
 func (h *workspaceChangeHub) startRootLocked(r *workspaceWatchRoot) {
-	watcher, err := fsnotify.NewWatcher()
+	watcher, err := newWorkspaceWatcher()
 	if err != nil {
 		r.state = event.WorkspaceWatchUnavailable
 		return
@@ -122,6 +122,10 @@ func (h *workspaceChangeHub) startRootLocked(r *workspaceWatchRoot) {
 }
 
 func (h *workspaceChangeHub) addTreeLocked(r *workspaceWatchRoot, root string) {
+	if r.watcher != nil && r.watcher.SupportsRecursive() {
+		h.addWatchDirModeLocked(r, root, true)
+		return
+	}
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			r.state = event.WorkspaceWatchDegraded
@@ -154,6 +158,10 @@ func (h *workspaceChangeHub) addTreeLocked(r *workspaceWatchRoot, root string) {
 }
 
 func (h *workspaceChangeHub) addWatchDirLocked(r *workspaceWatchRoot, path string) bool {
+	return h.addWatchDirModeLocked(r, path, false)
+}
+
+func (h *workspaceChangeHub) addWatchDirModeLocked(r *workspaceWatchRoot, path string, recursive bool) bool {
 	path = filepath.Clean(path)
 	if _, ok := r.watched[path]; ok {
 		return true
@@ -162,7 +170,7 @@ func (h *workspaceChangeHub) addWatchDirLocked(r *workspaceWatchRoot, path strin
 		r.state = event.WorkspaceWatchDegraded
 		return false
 	}
-	if err := r.watcher.Add(path); err != nil {
+	if err := r.watcher.Add(path, recursive); err != nil {
 		r.state = event.WorkspaceWatchDegraded
 		return false
 	}
@@ -192,6 +200,21 @@ func (h *workspaceChangeHub) addGitMetadataLocked(r *workspaceWatchRoot) {
 		r.gitDirs = gitMetadataDirsForWorkspace(r.root)
 	}
 	if len(r.gitDirs) == 0 || r.watcher == nil || r.dirs >= workspaceWatchMaxDirs {
+		return
+	}
+	if r.watcher.SupportsRecursive() {
+		for _, gitDir := range r.gitDirs {
+			if pathWithinRoot(r.root, gitDir) {
+				continue
+			}
+			h.addWatchDirModeLocked(r, gitDir, false)
+			for _, rel := range []string{"refs", "logs", "worktrees"} {
+				path := filepath.Join(gitDir, rel)
+				if info, err := os.Stat(path); err == nil && info.IsDir() {
+					h.addWatchDirModeLocked(r, path, true)
+				}
+			}
+		}
 		return
 	}
 	// Watch selected metadata trees recursively. fsnotify is non-recursive, so
@@ -249,6 +272,76 @@ func gitMetadataPathAllowed(gitDirs []string, path string) bool {
 	return false
 }
 
+func gitMetadataEventAllowed(gitDir, path string) bool {
+	rel, err := filepath.Rel(gitDir, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	if rel == "." || !strings.Contains(filepath.ToSlash(rel), "/") {
+		return true
+	}
+	first := strings.SplitN(filepath.ToSlash(rel), "/", 2)[0]
+	return first == "refs" || first == "logs" || first == "worktrees"
+}
+
+func pathWithinRoot(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func workspaceWatchPathSkipped(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	for i, name := range parts {
+		prefix := strings.Join(parts[:i+1], "/")
+		if fileref.SkipEntry(prefix, name, i < len(parts)-1) {
+			return true
+		}
+	}
+	return false
+}
+
+func workspaceWatchPathClass(r *workspaceWatchRoot, path string) (isGit, ignored bool) {
+	underGit := false
+	for _, gitDir := range r.gitDirs {
+		if path != gitDir && !strings.HasPrefix(path, gitDir+string(filepath.Separator)) {
+			continue
+		}
+		underGit = true
+		if gitMetadataEventAllowed(gitDir, path) {
+			return true, false
+		}
+	}
+	if underGit {
+		return false, true
+	}
+	return false, workspaceWatchPathSkipped(r.root, path)
+}
+
+func (h *workspaceChangeHub) addCreatedGitMetadataLocked(r *workspaceWatchRoot, path string) {
+	info, err := os.Stat(path)
+	if err != nil || !info.IsDir() || !gitMetadataPathAllowed(r.gitDirs, path) {
+		return
+	}
+	if !r.watcher.SupportsRecursive() {
+		h.addGitMetadataTreeLocked(r, path)
+		return
+	}
+	if pathWithinRoot(r.root, path) {
+		return
+	}
+	for _, gitDir := range r.gitDirs {
+		rel, relErr := filepath.Rel(gitDir, path)
+		if relErr == nil && (rel == "refs" || rel == "logs" || rel == "worktrees") {
+			h.addWatchDirModeLocked(r, path, true)
+			return
+		}
+	}
+}
+
 func gitMetadataDirsForWorkspace(root string) []string {
 	seen := make(map[string]struct{}, 2)
 	var dirs []string
@@ -286,12 +379,12 @@ func gitMetadataDirsForWorkspace(root string) []string {
 func (h *workspaceChangeHub) watchLoop(r *workspaceWatchRoot) {
 	for {
 		select {
-		case ev, ok := <-r.watcher.Events:
+		case ev, ok := <-r.watcher.Events():
 			if !ok {
 				return
 			}
 			h.observeFilesystem(r.key, ev)
-		case _, ok := <-r.watcher.Errors:
+		case _, ok := <-r.watcher.Errors():
 			if !ok {
 				return
 			}
@@ -315,18 +408,14 @@ func (h *workspaceChangeHub) observeFilesystem(key string, ev fsnotify.Event) {
 		h.mu.Unlock()
 		return
 	}
-	isGit := false
-	for _, gitDir := range r.gitDirs {
-		if path == gitDir || strings.HasPrefix(path, gitDir+string(filepath.Separator)) {
-			isGit = true
-			break
-		}
+	isGit, ignored := workspaceWatchPathClass(r, path)
+	if ignored {
+		h.mu.Unlock()
+		return
 	}
 	if isGit {
 		if ev.Op&fsnotify.Create != 0 {
-			if info, statErr := os.Stat(path); statErr == nil && info.IsDir() && gitMetadataPathAllowed(r.gitDirs, path) {
-				h.addGitMetadataTreeLocked(r, path)
-			}
+			h.addCreatedGitMetadataLocked(r, path)
 		}
 		if ev.Op&(fsnotify.Remove|fsnotify.Rename) != 0 {
 			h.removeWatchTreeLocked(r, path)
@@ -352,7 +441,7 @@ func (h *workspaceChangeHub) observeFilesystem(key string, ev fsnotify.Event) {
 			r.allPaths = true
 		}
 		r.source = mergeWorkspaceSource(r.source, "filesystem")
-		if ev.Op&fsnotify.Create != 0 {
+		if ev.Op&fsnotify.Create != 0 && !r.watcher.SupportsRecursive() {
 			if info, statErr := os.Stat(path); statErr == nil && info.IsDir() {
 				h.addTreeLocked(r, path)
 			}
@@ -592,7 +681,7 @@ func (h *workspaceChangeHub) reconcileRoots() {
 		}
 	}
 	h.mu.Lock()
-	watchers := make([]*fsnotify.Watcher, 0)
+	watchers := make([]workspaceWatcher, 0)
 	for key, r := range h.roots {
 		if _, ok := used[key]; ok {
 			continue
@@ -623,7 +712,7 @@ func (h *workspaceChangeHub) close() {
 		return
 	}
 	h.closed = true
-	watchers := make([]*fsnotify.Watcher, 0, len(h.roots))
+	watchers := make([]workspaceWatcher, 0, len(h.roots))
 	for key, r := range h.roots {
 		r.closed = true
 		if r.timer != nil {

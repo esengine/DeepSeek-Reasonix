@@ -220,6 +220,7 @@ const keys = (rows: TranscriptRow[]) => rows.map((row) => row.key).join(",");
   ], undefined, false, true);
   const mixedStates = foldSegmentStates(mixed);
   eq(mixedStates.length, 1, "hidden reasoning keeps a mixed tool process fold");
+  eq(foldSegmentStates(mixed, true)[0]?.keepReasoningExpanded, false, "expanded reasoning mode does not pin tool-only folds");
   eq(mixed[0]?.segments[0]?.displayItems.filter((item) => item.kind === "assistant").length ?? -1, 0, "hidden reasoning is excluded from fold body items");
   eq(mixed[0]?.segments[0]?.displayItems.filter((item) => item.kind === "tool").length ?? -1, 1, "hidden reasoning does not hide tools");
 }
@@ -241,6 +242,27 @@ const keys = (rows: TranscriptRow[]) => rows.map((row) => row.key).join(",");
   const closed = reconcileFoldEntries(seeded ?? EMPTY_FOLDS, settledStates, "auto", false);
   ok(closed?.get("a1")?.open === false, "completion auto-closes an untouched fold");
   eq(reconcileFoldEntries(closed ?? EMPTY_FOLDS, settledStates, "auto", false), null, "steady state reconciles to no change");
+}
+
+{
+  // Expanded reasoning pins only reasoning-bearing folds across completion.
+  const running = buildTurnModels(fixture.slice(0, 7), { id: "a2", hasAnswerText: true, hasReasoning: false, reasoningComplete: true }, true);
+  const runningStates = foldSegmentStates(running, true);
+  eq(runningStates[0]?.keepReasoningExpanded, true, "expanded mode marks a reasoning-bearing fold as pinned");
+  const seeded = reconcileFoldEntries(EMPTY_FOLDS, runningStates, "auto", false) ?? EMPTY_FOLDS;
+
+  const settledModels = buildTurnModels(fixture.slice(0, 7), undefined, false);
+  const settledPinnedStates = foldSegmentStates(settledModels, true);
+  const completed = reconcileFoldEntries(seeded, settledPinnedStates, "auto", false);
+  ok(completed?.get("a1")?.open === true, "expanded reasoning keeps its parent fold open after completion");
+
+  const manuallyCollapsed = foldMapWithToggle(seeded, "a1", true);
+  const completedCollapsed = reconcileFoldEntries(manuallyCollapsed, settledPinnedStates, "auto", false);
+  ok(completedCollapsed?.get("a1")?.open === false, "manual parent collapse still wins when expanded reasoning completes");
+
+  const settledAutoStates = foldSegmentStates(settledModels, false);
+  const backToAuto = reconcileFoldEntries(completed ?? EMPTY_FOLDS, settledAutoStates, "auto", false);
+  ok(backToAuto?.get("a1")?.open === false, "leaving expanded reasoning re-applies the automatic parent fold policy");
 }
 
 {

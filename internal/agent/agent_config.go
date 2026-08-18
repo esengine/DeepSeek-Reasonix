@@ -28,8 +28,9 @@ type agentConfig struct {
 	maxSubagentDepth int
 	// contextWindow and compactRatio decide when at most one provider-visible
 	// checkpoint is installed; recentKeep and archiveDir shape what it keeps.
-	contextWindow int
-	compactRatio  float64
-	recentKeep    int
-	archiveDir    string
+	contextWindow          int
+	compactRatio           float64
+	recentKeep             int
+	archiveDir             string
+	legacyAnchorSafetyGate bool
 }

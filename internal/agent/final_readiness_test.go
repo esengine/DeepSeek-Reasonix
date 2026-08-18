@@ -30,24 +30,26 @@ func TestFinalReadinessFailureBranches(t *testing.T) {
 		name        string
 		checks      []instruction.VerifyCheck
 		evidence    *evidence.Ledger
+		closedLoop  bool
 		wantEmpty   bool
 		wantContain string
 	}{
-		{"nil evidence never gates", []instruction.VerifyCheck{check}, nil, true, ""},
-		{"no writer never gates", []instruction.VerifyCheck{check}, readinessLedger(checkAfter), true, ""},
-		{"todo-only turn may end with incomplete list", nil, readinessLedger(todo), true, ""},
-		{"read-only context plus todo may end with incomplete list", nil, readinessLedger(readOnly, todo), true, ""},
-		{"completed todo without writer satisfies", nil, readinessLedger(doneTodo), true, ""},
-		{"writer without checks or todo never gates", nil, readinessLedger(writer), true, ""},
-		{"missing project check after writer is reported", []instruction.VerifyCheck{check}, readinessLedger(checkAfter, writer), false, "go test ./..."},
-		{"project check run after writer satisfies", []instruction.VerifyCheck{check}, readinessLedger(writer, checkAfter), true, ""},
-		{"todo writer without complete_step is reported", nil, readinessLedger(writer, todo), false, "incomplete items"},
-		{"complete_step without final todo update is reported", nil, readinessLedger(writer, todo, completeAfter), false, "latest successful todo_write"},
-		{"todo writer with complete_step and completed todo satisfies", nil, readinessLedger(writer, todo, completeAfter, doneTodo), true, ""},
+		{"nil evidence never gates", []instruction.VerifyCheck{check}, nil, false, true, ""},
+		{"no writer never gates", []instruction.VerifyCheck{check}, readinessLedger(checkAfter), false, true, ""},
+		{"todo-only turn may end with incomplete list", nil, readinessLedger(todo), false, true, ""},
+		{"read-only context plus todo may end with incomplete list", nil, readinessLedger(readOnly, todo), false, true, ""},
+		{"completed todo without writer satisfies", nil, readinessLedger(doneTodo), false, true, ""},
+		{"writer without checks or todo never gates", nil, readinessLedger(writer), false, true, ""},
+		{"missing project check after writer is reported", []instruction.VerifyCheck{check}, readinessLedger(checkAfter, writer), false, false, "go test ./..."},
+		{"project check run after writer satisfies", []instruction.VerifyCheck{check}, readinessLedger(writer, checkAfter), false, true, ""},
+		{"open turn with unfinished todos is not a delivery contradiction", nil, readinessLedger(writer, todo), false, true, ""},
+		{"closed-loop todo writer without complete_step is reported", nil, readinessLedger(writer, todo), true, false, "incomplete items"},
+		{"closed-loop complete_step without final todo update is reported", nil, readinessLedger(writer, todo, completeAfter), true, false, "latest successful todo_write"},
+		{"todo writer with complete_step and completed todo satisfies", nil, readinessLedger(writer, todo, completeAfter, doneTodo), false, true, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			a := &Agent{task: taskRuntime{ledger: tc.evidence}, projectChecks: tc.checks}
+			a := &Agent{task: taskRuntime{ledger: tc.evidence}, projectChecks: tc.checks, turn: turnRuntime{deliveryScopeActive: tc.closedLoop}}
 			got := a.ReadinessResult()
 			if tc.wantEmpty {
 				if !got.Ready {
@@ -84,11 +86,15 @@ func TestFinalReadinessAllowsIncompleteTodosInPlanMode(t *testing.T) {
 func TestFinalReadinessCheckAuditsIncompleteTodos(t *testing.T) {
 	todo := evidence.Receipt{ToolName: "todo_write", Success: true, Todos: []evidence.TodoItem{{Content: "edit", Status: "in_progress"}}}
 	writer := evidence.Receipt{ToolName: "write_file", Success: true, Write: true, Paths: []string{"a.go"}}
-	a := &Agent{task: taskRuntime{ledger: readinessLedger(writer, todo)}}
+	open := &Agent{task: taskRuntime{ledger: readinessLedger(writer, todo)}}
+	if got := open.finalReadinessCheckFor(); got.applies {
+		t.Fatalf("open-turn finalReadinessCheckFor() applies = true, want false: %+v", got)
+	}
 
-	got := a.finalReadinessCheckFor()
+	closed := &Agent{task: taskRuntime{ledger: readinessLedger(writer, todo)}, turn: turnRuntime{deliveryScopeActive: true}}
+	got := closed.finalReadinessCheckFor()
 	if !got.applies {
-		t.Fatalf("finalReadinessCheckFor() applies = false, want true")
+		t.Fatalf("closed-loop finalReadinessCheckFor() applies = false, want true")
 	}
 	if got.incompleteTodos != 1 {
 		t.Fatalf("incompleteTodos = %d, want 1", got.incompleteTodos)
@@ -106,7 +112,7 @@ func TestFinalReadinessAllowsFinalAfterLoopGuardedToolBlocker(t *testing.T) {
 	todo := evidence.Receipt{ToolName: "todo_write", Success: true, Todos: []evidence.TodoItem{{Content: "edit", Status: "in_progress"}}}
 	writer := evidence.Receipt{ToolName: "write_file", Success: true, Write: true, Paths: []string{"a.go"}}
 	ledger := readinessLedger(writer, todo)
-	a := &Agent{task: taskRuntime{ledger: ledger}}
+	a := &Agent{task: taskRuntime{ledger: ledger}, turn: turnRuntime{deliveryScopeActive: true}}
 	a.armLoopGuardPass(ledger.Len())
 
 	got := a.finalReadinessCheckFor()
@@ -125,7 +131,7 @@ func TestFinalReadinessLoopGuardPassSurvivesBookkeeping(t *testing.T) {
 	todo := evidence.Receipt{ToolName: "todo_write", Success: true, Todos: []evidence.TodoItem{{Content: "edit", Status: "in_progress"}}}
 	writer := evidence.Receipt{ToolName: "write_file", Success: true, Write: true, Paths: []string{"a.go"}}
 	ledger := readinessLedger(writer, todo)
-	a := &Agent{task: taskRuntime{ledger: ledger}}
+	a := &Agent{task: taskRuntime{ledger: ledger}, turn: turnRuntime{deliveryScopeActive: true}}
 	a.armLoopGuardPass(ledger.Len())
 
 	ledger.Record(evidence.Receipt{ToolName: "ask", Success: true})
@@ -144,7 +150,7 @@ func TestFinalReadinessLoopGuardPassRevokedByRealProgress(t *testing.T) {
 	todo := evidence.Receipt{ToolName: "todo_write", Success: true, Todos: []evidence.TodoItem{{Content: "edit", Status: "in_progress"}}}
 	writer := evidence.Receipt{ToolName: "write_file", Success: true, Write: true, Paths: []string{"a.go"}}
 	ledger := readinessLedger(writer, todo)
-	a := &Agent{task: taskRuntime{ledger: ledger}}
+	a := &Agent{task: taskRuntime{ledger: ledger}, turn: turnRuntime{deliveryScopeActive: true}}
 	a.armLoopGuardPass(ledger.Len())
 
 	ledger.Record(evidence.Receipt{ToolName: "bash", Success: true, Command: "go test ./..."})
@@ -164,7 +170,7 @@ func TestFinalReadinessIgnoresLoopGuardQuotedInToolOutput(t *testing.T) {
 	sess.Add(provider.Message{Role: provider.RoleUser, Content: "edit"})
 	sess.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "b1", Name: "bash"}}})
 	sess.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "b1", Name: "bash", Content: "agent.go:2082: \"[loop guard] %s has now %s %d times\""})
-	a := &Agent{task: taskRuntime{ledger: readinessLedger(writer, todo)}, sess: sessionRuntime{conversation: sess}}
+	a := &Agent{task: taskRuntime{ledger: readinessLedger(writer, todo)}, sess: sessionRuntime{conversation: sess}, turn: turnRuntime{deliveryScopeActive: true}}
 
 	if got := a.finalReadinessCheckFor(); got.reason == "" {
 		t.Fatal("finalReadinessCheckFor() reason empty, want quoted loop-guard text to be ignored")

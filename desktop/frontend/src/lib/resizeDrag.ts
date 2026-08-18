@@ -21,6 +21,70 @@ export interface RafResizeUpdater {
   cancel(): void;
 }
 
+export interface PointerResizeLifecycle {
+  /** Finish once, remove every listener, and release pointer capture. */
+  finish(): void;
+}
+
+/**
+ * Own one pointer-resize gesture across capture loss, cancellation, blur, and
+ * component cleanup. Every terminal path calls onFinish exactly once.
+ */
+export function createPointerResizeLifecycle({
+  separator,
+  pointerId,
+  onMove,
+  onFinish,
+}: {
+  separator: HTMLElement;
+  pointerId: number;
+  onMove: (event: PointerEvent) => void;
+  onFinish: () => void;
+}): PointerResizeLifecycle {
+  let active = true;
+
+  function removeListeners() {
+    window.removeEventListener("pointermove", handleMove);
+    window.removeEventListener("pointerup", handlePointerDone);
+    window.removeEventListener("pointercancel", handlePointerDone);
+    window.removeEventListener("blur", finish);
+    separator.removeEventListener("lostpointercapture", handlePointerDone);
+  }
+
+  function finish() {
+    if (!active) return;
+    active = false;
+    removeListeners();
+    try {
+      if (separator.hasPointerCapture(pointerId)) separator.releasePointerCapture(pointerId);
+    } catch {
+      // WebView2 can release capture before the terminal pointer event.
+    }
+    onFinish();
+  }
+
+  function handleMove(event: PointerEvent) {
+    if (event.pointerId === pointerId) onMove(event);
+  }
+
+  function handlePointerDone(event: PointerEvent) {
+    if (event.pointerId === pointerId) finish();
+  }
+
+  try {
+    separator.setPointerCapture(pointerId);
+  } catch {
+    // Pointer capture is optional in older embedded browser runtimes.
+  }
+  window.addEventListener("pointermove", handleMove);
+  window.addEventListener("pointerup", handlePointerDone);
+  window.addEventListener("pointercancel", handlePointerDone);
+  window.addEventListener("blur", finish);
+  separator.addEventListener("lostpointercapture", handlePointerDone);
+
+  return { finish };
+}
+
 function roundedPixel(value: number): number {
   return Math.round(value);
 }

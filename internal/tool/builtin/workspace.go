@@ -36,6 +36,10 @@ type Workspace struct {
 	ProxySpec       netclient.ProxySpec
 	ReadPaths       *PathResolver
 	SessionGuard    SessionDataGuard
+	// WriteRootSet is the live writable-root manager. When set, file writers
+	// and bash read Baseline+Session+per-call roots from it instead of a
+	// static WriteRoots snapshot.
+	WriteRootSet *sandbox.WritableRootSet
 	// ManagedConfig names the Reasonix-owned config files the file-writers may
 	// touch outside WriteRoots after a fresh per-write human approval (see
 	// ManagedConfigPaths). The zero value disables the escape hatch.
@@ -89,7 +93,7 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 	if len(enabled) == 0 {
 		for i, t := range all {
 			if bound, ok := overrides[t.Name()]; ok {
-				all[i] = bound
+				all[i] = BindWriteRootSet(bound, w.WriteRootSet)
 			}
 		}
 		return all
@@ -102,7 +106,7 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 	for _, t := range all {
 		if want[t.Name()] {
 			if bound, ok := overrides[t.Name()]; ok {
-				t = bound
+				t = BindWriteRootSet(bound, w.WriteRootSet)
 			}
 			out = append(out, t)
 		}

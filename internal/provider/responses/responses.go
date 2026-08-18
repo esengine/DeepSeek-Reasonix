@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	defaultStreamIdleTimeout     = 120 * time.Second
+	defaultStreamIdleTimeout     = 300 * time.Second
 	maxReplayableSearchItemBytes = 512 * 1024
 )
 
@@ -144,10 +144,10 @@ func New(cfg Config) provider.Provider {
 	// provider-boundary guard so stale config or extension metadata cannot emit
 	// unsupported input_image items.
 	vision = vision && vendor != "deepseek"
-	httpClient := &http.Client{Timeout: 300 * time.Second}
+	httpClient := &http.Client{}
 	if built, err := netclient.NewHTTPClient(cfg.Proxy, netclient.TransportOptions{
 		DialTimeout: 30 * time.Second, KeepAlive: 30 * time.Second,
-		TLSHandshakeTimeout: 15 * time.Second, ResponseHeaderTimeout: 120 * time.Second,
+		TLSHandshakeTimeout: 15 * time.Second, ResponseHeaderTimeout: 300 * time.Second,
 	}); err == nil {
 		httpClient = built
 	}
@@ -188,45 +188,6 @@ func responsesAutoOutputBudget(vendor, effort string) int {
 }
 
 func (c *client) Name() string { return c.name }
-
-// RequiresToolCallReasoning tells the agent to preserve stateless vendors'
-// reasoning on assistant tool-call turns so the follow-up can replay it.
-// DeepSeek and MiMo document this requirement for multi-turn tool calls.
-func (c *client) RequiresToolCallReasoning() bool {
-	return c.caps.toolCallReasoning
-}
-
-func (c *client) MissingToolCallReasoningWarningIdentity() string {
-	if c == nil {
-		return ""
-	}
-	return strings.Join([]string{
-		"responses", strings.TrimSpace(c.name), strings.TrimSpace(c.requestURL),
-		strings.TrimSpace(c.model), strings.TrimSpace(c.vendor), strings.TrimSpace(c.mode), strings.TrimSpace(c.effort),
-	}, "\x00")
-}
-
-// WarnOnMissingToolCallReasoning reports a tool_calls turn that arrived
-// without reasoning only for vendors whose endpoint reliably emits it.
-// DeepSeek's official API emits tool-call reasoning for its pro-tier models,
-// so a missing chain-of-thought there is a real degradation worth one warning.
-// MiMo documents reasoning alongside tool calls but does not guarantee it on
-// every round (observed: mimo-v2.5-pro tool-call turn with empty reasoning),
-// so a missing chain-of-thought is endpoint-conditional, not a degradation
-// signal — silence the warning. Capability-driven (review #7234):
-// toolCallReasoning=false vendors (DashScope) never warn — no round-trip
-// contract; singleSegmentReasoning=true vendors (MiMo) never warn — their
-// tool-call thinking is a single optional segment. Only multi-segment
-// thinking vendors that require replay (DeepSeek) warn, scoped to non-flash.
-func (c *client) WarnOnMissingToolCallReasoning() bool {
-	if !c.caps.toolCallReasoning || c.caps.singleSegmentReasoning {
-		return false
-	}
-	model := strings.ToLower(strings.TrimSpace(c.model))
-	// Flash-tier DeepSeek models do not emit tool-call reasoning (same carve
-	// as openai.go expectsDeepSeekToolCallReasoning).
-	return !strings.Contains(model, "flash")
-}
 
 func (c *client) sendOpts() provider.SendOptions {
 	return provider.SendOptions{Provider: c.name, KeyEnv: c.keyEnv, KeySource: c.keySource, KeyPresent: c.apiKey != "", RetryAuth: c.authed.Load()}
@@ -297,6 +258,11 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool, [
 	body := map[string]any{"model": c.model, "stream": true}
 
 	effort := strings.ToLower(strings.TrimSpace(c.effort))
+	if c.vendor == "deepseek" && (strings.EqualFold(strings.TrimSpace(c.model), "deepseek-v4-flash") || strings.EqualFold(strings.TrimSpace(c.model), "deepseek-v4-pro")) {
+		if effort == "medium" || effort == "xhigh" {
+			effort = "high"
+		}
+	}
 	switch effort {
 	case "auto":
 		effort = ""

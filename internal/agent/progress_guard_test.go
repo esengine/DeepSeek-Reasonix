@@ -95,9 +95,13 @@ func TestOutcomeShadowRecordsEveryRoundWithoutTouchingGuards(t *testing.T) {
 	}
 	if s := sink.samples[0]; s.Round != 1 || s.Exploration != 1 || s.Objective != 0 {
 		t.Fatalf("round 1 sample = %+v, want exploration 1 objective 0", s)
+	} else if s.Runway != 23 || s.RunwayDry != 0 || s.RunwayIdle != 1 || s.RunwaySpent {
+		t.Fatalf("round 1 runway = %+v, want balance 23, idle 1", s)
 	}
 	if s := sink.samples[1]; s.Round != 2 || s.Exploration != 0 || s.LegacyGain != 0 {
 		t.Fatalf("round 2 repeat sample = %+v, want all-zero with legacy gain 0", s)
+	} else if s.Runway != 19 || s.RunwayDry != 1 || s.RunwayIdle != 2 || s.RunwaySpent {
+		t.Fatalf("round 2 runway = %+v, want balance 19, dry 1, idle 2", s)
 	}
 	// The shadow observes; the guard alone decides. Round texts stay untouched
 	// below the nudge threshold exactly as before.

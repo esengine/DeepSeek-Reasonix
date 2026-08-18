@@ -17,7 +17,7 @@ Reasonix 只暴露一个 `/effort` 开关（以及 provider 级的 `effort` / `t
 | Provider          | Base URL                                                    | 推理控制                                     | `/effort` 档位                           | 备注 |
 |-------------------|-------------------------------------------------------------|----------------------------------------------|------------------------------------------|-------|
 | DeepSeek V4 Flash | `api.deepseek.com`、`*.deepseek.com`                        | `thinking.type` + `reasoning_effort`（深度） | `auto`、`disabled`、`low`、`high`、`max` | 默认开启思考；`disabled` 通过 `thinking.type=disabled` 关闭。兼容性输入 `medium` 归一化为 `high`，`xhigh` 归一化为 `high`。 |
-| DeepSeek V4 Pro   | `api.deepseek.com`、`*.deepseek.com`                        | `thinking.type` + `reasoning_effort`（深度） | `auto`、`disabled`、`high`、`max`        | 默认开启思考；`disabled` 通过 `thinking.type=disabled` 关闭。兼容性输入 `low`/`medium` 归一化为 `high`，`xhigh` 归一化为 `max`。 |
+| DeepSeek V4 Pro   | `api.deepseek.com`、`*.deepseek.com`                        | `thinking.type` + `reasoning_effort`（深度） | `auto`、`disabled`、`low`、`high`、`max` | 默认开启思考；`disabled` 通过 `thinking.type=disabled` 关闭。兼容性输入 `medium`、`xhigh` 归一化为 `high`。 |
 | MiniMax M3        | `api.minimaxi.com`、`*.minimaxi.com`                        | `thinking.type`（`adaptive`\|`disabled`）    | `auto`、`adaptive`、`disabled`           | 无深度档位；`reasoning_effort` 会被省略。 |
 | Zhipu GLM         | `open.bigmodel.cn` / `*.bigmodel.cn`、`api.z.ai` / `*.z.ai` | `thinking.type`（`enabled`\|`disabled`）     | `auto`、`enabled`、`disabled`            | **端点会静默忽略 `reasoning_effort`**，因此推理完全由 `thinking.type` 驱动。 |
 
@@ -67,12 +67,9 @@ provider（包括旧的 `deepseek-anthropic` 条目）保留其原协议。Reaso
 中未签名的 DeepSeek 思考块，省略不支持的图片，并依赖 DeepSeek 的自动前缀缓存，
 而不是被忽略的 `cache_control` 标记。
 
-该预设暴露当前模型专属的 effort 档位：Flash 支持 `auto`、`disabled`、`low`、
-`high` 和 `max`，而 Pro 暴露 `auto`、`disabled`、`high` 和 `max`，因为其当前的
-`low` 输入会映射到 `high`。Anthropic-compatible 端点在线上接受 `low|high|max`。
-遗留的 `medium` 归一化为 `high`；遗留的 `xhigh` 对 Flash 归一化为 `high`、对
-Pro 归一化为 `max`。Claude Opus 别名使用 Pro 映射，而 Sonnet/Haiku 以及不支持
-的模型名遵循 DeepSeek 文档记载的 Flash 回退。
+该预设为 Flash 和 Pro 暴露相同的模型专属 effort 档位：`auto`、`disabled`、
+`low`、`high` 和 `max`。Anthropic-compatible 端点在线上接受 `low|high|max`；
+遗留的 `medium`、`xhigh` 均归一化为 `high`。
 
 ## 其他所有后端（标准 `reasoning_effort`）
 

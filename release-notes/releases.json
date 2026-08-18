@@ -2,6 +2,1500 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.27.0",
+      "date": "2026-08-17",
+      "channel": "stable",
+      "title": {
+        "en": "Reasonix Desktop 1.27.0",
+        "zh": "Reasonix 桌面版 1.27.0"
+      },
+      "summary": {
+        "en": "This release improves transcript navigation reliability, adds ordered batch sign-offs with anchor safety, and hardens desktop window lifecycle recovery.",
+        "zh": "此版本提高了会话导航的可靠性，新增按序批量签收与锚点安全门禁，并加固了桌面窗口生命周期恢复。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "User Guide",
+            "zh": "用户指南"
+          },
+          "body": {
+            "en": "Learn about ordered batch sign-offs and other features.",
+            "zh": "了解按序批量签收及其他功能。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/5d88688607d257022a8d92b3906b76f2f5a24341/docs/GUIDE.md"
+        },
+        {
+          "title": {
+            "en": "User Guide (Chinese)",
+            "zh": "用户指南（中文）"
+          },
+          "body": {
+            "en": "Chinese version of the user guide.",
+            "zh": "用户指南的中文版本。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/5d88688607d257022a8d92b3906b76f2f5a24341/docs/GUIDE.zh-CN.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "Ordered batch sign-offs with anchor safety",
+            "zh": "按序批量签收与锚点安全门禁"
+          },
+          "body": {
+            "en": "Multiple evidence-backed complete_step calls can now be made in one provider tool-call round while preserving canonical Todo ordering, sequential host advancement, rejection semantics, and idempotency. Host-only model-visible text observations and closed-interval SHA-256 fingerprints for delete_range are added, with safe handling of same-batch reads, partial windows, changed targets, and invalid anchors.",
+            "zh": "现在可以在一个提供方工具调用回合中进行多个有证据支持的 complete_step 调用，同时保持规范的 Todo 顺序、顺序主机推进、拒绝语义和幂等性。为 delete_range 添加了仅主机可见的模型文本观察和闭区间 SHA-256 指纹，并安全处理同批次读取、部分窗口、更改目标和无效锚点。"
+          },
+          "refs": [
+            9046
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Reliable transcript navigation and scroll ownership",
+            "zh": "可靠的会话导航与滚动所有权"
+          },
+          "body": {
+            "en": "Fixed stale transcript navigation, preserved upward reader intent, converged transcript tail on native geometry, and fixed question navigation clicks. Cross-session navigation now hides source content synchronously and shows a localized loading surface.",
+            "zh": "修复了过期的会话导航，保留了向上阅读意图，使会话尾部收敛于原生几何，并修复了问题导航点击。跨会话导航现在同步隐藏源内容并显示本地化的加载界面。"
+          },
+          "refs": [
+            9054,
+            9053,
+            9044,
+            9013,
+            9024
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Desktop window lifecycle recovery hardened",
+            "zh": "桌面窗口生命周期恢复加固"
+          },
+          "body": {
+            "en": "Coordinated main-window presentation through one App-owned lifecycle path, gated Linux close-to-background on live StatusNotifier registration, and treated Wayland activation as compositor acknowledgement.",
+            "zh": "通过一个 App 拥有的生命周期路径协调主窗口呈现，在实时 StatusNotifier 注册上限制 Linux 关闭到后台，并将 Wayland 激活视为合成器确认。"
+          },
+          "refs": [
+            9021
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Provider Responses tool turns without reasoning recovered",
+            "zh": "修复 Responses 缺少推理的工具回合"
+          },
+          "body": {
+            "en": "Recovered DeepSeek and MiMo Responses tool turns when the provider omits an optional reasoning item, with effort-aware replay requirements.",
+            "zh": "当提供方省略可选推理项时，恢复了 DeepSeek 和 MiMo Responses 工具回合，并具有努力感知的重放要求。"
+          },
+          "refs": [
+            9052
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Tool-result cache prefix stability",
+            "zh": "工具结果缓存前缀稳定性"
+          },
+          "body": {
+            "en": "Kept each provider-visible tool result on the stable persisted Content representation, bounded to 32 KiB, while retaining the complete local value in RawContent.",
+            "zh": "将每个提供方可见的工具结果保持在稳定的持久化 Content 表示上，限制为 32 KiB，同时在 RawContent 中保留完整的本地值。"
+          },
+          "refs": [
+            9033
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "macOS workspace watching uses FSEvents",
+            "zh": "macOS 工作区监听使用 FSEvents"
+          },
+          "body": {
+            "en": "Replaced the macOS fsnotify/kqueue workspace backend with Apple FSEvents, using one native stream per workspace watch root instead of descriptors that grow with the directory tree.",
+            "zh": "用 Apple FSEvents 替换了 macOS 的 fsnotify/kqueue 工作区后端，每个工作区监视根使用一个原生流，而不是随目录树增长的描述符。"
+          },
+          "refs": [
+            9017
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Project tree reorder during topic switches fixed",
+            "zh": "修复切换会话时项目树临时乱序"
+          },
+          "body": {
+            "en": "Kept single-surface topic switching on the runtime projection path and indexed committed transcript/sidecar changes by exact session path.",
+            "zh": "在运行时投影路径上保持单表面主题切换，并按精确会话路径索引已提交的转录/边车更改。"
+          },
+          "refs": [
+            9016
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Unfinished todo readiness scoped to closed loops",
+            "zh": "未完成 todo 只在闭环回合阻塞"
+          },
+          "body": {
+            "en": "Ordinary open turns now finish normally when a partially completed todo list is cross-turn work state, while preserving enforcement for Goal, approved Plan, and strict-obligation turns.",
+            "zh": "当部分完成的 todo 列表是跨回合工作状态时，普通开放回合现在正常结束，同时保留对 Goal、已批准 Plan 和严格义务回合的执行。"
+          },
+          "refs": [
+            9026
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "Ordered batch sign-offs with anchor safety",
+              "zh": "按序批量签收与锚点安全门禁"
+            },
+            "body": {
+              "en": "Multiple evidence-backed complete_step calls in one provider tool-call round with canonical Todo ordering, sequential host advancement, rejection semantics, and idempotency. Host-only model-visible text observations and closed-interval SHA-256 fingerprints for delete_range.",
+              "zh": "在一个提供方工具调用回合中进行多个有证据支持的 complete_step 调用，具有规范的 Todo 顺序、顺序主机推进、拒绝语义和幂等性。为 delete_range 添加仅主机可见的模型文本观察和闭区间 SHA-256 指纹。"
+            },
+            "refs": [
+              9046
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Transcript navigation and scroll ownership",
+              "zh": "会话导航与滚动所有权"
+            },
+            "body": {
+              "en": "Fixed stale transcript navigation, preserved upward reader intent, converged transcript tail on native geometry, and fixed question navigation clicks. Cross-session navigation hides source content synchronously.",
+              "zh": "修复了过期的会话导航，保留了向上阅读意图，使会话尾部收敛于原生几何，并修复了问题导航点击。跨会话导航同步隐藏源内容。"
+            },
+            "refs": [
+              9054,
+              9053,
+              9044,
+              9013,
+              9024
+            ]
+          },
+          {
+            "title": {
+              "en": "Desktop window lifecycle recovery",
+              "zh": "桌面窗口生命周期恢复"
+            },
+            "body": {
+              "en": "Coordinated main-window presentation through one App-owned lifecycle path, gated Linux close-to-background on live StatusNotifier registration, and treated Wayland activation as compositor acknowledgement.",
+              "zh": "通过一个 App 拥有的生命周期路径协调主窗口呈现，在实时 StatusNotifier 注册上限制 Linux 关闭到后台，并将 Wayland 激活视为合成器确认。"
+            },
+            "refs": [
+              9021
+            ]
+          },
+          {
+            "title": {
+              "en": "Provider Responses tool turns without reasoning",
+              "zh": "Responses 缺少推理的工具回合"
+            },
+            "body": {
+              "en": "Recovered DeepSeek and MiMo Responses tool turns when the provider omits an optional reasoning item, with effort-aware replay requirements.",
+              "zh": "当提供方省略可选推理项时，恢复了 DeepSeek 和 MiMo Responses 工具回合，并具有努力感知的重放要求。"
+            },
+            "refs": [
+              9052
+            ]
+          },
+          {
+            "title": {
+              "en": "Tool-result cache prefix stability",
+              "zh": "工具结果缓存前缀稳定性"
+            },
+            "body": {
+              "en": "Kept each provider-visible tool result on the stable persisted Content representation, bounded to 32 KiB, while retaining the complete local value in RawContent.",
+              "zh": "将每个提供方可见的工具结果保持在稳定的持久化 Content 表示上，限制为 32 KiB，同时在 RawContent 中保留完整的本地值。"
+            },
+            "refs": [
+              9033
+            ]
+          },
+          {
+            "title": {
+              "en": "macOS workspace watching uses FSEvents",
+              "zh": "macOS 工作区监听使用 FSEvents"
+            },
+            "body": {
+              "en": "Replaced the macOS fsnotify/kqueue workspace backend with Apple FSEvents, using one native stream per workspace watch root instead of descriptors that grow with the directory tree.",
+              "zh": "用 Apple FSEvents 替换了 macOS 的 fsnotify/kqueue 工作区后端，每个工作区监视根使用一个原生流，而不是随目录树增长的描述符。"
+            },
+            "refs": [
+              9017
+            ]
+          },
+          {
+            "title": {
+              "en": "Project tree reorder during topic switches",
+              "zh": "切换会话时项目树临时乱序"
+            },
+            "body": {
+              "en": "Kept single-surface topic switching on the runtime projection path and indexed committed transcript/sidecar changes by exact session path.",
+              "zh": "在运行时投影路径上保持单表面主题切换，并按精确会话路径索引已提交的转录/边车更改。"
+            },
+            "refs": [
+              9016
+            ]
+          },
+          {
+            "title": {
+              "en": "Unfinished todo readiness scoped to closed loops",
+              "zh": "未完成 todo 只在闭环回合阻塞"
+            },
+            "body": {
+              "en": "Ordinary open turns now finish normally when a partially completed todo list is cross-turn work state, while preserving enforcement for Goal, approved Plan, and strict-obligation turns.",
+              "zh": "当部分完成的 todo 列表是跨回合工作状态时，普通开放回合现在正常结束，同时保留对 Goal、已批准 Plan 和严格义务回合的执行。"
+            },
+            "refs": [
+              9026
+            ]
+          }
+        ],
+        "fixed": []
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "esengine"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.27.0",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.26.0...desktop-v1.27.0",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.27.0",
+      "baseVersion": "1.27.0",
+      "status": "reviewed",
+      "previousRelease": "1.26.0",
+      "builds": {
+        "cli": "v1.27.0",
+        "desktop": "v1.27.0",
+        "npm": "1.27.0"
+      }
+    },
+    {
+      "version": "1.26.0",
+      "date": "2026-08-17",
+      "channel": "stable",
+      "title": {
+        "en": "DeepSeek V4 scheduled pricing and Pro low reasoning effort",
+        "zh": "DeepSeek V4 峰谷价格与 Pro low 推理强度"
+      },
+      "summary": {
+        "en": "Introduces effective-dated peak and off-peak pricing for DeepSeek V4 Flash and Pro, a unified cost quote across all surfaces, and support for low reasoning effort on DeepSeek V4 Pro.",
+        "zh": "引入 DeepSeek V4 Flash 和 Pro 的峰谷价格，统一各端成本报价，并支持 DeepSeek V4 Pro 的 low 推理强度。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Billing",
+            "zh": "计费"
+          },
+          "body": {
+            "en": "Learn how DeepSeek V4 peak and off-peak pricing is applied and how to configure custom endpoints.",
+            "zh": "了解 DeepSeek V4 峰谷价格如何应用以及如何配置自定义端点。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/baad6232136fa757b94dbd9c446f67c3572e7188/docs/BILLING.md"
+        },
+        {
+          "title": {
+            "en": "Billing (Chinese)",
+            "zh": "计费（中文）"
+          },
+          "body": {
+            "en": "Chinese documentation for DeepSeek V4 billing and pricing.",
+            "zh": "DeepSeek V4 计费与价格的中文文档。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/baad6232136fa757b94dbd9c446f67c3572e7188/docs/BILLING.zh-CN.md"
+        },
+        {
+          "title": {
+            "en": "Reasoning Providers",
+            "zh": "推理提供商"
+          },
+          "body": {
+            "en": "Details on supported reasoning providers and reasoning effort levels.",
+            "zh": "支持的推理提供商和推理强度级别的详细信息。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/baad6232136fa757b94dbd9c446f67c3572e7188/docs/REASONING_PROVIDERS.md"
+        },
+        {
+          "title": {
+            "en": "Reasoning Providers (Chinese)",
+            "zh": "推理提供商（中文）"
+          },
+          "body": {
+            "en": "Chinese documentation for reasoning providers and effort levels.",
+            "zh": "推理提供商和推理强度级别的中文文档。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/baad6232136fa757b94dbd9c446f67c3572e7188/docs/REASONING_PROVIDERS.zh-CN.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Bounded tool results preserve prompt-cache prefixes",
+            "zh": "有界工具结果保持提示词缓存前缀"
+          },
+          "body": {
+            "en": "Large tool results now keep a stable provider-visible 32KB representation while retaining the complete local result for explicit paged recovery. This fixes avoidable context growth and prefix churn; provider-side cache hit rates still depend on model and cache state.",
+            "zh": "大工具结果现在使用稳定的 provider 可见 32KB 表示，同时在本地保留完整结果供显式分页恢复。该修复避免不必要的上下文增长和前缀变化；供应商侧缓存命中率仍取决于模型与缓存状态。"
+          }
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "DeepSeek V4 peak and off-peak pricing",
+            "zh": "DeepSeek V4 峰谷价格"
+          },
+          "body": {
+            "en": "Effective-dated peak and off-peak pricing for DeepSeek V4 Flash and Pro is now applied automatically for official endpoints with default pricing. Peak windows are 01:00–04:00 and 06:00–10:00 UTC.",
+            "zh": "DeepSeek V4 Flash 和 Pro 的峰谷价格现已自动应用于使用默认价格的官方端点。峰时窗口为 UTC 01:00–04:00 和 06:00–10:00。"
+          },
+          "refs": [
+            8988
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Low reasoning effort for DeepSeek V4 Pro",
+            "zh": "DeepSeek V4 Pro 的 low 推理强度"
+          },
+          "body": {
+            "en": "You can now select low reasoning effort for DeepSeek V4 Pro across OpenAI Chat, Responses, and Anthropic protocols.",
+            "zh": "现在可以在 OpenAI Chat、Responses 和 Anthropic 协议中为 DeepSeek V4 Pro 选择 low 推理强度。"
+          },
+          "refs": [
+            8988
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Unified cost quotes across all surfaces",
+            "zh": "统一各端成本报价"
+          },
+          "body": {
+            "en": "A single occurrence-time cost quote is now reused across budget enforcement, events, stats, CLI, ACP, and desktop surfaces, ensuring consistent pricing display.",
+            "zh": "现在在预算执行、事件、统计、CLI、ACP 和桌面端统一使用单次发生时的成本报价，确保价格显示一致。"
+          },
+          "refs": [
+            8988
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Peak, off-peak, and mixed-rate labels",
+            "zh": "峰时、谷时和混合费率标签"
+          },
+          "body": {
+            "en": "CLI and desktop UI now show peak, off-peak, and mixed-rate labels, with an accessible mixed-rate badge in the context panel.",
+            "zh": "CLI 和桌面 UI 现在显示峰时、谷时和混合费率标签，并在上下文面板中提供可访问的混合费率徽章。"
+          },
+          "refs": [
+            8988
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "DeepSeek V4 scheduled pricing",
+              "zh": "DeepSeek V4 峰谷价格"
+            },
+            "body": {
+              "en": "Added effective-dated peak and off-peak pricing catalogs for DeepSeek V4 Flash and Pro in CNY and USD.",
+              "zh": "为 DeepSeek V4 Flash 和 Pro 添加了人民币和美元的有效期峰谷价格目录。"
+            },
+            "refs": [
+              8988
+            ]
+          },
+          {
+            "title": {
+              "en": "Low reasoning effort support",
+              "zh": "支持 low 推理强度"
+            },
+            "body": {
+              "en": "Added support for low reasoning effort on DeepSeek V4 Pro across OpenAI Chat, Responses, and Anthropic protocols.",
+              "zh": "在 OpenAI Chat、Responses 和 Anthropic 协议中为 DeepSeek V4 Pro 添加了 low 推理强度支持。"
+            },
+            "refs": [
+              8988
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Unified cost quote calculation",
+              "zh": "统一成本报价计算"
+            },
+            "body": {
+              "en": "Calculates one occurrence-time cost quote and reuses it across budget enforcement, events, stats, CLI, ACP, and desktop surfaces.",
+              "zh": "计算单次发生时的成本报价，并在预算执行、事件、统计、CLI、ACP 和桌面端复用。"
+            },
+            "refs": [
+              8988
+            ]
+          },
+          {
+            "title": {
+              "en": "Pricing labels in UI",
+              "zh": "UI 中的价格标签"
+            },
+            "body": {
+              "en": "Shows peak, off-peak, and mixed-rate labels in CLI and desktop UI, with an accessible mixed-rate badge in the context panel.",
+              "zh": "在 CLI 和桌面 UI 中显示峰时、谷时和混合费率标签，并在上下文面板中提供可访问的混合费率徽章。"
+            },
+            "refs": [
+              8988
+            ]
+          },
+          {
+            "title": {
+              "en": "Config v7 migration",
+              "zh": "配置 v7 迁移"
+            },
+            "body": {
+              "en": "Migrates exact official default pricing to config v7 without overwriting custom endpoints, custom prices, or historical charges.",
+              "zh": "将精确的官方默认价格迁移到配置 v7，不会覆盖自定义端点、自定义价格或历史费用。"
+            },
+            "refs": [
+              8988
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Stable large tool-result projection",
+              "zh": "稳定的大工具结果投影"
+            },
+            "body": {
+              "en": "Stops full local RawContent from being automatically promoted into sampling, retries, summaries, and projection replay. Complete text remains losslessly available through the session-scoped paged capability.",
+              "zh": "不再将本地完整 RawContent 自动提升到采样、重试、摘要和投影回放中；完整原文仍可通过会话隔离的分页能力无损读取。"
+            }
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.26.0",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.25.4...desktop-v1.26.0",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.26.0",
+      "baseVersion": "1.26.0",
+      "status": "reviewed",
+      "previousRelease": "1.25.4",
+      "builds": {
+        "cli": "v1.26.0",
+        "desktop": "v1.26.0",
+        "npm": "1.26.0"
+      }
+    },
+    {
+      "version": "1.25.4",
+      "date": "2026-08-16",
+      "channel": "stable",
+      "title": {
+        "en": "Reasonix Desktop 1.25.4",
+        "zh": "Reasonix 桌面版 1.25.4"
+      },
+      "summary": {
+        "en": "This release focuses on desktop reliability and usability improvements, including fixes for long-session scrolling, terminal clipboard integration, project tree organization, and provider recovery.",
+        "zh": "此版本专注于桌面应用的可靠性和易用性改进，包括修复长会话滚动、终端剪贴板集成、项目树组织以及供应商恢复。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "User Guide",
+            "zh": "用户指南"
+          },
+          "body": {
+            "en": "Learn how to use Reasonix effectively.",
+            "zh": "了解如何有效使用 Reasonix。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/3fb8642f650df8c729e840fc4c0489ac43c47695/docs/GUIDE.md"
+        },
+        {
+          "title": {
+            "en": "User Guide (Chinese)",
+            "zh": "用户指南（中文）"
+          },
+          "body": {
+            "en": "Chinese version of the user guide.",
+            "zh": "用户指南的中文版本。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/3fb8642f650df8c729e840fc4c0489ac43c47695/docs/GUIDE.zh-CN.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Long sessions can now scroll to the bottom",
+            "zh": "长会话现在可以滚动到底部"
+          },
+          "body": {
+            "en": "Rebuilt the session scrolling system around a single-writer arbiter, fixing the issue where very long sessions could not reach the latest content.",
+            "zh": "围绕单一写入者仲裁器重建了会话滚动系统，修复了超长会话无法到达最新内容的问题。"
+          },
+          "refs": [
+            8960
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Integrated terminal clipboard and selection-to-chat",
+            "zh": "集成终端剪贴板和选中内容添加到聊天"
+          },
+          "body": {
+            "en": "The integrated terminal now supports copy/paste and adding selections to chat, with proper lifecycle management.",
+            "zh": "集成终端现在支持复制/粘贴以及将选中内容添加到聊天，并具有适当的生命周期管理。"
+          },
+          "refs": [
+            8784
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Project tree organization: manual ordering and session groups",
+            "zh": "项目树组织：手动排序和会话分组"
+          },
+          "body": {
+            "en": "Topics can now be manually reordered via drag-and-drop, and collapsible session groups can be created within projects.",
+            "zh": "现在可以通过拖拽手动重新排序主题，并在项目内创建可折叠的会话分组。"
+          },
+          "refs": [
+            8608,
+            8699
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Provider reasoning replay recovery",
+            "zh": "供应商推理重放恢复"
+          },
+          "body": {
+            "en": "Sessions with malformed reasoning history now recover automatically without user intervention.",
+            "zh": "具有格式错误的推理历史的会话现在可以自动恢复，无需用户干预。"
+          },
+          "refs": [
+            8952
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "Manual drag-to-reorder topics in project tree",
+              "zh": "项目树中手动拖拽排序主题"
+            },
+            "body": {
+              "en": "Topic rows in the project tree (project + global workspace) can now be manually reordered via drag-and-drop. Order persists through the new ReorderTopics IPC into the existing ordered Topics/GlobalTopics arrays in projects.json.",
+              "zh": "项目树中的主题行（项目 + 全局工作区）现在可以通过拖放手动重新排序。顺序通过新的 ReorderTopics IPC 持久化到 projects.json 中现有的有序 Topics/GlobalTopics 数组。"
+            },
+            "refs": [
+              8608
+            ]
+          },
+          {
+            "title": {
+              "en": "In-project session groups for folding topics",
+              "zh": "项目内会话分组用于折叠主题"
+            },
+            "body": {
+              "en": "Phase 2 of #8194 — in-project session groups as foldable UI containers (project → group → topic). Groups persist in projects.json (desktopProject.Groups / GlobalGroups), managed via new ListProjectGroups / SaveSessionGroups IPC.",
+              "zh": "#8194 的第二阶段——项目内会话分组作为可折叠的 UI 容器（项目 → 组 → 主题）。组持久化在 projects.json 中（desktopProject.Groups / GlobalGroups），通过新的 ListProjectGroups / SaveSessionGroups IPC 管理。"
+            },
+            "refs": [
+              8699
+            ]
+          },
+          {
+            "title": {
+              "en": "Aggregate active-session indicator on collapsed project folders",
+              "zh": "折叠项目文件夹上的聚合活跃会话指示器"
+            },
+            "body": {
+              "en": "Collapsed project/global folder rows now show a small spinner when any child session is in-flight (thinking/streaming/waiting_confirmation/background_job).",
+              "zh": "当任何子会话正在进行（思考/流式传输/等待确认/后台作业）时，折叠的项目/全局文件夹行现在会显示一个小旋转指示器。"
+            },
+            "refs": [
+              8598
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Align context compaction with DeepSeek Harness",
+              "zh": "与 DeepSeek Harness 对齐上下文压缩"
+            },
+            "body": {
+              "en": "Automatic context compaction now aligns with DeepSeek Harness semantics: 80% default threshold, fixed 16% recent tail, and at most two successful pressure summaries.",
+              "zh": "自动上下文压缩现在与 DeepSeek Harness 语义对齐：80% 默认阈值、固定 16% 最近尾部，以及最多两次成功的压力摘要。"
+            },
+            "refs": [
+              8964
+            ]
+          },
+          {
+            "title": {
+              "en": "Preserve AI session titles on reasoning models",
+              "zh": "在推理模型上保留 AI 会话标题"
+            },
+            "body": {
+              "en": "The desktop AI rename session action can now return a visible title on reasoning models instead of failing after a reasoning-only completion.",
+              "zh": "桌面 AI 重命名会话操作现在可以在推理模型上返回可见标题，而不是在仅推理完成后失败。"
+            },
+            "refs": [
+              8980
+            ]
+          },
+          {
+            "title": {
+              "en": "Default Kotlin LSP to official kotlin-lsp",
+              "zh": "Kotlin 默认 LSP 切换为官方 kotlin-lsp"
+            },
+            "body": {
+              "en": "The Kotlin default language server now points to the official JetBrains kotlin-lsp instead of the deprecated fwcd/kotlin-language-server.",
+              "zh": "Kotlin 默认语言服务器现在指向 JetBrains 官方 kotlin-lsp，而不是已弃用的 fwcd/kotlin-language-server。"
+            },
+            "refs": [
+              8773
+            ]
+          },
+          {
+            "title": {
+              "en": "Canonicalize official Token Rhythm API paths",
+              "zh": "自动修复基元律动官方 API 路径"
+            },
+            "body": {
+              "en": "Automatically repair known official Token Rhythm API path mistakes before the first request, such as missing /v1 or duplicated /v1.",
+              "zh": "在首次请求前自动修复已知的基元律动官方 API 路径错误，例如缺少 /v1 或重复 /v1。"
+            },
+            "refs": [
+              8953
+            ]
+          },
+          {
+            "title": {
+              "en": "Desktop runtime reload process replacement",
+              "zh": "桌面运行时重载进程替换"
+            },
+            "body": {
+              "en": "Desktop now supports /reload from the composer and restarts unchanged native v2 plugin sidecars during an explicit full reload.",
+              "zh": "桌面端现在支持从输入框使用 /reload，并在显式重载时为未改变清单的原生插件启动新进程。"
+            },
+            "refs": [
+              8948
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Stop old sessions flipping back to unread",
+              "zh": "修复旧会话反复变成未读"
+            },
+            "body": {
+              "en": "Old sidebar sessions no longer show unread dots after being clicked; unread state is now keyed on logical topic and a one-time baseline prevents false unread.",
+              "zh": "旧侧边栏会话在点击后不再显示未读点；未读状态现在基于逻辑主题，并且一次性基线防止错误的未读。"
+            },
+            "refs": [
+              8694
+            ]
+          },
+          {
+            "title": {
+              "en": "Don't raise last_activity_at from file mtime",
+              "zh": "不再从文件 mtime 提升 last_activity_at"
+            },
+            "body": {
+              "en": "After upgrades or external file touches, historical sessions no longer show as 'just now'; file mtime is only a fallback when authoritative timestamps are missing.",
+              "zh": "升级或外部文件触碰后，历史会话不再显示为“刚刚”；文件 mtime 仅在权威时间戳缺失时作为后备。"
+            },
+            "refs": [
+              8677
+            ]
+          },
+          {
+            "title": {
+              "en": "Fix durable inbox queue reconciliation",
+              "zh": "修复消息队列已执行内容残留"
+            },
+            "body": {
+              "en": "Guidance that already entered the transcript no longer remains visible in the Composer queue, and stopping a turn no longer restores already-admitted messages.",
+              "zh": "已进入转录的指导不再保留在 Composer 队列中，停止回合不再恢复已接纳的消息。"
+            },
+            "refs": [
+              8954
+            ]
+          },
+          {
+            "title": {
+              "en": "Resume ordinary readiness checks automatically",
+              "zh": "自动补齐普通任务的收尾验证"
+            },
+            "body": {
+              "en": "Ordinary interactive turns now automatically continue when the host can name a safe remaining verification or review obligation.",
+              "zh": "当主机能够指出安全剩余的验证或审查义务时，普通交互回合现在会自动继续。"
+            },
+            "refs": [
+              8947
+            ]
+          },
+          {
+            "title": {
+              "en": "Fix composer timer across tab switches",
+              "zh": "修复切换会话后运行计时归零"
+            },
+            "body": {
+              "en": "The composer timer now continues instead of restarting at zero when switching tabs, and stale snapshots cannot rewind or stop a turn.",
+              "zh": "切换标签页时，Composer 计时器现在继续而不是从零重新开始，并且过时的快照无法倒回或停止回合。"
+            },
+            "refs": [
+              8957
+            ]
+          },
+          {
+            "title": {
+              "en": "Keep the viewport steady when auto-fold collapse shrinks the transcript",
+              "zh": "思考区自动折叠收缩时不再追底跳动"
+            },
+            "body": {
+              "en": "Auto-fold collapse of the reasoning panel no longer drags the transcript viewport with an imperative tail re-aim.",
+              "zh": "推理面板的自动折叠收缩不再通过命令式尾部重新瞄准拖动转录视口。"
+            },
+            "refs": [
+              8950
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "HaoyueQin",
+        "XTLine",
+        "Linearl",
+        "swingmonkey",
+        "zcxads666",
+        "sierhaha",
+        "Ray-lyy"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.25.4",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.25.3...desktop-v1.25.4",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.25.4",
+      "baseVersion": "1.25.4",
+      "status": "reviewed",
+      "previousRelease": "1.25.3",
+      "builds": {
+        "cli": "v1.25.4",
+        "desktop": "v1.25.4",
+        "npm": "1.25.4"
+      }
+    },
+    {
+      "version": "1.25.3",
+      "date": "2026-08-16",
+      "channel": "stable",
+      "title": {
+        "en": "Reasonix v1.25.3: Adaptive execution, smoother streaming, and more robust recovery",
+        "zh": "Reasonix v1.25.3：自适应执行、更流畅的流式体验与更稳健的恢复"
+      },
+      "summary": {
+        "en": "This release replaces execution modes with a unified adaptive standard policy, makes desktop streaming and scrolling more reliable, and strengthens context recovery, session ownership, and provider compatibility.",
+        "zh": "本次发布用统一的自适应标准策略取代执行模式，让桌面端流式输出与滚动更可靠，并强化了上下文恢复、会话所有权与提供商兼容性。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Adaptive Execution Policy",
+            "zh": "自适应执行策略"
+          },
+          "body": {
+            "en": "Reasonix now derives a per-turn policy from intent, risk, structure, and constraints, replacing Light, Balanced, and Delivery modes.",
+            "zh": "Reasonix 现在根据意图、风险、结构与约束逐轮推导策略，取代轻量、均衡与交付模式。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/e4279b0dee36f0649698a9188f53b28537296e82/docs/SPEC.md"
+        },
+        {
+          "title": {
+            "en": "Session Ownership and Recovery",
+            "zh": "会话所有权与恢复"
+          },
+          "body": {
+            "en": "Session writers are isolated, rewind is fork-first, and recovery branches remain stable across restarts.",
+            "zh": "会话写者被隔离，回溯采用分叉优先，恢复分支在重启后保持稳定。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/e4279b0dee36f0649698a9188f53b28537296e82/docs/SESSION_OWNERSHIP.md"
+        },
+        {
+          "title": {
+            "en": "Tool Approval Modes",
+            "zh": "工具审批模式"
+          },
+          "body": {
+            "en": "On-demand write-access grants let file tools and Bash request permission for directories outside the workspace.",
+            "zh": "按需写入授权让文件工具与 Bash 可请求工作区外目录的写入权限。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/e4279b0dee36f0649698a9188f53b28537296e82/docs/TOOL_APPROVAL_MODES.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "Unified adaptive execution replaces Light, Balanced, and Delivery modes",
+            "zh": "统一自适应执行策略取代轻量、均衡与交付模式"
+          },
+          "body": {
+            "en": "Reasonix no longer requires choosing an execution mode. Each turn derives a policy from intent, risk, structure, and constraints, used for planning, verification, and evidence closure.",
+            "zh": "Reasonix 不再要求选择执行模式。每轮根据意图、风险、结构与约束推导策略，并用于规划、验证与证据闭环。"
+          },
+          "refs": [
+            8866
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Desktop streaming and scrolling are now stable",
+            "zh": "桌面端流式输出与滚动现已稳定"
+          },
+          "body": {
+            "en": "The active turn renders outside the virtual list, eliminating flicker, snap-backs, and tail loss on Windows and WebView2. The todo panel updates in real time.",
+            "zh": "活跃轮次在虚拟列表外渲染，消除了 Windows 与 WebView2 上的闪烁、回跳与尾部丢失。待办面板实时更新。"
+          },
+          "refs": [
+            8903,
+            8925
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Context overflow recovery keeps progressing",
+            "zh": "上下文溢出恢复持续推进"
+          },
+          "body": {
+            "en": "Repeated hard context overflows in long tool turns can now recover after token-saving checkpoints instead of aborting with an error.",
+            "zh": "长工具轮次中反复出现的硬上下文溢出现在可在节省令牌的检查点后恢复，而不是报错中止。"
+          },
+          "refs": [
+            8874,
+            8921
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "DeepSeek Anthropic reasoning replay fixed",
+            "zh": "修复 DeepSeek Anthropic 推理回放"
+          },
+          "body": {
+            "en": "Tool-bound assistant turns now replay required thinking blocks, avoiding HTTP 400 errors on subsequent requests.",
+            "zh": "工具绑定的助手轮次现在会回放所需的思考块，避免后续请求出现 HTTP 400 错误。"
+          },
+          "refs": [
+            8924,
+            7763
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "On-demand write authorization for sandbox tools",
+            "zh": "沙箱工具按需写入授权"
+          },
+          "body": {
+            "en": "File tools and Bash can request write permission for directories outside the workspace, with once, session, project, or deny decisions.",
+            "zh": "文件工具与 Bash 可请求工作区外目录的写入权限，支持一次、会话、项目或拒绝等决策。"
+          },
+          "refs": [
+            8884
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "Adaptive standard execution policy",
+              "zh": "自适应标准执行策略"
+            },
+            "body": {
+              "en": "Replaces Light, Balanced, and Delivery modes with a single policy derived per turn from intent, risk, and structure.",
+              "zh": "用根据意图、风险与结构逐轮推导的单一策略取代轻量、均衡与交付模式。"
+            },
+            "refs": [
+              8866
+            ]
+          },
+          {
+            "title": {
+              "en": "On-demand write authorization",
+              "zh": "按需写入授权"
+            },
+            "body": {
+              "en": "File tools and Bash can request write permission for directories outside the workspace, with once, session, project, or deny decisions.",
+              "zh": "文件工具与 Bash 可请求工作区外目录的写入权限，支持一次、会话、项目或拒绝等决策。"
+            },
+            "refs": [
+              8884
+            ]
+          },
+          {
+            "title": {
+              "en": "Expanded reasoning display mode",
+              "zh": "持续展开推理显示模式"
+            },
+            "body": {
+              "en": "New explicit expanded mode keeps completed reasoning open and applies consistently to assistant messages, inline transcript reasoning, and sub-agent previews.",
+              "zh": "新增显式的展开模式，使已完成的推理保持展开，并一致应用于助手消息、内联转录推理和子代理预览。"
+            },
+            "refs": [
+              8732
+            ]
+          },
+          {
+            "title": {
+              "en": "SCNet provider presets",
+              "zh": "SCNet 提供商预设"
+            },
+            "body": {
+              "en": "Built-in presets for the National Supercomputing Internet (SCNet) Token Plan, including OpenAI-compatible and Anthropic-compatible endpoints.",
+              "zh": "新增国家超算互联网（SCNet）Token Plan 的内置预设，包括 OpenAI 兼容和 Anthropic 兼容端点。"
+            },
+            "refs": [
+              8886
+            ]
+          },
+          {
+            "title": {
+              "en": "Unified AI and agent session naming",
+              "zh": "统一 AI 与 Agent 会话命名"
+            },
+            "body": {
+              "en": "New cache-stable set_session_title capability and desktop AI rename action, with consistent title updates across catalog, history, and project tree.",
+              "zh": "新增缓存稳定的 set_session_title 能力和桌面端 AI 重命名操作，并在目录、历史记录和项目树中一致更新标题。"
+            },
+            "refs": [
+              8920
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Desktop streaming and scrolling stability",
+              "zh": "桌面端流式输出与滚动稳定性"
+            },
+            "body": {
+              "en": "Active turn renders outside the virtual list, eliminating flicker, snap-backs, and tail loss; todo panel updates in real time.",
+              "zh": "活跃轮次在虚拟列表外渲染，消除闪烁、回跳与尾部丢失；待办面板实时更新。"
+            },
+            "refs": [
+              8903,
+              8925
+            ]
+          },
+          {
+            "title": {
+              "en": "Context overflow recovery",
+              "zh": "上下文溢出恢复"
+            },
+            "body": {
+              "en": "Repeated hard context overflows can recover after token-saving checkpoints instead of aborting.",
+              "zh": "反复出现的硬上下文溢出可在节省令牌的检查点后恢复，而不是中止。"
+            },
+            "refs": [
+              8874,
+              8921
+            ]
+          },
+          {
+            "title": {
+              "en": "Session ownership and recovery",
+              "zh": "会话所有权与恢复"
+            },
+            "body": {
+              "en": "Writers are isolated, rewind is fork-first, and recovery branches remain stable across restarts.",
+              "zh": "写者被隔离，回溯采用分叉优先，恢复分支在重启后保持稳定。"
+            },
+            "refs": [
+              8878,
+              8923
+            ]
+          },
+          {
+            "title": {
+              "en": "Fact-driven execution",
+              "zh": "事实驱动执行"
+            },
+            "body": {
+              "en": "Ordinary requests enter the executor directly, while planning is reserved for explicit plans, approval boundaries, and goal starts; verification obligations come from concrete tool calls.",
+              "zh": "普通请求直接进入执行器，规划仅用于显式计划、审批边界和目标启动；验证义务由具体工具调用生成。"
+            },
+            "refs": [
+              8930
+            ]
+          },
+          {
+            "title": {
+              "en": "ACP v1 prompt outcomes",
+              "zh": "ACP v1 Prompt 结果"
+            },
+            "body": {
+              "en": "Readiness gaps and controlled pauses return compliant end_turn outcomes; genuine failures return JSON-RPC InternalError with redacted causes.",
+              "zh": "就绪差距与受控暂停返回合规的 end_turn 结果；真实故障返回带脱敏原因的 JSON-RPC InternalError。"
+            },
+            "refs": [
+              8916
+            ]
+          },
+          {
+            "title": {
+              "en": "Windows workspace watching",
+              "zh": "Windows 工作区监视"
+            },
+            "body": {
+              "en": "Replaced per-directory watches with one recursive subscription per workspace root, avoiding nested directory locks.",
+              "zh": "用每个工作区根目录的单个递归订阅取代逐目录监视，避免嵌套目录锁定。"
+            },
+            "refs": [
+              8922
+            ]
+          },
+          {
+            "title": {
+              "en": "Localized new-session sidebar titles",
+              "zh": "侧边栏新会话标题本地化"
+            },
+            "body": {
+              "en": "Auto-generated default titles now localize to the desktop language in the sidebar catalog.",
+              "zh": "自动生成的默认标题现在会在侧边栏目录中按桌面语言本地化。"
+            },
+            "refs": [
+              8824
+            ]
+          },
+          {
+            "title": {
+              "en": "Ordinary readiness quality gaps",
+              "zh": "普通任务质量差距"
+            },
+            "body": {
+              "en": "Missing verification evidence no longer interrupts ordinary mutations; gaps are surfaced in the completion summary.",
+              "zh": "缺少验证证据不再中断普通变更；差距会在完成摘要中显示。"
+            },
+            "refs": [
+              8901
+            ]
+          },
+          {
+            "title": {
+              "en": "SSH remote window frame on Windows",
+              "zh": "Windows 上 SSH 远程窗口框架"
+            },
+            "body": {
+              "en": "Remote windows now keep the native OS frame, providing titlebar and window controls.",
+              "zh": "远程窗口现在保留原生操作系统框架，提供标题栏和窗口控件。"
+            },
+            "refs": [
+              8913
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "DeepSeek Anthropic reasoning replay",
+              "zh": "DeepSeek Anthropic 推理回放"
+            },
+            "body": {
+              "en": "Tool-bound assistant turns replay required thinking blocks, avoiding HTTP 400 errors.",
+              "zh": "工具绑定的助手轮次回放所需的思考块，避免 HTTP 400 错误。"
+            },
+            "refs": [
+              8924,
+              7763
+            ]
+          },
+          {
+            "title": {
+              "en": "Compaction projections across restart",
+              "zh": "重启后保留压缩投影"
+            },
+            "body": {
+              "en": "Valid compaction projections are restored after restart instead of falling back to the full transcript.",
+              "zh": "重启后恢复有效的压缩投影，而不是回退到完整转录。"
+            },
+            "refs": [
+              8923
+            ]
+          },
+          {
+            "title": {
+              "en": "Windows and policy blockers cleared",
+              "zh": "清除 Windows 与策略阻断"
+            },
+            "body": {
+              "en": "Fixed invalid TOML fixture on Windows and clause-aware mutation constraints that blocked scoped protections.",
+              "zh": "修复 Windows 上无效的 TOML 夹具和阻止作用域保护的子句感知变更约束。"
+            },
+            "refs": [
+              8934
+            ]
+          },
+          {
+            "title": {
+              "en": "DOMPurify security pin",
+              "zh": "DOMPurify 安全固定"
+            },
+            "body": {
+              "en": "Pinned Mermaid transitive DOMPurify to patched 3.4.13, clearing a moderate runtime XSS advisory.",
+              "zh": "将 Mermaid 传递依赖的 DOMPurify 固定到已修复的 3.4.13，清除中等运行时 XSS 公告。"
+            },
+            "refs": [
+              8935
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "XTLine",
+        "innocarpe",
+        "Doonut",
+        "RayySummers",
+        "SweetenedSuzuka",
+        "ShumzZzZz",
+        "kaidiren"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.25.3",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.25.2...desktop-v1.25.3",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.25.3",
+      "baseVersion": "1.25.3",
+      "status": "reviewed",
+      "previousRelease": "1.25.2",
+      "builds": {
+        "cli": "v1.25.3",
+        "desktop": "v1.25.3",
+        "npm": "1.25.3"
+      }
+    },
+    {
+      "version": "1.25.2",
+      "date": "2026-08-14",
+      "channel": "stable",
+      "title": {
+        "en": "Desktop stability and agent reliability improvements",
+        "zh": "桌面端稳定性与智能体可靠性改进"
+      },
+      "summary": {
+        "en": "This release focuses on desktop stability, session management, and agent behavior fixes, including persistent reasoning display, memory approval alignment, adaptive planner research, and numerous UI and performance improvements.",
+        "zh": "此版本专注于桌面端稳定性、会话管理和智能体行为修复，包括持续展开的推理显示、记忆审批对齐、自适应规划器调研，以及大量 UI 和性能改进。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Tool Approval Modes",
+            "zh": "工具审批模式"
+          },
+          "body": {
+            "en": "Learn how Auto and YOLO modes handle memory tool approvals.",
+            "zh": "了解 Auto 和 YOLO 模式如何处理记忆工具审批。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/d6a743a118457f9bb52e698fd18b12400d1d5c68/docs/TOOL_APPROVAL_MODES.md"
+        },
+        {
+          "title": {
+            "en": "Tool Approval Modes (Chinese)",
+            "zh": "工具审批模式（中文）"
+          },
+          "body": {
+            "en": "Chinese guide for tool approval modes.",
+            "zh": "工具审批模式中文指南。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/d6a743a118457f9bb52e698fd18b12400d1d5c68/docs/TOOL_APPROVAL_MODES.zh-CN.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "Expanded reasoning display mode",
+            "zh": "持续展开的推理显示模式"
+          },
+          "body": {
+            "en": "Added an explicit expanded reasoning display mode that keeps completed reasoning open across assistant messages, inline transcripts, and sub-agent previews.",
+            "zh": "新增显式的展开推理显示模式，使已完成的推理在助手消息、内联转录和子代理预览中保持展开。"
+          },
+          "refs": [
+            8732
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Memory approvals now respect Auto and YOLO modes",
+            "zh": "记忆审批现在遵循 Auto 和 YOLO 模式"
+          },
+          "body": {
+            "en": "Memory tools no longer force approval prompts in Auto and YOLO modes; explicit ask and deny rules still apply.",
+            "zh": "记忆工具在 Auto 和 YOLO 模式下不再强制弹出审批提示；显式的 ask 和 deny 规则仍然有效。"
+          },
+          "refs": [
+            8788,
+            5049
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Adaptive planner research",
+            "zh": "自适应规划器调研"
+          },
+          "body": {
+            "en": "Planner no longer has fixed research round limits; it continues until a valid plan is submitted or safety boundaries are hit.",
+            "zh": "规划器不再有固定的调研轮数限制；它会持续进行，直到提交有效计划或触发安全边界。"
+          },
+          "refs": [
+            8830
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Desktop session and UI stability fixes",
+            "zh": "桌面端会话与 UI 稳定性修复"
+          },
+          "body": {
+            "en": "Fixed multiple issues including session switching prompts, pinned chats after restart, project tree loops, and transcript scrolling.",
+            "zh": "修复了多个问题，包括会话切换提示、重启后置顶会话、项目树循环和转录滚动。"
+          },
+          "refs": [
+            8881,
+            8834,
+            8772,
+            8877,
+            8813
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "Expanded reasoning display mode",
+              "zh": "持续展开的推理显示模式"
+            },
+            "body": {
+              "en": "Added an explicit expanded reasoning display mode that keeps completed reasoning open.",
+              "zh": "新增显式的展开推理显示模式，使已完成的推理保持展开。"
+            },
+            "refs": [
+              8732
+            ]
+          },
+          {
+            "title": {
+              "en": "ACP authoritative total tokens",
+              "zh": "ACP 权威总令牌数"
+            },
+            "body": {
+              "en": "ACP session status now exposes totalTokens as the authoritative inclusive total.",
+              "zh": "ACP 会话状态现在暴露 totalTokens 作为权威的包含总数。"
+            },
+            "refs": [
+              8675
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Adaptive planner research",
+              "zh": "自适应规划器调研"
+            },
+            "body": {
+              "en": "Removed fixed research round limits; planner continues until a valid plan is submitted.",
+              "zh": "移除了固定的调研轮数限制；规划器会持续进行，直到提交有效计划。"
+            },
+            "refs": [
+              8830
+            ]
+          },
+          {
+            "title": {
+              "en": "MCP tool refresh after list changes",
+              "zh": "MCP 工具列表变更后自动刷新"
+            },
+            "body": {
+              "en": "Refresh connected MCP tool catalogs after notifications/tools/list_changed.",
+              "zh": "在 notifications/tools/list_changed 后刷新已连接的 MCP 工具目录。"
+            },
+            "refs": [
+              8673
+            ]
+          },
+          {
+            "title": {
+              "en": "Desktop performance and stability improvements",
+              "zh": "桌面端性能与稳定性改进"
+            },
+            "body": {
+              "en": "Various improvements to rendering, workspace, catalog, and WebView2 stability.",
+              "zh": "对渲染、工作区、目录和 WebView2 稳定性的各种改进。"
+            },
+            "refs": [
+              8827,
+              8841,
+              8832,
+              8856,
+              8806,
+              8814,
+              8812,
+              8808
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Memory approvals respect Auto and YOLO modes",
+              "zh": "记忆审批遵循 Auto 和 YOLO 模式"
+            },
+            "body": {
+              "en": "Memory tools no longer force approval prompts in Auto and YOLO modes.",
+              "zh": "记忆工具在 Auto 和 YOLO 模式下不再强制弹出审批提示。"
+            },
+            "refs": [
+              8788,
+              5049
+            ]
+          },
+          {
+            "title": {
+              "en": "complete_step terminal message on final todo",
+              "zh": "最后一个待办完成时返回终止消息"
+            },
+            "body": {
+              "en": "complete_step now returns a terminal message when the final todo is completed, preventing infinite loops.",
+              "zh": "complete_step 现在在最后一个待办完成时返回终止消息，防止无限循环。"
+            },
+            "refs": [
+              8872
+            ]
+          },
+          {
+            "title": {
+              "en": "Desktop session and UI fixes",
+              "zh": "桌面端会话与 UI 修复"
+            },
+            "body": {
+              "en": "Fixed session switching prompts, pinned chats after restart, project tree loops, transcript scrolling, and more.",
+              "zh": "修复了会话切换提示、重启后置顶会话、项目树循环、转录滚动等问题。"
+            },
+            "refs": [
+              8881,
+              8834,
+              8772,
+              8877,
+              8813,
+              8833,
+              8831,
+              8880,
+              8885
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "kaidiren",
+        "SivanCola",
+        "myipanta",
+        "cyq1017",
+        "glyahh",
+        "Chise1"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.25.2",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.25.1...desktop-v1.25.2",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.25.2",
+      "baseVersion": "1.25.2",
+      "status": "reviewed",
+      "previousRelease": "1.25.1",
+      "builds": {
+        "cli": "v1.25.2",
+        "desktop": "v1.25.2",
+        "npm": "1.25.2"
+      }
+    },
+    {
       "version": "1.25.1",
       "date": "2026-08-13",
       "channel": "stable",

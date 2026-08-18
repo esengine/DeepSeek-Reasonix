@@ -12,6 +12,7 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = !process.env.PLAYWRIGHT_BROWSERS_PATH || 
 const { chromium } = await import("playwright");
 const port = Number(process.env.REASONIX_TRANSCRIPT_BROWSER_PORT ?? 4618);
 const url = `http://127.0.0.1:${port}/?mock=bench&bench=1`;
+const bottomTimeout = Number(process.env.REASONIX_TRANSCRIPT_BOTTOM_TIMEOUT ?? 30_000);
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -102,7 +103,7 @@ async function findVisibleTurnTarget(page, turnPredicate) {
 
 async function waitForLogicalSelection(page, timeout = 8_000) {
   return page.waitForFunction(
-    () => document.querySelector(".transcript")?.dataset.scrollMode === "logical-selecting",
+    () => document.querySelector(".transcript")?.dataset.scrollMode === "selection",
     undefined,
     { timeout },
   ).then(() => true, () => false);
@@ -132,7 +133,10 @@ const preview = spawn("pnpm", ["exec", "vite", "preview", "--port", String(port)
 let browser;
 try {
   await waitForServer();
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({
+    headless: true,
+    ...(process.env.PLAYWRIGHT_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH } : {}),
+  });
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Performance.enable");
@@ -164,10 +168,31 @@ try {
   }
   const jumpBottom = page.locator(".transcript__jump-bottom");
   if (await jumpBottom.count()) await jumpBottom.click();
-  await page.waitForFunction(() => {
-    const transcript = document.querySelector(".transcript");
-    return transcript && transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight <= 1;
-  }, undefined, { timeout: 30_000 });
+  try {
+    await page.waitForFunction(() => {
+      const transcript = document.querySelector(".transcript");
+      return transcript && transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight <= 1;
+    }, undefined, { timeout: bottomTimeout });
+  } catch (error) {
+    const bottomState = await page.evaluate(() => {
+      const transcript = document.querySelector(".transcript");
+      if (!transcript) return null;
+      return {
+        distance: transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight,
+        scrollTop: transcript.scrollTop,
+        scrollHeight: transcript.scrollHeight,
+        clientHeight: transcript.clientHeight,
+        mode: transcript.dataset.scrollMode,
+        rows: transcript.querySelectorAll(".transcript__row").length,
+        padding: getComputedStyle(transcript).padding,
+        viewportRect: transcript.querySelector('[data-viewport-type="element"]')?.getBoundingClientRect().toJSON(),
+        listRect: transcript.querySelector(".transcript__virtual-sizer")?.getBoundingClientRect().toJSON(),
+        lastRowRect: [...transcript.querySelectorAll(".transcript__row")].at(-1)?.getBoundingClientRect().toJSON(),
+        transcriptRect: transcript.getBoundingClientRect().toJSON(),
+      };
+    });
+    throw new Error(`jump-bottom did not settle at the native tail (${JSON.stringify(bottomState)})`, { cause: error });
+  }
   // Tool-dense fixtures often land the native tail on non-selectable tool
   // rows. Wheel off the pinned tail until a mounted "bench turn N" row is
   // visible, then snapshot the virtual window for the later bound check.
@@ -177,8 +202,8 @@ try {
 
   await page.evaluate(() => {
     window.__transcriptProgrammaticWrites = [];
-    window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (owner, top) => {
-      window.__transcriptProgrammaticWrites.push({ owner, top });
+    window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (write) => {
+      window.__transcriptProgrammaticWrites.push(write);
     };
   });
 
@@ -188,7 +213,7 @@ try {
     mode: document.querySelector(".transcript")?.dataset.scrollMode,
     target: document.elementFromPoint(x, y)?.outerHTML.slice(0, 300),
   }), points.start);
-  assert(downState.mode === "native-selecting", `primary pointerdown transfers scroll ownership to native selection (${downState.mode}; ${downState.target})`);
+  assert(downState.mode === "selection", `primary pointerdown transfers scroll ownership to selection (${downState.mode}; ${downState.target})`);
   await page.mouse.move(points.activate.x, points.activate.y, { steps: 6 });
   await page.waitForTimeout(50);
   for (let index = 0; index < 8; index += 1) {
@@ -311,7 +336,7 @@ try {
     };
   }, logicalFocusPoint);
   assert(during.collapsed, `cross-row drag releases the browser Range after logical promotion (${JSON.stringify(during)})`);
-  assert(during.mode === "logical-selecting", `cross-page drag remains owned by logical selection (${during.mode})`);
+  assert(during.mode === "selection", `cross-page drag remains owned by selection (${during.mode})`);
   assert(during.rows <= Math.ceil(baselineRows * 1.1) + 2, `logical selection keeps the virtual DOM bounded (${baselineRows} → ${during.rows})`);
   assert(during.overlayRects > 0, `logical selection paints mounted-row overlay rectangles (${JSON.stringify(during)})`);
   if (during.writeOwners.some((owner) => owner !== "selection-edge-scroll")) {
@@ -399,8 +424,8 @@ try {
   await page.evaluate(() => {
     window.__transcriptProgrammaticWrites = [];
     window.__logicalClipboardText = null;
-    window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (owner, top) => {
-      window.__transcriptProgrammaticWrites.push({ owner, top });
+    window.__REASONIX_TRANSCRIPT_SCROLL_WRITE__ = (write) => {
+      window.__transcriptProgrammaticWrites.push(write);
     };
   });
   await page.mouse.move(forwardPoints.start.x, forwardPoints.start.y);
@@ -429,7 +454,7 @@ try {
     rows: document.querySelectorAll(".transcript__row").length,
     owners: [...new Set((window.__transcriptProgrammaticWrites ?? []).map((write) => write.owner))],
   }));
-  assert(forwardDuring.mode === "logical-selecting", "downward cross-page drag also promotes to logical selection");
+  assert(forwardDuring.mode === "selection", "downward cross-page drag also promotes to logical selection");
   assert(forwardDuring.rows <= Math.ceil(baselineRows * 1.1) + 2, "forward logical selection also keeps the virtual DOM bounded");
   assert(forwardDuring.owners.every((owner) => owner === "selection-edge-scroll"), "forward logical gesture preserves scroll ownership");
   await page.mouse.up();

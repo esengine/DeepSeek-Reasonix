@@ -135,7 +135,7 @@ func TestCoordinatorToolPlannerRetriesReasoningOnlyStopForVisiblePlan(t *testing
 		plannerTools, Options{}, executor, 0, event.Discard, nil,
 	)
 
-	if err := coord.Run(context.Background(), "fix the bug"); err != nil {
+	if err := coord.Run(withNoClosedLoop(context.Background()), "fix the bug"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if plannerScript.call != 3 {

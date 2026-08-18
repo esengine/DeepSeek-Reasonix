@@ -755,11 +755,11 @@ func TestBuildRequestDeepSeekThinkingModes(t *testing.T) {
 		{name: "Flash low", model: "deepseek-v4-flash", input: "low", want: "low"},
 		{name: "Flash legacy medium", model: "deepseek-v4-flash", input: "medium", want: "high"},
 		{name: "Flash legacy xhigh", model: "deepseek-v4-flash", input: "xhigh", want: "high"},
-		{name: "Pro low", model: "deepseek-v4-pro", input: "low", want: "high"},
+		{name: "Pro low", model: "deepseek-v4-pro", input: "low", want: "low"},
 		{name: "Pro legacy medium", model: "deepseek-v4-pro", input: "medium", want: "high"},
-		{name: "Pro legacy xhigh", model: "deepseek-v4-pro", input: "xhigh", want: "max"},
+		{name: "Pro legacy xhigh", model: "deepseek-v4-pro", input: "xhigh", want: "high"},
 		{name: "Sonnet alias uses Flash", model: "claude-sonnet-4-6", input: "low", want: "low"},
-		{name: "Opus alias uses Pro", model: "claude-opus-4-8", input: "xhigh", want: "max"},
+		{name: "Opus alias legacy xhigh", model: "claude-opus-4-8", input: "xhigh", want: "high"},
 		{name: "unknown model falls back to Flash", model: "unknown-model", input: "xhigh", want: "high"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

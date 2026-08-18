@@ -82,7 +82,7 @@ type runMetrics struct {
 	ParentNamedFiles     int `json:"parent_named_files,omitempty"`
 	ChildEvidencePaths   int `json:"child_evidence_paths,omitempty"`
 	ChildDiscoveredPaths int `json:"child_discovered_paths,omitempty"`
-	// Optional Delivery capability counters (omitempty for baseline/old metrics).
+	// Optional capability counters (omitempty for older metrics).
 	ReadinessChecks            int     `json:"readiness_checks,omitempty"`
 	ReadinessRecoveries        int     `json:"readiness_recoveries,omitempty"`
 	CapabilityRoutes           int     `json:"capability_routes,omitempty"`
@@ -118,6 +118,8 @@ type sourceUsage struct {
 type result struct {
 	task
 	runMetrics
+	// Profile is retained for readers of older benchmark JSON. New runs always
+	// record "standard" because execution mode is no longer an experiment axis.
 	Profile string `json:"profile"`
 	// Arm is the ablation arm the harness requested, not the arm the child
 	// reported, so a run that died before writing metrics is still attributable.
@@ -233,8 +235,6 @@ func main() {
 		fmt.Fprintf(flag.CommandLine.Output(), "  %[1]s\n\n", strings.Replace(flag.CommandLine.Name(), "e2ebench", "go run ./cmd/e2ebench", 1))
 		fmt.Fprintf(flag.CommandLine.Output(), "  # Grade a PR's diff with a retry budget:\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  %[1]s -mode diff -base origin/main-v2 -repo . -attempts 3 -timeout 1800\n", strings.Replace(flag.CommandLine.Name(), "e2ebench", "go run ./cmd/e2ebench", 1))
-		fmt.Fprintf(flag.CommandLine.Output(), "\n  # Run the same suite with the delivery contract:\n")
-		fmt.Fprintf(flag.CommandLine.Output(), "  %[1]s -profile delivery\n", strings.Replace(flag.CommandLine.Name(), "e2ebench", "go run ./cmd/e2ebench", 1))
 	}
 
 	mode := flag.String("mode", "suite", "suite | diff | swebench | compare | traj | serve | fork")
@@ -262,7 +262,6 @@ func main() {
 	forkReps := flag.Int("reps", 1, "fork mode: continuation repetitions per bundle per arm")
 	bin := flag.String("bin", "reasonix", "path to the reasonix binary")
 	model := flag.String("model", "", "provider/model name (default: config default)")
-	profileFlag := flag.String("profile", benchmarkProfileBaseline, "prompt profile: baseline | delivery")
 	ablateFlag := flag.String("ablate", "", "ablation arm: subsystems to switch off (evidence, planner, subagent, retrieval, compaction; none|all)")
 	outMD := flag.String("out", "", "write the markdown report here (default: stdout)")
 	trajDir := flag.String("trajectories", "", "suite mode: write one <task-id>.trajectory.jsonl per task into this directory")
@@ -278,12 +277,12 @@ func main() {
 	timeoutSec := flag.Int("timeout", 1200, "agent timeout in seconds (diff mode)")
 	attempts := flag.Int("attempts", 1, "suite/diff modes: retry a task up to N times until an attempt passes (stochastic agent); enables Pass@≤N")
 	flag.Parse()
-	axes, err := resolveExperimentAxes(*profileFlag, *ablateFlag, *cacheArm, *anchorFlag)
+	axes, err := resolveExperimentAxes(*ablateFlag, *cacheArm, *anchorFlag)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	profile, arm, cache, anchor := axes.profile, axes.arm, axes.cache, axes.anchor
+	arm, cache, anchor := axes.arm, axes.cache, axes.anchor
 
 	if *mode == "swebench" {
 		if _, err := permissionFlag(*permission); err != nil {
@@ -293,7 +292,7 @@ func main() {
 		cwd, _ := os.Getwd()
 		report := runSwebench(swebenchOpts{
 			bin: *bin, subset: *subset, namespace: *namespace, model: *model,
-			profile: profile, permission: *permission, arm: arm, runID: *runID, workDir: cwd,
+			permission: *permission, arm: arm, runID: *runID, workDir: cwd,
 			harness: *harnessPy, dataset: *dataset, maxSteps: *maxSteps,
 			timeoutSec: *timeoutSec, workers: *workers, keepImages: *keepImages,
 			network: *network, proxyURL: *proxyURL,
@@ -319,7 +318,7 @@ func main() {
 		}
 		return
 	case "fork":
-		cfg := suiteConfig{bin: *bin, model: *model, profile: profile, arm: arm,
+		cfg := suiteConfig{bin: *bin, model: *model, arm: arm,
 			cacheArm: cache, effort: *effort, policy: *policyFlag}
 		if err := runForkMode(*bundles, *suite, *forkArms, *forkReps, cfg, *trajDir, *outMD, *outJSON); err != nil {
 			fmt.Fprintln(os.Stderr, "fork mode:", err)
@@ -331,7 +330,7 @@ func main() {
 	if *mode == "diff" {
 		report := runDiff(diffOpts{
 			bin: *bin, model: *model, repo: *repo, base: *base,
-			testCmd: *testCmd, profile: profile, ablate: arm, maxSteps: *maxSteps, timeoutSec: *timeoutSec, attempts: *attempts,
+			testCmd: *testCmd, ablate: arm, maxSteps: *maxSteps, timeoutSec: *timeoutSec, attempts: *attempts,
 		})
 		emit(report, *outMD, "")
 		return
@@ -339,7 +338,7 @@ func main() {
 
 	meterSource, faults, segments, steers := pressure.settings()
 	runSuiteMode(suiteConfig{
-		bin: *bin, model: *model, profile: profile, arm: arm, budget: *budget,
+		bin: *bin, model: *model, arm: arm, budget: *budget,
 		trajDir: *trajDir, forcePlanner: *forcePlanner, attempts: *attempts, anchor: anchor,
 		cacheArm: cache, effort: *effort, checkpoints: *checkpoints, policy: *policyFlag,
 		forkCapture: *forkCapture, meterConfig: meterSource, meterFaults: faults, segments: segments, steers: steers,
@@ -470,15 +469,15 @@ func filterTasks(tasks []task, filter string) ([]task, error) {
 }
 
 // suiteConfig carries one suite invocation's fixed experiment axes: binary,
-// model, tool-surface profile, ablation arm, cache arm, and reasoning effort.
+// model, ablation arm, cache arm, and reasoning effort.
 type suiteConfig struct {
-	bin, model, profile, cacheArm, effort string
-	arm                                   ablation.Set
-	anchor                                string
-	policy, forkCapture                   string
-	trajDir                               string
-	forcePlanner, checkpoints             bool
-	attempts, budget                      int
+	bin, model, cacheArm, effort string
+	arm                          ablation.Set
+	anchor                       string
+	policy, forkCapture          string
+	trajDir                      string
+	forcePlanner, checkpoints    bool
+	attempts, budget             int
 	// meterConfig is the real config.toml whose provider endpoint each run is
 	// redirected through the neutral meter; empty leaves runs unmetered.
 	meterConfig string
@@ -499,7 +498,7 @@ func runSuite(cfg suiteConfig, tasks []task) []result {
 	total := 0
 	for _, t := range tasks {
 		if cfg.budget > 0 && total >= cfg.budget {
-			results = append(results, result{task: t, Profile: cfg.profile, Skipped: true, Note: "skipped: token budget reached"})
+			results = append(results, result{task: t, Profile: benchmarkProfileStandard, Skipped: true, Note: "skipped: token budget reached"})
 			continue
 		}
 		if skipped, ok := anchorSkip(cfg, t); ok {
@@ -528,7 +527,7 @@ func runSuite(cfg suiteConfig, tasks []task) []result {
 // then drops in verify.sh and runs it as the grader. The grader is added only
 // after the run so the agent can't read the answer key.
 func runTask(cfg suiteConfig, t task) result {
-	r := result{task: t, Profile: cfg.profile, CacheArm: cfg.cacheArm, Effort: cfg.effort}
+	r := result{task: t, Profile: benchmarkProfileStandard, CacheArm: cfg.cacheArm, Effort: cfg.effort}
 	r.Arm = cfg.arm.Arm()
 	r.Anchor = cfg.anchor
 	t.Prompt = anchorPrompt(cfg.anchor, t)
@@ -652,7 +651,6 @@ func buildRunTaskArgs(cfg suiteConfig, metricsPath, trajectoryPath string, maxSt
 	if maxSteps > 0 {
 		args = append(args, "--max-steps", fmt.Sprint(maxSteps))
 	}
-	args = appendBenchmarkProfileArgs(args, cfg.profile)
 	if cfg.effort != "" {
 		args = append(args, "--effort", cfg.effort)
 	}
@@ -679,7 +677,7 @@ func buildSegmentArgs(cfg suiteConfig, seg segment, metricsPath, trajectoryPath 
 // warmPrefix primes the provider prefix cache for work's session shape with a
 // minimal one-step run before the graded run starts its clock. Its cost is
 // deliberately untracked: the warm arm measures a long-lived session's steady
-// state, not the price of reaching it. Prefix-shaping flags (model, profile,
+// state, not the price of reaching it. Prefix-shaping flags (model, effort,
 // ablation, cwd) must match the graded invocation exactly.
 func warmPrefix(cfg suiteConfig, work string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
@@ -688,7 +686,6 @@ func warmPrefix(cfg suiteConfig, work string) {
 	if cfg.model != "" {
 		args = append(args, "--model", cfg.model)
 	}
-	args = appendBenchmarkProfileArgs(args, cfg.profile)
 	if cfg.effort != "" {
 		args = append(args, "--effort", cfg.effort)
 	}

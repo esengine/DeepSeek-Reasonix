@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -10,17 +12,41 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
 	"reasonix/internal/provider"
-	"reasonix/internal/taskpolicy"
+	"reasonix/internal/runtimepolicy"
+	"reasonix/internal/taskcontract"
 	"reasonix/internal/tool"
 )
+
+func setTurnConstraints(a *Agent, raw string) {
+	c := runtimepolicy.ParseConstraints(runtimepolicy.StripQuotedConstraints(raw))
+	a.turn.constraints = c
+	a.turn.engine = runtimepolicy.NewEngine(c)
+}
+
+func TestRebuildTurnContractEnforcesExplicitFullVerification(t *testing.T) {
+	a := New(nil, tool.NewRegistry(), NewSession(""), Options{}, event.Discard)
+	a.resetTurnEvidence()
+	setTurnConstraints(a, "请闭环交付")
+	a.task.ledger.Record(evidence.Receipt{
+		ToolName: "edit_file", Success: true, Write: true, Mutation: true,
+		Args: json.RawMessage(`{"path":"README.md"}`), Paths: []string{"README.md"},
+	})
+	a.rebuildTurnContract()
+	for _, obligation := range a.turn.engine.Snapshot().Unsatisfied() {
+		if obligation.Kind == taskcontract.ObligationFullVerify && obligation.Enforcement == taskcontract.EnforcementStrict {
+			return
+		}
+	}
+	t.Fatalf("Agent rebuild dropped explicit full verification: %+v", a.turn.engine.Snapshot().Obligations)
+}
 
 func TestTaskPolicyUsesStructuredCommandEffects(t *testing.T) {
 	var calls int32
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "bash", readOnly: false, calls: &calls})
 	a := New(&scriptedProvider{name: "p"}, reg, NewSession("sys"), Options{}, event.Discard)
-	a.turn.policy = taskpolicy.TaskPolicy{Constraints: taskpolicy.Constraints{ForbidMutation: true}}
-	a.turn.policySet = true
+	a.turn.constraints = runtimepolicy.Constraints{ForbidMutation: true}
+	a.turn.engine = runtimepolicy.NewEngine(a.turn.constraints)
 
 	listing := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "bash", Arguments: `{"command":"git branch -a"}`})
 	if listing.blocked || listing.errMsg != "" {
@@ -48,8 +74,8 @@ func TestTaskPolicyUsesStructuredCommandEffects(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "bash", Arguments: string(args)})
-			if !got.blocked || !strings.Contains(got.errMsg, tt.wantDomain) {
-				t.Fatalf("command %q outcome = %+v, want %q mutation block", tt.command, got, tt.wantDomain)
+			if !got.blocked || !strings.Contains(got.output, "forbid") {
+				t.Fatalf("command %q outcome = %+v, want mutation block", tt.command, got)
 			}
 			if strings.Contains(got.errMsg, tt.secret) && tt.secret != "--edit" {
 				t.Fatalf("policy error leaked command operand %q: %q", tt.secret, got.errMsg)
@@ -62,32 +88,51 @@ func TestTaskPolicyUsesStructuredCommandEffects(t *testing.T) {
 }
 
 func TestTaskPolicyEnforcesVerificationAllowlist(t *testing.T) {
+	var calls int32
 	reg := tool.NewRegistry()
-	reg.Add(fakeTool{name: "bash", readOnly: true})
+	reg.Add(fakeTool{name: "bash", readOnly: true, calls: &calls})
 	a := New(&scriptedProvider{name: "p"}, reg, NewSession("sys"), Options{}, event.Discard)
-	a.turn.policy = taskpolicy.Derive(taskpolicy.Input{Raw: "fix it; only run go test ./internal/parser"})
-	a.turn.policySet = true
+	setTurnConstraints(a, "fix it; only run go test ./internal/parser")
+	a.turn.deliveryCriteriaEstablished = true
 
-	blocked := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "bash", Arguments: `{"command":"npm test"}`})
-	if !blocked.blocked || !strings.Contains(blocked.errMsg, "allowlist") {
-		t.Fatalf("npm test outcome = %+v, want allowlist block", blocked)
+	for _, command := range []string{"npm test", "go vet ./...", "golangci-lint run", "npm run typecheck"} {
+		blocked := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
+			Name: "bash", Arguments: `{"command":` + strconv.Quote(command) + `}`,
+		})
+		if !blocked.blocked || !strings.Contains(blocked.errMsg, "allowlist") {
+			t.Fatalf("%s outcome = %+v, want allowlist block", command, blocked)
+		}
+	}
+	if got := atomic.LoadInt32(&calls); got != 0 {
+		t.Fatalf("disallowed verification commands executed %d times, want 0", got)
 	}
 	allowed := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "bash", Arguments: `{"command":"go test ./internal/parser"}`})
 	if allowed.blocked || allowed.errMsg != "" {
 		t.Fatalf("allowed go test outcome = %+v", allowed)
 	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("allowed verification command executed %d times, want 1", got)
+	}
 }
 
-func TestTaskPolicyBlocksDisallowedExploreSubagent(t *testing.T) {
+func TestTaskPolicyForbidTestsBlocksEveryVerifier(t *testing.T) {
+	var calls int32
 	reg := tool.NewRegistry()
-	reg.Add(fakeTool{name: "explore", readOnly: true})
+	reg.Add(fakeTool{name: "bash", readOnly: true, calls: &calls})
 	a := New(&scriptedProvider{name: "p"}, reg, NewSession("sys"), Options{}, event.Discard)
-	a.turn.policy = taskpolicy.TaskPolicy{AllowExploreSubagent: false}
-	a.turn.policySet = true
+	setTurnConstraints(a, "fix it; don't run tests")
+	a.turn.deliveryCriteriaEstablished = true
 
-	got := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "explore", Arguments: `{}`})
-	if !got.blocked || !strings.Contains(got.errMsg, "exploration sub-agent") {
-		t.Fatalf("explore outcome = %+v, want task-policy block", got)
+	for _, command := range []string{"go test ./...", "go vet ./...", "golangci-lint run", "npm run typecheck"} {
+		got := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
+			Name: "bash", Arguments: `{"command":` + strconv.Quote(command) + `}`,
+		})
+		if !got.blocked || !strings.Contains(got.output, "forbid") {
+			t.Fatalf("%s outcome = %+v, want user-constraint block", command, got)
+		}
+	}
+	if got := atomic.LoadInt32(&calls); got != 0 {
+		t.Fatalf("forbidden verification commands executed %d times, want 0", got)
 	}
 }
 
@@ -95,8 +140,9 @@ func TestTaskPolicyBlocksExternalActionCommandVariants(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "bash", readOnly: false})
 	a := New(&scriptedProvider{name: "p"}, reg, NewSession("sys"), Options{}, event.Discard)
-	a.turn.policy = taskpolicy.Derive(taskpolicy.Input{Raw: "fix it, but don't push"})
-	a.turn.policySet = true
+	setTurnConstraints(a, "fix it, but don't push")
+	a.turn.deliveryCriteriaEstablished = true
+	a.setTodoState([]evidence.TodoItem{{Content: "fix it", Status: "in_progress"}})
 
 	for _, command := range []string{
 		"git -C ../repo push origin HEAD",
@@ -108,7 +154,7 @@ func TestTaskPolicyBlocksExternalActionCommandVariants(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "bash", Arguments: string(args)})
-		if !got.blocked || !strings.Contains(got.errMsg, "external action") {
+		if !got.blocked || !(strings.Contains(got.output, "external") || strings.Contains(got.output, "push") || strings.Contains(got.output, "publish") || strings.Contains(got.output, "deploy")) {
 			t.Fatalf("command %q outcome = %+v, want task-policy block", command, got)
 		}
 	}
@@ -123,38 +169,121 @@ func TestTaskPolicyBlocksResolvedExternalCapability(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(proxy)
 	a := New(nil, reg, NewSession("sys"), Options{}, event.Discard)
-	a.turn.policy = taskpolicy.Derive(taskpolicy.Input{Raw: "prepare the release, but don't deploy"})
-	a.turn.policySet = true
+	setTurnConstraints(a, "prepare the release, but don't deploy")
 
 	got := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
 		ID: "deploy-1", Name: "use_capability", Arguments: `{"action":"call","capability_id":"mcp-tool:vercel/deploy_project"}`,
 	})
-	if !got.blocked || !strings.Contains(got.errMsg, "external action") {
-		t.Fatalf("resolved deploy outcome = %+v, want task-policy block", got)
+	if !got.blocked || !strings.Contains(got.output, "deploy") {
+		t.Fatalf("resolved deploy outcome = %+v, want deploy block", got)
 	}
 	if calls != 0 {
 		t.Fatalf("resolved deploy Execute calls = %d, want 0", calls)
 	}
 }
 
-func TestTaskPolicyRequiresPostMutationVerification(t *testing.T) {
+func TestTaskPolicyReportsPostMutationVerificationGapWithoutBlockingTargetedTurn(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "bash", readOnly: true})
-	writer := evidence.Receipt{ToolName: "write_file", Success: true, Write: true, Mutation: true}
+	writer := evidence.Receipt{ToolName: "write_file", Success: true, Write: true, Mutation: true, Paths: []string{"notes.txt"}}
 	check := evidence.Receipt{ToolName: "bash", Success: true, Command: "go test ./..."}
 	a := &Agent{
 		task: taskRuntime{ledger: readinessLedger(check, writer)},
 		svc:  agentServices{tools: reg},
-		turn: turnRuntime{
-			policy:    taskpolicy.TaskPolicy{Verification: taskpolicy.VerifyTargeted},
-			policySet: true,
-		},
+		turn: turnRuntime{engine: runtimepolicy.NewEngine(runtimepolicy.Constraints{})},
 	}
-	if got := a.finalReadinessCheckFor(); !strings.Contains(got.reason, "verification command") {
-		t.Fatalf("readiness = %+v, want post-mutation verification", got)
+	if got := a.finalReadinessCheckFor(); got.reason != "" {
+		t.Fatalf("targeted readiness = %+v, want quality gap to remain non-blocking", got)
 	}
 	a.task.ledger.Record(check)
 	if got := a.finalReadinessCheckFor(); got.reason != "" {
 		t.Fatalf("readiness after verification = %+v, want ready", got)
+	}
+}
+
+func TestPolicyEscalatesBeforeFirstSensitiveMutation(t *testing.T) {
+	var calls int32
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "edit_file", readOnly: false, calls: &calls})
+	permission := &stubGate{deny: map[string]bool{}}
+	a := New(nil, reg, NewSession("sys"), Options{Gate: permission}, event.Discard)
+	setTurnConstraints(a, "fix the typo in README.md")
+
+	got := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
+		Name:      "edit_file",
+		Arguments: `{"path":"internal/auth/session.go","old_string":"old","new_string":"new"}`,
+	})
+	if !got.blocked || !strings.Contains(got.errMsg, "acceptance criteria") {
+		t.Fatalf("sensitive first mutation outcome = %+v, want pre-execution criteria block", got)
+	}
+	if got := atomic.LoadInt32(&calls); got != 0 {
+		t.Fatalf("sensitive writer executed %d times before escalation, want 0", got)
+	}
+	if len(permission.checked) != 0 {
+		t.Fatalf("permission was requested for a deterministically blocked call: %v", permission.checked)
+	}
+	a.turn.deliveryCriteriaEstablished = true
+	a.setTodoState([]evidence.TodoItem{{Content: "update session handling", Status: "in_progress"}})
+	got = a.executeOne(context.Background(), &a.turn, provider.ToolCall{
+		Name:      "edit_file",
+		Arguments: `{"path":"internal/auth/session.go","old_string":"old","new_string":"new"}`,
+	})
+	if got.blocked || got.errMsg != "" {
+		t.Fatalf("sensitive mutation with host contract = %+v, want execution", got)
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("sensitive writer executed %d times after contract, want 1", got)
+	}
+	if len(permission.checked) != 1 {
+		t.Fatalf("permission checks = %v, want exactly one for executable call", permission.checked)
+	}
+}
+
+func TestPolicyEscalatesDeepAbsoluteSensitiveMutationBeforeExecution(t *testing.T) {
+	var calls int32
+	root := t.TempDir()
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "edit_file", readOnly: false, calls: &calls})
+	permission := &stubGate{deny: map[string]bool{}}
+	a := New(nil, reg, NewSession("sys"), Options{Gate: permission, WriteWorkspaceRoot: root}, event.Discard)
+	setTurnConstraints(a, "fix this file")
+	args, err := json.Marshal(map[string]string{
+		"path":       filepath.Join(root, "internal", "provider", "openai", "responses", "client.go"),
+		"old_string": "old",
+		"new_string": "new",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := a.executeOne(context.Background(), &a.turn, provider.ToolCall{Name: "edit_file", Arguments: string(args)})
+	if got.blocked {
+		t.Fatalf("ordinary production file must not be pre-classified as schema/auth: %+v", got)
+	}
+}
+
+func TestPlannedLowRiskMutationKeepsOrdinaryPath(t *testing.T) {
+	var calls int32
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "edit_file", readOnly: false, calls: &calls})
+	permission := &stubGate{deny: map[string]bool{}}
+	a := New(nil, reg, NewSession("sys"), Options{Gate: permission}, event.Discard)
+	setTurnConstraints(a, "fix the typo in README.md")
+
+	got := a.executeOne(context.Background(), &a.turn, provider.ToolCall{
+		Name:      "edit_file",
+		Arguments: `{"path":"README.md","old_string":"teh","new_string":"the"}`,
+	})
+	if got.blocked || got.errMsg != "" {
+		t.Fatalf("low-risk mutation outcome = %+v, want ordinary execution", got)
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("low-risk writer calls = %d, want 1", got)
+	}
+	if len(permission.checked) != 1 {
+		t.Fatalf("permission checks = %v, want one ordinary check", permission.checked)
+	}
+	if a.closedLoopActive() {
+		t.Fatal("README typo must not create a closed-loop contract")
 	}
 }

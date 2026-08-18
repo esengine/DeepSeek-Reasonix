@@ -1,9 +1,12 @@
 // Run: tsx src/__tests__/hydrate-history-apply.test.ts
 
 import {
+  activeTabHydrationPlan,
+  canAdoptUnboundLiveSurface,
   duplicateLiveItemIds,
   hasCachedLiveTurn,
   hydratedHistoryApplyMode,
+  sameSessionHydrateIdentity,
   sameSessionPlaceholderItems,
   shouldPreferResidentHistory,
 } from "../lib/hydrateHistoryApply";
@@ -68,12 +71,82 @@ ok(
   "a live tail the page does not carry is kept",
 );
 ok(
-  sameSessionPlaceholderItems("a.jsonl", { meta: { sessionPath: "b.jsonl" }, items: [{ kind: "user" }] }) === undefined,
+  sameSessionPlaceholderItems({ sessionPath: "a.jsonl" }, { meta: { sessionPath: "b.jsonl" }, items: [{ kind: "user" }] }) === undefined,
   "foreign session items are not placeholders",
 );
 ok(
-  (sameSessionPlaceholderItems("a.jsonl", { meta: { sessionPath: "a.jsonl" }, items: [{ kind: "user" }] }) ?? []).length === 1,
+  (sameSessionPlaceholderItems({ sessionPath: "a.jsonl" }, { meta: { sessionPath: "a.jsonl" }, items: [{ kind: "user" }] }) ?? []).length === 1,
   "same-session items stay placeholders",
+);
+ok(
+  sameSessionHydrateIdentity(
+    { sessionPath: "a.jsonl", sessionGeneration: 3 },
+    { sessionPath: "a.jsonl", sessionGeneration: 3 },
+  ),
+  "same path and generation prove the same session",
+);
+ok(
+  !sameSessionHydrateIdentity(
+    { sessionPath: "a.jsonl", sessionGeneration: 4 },
+    { sessionPath: "a.jsonl", sessionGeneration: 3 },
+  ),
+  "different generations reject placeholders even when paths match",
+);
+ok(
+  !sameSessionHydrateIdentity({ sessionPath: "" }, { sessionPath: "" }),
+  "empty identities cannot prove the same session",
+);
+const sameSessionPlan = activeTabHydrationPlan(
+  { sessionPath: "a.jsonl", sessionGeneration: 3, sessionRevision: 8, sessionDigest: "rev-8" },
+  { sessionPath: "a.jsonl", sessionGeneration: 3 },
+  false,
+);
+ok(sameSessionPlan.surfacePolicy === "preserve-current", "backend sync preserves a proven same-session surface");
+ok(sameSessionPlan.loadOptions.preserveCachedHistory, "same-session backend sync may reuse its resident history");
+const reboundPlan = activeTabHydrationPlan(
+  { sessionPath: "a.jsonl", sessionGeneration: 4, sessionRevision: 9, sessionDigest: "rev-9" },
+  { sessionPath: "a.jsonl", sessionGeneration: 3 },
+  false,
+);
+ok(reboundPlan.surfacePolicy === "replace-surface", "backend sync replaces a generation-rebound surface");
+ok(reboundPlan.loadOptions.sessionGeneration === 4, "replace-surface hydration carries the target generation fence");
+ok(
+  canAdoptUnboundLiveSurface(
+    { sessionPath: "a.jsonl", sessionGeneration: 3 },
+    undefined,
+    { running: true, live: { text: "partial" }, items: [{ kind: "assistant", streaming: true }] },
+    true,
+  ),
+  "an unbound live runtime tail can be adopted before its first metadata snapshot",
+);
+ok(
+  !canAdoptUnboundLiveSurface(
+    { sessionPath: "a.jsonl" },
+    { sessionPath: "b.jsonl" },
+    { running: true, live: { text: "stale" }, items: [{ kind: "assistant", streaming: true }] },
+    true,
+  ),
+  "a differently identified surface cannot be adopted as a live tail",
+);
+ok(
+  !canAdoptUnboundLiveSurface(
+    { sessionPath: "a.jsonl" },
+    undefined,
+    { running: true, historyTotalTurns: 1, hydrateHistoryLoaded: true, items: [{ kind: "assistant", streaming: true }] },
+    true,
+  ),
+  "a surface with persisted history is never adopted without session identity",
+);
+ok(
+  !canAdoptUnboundLiveSurface(
+    { sessionPath: "a.jsonl" },
+    undefined,
+    { running: true, live: { text: "stale epoch" }, items: [{ kind: "assistant", streaming: true }] },
+    true,
+    "runtime-new",
+    "runtime-old",
+  ),
+  "a mismatched runtime epoch rejects an unbound live tail",
 );
 
 ok(

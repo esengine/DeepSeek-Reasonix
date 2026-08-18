@@ -8,7 +8,6 @@ import (
 	"reasonix/internal/capability"
 	"reasonix/internal/config"
 	"reasonix/internal/plugin"
-	"reasonix/internal/taskpolicy"
 )
 
 func (c *Controller) withCapabilityRoute(ctx context.Context, composed, routeInput string) string {
@@ -48,18 +47,8 @@ func (c *Controller) routeCapabilities(ctx context.Context, routeInput string) c
 		ctx = context.Background()
 	}
 	tools := c.ToolContractEntries()
-	profile := capability.ProfileBalanced
-	switch c.AgentPreset() {
-	case "light":
-		profile = capability.ProfileEconomy
-	case "delivery":
-		profile = capability.ProfileDelivery
-	}
-	delivery := profile == capability.ProfileDelivery
-	semanticAllowed := delivery
-	if policy, ok := taskpolicy.FromContext(ctx); ok {
-		semanticAllowed = policy.SemanticRouterAllowed
-	}
+	// Deterministic routing is first. The semantic router runs only when that
+	// catalog match is itself ambiguous — never as a per-turn classification.
 	var proxyTools map[string][]plugin.CachedTool
 	if c.proxyToolsFn != nil {
 		proxyTools = c.proxyToolsFn()
@@ -76,9 +65,8 @@ func (c *Controller) routeCapabilities(ctx context.Context, routeInput string) c
 		}
 	}
 	opts := capability.CatalogOptions{
-		Tools:   tools,
-		Skills:  c.Skills(),
-		Profile: profile,
+		Tools:  tools,
+		Skills: c.Skills(),
 	}
 	if c.capabilityRuntime != nil {
 		opts.Plugins, opts.CachedTools, opts.CacheKeyOK, opts.Disabled, proxyTools = c.capabilityRuntime.CapabilityCatalogState()
@@ -102,38 +90,27 @@ func (c *Controller) routeCapabilities(ctx context.Context, routeInput string) c
 		}
 	}
 	catalog := capability.BuildCatalog(opts)
-	var decision capability.RouteDecision
-	if delivery {
-		decision = capability.RouteDelivery(routeInput, catalog.Entries)
-	} else {
-		decision = capability.Route(routeInput, catalog.Entries)
-	}
+	decision := capability.Route(routeInput, catalog.Entries)
 	if c.capabilityProxy {
 		decision.CapabilityProxy = true
 	}
 
-	// The frozen TaskPolicy decides whether ambiguity warrants the semantic
-	// router; deterministic routing remains first for every role setting.
-	if semanticAllowed && c.semanticRouter != nil {
-		before := len(decision.Candidates)
-		strong := false
-		for _, cand := range decision.Candidates {
-			if cand.Policy == capability.AutoUseRequire || cand.Policy == capability.AutoUsePrefer {
-				strong = true
-				break
-			}
+	strong := false
+	for _, cand := range decision.Candidates {
+		if cand.Policy == capability.AutoUseRequire || cand.Policy == capability.AutoUsePrefer {
+			strong = true
+			break
 		}
-		if !strong {
-			decision = c.semanticRouter.RouteSemantic(ctx, routeInput, catalog, decision)
-			if c.capabilityProxy {
-				decision.CapabilityProxy = true
-			}
-			if c.capabilityAudit != nil {
-				fallback := len(decision.Candidates) == before
-				c.capabilityAudit.RecordRoute(true, fallback)
-			}
-		} else if c.capabilityAudit != nil {
-			c.capabilityAudit.RecordRoute(false, false)
+	}
+	ambiguous := !strong && len(decision.Candidates) > 1
+	if ambiguous && c.semanticRouter != nil {
+		before := len(decision.Candidates)
+		decision = c.semanticRouter.RouteSemantic(ctx, routeInput, catalog, decision)
+		if c.capabilityProxy {
+			decision.CapabilityProxy = true
+		}
+		if c.capabilityAudit != nil {
+			c.capabilityAudit.RecordRoute(true, len(decision.Candidates) == before)
 		}
 	} else if c.capabilityAudit != nil {
 		c.capabilityAudit.RecordRoute(false, false)
@@ -159,8 +136,8 @@ func (c *Controller) WireCapabilityRouting(plugins []config.PluginEntry, specs [
 }
 
 // SetCapabilityProxyRouting directs unready MCP route candidates to
-// use_capability instead of connect_tool_source. Used by Delivery and by
-// Balanced dual-model Planner boots.
+// use_capability instead of connect_tool_source. Used by closed-loop routes and
+// dual-model Planner boots.
 func (c *Controller) SetCapabilityProxyRouting(v bool) {
 	if c == nil {
 		return

@@ -99,9 +99,13 @@ func TestE2ESerialPlanHostAdvancesAndAllowsFinalAnswer(t *testing.T) {
 	sink := &recordSink{}
 	a := New(mp, evidenceRegistry(), NewSession("sys"), Options{}, sink)
 
-	runErr := a.Run(context.Background(), "implement the plan")
+	runErr := a.Run(withNoClosedLoop(context.Background()), "implement the plan")
 	if runErr != nil {
 		t.Fatalf("final answer blocked despite host-advanced completions: %v", runErr)
+	}
+	finalSignoff := lastToolResult(a.Session(), "complete_step")
+	if !strings.Contains(finalSignoff, "All steps completed") || strings.Contains(finalSignoff, "continue with the next step") {
+		t.Fatalf("final complete_step result = %q, want terminal message without continuation", finalSignoff)
 	}
 	for i, td := range a.sess.todoState {
 		if canonicalTodoStatus(td.Status) != "completed" {
@@ -127,7 +131,7 @@ func TestE2ECommandDriftAcceptedInTurn(t *testing.T) {
 		testutil.Turn{Text: "synced"},
 	)
 	a := New(mp, evidenceRegistry(), NewSession("sys"), Options{}, event.Discard)
-	if err := a.Run(context.Background(), "sync the branch"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "sync the branch"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if !sessionContains(a, "signed off") {
@@ -152,6 +156,8 @@ func TestE2ECrossTurnCanonicalGateBlocksThenClears(t *testing.T) {
 	mp := testutil.NewMock("m",
 		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "w1", Name: "write_file", Arguments: `{"path":"alpha.go"}`}}},
 		testutil.Turn{Text: "all done"},
+		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "v1", Name: "bash", Arguments: `{"command":"go test ./..."}`}}},
+		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "r1", Name: "bash", Arguments: `{"command":"git diff alpha.go"}`}}},
 		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c1", Name: "complete_step",
 			Arguments: `{"step":"alpha","result":"done","evidence":[{"kind":"diff","summary":"edited","paths":["alpha.go"]}]}`}}},
 		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c2", Name: "complete_step",
@@ -161,11 +167,11 @@ func TestE2ECrossTurnCanonicalGateBlocksThenClears(t *testing.T) {
 	a := New(mp, evidenceRegistry(), sess, Options{}, event.Discard)
 	a.SetSession(sess) // rebuilds canonical {alpha in_progress, beta pending}
 
-	firstErr := a.Run(context.Background(), "finish up")
+	firstErr := a.Run(withClosedLoopContext(context.Background()), "finish up")
 	if !readinessBlocked(firstErr) {
 		t.Fatalf("premature 'all done' error = %v, want FinalReadinessError from the cross-turn canonical gate", firstErr)
 	}
-	if err := a.Run(context.Background(), "finish up"); err != nil {
+	if err := a.Run(withClosedLoopContext(context.Background()), "finish up"); err != nil {
 		t.Fatalf("follow-up Run: %v", err)
 	}
 	for i, td := range a.sess.todoState {
@@ -194,7 +200,7 @@ func TestE2ECrossTurnPendingSignoffIsRejectedUntilCurrentAdvances(t *testing.T) 
 	a := New(mp, evidenceRegistry(), sess, Options{}, event.Discard)
 	a.SetSession(sess)
 
-	if err := a.Run(context.Background(), "continue"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "continue"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if !sessionContains(a, "only signs the current in_progress item") {
@@ -220,10 +226,10 @@ func TestE2ECrossTurnDiffEvidenceViaSessionFallback(t *testing.T) {
 	)
 	a := New(mp, evidenceRegistry(), NewSession("sys"), Options{}, event.Discard)
 
-	if err := a.Run(context.Background(), "edit x.go without tests"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "edit x.go without tests"); err != nil {
 		t.Fatalf("turn 1: %v", err)
 	}
-	if err := a.Run(context.Background(), "now sign off that change"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "now sign off that change"); err != nil {
 		t.Fatalf("turn 2: %v", err)
 	}
 	if !sessionContains(a, "signed off") {
@@ -241,7 +247,7 @@ func TestE2EUnbackedDiffEvidenceStillRejected(t *testing.T) {
 	)
 	a := New(mp, evidenceRegistry(), NewSession("sys"), Options{}, event.Discard)
 
-	if err := a.Run(context.Background(), "sign off without doing the work"); err != nil {
+	if err := a.Run(withNoClosedLoop(context.Background()), "sign off without doing the work"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if !sessionContains(a, "no matching successful writer") {

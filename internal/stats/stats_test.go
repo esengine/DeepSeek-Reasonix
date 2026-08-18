@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/billing"
 	"reasonix/internal/event"
 	"reasonix/internal/filelock"
 	"reasonix/internal/provider"
@@ -56,6 +57,32 @@ func TestRecorderWritesDailyFile(t *testing.T) {
 	// Forwarding must be untouched.
 	if len(inner.events) != 3 {
 		t.Fatalf("want 3 forwarded events, got %d", len(inner.events))
+	}
+}
+
+func TestRecorderPersistsRateBandAndRatedAt(t *testing.T) {
+	dir := t.TempDir()
+	r := NewRecorder(&spySink{}, dir, "desktop")
+	e := usageEvent("deepseek/deepseek-v4-pro", 100, 50, 0, 100, 0, 150)
+	e.CostQuote = &billing.CostQuote{
+		Original:  billing.Money{Amount: "0.00135", Currency: "CNY"},
+		Estimated: true, CostComplete: true, DisplayComplete: true, Complete: true,
+		RateBand: billing.RateBandPeak, RatedAt: "2026-08-17T01:00:00Z",
+	}
+	r.Emit(e)
+	flushRecorder(t, r)
+
+	files := dailyJSONLFiles(t, dir)
+	data, err := os.ReadFile(filepath.Join(dir, files[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["rate_band"] != billing.RateBandPeak || got["rated_at"] != "2026-08-17T01:00:00Z" {
+		t.Fatalf("scheduled stats fields missing: %s", data)
 	}
 }
 
@@ -469,13 +496,37 @@ type spySink struct{ events []event.Event }
 func (s *spySink) Emit(e event.Event) { s.events = append(s.events, e) }
 
 type auditSpySink struct {
-	events   []event.Event
-	protocol []event.ProtocolRecoveryAudit
+	events     []event.Event
+	protocol   []event.ProtocolRecoveryAudit
+	turns      int
+	workspace  []event.WorkspaceMutation
+	runBudgets []event.RunBudgetSample
 }
 
 func (s *auditSpySink) Emit(e event.Event) { s.events = append(s.events, e) }
 func (s *auditSpySink) RecordProtocolRecovery(a event.ProtocolRecoveryAudit) {
 	s.protocol = append(s.protocol, a)
+}
+func (s *auditSpySink) RecordTurnCompletion() { s.turns++ }
+func (s *auditSpySink) RecordWorkspaceMutation(m event.WorkspaceMutation) {
+	s.workspace = append(s.workspace, m)
+}
+func (s *auditSpySink) RecordRunBudget(sample event.RunBudgetSample) {
+	s.runBudgets = append(s.runBudgets, sample)
+}
+
+func TestRecorderForwardsHostCapabilities(t *testing.T) {
+	inner := &auditSpySink{}
+	r := NewRecorder(inner, t.TempDir(), "test")
+
+	event.RecordTurnCompletion(r)
+	event.RecordWorkspaceMutation(r, event.WorkspaceMutation{ToolName: "write_file"})
+	event.RecordRunBudget(r, event.RunBudgetSample{Currency: "USD"})
+	flushRecorder(t, r)
+
+	if inner.turns != 1 || len(inner.workspace) != 1 || len(inner.runBudgets) != 1 {
+		t.Fatalf("host capabilities not forwarded: turns=%d workspace=%d run_budget=%d", inner.turns, len(inner.workspace), len(inner.runBudgets))
+	}
 }
 
 func usageEvent(model string, prompt, completion, reasoning, hit, miss, total int) event.Event {

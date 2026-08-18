@@ -3,6 +3,32 @@ import { getLocale, type DictKey, type Translator } from "./i18n";
 import type { ProjectNode, ProjectTopicStatus } from "./types";
 
 export type ProjectTreeVariant = "classic" | "workbench" | "creation";
+export type WorkbenchOrganizeMode = "project" | "recent" | "time";
+export type WorkbenchSortMode = "created" | "updated";
+
+export const WORKBENCH_ORGANIZE_KEY = "projectTree:workbenchOrganize";
+// Shared by classic and workbench; key string kept for existing saved choices.
+export const WORKBENCH_SORT_KEY = "projectTree:workbenchSort";
+
+export function loadWorkbenchOrganizeMode(): WorkbenchOrganizeMode {
+  try {
+    const value = localStorage.getItem(WORKBENCH_ORGANIZE_KEY);
+    if (value === "recent" || value === "time") return value;
+  } catch {
+    /* localStorage unavailable */
+  }
+  return "project";
+}
+
+export function loadWorkbenchSortMode(): WorkbenchSortMode {
+  try {
+    const value = localStorage.getItem(WORKBENCH_SORT_KEY);
+    if (value === "created") return "created";
+  } catch {
+    /* localStorage unavailable */
+  }
+  return "updated";
+}
 
 export function isRuntimeSessionNode(node: ProjectNode): boolean {
   return node.kind === "session" || node.kind === "global_session";
@@ -14,6 +40,14 @@ export function isTopicNode(node: ProjectNode): boolean {
 
 export function projectTreeRevisionIsFresh(currentRevision: number, incomingRevision: number): boolean {
   return incomingRevision >= currentRevision;
+}
+
+export function projectTreeTopicPageIsFresh(
+  revisions: Readonly<Record<string, number>>,
+  projectKey: string,
+  incomingRevision: number,
+): boolean {
+  return projectTreeRevisionIsFresh(revisions[projectKey] ?? 0, incomingRevision);
 }
 
 // Project shells come from desktop-projects.json and are valid even when the
@@ -29,7 +63,14 @@ export function projectTreeShouldApplyShellSnapshot(options: {
 }
 
 export function mergeProjectTopicPage(current: ProjectNode[], incoming: ProjectNode[], append: boolean): ProjectNode[] {
-  if (!append) return [...incoming];
+  if (!append) {
+    const incomingKeys = new Set(incoming.map((node) => node.key));
+    // Project snapshots carry every pinned topic shell, while a lazy first
+    // page is bounded. Keep off-page pins so expanding a busy project cannot
+    // make its pinned section incomplete again.
+    const offPagePins = current.filter((node) => Boolean(node.pinned) && !incomingKeys.has(node.key));
+    return [...incoming, ...offPagePins];
+  }
   const next = [...current];
   const positions = new Map(next.map((node, index) => [node.key, index]));
   for (const node of incoming) {
@@ -44,6 +85,25 @@ export function mergeProjectTopicPage(current: ProjectNode[], incoming: ProjectN
   return next;
 }
 
+// A directory scan commits catalog rows in batches, but an incomplete page is
+// not authoritative for replacement, deletion, timestamps, or order. Keep the
+// last complete resident rows byte-for-byte and append only newly discovered
+// keys until a complete page can replace the canonical first page.
+export function mergeIncompleteProjectTopicPage(current: ProjectNode[], incoming: ProjectNode[]): ProjectNode[] {
+  const residentKeys = new Set(current.map((node) => node.key));
+  const discovered = incoming.filter((node) => !residentKeys.has(node.key));
+  return discovered.length === 0 ? current : [...current, ...discovered];
+}
+
+export function projectTreeTopicPageSignature(
+  query: string,
+  timeFilter: string,
+  sortMode: WorkbenchSortMode,
+  limit: number,
+): string {
+  return [query.trim(), timeFilter, sortMode, String(limit)].join("\u001f");
+}
+
 // Topic page loads rewrite children, so a signature keyed only on the project
 // shells lets the debounced reload effect observe arrivals without re-arming
 // itself on its own writes.
@@ -56,18 +116,63 @@ export function projectTreeShellSignature(tree: ProjectNode[]): string {
 export function projectTreeWithoutTopic(tree: ProjectNode[], topicId: string): ProjectNode[] {
   const id = topicId.trim();
   if (!id) return tree;
-  return tree.map((node) => {
-    if (node.kind !== "project" && node.kind !== "global_folder") return node;
-    return { ...node, children: asArray(node.children).filter((child) => child.topicId !== id) };
-  });
+  return projectTreeWithoutTopics(tree, new Set([id]));
+}
+
+// Pending archive IDs are a client-side tombstone overlay. Apply it to every
+// incoming page as well as the resident tree so an older request cannot paint
+// a topic back while its backend mutation is still queued or running.
+export function projectTreeWithoutTopics(tree: ProjectNode[], topicIds: ReadonlySet<string>): ProjectNode[] {
+  if (topicIds.size === 0) return tree;
+  let changed = false;
+  const next: ProjectNode[] = [];
+  for (const node of tree) {
+    if (node.topicId && topicIds.has(node.topicId) && (isTopicNode(node) || isRuntimeSessionNode(node))) {
+      changed = true;
+      continue;
+    }
+    const children = asArray(node.children);
+    const filteredChildren = projectTreeWithoutTopics(children, topicIds);
+    if (filteredChildren !== children) {
+      changed = true;
+      next.push({ ...node, children: filteredChildren });
+    } else {
+      next.push(node);
+    }
+  }
+  return changed ? next : tree;
+}
+
+export function projectTreeFolderKeyForTopic(tree: ProjectNode[], topicId: string): string {
+  const id = topicId.trim();
+  if (!id) return "";
+  for (const node of tree) {
+    if (node.kind !== "project" && node.kind !== "global_folder") continue;
+    if (asArray(node.children).some((child) => child.topicId === id)) return node.key;
+  }
+  return "";
+}
+
+export function invalidateProjectTreeTopicLoads(sequences: Record<string, number>, keys: Iterable<string>): void {
+  for (const key of keys) sequences[key] = (sequences[key] ?? 0) + 1;
 }
 
 export function projectTreeShellChildren(
   previous: ProjectNode[] | undefined,
-  options: { keepLoadedTopics: boolean },
+  pinnedShells: ProjectNode[] | undefined = [],
 ): ProjectNode[] {
-  if (options.keepLoadedTopics) return asArray(previous);
-  return [];
+  const shells = asArray(pinnedShells).filter((node) => isTopicNode(node) && Boolean(node.pinned));
+  if (!previous || previous.length === 0) return shells;
+
+  const shellByKey = new Map(shells.map((node) => [node.key, node]));
+  const next = asArray(previous).map((node) => {
+    if (!isTopicNode(node)) return node;
+    const shell = shellByKey.get(node.key);
+    if (!shell) return node.pinned ? { ...node, pinned: false } : node;
+    shellByKey.delete(node.key);
+    return { ...node, ...shell, children: node.children ?? shell.children };
+  });
+  return [...next, ...shellByKey.values()];
 }
 
 export function projectTreeEventAffectsFolder(project: ProjectNode, roots: string[]): boolean {
@@ -180,7 +285,7 @@ export function projectTreeTopicHoverCardModel(node: ProjectNode, t: Translator,
   const metaLine = projectTreeTopicMetaLine(node, t);
   const exactTime = activityAt ? topicActivityDateLabel(activityAt) : "";
   return {
-    title: (node.label || node.topicId || "Untitled").replace(/^●\s*/, ""),
+    title: (node.preview || node.label || node.topicId || "Untitled").replace(/^●\s*/, ""),
     statusLabel: topicStatusLabel(node, t),
     metaLine,
     exactTime: projectTreeDedupedExactTime(metaLine, exactTime),

@@ -11,6 +11,7 @@ import (
 	"reasonix/internal/evidence"
 	"reasonix/internal/extension"
 	"reasonix/internal/extension/dispatch"
+	"reasonix/internal/sessioninbox"
 )
 
 // Extension dispatch wiring (stage 6b1). Nil dispatcher is a no-op.
@@ -117,6 +118,8 @@ type frontendEventSink struct {
 	warned map[string]bool
 }
 
+var _ event.OptionalSinkCapabilities = (*frontendEventSink)(nil)
+
 func newFrontendEventSink(inner event.Sink, d *dispatch.Dispatcher) *frontendEventSink {
 	return &frontendEventSink{inner: inner, d: d, warned: map[string]bool{}}
 }
@@ -167,6 +170,13 @@ func (s *frontendEventSink) Emit(ev event.Event) {
 	s.inner.Emit(ev)
 }
 
+func (s *frontendEventSink) InboxChanged(snap sessioninbox.InboxSnapshot) {
+	if s == nil {
+		return
+	}
+	notifyInboxChanged(s.inner, snap)
+}
+
 // warnOnce logs msg at most once per key for the life of the sink. Warnings
 // stay on the log: routing them back through the sink would re-enter the
 // strategy path they describe.
@@ -203,6 +213,10 @@ func (s *frontendEventSink) RecordReadinessAudit(a evidence.ReadinessAudit) {
 	event.RecordReadinessAudit(s.inner, a)
 }
 
+func (s *frontendEventSink) RecordAnchorSafetyAudit(a event.AnchorSafetyAudit) {
+	event.RecordAnchorSafetyAudit(s.inner, a)
+}
+
 func (s *frontendEventSink) RecordContractShadow(a event.ContractShadowAudit) {
 	event.RecordContractShadow(s.inner, a)
 }
@@ -233,4 +247,12 @@ func (s *frontendEventSink) RecordProtocolRecovery(a event.ProtocolRecoveryAudit
 
 func (s *frontendEventSink) RecordTurnCompletion() {
 	event.RecordTurnCompletion(s.inner)
+}
+
+func (s *frontendEventSink) RecordWorkspaceMutation(m event.WorkspaceMutation) {
+	event.RecordWorkspaceMutation(s.inner, m)
+}
+
+func (s *frontendEventSink) RecordRunBudget(sample event.RunBudgetSample) {
+	event.RecordRunBudget(s.inner, sample)
 }

@@ -4,7 +4,7 @@ import "katex/dist/katex.min.css";
 import { normalizeMath } from "./mathNormalize";
 import { createComponents } from "./markdownComponents";
 import { reasonixRehypePlugins, reasonixRemarkPlugins } from "./markdownRemarkPlugins";
-import { markdownUrlTransform } from "../lib/markdownPipeline";
+import { markdownImageUrlTransform, markdownUrlTransform } from "../lib/markdownPipeline";
 
 // Markdown rendering via react-markdown + remark-gfm (tables, task lists,
 // strike, autolinks) and remark-math + rehype-katex for $/$$ KaTeX math.
@@ -39,7 +39,9 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
       components={components}
       // file:/// anchors (local path linkification) are safe to keep; the
       // default transform would blank them along with javascript: etc.
-      urlTransform={markdownUrlTransform}
+      urlTransform={(value, key, node) => node.tagName === "img" && key === "src"
+        ? markdownImageUrlTransform(value)
+        : markdownUrlTransform(value)}
     >
       {mathContent}
     </ReactMarkdown>

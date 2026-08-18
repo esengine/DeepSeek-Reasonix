@@ -1317,9 +1317,8 @@ type AgentConfig struct {
 	CompactForceRatio   float64 `toml:"compact_force_ratio"`
 	// ContextEditing is retired; native tool clearing is no longer an auto path.
 	ContextEditing string `toml:"context_editing"`
-	// Keep controls which compactable messages stay verbatim beyond the current
-	// user-fact/digest floor and recent tail. Empty uses the conservative default
-	// of keeping error tool results.
+	// Keep and RecentKeep are deprecated compatibility fields. They remain
+	// readable and writable but Harness-style compaction ignores them.
 	Keep       []string `toml:"keep"`
 	RecentKeep int      `toml:"recent_keep"`
 	// ColdResumePrune elides stale tool results when a session reopens past the
@@ -1328,6 +1327,7 @@ type AgentConfig struct {
 	// PlanModeReadOnlyCommands is retained for old config/session round trips. Main
 	// Plan bash calls now use the ordinary Permissions classifier and Sandbox.
 	PlanModeReadOnlyCommands []string `toml:"plan_mode_read_only_commands"`
+	LegacyAnchorSafetyGate   bool     `toml:"legacy_anchor_safety_gate"` // user-global rollback to the full-read guard
 }
 
 // ProviderEntry declares a model provider instance. ContextWindow is the model's
@@ -1827,7 +1827,7 @@ const LanguagePolicy = `Reply in the same language the user is using in their mo
 // Default returns the built-in default configuration.
 func Default() *Config {
 	return &Config{
-		ConfigVersion:    6,
+		ConfigVersion:    7,
 		DefaultModel:     "deepseek-flash",
 		CredentialsStore: CredentialsStoreAuto,
 		UI:               UIConfig{Theme: "auto", ShowTurnUsage: true},
@@ -1849,7 +1849,7 @@ func Default() *Config {
 			// Soft/snip/force are load-only compatibility; CompactRatio alone drives maintenance.
 			SoftCompactRatio:       0,
 			ToolResultSnipRatio:    0,
-			CompactRatio:           0.85,
+			CompactRatio:           0.80,
 			CompactForceRatio:      0,
 			ContextEditing:         "",
 			MaxSubagentDepth:       2,
@@ -1901,7 +1901,7 @@ func Default() *Config {
 				Name: "deepseek-pro", Kind: "anthropic", BaseURL: deepSeekAnthropicBaseURL,
 				Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY",
 				BalanceURL: "https://api.deepseek.com/user/balance", Thinking: "enabled",
-				WebSearch: boolPointer(true), SupportedEfforts: []string{"disabled", "high", "max"}, DefaultEffort: "high",
+				WebSearch: boolPointer(true), SupportedEfforts: []string{"disabled", "low", "high", "max"}, DefaultEffort: "high",
 				ContextWindow: 1_000_000, Price: deepSeekV4ProPriceUSD(),
 				BillingCurrency: "USD", BillingMode: "payg",
 			},

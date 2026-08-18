@@ -113,12 +113,111 @@ const benchMarkdownHeavyHistory = (): HistoryMessage[] => {
 const benchSmallHistory = (): HistoryMessage[] => {
   // 6 visible turns × 78 messages = 468 provider messages (nominal 473).
   const messages: HistoryMessage[] = [];
-  for (let turn = 1; turn <= 6; turn += 1) messages.push(...benchToolTurn(turn, 38, `Batch ${turn} summary.`));
+  for (let turn = 1; turn <= 6; turn += 1) {
+    const answer = turn === 6
+      ? [
+          "# Asynchronously hydrated verification appendix",
+          ...Array.from({ length: 1_200 }, (_, row) => `- package-${row % 42}: verified row ${row} with stable virtual measurements`),
+          "ASYNC LAYOUT EXPANSION COMPLETE",
+        ].join("\n")
+      : `Batch ${turn} summary.`;
+    messages.push(...benchToolTurn(turn, 38, answer));
+  }
   return messages;
 };
 const benchGiantTurnHistory = (): HistoryMessage[] => {
   // A single turn with thousands of messages (1000 tool pairs).
   return benchToolTurn(1, 1000, "Single-turn sweep complete.");
+};
+
+const benchReportedLongTurnHistory = (): HistoryMessage[] => {
+  // Sanitized reproduction of the reported shape: one user turn, 70 tool
+  // results, and 44 separately measured assistant blocks. Keeping the height
+  // distribution matters; no user content or exported session data is used.
+  const messages: HistoryMessage[] = [
+    { role: "user", content: "Inspect the workspace, apply the changes, and verify the result." },
+  ];
+  for (let block = 0; block < 44; block += 1) {
+    const callCount = block < 26 ? 2 : 1;
+    const toolCalls: HistoryToolCall[] = [];
+    for (let call = 0; call < callCount; call += 1) {
+      const id = `reported-block-${block}-call-${call}`;
+      toolCalls.push({
+        id,
+        name: block % 3 === 0 ? "bash" : "read_file",
+        arguments: JSON.stringify(block % 3 === 0
+          ? { command: `pnpm test --filter reported-${block}-${call}` }
+          : { path: `src/reported/section-${block}-${call}.ts` }),
+        resolvedReadOnly: block % 3 !== 0,
+        subject: `reported section ${block + 1}.${call + 1}`,
+      });
+    }
+    messages.push({
+      role: "assistant",
+      content: [
+        `### Verification block ${block + 1}`,
+        "",
+        `Processed the deterministic fixture section ${block + 1}.`,
+        "",
+        ...Array.from({ length: 2 + (block % 5) }, (_, row) => `- check ${row + 1}: stable measurement ${block}-${row}`),
+      ].join("\n"),
+      reasoning: `Planning verification block ${block + 1}.`,
+      toolCalls,
+    });
+    messages.push(...toolCalls.map((toolCall, call) => ({
+      role: "tool" as const,
+      toolCallId: toolCall.id,
+      toolName: toolCall.name,
+      content: benchToolOutput(block + 1, call),
+    })));
+  }
+  messages.push({ role: "assistant", content: "Reported long turn complete." });
+  return messages;
+};
+
+// Ref-resolution storm fixture (#8657): the newest page of a long session
+// carries many ref-replaced fields, so opening the session fires a paced
+// stream of history_items_patch invalidations — the exact load that used to
+// remount the virtual list on every scroll idle and strand the view at
+// estimate-based restore landings. The marker sits past the 4KiB preview
+// cut, so it only appears in the DOM once the ref has resolved.
+export const BENCH_STORM_MARKER = "BENCH STORM HYDRATION RESOLVED";
+const benchStormAnswer = (turn: number): string => {
+  let body = [
+    `## Storm turn ${turn} verification report`,
+    "",
+    "Inline preview summary: the batch completed and per-package details follow.",
+    "",
+  ].join("\n");
+  let row = 0;
+  while (body.length < 9 * 1024) {
+    row += 1;
+    body += `\n- storm-${turn}-${row}: resolved payload ${"y".repeat(90)}`;
+  }
+  body += `\n- storm-${turn}-FINAL ${BENCH_STORM_MARKER}`;
+  return body;
+};
+const benchStormReasoning = (turn: number): string => {
+  let body = `planning storm turn ${turn}: gather results, then tabulate.\n`;
+  while (body.length < 6 * 1024) body += `reasoning fragment ${turn} ${"z".repeat(90)}\n`;
+  return `${body}${BENCH_STORM_MARKER}`;
+};
+const benchStormHistory = (): HistoryMessage[] => {
+  // 40 visible turns. The newest 12 turns (exactly the page a session opens
+  // with) carry ref-replaced answer+reasoning fields; turns 1-28 are small
+  // and eager. Opening the session resolves ~24 refs at a paced interval.
+  const messages: HistoryMessage[] = [];
+  for (let turn = 1; turn <= 40; turn += 1) {
+    if (turn <= 28) {
+      messages.push(...benchToolTurn(turn, 3, `Batch ${turn} summary.`));
+    } else {
+      messages.push(
+        { role: "user", content: `storm turn ${turn}: produce the verification report.` },
+        { role: "assistant", content: benchStormAnswer(turn), reasoning: benchStormReasoning(turn), workDurationMs: 900 },
+      );
+    }
+  }
+  return messages;
 };
 
 /** The bench session for a mock topic, or undefined for non-bench topics. */
@@ -132,6 +231,10 @@ export function benchTopicHistory(topicId: string): HistoryMessage[] | undefined
       return benchFixture("small", benchSmallHistory);
     case "topic_bench_giant_turn":
       return benchFixture("giant", benchGiantTurnHistory);
+    case "topic_bench_reported_long_turn":
+      return benchFixture("reported-long-turn", benchReportedLongTurnHistory);
+    case "topic_bench_storm":
+      return benchFixture("storm", benchStormHistory);
     default:
       return undefined;
   }

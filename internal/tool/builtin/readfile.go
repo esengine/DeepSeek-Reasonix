@@ -6,11 +6,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"golang.org/x/text/transform"
@@ -64,6 +67,46 @@ func (readFile) Schema() json.RawMessage {
 }
 
 func (readFile) ReadOnly() bool { return true }
+
+// ObserveModelText extracts the exact numbered window returned by read_file.
+// It intentionally parses the already-produced output instead of rereading
+// the file, so overlay and encoding routing remain identical to what the model
+// saw and truncated results can still be promoted through RawContent.
+func (r readFile) ObserveModelText(args json.RawMessage, output string) (tool.ModelTextObservation, bool) {
+	var p struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil || strings.TrimSpace(p.Path) == "" {
+		return tool.ModelTextObservation{}, false
+	}
+	rp := resolveReadablePath(r.workDir, p.Path, r.paths)
+	var start int
+	var hashes []string
+	for line := range strings.SplitSeq(output, "\n") {
+		arrow := strings.Index(line, "→")
+		if arrow <= 0 {
+			continue
+		}
+		lineNo, err := strconv.Atoi(strings.TrimSpace(line[:arrow]))
+		if err != nil || lineNo < 1 {
+			continue
+		}
+		if len(hashes) == 0 {
+			start = lineNo
+		} else if lineNo != start+len(hashes) {
+			// A page boundary or malformed output is not a contiguous model
+			// observation; fail closed instead of stitching unrelated windows.
+			return tool.ModelTextObservation{}, false
+		}
+		lineText := line[arrow+len("→"):]
+		sum := sha256.Sum256([]byte(lineText))
+		hashes = append(hashes, hex.EncodeToString(sum[:]))
+	}
+	if len(hashes) == 0 {
+		return tool.ModelTextObservation{}, false
+	}
+	return tool.ModelTextObservation{Path: rp.Path, StartLine: start, LineHashes: hashes}, true
+}
 
 // SnipHint front-loads file content: the most relevant lines are near the top,
 // so keep a generous head and a short tail when an old read is shortened.

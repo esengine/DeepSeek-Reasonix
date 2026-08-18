@@ -23,6 +23,7 @@ type ContextInfo struct {
 	SessionCostQuote    *billing.CostQuote          `json:"sessionCostQuote,omitempty"`
 	Sources             map[string]usageSourceStats `json:"sources,omitempty"`
 	Maintenance         *ContextMaintenanceInfo     `json:"maintenance,omitempty"`
+	ContextBudget       *ContextBudgetInfo          `json:"contextBudget,omitempty"`
 }
 
 // ContextMaintenanceInfo is the Wails-safe current-view snapshot. Optional
@@ -42,6 +43,28 @@ type ContextMaintenanceInfo struct {
 	ProjectionVersion uint64                         `json:"projectionVersion,omitempty"`
 	Blocked           bool                           `json:"blocked,omitempty"`
 	LastReceipt       *ContextMaintenanceReceiptInfo `json:"lastReceipt,omitempty"`
+	ContextBudget     *ContextBudgetInfo             `json:"contextBudget,omitempty"`
+}
+
+// ContextBudgetInfo is the optional send-time admission view. Older desktop
+// builds ignore unknown fields; omission is the compatibility default.
+type ContextBudgetInfo struct {
+	WindowMode            string `json:"windowMode,omitempty"`
+	LimitMode             string `json:"limitMode,omitempty"`
+	Source                string `json:"source,omitempty"`
+	WindowTokens          int    `json:"windowTokens,omitempty"`
+	PromptTokens          int    `json:"promptTokens,omitempty"`
+	AutoOutputTokens      int    `json:"autoOutputTokens,omitempty"`
+	MaxOutputTokens       int    `json:"maxOutputTokens,omitempty"`
+	RequestedOutputTokens int    `json:"requestedOutputTokens,omitempty"`
+	EffectiveOutputTokens int    `json:"effectiveOutputTokens,omitempty"`
+	ReserveTokens         int    `json:"reserveTokens,omitempty"`
+	PhysicalRemaining     int    `json:"physicalRemaining,omitempty"`
+	Clipped               bool   `json:"clipped,omitempty"`
+	LastRecovery          string `json:"lastRecovery,omitempty"`
+	ObservedWindow        int    `json:"observedWindow,omitempty"`
+	ObservedPrompt        int    `json:"observedPrompt,omitempty"`
+	ObservedCompletion    int    `json:"observedCompletion,omitempty"`
 }
 
 type ContextMaintenanceReceiptInfo struct {
@@ -80,10 +103,29 @@ func contextMaintenanceInfo(snapshot agent.ContextMaintenanceSnapshot) *ContextM
 		Headroom: snapshot.Headroom, ProjectionVersion: snapshot.ProjectionVersion,
 		Blocked: snapshot.Blocked,
 	}
+	if snapshot.ContextBudget != nil {
+		info.ContextBudget = contextBudgetInfo(snapshot.ContextBudget)
+	}
 	if source := snapshot.LastReceipt; source != nil {
 		info.LastReceipt = contextMaintenanceReceiptInfo(source)
 	}
 	return info
+}
+
+func contextBudgetInfo(source *agent.ContextBudgetSnapshot) *ContextBudgetInfo {
+	if source == nil {
+		return nil
+	}
+	return &ContextBudgetInfo{
+		WindowMode: source.WindowMode, LimitMode: source.LimitMode, Source: source.Source,
+		WindowTokens: source.WindowTokens, PromptTokens: source.PromptTokens,
+		AutoOutputTokens: source.AutoOutputTokens, MaxOutputTokens: source.MaxOutputTokens,
+		RequestedOutputTokens: source.RequestedOutputTokens, EffectiveOutputTokens: source.EffectiveOutputTokens,
+		ReserveTokens: source.ReserveTokens, PhysicalRemaining: source.PhysicalRemaining,
+		Clipped: source.Clipped, LastRecovery: source.LastRecovery,
+		ObservedWindow: source.ObservedWindow, ObservedPrompt: source.ObservedPrompt,
+		ObservedCompletion: source.ObservedCompletion,
+	}
 }
 
 func contextMaintenanceReceiptInfo(source *agent.ContextMaintenanceReceipt) *ContextMaintenanceReceiptInfo {

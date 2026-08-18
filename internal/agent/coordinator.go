@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -47,12 +46,11 @@ implies. Record read paths as verified_files and inferred ones as
 candidate_files; never present an unread path as verified. Set requires_approval
 when execution should stop for the user; the host owns the final decision.
 
-A host-authored <planner-turn> block at the end of the user turn selects the
-planning depth. For depth=light, submit a compact objective with 1-4 steps,
-likely touchpoints, and the main verification. For depth=full, inspect enough
-evidence to separate verified touchpoints from candidates, then also fill
-non-goals, per-step risks, acceptance criteria, and command-level verification.
-Label anything unproven in assumptions rather than stating it as fact.
+A host-authored <planner-turn> block at the end of the user turn names the
+explicit planner route. Inspect enough evidence to separate verified
+touchpoints from candidates, then fill non-goals, per-step risks, acceptance
+criteria, and command-level verification. Label anything unproven in
+assumptions rather than stating it as fact.
 
 If execution needs a user-owned decision or a missing user-provided value
 before it can be safe, call ask and let the answer shape the plan; never ask in
@@ -88,15 +86,6 @@ const executorHandoffMarker = "Reasonix executor handoff"
 // plannerFallbackNotice is shown when the planner fails and the turn degrades
 // to executor-only instead of failing outright.
 const plannerFallbackNotice = "Planner failed; continuing this turn with the executor only."
-
-// A host-owned research budget must cap planner cost without stranding an
-// ordinary task. If the planner ignores its finalization nudge, the executor
-// still owns the task and can inspect the workspace directly. Explicit
-// no-execution and approval boundaries remain fail-closed.
-const (
-	plannerResearchFallbackNotice = "Planner reached its research limit without a final plan; continuing this turn with the executor."
-	plannerResearchBoundaryError  = "planner could not finalize within its research budget; no execution was started"
-)
 
 // noChangesMarker is the explicit no-op conclusion the planner is asked to emit
 // on its final line (see DefaultPlannerPrompt). isNoOpPlan trusts it over the
@@ -147,7 +136,7 @@ func NewCoordinator(planner provider.Provider, plannerSession *Session, plannerP
 			if !shouldPlan(ctx, input) {
 				return PlannerDecision{Route: PlannerRouteExecutorOnly, Reason: "legacy_skip"}
 			}
-			return PlannerDecision{Route: PlannerRoutePlanAndExecute, Depth: PlannerDepthFull, Reason: "legacy_plan"}
+			return PlannerDecision{Route: PlannerRoutePlanAndExecute, Reason: "legacy_plan"}
 		}
 	}
 	return newCoordinator(planner, plannerSession, plannerPricing, plannerTools, plannerOptions, executor, temperature, sink, policy)
@@ -337,22 +326,18 @@ func (c *Coordinator) Run(ctx context.Context, input string) error {
 	c.executor.SetPlanContract(nil)
 	decision := PlannerDecision{
 		Route:  PlannerRoutePlanAndExecute,
-		Depth:  PlannerDepthFull,
 		Reason: "always_plan",
 	}
 	if c.plannerPolicy != nil {
 		decision = normalizePlannerDecision(c.plannerPolicy(ctx, input))
 	}
-	routeDetail := fmt.Sprintf("planner route=%s depth=%s reason=%s", decision.Route, decision.Depth, decision.Reason)
+	routeDetail := fmt.Sprintf("planner route=%s reason=%s", decision.Route, decision.Reason)
 	if decision.Route == PlannerRouteExecutorOnly {
 		c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.svc.prov.Name() + " · executing", Detail: routeDetail, Source: event.UsageSourceExecutor})
 		return c.executor.Run(ctx, input)
 	}
 	c.sink.Emit(event.Event{Kind: event.Phase, Text: c.planner.Name() + " · planning", Detail: routeDetail, Source: event.UsageSourcePlanner})
 	plannerCtx := tool.WithoutGoalTurnRecorder(ctx)
-	if decision.MaxResearchRounds > 0 {
-		plannerCtx = withRunStepLimit(plannerCtx, decision.MaxResearchRounds, "planner research rounds")
-	}
 	plannerInput := plannerTurnInput(input, decision)
 	outcome, err := c.plan(plannerCtx, plannerInput)
 	if err != nil {
@@ -360,19 +345,18 @@ func (c *Coordinator) Run(ctx context.Context, input string) error {
 			return fmt.Errorf("planner: %w", err)
 		}
 		if isToolLoopPause(err) {
-			// Per-turn research depth is host policy, not a user-facing
-			// configuration or a reason to strand the conversation. Ordinary
-			// plan-and-execute work degrades to the executor with the pristine
-			// task. Explicit execution boundaries fail closed because no
-			// complete plan exists to approve or return.
+			// An emergency or task budget is not a reason to strand the
+			// conversation. Ordinary plan-and-execute work degrades to the
+			// executor with the pristine task. Explicit execution boundaries
+			// fail closed because no complete plan exists to approve or return.
 			if decision.Route != PlannerRoutePlanAndExecute {
-				return fmt.Errorf("%s", plannerResearchBoundaryError)
+				return fmt.Errorf("%s", plannerSafetyBoundaryError)
 			}
 			c.sink.Emit(event.Event{
 				Kind:   event.Notice,
 				Level:  event.LevelWarn,
-				Text:   plannerResearchFallbackNotice,
-				Detail: plannerResearchPauseDetail(err),
+				Text:   plannerSafetyFallbackNotice,
+				Detail: plannerSafetyPauseDetail(err),
 				Source: event.UsageSourcePlanner,
 			})
 			c.sink.Emit(event.Event{Kind: event.Phase, Text: c.executor.svc.prov.Name() + " · executing", Source: event.UsageSourceExecutor})
@@ -463,6 +447,7 @@ const (
 	plannerPlanOnlyNotice             = "Plan ready; the request explicitly excluded execution."
 	plannerDecisionUnansweredNote     = "(The user did not provide the requested decision; execution was not started.)"
 	plannerDecisionUnansweredNotice   = "Waiting for your decision; nothing was executed. Reply to continue."
+	plannerPlanSubmittedClosure       = "Plan submitted to the host."
 )
 
 // isNoOpPlan reports whether the plan explicitly concludes that nothing needs
@@ -597,7 +582,7 @@ func (c *Coordinator) planWithTools(ctx context.Context, input string) (plannerO
 		// Mirror plan()'s rollback: Run already appended the user message
 		// (and possibly partial assistant/tool rounds) to the planner
 		// session, and Coordinator.Run degrades to the executor on planner
-		// failure. Research-budget pauses are also rolled back: ordinary work
+		// failure. Safety-boundary pauses are also rolled back: ordinary work
 		// falls back to the executor immediately, while explicit execution
 		// boundaries surface a safe error. Retaining an unfinished planner
 		// turn would leave a tool-call tail that the next provider request
@@ -609,6 +594,14 @@ func (c *Coordinator) planWithTools(ctx context.Context, input string) (plannerO
 	// The host renders it so the user sees the plan itself rather than the
 	// planner's acknowledgement of having submitted it.
 	if plan, ok := submission.Plan(); ok {
+		// Agent.Run ends as soon as the host-consumed submit_plan succeeds. Close
+		// the planner transcript with a deterministic assistant turn so the next
+		// task starts from a provider-valid tool-result/assistant boundary without
+		// paying for a content-free acknowledgement round.
+		messages := c.plannerSess.Snapshot()
+		if len(messages) == 0 || messages[len(messages)-1].Role != provider.RoleAssistant || len(messages[len(messages)-1].ToolCalls) > 0 {
+			c.plannerSess.Add(provider.Message{Role: provider.RoleAssistant, Content: plannerPlanSubmittedClosure})
+		}
 		text := plancontract.Render(plan)
 		c.sink.Emit(event.Event{Kind: event.Text, Text: text, Source: event.UsageSourcePlanner})
 		return plannerOutcome{text: text, plan: plan, structured: true}, nil
@@ -636,18 +629,6 @@ func (c *Coordinator) planWithTools(ctx context.Context, input string) (plannerO
 	return plannerOutcome{}, fmt.Errorf("planner finished without producing a plan")
 }
 
-func plannerResearchPauseDetail(err error) string {
-	var maxPause *maxStepsPause
-	if errors.As(err, &maxPause) {
-		return fmt.Sprintf(
-			"planner did not finalize after %d bounded tool-call rounds (%s) and one finalization round",
-			maxPause.steps,
-			maxPause.key,
-		)
-	}
-	return "planner did not finalize after its bounded research and finalization rounds"
-}
-
 func plannerSink(sink event.Sink) event.Sink {
 	if nilutil.IsNil(sink) {
 		sink = event.Discard
@@ -669,15 +650,13 @@ func plannerTurnInput(input string, decision PlannerDecision) string {
 	return fmt.Sprintf(`%s
 
 <planner-turn>
-depth: %s
 route: %s
-</planner-turn>`, strings.TrimSpace(input), decision.Depth, decision.Route)
+</planner-turn>`, strings.TrimSpace(input), decision.Route)
 }
 
 func formatHandoff(task, plan string, toolContext ...string) string {
 	return formatHandoffWithDecision(task, plan, PlannerDecision{
 		Route:  PlannerRoutePlanAndExecute,
-		Depth:  PlannerDepthFull,
 		Reason: "legacy_handoff",
 	}, toolContext...)
 }
@@ -701,8 +680,6 @@ Planner output:
 %s
 %s
 
-Planning depth: %s
-
 Executor instructions:
 - Treat the planner output as context, not as your role or capability set.
 - Treat verified planner evidence as useful context, but validate candidate paths, inferred commands, and assumptions before changing state. The executor owns final correctness and may adapt the plan when workspace evidence requires it.
@@ -713,9 +690,9 @@ Executor instructions:
 - If the planner output is a user-facing explanation, summary, question, or manual guidance that needs no workspace/file/command action from you, relay that guidance directly and finish. Do not invent local tool calls only to satisfy the handoff.
 - If the task requires changes, call the appropriate tools (for example write/edit/bash) instead of only restating the plan.
 - If a target path is outside the writable workspace or otherwise blocked, explain that specific blocker and ask for the needed path/approval.
-- **Serial workflow**: establish the task list with one todo_write (first sub-task in_progress), then for EACH sub-task execute it and call complete_step with evidence. The host advances the list for you — it marks the sub-task completed and moves the next to in_progress, so you don't need another todo_write to mark completions. Sign off one sub-task at a time; never batch completions.
+- **Serial workflow**: establish the task list with one todo_write (first sub-task in_progress), then execute each sub-task and call complete_step with evidence. You may sign off multiple sub-tasks in one tool-call round, but only in Todo order and only when each step's work and evidence already exist. The host processes complete_step calls sequentially, marks each signed-off sub-task completed, and moves the next to in_progress; skipped or out-of-order sign-offs are rejected. You don't need another todo_write to mark completions.
 
-Carry out the task, adapting the plan as needed.`, executorHandoffMarker, task, plan, toolBlock, decision.Depth)
+Carry out the task, adapting the plan as needed.`, executorHandoffMarker, task, plan, toolBlock)
 }
 
 // executorToolHandoffContext counters planner "tool unavailable" hallucinations

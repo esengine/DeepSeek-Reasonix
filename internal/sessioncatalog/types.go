@@ -166,6 +166,7 @@ type TopicRecord struct {
 	WorkspaceRoot                string     `json:"workspaceRoot,omitempty"`
 	TopicID                      string     `json:"topicId"`
 	Title                        string     `json:"title"`
+	TitleSource                  string     `json:"titleSource,omitempty"`
 	Pinned                       bool       `json:"pinned,omitempty"`
 	SortOrder                    int        `json:"sortOrder,omitempty"`
 	Turns                        int        `json:"turns"`
@@ -189,6 +190,11 @@ type TopicPageRequest struct {
 	Limit         int    `json:"limit,omitempty"`
 	Query         string `json:"query,omitempty"`
 	TimeFilter    string `json:"timeFilter,omitempty"`
+	SortMode      string `json:"sortMode,omitempty"`
+	// ManualOrder makes sort_order the primary key within each pinned bucket.
+	// It is intentionally request-scoped: users who have never reordered keep
+	// the activity/created ordering even though metadata rows have a sort value.
+	ManualOrder bool `json:"manualOrder,omitempty"`
 }
 
 type TopicPage struct {
