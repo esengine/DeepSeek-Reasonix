@@ -234,7 +234,7 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
 - 交互授权只有单次允许、本会话允许当前范围和拒绝；会话授权绑定具体命令、规范目录或服务器能力，不写入项目配置。
 - 非交互 `reasonix run` 与无头子智能体没有授权界面：当前预设不覆盖的操作失败关闭。显式 `deny` 在所有预设下都不可绕过。
 - 管道、命令替换、重定向、Shell `-c` 和运行时内联代码都遵循同一个权限预设和 OS 沙盒，不再因为语法形式单独触发审批。
-- 安装 MCP server 即授权其全部工具，不再有 server、raw tool、writer 或 destructive 的第二套审批策略；项目 `reasonix.toml` 与 `.mcp.json` 声明同样默认可信，不需要额外启动确认，显式全局 `deny` 仍然优先。全局安装写入用户 `config.toml`，项目声明保留在原项目文件；同名时项目覆盖全局，项目内部 `reasonix.toml` 高于 `.mcp.json`。编辑写回当前生效来源，删除高优先级声明后露出下一层。`readOnlyHint` 与 `destructiveHint` 仅用于调度、Plan/严格只读边界及缓存到实时安全分类复核，不会新增逐调用审批。严格只读子智能体 registry 仍仅暴露已授权且 `readOnlyHint: true`、无 `destructiveHint` 的 MCP；双模型 Planner 通过固定 `use_capability` 代理（从不暴露直接 `mcp__*` schema）调用已授权、非 destructive 的 MCP，不再要求 `readOnlyHint`，destructive 工具留给 Executor。Balanced 双模型的 Executor 使用独立 frontend 复用同一稳定代理，因此 Planner 发现的 capability ID 可在 handoff 后直接执行，同时保持两侧 ledger/audit 隔离。分发前代理会再次复核当前 controller 的 enable、授权和完整运行时连接身份；共享 Host 中仅 server 同名不构成复用权限。
+- 安装 MCP server 即授权其全部工具，不再有 server、raw tool、writer 或 destructive 的第二套审批策略；项目本地配置与 `.mcp.json` 声明同样默认可信，不需要额外启动确认，显式全局 `deny` 仍然优先。全局安装写入用户 `config.toml`，项目声明保留在原项目文件；同名时项目覆盖全局，项目内部项目本地配置高于 `.mcp.json`。编辑写回当前生效来源，删除高优先级声明后露出下一层。`readOnlyHint` 与 `destructiveHint` 仅用于调度、Plan/严格只读边界及缓存到实时安全分类复核，不会新增逐调用审批。严格只读子智能体 registry 仍仅暴露已授权且 `readOnlyHint: true`、无 `destructiveHint` 的 MCP；双模型 Planner 通过固定 `use_capability` 代理（从不暴露直接 `mcp__*` schema）调用已授权、非 destructive 的 MCP，不再要求 `readOnlyHint`，destructive 工具留给 Executor。Balanced 双模型的 Executor 使用独立 frontend 复用同一稳定代理，因此 Planner 发现的 capability ID 可在 handoff 后直接执行，同时保持两侧 ledger/audit 隔离。分发前代理会再次复核当前 controller 的 enable、授权和完整运行时连接身份；共享 Host 中仅 server 同名不构成复用权限。
 - Plan 是协作流程，不等于权限预设。普通 built-in 与 Bash 继续遵循当前预设和 Sandbox；独立双模型 Planner 允许已授权、非 destructive 的 MCP（即使没有 `readOnlyHint`），但在规划阶段持续阻止 destructive 与未授权目标；没有独立 Planner 的单模型 Plan 仍阻止 MCP writer/destructive。
 - Plan 只能由用户显式选择进入，与当前权限预设相互独立；普通聊天不会自动切换到 Plan。权限预设不会回答 `ask`，也不会替用户批准 `exit_plan_mode`，获批计划的短期自动执行窗口也不会自动批准后续计划或嵌套/间接 Bash。
 - 桌面端协作模式分为 `normal`、`plan` 和 `goal`。Goal 默认不限自动轮数：目标保持 `active + armed` 时，运行时空闲驱动器每次只通过统一入口接纳一个普通顶层回合，模型 final 本身不会结束目标。模型使用 `get_goal`、`create_goal` 和带精确 ID/revision 的 `update_goal(edit|pause|resume|complete|blocked)`；`continue` 已退役。自动轮 blocked 至少需要 3 个已接纳轮次，宿主只校验轮数与权限，同一阻碍是否持续由模型判断。正数 `[agent].goal_token_budget` 和 `max_goal_rounds` 是可恢复的显式边界；未配置时累计轮次、token 与真实 provider 请求数只做观测。目标状态只写入 v3 `goal/state` 投影，activation 不持久化且冷启动、导入、fork 一律 disarm。旧简单/写入/研究参数、Goal sidecar 与 `.reasonix/autoresearch/.../` 仅在显式兼容／导入边界读取，不恢复旧执行器。普通聊天不会被宿主强制切换协作模式，但模型可依据当前直接人类请求创建长期目标。
@@ -455,7 +455,7 @@ auth_mode = "none"
 
 `[serve]` 控制 `reasonix serve` 的 browser frontend。默认 `auth_mode = "none"` 仅适合 loopback；暴露到其他机器时必须使用 token 或 password。只有位于可信 reverse proxy 后方时才能启用 `behind_proxy`。
 
-项目根目录的 `.mcp.json` 可使用 Claude Code 的 `mcpServers` schema；与 `reasonix.toml` 同名时，以后者为准。
+项目根目录的 `.mcp.json` 可使用 Claude Code 的 `mcpServers` schema；与项目本地配置同名时，以后者为准。
 
 MCP 启动与单次工具调用使用不同生命周期。调用方只短暂等待冷启动，而共享的进程启动、授权、
 `initialize`、`tools/list` 可在后台继续，最长由 `mcp_startup_timeout_seconds`（默认 `30`）
