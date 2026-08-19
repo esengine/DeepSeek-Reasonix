@@ -23,8 +23,6 @@ mem.prof
 
 # Wails desktop artifacts
 /desktop/build/*
-!/desktop/build/appicon.png
-!/desktop/build/appicon.svg
 /desktop/desktop
 /desktop/frontend/dist/*
 !/desktop/frontend/dist/.gitkeep
@@ -77,3 +75,6 @@ site/.generated/
 
 # Committed pointer at REASONIX.md; overrides a global CLAUDE.md ignore rule.
 !/CLAUDE.md
+
+# unified-rx scan index (local scan cache, not source)
+.unified-rx-index/
