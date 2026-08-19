@@ -1901,7 +1901,7 @@ export const zhTW: Record<DictKey, string> = {
   "settings.general.sectionProject": "專案",
   "settings.general.sectionProjectHint": "僅適用於此專案的設定，儲存到工作區的專案本地配置。",
   "settings.cacheContext": "快取上下文（使用者 ID）",
-  "settings.cacheContextHint": "選用。傳送給提供者的按專案識別碼，作為 DeepSeek user_id / OpenAI user 欄位。它按專案分組 KV 快取與用量歸屬。僅使用字母、數字、\"_\" 或 \"-\"，不超過 512 個字元。留空則不傳送。",
+  "settings.cacheContextHint": "選用。傳送給提供者的按專案識別碼，作為 DeepSeek user_id / OpenAI user 欄位。它按專案分組 KV 快取與用量歸屬。僅使用字母、數字、\"_\" 或 \"-\"，不超過 512 個字元。留空則自動推導一個 id。",
   "settings.pageDesc.models": "預設模型、規劃模型、執行上限與接入概覽。",
   "settings.pageDesc.providers": "管理模型供應商、API 位址、金鑰與可用模型。",
   "settings.pageDesc.mcp": "管理 MCP 伺服器連線和工具發現。",
